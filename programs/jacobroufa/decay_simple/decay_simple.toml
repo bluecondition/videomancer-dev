@@ -1,0 +1,99 @@
+# Copyright (C) 2025 Jacob Roufa
+# SPDX-License-Identifier: GPL-3.0-only
+#
+# This file is part of Videomancer Community Programs.
+# See LICENSE file in the repository root for full license text.
+#
+# Decay Simple Program Configuration
+
+[program]
+program_id = "com.jacobroufa.decay_simple"
+program_name = "Decay Simple"
+program_version = "2.0.0"
+abi_version = ">=1.0,<2.0"
+author = "Jacob Roufa"
+license = "GPL-3.0"
+category = "Video Processing"
+description = "Frame strobe + independent Y/U/V channel delays + feedback"
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Strobe Amount"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 127
+initial_value = 512
+display_float_digits = 0
+suffix_label = "frames"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Y Delay"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 511
+initial_value = 512
+display_float_digits = 0
+suffix_label = "px"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "U Delay"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 511
+initial_value = 512
+display_float_digits = 0
+suffix_label = "px"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "V Delay"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 511
+initial_value = 512
+display_float_digits = 0
+suffix_label = "px"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Enable Strobe"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Enable Y Delay"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Enable U Delay"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Enable V Delay"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Bypass"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Effect Amount"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 1
+suffix_label = "%"
