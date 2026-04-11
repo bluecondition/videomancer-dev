@@ -1,0 +1,143 @@
+[program]
+program_id = "com.lzxindustries.lostinfinite"
+program_version = "1.0.0"
+abi_version = ">=1.0,<2.0"
+program_name = "Lost Infinite"
+author = ""
+license = "GPL-3.0"
+categories = ["Render", "Fractal", "Mirror", "Pattern"]
+program_type = "synthesis"
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+description = "Single-slice raymarch of the LostInfinite shader: Householder-reflected lattice shell with phase-cycled color."
+url = "https://github.com/lzxindustries/videomancer-sdk"
+
+# --- Rotary Potentiometers (Knobs 1-6) ---
+#
+# Register map matches lostinfinite.vhd:
+#   r0 = Sample depth t  (how far along the ray we sample)
+#   r1 = P.z offset      (shader literal is 14; we let it slide)
+#   r2 = Wobble speed    (axis-vector rotation rate)
+#   r3 = Cycle speed     (exp(sin()) color cycle rate)
+#   r4 = Glow            (brightness LUT sharpness near the shell)
+#   r5 = unused
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Depth"
+value_labels = ["Near", "Mid", "Far", "Deepest"]
+initial_value_label = "Mid"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 896
+display_min_value = 0
+display_max_value = 15
+name_label = "Offset"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 300
+display_min_value = 0
+display_max_value = 100
+name_label = "Wobble"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 400
+display_min_value = 0
+display_max_value = 100
+name_label = "Cycle"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Glow"
+value_labels = ["Soft", "Medium", "Sharp", "Razor"]
+initial_value_label = "Medium"
+
+# --- Toggle Switches (7-11) ---
+#
+# Only toggle_switch_11 (Bypass) is wired into the VHD.  The other four
+# bits of registers_in(6) are reserved.
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Bypass"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+# --- Linear Potentiometer (Slider) ---
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 900
+display_min_value = 0
+display_max_value = 100
+name_label = "Brightness"
+suffix_label = "%"
+
+# --- Presets ---
+
+[[preset]]
+name = "Shader Default"
+rotary_potentiometer_1 = 512
+rotary_potentiometer_2 = 896
+rotary_potentiometer_3 = 300
+rotary_potentiometer_4 = 400
+rotary_potentiometer_5 = 512
+toggle_switch_11 = 0
+linear_potentiometer_12 = 900
+
+[[preset]]
+name = "Slow Drift"
+rotary_potentiometer_1 = 640
+rotary_potentiometer_2 = 768
+rotary_potentiometer_3 = 80
+rotary_potentiometer_4 = 60
+rotary_potentiometer_5 = 256
+toggle_switch_11 = 0
+linear_potentiometer_12 = 800
+
+[[preset]]
+name = "Hyper Vortex"
+rotary_potentiometer_1 = 900
+rotary_potentiometer_2 = 512
+rotary_potentiometer_3 = 900
+rotary_potentiometer_4 = 900
+rotary_potentiometer_5 = 896
+toggle_switch_11 = 0
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Deep Space"
+rotary_potentiometer_1 = 800
+rotary_potentiometer_2 = 1023
+rotary_potentiometer_3 = 120
+rotary_potentiometer_4 = 150
+rotary_potentiometer_5 = 128
+toggle_switch_11 = 0
+linear_potentiometer_12 = 700
+
+[[preset]]
+name = "Frozen Shell"
+rotary_potentiometer_1 = 512
+rotary_potentiometer_2 = 896
+rotary_potentiometer_3 = 0
+rotary_potentiometer_4 = 0
+rotary_potentiometer_5 = 768
+toggle_switch_11 = 0
+linear_potentiometer_12 = 900

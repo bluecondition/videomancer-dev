@@ -1,0 +1,188 @@
+[program]
+program_id = "com.lzxindustries.starfield"
+program_version = "2.0.0"
+abi_version = ">=1.0,<2.0"
+program_name = "Starfield"
+author = ""
+license = "GPL-3.0"
+categories = ["Render", "Pattern", "Screen"]
+program_type = "synthesis"
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+description = "Shader-inspired glowing parallax starfield with per-star colours, glow, depth parallax, and video-reactive luma mode."
+url = "https://github.com/lzxindustries/videomancer-sdk"
+
+# --- Rotary Potentiometers (Knobs 1-6) ---
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Layers"
+value_labels = ["1", "2", "3", "4", "5", "6", "7", "8"]
+initial_value_label = "8"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 400
+display_min_value = 0
+display_max_value = 100
+name_label = "Density"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 150
+display_min_value = 0
+display_max_value = 100
+name_label = "Speed"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Palette"
+value_labels = ["Mixed", "Cool", "Warm", "Rainbow"]
+initial_value_label = "Mixed"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 256
+display_min_value = 0
+display_max_value = 100
+name_label = "Glow"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Depth"
+value_labels = ["1", "2", "3", "4", "5", "6", "7", "Max"]
+initial_value_label = "4"
+
+# --- Toggle Switches (7-11) ---
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Direction"
+value_labels = ["Left", "Right"]
+initial_value_label = "Left"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Color Mode"
+value_labels = ["Color", "B&W"]
+initial_value_label = "Color"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Luma Mode"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Background"
+value_labels = ["Black", "Deep Blue"]
+initial_value_label = "Black"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Bypass"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+# --- Linear Potentiometer (Slider) ---
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 900
+display_min_value = 0
+display_max_value = 100
+name_label = "Brightness"
+suffix_label = "%"
+
+# --- Presets ---
+
+[[preset]]
+name = "Shader Default"
+rotary_potentiometer_1 = 896
+rotary_potentiometer_2 = 350
+rotary_potentiometer_3 = 150
+rotary_potentiometer_4 = 0
+rotary_potentiometer_5 = 256
+rotary_potentiometer_6 = 512
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 900
+
+[[preset]]
+name = "Deep Field"
+rotary_potentiometer_1 = 896
+rotary_potentiometer_2 = 700
+rotary_potentiometer_3 = 50
+rotary_potentiometer_4 = 256
+rotary_potentiometer_5 = 600
+rotary_potentiometer_6 = 896
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 1
+toggle_switch_11 = 0
+linear_potentiometer_12 = 800
+
+[[preset]]
+name = "Hyperspace"
+rotary_potentiometer_1 = 896
+rotary_potentiometer_2 = 600
+rotary_potentiometer_3 = 1023
+rotary_potentiometer_4 = 256
+rotary_potentiometer_5 = 128
+rotary_potentiometer_6 = 640
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Nebula"
+rotary_potentiometer_1 = 896
+rotary_potentiometer_2 = 800
+rotary_potentiometer_3 = 100
+rotary_potentiometer_4 = 768
+rotary_potentiometer_5 = 900
+rotary_potentiometer_6 = 768
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 1
+toggle_switch_11 = 0
+linear_potentiometer_12 = 700
+
+[[preset]]
+name = "Crystal Night"
+rotary_potentiometer_1 = 384
+rotary_potentiometer_2 = 250
+rotary_potentiometer_3 = 300
+rotary_potentiometer_4 = 256
+rotary_potentiometer_5 = 200
+rotary_potentiometer_6 = 512
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 1023

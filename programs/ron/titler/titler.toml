@@ -1,0 +1,94 @@
+# Titler Program Configuration
+#
+# Low-fi video titler: renders editable text over the input video.
+
+[program]
+program_id = "com.example.titler"
+program_name = "Titler"
+program_version = "1.0.0"
+abi_version = ">=1.0,<2.0"
+author = "Ron"
+license = "GPL-3.0"
+categories = ["Text"]
+program_type = "processing"
+description = "Lo-fi 16-character video titler with on-the-fly editing"
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "H Position"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 256
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "V Position"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 256
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Size"
+value_labels = ["1x", "2x", "4x", "8x", "16x"]
+initial_value_label = "2x"
+
+# Knob 4 is dual-purpose. With Edit Mode OFF it picks one of 8 preset text
+# colors (the latched value persists when Edit Mode is enabled). With Edit
+# Mode ON it becomes an Erase trigger: any motion of the knob blanks the
+# character currently under the editing cursor (knob 5). Sweeping knob 5 with
+# knob 4 active erases each character the cursor passes over.
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Color/Erase"
+value_labels = [
+    "White", "Red", "Orange", "Yellow",
+    "Green", "Cyan", "Blue", "Magenta",
+]
+initial_value_label = "White"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Cursor"
+control_mode = "steps_32"
+display_min_value = 1
+display_max_value = 32
+initial_value = 0
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Letter"
+control_mode = "steps_64"
+display_min_value = 0
+display_max_value = 63
+initial_value = 0
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Edit Mode"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Background"
+value_labels = ["Video", "Black"]
+initial_value_label = "Video"
+
+# Matte mode: when ON, the text glyph pixels reveal the incoming video
+# instead of the selected text color. Combined with a black background this
+# produces video-filled letterforms on black; combined with the video
+# background it makes the text disappear (the whole frame is the input).
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Matte"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"

@@ -1,0 +1,198 @@
+[program]
+program_id = "com.lzxindustries.slipframe"
+program_version = "1.0.0"
+abi_version = ">=1.0,<2.0"
+program_name = "Slipframe"
+author = ""
+license = "GPL-3.0"
+categories = ["Process", "Glitch", "Feedback"]
+program_type = "processing"
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+description = "Datamosh-style processor: horizontal smear, chroma lag, scanline tear, line persistence, bit-crush."
+url = "https://github.com/lzxindustries/videomancer-sdk"
+
+# --- Rotary Potentiometers (Knobs 1-6) ---
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 0
+display_min_value = 0
+display_max_value = 100
+name_label = "Smear"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 0
+display_min_value = 0
+display_max_value = 100
+name_label = "Smear Mod"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 0
+display_min_value = 0
+display_max_value = 100
+name_label = "Chroma Lag"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 0
+display_min_value = 0
+display_max_value = 100
+name_label = "Tear"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 0
+display_min_value = 0
+display_max_value = 100
+name_label = "Persist"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Crush"
+value_labels = ["Off", "1", "2", "3", "4", "5", "6", "7"]
+initial_value_label = "Off"
+
+# --- Toggle Switches (7-11) ---
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Smear Src"
+value_labels = ["Luma", "Noise"]
+initial_value_label = "Luma"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Tear Mode"
+value_labels = ["Lines", "Random"]
+initial_value_label = "Lines"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Chroma Dir"
+value_labels = ["Same", "Split"]
+initial_value_label = "Same"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Glitch"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Bypass"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+# --- Linear Potentiometer (Slider) ---
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 1023
+display_min_value = 0
+display_max_value = 100
+name_label = "Mix"
+suffix_label = "%"
+
+# --- Presets ---
+
+[[preset]]
+name = "Clean"
+rotary_potentiometer_1 = 0
+rotary_potentiometer_2 = 0
+rotary_potentiometer_3 = 0
+rotary_potentiometer_4 = 0
+rotary_potentiometer_5 = 0
+rotary_potentiometer_6 = 0
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "P-Frame Drift"
+rotary_potentiometer_1 = 200
+rotary_potentiometer_2 = 600
+rotary_potentiometer_3 = 120
+rotary_potentiometer_4 = 0
+rotary_potentiometer_5 = 400
+rotary_potentiometer_6 = 0
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 900
+
+[[preset]]
+name = "Torn Transport"
+rotary_potentiometer_1 = 80
+rotary_potentiometer_2 = 200
+rotary_potentiometer_3 = 60
+rotary_potentiometer_4 = 700
+rotary_potentiometer_5 = 0
+rotary_potentiometer_6 = 256
+toggle_switch_7 = 1
+toggle_switch_8 = 1
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Chroma Wreck"
+rotary_potentiometer_1 = 0
+rotary_potentiometer_2 = 0
+rotary_potentiometer_3 = 900
+rotary_potentiometer_4 = 0
+rotary_potentiometer_5 = 0
+rotary_potentiometer_6 = 0
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 1
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Full Mosh"
+rotary_potentiometer_1 = 350
+rotary_potentiometer_2 = 800
+rotary_potentiometer_3 = 450
+rotary_potentiometer_4 = 300
+rotary_potentiometer_5 = 600
+rotary_potentiometer_6 = 384
+toggle_switch_7 = 0
+toggle_switch_8 = 1
+toggle_switch_9 = 1
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 1023
