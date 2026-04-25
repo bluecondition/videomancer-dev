@@ -131,7 +131,6 @@ architecture blacklodge of program_top is
     -- Curtain fold phase DDA — frequency mapped continuously from pot 1
     signal fold_freq_r    : unsigned(11 downto 0) := to_unsigned(2048, 12);
     signal fold_phase_r   : unsigned(15 downto 0) := (others => '0');
-    signal sway_phase_off_r : signed(20 downto 0) := (others => '0');
     signal depth_amt_r    : unsigned(9 downto 0)  := to_unsigned(512, 10);
     signal warmth_r       : unsigned(9 downto 0)  := to_unsigned(512, 10);
     -- Precomputed signed warmth offset (per-frame).  Replaces an in-stage
@@ -147,8 +146,25 @@ architecture blacklodge of program_top is
     signal vign_en_r      : std_logic := '1';
     signal bypass_r       : std_logic := '0';
 
-    -- Per-frame sway offset (triangle of frame_count)
-    signal sway_off_r     : signed(8 downto 0) := (others => '0');
+    -- Per-band sway: 4 accumulators advancing at coprime per-frame rates.
+    -- Each curtain band hashes onto one of these so the folds don't all
+    -- ping-pong in lockstep — different folds drift at different speeds.
+    type t_sway_accums is array (0 to 3) of unsigned(15 downto 0);
+    constant C_SWAY_SPEEDS : t_sway_accums := (
+        to_unsigned(173, 16),
+        to_unsigned(211, 16),
+        to_unsigned(257, 16),
+        to_unsigned(311, 16));
+    signal sway_accums_r : t_sway_accums := (others => (others => '0'));
+    -- Triangle-wave outputs precomputed at vsync — per-pixel path only
+    -- needs a 4:1 mux to grab one based on band hash.
+    signal sway_tris_r   : t_sway_accums := (others => (others => '0'));
+
+    -- Pre-registered per-pixel band hash and the muxed sway value, so s1
+    -- only does a 3-input 16-bit add (hash compute + mux happen one cycle
+    -- earlier).  1-pixel offset is invisible since both signals are slow.
+    signal pre_hash_r    : unsigned(15 downto 0) := (others => '0');
+    signal pre_sway_r    : unsigned(15 downto 0) := (others => '0');
 
     ----------------------------------------------------------------------
     -- Chevron phase DDA (horizon-anchored, linear wavelength in depth)
@@ -392,7 +408,10 @@ begin
         variable v_persp_pot    : unsigned(9 downto 0);
         variable v_persp_mul    : unsigned(21 downto 0);
         variable v_fold_freq    : unsigned(11 downto 0);
+        variable v_fold_freq_pre: unsigned(12 downto 0);
         variable v_phase_with   : unsigned(15 downto 0);
+        variable v_band_accum   : unsigned(15 downto 0);
+        variable v_sway_tri     : unsigned(15 downto 0);
         variable v_depth_signed : signed(11 downto 0);
         variable v_blend_signed : signed(11 downto 0);
         variable v_blend_factor : unsigned(5 downto 0);
@@ -483,13 +502,19 @@ begin
                 eff_horizon_x_r <= v_persp_mul(21 downto 10);
                 step_r <= to_unsigned(20, 8);
 
-                -- Folds: continuous wavelength from pot 1.
-                -- fold_freq = 256 + (pot1 << 2) → range 256..4348, giving
-                -- a wavelength sweep of ~256 px (gentle) down to ~15 px
-                -- (tight) that varies smoothly with the knob.
-                v_fold_freq := shift_left(
-                                  resize(unsigned(registers_in(0)), 12), 2)
-                             + to_unsigned(256, 12);
+                -- Folds: continuous wavelength from pot 1.  Saturate at
+                -- the value the previous build's 90% setting produced
+                -- (= 3936) so the top end of the pot stays in the tight-
+                -- folds zone and never wraps past the 12-bit width.
+                v_fold_freq_pre := shift_left(
+                                       resize(unsigned(registers_in(0)), 13),
+                                       2)
+                                 + to_unsigned(256, 13);
+                if v_fold_freq_pre > to_unsigned(3936, 13) then
+                    v_fold_freq := to_unsigned(3936, 12);
+                else
+                    v_fold_freq := v_fold_freq_pre(11 downto 0);
+                end if;
                 fold_freq_r <= v_fold_freq;
 
                 depth_amt_r  <= unsigned(registers_in(1));
@@ -530,18 +555,22 @@ begin
                 vign_en_r    <= registers_in(6)(3);
                 bypass_r     <= registers_in(6)(4);
 
-                -- Per-frame sway: small triangle of frame_count top bits
-                if frame_count(9) = '0' then
-                    sway_off_r <= signed(resize(frame_count(8 downto 2), 9));
-                else
-                    sway_off_r <= signed(resize(
-                        not frame_count(8 downto 2), 9));
-                end if;
-
-                -- Pre-multiply sway_off × fold_freq once per frame so the
-                -- per-pixel path only adds (no multiply on the hot path).
-                sway_phase_off_r <= resize(signed(sway_off_r)
-                                  * signed('0' & v_fold_freq), 21);
+                -- Advance each per-band sway accumulator by its (coprime)
+                -- speed.  Each band picks one of these via hash, giving
+                -- the curtains random non-quantised ping-pong motion.
+                for i in 0 to 3 loop
+                    sway_accums_r(i) <= sway_accums_r(i) + C_SWAY_SPEEDS(i);
+                    -- Precompute the triangle-wave output (14-bit ≈ ¼-
+                    -- wavelen amplitude) so the per-pixel path is just
+                    -- a 4-way mux, no triangle math.
+                    if sway_accums_r(i)(15) = '0' then
+                        sway_tris_r(i) <= resize(
+                            sway_accums_r(i)(14 downto 1), 16);
+                    else
+                        sway_tris_r(i) <= resize(
+                            not sway_accums_r(i)(14 downto 1), 16);
+                    end if;
+                end loop;
             end if;
 
             -- Per-pixel curtain fold phase accumulator (resets at hsync)
@@ -550,6 +579,14 @@ begin
             elsif data_in.avid = '1' then
                 fold_phase_r <= fold_phase_r + resize(fold_freq_r, 16);
             end if;
+
+            -- Pre-register per-pixel band hash and muxed sway value.  s1
+            -- reads them as registered inputs (1-pixel offset, harmless).
+            v_grain := hash16(
+                resize(pixel_x(11 downto 5), 16),
+                to_unsigned(16#7C2D#, 16));
+            pre_hash_r <= v_grain;
+            pre_sway_r <= sway_tris_r(to_integer(v_grain(1 downto 0)));
 
             ------------------------------------------------------------
             -- Chevron — linear-wavelength advance with reciprocal LUT
@@ -643,16 +680,26 @@ begin
             freq_row_r <= freq_a_d2_r - freq_interp_r(24 downto 8);
 
             -- Always-running 2-stage split multiplier: phase_init =
-            -- (eff_horizon * freq + tooth_phase) mod 2^18.  Settles within
-            -- a few blanking cycles, so phase_r is preloaded before avid.
+            --   (eff_horizon × freq) + tooth_phase + (Vee-mode wavelen/2)
+            -- mod 2^18.  Settles within a few blanking cycles.
+            --
+            -- The Vee-mode +2^16 (= half a wavelen in phase units) shifts
+            -- the apex to a stripe BOUNDARY rather than the middle of a
+            -- stripe, so the centre chevron is the same width as every
+            -- other stripe instead of double-wide (2× bug fix).
             phase_mul_hi_r <= eff_horizon_r(11 downto 6) * freq_row_r;
             phase_mul_lo_r <= eff_horizon_r(5 downto 0)  * freq_row_r;
-            -- Stage 2: combine partials + tooth_phase (18-bit wraparound)
             v_phase_hi_18 := shift_left(
                 resize(phase_mul_hi_r(11 downto 0), 18), 6);
             v_phase_lo_18 := resize(phase_mul_lo_r(17 downto 0), 18);
-            phase_init_r  <= v_phase_hi_18 + v_phase_lo_18
-                           + resize(tooth_phase_r, 18);
+            if chev_vee_r = '1' then
+                phase_init_r <= v_phase_hi_18 + v_phase_lo_18
+                              + resize(tooth_phase_r, 18)
+                              + to_unsigned(65536, 18);
+            else
+                phase_init_r <= v_phase_hi_18 + v_phase_lo_18
+                              + resize(tooth_phase_r, 18);
+            end if;
 
             -- Per-pixel phase DDA (anchored at eff_horizon in Vee mode).
             -- Direction compare is pre-registered into stripe_back_pre_r
@@ -720,20 +767,14 @@ begin
             s1_x <= pixel_x;
             s1_y <= pixel_y;
 
-            -- Curtain fold phase = accumulator + (sway × freq, precomputed
-            -- at vsync) + per-band hash phase offset for subtle asymmetry.
-            -- Hash band updates every 32 pixels and adds 0..255 phase
-            -- units (≈ 0.4% of a cycle) so folds aren't exactly periodic.
-            v_grain := hash16(
-                resize(pixel_x(11 downto 5), 16),
-                to_unsigned(16#7C2D#, 16));
+            -- Curtain fold phase = accumulator + pre-registered sway
+            -- + pre-registered hash offset (3-input 16-bit add only).
             if sway_en_r = '1' then
-                v_phase_with := fold_phase_r
-                              + unsigned(sway_phase_off_r(15 downto 0))
-                              + resize(v_grain(7 downto 0), 16);
+                v_phase_with := fold_phase_r + pre_sway_r
+                              + resize(pre_hash_r(7 downto 0), 16);
             else
                 v_phase_with := fold_phase_r
-                              + resize(v_grain(7 downto 0), 16);
+                              + resize(pre_hash_r(7 downto 0), 16);
             end if;
             s1_phase <= v_phase_with;
 
