@@ -72,6 +72,44 @@ architecture blacklodge of program_top is
 
     constant C_CHROMA_MID   : unsigned(9 downto 0) := to_unsigned(512, 10);
 
+    -- Curtain lerp lookup tables — replace per-pixel multipliers with a
+    -- 64-entry constant ROM per channel.  Indexed by 6-bit blend_factor;
+    -- output is (HI - LO) × blend / 64 (or LO - HI for V).
+    type t_lerp_y_lut is array (0 to 63) of unsigned(8 downto 0);
+    type t_lerp_u_lut is array (0 to 63) of unsigned(7 downto 0);
+    type t_lerp_v_lut is array (0 to 63) of unsigned(5 downto 0);
+
+    function gen_lerp_y_lut return t_lerp_y_lut is
+        variable r : t_lerp_y_lut;
+    begin
+        for i in 0 to 63 loop
+            r(i) := to_unsigned((280 * i) / 64, 9);
+        end loop;
+        return r;
+    end function;
+
+    function gen_lerp_u_lut return t_lerp_u_lut is
+        variable r : t_lerp_u_lut;
+    begin
+        for i in 0 to 63 loop
+            r(i) := to_unsigned((240 * i) / 64, 8);
+        end loop;
+        return r;
+    end function;
+
+    function gen_lerp_v_lut return t_lerp_v_lut is
+        variable r : t_lerp_v_lut;
+    begin
+        for i in 0 to 63 loop
+            r(i) := to_unsigned((45 * i) / 64, 6);
+        end loop;
+        return r;
+    end function;
+
+    constant C_LERP_Y_LUT : t_lerp_y_lut := gen_lerp_y_lut;
+    constant C_LERP_U_LUT : t_lerp_u_lut := gen_lerp_u_lut;
+    constant C_LERP_V_LUT : t_lerp_v_lut := gen_lerp_v_lut;
+
     ----------------------------------------------------------------------
     -- Position / frame counters
     ----------------------------------------------------------------------
@@ -90,9 +128,17 @@ architecture blacklodge of program_top is
     ----------------------------------------------------------------------
     signal horizon_r      : unsigned(11 downto 0) := to_unsigned(540, 12);
     -- Minimum chevron wavelength (in pixels, near horizon)
-    signal folds_idx_r    : unsigned(1 downto 0)  := "01";
-    signal depth_amt_r    : unsigned(9 downto 0)  := to_unsigned(700, 10);
+    -- Curtain fold phase DDA — frequency mapped continuously from pot 1
+    signal fold_freq_r    : unsigned(11 downto 0) := to_unsigned(2048, 12);
+    signal fold_phase_r   : unsigned(15 downto 0) := (others => '0');
+    signal sway_phase_off_r : signed(20 downto 0) := (others => '0');
+    signal depth_amt_r    : unsigned(9 downto 0)  := to_unsigned(512, 10);
     signal warmth_r       : unsigned(9 downto 0)  := to_unsigned(512, 10);
+    -- Precomputed signed warmth offset (per-frame).  Replaces an in-stage
+    -- diff/shift/clamp chain so s5 only sees a signed add.
+    signal warmth_off_s_r : signed(7 downto 0)    := (others => '0');
+    -- Precomputed signed depth offset for the curtain blend (per-frame).
+    signal depth_off_s_r  : signed(11 downto 0)   := (others => '0');
     signal bright_sel_r   : unsigned(2 downto 0)  := "111";
 
     signal sway_en_r      : std_logic := '1';
@@ -147,11 +193,17 @@ architecture blacklodge of program_top is
 
     -- Per-frame constants (parameters latched at vsync)
     signal chev_min_int_r : unsigned(6 downto 0) := to_unsigned(10, 7);
-    signal step_r         : unsigned(7 downto 0) := to_unsigned(64, 8);
+    -- Vanishing-point X position from pot 4 (max_x * pot / 1024)
+    signal eff_horizon_x_r: unsigned(11 downto 0) := to_unsigned(960, 12);
+    -- Perspective amount fixed at a tasteful mid value
+    signal step_r         : unsigned(7 downto 0) := to_unsigned(20, 8);
 
     -- Per-row wavelength state (fractional 7.8 fixed-point)
     signal wavelen_int_r  : unsigned(6 downto 0) := to_unsigned(10, 7);
     signal wavelen_frac_r : unsigned(7 downto 0) := (others => '0');
+    -- Pre-registered "would frac+step overflow" flag — saves having a
+    -- 9-bit add + compare inside the hsync register-write critical path.
+    signal wavelen_carry_r : std_logic := '0';
 
     -- Always-on reciprocal-LUT pipeline
     signal freq_a_r       : unsigned(16 downto 0) := (others => '0');
@@ -174,6 +226,9 @@ architecture blacklodge of program_top is
     signal phase_mul_lo_r : unsigned(22 downto 0) := (others => '0');
     signal phase_init_r   : unsigned(17 downto 0) := (others => '0');
     signal phase_r        : unsigned(17 downto 0) := (others => '0');
+    -- Pre-registered backward-direction flag (Vee mode left half).
+    -- Splits the long compare-then-add path in the per-pixel chevron DDA.
+    signal stripe_back_pre_r : std_logic := '0';
 
     -- Align stripe_color (= phase_r(17)) with the 3-stage compose pipeline
     signal stripe_color_d1 : std_logic := '0';
@@ -181,30 +236,32 @@ architecture blacklodge of program_top is
     signal stripe_color_d3 : std_logic := '0';
 
     ----------------------------------------------------------------------
-    -- Stage 1: pre-compute fold_x, depth, is_floor
+    -- Stage 1: pre-compute fold_phase, depth, is_floor
     ----------------------------------------------------------------------
     signal s1_x         : unsigned(11 downto 0) := (others => '0');
     signal s1_y         : unsigned(11 downto 0) := (others => '0');
-    signal s1_fold_x    : unsigned(11 downto 0) := (others => '0');
+    signal s1_phase     : unsigned(15 downto 0) := (others => '0');
     signal s1_depth     : unsigned(11 downto 0) := (others => '0');
     signal s1_is_floor  : std_logic := '0';
 
     ----------------------------------------------------------------------
-    -- Stage 2: curtain fold triangles
+    -- Stage 2: curtain fold triangle (single tri from continuous phase)
     ----------------------------------------------------------------------
     signal s2_x         : unsigned(11 downto 0) := (others => '0');
     signal s2_y         : unsigned(11 downto 0) := (others => '0');
     signal s2_is_floor  : std_logic := '0';
     signal s2_tri_a     : unsigned(9 downto 0) := (others => '0');
-    signal s2_tri_b     : unsigned(9 downto 0) := (others => '0');
 
     ----------------------------------------------------------------------
-    -- Stage 3: fold_luma (curtain path)
+    -- Stage 3: fold_luma + curtain blend_factor (depth-shifted)
     ----------------------------------------------------------------------
-    signal s3_x         : unsigned(11 downto 0) := (others => '0');
-    signal s3_y         : unsigned(11 downto 0) := (others => '0');
-    signal s3_is_floor  : std_logic := '0';
-    signal s3_fold_luma : unsigned(9 downto 0) := (others => '0');
+    signal s3_x            : unsigned(11 downto 0) := (others => '0');
+    signal s3_y            : unsigned(11 downto 0) := (others => '0');
+    signal s3_is_floor     : std_logic := '0';
+    signal s3_fold_luma    : unsigned(9 downto 0) := (others => '0');
+    -- 6-bit blend (64 steps) — small enough for cheap mul, smooth enough
+    -- that no perceivable stepping is visible as the Depth knob is swept.
+    signal s3_blend_factor : unsigned(5 downto 0) := (others => '0');
 
     ----------------------------------------------------------------------
     -- Stage 4: interpolated colour for both layers
@@ -317,7 +374,10 @@ begin
         variable v_y_out        : unsigned(9 downto 0);
         variable v_u_out        : unsigned(9 downto 0);
         variable v_v_out        : unsigned(9 downto 0);
-        variable v_warmth_off   : unsigned(5 downto 0);
+        variable v_warmth_pot   : unsigned(9 downto 0);
+        variable v_warmth_diff  : unsigned(9 downto 0);
+        variable v_warmth_amt   : unsigned(6 downto 0);
+        variable v_warmth_signed : signed(10 downto 0);
         variable v_u_sum        : unsigned(10 downto 0);
         variable v_vgrad        : unsigned(7 downto 0);
         variable v_cur_hi_y     : unsigned(9 downto 0);
@@ -327,8 +387,18 @@ begin
         variable v_dp5          : unsigned(4 downto 0);
         variable v_prod10       : unsigned(9 downto 0);
         variable v_horz_slv     : std_logic_vector(9 downto 0);
-        variable v_horz_top4    : unsigned(3 downto 0);
-        variable v_horz_mul     : unsigned(15 downto 0);
+        variable v_horz_pot     : unsigned(9 downto 0);
+        variable v_horz_mul     : unsigned(21 downto 0);
+        variable v_persp_pot    : unsigned(9 downto 0);
+        variable v_persp_mul    : unsigned(21 downto 0);
+        variable v_fold_freq    : unsigned(11 downto 0);
+        variable v_phase_with   : unsigned(15 downto 0);
+        variable v_depth_signed : signed(11 downto 0);
+        variable v_blend_signed : signed(11 downto 0);
+        variable v_blend_factor : unsigned(5 downto 0);
+        variable v_lerp_y_mul   : unsigned(14 downto 0);
+        variable v_lerp_u_mul   : unsigned(13 downto 0);
+        variable v_lerp_v_mul   : unsigned(11 downto 0);
         variable v_row_depth    : unsigned(11 downto 0);
         variable v_row_depth_s  : unsigned(11 downto 0);
         variable v_wavelen_new  : unsigned(11 downto 0);
@@ -387,31 +457,71 @@ begin
                 pixel_y     <= (others => '0');
                 frame_count <= frame_count + 1;
 
-                -- Horizon derived from pot 4 top 4 bits: horizon =
-                -- max_y * top4 / 16 (12x4 multiply, runs once per frame).
+                -- Horizon derived from full 10-bit pot 5: horizon =
+                -- max_y * pot / 1024.  12x10 once-per-frame multiply gives
+                -- smooth 1080-line precision so the knob can be modulated.
                 v_horz_slv  := registers_in(4);
-                v_horz_top4 := unsigned(v_horz_slv(9 downto 6));
-                v_horz_mul  := resize(max_y_r * v_horz_top4, 16);
-                v_horizon_v := v_horz_mul(15 downto 4);
+                v_horz_pot  := unsigned(v_horz_slv);
+                v_horz_mul  := resize(max_y_r * v_horz_pot, 22);
+                v_horizon_v := v_horz_mul(21 downto 10);
                 horizon_r   <= v_horizon_v;
 
-                -- Chevron: minimum wavelength at horizon.  Range starts
-                -- where the previous build's 50% setting sat (chev_min=18)
-                -- and runs up to 33 pixels at full pot.
+                -- Chevron: minimum wavelength at horizon.  Top 5 bits of
+                -- pot 3 give a smooth 18..49 px range (2× the previous
+                -- 18..33 sweep), so very tall stripes are reachable too.
                 chev_min_int_r <= resize(unsigned(
-                                    registers_in(2)(9 downto 6)), 7)
+                                    registers_in(2)(9 downto 5)), 7)
                                 + to_unsigned(18, 7);
 
-                -- Perspective: per-row fractional wavelength step.  Pot 4
-                -- top 5 bits maps to step (0..31).  At step=31 and
-                -- chev_min=18, wavelen grows ~18→83 across a 540-row
-                -- floor — strong perspective without ever hitting the
-                -- 127-pixel LUT clamp (so the bottom never goes flat).
-                step_r <= resize(unsigned(registers_in(3)(9 downto 5)), 8);
+                -- Perspective vanishing-point X position from pot 4.
+                -- 0% → x=0 (left edge), 50% → centre, 100% → x=max
+                -- (right edge).  Step amount is fixed at a good tasteful
+                -- value so the perspective always reads as deep without
+                -- clamping at the bottom of the floor.
+                v_persp_pot := unsigned(registers_in(3));
+                v_persp_mul := resize(max_x_r * v_persp_pot, 22);
+                eff_horizon_x_r <= v_persp_mul(21 downto 10);
+                step_r <= to_unsigned(20, 8);
 
-                folds_idx_r  <= unsigned(registers_in(0)(9 downto 8));
+                -- Folds: continuous wavelength from pot 1.
+                -- fold_freq = 256 + (pot1 << 2) → range 256..4348, giving
+                -- a wavelength sweep of ~256 px (gentle) down to ~15 px
+                -- (tight) that varies smoothly with the knob.
+                v_fold_freq := shift_left(
+                                  resize(unsigned(registers_in(0)), 12), 2)
+                             + to_unsigned(256, 12);
+                fold_freq_r <= v_fold_freq;
+
                 depth_amt_r  <= unsigned(registers_in(1));
-                warmth_r     <= unsigned(registers_in(5));
+                -- Precompute (depth - 512) signed offset for curtain blend
+                depth_off_s_r <=
+                    signed(resize(unsigned(registers_in(1)), 12))
+                  - signed(resize(C_CHROMA_MID, 12));
+
+                warmth_r <= unsigned(registers_in(5));
+                -- Precompute signed warmth offset with 1.5× boost above
+                -- |diff|=256.  Stored as signed so s5 just adds + clamps.
+                v_warmth_pot := unsigned(registers_in(5));
+                if v_warmth_pot >= C_CHROMA_MID then
+                    v_warmth_diff := v_warmth_pot - C_CHROMA_MID;
+                    v_warmth_amt := resize(
+                        shift_right(v_warmth_diff, 4), 7);
+                    if v_warmth_diff >= to_unsigned(256, 10) then
+                        v_warmth_amt := v_warmth_amt + resize(shift_right(
+                            v_warmth_diff - to_unsigned(256, 10), 4), 7);
+                    end if;
+                    warmth_off_s_r <= signed('0' & v_warmth_amt);
+                else
+                    v_warmth_diff := C_CHROMA_MID - v_warmth_pot;
+                    v_warmth_amt := resize(
+                        shift_right(v_warmth_diff, 4), 7);
+                    if v_warmth_diff >= to_unsigned(256, 10) then
+                        v_warmth_amt := v_warmth_amt + resize(shift_right(
+                            v_warmth_diff - to_unsigned(256, 10), 4), 7);
+                    end if;
+                    warmth_off_s_r <= -signed('0' & v_warmth_amt);
+                end if;
+
                 bright_sel_r <= unsigned(registers_in(7)(9 downto 7));
 
                 sway_en_r    <= registers_in(6)(0);
@@ -427,6 +537,18 @@ begin
                     sway_off_r <= signed(resize(
                         not frame_count(8 downto 2), 9));
                 end if;
+
+                -- Pre-multiply sway_off × fold_freq once per frame so the
+                -- per-pixel path only adds (no multiply on the hot path).
+                sway_phase_off_r <= resize(signed(sway_off_r)
+                                  * signed('0' & v_fold_freq), 21);
+            end if;
+
+            -- Per-pixel curtain fold phase accumulator (resets at hsync)
+            if data_in.hsync_n = '0' and prev_hsync_n = '1' then
+                fold_phase_r <= (others => '0');
+            elsif data_in.avid = '1' then
+                fold_phase_r <= fold_phase_r + resize(fold_freq_r, 16);
             end if;
 
             ------------------------------------------------------------
@@ -440,18 +562,24 @@ begin
             -- boundaries trace perfectly straight rays from the horizon.
             ------------------------------------------------------------
 
+            -- Always-on: precompute "(frac + step) >= 256" overflow flag
+            -- so the hsync block only reads a registered bit.
+            if ('0' & wavelen_frac_r) + ('0' & step_r)
+                    >= to_unsigned(256, 9) then
+                wavelen_carry_r <= '1';
+            else
+                wavelen_carry_r <= '0';
+            end if;
+
             -- Per-hsync updates
             if data_in.hsync_n = '0' and prev_hsync_n = '1' then
                 if pixel_y + 1 >= horizon_r then
-                    -- Advance wavelen_frac (8-bit), carry into wavelen_int
-                    if ('0' & wavelen_frac_r) + ('0' & step_r)
-                            >= to_unsigned(256, 9) then
-                        wavelen_frac_r <= wavelen_frac_r + step_r;  -- wraps
-                        if wavelen_int_r < to_unsigned(127, 7) then
-                            wavelen_int_r <= wavelen_int_r + 1;
-                        end if;
-                    else
-                        wavelen_frac_r <= wavelen_frac_r + step_r;
+                    -- Advance wavelen_frac (8-bit, modular wrap is fine)
+                    wavelen_frac_r <= wavelen_frac_r + step_r;
+                    -- Carry into wavelen_int (saturated at 127)
+                    if wavelen_carry_r = '1'
+                            and wavelen_int_r < to_unsigned(127, 7) then
+                        wavelen_int_r <= wavelen_int_r + 1;
                     end if;
 
                     -- Advance row_phase by current freq_row (wraps at 2^17
@@ -474,8 +602,11 @@ begin
                 end if;
 
                 if chev_vee_r = '1' then
-                    eff_horizon_r <= horizon_r;
+                    -- Vee mode: anchor stripe DDA at the user-set X
+                    -- vanishing-point position (pot 4).
+                    eff_horizon_r <= eff_horizon_x_r;
                 else
+                    -- Straight mode: no anchor (parallel stripes).
                     eff_horizon_r <= (others => '0');
                 end if;
             end if;
@@ -523,11 +654,15 @@ begin
             phase_init_r  <= v_phase_hi_18 + v_phase_lo_18
                            + resize(tooth_phase_r, 18);
 
-            -- Per-pixel phase DDA (anchored at horizon_r in Vee mode)
+            -- Per-pixel phase DDA (anchored at eff_horizon in Vee mode).
+            -- Direction compare is pre-registered into stripe_back_pre_r
+            -- to break the compare-then-add critical path.
+            stripe_back_pre_r <= '1' when (chev_vee_r = '1'
+                                  and pixel_x < eff_horizon_r) else '0';
             v_freq_ext := resize(freq_row_r, 18);
             if data_in.avid = '0' then
                 phase_r <= phase_init_r;
-            elsif chev_vee_r = '1' and pixel_x < eff_horizon_r then
+            elsif stripe_back_pre_r = '1' then
                 phase_r <= phase_r - v_freq_ext;
             else
                 phase_r <= phase_r + v_freq_ext;
@@ -568,24 +703,15 @@ begin
                 min_dist_r <= dist_y_r;
             end if;
 
+            -- Uniform 32-pixel-bin fade: 0..7 saturating, computed as a
+            -- single shift + clamp instead of an 8-way priority encoder.
+            -- Total fade zone = 224 px, outer 32 px is full black.
             if vign_en_r = '0' then
                 fade_lvl_r <= "111";
             elsif min_dist_r >= to_unsigned(224, 12) then
                 fade_lvl_r <= "111";
-            elsif min_dist_r >= to_unsigned(160, 12) then
-                fade_lvl_r <= "110";
-            elsif min_dist_r >= to_unsigned(112, 12) then
-                fade_lvl_r <= "101";
-            elsif min_dist_r >= to_unsigned( 72, 12) then
-                fade_lvl_r <= "100";
-            elsif min_dist_r >= to_unsigned( 44, 12) then
-                fade_lvl_r <= "011";
-            elsif min_dist_r >= to_unsigned( 24, 12) then
-                fade_lvl_r <= "010";
-            elsif min_dist_r >= to_unsigned(  8, 12) then
-                fade_lvl_r <= "001";
             else
-                fade_lvl_r <= "000";
+                fade_lvl_r <= min_dist_r(7 downto 5);
             end if;
 
             ------------------------------------------------------------
@@ -594,22 +720,22 @@ begin
             s1_x <= pixel_x;
             s1_y <= pixel_y;
 
-            -- Curtain fold_x: optional sway plus per-band hash jitter so
-            -- the fold pattern is subtly irregular (real velvet curtains
-            -- never have perfectly periodic folds).  hash_band updates
-            -- every 32 pixels giving ~7 different jitter values across a
-            -- HD frame width.
-            if sway_en_r = '1' then
-                v_fold_x := pixel_x + unsigned(resize(sway_off_r, 12));
-            else
-                v_fold_x := pixel_x;
-            end if;
-            -- Hash 5-bit band index → 0..7 pixel offset added per band
+            -- Curtain fold phase = accumulator + (sway × freq, precomputed
+            -- at vsync) + per-band hash phase offset for subtle asymmetry.
+            -- Hash band updates every 32 pixels and adds 0..255 phase
+            -- units (≈ 0.4% of a cycle) so folds aren't exactly periodic.
             v_grain := hash16(
                 resize(pixel_x(11 downto 5), 16),
                 to_unsigned(16#7C2D#, 16));
-            v_fold_x := v_fold_x + resize(v_grain(2 downto 0), 12);
-            s1_fold_x <= v_fold_x;
+            if sway_en_r = '1' then
+                v_phase_with := fold_phase_r
+                              + unsigned(sway_phase_off_r(15 downto 0))
+                              + resize(v_grain(7 downto 0), 16);
+            else
+                v_phase_with := fold_phase_r
+                              + resize(v_grain(7 downto 0), 16);
+            end if;
+            s1_phase <= v_phase_with;
 
             -- Depth below horizon (0 above, positive below)
             if pixel_y >= horizon_r then
@@ -622,33 +748,21 @@ begin
             s1_depth <= v_depth;
 
             ------------------------------------------------------------
-            -- Stage 2: curtain fold triangles (floor now handled by DDA)
+            -- Stage 2: triangle wave from s1_phase (smooth 10-bit output)
+            -- phase(15) selects rising/falling half; phase(14..5) is the
+            -- 10-bit amplitude.  Period = 2^16 / fold_freq pixels — set
+            -- continuously by pot 1.
             ------------------------------------------------------------
             s2_x <= s1_x;
             s2_y <= s1_y;
             s2_is_floor <= s1_is_floor;
 
-            -- Triangle A: period selected by folds_idx (wider period default)
-            --   folds_idx 0: period 128 (7-bit tri) -- sparse wide folds
-            --   folds_idx 1: period  64 (6-bit tri)
-            --   folds_idx 2: period  32 (5-bit tri)
-            --   folds_idx 3: period  16 (4-bit tri) -- dense narrow folds
-            case to_integer(folds_idx_r) is
-                when 0      => v_tri_a := triwave10(s1_fold_x(6 downto 0), 7);
-                when 1      => v_tri_a := triwave10(s1_fold_x(5 downto 0), 6);
-                when 2      => v_tri_a := triwave10(s1_fold_x(4 downto 0), 5);
-                when others => v_tri_a := triwave10(s1_fold_x(3 downto 0), 4);
-            end case;
+            if s1_phase(15) = '0' then
+                v_tri_a := s1_phase(14 downto 5);
+            else
+                v_tri_a := not s1_phase(14 downto 5);
+            end if;
             s2_tri_a <= v_tri_a;
-
-            -- Triangle B: always one octave slower — breaks uniformity
-            case to_integer(folds_idx_r) is
-                when 0      => v_tri_b := triwave10(s1_fold_x(7 downto 1), 7);
-                when 1      => v_tri_b := triwave10(s1_fold_x(6 downto 1), 6);
-                when 2      => v_tri_b := triwave10(s1_fold_x(5 downto 1), 5);
-                when others => v_tri_b := triwave10(s1_fold_x(4 downto 1), 4);
-            end case;
-            s2_tri_b <= v_tri_b;
 
             ------------------------------------------------------------
             -- Stage 3: fold_luma (sum tris + hash tweak)
@@ -657,9 +771,8 @@ begin
             s3_y <= s2_y;
             s3_is_floor <= s2_is_floor;
 
-            -- Sum the two triangles then halve → 10-bit fold luma profile
-            v_fold_sum  := ('0' & s2_tri_a) + ('0' & s2_tri_b);
-            v_fold_luma := v_fold_sum(10 downto 1);
+            -- Single smooth triangle as fold luma (10-bit).
+            v_fold_luma := s2_tri_a;
             -- Optional grain: xor low 3 bits with hash for dither/texture
             if grain_en_r = '1' then
                 v_grain := hash16(resize(s2_x, 16), resize(s2_y, 16));
@@ -668,6 +781,21 @@ begin
             end if;
             s3_fold_luma <= v_fold_luma;
 
+            -- Pre-compute the depth-shifted curtain blend factor here so
+            -- s4's critical path is only the lerp multiplier (+ add).
+            -- Truncate to 6 bits (64 levels) — keeps the s4 multiplier
+            -- small while still smooth across a depth-pot sweep.
+            -- depth_off_s_r is precomputed at vsync (= depth - 512).
+            v_blend_signed := signed(resize(v_fold_luma, 12))
+                            + depth_off_s_r;
+            if v_blend_signed < 0 then
+                s3_blend_factor <= (others => '0');
+            elsif v_blend_signed > to_signed(1023, 12) then
+                s3_blend_factor <= to_unsigned(63, 6);
+            else
+                s3_blend_factor <= unsigned(v_blend_signed(9 downto 4));
+            end if;
+
             ------------------------------------------------------------
             -- Stage 4: colour compose (both layers in parallel)
             ------------------------------------------------------------
@@ -675,60 +803,15 @@ begin
             s4_y <= s3_y;
             s4_is_floor <= s3_is_floor;
 
-            -- Curtain: interpolate highlight/shadow by (1-depth*fold_luma)
-            -- Higher fold_luma → closer to highlight; Lower → closer to shadow.
-            -- Depth pot attenuates the dark side (more depth = deeper troughs).
-            --
-            -- Simple lerp: cur_y = lo + ((hi - lo) * fold_luma) >> 10
-            -- But no multiplier — substitute: dark_amt = ((hi - lo) *
-            -- (1023 - fold_luma) * depth_amt) >> 20.
-            -- Cheap approximation: use two shifts.
-            --
-            -- y_diff = hi - lo
-            v_cur_hi_y  := C_CURTAIN_HI_Y;
-            -- Vertical gradient: brighter near top of curtain — subtract
-            -- pixel_y(9 downto 4) from highlight (max dim ~ 63 counts).
-            if s3_y < to_unsigned(1024, 12) then
-                v_vgrad := resize(s3_y(9 downto 4), 8);
-                if v_cur_hi_y > resize(v_vgrad, 10) then
-                    v_cur_hi_y := v_cur_hi_y - resize(v_vgrad, 10);
-                end if;
-            end if;
-
-            -- Fold shadow: darken highlight by (1023 - fold_luma) weighted
-            -- by depth_amt.  Use top 5 bits of fold_luma complement and
-            -- top 5 bits of depth for a 10-bit dark_amt — purely shifted,
-            -- no multiplier.
-            --
-            -- dark_amt = ((1023 - fold_luma)[9..5] * depth_amt[9..5])
-            -- Small 5x5 = 10-bit product (HX4K: synthesises as LUTs, cheap).
-            v_inv_fold    := to_unsigned(1023, 10) - s3_fold_luma;
-            v_if5         := v_inv_fold(9 downto 5);
-            v_dp5         := depth_amt_r(9 downto 5);
-            v_prod10      := v_if5 * v_dp5;
-            v_dark_scaled := v_prod10;
-
-            -- cur_y = highlight_y - dark_scaled (clamped)
-            if v_cur_hi_y > v_dark_scaled then
-                s4_cur_y <= v_cur_hi_y - v_dark_scaled;
-            else
-                s4_cur_y <= (others => '0');
-            end if;
-
-            -- Curtain chroma: blend highlight and shadow chroma by fold_luma
-            -- Top-bit decision is enough for a stylised look.
-            if s3_fold_luma(9) = '1' then
-                s4_cur_u <= C_CURTAIN_HI_U;
-                s4_cur_v <= C_CURTAIN_HI_V;
-            else
-                -- Midtone: average
-                s4_cur_u <= resize(shift_right(
-                    resize(C_CURTAIN_HI_U, 11)
-                    + resize(C_CURTAIN_LO_U, 11), 1), 10);
-                s4_cur_v <= resize(shift_right(
-                    resize(C_CURTAIN_HI_V, 11)
-                    + resize(C_CURTAIN_LO_V, 11), 1), 10);
-            end if;
+            -- Curtain: lerp between LO and HI via tiny constant LUTs
+            -- indexed by s3_blend_factor (6-bit).  Replaces three runtime
+            -- multipliers with a fixed mux — much faster combinational.
+            s4_cur_y <= C_CURTAIN_LO_Y
+                      + resize(C_LERP_Y_LUT(to_integer(s3_blend_factor)),10);
+            s4_cur_u <= C_CURTAIN_LO_U
+                      + resize(C_LERP_U_LUT(to_integer(s3_blend_factor)),10);
+            s4_cur_v <= C_CURTAIN_LO_V
+                      - resize(C_LERP_V_LUT(to_integer(s3_blend_factor)),10);
 
             -- Floor: select cream vs dark chevron (DDA-delayed color)
             if stripe_color_d3 = '1' then
@@ -776,36 +859,14 @@ begin
                 when others => null;  -- 7: full Y
             end case;
 
-            -- Warmth: shift U (= Cr in Videomancer swapped convention)
-            -- upward when warmth_r > mid (more red).
-            -- warmth_off = (warmth_r - 512)[9..4] clamped to 0..31.
-            if warmth_r > C_CHROMA_MID then
-                v_warmth_off := resize(
-                    shift_right(warmth_r - C_CHROMA_MID, 4), 6);
-                v_u_sum := ('0' & v_u_out) + resize(v_warmth_off, 11);
-                if v_u_sum > to_unsigned(1023, 11) then
-                    v_u_out := to_unsigned(1023, 10);
-                else
-                    v_u_out := v_u_sum(9 downto 0);
-                end if;
-            elsif warmth_r < C_CHROMA_MID then
-                v_warmth_off := resize(
-                    shift_right(C_CHROMA_MID - warmth_r, 4), 6);
-                if v_u_out > resize(v_warmth_off, 10) then
-                    v_u_out := v_u_out - resize(v_warmth_off, 10);
-                else
-                    v_u_out := (others => '0');
-                end if;
-            end if;
-
             s5_y <= v_y_out;
             s5_u <= v_u_out;
             s5_v <= v_v_out;
 
             ------------------------------------------------------------
-            -- Stage 6: brightness scale (top 3 bits of pot 12)
-            --   000 = 1/8    011 = 1/2    111 = 8/8 (full)
-            -- Cheap shift-add, no multiplier.
+            -- Stage 6: brightness scale + warmth tint
+            --   Y: 000 = 1/8 ... 111 = 8/8 (full).  Cheap shift-add.
+            --   U: precomputed signed warmth offset added (modular wrap).
             ------------------------------------------------------------
             case to_integer(bright_sel_r) is
                 when 0      => s6_y <= shift_right(s5_y, 3);
@@ -822,8 +883,10 @@ begin
                                      + shift_right(s5_y, 3);
                 when others => s6_y <= s5_y;
             end case;
-            -- Chroma passes through unchanged (brightness shouldn't desaturate)
-            s6_u <= s5_u;
+            -- Apply precomputed warmth signed offset to U (= Cr)
+            v_warmth_signed := signed(resize(s5_u, 11))
+                             + resize(warmth_off_s_r, 11);
+            s6_u <= unsigned(v_warmth_signed(9 downto 0));
             s6_v <= s5_v;
 
         end if;
