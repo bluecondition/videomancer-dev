@@ -619,9 +619,12 @@ begin
                         wavelen_int_r <= wavelen_int_r + 1;
                     end if;
 
-                    -- Advance row_phase by current freq_row (wraps at 2^17
-                    -- exactly every wavelen rows → 45° tooth apex slope)
-                    v_row_phase_sum := ('0' & row_phase_r) + ('0' & freq_row_r);
+                    -- Advance row_phase by 2× freq_row per row.  Tooth
+                    -- period = wavelen/2 rows so adjacent rows are
+                    -- noticeably offset back-and-forth without going
+                    -- all the way to a brick-wall stagger.
+                    v_row_phase_sum := ('0' & row_phase_r)
+                                     + shift_left(resize(freq_row_r, 18), 1);
                     v_row_phase_17  := v_row_phase_sum(16 downto 0);
                     row_phase_r <= v_row_phase_17;
 
