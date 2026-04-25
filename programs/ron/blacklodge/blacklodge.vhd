@@ -680,13 +680,15 @@ begin
             freq_row_r <= freq_a_d2_r - freq_interp_r(24 downto 8);
 
             -- Always-running 2-stage split multiplier: phase_init =
-            --   (eff_horizon × freq) + tooth_phase + (Vee-mode wavelen/2)
+            --   (eff_horizon × freq) + tooth_phase + (Vee apex offset)
             -- mod 2^18.  Settles within a few blanking cycles.
             --
-            -- The Vee-mode +2^16 (= half a wavelen in phase units) shifts
-            -- the apex to a stripe BOUNDARY rather than the middle of a
-            -- stripe, so the centre chevron is the same width as every
-            -- other stripe instead of double-wide (2× bug fix).
+            -- Vee apex offset = 2^15 (= ¼-wavelen in phase units) is the
+            -- midpoint between apex-on-stripe (causes the old 2× wide
+            -- centre stripe) and apex-on-boundary (causes diamonds).
+            -- The centre column stays inside an LO stripe so the pattern
+            -- reads as chevrons, but the centre stripe is only modestly
+            -- wider than the others (not 2×).
             phase_mul_hi_r <= eff_horizon_r(11 downto 6) * freq_row_r;
             phase_mul_lo_r <= eff_horizon_r(5 downto 0)  * freq_row_r;
             v_phase_hi_18 := shift_left(
@@ -695,7 +697,7 @@ begin
             if chev_vee_r = '1' then
                 phase_init_r <= v_phase_hi_18 + v_phase_lo_18
                               + resize(tooth_phase_r, 18)
-                              + to_unsigned(65536, 18);
+                              + to_unsigned(32768, 18);
             else
                 phase_init_r <= v_phase_hi_18 + v_phase_lo_18
                               + resize(tooth_phase_r, 18);
