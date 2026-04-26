@@ -663,13 +663,13 @@ begin
                         wavelen_int_r <= wavelen_int_r + 1;
                     end if;
 
-                    -- Advance row_phase by freq_row per row → tooth
-                    -- period = wavelen rows.  With 2× tooth amplitude
-                    -- (= wavelen px sway over half-period wavelen/2
-                    -- rows) the apex slope is 2 px/row → much shorter,
-                    -- more compact V tooth with a wider apex.
+                    -- Advance row_phase by freq_row/4 per row → tooth
+                    -- period = 4× wavelen rows, so each chevron leg is
+                    -- ~2× longer than the previous /1 advance.  With
+                    -- the 2× tooth amplitude that's a 0.5 px/row apex
+                    -- slope and a more elongated V tooth.
                     v_row_phase_sum := ('0' & row_phase_r)
-                                     + ('0' & freq_row_r);
+                                     + ('0' & shift_right(freq_row_r, 2));
                     v_row_phase_17  := v_row_phase_sum(16 downto 0);
                     row_phase_r <= v_row_phase_17;
 
