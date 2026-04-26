@@ -663,13 +663,13 @@ begin
                         wavelen_int_r <= wavelen_int_r + 1;
                     end if;
 
-                    -- Advance row_phase by freq_row/8 per row → tooth
-                    -- period = 8× wavelen rows.  With 2× tooth amplitude
-                    -- (= wavelen px sway over half-period 4× wavelen
-                    -- rows) the apex slope is 0.25 px/row → ~28° apex
-                    -- angle (~3× sharper than the previous 45° design).
+                    -- Advance row_phase by freq_row per row → tooth
+                    -- period = wavelen rows.  With 2× tooth amplitude
+                    -- (= wavelen px sway over half-period wavelen/2
+                    -- rows) the apex slope is 2 px/row → much shorter,
+                    -- more compact V tooth with a wider apex.
                     v_row_phase_sum := ('0' & row_phase_r)
-                                     + ('0' & shift_right(freq_row_r, 3));
+                                     + ('0' & freq_row_r);
                     v_row_phase_17  := v_row_phase_sum(16 downto 0);
                     row_phase_r <= v_row_phase_17;
 
