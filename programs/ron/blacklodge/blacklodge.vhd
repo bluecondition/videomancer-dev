@@ -161,9 +161,12 @@ architecture blacklodge of program_top is
     -- ends of tight folds don't punch through with a huge drop shadow.
     signal hem_shift_r    : unsigned(1 downto 0) := "00";
     signal depth_amt_r    : unsigned(9 downto 0)  := to_unsigned(512, 10);
-    signal warmth_r       : unsigned(9 downto 0)  := to_unsigned(512, 10);
-    -- Precomputed signed warmth offset (per-frame).  Replaces an in-stage
-    -- diff/shift/clamp chain so s5 only sees a signed add.
+    -- Pot 6 now controls the V-tooth frequency (was Warmth).  3-bit
+    -- selector picks one of 8 row-phase advance rates from /16 (slow,
+    -- long teeth) up to ×8 (very fast, dense teeth).
+    signal tooth_freq_sel_r : unsigned(2 downto 0) := "100";
+    -- Precomputed signed warmth offset (per-frame).  Driven from T9 now,
+    -- so it's just a fixed +24 (warm) or 0 (neutral).
     signal warmth_off_s_r : signed(7 downto 0)    := (others => '0');
     -- Precomputed signed depth offset for the curtain blend (per-frame).
     signal depth_off_s_r  : signed(11 downto 0)   := (others => '0');
@@ -470,8 +473,9 @@ begin
         variable v_phase_hi_18  : unsigned(17 downto 0);
         variable v_phase_lo_18  : unsigned(17 downto 0);
         variable v_freq_ext     : unsigned(17 downto 0);
-        variable v_row_phase_sum: unsigned(17 downto 0);
+        variable v_row_phase_sum: unsigned(20 downto 0);
         variable v_row_phase_17 : unsigned(16 downto 0);
+        variable v_advance      : unsigned(19 downto 0);
         variable v_dist_x       : unsigned(11 downto 0);
         variable v_dist_y       : unsigned(11 downto 0);
         variable v_min_dist     : unsigned(11 downto 0);
@@ -567,35 +571,21 @@ begin
                     signed(resize(unsigned(registers_in(1)), 12))
                   - signed(resize(C_CHROMA_MID, 12));
 
-                warmth_r <= unsigned(registers_in(5));
-                -- Precompute signed warmth offset with 1.5× boost above
-                -- |diff|=256.  Stored as signed so s5 just adds + clamps.
-                v_warmth_pot := unsigned(registers_in(5));
-                if v_warmth_pot >= C_CHROMA_MID then
-                    v_warmth_diff := v_warmth_pot - C_CHROMA_MID;
-                    v_warmth_amt := resize(
-                        shift_right(v_warmth_diff, 4), 7);
-                    if v_warmth_diff >= to_unsigned(256, 10) then
-                        v_warmth_amt := v_warmth_amt + resize(shift_right(
-                            v_warmth_diff - to_unsigned(256, 10), 4), 7);
-                    end if;
-                    warmth_off_s_r <= signed('0' & v_warmth_amt);
-                else
-                    v_warmth_diff := C_CHROMA_MID - v_warmth_pot;
-                    v_warmth_amt := resize(
-                        shift_right(v_warmth_diff, 4), 7);
-                    if v_warmth_diff >= to_unsigned(256, 10) then
-                        v_warmth_amt := v_warmth_amt + resize(shift_right(
-                            v_warmth_diff - to_unsigned(256, 10), 4), 7);
-                    end if;
-                    warmth_off_s_r <= -signed('0' & v_warmth_amt);
-                end if;
+                -- Pot 6 = V-tooth frequency selector (top 3 bits → 0..7,
+                -- maps to row-phase advance rates from /16 to ×8).
+                tooth_freq_sel_r <= unsigned(registers_in(5)(9 downto 7));
 
                 bright_sel_r <= unsigned(registers_in(7)(9 downto 7));
 
                 sway_en_r    <= registers_in(6)(0);
                 chev_vee_r   <= registers_in(6)(1);
-                grain_en_r   <= registers_in(6)(2);
+                -- T9 = Warmth on/off (was Grain).  When on, set a fixed
+                -- positive Cr offset so the picture leans warm.
+                if registers_in(6)(2) = '1' then
+                    warmth_off_s_r <= to_signed(28, 8);
+                else
+                    warmth_off_s_r <= (others => '0');
+                end if;
                 vign_en_r    <= registers_in(6)(3);
                 bypass_r     <= registers_in(6)(4);
 
@@ -663,13 +653,29 @@ begin
                         wavelen_int_r <= wavelen_int_r + 1;
                     end if;
 
-                    -- Advance row_phase by freq_row/4 per row → tooth
-                    -- period = 4× wavelen rows, so each chevron leg is
-                    -- ~2× longer than the previous /1 advance.  With
-                    -- the 2× tooth amplitude that's a 0.5 px/row apex
-                    -- slope and a more elongated V tooth.
-                    v_row_phase_sum := ('0' & row_phase_r)
-                                     + ('0' & shift_right(freq_row_r, 2));
+                    -- Advance row_phase using K6-driven tooth frequency
+                    -- selector.  8 levels, /16 (longest period) up to ×8
+                    -- (densest teeth).  Default mid-knob = /1 (period =
+                    -- wavelen rows) — ~4× the previous /4 advance.
+                    case to_integer(tooth_freq_sel_r) is
+                        when 0 => v_advance := resize(
+                                    shift_right(freq_row_r, 4), 20);
+                        when 1 => v_advance := resize(
+                                    shift_right(freq_row_r, 3), 20);
+                        when 2 => v_advance := resize(
+                                    shift_right(freq_row_r, 2), 20);
+                        when 3 => v_advance := resize(
+                                    shift_right(freq_row_r, 1), 20);
+                        when 4 => v_advance := resize(freq_row_r, 20);
+                        when 5 => v_advance := shift_left(
+                                    resize(freq_row_r, 20), 1);
+                        when 6 => v_advance := shift_left(
+                                    resize(freq_row_r, 20), 2);
+                        when others => v_advance := shift_left(
+                                    resize(freq_row_r, 20), 3);
+                    end case;
+                    v_row_phase_sum := resize(row_phase_r, 21)
+                                     + resize(v_advance, 21);
                     v_row_phase_17  := v_row_phase_sum(16 downto 0);
                     row_phase_r <= v_row_phase_17;
 
@@ -742,11 +748,18 @@ begin
             v_phase_hi_18 := shift_left(
                 resize(phase_mul_hi_r(11 downto 0), 18), 6);
             v_phase_lo_18 := resize(phase_mul_lo_r(17 downto 0), 18);
-            -- 2× tooth_phase (= wavelen px sway) — full amplitude.  With
-            -- apex_offset = 0 the centre stripe pinches all the way to a
-            -- point at the V apex, giving each chevron a very sharp tip.
-            v_tooth_scaled := shift_left(resize(tooth_phase_r, 18), 1);
-            phase_init_r <= v_phase_hi_18 + v_phase_lo_18 + v_tooth_scaled;
+            -- 1× tooth_phase (= wavelen/2 px sway) — thinner V's.  In
+            -- Vee mode add a 2^15 apex offset so the centre column
+            -- never crosses the LO/HI boundary at the V apex.
+            v_tooth_scaled := resize(tooth_phase_r, 18);
+            if chev_vee_r = '1' then
+                phase_init_r <= v_phase_hi_18 + v_phase_lo_18
+                              + v_tooth_scaled
+                              + to_unsigned(32768, 18);
+            else
+                phase_init_r <= v_phase_hi_18 + v_phase_lo_18
+                              + v_tooth_scaled;
+            end if;
 
             -- Per-pixel phase DDA (anchored at eff_horizon in Vee mode).
             -- Direction compare is pre-registered into stripe_back_pre_r

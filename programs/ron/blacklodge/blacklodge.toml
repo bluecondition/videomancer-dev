@@ -70,14 +70,9 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
-name_label = "Warmth"
-control_mode = "linear"
-min_value = 0
-max_value = 1023
-initial_value = 512
-display_min_value = 0
-display_max_value = 100
-suffix_label = "%"
+name_label = "ChevFreq"
+value_labels = ["/16", "/8", "/4", "/2", "x1", "x2", "x4", "x8"]
+initial_value_label = "x1"
 
 # --- Toggle Switches (7-11) ---
 
@@ -95,9 +90,9 @@ initial_value_label = "Straight"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
-name_label = "Grain"
+name_label = "Warmth"
 value_labels = ["Off", "On"]
-initial_value_label = "On"
+initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
