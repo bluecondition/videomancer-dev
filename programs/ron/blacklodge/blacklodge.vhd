@@ -739,13 +739,15 @@ begin
             v_phase_hi_18 := shift_left(
                 resize(phase_mul_hi_r(11 downto 0), 18), 6);
             v_phase_lo_18 := resize(phase_mul_lo_r(17 downto 0), 18);
+            -- Halve the tooth_phase contribution: smaller horizontal V
+            -- sway over the same vertical period → sharper apex angle.
             if chev_vee_r = '1' then
                 phase_init_r <= v_phase_hi_18 + v_phase_lo_18
-                              + resize(tooth_phase_r, 18)
+                              + resize(shift_right(tooth_phase_r, 1), 18)
                               + to_unsigned(32768, 18);
             else
                 phase_init_r <= v_phase_hi_18 + v_phase_lo_18
-                              + resize(tooth_phase_r, 18);
+                              + resize(shift_right(tooth_phase_r, 1), 18);
             end if;
 
             -- Per-pixel phase DDA (anchored at eff_horizon in Vee mode).
