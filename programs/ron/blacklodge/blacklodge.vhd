@@ -663,11 +663,13 @@ begin
                         wavelen_int_r <= wavelen_int_r + 1;
                     end if;
 
-                    -- Advance row_phase by freq_row/2 per row → tooth
-                    -- period = 2× wavelen rows, so each chevron V leg
-                    -- spans twice as many rows as the local wavelength.
+                    -- Advance row_phase by freq_row/8 per row → tooth
+                    -- period = 8× wavelen rows.  With 2× tooth amplitude
+                    -- (= wavelen px sway over half-period 4× wavelen
+                    -- rows) the apex slope is 0.25 px/row → ~28° apex
+                    -- angle (~3× sharper than the previous 45° design).
                     v_row_phase_sum := ('0' & row_phase_r)
-                                     + ('0' & shift_right(freq_row_r, 1));
+                                     + ('0' & shift_right(freq_row_r, 3));
                     v_row_phase_17  := v_row_phase_sum(16 downto 0);
                     row_phase_r <= v_row_phase_17;
 
@@ -740,20 +742,11 @@ begin
             v_phase_hi_18 := shift_left(
                 resize(phase_mul_hi_r(11 downto 0), 18), 6);
             v_phase_lo_18 := resize(phase_mul_lo_r(17 downto 0), 18);
-            -- 1.5× tooth_phase (= 0.75·wavelen px sway) over the same
-            -- 2× wavelen vertical period → much steeper, more pronounced
-            -- V legs.  The apex_offset (32768) keeps the centre stripe
-            -- from flipping at the peak.
-            v_tooth_scaled := ('0' & tooth_phase_r)
-                            + ('0' & shift_right(tooth_phase_r, 1));
-            if chev_vee_r = '1' then
-                phase_init_r <= v_phase_hi_18 + v_phase_lo_18
-                              + v_tooth_scaled
-                              + to_unsigned(32768, 18);
-            else
-                phase_init_r <= v_phase_hi_18 + v_phase_lo_18
-                              + v_tooth_scaled;
-            end if;
+            -- 2× tooth_phase (= wavelen px sway) — full amplitude.  With
+            -- apex_offset = 0 the centre stripe pinches all the way to a
+            -- point at the V apex, giving each chevron a very sharp tip.
+            v_tooth_scaled := shift_left(resize(tooth_phase_r, 18), 1);
+            phase_init_r <= v_phase_hi_18 + v_phase_lo_18 + v_tooth_scaled;
 
             -- Per-pixel phase DDA (anchored at eff_horizon in Vee mode).
             -- Direction compare is pre-registered into stripe_back_pre_r
