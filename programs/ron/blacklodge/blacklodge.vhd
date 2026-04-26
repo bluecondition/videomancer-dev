@@ -156,6 +156,10 @@ architecture blacklodge of program_top is
     -- Curtain fold phase DDA — frequency mapped continuously from pot 1
     signal fold_freq_r    : unsigned(11 downto 0) := to_unsigned(2048, 12);
     signal fold_phase_r   : unsigned(15 downto 0) := (others => '0');
+    -- Hem amplitude shift derived from fold_freq top 2 bits.  Narrow
+    -- folds shift the LUT output right (smaller hem), so the pointy
+    -- ends of tight folds don't punch through with a huge drop shadow.
+    signal hem_shift_r    : unsigned(1 downto 0) := "00";
     signal depth_amt_r    : unsigned(9 downto 0)  := to_unsigned(512, 10);
     signal warmth_r       : unsigned(9 downto 0)  := to_unsigned(512, 10);
     -- Precomputed signed warmth offset (per-frame).  Replaces an in-stage
@@ -442,6 +446,7 @@ begin
         variable v_phase_with   : unsigned(15 downto 0);
         variable v_band_accum   : unsigned(15 downto 0);
         variable v_sway_tri     : unsigned(15 downto 0);
+        variable v_hem_raw      : unsigned(3 downto 0);
         variable v_hem          : unsigned(3 downto 0);
         variable v_curtain_bot  : unsigned(11 downto 0);
         variable v_shadow_d     : unsigned(11 downto 0);
@@ -550,6 +555,10 @@ begin
                     v_fold_freq := v_fold_freq_pre(11 downto 0);
                 end if;
                 fold_freq_r <= v_fold_freq;
+                -- Hem amplitude scales inversely with fold width: top 2
+                -- bits of fold_freq pick a shift that halves the hem
+                -- (and thus shadow prominence) at every doubling of freq.
+                hem_shift_r <= v_fold_freq(11 downto 10);
 
                 depth_amt_r  <= unsigned(registers_in(1));
                 -- Precompute (depth - 512) signed offset for curtain blend
@@ -653,12 +662,10 @@ begin
                         wavelen_int_r <= wavelen_int_r + 1;
                     end if;
 
-                    -- Advance row_phase by 2× freq_row per row.  Tooth
-                    -- period = wavelen/2 rows so adjacent rows are
-                    -- noticeably offset back-and-forth without going
-                    -- all the way to a brick-wall stagger.
-                    v_row_phase_sum := ('0' & row_phase_r)
-                                     + shift_left(resize(freq_row_r, 18), 1);
+                    -- Advance row_phase by freq_row per row → tooth period
+                    -- = wavelen rows.  Each chevron tooth spans a full
+                    -- wavelen vertically (longer, more pronounced V).
+                    v_row_phase_sum := ('0' & row_phase_r) + ('0' & freq_row_r);
                     v_row_phase_17  := v_row_phase_sum(16 downto 0);
                     row_phase_r <= v_row_phase_17;
 
@@ -822,7 +829,15 @@ begin
             -- amplitude is 0..12 px, indexed by the fold position via
             -- top bits of fold_phase_r (parabolic LUT, peak in middle of
             -- each fold, zero at fold seams).
-            v_hem := C_HEM_LUT(to_integer(fold_phase_r(15 downto 10)));
+            -- Look up base hem (0..12 px) then scale down for narrow
+            -- folds so tight pointy ends don't get an oversized shadow.
+            v_hem_raw := C_HEM_LUT(to_integer(fold_phase_r(15 downto 10)));
+            case to_integer(hem_shift_r) is
+                when 0      => v_hem := v_hem_raw;
+                when 1      => v_hem := shift_right(v_hem_raw, 1);
+                when 2      => v_hem := shift_right(v_hem_raw, 2);
+                when others => v_hem := shift_right(v_hem_raw, 3);
+            end case;
             v_curtain_bot := horizon_r + resize(v_hem, 12);
 
             if pixel_y >= v_curtain_bot then
