@@ -446,6 +446,7 @@ begin
         variable v_phase_with   : unsigned(15 downto 0);
         variable v_band_accum   : unsigned(15 downto 0);
         variable v_sway_tri     : unsigned(15 downto 0);
+        variable v_tooth_scaled : unsigned(17 downto 0);
         variable v_hem_raw      : unsigned(3 downto 0);
         variable v_hem          : unsigned(3 downto 0);
         variable v_curtain_bot  : unsigned(11 downto 0);
@@ -739,15 +740,19 @@ begin
             v_phase_hi_18 := shift_left(
                 resize(phase_mul_hi_r(11 downto 0), 18), 6);
             v_phase_lo_18 := resize(phase_mul_lo_r(17 downto 0), 18);
-            -- Halve the tooth_phase contribution: smaller horizontal V
-            -- sway over the same vertical period → sharper apex angle.
+            -- 1.5× tooth_phase (= 0.75·wavelen px sway) over the same
+            -- 2× wavelen vertical period → much steeper, more pronounced
+            -- V legs.  The apex_offset (32768) keeps the centre stripe
+            -- from flipping at the peak.
+            v_tooth_scaled := ('0' & tooth_phase_r)
+                            + ('0' & shift_right(tooth_phase_r, 1));
             if chev_vee_r = '1' then
                 phase_init_r <= v_phase_hi_18 + v_phase_lo_18
-                              + resize(shift_right(tooth_phase_r, 1), 18)
+                              + v_tooth_scaled
                               + to_unsigned(32768, 18);
             else
                 phase_init_r <= v_phase_hi_18 + v_phase_lo_18
-                              + resize(shift_right(tooth_phase_r, 1), 18);
+                              + v_tooth_scaled;
             end if;
 
             -- Per-pixel phase DDA (anchored at eff_horizon in Vee mode).
