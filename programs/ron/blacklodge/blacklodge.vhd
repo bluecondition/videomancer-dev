@@ -662,10 +662,11 @@ begin
                         wavelen_int_r <= wavelen_int_r + 1;
                     end if;
 
-                    -- Advance row_phase by freq_row per row → tooth period
-                    -- = wavelen rows.  Each chevron tooth spans a full
-                    -- wavelen vertically (longer, more pronounced V).
-                    v_row_phase_sum := ('0' & row_phase_r) + ('0' & freq_row_r);
+                    -- Advance row_phase by freq_row/2 per row → tooth
+                    -- period = 2× wavelen rows, so each chevron V leg
+                    -- spans twice as many rows as the local wavelength.
+                    v_row_phase_sum := ('0' & row_phase_r)
+                                     + ('0' & shift_right(freq_row_r, 1));
                     v_row_phase_17  := v_row_phase_sum(16 downto 0);
                     row_phase_r <= v_row_phase_17;
 
