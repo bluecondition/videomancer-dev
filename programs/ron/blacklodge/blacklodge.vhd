@@ -284,6 +284,9 @@ architecture blacklodge of program_top is
     signal s1_phase     : unsigned(15 downto 0) := (others => '0');
     signal s1_depth     : unsigned(11 downto 0) := (others => '0');
     signal s1_is_floor  : std_logic := '0';
+    -- Drop-shadow strength under the curtain hem.  0 = no shadow,
+    -- 15 = darkest (right under the hem edge).  Falls off over 16 rows.
+    signal s1_shadow_amt : unsigned(3 downto 0) := (others => '0');
 
     ----------------------------------------------------------------------
     -- Stage 2: curtain fold triangle (single tri from continuous phase)
@@ -291,6 +294,7 @@ architecture blacklodge of program_top is
     signal s2_x         : unsigned(11 downto 0) := (others => '0');
     signal s2_y         : unsigned(11 downto 0) := (others => '0');
     signal s2_is_floor  : std_logic := '0';
+    signal s2_shadow_amt: unsigned(3 downto 0) := (others => '0');
     signal s2_tri_a     : unsigned(9 downto 0) := (others => '0');
 
     ----------------------------------------------------------------------
@@ -299,6 +303,7 @@ architecture blacklodge of program_top is
     signal s3_x            : unsigned(11 downto 0) := (others => '0');
     signal s3_y            : unsigned(11 downto 0) := (others => '0');
     signal s3_is_floor     : std_logic := '0';
+    signal s3_shadow_amt   : unsigned(3 downto 0) := (others => '0');
     signal s3_fold_luma    : unsigned(9 downto 0) := (others => '0');
     -- 6-bit blend (64 steps) — small enough for cheap mul, smooth enough
     -- that no perceivable stepping is visible as the Depth knob is swept.
@@ -439,6 +444,8 @@ begin
         variable v_sway_tri     : unsigned(15 downto 0);
         variable v_hem          : unsigned(3 downto 0);
         variable v_curtain_bot  : unsigned(11 downto 0);
+        variable v_shadow_d     : unsigned(11 downto 0);
+        variable v_flr_y_var    : unsigned(9 downto 0);
         variable v_depth_signed : signed(11 downto 0);
         variable v_blend_signed : signed(11 downto 0);
         variable v_blend_factor : unsigned(5 downto 0);
@@ -820,8 +827,17 @@ begin
 
             if pixel_y >= v_curtain_bot then
                 s1_is_floor <= '1';
+                -- Drop-shadow strength: distance from curtain edge gives
+                -- 15..0 falloff over 16 rows (15 at the hem, fading to 0).
+                v_shadow_d := pixel_y - v_curtain_bot;
+                if v_shadow_d < to_unsigned(16, 12) then
+                    s1_shadow_amt <= to_unsigned(15, 4) - v_shadow_d(3 downto 0);
+                else
+                    s1_shadow_amt <= (others => '0');
+                end if;
             else
                 s1_is_floor <= '0';
+                s1_shadow_amt <= (others => '0');
             end if;
 
             -- Floor depth (used by chevron DDA) is measured from the
@@ -843,6 +859,7 @@ begin
             s2_x <= s1_x;
             s2_y <= s1_y;
             s2_is_floor <= s1_is_floor;
+            s2_shadow_amt <= s1_shadow_amt;
 
             if s1_phase(15) = '0' then
                 v_tri_a := s1_phase(14 downto 5);
@@ -857,6 +874,7 @@ begin
             s3_x <= s2_x;
             s3_y <= s2_y;
             s3_is_floor <= s2_is_floor;
+            s3_shadow_amt <= s2_shadow_amt;
 
             -- Single smooth triangle as fold luma (10-bit).
             v_fold_luma := s2_tri_a;
@@ -902,14 +920,26 @@ begin
 
             -- Floor: select cream vs dark chevron (DDA-delayed color)
             if stripe_color_d3 = '1' then
-                s4_flr_y <= C_FLOOR_LT_Y;
+                v_flr_y_var := C_FLOOR_LT_Y;
                 s4_flr_u <= C_FLOOR_LT_U;
                 s4_flr_v <= C_FLOOR_LT_V;
             else
-                s4_flr_y <= C_FLOOR_DK_Y;
+                v_flr_y_var := C_FLOOR_DK_Y;
                 s4_flr_u <= C_FLOOR_DK_U;
                 s4_flr_v <= C_FLOOR_DK_V;
             end if;
+            -- Drop-shadow under the curtain hem: attenuate Y based on
+            -- shadow_amt (15 = right under the curtain, 0 = no shadow).
+            -- 4 levels mapped from the top 2 bits of shadow_amt.
+            case s3_shadow_amt(3 downto 2) is
+                when "11" => v_flr_y_var := shift_right(v_flr_y_var, 1);
+                when "10" => v_flr_y_var := v_flr_y_var
+                                          - shift_right(v_flr_y_var, 2);
+                when "01" => v_flr_y_var := v_flr_y_var
+                                          - shift_right(v_flr_y_var, 3);
+                when others => null;  -- "00" → no shadow
+            end case;
+            s4_flr_y <= v_flr_y_var;
 
             -- Corner vignette check: flag if in outer border
             -- (Soft-vignette fade_lvl is computed by the always-on 4-stage
