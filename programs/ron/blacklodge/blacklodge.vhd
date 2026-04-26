@@ -72,6 +72,31 @@ architecture blacklodge of program_top is
 
     constant C_CHROMA_MID   : unsigned(9 downto 0) := to_unsigned(512, 10);
 
+    ----------------------------------------------------------------------
+    -- Curtain hem LUT — gives each fold a rounded bottom that hangs down
+    -- below the horizon line.  Indexed by 6 top bits of fold_phase (= a
+    -- position within the current fold), output is hem-offset in pixels
+    -- (0..12).  Parabola: hem(p) = 4·R·p·(N-1-p)/(N-1)² → smooth bulge
+    -- centred on each fold, reaching zero at the seams between folds.
+    ----------------------------------------------------------------------
+    type t_hem_lut is array (0 to 63) of unsigned(3 downto 0);
+
+    function gen_hem_lut return t_hem_lut is
+        variable r   : t_hem_lut;
+        variable val : integer;
+    begin
+        for i in 0 to 63 loop
+            val := (4 * 12 * i * (63 - i) + 1985) / 3969;
+            if val > 15 then
+                val := 15;
+            end if;
+            r(i) := to_unsigned(val, 4);
+        end loop;
+        return r;
+    end function;
+
+    constant C_HEM_LUT : t_hem_lut := gen_hem_lut;
+
     -- Curtain lerp lookup tables — replace per-pixel multipliers with a
     -- 64-entry constant ROM per channel.  Indexed by 6-bit blend_factor;
     -- output is (HI - LO) × blend / 64 (or LO - HI for V).
@@ -412,6 +437,8 @@ begin
         variable v_phase_with   : unsigned(15 downto 0);
         variable v_band_accum   : unsigned(15 downto 0);
         variable v_sway_tri     : unsigned(15 downto 0);
+        variable v_hem          : unsigned(3 downto 0);
+        variable v_curtain_bot  : unsigned(11 downto 0);
         variable v_depth_signed : signed(11 downto 0);
         variable v_blend_signed : signed(11 downto 0);
         variable v_blend_factor : unsigned(5 downto 0);
@@ -783,13 +810,27 @@ begin
             end if;
             s1_phase <= v_phase_with;
 
-            -- Depth below horizon (0 above, positive below)
-            if pixel_y >= horizon_r then
-                v_depth := pixel_y - horizon_r;
+            -- Curtain bottom = horizon + per-fold hem so each fold has a
+            -- rounded bottom that hangs into the floor area.  Hem
+            -- amplitude is 0..12 px, indexed by the fold position via
+            -- top bits of fold_phase_r (parabolic LUT, peak in middle of
+            -- each fold, zero at fold seams).
+            v_hem := C_HEM_LUT(to_integer(fold_phase_r(15 downto 10)));
+            v_curtain_bot := horizon_r + resize(v_hem, 12);
+
+            if pixel_y >= v_curtain_bot then
                 s1_is_floor <= '1';
             else
-                v_depth := horizon_r - pixel_y;
                 s1_is_floor <= '0';
+            end if;
+
+            -- Floor depth (used by chevron DDA) is measured from the
+            -- main horizon line, not the curved curtain hem, so the
+            -- chevron pattern stays consistent across the floor.
+            if pixel_y >= horizon_r then
+                v_depth := pixel_y - horizon_r;
+            else
+                v_depth := horizon_r - pixel_y;
             end if;
             s1_depth <= v_depth;
 
