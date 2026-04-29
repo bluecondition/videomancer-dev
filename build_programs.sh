@@ -393,6 +393,20 @@ for PROGRAM_PATH in $PROGRAMS_TO_BUILD; do
         # Temporary file for capturing make errors
         MAKE_LOG=$(mktemp)
 
+        # Check for and execute Python hook if it exists
+        PYTHON_HOOK="${PROJECT_ROOT}${PROGRAM}.py"
+        if [ -f "$PYTHON_HOOK" ]; then
+            echo -e "${CYAN}Executing Python hook: ${PROGRAM}.py${NC}"
+            if ! python3 "$PYTHON_HOOK"; then
+                echo -e "${RED}ERROR: Python hook failed${NC}"
+                rm -f "$MAKE_LOG"
+                cd ..
+                FAILED_PROGRAMS=$((FAILED_PROGRAMS + 1))
+                continue 2
+            fi
+            echo -e "${GREEN}  ✓ Python hook completed${NC}"
+        fi
+
         # Track total bitstream generation time
         BITSTREAM_START=$(date +%s.%N)
 
@@ -518,13 +532,12 @@ for PROGRAM_PATH in $PROGRAMS_TO_BUILD; do
         echo -e "${GREEN}✓ All 6 bitstream variants generated in ${TOTAL_BITSTREAM_TIME}s${NC}"
 
         # Convert TOML configuration to binary (once per program, shared across hardware)
-        if [ ! -f "${BUILD_ROOT}/program_config.bin" ]; then
-            echo -e "${GREEN}Converting TOML configuration to binary...${NC}"
-            cd "${VIDEOMANCER_SDK_ROOT}/tools/toml-converter"
-            python3 toml_to_config_binary.py "${PROGRAM_TOML}" "${BUILD_ROOT}/program_config.bin" --quiet
-            cd "${SCRIPT_DIR}"
-            echo -e "${GREEN}✓ Configuration binary created (7,372 bytes)${NC}"
-        fi
+        # Convert TOML configuration to binary (always regenerate to avoid stale config)
+        echo -e "${GREEN}Converting TOML configuration to binary...${NC}"
+        cd "${VIDEOMANCER_SDK_ROOT}/tools/toml-converter"
+        python3 toml_to_config_binary.py "${PROGRAM_TOML}" "${BUILD_ROOT}/program_config.bin" --quiet
+        cd "${SCRIPT_DIR}"
+        echo -e "${GREEN}✓ Configuration binary created${NC}"
 
         # Copy program_config.bin to hardware-specific build directory
         cp "${BUILD_ROOT}/program_config.bin" "${HW_BUILD_ROOT}/program_config.bin"
