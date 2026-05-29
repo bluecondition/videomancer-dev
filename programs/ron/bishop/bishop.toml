@@ -50,14 +50,14 @@ initial_value_label = "32 px"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
-name_label = "Exaggeration"
+name_label = "Grid Phase"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 0
-display_min_value = 100
-display_max_value = 294
-suffix_label = "%"
+initial_value = 64
+display_min_value = 0
+display_max_value = 127
+suffix_label = "px"
 
 # --- Toggle Switches (7-11) ---
 # T7, T8, T10 are reserved for future use (animation triggers).
