@@ -29,7 +29,7 @@
 --   registers_in(2) = K3 Palette    (top 3 bits = palette index)
 --   registers_in(3) = K4 Expression (top 3 bits → 1-of-5; ≥5 folds to neutral)
 --   registers_in(4) = K5 Grid period (top 2 bits → {16, 32, 64, 128})
---   registers_in(5) = K6 Grid phase  (top 7 bits → 0..127 px horizontal shift)
+--   registers_in(5) = K6 Exaggeration (top 5 bits → scale 1.0..~2.94x on expr deltas)
 --   registers_in(6) = Switches      (bit2 = grid on/off, bit4 = BG-Video)
 --   registers_in(7) = Fader Brightness
 --
@@ -124,8 +124,13 @@ architecture bishop of program_top is
     signal expr_idx_r : unsigned(2 downto 0) := (others => '0');
     -- K5 Grid period (00=16, 01=32, 10=64, 11=128).
     signal grid_per_r : unsigned(1 downto 0) := "01";   -- default 32 px (v2.1 spacing)
-    -- K6 Grid horizontal phase (subtracted from pixel_x before masking).
-    signal grid_phs_r : unsigned(6 downto 0) := to_unsigned(8, 7);  -- default = old hardcoded 8
+    -- K6 Expression exaggeration.  scale = 1 + exag_m_r/16, exag_m_r ∈
+    -- [0,31] → 1.0 .. ~2.94x.  Applied per edge in mesh_copy_proc:
+    -- act = expr + (exag_m_r * (expr - neutral)) >> 4.
+    signal exag_m_r   : unsigned(4 downto 0) := (others => '0');
+    -- Grid horizontal phase is fixed now that K6 is exaggeration; 8
+    -- matches the v2.1 column placement.
+    constant GRID_PHASE : unsigned(6 downto 0) := to_unsigned(8, 7);
 
     -- ---------------------------------------------------------------
     -- Mutable edge state.  current_x lives in a small BRAM (1R1W,
@@ -149,6 +154,51 @@ architecture bishop of program_top is
 
     signal active    : std_logic_vector(0 to C_NUM_EDGES - 1)
                      := (others => '0');
+
+    -- ---------------------------------------------------------------
+    -- Active (selected-expression) mesh, held in EBR.  mesh_copy_proc
+    -- prefetches the K4-selected expression into these once per frame
+    -- during vblank; render Stage 0 reads them with no expression mux.
+    -- Each is a dedicated 1W1R EBR (same proven pattern as current_x).
+    -- The read address is a COMBINATIONAL alias of raster_cycle so the
+    -- registered read (upd_*_r is the EBR output reg) has the exact same
+    -- timing as the old combinational ROM read — no pipeline shift.
+    -- iCE40 has no distributed LUT-RAM, so this MUST map to EBR; the
+    -- dedicated-process form guarantees it (inline conditional reads fell
+    -- back to flip-flops and overflowed the chip).
+    -- ---------------------------------------------------------------
+    type t_act_ram13 is array (0 to 127) of std_logic_vector(12 downto 0);
+    type t_act_ram16 is array (0 to 127) of std_logic_vector(15 downto 0);
+    signal act_ymin_ram  : t_act_ram13 := (others => (others => '0'));
+    signal act_ymax_ram  : t_act_ram13 := (others => (others => '0'));
+    signal act_xtop_ram  : t_act_ram16 := (others => (others => '0'));
+    signal act_slope_ram : t_act_ram16 := (others => (others => '0'));
+    signal act_raddr     : unsigned(6 downto 0);            -- = raster_cycle (comb)
+    signal act_we        : std_logic := '0';
+    signal act_waddr     : unsigned(6 downto 0) := (others => '0');
+    signal act_wd_ymin   : std_logic_vector(12 downto 0) := (others => '0');
+    signal act_wd_ymax   : std_logic_vector(12 downto 0) := (others => '0');
+    signal act_wd_xtop   : std_logic_vector(15 downto 0) := (others => '0');
+    signal act_wd_slope  : std_logic_vector(15 downto 0) := (others => '0');
+
+    -- Precomputed stamp-width params for the (scaled) slope.  Small flop
+    -- arrays (combinational read in latch_held) — the big mesh stays in
+    -- EBR; these two are cheap enough as registers.
+    type t_cnt_arr  is array (0 to C_NUM_EDGES - 1) of unsigned(6 downto 0);
+    type t_srel_arr is array (0 to C_NUM_EDGES - 1) of signed(6 downto 0);
+    signal act_count    : t_cnt_arr  := (others => (others => '0'));
+    signal act_startrel : t_srel_arr := (others => (others => '0'));
+
+    -- Mesh-copy FSM (vblank).  Per edge: act = expr + (m*(expr-neutral))>>4
+    -- with m = exag_m_r, then count/start_rel from the scaled slope.
+    type t_copy_state is (CP_IDLE, CP_READ, CP_DELTA, CP_MULT, CP_WRITE, CP_PARAMS);
+    signal cp_state : t_copy_state := CP_IDLE;
+    signal cp_idx   : unsigned(6 downto 0) := (others => '0');
+    signal cp_neu_ymin, cp_neu_ymax, cp_neu_xtop, cp_neu_slope : signed(15 downto 0);
+    signal cp_exp_ymin, cp_exp_ymax, cp_exp_xtop, cp_exp_slope : signed(15 downto 0);
+    signal cp_dlt_ymin, cp_dlt_ymax, cp_dlt_xtop, cp_dlt_slope : signed(15 downto 0);
+    signal cp_prd_ymin, cp_prd_ymax, cp_prd_xtop, cp_prd_slope : signed(21 downto 0);
+    signal cp_slope_res : signed(15 downto 0) := (others => '0');
 
     -- ---------------------------------------------------------------
     -- Rasterizer FSM
@@ -338,8 +388,8 @@ begin
                 end if;
                 -- K5 Grid period
                 grid_per_r <= unsigned(registers_in(4)(9 downto 8));
-                -- K6 Grid horizontal phase (top 7 bits → 0..127)
-                grid_phs_r <= unsigned(registers_in(5)(9 downto 3));
+                -- K6 Expression exaggeration (top 5 bits → 0..31).
+                exag_m_r   <= unsigned(registers_in(5)(9 downto 5));
             end if;
         end if;
     end process;
@@ -369,43 +419,20 @@ begin
         variable v_in_feature  : boolean;
         variable v_grid_show   : boolean;
 
-        -- Inline helper: pack edge constants into the held regs.
-        -- Held regs are simple lookups (no arithmetic in this latch);
-        -- the actual add chain lives in the per-cycle R_STAMP body
-        -- so the latch cycle stays short.
+        -- Latch per-edge state for the next edge.  count/start_rel are
+        -- precomputed (from the scaled slope) by mesh_copy_proc and read
+        -- here from the act_count/act_startrel flop arrays — a plain
+        -- combinational lookup, no arithmetic in this latch.
         procedure latch_held(idx : integer) is
-            variable s_fp      : signed(15 downto 0);   -- Q9.7 slope
-            variable s_int     : signed(11 downto 0);   -- floor(s_fp / 128), sign-ext to 12
-            variable count_raw : unsigned(7 downto 0);
-            variable v_thick_u : unsigned(7 downto 0);  -- thick_r resized
-            variable v_thick_s : signed(6 downto 0);    -- thick_r as signed
         begin
-            cx_rd_addr  <= to_unsigned(idx, 7);
-            active_held <= active(idx);
+            cx_rd_addr     <= to_unsigned(idx, 7);
+            active_held    <= active(idx);
+            count_m1_held  <= act_count(idx);
+            start_rel_held <= act_startrel(idx);
             if C_EDGE_BND(idx) = 1 then
                 bnd_held <= '1';
             else
                 bnd_held <= '0';
-            end if;
-            s_fp      := to_signed(f_slope(to_integer(expr_idx_r), idx), 16);
-            -- Q9.7: integer part is bits 15..7 (9 bits signed).
-            -- Sign-extend to 12 bits to match the existing s_int width.
-            s_int     := resize(s_fp(15 downto 7), 12);
-            v_thick_u := resize(thick_r, 8);
-            v_thick_s := signed(resize(thick_r, 7));
-            if s_int >= to_signed(0, 12) then
-                count_raw      := to_unsigned(to_integer(s_int), 8)
-                                + (v_thick_u sll 1);    -- 2 * thick_r
-                start_rel_held <= -v_thick_s;
-            else
-                count_raw      := to_unsigned(-to_integer(s_int), 8)
-                                + (v_thick_u sll 1);
-                start_rel_held <= resize(s_int, 7) - v_thick_s;
-            end if;
-            if count_raw > to_unsigned(MAX_STAMP_M1, 8) then
-                count_m1_held <= to_unsigned(MAX_STAMP_M1, 7);
-            else
-                count_m1_held <= count_raw(6 downto 0);
             end if;
         end procedure;
     begin
@@ -461,14 +488,15 @@ begin
                     -- Stage 0: lookup mesh constants + issue BRAM read
                     -- for current_x.  Registered into upd_*_r and
                     -- cx_rd_data for use one cycle later by Stage 1.
+                    -- upd_ymin_r / ymax / xtop / slope are driven by the
+                    -- act_*_bram processes (EBR reads at act_raddr, which
+                    -- combinationally tracks raster_cycle).  Here we only
+                    -- set the non-mesh Stage-0 outputs, aligned to the
+                    -- same edge as the EBR read.
                     if raster_cycle < to_unsigned(C_NUM_EDGES, 11) then
                         v_idx        := to_integer(raster_cycle(6 downto 0));
                         upd_valid_r  <= '1';
                         upd_idx_r    <= raster_cycle(6 downto 0);
-                        upd_ymin_r   <= to_signed(f_y_min(to_integer(expr_idx_r), v_idx), 13);
-                        upd_ymax_r   <= to_signed(f_y_max(to_integer(expr_idx_r), v_idx), 13);
-                        upd_xtop_r   <= to_signed(f_x_top(to_integer(expr_idx_r), v_idx), 16);
-                        upd_slope_r  <= to_signed(f_slope(to_integer(expr_idx_r), v_idx), 16);
                         upd_active_r <= active(v_idx);
                         if C_EDGE_BND(v_idx) = 1 then
                             upd_bnd_r <= '1';
@@ -613,6 +641,149 @@ begin
             if vsync_falling_r = '1' then
                 active <= (others => '0');
             end if;
+        end if;
+    end process;
+
+    -- ---------------------------------------------------------------
+    -- Active-mesh EBRs (4×).  Read port drives upd_*_r directly (the EBR
+    -- output register), addressed by act_raddr.  Write port is fed by
+    -- mesh_copy_proc.  act_raddr is a combinational alias of raster_cycle
+    -- so upd_*_r lands on the same edge as upd_idx_r/cx_rd_addr.
+    -- ---------------------------------------------------------------
+    act_raddr <= raster_cycle(6 downto 0);
+
+    act_ymin_bram : process(clk)
+    begin
+        if rising_edge(clk) then
+            if act_we = '1' then
+                act_ymin_ram(to_integer(act_waddr)) <= act_wd_ymin;
+            end if;
+            upd_ymin_r <= signed(act_ymin_ram(to_integer(act_raddr)));
+        end if;
+    end process;
+
+    act_ymax_bram : process(clk)
+    begin
+        if rising_edge(clk) then
+            if act_we = '1' then
+                act_ymax_ram(to_integer(act_waddr)) <= act_wd_ymax;
+            end if;
+            upd_ymax_r <= signed(act_ymax_ram(to_integer(act_raddr)));
+        end if;
+    end process;
+
+    act_xtop_bram : process(clk)
+    begin
+        if rising_edge(clk) then
+            if act_we = '1' then
+                act_xtop_ram(to_integer(act_waddr)) <= act_wd_xtop;
+            end if;
+            upd_xtop_r <= signed(act_xtop_ram(to_integer(act_raddr)));
+        end if;
+    end process;
+
+    act_slope_bram : process(clk)
+    begin
+        if rising_edge(clk) then
+            if act_we = '1' then
+                act_slope_ram(to_integer(act_waddr)) <= act_wd_slope;
+            end if;
+            upd_slope_r <= signed(act_slope_ram(to_integer(act_raddr)));
+        end if;
+    end process;
+
+    -- ---------------------------------------------------------------
+    -- Mesh copy FSM — prefetch the K4-selected expression into the
+    -- active-mesh EBRs once per frame (vblank).  Stage 1: pure 1x copy
+    -- (act = expr).  Finishes in ~2*C_NUM_EDGES cycles, long before the
+    -- first displayed line's R_CLEAR.
+    -- ---------------------------------------------------------------
+    mesh_copy_proc : process(clk)
+        variable v_e       : integer range 0 to C_NUM_EXPR - 1;
+        variable v_i       : integer range 0 to C_NUM_EDGES - 1;
+        variable s_int     : signed(11 downto 0);
+        variable count_raw : unsigned(7 downto 0);
+        variable v_thick_u : unsigned(7 downto 0);
+        variable v_thick_s : signed(6 downto 0);
+    begin
+        if rising_edge(clk) then
+            act_we <= '0';
+            case cp_state is
+                when CP_IDLE =>
+                    if vsync_falling_r = '1' then
+                        cp_idx   <= (others => '0');
+                        cp_state <= CP_READ;
+                    end if;
+
+                -- Read neutral (expr 0) and the selected expression.
+                when CP_READ =>
+                    v_e := to_integer(expr_idx_r);
+                    v_i := to_integer(cp_idx);
+                    cp_neu_ymin  <= to_signed(f_y_min(0,   v_i), 16);
+                    cp_neu_ymax  <= to_signed(f_y_max(0,   v_i), 16);
+                    cp_neu_xtop  <= to_signed(f_x_top(0,   v_i), 16);
+                    cp_neu_slope <= to_signed(f_slope(0,   v_i), 16);
+                    cp_exp_ymin  <= to_signed(f_y_min(v_e, v_i), 16);
+                    cp_exp_ymax  <= to_signed(f_y_max(v_e, v_i), 16);
+                    cp_exp_xtop  <= to_signed(f_x_top(v_e, v_i), 16);
+                    cp_exp_slope <= to_signed(f_slope(v_e, v_i), 16);
+                    cp_state <= CP_DELTA;
+
+                when CP_DELTA =>
+                    cp_dlt_ymin  <= cp_exp_ymin  - cp_neu_ymin;
+                    cp_dlt_ymax  <= cp_exp_ymax  - cp_neu_ymax;
+                    cp_dlt_xtop  <= cp_exp_xtop  - cp_neu_xtop;
+                    cp_dlt_slope <= cp_exp_slope - cp_neu_slope;
+                    cp_state <= CP_MULT;
+
+                when CP_MULT =>
+                    -- m (0..31) as signed(6), positive; × signed(16) → signed(22).
+                    cp_prd_ymin  <= signed(resize(exag_m_r, 6)) * cp_dlt_ymin;
+                    cp_prd_ymax  <= signed(resize(exag_m_r, 6)) * cp_dlt_ymax;
+                    cp_prd_xtop  <= signed(resize(exag_m_r, 6)) * cp_dlt_xtop;
+                    cp_prd_slope <= signed(resize(exag_m_r, 6)) * cp_dlt_slope;
+                    cp_state <= CP_WRITE;
+
+                -- act = expr + prod/16 (arithmetic >>4); write mesh EBRs.
+                when CP_WRITE =>
+                    act_we       <= '1';
+                    act_waddr    <= cp_idx;
+                    act_wd_ymin  <= std_logic_vector(resize(
+                                      cp_exp_ymin + resize(shift_right(cp_prd_ymin, 4), 16), 13));
+                    act_wd_ymax  <= std_logic_vector(resize(
+                                      cp_exp_ymax + resize(shift_right(cp_prd_ymax, 4), 16), 13));
+                    act_wd_xtop  <= std_logic_vector(
+                                      cp_exp_xtop + resize(shift_right(cp_prd_xtop, 4), 16));
+                    cp_slope_res <= cp_exp_slope + resize(shift_right(cp_prd_slope, 4), 16);
+                    act_wd_slope <= std_logic_vector(
+                                      cp_exp_slope + resize(shift_right(cp_prd_slope, 4), 16));
+                    cp_state <= CP_PARAMS;
+
+                -- count_m1 / start_rel from the scaled slope + K2 thickness
+                -- (the math the old latch_held did, now precomputed).
+                when CP_PARAMS =>
+                    s_int     := resize(cp_slope_res(15 downto 7), 12);
+                    v_thick_u := resize(thick_r, 8);
+                    v_thick_s := signed(resize(thick_r, 7));
+                    if s_int >= to_signed(0, 12) then
+                        count_raw := to_unsigned(to_integer(s_int), 8) + (v_thick_u sll 1);
+                        act_startrel(to_integer(cp_idx)) <= -v_thick_s;
+                    else
+                        count_raw := to_unsigned(-to_integer(s_int), 8) + (v_thick_u sll 1);
+                        act_startrel(to_integer(cp_idx)) <= resize(s_int, 7) - v_thick_s;
+                    end if;
+                    if count_raw > to_unsigned(MAX_STAMP_M1, 8) then
+                        act_count(to_integer(cp_idx)) <= to_unsigned(MAX_STAMP_M1, 7);
+                    else
+                        act_count(to_integer(cp_idx)) <= count_raw(6 downto 0);
+                    end if;
+                    if cp_idx = to_unsigned(C_NUM_EDGES - 1, 7) then
+                        cp_state <= CP_IDLE;
+                    else
+                        cp_idx   <= cp_idx + 1;
+                        cp_state <= CP_READ;
+                    end if;
+            end case;
         end if;
     end process;
 
@@ -769,10 +940,9 @@ begin
         -- naturally with the silhouette + EOR walker, which run on the
         -- same input-side clock.
         -- K5 grid_per_r selects the mask width (power-of-2 periods so
-        -- the mod-N is a cheap bit-slice).  K6 grid_phs_r shifts the
-        -- vertical-column grid horizontally without affecting the
-        -- horizontal-row spacing.
-        grid_xp <= pixel_x - resize(grid_phs_r, 12);
+        -- the mod-N is a cheap bit-slice).  Horizontal phase fixed at
+        -- GRID_PHASE (K6 was repurposed to expression exaggeration).
+        grid_xp <= pixel_x - resize(GRID_PHASE, 12);
         with grid_per_r select
             grid_mask <= "0001111" when "00",  -- period 16
                          "0011111" when "01",  -- period 32
