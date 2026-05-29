@@ -23,14 +23,15 @@
 --   CLEAR  560  +  STAMP 96*3 = 288  ≈ 848 cycles/line
 --   SD line = 858 cycles, HD = 2200.  Fits.
 --
--- First prototype: static head, no animation.  Animation knobs in the
--- .toml are wired but ignored.  Palette / brightness / background-video
--- controls are live.
---
--- Register map (live):
---   registers_in(5) = Color       (top 3 bits = palette index)
---   registers_in(6) = Switches    (bit4 = BG-Video)
---   registers_in(7) = Brightness
+-- Register map:
+--   registers_in(0) = K1 Scale      (latched, behavior deferred to a later milestone)
+--   registers_in(1) = K2 Thickness  (top 2 bits → THICK ∈ {1, 2, 3, 4})
+--   registers_in(2) = K3 Palette    (top 3 bits = palette index)
+--   registers_in(3) = K4 Expression (top 3 bits → 1-of-5; ≥5 folds to neutral)
+--   registers_in(4) = K5 Grid period (top 2 bits → {16, 32, 64, 128})
+--   registers_in(5) = K6 Grid phase  (top 7 bits → 0..127 px horizontal shift)
+--   registers_in(6) = Switches      (bit2 = grid on/off, bit4 = BG-Video)
+--   registers_in(7) = Fader Brightness
 --
 -- License: GPL-3.0
 -- Author: ron
@@ -54,7 +55,10 @@ architecture bishop of program_top is
     constant HEAD_HALF_W : natural := 200;  -- half-width of head bbox in pixels
     constant HEAD_HALF_H : natural := 300;  -- half-height for the grid mask
     constant CLEAR_W     : natural := 2 * HEAD_HALF_W;  -- cycles in CLEAR phase
-    constant THICK       : natural := 1;    -- line half-thickness
+    -- Edge thickness is now a per-frame latched value (`thick_r`), driven
+    -- by K2.  build_face_mesh.py sizes the tip-strip math for THICK_BUILD=4
+    -- so any K2 setting up to 4 stays parity-correct.
+    constant THICK_MAX   : natural := 4;
     -- Cap stamps per edge so a single near-horizontal high-slope edge
     -- can't blow the per-scanline cycle budget.  Edges with
     -- |slope| + 2*THICK > MAX_STAMP_M1 render only the first portion
@@ -102,17 +106,26 @@ architecture bishop of program_top is
     signal v_centre_r   : unsigned(11 downto 0) := to_unsigned(540, 12);
 
     -- ---------------------------------------------------------------
-    -- Per-frame latched user controls
+    -- Per-frame latched user controls (all updated on vsync_falling_r)
     -- ---------------------------------------------------------------
-    signal pal_y_r   : unsigned(9 downto 0) := C_PAL_Y(0);
-    signal pal_u_r   : unsigned(9 downto 0) := C_PAL_U(0);
-    signal pal_v_r   : unsigned(9 downto 0) := C_PAL_V(0);
-    signal bright_r  : unsigned(7 downto 0) := to_unsigned(220, 8);
+    signal pal_y_r    : unsigned(9 downto 0) := C_PAL_Y(0);
+    signal pal_u_r    : unsigned(9 downto 0) := C_PAL_U(0);
+    signal pal_v_r    : unsigned(9 downto 0) := C_PAL_V(0);
+    signal bright_r   : unsigned(7 downto 0) := to_unsigned(220, 8);
     signal bg_video_r : std_logic := '0';
-    -- Mesh switch (T9): when '1', the CLEAR phase writes 1s instead of
-    -- 0s at every 32nd row and every 32nd column inside the head bbox,
-    -- producing a procedural grid that costs no extra cycles.
+    -- T9: when '1', the EOR-fill mask paints a grid inside the silhouette.
     signal grid_en_r  : std_logic := '0';
+    -- K1 Scale — latched, behavior deferred to a future milestone.
+    signal scale_r    : unsigned(9 downto 0) := (others => '0');
+    -- K2 Thickness — stored as the actual THICK value (1..4).
+    signal thick_r    : unsigned(2 downto 0) := to_unsigned(1, 3);
+    -- K4 Expression — selects which row of the C_EDGE_* mesh tables to
+    -- index.  Clamped to [0, C_NUM_EXPR-1] in the vsync latch.
+    signal expr_idx_r : unsigned(2 downto 0) := (others => '0');
+    -- K5 Grid period (00=16, 01=32, 10=64, 11=128).
+    signal grid_per_r : unsigned(1 downto 0) := "01";   -- default 32 px (v2.1 spacing)
+    -- K6 Grid horizontal phase (subtracted from pixel_x before masking).
+    signal grid_phs_r : unsigned(6 downto 0) := to_unsigned(8, 7);  -- default = old hardcoded 8
 
     -- ---------------------------------------------------------------
     -- Mutable edge state.  current_x lives in a small BRAM (1R1W,
@@ -304,12 +317,29 @@ begin
                 end if;
                 pixel_y <= (others => '0');
 
-                pal_y_r <= C_PAL_Y(to_integer(unsigned(registers_in(5)(9 downto 7))));
-                pal_u_r <= C_PAL_U(to_integer(unsigned(registers_in(5)(9 downto 7))));
-                pal_v_r <= C_PAL_V(to_integer(unsigned(registers_in(5)(9 downto 7))));
+                -- K3 Palette
+                pal_y_r <= C_PAL_Y(to_integer(unsigned(registers_in(2)(9 downto 7))));
+                pal_u_r <= C_PAL_U(to_integer(unsigned(registers_in(2)(9 downto 7))));
+                pal_v_r <= C_PAL_V(to_integer(unsigned(registers_in(2)(9 downto 7))));
+                -- Fader Brightness, T9/T11 switches
                 bright_r   <= unsigned(registers_in(7)(9 downto 2));
                 bg_video_r <= registers_in(6)(4);
-                grid_en_r  <= registers_in(6)(2);  -- T9 Mesh: Dense = grid on
+                grid_en_r  <= registers_in(6)(2);
+                -- K1 Scale (latched, behavior deferred)
+                scale_r    <= unsigned(registers_in(0));
+                -- K2 Thickness: top 2 bits → 0..3, +1 → THICK 1..4
+                thick_r    <= ("0" & unsigned(registers_in(1)(9 downto 8)))
+                              + to_unsigned(1, 3);
+                -- K4 Expression: top 3 bits, clamped to <= C_NUM_EXPR - 1
+                if to_integer(unsigned(registers_in(3)(9 downto 7))) > C_NUM_EXPR - 1 then
+                    expr_idx_r <= (others => '0');
+                else
+                    expr_idx_r <= unsigned(registers_in(3)(9 downto 7));
+                end if;
+                -- K5 Grid period
+                grid_per_r <= unsigned(registers_in(4)(9 downto 8));
+                -- K6 Grid horizontal phase (top 7 bits → 0..127)
+                grid_phs_r <= unsigned(registers_in(5)(9 downto 3));
             end if;
         end if;
     end process;
@@ -347,6 +377,8 @@ begin
             variable s_fp      : signed(15 downto 0);   -- Q9.7 slope
             variable s_int     : signed(11 downto 0);   -- floor(s_fp / 128), sign-ext to 12
             variable count_raw : unsigned(7 downto 0);
+            variable v_thick_u : unsigned(7 downto 0);  -- thick_r resized
+            variable v_thick_s : signed(6 downto 0);    -- thick_r as signed
         begin
             cx_rd_addr  <= to_unsigned(idx, 7);
             active_held <= active(idx);
@@ -355,18 +387,20 @@ begin
             else
                 bnd_held <= '0';
             end if;
-            s_fp  := to_signed(C_EDGE_SLOPE(idx), 16);
+            s_fp      := to_signed(f_slope(to_integer(expr_idx_r), idx), 16);
             -- Q9.7: integer part is bits 15..7 (9 bits signed).
             -- Sign-extend to 12 bits to match the existing s_int width.
-            s_int := resize(s_fp(15 downto 7), 12);
+            s_int     := resize(s_fp(15 downto 7), 12);
+            v_thick_u := resize(thick_r, 8);
+            v_thick_s := signed(resize(thick_r, 7));
             if s_int >= to_signed(0, 12) then
                 count_raw      := to_unsigned(to_integer(s_int), 8)
-                                + to_unsigned(2 * THICK, 8);
-                start_rel_held <= to_signed(-THICK, 7);
+                                + (v_thick_u sll 1);    -- 2 * thick_r
+                start_rel_held <= -v_thick_s;
             else
                 count_raw      := to_unsigned(-to_integer(s_int), 8)
-                                + to_unsigned(2 * THICK, 8);
-                start_rel_held <= resize(s_int, 7) - to_signed(THICK, 7);
+                                + (v_thick_u sll 1);
+                start_rel_held <= resize(s_int, 7) - v_thick_s;
             end if;
             if count_raw > to_unsigned(MAX_STAMP_M1, 8) then
                 count_m1_held <= to_unsigned(MAX_STAMP_M1, 7);
@@ -431,10 +465,10 @@ begin
                         v_idx        := to_integer(raster_cycle(6 downto 0));
                         upd_valid_r  <= '1';
                         upd_idx_r    <= raster_cycle(6 downto 0);
-                        upd_ymin_r   <= to_signed(C_EDGE_Y_MIN(v_idx), 13);
-                        upd_ymax_r   <= to_signed(C_EDGE_Y_MAX(v_idx), 13);
-                        upd_xtop_r   <= to_signed(C_EDGE_X_TOP(v_idx), 16);
-                        upd_slope_r  <= to_signed(C_EDGE_SLOPE(v_idx), 16);
+                        upd_ymin_r   <= to_signed(f_y_min(to_integer(expr_idx_r), v_idx), 13);
+                        upd_ymax_r   <= to_signed(f_y_max(to_integer(expr_idx_r), v_idx), 13);
+                        upd_xtop_r   <= to_signed(f_x_top(to_integer(expr_idx_r), v_idx), 16);
+                        upd_slope_r  <= to_signed(f_slope(to_integer(expr_idx_r), v_idx), 16);
                         upd_active_r <= active(v_idx);
                         if C_EDGE_BND(v_idx) = 1 then
                             upd_bnd_r <= '1';
@@ -727,15 +761,25 @@ begin
     pixel_out_counter : block
         signal grid_hit  : std_logic;
         signal show_pix  : std_logic;
+        signal grid_xp   : unsigned(11 downto 0);
+        signal grid_mask : unsigned(6 downto 0);
     begin
         -- Use the input-side pixel_x / pixel_y counters (already kept
-        -- by timing_proc) for the grid pattern.  The earlier output-
-        -- side row counter was bumping multiple times per hsync pulse,
-        -- which collapsed the grid into a solid fill.  pixel_x / _y
-        -- also align naturally with the silhouette + EOR walker, both
-        -- of which run on the same input-side clock.
-        grid_hit <= '1' when pixel_x(4 downto 0) = "01000"
-                          or pixel_y(4 downto 0) = "00000"
+        -- by timing_proc) for the grid pattern.  pixel_x / _y align
+        -- naturally with the silhouette + EOR walker, which run on the
+        -- same input-side clock.
+        -- K5 grid_per_r selects the mask width (power-of-2 periods so
+        -- the mod-N is a cheap bit-slice).  K6 grid_phs_r shifts the
+        -- vertical-column grid horizontally without affecting the
+        -- horizontal-row spacing.
+        grid_xp <= pixel_x - resize(grid_phs_r, 12);
+        with grid_per_r select
+            grid_mask <= "0001111" when "00",  -- period 16
+                         "0011111" when "01",  -- period 32
+                         "0111111" when "10",  -- period 64
+                         "1111111" when others;-- period 128
+        grid_hit <= '1' when (grid_xp(6 downto 0)  and grid_mask) = "0000000"
+                          or (pixel_y(6 downto 0) and grid_mask) = "0000000"
                     else '0';
         show_pix <= edge_hit_r
                     or (grid_en_r and eor_inside_d_r and grid_hit);

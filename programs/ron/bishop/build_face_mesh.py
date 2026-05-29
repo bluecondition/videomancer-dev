@@ -1,32 +1,59 @@
 #!/usr/bin/env python3
-"""Convert face_mesh.py (named-vertex / named-edge wireframe) into the
-bishop_mesh_pkg.vhd that the FPGA reads.
+"""Convert face_mesh.py (named-vertex / named-edge wireframe + named
+expressions) into the bishop_mesh_pkg.vhd that the FPGA reads.
 
 Workflow:
-  1. Edit face_mesh.py (move/add/remove VERTICES, add/remove EDGES).
+  1. Edit face_mesh.py (move/add/remove VERTICES, EDGES, or EXPRESSIONS).
   2. Run this script.
-  3. Build with ./build_programs.sh ron bishop.
+  3. Inspect face_labels_<expression>.svg previews.
+  4. Build with ./build_programs.sh ron bishop.
 
 Vertex coords are in SVG pixel space (viewBox 960x720); the script
 normalizes them around the center of the used vertices and scales to
-TARGET_FACE_HEIGHT pixels of FPGA pixel space (same as extract_mesh.py
-so the renderer's expected y range stays unchanged).
+TARGET_FACE_HEIGHT pixels of FPGA pixel space.
 
 Each edge inherits its animation group from the vertex name prefix:
-  brow_*   -> 1 (Y-shift on brow knob)
-  eye_*    -> 2 (suppressed on blink)
-  mouth_*  -> 3 (Y-shift on mouth knob)
-  anything else -> 0 (static)
+  brow_*   -> 1
+  eye_*    -> 2
+  mouth_*  -> 3
+  anything else -> 0
 If the two endpoints disagree, the edge falls back to group 0.
+
+Each expression in EXPRESSIONS produces an independent set of mesh
+arrays.  All sets are padded to the same length (C_NUM_EDGES) with
+degenerate no-op edges (y_min > y_max so the rasterizer never activates
+them).  The FPGA mux's the active table via a vsync-latched expression
+index (K4 top-3-bits).
 """
 
+import subprocess
+import sys
 from collections import defaultdict
 from pathlib import Path
 
-from face_mesh import VERTICES, EDGES
+from face_mesh import VERTICES, EDGES, EXPRESSIONS
 
 VHDL_OUT = Path(__file__).with_name("bishop_mesh_pkg.vhd")
-TARGET_FACE_HEIGHT = 600   # same as extract_mesh.py
+TARGET_FACE_HEIGHT = 600
+
+# Q9.7 fixed-point: 9-bit integer (±256) + 7-bit fractional (1/128 px).
+# Same 16-bit storage as the old Q12.4 path so current_x_ram fits one EBR.
+FP_BITS  = 7
+FP_SCALE = 1 << FP_BITS    # 128
+
+# Tip-strip math is sized for THICK_BUILD = 4 (the max K2 thickness)
+# so the strip has enough margin at any runtime thickness.  At runtime
+# THICK<4, a few extra rows are painted by phantom detail edges instead
+# of boundary edges — invisible because both buffers OR into the display.
+THICK_BUILD = 4
+
+# Degenerate no-op edge used to pad each expression's mesh up to
+# C_NUM_EDGES.  y_min > y_max so the rasterizer never activates it.
+NO_OP_EDGE = {
+    "y_min": 32767, "y_max": -32768,
+    "x_top": 0, "slope": 0,
+    "group": 0, "bnd": 0,
+}
 
 GROUP_STATIC = 0
 GROUP_BROW   = 1
@@ -48,31 +75,30 @@ def edge_group(a: str, b: str) -> int:
 
 # Edges that should be visible but NOT contribute to even-odd fill
 # parity.  These are "interior detail" lines that would otherwise read
-# as enclosing a region — leaving black holes under the brow arches, or
-# under the mouth horizontal centerline, etc.
+# as enclosing a region.
 DETAIL_EDGE_NAMES = {
-    frozenset({"mouth_l", "mouth_r"}),  # mouth horizontal centerline
-    frozenset({"nose_l",  "nose_r"}),   # nose nostril cross-line
+    frozenset({"mouth_l", "mouth_r"}),
+    frozenset({"nose_l",  "nose_r"}),
 }
 
 def is_boundary_edge(a: str, b: str) -> bool:
-    """True if this edge should contribute to EOR parity.
-
-    Closed-shape outlines (silhouette, eye diamonds, mouth diamond,
-    nose triangle) are boundary edges.  Open polylines (brow arches)
-    and interior detail lines are NOT boundary — they're displayed
-    but skipped by the EOR walker."""
+    """True if this edge should contribute to EOR parity."""
     if frozenset({a, b}) in DETAIL_EDGE_NAMES:
         return False
-    # Brows are open V-shaped polylines.  Treating them as boundary
-    # would create a "hole" in the fill under each brow peak (the
-    # under-brow region reads as inside-the-brow XOR inside-the-head =
-    # outside the fill).
     if a.startswith("brow_") and b.startswith("brow_"):
         return False
     return True
 
+def apply_expression(deltas):
+    """Return a new VERTICES dict with (dx, dy) deltas applied."""
+    out = {}
+    for name, (x, y) in VERTICES.items():
+        dx, dy = deltas.get(name, (0, 0))
+        out[name] = (x + dx, y + dy)
+    return out
+
 def normalize(verts):
+    """Scale and center VERTICES around the head's bounding box."""
     used = set()
     for a, b in EDGES:
         used.add(a); used.add(b)
@@ -85,26 +111,9 @@ def normalize(verts):
     return {v: ((verts[v][0] - cx) * scale, (verts[v][1] - cy) * scale)
             for v in used}
 
-# Q9.7 fixed-point.  Same 16-bit storage as before so current_x_ram
-# still fits a single iCE40 EBR, but 7 fractional bits (1/128 px) means
-# slope rounding error is up to 1/256 per row — accumulated drift on a
-# 50-row edge is ~0.2 px, small enough that edges visibly meet at
-# shared vertices.  Q12.4 (previous, 4 frac bits) drifted up to 1.5 px.
-# Integer range ±256 is plenty for the head's ±200 px half-width.
-FP_BITS  = 7
-FP_SCALE = 1 << FP_BITS    # 128
-
 def to_dda(a, b, group, bnd):
-    """Convert a (signed-coords) edge to the DDA descriptor the FPGA expects.
-
-    The FPGA activates an edge when v_y_target == y_min and deactivates
-    when v_y_target > y_max.  For horizontal edges we set y_min = y_max
-    so the edge fires for exactly one row, with slope encoding the
-    horizontal sweep direction (the rasterizer stamps |slope| + 2*THICK
-    + 1 pixels per active row regardless of vertical span).
-
-    x_top and slope are emitted as Q12.8 fixed point (signed * 256).
-    """
+    """Convert an edge to the DDA descriptor the FPGA expects.  x_top
+    and slope in Q9.7 (signed * 128)."""
     x1, y1 = a
     x2, y2 = b
     if y1 < y2:
@@ -114,13 +123,12 @@ def to_dda(a, b, group, bnd):
         y_min, y_max = y2, y1
         x_top, x_bot = x2, x1
     else:
-        # Horizontal: one-row edge, slope encodes the full dx.
         y_min = y_max = y1
         x_top, x_bot = x1, x2
     yi_min = int(round(y_min))
     yi_max = int(round(y_max))
     if yi_min == yi_max:
-        slope_fp = int(round((x_bot - x_top) * FP_SCALE))   # horizontal: full dx
+        slope_fp = int(round((x_bot - x_top) * FP_SCALE))
     else:
         slope_fp = int(round((x_bot - x_top) * FP_SCALE / (yi_max - yi_min)))
     x_top_fp = int(round(x_top * FP_SCALE))
@@ -133,75 +141,21 @@ def to_dda(a, b, group, bnd):
         "bnd":    1 if bnd else 0,
     }
 
-def emit_vhdl(edges_dda, out_path: Path):
-    n = len(edges_dda)
-    lines = []
-    lines.append("-- Auto-generated by build_face_mesh.py.  Edit face_mesh.py, not this file.")
-    lines.append(f"-- Edges: {n}")
-    counts = defaultdict(int)
-    for e in edges_dda:
-        counts[e["group"]] += 1
-    for g in sorted(counts):
-        gname = {0: "STATIC", 1: "BROW", 2: "EYE", 3: "MOUTH"}.get(g, str(g))
-        lines.append(f"--   group {g} ({gname}): {counts[g]} edges")
-    lines.append("")
-    lines.append("library ieee;")
-    lines.append("use ieee.std_logic_1164.all;")
-    lines.append("use ieee.numeric_std.all;")
-    lines.append("")
-    lines.append("package bishop_mesh_pkg is")
-    lines.append("")
-    lines.append(f"    constant C_NUM_EDGES : natural := {n};")
-    lines.append("")
-    lines.append("    constant C_GRP_STATIC : natural := 0;")
-    lines.append("    constant C_GRP_BROW   : natural := 1;")
-    lines.append("    constant C_GRP_EYE    : natural := 2;")
-    lines.append("    constant C_GRP_MOUTH  : natural := 3;")
-    lines.append("")
-    lines.append("    type t_int_array is array (natural range <>) of integer;")
-    lines.append("")
-
-    def emit_const(name, values, comment):
-        lines.append(f"    -- {comment}")
-        lines.append(f"    constant {name} : t_int_array(0 to C_NUM_EDGES - 1) := (")
-        chunks = []
-        for i in range(0, len(values), 8):
-            row = ", ".join(f"{v:>5}" for v in values[i:i + 8])
-            chunks.append("        " + row)
-        lines.append(",\n".join(chunks))
-        lines.append("    );")
-        lines.append("")
-
-    emit_const("C_EDGE_Y_MIN", [e["y_min"] for e in edges_dda], "y_min per edge")
-    emit_const("C_EDGE_Y_MAX", [e["y_max"] for e in edges_dda], "y_max per edge")
-    emit_const("C_EDGE_X_TOP", [e["x_top"] for e in edges_dda], "x at y_min, Q9.7 (128x pixels)")
-    emit_const("C_EDGE_SLOPE", [e["slope"] for e in edges_dda], "slope dx/dy, Q9.7 (128x pixels/row)")
-    emit_const("C_EDGE_GROUP", [e["group"] for e in edges_dda], "animation group")
-    emit_const("C_EDGE_BND",   [e["bnd"]   for e in edges_dda], "1=boundary (EOR), 0=detail (visible only)")
-
-    lines.append("end package bishop_mesh_pkg;")
-    out_path.write_text("\n".join(lines) + "\n")
-
 def find_boundary_tips(boundary_edges, norm):
     """Find vertices that are strict top/bottom tips considering only
-    boundary edges.  At such tips, both incident boundary edges share
-    the same y AND x_top, so the rasterizer otherwise produces 1 EOR
-    crossing on the tip row where the polygon rule wants 0.  Detail
-    edges don't contribute to EOR, so their tips don't need stripping."""
+    boundary edges.  Detail edges don't contribute to EOR, so their
+    tips don't need stripping."""
     top_strict = defaultdict(int)
     bot_strict = defaultdict(int)
     horiz = defaultdict(int)
     for a, b in boundary_edges:
         ya, yb = norm[a][1], norm[b][1]
         if ya < yb:
-            top_strict[a] += 1
-            bot_strict[b] += 1
+            top_strict[a] += 1; bot_strict[b] += 1
         elif yb < ya:
-            top_strict[b] += 1
-            bot_strict[a] += 1
+            top_strict[b] += 1; bot_strict[a] += 1
         else:
-            horiz[a] += 1
-            horiz[b] += 1
+            horiz[a] += 1; horiz[b] += 1
     top_tips = set()
     bot_tips = set()
     for v in set(top_strict) | set(bot_strict) | set(horiz):
@@ -213,19 +167,17 @@ def find_boundary_tips(boundary_edges, norm):
             bot_tips.add(v)
     return top_tips, bot_tips
 
-def main():
-    norm = normalize(VERTICES)
+def build_one_mesh(verts, label, log):
+    """Run the full per-expression pipeline on `verts` and return the
+    edges_dda list (boundary + detail + phantom)."""
+    norm = normalize(verts)
     boundary_edges = [(a, b) for a, b in EDGES if is_boundary_edge(a, b)]
-    detail_edges   = [(a, b) for a, b in EDGES if not is_boundary_edge(a, b)]
     top_tips, bot_tips = find_boundary_tips(boundary_edges, norm)
-    print(f"boundary edges: {len(boundary_edges)},  detail edges: {len(detail_edges)}")
-    print(f"boundary top tips: {sorted(top_tips)}")
-    print(f"boundary bot tips: {sorted(bot_tips)}")
 
-    # Pass 1: build the initial DDA descriptor for every edge.
-    edges_dda      = []
-    edge_top_name  = []
-    edge_bot_name  = []
+    # Pass 1: initial DDA for every edge.
+    edges_dda     = []
+    edge_top_name = []
+    edge_bot_name = []
     for a_name, b_name in EDGES:
         a = norm[a_name]; b = norm[b_name]
         bnd = is_boundary_edge(a_name, b_name)
@@ -240,17 +192,9 @@ def main():
         edge_top_name.append(top_name)
         edge_bot_name.append(bot_name)
 
-    # Pass 2: at each boundary tip, strip enough rows for stamps to
-    # separate by a 1-px '0' gap.  Stamp widths depend on the slope:
-    # each stamp covers |s_int| + 2*THICK + 1 pixels, where s_int is
-    # the Q9.7 slope's integer part (matches VHDL latch_held).
-    # Required cur_x separation = |s_int_L| + |s_int_R| + 2*THICK + 1.
-    # Per-row separation grows by |slope_a - slope_b| (Q9.7), so
-    #   N = ceil(needed_q9_7 / |slope_diff|).
-    # Pass 3 adds phantom detail edges to redraw the stripped rows so
-    # the wireframe still meets at the vertex.
-    THICK = 1
-
+    # Pass 2: tip strip.  N = ceil((|s_int_L| + |s_int_R| + 2*THICK_BUILD + 1)
+    # * FP_SCALE / |slope_diff|).  THICK_BUILD=4 keeps the strip valid for
+    # any runtime K2 thickness.
     def find_N(tip, which):
         slopes = []
         for i, dda in enumerate(edges_dda):
@@ -265,17 +209,11 @@ def main():
         diff = abs(slopes[0] - slopes[1])
         if diff == 0:
             return 1
-        # Python's // is floor (toward -inf), same as VHDL's signed
-        # bit-slice on the Q9.7 slope.  Asymmetric for ±slope of same
-        # magnitude (e.g. -3.06 floors to -4, +3.06 to +3) — that's
-        # why the required separation is computed from both edges
-        # explicitly rather than from |slope_a|+|slope_b|.
         s_int_a = abs(slopes[0] // FP_SCALE)
         s_int_b = abs(slopes[1] // FP_SCALE)
-        needed = (s_int_a + s_int_b + 2 * THICK + 1) * FP_SCALE
+        needed = (s_int_a + s_int_b + 2 * THICK_BUILD + 1) * FP_SCALE
         return max(1, (needed + diff - 1) // diff)
 
-    # Record per-tip N so pass 3 can build matching phantoms.
     top_tip_N = {}
     bot_tip_N = {}
     for tip in sorted(top_tips):
@@ -286,7 +224,7 @@ def main():
                     and dda["y_min"] + N <= dda["y_max"]:
                 dda["y_min"] += N
                 dda["x_top"] += N * dda["slope"]
-        print(f"  top tip {tip}: stripped {N} row(s)")
+        log.append(f"  [{label}] top tip {tip}: stripped {N} row(s)")
 
     for tip in sorted(bot_tips):
         N = find_N(tip, "bot")
@@ -295,22 +233,15 @@ def main():
             if dda["bnd"] == 1 and edge_bot_name[i] == tip \
                     and dda["y_min"] + N <= dda["y_max"]:
                 dda["y_max"] -= N
-        print(f"  bot tip {tip}: stripped {N} row(s)")
+        log.append(f"  [{label}] bot tip {tip}: stripped {N} row(s)")
 
-    # Pass 3: phantom detail edges to render the stripped tip rows.
-    # These reproduce the rasterizer behavior of the original (un-
-    # stripped) edge for just the tip-row range, but with bnd=0 so the
-    # EOR walker ignores them.  Visual result: tips meet cleanly at the
-    # vertex without breaking even-odd parity.
+    # Pass 3: phantom detail edges.
     phantom_edges = []
-    n_boundary = len(edges_dda)   # phantoms only iterate over original edges
-
+    n_boundary = len(edges_dda)
     for i in range(n_boundary):
         dda = edges_dda[i]
         if dda["bnd"] != 1:
             continue
-        # Top tip phantom: covers the N rows above the post-strip y_min,
-        # starting at the original tip position.
         tip = edge_top_name[i]
         if tip in top_tip_N:
             N = top_tip_N[tip]
@@ -322,16 +253,11 @@ def main():
                 "group": dda["group"],
                 "bnd":   0,
             })
-        # Bot tip phantom: covers the N rows below the post-strip y_max,
-        # ending at the original tip vertex.
         tip = edge_bot_name[i]
         if tip in bot_tip_N:
             N = bot_tip_N[tip]
             phantom_y_min = dda["y_max"] + 1
             phantom_y_max = dda["y_max"] + N
-            # x_top at phantom_y_min = original_x_top + (offset) * slope.
-            # Bot strip doesn't change original_x_top, so use dda["x_top"]
-            # advanced from dda["y_min"] (original) to phantom_y_min.
             phantom_x_top = dda["x_top"] + (phantom_y_min - dda["y_min"]) * dda["slope"]
             phantom_edges.append({
                 "y_min": phantom_y_min,
@@ -343,19 +269,131 @@ def main():
             })
 
     edges_dda.extend(phantom_edges)
-    print(f"  added {len(phantom_edges)} phantom detail edges to restore tip pixels")
+    log.append(f"  [{label}] edges: {len(edges_dda)} "
+               f"(orig {n_boundary} + phantoms {len(phantom_edges)})")
+    return edges_dda
 
-    y_mins = [e["y_min"] for e in edges_dda]
-    y_maxs = [e["y_max"] for e in edges_dda]
-    x_tops = [e["x_top"] for e in edges_dda]
-    slopes = [e["slope"] for e in edges_dda]
-    print(f"Edges: {len(edges_dda)}")
-    print(f"y range : [{min(y_mins)}, {max(y_maxs)}]")
-    print(f"x range : [{min(x_tops)}, {max(x_tops)}]")
-    print(f"slope   : [{min(slopes)}, {max(slopes)}]")
+def emit_vhdl(meshes_per_expr, expr_names, out_path: Path):
+    """Emit bishop_mesh_pkg.vhd.
 
-    emit_vhdl(edges_dda, VHDL_OUT)
+    The varying fields (y_min, y_max, x_top, slope) are emitted as ONE
+    1D constant array per expression (e.g. C_EDGE_Y_MIN_0 .. _4) and
+    selected at runtime by case-statement lookup functions.  This keeps
+    yosys synthesizing them as distributed LUT ROMs (fast) instead of
+    BRAM (a single 2D / flattened array got BRAM-inferred and dropped
+    Fmax from ~78 to ~58 MHz).
+
+    group and bnd are expression-independent (boundary classification
+    and animation grouping don't change with pose, and the phantom-edge
+    order is identical across expressions), so they're emitted once as
+    plain 1D arrays.
+
+    All expressions are padded to the same length with NO_OP_EDGE."""
+    max_edges = max(len(m) for m in meshes_per_expr)
+    n_expr    = len(meshes_per_expr)
+    padded    = [m + [NO_OP_EDGE] * (max_edges - len(m)) for m in meshes_per_expr]
+
+    lines = []
+    lines.append("-- Auto-generated by build_face_mesh.py.  Edit face_mesh.py, not this file.")
+    lines.append(f"-- Expressions ({n_expr}): {', '.join(expr_names)}")
+    lines.append(f"-- Edges per expression (padded to max): {max_edges}")
+    lines.append("")
+    lines.append("library ieee;")
+    lines.append("use ieee.std_logic_1164.all;")
+    lines.append("use ieee.numeric_std.all;")
+    lines.append("")
+    lines.append("package bishop_mesh_pkg is")
+    lines.append("")
+    lines.append(f"    constant C_NUM_EDGES : natural := {max_edges};")
+    lines.append(f"    constant C_NUM_EXPR  : natural := {n_expr};")
+    lines.append("")
+    lines.append("    constant C_GRP_STATIC : natural := 0;")
+    lines.append("    constant C_GRP_BROW   : natural := 1;")
+    lines.append("    constant C_GRP_EYE    : natural := 2;")
+    lines.append("    constant C_GRP_MOUTH  : natural := 3;")
+    lines.append("")
+    for i, name in enumerate(expr_names):
+        lines.append(f"    constant C_EXPR_{name.upper()} : natural := {i};")
+    lines.append("")
+    lines.append("    type t_int_array is array (natural range <>) of integer;")
+    lines.append("")
+
+    def emit_1d(name, values, comment):
+        lines.append(f"    -- {comment}")
+        lines.append(f"    constant {name} : t_int_array(0 to C_NUM_EDGES - 1) := (")
+        chunks = []
+        for i in range(0, len(values), 8):
+            row = ", ".join(f"{v:>6}" for v in values[i:i + 8])
+            chunks.append("        " + row)
+        lines.append(",\n".join(chunks))
+        lines.append("    );")
+        lines.append("")
+
+    # Varying fields: one 1D array per expression.
+    VARY = [("y_min", "C_EDGE_Y_MIN", "y_min"),
+            ("y_max", "C_EDGE_Y_MAX", "y_max"),
+            ("x_top", "C_EDGE_X_TOP", "x at y_min, Q9.7 (128x px)"),
+            ("slope", "C_EDGE_SLOPE", "slope dx/dy, Q9.7 (128x px/row)")]
+    for field, base, desc in VARY:
+        for ei in range(n_expr):
+            emit_1d(f"{base}_{ei}", [e[field] for e in padded[ei]],
+                    f"{desc} — {expr_names[ei]}")
+
+    # Expression-independent fields (use expression 0).
+    emit_1d("C_EDGE_GROUP", [e["group"] for e in padded[0]],
+            "animation group per edge (expression-independent)")
+    emit_1d("C_EDGE_BND", [e["bnd"] for e in padded[0]],
+            "1=boundary (EOR), 0=detail/no-op (expression-independent)")
+
+    # Lookup functions — case statement keeps the per-expression arrays
+    # as separate LUT ROMs and adds a small 5:1 output mux.
+    for _, base, _ in VARY:
+        fn = "f_" + base[len("C_EDGE_"):].lower()   # C_EDGE_Y_MIN -> f_y_min
+        lines.append(f"    function {fn}(expr, idx : natural) return integer;")
+    lines.append("")
+    lines.append("end package bishop_mesh_pkg;")
+    lines.append("")
+    lines.append("package body bishop_mesh_pkg is")
+    lines.append("")
+    for _, base, _ in VARY:
+        fn = "f_" + base[len("C_EDGE_"):].lower()
+        lines.append(f"    function {fn}(expr, idx : natural) return integer is")
+        lines.append("    begin")
+        lines.append("        case expr is")
+        for ei in range(n_expr):
+            sel = "when others" if ei == n_expr - 1 else f"when {ei}"
+            lines.append(f"            {sel} => return {base}_{ei}(idx);")
+        lines.append("        end case;")
+        lines.append("    end function;")
+        lines.append("")
+    lines.append("end package body bishop_mesh_pkg;")
+    out_path.write_text("\n".join(lines) + "\n")
+
+def main():
+    expr_names = list(EXPRESSIONS.keys())
+    print(f"expressions ({len(expr_names)}): {', '.join(expr_names)}")
+    print(f"THICK_BUILD = {THICK_BUILD}  (strip math sized for max K2 thickness)")
+
+    meshes = []
+    log    = []
+    for name in expr_names:
+        deltas = EXPRESSIONS[name]
+        verts  = apply_expression(deltas)
+        mesh   = build_one_mesh(verts, name, log)
+        meshes.append(mesh)
+    for line in log:
+        print(line)
+
+    sizes = [len(m) for m in meshes]
+    print(f"per-expression edge counts: {sizes} -> padding to max={max(sizes)}")
+
+    emit_vhdl(meshes, expr_names, VHDL_OUT)
     print(f"wrote {VHDL_OUT}")
+
+    # Regenerate preview SVGs so they always match the emitted mesh.
+    svg_script = Path(__file__).with_name("make_labels_svg.py")
+    if svg_script.exists():
+        subprocess.run([sys.executable, str(svg_script)], check=True)
 
 if __name__ == "__main__":
     main()

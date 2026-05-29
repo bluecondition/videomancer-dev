@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="760" viewBox="0 0 1200 760">
 <rect width="100%" height="100%" fill="#000"/>
-<style>.bnd{stroke:#3f3;stroke-width:1.5;fill:none}.det{stroke:#5af;stroke-width:1.5;fill:none}.vert{fill:#fc3;stroke:none}.lbl{fill:#eee;font-family:monospace;font-size:11px}.title{fill:#fff;font-family:monospace;font-size:14px;font-weight:bold}.legend{fill:#bbb;font-family:monospace;font-size:11px}</style>
+<style>.bnd{stroke:#3f3;stroke-width:1.5;fill:none}.det{stroke:#5af;stroke-width:1.5;fill:none}.vert{fill:#fc3;stroke:none}.lbl{fill:#eee;font-family:monospace;font-size:11px}.title{fill:#fff;font-family:monospace;font-size:16px;font-weight:bold}.subtitle{fill:#aaa;font-family:monospace;font-size:11px}.legend{fill:#bbb;font-family:monospace;font-size:11px}</style>
 <line class="bnd" x1="330.0" y1="40.0" x2="179.7" y2="97.8"/>
 <line class="bnd" x1="179.7" y1="97.8" x2="131.1" y2="259.7"/>
 <line class="bnd" x1="131.1" y1="259.7" x2="147.3" y2="410.1"/>
@@ -34,98 +34,76 @@
 <line class="bnd" x1="399.4" y1="554.6" x2="330.0" y2="577.8"/>
 <line class="bnd" x1="330.0" y1="577.8" x2="260.6" y2="554.6"/>
 <line class="det" x1="260.6" y1="554.6" x2="399.4" y2="554.6"/>
-<circle class="vert" cx="330.0" cy="40.0" r="2.5"/>
+<circle cx="330.0" cy="40.0" r="3" fill="#fc3"/>
 <text class="lbl" x="330.0" y="24.0" text-anchor="middle">crown</text>
-<circle class="vert" cx="179.7" cy="97.8" r="2.5"/>
+<circle cx="179.7" cy="97.8" r="3" fill="#fc3"/>
 <text class="lbl" x="173.7" y="89.8" text-anchor="end">temple_l</text>
-<circle class="vert" cx="480.3" cy="97.8" r="2.5"/>
+<circle cx="480.3" cy="97.8" r="3" fill="#fc3"/>
 <text class="lbl" x="486.3" y="105.8" text-anchor="start">temple_r</text>
-<circle class="vert" cx="131.1" cy="259.7" r="2.5"/>
+<circle cx="131.1" cy="259.7" r="3" fill="#fc3"/>
 <text class="lbl" x="125.1" y="251.7" text-anchor="end">side_l</text>
-<circle class="vert" cx="528.9" cy="259.7" r="2.5"/>
+<circle cx="528.9" cy="259.7" r="3" fill="#fc3"/>
 <text class="lbl" x="534.9" y="267.7" text-anchor="start">side_r</text>
-<circle class="vert" cx="147.3" cy="410.1" r="2.5"/>
+<circle cx="147.3" cy="410.1" r="3" fill="#fc3"/>
 <text class="lbl" x="141.3" y="402.1" text-anchor="end">cheek_l</text>
-<circle class="vert" cx="512.7" cy="410.1" r="2.5"/>
+<circle cx="512.7" cy="410.1" r="3" fill="#fc3"/>
 <text class="lbl" x="518.7" y="418.1" text-anchor="start">cheek_r</text>
-<circle class="vert" cx="208.6" cy="600.9" r="2.5"/>
+<circle cx="208.6" cy="600.9" r="3" fill="#fc3"/>
 <text class="lbl" x="202.6" y="592.9" text-anchor="end">jaw_l</text>
-<circle class="vert" cx="451.4" cy="600.9" r="2.5"/>
+<circle cx="451.4" cy="600.9" r="3" fill="#fc3"/>
 <text class="lbl" x="457.4" y="608.9" text-anchor="start">jaw_r</text>
-<circle class="vert" cx="283.7" cy="720.0" r="2.5"/>
+<circle cx="283.7" cy="720.0" r="3" fill="#fc3"/>
 <text class="lbl" x="277.7" y="712.0" text-anchor="end">chin_l</text>
-<circle class="vert" cx="376.3" cy="720.0" r="2.5"/>
+<circle cx="376.3" cy="720.0" r="3" fill="#fc3"/>
 <text class="lbl" x="382.3" y="728.0" text-anchor="start">chin_r</text>
-<circle class="vert" cx="179.7" cy="277.1" r="2.5"/>
+<circle cx="179.7" cy="277.1" r="3" fill="#fc3"/>
 <text class="lbl" x="173.7" y="271.1" text-anchor="end">brow_l_o</text>
-<circle class="vert" cx="243.3" cy="257.4" r="2.5"/>
+<circle cx="243.3" cy="257.4" r="3" fill="#fc3"/>
 <text class="lbl" x="243.3" y="245.4" text-anchor="middle">brow_l_p</text>
-<circle class="vert" cx="295.3" cy="277.1" r="2.5"/>
+<circle cx="295.3" cy="277.1" r="3" fill="#fc3"/>
 <text class="lbl" x="301.3" y="283.1" text-anchor="start">brow_l_i</text>
-<circle class="vert" cx="364.7" cy="277.1" r="2.5"/>
+<circle cx="364.7" cy="277.1" r="3" fill="#fc3"/>
 <text class="lbl" x="358.7" y="271.1" text-anchor="end">brow_r_i</text>
-<circle class="vert" cx="416.7" cy="257.4" r="2.5"/>
+<circle cx="416.7" cy="257.4" r="3" fill="#fc3"/>
 <text class="lbl" x="416.7" y="245.4" text-anchor="middle">brow_r_p</text>
-<circle class="vert" cx="480.3" cy="277.1" r="2.5"/>
+<circle cx="480.3" cy="277.1" r="3" fill="#fc3"/>
 <text class="lbl" x="486.3" y="283.1" text-anchor="start">brow_r_o</text>
-<circle class="vert" cx="202.8" cy="334.9" r="2.5"/>
+<circle cx="202.8" cy="334.9" r="3" fill="#fc3"/>
 <text class="lbl" x="196.8" y="328.9" text-anchor="end">eye_l_o</text>
-<circle class="vert" cx="243.3" cy="323.3" r="2.5"/>
+<circle cx="243.3" cy="323.3" r="3" fill="#fc3"/>
 <text class="lbl" x="243.3" y="313.3" text-anchor="middle">eye_l_t</text>
-<circle class="vert" cx="289.5" cy="334.9" r="2.5"/>
+<circle cx="289.5" cy="334.9" r="3" fill="#fc3"/>
 <text class="lbl" x="295.5" y="340.9" text-anchor="start">eye_l_i</text>
-<circle class="vert" cx="243.3" cy="346.5" r="2.5"/>
+<circle cx="243.3" cy="346.5" r="3" fill="#fc3"/>
 <text class="lbl" x="243.3" y="362.5" text-anchor="middle">eye_l_b</text>
-<circle class="vert" cx="370.5" cy="334.9" r="2.5"/>
+<circle cx="370.5" cy="334.9" r="3" fill="#fc3"/>
 <text class="lbl" x="364.5" y="328.9" text-anchor="end">eye_r_i</text>
-<circle class="vert" cx="416.7" cy="323.3" r="2.5"/>
+<circle cx="416.7" cy="323.3" r="3" fill="#fc3"/>
 <text class="lbl" x="416.7" y="313.3" text-anchor="middle">eye_r_t</text>
-<circle class="vert" cx="457.2" cy="334.9" r="2.5"/>
+<circle cx="457.2" cy="334.9" r="3" fill="#fc3"/>
 <text class="lbl" x="463.2" y="340.9" text-anchor="start">eye_r_o</text>
-<circle class="vert" cx="416.7" cy="346.5" r="2.5"/>
+<circle cx="416.7" cy="346.5" r="3" fill="#fc3"/>
 <text class="lbl" x="416.7" y="362.5" text-anchor="middle">eye_r_b</text>
-<circle class="vert" cx="330.0" cy="300.2" r="2.5"/>
+<circle cx="330.0" cy="300.2" r="3" fill="#fc3"/>
 <text class="lbl" x="336.0" y="308.2" text-anchor="start">nose_top</text>
-<circle class="vert" cx="301.1" cy="502.6" r="2.5"/>
+<circle cx="301.1" cy="502.6" r="3" fill="#fc3"/>
 <text class="lbl" x="295.1" y="496.6" text-anchor="end">nose_l</text>
-<circle class="vert" cx="358.9" cy="502.6" r="2.5"/>
+<circle cx="358.9" cy="502.6" r="3" fill="#fc3"/>
 <text class="lbl" x="364.9" y="508.6" text-anchor="start">nose_r</text>
-<circle class="vert" cx="330.0" cy="525.7" r="2.5"/>
+<circle cx="330.0" cy="525.7" r="3" fill="#fc3"/>
 <text class="lbl" x="330.0" y="541.7" text-anchor="middle">nose_tip</text>
-<circle class="vert" cx="260.6" cy="554.6" r="2.5"/>
+<circle cx="260.6" cy="554.6" r="3" fill="#fc3"/>
 <text class="lbl" x="254.6" y="546.6" text-anchor="end">mouth_l</text>
-<circle class="vert" cx="330.0" cy="546.5" r="2.5"/>
+<circle cx="330.0" cy="546.5" r="3" fill="#fc3"/>
 <text class="lbl" x="330.0" y="536.5" text-anchor="middle">mouth_t</text>
-<circle class="vert" cx="399.4" cy="554.6" r="2.5"/>
+<circle cx="399.4" cy="554.6" r="3" fill="#fc3"/>
 <text class="lbl" x="405.4" y="562.6" text-anchor="start">mouth_r</text>
-<circle class="vert" cx="330.0" cy="577.8" r="2.5"/>
+<circle cx="330.0" cy="577.8" r="3" fill="#fc3"/>
 <text class="lbl" x="330.0" y="593.8" text-anchor="middle">mouth_b</text>
-<text class="title" x="680" y="60">Bishop face mesh — vertex names</text>
-<text class="legend" x="680" y="88" fill="#3f3" style="font-weight:bold">Silhouette (boundary)</text>
-<text class="legend" x="692" y="104">crown, temple_l/r, side_l/r,</text>
-<text class="legend" x="692" y="118">cheek_l/r, jaw_l/r, chin_l/r</text>
-<text class="legend" x="680" y="138" fill="#5af" style="font-weight:bold">Brows (detail)</text>
-<text class="legend" x="692" y="154">brow_l_o (outer) — brow_l_p (peak) — brow_l_i (inner)</text>
-<text class="legend" x="692" y="168">brow_r_i (inner) — brow_r_p (peak) — brow_r_o (outer)</text>
-<text class="legend" x="680" y="188" fill="#3f3" style="font-weight:bold">Eyes (boundary diamond)</text>
-<text class="legend" x="692" y="204">eye_*_o (outer), eye_*_t (top),</text>
-<text class="legend" x="692" y="218">eye_*_i (inner), eye_*_b (bottom)</text>
-<text class="legend" x="680" y="238" fill="#3f3" style="font-weight:bold">Nose (boundary triangle + detail nostril)</text>
-<text class="legend" x="692" y="254">nose_top (peak)</text>
-<text class="legend" x="692" y="268">nose_l / nose_r (base corners, connected by</text>
-<text class="legend" x="692" y="282">  a detail nostril line)</text>
-<text class="legend" x="692" y="296">nose_tip (bottom)</text>
-<text class="legend" x="680" y="316" fill="#3f3" style="font-weight:bold">Mouth (boundary diamond + detail centerline)</text>
-<text class="legend" x="692" y="332">mouth_l (left), mouth_t (top),</text>
-<text class="legend" x="692" y="346">mouth_r (right), mouth_b (bottom)</text>
-<text class="legend" x="692" y="360">mouth_l→mouth_r is a detail centerline</text>
-<text class="legend" x="680" y="380" fill="#bbb" style="font-weight:bold">Tip stripping</text>
-<text class="legend" x="692" y="396">Each convex tip strips N boundary rows so the</text>
-<text class="legend" x="692" y="410">two paired edges' stamps don't overlap (which</text>
-<text class="legend" x="692" y="424">would break EOR fill parity).  Phantom detail</text>
-<text class="legend" x="692" y="438">edges redraw the stripped rows so the wireframe</text>
-<text class="legend" x="692" y="452">still meets at the vertex.</text>
-<text class="legend" x="692" y="466"></text>
-<text class="legend" x="692" y="480">N: crown=2, eye/mouth corners=2, nose_tip=3,</text>
-<text class="legend" x="692" y="494">   nose_top=15 (shallow slope)</text>
+<text class="title" x="680" y="60">Bishop face — neutral</text>
+<text class="subtitle" x="680" y="82">Cyan dots = vertices moved by this expression</text>
+<text class="legend" x="680" y="104">(baseline pose — no deltas)</text>
+<text class="legend" x="680" y="132" style="font-weight:bold">Edge colors</text>
+<text class="legend" x="692" y="148" fill="#3f3">green: boundary (EOR fill)</text>
+<text class="legend" x="692" y="162" fill="#5af">blue:  detail (visible only)</text>
 </svg>

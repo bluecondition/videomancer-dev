@@ -1,24 +1,25 @@
 #!/usr/bin/env python3
-"""Render a labeled diagram of the Bishop face mesh.
+"""Render labeled diagrams of the Bishop face mesh, one SVG per
+expression in EXPRESSIONS.
 
-Reads VERTICES and EDGES from face_mesh.py and emits face_labels.svg
-showing the wireframe with every vertex labeled.  Boundary edges are
-green, detail edges (brows, mouth/nose centerlines) are blue."""
+Outputs face_labels_<expression>.svg under the bishop directory.  The
+SVG projection (scale + offset) is computed once from the NEUTRAL
+vertex bounds so all expressions share the same coordinate frame and
+visual comparisons across expressions are easy.
+
+Boundary edges drawn green; detail edges blue."""
 
 from pathlib import Path
-from face_mesh import VERTICES, EDGES
+from face_mesh import VERTICES, EDGES, EXPRESSIONS
 from build_face_mesh import is_boundary_edge
 
-OUT = Path(__file__).with_name("face_labels.svg")
+HERE = Path(__file__).parent
 
 W, H = 1200, 760
-MARGIN_X = 540   # extra room on the right for the legend / labels
+MARGIN_X = 540   # extra room on the right for the legend
 
-# Label offset hints — by default labels go to the right of the vertex,
-# but for verts on the right side of the face it reads better to put
-# them on the LEFT.  Custom anchors per vertex name.
 LABEL_HINTS = {
-    "crown":     ("middle", -16),    # above the vertex
+    "crown":     ("middle", -16),
     "temple_l":  ("end",     -8),
     "temple_r":  ("start",    8),
     "side_l":    ("end",     -8),
@@ -53,100 +54,111 @@ LABEL_HINTS = {
     "mouth_b":   ("middle",  16),
 }
 
-# Center the face in the left portion of the canvas.
+# Project from VERTICES (neutral) bounds so every expression uses the
+# same coordinate system.  Morphs only ever move brows/eyes/mouth a few
+# px, so they all stay well within the neutral bounding box.
 xs = [v[0] for v in VERTICES.values()]
 ys = [v[1] for v in VERTICES.values()]
 src_w = max(xs) - min(xs)
 src_h = max(ys) - min(ys)
-scale = min((W - MARGIN_X - 80) / src_w, (H - 80) / src_h)
-ox = 40 + (W - MARGIN_X - 80 - src_w * scale) / 2 - min(xs) * scale
-oy = 40 + (H - 80 - src_h * scale) / 2 - min(ys) * scale
+SCALE = min((W - MARGIN_X - 80) / src_w, (H - 80) / src_h)
+OX = 40 + (W - MARGIN_X - 80 - src_w * SCALE) / 2 - min(xs) * SCALE
+OY = 40 + (H - 80 - src_h * SCALE) / 2 - min(ys) * SCALE
 
-def project(v):
-    x, y = VERTICES[v]
-    return x * scale + ox, y * scale + oy
+def project(point):
+    x, y = point
+    return x * SCALE + OX, y * SCALE + OY
 
-lines = [
-    f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" '
-    f'viewBox="0 0 {W} {H}">',
-    '<rect width="100%" height="100%" fill="#000"/>',
-    '<style>'
-    '.bnd{stroke:#3f3;stroke-width:1.5;fill:none}'
-    '.det{stroke:#5af;stroke-width:1.5;fill:none}'
-    '.vert{fill:#fc3;stroke:none}'
-    '.lbl{fill:#eee;font-family:monospace;font-size:11px}'
-    '.title{fill:#fff;font-family:monospace;font-size:14px;font-weight:bold}'
-    '.legend{fill:#bbb;font-family:monospace;font-size:11px}'
-    '</style>',
-]
+def apply_deltas(deltas):
+    return {name: (x + deltas.get(name, (0, 0))[0],
+                   y + deltas.get(name, (0, 0))[1])
+            for name, (x, y) in VERTICES.items()}
 
-# Edges
-for a, b in EDGES:
-    ax, ay = project(a)
-    bx, by = project(b)
-    cls = "bnd" if is_boundary_edge(a, b) else "det"
-    lines.append(f'<line class="{cls}" x1="{ax:.1f}" y1="{ay:.1f}" '
-                 f'x2="{bx:.1f}" y2="{by:.1f}"/>')
+def render_svg(expr_name, deltas, out_path):
+    verts = apply_deltas(deltas)
+    lines = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" '
+        f'viewBox="0 0 {W} {H}">',
+        '<rect width="100%" height="100%" fill="#000"/>',
+        '<style>'
+        '.bnd{stroke:#3f3;stroke-width:1.5;fill:none}'
+        '.det{stroke:#5af;stroke-width:1.5;fill:none}'
+        '.vert{fill:#fc3;stroke:none}'
+        '.lbl{fill:#eee;font-family:monospace;font-size:11px}'
+        '.title{fill:#fff;font-family:monospace;font-size:16px;font-weight:bold}'
+        '.subtitle{fill:#aaa;font-family:monospace;font-size:11px}'
+        '.legend{fill:#bbb;font-family:monospace;font-size:11px}'
+        '</style>',
+    ]
 
-# Vertices + labels
-for name in VERTICES:
-    if not any(name == a or name == b for a, b in EDGES):
-        continue
-    x, y = project(name)
-    lines.append(f'<circle class="vert" cx="{x:.1f}" cy="{y:.1f}" r="2.5"/>')
-    anchor, dy = LABEL_HINTS.get(name, ("start", 4))
-    dx = {"start": 6, "end": -6, "middle": 0}[anchor]
-    lines.append(f'<text class="lbl" x="{x + dx:.1f}" y="{y + dy:.1f}" '
-                 f'text-anchor="{anchor}">{name}</text>')
+    # Edges
+    for a, b in EDGES:
+        ax, ay = project(verts[a])
+        bx, by = project(verts[b])
+        cls = "bnd" if is_boundary_edge(a, b) else "det"
+        lines.append(f'<line class="{cls}" x1="{ax:.1f}" y1="{ay:.1f}" '
+                     f'x2="{bx:.1f}" y2="{by:.1f}"/>')
 
-# Legend (right side)
-lx = W - MARGIN_X + 20
-ly = 60
-lines.append(f'<text class="title" x="{lx}" y="{ly}">Bishop face mesh — vertex names</text>')
-ly += 28
-groups = [
-    ("Silhouette (boundary)", "#3f3", [
-        "crown, temple_l/r, side_l/r,",
-        "cheek_l/r, jaw_l/r, chin_l/r",
-    ]),
-    ("Brows (detail)", "#5af", [
-        "brow_l_o (outer) — brow_l_p (peak) — brow_l_i (inner)",
-        "brow_r_i (inner) — brow_r_p (peak) — brow_r_o (outer)",
-    ]),
-    ("Eyes (boundary diamond)", "#3f3", [
-        "eye_*_o (outer), eye_*_t (top),",
-        "eye_*_i (inner), eye_*_b (bottom)",
-    ]),
-    ("Nose (boundary triangle + detail nostril)", "#3f3", [
-        "nose_top (peak)",
-        "nose_l / nose_r (base corners, connected by",
-        "  a detail nostril line)",
-        "nose_tip (bottom)",
-    ]),
-    ("Mouth (boundary diamond + detail centerline)", "#3f3", [
-        "mouth_l (left), mouth_t (top),",
-        "mouth_r (right), mouth_b (bottom)",
-        "mouth_l→mouth_r is a detail centerline",
-    ]),
-    ("Tip stripping", "#bbb", [
-        "Each convex tip strips N boundary rows so the",
-        "two paired edges' stamps don't overlap (which",
-        "would break EOR fill parity).  Phantom detail",
-        "edges redraw the stripped rows so the wireframe",
-        "still meets at the vertex.",
-        "",
-        "N: crown=2, eye/mouth corners=2, nose_tip=3,",
-        "   nose_top=15 (shallow slope)",
-    ]),
-]
-for header, color, body in groups:
-    lines.append(f'<text class="legend" x="{lx}" y="{ly}" fill="{color}" style="font-weight:bold">{header}</text>')
-    ly += 16
-    for line in body:
-        lines.append(f'<text class="legend" x="{lx + 12}" y="{ly}">{line}</text>')
+    # Vertices + labels
+    used = set(v for e in EDGES for v in e)
+    for name in VERTICES:
+        if name not in used:
+            continue
+        x, y = project(verts[name])
+        moved = name in deltas and deltas[name] != (0, 0)
+        # Vertices that moved this expression are highlighted in cyan.
+        fill = "#0ff" if moved else "#fc3"
+        lines.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="3" fill="{fill}"/>')
+        anchor, dy = LABEL_HINTS.get(name, ("start", 4))
+        dx = {"start": 6, "end": -6, "middle": 0}[anchor]
+        lines.append(f'<text class="lbl" x="{x + dx:.1f}" y="{y + dy:.1f}" '
+                     f'text-anchor="{anchor}">{name}</text>')
+
+    # Right-side panel: expression name + delta list
+    lx = W - MARGIN_X + 20
+    ly = 60
+    lines.append(f'<text class="title" x="{lx}" y="{ly}">'
+                 f'Bishop face — {expr_name}</text>')
+    ly += 22
+    lines.append(f'<text class="subtitle" x="{lx}" y="{ly}">'
+                 f'Cyan dots = vertices moved by this expression</text>')
+    ly += 22
+
+    if deltas:
+        lines.append(f'<text class="legend" x="{lx}" y="{ly}" '
+                     f'style="font-weight:bold">Per-vertex deltas (dx, dy):</text>')
+        ly += 18
+        for name in sorted(deltas):
+            dx, dy = deltas[name]
+            if (dx, dy) == (0, 0):
+                continue
+            lines.append(f'<text class="legend" x="{lx + 12}" y="{ly}">'
+                         f'{name:<10} ({dx:+d}, {dy:+d})</text>')
+            ly += 14
+    else:
+        lines.append(f'<text class="legend" x="{lx}" y="{ly}">'
+                     f'(baseline pose — no deltas)</text>')
         ly += 14
-    ly += 6
 
-lines.append('</svg>')
-OUT.write_text("\n".join(lines) + "\n")
-print(f"wrote {OUT}")
+    ly += 14
+    lines.append(f'<text class="legend" x="{lx}" y="{ly}" '
+                 f'style="font-weight:bold">Edge colors</text>')
+    ly += 16
+    lines.append(f'<text class="legend" x="{lx + 12}" y="{ly}" fill="#3f3">'
+                 f'green: boundary (EOR fill)</text>')
+    ly += 14
+    lines.append(f'<text class="legend" x="{lx + 12}" y="{ly}" fill="#5af">'
+                 f'blue:  detail (visible only)</text>')
+    ly += 14
+
+    lines.append('</svg>')
+    out_path.write_text("\n".join(lines) + "\n")
+
+def main():
+    for name, deltas in EXPRESSIONS.items():
+        out = HERE / f"face_labels_{name}.svg"
+        render_svg(name, deltas, out)
+        print(f"wrote {out}")
+
+if __name__ == "__main__":
+    main()

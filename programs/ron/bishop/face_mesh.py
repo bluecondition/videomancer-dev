@@ -5,7 +5,13 @@ Edit EDGES to add/remove connections (each entry is a pair of vertex names).
 Edge groups are inferred from vertex name prefixes (brow_/eye_/mouth_),
 which the FPGA uses to apply per-feature animation later.
 
-Then run build_face_mesh.py to regenerate bishop_mesh_pkg.vhd.
+Edit EXPRESSIONS to add or tweak facial poses.  Each expression is a
+per-vertex (dx, dy) delta in the same SVG pixel space as VERTICES; +y
+is down.  Only brows, eyes, and mouth are morphed — silhouette and
+nose stay put so tip-stripping math doesn't change per expression.
+
+Then run build_face_mesh.py to regenerate bishop_mesh_pkg.vhd and the
+per-expression preview SVGs.
 """
 
 VERTICES = {
@@ -93,3 +99,55 @@ EDGES = [
     ("mouth_b", "mouth_l"),
     ("mouth_l", "mouth_r"),
 ]
+
+# K4 (registers_in(3)) top-3-bits selects one of these.  Slots 5..7
+# fold back to neutral in the FPGA.  Order MATTERS — it's the runtime
+# mapping.  Deltas are in SVG pixel space (+y = down).
+EXPRESSIONS = {
+    "neutral": {},
+
+    "happy": {
+        "mouth_l":  (0, -8),  "mouth_r":  (0, -8),    # corners up
+        "mouth_t":  (0, -3),  "mouth_b":  (0, +3),    # arch deepens
+        "brow_l_p": (0, -2),  "brow_r_p": (0, -2),   # brows lift slightly
+        "eye_l_t":  (0, +2),  "eye_l_b":  (0, -2),   # squint
+        "eye_r_t":  (0, +2),  "eye_r_b":  (0, -2),
+    },
+
+    "sad": {
+        "mouth_l":  (0, +6),  "mouth_r":  (0, +6),    # corners down
+        "mouth_t":  (0, +3),
+        "brow_l_i": (0, -6),  "brow_r_i": (0, -6),   # inner brow lifts ("sad")
+        "brow_l_p": (0, +3),  "brow_r_p": (0, +3),
+        "brow_l_o": (0, +3),  "brow_r_o": (0, +3),
+    },
+
+    "angry": {
+        # brows: strong downward-inward V; inner drops hard and pulls
+        # toward the nose, outer lifts.
+        "brow_l_i": (+3, +10), "brow_r_i": (-3, +10),
+        "brow_l_p": (0, +3),   "brow_r_p": (0, +3),
+        "brow_l_o": (0, -8),   "brow_r_o": (0, -8),
+        # eyes: squint (top down, bottom up) + shift inward toward nose.
+        "eye_l_t":  (0, +2),   "eye_r_t":  (0, +2),
+        "eye_l_b":  (0, -2),   "eye_r_b":  (0, -2),
+        "eye_l_i":  (+2, 0),   "eye_r_i":  (-2, 0),
+        "eye_l_o":  (+2, 0),   "eye_r_o":  (-2, 0),
+        # nose: scrunch — bridge down, base/tip up.
+        "nose_top": (0, +5),
+        "nose_l":   (0, -3),   "nose_r":   (0, -3),
+        "nose_tip": (0, -3),
+        # mouth: thin frown.
+        "mouth_l":  (0, +2),   "mouth_r":  (0, +2),
+        "mouth_t":  (0, +2),   "mouth_b":  (0, -4),
+    },
+
+    "surprised": {
+        "brow_l_o": (0, -10), "brow_l_p": (0, -10), "brow_l_i": (0, -8),
+        "brow_r_o": (0, -10), "brow_r_p": (0, -10), "brow_r_i": (0, -8),
+        "mouth_t":  (0, -3),  "mouth_b":  (0, +8),   # mouth tall
+        "mouth_l":  (+3, 0),  "mouth_r":  (-3, 0),   # corners pull in
+        "eye_l_t":  (0, -3),  "eye_l_b":  (0, +3),   # eyes wide
+        "eye_r_t":  (0, -3),  "eye_r_b":  (0, +3),
+    },
+}
