@@ -107,11 +107,22 @@ EXPRESSIONS = {
     "neutral": {},
 
     "happy": {
-        "mouth_l":  (0, -8),  "mouth_r":  (0, -8),    # corners up
-        "mouth_t":  (0, -3),  "mouth_b":  (0, +3),    # arch deepens
-        "brow_l_p": (0, -2),  "brow_r_p": (0, -2),   # brows lift slightly
-        "eye_l_t":  (0, +2),  "eye_l_b":  (0, -2),   # squint
-        "eye_r_t":  (0, +2),  "eye_r_b":  (0, -2),
+        # Mouth: wide upward U.  Corners pull up AND outward (widen, not
+        # just curl); top lip lifts and bottom lip drops so the lips part.
+        "mouth_l":  (-8, -10), "mouth_r":  (+8, -10),
+        "mouth_t":  (0, -6),
+        "mouth_b":  (0, +3),
+        # Eyes: cheek-raise squint — the lower lid rising is the single
+        # biggest "believable smile" tell, so it dominates.  Top lid eases
+        # down a touch; outer corner lifts (smile-eye / crow's-feet hint).
+        "eye_l_t":  (0, +2),   "eye_r_t":  (0, +2),
+        "eye_l_b":  (0, -5),   "eye_r_b":  (0, -5),
+        "eye_l_o":  (0, -2),   "eye_r_o":  (0, -2),
+        # Nose: nostril sides lift very slightly (nasolabial folds deepen
+        # in a real smile, but the wireframe has no fold geometry).
+        "nose_l":   (0, -2),   "nose_r":   (0, -2),
+        # Brows: stay neutral — a baseline smile doesn't raise the brows
+        # (raised brows would read as surprised-happy instead).
     },
 
     "sad": {
