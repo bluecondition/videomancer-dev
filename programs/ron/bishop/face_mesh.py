@@ -126,11 +126,24 @@ EXPRESSIONS = {
     },
 
     "sad": {
-        "mouth_l":  (0, +6),  "mouth_r":  (0, +6),    # corners down
-        "mouth_t":  (0, +3),
-        "brow_l_i": (0, -6),  "brow_r_i": (0, -6),   # inner brow lifts ("sad")
-        "brow_l_p": (0, +3),  "brow_r_p": (0, +3),
-        "brow_l_o": (0, +3),  "brow_r_o": (0, +3),
+        # Brows — THE signature of sadness: inner corners pull up AND
+        # slightly together, peak lifts a touch, outer ends droop, giving
+        # the oblique "/\" slope (high at the nose, sloping down to the sides).
+        "brow_l_i": (+3, -10), "brow_r_i": (-3, -10),
+        "brow_l_p": (0, -2),   "brow_r_p": (0, -2),
+        "brow_l_o": (0, +5),   "brow_r_o": (0, +5),
+        # Eyes — hooded and heavy: upper lids droop, whole eye sags,
+        # outer corners drop (loss of alertness).
+        "eye_l_t":  (0, +4),   "eye_r_t":  (0, +4),
+        "eye_l_b":  (0, +2),   "eye_r_b":  (0, +2),
+        "eye_l_o":  (0, +2),   "eye_r_o":  (0, +2),
+        # Mouth — inverted-U frown (mirror of the happy U): corners pull
+        # down and slightly in, top lip lifts to deepen the frown, and the
+        # lower-lip midpoint nudges up to fake the pout.  Lips stay closed.
+        "mouth_l":  (+3, +10), "mouth_r":  (-3, +10),
+        "mouth_t":  (0, -2),
+        "mouth_b":  (0, -4),
+        # Nose stays at rest.
     },
 
     "angry": {
