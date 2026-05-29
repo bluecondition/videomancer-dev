@@ -1,0 +1,143 @@
+# Copyright (C) 2025 LZX Industries LLC
+# SPDX-License-Identifier: GPL-3.0-only
+#
+# Howler Program Configuration
+
+[program]
+program_id = "com.lzxindustries.howler"
+program_name = "Howler"
+program_version = "1.0.0"
+abi_version = ">=1.0,<2.0"
+author = "Lars Larsen"
+license = "GPL-3.0"
+categories = ["Tube"]
+program_type = "processing"
+description = "Video feedback loop with zoom, decay, and hue rotation inspired by BBC Radiophonic Workshop howl-round and Doctor Who titles"
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+url = "https://github.com/lzxindustries/videomancer-sdk"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Zoom"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 576
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Decay"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 768
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Inject"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Color Drift"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 128
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "H Shift"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 0
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Brightness"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Zoom Polar"
+value_labels = ["Expand", "Contract"]
+initial_value_label = "Expand"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Drift Dir"
+value_labels = ["CW", "CCW"]
+initial_value_label = "CW"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Self-Excite"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Channel Lock"
+value_labels = ["Indep", "Locked"]
+initial_value_label = "Locked"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Freeze"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Mix"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 1023
+display_float_digits = 1
+suffix_label = "%"
+
+[[preset]]
+name = "Basic Fdbk Echo"
+rotary_potentiometer_1 = 793
+rotary_potentiometer_2 = 921
+rotary_potentiometer_3 = 307
+
+[[preset]]
+name = "Tunnel & Bloom"
+rotary_potentiometer_1 = 593
+rotary_potentiometer_2 = 721
+rotary_potentiometer_3 = 507
+rotary_potentiometer_4 = 307
+toggle_switch_7 = 1
+toggle_switch_10 = 0
+
+[[preset]]
+name = "Self-Exciting"
+rotary_potentiometer_1 = 593
+rotary_potentiometer_2 = 721
+rotary_potentiometer_3 = 507
+rotary_potentiometer_4 = 818
+rotary_potentiometer_5 = 307
+rotary_potentiometer_6 = 716
+toggle_switch_9 = 1

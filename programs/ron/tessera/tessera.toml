@@ -1,0 +1,114 @@
+# Tessera — tumbling 3D triangles falling through the frame.
+#
+# v0 scaffold: parameter wiring is complete; rendering is a placeholder
+# (a centered diamond) until the triangle-field pipeline is implemented.
+
+[program]
+program_id = "com.bluecondition.tessera"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+program_name = "Tessera"
+author = "bluecondition"
+license = "GPL-3.0"
+categories = ["Shape", "Render", "Demo"]
+program_type = "processing"
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+description = "Triangles tumble through 3D space, outlined or filled with color or incoming video."
+url = "https://github.com/bluecondition/videomancer-dev"
+
+# --- Rotary Potentiometers (Knobs 1-6) ---
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+control_mode = "polar_degs_360"
+name_label = "Outline Hue"
+suffix_label = "°"
+initial_value = 0
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+control_mode = "polar_degs_360"
+name_label = "Fill Hue"
+suffix_label = "°"
+initial_value = 341
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+control_mode = "polar_degs_360"
+name_label = "BG Hue"
+suffix_label = "°"
+initial_value = 0
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 512
+display_min_value = 0
+display_max_value = 100
+name_label = "Size"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 512
+display_min_value = 0
+display_max_value = 100
+name_label = "Density"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Rot Axis"
+value_labels = ["X", "Y", "Z", "Random"]
+initial_value_label = "Random"
+
+# --- Toggle Switches (7-11) ---
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Outline Color"
+value_labels = ["Same", "Multi"]
+initial_value_label = "Same"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Fill"
+value_labels = ["Edge-Only", "Filled"]
+initial_value_label = "Filled"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Outline Style"
+value_labels = ["Solid", "Invert"]
+initial_value_label = "Solid"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Size Variation"
+value_labels = ["Same", "Varied"]
+initial_value_label = "Varied"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Direction"
+value_labels = ["Fall", "Rise"]
+initial_value_label = "Fall"
+
+# --- Linear Potentiometer (Fader 12) ---
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 0
+display_min_value = 0
+display_max_value = 100
+name_label = "Video Mix"
+suffix_label = "%"

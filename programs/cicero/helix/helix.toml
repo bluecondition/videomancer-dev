@@ -1,0 +1,127 @@
+# Helix Program Configuration
+
+[program]
+program_id = "com.cicero.helix"
+program_name = "Helix"
+program_version = "1.0.0"
+abi_version = ">=1.0,<2.0"
+author = "cicero"
+license = "GPL-3.0"
+categories = ["Render", "Geometric"]
+program_type = "synthesis"
+description = "DNA-style double helix winding vertically with optional horizontal rungs and continuous rotation."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Strand Width"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 256
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Helix Pitch"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 256
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Rotation Speed"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 384
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Rung Spacing"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 256
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Rung Width"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 128
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Brightness"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 800
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Colors"
+value_labels = ["Mono", "Bi-Color"]
+initial_value_label = "Bi-Color"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Background"
+value_labels = ["Dark", "Glow"]
+initial_value_label = "Dark"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Rungs"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Tint"
+value_labels = ["Cyan/Magenta", "Red/Blue"]
+initial_value_label = "Cyan/Magenta"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Invert"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Amplitude"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 1
+suffix_label = "%"
+
+[[preset]]
+name = "Default"
+
+[[preset]]
+name = "Tight Coil"
+rotary_potentiometer_2 = 800
+linear_potentiometer_12 = 256
+
+[[preset]]
+name = "Wide Sweep"
+linear_potentiometer_12 = 950
+rotary_potentiometer_4 = 600

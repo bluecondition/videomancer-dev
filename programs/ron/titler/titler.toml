@@ -38,14 +38,17 @@ suffix_label = "%"
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
 name_label = "Size"
-value_labels = ["1x", "2x", "4x", "8x", "16x"]
-initial_value_label = "2x"
+control_mode = "steps_32"
+display_min_value = 1
+display_max_value = 32
+initial_value = 32
+suffix_label = "x"
 
 # Knob 4 is dual-purpose. With Edit Mode OFF it picks one of 8 preset text
 # colors (the latched value persists when Edit Mode is enabled). With Edit
-# Mode ON it becomes an Erase trigger: any motion of the knob blanks the
-# character currently under the editing cursor (knob 5). Sweeping knob 5 with
-# knob 4 active erases each character the cursor passes over.
+# Mode ON it becomes an Erase-and-scroll knob: its position drags the editing
+# cursor along all 32 cells, and every cell the cursor lands on is blanked.
+# Knob 5 still works for moving the cursor without erasing.
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
 name_label = "Color/Erase"
@@ -92,3 +95,11 @@ parameter_id = "toggle_switch_9"
 name_label = "Matte"
 value_labels = ["Off", "On"]
 initial_value_label = "Off"
+
+# Font picker: Default is the original lo-fi 5x7 face, Sci-Fi is a chunkier
+# Bank-Gothic-style alternative with squared-off curves and digital numerals.
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Font"
+value_labels = ["Default", "Sci-Fi"]
+initial_value_label = "Default"

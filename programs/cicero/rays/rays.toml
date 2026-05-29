@@ -1,0 +1,128 @@
+# Rays Program Configuration
+
+[program]
+program_id = "com.cicero.rays"
+program_name = "Rays"
+program_version = "1.0.0"
+abi_version = ">=1.0,<2.0"
+author = "cicero"
+license = "GPL-3.0"
+categories = ["Render", "Geometric"]
+program_type = "synthesis"
+description = "Rotating 8 or 16-fold sunburst rays radiating from screen center with radial falloff."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Ray Width"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 160
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Falloff"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 384
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Spin Speed"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 384
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Background"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 120
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Tint"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 256
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Brightness"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 800
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Symmetry"
+value_labels = ["8 Rays", "16 Rays"]
+initial_value_label = "8 Rays"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Animation"
+value_labels = ["Spin", "Pulse"]
+initial_value_label = "Spin"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Palette"
+value_labels = ["White", "Spectrum"]
+initial_value_label = "White"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Center"
+value_labels = ["Dot", "Black Hole"]
+initial_value_label = "Dot"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Invert"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Ray Length"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 700
+display_float_digits = 1
+suffix_label = "%"
+
+[[preset]]
+name = "Default"
+
+[[preset]]
+name = "Pinwheel"
+toggle_switch_7 = 1
+rotary_potentiometer_3 = 600
+
+[[preset]]
+name = "Vortex"
+toggle_switch_9 = 1
+toggle_switch_10 = 1
+linear_potentiometer_12 = 950

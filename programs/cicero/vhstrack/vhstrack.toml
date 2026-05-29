@@ -1,0 +1,128 @@
+# VHS Track Program Configuration
+
+[program]
+program_id = "com.cicero.vhstrack"
+program_name = "VHS Track"
+program_version = "1.0.0"
+abi_version = ">=1.0,<2.0"
+author = "cicero"
+license = "GPL-3.0"
+categories = ["Processing", "Retro"]
+program_type = "processing"
+description = "VHS tape-tracking errors: horizontal skew per row, chroma drift, tape hiss, and a movable tracking-band noise stripe."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Skew Top"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 256
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Band Pos"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 700
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Band Width"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 80
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Chroma Drift"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 256
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Drift Speed"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 384
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Tape Hiss"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 64
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Color"
+value_labels = ["Color", "B&W"]
+initial_value_label = "Color"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Saturation"
+value_labels = ["Normal", "Under"]
+initial_value_label = "Under"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Band"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Snow"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Invert"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Skew Amount"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 384
+display_float_digits = 1
+suffix_label = "%"
+
+[[preset]]
+name = "Default"
+
+[[preset]]
+name = "Heavy Tracking"
+linear_potentiometer_12 = 900
+rotary_potentiometer_3 = 200
+
+[[preset]]
+name = "Late-Stage Tape"
+rotary_potentiometer_6 = 220
+rotary_potentiometer_4 = 600
+toggle_switch_8 = 1

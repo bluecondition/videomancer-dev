@@ -1,0 +1,141 @@
+# Copyright (C) 2025 LZX Industries LLC
+# SPDX-License-Identifier: GPL-3.0-only
+#
+# Kintsugi Program Configuration
+
+[program]
+program_id = "com.lzxindustries.kintsugi"
+program_name = "Kintsugi"
+program_version = "1.0.0"
+abi_version = ">=1.0,<2.0"
+author = "Lars Larsen"
+license = "GPL-3.0"
+categories = ["Craft"]
+program_type = "processing"
+description = "Gold crack-repair line overlay detecting source edges and rendering gold repair lines"
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+url = "https://github.com/lzxindustries/videomancer-sdk"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Sensitiv"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Crack Den"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Line Thk"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Tone"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Gold Br"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Balance"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Glow"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Cracks"
+value_labels = ["Halo", "Shatter"]
+initial_value_label = "Halo"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Metal"
+value_labels = ["Gold", "Pltnm"]
+initial_value_label = "Gold"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Emboss"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Patina"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Mix"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 1023
+display_float_digits = 1
+suffix_label = "%"
+
+[[preset]]
+name = "Thin Gold"
+rotary_potentiometer_2 = 675
+rotary_potentiometer_3 = 409
+rotary_potentiometer_4 = 675
+rotary_potentiometer_5 = 675
+rotary_potentiometer_6 = 409
+toggle_switch_10 = 0
+
+[[preset]]
+name = "Wide Metallic"
+rotary_potentiometer_1 = 614
+rotary_potentiometer_2 = 818
+rotary_potentiometer_3 = 818
+rotary_potentiometer_5 = 818
+toggle_switch_7 = 1
+toggle_switch_10 = 0
+
+[[preset]]
+name = "Golden Web"
+rotary_potentiometer_1 = 921
+rotary_potentiometer_2 = 618
+rotary_potentiometer_3 = 909
+rotary_potentiometer_4 = 1023
+rotary_potentiometer_5 = 618
+toggle_switch_7 = 1
+toggle_switch_8 = 1
+linear_potentiometer_12 = 614

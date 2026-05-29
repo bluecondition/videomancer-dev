@@ -542,6 +542,375 @@ GLYPHS = {
     ),
 }
 
+
+# Second font: a "Block Bold" variant. Filled valleys/peaks on the diagonal
+# letters (V, M, W, N), octagonal O with chamfered corners, tapered D,
+# shorter (3-col) middle bars on E/F, full-base "1" with flag, Z with
+# crossbar, and arcade-style 0 (slashed) / 4 (hooked). Letters not explicitly
+# listed here fall back to the default glyph.
+SCIFI_GLYPHS = {
+    "A": (
+        "..X.....",
+        ".XXX....",
+        "X.X.X...",
+        "XXXXX...",
+        "X...X...",
+        "X...X...",
+        "X...X...",
+        "........",
+    ),
+    "B": (
+        "XXXX....",
+        "X...X...",
+        "X...X...",
+        "XXX.....",
+        "X...X...",
+        "X...X...",
+        "XXXX....",
+        "........",
+    ),
+    "C": (
+        ".XXXX...",
+        "X.......",
+        "X.......",
+        "X.......",
+        "X.......",
+        "X.......",
+        ".XXXX...",
+        "........",
+    ),
+    "D": (
+        "XXX.....",
+        "X..X....",
+        "X...X...",
+        "X...X...",
+        "X...X...",
+        "X..X....",
+        "XXX.....",
+        "........",
+    ),
+    "E": (
+        "XXXXX...",
+        "X.......",
+        "X.......",
+        "XXX.....",
+        "X.......",
+        "X.......",
+        "XXXXX...",
+        "........",
+    ),
+    "F": (
+        "XXXXX...",
+        "X.......",
+        "X.......",
+        "XXX.....",
+        "X.......",
+        "X.......",
+        "X.......",
+        "........",
+    ),
+    "G": (
+        ".XXXX...",
+        "X.......",
+        "X.......",
+        "X.XXX...",
+        "X...X...",
+        "X...X...",
+        ".XXXX...",
+        "........",
+    ),
+    "H": (
+        "X...X...",
+        "X...X...",
+        "X...X...",
+        "XXXXX...",
+        "X...X...",
+        "X...X...",
+        "X...X...",
+        "........",
+    ),
+    "I": (
+        "XXXXX...",
+        "..X.....",
+        "..X.....",
+        "..X.....",
+        "..X.....",
+        "..X.....",
+        "XXXXX...",
+        "........",
+    ),
+    "J": (
+        "XXXXX...",
+        "....X...",
+        "....X...",
+        "....X...",
+        "....X...",
+        "X...X...",
+        ".XXX....",
+        "........",
+    ),
+    "K": (
+        "X...X...",
+        "X..X....",
+        "X.X.....",
+        "XX......",
+        "X.X.....",
+        "X..X....",
+        "X...X...",
+        "........",
+    ),
+    "L": (
+        "X.......",
+        "X.......",
+        "X.......",
+        "X.......",
+        "X.......",
+        "X.......",
+        "XXXXX...",
+        "........",
+    ),
+    "M": (
+        "X...X...",
+        "XX.XX...",
+        "XXXXX...",
+        "X.X.X...",
+        "X...X...",
+        "X...X...",
+        "X...X...",
+        "........",
+    ),
+    "N": (
+        "X...X...",
+        "XX..X...",
+        "XXX.X...",
+        "X.X.X...",
+        "X.XXX...",
+        "X..XX...",
+        "X...X...",
+        "........",
+    ),
+    "O": (
+        ".XXX....",
+        "XX.XX...",
+        "X...X...",
+        "X...X...",
+        "X...X...",
+        "XX.XX...",
+        ".XXX....",
+        "........",
+    ),
+    "P": (
+        "XXXX....",
+        "X...X...",
+        "X...X...",
+        "XXXX....",
+        "X.......",
+        "X.......",
+        "X.......",
+        "........",
+    ),
+    "Q": (
+        ".XXX....",
+        "X...X...",
+        "X...X...",
+        "X...X...",
+        "X.X.X...",
+        "X..X....",
+        ".XX.X...",
+        "........",
+    ),
+    "R": (
+        "XXXX....",
+        "X...X...",
+        "X...X...",
+        "XXXX....",
+        "X.X.....",
+        "X..X....",
+        "X...X...",
+        "........",
+    ),
+    "S": (
+        ".XXXX...",
+        "X.......",
+        "X.......",
+        ".XXX....",
+        "....X...",
+        "....X...",
+        "XXXX....",
+        "........",
+    ),
+    "T": (
+        "XXXXX...",
+        "..X.....",
+        "..X.....",
+        "..X.....",
+        "..X.....",
+        "..X.....",
+        "..X.....",
+        "........",
+    ),
+    "U": (
+        "X...X...",
+        "X...X...",
+        "X...X...",
+        "X...X...",
+        "X...X...",
+        "X...X...",
+        ".XXX....",
+        "........",
+    ),
+    "V": (
+        "X...X...",
+        "X...X...",
+        "X...X...",
+        "X...X...",
+        ".X.X....",
+        ".XXX....",
+        "..X.....",
+        "........",
+    ),
+    "W": (
+        "X...X...",
+        "X...X...",
+        "X...X...",
+        "X.X.X...",
+        "XXXXX...",
+        "XX.XX...",
+        "X...X...",
+        "........",
+    ),
+    "X": (
+        "X...X...",
+        "X...X...",
+        ".X.X....",
+        "..X.....",
+        ".X.X....",
+        "X...X...",
+        "X...X...",
+        "........",
+    ),
+    "Y": (
+        "X...X...",
+        "X...X...",
+        ".X.X....",
+        "..X.....",
+        "..X.....",
+        "..X.....",
+        "..X.....",
+        "........",
+    ),
+    "Z": (
+        "XXXXX...",
+        "....X...",
+        "...X....",
+        ".XXXX...",
+        ".X......",
+        "X.......",
+        "XXXXX...",
+        "........",
+    ),
+    "0": (
+        ".XXX....",
+        "X...X...",
+        "X..XX...",
+        "X.X.X...",
+        "XX..X...",
+        "X...X...",
+        ".XXX....",
+        "........",
+    ),
+    "1": (
+        "..X.....",
+        ".XX.....",
+        "X.X.....",
+        "..X.....",
+        "..X.....",
+        "..X.....",
+        "XXXXX...",
+        "........",
+    ),
+    "2": (
+        ".XXX....",
+        "X...X...",
+        "....X...",
+        "...X....",
+        "..X.....",
+        ".X......",
+        "XXXXX...",
+        "........",
+    ),
+    "3": (
+        "XXXX....",
+        "....X...",
+        "....X...",
+        ".XXX....",
+        "....X...",
+        "....X...",
+        "XXXX....",
+        "........",
+    ),
+    "4": (
+        ".XXXX...",
+        ".X..X...",
+        ".X..X...",
+        ".XXXX...",
+        "....X...",
+        "....X...",
+        "....X...",
+        "........",
+    ),
+    "5": (
+        "XXXXX...",
+        "X.......",
+        "XXXX....",
+        "....X...",
+        "....X...",
+        "X...X...",
+        ".XXX....",
+        "........",
+    ),
+    "6": (
+        ".XXX....",
+        "X.......",
+        "X.......",
+        "XXXX....",
+        "X...X...",
+        "X...X...",
+        ".XXX....",
+        "........",
+    ),
+    "7": (
+        "XXXXX...",
+        "....X...",
+        "...X....",
+        "..X.....",
+        ".X......",
+        ".X......",
+        ".X......",
+        "........",
+    ),
+    "8": (
+        ".XXX....",
+        "X...X...",
+        "X...X...",
+        ".XXX....",
+        "X...X...",
+        "X...X...",
+        ".XXX....",
+        "........",
+    ),
+    "9": (
+        ".XXX....",
+        "X...X...",
+        "X...X...",
+        ".XXXX...",
+        "....X...",
+        "....X...",
+        ".XXX....",
+        "........",
+    ),
+}
+
 # Fixed character order: index = position in this string. Must be 64 entries.
 CHARSET = " ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.,!?-+:'/()<>=*"
 # Pad with spaces to exactly 64 entries.
@@ -576,15 +945,26 @@ def main():
 
     print("Generating titler font ROM...")
 
+    # The ROM is laid out as 128 entries: the first 64 are the default font
+    # (font 0), the next 64 are the Sci-Fi font (font 1). Hardware addresses
+    # the entry as (font_sel * 64 + char_idx), so the font picker is just one
+    # extra bit at the top of the address.
+    fonts = [
+        ("default", GLYPHS),
+        ("sci-fi",  SCIFI_GLYPHS),
+    ]
+    total_count = 64 * len(fonts)
+
     lines = []
     lines.append("-- AUTO-GENERATED by titler.py - do not edit by hand.")
-    lines.append("-- 64 glyphs x 8 rows x 8 bits. MSB = leftmost pixel.")
+    lines.append(f"-- {total_count} glyphs x 8 rows x 8 bits. MSB = leftmost pixel.")
+    lines.append("-- Layout: entries 0..63 = default font, 64..127 = sci-fi font.")
     lines.append("library ieee;")
     lines.append("use ieee.std_logic_1164.all;")
     lines.append("")
     lines.append("package titler_font_pkg is")
     lines.append("")
-    lines.append("    constant C_FONT_CHAR_COUNT : integer := 64;")
+    lines.append(f"    constant C_FONT_CHAR_COUNT : integer := {total_count};")
     lines.append("    constant C_FONT_GLYPH_W    : integer := 8;")
     lines.append("    constant C_FONT_GLYPH_H    : integer := 8;")
     lines.append("")
@@ -593,15 +973,19 @@ def main():
     lines.append("")
     lines.append("    constant C_FONT_ROM : t_font_rom := (")
 
-    last_idx = len(CHARSET) - 1
-    for idx, ch in enumerate(CHARSET):
-        glyph = GLYPHS.get(ch, GLYPHS[" "])
-        rows = glyph_to_rows(glyph)
-        row_strs = ", ".join(f'x"{r:02X}"' for r in rows)
-        comment = ch if ch != " " else "SPC"
-        # Trailing comma before the comment (or omitted on the last entry).
-        sep = "," if idx < last_idx else " "
-        lines.append(f"        {idx:2d} => ({row_strs}){sep}  -- {comment}")
+    last_idx = total_count - 1
+    for font_idx, (font_name, glyph_dict) in enumerate(fonts):
+        lines.append(f"        -- font {font_idx}: {font_name}")
+        for sub_idx, ch in enumerate(CHARSET):
+            # Sci-fi font falls back to the default glyph for any char not
+            # explicitly defined (punctuation etc.).
+            glyph = glyph_dict.get(ch) or GLYPHS.get(ch, GLYPHS[" "])
+            rows = glyph_to_rows(glyph)
+            row_strs = ", ".join(f'x"{r:02X}"' for r in rows)
+            comment = ch if ch != " " else "SPC"
+            abs_idx = font_idx * 64 + sub_idx
+            sep = "," if abs_idx < last_idx else " "
+            lines.append(f"        {abs_idx:3d} => ({row_strs}){sep}  -- {comment}")
     lines.append("    );")
     lines.append("")
     lines.append("end package titler_font_pkg;")
@@ -610,7 +994,7 @@ def main():
     with open(out_path, "w", newline="\n") as f:
         f.write("\n".join(lines))
 
-    print(f"Wrote {out_path} ({len(CHARSET)} glyphs)")
+    print(f"Wrote {out_path} ({total_count} glyphs across {len(fonts)} fonts)")
 
 
 if __name__ == "__main__":

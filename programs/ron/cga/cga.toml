@@ -1,0 +1,111 @@
+[program]
+program_id = "com.ron.cga"
+program_version = "1.0.0"
+abi_version = ">=1.0,<2.0"
+program_name = "CGA Emulator"
+author = "ron"
+license = "GPL-3.0"
+categories = ["Computer", "Pixel", "Color"]
+program_type = "processing"
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+description = "IBM Color Graphics Adapter (CGA) palette emulator with three switchable palettes and pixel blocking."
+
+# --- Rotary Potentiometers (Knobs 1-6) ---
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Palette"
+value_labels = ["Green/Red", "Cyan/Mag", "Cyan/Red"]
+initial_value_label = "Green/Red"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "H Size"
+value_labels = ["Off", "2x", "4x", "8x", "16x"]
+initial_value_label = "4x"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "V Size"
+value_labels = ["Off", "2x", "4x", "8x", "16x"]
+initial_value_label = "4x"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 410
+display_min_value = 0
+display_max_value = 100
+name_label = "Contrast"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 512
+display_min_value = 0
+display_max_value = 100
+name_label = "Saturation"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 512
+display_min_value = 0
+display_max_value = 100
+name_label = "Reserve"
+suffix_label = "%"
+
+# --- Toggle Switches (7-11) ---
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Pixelate"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Intensity"
+value_labels = ["Low", "High"]
+initial_value_label = "High"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Scanlines"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Color Mode"
+value_labels = ["Nearest", "Luma"]
+initial_value_label = "Nearest"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Bypass"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+# --- Linear Potentiometer (Slider) ---
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 1023
+display_min_value = 0
+display_max_value = 100
+name_label = "Mix"
+suffix_label = "%"
+

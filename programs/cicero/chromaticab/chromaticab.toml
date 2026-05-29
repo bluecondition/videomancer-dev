@@ -1,0 +1,127 @@
+# Chromatic Aberration Program Configuration
+
+[program]
+program_id = "com.cicero.chromaticab"
+program_name = "Chromatic Ab"
+program_version = "1.0.0"
+abi_version = ">=1.0,<2.0"
+author = "cicero"
+license = "GPL-3.0"
+categories = ["Processing", "Lens"]
+program_type = "processing"
+description = "Horizontal RGB-style chroma channel separation that grows toward screen edges, mimicking lens chromatic aberration."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Strength"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 256
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Spread"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Falloff"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 256
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Anim Speed"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 0
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Tint Bias"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Brightness"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 900
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Mode"
+value_labels = ["Radial", "Constant"]
+initial_value_label = "Radial"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Direction"
+value_labels = ["Spread", "Squeeze"]
+initial_value_label = "Spread"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Luma Shift"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Mono"
+value_labels = ["Color", "Mono"]
+initial_value_label = "Color"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Invert"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Aberration"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 384
+display_float_digits = 1
+suffix_label = "%"
+
+[[preset]]
+name = "Default"
+
+[[preset]]
+name = "Heavy Edge"
+linear_potentiometer_12 = 900
+rotary_potentiometer_1 = 800
+
+[[preset]]
+name = "Animated"
+rotary_potentiometer_4 = 600
+linear_potentiometer_12 = 500

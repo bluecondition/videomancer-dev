@@ -1,0 +1,133 @@
+# Space Invaders
+#
+# Classic invaders clone: marching 6x8 alien formation, 4 destructible
+# shields, a player ship driven by the slider, and a bullet that fires on
+# any change of Switch 7.
+
+[program]
+program_id = "com.ron.invaders"
+program_name = "Invaders"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "Ron"
+license = "GPL-3.0"
+categories = ["Game", "Pattern"]
+program_type = "processing"
+description = "Space Invaders clone — 6x8 alien wave, destructible shields, slider-controlled ship, fire on any Switch 7 edge"
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+# --- Rotary Potentiometers (Knobs 1-6) ---
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Unused"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 0
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Unused"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 0
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Unused"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 0
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Alien Spd"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Bomb Drop Spd"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Shot Spd"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 0
+suffix_label = "%"
+
+# --- Toggle Switches (7-11) ---
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Fire"
+value_labels = ["A", "B"]
+initial_value_label = "A"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "BG"
+value_labels = ["Video", "Black"]
+initial_value_label = "Black"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Color"
+value_labels = ["Mono", "Hue"]
+initial_value_label = "Mono"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Pause"
+value_labels = ["Run", "Pause"]
+initial_value_label = "Run"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Reset"
+value_labels = ["Run", "Reset"]
+initial_value_label = "Run"
+
+# --- Linear Fader (12) ---
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Ship X"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 1
+suffix_label = "%"
+
+# --- Presets ---
+
+[[preset]]
+name = "Classic"
+
+[[preset]]
+name = "Fast Onslaught"
+rotary_potentiometer_1 = 900
+rotary_potentiometer_2 = 800
+rotary_potentiometer_4 = 768
+
+[[preset]]
+name = "Color Overlay"
+toggle_switch_8 = 0
+toggle_switch_9 = 1
+rotary_potentiometer_5 = 256
+rotary_potentiometer_6 = 768

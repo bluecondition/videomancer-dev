@@ -1,0 +1,178 @@
+[program]
+program_id = "com.bluecondition.hypercube"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+program_name = "Hypercube"
+author = "bluecondition"
+license = "GPL-3.0"
+categories = ["Render", "Pattern", "Shape"]
+program_type = "processing"
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+description = "4D tesseract wireframe carving screen into 8 cells, each applying its own chroma rotation."
+url = "https://github.com/bluecondition/videomancer-dev"
+
+# --- Rotary Potentiometers (Knobs 1-6) ---
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 200
+display_min_value = 0
+display_max_value = 100
+name_label = "Speed"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 600
+display_min_value = 0
+display_max_value = 100
+name_label = "4D Twist"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Size"
+value_labels = ["1x", "1.5x", "2x", "3x"]
+initial_value_label = "1.5x"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 700
+display_min_value = 0
+display_max_value = 100
+name_label = "Cell Tint"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Edge Width"
+value_labels = ["1", "2", "3", "4", "6", "8", "12", "16"]
+initial_value_label = "2"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 900
+display_min_value = 0
+display_max_value = 100
+name_label = "Edge Bright"
+suffix_label = "%"
+
+# --- Toggle Switches (7-11) ---
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Wireframe"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Background"
+value_labels = ["Black", "Video"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Cell Fill"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Edge Color"
+value_labels = ["Cell", "White"]
+initial_value_label = "White"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Direction"
+value_labels = ["Forward", "Reverse"]
+initial_value_label = "Forward"
+
+# --- Linear Potentiometer (Slider) ---
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 1023
+display_min_value = 0
+display_max_value = 100
+name_label = "Brightness"
+suffix_label = "%"
+
+# --- Presets ---
+
+[[preset]]
+name = "Default"
+rotary_potentiometer_1 = 200
+rotary_potentiometer_2 = 600
+rotary_potentiometer_3 = 512
+rotary_potentiometer_4 = 700
+rotary_potentiometer_5 = 256
+rotary_potentiometer_6 = 900
+toggle_switch_7 = 1
+toggle_switch_8 = 1
+toggle_switch_9 = 1
+toggle_switch_10 = 1
+toggle_switch_11 = 0
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Pure Wireframe"
+rotary_potentiometer_1 = 250
+rotary_potentiometer_2 = 700
+rotary_potentiometer_3 = 512
+rotary_potentiometer_4 = 0
+rotary_potentiometer_5 = 256
+rotary_potentiometer_6 = 1023
+toggle_switch_7 = 1
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 1
+toggle_switch_11 = 0
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Color Cells"
+rotary_potentiometer_1 = 150
+rotary_potentiometer_2 = 500
+rotary_potentiometer_3 = 600
+rotary_potentiometer_4 = 1023
+rotary_potentiometer_5 = 384
+rotary_potentiometer_6 = 700
+toggle_switch_7 = 1
+toggle_switch_8 = 1
+toggle_switch_9 = 1
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Slow 4D Drift"
+rotary_potentiometer_1 = 80
+rotary_potentiometer_2 = 1023
+rotary_potentiometer_3 = 700
+rotary_potentiometer_4 = 500
+rotary_potentiometer_5 = 256
+rotary_potentiometer_6 = 800
+toggle_switch_7 = 1
+toggle_switch_8 = 1
+toggle_switch_9 = 1
+toggle_switch_10 = 1
+toggle_switch_11 = 0
+linear_potentiometer_12 = 1023

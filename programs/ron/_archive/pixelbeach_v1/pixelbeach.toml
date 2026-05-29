@@ -1,0 +1,111 @@
+[program]
+program_id = "com.ron.pixelbeach"
+program_version = "1.0.0"
+abi_version = ">=1.0,<2.0"
+program_name = "Pixel Beach"
+author = "ron"
+license = "GPL-3.0"
+categories = ["Render", "Pattern", "Screen"]
+program_type = "synthesis"
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+description = "Generative 2D pixelated beach scene with parallax ocean waves, foam, sky gradient, and sand."
+
+# --- Rotary Potentiometers (Knobs 1-6) ---
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Wave Spd"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 700
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Wave Hgt"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 700
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Foam"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 500
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Tide"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 400
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Color"
+control_mode = "linear"
+display_min_value = -50
+display_max_value = 50
+initial_value = 512
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Horizon"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 480
+suffix_label = "%"
+
+# --- Toggle Switches (7-11) ---
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Wave Shape"
+value_labels = ["Smooth", "Choppy"]
+initial_value_label = "Smooth"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Sunset"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Night"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Deep Ocean"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Bypass"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+# --- Linear Potentiometer (Slider) ---
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Bright"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 900
+suffix_label = "%"

@@ -1,0 +1,203 @@
+[program]
+program_id = "com.videomancer.ron.oracle"
+program_version = "1.0.0"
+abi_version = ">=1.0,<2.0"
+program_name = "Oracle"
+author = "ron"
+license = "GPL-3.0"
+categories = ["Render", "Pattern", "Screen"]
+program_type = "synthesis"
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+description = "Glitchy divinatory portal: rainbow stripes above, bands below, torn noise window with an ellipse portal."
+url = "https://github.com/lzxindustries/videomancer-sdk"
+
+# --- Rotary Potentiometers (Knobs 1-6) ---
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 512
+display_min_value = 0
+display_max_value = 100
+name_label = "Portal Size"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 512
+display_min_value = 0
+display_max_value = 100
+name_label = "Portal X"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 512
+display_min_value = 0
+display_max_value = 100
+name_label = "Portal Y"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 600
+display_min_value = 0
+display_max_value = 100
+name_label = "Noise"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 128
+display_min_value = 0
+display_max_value = 100
+name_label = "Hue Speed"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 700
+display_min_value = 0
+display_max_value = 100
+name_label = "Band Freq"
+suffix_label = "%"
+
+# --- Toggle Switches (7-11) ---
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Top Zone"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Bottom Zone"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Portal"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Tear Edges"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Bypass"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+# --- Linear Potentiometer (Slider) ---
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 900
+display_min_value = 0
+display_max_value = 100
+name_label = "Brightness"
+suffix_label = "%"
+
+# --- Presets ---
+
+[[preset]]
+name = "Default Oracle"
+rotary_potentiometer_1 = 512
+rotary_potentiometer_2 = 512
+rotary_potentiometer_3 = 512
+rotary_potentiometer_4 = 600
+rotary_potentiometer_5 = 128
+rotary_potentiometer_6 = 700
+toggle_switch_7 = 1
+toggle_switch_8 = 1
+toggle_switch_9 = 1
+toggle_switch_10 = 1
+toggle_switch_11 = 0
+linear_potentiometer_12 = 900
+
+[[preset]]
+name = "Quiet Portal"
+rotary_potentiometer_1 = 700
+rotary_potentiometer_2 = 512
+rotary_potentiometer_3 = 512
+rotary_potentiometer_4 = 200
+rotary_potentiometer_5 = 32
+rotary_potentiometer_6 = 500
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 1
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 850
+
+[[preset]]
+name = "Maximal Chaos"
+rotary_potentiometer_1 = 900
+rotary_potentiometer_2 = 400
+rotary_potentiometer_3 = 600
+rotary_potentiometer_4 = 1000
+rotary_potentiometer_5 = 900
+rotary_potentiometer_6 = 950
+toggle_switch_7 = 1
+toggle_switch_8 = 1
+toggle_switch_9 = 1
+toggle_switch_10 = 1
+toggle_switch_11 = 0
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Stopped Clock"
+rotary_potentiometer_1 = 256
+rotary_potentiometer_2 = 512
+rotary_potentiometer_3 = 512
+rotary_potentiometer_4 = 400
+rotary_potentiometer_5 = 0
+rotary_potentiometer_6 = 300
+toggle_switch_7 = 1
+toggle_switch_8 = 1
+toggle_switch_9 = 1
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 900
+
+[[preset]]
+name = "Pure Bars"
+rotary_potentiometer_1 = 0
+rotary_potentiometer_2 = 512
+rotary_potentiometer_3 = 512
+rotary_potentiometer_4 = 0
+rotary_potentiometer_5 = 200
+rotary_potentiometer_6 = 800
+toggle_switch_7 = 1
+toggle_switch_8 = 1
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 900

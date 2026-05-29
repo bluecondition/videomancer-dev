@@ -1,0 +1,103 @@
+# SPDX-License-Identifier: GPL-3.0-only
+#
+# Oscbank Test: resource scaling test — N parallel sine oscillators.
+# Change C_N_OSCS in the vhd, rebuild, check timing + resources.
+
+[program]
+program_id = "com.ron.oscbank_test"
+program_name = "Oscbank Test"
+program_version = "0.0.1"
+abi_version = ">=1.0,<2.0"
+author = "ron"
+license = "GPL-3.0"
+categories = ["Synthesis"]
+program_type = "synthesis"
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+description = "Resource scaling test. N parallel sine carriers, summed/maxed. For experiments only."
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Base"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 256
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Spread"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 128
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "K3"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 0
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "K4"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 0
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "K5"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 0
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "K6"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 0
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "S7"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "S8"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "S9"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "S10"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "S11"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Slider"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 0

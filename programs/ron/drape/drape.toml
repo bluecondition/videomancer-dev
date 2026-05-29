@@ -1,0 +1,187 @@
+[program]
+program_id = "com.ron.drape"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+program_name = "Drape"
+author = "ron"
+license = "GPL-3.0"
+categories = ["Warp", "Pattern"]
+program_type = "processing"
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+description = "Freezes the scanline at a split and drapes it downward with a feathered fade to black."
+
+# --- Rotary Potentiometers (Knobs 1-6) ---
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Split"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 650
+display_min_value = 0
+display_max_value = 100
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Spread"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 500
+display_min_value = 0
+display_max_value = 100
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Fade"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 500
+display_min_value = 0
+display_max_value = 100
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Stretch"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 800
+display_min_value = 0
+display_max_value = 100
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Soft W"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 300
+display_min_value = 0
+display_max_value = 100
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Twist"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 512
+display_min_value = 0
+display_max_value = 100
+suffix_label = "%"
+
+# --- Toggle Switches (7-11) ---
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Blur"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Curve"
+value_labels = ["Straight", "Curved"]
+initial_value_label = "Straight"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Soft"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Curve+"
+value_labels = ["Hard", "Soft"]
+initial_value_label = "Hard"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Bypass"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+# --- Linear Potentiometer (Slider) ---
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Mix"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 1023
+display_min_value = 0
+display_max_value = 100
+suffix_label = "%"
+
+# --- Presets ---
+
+[[preset]]
+name = "Default"
+rotary_potentiometer_1 = 650
+rotary_potentiometer_2 = 500
+rotary_potentiometer_3 = 500
+rotary_potentiometer_4 = 800
+rotary_potentiometer_5 = 300
+rotary_potentiometer_6 = 0
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Long Drape"
+rotary_potentiometer_1 = 500
+rotary_potentiometer_2 = 900
+rotary_potentiometer_3 = 700
+rotary_potentiometer_4 = 800
+rotary_potentiometer_5 = 0
+rotary_potentiometer_6 = 0
+toggle_switch_7 = 1
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Short Tail"
+rotary_potentiometer_1 = 800
+rotary_potentiometer_2 = 300
+rotary_potentiometer_3 = 200
+rotary_potentiometer_4 = 800
+rotary_potentiometer_5 = 0
+rotary_potentiometer_6 = 0
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Top Clip"
+rotary_potentiometer_1 = 300
+rotary_potentiometer_2 = 800
+rotary_potentiometer_3 = 400
+rotary_potentiometer_4 = 800
+rotary_potentiometer_5 = 0
+rotary_potentiometer_6 = 0
+toggle_switch_7 = 1
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 1023

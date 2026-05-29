@@ -76,7 +76,7 @@ architecture slipframe of program_top is
     constant C_DATA_WIDTH         : integer := C_VIDEO_DATA_WIDTH;  -- 10
     constant C_SMEAR_DEPTH_BITS   : integer := 11;                  -- 2048 samples
     constant C_PERSIST_DEPTH_BITS : integer := 11;                  -- 2048 per bank
-    constant C_TOTAL_LATENCY      : integer := 11;
+    constant C_TOTAL_LATENCY      : integer := 13;
 
     --------------------------------------------------------------------------
     -- Registered-input / position tracking
@@ -107,6 +107,28 @@ architecture slipframe of program_top is
     signal s_delay_y              : unsigned(C_SMEAR_DEPTH_BITS - 1 downto 0) := (others => '0');
     signal s_delay_u              : unsigned(C_SMEAR_DEPTH_BITS - 1 downto 0) := (others => '0');
     signal s_delay_v              : unsigned(C_SMEAR_DEPTH_BITS - 1 downto 0) := (others => '0');
+
+    -- Pre-registered multiply outputs for p_delay_calc — breaks the 10x10
+    -- multiply out of the long add/clamp critical path.
+    signal s_mod_contrib_r        : unsigned(10 downto 0) := (others => '0');
+    signal s_tear_contrib_r       : unsigned(10 downto 0) := (others => '0');
+
+    -- Second-stage registers: clamped Y and chroma lag held between the
+    -- 4-way add/clamp stage and the per-channel chroma-lag compute stage.
+    signal s_clamp_y_r            : unsigned(C_SMEAR_DEPTH_BITS - 1 downto 0) := (others => '0');
+    signal s_chroma_lag_r         : unsigned(9 downto 0) := (others => '0');
+    signal s_toggle_split_r       : std_logic := '0';
+
+    -- One extra cycle of delay on the input data so it arrives at the
+    -- variable_delay_u buffers at the same pipeline cycle as s_delay_y/u/v.
+    signal s_s2_y_d1              : unsigned(C_DATA_WIDTH - 1 downto 0) := (others => '0');
+    signal s_s2_u_d1              : unsigned(C_DATA_WIDTH - 1 downto 0) := (others => '0');
+    signal s_s2_v_d1              : unsigned(C_DATA_WIDTH - 1 downto 0) := (others => '0');
+
+    -- Registered blend multiplier outputs — gets the two 10×10 multiplies out
+    -- of the long p_blend_crush combinational chain.
+    signal s_cur_mul_r            : unsigned(19 downto 0) := (others => '0');
+    signal s_prev_mul_r           : unsigned(19 downto 0) := (others => '0');
 
     --------------------------------------------------------------------------
     -- Stage 4: smear outputs, plus their 2-clock aligned versions
@@ -307,57 +329,63 @@ begin
                 v_mod_src := unsigned(s_lfsr_q(9 downto 0));
             end if;
 
-            -- (mod_knob * src) >> 10 → contribution range 0..1023
+            -- Register the multiply results so they are not in the same
+            -- combinational path as the downstream 4-way add/clamp chain.
+            -- 1-cycle of extra latency on knob changes; invisible.
             v_mod_prod_full := v_mod_knob * v_mod_src;
-            v_mod_contrib   := resize(v_mod_prod_full(19 downto 10), 11);
+            s_mod_contrib_r <= resize(v_mod_prod_full(19 downto 10), 11);
 
             -- Per-line tear offset
             if registers_in(6)(1) = '0' then
                 -- "Lines" mode: alternate lines carry the offset
                 if s_ab_toggle = '1' then
-                    v_tear_contrib := resize(v_tear_knob, 11);
+                    s_tear_contrib_r <= resize(v_tear_knob, 11);
                 else
-                    v_tear_contrib := (others => '0');
+                    s_tear_contrib_r <= (others => '0');
                 end if;
             else
                 -- "Random" mode: LFSR-gated per line
                 v_line_rand  := unsigned(s_line_lfsr_latched(9 downto 0));
                 v_tear_prod  := v_tear_knob * v_line_rand;
-                v_tear_contrib := resize(v_tear_prod(19 downto 10), 11);
+                s_tear_contrib_r <= resize(v_tear_prod(19 downto 10), 11);
             end if;
 
             -- Scale the smear knob ×2 so the full range reaches the 2048-sample
             -- depth of the variable_delay_u buffers.
             v_smear_scaled := shift_left(resize(v_smear_knob, 11), 1);
 
-            -- Combine base smear + luma/noise mod + per-line tear + drift,
-            -- then clamp Y delay to [0, 2047].
-            v_sum_y := resize(v_smear_scaled,  14)
-                     + resize(v_mod_contrib,   14)
-                     + resize(v_tear_contrib,  14)
-                     + resize(s_smear_drift,   14);
+            -- Stage A: combine base smear + luma/noise mod + per-line tear
+            -- + drift, then clamp to [0, 2047] and register. Also register
+            -- the chroma-lag and split toggle for use next cycle.
+            v_sum_y := resize(v_smear_scaled,     14)
+                     + resize(s_mod_contrib_r,    14)
+                     + resize(s_tear_contrib_r,   14)
+                     + resize(s_smear_drift,      14);
             if v_sum_y > to_unsigned(2047, 14) then
                 v_clamp_y := to_unsigned(2047, C_SMEAR_DEPTH_BITS);
             else
                 v_clamp_y := v_sum_y(C_SMEAR_DEPTH_BITS - 1 downto 0);
             end if;
-            s_delay_y <= v_clamp_y;
+            s_clamp_y_r      <= v_clamp_y;
+            s_chroma_lag_r   <= shift_right(v_lag_knob, 1);
+            s_toggle_split_r <= registers_in(6)(2);
 
-            -- Chroma lag: half the knob value so max ≈ 511 samples
-            v_chroma_lag := shift_right(v_lag_knob, 1);
+            -- Stage B: produce the three delay values from the registered
+            -- clamp_y and chroma_lag (pre-edge values = one cycle older than
+            -- v_clamp_y just computed above). Stage B's three outputs land on
+            -- the same cycle so Y/U/V stay aligned.
+            s_delay_y <= s_clamp_y_r;
 
-            -- U gets +lag (always positive direction)
-            v_sum_u := resize(v_clamp_y, 14) + resize(v_chroma_lag, 14);
+            v_sum_u := resize(s_clamp_y_r,    14) + resize(s_chroma_lag_r, 14);
             if v_sum_u > to_unsigned(2047, 14) then
                 s_delay_u <= to_unsigned(2047, C_SMEAR_DEPTH_BITS);
             else
                 s_delay_u <= v_sum_u(C_SMEAR_DEPTH_BITS - 1 downto 0);
             end if;
 
-            -- V gets +lag in Same mode, -lag (floored at 0) in Split mode
-            if registers_in(6)(2) = '1' then
-                v_sum_v := resize(signed('0' & std_logic_vector(v_clamp_y)), 15)
-                         - resize(signed('0' & std_logic_vector(v_chroma_lag)), 15);
+            if s_toggle_split_r = '1' then
+                v_sum_v := resize(signed('0' & std_logic_vector(s_clamp_y_r)),    15)
+                         - resize(signed('0' & std_logic_vector(s_chroma_lag_r)), 15);
                 if v_sum_v(14) = '1' then
                     s_delay_v <= (others => '0');
                 elsif v_sum_v > to_signed(2047, 15) then
@@ -372,6 +400,11 @@ begin
                     s_delay_v <= v_sum_u(C_SMEAR_DEPTH_BITS - 1 downto 0);
                 end if;
             end if;
+
+            -- Align data inputs to the extra pipeline cycle.
+            s_s2_y_d1 <= s_s2_y;
+            s_s2_u_d1 <= s_s2_u;
+            s_s2_v_d1 <= s_s2_v;
 
         end if;
     end process p_delay_calc;
@@ -388,7 +421,7 @@ begin
             clk    => clk,
             enable => '1',
             delay  => s_delay_y,
-            a      => s_s2_y,
+            a      => s_s2_y_d1,
             result => s_smear_y,
             valid  => open
         );
@@ -402,7 +435,7 @@ begin
             clk    => clk,
             enable => '1',
             delay  => s_delay_u,
-            a      => s_s2_u,
+            a      => s_s2_u_d1,
             result => s_smear_u,
             valid  => open
         );
@@ -416,7 +449,7 @@ begin
             clk    => clk,
             enable => '1',
             delay  => s_delay_v,
-            a      => s_s2_v,
+            a      => s_s2_v_d1,
             result => s_smear_v,
             valid  => open
         );
@@ -483,10 +516,15 @@ begin
             v_persist_t := unsigned(registers_in(4));
             v_inv_t     := to_unsigned(1023, 10) - v_persist_t;
 
-            -- Sum of two 10-bit × 10-bit products → 21 bits headroom
-            v_cur_mul   := s_smear_y_d2 * v_inv_t;
-            v_prev_mul  := v_prev_y     * v_persist_t;
-            v_blend_sum := resize(v_cur_mul, 21) + resize(v_prev_mul, 21);
+            -- Register the two 10×10 multiplies so they live in their own
+            -- pipeline stage instead of chained into the 21-bit add + XOR +
+            -- crush combinational path.
+            s_cur_mul_r  <= s_smear_y_d2 * v_inv_t;
+            s_prev_mul_r <= v_prev_y     * v_persist_t;
+
+            -- Blend sum uses pre-edge registered multiplies (= results from
+            -- the previous cycle). 1-cycle knob/video lag is invisible.
+            v_blend_sum := resize(s_cur_mul_r, 21) + resize(s_prev_mul_r, 21);
 
             -- Divide by 1024 (>> 10) and keep 10 bits. The sum's max is
             -- 1023*1023 ≈ 1_046_529 which after >>10 stays ≤ 1023.

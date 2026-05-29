@@ -1,0 +1,111 @@
+[program]
+program_id = "com.ron.pixelbeach"
+program_version = "2.0.0"
+abi_version = ">=1.0,<2.0"
+program_name = "Pixel Beach"
+author = "ron"
+license = "GPL-3.0"
+categories = ["Render", "Pattern", "Screen"]
+program_type = "synthesis"
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+description = "Chunky 8x8 pixel-art ocean with z-stacked wave layers, Stokes-sharpened crests, and ASR foam envelopes."
+
+# --- Rotary Potentiometers (Knobs 1-6) ---
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Wave Spd"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 600
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Wave Hgt"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 700
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Foam Life"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 500
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Drift"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 400
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Sky"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Horizon"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 320
+suffix_label = "%"
+
+# --- Toggle Switches (7-11) ---
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Wave Shape"
+value_labels = ["Smooth", "Jagged"]
+initial_value_label = "Smooth"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Cell Size"
+value_labels = ["8x8", "16x16"]
+initial_value_label = "8x8"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Sea State"
+value_labels = ["Calm", "Choppy"]
+initial_value_label = "Calm"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Mono"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Bypass"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+# --- Linear Potentiometer (Slider) ---
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Chaos"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 600
+suffix_label = "%"

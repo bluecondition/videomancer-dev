@@ -18,12 +18,18 @@
 --   registers_in(0) = Folds     (fold density: top 2 bits select period)
 --   registers_in(1) = Depth     (fold shadow depth 0..1023)
 --   registers_in(2) = Chevron   (base chevron thickness near horizon)
---   registers_in(3) = Perspect  (compression rate toward horizon)
---   registers_in(4) = Horizon   (vertical horizon position 0..1)
---   registers_in(5) = Warmth    (0..1023, shifts U toward red)
---   registers_in(6) = Switches  (bit0=Sway bit1=ChevVee bit2=Grain
---                                bit3=Vignette bit4=Bypass)
---   registers_in(7) = Brightness (top 3 bits: 1/8 .. 8/8 gain)
+--   registers_in(3) = Apex      (chevron VP horizontal position;
+--                                 0 = far left, 512 = centre, 1023 =
+--                                 far right of the active line)
+--   registers_in(4) = Scroll    (horizontal phase offset added to
+--                                 dx_phase; sweep = ~one stripe pair)
+--   registers_in(5) = ChevFreq  (top 3 bits: tooth period selector;
+--                                 top 5 bits: perspective compression)
+--   registers_in(6) = Switches  (bit0=Sway bit1=ChevDir bit2=Brown
+--                                bit3=Vignette bit4=Key)
+--   registers_in(7) = Horizon   (slider, REVERSED: top of slider =
+--                                raised curtain (small horizon y),
+--                                bottom = lowered curtain)
 --
 -- License: GPL-3.0
 -- Author: ron
@@ -69,6 +75,14 @@ architecture blacklodge of program_top is
     constant C_FLOOR_DK_Y   : unsigned(9 downto 0) := to_unsigned(122, 10);
     constant C_FLOOR_DK_U   : unsigned(9 downto 0) := to_unsigned(545, 10);  -- Cr
     constant C_FLOOR_DK_V   : unsigned(9 downto 0) := to_unsigned(497, 10);  -- Cb
+
+    -- Saturated warm brown (Brown switch T9 swaps the dark chevron
+    -- stripes from near-black to this).  More red-and-yellow saturation
+    -- than the old sienna value so the floor reads as proper brown
+    -- rather than tinted black.
+    constant C_FLOOR_BR_Y   : unsigned(9 downto 0) := to_unsigned(170, 10);
+    constant C_FLOOR_BR_U   : unsigned(9 downto 0) := to_unsigned(620, 10);  -- Cr
+    constant C_FLOOR_BR_V   : unsigned(9 downto 0) := to_unsigned(458, 10);  -- Cb
 
     constant C_CHROMA_MID   : unsigned(9 downto 0) := to_unsigned(512, 10);
 
@@ -165,18 +179,39 @@ architecture blacklodge of program_top is
     -- selector picks one of 8 row-phase advance rates from /16 (slow,
     -- long teeth) up to ×8 (very fast, dense teeth).
     signal tooth_freq_sel_r : unsigned(2 downto 0) := "100";
-    -- Precomputed signed warmth offset (per-frame).  Driven from T9 now,
-    -- so it's just a fixed +24 (warm) or 0 (neutral).
-    signal warmth_off_s_r : signed(7 downto 0)    := (others => '0');
     -- Precomputed signed depth offset for the curtain blend (per-frame).
     signal depth_off_s_r  : signed(11 downto 0)   := (others => '0');
-    signal bright_sel_r   : unsigned(2 downto 0)  := "111";
+    -- K5 (Scroll) → horizontal phase offset added to dx_phase init.
+    -- 20-bit holds four full stripe pairs (= 4 × 2^18 of phase) so a
+    -- K5 sweep slides the chevron pattern by ~four LO/LT cycles.  Each
+    -- K5 step is ~2^10 phase units → sub-pixel motion at every wavelen.
+    signal scroll_offset_r : unsigned(19 downto 0) := (others => '0');
 
     signal sway_en_r      : std_logic := '1';
+    -- chev_vee_r is undriven (always '0') — leftover from the OLD phase-
+    -- DDA renderer.  Kept so the dead code still compiles; synthesizer
+    -- prunes the branches that gate on '1'.
     signal chev_vee_r     : std_logic := '0';
-    signal grain_en_r     : std_logic := '1';
+    -- T8 = Chev Dir.  '0' = horizontal (V-stripes radiate from the
+    -- vanishing point with a horizontal zigzag tooth, original look);
+    -- '1' = 90°-rotated (horizontal stripes parallel to the horizon
+    -- with a vertical zigzag).  Both modes use a single vanishing
+    -- point fixed at screen centre.
+    signal chev_dir_r     : std_logic := '0';
+    -- T11 = Key: when on, floor pixels (below the horizon/curtain)
+    -- are replaced with the delayed input video while the curtain
+    -- area continues to render the red-curtain synth.  The chevron
+    -- pattern is suppressed; everything else (curtain, vignette,
+    -- brightness) still applies above the horizon.
+    signal key_en_r       : std_logic := '0';
     signal vign_en_r      : std_logic := '1';
-    signal bypass_r       : std_logic := '0';
+
+    -- Pre-selected dark-stripe colour (= DK or BR depending on T9
+    -- Brown).  Resolving the 2-way choice once per frame keeps s4's
+    -- floor-select as a tight 2:1 mux between LT and these registers.
+    signal dk_y_r         : unsigned(9 downto 0) := (others => '0');
+    signal dk_u_r         : unsigned(9 downto 0) := C_CHROMA_MID;
+    signal dk_v_r         : unsigned(9 downto 0) := C_CHROMA_MID;
 
     -- Per-band sway: 4 accumulators advancing at coprime per-frame rates.
     -- Each curtain band hashes onto one of these so the folds don't all
@@ -284,6 +319,37 @@ architecture blacklodge of program_top is
     signal stripe_color_d3 : std_logic := '0';
 
     ----------------------------------------------------------------------
+    -- Real-chevron renderer (Option 2): V shapes drawn directly rather
+    -- than as a horizontally-shifted stripe pattern.  Apex sits at
+    -- (eff_horizon_x_r, horizon_r); slope = 1 → 90° apex angle.  Bands
+    -- of constant chev coordinate alternate LO/LT every 2^N rows, so
+    -- swing is bounded only by screen width — no stripe-wavelen wrap.
+    --
+    -- chev_y(x, y) = (y - horizon) - |x - eff_horizon_x_r|   (clamped ≥ 0)
+    -- color       = chev_y(N)                                (band-LSB)
+    ----------------------------------------------------------------------
+    -- Perspective accumulator: every band-pair (LO+LT) corresponds to
+    -- 2^17 chev units.  Bands are smaller (rows-wise) near horizon
+    -- where freq_row is large, larger at foreground where freq_row is
+    -- small — naturally producing the floor's perspective look.
+    constant CHEV_BAND_BIT : natural := 16;  -- color = chev_y_pers(16)
+
+    -- Two parallel d1 registers — one per chev direction.  The mux
+    -- between them is deferred to the d1→d2 stage so the d1 input
+    -- path stays just (add → bit) rather than (add → bit → mux).
+    signal chev_x_color_d1 : std_logic := '0';
+    signal chev_y_color_d1 : std_logic := '0';
+    signal chev_color_d2 : std_logic := '0';
+    signal chev_color_d3 : std_logic := '0';
+
+    -- Perspective state for direct V-renderer
+    signal y_acc_r          : unsigned(23 downto 0) := (others => '0');
+    signal dx_mul_hi_r      : unsigned(22 downto 0) := (others => '0');
+    signal dx_mul_lo_r      : unsigned(22 downto 0) := (others => '0');
+    signal dx_phase_init_r  : unsigned(23 downto 0) := (others => '0');
+    signal dx_phase_r       : signed(25 downto 0)   := (others => '0');
+
+    ----------------------------------------------------------------------
     -- Stage 1: pre-compute fold_phase, depth, is_floor
     ----------------------------------------------------------------------
     signal s1_x         : unsigned(11 downto 0) := (others => '0');
@@ -330,7 +396,9 @@ architecture blacklodge of program_top is
     signal s4_flr_v     : unsigned(9 downto 0) := C_CHROMA_MID;
 
     -- Soft-vignette pipeline (always-on, 4-stage to relax timing).
-    -- fade_lvl_r 7 = full, 0 = full black at outer edge.
+    -- fade_lvl_r 127 = full, 0 = full black at outer edge.  7-bit
+    -- gives 128 levels = ~0.78% steps → continuous fade rather than
+    -- visible bands.  Applied as a 10x7 multiply at stage 5.
     signal dist_l_r     : unsigned(11 downto 0) := (others => '0');
     signal dist_r_r     : unsigned(11 downto 0) := (others => '0');
     signal dist_t_r     : unsigned(11 downto 0) := (others => '0');
@@ -338,14 +406,15 @@ architecture blacklodge of program_top is
     signal dist_x_r     : unsigned(11 downto 0) := (others => '0');
     signal dist_y_r     : unsigned(11 downto 0) := (others => '0');
     signal min_dist_r   : unsigned(11 downto 0) := (others => '0');
-    signal fade_lvl_r   : unsigned(2 downto 0) := "111";
+    signal fade_lvl_r   : unsigned(6 downto 0) := (others => '1');
 
     ----------------------------------------------------------------------
-    -- Stage 5: layer select + vignette + warmth
+    -- Stage 5: layer select + vignette
     ----------------------------------------------------------------------
     signal s5_y : unsigned(9 downto 0) := (others => '0');
     signal s5_u : unsigned(9 downto 0) := C_CHROMA_MID;
     signal s5_v : unsigned(9 downto 0) := C_CHROMA_MID;
+    signal s5_is_floor : std_logic := '0';
 
     ----------------------------------------------------------------------
     -- Stage 6: brightness scale (3-bit selector, case shift)
@@ -353,6 +422,10 @@ architecture blacklodge of program_top is
     signal s6_y : unsigned(9 downto 0) := (others => '0');
     signal s6_u : unsigned(9 downto 0) := C_CHROMA_MID;
     signal s6_v : unsigned(9 downto 0) := C_CHROMA_MID;
+    -- Pre-registered key-mux select (= key_en_r AND s5_is_floor).
+    -- Folding the AND into a register keeps the output-port mux a
+    -- pure 2:1 select on two registered inputs — minimal comb depth.
+    signal key_floor_r : std_logic := '0';
 
     ----------------------------------------------------------------------
     -- 16-bit multiplicative hash for grain / variation
@@ -427,11 +500,6 @@ begin
         variable v_y_out        : unsigned(9 downto 0);
         variable v_u_out        : unsigned(9 downto 0);
         variable v_v_out        : unsigned(9 downto 0);
-        variable v_warmth_pot   : unsigned(9 downto 0);
-        variable v_warmth_diff  : unsigned(9 downto 0);
-        variable v_warmth_amt   : unsigned(6 downto 0);
-        variable v_warmth_signed : signed(10 downto 0);
-        variable v_u_sum        : unsigned(10 downto 0);
         variable v_vgrad        : unsigned(7 downto 0);
         variable v_cur_hi_y     : unsigned(9 downto 0);
         variable v_tri_bit_idx  : integer range 0 to 6;
@@ -442,6 +510,8 @@ begin
         variable v_horz_slv     : std_logic_vector(9 downto 0);
         variable v_horz_pot     : unsigned(9 downto 0);
         variable v_horz_mul     : unsigned(21 downto 0);
+        variable v_apex_mul     : unsigned(21 downto 0);
+        variable v_fade_mul     : unsigned(16 downto 0);
         variable v_persp_pot    : unsigned(9 downto 0);
         variable v_persp_mul    : unsigned(21 downto 0);
         variable v_fold_freq    : unsigned(11 downto 0);
@@ -473,10 +543,14 @@ begin
         variable v_phase_hi_18  : unsigned(17 downto 0);
         variable v_phase_lo_18  : unsigned(17 downto 0);
         variable v_freq_ext     : unsigned(17 downto 0);
-        variable v_row_phase_sum: unsigned(20 downto 0);
+        variable v_row_phase_sum: unsigned(21 downto 0);
         variable v_row_phase_17 : unsigned(16 downto 0);
-        variable v_advance      : unsigned(19 downto 0);
+        variable v_advance      : unsigned(20 downto 0);
         variable v_dist_x       : unsigned(11 downto 0);
+        variable v_tooth_pers   : unsigned(19 downto 0);
+        variable v_tooth_x_pers : unsigned(19 downto 0);
+        variable v_chev_x_pers  : signed(25 downto 0);
+        variable v_chev_y_pers  : signed(25 downto 0);
         variable v_dist_y       : unsigned(11 downto 0);
         variable v_min_dist     : unsigned(11 downto 0);
         variable v_u_signed     : signed(10 downto 0);
@@ -523,28 +597,39 @@ begin
                 -- Horizon derived from full 10-bit pot 5: horizon =
                 -- max_y * pot / 1024.  12x10 once-per-frame multiply gives
                 -- smooth 1080-line precision so the knob can be modulated.
-                v_horz_slv  := registers_in(4);
-                v_horz_pot  := unsigned(v_horz_slv);
+                -- Horizon now from the slider (reg 7), reversed so
+                -- slider-top (= max value 1023) raises the curtain
+                -- (horizon y → 0) and slider-bottom drops it.
+                v_horz_slv  := registers_in(7);
+                v_horz_pot  := to_unsigned(1023, 10) - unsigned(v_horz_slv);
                 v_horz_mul  := resize(max_y_r * v_horz_pot, 22);
                 v_horizon_v := v_horz_mul(21 downto 10);
                 horizon_r   <= v_horizon_v;
 
-                -- Chevron: minimum wavelength at horizon.  Top 5 bits of
-                -- pot 3 give a smooth 18..49 px range (2× the previous
-                -- 18..33 sweep), so very tall stripes are reachable too.
+                -- Chevron: minimum wavelength at horizon.  Thin stripes
+                -- K3 = stripe width at horizon.  Top 5 bits of K3 (0..31)
+                -- + 4-px floor → 4..35 px range.  Default K3 ≈ 320 →
+                -- chev_min ≈ 14 px (matches the prior hardcoded value).
                 chev_min_int_r <= resize(unsigned(
                                     registers_in(2)(9 downto 5)), 7)
-                                + to_unsigned(18, 7);
+                                + to_unsigned(4, 7);
 
-                -- Perspective vanishing-point X position from pot 4.
-                -- 0% → x=0 (left edge), 50% → centre, 100% → x=max
-                -- (right edge).  Step amount is fixed at a good tasteful
-                -- value so the perspective always reads as deep without
-                -- clamping at the bottom of the floor.
-                v_persp_pot := unsigned(registers_in(3));
-                v_persp_mul := resize(max_x_r * v_persp_pot, 22);
-                eff_horizon_x_r <= v_persp_mul(21 downto 10);
-                step_r <= to_unsigned(20, 8);
+                -- K4 (Apex) = chevron vanishing-point horizontal
+                -- position.  pot=0 → VP at far left, pot=512 → centre,
+                -- pot=1023 → VP at far right.  eff_horizon_x =
+                -- max_x * K4 / 1024.  Computed once per vsync; the
+                -- per-pixel chevron DDA picks it up through the
+                -- existing dx_phase_init split-multiply pipeline.
+                v_apex_mul := resize(max_x_r * unsigned(registers_in(3)), 22);
+                eff_horizon_x_r <= v_apex_mul(21 downto 10);
+                -- K6 = viewer height.  Higher K6 = higher viewer = milder
+                -- perspective = slower wavelen growth.  step = 35 - top5
+                -- of K6 → range 4..35 (2 extra levels at the strong end
+                -- vs the prior 33-offset).  Default K6 ≈ 800 (top5=25)
+                -- gives step ≈ 10 (mild-moderate perspective).
+                step_r <= to_unsigned(35, 8)
+                        - resize(unsigned(
+                            registers_in(5)(9 downto 5)), 8);
 
                 -- Folds: continuous wavelength from pot 1.  Saturate at
                 -- the value the previous build's 90% setting produced
@@ -575,19 +660,30 @@ begin
                 -- maps to row-phase advance rates from /16 to ×8).
                 tooth_freq_sel_r <= unsigned(registers_in(5)(9 downto 7));
 
-                bright_sel_r <= unsigned(registers_in(7)(9 downto 7));
+                -- K5 (Scroll): horizontal phase offset added to
+                -- dx_phase init.  K5 << 10 → max ≈ 2^20 phase units ≈
+                -- four full stripe pairs, so a K5 sweep slides the
+                -- pattern by ~four cycles while each step stays well
+                -- under one pixel at every wavelen (smooth motion).
+                scroll_offset_r <= shift_left(
+                    resize(unsigned(registers_in(4)), 20), 10);
 
                 sway_en_r    <= registers_in(6)(0);
-                chev_vee_r   <= registers_in(6)(1);
-                -- T9 = Warmth on/off (was Grain).  When on, set a fixed
-                -- positive Cr offset so the picture leans warm.
-                if registers_in(6)(2) = '1' then
-                    warmth_off_s_r <= to_signed(28, 8);
-                else
-                    warmth_off_s_r <= (others => '0');
-                end if;
+                chev_dir_r   <= registers_in(6)(1);
                 vign_en_r    <= registers_in(6)(3);
-                bypass_r     <= registers_in(6)(4);
+                key_en_r     <= registers_in(6)(4);
+
+                -- T9 = Brown.  Pre-select the dark-stripe colour for
+                -- s4 (DK = near-black, BR = saturated warm brown).
+                if registers_in(6)(2) = '1' then
+                    dk_y_r <= C_FLOOR_BR_Y;
+                    dk_u_r <= C_FLOOR_BR_U;
+                    dk_v_r <= C_FLOOR_BR_V;
+                else
+                    dk_y_r <= C_FLOOR_DK_Y;
+                    dk_u_r <= C_FLOOR_DK_U;
+                    dk_v_r <= C_FLOOR_DK_V;
+                end if;
 
                 -- Advance each per-band sway accumulator by its (coprime)
                 -- speed.  Each band picks one of these via hash, giving
@@ -654,28 +750,21 @@ begin
                     end if;
 
                     -- Advance row_phase using K6-driven tooth frequency
-                    -- selector.  8 levels, /16 (longest period) up to ×8
-                    -- (densest teeth).  Default mid-knob = /1 (period =
-                    -- wavelen rows) — ~4× the previous /4 advance.
+                    -- selector.  Map shifted toward longer legs: /4
+                    -- gives 8× the leg height of the prior default,
+                    -- with full tooth amp for the longest diagonal
+                    -- line possible (apex narrows to ~28° at /4).
                     case to_integer(tooth_freq_sel_r) is
-                        when 0 => v_advance := resize(
-                                    shift_right(freq_row_r, 4), 20);
-                        when 1 => v_advance := resize(
-                                    shift_right(freq_row_r, 3), 20);
-                        when 2 => v_advance := resize(
-                                    shift_right(freq_row_r, 2), 20);
-                        when 3 => v_advance := resize(
-                                    shift_right(freq_row_r, 1), 20);
-                        when 4 => v_advance := resize(freq_row_r, 20);
-                        when 5 => v_advance := shift_left(
-                                    resize(freq_row_r, 20), 1);
-                        when 6 => v_advance := shift_left(
-                                    resize(freq_row_r, 20), 2);
+                        when 0|1   => v_advance := resize(
+                                        shift_right(freq_row_r, 2), 21);
+                        when 2|3   => v_advance := resize(
+                                        shift_right(freq_row_r, 1), 21);
+                        when 4|5   => v_advance := resize(freq_row_r, 21);
                         when others => v_advance := shift_left(
-                                    resize(freq_row_r, 20), 3);
+                                        resize(freq_row_r, 21), 1);
                     end case;
-                    v_row_phase_sum := resize(row_phase_r, 21)
-                                     + resize(v_advance, 21);
+                    v_row_phase_sum := resize(row_phase_r, 22)
+                                     + resize(v_advance, 22);
                     v_row_phase_17  := v_row_phase_sum(16 downto 0);
                     row_phase_r <= v_row_phase_17;
 
@@ -748,13 +837,23 @@ begin
             v_phase_hi_18 := shift_left(
                 resize(phase_mul_hi_r(11 downto 0), 18), 6);
             v_phase_lo_18 := resize(phase_mul_lo_r(17 downto 0), 18);
-            -- 1× tooth_phase (= wavelen/2 px sway) — thinner V's.  In
-            -- Vee mode add a 2^15 apex offset so the centre column
-            -- never crosses the LO/HI boundary at the V apex.
-            v_tooth_scaled := resize(tooth_phase_r, 18);
+            -- Tooth amplitude paired with K6 advance.  /4 (default)
+            -- and /2 use full amp (cap, can't reach 90° with these
+            -- long legs); ×1 hits 90° apex with full amp; ×2 needs
+            -- half amp to keep the 90° shape at the denser period.
+            case to_integer(tooth_freq_sel_r) is
+                when 0|1   => v_tooth_scaled := resize(
+                                tooth_phase_r, 18);                        -- full (/4 → 28°)
+                when 2|3   => v_tooth_scaled := resize(
+                                tooth_phase_r, 18);                        -- full (/2 → 53°)
+                when 4|5   => v_tooth_scaled := resize(
+                                tooth_phase_r, 18);                        -- full (×1 → 90°)
+                when others => v_tooth_scaled := resize(
+                                shift_right(tooth_phase_r, 1), 18);        -- half (×2 → 90°)
+            end case;
             if chev_vee_r = '1' then
                 phase_init_r <= v_phase_hi_18 + v_phase_lo_18
-                              + v_tooth_scaled
+                              + shift_right(v_tooth_scaled, 1)
                               + to_unsigned(32768, 18);
             else
                 phase_init_r <= v_phase_hi_18 + v_phase_lo_18
@@ -779,6 +878,98 @@ begin
             stripe_color_d1 <= phase_r(17);
             stripe_color_d2 <= stripe_color_d1;
             stripe_color_d3 <= stripe_color_d2;
+
+            ------------------------------------------------------------
+            -- Real-chevron renderer (Option 2) with perspective:
+            --   chev_y_pers = y_acc(y) - |dx_phase(x)|
+            -- where y_acc accumulates freq_row per row below horizon
+            -- (= integral of inverse-wavelen) and dx_phase accumulates
+            -- freq_row per pixel from eff_horizon_x_r.  Bands at every
+            -- 2·2^17 chev units → smaller bands near horizon (large
+            -- freq_row), larger at foreground (small freq_row), all
+            -- with the same V apex angle in world coords.
+            ------------------------------------------------------------
+            -- Always-on split multiply: eff_horizon_x_r * freq_row_r
+            dx_mul_hi_r <= eff_horizon_x_r(11 downto 6) * freq_row_r;
+            dx_mul_lo_r <= eff_horizon_x_r(5 downto 0)  * freq_row_r;
+            dx_phase_init_r <= shift_left(
+                                 resize(dx_mul_hi_r(17 downto 0), 24), 6)
+                             + resize(dx_mul_lo_r(22 downto 0), 24);
+
+            -- Per-pixel dx_phase DDA.  Single vanishing point at
+            -- eff_horizon_x_r (driven by K4 = Apex); dx_phase = 0
+            -- there in steady state.  K5 = Scroll adds a constant
+            -- per-frame phase offset so the pattern can be slid
+            -- horizontally without moving the VP itself.
+            --   Init  : dx_phase = -(eff_horizon_x · freq_row) + scroll
+            --   Per px: += freq_row
+            if data_in.avid = '0' then
+                dx_phase_r <= -signed(resize(dx_phase_init_r, 26))
+                            + signed(resize(scroll_offset_r, 26));
+            else
+                dx_phase_r <= dx_phase_r
+                            + signed(resize(freq_row_r, 26));
+            end if;
+
+            -- Per-row y_acc update at hsync (rows below horizon only)
+            if data_in.vsync_n = '0' and prev_vsync_n = '1' then
+                y_acc_r <= (others => '0');
+            elsif data_in.hsync_n = '0' and prev_hsync_n = '1' then
+                if pixel_y + 1 >= horizon_r then
+                    y_acc_r <= y_acc_r + resize(freq_row_r, 24);
+                else
+                    y_acc_r <= (others => '0');
+                end if;
+            end if;
+
+            -- Triangle wave from y_acc_r — perspective-correct accumulator
+            -- (grows by freq_row per row).  Bit 18 selects rising/falling;
+            -- period in y_acc = 2^19 → period in rows = 4·wavelen.  Amp
+            -- 2^18 → swing = 2·wavelen px.  Both grow together so slope
+            -- = 1 (90° apex) and leg_length = √2·2·wavelen ≈ 2.83× stripe
+            -- width — about half the prior length.  All boundaries trace
+            -- the same 45° diagonal in lockstep, producing many parallel
+            -- jagged stripes with 90° corners at every swing.
+            if y_acc_r(18) = '0' then
+                v_tooth_pers := "00" & y_acc_r(17 downto 0);
+            else
+                v_tooth_pers := "00" & (not y_acc_r(17 downto 0));
+            end if;
+
+            -- chev_coord = dx_phase + tooth.  Stripes form at every
+            -- 2^18 of chev_coord (one stripe pair = 2·wavelen px); the
+            -- tooth shifts the boundary back-and-forth per row by up
+            -- to 2^18 of phase = 2·wavelen px to create the zigzag.
+            v_chev_x_pers := dx_phase_r
+                           + signed(resize(v_tooth_pers, 26));
+
+            -- 90°-rotated form (chev_dir_r='1').  Swap the roles of x
+            -- and y in the chev coord: y_acc supplies the stripe phase
+            -- (advances by freq_row per row → bit 17 toggles every
+            -- wavelen rows), dx_phase supplies the tooth folded into a
+            -- triangle wave with period 2^19 in dx_phase ≈ 4·wavelen px
+            -- and amplitude 2^18 ≈ 2·wavelen of stripe offset → 90°
+            -- apex angle, matching the unrotated case.
+            if dx_phase_r(18) = '0' then
+                v_tooth_x_pers := "00" & unsigned(dx_phase_r(17 downto 0));
+            else
+                v_tooth_x_pers := "00" & not unsigned(dx_phase_r(17 downto 0));
+            end if;
+            v_chev_y_pers := signed(resize(y_acc_r, 26))
+                           + signed(resize(v_tooth_x_pers, 26));
+
+            chev_x_color_d1 <= v_chev_x_pers(17);
+            chev_y_color_d1 <= v_chev_y_pers(17);
+
+            -- Mux between the two pre-registered colour bits.  Both
+            -- inputs come from registers, so the mux's combinational
+            -- depth is just one LUT — well clear of the critical path.
+            if chev_dir_r = '1' then
+                chev_color_d2 <= chev_y_color_d1;
+            else
+                chev_color_d2 <= chev_x_color_d1;
+            end if;
+            chev_color_d3 <= chev_color_d2;
 
             ------------------------------------------------------------
             -- Always-on soft-vignette pipeline (4 cycles)
@@ -810,15 +1001,15 @@ begin
                 min_dist_r <= dist_y_r;
             end if;
 
-            -- Uniform 32-pixel-bin fade: 0..7 saturating, computed as a
-            -- single shift + clamp instead of an 8-way priority encoder.
-            -- Total fade zone = 224 px, outer 32 px is full black.
+            -- Smooth fade across a 128-pixel zone.  Inside the zone:
+            -- fade = min_dist (low 7 bits = 0..127).  Outside (or when
+            -- vignette disabled): fade = 127 (≈ full Y, < 1% dimming).
             if vign_en_r = '0' then
-                fade_lvl_r <= "111";
-            elsif min_dist_r >= to_unsigned(224, 12) then
-                fade_lvl_r <= "111";
+                fade_lvl_r <= (others => '1');
+            elsif min_dist_r >= to_unsigned(128, 12) then
+                fade_lvl_r <= (others => '1');
             else
-                fade_lvl_r <= min_dist_r(7 downto 5);
+                fade_lvl_r <= min_dist_r(6 downto 0);
             end if;
 
             ------------------------------------------------------------
@@ -898,21 +1089,14 @@ begin
             s2_tri_a <= v_tri_a;
 
             ------------------------------------------------------------
-            -- Stage 3: fold_luma (sum tris + hash tweak)
+            -- Stage 3: fold_luma (smooth triangle straight through)
             ------------------------------------------------------------
             s3_x <= s2_x;
             s3_y <= s2_y;
             s3_is_floor <= s2_is_floor;
             s3_shadow_amt <= s2_shadow_amt;
 
-            -- Single smooth triangle as fold luma (10-bit).
             v_fold_luma := s2_tri_a;
-            -- Optional grain: xor low 3 bits with hash for dither/texture
-            if grain_en_r = '1' then
-                v_grain := hash16(resize(s2_x, 16), resize(s2_y, 16));
-                v_fold_luma(3 downto 1) := v_fold_luma(3 downto 1)
-                                         xor v_grain(2 downto 0);
-            end if;
             s3_fold_luma <= v_fold_luma;
 
             -- Pre-compute the depth-shifted curtain blend factor here so
@@ -947,15 +1131,19 @@ begin
             s4_cur_v <= C_CURTAIN_LO_V
                       - resize(C_LERP_V_LUT(to_integer(s3_blend_factor)),10);
 
-            -- Floor: select cream vs dark chevron (DDA-delayed color)
-            if stripe_color_d3 = '1' then
+            -- Floor: select cream vs dark chevron from the rotated
+            -- Option-2 renderer (chev_color_d3).  Vertical zigzag
+            -- stripes radiating from the horizon point — perspective
+            -- via wavelen DDA, zigzag via tooth(y_acc) added to
+            -- dx_phase.  Stripe wavelen widens with depth.
+            if chev_color_d3 = '1' then
                 v_flr_y_var := C_FLOOR_LT_Y;
                 s4_flr_u <= C_FLOOR_LT_U;
                 s4_flr_v <= C_FLOOR_LT_V;
             else
-                v_flr_y_var := C_FLOOR_DK_Y;
-                s4_flr_u <= C_FLOOR_DK_U;
-                s4_flr_v <= C_FLOOR_DK_V;
+                v_flr_y_var := dk_y_r;
+                s4_flr_u <= dk_u_r;
+                s4_flr_v <= dk_v_r;
             end if;
             -- Drop-shadow under the curtain hem: attenuate Y based on
             -- shadow_amt (15 = right under the curtain, 0 = no shadow).
@@ -975,7 +1163,7 @@ begin
             --  pipeline below; no per-pixel work here.)
 
             ------------------------------------------------------------
-            -- Stage 5: layer select + vignette + warmth tint
+            -- Stage 5: layer select + smooth vignette
             ------------------------------------------------------------
             if s4_is_floor = '1' then
                 v_y_out := s4_flr_y;
@@ -987,70 +1175,55 @@ begin
                 v_v_out := s4_cur_v;
             end if;
 
-            -- Soft vignette Y attenuation (fade_lvl_r from always-on
-            -- pipeline above).  At level 0 chroma snaps to neutral so the
-            -- corner is true black.
-            case to_integer(fade_lvl_r) is
-                when 0 =>
-                    v_y_out := (others => '0');
-                    v_u_out := C_CHROMA_MID;
-                    v_v_out := C_CHROMA_MID;
-                when 1 => v_y_out := shift_right(v_y_out, 4);
-                when 2 => v_y_out := shift_right(v_y_out, 3);
-                when 3 => v_y_out := shift_right(v_y_out, 2);
-                when 4 => v_y_out := shift_right(v_y_out, 1);
-                when 5 => v_y_out := shift_right(v_y_out, 1)
-                                   + shift_right(v_y_out, 3);
-                when 6 => v_y_out := v_y_out - shift_right(v_y_out, 3);
-                when others => null;  -- 7: full Y
-            end case;
+            -- Soft vignette: Y_faded = Y * fade_lvl / 128.  10x7
+            -- multiply gives a 17-bit result; the top 10 bits are the
+            -- attenuated Y.  At fade=127 this is Y * 127/128 (~0.78%
+            -- dimming, invisible).  At fade=0 the corner is black.
+            v_fade_mul := v_y_out * fade_lvl_r;
+            v_y_out := v_fade_mul(16 downto 7);
+
+            -- Snap chroma toward neutral when the corner is very dark
+            -- so a stray Cr/Cb tint can't colour the near-black pixels.
+            if fade_lvl_r < to_unsigned(8, 7) then
+                v_u_out := C_CHROMA_MID;
+                v_v_out := C_CHROMA_MID;
+            end if;
 
             s5_y <= v_y_out;
             s5_u <= v_u_out;
             s5_v <= v_v_out;
+            s5_is_floor <= s4_is_floor;
 
             ------------------------------------------------------------
-            -- Stage 6: brightness scale + warmth tint
-            --   Y: 000 = 1/8 ... 111 = 8/8 (full).  Cheap shift-add.
-            --   U: precomputed signed warmth offset added (modular wrap).
+            -- Stage 6: pass-through register (brightness control was
+            -- removed when K5 was repurposed as Scroll).  Kept as a
+            -- register stage so key_floor_r aligns with s6_y at the
+            -- output mux.
             ------------------------------------------------------------
-            case to_integer(bright_sel_r) is
-                when 0      => s6_y <= shift_right(s5_y, 3);
-                when 1      => s6_y <= shift_right(s5_y, 2);
-                when 2      => s6_y <= shift_right(s5_y, 2)
-                                     + shift_right(s5_y, 3);
-                when 3      => s6_y <= shift_right(s5_y, 1);
-                when 4      => s6_y <= shift_right(s5_y, 1)
-                                     + shift_right(s5_y, 3);
-                when 5      => s6_y <= shift_right(s5_y, 1)
-                                     + shift_right(s5_y, 2);
-                when 6      => s6_y <= shift_right(s5_y, 1)
-                                     + shift_right(s5_y, 2)
-                                     + shift_right(s5_y, 3);
-                when others => s6_y <= s5_y;
-            end case;
-            -- Apply precomputed warmth signed offset to U (= Cr)
-            v_warmth_signed := signed(resize(s5_u, 11))
-                             + resize(warmth_off_s_r, 11);
-            s6_u <= unsigned(v_warmth_signed(9 downto 0));
+            key_floor_r <= key_en_r and s5_is_floor;
+            s6_y <= s5_y;
+            s6_u <= s5_u;
             s6_v <= s5_v;
 
         end if;
     end process;
 
     ------------------------------------------------------------
-    -- Output: bypass mux selects delayed input or generated pixel
+    -- Output: T11 = Key swaps the floor region (chevron area) for
+    -- the delayed input video while leaving curtain pixels on the
+    -- synth output.  Sync signals always come from the pipe so the
+    -- timing aligns with the s6 colour stream.
     ------------------------------------------------------------
     data_out.hsync_n <= pipe(LATENCY - 1).hsync_n;
     data_out.vsync_n <= pipe(LATENCY - 1).vsync_n;
     data_out.field_n <= pipe(LATENCY - 1).field_n;
     data_out.avid    <= pipe(LATENCY - 1).avid;
 
-    data_out.y <= pipe(LATENCY - 1).y when bypass_r = '1'
+    data_out.y <= pipe(LATENCY - 1).y when key_floor_r = '1'
                   else std_logic_vector(s6_y);
-    data_out.u <= pipe(LATENCY - 1).u when bypass_r = '1'
+    data_out.u <= pipe(LATENCY - 1).u when key_floor_r = '1'
                   else std_logic_vector(s6_u);
-    data_out.v <= pipe(LATENCY - 1).v when bypass_r = '1'
+    data_out.v <= pipe(LATENCY - 1).v when key_floor_r = '1'
                   else std_logic_vector(s6_v);
 
 end architecture blacklodge;

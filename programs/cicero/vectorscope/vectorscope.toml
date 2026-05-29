@@ -1,0 +1,126 @@
+# Vectorscope Program Configuration
+
+[program]
+program_id = "com.cicero.vectorscope"
+program_name = "Vectorscope"
+program_version = "1.0.0"
+abi_version = ">=1.0,<2.0"
+author = "cicero"
+license = "GPL-3.0"
+categories = ["Processing", "Analyzer"]
+program_type = "processing"
+description = "Live UV-plane scatter plot of incoming video chroma — a broadcast vectorscope display with graticule."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Persistence"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 700
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Trace Hue"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 256
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Grid Brt"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 256
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Underlay"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 120
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Gain"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Brightness"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 900
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Grid"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Crosshair"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Show Input"
+value_labels = ["Black", "Underlay"]
+initial_value_label = "Black"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Trace Style"
+value_labels = ["Single", "Quadrant"]
+initial_value_label = "Single"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Invert"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Display Scale"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 1
+suffix_label = "%"
+
+[[preset]]
+name = "Default"
+
+[[preset]]
+name = "Zoomed"
+linear_potentiometer_12 = 900
+
+[[preset]]
+name = "Overlay"
+toggle_switch_9 = 1
+linear_potentiometer_12 = 600

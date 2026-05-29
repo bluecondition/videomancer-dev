@@ -93,7 +93,7 @@ initial_value_label = "Black"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
-name_label = "Bypass"
+name_label = "Luma Gate"
 value_labels = ["Off", "On"]
 initial_value_label = "Off"
 

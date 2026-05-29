@@ -1,0 +1,122 @@
+# Lightning Program Configuration
+
+[program]
+program_id = "com.cicero.lightning"
+program_name = "Lightning"
+program_version = "2.0.0"
+abi_version = ">=1.0,<2.0"
+author = "cicero"
+license = "GPL-3.0"
+categories = ["Render", "Weather"]
+program_type = "synthesis"
+description = "Branching lightning tree from the top of the screen — main trunk forks into side branches at six fork points."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Branches"
+value_labels = ["0", "1", "2", "3", "4", "5", "6"]
+initial_value_label = "6"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Jitter"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 256
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Glow Width"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 256
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Brightness"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 900
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Branch Angle"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Trunk Bias"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 512
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Background"
+value_labels = ["Dark", "Storm"]
+initial_value_label = "Dark"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Core"
+value_labels = ["Soft", "Sharp"]
+initial_value_label = "Sharp"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Animate"
+value_labels = ["Static", "Frame"]
+initial_value_label = "Frame"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Tint"
+value_labels = ["White", "Blue"]
+initial_value_label = "White"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Invert"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Tree Spread"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 1
+suffix_label = "%"
+
+[[preset]]
+name = "Default"
+
+[[preset]]
+name = "Wide Tree"
+rotary_potentiometer_1 = 6
+linear_potentiometer_12 = 900
+
+[[preset]]
+name = "Single Bolt"
+rotary_potentiometer_1 = 0

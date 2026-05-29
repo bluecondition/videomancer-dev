@@ -1,0 +1,130 @@
+# Copyright (C) 2025 LZX Industries LLC
+# SPDX-License-Identifier: GPL-3.0-only
+#
+# Pong Program Configuration
+
+[program]
+program_id = "com.lzxindustries.pong"
+program_name = "Pong"
+program_version = "1.0.0"
+abi_version = ">=1.0,<2.0"
+author = "Lars Larsen"
+license = "GPL-3.0"
+categories = ["Game"]
+program_type = "processing"
+description = "Classic two-player Pong recreation with AI opponent, adjustable ball speed, paddle size, court color, and score display"
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+url = "https://github.com/lzxindustries/videomancer-sdk"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Ball Spd"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 384
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Pad Size"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "P1 Pos"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "AI Skill"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Court Hue"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Bright"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 768
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "P2 Mode"
+value_labels = ["AI", "Manual"]
+initial_value_label = "AI"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Net"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Score"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Color"
+value_labels = ["Mono", "Hue"]
+initial_value_label = "Mono"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Wide"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Mix"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 1023
+display_float_digits = 1
+suffix_label = "%"
+
+[[preset]]
+name = "Clsc Pong Match"
+
+[[preset]]
+name = "Neon Court Ovly"
+rotary_potentiometer_1 = 614
+rotary_potentiometer_2 = 307
+rotary_potentiometer_4 = 614
+rotary_potentiometer_5 = 716
+rotary_potentiometer_6 = 921
+toggle_switch_10 = 1
+linear_potentiometer_12 = 614
+
+[[preset]]
+name = "Two-Player"
+rotary_potentiometer_2 = 409
+toggle_switch_7 = 1

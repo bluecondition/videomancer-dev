@@ -1,0 +1,147 @@
+# Copyright (C) 2025 LZX Industries LLC
+# SPDX-License-Identifier: GPL-3.0-only
+#
+# Perlin Program Configuration
+
+[program]
+program_id = "com.lzxindustries.perlin"
+program_name = "Perlin"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "Lars Larsen"
+license = "GPL-3.0"
+categories = ["Render"]
+program_type = "processing"
+description = "Gradient noise synthesizer with four BRAM colour palettes, domain-warp feedback, two-octave fBm, and animated cycling."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+url = "https://github.com/lzxindustries/videomancer-sdk"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Scroll X"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 512
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Scale"
+control_mode = "steps_8"
+display_min_value = 1
+display_max_value = 8
+initial_value = 256
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Scroll Y"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 512
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Warp"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 0
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Palette Shift"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 0
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Palette Speed"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 0
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Texture"
+value_labels = ["Gradient", "Ridged"]
+initial_value_label = "Gradient"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Palette"
+value_labels = ["A", "B"]
+initial_value_label = "A"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Color"
+value_labels = ["Warm", "Cool"]
+initial_value_label = "Warm"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Video"
+value_labels = ["Noise", "Multiply"]
+initial_value_label = "Noise"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Octave"
+value_labels = ["1x", "2x"]
+initial_value_label = "1x"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Mix"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 1023
+display_float_digits = 1
+suffix_label = "%"
+
+[[preset]]
+name = "Clsc Marble"
+rotary_potentiometer_1 = 0
+rotary_potentiometer_2 = 438
+rotary_potentiometer_4 = 0
+rotary_potentiometer_5 = 614
+rotary_potentiometer_6 = 102
+
+[[preset]]
+name = "Flowing Fire"
+rotary_potentiometer_1 = 409
+rotary_potentiometer_2 = 638
+rotary_potentiometer_3 = 256
+rotary_potentiometer_4 = 450
+rotary_potentiometer_5 = 614
+rotary_potentiometer_6 = 302
+toggle_switch_7 = 1
+toggle_switch_9 = 1
+toggle_switch_10 = 1
+
+[[preset]]
+name = "Video-Modulated"
+rotary_potentiometer_1 = 200
+rotary_potentiometer_2 = 877
+rotary_potentiometer_4 = 200
+rotary_potentiometer_5 = 414
+rotary_potentiometer_6 = 302
+toggle_switch_7 = 1
+toggle_switch_8 = 1
+linear_potentiometer_12 = 512

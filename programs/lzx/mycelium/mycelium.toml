@@ -1,0 +1,133 @@
+# Copyright (C) 2025 LZX Industries LLC
+# SPDX-License-Identifier: GPL-3.0-only
+#
+# Mycelium Program Configuration
+
+[program]
+program_id = "com.lzxindustries.mycelium"
+program_name = "Mycelium"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "Lars Larsen"
+license = "GPL-3.0"
+categories = ["Organic"]
+program_type = "processing"
+description = "Reaction-diffusion video texture synthesizer with organic pattern growth seeded by input video luminance"
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+url = "https://github.com/lzxindustries/videomancer-sdk"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Feed Rate"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 400
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Kill Rate"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 560
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Diffusion"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Seed Thresh"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Color Map"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Sim Speed"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Freeze"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Seed Mode"
+value_labels = ["Cont.", "One-Shot"]
+initial_value_label = "Cont."
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Pattern"
+value_labels = ["Spots", "Stripes"]
+initial_value_label = "Spots"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Invert"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Turbo"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Mix"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 1023
+display_float_digits = 1
+suffix_label = "%"
+
+[[preset]]
+name = "Autonomous"
+rotary_potentiometer_4 = 205
+
+[[preset]]
+name = "Video Imprint"
+rotary_potentiometer_4 = 614
+
+[[preset]]
+name = "One-Shot"
+rotary_potentiometer_1 = 460
+rotary_potentiometer_4 = 307
+rotary_potentiometer_5 = 818
+toggle_switch_8 = 1

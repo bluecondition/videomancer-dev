@@ -22,3 +22,7 @@ __pycache__/
 
 # OS files
 Thumbs.db
+
+# Windows alternate-data-stream markers (created when copying from a
+# Windows host / WSL); never useful in the repo.
+*:Zone.Identifier

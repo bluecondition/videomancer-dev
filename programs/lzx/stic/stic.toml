@@ -1,0 +1,129 @@
+# Copyright (C) 2025 LZX Industries LLC
+# SPDX-License-Identifier: GPL-3.0-only
+#
+# STIC Program Configuration
+
+[program]
+program_id = "com.lzxindustries.stic"
+program_name = "STIC"
+program_version = "1.0.0"
+abi_version = ">=1.0,<2.0"
+author = "Lars Larsen"
+license = "GPL-3.0"
+categories = ["Computer"]
+program_type = "processing"
+description = "Intellivision STIC retro processor with 16-color palette quantization, Color Stack cycling, and Colored Squares mosaic mode."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+url = "https://github.com/lzxindustries/videomancer-sdk"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Tile Size"
+control_mode = "linear"
+display_min_value = 4
+display_max_value = 35
+initial_value = 384
+suffix_label = "px"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Stack Hue"
+value_labels = ["Black", "Blue", "Red", "Dk Green", "Tan", "Green", "Yellow", "White", "Grey", "Cyan", "Orange", "Brown", "Pink", "Lt Blue", "Yel-Grn", "Purple"]
+initial_value_label = "Blue"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Stack Rate"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 256
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Saturation"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 768
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Threshold"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 225
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Brightness"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Mode"
+value_labels = ["ColorStk", "ClrSqrs"]
+initial_value_label = "ColorStk"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Grid"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Scanlines"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Sprite Flk"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Scan Str"
+value_labels = ["Light", "Heavy"]
+initial_value_label = "Light"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Mix"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 1023
+
+[[preset]]
+name = "Color Stack"
+rotary_potentiometer_1 = 384
+rotary_potentiometer_2 = 64
+rotary_potentiometer_3 = 256
+rotary_potentiometer_4 = 768
+
+[[preset]]
+name = "Colored Sqrs"
+rotary_potentiometer_1 = 256
+rotary_potentiometer_3 = 512
+toggle_switch_7 = 1
+toggle_switch_8 = 1
+
+[[preset]]
+name = "Retro Game"
+rotary_potentiometer_1 = 512
+rotary_potentiometer_3 = 128
+rotary_potentiometer_4 = 1023
+toggle_switch_9 = 1
+toggle_switch_10 = 1

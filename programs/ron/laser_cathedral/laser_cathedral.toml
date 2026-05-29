@@ -1,0 +1,183 @@
+[program]
+program_id = "com.lzxindustries.laser_cathedral"
+program_version = "1.0.0"
+abi_version = ">=1.0,<2.0"
+program_name = "Laser Cathedral"
+author = "ron"
+license = "GPL-3.0"
+categories = ["Render", "Pattern", "Mirror"]
+program_type = "synthesis"
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+description = "Seven stacked parabolic arcs (frown to flat to smile) studded with rainbow origination dots."
+url = "https://github.com/lzxindustries/videomancer-sdk"
+
+# --- Rotary Potentiometers (Knobs 1-6) ---
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 600
+display_min_value = 0
+display_max_value = 100
+name_label = "Curvature"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 512
+display_min_value = 0
+display_max_value = 100
+name_label = "Translucency"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 512
+display_min_value = 0
+display_max_value = 100
+name_label = "Spacing"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Beam Count"
+value_labels = ["1", "2", "3", "4"]
+initial_value_label = "1"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 0
+display_min_value = -180
+display_max_value = 180
+name_label = "Rotation"
+suffix_label = "deg"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 512
+display_min_value = 0
+display_max_value = 100
+name_label = "Center X"
+suffix_label = "%"
+
+# --- Toggle Switches (7-11) ---
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Animation"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "X Mirror"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Y Mirror"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Invert"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Saturate"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+# --- Linear Potentiometer (Slider) ---
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 0
+display_min_value = 0
+display_max_value = 100
+name_label = "Shift Speed"
+suffix_label = "%"
+
+# --- Presets ---
+
+[[preset]]
+name = "Default"
+rotary_potentiometer_1 = 600
+rotary_potentiometer_2 = 200
+rotary_potentiometer_3 = 512
+rotary_potentiometer_4 = 0
+rotary_potentiometer_5 = 0
+rotary_potentiometer_6 = 512
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 0
+
+[[preset]]
+name = "Deep Bend"
+rotary_potentiometer_1 = 950
+rotary_potentiometer_2 = 300
+rotary_potentiometer_3 = 700
+rotary_potentiometer_4 = 0
+rotary_potentiometer_5 = 256
+rotary_potentiometer_6 = 512
+toggle_switch_7 = 1
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 1
+linear_potentiometer_12 = 200
+
+[[preset]]
+name = "Flat Lines"
+rotary_potentiometer_1 = 100
+rotary_potentiometer_2 = 150
+rotary_potentiometer_3 = 512
+rotary_potentiometer_4 = 256
+rotary_potentiometer_5 = 0
+rotary_potentiometer_6 = 512
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 1
+linear_potentiometer_12 = 0
+
+[[preset]]
+name = "Inverted"
+rotary_potentiometer_1 = 600
+rotary_potentiometer_2 = 250
+rotary_potentiometer_3 = 512
+rotary_potentiometer_4 = 0
+rotary_potentiometer_5 = 0
+rotary_potentiometer_6 = 512
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 1
+toggle_switch_11 = 0
+linear_potentiometer_12 = 0

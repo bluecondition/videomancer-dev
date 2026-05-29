@@ -1,0 +1,69 @@
+[program]
+program_id = "com.ron.tiler"
+program_version = "1.0.0"
+abi_version = ">=1.0,<2.0"
+program_name = "Tiler"
+author = "ron"
+license = "GPL-3.0"
+categories = ["Pattern"]
+program_type = "processing"
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+description = "Captures a region and tiles it. K1/2 origin, K3 rot, K4 size, K5/S7 luma mod, S8 under."
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Capture X"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 256
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Capture Y"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 256
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Rotate"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 360
+initial_value = 0
+suffix_label = "deg"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Tile Size"
+control_mode = "linear"
+display_min_value = 1
+display_max_value = 64
+initial_value = 1023
+suffix_label = "px"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Luma Thr"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Luma Mod"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Under"
+value_labels = ["Black", "Video"]
+initial_value_label = "Black"

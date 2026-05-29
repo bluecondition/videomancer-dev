@@ -1,0 +1,132 @@
+# Mandala Program Configuration
+
+[program]
+program_id = "com.cicero.mandala"
+program_name = "Mandala"
+program_version = "1.0.0"
+abi_version = ">=1.0,<2.0"
+author = "cicero"
+license = "GPL-3.0"
+categories = ["Pattern", "Mirror", "Render"]
+program_type = "synthesis"
+description = "Folded-coordinate radial kaleidoscope with N-fold symmetry, rotating petals, and animated rings."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Petals"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 384
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Ring Freq"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Rotation"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 256
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Brightness"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 768
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Hue"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 0
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Center Shift"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Fold"
+value_labels = ["Diamond", "Square"]
+initial_value_label = "Diamond"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Rings"
+value_labels = ["Smooth", "Stepped"]
+initial_value_label = "Smooth"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Inner"
+value_labels = ["Bright", "Dark"]
+initial_value_label = "Bright"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Palette"
+value_labels = ["Warm", "Cool"]
+initial_value_label = "Warm"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Invert"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Symmetry"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 1
+suffix_label = "%"
+
+[[preset]]
+name = "Default"
+
+[[preset]]
+name = "Sun"
+rotary_potentiometer_1 = 700
+rotary_potentiometer_2 = 320
+rotary_potentiometer_3 = 64
+linear_potentiometer_12 = 768
+
+[[preset]]
+name = "Frost"
+rotary_potentiometer_1 = 200
+rotary_potentiometer_2 = 800
+toggle_switch_10 = 1
+toggle_switch_8 = 1
+linear_potentiometer_12 = 256

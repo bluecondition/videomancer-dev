@@ -1,0 +1,167 @@
+[program]
+program_id = "com.ron.c64"
+program_version = "1.0.0"
+abi_version = ">=1.0,<2.0"
+program_name = "C64"
+author = "ron"
+license = "GPL-3.0"
+categories = ["Process", "Retro", "Palette"]
+program_type = "processing"
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+description = "Commodore 64 display: 16-colour palette, chunky pixels, border, scanlines."
+
+# --- Rotary Potentiometers (Knobs 1-6) ---
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Pixel Size"
+value_labels = ["Off", "2x", "4x", "8x", "16x"]
+initial_value_label = "8x"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 200
+display_min_value = 0
+display_max_value = 100
+name_label = "Border Wid"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Border Col"
+value_labels = ["Black", "White", "Red", "Cyan", "Purple", "Green", "Blue", "Yellow", "Orange", "Brown", "Lt Red", "Dk Grey", "Md Grey", "Lt Green", "Lt Blue", "Lt Grey"]
+initial_value_label = "Blue"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 400
+display_min_value = 0
+display_max_value = 100
+name_label = "Scanline"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 512
+display_min_value = 0
+display_max_value = 100
+name_label = "Saturation"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 384
+display_min_value = 0
+display_max_value = 100
+name_label = "Contrast"
+suffix_label = "%"
+
+# --- Toggle Switches (7-11) ---
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Pixelate"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Border"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Scanlines"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Bypass"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+# --- Linear Potentiometer (Slider) ---
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 1023
+display_min_value = 0
+display_max_value = 100
+name_label = "Mix"
+suffix_label = "%"
+
+# --- Presets ---
+
+[[preset]]
+name = "Classic C64"
+rotary_potentiometer_1 = 614
+rotary_potentiometer_2 = 200
+rotary_potentiometer_3 = 384
+rotary_potentiometer_4 = 400
+rotary_potentiometer_5 = 512
+rotary_potentiometer_6 = 512
+toggle_switch_7 = 1
+toggle_switch_8 = 1
+toggle_switch_9 = 1
+toggle_switch_11 = 0
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Palette Only"
+rotary_potentiometer_1 = 0
+rotary_potentiometer_2 = 0
+rotary_potentiometer_3 = 0
+rotary_potentiometer_4 = 0
+rotary_potentiometer_5 = 512
+rotary_potentiometer_6 = 512
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Blocky"
+rotary_potentiometer_1 = 921
+rotary_potentiometer_2 = 0
+rotary_potentiometer_3 = 0
+rotary_potentiometer_4 = 600
+rotary_potentiometer_5 = 512
+rotary_potentiometer_6 = 512
+toggle_switch_7 = 1
+toggle_switch_8 = 0
+toggle_switch_9 = 1
+toggle_switch_11 = 0
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Blue Border"
+rotary_potentiometer_1 = 614
+rotary_potentiometer_2 = 300
+rotary_potentiometer_3 = 384
+rotary_potentiometer_4 = 400
+rotary_potentiometer_5 = 700
+rotary_potentiometer_6 = 512
+toggle_switch_7 = 1
+toggle_switch_8 = 1
+toggle_switch_9 = 1
+toggle_switch_11 = 0
+linear_potentiometer_12 = 1023

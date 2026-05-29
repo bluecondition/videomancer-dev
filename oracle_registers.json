@@ -1,0 +1,14 @@
+{
+  "rotary_potentiometer_1": 512,
+  "rotary_potentiometer_2": 512,
+  "rotary_potentiometer_3": 512,
+  "rotary_potentiometer_4": 600,
+  "rotary_potentiometer_5": 128,
+  "rotary_potentiometer_6": 700,
+  "toggle_switch_7": 1,
+  "toggle_switch_8": 1,
+  "toggle_switch_9": 1,
+  "toggle_switch_10": 1,
+  "toggle_switch_11": 0,
+  "linear_potentiometer_12": 900
+}
