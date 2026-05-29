@@ -167,11 +167,19 @@ EXPRESSIONS = {
     },
 
     "surprised": {
-        "brow_l_o": (0, -10), "brow_l_p": (0, -10), "brow_l_i": (0, -8),
-        "brow_r_o": (0, -10), "brow_r_p": (0, -10), "brow_r_i": (0, -8),
-        "mouth_t":  (0, -3),  "mouth_b":  (0, +8),   # mouth tall
-        "mouth_l":  (+3, 0),  "mouth_r":  (-3, 0),   # corners pull in
-        "eye_l_t":  (0, -3),  "eye_l_b":  (0, +3),   # eyes wide
-        "eye_r_t":  (0, -3),  "eye_r_b":  (0, +3),
+        # Brows: the ENTIRE brow lifts high and arches — inner AND outer
+        # corners together (unlike sad), peak highest for the arch.
+        "brow_l_o": (0, -11), "brow_l_p": (0, -14), "brow_l_i": (0, -11),
+        "brow_r_o": (0, -11), "brow_r_p": (0, -14), "brow_r_i": (0, -11),
+        # Eyes: widest of the set — upper lids pull way back, lower lids
+        # drop (narrowed=happy, drooped=sad, wide=surprised).
+        "eye_l_t":  (0, -5),  "eye_r_t":  (0, -5),
+        "eye_l_b":  (0, +4),  "eye_r_b":  (0, +4),
+        # Mouth: jaw drops into a slack open O — big vertical opening,
+        # corners pulled IN (rounded, not stretched wide) and down a touch.
+        "mouth_t":  (0, -5),
+        "mouth_b":  (0, +12),
+        "mouth_l":  (+6, +2), "mouth_r":  (-6, +2),
+        # Nose at rest.
     },
 }
