@@ -402,14 +402,33 @@ begin
             s_int     := resize(s_fp(15 downto 7), 12);
             v_thick_u := resize(thick_r, 8);
             v_thick_s := signed(resize(thick_r, 7));
+            -- Stamp range: cover the row-to-row slope sweep plus K2 px
+            -- of padding on each side (for perpendicular thickness on
+            -- vertical-ish edges).  When |slope| already exceeds 2*K2
+            -- the K2 padding would just extend the edge horizontally
+            -- past its endpoints — which is what makes near-horizontal
+            -- edges look fatter sideways as K2 goes up — so drop the K2
+            -- padding for slope-dominant edges and let the slope sweep
+            -- stand on its own.  Build-time thickness phantoms cover
+            -- the vertical thickness for those edges.
             if s_int >= to_signed(0, 12) then
-                count_raw      := to_unsigned(to_integer(s_int), 8)
-                                + (v_thick_u sll 1);    -- 2 * thick_r
-                start_rel_held <= -v_thick_s;
+                if to_unsigned(to_integer(s_int), 8) > (v_thick_u sll 1) then
+                    count_raw      := to_unsigned(to_integer(s_int), 8);
+                    start_rel_held <= to_signed(0, 7);
+                else
+                    count_raw      := to_unsigned(to_integer(s_int), 8)
+                                    + (v_thick_u sll 1);   -- 2 * thick_r
+                    start_rel_held <= -v_thick_s;
+                end if;
             else
-                count_raw      := to_unsigned(-to_integer(s_int), 8)
-                                + (v_thick_u sll 1);
-                start_rel_held <= resize(s_int, 7) - v_thick_s;
+                if to_unsigned(-to_integer(s_int), 8) > (v_thick_u sll 1) then
+                    count_raw      := to_unsigned(-to_integer(s_int), 8);
+                    start_rel_held <= resize(s_int, 7);
+                else
+                    count_raw      := to_unsigned(-to_integer(s_int), 8)
+                                    + (v_thick_u sll 1);
+                    start_rel_held <= resize(s_int, 7) - v_thick_s;
+                end if;
             end if;
             if count_raw > to_unsigned(MAX_STAMP_M1, 8) then
                 count_m1_held <= to_unsigned(MAX_STAMP_M1, 7);
