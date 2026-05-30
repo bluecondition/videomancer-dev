@@ -159,7 +159,8 @@ architecture bishop of program_top is
     -- ---------------------------------------------------------------
     -- Rasterizer FSM
     -- ---------------------------------------------------------------
-    type t_raster_state is (R_IDLE, R_CLEAR, R_STAMP_PRELOAD, R_STAMP, R_STAMP_DRAIN);
+    type t_raster_state is (R_IDLE, R_CLEAR, R_STAMP_PRELOAD,
+                             R_STAMP_PRELOAD2, R_STAMP, R_STAMP_DRAIN);
     signal raster_state    : t_raster_state := R_IDLE;
     signal raster_cycle    : unsigned(10 downto 0) := (others => '0');
     signal stamp_edge_idx  : unsigned(7 downto 0)  := (others => '0');
@@ -222,6 +223,69 @@ architecture bishop of program_top is
     signal upd_slope_r2  : signed(15 downto 0)   := (others => '0');  -- Q9.7
     signal upd_active_r2 : std_logic := '0';
     signal upd_bnd_r2    : std_logic := '0';
+
+    -- ---------------------------------------------------------------
+    -- Active mesh BRAM (the BRAM-prefetch architecture).
+    --
+    -- The per-edge mesh-read mux (5:1 expr x N-entry LUT-ROM x 3-way
+    -- variant) on the render critical path is what was capping HD
+    -- timing.  Instead, the vblank copy engine (cp_proc) walks edges
+    -- 0..N-1 once per frame and resolves (expr, group, om, oe) into a
+    -- single value per (slot, field), written here.  The render then
+    -- reads one BRAM word per slot — no LUT-ROM, no expr mux, no
+    -- variant select on the per-pixel critical path.  4 EBRs.
+    -- ---------------------------------------------------------------
+    type t_act_y_ram is array (0 to 255) of std_logic_vector(12 downto 0);
+    type t_act_x_ram is array (0 to 255) of std_logic_vector(15 downto 0);
+    signal act_ymin_ram  : t_act_y_ram := (others => (others => '0'));
+    signal act_ymax_ram  : t_act_y_ram := (others => (others => '0'));
+    signal act_xtop_ram  : t_act_x_ram := (others => (others => '0'));
+    signal act_slope_ram : t_act_x_ram := (others => (others => '0'));
+
+    signal act_rd_addr   : unsigned(7 downto 0) := (others => '0');
+    signal act_ymin_rd   : std_logic_vector(12 downto 0);
+    signal act_ymax_rd   : std_logic_vector(12 downto 0);
+    signal act_xtop_rd   : std_logic_vector(15 downto 0);
+    signal act_slope_rd  : std_logic_vector(15 downto 0);
+
+    signal act_wr_en     : std_logic := '0';
+    signal act_wr_addr   : unsigned(7 downto 0) := (others => '0');
+    signal act_ymin_wr   : std_logic_vector(12 downto 0) := (others => '0');
+    signal act_ymax_wr   : std_logic_vector(12 downto 0) := (others => '0');
+    signal act_xtop_wr   : std_logic_vector(15 downto 0) := (others => '0');
+    signal act_slope_wr  : std_logic_vector(15 downto 0) := (others => '0');
+
+    -- Copy engine FSM + pipeline registers.  Per edge, the work is
+    -- split into three cycles so each cycle's combinational depth is
+    -- short:
+    --   Stage E (addr): present idx, LUT-ROM read for each of the 3
+    --                   variants (combinational), register per-variant
+    --                   values + group + addr.
+    --   Stage S (sel):  3-way case on group + om/oe picks the variant.
+    --                   Register one (ymin,ymax,xtop,slope) per slot.
+    --   Stage W (wr):   drive act_wr_en + act_*_wr to the BRAMs.
+    type t_cp_state is (CP_IDLE, CP_RUN);
+    signal cp_state : t_cp_state := CP_IDLE;
+    signal cp_addr  : unsigned(8 downto 0) := (others => '0');  -- 9-bit for fill drain
+    signal cp_e_valid : std_logic := '0';
+    signal cp_e_addr  : unsigned(7 downto 0) := (others => '0');
+    signal cp_e_group : natural range 0 to 3 := 0;
+    signal cp_e_ymin_open, cp_e_ymin_ec, cp_e_ymin_mc   : signed(12 downto 0) := (others => '0');
+    signal cp_e_ymax_open, cp_e_ymax_ec, cp_e_ymax_mc   : signed(12 downto 0) := (others => '0');
+    signal cp_e_xtop_open, cp_e_xtop_ec, cp_e_xtop_mc   : signed(15 downto 0) := (others => '0');
+    signal cp_e_slope_open, cp_e_slope_ec, cp_e_slope_mc : signed(15 downto 0) := (others => '0');
+    signal cp_s_valid : std_logic := '0';
+    signal cp_s_addr  : unsigned(7 downto 0) := (others => '0');
+    signal cp_s_ymin, cp_s_ymax  : signed(12 downto 0) := (others => '0');
+    signal cp_s_xtop, cp_s_slope : signed(15 downto 0) := (others => '0');
+
+    -- Render-side Stage 0 pre signals (1-cycle delay aligning the BRAM
+    -- read).  Control signals (valid/idx/active/bnd) ride alongside;
+    -- the data fields come from act_*_rd in the next cycle.
+    signal upd_valid_pre  : std_logic := '0';
+    signal upd_idx_pre    : unsigned(7 downto 0) := (others => '0');
+    signal upd_active_pre : std_logic := '0';
+    signal upd_bnd_pre    : std_logic := '0';
 
     -- Line-buffer write ports.  Two physical buffers (each ping-pong):
     -- lb_bnd_* receives only boundary-edge stamps and is what the EOR
@@ -377,47 +441,49 @@ begin
         variable v_in_feature  : boolean;
         variable v_grid_show   : boolean;
 
-        -- Inline helper: pack edge constants into the held regs.
-        -- Held regs are simple lookups (no arithmetic in this latch);
-        -- the actual add chain lives in the per-cycle R_STAMP body
-        -- so the latch cycle stays short.
+        -- Inline helper: kick off the per-edge BRAM reads (current_x and
+        -- active mesh slope) plus latch the simple flag/group state.
+        -- count_m1_held / start_rel_held are NOT computed here — they
+        -- depend on the slope, which arrives in act_slope_rd one cycle
+        -- later.  R_STAMP_PRELOAD's wait cycle does the math from the
+        -- registered act_slope_rd value, which keeps the heavy LUT-ROM
+        -- mux off the per-cycle critical path entirely.
         procedure latch_held(idx : integer) is
-            variable s_fp      : signed(15 downto 0);   -- Q9.7 slope
-            variable s_int     : signed(11 downto 0);   -- floor(s_fp / 128), sign-ext to 12
-            variable count_raw : unsigned(7 downto 0);
-            variable v_thick_u : unsigned(7 downto 0);  -- thick_r resized
-            variable v_thick_s : signed(6 downto 0);    -- thick_r as signed
         begin
             cx_rd_addr  <= to_unsigned(idx, 8);
+            act_rd_addr <= to_unsigned(idx, 8);
             active_held <= active(idx);
             if C_EDGE_BND(idx) = 1 then
                 bnd_held <= '1';
             else
                 bnd_held <= '0';
             end if;
-            s_fp      := to_signed(f_slope_sel(to_integer(expr_idx_r), idx,
-                                               open_mouth_r, open_eyes_r), 16);
-            -- Q9.7: integer part is bits 15..7 (9 bits signed).
-            -- Sign-extend to 12 bits to match the existing s_int width.
+        end procedure;
+
+        -- Compute count_m1_held / start_rel_held from a registered slope
+        -- value (act_slope_rd, arriving 1 cycle after the BRAM read was
+        -- kicked off by latch_held).  Stamp range covers the row-to-row
+        -- slope sweep + K2 px padding on each side, except when |slope|
+        -- already exceeds 2*K2 — then the K2 padding would just extend
+        -- horizontals past their endpoints, so drop it.
+        procedure compute_counts is
+            variable s_fp      : signed(15 downto 0);
+            variable s_int     : signed(11 downto 0);
+            variable count_raw : unsigned(7 downto 0);
+            variable v_thick_u : unsigned(7 downto 0);
+            variable v_thick_s : signed(6 downto 0);
+        begin
+            s_fp      := signed(act_slope_rd);
             s_int     := resize(s_fp(15 downto 7), 12);
             v_thick_u := resize(thick_r, 8);
             v_thick_s := signed(resize(thick_r, 7));
-            -- Stamp range: cover the row-to-row slope sweep plus K2 px
-            -- of padding on each side (for perpendicular thickness on
-            -- vertical-ish edges).  When |slope| already exceeds 2*K2
-            -- the K2 padding would just extend the edge horizontally
-            -- past its endpoints — which is what makes near-horizontal
-            -- edges look fatter sideways as K2 goes up — so drop the K2
-            -- padding for slope-dominant edges and let the slope sweep
-            -- stand on its own.  Build-time thickness phantoms cover
-            -- the vertical thickness for those edges.
             if s_int >= to_signed(0, 12) then
                 if to_unsigned(to_integer(s_int), 8) > (v_thick_u sll 1) then
                     count_raw      := to_unsigned(to_integer(s_int), 8);
                     start_rel_held <= to_signed(0, 7);
                 else
                     count_raw      := to_unsigned(to_integer(s_int), 8)
-                                    + (v_thick_u sll 1);   -- 2 * thick_r
+                                    + (v_thick_u sll 1);
                     start_rel_held <= -v_thick_s;
                 end if;
             else
@@ -450,6 +516,21 @@ begin
             -- because h_centre_r only updates on hsync).
             clear_base_r <= resize(h_centre_r, 11) - to_unsigned(HEAD_HALF_W, 11);
             h_centre_s   <= signed(resize(h_centre_r, 14));
+
+            -- Stage 0b: BRAM read data lands here.  Control signals
+            -- (valid/idx/active/bnd) ride the 1-cycle delay matched to
+            -- the BRAM read latency.  Data fields come straight from
+            -- act_*_rd, which the BRAMs delivered 1 cycle after the
+            -- act_rd_addr that Stage 0a issued.
+            upd_valid_r  <= upd_valid_pre;
+            upd_idx_r    <= upd_idx_pre;
+            upd_active_r <= upd_active_pre;
+            upd_bnd_r    <= upd_bnd_pre;
+            cx_rd_addr   <= upd_idx_pre;
+            upd_ymin_r   <= signed(act_ymin_rd);
+            upd_ymax_r   <= signed(act_ymax_rd);
+            upd_xtop_r   <= signed(act_xtop_rd);
+            upd_slope_r  <= signed(act_slope_rd);
 
             -- Pipeline shift: upd_*_r2 = upd_*_r delayed 1 cycle so
             -- Stage 1's use of upd_*_r2 aligns with cx_rd_data (which
@@ -486,30 +567,25 @@ begin
                     lb_wr_addr_r   <= clear_base_r + raster_cycle;
                     lb_wr_data_r   <= '0';
 
-                    -- Stage 0: lookup mesh constants + issue BRAM read
-                    -- for current_x.  Registered into upd_*_r and
-                    -- cx_rd_data for use one cycle later by Stage 1.
+                    -- Stage 0a: issue active mesh BRAM read for this
+                    -- slot, register the slot's control bits.  Mesh
+                    -- data lands in upd_*_r on the next cycle (in
+                    -- Stage 0b above), 1 cycle BRAM read latency
+                    -- aligned with the BRAM read for current_x and the
+                    -- pipeline shift to upd_*_r2.
                     if raster_cycle < to_unsigned(C_NUM_EDGES, 11) then
-                        v_idx        := to_integer(raster_cycle(7 downto 0));
-                        upd_valid_r  <= '1';
-                        upd_idx_r    <= raster_cycle(7 downto 0);
-                        upd_ymin_r   <= to_signed(f_y_min_sel(to_integer(expr_idx_r), v_idx,
-                                                              open_mouth_r, open_eyes_r), 13);
-                        upd_ymax_r   <= to_signed(f_y_max_sel(to_integer(expr_idx_r), v_idx,
-                                                              open_mouth_r, open_eyes_r), 13);
-                        upd_xtop_r   <= to_signed(f_x_top_sel(to_integer(expr_idx_r), v_idx,
-                                                              open_mouth_r, open_eyes_r), 16);
-                        upd_slope_r  <= to_signed(f_slope_sel(to_integer(expr_idx_r), v_idx,
-                                                              open_mouth_r, open_eyes_r), 16);
-                        upd_active_r <= active(v_idx);
+                        v_idx          := to_integer(raster_cycle(7 downto 0));
+                        act_rd_addr    <= raster_cycle(7 downto 0);
+                        upd_valid_pre  <= '1';
+                        upd_idx_pre    <= raster_cycle(7 downto 0);
+                        upd_active_pre <= active(v_idx);
                         if C_EDGE_BND(v_idx) = 1 then
-                            upd_bnd_r <= '1';
+                            upd_bnd_pre <= '1';
                         else
-                            upd_bnd_r <= '0';
+                            upd_bnd_pre <= '0';
                         end if;
-                        cx_rd_addr   <= raster_cycle(7 downto 0);
                     else
-                        upd_valid_r  <= '0';
+                        upd_valid_pre <= '0';
                     end if;
 
                     if raster_cycle = to_unsigned(CLEAR_W - 1, 11) then
@@ -527,14 +603,14 @@ begin
                     end if;
 
                 when R_STAMP_PRELOAD =>
-                    -- One wait cycle for cx_rd_data to settle after a
-                    -- cx_rd_addr change at the previous edge transition.
-                    -- Drain any pending stamp from Stage B too, so the
-                    -- last stamp of the previous edge still lands.
-                    -- Use bnd_held_d1 (= the PREVIOUS edge's bnd flag) —
-                    -- bnd_held was already latched to the new edge by
-                    -- latch_held() in the prior cycle, so it would mis-
-                    -- route this drained stamp.
+                    -- First wait cycle.  Drain any pending stamp from
+                    -- Stage B so the last stamp of the previous edge
+                    -- still lands.  Use bnd_held_d1 (= the PREVIOUS
+                    -- edge's bnd flag) — bnd_held was already latched
+                    -- to the new edge by latch_held() in the prior
+                    -- cycle.  BRAM reads for cx_rd_data and act_slope_rd
+                    -- complete during this cycle; their outputs become
+                    -- visible to PRELOAD2 next cycle.
                     v_stamp_abs := h_centre_s + resize(stamp_rel_r, 14);
                     if stamp_valid_r = '1' then
                         lb_wr_addr_r   <= unsigned(v_stamp_abs(10 downto 0));
@@ -543,7 +619,15 @@ begin
                         lb_wr_en_det_r <= not bnd_held_d1;
                     end if;
                     stamp_valid_r <= '0';
-                    raster_state  <= R_STAMP;
+                    raster_state  <= R_STAMP_PRELOAD2;
+
+                when R_STAMP_PRELOAD2 =>
+                    -- Second wait cycle: act_slope_rd is now valid for
+                    -- this edge, so compute count_m1_held and
+                    -- start_rel_held here.  Then R_STAMP can start
+                    -- next cycle with everything ready.
+                    compute_counts;
+                    raster_state <= R_STAMP;
 
                 when R_STAMP =>
                     -- Stage A: take the integer part of cur_x (Q9.7,
@@ -661,6 +745,144 @@ begin
                 current_x_ram(to_integer(cx_wr_addr)) <= cx_wr_data;
             end if;
             cx_rd_data <= current_x_ram(to_integer(cx_rd_addr));
+        end if;
+    end process;
+
+    -- Active mesh BRAMs (1W1R, 1-cycle read latency).  cp_proc writes
+    -- once per slot during vblank; render Stage 0 reads continuously.
+    act_ymin_bram_proc : process(clk)
+    begin
+        if rising_edge(clk) then
+            if act_wr_en = '1' then
+                act_ymin_ram(to_integer(act_wr_addr)) <= act_ymin_wr;
+            end if;
+            act_ymin_rd <= act_ymin_ram(to_integer(act_rd_addr));
+        end if;
+    end process;
+
+    act_ymax_bram_proc : process(clk)
+    begin
+        if rising_edge(clk) then
+            if act_wr_en = '1' then
+                act_ymax_ram(to_integer(act_wr_addr)) <= act_ymax_wr;
+            end if;
+            act_ymax_rd <= act_ymax_ram(to_integer(act_rd_addr));
+        end if;
+    end process;
+
+    act_xtop_bram_proc : process(clk)
+    begin
+        if rising_edge(clk) then
+            if act_wr_en = '1' then
+                act_xtop_ram(to_integer(act_wr_addr)) <= act_xtop_wr;
+            end if;
+            act_xtop_rd <= act_xtop_ram(to_integer(act_rd_addr));
+        end if;
+    end process;
+
+    act_slope_bram_proc : process(clk)
+    begin
+        if rising_edge(clk) then
+            if act_wr_en = '1' then
+                act_slope_ram(to_integer(act_wr_addr)) <= act_slope_wr;
+            end if;
+            act_slope_rd <= act_slope_ram(to_integer(act_rd_addr));
+        end if;
+    end process;
+
+    -- Copy engine.  Walks edges 0..N_EDGES-1 in vblank, resolving the
+    -- (expr, group, om, oe) variant select once per slot and writing
+    -- to the active mesh BRAMs.  3-stage pipeline so the heavy
+    -- LUT-ROM mux is isolated from the variant case mux which is
+    -- isolated from the BRAM write — each stage shallow.
+    cp_proc : process(clk)
+    begin
+        if rising_edge(clk) then
+            -- Defaults (overwritten below when valid)
+            act_wr_en   <= '0';
+
+            -- Stage E: address present, read each variant's LUT-ROM
+            -- combinationally, register per-variant values.
+            if cp_state = CP_RUN and cp_addr < to_unsigned(C_NUM_EDGES, 9) then
+                cp_e_valid <= '1';
+                cp_e_addr  <= cp_addr(7 downto 0);
+                cp_e_group <= C_EDGE_GROUP(to_integer(cp_addr(7 downto 0)));
+                cp_e_ymin_open <= to_signed(f_y_min   (to_integer(expr_idx_r), to_integer(cp_addr(7 downto 0))), 13);
+                cp_e_ymax_open <= to_signed(f_y_max   (to_integer(expr_idx_r), to_integer(cp_addr(7 downto 0))), 13);
+                cp_e_xtop_open <= to_signed(f_x_top   (to_integer(expr_idx_r), to_integer(cp_addr(7 downto 0))), 16);
+                cp_e_slope_open<= to_signed(f_slope   (to_integer(expr_idx_r), to_integer(cp_addr(7 downto 0))), 16);
+                cp_e_ymin_ec   <= to_signed(f_y_min_ec(to_integer(expr_idx_r), to_integer(cp_addr(7 downto 0))), 13);
+                cp_e_ymax_ec   <= to_signed(f_y_max_ec(to_integer(expr_idx_r), to_integer(cp_addr(7 downto 0))), 13);
+                cp_e_xtop_ec   <= to_signed(f_x_top_ec(to_integer(expr_idx_r), to_integer(cp_addr(7 downto 0))), 16);
+                cp_e_slope_ec  <= to_signed(f_slope_ec(to_integer(expr_idx_r), to_integer(cp_addr(7 downto 0))), 16);
+                cp_e_ymin_mc   <= to_signed(f_y_min_mc(to_integer(expr_idx_r), to_integer(cp_addr(7 downto 0))), 13);
+                cp_e_ymax_mc   <= to_signed(f_y_max_mc(to_integer(expr_idx_r), to_integer(cp_addr(7 downto 0))), 13);
+                cp_e_xtop_mc   <= to_signed(f_x_top_mc(to_integer(expr_idx_r), to_integer(cp_addr(7 downto 0))), 16);
+                cp_e_slope_mc  <= to_signed(f_slope_mc(to_integer(expr_idx_r), to_integer(cp_addr(7 downto 0))), 16);
+            else
+                cp_e_valid <= '0';
+            end if;
+
+            -- Stage S: variant select (3-way case on group, plus om/oe).
+            cp_s_valid <= cp_e_valid;
+            cp_s_addr  <= cp_e_addr;
+            case cp_e_group is
+                when C_GRP_MOUTH =>
+                    if open_mouth_r = '0' then
+                        cp_s_ymin <= cp_e_ymin_mc;
+                        cp_s_ymax <= cp_e_ymax_mc;
+                        cp_s_xtop <= cp_e_xtop_mc;
+                        cp_s_slope <= cp_e_slope_mc;
+                    else
+                        cp_s_ymin <= cp_e_ymin_open;
+                        cp_s_ymax <= cp_e_ymax_open;
+                        cp_s_xtop <= cp_e_xtop_open;
+                        cp_s_slope <= cp_e_slope_open;
+                    end if;
+                when C_GRP_EYE =>
+                    if open_eyes_r = '0' then
+                        cp_s_ymin <= cp_e_ymin_ec;
+                        cp_s_ymax <= cp_e_ymax_ec;
+                        cp_s_xtop <= cp_e_xtop_ec;
+                        cp_s_slope <= cp_e_slope_ec;
+                    else
+                        cp_s_ymin <= cp_e_ymin_open;
+                        cp_s_ymax <= cp_e_ymax_open;
+                        cp_s_xtop <= cp_e_xtop_open;
+                        cp_s_slope <= cp_e_slope_open;
+                    end if;
+                when others =>
+                    cp_s_ymin <= cp_e_ymin_open;
+                    cp_s_ymax <= cp_e_ymax_open;
+                    cp_s_xtop <= cp_e_xtop_open;
+                    cp_s_slope <= cp_e_slope_open;
+            end case;
+
+            -- Stage W: write to BRAMs.
+            if cp_s_valid = '1' then
+                act_wr_en    <= '1';
+                act_wr_addr  <= cp_s_addr;
+                act_ymin_wr  <= std_logic_vector(cp_s_ymin);
+                act_ymax_wr  <= std_logic_vector(cp_s_ymax);
+                act_xtop_wr  <= std_logic_vector(cp_s_xtop);
+                act_slope_wr <= std_logic_vector(cp_s_slope);
+            end if;
+
+            -- FSM
+            case cp_state is
+                when CP_IDLE =>
+                    if vsync_falling_r = '1' then
+                        cp_state <= CP_RUN;
+                        cp_addr  <= (others => '0');
+                    end if;
+                when CP_RUN =>
+                    -- Allow pipeline to drain (3 extra cycles past N).
+                    if cp_addr >= to_unsigned(C_NUM_EDGES + 3, 9) then
+                        cp_state <= CP_IDLE;
+                    else
+                        cp_addr <= cp_addr + 1;
+                    end if;
+            end case;
         end if;
     end process;
 

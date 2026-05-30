@@ -172,18 +172,12 @@ def slope_int_of(slope_fp):
     return slope_fp // FP_SCALE if slope_fp >= 0 else -((-slope_fp) // FP_SCALE)
 
 def thickness_extra_y(slope_fp):
-    """How many parallel detail rows to emit above AND below an edge to
-    equalise its perpendicular thickness with vertical-ish edges.
-    Vertical edges (|slope| < 3) already get their full 2*K2+1 width
-    from horizontal stamps, so they need none.  Near-horizontal edges
-    render as 1-row bands and need the most.
+    """Disabled for now (returns 0).  Thickness phantoms tripled the
+    mesh size and starved HD timing — even at cap=1 the per-(expr,
+    variant, field) LUT-ROM tables added too much LC pressure.
 
-    Capped at 2 (= 5 px perpendicular post-fatten) to keep the total
-    mesh size under the cur_x_bram's 128-entry limit.  Could be
-    larger if cur_x_bram were widened to 256."""
-    s = abs(slope_int_of(slope_fp))
-    if s >= 10: return 2
-    if s >= 3:  return 1
+    Re-enable once the BRAM-prefetch architecture frees up the LCs
+    currently held by the LUT-ROM mesh tables."""
     return 0
 
 def build_one_mesh(verts, label, log, canonical_template=None,
