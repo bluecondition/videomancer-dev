@@ -31,7 +31,7 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-from face_mesh import VERTICES, EDGES, EXPRESSIONS
+from face_mesh import VERTICES, EDGES, EXPRESSIONS, close_mouth, close_eyes
 
 VHDL_OUT = Path(__file__).with_name("bishop_mesh_pkg.vhd")
 TARGET_FACE_HEIGHT = 600
@@ -167,9 +167,20 @@ def find_boundary_tips(boundary_edges, norm):
             bot_tips.add(v)
     return top_tips, bot_tips
 
-def build_one_mesh(verts, label, log):
-    """Run the full per-expression pipeline on `verts` and return the
-    edges_dda list (boundary + detail + phantom)."""
+def build_one_mesh(verts, label, log, canonical_template=None):
+    """Run the full per-expression pipeline on `verts`.
+
+    Returns (edges_dda, template).
+
+    When `canonical_template` is None, phantoms are emitted naturally
+    in boundary-iteration order, and the resulting (parent_idx, side)
+    template is returned so other variants can be slot-aligned to it.
+
+    When given, phantoms are emitted in the template's slot order; any
+    slot whose parent isn't a stripped tip in THIS variant is filled
+    with NO_OP_EDGE.  This keeps every variant the same edge count and
+    every feature at the same indices, so the FPGA can pick open vs
+    closed per edge without remapping."""
     norm = normalize(verts)
     boundary_edges = [(a, b) for a, b in EDGES if is_boundary_edge(a, b)]
     top_tips, bot_tips = find_boundary_tips(boundary_edges, norm)
@@ -235,68 +246,103 @@ def build_one_mesh(verts, label, log):
                 dda["y_max"] -= N
         log.append(f"  [{label}] bot tip {tip}: stripped {N} row(s)")
 
-    # Pass 3: phantom detail edges.
-    phantom_edges = []
-    n_boundary = len(edges_dda)
-    for i in range(n_boundary):
-        dda = edges_dda[i]
-        if dda["bnd"] != 1:
-            continue
-        tip = edge_top_name[i]
-        if tip in top_tip_N:
-            N = top_tip_N[tip]
-            phantom_edges.append({
-                "y_min": dda["y_min"] - N,
+    # Pass 3: phantom detail edges (template-aware).
+    def top_phantom(dda, N):
+        return {"y_min": dda["y_min"] - N,
                 "y_max": dda["y_min"] - 1,
                 "x_top": dda["x_top"] - N * dda["slope"],
-                "slope": dda["slope"],
-                "group": dda["group"],
-                "bnd":   0,
-            })
-        tip = edge_bot_name[i]
-        if tip in bot_tip_N:
-            N = bot_tip_N[tip]
-            phantom_y_min = dda["y_max"] + 1
-            phantom_y_max = dda["y_max"] + N
-            phantom_x_top = dda["x_top"] + (phantom_y_min - dda["y_min"]) * dda["slope"]
-            phantom_edges.append({
-                "y_min": phantom_y_min,
-                "y_max": phantom_y_max,
-                "x_top": phantom_x_top,
-                "slope": dda["slope"],
-                "group": dda["group"],
-                "bnd":   0,
-            })
+                "slope": dda["slope"], "group": dda["group"], "bnd": 0}
+
+    def bot_phantom(dda, N):
+        p_y_min = dda["y_max"] + 1
+        return {"y_min": p_y_min,
+                "y_max": dda["y_max"] + N,
+                "x_top": dda["x_top"] + (p_y_min - dda["y_min"]) * dda["slope"],
+                "slope": dda["slope"], "group": dda["group"], "bnd": 0}
+
+    phantom_edges = []
+    n_boundary = len(edges_dda)
+    if canonical_template is None:
+        template_out = []
+        for i in range(n_boundary):
+            dda = edges_dda[i]
+            if dda["bnd"] != 1:
+                continue
+            tip = edge_top_name[i]
+            if tip in top_tip_N:
+                phantom_edges.append(top_phantom(dda, top_tip_N[tip]))
+                template_out.append((i, "top"))
+            tip = edge_bot_name[i]
+            if tip in bot_tip_N:
+                phantom_edges.append(bot_phantom(dda, bot_tip_N[tip]))
+                template_out.append((i, "bot"))
+    else:
+        template_out = canonical_template
+        for parent_idx, side in canonical_template:
+            dda = edges_dda[parent_idx]
+            phantom = None
+            if dda["bnd"] == 1:
+                if side == "top":
+                    tip = edge_top_name[parent_idx]
+                    if tip in top_tip_N:
+                        phantom = top_phantom(dda, top_tip_N[tip])
+                else:
+                    tip = edge_bot_name[parent_idx]
+                    if tip in bot_tip_N:
+                        phantom = bot_phantom(dda, bot_tip_N[tip])
+            phantom_edges.append(phantom if phantom is not None
+                                 else dict(NO_OP_EDGE))
 
     edges_dda.extend(phantom_edges)
+    real = sum(1 for p in phantom_edges if p["y_min"] <= p["y_max"])
     log.append(f"  [{label}] edges: {len(edges_dda)} "
-               f"(orig {n_boundary} + phantoms {len(phantom_edges)})")
-    return edges_dda
+               f"(orig {n_boundary} + phantoms {real} real / "
+               f"{len(phantom_edges) - real} no-op)")
+    return edges_dda, template_out
 
-def emit_vhdl(meshes_per_expr, expr_names, out_path: Path):
+# Variant suffix -> (function suffix, comment tag).  "" = open mouth +
+# open eyes (selected when S7=open and S8=open or when the edge isn't a
+# mouth/eye edge).  "MC" = mouth-closed override (selected for mouth
+# edges when S7=closed).  "EC" = eye-closed override (selected for eye
+# edges when S8=closed).
+VARIANTS = [
+    ("",   "",     "open mouth+eyes (base, also used for non-mouth-non-eye edges)"),
+    ("MC", "_mc",  "mouth closed (used for mouth edges when S7=closed)"),
+    ("EC", "_ec",  "eyes closed (used for eye edges when S8=closed)"),
+]
+
+def emit_vhdl(variants_per_expr, expr_names, out_path: Path):
     """Emit bishop_mesh_pkg.vhd.
 
-    The varying fields (y_min, y_max, x_top, slope) are emitted as ONE
-    1D constant array per expression (e.g. C_EDGE_Y_MIN_0 .. _4) and
-    selected at runtime by case-statement lookup functions.  This keeps
-    yosys synthesizing them as distributed LUT ROMs (fast) instead of
-    BRAM (a single 2D / flattened array got BRAM-inferred and dropped
-    Fmax from ~78 to ~58 MHz).
+    variants_per_expr is a dict keyed by (expr_idx, variant_suffix in
+    {"", "MC", "EC"}) returning that variant's mesh edge list.  All
+    meshes are padded to a common length so every (expression, variant,
+    edge) tuple addresses the same slot.
 
-    group and bnd are expression-independent (boundary classification
-    and animation grouping don't change with pose, and the phantom-edge
-    order is identical across expressions), so they're emitted once as
-    plain 1D arrays.
+    The varying fields (y_min, y_max, x_top, slope) are emitted as one
+    1D LUT-ROM per (expression, variant) and selected at runtime by
+    case-statement lookup functions (f_y_min / f_y_min_mc / f_y_min_ec
+    etc.).  This keeps yosys synthesizing them as distributed LUT ROMs
+    instead of inferring BRAM (which previously dropped Fmax from ~78
+    to ~58 MHz).
 
-    All expressions are padded to the same length with NO_OP_EDGE."""
-    max_edges = max(len(m) for m in meshes_per_expr)
-    n_expr    = len(meshes_per_expr)
-    padded    = [m + [NO_OP_EDGE] * (max_edges - len(m)) for m in meshes_per_expr]
+    group and bnd come from the "" variant — they describe the slot's
+    feature identity (which is what the FPGA needs to pick which
+    variant to read) and don't differ between variants in any way that
+    matters for the override decision."""
+    all_meshes = list(variants_per_expr.values())
+    max_edges  = max(len(m) for m in all_meshes)
+    n_expr     = len(expr_names)
+
+    def pad(mesh):
+        return mesh + [NO_OP_EDGE] * (max_edges - len(mesh))
+    padded = {key: pad(m) for key, m in variants_per_expr.items()}
 
     lines = []
     lines.append("-- Auto-generated by build_face_mesh.py.  Edit face_mesh.py, not this file.")
     lines.append(f"-- Expressions ({n_expr}): {', '.join(expr_names)}")
-    lines.append(f"-- Edges per expression (padded to max): {max_edges}")
+    lines.append(f"-- Edges per (expression, variant): {max_edges}")
+    lines.append("-- Variants per expression: open (base), MC (mouth-closed), EC (eyes-closed).")
     lines.append("")
     lines.append("library ieee;")
     lines.append("use ieee.std_logic_1164.all;")
@@ -329,40 +375,71 @@ def emit_vhdl(meshes_per_expr, expr_names, out_path: Path):
         lines.append("    );")
         lines.append("")
 
-    # Varying fields: one 1D array per expression.
     VARY = [("y_min", "C_EDGE_Y_MIN", "y_min"),
             ("y_max", "C_EDGE_Y_MAX", "y_max"),
             ("x_top", "C_EDGE_X_TOP", "x at y_min, Q9.7 (128x px)"),
             ("slope", "C_EDGE_SLOPE", "slope dx/dy, Q9.7 (128x px/row)")]
+
     for field, base, desc in VARY:
-        for ei in range(n_expr):
-            emit_1d(f"{base}_{ei}", [e[field] for e in padded[ei]],
-                    f"{desc} — {expr_names[ei]}")
+        for vsuffix, _, vdesc in VARIANTS:
+            for ei in range(n_expr):
+                cname = f"{base}{('_' + vsuffix) if vsuffix else ''}_{ei}"
+                emit_1d(cname, [e[field] for e in padded[(ei, vsuffix)]],
+                        f"{desc} — {expr_names[ei]} / {vdesc}")
 
-    # Expression-independent fields (use expression 0).
-    emit_1d("C_EDGE_GROUP", [e["group"] for e in padded[0]],
-            "animation group per edge (expression-independent)")
-    emit_1d("C_EDGE_BND", [e["bnd"] for e in padded[0]],
-            "1=boundary (EOR), 0=detail/no-op (expression-independent)")
+    # Group and bnd come from the open variant (slot identity).
+    emit_1d("C_EDGE_GROUP", [e["group"] for e in padded[(0, "")]],
+            "animation group per edge slot — used by FPGA to pick variant")
+    emit_1d("C_EDGE_BND", [e["bnd"] for e in padded[(0, "")]],
+            "1=boundary (EOR), 0=detail/no-op (slot identity)")
 
-    # Lookup functions — case statement keeps the per-expression arrays
-    # as separate LUT ROMs and adds a small 5:1 output mux.
+    # Declare per-variant lookup functions.
     for _, base, _ in VARY:
-        fn = "f_" + base[len("C_EDGE_"):].lower()   # C_EDGE_Y_MIN -> f_y_min
-        lines.append(f"    function {fn}(expr, idx : natural) return integer;")
+        for _, fnsuffix, _ in VARIANTS:
+            fn = "f_" + base[len("C_EDGE_"):].lower() + fnsuffix
+            lines.append(f"    function {fn}(expr, idx : natural) return integer;")
+    # And the per-edge "auto-select" wrappers that pick the right
+    # variant for this edge based on C_EDGE_GROUP and the open-mouth /
+    # open-eyes toggles.  Calling _sel hides the 3-way mux from the
+    # render so Stage 0 and latch_held both stay one-liners.
+    for _, base, _ in VARY:
+        fn = "f_" + base[len("C_EDGE_"):].lower() + "_sel"
+        lines.append(f"    function {fn}(expr, idx : natural; "
+                     f"om, oe : std_logic) return integer;")
     lines.append("")
     lines.append("end package bishop_mesh_pkg;")
     lines.append("")
     lines.append("package body bishop_mesh_pkg is")
     lines.append("")
     for _, base, _ in VARY:
-        fn = "f_" + base[len("C_EDGE_"):].lower()
-        lines.append(f"    function {fn}(expr, idx : natural) return integer is")
+        for vsuffix, fnsuffix, _ in VARIANTS:
+            fn = "f_" + base[len("C_EDGE_"):].lower() + fnsuffix
+            lines.append(f"    function {fn}(expr, idx : natural) return integer is")
+            lines.append("    begin")
+            lines.append("        case expr is")
+            for ei in range(n_expr):
+                cname = f"{base}{('_' + vsuffix) if vsuffix else ''}_{ei}"
+                sel = "when others" if ei == n_expr - 1 else f"when {ei}"
+                lines.append(f"            {sel} => return {cname}(idx);")
+            lines.append("        end case;")
+            lines.append("    end function;")
+            lines.append("")
+    # _sel bodies — pick variant per edge based on group + toggles.
+    for _, base, _ in VARY:
+        stem = base[len("C_EDGE_"):].lower()
+        fn = "f_" + stem + "_sel"
+        lines.append(f"    function {fn}(expr, idx : natural; "
+                     f"om, oe : std_logic) return integer is")
         lines.append("    begin")
-        lines.append("        case expr is")
-        for ei in range(n_expr):
-            sel = "when others" if ei == n_expr - 1 else f"when {ei}"
-            lines.append(f"            {sel} => return {base}_{ei}(idx);")
+        lines.append("        case C_EDGE_GROUP(idx) is")
+        lines.append("            when C_GRP_MOUTH =>")
+        lines.append(f"                if om = '0' then return f_{stem}_mc(expr, idx);")
+        lines.append(f"                else            return f_{stem}(expr, idx); end if;")
+        lines.append("            when C_GRP_EYE =>")
+        lines.append(f"                if oe = '0' then return f_{stem}_ec(expr, idx);")
+        lines.append(f"                else            return f_{stem}(expr, idx); end if;")
+        lines.append("            when others =>")
+        lines.append(f"                return f_{stem}(expr, idx);")
         lines.append("        end case;")
         lines.append("    end function;")
         lines.append("")
@@ -374,20 +451,33 @@ def main():
     print(f"expressions ({len(expr_names)}): {', '.join(expr_names)}")
     print(f"THICK_BUILD = {THICK_BUILD}  (strip math sized for max K2 thickness)")
 
-    meshes = []
-    log    = []
-    for name in expr_names:
-        deltas = EXPRESSIONS[name]
-        verts  = apply_expression(deltas)
-        mesh   = build_one_mesh(verts, name, log)
-        meshes.append(mesh)
+    log = []
+    # Canonical phantom slot template comes from neutral / open — every
+    # other variant aligns to its (parent_idx, side) layout so slot
+    # indices match across (expression, variant) and the FPGA can pick
+    # variants per edge without remapping.
+    canon_verts = apply_expression(EXPRESSIONS[expr_names[0]])
+    _, canon_template = build_one_mesh(canon_verts, "canonical", log)
+
+    transforms = [("",   lambda v: v),
+                  ("MC", close_mouth),
+                  ("EC", close_eyes)]
+
+    variants_per_expr = {}
+    for ei, name in enumerate(expr_names):
+        base = apply_expression(EXPRESSIONS[name])
+        for vsuffix, transform in transforms:
+            label = f"{name}/{vsuffix or 'open'}"
+            mesh, _ = build_one_mesh(transform(base), label, log, canon_template)
+            variants_per_expr[(ei, vsuffix)] = mesh
+
     for line in log:
         print(line)
 
-    sizes = [len(m) for m in meshes]
-    print(f"per-expression edge counts: {sizes} -> padding to max={max(sizes)}")
+    sizes = sorted(set(len(m) for m in variants_per_expr.values()))
+    print(f"variant edge counts (should be uniform): {sizes}")
 
-    emit_vhdl(meshes, expr_names, VHDL_OUT)
+    emit_vhdl(variants_per_expr, expr_names, VHDL_OUT)
     print(f"wrote {VHDL_OUT}")
 
     # Regenerate preview SVGs so they always match the emitted mesh.

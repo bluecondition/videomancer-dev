@@ -9,7 +9,7 @@ categories = ["Render", "Shape", "Demo", "Computer"]
 program_type = "synthesis"
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
-description = "Wireframe head with EOR grid fill.  K4 selects expression (neutral/happy/sad/angry/surprised); K5/K6 retune grid."
+description = "Wireframe head with grid fill. K4=expression, T7/T8 open mouth/eyes, K5/K6 grid period+phase."
 
 # --- Rotary Potentiometers (K1-K6) ---
 
@@ -60,19 +60,20 @@ display_max_value = 127
 suffix_label = "px"
 
 # --- Toggle Switches (7-11) ---
-# T7, T8, T10 are reserved for future use (animation triggers).
+# T7 = Mouth (Closed default / Open).  T8 = Eyes (Closed default / Open).
+# Each toggles independently and layers on any K4 expression.
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
-name_label = "Reserved 7"
-value_labels = ["Off", "On"]
-initial_value_label = "Off"
+name_label = "Mouth"
+value_labels = ["Closed", "Open"]
+initial_value_label = "Closed"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
-name_label = "Reserved 8"
-value_labels = ["Off", "On"]
-initial_value_label = "Off"
+name_label = "Eyes"
+value_labels = ["Closed", "Open"]
+initial_value_label = "Closed"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"

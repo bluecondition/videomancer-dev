@@ -92,12 +92,13 @@ EDGES = [
     ("nose_r",   "nose_tip"),
     ("nose_l",   "nose_r"),
 
-    # Mouth (diamond + horizontal centerline)
+    # Mouth — diamond read as two lip lines (upper: l->t->r, lower:
+    # l->b->r).  Closed = thin lens (lips close together); open = lips
+    # separate.  No centerline: the two lip arcs ARE the "double lines".
     ("mouth_l", "mouth_t"),
     ("mouth_t", "mouth_r"),
     ("mouth_r", "mouth_b"),
     ("mouth_b", "mouth_l"),
-    ("mouth_l", "mouth_r"),
 ]
 
 # K4 (registers_in(3)) top-3-bits selects one of these.  Slots 5..7
@@ -183,3 +184,40 @@ EXPRESSIONS = {
         # Nose at rest.
     },
 }
+
+# ---- Open/closed mode transforms (S7 mouth, S8 eyes) ------------------
+# "Closed" collapses a feature's top/bottom vertices onto its corner
+# line, so the diamond degenerates to a thin closed line that still
+# carries the expression's corner tilt (happy raised, sad lowered).
+# These operate on already-morphed vertices (expression deltas applied
+# first), so each expression closes appropriately.
+
+# Closed-mouth lip gap (px): half-distance between the two lip lines at
+# the mouth's midpoint when closed.  The lips taper to the corners, so
+# this is the widest separation (the "double line" in the middle).
+CLOSED_MOUTH_GAP = 4
+
+def close_mouth(verts):
+    # Collapse the open mouth into a thin lens: upper lip a hair above the
+    # corner line, lower lip a hair below.  Two close lip lines (the
+    # default/rest mouth); opening (S7) pushes mouth_t/mouth_b apart.
+    out = dict(verts)
+    cy = round((verts["mouth_l"][1] + verts["mouth_r"][1]) / 2)
+    out["mouth_t"] = (verts["mouth_t"][0], cy - CLOSED_MOUTH_GAP)
+    out["mouth_b"] = (verts["mouth_b"][0], cy + CLOSED_MOUTH_GAP)
+    return out
+
+def close_eyes(verts):
+    # Snap the corners onto the center line as well as the lids.  An
+    # expression with asymmetric corner heights (e.g. happy's squint)
+    # would otherwise leave the closed eye as a 1-row diamond whose
+    # corner becomes a new tip, drifting the phantom slot layout
+    # between variants.  Snapping forces a clean horizontal eye in
+    # every expression at a cost of <= 2 px on the corner positions.
+    out = dict(verts)
+    for corners, lids in ((("eye_l_o", "eye_l_i"), ("eye_l_t", "eye_l_b")),
+                          (("eye_r_o", "eye_r_i"), ("eye_r_t", "eye_r_b"))):
+        cy = round((verts[corners[0]][1] + verts[corners[1]][1]) / 2)
+        for v in corners + lids:
+            out[v] = (verts[v][0], cy)
+    return out

@@ -33,7 +33,6 @@
 <line class="bnd" x1="330.0" y1="546.5" x2="399.4" y2="554.6"/>
 <line class="bnd" x1="399.4" y1="554.6" x2="330.0" y2="577.8"/>
 <line class="bnd" x1="330.0" y1="577.8" x2="260.6" y2="554.6"/>
-<line class="det" x1="260.6" y1="554.6" x2="399.4" y2="554.6"/>
 <circle cx="330.0" cy="40.0" r="3" fill="#fc3"/>
 <text class="lbl" x="330.0" y="24.0" text-anchor="middle">crown</text>
 <circle cx="179.7" cy="97.8" r="3" fill="#fc3"/>

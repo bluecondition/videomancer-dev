@@ -10,7 +10,7 @@ visual comparisons across expressions are easy.
 Boundary edges drawn green; detail edges blue."""
 
 from pathlib import Path
-from face_mesh import VERTICES, EDGES, EXPRESSIONS
+from face_mesh import VERTICES, EDGES, EXPRESSIONS, close_mouth, close_eyes
 from build_face_mesh import is_boundary_edge
 
 HERE = Path(__file__).parent
@@ -74,8 +74,9 @@ def apply_deltas(deltas):
                    y + deltas.get(name, (0, 0))[1])
             for name, (x, y) in VERTICES.items()}
 
-def render_svg(expr_name, deltas, out_path):
-    verts = apply_deltas(deltas)
+def render_svg(expr_name, deltas, out_path, verts=None):
+    if verts is None:
+        verts = apply_deltas(deltas)
     lines = [
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" '
         f'viewBox="0 0 {W} {H}">',
@@ -156,9 +157,15 @@ def render_svg(expr_name, deltas, out_path):
 
 def main():
     for name, deltas in EXPRESSIONS.items():
+        # Open (default) pose.
         out = HERE / f"face_labels_{name}.svg"
         render_svg(name, deltas, out)
         print(f"wrote {out}")
+        # Closed-mouth + closed-eyes preview (S7 + S8 both on).
+        verts_closed = close_eyes(close_mouth(apply_deltas(deltas)))
+        out_c = HERE / f"face_labels_{name}_closed.svg"
+        render_svg(name + " (mouth+eyes closed)", deltas, out_c, verts=verts_closed)
+        print(f"wrote {out_c}")
 
 if __name__ == "__main__":
     main()

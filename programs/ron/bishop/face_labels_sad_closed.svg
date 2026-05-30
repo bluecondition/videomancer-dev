@@ -16,23 +16,23 @@
 <line class="det" x1="243.3" y1="255.1" x2="298.8" y2="265.5"/>
 <line class="det" x1="361.2" y1="265.5" x2="416.7" y2="255.1"/>
 <line class="det" x1="416.7" y1="255.1" x2="480.3" y2="282.9"/>
-<line class="bnd" x1="202.8" y1="337.2" x2="243.3" y2="328.0"/>
-<line class="bnd" x1="243.3" y1="328.0" x2="289.5" y2="334.9"/>
-<line class="bnd" x1="289.5" y1="334.9" x2="243.3" y2="348.8"/>
-<line class="bnd" x1="243.3" y1="348.8" x2="202.8" y2="337.2"/>
-<line class="bnd" x1="370.5" y1="334.9" x2="416.7" y2="328.0"/>
-<line class="bnd" x1="416.7" y1="328.0" x2="457.2" y2="337.2"/>
-<line class="bnd" x1="457.2" y1="337.2" x2="416.7" y2="348.8"/>
-<line class="bnd" x1="416.7" y1="348.8" x2="370.5" y2="334.9"/>
+<line class="bnd" x1="202.8" y1="336.1" x2="243.3" y2="336.1"/>
+<line class="bnd" x1="243.3" y1="336.1" x2="289.5" y2="336.1"/>
+<line class="bnd" x1="289.5" y1="336.1" x2="243.3" y2="336.1"/>
+<line class="bnd" x1="243.3" y1="336.1" x2="202.8" y2="336.1"/>
+<line class="bnd" x1="370.5" y1="336.1" x2="416.7" y2="336.1"/>
+<line class="bnd" x1="416.7" y1="336.1" x2="457.2" y2="336.1"/>
+<line class="bnd" x1="457.2" y1="336.1" x2="416.7" y2="336.1"/>
+<line class="bnd" x1="416.7" y1="336.1" x2="370.5" y2="336.1"/>
 <line class="bnd" x1="330.0" y1="300.2" x2="301.1" y2="502.6"/>
 <line class="bnd" x1="330.0" y1="300.2" x2="358.9" y2="502.6"/>
 <line class="bnd" x1="301.1" y1="502.6" x2="330.0" y2="525.7"/>
 <line class="bnd" x1="358.9" y1="502.6" x2="330.0" y2="525.7"/>
 <line class="det" x1="301.1" y1="502.6" x2="358.9" y2="502.6"/>
-<line class="bnd" x1="264.1" y1="566.2" x2="330.0" y2="544.2"/>
-<line class="bnd" x1="330.0" y1="544.2" x2="395.9" y2="566.2"/>
-<line class="bnd" x1="395.9" y1="566.2" x2="330.0" y2="573.1"/>
-<line class="bnd" x1="330.0" y1="573.1" x2="264.1" y2="566.2"/>
+<line class="bnd" x1="264.1" y1="566.2" x2="330.0" y2="561.6"/>
+<line class="bnd" x1="330.0" y1="561.6" x2="395.9" y2="566.2"/>
+<line class="bnd" x1="395.9" y1="566.2" x2="330.0" y2="570.8"/>
+<line class="bnd" x1="330.0" y1="570.8" x2="264.1" y2="566.2"/>
 <circle cx="330.0" cy="40.0" r="3" fill="#fc3"/>
 <text class="lbl" x="330.0" y="24.0" text-anchor="middle">crown</text>
 <circle cx="179.7" cy="97.8" r="3" fill="#fc3"/>
@@ -67,22 +67,22 @@
 <text class="lbl" x="416.7" y="243.1" text-anchor="middle">brow_r_p</text>
 <circle cx="480.3" cy="282.9" r="3" fill="#0ff"/>
 <text class="lbl" x="486.3" y="288.9" text-anchor="start">brow_r_o</text>
-<circle cx="202.8" cy="337.2" r="3" fill="#0ff"/>
-<text class="lbl" x="196.8" y="331.2" text-anchor="end">eye_l_o</text>
-<circle cx="243.3" cy="328.0" r="3" fill="#0ff"/>
-<text class="lbl" x="243.3" y="318.0" text-anchor="middle">eye_l_t</text>
-<circle cx="289.5" cy="334.9" r="3" fill="#fc3"/>
-<text class="lbl" x="295.5" y="340.9" text-anchor="start">eye_l_i</text>
-<circle cx="243.3" cy="348.8" r="3" fill="#0ff"/>
-<text class="lbl" x="243.3" y="364.8" text-anchor="middle">eye_l_b</text>
-<circle cx="370.5" cy="334.9" r="3" fill="#fc3"/>
-<text class="lbl" x="364.5" y="328.9" text-anchor="end">eye_r_i</text>
-<circle cx="416.7" cy="328.0" r="3" fill="#0ff"/>
-<text class="lbl" x="416.7" y="318.0" text-anchor="middle">eye_r_t</text>
-<circle cx="457.2" cy="337.2" r="3" fill="#0ff"/>
-<text class="lbl" x="463.2" y="343.2" text-anchor="start">eye_r_o</text>
-<circle cx="416.7" cy="348.8" r="3" fill="#0ff"/>
-<text class="lbl" x="416.7" y="364.8" text-anchor="middle">eye_r_b</text>
+<circle cx="202.8" cy="336.1" r="3" fill="#0ff"/>
+<text class="lbl" x="196.8" y="330.1" text-anchor="end">eye_l_o</text>
+<circle cx="243.3" cy="336.1" r="3" fill="#0ff"/>
+<text class="lbl" x="243.3" y="326.1" text-anchor="middle">eye_l_t</text>
+<circle cx="289.5" cy="336.1" r="3" fill="#fc3"/>
+<text class="lbl" x="295.5" y="342.1" text-anchor="start">eye_l_i</text>
+<circle cx="243.3" cy="336.1" r="3" fill="#0ff"/>
+<text class="lbl" x="243.3" y="352.1" text-anchor="middle">eye_l_b</text>
+<circle cx="370.5" cy="336.1" r="3" fill="#fc3"/>
+<text class="lbl" x="364.5" y="330.1" text-anchor="end">eye_r_i</text>
+<circle cx="416.7" cy="336.1" r="3" fill="#0ff"/>
+<text class="lbl" x="416.7" y="326.1" text-anchor="middle">eye_r_t</text>
+<circle cx="457.2" cy="336.1" r="3" fill="#0ff"/>
+<text class="lbl" x="463.2" y="342.1" text-anchor="start">eye_r_o</text>
+<circle cx="416.7" cy="336.1" r="3" fill="#0ff"/>
+<text class="lbl" x="416.7" y="352.1" text-anchor="middle">eye_r_b</text>
 <circle cx="330.0" cy="300.2" r="3" fill="#fc3"/>
 <text class="lbl" x="336.0" y="308.2" text-anchor="start">nose_top</text>
 <circle cx="301.1" cy="502.6" r="3" fill="#fc3"/>
@@ -93,13 +93,13 @@
 <text class="lbl" x="330.0" y="541.7" text-anchor="middle">nose_tip</text>
 <circle cx="264.1" cy="566.2" r="3" fill="#0ff"/>
 <text class="lbl" x="258.1" y="558.2" text-anchor="end">mouth_l</text>
-<circle cx="330.0" cy="544.2" r="3" fill="#0ff"/>
-<text class="lbl" x="330.0" y="534.2" text-anchor="middle">mouth_t</text>
+<circle cx="330.0" cy="561.6" r="3" fill="#0ff"/>
+<text class="lbl" x="330.0" y="551.6" text-anchor="middle">mouth_t</text>
 <circle cx="395.9" cy="566.2" r="3" fill="#0ff"/>
 <text class="lbl" x="401.9" y="574.2" text-anchor="start">mouth_r</text>
-<circle cx="330.0" cy="573.1" r="3" fill="#0ff"/>
-<text class="lbl" x="330.0" y="589.1" text-anchor="middle">mouth_b</text>
-<text class="title" x="680" y="60">Bishop face — sad</text>
+<circle cx="330.0" cy="570.8" r="3" fill="#0ff"/>
+<text class="lbl" x="330.0" y="586.8" text-anchor="middle">mouth_b</text>
+<text class="title" x="680" y="60">Bishop face — sad (mouth+eyes closed)</text>
 <text class="subtitle" x="680" y="82">Cyan dots = vertices moved by this expression</text>
 <text class="legend" x="680" y="104" style="font-weight:bold">Per-vertex deltas (dx, dy):</text>
 <text class="legend" x="692" y="122">brow_l_i   (+3, -10)</text>

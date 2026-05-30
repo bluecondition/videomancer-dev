@@ -30,7 +30,8 @@
 --   registers_in(3) = K4 Expression (top 3 bits → 1-of-5; ≥5 folds to neutral)
 --   registers_in(4) = K5 Grid period (top 2 bits → {16, 32, 64, 128})
 --   registers_in(5) = K6 Grid phase  (top 7 bits → 0..127 px horizontal shift)
---   registers_in(6) = Switches      (bit2 = grid on/off, bit4 = BG-Video)
+--   registers_in(6) = Switches      (bit0 = T7 Mouth open, bit1 = T8 Eyes open,
+--                                    bit2 = T9 grid on/off, bit4 = T11 BG-Video)
 --   registers_in(7) = Fader Brightness
 --
 -- License: GPL-3.0
@@ -126,6 +127,11 @@ architecture bishop of program_top is
     signal grid_per_r : unsigned(1 downto 0) := "01";   -- default 32 px (v2.1 spacing)
     -- K6 Grid horizontal phase (subtracted from pixel_x before masking).
     signal grid_phs_r : unsigned(6 downto 0) := to_unsigned(8, 7);  -- default = old hardcoded 8
+    -- S7 / S8: open mouth / open eyes.  Default 0 = closed (the rest
+    -- pose); 1 = open (the expression's tuned mouth/eye).  Selected
+    -- per-edge in Stage 0 based on C_EDGE_GROUP.
+    signal open_mouth_r : std_logic := '0';
+    signal open_eyes_r  : std_logic := '0';
 
     -- ---------------------------------------------------------------
     -- Mutable edge state.  current_x lives in a small BRAM (1R1W,
@@ -321,10 +327,12 @@ begin
                 pal_y_r <= C_PAL_Y(to_integer(unsigned(registers_in(2)(9 downto 7))));
                 pal_u_r <= C_PAL_U(to_integer(unsigned(registers_in(2)(9 downto 7))));
                 pal_v_r <= C_PAL_V(to_integer(unsigned(registers_in(2)(9 downto 7))));
-                -- Fader Brightness, T9/T11 switches
-                bright_r   <= unsigned(registers_in(7)(9 downto 2));
-                bg_video_r <= registers_in(6)(4);
-                grid_en_r  <= registers_in(6)(2);
+                -- Fader Brightness, T7/T8/T9/T11 switches
+                bright_r     <= unsigned(registers_in(7)(9 downto 2));
+                bg_video_r   <= registers_in(6)(4);
+                grid_en_r    <= registers_in(6)(2);
+                open_mouth_r <= registers_in(6)(0);  -- T7: mouth open(1)/closed(0)
+                open_eyes_r  <= registers_in(6)(1);  -- T8: eyes  open(1)/closed(0)
                 -- K1 Scale (latched, behavior deferred)
                 scale_r    <= unsigned(registers_in(0));
                 -- K2 Thickness: top 2 bits → 0..3, +1 → THICK 1..4
@@ -387,7 +395,8 @@ begin
             else
                 bnd_held <= '0';
             end if;
-            s_fp      := to_signed(f_slope(to_integer(expr_idx_r), idx), 16);
+            s_fp      := to_signed(f_slope_sel(to_integer(expr_idx_r), idx,
+                                               open_mouth_r, open_eyes_r), 16);
             -- Q9.7: integer part is bits 15..7 (9 bits signed).
             -- Sign-extend to 12 bits to match the existing s_int width.
             s_int     := resize(s_fp(15 downto 7), 12);
@@ -465,10 +474,14 @@ begin
                         v_idx        := to_integer(raster_cycle(6 downto 0));
                         upd_valid_r  <= '1';
                         upd_idx_r    <= raster_cycle(6 downto 0);
-                        upd_ymin_r   <= to_signed(f_y_min(to_integer(expr_idx_r), v_idx), 13);
-                        upd_ymax_r   <= to_signed(f_y_max(to_integer(expr_idx_r), v_idx), 13);
-                        upd_xtop_r   <= to_signed(f_x_top(to_integer(expr_idx_r), v_idx), 16);
-                        upd_slope_r  <= to_signed(f_slope(to_integer(expr_idx_r), v_idx), 16);
+                        upd_ymin_r   <= to_signed(f_y_min_sel(to_integer(expr_idx_r), v_idx,
+                                                              open_mouth_r, open_eyes_r), 13);
+                        upd_ymax_r   <= to_signed(f_y_max_sel(to_integer(expr_idx_r), v_idx,
+                                                              open_mouth_r, open_eyes_r), 13);
+                        upd_xtop_r   <= to_signed(f_x_top_sel(to_integer(expr_idx_r), v_idx,
+                                                              open_mouth_r, open_eyes_r), 16);
+                        upd_slope_r  <= to_signed(f_slope_sel(to_integer(expr_idx_r), v_idx,
+                                                              open_mouth_r, open_eyes_r), 16);
                         upd_active_r <= active(v_idx);
                         if C_EDGE_BND(v_idx) = 1 then
                             upd_bnd_r <= '1';
