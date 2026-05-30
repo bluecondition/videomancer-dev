@@ -279,13 +279,23 @@ architecture bishop of program_top is
     signal cp_s_ymin, cp_s_ymax  : signed(12 downto 0) := (others => '0');
     signal cp_s_xtop, cp_s_slope : signed(15 downto 0) := (others => '0');
 
-    -- Render-side Stage 0 pre signals (1-cycle delay aligning the BRAM
-    -- read).  Control signals (valid/idx/active/bnd) ride alongside;
-    -- the data fields come from act_*_rd in the next cycle.
+    -- Render-side Stage 0 pre signals.  The active-mesh BRAM read has
+    -- effective 2-cycle latency from when Stage 0a sets act_rd_addr
+    -- (register input) to when act_*_rd presents the data (register
+    -- output): 1 cycle for the address to be visible, 1 cycle for the
+    -- BRAM process to commit ram[addr] -> data register.  So control
+    -- signals (valid/idx/active/bnd) need to ride a 2-stage shift
+    -- (_pre -> _pre2) before Stage 0b reads them together with the
+    -- act_*_rd data.  cx_rd_addr is also driven from _pre2 so
+    -- cx_rd_data lines up the same way.
     signal upd_valid_pre  : std_logic := '0';
     signal upd_idx_pre    : unsigned(7 downto 0) := (others => '0');
     signal upd_active_pre : std_logic := '0';
     signal upd_bnd_pre    : std_logic := '0';
+    signal upd_valid_pre2  : std_logic := '0';
+    signal upd_idx_pre2    : unsigned(7 downto 0) := (others => '0');
+    signal upd_active_pre2 : std_logic := '0';
+    signal upd_bnd_pre2    : std_logic := '0';
 
     -- Line-buffer write ports.  Two physical buffers (each ping-pong):
     -- lb_bnd_* receives only boundary-edge stamps and is what the EOR
@@ -517,16 +527,27 @@ begin
             clear_base_r <= resize(h_centre_r, 11) - to_unsigned(HEAD_HALF_W, 11);
             h_centre_s   <= signed(resize(h_centre_r, 14));
 
-            -- Stage 0b: BRAM read data lands here.  Control signals
-            -- (valid/idx/active/bnd) ride the 1-cycle delay matched to
-            -- the BRAM read latency.  Data fields come straight from
-            -- act_*_rd, which the BRAMs delivered 1 cycle after the
-            -- act_rd_addr that Stage 0a issued.
-            upd_valid_r  <= upd_valid_pre;
-            upd_idx_r    <= upd_idx_pre;
-            upd_active_r <= upd_active_pre;
-            upd_bnd_r    <= upd_bnd_pre;
-            cx_rd_addr   <= upd_idx_pre;
+            -- Stage 0a': 1-cycle delay of pre signals so they reach
+            -- Stage 0b at the same cycle that act_*_rd presents the
+            -- BRAM-read data for the same edge.
+            upd_valid_pre2  <= upd_valid_pre;
+            upd_idx_pre2    <= upd_idx_pre;
+            upd_active_pre2 <= upd_active_pre;
+            upd_bnd_pre2    <= upd_bnd_pre;
+
+            -- Stage 0b: BRAM read data lands here, aligned with the
+            -- 2-stage-delayed control signals.  cx_rd_addr is driven
+            -- from upd_idx_pre2 so cx_rd_data also lines up with
+            -- upd_*_r2 in Stage 1 — but ONLY during R_CLEAR, since
+            -- during R_STAMP latch_held owns cx_rd_addr (parked on the
+            -- edge being stamped for the whole stamp loop).
+            upd_valid_r  <= upd_valid_pre2;
+            upd_idx_r    <= upd_idx_pre2;
+            upd_active_r <= upd_active_pre2;
+            upd_bnd_r    <= upd_bnd_pre2;
+            if raster_state = R_CLEAR then
+                cx_rd_addr <= upd_idx_pre2;
+            end if;
             upd_ymin_r   <= signed(act_ymin_rd);
             upd_ymax_r   <= signed(act_ymax_rd);
             upd_xtop_r   <= signed(act_xtop_rd);
