@@ -145,11 +145,11 @@ architecture bishop of program_top is
     -- edge drifts ~0.2 px — small enough that edges visibly meet at
     -- shared vertices.  Same 16-bit storage as Q12.4 so current_x_ram
     -- still fits a single EBR.
-    type t_cur_x_ram is array (0 to 127) of std_logic_vector(15 downto 0);
+    type t_cur_x_ram is array (0 to 255) of std_logic_vector(15 downto 0);
     signal current_x_ram : t_cur_x_ram := (others => (others => '0'));
-    signal cx_rd_addr  : unsigned(6 downto 0) := (others => '0');
+    signal cx_rd_addr  : unsigned(7 downto 0) := (others => '0');
     signal cx_rd_data  : std_logic_vector(15 downto 0);
-    signal cx_wr_addr  : unsigned(6 downto 0) := (others => '0');
+    signal cx_wr_addr  : unsigned(7 downto 0) := (others => '0');
     signal cx_wr_data  : std_logic_vector(15 downto 0) := (others => '0');
     signal cx_wr_en    : std_logic := '0';
 
@@ -162,7 +162,7 @@ architecture bishop of program_top is
     type t_raster_state is (R_IDLE, R_CLEAR, R_STAMP_PRELOAD, R_STAMP, R_STAMP_DRAIN);
     signal raster_state    : t_raster_state := R_IDLE;
     signal raster_cycle    : unsigned(10 downto 0) := (others => '0');
-    signal stamp_edge_idx  : unsigned(6 downto 0)  := (others => '0');
+    signal stamp_edge_idx  : unsigned(7 downto 0)  := (others => '0');
     -- Wide enough for max |slope| + 2*THICK.
     signal stamp_sub       : unsigned(6 downto 0)  := (others => '0');
 
@@ -203,7 +203,7 @@ architecture bishop of program_top is
     -- current_x / active.  Breaks the big "array read → ALU → array
     -- write" combinational chain that was the dominant critical path.
     signal upd_valid_r  : std_logic := '0';
-    signal upd_idx_r    : unsigned(6 downto 0)  := (others => '0');
+    signal upd_idx_r    : unsigned(7 downto 0)  := (others => '0');
     signal upd_ymin_r   : signed(12 downto 0)   := (others => '0');
     signal upd_ymax_r   : signed(12 downto 0)   := (others => '0');
     signal upd_xtop_r   : signed(15 downto 0)   := (others => '0');  -- Q9.7
@@ -215,7 +215,7 @@ architecture bishop of program_top is
     -- ram[OLD edge] (the read issued one cycle earlier than the latch
     -- in upd_*_r).
     signal upd_valid_r2  : std_logic := '0';
-    signal upd_idx_r2    : unsigned(6 downto 0)  := (others => '0');
+    signal upd_idx_r2    : unsigned(7 downto 0)  := (others => '0');
     signal upd_ymin_r2   : signed(12 downto 0)   := (others => '0');
     signal upd_ymax_r2   : signed(12 downto 0)   := (others => '0');
     signal upd_xtop_r2   : signed(15 downto 0)   := (others => '0');  -- Q9.7
@@ -388,7 +388,7 @@ begin
             variable v_thick_u : unsigned(7 downto 0);  -- thick_r resized
             variable v_thick_s : signed(6 downto 0);    -- thick_r as signed
         begin
-            cx_rd_addr  <= to_unsigned(idx, 7);
+            cx_rd_addr  <= to_unsigned(idx, 8);
             active_held <= active(idx);
             if C_EDGE_BND(idx) = 1 then
                 bnd_held <= '1';
@@ -471,9 +471,9 @@ begin
                     -- for current_x.  Registered into upd_*_r and
                     -- cx_rd_data for use one cycle later by Stage 1.
                     if raster_cycle < to_unsigned(C_NUM_EDGES, 11) then
-                        v_idx        := to_integer(raster_cycle(6 downto 0));
+                        v_idx        := to_integer(raster_cycle(7 downto 0));
                         upd_valid_r  <= '1';
-                        upd_idx_r    <= raster_cycle(6 downto 0);
+                        upd_idx_r    <= raster_cycle(7 downto 0);
                         upd_ymin_r   <= to_signed(f_y_min_sel(to_integer(expr_idx_r), v_idx,
                                                               open_mouth_r, open_eyes_r), 13);
                         upd_ymax_r   <= to_signed(f_y_max_sel(to_integer(expr_idx_r), v_idx,
@@ -488,7 +488,7 @@ begin
                         else
                             upd_bnd_r <= '0';
                         end if;
-                        cx_rd_addr   <= raster_cycle(6 downto 0);
+                        cx_rd_addr   <= raster_cycle(7 downto 0);
                     else
                         upd_valid_r  <= '0';
                     end if;
@@ -554,7 +554,7 @@ begin
 
                     if stamp_sub = count_m1_held then
                         stamp_sub <= (others => '0');
-                        if stamp_edge_idx = to_unsigned(C_NUM_EDGES - 1, 7) then
+                        if stamp_edge_idx = to_unsigned(C_NUM_EDGES - 1, 8) then
                             raster_state <= R_STAMP_DRAIN;
                         else
                             stamp_edge_idx <= stamp_edge_idx + 1;

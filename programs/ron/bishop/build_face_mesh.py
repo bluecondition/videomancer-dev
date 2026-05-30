@@ -167,7 +167,27 @@ def find_boundary_tips(boundary_edges, norm):
             bot_tips.add(v)
     return top_tips, bot_tips
 
-def build_one_mesh(verts, label, log, canonical_template=None):
+def slope_int_of(slope_fp):
+    """Signed integer part of a Q9.7 slope, i.e. dx per row in whole pixels."""
+    return slope_fp // FP_SCALE if slope_fp >= 0 else -((-slope_fp) // FP_SCALE)
+
+def thickness_extra_y(slope_fp):
+    """How many parallel detail rows to emit above AND below an edge to
+    equalise its perpendicular thickness with vertical-ish edges.
+    Vertical edges (|slope| < 3) already get their full 2*K2+1 width
+    from horizontal stamps, so they need none.  Near-horizontal edges
+    render as 1-row bands and need the most.
+
+    Capped at 2 (= 5 px perpendicular post-fatten) to keep the total
+    mesh size under the cur_x_bram's 128-entry limit.  Could be
+    larger if cur_x_bram were widened to 256."""
+    s = abs(slope_int_of(slope_fp))
+    if s >= 10: return 2
+    if s >= 3:  return 1
+    return 0
+
+def build_one_mesh(verts, label, log, canonical_template=None,
+                   thick_phantoms_per_slot=None):
     """Run the full per-expression pipeline on `verts`.
 
     Returns (edges_dda, template).
@@ -180,7 +200,14 @@ def build_one_mesh(verts, label, log, canonical_template=None):
     slot whose parent isn't a stripped tip in THIS variant is filled
     with NO_OP_EDGE.  This keeps every variant the same edge count and
     every feature at the same indices, so the FPGA can pick open vs
-    closed per edge without remapping."""
+    closed per edge without remapping.
+
+    thick_phantoms_per_slot, when given, is a per-slot list of `extra_y`
+    counts.  For each slot p with extra_y = N, the function appends 2*N
+    parallel detail edges (offsets -N..-1 and +1..+N) AFTER the tip-strip
+    phantoms.  Slots where THIS variant's slope wouldn't naturally need
+    that many extensions emit NO_OP padding, so every variant has the
+    same total edge count and the same per-slot semantics."""
     norm = normalize(verts)
     boundary_edges = [(a, b) for a, b in EDGES if is_boundary_edge(a, b)]
     top_tips, bot_tips = find_boundary_tips(boundary_edges, norm)
@@ -298,6 +325,42 @@ def build_one_mesh(verts, label, log, canonical_template=None):
     log.append(f"  [{label}] edges: {len(edges_dda)} "
                f"(orig {n_boundary} + phantoms {real} real / "
                f"{len(phantom_edges) - real} no-op)")
+
+    # Pass 4: thickness phantoms.  For each slot (parent edge), emit
+    # 2*extra_y parallel detail rows offset perpendicular-ish (Y only,
+    # which is the correct perpendicular direction for near-horizontal
+    # edges — the only ones that get extensions).  Slot count is fixed
+    # across variants by thick_phantoms_per_slot so per-edge indexing
+    # stays uniform; variants whose own slope wouldn't naturally need
+    # that many extensions get NO_OP fillers.
+    if thick_phantoms_per_slot is not None:
+        thick_real = 0
+        thick_nop  = 0
+        for parent_idx, max_extra in enumerate(thick_phantoms_per_slot):
+            if max_extra <= 0:
+                continue
+            parent = edges_dda[parent_idx]
+            # NO_OP parents (used to pad eye-phantom slots in EC variants
+            # etc.) shouldn't emit thickness phantoms — they don't render.
+            parent_active = (parent["y_min"] <= parent["y_max"])
+            this_extra = thickness_extra_y(parent["slope"]) if parent_active else 0
+            for i in range(1, max_extra + 1):
+                for sign in (-1, +1):
+                    if i <= this_extra:
+                        edges_dda.append({
+                            "y_min": parent["y_min"] + sign * i,
+                            "y_max": parent["y_max"] + sign * i,
+                            "x_top": parent["x_top"],
+                            "slope": parent["slope"],
+                            "group": parent["group"],
+                            "bnd":   0,
+                        })
+                        thick_real += 1
+                    else:
+                        edges_dda.append(dict(NO_OP_EDGE))
+                        thick_nop += 1
+        log.append(f"  [{label}]  + thickness: {thick_real} real / "
+                   f"{thick_nop} no-op  (total {len(edges_dda)})")
     return edges_dda, template_out
 
 # Variant suffix -> (function suffix, comment tag).  "" = open mouth +
@@ -463,12 +526,43 @@ def main():
                   ("MC", close_mouth),
                   ("EC", close_eyes)]
 
+    # Pass 1: build each variant once without thickness phantoms so we
+    # can survey per-slot slopes and decide how many parallel detail
+    # rows each slot needs across the whole variant set.  Eye edges
+    # need ~4 extras in the EC variant (horizontal) but only ~1 in the
+    # open variant, so we take the per-slot max so slot indexing stays
+    # uniform when the FPGA picks variants per edge.
+    pass1_meshes = {}
+    for ei, name in enumerate(expr_names):
+        base = apply_expression(EXPRESSIONS[name])
+        for vsuffix, transform in transforms:
+            mesh, _ = build_one_mesh(transform(base),
+                                     f"{name}/{vsuffix or 'open'}/pass1",
+                                     log, canon_template)
+            pass1_meshes[(ei, vsuffix)] = mesh
+    n_slots = max(len(m) for m in pass1_meshes.values())
+    thick_phantoms_per_slot = [0] * n_slots
+    for mesh in pass1_meshes.values():
+        for s, e in enumerate(mesh):
+            if e["y_min"] <= e["y_max"]:   # ignore NO_OPs
+                thick_phantoms_per_slot[s] = max(
+                    thick_phantoms_per_slot[s],
+                    thickness_extra_y(e["slope"]))
+    n_thick = sum(thick_phantoms_per_slot) * 2
+    print(f"thickness phantoms (max per slot, across variants): "
+          f"{sum(1 for x in thick_phantoms_per_slot if x>0)} slots fattened, "
+          f"+{n_thick} edges per variant")
+
+    # Pass 2: rebuild with the agreed thickness plan, so every variant
+    # has the same total edge count and same per-slot semantics.
     variants_per_expr = {}
     for ei, name in enumerate(expr_names):
         base = apply_expression(EXPRESSIONS[name])
         for vsuffix, transform in transforms:
             label = f"{name}/{vsuffix or 'open'}"
-            mesh, _ = build_one_mesh(transform(base), label, log, canon_template)
+            mesh, _ = build_one_mesh(transform(base), label, log,
+                                     canon_template,
+                                     thick_phantoms_per_slot)
             variants_per_expr[(ei, vsuffix)] = mesh
 
     for line in log:
