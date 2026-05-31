@@ -160,7 +160,8 @@ architecture bishop of program_top is
     -- Rasterizer FSM
     -- ---------------------------------------------------------------
     type t_raster_state is (R_IDLE, R_CLEAR, R_STAMP_PRELOAD,
-                             R_STAMP_PRELOAD2, R_STAMP, R_STAMP_DRAIN);
+                             R_STAMP_PRELOAD2, R_STAMP_PRELOAD3,
+                             R_STAMP, R_STAMP_DRAIN);
     signal raster_state    : t_raster_state := R_IDLE;
     signal raster_cycle    : unsigned(10 downto 0) := (others => '0');
     signal stamp_edge_idx  : unsigned(7 downto 0)  := (others => '0');
@@ -201,6 +202,14 @@ architecture bishop of program_top is
     -- stub were both this).
     signal center_sub_held  : unsigned(6 downto 0) := (others => '0');
     signal stamp_is_center_r : std_logic := '0';
+    -- compute_counts is split across two preload cycles to shorten its
+    -- combinational depth (it was the HD critical path).  Stage a
+    -- (PRELOAD2) registers the slope's sign / magnitude / padding
+    -- decision; stage b (PRELOAD3) does the add + cap + center.
+    signal s_int_held  : signed(11 downto 0) := (others => '0');
+    signal abs_s_held  : unsigned(7 downto 0) := (others => '0');
+    signal pad_held    : std_logic := '0';   -- |slope_int| <= 2*thick
+    signal sneg_held   : std_logic := '0';   -- slope is negative
 
     -- h_centre and bbox-edge constants pre-added once per scanline to
     -- avoid recomputing the (h_centre - HEAD_HALF_W) sum every cycle
@@ -487,37 +496,65 @@ begin
         -- slope sweep + K2 px padding on each side, except when |slope|
         -- already exceeds 2*K2 — then the K2 padding would just extend
         -- horizontals past their endpoints, so drop it.
-        procedure compute_counts is
-            variable s_fp        : signed(15 downto 0);
-            variable s_int       : signed(11 downto 0);
+        -- compute_counts stage a (PRELOAD2): decode the slope into its
+        -- sign / magnitude / "needs K2 padding" form and register them.
+        -- Also resolves the horizontal-edge EOR exclusion here (parallel
+        -- to the magnitude path).  Splitting the original one-cycle
+        -- compute into a+b shortened the HD critical path.
+        procedure compute_counts_a is
+            variable s_fp   : signed(15 downto 0);
+            variable s_int  : signed(11 downto 0);
+            variable abs_s  : unsigned(7 downto 0);
+        begin
+            s_fp   := signed(act_slope_rd);
+            s_int  := resize(s_fp(15 downto 7), 12);
+            if s_int >= to_signed(0, 12) then
+                abs_s := to_unsigned(to_integer(s_int), 8);
+                sneg_held <= '0';
+            else
+                abs_s := to_unsigned(-to_integer(s_int), 8);
+                sneg_held <= '1';
+            end if;
+            s_int_held <= s_int;
+            abs_s_held <= abs_s;
+            if abs_s > (resize(thick_r, 8) sll 1) then
+                pad_held <= '0';
+            else
+                pad_held <= '1';
+            end if;
+            -- Horizontal edge -> detail-only for EOR (closed-eye lids,
+            -- chin baseline).  Parallel to the magnitude decode.
+            if act_ymax_rd = act_ymin_rd then
+                bnd_held <= '0';
+            end if;
+        end procedure;
+
+        -- compute_counts stage b (PRELOAD3): add the K2 padding, cap the
+        -- count, derive start_rel and the center offset — all from the
+        -- registered stage-a values, so this cycle is just an add + a
+        -- compare.
+        procedure compute_counts_b is
             variable count_raw   : unsigned(7 downto 0);
             variable v_thick_u   : unsigned(7 downto 0);
             variable v_thick_s   : signed(6 downto 0);
             variable v_start_rel : signed(6 downto 0);
             variable v_count_m1  : unsigned(6 downto 0);
-            variable v_center    : unsigned(7 downto 0);
         begin
-            s_fp      := signed(act_slope_rd);
-            s_int     := resize(s_fp(15 downto 7), 12);
             v_thick_u := resize(thick_r, 8);
             v_thick_s := signed(resize(thick_r, 7));
-            if s_int >= to_signed(0, 12) then
-                if to_unsigned(to_integer(s_int), 8) > (v_thick_u sll 1) then
-                    count_raw   := to_unsigned(to_integer(s_int), 8);
-                    v_start_rel := to_signed(0, 7);
+            if pad_held = '1' then
+                count_raw := abs_s_held + (v_thick_u sll 1);
+                if sneg_held = '1' then
+                    v_start_rel := resize(s_int_held, 7) - v_thick_s;
                 else
-                    count_raw   := to_unsigned(to_integer(s_int), 8)
-                                 + (v_thick_u sll 1);
                     v_start_rel := -v_thick_s;
                 end if;
             else
-                if to_unsigned(-to_integer(s_int), 8) > (v_thick_u sll 1) then
-                    count_raw   := to_unsigned(-to_integer(s_int), 8);
-                    v_start_rel := resize(s_int, 7);
+                count_raw := abs_s_held;
+                if sneg_held = '1' then
+                    v_start_rel := resize(s_int_held, 7);
                 else
-                    count_raw   := to_unsigned(-to_integer(s_int), 8)
-                                 + (v_thick_u sll 1);
-                    v_start_rel := resize(s_int, 7) - v_thick_s;
+                    v_start_rel := to_signed(0, 7);
                 end if;
             end if;
             if count_raw > to_unsigned(MAX_STAMP_M1, 8) then
@@ -525,29 +562,10 @@ begin
             else
                 v_count_m1 := count_raw(6 downto 0);
             end if;
-            start_rel_held <= v_start_rel;
-            count_m1_held  <= v_count_m1;
-
-            -- Center stamp = the sweep pixel that lands on cur_x (the
-            -- true crossing).  cur_x is at sweep offset start_rel + sub
-            -- == 0, i.e. sub == -start_rel.  v_start_rel is always <= 0
-            -- so the negation is non-negative.  Clamp to count_m1 in
-            -- case a very steep edge had its count capped.
-            v_center := unsigned(resize(-v_start_rel, 8));
-            if v_center > resize(v_count_m1, 8) then
-                v_center := resize(v_count_m1, 8);
-            end if;
-            center_sub_held <= v_center(6 downto 0);
-
-            -- A horizontal edge (y_min == y_max) is parallel to the
-            -- scanline and never crosses it transversally — it must NOT
-            -- contribute an EOR toggle (otherwise closed-eye lids and
-            -- the chin baseline would each inject a spurious crossing
-            -- and flip the fill).  Force it detail-only for EOR; it's
-            -- still drawn via the detail buffer.
-            if act_ymax_rd = act_ymin_rd then
-                bnd_held <= '0';
-            end if;
+            start_rel_held  <= v_start_rel;
+            count_m1_held   <= v_count_m1;
+            -- center = sweep pixel at cur_x = -start_rel (start_rel <= 0).
+            center_sub_held <= unsigned(resize(-v_start_rel, 7));
         end procedure;
     begin
         if rising_edge(clk) then
@@ -680,11 +698,16 @@ begin
                     raster_state  <= R_STAMP_PRELOAD2;
 
                 when R_STAMP_PRELOAD2 =>
-                    -- Second wait cycle: act_slope_rd is now valid for
-                    -- this edge, so compute count_m1_held and
-                    -- start_rel_held here.  Then R_STAMP can start
-                    -- next cycle with everything ready.
-                    compute_counts;
+                    -- act_slope_rd / act_ymin_rd / act_ymax_rd are valid
+                    -- now; decode slope sign/magnitude/padding (stage a).
+                    compute_counts_a;
+                    raster_state <= R_STAMP_PRELOAD3;
+
+                when R_STAMP_PRELOAD3 =>
+                    -- Finish the count/start_rel/center from the
+                    -- registered stage-a values (stage b).  R_STAMP
+                    -- starts next cycle with everything ready.
+                    compute_counts_b;
                     raster_state <= R_STAMP;
 
                 when R_STAMP =>
