@@ -49,8 +49,18 @@ THICK_BUILD = 4
 
 # Degenerate no-op edge used to pad each expression's mesh up to
 # C_NUM_EDGES.  y_min > y_max so the rasterizer never activates it.
+#
+# CRITICAL: these y values are stored on the FPGA as signed(12 downto 0)
+# (13-bit, range -4096..+4095).  The old sentinels 32767 / -32768
+# OVERFLOWED that width — to_signed(32767,13) wraps to -1 and
+# to_signed(-32768,13) wraps to 0 — turning a "never active" no-op into
+# an edge ACTIVE for rows y=-1..0 that stamps at x_top=0 (screen
+# centre).  That produced a 2px dot at the nose centre whenever a
+# variant padded eye-phantom slots with no-ops (i.e. eyes closed).
+# Use in-range values that v_y_target (≈ ±frame_height/2, well under
+# 4095) can never equal, so the edge stays inactive every line.
 NO_OP_EDGE = {
-    "y_min": 32767, "y_max": -32768,
+    "y_min": 4095, "y_max": -4096,
     "x_top": 0, "slope": 0,
     "group": 0, "bnd": 0,
 }
