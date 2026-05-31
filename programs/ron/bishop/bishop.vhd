@@ -29,9 +29,10 @@
 --   registers_in(2) = K3 Palette    (top 3 bits = palette index)
 --   registers_in(3) = K4 Expression (top 3 bits → 1-of-5; ≥5 folds to neutral)
 --   registers_in(4) = K5 Grid period (top 2 bits → {16, 32, 64, 128})
---   registers_in(5) = K6 Grid phase  (top 7 bits → 0..127 px horizontal shift)
+--   registers_in(5) = K6 Grid scroll (top 8 bits, biased ±; speed+dir of auto-scroll)
 --   registers_in(6) = Switches      (bit0 = T7 Mouth open, bit1 = T8 Eyes open,
---                                    bit2 = T9 grid on/off, bit4 = T11 BG-Video)
+--                                    bit2 = T9 grid on/off, bit3 = T10 thick grid,
+--                                    bit4 = T11 BG-Video)
 --   registers_in(7) = Fader Brightness
 --
 -- License: GPL-3.0
@@ -116,6 +117,8 @@ architecture bishop of program_top is
     signal bg_video_r : std_logic := '0';
     -- T9: when '1', the EOR-fill mask paints a grid inside the silhouette.
     signal grid_en_r  : std_logic := '0';
+    -- T10: when '1', grid lines are 2px wide instead of 1px.
+    signal grid_thick_r : std_logic := '0';
     -- K1 Scale — latched, behavior deferred to a future milestone.
     signal scale_r    : unsigned(9 downto 0) := (others => '0');
     -- K2 Thickness — stored as the actual THICK value (1..4).
@@ -125,8 +128,13 @@ architecture bishop of program_top is
     signal expr_idx_r : unsigned(2 downto 0) := (others => '0');
     -- K5 Grid period (00=16, 01=32, 10=64, 11=128).
     signal grid_per_r : unsigned(1 downto 0) := "01";   -- default 32 px (v2.1 spacing)
-    -- K6 Grid horizontal phase (subtracted from pixel_x before masking).
-    signal grid_phs_r : unsigned(6 downto 0) := to_unsigned(8, 7);  -- default = old hardcoded 8
+    -- K6 Grid scroll: a Q7.6 phase accumulator (13 bits = 7 integer +
+    -- 6 fractional) advanced by the signed scroll_speed_r once per
+    -- vsync.  The integer part (bits 12..6) is subtracted from pixel_x
+    -- before masking, so the grid drifts smoothly left/right.  At max
+    -- speed it moves ~2px/frame; near K6 centre it's stopped.
+    signal grid_phs_acc_r : unsigned(12 downto 0) := (others => '0');
+    signal scroll_speed_r : signed(7 downto 0) := (others => '0');
     -- S7 / S8: open mouth / open eyes.  Default 0 = closed (the rest
     -- pose); 1 = open (the expression's tuned mouth/eye).  Selected
     -- per-edge in Stage 0 based on C_EDGE_GROUP.
@@ -421,10 +429,11 @@ begin
                 pal_y_r <= C_PAL_Y(to_integer(unsigned(registers_in(2)(9 downto 7))));
                 pal_u_r <= C_PAL_U(to_integer(unsigned(registers_in(2)(9 downto 7))));
                 pal_v_r <= C_PAL_V(to_integer(unsigned(registers_in(2)(9 downto 7))));
-                -- Fader Brightness, T7/T8/T9/T11 switches
+                -- Fader Brightness, T7-T11 switches
                 bright_r     <= unsigned(registers_in(7)(9 downto 2));
-                bg_video_r   <= registers_in(6)(4);
-                grid_en_r    <= registers_in(6)(2);
+                bg_video_r   <= registers_in(6)(4);  -- T11
+                grid_thick_r <= registers_in(6)(3);  -- T10: 2px grid lines
+                grid_en_r    <= registers_in(6)(2);  -- T9
                 open_mouth_r <= registers_in(6)(0);  -- T7: mouth open(1)/closed(0)
                 open_eyes_r  <= registers_in(6)(1);  -- T8: eyes  open(1)/closed(0)
                 -- K1 Scale (latched, behavior deferred)
@@ -440,8 +449,16 @@ begin
                 end if;
                 -- K5 Grid period
                 grid_per_r <= unsigned(registers_in(4)(9 downto 8));
-                -- K6 Grid horizontal phase (top 7 bits → 0..127)
-                grid_phs_r <= unsigned(registers_in(5)(9 downto 3));
+                -- K6 Grid scroll speed: top 8 bits, biased so the knob
+                -- centre (~512) is zero (stopped), left = scroll left,
+                -- right = scroll right.
+                scroll_speed_r <= signed(registers_in(5)(9 downto 2))
+                                - to_signed(128, 8);
+                -- Advance the Q7.6 phase accumulator once per frame.
+                -- Sign-extend the speed to 13 bits; unsigned add wraps
+                -- cleanly at the 7-bit integer boundary.
+                grid_phs_acc_r <= grid_phs_acc_r
+                                + unsigned(resize(scroll_speed_r, 13));
             end if;
         end if;
     end process;
@@ -1109,23 +1126,33 @@ begin
         signal show_pix  : std_logic;
         signal grid_xp   : unsigned(11 downto 0);
         signal grid_mask : unsigned(6 downto 0);
+        signal grid_lmask : unsigned(6 downto 0);
     begin
         -- Use the input-side pixel_x / pixel_y counters (already kept
         -- by timing_proc) for the grid pattern.  pixel_x / _y align
         -- naturally with the silhouette + EOR walker, which run on the
         -- same input-side clock.
         -- K5 grid_per_r selects the mask width (power-of-2 periods so
-        -- the mod-N is a cheap bit-slice).  K6 grid_phs_r shifts the
-        -- vertical-column grid horizontally without affecting the
+        -- the mod-N is a cheap bit-slice).  K6 drives grid_phs_acc_r,
+        -- an auto-scrolling phase; its integer part (bits 12..6) shifts
+        -- the vertical-column grid horizontally without affecting the
         -- horizontal-row spacing.
-        grid_xp <= pixel_x - resize(grid_phs_r, 12);
+        grid_xp <= pixel_x - resize(grid_phs_acc_r(12 downto 6), 12);
         with grid_per_r select
             grid_mask <= "0001111" when "00",  -- period 16
                          "0011111" when "01",  -- period 32
                          "0111111" when "10",  -- period 64
                          "1111111" when others;-- period 128
-        grid_hit <= '1' when (grid_xp(6 downto 0)  and grid_mask) = "0000000"
-                          or (pixel_y(6 downto 0) and grid_mask) = "0000000"
+        -- A line pixel is where the position within the period is 0
+        -- (thin = 1px).  For thick (2px, T10) we clear bit 0 of the
+        -- period mask, so positions 0 AND 1 both test as "on the line"
+        -- — one comparison per axis instead of two.  Thicker lines
+        -- survive chroma subsampling better, so the grid colour reads
+        -- closer to the bold outline.
+        grid_lmask <= (grid_mask and "1111110") when grid_thick_r = '1'
+                      else grid_mask;
+        grid_hit <= '1' when (grid_xp(6 downto 0)  and grid_lmask) = "0000000"
+                          or (pixel_y(6 downto 0) and grid_lmask) = "0000000"
                     else '0';
         show_pix <= edge_hit_r
                     or (grid_en_r and eor_inside_d_r and grid_hit);
