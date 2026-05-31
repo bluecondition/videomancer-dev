@@ -190,6 +190,17 @@ architecture bishop of program_top is
     -- R_STAMP_DRAIN.
     signal stamp_rel_r    : signed(12 downto 0) := (others => '0');
     signal stamp_valid_r  : std_logic := '0';
+    -- EOR-vs-thickness decoupling.  A boundary edge writes its full
+    -- thick sweep to the DETAIL buffer (visible) but only a single 1px
+    -- crossing mark to the BOUNDARY buffer (which the EOR fill walker
+    -- reads).  center_sub_held is the stamp_sub offset at which the
+    -- sweep pixel lands exactly on cur_x (the edge's true crossing);
+    -- stamp_is_center_r flags that pixel through the Stage A->B pipe.
+    -- Without this, thick/adjacent boundary stamps merge into one run
+    -- and corrupt the EOR parity (the "5 sections" banding + the mouth
+    -- stub were both this).
+    signal center_sub_held  : unsigned(6 downto 0) := (others => '0');
+    signal stamp_is_center_r : std_logic := '0';
 
     -- h_centre and bbox-edge constants pre-added once per scanline to
     -- avoid recomputing the (h_centre - HEAD_HALF_W) sum every cycle
@@ -477,11 +488,14 @@ begin
         -- already exceeds 2*K2 — then the K2 padding would just extend
         -- horizontals past their endpoints, so drop it.
         procedure compute_counts is
-            variable s_fp      : signed(15 downto 0);
-            variable s_int     : signed(11 downto 0);
-            variable count_raw : unsigned(7 downto 0);
-            variable v_thick_u : unsigned(7 downto 0);
-            variable v_thick_s : signed(6 downto 0);
+            variable s_fp        : signed(15 downto 0);
+            variable s_int       : signed(11 downto 0);
+            variable count_raw   : unsigned(7 downto 0);
+            variable v_thick_u   : unsigned(7 downto 0);
+            variable v_thick_s   : signed(6 downto 0);
+            variable v_start_rel : signed(6 downto 0);
+            variable v_count_m1  : unsigned(6 downto 0);
+            variable v_center    : unsigned(7 downto 0);
         begin
             s_fp      := signed(act_slope_rd);
             s_int     := resize(s_fp(15 downto 7), 12);
@@ -489,27 +503,50 @@ begin
             v_thick_s := signed(resize(thick_r, 7));
             if s_int >= to_signed(0, 12) then
                 if to_unsigned(to_integer(s_int), 8) > (v_thick_u sll 1) then
-                    count_raw      := to_unsigned(to_integer(s_int), 8);
-                    start_rel_held <= to_signed(0, 7);
+                    count_raw   := to_unsigned(to_integer(s_int), 8);
+                    v_start_rel := to_signed(0, 7);
                 else
-                    count_raw      := to_unsigned(to_integer(s_int), 8)
-                                    + (v_thick_u sll 1);
-                    start_rel_held <= -v_thick_s;
+                    count_raw   := to_unsigned(to_integer(s_int), 8)
+                                 + (v_thick_u sll 1);
+                    v_start_rel := -v_thick_s;
                 end if;
             else
                 if to_unsigned(-to_integer(s_int), 8) > (v_thick_u sll 1) then
-                    count_raw      := to_unsigned(-to_integer(s_int), 8);
-                    start_rel_held <= resize(s_int, 7);
+                    count_raw   := to_unsigned(-to_integer(s_int), 8);
+                    v_start_rel := resize(s_int, 7);
                 else
-                    count_raw      := to_unsigned(-to_integer(s_int), 8)
-                                    + (v_thick_u sll 1);
-                    start_rel_held <= resize(s_int, 7) - v_thick_s;
+                    count_raw   := to_unsigned(-to_integer(s_int), 8)
+                                 + (v_thick_u sll 1);
+                    v_start_rel := resize(s_int, 7) - v_thick_s;
                 end if;
             end if;
             if count_raw > to_unsigned(MAX_STAMP_M1, 8) then
-                count_m1_held <= to_unsigned(MAX_STAMP_M1, 7);
+                v_count_m1 := to_unsigned(MAX_STAMP_M1, 7);
             else
-                count_m1_held <= count_raw(6 downto 0);
+                v_count_m1 := count_raw(6 downto 0);
+            end if;
+            start_rel_held <= v_start_rel;
+            count_m1_held  <= v_count_m1;
+
+            -- Center stamp = the sweep pixel that lands on cur_x (the
+            -- true crossing).  cur_x is at sweep offset start_rel + sub
+            -- == 0, i.e. sub == -start_rel.  v_start_rel is always <= 0
+            -- so the negation is non-negative.  Clamp to count_m1 in
+            -- case a very steep edge had its count capped.
+            v_center := unsigned(resize(-v_start_rel, 8));
+            if v_center > resize(v_count_m1, 8) then
+                v_center := resize(v_count_m1, 8);
+            end if;
+            center_sub_held <= v_center(6 downto 0);
+
+            -- A horizontal edge (y_min == y_max) is parallel to the
+            -- scanline and never crosses it transversally — it must NOT
+            -- contribute an EOR toggle (otherwise closed-eye lids and
+            -- the chin baseline would each inject a spurious crossing
+            -- and flip the fill).  Force it detail-only for EOR; it's
+            -- still drawn via the detail buffer.
+            if act_ymax_rd = act_ymin_rd then
+                bnd_held <= '0';
             end if;
         end procedure;
     begin
@@ -636,8 +673,8 @@ begin
                     if stamp_valid_r = '1' then
                         lb_wr_addr_r   <= unsigned(v_stamp_abs(10 downto 0));
                         lb_wr_data_r   <= '1';
-                        lb_wr_en_bnd_r <= bnd_held_d1;
-                        lb_wr_en_det_r <= not bnd_held_d1;
+                        lb_wr_en_bnd_r <= bnd_held_d1 and stamp_is_center_r;
+                        lb_wr_en_det_r <= '1';
                     end if;
                     stamp_valid_r <= '0';
                     raster_state  <= R_STAMP_PRELOAD2;
@@ -664,16 +701,27 @@ begin
                     else
                         stamp_valid_r <= '0';
                     end if;
+                    -- Flag whether THIS sweep pixel is the edge's true
+                    -- crossing (cur_x), carried to Stage B for the 1px
+                    -- boundary-buffer write.
+                    if stamp_sub = center_sub_held then
+                        stamp_is_center_r <= '1';
+                    else
+                        stamp_is_center_r <= '0';
+                    end if;
 
                     -- Stage B: drain previous cycle's registered values
-                    -- into the LB.  This is just one 14-bit add per
-                    -- cycle, off the wider Stage A path.
+                    -- into the LB.  Every sweep pixel goes to the DETAIL
+                    -- buffer (visible thickness).  The BOUNDARY buffer
+                    -- (read by the EOR fill) gets only the single center
+                    -- pixel, and only for boundary edges — so thickness
+                    -- never corrupts the fill parity.
                     v_stamp_abs := h_centre_s + resize(stamp_rel_r, 14);
                     if stamp_valid_r = '1' then
                         lb_wr_addr_r   <= unsigned(v_stamp_abs(10 downto 0));
                         lb_wr_data_r   <= '1';
-                        lb_wr_en_bnd_r <= bnd_held;
-                        lb_wr_en_det_r <= not bnd_held;
+                        lb_wr_en_bnd_r <= bnd_held and stamp_is_center_r;
+                        lb_wr_en_det_r <= '1';
                     end if;
 
                     if stamp_sub = count_m1_held then
@@ -700,8 +748,8 @@ begin
                     if stamp_valid_r = '1' then
                         lb_wr_addr_r   <= unsigned(v_stamp_abs(10 downto 0));
                         lb_wr_data_r   <= '1';
-                        lb_wr_en_bnd_r <= bnd_held;
-                        lb_wr_en_det_r <= not bnd_held;
+                        lb_wr_en_bnd_r <= bnd_held and stamp_is_center_r;
+                        lb_wr_en_det_r <= '1';
                     end if;
                     stamp_valid_r <= '0';
                     raster_state <= R_IDLE;
