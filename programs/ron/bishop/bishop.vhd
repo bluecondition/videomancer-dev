@@ -579,6 +579,17 @@ begin
             else
                 v_count_m1 := count_raw(6 downto 0);
             end if;
+            -- INACTIVE edges contribute no stamps (stamp_valid is gated by
+            -- active_held in R_STAMP), so there's no reason to iterate
+            -- their full sweep — collapse them to a single cycle.  This
+            -- matters a lot for the closed-eye edges: they're horizontal
+            -- with a huge stamp count (~40) yet only active on one row, so
+            -- without this they'd burn ~40 cycles/edge on EVERY line and
+            -- overrun the per-line rasterizer budget (corrupting the
+            -- render — the eye-dependent nose dot).
+            if active_held = '0' then
+                v_count_m1 := to_unsigned(0, 7);
+            end if;
             start_rel_held  <= v_start_rel;
             count_m1_held   <= v_count_m1;
             -- center = sweep pixel at cur_x = -start_rel (start_rel <= 0).
