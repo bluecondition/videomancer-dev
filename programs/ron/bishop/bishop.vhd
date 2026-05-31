@@ -482,26 +482,12 @@ begin
             variable count_raw : unsigned(7 downto 0);
             variable v_thick_u : unsigned(7 downto 0);
             variable v_thick_s : signed(6 downto 0);
-            variable v_is_last  : boolean;
-            variable v_is_multi : boolean;
         begin
             s_fp      := signed(act_slope_rd);
             s_int     := resize(s_fp(15 downto 7), 12);
             v_thick_u := resize(thick_r, 8);
             v_thick_s := signed(resize(thick_r, 7));
-            -- "Last row of a multi-row edge" — at y_max, cur_x has DDA'd
-            -- to x_bot (the corner).  If we stamp the slope sweep here
-            -- we extend past x_bot (rightward for positive slope, etc.),
-            -- which shows up as a visible "stub" sticking out of every
-            -- non-tip corner (mouth_l / mouth_r etc.).  Drop the slope
-            -- sweep at the last row of multi-row edges; horizontal edges
-            -- (y_min == y_max) keep theirs — that span IS the line.
-            v_is_last  := (v_y_target = signed(act_ymax_rd));
-            v_is_multi := (signed(act_ymax_rd) > signed(act_ymin_rd));
-            if v_is_last and v_is_multi then
-                count_raw      := v_thick_u sll 1;
-                start_rel_held <= -v_thick_s;
-            elsif s_int >= to_signed(0, 12) then
+            if s_int >= to_signed(0, 12) then
                 if to_unsigned(to_integer(s_int), 8) > (v_thick_u sll 1) then
                     count_raw      := to_unsigned(to_integer(s_int), 8);
                     start_rel_held <= to_signed(0, 7);
