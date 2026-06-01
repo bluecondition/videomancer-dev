@@ -61,6 +61,16 @@ architecture bishop of program_top is
     -- by K2.  build_face_mesh.py sizes the tip-strip math for THICK_BUILD=4
     -- so any K2 setting up to 4 stays parity-correct.
     constant THICK_MAX   : natural := 4;
+    -- Slope-scaled thickness: a diagonal's perpendicular thickness from a
+    -- horizontal run of half-width h is h/sqrt(1+m^2), so to hold thickness
+    -- constant across slopes the half-pad must grow as thick*sqrt(1+m^2).
+    -- We approximate sqrt(1+m^2) ~= |slope_int|+1 (= ceil for small slope),
+    -- clamped to THICK_FACTOR_CAP so the near-horizontal tail (closed-mouth
+    -- lips, tip phantoms; |slope_int| up to ~24) can't overflow the stamp
+    -- counter or grow giant horizontal whiskers.  Exactly-horizontal edges
+    -- (ymin==ymax) are excluded — they get their thickness from the Stage-1
+    -- Y-window widening instead.
+    constant THICK_FACTOR_CAP : natural := 8;
     -- Cap stamps per edge so a single near-horizontal high-slope edge
     -- can't blow the per-scanline cycle budget.  Edges with
     -- |slope| + 2*THICK > MAX_STAMP_M1 render only the first portion
@@ -222,8 +232,12 @@ architecture bishop of program_top is
     -- decision; stage b (PRELOAD3) does the add + cap + center.
     signal s_int_held  : signed(11 downto 0) := (others => '0');
     signal abs_s_held  : unsigned(7 downto 0) := (others => '0');
-    signal pad_held    : std_logic := '0';   -- |slope_int| <= 2*thick
     signal sneg_held   : std_logic := '0';   -- slope is negative
+    -- Slope-scaled half-pad h = thick * min(|slope_int|+1, CAP), computed
+    -- in stage a so stage b is just adds.  0..32.
+    signal h_held      : unsigned(6 downto 0) := (others => '0');
+    -- Exactly-horizontal edge (ymin==ymax): width-only run, no X half-pad.
+    signal is_horiz_held : std_logic := '0';
 
     -- h_centre and bbox-edge constants pre-added once per scanline to
     -- avoid recomputing the (h_centre - HEAD_HALF_W) sum every cycle
@@ -533,9 +547,10 @@ begin
         -- to the magnitude path).  Splitting the original one-cycle
         -- compute into a+b shortened the HD critical path.
         procedure compute_counts_a is
-            variable s_fp   : signed(15 downto 0);
-            variable s_int  : signed(11 downto 0);
-            variable abs_s  : unsigned(7 downto 0);
+            variable s_fp     : signed(15 downto 0);
+            variable s_int    : signed(11 downto 0);
+            variable abs_s    : unsigned(7 downto 0);
+            variable v_factor : unsigned(3 downto 0);
         begin
             s_fp   := signed(act_slope_rd);
             s_int  := resize(s_fp(15 downto 7), 12);
@@ -548,15 +563,22 @@ begin
             end if;
             s_int_held <= s_int;
             abs_s_held <= abs_s;
-            if abs_s > (resize(thick_r, 8) sll 1) then
-                pad_held <= '0';
+            -- Slope-scaled half-pad: factor ~= ceil(sqrt(1+m^2)) ~=
+            -- |slope_int|+1, clamped to THICK_FACTOR_CAP.  h = thick*factor.
+            if abs_s >= to_unsigned(THICK_FACTOR_CAP, 8) then
+                v_factor := to_unsigned(THICK_FACTOR_CAP, 4);
             else
-                pad_held <= '1';
+                v_factor := resize(abs_s + 1, 4);
             end if;
-            -- Horizontal edge -> detail-only for EOR (closed-eye lids,
-            -- chin baseline).  Parallel to the magnitude decode.
+            h_held <= resize(thick_r * v_factor, 7);
+            -- Horizontal edge (ymin==ymax) -> detail-only for EOR (closed-
+            -- eye lids, chin baseline) AND width-only run: its thickness
+            -- comes from the Stage-1 Y-window widening, not the X half-pad.
             if act_ymax_rd = act_ymin_rd then
-                bnd_held <= '0';
+                bnd_held      <= '0';
+                is_horiz_held <= '1';
+            else
+                is_horiz_held <= '0';
             end if;
         end procedure;
 
@@ -566,21 +588,24 @@ begin
         -- compare.
         procedure compute_counts_b is
             variable count_raw   : unsigned(7 downto 0);
-            variable v_thick_u   : unsigned(7 downto 0);
-            variable v_thick_s   : signed(6 downto 0);
+            variable v_h_s       : signed(6 downto 0);
             variable v_start_rel : signed(6 downto 0);
             variable v_count_m1  : unsigned(6 downto 0);
         begin
-            v_thick_u := resize(thick_r, 8);
-            v_thick_s := signed(resize(thick_r, 7));
-            if pad_held = '1' then
-                count_raw := abs_s_held + (v_thick_u sll 1);
+            v_h_s := signed(resize(h_held, 7));   -- 0..32, MSB always 0
+            if is_horiz_held = '0' then
+                -- Diagonal/vertical: connectivity sweep (abs_s) + the
+                -- slope-scaled half-pad h on each side, giving uniform
+                -- perpendicular thickness across slopes.
+                count_raw := abs_s_held + (resize(h_held, 8) sll 1);
                 if sneg_held = '1' then
-                    v_start_rel := resize(s_int_held, 7) - v_thick_s;
+                    v_start_rel := resize(s_int_held, 7) - v_h_s;
                 else
-                    v_start_rel := -v_thick_s;
+                    v_start_rel := -v_h_s;
                 end if;
             else
+                -- Horizontal: full-width run only; the Stage-1 Y-window
+                -- widening supplies its thickness.
                 count_raw := abs_s_held;
                 if sneg_held = '1' then
                     v_start_rel := resize(s_int_held, 7);
