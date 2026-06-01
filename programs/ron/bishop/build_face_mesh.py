@@ -61,9 +61,6 @@ MAX_STAMP_M1  = 127                        # mirrors bishop.vhd MAX_STAMP_M1
 # THICK<4, a few extra rows are painted by phantom detail edges instead
 # of boundary edges — invisible because both buffers OR into the display.
 THICK_BUILD = 4
-# Mirrors bishop.vhd THICK_FACTOR_CAP — clamps the slope-scaled thickness
-# factor so the near-horizontal-diagonal tail can't overflow the stamp cap.
-THICK_FACTOR_CAP = 8
 
 # Degenerate no-op edge used to pad each expression's mesh up to
 # C_NUM_EDGES.  y_min > y_max so the rasterizer never activates it.
@@ -551,15 +548,7 @@ def check_fpga_limits(variants_per_expr):
                 if px > max_x_px:
                     max_x_px, max_x_where = px, f"expr{ei}/{vs or 'open'} slot{idx}"
             s_int = abs(e["slope"]) // FP_SCALE
-            # Mirror bishop.vhd compute_counts: horizontal edges (y_min ==
-            # y_max) draw a width-only run (no X half-pad); diagonals get a
-            # slope-scaled half-pad h = THICK_BUILD * min(s_int+1, CAP) on
-            # each side, so cnt = s_int + 2*h.
-            if e["y_min"] == e["y_max"]:
-                cnt = s_int
-            else:
-                factor = min(s_int + 1, THICK_FACTOR_CAP)
-                cnt = s_int + 2 * THICK_BUILD * factor
+            cnt = s_int + 2 * THICK_BUILD
             if cnt > max_cnt:
                 max_cnt, max_cnt_where = cnt, f"expr{ei}/{vs or 'open'} slot{idx}"
 
