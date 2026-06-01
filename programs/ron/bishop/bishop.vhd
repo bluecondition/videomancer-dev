@@ -54,8 +54,8 @@ architecture bishop of program_top is
     -- ---------------------------------------------------------------
     -- Geometry / rasterizer parameters
     -- ---------------------------------------------------------------
-    constant HEAD_HALF_W : natural := 200;  -- half-width of head bbox in pixels
-    constant HEAD_HALF_H : natural := 300;  -- half-height for the grid mask
+    constant HEAD_HALF_W : natural := 260;  -- half-width of head bbox in pixels
+    constant HEAD_HALF_H : natural := 420;  -- half-height for the grid mask
     constant CLEAR_W     : natural := 2 * HEAD_HALF_W;  -- cycles in CLEAR phase
     -- Edge thickness is now a per-frame latched value (`thick_r`), driven
     -- by K2.  build_face_mesh.py sizes the tip-strip math for THICK_BUILD=4
@@ -106,6 +106,12 @@ architecture bishop of program_top is
     signal max_y_r      : unsigned(11 downto 0) := to_unsigned(1080, 12);
     signal h_centre_r   : unsigned(11 downto 0) := to_unsigned(960, 12);
     signal v_centre_r   : unsigned(11 downto 0) := to_unsigned(540, 12);
+    -- Registered scanline target row (pixel_y - v_centre + 1).  Pipelined
+    -- out of the Stage-1 active-update compares: pixel_y/v_centre_r are
+    -- stable across the whole R_CLEAR edge walk, so the 1-cycle delay is
+    -- transparent, and it removes the 13-bit subtract from the long
+    -- subtract-then-compare carry chain that limited HD HDMI timing.
+    signal v_y_target_r : signed(12 downto 0) := (others => '0');
 
     -- ---------------------------------------------------------------
     -- Per-frame latched user controls (all updated on vsync_falling_r)
@@ -471,7 +477,6 @@ begin
     raster_proc : process(clk)
         variable v_idx         : integer range 0 to C_NUM_EDGES - 1;
         variable v_next_idx    : integer range 0 to C_NUM_EDGES - 1;
-        variable v_y_target    : signed(12 downto 0);
         variable v_ymin        : signed(12 downto 0);
         variable v_ymax        : signed(12 downto 0);
         variable v_xtop        : signed(11 downto 0);
@@ -601,7 +606,7 @@ begin
             lb_wr_en_bnd_r <= '0';
             lb_wr_en_det_r <= '0';
 
-            v_y_target := signed(resize(pixel_y, 13))
+            v_y_target_r <= signed(resize(pixel_y, 13))
                         - signed(resize(v_centre_r, 13))
                         + to_signed(1, 13);
 
@@ -820,7 +825,7 @@ begin
             -- from cx_rd_addr) lines up with the right edge.
             cx_wr_en <= '0';
             if upd_valid_r2 = '1' then
-                if v_y_target = upd_ymin_r2 then
+                if v_y_target_r = upd_ymin_r2 then
                     -- x_top is already Q9.7 in the mesh package — load
                     -- directly.  Mesh-side fixed-point lets us advance
                     -- x_top by exact 1-row slope steps when stripping
@@ -829,7 +834,7 @@ begin
                     cx_wr_addr <= upd_idx_r2;
                     cx_wr_data <= std_logic_vector(resize(upd_xtop_r2, 16));
                     active(to_integer(upd_idx_r2)) <= '1';
-                elsif v_y_target > upd_ymax_r2 then
+                elsif v_y_target_r > upd_ymax_r2 then
                     active(to_integer(upd_idx_r2)) <= '0';
                 elsif upd_active_r2 = '1' then
                     -- Q9.7 add: per-row fractional accumulation

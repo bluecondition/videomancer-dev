@@ -34,12 +34,27 @@ from pathlib import Path
 from face_mesh import VERTICES, EDGES, EXPRESSIONS, close_mouth, close_eyes
 
 VHDL_OUT = Path(__file__).with_name("bishop_mesh_pkg.vhd")
-TARGET_FACE_HEIGHT = 600
+# Rendered head height in FPGA pixels.  Bumped 600 -> 840 (~1.4x) to make
+# the head larger.  This is near the "free zone" ceiling: check_fpga_limits()
+# (run at build time) verifies x stays within the Q9.7 ±255 integer range and
+# the widest line stays under MAX_STAMP_M1.  HEAD_HALF_W in bishop.vhd must be
+# scaled in step (it sizes the clear bbox + stamp bounds).
+TARGET_FACE_HEIGHT = 840
 
 # Q9.7 fixed-point: 9-bit integer (±256) + 7-bit fractional (1/128 px).
 # Same 16-bit storage as the old Q12.4 path so current_x_ram fits one EBR.
 FP_BITS  = 7
 FP_SCALE = 1 << FP_BITS    # 128
+
+# Hard ceilings that bound how large TARGET_FACE_HEIGHT can grow without
+# changing the FPGA's storage formats.  Mirror the bishop.vhd constants:
+#   * x_top / cur_x are Q9.7 with a 9-bit SIGNED integer part -> |x| px must
+#     fit ±255 (use 255 as the symmetric safe limit).  Overflow = the head
+#     wraps around the screen (same failure class as the NO_OP overflow).
+#   * the per-edge stamp count is capped at MAX_STAMP_M1; a wider edge than
+#     that renders only its first portion (truncated line).
+FP_INT_MAX    = (1 << (FP_BITS + 1)) - 1   # 255: max |integer px| in Q9.7
+MAX_STAMP_M1  = 127                        # mirrors bishop.vhd MAX_STAMP_M1
 
 # Tip-strip math is sized for THICK_BUILD = 4 (the max K2 thickness)
 # so the strip has enough margin at any runtime thickness.  At runtime
@@ -513,6 +528,49 @@ def emit_vhdl(variants_per_expr, expr_names, out_path: Path):
     lines.append("end package body bishop_mesh_pkg;")
     out_path.write_text("\n".join(lines) + "\n")
 
+def check_fpga_limits(variants_per_expr):
+    """Verify the generated mesh fits the FPGA's fixed-point / stamp-count
+    formats, so scaling TARGET_FACE_HEIGHT up can't silently overflow into
+    a visual bug.  Reports the worst case (and how much margin remains) and
+    hard-errors if a limit is exceeded."""
+    max_x_px    = 0   # worst |integer x| in pixels (x_top and x_bot)
+    max_x_where = ""
+    max_cnt     = 0   # worst per-edge stamp count (|slope_int| + 2*THICK_BUILD)
+    max_cnt_where = ""
+    for (ei, vs), mesh in variants_per_expr.items():
+        for idx, e in enumerate(mesh):
+            if e["y_min"] > e["y_max"]:
+                continue   # NO_OP padding — never rendered
+            x_top = e["x_top"]
+            x_bot = e["x_top"] + e["slope"] * (e["y_max"] - e["y_min"])
+            for xv in (x_top, x_bot):
+                px = abs(xv) / FP_SCALE
+                if px > max_x_px:
+                    max_x_px, max_x_where = px, f"expr{ei}/{vs or 'open'} slot{idx}"
+            s_int = abs(e["slope"]) // FP_SCALE
+            cnt = s_int + 2 * THICK_BUILD
+            if cnt > max_cnt:
+                max_cnt, max_cnt_where = cnt, f"expr{ei}/{vs or 'open'} slot{idx}"
+
+    print(f"FPGA limit check:")
+    print(f"  max |x| = {max_x_px:.1f} px  ({max_x_where})   "
+          f"limit ±{FP_INT_MAX} (Q9.7 9-bit int)  "
+          f"-> headroom {FP_INT_MAX - max_x_px:.1f} px, "
+          f"~{FP_INT_MAX / max_x_px:.2f}x more scale")
+    print(f"  max stamp count = {max_cnt}  ({max_cnt_where})   "
+          f"limit {MAX_STAMP_M1}  "
+          f"-> headroom {MAX_STAMP_M1 - max_cnt}, "
+          f"~{MAX_STAMP_M1 / max_cnt:.2f}x more scale")
+    errs = []
+    if max_x_px > FP_INT_MAX:
+        errs.append(f"x overflow: |x|={max_x_px:.1f} > {FP_INT_MAX} "
+                    f"-> head wraps; reduce TARGET_FACE_HEIGHT or repartition Q-format")
+    if max_cnt > MAX_STAMP_M1:
+        errs.append(f"stamp overflow: count={max_cnt} > {MAX_STAMP_M1} "
+                    f"-> widest line truncated; reduce TARGET_FACE_HEIGHT or widen the counter")
+    if errs:
+        raise SystemExit("FPGA limit EXCEEDED:\n  " + "\n  ".join(errs))
+
 def main():
     expr_names = list(EXPRESSIONS.keys())
     print(f"expressions ({len(expr_names)}): {', '.join(expr_names)}")
@@ -574,6 +632,8 @@ def main():
 
     sizes = sorted(set(len(m) for m in variants_per_expr.values()))
     print(f"variant edge counts (should be uniform): {sizes}")
+
+    check_fpga_limits(variants_per_expr)
 
     emit_vhdl(variants_per_expr, expr_names, VHDL_OUT)
     print(f"wrote {VHDL_OUT}")
