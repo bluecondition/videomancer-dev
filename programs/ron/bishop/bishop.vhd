@@ -251,12 +251,21 @@ architecture bishop of program_top is
     -- in upd_*_r).
     signal upd_valid_r2  : std_logic := '0';
     signal upd_idx_r2    : unsigned(7 downto 0)  := (others => '0');
+    -- EFFECTIVE activation window [ymin, ymax].  For ordinary edges these
+    -- equal the raw mesh bounds.  For horizontal edges they are widened by
+    -- the thickness pads (ymin - top_pad .. ymax + bot_pad) so the line
+    -- spans thick_r scanlines and reads as thick as the steep edges.
     signal upd_ymin_r2   : signed(12 downto 0)   := (others => '0');
     signal upd_ymax_r2   : signed(12 downto 0)   := (others => '0');
     signal upd_xtop_r2   : signed(15 downto 0)   := (others => '0');  -- Q9.7
     signal upd_slope_r2  : signed(15 downto 0)   := (others => '0');  -- Q9.7
     signal upd_active_r2 : std_logic := '0';
     signal upd_bnd_r2    : std_logic := '0';
+    -- 1 = this edge is exactly horizontal (ymin==ymax): a single-scanline
+    -- line whose `slope` field holds its WIDTH, not a per-row slope.  Such
+    -- edges get Y-thickened (active for thick_r rows, see upd_ymin_r2/
+    -- upd_ymax_r2 below) and must NOT accumulate slope into cur_x.
+    signal upd_is_horiz_r2 : std_logic := '0';
 
     -- ---------------------------------------------------------------
     -- Active mesh BRAM (the BRAM-prefetch architecture).
@@ -646,8 +655,23 @@ begin
             -- has BRAM's 1-cycle read latency).
             upd_valid_r2  <= upd_valid_r;
             upd_idx_r2    <= upd_idx_r;
-            upd_ymin_r2   <= upd_ymin_r;
-            upd_ymax_r2   <= upd_ymax_r;
+            -- Horizontal edges (ymin==ymax) are 1 scanline tall; widen
+            -- their activation window by ±thick_r so the line spans
+            -- 2*thick+1 rows — matching the 2*thick+1 px HORIZONTAL width
+            -- a near-vertical edge gets from its sweep, so both axes read
+            -- equally thick.  Centred on the true row (symmetric pads).
+            -- Done here (not in Stage 1) to keep the add/sub off the
+            -- timing-critical v_y_target compare.  Ordinary edges pass
+            -- through unchanged.
+            if upd_ymin_r = upd_ymax_r then
+                upd_is_horiz_r2 <= '1';
+                upd_ymin_r2 <= upd_ymin_r - signed(resize(thick_r, 13));
+                upd_ymax_r2 <= upd_ymax_r + signed(resize(thick_r, 13));
+            else
+                upd_is_horiz_r2 <= '0';
+                upd_ymin_r2 <= upd_ymin_r;
+                upd_ymax_r2 <= upd_ymax_r;
+            end if;
             upd_xtop_r2   <= upd_xtop_r;
             upd_slope_r2  <= upd_slope_r;
             upd_active_r2 <= upd_active_r;
@@ -836,8 +860,11 @@ begin
                     active(to_integer(upd_idx_r2)) <= '1';
                 elsif v_y_target_r > upd_ymax_r2 then
                     active(to_integer(upd_idx_r2)) <= '0';
-                elsif upd_active_r2 = '1' then
-                    -- Q9.7 add: per-row fractional accumulation
+                elsif upd_active_r2 = '1' and upd_is_horiz_r2 = '0' then
+                    -- Q9.7 add: per-row fractional accumulation.  Skipped
+                    -- for horizontal edges — their slope field holds the
+                    -- line WIDTH, so cur_x must stay parked on the left
+                    -- end across all thick_r rows of the widened window.
                     cx_wr_en   <= '1';
                     cx_wr_addr <= upd_idx_r2;
                     cx_wr_data <= std_logic_vector(
