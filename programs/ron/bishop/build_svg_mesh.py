@@ -17,11 +17,11 @@ OUT = Path(__file__).with_name("bishop_mesh_pkg.vhd")
 
 FP_BITS = 7
 FP_SCALE = 1 << FP_BITS          # 128 (Q9.7)
-TARGET_W = 500                   # scaled head width px; half (250) < Q9.7 |x|=255
+TARGET_W = 480                   # scaled head width px; half (240) < Q9.7 |x|=255
 FP_INT_MAX = 255
 MAX_STAMP_M1 = 127
 THICK_BUILD = 4
-INCLUDE_SILHOUETTE = False       # draw the clip-path head outline as edges too?
+INCLUDE_SILHOUETTE = True        # draw the clip-path head outline as edges too?
 
 
 def floats(s):

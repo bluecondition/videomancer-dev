@@ -54,7 +54,7 @@ architecture bishop of program_top is
     -- ---------------------------------------------------------------
     -- Geometry / rasterizer parameters
     -- ---------------------------------------------------------------
-    constant HEAD_HALF_W : natural := 220;  -- half-width of head bbox (dense SVG model, max|x|~206)
+    constant HEAD_HALF_W : natural := 245;  -- half-width of head bbox (dense SVG model + silhouette, max|x|~240)
     constant HEAD_HALF_H : natural := 420;  -- half-height for the grid mask
     constant CLEAR_W     : natural := 2 * HEAD_HALF_W;  -- cycles in CLEAR phase
     -- Edge thickness is now a per-frame latched value (`thick_r`), driven
@@ -173,18 +173,27 @@ architecture bishop of program_top is
     -- ---------------------------------------------------------------
     -- Rasterizer FSM
     -- ---------------------------------------------------------------
-    -- R_STAMP_SCAN walks the edge index over INACTIVE edges at 1 cycle each
-    -- (just testing the active bit) and only enters the 3-cycle PRELOAD +
-    -- stamp path for edges actually on this scanline.  Inactive edges drew
-    -- nothing before (stamp_valid was gated off), so this is render-identical
-    -- — it just stops paying ~4 cycles/edge for edges that aren't here,
-    -- turning the per-line walk from O(N_EDGES) toward O(active-this-row).
-    type t_raster_state is (R_IDLE, R_CLEAR, R_STAMP_SCAN, R_STAMP_PRELOAD,
-                             R_STAMP_PRELOAD2, R_STAMP_PRELOAD3,
+    -- Active-edge list: during R_CLEAR the edge-update appends the index of
+    -- every edge active on this scanline to act_list_ram.  R_STAMP then
+    -- iterates ONLY that list (R_STAMP_SCAN issues the list read, SCAN2
+    -- consumes it and enters the stamp pipeline).  This replaces the old
+    -- inline scan that indexed the full active vector every cycle (a wide
+    -- N:1 mux that was the HD critical path) and walked all N edges — now
+    -- the stamp phase is O(active-this-row) with no wide mux.
+    type t_raster_state is (R_IDLE, R_CLEAR, R_STAMP_SCAN, R_STAMP_SCAN2,
+                             R_STAMP_PRELOAD, R_STAMP_PRELOAD2, R_STAMP_PRELOAD3,
                              R_STAMP, R_STAMP_DRAIN);
     signal raster_state    : t_raster_state := R_IDLE;
     signal raster_cycle    : unsigned(10 downto 0) := (others => '0');
-    signal stamp_edge_idx  : unsigned(8 downto 0)  := (others => '0');
+    -- Active-edge list storage + pointers (single-driver: all in raster_proc).
+    type t_act_list_ram is array (0 to 511) of std_logic_vector(8 downto 0);
+    signal act_list_ram : t_act_list_ram := (others => (others => '0'));
+    signal al_wr_addr   : unsigned(8 downto 0) := (others => '0');  -- build ptr (R_CLEAR)
+    signal al_rd_addr   : unsigned(8 downto 0) := (others => '0');  -- iterate ptr (R_STAMP)
+    signal al_rd_data   : std_logic_vector(8 downto 0) := (others => '0');
+    signal al_count     : unsigned(8 downto 0) := (others => '0');  -- # active this line
+    signal al_wr_en     : std_logic := '0';
+    signal al_wr_data   : std_logic_vector(8 downto 0) := (others => '0');
     -- Wide enough for max |slope| + 2*THICK.
     signal stamp_sub       : unsigned(6 downto 0)  := (others => '0');
 
@@ -694,6 +703,7 @@ begin
                         lb_ab_r       <= not lb_ab_r;
                         raster_state  <= R_CLEAR;
                         raster_cycle  <= (others => '0');
+                        al_wr_addr    <= (others => '0');  -- start a fresh active list
                     end if;
 
                 when R_CLEAR =>
@@ -727,30 +737,33 @@ begin
                     end if;
 
                     if raster_cycle = to_unsigned(CLEAR_W - 1, 11) then
-                        -- Hand off to R_STAMP_SCAN, which finds the first
-                        -- active edge (latch_held there) before PRELOAD.
+                        -- Active list is fully built; iterate it.  al_count
+                        -- snapshots the build pointer; al_rd_addr starts the
+                        -- read so al_rd_data = list[0] arrives in SCAN2.
                         raster_state    <= R_STAMP_SCAN;
                         raster_cycle    <= (others => '0');
-                        stamp_edge_idx  <= (others => '0');
+                        al_count        <= al_wr_addr;
+                        al_rd_addr      <= (others => '0');
                         stamp_sub       <= (others => '0');
                     else
                         raster_cycle <= raster_cycle + 1;
                     end if;
 
                 when R_STAMP_SCAN =>
-                    -- Find the next edge active on this scanline.  Inactive
-                    -- edges are skipped 1 cycle each (they stamp nothing);
-                    -- when none remain, drain.  latch_held issues the new
-                    -- edge's mesh/cur_x reads, which settle during PRELOAD —
-                    -- same read timing the old inline latch_held had.
-                    if stamp_edge_idx >= to_unsigned(C_NUM_EDGES, 9) then
+                    -- Issue the list read for al_rd_addr (al_rd_data lands
+                    -- next cycle); drain when the list is exhausted.
+                    if al_rd_addr >= al_count then
                         raster_state <= R_STAMP_DRAIN;
-                    elsif active(to_integer(stamp_edge_idx)) = '0' then
-                        stamp_edge_idx <= stamp_edge_idx + 1;
                     else
-                        latch_held(to_integer(stamp_edge_idx));
-                        raster_state <= R_STAMP_PRELOAD;
+                        raster_state <= R_STAMP_SCAN2;
                     end if;
+
+                when R_STAMP_SCAN2 =>
+                    -- al_rd_data holds this active edge's index; latch it
+                    -- (issues its mesh/cur_x reads, settling during PRELOAD)
+                    -- and enter the stamp pipeline.
+                    latch_held(to_integer(unsigned(al_rd_data)));
+                    raster_state <= R_STAMP_PRELOAD;
 
                 when R_STAMP_PRELOAD =>
                     -- First wait cycle.  Drain any pending stamp from
@@ -822,10 +835,10 @@ begin
                     end if;
 
                     if stamp_sub = count_m1_held then
-                        -- Advance to the next edge; R_STAMP_SCAN skips
-                        -- inactive ones and drains at the end.
+                        -- Advance to the next list entry; R_STAMP_SCAN reads
+                        -- it (or drains when the list is exhausted).
                         stamp_sub <= (others => '0');
-                        stamp_edge_idx <= stamp_edge_idx + 1;
+                        al_rd_addr <= al_rd_addr + 1;
                         raster_state <= R_STAMP_SCAN;
                     else
                         stamp_sub <= stamp_sub + 1;
@@ -850,6 +863,7 @@ begin
                         lb_ab_r       <= not lb_ab_r;
                         raster_state  <= R_CLEAR;
                         raster_cycle  <= (others => '0');
+                        al_wr_addr    <= (others => '0');  -- fresh active list
                     end if;
 
             end case;
@@ -858,6 +872,7 @@ begin
             -- DOUBLE-registered upd_*_r2 so cx_rd_data (1-cycle delayed
             -- from cx_rd_addr) lines up with the right edge.
             cx_wr_en <= '0';
+            al_wr_en <= '0';
             if upd_valid_r2 = '1' then
                 if v_y_target_r = upd_ymin_r2 then
                     -- x_top is already Q9.7 in the mesh package — load
@@ -880,6 +895,14 @@ begin
                     cx_wr_data <= std_logic_vector(
                                     signed(cx_rd_data) + upd_slope_r2);
                 end if;
+                -- Append to the active list iff the edge is active on this
+                -- line AFTER this update: it just activated (==ymin), or it
+                -- was already active and hasn't passed ymax yet.
+                if (v_y_target_r = upd_ymin_r2)
+                   or (v_y_target_r <= upd_ymax_r2 and upd_active_r2 = '1') then
+                    al_wr_en   <= '1';
+                    al_wr_data <= std_logic_vector(upd_idx_r2);
+                end if;
             end if;
 
             -- Global vsync reset of all active flags.  Edges whose
@@ -891,6 +914,15 @@ begin
             if vsync_falling_r = '1' then
                 active <= (others => '0');
             end if;
+
+            -- Active-list BRAM: append on al_wr_en (advancing the build
+            -- pointer), plus a continuous read so al_rd_data trails
+            -- al_rd_addr by one cycle for the R_STAMP_SCAN/SCAN2 iterator.
+            if al_wr_en = '1' then
+                act_list_ram(to_integer(al_wr_addr)) <= al_wr_data;
+                al_wr_addr <= al_wr_addr + 1;
+            end if;
+            al_rd_data <= act_list_ram(to_integer(al_rd_addr));
         end if;
     end process;
 
