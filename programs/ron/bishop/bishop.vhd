@@ -281,6 +281,12 @@ architecture bishop of program_top is
     -- edges get Y-thickened (active for thick_r rows, see upd_ymin_r2/
     -- upd_ymax_r2 below) and must NOT accumulate slope into cur_x.
     signal upd_is_horiz_r2 : std_logic := '0';
+    -- Scanline-vs-edge compare flags, computed at the r->r2 stage (vs the
+    -- effective bounds) and registered, so Stage 1 uses 1-bit flags instead
+    -- of the 13-bit v_y_target compare (which was the HD critical path).
+    -- Valid a stage early because v_y_target_r is constant across R_CLEAR.
+    signal upd_is_ymin_r2   : std_logic := '0';   -- v_y_target_r = effective ymin
+    signal upd_past_ymax_r2 : std_logic := '0';   -- v_y_target_r > effective ymax
 
     -- ---------------------------------------------------------------
     -- Active mesh BRAM (the BRAM-prefetch architecture).
@@ -527,7 +533,10 @@ begin
         begin
             cx_rd_addr  <= to_unsigned(idx, 8);
             act_rd_addr <= to_unsigned(idx, 8);
-            active_held <= active(idx);
+            -- Only ever called from R_STAMP_SCAN2 with an edge taken from the
+            -- active list, so it is active by construction — no need to index
+            -- the (wide) active vector here (that 251:1 mux was the HD path).
+            active_held <= '1';
             if C_EDGE_BND(idx) = 1 then
                 bnd_held <= '1';
             else
@@ -681,10 +690,18 @@ begin
                 upd_is_horiz_r2 <= '1';
                 upd_ymin_r2 <= upd_ymin_r - signed(resize(thick_r, 13));
                 upd_ymax_r2 <= upd_ymax_r + signed(resize(thick_r, 13));
+                if v_y_target_r = upd_ymin_r - signed(resize(thick_r, 13)) then
+                    upd_is_ymin_r2 <= '1'; else upd_is_ymin_r2 <= '0'; end if;
+                if v_y_target_r > upd_ymax_r + signed(resize(thick_r, 13)) then
+                    upd_past_ymax_r2 <= '1'; else upd_past_ymax_r2 <= '0'; end if;
             else
                 upd_is_horiz_r2 <= '0';
                 upd_ymin_r2 <= upd_ymin_r;
                 upd_ymax_r2 <= upd_ymax_r;
+                if v_y_target_r = upd_ymin_r then
+                    upd_is_ymin_r2 <= '1'; else upd_is_ymin_r2 <= '0'; end if;
+                if v_y_target_r > upd_ymax_r then
+                    upd_past_ymax_r2 <= '1'; else upd_past_ymax_r2 <= '0'; end if;
             end if;
             upd_xtop_r2   <= upd_xtop_r;
             upd_slope_r2  <= upd_slope_r;
@@ -874,7 +891,7 @@ begin
             cx_wr_en <= '0';
             al_wr_en <= '0';
             if upd_valid_r2 = '1' then
-                if v_y_target_r = upd_ymin_r2 then
+                if upd_is_ymin_r2 = '1' then
                     -- x_top is already Q9.7 in the mesh package — load
                     -- directly.  Mesh-side fixed-point lets us advance
                     -- x_top by exact 1-row slope steps when stripping
@@ -883,7 +900,7 @@ begin
                     cx_wr_addr <= upd_idx_r2;
                     cx_wr_data <= std_logic_vector(resize(upd_xtop_r2, 16));
                     active(to_integer(upd_idx_r2)) <= '1';
-                elsif v_y_target_r > upd_ymax_r2 then
+                elsif upd_past_ymax_r2 = '1' then
                     active(to_integer(upd_idx_r2)) <= '0';
                 elsif upd_active_r2 = '1' and upd_is_horiz_r2 = '0' then
                     -- Q9.7 add: per-row fractional accumulation.  Skipped
@@ -898,8 +915,8 @@ begin
                 -- Append to the active list iff the edge is active on this
                 -- line AFTER this update: it just activated (==ymin), or it
                 -- was already active and hasn't passed ymax yet.
-                if (v_y_target_r = upd_ymin_r2)
-                   or (v_y_target_r <= upd_ymax_r2 and upd_active_r2 = '1') then
+                if upd_is_ymin_r2 = '1'
+                   or (upd_past_ymax_r2 = '0' and upd_active_r2 = '1') then
                     al_wr_en   <= '1';
                     al_wr_data <= std_logic_vector(upd_idx_r2);
                 end if;
