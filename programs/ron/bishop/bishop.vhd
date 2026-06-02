@@ -159,11 +159,11 @@ architecture bishop of program_top is
     -- edge drifts ~0.2 px — small enough that edges visibly meet at
     -- shared vertices.  Same 16-bit storage as Q12.4 so current_x_ram
     -- still fits a single EBR.
-    type t_cur_x_ram is array (0 to 511) of std_logic_vector(15 downto 0);
+    type t_cur_x_ram is array (0 to 255) of std_logic_vector(15 downto 0);
     signal current_x_ram : t_cur_x_ram := (others => (others => '0'));
-    signal cx_rd_addr  : unsigned(8 downto 0) := (others => '0');
+    signal cx_rd_addr  : unsigned(7 downto 0) := (others => '0');
     signal cx_rd_data  : std_logic_vector(15 downto 0);
-    signal cx_wr_addr  : unsigned(8 downto 0) := (others => '0');
+    signal cx_wr_addr  : unsigned(7 downto 0) := (others => '0');
     signal cx_wr_data  : std_logic_vector(15 downto 0) := (others => '0');
     signal cx_wr_en    : std_logic := '0';
 
@@ -186,14 +186,14 @@ architecture bishop of program_top is
     signal raster_state    : t_raster_state := R_IDLE;
     signal raster_cycle    : unsigned(10 downto 0) := (others => '0');
     -- Active-edge list storage + pointers (single-driver: all in raster_proc).
-    type t_act_list_ram is array (0 to 511) of std_logic_vector(8 downto 0);
+    type t_act_list_ram is array (0 to 255) of std_logic_vector(7 downto 0);
     signal act_list_ram : t_act_list_ram := (others => (others => '0'));
-    signal al_wr_addr   : unsigned(8 downto 0) := (others => '0');  -- build ptr (R_CLEAR)
-    signal al_rd_addr   : unsigned(8 downto 0) := (others => '0');  -- iterate ptr (R_STAMP)
-    signal al_rd_data   : std_logic_vector(8 downto 0) := (others => '0');
-    signal al_count     : unsigned(8 downto 0) := (others => '0');  -- # active this line
+    signal al_wr_addr   : unsigned(7 downto 0) := (others => '0');  -- build ptr (R_CLEAR)
+    signal al_rd_addr   : unsigned(7 downto 0) := (others => '0');  -- iterate ptr (R_STAMP)
+    signal al_rd_data   : std_logic_vector(7 downto 0) := (others => '0');
+    signal al_count     : unsigned(7 downto 0) := (others => '0');  -- # active this line
     signal al_wr_en     : std_logic := '0';
-    signal al_wr_data   : std_logic_vector(8 downto 0) := (others => '0');
+    signal al_wr_data   : std_logic_vector(7 downto 0) := (others => '0');
     -- Wide enough for max |slope| + 2*THICK.
     signal stamp_sub       : unsigned(7 downto 0)  := (others => '0');
 
@@ -253,7 +253,7 @@ architecture bishop of program_top is
     -- current_x / active.  Breaks the big "array read → ALU → array
     -- write" combinational chain that was the dominant critical path.
     signal upd_valid_r  : std_logic := '0';
-    signal upd_idx_r    : unsigned(8 downto 0)  := (others => '0');
+    signal upd_idx_r    : unsigned(7 downto 0)  := (others => '0');
     signal upd_ymin_r   : signed(12 downto 0)   := (others => '0');
     signal upd_ymax_r   : signed(12 downto 0)   := (others => '0');
     signal upd_xtop_r   : signed(15 downto 0)   := (others => '0');  -- Q9.7
@@ -265,7 +265,7 @@ architecture bishop of program_top is
     -- ram[OLD edge] (the read issued one cycle earlier than the latch
     -- in upd_*_r).
     signal upd_valid_r2  : std_logic := '0';
-    signal upd_idx_r2    : unsigned(8 downto 0)  := (others => '0');
+    signal upd_idx_r2    : unsigned(7 downto 0)  := (others => '0');
     -- EFFECTIVE activation window [ymin, ymax].  For ordinary edges these
     -- equal the raw mesh bounds.  For horizontal edges they are widened by
     -- the thickness pads (ymin - top_pad .. ymax + bot_pad) so the line
@@ -293,21 +293,21 @@ architecture bishop of program_top is
     -- reads one BRAM word per slot — no LUT-ROM, no expr mux, no
     -- variant select on the per-pixel critical path.  4 EBRs.
     -- ---------------------------------------------------------------
-    type t_act_y_ram is array (0 to 511) of std_logic_vector(12 downto 0);
-    type t_act_x_ram is array (0 to 511) of std_logic_vector(15 downto 0);
+    type t_act_y_ram is array (0 to 255) of std_logic_vector(12 downto 0);
+    type t_act_x_ram is array (0 to 255) of std_logic_vector(15 downto 0);
     signal act_ymin_ram  : t_act_y_ram := (others => (others => '0'));
     signal act_ymax_ram  : t_act_y_ram := (others => (others => '0'));
     signal act_xtop_ram  : t_act_x_ram := (others => (others => '0'));
     signal act_slope_ram : t_act_x_ram := (others => (others => '0'));
 
-    signal act_rd_addr   : unsigned(8 downto 0) := (others => '0');
+    signal act_rd_addr   : unsigned(7 downto 0) := (others => '0');
     signal act_ymin_rd   : std_logic_vector(12 downto 0);
     signal act_ymax_rd   : std_logic_vector(12 downto 0);
     signal act_xtop_rd   : std_logic_vector(15 downto 0);
     signal act_slope_rd  : std_logic_vector(15 downto 0);
 
     signal act_wr_en     : std_logic := '0';
-    signal act_wr_addr   : unsigned(8 downto 0) := (others => '0');
+    signal act_wr_addr   : unsigned(7 downto 0) := (others => '0');
     signal act_ymin_wr   : std_logic_vector(12 downto 0) := (others => '0');
     signal act_ymax_wr   : std_logic_vector(12 downto 0) := (others => '0');
     signal act_xtop_wr   : std_logic_vector(15 downto 0) := (others => '0');
@@ -326,14 +326,14 @@ architecture bishop of program_top is
     signal cp_state : t_cp_state := CP_IDLE;
     signal cp_addr  : unsigned(8 downto 0) := (others => '0');  -- 9-bit for fill drain
     signal cp_e_valid : std_logic := '0';
-    signal cp_e_addr  : unsigned(8 downto 0) := (others => '0');
+    signal cp_e_addr  : unsigned(7 downto 0) := (others => '0');
     signal cp_e_group : natural range 0 to 3 := 0;
     signal cp_e_ymin_open, cp_e_ymin_ec, cp_e_ymin_mc   : signed(12 downto 0) := (others => '0');
     signal cp_e_ymax_open, cp_e_ymax_ec, cp_e_ymax_mc   : signed(12 downto 0) := (others => '0');
     signal cp_e_xtop_open, cp_e_xtop_ec, cp_e_xtop_mc   : signed(15 downto 0) := (others => '0');
     signal cp_e_slope_open, cp_e_slope_ec, cp_e_slope_mc : signed(15 downto 0) := (others => '0');
     signal cp_s_valid : std_logic := '0';
-    signal cp_s_addr  : unsigned(8 downto 0) := (others => '0');
+    signal cp_s_addr  : unsigned(7 downto 0) := (others => '0');
     signal cp_s_ymin, cp_s_ymax  : signed(12 downto 0) := (others => '0');
     signal cp_s_xtop, cp_s_slope : signed(15 downto 0) := (others => '0');
 
@@ -347,11 +347,11 @@ architecture bishop of program_top is
     -- act_*_rd data.  cx_rd_addr is also driven from _pre2 so
     -- cx_rd_data lines up the same way.
     signal upd_valid_pre  : std_logic := '0';
-    signal upd_idx_pre    : unsigned(8 downto 0) := (others => '0');
+    signal upd_idx_pre    : unsigned(7 downto 0) := (others => '0');
     signal upd_active_pre : std_logic := '0';
     signal upd_bnd_pre    : std_logic := '0';
     signal upd_valid_pre2  : std_logic := '0';
-    signal upd_idx_pre2    : unsigned(8 downto 0) := (others => '0');
+    signal upd_idx_pre2    : unsigned(7 downto 0) := (others => '0');
     signal upd_active_pre2 : std_logic := '0';
     signal upd_bnd_pre2    : std_logic := '0';
 
@@ -525,8 +525,8 @@ begin
         -- mux off the per-cycle critical path entirely.
         procedure latch_held(idx : integer) is
         begin
-            cx_rd_addr  <= to_unsigned(idx, 9);
-            act_rd_addr <= to_unsigned(idx, 9);
+            cx_rd_addr  <= to_unsigned(idx, 8);
+            act_rd_addr <= to_unsigned(idx, 8);
             active_held <= active(idx);
             if C_EDGE_BND(idx) = 1 then
                 bnd_held <= '1';
@@ -722,10 +722,10 @@ begin
                     -- aligned with the BRAM read for current_x and the
                     -- pipeline shift to upd_*_r2.
                     if raster_cycle < to_unsigned(C_NUM_EDGES, 11) then
-                        v_idx          := to_integer(raster_cycle(8 downto 0));
-                        act_rd_addr    <= raster_cycle(8 downto 0);
+                        v_idx          := to_integer(raster_cycle(7 downto 0));
+                        act_rd_addr    <= raster_cycle(7 downto 0);
                         upd_valid_pre  <= '1';
-                        upd_idx_pre    <= raster_cycle(8 downto 0);
+                        upd_idx_pre    <= raster_cycle(7 downto 0);
                         upd_active_pre <= active(v_idx);
                         if C_EDGE_BND(v_idx) = 1 then
                             upd_bnd_pre <= '1';
@@ -999,20 +999,20 @@ begin
             -- combinationally, register per-variant values.
             if cp_state = CP_RUN and cp_addr < to_unsigned(C_NUM_EDGES, 9) then
                 cp_e_valid <= '1';
-                cp_e_addr  <= cp_addr(8 downto 0);
-                cp_e_group <= C_EDGE_GROUP(to_integer(cp_addr(8 downto 0)));
-                cp_e_ymin_open <= to_signed(f_y_min   (to_integer(expr_idx_r), to_integer(cp_addr(8 downto 0))), 13);
-                cp_e_ymax_open <= to_signed(f_y_max   (to_integer(expr_idx_r), to_integer(cp_addr(8 downto 0))), 13);
-                cp_e_xtop_open <= to_signed(f_x_top   (to_integer(expr_idx_r), to_integer(cp_addr(8 downto 0))), 16);
-                cp_e_slope_open<= to_signed(f_slope   (to_integer(expr_idx_r), to_integer(cp_addr(8 downto 0))), 16);
-                cp_e_ymin_ec   <= to_signed(f_y_min_ec(to_integer(expr_idx_r), to_integer(cp_addr(8 downto 0))), 13);
-                cp_e_ymax_ec   <= to_signed(f_y_max_ec(to_integer(expr_idx_r), to_integer(cp_addr(8 downto 0))), 13);
-                cp_e_xtop_ec   <= to_signed(f_x_top_ec(to_integer(expr_idx_r), to_integer(cp_addr(8 downto 0))), 16);
-                cp_e_slope_ec  <= to_signed(f_slope_ec(to_integer(expr_idx_r), to_integer(cp_addr(8 downto 0))), 16);
-                cp_e_ymin_mc   <= to_signed(f_y_min_mc(to_integer(expr_idx_r), to_integer(cp_addr(8 downto 0))), 13);
-                cp_e_ymax_mc   <= to_signed(f_y_max_mc(to_integer(expr_idx_r), to_integer(cp_addr(8 downto 0))), 13);
-                cp_e_xtop_mc   <= to_signed(f_x_top_mc(to_integer(expr_idx_r), to_integer(cp_addr(8 downto 0))), 16);
-                cp_e_slope_mc  <= to_signed(f_slope_mc(to_integer(expr_idx_r), to_integer(cp_addr(8 downto 0))), 16);
+                cp_e_addr  <= cp_addr(7 downto 0);
+                cp_e_group <= C_EDGE_GROUP(to_integer(cp_addr(7 downto 0)));
+                cp_e_ymin_open <= to_signed(f_y_min   (to_integer(expr_idx_r), to_integer(cp_addr(7 downto 0))), 13);
+                cp_e_ymax_open <= to_signed(f_y_max   (to_integer(expr_idx_r), to_integer(cp_addr(7 downto 0))), 13);
+                cp_e_xtop_open <= to_signed(f_x_top   (to_integer(expr_idx_r), to_integer(cp_addr(7 downto 0))), 16);
+                cp_e_slope_open<= to_signed(f_slope   (to_integer(expr_idx_r), to_integer(cp_addr(7 downto 0))), 16);
+                cp_e_ymin_ec   <= to_signed(f_y_min_ec(to_integer(expr_idx_r), to_integer(cp_addr(7 downto 0))), 13);
+                cp_e_ymax_ec   <= to_signed(f_y_max_ec(to_integer(expr_idx_r), to_integer(cp_addr(7 downto 0))), 13);
+                cp_e_xtop_ec   <= to_signed(f_x_top_ec(to_integer(expr_idx_r), to_integer(cp_addr(7 downto 0))), 16);
+                cp_e_slope_ec  <= to_signed(f_slope_ec(to_integer(expr_idx_r), to_integer(cp_addr(7 downto 0))), 16);
+                cp_e_ymin_mc   <= to_signed(f_y_min_mc(to_integer(expr_idx_r), to_integer(cp_addr(7 downto 0))), 13);
+                cp_e_ymax_mc   <= to_signed(f_y_max_mc(to_integer(expr_idx_r), to_integer(cp_addr(7 downto 0))), 13);
+                cp_e_xtop_mc   <= to_signed(f_x_top_mc(to_integer(expr_idx_r), to_integer(cp_addr(7 downto 0))), 16);
+                cp_e_slope_mc  <= to_signed(f_slope_mc(to_integer(expr_idx_r), to_integer(cp_addr(7 downto 0))), 16);
             else
                 cp_e_valid <= '0';
             end if;

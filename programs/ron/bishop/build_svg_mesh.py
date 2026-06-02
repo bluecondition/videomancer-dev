@@ -62,12 +62,15 @@ REMOVED_EDGES = [
     (45, 34), (37, 49), (66, 73),
     # batch 13
     (45, 58), (46, 56),
+    # batch 14
+    (35, 22), (36, 22), (47, 22), (47, 51),
 ]
 
 # Edges to ADD that aren't in the SVG, as (pointA, pointB) by the same
 # numbering.  Drawn as a straight line between the two points' coords.
 ADDED_EDGES = [
     (55, 49),
+    (35, 36), (35, 42), (43, 36),
 ]
 
 # Points to MOVE: {number: (new_x, new_y)} in SVG coords.  Applied as an
