@@ -173,7 +173,13 @@ architecture bishop of program_top is
     -- ---------------------------------------------------------------
     -- Rasterizer FSM
     -- ---------------------------------------------------------------
-    type t_raster_state is (R_IDLE, R_CLEAR, R_STAMP_PRELOAD,
+    -- R_STAMP_SCAN walks the edge index over INACTIVE edges at 1 cycle each
+    -- (just testing the active bit) and only enters the 3-cycle PRELOAD +
+    -- stamp path for edges actually on this scanline.  Inactive edges drew
+    -- nothing before (stamp_valid was gated off), so this is render-identical
+    -- — it just stops paying ~4 cycles/edge for edges that aren't here,
+    -- turning the per-line walk from O(N_EDGES) toward O(active-this-row).
+    type t_raster_state is (R_IDLE, R_CLEAR, R_STAMP_SCAN, R_STAMP_PRELOAD,
                              R_STAMP_PRELOAD2, R_STAMP_PRELOAD3,
                              R_STAMP, R_STAMP_DRAIN);
     signal raster_state    : t_raster_state := R_IDLE;
@@ -485,7 +491,6 @@ begin
     -- ---------------------------------------------------------------
     raster_proc : process(clk)
         variable v_idx         : integer range 0 to C_NUM_EDGES - 1;
-        variable v_next_idx    : integer range 0 to C_NUM_EDGES - 1;
         variable v_ymin        : signed(12 downto 0);
         variable v_ymax        : signed(12 downto 0);
         variable v_xtop        : signed(11 downto 0);
@@ -722,17 +727,29 @@ begin
                     end if;
 
                     if raster_cycle = to_unsigned(CLEAR_W - 1, 11) then
-                        -- Transition through R_STAMP_PRELOAD so the
-                        -- BRAM read of edge 0's current_x (issued in
-                        -- latch_held) has a cycle to settle before
-                        -- Stage A reads cx_rd_data.
-                        raster_state    <= R_STAMP_PRELOAD;
+                        -- Hand off to R_STAMP_SCAN, which finds the first
+                        -- active edge (latch_held there) before PRELOAD.
+                        raster_state    <= R_STAMP_SCAN;
                         raster_cycle    <= (others => '0');
                         stamp_edge_idx  <= (others => '0');
                         stamp_sub       <= (others => '0');
-                        latch_held(0);
                     else
                         raster_cycle <= raster_cycle + 1;
+                    end if;
+
+                when R_STAMP_SCAN =>
+                    -- Find the next edge active on this scanline.  Inactive
+                    -- edges are skipped 1 cycle each (they stamp nothing);
+                    -- when none remain, drain.  latch_held issues the new
+                    -- edge's mesh/cur_x reads, which settle during PRELOAD —
+                    -- same read timing the old inline latch_held had.
+                    if stamp_edge_idx >= to_unsigned(C_NUM_EDGES, 8) then
+                        raster_state <= R_STAMP_DRAIN;
+                    elsif active(to_integer(stamp_edge_idx)) = '0' then
+                        stamp_edge_idx <= stamp_edge_idx + 1;
+                    else
+                        latch_held(to_integer(stamp_edge_idx));
+                        raster_state <= R_STAMP_PRELOAD;
                     end if;
 
                 when R_STAMP_PRELOAD =>
@@ -805,18 +822,11 @@ begin
                     end if;
 
                     if stamp_sub = count_m1_held then
+                        -- Advance to the next edge; R_STAMP_SCAN skips
+                        -- inactive ones and drains at the end.
                         stamp_sub <= (others => '0');
-                        if stamp_edge_idx = to_unsigned(C_NUM_EDGES - 1, 8) then
-                            raster_state <= R_STAMP_DRAIN;
-                        else
-                            stamp_edge_idx <= stamp_edge_idx + 1;
-                            -- Latch held values for the NEXT edge and
-                            -- transition through PRELOAD so the new
-                            -- BRAM read has a cycle to settle.
-                            v_next_idx := to_integer(stamp_edge_idx) + 1;
-                            latch_held(v_next_idx);
-                            raster_state <= R_STAMP_PRELOAD;
-                        end if;
+                        stamp_edge_idx <= stamp_edge_idx + 1;
+                        raster_state <= R_STAMP_SCAN;
                     else
                         stamp_sub <= stamp_sub + 1;
                     end if;
