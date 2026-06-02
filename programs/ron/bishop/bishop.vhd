@@ -195,7 +195,7 @@ architecture bishop of program_top is
     signal al_wr_en     : std_logic := '0';
     signal al_wr_data   : std_logic_vector(8 downto 0) := (others => '0');
     -- Wide enough for max |slope| + 2*THICK.
-    signal stamp_sub       : unsigned(6 downto 0)  := (others => '0');
+    signal stamp_sub       : unsigned(7 downto 0)  := (others => '0');
 
     -- Per-edge values held across the edge's STAMP iterations.  Latched
     -- once at edge transition.  cur_x doesn't need a "held" register —
@@ -210,8 +210,8 @@ architecture bishop of program_top is
     -- that one stamp into the wrong buffer (visible as extra/missing
     -- EOR crossings on the last row of every bnd<->det edge transition).
     signal bnd_held_d1    : std_logic := '0';
-    signal start_rel_held : signed(6 downto 0)  := (others => '0');
-    signal count_m1_held  : unsigned(6 downto 0) := (others => '0');
+    signal start_rel_held : signed(7 downto 0)  := (others => '0');
+    signal count_m1_held  : unsigned(7 downto 0) := (others => '0');
 
     -- Stamp pipeline registers (Stage A → Stage B).  Splits the
     -- (cur_x + start_rel + sub) + h_centre add chain into two cycles.
@@ -229,7 +229,7 @@ architecture bishop of program_top is
     -- Without this, thick/adjacent boundary stamps merge into one run
     -- and corrupt the EOR parity (the "5 sections" banding + the mouth
     -- stub were both this).
-    signal center_sub_held  : unsigned(6 downto 0) := (others => '0');
+    signal center_sub_held  : unsigned(7 downto 0) := (others => '0');
     signal stamp_is_center_r : std_logic := '0';
     -- compute_counts is split across two preload cycles to shorten its
     -- combinational depth (it was the HD critical path).  Stage a
@@ -581,31 +581,31 @@ begin
         procedure compute_counts_b is
             variable count_raw   : unsigned(7 downto 0);
             variable v_thick_u   : unsigned(7 downto 0);
-            variable v_thick_s   : signed(6 downto 0);
-            variable v_start_rel : signed(6 downto 0);
-            variable v_count_m1  : unsigned(6 downto 0);
+            variable v_thick_s   : signed(7 downto 0);
+            variable v_start_rel : signed(7 downto 0);
+            variable v_count_m1  : unsigned(7 downto 0);
         begin
             v_thick_u := resize(thick_r, 8);
-            v_thick_s := signed(resize(thick_r, 7));
+            v_thick_s := signed(resize(thick_r, 8));
             if pad_held = '1' then
                 count_raw := abs_s_held + (v_thick_u sll 1);
                 if sneg_held = '1' then
-                    v_start_rel := resize(s_int_held, 7) - v_thick_s;
+                    v_start_rel := resize(s_int_held, 8) - v_thick_s;
                 else
                     v_start_rel := -v_thick_s;
                 end if;
             else
                 count_raw := abs_s_held;
                 if sneg_held = '1' then
-                    v_start_rel := resize(s_int_held, 7);
+                    v_start_rel := resize(s_int_held, 8);
                 else
-                    v_start_rel := to_signed(0, 7);
+                    v_start_rel := to_signed(0, 8);
                 end if;
             end if;
             if count_raw > to_unsigned(MAX_STAMP_M1, 8) then
-                v_count_m1 := to_unsigned(MAX_STAMP_M1, 7);
+                v_count_m1 := to_unsigned(MAX_STAMP_M1, 8);
             else
-                v_count_m1 := count_raw(6 downto 0);
+                v_count_m1 := count_raw(7 downto 0);
             end if;
             -- INACTIVE edges contribute no stamps (stamp_valid is gated by
             -- active_held in R_STAMP), so there's no reason to iterate
@@ -616,12 +616,12 @@ begin
             -- overrun the per-line rasterizer budget (corrupting the
             -- render — the eye-dependent nose dot).
             if active_held = '0' then
-                v_count_m1 := to_unsigned(0, 7);
+                v_count_m1 := to_unsigned(0, 8);
             end if;
             start_rel_held  <= v_start_rel;
             count_m1_held   <= v_count_m1;
             -- center = sweep pixel at cur_x = -start_rel (start_rel <= 0).
-            center_sub_held <= unsigned(resize(-v_start_rel, 7));
+            center_sub_held <= unsigned(resize(-v_start_rel, 8));
         end procedure;
     begin
         if rising_edge(clk) then
