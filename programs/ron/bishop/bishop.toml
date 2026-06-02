@@ -9,6 +9,10 @@ categories = ["Render", "Shape", "Demo", "Computer"]
 program_type = "synthesis"
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
+# Dense wireframe is congestion-limited at ~66 MHz on the HX4K; run the HD
+# program clock at half rate (37 MHz, via the div2 PLL) so it meets timing
+# on hardware.  HD output is reduced-resolution; SD is unaffected.
+hd_clock_divisor = 2
 description = "Wireframe head. K4=expression, T7/T8 mouth/eyes, K5 grid period, K6 grid scroll, T10 grid thickness."
 
 # --- Rotary Potentiometers (K1-K6) ---
