@@ -17,11 +17,17 @@ OUT = Path(__file__).with_name("bishop_mesh_pkg.vhd")
 
 FP_BITS = 7
 FP_SCALE = 1 << FP_BITS          # 128 (Q9.7)
-TARGET_W = 480                   # scaled head width px; half (240) < Q9.7 |x|=255
+TARGET_H = 760                   # scaled head HEIGHT in program px (drives scale)
+# HD runs at half horizontal resolution (hd_clock_divisor=2), so the picture
+# is stretched 2x wide on screen AND the rasterizer gets half the cycles per
+# line.  Squeeze x by 0.5: this restores proportions AND shrinks the clear
+# phase (2*HEAD_HALF_W), freeing per-line budget so busy rows stop dropping
+# edges at high thickness.
+X_COMPENSATE = 0.5
 FP_INT_MAX = 255
 MAX_STAMP_M1 = 127
 THICK_BUILD = 4
-INCLUDE_SILHOUETTE = True        # draw the clip-path head outline as edges too?
+INCLUDE_SILHOUETTE = False       # the clip-path "ring" — dropped (facets form the outline)
 
 
 def floats(s):
@@ -57,15 +63,18 @@ def main():
             uniq[k] = (a, b)
     edges = list(uniq.values())
 
-    # center + scale using the silhouette bbox (consistent head sizing)
+    # center + scale using the silhouette bbox (consistent head sizing).
+    # y scales to TARGET_H; x scales by the same factor * X_COMPENSATE so the
+    # head is half-width in program space (undone by the div2 2x on screen).
     xs = [p[0] for p in sil]
     ys = [p[1] for p in sil]
     cx = (min(xs) + max(xs)) / 2
     cy = (min(ys) + max(ys)) / 2
-    scale = TARGET_W / (max(xs) - min(xs))
+    scale_y = TARGET_H / (max(ys) - min(ys))
+    scale_x = scale_y * X_COMPENSATE
 
     def scaled(p):
-        return ((p[0] - cx) * scale, (p[1] - cy) * scale)
+        return ((p[0] - cx) * scale_x, (p[1] - cy) * scale_y)
 
     # A horizontal edge stamps its full WIDTH on one row, so a wide one can
     # exceed the per-edge stamp cap.  Split such edges into equal pieces
@@ -110,12 +119,16 @@ def main():
         xb = e["x_top"] + e["slope"] * (e["y_max"] - e["y_min"])
         maxx = max(maxx, abs(e["x_top"]) / FP_SCALE, abs(xb) / FP_SCALE)
     maxstamp = max(abs(e["slope"]) // FP_SCALE + 2 * THICK_BUILD for e in mesh)
-    half_w = int(round(TARGET_W / 2))
+    # HEAD_HALF_W must cover the head's x extent AND be >= ceil((N+pad)/2):
+    # the R_CLEAR phase (2*HEAD_HALF_W cycles) is where all N edges are walked
+    # and the active list is built, so 2*HEAD_HALF_W must exceed N (+pipeline).
+    half_w = max(int(maxx) + 6, (N + 12 + 1) // 2)
     print(f"edges N = {N}   max|x| = {maxx:.1f} (limit {FP_INT_MAX})   "
-          f"max stamp = {maxstamp} (limit {MAX_STAMP_M1})   HEAD_HALF_W ~= {half_w}")
+          f"max stamp = {maxstamp} (limit {MAX_STAMP_M1})   "
+          f"suggest HEAD_HALF_W = {half_w}  (>= ceil((N+12)/2) for the edge walk)")
     errs = []
     if maxx > FP_INT_MAX:
-        errs.append(f"x overflow {maxx:.1f} > {FP_INT_MAX} (reduce TARGET_W)")
+        errs.append(f"x overflow {maxx:.1f} > {FP_INT_MAX} (reduce TARGET_H/X_COMPENSATE)")
     if maxstamp > MAX_STAMP_M1:
         errs.append(f"stamp overflow {maxstamp} > {MAX_STAMP_M1}")
     if errs:
