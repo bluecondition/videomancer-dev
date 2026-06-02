@@ -23,11 +23,62 @@ TARGET_H = 760                   # scaled head HEIGHT in program px (drives scal
 # line.  Squeeze x by 0.5: this restores proportions AND shrinks the clear
 # phase (2*HEAD_HALF_W), freeing per-line budget so busy rows stop dropping
 # edges at high thickness.
-X_COMPENSATE = 0.5
+X_COMPENSATE = 1.0
 FP_INT_MAX = 255
 MAX_STAMP_M1 = 127
 THICK_BUILD = 4
 INCLUDE_SILHOUETTE = False       # the clip-path "ring" — dropped (facets form the outline)
+
+# Edges to DELETE, as (pointA, pointB) pairs using the numbers from
+# face12_labeled.svg / face12_points.txt.  Order within a pair doesn't matter.
+# Numbers are stable (derived from the original SVG), so they keep referring
+# to the same points even as edges are removed.
+REMOVED_EDGES = [
+    (20, 45), (21, 46), (23, 48), (24, 49), (42, 63),
+    (110, 131), (112, 133), (131, 127), (131, 126), (132, 128),
+    (128, 133), (95, 77), (91, 75),
+    # batch 2
+    (80, 82), (88, 92), (88, 94), (80, 63), (82, 62), (79, 68), (72, 68),
+    # batch 3
+    (80, 60),
+    # batch 4
+    (110, 85), (112, 87), (109, 130), (113, 134), (83, 66),
+    # batch 5
+    (80, 81), (81, 82),
+    # batch 6
+    (81, 76),
+    # batch 7
+    (101, 99), (99, 98), (98, 100), (100, 102), (59, 73),
+    # batch 8
+    (73, 49), (72, 45),
+    # batch 9
+    (62, 57), (46, 48), (110, 118), (112, 119), (111, 117),
+    (92, 110), (94, 112), (104, 111),
+    # batch 10
+    (46, 47), (47, 48), (48, 55), (54, 49),
+    # batch 11
+    (57, 49),
+    # batch 12
+    (45, 34), (37, 49), (66, 73),
+    # batch 13
+    (45, 58), (46, 56),
+]
+
+# Edges to ADD that aren't in the SVG, as (pointA, pointB) by the same
+# numbering.  Drawn as a straight line between the two points' coords.
+ADDED_EDGES = [
+    (55, 49),
+]
+
+# Points to MOVE: {number: (new_x, new_y)} in SVG coords.  Applied as an
+# overlay AFTER numbering, so point numbers stay stable; every edge touching
+# a moved point follows it.
+MOVED_POINTS = {
+    3: (410.0, 130.0),   # just right of 6
+    1: (450.0, 118.0),   # just right of 7
+    4: (560.0, 130.0),   # just left of 10
+    2: (520.0, 118.0),   # just left of 9
+}
 
 
 def floats(s):
@@ -62,6 +113,37 @@ def main():
         if k[0] != k[1]:
             uniq[k] = (a, b)
     edges = list(uniq.values())
+
+    # Number vertices identically to make_labeled_svg.py (top-to-bottom,
+    # then left-to-right) from the FULL edge set, so the numbering is stable,
+    # then drop any edge whose endpoints are in REMOVED_EDGES.
+    def rnd(p):
+        return (round(p[0], 2), round(p[1], 2))
+    allv = set()
+    for a, b in edges:
+        allv.add(rnd(a)); allv.add(rnd(b))
+    num = {p: i + 1 for i, p in enumerate(sorted(allv, key=lambda p: (p[1], p[0])))}
+    removed = {frozenset(pair) for pair in REMOVED_EDGES}
+    if removed:
+        before = len(edges)
+        edges = [(a, b) for (a, b) in edges
+                 if frozenset({num[rnd(a)], num[rnd(b)]}) not in removed]
+        print(f"removed {before - len(edges)} of {len(removed)} requested edges")
+    # add edges not present in the SVG (straight line between two points)
+    inv = {n: p for p, n in num.items()}
+    present = {frozenset({num[rnd(a)], num[rnd(b)]}) for a, b in edges}
+    added = 0
+    for pa, pb in ADDED_EDGES:
+        if frozenset({pa, pb}) not in present and pa in inv and pb in inv:
+            edges.append((inv[pa], inv[pb])); added += 1
+    if ADDED_EDGES:
+        print(f"added {added} of {len(ADDED_EDGES)} requested edges")
+    # MOVE points: remap every edge endpoint that matches a moved point
+    move = {inv[n]: (float(x), float(y)) for n, (x, y) in MOVED_POINTS.items()
+            if n in inv}
+    if move:
+        edges = [(move.get(rnd(a), a), move.get(rnd(b), b)) for a, b in edges]
+        print(f"moved {len(move)} points")
 
     # center + scale using the silhouette bbox (consistent head sizing).
     # y scales to TARGET_H; x scales by the same factor * X_COMPENSATE so the
