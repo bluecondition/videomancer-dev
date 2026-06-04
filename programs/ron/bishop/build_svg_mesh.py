@@ -18,7 +18,7 @@ OUT = Path(__file__).with_name("bishop_mesh_pkg.vhd")
 
 FP_BITS = 7
 FP_SCALE = 1 << FP_BITS          # 128 (Q9.7)
-TARGET_H = 760                   # scaled head HEIGHT in program px (drives scale)
+TARGET_H = 950                   # scaled head HEIGHT in program px (drives scale)
 # HD runs at half horizontal resolution (hd_clock_divisor=2), so the picture
 # is stretched 2x wide on screen AND the rasterizer gets half the cycles per
 # line.  Squeeze x by 0.5: this restores proportions AND shrinks the clear

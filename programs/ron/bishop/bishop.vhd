@@ -54,7 +54,7 @@ architecture bishop of program_top is
     -- ---------------------------------------------------------------
     -- Geometry / rasterizer parameters
     -- ---------------------------------------------------------------
-    constant HEAD_HALF_W : natural := 208;  -- full-res HD (no x-squeeze); >=max|x|~202 and >=ceil((N+12)/2)
+    constant HEAD_HALF_W : natural := 258;  -- 1.25x head (TARGET_H=950); >=max|x|~253 and >=ceil((N+12)/2)
     constant HEAD_HALF_H : natural := 420;  -- half-height for the grid mask
     constant CLEAR_W     : natural := 2 * HEAD_HALF_W;  -- cycles in CLEAR phase
     -- Edge thickness is now a per-frame latched value (`thick_r`), driven
