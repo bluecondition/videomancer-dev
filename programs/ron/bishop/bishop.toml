@@ -9,7 +9,7 @@ categories = ["Render", "Shape", "Demo", "Computer"]
 program_type = "synthesis"
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
-description = "Wireframe head. K4=expression, T7/T8 mouth/eyes, K5 grid period, K6 grid scroll, T10 grid thickness."
+description = "Wireframe head. K2=thickness, K4=expression, T7/T8 mouth/eyes, K5 noise speed, K6 noise spread."
 
 # --- Rotary Potentiometers (K1-K6) ---
 
@@ -44,20 +44,25 @@ initial_value_label = "Neutral"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
-name_label = "Grid Period"
-value_labels = ["16 px", "32 px", "64 px", "128 px"]
-initial_value_label = "32 px"
-
-[[parameter]]
-parameter_id = "rotary_potentiometer_6"
-name_label = "Grid Scroll"
+name_label = "Noise Speed"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
 initial_value = 512
-display_min_value = -128
-display_max_value = 127
-suffix_label = ""
+display_min_value = 0
+display_max_value = 100
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Noise Spread"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 0
+display_min_value = 0
+display_max_value = 100
+suffix_label = "%"
 
 # --- Toggle Switches (7-11) ---
 # T7 = Mouth (Closed default / Open).  T8 = Eyes (Closed default / Open).
@@ -77,9 +82,9 @@ initial_value_label = "Closed"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
-name_label = "Grid"
-value_labels = ["Off", "On"]
-initial_value_label = "On"
+name_label = "Noise"
+value_labels = ["Smooth", "Streaks"]
+initial_value_label = "Smooth"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
@@ -114,11 +119,11 @@ rotary_potentiometer_1   = 512   # Scale
 rotary_potentiometer_2   = 0     # Thickness = 1 px
 rotary_potentiometer_3   = 0     # Palette = Green
 rotary_potentiometer_4   = 0     # Expression = Neutral
-rotary_potentiometer_5   = 384   # Grid Period = 32 px
-rotary_potentiometer_6   = 512   # Grid Scroll = stopped
+rotary_potentiometer_5   = 512   # Noise Speed
+rotary_potentiometer_6   = 0     # Noise Spread = off
 toggle_switch_7          = 0
 toggle_switch_8          = 0
-toggle_switch_9          = 1     # Grid on
+toggle_switch_9          = 0     # Noise = Smooth
 toggle_switch_10         = 0
 toggle_switch_11         = 0
 linear_potentiometer_12  = 900
@@ -129,11 +134,11 @@ rotary_potentiometer_1   = 512
 rotary_potentiometer_2   = 0
 rotary_potentiometer_3   = 256   # Palette = Amber
 rotary_potentiometer_4   = 256   # Expression = Happy
-rotary_potentiometer_5   = 384   # 32 px grid
-rotary_potentiometer_6   = 512   # Grid Scroll = stopped
+rotary_potentiometer_5   = 512   # Noise Speed
+rotary_potentiometer_6   = 0     # Noise Spread = off
 toggle_switch_7          = 0
 toggle_switch_8          = 0
-toggle_switch_9          = 1
+toggle_switch_9          = 0
 toggle_switch_10         = 0
 toggle_switch_11         = 0
 linear_potentiometer_12  = 1000
@@ -144,11 +149,11 @@ rotary_potentiometer_1   = 512
 rotary_potentiometer_2   = 384   # Thickness = 2 px
 rotary_potentiometer_3   = 384   # Palette = Red
 rotary_potentiometer_4   = 768   # Expression = Angry
-rotary_potentiometer_5   = 256   # 32 px grid
-rotary_potentiometer_6   = 512   # Grid Scroll = stopped
+rotary_potentiometer_5   = 512   # Noise Speed
+rotary_potentiometer_6   = 0     # Noise Spread = off
 toggle_switch_7          = 0
 toggle_switch_8          = 0
-toggle_switch_9          = 1
+toggle_switch_9          = 0
 toggle_switch_10         = 0
 toggle_switch_11         = 0
 linear_potentiometer_12  = 900
@@ -159,11 +164,11 @@ rotary_potentiometer_1   = 512
 rotary_potentiometer_2   = 256
 rotary_potentiometer_3   = 128   # Palette = Cyan
 rotary_potentiometer_4   = 896   # Expression = Surprised
-rotary_potentiometer_5   = 768   # 128 px grid (sparse)
-rotary_potentiometer_6   = 512   # Grid Scroll = stopped
+rotary_potentiometer_5   = 512   # Noise Speed
+rotary_potentiometer_6   = 0     # Noise Spread = off
 toggle_switch_7          = 0
 toggle_switch_8          = 0
-toggle_switch_9          = 1
+toggle_switch_9          = 0
 toggle_switch_10         = 0
 toggle_switch_11         = 0
 linear_potentiometer_12  = 1000

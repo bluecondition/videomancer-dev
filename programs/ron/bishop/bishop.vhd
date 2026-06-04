@@ -212,6 +212,11 @@ architecture bishop of program_top is
     signal bnd_held_d1    : std_logic := '0';
     signal start_rel_held : signed(7 downto 0)  := (others => '0');
     signal count_m1_held  : unsigned(7 downto 0) := (others => '0');
+    -- Per-edge x-extent for THIS edge (latched in compute_counts_a from the
+    -- x-extent ROMs).  The stamp loop is gated to [xlo_held, xhi_held] so the
+    -- thickness pad can't push a near-horizontal edge past its endpoints.
+    signal xlo_held       : signed(12 downto 0) := (others => '0');
+    signal xhi_held       : signed(12 downto 0) := (others => '0');
 
     -- Stamp pipeline registers (Stage A → Stage B).  Splits the
     -- (cur_x + start_rel + sub) + h_centre add chain into two cycles.
@@ -312,6 +317,23 @@ architecture bishop of program_top is
     signal act_xtop_rd   : std_logic_vector(15 downto 0);
     signal act_slope_rd  : std_logic_vector(15 downto 0);
 
+    -- Static per-edge x-extent ROMs.  Pure geometry (no expression/variant
+    -- dependence), so they sit in a plain ROM read at act_rd_addr in lockstep
+    -- with the mesh BRAMs above — no cp_proc copy, no wide combinational mux.
+    type t_xext_rom is array (0 to 255) of std_logic_vector(12 downto 0);
+    function init_xext(src : t_int_array) return t_xext_rom is
+        variable r : t_xext_rom := (others => (others => '0'));
+    begin
+        for i in 0 to C_NUM_EDGES - 1 loop
+            r(i) := std_logic_vector(to_signed(src(i), 13));
+        end loop;
+        return r;
+    end function;
+    constant C_XLO_ROM   : t_xext_rom := init_xext(C_EDGE_X_LO);
+    constant C_XHI_ROM   : t_xext_rom := init_xext(C_EDGE_X_HI);
+    signal act_xlo_rd    : std_logic_vector(12 downto 0);
+    signal act_xhi_rd    : std_logic_vector(12 downto 0);
+
     signal act_wr_en     : std_logic := '0';
     signal act_wr_addr   : unsigned(7 downto 0) := (others => '0');
     signal act_ymin_wr   : std_logic_vector(12 downto 0) := (others => '0');
@@ -319,29 +341,69 @@ architecture bishop of program_top is
     signal act_xtop_wr   : std_logic_vector(15 downto 0) := (others => '0');
     signal act_slope_wr  : std_logic_vector(15 downto 0) := (others => '0');
 
-    -- Copy engine FSM + pipeline registers.  Per edge, the work is
-    -- split into three cycles so each cycle's combinational depth is
-    -- short:
-    --   Stage E (addr): present idx, LUT-ROM read for each of the 3
-    --                   variants (combinational), register per-variant
-    --                   values + group + addr.
-    --   Stage S (sel):  3-way case on group + om/oe picks the variant.
-    --                   Register one (ymin,ymax,xtop,slope) per slot.
-    --   Stage W (wr):   drive act_wr_en + act_*_wr to the BRAMs.
-    type t_cp_state is (CP_IDLE, CP_RUN);
+    -- ---------------------------------------------------------------
+    -- Copy engine — SEQUENTIAL per-edge FSM.  Once per frame in vblank it
+    -- walks edges 0..N-1, reads the (static) mesh, optionally jitters both
+    -- endpoints (K6 noise) and recomputes the slope with a restoring DIVIDER
+    -- (shallow add/compare per cycle — no multiply, so it meets the HD clock),
+    -- then writes the active mesh BRAM.  ~22 cycles/edge fits the vblank
+    -- window easily.  Only the 'open' mesh variant is read (the static dense
+    -- mesh has no per-expression variants), which also trims the LUT-ROM mux.
+    -- ---------------------------------------------------------------
+    -- Split into many shallow states (free in vblank) so no single cycle has a
+    -- deep combinational path — keeps the noise engine off the HD critical path.
+    type t_cp_state is (CP_IDLE, CP_LOAD, CP_HASH, CP_PHASE, CP_TRI, CP_AMP,
+                        CP_OFF, CP_SORT, CP_FLOOR, CP_SPAN, CP_DX, CP_DIV, CP_WR);
     signal cp_state : t_cp_state := CP_IDLE;
-    signal cp_addr  : unsigned(8 downto 0) := (others => '0');  -- 9-bit for fill drain
-    signal cp_e_valid : std_logic := '0';
-    signal cp_e_addr  : unsigned(7 downto 0) := (others => '0');
-    signal cp_e_group : natural range 0 to 3 := 0;
-    signal cp_e_ymin_open, cp_e_ymin_ec, cp_e_ymin_mc   : signed(12 downto 0) := (others => '0');
-    signal cp_e_ymax_open, cp_e_ymax_ec, cp_e_ymax_mc   : signed(12 downto 0) := (others => '0');
-    signal cp_e_xtop_open, cp_e_xtop_ec, cp_e_xtop_mc   : signed(15 downto 0) := (others => '0');
-    signal cp_e_slope_open, cp_e_slope_ec, cp_e_slope_mc : signed(15 downto 0) := (others => '0');
-    signal cp_s_valid : std_logic := '0';
-    signal cp_s_addr  : unsigned(7 downto 0) := (others => '0');
-    signal cp_s_ymin, cp_s_ymax  : signed(12 downto 0) := (others => '0');
-    signal cp_s_xtop, cp_s_slope : signed(15 downto 0) := (others => '0');
+    signal cp_addr  : unsigned(8 downto 0) := (others => '0');
+
+    -- K6 NOISE: coherent 2D point wander.  K6 = spread (level 0..7), K5 =
+    -- speed.  Each vertex's (dx,dy) is hashed from its (x,y) so a shared point
+    -- moves identically and the wireframe stays joined.
+    -- spread is a 5-bit LINEAR amplitude (0..31): offset = (tri*spread)>>1 in
+    -- Q9.7, so the response is smooth (32 steps) and tops out near +-31px (what
+    -- the old coarse level-4 / knob-50% gave) at full knob.
+    signal noise_spread_r : unsigned(4 downto 0)  := (others => '0');
+    signal noise_speed_r  : unsigned(4 downto 0)  := (others => '0');
+    signal noise_t_r      : unsigned(15 downto 0) := (others => '0');
+    signal noise_on       : std_logic;
+    -- P9 "Noise": '1' = allow the thin-horizontal-streak texture (edges may
+    -- collapse flat); '0' = enforce a min vertical span so they don't streak.
+    signal noise_streaks_r : std_logic := '0';
+    constant NOISE_SPAN_FLOOR : integer := 8;
+    -- Latched triangle-wave samples (per endpoint, x/y phases) -> CP_AMP.
+    signal t_trxt, t_tryt, t_trxb, t_tryb : signed(9 downto 0) := (others => '0');
+
+    -- Triangle wave: period 1024, amplitude -256..+255.  Low 10 phase bits
+    -- (plain truncation; resize() on signed would corrupt the wrap).
+    function tri10(ph : signed(16 downto 0)) return signed is
+        variable p  : unsigned(9 downto 0);
+        variable up : unsigned(8 downto 0);
+    begin
+        p := unsigned(ph(9 downto 0));
+        if p(9) = '0' then up := p(8 downto 0);
+        else               up := to_unsigned(511, 9) - p(8 downto 0);
+        end if;
+        return resize(signed('0' & up), 10) - to_signed(256, 10);
+    end function;
+
+    -- Per-edge working registers (one edge in flight at a time).
+    signal w_xtop, w_xbot, w_slope : signed(15 downto 0) := (others => '0');
+    signal w_ymin, w_ymax          : signed(12 downto 0) := (others => '0');
+    signal w_phxt, w_phyt, w_phxb, w_phyb : signed(16 downto 0) := (others => '0');
+    signal o_dxt, o_dxb : signed(17 downto 0) := (others => '0');  -- x offsets
+    signal o_dyt, o_dyb : signed(13 downto 0) := (others => '0');  -- y offsets
+    signal w_nxt, w_nxb : signed(17 downto 0) := (others => '0');
+    signal w_nyt, w_nyb : signed(13 downto 0) := (others => '0');
+    signal w_xa, w_xb   : signed(17 downto 0) := (others => '0');
+    signal w_ya, w_yb   : signed(13 downto 0) := (others => '0');
+    signal w_dxsign     : std_logic := '0';
+    -- Restoring divider: quot = |dx| / span (slope magnitude, Q9.7).
+    signal d_rem      : unsigned(8 downto 0)  := (others => '0');
+    signal d_quot     : unsigned(17 downto 0) := (others => '0');
+    signal d_dividend : unsigned(17 downto 0) := (others => '0');
+    signal d_divisor  : unsigned(7 downto 0)  := (others => '0');
+    signal d_cnt      : integer range 0 to 17 := 0;
 
     -- Render-side Stage 0 pre signals.  The active-mesh BRAM read has
     -- effective 2-cycle latency from when Stage 0a sets act_rd_addr
@@ -469,7 +531,8 @@ begin
                 bright_r     <= unsigned(registers_in(7)(9 downto 2));
                 bg_video_r   <= registers_in(6)(4);  -- T11
                 grid_thick_r <= registers_in(6)(3);  -- T10: 2px grid lines
-                grid_en_r    <= registers_in(6)(2);  -- T9
+                grid_en_r    <= registers_in(6)(2);  -- T9 (dead grid)
+                noise_streaks_r <= registers_in(6)(2);  -- P9 "Noise": allow streaks
                 open_mouth_r <= registers_in(6)(0);  -- T7: mouth open(1)/closed(0)
                 open_eyes_r  <= registers_in(6)(1);  -- T8: eyes  open(1)/closed(0)
                 -- K1 Scale (latched, behavior deferred)
@@ -483,18 +546,13 @@ begin
                 else
                     expr_idx_r <= unsigned(registers_in(3)(9 downto 7));
                 end if;
-                -- K5 Grid period
-                grid_per_r <= unsigned(registers_in(4)(9 downto 8));
-                -- K6 Grid scroll speed: top 8 bits, biased so the knob
-                -- centre (~512) is zero (stopped), left = scroll left,
-                -- right = scroll right.
-                scroll_speed_r <= signed(registers_in(5)(9 downto 2))
-                                - to_signed(128, 8);
-                -- Advance the Q7.6 phase accumulator once per frame.
-                -- Sign-extend the speed to 13 bits; unsigned add wraps
-                -- cleanly at the 7-bit integer boundary.
-                grid_phs_acc_r <= grid_phs_acc_r
-                                + unsigned(resize(scroll_speed_r, 13));
+                -- K5 = noise SPEED (frame-phase rate), K6 = noise SPREAD
+                -- (amplitude level 0..7).  The grid these used to drive is
+                -- gone.  noise_t_r advances once per frame by the speed, so the
+                -- per-vertex Lissajous phase animates.
+                noise_speed_r  <= unsigned(registers_in(4)(9 downto 5));
+                noise_spread_r <= unsigned(registers_in(5)(9 downto 5));
+                noise_t_r      <= noise_t_r + resize(noise_speed_r, 16);
             end if;
         end if;
     end process;
@@ -580,6 +638,18 @@ begin
             -- chin baseline).  Parallel to the magnitude decode.
             if act_ymax_rd = act_ymin_rd then
                 bnd_held <= '0';
+            end if;
+            -- Latch this edge's x-extent (aligned with act_slope_rd) for the
+            -- stamp clamp.  Vertical edges carry a wide sentinel -> inert.  With
+            -- noise on, the edge has been jittered out of its static extent, so
+            -- latch a wide inert range here (keeps the noise_on test OFF the
+            -- per-pixel stamp_valid critical path).
+            if noise_on = '1' then
+                xlo_held <= to_signed(-1024, 13);
+                xhi_held <= to_signed(1023, 13);
+            else
+                xlo_held <= signed(act_xlo_rd);
+                xhi_held <= signed(act_xhi_rd);
             end if;
         end procedure;
 
@@ -823,7 +893,9 @@ begin
                     stamp_rel_r <= v_stamp_rel;
                     if active_held = '1'
                             and v_stamp_rel >= -to_signed(HEAD_HALF_W, 13)
-                            and v_stamp_rel <  to_signed(HEAD_HALF_W, 13) then
+                            and v_stamp_rel <  to_signed(HEAD_HALF_W, 13)
+                            and v_stamp_rel >= xlo_held
+                            and v_stamp_rel <= xhi_held then
                         stamp_valid_r <= '1';
                     else
                         stamp_valid_r <= '0';
@@ -943,6 +1015,9 @@ begin
         end if;
     end process;
 
+    -- Noise active whenever K6 spread is non-zero.
+    noise_on <= '1' when noise_spread_r /= "00000" else '0';
+
     -- ---------------------------------------------------------------
     -- current_x BRAM — replaces what was an N_EDGES-entry register
     -- file.  iCE40 EBR in 256×16 mode (we use 128 entries × 12 bits).
@@ -1001,98 +1076,190 @@ begin
         end if;
     end process;
 
+    -- x-extent ROMs read in lockstep with the mesh BRAMs (same address, same
+    -- 1-cycle latency), so act_xlo_rd/act_xhi_rd line up with act_slope_rd in
+    -- compute_counts_a.
+    act_xext_rom_proc : process(clk)
+    begin
+        if rising_edge(clk) then
+            act_xlo_rd <= C_XLO_ROM(to_integer(act_rd_addr));
+            act_xhi_rd <= C_XHI_ROM(to_integer(act_rd_addr));
+        end if;
+    end process;
+
     -- Copy engine.  Walks edges 0..N_EDGES-1 in vblank, resolving the
     -- (expr, group, om, oe) variant select once per slot and writing
     -- to the active mesh BRAMs.  3-stage pipeline so the heavy
     -- LUT-ROM mux is isolated from the variant case mux which is
     -- isolated from the BRAM write — each stage shallow.
     cp_proc : process(clk)
+        variable ixt, iyt, ixb, iyb : signed(13 downto 0);
+        variable hxt, hyt, hxb, hyb : signed(16 downto 0);
+        variable tt   : signed(16 downto 0);
+        variable sp   : signed(5 downto 0);
+        variable dx_v       : signed(18 downto 0);
+        variable span_v     : signed(13 downto 0);
+        variable spc        : integer range 1 to 255;
+        variable newrem     : unsigned(8 downto 0);
+        variable v_sl       : signed(18 downto 0);
+        variable nslope     : signed(15 downto 0);
+        variable xa16       : signed(15 downto 0);
+        variable idx        : integer range 0 to 255;
     begin
         if rising_edge(clk) then
-            -- Defaults (overwritten below when valid)
-            act_wr_en   <= '0';
+            act_wr_en <= '0';   -- default: no write this cycle
 
-            -- Stage E: address present, read each variant's LUT-ROM
-            -- combinationally, register per-variant values.
-            if cp_state = CP_RUN and cp_addr < to_unsigned(C_NUM_EDGES, 9) then
-                cp_e_valid <= '1';
-                cp_e_addr  <= cp_addr(7 downto 0);
-                cp_e_group <= C_EDGE_GROUP(to_integer(cp_addr(7 downto 0)));
-                cp_e_ymin_open <= to_signed(f_y_min   (to_integer(expr_idx_r), to_integer(cp_addr(7 downto 0))), 13);
-                cp_e_ymax_open <= to_signed(f_y_max   (to_integer(expr_idx_r), to_integer(cp_addr(7 downto 0))), 13);
-                cp_e_xtop_open <= to_signed(f_x_top   (to_integer(expr_idx_r), to_integer(cp_addr(7 downto 0))), 16);
-                cp_e_slope_open<= to_signed(f_slope   (to_integer(expr_idx_r), to_integer(cp_addr(7 downto 0))), 16);
-                cp_e_ymin_ec   <= to_signed(f_y_min_ec(to_integer(expr_idx_r), to_integer(cp_addr(7 downto 0))), 13);
-                cp_e_ymax_ec   <= to_signed(f_y_max_ec(to_integer(expr_idx_r), to_integer(cp_addr(7 downto 0))), 13);
-                cp_e_xtop_ec   <= to_signed(f_x_top_ec(to_integer(expr_idx_r), to_integer(cp_addr(7 downto 0))), 16);
-                cp_e_slope_ec  <= to_signed(f_slope_ec(to_integer(expr_idx_r), to_integer(cp_addr(7 downto 0))), 16);
-                cp_e_ymin_mc   <= to_signed(f_y_min_mc(to_integer(expr_idx_r), to_integer(cp_addr(7 downto 0))), 13);
-                cp_e_ymax_mc   <= to_signed(f_y_max_mc(to_integer(expr_idx_r), to_integer(cp_addr(7 downto 0))), 13);
-                cp_e_xtop_mc   <= to_signed(f_x_top_mc(to_integer(expr_idx_r), to_integer(cp_addr(7 downto 0))), 16);
-                cp_e_slope_mc  <= to_signed(f_slope_mc(to_integer(expr_idx_r), to_integer(cp_addr(7 downto 0))), 16);
-            else
-                cp_e_valid <= '0';
-            end if;
-
-            -- Stage S: variant select (3-way case on group, plus om/oe).
-            cp_s_valid <= cp_e_valid;
-            cp_s_addr  <= cp_e_addr;
-            case cp_e_group is
-                when C_GRP_MOUTH =>
-                    if open_mouth_r = '0' then
-                        cp_s_ymin <= cp_e_ymin_mc;
-                        cp_s_ymax <= cp_e_ymax_mc;
-                        cp_s_xtop <= cp_e_xtop_mc;
-                        cp_s_slope <= cp_e_slope_mc;
-                    else
-                        cp_s_ymin <= cp_e_ymin_open;
-                        cp_s_ymax <= cp_e_ymax_open;
-                        cp_s_xtop <= cp_e_xtop_open;
-                        cp_s_slope <= cp_e_slope_open;
-                    end if;
-                when C_GRP_EYE =>
-                    if open_eyes_r = '0' then
-                        cp_s_ymin <= cp_e_ymin_ec;
-                        cp_s_ymax <= cp_e_ymax_ec;
-                        cp_s_xtop <= cp_e_xtop_ec;
-                        cp_s_slope <= cp_e_slope_ec;
-                    else
-                        cp_s_ymin <= cp_e_ymin_open;
-                        cp_s_ymax <= cp_e_ymax_open;
-                        cp_s_xtop <= cp_e_xtop_open;
-                        cp_s_slope <= cp_e_slope_open;
-                    end if;
-                when others =>
-                    cp_s_ymin <= cp_e_ymin_open;
-                    cp_s_ymax <= cp_e_ymax_open;
-                    cp_s_xtop <= cp_e_xtop_open;
-                    cp_s_slope <= cp_e_slope_open;
-            end case;
-
-            -- Stage W: write to BRAMs.
-            if cp_s_valid = '1' then
-                act_wr_en    <= '1';
-                act_wr_addr  <= cp_s_addr;
-                act_ymin_wr  <= std_logic_vector(cp_s_ymin);
-                act_ymax_wr  <= std_logic_vector(cp_s_ymax);
-                act_xtop_wr  <= std_logic_vector(cp_s_xtop);
-                act_slope_wr <= std_logic_vector(cp_s_slope);
-            end if;
-
-            -- FSM
             case cp_state is
                 when CP_IDLE =>
                     if vsync_falling_r = '1' then
-                        cp_state <= CP_RUN;
                         cp_addr  <= (others => '0');
+                        cp_state <= CP_LOAD;
                     end if;
-                when CP_RUN =>
-                    -- Allow pipeline to drain (3 extra cycles past N).
-                    if cp_addr >= to_unsigned(C_NUM_EDGES + 3, 9) then
+
+                -- Read the (static, single-variant) mesh for this edge.
+                when CP_LOAD =>
+                    if cp_addr >= to_unsigned(C_NUM_EDGES, 9) then
                         cp_state <= CP_IDLE;
                     else
-                        cp_addr <= cp_addr + 1;
+                        idx := to_integer(cp_addr(7 downto 0));
+                        w_ymin  <= to_signed(f_y_min(to_integer(expr_idx_r), idx), 13);
+                        w_ymax  <= to_signed(f_y_max(to_integer(expr_idx_r), idx), 13);
+                        w_xtop  <= to_signed(f_x_top(to_integer(expr_idx_r), idx), 16);
+                        w_slope <= to_signed(f_slope(to_integer(expr_idx_r), idx), 16);
+                        w_xbot  <= to_signed(C_EDGE_X_BOT(idx), 16);
+                        cp_state <= CP_HASH;
                     end if;
+
+                -- CP_HASH: per-endpoint coordinate hash (ix = x>>7 px).
+                -- hash_x = ix*5 + iy*3 ; hash_y = iy*5 - ix*3 (distinct per
+                -- axis -> each point traces a small Lissajous orbit).  Stored
+                -- in w_ph*; the frame phase is added in the next state so this
+                -- cycle's add chain stays shallow.
+                when CP_HASH =>
+                    ixt := resize(shift_right(w_xtop, 7), 14);  iyt := resize(w_ymin, 14);
+                    ixb := resize(shift_right(w_xbot, 7), 14);  iyb := resize(w_ymax, 14);
+                    hxt := resize((shift_left(ixt,2)+ixt) + (shift_left(iyt,1)+iyt), 17);
+                    hyt := resize((shift_left(iyt,2)+iyt) - (shift_left(ixt,1)+ixt), 17);
+                    hxb := resize((shift_left(ixb,2)+ixb) + (shift_left(iyb,1)+iyb), 17);
+                    hyb := resize((shift_left(iyb,2)+iyb) - (shift_left(ixb,1)+ixb), 17);
+                    w_phxt <= hxt;  w_phyt <= hyt;  w_phxb <= hxb;  w_phyb <= hyb;
+                    cp_state <= CP_PHASE;
+
+                -- CP_PHASE: add the per-frame phase (animation).
+                when CP_PHASE =>
+                    tt := signed(resize(noise_t_r, 17));
+                    w_phxt <= resize(w_phxt + tt, 17);  w_phyt <= resize(w_phyt + tt, 17);
+                    w_phxb <= resize(w_phxb + tt, 17);  w_phyb <= resize(w_phyb + tt, 17);
+                    cp_state <= CP_TRI;
+
+                -- CP_TRI: sample the triangle waves (kept shallow; the spread
+                -- multiply happens next state).
+                when CP_TRI =>
+                    t_trxt <= tri10(w_phxt);  t_tryt <= tri10(w_phyt);
+                    t_trxb <= tri10(w_phxb);  t_tryb <= tri10(w_phyb);
+                    cp_state <= CP_AMP;
+
+                -- CP_AMP: linear spread scaling.  offset_q97 = (tri*spread)>>1,
+                -- so amplitude ramps smoothly with K6 (0..31) up to ~+-31px at
+                -- full knob.  Y offset is the same in rows (>>8 = >>1 then >>7).
+                -- Small 10x6 multiplies (one per offset).
+                when CP_AMP =>
+                    sp := signed('0' & std_logic_vector(noise_spread_r));
+                    o_dxt <= resize(shift_right(t_trxt * sp, 1), 18);
+                    o_dyt <= resize(shift_right(t_tryt * sp, 8), 14);
+                    o_dxb <= resize(shift_right(t_trxb * sp, 1), 18);
+                    o_dyb <= resize(shift_right(t_tryb * sp, 8), 14);
+                    cp_state <= CP_OFF;
+
+                -- CP_OFF: move the endpoints by the offsets.
+                when CP_OFF =>
+                    w_nxt <= resize(w_xtop,18) + o_dxt;  w_nyt <= resize(w_ymin,14) + o_dyt;
+                    w_nxb <= resize(w_xbot,18) + o_dxb;  w_nyb <= resize(w_ymax,14) + o_dyb;
+                    cp_state <= CP_SORT;
+
+                -- CP_SORT: re-order endpoints by y (jitter may flip them).
+                -- Just the compare + mux; the subtracts that used to chain off
+                -- this in the same cycle were the HD critical path, so they now
+                -- get their own (registered) states below.
+                when CP_SORT =>
+                    if w_nyt <= w_nyb then
+                        w_ya <= w_nyt;  w_xa <= w_nxt;  w_yb <= w_nyb;  w_xb <= w_nxb;
+                    else
+                        w_ya <= w_nyb;  w_xa <= w_nxb;  w_yb <= w_nyt;  w_xb <= w_nxt;
+                    end if;
+                    cp_state <= CP_FLOOR;
+
+                -- CP_FLOOR: when P9 "Noise" is OFF (Smooth), enforce a min
+                -- vertical span (extend ymax) so an edge can't collapse flat
+                -- and draw a wide horizontal streak — it renders as a gentle
+                -- shallow diagonal instead.  Its own state to keep the compare
+                -- off the divisor-setup critical path.
+                when CP_FLOOR =>
+                    if noise_on = '1' and noise_streaks_r = '0'
+                            and (w_yb - w_ya) < NOISE_SPAN_FLOOR then
+                        w_yb <= w_ya + to_signed(NOISE_SPAN_FLOOR, 14);
+                    end if;
+                    cp_state <= CP_SPAN;
+
+                -- CP_SPAN: span = yb-ya, clamped to [1,255] -> divisor.
+                when CP_SPAN =>
+                    span_v := w_yb - w_ya;
+                    if    span_v <= 0  then spc := 1;
+                    elsif span_v > 255 then spc := 255;
+                    else  spc := to_integer(span_v); end if;
+                    d_divisor <= to_unsigned(spc, 8);
+                    cp_state  <= CP_DX;
+
+                -- CP_DX: dx = xb-xa -> sign + |dx| (dividend); arm the divider.
+                when CP_DX =>
+                    dx_v := resize(w_xb, 19) - resize(w_xa, 19);
+                    if dx_v < 0 then w_dxsign <= '1'; d_dividend <= unsigned(resize(-dx_v, 18));
+                    else             w_dxsign <= '0'; d_dividend <= unsigned(resize( dx_v, 18));
+                    end if;
+                    d_rem  <= (others => '0');
+                    d_quot <= (others => '0');
+                    d_cnt  <= 17;
+                    cp_state <= CP_DIV;
+
+                -- Restoring division, one bit per cycle (shallow: a 9-bit
+                -- compare + subtract).  18 steps -> |slope| in Q9.7.
+                when CP_DIV =>
+                    newrem := d_rem(7 downto 0) & d_dividend(17);
+                    if newrem >= ('0' & d_divisor) then
+                        d_rem  <= resize(newrem - ('0' & d_divisor), 9);
+                        d_quot <= d_quot(16 downto 0) & '1';
+                    else
+                        d_rem  <= newrem;
+                        d_quot <= d_quot(16 downto 0) & '0';
+                    end if;
+                    d_dividend <= d_dividend(16 downto 0) & '0';
+                    if d_cnt = 0 then cp_state <= CP_WR;
+                    else d_cnt <= d_cnt - 1; end if;
+
+                -- Apply sign + saturate, pick jittered vs original slope
+                -- (noise-off bypass is bit-exact), write the active mesh BRAM.
+                when CP_WR =>
+                    if w_dxsign = '1' then v_sl := -signed('0' & d_quot);
+                    else                   v_sl :=  signed('0' & d_quot);
+                    end if;
+                    if    v_sl > 32767  then nslope := to_signed(32767, 16);
+                    elsif v_sl < -32768 then nslope := to_signed(-32768, 16);
+                    else  nslope := resize(v_sl, 16); end if;
+                    if    w_xa > 32767  then xa16 := to_signed(32767, 16);
+                    elsif w_xa < -32768 then xa16 := to_signed(-32768, 16);
+                    else  xa16 := resize(w_xa, 16); end if;
+                    act_wr_en   <= '1';
+                    act_wr_addr <= cp_addr(7 downto 0);
+                    act_ymin_wr <= std_logic_vector(resize(w_ya, 13));
+                    act_ymax_wr <= std_logic_vector(resize(w_yb, 13));
+                    act_xtop_wr <= std_logic_vector(xa16);
+                    if noise_on = '1' then
+                        act_slope_wr <= std_logic_vector(nslope);
+                    else
+                        act_slope_wr <= std_logic_vector(w_slope);
+                    end if;
+                    cp_addr  <= cp_addr + 1;
+                    cp_state <= CP_LOAD;
             end case;
         end if;
     end process;

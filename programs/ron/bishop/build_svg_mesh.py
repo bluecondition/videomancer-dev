@@ -9,6 +9,7 @@ the grid fill is dropped in bishop.vhd.  All 12 mesh accessors collapse to
 
 Edit face12.svg, then run this, then ./build_programs.sh ron bishop.
 """
+import math
 import re
 from pathlib import Path
 
@@ -58,12 +59,18 @@ REMOVED_EDGES = [
     (46, 47), (47, 48), (48, 55), (54, 49),
     # batch 11
     (57, 49),
-    # batch 12
-    (45, 34), (37, 49), (66, 73),
-    # batch 13
-    (45, 58), (46, 56),
+    # batch 12  (66-73 un-removed in batch 16)
+    (45, 34), (37, 49),
+    # batch 13  (45-58, 46-56 un-removed in batch 16)
     # batch 14
     (35, 22), (36, 22), (47, 22), (47, 51),
+    # batch 15 - drop the 118/119 upper-lip kinks (lines sticking in toward
+    # center); run the upper lip straight from the mouth corner to the bow.
+    (118, 120), (118, 122), (119, 121), (119, 123),
+    # batch 17 - re-route 43 from 64 to 57
+    (43, 64),
+    # batch 19 - trim 4 edges to fit under the 256-edge ceiling (symmetric).
+    (67, 79), (67, 80), (70, 82), (70, 83),
 ]
 
 # Edges to ADD that aren't in the SVG, as (pointA, pointB) by the same
@@ -71,6 +78,13 @@ REMOVED_EDGES = [
 ADDED_EDGES = [
     (55, 49),
     (35, 36), (35, 42), (43, 36),
+    (122, 120), (123, 121),   # batch 15 - upper lip corner->bow, straight
+    # batch 16 - new lines (45-58, 46-56, 66-73 un-removed above)
+    (22, 51), (65, 72), (49, 59), (48, 57), (130, 137), (134, 140),
+    # batch 17 - re-route 43 from 64 to 57
+    (43, 57),
+    # batch 18
+    (46, 42), (43, 48),
 ]
 
 # Points to MOVE: {number: (new_x, new_y)} in SVG coords.  Applied as an
@@ -81,6 +95,10 @@ MOVED_POINTS = {
     1: (450.0, 118.0),   # just right of 7
     4: (560.0, 130.0),   # just left of 10
     2: (520.0, 118.0),   # just left of 9
+    # batch 16 - narrow the nose bridge for more contour: left rail +10x,
+    # right rail -10x (both toward center).
+    42: (465.0, 283.0),  60: (462.0, 320.0),  75: (458.0, 360.0),  85: (454.0, 400.0),
+    43: (495.0, 283.0),  62: (498.0, 320.0),  77: (502.0, 360.0),  87: (506.0, 400.0),
 }
 
 
@@ -216,8 +234,36 @@ def main():
         errs.append(f"x overflow {maxx:.1f} > {FP_INT_MAX} (reduce TARGET_H/X_COMPENSATE)")
     if maxstamp > MAX_STAMP_M1:
         errs.append(f"stamp overflow {maxstamp} > {MAX_STAMP_M1}")
+    if N > 256:
+        # bishop.vhd addresses edges with 8-bit indices and 256-deep BRAMs/
+        # ROMs (act_*_ram, act_list_ram, the x-extent ROMs).  >256 edges index
+        # out of bounds -> "index out of bounds" at yosys ghdl import.
+        errs.append(f"edge count {N} > 256 (8-bit edge addressing ceiling)")
     if errs:
         raise SystemExit("LIMIT EXCEEDED: " + "; ".join(errs))
+
+    # Per-edge x-extent [x_lo, x_hi] in head-relative px.  The stamp loop is
+    # clamped to this range so the K2 thickness pad can't push a near-horizontal
+    # edge LENGTHWISE past its endpoints (the "spike" artifact).  Vertical-
+    # dominant edges (|slope_int| == 0) get their thickness from the horizontal
+    # pad and never overshoot, so we mark them inert with a wide sentinel.
+    # +-1 px margin keeps rounding from clipping the genuine endpoint pixel.
+    X_INERT = 511
+    X_MARGIN = 1
+
+    def x_extent(e):
+        xt, sl = e["x_top"], e["slope"]
+        if e["y_max"] == e["y_min"]:        # horizontal: slope holds the WIDTH
+            xo = xt + sl
+        else:
+            xo = xt + sl * (e["y_max"] - e["y_min"])
+        if abs(sl) // FP_SCALE == 0:        # vertical-dominant -> don't clamp
+            return (-X_INERT, X_INERT)
+        lo = min(xt, xo) / FP_SCALE
+        hi = max(xt, xo) / FP_SCALE
+        return (int(math.floor(lo)) - X_MARGIN, int(math.ceil(hi)) + X_MARGIN)
+
+    xext = [x_extent(e) for e in mesh]
 
     # ---- emit ----
     def arr(name, vals):
@@ -246,6 +292,18 @@ def main():
     L.append(arr("C_EDGE_Y_MAX", [e["y_max"] for e in mesh]))
     L.append(arr("C_EDGE_X_TOP", [e["x_top"] for e in mesh]))
     L.append(arr("C_EDGE_SLOPE", [e["slope"] for e in mesh]))
+    L.append(arr("C_EDGE_X_LO", [v[0] for v in xext]))
+    L.append(arr("C_EDGE_X_HI", [v[1] for v in xext]))
+    # x_bot = x at y_max (the second endpoint), Q9.7 like x_top.  Needed by the
+    # noise engine to jitter both endpoints.  For horizontal edges (y_max ==
+    # y_min) the slope field holds the WIDTH, so the far end is x_top + slope;
+    # using the general x_top + slope*(y_max-y_min) would collapse to x_top and
+    # make horizontal lines vanish once noise jitters them.
+    def x_bot_of(e):
+        if e["y_max"] == e["y_min"]:
+            return e["x_top"] + e["slope"]
+        return e["x_top"] + e["slope"] * (e["y_max"] - e["y_min"])
+    L.append(arr("C_EDGE_X_BOT", [x_bot_of(e) for e in mesh]))
     fns = ["f_y_min", "f_y_min_mc", "f_y_min_ec", "f_y_max", "f_y_max_mc", "f_y_max_ec",
            "f_x_top", "f_x_top_mc", "f_x_top_ec", "f_slope", "f_slope_mc", "f_slope_ec"]
     for f in fns:
