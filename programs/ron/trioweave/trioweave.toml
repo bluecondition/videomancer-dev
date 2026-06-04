@@ -13,7 +13,7 @@ categories = ["Synthesis", "Pattern"]
 program_type = "synthesis"
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
-description = "Three layered sine VCOs with own Freq + LFO each. Slider FM-modulates the LFOs. Fixed RGB-like triad."
+description = "Three half-wave sine VCOs. Freq + LFO per osc. S7-S9 gate slider thickness, S10-S11 = blend mode."
 
 # --- Rotary Potentiometers ---
 
@@ -30,17 +30,6 @@ suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
-name_label = "Osc1 LFO"
-control_mode = "linear"
-min_value = 0
-max_value = 1023
-initial_value = 200
-display_min_value = 0
-display_max_value = 100
-suffix_label = "%"
-
-[[parameter]]
-parameter_id = "rotary_potentiometer_3"
 name_label = "Osc2 Freq"
 control_mode = "linear"
 min_value = 0
@@ -51,18 +40,7 @@ display_max_value = 90
 suffix_label = ""
 
 [[parameter]]
-parameter_id = "rotary_potentiometer_4"
-name_label = "Osc2 LFO"
-control_mode = "linear"
-min_value = 0
-max_value = 1023
-initial_value = 320
-display_min_value = 0
-display_max_value = 100
-suffix_label = "%"
-
-[[parameter]]
-parameter_id = "rotary_potentiometer_5"
+parameter_id = "rotary_potentiometer_3"
 name_label = "Osc3 Freq"
 control_mode = "linear"
 min_value = 0
@@ -71,6 +49,28 @@ initial_value = 512
 display_min_value = 0
 display_max_value = 90
 suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Osc1 LFO"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 200
+display_min_value = 0
+display_max_value = 100
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Osc2 LFO"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 320
+display_min_value = 0
+display_max_value = 100
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
@@ -87,90 +87,90 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
-name_label = "Key Polarity"
-value_labels = ["Low", "High"]
-initial_value_label = "Low"
+name_label = "Osc1 Thick"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
-name_label = "Blend 1"
+name_label = "Osc2 Thick"
 value_labels = ["Off", "On"]
 initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
-name_label = "Blend 2"
+name_label = "Osc3 Thick"
 value_labels = ["Off", "On"]
 initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
-name_label = "Blend 4"
+name_label = "Blend 1"
 value_labels = ["Off", "On"]
 initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
-name_label = "Scroll"
+name_label = "Blend 2"
 value_labels = ["Off", "On"]
-initial_value_label = "On"
+initial_value_label = "Off"
 
 # --- Linear Potentiometer ---
 
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
-name_label = "FM Depth"
+name_label = "Thickness"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
 initial_value = 0
-display_min_value = 0
-display_max_value = 100
-suffix_label = "%"
+display_min_value = 1
+display_max_value = 10
+suffix_label = "x"
 
 # --- Presets ---
 
 [[preset]]
 name = "Default Trio"
 rotary_potentiometer_1 = 256
-rotary_potentiometer_2 = 200
-rotary_potentiometer_3 = 384
-rotary_potentiometer_4 = 320
-rotary_potentiometer_5 = 512
+rotary_potentiometer_2 = 384
+rotary_potentiometer_3 = 512
+rotary_potentiometer_4 = 200
+rotary_potentiometer_5 = 320
 rotary_potentiometer_6 = 240
 toggle_switch_7 = 0
 toggle_switch_8 = 0
 toggle_switch_9 = 0
-toggle_switch_10 = 0
-toggle_switch_11 = 1
+toggle_switch_10 = 1
+toggle_switch_11 = 0
 linear_potentiometer_12 = 0
 
 [[preset]]
 name = "Slow Weave"
 rotary_potentiometer_1 = 96
-rotary_potentiometer_2 = 100
-rotary_potentiometer_3 = 128
-rotary_potentiometer_4 = 200
-rotary_potentiometer_5 = 160
+rotary_potentiometer_2 = 128
+rotary_potentiometer_3 = 160
+rotary_potentiometer_4 = 100
+rotary_potentiometer_5 = 200
 rotary_potentiometer_6 = 300
 toggle_switch_7 = 0
 toggle_switch_8 = 0
 toggle_switch_9 = 0
 toggle_switch_10 = 0
-toggle_switch_11 = 1
+toggle_switch_11 = 0
 linear_potentiometer_12 = 0
 
 [[preset]]
-name = "Deep FM"
+name = "Thick Trio"
 rotary_potentiometer_1 = 400
-rotary_potentiometer_2 = 600
-rotary_potentiometer_3 = 500
-rotary_potentiometer_4 = 700
-rotary_potentiometer_5 = 600
+rotary_potentiometer_2 = 500
+rotary_potentiometer_3 = 600
+rotary_potentiometer_4 = 500
+rotary_potentiometer_5 = 500
 rotary_potentiometer_6 = 500
-toggle_switch_7 = 0
-toggle_switch_8 = 0
-toggle_switch_9 = 0
+toggle_switch_7 = 1
+toggle_switch_8 = 1
+toggle_switch_9 = 1
 toggle_switch_10 = 0
 toggle_switch_11 = 1
-linear_potentiometer_12 = 700
+linear_potentiometer_12 = 800

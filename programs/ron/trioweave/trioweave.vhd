@@ -1,28 +1,32 @@
--- Trioweave: 3 sine VCOs each with own Freq + LFO, FM-modulated by slider.
+-- Trioweave: 3 half-wave-rectified sine VCOs.
+--
+-- Each oscillator outputs only its positive half-cycle (sin > 0 -> bright
+-- bump; sin <= 0 -> black).  This gives discrete bright "bars" with dark
+-- gaps where the carrier dips below zero, so when no oscillator is in its
+-- bright phase at a pixel the output goes to black.
 --
 -- Knob layout:
---   K1 OSC1 Freq   K2 OSC1 LFO rate
---   K3 OSC2 Freq   K4 OSC2 LFO rate
---   K5 OSC3 Freq   K6 OSC3 LFO rate
---   S7 Key polarity / tie-break
---   S8/S9/S10 Blend mode (8 options, bajaweave-style)
---   S11 Scroll on/off
---   S12 FM Depth -- scales how much a global FM source modulates each LFO rate
+--   K1 OSC1 Freq   K2 OSC2 Freq   K3 OSC3 Freq
+--   K4 OSC1 LFO    K5 OSC2 LFO    K6 OSC3 LFO
+--   S7/S8/S9 Gate which oscs are subject to the slider Thickness.
+--            Off: that osc stays at 1x (~50% duty, current "thin" look).
+--            On:  that osc gets the slider's thickness (1x to 10x).
+--   S10/S11 Blend mode (4 options):
+--     (S10,S11) = (0,0) -> MIN  -- darkest wins
+--     (S10,S11) = (1,0) -> DIFF -- abs difference
+--     (S10,S11) = (0,1) -> AND  -- bitwise AND (sparse glitch)
+--     (S10,S11) = (1,1) -> OR   -- bitwise OR (bright glitch)
+--   S12 Thickness -- global 1x..10x.  At 1x (slider=0) bright stripes
+--                    occupy ~50% of the cycle (matches old "thin").  At
+--                    10x (slider=1023) bright zones cover ~91% of the
+--                    cycle for oscs whose switch is on.
 --
--- Colors: fixed RGB-like triad (compile-time U/V constants, no hue LUT).
---
--- FM source: a dedicated frame-rate phase accumulator runs at a fixed slow
--- speed.  Its triangle output is multiplied by the slider and added to each
--- per-osc LFO step.  Slider=0 -> no FM, LFOs steady at their knob rates.
--- Slider=max -> LFO rates swing by ~+/-50% of base, creating a slow
--- "breathing" wobble in the modulation rate that compounds with each
--- osc's individual LFO rate.
+-- Scroll is hardcoded to always-on (no switch for it).
+-- Colors: fixed deeper RGB-like triad (compile-time U/V constants).
 --
 -- Resources:
 --   3 carrier sin LUTs (per-pixel)
 --   1 shared LFO sin LUT (time-muxed across 3 oscs during hsync blanking)
---   1 FM source phase accumulator (frame_phase_accumulator, free-running)
---   1 small 10b*11b signed multiplier for FM_value * slider
 -- Total: ~12 BRAMs, low LC count.
 --
 -- Pipeline (data_in -> data_out): ~11 clocks
@@ -47,27 +51,33 @@ architecture trioweave of program_top is
     constant C_CARRIER_W     : integer := 20;
     constant C_LFO_W         : integer := 20;
     constant C_SCROLL_W      : integer := 16;
-    constant C_FM_W          : integer := 16;
 
     constant C_FREQ_KNOB_SH  : integer := 5;
     constant C_FREQ_MIN      : integer := 1456;
     constant C_LFO_FLOOR     : integer := 816;
-    constant C_SCROLL_RATE   : unsigned(9 downto 0) := to_unsigned(128, 10);
-    constant C_FM_RATE       : unsigned(9 downto 0) := to_unsigned(96, 10);
-    constant C_FM_SCALE_SH   : integer := 8;
 
-    -- Fixed UV per osc (matches old trioweave defaults: hue 0, 340, 680).
+    -- Narrow per-osc LFO knob ranges (user-tuned sweet zones, 2026-05-25).
+    -- step(i) = FLOOR_i + K * RANGE_i / 1024, so the full 0..1023 knob travel
+    -- covers a small zone around the desired LFO step.
+    constant C_LFO_FLOOR_0   : integer := 1890;
+    constant C_LFO_RANGE_0   : integer := 123;
+    constant C_LFO_FLOOR_1   : integer := 2844;
+    constant C_LFO_RANGE_1   : integer := 153;
+    constant C_LFO_FLOOR_2   : integer := 2811;
+    constant C_LFO_RANGE_2   : integer := 216;
+    constant C_SCROLL_RATE   : unsigned(9 downto 0) := to_unsigned(384, 10);
+
+    -- Deeper RGB-like triad (compile-time U/V constants, ~25% larger
+    -- chroma offsets than before).
     type t_uv_array is array (0 to C_N_OSCS-1) of unsigned(9 downto 0);
     constant C_OSC_U : t_uv_array := (
-        to_unsigned(767, 10),
-        to_unsigned(387, 10),
-        to_unsigned(381, 10));
+        to_unsigned(832, 10),   -- OSC1 red:    +320 from neutral
+        to_unsigned(352, 10),   -- OSC2 green:  -160
+        to_unsigned(342, 10));  -- OSC3 blue:   -170
     constant C_OSC_V : t_uv_array := (
-        to_unsigned(512, 10),
-        to_unsigned(735, 10),
-        to_unsigned(292, 10));
-    constant C_AVG_U : unsigned(9 downto 0) := to_unsigned(511, 10);  -- mean of C_OSC_U
-    constant C_AVG_V : unsigned(9 downto 0) := to_unsigned(513, 10);  -- mean of C_OSC_V
+        to_unsigned(512, 10),   -- OSC1:    0
+        to_unsigned(792, 10),   -- OSC2: +280
+        to_unsigned(232, 10));  -- OSC3: -280
 
     constant C_UV_MID : unsigned(9 downto 0) := to_unsigned(512, 10);
 
@@ -111,24 +121,21 @@ architecture trioweave of program_top is
         to_unsigned(200, 10),
         to_unsigned(320, 10),
         to_unsigned(240, 10));
-    signal r_keypol    : std_logic := '0';
-    signal r_mode      : unsigned(2 downto 0) := (others => '0');
-    signal r_scroll_en : std_logic := '1';
+    -- Per-osc thickness toggle (bit i = OSC(i) thick).
+    signal r_thick     : std_logic_vector(C_N_OSCS-1 downto 0) := (others => '0');
+    -- Output blend mode. Bit 1 hardcoded to '1' so r_mode is always in
+    -- {010, 011, 110, 111} = {MIN, DIFF, AND, OR}.
+    signal r_mode      : unsigned(2 downto 0) := "010";
     signal r_slider    : unsigned(9 downto 0) := (others => '0');
 
     -- Timing record
     signal s_timing : t_video_timing_port;
 
     -- ====================================================================
-    -- FM source: free-running per-frame phase accumulator.
-    -- Triangle of its top 10 bits is the modulating signal.
+    -- Slider-derived global thickness threshold (combinational).
+    -- threshold = -slider * 31/64, range -495..0.
     -- ====================================================================
-    signal s_fm_phase     : unsigned(C_FM_W-1 downto 0);
-    signal s_fm_phase_top : unsigned(9 downto 0);
-    signal s_fm_tri       : signed(9 downto 0);
-    signal r_fm_value     : signed(9 downto 0) := (others => '0');
-    -- FM_value * slider, scaled to a magnitude similar to the LFO step range
-    signal r_fm_mod       : signed(12 downto 0) := (others => '0');
+    signal s_slider_thresh : signed(11 downto 0);
 
     -- ====================================================================
     -- Per-osc LFO state
@@ -167,6 +174,12 @@ architecture trioweave of program_top is
     -- Carrier sin LUTs
     signal s_osc_sin   : t_signed10;
     signal r_osc_sin_r : t_signed10 := (others => (others => '0'));
+
+    -- Per-osc registered threshold (selected from slider or zero based on
+    -- r_thick(i)).  Registering moves the small mux out of the luma
+    -- combinational path.
+    type t_thresh_arr is array (0 to C_N_OSCS-1) of signed(11 downto 0);
+    signal r_osc_thresh : t_thresh_arr := (others => (others => '0'));
 
     -- Per-osc luma
     signal r_osc_luma : t_uns10 := (others => (others => '0'));
@@ -232,47 +245,29 @@ begin
         if rising_edge(clk) then
             if s_timing.vsync_start = '1' then
                 r_freq(0) <= s_k1;
-                r_lfo(0)  <= s_k2;
-                r_freq(1) <= s_k3;
-                r_lfo(1)  <= s_k4;
-                r_freq(2) <= s_k5;
+                r_freq(1) <= s_k2;
+                r_freq(2) <= s_k3;
+                r_lfo(0)  <= s_k4;
+                r_lfo(1)  <= s_k5;
                 r_lfo(2)  <= s_k6;
-                r_keypol    <= s_s7;
-                r_mode      <= s_s10 & s_s9 & s_s8;
-                r_scroll_en <= s_s11;
+                r_thick(0)  <= s_s7;
+                r_thick(1)  <= s_s8;
+                r_thick(2)  <= s_s9;
+                -- mode = (S11, '1', S10): selects MIN/DIFF/AND/OR.
+                r_mode      <= s_s11 & '1' & s_s10;
                 r_slider    <= s_k12;
             end if;
         end if;
     end process;
 
     -- ========================================================================
-    -- FM Source: free-running per-frame phase, triangle output.
-    -- Multiplied by slider value to get the modulation magnitude shared
-    -- by all per-osc LFO step calculations.
+    -- Slider -> global thickness threshold.
+    --   threshold = -slider * 31/64, range -495..0
+    -- At slider=0 the threshold is 0 (50% duty, 1x thickness).
+    -- At slider=1023 it's ~-495 (91% duty, ~10:1 bright:dark, 10x thickness).
     -- ========================================================================
-    fm_inst : entity work.frame_phase_accumulator
-        generic map (G_PHASE_WIDTH => C_FM_W, G_SPEED_WIDTH => 10)
-        port map (
-            clk     => clk,
-            vsync_n => data_in.vsync_n,
-            enable  => '1',
-            speed   => C_FM_RATE,
-            phase   => s_fm_phase
-        );
-
-    s_fm_phase_top <= s_fm_phase(C_FM_W-1 downto C_FM_W-10);
-    s_fm_tri       <= tri_fold(s_fm_phase_top);
-
-    p_fm_mod : process(clk)
-        variable v_prod : signed(20 downto 0);
-    begin
-        if rising_edge(clk) then
-            r_fm_value <= s_fm_tri;
-            -- 10b signed * 11b signed (slider extended to positive 11b) = 21b signed
-            v_prod := r_fm_value * signed(resize(r_slider, 11));
-            r_fm_mod <= resize(shift_right(v_prod, C_FM_SCALE_SH), 13);
-        end if;
-    end process;
+    s_slider_thresh <= -signed(resize(
+        shift_right(r_slider, 1) - shift_right(r_slider, 6), 12));
 
     -- ========================================================================
     -- LFO Accumulators (per-line, per-osc).  Step is computed combinationally
@@ -283,16 +278,25 @@ begin
         signal s_base_step : signed(13 downto 0);
         signal s_step_sum  : signed(13 downto 0);
     begin
-        s_base_step <= signed(resize(
-            shift_left(resize(r_lfo(i), 12), 1)
-            + resize(r_lfo(i), 12)
-            + to_unsigned(C_LFO_FLOOR, 12), 14));
-        s_step_sum <= s_base_step + resize(r_fm_mod, 14);
+        g0 : if i = 0 generate
+            s_base_step <= signed(resize(
+                shift_right(r_lfo(i) * to_unsigned(C_LFO_RANGE_0, 8), 10),
+                14)) + to_signed(C_LFO_FLOOR_0, 14);
+        end generate;
+        g1 : if i = 1 generate
+            s_base_step <= signed(resize(
+                shift_right(r_lfo(i) * to_unsigned(C_LFO_RANGE_1, 8), 10),
+                14)) + to_signed(C_LFO_FLOOR_1, 14);
+        end generate;
+        g2 : if i = 2 generate
+            s_base_step <= signed(resize(
+                shift_right(r_lfo(i) * to_unsigned(C_LFO_RANGE_2, 8), 10),
+                14)) + to_signed(C_LFO_FLOOR_2, 14);
+        end generate;
 
-        -- Clamp negative to 0 (avoid step underflow turning into huge wrap)
-        s_lfo_step_slv(i) <= std_logic_vector(to_unsigned(0, C_LFO_W))
-                                when s_step_sum(13) = '1'
-                            else std_logic_vector(resize(unsigned(s_step_sum(12 downto 0)), C_LFO_W));
+        s_step_sum <= s_base_step;
+
+        s_lfo_step_slv(i) <= std_logic_vector(resize(unsigned(s_step_sum(12 downto 0)), C_LFO_W));
     end generate;
 
     gen_lfo : for i in 0 to C_N_OSCS-1 generate
@@ -391,7 +395,7 @@ begin
         port map (
             clk     => clk,
             vsync_n => data_in.vsync_n,
-            enable  => r_scroll_en,
+            enable  => '1',
             speed   => C_SCROLL_RATE,
             phase   => s_scroll_phase
         );
@@ -436,11 +440,40 @@ begin
         end if;
     end process;
 
-    p_luma_reg : process(clk)
+    -- Pre-register per-osc threshold so the slider/switch mux is out of
+    -- the luma combinational path.
+    p_thresh_reg : process(clk)
     begin
         if rising_edge(clk) then
             for i in 0 to C_N_OSCS-1 loop
-                r_osc_luma(i) <= unsigned(resize(r_osc_sin_r(i) + to_signed(512, 11), 10));
+                if r_thick(i) = '1' then
+                    r_osc_thresh(i) <= s_slider_thresh;
+                else
+                    r_osc_thresh(i) <= (others => '0');
+                end if;
+            end loop;
+        end if;
+    end process;
+
+    -- Single-stage luma: half-wave rectify with threshold + 3/2 scale + 767 cap.
+    p_luma_reg : process(clk)
+        variable v_diff     : signed(12 downto 0);
+        variable v_luma_raw : signed(13 downto 0);
+    begin
+        if rising_edge(clk) then
+            for i in 0 to C_N_OSCS-1 loop
+                v_diff := resize(r_osc_sin_r(i), 13) - resize(r_osc_thresh(i), 13);
+                if v_diff(12) = '1' then
+                    -- sin < threshold (negative diff) -> dark
+                    r_osc_luma(i) <= (others => '0');
+                else
+                    v_luma_raw := resize(v_diff, 14) + resize(shift_right(v_diff, 1), 14);
+                    if v_luma_raw > to_signed(767, 14) then
+                        r_osc_luma(i) <= to_unsigned(767, 10);
+                    else
+                        r_osc_luma(i) <= unsigned(v_luma_raw(9 downto 0));
+                    end if;
+                end if;
             end loop;
         end if;
     end process;
@@ -456,22 +489,13 @@ begin
             v_l1 := r_osc_luma(1);
             v_l2 := r_osc_luma(2);
 
-            if r_keypol = '0' then
-                if v_l0 >= v_l1 and v_l0 >= v_l2 then
-                    r_max_val <= v_l0; r_max_idx <= "00";
-                elsif v_l1 >= v_l2 then
-                    r_max_val <= v_l1; r_max_idx <= "01";
-                else
-                    r_max_val <= v_l2; r_max_idx <= "10";
-                end if;
+            -- MAX (used by DIFF mode for color selection; low-index tie-break)
+            if v_l0 >= v_l1 and v_l0 >= v_l2 then
+                r_max_val <= v_l0; r_max_idx <= "00";
+            elsif v_l1 >= v_l2 then
+                r_max_val <= v_l1; r_max_idx <= "01";
             else
-                if v_l2 >= v_l1 and v_l2 >= v_l0 then
-                    r_max_val <= v_l2; r_max_idx <= "10";
-                elsif v_l1 >= v_l0 then
-                    r_max_val <= v_l1; r_max_idx <= "01";
-                else
-                    r_max_val <= v_l0; r_max_idx <= "00";
-                end if;
+                r_max_val <= v_l2; r_max_idx <= "10";
             end if;
 
             if v_l0 <= v_l1 and v_l0 <= v_l2 then
@@ -513,8 +537,8 @@ begin
                     else
                         v_y := r_sum_y(9 downto 0);
                     end if;
-                    v_u := C_AVG_U;
-                    v_v := C_AVG_V;
+                    v_u := C_UV_MID;
+                    v_v := C_UV_MID;
                 when "010" =>  -- MIN
                     v_y := r_min_val;
                     case r_min_idx is
@@ -531,8 +555,8 @@ begin
                     end case;
                 when "100" =>  -- AVG (sum * 5/16 ~= sum/3.2)
                     v_y := resize(shift_right(r_sum_y, 2) + shift_right(r_sum_y, 4), 10);
-                    v_u := C_AVG_U;
-                    v_v := C_AVG_V;
+                    v_u := C_UV_MID;
+                    v_v := C_UV_MID;
                 when "101" =>  -- HARDKEY: OSC1 luma threshold over MAX(OSC2,OSC3)
                     if r_l0_d > to_unsigned(512, 10) then
                         v_y := r_l0_d; v_u := C_OSC_U(0); v_v := C_OSC_V(0);
@@ -546,8 +570,8 @@ begin
                     end if;
                 when "110" =>  -- AND bitwise
                     v_y := r_and_y;
-                    v_u := C_AVG_U;
-                    v_v := C_AVG_V;
+                    v_u := C_UV_MID;
+                    v_v := C_UV_MID;
                 when others =>  -- "111" OR bitwise
                     v_y := r_or_y;
                     case r_max_idx is
