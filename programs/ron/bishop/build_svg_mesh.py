@@ -282,24 +282,44 @@ def main():
     def clamp8(v):
         return max(-127, min(127, int(round(v))))
 
+    def pack_delta(dx, dy):
+        return ((int(dy) & 0xFF) << 8) | (int(dx) & 0xFF)
+
+    # SPARSE morph storage: a delta belongs to a VERTEX, not an edge-endpoint, so
+    # store it once per moving vertex (slot 1..V; slot 0 = static = zero) and let
+    # each mesh edge carry its two endpoints' slots.  This drops 12 edge ROMs
+    # (6 morphs x top/bot, 256-deep) to 6 vertex ROMs (V-deep) + 1 edge->slot map.
+    moving = sorted(set().union(*[set(d) for d in morph_src.values()]))
+    vtx_slot = {n: i + 1 for i, n in enumerate(moving)}     # 1..V ; 0 = static
+    NSLOT = len(moving) + 1
+    vrom = {m: [0] * NSLOT for m in MORPHS}                 # [slot] -> packed px
+    for m in MORPHS:
+        for n, (dx, dy) in morph_src[m].items():
+            vrom[m][vtx_slot[n]] = pack_delta(clamp8(dx * scale_x),
+                                              clamp8(dy * scale_y))
+
+    # mesh + edge->vertex-slot map (top_slot<<8 | bot_slot), aligned 1:1 with
+    # mesh[] (same split + by-y swap).  Split pieces have interpolated endpoints
+    # that are NOT vertices, so per-vertex deltas can't represent them — but a
+    # split edge is a wide horizontal and none touch a moving vertex (asserted).
     mesh = []
-    deltas = {m: [] for m in MORPHS}
+    emap = []
     for na, nb in edge_nums:
         sa, sb = scaled(neutral_pos(na)), scaled(neutral_pos(nb))
-        for f0, f1 in split_fracs(sa, sb):
+        pieces = split_fracs(sa, sb)
+        if len(pieces) > 1 and (na in vtx_slot or nb in vtx_slot):
+            raise SystemExit(f"morph vertex on split edge {na}-{nb}: "
+                             "per-vertex morph cannot interpolate split pieces")
+        for f0, f1 in pieces:
             p0, p1 = lerp(sa, sb, f0), lerp(sa, sb, f1)
             mesh.append(to_dda(p0, p1))
-            top_is_p0 = (p0[1] <= p1[1])
-            for m in MORPHS:
-                da = morph_src[m].get(na, (0, 0))
-                db = morph_src[m].get(nb, (0, 0))
-                e0 = lerp(da, db, f0)
-                e1 = lerp(da, db, f1)
-                d0 = (e0[0] * scale_x, e0[1] * scale_y)
-                d1 = (e1[0] * scale_x, e1[1] * scale_y)
-                dt, dbt = (d0, d1) if top_is_p0 else (d1, d0)
-                deltas[m].append((clamp8(dt[0]), clamp8(dt[1]),
-                                  clamp8(dbt[0]), clamp8(dbt[1])))
+            if f0 == 0.0 and f1 == 1.0:                    # whole edge = vertices
+                top_n = na if p0[1] <= p1[1] else nb
+                bot_n = nb if p0[1] <= p1[1] else na
+                ts, bs = vtx_slot.get(top_n, 0), vtx_slot.get(bot_n, 0)
+            else:                                          # split piece = static
+                ts = bs = 0
+            emap.append((ts << 8) | bs)
     N = len(mesh)
 
     # guards (same ceilings as build_face_mesh.check_fpga_limits)
@@ -395,26 +415,25 @@ def main():
         return e["x_top"] + e["slope"] * (e["y_max"] - e["y_min"])
     L.append(arr("C_EDGE_X_BOT", [x_bot_of(e) for e in mesh]))
 
-    # ---- morph deltas (mouth open/close, eye blink, expressions) ----
-    # Per edge, two packed words (top endpoint, bottom endpoint).  Each word is
-    # (dy<<8) | (dx & 0xFF), 8-bit signed px deltas applied additively to the
-    # endpoint in the vblank engine.  PHASE 0: zero-filled (RTL plumbing only);
-    # later phases fill these from the morph overlays defined above.
-    def pack_delta(dx, dy):
-        return ((int(dy) & 0xFF) << 8) | (int(dx) & 0xFF)
+    # ---- morph deltas: SPARSE per-vertex storage ----
+    # 6 vertex-delta ROMs (indexed by vertex SLOT 0..NSLOT-1; slot 0 = zero) plus
+    # one edge->slot map (top_slot<<8 | bot_slot per mesh edge).  Each packed word
+    # is (dy<<8)|(dx&0xFF) program-px.  Replaces the 12 edge-indexed 256-deep ROMs
+    # (6 morphs x top/bot) -> 6 V-deep ROMs + 1 map: 12 BRAM -> 7.
+    def arr_n(name, vals, depth):
+        body = ", ".join(str(v) for v in vals)
+        return (f"    constant {name} : t_int_array(0 to {depth} - 1) := (\n"
+                f"        {body}\n    );\n")
 
-    def emit_morph(prefix, dl):                 # dl = deltas[m] (dxt,dyt,dxb,dyb)
-        L.append(arr(prefix + "_DTOP", [pack_delta(d[0], d[1]) for d in dl]))
-        L.append(arr(prefix + "_DBOT", [pack_delta(d[2], d[3]) for d in dl]))
-
-    emit_morph("C_MOUTH", deltas["mouth"])
-    emit_morph("C_EYE", deltas["eye"])
-    emit_morph("C_EXPR_HAPPY", deltas["happy"])
-    emit_morph("C_EXPR_SAD", deltas["sad"])
-    emit_morph("C_EXPR_ANGRY", deltas["angry"])
-    emit_morph("C_EXPR_SURPRISED", deltas["surprised"])
-    nz = sum(1 for m in MORPHS for d in deltas[m] if any(d))
-    print(f"morph deltas: {nz} non-zero edge-endpoints across {len(MORPHS)} morphs")
+    L.append(f"    constant C_MORPH_NSLOT : natural := {NSLOT};")
+    for m, nm in [("mouth", "C_VROM_MOUTH"), ("eye", "C_VROM_EYE"),
+                  ("happy", "C_VROM_HAPPY"), ("sad", "C_VROM_SAD"),
+                  ("angry", "C_VROM_ANGRY"), ("surprised", "C_VROM_SUR")]:
+        L.append(arr_n(nm, vrom[m], "C_MORPH_NSLOT"))
+    L.append(arr("C_MORPH_EMAP", emap))
+    nz = sum(1 for m in MORPHS for v in vrom[m] if v != 0)
+    print(f"morph: {len(moving)} moving vertices, NSLOT={NSLOT}, "
+          f"{nz} non-zero vertex-deltas; emap covers {N} edges")
 
     fns = ["f_y_min", "f_y_min_mc", "f_y_min_ec", "f_y_max", "f_y_max_mc", "f_y_max_ec",
            "f_x_top", "f_x_top_mc", "f_x_top_ec", "f_slope", "f_slope_mc", "f_slope_ec"]

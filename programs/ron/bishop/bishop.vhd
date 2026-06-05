@@ -353,7 +353,7 @@ architecture bishop of program_top is
     -- Split into many shallow states (free in vblank) so no single cycle has a
     -- deep combinational path — keeps the noise engine off the HD critical path.
     type t_cp_state is (CP_IDLE, CP_LOAD, CP_HASH, CP_PHASE, CP_TRI,
-                        CP_MLOAD, CP_MSEL, CP_MDO,
+                        CP_MR0, CP_MR1, CP_MR2, CP_MLOAD, CP_MSEL, CP_MDO,
                         CP_OFF, CP_SORT, CP_FLOOR, CP_SPAN, CP_DX, CP_DIV, CP_WR);
     signal cp_state : t_cp_state := CP_IDLE;
     signal cp_addr  : unsigned(8 downto 0) := (others => '0');
@@ -420,27 +420,43 @@ architecture bishop of program_top is
     signal expr_frac_r  : unsigned(4 downto 0) := (others => '0');  -- K4 blend t (0..31)
     signal morph_active : std_logic;
 
-    type t_morph_rom is array (0 to 255) of std_logic_vector(15 downto 0);
-    function init_morph(src : t_int_array) return t_morph_rom is
-        variable r : t_morph_rom := (others => (others => '0'));
+    -- SPARSE morph storage: per-VERTEX delta ROMs (one per morph, indexed by a
+    -- vertex slot 0..NSLOT-1; slot 0 = static = zero) + an edge->slot map.  A
+    -- delta is a property of a vertex, so storing per moving-vertex (not per
+    -- edge-endpoint) drops 12 edge ROMs to 6 vertex ROMs + 1 map (12->7 BRAM).
+    type t_vrom is array (0 to C_MORPH_NSLOT - 1) of std_logic_vector(15 downto 0);
+    function init_vrom(src : t_int_array) return t_vrom is
+        variable r : t_vrom;
+    begin
+        for i in 0 to C_MORPH_NSLOT - 1 loop
+            r(i) := std_logic_vector(to_unsigned(src(i) mod 65536, 16));
+        end loop;
+        return r;
+    end function;
+    constant C_VROM_M : t_vrom := init_vrom(C_VROM_MOUTH);
+    constant C_VROM_E : t_vrom := init_vrom(C_VROM_EYE);
+    constant C_VROM_H : t_vrom := init_vrom(C_VROM_HAPPY);
+    constant C_VROM_S : t_vrom := init_vrom(C_VROM_SAD);
+    constant C_VROM_A : t_vrom := init_vrom(C_VROM_ANGRY);
+    constant C_VROM_U : t_vrom := init_vrom(C_VROM_SUR);
+
+    type t_emap is array (0 to 255) of std_logic_vector(15 downto 0);
+    function init_emap(src : t_int_array) return t_emap is
+        variable r : t_emap := (others => (others => '0'));
     begin
         for i in 0 to C_NUM_EDGES - 1 loop
             r(i) := std_logic_vector(to_unsigned(src(i), 16));
         end loop;
         return r;
     end function;
-    constant C_MOUTH_T_ROM : t_morph_rom := init_morph(C_MOUTH_DTOP);
-    constant C_MOUTH_B_ROM : t_morph_rom := init_morph(C_MOUTH_DBOT);
-    constant C_EYE_T_ROM   : t_morph_rom := init_morph(C_EYE_DTOP);
-    constant C_EYE_B_ROM   : t_morph_rom := init_morph(C_EYE_DBOT);
-    constant C_HAP_T_ROM   : t_morph_rom := init_morph(C_EXPR_HAPPY_DTOP);
-    constant C_HAP_B_ROM   : t_morph_rom := init_morph(C_EXPR_HAPPY_DBOT);
-    constant C_SAD_T_ROM   : t_morph_rom := init_morph(C_EXPR_SAD_DTOP);
-    constant C_SAD_B_ROM   : t_morph_rom := init_morph(C_EXPR_SAD_DBOT);
-    constant C_ANG_T_ROM   : t_morph_rom := init_morph(C_EXPR_ANGRY_DTOP);
-    constant C_ANG_B_ROM   : t_morph_rom := init_morph(C_EXPR_ANGRY_DBOT);
-    constant C_SUR_T_ROM   : t_morph_rom := init_morph(C_EXPR_SURPRISED_DTOP);
-    constant C_SUR_B_ROM   : t_morph_rom := init_morph(C_EXPR_SURPRISED_DBOT);
+    constant C_EMAP_ROM : t_emap := init_emap(C_MORPH_EMAP);
+
+    -- emap read at cp_addr; the 6 vrom reads share one address (vrom_addr), so
+    -- top and bottom endpoints are read in successive cycles (CP_MR0..MR2).
+    signal emap_r    : std_logic_vector(15 downto 0);
+    signal vrom_addr : unsigned(5 downto 0) := (others => '0');
+    signal vr_m, vr_e, vr_h, vr_s, vr_a, vr_u : std_logic_vector(15 downto 0);
+    -- latched top/bottom-endpoint deltas for the current edge (fed to CP_MLOAD).
     signal mrd_mt, mrd_mb, mrd_et, mrd_eb : std_logic_vector(15 downto 0);
     signal mrd_ht, mrd_hb, mrd_st, mrd_sb : std_logic_vector(15 downto 0);
     signal mrd_at, mrd_ab, mrd_ut, mrd_ub : std_logic_vector(15 downto 0);
@@ -1175,17 +1191,17 @@ begin
     -- Morph-delta ROMs read at cp_addr (registered, 1-cycle latency).  cp_addr
     -- is stable across an edge's cp_proc states, so the reads are valid well
     -- before CP_MLOAD consumes them.
+    -- emap read tracks the current edge (cp_addr); the 6 vrom reads track
+    -- vrom_addr, which cp_proc points at the top then the bottom vertex slot.
     morph_rom_proc : process(clk)
-        variable a : integer range 0 to 255;
+        variable va : integer range 0 to C_MORPH_NSLOT - 1;
     begin
         if rising_edge(clk) then
-            a := to_integer(cp_addr(7 downto 0));
-            mrd_mt <= C_MOUTH_T_ROM(a); mrd_mb <= C_MOUTH_B_ROM(a);
-            mrd_et <= C_EYE_T_ROM(a);   mrd_eb <= C_EYE_B_ROM(a);
-            mrd_ht <= C_HAP_T_ROM(a);   mrd_hb <= C_HAP_B_ROM(a);
-            mrd_st <= C_SAD_T_ROM(a);   mrd_sb <= C_SAD_B_ROM(a);
-            mrd_at <= C_ANG_T_ROM(a);   mrd_ab <= C_ANG_B_ROM(a);
-            mrd_ut <= C_SUR_T_ROM(a);   mrd_ub <= C_SUR_B_ROM(a);
+            emap_r <= C_EMAP_ROM(to_integer(cp_addr(7 downto 0)));
+            va := to_integer(vrom_addr);
+            vr_m <= C_VROM_M(va);  vr_e <= C_VROM_E(va);
+            vr_h <= C_VROM_H(va);  vr_s <= C_VROM_S(va);
+            vr_a <= C_VROM_A(va);  vr_u <= C_VROM_U(va);
         end if;
     end process;
 
@@ -1257,9 +1273,29 @@ begin
 
                 -- CP_TRI: sample the triangle waves (kept shallow; the noise
                 -- spread multiply is folded into the shared multiply loop).
+                -- Also point vrom_addr at this edge's TOP vertex slot (emap_r is
+                -- valid by now — emap tracks cp_addr, stable since CP_LOAD).
                 when CP_TRI =>
                     t_trxt <= tri10(w_phxt);  t_tryt <= tri10(w_phyt);
                     t_trxb <= tri10(w_phxb);  t_tryb <= tri10(w_phyb);
+                    vrom_addr <= unsigned(emap_r(13 downto 8));   -- top slot
+                    cp_state  <= CP_MR0;
+
+                -- CP_MR0..MR2: dependent ROM reads have 2-cycle latency (set
+                -- addr -> +1 addr visible -> +1 data out).  MR0 switches the
+                -- shared vrom_addr to the BOTTOM slot; MR1 latches the TOP-vertex
+                -- deltas (now valid from the addr set in CP_TRI); MR2 latches the
+                -- BOTTOM-vertex deltas.  mrd_*t/*b then feed CP_MLOAD as before.
+                when CP_MR0 =>
+                    vrom_addr <= unsigned(emap_r(5 downto 0));    -- bottom slot
+                    cp_state  <= CP_MR1;
+                when CP_MR1 =>
+                    mrd_mt <= vr_m;  mrd_et <= vr_e;  mrd_ht <= vr_h;
+                    mrd_st <= vr_s;  mrd_at <= vr_a;  mrd_ut <= vr_u;
+                    cp_state <= CP_MR2;
+                when CP_MR2 =>
+                    mrd_mb <= vr_m;  mrd_eb <= vr_e;  mrd_hb <= vr_h;
+                    mrd_sb <= vr_s;  mrd_ab <= vr_a;  mrd_ub <= vr_u;
                     cp_state <= CP_MLOAD;
 
                 -- CP_MLOAD: unpack the per-edge morph deltas.  Mouth + eye are
