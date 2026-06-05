@@ -9,17 +9,17 @@ categories = ["Render", "Shape", "Demo", "Computer"]
 program_type = "synthesis"
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
-description = "Wireframe head. K2=thickness, K4=expression, T7/T8 mouth/eyes, K5 noise speed, K6 noise spread."
+description = "Wireframe head. K1 mouth open/close, K2 thickness, K3 palette, K4 expression blend, K5/K6 noise speed/spread, T8 eye blink."
 
 # --- Rotary Potentiometers (K1-K6) ---
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_1"
-name_label = "Scale"
+name_label = "Mouth"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 512
+initial_value = 1023
 display_min_value = 0
 display_max_value = 100
 suffix_label = "%"
@@ -39,8 +39,13 @@ initial_value_label = "Green"
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
 name_label = "Expression"
-value_labels = ["Neutral", "Happy", "Sad", "Angry", "Surprised"]
-initial_value_label = "Neutral"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 0
+display_min_value = 0
+display_max_value = 100
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
@@ -64,21 +69,14 @@ display_min_value = 0
 display_max_value = 100
 suffix_label = "%"
 
-# --- Toggle Switches (7-11) ---
-# T7 = Mouth (Closed default / Open).  T8 = Eyes (Closed default / Open).
-# Each toggles independently and layers on any K4 expression.
-
-[[parameter]]
-parameter_id = "toggle_switch_7"
-name_label = "Mouth"
-value_labels = ["Closed", "Open"]
-initial_value_label = "Closed"
+# --- Toggle Switches (8-11) ---
+# Mouth is the K1 analog knob now; T7 retired.  T8 = Eyes (Open default / Closed).
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
 name_label = "Eyes"
 value_labels = ["Closed", "Open"]
-initial_value_label = "Closed"
+initial_value_label = "Open"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
@@ -115,13 +113,12 @@ suffix_label = "%"
 
 [[preset]]
 name = "Neutral"
-rotary_potentiometer_1   = 512   # Scale
+rotary_potentiometer_1   = 1023  # Mouth = open (neutral)
 rotary_potentiometer_2   = 0     # Thickness = 1 px
 rotary_potentiometer_3   = 0     # Palette = Green
 rotary_potentiometer_4   = 0     # Expression = Neutral
 rotary_potentiometer_5   = 512   # Noise Speed
 rotary_potentiometer_6   = 0     # Noise Spread = off
-toggle_switch_7          = 0
 toggle_switch_8          = 0
 toggle_switch_9          = 0     # Noise = Smooth
 toggle_switch_10         = 0
@@ -130,13 +127,12 @@ linear_potentiometer_12  = 900
 
 [[preset]]
 name = "Happy"
-rotary_potentiometer_1   = 512
+rotary_potentiometer_1   = 1023  # Mouth = open
 rotary_potentiometer_2   = 0
 rotary_potentiometer_3   = 256   # Palette = Amber
 rotary_potentiometer_4   = 256   # Expression = Happy
 rotary_potentiometer_5   = 512   # Noise Speed
 rotary_potentiometer_6   = 0     # Noise Spread = off
-toggle_switch_7          = 0
 toggle_switch_8          = 0
 toggle_switch_9          = 0
 toggle_switch_10         = 0
@@ -145,13 +141,12 @@ linear_potentiometer_12  = 1000
 
 [[preset]]
 name = "Angry"
-rotary_potentiometer_1   = 512
+rotary_potentiometer_1   = 1023  # Mouth = open
 rotary_potentiometer_2   = 384   # Thickness = 2 px
 rotary_potentiometer_3   = 384   # Palette = Red
 rotary_potentiometer_4   = 768   # Expression = Angry
 rotary_potentiometer_5   = 512   # Noise Speed
 rotary_potentiometer_6   = 0     # Noise Spread = off
-toggle_switch_7          = 0
 toggle_switch_8          = 0
 toggle_switch_9          = 0
 toggle_switch_10         = 0
@@ -160,13 +155,12 @@ linear_potentiometer_12  = 900
 
 [[preset]]
 name = "Surprised"
-rotary_potentiometer_1   = 512
+rotary_potentiometer_1   = 1023  # Mouth = open
 rotary_potentiometer_2   = 256
 rotary_potentiometer_3   = 128   # Palette = Cyan
 rotary_potentiometer_4   = 896   # Expression = Surprised
 rotary_potentiometer_5   = 512   # Noise Speed
 rotary_potentiometer_6   = 0     # Noise Spread = off
-toggle_switch_7          = 0
 toggle_switch_8          = 0
 toggle_switch_9          = 0
 toggle_switch_10         = 0

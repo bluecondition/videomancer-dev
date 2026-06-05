@@ -101,6 +101,67 @@ MOVED_POINTS = {
     43: (495.0, 283.0),  62: (498.0, 320.0),  77: (502.0, 360.0),  87: (506.0, 400.0),
 }
 
+# ---- Morph overlays: per-point (dx, dy) SVG-px deltas (+y = down) ----
+# The neutral mesh = fully-open mouth & eyes.  Each morph moves a set of points;
+# every edge endpoint that is (or interpolates toward) a moved point follows it.
+# Expressions adapted from the tuned named-vertex deltas in face_mesh.py, mapped
+# onto face12 point numbers.  Mouth corners 122/123, upper lip 115/116/117,
+# lower lip 126/127/128; eyes: upper lid 52/53/54/55, lower lid 67/68/69/70,
+# outer 58/65/59/66, inner 56/63/57/64; brows: inner 30/34/31/37, peak 38/41,
+# outer 32/44/33/50; nose sides 91/92/94/95, tip 88/104.
+# Mouth close (K1=0%): lower lip rises and upper-lip lower edge dips so the lips
+# meet around the mouth centerline (~y510); corners pinch in slightly; chin lifts
+# a touch for the jaw-up realism cue.  Neutral (K1=100%) = these all zero = open.
+MOUTH_CLOSED = {
+    124:(0,-9), 127:(0,-12), 126:(0,-12), 128:(0,-12), 125:(0,-9),  # lower lip up
+    117:(0,4), 120:(0,3), 121:(0,3),                                # upper lip dips
+    122:(3,0), 123:(-3,0),                                          # corners pinch
+    131:(0,-2), 132:(0,-3), 133:(0,-2),                            # chin lifts
+}
+# Eye blink (P8=Closed): upper lids drop and lower lids rise to a near-flat line
+# at mid-eye (~y317); outer/inner corners ease in.  Neutral (P8=Open) = zero.
+EYES_CLOSED = {
+    52:(0,15), 53:(0,15), 54:(0,15), 55:(0,15),     # upper lids down
+    67:(0,-14), 68:(0,-14), 69:(0,-14), 70:(0,-14),  # lower lids up
+    60:(0,-3), 63:(0,-4), 62:(0,-3), 64:(0,-4),      # mid-lower lids up
+    65:(0,-6), 66:(0,-6),                            # lower outer up
+    56:(0,4), 57:(0,4),                              # inner-upper ease down
+}
+
+EXPR_HAPPY = {
+    122:(-8,-10), 123:(8,-10), 117:(0,-6), 115:(0,-6), 116:(0,-6),
+    126:(0,3), 127:(0,2), 128:(0,2),
+    67:(0,-5), 68:(0,-5), 69:(0,-5), 70:(0,-5),
+    52:(0,2), 53:(0,2), 54:(0,2), 55:(0,2),
+    58:(0,-2), 65:(0,-2), 59:(0,-2), 66:(0,-2),
+    91:(0,-2), 92:(0,-2), 94:(0,-2), 95:(0,-2),
+}
+EXPR_SAD = {
+    30:(3,-10), 34:(3,-10), 31:(-3,-10), 37:(-3,-10), 38:(0,-2), 41:(0,-2),
+    32:(0,5), 44:(0,5), 33:(0,5), 50:(0,5),
+    52:(0,4), 53:(0,4), 54:(0,4), 55:(0,4),
+    67:(0,2), 68:(0,2), 69:(0,2), 70:(0,2), 58:(0,2), 65:(0,2), 59:(0,2), 66:(0,2),
+    122:(3,10), 123:(-3,10), 117:(0,-2), 115:(0,-2), 116:(0,-2),
+    126:(0,-4), 127:(0,-3), 128:(0,-3),
+}
+EXPR_ANGRY = {
+    30:(3,10), 34:(3,10), 31:(-3,10), 37:(-3,10), 38:(0,3), 41:(0,3),
+    32:(0,-8), 44:(0,-8), 33:(0,-8), 50:(0,-8),
+    52:(0,2), 53:(0,2), 54:(0,2), 55:(0,2), 67:(0,-2), 68:(0,-2), 69:(0,-2), 70:(0,-2),
+    56:(2,0), 63:(2,0), 58:(2,0), 65:(2,0), 57:(-2,0), 64:(-2,0), 59:(-2,0), 66:(-2,0),
+    47:(0,5), 51:(0,5), 91:(0,-3), 92:(0,-3), 94:(0,-3), 95:(0,-3), 88:(0,-3), 104:(0,-3),
+    122:(0,2), 123:(0,2), 117:(0,2), 115:(0,2), 116:(0,2),
+    126:(0,-4), 127:(0,-3), 128:(0,-3),
+}
+EXPR_SURPRISED = {
+    32:(0,-11), 44:(0,-11), 38:(0,-14), 30:(0,-11), 34:(0,-11),
+    33:(0,-11), 50:(0,-11), 41:(0,-14), 31:(0,-11), 37:(0,-11),
+    52:(0,-5), 53:(0,-5), 54:(0,-5), 55:(0,-5),
+    67:(0,4), 68:(0,4), 69:(0,4), 70:(0,4),
+    117:(0,-5), 115:(0,-5), 116:(0,-5),
+    126:(0,12), 127:(0,10), 128:(0,10), 122:(6,2), 123:(-6,2),
+}
+
 
 def floats(s):
     n = [float(x) for x in re.findall(r'-?\d+\.?\d*', s)]
@@ -145,30 +206,28 @@ def main():
         allv.add(rnd(a)); allv.add(rnd(b))
     num = {p: i + 1 for i, p in enumerate(sorted(allv, key=lambda p: (p[1], p[0])))}
     removed = {frozenset(pair) for pair in REMOVED_EDGES}
-    if removed:
-        before = len(edges)
-        edges = [(a, b) for (a, b) in edges
-                 if frozenset({num[rnd(a)], num[rnd(b)]}) not in removed]
-        print(f"removed {before - len(edges)} of {len(removed)} requested edges")
-    # add edges not present in the SVG (straight line between two points)
     inv = {n: p for p, n in num.items()}
-    present = {frozenset({num[rnd(a)], num[rnd(b)]}) for a, b in edges}
+    # Edge list as stable (point_number, point_number) pairs — keeps the point
+    # identity so morph deltas (keyed by number) can follow each endpoint.
+    edge_nums = []
+    seen = set()
+    n_removed = 0
+    for a, b in edges:
+        key = frozenset({num[rnd(a)], num[rnd(b)]})
+        if key in removed:
+            n_removed += 1; continue
+        if key in seen:
+            continue
+        seen.add(key); edge_nums.append((num[rnd(a)], num[rnd(b)]))
+    print(f"removed {n_removed} edge-instances")
     added = 0
     for pa, pb in ADDED_EDGES:
-        if frozenset({pa, pb}) not in present and pa in inv and pb in inv:
-            edges.append((inv[pa], inv[pb])); added += 1
-    if ADDED_EDGES:
-        print(f"added {added} of {len(ADDED_EDGES)} requested edges")
-    # MOVE points: remap every edge endpoint that matches a moved point
-    move = {inv[n]: (float(x), float(y)) for n, (x, y) in MOVED_POINTS.items()
-            if n in inv}
-    if move:
-        edges = [(move.get(rnd(a), a), move.get(rnd(b), b)) for a, b in edges]
-        print(f"moved {len(move)} points")
+        key = frozenset({pa, pb})
+        if pa in inv and pb in inv and key not in seen:
+            seen.add(key); edge_nums.append((pa, pb)); added += 1
+    print(f"added {added} of {len(ADDED_EDGES)} requested edges")
 
     # center + scale using the silhouette bbox (consistent head sizing).
-    # y scales to TARGET_H; x scales by the same factor * X_COMPENSATE so the
-    # head is half-width in program space (undone by the div2 2x on screen).
     xs = [p[0] for p in sil]
     ys = [p[1] for p in sil]
     cx = (min(xs) + max(xs)) / 2
@@ -179,19 +238,23 @@ def main():
     def scaled(p):
         return ((p[0] - cx) * scale_x, (p[1] - cy) * scale_y)
 
+    def neutral_pos(n):                              # SVG pos (MOVED overlay)
+        return MOVED_POINTS.get(n, inv[n])
+
     # A horizontal edge stamps its full WIDTH on one row, so a wide one can
-    # exceed the per-edge stamp cap.  Split such edges into equal pieces
-    # (visually identical — a horizontal line is a horizontal line).
+    # exceed the per-edge stamp cap.  Split such edges; morph deltas at a split
+    # point interpolate between the two original endpoints' deltas.
     SAFE_PX = MAX_STAMP_M1 - 2 * THICK_BUILD - 2     # leave margin under 127
 
-    def split_edge(a, b):
-        (x1, y1), (x2, y2) = a, b
+    def split_fracs(sa, sb):
+        (x1, y1), (x2, y2) = sa, sb
         if round(y1) == round(y2) and abs(x2 - x1) > SAFE_PX:
             k = int(abs(x2 - x1) // SAFE_PX) + 1
-            pts = [(x1 + (x2 - x1) * i / k, y1 + (y2 - y1) * i / k)
-                   for i in range(k + 1)]
-            return [(pts[i], pts[i + 1]) for i in range(k)]
-        return [(a, b)]
+            return [(i / k, (i + 1) / k) for i in range(k)]
+        return [(0.0, 1.0)]
+
+    def lerp(p, q, f):
+        return (p[0] + (q[0] - p[0]) * f, p[1] + (q[1] - p[1]) * f)
 
     def to_dda(a, b):                                # a, b already scaled
         x1, y1 = a
@@ -210,10 +273,33 @@ def main():
         return {"y_min": yi0, "y_max": yi1,
                 "x_top": int(round(xt * FP_SCALE)), "slope": slope}
 
+    # Build the mesh + per-morph per-endpoint px deltas, aligned 1:1 with mesh[]
+    # (same split + same by-y top/bottom swap, so a delta stays on its endpoint).
+    MORPHS = ("mouth", "eye", "happy", "sad", "angry", "surprised")
+    morph_src = {"mouth": MOUTH_CLOSED, "eye": EYES_CLOSED, "happy": EXPR_HAPPY,
+                 "sad": EXPR_SAD, "angry": EXPR_ANGRY, "surprised": EXPR_SURPRISED}
+
+    def clamp8(v):
+        return max(-127, min(127, int(round(v))))
+
     mesh = []
-    for a, b in edges:
-        for pa, pb in split_edge(scaled(a), scaled(b)):
-            mesh.append(to_dda(pa, pb))
+    deltas = {m: [] for m in MORPHS}
+    for na, nb in edge_nums:
+        sa, sb = scaled(neutral_pos(na)), scaled(neutral_pos(nb))
+        for f0, f1 in split_fracs(sa, sb):
+            p0, p1 = lerp(sa, sb, f0), lerp(sa, sb, f1)
+            mesh.append(to_dda(p0, p1))
+            top_is_p0 = (p0[1] <= p1[1])
+            for m in MORPHS:
+                da = morph_src[m].get(na, (0, 0))
+                db = morph_src[m].get(nb, (0, 0))
+                e0 = lerp(da, db, f0)
+                e1 = lerp(da, db, f1)
+                d0 = (e0[0] * scale_x, e0[1] * scale_y)
+                d1 = (e1[0] * scale_x, e1[1] * scale_y)
+                dt, dbt = (d0, d1) if top_is_p0 else (d1, d0)
+                deltas[m].append((clamp8(dt[0]), clamp8(dt[1]),
+                                  clamp8(dbt[0]), clamp8(dbt[1])))
     N = len(mesh)
 
     # guards (same ceilings as build_face_mesh.check_fpga_limits)
@@ -279,12 +365,16 @@ def main():
     L.append("use ieee.numeric_std.all;\n")
     L.append("package bishop_mesh_pkg is\n")
     L.append(f"    constant C_NUM_EDGES : natural := {N};")
-    L.append("    constant C_NUM_EXPR  : natural := 1;\n")
+    L.append("    constant C_NUM_EXPR  : natural := 5;\n")
     L.append("    constant C_GRP_STATIC : natural := 0;")
     L.append("    constant C_GRP_BROW   : natural := 1;")
     L.append("    constant C_GRP_EYE    : natural := 2;")
     L.append("    constant C_GRP_MOUTH  : natural := 3;\n")
-    L.append("    constant C_EXPR_NEUTRAL : natural := 0;\n")
+    L.append("    constant C_EXPR_NEUTRAL   : natural := 0;")
+    L.append("    constant C_EXPR_HAPPY     : natural := 1;")
+    L.append("    constant C_EXPR_SAD       : natural := 2;")
+    L.append("    constant C_EXPR_ANGRY     : natural := 3;")
+    L.append("    constant C_EXPR_SURPRISED : natural := 4;\n")
     L.append("    type t_int_array is array (natural range <>) of integer;\n")
     L.append(arr("C_EDGE_BND", [0] * N))
     L.append(arr("C_EDGE_GROUP", [0] * N))
@@ -304,6 +394,28 @@ def main():
             return e["x_top"] + e["slope"]
         return e["x_top"] + e["slope"] * (e["y_max"] - e["y_min"])
     L.append(arr("C_EDGE_X_BOT", [x_bot_of(e) for e in mesh]))
+
+    # ---- morph deltas (mouth open/close, eye blink, expressions) ----
+    # Per edge, two packed words (top endpoint, bottom endpoint).  Each word is
+    # (dy<<8) | (dx & 0xFF), 8-bit signed px deltas applied additively to the
+    # endpoint in the vblank engine.  PHASE 0: zero-filled (RTL plumbing only);
+    # later phases fill these from the morph overlays defined above.
+    def pack_delta(dx, dy):
+        return ((int(dy) & 0xFF) << 8) | (int(dx) & 0xFF)
+
+    def emit_morph(prefix, dl):                 # dl = deltas[m] (dxt,dyt,dxb,dyb)
+        L.append(arr(prefix + "_DTOP", [pack_delta(d[0], d[1]) for d in dl]))
+        L.append(arr(prefix + "_DBOT", [pack_delta(d[2], d[3]) for d in dl]))
+
+    emit_morph("C_MOUTH", deltas["mouth"])
+    emit_morph("C_EYE", deltas["eye"])
+    emit_morph("C_EXPR_HAPPY", deltas["happy"])
+    emit_morph("C_EXPR_SAD", deltas["sad"])
+    emit_morph("C_EXPR_ANGRY", deltas["angry"])
+    emit_morph("C_EXPR_SURPRISED", deltas["surprised"])
+    nz = sum(1 for m in MORPHS for d in deltas[m] if any(d))
+    print(f"morph deltas: {nz} non-zero edge-endpoints across {len(MORPHS)} morphs")
+
     fns = ["f_y_min", "f_y_min_mc", "f_y_min_ec", "f_y_max", "f_y_max_mc", "f_y_max_ec",
            "f_x_top", "f_x_top_mc", "f_x_top_ec", "f_slope", "f_slope_mc", "f_slope_ec"]
     for f in fns:

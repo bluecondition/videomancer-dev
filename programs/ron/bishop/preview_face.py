@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Render the CURRENT wireframe (face12.svg minus build_svg_mesh.REMOVED_EDGES)
 to /tmp/face_preview.png at true proportions, for judging edge edits.
-Pass 'labels' as arg to overlay the point numbers."""
+Pass 'labels' to overlay point numbers.  Pass a morph name
+(mouth|eye|happy|sad|angry|surprised) to apply that overlay's px deltas."""
 import re
 import sys
 from pathlib import Path
@@ -16,7 +17,13 @@ def floats(s):
     return list(zip(n[0::2], n[1::2]))
 
 
-def main(labels=False):
+MORPH_SRC = {
+    "mouth": "MOUTH_CLOSED", "eye": "EYES_CLOSED", "happy": "EXPR_HAPPY",
+    "sad": "EXPR_SAD", "angry": "EXPR_ANGRY", "surprised": "EXPR_SURPRISED",
+}
+
+
+def main(labels=False, morph=None):
     svg = SVG.read_text()
     verts, edges = {}, []
     for pl in re.findall(r'<polyline points="([^"]+)"', svg):
@@ -37,8 +44,13 @@ def main(labels=False):
             kept.append((inv[pa], inv[pb]))
     move = {inv[n]: (float(x), float(y))
             for n, (x, y) in getattr(B, "MOVED_POINTS", {}).items() if n in inv}
+    # optional morph overlay: additive px deltas keyed by point number
+    mdelta = getattr(B, MORPH_SRC[morph], {}) if morph else {}
+    morph_by_pt = {inv[n]: d for n, d in mdelta.items() if n in inv}
     def mv(p):
-        return move.get((round(p[0], 2), round(p[1], 2)), p)
+        q = move.get((round(p[0], 2), round(p[1], 2)), p)
+        dx, dy = morph_by_pt.get((round(p[0], 2), round(p[1], 2)), (0, 0))
+        return (q[0] + dx, q[1] + dy)
     kept = [(mv(a), mv(b)) for a, b in kept]
 
     xs = [p[0] for p in ordered]; ys = [p[1] for p in ordered]
@@ -58,9 +70,13 @@ def main(labels=False):
             x, y = T(mv(p))
             d.ellipse([x - 2, y - 2, x + 2, y + 2], fill=(230, 40, 40))
             d.text((x + 3, y - 14), str(num[p]), fill=(255, 210, 0), font=fnt)
-    img.save('/tmp/face_preview.png')
-    print(f"{len(kept)} edges kept ({len(edges)-len(kept)} removed) -> /tmp/face_preview.png {img.size}")
+    out = f'/tmp/face_{morph}.png' if morph else '/tmp/face_preview.png'
+    img.save(out)
+    tag = f" [{morph}]" if morph else ""
+    print(f"{len(kept)} edges kept ({len(edges)-len(kept)} removed){tag} -> {out} {img.size}")
 
 
 if __name__ == "__main__":
-    main(labels=("labels" in sys.argv))
+    args = sys.argv[1:]
+    m = next((a for a in args if a in MORPH_SRC), None)
+    main(labels=("labels" in args), morph=m)

@@ -352,7 +352,8 @@ architecture bishop of program_top is
     -- ---------------------------------------------------------------
     -- Split into many shallow states (free in vblank) so no single cycle has a
     -- deep combinational path — keeps the noise engine off the HD critical path.
-    type t_cp_state is (CP_IDLE, CP_LOAD, CP_HASH, CP_PHASE, CP_TRI, CP_AMP,
+    type t_cp_state is (CP_IDLE, CP_LOAD, CP_HASH, CP_PHASE, CP_TRI,
+                        CP_MLOAD, CP_MSEL, CP_MDO,
                         CP_OFF, CP_SORT, CP_FLOOR, CP_SPAN, CP_DX, CP_DIV, CP_WR);
     signal cp_state : t_cp_state := CP_IDLE;
     signal cp_addr  : unsigned(8 downto 0) := (others => '0');
@@ -404,6 +405,58 @@ architecture bishop of program_top is
     signal d_dividend : unsigned(17 downto 0) := (others => '0');
     signal d_divisor  : unsigned(7 downto 0)  := (others => '0');
     signal d_cnt      : integer range 0 to 17 := 0;
+
+    -- ---------------------------------------------------------------
+    -- MORPHS: mouth open/close (K1 analog), eye blink (P8), expression (K4
+    -- blend).  Per-edge endpoint px deltas live in 12 packed ROMs (top/bot for
+    -- mouth, eye, and 4 expressions).  In the cp_proc the selected deltas are
+    -- scaled (mouth by K1, expression by the K4 blend t) and added to the
+    -- endpoints at CP_OFF alongside the noise offset, so the existing
+    -- sort->divider->slope pipeline recomputes the slope for free.  All in
+    -- vblank; the per-pixel render path is untouched.
+    -- ---------------------------------------------------------------
+    signal mouth_frac_r : unsigned(4 downto 0) := (others => '0');  -- K1 CLOSE amount (0=open)
+    signal expr_base_r  : unsigned(1 downto 0) := (others => '0');  -- K4 lower expr A (0..3)
+    signal expr_frac_r  : unsigned(4 downto 0) := (others => '0');  -- K4 blend t (0..31)
+    signal morph_active : std_logic;
+
+    type t_morph_rom is array (0 to 255) of std_logic_vector(15 downto 0);
+    function init_morph(src : t_int_array) return t_morph_rom is
+        variable r : t_morph_rom := (others => (others => '0'));
+    begin
+        for i in 0 to C_NUM_EDGES - 1 loop
+            r(i) := std_logic_vector(to_unsigned(src(i), 16));
+        end loop;
+        return r;
+    end function;
+    constant C_MOUTH_T_ROM : t_morph_rom := init_morph(C_MOUTH_DTOP);
+    constant C_MOUTH_B_ROM : t_morph_rom := init_morph(C_MOUTH_DBOT);
+    constant C_EYE_T_ROM   : t_morph_rom := init_morph(C_EYE_DTOP);
+    constant C_EYE_B_ROM   : t_morph_rom := init_morph(C_EYE_DBOT);
+    constant C_HAP_T_ROM   : t_morph_rom := init_morph(C_EXPR_HAPPY_DTOP);
+    constant C_HAP_B_ROM   : t_morph_rom := init_morph(C_EXPR_HAPPY_DBOT);
+    constant C_SAD_T_ROM   : t_morph_rom := init_morph(C_EXPR_SAD_DTOP);
+    constant C_SAD_B_ROM   : t_morph_rom := init_morph(C_EXPR_SAD_DBOT);
+    constant C_ANG_T_ROM   : t_morph_rom := init_morph(C_EXPR_ANGRY_DTOP);
+    constant C_ANG_B_ROM   : t_morph_rom := init_morph(C_EXPR_ANGRY_DBOT);
+    constant C_SUR_T_ROM   : t_morph_rom := init_morph(C_EXPR_SURPRISED_DTOP);
+    constant C_SUR_B_ROM   : t_morph_rom := init_morph(C_EXPR_SURPRISED_DBOT);
+    signal mrd_mt, mrd_mb, mrd_et, mrd_eb : std_logic_vector(15 downto 0);
+    signal mrd_ht, mrd_hb, mrd_st, mrd_sb : std_logic_vector(15 downto 0);
+    signal mrd_at, mrd_ab, mrd_ut, mrd_ub : std_logic_vector(15 downto 0);
+
+    -- Per-edge morph working registers (px deltas), held for the multiply loop.
+    signal m_mxt, m_myt, m_mxb, m_myb : signed(7 downto 0) := (others => '0'); -- mouth
+    signal m_dxt, m_dyt, m_dxb, m_dyb : signed(8 downto 0) := (others => '0'); -- exprB - exprA
+    -- one shared multiplier sequenced over 8 products (operand select split
+    -- into CP_MSEL to keep the mux off the multiply path); results accumulate
+    -- straight into mt_* so no per-product intermediate registers are kept.
+    signal m_cnt   : integer range 0 to 11 := 0;   -- 0..3 noise, 4..7 expr, 8..11 mouth
+    signal mul_a_r : signed(9 downto 0) := (others => '0');
+    signal mul_b_r : signed(6 downto 0) := (others => '0');
+    -- running total morph delta per endpoint (px): exprA + eye init, then the
+    -- expr-blend and mouth products accumulate in CP_MDO.
+    signal mt_xt, mt_yt, mt_xb, mt_yb : signed(10 downto 0) := (others => '0');
 
     -- Render-side Stage 0 pre signals.  The active-mesh BRAM read has
     -- effective 2-cycle latency from when Stage 0a sets act_rd_addr
@@ -546,6 +599,15 @@ begin
                 else
                     expr_idx_r <= unsigned(registers_in(3)(9 downto 7));
                 end if;
+                -- ---- Morph controls ----
+                -- K1 = MOUTH (analog): 0% closed .. 100% open.  Current mesh is
+                -- fully open (= neutral), so the close fraction = 31 - K1top5.
+                mouth_frac_r <= to_unsigned(31, 5) - unsigned(registers_in(0)(9 downto 5));
+                -- K4 = EXPRESSION blend across 5 (Neutral..Surprised): the knob
+                -- spans positions 0..4; base = floor, frac t = fractional part.
+                expr_base_r <= unsigned(registers_in(3)(9 downto 8));      -- 0..3 (A)
+                expr_frac_r <= unsigned(registers_in(3)(7 downto 3));      -- 0..31 (t)
+                -- P8 (open_eyes_r, registers_in(6)(1)) gates the eye-close morph.
                 -- K5 = noise SPEED (frame-phase rate), K6 = noise SPREAD
                 -- (amplitude level 0..7).  The grid these used to drive is
                 -- gone.  noise_t_r advances once per frame by the speed, so the
@@ -663,6 +725,8 @@ begin
             variable v_thick_s   : signed(7 downto 0);
             variable v_start_rel : signed(7 downto 0);
             variable v_count_m1  : unsigned(7 downto 0);
+            variable v_wide      : unsigned(10 downto 0);
+            variable v_half      : unsigned(7 downto 0);
         begin
             v_thick_u := resize(thick_r, 8);
             v_thick_s := signed(resize(thick_r, 8));
@@ -672,6 +736,20 @@ begin
                     v_start_rel := resize(s_int_held, 8) - v_thick_s;
                 else
                     v_start_rel := -v_thick_s;
+                end if;
+            elsif abs_s_held >= 1 and abs_s_held <= 31 then
+                -- Near-horizontal (|slope| > 2*thick): a horizontal pad would
+                -- run lengthwise and add no perpendicular thickness, so instead
+                -- widen the run to ~thick*|slope| (vertical thickness ~thick) and
+                -- centre it on the crossing.  Bounded to abs_s<=31 so the wide
+                -- run fits the stamp cap; flatter edges (streaks) fall through.
+                v_wide := thick_r * abs_s_held;
+                v_half := resize(shift_right(v_wide - resize(abs_s_held, 11), 1), 8);
+                count_raw := v_wide(7 downto 0);
+                if sneg_held = '1' then
+                    v_start_rel := resize(s_int_held, 8) - signed('0' & v_half(6 downto 0));
+                else
+                    v_start_rel := -signed('0' & v_half(6 downto 0));
                 end if;
             else
                 count_raw := abs_s_held;
@@ -1018,6 +1096,13 @@ begin
     -- Noise active whenever K6 spread is non-zero.
     noise_on <= '1' when noise_spread_r /= "00000" else '0';
 
+    -- Morph active when the mouth is not fully open, eyes are closed, or an
+    -- expression other than pure neutral is selected.  Frame-constant; used to
+    -- gate the slope recompute in CP_WR.
+    morph_active <= '1' when mouth_frac_r /= "00000" or open_eyes_r = '0'
+                         or expr_base_r /= "00" or expr_frac_r /= "00000"
+                    else '0';
+
     -- ---------------------------------------------------------------
     -- current_x BRAM — replaces what was an N_EDGES-entry register
     -- file.  iCE40 EBR in 256×16 mode (we use 128 entries × 12 bits).
@@ -1087,6 +1172,23 @@ begin
         end if;
     end process;
 
+    -- Morph-delta ROMs read at cp_addr (registered, 1-cycle latency).  cp_addr
+    -- is stable across an edge's cp_proc states, so the reads are valid well
+    -- before CP_MLOAD consumes them.
+    morph_rom_proc : process(clk)
+        variable a : integer range 0 to 255;
+    begin
+        if rising_edge(clk) then
+            a := to_integer(cp_addr(7 downto 0));
+            mrd_mt <= C_MOUTH_T_ROM(a); mrd_mb <= C_MOUTH_B_ROM(a);
+            mrd_et <= C_EYE_T_ROM(a);   mrd_eb <= C_EYE_B_ROM(a);
+            mrd_ht <= C_HAP_T_ROM(a);   mrd_hb <= C_HAP_B_ROM(a);
+            mrd_st <= C_SAD_T_ROM(a);   mrd_sb <= C_SAD_B_ROM(a);
+            mrd_at <= C_ANG_T_ROM(a);   mrd_ab <= C_ANG_B_ROM(a);
+            mrd_ut <= C_SUR_T_ROM(a);   mrd_ub <= C_SUR_B_ROM(a);
+        end if;
+    end process;
+
     -- Copy engine.  Walks edges 0..N_EDGES-1 in vblank, resolving the
     -- (expr, group, om, oe) variant select once per slot and writing
     -- to the active mesh BRAMs.  3-stage pipeline so the heavy
@@ -1096,7 +1198,6 @@ begin
         variable ixt, iyt, ixb, iyb : signed(13 downto 0);
         variable hxt, hyt, hxb, hyb : signed(16 downto 0);
         variable tt   : signed(16 downto 0);
-        variable sp   : signed(5 downto 0);
         variable dx_v       : signed(18 downto 0);
         variable span_v     : signed(13 downto 0);
         variable spc        : integer range 1 to 255;
@@ -1105,6 +1206,8 @@ begin
         variable nslope     : signed(15 downto 0);
         variable xa16       : signed(15 downto 0);
         variable idx        : integer range 0 to 255;
+        -- morph
+        variable va_t, va_b, vb_t, vb_b : std_logic_vector(15 downto 0);
     begin
         if rising_edge(clk) then
             act_wr_en <= '0';   -- default: no write this cycle
@@ -1152,29 +1255,89 @@ begin
                     w_phxb <= resize(w_phxb + tt, 17);  w_phyb <= resize(w_phyb + tt, 17);
                     cp_state <= CP_TRI;
 
-                -- CP_TRI: sample the triangle waves (kept shallow; the spread
-                -- multiply happens next state).
+                -- CP_TRI: sample the triangle waves (kept shallow; the noise
+                -- spread multiply is folded into the shared multiply loop).
                 when CP_TRI =>
                     t_trxt <= tri10(w_phxt);  t_tryt <= tri10(w_phyt);
                     t_trxb <= tri10(w_phxb);  t_tryb <= tri10(w_phyb);
-                    cp_state <= CP_AMP;
+                    cp_state <= CP_MLOAD;
 
-                -- CP_AMP: linear spread scaling.  offset_q97 = (tri*spread)>>1,
-                -- so amplitude ramps smoothly with K6 (0..31) up to ~+-31px at
-                -- full knob.  Y offset is the same in rows (>>8 = >>1 then >>7).
-                -- Small 10x6 multiplies (one per offset).
-                when CP_AMP =>
-                    sp := signed('0' & std_logic_vector(noise_spread_r));
-                    o_dxt <= resize(shift_right(t_trxt * sp, 1), 18);
-                    o_dyt <= resize(shift_right(t_tryt * sp, 8), 14);
-                    o_dxb <= resize(shift_right(t_trxb * sp, 1), 18);
-                    o_dyb <= resize(shift_right(t_tryb * sp, 8), 14);
-                    cp_state <= CP_OFF;
+                -- CP_MLOAD: unpack the per-edge morph deltas.  Mouth + eye are
+                -- direct (eye gated by P8 closed); the two K4-adjacent expression
+                -- deltas A and (B-A) are selected from the 4 expr ROMs by the
+                -- blend base index.  All px (8-bit signed), packed (dy<<8|dx).
+                when CP_MLOAD =>
+                    m_mxt <= signed(mrd_mt(7 downto 0));  m_myt <= signed(mrd_mt(15 downto 8));
+                    m_mxb <= signed(mrd_mb(7 downto 0));  m_myb <= signed(mrd_mb(15 downto 8));
+                    case expr_base_r is
+                        when "00"   => va_t := (others=>'0'); va_b := (others=>'0');
+                                       vb_t := mrd_ht; vb_b := mrd_hb;
+                        when "01"   => va_t := mrd_ht; va_b := mrd_hb; vb_t := mrd_st; vb_b := mrd_sb;
+                        when "10"   => va_t := mrd_st; va_b := mrd_sb; vb_t := mrd_at; vb_b := mrd_ab;
+                        when others => va_t := mrd_at; va_b := mrd_ab; vb_t := mrd_ut; vb_b := mrd_ub;
+                    end case;
+                    m_dxt <= resize(signed(vb_t(7 downto 0)),9)  - resize(signed(va_t(7 downto 0)),9);
+                    m_dyt <= resize(signed(vb_t(15 downto 8)),9) - resize(signed(va_t(15 downto 8)),9);
+                    m_dxb <= resize(signed(vb_b(7 downto 0)),9)  - resize(signed(va_b(7 downto 0)),9);
+                    m_dyb <= resize(signed(vb_b(15 downto 8)),9) - resize(signed(va_b(15 downto 8)),9);
+                    -- init the running total = exprA + eye (eye gated by P8 closed)
+                    if open_eyes_r = '0' then
+                        mt_xt <= resize(signed(va_t(7 downto 0)),11)  + resize(signed(mrd_et(7 downto 0)),11);
+                        mt_yt <= resize(signed(va_t(15 downto 8)),11) + resize(signed(mrd_et(15 downto 8)),11);
+                        mt_xb <= resize(signed(va_b(7 downto 0)),11)  + resize(signed(mrd_eb(7 downto 0)),11);
+                        mt_yb <= resize(signed(va_b(15 downto 8)),11) + resize(signed(mrd_eb(15 downto 8)),11);
+                    else
+                        mt_xt <= resize(signed(va_t(7 downto 0)),11);
+                        mt_yt <= resize(signed(va_t(15 downto 8)),11);
+                        mt_xb <= resize(signed(va_b(7 downto 0)),11);
+                        mt_yb <= resize(signed(va_b(15 downto 8)),11);
+                    end if;
+                    m_cnt <= 0;
+                    cp_state <= CP_MSEL;
 
-                -- CP_OFF: move the endpoints by the offsets.
+                -- CP_MSEL: select this product's operands (mux only -> reg, so
+                -- the mux stays off the multiply path).  One shared multiplier
+                -- serves all three engines: 0..3 = noise tri*spread, 4..7 = expr
+                -- blend t*(B-A), 8..11 = mouth frac*mouthΔ.
+                when CP_MSEL =>
+                    case m_cnt is
+                        when 0  => mul_a_r <= resize(t_trxt,10);  when 1  => mul_a_r <= resize(t_tryt,10);
+                        when 2  => mul_a_r <= resize(t_trxb,10);  when 3  => mul_a_r <= resize(t_tryb,10);
+                        when 4  => mul_a_r <= resize(m_dxt,10);   when 5  => mul_a_r <= resize(m_dyt,10);
+                        when 6  => mul_a_r <= resize(m_dxb,10);   when 7  => mul_a_r <= resize(m_dyb,10);
+                        when 8  => mul_a_r <= resize(m_mxt,10);   when 9  => mul_a_r <= resize(m_myt,10);
+                        when 10 => mul_a_r <= resize(m_mxb,10);   when others => mul_a_r <= resize(m_myb,10);
+                    end case;
+                    if    m_cnt <= 3 then mul_b_r <= signed(resize(noise_spread_r, 7));
+                    elsif m_cnt <= 7 then mul_b_r <= signed(resize(expr_frac_r, 7));
+                    else                  mul_b_r <= signed(resize(mouth_frac_r, 7));
+                    end if;
+                    cp_state <= CP_MDO;
+
+                -- CP_MDO: one multiply, routed by m_cnt.  Noise (0..3) -> the
+                -- offset o_d* (direct, shift 1/8); morph (4..11) -> accumulate
+                -- into the running total mt_* (shift 5).
+                when CP_MDO =>
+                    case m_cnt is
+                        when 0  => o_dxt <= resize(shift_right(mul_a_r * mul_b_r, 1), 18);
+                        when 1  => o_dyt <= resize(shift_right(mul_a_r * mul_b_r, 8), 14);
+                        when 2  => o_dxb <= resize(shift_right(mul_a_r * mul_b_r, 1), 18);
+                        when 3  => o_dyb <= resize(shift_right(mul_a_r * mul_b_r, 8), 14);
+                        when 4 | 8  => mt_xt <= mt_xt + resize(shift_right(mul_a_r * mul_b_r, 5), 11);
+                        when 5 | 9  => mt_yt <= mt_yt + resize(shift_right(mul_a_r * mul_b_r, 5), 11);
+                        when 6 | 10 => mt_xb <= mt_xb + resize(shift_right(mul_a_r * mul_b_r, 5), 11);
+                        when others => mt_yb <= mt_yb + resize(shift_right(mul_a_r * mul_b_r, 5), 11);
+                    end case;
+                    if m_cnt = 11 then cp_state <= CP_OFF;
+                    else m_cnt <= m_cnt + 1; cp_state <= CP_MSEL; end if;
+
+                -- CP_OFF: move the endpoints by the noise offset AND the morph
+                -- delta (x px<<7 to Q9.7, y px direct).
                 when CP_OFF =>
-                    w_nxt <= resize(w_xtop,18) + o_dxt;  w_nyt <= resize(w_ymin,14) + o_dyt;
-                    w_nxb <= resize(w_xbot,18) + o_dxb;  w_nyb <= resize(w_ymax,14) + o_dyb;
+                    w_nxt <= resize(w_xtop,18) + o_dxt + shift_left(resize(mt_xt,18),7);
+                    w_nyt <= resize(w_ymin,14) + o_dyt + resize(mt_yt,14);
+                    w_nxb <= resize(w_xbot,18) + o_dxb + shift_left(resize(mt_xb,18),7);
+                    w_nyb <= resize(w_ymax,14) + o_dyb + resize(mt_yb,14);
                     cp_state <= CP_SORT;
 
                 -- CP_SORT: re-order endpoints by y (jitter may flip them).
@@ -1253,7 +1416,7 @@ begin
                     act_ymin_wr <= std_logic_vector(resize(w_ya, 13));
                     act_ymax_wr <= std_logic_vector(resize(w_yb, 13));
                     act_xtop_wr <= std_logic_vector(xa16);
-                    if noise_on = '1' then
+                    if noise_on = '1' or morph_active = '1' then
                         act_slope_wr <= std_logic_vector(nslope);
                     else
                         act_slope_wr <= std_logic_vector(w_slope);
