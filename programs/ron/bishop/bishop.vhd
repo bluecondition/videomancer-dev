@@ -398,6 +398,11 @@ architecture bishop of program_top is
     signal w_nyt, w_nyb : signed(13 downto 0) := (others => '0');
     signal w_xa, w_xb   : signed(17 downto 0) := (others => '0');
     signal w_ya, w_yb   : signed(13 downto 0) := (others => '0');
+    -- 1 = this edge is horizontal in the NEUTRAL mesh (ymin==ymax).  A morph or
+    -- noise nudge can tilt it off-horizontal, which would drop its is_horiz
+    -- Y-thicken/width-fill and render it as a thin diagonal stroke; CP_FLOOR
+    -- collapses such edges back to a flat row so they stay thick bars.
+    signal horiz_r      : std_logic := '0';
     signal w_dxsign     : std_logic := '0';
     -- Restoring divider: quot = |dx| / span (slope magnitude, Q9.7).
     signal d_rem      : unsigned(8 downto 0)  := (others => '0');
@@ -1222,6 +1227,7 @@ begin
         variable nslope     : signed(15 downto 0);
         variable xa16       : signed(15 downto 0);
         variable idx        : integer range 0 to 255;
+        variable v_mid      : signed(13 downto 0);
         -- morph
         variable va_t, va_b, vb_t, vb_b : std_logic_vector(15 downto 0);
     begin
@@ -1246,6 +1252,12 @@ begin
                         w_xtop  <= to_signed(f_x_top(to_integer(expr_idx_r), idx), 16);
                         w_slope <= to_signed(f_slope(to_integer(expr_idx_r), idx), 16);
                         w_xbot  <= to_signed(C_EDGE_X_BOT(idx), 16);
+                        if f_y_min(to_integer(expr_idx_r), idx) =
+                           f_y_max(to_integer(expr_idx_r), idx) then
+                            horiz_r <= '1';
+                        else
+                            horiz_r <= '0';
+                        end if;
                         cp_state <= CP_HASH;
                     end if;
 
@@ -1394,7 +1406,14 @@ begin
                 -- shallow diagonal instead.  Its own state to keep the compare
                 -- off the divisor-setup critical path.
                 when CP_FLOOR =>
-                    if noise_on = '1' and noise_streaks_r = '0'
+                    if horiz_r = '1' and morph_active = '1' then
+                        -- A neutral-horizontal edge tilted by a morph: snap both
+                        -- ends to the mid row so it keeps ymin==ymax (is_horiz =>
+                        -- Y-thicken + width-fill) and renders as a thick bar that
+                        -- moved, not a thin diagonal.  span 0 -> slope = width.
+                        v_mid := resize(shift_right(resize(w_ya, 15) + resize(w_yb, 15), 1), 14);
+                        w_ya <= v_mid;  w_yb <= v_mid;
+                    elsif noise_on = '1' and noise_streaks_r = '0'
                             and (w_yb - w_ya) < NOISE_SPAN_FLOOR then
                         w_yb <= w_ya + to_signed(NOISE_SPAN_FLOOR, 14);
                     end if;
