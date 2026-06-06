@@ -144,7 +144,7 @@ architecture bishop of program_top is
     -- S7 / S8: open mouth / open eyes.  Default 0 = closed (the rest
     -- pose); 1 = open (the expression's tuned mouth/eye).  Selected
     -- per-edge in Stage 0 based on C_EDGE_GROUP.
-    signal open_mouth_r : std_logic := '0';
+    signal fill_on_r    : std_logic := '0';   -- T7: solid-fill eyes/brows/mouth
     signal open_eyes_r  : std_logic := '0';
 
     -- ---------------------------------------------------------------
@@ -607,7 +607,7 @@ begin
                 grid_thick_r <= registers_in(6)(3);  -- T10: 2px grid lines
                 grid_en_r    <= registers_in(6)(2);  -- T9 (dead grid)
                 noise_streaks_r <= registers_in(6)(2);  -- P9 "Noise": allow streaks
-                open_mouth_r <= registers_in(6)(0);  -- T7: mouth open(1)/closed(0)
+                fill_on_r <= registers_in(6)(0);  -- T7: 1 = solid-fill features
                 open_eyes_r  <= registers_in(6)(1);  -- T8: eyes  open(1)/closed(0)
                 -- K1 Scale (latched, behavior deferred)
                 scale_r    <= unsigned(registers_in(0));
@@ -1641,9 +1641,10 @@ begin
         grid_hit <= '1' when (grid_xp(6 downto 0)  and grid_lmask) = "0000000"
                           or (pixel_y(6 downto 0) and grid_lmask) = "0000000"
                     else '0';
-        -- Grid fill dropped: the dense wireframe carries the detail itself,
-        -- so the output is just the outline (no EOR grid).
-        show_pix <= edge_hit_r;
+        -- Outline always; T7 (fill_on_r) additionally lights the EOR-fill
+        -- interior of the feature loops (eyes/brows/mouth, the bnd=1 edges),
+        -- so they read as solid blobs in the current palette colour.
+        show_pix <= edge_hit_r or (fill_on_r and eor_inside_d_r);
 
         data_out.y <= std_logic_vector(pix_y_r) when show_pix = '1'
                       else pipe(LATENCY - 1).y when bg_video_r = '1'

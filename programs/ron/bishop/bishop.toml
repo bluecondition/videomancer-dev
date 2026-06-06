@@ -9,7 +9,7 @@ categories = ["Render", "Shape", "Demo", "Computer"]
 program_type = "synthesis"
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
-description = "Wireframe head. K1 mouth open/close, K2 thickness, K3 palette, K4 expression blend, K5/K6 noise speed/spread, T8 eye blink."
+description = "Wireframe head. K1 mouth, K2 thickness, K3 palette, K4 expression blend, K5/K6 noise, T7 fill features, T8 eye blink."
 
 # --- Rotary Potentiometers (K1-K6) ---
 
@@ -69,8 +69,14 @@ display_min_value = 0
 display_max_value = 100
 suffix_label = "%"
 
-# --- Toggle Switches (8-11) ---
-# Mouth is the K1 analog knob now; T7 retired.  T8 = Eyes (Open default / Closed).
+# --- Toggle Switches (7-11) ---
+# T7 = Fill (eyes/brows/mouth solid).  T8 = Eyes blink.  Mouth is the K1 knob.
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Fill"
+value_labels = ["Outline", "Solid"]
+initial_value_label = "Outline"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
@@ -119,6 +125,7 @@ rotary_potentiometer_3   = 0     # Palette = Green
 rotary_potentiometer_4   = 0     # Expression = Neutral
 rotary_potentiometer_5   = 512   # Noise Speed
 rotary_potentiometer_6   = 0     # Noise Spread = off
+toggle_switch_7          = 0     # Fill = Outline
 toggle_switch_8          = 0
 toggle_switch_9          = 0     # Noise = Smooth
 toggle_switch_10         = 0
@@ -133,6 +140,7 @@ rotary_potentiometer_3   = 256   # Palette = Amber
 rotary_potentiometer_4   = 256   # Expression = Happy
 rotary_potentiometer_5   = 512   # Noise Speed
 rotary_potentiometer_6   = 0     # Noise Spread = off
+toggle_switch_7          = 0     # Fill = Outline
 toggle_switch_8          = 0
 toggle_switch_9          = 0
 toggle_switch_10         = 0
@@ -147,6 +155,7 @@ rotary_potentiometer_3   = 384   # Palette = Red
 rotary_potentiometer_4   = 768   # Expression = Angry
 rotary_potentiometer_5   = 512   # Noise Speed
 rotary_potentiometer_6   = 0     # Noise Spread = off
+toggle_switch_7          = 0     # Fill = Outline
 toggle_switch_8          = 0
 toggle_switch_9          = 0
 toggle_switch_10         = 0
@@ -161,6 +170,7 @@ rotary_potentiometer_3   = 128   # Palette = Cyan
 rotary_potentiometer_4   = 896   # Expression = Surprised
 rotary_potentiometer_5   = 512   # Noise Speed
 rotary_potentiometer_6   = 0     # Noise Spread = off
+toggle_switch_7          = 0     # Fill = Outline
 toggle_switch_8          = 0
 toggle_switch_9          = 0
 toggle_switch_10         = 0

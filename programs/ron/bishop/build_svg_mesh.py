@@ -162,6 +162,23 @@ EXPR_SURPRISED = {
     126:(0,12), 127:(0,10), 128:(0,10), 122:(6,2), 123:(-6,2),
 }
 
+# T7 SOLID-FILL feature loops.  Each is a CLOSED perimeter (point cycle); its
+# edges are marked bnd=1 so the EOR even-odd walker fills the interior when T7
+# is on.  Mark ONLY the outer perimeter (internal detail edges stay bnd=0, and
+# vanish into the same-colour fill anyway).  The loops move with the morphs, so
+# the fills track expressions / blink / mouth-close.
+FILL_LOOPS = [
+    [45, 38, 34, 39, 46],                                       # L eyebrow
+    [48, 40, 37, 41, 49],                                       # R eyebrow
+    [58, 52, 53, 56, 63, 68, 67, 65],                           # L eye almond
+    [57, 54, 55, 59, 66, 70, 69, 64],                           # R eye almond
+    [122, 120, 115, 117, 116, 121, 123, 125, 128, 126, 127, 124],  # mouth
+]
+FILL_EDGES = set()
+for _loop in FILL_LOOPS:
+    for _i in range(len(_loop)):
+        FILL_EDGES.add(frozenset({_loop[_i], _loop[(_i + 1) % len(_loop)]}))
+
 
 def floats(s):
     n = [float(x) for x in re.findall(r'-?\d+\.?\d*', s)]
@@ -304,15 +321,18 @@ def main():
     # split edge is a wide horizontal and none touch a moving vertex (asserted).
     mesh = []
     emap = []
+    bnd_list = []
     for na, nb in edge_nums:
         sa, sb = scaled(neutral_pos(na)), scaled(neutral_pos(nb))
         pieces = split_fracs(sa, sb)
         if len(pieces) > 1 and (na in vtx_slot or nb in vtx_slot):
             raise SystemExit(f"morph vertex on split edge {na}-{nb}: "
                              "per-vertex morph cannot interpolate split pieces")
+        is_fill = 1 if frozenset({na, nb}) in FILL_EDGES else 0
         for f0, f1 in pieces:
             p0, p1 = lerp(sa, sb, f0), lerp(sa, sb, f1)
             mesh.append(to_dda(p0, p1))
+            bnd_list.append(is_fill)
             if f0 == 0.0 and f1 == 1.0:                    # whole edge = vertices
                 top_n = na if p0[1] <= p1[1] else nb
                 bot_n = nb if p0[1] <= p1[1] else na
@@ -396,7 +416,7 @@ def main():
     L.append("    constant C_EXPR_ANGRY     : natural := 3;")
     L.append("    constant C_EXPR_SURPRISED : natural := 4;\n")
     L.append("    type t_int_array is array (natural range <>) of integer;\n")
-    L.append(arr("C_EDGE_BND", [0] * N))
+    L.append(arr("C_EDGE_BND", bnd_list))   # 1 = T7 fill-loop boundary edge
     L.append(arr("C_EDGE_GROUP", [0] * N))
     L.append(arr("C_EDGE_Y_MIN", [e["y_min"] for e in mesh]))
     L.append(arr("C_EDGE_Y_MAX", [e["y_max"] for e in mesh]))
