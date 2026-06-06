@@ -168,8 +168,6 @@ EXPR_SURPRISED = {
 # vanish into the same-colour fill anyway).  The loops move with the morphs, so
 # the fills track expressions / blink / mouth-close.
 FILL_LOOPS = [
-    [45, 38, 34, 39, 46],                                       # L eyebrow
-    [48, 40, 37, 41, 49],                                       # R eyebrow
     [58, 52, 53, 56, 63, 68, 67, 65],                           # L eye almond
     [57, 54, 55, 59, 66, 70, 69, 64],                           # R eye almond
     [122, 120, 115, 117, 116, 121, 123, 125, 128, 126, 127, 124],  # mouth

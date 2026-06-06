@@ -717,9 +717,16 @@ begin
             else
                 pad_held <= '1';
             end if;
-            -- Horizontal edge -> detail-only for EOR (closed-eye lids,
-            -- chin baseline).  Parallel to the magnitude decode.
-            if act_ymax_rd = act_ymin_rd then
+            -- EOR boundary rules (detail/line drawing is unaffected; this only
+            -- gates the 1px boundary-buffer crossing the fill walker reads):
+            --  * exactly-horizontal edge -> no crossing (lids/baselines), and
+            --  * half-open span [ymin, ymax): no crossing on the BOTTOM row, so
+            --    a shared vertex counts once and a local-max vertex (both edges
+            --    ending here, e.g. the mouth's cupid's-bow valley) counts zero.
+            --    Without this the parity goes odd on those rows and the fill
+            --    leaks right to the screen edge.
+            if act_ymax_rd = act_ymin_rd
+               or v_y_target_r = signed(act_ymax_rd) then
                 bnd_held <= '0';
             end if;
             -- Latch this edge's x-extent (aligned with act_slope_rd) for the
