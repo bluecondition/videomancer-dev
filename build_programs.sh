@@ -186,6 +186,39 @@ parse_build_stats() {
     echo "$stats"
 }
 
+# Build one FPGA config, retrying across nextpnr seeds when the router hits its
+# seed-dependent assertion CRASH (some dense netlists crash at low seeds but
+# route at higher ones).  A synth/compile error repeats on every seed, so we
+# fail fast on those.  Timing-acceptance is unchanged (--timing-allow-fail keeps
+# a marginal build) — a thin-margin config that doesn't crash is accepted as
+# before; reliably meeting Fmin is a logic/placement problem, not a seed one
+# (nextpnr's routing is non-deterministic, so reseeding can't guarantee timing).
+# Starts at ${SEED:-1}, so behaviour is identical for programs that already route
+# at the default seed.
+# Args: $1=config  $2=frequency  $3=hd (1 -> pass HD_CLOCK_DIVISOR)
+# Sets LAST_SEED to the seed that built.  Returns 0 on a built bitstream.
+build_config_with_retry() {
+    local config="$1" freq="$2" hd="$3"
+    local div_arg=""
+    [ "$hd" = "1" ] && div_arg="HD_CLOCK_DIVISOR=$HD_CLK_DIV"
+    local base="${SEED:-1}" tries="${SEED_MAX_RETRIES:-6}" i seed
+    for (( i = 0; i < tries; i++ )); do
+        seed=$(( base + i ))
+        if make VIDEOMANCER_SDK_ROOT="${VIDEOMANCER_SDK_ROOT}" PROJECT_ROOT="${PROJECT_ROOT}" \
+                BUILD_ROOT="${HW_BUILD_ROOT}" PROGRAM=$PROGRAM CONFIG=$config DEVICE=$DEVICE \
+                PACKAGE=$PACKAGE FREQUENCY=$freq HARDWARE=$HARDWARE CORE=$CORE PLATFORM=$PLATFORM \
+                SEED=$seed $div_arg > "$MAKE_LOG" 2>&1; then
+            LAST_SEED=$seed
+            return 0
+        fi
+        if ! grep -qE "assertion_failure|next_score >= 0|terminate called" "$MAKE_LOG"; then
+            return 1   # not a router crash (synth/compile error) -> fail fast
+        fi
+        echo -e "${YELLOW}    seed ${seed} crashed the nextpnr router; retrying with seed $(( seed + 1 ))...${NC}"
+    done
+    return 1   # every seed in the sweep crashed the router
+}
+
 # Parse command line arguments to determine which programs to build
 VENDOR_FILTER=""
 PROGRAM_FILTER=""
@@ -419,7 +452,7 @@ for PROGRAM_PATH in $PROGRAMS_TO_BUILD; do
 
         echo -e "${CYAN}  [1/6] HD Analog - Fmin: 74.25 MHz...${NC}"
         START=$(date +%s.%N)
-        if ! make VIDEOMANCER_SDK_ROOT="${VIDEOMANCER_SDK_ROOT}" PROJECT_ROOT="${PROJECT_ROOT}" BUILD_ROOT="${HW_BUILD_ROOT}" PROGRAM=$PROGRAM CONFIG=hd_analog DEVICE=$DEVICE PACKAGE=$PACKAGE FREQUENCY=74.25 HARDWARE=$HARDWARE CORE=$CORE PLATFORM=$PLATFORM HD_CLOCK_DIVISOR=$HD_CLK_DIV > "$MAKE_LOG" 2>&1; then
+        if ! build_config_with_retry hd_analog 74.25 1; then
             echo -e "${RED}Build failed. Error output:${NC}"
             cat "$MAKE_LOG"
             rm -f "$MAKE_LOG"
@@ -431,14 +464,14 @@ for PROGRAM_PATH in $PROGRAMS_TO_BUILD; do
         ELAPSED=$(echo "$END - $START" | bc)
         BUILD_STATS=$(parse_build_stats "$MAKE_LOG")
         if [ -n "$BUILD_STATS" ]; then
-            echo -e "${GREEN}    ✓ Completed in ${ELAPSED}s - ${BUILD_STATS}${NC}"
+            echo -e "${GREEN}    ✓ Completed in ${ELAPSED}s (seed ${LAST_SEED}) - ${BUILD_STATS}${NC}"
         else
-            echo -e "${GREEN}    ✓ Completed in ${ELAPSED}s${NC}"
+            echo -e "${GREEN}    ✓ Completed in ${ELAPSED}s (seed ${LAST_SEED})${NC}"
         fi
 
         echo -e "${CYAN}  [2/6] SD Analog - Fmin: 27 MHz...${NC}"
         START=$(date +%s.%N)
-        if ! make VIDEOMANCER_SDK_ROOT="${VIDEOMANCER_SDK_ROOT}" PROJECT_ROOT="${PROJECT_ROOT}" BUILD_ROOT="${HW_BUILD_ROOT}" PROGRAM=$PROGRAM CONFIG=sd_analog DEVICE=$DEVICE PACKAGE=$PACKAGE FREQUENCY=27 HARDWARE=$HARDWARE CORE=$CORE PLATFORM=$PLATFORM > "$MAKE_LOG" 2>&1; then
+        if ! build_config_with_retry sd_analog 27 0; then
             echo -e "${RED}Build failed. Error output:${NC}"
             cat "$MAKE_LOG"
             rm -f "$MAKE_LOG"
@@ -450,14 +483,14 @@ for PROGRAM_PATH in $PROGRAMS_TO_BUILD; do
         ELAPSED=$(echo "$END - $START" | bc)
         BUILD_STATS=$(parse_build_stats "$MAKE_LOG")
         if [ -n "$BUILD_STATS" ]; then
-            echo -e "${GREEN}    ✓ Completed in ${ELAPSED}s - ${BUILD_STATS}${NC}"
+            echo -e "${GREEN}    ✓ Completed in ${ELAPSED}s (seed ${LAST_SEED}) - ${BUILD_STATS}${NC}"
         else
-            echo -e "${GREEN}    ✓ Completed in ${ELAPSED}s${NC}"
+            echo -e "${GREEN}    ✓ Completed in ${ELAPSED}s (seed ${LAST_SEED})${NC}"
         fi
 
         echo -e "${CYAN}  [3/6] HD HDMI - Fmin: 74.25 MHz...${NC}"
         START=$(date +%s.%N)
-        if ! make VIDEOMANCER_SDK_ROOT="${VIDEOMANCER_SDK_ROOT}" PROJECT_ROOT="${PROJECT_ROOT}" BUILD_ROOT="${HW_BUILD_ROOT}" PROGRAM=$PROGRAM CONFIG=hd_hdmi DEVICE=$DEVICE PACKAGE=$PACKAGE FREQUENCY=74.25 HARDWARE=$HARDWARE CORE=$CORE PLATFORM=$PLATFORM HD_CLOCK_DIVISOR=$HD_CLK_DIV > "$MAKE_LOG" 2>&1; then
+        if ! build_config_with_retry hd_hdmi 74.25 1; then
             echo -e "${RED}Build failed. Error output:${NC}"
             cat "$MAKE_LOG"
             rm -f "$MAKE_LOG"
@@ -469,14 +502,14 @@ for PROGRAM_PATH in $PROGRAMS_TO_BUILD; do
         ELAPSED=$(echo "$END - $START" | bc)
         BUILD_STATS=$(parse_build_stats "$MAKE_LOG")
         if [ -n "$BUILD_STATS" ]; then
-            echo -e "${GREEN}    ✓ Completed in ${ELAPSED}s - ${BUILD_STATS}${NC}"
+            echo -e "${GREEN}    ✓ Completed in ${ELAPSED}s (seed ${LAST_SEED}) - ${BUILD_STATS}${NC}"
         else
-            echo -e "${GREEN}    ✓ Completed in ${ELAPSED}s${NC}"
+            echo -e "${GREEN}    ✓ Completed in ${ELAPSED}s (seed ${LAST_SEED})${NC}"
         fi
 
         echo -e "${CYAN}  [4/6] SD HDMI - Fmin: 27 MHz...${NC}"
         START=$(date +%s.%N)
-        if ! make VIDEOMANCER_SDK_ROOT="${VIDEOMANCER_SDK_ROOT}" PROJECT_ROOT="${PROJECT_ROOT}" BUILD_ROOT="${HW_BUILD_ROOT}" PROGRAM=$PROGRAM CONFIG=sd_hdmi DEVICE=$DEVICE PACKAGE=$PACKAGE FREQUENCY=27 HARDWARE=$HARDWARE CORE=$CORE PLATFORM=$PLATFORM > "$MAKE_LOG" 2>&1; then
+        if ! build_config_with_retry sd_hdmi 27 0; then
             echo -e "${RED}Build failed. Error output:${NC}"
             cat "$MAKE_LOG"
             rm -f "$MAKE_LOG"
@@ -488,14 +521,14 @@ for PROGRAM_PATH in $PROGRAMS_TO_BUILD; do
         ELAPSED=$(echo "$END - $START" | bc)
         BUILD_STATS=$(parse_build_stats "$MAKE_LOG")
         if [ -n "$BUILD_STATS" ]; then
-            echo -e "${GREEN}    ✓ Completed in ${ELAPSED}s - ${BUILD_STATS}${NC}"
+            echo -e "${GREEN}    ✓ Completed in ${ELAPSED}s (seed ${LAST_SEED}) - ${BUILD_STATS}${NC}"
         else
-            echo -e "${GREEN}    ✓ Completed in ${ELAPSED}s${NC}"
+            echo -e "${GREEN}    ✓ Completed in ${ELAPSED}s (seed ${LAST_SEED})${NC}"
         fi
 
         echo -e "${CYAN}  [5/6] HD Dual - Fmin: 74.25 MHz...${NC}"
         START=$(date +%s.%N)
-        if ! make VIDEOMANCER_SDK_ROOT="${VIDEOMANCER_SDK_ROOT}" PROJECT_ROOT="${PROJECT_ROOT}" BUILD_ROOT="${HW_BUILD_ROOT}" PROGRAM=$PROGRAM CONFIG=hd_dual DEVICE=$DEVICE PACKAGE=$PACKAGE FREQUENCY=74.25 HARDWARE=$HARDWARE CORE=$CORE PLATFORM=$PLATFORM HD_CLOCK_DIVISOR=$HD_CLK_DIV > "$MAKE_LOG" 2>&1; then
+        if ! build_config_with_retry hd_dual 74.25 1; then
             echo -e "${RED}Build failed. Error output:${NC}"
             cat "$MAKE_LOG"
             rm -f "$MAKE_LOG"
@@ -507,14 +540,14 @@ for PROGRAM_PATH in $PROGRAMS_TO_BUILD; do
         ELAPSED=$(echo "$END - $START" | bc)
         BUILD_STATS=$(parse_build_stats "$MAKE_LOG")
         if [ -n "$BUILD_STATS" ]; then
-            echo -e "${GREEN}    ✓ Completed in ${ELAPSED}s - ${BUILD_STATS}${NC}"
+            echo -e "${GREEN}    ✓ Completed in ${ELAPSED}s (seed ${LAST_SEED}) - ${BUILD_STATS}${NC}"
         else
-            echo -e "${GREEN}    ✓ Completed in ${ELAPSED}s${NC}"
+            echo -e "${GREEN}    ✓ Completed in ${ELAPSED}s (seed ${LAST_SEED})${NC}"
         fi
 
         echo -e "${CYAN}  [6/6] SD Dual - Fmin: 27 MHz...${NC}"
         START=$(date +%s.%N)
-        if ! make VIDEOMANCER_SDK_ROOT="${VIDEOMANCER_SDK_ROOT}" PROJECT_ROOT="${PROJECT_ROOT}" BUILD_ROOT="${HW_BUILD_ROOT}" PROGRAM=$PROGRAM CONFIG=sd_dual DEVICE=$DEVICE PACKAGE=$PACKAGE FREQUENCY=27 HARDWARE=$HARDWARE CORE=$CORE PLATFORM=$PLATFORM > "$MAKE_LOG" 2>&1; then
+        if ! build_config_with_retry sd_dual 27 0; then
             echo -e "${RED}Build failed. Error output:${NC}"
             cat "$MAKE_LOG"
             rm -f "$MAKE_LOG"
@@ -526,9 +559,9 @@ for PROGRAM_PATH in $PROGRAMS_TO_BUILD; do
         ELAPSED=$(echo "$END - $START" | bc)
         BUILD_STATS=$(parse_build_stats "$MAKE_LOG")
         if [ -n "$BUILD_STATS" ]; then
-            echo -e "${GREEN}    ✓ Completed in ${ELAPSED}s - ${BUILD_STATS}${NC}"
+            echo -e "${GREEN}    ✓ Completed in ${ELAPSED}s (seed ${LAST_SEED}) - ${BUILD_STATS}${NC}"
         else
-            echo -e "${GREEN}    ✓ Completed in ${ELAPSED}s${NC}"
+            echo -e "${GREEN}    ✓ Completed in ${ELAPSED}s (seed ${LAST_SEED})${NC}"
         fi
 
         BITSTREAM_END=$(date +%s.%N)
