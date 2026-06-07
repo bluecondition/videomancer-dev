@@ -539,7 +539,6 @@ architecture bishop of program_top is
     -- naturally fills the silhouette interior MINUS the feature
     -- interiors — no per-region bbox needed.
     signal eor_inside_r   : std_logic := '0';
-    signal eor_prev_lb_r  : std_logic := '0';
     signal eor_inside_d_r : std_logic := '0';  -- aligned with edge_hit_r
     -- Saturating count of consecutive '1' pixels in the LB walk.  Used
     -- to recognise abnormally long solid runs (e.g. the mouth
@@ -547,7 +546,6 @@ architecture bishop of program_top is
     -- apply a cancelling toggle on the trailing 1->0 transition so the
     -- run doesn't break even-odd parity for the rest of the scanline.
     -- Normal edge crossings are 3-4 px and never trip the threshold.
-    signal eor_run_len_r  : unsigned(4 downto 0) := (others => '0');
 
 begin
 
@@ -731,10 +729,11 @@ begin
             end if;
             -- Latch this edge's x-extent (aligned with act_slope_rd) for the
             -- stamp clamp.  Vertical edges carry a wide sentinel -> inert.  With
-            -- noise on, the edge has been jittered out of its static extent, so
-            -- latch a wide inert range here (keeps the noise_on test OFF the
-            -- per-pixel stamp_valid critical path).
-            if noise_on = '1' then
+            -- noise OR a morph on, the edge has moved out of its static (neutral)
+            -- extent, so latch a wide inert range — otherwise the clamp can clip
+            -- a moved edge's centre pixel, dropping its EOR crossing and leaking
+            -- the fill.  (Keeps the test OFF the per-pixel stamp_valid path.)
+            if noise_on = '1' or morph_active = '1' then
                 xlo_held <= to_signed(-1024, 13);
                 xhi_held <= to_signed(1023, 13);
             else
@@ -1566,36 +1565,20 @@ begin
         end if;
     end process;
 
-    -- Even-odd fill walker.  Operates on lb_bnd_rd_data (the raw bit
-    -- coming out of the line buffer, BEFORE the edge_hit_r register).
-    -- Reset at hsync; toggle on every rising 0->1 transition.
+    -- Even-odd fill walker.  Each boundary edge writes exactly one 1px crossing
+    -- per row (the centre stamp; horizontal edges and the half-open bottom row
+    -- are excluded), so walking left-to-right and flipping "inside" on every set
+    -- pixel is a clean even-odd scan — no rising-edge or run-cancel needed.
     eor_proc : process(clk)
     begin
         if rising_edge(clk) then
             if hsync_falling_r = '1' then
                 eor_inside_r   <= '0';
-                eor_prev_lb_r  <= '0';
                 eor_inside_d_r <= '0';
-                eor_run_len_r  <= (others => '0');
             else
                 if lb_bnd_rd_data = '1' then
-                    if eor_prev_lb_r = '0' then
-                        -- 0->1 rising: classic EOR toggle.
-                        eor_inside_r  <= not eor_inside_r;
-                        eor_run_len_r <= to_unsigned(1, 5);
-                    elsif eor_run_len_r /= "11111" then
-                        eor_run_len_r <= eor_run_len_r + 1;
-                    end if;
-                else
-                    -- lb_bnd_rd_data = '0'
-                    if eor_prev_lb_r = '1' and eor_run_len_r = "11111" then
-                        -- Trailing edge of a long solid run: cancel the
-                        -- earlier toggle so the run nets to 0 crossings.
-                        eor_inside_r <= not eor_inside_r;
-                    end if;
-                    eor_run_len_r <= (others => '0');
+                    eor_inside_r <= not eor_inside_r;
                 end if;
-                eor_prev_lb_r  <= lb_bnd_rd_data;
                 -- Delay the "inside" flag by one cycle so it lines up
                 -- with edge_hit_r at the output mux.
                 eor_inside_d_r <= eor_inside_r;
