@@ -1,39 +1,51 @@
-# Tessera — tumbling 3D triangles falling through the frame
+# Tessera — tumbling triangles raining down (sprite engine)
 
 ## What it does
-Two equilateral triangles tumble about the Z-axis and fall (or rise) through
-the frame. Each triangle can be drawn as an outline only or filled; the fill
-can be a flat colour or the incoming video (cross-faded by the slider). The
-outline of the second triangle can take a +90° hue shift for a two-colour
-"Multi" look. Size cycles in a 4-step ±R/8 pattern when Size Variation is
-on. Hues for outline, fill and background are independent polar knobs.
+1–10 independent equilateral-triangle **outlines** rain down the screen. Each
+has a **random in-plane orientation** (so every triangle looks unique), a random
+screen-x and vertical stagger, and **tumbles end-over-end at a uniform speed** as
+it falls, recycling from the top once it exits the bottom. Outline-only.
 
-## How it works
-Processing program that overlays generated triangles on incoming video.
-Rotation is done by a 7-iteration unrolled CORDIC engine (no sin/cos LUT,
-no multiplier for the rotation itself); a quadrant pre-rotation brings the
-residual angle into CORDIC's natural [0,90°] range. Vertex pre-scale uses
-shift-add chains for fixed `R*K`, `R*sin60*K`, `R*cos60*K` — no multipliers.
-Per-pixel rasterisation is a 3-edge DDA (edge-walker): three 29-bit
-accumulators advance by `dy_i` per pixel and `-dx_i` per line, so there are
-no per-pixel multiplies. The two triangles are produced by an "offset trick":
-triangle 1 is triangle 0 translated by 256 internal px, which collapses to a
-shift+add and adds only ~840 LC. Fits 7576 / 7680 LC (98%) on the HX4K at
-74.25 MHz with Fmax 84 MHz.
+## How it works (v7 — line-buffer sprite engine)
+Many independent triangles don't fit as parallel per-pixel rasterisers on the
+HX4K, so one rasteriser is **time-shared** through a line buffer:
+
+- **Geometry (vblank):** per triangle, rotate the base equilateral verts by a
+  random angle φ (shared sin/cos LUT) then foreshorten y by a **triangle-wave**
+  factor (linear → constant apparent tumble speed; plain cos would dwell
+  face-on and rush through edge-on). Produces three *general* edges (a=dy,
+  b=−dx), the edge value at the bounding-box corner, the bbox, and a threshold.
+  All multiplies are sequenced through **one shared multiplier**; long arithmetic
+  chains (center-y wrap, vertex/bbox) are pipelined across vblank cycles.
+- **Sprite FIFO:** per-triangle records live in a **recirculating shift
+  register** — the fill engine always reads the head, so there are no
+  runtime-indexed register arrays (those blew up LUT usage in an earlier try).
+- **Fill (per line):** pop each record; if the line is in its y-band, walk its
+  x bounding span with one shared edge tester, marking outline pixels into the
+  fill half of a ping-pong line buffer; step the edge row for the next line.
+  Drawing is bounded to each span, so a flat triangle draws a short segment,
+  never a full-screen line.
+- **Scanout:** read the display half of the line buffer (one-line latency; line
+  0 blanked), colour mux to outline/background.
+
+Fits ~6700 / 7680 LC (87%) on the HX4K, Fmax ~86 MHz at the 74.25 MHz HD target.
+
+## Two-sided video fill (T11)
+With **T11 = Video On**, each triangle is filled like a two-sided card: the face
+toward the viewer shows the **incoming video**, and once it tumbles past edge-on
+the **back** face shows a **solid colour** (K2 Fill Hue). The side is chosen from
+the sign of the tumble factor, so it flips every half-tumble. The line buffer
+carries a 2-bit code per pixel (bg / outline / solid-fill / video-fill); the
+incoming video is delayed to align with the scanout. T11 Off = outline-only.
 
 ## Controls
 - **K1 Outline Hue** — outline colour (0..360°)
-- **K2 Fill Hue** — fill colour (0..360°)
+- **K2 Fill Hue** — solid colour on the back face when Video is on
 - **K3 BG Hue** — background colour (0..360°)
-- **K4 Size** — triangle radius
-- **K5 Density** — wired, currently deferred (single-triangle gate)
-- **K6 Rot Axis** — X / Y / Z / Random (only Z currently implemented)
-- **T7 Outline Color** — Same / Multi (+90° hue shift on triangle 1 outline)
-- **T8 Fill** — Edge-Only / Filled
-- **T9 Outline Style** — Solid / Invert
-- **T10 Size Variation** — Same / Varied (4-step ±R/8 cycle)
-- **T11 Direction** — Fall / Rise
-- **Slider Video Mix** — crossfade fill colour with incoming video
+- **K4 Fall Speed** — downward speed (shared)
+- **K5 Count** — number of triangles (1..10)
+- **K6 Tumble Speed** — end-over-end rate (shared)
+- **T11 Video** — Off (outline only) / On (front=video, back=solid)
 
 ## Presets
 None defined in the toml.
