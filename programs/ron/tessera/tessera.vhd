@@ -22,8 +22,10 @@
 --    blanked), clear behind, colour mux.  Drawing is bounded to each span so a
 --    flat triangle draws a short segment (no full-screen line).
 --
--- Outline-only.  Controls: K1 Outline Hue, K3 BG Hue, K4 Fall Speed,
--- K5 Count (1..N), K6 Tumble Speed.
+-- Controls: K1 Outline Hue, K2 Fill Hue, K3 BG Hue, K4 Fall Speed,
+-- K5 Count (1..12), K6 Tumble Speed, T11 Video (front=video, back=solid),
+-- Fader Size (4 steps; at the largest the live count auto-caps to keep the
+-- fill engine within its per-line budget).
 --
 -- Author: bluecondition
 
@@ -51,7 +53,7 @@ architecture tessera of program_top is
     constant LB_SOLID : std_logic_vector(1 downto 0) := "10";  -- solid fill (back side)
     constant LB_VIDEO : std_logic_vector(1 downto 0) := "11";  -- video fill (front side)
 
-    constant C_MAX_TRI       : integer := 10;
+    constant C_MAX_TRI       : integer := 12;
     constant C_OUTLINE_SHIFT : integer := 1;
     constant C_LBW           : integer := 2048;
     constant C_LAW           : integer := 11;
@@ -63,6 +65,7 @@ architecture tessera of program_top is
     subtype  t_ab is signed(10 downto 0);   -- edge deltas / thresholds (small)
     constant C_FW : integer := 18;           -- fill working edge value (in-band, small)
     subtype  t_fc is signed(C_FW - 1 downto 0);
+    subtype  t_xy is signed(11 downto 0);    -- screen bbox coord (0..~2000)
 
     --------------------------------------------------------------------------
     -- Per-index hashes (elaboration-time; use HIGH bits).
@@ -95,8 +98,8 @@ architecture tessera of program_top is
         a0, a1, a2 : t_ab;         -- dy_e (x step)
         b0, b1, b2 : t_ab;         -- -dx_e (y step)
         e0, e1, e2 : t_e;          -- edge value at (xmin, current fill line)
-        xmin, xmax : t_g;
-        ymin, ymax : t_g;
+        xmin, xmax : t_xy;
+        ymin, ymax : t_xy;
         thr0, thr1, thr2 : t_ab;   -- per-edge outline threshold (length-scaled)
         valid      : std_logic;
         front      : std_logic;    -- '1' = front face toward viewer (video side)
@@ -123,6 +126,7 @@ architecture tessera of program_top is
     signal s_fall_pot    : unsigned(9 downto 0);
     signal s_count_pot   : unsigned(9 downto 0);
     signal s_tumble_pot  : unsigned(9 downto 0);
+    signal s_size_pot    : unsigned(9 downto 0);
     signal s_video_en    : std_logic;
 
     signal s_timing  : t_video_timing_port;
@@ -141,6 +145,7 @@ architecture tessera of program_top is
     signal s_rangey      : t_g := (others => '0');
     signal s_count       : integer range 1 to C_MAX_TRI := 6;
     signal s_R, s_half, s_third : t_g := (others => '0');
+    signal s_size_h : t_g := (others => '0');   -- latched triangle height
 
     --------------------------------------------------------------------------
     -- Shared sin/cos LUT + multiplier
@@ -236,6 +241,7 @@ begin
     s_fall_pot    <= unsigned(registers_in(3));
     s_count_pot   <= unsigned(registers_in(4));
     s_tumble_pot  <= unsigned(registers_in(5));
+    s_size_pot    <= unsigned(registers_in(7));   -- Fader P12 = Size
     s_video_en    <= registers_in(6)(4);   -- P11 toggle
 
     p_measure_resolution : process(clk)
@@ -309,27 +315,36 @@ begin
     -- Animation: sizes, count, tumble + shared fall accumulators.
     --------------------------------------------------------------------------
     p_anim : process(clk)
-        variable v_h, v_r, v_half : t_g;
+        variable v_h              : t_g;
         variable v_fall, v_next   : t_g;
-        variable v_count          : integer;
+        variable v_count, v_capm  : integer;
+        variable v_mv             : unsigned(11 downto 0);
     begin
         if rising_edge(clk) then
             if s_vsync_pulse = '1' then
                 s_initialized <= '1';
-                v_h := signed(resize(shift_right(s_measured_v, 4)
-                            + shift_right(s_measured_v, 5)
-                            + shift_right(s_measured_v, 8), C_GW));
-                v_r := shift_right(v_h, 1) + shift_right(v_h, 3)
-                     + shift_right(v_h, 5) + shift_right(v_h, 7);
-                s_R     <= v_r;
-                s_third <= shift_right(v_r, 1);
-                v_half := shift_right(v_h, 1) + shift_right(v_h, 4)
-                        + shift_right(v_h, 6);
-                s_half  <= v_half;
-                s_rangey <= signed(resize(s_measured_v, C_GW)) + shift_left(v_h, 1);
+                -- Triangle height from the Size fader (P12): 4 steps via shifts,
+                -- ~6% / ~9% / ~11% / ~14% of the measured screen height.  At the
+                -- largest step the live count is capped (v_capm) so the fill
+                -- engine always finishes a line (count*span <= line budget).
+                v_mv := s_measured_v;
+                case s_size_pot(9 downto 8) is
+                    when "00"   => v_h := signed(resize(shift_right(v_mv, 4), C_GW));                          -- ~6.3%
+                                   v_capm := C_MAX_TRI;
+                    when "01"   => v_h := signed(resize(shift_right(v_mv, 4) + shift_right(v_mv, 5), C_GW));   -- ~9.4%
+                                   v_capm := C_MAX_TRI;
+                    when "10"   => v_h := signed(resize(shift_right(v_mv, 4) + shift_right(v_mv, 5)
+                                                      + shift_right(v_mv, 8), C_GW));                          -- ~10.2%
+                                   v_capm := C_MAX_TRI;
+                    when others => v_h := signed(resize(shift_right(v_mv, 3) + shift_right(v_mv, 6), C_GW));   -- ~14%
+                                   v_capm := 10;
+                end case;
+                -- latch the height; R/half/third/range are derived in p_size
+                -- one cycle later (breaks the size shift-add critical path).
+                s_size_h <= v_h;
                 s_tumble_acc <= s_tumble_acc + (shift_right(s_tumble_pot, 6) + 1);
                 v_count := to_integer(shift_right(s_count_pot * to_unsigned(C_MAX_TRI, 10), 10)) + 1;
-                if v_count > C_MAX_TRI then v_count := C_MAX_TRI; end if;
+                if v_count > v_capm then v_count := v_capm; end if;
                 s_count <= v_count;
                 v_fall := resize(signed('0' & std_logic_vector(shift_right(s_fall_pot, 6))), C_GW)
                         + to_signed(1, C_GW);
@@ -341,6 +356,21 @@ begin
                     s_fall_acc <= v_next;
                 end if;
             end if;
+        end if;
+    end process;
+
+    -- Derive R / half / third / recycle-range from the latched height, one
+    -- cycle behind p_size's input (well before the geometry engine reads them).
+    p_size : process(clk)
+    begin
+        if rising_edge(clk) then
+            s_R     <= shift_right(s_size_h, 1) + shift_right(s_size_h, 3)
+                     + shift_right(s_size_h, 5) + shift_right(s_size_h, 7);   -- 2/3 H
+            s_third <= shift_right(s_size_h, 2) + shift_right(s_size_h, 4)
+                     + shift_right(s_size_h, 6);                              -- 1/3 H
+            s_half  <= shift_right(s_size_h, 1) + shift_right(s_size_h, 4)
+                     + shift_right(s_size_h, 6);                              -- 0.577 H
+            s_rangey <= signed(resize(s_measured_v, C_GW)) + shift_left(s_size_h, 1);
         end if;
     end process;
 
@@ -511,8 +541,8 @@ begin
                 when G_STORE =>
                     s_stage.a0 <= resize(s_dy0, 11); s_stage.a1 <= resize(s_dy1, 11); s_stage.a2 <= resize(s_dy2, 11);
                     s_stage.b0 <= resize(-s_dx0, 11); s_stage.b1 <= resize(-s_dx1, 11); s_stage.b2 <= resize(-s_dx2, 11);
-                    s_stage.xmin <= s_xmin; s_stage.xmax <= s_xmax;
-                    s_stage.ymin <= s_ymin; s_stage.ymax <= s_ymax;
+                    s_stage.xmin <= resize(s_xmin, 12); s_stage.xmax <= resize(s_xmax, 12);
+                    s_stage.ymin <= resize(s_ymin, 12); s_stage.ymax <= resize(s_ymax, 12);
                     -- per-edge threshold = (Manhattan length) * outline width, so
                     -- the outline stays a constant pixel width as edges
                     -- foreshorten differently while tumbling.
@@ -581,13 +611,14 @@ begin
                         s_fc0 <= resize(v_hd.e0, C_FW);
                         s_fc1 <= resize(v_hd.e1, C_FW);
                         s_fc2 <= resize(v_hd.e2, C_FW);
-                        if v_hd.xmin < to_signed(0, C_GW) then
+                        if v_hd.xmin < to_signed(0, 12) then
                             s_fx <= (others => '0');
                         else
-                            s_fx <= v_hd.xmin;
+                            s_fx <= resize(v_hd.xmin, C_GW);
                         end if;
                         s_pv <= '0';   -- test pipeline empty
-                        if (v_hd.valid = '1') and (v_vc >= v_hd.ymin) and (v_vc <= v_hd.ymax) then
+                        if (v_hd.valid = '1') and (v_vc >= resize(v_hd.ymin, C_GW))
+                           and (v_vc <= resize(v_hd.ymax, C_GW)) then
                             s_fst <= F_WALK;
                         else
                             s_fst <= F_DONE;
@@ -631,7 +662,7 @@ begin
                         s_fc0 <= s_fc0 + resize(v_hd.a0, C_FW);
                         s_fc1 <= s_fc1 + resize(v_hd.a1, C_FW);
                         s_fc2 <= s_fc2 + resize(v_hd.a2, C_FW);
-                        if s_fx >= v_hd.xmax then
+                        if s_fx >= resize(v_hd.xmax, C_GW) then
                             s_fst <= F_DRAIN;
                         else
                             s_fx <= s_fx + 1;

@@ -43,9 +43,12 @@ incoming video is delayed to align with the scanout. T11 Off = outline-only.
 - **K2 Fill Hue** — solid colour on the back face when Video is on
 - **K3 BG Hue** — background colour (0..360°)
 - **K4 Fall Speed** — downward speed (shared)
-- **K5 Count** — number of triangles (1..10)
+- **K5 Count** — number of triangles (1..12)
 - **K6 Tumble Speed** — end-over-end rate (shared)
 - **T11 Video** — Off (outline only) / On (front=video, back=solid)
+- **Fader Size** — triangle size, 4 steps (~6%–14% of screen height). At the
+  largest step the live count auto-caps (to ~10) so the fill engine always
+  finishes a scanline — bigger triangles, fewer of them, no glitching.
 
 ## Presets
 None defined in the toml.
