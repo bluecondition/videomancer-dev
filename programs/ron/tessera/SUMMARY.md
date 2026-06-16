@@ -1,34 +1,48 @@
 # Tessera — tumbling triangles raining down (sprite engine)
 
 ## What it does
-1–10 independent equilateral-triangle **outlines** rain down the screen. Each
+1–20 independent equilateral-triangle **outlines** rain down the screen. Each
 has a **random in-plane orientation** (so every triangle looks unique), a random
-screen-x and vertical stagger, and **tumbles end-over-end at a uniform speed** as
-it falls, recycling from the top once it exits the bottom. Outline-only.
+screen-x and vertical position, **tumbles end-over-end at a uniform speed**, and
+carries a slow **constant in-plane spin** as it falls, recycling from the top
+once it exits the bottom. Outline-only (optional two-sided video fill on T11).
 
-## How it works (v7 — line-buffer sprite engine)
+**One fader (P12) sets both count and size:** fully down = a single large
+triangle (~75% of screen height); turning it up raises the count to 20 while the
+triangles shrink (`height = min(0.75, 1.5/count) · screenH`). Because per-line
+fill cost ≈ `count · height`, this stays flat (~1.5·H) for count ≥ 2, which is
+exactly what keeps the time-shared rasteriser inside its per-line budget at every
+setting — big-and-few or small-and-many cost the same.
+
+## How it works (v8 — BRAM sprite store)
 Many independent triangles don't fit as parallel per-pixel rasterisers on the
 HX4K, so one rasteriser is **time-shared** through a line buffer:
 
 - **Geometry (vblank):** per triangle, rotate the base equilateral verts by a
-  random angle φ (shared sin/cos LUT) then foreshorten y by a **triangle-wave**
-  factor (linear → constant apparent tumble speed; plain cos would dwell
-  face-on and rush through edge-on). Produces three *general* edges (a=dy,
-  b=−dx), the edge value at the bounding-box corner, the bbox, and a threshold.
-  All multiplies are sequenced through **one shared multiplier**; long arithmetic
-  chains (center-y wrap, vertex/bbox) are pipelined across vblank cycles.
-- **Sprite FIFO:** per-triangle records live in a **recirculating shift
-  register** — the fill engine always reads the head, so there are no
-  runtime-indexed register arrays (those blew up LUT usage in an earlier try).
-- **Fill (per line):** pop each record; if the line is in its y-band, walk its
-  x bounding span with one shared edge tester, marking outline pixels into the
-  fill half of a ping-pong line buffer; step the edge row for the next line.
-  Drawing is bounded to each span, so a flat triangle draws a short segment,
-  never a full-screen line.
+  random angle φ — the per-triangle hash plus a **shared spin accumulator** that
+  advances each frame (slow in-plane spin) — then foreshorten y by a
+  **triangle-wave** factor (linear → constant apparent tumble speed; plain cos
+  would dwell face-on and rush through edge-on). Produces three *general* edges
+  (a=dy, b=−dx), the edge value at the bbox corner, the bbox (xmax clamped to
+  screen), and per-edge thresholds. All multiplies are sequenced through **one
+  shared multiplier**; long chains (centre-y wrap, vertex/bbox) are pipelined.
+- **Sprite store (BRAM):** per-triangle records are packed into a **block RAM**
+  (one slot per triangle). Geometry writes every slot in vblank; the fill engine
+  reads + writes them back sequentially. Moving the records out of the register
+  fabric (an earlier recirculating shift-register FIFO) is what freed the LCs to
+  reach 20 triangles — the device sits at ~89% LC / 23 of 32 BRAMs. The store is
+  given a full BRAM depth (256) with a **single muxed write port**, or yosys
+  leaves it in LUTs/FFs (a 20-deep or dual-write memory won't infer as SB_RAM40).
+- **Fill (per line):** for slot 0..count−1, read the record (1-cycle BRAM
+  latency), and if the line is in its y-band, walk its x bounding span with one
+  shared edge tester, marking outline pixels into the fill half of a ping-pong
+  line buffer; step the edge row and write the record back. Drawing is bounded to
+  each span, so a flat triangle draws a short segment, never a full-screen line.
 - **Scanout:** read the display half of the line buffer (one-line latency; line
   0 blanked), colour mux to outline/background.
 
-Fits ~6700 / 7680 LC (87%) on the HX4K, Fmax ~86 MHz at the 74.25 MHz HD target.
+Fits ~6860 / 7680 LC (89%), RAMs 23/32, Fmax ~76–82 MHz across all six HD/SD
+variants at the 74.25 MHz HD target (HD Dual the tightest at ~78 MHz).
 
 ## Two-sided video fill (T11)
 With **T11 = Video On**, each triangle is filled like a two-sided card: the face
@@ -43,12 +57,11 @@ incoming video is delayed to align with the scanout. T11 Off = outline-only.
 - **K2 Fill Hue** — solid colour on the back face when Video is on
 - **K3 BG Hue** — background colour (0..360°)
 - **K4 Fall Speed** — downward speed (shared)
-- **K5 Count** — number of triangles (1..12)
+- **K5 Spin** — in-plane spin rate (0 = none .. fast)
 - **K6 Tumble Speed** — end-over-end rate (shared)
 - **T11 Video** — Off (outline only) / On (front=video, back=solid)
-- **Fader Size** — triangle size, 4 steps (~6%–14% of screen height). At the
-  largest step the live count auto-caps (to ~10) so the fill engine always
-  finishes a scanline — bigger triangles, fewer of them, no glitching.
+- **Fader P12 Count** — sets count + size together: down = 1 large triangle
+  (~75% of screen height), up = 20 small ones.
 
 ## Presets
 None defined in the toml.
