@@ -3,9 +3,16 @@
 ## What it does
 1–20 independent equilateral-triangle **outlines** rain down the screen. Each
 has a **random in-plane orientation** (so every triangle looks unique), a random
-screen-x and vertical position, **tumbles end-over-end at a uniform speed**, and
-carries a slow **constant in-plane spin** as it falls, recycling from the top
-once it exits the bottom. Outline-only (optional two-sided video fill on T11).
+screen-x, **tumbles end-over-end at a uniform speed**, and carries a slow
+**constant in-plane spin** as it falls, recycling from the top once it exits the
+bottom. Outline-only (optional two-sided video fill on T11).
+
+Vertical placement uses a **golden-ratio (low-discrepancy) sequence** rather than
+random offsets, so the triangles stay evenly spread over the screen at any count
+without clumping or visible banding (random offsets clump; the golden sequence
+does not — and it's still irregular, not a grid). The recycle range is just
+`measured_v + 2R`, so a triangle re-enters the top exactly as it exits the bottom
+— no blank gap.
 
 **One fader (P12) sets both count and size:** fully down = a single large
 triangle (~75% of screen height); turning it up raises the count to 20 while the
@@ -41,8 +48,10 @@ HX4K, so one rasteriser is **time-shared** through a line buffer:
 - **Scanout:** read the display half of the line buffer (one-line latency; line
   0 blanked), colour mux to outline/background.
 
-Fits ~6860 / 7680 LC (89%), RAMs 23/32, Fmax ~76–82 MHz across all six HD/SD
-variants at the 74.25 MHz HD target (HD Dual the tightest at ~78 MHz).
+Fits ~7000 / 7680 LC (91%), RAMs 23/32. Five of six variants clear the 74.25 MHz
+HD target (76–84 MHz); the **HD-HDMI** variant lands ~72 MHz (≈3% under) — the
+chip is at capacity with the colour palette added. Shipped at full clock by
+choice; HD-HDMI output may be marginal (HD-analog, HD-dual and all SD are fine).
 
 ## Two-sided video fill (T11)
 With **T11 = Video On**, each triangle is filled like a two-sided card: the face
@@ -53,9 +62,12 @@ carries a 2-bit code per pixel (bg / outline / solid-fill / video-fill); the
 incoming video is delayed to align with the scanout. T11 Off = outline-only.
 
 ## Controls
-- **K1 Outline Hue** — outline colour (0..360°)
-- **K2 Fill Hue** — solid colour on the back face when Video is on
-- **K3 BG Hue** — background colour (0..360°)
+Each colour knob sweeps a **white → rainbow → black** palette (white, R, O, Y, G,
+B, V, black — the rainbow entries are the phosphor program's hardware-confirmed
+BT.601 values, U/V swapped for rev_b):
+- **K1 Outline Colour** — outline colour
+- **K2 Fill Colour** — solid colour on the back face when Video is on
+- **K3 BG Colour** — background colour
 - **K4 Fall Speed** — downward speed (shared)
 - **K5 Spin** — in-plane spin rate (0 = none .. fast)
 - **K6 Tumble Speed** — end-over-end rate (shared)

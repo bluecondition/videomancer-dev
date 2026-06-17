@@ -29,8 +29,9 @@
 -- ~1.5H for count >= 2, which is what keeps the fill engine inside its per-line
 -- budget at EVERY setting.
 --
--- Controls: K1 Outline Hue, K2 Fill Hue, K3 BG Hue, K4 Fall Speed,
--- K5 Spin, K6 Tumble Speed, T11 Video (front=video, back=solid),
+-- Controls: K1 Outline Colour, K2 Fill Colour, K3 BG Colour (each sweeps
+-- white -> rainbow -> black), K4 Fall Speed, K5 Spin, K6 Tumble Speed,
+-- T11 Video (front=video, back=solid),
 -- Fader P12 = Count + Size (down = 1 large .. up = 20 small).
 --
 -- Author: bluecondition
@@ -124,6 +125,36 @@ architecture tessera of program_top is
         15 => to_unsigned(410, 12), 16 => to_unsigned(384, 12),
         17 => to_unsigned(361, 12), 18 => to_unsigned(341, 12),
         19 => to_unsigned(323, 12), 20 => to_unsigned(307, 12));
+
+    -- Colour palette for the Outline/Fill/BG knobs: white -> rainbow -> black,
+    -- selected by the knob's top 3 bits (8 steps, no arithmetic). The 6 rainbow
+    -- entries are the phosphor program's hardware-confirmed BT.601 values (U/V
+    -- swapped for Videomancer rev_b: the U register holds Cr, V holds Cb).
+    type t_pal is array (0 to 7) of unsigned(9 downto 0);
+    constant C_PAL_Y : t_pal := (
+        to_unsigned(1023, 10),  -- White
+        to_unsigned(328, 10),   -- Red
+        to_unsigned(584, 10),   -- Orange
+        to_unsigned(840, 10),   -- Yellow
+        to_unsigned(580, 10),   -- Green
+        to_unsigned(164, 10),   -- Blue
+        to_unsigned(349, 10),   -- Violet
+        to_unsigned(0, 10));    -- Black
+    constant C_PAL_U : t_pal := (
+        to_unsigned(512, 10), to_unsigned(960, 10), to_unsigned(772, 10),
+        to_unsigned(584, 10), to_unsigned(136, 10), to_unsigned(440, 10),
+        to_unsigned(756, 10), to_unsigned(512, 10));
+    constant C_PAL_V : t_pal := (
+        to_unsigned(512, 10), to_unsigned(360, 10), to_unsigned(212, 10),
+        to_unsigned(64, 10),  to_unsigned(216, 10), to_unsigned(960, 10),
+        to_unsigned(852, 10), to_unsigned(512, 10));
+
+
+    -- Golden-ratio step (0.618 * 4096) for the low-discrepancy y-distribution:
+    -- triangle i sits at fall + i*0.618*range (mod range), which spreads the
+    -- triangles uniformly over the recycle range without clumping (random hash
+    -- offsets clump; this does not) and without a visible grid.
+    constant C_GOLDEN : integer := 2531;
 
     --------------------------------------------------------------------------
     -- Sprite record (one per triangle) + packed BRAM storage.
@@ -238,9 +269,11 @@ architecture tessera of program_top is
     signal s_count       : integer range 1 to C_MAX_TRI := 6;
     signal s_R, s_half, s_third : t_g := (others => '0');
     signal s_size_h : t_g := (others => '0');   -- latched triangle height
-    -- y-stagger shift: scale the per-triangle hash spread (0..1023) up toward the
-    -- recycle range so triangles spread vertically even at low counts (big tris).
-    signal s_stag_sh : integer range 0 to 2 := 0;
+    -- golden-ratio y-distribution: per-frame step + per-triangle accumulator
+    signal s_golden_step : t_g := (others => '0');
+    signal s_gold_acc  : t_g := (others => '0');
+    signal s_gold_sum  : t_g := (others => '0');   -- pre-wrap (pipelines the wrap)
+
 
     -- count-driven size pipeline
     signal s_sz_recip : unsigned(11 downto 0) := to_unsigned(512, 12);
@@ -322,6 +355,11 @@ architecture tessera of program_top is
     signal s_o_y : unsigned(9 downto 0) := (others => '0');
     signal s_o_u : unsigned(9 downto 0) := C_CHROMA_MID;
     signal s_o_v : unsigned(9 downto 0) := C_CHROMA_MID;
+    -- Latched colour per knob (off the pixel path): one knob/channel refreshed
+    -- per cycle through a single shared 8:1 palette mux; idx = knob top 3 bits.
+    type t_col3 is array (0 to 2) of unsigned(9 downto 0);   -- [outline, fill, bg]
+    signal s_col_y, s_col_u, s_col_v : t_col3 := (others => (others => '0'));
+    signal s_ck, s_cc : integer range 0 to 2 := 0;
 
     -- incoming-video delay to align with the scanout colour mux (front face fill)
     type t_vdel is array (0 to 3) of std_logic_vector(9 downto 0);
@@ -444,8 +482,6 @@ begin
     end process;
 
     -- Count-driven size: height = (measured_v * C_RECIP(count)) >> 12.
-    -- Pipelined (one small multiply); settles in vblank long before the
-    -- geometry engine reads s_R.
     p_sizecalc : process(clk)
     begin
         if rising_edge(clk) then
@@ -464,11 +500,49 @@ begin
                      + shift_right(s_size_h, 6);                              -- 1/3 H
             s_half  <= shift_right(s_size_h, 1) + shift_right(s_size_h, 4)
                      + shift_right(s_size_h, 6);                              -- 0.577 H
-            s_rangey <= signed(resize(s_measured_v, C_GW)) + shift_left(s_size_h, 1);
-            -- bigger triangles -> larger recycle range -> shift the hash spread up
-            if    s_size_h > shift_right(signed(resize(s_measured_v, C_GW)), 1) then s_stag_sh <= 2;
-            elsif s_size_h > shift_right(signed(resize(s_measured_v, C_GW)), 3) then s_stag_sh <= 1;
-            else  s_stag_sh <= 0; end if;
+            -- recycle range = measured_v + 2R (R = 2/3 H): a triangle re-enters
+            -- the top exactly as it exits the bottom, so there is no blank gap.
+            s_rangey <= signed(resize(s_measured_v, C_GW)) + s_size_h
+                      + shift_right(s_size_h, 2) + shift_right(s_size_h, 4)
+                      + shift_right(s_size_h, 6);
+        end if;
+    end process;
+
+    -- golden step ~= 0.609 * recycle range = 39/64, via shifts (no multiply).
+    -- 39/64 is coprime with 64 so the per-triangle accumulation has no
+    -- small-period collisions for <=20 triangles -> stays evenly distributed.
+    p_golden : process(clk)
+    begin
+        if rising_edge(clk) then
+            s_golden_step <= shift_right(s_rangey, 1) + shift_right(s_rangey, 3)
+                           - shift_right(s_rangey, 6);
+        end if;
+    end process;
+
+    -- Colour knob -> palette, latched. Round-robin over 3 knobs x 3 channels
+    -- (one per cycle) through a single shared 8:1 mux. idx = knob top 3 bits.
+    p_color : process(clk)
+        variable v_kv  : unsigned(9 downto 0);
+        variable v_idx : integer range 0 to 7;
+    begin
+        if rising_edge(clk) then
+            case s_ck is
+                when 0      => v_kv := s_outline_hue;
+                when 1      => v_kv := s_fill_hue;
+                when others => v_kv := s_bg_hue;
+            end case;
+            v_idx := to_integer(v_kv(9 downto 7));
+            case s_cc is
+                when 0      => s_col_y(s_ck) <= C_PAL_Y(v_idx);
+                when 1      => s_col_u(s_ck) <= C_PAL_U(v_idx);
+                when others => s_col_v(s_ck) <= C_PAL_V(v_idx);
+            end case;
+            if s_cc = 2 then
+                s_cc <= 0;
+                if s_ck = 2 then s_ck <= 0; else s_ck <= s_ck + 1; end if;
+            else
+                s_cc <= s_cc + 1;
+            end if;
         end if;
     end process;
 
@@ -494,6 +568,7 @@ begin
                 when G_IDLE =>
                     if s_geng_start = '1' then
                         s_gtri <= 0;
+                        s_gold_sum <= (others => '0');   -- triangle 0 at phase 0
                         s_gst  <= G_PHI;
                     end if;
 
@@ -502,15 +577,17 @@ begin
                     -- shared spin accumulator (constant slow rotation over time)
                     s_lut_angle <= std_logic_vector(
                         C_HASH_PHI(s_gtri)(15 downto 6) + s_spin_acc);
+                    -- wrap the golden accumulator here (compare+subtract), the
+                    -- pre-wrap add was done in the previous triangle's G_STORE
+                    if s_gold_sum >= s_rangey then s_gold_acc <= s_gold_sum - s_rangey;
+                    else                           s_gold_acc <= s_gold_sum; end if;
                     s_pwait <= 0;
                     s_gst   <= G_PHIW;
 
                 when G_PHIW =>
                     -- cy = (shared fall + per-tri stagger) wrapped - margin(R),
                     -- pipelined one op per cycle and overlapped with LUT settle.
-                    s_cy1 <= s_fall_acc
-                           + signed(resize(shift_left(
-                               resize(C_HASH_Y(s_gtri)(15 downto 6), 12), s_stag_sh), C_GW));
+                    s_cy1 <= s_fall_acc + s_gold_acc;
                     if s_cy1 >= s_rangey then s_cy2 <= s_cy1 - s_rangey;
                     else                      s_cy2 <= s_cy1; end if;
                     if s_cy2 >= s_rangey then s_cy3 <= s_cy2 - s_rangey;
@@ -674,6 +751,8 @@ begin
                         s_gst <= G_IDLE;
                     else
                         s_gtri <= s_gtri + 1;
+                        -- advance the golden phase (add only; G_PHI does the wrap)
+                        s_gold_sum <= s_gold_acc + s_golden_step;
                         s_gst  <= G_PHI;
                     end if;
             end case;
@@ -919,21 +998,15 @@ begin
             if s_v0_2 = '1' then v_code := LB_BG; else v_code := s_disp_code; end if;
             case v_code is
                 when LB_LINE =>
-                    s_o_y <= C_OUTLINE_LUMA;
-                    s_o_u <= s_outline_hue;
-                    s_o_v <= C_MAX_VAL - s_outline_hue;
+                    s_o_y <= s_col_y(0); s_o_u <= s_col_u(0); s_o_v <= s_col_v(0);
                 when LB_VIDEO =>
                     s_o_y <= unsigned(s_vy(3));
                     s_o_u <= unsigned(s_vu(3));
                     s_o_v <= unsigned(s_vv(3));
                 when LB_SOLID =>
-                    s_o_y <= C_FILL_LUMA;
-                    s_o_u <= s_fill_hue;
-                    s_o_v <= C_MAX_VAL - s_fill_hue;
+                    s_o_y <= s_col_y(1); s_o_u <= s_col_u(1); s_o_v <= s_col_v(1);
                 when others =>
-                    s_o_y <= C_BG_LUMA;
-                    s_o_u <= s_bg_hue;
-                    s_o_v <= C_MAX_VAL - s_bg_hue;
+                    s_o_y <= s_col_y(2); s_o_u <= s_col_u(2); s_o_v <= s_col_v(2);
             end case;
         end if;
     end process;

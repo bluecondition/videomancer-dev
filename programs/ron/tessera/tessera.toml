@@ -21,24 +21,36 @@ url = "https://github.com/bluecondition/videomancer-dev"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_1"
-control_mode = "polar_degs_360"
-name_label = "Outline Hue"
-suffix_label = "°"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
 initial_value = 0
+display_min_value = 0
+display_max_value = 100
+name_label = "Outline Color"
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
-control_mode = "polar_degs_360"
-name_label = "Fill Hue"
-suffix_label = "°"
-initial_value = 341
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 640
+display_min_value = 0
+display_max_value = 100
+name_label = "Fill Color"
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
-control_mode = "polar_degs_360"
-name_label = "BG Hue"
-suffix_label = "°"
-initial_value = 0
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 1023
+display_min_value = 0
+display_max_value = 100
+name_label = "BG Color"
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
