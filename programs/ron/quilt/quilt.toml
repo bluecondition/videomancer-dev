@@ -1,0 +1,206 @@
+# Quilt — recursive-subdivision improv quilt.
+#
+# A loosely grid-based field of randomly coloured and textured rectangular
+# patches.  Each coarse grid cell recursively splits into nested sub-rectangles
+# (log-cabin / crazy-quilt), each leaf getting a fabric colour and a procedural
+# texture.  Static image; re-randomise the layout and the internal pieces with
+# two independent seed knobs.  P12 (Density) is the master recursion control.
+
+[program]
+program_id = "com.bluecondition.quilt"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+program_name = "Quilt"
+author = "bluecondition"
+license = "GPL-3.0"
+categories = ["Pattern", "Generative", "Demo"]
+program_type = "synthesis"
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+description = "Recursive-subdivision patchwork quilt of coloured, textured rectangles."
+url = "https://github.com/bluecondition/videomancer-dev"
+
+# --- Rotary Potentiometers (Knobs 1-6) ---
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Grid Scale"
+value_labels = ["Large", "Big", "Medium", "Small"]
+initial_value_label = "Medium"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 300
+name_label = "Composition"
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 620
+name_label = "Sub-Pieces"
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Split Jitter"
+value_labels = ["Centered", "Slight", "Medium", "Wild"]
+initial_value_label = "Medium"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 0
+display_min_value = 0
+display_max_value = 15
+name_label = "Palette Tint"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Texture Scale"
+value_labels = ["Fine", "Small", "Medium", "Coarse"]
+initial_value_label = "Medium"
+
+# --- Toggle Switches (7-11, binary) ---
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Seams"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Texture"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Grid"
+value_labels = ["Square", "Not Square"]
+initial_value_label = "Square"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Luma Mod"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Palette"
+value_labels = ["Fabric", "Rainbow"]
+initial_value_label = "Fabric"
+
+# --- Linear Potentiometer (Fader 12) ---
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 700
+display_min_value = 0
+display_max_value = 100
+name_label = "Density"
+suffix_label = "%"
+
+# --- Presets ---
+
+[[preset]]
+name = "Crazy Quilt"
+rotary_potentiometer_1 = 600       # medium grid
+rotary_potentiometer_2 = 300
+rotary_potentiometer_3 = 620
+rotary_potentiometer_4 = 700       # wild jitter
+rotary_potentiometer_5 = 0
+rotary_potentiometer_6 = 350       # small texture
+toggle_switch_7 = 1                # seams on
+toggle_switch_8 = 1                # texture on
+toggle_switch_9 = 0                # square grid
+toggle_switch_10 = 0               # luma mod off
+toggle_switch_11 = 0               # fabric
+linear_potentiometer_12 = 820      # high density
+
+[[preset]]
+name = "Log Cabin"
+rotary_potentiometer_1 = 200       # big blocks
+rotary_potentiometer_2 = 512
+rotary_potentiometer_3 = 480
+rotary_potentiometer_4 = 350       # slight jitter
+rotary_potentiometer_5 = 0
+rotary_potentiometer_6 = 600       # medium texture
+toggle_switch_7 = 1
+toggle_switch_8 = 1                # texture on
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 600
+
+[[preset]]
+name = "Off-Grid"
+rotary_potentiometer_1 = 300       # biggish cells so overlap reads clearly
+rotary_potentiometer_2 = 740
+rotary_potentiometer_3 = 200
+rotary_potentiometer_4 = 500
+rotary_potentiometer_5 = 0
+rotary_potentiometer_6 = 350       # fine texture
+toggle_switch_7 = 1
+toggle_switch_8 = 1                # texture on
+toggle_switch_9 = 1                # not square -> off-grid overlapping rectangles
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 600
+
+[[preset]]
+name = "Solid Patches"
+rotary_potentiometer_1 = 600
+rotary_potentiometer_2 = 880
+rotary_potentiometer_3 = 320
+rotary_potentiometer_4 = 0         # centered
+rotary_potentiometer_5 = 0
+rotary_potentiometer_6 = 300
+toggle_switch_7 = 1
+toggle_switch_8 = 0                # texture off
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 420      # lower density -> bigger patches
+
+[[preset]]
+name = "Rainbow Crazy"
+rotary_potentiometer_1 = 800       # small grid
+rotary_potentiometer_2 = 140
+rotary_potentiometer_3 = 900
+rotary_potentiometer_4 = 700
+rotary_potentiometer_5 = 256
+rotary_potentiometer_6 = 350       # fine texture
+toggle_switch_7 = 1
+toggle_switch_8 = 1                # texture on
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 1               # rainbow palette
+linear_potentiometer_12 = 900      # max density
+
+[[preset]]
+name = "Luma Mod"
+rotary_potentiometer_1 = 200       # big base cells so luma detail shows
+rotary_potentiometer_2 = 420
+rotary_potentiometer_3 = 560
+rotary_potentiometer_4 = 500
+rotary_potentiometer_5 = 0
+rotary_potentiometer_6 = 350       # fine texture
+toggle_switch_7 = 1
+toggle_switch_8 = 1                # texture on
+toggle_switch_9 = 0
+toggle_switch_10 = 1               # luma mod on (mask + density); hidden cells -> black
+toggle_switch_11 = 0
+linear_potentiometer_12 = 1023     # full range so bright video fully subdivides
