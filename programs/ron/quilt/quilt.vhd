@@ -460,14 +460,14 @@ begin
         variable bidx       : integer range 0 to 15;
         variable vdiag      : unsigned(11 downto 0);
         variable v_adiag    : unsigned(11 downto 0);
-        variable v_s, v_sm1 : integer range 0 to 7;
         variable v_pm       : unsigned(11 downto 0);
         variable v_bv       : unsigned(3 downto 0);
         variable v_nv, v_nh : boolean;
         variable v_t2       : unsigned(1 downto 0);
-        variable v_vx, v_vy, v_vd, v_va : unsigned(11 downto 0);  -- ramp (>>sm1)
-        variable v_bx, v_by : unsigned(11 downto 0);              -- coarse bit (>>s)
-        variable v_wx, v_wy : unsigned(11 downto 0);              -- block parity (>>s+1)
+        variable v_rx, v_ry, v_rd, v_ra : unsigned(1 downto 0);   -- 2-bit ramp fields
+        variable v_bxb, v_byb : std_logic;                        -- checker bit (bit s)
+        variable v_wxb, v_wyb : std_logic;                        -- block parity (bit s+1)
+        variable v_drow, v_dcol : unsigned(1 downto 0);           -- dither cell (scaled)
         variable pidx       : integer range 0 to 15;
         variable ty, tu, tv : unsigned(9 downto 0);
 
@@ -700,39 +700,57 @@ begin
             s10_pidx  <= s10a_seed(7 downto 4) xor s_tint;
             s10_hide  <= s10a_hide;
 
-            v_s     := s_tex_shift;
-            v_sm1   := s_tex_shift - 1;
             vdiag   := s10a_lx + s10a_ly;
             v_adiag := s10a_lx + (not s10a_ly);
-            -- dither/dots cell from a fixed coarse slice (bits 5..3 -> ~8 px cells),
-            -- no barrel shifter (keeps timing) and not 1-px noise.
-            bidx    := to_integer(s10a_ly(4 downto 3) & s10a_lx(4 downto 3));
-            v_bv    := C_BAYER(bidx);
+            -- All texture coords are read as small fixed bit-slices selected by the
+            -- Texture knob (a 4:1 mux), NOT 12-bit barrel shifters — the texture
+            -- only needs a 2-bit ramp field (coord>>(s-1))(1:0) and a couple of
+            -- single bits.  This both scales every pattern with the knob and keeps
+            -- HD timing (barrel shifters here were the congestion bottleneck).
+            --   v_r* = 2-bit ramp field at [s:s-1]; v_*b = bit s; v_w*b = bit s+1.
             case s_tex_shift is
-                when 3      => v_pm := to_unsigned( 7, 12);
-                when 4      => v_pm := to_unsigned(15, 12);
-                when 5      => v_pm := to_unsigned(31, 12);
-                when others => v_pm := to_unsigned(63, 12);
+                when 3 =>
+                    v_rx := s10a_lx(3 downto 2); v_ry := s10a_ly(3 downto 2);
+                    v_rd := vdiag(3 downto 2);   v_ra := v_adiag(3 downto 2);
+                    v_bxb := s10a_lx(3); v_byb := s10a_ly(3);
+                    v_wxb := s10a_lx(4); v_wyb := s10a_ly(4);
+                    v_drow := s10a_ly(2 downto 1); v_dcol := s10a_lx(2 downto 1);
+                    v_pm := to_unsigned(7, 12);
+                when 4 =>
+                    v_rx := s10a_lx(4 downto 3); v_ry := s10a_ly(4 downto 3);
+                    v_rd := vdiag(4 downto 3);   v_ra := v_adiag(4 downto 3);
+                    v_bxb := s10a_lx(4); v_byb := s10a_ly(4);
+                    v_wxb := s10a_lx(5); v_wyb := s10a_ly(5);
+                    v_drow := s10a_ly(3 downto 2); v_dcol := s10a_lx(3 downto 2);
+                    v_pm := to_unsigned(15, 12);
+                when 5 =>
+                    v_rx := s10a_lx(5 downto 4); v_ry := s10a_ly(5 downto 4);
+                    v_rd := vdiag(5 downto 4);   v_ra := v_adiag(5 downto 4);
+                    v_bxb := s10a_lx(5); v_byb := s10a_ly(5);
+                    v_wxb := s10a_lx(6); v_wyb := s10a_ly(6);
+                    v_drow := s10a_ly(4 downto 3); v_dcol := s10a_lx(4 downto 3);
+                    v_pm := to_unsigned(31, 12);
+                when others =>
+                    v_rx := s10a_lx(6 downto 5); v_ry := s10a_ly(6 downto 5);
+                    v_rd := vdiag(6 downto 5);   v_ra := v_adiag(6 downto 5);
+                    v_bxb := s10a_lx(6); v_byb := s10a_ly(6);
+                    v_wxb := s10a_lx(7); v_wyb := s10a_ly(7);
+                    v_drow := s10a_ly(5 downto 4); v_dcol := s10a_lx(5 downto 4);
+                    v_pm := to_unsigned(63, 12);
             end case;
+            bidx := to_integer(v_drow & v_dcol);
+            v_bv := C_BAYER(bidx);
             v_nv := (s10a_lx and v_pm) < 2;    -- near a vertical cell line
             v_nh := (s10a_ly and v_pm) < 2;    -- near a horizontal cell line
-            v_vx := s10a_lx  srl v_sm1;        -- ramp coords (slice low 2 bits)
-            v_vy := s10a_ly  srl v_sm1;
-            v_vd := vdiag    srl v_sm1;
-            v_va := v_adiag  srl v_sm1;
-            v_bx := s10a_lx  srl v_s;          -- coarse on/off bit
-            v_by := s10a_ly  srl v_s;
-            v_wx := s10a_lx  srl (v_s + 1);    -- block parity
-            v_wy := s10a_ly  srl (v_s + 1);
             v_t2 := "01";
             case to_integer(s10a_seed(11 downto 8)) is
                 when 0  => v_t2 := "01";                                       -- solid
-                when 1  => v_t2 := v_vx(1 downto 0);                           -- v ridges
-                when 2  => v_t2 := v_vy(1 downto 0);                           -- h ridges
-                when 3  => v_t2 := v_vd(1 downto 0);                           -- diagonal
-                when 4  => v_t2 := v_va(1 downto 0);                           -- anti-diagonal
+                when 1  => v_t2 := v_rx;                                       -- v ridges
+                when 2  => v_t2 := v_ry;                                       -- h ridges
+                when 3  => v_t2 := v_rd;                                       -- diagonal
+                when 4  => v_t2 := v_ra;                                       -- anti-diagonal
                 when 5  =>                                                     -- checker (deep)
-                    if v_bx(0) = v_by(0) then v_t2 := "00"; else v_t2 := "11"; end if;
+                    if v_bxb = v_byb then v_t2 := "00"; else v_t2 := "11"; end if;
                 when 6  =>                                                     -- cross-hatch
                     if v_nv or v_nh then v_t2 := "11"; else v_t2 := "00"; end if;
                 when 7  => v_t2 := v_bv(3 downto 2);                           -- ordered dither
@@ -744,15 +762,15 @@ begin
                 when 10 =>                                                     -- h pinstripe
                     if v_nh then v_t2 := "11"; else v_t2 := "01"; end if;
                 when 11 =>                                                     -- basketweave
-                    if (v_wx(0) xor v_wy(0)) = '0' then v_t2 := v_vy(1 downto 0);
-                    else v_t2 := v_vx(1 downto 0); end if;
+                    if (v_wxb xor v_wyb) = '0' then v_t2 := v_ry;
+                    else v_t2 := v_rx; end if;
                 when 12 =>                                                     -- herringbone
-                    if v_wy(0) = '0' then v_t2 := v_vd(1 downto 0);
-                    else v_t2 := v_va(1 downto 0); end if;
+                    if v_wyb = '0' then v_t2 := v_rd;
+                    else v_t2 := v_ra; end if;
                 when 13 =>                                                     -- woven grid
-                    if v_nv or v_nh then v_t2 := "11"; else v_t2 := v_vx(1 downto 0); end if;
-                when 14 => v_t2 := v_vd(1 downto 0);                           -- diagonal (alt)
-                when others => v_t2 := v_vy(1 downto 0);                       -- h ridges (alt)
+                    if v_nv or v_nh then v_t2 := "11"; else v_t2 := v_rx; end if;
+                when 14 => v_t2 := v_rd;                                       -- diagonal (alt)
+                when others => v_t2 := v_ry;                                   -- h ridges (alt)
             end case;
             s10_tval <= v_t2;
 
