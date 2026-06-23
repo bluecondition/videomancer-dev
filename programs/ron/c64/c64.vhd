@@ -128,6 +128,13 @@ architecture c64 of program_top is
     -- is divided by the full cell height -> too-dark/wrong-chroma average that
     -- palette-matches to red (the "red bar across the top").
     signal s_line_active : std_logic := '0';
+    -- '1' until the frame's FIRST cell row finishes (its 2D average isn't ready
+    -- until its last line). The per-column display buffer lags one cell row, so
+    -- while this is set the top cell row would otherwise show the PREVIOUS frame's
+    -- bottom row (stale wrap). Blank it instead. See [[triangulator_milestone]] —
+    -- same stale-per-column-buffer class, but 2D averaging adds a 1-row latency
+    -- that can't be sampled away, so we blank rather than re-anchor.
+    signal s_top_stale : std_logic := '1';
 
     signal s_acc_y, s_acc_u, s_acc_v : unsigned(13 downto 0) := (others => '0');
 
@@ -320,6 +327,7 @@ begin
                     s_y_count <= s_y_count + 1;
                     if s_cell_y >= s_size - 1 then
                         s_cell_y <= (others => '0');
+                        s_top_stale <= '0';   -- first cell row complete -> buffer now valid
                     else
                         s_cell_y <= s_cell_y + 1;
                     end if;
@@ -335,6 +343,7 @@ begin
                 s_cell_y      <= (others => '0');
                 s_cell_col    <= (others => '0');
                 s_line_active <= '0';
+                s_top_stale   <= '1';   -- top cell row's 2D avg not yet computed
             end if;
 
             -- ---- 2D averaging: accumulate raw line-sums vertically ----
@@ -617,7 +626,11 @@ begin
     begin
         if rising_edge(clk) then
             if s_pixelate = '1' then
-                v_idx := to_integer(s_buf_rdata);
+                if s_top_stale = '1' then
+                    v_idx := 0;   -- top cell row: 2D avg not ready -> blank (else stale wrap)
+                else
+                    v_idx := to_integer(s_buf_rdata);
+                end if;
             else
                 v_idx := to_integer(s_match_idx);
             end if;
