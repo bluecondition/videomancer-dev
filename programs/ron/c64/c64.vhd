@@ -121,6 +121,13 @@ architecture c64 of program_top is
     signal s_cell_x   : unsigned(4 downto 0)  := (others => '0');
     signal s_cell_y   : unsigned(4 downto 0)  := (others => '0');
     signal s_cell_col : unsigned(10 downto 0) := (others => '0');
+    -- '1' once the current line has carried active video. Cell-ROW advance
+    -- (s_cell_y / s_y_count) is gated on this so the hsyncs during vertical
+    -- blanking don't desync the cell phase -> the first active line lands on
+    -- s_cell_y=0. Without it the top cell row is a PARTIAL cell whose 2D sum
+    -- is divided by the full cell height -> too-dark/wrong-chroma average that
+    -- palette-matches to red (the "red bar across the top").
+    signal s_line_active : std_logic := '0';
 
     signal s_acc_y, s_acc_u, s_acc_v : unsigned(13 downto 0) := (others => '0');
 
@@ -272,7 +279,8 @@ begin
 
             -- ---- Pixel/line counters ----
             if data_in.avid = '1' then
-                s_x_count <= s_x_count + 1;
+                s_x_count     <= s_x_count + 1;
+                s_line_active <= '1';   -- this line carries active video
             end if;
 
             -- ---- Cell tracking + horizontal accumulator (EVERY line, for 2D) ----
@@ -304,23 +312,29 @@ begin
             if data_in.hsync_n = '0' and s_prev_hsync_n = '1' then
                 if s_x_count > 0 then s_line_width <= s_x_count; end if;
                 s_x_count  <= (others => '0');
-                s_y_count  <= s_y_count + 1;
                 s_cell_x   <= (others => '0');
                 s_cell_col <= (others => '0');
-                if s_cell_y >= s_size - 1 then
-                    s_cell_y <= (others => '0');
-                else
-                    s_cell_y <= s_cell_y + 1;
+                -- advance the cell ROW only for lines that had active video, so
+                -- vblank hsyncs can't desync the cell phase (red-bar fix)
+                if s_line_active = '1' then
+                    s_y_count <= s_y_count + 1;
+                    if s_cell_y >= s_size - 1 then
+                        s_cell_y <= (others => '0');
+                    else
+                        s_cell_y <= s_cell_y + 1;
+                    end if;
+                    s_line_active <= '0';
                 end if;
             end if;
 
             if data_in.vsync_n = '0' and s_prev_vsync_n = '1' then
                 if s_y_count > 0 then s_frame_height <= s_y_count; end if;
-                s_y_count  <= (others => '0');
-                s_x_count  <= (others => '0');
-                s_cell_x   <= (others => '0');
-                s_cell_y   <= (others => '0');
-                s_cell_col <= (others => '0');
+                s_y_count     <= (others => '0');
+                s_x_count     <= (others => '0');
+                s_cell_x      <= (others => '0');
+                s_cell_y      <= (others => '0');
+                s_cell_col    <= (others => '0');
+                s_line_active <= '0';
             end if;
 
             -- ---- 2D averaging: accumulate raw line-sums vertically ----
