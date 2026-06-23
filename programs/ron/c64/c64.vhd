@@ -5,22 +5,29 @@
 -- CRT scanline dimming.
 --
 -- PIXELATION (rewritten 2026-06-22 to mirror the CGA program, which is
--- confirmed working on this hardware):
---   * On the FIRST line of each cell row, the cell is averaged horizontally,
---     palette-matched, and the 4-bit index is written to a per-column buffer.
+-- confirmed working on this hardware; FULL-2D averaging added 2026-06-23):
+--   * Each line's per-cell horizontal sum is accumulated into a per-column
+--     VERTICAL accumulator (s_vacc). On the LAST line of a cell row the full
+--     2D sum is divided once (>>2*shift), palette-matched, and the 4-bit index
+--     is written to the per-column display buffer.
 --   * Every output pixel reads that buffer -> solid blocks for the whole row.
+--     (Block colour comes from the cell ABOVE -> inherent ~1-cell-row delay.)
+--   * Averaging the whole cell (not just line 0) widens the match deadband and
+--     cuts the scattered colour flicker the 1D version still showed.
 --   * Controls (pixelate / size / contrast / sat) are plain registered
 --     signals used DIRECTLY -- NOT pipelined per-pixel. (A per-pixel pixelate
 --     shift-register flag is what broke earlier versions.)
---   * Single buffer, shallow pipeline, full-width addressing -- exactly CGA.
+--   * Single display buffer + single vacc, full-width addressing. Both BRAMs
+--     are collision-safe: writes are lagged so read/write never hit one addr.
 --
--- Pipeline (10 clocks):
---   T1 : controls, cell tracking, h-average, match input, buffer-write setup
---   T2 : pre-match contrast + posterise, 16 palette distances
---   T3 : 16->4 reduction
---   T4 : 4->1 reduction -> index, register buffer write
---   T5 : display (buffer vs per-pixel) palette lookup + border overlay
---   T6 : scanline dim + saturation + output register
+-- Pipeline (11 clocks):
+--   T1  : controls, cell tracking, h-sum, vacc accumulate, sample-line latch
+--   S1b : divide the 2D sum (>>2*shift) -> match input  (off T1 crit path)
+--   T2  : pre-match contrast + posterise, 16 palette distances
+--   T3  : 16->4 reduction
+--   T4  : 4->1 reduction -> index, register buffer write
+--   T5  : display (buffer vs per-pixel) palette lookup + border overlay
+--   T6  : scanline dim + saturation + output register
 --   T7-T10 : interpolator wet/dry mix
 --
 -- Register map:
@@ -46,7 +53,7 @@ use work.video_stream_pkg.all;
 architecture c64 of program_top is
 
     constant C_W          : integer := C_VIDEO_DATA_WIDTH;  -- 10
-    constant C_LATENCY    : integer := 12;
+    constant C_LATENCY    : integer := 13;
     constant C_DIST_WIDTH : integer := 8;
     constant C_MAX_COLS   : integer := 2048;   -- covers full HD line width
 
@@ -99,7 +106,7 @@ architecture c64 of program_top is
     signal s_size       : unsigned(4 downto 0) := to_unsigned(8, 5);
     signal s_shift      : unsigned(2 downto 0) := to_unsigned(3, 3);
     -- 8-bit multiplier coefficients (128 = unity) keep the LUT multipliers small
-    signal s_contrast8  : unsigned(7 downto 0) := to_unsigned(96, 8);
+    signal s_contrast6  : unsigned(5 downto 0) := to_unsigned(24, 6);
     signal s_sat8       : unsigned(7 downto 0) := to_unsigned(128, 8);
     signal s_scan_str   : unsigned(9 downto 0) := to_unsigned(400, 10);
     signal s_mix_t      : unsigned(9 downto 0);
@@ -117,7 +124,31 @@ architecture c64 of program_top is
 
     signal s_acc_y, s_acc_u, s_acc_v : unsigned(13 downto 0) := (others => '0');
 
-    -- Match-pipeline input (averaged at sample, else raw pixel)
+    -- Per-column VERTICAL accumulator for full-2D averaging. Stores the running
+    -- raw sum of each line's cell-sum (<=16 lines * 16 px * 1023 -> 18 bits);
+    -- the full cell is divided once at the last line by >>(2*shift). 1024 deep
+    -- covers pixelated columns (>=2x). Collision-safe: write lagged 2 clocks so
+    -- the live read pointer is off that column (as CGA's buffer never R+W's the
+    -- same address at once).
+    constant C_VCOLS : integer := 1024;
+    type t_vacc is array(0 to C_VCOLS - 1) of unsigned(17 downto 0);
+    signal s_vacc_y, s_vacc_u, s_vacc_v : t_vacc := (others => (others => '0'));
+    signal s_vacc_ra : unsigned(9 downto 0) := (others => '0');
+    signal s_vrd_y, s_vrd_u, s_vrd_v : unsigned(17 downto 0) := (others => '0');
+    signal s_vwe1, s_vwe2 : std_logic := '0';
+    signal s_vwa1, s_vwa2 : unsigned(9 downto 0) := (others => '0');
+    signal s_vwy1, s_vwy2 : unsigned(17 downto 0) := (others => '0');
+    signal s_vwu1, s_vwu2 : unsigned(17 downto 0) := (others => '0');
+    signal s_vwv1, s_vwv2 : unsigned(17 downto 0) := (others => '0');
+
+    -- T1 -> S1b: registered 2D sum + sample flag + raw passthrough. The divide
+    -- (>>2*shift) is done in S1b to keep it off the T1 critical path.
+    signal s_vsum_y, s_vsum_u, s_vsum_v : unsigned(17 downto 0) := (others => '0');
+    signal s_smpl  : std_logic := '0';
+    signal s_sh2_r : integer range 0 to 8 := 6;
+    signal s_raw_y, s_raw_u, s_raw_v : unsigned(9 downto 0) := (others => '0');
+
+    -- S1b match-pipeline input (averaged at sample, else raw pixel)
     signal s_match_y : unsigned(9 downto 0) := (others => '0');
     signal s_match_u : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal s_match_v : unsigned(9 downto 0) := to_unsigned(512, 10);
@@ -146,8 +177,8 @@ architecture c64 of program_top is
     signal s_buf_rdata : unsigned(3 downto 0)  := (others => '0');
 
     -- Buffer-write control pipeline (T1 -> T4)
-    signal s_we_d1, s_we_d2, s_we_d3, s_we_d4 : std_logic := '0';
-    signal s_wcol_d1, s_wcol_d2, s_wcol_d3, s_wcol_d4 : unsigned(10 downto 0) := (others => '0');
+    signal s_we_d1, s_we_d2, s_we_d3, s_we_d4, s_we_d5 : std_logic := '0';
+    signal s_wcol_d1, s_wcol_d2, s_wcol_d3, s_wcol_d4, s_wcol_d5 : unsigned(10 downto 0) := (others => '0');
 
     -- T5 output
     signal s_out_y : unsigned(9 downto 0) := (others => '0');
@@ -158,7 +189,7 @@ architecture c64 of program_top is
     signal s_su_prod, s_sv_prod : signed(20 downto 0) := (others => '0');
     signal s_yscan : unsigned(9 downto 0) := (others => '0');
     signal s_pt_y, s_pt_u, s_pt_v : unsigned(9 downto 0) := to_unsigned(512, 10);
-    signal s_border_d6 : std_logic := '0';
+    signal s_border_d6, s_border_d7 : std_logic := '0';
 
     -- T6b processed output
     signal s_proc_y : unsigned(9 downto 0) := (others => '0');
@@ -167,7 +198,7 @@ architecture c64 of program_top is
 
     -- Border / scanline flag pipelines (per-pixel, position-dependent)
     signal s_border_d1, s_border_d2, s_border_d3, s_border_d4, s_border_d5 : std_logic := '0';
-    signal s_scan_d1, s_scan_d2, s_scan_d3, s_scan_d4, s_scan_d5 : std_logic := '0';
+    signal s_scan_d1, s_scan_d2, s_scan_d3, s_scan_d4, s_scan_d5, s_scan_d6 : std_logic := '0';
 
     -- Border colour pipeline
     signal s_bord_y, s_bord_u, s_bord_v : unsigned(9 downto 0) := to_unsigned(512, 10);
@@ -175,6 +206,7 @@ architecture c64 of program_top is
     signal s_bord_y2, s_bord_u2, s_bord_v2 : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal s_bord_y3, s_bord_u3, s_bord_v3 : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal s_bord_y4, s_bord_u4, s_bord_v4 : unsigned(9 downto 0) := to_unsigned(512, 10);
+    signal s_bord_y5, s_bord_u5, s_bord_v5 : unsigned(9 downto 0) := to_unsigned(512, 10);
 
     -- Bypass / sync shift registers
     type t_data_sr is array(0 to C_LATENCY - 1) of std_logic_vector(9 downto 0);
@@ -197,7 +229,10 @@ begin
         variable v_shift : unsigned(2 downto 0);
         variable v_pix   : std_logic;
         variable v_at_cell_end : boolean;
+        variable v_last  : boolean;
+        variable v_sh2   : integer range 0 to 8;
         variable v_sum_y, v_sum_u, v_sum_v : unsigned(13 downto 0);
+        variable v_vn_y, v_vn_u, v_vn_v : unsigned(17 downto 0);  -- 2D vertical sums
         variable v_bidx  : unsigned(3 downto 0);
         variable v_bwid  : unsigned(9 downto 0);
         variable v_inbord : std_logic;
@@ -216,7 +251,7 @@ begin
             s_border_en <= registers_in(6)(1);
             s_scan_en   <= registers_in(6)(2);
             s_bypass    <= registers_in(6)(4);
-            s_contrast8 <= unsigned(registers_in(5)(9 downto 2));
+            s_contrast6 <= unsigned(registers_in(5)(9 downto 4));
             s_sat8      <= unsigned(registers_in(4)(9 downto 2));
             s_scan_str  <= unsigned(registers_in(3));
 
@@ -240,8 +275,9 @@ begin
                 s_x_count <= s_x_count + 1;
             end if;
 
-            -- ---- Cell tracking + horizontal accumulator (first line) ----
+            -- ---- Cell tracking + horizontal accumulator (EVERY line, for 2D) ----
             v_at_cell_end := false;
+            v_last := (s_cell_y = s_size - 1);
             v_sum_y := s_acc_y;  v_sum_u := s_acc_u;  v_sum_v := s_acc_v;
 
             if data_in.avid = '1' then
@@ -253,18 +289,16 @@ begin
                     s_cell_x <= s_cell_x + 1;
                 end if;
 
-                if s_cell_y = 0 then
-                    if s_cell_x = 0 then
-                        v_sum_y := resize(v_in_y, 14);
-                        v_sum_u := resize(v_in_u, 14);
-                        v_sum_v := resize(v_in_v, 14);
-                    else
-                        v_sum_y := s_acc_y + resize(v_in_y, 14);
-                        v_sum_u := s_acc_u + resize(v_in_u, 14);
-                        v_sum_v := s_acc_v + resize(v_in_v, 14);
-                    end if;
-                    s_acc_y <= v_sum_y;  s_acc_u <= v_sum_u;  s_acc_v <= v_sum_v;
+                if s_cell_x = 0 then
+                    v_sum_y := resize(v_in_y, 14);
+                    v_sum_u := resize(v_in_u, 14);
+                    v_sum_v := resize(v_in_v, 14);
+                else
+                    v_sum_y := s_acc_y + resize(v_in_y, 14);
+                    v_sum_u := s_acc_u + resize(v_in_u, 14);
+                    v_sum_v := s_acc_v + resize(v_in_v, 14);
                 end if;
+                s_acc_y <= v_sum_y;  s_acc_u <= v_sum_u;  s_acc_v <= v_sum_v;
             end if;
 
             if data_in.hsync_n = '0' and s_prev_hsync_n = '1' then
@@ -289,24 +323,39 @@ begin
                 s_cell_col <= (others => '0');
             end if;
 
-            -- ---- Match input: cell average at first-line cell-end, else raw ----
-            if v_at_cell_end and s_cell_y = 0 and data_in.avid = '1' then
-                s_match_y <= resize(v_sum_y srl to_integer(s_shift), 10);
-                s_match_u <= resize(v_sum_u srl to_integer(s_shift), 10);
-                s_match_v <= resize(v_sum_v srl to_integer(s_shift), 10);
-            else
-                s_match_y <= v_in_y;
-                s_match_u <= v_in_u;
-                s_match_v <= v_in_v;
-            end if;
+            -- ---- 2D averaging: accumulate raw line-sums vertically ----
+            -- The divide -> match is deferred to S1b (p_t1b) for timing.
+            s_raw_y <= v_in_y;  s_raw_u <= v_in_u;  s_raw_v <= v_in_v;  -- passthrough
+            s_smpl  <= '0';
+            s_we_d1 <= '0';
+            s_vwe1  <= '0';
 
-            -- ---- Buffer write enable + column (first-line cell-end only) ----
-            if v_at_cell_end and s_cell_y = 0 and s_pixelate = '1' and data_in.avid = '1' then
-                s_we_d1   <= '1';
-                s_wcol_d1 <= s_cell_col;
-            else
-                s_we_d1   <= '0';
-                s_wcol_d1 <= (others => '0');
+            if v_at_cell_end and data_in.avid = '1' then
+                if s_cell_y = 0 then
+                    v_vn_y := resize(v_sum_y, 18);
+                    v_vn_u := resize(v_sum_u, 18);
+                    v_vn_v := resize(v_sum_v, 18);
+                else
+                    v_vn_y := s_vrd_y + resize(v_sum_y, 18);
+                    v_vn_u := s_vrd_u + resize(v_sum_u, 18);
+                    v_vn_v := s_vrd_v + resize(v_sum_v, 18);
+                end if;
+                -- write back (lagged 2 clocks in p_vacc for collision-safety)
+                s_vwe1 <= '1';
+                s_vwa1 <= resize(s_cell_col, 10);
+                s_vwy1 <= v_vn_y;  s_vwu1 <= v_vn_u;  s_vwv1 <= v_vn_v;
+
+                -- on the LAST line, register the full 2D sum (divided in S1b)
+                if v_last then
+                    v_sh2 := to_integer(s_shift) + to_integer(s_shift);
+                    s_vsum_y <= v_vn_y;  s_vsum_u <= v_vn_u;  s_vsum_v <= v_vn_v;
+                    s_sh2_r  <= v_sh2;
+                    s_smpl   <= '1';
+                    if s_pixelate = '1' then
+                        s_we_d1   <= '1';
+                        s_wcol_d1 <= s_cell_col;
+                    end if;
+                end if;
             end if;
 
             -- ---- Border detection (position-dependent, pipelined) ----
@@ -355,6 +404,55 @@ begin
     end process p_t1;
 
     -- ====================================================================
+    -- Per-column vertical accumulator (full-2D averaging).
+    -- Combinational read on the live column; write lagged 2 clocks so the
+    -- read pointer has advanced off that column -> no same-address EBR R/W.
+    -- ====================================================================
+    s_vacc_ra <= resize(s_cell_col, 10);
+    p_vacc : process(clk)
+    begin
+        if rising_edge(clk) then
+            s_vwe2 <= s_vwe1;  s_vwa2 <= s_vwa1;
+            s_vwy2 <= s_vwy1;  s_vwu2 <= s_vwu1;  s_vwv2 <= s_vwv1;
+            if s_vwe2 = '1' then
+                s_vacc_y(to_integer(s_vwa2)) <= s_vwy2;
+                s_vacc_u(to_integer(s_vwa2)) <= s_vwu2;
+                s_vacc_v(to_integer(s_vwa2)) <= s_vwv2;
+            end if;
+            s_vrd_y <= s_vacc_y(to_integer(s_vacc_ra));
+            s_vrd_u <= s_vacc_u(to_integer(s_vacc_ra));
+            s_vrd_v <= s_vacc_v(to_integer(s_vacc_ra));
+        end if;
+    end process p_vacc;
+
+    -- ====================================================================
+    -- S1b: finalise the 2D match. The variable-shift divide of the 18-bit
+    -- vertical sum is isolated here so it does not sit on T1's critical
+    -- path (which broke HD Dual timing). On a sample line use the divided
+    -- sum; otherwise pass the raw pixel straight through.
+    -- ====================================================================
+    p_t1b : process(clk)
+    begin
+        if rising_edge(clk) then
+            if s_smpl = '1' then
+                s_match_y <= resize(s_vsum_y srl s_sh2_r, 10);
+                s_match_u <= resize(s_vsum_u srl s_sh2_r, 10);
+                s_match_v <= resize(s_vsum_v srl s_sh2_r, 10);
+            else
+                s_match_y <= s_raw_y;
+                s_match_u <= s_raw_u;
+                s_match_v <= s_raw_v;
+            end if;
+
+            s_we_d2     <= s_we_d1;
+            s_wcol_d2   <= s_wcol_d1;
+            s_border_d2 <= s_border_d1;
+            s_scan_d2   <= s_scan_d1;
+            s_bord_y1 <= s_bord_y;  s_bord_u1 <= s_bord_u;  s_bord_v1 <= s_bord_v;
+        end if;
+    end process p_t1b;
+
+    -- ====================================================================
     -- T2: pre-match contrast + posterise, then 16 palette distances
     -- ====================================================================
     p_t2 : process(clk)
@@ -364,15 +462,16 @@ begin
         -- critical s_m path); also gives the per-pixel path a cleaner look.
         constant C_POSTER : unsigned(9 downto 0) := "1111000000";  -- mask low 6
         variable v_cy_s   : signed(11 downto 0);
-        variable v_cy_p   : signed(20 downto 0);
+        variable v_cy_p   : signed(18 downto 0);
         variable v_cy_o   : signed(11 downto 0);
         variable v_my, v_mu, v_mv : unsigned(9 downto 0);
     begin
         if rising_edge(clk) then
-            -- contrast: (Y-512) * contrast8 / 128 + 512  (128 = unity)
+            -- contrast: (Y-512) * contrast6 / 32 + 512  (32 = unity; 6-bit
+            -- coeff keeps the LUT multiplier small enough for HD timing)
             v_cy_s := signed(resize(s_match_y, 12)) - to_signed(512, 12);
-            v_cy_p := v_cy_s * signed('0' & s_contrast8);
-            v_cy_o := v_cy_p(18 downto 7) + to_signed(512, 12);
+            v_cy_p := v_cy_s * signed('0' & s_contrast6);
+            v_cy_o := v_cy_p(16 downto 5) + to_signed(512, 12);
             if    v_cy_o < 0    then v_my := (others => '0');
             elsif v_cy_o > 1023 then v_my := to_unsigned(1023, 10);
             else                     v_my := unsigned(v_cy_o(9 downto 0)); end if;
@@ -381,11 +480,11 @@ begin
             s_m_u <= s_match_u and C_POSTER;
             s_m_v <= s_match_v and C_POSTER;
 
-            s_we_d2     <= s_we_d1;
-            s_wcol_d2   <= s_wcol_d1;
-            s_border_d2 <= s_border_d1;
-            s_scan_d2   <= s_scan_d1;
-            s_bord_y1 <= s_bord_y;  s_bord_u1 <= s_bord_u;  s_bord_v1 <= s_bord_v;
+            s_we_d3     <= s_we_d2;
+            s_wcol_d3   <= s_wcol_d2;
+            s_border_d3 <= s_border_d2;
+            s_scan_d3   <= s_scan_d2;
+            s_bord_y2 <= s_bord_y1;  s_bord_u2 <= s_bord_u1;  s_bord_v2 <= s_bord_v1;
         end if;
     end process p_t2;
 
@@ -399,11 +498,11 @@ begin
                 s_dist(i) <= f_dist(s_m_y, s_m_u, s_m_v, C_PAL(i).y, C_PAL(i).u, C_PAL(i).v);
             end loop;
 
-            s_we_d3     <= s_we_d2;
-            s_wcol_d3   <= s_wcol_d2;
-            s_border_d3 <= s_border_d2;
-            s_scan_d3   <= s_scan_d2;
-            s_bord_y2 <= s_bord_y1;  s_bord_u2 <= s_bord_u1;  s_bord_v2 <= s_bord_v1;
+            s_we_d4     <= s_we_d3;
+            s_wcol_d4   <= s_wcol_d3;
+            s_border_d4 <= s_border_d3;
+            s_scan_d4   <= s_scan_d3;
+            s_bord_y3 <= s_bord_y2;  s_bord_u3 <= s_bord_u2;  s_bord_v3 <= s_bord_v2;
         end if;
     end process p_t2b;
 
@@ -447,11 +546,11 @@ begin
             if v_hi < v_lo then s_gmin_d <= v_hi; s_gidx_d <= v_hii;
             else                s_gmin_d <= v_lo; s_gidx_d <= v_loi; end if;
 
-            s_we_d4     <= s_we_d3;
-            s_wcol_d4   <= s_wcol_d3;
-            s_border_d4 <= s_border_d3;
-            s_scan_d4   <= s_scan_d3;
-            s_bord_y3 <= s_bord_y2;  s_bord_u3 <= s_bord_u2;  s_bord_v3 <= s_bord_v2;
+            s_we_d5     <= s_we_d4;
+            s_wcol_d5   <= s_wcol_d4;
+            s_border_d5 <= s_border_d4;
+            s_scan_d5   <= s_scan_d4;
+            s_bord_y4 <= s_bord_y3;  s_bord_u4 <= s_bord_u3;  s_bord_v4 <= s_bord_v3;
         end if;
     end process p_t3;
 
@@ -471,13 +570,13 @@ begin
             if v_hi < v_lo then v_idx := v_hii; else v_idx := v_loi; end if;
             s_match_idx <= v_idx;
 
-            s_buf_we    <= s_we_d4;
-            s_buf_waddr <= s_wcol_d4;
+            s_buf_we    <= s_we_d5;
+            s_buf_waddr <= s_wcol_d5;
             s_buf_wdata <= v_idx;
 
-            s_border_d5 <= s_border_d4;
-            s_scan_d5   <= s_scan_d4;
-            s_bord_y4 <= s_bord_y3;  s_bord_u4 <= s_bord_u3;  s_bord_v4 <= s_bord_v3;
+            s_border_d6 <= s_border_d5;
+            s_scan_d6   <= s_scan_d5;
+            s_bord_y5 <= s_bord_y4;  s_bord_u5 <= s_bord_u4;  s_bord_v5 <= s_bord_v4;
         end if;
     end process p_t4;
 
@@ -512,10 +611,10 @@ begin
             s_out_u <= C_PAL(v_idx).u;
             s_out_v <= C_PAL(v_idx).v;
 
-            if s_border_d5 = '1' then
-                s_out_y <= s_bord_y4;
-                s_out_u <= s_bord_u4;
-                s_out_v <= s_bord_v4;
+            if s_border_d6 = '1' then
+                s_out_y <= s_bord_y5;
+                s_out_u <= s_bord_u5;
+                s_out_v <= s_bord_v5;
             end if;
         end if;
     end process p_t5;
@@ -528,7 +627,7 @@ begin
         variable v_su, v_sv : signed(11 downto 0);
     begin
         if rising_edge(clk) then
-            if s_scan_d5 = '1' then
+            if s_scan_d6 = '1' then
                 v_dim    := s_out_y * (to_unsigned(1023, 10) - s_scan_str);
                 s_yscan  <= v_dim(19 downto 10);
             else
@@ -542,7 +641,7 @@ begin
             s_sv_prod <= v_sv * signed('0' & s_sat8);
 
             s_pt_y <= s_out_y;  s_pt_u <= s_out_u;  s_pt_v <= s_out_v;  -- border passthrough
-            s_border_d6 <= s_border_d5;
+            s_border_d7 <= s_border_d6;
         end if;
     end process p_t6a;
 
@@ -553,7 +652,7 @@ begin
         variable v_suo, v_svo : signed(11 downto 0);
     begin
         if rising_edge(clk) then
-          if s_border_d6 = '1' then
+          if s_border_d7 = '1' then
             s_proc_y <= s_pt_y;  s_proc_u <= s_pt_u;  s_proc_v <= s_pt_v;
           else
             s_proc_y <= s_yscan;
@@ -574,15 +673,15 @@ begin
     -- ====================================================================
     interp_y : entity work.interpolator_u
         generic map(G_WIDTH => C_W, G_FRAC_BITS => C_W, G_OUTPUT_MIN => 0, G_OUTPUT_MAX => 1023)
-        port map(clk => clk, enable => '1', a => unsigned(s_y_sr(7)), b => s_proc_y,
+        port map(clk => clk, enable => '1', a => unsigned(s_y_sr(8)), b => s_proc_y,
                  t => s_mix_t, result => s_interp_y, valid => open);
     interp_u : entity work.interpolator_u
         generic map(G_WIDTH => C_W, G_FRAC_BITS => C_W, G_OUTPUT_MIN => 0, G_OUTPUT_MAX => 1023)
-        port map(clk => clk, enable => '1', a => unsigned(s_u_sr(7)), b => s_proc_u,
+        port map(clk => clk, enable => '1', a => unsigned(s_u_sr(8)), b => s_proc_u,
                  t => s_mix_t, result => s_interp_u, valid => open);
     interp_v : entity work.interpolator_u
         generic map(G_WIDTH => C_W, G_FRAC_BITS => C_W, G_OUTPUT_MIN => 0, G_OUTPUT_MAX => 1023)
-        port map(clk => clk, enable => '1', a => unsigned(s_v_sr(7)), b => s_proc_v,
+        port map(clk => clk, enable => '1', a => unsigned(s_v_sr(8)), b => s_proc_v,
                  t => s_mix_t, result => s_interp_v, valid => open);
 
     -- ====================================================================
