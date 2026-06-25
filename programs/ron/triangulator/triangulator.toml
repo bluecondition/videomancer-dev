@@ -1,0 +1,184 @@
+# Triangulator — triangle pixelation.
+#
+# Tiles the screen with a triangular lattice (alternating upright / inverted
+# triangles) instead of square pixels.  Each triangle is flat-filled with a
+# colour sampled from the incoming live video.  K1 gives a very smooth size
+# scale; optional grid lines, luma shaping and colorization let the look be
+# dialled in.  Forked from the mondrian / c64 cell-counter + line-buffer engines.
+
+[program]
+program_id = "com.bluecondition.triangulator"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+program_name = "Triangulator"
+author = "bluecondition"
+license = "GPL-3.0"
+categories = ["Pixel", "Pattern", "Color"]
+program_type = "processing"
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+description = "Triangle pixelation: video sampled into a lattice of upright/inverted triangles."
+url = "https://github.com/bluecondition/videomancer-dev"
+
+# --- Rotary Potentiometers (Knobs 1-6) ---
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 200
+display_min_value = 8
+display_max_value = 256
+name_label = "Triangle Size"
+suffix_label = "px"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 512
+display_min_value = 0
+display_max_value = 200
+name_label = "Luma Gain"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 400
+display_min_value = 0
+display_max_value = 100
+name_label = "Luma Thresh"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Colorize"
+value_labels = ["Original", "Duotone", "Posterize", "Hue Spin"]
+initial_value_label = "Original"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 0
+name_label = "Colorize/Grid"
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Line Width"
+value_labels = ["Thin", "Medium", "Bold", "Heavy"]
+initial_value_label = "Medium"
+
+# --- Toggle Switches (7-11, binary) ---
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Grid Lines"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Luma Mod"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Fill Mode"
+value_labels = ["Flat", "Faceted"]
+initial_value_label = "Flat"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Wireframe"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Bypass"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+# --- Linear Potentiometer (Fader 12) ---
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 1023
+display_min_value = 0
+display_max_value = 100
+name_label = "Mix"
+suffix_label = "%"
+
+# --- Presets ---
+
+[[preset]]
+name = "Fine Triangles"
+rotary_potentiometer_1 = 40
+rotary_potentiometer_2 = 512
+rotary_potentiometer_3 = 0
+rotary_potentiometer_4 = 0
+rotary_potentiometer_5 = 0
+rotary_potentiometer_6 = 300
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Wireframe"
+rotary_potentiometer_1 = 220
+rotary_potentiometer_2 = 512
+rotary_potentiometer_3 = 400      # "has luma" threshold (K3)
+rotary_potentiometer_4 = 0
+rotary_potentiometer_5 = 160      # white edges
+rotary_potentiometer_6 = 500
+toggle_switch_7 = 0
+toggle_switch_8 = 1              # luma mod on -> only lit triangles' edges
+toggle_switch_9 = 0
+toggle_switch_10 = 1             # wireframe: edges only, no fill
+toggle_switch_11 = 0
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Duotone Pop"
+rotary_potentiometer_1 = 180
+rotary_potentiometer_2 = 700               # punchier contrast
+rotary_potentiometer_3 = 120               # slight black lift
+rotary_potentiometer_4 = 350               # Duotone
+rotary_potentiometer_5 = 256               # duotone pair 2
+rotary_potentiometer_6 = 300
+toggle_switch_7 = 0
+toggle_switch_8 = 0                # luma mod on
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Posterized"
+rotary_potentiometer_1 = 150
+rotary_potentiometer_2 = 600
+rotary_potentiometer_3 = 0
+rotary_potentiometer_4 = 620               # Posterize
+rotary_potentiometer_5 = 0                 # rainbow palette
+rotary_potentiometer_6 = 400
+toggle_switch_7 = 1               # grid on
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 1023
