@@ -39,8 +39,8 @@ use work.video_timing_pkg.all;
 
 architecture mondrian of program_top is
 
-    constant LATENCY : natural := 21;
-    constant DMAX    : natural := 4;          -- subdivision levels
+    constant LATENCY : natural := 17;
+    constant DMAX    : natural := 3;          -- subdivision levels
     constant MIN_W   : natural := 8;          -- don't split a span narrower than this
 
     constant C_MID   : unsigned(9 downto 0) := to_unsigned(512, 10);
@@ -48,7 +48,7 @@ architecture mondrian of program_top is
 
     -- per-level hash mixing constants (compile-time)
     type t_lc is array (0 to DMAX - 1) of unsigned(15 downto 0);
-    constant C_LC : t_lc := (x"9E37", x"7C15", x"D2B9", x"3F41");
+    constant C_LC : t_lc := (x"9E37", x"7C15", x"D2B9");
 
     --------------------------------------------------------------------------
     -- Pipeline node: running rectangle bounds + seed + freeze + pixel coords.
@@ -57,7 +57,6 @@ architecture mondrian of program_top is
         x0, x1, y0, y1 : unsigned(11 downto 0);
         px, py         : unsigned(11 downto 0);
         seed           : unsigned(15 downto 0);
-        dens           : unsigned(7 downto 0);   -- per-cell subdivide threshold base
         frozen         : std_logic;
     end record;
 
@@ -74,7 +73,6 @@ architecture mondrian of program_top is
     -- (gx,gy-1) (gx-1,gy-1).
     --------------------------------------------------------------------------
     type t_u16_4 is array (0 to 3) of unsigned(15 downto 0);
-    type t_u12_4 is array (0 to 3) of unsigned(11 downto 0);
     constant CK_X : integer_vector(0 to 3) := (0, 1, 0, 1);
     constant CK_Y : integer_vector(0 to 3) := (0, 0, 1, 1);
 
@@ -200,20 +198,6 @@ architecture mondrian of program_top is
         return r;
     end function;
 
-    -- Coarse-cell column index for the per-column luma hold (per-cell Luma Mod).
-    function cell_col(x : unsigned(11 downto 0); g : integer) return integer is
-        variable c : integer;
-    begin
-        case g is
-            when 5      => c := to_integer(x(11 downto 5));
-            when 6      => c := to_integer(x(11 downto 6));
-            when 7      => c := to_integer(x(11 downto 7));
-            when others => c := to_integer(x(11 downto 8));
-        end case;
-        if c > 63 then c := 63; end if;
-        return c;
-    end function;
-
     --------------------------------------------------------------------------
     -- Position + per-frame parameters
     --------------------------------------------------------------------------
@@ -221,11 +205,22 @@ architecture mondrian of program_top is
     signal prev_hsync_n     : std_logic := '1';
     signal prev_vsync_n     : std_logic := '1';
 
-    signal s_g          : integer range 5 to 8 := 6;
-    signal s_cellsz     : integer range 32 to 256 := 64;   -- coarse cell size (px)
-    signal s_cell2sz    : integer range 64 to 512 := 128;  -- 2x cell size (px)
-    signal s_cellmask   : unsigned(11 downto 0) := to_unsigned(63, 12);
-    signal s_cellcenter : unsigned(11 downto 0) := to_unsigned(32, 12);   -- cell centre (sz/2)
+    -- Continuous-scale cell counters (advanced as the raster scans -> arbitrary
+    -- cell sizes with no divide/multiply).  org = cell origin px, loc = position
+    -- within cell, idx = cell column index.
+    signal cellx_org : unsigned(11 downto 0) := (others => '0');
+    signal cellx_loc : unsigned(11 downto 0) := (others => '0');
+    signal cellx_idx : unsigned(6 downto 0)  := (others => '0');
+    signal celly_org : unsigned(11 downto 0) := (others => '0');
+    signal celly_loc : unsigned(11 downto 0) := (others => '0');
+
+    -- Continuous grid scale: cell size is any 32..256 px.  Stored as unsigned (and
+    -- pre-derived 2x / size-1 / centre) ONCE per frame so the per-pixel datapath
+    -- never re-derives them with to_unsigned — keeps the netlist sparse for routing.
+    signal s_csz   : unsigned(11 downto 0) := to_unsigned(64, 12);   -- cell size
+    signal s_csz2  : unsigned(11 downto 0) := to_unsigned(128, 12);  -- 2x cell size
+    signal s_cszm1 : unsigned(11 downto 0) := to_unsigned(63, 12);   -- cell size - 1
+    signal s_cszc  : unsigned(11 downto 0) := to_unsigned(32, 12);   -- cell centre
     signal s_density    : unsigned(7 downto 0) := to_unsigned(160, 8);
     signal s_jit_mode   : unsigned(1 downto 0) := to_unsigned(1, 2);
     signal s_color_amt  : unsigned(7 downto 0) := to_unsigned(55, 8);   -- white<->colour threshold
@@ -237,7 +232,6 @@ architecture mondrian of program_top is
     signal s_notsq      : std_logic := '0';   -- S9: 0 = square grid, 1 = cell merge
     signal s_vid_en     : std_logic := '0';
     signal s_lumamod    : std_logic := '0';   -- S11: per-cell luma gate (black where cell luma <= mid)
-    signal s_line_top   : std_logic := '0';   -- this scan line is a cell-row top
 
     --------------------------------------------------------------------------
     -- Sync / video alignment pipe
@@ -248,7 +242,8 @@ architecture mondrian of program_top is
     --------------------------------------------------------------------------
     -- Pipeline registers
     --------------------------------------------------------------------------
-    signal s0_x, s0_y : unsigned(11 downto 0);
+    signal s0_x, s0_y   : unsigned(11 downto 0);
+    signal s0_x0, s0_y0 : unsigned(11 downto 0);   -- cell origin (px) for this pixel
 
     -- Per-cell Luma Mod: one hide bit per base-cell column, sampled at the cell
     -- centre on each cell-row's top line and held across the cell, then delayed to
@@ -256,20 +251,13 @@ architecture mondrian of program_top is
     signal cell_hide : std_logic_vector(0 to 63) := (others => '0');
     signal hide_pipe : std_logic_vector(0 to LATENCY - 1) := (others => '0');
 
-    -- S1a: base cell origin + 2x2 candidate aligned origins + edge validity.
-    signal s1a_ax, s1a_ay    : t_u12_4;
+    -- S1a: 2x2 candidate hashes + base origin + edge validity (hash folded into
+    -- S1a to drop the separate S1a2 stage's registers and ease routing).
+    signal s1a_hk            : t_u16_4;
     signal s1a_x0, s1a_y0    : unsigned(11 downto 0);
     signal s1a_px, s1a_py    : unsigned(11 downto 0);
     signal s1a_left_ok       : std_logic;
     signal s1a_up_ok         : std_logic;
-
-    -- S1a2: per-candidate cell hash on its own stage (the nonlinear hash adds would
-    -- otherwise stack on the origin-subtract path and miss HD timing).
-    signal s1a2_hk           : t_u16_4;
-    signal s1a2_x0, s1a2_y0  : unsigned(11 downto 0);
-    signal s1a2_px, s1a2_py  : unsigned(11 downto 0);
-    signal s1a2_left_ok      : std_logic;
-    signal s1a2_up_ok        : std_logic;
 
     -- S1b: winning candidate, selected (node built in S1c to keep paths short).
     signal s1b_hkw           : unsigned(15 downto 0);
@@ -281,20 +269,20 @@ architecture mondrian of program_top is
     signal s1_n : t_node;                                  -- selected (merged) cell node
 
     -- hash-stage outputs (decoded bits + node carrying new seed)
-    signal h0_n, h1_n, h2_n, h3_n     : t_node;
-    signal h0_or, h1_or, h2_or, h3_or : std_logic;
-    signal h0_ds, h1_ds, h2_ds, h3_ds : std_logic;
-    signal h0_sg, h1_sg, h2_sg, h3_sg : std_logic;
-    signal h0_hf, h1_hf, h2_hf, h3_hf : std_logic;
+    signal h0_n, h1_n, h2_n     : t_node;
+    signal h0_or, h1_or, h2_or  : std_logic;
+    signal h0_ds, h1_ds, h2_ds  : std_logic;
+    signal h0_sg, h1_sg, h2_sg  : std_logic;
+    signal h0_hf, h1_hf, h2_hf  : std_logic;
 
     -- decide-stage outputs (node + orient passthrough + split coord + flag)
-    signal d0_n, d1_n, d2_n, d3_n         : t_node;
-    signal d0_or, d1_or, d2_or, d3_or     : std_logic;
-    signal d0_dt, d1_dt, d2_dt, d3_dt     : std_logic;
-    signal d0_nx, d1_nx, d2_nx, d3_nx     : unsigned(11 downto 0);
+    signal d0_n, d1_n, d2_n         : t_node;
+    signal d0_or, d1_or, d2_or     : std_logic;
+    signal d0_dt, d1_dt, d2_dt     : std_logic;
+    signal d0_nx, d1_nx, d2_nx     : unsigned(11 downto 0);
 
     -- descend-stage output nodes
-    signal n0, n1, n2, n3 : t_node;
+    signal n0, n1, n2 : t_node;
 
     -- leaf metrics, split across two stages
     signal s10a_m1, s10a_m2 : unsigned(11 downto 0);
@@ -323,36 +311,46 @@ begin
     --------------------------------------------------------------------------
     p_position : process(clk)
         variable v_h_edge, v_v_edge : std_logic;
+        variable v_csz : integer;
     begin
         if rising_edge(clk) then
             prev_hsync_n <= data_in.hsync_n;
             prev_vsync_n <= data_in.vsync_n;
 
-            -- this scan line is the top of a cell-row (pixel_y constant per line)
-            if (pixel_y and s_cellmask) = 0 then s_line_top <= '1';
-            else                                 s_line_top <= '0'; end if;
-
             v_h_edge := '0'; v_v_edge := '0';
             if data_in.hsync_n = '0' and prev_hsync_n = '1' then v_h_edge := '1'; end if;
             if data_in.vsync_n = '0' and prev_vsync_n = '1' then v_v_edge := '1'; end if;
 
-            if v_h_edge = '1' then        pixel_x <= (others => '0');
-            elsif data_in.avid = '1' then pixel_x <= pixel_x + 1; end if;
+            -- X position + X cell counter (origin / local / column index).  Counting
+            -- as we scan gives arbitrary (continuous) cell sizes with no divide.
+            if v_h_edge = '1' then
+                pixel_x   <= (others => '0');
+                cellx_org <= (others => '0');
+                cellx_loc <= (others => '0');
+                cellx_idx <= (others => '0');
+            elsif data_in.avid = '1' then
+                pixel_x <= pixel_x + 1;
+                if cellx_loc = s_cszm1 then
+                    cellx_loc <= (others => '0');
+                    cellx_org <= cellx_org + s_csz;
+                    cellx_idx <= cellx_idx + 1;
+                else
+                    cellx_loc <= cellx_loc + 1;
+                end if;
+            end if;
 
             if v_v_edge = '1' then
-                pixel_y <= (others => '0');
+                pixel_y   <= (others => '0');
+                celly_org <= (others => '0');
+                celly_loc <= (others => '0');
 
-                -- Grid scale: K1 top 2 bits -> coarse cell 256/128/64/32 px
-                case to_integer(unsigned(registers_in(0)(9 downto 8))) is
-                    when 0      => s_g <= 8; s_cellsz <= 256; s_cell2sz <= 512;
-                                   s_cellmask <= to_unsigned(255, 12); s_cellcenter <= to_unsigned(128, 12);
-                    when 1      => s_g <= 7; s_cellsz <= 128; s_cell2sz <= 256;
-                                   s_cellmask <= to_unsigned(127, 12); s_cellcenter <= to_unsigned(64, 12);
-                    when 2      => s_g <= 6; s_cellsz <= 64;  s_cell2sz <= 128;
-                                   s_cellmask <= to_unsigned(63, 12);  s_cellcenter <= to_unsigned(32, 12);
-                    when others => s_g <= 5; s_cellsz <= 32;  s_cell2sz <= 64;
-                                   s_cellmask <= to_unsigned(31, 12);  s_cellcenter <= to_unsigned(16, 12);
-                end case;
+                -- Grid Scale (K1): continuous cell size, 32..256 px.
+                v_csz := 32 + to_integer(unsigned(registers_in(0)(9 downto 2)));
+                if v_csz > 256 then v_csz := 256; end if;
+                s_csz   <= to_unsigned(v_csz, 12);
+                s_csz2  <= to_unsigned(v_csz + v_csz, 12);
+                s_cszm1 <= to_unsigned(v_csz - 1, 12);
+                s_cszc  <= to_unsigned(v_csz / 2, 12);
 
                 s_comp_seed <= mix16(unsigned(registers_in(1)), x"9E37");
                 s_sub_seed  <= mix16(unsigned(registers_in(2)), x"C2B5");
@@ -378,6 +376,13 @@ begin
                 s_density  <= unsigned(registers_in(7)(9 downto 2));
             elsif v_h_edge = '1' then
                 pixel_y <= pixel_y + 1;
+                -- Y cell counter advances per line
+                if celly_loc = s_cszm1 then
+                    celly_loc <= (others => '0');
+                    celly_org <= celly_org + s_csz;
+                else
+                    celly_loc <= celly_loc + 1;
+                end if;
             end if;
         end if;
     end process p_position;
@@ -387,8 +392,8 @@ begin
     --------------------------------------------------------------------------
     p_pipe : process(clk)
         variable v_x0, v_y0   : unsigned(11 downto 0);
-        variable v_axk, v_ayk : unsigned(11 downto 0);
-        variable v_col        : integer range 0 to 63;
+        variable v_x0L, v_y0U : unsigned(11 downto 0);
+        variable v_col        : integer range 0 to 127;
         variable v_bigx, v_bigy, v_cov : std_logic_vector(0 to 3);
         variable v_rnk        : integer range 0 to 2;
         variable vv           : integer_vector(0 to 3);
@@ -425,7 +430,7 @@ begin
             h  := hash_lvl(n_in.seed, s_sub_seed, C_LC(lvl));
             nn := n_in; nn.seed := h;
             o  := h(0);
-            t8 := to_integer(n_in.dens) - lvl * 32;      -- density tapers with depth
+            t8 := to_integer(s_density) - lvl * 32;      -- density tapers with depth
             if t8 < 0 then t8 := 0; end if;
             q_n  <= nn;
             q_or <= o;
@@ -443,14 +448,17 @@ begin
             pipe(0) <= data_in;
             for i in 1 to LATENCY - 1 loop pipe(i) <= pipe(i - 1); end loop;
 
-            -- S0: latch pixel position + per-cell Luma Mod sample/hold/delay.
-            s0_x <= pixel_x;
-            s0_y <= pixel_y;
-            v_col := cell_col(pixel_x, s_g);
+            -- S0: latch pixel position + cell origin + per-cell Luma Mod sample/hold.
+            s0_x  <= pixel_x;
+            s0_y  <= pixel_y;
+            s0_x0 <= cellx_org;
+            s0_y0 <= celly_org;
+            v_col := to_integer(cellx_idx);
+            if v_col > 63 then v_col := 63; end if;
             hide_pipe(0) <= cell_hide(v_col);
             for i in 1 to LATENCY - 1 loop hide_pipe(i) <= hide_pipe(i - 1); end loop;
             -- sample one hide bit per cell, at the cell centre on the cell-row's top line
-            if s_line_top = '1' and (pixel_x and s_cellmask) = s_cellcenter then
+            if celly_loc = 0 and cellx_loc = s_cszc then
                 if unsigned(data_in.y) <= to_unsigned(512, 10) then
                     cell_hide(v_col) <= '1';
                 else
@@ -458,51 +466,44 @@ begin
                 end if;
             end if;
 
-            -- S1a: base grid cell origin + the 2x2 candidate cells' aligned origins.
-            -- The up-left candidates are only valid when the base cell isn't on the
-            -- top/left edge (so merged origins never go negative).
-            v_x0 := s0_x and not s_cellmask;
-            v_y0 := s0_y and not s_cellmask;
+            -- S1a: base origin + 2x2 candidate origins + hashes + edge validity.  The
+            -- single-add hash is short enough to share this stage; the old separate
+            -- S1a2 stage was folded in here to cut registers / ease routing.  There
+            -- are only two distinct x origins (x0, x0-cell) and two y, so the four
+            -- candidate hashes come from the 2x2 product.
+            v_x0  := s0_x0;
+            v_y0  := s0_y0;
+            v_x0L := s0_x0 - s_csz;   -- left-neighbour origin
+            v_y0U := s0_y0 - s_csz;   -- up-neighbour origin
             s1a_x0 <= v_x0;
             s1a_y0 <= v_y0;
             s1a_px <= s0_x;
             s1a_py <= s0_y;
-            if v_x0 >= to_unsigned(s_cellsz, 12) then s1a_left_ok <= '1'; else s1a_left_ok <= '0'; end if;
-            if v_y0 >= to_unsigned(s_cellsz, 12) then s1a_up_ok   <= '1'; else s1a_up_ok   <= '0'; end if;
-            for k in 0 to 3 loop
-                s1a_ax(k) <= v_x0 - to_unsigned(CK_X(k) * s_cellsz, 12);
-                s1a_ay(k) <= v_y0 - to_unsigned(CK_Y(k) * s_cellsz, 12);
-            end loop;
-
-            -- S1a2: per-candidate cell hash (own stage to isolate the nonlinear adds)
-            for k in 0 to 3 loop
-                s1a2_hk(k) <= init_seed(s_comp_seed, s1a_ax(k), s1a_ay(k));
-            end loop;
-            s1a2_x0      <= s1a_x0;
-            s1a2_y0      <= s1a_y0;
-            s1a2_px      <= s1a_px;
-            s1a2_py      <= s1a_py;
-            s1a2_left_ok <= s1a_left_ok;
-            s1a2_up_ok   <= s1a_up_ok;
+            if v_x0 >= s_csz then s1a_left_ok <= '1'; else s1a_left_ok <= '0'; end if;
+            if v_y0 >= s_csz then s1a_up_ok   <= '1'; else s1a_up_ok   <= '0'; end if;
+            s1a_hk(0) <= init_seed(s_comp_seed, v_x0,  v_y0);
+            s1a_hk(1) <= init_seed(s_comp_seed, v_x0L, v_y0);
+            s1a_hk(2) <= init_seed(s_comp_seed, v_x0,  v_y0U);
+            s1a_hk(3) <= init_seed(s_comp_seed, v_x0L, v_y0U);
 
             -- S1b: decode each candidate's grow-right / grow-down bits (~25% each,
             -- only in Not-Square mode), test which cover this pixel (pure hash-bit
             -- logic since cells are grid-aligned), and pick the LARGEST covering cell
             -- (size-first, hash priority breaks ties).
             for k in 0 to 3 loop
-                v_bigx(k) := s_notsq and s1a2_hk(k)(7) and s1a2_hk(k)(3);
-                v_bigy(k) := s_notsq and s1a2_hk(k)(6) and s1a2_hk(k)(2);
+                v_bigx(k) := s_notsq and s1a_hk(k)(7) and s1a_hk(k)(3);
+                v_bigy(k) := s_notsq and s1a_hk(k)(6) and s1a_hk(k)(2);
             end loop;
             v_cov(0) := '1';
-            v_cov(1) := v_bigx(1) and s1a2_left_ok;
-            v_cov(2) := v_bigy(2) and s1a2_up_ok;
-            v_cov(3) := v_bigx(3) and v_bigy(3) and s1a2_left_ok and s1a2_up_ok;
+            v_cov(1) := v_bigx(1) and s1a_left_ok;
+            v_cov(2) := v_bigy(2) and s1a_up_ok;
+            v_cov(3) := v_bigx(3) and v_bigy(3) and s1a_left_ok and s1a_up_ok;
             for k in 0 to 3 loop
                 v_rnk := 0;
                 if v_bigx(k) = '1' then v_rnk := v_rnk + 1; end if;
                 if v_bigy(k) = '1' then v_rnk := v_rnk + 1; end if;
                 if v_cov(k) = '1' then
-                    vv(k) := 16 + 16 * v_rnk + to_integer(s1a2_hk(k)(15 downto 12));
+                    vv(k) := 16 + 16 * v_rnk + to_integer(s1a_hk(k)(15 downto 12));
                 else
                     vv(k) := 0;
                 end if;
@@ -516,28 +517,28 @@ begin
 
             -- register only the WINNER's data; the node (a couple of adds) is
             -- built next cycle in S1c so this stage's argmax path stays short.
-            s1b_hkw  <= s1a2_hk(v_kw);
+            s1b_hkw  <= s1a_hk(v_kw);
             s1b_bigx <= v_bigx(v_kw);
             s1b_bigy <= v_bigy(v_kw);
             if CK_X(v_kw) = 1 then s1b_ckx <= '1'; else s1b_ckx <= '0'; end if;
             if CK_Y(v_kw) = 1 then s1b_cky <= '1'; else s1b_cky <= '0'; end if;
-            s1b_x0 <= s1a2_x0;
-            s1b_y0 <= s1a2_y0;
-            s1b_px <= s1a2_px;
-            s1b_py <= s1a2_py;
+            s1b_x0 <= s1a_x0;
+            s1b_y0 <= s1a_y0;
+            s1b_px <= s1a_px;
+            s1b_py <= s1a_py;
 
             -- S1c: build the winning (merged) cell node — origin shifted up-left by
             -- the candidate offset, extent 1 or 2 cells.  A grown cell is one root
             -- (one seed) spanning 2 cells, so it subdivides as a unit and the old
             -- grid line between the fused cells is no longer forced.
-            if s1b_ckx = '1' then v_wx0 := s1b_x0 - to_unsigned(s_cellsz, 12);
+            if s1b_ckx = '1' then v_wx0 := s1b_x0 - s_csz;
             else                  v_wx0 := s1b_x0; end if;
-            if s1b_cky = '1' then v_wy0 := s1b_y0 - to_unsigned(s_cellsz, 12);
+            if s1b_cky = '1' then v_wy0 := s1b_y0 - s_csz;
             else                  v_wy0 := s1b_y0; end if;
-            if s1b_bigx = '1' then v_wx1 := v_wx0 + to_unsigned(s_cell2sz, 12);
-            else                   v_wx1 := v_wx0 + to_unsigned(s_cellsz, 12); end if;
-            if s1b_bigy = '1' then v_wy1 := v_wy0 + to_unsigned(s_cell2sz, 12);
-            else                   v_wy1 := v_wy0 + to_unsigned(s_cellsz, 12); end if;
+            if s1b_bigx = '1' then v_wx1 := v_wx0 + s_csz2;
+            else                   v_wx1 := v_wx0 + s_csz; end if;
+            if s1b_bigy = '1' then v_wy1 := v_wy0 + s_csz2;
+            else                   v_wy1 := v_wy0 + s_csz; end if;
             s1_n.x0     <= v_wx0;
             s1_n.x1     <= v_wx1;
             s1_n.y0     <= v_wy0;
@@ -545,7 +546,6 @@ begin
             s1_n.px     <= s1b_px;
             s1_n.py     <= s1b_py;
             s1_n.seed   <= s1b_hkw;
-            s1_n.dens   <= s_density;   -- merged cells subdivide like any other
             s1_n.frozen <= '0';
 
             -- Level 0 : hash -> decide -> descend
@@ -566,14 +566,8 @@ begin
             d2_n <= h2_n; d2_or <= h2_or; d2_dt <= dtmp.doit; d2_nx <= dtmp.nx;
             n2 <= descend(d2_n, d2_or, d2_dt, d2_nx);
 
-            -- Level 3
-            do_hash(h3_n, h3_or, h3_ds, h3_sg, h3_hf, 3, n2);
-            dtmp := calc_split(h3_n, h3_or, h3_ds, h3_sg, h3_hf, s_jit_mode);
-            d3_n <= h3_n; d3_or <= h3_or; d3_dt <= dtmp.doit; d3_nx <= dtmp.nx;
-            n3 <= descend(d3_n, d3_or, d3_dt, d3_nx);
-
             -- S10a: leaf-local coords + per-axis edge mins
-            n  := n3;
+            n  := n2;
             lw := n.x1 - n.x0;
             lh := n.y1 - n.y0;
             lx := n.px - n.x0;
