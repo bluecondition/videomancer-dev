@@ -26,6 +26,7 @@ them).  The FPGA mux's the active table via a vsync-latched expression
 index (K4 top-3-bits).
 """
 
+import os
 import subprocess
 import sys
 from collections import defaultdict
@@ -61,6 +62,36 @@ MAX_STAMP_M1  = 127                        # mirrors bishop.vhd MAX_STAMP_M1
 # THICK<4, a few extra rows are painted by phantom detail edges instead
 # of boundary edges — invisible because both buffers OR into the display.
 THICK_BUILD = 4
+
+# ---- Facet-stress experiment (env-gated; BISHOP_STRESS_EDGES=0 -> no-op) ----
+# Inject K synthetic detail edges into every (expr, variant) mesh to measure
+# the performance cost of denser geometry.  See facet_sweep.sh.  All default
+# off, so a normal `python build_face_mesh.py` is byte-identical to committed.
+STRESS_EDGES = int(os.environ.get("BISHOP_STRESS_EDGES", "0"))    # K extra edges
+STRESS_MODE  = os.environ.get("BISHOP_STRESS_MODE", "stacked")    # stacked | spread
+STRESS_SLOPE = int(os.environ.get("BISHOP_STRESS_SLOPE", "4"))    # |slope_int| px/row
+STRESS_ROW   = int(os.environ.get("BISHOP_STRESS_ROW", "0"))      # band centre (stacked)
+STRESS_SPAN  = 8                                                  # rows each edge spans
+
+# SD per-scanline cycle-budget model constants — MUST mirror bishop.vhd.
+HEAD_HALF_W_MIRROR = 260              # bishop.vhd HEAD_HALF_W
+R_CLEAR_CYCLES     = 2 * HEAD_HALF_W_MIRROR   # fixed clear-phase cost = 520
+# Rasterizer cycles available per SD scanline.  NOT 858: an NTSC line is 858
+# PIXELS, but the SD core runs at 2x the pixel rate (sd_video_clk_pll_2x), so
+# the rasterizer (which preps line N during line N-1) gets ~2*858 = 1716 core
+# clks/line.  Confirmed by calibration: the committed mesh's worst row costs
+# ~1180 cyc and renders clean, which is impossible under 858.  Recalibrate
+# here if the corruption-onset sim disagrees.
+SD_BUDGET_CYCLES   = 1716
+# Per-line rasterizer walk model.  With the R_STAMP_SCAN inactive-edge skip:
+#   * SCAN visits every edge once    -> SCAN_PER_EDGE (1) * N_EDGES per line
+#   * each ACTIVE edge then pays      -> ACTIVE_OVERHEAD (4 = 3 PRELOAD + the
+#     scan-found cycle) + (stamp count + 1) cycles
+# So the dominant O(N) term is now just the 1-cycle scan, and the heavy
+# 4+stamps cost is paid only for edges actually on the row.
+SCAN_PER_EDGE      = 1
+ACTIVE_OVERHEAD    = 4
+R_STAMP_DRAIN      = 1
 
 # Degenerate no-op edge used to pad each expression's mesh up to
 # C_NUM_EDGES.  y_min > y_max so the rasterizer never activates it.
@@ -571,6 +602,72 @@ def check_fpga_limits(variants_per_expr):
     if errs:
         raise SystemExit("FPGA limit EXCEEDED:\n  " + "\n  ".join(errs))
 
+def inject_stress_edges(variants_per_expr):
+    """Experiment-only: append STRESS_EDGES synthetic detail edges (bnd=0,
+    EOR-safe) to EVERY (expr, variant) mesh identically, so C_NUM_EDGES stays
+    uniform and rises by K.  K=0 -> no-op (committed builds are unaffected)."""
+    if STRESS_EDGES <= 0:
+        return
+    half_h   = TARGET_FACE_HEIGHT // 2
+    slope_fp = STRESS_SLOPE * FP_SCALE            # |slope_int| = STRESS_SLOPE
+    span     = STRESS_SPAN
+    synth = []
+    for k in range(STRESS_EDGES):
+        if STRESS_MODE == "stacked":
+            y0 = STRESS_ROW                       # all K share one row band
+        else:                                     # spread: tile across the head
+            y0 = -half_h + (k * (2 * half_h - span)) // max(1, STRESS_EDGES)
+        synth.append({
+            "y_min": int(y0),
+            "y_max": int(y0 + span),
+            "x_top": 0,                           # centred; keeps |x| tiny
+            "slope": slope_fp,
+            "group": GROUP_STATIC,                # group 0 -> no variant remap
+            "bnd":   0,                           # DETAIL: EOR-safe, detail buffer only
+        })
+    for key in variants_per_expr:
+        variants_per_expr[key] = variants_per_expr[key] + [dict(e) for e in synth]
+    print(f"STRESS: injected {STRESS_EDGES} '{STRESS_MODE}' edges "
+          f"(|slope|={STRESS_SLOPE}, span={span}, row={STRESS_ROW})")
+
+def predict_sd_margin(variants_per_expr, thick=THICK_BUILD):
+    """Pure-software SD per-scanline budget model (no build).  Per line the
+    rasterizer pays:  R_CLEAR (520)  +  PER_EDGE_WALK*N_EDGES (the O(N) edge
+    walk, every line, active or not)  +  the worst row's active stamp sum
+    +  drain.  Active stamp count = |slope_int| (horizontal, width-only,
+    Y-extended +-thick) or |slope_int|+2*thick (diagonal).  Reports margin
+    vs SD_BUDGET_CYCLES at the worst K2 thickness (matches the
+    rotary_potentiometer_2=1023 SD sim)."""
+    n_edges = max(len(m) for m in variants_per_expr.values())
+    scan    = SCAN_PER_EDGE * n_edges          # 1-cycle scan of all edges/line
+    worst_line, worst_where = 0, ""
+    for (ei, vs), mesh in variants_per_expr.items():
+        row_stamps = defaultdict(int)          # sum of stamp counts on a row
+        row_active = defaultdict(int)          # number of active edges on a row
+        for e in mesh:
+            s_int = abs(e["slope"]) // FP_SCALE
+            if e["y_min"] == e["y_max"]:        # horizontal: Y-extended, width-only
+                r0, r1, cnt = e["y_min"] - thick, e["y_min"] + thick, s_int
+            elif e["y_min"] < e["y_max"]:       # diagonal/vertical
+                r0, r1, cnt = e["y_min"], e["y_max"], s_int + 2 * thick
+            else:
+                continue                         # NO_OP padding
+            for r in range(r0, r1 + 1):
+                row_stamps[r] += cnt
+                row_active[r] += 1
+        for r in row_stamps:
+            # per-line cost on row r = scan(all) + active edges' overhead+stamps
+            line = scan + ACTIVE_OVERHEAD * row_active[r] + row_stamps[r]
+            if line > worst_line:
+                worst_line, worst_where = line, f"expr{ei}/{vs or 'open'} row{r}"
+    total  = R_CLEAR_CYCLES + worst_line + R_STAMP_DRAIN
+    margin = SD_BUDGET_CYCLES - total
+    print(f"SD budget model (THICK={thick}, N={n_edges}): clear {R_CLEAR_CYCLES} "
+          f"+ worst line {worst_line} (scan {scan} + active-edge work; {worst_where}) "
+          f"+ drain {R_STAMP_DRAIN} = {total} / {SD_BUDGET_CYCLES} -> margin "
+          f"{margin} {'OK' if margin >= 0 else 'OVERRUN'}")
+    return margin, worst_where
+
 def main():
     expr_names = list(EXPRESSIONS.keys())
     print(f"expressions ({len(expr_names)}): {', '.join(expr_names)}")
@@ -630,9 +727,12 @@ def main():
     for line in log:
         print(line)
 
+    inject_stress_edges(variants_per_expr)
+
     sizes = sorted(set(len(m) for m in variants_per_expr.values()))
     print(f"variant edge counts (should be uniform): {sizes}")
 
+    predict_sd_margin(variants_per_expr)
     check_fpga_limits(variants_per_expr)
 
     emit_vhdl(variants_per_expr, expr_names, VHDL_OUT)
