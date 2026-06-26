@@ -31,9 +31,9 @@
 --   1 clk : S4 — synchronous sprite ROM reads + state lookups
 --   1 clk : S5 — bit selects + per-region pixel combine
 --   1 clk : S6 — color mux
---   4 clk : interpolator
---   2 clk : IO alignment
---   total : 8 render + 4 interp + 2 IO = 14 clocks
+--   2 clk : IO alignment (wet pixel straight to output; the wet/dry
+--           interpolators were removed — mix was hardcoded fully wet)
+--   total : 8 render + 2 IO = 10 clocks
 --
 -- Physics FSM (8 phases, vsync-triggered):
 --   Phase 0 : reset on edge; spawn first-free wand-shot on Fire-pending;
@@ -70,32 +70,36 @@ architecture invaders of program_top is
     constant C_DELAY      : integer := 8;
 
     -- Alien formation: 3 rows × 6 cols of 64×64 CRT_TV sprites drawn at
-    -- 2× nearest-neighbour scale = 128×128 on screen.  Cells are 144 ×
-    -- 144 with the sprite centred (8 px padding all around → 16 px
-    -- between adjacent aliens both horizontally and vertically).
-    -- Nothing overlaps and nothing is cropped.
+    -- 2× nearest-neighbour scale = 128×128 on screen.  Cells are a
+    -- power-of-two 128 × 128 so the row/col a pixel falls in is a plain
+    -- bit-slice (no comparator cascade).  The sprite fills the cell, so
+    -- aliens sit edge-to-edge — the CRT_TV art's own transparent margin
+    -- keeps a small visual gap.
     --
-    -- The full 864 × 432 grid is taller than the 274-px gap above the
-    -- bunker, so the formation starts with its top row(s) off-screen
-    -- above y=0 and marches into view as it drops after each bounce —
-    -- exactly the classic Space Invaders entry pattern.
+    -- The full 768 × 384 grid is taller than the gap above the bunker,
+    -- so the formation starts with its top row(s) off-screen above y=0
+    -- and marches into view as it drops after each bounce — the classic
+    -- Space Invaders entry pattern.
     constant C_COLS         : integer := 6;
     constant C_ROWS         : integer := 3;
-    constant C_CELL_W       : integer := 144;
-    constant C_CELL_H       : integer := 144;
-    constant C_FORM_W       : integer := C_COLS * C_CELL_W;             -- 864
-    constant C_FORM_H       : integer := C_ROWS * C_CELL_H;             -- 432
-    constant C_FORM_X_INIT  : integer := 48;                  -- (960-864)/2
-    -- y_init = -160: bottom row's sprite sits just above the bunker at
-    -- start (-160 + 2*144 + 8 = 136 sprite-top of bottom row, +128 sprite
-    -- = 264 sprite-bottom; cell bottom at -160 + 432 = 272), so only 1
-    -- full row + the middle row's bottom half is visible initially.  As
-    -- the formation drops 16 px per bounce, the top rows march in.
-    constant C_FORM_Y_INIT  : integer := -160;
+    -- Cells are a power of two (128) so the column/row a pixel falls in is a
+    -- plain bit-slice of form_dx/dy — no 12-bit comparator cascade or
+    -- priority encoder.  The 128-wide sprite fills the cell (no padding), so
+    -- aliens sit edge-to-edge; the CRT_TV art's own transparent margin keeps
+    -- a small visual gap.
+    constant C_CELL_W       : integer := 128;
+    constant C_CELL_H       : integer := 128;
+    constant C_FORM_W       : integer := C_COLS * C_CELL_W;             -- 768
+    constant C_FORM_H       : integer := C_ROWS * C_CELL_H;             -- 384
+    constant C_FORM_X_INIT  : integer := 96;                  -- (960-768)/2
+    -- Formation starts with its top row off-screen and marches in as it
+    -- drops after each bounce — the classic entry pattern.  p_layout
+    -- recomputes the live init from the measured resolution.
+    constant C_FORM_Y_INIT  : integer := -128;
     constant C_SPRITE_SRC   : integer := 64;
     constant C_SPRITE_W     : integer := 128;
     constant C_SPRITE_H     : integer := 128;
-    constant C_SPRITE_OFF   : integer := 8;   -- sprite centred in 144 cell
+    constant C_SPRITE_OFF   : integer := 0;   -- sprite fills the 128 cell
     -- alien_idx = {row(1..0), col(2..0)} with col stride 8.  Slots 6, 7,
     -- 14, 15, 22..31 unused, but the 5-bit packing is cheaper than
     -- multiplying by 6.
@@ -109,8 +113,10 @@ architecture invaders of program_top is
     constant C_BULLET_H     : integer := 16;
     constant C_BOMB_W       : integer := 6;
     constant C_BOMB_H       : integer := 14;
-    constant C_BULLETS      : integer := 4;
-    constant C_BOMBS        : integer := 5;
+    -- Up to 5 wand-shots in flight (the resource pass freed the LCs); bombs
+    -- kept at 3.
+    constant C_BULLETS      : integer := 5;
+    constant C_BOMBS        : integer := 3;
     -- Wand offset inside the wizard sprite (upper-right of the 128x128
     -- bitmap; mirrored to upper-left when wizard faces left)
     constant C_WAND_OFFSET_X : integer := 88;
@@ -134,6 +140,40 @@ architecture invaders of program_top is
     -- 10 → 26 (= 10 + one chunk-row) so the bunkers sit one chunk higher.
     constant C_BUNKER_GAP   : integer := 26;
     constant C_BOMB_SPEED   : integer := 2;
+
+    -- ------------------------------------------------------------------
+    -- Rainbow ghost trail: instead of dots, leave faded full-sprite
+    -- afterimages of the wizard behind it as it slides left/right.  A new
+    -- ghost is recorded on a vsync only once the ship has moved at least
+    -- C_TRAIL_GAP px since the last one, so a stationary ship leaves no
+    -- pile-up.  Each ghost cycles through the 7-colour ROYGBIV phosphor
+    -- palette, so the afterimages fan out as a rainbow.  Because the wizard
+    -- only moves horizontally, every ghost shares the live wizard's ROM row
+    -- (same Y band) — only the per-ghost column index + colour differ.
+    constant C_TRAIL_LEN   : integer := 3;  -- number of afterimages held
+    -- Spacing ≥ the 128-wide sprite so the ghosts never overlap each other.
+    -- That guarantees at most one ghost covers any pixel, so the render needs
+    -- a SINGLE wizard-row mux (the winning ghost is picked in S3) no matter
+    -- how many ghosts there are — the trail reads as distinct rainbow echoes.
+    constant C_TRAIL_GAP   : integer := 144;
+    -- Dim luma for the ghost silhouette so it reads as a faded afterimage
+    -- rather than a second solid wizard.
+    constant C_GHOST_LUMA  : integer := 470;
+
+    -- ROYGBIV phosphor chroma palette, 10-bit U/V in the Videomancer
+    -- U/V-swapped convention (hardware-confirmed; see Phosphor program).
+    -- Looked up once per ghost at drop time (off the hot path) so the render
+    -- path carries plain chroma.  Index 7 duplicates red as an out-of-range
+    -- guard for the 3-bit colour counter.
+    type t_pal is array (0 to 7) of unsigned(9 downto 0);
+    constant C_TRAIL_PAL_U : t_pal := (
+        to_unsigned(960, 10), to_unsigned(772, 10), to_unsigned(584, 10),
+        to_unsigned(136, 10), to_unsigned(440, 10), to_unsigned(608, 10),
+        to_unsigned(756, 10), to_unsigned(960, 10));
+    constant C_TRAIL_PAL_V : t_pal := (
+        to_unsigned(360, 10), to_unsigned(212, 10), to_unsigned( 64, 10),
+        to_unsigned(216, 10), to_unsigned(960, 10), to_unsigned(696, 10),
+        to_unsigned(852, 10), to_unsigned(360, 10));
 
     -- Alien ROM = CRT_TV_F0 followed by CRT_TV_F1 → 128 entries × 64 bits
     -- (frame select is the high bit of the 7-bit address).
@@ -195,7 +235,6 @@ architecture invaders of program_top is
     signal s_bright_pot     : unsigned(9 downto 0);
     signal s_bomb_spd_pot   : unsigned(9 downto 0);
     signal s_hue_pot        : unsigned(9 downto 0);
-    signal s_mix_pot        : unsigned(9 downto 0);
     signal s_bomb_speed     : unsigned(3 downto 0) := to_unsigned(3, 4);
     signal s_sw_fire        : std_logic;
     signal s_sw_bg_black    : std_logic;
@@ -331,26 +370,43 @@ architecture invaders of program_top is
     signal s_expl_frame    : unsigned(1 downto 0) := (others => '0');
     signal s_expl_timer    : unsigned(2 downto 0) := (others => '0');
 
+    -- Rainbow ghost ring buffer.  s_trail_x holds each afterimage's sprite
+    -- top-left X (ghosts start off-screen so none show before the first
+    -- move).  Each ghost carries its already-resolved chroma (palette looked
+    -- up at drop time) and the wizard facing it had when dropped.
+    type t_trail_x_arr is array (0 to C_TRAIL_LEN - 1) of signed(11 downto 0);
+    type t_trail_uv_arr is array (0 to C_TRAIL_LEN - 1) of unsigned(9 downto 0);
+    signal s_trail_x       : t_trail_x_arr := (others => to_signed(-256, 12));
+    signal s_trail_u       : t_trail_uv_arr := (others => C_CHROMA_MID);
+    signal s_trail_v       : t_trail_uv_arr := (others => C_CHROMA_MID);
+    signal s_trail_face    : std_logic_vector(0 to C_TRAIL_LEN - 1)
+                              := (others => '0');
+    signal s_trail_valid   : std_logic_vector(0 to C_TRAIL_LEN - 1)
+                              := (others => '0');
+    signal s_trail_head    : unsigned(2 downto 0) := (others => '0');
+    signal s_trail_colctr  : unsigned(2 downto 0) := (others => '0');
+    -- Movement tracker, pipelined so the once-per-frame distance test never
+    -- forms a long chained carry path: s_trail_anchor = ship X at the last
+    -- drop, s_trail_diff = ship X − anchor (registered), s_trail_moved =
+    -- |diff| ≥ gap (registered, via two parallel compares — no abs chain).
+    signal s_trail_anchor  : signed(11 downto 0) := (others => '0');
+    signal s_trail_diff    : signed(11 downto 0) := (others => '0');
+    signal s_trail_moved   : std_logic := '0';
+
     -- ========================================================================
     -- Physics FSM intermediates
     -- ========================================================================
     signal s_ph_phase      : unsigned(2 downto 0) := (others => '0');
     signal s_ph_new_fx     : signed(11 downto 0) := (others => '0');
 
-    -- Bullet-vs-formation deltas + cascade flags for the SCANNED bullet
-    -- only (serial alien hit detection, one bullet per vsync).  Single
-    -- signals instead of per-bullet arrays — keeps the LC budget sane
-    -- with 5 bullets in flight.
-    signal s_ph_bf_dx      : signed(11 downto 0) := (others => '0');
-    signal s_ph_bf_dy      : signed(11 downto 0) := (others => '0');
-    signal s_ph_bf_dy_lt144 : std_logic := '0';
-    signal s_ph_bf_dy_lt288 : std_logic := '0';
+    -- Bullet-vs-formation hit detect for the SCANNED bullet only (serial,
+    -- one bullet per vsync).  With power-of-two cells the hit cell is just a
+    -- bit-slice: s_ph_bf_col = scan_dx[9:7], s_ph_bf_row = scan_dy[8:7],
+    -- gated by the in-grid range flags.  Single signals (not per-bullet
+    -- arrays) keep the LC budget sane.
+    signal s_ph_bf_col     : unsigned(2 downto 0) := (others => '0');
+    signal s_ph_bf_row     : unsigned(1 downto 0) := (others => '0');
     signal s_ph_bf_dy_in    : std_logic := '0';
-    signal s_ph_bf_dx_lt144 : std_logic := '0';
-    signal s_ph_bf_dx_lt288 : std_logic := '0';
-    signal s_ph_bf_dx_lt432 : std_logic := '0';
-    signal s_ph_bf_dx_lt576 : std_logic := '0';
-    signal s_ph_bf_dx_lt720 : std_logic := '0';
     signal s_ph_bf_dx_in    : std_logic := '0';
     -- Bomb vs ship: serialised via the same s_bullet_scan counter so we
     -- check one bomb's ship hit per vsync.  At ~3 px/frame in a 128-tall
@@ -365,6 +421,10 @@ architecture invaders of program_top is
     signal s_ph_alien_in   : std_logic := '0';
     signal s_ph_alien_idx  : unsigned(C_ALIEN_IDX_W - 1 downto 0)
                               := (others => '0');
+    -- Pre-registered "alien at the hit cell is alive" — read in phase 3 so
+    -- phase 4's commit isn't a 32:1 s_aliens read AND'd with the write-enable
+    -- to s_bullet_active on one routing-heavy path.
+    signal s_ph_alien_alive_pre : std_logic := '0';
     signal s_ph_alien_sel  : unsigned(2 downto 0) := (others => '0');
     -- Pre-computed explosion spawn position (set in phase 3, consumed
     -- in phase 4) so the alien_idx → spawn-coordinate case statement
@@ -416,22 +476,23 @@ architecture invaders of program_top is
     signal s_stg2_expl_dy  : signed(11 downto 0) := (others => '0');
     signal s_stg2_expl_a   : std_logic := '0';
     signal s_stg2_expl_fr  : unsigned(1 downto 0) := (others => '0');
-    -- Pre-registered formation row+col cascade flags.  Cells are 144 ×
-    -- 144 — neither power of 2 — so we decode both axes in S2 and let
-    -- S3 just priority-encode 1-bit flops.
-    signal s_stg2_fdy_lt144 : std_logic := '0';
-    signal s_stg2_fdy_lt288 : std_logic := '0';
+    -- Formation in-grid flags.  Cells are a power of two, so S3 derives
+    -- row/col by bit-slicing the registered form deltas — no cascade.
     signal s_stg2_fdy_in    : std_logic := '0';
-    signal s_stg2_fdx_lt144 : std_logic := '0';
-    signal s_stg2_fdx_lt288 : std_logic := '0';
-    signal s_stg2_fdx_lt432 : std_logic := '0';
-    signal s_stg2_fdx_lt576 : std_logic := '0';
-    signal s_stg2_fdx_lt720 : std_logic := '0';
     signal s_stg2_fdx_in    : std_logic := '0';
     signal s_stg2_frame    : std_logic := '0';
     signal s_stg2_bull_a   : std_logic_vector(0 to C_BULLETS - 1)
                               := (others => '0');
     signal s_stg2_bomb_a   : std_logic_vector(0 to C_BOMBS - 1)
+                              := (others => '0');
+    -- Ghost trail: per-ghost X delta + validity + facing + resolved chroma
+    -- (all registered here from live ring state so S3 reads only S2 flops).
+    -- The Y band and ROM row are shared with the live wizard via ship_dy.
+    type t_d_arr_t is array (0 to C_TRAIL_LEN - 1) of signed(11 downto 0);
+    signal s_stg2_trail_dx : t_d_arr_t := (others => (others => '0'));
+    signal s_stg2_trail_v  : std_logic_vector(0 to C_TRAIL_LEN - 1)
+                              := (others => '0');
+    signal s_stg2_trail_f  : std_logic_vector(0 to C_TRAIL_LEN - 1)
                               := (others => '0');
 
     -- S3: in-bbox flags + indices + ROM addresses
@@ -455,6 +516,13 @@ architecture invaders of program_top is
     signal s_stg3_in_expl    : std_logic := '0';
     signal s_stg3_expl_addr  : unsigned(7 downto 0) := (others => '0');
     signal s_stg3_expl_col   : unsigned(5 downto 0) := (others => '0');
+    -- Winning ghost (non-overlap → at most one covers a pixel): in-bbox
+    -- flag, column, facing, and ring index for the chroma read.  Carried to
+    -- S5 where the shared wizard ROM row becomes the silhouette bit.
+    signal s_stg3_gh_in      : std_logic := '0';
+    signal s_stg3_gh_col     : unsigned(6 downto 0) := (others => '0');
+    signal s_stg3_gh_f       : std_logic := '0';
+    signal s_stg3_gh_sel     : integer range 0 to C_TRAIL_LEN - 1 := 0;
 
     -- S4: sync ROM reads + state lookups
     signal s_stg4_alien_row  : std_logic_vector(63 downto 0) := (others => '0');
@@ -475,6 +543,10 @@ architecture invaders of program_top is
     signal s_stg4_expl_row   : std_logic_vector(47 downto 0) := (others => '0');
     signal s_stg4_in_expl    : std_logic := '0';
     signal s_stg4_expl_col   : unsigned(5 downto 0) := (others => '0');
+    signal s_stg4_gh_in      : std_logic := '0';
+    signal s_stg4_gh_col     : unsigned(6 downto 0) := (others => '0');
+    signal s_stg4_gh_f       : std_logic := '0';
+    signal s_stg4_gh_sel     : integer range 0 to C_TRAIL_LEN - 1 := 0;
 
     -- S5: combined per-region pixel flags
     signal s_stg5_on_alien   : std_logic := '0';
@@ -484,6 +556,9 @@ architecture invaders of program_top is
     signal s_stg5_on_bunker  : std_logic := '0';
     signal s_stg5_on_expl    : std_logic := '0';
     signal s_stg5_on_floor   : std_logic := '0';
+    signal s_stg5_on_trail   : std_logic := '0';
+    signal s_stg5_trail_u    : unsigned(9 downto 0) := C_CHROMA_MID;
+    signal s_stg5_trail_v    : unsigned(9 downto 0) := C_CHROMA_MID;
 
     -- Floor line geometry — 4-px stripe at the wizard's feet, full
     -- screen width.  Computed in p_layout based on ship_y.
@@ -494,12 +569,18 @@ architecture invaders of program_top is
     signal s_out_y         : unsigned(9 downto 0) := (others => '0');
     signal s_out_u         : unsigned(9 downto 0) := C_CHROMA_MID;
     signal s_out_v         : unsigned(9 downto 0) := C_CHROMA_MID;
+    -- Pre-registered foreground chroma (constant per frame).  Keeping the
+    -- sw_color choice out of S6 leaves the output mux a single 2:1 select.
+    signal s_fg_u          : unsigned(9 downto 0) := C_CHROMA_MID;
+    signal s_fg_v          : unsigned(9 downto 0) := C_CHROMA_MID;
     signal s_out_show      : std_logic := '0';
 
     -- ========================================================================
-    -- Sync + data delay (8 render + 4 interp = 12 sync entries)
+    -- Sync delay: 8 render stages, then straight to the 2 IO stages (the
+    -- wet/dry interpolators were removed — the mix was hardcoded fully wet,
+    -- so they were a no-op; sync now taps at the 8-clock render depth).
     -- ========================================================================
-    type t_sync_pipe is array (0 to 11) of std_logic_vector(3 downto 0);
+    type t_sync_pipe is array (0 to C_DELAY - 1) of std_logic_vector(3 downto 0);
     signal s_sync_pipe     : t_sync_pipe := (others => (others => '0'));
 
     type t_data_delay is array (0 to C_DELAY - 1) of std_logic_vector(9 downto 0);
@@ -510,9 +591,6 @@ architecture invaders of program_top is
     signal s_wet_y : std_logic_vector(9 downto 0);
     signal s_wet_u : std_logic_vector(9 downto 0);
     signal s_wet_v : std_logic_vector(9 downto 0);
-
-    signal s_mix_y_result, s_mix_u_result, s_mix_v_result : unsigned(9 downto 0);
-    signal s_mix_y_valid,  s_mix_u_valid,  s_mix_v_valid  : std_logic;
 
     signal s_io_0 : t_video_stream_yuv444_30b;
     signal s_io_1 : t_video_stream_yuv444_30b;
@@ -622,7 +700,6 @@ begin
     -- hardcode their effective values so registers_in(0..2) get optimised
     -- away by yosys.
     s_hue_pot        <= to_unsigned(512, 10);
-    s_mix_pot        <= to_unsigned(1023, 10);
     s_bright_pot     <= to_unsigned(940, 10);
     s_alien_spd_pot  <= unsigned(registers_in(3));   -- Pot 4: Alien Spd
     s_bomb_spd_pot   <= unsigned(registers_in(4));   -- Pot 5: Bomb Drop Spd
@@ -714,6 +791,52 @@ begin
                 s_wizard_facing <= '1';   -- moving right → mirrored
             elsif s_ship_x < s_ship_x_prev then
                 s_wizard_facing <= '0';   -- moving left → default
+            end if;
+        end if;
+    end process;
+
+    -- ========================================================================
+    -- Rainbow ghost recorder
+    -- ========================================================================
+    -- The "has the wizard moved a ghost-gap since the last drop?" test runs
+    -- continuously and pipelined (one 12-bit op per registered stage) so it
+    -- never forms a long carry chain on the pixel clock.  At vsync, if the
+    -- pre-computed s_trail_moved flag is set, drop a new ghost into the ring
+    -- — recording the sprite's top-left X, its facing, and its rainbow
+    -- chroma (palette resolved here, during vblank) — and advance the colour
+    -- counter.  The ghost's Y is the wizard's live Y, so it shares the row.
+    p_trail : process(clk)
+    begin
+        if rising_edge(clk) then
+            -- Stage A: registered signed delta from the last-drop anchor.
+            s_trail_diff <= s_ship_x - s_trail_anchor;
+            -- Stage B: registered |delta| ≥ gap, via two parallel compares.
+            if s_trail_diff >=  to_signed(C_TRAIL_GAP, 12) or
+               s_trail_diff <= -to_signed(C_TRAIL_GAP, 12) then
+                s_trail_moved <= '1';
+            else
+                s_trail_moved <= '0';
+            end if;
+
+            if s_timing.vsync_start = '1' and s_trail_moved = '1' then
+                s_trail_x(to_integer(s_trail_head))     <= s_ship_x;
+                s_trail_u(to_integer(s_trail_head))     <=
+                    C_TRAIL_PAL_U(to_integer(s_trail_colctr));
+                s_trail_v(to_integer(s_trail_head))     <=
+                    C_TRAIL_PAL_V(to_integer(s_trail_colctr));
+                s_trail_face(to_integer(s_trail_head))  <= s_wizard_facing;
+                s_trail_valid(to_integer(s_trail_head)) <= '1';
+                s_trail_anchor <= s_ship_x;
+                if s_trail_head >= to_unsigned(C_TRAIL_LEN - 1, 3) then
+                    s_trail_head <= (others => '0');
+                else
+                    s_trail_head <= s_trail_head + 1;
+                end if;
+                if s_trail_colctr >= to_unsigned(6, 3) then
+                    s_trail_colctr <= (others => '0');
+                else
+                    s_trail_colctr <= s_trail_colctr + 1;
+                end if;
             end if;
         end if;
     end process;
@@ -1075,48 +1198,14 @@ begin
                     v_scan_dy  := v_scan_by - s_form_y;
                     s_ph_alien_sel <= s_bullet_scan;
                     if v_scan_act = '1' then
-                        s_ph_bf_dx <= v_scan_dx;
-                        s_ph_bf_dy <= v_scan_dy;
-                        if v_scan_dy < to_signed(144, 12) then
-                            s_ph_bf_dy_lt144 <= '1';
-                        else
-                            s_ph_bf_dy_lt144 <= '0';
-                        end if;
-                        if v_scan_dy < to_signed(288, 12) then
-                            s_ph_bf_dy_lt288 <= '1';
-                        else
-                            s_ph_bf_dy_lt288 <= '0';
-                        end if;
+                        -- Power-of-two cells → hit cell is a bit-slice.
+                        s_ph_bf_col <= unsigned(v_scan_dx(9 downto 7));
+                        s_ph_bf_row <= unsigned(v_scan_dy(8 downto 7));
                         if v_scan_dy >= to_signed(0, 12) and
                            v_scan_dy <  to_signed(C_FORM_H, 12) then
                             s_ph_bf_dy_in <= '1';
                         else
                             s_ph_bf_dy_in <= '0';
-                        end if;
-                        if v_scan_dx < to_signed(144, 12) then
-                            s_ph_bf_dx_lt144 <= '1';
-                        else
-                            s_ph_bf_dx_lt144 <= '0';
-                        end if;
-                        if v_scan_dx < to_signed(288, 12) then
-                            s_ph_bf_dx_lt288 <= '1';
-                        else
-                            s_ph_bf_dx_lt288 <= '0';
-                        end if;
-                        if v_scan_dx < to_signed(432, 12) then
-                            s_ph_bf_dx_lt432 <= '1';
-                        else
-                            s_ph_bf_dx_lt432 <= '0';
-                        end if;
-                        if v_scan_dx < to_signed(576, 12) then
-                            s_ph_bf_dx_lt576 <= '1';
-                        else
-                            s_ph_bf_dx_lt576 <= '0';
-                        end if;
-                        if v_scan_dx < to_signed(720, 12) then
-                            s_ph_bf_dx_lt720 <= '1';
-                        else
-                            s_ph_bf_dx_lt720 <= '0';
                         end if;
                         if v_scan_dx >= to_signed(0, 12) and
                            v_scan_dx <  to_signed(C_FORM_W, 12) then
@@ -1142,57 +1231,24 @@ begin
                 -- --------------------------------------------------
                 when 3 =>
                     s_ph_alien_in <= s_ph_bf_dx_in and s_ph_bf_dy_in;
-                    if s_ph_bf_dy_lt144 = '1' then
-                        if    s_ph_bf_dx_lt144 = '1' then s_ph_alien_idx <= "00000";
-                        elsif s_ph_bf_dx_lt288 = '1' then s_ph_alien_idx <= "00001";
-                        elsif s_ph_bf_dx_lt432 = '1' then s_ph_alien_idx <= "00010";
-                        elsif s_ph_bf_dx_lt576 = '1' then s_ph_alien_idx <= "00011";
-                        elsif s_ph_bf_dx_lt720 = '1' then s_ph_alien_idx <= "00100";
-                        else                              s_ph_alien_idx <= "00101";
-                        end if;
-                    elsif s_ph_bf_dy_lt288 = '1' then
-                        if    s_ph_bf_dx_lt144 = '1' then s_ph_alien_idx <= "01000";
-                        elsif s_ph_bf_dx_lt288 = '1' then s_ph_alien_idx <= "01001";
-                        elsif s_ph_bf_dx_lt432 = '1' then s_ph_alien_idx <= "01010";
-                        elsif s_ph_bf_dx_lt576 = '1' then s_ph_alien_idx <= "01011";
-                        elsif s_ph_bf_dx_lt720 = '1' then s_ph_alien_idx <= "01100";
-                        else                              s_ph_alien_idx <= "01101";
-                        end if;
-                    else
-                        if    s_ph_bf_dx_lt144 = '1' then s_ph_alien_idx <= "10000";
-                        elsif s_ph_bf_dx_lt288 = '1' then s_ph_alien_idx <= "10001";
-                        elsif s_ph_bf_dx_lt432 = '1' then s_ph_alien_idx <= "10010";
-                        elsif s_ph_bf_dx_lt576 = '1' then s_ph_alien_idx <= "10011";
-                        elsif s_ph_bf_dx_lt720 = '1' then s_ph_alien_idx <= "10100";
-                        else                              s_ph_alien_idx <= "10101";
-                        end if;
-                    end if;
+                    -- alien_idx = {row(1..0), col(2..0)} straight from the
+                    -- bit-sliced cell — no priority encoder.
+                    s_ph_alien_idx <= s_ph_bf_row & s_ph_bf_col;
+                    -- Pre-read alien-alive at the hit cell (s_aliens is stable
+                    -- between phases) so phase 4 commits off a single flop.
+                    s_ph_alien_alive_pre <=
+                        s_aliens(to_integer(s_ph_bf_row & s_ph_bf_col));
 
-                    -- Pre-compute explosion spawn coords from the SAME
-                    -- cascade flags (parallel to alien_idx encode).
-                    -- expl = form + col*144 + 48 / form + row*144 + 48.
-                    -- Phase 4 just registers these into s_expl_x/y on
-                    -- a kill — shortens the alien_alive → spawn chain.
-                    if    s_ph_bf_dx_lt144 = '1' then
-                        s_ph_expl_x_cand <= s_form_x + to_signed(      48, 12);
-                    elsif s_ph_bf_dx_lt288 = '1' then
-                        s_ph_expl_x_cand <= s_form_x + to_signed(144 + 48, 12);
-                    elsif s_ph_bf_dx_lt432 = '1' then
-                        s_ph_expl_x_cand <= s_form_x + to_signed(288 + 48, 12);
-                    elsif s_ph_bf_dx_lt576 = '1' then
-                        s_ph_expl_x_cand <= s_form_x + to_signed(432 + 48, 12);
-                    elsif s_ph_bf_dx_lt720 = '1' then
-                        s_ph_expl_x_cand <= s_form_x + to_signed(576 + 48, 12);
-                    else
-                        s_ph_expl_x_cand <= s_form_x + to_signed(720 + 48, 12);
-                    end if;
-                    if s_ph_bf_dy_lt144 = '1' then
-                        s_ph_expl_y_cand <= s_form_y + to_signed(      48, 12);
-                    elsif s_ph_bf_dy_lt288 = '1' then
-                        s_ph_expl_y_cand <= s_form_y + to_signed(144 + 48, 12);
-                    else
-                        s_ph_expl_y_cand <= s_form_y + to_signed(288 + 48, 12);
-                    end if;
+                    -- Explosion spawn = cell origin + centring offset.
+                    -- cell origin = form + (cell << 7); the 48-wide blast is
+                    -- centred in the 128 cell → +40.  Built from the sliced
+                    -- col/row (a shift), parallel to the alien_idx path.
+                    s_ph_expl_x_cand <= s_form_x +
+                        signed(shift_left(resize(s_ph_bf_col, 12), 7)) +
+                        to_signed(40, 12);
+                    s_ph_expl_y_cand <= s_form_y +
+                        signed(shift_left(resize(s_ph_bf_row, 12), 7)) +
+                        to_signed(40, 12);
 
                     s_ph_phase <= to_unsigned(4, 3);
 
@@ -1204,7 +1260,7 @@ begin
                 -- --------------------------------------------------
                 when 4 =>
                     if s_ph_alien_in = '1' and
-                       s_aliens(to_integer(s_ph_alien_idx)) = '1' then
+                       s_ph_alien_alive_pre = '1' then
                         s_aliens(to_integer(s_ph_alien_idx)) <= '0';
                         s_bullet_active(to_integer(s_ph_alien_sel)) <= '0';
                         if s_dead_count < to_unsigned(31, 5) then
@@ -1366,49 +1422,14 @@ begin
             s_stg2_expl_dy <= s_stg1_vy - s_expl_y;
             s_stg2_expl_a  <= s_expl_active;
             s_stg2_expl_fr <= s_expl_frame;
-            -- Pre-register row + col cascade flags for the 144-px cell
-            -- grid (neither power of 2) so S3 doesn't stack 12-bit
-            -- compares with the priority encoders that pick row/col.
-            if (s_stg1_vy - s_form_y) < to_signed(144, 12) then
-                s_stg2_fdy_lt144 <= '1';
-            else
-                s_stg2_fdy_lt144 <= '0';
-            end if;
-            if (s_stg1_vy - s_form_y) < to_signed(288, 12) then
-                s_stg2_fdy_lt288 <= '1';
-            else
-                s_stg2_fdy_lt288 <= '0';
-            end if;
+            -- Power-of-two (128) cells → the row/col are bit-slices of the
+            -- registered form deltas in S3, so S2 only needs the in-grid
+            -- range checks (no 12-bit comparator cascade, no priority encoder).
             if (s_stg1_vy - s_form_y) >= to_signed(0, 12)
             and (s_stg1_vy - s_form_y) < to_signed(C_FORM_H, 12) then
                 s_stg2_fdy_in <= '1';
             else
                 s_stg2_fdy_in <= '0';
-            end if;
-            if (s_stg1_hx - s_form_x) < to_signed(144, 12) then
-                s_stg2_fdx_lt144 <= '1';
-            else
-                s_stg2_fdx_lt144 <= '0';
-            end if;
-            if (s_stg1_hx - s_form_x) < to_signed(288, 12) then
-                s_stg2_fdx_lt288 <= '1';
-            else
-                s_stg2_fdx_lt288 <= '0';
-            end if;
-            if (s_stg1_hx - s_form_x) < to_signed(432, 12) then
-                s_stg2_fdx_lt432 <= '1';
-            else
-                s_stg2_fdx_lt432 <= '0';
-            end if;
-            if (s_stg1_hx - s_form_x) < to_signed(576, 12) then
-                s_stg2_fdx_lt576 <= '1';
-            else
-                s_stg2_fdx_lt576 <= '0';
-            end if;
-            if (s_stg1_hx - s_form_x) < to_signed(720, 12) then
-                s_stg2_fdx_lt720 <= '1';
-            else
-                s_stg2_fdx_lt720 <= '0';
             end if;
             if (s_stg1_hx - s_form_x) >= to_signed(0, 12)
             and (s_stg1_hx - s_form_x) < to_signed(C_FORM_W, 12) then
@@ -1419,6 +1440,17 @@ begin
             s_stg2_frame  <= s_alien_frame;
             s_stg2_bull_a <= s_bullet_active;
             s_stg2_bomb_a <= s_bomb_active;
+
+            -- Ghost X deltas (live ring state changes only during vblank);
+            -- the Y delta is shared with the ship (s_stg2_ship_dy).  Per-ghost
+            -- chroma is frame-constant, so it is NOT carried per pixel — only
+            -- the winning-ghost selector rides the pipe; colour is read back
+            -- from the ring at S5.
+            for i in 0 to C_TRAIL_LEN - 1 loop
+                s_stg2_trail_dx(i) <= s_stg1_hx - s_trail_x(i);
+            end loop;
+            s_stg2_trail_v  <= s_trail_valid;
+            s_stg2_trail_f  <= s_trail_face;
         end if;
     end process;
 
@@ -1433,76 +1465,30 @@ begin
         variable v_chunk_idx   : unsigned(3 downto 0);
         variable v_bnk_col_use : unsigned(6 downto 0);
         variable v_bnk_in_y    : std_logic;
-        variable v_in_cell_x   : signed(11 downto 0);
-        variable v_in_cell_y   : signed(11 downto 0);
         variable v_row_bits    : unsigned(1 downto 0);
         variable v_col_bits    : unsigned(2 downto 0);
-        variable v_in_sprite_x : std_logic;
-        variable v_in_sprite_y : std_logic;
-        variable v_spr_x       : signed(11 downto 0);
-        variable v_spr_y       : signed(11 downto 0);
+        variable v_gh_in       : std_logic;
+        variable v_gh_col      : unsigned(6 downto 0);
+        variable v_gh_f        : std_logic;
+        variable v_gh_sel      : integer range 0 to C_TRAIL_LEN - 1;
     begin
         if rising_edge(clk) then
-            -- Priority encode row (3 ways) and col (6 ways) from the
-            -- pre-registered S2 cascade flags.  in_cell_x/y are form_dx/dy
-            -- minus the cell's origin (0, 144, 288, 432, 576 or 720).
-            if s_stg2_fdy_lt144 = '1' then
-                v_row_bits  := "00";
-                v_in_cell_y := s_stg2_form_dy;
-            elsif s_stg2_fdy_lt288 = '1' then
-                v_row_bits  := "01";
-                v_in_cell_y := s_stg2_form_dy - to_signed(144, 12);
-            else
-                v_row_bits  := "10";
-                v_in_cell_y := s_stg2_form_dy - to_signed(288, 12);
-            end if;
-            if s_stg2_fdx_lt144 = '1' then
-                v_col_bits  := "000";
-                v_in_cell_x := s_stg2_form_dx;
-            elsif s_stg2_fdx_lt288 = '1' then
-                v_col_bits  := "001";
-                v_in_cell_x := s_stg2_form_dx - to_signed(144, 12);
-            elsif s_stg2_fdx_lt432 = '1' then
-                v_col_bits  := "010";
-                v_in_cell_x := s_stg2_form_dx - to_signed(288, 12);
-            elsif s_stg2_fdx_lt576 = '1' then
-                v_col_bits  := "011";
-                v_in_cell_x := s_stg2_form_dx - to_signed(432, 12);
-            elsif s_stg2_fdx_lt720 = '1' then
-                v_col_bits  := "100";
-                v_in_cell_x := s_stg2_form_dx - to_signed(576, 12);
-            else
-                v_col_bits  := "101";
-                v_in_cell_x := s_stg2_form_dx - to_signed(720, 12);
-            end if;
-
-            -- Sprite is C_SPRITE_OFF=8 px into the 144-cell.  Pixel is on
-            -- the sprite only when in_cell_x ∈ [8, 136) AND likewise y.
-            v_spr_x := v_in_cell_x - to_signed(C_SPRITE_OFF, 12);
-            v_spr_y := v_in_cell_y - to_signed(C_SPRITE_OFF, 12);
-            if v_spr_x >= to_signed(0, 12) and
-               v_spr_x <  to_signed(C_SPRITE_W, 12) then
-                v_in_sprite_x := '1';
-            else
-                v_in_sprite_x := '0';
-            end if;
-            if v_spr_y >= to_signed(0, 12) and
-               v_spr_y <  to_signed(C_SPRITE_H, 12) then
-                v_in_sprite_y := '1';
-            else
-                v_in_sprite_y := '0';
-            end if;
-            s_stg3_in_form <= s_stg2_fdx_in and s_stg2_fdy_in
-                              and v_in_sprite_x and v_in_sprite_y;
+            -- Power-of-two (128) cells: column = form_dx[9:7], row =
+            -- form_dy[8:7], and the in-cell coordinate is just the low 7
+            -- bits — all plain bit-slices, no compares/subtracts.  The
+            -- sprite fills the cell, so "in grid" == "on sprite".
+            v_col_bits := unsigned(s_stg2_form_dx(9 downto 7));
+            v_row_bits := unsigned(s_stg2_form_dy(8 downto 7));
+            s_stg3_in_form <= s_stg2_fdx_in and s_stg2_fdy_in;
 
             -- alien_idx = {row(1..0), col(2..0)} → 5 bits
             s_stg3_alien_idx <= v_row_bits & v_col_bits;
 
-            -- 2× nearest-neighbour: source coord = sprite coord >> 1.
+            -- 2× nearest-neighbour: source coord = in-cell coord >> 1.
             -- ROM address = {frame, source_row(5..0)} → 128-entry ROM.
             s_stg3_alien_addr <= s_stg2_frame &
-                                 unsigned(v_spr_y(6 downto 1));
-            s_stg3_alien_col  <= unsigned(v_spr_x(6 downto 1));
+                                 unsigned(s_stg2_form_dy(6 downto 1));
+            s_stg3_alien_col  <= unsigned(s_stg2_form_dx(6 downto 1));
 
             -- Ship
             if s_stg2_ship_dx >= to_signed(0, 12) and
@@ -1520,6 +1506,30 @@ begin
             s_stg3_in_ship  <= v_ship_in_x and v_ship_in_y;
             s_stg3_ship_row <= unsigned(s_stg2_ship_dy(6 downto 0));
             s_stg3_ship_col <= unsigned(s_stg2_ship_dx(6 downto 0));
+
+            -- Ghost afterimages: same 128-tall Y band as the live wizard
+            -- (reuse v_ship_in_y), each at its own X.  Ghosts never overlap
+            -- (spacing ≥ sprite width), so pick the single one covering this
+            -- pixel and pass its column/facing/ring-index to S5 — one row mux
+            -- regardless of ghost count.
+            v_gh_in  := '0';
+            v_gh_col := (others => '0');
+            v_gh_f   := '0';
+            v_gh_sel := 0;
+            for i in 0 to C_TRAIL_LEN - 1 loop
+                if s_stg2_trail_v(i) = '1' and v_ship_in_y = '1' and
+                   s_stg2_trail_dx(i) >= to_signed(0, 12) and
+                   s_stg2_trail_dx(i) <  to_signed(C_SHIP_W, 12) then
+                    v_gh_in  := '1';
+                    v_gh_col := unsigned(s_stg2_trail_dx(i)(6 downto 0));
+                    v_gh_f   := s_stg2_trail_f(i);
+                    v_gh_sel := i;
+                end if;
+            end loop;
+            s_stg3_gh_in  <= v_gh_in;
+            s_stg3_gh_col <= v_gh_col;
+            s_stg3_gh_f   <= v_gh_f;
+            s_stg3_gh_sel <= v_gh_sel;
 
             -- Bullets (each WAND_SHOT 8x16)
             for i in 0 to C_BULLETS - 1 loop
@@ -1662,6 +1672,10 @@ begin
             s_stg4_ship_col  <= s_stg3_ship_col;
             s_stg4_in_bullet <= s_stg3_in_bullet;
             s_stg4_in_bomb   <= s_stg3_in_bomb;
+            s_stg4_gh_in  <= s_stg3_gh_in;
+            s_stg4_gh_col <= s_stg3_gh_col;
+            s_stg4_gh_f   <= s_stg3_gh_f;
+            s_stg4_gh_sel <= s_stg3_gh_sel;
         end if;
     end process;
 
@@ -1675,6 +1689,7 @@ begin
         variable v_expl_bit   : std_logic;
         variable v_on_bullet  : std_logic;
         variable v_on_bomb    : std_logic;
+        variable v_gh_bit     : std_logic;
     begin
         if rising_edge(clk) then
             -- Alien (64-bit row, bit 63 leftmost)
@@ -1740,26 +1755,62 @@ begin
             else
                 s_stg5_on_floor <= '0';
             end if;
+
+            -- Ghost afterimage: the winning ghost shares the live wizard ROM
+            -- row (same Y band), so its silhouette bit is that row indexed at
+            -- the ghost's column, mirrored per its stored facing.  ONE mux —
+            -- the non-overlap guarantee meant S3 already chose the ghost.
+            -- Chroma was resolved at drop time, so no palette LUT here.
+            if s_stg4_gh_f = '0' then
+                v_gh_bit := s_stg4_wizard_row(
+                                127 - to_integer(s_stg4_gh_col));
+            else
+                v_gh_bit := s_stg4_wizard_row(to_integer(s_stg4_gh_col));
+            end if;
+            s_stg5_on_trail <= s_stg4_gh_in and v_gh_bit;
+            s_stg5_trail_u  <= s_trail_u(s_stg4_gh_sel);
+            s_stg5_trail_v  <= s_trail_v(s_stg4_gh_sel);
         end if;
     end process;
 
     -- ========================================================================
     -- Render — S6: color mux
     -- ========================================================================
-    p_stage6 : process(clk)
+    -- Foreground chroma, resolved once per clock from the sw_color toggle.
+    p_fg_color : process(clk)
     begin
         if rising_edge(clk) then
-            s_out_show <= s_stg5_on_alien or s_stg5_on_ship or
-                          s_stg5_on_bullet or s_stg5_on_bomb or
-                          s_stg5_on_bunker or s_stg5_on_expl or
-                          s_stg5_on_floor;
-            s_out_y <= s_bright_pot;
             if s_sw_color = '1' then
-                s_out_u <= s_hue_pot;
-                s_out_v <= C_MAX_VAL - s_hue_pot;
+                s_fg_u <= s_hue_pot;
+                s_fg_v <= C_MAX_VAL - s_hue_pot;
             else
-                s_out_u <= C_CHROMA_MID;
-                s_out_v <= C_CHROMA_MID;
+                s_fg_u <= C_CHROMA_MID;
+                s_fg_v <= C_CHROMA_MID;
+            end if;
+        end if;
+    end process;
+
+    p_stage6 : process(clk)
+        variable v_fg  : std_logic;
+    begin
+        if rising_edge(clk) then
+            -- Foreground sprites/lines (everything except the ghosts).
+            v_fg := s_stg5_on_alien or s_stg5_on_ship or
+                    s_stg5_on_bullet or s_stg5_on_bomb or
+                    s_stg5_on_bunker or s_stg5_on_expl or
+                    s_stg5_on_floor;
+            s_out_show <= v_fg or s_stg5_on_trail;
+
+            -- Single 2:1 select per channel: foreground (incl. the live
+            -- wizard) wins over the faded ghost afterimages.
+            if v_fg = '1' then
+                s_out_y <= s_bright_pot;
+                s_out_u <= s_fg_u;
+                s_out_v <= s_fg_v;
+            else
+                s_out_y <= to_unsigned(C_GHOST_LUMA, 10);
+                s_out_u <= s_stg5_trail_u;
+                s_out_v <= s_stg5_trail_v;
             end if;
         end if;
     end process;
@@ -1772,7 +1823,7 @@ begin
         if rising_edge(clk) then
             s_sync_pipe(0) <= data_in.field_n & data_in.avid &
                               data_in.vsync_n & data_in.hsync_n;
-            for i in 1 to 11 loop
+            for i in 1 to C_DELAY - 1 loop
                 s_sync_pipe(i) <= s_sync_pipe(i - 1);
             end loop;
 
@@ -1812,48 +1863,22 @@ begin
     end process;
 
     -- ========================================================================
-    -- Wet/dry mix
-    -- ========================================================================
-    mix_y_inst : entity work.interpolator_u
-        generic map(G_WIDTH => 10, G_FRAC_BITS => 10,
-                    G_OUTPUT_MIN => 0, G_OUTPUT_MAX => 1023)
-        port map(clk => clk, enable => '1',
-                 a => unsigned(s_y_delay(C_DELAY - 1)),
-                 b => unsigned(s_wet_y),
-                 t => s_mix_pot,
-                 result => s_mix_y_result, valid => s_mix_y_valid);
-
-    mix_u_inst : entity work.interpolator_u
-        generic map(G_WIDTH => 10, G_FRAC_BITS => 10,
-                    G_OUTPUT_MIN => 0, G_OUTPUT_MAX => 1023)
-        port map(clk => clk, enable => '1',
-                 a => unsigned(s_u_delay(C_DELAY - 1)),
-                 b => unsigned(s_wet_u),
-                 t => s_mix_pot,
-                 result => s_mix_u_result, valid => s_mix_u_valid);
-
-    mix_v_inst : entity work.interpolator_u
-        generic map(G_WIDTH => 10, G_FRAC_BITS => 10,
-                    G_OUTPUT_MIN => 0, G_OUTPUT_MAX => 1023)
-        port map(clk => clk, enable => '1',
-                 a => unsigned(s_v_delay(C_DELAY - 1)),
-                 b => unsigned(s_wet_v),
-                 t => s_mix_pot,
-                 result => s_mix_v_result, valid => s_mix_v_valid);
-
-    -- ========================================================================
     -- IO alignment
     -- ========================================================================
+    -- The wet pixel goes straight to the output (no wet/dry interpolation —
+    -- mix was hardcoded fully wet).  Sync is tapped at s_sync_pipe(C_DELAY-1),
+    -- matching the wet pixel's 8-clock render depth.  Bit 2 of the sync word
+    -- is avid (field_n & avid & vsync_n & hsync_n).
     p_io : process(clk)
     begin
         if rising_edge(clk) then
-            s_io_0.y       <= std_logic_vector(s_mix_y_result);
-            s_io_0.u       <= std_logic_vector(s_mix_u_result);
-            s_io_0.v       <= std_logic_vector(s_mix_v_result);
-            s_io_0.hsync_n <= s_sync_pipe(11)(0);
-            s_io_0.vsync_n <= s_sync_pipe(11)(1);
-            s_io_0.avid    <= s_mix_y_valid and s_mix_u_valid and s_mix_v_valid;
-            s_io_0.field_n <= s_sync_pipe(11)(3);
+            s_io_0.y       <= s_wet_y;
+            s_io_0.u       <= s_wet_u;
+            s_io_0.v       <= s_wet_v;
+            s_io_0.hsync_n <= s_sync_pipe(C_DELAY - 1)(0);
+            s_io_0.vsync_n <= s_sync_pipe(C_DELAY - 1)(1);
+            s_io_0.avid    <= s_sync_pipe(C_DELAY - 1)(2);
+            s_io_0.field_n <= s_sync_pipe(C_DELAY - 1)(3);
             s_io_1 <= s_io_0;
         end if;
     end process;
