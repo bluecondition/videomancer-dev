@@ -18,7 +18,7 @@
 -- ADC noise is crushed to sub-tick level, and the 64x finer position feeds a
 -- widened step lerp (zprod >> 16).  The field settles ~1/8 s after P12 stops.
 --
--- Depth: NP=3 planes composited front-to-back, each at its own cell size that
+-- Depth: NP=4 planes composited front-to-back, each at its own cell size that
 -- scales from dense/far to large/near at a different speed (front fastest); the
 -- numbers are SPLIT across the planes (a balanced per-cell hash assigns each cell
 -- to one plane) so each number lives at one depth.  P12=100% = all far/dense/small
@@ -30,9 +30,11 @@
 -- Controls: K1 Color, K2 Change Rate, K3 Number Set, K4 Size (smooth font
 --           scale; brightness is always full and uniform across planes),
 --           K5 Spacing (gap between numbers, font size unchanged: pitch step
---           = font step * RT via the vblank multiply chain), K6 Glow
---           (two-ring fading phosphor haze), S7 Animate, S8 Background,
---           S9 Video, S10 Font, S11 Invert, P12 Zoom.
+--           = font step * RT via the vblank multiply chain), K6 Glow (a few
+--           SCREEN pixels of phosphor haze fading with true screen distance,
+--           via a 9-tap window on the composited lit mask -- independent of
+--           digit size), S7 Animate, S8 Background, S9 Video, S10 Font,
+--           S11 Invert, P12 Zoom.
 --
 -- Author: bluecondition
 
@@ -132,24 +134,18 @@ architecture ziffern of program_top is
     type t_dlut is array (0 to 15) of integer range 0 to 8;
     constant C_DIGLUT : t_dlut := (0,1,2,3,4,5,6,7,8,0,1,2,3,4,5,6);
 
-    -- Packed glyph ROM for BRAM inference: one 40-bit word per (glyph, row) =
-    -- the 5-row window rowAbove2 & rowAbove & rowCentre & rowBelow & rowBelow2
-    -- (boundary rows zero), addr = idx*8 + gy.  One synchronous read per plane
-    -- replaces the wide LUT muxes whose fanout wiring congests the router at
-    -- NP=4; the 5-row window feeds the two-ring fading glow.
-    type t_grom is array (0 to 255) of std_logic_vector(39 downto 0);
+    -- Flattened glyph ROM for BRAM inference: one row byte per (glyph, row),
+    -- addr = idx*8 + gy.  One synchronous read per plane replaces the wide
+    -- LUT muxes whose fanout wiring congests the router at NP=4.  (Glow no
+    -- longer needs neighbour rows: it is a SCREEN-space window on the
+    -- composited lit mask, not a glyph-space ring.)
+    type t_grom is array (0 to 255) of std_logic_vector(7 downto 0);
     function gen_grom return t_grom is
         variable r : t_grom := (others => (others => '0'));
-        variable uu, u, c, d, dd : std_logic_vector(7 downto 0);
     begin
         for idx in 0 to 17 loop
             for gy in 0 to 7 loop
-                if gy > 1 then uu := C_DIGITS(idx, gy - 2); else uu := x"00"; end if;
-                if gy > 0 then u  := C_DIGITS(idx, gy - 1); else u  := x"00"; end if;
-                c := C_DIGITS(idx, gy);
-                if gy < 7 then d  := C_DIGITS(idx, gy + 1); else d  := x"00"; end if;
-                if gy < 6 then dd := C_DIGITS(idx, gy + 2); else dd := x"00"; end if;
-                r(idx * 8 + gy) := uu & u & c & d & dd;
+                r(idx * 8 + gy) := C_DIGITS(idx, gy);
             end loop;
         end loop;
         return r;
@@ -260,7 +256,7 @@ architecture ziffern of program_top is
     --   T10  = glyph's share of the cell from K5 (1023=packed .. 512=gap one font wide)
     --   RT   = (R*T10)>>10, single combined factor: pitch step = (font step * RT)>>10
     --   tk/t8 = glyph column thresholds k*(T10>>3) and gate 8*(T10>>3) on frac(17:8)
-    signal s_rr    : unsigned(10 downto 0) := to_unsigned(1024, 11);
+    signal s_rr    : unsigned(11 downto 0) := to_unsigned(1024, 12);
     signal s_t10   : unsigned(9 downto 0) := to_unsigned(1023, 10);
     signal s_rt    : unsigned(10 downto 0) := to_unsigned(1024, 11);
     type t_thr is array (1 to 7) of unsigned(9 downto 0);
@@ -286,7 +282,8 @@ architecture ziffern of program_top is
 
     signal s_num_y, s_num_u, s_num_v : unsigned(9 downto 0) := (others => '0');
     signal s_bg_y,  s_bg_u,  s_bg_v  : unsigned(9 downto 0) := (others => '0');
-    signal s_glow1_y, s_glow2_y : unsigned(9 downto 0) := (others => '0');
+    signal s_glow1_y, s_glow2_y, s_glow3_y, s_glow4_y
+                       : unsigned(9 downto 0) := (others => '0');
     signal s_glow_on : std_logic := '0';
 
     -- filtered zoom position (Q10.6): eases toward (1023-P12)<<6 each frame
@@ -333,20 +330,23 @@ architecture ziffern of program_top is
     signal s2_gx, s2_gy : t_u3arr := (others => (others => '0'));
     signal s2_vis : t_slarr := (others => '0');
 
-    type t_slv40arr is array (0 to NP - 1) of std_logic_vector(39 downto 0);
-    signal s3_word : t_slv40arr := (others => (others => '0'));   -- BRAM glyph read
-    signal s3_rb_uu, s3_rb_u, s3_rb_c, s3_rb_d, s3_rb_dd : t_slv8arr;  -- word slices
+    signal s3_word : t_slv8arr := (others => (others => '0'));    -- BRAM glyph row
     signal s3_gx : t_u3arr := (others => (others => '0'));
     signal s3_vis : t_slarr := (others => '0');
 
-    signal s4_center, s4_glow1, s4_glow2 : t_slarr := (others => '0');
+    signal s4_center : t_slarr := (others => '0');
 
-    -- sync delay pipeline (aligned to s4): [vpar field avid vsync hsync]
-    type t_syncp is array (0 to 5) of std_logic_vector(4 downto 0);
+    -- screen-space glow: composited lit mask through a +/-4 px window; the
+    -- output pixel is the window centre, glow level = distance to nearest lit
+    signal s_litw : std_logic_vector(0 to 8) := (others => '0');
+
+    -- sync delay pipeline (aligned through the glow window to the colour
+    -- stage: S0..S4 + lit + 4-tap centre = 11 deep): [vpar field avid vsync hsync]
+    type t_syncp is array (0 to 10) of std_logic_vector(4 downto 0);
     signal s_syncp : t_syncp := (others => (others => '0'));
 
     -- incoming video delayed to align with the colour stage (S9 video key)
-    type t_vidp is array (0 to 5) of unsigned(9 downto 0);
+    type t_vidp is array (0 to 10) of unsigned(9 downto 0);
     signal s_vy, s_vu, s_vv : t_vidp := (others => (others => '0'));
 
     signal s5_y, s5_u, s5_v : unsigned(9 downto 0) := (others => '0');
@@ -484,9 +484,11 @@ begin
         variable v_sf, v_sn : unsigned(17 downto 0);
         variable v_hidx : integer range 0 to 15;
         variable v_t10, v_t1 : unsigned(9 downto 0);
+        variable v_d : unsigned(11 downto 0);
     begin
         if rising_edge(clk) then
-            v_Gbg := shift_right(s_measured_h, 5);   -- far cell size (~32 across)
+            -- far cell 25% smaller than measured>>5 -> zoom starts deeper (~42 across)
+            v_Gbg := shift_right(s_measured_h, 5) - shift_right(s_measured_h, 7);
             v_Gfg := shift_right(s_measured_h, 3);   -- near cell size (~8 across)
             -- step endpoints (cells/pixel) = (1<<FRAC)/cellsize, via the recip LUT.
             v_sf := C_RECIP(to_integer(v_Gbg(7 downto 0)));   -- far  (bigger step)
@@ -517,8 +519,17 @@ begin
                 s_num_u <= C_HUE_U(v_hidx);
                 s_num_v <= C_HUE_V(v_hidx);
 
-                -- K4 Size: R = 1536-K4 scales the zoom step (unity at K4=512)
-                s_rr <= to_unsigned(1536, 11) - resize(s_sizek, 11);
+                -- K4 Size: piecewise step scale, font 0.5x (K4=0) .. 1x (512)
+                -- .. ~3x (1023); more range up than down per user preference.
+                if s_sizek(9) = '0' then
+                    s_rr <= to_unsigned(2048, 12)
+                            - shift_left(resize(s_sizek, 12), 1);
+                else
+                    v_d := resize(s_sizek(8 downto 0), 12);
+                    s_rr <= to_unsigned(1024, 12)
+                            - (v_d + shift_right(v_d, 2)
+                                   + shift_right(v_d, 4) + shift_right(v_d, 6));
+                end if;
                 -- K5 Spacing: glyph share of the cell T10 = 1023 - K5/2
                 v_t10 := to_unsigned(1023, 10) - ("0" & s_space(9 downto 1));
                 s_t10 <= v_t10;
@@ -672,13 +683,15 @@ begin
         end if;
     end process;
 
-    -- Glow + background colours from the REGISTERED number colour.  Two-ring
-    -- fade: inner ring max Y/4, outer ring max Y/16 (subtle phosphor haze).
+    -- Glow + background colours from the REGISTERED number colour.  Four
+    -- fade levels for 1..4 screen px from a digit: Y/4, Y/8, Y/16, Y/32.
     p_colaux : process(clk)
     begin
         if rising_edge(clk) then
             s_glow1_y <= shift_right(scale8(s_num_y, s_glow(9 downto 7)), 2);
-            s_glow2_y <= shift_right(scale8(s_num_y, s_glow(9 downto 7)), 4);
+            s_glow2_y <= shift_right(scale8(s_num_y, s_glow(9 downto 7)), 3);
+            s_glow3_y <= shift_right(scale8(s_num_y, s_glow(9 downto 7)), 4);
+            s_glow4_y <= shift_right(scale8(s_num_y, s_glow(9 downto 7)), 5);
             if s_glow > to_unsigned(32, 10) then s_glow_on <= '1'; else s_glow_on <= '0'; end if;
             if s_bg_tint = '1' then
                 s_bg_y <= shift_right(s_num_y, 4); s_bg_u <= s_num_u; s_bg_v <= s_num_v;
@@ -707,7 +720,7 @@ begin
             s_vy(0) <= unsigned(data_in.y);
             s_vu(0) <= unsigned(data_in.u);
             s_vv(0) <= unsigned(data_in.v);
-            for k in 1 to 5 loop
+            for k in 1 to 10 loop
                 s_syncp(k) <= s_syncp(k - 1);
                 s_vy(k) <= s_vy(k - 1);
                 s_vu(k) <= s_vu(k - 1);
@@ -859,42 +872,37 @@ begin
                 s3_vis(i) <= s2_vis(i);
             end if;
         end process;
-        s3_rb_uu(i) <= s3_word(i)(39 downto 32);
-        s3_rb_u(i)  <= s3_word(i)(31 downto 24);
-        s3_rb_c(i)  <= s3_word(i)(23 downto 16);
-        s3_rb_d(i)  <= s3_word(i)(15 downto 8);
-        s3_rb_dd(i) <= s3_word(i)(7 downto 0);
     end generate;
 
     --------------------------------------------------------------------------
-    -- S4: per-plane centre pixel + two-ring fading glow.
-    --   ring1 = 3x3 box minus centre (bright inner haze)
-    --   ring2 = 5x5 box minus 3x3   (dim outer haze)
+    -- S4: per-plane centre pixel.
     --------------------------------------------------------------------------
     p_pix : process(clk)
         variable p : integer range -1 to 8;
-        variable v_center, v_g1, v_g2 : std_logic;
     begin
         if rising_edge(clk) then
             for i in 0 to NP - 1 loop
                 p := to_integer(s3_gx(i));
-                v_center := getbit(s3_rb_c(i), p) and s3_vis(i);
-                v_g1 := ( getbit(s3_rb_u(i), p-1) or getbit(s3_rb_u(i), p) or getbit(s3_rb_u(i), p+1) or
-                          getbit(s3_rb_c(i), p-1) or                          getbit(s3_rb_c(i), p+1) or
-                          getbit(s3_rb_d(i), p-1) or getbit(s3_rb_d(i), p) or getbit(s3_rb_d(i), p+1) )
-                        and s3_vis(i) and (not v_center);
-                v_g2 := ( getbit(s3_rb_uu(i), p-2) or getbit(s3_rb_uu(i), p-1) or getbit(s3_rb_uu(i), p) or
-                          getbit(s3_rb_uu(i), p+1) or getbit(s3_rb_uu(i), p+2) or
-                          getbit(s3_rb_dd(i), p-2) or getbit(s3_rb_dd(i), p-1) or getbit(s3_rb_dd(i), p) or
-                          getbit(s3_rb_dd(i), p+1) or getbit(s3_rb_dd(i), p+2) or
-                          getbit(s3_rb_u(i),  p-2) or getbit(s3_rb_u(i),  p+2) or
-                          getbit(s3_rb_c(i),  p-2) or getbit(s3_rb_c(i),  p+2) or
-                          getbit(s3_rb_d(i),  p-2) or getbit(s3_rb_d(i),  p+2) )
-                        and s3_vis(i) and (not v_center) and (not v_g1);
-                s4_center(i) <= v_center;
-                s4_glow1(i)  <= v_g1;
-                s4_glow2(i)  <= v_g2;
+                s4_center(i) <= getbit(s3_word(i), p) and s3_vis(i);
             end loop;
+        end if;
+    end process;
+
+    --------------------------------------------------------------------------
+    -- S5w: composite the planes' lit bits and slide them through a 9-tap
+    -- window.  The colour stage outputs the window CENTRE (litw(4)); taps
+    -- 3/5, 2/6, 1/7, 0/8 are the pixels 1..4 SCREEN px away, giving a glow
+    -- that fades with true screen distance regardless of digit size.
+    --------------------------------------------------------------------------
+    p_lit : process(clk)
+        variable v_any : std_logic;
+    begin
+        if rising_edge(clk) then
+            v_any := '0';
+            for i in 0 to NP - 1 loop
+                if s4_center(i) = '1' then v_any := '1'; end if;
+            end loop;
+            s_litw <= v_any & s_litw(0 to 7);
         end if;
     end process;
 
@@ -904,34 +912,30 @@ begin
     p_color : process(clk)
         variable v_y, v_u, v_v : unsigned(9 downto 0);
         variable v_bgy, v_bgu, v_bgv : unsigned(9 downto 0);
-        variable v_win : integer range -1 to NP - 1;
-        variable v_g1sel, v_g2sel : std_logic;
+        variable v_lit : std_logic;
+        variable v_g1, v_g2, v_g3, v_g4 : std_logic;
         variable v_on_y, v_on_u, v_on_v : unsigned(9 downto 0);
         variable v_off_y, v_off_u, v_off_v : unsigned(9 downto 0);
     begin
         if rising_edge(clk) then
             if s_video = '1' then
                 if s_bg_tint = '1' then
-                    v_bgy := resize(shift_right(resize(s_bg_y,11) + resize(s_vy(5),11), 1), 10);
-                    v_bgu := resize(shift_right(resize(s_bg_u,11) + resize(s_vu(5),11), 1), 10);
-                    v_bgv := resize(shift_right(resize(s_bg_v,11) + resize(s_vv(5),11), 1), 10);
+                    v_bgy := resize(shift_right(resize(s_bg_y,11) + resize(s_vy(10),11), 1), 10);
+                    v_bgu := resize(shift_right(resize(s_bg_u,11) + resize(s_vu(10),11), 1), 10);
+                    v_bgv := resize(shift_right(resize(s_bg_v,11) + resize(s_vv(10),11), 1), 10);
                 else
-                    v_bgy := s_vy(5); v_bgu := s_vu(5); v_bgv := s_vv(5);
+                    v_bgy := s_vy(10); v_bgu := s_vu(10); v_bgv := s_vv(10);
                 end if;
             else
                 v_bgy := s_bg_y; v_bgu := s_bg_u; v_bgv := s_bg_v;
             end if;
 
-            v_win := -1;
-            for i in NP - 1 downto 0 loop
-                if s4_center(i) = '1' then v_win := i; end if;
-            end loop;
-            v_g1sel := '0';
-            v_g2sel := '0';
-            for i in 0 to NP - 1 loop
-                if s4_glow1(i) = '1' then v_g1sel := '1'; end if;
-                if s4_glow2(i) = '1' then v_g2sel := '1'; end if;
-            end loop;
+            -- window centre is the output pixel; taps outward = screen px away
+            v_lit := s_litw(4);
+            v_g1  := s_litw(3) or s_litw(5);
+            v_g2  := s_litw(2) or s_litw(6);
+            v_g3  := s_litw(1) or s_litw(7);
+            v_g4  := s_litw(0) or s_litw(8);
 
             -- uniform brightness across all planes (no depth fade)
             if s_invert = '0' then
@@ -942,18 +946,22 @@ begin
                 v_off_y := s_num_y; v_off_u := s_num_u; v_off_v := s_num_v;
             end if;
 
-            if v_win >= 0 then
+            if v_lit = '1' then
                 v_y := v_on_y; v_u := v_on_u; v_v := v_on_v;
-            elsif (v_g1sel = '1') and (s_glow_on = '1') then
+            elsif (v_g1 = '1') and (s_glow_on = '1') then
                 v_y := s_glow1_y; v_u := s_num_u; v_v := s_num_v;
-            elsif (v_g2sel = '1') and (s_glow_on = '1') then
+            elsif (v_g2 = '1') and (s_glow_on = '1') then
                 v_y := s_glow2_y; v_u := s_num_u; v_v := s_num_v;
+            elsif (v_g3 = '1') and (s_glow_on = '1') then
+                v_y := s_glow3_y; v_u := s_num_u; v_v := s_num_v;
+            elsif (v_g4 = '1') and (s_glow_on = '1') then
+                v_y := s_glow4_y; v_u := s_num_u; v_v := s_num_v;
             else
                 v_y := v_off_y; v_u := v_off_u; v_v := v_off_v;
             end if;
 
             s5_y <= v_y; s5_u <= v_u; s5_v <= v_v;
-            s5_sync <= s_syncp(5);
+            s5_sync <= s_syncp(10);
         end if;
     end process;
 
