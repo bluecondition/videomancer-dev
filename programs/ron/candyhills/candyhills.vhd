@@ -110,20 +110,23 @@ architecture candyhills of program_top is
     constant CREST_U : integer := 492;
     constant CREST_V : integer := 488;
 
-    -- BUSHES: small round domes that bulge up off the foreground crest into the
-    -- sky, in occasional small groups.  Flat base on the crest, semicircle up.
-    -- All same size (radius BR, in a BSLOT-wide slot), fixed grassy-green colours
-    -- (U = Cr, V = Cb swapped).  Fill is textured (the watercolour wash applies);
-    -- the outline is a darker green as thick as the crest line.
-    constant BSLOTLOG : natural := 5;    -- slot = 32 px (one bush per slot)
-    constant BR       : integer := 16;   -- bush radius (px)
-    constant BUSHOUT  : integer := 4;    -- outline thickness (~ crest THICK)
+    -- BUSHES: light-green semicircles outlined in dark green, growing straight out
+    -- of a crest (fg/mid/bg) at 100/50/25 % size, in sparse RANDOM GROUPS of 3 or 6,
+    -- preferentially on FLAT parts of the crest.  The base follows the crest
+    -- PER-COLUMN so the bush is flush with the hill (no sky between them); the dome
+    -- is a true circle test dx^2 + dy^2 <= R^2 with an EVEN radial outline in the
+    -- annulus (R-T)^2 .. R^2.  Fixed grassy greens (U = Cr, V = Cb swapped); fill
+    -- textured (watercolour wash), outline dark.  Per layer L: slot = 128>>L px
+    -- (log 7-L), radius 48>>L, centre 64>>L.  No LUT / no per-frame state.
+    constant BSLOTLOG : natural := 7;    -- fg slot = 128 px; layer L = 128>>L
+    constant BR       : integer := 48;   -- fg bush radius; layer L = 48>>L
     constant BFILL_Y  : integer := 735;  constant BFILL_U : integer := 356;  constant BFILL_V : integer := 292;
     constant BLINE_Y  : integer := 250;  constant BLINE_U : integer := 360;  constant BLINE_V : integer := 296;
-    -- Dome half-height vs horizontal offset: round(sqrt(BR^2 - dx^2)), dx 0..16.
-    type t_dome is array(0 to 16) of integer range 0 to 16;
-    constant DOMEH : t_dome :=
-        (16, 16, 16, 16, 15, 15, 15, 14, 14, 13, 12, 12, 11, 9, 8, 6, 0);
+    -- Per-layer outer radius^2 and inner (fill) radius^2 = (R - T)^2, T = outline
+    -- thickness (5/3/2 px for fg/mid/bg).  fg 48/43, mid 24/21, bg 12/10.
+    type t_int3 is array(0 to 2) of integer;
+    constant BR2   : t_int3 := (2304, 576, 144);   -- 48^2 / 24^2 / 12^2
+    constant BRIN2 : t_int3 := (1849, 441, 100);   -- 43^2 / 21^2 / 10^2
 
     constant HAZE_Y  : integer := 820;   -- pale desaturated distance tint
     constant HAZE_U  : integer := 500;
@@ -172,6 +175,10 @@ architecture candyhills of program_top is
     type t_l3s13  is array(0 to 2) of signed(12 downto 0);
     type t_l3s14  is array(0 to 2) of signed(13 downto 0);
     type t_l3slv  is array(0 to 2) of std_logic_vector(9 downto 0);
+    type t_l3u9   is array(0 to 2) of unsigned(8 downto 0);
+    type t_l3u6   is array(0 to 2) of unsigned(5 downto 0);
+    type t_l3u13  is array(0 to 2) of unsigned(12 downto 0);
+    type t_bcode  is array(0 to 2) of std_logic_vector(1 downto 0);
 
     --------------------------------------------------------------------------
     -- Raster position / animation.
@@ -342,15 +349,20 @@ architecture candyhills of program_top is
     signal r10_tex : signed(8 downto 0) := (others => '0');
 
     -- BUSH sub-pipeline (parallel to the colour path; overrides colour at s10).
-    --   s5b captures fg world-x + fg (py-crest); s6 does geometry (slot / dome
-    --   height / dy + presence hashes); s6b resolves a 2-bit code (00 none /
-    --   01 fill / 10 outline); s7..s9 carry it to the s10 override.
-    signal r5_sx0   : unsigned(13 downto 0) := (others => '0');  -- fg world-x
-    signal r5_dd0   : signed(13 downto 0) := (others => '0');    -- fg py - crest
-    signal r6_bpres : std_logic := '0';
-    signal r6_bdomeH: unsigned(4 downto 0) := (others => '0');
-    signal r6_bdy   : signed(6 downto 0) := (others => '0');     -- crest - py, saturated
-    signal r6b_bcode, r7_bcode, r8_bcode, r9_bcode : std_logic_vector(1 downto 0) := "00";
+    --   Fully STATELESS (no held anchor / no per-slot memory) so bushes scroll
+    --   cleanly off both edges with no popping.  s5b captures all-layer world-x /
+    --   (py-crest); s6 does per-layer geometry (squared radial distance from the
+    --   dome centre + group placement); s6b resolves a per-layer 2-bit code
+    --   (00 none / 01 fill / 10 outline); s7..s9 carry; s10 picks the frontmost
+    --   bush in front of the winning hill.
+    signal r5_sxL   : t_l3u14 := (others => (others => '0'));    -- world-x per layer
+    signal r5_ddL   : t_l3s14 := (others => (others => '0'));    -- py - crest per layer
+    signal r6_adx   : t_l3u6 := (others => (others => '0'));     -- |dx| per layer
+    signal r6_dyi   : t_l3u6 := (others => (others => '0'));     -- dy = crest-py per layer
+    signal r6_bok   : std_logic_vector(2 downto 0) := "000";     -- placed + above crest
+    signal r6b_d2   : t_l3u13 := (others => (others => '0'));    -- dx^2 + dy^2 (own stage)
+    signal r6b_bok  : std_logic_vector(2 downto 0) := "000";
+    signal r7_bcode, r8_bcode, r9_bcode : t_bcode := (others => "00");
 
     --------------------------------------------------------------------------
     -- Sync alignment pipe + output.
@@ -532,11 +544,15 @@ begin
         variable v_dd   : signed(13 downto 0);    -- depth (crest-line test)
         variable v_ang  : signed(12 downto 0);      -- phase + tilt + curve
         variable v_y    : signed(11 downto 0);
-        variable v_dx   : signed(6 downto 0);       -- bush: px within slot - centre
-        variable v_adx  : integer range 0 to 16;    -- bush: |dx|
-        variable v_dyb  : signed(13 downto 0);      -- bush: crest - py
-        variable v_grp  : unsigned(6 downto 0);
-        variable v_slt  : unsigned(7 downto 0);
+        variable v_dx   : signed(8 downto 0);       -- bush: px within slot - centre
+        variable v_adx  : integer range 0 to 63;    -- bush: |dx| (clamped)
+        variable v_dyi  : integer range 0 to 63;    -- bush: dy = crest - py (clamped)
+        variable v_dyy  : signed(14 downto 0);      -- bush: crest - py (raw)
+        variable v_sl   : unsigned(8 downto 0);     -- bush: slot index
+        variable v_gh   : unsigned(5 downto 0);     -- bush: group hash
+        variable v_len  : integer range 0 to 7;     -- bush: group length (3 or 6)
+        variable v_place: std_logic;                -- bush: group placement
+        variable v_bsel : std_logic_vector(1 downto 0);  -- bush: winning code @ s10
     begin
         if rising_edge(clk) then
             pipe(0) <= data_in;
@@ -630,10 +646,10 @@ begin
             r5_py  <= r5a_py;
             r5_pyc <= signed(resize(r5a_py, 12)) - signed(resize(s_pyref, 12));
             r5_tex <= r5a_tex;
-            -- BUSH: capture the FOREGROUND world-x and (py - crest) so bushes ride
-            -- the front hill regardless of which layer wins this pixel.
-            r5_sx0 <= r5a_sx(0);
-            r5_dd0 <= r5a_dd(0);
+            -- BUSH: capture ALL layers' world-x and (py - crest) so each layer's
+            -- bushes ride its own crest (dy = crest - py = -ddL, per column).
+            r5_sxL <= r5a_sx;
+            r5_ddL <= r5a_dd;
 
             -----------------------------------------------------------------
             -- s6: PERSPECTIVE FAN operands.  freq_eff = freq<<layer (per-layer
@@ -649,28 +665,40 @@ begin
             r6_layer <= r5_layer; r6_sky <= r5_sky; r6_cl <= r5_cl; r6_tex <= r5_tex;
 
             -----------------------------------------------------------------
-            -- s6 (bush geometry): one bush per BSLOT slot; centre at slot+BR.
-            --   dome half-height from |dx| via DOMEH LUT; dy = crest - py (>0 =
-            --   above crest = sky side).  Presence = occasional groups (128-px
-            --   windows) with a few slots skipped for irregularity (cheap folds).
+            -- s6 (bush geometry, per layer L): slot = 128>>L, centre 64>>L, radius
+            --   48>>L.  CENTRE ANCHOR: sample the crest at the slot's left edge,
+            --   extrapolate half a slot forward using the last slot's slope
+            --   (delta/2) to estimate the crest UNDER THE CENTRE, hold it across
+            --   the slot -> the flat base sits on the crest and the dome is round
+            --   at any amplitude.  Placement: sparse random groups of 3 or 6 slots.
             -----------------------------------------------------------------
-            v_dx := signed('0' & r5_sx0(4 downto 0)) - to_signed(BR, 7);   -- -16..15
-            if v_dx(6) = '1' then v_adx := to_integer(unsigned(-v_dx));
-            else                  v_adx := to_integer(unsigned(v_dx(4 downto 0))); end if;
-            if v_adx > 16 then v_adx := 16; end if;
-            r6_bdomeH <= to_unsigned(DOMEH(v_adx), 5);
-            v_dyb := -r5_dd0;                                              -- crest - py
-            if    v_dyb > to_signed(63, 14)  then r6_bdy <= to_signed(63, 7);
-            elsif v_dyb < to_signed(-1, 14)  then r6_bdy <= to_signed(-1, 7);
-            else                                  r6_bdy <= resize(v_dyb, 7); end if;
-            v_grp := r5_sx0(13 downto 7) xor ('0' & r5_sx0(13 downto 8));   -- folded window hash
-            v_slt := r5_sx0(12 downto 5) xor ("00" & r5_sx0(12 downto 7));  -- folded slot hash
-            if v_grp(1 downto 0) = "10"                                     -- ~1/4 windows
-               and v_slt(2 downto 0) /= "101" then                         -- skip ~1/8 slots
-                r6_bpres <= '1';
-            else
-                r6_bpres <= '0';
-            end if;
+            for L in 0 to 2 loop
+                v_sl := resize(r5_sxL(L)(13 downto BSLOTLOG - L), 9);        -- slot index
+                -- dx = distance from the slot centre (centre = slot/2).
+                v_dx := signed('0' & r5_sxL(L)(BSLOTLOG - 1 - L downto 0))
+                        - to_signed(2 ** (BSLOTLOG - 1 - L), 9);
+                if v_dx(8) = '1' then v_adx := to_integer(unsigned(-v_dx));
+                else                  v_adx := to_integer(unsigned(v_dx(5 downto 0))); end if;
+                if v_adx > 63 then v_adx := 63; end if;
+                r6_adx(L) <= to_unsigned(v_adx, 6);
+                -- dy = crest - py = -ddL (per column -> base flush with the crest).
+                v_dyy := resize(-r5_ddL(L), 15);
+                if    v_dyy < to_signed(1, 15)  then v_dyi := 0;             -- on/below crest
+                elsif v_dyy > to_signed(63, 15) then v_dyi := 63;
+                else                                 v_dyi := to_integer(v_dyy(5 downto 0)); end if;
+                r6_dyi(L) <= to_unsigned(v_dyi, 6);
+                -- placement: sparse random groups of 3 or 6 within 8-slot regions.
+                v_gh  := v_sl(8 downto 3) xor ('0' & v_sl(8 downto 4)) xor ("000" & v_sl(8 downto 6));
+                if v_gh(2) = '1' then v_len := 6; else v_len := 3; end if;
+                if v_gh(1 downto 0) = "10" and to_integer(v_sl(2 downto 0)) < v_len then
+                    v_place := '1';
+                else
+                    v_place := '0';
+                end if;
+                -- draw only above the crest (dy>=1) and where placed (stateless).
+                if v_dyy >= to_signed(1, 15) then r6_bok(L) <= v_place;
+                else                              r6_bok(L) <= '0'; end if;
+            end loop;
 
             -----------------------------------------------------------------
             -- s6b: base multiply + the two fan partial products (short carry
@@ -682,18 +710,13 @@ begin
             r6b_plo  <= signed(resize(r6_sx, 15)) * signed(resize(unsigned(r6_fanadd(6 downto 0)), 8));
             r6b_py <= r6_py;
             r6b_layer <= r6_layer; r6b_sky <= r6_sky; r6b_cl <= r6_cl; r6b_tex <= r6_tex;
-            -- s6b (bush code): inside dome (above crest, dy<=domeH) -> fill, unless
-            --   within BUSHOUT of the rim -> outline.  01 fill / 10 outline / 00 none.
-            if r6_bpres = '1' and r6_bdy >= to_signed(1, 7)
-               and r6_bdy <= signed('0' & r6_bdomeH) then
-                if (signed('0' & r6_bdomeH) - r6_bdy) < to_signed(BUSHOUT, 7) then
-                    r6b_bcode <= "10";
-                else
-                    r6b_bcode <= "01";
-                end if;
-            else
-                r6b_bcode <= "00";
-            end if;
+            -- s6b (bush): squared radial distance dx^2+dy^2 in its OWN stage (the
+            --   multiplies are the tallest logic) -> compared in s7.
+            for L in 0 to 2 loop
+                r6b_d2(L)  <= to_unsigned(to_integer(r6_adx(L)) * to_integer(r6_adx(L))
+                                        + to_integer(r6_dyi(L)) * to_integer(r6_dyi(L)), 13);
+                r6b_bok(L) <= r6_bok(L);
+            end loop;
 
             -----------------------------------------------------------------
             -- s7: fanraw = phi*128 + plo ; phase = base + fanraw>>FANPOST
@@ -704,7 +727,16 @@ begin
                                              + resize(r6b_plo, 30), FANPOST), 22), 14));
             r7_py <= r6b_py;
             r7_layer <= r6b_layer; r7_sky <= r6b_sky; r7_cl <= r6b_cl; r7_tex <= r6b_tex;
-            r7_bcode <= r6b_bcode;
+            -- s7 (bush code): inside inner radius -> fill; annulus to outer -> even
+            --   dark outline; else none.
+            for L in 0 to 2 loop
+                if r6b_bok(L) = '1' and to_integer(r6b_d2(L)) <= BR2(L) then
+                    if to_integer(r6b_d2(L)) <= BRIN2(L) then r7_bcode(L) <= "01";
+                    else                                      r7_bcode(L) <= "10"; end if;
+                else
+                    r7_bcode(L) <= "00";
+                end if;
+            end loop;
 
             -----------------------------------------------------------------
             -- s8: stripe angle = phase + diagonal tilt(py>>TILTF) + sine curve.
@@ -724,14 +756,24 @@ begin
             r9_bcode <= r8_bcode;
 
             -----------------------------------------------------------------
-            -- s10: assemble base colour (all constants, no per-pixel mix).
-            --      Bushes (fg props) override everything; sky flag cleared so
-            --      they stay opaque (video-sky) and get the texture wash.
+            -- s10: assemble base colour.  A bush shows only when it is in front of
+            --      the winning hill: layer L's bush needs the hill winner to be
+            --      farther (sky, or a higher layer index).  Pick the frontmost such
+            --      bush; sky flag cleared so it stays opaque (video-sky) + textured.
             -----------------------------------------------------------------
-            if r9_bcode = "10" then                                  -- bush outline
+            if (r9_sky = '1' or r9_layer >= 1) and r9_bcode(0) /= "00" then
+                v_bsel := r9_bcode(0);
+            elsif (r9_sky = '1' or r9_layer >= 2) and r9_bcode(1) /= "00" then
+                v_bsel := r9_bcode(1);
+            elsif r9_sky = '1' and r9_bcode(2) /= "00" then
+                v_bsel := r9_bcode(2);
+            else
+                v_bsel := "00";
+            end if;
+            if v_bsel = "10" then                                    -- bush outline
                 r10_y <= to_unsigned(BLINE_Y, 10); r10_u <= to_unsigned(BLINE_U, 10);
                 r10_v <= to_unsigned(BLINE_V, 10); r10_sky <= '0';
-            elsif r9_bcode = "01" then                               -- bush fill (textured)
+            elsif v_bsel = "01" then                                 -- bush fill (textured)
                 r10_y <= to_unsigned(BFILL_Y, 10); r10_u <= to_unsigned(BFILL_U, 10);
                 r10_v <= to_unsigned(BFILL_V, 10); r10_sky <= '0';
             elsif r9_sky = '1' then
