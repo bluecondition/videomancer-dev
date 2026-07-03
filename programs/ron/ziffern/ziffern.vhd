@@ -241,6 +241,9 @@ architecture ziffern of program_top is
     signal s_zm_acc : t_zparr := (others => (others => '0'));
     signal s_zm_cnt : integer range 0 to 18 := 18;
     signal s_zm_busy : std_logic := '0';
+    -- handshake: pulse when zprod lands; delayed once so p_phasemul starts only
+    -- AFTER p_recip has registered the new s_pstep (mh must use THIS frame's step)
+    signal s_zm_done, s_zm_done_d : std_logic := '0';
 
     -- sequential centre multiply (centre*step -> phase start offset)
     signal s_pm_ah, s_pm_av : t_marr := (others => (others => '0'));
@@ -381,6 +384,7 @@ begin
         variable v_term : unsigned(31 downto 0);
     begin
         if rising_edge(clk) then
+            s_zm_done <= '0';
             if s_vsync_pulse = '1' then
                 v_ez := s_zoomf;
                 if v_ez < to_unsigned(1023 * 32, 17) then v_tri := v_ez;
@@ -407,6 +411,7 @@ begin
                         s_zprod(i) <= s_zm_acc(i);
                     end loop;
                     s_zm_busy <= '0';
+                    s_zm_done <= '1';
                 end if;
             end if;
         end if;
@@ -480,12 +485,18 @@ begin
     --------------------------------------------------------------------------
     -- Sequential centre multiply: m(i) = centre * step(i) (shift-add per cycle),
     -- so the line/column start phase = -m(i) puts the screen centre at phase 0.
+    -- MUST start only after p_recip has registered THIS frame's s_pstep (the
+    -- s_zm_done_d handshake): computing mh from last frame's step while p_acc
+    -- steps with the new one biases the grid off-centre by centre*dstep/step --
+    -- a zoom-speed-proportional shift that POPPED at mid-throw where the
+    -- triangle envelope changes a plane's speed (the "leftward jump at 50%").
     --------------------------------------------------------------------------
     p_phasemul : process(clk)
         variable th, tv : unsigned(27 downto 0);
     begin
         if rising_edge(clk) then
-            if s_vsync_pulse = '1' then
+            s_zm_done_d <= s_zm_done;
+            if s_zm_done_d = '1' then
                 s_cxr <= resize(shift_right(s_measured_h, 1), 11);
                 s_cyr <= resize(shift_right(s_measured_v, 1), 11);
                 for i in 0 to NP - 1 loop
