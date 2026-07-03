@@ -201,22 +201,54 @@ build_config_with_retry() {
     local config="$1" freq="$2" hd="$3"
     local div_arg=""
     [ "$hd" = "1" ] && div_arg="HD_CLOCK_DIVISOR=$HD_CLK_DIV"
-    local base="${SEED:-1}" tries="${SEED_MAX_RETRIES:-6}" i seed
+    local base="${SEED:-1}" tries="${SEED_MAX_RETRIES:-6}" i seed rc
+    # nextpnr's default router1 stalls/crashes on congested-but-routable designs
+    # (router2 routes them in seconds).  Override with NEXTPNR_ROUTER= to restore
+    # router1, or e.g. NEXTPNR_ROUTER="--router router1".
+    local router_arg="ROUTER=${NEXTPNR_ROUTER---router router2}"
+    # router2 doesn't crash on a bad seed -- it can STALL on a couple of
+    # unroutable wires and spin forever.  Cap each attempt; a timeout (rc 124/137)
+    # is treated like a crash and retried with the next seed.  A stale partial
+    # .asc/.bin from a killed run would fool make into "nothing to do", so wipe
+    # them before every attempt.
+    local asc="${HW_BUILD_ROOT}/bitstreams/${config}.asc"
+    local bin="${HW_BUILD_ROOT}/bitstreams/${config}.bin"
     for (( i = 0; i < tries; i++ )); do
         seed=$(( base + i ))
-        if make VIDEOMANCER_SDK_ROOT="${VIDEOMANCER_SDK_ROOT}" PROJECT_ROOT="${PROJECT_ROOT}" \
+        rm -f "$asc" "$bin"
+        /usr/bin/timeout -k 5 "${MAKE_TIMEOUT:-360}" \
+            make VIDEOMANCER_SDK_ROOT="${VIDEOMANCER_SDK_ROOT}" PROJECT_ROOT="${PROJECT_ROOT}" \
                 BUILD_ROOT="${HW_BUILD_ROOT}" PROGRAM=$PROGRAM CONFIG=$config DEVICE=$DEVICE \
                 PACKAGE=$PACKAGE FREQUENCY=$freq HARDWARE=$HARDWARE CORE=$CORE PLATFORM=$PLATFORM \
-                SEED=$seed $div_arg > "$MAKE_LOG" 2>&1; then
-            LAST_SEED=$seed
-            return 0
+                SEED=$seed $div_arg "$router_arg" > "$MAKE_LOG" 2>&1
+        rc=$?
+        if [ $rc -eq 0 ]; then
+            # Built, but router2's post-route Fmax is seed-dependent for
+            # timing-marginal designs.  If it did NOT meet timing, keep hunting
+            # for a seed that does (the .asc/.bin of a passing seed stay in place);
+            # accept the last attempt if no seed closes.  Set NO_TIMING_RETRY=1 to
+            # accept the first routed bitstream regardless.
+            if [ -n "$NO_TIMING_RETRY" ] || ! grep -qE "Max frequency.*FAIL" "$MAKE_LOG"; then
+                LAST_SEED=$seed
+                return 0
+            fi
+            if [ $(( i + 1 )) -ge $tries ]; then
+                LAST_SEED=$seed
+                return 0   # no seed closed timing; accept best-effort (timing-allow-fail)
+            fi
+            echo -e "${YELLOW}    seed ${seed} missed timing; retrying with seed $(( seed + 1 ))...${NC}"
+            continue
+        fi
+        if [ $rc -eq 124 ] || [ $rc -eq 137 ]; then
+            echo -e "${YELLOW}    seed ${seed} stalled the router (timeout); retrying with seed $(( seed + 1 ))...${NC}"
+            continue
         fi
         if ! grep -qE "assertion_failure|next_score >= 0|terminate called" "$MAKE_LOG"; then
-            return 1   # not a router crash (synth/compile error) -> fail fast
+            return 1   # not a router crash/stall (synth/compile error) -> fail fast
         fi
         echo -e "${YELLOW}    seed ${seed} crashed the nextpnr router; retrying with seed $(( seed + 1 ))...${NC}"
     done
-    return 1   # every seed in the sweep crashed the router
+    return 1   # every seed in the sweep crashed or stalled
 }
 
 # Parse command line arguments to determine which programs to build
