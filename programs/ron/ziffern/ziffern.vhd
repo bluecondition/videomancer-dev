@@ -220,6 +220,23 @@ architecture ziffern of program_top is
         return r;
     end function;
 
+    -- signed variant for chroma offsets (arithmetic shifts around 512)
+    function scale8s(val : signed(10 downto 0); sel : unsigned(2 downto 0)) return signed is
+        variable r : signed(10 downto 0);
+    begin
+        case sel is
+            when "000" => r := shift_right(val, 3);
+            when "001" => r := shift_right(val, 2);
+            when "010" => r := shift_right(val, 2) + shift_right(val, 3);
+            when "011" => r := shift_right(val, 1);
+            when "100" => r := shift_right(val, 1) + shift_right(val, 3);
+            when "101" => r := shift_right(val, 1) + shift_right(val, 2);
+            when "110" => r := shift_right(val, 1) + shift_right(val, 2) + shift_right(val, 3);
+            when others => r := val;
+        end case;
+        return r;
+    end function;
+
     --------------------------------------------------------------------------
     -- Knob / switch reads
     --------------------------------------------------------------------------
@@ -292,6 +309,10 @@ architecture ziffern of program_top is
     signal s_bg_y,  s_bg_u,  s_bg_v  : unsigned(9 downto 0) := (others => '0');
     signal s_glow1_y, s_glow2_y, s_glow3_y, s_glow4_y
                        : unsigned(9 downto 0) := (others => '0');
+    -- glow chroma scaled toward neutral with K6: without this the halo's
+    -- full-saturation U/V dominates the RGB conversion at any Y and the
+    -- knob has no visible range
+    signal s_glow_u, s_glow_v : unsigned(9 downto 0) := C_MID;
     signal s_glow_on : std_logic := '0';
 
     -- filtered zoom position (Q10.6): eases toward (1023-P12)<<6 each frame
@@ -361,8 +382,8 @@ architecture ziffern of program_top is
     signal s_litw : std_logic_vector(0 to 8) := (others => '0');
 
     -- sync delay pipeline (aligned through the glow window to the colour
-    -- stage: S0..S4 + lit + 4-tap centre = 11 deep): [vpar field avid vsync hsync]
-    type t_syncp is array (0 to 10) of std_logic_vector(4 downto 0);
+    -- stage: S0..S4 + lit + 4-tap centre = 11 deep): [field avid vsync hsync]
+    type t_syncp is array (0 to 10) of std_logic_vector(3 downto 0);
     signal s_syncp : t_syncp := (others => (others => '0'));
 
     -- incoming video delayed to align with the colour stage (S9 video key)
@@ -370,7 +391,7 @@ architecture ziffern of program_top is
     signal s_vy, s_vu, s_vv : t_vidp := (others => (others => '0'));
 
     signal s5_y, s5_u, s5_v : unsigned(9 downto 0) := (others => '0');
-    signal s5_sync : std_logic_vector(4 downto 0) := (others => '0');
+    signal s5_sync : std_logic_vector(3 downto 0) := (others => '0');
     signal s_io : t_video_stream_yuv444_30b;
 
 begin
@@ -726,14 +747,24 @@ begin
     end process;
 
     -- Glow + background colours from the REGISTERED number colour.  Four
-    -- fade levels for 1..4 screen px from a digit: Y/4, Y/8, Y/16, Y/32.
+    -- fade levels for 1..4 screen px from a digit (Y/2 .. Y/16 of the
+    -- K6-scaled base), and the halo CHROMA eases from neutral to full
+    -- saturation with the same K6 curve -- both must scale or the RGB
+    -- conversion is chroma-dominated and the knob shows no range.
     p_colaux : process(clk)
+        variable v_du, v_dv : signed(10 downto 0);
     begin
         if rising_edge(clk) then
-            s_glow1_y <= shift_right(scale8(s_num_y, s_glow(9 downto 7)), 2);
-            s_glow2_y <= shift_right(scale8(s_num_y, s_glow(9 downto 7)), 3);
-            s_glow3_y <= shift_right(scale8(s_num_y, s_glow(9 downto 7)), 4);
-            s_glow4_y <= shift_right(scale8(s_num_y, s_glow(9 downto 7)), 5);
+            s_glow1_y <= shift_right(scale8(s_num_y, s_glow(9 downto 7)), 1);
+            s_glow2_y <= shift_right(scale8(s_num_y, s_glow(9 downto 7)), 2);
+            s_glow3_y <= shift_right(scale8(s_num_y, s_glow(9 downto 7)), 3);
+            s_glow4_y <= shift_right(scale8(s_num_y, s_glow(9 downto 7)), 4);
+            v_du := signed(resize(s_num_u, 11)) - to_signed(512, 11);
+            v_dv := signed(resize(s_num_v, 11)) - to_signed(512, 11);
+            s_glow_u <= unsigned(resize(to_signed(512, 11)
+                            + scale8s(v_du, s_glow(9 downto 7)), 11)(9 downto 0));
+            s_glow_v <= unsigned(resize(to_signed(512, 11)
+                            + scale8s(v_dv, s_glow(9 downto 7)), 11)(9 downto 0));
             if s_glow > to_unsigned(32, 10) then s_glow_on <= '1'; else s_glow_on <= '0'; end if;
             if s_bg_tint = '1' then
                 s_bg_y <= shift_right(s_num_y, 4); s_bg_u <= s_num_u; s_bg_v <= s_num_v;
@@ -757,7 +788,7 @@ begin
     p_sync : process(clk)
     begin
         if rising_edge(clk) then
-            s_syncp(0) <= s_v_count(0) & data_in.field_n & data_in.avid &
+            s_syncp(0) <= data_in.field_n & data_in.avid &
                           data_in.vsync_n & data_in.hsync_n;
             s_vy(0) <= unsigned(data_in.y);
             s_vu(0) <= unsigned(data_in.u);
@@ -1040,13 +1071,13 @@ begin
             if v_lit = '1' then
                 v_y := v_on_y; v_u := v_on_u; v_v := v_on_v;
             elsif (v_g1 = '1') and (s_glow_on = '1') then
-                v_y := s_glow1_y; v_u := s_num_u; v_v := s_num_v;
+                v_y := s_glow1_y; v_u := s_glow_u; v_v := s_glow_v;
             elsif (v_g2 = '1') and (s_glow_on = '1') then
-                v_y := s_glow2_y; v_u := s_num_u; v_v := s_num_v;
+                v_y := s_glow2_y; v_u := s_glow_u; v_v := s_glow_v;
             elsif (v_g3 = '1') and (s_glow_on = '1') then
-                v_y := s_glow3_y; v_u := s_num_u; v_v := s_num_v;
+                v_y := s_glow3_y; v_u := s_glow_u; v_v := s_glow_v;
             elsif (v_g4 = '1') and (s_glow_on = '1') then
-                v_y := s_glow4_y; v_u := s_num_u; v_v := s_num_v;
+                v_y := s_glow4_y; v_u := s_glow_u; v_v := s_glow_v;
             else
                 v_y := v_off_y; v_u := v_off_u; v_v := v_off_v;
             end if;
