@@ -33,8 +33,16 @@
 --           = font step * RT via the vblank multiply chain), K6 Glow (a few
 --           SCREEN pixels of phosphor haze fading with true screen distance,
 --           via a 9-tap window on the composited lit mask -- independent of
---           digit size), S7 Animate, S8 Background, S9 Video, S10 Font,
---           S11 Invert, P12 Zoom.
+--           digit size), S7 Luma Mod, S8 Background, S9 Video, S10 Font,
+--           S11 Invert, P12 Zoom.  K2 at 0% freezes the digits (no Animate
+--           switch).
+--
+-- Luma Mod (S7): the planes become a SIZE LADDER instead of a zoom envelope
+-- (back rung pinned at the far wall; others at 1/4, 1/2, full of the
+-- P12-scaled zoom-in).  Each plane samples the incoming video's luma once
+-- per cell (top-left pixel, held in a 256x2 buffer) and draws its cells only
+-- where the 2-bit level (vy(9:8)) matches its rung -- dark areas stay a far
+-- dense wall, bright areas pop individual numbers forward proportionally.
 --
 -- Author: bluecondition
 
@@ -222,7 +230,7 @@ architecture ziffern of program_top is
     signal s_space       : unsigned(9 downto 0);
     signal s_glow        : unsigned(9 downto 0);
     signal s_sizek       : unsigned(9 downto 0);
-    signal s_animate     : std_logic;
+    signal s_lumamod     : std_logic;
     signal s_bg_tint     : std_logic;
     signal s_video       : std_logic;
     signal s_font_sel    : std_logic;
@@ -259,12 +267,12 @@ architecture ziffern of program_top is
     signal s_rr    : unsigned(11 downto 0) := to_unsigned(1024, 12);
     signal s_t10   : unsigned(9 downto 0) := to_unsigned(1023, 10);
     signal s_rt    : unsigned(10 downto 0) := to_unsigned(1024, 11);
-    type t_thr is array (1 to 7) of unsigned(9 downto 0);
-    signal s_tk    : t_thr := (to_unsigned(127,10), to_unsigned(254,10),
-                               to_unsigned(381,10), to_unsigned(508,10),
-                               to_unsigned(635,10), to_unsigned(762,10),
-                               to_unsigned(889,10));
-    signal s_t8    : unsigned(9 downto 0) := to_unsigned(1016, 10);
+    type t_thr is array (1 to 7) of unsigned(7 downto 0);
+    signal s_tk    : t_thr := (to_unsigned(31,8),  to_unsigned(62,8),
+                               to_unsigned(93,8),  to_unsigned(124,8),
+                               to_unsigned(155,8), to_unsigned(186,8),
+                               to_unsigned(217,8));
+    signal s_t8    : unsigned(7 downto 0) := to_unsigned(248, 8);
 
     -- sequential RT multiply (R*T10, runs from vsync alongside p_zmul)
     signal s_rt_acc : unsigned(20 downto 0) := (others => '0');
@@ -316,10 +324,22 @@ architecture ziffern of program_top is
     --------------------------------------------------------------------------
     signal s0_col, s0_row : t_sarr := (others => (others => '0'));
     signal s0_frh, s0_frv : t_frarr := (others => (others => '0'));   -- cell fraction
+    signal s0_newrow : t_slarr := (others => '0');   -- this line starts a new cell row
 
     signal s1_base : t_u16arr := (others => (others => '0'));
     signal s1_gx, s1_gy : t_u3arr := (others => (others => '0'));
     signal s1_render : t_slarr := (others => '1');
+
+    -- Luma Mod: per-plane per-cell luma level, sampled at each cell's
+    -- top-left pixel into a small 1W1R buffer (BRAM), read back per pixel.
+    -- Level (2 bits, vy(9:8)) selects which ladder rung (plane) draws the cell.
+    type t_u8arr is array (0 to NP - 1) of unsigned(7 downto 0);
+    type t_lvl2  is array (0 to NP - 1) of std_logic_vector(1 downto 0);
+    type t_lvlbuf is array (0 to 255) of std_logic_vector(1 downto 0);
+    signal r_colprev : t_sarr := (others => (others => '0'));
+    signal s1_addr : t_u8arr := (others => (others => '0'));
+    signal s1_wr   : t_slarr := (others => '0');
+    signal sA_lvl  : t_lvl2 := (others => (others => '0'));
 
     signal sA_gen8 : t_slv8arr := (others => (others => '0'));
     signal sA_base : t_u16arr := (others => (others => '0'));
@@ -362,7 +382,7 @@ begin
     s_space       <= unsigned(registers_in(4));    -- K5 Spacing (gap, font unchanged)
     s_glow        <= unsigned(registers_in(5));
     s_zoom        <= unsigned(registers_in(7));    -- P12 Zoom (100%=far, 0%=front)
-    s_animate     <= registers_in(6)(0);
+    s_lumamod     <= registers_in(6)(0);   -- S7 Luma Mod
     s_bg_tint     <= registers_in(6)(1);
     s_video       <= registers_in(6)(2);
     s_font_sel    <= registers_in(6)(3);
@@ -449,8 +469,23 @@ begin
                 if v_ez < to_unsigned(1023 * 32, 17) then v_tri := v_ez;
                 else v_tri := to_unsigned(1023 * 64, 17) - v_ez; end if;
                 for i in 0 to NP - 1 loop
-                    -- prog + leading bump; 0 at both ends -> all start together, converge
-                    v_cz := resize(v_ez, 18) + resize(shift_right(v_tri, C_GSHIFT(i)), 18);
+                    if s_lumamod = '1' then
+                        -- Luma Mod: planes are a SIZE LADDER, not a zoom
+                        -- envelope.  Back plane pinned at the far wall; the
+                        -- others at 1/4, 1/2 and full of the P12-scaled
+                        -- zoom-in.  Which rung draws is luma-selected per
+                        -- cell (see the level buffers / p_hashMix).
+                        if i = NP - 1 then
+                            v_cz := (others => '0');
+                        else
+                            v_cz := resize(shift_right(v_ez, i), 18);
+                        end if;
+                    else
+                        -- prog + leading bump; 0 at both ends -> all start
+                        -- together, converge
+                        v_cz := resize(v_ez, 18)
+                                + resize(shift_right(v_tri, C_GSHIFT(i)), 18);
+                    end if;
                     s_cz(i)     <= v_cz(16 downto 0);
                     s_zm_acc(i) <= (others => '0');
                 end loop;
@@ -483,13 +518,18 @@ begin
         variable v_Gbg, v_Gfg : unsigned(11 downto 0);
         variable v_sf, v_sn : unsigned(17 downto 0);
         variable v_hidx : integer range 0 to 15;
-        variable v_t10, v_t1 : unsigned(9 downto 0);
+        variable v_t10 : unsigned(9 downto 0);
+        variable v_t1  : unsigned(7 downto 0);
         variable v_d : unsigned(11 downto 0);
     begin
         if rising_edge(clk) then
             -- far cell 25% smaller than measured>>5 -> zoom starts deeper (~42 across)
             v_Gbg := shift_right(s_measured_h, 5) - shift_right(s_measured_h, 7);
-            v_Gfg := shift_right(s_measured_h, 3);   -- near cell size (~8 across)
+            -- near cell anchored to picture HEIGHT: ~0.164*V (~6 rows at K4
+            -- unity), so K4 max (x1.49) lands at the 4-numbers-high ceiling
+            -- on any aspect ratio.
+            v_Gfg := shift_right(s_measured_v, 3) + shift_right(s_measured_v, 5)
+                     + shift_right(s_measured_v, 7);
             -- step endpoints (cells/pixel) = (1<<FRAC)/cellsize, via the recip LUT.
             v_sf := C_RECIP(to_integer(v_Gbg(7 downto 0)));   -- far  (bigger step)
             v_sn := C_RECIP(to_integer(v_Gfg(7 downto 0)));   -- near (smaller step)
@@ -509,9 +549,9 @@ begin
 
             if s_vsync_pulse = '1' then
                 s_seed <= mix16(resize(s_seed_knob, 16) xor x"1B7F");
-                if s_animate = '1' then
-                    s_T <= s_T + (resize(shift_right(s_change_rate, 6), 24) + 1);
-                end if;
+                -- no +1 floor: K2 at 0% = digits frozen (replaces the old
+                -- Animate switch, freeing S7 for Luma Mod)
+                s_T <= s_T + resize(shift_right(s_change_rate, 6), 24);
 
                 -- always full brightness, uniform across planes
                 v_hidx := to_integer(s_hue_knob(9 downto 6));
@@ -520,21 +560,23 @@ begin
                 s_num_v <= C_HUE_V(v_hidx);
 
                 -- K4 Size: piecewise step scale, font 0.5x (K4=0) .. 1x (512)
-                -- .. ~3x (1023); more range up than down per user preference.
+                -- .. ~1.49x (1023).  The top is a hard visual ceiling: 1.49 *
+                -- the height-anchored near cell = 4 numbers high at full zoom.
                 if s_sizek(9) = '0' then
                     s_rr <= to_unsigned(2048, 12)
                             - shift_left(resize(s_sizek, 12), 1);
                 else
                     v_d := resize(s_sizek(8 downto 0), 12);
                     s_rr <= to_unsigned(1024, 12)
-                            - (v_d + shift_right(v_d, 2)
-                                   + shift_right(v_d, 4) + shift_right(v_d, 6));
+                            - (shift_right(v_d, 1) + shift_right(v_d, 3)
+                                                   + shift_right(v_d, 5));
                 end if;
                 -- K5 Spacing: glyph share of the cell T10 = 1023 - K5/2
                 v_t10 := to_unsigned(1023, 10) - ("0" & s_space(9 downto 1));
                 s_t10 <= v_t10;
-                -- glyph column thresholds (k * T10/8) + exact gate 8*(T10/8)
-                v_t1 := shift_right(v_t10, 3);
+                -- glyph column thresholds in 8-bit cell-fraction units
+                -- (t1 = T10/4/8) + exact gate 8*t1
+                v_t1 := resize(shift_right(v_t10, 5), 8);
                 s_tk(1) <= v_t1;
                 s_tk(2) <= shift_left(v_t1, 1);
                 s_tk(3) <= shift_left(v_t1, 1) + v_t1;
@@ -749,6 +791,14 @@ begin
                     else
                         nx_v := s_phv(i) + stp;
                     end if;
+                    -- does this line open a NEW cell row?  (held all line;
+                    -- luma-mod samples cells only on their first line)
+                    if s_firstline = '1'
+                       or nx_v(26 downto 18) /= s_phv(i)(26 downto 18) then
+                        s0_newrow(i) <= '1';
+                    else
+                        s0_newrow(i) <= '0';
+                    end if;
                     s_phv(i) <= nx_v;
                     cur_v := nx_v;
                     -- horizontal restart at line's first pixel
@@ -776,17 +826,19 @@ begin
     -- S1: spatial de-correlation.
     --------------------------------------------------------------------------
     p_hashA : process(clk)
-        variable v_fh, v_fv : unsigned(9 downto 0);
+        variable v_fh, v_fv : unsigned(7 downto 0);
         variable v_gx, v_gy : unsigned(2 downto 0);
     begin
         if rising_edge(clk) then
             for i in 0 to NP - 1 loop
                 s1_base(i) <= spreadcr(s0_col(i), s0_row(i));
-                -- glyph occupies [0, t8) of the cell (t8 = 8*(T10/8), K5-set);
-                -- column/row = popcount of thresholds passed (k * T10/8).
-                -- Frac compared at 10 bits (1/1024 cell) -- plenty.
-                v_fh := s0_frh(i)(17 downto 8);
-                v_fv := s0_frv(i)(17 downto 8);
+                -- glyph occupies [0, t8) of the cell (t8 = 8*(T8/8), K5-set);
+                -- column/row = popcount of thresholds passed (k * T8/8).
+                -- Frac compared at 8 bits (1/256 cell): <=1 px boundary
+                -- quantisation at the biggest cells, invisible, and 56
+                -- narrower comparators at 90%+ utilisation.
+                v_fh := s0_frh(i)(17 downto 10);
+                v_fv := s0_frv(i)(17 downto 10);
                 v_gx := (others => '0');
                 v_gy := (others => '0');
                 for k in 1 to 7 loop
@@ -797,9 +849,37 @@ begin
                 s1_gy(i) <= v_gy;
                 if (v_fh < s_t8) and (v_fv < s_t8) then s1_render(i) <= '1';
                 else s1_render(i) <= '0'; end if;
+                -- luma-mod cell sampling: cell's first pixel on its first line
+                r_colprev(i) <= s0_col(i);
+                s1_addr(i) <= unsigned(std_logic_vector(s0_col(i)(7 downto 0)));
+                if (s0_col(i) /= r_colprev(i)) and (s0_newrow(i) = '1')
+                   and (s_syncp(1)(2) = '1') then
+                    s1_wr(i) <= '1';
+                else
+                    s1_wr(i) <= '0';
+                end if;
             end loop;
         end if;
     end process;
+
+    --------------------------------------------------------------------------
+    -- Luma-mod level buffers: one tiny 256x2 1W1R memory per plane (written
+    -- at each cell's top-left pixel, read every pixel by cell column).
+    --------------------------------------------------------------------------
+    g_lvl : for i in 0 to NP - 1 generate
+        signal lvlbuf : t_lvlbuf := (others => (others => '0'));
+    begin
+        p_lvl : process(clk)
+        begin
+            if rising_edge(clk) then
+                if s1_wr(i) = '1' then
+                    lvlbuf(to_integer(s1_addr(i)))
+                        <= std_logic_vector(s_vy(1)(9 downto 8));
+                end if;
+                sA_lvl(i) <= lvlbuf(to_integer(s1_addr(i)));
+            end if;
+        end process;
+    end generate;
 
     --------------------------------------------------------------------------
     -- SA: per-cell hash -> staggered generation index + balanced plane split.
@@ -852,7 +932,18 @@ begin
                 if s_font_sel = '1' then s2_idx(i) <= v_off + 9;
                 else                     s2_idx(i) <= v_off; end if;
                 s2_gx(i) <= sA_gx(i); s2_gy(i) <= sA_gy(i);
-                s2_vis(i) <= sA_owned(i) and sA_render(i);
+                -- Luma Mod: ownership is LUMA-selected, not hash-split --
+                -- plane i draws cells whose sampled level is 3-i (dark ->
+                -- back/far rung, bright -> front/zoomed-in rung).
+                if s_lumamod = '1' then
+                    if sA_lvl(i) = std_logic_vector(to_unsigned(NP - 1 - i, 2)) then
+                        s2_vis(i) <= sA_render(i);
+                    else
+                        s2_vis(i) <= '0';
+                    end if;
+                else
+                    s2_vis(i) <= sA_owned(i) and sA_render(i);
+                end if;
             end loop;
         end if;
     end process;
