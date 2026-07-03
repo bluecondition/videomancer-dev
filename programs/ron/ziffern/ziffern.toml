@@ -1,9 +1,12 @@
 # Ziffern — Kraftwerk-inspired 3D zooming digit wall.
 #
 # A green "old computer screen" wall of pixelated digits 1-9 in an even grid.
-# The digits change at random, staggered times; the whole field zooms toward the
-# viewer (numbers enlarge) and recedes, centred on the screen.  Pure synthesis:
-# ignores the incoming video and draws over a black / dark-tinted background.
+# The digits change at random, staggered times.  P12 "Zoom" is a manual position:
+# 100% = all numbers far back on one plane (small); pulling it down brings them
+# forward in perspective at a range of per-number speeds (fast ones reach the
+# front early, the slowest at 0%), and at 0% all numbers are co-planar at the
+# front.  Movement happens only when P12 moves.  Background is black or a dark
+# tint; S9 keys incoming video into the black areas.
 # Forked structurally from the ziggurat accumulator-coordinate engine.
 
 [program]
@@ -14,7 +17,7 @@ program_name = "Ziffern"
 author = "bluecondition"
 license = "GPL-3.0"
 categories = ["Pattern", "Color", "Generator"]
-program_type = "synthesis"
+program_type = "processing"
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 description = "A zooming green wall of randomly-changing digits 1-9 (Kraftwerk-style number field)."
@@ -27,7 +30,7 @@ parameter_id = "rotary_potentiometer_1"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 480          # lands on green in the hue ring
+initial_value = 483          # ~170 deg (green)
 display_min_value = 0
 display_max_value = 360
 name_label = "Color"
@@ -38,7 +41,7 @@ parameter_id = "rotary_potentiometer_2"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 300
+initial_value = 0
 display_min_value = 0
 display_max_value = 100
 name_label = "Change Rate"
@@ -60,7 +63,7 @@ parameter_id = "rotary_potentiometer_4"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 1023
+initial_value = 716          # 70%
 display_min_value = 0
 display_max_value = 100
 name_label = "Brightness"
@@ -71,7 +74,7 @@ parameter_id = "rotary_potentiometer_5"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 0
+initial_value = 225          # 22%
 display_min_value = 0
 display_max_value = 100
 name_label = "Spacing"
@@ -104,14 +107,14 @@ initial_value_label = "Black"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
-name_label = "Scanlines"
+name_label = "Video"
 value_labels = ["Off", "On"]
 initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
 name_label = "Font"
-value_labels = ["Plain", "Sci-Fi"]
+value_labels = ["Plain", "Alien"]
 initial_value_label = "Plain"
 
 [[parameter]]
@@ -127,7 +130,7 @@ parameter_id = "linear_potentiometer_12"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 0
+initial_value = 1023         # 100% = all numbers far back (one plane)
 display_min_value = 0
 display_max_value = 100
 name_label = "Zoom"
@@ -148,7 +151,7 @@ toggle_switch_8 = 0
 toggle_switch_9 = 0
 toggle_switch_10 = 0
 toggle_switch_11 = 0
-linear_potentiometer_12 = 0
+linear_potentiometer_12 = 1023
 
 [[preset]]
 name = "Slow Drift"
@@ -160,10 +163,10 @@ rotary_potentiometer_5 = 450
 rotary_potentiometer_6 = 120
 toggle_switch_7 = 1
 toggle_switch_8 = 1
-toggle_switch_9 = 1
+toggle_switch_9 = 0
 toggle_switch_10 = 0
 toggle_switch_11 = 0
-linear_potentiometer_12 = 0
+linear_potentiometer_12 = 1023
 
 [[preset]]
 name = "Full Throw"
@@ -178,7 +181,7 @@ toggle_switch_8 = 0
 toggle_switch_9 = 0
 toggle_switch_10 = 1
 toggle_switch_11 = 0
-linear_potentiometer_12 = 1023
+linear_potentiometer_12 = 512
 
 [[preset]]
 name = "Amber Terminal"
@@ -190,7 +193,7 @@ rotary_potentiometer_5 = 200
 rotary_potentiometer_6 = 80
 toggle_switch_7 = 1
 toggle_switch_8 = 1
-toggle_switch_9 = 1
+toggle_switch_9 = 0
 toggle_switch_10 = 0
 toggle_switch_11 = 0
-linear_potentiometer_12 = 0
+linear_potentiometer_12 = 1023
