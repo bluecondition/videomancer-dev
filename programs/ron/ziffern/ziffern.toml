@@ -5,8 +5,9 @@
 # 100% = all numbers far back on one plane (small); pulling it down brings them
 # forward in perspective at a range of per-number speeds (fast ones reach the
 # front early, the slowest at 0%), and at 0% all numbers are co-planar at the
-# front.  Movement happens only when P12 moves.  Background is black or a dark
-# tint; S9 keys incoming video into the black areas.
+# front.  Movement follows P12 through a short glide filter (settles ~1/8 s after
+# the slider stops) so knob ticks and pot noise never stutter the field.
+# Background is black or a dark tint; S9 keys incoming video into the black areas.
 # Forked structurally from the ziggurat accumulator-coordinate engine.
 
 [program]

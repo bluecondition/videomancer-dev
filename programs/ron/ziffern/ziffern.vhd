@@ -11,6 +11,13 @@
 -- cell size changes instead of snapping on a per-pixel modulo.  No per-pixel
 -- multiply/divide (step + centre offset are per-frame; per pixel is just an add).
 --
+-- Glide filter: the geometry is NOT driven by the raw P12 reading.  One knob tick
+-- moves an edge cell ~3 px (and pot ADC noise trembles the whole field), so the
+-- zoom position is a Q10.6 low-pass that eases toward the knob target each frame
+-- (pos += (target-pos) >> C_GLIDE_SH).  Knob ticks become an exponential glide,
+-- ADC noise is crushed to sub-tick level, and the 64x finer position feeds a
+-- widened step lerp (zprod >> 16).  The field settles ~1/8 s after P12 stops.
+--
 -- Depth: NP=3 planes composited front-to-back, each at its own cell size that
 -- scales from dense/far to large/near at a different speed (front fastest); the
 -- numbers are SPLIT across the planes (a balanced per-cell hash assigns each cell
@@ -40,6 +47,7 @@ architecture ziffern of program_top is
 
     constant NP   : integer := 3;        -- depth planes (front=0 .. back=NP-1)
     constant FRAC : integer := 18;       -- phase fraction bits (sub-pixel, smooth zoom)
+    constant C_GLIDE_SH : integer := 3;  -- zoom glide: pos += diff>>3 per frame (~8-frame tau)
 
     -- per-plane speed: cz = prog + triangle(prog)>>gshift.  triangle is 0 at both
     -- throw ends (so all planes start together / converge at the ends) and peaks
@@ -127,8 +135,8 @@ architecture ziffern of program_top is
     type t_slv8arr is array (0 to NP - 1) of std_logic_vector(7 downto 0);
     type t_idxarr is array (0 to NP - 1) of integer range 0 to 17;
     type t_slarr  is array (0 to NP - 1) of std_logic;
-    type t_zparr  is array (0 to NP - 1) of unsigned(27 downto 0);
-    type t_czarr  is array (0 to NP - 1) of unsigned(10 downto 0);
+    type t_zparr  is array (0 to NP - 1) of unsigned(31 downto 0);
+    type t_czarr  is array (0 to NP - 1) of unsigned(16 downto 0);   -- Q10.6 progress
     type t_steparr is array (0 to NP - 1) of unsigned(17 downto 0);  -- step (cells/px)
     type t_marr   is array (0 to NP - 1) of unsigned(27 downto 0);   -- centre*step
     type t_pharr  is array (0 to NP - 1) of signed(27 downto 0);     -- phase Q10.18
@@ -224,11 +232,14 @@ architecture ziffern of program_top is
     signal s_glow_y : unsigned(9 downto 0) := (others => '0');
     signal s_glow_on : std_logic := '0';
 
+    -- filtered zoom position (Q10.6): eases toward (1023-P12)<<6 each frame
+    signal s_zoomf  : unsigned(16 downto 0) := (others => '0');
+
     -- sequential zoom multiply (cz*delta -> per-plane cell size)
     signal s_zprod  : t_zparr := (others => (others => '0'));
     signal s_cz     : t_czarr := (others => (others => '0'));
     signal s_zm_acc : t_zparr := (others => (others => '0'));
-    signal s_zm_cnt : integer range 0 to 12 := 12;
+    signal s_zm_cnt : integer range 0 to 18 := 18;
     signal s_zm_busy : std_logic := '0';
 
     -- sequential centre multiply (centre*step -> phase start offset)
@@ -338,31 +349,53 @@ begin
     end process;
 
     --------------------------------------------------------------------------
-    -- Sequential zoom multiply: zprod(i) = cz(i) * delta, shift-add per cycle.
-    -- prog = 1023 - P12 (forward progress: 0 at P12=100% far, 1023 at 0% front).
+    -- Zoom glide filter: Q10.6 position easing toward the knob target each
+    -- frame.  Raw prog = 1023 - P12; target = prog<<6.  pos += diff>>GLIDE_SH
+    -- (signed; the >>3 truncation parks it <=7 sub-ticks (~0.3 px) from the
+    -- target -- invisible, and NEVER snap the residual: a 1-tick snap is the
+    -- 3 px pop this filter exists to remove).
     --------------------------------------------------------------------------
-    p_zmul : process(clk)
-        variable v_ez   : unsigned(10 downto 0);   -- prog = 1023 - P12
-        variable v_tri  : unsigned(10 downto 0);   -- triangle: 0 at ends, peak mid
-        variable v_cz   : unsigned(11 downto 0);
-        variable v_term : unsigned(27 downto 0);
+    p_zoomfilt : process(clk)
+        variable v_tgt  : unsigned(16 downto 0);
+        variable v_diff : signed(18 downto 0);
     begin
         if rising_edge(clk) then
             if s_vsync_pulse = '1' then
-                v_ez := to_unsigned(1023, 11) - resize(s_zoom, 11);
-                if v_ez < to_unsigned(512, 11) then v_tri := v_ez;
-                else v_tri := to_unsigned(1023, 11) - v_ez; end if;
+                v_tgt := shift_left(resize(to_unsigned(1023, 11) - resize(s_zoom, 11), 17), 6);
+                v_diff := signed(resize(v_tgt, 19)) - signed(resize(s_zoomf, 19));
+                s_zoomf <= unsigned(resize(signed(resize(s_zoomf, 19))
+                                           + shift_right(v_diff, C_GLIDE_SH), 17));
+            end if;
+        end if;
+    end process;
+
+    --------------------------------------------------------------------------
+    -- Sequential zoom multiply: zprod(i) = cz(i) * delta, shift-add per cycle.
+    -- cz is Q10.6 (the filtered position), so the lerp resolution is 64x one
+    -- knob tick; per-plane step = stepfar - zprod>>16 in p_recip.
+    --------------------------------------------------------------------------
+    p_zmul : process(clk)
+        variable v_ez   : unsigned(16 downto 0);   -- filtered prog, Q10.6
+        variable v_tri  : unsigned(16 downto 0);   -- triangle: 0 at ends, peak mid
+        variable v_cz   : unsigned(17 downto 0);
+        variable v_term : unsigned(31 downto 0);
+    begin
+        if rising_edge(clk) then
+            if s_vsync_pulse = '1' then
+                v_ez := s_zoomf;
+                if v_ez < to_unsigned(1023 * 32, 17) then v_tri := v_ez;
+                else v_tri := to_unsigned(1023 * 64, 17) - v_ez; end if;
                 for i in 0 to NP - 1 loop
                     -- prog + leading bump; 0 at both ends -> all start together, converge
-                    v_cz := resize(v_ez, 12) + resize(shift_right(v_tri, C_GSHIFT(i)), 12);
-                    s_cz(i)     <= v_cz(10 downto 0);
+                    v_cz := resize(v_ez, 18) + resize(shift_right(v_tri, C_GSHIFT(i)), 18);
+                    s_cz(i)     <= v_cz(16 downto 0);
                     s_zm_acc(i) <= (others => '0');
                 end loop;
                 s_zm_cnt  <= 0;
                 s_zm_busy <= '1';
             elsif s_zm_busy = '1' then
-                if s_zm_cnt <= 10 then
-                    v_term := shift_left(resize(s_delta, 28), s_zm_cnt);
+                if s_zm_cnt <= 16 then
+                    v_term := shift_left(resize(s_delta, 32), s_zm_cnt);
                     for i in 0 to NP - 1 loop
                         if s_cz(i)(s_zm_cnt) = '1' then
                             s_zm_acc(i) <= s_zm_acc(i) + v_term;
@@ -395,8 +428,15 @@ begin
             v_sn := C_RECIP(to_integer(v_Gfg(7 downto 0)));   -- near (smaller step)
             s_stepfar  <= v_sf;
             s_stepnear <= v_sn;
-            -- delta from the REGISTERED endpoints (keeps the LUT-read off the subtract cone)
-            if s_stepfar > s_stepnear then s_delta <= s_stepfar - s_stepnear;
+            -- delta from the REGISTERED endpoints (keeps the LUT-read off the subtract cone);
+            -- clamp to 15 bits so cz(Q10.6)*delta stays within the 32-bit accumulator
+            -- (only reachable with garbage timing measurements, Gbg < 8).
+            if s_stepfar > s_stepnear then
+                if s_stepfar - s_stepnear > to_unsigned(32767, 18) then
+                    s_delta <= to_unsigned(32767, 18);
+                else
+                    s_delta <= s_stepfar - s_stepnear;
+                end if;
             else s_delta <= (others => '0'); end if;
 
             -- K5 Spacing: glyph occupies the cell shifted by s_spcsh (11=packed .. 8=wide gap)
@@ -421,15 +461,16 @@ begin
         end if;
     end process;
 
-    -- per-plane step = lerp(stepfar, stepnear, prog_i):  step = stepfar - zprod>>10,
-    -- where zprod = clamp(prog + prog>>gshift) * (stepfar-stepnear) from p_zmul.
-    -- step is continuous in P12 (no per-G quantisation) -> the zoom GLIDES.
+    -- per-plane step = lerp(stepfar, stepnear, prog_i):  step = stepfar - zprod>>16,
+    -- where zprod = (prog + tri(prog)>>gshift) * (stepfar-stepnear) from p_zmul,
+    -- prog in Q10.6 (filtered).  step is continuous in the GLIDED position with
+    -- 64x-per-knob-tick resolution -> the zoom is sub-pixel smooth.
     p_recip : process(clk)
         variable v_st : unsigned(17 downto 0);
     begin
         if rising_edge(clk) then
             for i in 0 to NP - 1 loop
-                v_st := s_stepfar - resize(shift_right(s_zprod(i), 10), 18);
+                v_st := s_stepfar - resize(shift_right(s_zprod(i), 16), 18);
                 if v_st < to_unsigned(64, 18) then v_st := to_unsigned(64, 18); end if;
                 s_pstep(i) <= v_st;
             end loop;
