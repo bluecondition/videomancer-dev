@@ -1,0 +1,124 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="760" viewBox="0 0 1200 760">
+<rect width="100%" height="100%" fill="#000"/>
+<style>.bnd{stroke:#3f3;stroke-width:1.5;fill:none}.det{stroke:#5af;stroke-width:1.5;fill:none}.vert{fill:#fc3;stroke:none}.lbl{fill:#eee;font-family:monospace;font-size:11px}.title{fill:#fff;font-family:monospace;font-size:16px;font-weight:bold}.subtitle{fill:#aaa;font-family:monospace;font-size:11px}.legend{fill:#bbb;font-family:monospace;font-size:11px}</style>
+<line class="bnd" x1="330.0" y1="40.0" x2="179.7" y2="97.8"/>
+<line class="bnd" x1="179.7" y1="97.8" x2="131.1" y2="259.7"/>
+<line class="bnd" x1="131.1" y1="259.7" x2="147.3" y2="410.1"/>
+<line class="bnd" x1="147.3" y1="410.1" x2="208.6" y2="600.9"/>
+<line class="bnd" x1="208.6" y1="600.9" x2="283.7" y2="720.0"/>
+<line class="bnd" x1="283.7" y1="720.0" x2="376.3" y2="720.0"/>
+<line class="bnd" x1="376.3" y1="720.0" x2="451.4" y2="600.9"/>
+<line class="bnd" x1="451.4" y1="600.9" x2="512.7" y2="410.1"/>
+<line class="bnd" x1="512.7" y1="410.1" x2="528.9" y2="259.7"/>
+<line class="bnd" x1="528.9" y1="259.7" x2="480.3" y2="97.8"/>
+<line class="bnd" x1="480.3" y1="97.8" x2="330.0" y2="40.0"/>
+<line class="det" x1="179.7" y1="282.9" x2="243.3" y2="255.1"/>
+<line class="det" x1="243.3" y1="255.1" x2="298.8" y2="265.5"/>
+<line class="det" x1="361.2" y1="265.5" x2="416.7" y2="255.1"/>
+<line class="det" x1="416.7" y1="255.1" x2="480.3" y2="282.9"/>
+<line class="bnd" x1="202.8" y1="336.1" x2="243.3" y2="336.1"/>
+<line class="bnd" x1="243.3" y1="336.1" x2="289.5" y2="336.1"/>
+<line class="bnd" x1="289.5" y1="336.1" x2="243.3" y2="336.1"/>
+<line class="bnd" x1="243.3" y1="336.1" x2="202.8" y2="336.1"/>
+<line class="bnd" x1="370.5" y1="336.1" x2="416.7" y2="336.1"/>
+<line class="bnd" x1="416.7" y1="336.1" x2="457.2" y2="336.1"/>
+<line class="bnd" x1="457.2" y1="336.1" x2="416.7" y2="336.1"/>
+<line class="bnd" x1="416.7" y1="336.1" x2="370.5" y2="336.1"/>
+<line class="bnd" x1="330.0" y1="300.2" x2="301.1" y2="502.6"/>
+<line class="bnd" x1="330.0" y1="300.2" x2="358.9" y2="502.6"/>
+<line class="bnd" x1="301.1" y1="502.6" x2="330.0" y2="525.7"/>
+<line class="bnd" x1="358.9" y1="502.6" x2="330.0" y2="525.7"/>
+<line class="det" x1="301.1" y1="502.6" x2="358.9" y2="502.6"/>
+<line class="bnd" x1="264.1" y1="566.2" x2="330.0" y2="561.6"/>
+<line class="bnd" x1="330.0" y1="561.6" x2="395.9" y2="566.2"/>
+<line class="bnd" x1="395.9" y1="566.2" x2="330.0" y2="570.8"/>
+<line class="bnd" x1="330.0" y1="570.8" x2="264.1" y2="566.2"/>
+<circle cx="330.0" cy="40.0" r="3" fill="#fc3"/>
+<text class="lbl" x="330.0" y="24.0" text-anchor="middle">crown</text>
+<circle cx="179.7" cy="97.8" r="3" fill="#fc3"/>
+<text class="lbl" x="173.7" y="89.8" text-anchor="end">temple_l</text>
+<circle cx="480.3" cy="97.8" r="3" fill="#fc3"/>
+<text class="lbl" x="486.3" y="105.8" text-anchor="start">temple_r</text>
+<circle cx="131.1" cy="259.7" r="3" fill="#fc3"/>
+<text class="lbl" x="125.1" y="251.7" text-anchor="end">side_l</text>
+<circle cx="528.9" cy="259.7" r="3" fill="#fc3"/>
+<text class="lbl" x="534.9" y="267.7" text-anchor="start">side_r</text>
+<circle cx="147.3" cy="410.1" r="3" fill="#fc3"/>
+<text class="lbl" x="141.3" y="402.1" text-anchor="end">cheek_l</text>
+<circle cx="512.7" cy="410.1" r="3" fill="#fc3"/>
+<text class="lbl" x="518.7" y="418.1" text-anchor="start">cheek_r</text>
+<circle cx="208.6" cy="600.9" r="3" fill="#fc3"/>
+<text class="lbl" x="202.6" y="592.9" text-anchor="end">jaw_l</text>
+<circle cx="451.4" cy="600.9" r="3" fill="#fc3"/>
+<text class="lbl" x="457.4" y="608.9" text-anchor="start">jaw_r</text>
+<circle cx="283.7" cy="720.0" r="3" fill="#fc3"/>
+<text class="lbl" x="277.7" y="712.0" text-anchor="end">chin_l</text>
+<circle cx="376.3" cy="720.0" r="3" fill="#fc3"/>
+<text class="lbl" x="382.3" y="728.0" text-anchor="start">chin_r</text>
+<circle cx="179.7" cy="282.9" r="3" fill="#0ff"/>
+<text class="lbl" x="173.7" y="276.9" text-anchor="end">brow_l_o</text>
+<circle cx="243.3" cy="255.1" r="3" fill="#0ff"/>
+<text class="lbl" x="243.3" y="243.1" text-anchor="middle">brow_l_p</text>
+<circle cx="298.8" cy="265.5" r="3" fill="#0ff"/>
+<text class="lbl" x="304.8" y="271.5" text-anchor="start">brow_l_i</text>
+<circle cx="361.2" cy="265.5" r="3" fill="#0ff"/>
+<text class="lbl" x="355.2" y="259.5" text-anchor="end">brow_r_i</text>
+<circle cx="416.7" cy="255.1" r="3" fill="#0ff"/>
+<text class="lbl" x="416.7" y="243.1" text-anchor="middle">brow_r_p</text>
+<circle cx="480.3" cy="282.9" r="3" fill="#0ff"/>
+<text class="lbl" x="486.3" y="288.9" text-anchor="start">brow_r_o</text>
+<circle cx="202.8" cy="336.1" r="3" fill="#0ff"/>
+<text class="lbl" x="196.8" y="330.1" text-anchor="end">eye_l_o</text>
+<circle cx="243.3" cy="336.1" r="3" fill="#0ff"/>
+<text class="lbl" x="243.3" y="326.1" text-anchor="middle">eye_l_t</text>
+<circle cx="289.5" cy="336.1" r="3" fill="#fc3"/>
+<text class="lbl" x="295.5" y="342.1" text-anchor="start">eye_l_i</text>
+<circle cx="243.3" cy="336.1" r="3" fill="#0ff"/>
+<text class="lbl" x="243.3" y="352.1" text-anchor="middle">eye_l_b</text>
+<circle cx="370.5" cy="336.1" r="3" fill="#fc3"/>
+<text class="lbl" x="364.5" y="330.1" text-anchor="end">eye_r_i</text>
+<circle cx="416.7" cy="336.1" r="3" fill="#0ff"/>
+<text class="lbl" x="416.7" y="326.1" text-anchor="middle">eye_r_t</text>
+<circle cx="457.2" cy="336.1" r="3" fill="#0ff"/>
+<text class="lbl" x="463.2" y="342.1" text-anchor="start">eye_r_o</text>
+<circle cx="416.7" cy="336.1" r="3" fill="#0ff"/>
+<text class="lbl" x="416.7" y="352.1" text-anchor="middle">eye_r_b</text>
+<circle cx="330.0" cy="300.2" r="3" fill="#fc3"/>
+<text class="lbl" x="336.0" y="308.2" text-anchor="start">nose_top</text>
+<circle cx="301.1" cy="502.6" r="3" fill="#fc3"/>
+<text class="lbl" x="295.1" y="496.6" text-anchor="end">nose_l</text>
+<circle cx="358.9" cy="502.6" r="3" fill="#fc3"/>
+<text class="lbl" x="364.9" y="508.6" text-anchor="start">nose_r</text>
+<circle cx="330.0" cy="525.7" r="3" fill="#fc3"/>
+<text class="lbl" x="330.0" y="541.7" text-anchor="middle">nose_tip</text>
+<circle cx="264.1" cy="566.2" r="3" fill="#0ff"/>
+<text class="lbl" x="258.1" y="558.2" text-anchor="end">mouth_l</text>
+<circle cx="330.0" cy="561.6" r="3" fill="#0ff"/>
+<text class="lbl" x="330.0" y="551.6" text-anchor="middle">mouth_t</text>
+<circle cx="395.9" cy="566.2" r="3" fill="#0ff"/>
+<text class="lbl" x="401.9" y="574.2" text-anchor="start">mouth_r</text>
+<circle cx="330.0" cy="570.8" r="3" fill="#0ff"/>
+<text class="lbl" x="330.0" y="586.8" text-anchor="middle">mouth_b</text>
+<text class="title" x="680" y="60">Bishop face — sad (mouth+eyes closed)</text>
+<text class="subtitle" x="680" y="82">Cyan dots = vertices moved by this expression</text>
+<text class="legend" x="680" y="104" style="font-weight:bold">Per-vertex deltas (dx, dy):</text>
+<text class="legend" x="692" y="122">brow_l_i   (+3, -10)</text>
+<text class="legend" x="692" y="136">brow_l_o   (+0, +5)</text>
+<text class="legend" x="692" y="150">brow_l_p   (+0, -2)</text>
+<text class="legend" x="692" y="164">brow_r_i   (-3, -10)</text>
+<text class="legend" x="692" y="178">brow_r_o   (+0, +5)</text>
+<text class="legend" x="692" y="192">brow_r_p   (+0, -2)</text>
+<text class="legend" x="692" y="206">eye_l_b    (+0, +2)</text>
+<text class="legend" x="692" y="220">eye_l_o    (+0, +2)</text>
+<text class="legend" x="692" y="234">eye_l_t    (+0, +4)</text>
+<text class="legend" x="692" y="248">eye_r_b    (+0, +2)</text>
+<text class="legend" x="692" y="262">eye_r_o    (+0, +2)</text>
+<text class="legend" x="692" y="276">eye_r_t    (+0, +4)</text>
+<text class="legend" x="692" y="290">mouth_b    (+0, -4)</text>
+<text class="legend" x="692" y="304">mouth_l    (+3, +10)</text>
+<text class="legend" x="692" y="318">mouth_r    (-3, +10)</text>
+<text class="legend" x="692" y="332">mouth_t    (+0, -2)</text>
+<text class="legend" x="680" y="360" style="font-weight:bold">Edge colors</text>
+<text class="legend" x="692" y="376" fill="#3f3">green: boundary (EOR fill)</text>
+<text class="legend" x="692" y="390" fill="#5af">blue:  detail (visible only)</text>
+</svg>

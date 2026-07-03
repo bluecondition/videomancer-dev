@@ -1,0 +1,115 @@
+# Oubliette
+#
+# A top-down, turn-based roguelike for the Videomancer.  Pick a class, explore
+# procedurally generated dungeon levels, fight monsters, loot treasure, descend.
+# Driven entirely by the front panel: one Switch-7 flip = one turn.
+
+[program]
+program_id = "com.ron.oubliette"
+program_name = "Oubliette"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "Ron"
+license = "GPL-3.0"
+categories = ["Game", "Pattern"]
+program_type = "processing"
+description = "Top-down turn-based roguelike — pick a class, explore, fight, loot, and descend. One Switch-7 flip = one turn."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+# --- Rotary Potentiometers (Knobs 1-6) ---
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Class"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 0
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Seed"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Action"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 0
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Unused"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 0
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Unused"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 0
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Hue"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+
+# --- Toggle Switches (7-11) ---
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Step/Act"
+value_labels = ["A", "B"]
+initial_value_label = "A"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Status"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Use/Cast"
+value_labels = ["A", "B"]
+initial_value_label = "A"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Peaceful"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "New Game"
+value_labels = ["Run", "New"]
+initial_value_label = "Run"
+
+# --- Linear Fader (12) ---
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Heading"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+
+# --- Presets ---
+
+[[preset]]
+name = "New Adventure"

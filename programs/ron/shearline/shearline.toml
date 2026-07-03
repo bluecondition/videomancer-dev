@@ -1,0 +1,133 @@
+[program]
+program_id = "com.bluecondition.shearline"
+program_version = "1.0.0"
+abi_version = ">=1.0,<2.0"
+program_name = "Shearline"
+author = "bluecondition"
+license = "GPL-3.0"
+categories = ["Process", "Glitch", "Feedback"]
+program_type = "processing"
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+description = "Recursive line-feedback smear: each scanline re-draws the previous line shifted sideways into diagonal comet trails."
+url = "https://github.com/lzxindustries/videomancer-sdk"
+
+# --- Rotary Potentiometers (Knobs 1-6) ---
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 64
+display_min_value = 0
+display_max_value = 15
+name_label = "Shift"
+suffix_label = "px"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 700
+display_min_value = 0
+display_max_value = 100
+name_label = "Decay"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 0
+display_min_value = 0
+display_max_value = 100
+name_label = "Slope Mod"
+suffix_label = "%"
+
+# --- Toggle Switches (7-11) ---
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Direction"
+value_labels = ["Right", "Left"]
+initial_value_label = "Right"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Frame"
+value_labels = ["Free Run", "Reset"]
+initial_value_label = "Free Run"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Bypass"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+# --- Linear Potentiometer (Slider) ---
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 1023
+display_min_value = 0
+display_max_value = 100
+name_label = "Mix"
+suffix_label = "%"
+
+# --- Presets ---
+
+[[preset]]
+name = "Clean"
+rotary_potentiometer_1 = 0
+rotary_potentiometer_2 = 0
+rotary_potentiometer_3 = 0
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Whisper"
+rotary_potentiometer_1 = 64
+rotary_potentiometer_2 = 380
+rotary_potentiometer_3 = 0
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 900
+
+[[preset]]
+name = "Comet"
+rotary_potentiometer_1 = 96
+rotary_potentiometer_2 = 820
+rotary_potentiometer_3 = 0
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Screamer"
+rotary_potentiometer_1 = 320
+rotary_potentiometer_2 = 980
+rotary_potentiometer_3 = 260
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Left Sweep"
+rotary_potentiometer_1 = 160
+rotary_potentiometer_2 = 880
+rotary_potentiometer_3 = 0
+toggle_switch_7 = 1
+toggle_switch_8 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 1023

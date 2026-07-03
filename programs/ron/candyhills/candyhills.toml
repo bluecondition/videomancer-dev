@@ -1,0 +1,197 @@
+# Candy Hills — a side-scrolling 2D generative landscape: large, long, sweeping
+# candy-coloured hills filled with bold angled stripes that move with each hill,
+# under a pastel mint sky, with a soft cloudy paper-grain wash.
+#
+# A STREAMING synthesis program (no frame buffer).  3 parallax hill layers (back
+# layers hazed + slower); crests are summed sines whose amplitude is a smooth
+# gain and may run off the top/bottom of frame.  Stripes are attached to each
+# hill (move with it), per-layer widths 100/50/25%, with a perspective fan
+# (narrow at the bottom, wider toward the crest; P12) and a gentle sine curve.
+# Always-on watercolour cloud; S10 replaces the sky with the incoming video.
+
+[program]
+program_id = "com.bluecondition.candyhills"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+program_name = "Candy Hills"
+author = "bluecondition"
+license = "GPL-3.0"
+categories = ["Pattern", "Generative", "Art"]
+program_type = "synthesis"
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+description = "Side-scrolling striped candy hills in 3 parallax layers under a pastel sky, with a soft hand-drawn paper-grain wash."
+url = "https://github.com/bluecondition/videomancer-dev"
+
+# --- Rotary Potentiometers (Knobs 1-6) ---
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 300
+display_min_value = 0
+display_max_value = 100
+name_label = "Scroll Speed"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 560
+display_min_value = 0
+display_max_value = 100
+name_label = "Hill Amplitude"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 512
+display_min_value = 0
+display_max_value = 100
+name_label = "Sky Tint"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Palette"
+value_labels = ["Green/Magenta", "Mint/Coral", "Sunset", "Mono", "Bubblegum", "Lemon/Berry", "Aqua/Tangerine", "Lavender/Lime"]
+initial_value_label = "Green/Magenta"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 930
+display_min_value = 0
+display_max_value = 100
+name_label = "Stripe Width"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 360
+display_min_value = 0
+display_max_value = 100
+name_label = "Texture Amount"
+suffix_label = "%"
+
+# --- Toggle Switches (7-11, binary) ---
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "3rd Layer"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Distance Haze"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Crest Line"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Video Sky"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Freeze"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+# --- Linear Potentiometer (Fader 12) ---
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 350
+display_min_value = 0
+display_max_value = 100
+name_label = "Fan Amount"
+suffix_label = "%"
+
+# --- Presets ---
+
+# param order: K1 Speed, K2 Amplitude, K3 SkyTint, K4 Palette, K5 StripeWidth,
+# K6 Texture | S7 3rdLayer S8 Haze S9 CrestLine S10 VideoSky S11 Freeze | P12 Fan
+
+[[preset]]
+name = "Candy Country"
+rotary_potentiometer_1 = 300
+rotary_potentiometer_2 = 560
+rotary_potentiometer_3 = 512
+rotary_potentiometer_4 = 0
+rotary_potentiometer_5 = 930
+rotary_potentiometer_6 = 360
+toggle_switch_7 = 1
+toggle_switch_8 = 1
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 400
+
+[[preset]]
+name = "Mint & Coral"
+rotary_potentiometer_1 = 200
+rotary_potentiometer_2 = 720
+rotary_potentiometer_3 = 560
+rotary_potentiometer_4 = 160
+rotary_potentiometer_5 = 880
+rotary_potentiometer_6 = 300
+toggle_switch_7 = 1
+toggle_switch_8 = 1
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 350
+
+[[preset]]
+name = "Sunset Ridge"
+rotary_potentiometer_1 = 500
+rotary_potentiometer_2 = 860
+rotary_potentiometer_3 = 460
+rotary_potentiometer_4 = 320
+rotary_potentiometer_5 = 800
+rotary_potentiometer_6 = 420
+toggle_switch_7 = 1
+toggle_switch_8 = 1
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 520
+
+[[preset]]
+name = "Flat Two-Layer"
+rotary_potentiometer_1 = 260
+rotary_potentiometer_2 = 260
+rotary_potentiometer_3 = 512
+rotary_potentiometer_4 = 0
+rotary_potentiometer_5 = 700
+rotary_potentiometer_6 = 200
+toggle_switch_7 = 0
+toggle_switch_8 = 1
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 220
