@@ -45,7 +45,11 @@ use work.video_timing_pkg.all;
 
 architecture ziffern of program_top is
 
-    constant NP   : integer := 3;        -- depth planes (front=0 .. back=NP-1)
+    -- NP=5 dies in synthesis: yosys abc9 "Boxes are not in a topological order"
+    -- crash mapping the 5-plane netlist (BRAM boxes + carries).  4 is the max
+    -- this toolchain will build; plain-LUT-ROM NP=4 also fails (router congestion,
+    -- 2 permanently-overused wires) -- the BRAM glyph ROM is what makes 4 fit.
+    constant NP   : integer := 4;        -- depth planes (front=0 .. back=NP-1)
     constant FRAC : integer := 18;       -- phase fraction bits (sub-pixel, smooth zoom)
     constant C_GLIDE_SH : integer := 3;  -- zoom glide: pos += diff>>3 per frame (~8-frame tau)
 
@@ -54,7 +58,7 @@ architecture ziffern of program_top is
     -- mid-throw, bumped differently per plane so the front plane leads.  shift 1 =
     -- biggest lead (fastest), 15 = ~none (slowest, straight).
     type t_gsh is array (0 to NP - 1) of integer range 0 to 15;
-    constant C_GSHIFT : t_gsh := (1, 2, 15);
+    constant C_GSHIFT : t_gsh := (1, 2, 3, 15);
 
     constant C_MID : unsigned(9 downto 0) := to_unsigned(512, 10);
 
@@ -124,6 +128,27 @@ architecture ziffern of program_top is
 
     type t_dlut is array (0 to 15) of integer range 0 to 8;
     constant C_DIGLUT : t_dlut := (0,1,2,3,4,5,6,7,8,0,1,2,3,4,5,6);
+
+    -- Packed glyph ROM for BRAM inference: one 24-bit word per (glyph, row) =
+    -- rowAbove & rowCentre & rowBelow (boundary rows zero), addr = idx*8 + gy.
+    -- One synchronous read per plane replaces three wide LUT muxes -- the LUT
+    -- ROM's fanout wiring is what congests the router at NP=4.
+    type t_grom is array (0 to 255) of std_logic_vector(23 downto 0);
+    function gen_grom return t_grom is
+        variable r : t_grom := (others => (others => '0'));
+        variable u, c, d : std_logic_vector(7 downto 0);
+    begin
+        for idx in 0 to 17 loop
+            for gy in 0 to 7 loop
+                if gy > 0 then u := C_DIGITS(idx, gy - 1); else u := x"00"; end if;
+                c := C_DIGITS(idx, gy);
+                if gy < 7 then d := C_DIGITS(idx, gy + 1); else d := x"00"; end if;
+                r(idx * 8 + gy) := u & c & d;
+            end loop;
+        end loop;
+        return r;
+    end function;
+    constant C_GROM : t_grom := gen_grom;
 
     --------------------------------------------------------------------------
     -- Per-plane array types
@@ -276,7 +301,9 @@ architecture ziffern of program_top is
     signal s2_gx, s2_gy : t_u3arr := (others => (others => '0'));
     signal s2_vis : t_slarr := (others => '0');
 
-    signal s3_rb_u, s3_rb_c, s3_rb_d : t_slv8arr := (others => (others => '0'));
+    type t_slv24arr is array (0 to NP - 1) of std_logic_vector(23 downto 0);
+    signal s3_word : t_slv24arr := (others => (others => '0'));   -- BRAM glyph read
+    signal s3_rb_u, s3_rb_c, s3_rb_d : t_slv8arr;                 -- word slices
     signal s3_gx : t_u3arr := (others => (others => '0'));
     signal s3_vis : t_slarr := (others => '0');
 
@@ -653,11 +680,14 @@ begin
                 v_rate := 6 + v_pc;                                  -- 6..10
                 v_gen  := shift_right(s_T + resize(v_h(7 downto 0), 24), v_rate);
                 sA_gen8(i) <= std_logic_vector(v_gen(7 downto 0));
-                -- balanced 3-way split (well-mixed high byte -> equal thirds)
+                -- balanced NP-way split (well-mixed high byte -> equal shares)
                 v_hi := v_h(15 downto 8);
-                if    v_hi < to_unsigned(86, 8)  then v_pof := 0;
-                elsif v_hi < to_unsigned(171, 8) then v_pof := 1;
-                else                                  v_pof := 2; end if;
+                v_pof := NP - 1;
+                for k in NP - 2 downto 0 loop
+                    if v_hi < to_unsigned(((k + 1) * 256) / NP, 8) then
+                        v_pof := k;
+                    end if;
+                end loop;
                 if v_pof = i then sA_owned(i) <= '1'; else sA_owned(i) <= '0'; end if;
                 sA_base(i) <= s1_base(i);
                 sA_gx(i) <= s1_gx(i); sA_gy(i) <= s1_gy(i);
@@ -686,24 +716,24 @@ begin
     end process;
 
     --------------------------------------------------------------------------
-    -- S3: glyph rows (centre + above/below for the dilation glow).
+    -- S3: glyph rows (centre + above/below for the dilation glow), one packed
+    -- 24-bit BRAM read per plane (own generate block so each plane reliably
+    -- infers its own EBR pair instead of a 4-read-port memory).
     --------------------------------------------------------------------------
-    p_font : process(clk)
-        variable v_gy : integer range 0 to 7;
-    begin
-        if rising_edge(clk) then
-            for i in 0 to NP - 1 loop
-                v_gy := to_integer(s2_gy(i));
-                s3_rb_c(i) <= C_DIGITS(s2_idx(i), v_gy);
-                if v_gy > 0 then s3_rb_u(i) <= C_DIGITS(s2_idx(i), v_gy - 1);
-                else             s3_rb_u(i) <= (others => '0'); end if;
-                if v_gy < 7 then s3_rb_d(i) <= C_DIGITS(s2_idx(i), v_gy + 1);
-                else             s3_rb_d(i) <= (others => '0'); end if;
+    g_font : for i in 0 to NP - 1 generate
+        p_font : process(clk)
+        begin
+            if rising_edge(clk) then
+                s3_word(i) <= C_GROM(to_integer(
+                                  to_unsigned(s2_idx(i), 5) & s2_gy(i)));
                 s3_gx(i) <= s2_gx(i);
                 s3_vis(i) <= s2_vis(i);
-            end loop;
-        end if;
-    end process;
+            end if;
+        end process;
+        s3_rb_u(i) <= s3_word(i)(23 downto 16);
+        s3_rb_c(i) <= s3_word(i)(15 downto 8);
+        s3_rb_d(i) <= s3_word(i)(7 downto 0);
+    end generate;
 
     --------------------------------------------------------------------------
     -- S4: per-plane centre pixel + 1-glyph-pixel dilation glow.
@@ -760,11 +790,16 @@ begin
                 if s4_glow(i) = '1' then v_glowsel := '1'; end if;
             end loop;
 
-            -- depth fade: nearer (front) plane brighter
+            -- depth fade: nearer (front) plane brighter.  NOTE: keep exactly
+            -- this 4-arm shape -- adding a 5th arm re-triggers the abc9
+            -- "Boxes are not in a topological order" synth crash (shape-
+            -- sensitive toolchain bug, same one that blocks NP=5).
             case v_win is
                 when 0      => v_numy_f := s_num_y;
                 when 1      => v_numy_f := s_num_y - shift_right(s_num_y, 3);
-                when others => v_numy_f := s_num_y - shift_right(s_num_y, 2);
+                when 2      => v_numy_f := s_num_y - shift_right(s_num_y, 2);
+                when others => v_numy_f := s_num_y - shift_right(s_num_y, 2)
+                                                   - shift_right(s_num_y, 3);
             end case;
 
             if s_invert = '0' then
