@@ -27,9 +27,12 @@
 --
 -- Background is black or a dark tint; S9 keys incoming video into the black areas.
 --
--- Controls: K1 Color, K2 Change Rate, K3 Number Set, K4 Brightness, K5 Spacing,
---           K6 Glow, S7 Animate, S8 Background, S9 Video, S10 Font, S11 Invert,
---           P12 Zoom.
+-- Controls: K1 Color, K2 Change Rate, K3 Number Set, K4 Size (smooth font
+--           scale; brightness is always full and uniform across planes),
+--           K5 Spacing (gap between numbers, font size unchanged: pitch step
+--           = font step * RT via the vblank multiply chain), K6 Glow
+--           (two-ring fading phosphor haze), S7 Animate, S8 Background,
+--           S9 Video, S10 Font, S11 Invert, P12 Zoom.
 --
 -- Author: bluecondition
 
@@ -129,21 +132,24 @@ architecture ziffern of program_top is
     type t_dlut is array (0 to 15) of integer range 0 to 8;
     constant C_DIGLUT : t_dlut := (0,1,2,3,4,5,6,7,8,0,1,2,3,4,5,6);
 
-    -- Packed glyph ROM for BRAM inference: one 24-bit word per (glyph, row) =
-    -- rowAbove & rowCentre & rowBelow (boundary rows zero), addr = idx*8 + gy.
-    -- One synchronous read per plane replaces three wide LUT muxes -- the LUT
-    -- ROM's fanout wiring is what congests the router at NP=4.
-    type t_grom is array (0 to 255) of std_logic_vector(23 downto 0);
+    -- Packed glyph ROM for BRAM inference: one 40-bit word per (glyph, row) =
+    -- the 5-row window rowAbove2 & rowAbove & rowCentre & rowBelow & rowBelow2
+    -- (boundary rows zero), addr = idx*8 + gy.  One synchronous read per plane
+    -- replaces the wide LUT muxes whose fanout wiring congests the router at
+    -- NP=4; the 5-row window feeds the two-ring fading glow.
+    type t_grom is array (0 to 255) of std_logic_vector(39 downto 0);
     function gen_grom return t_grom is
         variable r : t_grom := (others => (others => '0'));
-        variable u, c, d : std_logic_vector(7 downto 0);
+        variable uu, u, c, d, dd : std_logic_vector(7 downto 0);
     begin
         for idx in 0 to 17 loop
             for gy in 0 to 7 loop
-                if gy > 0 then u := C_DIGITS(idx, gy - 1); else u := x"00"; end if;
+                if gy > 1 then uu := C_DIGITS(idx, gy - 2); else uu := x"00"; end if;
+                if gy > 0 then u  := C_DIGITS(idx, gy - 1); else u  := x"00"; end if;
                 c := C_DIGITS(idx, gy);
-                if gy < 7 then d := C_DIGITS(idx, gy + 1); else d := x"00"; end if;
-                r(idx * 8 + gy) := u & c & d;
+                if gy < 7 then d  := C_DIGITS(idx, gy + 1); else d  := x"00"; end if;
+                if gy < 6 then dd := C_DIGITS(idx, gy + 2); else dd := x"00"; end if;
+                r(idx * 8 + gy) := uu & u & c & d & dd;
             end loop;
         end loop;
         return r;
@@ -219,7 +225,7 @@ architecture ziffern of program_top is
     signal s_zoom        : unsigned(9 downto 0);
     signal s_space       : unsigned(9 downto 0);
     signal s_glow        : unsigned(9 downto 0);
-    signal s_master      : unsigned(9 downto 0);
+    signal s_sizek       : unsigned(9 downto 0);
     signal s_animate     : std_logic;
     signal s_bg_tint     : std_logic;
     signal s_video       : std_logic;
@@ -245,16 +251,42 @@ architecture ziffern of program_top is
     signal s_delta   : unsigned(17 downto 0) := (others => '0');    -- stepfar - stepnear
     signal s_stepfar : unsigned(17 downto 0) := to_unsigned(6554, 18);  -- (1<<FRAC)/Gbg
     signal s_stepnear: unsigned(17 downto 0) := to_unsigned(1092, 18);  -- (1<<FRAC)/Gfg
-    signal s_pstep : t_steparr := (others => to_unsigned(6554, 18));  -- per-plane step (cells/px)
+    signal s_stepf : t_steparr := (others => to_unsigned(6554, 18)); -- font step (zoom lerp)
+    signal s_pstep : t_steparr := (others => to_unsigned(6554, 18)); -- pitch step (cells/px)
     signal s_mh, s_mv : t_marr := (others => (others => '0'));        -- centre*step
-    signal s_spcsh : integer range 12 to 15 := 15;                    -- spacing: glyph = cell>>(...)
+
+    -- K4 Size / K5 Spacing (per-frame constants):
+    --   R    = step scale from K4 (1536-K4: 1536=0.67x font .. 513=2x, 1024=unity@512)
+    --   T10  = glyph's share of the cell from K5 (1023=packed .. 512=gap one font wide)
+    --   RT   = (R*T10)>>10, single combined factor: pitch step = (font step * RT)>>10
+    --   tk/t8 = glyph column thresholds k*(T10>>3) and gate 8*(T10>>3) on frac(17:8)
+    signal s_rr    : unsigned(10 downto 0) := to_unsigned(1024, 11);
+    signal s_t10   : unsigned(9 downto 0) := to_unsigned(1023, 10);
+    signal s_rt    : unsigned(10 downto 0) := to_unsigned(1024, 11);
+    type t_thr is array (1 to 7) of unsigned(9 downto 0);
+    signal s_tk    : t_thr := (to_unsigned(127,10), to_unsigned(254,10),
+                               to_unsigned(381,10), to_unsigned(508,10),
+                               to_unsigned(635,10), to_unsigned(762,10),
+                               to_unsigned(889,10));
+    signal s_t8    : unsigned(9 downto 0) := to_unsigned(1016, 10);
+
+    -- sequential RT multiply (R*T10, runs from vsync alongside p_zmul)
+    signal s_rt_acc : unsigned(20 downto 0) := (others => '0');
+    signal s_rt_cnt : integer range 0 to 11 := 11;
+
+    -- sequential pitch multiply (font step * RT per plane, after p_recip)
+    type t_ptarr is array (0 to NP - 1) of unsigned(29 downto 0);
+    signal s_pt_acc : t_ptarr := (others => (others => '0'));
+    signal s_pt_cnt : integer range 0 to 12 := 12;
+    signal s_pt_busy : std_logic := '0';
+    signal s_pt_done, s_pt_done_d : std_logic := '0';
 
     signal s_seed  : unsigned(15 downto 0) := (others => '0');
     signal s_T     : unsigned(23 downto 0) := (others => '0');
 
     signal s_num_y, s_num_u, s_num_v : unsigned(9 downto 0) := (others => '0');
     signal s_bg_y,  s_bg_u,  s_bg_v  : unsigned(9 downto 0) := (others => '0');
-    signal s_glow_y : unsigned(9 downto 0) := (others => '0');
+    signal s_glow1_y, s_glow2_y : unsigned(9 downto 0) := (others => '0');
     signal s_glow_on : std_logic := '0';
 
     -- filtered zoom position (Q10.6): eases toward (1023-P12)<<6 each frame
@@ -301,13 +333,13 @@ architecture ziffern of program_top is
     signal s2_gx, s2_gy : t_u3arr := (others => (others => '0'));
     signal s2_vis : t_slarr := (others => '0');
 
-    type t_slv24arr is array (0 to NP - 1) of std_logic_vector(23 downto 0);
-    signal s3_word : t_slv24arr := (others => (others => '0'));   -- BRAM glyph read
-    signal s3_rb_u, s3_rb_c, s3_rb_d : t_slv8arr;                 -- word slices
+    type t_slv40arr is array (0 to NP - 1) of std_logic_vector(39 downto 0);
+    signal s3_word : t_slv40arr := (others => (others => '0'));   -- BRAM glyph read
+    signal s3_rb_uu, s3_rb_u, s3_rb_c, s3_rb_d, s3_rb_dd : t_slv8arr;  -- word slices
     signal s3_gx : t_u3arr := (others => (others => '0'));
     signal s3_vis : t_slarr := (others => '0');
 
-    signal s4_center, s4_glow : t_slarr := (others => '0');
+    signal s4_center, s4_glow1, s4_glow2 : t_slarr := (others => '0');
 
     -- sync delay pipeline (aligned to s4): [vpar field avid vsync hsync]
     type t_syncp is array (0 to 5) of std_logic_vector(4 downto 0);
@@ -326,8 +358,8 @@ begin
     s_hue_knob    <= unsigned(registers_in(0));
     s_change_rate <= unsigned(registers_in(1));
     s_seed_knob   <= unsigned(registers_in(2));
-    s_master      <= unsigned(registers_in(3));   -- K4 Brightness
-    s_space       <= unsigned(registers_in(4));    -- K5 Spacing (density)
+    s_sizek       <= unsigned(registers_in(3));   -- K4 Size (smooth font scale)
+    s_space       <= unsigned(registers_in(4));    -- K5 Spacing (gap, font unchanged)
     s_glow        <= unsigned(registers_in(5));
     s_zoom        <= unsigned(registers_in(7));    -- P12 Zoom (100%=far, 0%=front)
     s_animate     <= registers_in(6)(0);
@@ -402,7 +434,7 @@ begin
     --------------------------------------------------------------------------
     -- Sequential zoom multiply: zprod(i) = cz(i) * delta, shift-add per cycle.
     -- cz is Q10.6 (the filtered position), so the lerp resolution is 64x one
-    -- knob tick; per-plane step = stepfar - zprod>>16 in p_recip.
+    -- knob tick; per-plane font step = stepfar - zprod>>16 in p_recip.
     --------------------------------------------------------------------------
     p_zmul : process(clk)
         variable v_ez   : unsigned(16 downto 0);   -- filtered prog, Q10.6
@@ -451,6 +483,7 @@ begin
         variable v_Gbg, v_Gfg : unsigned(11 downto 0);
         variable v_sf, v_sn : unsigned(17 downto 0);
         variable v_hidx : integer range 0 to 15;
+        variable v_t10, v_t1 : unsigned(9 downto 0);
     begin
         if rising_edge(clk) then
             v_Gbg := shift_right(s_measured_h, 5);   -- far cell size (~32 across)
@@ -460,6 +493,7 @@ begin
             v_sn := C_RECIP(to_integer(v_Gfg(7 downto 0)));   -- near (smaller step)
             s_stepfar  <= v_sf;
             s_stepnear <= v_sn;
+
             -- delta from the REGISTERED endpoints (keeps the LUT-read off the subtract cone);
             -- clamp to 15 bits so cz(Q10.6)*delta stays within the 32-bit accumulator
             -- (only reachable with garbage timing measurements, Gbg < 8).
@@ -471,32 +505,42 @@ begin
                 end if;
             else s_delta <= (others => '0'); end if;
 
-            -- K5 Spacing: glyph occupies the cell shifted by s_spcsh (11=packed .. 8=wide gap)
-            case s_space(9 downto 8) is
-                when "00"   => s_spcsh <= 15;   -- packed (glyph fills cell)
-                when "01"   => s_spcsh <= 14;
-                when "10"   => s_spcsh <= 13;
-                when others => s_spcsh <= 12;   -- wide gap
-            end case;
-
             if s_vsync_pulse = '1' then
                 s_seed <= mix16(resize(s_seed_knob, 16) xor x"1B7F");
                 if s_animate = '1' then
                     s_T <= s_T + (resize(shift_right(s_change_rate, 6), 24) + 1);
                 end if;
 
+                -- always full brightness, uniform across planes
                 v_hidx := to_integer(s_hue_knob(9 downto 6));
-                s_num_y <= scale8(C_HUE_Y(v_hidx), s_master(9 downto 7));
+                s_num_y <= C_HUE_Y(v_hidx);
                 s_num_u <= C_HUE_U(v_hidx);
                 s_num_v <= C_HUE_V(v_hidx);
+
+                -- K4 Size: R = 1536-K4 scales the zoom step (unity at K4=512)
+                s_rr <= to_unsigned(1536, 11) - resize(s_sizek, 11);
+                -- K5 Spacing: glyph share of the cell T10 = 1023 - K5/2
+                v_t10 := to_unsigned(1023, 10) - ("0" & s_space(9 downto 1));
+                s_t10 <= v_t10;
+                -- glyph column thresholds (k * T10/8) + exact gate 8*(T10/8)
+                v_t1 := shift_right(v_t10, 3);
+                s_tk(1) <= v_t1;
+                s_tk(2) <= shift_left(v_t1, 1);
+                s_tk(3) <= shift_left(v_t1, 1) + v_t1;
+                s_tk(4) <= shift_left(v_t1, 2);
+                s_tk(5) <= shift_left(v_t1, 2) + v_t1;
+                s_tk(6) <= shift_left(v_t1, 2) + shift_left(v_t1, 1);
+                s_tk(7) <= shift_left(v_t1, 2) + shift_left(v_t1, 1) + v_t1;
+                s_t8   <= shift_left(v_t1, 3);
             end if;
         end if;
     end process;
 
-    -- per-plane step = lerp(stepfar, stepnear, prog_i):  step = stepfar - zprod>>16,
-    -- where zprod = (prog + tri(prog)>>gshift) * (stepfar-stepnear) from p_zmul,
-    -- prog in Q10.6 (filtered).  step is continuous in the GLIDED position with
-    -- 64x-per-knob-tick resolution -> the zoom is sub-pixel smooth.
+    -- per-plane FONT step = lerp(stepfar, stepnear, prog_i): stepf = stepfar -
+    -- zprod>>16, zprod = (prog + tri(prog)>>gshift)*(stepfar-stepnear) from
+    -- p_zmul, prog in Q10.6 (filtered) -> sub-pixel smooth zoom.  The PITCH
+    -- step (what p_acc/p_phasemul consume) is stepf*RT>>10 from p_pitchmul,
+    -- folding in K4 Size and K5 Spacing.
     p_recip : process(clk)
         variable v_st : unsigned(17 downto 0);
     begin
@@ -504,26 +548,100 @@ begin
             for i in 0 to NP - 1 loop
                 v_st := s_stepfar - resize(shift_right(s_zprod(i), 16), 18);
                 if v_st < to_unsigned(64, 18) then v_st := to_unsigned(64, 18); end if;
-                s_pstep(i) <= v_st;
+                s_stepf(i) <= v_st;
             end loop;
+        end if;
+    end process;
+
+    --------------------------------------------------------------------------
+    -- Sequential RT multiply: RT = (R * T10) >> 10 (K4 size x K5 spacing as
+    -- ONE pitch factor).  Starts at vsync; done (~12 cycles) long before its
+    -- consumer p_pitchmul starts (~20 cycles).
+    --------------------------------------------------------------------------
+    p_rtmul : process(clk)
+    begin
+        if rising_edge(clk) then
+            if s_vsync_pulse = '1' then
+                s_rt_acc <= (others => '0');
+                s_rt_cnt <= 0;
+            elsif s_rt_cnt <= 9 then
+                if s_t10(s_rt_cnt) = '1' then
+                    s_rt_acc <= s_rt_acc + shift_left(resize(s_rr, 21), s_rt_cnt);
+                end if;
+                s_rt_cnt <= s_rt_cnt + 1;
+            elsif s_rt_cnt = 10 then
+                s_rt <= s_rt_acc(20 downto 10);
+                s_rt_cnt <= 11;
+            end if;
+        end if;
+    end process;
+
+    --------------------------------------------------------------------------
+    -- Sequential pitch multiply: pstep(i) = (stepf(i) * RT) >> 10.  Starts on
+    -- s_zm_done_d (one cycle after p_recip registered this frame's stepf).
+    -- NOTE: an endpoint-scaling restructure (scale stepfar/stepnear by RT once,
+    -- before the lerp -- mathematically identical, ~150 LC smaller) was tried
+    -- and REVERTED: both slimmed variants wedge the HD Dual router (permanent
+    -- overuse, all seeds) while THIS exact netlist routes.  At 94% utilisation
+    -- placement is a lottery; keep the netlist shape that holds the winning
+    -- ticket.
+    --------------------------------------------------------------------------
+    p_pitchmul : process(clk)
+        variable v_p : unsigned(19 downto 0);
+    begin
+        if rising_edge(clk) then
+            s_zm_done_d <= s_zm_done;
+            s_pt_done   <= '0';
+            if s_zm_done_d = '1' then
+                for i in 0 to NP - 1 loop
+                    s_pt_acc(i) <= (others => '0');
+                end loop;
+                s_pt_cnt  <= 0;
+                s_pt_busy <= '1';
+            elsif s_pt_busy = '1' then
+                if s_pt_cnt <= 10 then
+                    for i in 0 to NP - 1 loop
+                        if s_rt(s_pt_cnt) = '1' then
+                            s_pt_acc(i) <= s_pt_acc(i)
+                                + shift_left(resize(s_stepf(i), 30), s_pt_cnt);
+                        end if;
+                    end loop;
+                    s_pt_cnt <= s_pt_cnt + 1;
+                else
+                    for i in 0 to NP - 1 loop
+                        v_p := s_pt_acc(i)(29 downto 10);
+                        if v_p > to_unsigned(262143, 20) then
+                            v_p := to_unsigned(262143, 20);
+                        end if;
+                        if v_p < to_unsigned(64, 20) then
+                            v_p := to_unsigned(64, 20);
+                        end if;
+                        s_pstep(i) <= v_p(17 downto 0);
+                    end loop;
+                    s_pt_busy <= '0';
+                    s_pt_done <= '1';
+                end if;
+            end if;
         end if;
     end process;
 
     --------------------------------------------------------------------------
     -- Sequential centre multiply: m(i) = centre * step(i) (shift-add per cycle),
     -- so the line/column start phase = -m(i) puts the screen centre at phase 0.
-    -- MUST start only after p_recip has registered THIS frame's s_pstep (the
-    -- s_zm_done_d handshake): computing mh from last frame's step while p_acc
-    -- steps with the new one biases the grid off-centre by centre*dstep/step --
-    -- a zoom-speed-proportional shift that POPPED at mid-throw where the
-    -- triangle envelope changes a plane's speed (the "leftward jump at 50%").
+    -- MUST start only after p_pitchmul has registered THIS frame's s_pstep
+    -- (the s_pt_done_d handshake): computing mh from a stale/mid-update step
+    -- while p_acc steps with the new one biases the grid off-centre by
+    -- centre*dstep/step -- a zoom-speed-proportional shift that POPPED at
+    -- mid-throw where the envelope changes a plane's speed (the it-17
+    -- "leftward jump at 50%").  Every stage of the vblank multiply chain
+    -- (zmul -> recip -> pitchmul -> phasemul) is handshake-sequenced.
     --------------------------------------------------------------------------
     p_phasemul : process(clk)
         variable th, tv : unsigned(27 downto 0);
     begin
         if rising_edge(clk) then
-            s_zm_done_d <= s_zm_done;
-            if s_zm_done_d = '1' then
+            s_pt_done_d <= s_pt_done;
+            if s_pt_done_d = '1' then
                 s_cxr <= resize(shift_right(s_measured_h, 1), 11);
                 s_cyr <= resize(shift_right(s_measured_v, 1), 11);
                 for i in 0 to NP - 1 loop
@@ -554,11 +672,13 @@ begin
         end if;
     end process;
 
-    -- Glow + background colours from the REGISTERED number colour.
+    -- Glow + background colours from the REGISTERED number colour.  Two-ring
+    -- fade: inner ring max Y/4, outer ring max Y/16 (subtle phosphor haze).
     p_colaux : process(clk)
     begin
         if rising_edge(clk) then
-            s_glow_y <= shift_right(scale8(s_num_y, s_glow(9 downto 7)), 1);
+            s_glow1_y <= shift_right(scale8(s_num_y, s_glow(9 downto 7)), 2);
+            s_glow2_y <= shift_right(scale8(s_num_y, s_glow(9 downto 7)), 4);
             if s_glow > to_unsigned(32, 10) then s_glow_on <= '1'; else s_glow_on <= '0'; end if;
             if s_bg_tint = '1' then
                 s_bg_y <= shift_right(s_num_y, 4); s_bg_u <= s_num_u; s_bg_v <= s_num_v;
@@ -643,17 +763,26 @@ begin
     -- S1: spatial de-correlation.
     --------------------------------------------------------------------------
     p_hashA : process(clk)
-        variable v_slh, v_slv : unsigned(17 downto 0);
+        variable v_fh, v_fv : unsigned(9 downto 0);
+        variable v_gx, v_gy : unsigned(2 downto 0);
     begin
         if rising_edge(clk) then
             for i in 0 to NP - 1 loop
                 s1_base(i) <= spreadcr(s0_col(i), s0_row(i));
-                -- spacing: cell split into 2^(18-s_spcsh) slots; glyph = first 8, gap after.
-                v_slh := shift_right(s0_frh(i), s_spcsh);
-                v_slv := shift_right(s0_frv(i), s_spcsh);
-                s1_gx(i) <= v_slh(2 downto 0);
-                s1_gy(i) <= v_slv(2 downto 0);
-                if (v_slh < 8) and (v_slv < 8) then s1_render(i) <= '1';
+                -- glyph occupies [0, t8) of the cell (t8 = 8*(T10/8), K5-set);
+                -- column/row = popcount of thresholds passed (k * T10/8).
+                -- Frac compared at 10 bits (1/1024 cell) -- plenty.
+                v_fh := s0_frh(i)(17 downto 8);
+                v_fv := s0_frv(i)(17 downto 8);
+                v_gx := (others => '0');
+                v_gy := (others => '0');
+                for k in 1 to 7 loop
+                    if v_fh >= s_tk(k) then v_gx := v_gx + 1; end if;
+                    if v_fv >= s_tk(k) then v_gy := v_gy + 1; end if;
+                end loop;
+                s1_gx(i) <= v_gx;
+                s1_gy(i) <= v_gy;
+                if (v_fh < s_t8) and (v_fv < s_t8) then s1_render(i) <= '1';
                 else s1_render(i) <= '0'; end if;
             end loop;
         end if;
@@ -730,28 +859,41 @@ begin
                 s3_vis(i) <= s2_vis(i);
             end if;
         end process;
-        s3_rb_u(i) <= s3_word(i)(23 downto 16);
-        s3_rb_c(i) <= s3_word(i)(15 downto 8);
-        s3_rb_d(i) <= s3_word(i)(7 downto 0);
+        s3_rb_uu(i) <= s3_word(i)(39 downto 32);
+        s3_rb_u(i)  <= s3_word(i)(31 downto 24);
+        s3_rb_c(i)  <= s3_word(i)(23 downto 16);
+        s3_rb_d(i)  <= s3_word(i)(15 downto 8);
+        s3_rb_dd(i) <= s3_word(i)(7 downto 0);
     end generate;
 
     --------------------------------------------------------------------------
-    -- S4: per-plane centre pixel + 1-glyph-pixel dilation glow.
+    -- S4: per-plane centre pixel + two-ring fading glow.
+    --   ring1 = 3x3 box minus centre (bright inner haze)
+    --   ring2 = 5x5 box minus 3x3   (dim outer haze)
     --------------------------------------------------------------------------
     p_pix : process(clk)
         variable p : integer range -1 to 8;
-        variable v_center, v_glow : std_logic;
+        variable v_center, v_g1, v_g2 : std_logic;
     begin
         if rising_edge(clk) then
             for i in 0 to NP - 1 loop
                 p := to_integer(s3_gx(i));
                 v_center := getbit(s3_rb_c(i), p) and s3_vis(i);
-                v_glow := ( getbit(s3_rb_u(i), p-1) or getbit(s3_rb_u(i), p) or getbit(s3_rb_u(i), p+1) or
-                            getbit(s3_rb_c(i), p-1) or                          getbit(s3_rb_c(i), p+1) or
-                            getbit(s3_rb_d(i), p-1) or getbit(s3_rb_d(i), p) or getbit(s3_rb_d(i), p+1) )
-                          and s3_vis(i) and (not v_center);
+                v_g1 := ( getbit(s3_rb_u(i), p-1) or getbit(s3_rb_u(i), p) or getbit(s3_rb_u(i), p+1) or
+                          getbit(s3_rb_c(i), p-1) or                          getbit(s3_rb_c(i), p+1) or
+                          getbit(s3_rb_d(i), p-1) or getbit(s3_rb_d(i), p) or getbit(s3_rb_d(i), p+1) )
+                        and s3_vis(i) and (not v_center);
+                v_g2 := ( getbit(s3_rb_uu(i), p-2) or getbit(s3_rb_uu(i), p-1) or getbit(s3_rb_uu(i), p) or
+                          getbit(s3_rb_uu(i), p+1) or getbit(s3_rb_uu(i), p+2) or
+                          getbit(s3_rb_dd(i), p-2) or getbit(s3_rb_dd(i), p-1) or getbit(s3_rb_dd(i), p) or
+                          getbit(s3_rb_dd(i), p+1) or getbit(s3_rb_dd(i), p+2) or
+                          getbit(s3_rb_u(i),  p-2) or getbit(s3_rb_u(i),  p+2) or
+                          getbit(s3_rb_c(i),  p-2) or getbit(s3_rb_c(i),  p+2) or
+                          getbit(s3_rb_d(i),  p-2) or getbit(s3_rb_d(i),  p+2) )
+                        and s3_vis(i) and (not v_center) and (not v_g1);
                 s4_center(i) <= v_center;
-                s4_glow(i)   <= v_glow;
+                s4_glow1(i)  <= v_g1;
+                s4_glow2(i)  <= v_g2;
             end loop;
         end if;
     end process;
@@ -763,8 +905,7 @@ begin
         variable v_y, v_u, v_v : unsigned(9 downto 0);
         variable v_bgy, v_bgu, v_bgv : unsigned(9 downto 0);
         variable v_win : integer range -1 to NP - 1;
-        variable v_glowsel : std_logic;
-        variable v_numy_f : unsigned(9 downto 0);
+        variable v_g1sel, v_g2sel : std_logic;
         variable v_on_y, v_on_u, v_on_v : unsigned(9 downto 0);
         variable v_off_y, v_off_u, v_off_v : unsigned(9 downto 0);
     begin
@@ -785,35 +926,28 @@ begin
             for i in NP - 1 downto 0 loop
                 if s4_center(i) = '1' then v_win := i; end if;
             end loop;
-            v_glowsel := '0';
+            v_g1sel := '0';
+            v_g2sel := '0';
             for i in 0 to NP - 1 loop
-                if s4_glow(i) = '1' then v_glowsel := '1'; end if;
+                if s4_glow1(i) = '1' then v_g1sel := '1'; end if;
+                if s4_glow2(i) = '1' then v_g2sel := '1'; end if;
             end loop;
 
-            -- depth fade: nearer (front) plane brighter.  NOTE: keep exactly
-            -- this 4-arm shape -- adding a 5th arm re-triggers the abc9
-            -- "Boxes are not in a topological order" synth crash (shape-
-            -- sensitive toolchain bug, same one that blocks NP=5).
-            case v_win is
-                when 0      => v_numy_f := s_num_y;
-                when 1      => v_numy_f := s_num_y - shift_right(s_num_y, 3);
-                when 2      => v_numy_f := s_num_y - shift_right(s_num_y, 2);
-                when others => v_numy_f := s_num_y - shift_right(s_num_y, 2)
-                                                   - shift_right(s_num_y, 3);
-            end case;
-
+            -- uniform brightness across all planes (no depth fade)
             if s_invert = '0' then
-                v_on_y := v_numy_f; v_on_u := s_num_u; v_on_v := s_num_v;
-                v_off_y := v_bgy;   v_off_u := v_bgu; v_off_v := v_bgv;
+                v_on_y := s_num_y; v_on_u := s_num_u; v_on_v := s_num_v;
+                v_off_y := v_bgy;  v_off_u := v_bgu; v_off_v := v_bgv;
             else
-                v_on_y := v_bgy;    v_on_u := v_bgu; v_on_v := v_bgv;
-                v_off_y := v_numy_f; v_off_u := s_num_u; v_off_v := s_num_v;
+                v_on_y := v_bgy;   v_on_u := v_bgu; v_on_v := v_bgv;
+                v_off_y := s_num_y; v_off_u := s_num_u; v_off_v := s_num_v;
             end if;
 
             if v_win >= 0 then
                 v_y := v_on_y; v_u := v_on_u; v_v := v_on_v;
-            elsif (v_glowsel = '1') and (s_glow_on = '1') then
-                v_y := s_glow_y; v_u := s_num_u; v_v := s_num_v;
+            elsif (v_g1sel = '1') and (s_glow_on = '1') then
+                v_y := s_glow1_y; v_u := s_num_u; v_v := s_num_v;
+            elsif (v_g2sel = '1') and (s_glow_on = '1') then
+                v_y := s_glow2_y; v_u := s_num_u; v_v := s_num_v;
             else
                 v_y := v_off_y; v_u := v_off_u; v_v := v_off_v;
             end if;
