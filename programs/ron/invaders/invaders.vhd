@@ -133,6 +133,13 @@ architecture invaders of program_top is
     constant C_CHUNK_ROWS_PWR : integer := 4;
     constant C_CHUNKS_PER_BNK : integer := C_CHUNK_COLS * C_CHUNK_ROWS_PWR;
                                                 -- 16
+    -- The bunker is 112 tall = 3.5 chunk rows, so one chunk row is a
+    -- half-height (16px) partial.  Offsetting the chunk-row split by this puts
+    -- the partial row at the TOP (by the aliens) and makes the BOTTOM row the
+    -- wizard shoots into a full 32px — a fast shot dwells in a thin 16px row
+    -- too briefly for the serial hit-scan to reliably catch it.
+    constant C_CHUNK_ROW_OFF  : integer := C_CHUNK_H
+                                           - (C_BUNKER_H mod C_CHUNK_H);  -- 16
 
     constant C_FORM_STEP_X  : integer := 6;     -- faster side-to-side march
     constant C_BORDER       : integer := 8;
@@ -142,20 +149,21 @@ architecture invaders of program_top is
     constant C_BOMB_SPEED   : integer := 2;
 
     -- ------------------------------------------------------------------
-    -- Rainbow ghost trail: instead of dots, leave faded full-sprite
-    -- afterimages of the wizard behind it as it slides left/right.  A new
-    -- ghost is recorded on a vsync only once the ship has moved at least
-    -- C_TRAIL_GAP px since the last one, so a stationary ship leaves no
-    -- pile-up.  Each ghost cycles through the 7-colour ROYGBIV phosphor
-    -- palette, so the afterimages fan out as a rainbow.  Because the wizard
-    -- only moves horizontally, every ghost shares the live wizard's ROM row
-    -- (same Y band) — only the per-ghost column index + colour differ.
-    constant C_TRAIL_LEN   : integer := 3;  -- number of afterimages held
-    -- Spacing ≥ the 128-wide sprite so the ghosts never overlap each other.
-    -- That guarantees at most one ghost covers any pixel, so the render needs
-    -- a SINGLE wizard-row mux (the winning ghost is picked in S3) no matter
-    -- how many ghosts there are — the trail reads as distinct rainbow echoes.
-    constant C_TRAIL_GAP   : integer := 144;
+    -- Rainbow edge-ghost: a rainbow band that hugs the wizard's TRAILING edge,
+    -- built from the silhouette's own edge pixels (not a full-sprite copy).
+    -- Per pixel we sample the wizard ROM row s_fringe_step px toward the body;
+    -- where that is set but the live pixel is off, we draw the band.  Reuses
+    -- the live wizard ROM row (no history buffer) — one tap only, since each
+    -- extra variable index into the 128-bit row is routing-heavy.
+    --
+    -- The band width (= the tap distance) is DYNAMIC: it tracks the wizard's
+    -- per-frame speed, growing quickly as it accelerates (C_FRINGE_RISE/frame)
+    -- and reeling back slowly as it slows/stops (C_FRINGE_FALL/frame) for a
+    -- motion-blur stretch.
+    constant C_FRINGE_MIN   : integer := 8;   -- width when slow/stopped
+    constant C_FRINGE_MAX   : integer := 46;  -- max stretched width
+    constant C_FRINGE_RISE  : integer := 3;   -- grow rate (px/frame)
+    constant C_FRINGE_FALL  : integer := 1;   -- shrink rate (px/frame)
     -- Dim luma for the ghost silhouette so it reads as a faded afterimage
     -- rather than a second solid wizard.
     constant C_GHOST_LUMA  : integer := 470;
@@ -320,8 +328,13 @@ architecture invaders of program_top is
 
     -- Per-bullet state
     type t_pos_arr_b is array (0 to C_BULLETS - 1) of signed(11 downto 0);
+    -- Bullets park well off-screen-bottom when inactive so the registered
+    -- "at top" flag is never stale-true for a slot about to be re-fired (a
+    -- y of 0 used to make every fresh slot's first shot self-deactivate).
+    constant C_BULLET_PARK : integer := 2000;
     signal s_bullet_x      : t_pos_arr_b := (others => (others => '0'));
-    signal s_bullet_y      : t_pos_arr_b := (others => (others => '0'));
+    signal s_bullet_y      : t_pos_arr_b
+                              := (others => to_signed(C_BULLET_PARK, 12));
     signal s_bullet_active : std_logic_vector(0 to C_BULLETS - 1)
                               := (others => '0');
     signal s_bullet_at_top : std_logic_vector(0 to C_BULLETS - 1)
@@ -341,6 +354,13 @@ architecture invaders of program_top is
 
     -- 8-bit LFSR
     signal s_lfsr          : std_logic_vector(7 downto 0) := "10110011";
+
+    -- Pre-registered bomb-spawn pick (LFSR column + its lowest live row),
+    -- computed continuously in p_bomb_pick so the s_aliens read stays off the
+    -- phase-1 bomb-X write path.
+    signal s_bsp_col       : unsigned(2 downto 0) := (others => '0');
+    signal s_bsp_row       : unsigned(1 downto 0) := (others => '0');
+    signal s_bsp_can       : std_logic := '0';
 
     -- Serial alien-hit scan: check one bullet per vsync (round-robin).
     -- Bullets at ≥6 px/frame sit in a 144-tall cell for ~24 frames so a
@@ -370,28 +390,18 @@ architecture invaders of program_top is
     signal s_expl_frame    : unsigned(1 downto 0) := (others => '0');
     signal s_expl_timer    : unsigned(2 downto 0) := (others => '0');
 
-    -- Rainbow ghost ring buffer.  s_trail_x holds each afterimage's sprite
-    -- top-left X (ghosts start off-screen so none show before the first
-    -- move).  Each ghost carries its already-resolved chroma (palette looked
-    -- up at drop time) and the wizard facing it had when dropped.
-    type t_trail_x_arr is array (0 to C_TRAIL_LEN - 1) of signed(11 downto 0);
-    type t_trail_uv_arr is array (0 to C_TRAIL_LEN - 1) of unsigned(9 downto 0);
-    signal s_trail_x       : t_trail_x_arr := (others => to_signed(-256, 12));
-    signal s_trail_u       : t_trail_uv_arr := (others => C_CHROMA_MID);
-    signal s_trail_v       : t_trail_uv_arr := (others => C_CHROMA_MID);
-    signal s_trail_face    : std_logic_vector(0 to C_TRAIL_LEN - 1)
-                              := (others => '0');
-    signal s_trail_valid   : std_logic_vector(0 to C_TRAIL_LEN - 1)
-                              := (others => '0');
-    signal s_trail_head    : unsigned(2 downto 0) := (others => '0');
-    signal s_trail_colctr  : unsigned(2 downto 0) := (others => '0');
-    -- Movement tracker, pipelined so the once-per-frame distance test never
-    -- forms a long chained carry path: s_trail_anchor = ship X at the last
-    -- drop, s_trail_diff = ship X − anchor (registered), s_trail_moved =
-    -- |diff| ≥ gap (registered, via two parallel compares — no abs chain).
-    signal s_trail_anchor  : signed(11 downto 0) := (others => '0');
-    signal s_trail_diff    : signed(11 downto 0) := (others => '0');
-    signal s_trail_moved   : std_logic := '0';
+    -- Rainbow edge-shadow.  No history buffer: a SOLID rainbow block grows
+    -- from the wizard's trailing edge (a prefix-OR of the silhouette row, so
+    -- internal art holes are filled).  Always touching the wizard; its width
+    -- tracks speed.  s_ghost_phase animates the hue over time.
+    signal s_ghost_phase   : unsigned(2 downto 0) := (others => '0');
+    signal s_ghost_pdiv    : unsigned(2 downto 0) := (others => '0');
+    signal s_ship_x_vprev  : signed(11 downto 0) := (others => '0');
+    -- Per-frame speed (|Δship_x|, clamped) and the smoothed band width.
+    signal s_ghost_dx      : signed(11 downto 0) := (others => '0');
+    signal s_ghost_spd     : unsigned(7 downto 0) := (others => '0');
+    signal s_fringe_step   : unsigned(6 downto 0)
+                              := to_unsigned(C_FRINGE_MIN, 7);
 
     -- ========================================================================
     -- Physics FSM intermediates
@@ -485,15 +495,8 @@ architecture invaders of program_top is
                               := (others => '0');
     signal s_stg2_bomb_a   : std_logic_vector(0 to C_BOMBS - 1)
                               := (others => '0');
-    -- Ghost trail: per-ghost X delta + validity + facing + resolved chroma
-    -- (all registered here from live ring state so S3 reads only S2 flops).
-    -- The Y band and ROM row are shared with the live wizard via ship_dy.
-    type t_d_arr_t is array (0 to C_TRAIL_LEN - 1) of signed(11 downto 0);
-    signal s_stg2_trail_dx : t_d_arr_t := (others => (others => '0'));
-    signal s_stg2_trail_v  : std_logic_vector(0 to C_TRAIL_LEN - 1)
-                              := (others => '0');
-    signal s_stg2_trail_f  : std_logic_vector(0 to C_TRAIL_LEN - 1)
-                              := (others => '0');
+    -- (Edge-ghost needs no S2/S3/S4 plumbing — it is computed in S5 directly
+    -- from the wizard ROM row + ship_col + facing.)
 
     -- S3: in-bbox flags + indices + ROM addresses
     signal s_stg3_in_form    : std_logic := '0';
@@ -516,13 +519,6 @@ architecture invaders of program_top is
     signal s_stg3_in_expl    : std_logic := '0';
     signal s_stg3_expl_addr  : unsigned(7 downto 0) := (others => '0');
     signal s_stg3_expl_col   : unsigned(5 downto 0) := (others => '0');
-    -- Winning ghost (non-overlap → at most one covers a pixel): in-bbox
-    -- flag, column, facing, and ring index for the chroma read.  Carried to
-    -- S5 where the shared wizard ROM row becomes the silhouette bit.
-    signal s_stg3_gh_in      : std_logic := '0';
-    signal s_stg3_gh_col     : unsigned(6 downto 0) := (others => '0');
-    signal s_stg3_gh_f       : std_logic := '0';
-    signal s_stg3_gh_sel     : integer range 0 to C_TRAIL_LEN - 1 := 0;
 
     -- S4: sync ROM reads + state lookups
     signal s_stg4_alien_row  : std_logic_vector(63 downto 0) := (others => '0');
@@ -533,6 +529,11 @@ architecture invaders of program_top is
     signal s_stg4_alien_col  : unsigned(5 downto 0) := (others => '0');
     signal s_stg4_in_ship    : std_logic := '0';
     signal s_stg4_ship_col   : unsigned(6 downto 0) := (others => '0');
+    -- Edge-ghost indices, resolved in S4: gh_base = live wizard row index,
+    -- gh_tap = base + dynamic band width (clamped to the row).  S5 turns these
+    -- into a SOLID shadow via a prefix-OR of the silhouette row.
+    signal s_stg4_gh_base    : integer range 0 to 127 := 0;
+    signal s_stg4_gh_tap     : integer range 0 to 127 := 0;
     signal s_stg4_in_bullet  : std_logic_vector(0 to C_BULLETS - 1)
                                 := (others => '0');
     signal s_stg4_in_bomb    : std_logic_vector(0 to C_BOMBS - 1)
@@ -543,10 +544,6 @@ architecture invaders of program_top is
     signal s_stg4_expl_row   : std_logic_vector(47 downto 0) := (others => '0');
     signal s_stg4_in_expl    : std_logic := '0';
     signal s_stg4_expl_col   : unsigned(5 downto 0) := (others => '0');
-    signal s_stg4_gh_in      : std_logic := '0';
-    signal s_stg4_gh_col     : unsigned(6 downto 0) := (others => '0');
-    signal s_stg4_gh_f       : std_logic := '0';
-    signal s_stg4_gh_sel     : integer range 0 to C_TRAIL_LEN - 1 := 0;
 
     -- S5: combined per-region pixel flags
     signal s_stg5_on_alien   : std_logic := '0';
@@ -796,46 +793,64 @@ begin
     end process;
 
     -- ========================================================================
-    -- Rainbow ghost recorder
+    -- Edge-ghost animation + speed-driven band width
     -- ========================================================================
-    -- The "has the wizard moved a ghost-gap since the last drop?" test runs
-    -- continuously and pipelined (one 12-bit op per registered stage) so it
-    -- never forms a long carry chain on the pixel clock.  At vsync, if the
-    -- pre-computed s_trail_moved flag is set, drop a new ghost into the ring
-    -- — recording the sprite's top-left X, its facing, and its rainbow
-    -- chroma (palette resolved here, during vblank) — and advance the colour
-    -- counter.  The ghost's Y is the wizard's live Y, so it shares the row.
-    p_trail : process(clk)
+    -- Continuously track |Δship_x| (pipelined: delta then abs, registered, so
+    -- no long carry chain).  Once per vsync: reload the linger timer if the
+    -- ship moved, advance the hue phase, and ease the band width toward a
+    -- target set by speed — fast to stretch, slow to retract.
+    p_ghost : process(clk)
+        variable v_abs    : signed(11 downto 0);
+        variable v_target : integer range 0 to 255;
+        variable v_step   : integer range 0 to 127;
     begin
         if rising_edge(clk) then
-            -- Stage A: registered signed delta from the last-drop anchor.
-            s_trail_diff <= s_ship_x - s_trail_anchor;
-            -- Stage B: registered |delta| ≥ gap, via two parallel compares.
-            if s_trail_diff >=  to_signed(C_TRAIL_GAP, 12) or
-               s_trail_diff <= -to_signed(C_TRAIL_GAP, 12) then
-                s_trail_moved <= '1';
+            -- Speed pipeline (runs every clock; sampled at vsync below).
+            s_ghost_dx <= s_ship_x - s_ship_x_vprev;
+            if s_ghost_dx < 0 then
+                v_abs := -s_ghost_dx;
             else
-                s_trail_moved <= '0';
+                v_abs := s_ghost_dx;
+            end if;
+            if v_abs > to_signed(255, 12) then
+                s_ghost_spd <= to_unsigned(255, 8);
+            else
+                s_ghost_spd <= unsigned(v_abs(7 downto 0));
             end if;
 
-            if s_timing.vsync_start = '1' and s_trail_moved = '1' then
-                s_trail_x(to_integer(s_trail_head))     <= s_ship_x;
-                s_trail_u(to_integer(s_trail_head))     <=
-                    C_TRAIL_PAL_U(to_integer(s_trail_colctr));
-                s_trail_v(to_integer(s_trail_head))     <=
-                    C_TRAIL_PAL_V(to_integer(s_trail_colctr));
-                s_trail_face(to_integer(s_trail_head))  <= s_wizard_facing;
-                s_trail_valid(to_integer(s_trail_head)) <= '1';
-                s_trail_anchor <= s_ship_x;
-                if s_trail_head >= to_unsigned(C_TRAIL_LEN - 1, 3) then
-                    s_trail_head <= (others => '0');
-                else
-                    s_trail_head <= s_trail_head + 1;
+            if s_timing.vsync_start = '1' then
+                s_ship_x_vprev <= s_ship_x;
+
+                -- Target width = min + speed, clamped; ease toward it.
+                v_target := C_FRINGE_MIN + to_integer(s_ghost_spd);
+                if v_target > C_FRINGE_MAX then
+                    v_target := C_FRINGE_MAX;
                 end if;
-                if s_trail_colctr >= to_unsigned(6, 3) then
-                    s_trail_colctr <= (others => '0');
+                v_step := to_integer(s_fringe_step);
+                if v_target > v_step then            -- accelerate → stretch fast
+                    if v_step + C_FRINGE_RISE >= v_target then
+                        s_fringe_step <= to_unsigned(v_target, 7);
+                    else
+                        s_fringe_step <= s_fringe_step + C_FRINGE_RISE;
+                    end if;
+                elsif v_target < v_step then          -- slow → retract slowly
+                    if v_step <= v_target + C_FRINGE_FALL then
+                        s_fringe_step <= to_unsigned(v_target, 7);
+                    else
+                        s_fringe_step <= s_fringe_step - C_FRINGE_FALL;
+                    end if;
+                end if;
+
+                -- Hue phase advances one step every few frames (slow shimmer).
+                if s_ghost_pdiv >= to_unsigned(2, 3) then
+                    s_ghost_pdiv <= (others => '0');
+                    if s_ghost_phase >= to_unsigned(6, 3) then
+                        s_ghost_phase <= (others => '0');
+                    else
+                        s_ghost_phase <= s_ghost_phase + 1;
+                    end if;
                 else
-                    s_trail_colctr <= s_trail_colctr + 1;
+                    s_ghost_pdiv <= s_ghost_pdiv + 1;
                 end if;
             end if;
         end if;
@@ -924,6 +939,33 @@ begin
         end if;
     end process;
 
+    -- Bomb-spawn pick: continuously resolve the LFSR-chosen column and its
+    -- lowest live alien row from s_aliens, registered so phase 1 consumes a
+    -- flop instead of chaining the 32-bit s_aliens read into the bomb-X write.
+    p_bomb_pick : process(clk)
+        variable v_col : integer range 0 to 7;
+        variable v_can : std_logic;
+        variable v_row : unsigned(1 downto 0);
+    begin
+        if rising_edge(clk) then
+            v_col := to_integer(unsigned(s_lfsr(2 downto 0)));
+            v_can := '0';
+            v_row := "00";
+            if v_col < C_COLS then
+                if s_aliens(2 * C_COLS + v_col) = '1' then
+                    v_row := "10"; v_can := '1';
+                elsif s_aliens(1 * C_COLS + v_col) = '1' then
+                    v_row := "01"; v_can := '1';
+                elsif s_aliens(0 * C_COLS + v_col) = '1' then
+                    v_row := "00"; v_can := '1';
+                end if;
+            end if;
+            s_bsp_col <= to_unsigned(v_col, 3);
+            s_bsp_row <= v_row;
+            s_bsp_can <= v_can;
+        end if;
+    end process;
+
     -- Projectile scan counter — cycles through the C_PROJ_COUNT projectiles,
     -- advancing once per vsync.  Phase 5/6/7 of the physics FSM check that
     -- one projectile's bunker-hit status each frame.
@@ -964,13 +1006,13 @@ begin
     p_physics : process(clk)
         variable v_spawned     : std_logic;
         variable v_picked      : std_logic;
-        variable v_can_spawn   : std_logic;
         variable v_col         : integer range 0 to 7;
         variable v_row         : integer range 0 to C_ROWS - 1;
         variable v_bs          : integer range 0 to C_BULLETS - 1;
         variable v_ms          : integer range 0 to C_BOMBS - 1;
         variable v_pb_dx       : signed(11 downto 0);
         variable v_pb_dy       : signed(11 downto 0);
+        variable v_pb_chrow    : unsigned(7 downto 0);
         variable v_cidx        : unsigned(3 downto 0);
         variable v_bid         : unsigned(1 downto 0);
         variable v_hit         : std_logic;
@@ -1084,11 +1126,15 @@ begin
                 -- --------------------------------------------------
                 when 1 =>
                     if s_sw_pause = '0' then
-                        -- Advance each bullet
+                        -- Advance each bullet; on reaching the top, deactivate
+                        -- AND park it off-screen so its "at top" flag clears
+                        -- before the slot is re-fired.
                         for i in 0 to C_BULLETS - 1 loop
                             if s_bullet_active(i) = '1' then
                                 if s_bullet_at_top(i) = '1' then
                                     s_bullet_active(i) <= '0';
+                                    s_bullet_y(i) <=
+                                        to_signed(C_BULLET_PARK, 12);
                                 else
                                     s_bullet_y(i) <= s_bullet_y(i) -
                                         signed(resize(s_bullet_speed, 12));
@@ -1116,19 +1162,13 @@ begin
                         -- consuming the cooldown) on dead columns so the
                         -- next pick advances the LFSR and retries.
                         if s_bomb_cooldown = 0 and s_aliens_clear = '0' then
-                            v_col := to_integer(unsigned(s_lfsr(2 downto 0)));
-                            v_can_spawn := '0';
-                            v_row := 0;
-                            if v_col < C_COLS then
-                                if s_aliens(2 * C_COLS + v_col) = '1' then
-                                    v_row := 2; v_can_spawn := '1';
-                                elsif s_aliens(1 * C_COLS + v_col) = '1' then
-                                    v_row := 1; v_can_spawn := '1';
-                                elsif s_aliens(0 * C_COLS + v_col) = '1' then
-                                    v_row := 0; v_can_spawn := '1';
-                                end if;
-                            end if;
-                            if v_can_spawn = '1' then
+                            -- Column liveness is pre-registered in p_bomb_pick
+                            -- (off this path) so the s_aliens read no longer
+                            -- chains into the bomb-X write — that chain was the
+                            -- HD-Dual critical path on some placements.
+                            v_col := to_integer(s_bsp_col);
+                            v_row := to_integer(s_bsp_row);
+                            if s_bsp_can = '1' then
                                 v_x := s_form_x + to_signed(
                                     v_col * C_CELL_W + C_CELL_W / 2
                                     - C_BOMB_W / 2, 12);
@@ -1319,9 +1359,12 @@ begin
                             if v_pb_dx >= to_signed(0, 12) and
                                v_pb_dx <  to_signed(C_BUNKER_W, 12) then
                                 s_ph_proj_hit <= '1';
-                                -- chunk size 32 × 32 → row(1..0)=dy(6..5),
-                                -- col(1..0)=dx(6..5)
-                                v_cidx := unsigned(v_pb_dy(6 downto 5)) &
+                                -- chunk 32 × 32: col = dx(6..5); row =
+                                -- (dy+OFF)(6..5) — must match the render so
+                                -- the half-height row is at the top.
+                                v_pb_chrow := unsigned(v_pb_dy(7 downto 0)) +
+                                              to_unsigned(C_CHUNK_ROW_OFF, 8);
+                                v_cidx := v_pb_chrow(6 downto 5) &
                                           unsigned(v_pb_dx(6 downto 5));
                                 v_bid  := to_unsigned(b, 2);
                             end if;
@@ -1440,17 +1483,6 @@ begin
             s_stg2_frame  <= s_alien_frame;
             s_stg2_bull_a <= s_bullet_active;
             s_stg2_bomb_a <= s_bomb_active;
-
-            -- Ghost X deltas (live ring state changes only during vblank);
-            -- the Y delta is shared with the ship (s_stg2_ship_dy).  Per-ghost
-            -- chroma is frame-constant, so it is NOT carried per pixel — only
-            -- the winning-ghost selector rides the pipe; colour is read back
-            -- from the ring at S5.
-            for i in 0 to C_TRAIL_LEN - 1 loop
-                s_stg2_trail_dx(i) <= s_stg1_hx - s_trail_x(i);
-            end loop;
-            s_stg2_trail_v  <= s_trail_valid;
-            s_stg2_trail_f  <= s_trail_face;
         end if;
     end process;
 
@@ -1465,12 +1497,9 @@ begin
         variable v_chunk_idx   : unsigned(3 downto 0);
         variable v_bnk_col_use : unsigned(6 downto 0);
         variable v_bnk_in_y    : std_logic;
+        variable v_bnk_chrow   : unsigned(7 downto 0);
         variable v_row_bits    : unsigned(1 downto 0);
         variable v_col_bits    : unsigned(2 downto 0);
-        variable v_gh_in       : std_logic;
-        variable v_gh_col      : unsigned(6 downto 0);
-        variable v_gh_f        : std_logic;
-        variable v_gh_sel      : integer range 0 to C_TRAIL_LEN - 1;
     begin
         if rising_edge(clk) then
             -- Power-of-two (128) cells: column = form_dx[9:7], row =
@@ -1506,30 +1535,6 @@ begin
             s_stg3_in_ship  <= v_ship_in_x and v_ship_in_y;
             s_stg3_ship_row <= unsigned(s_stg2_ship_dy(6 downto 0));
             s_stg3_ship_col <= unsigned(s_stg2_ship_dx(6 downto 0));
-
-            -- Ghost afterimages: same 128-tall Y band as the live wizard
-            -- (reuse v_ship_in_y), each at its own X.  Ghosts never overlap
-            -- (spacing ≥ sprite width), so pick the single one covering this
-            -- pixel and pass its column/facing/ring-index to S5 — one row mux
-            -- regardless of ghost count.
-            v_gh_in  := '0';
-            v_gh_col := (others => '0');
-            v_gh_f   := '0';
-            v_gh_sel := 0;
-            for i in 0 to C_TRAIL_LEN - 1 loop
-                if s_stg2_trail_v(i) = '1' and v_ship_in_y = '1' and
-                   s_stg2_trail_dx(i) >= to_signed(0, 12) and
-                   s_stg2_trail_dx(i) <  to_signed(C_SHIP_W, 12) then
-                    v_gh_in  := '1';
-                    v_gh_col := unsigned(s_stg2_trail_dx(i)(6 downto 0));
-                    v_gh_f   := s_stg2_trail_f(i);
-                    v_gh_sel := i;
-                end if;
-            end loop;
-            s_stg3_gh_in  <= v_gh_in;
-            s_stg3_gh_col <= v_gh_col;
-            s_stg3_gh_f   <= v_gh_f;
-            s_stg3_gh_sel <= v_gh_sel;
 
             -- Bullets (each WAND_SHOT 8x16)
             for i in 0 to C_BULLETS - 1 loop
@@ -1583,9 +1588,11 @@ begin
                 end if;
                 if v_in_x = '1' and v_bnk_in_y = '1' then
                     s_stg3_in_bunker(b) <= '1';
-                    -- chunk size 32 × 32 → row(1..0)=dy(6..5),
-                    -- col(1..0)=dx(6..5)
-                    v_chunk_idx   := unsigned(s_stg2_bnk_dy(6 downto 5)) &
+                    -- chunk 32 × 32: col = dx(6..5); row = (dy+OFF)(6..5) so
+                    -- the half-height partial row sits at the top, not bottom.
+                    v_bnk_chrow   := unsigned(s_stg2_bnk_dy(7 downto 0)) +
+                                     to_unsigned(C_CHUNK_ROW_OFF, 8);
+                    v_chunk_idx   := v_bnk_chrow(6 downto 5) &
                                      unsigned(s_stg2_bnk_dx(b)(6 downto 5));
                     v_bnk_col_use := unsigned(s_stg2_bnk_dx(b)(6 downto 0));
                 else
@@ -1624,6 +1631,8 @@ begin
         variable v_alien_idx : integer range 0 to C_ALIEN_SLOTS - 1;
         variable v_chunk_hit : std_logic;
         variable v_any_bnk   : std_logic;
+        variable v_base      : integer range 0 to 127;
+        variable v_tap       : integer range 0 to 255;
     begin
         if rising_edge(clk) then
             -- ROM reads (BRAM-inferred)
@@ -1672,10 +1681,20 @@ begin
             s_stg4_ship_col  <= s_stg3_ship_col;
             s_stg4_in_bullet <= s_stg3_in_bullet;
             s_stg4_in_bomb   <= s_stg3_in_bomb;
-            s_stg4_gh_in  <= s_stg3_gh_in;
-            s_stg4_gh_col <= s_stg3_gh_col;
-            s_stg4_gh_f   <= s_stg3_gh_f;
-            s_stg4_gh_sel <= s_stg3_gh_sel;
+            -- Edge-ghost indices: base = live wizard row index (mirrored when
+            -- facing right), tap = base + dynamic band width clamped to the
+            -- row.  S5 prefix-ORs the row at both to make a solid shadow.
+            if s_wizard_facing = '0' then
+                v_base := 127 - to_integer(s_stg3_ship_col);
+            else
+                v_base := to_integer(s_stg3_ship_col);
+            end if;
+            v_tap := v_base + to_integer(s_fringe_step);
+            if v_tap > 127 then
+                v_tap := 127;
+            end if;
+            s_stg4_gh_base <= v_base;
+            s_stg4_gh_tap  <= v_tap;
         end if;
     end process;
 
@@ -1689,7 +1708,13 @@ begin
         variable v_expl_bit   : std_logic;
         variable v_on_bullet  : std_logic;
         variable v_on_bomb    : std_logic;
-        variable v_gh_bit     : std_logic;
+        variable v_on_ghost   : std_logic;
+        variable v_grp        : std_logic_vector(0 to 31);
+        variable v_base_g     : integer range 0 to 31;
+        variable v_tap_g      : integer range 0 to 31;
+        variable v_pfx_b      : std_logic;
+        variable v_pfx_t      : std_logic;
+        variable v_cidx       : integer range 0 to 13;
     begin
         if rising_edge(clk) then
             -- Alien (64-bit row, bit 63 leftmost)
@@ -1756,20 +1781,49 @@ begin
                 s_stg5_on_floor <= '0';
             end if;
 
-            -- Ghost afterimage: the winning ghost shares the live wizard ROM
-            -- row (same Y band), so its silhouette bit is that row indexed at
-            -- the ghost's column, mirrored per its stored facing.  ONE mux —
-            -- the non-overlap guarantee meant S3 already chose the ghost.
-            -- Chroma was resolved at drop time, so no palette LUT here.
-            if s_stg4_gh_f = '0' then
-                v_gh_bit := s_stg4_wizard_row(
-                                127 - to_integer(s_stg4_gh_col));
-            else
-                v_gh_bit := s_stg4_wizard_row(to_integer(s_stg4_gh_col));
+            -- Solid edge-shadow via a prefix-OR of the silhouette row, coarsened
+            -- to 4-px groups (32 instead of 128 → ~1/4 the logic; the 4-px
+            -- quantisation of the inner edge hides under the wizard).
+            -- v_pfx_b = any body group strictly BEFORE this pixel's group (so
+            -- this pixel is NOT yet past the trailing edge); v_pfx_t = any body
+            -- group within the band toward the body.  Shadow = trailing margin
+            -- AND body within reach → a SOLID block hugging the edge (internal
+            -- art holes filled by the OR), always touching the wizard.
+            for g in 0 to 31 loop
+                v_grp(g) := s_stg4_wizard_row(4*g)     or
+                            s_stg4_wizard_row(4*g + 1) or
+                            s_stg4_wizard_row(4*g + 2) or
+                            s_stg4_wizard_row(4*g + 3);
+            end loop;
+            v_base_g := s_stg4_gh_base / 4;
+            v_tap_g  := s_stg4_gh_tap  / 4;
+            v_pfx_b  := '0';
+            v_pfx_t  := '0';
+            for g in 0 to 31 loop
+                if g < v_base_g then
+                    v_pfx_b := v_pfx_b or v_grp(g);
+                end if;
+                if g <= v_tap_g then
+                    v_pfx_t := v_pfx_t or v_grp(g);
+                end if;
+            end loop;
+            v_on_ghost := v_pfx_t and (not v_pfx_b);
+            -- Hue is a left-to-right rainbow (by screen column) that scrolls
+            -- with the animation phase.
+            v_cidx := to_integer(s_stg4_ship_col(5 downto 3))
+                      + to_integer(s_ghost_phase);
+            if v_cidx >= 7 then
+                v_cidx := v_cidx - 7;
             end if;
-            s_stg5_on_trail <= s_stg4_gh_in and v_gh_bit;
-            s_stg5_trail_u  <= s_trail_u(s_stg4_gh_sel);
-            s_stg5_trail_v  <= s_trail_v(s_stg4_gh_sel);
+            -- Always present (thin when stopped, stretched when moving), in the
+            -- trailing margin only.
+            if s_stg4_in_ship = '1' and v_on_ghost = '1' then
+                s_stg5_on_trail <= '1';
+            else
+                s_stg5_on_trail <= '0';
+            end if;
+            s_stg5_trail_u  <= C_TRAIL_PAL_U(v_cidx);
+            s_stg5_trail_v  <= C_TRAIL_PAL_V(v_cidx);
         end if;
     end process;
 
