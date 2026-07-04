@@ -755,10 +755,13 @@ begin
         variable v_du, v_dv : signed(10 downto 0);
     begin
         if rising_edge(clk) then
-            s_glow1_y <= shift_right(scale8(s_num_y, s_glow(9 downto 7)), 1);
-            s_glow2_y <= shift_right(scale8(s_num_y, s_glow(9 downto 7)), 2);
-            s_glow3_y <= shift_right(scale8(s_num_y, s_glow(9 downto 7)), 3);
-            s_glow4_y <= shift_right(scale8(s_num_y, s_glow(9 downto 7)), 4);
+            -- ring ceilings at FULL/half/quarter/eighth of the K6-scaled base:
+            -- next to the huge full-zoom digits the 4 px halo needs to hit
+            -- digit brightness at ring 1 to read at all
+            s_glow1_y <= scale8(s_num_y, s_glow(9 downto 7));
+            s_glow2_y <= shift_right(scale8(s_num_y, s_glow(9 downto 7)), 1);
+            s_glow3_y <= shift_right(scale8(s_num_y, s_glow(9 downto 7)), 2);
+            s_glow4_y <= shift_right(scale8(s_num_y, s_glow(9 downto 7)), 3);
             v_du := signed(resize(s_num_u, 11)) - to_signed(512, 11);
             v_dv := signed(resize(s_num_v, 11)) - to_signed(512, 11);
             s_glow_u <= unsigned(resize(to_signed(512, 11)
