@@ -33,6 +33,21 @@ saturating horizontal drift accumulate per row, tearing the lines; calm frames l
 it settle back toward rest. So at low P12 it's nearly frozen, and P12 up = more
 frequent/violent tears.
 
+## Horizontal-bar bug (fixed, sim-diagnosed)
+The "horizontal bars on the keyed image" were solid fills on bright regions striped
+by the scanline dimmer. Root causes, all removed/changed:
+- **Scanline dimming** (dim every other line) striped any solid region into
+  horizontal bars — removed.
+- **Halo solid-fill** (fired at eyeKey−80) flooded merely-bright areas solid — removed.
+- **Denser-when-bright** (halved pitch, kept thickness) pushed line duty toward
+  100% (solid) — removed; pitch is now uniform.
+- **Eye solid-key** was tested on crushed luma Lc, which the contrast crush clamps
+  to full-scale across whole lit areas (indistinguishable from true highlights) →
+  huge solid fills. Now keyed on **RAW luma** (`pipe(3).y`) so only genuine
+  specular highlights flip to solid.
+Also **reduced the wobble amplitude** (`wave >> 3`) so lines read as mostly-vertical
+following the luma, not steep diagonals. Verified by GHDL sim (see below).
+
 ## Removed / off by default
 - **Tracking band removed** (was a full-width horizontal brightness band).
 - **Window cascade defaults OFF** (S10) — when on, the outer boxes' offsets ran
@@ -74,6 +89,19 @@ Fmax 80.6–101.4 MHz (HD Fmin 74.25), LCs 4878/7680 (63%), 0 BRAM, 0 DSP.
    nested rects × bbox+stroke compares) feeding one register = ~16 ns. Fixed by
    factoring the rectangle test into independent X-only / Y-only membership bits
    computed in one stage and AND/OR-combined the next: 55 → 81–101 MHz.
+
+## Simulating (headless GHDL)
+From `videomancer-sdk/tools/vhdl-image-tester`, source the oss-cad-suite env, then
+the CLI runs the VHDL directly (no bitstream build — fast iteration):
+```
+./.venv/bin/python run.py simulate revenant --image PORTRAIT.png \
+  --programs-dir /home/ron/videomancer-dev/programs/ron --preset "Possessed" \
+  --output out.png
+```
+GHDL elaboration needs `libz.so`; only `libz.so.1` exists, so symlink one and
+`export LIBRARY_PATH=<dir-with-libz.so>:$LIBRARY_PATH`. NOTE: the sim uses the
+opposite U/V convention from hardware, so palette colours render swapped (electric
+violet/cyan shows as green in sim) — judge structure, not hue, in sim.
 
 ## Phase 2 (deferred)
 S9 Text overlay — scattered ASCII / system-log glyphs via a Python glyph-ROM hook

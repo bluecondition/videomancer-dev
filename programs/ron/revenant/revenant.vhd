@@ -440,7 +440,10 @@ begin
             v_wave := resize(tri(v_ph1), 12)
                     + resize(shift_right(tri(v_ph2), 1), 12)
                     + resize(shift_right(tri(v_ph3), 2), 12);
-            v_rip := shift_left(v_wave, s_riplsh)
+            -- Keep the wave a SUBTLE secondary wobble (>>3) so the luma-curvature
+            -- (r4_disp) stays the primary shape -> mostly-vertical lines that follow
+            -- the form, not steep diagonals.  Amplitude still ramps with P12.
+            v_rip := shift_right(shift_left(v_wave, s_riplsh), 3)
                    + resize(shift_right(noise_walk, s_walkshr), 12)
                    + resize(row_jit, 12);
             r1_rip <= v_rip;
@@ -481,16 +484,16 @@ begin
                      + resize(r4_disp, 14)
                      + unsigned(resize(r4_rip + 1024, 14));   -- bias rip positive
             v_phw := s_phw;
-            if r4_lc >= s_key2 then v_phw := s_phw - 1; end if;   -- denser where brighter
-            if v_phw < 2 then v_phw := 2; end if;
             v_pmask := to_unsigned((2 ** v_phw) - 1, 7);
             v_phase := resize(v_field(6 downto 0) and v_pmask, 7);
 
+            -- Eye solid-key is gated on RAW luma (pipe(3).y, aligned with r4) so ONLY
+            -- genuinely bright specular highlights flip to solid.  The contrast crush
+            -- pushes whole lit areas to full Lc, which must still render as vertical
+            -- lines (not a solid block), so the key can't use Lc here.
             r5_line <= '0'; r5_eye <= '0'; r5_halo <= '0';
-            if r4_lc >= s_eyek then
+            if unsigned(pipe(3).y) >= s_eyek then
                 r5_eye  <= '1';
-            elsif r4_lc >= s_eyeh then
-                r5_halo <= '1';
             elsif r4_lc >= s_key and v_phase < resize(s_thick, 7) then
                 r5_line <= '1';
             end if;
@@ -569,16 +572,10 @@ begin
             r8_trk <= r7_trk; r8_px <= r7_px; r8_py <= r7_py;
 
             -----------------------------------------------------------------
-            -- s9: analog degradation (scanline dim + tracking lift + dither).
+            -- s9: analog degradation — fine luma dither only (scanline dimming
+            -- removed: it striped solid regions into horizontal bars).
             -----------------------------------------------------------------
-            if r8_py(0) = '1' then
-                v_dimy := signed(resize(r8_y,13)) - signed(resize(shift_right(r8_y,3),13));
-            else
-                v_dimy := signed(resize(r8_y,13));
-            end if;
-            if r8_trk = '1' then
-                v_dimy := v_dimy + 80;
-            end if;
+            v_dimy := signed(resize(r8_y,13));
             v_noise := signed(resize(lfsr(5 downto 0) and s_noisem, 8))
                      - signed(resize('0' & s_noisem(5 downto 1), 8));
             v_dimy := v_dimy + resize(v_noise, 13);
