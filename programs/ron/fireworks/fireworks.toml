@@ -1,0 +1,179 @@
+[program]
+program_id = "com.ron.fireworks"
+program_version = "1.0.0"
+abi_version = ">=1.0,<2.0"
+program_name = "Fireworks"
+author = "ron"
+license = "GPL-3.0"
+categories = ["Render", "Demo"]
+program_type = "synthesis"
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+description = "Night-sky pyrotechnics: rockets, two-tone peony/ring/willow/palm/crackle shells, drifting smoke, wind control."
+
+# --- Rotary Potentiometers (Knobs 1-6) ---
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 700
+display_min_value = 0
+display_max_value = 100
+name_label = "Launch Rate"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 512
+display_min_value = 0
+display_max_value = 100
+name_label = "Shell Size"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Shell Type"
+value_labels = ["Mix", "Peony", "Ring", "Willow", "Palm", "Crackle"]
+initial_value_label = "Mix"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 375
+display_min_value = 0
+display_max_value = 100
+name_label = "Gravity"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Color"
+value_labels = ["Mix", "Red", "Gold", "Yellow", "Green", "Blue", "Violet", "White"]
+initial_value_label = "Mix"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 640
+display_min_value = 0
+display_max_value = 100
+name_label = "Intensity"
+suffix_label = "%"
+
+# --- Toggle Switches (7-11) ---
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Twinkle"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Big Sparks"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Pistil"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Smoke"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Background"
+value_labels = ["Black", "Video"]
+initial_value_label = "Black"
+
+# --- Linear Potentiometer (Slider) ---
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 512
+display_min_value = -100
+display_max_value = 100
+name_label = "Wind"
+suffix_label = "%"
+
+# --- Presets ---
+# (K6 Intensity: sparks per shell + smoke hang; auto-pistil above ~62%.
+#  P12 Wind: center = calm; left/right = direction + strength.)
+
+[[preset]]
+name = "Grand Finale"
+rotary_potentiometer_1 = 1000
+rotary_potentiometer_2 = 620
+rotary_potentiometer_3 = 85
+rotary_potentiometer_4 = 375
+rotary_potentiometer_5 = 64
+rotary_potentiometer_6 = 1000
+toggle_switch_7 = 1
+toggle_switch_8 = 1
+toggle_switch_9 = 1
+toggle_switch_10 = 1
+toggle_switch_11 = 0
+linear_potentiometer_12 = 512
+
+[[preset]]
+name = "Golden Willows"
+rotary_potentiometer_1 = 500
+rotary_potentiometer_2 = 700
+rotary_potentiometer_3 = 597
+rotary_potentiometer_4 = 700
+rotary_potentiometer_5 = 320
+rotary_potentiometer_6 = 700
+toggle_switch_7 = 1
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 1
+toggle_switch_11 = 0
+linear_potentiometer_12 = 640
+
+[[preset]]
+name = "Space Garden"
+rotary_potentiometer_1 = 450
+rotary_potentiometer_2 = 550
+rotary_potentiometer_3 = 427
+rotary_potentiometer_4 = 0
+rotary_potentiometer_5 = 64
+rotary_potentiometer_6 = 640
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 1
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 512
+
+[[preset]]
+name = "Quiet Night"
+rotary_potentiometer_1 = 300
+rotary_potentiometer_2 = 420
+rotary_potentiometer_3 = 256
+rotary_potentiometer_4 = 375
+rotary_potentiometer_5 = 64
+rotary_potentiometer_6 = 380
+toggle_switch_7 = 1
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 1
+toggle_switch_11 = 0
+linear_potentiometer_12 = 512
