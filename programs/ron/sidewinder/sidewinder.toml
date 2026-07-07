@@ -1,0 +1,184 @@
+[program]
+program_id = "com.bluecondition.sidewinder"
+program_version = "1.0.0"
+abi_version = ">=1.0,<2.0"
+program_name = "Sidewinder"
+author = "bluecondition"
+license = "GPL-3.0"
+categories = ["Warp", "Signal"]
+program_type = "processing"
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+description = "Per-scanline wave displacement: the picture snakes left and right down the screen as a rolling triangle or sine wave."
+url = "https://github.com/lzxindustries/videomancer-sdk"
+
+# --- Rotary Potentiometers (Knobs 1-6) ---
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 320
+display_min_value = 0
+display_max_value = 255
+name_label = "Amount"
+suffix_label = "px"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 340
+display_min_value = 0
+display_max_value = 100
+name_label = "Period"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 600
+display_min_value = -100
+display_max_value = 100
+name_label = "Rate"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 0
+display_min_value = 0
+display_max_value = 63
+name_label = "Ripple"
+suffix_label = "px"
+
+# --- Toggle Switches (7-11) ---
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Shape"
+value_labels = ["Triangle", "Sine"]
+initial_value_label = "Triangle"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Swell"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Steps"
+value_labels = ["Smooth", "Stepped"]
+initial_value_label = "Smooth"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Edge"
+value_labels = ["Black", "Wrap"]
+initial_value_label = "Wrap"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Bypass"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+# --- Linear Potentiometer (Slider) ---
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 1023
+display_min_value = 0
+display_max_value = 100
+name_label = "Mix"
+suffix_label = "%"
+
+# --- Presets ---
+
+[[preset]]
+name = "Clean"
+rotary_potentiometer_1 = 0
+rotary_potentiometer_2 = 0
+rotary_potentiometer_3 = 512
+rotary_potentiometer_4 = 0
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 1
+toggle_switch_11 = 0
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Gentle Sway"
+rotary_potentiometer_1 = 180
+rotary_potentiometer_2 = 220
+rotary_potentiometer_3 = 580
+rotary_potentiometer_4 = 0
+toggle_switch_7 = 1
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 1
+toggle_switch_11 = 0
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Heat Haze"
+rotary_potentiometer_1 = 90
+rotary_potentiometer_2 = 700
+rotary_potentiometer_3 = 640
+rotary_potentiometer_4 = 120
+toggle_switch_7 = 1
+toggle_switch_8 = 1
+toggle_switch_9 = 0
+toggle_switch_10 = 1
+toggle_switch_11 = 0
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Seasick"
+rotary_potentiometer_1 = 640
+rotary_potentiometer_2 = 300
+rotary_potentiometer_3 = 700
+rotary_potentiometer_4 = 200
+toggle_switch_7 = 1
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 1
+toggle_switch_11 = 0
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Band Shredder"
+rotary_potentiometer_1 = 520
+rotary_potentiometer_2 = 620
+rotary_potentiometer_3 = 760
+rotary_potentiometer_4 = 0
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 1
+toggle_switch_10 = 1
+toggle_switch_11 = 0
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Slow Serpent"
+rotary_potentiometer_1 = 420
+rotary_potentiometer_2 = 160
+rotary_potentiometer_3 = 545
+rotary_potentiometer_4 = 60
+toggle_switch_7 = 0
+toggle_switch_8 = 1
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 1023
