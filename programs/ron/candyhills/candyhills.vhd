@@ -1,9 +1,9 @@
 -- candyhills.vhd  (v0.5 — "Candy Hills")
 --
 -- A real-time, side-scrolling 2D generative landscape: large, long, sweeping
--- rolling candy hills filled with bold angled stripes that fan wider toward the
--- crest, under a pastel sky, with a soft cloudy paper-grain wash over the frame.
--- The view scrolls continuously leftward and never repeats.
+-- rolling candy hills filled with bold 45-degree stripes that fan wider toward
+-- the crest, under a pastel sky, with a soft watercolour cloud wash over the
+-- frame.  The view scrolls continuously leftward and never repeats.
 --
 -- Streaming synthesis program (no frame buffer): only the input SYNC is used.
 --
@@ -18,24 +18,31 @@
 --   accumulators; back layers scroll fractionally slower (parallax).
 --
 -- STRIPES
---   Colour comes from a stripe wave whose phase = world-x (scrolls), plus a
---   straight diagonal lean (py>>TILT) and a perspective FAN.  The fan = (px from
---   screen centre)*depth*FanAmount, done in screen space so it is bounded and
---   seamless: it raises the local stripe frequency with depth, so bands are
---   narrow at a hill's bottom and widen / bow toward the crest.  Stripe WIDTH is
---   a continuous frequency (one small multiply) with a large range.
+--   45-degree diagonals, ENTIRELY WORLD-ANCHORED: crest, stripes and fan
+--   all scroll at identical speed (nothing is screen-anchored, so nothing can
+--   slip, shear or reset).  The x gradient (world-x * freq) equals the y
+--   gradient (per-layer per-line accumulator), so K5 changes width while the
+--   angle stays 45.  CREST FAN (P12): the fan phase is the crest sine's own
+--   COSINE (free LUT tap) * fan gain — its derivative tracks hill height, so
+--   stripes widen over crests and tighten in valleys, glued to the terrain
+--   like Tiny Wings wedges.  A gentle sine curve of py bends them.  PEAK
+--   GLOW: stripe luma lifts near the crest surface (sunlit tops).
+--
+-- SHADING
+--   Crest-lit gradient that FOLLOWS THE CURVE OF THE CREST: the top ~15% of
+--   frame height below the local crest is fully lit (+120 luma, peaks and
+--   valleys alike); below the band the lift fades out over 120 px while a
+--   multiplicative shade ramps to 37.5% brightness at 640 px past the band.
+--   Replaces the watercolour wash (and its 3 LUTs).
 --
 -- Fixed colours stored U/V (Cb/Cr) SWAPPED for the Videomancer HW convention
 -- (stored U = Cr, V = Cb), matching the mondrian / glitchscape palettes.
 --
 -- Controls:
 --   K1 Scroll Speed     K2 Hill Amplitude (smooth)   K3 Sky Tint
---   K4 Palette          K5 Stripe Width (wide range) K6 Texture Amount
---   S7 3rd Layer  S8 Distance Haze  S9 Crest Line(def off)  S10 Texture  S11 Freeze
+--   K4 Palette          K5 Stripe Width (wide range) K6 (unused)
+--   S7 3rd Layer  S8 Distance Haze  S9 Crest Line(def off)  S10 Video Sky  S11 Freeze
 --   P12 Fan Amount
---
--- HOOKS for later (not built): bushes / props between colour assembly and the
--- texture wash for the foreground layer near the crest.
 --
 -- Author: bluecondition
 
@@ -54,19 +61,27 @@ architecture candyhills of program_top is
     constant LATENCY : natural := 13;         -- datapath stages s1..s11 (+ s5a, s6b)
 
     constant C_MID  : unsigned(9 downto 0) := to_unsigned(512, 10);
-    constant SOFT   : integer := 120;         -- soft-edge half-band of stripe wave
-    -- Stripes are attached to the TERRAIN (phase = world-x * freq), so they move
-    -- with each hill at that layer's scroll rate.  Per-layer width is 100/50/25 %
-    -- (freq << layer).  PERSPECTIVE FAN (Fan Amount, P12): the local frequency
-    -- rises toward the bottom of the frame (fanadd grows with py) so stripes are
-    -- narrow at the bottom and fan wider toward the crest.  The fan divide is
-    -- SPLIT: only FANPRE bits dropped BEFORE the sx multiply (so the frequency
-    -- stays fractional and the width changes SMOOTHLY per row, no stair-steps),
-    -- FANPOST bits after; FANPRE+FANPOST sets the strength.
-    -- A gentle sine curve (tilt + curve of py) bends the stripes.
-    constant FANPRE  : natural := 4;          -- shift on (py-PYREF)*fan before sx*
-    constant FANPOST : natural := 11;         -- shift after the sx multiply
-    constant TILTF  : natural := 2;           -- fixed diagonal lean: + py >> TILTF
+    -- Stripe soft-edge width in PIXELS (2^SOFTW px).  The compare threshold is
+    -- thr = 2^SOFTW * gx(row) so the blend zone is a CONSTANT pixel width at
+    -- any stripe width/fan — a fixed phase threshold ballooned to 100+ px of
+    -- washed-out mid-colour on the fanned-wide crest stripes (the hills read
+    -- brighter at the top, darker at the bottom).
+    constant SOFTW  : natural := 3;
+    -- STRIPES: 45-degree diagonals, ENTIRELY WORLD-ANCHORED so the crest, the
+    -- stripes and the fan all scroll at IDENTICAL speed (any screen-space
+    -- term makes some rows slip — every earlier fan artifact was that leak).
+    -- gx from the world-x base (sx*freq, mod-1024 seamless across the world
+    -- wrap); gy from a per-layer per-LINE accumulator (ydacc slope = freq<<L).
+    -- CREST FAN (P12): stripe width is modulated BY THE TERRAIN — the fan
+    -- phase is cosA(world-x)*fan (the crest sine's own cosine, a free LUT
+    -- tap), whose x-derivative is -sinA ∝ hill height: stripes WIDEN over
+    -- tall hills / crests and tighten in valleys, glued to the hill like the
+    -- Tiny Wings wedges.  Bounded by construction (|dgx| <= 1.27 < min freq
+    -- 2): no clamp, no reset, no slip — ever.  A gentle sine curve of py
+    -- bends the stripes.  CREST-LIT SHADING: +120 luma in the lit band,
+    -- fading to 37.5% brightness below (see SHADING above).
+    constant FANSH   : natural := 5;          -- fan gain shift (cos*fan >> FANSH)
+    constant FANPOST : natural := 11;         -- ydacc fraction bits (phase = acc >> FANPOST)
     constant CURVESH : natural := 3;          -- stripe sine-curve amplitude shift
     constant THICK  : integer := 5;           -- crest-line thickness (px, fixed)
 
@@ -110,13 +125,14 @@ architecture candyhills of program_top is
     constant CREST_U : integer := 492;
     constant CREST_V : integer := 488;
 
-    -- BUSHES: light-green semicircles outlined in dark green, growing straight out
-    -- of a crest (fg/mid/bg) at 100/50/25 % size, in sparse RANDOM GROUPS of 3 or 6,
-    -- preferentially on FLAT parts of the crest.  The base follows the crest
-    -- PER-COLUMN so the bush is flush with the hill (no sky between them); the dome
-    -- is a true circle test dx^2 + dy^2 <= R^2 with an EVEN radial outline in the
+    -- BUSHES: light-green circles outlined in dark green, growing straight out
+    -- of a crest (fg/mid/bg) at 100/50/25 % size, in sparse RANDOM GROUPS of 3 or 6.
+    -- The dome is a TRUE circle test dx^2 + dy^2 <= R^2 against a per-slot ANCHOR
+    -- (the crest height under the dome centre, held constant across the slot), so
+    -- the circle never leans with the crest slope; it is CLIPPED per column at the
+    -- crest (draw only above it), and carries an EVEN radial outline in the
     -- annulus (R-T)^2 .. R^2.  Fixed grassy greens (U = Cr, V = Cb swapped); fill
-    -- textured (watercolour wash), outline dark.  Per layer L: slot = 128>>L px
+    -- fill light green, outline dark.  Per layer L: slot = 128>>L px
     -- (log 7-L), radius 48>>L, centre 64>>L.  No LUT / no per-frame state.
     constant BSLOTLOG : natural := 7;    -- fg slot = 128 px; layer L = 128>>L
     constant BR       : integer := 48;   -- fg bush radius; layer L = 48>>L
@@ -189,14 +205,9 @@ architecture candyhills of program_top is
     signal px        : unsigned(11 downto 0) := (others => '0');
     signal py        : unsigned(10 downto 0) := (others => '0');
     signal frame_act : std_logic := '0';
-    signal frame_cnt : unsigned(9 downto 0) := (others => '0');
 
     signal act_h     : unsigned(10 downto 0) := to_unsigned(720, 11);
-    signal act_cx    : unsigned(11 downto 0) := to_unsigned(640, 12);  -- active width/2
-    signal max_px    : unsigned(11 downto 0) := (others => '0');
     signal max_py    : unsigned(10 downto 0) := (others => '0');
-
-    signal lfsr      : unsigned(15 downto 0) := x"ACE1";
 
     -- Per-pixel crest phase accumulators (reset to per-frame offset at line start).
     signal phA       : t_l3u20 := (others => (others => '0'));
@@ -213,7 +224,6 @@ architecture candyhills of program_top is
     signal s_freq    : unsigned(5 downto 0) := to_unsigned(3, 6);    -- K5 stripe freq (1..32)
     signal s_fan     : unsigned(5 downto 0) := to_unsigned(32, 6);  -- P12 fan amount (0..63)
     signal s_palsel  : integer range 0 to 7 := 0;     -- K4 palette (8)
-    signal s_texsh   : integer range 1 to 4 := 3;    -- K6 texture amount (cloud >> texsh)
 
     signal s_lay3    : std_logic := '1';   -- S7
     signal s_haze    : std_logic := '1';   -- S8
@@ -223,7 +233,14 @@ architecture candyhills of program_top is
 
     -- Per-layer baselines near vertical centre (parallax-offset).
     signal base_y    : t_l3u11 := (others => to_unsigned(360, 11));
-    signal s_pyref   : unsigned(10 downto 0) := to_unsigned(540, 11);  -- fan crossover row (~0.75*act_h)
+    -- Per-layer 45-degree diagonal phase accumulator: slope per line =
+    -- freq << layer (in 1/2^FANPOST phase units) — the same base gradient as
+    -- the stripes' x term, which is what keeps them at 45 degrees.
+    type t_l3u21 is array(0 to 2) of unsigned(20 downto 0);
+    signal ydacc     : t_l3u21 := (others => (others => '0'));
+
+    -- Crest-lit shading: lit-band depth (~15% of act_h), latched per frame.
+    signal s_litd : unsigned(10 downto 0) := to_unsigned(112, 11);
 
     -- Selected base palette colours, registered every clock (pipelines the 8:1
     -- palette mux out of the per-frame haze path so it does not gate timing).
@@ -245,6 +262,11 @@ architecture candyhills of program_top is
     --------------------------------------------------------------------------
     signal angA, angB : t_l3slv;
     signal sinA, sinB : t_l3s10;
+    -- Crest-fan cosine: ONE shared LUT fed by the WINNER's primary angle
+    -- (carried down the pipe and muxed at s5b).  Tapping cos_out on all three
+    -- crest LUTs costs 3 full cosine tables (+9 EBR, overflows the part);
+    -- one shared instance is +3.
+    signal fan_cos    : signed(9 downto 0);
 
     -- Stripe sine-curve LUT (bends the stripes like the crest).
     signal curve_ang : std_logic_vector(9 downto 0) := (others => '0');
@@ -255,7 +277,7 @@ architecture candyhills of program_top is
     -- config/SPI region into the pixel pipeline).
     signal d_gainA : unsigned(5 downto 0) := to_unsigned(35, 6);
     signal d_freq  : unsigned(5 downto 0) := to_unsigned(3, 6);
-    signal d_fan   : unsigned(5 downto 0) := to_unsigned(32, 6);
+    signal d_fan   : unsigned(5 downto 0) := to_unsigned(21, 6);
 
     --------------------------------------------------------------------------
     -- Datapath stage registers.
@@ -264,26 +286,26 @@ architecture candyhills of program_top is
     signal r1_px   : unsigned(11 downto 0) := (others => '0');
     signal r1_py   : unsigned(10 downto 0) := (others => '0');
     signal r1_sinA, r1_sinB : t_l3s10 := (others => (others => '0'));
+    signal r1_ang  : t_l3slv := (others => (others => '0'));   -- crest-fan angle carry
     signal r1_sx   : t_l3u14 := (others => (others => '0'));
-    signal r1_cloud : signed(8 downto 0) := (others => '0');   -- raw watercolour cloud
     -- s2: combined displacement = sinA + sinB/2
     signal r2_disp : t_l3s12 := (others => (others => '0'));
     signal r2_px   : unsigned(11 downto 0) := (others => '0');
     signal r2_py   : unsigned(10 downto 0) := (others => '0');
     signal r2_sx   : t_l3u14 := (others => (others => '0'));
-    signal r2_tex  : signed(8 downto 0) := (others => '0');
+    signal r2_ang  : t_l3slv := (others => (others => '0'));
     -- s3: amplitude-scaled displacement (smooth gain multiply)
     signal r3_scl  : t_l3s13 := (others => (others => '0'));
     signal r3_px   : unsigned(11 downto 0) := (others => '0');
     signal r3_py   : unsigned(10 downto 0) := (others => '0');
     signal r3_sx   : t_l3u14 := (others => (others => '0'));
-    signal r3_tex  : signed(8 downto 0) := (others => '0');
+    signal r3_ang  : t_l3slv := (others => (others => '0'));
     -- s4: crest = baseline - scaled displacement (signed, may run off-screen)
     signal r4_crest : t_l3s13 := (others => (others => '0'));
     signal r4_px   : unsigned(11 downto 0) := (others => '0');
     signal r4_py   : unsigned(10 downto 0) := (others => '0');
     signal r4_sx   : t_l3u14 := (others => (others => '0'));
-    signal r4_tex  : signed(8 downto 0) := (others => '0');
+    signal r4_ang  : t_l3slv := (others => (others => '0'));
     -- s5: frontmost covering layer / sky / crest-line / winner's world-x
     -- s5a: the three crest subtracts (carry chains), split off from the priority
     --      select so the compares route alone.  dd(l) = py - crest(l); sign = the
@@ -291,70 +313,75 @@ architecture candyhills of program_top is
     signal r5a_dd  : t_l3s14 := (others => (others => '0'));   -- 14b: py-crest, no overflow
     signal r5a_sx  : t_l3u14 := (others => (others => '0'));
     signal r5a_py  : unsigned(10 downto 0) := (others => '0');
-    signal r5a_tex : signed(8 downto 0) := (others => '0');
+    signal r5a_ang : t_l3slv := (others => (others => '0'));
 
     signal r5_layer : integer range 0 to 2 := 0;
     signal r5_sky  : std_logic := '0';
     signal r5_cl   : std_logic := '0';
     signal r5_sx   : unsigned(13 downto 0) := (others => '0');  -- world-x of winner
     signal r5_py   : unsigned(10 downto 0) := (others => '0');
-    signal r5_pyc  : signed(11 downto 0) := (others => '0');    -- py - PYREF (fan)
-    signal r5_tex  : signed(8 downto 0) := (others => '0');
-    -- s6: base frequency (freq<<layer) + fan add ((py-PYREF)*fan>>FANPRE), split so
-    --     the phase needs only small multiplies.
+    signal r5_fang : std_logic_vector(9 downto 0) := (others => '0');  -- winner's crest angle
+    signal r5_glow : unsigned(6 downto 0) := (others => '0');   -- crest lift (96 in lit band -> 0)
+    signal r5_shade : unsigned(5 downto 0) := (others => '0');  -- shade 0..32 (-> 50% dark)
+    -- s6: base frequency (freq<<layer) + the crest-fan multiply.
     signal r6_layer : integer range 0 to 2 := 0;
     signal r6_sky  : std_logic := '0';
     signal r6_cl   : std_logic := '0';
     signal r6_freqeff : unsigned(7 downto 0) := (others => '0');   -- freq << layer
-    signal r6_fanadd  : signed(13 downto 0) := (others => '0');    -- (py-PYREF)*fan >> FANPRE (fractional)
+    signal r6_cos  : signed(9 downto 0) := (others => '0');       -- fan_cos registered (BRAM out)
+    signal r6_glow : unsigned(6 downto 0) := (others => '0');
+    signal r6_shade : unsigned(5 downto 0) := (others => '0');
     signal r6_sx   : unsigned(13 downto 0) := (others => '0');
     signal r6_py   : unsigned(10 downto 0) := (others => '0');
-    signal r6_tex  : signed(8 downto 0) := (others => '0');
-    -- s6b: raw multiplies.  base = sx(9:0)*freq_eff (small).  The fan multiply
-    --      sx*fanadd (15x14) is the HD critical path, so it is SPLIT into two
-    --      half-width partial products against fanadd's high/low 7-bit halves —
-    --      each a short 15x7/15x8 multiply — then summed in s7 (which had slack).
-    --      This shortens the carry chain that was limiting Fmax.  Only phase(9:0)
-    --      survives downstream, so the fan phase is mod-1024.
+    -- s6b: base multiply sx(9:0)*freq_eff + fan multiply cos*gain (small).
+    --      Only phase(9:0) survives downstream, so both are mod-1024.
     signal r6b_base : unsigned(17 downto 0) := (others => '0');
-    signal r6b_phi : signed(21 downto 0) := (others => '0');   -- sx * fanadd(13:7)
-    signal r6b_plo : signed(22 downto 0) := (others => '0');   -- sx * fanadd(6:0)
+    signal r6b_fan : signed(16 downto 0) := (others => '0');
+    signal r6b_glow : unsigned(6 downto 0) := (others => '0');
+    signal r6b_shade : unsigned(5 downto 0) := (others => '0');
     signal r6b_layer : integer range 0 to 2 := 0;
     signal r6b_sky : std_logic := '0';
     signal r6b_cl  : std_logic := '0';
     signal r6b_py  : unsigned(10 downto 0) := (others => '0');
-    signal r6b_tex : signed(8 downto 0) := (others => '0');
     -- s7: stripe phase = base + fanraw>>FANPOST
     signal r7_layer : integer range 0 to 2 := 0;
     signal r7_sky  : std_logic := '0';
     signal r7_cl   : std_logic := '0';
     signal r7_phase : unsigned(13 downto 0) := (others => '0');
     signal r7_py   : unsigned(10 downto 0) := (others => '0');
-    signal r7_tex  : signed(8 downto 0) := (others => '0');
-    -- s8: stripe angle = phase + tilt(py) + sine curve(py)
+    signal r7_glow : unsigned(6 downto 0) := (others => '0');
+    signal r7_shade : unsigned(5 downto 0) := (others => '0');
+    -- s8: stripe angle = phase + diagonal + sine curve(py)
     signal r8_layer : integer range 0 to 2 := 0;
     signal r8_sky  : std_logic := '0';
     signal r8_cl   : std_logic := '0';
     signal r8_ang  : std_logic_vector(9 downto 0) := (others => '0');
-    signal r8_tex  : signed(8 downto 0) := (others => '0');
+    signal r8_thr  : unsigned(7 downto 0) := to_unsigned(16, 8);  -- soft-edge threshold (2^SOFTW px * freqeff)
+    signal r8_glow : unsigned(6 downto 0) := (others => '0');
+    signal r8_shade : unsigned(5 downto 0) := (others => '0');
     -- s9: stripe wave sampled
     signal r9_layer : integer range 0 to 2 := 0;
     signal r9_sky  : std_logic := '0';
     signal r9_cl   : std_logic := '0';
     signal r9_ssin : signed(9 downto 0) := (others => '0');
-    signal r9_tex  : signed(8 downto 0) := (others => '0');
+    signal r9_thr  : unsigned(7 downto 0) := to_unsigned(16, 8);
+    signal r9_glow : unsigned(6 downto 0) := (others => '0');
+    signal r9_shade : unsigned(5 downto 0) := (others => '0');
     -- s10: assembled base colour (+ sky flag for the video-sky option)
     signal r10_y, r10_u, r10_v : unsigned(9 downto 0) := C_MID;
     signal r10_sky : std_logic := '0';
-    signal r10_tex : signed(8 downto 0) := (others => '0');
+    signal r10_shade : unsigned(5 downto 0) := (others => '0');
 
     -- BUSH sub-pipeline (parallel to the colour path; overrides colour at s10).
-    --   Fully STATELESS (no held anchor / no per-slot memory) so bushes scroll
-    --   cleanly off both edges with no popping.  s5b captures all-layer world-x /
-    --   (py-crest); s6 does per-layer geometry (squared radial distance from the
-    --   dome centre + group placement); s6b resolves a per-layer 2-bit code
-    --   (00 none / 01 fill / 10 outline); s7..s9 carry; s10 picks the frontmost
-    --   bush in front of the winning hill.
+    --   LINE-LOCAL state only (the per-slot crest anchor is re-derived every
+    --   scanline from the crest itself — no per-frame memory), so bushes scroll
+    --   cleanly off both edges with no popping.  s4 latches the per-slot anchor;
+    --   s5b captures all-layer world-x / (py-crest); s6 does per-layer geometry
+    --   (squared radial distance from the dome centre + group placement); s6b
+    --   resolves a per-layer 2-bit code (00 none / 01 fill / 10 outline);
+    --   s7..s9 carry; s10 picks the frontmost bush in front of the winning hill.
+    signal ba_cur    : t_l3s13 := (others => (others => '0'));   -- crest @ slot left edge
+    signal ba_anchor : t_l3s14 := (others => (others => '0'));   -- crest under dome centre (held per slot)
     signal r5_sxL   : t_l3u14 := (others => (others => '0'));    -- world-x per layer
     signal r5_ddL   : t_l3s14 := (others => (others => '0'));    -- py - crest per layer
     signal r6_adx   : t_l3u6 := (others => (others => '0'));     -- |dx| per layer
@@ -390,12 +417,17 @@ begin
     u_curve : entity work.sin_cos_full_lut_10x10
         port map (angle_in => curve_ang, sin_out => curve_sin, cos_out => open);
 
+    -- Crest-fan cosine: shared single LUT on the winner's primary angle
+    -- (r5_fang, registered at s5b; output registered into r6_cos at s6 —
+    -- BRAM read port registered before the s6b multiply).
+    u_fancos : entity work.sin_cos_full_lut_10x10
+        port map (angle_in => r5_fang, sin_out => open, cos_out => fan_cos);
+
     --------------------------------------------------------------------------
     -- Raster position, phase accumulators, per-frame parameter latch.
     --------------------------------------------------------------------------
     p_position : process(clk)
         variable v_h_edge, v_v_edge : std_logic;
-        variable v_tex : integer range 0 to 3;
         variable v_kw  : integer range 0 to 31;
         variable v_ay, v_au, v_av : integer;
         variable v_by, v_bu, v_bv : integer;
@@ -410,12 +442,6 @@ begin
             if data_in.hsync_n = '0' and prev_hsync_n = '1' then v_h_edge := '1'; end if;
             if data_in.vsync_n = '0' and prev_vsync_n = '1' then v_v_edge := '1'; end if;
 
-            if lfsr(0) = '1' then
-                lfsr <= ('0' & lfsr(15 downto 1)) xor x"B400";
-            else
-                lfsr <= '0' & lfsr(15 downto 1);
-            end if;
-
             -- Register the selected base palette colours every clock (the 8:1 mux
             -- is then off the per-frame haze path).
             sel_ay <= P_AY(s_palsel); sel_au <= P_AU(s_palsel); sel_av <= P_AV(s_palsel);
@@ -429,7 +455,6 @@ begin
 
             -- X counter + crest phase accumulators.
             if v_h_edge = '1' then
-                if px > max_px then max_px <= px; end if;
                 px <= (others => '0');
                 for l in 0 to 2 loop
                     phA(l) <= offA(l);
@@ -447,10 +472,7 @@ begin
             if v_v_edge = '1' then
                 py        <= (others => '0');
                 frame_act <= '0';
-                frame_cnt <= frame_cnt + 1;
                 act_h  <= py;                          -- py at vsync = active height
-                act_cx <= '0' & max_px(11 downto 1);   -- active width / 2 (fan centre)
-                max_px <= (others => '0');
                 max_py <= (others => '0');
 
                 ---------------------------------------------------------------
@@ -476,8 +498,9 @@ begin
                 s_palsel <= to_integer(unsigned(registers_in(3)(9 downto 7)));  -- K4 (8 palettes)
                 v_kw    := to_integer(unsigned(registers_in(4)(9 downto 7)));   -- K5 0..7
                 s_freq  <= to_unsigned(FREQTBL(v_kw), 6);                       -- geometric width, full-knob range
-                v_tex   := to_integer(unsigned(registers_in(5)(9 downto 8)));   -- K6
-                s_texsh <= 4 - v_tex;                                          -- 4(subtle)..1(strong)
+
+                -- Crest-lit band depth ~ 15% of frame height.
+                s_litd <= shift_right(act_h, 3) + shift_right(act_h, 5);
 
                 s_lay3    <= registers_in(6)(0);   -- S7
                 s_haze    <= registers_in(6)(1);   -- S8
@@ -493,7 +516,6 @@ begin
                 base_y(0) <= shift_right(act_h, 1) + shift_right(act_h, 5);  -- ~0.531 fg
                 base_y(1) <= shift_right(act_h, 1);                          -- 0.5   mid
                 base_y(2) <= shift_right(act_h, 1) - shift_right(act_h, 4);  -- ~0.437 bg
-                s_pyref   <= act_h - shift_right(act_h, 2);                  -- ~0.75*act_h fan crossover
 
                 ---------------------------------------------------------------
                 -- Hazed stripe colours per layer for the selected palette.
@@ -524,8 +546,16 @@ begin
             elsif data_in.avid = '1' and frame_act = '0' then
                 frame_act <= '1';
                 py        <= (others => '0');
+                ydacc     <= (others => (others => '0'));
             elsif v_h_edge = '1' then
                 py <= py + 1;
+                -- 45-degree diagonal accumulators: one add per LINE per layer;
+                -- slope = freq << layer, exactly the stripes' base x gradient
+                -- (in 1/2^FANPOST units) -> constant 45 degrees.
+                -- 21 bits = 10-bit phase + FANPOST fraction; wraps mod-1024.
+                for l in 0 to 2 loop
+                    ydacc(l) <= ydacc(l) + shift_left(resize(s_freq, 21), FANPOST + l);
+                end loop;
             end if;
         end if;
     end process p_position;
@@ -534,20 +564,23 @@ begin
     -- Main datapath.
     --------------------------------------------------------------------------
     p_pipe : process(clk)
-        variable v_a, v_b : unsigned(7 downto 0);
-        variable v_cloud : signed(8 downto 0);
-        variable v_grain : signed(8 downto 0);
         variable v_dr   : signed(8 downto 0);     -- displacement >> 2
         variable v_win  : integer range 0 to 2;
         variable v_sky  : std_logic;
         variable v_pys  : signed(12 downto 0);
         variable v_dd   : signed(13 downto 0);    -- depth (crest-line test)
-        variable v_ang  : signed(12 downto 0);      -- phase + tilt + curve
+        variable v_ang  : signed(12 downto 0);      -- phase + diagonal + curve
+        variable v_thu  : unsigned(13 downto 0);    -- soft-edge threshold raw
+        variable v_e    : unsigned(13 downto 0);    -- depth past the lit band
+        variable v_shp  : unsigned(15 downto 0);    -- y * shade product
         variable v_y    : signed(11 downto 0);
         variable v_dx   : signed(8 downto 0);       -- bush: px within slot - centre
+        variable v_axu  : unsigned(8 downto 0);     -- bush: |dx| (unclamped)
         variable v_adx  : integer range 0 to 63;    -- bush: |dx| (clamped)
-        variable v_dyi  : integer range 0 to 63;    -- bush: dy = crest - py (clamped)
-        variable v_dyy  : signed(14 downto 0);      -- bush: crest - py (raw)
+        variable v_dya  : signed(14 downto 0);      -- bush: anchor - py (raw)
+        variable v_dyu  : unsigned(14 downto 0);    -- bush: |anchor - py| (unclamped)
+        variable v_dyi  : integer range 0 to 63;    -- bush: |anchor - py| (clamped)
+        variable v_dyy  : signed(14 downto 0);      -- bush: crest - py (per-column clip)
         variable v_sl   : unsigned(8 downto 0);     -- bush: slot index
         variable v_gh   : unsigned(5 downto 0);     -- bush: group hash
         variable v_len  : integer range 0 to 7;     -- bush: group length (3 or 6)
@@ -562,29 +595,16 @@ begin
             d_gainA <= s_gainA; d_freq <= s_freq; d_fan <= s_fan;
 
             -----------------------------------------------------------------
-            -- s1: capture both crest sines, stripe-x (world x), texture.
+            -- s1: capture both crest sines (+ the primary's cosine, for the
+            --     crest fan), stripe-x (world x).
             -----------------------------------------------------------------
             r1_px <= px; r1_py <= py;
             for l in 0 to 2 loop
                 r1_sinA(l) <= sinA(l);
                 r1_sinB(l) <= sinB(l);
+                r1_ang(l)  <= angA(l);
                 r1_sx(l)   <= resize(px, 14) + scrollPx(l)(17 downto 4);
             end loop;
-
-            -- Watercolour cloud: sum of two slow folded-triangle "octaves" of
-            -- px/py (drifting with the frame) -> a soft mottled low-frequency
-            -- gradient, plus a tiny bit of grain for tooth.  Always on; K6 (via
-            -- s_texsh) scales the amount.
-            v_a := resize(px(9 downto 4), 8) + resize(py(9 downto 5), 8)
-                 + resize(frame_cnt(7 downto 1), 8);          -- large slow blotches
-            if v_a(7) = '1' then v_a := not v_a; end if;      -- fold 0..127
-            v_b := resize(px(8 downto 3), 8) - resize(py(8 downto 4), 8)
-                 + resize(frame_cnt(6 downto 0), 8);          -- medium blotches
-            if v_b(7) = '1' then v_b := not v_b; end if;
-            -- two octaves centred, smooth: ~ +/-96
-            v_cloud := resize(signed('0' & v_a(6 downto 1)) - 32, 9)
-                     + resize(signed('0' & v_b(6 downto 2)) - 16, 9);
-            r1_cloud <= v_cloud;   -- shift + grain applied next stage (s2)
 
             -----------------------------------------------------------------
             -- s2: combined crest displacement = primary + secondary/2.
@@ -592,10 +612,7 @@ begin
             for l in 0 to 2 loop
                 r2_disp(l) <= resize(r1_sinA(l), 12) + resize(shift_right(r1_sinB(l), 1), 12);
             end loop;
-            -- finish the texture: K6 amount shift + a little grain (lfsr is free-run)
-            v_grain := signed(resize(lfsr(2 downto 0), 9)) - 3;
-            r2_tex <= resize(shift_right(r1_cloud, s_texsh), 9) + v_grain;
-            r2_px <= r1_px; r2_py <= r1_py; r2_sx <= r1_sx;
+            r2_px <= r1_px; r2_py <= r1_py; r2_sx <= r1_sx; r2_ang <= r1_ang;
 
             -----------------------------------------------------------------
             -- s3: SMOOTH amplitude = displacement * gain (one small multiply).
@@ -604,7 +621,7 @@ begin
                 v_dr := resize(shift_right(r2_disp(l), 2), 9);          -- +/-191
                 r3_scl(l) <= resize(shift_right(v_dr * signed('0' & d_gainA), 4), 13);
             end loop;
-            r3_px <= r2_px; r3_py <= r2_py; r3_sx <= r2_sx; r3_tex <= r2_tex;
+            r3_px <= r2_px; r3_py <= r2_py; r3_sx <= r2_sx; r3_ang <= r2_ang;
 
             -----------------------------------------------------------------
             -- s4: crest = baseline - scaled.  NOT clamped: large amplitude runs
@@ -613,7 +630,28 @@ begin
             for l in 0 to 2 loop
                 r4_crest(l) <= signed(resize(base_y(l), 13)) - r3_scl(l);
             end loop;
-            r4_px <= r3_px; r4_py <= r3_py; r4_sx <= r3_sx; r4_tex <= r3_tex;
+            r4_px <= r3_px; r4_py <= r3_py; r4_sx <= r3_sx; r4_ang <= r3_ang;
+
+            -----------------------------------------------------------------
+            -- BUSH anchor (per layer): sample the crest at each slot's LEFT
+            -- edge and extrapolate half a slot ahead using the previous slot's
+            -- slope (delta/2) to estimate the crest UNDER THE DOME CENTRE;
+            -- hold it across the slot.  A constant per-slot base keeps the
+            -- dome perfectly round regardless of the crest slope.  Re-derived
+            -- every scanline (the crest is a function of x only), so there is
+            -- no cross-frame state and bushes still scroll without popping.
+            -----------------------------------------------------------------
+            for L in 0 to 2 loop
+                if r4_px = 0 then                          -- line start: seed with crest(x=0)
+                    ba_cur(L)    <= r4_crest(L);
+                    ba_anchor(L) <= resize(r4_crest(L), 14);
+                elsif r4_sx(L)(BSLOTLOG - 1 - L downto 0) = 0 then   -- slot left edge
+                    ba_cur(L)    <= r4_crest(L);
+                    ba_anchor(L) <= resize(r4_crest(L), 14)
+                                  + resize(shift_right(resize(r4_crest(L), 14)
+                                                       - resize(ba_cur(L), 14), 1), 14);
+                end if;
+            end loop;
 
             -----------------------------------------------------------------
             -- s5a: the three crest subtracts, parallel (carry chains only).
@@ -622,7 +660,7 @@ begin
             for l in 0 to 2 loop
                 r5a_dd(l) <= resize(v_pys, 14) - resize(r4_crest(l), 14);
             end loop;
-            r5a_sx <= r4_sx; r5a_py <= r4_py; r5a_tex <= r4_tex;
+            r5a_sx <= r4_sx; r5a_py <= r4_py; r5a_ang <= r4_ang;
 
             -----------------------------------------------------------------
             -- s5b: pick frontmost covering layer (py at/below crest l -> dd(l)>=0,
@@ -638,55 +676,80 @@ begin
             else
                 v_win := 0; v_sky := '1';
             end if;
-            v_dd := r5a_dd(v_win);                                 -- depth (crest line only)
+            v_dd := r5a_dd(v_win);                                 -- depth below crest
             r5_layer <= v_win;
             r5_sky   <= v_sky;
             if v_dd < to_signed(THICK, 14) then r5_cl <= '1'; else r5_cl <= '0'; end if;
             r5_sx  <= r5a_sx(v_win);
             r5_py  <= r5a_py;
-            r5_pyc <= signed(resize(r5a_py, 12)) - signed(resize(s_pyref, 12));
-            r5_tex <= r5a_tex;
+            r5_fang <= r5a_ang(v_win);
+            -- CREST-LIT SHADING (follows the crest curve, peaks and valleys
+            -- alike): the top ~15% of frame height below the crest is fully
+            -- lit (+120 luma); past the band the lift fades out over 120 px
+            -- while a multiplicative shade ramps to 40/64 (37.5% brightness)
+            -- at 640 px past the band.
+            if v_sky = '1' then
+                r5_glow  <= (others => '0');
+                r5_shade <= (others => '0');
+            elsif v_dd < signed(resize(s_litd, 14)) then
+                r5_glow  <= to_unsigned(120, 7);
+                r5_shade <= (others => '0');
+            else
+                v_e := unsigned(v_dd) - resize(s_litd, 14);
+                if v_e >= to_unsigned(120, 14) then r5_glow <= (others => '0');
+                else r5_glow <= to_unsigned(120, 7) - v_e(6 downto 0); end if;
+                if v_e >= to_unsigned(640, 14) then r5_shade <= to_unsigned(40, 6);
+                else r5_shade <= v_e(9 downto 4); end if;
+            end if;
             -- BUSH: capture ALL layers' world-x and (py - crest) so each layer's
             -- bushes ride its own crest (dy = crest - py = -ddL, per column).
             r5_sxL <= r5a_sx;
             r5_ddL <= r5a_dd;
 
             -----------------------------------------------------------------
-            -- s6: PERSPECTIVE FAN operands.  freq_eff = freq<<layer (per-layer
-            --     width).  fanadd is CENTRED on PYREF (~0.75*act_h): negative
-            --     above it (toward the crest -> lower freq -> WIDER) and positive
-            --     below (toward the bottom -> higher freq -> narrower).  Fan
-            --     Amount (P12) scales it gently.  Clamped so total freq stays > 0.
-            --     Per-scanline py is constant -> no shear; fanadd integer -> seamless.
+            -- s6: CREST FAN operand.  freq_eff = freq<<layer (per-layer width).
+            --     Register the shared fan-cosine LUT output (addressed by the
+            --     winner's angle from s5b); the gain multiply happens at s6b.
+            --     fan phase = cos(winner world-x) * fan gain: its x-derivative
+            --     is -sinA ∝ hill height, so stripes WIDEN over tall hills and
+            --     tighten in valleys — world-anchored, so the stripes scroll at
+            --     EXACTLY the hill speed (no slip, no reset, no clamp needed:
+            --     |dgx| <= 1.27 < min freq 2).
             -----------------------------------------------------------------
             r6_freqeff <= resize(shift_left(d_freq, r5_layer), 8);
-            r6_fanadd  <= resize(shift_right(r5_pyc * signed('0' & d_fan), FANPRE), 14);
+            r6_cos  <= fan_cos;
+            r6_glow <= r5_glow; r6_shade <= r5_shade;
             r6_sx <= r5_sx; r6_py <= r5_py;
-            r6_layer <= r5_layer; r6_sky <= r5_sky; r6_cl <= r5_cl; r6_tex <= r5_tex;
+            r6_layer <= r5_layer; r6_sky <= r5_sky; r6_cl <= r5_cl;
 
             -----------------------------------------------------------------
             -- s6 (bush geometry, per layer L): slot = 128>>L, centre 64>>L, radius
-            --   48>>L.  CENTRE ANCHOR: sample the crest at the slot's left edge,
-            --   extrapolate half a slot forward using the last slot's slope
-            --   (delta/2) to estimate the crest UNDER THE CENTRE, hold it across
-            --   the slot -> the flat base sits on the crest and the dome is round
-            --   at any amplitude.  Placement: sparse random groups of 3 or 6 slots.
+            --   48>>L.  dy is measured from the per-slot ANCHOR (crest under the
+            --   dome centre, latched at s4) -> a TRUE circle at any crest slope;
+            --   the per-column crest test below only CLIPS it at the crest.
+            --   Placement: sparse random groups of 3 or 6 slots.
             -----------------------------------------------------------------
             for L in 0 to 2 loop
                 v_sl := resize(r5_sxL(L)(13 downto BSLOTLOG - L), 9);        -- slot index
                 -- dx = distance from the slot centre (centre = slot/2).
                 v_dx := signed('0' & r5_sxL(L)(BSLOTLOG - 1 - L downto 0))
                         - to_signed(2 ** (BSLOTLOG - 1 - L), 9);
-                if v_dx(8) = '1' then v_adx := to_integer(unsigned(-v_dx));
-                else                  v_adx := to_integer(unsigned(v_dx(5 downto 0))); end if;
-                if v_adx > 63 then v_adx := 63; end if;
+                if v_dx(8) = '1' then v_axu := unsigned(-v_dx);
+                else                  v_axu := unsigned(v_dx); end if;
+                if v_axu > 63 then v_adx := 63;                              -- incl. dx = -64
+                else               v_adx := to_integer(v_axu(5 downto 0)); end if;
                 r6_adx(L) <= to_unsigned(v_adx, 6);
-                -- dy = crest - py = -ddL (per column -> base flush with the crest).
-                v_dyy := resize(-r5_ddL(L), 15);
-                if    v_dyy < to_signed(1, 15)  then v_dyi := 0;             -- on/below crest
-                elsif v_dyy > to_signed(63, 15) then v_dyi := 63;
-                else                                 v_dyi := to_integer(v_dyy(5 downto 0)); end if;
+                -- dy = anchor - py (signed: the circle continues BELOW the anchor
+                -- until the per-column crest clip, so downslopes show a part-buried
+                -- round rim instead of a sheared base).
+                v_dya := resize(ba_anchor(L), 15) - signed(resize(r5_py, 15));
+                if v_dya(14) = '1' then v_dyu := unsigned(-v_dya);
+                else                    v_dyu := unsigned(v_dya); end if;
+                if v_dyu > 63 then v_dyi := 63;
+                else               v_dyi := to_integer(v_dyu(5 downto 0)); end if;
                 r6_dyi(L) <= to_unsigned(v_dyi, 6);
+                -- per-column crest clip: draw only strictly above the crest.
+                v_dyy := resize(-r5_ddL(L), 15);
                 -- placement: sparse random groups of 3 or 6 within 8-slot regions.
                 v_gh  := v_sl(8 downto 3) xor ('0' & v_sl(8 downto 4)) xor ("000" & v_sl(8 downto 6));
                 if v_gh(2) = '1' then v_len := 6; else v_len := 3; end if;
@@ -701,15 +764,13 @@ begin
             end loop;
 
             -----------------------------------------------------------------
-            -- s6b: base multiply + the two fan partial products (short carry
-            --      chains).  fanadd = fanadd(13:7)*128 + fanadd(6:0), so
-            --      sx*fanadd = phi*128 + plo (summed in s7).
+            -- s6b: base multiply + the fan gain multiply (both small).
             -----------------------------------------------------------------
             r6b_base <= r6_sx(9 downto 0) * r6_freqeff;               -- seamless base
-            r6b_phi  <= signed(resize(r6_sx, 15)) * r6_fanadd(13 downto 7);
-            r6b_plo  <= signed(resize(r6_sx, 15)) * signed(resize(unsigned(r6_fanadd(6 downto 0)), 8));
+            r6b_fan  <= r6_cos * signed('0' & d_fan);
+            r6b_glow <= r6_glow; r6b_shade <= r6_shade;
             r6b_py <= r6_py;
-            r6b_layer <= r6_layer; r6b_sky <= r6_sky; r6b_cl <= r6_cl; r6b_tex <= r6_tex;
+            r6b_layer <= r6_layer; r6b_sky <= r6_sky; r6b_cl <= r6_cl;
             -- s6b (bush): squared radial distance dx^2+dy^2 in its OWN stage (the
             --   multiplies are the tallest logic) -> compared in s7.
             for L in 0 to 2 loop
@@ -719,14 +780,13 @@ begin
             end loop;
 
             -----------------------------------------------------------------
-            -- s7: fanraw = phi*128 + plo ; phase = base + fanraw>>FANPOST
-            --     (fan signed: - widens, + narrows).
+            -- s7: phase = base + crest-fan phase (cos*fan >> FANSH; +cos ->
+            --     -sin derivative -> wider where the hill is tall).
             -----------------------------------------------------------------
             r7_phase <= unsigned(resize(signed(resize(r6b_base, 22))
-                        + resize(shift_right(resize(shift_left(resize(r6b_phi, 30), 7), 30)
-                                             + resize(r6b_plo, 30), FANPOST), 22), 14));
-            r7_py <= r6b_py;
-            r7_layer <= r6b_layer; r7_sky <= r6b_sky; r7_cl <= r6b_cl; r7_tex <= r6b_tex;
+                        + resize(shift_right(r6b_fan, FANSH), 22), 14));
+            r7_py <= r6b_py; r7_glow <= r6b_glow; r7_shade <= r6b_shade;
+            r7_layer <= r6b_layer; r7_sky <= r6b_sky; r7_cl <= r6b_cl;
             -- s7 (bush code): inside inner radius -> fill; annulus to outer -> even
             --   dark outline; else none.
             for L in 0 to 2 loop
@@ -739,27 +799,38 @@ begin
             end loop;
 
             -----------------------------------------------------------------
-            -- s8: stripe angle = phase + diagonal tilt(py>>TILTF) + sine curve.
+            -- s8: stripe angle = phase + 45-degree diagonal (per-layer line
+            --     accumulator) + sine curve.
             -----------------------------------------------------------------
             v_ang := signed(resize(r7_phase(9 downto 0), 13))
-                   + resize(shift_right(signed(resize(r7_py, 12)), TILTF), 13)
+                   + signed(resize(ydacc(r7_layer)(20 downto 11), 13))
                    + resize(shift_right(curve_sin, CURVESH), 13);
             r8_ang <= std_logic_vector(v_ang(9 downto 0));
-            r8_layer <= r7_layer; r8_sky <= r7_sky; r8_cl <= r7_cl; r8_tex <= r7_tex;
+            -- soft-edge threshold = 2^SOFTW px * freqeff, clamped 4..128 —
+            -- constant blend width in pixels at any K5/layer.
+            v_thu := shift_left(resize(d_freq, 14), SOFTW + r7_layer);
+            if    v_thu > to_unsigned(128, 14) then r8_thr <= to_unsigned(128, 8);
+            elsif v_thu < to_unsigned(4, 14)   then r8_thr <= to_unsigned(4, 8);
+            else                                    r8_thr <= resize(v_thu, 8);
+            end if;
+            r8_glow <= r7_glow; r8_shade <= r7_shade;
+            r8_layer <= r7_layer; r8_sky <= r7_sky; r8_cl <= r7_cl;
             r8_bcode <= r7_bcode;
 
             -----------------------------------------------------------------
             -- s9: stripe wave = triangle of the angle (sign picks colour A/B).
             -----------------------------------------------------------------
             r9_ssin <= tri10(unsigned(r8_ang));
-            r9_layer <= r8_layer; r9_sky <= r8_sky; r9_cl <= r8_cl; r9_tex <= r8_tex;
+            r9_thr  <= r8_thr;
+            r9_glow <= r8_glow; r9_shade <= r8_shade;
+            r9_layer <= r8_layer; r9_sky <= r8_sky; r9_cl <= r8_cl;
             r9_bcode <= r8_bcode;
 
             -----------------------------------------------------------------
             -- s10: assemble base colour.  A bush shows only when it is in front of
             --      the winning hill: layer L's bush needs the hill winner to be
             --      farther (sky, or a higher layer index).  Pick the frontmost such
-            --      bush; sky flag cleared so it stays opaque (video-sky) + textured.
+            --      bush; sky flag cleared so it stays opaque under video-sky.
             -----------------------------------------------------------------
             if (r9_sky = '1' or r9_layer >= 1) and r9_bcode(0) /= "00" then
                 v_bsel := r9_bcode(0);
@@ -770,35 +841,43 @@ begin
             else
                 v_bsel := "00";
             end if;
+            r10_shade <= (others => '0');       -- only stripe pixels shade
             if v_bsel = "10" then                                    -- bush outline
                 r10_y <= to_unsigned(BLINE_Y, 10); r10_u <= to_unsigned(BLINE_U, 10);
                 r10_v <= to_unsigned(BLINE_V, 10); r10_sky <= '0';
-            elsif v_bsel = "01" then                                 -- bush fill (textured)
+            elsif v_bsel = "01" then                                 -- bush fill
                 r10_y <= to_unsigned(BFILL_Y, 10); r10_u <= to_unsigned(BFILL_U, 10);
                 r10_v <= to_unsigned(BFILL_V, 10); r10_sky <= '0';
             elsif r9_sky = '1' then
                 r10_y <= sky_y; r10_u <= sky_u; r10_v <= sky_v; r10_sky <= '1';
             elsif r9_cl = '1' and s_creston = '1' then
                 r10_y <= gC_y(r9_layer); r10_u <= gC_u(r9_layer); r10_v <= gC_v(r9_layer); r10_sky <= '0';
-            elsif r9_ssin > to_signed(SOFT, 10) then
-                r10_y <= gB_y(r9_layer); r10_u <= gB_u(r9_layer); r10_v <= gB_v(r9_layer); r10_sky <= '0';
-            elsif r9_ssin < to_signed(-SOFT, 10) then
-                r10_y <= gA_y(r9_layer); r10_u <= gA_u(r9_layer); r10_v <= gA_v(r9_layer); r10_sky <= '0';
+            elsif r9_ssin > signed(resize(r9_thr, 10)) then
+                r10_y <= gB_y(r9_layer) + resize(r9_glow, 10);
+                r10_u <= gB_u(r9_layer); r10_v <= gB_v(r9_layer); r10_sky <= '0';
+                r10_shade <= r9_shade;
+            elsif r9_ssin < -signed(resize(r9_thr, 10)) then
+                r10_y <= gA_y(r9_layer) + resize(r9_glow, 10);
+                r10_u <= gA_u(r9_layer); r10_v <= gA_v(r9_layer); r10_sky <= '0';
+                r10_shade <= r9_shade;
             else
-                r10_y <= gM_y(r9_layer); r10_u <= gM_u(r9_layer); r10_v <= gM_v(r9_layer); r10_sky <= '0';
+                r10_y <= gM_y(r9_layer) + resize(r9_glow, 10);
+                r10_u <= gM_u(r9_layer); r10_v <= gM_v(r9_layer); r10_sky <= '0';
+                r10_shade <= r9_shade;
             end if;
-            r10_tex <= r9_tex;
 
             -----------------------------------------------------------------
-            -- s11: always-on watercolour wash over luma; OR, in Video Sky mode,
-            --      pass the incoming video through wherever the sky shows.
+            -- s11: crest-lit shading: y' = y - y*shade/64 (shade <= 40 ->
+            --      floor at 37.5% brightness; no underflow, no clamp needed).
+            --      In Video Sky mode, pass the input through on the sky.
             -----------------------------------------------------------------
             if r10_sky = '1' and s_vidsky = '1' then
                 s_io.y <= pipe(LATENCY - 1).y;
                 s_io.u <= pipe(LATENCY - 1).u;
                 s_io.v <= pipe(LATENCY - 1).v;
             else
-                s_io.y <= std_logic_vector(clamp10(signed(resize(r10_y, 12)) + resize(r10_tex, 12)));
+                v_shp := r10_y * r10_shade;
+                s_io.y <= std_logic_vector(r10_y - resize(v_shp(15 downto 6), 10));
                 s_io.u <= std_logic_vector(r10_u);
                 s_io.v <= std_logic_vector(r10_v);
             end if;
