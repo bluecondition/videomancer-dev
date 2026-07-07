@@ -1,0 +1,203 @@
+[program]
+program_id = "com.bluecondition.edgelab"
+program_version = "1.0.0"
+abi_version = ">=1.0,<2.0"
+program_name = "Edge Lab"
+author = "bluecondition"
+license = "GPL-3.0"
+categories = ["Process", "Edges"]
+program_type = "processing"
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+description = "Edge-detection lab: eight detectors from Roberts to Canny on one knob, with image cleanup, thickening and negative."
+url = "https://github.com/lzxindustries/videomancer-sdk"
+
+# --- Rotary Potentiometers (Knobs 1-6) ---
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Detector"
+value_labels = ["Roberts", "Prewitt", "Sobel", "Scharr", "Kirsch", "Laplace", "LoG", "Canny", "Phosphor"]
+initial_value_label = "Sobel"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 240
+display_min_value = 0
+display_max_value = 255
+name_label = "Threshold"
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 512
+display_min_value = -100
+display_max_value = 100
+name_label = "Brightness"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 256
+display_min_value = 0
+display_max_value = 400
+name_label = "Contrast"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Posterize"
+value_labels = ["Off", "128", "64", "32", "16", "8", "4", "2"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Thickness"
+value_labels = ["1 px", "2 px", "3 px", "5 px"]
+initial_value_label = "1 px"
+
+# --- Toggle Switches (7-11) ---
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Smooth"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Invert"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "View"
+value_labels = ["Edges", "Source"]
+initial_value_label = "Edges"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Overlay"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Output"
+value_labels = ["Binary", "Gradient"]
+initial_value_label = "Binary"
+
+# --- Linear Potentiometer (Slider) ---
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 1023
+display_min_value = 0
+display_max_value = 100
+name_label = "Mix"
+suffix_label = "%"
+
+# --- Presets ---
+
+[[preset]]
+name = "Sobel Classic"
+rotary_potentiometer_1 = 320
+rotary_potentiometer_2 = 240
+rotary_potentiometer_3 = 512
+rotary_potentiometer_4 = 256
+rotary_potentiometer_5 = 0
+rotary_potentiometer_6 = 0
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Canny Fine"
+rotary_potentiometer_1 = 850
+rotary_potentiometer_2 = 180
+rotary_potentiometer_3 = 512
+rotary_potentiometer_4 = 300
+rotary_potentiometer_5 = 0
+rotary_potentiometer_6 = 0
+toggle_switch_7 = 1
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Coloring Book"
+rotary_potentiometer_1 = 320
+rotary_potentiometer_2 = 280
+rotary_potentiometer_3 = 512
+rotary_potentiometer_4 = 320
+rotary_potentiometer_5 = 384
+rotary_potentiometer_6 = 384
+toggle_switch_7 = 1
+toggle_switch_8 = 1
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Ghost Trace"
+rotary_potentiometer_1 = 850
+rotary_potentiometer_2 = 200
+rotary_potentiometer_3 = 512
+rotary_potentiometer_4 = 256
+rotary_potentiometer_5 = 0
+rotary_potentiometer_6 = 128
+toggle_switch_7 = 1
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 1
+toggle_switch_11 = 0
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Gradient Field"
+rotary_potentiometer_1 = 448
+rotary_potentiometer_2 = 0
+rotary_potentiometer_3 = 512
+rotary_potentiometer_4 = 300
+rotary_potentiometer_5 = 0
+rotary_potentiometer_6 = 0
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 1
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Neon Compass"
+rotary_potentiometer_1 = 500
+rotary_potentiometer_2 = 320
+rotary_potentiometer_3 = 512
+rotary_potentiometer_4 = 340
+rotary_potentiometer_5 = 512
+rotary_potentiometer_6 = 128
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 1023
