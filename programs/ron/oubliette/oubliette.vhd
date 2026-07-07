@@ -331,36 +331,35 @@ architecture oubliette of program_top is
     signal s_bcd_q    : std_logic_vector(11 downto 0) := (others => '0');
 
     --------------------------------------------------------------------------
-    -- HUD character array (flip-flops so the update FSM can write several cells
-    -- per cycle).  Labels are fixed at init; digit cells are rewritten/frame.
+    -- HUD character RAM (block RAM, 128 x 7 - address bit 6 selects the top
+    -- context line, bits 5:0 the column).  Replacing the old flip-flop char
+    -- arrays kills two 28-way 7-bit read muxes (a recurring critical path)
+    -- and their write decoders.  The update FSM rewrites every cell - labels
+    -- included - once per frame during vblank, one cell per cycle.
     --------------------------------------------------------------------------
-    type t_hud is array (0 to C_HUDN - 1) of unsigned(6 downto 0);
-    signal s_hud : t_hud := (
-        0 => to_unsigned(G_H, 7),     1 => to_unsigned(G_P, 7),
-        3 => to_unsigned(G_D0, 7),    4 => to_unsigned(G_D0, 7),
-        5 => to_unsigned(G_SLASH, 7), 6 => to_unsigned(G_D0, 7),
-        7 => to_unsigned(G_D0, 7),    9 => to_unsigned(G_G, 7),
-        11 => to_unsigned(G_D0, 7),   12 => to_unsigned(G_D0, 7),
-        13 => to_unsigned(G_D0, 7),   15 => to_unsigned(G_L, 7),
-        16 => to_unsigned(G_V, 7),    18 => to_unsigned(G_D0, 7),
-        19 => to_unsigned(G_D0, 7),   21 => to_unsigned(G_D, 7),
-        23 => to_unsigned(G_D0, 7),   others => to_unsigned(G_SP, 7));
+    type t_hudram is array (0 to 127) of std_logic_vector(6 downto 0);
+    signal s_hudram : t_hudram := (others => (others => '0'));
+    attribute ram_style of s_hudram : signal is "block";
+    signal s_hr_we    : std_logic := '0';
+    signal s_hr_waddr : unsigned(6 downto 0) := (others => '0');
+    signal s_hr_wdata : std_logic_vector(6 downto 0) := (others => '0');
 
-    -- top context line (combat / create / game-over messages)
-    signal s_hudtop : t_hud := (others => to_unsigned(G_SP, 7));
-
-    -- HUD update FSM
-    type t_hu is (HU_IDLE, HU_REQ, HU_WAIT, HU_WR, HU_EHP_REQ, HU_EHP_WAIT, HU_TOP);
+    -- HUD update FSM: latch every displayed number's digits first (BCD ROM
+    -- reads), then stream the bottom bar and top line into the char RAM.
+    type t_hu is (HU_IDLE, HU_REQ, HU_WAIT, HU_LATCH, HU_BOT, HU_TOP);
     signal s_hu_state : t_hu := HU_IDLE;
-    signal s_hu_field : integer range 0 to 4 := 0;
-    signal s_hu_col   : integer range 0 to C_HUDN - 1 := 0;  -- top-line cursor
+    signal s_hu_field : integer range 0 to 5 := 0;
+    signal s_hu_col   : integer range 0 to C_HUDN - 1 := 0;
+    -- digit registers: 0,1=hp 2,3=maxhp 4,5,6=gold 7,8=level 9=depth 10,11=enemy hp
+    type t_dig is array (0 to 11) of integer range 0 to 9;
+    signal s_dig : t_dig := (others => 0);
 
     --------------------------------------------------------------------------
     -- Turn FSM (player move + greedy monster chase) + combat sub-FSM.
     --------------------------------------------------------------------------
     -- Turn FSM is split into short single-purpose states so no one cycle has a
     -- long combinational path (each runs in vblank with whole-frame slack).
-    type t_turn is (TS_IDLE, TS_PMON, TS_PSCAN, TS_PWAIT, TS_PMOVE,
+    type t_turn is (TS_IDLE, TS_PMON, TS_PSW, TS_PSCAN, TS_PWAIT, TS_PMOVE,
                     TS_MREQ, TS_MCALC, TS_MSTEP, TS_MBUMP, TS_MWAIT, TS_MAPPLY);
     signal s_ts : t_turn := TS_IDLE;
     signal s_mi : integer range 0 to C_MONS - 1 := 0;
@@ -386,19 +385,28 @@ architecture oubliette of program_top is
     -- a separate short cycle from the subtract/abs.
     signal s_adx, s_ady : integer range 0 to 64 := 0;
     signal s_ddxp, s_ddxn, s_ddyp, s_ddyn : std_logic := '0';
+    -- continuously registered "monster j stands on (s_tx,s_ty)" match vector -
+    -- the FSM scan states just OR these bits instead of doing 6 parallel 12-bit
+    -- coordinate compares deep inside the state-decode tree (was ~13 levels).
+    signal s_mmatch : std_logic_vector(0 to C_MONS - 1) := (others => '0');
+    -- per-slot spawn-enable mask, precomputed at generation start so GN_MON
+    -- does no depth arithmetic.
+    signal s_mon_en : std_logic_vector(0 to C_MONS - 1) := (others => '0');
     signal s_step_prev : std_logic := '0';
     signal s_new_prev  : std_logic := '0';
     signal s_turn_pending : std_logic := '0';
     signal s_sw_new : std_logic := '0';
 
-    -- combat resolves over two short cycles (player phase, then monster phase)
     -- combat resolves one arithmetic op per cycle (turn-based: latency is free,
     -- and every cycle's combinational path stays short for full-clock timing).
-    type t_cs is (CS_INIT, CS_INPUT, CS_PLAYER, CS_PHIT, CS_POUT, CS_MONSTER, CS_MHIT);
+    type t_cs is (CS_INIT, CS_INPUT, CS_PLAYER, CS_PHIT, CS_POUT, CS_LVL,
+                  CS_MONSTER, CS_MHIT);
     signal s_cs : t_cs := CS_INPUT;
     signal s_cb_act_l : integer range 0 to 4 := 0;
     signal s_dmg, s_mdmg : integer range 0 to 63 := 0;
     signal s_mon_dead : std_logic := '0';
+    -- experience: kills award XP; level-up at level*8 XP (shift, no multiply)
+    signal s_xp : unsigned(7 downto 0) := (others => '0');
     -- context name glyphs pre-resolved to registers so the HUD never does a
     -- name-table lookup on the (timing-critical) HUD write path.
     type t_g3 is array (0 to 2) of integer range 0 to 63;
@@ -590,6 +598,21 @@ begin
         end if;
     end process;
 
+    -- Continuous monster-at-target matcher: registered every cycle, consumed
+    -- by the turn FSM one state later (a wait state guarantees freshness).
+    p_mmatch : process(clk)
+    begin
+        if rising_edge(clk) then
+            for j in 0 to C_MONS - 1 loop
+                if s_mactive(j) = '1' and s_mx(j) = s_tx and s_my(j) = s_ty then
+                    s_mmatch(j) <= '1';
+                else
+                    s_mmatch(j) <= '0';
+                end if;
+            end loop;
+        end if;
+    end process;
+
     --------------------------------------------------------------------------
     -- Master game FSM: CREATE -> EXPLORE <-> COMBAT, EXPLORE/COMBAT -> GAMEOVER.
     -- A turn (player move + greedy monster chase) runs serially during vblank so
@@ -605,7 +628,8 @@ begin
         variable v_occ : std_logic;
         variable cls : integer range 0 to 3;
         variable mt  : integer range 0 to 5;
-        variable patk, pdef, matk, mdef : integer range 0 to 31;
+        variable v_xp  : integer range 0 to 511;
+        variable v_thr : integer range 0 to 255;
         variable monhp : integer range -64 to 255;
         variable dmg, mdmg : integer range -64 to 63;
         variable php, newhp : integer range -64 to 255;
@@ -627,6 +651,15 @@ begin
             s_gst   <= GN_CLEAR;
             s_gensp <= '1';
             s_game  <= G_GEN;
+            -- spawn-enable mask: slot i gets a monster if i < d+1 (and its room
+            -- exists) - resolved here so GN_MON does no depth arithmetic.
+            for i in 0 to C_MONS - 1 loop
+                if i < d + 1 and i + 3 < C_NROOM then
+                    s_mon_en(i) <= '1';
+                else
+                    s_mon_en(i) <= '0';
+                end if;
+            end loop;
         end procedure;
     begin
         if rising_edge(clk) then
@@ -696,6 +729,7 @@ begin
                             s_pdef  <= C_CLS_DEF(cls);
                             s_gold  <= (others => '0');
                             s_level <= to_unsigned(1, 5);
+                            s_xp    <= (others => '0');
                             s_ts <= TS_IDLE;
                             start_gen(1);          -- generate dungeon level 1
                         end if;
@@ -727,6 +761,7 @@ begin
                                 s_rx1 <= to_unsigned(v_rx0 + v_rw - 1, 6);
                                 s_ry1 <= to_unsigned(v_ry0 + v_rh - 1, 6);
                                 s_rx0 <= to_unsigned(v_rx0, 6);
+                                s_ry0 <= to_unsigned(v_ry0, 6);
                                 s_cx  <= to_unsigned(v_rx0, 6);
                                 s_cy  <= to_unsigned(v_ry0, 6);
                                 s_rcx(s_gi) <= to_unsigned(v_rx0 + v_rw / 2, 6);
@@ -823,12 +858,13 @@ begin
                                 end case;
                             when GN_MON =>
                                 -- monsters in rooms 3..NROOM-1 (spawn/weapon/chest rooms
-                                -- 0..2 stay clear), one per room, capped by depth.
+                                -- 0..2 stay clear), one per room; count via the mask
+                                -- precomputed in start_gen (no depth arithmetic here).
                                 v_type := to_integer(unsigned(s_glfsr(2 downto 0)));
                                 if v_type > 5 then v_type := v_type - 6; end if;
                                 v_lo := s_gi + 3;                 -- room index, clamped
                                 if v_lo > C_NROOM - 1 then v_lo := C_NROOM - 1; end if;
-                                if s_gi < to_integer(s_depth) + 1 and s_gi + 3 < C_NROOM then
+                                if s_mon_en(s_gi) = '1' then
                                     s_mactive(s_gi) <= '1';
                                     s_mx(s_gi) <= s_rcx(v_lo);
                                     s_my(s_gi) <= s_rcy(v_lo);
@@ -874,13 +910,14 @@ begin
                                 s_tx <= to_unsigned(v_tx, 6);
                                 s_ty <= to_unsigned(v_ty, 6);
                                 s_g_raddr <= to_unsigned(v_ty, 6) & to_unsigned(v_tx, 6);
-                                s_ts <= TS_PSCAN;
+                                s_ts <= TS_PSW;
+                            when TS_PSW =>
+                                s_ts <= TS_PSCAN;   -- let p_mmatch see the new target
                             when TS_PSCAN =>
                                 -- attack if a monster occupies the target cell
                                 v_occ := '0';
                                 for j in 0 to C_MONS - 1 loop
-                                    if s_mactive(j) = '1'
-                                       and s_mx(j) = s_tx and s_my(j) = s_ty then
+                                    if s_mmatch(j) = '1' then
                                         v_occ := '1';
                                         s_ctarget <= j;
                                         s_cmt  <= s_mtype(j);
@@ -989,11 +1026,10 @@ begin
                                     s_ts <= TS_MWAIT;
                                 end if;
                             when TS_MWAIT =>
-                                -- occupancy scan in its own cycle (short path)
+                                -- occupancy = any registered match except self
                                 v_occ := '0';
                                 for j in 0 to C_MONS - 1 loop
-                                    if j /= s_mi and s_mactive(j) = '1'
-                                       and s_mx(j) = s_tx and s_my(j) = s_ty then
+                                    if j /= s_mi and s_mmatch(j) = '1' then
                                         v_occ := '1';
                                     end if;
                                 end loop;
@@ -1046,15 +1082,29 @@ begin
                                 -- outcome branch (kill / flee / counterattack)
                                 if s_mon_dead = '1' then
                                     s_mactive(s_ctarget) <= '0';
-                                    s_gold <= s_gold + s_cmxp;
-                                    s_game <= G_EXPLORE;
-                                    s_cs <= CS_INPUT;
+                                    v_xp := to_integer(s_xp) + s_cmxp;
+                                    if v_xp > 255 then v_xp := 255; end if;
+                                    s_xp <= to_unsigned(v_xp, 8);
+                                    s_cs <= CS_LVL;
                                 elsif s_cb_act_l = 4 and s_clfsr(2) = '1' then
                                     s_game <= G_EXPLORE;             -- fled
                                     s_cs <= CS_INPUT;
                                 else
                                     s_cs <= CS_MONSTER;
                                 end if;
+                            when CS_LVL =>
+                                -- level-up when xp >= level*8 (a shift): stats up,
+                                -- full heal - then back to exploring.
+                                v_thr := to_integer(s_level) * 8;
+                                if to_integer(s_xp) >= v_thr and s_level < 30 then
+                                    s_xp    <= to_unsigned(to_integer(s_xp) - v_thr, 8);
+                                    s_level <= s_level + 1;
+                                    s_maxhp <= s_maxhp + 2;
+                                    s_hp    <= s_maxhp + 2;
+                                    if s_patk < 20 then s_patk <= s_patk + 1; end if;
+                                end if;
+                                s_game <= G_EXPLORE;
+                                s_cs <= CS_INPUT;
                             when CS_MONSTER =>
                                 -- monster damage value (one cycle of arithmetic)
                                 var2 := to_integer(unsigned(s_clfsr(4 downto 3)));
@@ -1099,10 +1149,10 @@ begin
 
     p_hud : process(clk)
         variable v_val : integer range 0 to 4095;
-        variable hu, te, ones : integer range 0 to 15;
         variable v_g : integer range 0 to 127;
     begin
         if rising_edge(clk) then
+            s_hr_we <= '0';
             case s_hu_state is
                 when HU_IDLE =>
                     if s_vsync_pulse = '1' then
@@ -1115,51 +1165,73 @@ begin
                         when 1 => v_val := to_integer(s_maxhp);
                         when 2 => v_val := to_integer(s_gold);
                         when 3 => v_val := to_integer(s_level);
-                        when others => v_val := to_integer(s_depth);
+                        when 4 => v_val := to_integer(s_depth);
+                        when others => v_val := to_integer(s_cmhp);
                     end case;
                     if v_val > 1023 then v_val := 1023; end if;
                     s_bcd_addr <= to_unsigned(v_val, 10);
                     s_hu_state <= HU_WAIT;
                 when HU_WAIT =>
-                    s_hu_state <= HU_WR;
-                when HU_WR =>
-                    hu := to_integer(unsigned(s_bcd_q(11 downto 8)));
-                    te := to_integer(unsigned(s_bcd_q(7 downto 4)));
-                    ones := to_integer(unsigned(s_bcd_q(3 downto 0)));
+                    s_hu_state <= HU_LATCH;
+                when HU_LATCH =>
                     case s_hu_field is
-                        when 0 =>   -- HP  -> cols 3,4
-                            s_hud(3) <= to_unsigned(G_D0 + te, 7);
-                            s_hud(4) <= to_unsigned(G_D0 + ones, 7);
-                        when 1 =>   -- MAXHP -> 6,7
-                            s_hud(6) <= to_unsigned(G_D0 + te, 7);
-                            s_hud(7) <= to_unsigned(G_D0 + ones, 7);
-                        when 2 =>   -- GOLD -> 11,12,13
-                            s_hud(11) <= to_unsigned(G_D0 + hu, 7);
-                            s_hud(12) <= to_unsigned(G_D0 + te, 7);
-                            s_hud(13) <= to_unsigned(G_D0 + ones, 7);
-                        when 3 =>   -- LEVEL -> 18,19
-                            s_hud(18) <= to_unsigned(G_D0 + te, 7);
-                            s_hud(19) <= to_unsigned(G_D0 + ones, 7);
-                        when others =>   -- DEPTH -> 23
-                            s_hud(23) <= to_unsigned(G_D0 + ones, 7);
+                        when 0 =>
+                            s_dig(0) <= to_integer(unsigned(s_bcd_q(7 downto 4)));
+                            s_dig(1) <= to_integer(unsigned(s_bcd_q(3 downto 0)));
+                        when 1 =>
+                            s_dig(2) <= to_integer(unsigned(s_bcd_q(7 downto 4)));
+                            s_dig(3) <= to_integer(unsigned(s_bcd_q(3 downto 0)));
+                        when 2 =>
+                            s_dig(4) <= to_integer(unsigned(s_bcd_q(11 downto 8)));
+                            s_dig(5) <= to_integer(unsigned(s_bcd_q(7 downto 4)));
+                            s_dig(6) <= to_integer(unsigned(s_bcd_q(3 downto 0)));
+                        when 3 =>
+                            s_dig(7) <= to_integer(unsigned(s_bcd_q(7 downto 4)));
+                            s_dig(8) <= to_integer(unsigned(s_bcd_q(3 downto 0)));
+                        when 4 =>
+                            s_dig(9) <= to_integer(unsigned(s_bcd_q(3 downto 0)));
+                        when others =>
+                            s_dig(10) <= to_integer(unsigned(s_bcd_q(7 downto 4)));
+                            s_dig(11) <= to_integer(unsigned(s_bcd_q(3 downto 0)));
                     end case;
-                    if s_hu_field = 4 then
-                        s_hu_state <= HU_EHP_REQ;
+                    if s_hu_field = 5 then
+                        s_hu_col <= 0;
+                        s_hu_state <= HU_BOT;
                     else
                         s_hu_field <= s_hu_field + 1;
                         s_hu_state <= HU_REQ;
                     end if;
-                when HU_EHP_REQ =>
-                    s_bcd_addr <= resize(s_cmhp, 10);
-                    s_hu_state <= HU_EHP_WAIT;
-                when HU_EHP_WAIT =>
-                    s_hu_col <= 0;
-                    s_hu_state <= HU_TOP;
+                when HU_BOT =>
+                    -- bottom status bar, one cell/cycle: "HP tt/oo G hhh LV ll D d"
+                    case s_hu_col is
+                        when 0 => v_g := G_H;  when 1 => v_g := G_P;
+                        when 3 => v_g := G_D0 + s_dig(0);
+                        when 4 => v_g := G_D0 + s_dig(1);
+                        when 5 => v_g := G_SLASH;
+                        when 6 => v_g := G_D0 + s_dig(2);
+                        when 7 => v_g := G_D0 + s_dig(3);
+                        when 9 => v_g := G_G;
+                        when 11 => v_g := G_D0 + s_dig(4);
+                        when 12 => v_g := G_D0 + s_dig(5);
+                        when 13 => v_g := G_D0 + s_dig(6);
+                        when 15 => v_g := G_L; when 16 => v_g := G_V;
+                        when 18 => v_g := G_D0 + s_dig(7);
+                        when 19 => v_g := G_D0 + s_dig(8);
+                        when 21 => v_g := G_D;
+                        when 23 => v_g := G_D0 + s_dig(9);
+                        when others => v_g := G_SP;
+                    end case;
+                    s_hr_waddr <= to_unsigned(s_hu_col, 7);          -- bit6=0: bottom
+                    s_hr_wdata <= std_logic_vector(to_unsigned(v_g, 7));
+                    s_hr_we    <= '1';
+                    if s_hu_col = C_HUDN - 1 then
+                        s_hu_col <= 0;
+                        s_hu_state <= HU_TOP;
+                    else
+                        s_hu_col <= s_hu_col + 1;
+                    end if;
                 when HU_TOP =>
-                    -- lay out the top context line one cell per cycle (whole-frame
-                    -- slack in vblank), so no single cycle has a 28-wide deep mux.
-                    te := to_integer(unsigned(s_bcd_q(7 downto 4)));
-                    ones := to_integer(unsigned(s_bcd_q(3 downto 0)));
+                    -- top context line, one cell/cycle.
                     v_g := G_SP;
                     case s_game is
                         when G_CREATE =>      -- "CLASS xxx  S7=GO"
@@ -1184,8 +1256,8 @@ begin
                                 when 7 => v_g := s_monn(1);
                                 when 8 => v_g := s_monn(2);
                                 when 10 => v_g := G_H; when 11 => v_g := G_P;
-                                when 13 => v_g := G_D0 + te;
-                                when 14 => v_g := G_D0 + ones;
+                                when 13 => v_g := G_D0 + s_dig(10);
+                                when 14 => v_g := G_D0 + s_dig(11);
                                 when 16 => v_g := s_actn(0);
                                 when 17 => v_g := s_actn(1);
                                 when 18 => v_g := s_actn(2);
@@ -1232,13 +1304,30 @@ begin
                                 v_g := G_SP;
                             end if;
                     end case;
-                    s_hudtop(s_hu_col) <= to_unsigned(v_g, 7);
+                    s_hr_waddr <= to_unsigned(64 + s_hu_col, 7);     -- bit6=1: top line
+                    s_hr_wdata <= std_logic_vector(to_unsigned(v_g, 7));
+                    s_hr_we    <= '1';
                     if s_hu_col = C_HUDN - 1 then
                         s_hu_state <= HU_IDLE;
                     else
                         s_hu_col <= s_hu_col + 1;
                     end if;
             end case;
+        end if;
+    end process;
+
+    --------------------------------------------------------------------------
+    -- HUD char RAM: 1 write port (update FSM, vblank) + 1 registered read port
+    -- (render, addr = top-flag & column).  A block RAM, so the render-side
+    -- glyph fetch is a clean registered read with no wide mux.
+    --------------------------------------------------------------------------
+    p_hudram : process(clk)
+    begin
+        if rising_edge(clk) then
+            if s_hr_we = '1' then
+                s_hudram(to_integer(s_hr_waddr)) <= s_hr_wdata;
+            end if;
+            s1_glyph <= unsigned(s_hudram(to_integer(s0_hud_top & s0_hud_col)));
         end if;
     end process;
 
@@ -1285,12 +1374,12 @@ begin
             -- HUD strips (screen space, 16 px glyph cells): top context line at
             -- the top margin, bottom status bar at the bottom.
             if cur_y >= C_HUD_MARG and cur_y < C_HUD_MARG + C_HUD_H
-               and cur_x < C_HUDN * 16 then
+               and cur_x < C_HUDN * (2 ** C_HUD_LOG2) then
                 v_inhud := '1';
                 v_yoff := cur_y - C_HUD_MARG;
                 s0_hud_top <= '1';
             elsif cur_y >= s_hud_y0 and (cur_y - s_hud_y0) < C_HUD_H
-                  and cur_x < C_HUDN * 16 then
+                  and cur_x < C_HUDN * (2 ** C_HUD_LOG2) then
                 v_inhud := '1';
                 v_yoff := cur_y - s_hud_y0;
                 s0_hud_top <= '0';
@@ -1402,15 +1491,10 @@ begin
     --   S1 glyph fetch  ->  S2 font ROM read  ->  S3/S4 carry to colour.
     --------------------------------------------------------------------------
     p_hud_pipe : process(clk)
-        variable v_idx : integer range 0 to 63;
         variable v_faddr : integer range 0 to C_FROM_DEPTH - 1;
     begin
         if rising_edge(clk) then
-            -- S1: glyph fetch from the active HUD char array (clamped index).
-            v_idx := to_integer(s0_hud_col);
-            if v_idx > C_HUDN - 1 then v_idx := C_HUDN - 1; end if;
-            if s0_hud_top = '1' then s1_glyph <= s_hudtop(v_idx);
-            else                     s1_glyph <= s_hud(v_idx); end if;
+            -- S1: carries (the glyph itself is fetched by p_hudram in parallel).
             s1_hud_active <= s0_hud_active;
             s1_frow <= s0_frow; s1_fcol <= s0_fcol;
 
