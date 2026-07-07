@@ -1,0 +1,210 @@
+# Orbifold — iterated fract-ring rosette fractal.
+#
+# The classic two-line shader — uv = fract(uv * k); ring if t < |uv| < t+w —
+# iterated across 6 power-of-two scales.  Interlocking scallop rings and
+# quatrefoil rosettes with a triangle-wave rainbow, continuous self-similar
+# zoom, and an optional live-video background.
+
+[program]
+program_id = "com.bluecondition.orbifold"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+program_name = "Orbifold"
+author = "bluecondition"
+license = "GPL-3.0"
+categories = ["Pattern", "Generative", "Demo"]
+program_type = "synthesis"
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+description = "Iterated fract-ring fractal: interlocking rosette rings across 6 zoomable scales."
+url = "https://github.com/bluecondition/videomancer-dev"
+
+# --- Rotary Potentiometers (Knobs 1-6) ---
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Scale"
+value_labels = ["Huge", "Large", "Medium", "Small"]
+initial_value_label = "Large"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 490
+name_label = "Radius"
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 120
+name_label = "Thickness"
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Depth"
+value_labels = ["1", "2", "3", "4", "5", "6"]
+initial_value_label = "6"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 0
+display_min_value = 0
+display_max_value = 255
+name_label = "Hue"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 0
+display_min_value = 0
+display_max_value = 100
+name_label = "Zoom Speed"
+suffix_label = "%"
+
+# --- Toggle Switches (7-11, binary) ---
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Centres"
+value_labels = ["Corners", "Middles"]
+initial_value_label = "Middles"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Fill"
+value_labels = ["Rings", "Discs"]
+initial_value_label = "Rings"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Background"
+value_labels = ["Black", "Video"]
+initial_value_label = "Black"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Shape"
+value_labels = ["Circles", "Squares"]
+initial_value_label = "Circles"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Palette"
+value_labels = ["Rainbow", "Phosphor"]
+initial_value_label = "Rainbow"
+
+# --- Linear Potentiometer (Fader 12) ---
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 1023
+display_min_value = 0
+display_max_value = 100
+name_label = "Zoom"
+suffix_label = "%"
+
+# --- Presets ---
+
+[[preset]]
+name = "Rosette Wall"
+rotary_potentiometer_1 = 300       # Large (256 px)
+rotary_potentiometer_2 = 490
+rotary_potentiometer_3 = 120
+rotary_potentiometer_4 = 1023      # full depth
+rotary_potentiometer_5 = 0
+rotary_potentiometer_6 = 0
+toggle_switch_7 = 1                # middles (full rosette rings)
+toggle_switch_8 = 0                # rings
+toggle_switch_9 = 0                # black
+toggle_switch_10 = 0
+toggle_switch_11 = 0               # rainbow
+linear_potentiometer_12 = 1023     # zoomed fully in
+
+[[preset]]
+name = "Infinite Zoom"
+rotary_potentiometer_1 = 300
+rotary_potentiometer_2 = 490
+rotary_potentiometer_3 = 110
+rotary_potentiometer_4 = 1023
+rotary_potentiometer_5 = 128
+rotary_potentiometer_6 = 320       # steady zoom
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Polka Bloom"
+rotary_potentiometer_1 = 600       # Medium (128 px)
+rotary_potentiometer_2 = 420
+rotary_potentiometer_3 = 380
+rotary_potentiometer_4 = 800       # 5 levels
+rotary_potentiometer_5 = 400
+rotary_potentiometer_6 = 60        # slow drift
+toggle_switch_7 = 1                # cell middles
+toggle_switch_8 = 1                # filled discs
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 880      # a touch zoomed out
+
+[[preset]]
+name = "Phosphor Lace"
+rotary_potentiometer_1 = 800       # Small (64 px)
+rotary_potentiometer_2 = 700
+rotary_potentiometer_3 = 180
+rotary_potentiometer_4 = 1023
+rotary_potentiometer_5 = 0
+rotary_potentiometer_6 = 100
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 1               # phosphor mono
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Video Halo"
+rotary_potentiometer_1 = 300
+rotary_potentiometer_2 = 490
+rotary_potentiometer_3 = 120
+rotary_potentiometer_4 = 1023
+rotary_potentiometer_5 = 0
+rotary_potentiometer_6 = 0
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 1                # live video behind the rings
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Tile Works"
+rotary_potentiometer_1 = 600       # Medium (128 px)
+rotary_potentiometer_2 = 490
+rotary_potentiometer_3 = 140
+rotary_potentiometer_4 = 1023      # full depth
+rotary_potentiometer_5 = 300
+rotary_potentiometer_6 = 80        # slow zoom
+toggle_switch_7 = 1                # middles -> concentric square frames
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 1               # squares
+toggle_switch_11 = 0
+linear_potentiometer_12 = 900
