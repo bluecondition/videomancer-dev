@@ -24,9 +24,9 @@
 --   K2 Streak Width  (fill fraction of each vertical bar; high = fat bars)
 --   K3 Saturation    (chroma intensity of the jewel palette)
 --   K4 Palette       (Jewel / Neon / Vaporwave / Mono)
---   K5 Channel Shift (base chroma-separation fringe amount)
+--   K5 Line Spacing  (vertical bar pitch: fully spaced out -> very tight)
 --   K6 Filaments     (density of the fine white contour veins)
---   S7 Channel Sep   (RGB-style U/V fringe on/off; amount = K5 + chaos)
+--   S7 Channel Sep   (RGB-style U/V fringe on/off; amount rides P12)
 --   S8 Hot Zones     (blown-white bloom cores at the brightest source spots)
 --   S9 Drips         (mass bleeds downward in the lower frame)
 --   S10 Compress     (block/scanline JPEG artifacting + grain)
@@ -60,8 +60,7 @@ architecture glitchscape of program_top is
     constant TEAL_U : unsigned(9 downto 0) := to_unsigned(224, 10);   -- = Cr
     constant TEAL_V : unsigned(9 downto 0) := to_unsigned(604, 10);   -- = Cb
 
-    constant PITCH_W : integer := 4;                    -- bar pitch = 2^4 = 16 px
-    constant BAR_W   : integer := 11;                   -- bar fill (px of 16, fixed)
+    -- bar pitch (line spacing) is runtime, set by K5 -> s_phw / s_pmask / s_barw.
 
     --------------------------------------------------------------------------
     -- Jewel-tone bar palettes.  Indexed 0..7 by a per-bar column hash.  Only
@@ -132,6 +131,9 @@ architecture glitchscape of program_top is
     signal s_mask    : unsigned(9 downto 0) := to_unsigned(300,10);   -- mass key
     signal s_blk     : unsigned(9 downto 0) := to_unsigned(64,10);    -- contrast black point
     signal s_satsel  : unsigned(2 downto 0) := to_unsigned(3,3);      -- saturation step
+    signal s_phw     : integer range 2 to 6 := 4;                    -- K5 bar pitch = 2^phw px
+    signal s_pmask   : unsigned(6 downto 0) := to_unsigned(15,7);    -- pitch-1 (phase mask)
+    signal s_barw    : unsigned(6 downto 0) := to_unsigned(12,7);    -- bar fill width (3/4 pitch)
     signal s_palsel  : unsigned(1 downto 0) := (others => '0');       -- palette select
     signal s_fildens : unsigned(5 downto 0) := (others => '0');       -- filament gate
 
@@ -222,7 +224,7 @@ begin
     --------------------------------------------------------------------------
     p_position : process(clk)
         variable v_h_edge, v_v_edge : std_logic;
-        variable v_chaos, v_chr : integer;
+        variable v_chaos, v_k5, v_phw, v_pit : integer;
     begin
         if rising_edge(clk) then
             prev_hsync_n <= data_in.hsync_n;
@@ -268,6 +270,15 @@ begin
                 s_mask   <= unsigned(registers_in(0)(9 downto 0));          -- K1 Mass Key
                 s_blk    <= resize(unsigned(registers_in(1)(9 downto 2)), 10); -- K2 Contrast: black point 0..255
                 s_satsel <= unsigned(registers_in(2)(9 downto 7));          -- K3 saturation step
+                -- K5 Line Spacing: bar pitch 2^phw px, spaced (64) -> tight (4).
+                -- Higher K5 = tighter.  Fill stays ~3/4 of pitch so the bar/gap
+                -- ratio holds across the whole range.
+                v_k5  := to_integer(unsigned(registers_in(4)(9 downto 7)));  -- 0..7
+                v_phw := 6 - (v_k5 + 1) / 2;                                 -- 6..2
+                v_pit := 2 ** v_phw;                                         -- 64..4
+                s_phw   <= v_phw;
+                s_pmask <= to_unsigned(v_pit - 1, 7);
+                s_barw  <= to_unsigned(v_pit - v_pit / 4, 7);               -- 3/4 fill
                 s_palsel <= unsigned(registers_in(3)(9 downto 8));          -- K4 palette
                 s_fildens<= unsigned(registers_in(5)(9 downto 4));          -- K6 filament gate 0..63
 
@@ -283,9 +294,7 @@ begin
                 s_riplsh  <= v_chaos / 256;                                -- 0..2
                 s_jitmsk  <= to_unsigned((2 ** (2 + v_chaos / 256)) - 1, 6); -- 3..15
                 if registers_in(6)(0) = '1' then
-                    v_chr := to_integer(unsigned(registers_in(4)(9 downto 6)))/2 + v_chaos/256; -- K5 + chaos
-                    if v_chr > CHR_MAX then v_chr := CHR_MAX; end if;
-                    s_chroff <= v_chr;
+                    s_chroff <= 1 + v_chaos / 128;                          -- 1..8, rides P12
                 else
                     s_chroff <= 0;
                 end if;
@@ -391,12 +400,12 @@ begin
             v_field := resize(r4_px, 14)
                      + resize(r4_disp, 14)
                      + unsigned(resize(r4_rip + 1024, 14));   -- bias rip positive
-            v_phase := resize(v_field(PITCH_W - 1 downto 0), 7);
-            v_bar   := shift_right(v_field, PITCH_W);
+            v_phase := v_field(6 downto 0) and s_pmask;          -- v_field mod pitch
+            v_bar   := shift_right(v_field, s_phw);
             v_hash  := v_bar(2 downto 0) xor v_bar(5 downto 3) xor v_bar(8 downto 6);
             r5_idx  <= to_integer(v_hash);
 
-            if v_phase < to_unsigned(BAR_W, 7) then r5_streak <= '1'; else r5_streak <= '0'; end if;
+            if v_phase < s_barw then r5_streak <= '1'; else r5_streak <= '0'; end if;
 
             -- mass membership: crushed luma above (key - drip relief), with a
             -- column-stable edge fray + per-row jitter so the top edge tears.
