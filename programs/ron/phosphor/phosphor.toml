@@ -9,10 +9,18 @@ categories = ["Edges"]
 program_type = "processing"
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
-description = "Rainbow edges. K1 W, K2 thr, K3 noise, K4 poster, K5 contrast, K6 curve, S7 key, S8 curve en."
+description = "Rainbow edges. P12 W, K1 color, K2 thr, K3 noise, K4 postr, K5 contr, K6 curve, S7 key, S8 curve, S9 smth, S10 med, S11 rev."
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_1"
+name_label = "Color"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 6
+initial_value = 0
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
 name_label = "Band W"
 control_mode = "linear"
 display_min_value = 1
@@ -35,7 +43,7 @@ name_label = "Noise"
 control_mode = "linear"
 display_min_value = 1
 display_max_value = 16
-initial_value = 192
+initial_value = 0
 suffix_label = "px"
 
 [[parameter]]
@@ -61,9 +69,8 @@ parameter_id = "rotary_potentiometer_6"
 name_label = "Curve"
 control_mode = "linear"
 display_min_value = 0
-display_max_value = 100
+display_max_value = 3
 initial_value = 256
-suffix_label = "%"
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
@@ -74,5 +81,23 @@ initial_value_label = "Off"
 [[parameter]]
 parameter_id = "toggle_switch_8"
 name_label = "Curve En"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Smooth"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Median"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Reverse"
 value_labels = ["Off", "On"]
 initial_value_label = "Off"
