@@ -28,14 +28,14 @@
 -- Background is black or a dark tint; S9 keys incoming video into the black areas.
 --
 -- Controls: K1 Color, K2 Change Rate, K3 Number Set, K4 Size (smooth font
---           scale; brightness is always full and uniform across planes),
---           K5 Spacing (gap between numbers, font size unchanged: pitch step
---           = font step * RT via the vblank multiply chain), K6 Glow (a few
---           SCREEN pixels of phosphor haze fading with true screen distance,
---           via a 9-tap window on the composited lit mask -- independent of
---           digit size), S7 Luma Mod, S8 Background, S9 Video, S10 Font,
---           S11 Invert, P12 Zoom.  K2 at 0% freezes the digits (no Animate
---           switch).
+--           scale; brightness is uniform across planes), K5 Spacing (gap
+--           between numbers, font size unchanged: pitch step = font step *
+--           RT via the vblank multiply chain), K6 Glow = ENERGY: digits idle
+--           at 50% brightness, K6 drives them to 100% AND draws a 3-ring
+--           screen-space halo at 75/50/25% of the digit brightness (window
+--           on the composited lit mask -- independent of digit size),
+--           S7 Luma Mod, S8 Background, S9 Video, S10 Font, S11 Invert,
+--           P12 Zoom.  K2 at 0% freezes the digits (no Animate switch).
 --
 -- Luma Mod (S7): the planes become a SIZE LADDER instead of a zoom envelope
 -- (back rung pinned at the far wall; others at 1/4, 1/2, full of the
@@ -220,22 +220,6 @@ architecture ziffern of program_top is
         return r;
     end function;
 
-    -- signed variant for chroma offsets (arithmetic shifts around 512)
-    function scale8s(val : signed(10 downto 0); sel : unsigned(2 downto 0)) return signed is
-        variable r : signed(10 downto 0);
-    begin
-        case sel is
-            when "000" => r := shift_right(val, 3);
-            when "001" => r := shift_right(val, 2);
-            when "010" => r := shift_right(val, 2) + shift_right(val, 3);
-            when "011" => r := shift_right(val, 1);
-            when "100" => r := shift_right(val, 1) + shift_right(val, 3);
-            when "101" => r := shift_right(val, 1) + shift_right(val, 2);
-            when "110" => r := shift_right(val, 1) + shift_right(val, 2) + shift_right(val, 3);
-            when others => r := val;
-        end case;
-        return r;
-    end function;
 
     --------------------------------------------------------------------------
     -- Knob / switch reads
@@ -305,18 +289,16 @@ architecture ziffern of program_top is
     signal s_seed  : unsigned(15 downto 0) := (others => '0');
     signal s_T     : unsigned(23 downto 0) := (others => '0');
 
+    signal s_ny_raw : unsigned(9 downto 0) := (others => '0');  -- staged hue Y (LUT mux only)
     signal s_num_y, s_num_u, s_num_v : unsigned(9 downto 0) := (others => '0');
     signal s_bg_y,  s_bg_u,  s_bg_v  : unsigned(9 downto 0) := (others => '0');
-    signal s_glow1_y, s_glow2_y, s_glow3_y, s_glow4_y
+    signal s_glow1_y, s_glow2_y, s_glow3_y
                        : unsigned(9 downto 0) := (others => '0');
-    -- glow chroma scaled toward neutral with K6: without this the halo's
-    -- full-saturation U/V dominates the RGB conversion at any Y and the
-    -- knob has no visible range
-    signal s_glow_u, s_glow_v : unsigned(9 downto 0) := C_MID;
     signal s_glow_on : std_logic := '0';
 
     -- filtered zoom position (Q10.6): eases toward (1023-P12)<<6 each frame
     signal s_zoomf  : unsigned(16 downto 0) := (others => '0');
+    signal s_ztgt   : unsigned(16 downto 0) := (others => '0');  -- staged knob target
 
     -- sequential zoom multiply (cz*delta -> per-plane cell size)
     signal s_zprod  : t_zparr := (others => (others => '0'));
@@ -358,6 +340,8 @@ architecture ziffern of program_top is
     type t_lvl2  is array (0 to NP - 1) of std_logic_vector(1 downto 0);
     type t_lvlbuf is array (0 to 255) of std_logic_vector(1 downto 0);
     signal r_colprev : t_sarr := (others => (others => '0'));
+    signal r_rowprev : t_sarr := (others => (others => '0'));
+    signal r_as_d    : std_logic := '0';
     signal s1_addr : t_u8arr := (others => (others => '0'));
     signal s1_wr   : t_slarr := (others => '0');
     signal sA_lvl  : t_lvl2 := (others => (others => '0'));
@@ -379,15 +363,15 @@ architecture ziffern of program_top is
 
     -- screen-space glow: composited lit mask through a +/-4 px window; the
     -- output pixel is the window centre, glow level = distance to nearest lit
-    signal s_litw : std_logic_vector(0 to 8) := (others => '0');
+    signal s_litw : std_logic_vector(0 to 6) := (others => '0');
 
     -- sync delay pipeline (aligned through the glow window to the colour
-    -- stage: S0..S4 + lit + 4-tap centre = 11 deep): [field avid vsync hsync]
-    type t_syncp is array (0 to 10) of std_logic_vector(3 downto 0);
+    -- stage: S0..S4 + lit + 3-tap centre = 10 deep): [field avid vsync hsync]
+    type t_syncp is array (0 to 9) of std_logic_vector(3 downto 0);
     signal s_syncp : t_syncp := (others => (others => '0'));
 
     -- incoming video delayed to align with the colour stage (S9 video key)
-    type t_vidp is array (0 to 10) of unsigned(9 downto 0);
+    type t_vidp is array (0 to 9) of unsigned(9 downto 0);
     signal s_vy, s_vu, s_vv : t_vidp := (others => (others => '0'));
 
     signal s5_y, s5_u, s5_v : unsigned(9 downto 0) := (others => '0');
@@ -459,13 +443,13 @@ begin
     -- 3 px pop this filter exists to remove).
     --------------------------------------------------------------------------
     p_zoomfilt : process(clk)
-        variable v_tgt  : unsigned(16 downto 0);
         variable v_diff : signed(18 downto 0);
     begin
         if rising_edge(clk) then
+            -- target staged every cycle (knob sub off the filter's add cone)
+            s_ztgt <= shift_left(resize(to_unsigned(1023, 11) - resize(s_zoom, 11), 17), 6);
             if s_vsync_pulse = '1' then
-                v_tgt := shift_left(resize(to_unsigned(1023, 11) - resize(s_zoom, 11), 17), 6);
-                v_diff := signed(resize(v_tgt, 19)) - signed(resize(s_zoomf, 19));
+                v_diff := signed(resize(s_ztgt, 19)) - signed(resize(s_zoomf, 19));
                 s_zoomf <= unsigned(resize(signed(resize(s_zoomf, 19))
                                            + shift_right(v_diff, C_GLIDE_SH), 17));
             end if;
@@ -574,9 +558,12 @@ begin
                 -- Animate switch, freeing S7 for Luma Mod)
                 s_T <= s_T + resize(shift_right(s_change_rate, 6), 24);
 
-                -- always full brightness, uniform across planes
+                -- uniform across planes; only the raw LUT reads here --
+                -- the 50%->100% K6 brightness sum is computed NEXT cycle in
+                -- p_numy off the REGISTERED s_ny_raw (LUT-mux + scale8 + add
+                -- in one cone was STA-timed every cycle and capped Fmax)
                 v_hidx := to_integer(s_hue_knob(9 downto 6));
-                s_num_y <= C_HUE_Y(v_hidx);
+                s_ny_raw <= C_HUE_Y(v_hidx);
                 s_num_u <= C_HUE_U(v_hidx);
                 s_num_v <= C_HUE_V(v_hidx);
 
@@ -746,28 +733,30 @@ begin
         end if;
     end process;
 
-    -- Glow + background colours from the REGISTERED number colour.  Four
-    -- fade levels for 1..4 screen px from a digit (Y/2 .. Y/16 of the
-    -- K6-scaled base), and the halo CHROMA eases from neutral to full
-    -- saturation with the same K6 curve -- both must scale or the RGB
-    -- conversion is chroma-dominated and the knob shows no range.
-    p_colaux : process(clk)
-        variable v_du, v_dv : signed(10 downto 0);
+    -- Digit Y from the staged hue: idle 50%, K6 drives toward 100%.
+    p_numy : process(clk)
     begin
         if rising_edge(clk) then
-            -- ring ceilings at FULL/half/quarter/eighth of the K6-scaled base:
-            -- next to the huge full-zoom digits the 4 px halo needs to hit
-            -- digit brightness at ring 1 to read at all
-            s_glow1_y <= scale8(s_num_y, s_glow(9 downto 7));
-            s_glow2_y <= shift_right(scale8(s_num_y, s_glow(9 downto 7)), 1);
-            s_glow3_y <= shift_right(scale8(s_num_y, s_glow(9 downto 7)), 2);
-            s_glow4_y <= shift_right(scale8(s_num_y, s_glow(9 downto 7)), 3);
-            v_du := signed(resize(s_num_u, 11)) - to_signed(512, 11);
-            v_dv := signed(resize(s_num_v, 11)) - to_signed(512, 11);
-            s_glow_u <= unsigned(resize(to_signed(512, 11)
-                            + scale8s(v_du, s_glow(9 downto 7)), 11)(9 downto 0));
-            s_glow_v <= unsigned(resize(to_signed(512, 11)
-                            + scale8s(v_dv, s_glow(9 downto 7)), 11)(9 downto 0));
+            if s_glow > to_unsigned(32, 10) then
+                s_num_y <= shift_right(s_ny_raw, 1)
+                           + shift_right(scale8(s_ny_raw, s_glow(9 downto 7)), 1);
+            else
+                s_num_y <= shift_right(s_ny_raw, 1);
+            end if;
+        end if;
+    end process;
+
+    -- Glow + background colours from the REGISTERED number colour.  Halo =
+    -- three rings at 75/50/25% of the CURRENT digit Y (which itself rises
+    -- 50%->100% with K6), and the halo CHROMA eases from neutral to full
+    -- saturation with the K6 curve -- chroma must scale or the RGB
+    -- conversion is chroma-dominated and the knob shows no range.
+    p_colaux : process(clk)
+    begin
+        if rising_edge(clk) then
+            s_glow1_y <= shift_right(s_num_y, 1) + shift_right(s_num_y, 2);
+            s_glow2_y <= shift_right(s_num_y, 1);
+            s_glow3_y <= shift_right(s_num_y, 2);
             if s_glow > to_unsigned(32, 10) then s_glow_on <= '1'; else s_glow_on <= '0'; end if;
             if s_bg_tint = '1' then
                 s_bg_y <= shift_right(s_num_y, 4); s_bg_u <= s_num_u; s_bg_v <= s_num_v;
@@ -796,7 +785,7 @@ begin
             s_vy(0) <= unsigned(data_in.y);
             s_vu(0) <= unsigned(data_in.u);
             s_vv(0) <= unsigned(data_in.v);
-            for k in 1 to 10 loop
+            for k in 1 to 9 loop
                 s_syncp(k) <= s_syncp(k - 1);
                 s_vy(k) <= s_vy(k - 1);
                 s_vu(k) <= s_vu(k - 1);
@@ -825,14 +814,6 @@ begin
                     else
                         nx_v := s_phv(i) + stp;
                     end if;
-                    -- does this line open a NEW cell row?  (held all line;
-                    -- luma-mod samples cells only on their first line)
-                    if s_firstline = '1'
-                       or nx_v(26 downto 18) /= s_phv(i)(26 downto 18) then
-                        s0_newrow(i) <= '1';
-                    else
-                        s0_newrow(i) <= '0';
-                    end if;
                     s_phv(i) <= nx_v;
                     cur_v := nx_v;
                     -- horizontal restart at line's first pixel
@@ -853,6 +834,26 @@ begin
                 s0_frh(i) <= unsigned(cur_h(17 downto 0));
                 s0_frv(i) <= unsigned(cur_v(17 downto 0));
             end loop;
+        end if;
+    end process;
+
+    --------------------------------------------------------------------------
+    -- New-cell-row detect, one cycle after line start from REGISTERED rows
+    -- (comparing on the fresh 28-bit phase add capped Fmax).  s0_newrow
+    -- settles at avid_start+2, so the leftmost edge cell's luma sample can
+    -- lag a cell-row -- invisible at the screen edge.
+    --------------------------------------------------------------------------
+    p_rowdet : process(clk)
+    begin
+        if rising_edge(clk) then
+            r_as_d <= s_timing.avid_start;
+            if r_as_d = '1' then
+                for i in 0 to NP - 1 loop
+                    if s0_row(i) /= r_rowprev(i) then s0_newrow(i) <= '1';
+                    else s0_newrow(i) <= '0'; end if;
+                    r_rowprev(i) <= s0_row(i);
+                end loop;
+            end if;
         end if;
     end process;
 
@@ -1027,7 +1028,7 @@ begin
             for i in 0 to NP - 1 loop
                 if s4_center(i) = '1' then v_any := '1'; end if;
             end loop;
-            s_litw <= v_any & s_litw(0 to 7);
+            s_litw <= v_any & s_litw(0 to 5);
         end if;
     end process;
 
@@ -1038,29 +1039,28 @@ begin
         variable v_y, v_u, v_v : unsigned(9 downto 0);
         variable v_bgy, v_bgu, v_bgv : unsigned(9 downto 0);
         variable v_lit : std_logic;
-        variable v_g1, v_g2, v_g3, v_g4 : std_logic;
+        variable v_g1, v_g2, v_g3 : std_logic;
         variable v_on_y, v_on_u, v_on_v : unsigned(9 downto 0);
         variable v_off_y, v_off_u, v_off_v : unsigned(9 downto 0);
     begin
         if rising_edge(clk) then
             if s_video = '1' then
                 if s_bg_tint = '1' then
-                    v_bgy := resize(shift_right(resize(s_bg_y,11) + resize(s_vy(10),11), 1), 10);
-                    v_bgu := resize(shift_right(resize(s_bg_u,11) + resize(s_vu(10),11), 1), 10);
-                    v_bgv := resize(shift_right(resize(s_bg_v,11) + resize(s_vv(10),11), 1), 10);
+                    v_bgy := resize(shift_right(resize(s_bg_y,11) + resize(s_vy(9),11), 1), 10);
+                    v_bgu := resize(shift_right(resize(s_bg_u,11) + resize(s_vu(9),11), 1), 10);
+                    v_bgv := resize(shift_right(resize(s_bg_v,11) + resize(s_vv(9),11), 1), 10);
                 else
-                    v_bgy := s_vy(10); v_bgu := s_vu(10); v_bgv := s_vv(10);
+                    v_bgy := s_vy(9); v_bgu := s_vu(9); v_bgv := s_vv(9);
                 end if;
             else
                 v_bgy := s_bg_y; v_bgu := s_bg_u; v_bgv := s_bg_v;
             end if;
 
             -- window centre is the output pixel; taps outward = screen px away
-            v_lit := s_litw(4);
-            v_g1  := s_litw(3) or s_litw(5);
-            v_g2  := s_litw(2) or s_litw(6);
-            v_g3  := s_litw(1) or s_litw(7);
-            v_g4  := s_litw(0) or s_litw(8);
+            v_lit := s_litw(3);
+            v_g1  := s_litw(2) or s_litw(4);
+            v_g2  := s_litw(1) or s_litw(5);
+            v_g3  := s_litw(0) or s_litw(6);
 
             -- uniform brightness across all planes (no depth fade)
             if s_invert = '0' then
@@ -1074,19 +1074,17 @@ begin
             if v_lit = '1' then
                 v_y := v_on_y; v_u := v_on_u; v_v := v_on_v;
             elsif (v_g1 = '1') and (s_glow_on = '1') then
-                v_y := s_glow1_y; v_u := s_glow_u; v_v := s_glow_v;
+                v_y := s_glow1_y; v_u := s_num_u; v_v := s_num_v;
             elsif (v_g2 = '1') and (s_glow_on = '1') then
-                v_y := s_glow2_y; v_u := s_glow_u; v_v := s_glow_v;
+                v_y := s_glow2_y; v_u := s_num_u; v_v := s_num_v;
             elsif (v_g3 = '1') and (s_glow_on = '1') then
-                v_y := s_glow3_y; v_u := s_glow_u; v_v := s_glow_v;
-            elsif (v_g4 = '1') and (s_glow_on = '1') then
-                v_y := s_glow4_y; v_u := s_glow_u; v_v := s_glow_v;
+                v_y := s_glow3_y; v_u := s_num_u; v_v := s_num_v;
             else
                 v_y := v_off_y; v_u := v_off_u; v_v := v_off_v;
             end if;
 
             s5_y <= v_y; s5_u <= v_u; s5_v <= v_v;
-            s5_sync <= s_syncp(10);
+            s5_sync <= s_syncp(9);
         end if;
     end process;
 
