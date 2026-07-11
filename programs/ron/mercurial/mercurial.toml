@@ -1,0 +1,172 @@
+[program]
+program_id = "com.ron.mercurial"
+program_version = "0.3.0"
+abi_version = ">=1.0,<2.0"
+program_name = "Mercurial"
+author = "ron"
+license = "GPL-3.0"
+categories = ["Material", "Render", "Optics"]
+program_type = "processing"
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+description = "Luma as material: the picture becomes a chrome surface, lit, iridescent, and (v0.3) elastic."
+
+# --- Rotary Potentiometers (Knobs 1-6) ---
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 160
+display_min_value = 0
+display_max_value = 360
+name_label = "Light"
+suffix_label = "deg"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 400
+display_min_value = 0
+display_max_value = 100
+name_label = "Polish"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 640
+display_min_value = 0
+display_max_value = 100
+name_label = "Luster"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 300
+display_min_value = 0
+display_max_value = 100
+name_label = "Film"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 200
+display_min_value = 0
+display_max_value = 100
+name_label = "Drift"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 512
+display_min_value = 0
+display_max_value = 100
+name_label = "Elasticity"
+suffix_label = "%"
+
+# --- Toggle Switches (7-11) ---
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Stiffness"
+value_labels = ["Bright Stiff", "Dark Stiff"]
+initial_value_label = "Bright Stiff"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Iridesce"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Strata"
+value_labels = ["Chrome", "Strata"]
+initial_value_label = "Chrome"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Rubber"
+value_labels = ["Bypass", "Live"]
+initial_value_label = "Bypass"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Orbit"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+# --- Linear Potentiometer (Slider) ---
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 1023
+display_min_value = 0
+display_max_value = 100
+name_label = "Mercury"
+suffix_label = "%"
+
+# --- Presets ---
+
+[[preset]]
+name = "Liquid Chrome"
+rotary_potentiometer_1 = 160
+rotary_potentiometer_2 = 620
+rotary_potentiometer_3 = 700
+rotary_potentiometer_4 = 0
+rotary_potentiometer_5 = 0
+rotary_potentiometer_6 = 400
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 1
+toggle_switch_11 = 1
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Oil Slick"
+rotary_potentiometer_1 = 96
+rotary_potentiometer_2 = 300
+rotary_potentiometer_3 = 512
+rotary_potentiometer_4 = 860
+rotary_potentiometer_5 = 128
+rotary_potentiometer_6 = 320
+toggle_switch_7 = 0
+toggle_switch_8 = 1
+toggle_switch_9 = 0
+toggle_switch_10 = 1
+toggle_switch_11 = 0
+linear_potentiometer_12 = 900
+
+[[preset]]
+name = "Molten Strata"
+rotary_potentiometer_1 = 512
+rotary_potentiometer_2 = 480
+rotary_potentiometer_3 = 640
+rotary_potentiometer_4 = 400
+rotary_potentiometer_5 = 700
+rotary_potentiometer_6 = 820
+toggle_switch_7 = 1
+toggle_switch_8 = 1
+toggle_switch_9 = 1
+toggle_switch_10 = 1
+toggle_switch_11 = 1
+linear_potentiometer_12 = 1023
