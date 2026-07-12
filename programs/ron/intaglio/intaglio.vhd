@@ -231,6 +231,8 @@ architecture intaglio of program_top is
     signal ax5, ay5 : unsigned(11 downto 0) := (others => '0');
     signal sgn5 : std_logic := '0';
     signal bin6 : unsigned(2 downto 0) := (others => '0');
+    signal bin_hold : unsigned(2 downto 0) := (others => '0');
+    signal hold_cnt : unsigned(5 downto 0) := (others => '0');
     signal mag6 : unsigned(12 downto 0) := (others => '0');
     signal x_s6 : unsigned(10 downto 0) := (others => '0');
     -- stipple lattice track
@@ -412,7 +414,8 @@ begin
                             s_xoff <= "100";        -- 90 degrees
                         end if;
                         -- flat-area default bin follows the plate angle
-                        s_bin0 <= s_th0(8 downto 6);
+                        -- (rounded to the even 4-direction set)
+                        s_bin0 <= (s_th0(8 downto 6) + 1) and "110";
                         -- tremor depth
                         if s_k5(9 downto 7) = 0 then
                             s_jsh <= 0;
@@ -464,6 +467,7 @@ begin
         variable v_iy : signed(11 downto 0);
         variable v_dd : unsigned(6 downto 0);
         variable v_hf : signed(6 downto 0);
+        variable v_rad, v_cap : unsigned(6 downto 0);
         variable v_sub, v_sb2 : unsigned(10 downto 0);
     begin
         if rising_edge(clk) then
@@ -566,10 +570,26 @@ begin
                 if sgn5 = '1' and v_bq /= 0 then
                     v_bq := to_unsigned(8, 4)(2 downto 0) - v_bq;
                 end if;
-                if mag5 < s_magfl or s_aline < 4 or x_s6 < 8 then
+                -- round to the nearest EVEN family (4 stroke directions,
+                -- 45 apart): 22.5-degree selection granularity flips
+                -- family on tiny gradient changes and shreds soft shading
+                -- into patchwork
+                v_bq := (v_bq + 1) and "110";
+                if s_aline < 4 or x_s6 < 8 then
                     bin6 <= s_bin0;
-                else
+                    hold_cnt <= (others => '0');
+                elsif mag5 >= s_magfl then
                     bin6 <= v_bq;
+                    bin_hold <= v_bq;
+                    hold_cnt <= (others => '1');
+                elsif hold_cnt /= 0 then
+                    -- ridge/valley zones (gradient through zero) inherit
+                    -- the last strong direction on this line instead of
+                    -- striping with the default family
+                    bin6 <= bin_hold;
+                    hold_cnt <= hold_cnt - 1;
+                else
+                    bin6 <= s_bin0;
                 end if;
                 mag6 <= mag5;
                 cl6  <= cl5;
@@ -728,12 +748,21 @@ begin
                 else
                     -- stipple: cell fires by hash vs tone, dot radius by
                     -- tone (diamond metric |d1-c| + |d2-c|, c = half cell)
+                    -- with the radius CAPPED below the half-cell so dots
+                    -- stay separate instead of merging into chunks
                     v_hf := signed(resize(
                         shift_left(to_unsigned(4, 6), s_pitch_sh), 7));
-                    if en1_8 = '1' and sj8 < w1_8 & '1' then
+                    v_rad := resize(w1_8(6 downto 2), 7) + 1;
+                    v_cap := resize(shift_left(to_unsigned(4, 6),
+                                               s_pitch_sh), 7) - 2;
+                    if v_rad > v_cap then
+                        v_rad := v_cap;
+                    end if;
+                    if en1_8 = '1'
+                       and resize(sj8, 9) < w1_8 & "00" then
                         v_dd := resize(f_absu(signed(resize(d1_8, 7)) - v_hf), 7)
                                 + resize(f_absu(signed(resize(d2_8, 7)) - v_hf), 7);
-                        if v_dd < resize(w1_8(6 downto 2), 7) + 2 then
+                        if v_dd < v_rad then
                             v_ink := "10";
                         end if;
                     end if;
@@ -834,8 +863,11 @@ begin
 
             -- per-line tremor jitter (2-step lstep sequencer)
             if s_lstep = 1 then
+                -- tremor pattern boils at ~10 Hz when the plate is live
+                -- (full-rate reseeding strobes at field rate); locked
+                -- plate = static hand wobble
                 s_lh_a  <= f_hash_a(resize(s_aline, 8),
-                                    resize(s_dracc(9 downto 2), 8), x"B33F");
+                                    resize(s_dracc(11 downto 5), 8), x"B33F");
                 s_lstep <= "10";
             elsif s_lstep = 2 then
                 s_ljit8 <= f_hash_b(s_lh_a);
