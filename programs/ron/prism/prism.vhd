@@ -1,6 +1,9 @@
--- phosphor.vhd
+-- prism.vhd
 --
--- Edge detection with rainbow band-trail to the right of each edge.
+-- Edge detection with rainbow band-trail to the right of each edge: every
+-- detected edge becomes a dispersion point, splitting into an ordered
+-- ROYGBIV spectrum. (Formerly "phosphor", after the CRT-phosphor edge
+-- simulator this program grew out of.)
 --
 -- At each detected edge the output resets to RED; subsequent pixels on the
 -- same scanline step through ORANGE, YELLOW, GREEN, BLUE, INDIGO, VIOLET,
@@ -10,9 +13,7 @@
 -- Edge detect : 3x3 Sobel on preprocessed luma (the Edge Lab detector).
 --               Four chained line buffers give a 5-row window; the Sobel
 --               rows are raw, 3x3 Gaussian-blurred (switch 9, default on,
---               per Edge Lab's Smooth) or separable-3x3-median denoised
---               (switch 10, wins over smooth) -- the median kills speckle
---               WITHOUT softening the edge, so magnitudes stay strong.
+--               per Edge Lab's Smooth).
 --               Magnitude |gx| + |gy| against the knob 2 threshold.
 -- Solidify    : the thresholded edge bit is OR'd with the same column of
 --               the previous two lines (two 1-bit line buffers), so a line
@@ -37,7 +38,7 @@ use work.core_pkg.all;
 use work.video_stream_pkg.all;
 use work.video_timing_pkg.all;
 
-architecture phosphor of program_top is
+architecture prism of program_top is
 
     constant C_SYNC_DELAY : integer := 13;
 
@@ -92,51 +93,34 @@ architecture phosphor of program_top is
         end if;
     end function;
 
-    -- Median of 3: two comparator levels (a/b sort, then c against both)
-    function f_med3(a, b, c : unsigned(7 downto 0)) return unsigned is
-        variable v_mn, v_mx : unsigned(7 downto 0);
-    begin
-        if a < b then
-            v_mn := a;  v_mx := b;
-        else
-            v_mn := b;  v_mx := a;
-        end if;
-        if c < v_mn then
-            return v_mn;
-        elsif c > v_mx then
-            return v_mx;
-        else
-            return c;
-        end if;
-    end function;
-
     -- Parameters
     signal s_knob_width      : unsigned(9 downto 0);
     signal s_knob_noise      : unsigned(9 downto 0);
     signal s_knob_contrast   : unsigned(9 downto 0);
-    signal s_knob_curve      : unsigned(9 downto 0);
-    signal s_poster_mask     : std_logic_vector(9 downto 0);
-    signal s_curve_steep     : unsigned(1 downto 0);  -- curve steepness 0..3
+    signal s_poster_mask     : std_logic_vector(9 downto 0) := (others => '1');
+    signal s_scheme          : unsigned(2 downto 0);  -- K6: 0 rainbow, 1..7 mono fade
     signal s_sw_video_key    : std_logic;
     signal s_sw_curve_en     : std_logic;
-    signal s_sw_smooth       : std_logic;
-    signal s_sw_median       : std_logic;
-    signal s_knob_color      : unsigned(9 downto 0);  -- K1: rainbow phase, animatable
-    signal s_sw_reverse      : std_logic;             -- S11: violet-first band order
+    signal s_sw_smooth       : std_logic := '0';  -- field-latched in p_knobs
+    signal s_sw_key_over     : std_logic;  -- S10: keyed video above the rainbow
+    signal s_knob_color      : unsigned(9 downto 0);  -- K1: colour phase, animatable
+    signal s_sw_reverse      : std_logic;             -- S11: violet-first / fade-up
     signal s_band_width      : unsigned(7 downto 0);  -- 1..128 (8 bits: 128 must not wrap)
     signal s_min_run_m1      : unsigned(4 downto 0);  -- min run length - 1 (0..15)
-    signal s_contrast_gain   : unsigned(8 downto 0);  -- 128..255 (1.0x..~2.0x in 7-bit fixed)
+    signal s_contrast_gain   : unsigned(10 downto 0) := to_unsigned(128, 11);  -- 128..1151 (1.0x..~9.0x in 7-bit fixed)
+    signal s_pivot           : unsigned(9 downto 0)  := to_unsigned(512, 10);  -- contrast pivot: 512 -> 64 as K5 rises
     signal s_thr             : unsigned(7 downto 0);  -- Sobel magnitude threshold
 
     -- Valid chain: av(i) = data_in.avid delayed i clocks
     signal av : std_logic_vector(1 to 12) := (others => '0');
 
-    -- S1-S2 contrast: Y_out = 512 + (Y_in - 512) * gain / 128
-    signal a1_prod : signed(19 downto 0) := (others => '0');
-    signal a2_y    : unsigned(9 downto 0) := (others => '0');
-
-    -- S3 posterize + reduce to 8 bit
-    signal a3_y8 : unsigned(7 downto 0) := (others => '0');
+    -- S1-S3 contrast/blowout: Y_out = pivot + (Y_in - pivot) * gain / 128,
+    -- then posterize + reduce to 8 bit. Split so the 11x12 multiply has a
+    -- stage to itself (EdgeLab structure): S1 center, S2 multiply, S3
+    -- shift/recenter/clamp/posterize.
+    signal a1_c    : signed(10 downto 0) := (others => '0');
+    signal a2_prod : signed(22 downto 0) := (others => '0');
+    signal a3_y8   : unsigned(7 downto 0) := (others => '0');
 
     -- Luma line buffers (BRAM): 4 chained lines for the 5-row window that
     -- feeds the 3x3 Gaussian blur (and the raw Sobel rows when smooth is
@@ -163,12 +147,6 @@ architecture phosphor of program_top is
     signal q1d, q2d, q3d : unsigned(7 downto 0) := (others => '0');
     signal q1e, q2e, q3e : unsigned(7 downto 0) := (others => '0');
 
-    -- S4 separable-median first pass: vertical median-of-3 per row + 2-col
-    -- histories for the horizontal pass (vm0 = top row n-3 ... vm2 = n-1)
-    signal vm0, vm0d, vm0e : unsigned(7 downto 0) := (others => '0');
-    signal vm1, vm1d, vm1e : unsigned(7 downto 0) := (others => '0');
-    signal vm2, vm2d, vm2e : unsigned(7 downto 0) := (others => '0');
-
     -- S5 effective Sobel rows (blurred or raw; e0 = top, e2 = bottom)
     signal e0, e1, e2 : unsigned(7 downto 0) := (others => '0');
 
@@ -186,6 +164,14 @@ architecture phosphor of program_top is
     signal elb1, elb2 : t_lb1 := (others => (others => '0'));
     signal eq1, eq2   : std_logic_vector(0 downto 0) := (others => '0');
     signal ebr, ebw   : unsigned(10 downto 0) := (others => '0');
+
+    -- Field-boundary latch pulse: fires on the hsync edge of lines with no
+    -- active video (vertical blanking). Preprocess parameters only update
+    -- here, so a whole field is always processed with ONE set of values --
+    -- a mid-frame knob change otherwise bakes rows with old and new gain
+    -- into the line buffers, and the Sobel reads the uniform step between
+    -- them as a full-width horizontal edge (flashing glitch bar).
+    signal s_ctl_latch : std_logic := '0';
 
     -- Blanking guards: left columns (shift/history chains crossing hblank)
     -- and field warm-up lines (window straddling vblank)
@@ -207,8 +193,38 @@ architecture phosphor of program_top is
     -- the output mux stays shallow; index 7 always maps to 7 (black/key).
     type t_cmap is array (0 to 7) of unsigned(2 downto 0);
     signal s_cmap      : t_cmap := ("000", "001", "010", "011", "100", "101", "110", "111");
-    signal s_disp_idx  : unsigned(2 downto 0);                      -- palette index after remap
+    signal s_base_sel  : unsigned(2 downto 0) := (others => '0');   -- mono-scheme base colour
     signal s_key_video : std_logic;                                 -- pass source video this pixel
+
+    -- Registered display palette (built by p_pal) + engine pipeline regs.
+    -- Mono schemes lerp each band from the base colour toward black or
+    -- white: weight w(i) = depth * C_FADE(i) / 256, K1 sets depth+target.
+    signal s_pal_y : t_pal := C_PAL_Y;
+    signal s_pal_u : t_pal := C_PAL_U;
+    signal s_pal_v : t_pal := C_PAL_V;
+    signal s_pcnt, s_pcnt_d1, s_pcnt_d2, s_pcnt_d3, s_pcnt_d4
+        : unsigned(2 downto 0) := (others => '0');
+    signal s_pf   : unsigned(8 downto 0) := (others => '0');  -- per-band fade coeff
+    signal s_pby, s_pby_d1, s_pby_d2 : unsigned(9 downto 0) := (others => '0');
+    signal s_pbu, s_pbu_d1, s_pbu_d2 : signed(10 downto 0) := (others => '0');
+    signal s_pbv, s_pbv_d1, s_pbv_d2 : signed(10 downto 0) := (others => '0');
+    signal s_pb7_a, s_pb7_b, s_pb7_c, s_pb7_d : std_logic := '0';  -- band-7 pipe
+    signal s_ptw_a, s_ptw_b, s_ptw_c, s_ptw_d : std_logic := '0';  -- to-white pipe
+    signal s_pwp  : unsigned(17 downto 0) := (others => '0');  -- depth * coeff
+    signal s_pw, s_pw_d : unsigned(8 downto 0) := (others => '0');  -- weight 0..256
+    signal s_pwc  : unsigned(8 downto 0) := to_unsigned(256, 9);    -- 256 - weight
+    signal s_ply  : unsigned(18 downto 0) := (others => '0');       -- y * (256-w)
+    signal s_plu, s_plv : signed(20 downto 0) := (others => '0');
+    -- K1-derived fade depth (0..256) and direction (registered in p_cmap)
+    signal s_pdepth : unsigned(8 downto 0) := (others => '0');
+    signal s_ptw    : std_logic := '0';
+
+    -- Fade ramp i/7 in /256 fixed point: band 0 always full base colour
+    type t_fade is array (0 to 6) of unsigned(8 downto 0);
+    constant C_FADE : t_fade := (
+        to_unsigned(  0, 9), to_unsigned( 37, 9), to_unsigned( 73, 9),
+        to_unsigned(110, 9), to_unsigned(146, 9), to_unsigned(183, 9),
+        to_unsigned(219, 9));
 
     -- Per-band effective widths MINUS ONE (curve-adjusted terminal counts),
     -- indexed directly by s_band_idx so the value is never stale when the
@@ -216,11 +232,37 @@ architecture phosphor of program_top is
     type t_sizes is array (0 to 7) of unsigned(7 downto 0);
     signal s_sizes_m1 : t_sizes := (others => to_unsigned(127, 8));
 
+    -- Curve coefficient ROM: width(i) = max(1, W * c(i) / 256), a linear
+    -- ramp (i+1)/7 from thin red to full-width violet. Real coefficients
+    -- instead of bit-shifts so the growth is smooth.
+    type t_crow is array (0 to 6) of unsigned(8 downto 0);
+    constant C_CURVE : t_crow := (
+        to_unsigned( 37, 9), to_unsigned( 73, 9), to_unsigned(110, 9),
+        to_unsigned(146, 9), to_unsigned(183, 9), to_unsigned(219, 9),
+        to_unsigned(256, 9));
+
+    -- Curve engine: one 8x9 multiply cycles through the bands, one per
+    -- clock (full table refresh every 8 clocks -- instant for a knob)
+    signal r_bw      : unsigned(7 downto 0) := to_unsigned(128, 8);
+    signal s_ccnt    : unsigned(2 downto 0) := (others => '0');
+    signal s_ccnt_d1 : unsigned(2 downto 0) := (others => '0');
+    signal s_ccnt_d2 : unsigned(2 downto 0) := (others => '0');
+    signal s_coef    : unsigned(8 downto 0) := (others => '0');
+    signal s_cprod   : unsigned(16 downto 0) := (others => '0');
+
     -- Delayed incoming Y/U/V for video key-through (needs full SYNC_DELAY alignment)
     type t_yuv_delay is array (0 to C_SYNC_DELAY - 1) of std_logic_vector(9 downto 0);
     signal s_y_in_sr : t_yuv_delay := (others => (others => '0'));
     signal s_u_in_sr : t_yuv_delay := (others => (others => '0'));
     signal s_v_in_sr : t_yuv_delay := (others => (others => '0'));
+
+    -- Luma-key matte: PREPROCESSED luma >= 50% (a3_y8 MSB), delayed from
+    -- pipeline index 3 to output alignment. Where the matte is high the
+    -- source rides on top of the rainbow -- and because the matte comes
+    -- from the post-blowout signal, K5 directly hardens the key cutout.
+    -- Stateless per-pixel decision: none of the parity problems of the
+    -- earlier within-edges experiments.
+    signal s_matte_sr : std_logic_vector(C_SYNC_DELAY - 4 downto 0) := (others => '0');
 
     -- Sync shift register
     signal s_avid_sr    : std_logic_vector(C_SYNC_DELAY - 1 downto 0) := (others => '0');
@@ -237,12 +279,12 @@ begin
     s_knob_color    <= unsigned(registers_in(0));
     s_knob_noise    <= unsigned(registers_in(2));
     s_knob_contrast <= unsigned(registers_in(4));
-    s_knob_curve    <= unsigned(registers_in(5));
-    s_sw_video_key  <= registers_in(6)(0);
-    s_sw_curve_en   <= registers_in(6)(1);
     -- Toggle switches 7..11 arrive as bits 0..4 of registers_in(6)
-    s_sw_smooth     <= registers_in(6)(2);
-    s_sw_median     <= registers_in(6)(3);
+    -- (s_sw_smooth is latched at field boundaries in p_knobs -- it feeds
+    -- the detector window like the preprocess knobs do)
+    s_sw_video_key  <= registers_in(6)(0);
+    s_sw_key_over   <= registers_in(6)(1);  -- S8: Key Pos, next to S7's key
+    s_sw_curve_en   <= registers_in(6)(3);  -- S10: Curve En
     s_sw_reverse    <= registers_in(6)(4);
 
     -- Band width: knob top 7 bits + 1 gives 1..128 pixels. Must be 8 bits:
@@ -254,21 +296,19 @@ begin
     s_min_run_m1 <= resize(unsigned(s_knob_noise(9 downto 6)), 5);
     -- Sobel threshold: knob top 8 bits cover the full 0..255 magnitude range
     s_thr <= unsigned(registers_in(1)(9 downto 2));
-    -- Contrast gain: 7-bit fixed-point (128 = 1.0x). 128 + knob(9:3) = 128..255.
-    s_contrast_gain <= resize(unsigned(s_knob_contrast(9 downto 3)), 9) + to_unsigned(128, 9);
-    -- Curve steepness: knob top 2 bits = 0..3 shift-per-band for the
-    -- geometric band-width curve (0 = even, 1 = doubling, 3 = steepest).
-    s_curve_steep <= s_knob_curve(9 downto 8);
-    -- Posterize (Edge Lab mapping): knob top 3 bits → off, then 128..2 levels
-    with to_integer(unsigned(registers_in(3)(9 downto 7))) select
-        s_poster_mask <= "1111111111" when 0,
-                         "1111111000" when 1,
-                         "1111110000" when 2,
-                         "1111100000" when 3,
-                         "1111000000" when 4,
-                         "1110000000" when 5,
-                         "1100000000" when 6,
-                         "1000000000" when others;
+    -- Contrast gain: 7-bit fixed-point (128 = 1.0x). 128 + knob = 128..1151,
+    -- i.e. 1.0x..~9.0x. The pivot slides from mid-grey (512) down to BT.601
+    -- black level (64) as the knob rises -- knob * 7/16 subtracted -- so the
+    -- low range is classic centered contrast while the top blows EVERYTHING
+    -- above ~12% luma out to white and crushes the black-level noise floor
+    -- to black: a video-level-aware binarizer (the "3x value multiplier to
+    -- all white" technique, minus the amplified dark noise).
+    -- REGISTERED: both values are knob-derived and quasi-static; computing
+    -- them combinationally ahead of the S1 subtract+multiply cost ~30 MHz.
+    -- Colour scheme: knob top 3 bits -- zone 0 = rainbow, zones 1..7 = all
+    -- bands in that single colour (red..violet), fading along the trail
+    s_scheme <= unsigned(registers_in(5)(9 downto 7));
+    -- (posterize mask is latched at field boundaries in p_knobs)
 
     ----------------------------------------------------------------------------
     -- Edge pipeline (all luma), Edge Lab Sobel with optional Gaussian smooth
@@ -277,10 +317,9 @@ begin
     --   S2  contrast stage B: shift back, recenter, clamp
     --   S3  posterize, reduce to 8 bit; present line-buffer read address
     --   S4  register BRAM reads into FFs; line-buffer rotate writes
-    --   S5  vertical [1 2 1] sums + vertical medians for rows n-1/n-2/n-3
-    --       + column histories; delayed raw taps
-    --   S6  horizontal [1 2 1], /16 -> blurred rows; horizontal median;
-    --       source mux -> e-rows
+    --   S5  vertical [1 2 1] sums for rows n-1/n-2/n-3 + column histories;
+    --       delayed raw taps
+    --   S6  horizontal [1 2 1], /16 -> blurred rows; smooth mux -> e-rows
     --   S7  Sobel column sums ss / dy + two-column histories
     --   S8  gx = ss - ss2 (horizontal), gy = dy + 2*dy1 + dy2 (vertical)
     --   S9  magnitude |gx| + |gy|
@@ -288,9 +327,35 @@ begin
     --   S11 threshold -> edge bit; present bit-buffer read address
     --   S12 solidify (OR with previous 2 lines) + min-run → trigger
     ----------------------------------------------------------------------------
+    p_knobs : process(clk)
+    begin
+        if rising_edge(clk) then
+            -- Detector-window parameters only change at field boundaries
+            -- (s_ctl_latch) so a field is never processed with mixed
+            -- settings -- mid-frame changes painted a full-width fake
+            -- horizontal edge near the top of the screen.
+            if s_ctl_latch = '1' then
+                s_contrast_gain <= resize(s_knob_contrast, 11) + to_unsigned(128, 11);
+                s_pivot <= to_unsigned(512, 10)
+                           - (shift_right(s_knob_contrast, 1)
+                              - shift_right(s_knob_contrast, 4));
+                case to_integer(unsigned(registers_in(3)(9 downto 7))) is
+                    when 0      => s_poster_mask <= "1111111111";
+                    when 1      => s_poster_mask <= "1111111000";
+                    when 2      => s_poster_mask <= "1111110000";
+                    when 3      => s_poster_mask <= "1111100000";
+                    when 4      => s_poster_mask <= "1111000000";
+                    when 5      => s_poster_mask <= "1110000000";
+                    when 6      => s_poster_mask <= "1100000000";
+                    when others => s_poster_mask <= "1000000000";
+                end case;
+                s_sw_smooth <= registers_in(6)(2);
+            end if;
+        end if;
+    end process p_knobs;
+
     p_pix : process(clk)
-        variable v_diff  : signed(10 downto 0);
-        variable v_sum   : signed(13 downto 0);
+        variable v_sum   : signed(14 downto 0);
         variable v_p10   : unsigned(9 downto 0);
         variable v_m8    : unsigned(7 downto 0);
         variable v_solid : std_logic;
@@ -306,27 +371,31 @@ begin
                 s_seen <= '1';
             end if;
 
-            -- S1: difference from mid-grey, multiply by contrast gain
+            -- S1: difference from the (knob-tracking, registered) pivot
             if data_in.avid = '1' then
-                v_diff := signed(resize(unsigned(data_in.y), 11)) - to_signed(512, 11);
-                a1_prod <= v_diff * signed(std_logic_vector(s_contrast_gain));
+                a1_c <= signed(resize(unsigned(data_in.y), 11))
+                        - signed(resize(s_pivot, 11));
             end if;
 
-            -- S2: shift back, recenter, clamp
+            -- S2: multiply by gain (the 11x12 multiply gets this stage to
+            -- itself -- with any logic ahead of it the HD configs miss)
             if av(1) = '1' then
-                v_sum := resize(shift_right(a1_prod, 7), 14) + to_signed(512, 14);
-                if v_sum < 0 then
-                    a2_y <= (others => '0');
-                elsif v_sum > 1023 then
-                    a2_y <= (others => '1');
-                else
-                    a2_y <= unsigned(std_logic_vector(v_sum(9 downto 0)));
-                end if;
+                a2_prod <= a1_c * signed('0' & std_logic_vector(s_contrast_gain));
             end if;
 
-            -- S3: posterize, reduce to 8 bit; luma reads presented this cycle
+            -- S3: shift back, recenter on the pivot, clamp, posterize,
+            -- reduce to 8 bit; luma reads presented this cycle
             if av(2) = '1' then
-                v_p10 := a2_y and unsigned(s_poster_mask);
+                v_sum := resize(shift_right(a2_prod, 7), 15)
+                         + signed(resize(s_pivot, 15));
+                if v_sum < 0 then
+                    v_p10 := (others => '0');
+                elsif v_sum > 1023 then
+                    v_p10 := (others => '1');
+                else
+                    v_p10 := unsigned(std_logic_vector(v_sum(9 downto 0)));
+                end if;
+                v_p10 := v_p10 and unsigned(s_poster_mask);
                 a3_y8 <= v_p10(9 downto 2);
                 lrx   <= lrx + 1;
             end if;
@@ -343,9 +412,8 @@ begin
                 lwx <= lwx + 1;
             end if;
 
-            -- S5: vertical [1 2 1] sums and vertical medians for the 3 blur
-            -- rows, two-column histories for the horizontal passes, delayed
-            -- raw taps
+            -- S5: vertical [1 2 1] sums for the 3 blur rows, two-column
+            -- histories for the horizontal pass, delayed raw taps
             if av(4) = '1' then
                 ga <= resize(y8d, 10)
                       + shift_left(resize(qr1, 10), 1)
@@ -362,25 +430,13 @@ begin
                 q1d <= qr1;  q1e <= q1d;
                 q2d <= qr2;  q2e <= q2d;
                 q3d <= qr3;  q3e <= q3d;
-                vm0 <= f_med3(qr2, qr3, qr4);
-                vm1 <= f_med3(qr1, qr2, qr3);
-                vm2 <= f_med3(y8d, qr1, qr2);
-                vm0d <= vm0;  vm0e <= vm0d;
-                vm1d <= vm1;  vm1e <= vm1d;
-                vm2d <= vm2;  vm2e <= vm2d;
             end if;
 
             -- S6: horizontal [1 2 1] over the vertical sums, /16 -> blurred
-            -- rows; separable median second pass (horizontal median-of-3
-            -- over the vertical medians). The mux picks median (S10, wins
-            -- over smooth), blurred (S9) or raw rows -- all three centered
-            -- on the same column, so latency is identical in every mode.
+            -- rows; smooth mux picks blurred (S9) or raw rows -- both
+            -- centered on the same column, so latency is identical.
             if av(5) = '1' then
-                if s_sw_median = '1' then
-                    e0 <= f_med3(vm0, vm0d, vm0e);
-                    e1 <= f_med3(vm1, vm1d, vm1e);
-                    e2 <= f_med3(vm2, vm2d, vm2e);
-                elsif s_sw_smooth = '1' then
+                if s_sw_smooth = '1' then
                     e2 <= resize(shift_right(resize(ga2, 12)
                               + shift_left(resize(ga1, 12), 1)
                               + resize(ga, 12), 4), 8);
@@ -496,6 +552,14 @@ begin
                     s_aline <= (others => '0');
                 end if;
             end if;
+
+            -- Field-boundary latch pulse: hsync edge of a blank line
+            if data_in.hsync_n = '0' and s_prev_hsync_n_p = '1'
+               and s_seen = '0' then
+                s_ctl_latch <= '1';
+            else
+                s_ctl_latch <= '0';
+            end if;
         end if;
     end process p_pix;
 
@@ -570,31 +634,44 @@ begin
 
     ----------------------------------------------------------------------------
     -- Curve: per-band effective widths. With curve enabled (switch 8) the
-    -- widths grow geometrically toward violet:
-    --   width(i) = max(1, band_width >> ((6 - i) * steepness))
-    -- so red is the thinnest band and violet gets the full K1 width. At
-    -- steepness 1 each colour doubles the previous one; higher settings pin
-    -- more of the early colours at 1 px. The whole table is registered every
-    -- clock (it only depends on knobs), so p_band can index it by band_idx
-    -- with no stale-size lag when a band advances.
+    -- widths grow toward violet along the K6-selected profile:
+    --   width(i) = max(1, band_width * C_CURVE(shape)(i) / 256)
+    -- so red is the thinnest band and violet gets the full width. One 8x9
+    -- multiply is time-multiplexed across the bands (one per clock; band 7
+    -- and curve-off get the plain width) -- the table refreshes every 8
+    -- clocks, instant for a knob, and p_band still indexes it by band_idx
+    -- with no stale-size lag.
     ----------------------------------------------------------------------------
     p_curve : process(clk)
-        variable v_sz : unsigned(7 downto 0);
+        variable v_w : unsigned(8 downto 0);
     begin
         if rising_edge(clk) then
-            for i in 0 to 6 loop
-                if s_sw_curve_en = '1' then
-                    v_sz := shift_right(s_band_width,
-                                        (6 - i) * to_integer(s_curve_steep));
-                    if v_sz = 0 then
-                        v_sz := to_unsigned(1, 8);
-                    end if;
-                    s_sizes_m1(i) <= v_sz - 1;
-                else
-                    s_sizes_m1(i) <= s_band_width - 1;
+            r_bw <= s_band_width;
+
+            -- stage 0: fetch the coefficient (ROM mux gets its own register
+            -- -- sharing a stage with the multiply cost ~20 MHz)
+            if s_ccnt = 7 then
+                s_coef <= (others => '0');  -- unused, band 7 stored plain
+            else
+                s_coef <= C_CURVE(to_integer(s_ccnt));
+            end if;
+            s_ccnt_d1 <= s_ccnt;
+            s_ccnt    <= s_ccnt + 1;
+
+            -- stage 1: the multiply, alone in its stage
+            s_cprod   <= r_bw * s_coef;
+            s_ccnt_d2 <= s_ccnt_d1;
+
+            -- stage 2: normalize, clamp to >= 1, store minus one
+            if s_sw_curve_en = '1' and s_ccnt_d2 /= 7 then
+                v_w := resize(shift_right(s_cprod, 8), 9);
+                if v_w = 0 then
+                    v_w := to_unsigned(1, 9);
                 end if;
-            end loop;
-            s_sizes_m1(7) <= s_band_width - 1;  -- black region, don't-care
+                s_sizes_m1(to_integer(s_ccnt_d2)) <= resize(v_w - 1, 8);
+            else
+                s_sizes_m1(to_integer(s_ccnt_d2)) <= r_bw - 1;
+            end if;
         end if;
     end process p_curve;
 
@@ -650,12 +727,16 @@ begin
                 s_u_in_sr(i) <= s_u_in_sr(i - 1);
                 s_v_in_sr(i) <= s_v_in_sr(i - 1);
             end loop;
+            s_matte_sr(0) <= a3_y8(7);
+            for i in 1 to C_SYNC_DELAY - 4 loop
+                s_matte_sr(i) <= s_matte_sr(i - 1);
+            end loop;
         end if;
     end process p_video_delay;
 
     ----------------------------------------------------------------------------
     -- Sync delay: 13 stages — contrast (2) + posterize (1) + BRAM-read
-    -- register (1) + column sums/medians (1) + blur/mux (1) + Sobel sums (1)
+    -- register (1) + column sums (1) + blur/mux (1) + Sobel sums (1)
     -- + gradients (1) + magnitude (1) + normalize (1) + threshold (1) +
     -- solidify/min-run (1) + band (1); palette lookup is combinational on
     -- band_idx.
@@ -680,6 +761,7 @@ begin
     p_cmap : process(clk)
         variable v_k7 : unsigned(12 downto 0);
         variable v_s  : integer range 0 to 13;
+        variable v_b  : integer range -1 to 13;
     begin
         if rising_edge(clk) then
             v_k7 := shift_left(resize(s_knob_color, 13), 3)
@@ -696,27 +778,142 @@ begin
                 s_cmap(i) <= to_unsigned(v_s, 3);
             end loop;
             s_cmap(7) <= "111";  -- black/key region never remaps
+
+            -- Mono-scheme base colour comes straight from K6 (no K1 phase
+            -- -- in mono schemes K1 is the fade control instead)
+            if s_scheme /= 0 then
+                v_b := to_integer(s_scheme) - 1;
+                s_base_sel <= to_unsigned(v_b, 3);
+            else
+                s_base_sel <= (others => '0');
+            end if;
+
+            -- Mono fade from K1: centre = flat solid colour, turning down
+            -- fades the trail to black, turning up bleaches it to white
+            if s_knob_color >= 512 then
+                s_ptw    <= '1';
+                s_pdepth <= resize(shift_right(s_knob_color - to_unsigned(512, 10), 1), 9);
+            else
+                s_ptw    <= '0';
+                s_pdepth <= resize(shift_right(to_unsigned(512, 10) - s_knob_color, 1), 9);
+            end if;
         end if;
     end process p_cmap;
 
-    s_disp_idx <= s_cmap(to_integer(s_band_idx));
+    ----------------------------------------------------------------------------
+    -- Palette engine: builds the registered display palette one band per
+    -- clock (5-stage: fetch / depth-multiply / weight / lerp-multiply /
+    -- store; table refresh every 8 clocks). Scheme 0 (Rainbow) reads the
+    -- classic palette through s_cmap unfaded. Schemes 1..7 render every
+    -- band in the K6 base colour, lerped along the trail toward black or
+    -- white by K1: weight w(i) = depth * C_FADE(i)/256, chroma relaxes to
+    -- neutral, Y heads to 0 or full white. S11 reverse flips the fade
+    -- direction. Band 7 is forced w = 256 toward black in every scheme,
+    -- preserving the video-key region. Each multiply is alone in its stage.
+    ----------------------------------------------------------------------------
+    p_pal : process(clk)
+        variable v_sel : unsigned(2 downto 0);
+        variable v_f   : integer range 0 to 6;
+        variable v_w   : unsigned(8 downto 0);
+        variable v_y   : unsigned(11 downto 0);
+    begin
+        if rising_edge(clk) then
+            -- stage A: fetch base colour, fade coefficient, flags
+            if s_scheme = 0 then
+                v_sel := s_cmap(to_integer(s_pcnt));
+            else
+                v_sel := s_base_sel;
+            end if;
+            s_pby <= C_PAL_Y(to_integer(v_sel));
+            s_pbu <= signed(resize(C_PAL_U(to_integer(v_sel)), 11))
+                     - to_signed(512, 11);
+            s_pbv <= signed(resize(C_PAL_V(to_integer(v_sel)), 11))
+                     - to_signed(512, 11);
+            if s_pcnt = 7 or s_scheme = 0 then
+                s_pf <= (others => '0');      -- rainbow / band 7: no ramp
+            else
+                if s_sw_reverse = '1' then
+                    v_f := 6 - to_integer(s_pcnt);
+                else
+                    v_f := to_integer(s_pcnt);
+                end if;
+                s_pf <= C_FADE(v_f);
+            end if;
+            if s_pcnt = 7 then
+                s_pb7_a <= '1';
+            else
+                s_pb7_a <= '0';
+            end if;
+            s_ptw_a   <= s_ptw;
+            s_pcnt_d1 <= s_pcnt;
+            s_pcnt    <= s_pcnt + 1;
 
-    -- Video key: source video fills the past-violet black region
-    s_key_video <= '1' when s_sw_video_key = '1' and s_band_idx = "111"
+            -- stage B: depth x coefficient multiply, alone
+            s_pwp    <= s_pdepth * s_pf;
+            s_pby_d1 <= s_pby;  s_pbu_d1 <= s_pbu;  s_pbv_d1 <= s_pbv;
+            s_pb7_b  <= s_pb7_a;  s_ptw_b <= s_ptw_a;
+            s_pcnt_d2 <= s_pcnt_d1;
+
+            -- stage C: lerp weight and its complement (band 7 = full black)
+            if s_pb7_b = '1' then
+                v_w := to_unsigned(256, 9);
+            else
+                v_w := resize(shift_right(s_pwp, 8), 9);
+            end if;
+            s_pw     <= v_w;
+            s_pwc    <= to_unsigned(256, 9) - v_w;
+            s_pby_d2 <= s_pby_d1;  s_pbu_d2 <= s_pbu_d1;  s_pbv_d2 <= s_pbv_d1;
+            s_pb7_c  <= s_pb7_b;  s_ptw_c <= s_ptw_b;
+            s_pcnt_d3 <= s_pcnt_d2;
+
+            -- stage D: lerp multiplies, alone
+            s_ply <= s_pby_d2 * s_pwc;
+            s_plu <= s_pbu_d2 * signed('0' & std_logic_vector(s_pwc));
+            s_plv <= s_pbv_d2 * signed('0' & std_logic_vector(s_pwc));
+            s_pw_d   <= s_pw;
+            s_pb7_d  <= s_pb7_c;  s_ptw_d <= s_ptw_c;
+            s_pcnt_d4 <= s_pcnt_d3;
+
+            -- stage E: recombine (white target adds 4w = w * 1024/256),
+            -- clamp, recenter chroma, store
+            v_y := resize(shift_right(s_ply, 8), 12);
+            if s_ptw_d = '1' and s_pb7_d = '0' then
+                v_y := v_y + shift_left(resize(s_pw_d, 12), 2);
+            end if;
+            if v_y > 1023 then
+                v_y := to_unsigned(1023, 12);
+            end if;
+            s_pal_y(to_integer(s_pcnt_d4)) <= v_y(9 downto 0);
+            s_pal_u(to_integer(s_pcnt_d4)) <= unsigned(resize(
+                shift_right(s_plu, 8) + to_signed(512, 21), 10));
+            s_pal_v(to_integer(s_pcnt_d4)) <= unsigned(resize(
+                shift_right(s_plv, 8) + to_signed(512, 21), 10));
+        end if;
+    end process p_pal;
+
+    -- Video key: source video fills the past-violet black region. With
+    -- Key Pos = Over (S10), it ALSO rides on top of the colour bands
+    -- wherever the luma-key matte is high (preprocessed luma >= 50%) --
+    -- trails stream out from behind the keyed image instead of covering
+    -- it. K5 blowout hardens the matte.
+    s_key_video <= '1' when s_sw_video_key = '1'
+                        and (s_band_idx = "111"
+                             or (s_sw_key_over = '1'
+                                 and s_matte_sr(C_SYNC_DELAY - 4) = '1'))
                    else '0';
 
     data_out.y <= s_y_in_sr(C_SYNC_DELAY - 1)
                       when s_key_video = '1'
-                      else std_logic_vector(C_PAL_Y(to_integer(s_disp_idx)));
+                      else std_logic_vector(s_pal_y(to_integer(s_band_idx)));
     data_out.u <= s_u_in_sr(C_SYNC_DELAY - 1)
                       when s_key_video = '1'
-                      else std_logic_vector(C_PAL_U(to_integer(s_disp_idx)));
+                      else std_logic_vector(s_pal_u(to_integer(s_band_idx)));
     data_out.v <= s_v_in_sr(C_SYNC_DELAY - 1)
                       when s_key_video = '1'
-                      else std_logic_vector(C_PAL_V(to_integer(s_disp_idx)));
+                      else std_logic_vector(s_pal_v(to_integer(s_band_idx)));
     data_out.avid    <= s_avid_sr   (C_SYNC_DELAY - 1);
     data_out.hsync_n <= s_hsync_n_sr(C_SYNC_DELAY - 1);
     data_out.vsync_n <= s_vsync_n_sr(C_SYNC_DELAY - 1);
     data_out.field_n <= s_field_n_sr(C_SYNC_DELAY - 1);
 
-end phosphor;
+end prism;

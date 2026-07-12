@@ -1,22 +1,22 @@
 [program]
-program_id = "com.ron.phosphor"
+program_id = "com.ron.prism"
 program_version = "1.0.0"
 abi_version = ">=1.0,<2.0"
-program_name = "Phosphor"
+program_name = "Prism"
 author = "ron"
 license = "GPL-3.0"
 categories = ["Edges"]
 program_type = "processing"
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
-description = "Rainbow edges. P12 W, K1 color, K2 thr, K3 noise, K4 postr, K5 contr, K6 curve, S7 key, S8 curve, S9 smth, S10 med, S11 rev."
+description = "Rainbow edges. P12 W, K1 fade, K2 thr, K3 noise, K4 postr, K5 contr, K6 scheme, S7 key, S8 kpos, S9 smth, S10 curve, S11 rev."
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_1"
-name_label = "Color"
+name_label = "Col/Fade"
 control_mode = "linear"
 display_min_value = 0
-display_max_value = 6
+display_max_value = 100
 initial_value = 0
 
 [[parameter]]
@@ -25,7 +25,7 @@ name_label = "Band W"
 control_mode = "linear"
 display_min_value = 1
 display_max_value = 128
-initial_value = 1023
+initial_value = 192
 suffix_label = "px"
 
 [[parameter]]
@@ -34,7 +34,7 @@ name_label = "Edge Thr"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 80
+initial_value = 0
 suffix_label = "%"
 
 [[parameter]]
@@ -60,17 +60,15 @@ parameter_id = "rotary_potentiometer_5"
 name_label = "Contrast"
 control_mode = "linear"
 display_min_value = 100
-display_max_value = 200
+display_max_value = 900
 initial_value = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
-name_label = "Curve"
-control_mode = "linear"
-display_min_value = 0
-display_max_value = 3
-initial_value = 256
+name_label = "Scheme"
+value_labels = ["Rainbow", "Red", "Orange", "Yellow", "Green", "Blue", "Indigo", "Violet"]
+initial_value_label = "Rainbow"
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
@@ -80,19 +78,19 @@ initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
-name_label = "Curve En"
-value_labels = ["Off", "On"]
-initial_value_label = "Off"
+name_label = "Key Pos"
+value_labels = ["Under", "Over"]
+initial_value_label = "Over"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
 name_label = "Smooth"
 value_labels = ["Off", "On"]
-initial_value_label = "On"
+initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
-name_label = "Median"
+name_label = "Curve En"
 value_labels = ["Off", "On"]
 initial_value_label = "Off"
 
