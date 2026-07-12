@@ -213,6 +213,51 @@ architecture pyro of program_top is
     signal s_ftop2, s_fbot2 : std_logic := '0';
     signal s_addr_top2, s_addr_bot2 : unsigned(15 downto 0) := (others => '0');
 
+    -- ==== Nebula cloud layer (starfield technique, scaled to 2 EBR) ====
+    -- 64x32 4-bit seamless value-noise tile, 8x16-px texels (512x512 px
+    -- wrap), read per pixel and added to the sky gradient. Generated at
+    -- elaboration: 2-octave bilinear noise over a wrapping 8x4 lattice.
+    function f_nebh(xi, yi : integer) return integer is
+        variable t : integer;
+    begin
+        t := (xi * 73 + yi * 199 + 55) mod 256;
+        t := (t * 137 + 91) mod 251;
+        t := (t * 149 + 33) mod 256;
+        return t;                              -- 0..255
+    end function;
+    function f_nebbi(x, y, lg : integer) return integer is
+        -- bilinear value noise; lattice cells are 2**lg texels, lattice
+        -- wraps mod (64/2**lg) in x and mod (32/2**lg) in y (seamless)
+        variable cx, cy, fx, fy, s : integer;
+        variable h00, h10, h01, h11, top, bot : integer;
+    begin
+        s   := 2 ** lg;
+        cx  := x / s;  cy := y / s;
+        fx  := x mod s;  fy := y mod s;
+        h00 := f_nebh(cx mod (64 / s),       cy mod (32 / s));
+        h10 := f_nebh((cx + 1) mod (64 / s), cy mod (32 / s));
+        h01 := f_nebh(cx mod (64 / s),       (cy + 1) mod (32 / s));
+        h11 := f_nebh((cx + 1) mod (64 / s), (cy + 1) mod (32 / s));
+        top := h00 * (s - fx) + h10 * fx;
+        bot := h01 * (s - fx) + h11 * fx;
+        return (top * (s - fy) + bot * fy) / (s * s);   -- 0..255
+    end function;
+    type t_neb is array(0 to 2047) of unsigned(3 downto 0);
+    function f_neb_init return t_neb is
+        variable v : t_neb;
+        variable n : integer;
+    begin
+        for y in 0 to 31 loop
+            for x in 0 to 63 loop
+                n := (3 * f_nebbi(x, y, 3) + f_nebbi(x * 2, y * 2, 3)) / 4;
+                v(y * 64 + x) := to_unsigned(n / 16, 4);
+            end loop;
+        end loop;
+        return v;
+    end function;
+    signal s_neb   : t_neb := f_neb_init;
+    signal s_neb_q : unsigned(3 downto 0) := (others => '0');
+
     -- ==== Night sky: gradient + hashed static starfield + sky flash ====
     -- star flag decided at stage 2 (one crisp dot per lit cell), piped to 6
     signal s_bgy   : unsigned(7 downto 0) := to_unsigned(40, 8);
@@ -314,12 +359,15 @@ architecture pyro of program_top is
     signal s_pad    : t_sl_u9 := (to_unsigned(40, 9),  to_unsigned(120, 9),
                                   to_unsigned(200, 9), to_unsigned(280, 9));
 
-    -- shell types (chrys = peony with forced heads + tight trailing spread)
+    -- shell types (chrys = peony with forced heads + tight trailing spread;
+    -- comet = a few max-speed straight streaks with bright heads and half
+    -- gravity -- the two-tone split recolors the trail behind the head)
     constant C_TY_PEONY   : unsigned(2 downto 0) := "000";
     constant C_TY_RING    : unsigned(2 downto 0) := "001";
     constant C_TY_WILLOW  : unsigned(2 downto 0) := "010";
     constant C_TY_PALM    : unsigned(2 downto 0) := "011";
     constant C_TY_CHRYS   : unsigned(2 downto 0) := "100";
+    constant C_TY_COMET   : unsigned(2 downto 0) := "101";
     -- per-shell pastel flag (K4 pastel bank -> desaturated palette half)
     signal s_sl_pas  : std_logic_vector(3 downto 0) := (others => '0');
 
@@ -888,6 +936,17 @@ begin
         end if;
     end process p_tbl;
 
+    -- ==== nebula ROM (2 EBR): free-running per-pixel read; the 1-2 px
+    -- lag against the color pipeline is a fixed shift of a wrapping
+    -- texture (starfield trick) ====
+    p_neb : process(clk)
+    begin
+        if rising_edge(clk) then
+            s_neb_q <= s_neb(to_integer(s_y_count(8 downto 4)
+                                        & s_x_count(8 downto 3)));
+        end if;
+    end process p_neb;
+
     -- ====================================================================
     -- Prefetch captures + span-boundary commit (tag pipeline).
     -- ====================================================================
@@ -1309,7 +1368,7 @@ begin
                         s_val_pre <= "11";
                     end if;
                     if s_sl_typ(s_ei) = C_TY_PALM or s_sl_typ(s_ei) = C_TY_CHRYS
-                       or v_idx < 6 then
+                       or s_sl_typ(s_ei) = C_TY_COMET or v_idx < 6 then
                         s_head_pre <= '1';
                     else
                         s_head_pre <= '0';
@@ -1365,6 +1424,8 @@ begin
                         s_dreffC <= v_d7(5 downto 0) & '0';               -- x2
                     elsif s_ctyp = C_TY_PALM then
                         s_dreffC <= v_d7 + resize(v_d7(6 downto 1), 7);   -- x1.5
+                    elsif s_ctyp = C_TY_COMET then
+                        s_dreffC <= '0' & v_d7(6 downto 1);               -- x0.5
                     else
                         s_dreffC <= v_d7;
                     end if;
@@ -1380,6 +1441,8 @@ begin
                         s_dreffP <= v_d7(5 downto 0) & '0';
                     elsif s_ctyp = C_TY_PALM then
                         s_dreffP <= v_d7 + resize(v_d7(6 downto 1), 7);
+                    elsif s_ctyp = C_TY_COMET then
+                        s_dreffP <= '0' & v_d7(6 downto 1);
                     else
                         s_dreffP <= v_d7;
                     end if;
@@ -1435,6 +1498,8 @@ begin
                             v_vf := to_unsigned(112, 8) + resize(s_h(12 downto 10), 8);
                         when C_TY_CHRYS =>   -- tight trailing shell of comets
                             v_vf := to_unsigned(88, 8) + resize(v_rv(4 downto 0), 8);
+                        when C_TY_COMET =>   -- max-speed straight streaks
+                            v_vf := to_unsigned(122, 8) + resize(s_h(2 downto 1), 8);
                         when others =>       -- peony: filled sphere
                             v_vf := to_unsigned(64, 8) + resize(v_rv, 8);
                     end case;
@@ -1658,9 +1723,12 @@ begin
                                 s_sl_cx(k)    <= unsigned(v_bxs(8 downto 0));
                                 s_sl_cy(k)    <= s_ground;
                                 s_sl_apy(k)   <= s_apbase + resize(v_seed(10 downto 6), 8);
-                                -- type: S7 bank pick; S8 mixes in ring shells
+                                -- type: S7 bank pick; S8 mixes in ring
+                                -- shells; comets salt both banks (~1 in 4)
                                 if s_ringOn = '1' and v_seed(2 downto 1) = "11" then
                                     v_t3 := C_TY_RING;
+                                elsif v_seed(8 downto 7) = "11" then
+                                    v_t3 := C_TY_COMET;
                                 elsif s_bankB = '0' then
                                     if v_seed(6) = '0' then v_t3 := C_TY_PEONY;
                                     else v_t3 := C_TY_CHRYS; end if;
@@ -1701,15 +1769,22 @@ begin
                                                         + to_unsigned(2, 3)
                                                         + resize(v_seed(15 downto 14), 3);
                                 end case;
-                                if s_hueSel = "010" then
+                                -- pastel bank is all-pastel; the Random
+                                -- bank salts in pastel shells (~1 in 4)
+                                -- for more color variety
+                                if s_hueSel = "010"
+                                   or (s_hueSel = "100"
+                                       and v_seed(10 downto 9) = "11") then
                                     s_sl_pas(k) <= '1';
                                 else
                                     s_sl_pas(k) <= '0';
                                 end if;
                                 s_sl_rsp(k) <= to_unsigned(2, 7);
-                                -- spark count (palm: few thick arms)
+                                -- spark count (palm/comet: few thick arms)
                                 if v_t3 = C_TY_PALM then
                                     s_sl_n(k) <= to_unsigned(10, 6);
+                                elsif v_t3 = C_TY_COMET then
+                                    s_sl_n(k) <= to_unsigned(14, 6);
                                 else
                                     v_n7 := to_unsigned(10, 7) + resize(s_dens, 7);
                                     if v_n7 > 60 then v_n7 := to_unsigned(60, 7); end if;
@@ -1868,9 +1943,19 @@ begin
     -- a single dot. Step cap keeps a bad request from hogging the frame.
     -- ====================================================================
     p_writer : process(clk)
+        variable v_wake : unsigned(1 downto 0);
     begin
         if rising_edge(clk) then
             s_pen_we <= '0';
+            -- wake value: one brightness step behind the head, so every
+            -- particle leaves a dimmer trail along its own motion vector
+            if s_w_val = "11" then
+                v_wake := "10";
+            elsif s_w_val = "10" then
+                v_wake := "01";
+            else
+                v_wake := s_w_val;
+            end if;
             if s_w_active = '0' then
                 if s_pl_stb = '1' then
                     s_wk_x   <= s_pl_fx;
@@ -1891,18 +1976,19 @@ begin
                         if s_wk_y < s_wk_ty then s_wk_y <= s_wk_y + 1;
                         elsif s_wk_y > s_wk_ty then s_wk_y <= s_wk_y - 1; end if;
                         s_w_step <= 1;
-                    when 1 =>      -- write the cell
+                    when 1 =>      -- write the cell (head bright, wake dim)
                         s_pen_we    <= '1';
-                        s_pen_wdata <= s_w_val;
                         s_pen_waddr <= f_addr(s_wk_y, s_wk_x);
                         if (s_wk_x = s_wk_tx and s_wk_y = s_wk_ty)
                            or s_w_cnt = to_unsigned(24, 5) then
+                            s_pen_wdata <= s_w_val;
                             if s_w_head = '1' then
                                 s_w_step <= 2;
                             else
                                 s_w_active <= '0';
                             end if;
                         else
+                            s_pen_wdata <= v_wake;
                             s_w_cnt  <= s_w_cnt + 1;
                             s_w_step <= 0;
                         end if;
@@ -1992,11 +2078,14 @@ begin
                 s_d_u <= to_unsigned(494, 10);
                 s_d_v <= to_unsigned(548, 10);
             elsif s_insq6 = '1' and s_blk = '0' then
-                -- night sky: blue-tinted gradient + ambient detonation flash
+                -- night sky: blue gradient + nebula clouds (moonlit: a
+                -- touch brighter and grayer where the cloud is dense)
+                -- + ambient detonation flash
                 s_d_y <= resize(s_bgy, 10)
+                         + resize(s_neb_q & "00", 10)
                          + resize(s_flash & "000000", 10);
-                s_d_u <= to_unsigned(498, 10);
-                s_d_v <= to_unsigned(536, 10);
+                s_d_u <= to_unsigned(498, 10) + resize(s_neb_q(3 downto 2), 10);
+                s_d_v <= to_unsigned(536, 10) - resize(s_neb_q(3 downto 2), 10);
             else
                 s_d_y <= (others => '0');
                 s_d_u <= to_unsigned(512, 10);
