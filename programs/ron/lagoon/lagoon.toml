@@ -1,6 +1,6 @@
 [program]
 program_id = "com.bluecondition.lagoon"
-program_version = "1.2.1"
+program_version = "1.3.1"
 abi_version = ">=1.0,<2.0"
 program_name = "Lagoon"
 author = "bluecondition"
@@ -19,7 +19,7 @@ parameter_id = "rotary_potentiometer_1"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 300
+initial_value = 517
 display_min_value = 0
 display_max_value = 95
 name_label = "Ripple"
@@ -30,7 +30,7 @@ parameter_id = "rotary_potentiometer_2"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 250
+initial_value = 453
 display_min_value = 0
 display_max_value = 255
 name_label = "Waves"
@@ -41,7 +41,7 @@ parameter_id = "rotary_potentiometer_3"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 640
+initial_value = 813
 display_min_value = -100
 display_max_value = 100
 name_label = "Speed"
@@ -52,7 +52,7 @@ parameter_id = "rotary_potentiometer_4"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 480
+initial_value = 256
 display_min_value = 0
 display_max_value = 100
 name_label = "Scale"
@@ -63,7 +63,7 @@ parameter_id = "rotary_potentiometer_5"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 550
+initial_value = 644
 display_min_value = 0
 display_max_value = 100
 name_label = "Tint"
@@ -74,7 +74,7 @@ parameter_id = "rotary_potentiometer_6"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 450
+initial_value = 460
 display_min_value = 0
 display_max_value = 100
 name_label = "Caustics"
@@ -92,13 +92,13 @@ initial_value_label = "Aqua"
 parameter_id = "toggle_switch_8"
 name_label = "Glitter"
 value_labels = ["Off", "On"]
-initial_value_label = "On"
+initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
 name_label = "Murk"
 value_labels = ["Off", "On"]
-initial_value_label = "Off"
+initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"

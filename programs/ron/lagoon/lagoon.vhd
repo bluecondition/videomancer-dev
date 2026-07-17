@@ -6,12 +6,15 @@
 --
 --   offset(x,y) = sin(swell) * Waves                     (big per-line swell)
 --               + [tri(r1) + tri(r2)/2] * Ripple          (fine 2D interference)
---   caustic     = tri(c1 + 32*tri(r1)) + tri(c2 - 32*tri(r2)) + dither;
+--   caustic     = tri(c1 + 32*tri(r1)) + tri(c2 - 32*tri(r2)) + dither,
+--                 with each line's caustic phase seeded +base_off*fc so the
+--                 light field SWAYS WITH the swell-displaced picture;
 --                 highlight where it tops a K6 threshold. The ripple waves
 --                 PHASE-MODULATE the caustic waves, bending the interference
---                 lattice into writhing curves, and a small +-32 hash dither
---                 (x bits ^ line ^ frame LFSR) roughens the contour edges --
---                 organic instead of a rigid diamond grid.
+--                 lattice into writhing curves, and a small +-16 hash dither
+--                 roughens the contour edges -- organic instead of a rigid
+--                 diamond grid. The dither uses x bits >= 1 and a per-LINE
+--                 LFSR (no pixel/line LSBs: those made a checkerboard).
 --   grade       = chroma lerp toward aqua/abyss target, depth-gradient murk
 --
 -- Controls:
@@ -225,6 +228,7 @@ architecture lagoon of program_top is
     signal s_fyc2        : unsigned(11 downto 0) := (others => '0');
     signal s_thr         : signed(10 downto 0) := to_signed(528, 11);
     signal s_lfsr        : unsigned(15 downto 0) := x"ACE1";
+    signal s_lfsr_ln     : unsigned(15 downto 0) := x"5A5A";  -- steps per line
 
     -- Temporal (frame) phases and their per-line running copies
     signal s_rip_f1, s_rip_f2   : unsigned(15 downto 0) := (others => '0');
@@ -259,6 +263,10 @@ architecture lagoon of program_top is
     signal s_swh_tri  : signed(9 downto 0) := (others => '0');
     signal s_prod_sw  : signed(18 downto 0) := (others => '0');
     signal s_base_off : signed(10 downto 0) := (others => '0');
+    -- Swell-tracking caustic seed offsets: base_off (px) * fc (phase/px),
+    -- mod 2^16 -- the caustic field sways with the displaced picture.
+    signal s_prod_c1  : signed(23 downto 0) := (others => '0');
+    signal s_prod_c2  : signed(24 downto 0) := (others => '0');
 
     --------------------------------------------------------------------------
     -- Per-pixel pipeline (E2..E8)
@@ -413,11 +421,9 @@ begin
                         s_base_off <= resize(shift_right(s_prod_sw, 8), 11);
                     end if;
                     s_lstep <= s_lstep + 1;
-                when 4 =>       -- seed per-pixel accumulators; murk value
-                    s_acc_r1 <= s_rip_l1;
-                    s_acc_r2 <= s_rip_l2;
-                    s_acc_c1 <= s_caus_l1;
-                    s_acc_c2 <= s_caus_l2;
+                when 4 =>       -- caustic swell-tracking multiplies; murk
+                    s_prod_c1 <= s_base_off * signed('0' & s_fc1);
+                    s_prod_c2 <= s_base_off * signed('0' & s_fc2);
                     if s_murk_en = '1' then
                         if s_murk_acc(15 downto 6) > to_unsigned(288, 10) then
                             s_murk_sub <= to_unsigned(288, 10);
@@ -428,6 +434,14 @@ begin
                         s_murk_sub <= (others => '0');
                     end if;
                     s_lstep <= s_lstep + 1;
+                when 5 =>       -- seed per-pixel accumulators; the caustic
+                                -- seeds carry the swell offset so the light
+                                -- pattern rides the displaced picture
+                    s_acc_r1 <= s_rip_l1;
+                    s_acc_r2 <= s_rip_l2;
+                    s_acc_c1 <= s_caus_l1 + unsigned(s_prod_c1(15 downto 0));
+                    s_acc_c2 <= s_caus_l2 + unsigned(s_prod_c2(15 downto 0));
+                    s_lstep  <= s_lstep + 1;
                 when others =>
                     null;
             end case;
@@ -554,6 +568,11 @@ begin
                 s_sw_l     <= s_sw_l + resize(s_fsw, 16);
                 s_murk_acc <= s_murk_acc + resize(s_murk_step, 16);
                 s_line_cnt <= s_line_cnt + 1;
+                if s_lfsr_ln(0) = '1' then
+                    s_lfsr_ln <= ('0' & s_lfsr_ln(15 downto 1)) xor x"B400";
+                else
+                    s_lfsr_ln <= '0' & s_lfsr_ln(15 downto 1);
+                end if;
                 s_lstep    <= (others => '0');
                 -- Latch the finished line's average colour for the left fill
                 -- (that line is the one read back during the next line);
@@ -647,11 +666,11 @@ begin
             -- (+-32, reseeded per frame) to roughen the contour edges
             s4_rip <= s3_fine * signed('0' & s_rip_k(9 downto 2));
             s4_q   <= signed(resize(s3_x, 13)) + resize(s_base_off, 13);
-            v_h4   := s3_x(3 downto 0) xor s3_x(7 downto 4)
-                      xor s_lfsr(3 downto 0) xor s_line_cnt(3 downto 0);
+            v_h4   := s3_x(4 downto 1) xor s3_x(8 downto 5)
+                      xor s_lfsr_ln(3 downto 0);
             s4_caus <= resize(s3_c1, 11) + resize(s3_c2, 11)
                      + shift_left(resize(signed('0' & v_h4)
-                                         - to_signed(8, 5), 11), 2);
+                                         - to_signed(8, 5), 11), 1);
             s4_g <= s3_g;
 
             -- E5: read address add + clamp; highlight threshold

@@ -33,6 +33,15 @@ sidewinder's dual-bank line-buffer displacement engine.
      the v1.0 grid read as too rigid.
    - v1.1.1: brightness halved per HW feedback — 1× gain capped at +192
      (was 2× / +384), glitter cores +256 (was +511).
+   - v1.2.2: the dither's pixel/line LSBs (x·bit0 ⊕ line·bit0) showed as a
+     checkerboard at caustic contours on HW — now x bits ≥ 1 (2-px minimum
+     feature) ⊕ a per-line-stepped LFSR (random vertical phase), amplitude
+     ±16, so it reads as soft grain.
+   - v1.3.0: the caustic field now SWAYS WITH the swell — each line's
+     caustic phase is seeded +base_off×fc (two line-rate multiplies in the
+     hblank sequencer; 16-bit phase wrap makes the mod arithmetic exact),
+     so the light pattern rides the displaced picture instead of staying
+     bolted to screen space. Cost ~570 LCs (72% → 79% util).
    - *Glitter* (S8): caustic peaks above a fixed level become blown-white
      cores; a frame LFSR xor'd with phase bits lights ~1/4 of the cores per
      frame for a twinkle.
@@ -97,11 +106,13 @@ warm/olive in sim — correct on hardware.
 - **Waterline mode** (top of screen dry, effect ramps in below a K-set
   line) — murk accumulator already gives the vertical ramp hook.
 
-## Timing / build (v1.2.1, 2026-07-11)
+## Timing / build (v1.3.0, 2026-07-12)
 
-All 6 configs routed at full clock, ~5500 LCs (72%), 23 EBR. Build with
-`SEED=9 ./build_programs.sh ron lagoon`. v1.2.1: every config passed
-first-try at seed 9 (80.2–84.9 MHz), no retry-cap accepts to re-verify. Seeds MOVE whenever the netlist changes;
+All 6 configs routed at full clock, ~6080 LCs (79%), 23 EBR. Build with
+`SEED=9 ./build_programs.sh ron lagoon`. v1.3.0 seeds: HD Analog 11 (79.37),
+HD HDMI 14 (75.03 routed — completed on the final retry, re-verified
+manually), HD Dual 9 (80.22). Utilization is back near the congestion zone;
+the next feature should budget for a cut or a seed hunt. Seeds MOVE whenever the netlist changes;
 only mid-sweep completions are trustworthy without re-verification (v1.1's
 hd_hdmi completed on the final retry and needed a manual re-route to confirm).
 
@@ -119,4 +130,10 @@ Timing-closure history (44 -> pass on HD configs):
 
 ## Status
 
-- v1.0 built + packaged 2026-07-11 (out/rev_b/ron/lagoon.vmprog); not HW-tested.
+- **v1.3.1 COMPLETE 2026-07-12** — HW-validated and user-approved through five
+  rounds of hardware iteration (caustic brightness, checkerboard dither,
+  left-edge fill + seam, swell-tracking caustics).
+- Defaults are the user's hardware-tuned settings: Ripple 48px, Waves 113px,
+  Speed 59%, Scale 25%, Tint 63%, Caustics 45%, Aqua, Glitter Off, Murk On,
+  Calm, Depth 100%.
+- Packaged at out/rev_b/ron/lagoon.vmprog.
