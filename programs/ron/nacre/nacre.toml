@@ -1,0 +1,218 @@
+# NACRE -- concentric circles, each carrying its OWN gradient.
+#
+# A fork of Hypnos Cascade whose whole subject is the shading.  Move the
+# centre (K1/K2) and the innermost circle leads; each outer ring holds until
+# the one inside reaches it, then is shoved outward -- rings cascade one by
+# one and never overlap.  What is new is the fill: every ring's gradient
+# belongs to THAT ring, measured between its own circle and the circle
+# nested inside it, so it SQUEEZES where the inner circle crowds it and
+# SWELLS where the gap opens -- smooth round contours morphing between the
+# two circles as the cascade moves.  No incoming video; pure black & white.
+#
+# Controls: K1/K2 Centre X/Y, K3 Period, K4 Steps (quantise the gradient);
+# S7 Glide, S8 Cascade, S9 Ramp (Steps/Smooth), S10 Catch-Up (Stay/Home).
+# K5/K6/P12 and S11 are spare.
+
+[program]
+program_id = "com.bluecondition.nacre"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+program_name = "Nacre"
+author = "bluecondition"
+license = "GPL-3.0"
+categories = ["Illusion", "Optics", "Pattern"]
+program_type = "synthesis"
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+description = "Concentric circles where every ring carries its own gradient, squeezing and swelling with the cascade"
+url = "https://github.com/bluecondition/videomancer-dev"
+
+# --- Rotary Potentiometers (Knobs 1-6) ---
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 512            # centred (detent = frame centre)
+display_min_value = -100
+display_max_value = 100
+name_label = "Center X"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 512            # centred (detent = frame centre)
+display_min_value = -100
+display_max_value = 100
+name_label = "Center Y"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 430            # ring density: ~0.5 ring across frame -> alias limit
+display_min_value = 0
+display_max_value = 100
+name_label = "Period"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 0              # STEPS: classic hard / 2..64 grey levels per ring
+display_min_value = 0          # (only used when S9 = Steps)
+display_max_value = 100
+name_label = "Steps"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 512            # SPIRAL detent = pure circles (CCW/CW = Vertigo twist)
+display_min_value = -100
+display_max_value = 100
+name_label = "Spare"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 512            # DUTY ~50% (band A : band B width)
+display_min_value = 0
+display_max_value = 100
+name_label = "Spare"
+suffix_label = "%"
+
+# --- Toggle Switches (7-11, binary) ---
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Glide"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Cascade"
+value_labels = ["Uniform", "Cascade"]
+initial_value_label = "Cascade"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Ramp"
+value_labels = ["Steps", "Smooth"]
+initial_value_label = "Smooth"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Catch-Up"
+value_labels = ["Stay", "Home"]
+initial_value_label = "Home"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Spare"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+# --- Linear Potentiometer (Fader 12) ---
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 0              # Z / ZOOM dolly -- bottom = base period, push = fly in
+display_min_value = 0
+display_max_value = 100
+name_label = "Spare"
+suffix_label = "%"
+
+# --- Presets ---
+
+[[preset]]
+name = "Cascade"                # centred rings; move the centre to see them push
+rotary_potentiometer_1 = 512    # Center X (centred)
+rotary_potentiometer_2 = 512    # Center Y (centred)
+rotary_potentiometer_3 = 430    # Period
+rotary_potentiometer_4 = 0      # Gradient: hard
+rotary_potentiometer_5 = 512    # (spare)
+rotary_potentiometer_6 = 512    # Duty 50%
+toggle_switch_7 = 1            # Glide on
+toggle_switch_8 = 1            # Cascade
+toggle_switch_9 = 1            # Ramp: Smooth
+toggle_switch_10 = 1          # Catch-Up: Home (glide back concentric)
+toggle_switch_11 = 0
+linear_potentiometer_12 = 0
+
+[[preset]]
+name = "Stay Dragged"           # cascade that freezes offset instead of catching up
+rotary_potentiometer_1 = 512
+rotary_potentiometer_2 = 512
+rotary_potentiometer_3 = 430
+rotary_potentiometer_4 = 0
+rotary_potentiometer_5 = 512
+rotary_potentiometer_6 = 512
+toggle_switch_7 = 1            # Glide on
+toggle_switch_8 = 1            # Cascade
+toggle_switch_9 = 0
+toggle_switch_10 = 0          # Catch-Up: Stay (hold the dragged nest)
+toggle_switch_11 = 0
+linear_potentiometer_12 = 0
+
+[[preset]]
+name = "Fine Rings"             # many close rings -> longer cascade chain
+rotary_potentiometer_1 = 512
+rotary_potentiometer_2 = 512
+rotary_potentiometer_3 = 680    # higher density
+rotary_potentiometer_4 = 0
+rotary_potentiometer_5 = 512
+rotary_potentiometer_6 = 512
+toggle_switch_7 = 1
+toggle_switch_8 = 1            # Cascade
+toggle_switch_9 = 0
+toggle_switch_10 = 1          # Home
+toggle_switch_11 = 0
+linear_potentiometer_12 = 0
+
+[[preset]]
+name = "Gradient Waves"         # 8-ring luma ramp on fine rings -- soft target
+rotary_potentiometer_1 = 512
+rotary_potentiometer_2 = 512
+rotary_potentiometer_3 = 680    # fine rings
+rotary_potentiometer_4 = 700    # Gradient: 8-ring fold
+rotary_potentiometer_5 = 512
+rotary_potentiometer_6 = 512
+toggle_switch_7 = 1            # Glide on
+toggle_switch_8 = 1            # Cascade
+toggle_switch_9 = 0
+toggle_switch_10 = 1          # Home
+toggle_switch_11 = 1          # Smooth ramp
+linear_potentiometer_12 = 0
+
+[[preset]]
+name = "Nacre"          # smooth per-ring ramp riding the cascade
+rotary_potentiometer_1 = 512
+rotary_potentiometer_2 = 512
+rotary_potentiometer_3 = 430
+rotary_potentiometer_4 = 0
+rotary_potentiometer_5 = 512
+rotary_potentiometer_6 = 512
+toggle_switch_7 = 1
+toggle_switch_8 = 1            # Cascade
+toggle_switch_9 = 1            # Ramp: Smooth (per-ring, edge-anchored)
+toggle_switch_10 = 1          # Home
+toggle_switch_11 = 0
+linear_potentiometer_12 = 0
