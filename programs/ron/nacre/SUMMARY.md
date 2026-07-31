@@ -134,9 +134,13 @@ multiple of 4 and a remainder — halving the mux depth.
 | **HD Dual** | **61.02 MHz (best of 6 seeds)** | 74.25 | **FAILS** |
 | SD Dual | 66.95 MHz (seed 1) | 27 | pass |
 
-**HD Dual does not close.** It closed at 75.60 MHz before the round-contour
-work, so the finer grid cost it — and 61 MHz is an 18 % miss, far outside
-seed noise, so it needs a path fix rather than reseeding. **The packaged
+**HD Dual does not close, and it is a ROUTING failure, not a timing one.**
+nextpnr's router converges from 3383 overused wires down to **2 and then
+stalls there for 230 iterations** — at 7454/7680 (97 %) the dual config's
+extra core logic leaves no tracks to finish with. Pipelining cannot fix that;
+only LC headroom can. It closed at 75.60 MHz before the round-contour work,
+so the finer grid is what pushed it over. Check the router log for a stuck
+`overused=` count before attributing a dual-config miss to logic depth. **The packaged
 `out/rev_b/ron/nacre.vmprog` therefore contains a failing hd_dual bitstream
 and must not be treated as shippable** (the builder accepts a best-effort
 bitstream after its seed retries; see [[build_timing_verification]]).
