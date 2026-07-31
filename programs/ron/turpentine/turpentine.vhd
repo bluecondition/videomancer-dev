@@ -1,68 +1,46 @@
 -- turpentine.vhd
 --
--- TURPENTINE v2 -- chroma as pigment: the picture repainted in oils.
+-- TURPENTINE v3 -- chroma as pigment: the picture rebuilt from paint dabs.
 --
--- v1 (chroma-directed feedback smear) read as subtle mush; scrapped.
--- v2 keeps the fiction -- chroma is paint -- but goes bold: every control
--- makes an immediately legible change to the image.
+-- v1 (chroma-directed smear) and v2 (posterize + relief) both read as
+-- filters -- the image stayed the image. v3 goes structural: the video is
+-- RECONSTRUCTED from discrete dabs of paint on a canvas. A cell grid
+-- samples the picture; each cell gets one glossy blob of pigment whose
+-- colour is the cell's hue quantized to a limited palette and whose SIZE
+-- is the cell's saturation (paint load). Gray cells get NO paint -- the
+-- canvas shows through. Every control changes the structure of the
+-- painting, not a gain:
 --
--- Chroma is a 2D vector. v2 reads it as PIGMENT IDENTITY and LOAD:
---   hue angle  -> which pigment from a limited palette (quantized sectors)
---   saturation -> how much paint is loaded there (quantized rings; below
---                 a floor = bare paper)
--- The image is re-rendered as a painting: flat pigment regions, tonal
--- bands, brush strokes oriented along each region's hue, thick-paint
--- relief lit by a movable light, dark outlines at pigment boundaries.
+--   K1 Pigments  2..32 hue sectors -- the palette collapses
+--   K2 Dab       8/16/32/64 px cells -- pointillism -> chunky impasto
+--   K3 Light     highlight position on every dab (S11 Orbit = auto)
+--   K4 Scatter   grid -> hand-thrown chaos (position + size jitter)
+--   K5 Load      how much saturation earns paint: everything painted ->
+--                only vivid colours survive as sparse dots on bare canvas
+--   K6 Smear     dabs stretch into long horizontal knife strokes
+--   P12 Solvent  dry video -> dabs over the photo -> the photo strips
+--                away to bare canvas -> glossy varnish climax
+--   S7 Palette   Free (sampled saturation) / Vivid (full-load pigments)
+--   S8 Canvas    Paper (warm white) / Velvet (near-black)
+--   S9 Shape     Round dabs / Square tiles (mosaic)
+--   S10 Rim      dark contour ring around every dab
+--   S11 Orbit    light auto-rotation
 --
--- P12 "Solvent" = master dry video -> full painting crossfade (0 = exact
--- dry by construction); past ~80% a VARNISH zone deepens the result
--- (outline boost + stronger relief).
+-- Architecture: streaming, C_LATENCY = 9 (render E1..E6 + a 3-clock
+-- inline dry/wet lerp). The v2 hue-sector quantizer (octant fold + parallel
+-- tangent compares, no atan2) runs on every pixel but is USED once per
+-- cell: on the first line of each cell row the cell-centre pixel's
+-- {luma8, idx5, ring2, gray} is written to a 256x16 cell-sample BRAM
+-- (1 EBR -- the whole program uses 1). Rendering never touches it
+-- directly: each cell's paint is fully precomputed during the previous
+-- cell's 8 pixel phases (BRAM land -> palette angle -> registered qsin ->
+-- 2 multiplies -> colour/threshold registers), redshift prefetch style,
+-- with an hblank sequence priming cell 0. Per PIXEL the dab test is just
+-- |x-cx| -> squared-distance LUT -> compare against per-cell-per-line
+-- thresholds (body / rim / highlight) -- shallow, fast logic.
 --
--- Controls (all deliberately high-impact):
---   K1 Pigments  32/16/8/4/2 hue sectors (index bit-mask -- the picture
---                collapses into fewer and fewer colors)
---   K2 Relief    impasto depth (flat poster -> deeply embossed paint)
---   K3 Light     light direction, highlights sweep (S11 = auto orbit)
---   K4 Stroke    brush texture amplitude + pitch, carved into the relief,
---                oriented along each region's hue octant
---   K5 Wash      oil -> watercolour (pigment thins, luma lifts to paper)
---   K6 Outline   dark contour lines at pigment boundaries (paint-by-number)
---   S7 Palette   Free (original saturation, quantized) / Vivid (full-load
---                pigments -- bold false-colour poster)
---   S8 Canvas    paper tooth in the relief
---   S9 Tone      luma posterized into wobbled tonal bands
---   S10 Ink      outline colour Black / Chalk
---   S11 Orbit    light auto-rotation (keeps static input alive)
---
--- Architecture: single streaming pipeline E1..E13 + 4-clock interpolator
--- dry/wet mix, C_LATENCY = 17.
---   * Hue sectors WITHOUT atan2/CORDIC ROMs: fold (cu,cv) to the first
---     octant (signs + swap = 3 bits), then two tangent threshold tests
---     (tan 22.5/11.25/33.75 as shift-add sums of the major component,
---     all three compares in parallel) = 2 more bits -> 5-bit sector
---     index, 32 uniform sectors. Odd octants bit-invert the sub-index.
---   * Palette reconstruction: sector-center angle -> the shared 64-entry
---     quarter-wave qsin (angle registered E6, ROM outputs registered E7,
---     mercurial rule), then 2 multiplies sat_q x sin/cos. K1 masks the
---     index and re-centers the angle, so fewer pigments = wider sectors.
---   * Relief: paint thickness T = pigment-load base + tonal-band term +
---     hue-oriented triangle strokes + canvas hash. One packed row buffer
---     {T8, idx5, gray} 2048x14 (8 EBR, canonical 1W1R, write lagging read
---     = previous-row values, redshift single-bank trick). gx from x-delay
---     registers, gy vs the row above; shade = (gx*lx + gy*ly) >>> rsh
---     (2 multiplies); glint highlight above a threshold.
---   * Outlines: masked pigment index compared against left and above
---     neighbours (index rides the row buffer), 1-px dilate, shift-blend
---     toward ink (black/chalk) in 4 K6 steps.
---   * Dry/wet: 3x interpolator_u on a Solvent ramp (shearline pattern).
---
--- Multiplies (7): 2 palette (u8 x s8), 2 shading (s9 x s8), 3 in the
--- interpolators. Everything else is shift-add. EBR: 8 of 32.
---
--- Timing discipline (house rules): multiplies alone in their stage with
--- registered inputs; BRAM reads land in FFs; qsin angle and output
--- registered; per-frame terms built one add per sequencer step; the
--- E5 sector compares are all parallel against E4-registered thresholds.
+-- Multiplies: 2 palette (u8 x s8, once per cell) + 3 mix (u8 x s11).
+-- EBR: 1. Everything else is shift-add.
 --------------------------------------------------------------------------------
 
 library ieee;
@@ -76,7 +54,7 @@ use work.video_stream_pkg.all;
 
 architecture turpentine of program_top is
 
-    constant C_LATENCY : integer := 17;
+    constant C_LATENCY : integer := 9;
 
     ----------------------------------------------------------------------
     -- helpers
@@ -117,6 +95,37 @@ architecture turpentine of program_top is
         return resize(unsigned(v11(8 downto 0)), 9);
     end function;
 
+    -- |s8| -> u6 clamped to 0..31 (squared-distance LUT domain)
+    function f_abs31(v : signed(7 downto 0)) return unsigned is
+        variable v9 : signed(8 downto 0);
+    begin
+        v9 := resize(v, 9);
+        if v9 < 0 then
+            v9 := -v9;
+        end if;
+        if v9 > 31 then
+            v9 := to_signed(31, 9);
+        end if;
+        return resize(unsigned(v9(4 downto 0)), 5);
+    end function;
+
+    -- squared-distance LUT, 32 entries (logic ROM)
+    type t_sq is array (0 to 31) of unsigned(9 downto 0);
+    constant C_SQ : t_sq := (
+        to_unsigned(  0, 10), to_unsigned(  1, 10), to_unsigned(  4, 10), to_unsigned(  9, 10),
+        to_unsigned( 16, 10), to_unsigned( 25, 10), to_unsigned( 36, 10), to_unsigned( 49, 10),
+        to_unsigned( 64, 10), to_unsigned( 81, 10), to_unsigned(100, 10), to_unsigned(121, 10),
+        to_unsigned(144, 10), to_unsigned(169, 10), to_unsigned(196, 10), to_unsigned(225, 10),
+        to_unsigned(256, 10), to_unsigned(289, 10), to_unsigned(324, 10), to_unsigned(361, 10),
+        to_unsigned(400, 10), to_unsigned(441, 10), to_unsigned(484, 10), to_unsigned(529, 10),
+        to_unsigned(576, 10), to_unsigned(625, 10), to_unsigned(676, 10), to_unsigned(729, 10),
+        to_unsigned(784, 10), to_unsigned(841, 10), to_unsigned(900, 10), to_unsigned(961, 10));
+
+    function f_sq(v : unsigned(4 downto 0)) return unsigned is
+    begin
+        return C_SQ(to_integer(v));
+    end function;
+
     -- quarter-wave folded sine, 64-entry logic ROM (fireworks/mercurial)
     type t_qsin is array(0 to 63) of signed(9 downto 0);
     constant C_QSIN : t_qsin := (
@@ -146,7 +155,7 @@ architecture turpentine of program_top is
         end if;
     end function;
 
-    -- value-noise hash, split across two pipeline stages (inferno lesson)
+    -- value-noise hash, split across two stages (inferno lesson)
     function f_hash_a(cx, cy : unsigned(7 downto 0);
                       seed   : unsigned(15 downto 0)) return unsigned is
         variable h16 : unsigned(15 downto 0);
@@ -176,29 +185,50 @@ architecture turpentine of program_top is
     signal s_k4  : unsigned(9 downto 0) := (others => '0');
     signal s_k5  : unsigned(9 downto 0) := (others => '0');
     signal s_k6  : unsigned(9 downto 0) := (others => '0');
-    signal s_vivid   : std_logic := '0';                       -- S7
-    signal s_canv_on : std_logic := '1';                       -- S8
-    signal s_tone_on : std_logic := '1';                       -- S9
-    signal s_chalk   : std_logic := '0';                       -- S10
-    signal s_orbit   : std_logic := '0';                       -- S11
+    signal s_vivid  : std_logic := '0';                        -- S7
+    signal s_velvet : std_logic := '0';                        -- S8
+    signal s_square : std_logic := '0';                        -- S9
+    signal s_rim_on : std_logic := '1';                        -- S10
+    signal s_orbit  : std_logic := '0';                        -- S11
 
     signal s_lang      : unsigned(9 downto 0) := (others => '0');
     signal s_orbit_acc : unsigned(9 downto 0) := (others => '0');
     signal s_lx8, s_ly8 : signed(7 downto 0) := to_signed(90, 8);
+    signal s_ox, s_oy   : signed(5 downto 0) := (others => '0');
 
-    signal s_mix10  : unsigned(9 downto 0) := (others => '0'); -- solvent
+    signal s_mix10  : unsigned(9 downto 0) := (others => '0');
+    signal s_bgm    : unsigned(1 downto 0) := (others => '0'); -- bg morph
     signal s_varn   : std_logic := '0';
     signal s_mask5  : unsigned(4 downto 0) := (others => '1');
     signal s_half10 : unsigned(9 downto 0) := to_unsigned(16, 10);
-    signal s_rsh    : natural range 3 to 7 := 5;               -- relief
-    signal s_amp_on : std_logic := '1';                        -- stroke
-    signal s_ash    : natural range 0 to 2 := 1;
-    signal s_psh    : natural range 1 to 3 := 2;
-    signal s_liftsh : natural range 0 to 3 := 0;               -- wash lift
-    signal s_ol_lvl : unsigned(1 downto 0) := (others => '0'); -- outline
-    signal s_ink_y  : unsigned(9 downto 0) := to_unsigned(96, 10);
-    -- per-frame pigment-load LUTs (wash/vivid folded in by the sequencer)
+
+    signal s_csh    : natural range 3 to 6 := 4;               -- cell size
+    signal s_cmask  : unsigned(5 downto 0) := to_unsigned(15, 6);
+    signal s_chalf  : unsigned(5 downto 0) := to_unsigned(8, 6);
+    signal s_r3, s_r2, s_r1 : unsigned(4 downto 0) := (others => '0');
+    signal s_gate2  : unsigned(1 downto 0) := "01";            -- load gate
+    signal s_sparse : std_logic := '0';
+    signal s_smr    : natural range 0 to 3 := 0;               -- smear
+    signal s_sct    : unsigned(1 downto 0) := "00";            -- scatter
+    -- Scatter throw range, derived from the cell size so a dab can NEVER
+    -- cross its own cell edge (a dab is only drawn within its own cell's
+    -- pixels, so an overflowing dab renders as a clipped half-moon). The
+    -- throw is chalf>>z and the radius is scaled to match, so Scatter
+    -- reads as "hand-thrown = smaller, wandering dabs" instead of
+    -- pac-men. jsl/jsr: one is always 0 (signed shift by csh-4-z).
+    signal s_jz  : std_logic := '1';                           -- throw off
+    signal s_jsl : natural range 0 to 2 := 0;
+    signal s_jsr : natural range 0 to 4 := 0;
+    signal s_glb    : unsigned(6 downto 0) := to_unsigned(96, 7); -- gloss
+
+    -- per-frame pigment-load LUT (vivid folded in)
     signal s_sq1, s_sq2, s_sq3 : unsigned(7 downto 0) := (others => '0');
+
+    -- canvas + rim colours (S8-dependent)
+    signal s_cv_y  : unsigned(9 downto 0) := to_unsigned(816, 10);
+    signal s_cv_u  : unsigned(9 downto 0) := to_unsigned(502, 10);
+    signal s_cv_v  : unsigned(9 downto 0) := to_unsigned(520, 10);
+    signal s_rim_y : unsigned(9 downto 0) := to_unsigned(96, 10);
 
     signal s_seq   : unsigned(3 downto 0) := (others => '0');
     signal s_qs_a  : unsigned(9 downto 0) := (others => '0');
@@ -208,15 +238,10 @@ architecture turpentine of program_top is
     signal s_prev_vsync_n : std_logic := '1';
     signal s_prev_hsync_n : std_logic := '1';
 
-    -- saturation ring thresholds (sat9 scale, 0..766)
+    -- saturation ring thresholds (sat9 scale)
     constant C_GRAY : unsigned(9 downto 0) := to_unsigned(56, 10);
     constant C_RLO  : unsigned(9 downto 0) := to_unsigned(160, 10);
     constant C_RHI  : unsigned(9 downto 0) := to_unsigned(320, 10);
-    -- pigment-load thickness per ring (paper, r1, r2, r3)
-    constant C_T0 : unsigned(7 downto 0) := to_unsigned(24, 8);
-    constant C_T1 : unsigned(7 downto 0) := to_unsigned(64, 8);
-    constant C_T2 : unsigned(7 downto 0) := to_unsigned(104, 8);
-    constant C_T3 : unsigned(7 downto 0) := to_unsigned(152, 8);
 
     ----------------------------------------------------------------------
     -- position / line bookkeeping
@@ -224,102 +249,120 @@ architecture turpentine of program_top is
     signal s_x_count : unsigned(10 downto 0) := (others => '0');
     signal s_aline   : unsigned(9 downto 0) := (others => '0');
     signal s_seen    : std_logic := '0';
-    signal s_ln0     : std_logic := '1';
+    signal s_cyi     : unsigned(7 downto 0) := (others => '0');
+    signal s_dyb     : signed(6 downto 0) := (others => '0');  -- y - centre
+    signal s_capline : std_logic := '0';                       -- cell row ln0
 
     ----------------------------------------------------------------------
-    -- E1..E7: sector index, rings, strokes, palette angle
+    -- hue-sector quantizer lanes E1..E5 (v2 machinery, feeds capture)
     ----------------------------------------------------------------------
     signal s_in_y, s_in_u, s_in_v : unsigned(9 downto 0) := (others => '0');
     signal px1 : unsigned(10 downto 0) := (others => '0');
 
     signal au2, av2 : unsigned(8 downto 0) := (others => '0');
     signal su2, sv2 : std_logic := '0';
-    signal px2 : unsigned(10 downto 0) := (others => '0');
 
     signal a3, b3 : unsigned(8 downto 0) := (others => '0');
     signal oct3   : unsigned(2 downto 0) := (others => '0');
     signal sat3   : unsigned(9 downto 0) := (others => '0');
-    signal px3 : unsigned(10 downto 0) := (others => '0');
 
     signal t22_4, t11_4, t33_4 : unsigned(8 downto 0) := (others => '0');
     signal b4   : unsigned(8 downto 0) := (others => '0');
     signal oct4 : unsigned(2 downto 0) := (others => '0');
     signal sat4 : unsigned(9 downto 0) := (others => '0');
-    signal px4 : unsigned(10 downto 0) := (others => '0');
 
     signal idx5  : unsigned(4 downto 0) := (others => '0');
     signal gray5 : std_logic := '0';
     signal ring5 : unsigned(1 downto 0) := (others => '0');
-    signal px5 : unsigned(10 downto 0) := (others => '0');
 
-    signal m6    : unsigned(4 downto 0) := (others => '0');
-    signal ang6  : unsigned(9 downto 0) := (others => '0');
-    signal sq6   : unsigned(7 downto 0) := (others => '0');
-    signal tri6  : signed(6 downto 0) := (others => '0');
-    signal ch_a6 : unsigned(11 downto 0) := (others => '0');
-    signal gray6 : std_logic := '0';
-    signal ring6 : unsigned(1 downto 0) := (others => '0');
-    signal px6 : unsigned(10 downto 0) := (others => '0');
-
-    signal cs7, sn7 : signed(7 downto 0) := (others => '0');
-    signal sq7   : unsigned(7 downto 0) := (others => '0');
-    signal tri7  : signed(6 downto 0) := (others => '0');
-    signal cnv7  : signed(4 downto 0) := (others => '0');
-    signal yb7   : unsigned(9 downto 0) := (others => '0');
-    signal m7    : unsigned(4 downto 0) := (others => '0');
-    signal gray7 : std_logic := '0';
-    signal ring7 : unsigned(1 downto 0) := (others => '0');
-    signal px7 : unsigned(10 downto 0) := (others => '0');
+    -- capture pipe (flag + cell address)
+    signal capf : std_logic_vector(1 to 5) := (others => '0');
+    type t_cxa is array (1 to 5) of unsigned(7 downto 0);
+    signal cxap : t_cxa := (others => (others => '0'));
 
     ----------------------------------------------------------------------
-    -- E8..E13: palette mults, thickness + row buffer, shading, outline
+    -- cell-sample BRAM {luma8, idx5, ring2, gray1}
     ----------------------------------------------------------------------
-    signal pu8, pv8 : signed(16 downto 0) := (others => '0');
-    signal T8    : unsigned(7 downto 0) := (others => '0');
-    signal yb8   : unsigned(9 downto 0) := (others => '0');
-    signal m8    : unsigned(4 downto 0) := (others => '0');
-    signal gray8 : std_logic := '0';
-    signal px8 : unsigned(10 downto 0) := (others => '0');
-
-    -- packed row buffer {T8, idx5, gray} (previous line, same field)
-    type t_row is array (0 to 2047) of std_logic_vector(13 downto 0);
-    signal row_ram : t_row := (others => (others => '0'));
-    signal row_q   : std_logic_vector(13 downto 0) := (others => '0');
-    signal T_up8   : unsigned(7 downto 0) := (others => '0');
-    signal iup8    : unsigned(4 downto 0) := (others => '0');
-    signal gup8    : std_logic := '0';
-
-    signal T8_d1, T8_d2 : unsigned(7 downto 0) := (others => '0');
-    signal m8_d1  : unsigned(4 downto 0) := (others => '0');
-    signal gray8_d1 : std_logic := '0';
-
-    signal gx9, gy9 : signed(8 downto 0) := (others => '0');
-    signal ucol9, vcol9 : unsigned(9 downto 0) := (others => '0');
-    signal ol9   : std_logic := '0';
-    signal yb9   : unsigned(9 downto 0) := (others => '0');
-    signal ln0_9 : std_logic := '0';
-
-    signal sx10, sy10 : signed(16 downto 0) := (others => '0');
-    signal ucol10, vcol10 : unsigned(9 downto 0) := (others => '0');
-    signal ol10  : std_logic := '0';
-    signal ol9_d1 : std_logic := '0';
-    signal yb10  : unsigned(9 downto 0) := (others => '0');
-
-    signal shade11 : signed(8 downto 0) := (others => '0');
-    signal ucol11, vcol11 : unsigned(9 downto 0) := (others => '0');
-    signal ol11 : std_logic := '0';
-    signal yb11 : unsigned(9 downto 0) := (others => '0');
-
-    signal y12 : unsigned(9 downto 0) := (others => '0');
-    signal u12, v12 : unsigned(9 downto 0) := (others => '0');
-    signal ol12 : std_logic := '0';
-
-    signal wy13, wu13, wv13 : unsigned(9 downto 0) := (others => '0');
+    type t_cc is array (0 to 255) of std_logic_vector(15 downto 0);
+    signal cc_ram   : t_cc := (others => x"0001");             -- gray init
+    signal cc_q     : std_logic_vector(15 downto 0) := (others => '0');
+    signal cc_raddr : unsigned(7 downto 0) := (others => '0');
 
     ----------------------------------------------------------------------
-    -- dry / sync delay + interpolators
+    -- cell engine: NEXT-cell precompute registers (loaded over the
+    -- current cell's pixel phases / the hblank priming sequence)
     ----------------------------------------------------------------------
-    type t_data_sr is array (0 to 12) of std_logic_vector(9 downto 0);
+    signal p_ha  : unsigned(11 downto 0) := (others => '0');
+    signal n_ys8  : unsigned(7 downto 0) := (others => '0');
+    signal n_idx  : unsigned(4 downto 0) := (others => '0');
+    signal n_ring : unsigned(1 downto 0) := (others => '0');
+    signal n_gray : std_logic := '1';
+    signal n_h8   : unsigned(7 downto 0) := (others => '0');
+    signal n_ang  : unsigned(9 downto 0) := (others => '0');
+    signal n_sq   : unsigned(7 downto 0) := (others => '0');
+    signal n_jx   : signed(6 downto 0) := (others => '0');
+    signal n_jy   : signed(6 downto 0) := (others => '0');
+    signal n_cs, n_sn : signed(7 downto 0) := (others => '0');
+    signal n_r    : unsigned(4 downto 0) := (others => '0');
+    signal n_dy   : signed(6 downto 0) := (others => '0');
+    signal n_pu, n_pv : signed(16 downto 0) := (others => '0');
+    signal n_dy2  : unsigned(9 downto 0) := (others => '0');
+    signal n_dyg2 : unsigned(9 downto 0) := (others => '0');
+    signal n_rr   : unsigned(9 downto 0) := (others => '0');
+    signal n_rrg  : unsigned(9 downto 0) := (others => '0');
+    signal n_dyok : std_logic := '0';
+    signal n_dyrim : std_logic := '0';
+
+    -- CURRENT-cell render registers (shifted at each cell's phase 0)
+    signal c_ucol, c_vcol : unsigned(9 downto 0) := (others => '0');
+    signal c_ys8  : unsigned(7 downto 0) := (others => '0');
+    signal c_en   : std_logic := '0';
+    signal c_thr  : signed(11 downto 0) := (others => '0');
+    signal c_thrr : signed(11 downto 0) := (others => '0');
+    signal c_thrg : signed(11 downto 0) := (others => '0');
+    signal c_r    : unsigned(4 downto 0) := (others => '0');
+    signal c_dyok : std_logic := '0';
+    signal c_dyrim : std_logic := '0';
+    signal c_ccx  : unsigned(10 downto 0) := (others => '0');
+
+    signal pf_seq : unsigned(2 downto 0) := (others => '0');
+
+    -- per-pixel cell-context pipe (the cell registers advance while a
+    -- pixel is in flight; the last pixels of a cell must be tested
+    -- against THEIR cell, not the next one)
+    type t_kthr is array (2 to 4) of signed(11 downto 0);
+    type t_ku10 is array (2 to 4) of unsigned(9 downto 0);
+    type t_ku8  is array (2 to 4) of unsigned(7 downto 0);
+    type t_ku5  is array (2 to 4) of unsigned(4 downto 0);
+    signal k_thr, k_thrr, k_thrg : t_kthr := (others => (others => '0'));
+    signal k_ucol, k_vcol : t_ku10 := (others => (others => '0'));
+    signal k_ys8 : t_ku8 := (others => (others => '0'));
+    signal k_r   : t_ku5 := (others => (others => '0'));
+    signal k_en, k_dyok, k_dyrim : std_logic_vector(2 to 4) := (others => '0');
+
+    ----------------------------------------------------------------------
+    -- render lanes E2..E6
+    ----------------------------------------------------------------------
+    signal dxs2   : signed(7 downto 0) := (others => '0');
+    signal ch_a2  : unsigned(11 downto 0) := (others => '0');
+
+    signal dxa3, dxg3 : unsigned(4 downto 0) := (others => '0');
+    signal ch8_3  : unsigned(7 downto 0) := (others => '0');
+
+    signal dx2_4, dxg2_4 : unsigned(9 downto 0) := (others => '0');
+    signal dxa4   : unsigned(4 downto 0) := (others => '0');
+    signal cnv4   : signed(4 downto 0) := (others => '0');
+
+    signal sel5   : unsigned(1 downto 0) := (others => '0');   -- bg/dab/gloss/rim
+    signal py5, pu5, pv5 : unsigned(9 downto 0) := (others => '0');
+    signal cnv5   : signed(4 downto 0) := (others => '0');
+
+    signal wy6, wu6, wv6 : unsigned(9 downto 0) := (others => '0');
+
+    ----------------------------------------------------------------------
+    -- dry / sync delay + inline mix
+    ----------------------------------------------------------------------
+    type t_data_sr is array (0 to 5) of std_logic_vector(9 downto 0);
     signal s_y_sr, s_u_sr, s_v_sr : t_data_sr := (others => (others => '0'));
 
     signal s_avid_sr    : std_logic_vector(0 to C_LATENCY - 1) := (others => '0');
@@ -327,25 +370,36 @@ architecture turpentine of program_top is
     signal s_vsync_n_sr : std_logic_vector(0 to C_LATENCY - 1) := (others => '1');
     signal s_field_n_sr : std_logic_vector(0 to C_LATENCY - 1) := (others => '0');
 
-    signal s_iy_a, s_iu_a, s_iv_a : unsigned(9 downto 0);
-    signal s_iy_r, s_iu_r, s_iv_r : unsigned(9 downto 0);
-    signal s_iy_v, s_iu_v, s_iv_v : std_logic;
+    -- inline dry/wet lerp (M1..M3). The SDK interpolator_u's single-stage
+    -- 10x11 s_product multiply was the routed critical path on HD Dual
+    -- (5 seeds missing, HD HDMI marginal at 74.98 = structural, not seed
+    -- luck): three instances of it, each t x (b-a) in one clock. Inline
+    -- version cuts t to 8 bits (mercurial squeeze -- worst-case error is
+    -- (b-a)/256 <= 4 LSB at full solvent, invisible; t=0 is still EXACT
+    -- dry video, which is the property that matters) and gives the
+    -- multiply a stage of its own. 3 clocks instead of 4.
+    signal m1_ay, m1_au, m1_av : unsigned(9 downto 0) := (others => '0');
+    signal m1_dy, m1_du, m1_dv : signed(10 downto 0) := (others => '0');
+    signal m2_ay, m2_au, m2_av : unsigned(9 downto 0) := (others => '0');
+    signal m2_py, m2_pu, m2_pv : signed(19 downto 0) := (others => '0');
+    signal m3_y, m3_u, m3_v    : unsigned(9 downto 0) := (others => '0');
 
 begin
 
     ------------------------------------------------------------------------
-    -- shared qsin: sequencer-only user, angle + output registered anyway
+    -- shared qsin: sequencer-only, angle + output registered
     ------------------------------------------------------------------------
     s_qs_a <= s_lang                          when s_seq = 10 else
               s_lang + to_unsigned(256, 10);
 
     ------------------------------------------------------------------------
-    -- per-frame control latch + vblank sequencer (one add per step)
+    -- per-frame control latch + vblank sequencer (one step per line)
     ------------------------------------------------------------------------
     p_frame : process(clk)
-        variable v_z  : natural range 0 to 4;
-        variable v_b  : unsigned(7 downto 0);
-        variable v_ol : unsigned(2 downto 0);
+        variable v_z : natural range 0 to 4;
+        variable v_b : unsigned(7 downto 0);
+        variable v_m : unsigned(11 downto 0);
+        variable v_e : integer range -4 to 2;
     begin
         if rising_edge(clk) then
             s_prev_vsync_n <= data_in.vsync_n;
@@ -359,13 +413,13 @@ begin
                 s_k4  <= unsigned(registers_in(3));
                 s_k5  <= unsigned(registers_in(4));
                 s_k6  <= unsigned(registers_in(5));
-                s_vivid   <= registers_in(6)(0);   -- switch 7
-                s_canv_on <= registers_in(6)(1);   -- switch 8
-                s_tone_on <= registers_in(6)(2);   -- switch 9
-                s_chalk   <= registers_in(6)(3);   -- switch 10
-                s_orbit   <= registers_in(6)(4);   -- switch 11
+                s_vivid  <= registers_in(6)(0);    -- switch 7
+                s_velvet <= registers_in(6)(1);    -- switch 8
+                s_square <= registers_in(6)(2);    -- switch 9
+                s_rim_on <= registers_in(6)(3);    -- switch 10
+                s_orbit  <= registers_in(6)(4);    -- switch 11
 
-                s_orbit_acc <= s_orbit_acc + 2;
+                s_orbit_acc <= s_orbit_acc + 3;
                 if registers_in(6)(4) = '1' then
                     s_lang <= unsigned(registers_in(2)) + s_orbit_acc;
                 else
@@ -376,25 +430,52 @@ begin
             elsif s_seq /= 0 and data_in.avid = '0' then
                 case to_integer(s_seq) is
                     when 10 =>
-                        -- solvent ramp: full painting by ~68%, varnish
-                        -- zone beyond 80% (qsin presented: light angle)
-                        if s_p12 > 682 then
+                        -- Solvent: full painting by ~58%, then the photo
+                        -- background strips to canvas, varnish past 80%
+                        -- (qsin presented: light angle)
+                        v_m := resize(s_p12, 12) + resize(s_p12(9 downto 1), 12)
+                               + resize(s_p12(9 downto 2), 12);
+                        if v_m > 1023 then
                             s_mix10 <= (others => '1');
                         else
-                            s_mix10 <= resize(s_p12 + s_p12(9 downto 1), 10);
+                            s_mix10 <= v_m(9 downto 0);
                         end if;
                         if s_p12 > 800 then
-                            s_varn <= '1';
+                            s_bgm <= "11"; s_varn <= '1';
+                        elsif s_p12 > 704 then
+                            s_bgm <= "10"; s_varn <= '0';
+                        elsif s_p12 > 608 then
+                            s_bgm <= "01"; s_varn <= '0';
                         else
-                            s_varn <= '0';
+                            s_bgm <= "00"; s_varn <= '0';
                         end if;
                     when 9 =>
-                        -- pigment count: K1 zone -> index mask + recenter
+                        -- cell size (K2 zone) + pigment mask (K1 zone,
+                        -- knob up = more pigments)
                         -- (qsin presented: light angle + 256)
+                        s_csh <= 3 + to_integer(s_k2(9 downto 8));
+                        case s_k2(9 downto 8) is
+                            when "00" =>
+                                s_cmask <= to_unsigned(7, 6);
+                                s_chalf <= to_unsigned(4, 6);
+                                s_r3 <= to_unsigned(4, 5);
+                            when "01" =>
+                                s_cmask <= to_unsigned(15, 6);
+                                s_chalf <= to_unsigned(8, 6);
+                                s_r3 <= to_unsigned(7, 5);
+                            when "10" =>
+                                s_cmask <= to_unsigned(31, 6);
+                                s_chalf <= to_unsigned(16, 6);
+                                s_r3 <= to_unsigned(14, 5);
+                            when others =>
+                                s_cmask <= to_unsigned(63, 6);
+                                s_chalf <= to_unsigned(32, 6);
+                                s_r3 <= to_unsigned(29, 5);
+                        end case;
                         if s_k1(9 downto 7) > 4 then
-                            v_z := 4;
+                            v_z := 0;
                         else
-                            v_z := to_integer(s_k1(9 downto 7));
+                            v_z := 4 - to_integer(s_k1(9 downto 7));
                         end if;
                         case v_z is
                             when 0 => s_mask5 <= "11111";
@@ -409,91 +490,86 @@ begin
                                       s_half10 <= to_unsigned(256, 10);
                         end case;
                     when 8 =>
-                        -- capture two-behind: qsin(light angle) = ly
+                        -- capture two-behind: qsin(light angle) = ly;
+                        -- highlight offset scales with cell size
                         s_ly8 <= resize(shift_right(s_qs_r, 2), 8);
-                        if s_varn = '1' and s_k2(9 downto 8) /= "00" then
-                            s_rsh <= 7 - to_integer(s_k2(9 downto 8)) - 1;
-                        else
-                            s_rsh <= 7 - to_integer(s_k2(9 downto 8));
-                        end if;
+                        s_oy  <= resize(shift_right(
+                                     resize(shift_right(s_qs_r, 2), 8),
+                                     10 - s_csh), 6);
+                        -- dab radii per saturation ring
+                        s_r2 <= s_r3 - resize(s_r3(4 downto 2), 5);
+                        s_r1 <= '0' & s_r3(4 downto 1);
                     when 7 =>
                         -- capture: qsin(light angle + 256) = lx
                         s_lx8 <= resize(shift_right(s_qs_r, 2), 8);
-                        -- stroke: amplitude zone + pitch
+                        s_ox  <= resize(shift_right(
+                                     resize(shift_right(s_qs_r, 2), 8),
+                                     10 - s_csh), 6);
+                        s_smr <= to_integer(s_k6(9 downto 8));
+                        s_sct <= s_k4(9 downto 8);
+                        -- throw shift: |jx|max = chalf >> z, and the
+                        -- 4-bit hash already carries magnitude 2^3, so
+                        -- the net shift is (csh-1) - z - 3
                         if s_k4(9 downto 8) = "00" then
-                            s_amp_on <= '0';
-                            s_ash    <= 0;
+                            s_jz  <= '1';
+                            s_jsl <= 0;
+                            s_jsr <= 0;
                         else
-                            s_amp_on <= '1';
-                            s_ash    <= to_integer(s_k4(9 downto 8)) - 1;
-                        end if;
-                        if s_k4(7 downto 6) = "00" then
-                            s_psh <= 1;
-                        elsif s_k4(7 downto 6) = "11" then
-                            s_psh <= 3;
-                        else
-                            s_psh <= to_integer(s_k4(7 downto 6));
+                            s_jz <= '0';
+                            v_e := s_csh - 4 - (4 - to_integer(s_k4(9 downto 8)));
+                            if v_e >= 0 then
+                                s_jsl <= v_e;
+                                s_jsr <= 0;
+                            else
+                                s_jsl <= 0;
+                                s_jsr <= -v_e;
+                            end if;
                         end if;
                     when 6 =>
-                        -- wash: luma lift shift (0 = dry oil)
+                        -- Load: which rings earn paint (top zone = sparse
+                        -- shrunken dots)
                         case s_k5(9 downto 8) is
-                            when "00"   => s_liftsh <= 0;
-                            when "01"   => s_liftsh <= 3;
-                            when "10"   => s_liftsh <= 2;
-                            when others => s_liftsh <= 1;
+                            when "00"   => s_gate2 <= "01"; s_sparse <= '0';
+                            when "01"   => s_gate2 <= "10"; s_sparse <= '0';
+                            when "10"   => s_gate2 <= "11"; s_sparse <= '0';
+                            when others => s_gate2 <= "11"; s_sparse <= '1';
                         end case;
+                        if s_varn = '1' then
+                            s_glb <= to_unsigned(127, 7);      -- varnish
+                        else
+                            s_glb <= to_unsigned(96, 7);
+                        end if;
                     when 5 =>
-                        -- pigment-load LUT ring 3 (wash + vivid folded)
                         if s_vivid = '1' then
                             v_b := to_unsigned(200, 8);
                         else
                             v_b := to_unsigned(216, 8);
                         end if;
-                        case s_k5(9 downto 8) is
-                            when "00"   => s_sq3 <= v_b;
-                            when "01"   => s_sq3 <= v_b - ("00" & v_b(7 downto 2));
-                            when "10"   => s_sq3 <= '0' & v_b(7 downto 1);
-                            when others => s_sq3 <= "00" & v_b(7 downto 2);
-                        end case;
+                        s_sq3 <= v_b;
                     when 4 =>
                         if s_vivid = '1' then
-                            v_b := to_unsigned(200, 8);
+                            s_sq2 <= to_unsigned(200, 8);
                         else
-                            v_b := to_unsigned(152, 8);
+                            s_sq2 <= to_unsigned(152, 8);
                         end if;
-                        case s_k5(9 downto 8) is
-                            when "00"   => s_sq2 <= v_b;
-                            when "01"   => s_sq2 <= v_b - ("00" & v_b(7 downto 2));
-                            when "10"   => s_sq2 <= '0' & v_b(7 downto 1);
-                            when others => s_sq2 <= "00" & v_b(7 downto 2);
-                        end case;
                     when 3 =>
                         if s_vivid = '1' then
-                            v_b := to_unsigned(200, 8);
+                            s_sq1 <= to_unsigned(200, 8);
                         else
-                            v_b := to_unsigned(88, 8);
+                            s_sq1 <= to_unsigned(88, 8);
                         end if;
-                        case s_k5(9 downto 8) is
-                            when "00"   => s_sq1 <= v_b;
-                            when "01"   => s_sq1 <= v_b - ("00" & v_b(7 downto 2));
-                            when "10"   => s_sq1 <= '0' & v_b(7 downto 1);
-                            when others => s_sq1 <= "00" & v_b(7 downto 2);
-                        end case;
                     when 2 =>
-                        -- outline level (varnish boosts one step)
-                        v_ol := resize(s_k6(9 downto 8), 3);
-                        if s_varn = '1' and v_ol /= 0 then
-                            v_ol := v_ol + 1;
-                        end if;
-                        if v_ol > 3 then
-                            s_ol_lvl <= "11";
+                        -- canvas ground + rim colour (rim contrasts it)
+                        if s_velvet = '1' then
+                            s_cv_y <= to_unsigned(80, 10);
+                            s_cv_u <= to_unsigned(512, 10);
+                            s_cv_v <= to_unsigned(512, 10);
+                            s_rim_y <= to_unsigned(760, 10);
                         else
-                            s_ol_lvl <= v_ol(1 downto 0);
-                        end if;
-                        if s_chalk = '1' then
-                            s_ink_y <= to_unsigned(940, 10);
-                        else
-                            s_ink_y <= to_unsigned(96, 10);
+                            s_cv_y <= to_unsigned(816, 10);
+                            s_cv_u <= to_unsigned(502, 10);
+                            s_cv_v <= to_unsigned(520, 10);
+                            s_rim_y <= to_unsigned(96, 10);
                         end if;
                     when others =>
                         null;
@@ -504,7 +580,7 @@ begin
     end process p_frame;
 
     ------------------------------------------------------------------------
-    -- main pixel pipeline E1..E13
+    -- main pixel pipeline
     ------------------------------------------------------------------------
     p_pix : process(clk)
         variable v_cu, v_cv : signed(9 downto 0);
@@ -513,19 +589,19 @@ begin
         variable v_oct  : unsigned(2 downto 0);
         variable v_c22, v_c11, v_c33 : std_logic;
         variable v_sub  : unsigned(1 downto 0);
-        variable v_w12  : unsigned(11 downto 0);
-        variable v_w3   : unsigned(2 downto 0);
-        variable v_t2   : unsigned(1 downto 0);
-        variable v_tri  : signed(6 downto 0);
-        variable v_ys   : signed(11 downto 0);
-        variable v_yq   : unsigned(9 downto 0);
+        variable v_step : unsigned(2 downto 0);
+        variable v_sv   : std_logic;
+        variable v_cxn  : unsigned(7 downto 0);
+        variable v_j    : signed(4 downto 0);
+        variable v_r    : unsigned(5 downto 0);
+        variable v_h    : unsigned(5 downto 0);
+        variable v_dyg  : signed(7 downto 0);
+        variable v_dxs  : signed(11 downto 0);
+        variable v_in, v_rim, v_glo : std_logic;
+        variable v_y    : unsigned(10 downto 0);
+        variable v_bgy  : unsigned(9 downto 0);
+        variable v_bgu, v_bgv : unsigned(9 downto 0);
         variable v_h8   : unsigned(7 downto 0);
-        variable v_T    : unsigned(9 downto 0);
-        variable v_hd, v_vd : std_logic;
-        variable v_sh   : signed(17 downto 0);
-        variable v_y    : signed(11 downto 0);
-        variable v_lift : unsigned(9 downto 0);
-        variable v_iy, v_iu, v_iv : unsigned(9 downto 0);
     begin
         if rising_edge(clk) then
             s_prev_hsync_n <= data_in.hsync_n;
@@ -545,14 +621,183 @@ begin
             s_y_sr(0) <= data_in.y;
             s_u_sr(0) <= data_in.u;
             s_v_sr(0) <= data_in.v;
-            for i in 1 to 12 loop
+            for i in 1 to 5 loop
                 s_y_sr(i) <= s_y_sr(i - 1);
                 s_u_sr(i) <= s_u_sr(i - 1);
                 s_v_sr(i) <= s_v_sr(i - 1);
             end loop;
 
+            -- capture flag: cell-centre pixel of the first line of each
+            -- cell row (rides the quantizer pipe, writes the BRAM at E6)
+            if data_in.avid = '1' and s_capline = '1'
+               and (s_x_count and resize(s_cmask, 11))
+                   = resize(s_chalf, 11) then
+                capf(1) <= '1';
+            else
+                capf(1) <= '0';
+            end if;
+            cxap(1) <= resize(shift_right(s_x_count, s_csh), 8);
+            capf(2 to 5) <= capf(1 to 4);
+            for i in 2 to 5 loop
+                cxap(i) <= cxap(i - 1);
+            end loop;
+
             --------------------------------------------------------------
-            -- E2: chroma vector magnitudes + signs
+            -- CELL ENGINE: the next cell's paint is fully precomputed
+            -- across the current cell's pixel phases (or the hblank
+            -- priming sequence pf_seq for cell 0 of each line)
+            --------------------------------------------------------------
+            v_step := "111";
+            v_sv   := '0';
+            if pf_seq /= 0 then
+                v_step := pf_seq;
+                v_sv   := '1';
+                v_cxn  := (others => '0');
+                pf_seq <= pf_seq + 1;
+                if pf_seq = 7 then
+                    pf_seq <= (others => '0');
+                end if;
+            elsif data_in.avid = '1'
+                  and (s_x_count and resize(s_cmask, 11) and
+                       not to_unsigned(7, 11)) = 0 then
+                v_step := s_x_count(2 downto 0);
+                v_sv   := '1';
+                v_cxn  := resize(shift_right(s_x_count, s_csh), 8) + 1;
+            end if;
+
+            if v_sv = '1' then
+                case v_step is
+                    when "001" =>
+                        cc_raddr <= v_cxn;
+                    when "010" =>
+                        p_ha <= f_hash_a(v_cxn, s_cyi, x"B0B5");
+                    when "011" =>
+                        n_ys8  <= unsigned(cc_q(15 downto 8));
+                        n_idx  <= unsigned(cc_q(7 downto 3));
+                        n_ring <= unsigned(cc_q(2 downto 1));
+                        n_gray <= cc_q(0);
+                        n_h8   <= f_hash_b(p_ha);
+                    when "100" =>
+                        n_ang <= shift_left(resize(n_idx and s_mask5, 10), 5)
+                                 + s_half10;
+                        case n_ring is
+                            when "11"   => n_sq <= s_sq3;
+                            when "10"   => n_sq <= s_sq2;
+                            when others => n_sq <= s_sq1;
+                        end case;
+                        if n_gray = '1' then
+                            n_sq <= (others => '0');
+                        end if;
+                        -- scatter throw from the cell hash, scaled to the
+                        -- cell size (jsl/jsr are per-frame; one is 0)
+                        if s_jz = '1' then
+                            n_jx <= (others => '0');
+                            n_jy <= (others => '0');
+                        else
+                            n_jx <= shift_left(shift_right(
+                                signed(resize(n_h8(3 downto 0), 7)) - 8,
+                                s_jsr), s_jsl);
+                            n_jy <= shift_left(shift_right(
+                                signed(resize(n_h8(7 downto 4), 7)) - 8,
+                                s_jsr), s_jsl);
+                        end if;
+                    when "101" =>
+                        n_cs <= resize(shift_right(f_qsin(n_ang + 256), 2), 8);
+                        n_sn <= resize(shift_right(f_qsin(n_ang), 2), 8);
+                        -- radius: saturation ring, size jitter at max
+                        -- scatter, sparse Load shrink
+                        case n_ring is
+                            when "11"   => v_r := '0' & s_r3;
+                            when "10"   => v_r := '0' & s_r2;
+                            when others => v_r := '0' & s_r1;
+                        end case;
+                        -- Scatter shrinks the dab to make room for the
+                        -- throw: r' + |j|max + 1 <= chalf holds in every
+                        -- zone, so dabs are always whole (never clipped
+                        -- by their cell edge). Size jitter is shrink-only
+                        -- for the same reason.
+                        case s_sct is
+                            when "00"   => null;
+                            when "01"   => v_r := v_r - shift_right(v_r, 3);
+                            when "10"   => v_r := v_r - shift_right(v_r, 2);
+                            when others =>
+                                -- guarded: an unsigned underflow here
+                                -- wraps to a giant radius that the
+                                -- upper clamp happily accepts
+                                v_r := shift_right(v_r, 1);
+                                v_h := resize(unsigned(n_h8(6 downto 5)), 6);
+                                if v_r > v_h then
+                                    v_r := v_r - v_h;
+                                else
+                                    v_r := (others => '0');
+                                end if;
+                        end case;
+                        if s_sparse = '1' then
+                            v_r := '0' & v_r(5 downto 1);
+                        end if;
+                        if v_r > 29 then
+                            v_r := to_unsigned(29, 6);
+                        elsif v_r < 2 then
+                            v_r := to_unsigned(2, 6);
+                        end if;
+                        n_r  <= v_r(4 downto 0);
+                        n_dy <= s_dyb + resize(n_jy, 7);
+                    when "110" =>
+                        n_pu <= signed('0' & n_sq) * n_sn;
+                        n_pv <= signed('0' & n_sq) * n_cs;
+                        n_dy2 <= f_sq(f_abs31(resize(n_dy, 8)));
+                        v_dyg := resize(n_dy, 8) - resize(s_oy, 8);
+                        n_dyg2 <= f_sq(f_abs31(v_dyg));
+                        n_rr  <= f_sq(n_r);
+                        n_rrg <= f_sq('0' & n_r(4 downto 1));
+                        if resize(f_abs31(resize(n_dy, 8)), 6)
+                           <= ('0' & n_r) then
+                            n_dyok <= '1';
+                        else
+                            n_dyok <= '0';
+                        end if;
+                        if resize(f_abs31(resize(n_dy, 8)), 6) + 1
+                           >= ('0' & n_r) then
+                            n_dyrim <= '1';
+                        else
+                            n_dyrim <= '0';
+                        end if;
+                    when others =>
+                        null;
+                end case;
+            end if;
+
+            -- phase 0 of every cell: commit the precomputed paint
+            if data_in.avid = '1'
+               and (s_x_count and resize(s_cmask, 11)) = 0 then
+                c_ucol <= f_cu10(to_signed(512, 12)
+                                 + resize(shift_right(n_pu, 7), 12));
+                c_vcol <= f_cu10(to_signed(512, 12)
+                                 + resize(shift_right(n_pv, 7), 12));
+                c_ys8  <= n_ys8;
+                c_r    <= n_r;
+                c_dyok <= n_dyok;
+                c_dyrim <= n_dyrim;
+                c_thr  <= signed(resize(n_rr, 12))
+                          - signed(resize(n_dy2, 12));
+                c_thrr <= signed(resize(n_rr, 12))
+                          - signed(resize(n_dy2, 12))
+                          - signed(resize(n_r & '0', 12)) + 1;
+                c_thrg <= signed(resize(n_rrg, 12))
+                          - signed(resize(n_dyg2, 12));
+                -- x & cmask = 0 here, so x IS the cell base
+                c_ccx  <= s_x_count + resize(s_chalf, 11)
+                          + unsigned(resize(n_jx, 11));
+                if n_gray = '0' and n_ring >= s_gate2
+                   and s_capline = '0' then
+                    c_en <= '1';
+                else
+                    c_en <= '0';
+                end if;
+            end if;
+
+            --------------------------------------------------------------
+            -- E2..E5: hue-sector quantizer (capture path, v2 machinery)
             --------------------------------------------------------------
             v_cu := signed((not s_in_u(9)) & s_in_u(8 downto 0));
             v_cv := signed((not s_in_v(9)) & s_in_v(8 downto 0));
@@ -560,11 +805,7 @@ begin
             av2 <= f_abs9(v_cv);
             su2 <= v_cu(9);
             sv2 <= v_cv(9);
-            px2 <= px1;
 
-            --------------------------------------------------------------
-            -- E3: octant fold (major/minor swap + signs) + saturation
-            --------------------------------------------------------------
             v_swap := '0';
             if au2 > av2 then
                 v_swap := '1';
@@ -577,26 +818,17 @@ begin
             a3 <= v_a;
             b3 <= v_b;
             sat3 <= resize(v_a, 10) + resize(v_b(8 downto 1), 10);
-
-            -- octant table: angle from +V axis toward +U, 8 x 45 degrees
-            if sv2 = '0' and su2 = '0' then           -- +V +U quadrant
+            if sv2 = '0' and su2 = '0' then
                 if v_swap = '0' then v_oct := "000"; else v_oct := "001"; end if;
-            elsif sv2 = '1' and su2 = '0' then        -- -V +U
+            elsif sv2 = '1' and su2 = '0' then
                 if v_swap = '1' then v_oct := "010"; else v_oct := "011"; end if;
-            elsif sv2 = '1' and su2 = '1' then        -- -V -U
+            elsif sv2 = '1' and su2 = '1' then
                 if v_swap = '0' then v_oct := "100"; else v_oct := "101"; end if;
-            else                                      -- +V -U
+            else
                 if v_swap = '1' then v_oct := "110"; else v_oct := "111"; end if;
             end if;
             oct3 <= v_oct;
-            px3  <= px2;
 
-            --------------------------------------------------------------
-            -- E4: intra-octant tangent thresholds (shift-add, parallel)
-            --   tan 22.50 = 0.4142 ~ 1/2 - 1/16 - 1/32 + 1/128
-            --   tan 11.25 = 0.1989 ~ 1/4 - 1/16 + 1/128
-            --   tan 33.75 = 0.6682 ~ 1/2 + 1/8 + 1/32 + 1/128
-            --------------------------------------------------------------
             t22_4 <= resize(a3(8 downto 1), 9) - resize(a3(8 downto 4), 9)
                      - resize(a3(8 downto 5), 9) + resize(a3(8 downto 7), 9);
             t11_4 <= resize(a3(8 downto 2), 9) - resize(a3(8 downto 4), 9)
@@ -606,12 +838,7 @@ begin
             b4   <= b3;
             oct4 <= oct3;
             sat4 <= sat3;
-            px4  <= px3;
 
-            --------------------------------------------------------------
-            -- E5: sector index (all compares parallel; odd octants run
-            -- backwards so the sub-index bit-inverts) + rings + gray
-            --------------------------------------------------------------
             v_c22 := '0'; v_c11 := '0'; v_c33 := '0';
             if b4 > t22_4 then v_c22 := '1'; end if;
             if b4 > t11_4 then v_c11 := '1'; end if;
@@ -627,7 +854,6 @@ begin
                 v_sub := not v_sub;
             end if;
             idx5 <= oct4 & v_sub;
-
             if sat4 < C_GRAY then
                 gray5 <= '1';
             else
@@ -640,227 +866,142 @@ begin
             else
                 ring5 <= "01";
             end if;
-            px5 <= px4;
 
             --------------------------------------------------------------
-            -- E6: masked pigment index -> sector-center angle; pigment
-            -- load from the per-frame ring LUT; hue-oriented stroke
-            -- triangle; canvas hash A
+            -- E2..E5: dab render lanes (shallow: abs -> LUT -> compares)
             --------------------------------------------------------------
-            m6   <= idx5 and s_mask5;
-            ang6 <= shift_left(resize(idx5 and s_mask5, 10), 5) + s_half10;
-            case ring5 is
-                when "11"   => sq6 <= s_sq3;
-                when "10"   => sq6 <= s_sq2;
-                when others => sq6 <= s_sq1;
+            v_dxs := signed(resize(px1, 12)) - signed(resize(c_ccx, 12));
+            if v_dxs > 127 then
+                dxs2 <= to_signed(127, 8);
+            elsif v_dxs < -127 then
+                dxs2 <= to_signed(-127, 8);
+            else
+                dxs2 <= resize(v_dxs, 8);
+            end if;
+            ch_a2 <= f_hash_a(px1(9 downto 2), s_aline(9 downto 2), x"CA9A");
+
+            -- capture this pixel's cell context (the c_* registers move
+            -- on to the next cell while the pixel is in flight)
+            k_thr(2)  <= c_thr;
+            k_thrr(2) <= c_thrr;
+            k_thrg(2) <= c_thrg;
+            k_ucol(2) <= c_ucol;
+            k_vcol(2) <= c_vcol;
+            k_ys8(2)  <= c_ys8;
+            k_r(2)    <= c_r;
+            k_en(2)   <= c_en;
+            k_dyok(2) <= c_dyok;
+            k_dyrim(2) <= c_dyrim;
+            for i in 3 to 4 loop
+                k_thr(i)  <= k_thr(i - 1);
+                k_thrr(i) <= k_thrr(i - 1);
+                k_thrg(i) <= k_thrg(i - 1);
+                k_ucol(i) <= k_ucol(i - 1);
+                k_vcol(i) <= k_vcol(i - 1);
+                k_ys8(i)  <= k_ys8(i - 1);
+                k_r(i)    <= k_r(i - 1);
+                k_en(i)   <= k_en(i - 1);
+                k_dyok(i) <= k_dyok(i - 1);
+                k_dyrim(i) <= k_dyrim(i - 1);
+            end loop;
+
+            dxa3  <= f_abs31(shift_right(dxs2, s_smr));
+            dxg3  <= f_abs31(shift_right(dxs2 - resize(s_ox, 8), s_smr));
+            ch8_3 <= f_hash_b(ch_a2);
+
+            dx2_4  <= f_sq(dxa3);
+            dxg2_4 <= f_sq(dxg3);
+            dxa4   <= dxa3;
+            cnv4   <= signed(resize(ch8_3(7 downto 4), 5)) - 8;
+
+            -- E5: shape tests + lane select + paint colours (all against
+            -- the PIPED cell context)
+            v_in  := '0';
+            v_rim := '0';
+            v_glo := '0';
+            if s_square = '1' then
+                if k_en(4) = '1' and k_dyok(4) = '1'
+                   and resize(dxa4, 6) <= ('0' & k_r(4)) then
+                    v_in := '1';
+                    if resize(dxa4, 6) + 1 >= ('0' & k_r(4))
+                       or k_dyrim(4) = '1' then
+                        v_rim := '1';
+                    end if;
+                end if;
+            else
+                if k_en(4) = '1'
+                   and signed(resize(dx2_4, 12)) <= k_thr(4) then
+                    v_in := '1';
+                    if signed(resize(dx2_4, 12)) > k_thrr(4) then
+                        v_rim := '1';
+                    end if;
+                end if;
+            end if;
+            if signed(resize(dxg2_4, 12)) <= k_thrg(4) then
+                v_glo := '1';
+            end if;
+
+            if v_in = '1' and v_rim = '1' and s_rim_on = '1' then
+                sel5 <= "11";                                  -- rim
+            elsif v_in = '1' and v_glo = '1' then
+                sel5 <= "10";                                  -- highlight
+            elsif v_in = '1' then
+                sel5 <= "01";                                  -- dab body
+            else
+                sel5 <= "00";                                  -- background
+            end if;
+            py5 <= k_ys8(4) & "00";
+            pu5 <= k_ucol(4);
+            pv5 <= k_vcol(4);
+            cnv5 <= cnv4;
+
+            --------------------------------------------------------------
+            -- E6: compose wet result (paint lanes over the background,
+            -- background morphs photo -> canvas with the Solvent zone)
+            --------------------------------------------------------------
+            v_bgy := f_cu10(signed(resize(s_cv_y, 12))
+                            + resize(cnv5, 12));
+            v_bgu := s_cv_u;
+            v_bgv := s_cv_v;
+            case s_bgm is
+                when "00" =>
+                    v_bgy := unsigned(s_y_sr(4));
+                    v_bgu := unsigned(s_u_sr(4));
+                    v_bgv := unsigned(s_v_sr(4));
+                when "01" =>
+                    v_bgy := ('0' & unsigned(s_y_sr(4)(9 downto 1)))
+                             + ('0' & v_bgy(9 downto 1));
+                    v_bgu := ('0' & unsigned(s_u_sr(4)(9 downto 1)))
+                             + ('0' & v_bgu(9 downto 1));
+                    v_bgv := ('0' & unsigned(s_v_sr(4)(9 downto 1)))
+                             + ('0' & v_bgv(9 downto 1));
+                when others =>
+                    null;
             end case;
-            if gray5 = '1' then
-                sq6 <= (others => '0');
-            end if;
 
-            -- stroke orientation from the hue quadrant: strokes rotate
-            -- with the pigment (0/45/90/135 degrees)
-            case idx5(4 downto 3) is
-                when "00"   => v_w12 := resize(s_aline, 12);
-                when "01"   => v_w12 := resize(px5, 12) + resize(s_aline, 12);
-                when "10"   => v_w12 := resize(px5, 12);
-                when others => v_w12 := resize(px5, 12) - resize(s_aline, 12);
+            case sel5 is
+                when "11" =>                                   -- rim
+                    wy6 <= s_rim_y;
+                    wu6 <= to_unsigned(512, 10);
+                    wv6 <= to_unsigned(512, 10);
+                when "10" =>                                   -- highlight
+                    v_y := resize(py5, 11) + resize(s_glb, 11);
+                    if v_y > 1023 then
+                        wy6 <= (others => '1');
+                    else
+                        wy6 <= v_y(9 downto 0);
+                    end if;
+                    wu6 <= pu5;
+                    wv6 <= pv5;
+                when "01" =>                                   -- dab body
+                    wy6 <= py5;
+                    wu6 <= pu5;
+                    wv6 <= pv5;
+                when others =>                                 -- background
+                    wy6 <= v_bgy;
+                    wu6 <= v_bgu;
+                    wv6 <= v_bgv;
             end case;
-            v_w12 := shift_right(v_w12, s_psh);
-            v_w3  := v_w12(2 downto 0);
-            v_t2  := v_w3(1 downto 0) xor (v_w3(2) & v_w3(2));
-            v_tri := resize(signed('0' & v_t2 & '0'), 7) - 3;  -- -3,-1,1,3
-            if s_amp_on = '1' then
-                tri6 <= shift_left(v_tri, s_ash + 1);          -- to +/-24
-            else
-                tri6 <= (others => '0');
-            end if;
-
-            ch_a6 <= f_hash_a(px5(9 downto 2), s_aline(9 downto 2), x"0111");
-            gray6 <= gray5;
-            ring6 <= ring5;
-            px6   <= px5;
-
-            --------------------------------------------------------------
-            -- E7: qsin ROM outputs registered (mercurial rule); tonal
-            -- band quantize (wobbled by the stroke); canvas hash B
-            --------------------------------------------------------------
-            cs7 <= resize(shift_right(f_qsin(ang6 + 256), 2), 8);
-            sn7 <= resize(shift_right(f_qsin(ang6), 2), 8);
-            sq7 <= sq6;
-            tri7 <= tri6;
-            v_h8 := f_hash_b(ch_a6);
-            if s_canv_on = '1' then
-                cnv7 <= signed(resize(v_h8(7 downto 4), 5)) - 8;
-            else
-                cnv7 <= (others => '0');
-            end if;
-
-            -- tonal bands: 8 wobbled luma bands (S9), else straight luma
-            v_ys := signed(resize(unsigned(s_y_sr(5)), 12))
-                    + resize(tri6, 12);
-            v_yq := f_cu10(v_ys);
-            if s_tone_on = '1' then
-                yb7 <= v_yq(9 downto 7) & "1000000";
-            else
-                yb7 <= unsigned(s_y_sr(5));
-            end if;
-
-            m7    <= m6;
-            gray7 <= gray6;
-            ring7 <= ring6;
-            px7   <= px6;   -- row-buffer read address (see p_row)
-
-            --------------------------------------------------------------
-            -- E8: palette multiplies (alone); paint thickness assemble;
-            -- land the row-buffer read
-            --------------------------------------------------------------
-            pu8 <= signed('0' & sq7) * sn7;
-            pv8 <= signed('0' & sq7) * cs7;
-
-            case ring7 is
-                when "11"   => v_T := resize(C_T3, 10);
-                when "10"   => v_T := resize(C_T2, 10);
-                when others => v_T := resize(C_T1, 10);
-            end case;
-            if gray7 = '1' then
-                v_T := resize(C_T0, 10);
-            end if;
-            v_T := v_T + unsigned(resize(signed(resize(tri7, 8)) + 24, 10))
-                       + unsigned(resize(signed(resize(cnv7, 8)) + 8, 10))
-                       + resize(yb7(9 downto 7) & "00", 10);
-            if v_T > 255 then
-                T8 <= (others => '1');
-            else
-                T8 <= resize(v_T, 8);
-            end if;
-
-            T_up8 <= unsigned(row_q(13 downto 6));
-            iup8  <= unsigned(row_q(5 downto 1));
-            gup8  <= row_q(0);
-
-            yb8   <= yb7;
-            m8    <= m7;
-            gray8 <= gray7;
-            px8   <= px7;
-
-            --------------------------------------------------------------
-            -- E9: gradients (x from delay regs, y vs the row above),
-            -- paint colour compose, outline detect (left + up neighbours)
-            --------------------------------------------------------------
-            T8_d1 <= T8;
-            T8_d2 <= T8_d1;
-            gx9 <= signed(resize(T8, 9)) - signed(resize(T8_d2, 9));
-            if ln0_9 = '1' then
-                gy9 <= (others => '0');
-            else
-                gy9 <= signed(resize(T_up8, 9)) - signed(resize(T8, 9));
-            end if;
-            if s_aline = 0 then
-                ln0_9 <= '1';
-            else
-                ln0_9 <= '0';
-            end if;
-
-            ucol9 <= f_cu10(to_signed(512, 12)
-                            + resize(shift_right(pu8, 7), 12));
-            vcol9 <= f_cu10(to_signed(512, 12)
-                            + resize(shift_right(pv8, 7), 12));
-
-            -- pigment boundary = the (gray, masked idx) tuple changes;
-            -- two gray pixels are the SAME pigment whatever their noise
-            -- hue index says, else flat areas fill with outline speckle
-            m8_d1    <= m8;
-            gray8_d1 <= gray8;
-            v_hd := '0';
-            if (gray8 /= gray8_d1)
-               or (gray8 = '0' and gray8_d1 = '0' and m8 /= m8_d1) then
-                v_hd := '1';
-            end if;
-            v_vd := '0';
-            if ln0_9 = '0'
-               and ((gray8 /= gup8)
-                    or (gray8 = '0' and gup8 = '0'
-                        and m8 /= (iup8 and s_mask5))) then
-                v_vd := '1';
-            end if;
-            ol9 <= v_hd or v_vd;
-
-            yb9 <= yb8;
-
-            --------------------------------------------------------------
-            -- E10: shading multiplies (alone); outline 1-px dilate
-            --------------------------------------------------------------
-            sx10 <= gx9 * s_lx8;
-            sy10 <= gy9 * s_ly8;
-            ol9_d1 <= ol9;
-            ol10   <= ol9 or ol9_d1;
-            ucol10 <= ucol9;
-            vcol10 <= vcol9;
-            yb10   <= yb9;
-
-            --------------------------------------------------------------
-            -- E11: shade sum + clamp
-            --------------------------------------------------------------
-            v_sh := resize(sx10, 18) + resize(sy10, 18);
-            v_sh := shift_right(v_sh, s_rsh);
-            if v_sh > 240 then
-                shade11 <= to_signed(240, 9);
-            elsif v_sh < -240 then
-                shade11 <= to_signed(-240, 9);
-            else
-                shade11 <= resize(v_sh, 9);
-            end if;
-            ucol11 <= ucol10;
-            vcol11 <= vcol10;
-            ol11   <= ol10;
-            yb11   <= yb10;
-
-            --------------------------------------------------------------
-            -- E12: light the paint (+ wet glint) + wash lift
-            --------------------------------------------------------------
-            v_y := signed(resize(yb11, 12)) + resize(shade11, 12);
-            if shade11 > 176 then
-                v_y := v_y + 64;                       -- wet-paint glint
-            end if;
-            if s_liftsh /= 0 then
-                v_lift := shift_right(to_unsigned(1023, 10) - yb11,
-                                      s_liftsh);
-                v_y := v_y + signed(resize(v_lift, 12));
-            end if;
-            y12 <= f_cu10(v_y);
-            u12 <= ucol11;
-            v12 <= vcol11;
-            ol12 <= ol11;
-
-            --------------------------------------------------------------
-            -- E13: outline apply (shift blends toward ink) -> wet result
-            --------------------------------------------------------------
-            v_iy := y12;  v_iu := u12;  v_iv := v12;
-            if ol12 = '1' then
-                case s_ol_lvl is
-                    when "01" =>
-                        v_iy := ('0' & y12(9 downto 1))
-                                + ('0' & s_ink_y(9 downto 1));
-                        v_iu := ('0' & u12(9 downto 1)) + 256;
-                        v_iv := ('0' & v12(9 downto 1)) + 256;
-                    when "10" =>
-                        v_iy := ("00" & y12(9 downto 2))
-                                + ('0' & s_ink_y(9 downto 1))
-                                + ("00" & s_ink_y(9 downto 2));
-                        v_iu := ("00" & u12(9 downto 2)) + 384;
-                        v_iv := ("00" & v12(9 downto 2)) + 384;
-                    when "11" =>
-                        v_iy := s_ink_y;
-                        v_iu := to_unsigned(512, 10);
-                        v_iv := to_unsigned(512, 10);
-                    when others =>
-                        null;
-                end case;
-            end if;
-            wy13 <= v_iy;
-            wu13 <= v_iu;
-            wv13 <= v_iv;
 
             --------------------------------------------------------------
             -- line / field bookkeeping
@@ -872,9 +1013,22 @@ begin
                     if s_aline < 1000 then
                         s_aline <= s_aline + 1;
                     end if;
+                    s_cyi <= resize(shift_right(s_aline + 1, s_csh), 8);
+                    s_dyb <= signed(resize((s_aline + 1)
+                                           and resize(s_cmask, 10), 7))
+                             - signed(resize(s_chalf, 7));
+                    if ((s_aline + 1) and resize(s_cmask, 10)) = 0 then
+                        s_capline <= '1';
+                    else
+                        s_capline <= '0';
+                    end if;
                 else
                     s_aline <= (others => '0');
+                    s_cyi <= (others => '0');
+                    s_dyb <= -signed(resize(s_chalf, 7));
+                    s_capline <= '1';
                 end if;
+                pf_seq <= "001";   -- prime cell 0 of the coming line
             end if;
             if data_in.vsync_n = '0' and s_prev_vsync_n = '1' then
                 s_aline <= (others => '0');
@@ -883,48 +1037,55 @@ begin
     end process p_pix;
 
     ------------------------------------------------------------------------
-    -- packed row buffer, canonical 1W1R: read at px7 (this pixel, lands
-    -- E8 = previous row's value), write {T8, idx, gray} at px8 one clock
-    -- later -- the write pointer trails the read pointer, so reads always
-    -- see the row above (redshift single-bank trick, zero seams)
+    -- cell-sample BRAM: write from the quantizer pipe (E6, once per cell
+    -- per cell-row), read by the cell engine prefetch -- canonical 1W1R
     ------------------------------------------------------------------------
-    p_row : process(clk)
+    p_ccram : process(clk)
     begin
         if rising_edge(clk) then
-            row_q <= row_ram(to_integer(px6));
-            row_ram(to_integer(px8)) <=
-                std_logic_vector(T8) & std_logic_vector(m8) & gray8;
+            cc_q <= cc_ram(to_integer(cc_raddr));
+            if capf(5) = '1' then
+                cc_ram(to_integer(cxap(5))) <=
+                    s_y_sr(4)(9 downto 2) & std_logic_vector(idx5)
+                    & std_logic_vector(ring5) & gray5;
+            end if;
         end if;
-    end process p_row;
+    end process p_ccram;
 
     ------------------------------------------------------------------------
-    -- dry/wet mix: interpolator_u per channel, t = Solvent ramp.
-    -- wet is valid 13 clocks after data_in -> dry tap index 12.
+    -- dry/wet mix, inline: result = a + (t8 * (b - a)) >> 8.
+    -- M1 diff (wet is valid 6 clocks after data_in -> dry tap index 5),
+    -- M2 the multiply alone in its stage, M3 sum + clamp.
     ------------------------------------------------------------------------
-    s_iy_a <= unsigned(s_y_sr(12));
-    s_iu_a <= unsigned(s_u_sr(12));
-    s_iv_a <= unsigned(s_v_sr(12));
+    p_mix : process(clk)
+        variable v_s : signed(12 downto 0);
+    begin
+        if rising_edge(clk) then
+            -- M1: diff = wet - dry, dry carried alongside
+            m1_ay <= unsigned(s_y_sr(5));
+            m1_au <= unsigned(s_u_sr(5));
+            m1_av <= unsigned(s_v_sr(5));
+            m1_dy <= signed(resize(wy6, 11)) - signed(resize(unsigned(s_y_sr(5)), 11));
+            m1_du <= signed(resize(wu6, 11)) - signed(resize(unsigned(s_u_sr(5)), 11));
+            m1_dv <= signed(resize(wv6, 11)) - signed(resize(unsigned(s_v_sr(5)), 11));
 
-    interp_y_inst : entity work.interpolator_u
-        generic map(G_WIDTH => 10, G_FRAC_BITS => 10,
-                    G_OUTPUT_MIN => 0, G_OUTPUT_MAX => 1023)
-        port map(clk => clk, enable => '1',
-                 a => s_iy_a, b => wy13, t => s_mix10,
-                 result => s_iy_r, valid => s_iy_v);
+            -- M2: the multiplies, alone, pure reg x reg
+            m2_py <= signed('0' & s_mix10(9 downto 2)) * m1_dy;
+            m2_pu <= signed('0' & s_mix10(9 downto 2)) * m1_du;
+            m2_pv <= signed('0' & s_mix10(9 downto 2)) * m1_dv;
+            m2_ay <= m1_ay;
+            m2_au <= m1_au;
+            m2_av <= m1_av;
 
-    interp_u_inst : entity work.interpolator_u
-        generic map(G_WIDTH => 10, G_FRAC_BITS => 10,
-                    G_OUTPUT_MIN => 0, G_OUTPUT_MAX => 1023)
-        port map(clk => clk, enable => '1',
-                 a => s_iu_a, b => wu13, t => s_mix10,
-                 result => s_iu_r, valid => s_iu_v);
-
-    interp_v_inst : entity work.interpolator_u
-        generic map(G_WIDTH => 10, G_FRAC_BITS => 10,
-                    G_OUTPUT_MIN => 0, G_OUTPUT_MAX => 1023)
-        port map(clk => clk, enable => '1',
-                 a => s_iv_a, b => wv13, t => s_mix10,
-                 result => s_iv_r, valid => s_iv_v);
+            -- M3: a + prod>>8, clamped
+            v_s := signed(resize(m2_ay, 13)) + resize(m2_py(19 downto 8), 13);
+            m3_y <= f_cu10(v_s);
+            v_s := signed(resize(m2_au, 13)) + resize(m2_pu(19 downto 8), 13);
+            m3_u <= f_cu10(v_s);
+            v_s := signed(resize(m2_av, 13)) + resize(m2_pv(19 downto 8), 13);
+            m3_v <= f_cu10(v_s);
+        end if;
+    end process p_mix;
 
     ------------------------------------------------------------------------
     -- sync delay + output
@@ -939,9 +1100,9 @@ begin
         end if;
     end process p_sync;
 
-    data_out.y       <= std_logic_vector(s_iy_r);
-    data_out.u       <= std_logic_vector(s_iu_r);
-    data_out.v       <= std_logic_vector(s_iv_r);
+    data_out.y       <= std_logic_vector(m3_y);
+    data_out.u       <= std_logic_vector(m3_u);
+    data_out.v       <= std_logic_vector(m3_v);
     data_out.avid    <= s_avid_sr(C_LATENCY - 1);
     data_out.hsync_n <= s_hsync_n_sr(C_LATENCY - 1);
     data_out.vsync_n <= s_vsync_n_sr(C_LATENCY - 1);

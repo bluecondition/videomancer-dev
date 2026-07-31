@@ -38,6 +38,9 @@
 -- and turbulence share this one read (offsets summed, clamped s9). U and V
 -- are separate arrays with independent read addresses, so the chromatic
 -- fringe is just +/-fr_dx on the chroma read addresses (zero multiplies).
+-- Reads landing in the border columns (black on capture sources) paint the
+-- line's sampled average colour instead (lagoon's left-fill, both edges,
+-- gated on nonzero deflection so Collapse = 0 stays exactly dry).
 --
 -- Mass field: mercurial's coarse-grid machinery -- per-column vacc IIR
 -- (K1's threshold-gain curve + S7 polarity applied at the accumulator),
@@ -437,6 +440,23 @@ architecture redshift of program_top is
     signal u_addr  : unsigned(9 downto 0) := (others => '0');
     signal v_addr  : unsigned(9 downto 0) := (others => '0');
 
+    ----------------------------------------------------------------------
+    -- EDGE FILL (lagoon pattern, both edges): each line's average colour
+    -- (64 pixels starting past the often-black blanking columns) is
+    -- latched at hsync and painted into warp reads that land within
+    -- C_EDGE columns of either border -- the deflection reveal reads as
+    -- per-line sampled streaks instead of smeared black. Gated on
+    -- nonzero deflection so Collapse = 0 stays exactly dry.
+    ----------------------------------------------------------------------
+    constant C_EDGE : integer := 6;
+    signal s_sum_y, s_sum_u, s_sum_v : unsigned(15 downto 0) := (others => '0');
+    signal s_avg_cnt : unsigned(6 downto 0) := (others => '0');
+    signal s_lavg_y  : unsigned(9 downto 0) := (others => '0');
+    signal s_lavg_u  : unsigned(9 downto 0) := to_unsigned(512, 10);
+    signal s_lavg_v  : unsigned(9 downto 0) := to_unsigned(512, 10);
+    signal s_wmax6   : unsigned(10 downto 0) := to_unsigned(1913, 11);
+    signal efill7, efill8 : std_logic := '0';
+
     type t_lb_y  is array (0 to 2047) of std_logic_vector(9 downto 0);
     type t_lb_uv is array (0 to 1023) of std_logic_vector(9 downto 0);
     signal lbY : t_lb_y  := (others => (others => '0'));
@@ -803,6 +823,16 @@ begin
                     vq_disp <= unsigned(vacc_q(11 downto 0));
                 end if;
 
+                -- edge-fill average: 64 registered pixels, starting past
+                -- the (often black) source edge columns
+                if s_x_count > to_unsigned(8, 11)
+                   and s_avg_cnt < to_unsigned(64, 7) then
+                    s_sum_y   <= s_sum_y + resize(r0_y, 16);
+                    s_sum_u   <= s_sum_u + resize(r0_u, 16);
+                    s_sum_v   <= s_sum_v + resize(r0_v, 16);
+                    s_avg_cnt <= s_avg_cnt + 1;
+                end if;
+
                 -- rolling corner prefetch: fetch column col+2's two rows
                 -- mid-span, shift corners at span start -- but NOT at
                 -- column 0, whose corners the hblank prefetch just loaded
@@ -1024,6 +1054,17 @@ begin
                 end if;
                 v_addr <= v_qa(10 downto 1);
 
+                -- edge-fill zone: the read landed in the border columns
+                -- (which smear black on capture sources) and the field is
+                -- actually deflecting -- paint the line's sampled colour
+                if (v_q < to_signed(C_EDGE, 13)
+                    or v_q > signed(resize(s_wmax6, 13)))
+                   and dx6 /= 0 then
+                    efill7 <= '1';
+                else
+                    efill7 <= '0';
+                end if;
+
                 rd_x <= rd_x + 1;
                 dx7  <= dx6;
                 m_d7 <= m_d6;
@@ -1031,15 +1072,26 @@ begin
 
             -- S8: BRAM reads happen this cycle (see p_lb*)
             if av(8) = '1' then
-                dx8  <= dx7;
-                m_d8 <= m_d7;
+                dx8    <= dx7;
+                m_d8   <= m_d7;
+                efill8 <= efill7;
             end if;
 
-            -- S9: land the warp reads in plain FFs
+            -- S9: land the warp reads (edge-fill zone lands the line's
+            -- sampled colour instead -- one stable-select mux on the BRAM
+            -- outputs, sidewinder p_wet precedent); grades and Doppler
+            -- apply on top downstream, so the fill inherits the red/blue
+            -- drag near masses
             if av(9) = '1' then
-                wy9 <= unsigned(by_q);
-                wu9 <= unsigned(bu_q);
-                wv9 <= unsigned(bv_q);
+                if efill8 = '1' then
+                    wy9 <= s_lavg_y;
+                    wu9 <= s_lavg_u;
+                    wv9 <= s_lavg_v;
+                else
+                    wy9 <= unsigned(by_q);
+                    wu9 <= unsigned(bu_q);
+                    wv9 <= unsigned(bv_q);
+                end if;
                 dx9  <= dx8;
                 m_d9 <= m_d8;
             end if;
@@ -1185,7 +1237,19 @@ begin
                 if s_x_count > 0 then
                     s_lwidth <= s_x_count;
                     s_wmax   <= s_x_count - 1;
+                    s_wmax6  <= s_x_count - (C_EDGE + 1);
                 end if;
+
+                -- latch this line's sampled fill colour, restart the sum
+                if s_avg_cnt = to_unsigned(64, 7) then
+                    s_lavg_y <= s_sum_y(15 downto 6);
+                    s_lavg_u <= s_sum_u(15 downto 6);
+                    s_lavg_v <= s_sum_v(15 downto 6);
+                end if;
+                s_sum_y   <= (others => '0');
+                s_sum_u   <= (others => '0');
+                s_sum_v   <= (others => '0');
+                s_avg_cnt <= (others => '0');
                 s_x_count <= (others => '0');
                 wx    <= (others => '0');
                 x_s2  <= (others => '0');

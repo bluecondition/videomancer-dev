@@ -27,7 +27,7 @@ parameter_id = "rotary_potentiometer_1"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 200
+initial_value = 0
 display_min_value = 8
 display_max_value = 256
 name_label = "Triangle Size"
@@ -49,7 +49,7 @@ parameter_id = "rotary_potentiometer_3"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 400
+initial_value = 512
 display_min_value = 0
 display_max_value = 100
 name_label = "Luma Thresh"
@@ -74,7 +74,7 @@ suffix_label = ""
 parameter_id = "rotary_potentiometer_6"
 name_label = "Line Width"
 value_labels = ["Thin", "Medium", "Bold", "Heavy"]
-initial_value_label = "Medium"
+initial_value_label = "Thin"
 
 # --- Toggle Switches (7-11, binary) ---
 
@@ -82,7 +82,7 @@ initial_value_label = "Medium"
 parameter_id = "toggle_switch_7"
 name_label = "Grid Lines"
 value_labels = ["Off", "On"]
-initial_value_label = "Off"
+initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
@@ -93,8 +93,10 @@ initial_value_label = "Off"
 [[parameter]]
 parameter_id = "toggle_switch_9"
 name_label = "Fill Mode"
-value_labels = ["Flat", "Faceted"]
-initial_value_label = "Flat"
+# switch off (0) = faceted (per half-cell reads), on (1) = flat (left-cell read);
+# labels were previously swapped vs the s_fill hardware sense.
+value_labels = ["Faceted", "Flat"]
+initial_value_label = "Faceted"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"

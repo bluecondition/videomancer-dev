@@ -1,0 +1,204 @@
+# HYPNOS -- hard-edged concentric-CIRCLE / bullseye generator (pure B/W, no video).
+#
+# 1960s op-art target: Vasarely / Bridget Riley / the Vertigo spiral.  For each
+# pixel: TRUE Euclidean distance from a freely-movable centre (CORDIC) -> gamma
+# warp -> band it.  The centre travels +/-2 screens off-frame (the field becomes
+# a shallow arc, then near-parallel stripes -- that range IS the instrument).
+# Z on the slider is a dolly that flies you into the rings; full-CCW WARP + a
+# slider push is the infinite tunnel.  SPIRAL (K5) twists the rings into the
+# Vertigo spiral.  No input video -- a straight black-and-white generator.
+#
+# Hardware reality: 6 knobs + 5 switches + 1 slider = 12 live controls, no shift
+# layer.  So the spec's ~16 controls were compressed: the 6 continuous essentials
+# on knobs, Z on the slider, and glide / catch-up / invert / output-mode / animate
+# on the five switches.  Glide-time, anim-rate, softness-baseline and the B/W
+# palette are compile-time constants (there is no register to "preset" them into).
+
+[program]
+program_id = "com.bluecondition.hypnos"
+program_version = "0.3.0"
+abi_version = ">=1.0,<2.0"
+program_name = "Hypnos"
+author = "bluecondition"
+license = "GPL-3.0"
+categories = ["Illusion", "Optics", "Pattern"]
+program_type = "synthesis"
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+description = "Op-art target of TRUE concentric circles: movable off-screen centre, tunnel-to-dome warp, Vertigo spiral, Z-dolly slider"
+url = "https://github.com/bluecondition/videomancer-dev"
+
+# --- Rotary Potentiometers (Knobs 1-6) ---
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 512            # centred (detent = frame centre)
+display_min_value = -100
+display_max_value = 100
+name_label = "Center X"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 512            # centred (detent = frame centre)
+display_min_value = -100
+display_max_value = 100
+name_label = "Center Y"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 430            # ring density: ~0.5 ring across frame -> alias limit
+display_min_value = 0
+display_max_value = 100
+name_label = "Period"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 512            # WARP detent = flat (CCW tunnel, CW dome)
+display_min_value = -100
+display_max_value = 100
+name_label = "Warp"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 512            # SPIRAL detent = pure circles (CCW/CW = Vertigo twist)
+display_min_value = -100
+display_max_value = 100
+name_label = "Spiral"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 512            # DUTY ~50% (band A : band B width)
+display_min_value = 5
+display_max_value = 95
+name_label = "Duty"
+suffix_label = "%"
+
+# --- Toggle Switches (7-11, binary) ---
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Glide"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Catch-Up"
+value_labels = ["Uniform", "Catch-Up"]
+initial_value_label = "Uniform"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Invert"
+value_labels = ["Normal", "Invert"]
+initial_value_label = "Normal"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Output"
+value_labels = ["Key", "Gradient"]
+initial_value_label = "Key"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Animate"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+# --- Linear Potentiometer (Fader 12) ---
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 0              # Z / ZOOM dolly -- bottom = base period, push = fly in
+display_min_value = 0
+display_max_value = 100
+name_label = "Zoom"
+suffix_label = "%"
+
+# --- Presets ---
+
+[[preset]]
+name = "Op-Art Target"          # the reference image: centred, flat, 50% duty, static
+rotary_potentiometer_1 = 512    # Center X (centred)
+rotary_potentiometer_2 = 512    # Center Y (centred)
+rotary_potentiometer_3 = 430    # Period
+rotary_potentiometer_4 = 512    # Warp flat
+rotary_potentiometer_5 = 512    # Spiral off (pure circles)
+rotary_potentiometer_6 = 512    # Duty 50%
+toggle_switch_7 = 1            # Glide on
+toggle_switch_8 = 0            # Uniform motion
+toggle_switch_9 = 0            # Normal (not inverted)
+toggle_switch_10 = 0            # Key (hard)
+toggle_switch_11 = 0            # static
+linear_potentiometer_12 = 0
+
+[[preset]]
+name = "Vertigo Vortex"         # centred spiral into a deep tunnel, drifting
+rotary_potentiometer_1 = 512
+rotary_potentiometer_2 = 512
+rotary_potentiometer_3 = 470
+rotary_potentiometer_4 = 120    # deep tunnel
+rotary_potentiometer_5 = 760    # Vertigo spiral
+rotary_potentiometer_6 = 512
+toggle_switch_7 = 1            # Glide on
+toggle_switch_8 = 0            # Uniform
+toggle_switch_9 = 0            # Normal
+toggle_switch_10 = 0
+toggle_switch_11 = 1          # animate
+linear_potentiometer_12 = 470
+
+[[preset]]
+name = "Riley Stripes"          # centre far off-screen -> near-parallel stripes
+rotary_potentiometer_1 = 980    # far right
+rotary_potentiometer_2 = 120    # far up
+rotary_potentiometer_3 = 300
+rotary_potentiometer_4 = 512
+rotary_potentiometer_5 = 512
+rotary_potentiometer_6 = 512
+toggle_switch_7 = 1           # Glide on (centre swims)
+toggle_switch_8 = 0           # Uniform
+toggle_switch_9 = 0           # Normal
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 0
+
+[[preset]]
+name = "Sphere Dome"            # CW warp, soft gradient rings
+rotary_potentiometer_1 = 512
+rotary_potentiometer_2 = 512
+rotary_potentiometer_3 = 430
+rotary_potentiometer_4 = 860    # dome
+rotary_potentiometer_5 = 512    # no spiral
+rotary_potentiometer_6 = 512
+toggle_switch_7 = 1            # Glide on
+toggle_switch_8 = 1            # Catch-Up (feel it when you move the centre)
+toggle_switch_9 = 0            # Normal
+toggle_switch_10 = 1          # gradient
+toggle_switch_11 = 0
+linear_potentiometer_12 = 0

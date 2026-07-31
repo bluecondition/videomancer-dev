@@ -1,0 +1,245 @@
+# Ribbon — full-screen candy-ribbon stripes.
+#
+# A standalone fork of SUGARCOAT's "rainbow taffy" texture, blown up to fill
+# the frame and grown into a full instrument.  Diagonal palette-ramp stripes
+# are bent by a cross-axis triangle warp into waving ribbons, rounded and lit
+# by a specular gloss, and can be mirrored into arrowheads, cross-woven into
+# tartan, folded into ropes or wrapped in dark outlines.
+#
+# No video in — a pure generator.  WARP lives on the slider, and Warp, Angle,
+# Scale, Palette and Ripple are all CONTINUOUS: no stepping anywhere.
+#
+# Author: bluecondition
+
+[program]
+program_id = "com.bluecondition.ribbon"
+program_version = "0.2.0"
+abi_version = ">=1.0,<2.0"
+program_name = "Ribbon"
+author = "bluecondition"
+license = "GPL-3.0"
+categories = ["Pattern", "Color", "Render"]
+program_type = "synthesis"
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+description = "Full-screen glossy candy ribbons: warping palette stripes, chevrons, tartan and ropes. Rainbow or bakery brown."
+url = "https://github.com/bluecondition/videomancer-dev"
+
+# --- Rotary Potentiometers (Knobs 1-6) ---
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 256
+display_min_value = 0
+display_max_value = 180
+name_label = "Angle"
+suffix_label = "deg"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 512
+display_min_value = 1
+display_max_value = 4
+name_label = "Density"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 512
+display_min_value = 0
+display_max_value = 100
+name_label = "Scale"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 0
+display_min_value = 0
+display_max_value = 100
+name_label = "Palette"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 250
+display_min_value = 0
+display_max_value = 100
+name_label = "Ripple"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 640
+display_min_value = 0
+display_max_value = 100
+name_label = "Gloss"
+suffix_label = "%"
+
+# --- Toggle Switches (7-11) ---
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Chevron"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Plaid"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Bakery"
+value_labels = ["Candy", "Bakery"]
+initial_value_label = "Candy"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Rope"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Outline"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+# --- Linear Potentiometer (Slider) ---
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 320
+display_min_value = 0
+display_max_value = 100
+name_label = "Warp"
+suffix_label = "%"
+
+# --- Presets ---
+
+[[preset]]
+name = "Rainbow"
+rotary_potentiometer_1 = 256
+rotary_potentiometer_2 = 512
+rotary_potentiometer_3 = 512
+rotary_potentiometer_4 = 0
+rotary_potentiometer_5 = 250
+rotary_potentiometer_6 = 640
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 320
+
+[[preset]]
+name = "Bakeshop"
+rotary_potentiometer_1 = 256
+rotary_potentiometer_2 = 560
+rotary_potentiometer_3 = 640
+rotary_potentiometer_4 = 0
+rotary_potentiometer_5 = 200
+rotary_potentiometer_6 = 700
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 1
+toggle_switch_10 = 1
+toggle_switch_11 = 0
+linear_potentiometer_12 = 200
+
+[[preset]]
+name = "Bunting"
+rotary_potentiometer_1 = 256
+rotary_potentiometer_2 = 300
+rotary_potentiometer_3 = 560
+rotary_potentiometer_4 = 380
+rotary_potentiometer_5 = 180
+rotary_potentiometer_6 = 760
+toggle_switch_7 = 1
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 1
+linear_potentiometer_12 = 260
+
+[[preset]]
+name = "Tartan"
+rotary_potentiometer_1 = 128
+rotary_potentiometer_2 = 512
+rotary_potentiometer_3 = 600
+rotary_potentiometer_4 = 620
+rotary_potentiometer_5 = 300
+rotary_potentiometer_6 = 520
+toggle_switch_7 = 0
+toggle_switch_8 = 1
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 0
+
+[[preset]]
+name = "Licorice Rope"
+rotary_potentiometer_1 = 700
+rotary_potentiometer_2 = 512
+rotary_potentiometer_3 = 696
+rotary_potentiometer_4 = 150
+rotary_potentiometer_5 = 420
+rotary_potentiometer_6 = 900
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 1
+toggle_switch_11 = 1
+linear_potentiometer_12 = 520
+
+[[preset]]
+name = "Flat Bands"
+rotary_potentiometer_1 = 0
+rotary_potentiometer_2 = 430
+rotary_potentiometer_3 = 680
+rotary_potentiometer_4 = 850
+rotary_potentiometer_5 = 250
+rotary_potentiometer_6 = 0
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 0
+
+[[preset]]
+name = "Sugar Storm"
+rotary_potentiometer_1 = 400
+rotary_potentiometer_2 = 900
+rotary_potentiometer_3 = 620
+rotary_potentiometer_4 = 500
+rotary_potentiometer_5 = 800
+rotary_potentiometer_6 = 820
+toggle_switch_7 = 1
+toggle_switch_8 = 1
+toggle_switch_9 = 0
+toggle_switch_10 = 1
+toggle_switch_11 = 0
+linear_potentiometer_12 = 900

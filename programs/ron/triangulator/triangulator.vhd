@@ -28,7 +28,7 @@
 --   S9 Fill Mode      (Flat = one colour per ▲/▽ | Faceted = per half-cell)
 --   S10 Wireframe     (edges only, no fill)
 --   S11 Bypass        (pass input through)
---   P12 (reserved)
+--   P12 Mix           (dry/wet: 0 = clean input, 100% = full effect)
 --
 -- Luma Mod / Wireframe matrix:
 --   LM on,  WF off -> only lit triangles: fill + their own grid lines, else black
@@ -55,7 +55,7 @@ use work.video_timing_pkg.all;
 
 architecture triangulator of program_top is
 
-    constant LATENCY  : natural := 10;
+    constant LATENCY  : natural := 12;
     constant C_MAXCOL : natural := 256;                       -- max cell columns (small triangles)
 
     constant C_MID  : unsigned(9 downto 0) := to_unsigned(512, 10);
@@ -136,10 +136,13 @@ architecture triangulator of program_top is
     signal s_palsel : std_logic := '0';                            -- posterize palette
     signal s_hue    : unsigned(1 downto 0) := (others => '0');     -- hue angle (x90 deg)
     signal s_line_w : unsigned(11 downto 0) := to_unsigned(2, 12); -- grid line width
+    signal s_line_wt : unsigned(11 downto 0) := to_unsigned(1, 12); -- horiz band, top of row
+    signal s_line_wb : unsigned(11 downto 0) := to_unsigned(1, 12); -- horiz band, bottom of row
     signal s_grid   : std_logic := '1';
     signal s_fill   : std_logic := '0';                            -- 0 faceted, 1 flat
     signal s_wire   : std_logic := '0';                            -- S10: grid only, no fill
     signal s_bypass : std_logic := '0';                            -- S11
+    signal s_mix    : unsigned(6 downto 0) := to_unsigned(64, 7); -- P12 dry/wet, 64 steps (64 = full effect)
     signal s_gy, s_gu, s_gv : unsigned(9 downto 0) := to_unsigned(48, 10); -- grid colour (K5)
 
     -- per-frame selected duotone endpoints + deltas
@@ -196,6 +199,10 @@ architecture triangulator of program_top is
     signal s5_y, s5_u, s5_v       : unsigned(9 downto 0) := C_MID;          -- St5 colorized
     signal s6_y, s6_u, s6_v       : unsigned(9 downto 0) := C_MID;          -- St6 grid overlay
     signal s6_vid                 : std_logic := '0';                       -- St6: colour this edge from live video
+    signal m7_dy, m7_du, m7_dv    : signed(10 downto 0) := (others => '0'); -- St7 effect - dry
+    signal m7_iy, m7_iu, m7_iv    : unsigned(9 downto 0) := C_MID;          -- St7 dry input
+    signal m8_py, m8_pu, m8_pv    : signed(18 downto 0) := (others => '0'); -- St8 mix products
+    signal m8_iy, m8_iu, m8_iv    : unsigned(9 downto 0) := C_MID;
 
     signal s_io : t_video_stream_yuv444_30b;
 
@@ -274,20 +281,37 @@ begin
                 s_palsel <= registers_in(4)(9);
                 s_hue    <= unsigned(registers_in(4)(9 downto 8));
 
-                -- Line Width (K6 top 2 bits) -> 1/2/3/4 px.  The diagonal uses the
-                -- same threshold: its ~2.0 edge gradient cancels the 2x from the
-                -- symmetric |d| test, so diagonal and horizontal come out equal.
+                -- Line Width (K6 top 2 bits) -> 1/2/3/4 px.  Horizontal edges are
+                -- shared base-to-base between cell rows, so each row draws only
+                -- HALF the width (top band wt + bottom band wb of the two adjacent
+                -- rows sum to W); the diagonal's [-W,W) band (2W units) is halved
+                -- back to ~W px by its ~2.0 edge gradient, so both match at ~W px.
                 case to_integer(unsigned(registers_in(5)(9 downto 8))) is
-                    when 0      => s_line_w <= to_unsigned(1, 12);
-                    when 1      => s_line_w <= to_unsigned(2, 12);
-                    when 2      => s_line_w <= to_unsigned(3, 12);
-                    when others => s_line_w <= to_unsigned(4, 12);
+                    when 0      => s_line_w  <= to_unsigned(1, 12);
+                                   s_line_wt <= to_unsigned(1, 12);
+                                   s_line_wb <= to_unsigned(0, 12);
+                    when 1      => s_line_w  <= to_unsigned(2, 12);
+                                   s_line_wt <= to_unsigned(1, 12);
+                                   s_line_wb <= to_unsigned(1, 12);
+                    when 2      => s_line_w  <= to_unsigned(3, 12);
+                                   s_line_wt <= to_unsigned(2, 12);
+                                   s_line_wb <= to_unsigned(1, 12);
+                    when others => s_line_w  <= to_unsigned(4, 12);
+                                   s_line_wt <= to_unsigned(2, 12);
+                                   s_line_wb <= to_unsigned(2, 12);
                 end case;
 
                 s_grid   <= registers_in(6)(0);
                 s_fill   <= registers_in(6)(2);
                 s_wire   <= registers_in(6)(3);   -- S10 Wireframe (grid only)
                 s_bypass <= registers_in(6)(4);   -- S11 Bypass
+
+                -- P12 Mix (dry/wet), 64 steps (visually seamless, and an 11x8 mult
+                -- instead of 11x12 -- the full-width version cost ~500 LCs more and
+                -- broke HD routing).  Adding the top bit maps 63 -> 64 so the fader
+                -- top is EXACT full effect (no 63/64 residue of the dry).
+                s_mix <= resize(unsigned(registers_in(7)(9 downto 4)), 7)
+                       + resize(unsigned(registers_in(7)(9 downto 9)), 7);
 
                 -- Grid-line colour from K5 (top 3 bits).
                 s_gy <= GRID_Y(to_integer(unsigned(registers_in(4)(9 downto 7))));
@@ -328,9 +352,9 @@ begin
     -- Combinational geometry: triangle classification, read address, grid flag.
     -- 45-degree diagonal => no multiply.
     --------------------------------------------------------------------------
-    p_comb : process(g0_lxs, g0_ly, g0_cx, g0_even, s_csz_h, s_csz_hm1, s_line_w, s_fill)
+    p_comb : process(g0_lxs, g0_ly, g0_cx, g0_even, s_csz_h, s_csz_hm1,
+                     s_line_w, s_line_wt, s_line_wb, s_fill)
         variable v_d     : signed(12 downto 0);
-        variable v_ad    : unsigned(11 downto 0);
         variable v_side  : std_logic;
     begin
         -- g0_lxs is already lx*7/4 (registered): equilateral edge slope.
@@ -342,7 +366,6 @@ begin
         end if;
 
         if v_d >= 0 then v_side := '1'; else v_side := '0'; end if;
-        if v_d < 0 then v_ad := unsigned(resize(-v_d, 12)); else v_ad := unsigned(resize(v_d, 12)); end if;
 
         -- read address: faceted = own cell; flat = the triangle's LEFT cell
         -- (side 1 -> this cell is the left cell; side 0 -> the cell to the left).
@@ -360,9 +383,13 @@ begin
 
         -- grid line: on the active diagonal, or near the TOP (▽ base) or BOTTOM
         -- (▲ base) of the cell row, so every triangle owns all three of its edges.
+        -- The diagonal takes the full [-W,W) band (its ~2.0 gradient halves it to
+        -- ~W px perpendicular); the horizontal bands are split wt/wb across the
+        -- two rows sharing the edge so the combined line is also ~W px.
         -- Vertical cell edges are NOT triangle edges.
-        if (v_ad < resize(s_line_w, 12)) or (g0_ly < s_line_w)
-           or (g0_ly > s_csz_hm1 - s_line_w) then
+        if (v_d >= -signed(resize(s_line_w, 13)) and v_d < signed(resize(s_line_w, 13)))
+           or (g0_ly < s_line_wt)
+           or (g0_ly > s_csz_hm1 - s_line_wb) then
             c_grid <= '1';
         else
             c_grid <= '0';
@@ -536,16 +563,41 @@ begin
                 s6_v <= s5_v;
             end if;
 
-            -- St7: output.  Bypass passes raw input; s6_vid edges take the live video
-            -- colour (pipe is aligned with the output sync here).
-            if s_bypass = '1' or s6_vid = '1' then
+            -- St7: mix prep — capture the dry input (aligned with St6 here) and the
+            -- per-channel (effect - dry) difference.  s6_vid edges are coloured by
+            -- the live video, so their effect IS the dry pixel (diff = 0).
+            m7_iy <= unsigned(pipe(LATENCY - 3).y);
+            m7_iu <= unsigned(pipe(LATENCY - 3).u);
+            m7_iv <= unsigned(pipe(LATENCY - 3).v);
+            if s6_vid = '1' then
+                m7_dy <= (others => '0');
+                m7_du <= (others => '0');
+                m7_dv <= (others => '0');
+            else
+                m7_dy <= signed(resize(s6_y, 11)) - signed(resize(unsigned(pipe(LATENCY - 3).y), 11));
+                m7_du <= signed(resize(s6_u, 11)) - signed(resize(unsigned(pipe(LATENCY - 3).u), 11));
+                m7_dv <= signed(resize(s6_v, 11)) - signed(resize(unsigned(pipe(LATENCY - 3).v), 11));
+            end if;
+
+            -- St8: P12 mix products (one mult per channel, operands + product
+            -- registered, nothing else in the stage).
+            m8_py <= m7_dy * signed('0' & s_mix);
+            m8_pu <= m7_du * signed('0' & s_mix);
+            m8_pv <= m7_dv * signed('0' & s_mix);
+            m8_iy <= m7_iy;
+            m8_iu <= m7_iu;
+            m8_iv <= m7_iv;
+
+            -- St9: output = dry + (effect - dry) * mix / 64.  Bypass passes the
+            -- raw input (pipe is aligned with the output sync here).
+            if s_bypass = '1' then
                 s_io.y <= pipe(LATENCY - 1).y;
                 s_io.u <= pipe(LATENCY - 1).u;
                 s_io.v <= pipe(LATENCY - 1).v;
             else
-                s_io.y <= std_logic_vector(s6_y);
-                s_io.u <= std_logic_vector(s6_u);
-                s_io.v <= std_logic_vector(s6_v);
+                s_io.y <= std_logic_vector(clamp10(signed(resize(m8_iy, 14)) + resize(shift_right(m8_py, 6), 14)));
+                s_io.u <= std_logic_vector(clamp10(signed(resize(m8_iu, 14)) + resize(shift_right(m8_pu, 6), 14)));
+                s_io.v <= std_logic_vector(clamp10(signed(resize(m8_iv, 14)) + resize(shift_right(m8_pv, 6), 14)));
             end if;
             s_io.hsync_n <= pipe(LATENCY - 1).hsync_n;
             s_io.vsync_n <= pipe(LATENCY - 1).vsync_n;

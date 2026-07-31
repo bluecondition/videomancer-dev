@@ -89,7 +89,7 @@ architecture pyro of program_top is
     constant C_USHIFT  : integer := 2;     -- 4 screen px per cell
     constant C_VW      : integer := 1280;  -- canvas viewport width  (px)
     constant C_VH      : integer := 720;   -- canvas viewport height (px)
-    constant C_LATENCY : integer := 6;     -- input->output register stages
+    constant C_LATENCY : integer := 7;     -- input->output register stages
     constant C_CELLS   : integer := C_CW * C_CH;  -- 57600 (29 EBRs at 2 bit)
 
     constant C_GROUND  : integer := 176;   -- launch pad row (cells)
@@ -261,6 +261,10 @@ architecture pyro of program_top is
     -- ==== Night sky: gradient + hashed static starfield + sky flash ====
     -- star flag decided at stage 2 (one crisp dot per lit cell), piped to 6
     signal s_bgy   : unsigned(7 downto 0) := to_unsigned(40, 8);
+    -- line-rate composites: gradient + sky-flash (sky) and water base +
+    -- half flash -- keeps the per-pixel color stage to a single add
+    signal s_bgf   : unsigned(9 downto 0) := to_unsigned(40, 10);
+    signal s_wf    : unsigned(9 downto 0) := to_unsigned(48, 10);
     signal s_star2, s_star3, s_star4, s_star5, s_star6 : std_logic := '0';
     -- dim/twinkle flag rides alongside
     signal s_stwk2, s_stwk3, s_stwk4, s_stwk5, s_stwk6 : std_logic := '0';
@@ -349,6 +353,13 @@ architecture pyro of program_top is
     signal s_sl_rsp   : t_sl_u7  := (others => to_unsigned(12, 7));
     signal s_sl_n     : t_sl_u6  := (others => to_unsigned(24, 6));
     signal s_sl_ever  : std_logic_vector(3 downto 0) := "0011";
+    -- free-running helper flags: relaunch timers + shared drift pacing
+    -- (decoded OUTSIDE the vsync cone -- the 10-bit age/delay compare and
+    -- per-slot pace decodes were routed critical paths at 89% util)
+    signal s_expd    : std_logic_vector(3 downto 0) := "0000";
+    signal s_pc_sink : std_logic := '0';
+    signal s_pc_mom8 : std_logic := '0';
+    signal s_pc_mom16: std_logic := '0';
 
     -- raster-scaled layout (recomputed each vsync from the measured raster,
     -- so the show fills the screen on SD rasters too, not just 1280x720)
@@ -533,7 +544,8 @@ architecture pyro of program_top is
     signal s_w_head : std_logic := '0';
 
     -- ==== Palette (U/V swapped for HW: stored U = Cr, stored V = Cb) ====
-    -- 0 Red, 1 Gold, 2 Yellow, 3 Green, 4 Blue, 5 Indigo, 6 Violet, 7 White;
+    -- Full rainbow: 0 Red, 1 Orange, 2 Yellow, 3 Green, 4 Blue, 5 Indigo,
+    -- 6 Violet, 7 White (the scope-verified ROYGBIV chroma set);
     -- entries 8..15 are the pastel bank (chroma halved toward 512) so the
     -- pastel flag is just index bit 3 -- no extra mux depth in stage 6
     type t_pal16 is array(0 to 15) of unsigned(9 downto 0);
@@ -547,9 +559,19 @@ architecture pyro of program_top is
         to_unsigned(960, 10), to_unsigned(696, 10), to_unsigned(852, 10), to_unsigned(512, 10),
         to_unsigned(436, 10), to_unsigned(362, 10), to_unsigned(288, 10), to_unsigned(364, 10),
         to_unsigned(736, 10), to_unsigned(604, 10), to_unsigned(682, 10), to_unsigned(512, 10));
-    -- ember cool-down: warm hues cool within family (white/yellow->gold,
-    -- gold->red); cool hues KEEP their identity (green/indigo/violet hold,
-    -- blue deepens to indigo) -- cooling everything toward red/gold read
+    -- per-color LUMA CEILING (the palette's verified Y column, slightly
+    -- lifted; pastels halfway to white): every hue is distinguished as
+    -- much by brightness as by chroma -- red at a forced-bright 768 reads
+    -- PINK, orange reads cream. Capping spark luma per color is what
+    -- makes the full rainbow actually visible on screen.
+    constant C_PAL_YC : t_pal16 := (
+        to_unsigned(400, 10), to_unsigned(620, 10), to_unsigned(840, 10), to_unsigned(640, 10),
+        to_unsigned(320, 10), to_unsigned(360, 10), to_unsigned(450, 10), to_unsigned(768, 10),
+        to_unsigned(584, 10), to_unsigned(696, 10), to_unsigned(800, 10), to_unsigned(704, 10),
+        to_unsigned(544, 10), to_unsigned(564, 10), to_unsigned(608, 10), to_unsigned(768, 10));
+    -- ember cool-down: warm hues cool within family (white/yellow->orange,
+    -- orange->red); cool hues KEEP their identity (green/indigo/violet
+    -- hold, blue deepens to indigo) -- cooling everything toward red read
     -- as a single color wash over the whole show
     type t_map8 is array(0 to 7) of unsigned(2 downto 0);
     constant C_EMBER : t_map8 := ("000", "000", "001", "011", "101", "101", "110", "001");
@@ -587,6 +609,12 @@ architecture pyro of program_top is
     signal s_cidx6 : unsigned(2 downto 0) := "000";
     signal s_far6  : std_logic := '0';
     signal s_t6    : unsigned(7 downto 0) := (others => '0');
+    -- stage 6a->6b pipe: the argmin->pastel->palette->luma-cap cone was
+    -- one combinational stage too deep for hd timing, so the owning color
+    -- index resolves a stage ahead of the cap/branch muxes
+    signal s_ci7   : unsigned(3 downto 0) := (others => '0');
+    signal s_t7    : unsigned(7 downto 0) := (others => '0');
+    signal s_star7, s_stwk7, s_mir7, s_insq7 : std_logic := '0';
 
     -- ==== Colour / output (stage 6) ====
     signal s_d_y   : unsigned(9 downto 0) := (others => '0');
@@ -687,6 +715,9 @@ begin
             -- night-sky gradient: dark zenith lifting toward the horizon
             -- (line-rate value, sampled at stage 6 -- 1-line skew invisible)
             s_bgy <= to_unsigned(40, 8) + resize(s_pcy(7 downto 2), 8);
+            -- pre-composited backgrounds (line-rate adds, not pixel-rate)
+            s_bgf <= resize(s_bgy, 10) + resize(s_flash & "000000", 10);
+            s_wf  <= to_unsigned(48, 10) + resize(s_flash & "00000", 10);
 
             -- water horizon at ~78% of the usable cell height (1/2+1/4+1/32)
             s_horiz <= resize(shift_right(s_ch2, 1) + shift_right(s_ch2, 2)
@@ -1109,7 +1140,12 @@ begin
                                     + s_scr_r;
                         end if;
                         if v_tl < to_signed(64, 10) then
-                            null;
+                            -- ascending rocket: white head with a yellow
+                            -- fringe (user-preferred launch look; white is
+                            -- chromatically neutral, so re-claimed embers
+                            -- shift far less than the old gold did)
+                            s_aci(k) <= "111";
+                            s_aco(k) <= "010";
                         elsif v_tl < to_signed(70, 10) then
                             s_aci(k) <= "111";
                             s_aco(k) <= "111";
@@ -1198,6 +1234,31 @@ begin
             -- pre-registered spawn clamp bound (the spawn-x adder+clamp
             -- chain is the hd_hdmi critical path -- keep it shallow)
             s_cwm32 <= signed(resize(s_cwu, 11)) - to_signed(32, 11);
+            -- relaunch timers + drift pacing, decoded free-running (ages
+            -- change only at vsync, so these settle immediately after)
+            for k in 0 to 3 loop
+                if s_sl_age(k) >= s_sl_delay(k) then
+                    s_expd(k) <= '1';
+                else
+                    s_expd(k) <= '0';
+                end if;
+            end loop;
+            if (s_gravK /= 0 and s_frame_cnt(2 downto 0) = "000")
+               or (s_gravK(5) = '1' and s_frame_cnt(2 downto 0) = "100") then
+                s_pc_sink <= '1';
+            else
+                s_pc_sink <= '0';
+            end if;
+            if s_frame_cnt(2 downto 0) = "010" then
+                s_pc_mom8 <= '1';
+            else
+                s_pc_mom8 <= '0';
+            end if;
+            if s_frame_cnt(3 downto 0) = "0110" then
+                s_pc_mom16 <= '1';
+            else
+                s_pc_mom16 <= '0';
+            end if;
             -- altitude map: 0..158 cells of rise, clamped at the apogee band
             if resize(s_sldr(9 downto 3), 8) + resize(s_sldr(9 downto 5), 8)
                >= s_ground - s_apbase then
@@ -1697,8 +1758,7 @@ begin
                             -- slot 3 doubles as the hand-fire shell: manual
                             -- pushes spawn it instantly (even in silence);
                             -- auto relaunch skips it while the hand owns it
-                            v_sp := s_silent = '0'
-                                    and s_sl_age(k) >= s_sl_delay(k);
+                            v_sp := s_silent = '0' and s_expd(k) = '1';
                             if k = 3 then
                                 v_sp := (v_sp and s_hf_state = "00"
                                          and v_hf_go = '0')
@@ -1824,22 +1884,21 @@ begin
                                 -- core and attribution all follow for free;
                                 -- FREEZE halts it, scrub collapses the
                                 -- pattern around the drifted position).
+                                -- Pacing comes from SHARED free-running
+                                -- frame-counter decodes (s_pc_*), not
+                                -- per-slot age bits: one decode, 4 users.
                                 -- Sink: 1 cell / 8 frames, doubled on the
                                 -- heavy half of the GRAVITY knob; none at 0
-                                if (s_gravK /= 0
-                                    and s_sl_age(k)(2 downto 0) = "000")
-                                   or (s_gravK(5) = '1'
-                                       and s_sl_age(k)(2 downto 0) = "100") then
+                                if s_pc_sink = '1' then
                                     if s_sl_cy(k) < to_unsigned(176, 8) then
                                         s_sl_cy(k) <= s_sl_cy(k) + 1;
                                     end if;
                                 end if;
                                 -- sideways momentum: seed-picked direction,
                                 -- 1 cell / 8 or / 16 frames
-                                if (s_sl_seed(k)(2) = '1'
-                                    and s_sl_age(k)(2 downto 0) = "010")
+                                if (s_sl_seed(k)(2) = '1' and s_pc_mom8 = '1')
                                    or (s_sl_seed(k)(2) = '0'
-                                       and s_sl_age(k)(3 downto 0) = "0110") then
+                                       and s_pc_mom16 = '1') then
                                     if s_sl_seed(k)(1) = '1' then
                                         if signed(resize(s_sl_cx(k), 11)) < s_cwm32 then
                                             s_sl_cx(k) <= s_sl_cx(k) + 1;
@@ -2032,60 +2091,66 @@ begin
     p_color : process(clk)
         variable v_t  : unsigned(7 downto 0);
         variable v_y  : unsigned(10 downto 0);
-        variable v_ci : unsigned(3 downto 0);
     begin
         if rising_edge(clk) then
-            v_t := s_t6;
-            -- luma = t*4 (t <= 192 -> max 768: full-scale Y clips all RGB
-            -- channels on real displays and washes saturated chroma to white)
+            -- stage 6a: resolve the owning color index (argmin -> pastel
+            -- bit -> inner/outer) and pipe everything else one stage
+            if s_far6 = '1' then
+                s_ci7 <= s_apas(to_integer(s_cidx6)) & s_aco(to_integer(s_cidx6));
+            else
+                s_ci7 <= s_apas(to_integer(s_cidx6)) & s_aci(to_integer(s_cidx6));
+            end if;
+            s_t7    <= s_t6;
+            s_star7 <= s_star6;
+            s_stwk7 <= s_stwk6;
+            s_mir7  <= s_mir6;
+            s_insq7 <= s_insq6;
+
+            -- stage 6b: luma = t*4 (t <= 192 -> max 768), per-color cap,
+            -- mirror attenuation, background branches
+            v_t := s_t7;
             v_y := resize(v_t & "00", 11);
-            if s_insq6 = '1' and v_t /= 0 then
-                -- drawn spark; mirrored copies dim to 5/8 and shift blue
-                if s_mir6 = '1' then
+            if s_insq7 = '1' and v_t /= 0 then
+                -- per-color luma ceiling keeps hues saturated at full glow
+                if v_y > resize(C_PAL_YC(to_integer(s_ci7)), 11) then
+                    v_y := resize(C_PAL_YC(to_integer(s_ci7)), 11);
+                end if;
+                -- mirrored copies dim to 5/8 and shift blue
+                if s_mir7 = '1' then
                     s_d_y <= resize(v_y(9 downto 1), 10)
                              + resize(v_y(9 downto 3), 10);
                 else
                     s_d_y <= v_y(9 downto 0);
                 end if;
-                -- index bit 3 = the owning shell's pastel flag
-                if s_far6 = '1' then
-                    v_ci := s_apas(to_integer(s_cidx6)) & s_aco(to_integer(s_cidx6));
+                s_d_u <= C_PAL_U(to_integer(s_ci7));
+                if s_mir7 = '1' then
+                    s_d_v <= C_PAL_V(to_integer(s_ci7)) + to_unsigned(32, 10);
                 else
-                    v_ci := s_apas(to_integer(s_cidx6)) & s_aci(to_integer(s_cidx6));
+                    s_d_v <= C_PAL_V(to_integer(s_ci7));
                 end if;
-                s_d_u <= C_PAL_U(to_integer(v_ci));
-                if s_mir6 = '1' then
-                    s_d_v <= C_PAL_V(to_integer(v_ci)) + to_unsigned(32, 10);
-                else
-                    s_d_v <= C_PAL_V(to_integer(v_ci));
-                end if;
-            elsif s_insq6 = '1' and s_star6 = '1' and s_blk = '0' then
+            elsif s_insq7 = '1' and s_star7 = '1' and s_blk = '0' then
                 -- static star: crisp dot, cool white, slow twinkle;
                 -- reflected stars shimmer at reduced brightness
-                if s_stwk6 = '1' then
+                if s_stwk7 = '1' then
                     s_d_y <= to_unsigned(200, 10);
-                elsif s_mir6 = '1' then
+                elsif s_mir7 = '1' then
                     s_d_y <= to_unsigned(180, 10);
                 else
                     s_d_y <= to_unsigned(300, 10);
                 end if;
                 s_d_u <= to_unsigned(504, 10);      -- stored U = Cr: cool
                 s_d_v <= to_unsigned(524, 10);      -- stored V = Cb: bluish
-            elsif s_insq6 = '1' and s_mir6 = '1' and s_blk = '0' then
+            elsif s_insq7 = '1' and s_mir7 = '1' and s_blk = '0' then
                 -- open water: flat, dark, deep blue; half the sky flash
-                s_d_y <= to_unsigned(48, 10)
-                         + resize(s_flash & "00000", 10);
+                s_d_y <= s_wf;
                 s_d_u <= to_unsigned(494, 10);
                 s_d_v <= to_unsigned(548, 10);
-            elsif s_insq6 = '1' and s_blk = '0' then
-                -- night sky: blue gradient + nebula clouds (moonlit: a
-                -- touch brighter and grayer where the cloud is dense)
-                -- + ambient detonation flash
-                s_d_y <= resize(s_bgy, 10)
-                         + resize(s_neb_q & "00", 10)
-                         + resize(s_flash & "000000", 10);
-                s_d_u <= to_unsigned(498, 10) + resize(s_neb_q(3 downto 2), 10);
-                s_d_v <= to_unsigned(536, 10) - resize(s_neb_q(3 downto 2), 10);
+            elsif s_insq7 = '1' and s_blk = '0' then
+                -- night sky: blue gradient + nebula clouds + ambient flash
+                -- (gradient+flash pre-composited at line rate: one add here)
+                s_d_y <= s_bgf + resize(s_neb_q & "00", 10);
+                s_d_u <= to_unsigned(500, 10);
+                s_d_v <= to_unsigned(534, 10);
             else
                 s_d_y <= (others => '0');
                 s_d_u <= to_unsigned(512, 10);

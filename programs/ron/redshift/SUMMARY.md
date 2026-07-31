@@ -54,12 +54,24 @@ MG1 darken `y8×dk8` (identity form `y − 2dk + (y·dk)>>7` ≡ `y −
 3. Sign flips (Repel) belong in per-frame operands, not post-sum negate
    muxes.
 
+## Edge fill (v2.1)
+
+Warp reads landing within 6 columns of either border used to smear the
+capture source's black blanking columns across the deflected zones. Lagoon's
+left-fill pattern, applied to BOTH edges: each line averages 64 pixels
+(starting past the black columns), latches at hsync, and the S9 land stage
+muxes that colour in for border-zone reads (sidewinder p_wet precedent for
+a stable-select mux on BRAM outputs). Gated on dx /= 0 so Collapse = 0
+stays exactly dry. The fill enters before the grades, so it inherits the
+darkening and the red/blue Doppler drag near masses.
+
 ## Status
 
-v2.0.0 — all 6 configs routed-closed at full clock, ALL seed 1, no retries
-(hd_analog independently re-verified 75.73 MHz routed). Built + packaged
-with 4 presets (Gravity Well / Ergosphere / White Hole / Total Collapse).
-NOT yet HW-tested. Chroma constants (shell hues from qsin, debris 478/540)
-are BT.601-standard; if hardware shows swapped hues flip the U/V pairs.
-Gotcha hit at packaging: description strings max 127 BYTES — an overlong
-one fails validation and silently ships the stale config binary.
+v2.1.0 — all 6 configs routed-closed at full clock (five seed 1, one seed
+2; v2.0 hd_analog independently re-verified 75.73 MHz routed, v2.1 78.24).
+Built + packaged with 4 presets (Gravity Well / Ergosphere / White Hole /
+Total Collapse). v2.0 HW-approved 2026-07-12; v2.1 edge fill not yet
+HW-checked. Chroma constants (shell hues from qsin, debris 478/540) are
+BT.601-standard. Gotcha hit at packaging: description strings max 127
+BYTES — an overlong one fails validation AFTER bitstreams succeed and
+silently ships the stale config binary.

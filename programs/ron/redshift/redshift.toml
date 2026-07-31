@@ -1,6 +1,6 @@
 [program]
 program_id = "com.ron.redshift"
-program_version = "2.0.0"
+program_version = "2.1.0"
 abi_version = ">=1.0,<2.0"
 program_name = "Redshift"
 author = "ron"

@@ -9,7 +9,7 @@ categories = ["Render", "Pattern", "Screen"]
 program_type = "processing"
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
-description = "Domain-warped noise fire: yellow-orange-red palette, rolling smoke, Canny luma-edge fire mode, blue flame, overlay."
+description = "Two-layer domain-warped noise fire: yellow-orange-red palette, rolling smoke, Canny luma-edge mode, blue flame, overlay."
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_1"
@@ -17,7 +17,7 @@ name_label = "Fuel"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 600
+initial_value = 767
 suffix_label = "%"
 
 [[parameter]]
@@ -35,7 +35,7 @@ name_label = "Smoke"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 300
+initial_value = 512
 suffix_label = "%"
 
 [[parameter]]
@@ -44,7 +44,7 @@ name_label = "Turblnce"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 400
+initial_value = 512
 suffix_label = "%"
 
 [[parameter]]
@@ -62,14 +62,14 @@ name_label = "Rise"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 500
+initial_value = 512
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
 name_label = "Ember"
 value_labels = ["Off", "On"]
-initial_value_label = "Off"
+initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
@@ -97,9 +97,9 @@ initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
-name_label = "Intensity"
+name_label = "Intensify"
 control_mode = "linear"
-display_min_value = 0
-display_max_value = 100
-initial_value = 900
-suffix_label = "%"
+display_min_value = 1
+display_max_value = 5
+initial_value = 0
+suffix_label = "x"

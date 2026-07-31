@@ -21,7 +21,9 @@ Two full-screen synthesis layers separated by a horizon line. The curtain uses s
 - Slider Horizon — horizon line height (top = raised curtain, bottom = lowered)
 
 ## Presets
-- Red Room
-- Deep Velvet
-- Alcove
-- Stage Lit
+- Red Room — canonical look (matches defaults)
+- Deep Velvet — dense heavy folds, deep shadow, lowered curtain
+- Alcove — off-centre vanishing point, raised viewer, near-black stripes
+- Stage Lit — flat, bright, static (no sway/vignette)
+- Vertical Weave — 90°-rotated chevrons scrolling sideways
+- Signal Floor — incoming video keyed into the floor, low horizon

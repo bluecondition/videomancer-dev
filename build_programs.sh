@@ -129,8 +129,9 @@ parse_build_stats() {
         return 1
     fi
 
-    # Extract max frequency from timing analysis (look for critical path max frequency)
-    max_freq=$(grep -oP 'Max frequency for clock.*?:\s+\K[0-9.]+' "$log_file" | head -n1)
+    # Extract max frequency from timing analysis: the LAST report is the
+    # post-route result (earlier ones are placement estimates)
+    max_freq=$(grep -oP 'Max frequency for clock.*?:\s+\K[0-9.]+' "$log_file" | tail -n1)
     if [ -z "$max_freq" ]; then
         # Alternative pattern for max frequency
         max_freq=$(grep -oP 'Max delay.*?=.*?\K[0-9.]+(?=\s+MHz)' "$log_file" | head -n1)
@@ -228,7 +229,10 @@ build_config_with_retry() {
             # for a seed that does (the .asc/.bin of a passing seed stay in place);
             # accept the last attempt if no seed closes.  Set NO_TIMING_RETRY=1 to
             # accept the first routed bitstream regardless.
-            if [ -n "$NO_TIMING_RETRY" ] || ! grep -qE "Max frequency.*FAIL" "$MAKE_LOG"; then
+            # NOTE: nextpnr prints "Max frequency" several times (placement
+            # estimates are pessimistic and often say FAIL on designs whose
+            # post-route timing PASSES) -- judge only the LAST report per clock.
+            if [ -n "$NO_TIMING_RETRY" ] || awk '/Max frequency for clock/ { last[$6] = $0 } END { bad = 0; for (c in last) if (last[c] ~ /\(FAIL/) bad = 1; exit bad }' "$MAKE_LOG"; then
                 LAST_SEED=$seed
                 return 0
             fi

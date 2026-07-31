@@ -1,0 +1,222 @@
+# Penrose — never-ending staircase, a tribute to M.C. Escher.
+#
+# A Penrose-stairs ring rendered as an isometric woodcut: paper-and-ink
+# hatched faces, seam outlines, four print schemes, the input video engraved
+# into the sky, and a procession of monks climbing the impossible loop forever.
+
+[program]
+program_id = "com.bluecondition.penrose"
+program_version = "2.0.0"
+abi_version = ">=1.0,<2.0"
+program_name = "Penrose"
+author = "bluecondition"
+license = "GPL-3.0"
+categories = ["Illusion", "Render", "Print"]
+program_type = "synthesis"
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+description = "Never-ending Penrose staircase with marching monks -- an M.C. Escher tribute in engraved paper and ink."
+url = "https://github.com/bluecondition/videomancer-dev"
+
+# --- Rotary Potentiometers (Knobs 1-6) ---
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 400
+display_min_value = 0
+display_max_value = 100
+name_label = "Ink"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 500
+display_min_value = 0
+display_max_value = 100
+name_label = "Shade"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 200
+display_min_value = 0
+display_max_value = 100
+name_label = "Well"
+suffix_label = "%"
+
+# Enum knobs: the config binary stores the LABEL INDEX (0..N-1) and the firmware
+# scales it onto the 10-bit register, so index i arrives as i*1023/(N-1) and
+# lands squarely in the band each `case` below decodes.  A numeric initial_value
+# is rejected by the validator here ("value_labels cannot be used with numeric
+# fields") -- initial_value_label is the only way to set these defaults.
+# Caveat for simulation: lzx-vhdl-cli resolves initial_value_label for TOGGLES
+# only and feeds pots a bare 512, which lands on Night/Coarse -- pass
+# --set rotary_potentiometer_N=... to sim the intended defaults.
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Scheme"
+value_labels = ["Parchment", "Gallery", "Night", "Blueprint"]
+initial_value_label = "Parchment"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 512
+display_min_value = 0
+display_max_value = 100
+name_label = "Spare"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Hatch"
+value_labels = ["Fine", "Medium", "Coarse", "Off"]
+initial_value_label = "Medium"
+
+# --- Toggle Switches (7-11, binary) ---
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Outline"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Video Sky"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "View"
+value_labels = ["Standard", "Shallow"]
+initial_value_label = "Standard"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Terraces"
+value_labels = ["Flat", "Stepped"]
+initial_value_label = "Stepped"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Spare"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+# --- Linear Potentiometer (Fader 12) ---
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 620
+display_min_value = 0
+display_max_value = 100
+name_label = "Terrace Depth"
+suffix_label = "%"
+
+# --- Presets ---
+
+[[preset]]
+name = "Grand Stair"
+rotary_potentiometer_1 = 400       # Ink
+rotary_potentiometer_2 = 520       # Shade
+rotary_potentiometer_3 = 200       # Well (shallow)
+rotary_potentiometer_4 = 0         # Parchment
+rotary_potentiometer_5 = 512       # spare
+rotary_potentiometer_6 = 400       # Medium hatch
+toggle_switch_7 = 1                # outline
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 1               # terraces stepped
+toggle_switch_11 = 0
+linear_potentiometer_12 = 620      # terrace depth
+
+[[preset]]
+name = "Deep Well"
+rotary_potentiometer_1 = 460
+rotary_potentiometer_2 = 640
+rotary_potentiometer_3 = 900       # Well (deep pit)
+rotary_potentiometer_4 = 0         # Parchment
+rotary_potentiometer_5 = 512
+rotary_potentiometer_6 = 400
+toggle_switch_7 = 1
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 1               # stepped
+toggle_switch_11 = 0
+linear_potentiometer_12 = 1023     # deepest terraces
+
+[[preset]]
+name = "Night Court"
+rotary_potentiometer_1 = 620
+rotary_potentiometer_2 = 700
+rotary_potentiometer_3 = 400
+rotary_potentiometer_4 = 600       # Night
+rotary_potentiometer_5 = 512
+rotary_potentiometer_6 = 400
+toggle_switch_7 = 1
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 1
+toggle_switch_11 = 0
+linear_potentiometer_12 = 520
+
+[[preset]]
+name = "Blueprint"
+rotary_potentiometer_1 = 200
+rotary_potentiometer_2 = 300
+rotary_potentiometer_3 = 250
+rotary_potentiometer_4 = 900       # Blueprint
+rotary_potentiometer_5 = 512
+rotary_potentiometer_6 = 1023      # hatch off
+toggle_switch_7 = 1
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 1
+toggle_switch_11 = 0
+linear_potentiometer_12 = 400
+
+[[preset]]
+name = "Flat Plaza"
+rotary_potentiometer_1 = 700
+rotary_potentiometer_2 = 640
+rotary_potentiometer_3 = 100
+rotary_potentiometer_4 = 0         # Parchment
+rotary_potentiometer_5 = 512
+rotary_potentiometer_6 = 700       # Coarse
+toggle_switch_7 = 1
+toggle_switch_8 = 0
+toggle_switch_9 = 1                # shallow view
+toggle_switch_10 = 0               # flat courtyard
+toggle_switch_11 = 0
+linear_potentiometer_12 = 0
+
+[[preset]]
+name = "Gallery Wall"
+rotary_potentiometer_1 = 360
+rotary_potentiometer_2 = 460
+rotary_potentiometer_3 = 300
+rotary_potentiometer_4 = 300       # Gallery
+rotary_potentiometer_5 = 512
+rotary_potentiometer_6 = 400
+toggle_switch_7 = 1
+toggle_switch_8 = 1                # engraved video sky
+toggle_switch_9 = 0
+toggle_switch_10 = 1
+toggle_switch_11 = 0
+linear_potentiometer_12 = 480

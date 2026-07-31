@@ -1,20 +1,72 @@
--- Pixel Beach v2: Chunky-pixel ocean with trochoidal-ish waves
--- ---------------------------------------------------------------
--- 8x8 cells, never finer. Three z-stacked wave layers (back -> mid -> front).
--- Front layer can occlude back-layer crests.
--- Wave body uses a 2nd-harmonic-sharpened cosine: sharp narrow crests,
--- broader flatter troughs (Stokes-wave approximation -> "rolling" look).
--- Foam crest band sits on the top 1-2 cells of each wave; foam intensity
--- follows an Attack-Sustain-Release envelope driven by the wave's phase
--- so that foam pops white at the crest, holds, then fades in the wake.
--- Sky is a single solid color picked from an 8-entry palette by knob 5.
+-- Pixel Beach v3 "Shorebreak": side-profile 8-bit ocean, real physics.
 --
--- License: GPL-3.0
--- Author: ron
+-- The screen is a cross-section of a beach: sky and blocky sun above, ocean
+-- blue wedge in the middle, sand below-left.  Every visible cell is ONE solid
+-- colour (16x16 px, or 8x8 via S8) -- no dithering, no sub-cell texture.
+--
+-- The water is not an oscillator stack: each cell-column carries a surface
+-- height eta and a momentum u in BRAM, and a vblank FSM integrates the 1D
+-- shallow-water equations every frame:
+--
+--   u[i]   += (eta[i] - eta[i+1]) >> 3          gravity on the surface slope
+--   u[i]   -= u[i] >> fr                        friction (stronger when shallow)
+--   flux_i  = u[i] * depth_upwind               momentum transports water
+--   eta[i] += flux[i-1] - flux[i]               exact conservation (each
+--                                               interface flux quantized once)
+--   eta[i] += df[i-1] - df[i]                   pairwise diffusion (kills the
+--                                               odd-even checkerboard mode)
+--
+-- Because wave speed rises with depth, the swell forced at the right edge
+-- steepens as the bottom shoals toward the beach, topples, runs up the sand,
+-- and drains back to sea on its own momentum -- crash and backwash are not
+-- animated, they fall out of the physics.  Verified against the integer
+-- Python prototype (beach_proto.py): stable, mass-conserving, breaks on the
+-- slope.
+--
+-- Foam is a per-column quantity: injected where a steep leftward-moving front
+-- crosses shallow water, advected with u, decayed every tick.  Spray cells
+-- pop up one row above the surface on a per-column hash while foam is high --
+-- each crash tip breaks a little differently.  Sand darkens where water has
+-- covered it (per-column wetness, decays over ~2 s).
+--
+-- Controls (bold, always-on):
+--   K1 Rhythm  tempo of both the waves and the slow surge cycle
+--   K2 Tide    water level +-4 rows: walks the shoreline up and down the sand
+--   K3 Foam    foam injection strength
+--   K4 Chop    secondary short-period wave + per-column crest jitter
+--   K5 Swell   sea energy: wave amplitude AND surge depth.  Max is the
+--              designed climax: storm faces walling up and dumping.
+--   K6 Time    physics rate: 1/4x, 1/2x, 1x, 2x
+--   S7 Gulls   three low-res gulls flapping across the sky
+--   S8 Pixels  16 px / 8 px cells
+--   S9 Storm   +50% wave energy, hotter foam injection
+--   S10 Sky    Day / Night
+--   S11 Bypass
+--   P12 Sun    sun (or moon, S10) elevation: slider rides it through the sky;
+--              in Day the palette follows it down Day -> Golden -> Sunset.
+--
+-- Swell noise (v3.2): a 16-bit LFSR re-rolls each wave's height (+-40%) at
+-- every wave-phase wrap and jitters the phase rate, so no two waves match.
+-- A third slow oscillator (ph3, K1-paced) is the SURGE: it raises the forced
+-- boundary level so water piles up against the beach, then lets it collapse
+-- back out to the right; while the surge is high the individual waves are
+-- damped (big swell = lower waves), giving the in/out breathing rhythm.
+--
+-- Structure:
+--   p_position  raster counters, cell lattice, interlace detect, n_cols/rows
+--   p_vseq      per-frame render params + gulls + FSM kick     (vblank)
+--   p_fsm       physics: PREP -> V pass -> F pass -> boundary  (vblank)
+--   p_disp      per-cell state prefetch + derived geometry     (active video)
+--   p_pix       P1 diffs -> P2 classify -> P3 palette -> P4 out (per pixel)
+--
+-- State BRAMs (256 x 16 each, canonical 1W1R, FSM writes in vblank only, read
+-- address muxed FSM/display by fsm_run): eta, u, foam & wet packed.
+-- One shared 13x10 multiplier (registered in/out) serves flux and swell.
 
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
+
 library work;
 use work.video_timing_pkg.all;
 use work.video_stream_pkg.all;
@@ -23,902 +75,2140 @@ use work.all;
 
 architecture pixelbeach of program_top is
 
-  constant C_LATENCY    : integer := 9;  -- S1, S2, S3a, S3b, S3c, S4, S5, S6, S7
-  constant C_NUM_LAYERS : integer := 3;
-  constant C_CELL_BITS_8  : integer := 3;  -- 8x8 chunky cells
-  constant C_CELL_BITS_16 : integer := 4;  -- 16x16 chunky cells
+    constant C_DW  : integer := C_VIDEO_DATA_WIDTH;   -- 10
+    constant C_LAT : integer := 5;
 
-  -- 64-entry sine LUT (signed 8-bit, range -127..127)
-  type t_sin_lut is array(0 to 63) of signed(7 downto 0);
-  constant C_SIN : t_sin_lut := (
-     0 => to_signed(   0, 8),  1 => to_signed(  12, 8),
-     2 => to_signed(  25, 8),  3 => to_signed(  37, 8),
-     4 => to_signed(  49, 8),  5 => to_signed(  60, 8),
-     6 => to_signed(  71, 8),  7 => to_signed(  81, 8),
-     8 => to_signed(  90, 8),  9 => to_signed(  98, 8),
-    10 => to_signed( 106, 8), 11 => to_signed( 112, 8),
-    12 => to_signed( 117, 8), 13 => to_signed( 121, 8),
-    14 => to_signed( 124, 8), 15 => to_signed( 126, 8),
-    16 => to_signed( 127, 8), 17 => to_signed( 126, 8),
-    18 => to_signed( 124, 8), 19 => to_signed( 121, 8),
-    20 => to_signed( 117, 8), 21 => to_signed( 112, 8),
-    22 => to_signed( 106, 8), 23 => to_signed(  98, 8),
-    24 => to_signed(  90, 8), 25 => to_signed(  81, 8),
-    26 => to_signed(  71, 8), 27 => to_signed(  60, 8),
-    28 => to_signed(  49, 8), 29 => to_signed(  37, 8),
-    30 => to_signed(  25, 8), 31 => to_signed(  12, 8),
-    32 => to_signed(   0, 8), 33 => to_signed( -12, 8),
-    34 => to_signed( -25, 8), 35 => to_signed( -37, 8),
-    36 => to_signed( -49, 8), 37 => to_signed( -60, 8),
-    38 => to_signed( -71, 8), 39 => to_signed( -81, 8),
-    40 => to_signed( -90, 8), 41 => to_signed( -98, 8),
-    42 => to_signed(-106, 8), 43 => to_signed(-112, 8),
-    44 => to_signed(-117, 8), 45 => to_signed(-121, 8),
-    46 => to_signed(-124, 8), 47 => to_signed(-126, 8),
-    48 => to_signed(-127, 8), 49 => to_signed(-126, 8),
-    50 => to_signed(-124, 8), 51 => to_signed(-121, 8),
-    52 => to_signed(-117, 8), 53 => to_signed(-112, 8),
-    54 => to_signed(-106, 8), 55 => to_signed( -98, 8),
-    56 => to_signed( -90, 8), 57 => to_signed( -81, 8),
-    58 => to_signed( -71, 8), 59 => to_signed( -60, 8),
-    60 => to_signed( -49, 8), 61 => to_signed( -37, 8),
-    62 => to_signed( -25, 8), 63 => to_signed( -12, 8)
-  );
+    ----------------------------------------------------------------------------
+    -- Geometry constants (heights in Q6: 64 units = one cell-row)
+    ----------------------------------------------------------------------------
+    constant C_B0     : signed(11 downto 0) := to_signed(192, 12);  -- beach top +3 rows
+    constant C_DCLAMP : signed(11 downto 0) := to_signed(768, 12);  -- depth cap 12 rows
+    constant C_UCLAMP : signed(11 downto 0) := to_signed(255, 12);
 
-  -- Per-layer constants:
-  --   offset_y    - pixels below horizon (baseline y)
-  --   amp         - crest amplitude in pixels
-  --   wshift      - wavelength = 64 << wshift
-  --   phase_off   - per-layer phase offset (visual desync)
-  --   tide_amp    - per-layer parallax distance the wave field travels
-  --                 during one full crash/recede cycle (pixels)
-  --   tide_off    - per-layer tide phase offset (layers crash off-cycle)
-  --   h2_shift    - 2nd-harmonic weight (cos2 sra h2_shift); smaller = sharper
-  --   warble_step - per-frame warble-LFO phase advance (relative primes
-  --                 between layers -> phase relationships never align)
-  type t_layer is record
-    offset_y    : unsigned(8 downto 0);
-    amp         : unsigned(5 downto 0);
-    wshift      : unsigned(2 downto 0);
-    phase_off   : unsigned(5 downto 0);
-    tide_amp    : unsigned(8 downto 0);
-    tide_off    : unsigned(5 downto 0);
-    h2_shift    : unsigned(2 downto 0);
-    warble_step : unsigned(7 downto 0);
-  end record;
-  type t_layer_array is array(0 to C_NUM_LAYERS - 1) of t_layer;
-  constant C_LAYER : t_layer_array := (
-    -- Back: small, frequent. Tide moves it the least (parallax distance).
-    0 => (offset_y    => to_unsigned( 32, 9),
-          amp         => to_unsigned( 14, 6),
-          wshift      => to_unsigned(  2, 3),  -- 256-pixel wavelength
-          phase_off   => to_unsigned(  0, 6),
-          tide_amp    => to_unsigned( 60, 9),
-          tide_off    => to_unsigned(  0, 6),
-          h2_shift    => to_unsigned(  3, 3),  -- gentle 2nd harmonic
-          warble_step => to_unsigned( 53, 8)),
-    -- Mid: medium.
-    1 => (offset_y    => to_unsigned( 96, 9),
-          amp         => to_unsigned( 24, 6),
-          wshift      => to_unsigned(  3, 3),  -- 512-pixel wavelength
-          phase_off   => to_unsigned( 21, 6),
-          tide_amp    => to_unsigned(140, 9),
-          tide_off    => to_unsigned(  5, 6),
-          h2_shift    => to_unsigned(  2, 3),  -- moderate
-          warble_step => to_unsigned( 71, 8)),
-    -- Front: big rolling waves. Travels furthest each tide cycle.
-    2 => (offset_y    => to_unsigned(184, 9),
-          amp         => to_unsigned( 40, 6),
-          wshift      => to_unsigned(  3, 3),  -- 512-pixel wavelength
-          phase_off   => to_unsigned( 43, 6),
-          tide_amp    => to_unsigned(260, 9),
-          tide_off    => to_unsigned( 11, 6),
-          h2_shift    => to_unsigned(  1, 3),  -- sharpest crests (max breaking)
-          warble_step => to_unsigned( 83, 8))
-  );
+    ----------------------------------------------------------------------------
+    -- Palette ROM: addr = pal(2b) & idx(4b); word = Y(10) & U(10) & V(10).
+    -- Stored U/V-SWAPPED (U slot = Cr, V slot = Cb): HW-confirmed 2026-07-18 --
+    -- the standard-order palette rendered the ocean orange and the sand light
+    -- blue (same convention mondrian needed).  Generated by genpal.py.
+    ----------------------------------------------------------------------------
+    constant C_I_SKYHI : unsigned(3 downto 0) := to_unsigned( 0, 4);
+    constant C_I_SKYLO : unsigned(3 downto 0) := to_unsigned( 1, 4);
+    constant C_I_SUN   : unsigned(3 downto 0) := to_unsigned( 2, 4);
+    constant C_I_SAND  : unsigned(3 downto 0) := to_unsigned( 3, 4);
+    constant C_I_SANDW : unsigned(3 downto 0) := to_unsigned( 4, 4);
+    constant C_I_SURF  : unsigned(3 downto 0) := to_unsigned( 5, 4);
+    constant C_I_AQUA  : unsigned(3 downto 0) := to_unsigned( 6, 4);
+    constant C_I_MID   : unsigned(3 downto 0) := to_unsigned( 7, 4);
+    constant C_I_DEEP  : unsigned(3 downto 0) := to_unsigned( 8, 4);
+    constant C_I_FOAM  : unsigned(3 downto 0) := to_unsigned( 9, 4);
+    constant C_I_GULL  : unsigned(3 downto 0) := to_unsigned(10, 4);
+    constant C_I_SAND2 : unsigned(3 downto 0) := to_unsigned(11, 4);
+    constant C_I_SANDM : unsigned(3 downto 0) := to_unsigned(12, 4);
+    constant C_I_GULL2 : unsigned(3 downto 0) := to_unsigned(13, 4);
 
-  type t_yuv is record
-    y : unsigned(9 downto 0);
-    u : unsigned(9 downto 0);
-    v : unsigned(9 downto 0);
-  end record;
+    -- Wash-crest foam mask: a hand-placed, aperiodic 64-column pattern of
+    -- scattered dots + short (2-col) runs, ~23% coverage.  A ROM (not an XOR
+    -- hash) because any bit-XOR of x is periodic and tiles a visible
+    -- "dot dot space" motif; this has no algebraic structure so the foam looks
+    -- random and doesn't repeat across the ~80-col screen.  '1' = foam here.
+    constant FOAM_MASK : std_logic_vector(0 to 63) :=
+        "00110000" & "01000100" & "00010000" & "11000001" &
+        "00001000" & "00100010" & "10000100" & "00011001";
 
-  -- Palette constants -- U/V swapped for Videomancer hardware (SDK convention).
-  -- In these constants the field named "u" holds BT.601 Cr, and "v" holds Cb.
-  -- For aqua: u<512 (low Cr -> cyan-green) and v>512 (high Cb -> blue).
-  type t_ocean_palette is array(0 to C_NUM_LAYERS - 1) of t_yuv;
-  constant C_OCEAN : t_ocean_palette := (
-    -- Back: deep teal-green
-    0 => (y => to_unsigned(240, 10), u => to_unsigned(420, 10), v => to_unsigned(548, 10)),
-    -- Mid: medium aqua-blue
-    1 => (y => to_unsigned(400, 10), u => to_unsigned(440, 10), v => to_unsigned(584, 10)),
-    -- Front: light aqua
-    2 => (y => to_unsigned(560, 10), u => to_unsigned(458, 10), v => to_unsigned(612, 10))
-  );
+    type t_pal is array (0 to 63) of std_logic_vector(29 downto 0);
+    constant PAL_ROM : t_pal := (
+        -- 0: Day (U/V swapped for hardware)
+         0 => "101000001101010111101010100001",  -- SKYHI
+         1 => "110011101101100100101001001011",  -- SKYLO
+         2 => "110110111010010111000100001101",  -- SUN
+         3 => "110010110110010100100101111010",  -- SAND
+         4 => "100101000010010100000110001010",  -- SANDW
+         5 => "101110101001010000111000110001",  -- SURF
+         6 => "100100001101000000111001110100",  -- AQUA
+         7 => "011000101001010000101011101110",  -- MID
+         8 => "001110111101100000111011010000",  -- DEEP
+         9 => "111110101101111110001000000011",  -- FOAM
+        10 => "001111010101111111001000011000",  -- GULL
+        11 => "101110100110010101010101101010",  -- SAND2
+        12 => "101100111010010100100101111110",  -- SANDM
+        13 => "111011111101111110111000001001",  -- GULL2
+        14 => "000000000000000000000000000000",
+        15 => "000000000000000000000000000000",
+        -- 1: Golden (U/V swapped for hardware)
+        16 => "101011100110101001010101010000",  -- SKYHI
+        17 => "110100111110011001110101010101",  -- SKYLO
+        18 => "110010010010100110100011001011",  -- SUN
+        19 => "110001001110011001010101100101",  -- SAND
+        20 => "100010011110010101100110010000",  -- SANDW
+        21 => "101111001001100110000111110110",  -- SURF
+        22 => "100010110101010000001001000001",  -- AQUA
+        23 => "010111101001011110111010100110",  -- MID
+        24 => "001101011101101010111010010110",  -- DEEP
+        25 => "111101000010000101100111010011",  -- FOAM
+        26 => "001110000010000101111000000000",  -- GULL
+        27 => "101101001110011001010101100101",  -- SAND2
+        28 => "101000110110010111100101111010",  -- SANDM
+        29 => "111010110110000011010111101001",  -- GULL2
+        30 => "000000000000000000000000000000",
+        31 => "000000000000000000000000000000",
+        -- 2: Sunset (U/V swapped for hardware)
+        32 => "010110011110010101101001111010",  -- SKYHI
+        33 => "100110010110111110000101111111",  -- SKYLO
+        34 => "100110000111001001010100010101",  -- SUN
+        35 => "101001101010011000000110000101",  -- SAND
+        36 => "011011111010010100010110110000",  -- SANDW
+        37 => "100110101110001001101000110000",  -- SURF
+        38 => "010110110001100001101001100110",  -- AQUA
+        39 => "010010111001110010011010011011",  -- MID
+        40 => "001010101001110010111010001011",  -- DEEP
+        41 => "111001100110001100110111100000",  -- FOAM
+        42 => "001011000110000010111000011011",  -- GULL
+        43 => "100110000010010110110110001010",  -- SAND2
+        44 => "100001110010010110000110011010",  -- SANDM
+        45 => "110110111010000111100111110110",  -- GULL2
+        46 => "000000000000000000000000000000",
+        47 => "000000000000000000000000000000",
+        -- 3: Night (U/V swapped for hardware)
+        48 => "000110100101111000111001010101",  -- SKYHI
+        49 => "001110001101110100001001101011",  -- SKYLO
+        50 => "111011101001111011011000010101",  -- SUN
+        51 => "011000010001111111011000010000",  -- SAND
+        52 => "010000010101111111001000011000",  -- SANDW
+        53 => "100011011101011111011000111011",  -- SURF
+        54 => "010110110001100001101001100110",  -- AQUA
+        55 => "001110011001101000001001111011",  -- MID
+        56 => "000111011001110000111001100000",  -- DEEP
+        57 => "111001000101110111011000011011",  -- FOAM
+        58 => "001000011101111110111000100000",  -- GULL
+        59 => "010110010001111111011000010000",  -- SAND2
+        60 => "010011010101111111011000010100",  -- SANDM
+        61 => "110011101101111011011000011001",  -- GULL2
+        62 => "000000000000000000000000000000",
+        63 => "000000000000000000000000000000"
+    );
 
-  -- Foam release-band tint (light aqua, between ocean and white)
-  constant C_CREST_MID  : t_yuv := (y => to_unsigned(780, 10), u => to_unsigned(484, 10), v => to_unsigned(556, 10));
-  constant C_CREST_HIGH : t_yuv := (y => to_unsigned(880, 10), u => to_unsigned(498, 10), v => to_unsigned(534, 10));
-  constant C_FOAM_WHITE : t_yuv := (y => to_unsigned(948, 10), u => to_unsigned(512, 10), v => to_unsigned(512, 10));
+    type t_sin is array (0 to 63) of signed(7 downto 0);
+    constant SIN_LUT : t_sin := (
+        to_signed(   0, 8), to_signed(  12, 8), to_signed(  25, 8), to_signed(  37, 8),
+        to_signed(  49, 8), to_signed(  60, 8), to_signed(  71, 8), to_signed(  81, 8),
+        to_signed(  90, 8), to_signed(  98, 8), to_signed( 106, 8), to_signed( 112, 8),
+        to_signed( 117, 8), to_signed( 122, 8), to_signed( 125, 8), to_signed( 126, 8),
+        to_signed( 127, 8), to_signed( 126, 8), to_signed( 125, 8), to_signed( 122, 8),
+        to_signed( 117, 8), to_signed( 112, 8), to_signed( 106, 8), to_signed(  98, 8),
+        to_signed(  90, 8), to_signed(  81, 8), to_signed(  71, 8), to_signed(  60, 8),
+        to_signed(  49, 8), to_signed(  37, 8), to_signed(  25, 8), to_signed(  12, 8),
+        to_signed(   0, 8), to_signed( -12, 8), to_signed( -25, 8), to_signed( -37, 8),
+        to_signed( -49, 8), to_signed( -60, 8), to_signed( -71, 8), to_signed( -81, 8),
+        to_signed( -90, 8), to_signed( -98, 8), to_signed(-106, 8), to_signed(-112, 8),
+        to_signed(-117, 8), to_signed(-122, 8), to_signed(-125, 8), to_signed(-126, 8),
+        to_signed(-127, 8), to_signed(-126, 8), to_signed(-125, 8), to_signed(-122, 8),
+        to_signed(-117, 8), to_signed(-112, 8), to_signed(-106, 8), to_signed( -98, 8),
+        to_signed( -90, 8), to_signed( -81, 8), to_signed( -71, 8), to_signed( -60, 8),
+        to_signed( -49, 8), to_signed( -37, 8), to_signed( -25, 8), to_signed( -12, 8)
+    );
 
-  -- Sky palette (8 presets, picked by upper bits of knob 5)
-  type t_sky_palette is array(0 to 7) of t_yuv;
-  constant C_SKY : t_sky_palette := (
-    0 => (y => to_unsigned(640, 10), u => to_unsigned(488, 10), v => to_unsigned(560, 10)),  -- light blue (default)
-    1 => (y => to_unsigned(740, 10), u => to_unsigned(500, 10), v => to_unsigned(540, 10)),  -- pale blue
-    2 => (y => to_unsigned(820, 10), u => to_unsigned(508, 10), v => to_unsigned(522, 10)),  -- almost-white sky
-    3 => (y => to_unsigned(440, 10), u => to_unsigned(470, 10), v => to_unsigned(584, 10)),  -- deeper blue
-    4 => (y => to_unsigned(280, 10), u => to_unsigned(516, 10), v => to_unsigned(548, 10)),  -- twilight
-    5 => (y => to_unsigned(540, 10), u => to_unsigned(612, 10), v => to_unsigned(456, 10)),  -- sunset orange
-    6 => (y => to_unsigned(660, 10), u => to_unsigned(572, 10), v => to_unsigned(484, 10)),  -- warm pink
-    7 => (y => to_unsigned(140, 10), u => to_unsigned(496, 10), v => to_unsigned(534, 10))   -- night
-  );
 
-  -- =====================================================================
-  -- Signals
-  -- =====================================================================
-  type t_pipe is array(0 to C_LATENCY - 1) of t_video_stream_yuv444_30b;
-  signal pipe : t_pipe;
+    -- v3.8 sunset gradients: 16 P12-keyframes x {day-hi, day-lo, night-hi,
+    -- night-lo} for the sky; 16 x {day, night} for the sun disc; per-palette
+    -- deep-water bases for the ocean dimmer.  All separate ROMs with single
+    -- read sites (addr registers) -- never share a site with PAL_ROM.
+    type t_skyg_rom is array (0 to 127) of std_logic_vector(29 downto 0);
+    constant SKYG_ROM : t_skyg_rom := (
+         0 => "000000000010000000001000000000",
+         1 => "000010101010000010101000010101",
+         2 => "000101011110000110001000101001",
+         3 => "001000110010001010111000111101",
+         4 => "001100000110010001001001001000",
+         5 => "001111010110011010011000110011",
+         6 => "010010101110100110001000010101",
+         7 => "010110101010110001100111110110",
+         8 => "011011100110111101010111010111",
+         9 => "100000000111000010110111000000",
+        10 => "100011010011000011000110101111",
+        11 => "101000000010111010100101111000",
+        12 => "101101110010101101000101011011",
+        13 => "110100001110010010110110010010",
+        14 => "110000010001101100001001010100",
+        15 => "101000001101010111101010100001",
+        16 => "001101011101101010111010010110",
+        17 => "001101011101101010111010010110",
+        18 => "001101011101101010111010010110",
+        19 => "001101011101101010111010010110",
+        20 => "001101011101101010111010010110",
+        21 => "001101011101101010111010010110",
+        22 => "001101011101101010111010010110",
+        23 => "001111001001101000111010011000",
+        24 => "010000110101100110111010011011",
+        25 => "010010100101100100111010011110",
+        26 => "010101000101100001111010100010",
+        27 => "010111101001011110111010100110",
+        28 => "011101010001010111101001110011",
+        29 => "100000000001010011111001011010",
+        30 => "100010110101010000001001000001",
+        31 => "100010110101010000001001000001",
+        32 => "000000000010000000001000000000",
+        33 => "000100000010000101111000010111",
+        34 => "001000010010001101101000100110",
+        35 => "001101010010011001001000100110",
+        36 => "010010001110100110001000010101",
+        37 => "010111100110110100100111110010",
+        38 => "011101100110111101110111010010",
+        39 => "100011010011000000110110101100",
+        40 => "101000110010111011010101111011",
+        41 => "101101111110101111010101011110",
+        42 => "110011001110100000010101011100",
+        43 => "110111000110010001100110001010",
+        44 => "111000000110000100000111010101",
+        45 => "110110100001110110111000011111",
+        46 => "110100001101101111011001000010",
+        47 => "110011101101100100101001001011",
+        48 => "000000000010000000001000000000",
+        49 => "000000000010000000001000000000",
+        50 => "000000000010000000001000000000",
+        51 => "000000000010000000001000000000",
+        52 => "000000000010000000001000000000",
+        53 => "000000000010000000001000000000",
+        54 => "000000000010000000001000000000",
+        55 => "000000000010000000001000000000",
+        56 => "000000000010000000001000000000",
+        57 => "000000000010000000001000000000",
+        58 => "000000000010000000001000000000",
+        59 => "000000000010000000001000000000",
+        60 => "000000000010000000001000000000",
+        61 => "000000000010000000001000000000",
+        62 => "000000000010000000001000000000",
+        63 => "000000000010000000001000000000",
+        64 => "000000000010000000001000000000",
+        65 => "000001001001111111001000001101",
+        66 => "000010010101111101111000010110",
+        67 => "000011011001111100111000100001",
+        68 => "000100101001111011101000101100",
+        69 => "000101101101111010101000110111",
+        70 => "000110111001111001011001000000",
+        71 => "000111111001110111111001001001",
+        72 => "001000111001110111001001010000",
+        73 => "001001101001110110011001010111",
+        74 => "001010010001110110001001011101",
+        75 => "001010101101110101101001100001",
+        76 => "001011000001110101011001100011",
+        77 => "001011010001110101011001100011",
+        78 => "001011011101110100111001100100",
+        79 => "001011011101110100111001100100",
+        80 => "000111011001110000111001100000",
+        81 => "000111011001110000111001100000",
+        82 => "000111011001110000111001100000",
+        83 => "000111011001110000111001100000",
+        84 => "000111011001110000111001100000",
+        85 => "000111011001110000111001100000",
+        86 => "000111011001110000111001100000",
+        87 => "001000101001101110101001100111",
+        88 => "001001111101101101001001101101",
+        89 => "001011010001101011011001110011",
+        90 => "001100110101101001111001110111",
+        91 => "001110011001101000001001111011",
+        92 => "010001010001100101101001110011",
+        93 => "010100001001100011001001101011",
+        94 => "010110110001100001101001100110",
+        95 => "010110110001100001101001100110",
+        96 => "000000000010000000001000000000",
+        97 => "000010000101111110011000010001",
+        98 => "000100001001111100111000011111",
+        99 => "000110001001111011101000101100",
+        100 => "001000001001111010001000110111",
+        101 => "001001101101111001001001000010",
+        102 => "001011001001110111111001001011",
+        103 => "001100011101110111001001010010",
+        104 => "001101011101110110011001011001",
+        105 => "001110010001110110001001011101",
+        106 => "001110111101110101101001011111",
+        107 => "001111011001110101001001100010",
+        108 => "001111101101110100111001100100",
+        109 => "001111111101110100111001100100",
+        110 => "010000001101110100111001100100",
+        111 => "010000011101110100111001100100",
+        112 => "000000000010000000001000000000",
+        113 => "000000000010000000001000000000",
+        114 => "000000000010000000001000000000",
+        115 => "000000000010000000001000000000",
+        116 => "000000000010000000001000000000",
+        117 => "000000000010000000001000000000",
+        118 => "000000000010000000001000000000",
+        119 => "000000000010000000001000000000",
+        120 => "000000000010000000001000000000",
+        121 => "000000000010000000001000000000",
+        122 => "000000000010000000001000000000",
+        123 => "000000000010000000001000000000",
+        124 => "000000000010000000001000000000",
+        125 => "000000000010000000001000000000",
+        126 => "000000000010000000001000000000",
+        127 => "000000000010000000001000000000"
+    );
+    type t_sung_rom is array (0 to 31) of std_logic_vector(29 downto 0);
+    constant SUNG_ROM : t_sung_rom := (
+         0 => "001111001010111000110111000110",
+         1 => "001111001010111000110111000110",
+         2 => "001111001010111000110111000110",
+         3 => "001111001010111000110111000110",
+         4 => "001111001010111000110111000110",
+         5 => "001111110110111010010111000010",
+         6 => "010000101110111100110110111101",
+         7 => "010010001011000010000110110010",
+         8 => "010101111011001100110110010101",
+         9 => "011010010111010011010101110001",
+        10 => "100000000011001110100101000111",
+        11 => "100110001111000001110100100001",
+        12 => "101011101110110101100100000110",
+        13 => "110000010110101010000011111000",
+        14 => "110100000110100000000011111010",
+        15 => "110110111010010111000100001101",
+        16 => "001010111101111101011000010011",
+        17 => "010010110101111100011000011000",
+        18 => "011010101101111011011000011001",
+        19 => "100010001101111011011000011001",
+        20 => "101000011101111011011000010111",
+        21 => "101101001101111011111000010101",
+        22 => "110001010001111100011000010100",
+        23 => "110100100001111100101000010010",
+        24 => "110110110101111101001000001111",
+        25 => "111000100001111101001000001101",
+        26 => "111001100101111101101000001101",
+        27 => "111010010101111101001000001111",
+        28 => "111010110101111101001000010001",
+        29 => "111011010001111100101000010010",
+        30 => "111011011101111011111000010101",
+        31 => "111011101001111011011000010101"
+    );
+    type t_deepb_rom is array (0 to 3) of std_logic_vector(29 downto 0);
+    constant DEEPB_ROM : t_deepb_rom := (
+         0 => "001110111101100000111011010000",
+         1 => "001101011101101010111010010110",
+         2 => "001010101001110010111010001011",
+         3 => "000111011001110000111001100000"
+    );
 
-  signal s_pixel_x      : unsigned(11 downto 0) := (others => '0');
-  signal s_pixel_y      : unsigned(11 downto 0) := (others => '0');
-  signal s_prev_hsync_n : std_logic := '1';
-  signal s_prev_vsync_n : std_logic := '1';
-  signal s_frame_count  : unsigned(15 downto 0) := (others => '0');
+    type t_skyb is array (0 to 7) of std_logic_vector(29 downto 0);
+    constant SKYB_ROM : t_skyb := (
+        0 => "101000001101010111101010100001", 1 => "110011101101100100101001001011", 2 => "101011100110101001010101010000", 3 => "110100111110011001110101010101",
+        4 => "010110011110010101101001111010", 5 => "100110010110111110000101111111", 6 => "000110100101111000111001010101", 7 => "001110001101110100001001101011");
 
-  -- Tide state (advances on vsync, drives all layer scroll positions)
-  signal s_tide_phase : unsigned(23 downto 0) := (others => '0');
-  -- Per-layer pixel-scroll position, signed (positive = pattern shifted left)
-  type t_scroll_arr is array(0 to C_NUM_LAYERS - 1) of signed(15 downto 0);
-  signal s_scroll : t_scroll_arr := (others => (others => '0'));
-  -- Tide velocity sign: '1' = crashing inward, '0' = receding outward
-  signal s_tide_inward : std_logic := '1';
-  -- Tide velocity signed magnitude (cos of tide_phase): drives amplitude
-  -- modulation and smooth foam transition.
-  signal s_tide_vel : signed(7 downto 0) := (others => '0');
-  -- Tide position (sin of tide_phase): drives amplitude swelling.
-  signal s_tide_pos : signed(7 downto 0) := (others => '0');
+    -- Droplet arc: cell-rows above the surface over a 16-frame flight
+    type t_arc is array (0 to 15) of unsigned(2 downto 0);
+    constant ARC_ROM : t_arc := (
+        "001", "010", "011", "100", "101", "101", "110", "110",
+        "110", "101", "101", "100", "011", "010", "001", "000");
 
-  -- Per-frame foam parameters (precomputed at vsync from tide_vel so S4
-  -- only does reads -- keeps the per-pixel hot path lean).
-  signal s_foam_step : unsigned(5 downto 0) := (others => '0');
-  signal s_foam_band_thick : std_logic := '0';  -- '1' = thicker (crashing)
+    -- band-boundary undulation: one sine period over 16 cells, +-1.5 rows
+    type t_ofb is array (0 to 15) of signed(7 downto 0);
+    constant OFB1_ROM : t_ofb := (
+        to_signed(0,8), to_signed(37,8), to_signed(68,8), to_signed(89,8),
+        to_signed(96,8), to_signed(89,8), to_signed(68,8), to_signed(37,8),
+        to_signed(0,8), to_signed(-37,8), to_signed(-68,8), to_signed(-89,8),
+        to_signed(-96,8), to_signed(-89,8), to_signed(-68,8), to_signed(-37,8));
+    -- Blocky sun: 6x6 circle in an 8x8 cell field, row-major, bit 63 = (0,0)
+    constant SUN_PAT : std_logic_vector(63 downto 0) :=
+        "00000000" & "00111100" & "01111110" & "01111110" &
+        "01111110" & "01111110" & "00111100" & "00000000";
 
-  -- Per-frame per-layer amplitude * height_knob, MODULATED by tide_pos.
-  -- During crash (tide_pos > 0) amps grow ~+25%; during recede they shrink
-  -- ~-25%. Precomputed in S1 vsync so it's free on the per-pixel path.
-  type t_amp_x_knob_arr is array(0 to C_NUM_LAYERS - 1) of unsigned(12 downto 0);
-  signal s_amp_x_knob : t_amp_x_knob_arr := (others => (others => '0'));
+    ----------------------------------------------------------------------------
+    -- Symmetric (toward-zero) shift: keeps +/- wave halves identical, and the
+    -- conservative flux/diffusion pairs exact.
+    ----------------------------------------------------------------------------
+    -- sign bit of a 15-bit difference (true when the value is negative)
+    function sgn15(x : signed(14 downto 0)) return std_logic is
+    begin
+        return x(14);
+    end function;
 
-  -- Slow modulator: a per-cell-column sine wave whose phase advances
-  -- slowly each frame. Provides organic baseline-shift across the X axis
-  -- that drifts continuously over time. Always ON (no choppy gate);
-  -- amplitude scales with Chaos. Pipelined through S2..S3c.
-  signal s_slow_phase : unsigned(15 downto 0) := (others => '0');
-  signal s_col_slow   : signed(7 downto 0)    := (others => '0');
-  signal s1_col_slow  : signed(7 downto 0)    := (others => '0');
-  signal s2_col_slow  : signed(7 downto 0)    := (others => '0');
-  -- Combined noise+slow offset (computed in S3a so S3c has a shorter
-  -- adder chain). 8b+8b => 9b signed range +/-254.
-  signal s3a_col_off  : signed(8 downto 0) := (others => '0');
-  signal s3b_col_off  : signed(8 downto 0) := (others => '0');
-  signal s3c_col_off  : signed(8 downto 0) := (others => '0');
+    function sshr(x : signed; n : natural) return signed is
+    begin
+        if x < 0 then
+            return -shift_right(-x, n);
+        else
+            return shift_right(x, n);
+        end if;
+    end function;
 
-  -- Per-layer warble LFO (independent rates -> layers never resync)
-  type t_warble_arr is array(0 to C_NUM_LAYERS - 1) of unsigned(15 downto 0);
-  signal s_warble_phase : t_warble_arr := (others => (others => '0'));
-  type t_warble_val_arr is array(0 to C_NUM_LAYERS - 1) of signed(7 downto 0);
-  signal s_warble_val : t_warble_val_arr := (others => (others => '0'));
+    ----------------------------------------------------------------------------
+    -- State BRAMs: 256 x 16 each (eta / u sign-extended s13, foam(15:8) &
+    -- wet(7:0) packed).  Power-of-2 width and depth (inferno BRAM lesson).
+    ----------------------------------------------------------------------------
+    type t_mem16 is array (0 to 255) of std_logic_vector(15 downto 0);
+    signal eta_mem : t_mem16 := (others => (others => '0'));
+    signal u_mem   : t_mem16 := (others => (others => '0'));
+    signal fw_mem  : t_mem16 := (others => (others => '0'));
 
-  -- LFSR-driven per-column noise (gated by Sea State = Choppy).
-  -- s_col_noise is PRE-SCALED at the column boundary so the per-pixel hot
-  -- path is just an add. Pipelined to stay aligned with wave_top.
-  signal s_lfsr_out    : std_logic_vector(9 downto 0);
-  signal s_lfsr_reset  : std_logic := '1';  -- seeded at first vsync
-  signal s_lfsr_seed   : std_logic_vector(9 downto 0);
-  signal s_col_noise   : signed(7 downto 0) := (others => '0');  -- pre-scaled
-  signal s1_col_noise  : signed(7 downto 0) := (others => '0');
-  signal s2_col_noise  : signed(7 downto 0) := (others => '0');
+    signal e_rd, u_rd, fw_rd : std_logic_vector(15 downto 0) := (others => '0');
 
-  -- Per-frame, per-layer pre-scaled warble adjust (computed at vsync).
-  type t_warble_adj_arr is array(0 to C_NUM_LAYERS - 1) of signed(7 downto 0);
-  signal s_warble_adj : t_warble_adj_arr := (others => (others => '0'));
+    -- display snapshot banks: copied from the live state once per frame in
+    -- vblank, so the physics FSM owns the live BRAMs ALL frame (hundreds of
+    -- ticks/frame possible) and the display never sees a mid-tick state
+    signal eta_dsp : t_mem16 := (others => (others => '0'));
+    signal fw_dsp  : t_mem16 := (others => (others => '0'));
+    signal e_rd_d, fw_rd_d : std_logic_vector(15 downto 0) := (others => '0');
+    type t_grad is array (0 to 7) of std_logic_vector(15 downto 0);
+    signal gradA_mem, gradB_mem : t_grad := (others => (others => '0'));
+    signal gA_rd, gB_rd : std_logic_vector(15 downto 0) := (others => '0');
+    signal band  : unsigned(2 downto 0) := (others => '0');
+    signal bacc  : unsigned(14 downto 0) := (others => '0');
+    signal ed_we,  fwd_we  : std_logic := '0';
+    signal ed_wa,  fwd_wa  : unsigned(7 downto 0) := (others => '0');
+    signal ed_wd,  fwd_wd  : std_logic_vector(15 downto 0) := (others => '0');
 
-  -- Per-frame, per-layer constant phase offset = phase_off + warble_adj.
-  -- Computed once per vsync so the per-pixel hot path becomes a single add.
-  type t_phase_const_arr is array(0 to C_NUM_LAYERS - 1) of unsigned(5 downto 0);
-  signal s_phase_const : t_phase_const_arr := (others => (others => '0'));
+    -- FSM-side ports
+    signal e_ra_f, u_ra_f, fw_ra_f : unsigned(7 downto 0) := (others => '0');
+    signal e_we,  u_we,  fw_we     : std_logic := '0';
+    signal e_wa,  u_wa,  fw_wa     : unsigned(7 downto 0) := (others => '0');
+    signal e_wd,  u_wd,  fw_wd     : std_logic_vector(15 downto 0) := (others => '0');
+    -- display-side read addresses
+    signal e_ra_d, fw_ra_d : unsigned(7 downto 0) := (others => '0');
 
-  -- Per-layer phase total = phase_const + per-column LFSR phase jitter.
-  -- Updated at every cell-column edge (inline-forwarded). Per-pixel just
-  -- adds raw_phase + s_phase_total(li) -> single 6-bit add per layer.
-  signal s_phase_total : t_phase_const_arr := (others => (others => '0'));
+    signal fsm_run : std_logic := '0';
 
-  -- ---- S1: cell-snapped coordinates, raw phase per layer ----
-  type t_phase_arr is array(0 to C_NUM_LAYERS - 1) of unsigned(5 downto 0);
-  signal s1_phase   : t_phase_arr := (others => (others => '0'));
-  signal s1_cell_x  : unsigned(8 downto 0) := (others => '0');
-  signal s1_cell_y  : unsigned(8 downto 0) := (others => '0');
+    ----------------------------------------------------------------------------
+    -- Raster position / lattice
+    ----------------------------------------------------------------------------
+    signal prev_hsync_n : std_logic := '1';
+    signal prev_vsync_n : std_logic := '1';
+    signal r_hedge      : std_logic := '0';
+    signal fcnt         : unsigned(9 downto 0) := (others => '0');
+    signal field_tgl    : std_logic := '0';
+    signal s_fprev      : std_logic := '0';
+    signal s_ilace      : std_logic := '0';
 
-  -- ---- S2: cos1 and cos2 LUT outputs per layer ----
-  type t_sin_arr is array(0 to C_NUM_LAYERS - 1) of signed(7 downto 0);
-  signal s2_cos1    : t_sin_arr := (others => (others => '0'));
-  signal s2_cos2    : t_sin_arr := (others => (others => '0'));
-  signal s2_phase   : t_phase_arr := (others => (others => '0'));
-  signal s2_cell_x  : unsigned(8 downto 0) := (others => '0');
-  signal s2_cell_y  : unsigned(8 downto 0) := (others => '0');
+    signal x_loc     : unsigned(4 downto 0) := (others => '0');
+    signal x_idx     : unsigned(7 downto 0) := (others => '0');
+    signal celly_loc : unsigned(4 downto 0) := (others => '0');
+    signal celly_idx : unsigned(7 downto 0) := (others => '0');
+    signal frame_act : std_logic := '0';
 
-  -- ---- S3a: amplitude*knob, combined cos, baseline y (one cycle of math) ----
-  type t_amp_x_arr is array(0 to C_NUM_LAYERS - 1) of unsigned(12 downto 0);
-  type t_comb_arr  is array(0 to C_NUM_LAYERS - 1) of signed(9 downto 0);
-  type t_base_arr  is array(0 to C_NUM_LAYERS - 1) of signed(12 downto 0);
-  signal s3a_amp_x_knob : t_amp_x_arr := (others => (others => '0'));
-  signal s3a_combined   : t_comb_arr  := (others => (others => '0'));
-  signal s3a_base       : t_base_arr  := (others => (others => '0'));
-  signal s3a_phase      : t_phase_arr := (others => (others => '0'));
-  signal s3a_cell_x     : unsigned(8 downto 0) := (others => '0');
-  signal s3a_cell_y     : unsigned(8 downto 0) := (others => '0');
+    signal n_cols : unsigned(8 downto 0) := to_unsigned(80, 9);
+    signal n_rows : unsigned(8 downto 0) := to_unsigned(45, 9);
 
-  -- ---- S3b: raw products (multiplier output stage) ----
-  type t_prod_arr is array(0 to C_NUM_LAYERS - 1) of signed(23 downto 0);
-  signal s3b_prod   : t_prod_arr  := (others => (others => '0'));
-  signal s3b_base   : t_base_arr  := (others => (others => '0'));
-  signal s3b_phase  : t_phase_arr := (others => (others => '0'));
-  signal s3b_cell_x : unsigned(8 downto 0) := (others => '0');
-  signal s3b_cell_y : unsigned(8 downto 0) := (others => '0');
-  -- ---- S3c: wave_top per layer (final pixel-coord wave surface) ----
-  type t_wtop_arr is array(0 to C_NUM_LAYERS - 1) of signed(12 downto 0);
-  signal s3c_wave_top : t_wtop_arr := (others => (others => '0'));
-  signal s3c_phase    : t_phase_arr := (others => (others => '0'));
-  signal s3c_cell_x   : unsigned(8 downto 0) := (others => '0');
-  signal s3c_cell_y   : unsigned(8 downto 0) := (others => '0');
+    ----------------------------------------------------------------------------
+    -- Latched controls
+    ----------------------------------------------------------------------------
+    signal lk1, lk2, lk3, lk4, lk5, lk6, lp12 : unsigned(9 downto 0) := (others => '0');
+    signal s_gulls  : std_logic := '0';
+    signal s_size8  : std_logic := '0';
+    signal s_storm  : std_logic := '0';
+    signal s_night  : std_logic := '0';
+    signal s_bypass : std_logic := '0';
 
-  -- ---- S4: layer ownership + foam status ----
-  -- ownership: 0..2 = layer index, 3 = sky
-  signal s4_owner    : unsigned(1 downto 0) := "11";
-  -- foam level: 0=none, 1=subtle tint, 2=mid crest, 3=full white
-  signal s4_foam_lvl : unsigned(1 downto 0) := (others => '0');
-  signal s4_cell_x   : unsigned(8 downto 0) := (others => '0');
-  signal s4_cell_y   : unsigned(8 downto 0) := (others => '0');
+    signal cellw_m1 : unsigned(4 downto 0) := to_unsigned(15, 5);
+    signal rowp_m1  : unsigned(4 downto 0) := to_unsigned(15, 5);
 
-  -- ---- S5: pre-bright color ----
-  signal s5_y, s5_u, s5_v : unsigned(9 downto 0) := (others => '0');
+    ----------------------------------------------------------------------------
+    -- Per-frame render parameters (p_vseq)
+    ----------------------------------------------------------------------------
+    signal vstep     : unsigned(2 downto 0) := "111";
+    signal slb_full  : unsigned(15 downto 0) := (others => '0');
+    signal slb_q     : signed(14 downto 0) := to_signed(1710, 15);  -- base sea level, Q6
+    signal tide_q    : signed(9 downto 0) := (others => '0');
+    signal slr_q     : signed(14 downto 0) := to_signed(1710, 15);  -- with tide
+    signal skyband_q : signed(14 downto 0) := to_signed(1000, 15);
+    signal skystep_q : unsigned(11 downto 0) := to_unsigned(125, 12);
+    signal w_edge    : signed(9 downto 0) := (others => '0');  -- wash edge column
+    -- Beach wash: a self-contained sheet that grows ~8 cells down from the
+    -- sand's diagonal surface (DEEP->MID->AQUA->SURF + foam edge), sine-shaped
+    -- along the diagonal, then recedes; the whole beach face pulses together.
+    signal wph    : unsigned(11 downto 0) := (others => '0');  -- wash phase
+    signal wreach : signed(14 downto 0) := (others => '0');    -- global reach Q6
+    signal wwet_reach : signed(14 downto 0) := (others => '0'); -- trailing wet edge
+    signal b_floor   : signed(11 downto 0) := to_signed(-720, 12);
+    signal slope_c   : signed(11 downto 0) := to_signed(24, 12);
+    signal chopj     : unsigned(5 downto 0) := (others => '0');
+    signal pal_sel   : unsigned(1 downto 0) := (others => '0');
+    signal sun_x0    : unsigned(7 downto 0) := to_unsigned(58, 8);
+    signal sun_cell  : unsigned(7 downto 0) := to_unsigned(3, 8);
+    signal ncols_m1  : unsigned(7 downto 0) := to_unsigned(79, 8);
 
-  -- ---- S6: post-bright color ----
-  signal s6_y, s6_u, s6_v : unsigned(9 downto 0) := (others => '0');
+    signal sun_q15   : signed(14 downto 0) := (others => '0');
+    signal slb2_q    : signed(14 downto 0) := (others => '0');
+    signal stk_len15 : signed(14 downto 0) := (others => '0');
+    signal mir_on    : std_logic := '0';
+    signal tri_on    : std_logic := '0';
+    signal sunw      : std_logic_vector(29 downto 0) := (others => '0');
+    signal sun_y_r, sun_u_r, sun_v_r : std_logic_vector(9 downto 0) := (others => '0');
 
-  -- ---- Controls (latched on vsync) ----
-  signal s_speed      : unsigned(9 downto 0) := (others => '0');
-  signal s_height     : unsigned(9 downto 0) := (others => '0');
-  signal s_foam_life  : unsigned(9 downto 0) := (others => '0');
-  signal s_drift      : unsigned(9 downto 0) := (others => '0');
-  signal s_sky_idx    : unsigned(2 downto 0) := (others => '0');
-  signal s_horizon    : unsigned(11 downto 0) := (others => '0');
-  signal s_jagged     : std_logic := '0';
-  signal s_chunk16    : std_logic := '0';
-  signal s_choppy     : std_logic := '0';
-  signal s_mono       : std_logic := '0';
-  signal s_bypass     : std_logic := '0';
-  signal s_chaos      : unsigned(9 downto 0) := (others => '0');
+    signal gx0, gx1, gx2 : unsigned(7 downto 0) := to_unsigned(20, 8);
+    -- plumage bit per gull (0 = dark, 1 = white); FLIPS each time the bird
+    -- wraps, so every direction carries every colour over time
+    signal gcol : std_logic_vector(2 downto 0) := "010";
+    signal gulls_on      : std_logic := '0';
+    signal gy0, gy1, gy2 : unsigned(7 downto 0) := to_unsigned(2, 8);
+    signal ghz2          : unsigned(7 downto 0) := (others => '0');  -- 2*horizon row
+
+    -- kick handshake: vseq toggles kick_t once per field; the half-rate FSM
+    -- compares against kick_seen so the request can never be missed
+    signal kick_t    : std_logic := '0';
+    signal kick_seen : std_logic := '0';
+    signal fsm_ticks : unsigned(5 downto 0) := (others => '0');
+    -- the physics FSM runs on every OTHER clock: its whole control/datapath
+    -- cone gets two clock periods (27 ns) on silicon -- the v3.5.x one-hot
+    -- next-state cone was corrupting at 13.47 ns on hardware (HUD-diagnosed)
+    signal fsm_ce    : std_logic := '0';
+
+    ----------------------------------------------------------------------------
+    -- Physics FSM
+    ----------------------------------------------------------------------------
+    type t_fst is (FI, CP0, CP1, CP2,
+                   FP0, FP1, FP2, FP3, FP4, FP5, FP6, FP7, FP8, FP9,
+                   FP10, FP11, FP12,
+                   FD0, FD1, FD2, FD3, FD4, FD5, FD6, FD7,
+                   FD8, FD9, FD10, FD11,
+                   FDG0, FDG1, FDG2, FDG3, FDG4, FDG5, FDG6, FG0, FG1,
+                   FE0, FE1, FE2,
+                   FVL0, FVL1, FVL2, FV0, FV1, FV2, FV3, FV4, FV5, FV6,
+                   FFL0, FFL1, FFL2, FF0, FF1, FF2, FF3, FF4, FF5, FF6, FF7, FF8,
+                   FB0, FB1);
+    signal fst : t_fst := FI;
+    -- 37 states in binary encoding made every FSM register's clock-enable a
+    -- ~7-LUT decode of the state vector -- the v3.2 post-route critical path.
+    -- One-hot turns each enable into a single state bit.
+    -- "none": forbid yosys fsm_detect/fsm_extract from touching this state
+    -- register.  Post-synthesis simulation proved the extraction pass was
+    -- MIS-COMPILING the 40-state machine (dropped gating -> free-running
+    -- ticks on hardware while RTL sim stayed correct).  Plain registers and
+    -- muxes are timing-safe here because the FSM runs at half rate (27 ns).
+    attribute fsm_encoding : string;
+    attribute fsm_encoding of fst : signal is "none";
+
+    signal ticks_left : unsigned(5 downto 0) := (others => '0');
+    -- hard per-field tick budget: ticks_run resets ONLY on the (HW-verified
+    -- clean) frame edge and gates every tick start.  Whatever lets the run
+    -- loop retrigger on silicon, it cannot exceed the budget.
+    signal field_seen : std_logic := '0';
+    signal ticks_run  : unsigned(5 downto 0) := (others => '0');
+    signal ncf        : unsigned(8 downto 0) := to_unsigned(80, 9);
+
+    -- physics knobs (registered in PREP)
+    signal p_inj  : unsigned(7 downto 0) := to_unsigned(90, 8);
+    signal p_inc1 : unsigned(4 downto 0) := to_unsigned(6, 5);
+    signal p_inc2 : unsigned(6 downto 0) := to_unsigned(15, 7);
+    signal p_amp  : unsigned(8 downto 0) := to_unsigned(192, 9);
+    signal p_camp : unsigned(7 downto 0) := (others => '0');
+
+    signal ph1, ph2, ph3 : unsigned(9 downto 0) := (others => '0');
+    signal p_inc3   : unsigned(3 downto 0) := to_unsigned(2, 4);
+    signal sin_v1, sin_v2, sin_v3 : signed(7 downto 0) := (others => '0');
+    signal swell_a  : signed(11 downto 0) := (others => '0');
+    signal chop_v   : signed(11 downto 0) := (others => '0');
+    signal swell    : signed(11 downto 0) := (others => '0');
+
+    -- swell noise + surge (v3.2)
+    signal lfsr      : unsigned(15 downto 0) := x"ACE1";
+    signal wave_new  : std_logic := '0';
+    signal inc_j     : unsigned(9 downto 0) := (others => '0');
+    signal amp_mod   : unsigned(8 downto 0) := to_unsigned(256, 9);
+    signal wave_jit  : signed(4 downto 0) := (others => '0');
+    signal surge_amp : unsigned(8 downto 0) := (others => '0');
+    signal surge_off : signed(11 downto 0) := (others => '0');
+    signal th_mid, th_hi : signed(11 downto 0) := (others => '0');
+
+    -- shared multiplier
+    -- sunset colour engine (computed once per kick via the shared mult):
+    -- sky hi/lo = lerp between adjacent P12 keyframes; ocean deep = base
+    -- scaled toward black/neutral by dscale
+    signal skyg_addr : unsigned(6 downto 0) := (others => '0');
+    signal ga_g, gb_g : std_logic_vector(29 downto 0) := (others => '0');
+    signal glow_y, glow_u, glow_v : std_logic_vector(9 downto 0) := (others => '0');
+    signal gd_y, gd_u, gd_v : signed(10 downto 0) := (others => '0');
+    signal ay_a, au_a, av_a : signed(10 downto 0) := (others => '0');
+    signal gk : unsigned(2 downto 0) := (others => '0');
+    signal gradA_we : std_logic := '0';
+    signal grad_wa  : unsigned(2 downto 0) := (others => '0');
+    signal gradA_wd, gradB_wd : std_logic_vector(15 downto 0) := (others => '0');
+    signal sga_hi, sgb_hi, sga_lo, sgb_lo : std_logic_vector(29 downto 0) := (others => '0');
+    signal t_r       : unsigned(3 downto 0) := (others => '0');
+    -- geometry-scaled sun position: 64 .. skyband+512 across full P12 travel,
+    -- computed here (mult) and consumed by vseq next field (1-field lag)
+    signal sun_q_f   : unsigned(11 downto 0) := to_unsigned(500, 12);
+    signal skyhi_y, skyhi_u, skyhi_v : std_logic_vector(9 downto 0) := (others => '0');
+    signal skylo_y, skylo_u, skylo_v : std_logic_vector(9 downto 0) := (others => '0');
+
+    signal ma : signed(11 downto 0) := (others => '0');
+    signal mb : signed(9 downto 0) := (others => '0');
+    signal mp : signed(21 downto 0) := (others => '0');
+
+    -- sweep registers
+    signal vi        : unsigned(8 downto 0) := (others => '0');
+    signal b_raw     : signed(11 downto 0) := (others => '0');
+    signal b_nx_raw  : signed(11 downto 0) := (others => '0');
+    signal b_eff_i   : signed(11 downto 0) := (others => '0');
+    signal b_eff_ip1 : signed(11 downto 0) := (others => '0');
+
+    signal eta_i, eta_ip1 : signed(11 downto 0) := (others => '0');
+    signal u_i            : signed(11 downto 0) := (others => '0');
+    signal d_i, d_ip1     : signed(11 downto 0) := (others => '0');
+    signal de_r           : signed(11 downto 0) := (others => '0');
+    signal grav_r, fric_r : signed(11 downto 0) := (others => '0');
+    signal neg_sl         : signed(11 downto 0) := (others => '0');
+    signal sum_a, sum_b   : signed(11 downto 0) := (others => '0');
+    signal un_r           : signed(11 downto 0) := (others => '0');
+    signal efin_r         : signed(11 downto 0) := (others => '0');
+
+    signal eta_pend  : signed(11 downto 0) := (others => '0');
+    signal foam_pend : unsigned(8 downto 0) := (others => '0');
+    signal wet_pend  : unsigned(7 downto 0) := (others => '0');
+    signal fw_jp1    : std_logic_vector(15 downto 0) := (others => '0');
+    signal qf_prev   : signed(11 downto 0) := (others => '0');
+    signal qf_j_r    : signed(11 downto 0) := (others => '0');
+    signal df_prev   : signed(11 downto 0) := (others => '0');
+    signal df_j      : signed(11 downto 0) := (others => '0');
+    signal slope_w   : signed(11 downto 0) := (others => '0');
+    signal brk_r     : std_logic := '0';
+    signal cap_r     : std_logic := '0';
+    signal foam_adj  : unsigned(8 downto 0) := (others => '0');
+    signal sub_next  : unsigned(7 downto 0) := (others => '0');
+    signal add_next  : unsigned(7 downto 0) := (others => '0');
+
+    ----------------------------------------------------------------------------
+    -- Display prefetch / per-cell derived
+    ----------------------------------------------------------------------------
+    signal pf_cnt   : unsigned(2 downto 0) := "111";
+    signal eta_cur, eta_nxt : signed(11 downto 0) := (others => '0');
+    signal foam_cur, foam_nxt : unsigned(7 downto 0) := (others => '0');
+    signal wet_cur, wet_nxt   : unsigned(7 downto 0) := (others => '0');
+    signal b_cur, b_nxt       : signed(11 downto 0) := C_B0;
+
+    signal surf_q  : signed(14 downto 0) := (others => '0');
+    signal wreach_q  : signed(14 downto 0) := (others => '0');  -- per-col wash reach
+    signal wwet_reach_q : signed(14 downto 0) := (others => '0');  -- per-col wet edge
+    -- The aqua/mid (off_b) and mid/deep (off_c) band boundaries each ride their
+    -- OWN per-column, time-drifting offset so all three blue layers slide
+    -- independently -- but stored as just the small offset (surf_q + off), so
+    -- the band flags reuse the single row_q-surf_q subtract (saves 2 refs).
+    signal off_b   : signed(7 downto 0) := (others => '0');
+    signal off_c   : signed(7 downto 0) := (others => '0');
+    signal bot_q   : signed(14 downto 0) := (others => '0');
+    signal wat_c   : std_logic := '0';
+    -- droplet: one cell per column arcing off the crest on a staggered cycle
+    -- (stored as a cell-row index so the pixel test is a single compare)
+    signal drop_cell  : unsigned(7 downto 0) := (others => '0');
+    signal drop_on    : std_logic := '0';
+
+    ----------------------------------------------------------------------------
+    -- Pixel pipeline P1..P4
+    ----------------------------------------------------------------------------
+    signal row_q : signed(14 downto 0) := (others => '0');
+
+    -- band membership as parallel subtract-sign flags (one 15-bit carry chain
+    -- each, all in P1) so P2 is a pure boolean priority mux with no chains
+    signal p1_fsand : std_logic := '0';
+    signal p1_uw    : std_logic := '0';   -- pixel under the active wash sheet
+    signal p1_lead  : std_logic := '0';   -- wash leading (foam) edge
+    signal p1_lgap  : std_logic := '0';   -- breakup gaps in the wash foam edge
+    signal p1_band  : unsigned(1 downto 0) := (others => '0');  -- DEEP..SURF
+    signal p1_res   : std_logic := '0';   -- residual wet sand (fading)
+    signal p1_wl    : unsigned(1 downto 0) := (others => '0');  -- wet shade   -- row at/below the sand line
+    signal p1_b0    : std_logic := '0';   -- at/below the water surface
+    signal p1_b64   : std_logic := '0';   -- within the crest row
+    signal p1_b128  : std_logic := '0';   -- within 2 rows of the surface
+    signal p1_ba192 : std_logic := '0';   -- above the aqua/mid boundary
+    signal p1_bm448 : std_logic := '0';   -- above the mid/deep boundary
+    signal p1_spr   : std_logic := '0';   -- within 1 row above the surface
+    signal p1_b256  : std_logic := '0';   -- top row of the MID band
+    signal p1_b512  : std_logic := '0';   -- top row of the DEEP band
+    signal p1_fM    : std_logic := '0';   -- mid-layer foam gate
+    signal p1_fD    : std_logic := '0';   -- deep-layer foam gate
+    signal p1_gullw : std_logic := '0';   -- white gull (flying right)
+    signal p1_mir   : std_logic := '0';   -- mirrored sun disc on the ocean
+    signal p1_stk   : std_logic := '0';   -- horizon streak (sun-wide, ocean only)
+    signal p2_sky, p3_sky : std_logic_vector(1 downto 0) := "00";
+    signal p1_sky2  : std_logic := '0';
+    signal p1_wat       : std_logic := '0';
+    signal p1_fhi, p1_fmid, p1_fspray : std_logic := '0';
+    signal p1_fcrest    : std_logic := '0';
+    signal p1_gap       : std_logic := '0';
+    signal p1_sand2     : std_logic := '0';
+
+    signal p1_sun       : std_logic := '0';
+    signal p1_gull      : std_logic := '0';
+    signal p1_gullr     : std_logic := '0';   -- gull reflection on the ocean
+    signal p1_drop      : std_logic := '0';   -- flying crest droplet (over water)
+    signal p1_sprayh    : std_logic := '0';
+
+    signal p2_idx : unsigned(3 downto 0) := C_I_SKYHI;
+    signal p3_yuv : std_logic_vector(29 downto 0) := (others => '0');
+    signal p4_y, p4_u, p4_v : std_logic_vector(C_DW - 1 downto 0) := (others => '0');
+
+    ----------------------------------------------------------------------------
+    -- Sync pipe
+    ----------------------------------------------------------------------------
+    type t_pipe is array (0 to C_LAT - 1) of t_video_stream_yuv444_30b;
+    signal pipe : t_pipe;
 
 begin
 
-  -- =====================================================================
-  -- LFSR for per-column noise. Reseeded once per vsync from frame_count,
-  -- otherwise free-runs. Top bit forced to '1' so the seed is never zero.
-  -- 10-bit maximal-length polynomial x^10 + x^7 + 1 = "1001000000".
-  -- =====================================================================
-  s_lfsr_seed <= '1' & std_logic_vector(s_frame_count(8 downto 0));
+    ----------------------------------------------------------------------------
+    -- Raster counters, lattice, frame bookkeeping.
+    ----------------------------------------------------------------------------
+    p_position : process(clk)
+        variable v_h_edge, v_v_edge : std_logic;
+    begin
+        if rising_edge(clk) then
+            prev_hsync_n <= data_in.hsync_n;
+            prev_vsync_n <= data_in.vsync_n;
 
-  u_lfsr : entity work.lfsr
-    generic map (G_DATA_WIDTH => 10)
-    port map (
-      clk      => clk,
-      reset    => s_lfsr_reset,
-      enable   => '1',
-      seed     => s_lfsr_seed,
-      poly     => "1001000000",
-      lfsr_out => s_lfsr_out
-    );
-
-  -- =====================================================================
-  -- S1: input tracking, control latch, tide phase accumulator,
-  --     per-layer phase computation (cell-snapped x).
-  --
-  -- Tide replaces linear scroll: position is a slow sinusoid of frame time,
-  -- so all layers crash leftward then recede rightward in a continuous cycle.
-  -- s_tide_inward holds the SIGN of the tide velocity for foam physics.
-  -- =====================================================================
-  p_s1 : process(clk)
-    variable v_x_snap        : unsigned(11 downto 0);
-    variable v_scrolled      : signed(15 downto 0);
-    variable v_scrolled_u    : unsigned(15 downto 0);
-    variable v_raw_phase     : unsigned(15 downto 0);
-    variable v_tide_step     : unsigned(15 downto 0);
-    variable v_tide_addr     : unsigned(5 downto 0);
-    variable v_tide_pos      : signed(7 downto 0);
-    variable v_tide_vel      : signed(7 downto 0);
-    variable v_tide_layer    : signed(7 downto 0);
-    variable v_scroll_lay    : signed(17 downto 0);
-    variable v_addr_layer    : unsigned(5 downto 0);
-    variable v_warble_addr   : unsigned(5 downto 0);
-    variable v_warble_val    : signed(7 downto 0);
-    variable v_phase_combine : unsigned(7 downto 0);
-    variable v_at_col_edge   : boolean;
-    variable v_raw_noise     : signed(7 downto 0);
-    variable v_step_s        : signed(7 downto 0);
-    variable v_amp_base      : unsigned(12 downto 0);
-    variable v_amp_q         : unsigned(12 downto 0);  -- amp >> 2 (quarter)
-    variable v_amp_e         : unsigned(12 downto 0);  -- amp >> 3 (eighth)
-    variable v_amp_mod       : unsigned(13 downto 0);
-    variable v_slow_addr     : unsigned(5 downto 0);
-    variable v_slow_raw      : signed(7 downto 0);
-    variable v_col_noise_new : signed(7 downto 0);  -- scratch for inline forward
-    variable v_col_slow_new  : signed(7 downto 0);
-    variable v_col_phase_slo : signed(5 downto 0);  -- slow phase (drift, smooth)
-    variable v_phase_total_new : t_phase_const_arr;
-  begin
-    if rising_edge(clk) then
-
-      s_prev_hsync_n <= data_in.hsync_n;
-      s_prev_vsync_n <= data_in.vsync_n;
-
-      -- Pipe input through for sync/avid alignment AND bypass passthrough.
-      pipe(0).avid    <= data_in.avid;
-      pipe(0).hsync_n <= data_in.hsync_n;
-      pipe(0).vsync_n <= data_in.vsync_n;
-      pipe(0).field_n <= data_in.field_n;
-      pipe(0).y <= data_in.y;
-      pipe(0).u <= data_in.u;
-      pipe(0).v <= data_in.v;
-      for i in 1 to C_LATENCY - 1 loop
-        pipe(i) <= pipe(i - 1);
-      end loop;
-
-      -- Pixel position counters
-      if data_in.avid = '1' then
-        s_pixel_x <= s_pixel_x + 1;
-      end if;
-      if data_in.hsync_n = '0' and s_prev_hsync_n = '1' then
-        s_pixel_x <= (others => '0');
-        s_pixel_y <= s_pixel_y + 1;
-      end if;
-
-      -- LFSR re-seed pulse: high for one cycle each vsync edge.
-      if data_in.vsync_n = '0' and s_prev_vsync_n = '1' then
-        s_lfsr_reset <= '1';
-      else
-        s_lfsr_reset <= '0';
-      end if;
-
-      if data_in.vsync_n = '0' and s_prev_vsync_n = '1' then
-        s_pixel_y <= (others => '0');
-        s_frame_count <= s_frame_count + 1;
-
-        -- Latch controls. Slider = Chaos (vital function). Knob 4 = Drift.
-        s_speed     <= unsigned(registers_in(0));
-        s_height    <= unsigned(registers_in(1));
-        s_foam_life <= unsigned(registers_in(2));
-        s_drift     <= unsigned(registers_in(3));
-        s_sky_idx   <= unsigned(registers_in(4)(9 downto 7));
-        s_horizon   <= resize(unsigned(registers_in(5)), 12);
-        s_jagged    <= registers_in(6)(0);
-        s_chunk16   <= registers_in(6)(1);
-        s_choppy    <= registers_in(6)(2);
-        s_mono      <= registers_in(6)(3);
-        s_bypass    <= registers_in(6)(4);
-        s_chaos     <= unsigned(registers_in(7));
-
-        -- Tide phase advances per frame, rate set by Wave Speed knob.
-        -- Step = knob * 64. At default knob=600 -> step=38400, full 24-bit
-        -- cycle ~= 2^24/38400 = ~437 frames = ~7.3 sec at 60fps.
-        -- to_unsigned width must hold value 64 (>= 7 bits); 6 bits wraps to 0.
-        v_tide_step := resize(unsigned(registers_in(0)) * to_unsigned(64, 7), 16);
-        s_tide_phase <= s_tide_phase + resize(v_tide_step, 24);
-
-        -- Tide position from top 6 bits of phase -> 6-bit sin LUT addr
-        v_tide_addr := s_tide_phase(23 downto 18);
-        v_tide_pos  := C_SIN(to_integer(v_tide_addr));
-        -- Velocity = cos(phase) = sin(phase + pi/2) -> addr + 16 mod 64
-        v_tide_vel  := C_SIN(to_integer(v_tide_addr + to_unsigned(16, 6)));
-
-        -- Expose tide state to downstream stages.
-        s_tide_pos <= v_tide_pos;
-        s_tide_vel <= v_tide_vel;
-        if v_tide_vel >= 0 then
-          s_tide_inward <= '1';
-        else
-          s_tide_inward <= '0';
-        end if;
-
-        -- Precompute foam parameters from tide_vel for smooth transition.
-        -- foam_step = base + foam_life_knob + (tide_vel sra 4), clamped >= 1.
-        v_step_s := to_signed(8, 8)
-                    + signed('0' & std_logic_vector(resize(unsigned(registers_in(2)(9 downto 7)), 7)))
-                    + resize(shift_right(v_tide_vel, 4), 8);
-        if v_step_s < to_signed(1, 8) then
-          s_foam_step <= to_unsigned(1, 6);
-        elsif v_step_s > to_signed(31, 8) then
-          s_foam_step <= to_unsigned(31, 6);
-        else
-          s_foam_step <= unsigned(std_logic_vector(v_step_s(5 downto 0)));
-        end if;
-
-        -- Band-thickness toggle: strong inward = thicker. Dead-zone near 0.
-        if v_tide_vel > to_signed(32, 8) then
-          s_foam_band_thick <= '1';
-        else
-          s_foam_band_thick <= '0';
-        end if;
-
-        -- Advance the slow modulator phase. Rate is set by Drift (knob 4):
-        -- step = knob >> 3 -> 0..127 per frame -> 8..inf sec/cycle at 60fps.
-        s_slow_phase <= s_slow_phase + resize(unsigned(registers_in(3)(9 downto 3)), 16);
-
-        -- Per-layer scroll position: pos = tide_amp * sin(phase + layer_off) / 128
-        -- tide_amp (max 260, 9-bit) * tide_layer (+/-127, 8-bit) -> 17-bit signed
-        for li in 0 to C_NUM_LAYERS - 1 loop
-          v_addr_layer := v_tide_addr + C_LAYER(li).tide_off;
-          v_tide_layer := C_SIN(to_integer(v_addr_layer));
-          v_scroll_lay := signed('0' & std_logic_vector(C_LAYER(li).tide_amp))
-                          * v_tide_layer;
-          -- Divide by 128 (>>7) -> +/-260 pixels of scroll
-          s_scroll(li) <= resize(shift_right(v_scroll_lay, 7), 16);
-
-          -- Advance per-layer warble accumulator; sample sin LUT at current phase.
-          v_warble_addr      := s_warble_phase(li)(15 downto 10);
-          v_warble_val       := C_SIN(to_integer(v_warble_addr));
-          s_warble_val(li)   <= v_warble_val;
-          s_warble_phase(li) <= s_warble_phase(li) + resize(C_LAYER(li).warble_step, 16);
-
-          -- Pre-scale warble by Chaos (slider). Sea State switch no longer
-          -- gates this -- Chaos slider is the master and works always.
-          case registers_in(7)(9 downto 8) is
-            when "00"   => v_warble_val := (others => '0');
-            when "01"   => v_warble_val := shift_right(v_warble_val, 6);
-            when "10"   => v_warble_val := shift_right(v_warble_val, 5);
-            when others => v_warble_val := shift_right(v_warble_val, 4);
-          end case;
-          s_warble_adj(li)  <= v_warble_val;
-          s_phase_const(li) <= C_LAYER(li).phase_off
-                               + unsigned(std_logic_vector(v_warble_val(5 downto 0)));
-
-          -- amp_x_knob (per-frame, per-layer) with tide-driven modulation,
-          -- multiplier-free: shift+add gives 5 amplitude levels keyed to
-          -- tide_pos top 3 bits. Bigger amps during crash, smaller during
-          -- recede. ~+/-25% peak swing.
-          v_amp_base := C_LAYER(li).amp * unsigned(registers_in(1)(9 downto 3));
-          v_amp_q    := "00" & v_amp_base(12 downto 2);  -- amp >> 2
-          v_amp_e    := "000" & v_amp_base(12 downto 3); -- amp >> 3
-
-          case v_tide_pos(7 downto 5) is
-            when "010" | "011" => v_amp_mod := resize(v_amp_base, 14) + resize(v_amp_q, 14);  -- +25%
-            when "001"          => v_amp_mod := resize(v_amp_base, 14) + resize(v_amp_e, 14); -- +12%
-            when "000"          => v_amp_mod := resize(v_amp_base, 14);                       --   0
-            when "111"          => v_amp_mod := resize(v_amp_base, 14) - resize(v_amp_e, 14); -- -12%
-            when others          => v_amp_mod := resize(v_amp_base, 14) - resize(v_amp_q, 14);-- -25%
-          end case;
-
-          if v_amp_mod(13) = '1' then  -- underflow
-            s_amp_x_knob(li) <= (others => '0');
-          else
-            s_amp_x_knob(li) <= v_amp_mod(12 downto 0);
-          end if;
-        end loop;
-      end if;
-
-      -- Cell-size mux: 8x8 vs 16x16. Snap x to cell column, detect col edge.
-      if s_chunk16 = '1' then
-        v_x_snap  := s_pixel_x(11 downto C_CELL_BITS_16) & to_unsigned(0, C_CELL_BITS_16);
-        s1_cell_x <= resize(s_pixel_x(11 downto C_CELL_BITS_16), 9);
-        s1_cell_y <= resize(s_pixel_y(11 downto C_CELL_BITS_16), 9);
-        v_at_col_edge := (s_pixel_x(3 downto 0) = "0000");
-      else
-        v_x_snap  := s_pixel_x(11 downto C_CELL_BITS_8) & to_unsigned(0, C_CELL_BITS_8);
-        s1_cell_x <= s_pixel_x(11 downto C_CELL_BITS_8);
-        s1_cell_y <= s_pixel_y(11 downto C_CELL_BITS_8);
-        v_at_col_edge := (s_pixel_x(2 downto 0) = "000");
-      end if;
-
-      -- Sample LFSR & slow modulator once per cell column. To keep the
-      -- pipeline ALIGNED with the new column, compute new values into vars
-      -- and assign BOTH the signals AND the pipe forwards from them.
-      --
-      -- Chaos slider scales LFSR-based RANDOM effects (always on, ignores
-      -- the Sea State switch which had been gating everything to zero):
-      --   col_noise        - per-column wave_top jitter        (up to +/-64 px)
-      --   col_phase_jitter - per-column phase offset (random, jagged)
-      --   warble           - per-layer per-frame phase drift
-      --
-      -- Drift knob scales the SIN-based SMOOTH modulator. Applied to
-      -- BOTH baseline (col_slow) AND phase (col_phase_slo) so peaks in
-      -- different regions of the screen have different spacing AND
-      -- different heights -- gives organic uneven peak distribution.
-      if v_at_col_edge then
-        v_raw_noise := signed(s_lfsr_out(9 downto 2));  -- ±127 jitter source
-        v_slow_addr := s_slow_phase(15 downto 10) + s_pixel_x(10 downto 5);
-        v_slow_raw  := C_SIN(to_integer(v_slow_addr));
-
-        case s_chaos(9 downto 8) is
-          when "00"   => v_col_noise_new := (others => '0');
-          when "01"   => v_col_noise_new := shift_right(v_raw_noise, 3);  -- +/- 16 px
-          when "10"   => v_col_noise_new := shift_right(v_raw_noise, 2);  -- +/- 32 px
-          when others => v_col_noise_new := shift_right(v_raw_noise, 1);  -- +/- 64 px
-        end case;
-
-        case s_drift(9 downto 8) is
-          when "00"   =>
-            v_col_slow_new  := (others => '0');
-            v_col_phase_slo := (others => '0');
-          when "01"   =>
-            v_col_slow_new  := shift_right(v_slow_raw, 4);              -- +/-  7 px baseline
-            v_col_phase_slo := resize(shift_right(v_slow_raw, 5), 6);   -- +/- 3 phase
-          when "10"   =>
-            v_col_slow_new  := shift_right(v_slow_raw, 3);              -- +/- 15 px baseline
-            v_col_phase_slo := resize(shift_right(v_slow_raw, 4), 6);   -- +/- 7 phase
-          when others =>
-            v_col_slow_new  := shift_right(v_slow_raw, 2);              -- +/- 31 px baseline
-            v_col_phase_slo := resize(shift_right(v_slow_raw, 3), 6);   -- +/- 15 phase
-        end case;
-
-        -- Phase total = warble-adjusted const + smooth slow-mod phase.
-        -- Only one phase contribution: the spatially-coherent slow modulator.
-        -- (LFSR phase jitter dropped -- it produced incoherent noise that
-        -- hid peaks rather than just spacing them unevenly.)
-        for li in 0 to C_NUM_LAYERS - 1 loop
-          v_phase_total_new(li) := s_phase_const(li)
-                                   + unsigned(std_logic_vector(v_col_phase_slo));
-          s_phase_total(li) <= v_phase_total_new(li);
-        end loop;
-
-        s_col_noise  <= v_col_noise_new;
-        s_col_slow   <= v_col_slow_new;
-        s1_col_noise <= v_col_noise_new;
-        s1_col_slow  <= v_col_slow_new;
-      else
-        for li in 0 to C_NUM_LAYERS - 1 loop
-          v_phase_total_new(li) := s_phase_total(li);
-        end loop;
-        s1_col_noise <= s_col_noise;
-        s1_col_slow  <= s_col_slow;
-      end if;
-
-      -- Per-layer raw phase + precombined phase_total = single 6-bit add.
-      -- v_phase_total_new tracks the same value as s_phase_total but is
-      -- valid the same cycle it was computed (signal would lag by 1).
-      for li in 0 to C_NUM_LAYERS - 1 loop
-        v_scrolled   := resize(signed('0' & std_logic_vector(v_x_snap)), 16)
-                        + s_scroll(li);
-        v_scrolled_u := unsigned(std_logic_vector(v_scrolled));
-        v_raw_phase  := resize(v_scrolled_u srl to_integer(C_LAYER(li).wshift), 16);
-        s1_phase(li) <= v_raw_phase(5 downto 0) + v_phase_total_new(li);
-      end loop;
-    end if;
-  end process p_s1;
-
-  -- =====================================================================
-  -- S2: sin LUT lookups
-  --   cos(phase)    = sin(phase + 16)
-  --   cos(2*phase)  = sin(2*phase + 16)
-  -- The 2nd harmonic narrows crests and broadens troughs (Stokes shape).
-  -- =====================================================================
-  p_s2 : process(clk)
-    variable v_addr_cos1 : unsigned(5 downto 0);
-    variable v_addr_cos2 : unsigned(6 downto 0);
-  begin
-    if rising_edge(clk) then
-      for li in 0 to C_NUM_LAYERS - 1 loop
-        v_addr_cos1 := s1_phase(li) + to_unsigned(16, 6);
-        v_addr_cos2 := resize(s1_phase(li) & '0', 7) + to_unsigned(16, 7);
-        s2_cos1(li) <= C_SIN(to_integer(v_addr_cos1));
-        s2_cos2(li) <= C_SIN(to_integer(v_addr_cos2(5 downto 0)));
-      end loop;
-      s2_phase     <= s1_phase;
-      s2_cell_x    <= s1_cell_x;
-      s2_cell_y    <= s1_cell_y;
-      s2_col_noise <= s1_col_noise;
-      s2_col_slow  <= s1_col_slow;
-    end if;
-  end process p_s2;
-
-  -- =====================================================================
-  -- S3a: shape the waveform (jagged or smooth), prep multiplicands.
-  --   combined  = cos1 + (cos2 sra 2)            (Stokes 2nd harmonic / 4)
-  --   amp_x_knob = layer.amp * height_knob(7b)   (single 6x7 multiply)
-  --   base      = horizon + layer.offset_y       (per-layer baseline y)
-  -- =====================================================================
-  p_s3a : process(clk)
-    variable v_cos1       : signed(7 downto 0);
-    variable v_cos2       : signed(7 downto 0);
-    variable v_combined   : signed(9 downto 0);
-    variable v_base       : signed(12 downto 0);
-    variable v_layer_off  : unsigned(11 downto 0);
-    variable v_tri        : signed(7 downto 0);
-    variable v_quarter    : unsigned(1 downto 0);
-    variable v_phase      : unsigned(5 downto 0);
-    variable v_frac       : unsigned(3 downto 0);
-  begin
-    if rising_edge(clk) then
-      for li in 0 to C_NUM_LAYERS - 1 loop
-        v_cos1 := s2_cos1(li);
-        v_cos2 := s2_cos2(li);
-
-        if s_jagged = '1' then
-          -- Triangle wave at same phase (still cos-addr convention).
-          v_phase   := s2_phase(li) + to_unsigned(16, 6);
-          v_quarter := v_phase(5 downto 4);
-          v_frac    := v_phase(3 downto 0);
-          case v_quarter is
-            when "00" | "10" =>
-              v_tri := signed(shift_left(resize(v_frac, 8), 3));
-            when others =>
-              v_tri := signed(shift_left(resize(to_unsigned(15, 4) - v_frac, 8), 3));
-          end case;
-          if v_quarter(1) = '1' then
-            v_tri := -v_tri;
-          end if;
-          v_cos1 := v_tri;
-          v_cos2 := (others => '0');
-        end if;
-
-        -- Per-layer 2nd-harmonic weight: layer with smaller h2_shift = sharper
-        -- crests. h2_shift is constant per li so the sra is a static shift.
-        v_combined   := resize(v_cos1, 10)
-                        + resize(shift_right(v_cos2, to_integer(C_LAYER(li).h2_shift)), 10);
-        v_layer_off  := resize(C_LAYER(li).offset_y, 12);
-        v_base       := signed('0' & std_logic_vector(s_horizon + v_layer_off));
-
-        s3a_combined(li)   <= v_combined;
-        s3a_amp_x_knob(li) <= s_amp_x_knob(li);  -- precomputed (tide-modulated)
-        s3a_base(li)       <= v_base;
-      end loop;
-
-      s3a_phase  <= s2_phase;
-      s3a_cell_x <= s2_cell_x;
-      s3a_cell_y <= s2_cell_y;
-      -- Combine col_noise + col_slow into one offset so S3c has a shorter
-      -- adder chain (single combined-offset add instead of two).
-      s3a_col_off <= resize(s2_col_noise, 9) + resize(s2_col_slow, 9);
-    end if;
-  end process p_s3a;
-
-  -- =====================================================================
-  -- S3b: multiplier-only stage. The 14b*10b multiply is its own pipeline
-  -- stage so it doesn't share a clock cycle with adders.
-  -- =====================================================================
-  p_s3b : process(clk)
-    variable v_amp_s : signed(13 downto 0);
-  begin
-    if rising_edge(clk) then
-      for li in 0 to C_NUM_LAYERS - 1 loop
-        v_amp_s := signed('0' & std_logic_vector(s3a_amp_x_knob(li)));
-        s3b_prod(li) <= v_amp_s * s3a_combined(li);
-      end loop;
-      s3b_base    <= s3a_base;
-      s3b_phase   <= s3a_phase;
-      s3b_cell_x  <= s3a_cell_x;
-      s3b_cell_y  <= s3a_cell_y;
-      s3b_col_off <= s3a_col_off;
-    end if;
-  end process p_s3b;
-
-  -- =====================================================================
-  -- S3c: assemble wave_top = base + (-(prod >> 14)) + col_noise.
-  -- Adders only, no multiplier on this path.
-  -- =====================================================================
-  p_s3c : process(clk)
-    variable v_off     : signed(12 downto 0);
-    variable v_off_ext : signed(12 downto 0);
-  begin
-    if rising_edge(clk) then
-      v_off_ext := resize(s3b_col_off, 13);
-      for li in 0 to C_NUM_LAYERS - 1 loop
-        v_off := -resize(s3b_prod(li) sra 14, 13);
-        s3c_wave_top(li) <= s3b_base(li) + v_off + v_off_ext;
-      end loop;
-      s3c_phase   <= s3b_phase;
-      s3c_cell_x  <= s3b_cell_x;
-      s3c_cell_y  <= s3b_cell_y;
-      s3c_col_off <= s3b_col_off;
-    end if;
-  end process p_s3c;
-
-  -- =====================================================================
-  -- S4: determine which layer owns this cell (front-to-back priority)
-  --     and compute foam status from the owning layer's phase.
-  -- Foam ASR envelope (raw phase 0..63, phase 0 = crest of the wave):
-  --   phase  0..7  -> level 3 (white)        Attack + Sustain
-  --   phase  8..15 -> level 3 (white)        Sustain (extended by knob 2)
-  --   phase 16..23 -> level 2 (mid crest)    Release 1
-  --   phase 24..31 -> level 1 (subtle tint)  Release 2
-  --   phase 32..63 -> level 0 (none)         Silent
-  -- The 'foam_life' knob lengthens the Sustain region (shifts release later).
-  -- =====================================================================
-  -- =====================================================================
-  -- S4: layer ownership + foam status.
-  --
-  -- ASR envelope is TIDE-DIRECTION AWARE:
-  --   Inward crash:  sustain & release windows are LONGER -> foam lingers
-  --                  in the wake; band is one cell THICKER -> visible build.
-  --   Outward recede: windows SHORT, band thin, and the foam pattern is
-  --                   hash-thinned by the col_noise LSBs so it FRAGMENTS
-  --                   into chunks as it dies off behind the retreating wave.
-  -- This gives the look of foam-with-its-own-physics without needing a
-  -- per-column persistent life RAM.
-  -- =====================================================================
-  p_s4 : process(clk)
-    variable v_owner       : unsigned(1 downto 0);
-    variable v_top_pix     : signed(12 downto 0);
-    variable v_top_cell    : unsigned(8 downto 0);
-    variable v_dist        : unsigned(8 downto 0);
-    variable v_phase       : unsigned(5 downto 0);
-    variable v_sustain_end : unsigned(5 downto 0);
-    variable v_rel1_end    : unsigned(5 downto 0);
-    variable v_rel2_end    : unsigned(5 downto 0);
-    variable v_level       : unsigned(1 downto 0);
-    variable v_claimed     : boolean;
-    variable v_band_max    : unsigned(8 downto 0);
-    variable v_deep_hint   : unsigned(8 downto 0);
-  begin
-    if rising_edge(clk) then
-      v_owner   := "11";
-      v_level   := "00";
-      v_claimed := false;
-
-      -- Foam params (band and step) are precomputed in S1 vsync from
-      -- tide_vel. Use them directly here.
-      if s_chunk16 = '1' then
-        if s_foam_band_thick = '1' then
-          v_band_max  := to_unsigned(1, 9);
-          v_deep_hint := to_unsigned(2, 9);
-        else
-          v_band_max  := to_unsigned(0, 9);
-          v_deep_hint := to_unsigned(1, 9);
-        end if;
-      else
-        if s_foam_band_thick = '1' then
-          v_band_max  := to_unsigned(2, 9);
-          v_deep_hint := to_unsigned(3, 9);
-        else
-          v_band_max  := to_unsigned(1, 9);
-          v_deep_hint := to_unsigned(2, 9);
-        end if;
-      end if;
-
-      -- Front-to-back: front layer claims first.
-      for li in C_NUM_LAYERS - 1 downto 0 loop
-        if not v_claimed then
-          v_top_pix := s3c_wave_top(li);
-
-          if v_top_pix < 0 then
-            v_top_cell := (others => '0');
-          elsif v_top_pix > 4095 then
-            v_top_cell := (others => '1');
-          elsif s_chunk16 = '1' then
-            v_top_cell := unsigned(std_logic_vector(v_top_pix(12 downto 4)));
-          else
-            v_top_cell := unsigned(std_logic_vector(v_top_pix(11 downto 3)));
-          end if;
-
-          if s3c_cell_y >= v_top_cell then
-            v_owner   := to_unsigned(li, 2);
-            v_claimed := true;
-
-            v_phase       := s3c_phase(li);
-            v_sustain_end := s_foam_step;
-            v_rel1_end    := v_sustain_end + s_foam_step;
-            v_rel2_end    := v_rel1_end    + s_foam_step;
-
-            v_dist := s3c_cell_y - v_top_cell;
-
-            if v_dist <= v_band_max then
-              if v_phase < v_sustain_end then
-                v_level := "11";                                       -- back: white
-              elsif v_phase < v_rel1_end then
-                v_level := "10";                                       -- back: high
-              elsif v_phase < v_rel2_end then
-                v_level := "01";                                       -- back: light
-              -- Asymmetric leading edge: foam appears just BEFORE the next
-              -- crest arrives (phase wrapping from 63 -> 0). Window is half
-              -- the trailing wake -> waves look like they're foaming both
-              -- sides but the back wake is brighter / longer.
-              -- phase >= (64 - s_foam_step/2) -> 'mid' leading band
-              -- phase >= (64 - s_foam_step)   -> 'far' leading band
-              elsif v_phase >= (to_unsigned(0, 6) - shift_right(s_foam_step, 1)) then
-                v_level := "10";                                       -- leading: high
-              elsif v_phase >= (to_unsigned(0, 6) - s_foam_step) then
-                v_level := "01";                                       -- leading: light
-              else
-                v_level := "00";
-              end if;
-            elsif v_dist = v_deep_hint and v_phase < to_unsigned(4, 6) then
-              v_level := "01";  -- one cell deeper at sharp peak
-            else
-              v_level := "00";
+            v_h_edge := '0';
+            v_v_edge := '0';
+            if data_in.hsync_n = '0' and prev_hsync_n = '1' then v_h_edge := '1'; end if;
+            if data_in.vsync_n = '0' and prev_vsync_n = '1' then v_v_edge := '1'; end if;
+            r_hedge <= v_h_edge;
+            if v_v_edge = '1' then
+                field_tgl <= not field_tgl;
             end if;
-          end if;
+
+            -- X lattice
+            if v_h_edge = '1' then
+                if x_idx > to_unsigned(4, 8) then
+                    n_cols <= resize(x_idx, 9) + 1;
+                end if;
+                x_loc <= (others => '0');
+                x_idx <= (others => '0');
+            elsif data_in.avid = '1' then
+                if x_loc = cellw_m1 then
+                    x_loc <= (others => '0');
+                    if x_idx /= to_unsigned(255, 8) then
+                        x_idx <= x_idx + 1;
+                    end if;
+                else
+                    x_loc <= x_loc + 1;
+                end if;
+            end if;
+
+            -- Y lattice, anchored to the first active line of the field.
+            -- Rows are COUNTED during active video and latched at the v edge
+            -- (never derived from the line counter at vsync -- height trap).
+            if v_v_edge = '1' then
+                if celly_idx > to_unsigned(4, 8) then
+                    n_rows <= resize(celly_idx, 9) + 1;
+                end if;
+                celly_loc <= (others => '0');
+                celly_idx <= (others => '0');
+                frame_act <= '0';
+                band      <= (others => '0');
+                bacc      <= resize(skystep_q, 15);
+                fcnt      <= fcnt + 1;
+                s_fprev   <= data_in.field_n;
+                s_ilace   <= data_in.field_n xor s_fprev;
+
+                -- latch controls once per field
+                lk1  <= unsigned(registers_in(0));
+                lk2  <= unsigned(registers_in(1));
+                lk3  <= unsigned(registers_in(2));
+                lk4  <= unsigned(registers_in(3));
+                lk5  <= unsigned(registers_in(4));
+                lk6  <= unsigned(registers_in(5));
+                lp12 <= unsigned(registers_in(7));
+                s_gulls  <= registers_in(6)(0);
+                s_size8  <= registers_in(6)(1);
+                s_storm  <= registers_in(6)(2);
+                s_night  <= registers_in(6)(3);
+                s_bypass <= registers_in(6)(4);
+            elsif data_in.avid = '1' and frame_act = '0' then
+                frame_act <= '1';
+                celly_loc <= (others => '0');
+                celly_idx <= (others => '0');
+            elsif v_h_edge = '1' and frame_act = '1' then
+                if celly_loc = rowp_m1 then
+                    celly_loc <= (others => '0');
+                    if celly_idx /= to_unsigned(255, 8) then
+                        celly_idx <= celly_idx + 1;
+                        -- vertical sky band advance (skyband/8 per band)
+                        if resize(celly_idx + 1, 15) & "000000" >= bacc
+                           and band /= "111" then
+                            band <= band + 1;
+                            bacc <= bacc + resize(skystep_q, 15);
+                        end if;
+                    end if;
+                else
+                    celly_loc <= celly_loc + 1;
+                end if;
+            end if;
+
+            -- cell pitch 16/8 px (S8); rows halved when interlaced
+            if s_size8 = '1' then
+                cellw_m1 <= to_unsigned(7, 5);
+                if s_ilace = '1' then rowp_m1 <= to_unsigned(3, 5);
+                else                  rowp_m1 <= to_unsigned(7, 5); end if;
+            else
+                cellw_m1 <= to_unsigned(15, 5);
+                if s_ilace = '1' then rowp_m1 <= to_unsigned(7, 5);
+                else                  rowp_m1 <= to_unsigned(15, 5); end if;
+            end if;
         end if;
-      end loop;
+    end process p_position;
 
-      s4_owner    <= v_owner;
-      s4_foam_lvl <= v_level;
-      s4_cell_x   <= s3c_cell_x;
-      s4_cell_y   <= s3c_cell_y;
-    end if;
-  end process p_s4;
+    ----------------------------------------------------------------------------
+    -- Per-frame sequencer: render geometry, gull motion, physics kick.
+    ----------------------------------------------------------------------------
+    p_vseq : process(clk)
+        variable v_ticks : unsigned(5 downto 0);
+        variable v_sunq  : unsigned(11 downto 0);
+        variable v_nq    : unsigned(8 downto 0);
+        variable v_tf    : unsigned(8 downto 0);
+        variable v_rmax  : signed(14 downto 0);
+        variable v_reach : signed(14 downto 0);
+        variable v_swp   : signed(14 downto 0);
+    begin
+        if rising_edge(clk) then
+            if prev_vsync_n = '1' and data_in.vsync_n = '0' then
+                vstep <= (others => '0');
+            end if;
 
-  -- =====================================================================
-  -- S5: color selection from owner + foam_lvl
-  -- =====================================================================
-  p_s5 : process(clk)
-    variable v_y, v_u, v_v : unsigned(9 downto 0);
-    variable v_ocean : t_yuv;
-  begin
-    if rising_edge(clk) then
-      if s4_owner = "11" then
-        v_y := C_SKY(to_integer(s_sky_idx)).y;
-        v_u := C_SKY(to_integer(s_sky_idx)).u;
-        v_v := C_SKY(to_integer(s_sky_idx)).v;
-      else
-        v_ocean := C_OCEAN(to_integer(s4_owner));
-        case s4_foam_lvl is
-          when "11" =>
-            v_y := C_FOAM_WHITE.y;
-            v_u := C_FOAM_WHITE.u;
-            v_v := C_FOAM_WHITE.v;
-          when "10" =>
-            v_y := C_CREST_HIGH.y;
-            v_u := C_CREST_HIGH.u;
-            v_v := C_CREST_HIGH.v;
-          when "01" =>
-            v_y := C_CREST_MID.y;
-            v_u := C_CREST_MID.u;
-            v_v := C_CREST_MID.v;
-          when others =>
-            v_y := v_ocean.y;
-            v_u := v_ocean.u;
-            v_v := v_ocean.v;
-        end case;
-      end if;
+            case to_integer(vstep) is
+                when 0 =>
+                    slb_full <= shift_left(resize(n_rows, 16), 6);
+                    tide_q   <= resize(sshr(signed(resize(lk2, 11))
+                                            - to_signed(512, 11), 1), 10);
+                    -- wash animation clock (~3.4 s cycle: a little slower trigger)
+                    wph <= wph + to_unsigned(20, 12);
+                    -- wph upper half = PAUSE (reach 0, sand fully recovers);
+                    -- lower half = rise then fall.  PEAK depth now correlates to
+                    -- WAVE BEHAVIOUR: taller waves (swell) and more foam (p_inj)
+                    -- send the over-wash further down, with a small tide nudge.
+                    -- min(v_reach, rmax) later clamps the depth at 8 px.
+                    v_tf   := lk2(9 downto 1);          -- tide fraction = lk2/2
+                    if swell > to_signed(0, 12) then v_swp := resize(swell, 15);
+                    else v_swp := (others => '0'); end if;
+                    v_rmax := to_signed(96, 15)
+                              + signed(resize(shift_right(v_tf, 2), 15))   -- tide
+                              + shift_right(v_swp, 1)                       -- taller wave
+                              + signed(resize(shift_right(p_inj, 1), 15));  -- more foam
+                    if wph(11) = '1' then
+                        v_reach := (others => '0');
+                    elsif wph(10) = '0' then
+                        v_reach := signed(resize(shift_right(wph(9 downto 0), 1), 15));
+                    else
+                        v_reach := signed(resize(shift_right(
+                            to_unsigned(1023, 10) - wph(9 downto 0), 1), 15));
+                    end if;
+                    -- wet trail: NEVER ahead of the wash.  During the whole RISE
+                    -- (wph top bits 00) PIN the wet edge to the wash edge, so no
+                    -- wet can open ahead of it even when the wave-driven depth
+                    -- clamp (rmax) dips mid-rise.  Only once the wash starts to
+                    -- RECEDE (01) does the wet edge hold the peak and dry slowly
+                    -- back toward the retreating wash -> wet appears and fades
+                    -- AFTER the wash has been on a pixel.  Keeps drying in PAUSE.
+                    if wph(11) = '0' and wph(10) = '0' then
+                        wwet_reach <= wreach;            -- RISE: no wet ahead
+                    elsif wreach > wwet_reach then
+                        wwet_reach <= wreach;            -- peak catch
+                    elsif wwet_reach > to_signed(2, 15) then
+                        wwet_reach <= wwet_reach - to_signed(2, 15);  -- dry the trail
+                    else
+                        wwet_reach <= (others => '0');
+                    end if;
+                    if v_reach > v_rmax then wreach <= v_rmax;
+                    else wreach <= v_reach; end if;
+                    vstep    <= vstep + 1;
+                when 1 =>
+                    -- sea level at ~58% of screen height
+                    slb_q <= signed(resize(shift_right(slb_full, 1), 15))
+                           + signed(resize(shift_right(slb_full, 4), 15))
+                           + signed(resize(shift_right(slb_full, 5), 15));
+                    vstep <= vstep + 1;
+                when 2 =>
+                    slr_q     <= slb_q - resize(tide_q, 15);
+                    skyband_q <= slb_q - signed(shift_left(resize(n_rows, 15), 4));
+                    if n_rows > to_unsigned(63, 9) then
+                        b_floor <= to_signed(-1008, 12);
+                    else
+                        b_floor <= -signed(shift_left(resize(n_rows, 12), 4));
+                    end if;
+                    -- gentler sand slope => wider exposed beach (the wash + wet
+                    -- span more of the screen); also gentles wave shoaling a bit
+                    if s_size8 = '1' then
+                        slope_c <= to_signed(5, 12);
+                    else
+                        slope_c <= to_signed(8, 12);
+                    end if;
+                    skystep_q <= unsigned(skyband_q(14 downto 3));
+                    -- Wash reaches the SCREEN MIDPOINT (ncols/2), resolution-
+                    -- independent, +/- a tide swing (higher tide -> a bit wider).
+                    -- The per-column cap = (w_edge - x)*128 rounds the far tip.
+                    w_edge <= signed(resize(shift_right(n_cols, 1), 10))
+                              + resize(shift_right(tide_q, 4), 10);
+                    chopj <= lk4(9 downto 4);
+                    -- palette rides the sun: Night switch pins the night set;
+                    -- in Day the palette follows P12 down through sunset
+                    if s_night = '1' then
+                        pal_sel <= "11";
+                    elsif lp12 > to_unsigned(640, 10) then
+                        pal_sel <= "00";
+                    elsif lp12 > to_unsigned(320, 10) then
+                        pal_sel <= "01";
+                    else
+                        pal_sel <= "10";
+                    end if;
+                    vstep <= vstep + 1;
+                when 3 =>
+                    ncols_m1 <= resize(n_cols - 1, 8);
+                    -- quantize the width so per-field +-1/2 jitter on n_cols
+                    -- (HW active-pixel-count noise) can't wobble the sun's x
+                    v_nq := n_cols and to_unsigned(508, 9);   -- mask low 2 bits
+                    sun_x0 <= resize(v_nq - shift_right(v_nq, 2) - 4, 8);
+                    -- P12 is the sun/moon elevation: slider up = high in the
+                    -- sky, slider down = sinking into the sea
+                    v_sunq := sun_q_f;
+                    sun_cell <= resize(v_sunq(11 downto 6), 8);
+                    sun_q15  <= signed(resize(v_sunq, 15));
+                    sunw     <= SUNG_ROM(to_integer(s_night & lp12(9 downto 6)));
+                    vstep    <= vstep + 1;
+                when 4 =>
+                    -- horizon = the SKY/OCEAN line (skyband_q).  The sun sets
+                    -- BEHIND the ocean strip: mirrored disc while fully above
+                    -- the line, sun-wide streak while straddling it, nothing
+                    -- once fully behind
+                    -- mirrored disc stays WHOLE until the sun's bottom is
+                    -- one line past the horizon; then it blooms into the
+                    -- column, which grows to the full ocean depth (x4 rate)
+                    -- disc stays WHOLE until the sun's bottom is ~2 lines
+                    -- past the horizon, THEN the column forms.  A 320 offset
+                    -- (= real 448 height minus 2 lines) against the plain
+                    -- horizon is identical to 448 vs skyband+128 but adds no
+                    -- extra adder -- stays inside the LC budget.
+                    if sun_q15 + to_signed(320, 15) < skyband_q then
+                        mir_on <= '1';
+                    else
+                        mir_on <= '0';
+                    end if;
+                    if sun_q15 + to_signed(320, 15) >= skyband_q
+                       and sun_q15 + to_signed(64, 15) < skyband_q then
+                        tri_on <= '1';
+                    else
+                        tri_on <= '0';
+                    end if;
+                    stk_len15 <= shift_left(sun_q15 + to_signed(320, 15)
+                                            - skyband_q, 2);
+                    slb2_q  <= shift_left(skyband_q, 1);
+                    sun_y_r <= sunw(29 downto 20);
+                    sun_u_r <= sunw(19 downto 10);
+                    sun_v_r <= sunw(9 downto 0);
 
-      -- Mono switch: drop chroma to neutral
-      if s_mono = '1' then
-        v_u := to_unsigned(512, 10);
-        v_v := to_unsigned(512, 10);
-      end if;
+                    -- gulls: leftward drift at three rates, wrap at 0
+                    if s_gulls = '1' then
+                        if fcnt(0) = '0' then
+                            if gx0 = 0 then
+                                gx0 <= ncols_m1; gcol(0) <= not gcol(0);
+                            else gx0 <= gx0 - 1; end if;
+                        end if;
+                        if fcnt(1 downto 0) = "00" then
+                            if gx1 = ncols_m1 then
+                                gx1 <= (others => '0'); gcol(1) <= not gcol(1);
+                            else gx1 <= gx1 + 1; end if;
+                        end if;
+                        if fcnt(2 downto 0) = "000" then
+                            if gx2 = ncols_m1 then
+                                gx2 <= (others => '0'); gcol(2) <= not gcol(2);
+                            else gx2 <= gx2 + 1; end if;
+                        end if;
+                    end if;
+                    -- gulls ride just above the horizon (geometry-derived)
+                    -- so their reflections land inside the ocean strip
+                    gy0 <= resize(unsigned(skyband_q(11 downto 6)), 8)
+                           - 3 + ("0000000" & fcnt(5));
+                    gy1 <= resize(unsigned(skyband_q(11 downto 6)), 8)
+                           - 6 + ("0000000" & fcnt(6));
+                    gy2 <= resize(unsigned(skyband_q(11 downto 6)), 8) - 9;
+                    -- twice the horizon row: reflected cell = 2*horizon - celly,
+                    -- so the SAME gy0/1/2 targets locate the mirror images too
+                    ghz2 <= resize(unsigned(skyband_q(11 downto 6)) & '0', 8);
+                    -- birds roost when the sky is nearly dark
+                    if lp12 < to_unsigned(96, 10) then
+                        gulls_on <= '0';
+                    else
+                        gulls_on <= s_gulls;
+                    end if;
 
-      s5_y <= v_y;
-      s5_u <= v_u;
-      s5_v <= v_v;
-    end if;
-  end process p_s5;
+                    -- physics rate: K6 zones 1/4x, 1/2x, 1x, 2x
+                    -- physics rate: 4/8/16/32 ticks per field.  The display
+                    -- reads its own snapshot banks, so ticks are free to run
+                    -- beside active video -- the budget is the whole frame
+                    case lk6(9 downto 8) is
+                        when "00"   => v_ticks := "000001";
+                        when "01"   => v_ticks := "000010";
+                        when "10"   => v_ticks := "000011";
+                        when others => v_ticks := "000100";
+                    end case;
+                    fsm_ticks <= v_ticks;
+                    kick_t    <= not kick_t;
+                    vstep <= vstep + 1;
+                when others =>
+                    null;
+            end case;
+        end if;
+    end process p_vseq;
 
-  -- =====================================================================
-  -- S6: pipeline buffer stage (brightness scaling removed when the slider
-  -- was repurposed for Chaos -- the slider is now a vital function).
-  -- =====================================================================
-  p_s6 : process(clk)
-  begin
-    if rising_edge(clk) then
-      s6_y <= s5_y;
-      s6_u <= s5_u;
-      s6_v <= s5_v;
-    end if;
-  end process p_s6;
+    ----------------------------------------------------------------------------
+    -- Physics FSM: runs entirely inside vertical blanking.
+    ----------------------------------------------------------------------------
+    p_fsm : process(clk)
+        variable v_d    : signed(11 downto 0);
+        variable v_dmax : signed(11 downto 0);
+        variable v_un   : signed(11 downto 0);
+        variable v_dep  : signed(11 downto 0);
+        variable v_f    : unsigned(9 downto 0);
+        variable v_m    : unsigned(7 downto 0);
+        variable v_fin  : signed(11 downto 0);
+        variable v_fp   : unsigned(9 downto 0);
+        variable v_i1   : unsigned(9 downto 0);
+        variable v_cy, v_cu, v_cv : signed(10 downto 0);
+        variable v_iw   : signed(6 downto 0);
+        variable v_pa   : unsigned(9 downto 0);
+        variable v_ph11 : unsigned(10 downto 0);
+        variable v_ae   : unsigned(9 downto 0);
+    begin
+        if rising_edge(clk) then
+            fsm_ce <= not fsm_ce;
+            if fsm_ce = '1' then
+            if field_seen /= field_tgl then
+                field_seen <= field_tgl;
+                ticks_run  <= (others => '0');
+            end if;
+            e_we   <= '0';
+            u_we   <= '0';
+            fw_we  <= '0';
+            ed_we  <= '0';
+            fwd_we <= '0';
+            gradA_we <= '0';
 
-  -- =====================================================================
-  -- S7: output mux with bypass
-  -- =====================================================================
-  data_out.y <= pipe(C_LATENCY - 1).y when s_bypass = '1'
-                else std_logic_vector(s6_y);
-  data_out.u <= pipe(C_LATENCY - 1).u when s_bypass = '1'
-                else std_logic_vector(s6_u);
-  data_out.v <= pipe(C_LATENCY - 1).v when s_bypass = '1'
-                else std_logic_vector(s6_v);
+            case fst is
+                when FI =>
+                    fsm_run <= '0';
+                    if kick_seen /= kick_t
+                       and ticks_run < fsm_ticks then
+                        kick_seen  <= kick_t;
+                        fsm_run    <= '1';
+                        ticks_left <= fsm_ticks;
+                        ncf        <= n_cols;
+                        vi         <= (others => '0');
+                        fst        <= CP0;
+                    end if;
 
-  data_out.hsync_n <= pipe(C_LATENCY - 1).hsync_n;
-  data_out.vsync_n <= pipe(C_LATENCY - 1).vsync_n;
-  data_out.field_n <= pipe(C_LATENCY - 1).field_n;
-  data_out.avid    <= pipe(C_LATENCY - 1).avid;
+                ----------------------------------------------------------------
+                -- Copy pass: snapshot live eta/foam/wet into the display banks
+                -- (runs right after vsync, ~3 clocks per column)
+                ----------------------------------------------------------------
+                when CP0 =>
+                    e_ra_f  <= resize(vi, 8);
+                    fw_ra_f <= resize(vi, 8);
+                    fst     <= CP1;
+                when CP1 =>
+                    fst <= CP2;
+                when CP2 =>
+                    ed_we  <= '1';
+                    ed_wa  <= resize(vi, 8);
+                    ed_wd  <= e_rd;
+                    fwd_we <= '1';
+                    fwd_wa <= resize(vi, 8);
+                    fwd_wd <= fw_rd;
+                    if vi = ncf - 1 then
+                        vi  <= (others => '0');
+                        fst <= FP0;
+                    else
+                        vi  <= vi + 1;
+                        fst <= CP0;
+                    end if;
+
+                ----------------------------------------------------------------
+                -- PREP: knob curves, LFSR noise, wave/chop/surge oscillators,
+                -- forced boundary height.  Shared-mult schedule (operands set
+                -- in state N are readable as mp in state N+2):
+                --   FP3: amp*amp_mod  FP5: sin1*amp_eff  FP6: sin2*chop
+                --   FP7: sin3*surge
+                ----------------------------------------------------------------
+                when FP0 =>
+                    t_r    <= lp12(5 downto 2);
+                    p_inc1 <= to_unsigned(2, 5) + ("0" & lk1(9 downto 6));
+                    p_inc3 <= to_unsigned(1, 4) + resize(lk1(9 downto 8), 4);
+                    p_camp <= lk4(9 downto 2);
+                    if s_storm = '1' then
+                        -- Storm: +50% wave energy, hotter foam
+                        v_pa := ("0" & lk5(9 downto 1)) + ("00" & lk5(9 downto 2));
+                        if v_pa > to_unsigned(511, 10) then
+                            v_pa := to_unsigned(511, 10);
+                        end if;
+                        p_amp <= v_pa(8 downto 0);
+                        p_inj <= to_unsigned(160, 8) + ("00" & lk3(9 downto 4));
+                    else
+                        p_amp <= lk5(9 downto 1);
+                        p_inj <= to_unsigned(96, 8) + ("0" & lk3(9 downto 3));
+                    end if;
+                    surge_amp <= ("0" & lk5(9 downto 2)) + to_unsigned(32, 9);
+                    fst       <= FP1;
+                when FP1 =>
+                    lfsr <= lfsr(14 downto 0)
+                            & (lfsr(15) xor lfsr(13) xor lfsr(12) xor lfsr(10));
+                    p_inc2 <= ("0" & p_inc1 & "0") + resize(p_inc1(4 downto 1), 7);
+                    -- wave rate = knob rate + THIS WAVE's rolled period
+                    -- offset (+-8 -> ~2:1 period spread wave to wave) + a
+                    -- per-tick +-1 dither.  Registered ahead of the phase add.
+                    v_iw := signed(resize(p_inc1, 7)) + resize(wave_jit, 7);
+                    if v_iw < to_signed(1, 7) then
+                        v_iw := to_signed(1, 7);
+                    end if;
+                    v_i1 := resize(unsigned(v_iw(5 downto 0)), 10);
+                    if lfsr(0) = '1' then v_i1 := v_i1 + 1; end if;
+                    if lfsr(1) = '1' and v_i1 /= 0 then v_i1 := v_i1 - 1; end if;
+                    inc_j  <= v_i1;
+                    th_mid <= signed(resize(surge_amp(8 downto 1), 12));
+                    fst    <= FP2;
+                when FP2 =>
+                    -- wrap = carry out of the 11-bit add (no compare chain)
+                    v_ph11 := ("0" & ph1) + ("0" & inc_j);
+                    ph1 <= v_ph11(9 downto 0);
+                    if v_ph11(10) = '1' then
+                        wave_new <= '1';
+                    end if;
+                    ph2 <= ph2 + resize(p_inc2, 10);
+                    ph3 <= ph3 + resize(p_inc3, 10);
+                    th_hi <= th_mid + signed(resize(surge_amp(8 downto 2), 12));
+                    fst <= FP3;
+                when FP3 =>
+                    -- each new wave rolls its own height (x0.5..x1.5) and
+                    -- its own period (+-8 on the phase rate)
+                    if wave_new = '1' then
+                        amp_mod  <= to_unsigned(128, 9) + ("0" & lfsr(7 downto 0));
+                        wave_jit <= signed('0' & lfsr(11 downto 8)) - to_signed(8, 5);
+                        wave_new <= '0';
+                    end if;
+                    sin_v1 <= SIN_LUT(to_integer(ph1(9 downto 4)));
+                    fst    <= FP4;
+                when FP4 =>
+                    sin_v2 <= SIN_LUT(to_integer(ph2(9 downto 4)));
+                    ma     <= signed(resize(p_amp, 12));
+                    mb     <= signed(resize(amp_mod, 10));
+                    fst    <= FP5;
+                when FP5 =>
+                    sin_v3 <= SIN_LUT(to_integer(ph3(9 downto 4)));
+                    fst    <= FP6;
+                when FP6 =>
+                    -- mp = amp * amp_mod (Q8 factor)
+                    v_ae := unsigned(mp(17 downto 8));
+                    if v_ae > to_unsigned(511, 10) then
+                        v_ae := to_unsigned(511, 10);
+                    end if;
+                    ma  <= resize(sin_v1, 12);
+                    mb  <= signed(resize(v_ae, 10));
+                    fst <= FP7;
+                when FP7 =>
+                    ma  <= resize(sin_v2, 12);
+                    mb  <= signed(resize(p_camp, 10));
+                    fst <= FP8;
+                when FP8 =>
+                    swell_a <= resize(shift_right(mp, 7), 12);   -- wave component
+                    ma      <= resize(sin_v3, 12);
+                    mb      <= signed(resize(surge_amp, 10));
+                    fst     <= FP9;
+                when FP9 =>
+                    chop_v <= resize(shift_right(mp, 9), 12);
+                    fst    <= FP10;
+                when FP10 =>
+                    -- surge level 0..surge_amp (half-offset sine)
+                    surge_off <= resize(shift_right(mp, 8), 12)
+                                 + signed(resize(surge_amp(8 downto 1), 12));
+                    fst <= FP11;
+                when FP11 =>
+                    -- swell too big -> waves lower: damp the wave component
+                    -- through the top half of the surge cycle (thresholds
+                    -- pre-registered in FP1/FP2)
+                    if surge_off > th_hi then
+                        swell_a <= swell_a - shift_right(swell_a, 2);
+                    end if;
+                    fst <= FP12;
+                when FP12 =>
+                    swell <= swell_a + chop_v + surge_off;
+                    fst   <= FD0;
+
+                ----------------------------------------------------------------
+                -- Sunset colour engine.  Sky hi/lo lerp between P12 keyframes
+                -- k and k+1 with t = P12(5:2); ocean deep scaled by dscale.
+                -- Operands set in state N are harvested in state N+2.
+                ----------------------------------------------------------------
+                when FD0 =>
+                    skyg_addr <= s_night & "00" & lp12(9 downto 6);
+                    fst <= FD1;
+                when FD1 =>
+                    sga_hi <= SKYG_ROM(to_integer(skyg_addr));
+                    if lp12(9 downto 6) = "1111" then
+                        skyg_addr <= s_night & "00" & "1111";
+                    else
+                        skyg_addr <= s_night & "00" & (lp12(9 downto 6) + 1);
+                    end if;
+                    fst <= FD2;
+                when FD2 =>
+                    sgb_hi    <= SKYG_ROM(to_integer(skyg_addr));
+                    skyg_addr <= s_night & "01" & lp12(9 downto 6);
+                    fst <= FD3;
+                when FD3 =>
+                    sga_lo <= SKYG_ROM(to_integer(skyg_addr));
+                    if lp12(9 downto 6) = "1111" then
+                        skyg_addr <= s_night & "01" & "1111";
+                    else
+                        skyg_addr <= s_night & "01" & (lp12(9 downto 6) + 1);
+                    end if;
+                    fst <= FD4;
+                -- shared-multiplier latency is ONE fsm-state: operands set in
+                -- state N give a valid mp in state N+1 (we overwrite ma every
+                -- state, so the read must be exactly one state after the set,
+                -- NOT two -- reading two states later picks up the NEXT
+                -- channel's product, which underflowed Y to white at night).
+                when FD4 =>
+                    sgb_lo <= SKYG_ROM(to_integer(skyg_addr));
+                    ma <= resize(signed('0' & sgb_hi(29 downto 20))
+                                 - signed('0' & sga_hi(29 downto 20)), 12);
+                    mb <= signed(resize(t_r, 10));
+                    fst <= FD5;
+                when FD5 =>
+                    skyhi_y <= std_logic_vector(resize(unsigned(
+                        signed('0' & sga_hi(29 downto 20)) + resize(shift_right(mp, 4), 11)), 10));
+                    ma <= resize(signed('0' & sgb_hi(19 downto 10))
+                                 - signed('0' & sga_hi(19 downto 10)), 12);
+                    fst <= FD6;
+                when FD6 =>
+                    skyhi_u <= std_logic_vector(resize(unsigned(
+                        signed('0' & sga_hi(19 downto 10)) + resize(shift_right(mp, 4), 11)), 10));
+                    ma <= resize(signed('0' & sgb_hi(9 downto 0))
+                                 - signed('0' & sga_hi(9 downto 0)), 12);
+                    fst <= FD7;
+                when FD7 =>
+                    skyhi_v <= std_logic_vector(resize(unsigned(
+                        signed('0' & sga_hi(9 downto 0)) + resize(shift_right(mp, 4), 11)), 10));
+                    ma <= resize(signed('0' & sgb_lo(29 downto 20))
+                                 - signed('0' & sga_lo(29 downto 20)), 12);
+                    fst <= FD8;
+                when FD8 =>
+                    skylo_y <= std_logic_vector(resize(unsigned(
+                        signed('0' & sga_lo(29 downto 20)) + resize(shift_right(mp, 4), 11)), 10));
+                    ma <= resize(signed('0' & sgb_lo(19 downto 10))
+                                 - signed('0' & sga_lo(19 downto 10)), 12);
+                    fst <= FD9;
+                when FD9 =>
+                    skylo_u <= std_logic_vector(resize(unsigned(
+                        signed('0' & sga_lo(19 downto 10)) + resize(shift_right(mp, 4), 11)), 10));
+                    ma <= resize(signed('0' & sgb_lo(9 downto 0))
+                                 - signed('0' & sga_lo(9 downto 0)), 12);
+                    fst <= FD10;
+                when FD10 =>
+                    skylo_v <= std_logic_vector(resize(unsigned(
+                        signed('0' & sga_lo(9 downto 0)) + resize(shift_right(mp, 4), 11)), 10));
+                    fst <= FD11;
+                when FD11 =>
+                    skyg_addr <= s_night & "10" & lp12(9 downto 6);
+                    fst <= FDG0;
+
+                ----------------------------------------------------------------
+                -- Horizon-glow lerp, then 8 vertical sky bands from sky-top
+                -- to glow by pure incremental adds (no multiplies)
+                ----------------------------------------------------------------
+                when FDG0 =>
+                    ga_g <= SKYG_ROM(to_integer(skyg_addr));
+                    if lp12(9 downto 6) = "1111" then
+                        skyg_addr <= s_night & "10" & "1111";
+                    else
+                        skyg_addr <= s_night & "10" & (lp12(9 downto 6) + 1);
+                    end if;
+                    fst <= FDG1;
+                when FDG1 =>
+                    gb_g <= SKYG_ROM(to_integer(skyg_addr));
+                    fst  <= FDG2;
+                when FDG2 =>
+                    ma <= resize(signed('0' & gb_g(29 downto 20))
+                                 - signed('0' & ga_g(29 downto 20)), 12);
+                    fst <= FDG3;
+                when FDG3 =>
+                    glow_y <= std_logic_vector(resize(unsigned(
+                        signed('0' & ga_g(29 downto 20)) + resize(shift_right(mp, 4), 11)), 10));
+                    ma <= resize(signed('0' & gb_g(19 downto 10))
+                                 - signed('0' & ga_g(19 downto 10)), 12);
+                    fst <= FDG4;
+                when FDG4 =>
+                    glow_u <= std_logic_vector(resize(unsigned(
+                        signed('0' & ga_g(19 downto 10)) + resize(shift_right(mp, 4), 11)), 10));
+                    ma <= resize(signed('0' & gb_g(9 downto 0))
+                                 - signed('0' & ga_g(9 downto 0)), 12);
+                    fst <= FDG5;
+                when FDG5 =>
+                    glow_v <= std_logic_vector(resize(unsigned(
+                        signed('0' & ga_g(9 downto 0)) + resize(shift_right(mp, 4), 11)), 10));
+                    fst <= FG0;
+                when FDG6 =>
+                    fst <= FG0;
+                when FG0 =>
+                    gd_y <= shift_right(signed('0' & glow_y)
+                                        - signed('0' & skyhi_y), 3);
+                    gd_u <= shift_right(signed('0' & glow_u)
+                                        - signed('0' & skyhi_u), 3);
+                    gd_v <= shift_right(signed('0' & glow_v)
+                                        - signed('0' & skyhi_v), 3);
+                    ay_a <= signed('0' & skyhi_y);
+                    au_a <= signed('0' & skyhi_u);
+                    av_a <= signed('0' & skyhi_v);
+                    gk   <= (others => '0');
+                    fst  <= FG1;
+                when FG1 =>
+                    -- clamp accumulators: floor-rounded negative deltas can
+                    -- walk a near-black band below zero, and the unsigned
+                    -- slice would wrap to WHITE (night-sky bug)
+                    v_cy := ay_a; if v_cy < 0 then v_cy := (others => '0'); end if;
+                    v_cu := au_a; if v_cu < 0 then v_cu := (others => '0'); end if;
+                    v_cv := av_a; if v_cv < 0 then v_cv := (others => '0'); end if;
+                    gradA_we <= '1';
+                    grad_wa  <= gk;
+                    gradA_wd <= std_logic_vector(v_cy(9 downto 0))
+                                & std_logic_vector(v_cu(9 downto 4));
+                    gradB_wd <= std_logic_vector(v_cu(3 downto 0))
+                                & std_logic_vector(v_cv(9 downto 0)) & "00";
+                    ay_a <= ay_a + gd_y;
+                    au_a <= au_a + gd_u;
+                    av_a <= av_a + gd_v;
+                    if gk = "111" then
+                        fst <= FE0;
+                    else
+                        gk  <= gk + 1;
+                        fst <= FG1;
+                    end if;
+                when FE0 =>
+                    -- span/2 keeps ma inside the 12-bit mult input even in 8px
+                    -- modes (skyband ~2x larger); mb = (1023-P12)/2 fits the
+                    -- 10-bit input; the /4 vs the old /2 is recovered by the
+                    -- one-bit-smaller shift in FE2 -- 16px result unchanged
+                    ma <= resize(shift_right(skyband_q + to_signed(448, 15), 1), 12);
+                    mb <= signed(resize(shift_right(to_unsigned(1023, 10) - lp12, 1), 10));
+                    fst <= FE1;
+                when FE1 =>
+                    fst <= FE2;
+                when FE2 =>
+                    sun_q_f <= to_unsigned(64, 12)
+                               + resize(unsigned(mp(19 downto 8)), 12);
+                    fst <= FVL0;
+                ----------------------------------------------------------------
+                -- V pass: velocity update, interfaces 0 .. ncf-2
+                ----------------------------------------------------------------
+                when FVL0 =>
+                    e_ra_f  <= (others => '0');
+                    vi      <= (others => '0');
+                    b_raw   <= C_B0;
+                    b_eff_i <= C_B0 - resize(tide_q, 12);
+                    fst     <= FVL1;
+                when FVL1 =>
+                    fst <= FVL2;
+                when FVL2 =>
+                    eta_i <= resize(signed(e_rd(11 downto 0)), 12);
+                    fst   <= FV0;
+
+                when FV0 =>
+                    e_ra_f <= resize(vi + 1, 8);
+                    u_ra_f <= resize(vi, 8);
+                    if b_raw - slope_c < b_floor then
+                        b_nx_raw <= b_floor;
+                    else
+                        b_nx_raw <= b_raw - slope_c;
+                    end if;
+                    fst <= FV1;
+                when FV1 =>
+                    b_eff_ip1 <= b_nx_raw - resize(tide_q, 12);
+                    fst       <= FV2;
+                when FV2 =>
+                    eta_ip1 <= resize(signed(e_rd(11 downto 0)), 12);
+                    u_i     <= resize(signed(u_rd(11 downto 0)), 12);
+                    v_d := eta_i - b_eff_i;
+                    if v_d < 0 then v_d := (others => '0'); end if;
+                    if v_d > C_DCLAMP then v_d := C_DCLAMP; end if;
+                    d_i <= v_d;
+                    fst <= FV3;
+                when FV3 =>
+                    v_d := eta_ip1 - b_eff_ip1;
+                    if v_d < 0 then v_d := (others => '0'); end if;
+                    if v_d > C_DCLAMP then v_d := C_DCLAMP; end if;
+                    d_ip1 <= v_d;
+                    de_r  <= eta_i - eta_ip1;
+                    fst   <= FV4;
+                when FV4 =>
+                    -- split the deep cone: register the two shifted terms, add
+                    -- them next state (each sshr is its own negate/shift chain)
+                    -- friction and gravity MUST use symmetric shifts: floor
+                    -- shifts never damp small positive u (shift_right(+u,n)=0
+                    -- for u < 2^n) while always nudging negative u -- a
+                    -- constant energy pump that blew the sim up (v3.4 bug)
+                    if d_i > d_ip1 then v_dmax := d_i; else v_dmax := d_ip1; end if;
+                    grav_r <= sshr(de_r, 3);
+                    if v_dmax < to_signed(128, 12) then
+                        fric_r <= sshr(u_i, 7);
+                    else
+                        fric_r <= sshr(u_i, 7);
+                    end if;
+                    fst <= FV5;
+                when FV5 =>
+                    un_r <= u_i + grav_r - fric_r;
+                    fst  <= FV6;
+                when FV6 =>
+                    v_un := un_r;
+                    if v_un > C_UCLAMP then v_un := C_UCLAMP; end if;
+                    if v_un < -C_UCLAMP then v_un := -C_UCLAMP; end if;
+                    if d_i = 0 and d_ip1 = 0 then
+                        v_un := (others => '0');
+                    end if;
+                    u_we <= '1';
+                    u_wa <= resize(vi, 8);
+                    u_wd <= std_logic_vector(resize(v_un, 16));
+
+                    eta_i   <= eta_ip1;
+                    b_raw   <= b_nx_raw;
+                    b_eff_i <= b_eff_ip1;
+                    if vi = ncf - 2 then
+                        fst <= FFL0;
+                    else
+                        vi  <= vi + 1;
+                        fst <= FV0;
+                    end if;
+
+                ----------------------------------------------------------------
+                -- F pass: conservative flux + diffusion + foam/wet,
+                -- finalizes columns 0 .. ncf-2 (ncf-1 is the forced boundary)
+                ----------------------------------------------------------------
+                when FFL0 =>
+                    e_ra_f   <= (others => '0');
+                    fw_ra_f  <= (others => '0');
+                    vi       <= (others => '0');
+                    b_raw    <= C_B0;
+                    b_eff_i  <= C_B0 - resize(tide_q, 12);
+                    qf_prev  <= (others => '0');
+                    df_prev  <= (others => '0');
+                    sub_next <= (others => '0');
+                    add_next <= (others => '0');
+                    fst      <= FFL1;
+                when FFL1 =>
+                    fst <= FFL2;
+                when FFL2 =>
+                    eta_pend  <= resize(signed(e_rd(11 downto 0)), 12);
+                    foam_pend <= "0" & unsigned(fw_rd(15 downto 8));
+                    wet_pend  <= unsigned(fw_rd(7 downto 0));
+                    fst       <= FF0;
+
+                when FF0 =>
+                    e_ra_f  <= resize(vi + 1, 8);
+                    fw_ra_f <= resize(vi + 1, 8);
+                    u_ra_f  <= resize(vi, 8);
+                    if b_raw - slope_c < b_floor then
+                        b_nx_raw <= b_floor;
+                    else
+                        b_nx_raw <= b_raw - slope_c;
+                    end if;
+                    fst <= FF1;
+                when FF1 =>
+                    b_eff_ip1 <= b_nx_raw - resize(tide_q, 12);
+                    fst       <= FF2;
+                when FF2 =>
+                    eta_ip1 <= resize(signed(e_rd(11 downto 0)), 12);
+                    u_i     <= resize(signed(u_rd(11 downto 0)), 12);
+                    fw_jp1  <= fw_rd;
+                    v_d := eta_pend - b_eff_i;
+                    if v_d < 0 then v_d := (others => '0'); end if;
+                    if v_d > C_DCLAMP then v_d := C_DCLAMP; end if;
+                    d_i <= v_d;
+                    fst <= FF3;
+                when FF3 =>
+                    v_d := eta_ip1 - b_eff_ip1;
+                    if v_d < 0 then v_d := (others => '0'); end if;
+                    if v_d > C_DCLAMP then v_d := C_DCLAMP; end if;
+                    d_ip1   <= v_d;
+                    slope_w <= eta_ip1 - eta_pend;
+                    neg_sl  <= eta_pend - eta_ip1;
+                    fst     <= FF4;
+                when FF4 =>
+                    if u_i(11) = '1' then v_dep := d_ip1; else v_dep := d_i; end if;
+                    ma   <= u_i;
+                    mb   <= signed(resize(unsigned(v_dep(9 downto 4)), 10));
+                    df_j <= sshr(neg_sl, 5);
+                    -- breaking starts sooner: deeper trigger zone, gentler
+                    -- slope and speed thresholds than v3.0
+                    if d_i > 0 and d_i < to_signed(512, 12)
+                       and slope_w > to_signed(8, 12)
+                       and u_i < to_signed(-6, 12) then
+                        brk_r <= '1';
+                    else
+                        brk_r <= '0';
+                    end if;
+                    -- whitecap: any steep advancing front seeds a little foam
+                    -- regardless of depth, so the whole wave top carries bits
+                    if slope_w > to_signed(24, 12)
+                       and u_i < to_signed(-6, 12) then
+                        cap_r <= '1';
+                    else
+                        cap_r <= '0';
+                    end if;
+                    fst <= FF5;
+                when FF5 =>
+                    -- foam: inject on break, exchange with the right neighbour
+                    v_f := resize(foam_pend, 10) + resize(add_next, 10);
+                    if brk_r = '1' then
+                        v_f := v_f + resize(p_inj, 10);
+                    elsif cap_r = '1' then
+                        v_f := v_f + resize(p_inj(7 downto 2), 10);
+                    end if;
+                    add_next <= (others => '0');
+                    sub_next <= (others => '0');
+                    if u_i < to_signed(-32, 12) then
+                        -- leftward flow drags the neighbour's foam onto us
+                        v_m := "00" & unsigned(fw_jp1(15 downto 10));
+                        v_f := v_f + resize(v_m, 10);
+                        sub_next <= v_m;
+                    elsif u_i > to_signed(32, 12) then
+                        -- rightward flow carries our foam away
+                        v_m := resize(shift_right(v_f, 2), 8);
+                        v_f := v_f - resize(v_m, 10);
+                        add_next <= v_m;
+                    end if;
+                    if v_f > to_unsigned(255, 10) then
+                        v_f := to_unsigned(255, 10);
+                    end if;
+                    foam_adj <= resize(v_f, 9);
+                    fst      <= FF6;
+                when FF6 =>
+                    -- pre-sum the terms that are already registered so FF7 is
+                    -- only two adders deep (this cone was the HD critical path)
+                    qf_j_r <= resize(sshr(mp, 5), 12);
+                    sum_a  <= eta_pend + qf_prev;
+                    sum_b  <= df_prev - df_j;
+                    fst    <= FF7;
+                when FF7 =>
+                    efin_r <= sum_a + sum_b - qf_j_r;
+                    fst    <= FF8;
+                when FF8 =>
+                    v_fin := efin_r;
+                    if v_fin > to_signed(1023, 12) then v_fin := to_signed(1023, 12); end if;
+                    if v_fin < to_signed(-1023, 12) then v_fin := to_signed(-1023, 12); end if;
+                    e_we <= '1';
+                    e_wa <= resize(vi, 8);
+                    e_wd <= std_logic_vector(resize(v_fin, 16));
+
+                    -- foam decay only on the field's LAST tick so the foam's
+                    -- visual wash-away rate is independent of K6 tick rate
+                    if ticks_left = to_unsigned(1, 6) then
+                        v_fp := resize(foam_adj, 10)
+                              - resize(foam_adj(8 downto 6), 10);
+                        if v_fp /= 0 then
+                            v_fp := v_fp - 1;
+                        end if;
+                    else
+                        v_fp := resize(foam_adj, 10);
+                        if v_fp > to_unsigned(255, 10) then
+                            v_fp := to_unsigned(255, 10);
+                        end if;
+                    end if;
+                    -- wetness: even a thin swash soaks the sand, then it dries
+                    -- slowly (1/tick ~ 4 s to fully dry) through the darker
+                    -- crash-mark browns
+                    fw_we <= '1';
+                    fw_wa <= resize(vi, 8);
+                    fw_wd <= std_logic_vector(v_fp(7 downto 0)) & x"00";
+
+                    -- advance chains
+                    eta_pend <= eta_ip1;
+                    if unsigned(fw_jp1(15 downto 8)) > resize(sub_next, 8) then
+                        foam_pend <= resize(unsigned(fw_jp1(15 downto 8)) - sub_next, 9);
+                    else
+                        foam_pend <= (others => '0');
+                    end if;
+                    wet_pend <= unsigned(fw_jp1(7 downto 0));
+                    qf_prev  <= qf_j_r;
+                    df_prev  <= df_j;
+                    b_raw    <= b_nx_raw;
+                    b_eff_i  <= b_eff_ip1;
+                    if vi = ncf - 2 then
+                        fst <= FB0;
+                    else
+                        vi  <= vi + 1;
+                        fst <= FF0;
+                    end if;
+
+                ----------------------------------------------------------------
+                -- Boundary: force the deep-water swell at the right edge
+                ----------------------------------------------------------------
+                when FB0 =>
+                    e_we  <= '1';
+                    e_wa  <= resize(ncf - 1, 8);
+                    e_wd  <= std_logic_vector(resize(swell, 16));
+                    fw_we <= '1';
+                    fw_wa <= resize(ncf - 1, 8);
+                    fw_wd <= x"00FF";
+                    fst   <= FB1;
+                when FB1 =>
+                    ticks_run <= ticks_run + 1;
+                    if ticks_left > 1
+                       and (ticks_run + 1) < fsm_ticks then
+                        ticks_left <= ticks_left - 1;
+                        fst        <= FP1;
+                    else
+                        fst <= FI;
+                    end if;
+            end case;
+            end if;  -- fsm_ce
+        end if;
+    end process p_fsm;
+
+    ----------------------------------------------------------------------------
+    -- Shared multiplier (registered in and out)
+    ----------------------------------------------------------------------------
+    p_mult : process(clk)
+    begin
+        if rising_edge(clk) then
+            mp <= ma * mb;
+        end if;
+    end process p_mult;
+
+    ----------------------------------------------------------------------------
+    -- State BRAMs: canonical 1W1R, read address muxed FSM/display.
+    ----------------------------------------------------------------------------
+    p_eta_mem : process(clk)
+    begin
+        if rising_edge(clk) then
+            e_rd <= eta_mem(to_integer(e_ra_f));
+            if e_we = '1' then
+                eta_mem(to_integer(e_wa)) <= e_wd;
+            end if;
+        end if;
+    end process p_eta_mem;
+
+    p_u_mem : process(clk)
+    begin
+        if rising_edge(clk) then
+            u_rd <= u_mem(to_integer(u_ra_f));
+            if u_we = '1' then
+                u_mem(to_integer(u_wa)) <= u_wd;
+            end if;
+        end if;
+    end process p_u_mem;
+
+    p_fw_mem : process(clk)
+    begin
+        if rising_edge(clk) then
+            fw_rd <= fw_mem(to_integer(fw_ra_f));
+            if fw_we = '1' then
+                fw_mem(to_integer(fw_wa)) <= fw_wd;
+            end if;
+        end if;
+    end process p_fw_mem;
+
+    -- vertical sky gradient (8 bands, written per frame by FG states)
+    p_gradA : process(clk)
+    begin
+        if rising_edge(clk) then
+            gA_rd <= gradA_mem(to_integer(band));
+            if gradA_we = '1' then
+                gradA_mem(to_integer(grad_wa)) <= gradA_wd;
+            end if;
+        end if;
+    end process p_gradA;
+
+    p_gradB : process(clk)
+    begin
+        if rising_edge(clk) then
+            gB_rd <= gradB_mem(to_integer(band));
+            if gradA_we = '1' then
+                gradB_mem(to_integer(grad_wa)) <= gradB_wd;
+            end if;
+        end if;
+    end process p_gradB;
+
+    -- display snapshot banks (write = FSM copy pass, read = display only)
+    p_eta_dsp : process(clk)
+    begin
+        if rising_edge(clk) then
+            e_rd_d <= eta_dsp(to_integer(e_ra_d));
+            if ed_we = '1' then
+                eta_dsp(to_integer(ed_wa)) <= ed_wd;
+            end if;
+        end if;
+    end process p_eta_dsp;
+
+    p_fw_dsp : process(clk)
+    begin
+        if rising_edge(clk) then
+            fw_rd_d <= fw_dsp(to_integer(fw_ra_d));
+            if fwd_we = '1' then
+                fw_dsp(to_integer(fwd_wa)) <= fwd_wd;
+            end if;
+        end if;
+    end process p_fw_dsp;
+
+    ----------------------------------------------------------------------------
+    -- Display prefetch: cell 0 loaded in the back porch; then, while cell k is
+    -- on screen, cell k+1 is fetched into the staging regs (issue at x_loc 1,
+    -- latch at 4, promote at the cell boundary).  b runs along the sweep.
+    ----------------------------------------------------------------------------
+    p_disp : process(clk)
+        variable v_dc  : signed(14 downto 0);
+        variable v_bot : signed(14 downto 0);
+        variable v_wr, v_cap : signed(14 downto 0);
+        variable v_jit : signed(7 downto 0);
+        variable v_h2  : unsigned(1 downto 0);
+        variable v_hs  : unsigned(3 downto 0);
+        variable v_cyc : unsigned(6 downto 0);
+        variable v_dy  : unsigned(2 downto 0);
+        variable v_drow : signed(14 downto 0);
+        variable v_sn  : signed(14 downto 0);
+    begin
+        if rising_edge(clk) then
+            if r_hedge = '1' then
+                pf_cnt  <= (others => '0');
+                e_ra_d  <= (others => '0');
+                fw_ra_d <= (others => '0');
+            elsif pf_cnt /= "111" then
+                pf_cnt <= pf_cnt + 1;
+            end if;
+
+            case to_integer(pf_cnt) is
+                when 2 =>
+                    eta_cur  <= resize(signed(e_rd_d(11 downto 0)), 12);
+                    foam_cur <= unsigned(fw_rd_d(15 downto 8));
+                    wet_cur  <= unsigned(fw_rd_d(7 downto 0));
+                    b_cur    <= C_B0;
+                when 4 =>
+                    -- derived geometry for cell 0 (no jitter on the sand edge)
+                    surf_q   <= slr_q - resize(eta_cur, 15);
+                    off_b    <= (others => '0');
+                    off_c    <= (others => '0');
+                    drop_on  <= '0';
+                    -- cell 0 is far from the wash edge: full reach (else it
+                    -- carries the previous line's rightmost/submerged value and
+                    -- the leftmost column loses its wash/foam)
+                    wreach_q <= wreach;
+                    bot_q    <= slb_q - resize(b_cur, 15);
+                    v_dc := resize(eta_cur, 15) + resize(tide_q, 15)
+                            - resize(b_cur, 15);
+                    if v_dc > to_signed(16, 15) then wat_c <= '1';
+                    else wat_c <= '0'; end if;
+                when others =>
+                    null;
+            end case;
+
+            if data_in.avid = '1' then
+                if x_loc = to_unsigned(1, 5) then
+                    -- fetch the next cell while this one is on screen
+                    if x_idx >= ncols_m1 then
+                        e_ra_d  <= ncols_m1;
+                        fw_ra_d <= ncols_m1;
+                    else
+                        e_ra_d  <= x_idx + 1;
+                        fw_ra_d <= x_idx + 1;
+                    end if;
+                elsif x_loc = to_unsigned(4, 5) then
+                    eta_nxt  <= resize(signed(e_rd_d(11 downto 0)), 12);
+                    foam_nxt <= unsigned(fw_rd_d(15 downto 8));
+                    wet_nxt  <= unsigned(fw_rd_d(7 downto 0));
+                    if b_cur - slope_c < b_floor then
+                        b_nxt <= b_floor;
+                    else
+                        b_nxt <= b_cur - slope_c;
+                    end if;
+                elsif x_loc = cellw_m1 then
+                    -- entering the next cell: promote staged state, derive
+                    eta_cur  <= eta_nxt;
+                    foam_cur <= foam_nxt;
+                    wet_cur  <= wet_nxt;
+                    b_cur    <= b_nxt;
+
+                    v_h2 := x_idx(1 downto 0) xor fcnt(6 downto 5);
+                    case v_h2 is
+                        when "00"   => v_jit := signed(resize(chopj, 8));
+                        when "10"   => v_jit := -signed(resize(chopj, 8));
+                        when "11"   => v_jit := signed(resize(chopj(5 downto 1), 8));
+                        when others => v_jit := (others => '0');
+                    end case;
+
+                    -- band-boundary undulation: drifting sine offsets with
+                    -- different spatial phases, so the MID and DEEP layers
+                    -- roll organically and sometimes crest ABOVE the bands in
+                    -- front of them
+                    surf_q  <= slr_q - resize(eta_nxt, 15) + resize(v_jit, 15);
+                    off_b   <= OFB1_ROM(to_integer(x_idx(3 downto 0)
+                                                   + fcnt(7 downto 4)));
+                    off_c   <= OFB1_ROM(to_integer(
+                                   x_idx(3 downto 0) + 5 + fcnt(8 downto 5)));
+                    bot_q   <= slb_q - resize(b_nxt, 15);
+                    -- sine-shaped, left-crawling leading edge along the diagonal
+                    -- ONE undulating, height-tapered leading edge shared by the
+                    -- wash (current reach) AND the wet band (receding peak), so
+                    -- the sand is wet exactly where the water was, with the same
+                    -- sine wiggle -- and both taper to a rounded point at the
+                    -- waterline (cap = 16*height-above-waterline).
+                    v_sn := resize(SIN_LUT(to_integer(x_idx(5 downto 0)
+                                                      + wph(9 downto 4))), 15);
+                    -- distance (in columns) left of the wash edge, *128 -> the
+                    -- reach is full until the last ~4 columns, then tapers to 0
+                    v_cap := shift_left(resize(w_edge
+                                 - signed(resize(x_idx, 10)), 15), 7);
+                    v_wr  := wreach + v_sn;
+                    if v_wr < v_cap then wreach_q <= v_wr;
+                    else wreach_q <= v_cap; end if;
+                    v_wr  := wwet_reach + v_sn;      -- wet outer edge, same shape
+                    if v_wr < v_cap then wwet_reach_q <= v_wr;
+                    else wwet_reach_q <= v_cap; end if;
+
+                    -- droplet: every ~2 s each column gets a 16-frame window
+                    -- (staggered by a static column hash); while local foam is
+                    -- high a single foam cell flies the ARC_ROM trajectory
+                    v_hs  := x_idx(3 downto 0) xor x_idx(7 downto 4);
+                    v_cyc := fcnt(6 downto 0) + (v_hs & "000");
+                    v_dy  := ARC_ROM(to_integer(v_cyc(3 downto 0)));
+                    if x_idx(5) = '1' then
+                        v_dy := '0' & v_dy(2 downto 1);   -- some columns hop low
+                    end if;
+                    if v_cyc(6 downto 4) = "000" and v_dy /= 0
+                       and foam_nxt > to_unsigned(100, 8) then
+                        drop_on <= '1';
+                    else
+                        drop_on <= '0';
+                    end if;
+                    v_drow := slr_q - resize(eta_nxt, 15) + resize(v_jit, 15)
+                              - signed(resize(v_dy & "000000", 15));
+                    drop_cell <= unsigned(v_drow(13 downto 6));
+
+                    v_dc := resize(eta_nxt, 15) + resize(tide_q, 15)
+                            - resize(b_nxt, 15);
+                    if v_dc > to_signed(16, 15) then wat_c <= '1';
+                    else wat_c <= '0'; end if;
+                end if;
+            end if;
+        end if;
+    end process p_disp;
+
+    ----------------------------------------------------------------------------
+    -- Pixel pipeline
+    ----------------------------------------------------------------------------
+    p_pix : process(clk)
+        variable v_dy, v_dx : unsigned(7 downto 0);
+        variable v_g        : std_logic;
+        variable v_gw       : std_logic;
+        variable v_gr       : std_logic;
+        variable v_cr       : unsigned(7 downto 0);
+        variable v_dxg      : unsigned(7 downto 0);
+        variable v_idx      : unsigned(3 downto 0);
+        variable v_sky      : std_logic_vector(1 downto 0);
+        variable v_wd       : signed(14 downto 0);
+        variable v_wl       : signed(14 downto 0);
+        variable v_dsurf    : signed(14 downto 0);
+        variable v_rq       : signed(14 downto 0);
+        variable v_dqm      : signed(14 downto 0);
+        variable v_shx      : unsigned(7 downto 0);
+        variable v_dxs      : unsigned(7 downto 0);
+    begin
+        if rising_edge(clk) then
+            ------------------------------------------------------------------
+            -- P1: subtractions + membership flags (inputs are cell-rate regs)
+            ------------------------------------------------------------------
+            row_q <= signed(shift_left(resize(celly_idx, 15), 6));
+            p1_fsand <= not sgn15(row_q - bot_q);
+            -- wash sheet: depth below the sand surface.  wreach_q already goes
+            -- <=0 outside the tide-set extent, so no separate beach gate needed.
+            v_wd := row_q - bot_q;                     -- depth into sand
+            if v_wd >= to_signed(0, 15) and v_wd < wreach_q then
+                p1_uw <= '1';
+            else
+                p1_uw <= '0';
+            end if;
+            -- foamy leading band (up to ~2 px into the wash); broken up in the
+            -- render (p1_lgap) so most of the crest is bare and the foam reads
+            -- as a chaotic mix of short LINES and DOTS, like real swash foam.
+            -- p1_lgap='1' = open (no foam).  Look the column up in the aperiodic
+            -- FOAM_MASK ROM (dots + short runs, no repeating motif); XOR the low
+            -- index bits with the cell row so the pattern shifts as the 2-px
+            -- crest sweeps up/down each wave (liveliness, no global time term ->
+            -- no flashing).
+            p1_lead <= not sgn15(v_wd - wreach_q + to_signed(128, 15));
+            p1_lgap <= not FOAM_MASK(to_integer(
+                           x_idx(5 downto 0) xor resize(celly_idx(1 downto 0), 6)));
+            -- colour bands (DEEP/MID/AQUA/SURF) as clean horizontal stripes
+            if v_wd >= to_signed(384, 15) then p1_band <= "11";
+            else p1_band <= unsigned(v_wd(8 downto 7)); end if;
+            -- wetness = distance below the trailing (wet) edge.  Threshold is
+            -- SMALL (16, ~1/4 cell) so wet appears right behind the wash the
+            -- instant it recedes off a pixel -- no dry gap trailing the wash.
+            -- The rise-pin guarantees wwet_reach_q <= wreach_q while advancing,
+            -- so this can never leak wet ahead of the wash.  (No per-cell hash
+            -- here: it used to force the old +40 margin; the per-column sine on
+            -- wwet_reach_q already keeps the dry-back edge from looking boxy.)
+            v_wl := wwet_reach_q - v_wd;
+            if v_wd >= to_signed(0, 15)
+               and v_wl > to_signed(16, 15) then
+                p1_res <= '1';
+                if v_wl > to_signed(384, 15) then p1_wl <= "10";     -- SANDW
+                else p1_wl <= unsigned(v_wl(8 downto 7)); end if;
+            else
+                p1_res <= '0';
+            end if;
+
+            -- all band flags off ONE row_q-surf_q subtract; the aqua/mid and
+            -- mid/deep boundaries just add their independent per-column offset
+            v_dsurf := row_q - surf_q;
+            p1_b0    <= not sgn15(v_dsurf);
+            p1_b64   <= sgn15(v_dsurf - to_signed(64, 15));
+            p1_b128  <= sgn15(v_dsurf - to_signed(128, 15));
+            p1_ba192 <= sgn15(v_dsurf - resize(off_b, 15) - to_signed(192, 15));
+            p1_bm448 <= sgn15(v_dsurf - resize(off_c, 15) - to_signed(448, 15));
+            p1_b256  <= sgn15(v_dsurf - resize(off_b, 15) - to_signed(256, 15));
+            p1_b512  <= sgn15(v_dsurf - resize(off_c, 15) - to_signed(512, 15));
+
+            -- crest droplet: single cell at drop_cell while airborne
+            if celly_idx = drop_cell and drop_on = '1' then
+                p1_drop <= '1';
+            else
+                p1_drop <= '0';
+            end if;
+
+
+            -- per-layer foam gates: same foam physics, different thresholds,
+            -- gap patterns and drift clocks so no two layers match
+            if foam_cur > to_unsigned(50, 8)
+               and (x_idx(2 downto 1) xor fcnt(6 downto 5)) /= "10" then
+                p1_fM <= '1';
+            else
+                p1_fM <= '0';
+            end if;
+            if foam_cur > to_unsigned(70, 8)
+               and (x_idx(3 downto 2) xor fcnt(8 downto 7)) /= "01" then
+                p1_fD <= '1';
+            else
+                p1_fD <= '0';
+            end if;
+
+            -- side-to-side shimmer for everything reflected on the ocean
+            if (celly_idx(0) xor fcnt(3)) = '1' then
+                if (celly_idx(1) xor fcnt(4)) = '1' then
+                    v_shx := x_idx + 1;
+                else
+                    v_shx := x_idx - 1;
+                end if;
+            else
+                v_shx := x_idx;
+            end if;
+            v_dxs := v_shx - sun_x0;
+
+            -- mirrored sun disc on the flat ocean: reflect the row across
+            -- the horizon and reuse SUN_PAT (vertically symmetric)
+            v_rq  := slb2_q - row_q;
+            v_dqm := v_rq - sun_q15;
+            if mir_on = '1'
+               and v_dqm >= to_signed(0, 15) and v_dqm < to_signed(512, 15)
+               and v_dxs(7 downto 3) = 0
+               and SUN_PAT(63 - to_integer(unsigned(v_dqm(8 downto 6)) & v_dxs(2 downto 0))) = '1' then
+                p1_mir <= '1';
+            else
+                p1_mir <= '0';
+            end if;
+
+
+            -- horizon streak: sun-wide solid column down the ocean strip
+            -- while the sun straddles the sky/ocean line
+            if tri_on = '1'
+               and v_dxs >= to_unsigned(1, 8) and v_dxs <= to_unsigned(6, 8)
+               and sgn15(row_q - skyband_q) = '0'
+               and sgn15(row_q - skyband_q - stk_len15) = '1' then
+                p1_stk <= '1';
+            else
+                p1_stk <= '0';
+            end if;
+            p1_spr   <= not sgn15(v_dsurf + to_signed(64, 15));
+            if row_q >= skyband_q then p1_sky2 <= '1'; else p1_sky2 <= '0'; end if;
+            p1_wat <= wat_c;
+            if foam_cur > to_unsigned(96, 8)  then p1_fhi <= '1'; else p1_fhi <= '0'; end if;
+            if foam_cur > to_unsigned(32, 8)  then p1_fmid <= '1'; else p1_fmid <= '0'; end if;
+            if foam_cur > to_unsigned(120, 8) then p1_fspray <= '1'; else p1_fspray <= '0'; end if;
+            if foam_cur > to_unsigned(12, 8)  then p1_fcrest <= '1'; else p1_fcrest <= '0'; end if;
+
+            -- crest-foam gap: ~1 in 4 columns stays open, drifting over time
+            if (x_idx(1 downto 0) xor fcnt(6 downto 5)) = "11" then
+                p1_gap <= '1';
+            else
+                p1_gap <= '0';
+            end if;
+
+            -- static sand speckle: ~1 in 4 cells takes the second tan
+            p1_sand2 <= (x_idx(1) xor celly_idx(0))
+                        and (x_idx(0) xor celly_idx(2));
+
+            -- sun/moon: 6x6 circle in an 8x8 cell field
+            v_dy := celly_idx - sun_cell;
+            v_dx := x_idx - sun_x0;
+            if v_dy(7 downto 3) = 0 and v_dx(7 downto 3) = 0
+               and SUN_PAT(63 - to_integer(v_dy(2 downto 0) & v_dx(2 downto 0))) = '1' then
+                p1_sun <= '1';
+            else
+                p1_sun <= '0';
+            end if;
+
+            -- gulls: per-bird hits, grouped by each bird's CURRENT plumage.
+            -- The mirror row (v_cr = 2*horizon - celly) reuses the SAME x-hit
+            -- and gy target, so reflections cost only one subtract + 3 compares
+            v_g := '0'; v_gw := '0'; v_gr := '0';
+            v_cr := ghz2 - celly_idx;
+            v_dxg := x_idx - gx0;
+            if v_dxg <= to_unsigned(2, 8)
+               and (v_dxg(0) = '1' or fcnt(4 downto 3) /= "11") then
+                if celly_idx = gy0 then
+                    if gcol(0) = '1' then v_gw := '1'; else v_g := '1'; end if;
+                end if;
+                if v_cr = gy0 then v_gr := '1'; end if;
+            end if;
+            v_dxg := x_idx - gx1;
+            if v_dxg <= to_unsigned(2, 8)
+               and (v_dxg(0) = '1' or fcnt(4 downto 3) /= "01") then
+                if celly_idx = gy1 then
+                    if gcol(1) = '1' then v_gw := '1'; else v_g := '1'; end if;
+                end if;
+                if v_cr = gy1 then v_gr := '1'; end if;
+            end if;
+            v_dxg := x_idx - gx2;
+            if v_dxg <= to_unsigned(2, 8)
+               and (v_dxg(0) = '1' or fcnt(5 downto 4) /= "10") then
+                if celly_idx = gy2 then
+                    if gcol(2) = '1' then v_gw := '1'; else v_g := '1'; end if;
+                end if;
+                if v_cr = gy2 then v_gr := '1'; end if;
+            end if;
+            if gulls_on = '1' then
+                p1_gull <= v_g; p1_gullw <= v_gw; p1_gullr <= v_gr;
+            else
+                p1_gull <= '0'; p1_gullw <= '0'; p1_gullr <= '0';
+            end if;
+
+            -- per-column spray hash, reshuffles a few times a second
+            p1_sprayh <= x_idx(0) xor x_idx(2) xor fcnt(2)
+                         xor (x_idx(1) and fcnt(4));
+
+            ------------------------------------------------------------------
+            -- P2: classify -> palette index
+            ------------------------------------------------------------------
+            if p1_fsand = '1' then
+                if p1_uw = '1' then
+                    if p1_lead = '1' and p1_lgap = '0' then
+                        v_idx := C_I_FOAM;                    -- broken foam edge
+                    else
+                        v_idx := C_I_DEEP - ("00" & p1_band); -- DEEP MID AQUA SURF
+                    end if;
+                elsif p1_res = '1' then
+                    case p1_wl is
+                        when "10"   => v_idx := C_I_SANDW;    -- wettest
+                        when "01"   => v_idx := C_I_SANDM;
+                        when others => v_idx := C_I_SAND2;    -- nearly dry
+                    end case;
+                elsif p1_sand2 = '1' then
+                    v_idx := C_I_SAND2;
+                else
+                    v_idx := C_I_SAND;
+                end if;
+            elsif p1_wat = '1' and p1_b0 = '1' then
+                if p1_b64 = '1' then
+                    if p1_fmid = '1' then
+                        v_idx := C_I_FOAM;
+                    elsif p1_fcrest = '1' and p1_gap = '0' then
+                        v_idx := C_I_FOAM;
+                    else
+                        v_idx := C_I_SURF;
+                    end if;
+                elsif p1_b128 = '1' then
+                    if p1_fhi = '1' then v_idx := C_I_FOAM; else v_idx := C_I_AQUA; end if;
+                elsif p1_ba192 = '1' then
+                    v_idx := C_I_AQUA;
+                elsif p1_bm448 = '1' then
+                    -- MID band; its top row carries its own foam line
+                    if p1_b256 = '1' and p1_fM = '1' then
+                        v_idx := C_I_FOAM;
+                    else
+                        v_idx := C_I_MID;
+                    end if;
+                else
+                    -- DEEP band; its own foam line on its top row
+                    if p1_b512 = '1' and p1_fD = '1' then
+                        v_idx := C_I_FOAM;
+                    else
+                        v_idx := C_I_DEEP;
+                    end if;
+                end if;
+            elsif p1_wat = '1' and p1_fspray = '1' and p1_sprayh = '1'
+                  and p1_spr = '1' then
+                v_idx := C_I_FOAM;
+            elsif p1_wat = '1' and p1_drop = '1' then
+                v_idx := C_I_FOAM;               -- airborne crest droplet
+            elsif p1_gull = '1' then
+                v_idx := C_I_GULL;
+            elsif p1_gullw = '1' then
+                if s_night = '1' then v_idx := C_I_GULL;
+                else v_idx := C_I_GULL2; end if;
+            elsif p1_sun = '1' and p1_sky2 = '0' then
+                v_idx := C_I_SUN;               -- sun lives in the UPPER sky
+            elsif p1_sky2 = '1' then
+                -- the OCEAN strip: occludes the setting sun; carries the
+                -- mirrored disc / horizon streak
+                if p1_mir = '1' or p1_stk = '1' then
+                    v_idx := C_I_SUN;
+                elsif p1_gullr = '1' then
+                    v_idx := C_I_GULL;          -- gull mirrored on the ocean
+                else
+                    v_idx := C_I_SKYLO;
+                end if;
+            else
+                v_idx := C_I_SKYHI;
+            end if;
+            v_sky := "00";
+            if v_idx = C_I_SKYHI then v_sky := "01"; end if;
+            if v_idx = C_I_SKYLO then v_sky := "10"; end if;
+            if v_idx = C_I_SUN   then v_sky := "11"; end if;
+            p2_idx <= v_idx;
+            p2_sky <= v_sky;
+
+            ------------------------------------------------------------------
+            -- P3: palette lookup
+            ------------------------------------------------------------------
+            p3_yuv <= PAL_ROM(to_integer(pal_sel & p2_idx));
+            p3_sky <= p2_sky;
+
+            ------------------------------------------------------------------
+            -- P4: output registers
+            ------------------------------------------------------------------
+            -- per-frame sunset colours override the static palette: sky
+            -- gradient, travelling sun colour (disc/mirror/streak), dimming
+            -- ocean deep band
+            if p3_sky = "01" then
+                p4_y <= gA_rd(15 downto 6);
+                p4_u <= gA_rd(5 downto 0) & gB_rd(15 downto 12);
+                p4_v <= gB_rd(11 downto 2);
+            elsif p3_sky = "10" then
+                p4_y <= skylo_y; p4_u <= skylo_u; p4_v <= skylo_v;
+            elsif p3_sky = "11" then
+                p4_y <= sun_y_r; p4_u <= sun_u_r; p4_v <= sun_v_r;
+            else
+                p4_y <= p3_yuv(29 downto 20);
+                p4_u <= p3_yuv(19 downto 10);
+                p4_v <= p3_yuv(9 downto 0);
+            end if;
+        end if;
+    end process p_pix;
+
+    ----------------------------------------------------------------------------
+    -- Sync pipe + output
+    ----------------------------------------------------------------------------
+    p_pipe : process(clk)
+    begin
+        if rising_edge(clk) then
+            pipe(0) <= data_in;
+            for i in 1 to C_LAT - 1 loop
+                pipe(i) <= pipe(i - 1);
+            end loop;
+        end if;
+    end process p_pipe;
+
+    data_out.hsync_n <= pipe(C_LAT - 1).hsync_n;
+    data_out.vsync_n <= pipe(C_LAT - 1).vsync_n;
+    data_out.field_n <= pipe(C_LAT - 1).field_n;
+    data_out.avid    <= pipe(C_LAT - 1).avid;
+
+    data_out.y <= pipe(C_LAT - 1).y when s_bypass = '1' else p4_y;
+    data_out.u <= pipe(C_LAT - 1).u when s_bypass = '1' else p4_u;
+    data_out.v <= pipe(C_LAT - 1).v when s_bypass = '1' else p4_v;
 
 end architecture pixelbeach;

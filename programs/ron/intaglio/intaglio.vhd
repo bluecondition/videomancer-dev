@@ -223,7 +223,7 @@ architecture intaglio of program_top is
     signal y8d      : unsigned(7 downto 0) := (others => '0');
     signal ss, ss1, ss2 : unsigned(9 downto 0) := (others => '0');
     signal dy, dy1, dy2 : signed(8 downto 0) := (others => '0');
-    signal cl3, cl4, cl5, cl6, cl7 : unsigned(7 downto 0) := (others => '0');
+    signal cl3, cl4, cl5 : unsigned(7 downto 0) := (others => '0');
     signal s_gx, s_gy : signed(11 downto 0) := (others => '0');
 
     -- S5 magnitude + |g| pair, S6 bucket
@@ -248,11 +248,16 @@ architecture intaglio of program_top is
     signal p_acc : t_p16 := (others => (others => '0'));
     signal b_acc : t_p16 := (others => (others => '0'));
 
-    -- S7 phase picks, S8 distances, S9 ink decisions
+    -- S7 phase picks + widths, S8 distances, S9 ink decisions
     signal ph_h7, ph_x7, ph_t7 : unsigned(7 downto 0) := (others => '0');
     signal mag7 : unsigned(12 downto 0) := (others => '0');
     signal dh8, dx8, dt8 : unsigned(6 downto 0) := (others => '0');
     signal mag8 : unsigned(12 downto 0) := (others => '0');
+    -- tone -> width ladder, spread over S6 (subtract) / S7 (shift+clamp)
+    -- / S8 (pipe): fused it was the v0.1 HD critical path
+    signal wd1_6, wd2_6, wd3_6 : signed(10 downto 0) := (others => '0');
+    signal w1_7, w2_7, w3_7 : unsigned(6 downto 0) := (others => '0');
+    signal en1_7, en2_7, en3_7 : std_logic := '0';
     signal w1_8, w2_8, w3_8 : unsigned(6 downto 0) := (others => '0');
     signal en1_8, en2_8, en3_8 : std_logic := '0';
     signal ink9  : unsigned(1 downto 0) := (others => '0');
@@ -460,9 +465,7 @@ begin
         variable v_bq : unsigned(2 downto 0);
         variable v_ph : unsigned(7 downto 0);
         variable v_pp : unsigned(15 downto 0);
-        variable v_dk : signed(10 downto 0);
         variable v_w  : unsigned(8 downto 0);
-        variable v_wc : unsigned(6 downto 0);
         variable v_ink : unsigned(1 downto 0);
         variable v_iy : signed(11 downto 0);
         variable v_dd : unsigned(6 downto 0);
@@ -592,7 +595,6 @@ begin
                     bin6 <= s_bin0;
                 end if;
                 mag6 <= mag5;
-                cl6  <= cl5;
                 x_s6 <= x_s6 + 1;
 
                 -- stipple lattice coords + sub-cell diagonal coords
@@ -616,6 +618,14 @@ begin
                         d1_6 <= resize(v_sub(5 downto 0), 6);
                         d2_6 <= resize(v_sb2(5 downto 0), 6);
                 end case;
+
+                -- width ladder stage 1: tone excess over each threshold
+                wd1_6 <= signed(resize(not cl5, 11))
+                         - signed(resize(s_t1, 11));
+                wd2_6 <= signed(resize(not cl5, 11))
+                         - signed(resize(s_t2, 11));
+                wd3_6 <= signed(resize(not cl5, 11))
+                         - signed(resize(s_t3, 11));
 
                 for k in 0 to 7 loop
                     p_acc(k) <= p_acc(k) + unsigned(resize(s_ck(k), 16));
@@ -643,7 +653,44 @@ begin
                                     s_pitch_sh);
                 ph_t7 <= v_pp(7 downto 0);
                 mag7 <= mag6;
-                cl7  <= cl6;
+
+                -- width ladder stage 2: shift + base + clamp per level
+                en1_7 <= '0';
+                if wd1_6 >= 0 then
+                    en1_7 <= '1';
+                    v_w := resize(s_wbase, 9)
+                           + resize(shift_right(unsigned(resize(wd1_6, 11)),
+                                                s_wsh), 9);
+                    if v_w > resize(s_wmax, 9) then
+                        w1_7 <= s_wmax;
+                    else
+                        w1_7 <= resize(v_w, 7);
+                    end if;
+                end if;
+                en2_7 <= '0';
+                if wd2_6 >= 0 then
+                    en2_7 <= '1';
+                    v_w := resize(s_wbase, 9)
+                           + resize(shift_right(unsigned(resize(wd2_6, 11)),
+                                                s_wsh), 9);
+                    if v_w > resize(s_wmax, 9) then
+                        w2_7 <= s_wmax;
+                    else
+                        w2_7 <= resize(v_w, 7);
+                    end if;
+                end if;
+                en3_7 <= '0';
+                if wd3_6 >= 0 then
+                    en3_7 <= '1';
+                    v_w := resize(s_wbase, 9)
+                           + resize(shift_right(unsigned(resize(wd3_6, 11)),
+                                                s_wsh), 9);
+                    if v_w > resize(s_wmax, 9) then
+                        w3_7 <= s_wmax;
+                    else
+                        w3_7 <= resize(v_w, 7);
+                    end if;
+                end if;
 
                 sh7  <= f_hash_a(st1_8, st2_8, x"7A3C");
                 d1_7 <= d1_6;
@@ -668,49 +715,10 @@ begin
                     dt8 <= resize(shift_right(128 - ph_t7, 1), 7);
                 end if;
 
-                -- widths: w = base + (dark - t)>>wsh, clamped; enables
-                v_dk := signed(resize(not cl7, 11)) - signed(resize(s_t1, 11));
-                en1_8 <= '0';
-                if v_dk >= 0 then
-                    en1_8 <= '1';
-                    v_w := resize(s_wbase, 9)
-                           + resize(shift_right(unsigned(resize(v_dk, 11)),
-                                                s_wsh), 9);
-                    if v_w > resize(s_wmax, 9) then
-                        v_wc := s_wmax;
-                    else
-                        v_wc := resize(v_w, 7);
-                    end if;
-                    w1_8 <= v_wc;
-                end if;
-                v_dk := signed(resize(not cl7, 11)) - signed(resize(s_t2, 11));
-                en2_8 <= '0';
-                if v_dk >= 0 then
-                    en2_8 <= '1';
-                    v_w := resize(s_wbase, 9)
-                           + resize(shift_right(unsigned(resize(v_dk, 11)),
-                                                s_wsh), 9);
-                    if v_w > resize(s_wmax, 9) then
-                        v_wc := s_wmax;
-                    else
-                        v_wc := resize(v_w, 7);
-                    end if;
-                    w2_8 <= v_wc;
-                end if;
-                v_dk := signed(resize(not cl7, 11)) - signed(resize(s_t3, 11));
-                en3_8 <= '0';
-                if v_dk >= 0 then
-                    en3_8 <= '1';
-                    v_w := resize(s_wbase, 9)
-                           + resize(shift_right(unsigned(resize(v_dk, 11)),
-                                                s_wsh), 9);
-                    if v_w > resize(s_wmax, 9) then
-                        v_wc := s_wmax;
-                    else
-                        v_wc := resize(v_w, 7);
-                    end if;
-                    w3_8 <= v_wc;
-                end if;
+                -- width ladder stage 3: plain pipes
+                w1_8 <= w1_7;  en1_8 <= en1_7;
+                w2_8 <= w2_7;  en2_8 <= en2_7;
+                w3_8 <= w3_7;  en3_8 <= en3_7;
                 mag8 <= mag7;
 
                 sj8  <= f_hash_b(sh7);

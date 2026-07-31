@@ -1,0 +1,203 @@
+# HYPNOS -- hard-edged concentric-ring / bullseye generator.
+#
+# 1960s op-art target: Vasarely / Bridget Riley / the Vertigo spiral.  For each
+# pixel: distance from a freely-movable centre -> gamma warp -> band it.  The
+# centre travels +/-2 screens off-frame (the field becomes a shallow arc, then
+# near-parallel stripes -- that range IS the instrument).  Z on the slider is a
+# dolly that flies you into the rings; full-CCW WARP + a slider push is the
+# infinite tunnel.
+#
+# Hardware reality: 6 knobs + 5 switches + 1 slider = 12 live controls, no shift
+# layer.  So the spec's ~16 controls were compressed: the 6 continuous essentials
+# on knobs, Z on the slider, glide-arming + output-mode + animate on switches.
+# Glide-time, anim-rate, softness-baseline and the B/W palette are compile-time
+# constants (there is no register to "preset" them into).
+
+[program]
+program_id = "com.bluecondition.hypnos_square"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+program_name = "Hypnos Square"
+author = "bluecondition"
+license = "GPL-3.0"
+categories = ["Illusion", "Optics", "Pattern"]
+program_type = "processing"
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+description = "Op-art bullseye: movable off-screen centre, warp from tunnel to sphere dome, circle-to-square metric, Z-dolly slider"
+url = "https://github.com/bluecondition/videomancer-dev"
+
+# --- Rotary Potentiometers (Knobs 1-6) ---
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 648            # centre offset RIGHT of frame centre (detent 512)
+display_min_value = -100
+display_max_value = 100
+name_label = "Center X"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 392            # centre offset ABOVE frame centre (detent 512)
+display_min_value = -100
+display_max_value = 100
+name_label = "Center Y"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 430            # ring density: ~0.5 ring across frame -> alias limit
+display_min_value = 0
+display_max_value = 100
+name_label = "Period"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 512            # WARP detent = flat (CCW tunnel, CW dome)
+display_min_value = -100
+display_max_value = 100
+name_label = "Warp"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 512            # METRIC detent = circle (CCW diamond, CW square)
+display_min_value = -100
+display_max_value = 100
+name_label = "Metric"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 512            # DUTY ~50% (band A : band B width)
+display_min_value = 5
+display_max_value = 95
+name_label = "Duty"
+suffix_label = "%"
+
+# --- Toggle Switches (7-11, binary) ---
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Glide X"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Glide Y"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Glide Z"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Output"
+value_labels = ["Key", "Gradient"]
+initial_value_label = "Key"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Animate"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+# --- Linear Potentiometer (Fader 12) ---
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 0              # Z / ZOOM dolly -- bottom = base period, push = fly in
+display_min_value = 0
+display_max_value = 100
+name_label = "Zoom"
+suffix_label = "%"
+
+# --- Presets ---
+
+[[preset]]
+name = "Op-Art Target"          # the reference image: offset, flat, 50% duty, static
+rotary_potentiometer_1 = 648    # Center X (right)
+rotary_potentiometer_2 = 392    # Center Y (up)
+rotary_potentiometer_3 = 430    # Period
+rotary_potentiometer_4 = 512    # Warp flat
+rotary_potentiometer_5 = 512    # Metric circle
+rotary_potentiometer_6 = 512    # Duty 50%
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0            # Key (hard)
+toggle_switch_11 = 0            # static
+linear_potentiometer_12 = 0
+
+[[preset]]
+name = "Vertigo Vortex"         # centred, full-CCW tunnel, mid zoom, drifting
+rotary_potentiometer_1 = 512
+rotary_potentiometer_2 = 512
+rotary_potentiometer_3 = 470
+rotary_potentiometer_4 = 120    # deep tunnel
+rotary_potentiometer_5 = 512
+rotary_potentiometer_6 = 512
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 1            # glide the zoom
+toggle_switch_10 = 0
+toggle_switch_11 = 1          # animate
+linear_potentiometer_12 = 470
+
+[[preset]]
+name = "Riley Stripes"          # centre far off-screen -> near-parallel stripes
+rotary_potentiometer_1 = 980    # far right
+rotary_potentiometer_2 = 120    # far up
+rotary_potentiometer_3 = 300
+rotary_potentiometer_4 = 512
+rotary_potentiometer_5 = 512
+rotary_potentiometer_6 = 512
+toggle_switch_7 = 1           # glide X
+toggle_switch_8 = 1           # glide Y  (centre swims)
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 0
+
+[[preset]]
+name = "Sphere Dome"            # CW warp, square-leaning metric, soft gradient
+rotary_potentiometer_1 = 512
+rotary_potentiometer_2 = 512
+rotary_potentiometer_3 = 430
+rotary_potentiometer_4 = 860    # dome
+rotary_potentiometer_5 = 690    # toward square
+rotary_potentiometer_6 = 512
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 1          # gradient
+toggle_switch_11 = 0
+linear_potentiometer_12 = 0

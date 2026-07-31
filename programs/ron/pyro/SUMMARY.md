@@ -1,7 +1,60 @@
 # PYRO — Performable Night-Sky Pyrotechnics
 
-**Status: v0.3 built, packaged, all 6 configs pass routed timing.
+**Status: v0.5 built, packaged, all 6 configs pass routed timing.
 HW-iterating. Intended to replace `fireworks` after HW validation.**
+
+## v0.5 — full rainbow + white launches (2026-07-12)
+
+1. **Per-color luma ceiling** (the real "full rainbow" fix): the palette
+   chroma was already the scope-verified ROYGBIV set, but sparks rendered
+   at a uniform bright luma — and red/orange (or blue/indigo) differ
+   mostly by BRIGHTNESS, so everything washed toward the same pale tones.
+   `C_PAL_YC` caps each spark's luma at its hue's natural ceiling (red
+   ~400, yellow ~840, blue ~320...); the white-hot bloom still hits 768.
+   Hue bank labels now Warm / Primaries / Pastel / Red-Wht-Blue /
+   Rainbow (default Rainbow).
+2. **Launch color**: rockets draw a white head with a yellow fringe
+   (aci=White, aco=Yellow). This deliberately reverts v0.2's
+   hold-old-colors ascent — white is chromatically neutral so re-claimed
+   embers barely shift.
+3. **Timing at 89.7% (chip full)**: closing needed three passes:
+   (a) line-rate pre-composites `s_bgf`/`s_wf` (no help — yosys had
+   already merged them); (b) **split p_color into stages 6a/6b**
+   (C_LATENCY 7): the argmin->pastel->palette->luma-cap cone ended inside
+   the CORE's blanking register at 15 ns; (c) **free-running engine
+   decodes**: relaunch `age>=delay` compares -> `s_expd` flags, drift
+   pacing from shared frame-counter decodes (`s_pc_*`) instead of
+   per-slot age bits. After (c): hd_analog 74.80 (s3), hd_hdmi 75.29
+   (s14), hd_dual 74.42 (s3) — seed hunts collapsed from 24+ misses to
+   single digits. Lesson: at ~90% the critical path is whack-a-mole;
+   fix the CONES (register the decodes), don't chase seeds.
+
+v0.5: 6850-6873 LC (89.4%), 32/32 EBR. SD 70-72 (s1). Package 473240 B.
+
+## v0.4 — third feedback round (2026-07-12)
+
+1. **Nebula cloud sky** (starfield technique, scaled to the 2 spare EBRs):
+   64x32 4-bit seamless 2-octave value-noise tile generated at
+   elaboration (`f_neb_init`), 8x16-px texels (512x512-px wrap), read per
+   pixel (`p_neb`, free-running; 1-2 px lag is a fixed shift of a
+   wrapping texture). Adds up to +60 luma under the gradient with a
+   slight desaturation where dense = moonlit clouds.
+2. **Comet shell type** (C_TY_COMET): 14 max-speed straight streaks
+   (vfrac ~122-125), forced bright heads, half gravity; salted into both
+   TYPE banks (~1 in 4, seed(8:7)). The two-tone split recolors the
+   trail behind each head.
+3. **Color variety**: Random hue bank salts in pastel shells (~1 in 4).
+4. **Graduated wakes**: the line-walker now writes walked cells one
+   brightness level below the head (head "11", wake "10" -> decays
+   through "01") -- every particle drags a fading tail along its own
+   motion vector. (Response to "trails always go right": the geometry
+   is radial by construction; if a rightward bias persists on HW,
+   identify which layer moves.)
+
+v0.4 resources: **6860-6868 LC (89%!), 32/32 EBR — the chip is FULL.**
+Routed: hd_analog 74.62 (s20), hd_hdmi 74.46 (s11), hd_dual 74.36 (s28)
+-- thin margins, long seed hunts (20/11/28). Any further feature needs a
+matching cut. SD 64-70 (s1). Repackaged 473006 B.
 
 ## v0.3 — second feedback round (2026-07-11)
 

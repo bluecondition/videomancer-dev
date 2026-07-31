@@ -1,0 +1,179 @@
+[program]
+program_id = "com.ron.sugarcoat"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+program_name = "Sugarcoat"
+author = "ron"
+license = "GPL-3.0"
+categories = ["Color", "Material", "Render", "Pattern"]
+program_type = "processing"
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+description = "1:1 color-to-candy map: each color becomes a candy texture - chocolate, cream dots, cookie, cane, mint, icing, taffy."
+
+# --- Rotary Potentiometers (Knobs 1-6) ---
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 512
+display_min_value = 0
+display_max_value = 100
+name_label = "Texture"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 512
+display_min_value = 0
+display_max_value = 100
+name_label = "Density"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 320
+display_min_value = 1
+display_max_value = 4
+name_label = "Scale"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 0
+display_min_value = 0
+display_max_value = 100
+name_label = "Palette"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 320
+display_min_value = 0
+display_max_value = 100
+name_label = "Warp"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 640
+display_min_value = 0
+display_max_value = 100
+name_label = "Gloss"
+suffix_label = "%"
+
+# --- Toggle Switches (7-11) ---
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Bakery"
+value_labels = ["Candy", "Bakery"]
+initial_value_label = "Candy"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Melt"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Map"
+value_labels = ["Chroma", "Luma"]
+initial_value_label = "Chroma"
+
+# --- Linear Potentiometer (Slider) ---
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 768
+display_min_value = 0
+display_max_value = 100
+name_label = "Strength"
+suffix_label = "%"
+
+# --- Presets ---
+
+[[preset]]
+name = "Lollipop"
+rotary_potentiometer_1 = 500
+rotary_potentiometer_2 = 520
+rotary_potentiometer_3 = 320
+rotary_potentiometer_4 = 0
+rotary_potentiometer_5 = 300
+rotary_potentiometer_6 = 560
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Peppermint"
+rotary_potentiometer_1 = 340
+rotary_potentiometer_2 = 600
+rotary_potentiometer_3 = 320
+rotary_potentiometer_4 = 300
+rotary_potentiometer_5 = 120
+rotary_potentiometer_6 = 640
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 950
+
+[[preset]]
+name = "Jawbreaker"
+rotary_potentiometer_1 = 1000
+rotary_potentiometer_2 = 430
+rotary_potentiometer_3 = 600
+rotary_potentiometer_4 = 150
+rotary_potentiometer_5 = 0
+rotary_potentiometer_6 = 720
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Bakeshop"
+rotary_potentiometer_1 = 0
+rotary_potentiometer_2 = 560
+rotary_potentiometer_3 = 320
+rotary_potentiometer_4 = 0
+rotary_potentiometer_5 = 200
+rotary_potentiometer_6 = 480
+toggle_switch_9 = 1
+toggle_switch_10 = 0
+toggle_switch_11 = 1
+linear_potentiometer_12 = 820
+
+[[preset]]
+name = "Sugar Rush"
+rotary_potentiometer_1 = 300
+rotary_potentiometer_2 = 520
+rotary_potentiometer_3 = 100
+rotary_potentiometer_4 = 0
+rotary_potentiometer_5 = 300
+rotary_potentiometer_6 = 620
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 1023

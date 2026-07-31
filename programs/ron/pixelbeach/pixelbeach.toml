@@ -1,6 +1,6 @@
 [program]
 program_id = "com.ron.pixelbeach"
-program_version = "2.0.0"
+program_version = "3.16.0"
 abi_version = ">=1.0,<2.0"
 program_name = "Pixel Beach"
 author = "ron"
@@ -9,31 +9,31 @@ categories = ["Render", "Pattern", "Screen"]
 program_type = "synthesis"
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
-description = "Chunky 8x8 pixel-art ocean with z-stacked wave layers, Stokes-sharpened crests, and ASR foam envelopes."
+description = "Side-profile 8-bit shorebreak: shallow-water physics, waves that steepen, crash, foam, and drain back. Sun, gulls, wet sand."
 
 # --- Rotary Potentiometers (Knobs 1-6) ---
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_1"
-name_label = "Wave Spd"
+name_label = "Rhythm"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 600
+initial_value = 400
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
-name_label = "Wave Hgt"
+name_label = "Tide"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 700
+initial_value = 512
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
-name_label = "Foam Life"
+name_label = "Foam"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
@@ -42,56 +42,56 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
-name_label = "Drift"
+name_label = "Chop"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 400
+initial_value = 300
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
-name_label = "Sky"
+name_label = "Swell"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 0
-suffix_label = ""
+initial_value = 600
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
-name_label = "Horizon"
+name_label = "Time"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 320
+initial_value = 550
 suffix_label = "%"
 
 # --- Toggle Switches (7-11) ---
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
-name_label = "Wave Shape"
-value_labels = ["Smooth", "Jagged"]
-initial_value_label = "Smooth"
+name_label = "Gulls"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
-name_label = "Cell Size"
-value_labels = ["8x8", "16x16"]
-initial_value_label = "8x8"
+name_label = "Pixels"
+value_labels = ["16px", "8px"]
+initial_value_label = "16px"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
-name_label = "Sea State"
-value_labels = ["Calm", "Choppy"]
-initial_value_label = "Calm"
+name_label = "Storm"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
-name_label = "Mono"
-value_labels = ["Off", "On"]
-initial_value_label = "Off"
+name_label = "Sky"
+value_labels = ["Day", "Night"]
+initial_value_label = "Day"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
@@ -103,9 +103,9 @@ initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
-name_label = "Chaos"
+name_label = "Sun"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 600
+initial_value = 800
 suffix_label = "%"

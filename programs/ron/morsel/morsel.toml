@@ -1,0 +1,212 @@
+# Morsel — the whole screen is one chocolate-chip cookie.
+#
+# Forked from the single choc-chip swatch inside Sugarcoat and rebuilt around
+# a real 3-D morsel: a flat-based, bulging-sided, curl-tipped chip modelled in
+# Python, photographed from eight 3-D orientations and stored as polar
+# silhouettes.  Every chip is freely rotated, size-jittered and scattered.
+# The video is baked in twice — the dough tone follows the luma pixel for
+# pixel, and the chip density and size follow a per-cell luma sample.
+
+[program]
+program_id = "com.bluecondition.morsel"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+program_name = "Morsel"
+author = "bluecondition"
+license = "GPL-3.0"
+categories = ["Color", "Material", "Render", "Pattern"]
+program_type = "processing"
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+description = "Video baked into a full-screen chocolate-chip cookie: lit 3-D morsels over golden dough."
+url = "https://github.com/bluecondition/videomancer-dev"
+
+# --- Rotary Potentiometers (Knobs 1-6) ---
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 700
+display_min_value = 8
+display_max_value = 128
+name_label = "Scale"
+suffix_label = "px"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 512
+display_min_value = 0
+display_max_value = 100
+name_label = "Shape"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 430
+display_min_value = 0
+display_max_value = 100
+name_label = "Bake"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 620
+display_min_value = 0
+display_max_value = 100
+name_label = "Relief"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 560
+display_min_value = 0
+display_max_value = 100
+name_label = "Grain"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 780
+display_min_value = 0
+display_max_value = 100
+name_label = "Chip Size"
+suffix_label = "%"
+
+# --- Toggle Switches (7-11, binary) ---
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Luma Mod"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Tint"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Invert"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Emboss"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "White Chips"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+# --- Linear Potentiometer (Fader 12) ---
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 620
+display_min_value = 0
+display_max_value = 100
+name_label = "Chips"
+suffix_label = "%"
+
+# --- Presets ---
+
+[[preset]]
+name = "Fresh Batch"
+rotary_potentiometer_1 = 700      # 64 px cells
+rotary_potentiometer_2 = 512      # full spread of 3-D orientations
+rotary_potentiometer_3 = 430
+rotary_potentiometer_4 = 620
+rotary_potentiometer_5 = 560
+rotary_potentiometer_6 = 780
+toggle_switch_7 = 1
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 1
+toggle_switch_11 = 0
+linear_potentiometer_12 = 620
+
+[[preset]]
+name = "Fine Halftone"
+rotary_potentiometer_1 = 300      # 16 px cells: the picture reads as chips
+rotary_potentiometer_2 = 512
+rotary_potentiometer_3 = 380
+rotary_potentiometer_4 = 500
+rotary_potentiometer_5 = 480
+rotary_potentiometer_6 = 800
+toggle_switch_7 = 1
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 1
+toggle_switch_11 = 0
+linear_potentiometer_12 = 700
+
+[[preset]]
+name = "Loaded"
+rotary_potentiometer_1 = 700
+rotary_potentiometer_2 = 400
+rotary_potentiometer_3 = 620      # darker bake
+rotary_potentiometer_4 = 820      # deep relief + hot glints
+rotary_potentiometer_5 = 620
+rotary_potentiometer_6 = 900
+toggle_switch_7 = 1
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 1
+toggle_switch_11 = 0
+linear_potentiometer_12 = 1023    # every cell gets a chip
+
+[[preset]]
+name = "Giant Morsels"
+rotary_potentiometer_1 = 950      # 128 px cells: one chip is a whole shape
+rotary_potentiometer_2 = 200      # side-on flat-bottomed teardrops
+rotary_potentiometer_3 = 430
+rotary_potentiometer_4 = 700
+rotary_potentiometer_5 = 500
+rotary_potentiometer_6 = 830
+toggle_switch_7 = 1
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 1
+toggle_switch_11 = 0
+linear_potentiometer_12 = 620
+
+[[preset]]
+name = "Dark & White"
+rotary_potentiometer_1 = 700
+rotary_potentiometer_2 = 800      # rounder chips with a small point
+rotary_potentiometer_3 = 430
+rotary_potentiometer_4 = 620
+rotary_potentiometer_5 = 560
+rotary_potentiometer_6 = 780
+toggle_switch_7 = 1
+toggle_switch_8 = 1               # dough takes the video's colour
+toggle_switch_9 = 0
+toggle_switch_10 = 1
+toggle_switch_11 = 1              # white chocolate in the mix
+linear_potentiometer_12 = 760

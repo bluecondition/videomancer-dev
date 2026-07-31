@@ -49,8 +49,8 @@ suffix_label = "%"
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
 name_label = "Hue"
-value_labels = ["Gold", "Primaries", "Pastel", "Red-Wht-Blue", "Random"]
-initial_value_label = "Random"
+value_labels = ["Warm", "Primaries", "Pastel", "Red-Wht-Blue", "Rainbow"]
+initial_value_label = "Rainbow"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"

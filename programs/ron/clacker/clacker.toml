@@ -1,0 +1,200 @@
+# Clacker — video as a mechanical flip-disc wall.
+#
+# A grid of discs (or squares) mounted on a dark backing panel.  Every disc
+# HOLDS its state between frames and physically SWINGS to a new position when
+# the video changes: edge-on at the instant of the change, then a damped
+# overshooting settle that briefly shows the disc's black back at the peak of
+# the bounce.  Colour mode paints the quantized video colour on each face;
+# Luma Mod turns the wall into a fixed-colour dot matrix where the video's
+# luma sets each disc's RESTING TILT ANGLE — greyscale rendered by mechanical
+# angle alone.  Rows re-evaluate on a travelling refresh wave, so the wall
+# updates in a ripple rather than all at once.
+
+[program]
+program_id = "com.bluecondition.clacker"
+program_version = "0.2.1"
+abi_version = ">=1.0,<2.0"
+program_name = "Clacker"
+author = "bluecondition"
+license = "GPL-3.0"
+categories = ["Pixel", "Pattern", "Color"]
+program_type = "processing"
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+description = "Video re-rendered as a mechanical flip-disc wall with swinging, overshooting discs."
+url = "https://github.com/bluecondition/videomancer-dev"
+
+# --- Rotary Potentiometers (Knobs 1-6) ---
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 380
+display_min_value = 34
+display_max_value = 162
+name_label = "Disc Size"
+suffix_label = "px"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 1023
+display_min_value = 2
+display_max_value = 16
+name_label = "Levels"
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 760
+display_min_value = 25
+display_max_value = 56
+name_label = "Fill"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 1023
+display_min_value = 0
+display_max_value = 100
+name_label = "Refresh"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 700
+display_min_value = 0
+display_max_value = 100
+name_label = "Tilt Shade"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 400
+display_min_value = 75
+display_max_value = 270
+name_label = "Chroma"
+suffix_label = "%"
+
+# --- Toggle Switches (7-11, binary) ---
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Shape"
+value_labels = ["Disc", "Square"]
+initial_value_label = "Disc"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Mode"
+value_labels = ["Colour", "Luma Mod"]
+initial_value_label = "Colour"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Backing"
+value_labels = ["Black", "Video"]
+initial_value_label = "Black"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Grid"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Bypass"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+# --- Linear Potentiometer (Fader 12) ---
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 620
+display_min_value = 0
+display_max_value = 100
+name_label = "Clack"
+suffix_label = "%"
+
+# --- Presets ---
+
+[[preset]]
+name = "Departures"
+rotary_potentiometer_1 = 380      # ~81 px discs
+rotary_potentiometer_2 = 1023     # 16 colour levels
+rotary_potentiometer_3 = 760      # discs nearly touching
+rotary_potentiometer_4 = 1023     # every row, every frame
+rotary_potentiometer_5 = 700
+rotary_potentiometer_6 = 400
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 620     # realistic ~8-frame flip
+
+[[preset]]
+name = "Flip-Dot Sign"
+rotary_potentiometer_1 = 180      # small dots
+rotary_potentiometer_2 = 200      # ~5 tilt levels: crunchy, posterised
+rotary_potentiometer_3 = 700
+rotary_potentiometer_4 = 1023
+rotary_potentiometer_5 = 1023     # full edge-on blackout
+rotary_potentiometer_6 = 400
+toggle_switch_7 = 0
+toggle_switch_8 = 1               # Luma Mod: tilt carries the image
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 700
+
+[[preset]]
+name = "Slow Wave"
+rotary_potentiometer_1 = 300
+rotary_potentiometer_2 = 620
+rotary_potentiometer_3 = 820      # overfilled, discs kissing
+rotary_potentiometer_4 = 120      # 16-frame refresh: update wave crawls up
+rotary_potentiometer_5 = 850
+rotary_potentiometer_6 = 620      # heavy chroma
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 1023    # long lazy overshooting tumbles
+
+[[preset]]
+name = "Split-Flap"
+rotary_potentiometer_1 = 520      # big cards
+rotary_potentiometer_2 = 400
+rotary_potentiometer_3 = 900      # square cards filling the cell
+rotary_potentiometer_4 = 600
+rotary_potentiometer_5 = 500
+rotary_potentiometer_6 = 300
+toggle_switch_7 = 1               # Square
+toggle_switch_8 = 0
+toggle_switch_9 = 1               # dim video showing through the panel
+toggle_switch_10 = 1              # visible bezel between cards
+toggle_switch_11 = 0
+linear_potentiometer_12 = 480

@@ -1,0 +1,217 @@
+[program]
+program_id = "com.ron.gilt"
+program_version = "0.6.0"
+abi_version = ">=1.0,<2.0"
+program_name = "Gilt"
+author = "ron"
+license = "GPL-3.0"
+categories = ["Color", "Render", "Pattern"]
+program_type = "processing"
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+description = "Video re-rendered as a Klimt Golden Phase painting: flesh stays human, everything else becomes gold leaf, mosaic and ornament."
+
+# --- Rotary Potentiometers (Knobs 1-6) ---
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 563
+display_min_value = 0
+display_max_value = 100
+name_label = "Flesh"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 460
+display_min_value = 0
+display_max_value = 100
+name_label = "Patina"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 614
+display_min_value = 0
+display_max_value = 100
+name_label = "Ornament"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 409
+display_min_value = 0
+display_max_value = 100
+name_label = "Scale"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 470
+display_min_value = 0
+display_max_value = 100
+name_label = "Jewel"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 102
+display_min_value = 0
+display_max_value = 100
+name_label = "Drift"
+suffix_label = "%"
+
+# --- Toggle Switches (7-11) ---
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Mosaic"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Outline"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Luma"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Bank"
+value_labels = ["Adele", "Kiss"]
+initial_value_label = "Adele"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Halo"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+# --- Linear Potentiometer (Slider) ---
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 1023
+display_min_value = 0
+display_max_value = 100
+name_label = "Gild"
+suffix_label = "%"
+
+# --- Presets ---
+
+[[preset]]
+name = "Adele"
+rotary_potentiometer_1 = 563
+rotary_potentiometer_2 = 400
+rotary_potentiometer_3 = 640
+rotary_potentiometer_4 = 384
+rotary_potentiometer_5 = 300
+rotary_potentiometer_6 = 90
+toggle_switch_7 = 1
+toggle_switch_8 = 1
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 1
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "The Kiss"
+rotary_potentiometer_1 = 520
+rotary_potentiometer_2 = 720
+rotary_potentiometer_3 = 720
+rotary_potentiometer_4 = 512
+rotary_potentiometer_5 = 512
+rotary_potentiometer_6 = 60
+toggle_switch_7 = 1
+toggle_switch_8 = 1
+toggle_switch_9 = 0
+toggle_switch_10 = 1
+toggle_switch_11 = 0
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Bare Leaf"
+rotary_potentiometer_1 = 563
+rotary_potentiometer_2 = 460
+rotary_potentiometer_3 = 96
+rotary_potentiometer_4 = 300
+rotary_potentiometer_5 = 0
+rotary_potentiometer_6 = 0
+toggle_switch_7 = 1
+toggle_switch_8 = 1
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Gilding"
+rotary_potentiometer_1 = 563
+rotary_potentiometer_2 = 460
+rotary_potentiometer_3 = 614
+rotary_potentiometer_4 = 409
+rotary_potentiometer_5 = 358
+rotary_potentiometer_6 = 102
+toggle_switch_7 = 1
+toggle_switch_8 = 1
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 1
+linear_potentiometer_12 = 470
+
+[[preset]]
+name = "Luma Figure"
+rotary_potentiometer_1 = 563
+rotary_potentiometer_2 = 440
+rotary_potentiometer_3 = 700
+rotary_potentiometer_4 = 448
+rotary_potentiometer_5 = 384
+rotary_potentiometer_6 = 90
+toggle_switch_7 = 1
+toggle_switch_8 = 1
+toggle_switch_9 = 1
+toggle_switch_10 = 0
+toggle_switch_11 = 1
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Luma Cells"
+rotary_potentiometer_1 = 563
+rotary_potentiometer_2 = 440
+rotary_potentiometer_3 = 700
+rotary_potentiometer_4 = 448
+rotary_potentiometer_5 = 384
+rotary_potentiometer_6 = 90
+toggle_switch_7 = 1
+toggle_switch_8 = 0
+toggle_switch_9 = 1
+toggle_switch_10 = 0
+toggle_switch_11 = 1
+linear_potentiometer_12 = 1023
