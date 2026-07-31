@@ -374,6 +374,7 @@ architecture nacre of program_top is
     -- preempt at knot-complete points, hm_pend resumes it)
     -- knot walker / evaluation state
     signal ks_g   : signed(15 downto 0) := (others => '0');   -- next grid knot
+    signal hm_last : std_logic := '0';   -- this knot closes the run
     signal ks_n   : signed(15 downto 0) := (others => '0');   -- chosen next knot
     signal ks_n2  : signed(15 downto 0) := (others => '0');   -- and its regrid
     signal s_kstep : unsigned(7 downto 0) := to_unsigned(16, 8);
@@ -1435,6 +1436,14 @@ begin
                         hm_ph <= 13;
                     when 13 =>
                         ks_n2 <= ks_n + signed(resize(s_kstep, 16));
+                        -- "this knot closes the run" as a FLAG.  Leaving the
+                        -- 16-bit compare in state 29 put a carry chain in
+                        -- hk_x's load enable -- 18 logic levels, 13.5 ns, and
+                        -- hd_hdmi's critical path.  hk_x and hm_xbe are both
+                        -- stable across the whole knot frame, so it can be
+                        -- decided here.
+                        if hk_x >= hm_xbe then hm_last <= '1';
+                        else                   hm_last <= '0'; end if;
                         hm_ph <= 14;
                     when 14 | 15 | 16 | 17 =>
                         hm_ph <= hm_ph + 1;
@@ -1500,7 +1509,7 @@ begin
                         hp_x <= hk_x;  hp_f <= hk_f;  hp_v <= '1';
                         hm_ph <= 29;
                     when 29 =>
-                        if hk_x >= hm_xbe then
+                        if hm_last = '1' then
                             hm_ph <= 30;                  -- roll to the next run
                         else
                             hk_x <= ks_n;                 -- chosen in 11..13

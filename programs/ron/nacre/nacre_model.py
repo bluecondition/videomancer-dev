@@ -75,7 +75,7 @@ class Engine:
             hw_di=0, hq_l=0, hq_df=0,
             hw_xn=0, hw_f0=0, hw_pend=0,
             hp_x=0, hp_f=0, hp_v=0,
-            ks_g=0, ks_n=0, ks_n2=0,
+            ks_g=0, ks_n=0, ks_n2=0, hm_last=0,
             nrm_in=0, nrm_nm=0, hn=0, rrom_a=0, rrom_q=0,
             nrm_sh=0, nrm_in_q=0, nrm_nm_q=0, nrm_r=0, nrm_in_c=0, nrm_nm_c=0,
             doa_ex=0, doa_ey=0,
@@ -382,6 +382,9 @@ class Engine:
             n['hm_ph'] = 13
         elif ph == 13:
             n['ks_n2'] = sgn(s['ks_n'] + kstep, 16)
+            # "closes the run" as a flag: the 16-bit compare in state 29 was
+            # a carry chain inside hk_x's load enable and hd_hdmi's crit path
+            n['hm_last'] = 1 if s['hk_x'] >= s['hm_xbe'] else 0
             n['hm_ph'] = 14
         elif ph in (14, 15, 16, 17):
             n['hm_ph'] = ph + 1
@@ -435,7 +438,7 @@ class Engine:
             n['hp_v'] = 1
             n['hm_ph'] = 29
         elif ph == 29:
-            if s['hk_x'] >= s['hm_xbe']:
+            if s['hm_last']:
                 n['hm_ph'] = 30
             else:
                 n['hk_x'] = s['ks_n']          # chosen back in states 11..13
