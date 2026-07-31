@@ -123,6 +123,24 @@ final `p_norm` split pre-shifts left by a constant 9 so the whole normalise
 becomes a *right* shift of `nrm_sh+1` (1..18), then splits that into a
 multiple of 4 and a remainder — halving the mux depth.
 
+### Where the six configs actually stand (v0.3, post-route)
+
+| config | Fmax | required | verdict |
+|---|---|---|---|
+| HD Analog | 77.95 MHz (seed 3) | 74.25 | pass, 5.0 % |
+| SD Analog | 69.34 MHz (seed 1) | 27 | pass |
+| HD HDMI | 77.28 MHz (seed 1) | 74.25 | pass, 4.1 % |
+| SD HDMI | 77.15 MHz (seed 2) | 27 | pass |
+| **HD Dual** | **61.02 MHz (best of 6 seeds)** | 74.25 | **FAILS** |
+| SD Dual | 66.95 MHz (seed 1) | 27 | pass |
+
+**HD Dual does not close.** It closed at 75.60 MHz before the round-contour
+work, so the finer grid cost it — and 61 MHz is an 18 % miss, far outside
+seed noise, so it needs a path fix rather than reseeding. **The packaged
+`out/rev_b/ron/nacre.vmprog` therefore contains a failing hd_dual bitstream
+and must not be treated as shippable** (the builder accepts a best-effort
+bitstream after its seed retries; see [[build_timing_verification]]).
+
 **Single Fmax readings prove nothing here: router2 is run-nondeterministic.**
 An 8-seed sweep of the pre-split netlist returned 63.4 / 71.0 / 63.4 / 66.0 /
 64.3 / 67.5 / 67.4 / 65.6 MHz — all failing — even though one earlier one-off
