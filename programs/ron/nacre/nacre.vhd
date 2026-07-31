@@ -94,13 +94,17 @@ architecture nacre of program_top is
     -- RAM).  Rings C_NC..C_NT-1 are RIGID: concentric about the outermost
     -- chained disc, so they cost engine slots but NO storage, and they keep
     -- the screen filled when the nest is smaller than the raster.
+    -- A pass must COMPLETE inside one line period (running C_NEARLY lines
+    -- ahead buys latency, not throughput -- a pass that overruns simply
+    -- misses the next line's trigger).  Ring counts are set by that budget:
+    -- only rings out to the screen diagonal are ever visible anyway.
     function f_nc return integer is
     begin
-        if C_ENABLE_HD then return 12; else return 8; end if;
+        if C_ENABLE_HD then return 8; else return 6; end if;
     end function;
     function f_nt return integer is
     begin
-        if C_ENABLE_HD then return 24; else return 16; end if;
+        if C_ENABLE_HD then return 16; else return 12; end if;
     end function;
     -- The knot engine cannot finish a line inside one line period, so it
     -- runs C_NEARLY lines ahead of the raster.
@@ -738,27 +742,28 @@ begin
                                 - resize(s_k4_gr, 14), 10));
                     -- v0.9 per-circle gradient frame constants
                     when 10 =>
-                        -- Knot grid = ONE ring spacing.  Every ring edge is
-                        -- already a knot, so the grid only has to cover the
-                        -- long tangent runs; halving it again doubles engine
-                        -- time for ~3/255 of accuracy (measured in the proto).
-                        if s_spac >= 255 then
+                        -- Knot grid.  Every ring edge is already a knot, so
+                        -- the grid only has to cover the LONG tangent runs --
+                        -- and those runs are what set the engine's per-line
+                        -- budget (a pass must finish inside one line period;
+                        -- running lines ahead buys latency, not throughput).
+                        -- Two ring spacings keeps the field smooth there and
+                        -- roughly halves the knot count.
+                        if s_spac >= 128 then
                             s_kstep <= to_unsigned(255, 8);
-                        elsif s_spac < 16 then
+                        elsif s_spac < 8 then
                             s_kstep <= to_unsigned(16, 8);
                         else
-                            s_kstep <= resize(s_spac, 8);
+                            s_kstep <= resize(shift_left(s_spac, 1), 8);
                         end if;
+
                     when 4 =>
-                        -- outermost ring radius = C_NT * spacing (clamped
-                        -- like the span radii).  C_NT is 24 (HD) or 16 (SD),
-                        -- both pure shift-adds.
-                        if C_NT = 24 then          -- 16 + 8
-                            v_e := resize(signed(shift_left(resize(s_spac, 18), 4)
-                                          + shift_left(resize(s_spac, 18), 3)), 28);
-                        else                       -- 16
-                            v_e := resize(signed(shift_left(resize(s_spac, 18), 4)), 28);
-                        end if;
+                        -- outermost ring radius = C_NT * spacing, clamped
+                        -- like the span radii.  C_NT is a compile-time
+                        -- constant so this folds to shift-adds; do NOT
+                        -- hand-code per-C_NT cases (a stale 16 for an
+                        -- 8-ring build renders pure black).
+                        v_e := resize(signed('0' & (s_spac * to_unsigned(C_NT, 6))), 28);
                         if v_e > C_RCL then v_e := to_signed(C_RCL, 28); end if;
                         s_rmax <= unsigned(v_e(12 downto 0));
 
@@ -1007,6 +1012,11 @@ begin
             m_pl <= m_a * signed('0' & m_b(6 downto 0));
             m_p  <= shift_left(resize(m_ph, 30), 7) + resize(m_pl, 30);
 
+            -- write strobes are ONE-SHOT: without these defaults they latch
+            -- high and every later cycle rewrites the span store / seed slot
+            spst_we <= '0';
+            sd_we   <= '0';
+
             -- the raster's seed bank advances at every active-line start;
             -- vsync parks it so the frame's first line lands on bank 0
             if s_vs_pulse = '1' then
@@ -1238,8 +1248,16 @@ begin
                     when 53 =>
                         hm_ody2 <= unsigned(m_p(26 downto 0));
                         m_a <= resize(hm_dy_n, 15);  m_b <= resize(hm_dy_n, 15);
+                        -- clamp to BOTH raster edges: rings wider than the
+                        -- screen have negative left edges, and a negative
+                        -- run end propagates into hm_xae and then into the
+                        -- seed's x_next as a huge unsigned value, which
+                        -- desynchronises the pixel path for the rest of the
+                        -- line (the whole left side went black)
                         if spst_q > signed(resize(s_W, 16)) - 1 then
                             hm_xbe <= signed(resize(s_W, 16)) - 1;
+                        elsif spst_q < 0 then
+                            hm_xbe <= (others => '0');
                         else
                             hm_xbe <= spst_q;
                         end if;
@@ -1254,7 +1272,11 @@ begin
                         hw_pend <= '1';
                         ks_g <= hm_xae + signed(resize(s_kstep, 16));
                         hk_x <= hm_xae;
-                        hm_ph <= 0;
+                        if hm_xbe <= hm_xae then
+                            hm_ph <= 32;              -- outermost ring clipped
+                        else
+                            hm_ph <= 0;
+                        end if;
 
                     -- --------------- knot frame ---------------
                     -- LATENCIES (get these wrong and the field is garbage):
@@ -1372,7 +1394,12 @@ begin
                     when 27 =>
                         hm_ph <= 28;
                     when 28 =>
-                        if hp_v = '1' then
+                        -- A piece is only emitted if it actually covers
+                        -- pixels.  Rings far larger than the raster clip to
+                        -- zero-length runs; emitting those would hand the
+                        -- pixel path two seeds with the same x_next, and it
+                        -- can only consume one per pixel.
+                        if hp_v = '1' and hk_x > hp_x then
                             m_a   <= hn;  m_b <= signed(resize(rrom_q, 15));
                             hw_xn <= unsigned(hk_x(10 downto 0));
                             hw_f0 <= hp_f;
@@ -1462,10 +1489,20 @@ begin
                         if hm_side = '0' then hm_icx <= hm_icx0;
                         else                  hm_ocx <= hm_icx0; end if;
                         m_a <= resize(hm_dy_n, 15);  m_b <= resize(hm_dy_n, 15);
-                        hm_xae <= hk_x;                   -- the shared edge
-                        ks_g   <= hk_x + signed(resize(s_kstep, 16));
+                        hm_xae <= hm_xbe;                 -- the shared edge (the
+                                                          -- run just closed; hk_x
+                                                          -- is stale after a skip)
+                        ks_g   <= hm_xbe + signed(resize(s_kstep, 16));
+                        -- clamp to BOTH raster edges: rings wider than the
+                        -- screen have negative left edges, and a negative
+                        -- run end propagates into hm_xae and then into the
+                        -- seed's x_next as a huge unsigned value, which
+                        -- desynchronises the pixel path for the rest of the
+                        -- line (the whole left side went black)
                         if spst_q > signed(resize(s_W, 16)) - 1 then
                             hm_xbe <= signed(resize(s_W, 16)) - 1;
+                        elsif spst_q < 0 then
+                            hm_xbe <= (others => '0');
                         else
                             hm_xbe <= spst_q;
                         end if;
@@ -1477,14 +1514,21 @@ begin
                         else                  hm_ody2 <= unsigned(m_p(26 downto 0)); end if;
                         -- the shared edge is re-evaluated in the NEW context,
                         -- so it OPENS the next piece: drop the stale anchor
+                        -- The shared edge belongs to BOTH runs but with
+                        -- different values (f jumps 1 -> 0 across a ring
+                        -- edge), so it must be re-evaluated in the new
+                        -- context as this run's OPENING knot: hp_v = '0'
+                        -- makes it emit no piece, only set the anchor.
+                        -- Skipping straight to the next grid knot instead
+                        -- leaves the span from the edge unrendered, and the
+                        -- previous piece then smears across it.
                         hp_v <= '0';
-                        if ks_g < hm_xbe then
-                            hk_x <= ks_g;
-                            ks_g <= ks_g + signed(resize(s_kstep, 16));
+                        if hm_xbe <= hm_xae then
+                            hm_ph <= 32;              -- run clipped away: skip
                         else
-                            hk_x <= hm_xbe;
+                            hk_x <= hm_xae;           -- the shared edge
+                            hm_ph <= 0;
                         end if;
-                        hm_ph <= 0;
 
                     -- --------------- finish ---------------
                     when 40 =>
