@@ -104,13 +104,16 @@ architecture nacre of program_top is
     end function;
     function f_nt return integer is
     begin
-        if C_ENABLE_HD then return 16; else return 12; end if;
+        -- 12 / 10: the radix-2 knot frame is 29 cycles, and 2*C_NT runs
+        -- x 2 knots each has to fit the line period (HD 2200, SD 1716 clk)
+        if C_ENABLE_HD then return 12; else return 10; end if;
     end function;
-    -- The knot engine cannot finish a line inside one line period, so it
-    -- runs C_NEARLY lines ahead of the raster.
+    -- The pass now fits one line period, so a plain double buffer is enough:
+    -- the engine computes line N+1 during line N.  (Running further ahead
+    -- buys LATENCY, not throughput -- it never fixed the budget.)
     function f_nearly return integer is
     begin
-        if C_ENABLE_HD then return 2; else return 3; end if;
+        return 1;
     end function;
     constant C_NEARLY : integer := f_nearly;
     constant C_NC    : integer := f_nc;
@@ -196,6 +199,11 @@ architecture nacre of program_top is
     ----------------------------------------------------------------------
     signal s_cx, s_cy : signed(13 downto 0) := (others => '0');          -- glided centre (px)
     signal s_cxs, s_cys : signed(21 downto 0) := (others => '0');        -- glide accum, Q8
+    -- glide target and step, staged across sequencer slots: target-minus-accum
+    -- minus shift plus accum in ONE slot was a 2x22-bit carry chain and, at
+    -- 96 % utilisation, the design's critical path
+    signal s_tgx, s_tgy : signed(21 downto 0) := (others => '0');
+    signal s_dgx, s_dgy : signed(21 downto 0) := (others => '0');
     signal s_lf   : signed(15 downto 0) := to_signed(-704, 16);          -- freq log2, Q6
     signal s_nl   : unsigned(15 downto 0) := to_unsigned(704, 16);       -- -Lf (spacing log)
     signal s_mant : unsigned(10 downto 0) := to_unsigned(1024, 11);      -- spacing mantissa
@@ -316,6 +324,10 @@ architecture nacre of program_top is
     signal spst_wd : signed(15 downto 0) := (others => '0');
     signal spst_ra : integer range 0 to 255 := 0;
     signal spst_q  : signed(15 downto 0) := (others => '0');
+    -- spst_q clamped to [0, W], registered.  The EBR read (~8 ns) plus the
+    -- clamp comparators in ONE cycle was the last HD critical path; this also
+    -- collapses three copies of the clamp into one.
+    signal sp_cl   : signed(15 downto 0) := (others => '0');
 
     -- 9-bit reciprocal mantissa ROM: round(2^18 / v) for v = 256..511
     -- (normalized top 9 bits, MSB implied) -> 10-bit mantissa in [512,1024]
@@ -344,7 +356,7 @@ architecture nacre of program_top is
     -- seed slot RAM: FOUR line banks x 256 pieces.  The engine runs
     -- C_NEARLY lines ahead of the raster, so it needs more than the classic
     -- double buffer; 4 banks make the bank index a free 2-bit wrap.
-    type t_seed is array(0 to 1023) of std_logic_vector(56 downto 0);
+    type t_seed is array(0 to 511) of std_logic_vector(56 downto 0);
     signal seedram : t_seed := (others => (others => '0'));
     signal sd_wa : unsigned(9 downto 0) := (others => '0');
     signal sd_we : std_logic := '0';
@@ -359,20 +371,21 @@ architecture nacre of program_top is
     -- preempt at knot-complete points, hm_pend resumes it)
     -- knot walker / evaluation state
     signal ks_g   : signed(15 downto 0) := (others => '0');   -- next grid knot
+    signal ks_n   : signed(15 downto 0) := (others => '0');   -- chosen next knot
+    signal ks_n2  : signed(15 downto 0) := (others => '0');   -- and its regrid
     signal s_kstep : unsigned(7 downto 0) := to_unsigned(16, 8);
     signal hk_x   : signed(15 downto 0) := (others => '0');   -- knot x
-    signal hk_ti, hk_to : signed(14 downto 0) := (others => '0');
     signal hk_f   : signed(17 downto 0) := (others => '0');   -- f at the knot, Q16
-    signal hw_r, hw_r2 : unsigned(13 downto 0) := (others => '0');
-    signal hw_q6a, hw_q6b : unsigned(19 downto 0) := (others => '0');
     signal hw_di  : unsigned(18 downto 0) := (others => '0');
+    -- the piece staged for the NEXT knot frame's slope divide
+    signal hq_l   : unsigned(11 downto 0) := (others => '0');
+    signal hq_df  : signed(10 downto 0) := (others => '0');
     signal hp_x   : signed(15 downto 0) := (others => '0');   -- open piece anchor
     signal hp_f   : signed(17 downto 0) := (others => '0');
     signal hp_v   : std_logic := '0';
     signal hw_xn  : unsigned(10 downto 0) := (others => '0'); -- staged seed word
     signal hw_f0  : signed(17 downto 0) := (others => '0');
     signal hw_pend : std_logic := '0';
-    signal hm_icx0 : signed(15 downto 0) := (others => '0');
     signal hm_dy_n : signed(14 downto 0) := (others => '0');
     signal hm_first : std_logic := '0';
     signal hm_xae, hm_xbe : signed(15 downto 0) := (others => '0');
@@ -381,7 +394,7 @@ architecture nacre of program_top is
     signal hm_iR, hm_oR : unsigned(12 downto 0) := (others => '0');
     signal hm_slot : unsigned(7 downto 0) := (others => '0');
     signal hm_side : std_logic := '0';
-    signal hm_ph  : integer range 0 to 55 := 0;
+    signal hm_ph  : integer range 0 to 63 := 0;
     signal hm_ean : integer range 0 to C_NC - 1 := 0;   -- chain read addr
     signal hm_k   : integer range 0 to C_NT := 0;       -- current run's own ring
     signal hm_lowp : integer range 0 to C_NT := C_NT;   -- innermost ring the
@@ -396,13 +409,16 @@ architecture nacre of program_top is
     -- engine is a CONSTANT -- one priority encoder + barrel on the die.
     signal nrm_in : unsigned(17 downto 0) := (others => '0');
     signal nrm_nm : signed(18 downto 0) := (others => '0');
+    signal nrm_sh   : integer range 0 to 17 := 0;          -- stage-1 exponent
+    signal nrm_in_q : unsigned(17 downto 0) := (others => '0');
+    signal nrm_nm_q : signed(18 downto 0) := (others => '0');
     signal hn     : signed(14 downto 0) := (others => '0');
     signal rrom_a : unsigned(7 downto 0) := (others => '0');
     signal rrom_q : unsigned(9 downto 0) := (others => '0');
 
     -- pixel-path linear accumulator + seed prefetch
-    signal fd_f   : signed(29 downto 0) := (others => '0');   -- Q16+12 guard +2
-    signal fd_d   : signed(27 downto 0) := (others => '0');
+    signal fd_f   : signed(24 downto 0) := (others => '0');   -- Q16 + 6 guard
+    signal fd_d   : signed(22 downto 0) := (others => '0');
     signal fd_xn  : unsigned(10 downto 0) := (others => '1'); -- next reseed x
     signal fd_ptr : unsigned(7 downto 0) := (others => '0');  -- seed read pointer
     signal fd_px  : unsigned(10 downto 0) := (others => '0'); -- pixel x at fd stage
@@ -477,21 +493,33 @@ begin
         variable v_nu : signed(19 downto 0);
     begin
         if rising_edge(clk) then
+            -- stage 1: priority encode ONLY.  Encoder + barrel + clamp in one
+            -- cycle measured 22.4 ns (44.7 MHz) -- the whole design's critical
+            -- path -- so the barrel now gets a cycle of its own.
             v_nb := 0;
             for i in 17 downto 1 loop
                 if nrm_in(i) = '1' then v_nb := i; exit; end if;
             end loop;
-            if v_nb >= 8 then
-                v_tp := shift_right(nrm_in, v_nb - 8);
-                v_nu := resize(shift_right(resize(nrm_nm, 20), v_nb - 8), 20);
+            nrm_sh   <= v_nb;
+            nrm_in_q <= nrm_in;
+            nrm_nm_q <= nrm_nm;
+
+            -- stage 2: barrel-shift BOTH operands by the same exponent, so
+            -- every post-multiply shift downstream stays a constant
+            if nrm_sh >= 8 then
+                v_tp := shift_right(nrm_in_q, nrm_sh - 8);
+                v_nu := resize(shift_right(resize(nrm_nm_q, 20), nrm_sh - 8), 20);
             else
-                v_tp := shift_left(nrm_in, 8 - v_nb);
-                v_nu := resize(shift_left(resize(nrm_nm, 20), 8 - v_nb), 20);
+                v_tp := shift_left(nrm_in_q, 8 - nrm_sh);
+                v_nu := resize(shift_left(resize(nrm_nm_q, 20), 8 - nrm_sh), 20);
             end if;
             rrom_a <= v_tp(7 downto 0);
             if    v_nu >  16383 then hn <= to_signed(16383, 15);
             elsif v_nu < -16384 then hn <= to_signed(-16384, 15);
             else                     hn <= resize(v_nu, 15); end if;
+
+            -- stage 3: the ROM read indexes the PRE-edge rrom_a, so rrom_q
+            -- ALWAYS trails hn by one cycle.  hn at T+3, rrom_q at T+4.
             rrom_q <= C_RROM(to_integer(rrom_a));
         end if;
     end process p_norm;
@@ -501,14 +529,27 @@ begin
         if rising_edge(clk) then
             if spst_we = '1' then spst(spst_wa) <= spst_wd; end if;
             spst_q <= spst(spst_ra);
+            -- Clamp to BOTH raster edges: rings wider than the screen have
+            -- negative left edges, and a negative run end propagates into
+            -- x_next as a huge unsigned value, desynchronising the pixel path
+            -- for the rest of the line.  The right clamp is s_W, not s_W-1:
+            -- x_next = s_W simply never matches, so the last column keeps its
+            -- piece.
+            if spst_q > signed(resize(s_W, 16)) then
+                sp_cl <= signed(resize(s_W, 16));
+            elsif spst_q < 0 then
+                sp_cl <= (others => '0');
+            else
+                sp_cl <= spst_q;
+            end if;
         end if;
     end process p_spst;
 
     p_seedram : process(clk)
     begin
         if rising_edge(clk) then
-            if sd_we = '1' then seedram(to_integer(sd_wa)) <= sd_wd; end if;
-            sd_q <= seedram(to_integer(sd_ra));
+            if sd_we = '1' then seedram(to_integer(sd_wa(8 downto 0))) <= sd_wd; end if;
+            sd_q <= seedram(to_integer(sd_ra(8 downto 0)));
         end if;
     end process p_seedram;
 
@@ -524,16 +565,19 @@ begin
     begin
         if rising_edge(clk) then
             if data_in.avid = '1' and s_avid_p = '0' then
-                -- line start: prefetch word 0 of the bank just written
-                -- (s_lb_eng still holds the engine bank at the rise cycle)
-                sd_ra <= (s_lbank + 1) & "00000000";
+                -- line start: word 0 is ALREADY in sd_q (parked during
+                -- blanking below -- the RAM needs 2 cycles from address to
+                -- data, and issuing the address here left the fd_ld load
+                -- reading the PREVIOUS line's leftover word), so point at
+                -- word 1 now and the first reseed can land on pixel 0
+                sd_ra <= ((s_lbank + 1) & "00000000") + 1;
                 fd_ptr <= (others => '0');
                 fd_px  <= (others => '0');
                 fd_ld  <= '1';
             elsif fd_ld = '1' then
-                -- word 0 arrives: seed the accumulator, prefetch word 1
-                fd_f  <= shift_left(resize(signed(sd_q(45 downto 28)), 30), 12);
-                fd_d  <= resize(signed(sd_q(27 downto 0)), 28);
+                -- word 0: seed the accumulator (word 1 is already in flight)
+                fd_f  <= shift_left(resize(signed(sd_q(45 downto 28)), 25), 6);
+                fd_d  <= resize(signed(sd_q(27 downto 0)), 23);
                 fd_xn <= unsigned(sd_q(56 downto 46));
                 fd_ptr <= to_unsigned(1, 8);
                 sd_ra <= (s_lbank & "00000000") + 1;
@@ -541,19 +585,23 @@ begin
             elsif s_avid_p = '1' then
                 if fd_px = fd_xn then
                     -- knot: reseed from the prefetched word, prefetch next
-                    fd_f  <= shift_left(resize(signed(sd_q(45 downto 28)), 30), 12);
-                    fd_d  <= resize(signed(sd_q(27 downto 0)), 28);
+                    fd_f  <= shift_left(resize(signed(sd_q(45 downto 28)), 25), 6);
+                    fd_d  <= resize(signed(sd_q(27 downto 0)), 23);
                     fd_xn <= unsigned(sd_q(56 downto 46));
                     fd_ptr <= fd_ptr + 1;
                     sd_ra <= (s_lbank & "00000000") + resize(fd_ptr, 10) + 1;
                 else
-                    fd_f <= fd_f + resize(fd_d, 30);
+                    fd_f <= fd_f + resize(fd_d, 25);
                 end if;
                 fd_px <= fd_px + 1;
+            else
+                -- blanking: park on the NEXT line's word 0 so it is in sd_q
+                -- before the raster needs it
+                sd_ra <= (s_lbank + 1) & "00000000";
             end if;
 
             -- fold: clamp Q16, triangle (dark at edges, bright mid-ring)
-            v_f := shift_right(fd_f, 12);
+            v_f := resize(shift_right(fd_f, 6), 30);
             if    v_f < 0     then v_t := (others => '0');
             elsif v_f > 65536 then v_t := to_unsigned(65536, 17);
             else                   v_t := resize(unsigned(v_f(16 downto 0)), 17);
@@ -666,18 +714,12 @@ begin
                     -- finished by slot 3; the chain starts at slot 3 too and
                     -- reads s_cx/s_cy, published at slot 2.
                     when 3 =>
-                        if mx_sgn = '1' then v_ct := -resize(mx_acc, 28);
-                        else                 v_ct :=  resize(mx_acc, 28); end if;
-                        v_targ := shift_left(resize(signed('0' & s_W(11 downto 1)), 22), 8)
-                                  + resize(v_ct, 22);
-                        if s_glx = '1' then s_cxs <= s_cxs + shift_right(v_targ - s_cxs, C_GSH);
-                        else                s_cxs <= v_targ; end if;
-                        if my_sgn = '1' then v_ct := -resize(my_acc, 28);
-                        else                 v_ct :=  resize(my_acc, 28); end if;
-                        v_targ := shift_left(resize(signed('0' & s_H(11 downto 1)), 22), 8)
-                                  + resize(v_ct, 22);
-                        if s_gly = '1' then s_cys <= s_cys + shift_right(v_targ - s_cys, C_GSH);
-                        else                s_cys <= v_targ; end if;
+                        -- apply only: one add and a mux (the target and the
+                        -- one-pole step were staged at slots 7 and 5)
+                        if s_glx = '1' then s_cxs <= s_cxs + s_dgx;
+                        else                s_cxs <= s_tgx; end if;
+                        if s_gly = '1' then s_cys <= s_cys + s_dgy;
+                        else                s_cys <= s_tgy; end if;
 
                     -- FREQUENCY: Lf(Q6) = -704 + Period*144/256.  The
                     -- decode is pipelined one step per slot (a single-slot
@@ -731,12 +773,27 @@ begin
                         else
                             s_apx <= resize(s_acap, 12);
                         end if;
+                        -- CENTRE target: c = W/2 + (K-512)*W/256, Q8.  The
+                        -- serial multiply (kicked at vsync, 10 cycles) has long
+                        -- since finished by slot 7.
+                        if mx_sgn = '1' then v_ct := -resize(mx_acc, 28);
+                        else                 v_ct :=  resize(mx_acc, 28); end if;
+                        s_tgx <= shift_left(resize(signed('0' & s_W(11 downto 1)), 22), 8)
+                                 + resize(v_ct, 22);
+                        if my_sgn = '1' then v_ct := -resize(my_acc, 28);
+                        else                 v_ct :=  resize(my_acc, 28); end if;
+                        s_tgy <= shift_left(resize(signed('0' & s_H(11 downto 1)), 22), 8)
+                                 + resize(v_ct, 22);
                     when 6 =>
                         s_cpx <= resize(s_apx, 13) + resize(shift_right(s_apx, 2), 13)
                                  + resize(shift_right(s_apx, 3), 13);
                     when 5 =>
                         s_cpx <= s_cpx + resize(shift_right(s_apx, 5), 13)
                                  + resize(shift_right(s_apx, 7), 13);
+                        -- one-pole glide step (s_cxs only moves at slot 3, so
+                        -- reading it here sees the same value slot 3 will use)
+                        s_dgx <= shift_right(s_tgx - s_cxs, C_GSH);
+                        s_dgy <= shift_right(s_tgy - s_cys, C_GSH);
                         -- K4 STEPS: 7 zones -> 2..64 grey levels per ring
                         s_gn <= to_integer(shift_right(shift_left(resize(s_k4_gr, 14), 3)
                                 - resize(s_k4_gr, 14), 10));
@@ -997,14 +1054,10 @@ begin
         -- E_HERM temporaries
         variable v_hd : signed(15 downto 0);
         variable v_ix : integer range 0 to 7;
-        variable v_rv : unsigned(17 downto 0);
-        variable v_tp : unsigned(8 downto 0);
-        variable v_nb : integer range 0 to 17;
-        variable v_l  : signed(15 downto 0);
+        variable v_do : unsigned(18 downto 0);
+        variable v_gp : unsigned(19 downto 0);
         variable v_fp : signed(29 downto 0);
         variable v_dp : signed(35 downto 0);
-        variable v_rm : unsigned(17 downto 0);
-        variable v_iap, v_oap : std_logic;
     begin
         if rising_edge(clk) then
             -- 2-stage engine multiply (partials, then combine)
@@ -1037,34 +1090,26 @@ begin
             -- Two chained 27-bit subtract/compares; loads override.
             ------------------------------------------------------------
             if sqa_run = '1' then
-                v_sqn := sqa_num; v_sqr := sqa_res; v_sqo := sqa_one;
-                for i in 0 to 1 loop
-                    v_tr := v_sqr or v_sqo;
-                    if v_sqn >= v_tr then
-                        v_sqn := v_sqn - v_tr;
-                        v_sqr := shift_right(v_sqr, 1) or v_sqo;
-                    else
-                        v_sqr := shift_right(v_sqr, 1);
-                    end if;
-                    v_sqo := shift_right(v_sqo, 2);
-                end loop;
-                sqa_num <= v_sqn; sqa_res <= v_sqr; sqa_one <= v_sqo;
-                if v_sqo = 0 then sqa_run <= '0'; end if;
+                v_tr := sqa_res or sqa_one;
+                if sqa_num >= v_tr then
+                    sqa_num <= sqa_num - v_tr;
+                    sqa_res <= shift_right(sqa_res, 1) or sqa_one;
+                else
+                    sqa_res <= shift_right(sqa_res, 1);
+                end if;
+                sqa_one <= shift_right(sqa_one, 2);
+                if sqa_one = 0 then sqa_run <= '0'; end if;
             end if;
             if sqb_run = '1' then
-                v_sqn := sqb_num; v_sqr := sqb_res; v_sqo := sqb_one;
-                for i in 0 to 1 loop
-                    v_tr := v_sqr or v_sqo;
-                    if v_sqn >= v_tr then
-                        v_sqn := v_sqn - v_tr;
-                        v_sqr := shift_right(v_sqr, 1) or v_sqo;
-                    else
-                        v_sqr := shift_right(v_sqr, 1);
-                    end if;
-                    v_sqo := shift_right(v_sqo, 2);
-                end loop;
-                sqb_num <= v_sqn; sqb_res <= v_sqr; sqb_one <= v_sqo;
-                if v_sqo = 0 then sqb_run <= '0'; end if;
+                v_tr := sqb_res or sqb_one;
+                if sqb_num >= v_tr then
+                    sqb_num <= sqb_num - v_tr;
+                    sqb_res <= shift_right(sqb_res, 1) or sqb_one;
+                else
+                    sqb_res <= shift_right(sqb_res, 1);
+                end if;
+                sqb_one <= shift_right(sqb_one, 2);
+                if sqb_one = 0 then sqb_run <= '0'; end if;
             end if;
             case e_st is
 
@@ -1210,13 +1255,13 @@ begin
             when E_HERM =>
                 case hm_ph is
 
-                    -- ---------------- line init ----------------
+                    -- ---------------- line init (40..46) ----------------
                     when 48 =>
                         hm_slot <= (others => '0');
                         hp_v    <= '0';
                         hw_pend <= '0';
                         if hm_lowp = C_NT then
-                            hm_ph <= 41;              -- no discs: ground sentinel only
+                            hm_ph <= 45;              -- no discs: ground sentinel only
                         else
                             hm_k    <= C_NT - 1;
                             hm_side <= '0';
@@ -1232,60 +1277,110 @@ begin
                     when 50 =>
                         hm_ocx  <= resize(doa_ex, 16) + resize(s_cx, 16);
                         hm_dy_n <= resize(resize(sp_dy, 16) - resize(doa_ey, 16), 15);
-                        if spst_q < 0 then hm_xae <= (others => '0');
-                        else               hm_xae <= spst_q; end if;
                         if C_NT - 1 > hm_lowp then spst_ra <= C_NT - 2;
                         else                       spst_ra <= C_NT + C_NT - 1; end if;
                         hm_ph <= 51;
                     when 51 =>
                         m_a <= resize(hm_dy_n, 15);  m_b <= resize(hm_dy_n, 15);
-                        hm_ph <= 52;
+                        hm_xae <= sp_cl;
+                        hm_ph <= 52;                  -- OUTER dy^2 -> m_p at 54
                     when 52 =>
                         hm_icx  <= resize(doa_ex, 16) + resize(s_cx, 16);
                         hm_dy_n <= resize(resize(sp_dy, 16) - resize(doa_ey, 16), 15);
                         hm_iR   <= resize(s_rmax - resize(s_spac, 13), 13);
                         hm_ph <= 53;
                     when 53 =>
-                        hm_ody2 <= unsigned(m_p(26 downto 0));
                         m_a <= resize(hm_dy_n, 15);  m_b <= resize(hm_dy_n, 15);
-                        -- clamp to BOTH raster edges: rings wider than the
-                        -- screen have negative left edges, and a negative
-                        -- run end propagates into hm_xae and then into the
-                        -- seed's x_next as a huge unsigned value, which
-                        -- desynchronises the pixel path for the rest of the
-                        -- line (the whole left side went black)
-                        if spst_q > signed(resize(s_W, 16)) - 1 then
-                            hm_xbe <= signed(resize(s_W, 16)) - 1;
-                        elsif spst_q < 0 then
-                            hm_xbe <= (others => '0');
-                        else
-                            hm_xbe <= spst_q;
-                        end if;
-                        hm_ph <= 54;
+                        hm_xbe <= sp_cl;
+                        hm_ph <= 54;                  -- INNER dy^2 -> m_p at 56
                     when 54 =>
+                        -- m_p here is the multiply issued at 51.  Reading the
+                        -- two dy^2 products at 53 and 54 was a ONE-CYCLE-EARLY
+                        -- read that left hm_ody2 holding E_SPAN's last w^2, so
+                        -- every line's FIRST run had a bogus outer circle --
+                        -- masked while the nest is concentric, wrong the
+                        -- moment it is dragged.
+                        hm_ody2 <= unsigned(m_p(26 downto 0));
+                        hm_ph <= 55;
+                    when 55 =>
+                        hm_ph <= 56;
+                    when 56 =>
                         hm_idy2 <= unsigned(m_p(26 downto 0));
                         -- LEADING GROUND piece: flat black from x = 0 up to
-                        -- the first edge (the pixel path reseeds at x_next)
+                        -- the first edge (the pixel path reseeds at x_next).
+                        -- hq_l = 0 makes the staged slope divide produce 0.
                         hw_xn <= unsigned(hm_xae(10 downto 0));
                         hw_f0 <= (others => '0');
-                        sd_wd(27 downto 0) <= (others => '0');
+                        hq_l  <= (others => '0');
+                        hq_df <= (others => '0');
                         hw_pend <= '1';
                         ks_g <= hm_xae + signed(resize(s_kstep, 16));
                         hk_x <= hm_xae;
-                        if hm_xbe <= hm_xae then
-                            hm_ph <= 32;              -- outermost ring clipped
+                        if hm_xbe <= hm_xae + 1 then
+                            hm_ph <= 29;              -- outermost ring clipped
                         else
                             hm_ph <= 0;
                         end if;
 
-                    -- --------------- knot frame ---------------
+                    -- --------------- knot frame (23 cycles, 0..22) --------
                     -- LATENCIES (get these wrong and the field is garbage):
                     --   shared multiply: operands issued at T, m_p at T+3
-                    --   radix-4 sqrt: loaded at T, 7 stepping cycles T+1..T+7,
-                    --                 result readable at T+8
-                    --   p_norm: nrm_* loaded at T, hn at T+1, rrom_q at T+2
+                    --   radix-4 sqrt: loaded at T, result readable at T+8
+                    --   p_norm: nrm_* loaded at T, hn at T+2, rrom_q at T+3
+                    --     (rrom_q trails hn by one cycle -- p_norm's ROM read
+                    --      indexes the PRE-edge rrom_a.  Reading them in the
+                    --      same cycle used the PREVIOUS knot's reciprocal on
+                    --      every divide; that was the whole field being wrong.)
+                    -- The previous piece's slope divide is PIPELINED into this
+                    -- knot's sqrt shadow (states 2..9), which is what makes the
+                    -- frame fit the per-line budget.
                     when 0 =>
-                        -- commit the pending piece, then open this knot
+                        -- the hk_ti/hk_to registers are gone: the subtract
+                        -- feeds the multiply operand register directly (still
+                        -- FF-to-FF, and it buys a cycle back off the frame)
+                        m_a <= resize(hk_x - hm_icx, 15);
+                        m_b <= resize(hk_x - hm_icx, 15);
+                        hm_ph <= 1;
+                    when 1 =>
+                        m_a <= resize(hk_x - hm_ocx, 15);
+                        m_b <= resize(hk_x - hm_ocx, 15);
+                        nrm_in <= resize(hq_l, 18);          -- previous piece
+                        nrm_nm <= resize(hq_df, 19);
+                        hm_ph <= 2;
+                    when 2 =>
+                        hm_ph <= 3;
+                    when 3 =>
+                        sqa_num <= resize(unsigned(m_p(26 downto 0)) + hm_idy2, 27);
+                        sqa_res <= (others => '0');
+                        sqa_one <= shift_left(to_unsigned(1, 27), 26);
+                        sqa_run <= '1';
+                        hm_ph <= 4;
+                    when 4 =>
+                        sqb_num <= resize(unsigned(m_p(26 downto 0)) + hm_ody2, 27);
+                        sqb_res <= (others => '0');
+                        sqb_one <= shift_left(to_unsigned(1, 27), 26);
+                        sqb_run <= '1';
+                        hm_ph <= 5;
+                    when 5 =>
+                        m_a <= hn;  m_b <= signed(resize(rrom_q, 15));
+                        hm_ph <= 6;
+                    when 6 | 7 =>
+                        hm_ph <= hm_ph + 1;
+                    when 8 =>
+                        -- d0 (Q16 + 6 guard per px).  hn carries (df >> 8)
+                        -- scaled by the SAME exponent as L, so hn*mant >> 3 is
+                        -- df*2^6/L and the conversion is one CONSTANT shift.
+                        -- (>>3 on df instead of >>8 saturated hn for every
+                        -- piece shorter than 128 px -- the slope came out ~16x
+                        -- too small and the field barely moved.)
+                        if hw_pend = '1' then
+                            v_dp := resize(shift_right(m_p, 3), 36);
+                            if    v_dp >  4194303 then v_dp :=  to_signed(4194303, 36);
+                            elsif v_dp < -4194304 then v_dp := to_signed(-4194304, 36); end if;
+                            sd_wd(27 downto 0) <= std_logic_vector(resize(v_dp, 28));
+                        end if;
+                        hm_ph <= 9;
+                    when 9 =>
                         if hw_pend = '1' then
                             sd_wa <= eng_bank & hm_slot;
                             sd_wd(56 downto 46) <= std_logic_vector(hw_xn);
@@ -1294,146 +1389,113 @@ begin
                             hm_slot <= hm_slot + 1;
                             hw_pend <= '0';
                         end if;
-                        hk_ti <= resize(hk_x - hm_icx, 15);
-                        hk_to <= resize(hk_x - hm_ocx, 15);
-                        hm_ph <= 1;
-                    when 1 =>
-                        m_a <= hk_ti;  m_b <= hk_ti;
-                        hm_ph <= 2;
-                    when 2 =>
-                        m_a <= hk_to;  m_b <= hk_to;
-                        hm_ph <= 3;
-                    when 3 =>
-                        hm_ph <= 4;
-                    when 4 =>
-                        sqa_num <= resize(unsigned(m_p(26 downto 0)) + hm_idy2, 27);
-                        sqa_res <= (others => '0');
-                        sqa_one <= shift_left(to_unsigned(1, 27), 26);
-                        sqa_run <= '1';
-                        hm_ph <= 5;
-                    when 5 =>
-                        sqb_num <= resize(unsigned(m_p(26 downto 0)) + hm_ody2, 27);
-                        sqb_res <= (others => '0');
-                        sqb_one <= shift_left(to_unsigned(1, 27), 26);
-                        sqb_run <= '1';
-                        hm_ph <= 6;
-                    when 6 | 7 | 8 | 9 | 10 | 11 =>       -- sqrt A: 7 steps
-                        hm_ph <= hm_ph + 1;
+                        hm_ph <= 10;
+                    -- radix-2 sqrt: loaded at 3 and 4, readable at 18 and
+                    -- 19.  Radix-4 (two chained 27-bit subtracts in one cycle)
+                    -- measured 18.2 ns / 55 MHz and was THE critical path of
+                    -- the whole design; one step per cycle halves it, paid for
+                    -- with these idle states and a smaller ring count.
+                    when 10 =>
+                        hm_ph <= 11;
+                    -- The next knot's x does not depend on this knot's f, so
+                    -- the whole candidate chain runs HERE, in the sqrt's idle
+                    -- window.  As one cycle at the end of the frame it was an
+                    -- 18 ns compare/mux/add chain and the critical path.
+                    --
+                    -- Candidates: the grid, and the run's INNER circle-centre
+                    -- column (where r(x) kinks -- without it the central run
+                    -- interpolates straight across the innermost disc).  Every
+                    -- piece must span >= 2 px, because the pixel path's seed
+                    -- prefetch takes 2 cycles and back-to-back reseeds read a
+                    -- STALE word; the bounds are folded into the candidate
+                    -- tests rather than clamping the winner afterwards.
+                    when 11 =>
+                        if ks_g + 1 < hm_xbe then ks_n <= ks_g;
+                        else                      ks_n <= hm_xbe; end if;
+                        hm_ph <= 12;
                     when 12 =>
-                        -- inner distance ready; start recip(2ri+1) on the
-                        -- remainder (the sub-pixel correction)
-                        hw_r   <= sqa_res(13 downto 0);
-                        nrm_in <= resize(shift_left(resize(sqa_res(13 downto 0), 18), 1) + 1, 18);
-                        nrm_nm <= resize(signed('0' & sqa_num(14 downto 0)), 19);
+                        if hm_icx > hk_x + 1 and hm_icx < ks_n then
+                            ks_n <= hm_icx;
+                        end if;
                         hm_ph <= 13;
                     when 13 =>
-                        hw_r2  <= sqb_res(13 downto 0);   -- outer distance ready
+                        ks_n2 <= ks_n + signed(resize(s_kstep, 16));
                         hm_ph <= 14;
-                    when 14 =>
-                        m_a <= hn;  m_b <= signed(resize(rrom_q, 15));
-                        nrm_in <= resize(shift_left(resize(hw_r2, 18), 1) + 1, 18);
-                        nrm_nm <= resize(signed('0' & sqb_num(14 downto 0)), 19);
-                        hm_ph <= 15;
-                    when 15 =>
-                        hm_ph <= 16;
-                    when 16 =>
-                        m_a <= hn;  m_b <= signed(resize(rrom_q, 15));
-                        hm_ph <= 17;
-                    when 17 =>
-                        -- r (Q6) = (r << 6) + rem * recip(2r+1) >> 11
-                        hw_q6a <= resize(shift_left(resize(hw_r, 20), 6)
-                                  + unsigned(resize(shift_right(m_p, 11), 20)), 20);
-                        hm_ph <= 18;
+                    when 14 | 15 | 16 | 17 =>
+                        hm_ph <= hm_ph + 1;
                     when 18 =>
-                        hm_ph <= 19;
-                    when 19 =>
-                        hw_q6b <= resize(shift_left(resize(hw_r2, 20), 6)
-                                  + unsigned(resize(shift_right(m_p, 11), 20)), 20);
-                        -- d_in = ri - R_inner (Q6, clamped >= 0)
-                        if hw_q6a > shift_left(resize(hm_iR, 20), 6) then
-                            hw_di <= resize(hw_q6a - shift_left(resize(hm_iR, 20), 6), 19);
+                        -- d_in = r_inner - R_inner (Q6, clamped >= 0).
+                        -- Integer sqrt only: the sub-pixel remainder
+                        -- correction measured 1.4/255 of mean error and cost
+                        -- 8 cycles a knot, which the line budget cannot pay.
+                        if shift_left(resize(sqa_res(13 downto 0), 20), 6)
+                           > shift_left(resize(hm_iR, 20), 6) then
+                            hw_di <= resize(shift_left(resize(sqa_res(13 downto 0), 20), 6)
+                                            - shift_left(resize(hm_iR, 20), 6), 19);
                         else
                             hw_di <= (others => '0');
                         end if;
-                        hm_ph <= 20;
-                    when 20 =>
-                        -- gap = d_in + d_out -> recip; numerator = d_in, so
-                        -- both share an exponent and f is a constant shift
-                        if shift_left(resize(hm_oR, 20), 6) > hw_q6b then
-                            v_rv := resize(shift_left(resize(hm_oR, 20), 6) - hw_q6b, 18);
+                        hm_ph <= 19;
+                    when 19 =>
+                        -- d_out AND the gap in one cycle (a clamped subtract
+                        -- plus an add -- far short of the norm path), which is
+                        -- what keeps the frame at 23 cycles after p_norm grew
+                        -- a stage.  gap = d_in + d_out -> recip; the numerator
+                        -- is d_in, so both share an exponent and f is a
+                        -- constant shift.
+                        if shift_left(resize(hm_oR, 20), 6)
+                           > shift_left(resize(sqb_res(13 downto 0), 20), 6) then
+                            v_do := resize(shift_left(resize(hm_oR, 20), 6)
+                                           - shift_left(resize(sqb_res(13 downto 0), 20), 6), 19);
                         else
-                            v_rv := (others => '0');
+                            v_do := (others => '0');
                         end if;
-                        v_rv := resize(hw_di, 18) + v_rv;
-                        if v_rv < 64 then v_rv := to_unsigned(64, 18); end if;
-                        nrm_in <= v_rv;
+                        v_gp := resize(hw_di, 20) + resize(v_do, 20);
+                        if    v_gp > 262143 then v_gp := to_unsigned(262143, 20);
+                        elsif v_gp < 64     then v_gp := to_unsigned(64, 20); end if;
+                        nrm_in <= resize(v_gp, 18);
                         nrm_nm <= resize(signed('0' & hw_di), 19);
-                        hm_ph <= 21;
-                    when 21 =>
-                        hm_ph <= 22;
-                    when 22 =>
-                        m_a <= hn;  m_b <= signed(resize(rrom_q, 15));
-                        hm_ph <= 23;
-                    when 23 | 24 =>
+                        hm_ph <= 20;
+                    when 20 | 21 | 22 =>
                         hm_ph <= hm_ph + 1;
-                    when 25 =>
+                    when 23 =>
+                        m_a <= hn;  m_b <= signed(resize(rrom_q, 15));
+                        hm_ph <= 24;
+                    when 24 | 25 =>
+                        hm_ph <= hm_ph + 1;
+                    when 26 =>
                         v_fp := resize(shift_right(m_p, 1), 30);     -- f, Q16
                         if    v_fp < 0     then hk_f <= (others => '0');
                         elsif v_fp > 65536 then hk_f <= to_signed(65536, 18);
                         else                    hk_f <= resize(v_fp, 18); end if;
-                        hm_ph <= 26;
-                    when 26 =>
-                        -- close the piece [hp_x, hk_x): slope = df / L
-                        if hp_v = '1' then
-                            v_l := hk_x - hp_x;
-                            if v_l < 1 then v_l := to_signed(1, 16); end if;
-                            nrm_in <= resize(unsigned(v_l(11 downto 0)), 18);
-                            nrm_nm <= resize(shift_right(hk_f - hp_f, 3), 19);
-                        end if;
                         hm_ph <= 27;
                     when 27 =>
-                        hm_ph <= 28;
-                    when 28 =>
-                        -- A piece is only emitted if it actually covers
-                        -- pixels.  Rings far larger than the raster clip to
-                        -- zero-length runs; emitting those would hand the
-                        -- pixel path two seeds with the same x_next, and it
-                        -- can only consume one per pixel.
+                        -- stage the piece [hp_x, hk_x).  A piece is only
+                        -- emitted if it covers pixels: rings far larger than
+                        -- the raster clip to zero-length runs, and emitting
+                        -- those hands the pixel path two seeds with the same
+                        -- x_next, which it can only consume one of per pixel.
                         if hp_v = '1' and hk_x > hp_x then
-                            m_a   <= hn;  m_b <= signed(resize(rrom_q, 15));
                             hw_xn <= unsigned(hk_x(10 downto 0));
                             hw_f0 <= hp_f;
+                            hq_l  <= unsigned(resize(hk_x - hp_x, 12));
+                            hq_df <= resize(shift_right(hk_f - hp_f, 8), 11);
                             hw_pend <= '1';
                         end if;
                         hp_x <= hk_x;  hp_f <= hk_f;  hp_v <= '1';
-                        hm_ph <= 29;
-                    when 29 | 30 =>
-                        hm_ph <= hm_ph + 1;
-                    when 31 =>
-                        -- d0 (Q16+12 per px).  hn carries (df>>3) scaled by
-                        -- the SAME exponent as L, so hn*mant/2^17 is
-                        -- (df>>3)/L and the whole conversion is one shift.
-                        if hw_pend = '1' then
-                            v_dp := resize(shift_right(m_p, 2), 36);
-                            if    v_dp >  134217727 then v_dp :=  to_signed(134217727, 36);
-                            elsif v_dp < -134217728 then v_dp := to_signed(-134217728, 36); end if;
-                            sd_wd(27 downto 0) <= std_logic_vector(resize(v_dp, 28));
-                        end if;
-                        -- next knot: the grid, or this run's far edge
+                        hm_ph <= 28;
+                    -- (state 22 is unreachable: 21 jumps to 0 or to the roll)
+                    when 28 =>
                         if hk_x >= hm_xbe then
-                            hm_ph <= 32;                  -- roll to the next run
+                            hm_ph <= 29;                  -- roll to the next run
                         else
-                            if ks_g < hm_xbe then
-                                hk_x <= ks_g;
-                                ks_g <= ks_g + signed(resize(s_kstep, 16));
-                            else
-                                hk_x <= hm_xbe;
-                            end if;
+                            hk_x <= ks_n;                 -- chosen in 11..13
+                            ks_g <= ks_n2;                -- grid re-anchors
                             hm_ph <= 0;
                         end if;
 
-                    -- --------------- run roll ---------------
-                    when 32 =>
+                    -- --------------- run roll (23..29) ---------------
+                    when 29 =>
                         -- Walk order: left edges outside-in, the innermost
                         -- present ring's central run, then right edges
                         -- inside-out.  The walk TERMINATES here (a run must
@@ -1444,33 +1506,33 @@ begin
                             if    hm_k < 2        then hm_ean <= 0;
                             elsif hm_k - 2 < C_NC then hm_ean <= hm_k - 2;
                             else                       hm_ean <= C_NC - 1; end if;
-                            hm_ph <= 33;
+                            hm_ph <= 30;
                         elsif hm_side = '0' then
                             hm_side <= '1';               -- central run done
                             if hm_lowp < C_NT - 1 then
                                 hm_k <= hm_lowp + 1;
                                 if hm_lowp + 1 < C_NC then hm_ean <= hm_lowp + 1;
                                 else                       hm_ean <= C_NC - 1; end if;
-                                hm_ph <= 33;
+                                hm_ph <= 30;
                             else
-                                hm_ph <= 40;              -- nothing outside it
+                                hm_ph <= 36;              -- nothing outside it
                             end if;
                         elsif hm_k < C_NT - 1 then
                             hm_k <= hm_k + 1;
                             if hm_k + 1 < C_NC then hm_ean <= hm_k + 1;
                             else                    hm_ean <= C_NC - 1; end if;
-                            hm_ph <= 33;
+                            hm_ph <= 30;
                         else
-                            hm_ph <= 40;                  -- outermost done
+                            hm_ph <= 36;                  -- outermost done
                         end if;
-                    when 33 =>
+                    when 30 =>
                         if hm_side = '0' and hm_k > hm_lowp then
                             spst_ra <= hm_k - 1;
                         else
                             spst_ra <= C_NT + hm_k;
                         end if;
-                        hm_ph <= 34;
-                    when 34 =>
+                        hm_ph <= 31;
+                    when 31 =>
                         -- shuffle the circle context along by one ring
                         if hm_side = '0' then
                             hm_ocx <= hm_icx;  hm_ody2 <= hm_idy2;
@@ -1483,37 +1545,27 @@ begin
                             hm_oR  <= resize(hm_oR + resize(s_spac, 13), 13);
                         end if;
                         hm_dy_n <= resize(resize(sp_dy, 16) - resize(doa_ey, 16), 15);
-                        hm_icx0 <= resize(doa_ex, 16) + resize(s_cx, 16);
-                        hm_ph <= 35;
-                    when 35 =>
-                        if hm_side = '0' then hm_icx <= hm_icx0;
-                        else                  hm_ocx <= hm_icx0; end if;
+                        hm_ph <= 32;
+                    when 32 =>
+                        -- doa_ex still holds ram_ex(hm_ean) here (the address
+                        -- settled two cycles ago), so the hm_icx0 staging
+                        -- register is unnecessary
+                        if hm_side = '0' then hm_icx <= resize(doa_ex, 16) + resize(s_cx, 16);
+                        else                  hm_ocx <= resize(doa_ex, 16) + resize(s_cx, 16); end if;
                         m_a <= resize(hm_dy_n, 15);  m_b <= resize(hm_dy_n, 15);
                         hm_xae <= hm_xbe;                 -- the shared edge (the
                                                           -- run just closed; hk_x
                                                           -- is stale after a skip)
                         ks_g   <= hm_xbe + signed(resize(s_kstep, 16));
-                        -- clamp to BOTH raster edges: rings wider than the
-                        -- screen have negative left edges, and a negative
-                        -- run end propagates into hm_xae and then into the
-                        -- seed's x_next as a huge unsigned value, which
-                        -- desynchronises the pixel path for the rest of the
-                        -- line (the whole left side went black)
-                        if spst_q > signed(resize(s_W, 16)) - 1 then
-                            hm_xbe <= signed(resize(s_W, 16)) - 1;
-                        elsif spst_q < 0 then
-                            hm_xbe <= (others => '0');
-                        else
-                            hm_xbe <= spst_q;
-                        end if;
-                        hm_ph <= 36;
-                    when 36 | 37 =>
-                        hm_ph <= hm_ph + 1;
-                    when 38 =>
+                        hm_ph <= 33;
+                    when 33 =>
+                        hm_xbe <= sp_cl;
+                        hm_ph <= 34;
+                    when 34 =>
+                        hm_ph <= 35;
+                    when 35 =>
                         if hm_side = '0' then hm_idy2 <= unsigned(m_p(26 downto 0));
                         else                  hm_ody2 <= unsigned(m_p(26 downto 0)); end if;
-                        -- the shared edge is re-evaluated in the NEW context,
-                        -- so it OPENS the next piece: drop the stale anchor
                         -- The shared edge belongs to BOTH runs but with
                         -- different values (f jumps 1 -> 0 across a ring
                         -- edge), so it must be re-evaluated in the new
@@ -1523,15 +1575,36 @@ begin
                         -- leaves the span from the edge unrendered, and the
                         -- previous piece then smears across it.
                         hp_v <= '0';
-                        if hm_xbe <= hm_xae then
-                            hm_ph <= 32;              -- run clipped away: skip
+                        if hm_xbe <= hm_xae + 1 then
+                            hm_ph <= 29;              -- run clipped away: skip
                         else
                             hk_x <= hm_xae;           -- the shared edge
                             hm_ph <= 0;
                         end if;
 
-                    -- --------------- finish ---------------
+                    -- --------------- finish (30..38) ---------------
+                    -- the last piece's slope divide has no next knot to ride
+                    -- in, so it is run out here once per line
+                    when 36 =>
+                        nrm_in <= resize(hq_l, 18);
+                        nrm_nm <= resize(hq_df, 19);
+                        hm_ph <= 37;
+                    when 37 | 38 | 39 =>
+                        hm_ph <= hm_ph + 1;
                     when 40 =>
+                        m_a <= hn;  m_b <= signed(resize(rrom_q, 15));
+                        hm_ph <= 41;
+                    when 41 | 42 =>
+                        hm_ph <= hm_ph + 1;
+                    when 43 =>
+                        if hw_pend = '1' then
+                            v_dp := resize(shift_right(m_p, 3), 36);
+                            if    v_dp >  4194303 then v_dp :=  to_signed(4194303, 36);
+                            elsif v_dp < -4194304 then v_dp := to_signed(-4194304, 36); end if;
+                            sd_wd(27 downto 0) <= std_logic_vector(resize(v_dp, 28));
+                        end if;
+                        hm_ph <= 44;
+                    when 44 =>
                         if hw_pend = '1' then
                             sd_wa <= eng_bank & hm_slot;
                             sd_wd(56 downto 46) <= std_logic_vector(hw_xn);
@@ -1540,15 +1613,15 @@ begin
                             hm_slot <= hm_slot + 1;
                             hw_pend <= '0';
                         end if;
-                        hm_ph <= 41;
-                    when 41 =>
+                        hm_ph <= 45;
+                    when 45 =>
                         -- TRAILING GROUND sentinel: x_next = 2047 never
                         -- matches, so the rest of the line stays flat
                         sd_wa <= eng_bank & hm_slot;
                         sd_wd <= (others => '0');
                         sd_wd(56 downto 46) <= (others => '1');
                         sd_we <= '1';
-                        hm_ph <= 42;
+                        hm_ph <= 57;
                     when others =>
                         -- more lines to pre-fill (frame start), else idle
                         if e_pre /= 0 then
