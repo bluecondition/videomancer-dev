@@ -384,7 +384,10 @@ architecture nacre of program_top is
     -- alone interpolate it as a pyramid and the innermost disc renders as a
     -- visible DIAMOND.  It gets half the grid step; the other runs cannot
     -- afford it (SD went over the line budget at a quarter).
-    signal hm_ctr  : std_logic := '0';
+    -- ...as a single registered STEP, not a mux at each use site.  Three
+    -- 16-bit "half or whole" muxes cost ~130 LC and pushed hd_hdmi off the
+    -- end of its seed range.
+    signal hm_step : unsigned(7 downto 0) := to_unsigned(16, 8);
     signal ks_n   : signed(15 downto 0) := (others => '0');   -- chosen next knot
     signal ks_n2  : signed(15 downto 0) := (others => '0');   -- and its regrid
     signal s_kstep : unsigned(7 downto 0) := to_unsigned(16, 8);
@@ -1302,8 +1305,11 @@ begin
                             hm_ean  <= C_NC - 1;      -- outermost = rigid
                             spst_ra <= C_NT - 1;      -- xa = L[C_NT-1]
                             hm_oR   <= s_rmax;
-                            if hm_lowp = C_NT - 1 then hm_ctr <= '1';
-                            else                       hm_ctr <= '0'; end if;
+                            if hm_lowp = C_NT - 1 then
+                                hm_step <= shift_right(s_kstep, 1);
+                            else
+                                hm_step <= s_kstep;
+                            end if;
                             hm_ph   <= 49;
                         end if;
                     when 49 =>
@@ -1350,11 +1356,7 @@ begin
                         hq_l  <= (others => '0');
                         hq_df <= (others => '0');
                         hw_pend <= '1';
-                        if hm_ctr = '1' then
-                            ks_g <= hm_xae + signed(resize(shift_right(s_kstep, 1), 16));
-                        else
-                            ks_g <= hm_xae + signed(resize(s_kstep, 16));
-                        end if;
+                        ks_g <= hm_xae + signed(resize(hm_step, 16));
                         hk_x <= hm_xae;
                         if hm_xbe <= hm_xae + 1 then
                             hm_ph <= 30;              -- outermost ring clipped
@@ -1459,11 +1461,7 @@ begin
                         end if;
                         hm_ph <= 13;
                     when 13 =>
-                        if hm_ctr = '1' then
-                            ks_n2 <= ks_n + signed(resize(shift_right(s_kstep, 1), 16));
-                        else
-                            ks_n2 <= ks_n + signed(resize(s_kstep, 16));
-                        end if;
+                        ks_n2 <= ks_n + signed(resize(hm_step, 16));
                         -- "this knot closes the run" as a FLAG.  Leaving the
                         -- 16-bit compare in state 29 put a carry chain in
                         -- hk_x's load enable -- 18 logic levels, 13.5 ns, and
@@ -1557,8 +1555,11 @@ begin
                             if    hm_k < 2        then hm_ean <= 0;
                             elsif hm_k - 2 < C_NC then hm_ean <= hm_k - 2;
                             else                       hm_ean <= C_NC - 1; end if;
-                            if hm_k = hm_lowp + 1 then hm_ctr <= '1';
-                            else                       hm_ctr <= '0'; end if;
+                            if hm_k = hm_lowp + 1 then
+                                hm_step <= shift_right(s_kstep, 1);
+                            else
+                                hm_step <= s_kstep;
+                            end if;
                             hm_ph <= 31;
                         elsif hm_side = '0' then
                             hm_side <= '1';               -- central run done
@@ -1566,7 +1567,7 @@ begin
                                 hm_k <= hm_lowp + 1;
                                 if hm_lowp + 1 < C_NC then hm_ean <= hm_lowp + 1;
                                 else                       hm_ean <= C_NC - 1; end if;
-                                hm_ctr <= '0';
+                                hm_step <= s_kstep;
                                 hm_ph <= 31;
                             else
                                 hm_ph <= 37;              -- nothing outside it
@@ -1575,7 +1576,7 @@ begin
                             hm_k <= hm_k + 1;
                             if hm_k + 1 < C_NC then hm_ean <= hm_k + 1;
                             else                    hm_ean <= C_NC - 1; end if;
-                            hm_ctr <= '0';
+                            hm_step <= s_kstep;
                             hm_ph <= 31;
                         else
                             hm_ph <= 37;                  -- outermost done
@@ -1611,11 +1612,7 @@ begin
                         hm_xae <= hm_xbe;                 -- the shared edge (the
                                                           -- run just closed; hk_x
                                                           -- is stale after a skip)
-                        if hm_ctr = '1' then
-                            ks_g <= hm_xbe + signed(resize(shift_right(s_kstep, 1), 16));
-                        else
-                            ks_g <= hm_xbe + signed(resize(s_kstep, 16));
-                        end if;
+                        ks_g   <= hm_xbe + signed(resize(hm_step, 16));
                         hm_ph <= 34;
                     when 34 =>
                         hm_xbe <= sp_cl;
