@@ -144,9 +144,16 @@ chain-RAM-to-engine nets competing for the same channels; six fit. Check the
 router log for a stuck `overused=` count before blaming logic depth, and try
 net count before reaching for a ring cut. (The builder accepts a best-effort bitstream after its seed retries, so read
 the reported Fmax rather than trusting the "✓ Completed" line; see
-[[build_timing_verification]].) The five non-dual configs above were measured
-at C_NC=8 and need re-confirming at 6 — fewer discs only removes logic, but
-that is an assumption until the rebuild says so.
+[[build_timing_verification]].)
+
+> **Build state, 2026-07-31.** hd_dual's 77.30 / 76.80 MHz were measured
+> directly with nextpnr on the C_NC=6 netlist. The other five rows were
+> measured at C_NC=8 and still need re-confirming at 6 — dropping discs only
+> removes logic, so a regression is unlikely, but it is an assumption until a
+> build says otherwise. **Run a clean `./build_programs.sh ron nacre` before
+> flashing anything**: the build tree was left partial (hd_hdmi bitstream
+> missing) and `out/rev_b/ron/nacre.vmprog` is still the older C_NC=8 package
+> that carries the FAILING 61 MHz hd_dual bitstream.
 
 **Single Fmax readings prove nothing here: router2 is run-nondeterministic.**
 An 8-seed sweep of the pre-split netlist returned 63.4 / 71.0 / 63.4 / 66.0 /
