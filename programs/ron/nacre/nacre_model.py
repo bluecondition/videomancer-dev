@@ -15,7 +15,7 @@ import sys
 
 # ---------------------------------------------------------------- constants
 C_NC     = 8        # chained discs (HD)
-C_NT     = 12       # total rings (HD)
+C_NT     = 10       # total rings (HD)
 C_RCL    = 4095
 NO_SUBPIX = True
 TWO_CENTRES = False   # outer centre never wins and costs 2 comparators   # test: drop the sub-pixel distance correction
@@ -51,7 +51,7 @@ class Engine:
         self.ram_ex = list(ex)          # C_NC entries
         self.ram_ey = list(ey)
         if kstep is None:
-            kstep = 255 if spac >= 128 else (16 if spac < 8 else uns(spac << 1, 8))
+            kstep = 255 if spac >= 255 else (8 if spac < 8 else uns(spac, 8))
         self.s_kstep = kstep
         self.s_rmax = min(spac * C_NT, C_RCL) if rmax is None else rmax
 
@@ -75,7 +75,7 @@ class Engine:
             hw_di=0, hq_l=0, hq_df=0,
             hw_xn=0, hw_f0=0, hw_pend=0,
             hp_x=0, hp_f=0, hp_v=0,
-            ks_g=0, ks_n=0, ks_n2=0, hm_last=0,
+            ks_g=0, ks_n=0, ks_n2=0, hm_last=0, hm_ctr=0,
             nrm_in=0, nrm_nm=0, hn=0, rrom_a=0, rrom_q=0,
             nrm_sh=0, nrm_in_q=0, nrm_nm_q=0, nrm_r=0, nrm_in_c=0, nrm_nm_c=0,
             doa_ex=0, doa_ey=0,
@@ -269,6 +269,7 @@ class Engine:
                 n['hm_ean'] = C_NC - 1
                 n['spst_ra'] = C_NT - 1
                 n['hm_oR'] = self.s_rmax
+                n['hm_ctr'] = 1 if s['hm_lowp'] == C_NT - 1 else 0
                 n['hm_ph'] = 49
         elif ph == 49:
             n['hm_ean'] = C_NT - 2 if C_NT - 2 < C_NC else C_NC - 1
@@ -310,7 +311,8 @@ class Engine:
             n['hq_l'] = 0
             n['hq_df'] = 0
             n['hw_pend'] = 1
-            n['ks_g'] = sgn(s['hm_xae'] + kstep, 16)
+            kg = (kstep >> 1) if s['hm_ctr'] else kstep
+            n['ks_g'] = sgn(s['hm_xae'] + (kg if kg >= 2 else 2), 16)
             n['hk_x'] = s['hm_xae']
             n['hm_ph'] = 30 if s['hm_xbe'] <= s['hm_xae'] + 1 else 0
 
@@ -381,7 +383,10 @@ class Engine:
                 n['ks_n'] = s['hm_icx']
             n['hm_ph'] = 13
         elif ph == 13:
-            n['ks_n2'] = sgn(s['ks_n'] + kstep, 16)
+            st = (kstep >> 1) if s['hm_ctr'] else kstep
+            if st < 2:
+                st = 2
+            n['ks_n2'] = sgn(s['ks_n'] + st, 16)
             # "closes the run" as a flag: the 16-bit compare in state 29 was
             # a carry chain inside hk_x's load enable and hd_hdmi's crit path
             n['hm_last'] = 1 if s['hk_x'] >= s['hm_xbe'] else 0
@@ -450,18 +455,22 @@ class Engine:
             if s['hm_side'] == 0 and s['hm_k'] > s['hm_lowp']:
                 n['hm_k'] = s['hm_k'] - 1
                 n['hm_ean'] = 0 if s['hm_k'] < 2 else (s['hm_k'] - 2 if s['hm_k'] - 2 < C_NC else C_NC - 1)
+                # the run we are about to open is the CENTRAL one
+                n['hm_ctr'] = 1 if s['hm_k'] == s['hm_lowp'] + 1 else 0
                 n['hm_ph'] = 31
             elif s['hm_side'] == 0:
                 n['hm_side'] = 1
                 if s['hm_lowp'] < C_NT - 1:
                     n['hm_k'] = s['hm_lowp'] + 1
                     n['hm_ean'] = s['hm_lowp'] + 1 if s['hm_lowp'] + 1 < C_NC else C_NC - 1
+                    n['hm_ctr'] = 0
                     n['hm_ph'] = 31
                 else:
                     n['hm_ph'] = 37
             elif s['hm_k'] < C_NT - 1:
                 n['hm_k'] = s['hm_k'] + 1
                 n['hm_ean'] = s['hm_k'] + 1 if s['hm_k'] + 1 < C_NC else C_NC - 1
+                n['hm_ctr'] = 0
                 n['hm_ph'] = 31
             else:
                 n['hm_ph'] = 37
@@ -492,7 +501,8 @@ class Engine:
             n['m_a'] = s['hm_dy_n']
             n['m_b'] = s['hm_dy_n']
             n['hm_xae'] = s['hm_xbe']
-            n['ks_g'] = sgn(s['hm_xbe'] + kstep, 16)
+            kg2 = (kstep >> 1) if s['hm_ctr'] else kstep
+            n['ks_g'] = sgn(s['hm_xbe'] + (kg2 if kg2 >= 2 else 2), 16)
             n['hm_ph'] = 34
         elif ph == 34:
             n['hm_xbe'] = s['sp_cl']

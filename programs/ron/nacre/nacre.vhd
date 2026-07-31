@@ -104,9 +104,13 @@ architecture nacre of program_top is
     end function;
     function f_nt return integer is
     begin
-        -- 12 / 10: the radix-2 knot frame is 29 cycles, and 2*C_NT runs
-        -- x 2 knots each has to fit the line period (HD 2200, SD 1716 clk)
-        if C_ENABLE_HD then return 12; else return 10; end if;
+        -- 10 / 8.  Two constraints set this, not taste: the radix-2 knot
+        -- frame is 30 cycles and 2*C_NT runs x >=2 knots each has to fit the
+        -- line period (HD 2200, SD 1716 clk) -- AND the knot grid has to be
+        -- one ring spacing rather than two, or the field is linear in x
+        -- across a whole ring width and the contours come out POLYGONAL.
+        -- 12/10 rings at the finer grid left only 4 % throughput margin.
+        if C_ENABLE_HD then return 10; else return 8; end if;
     end function;
     -- The pass now fits one line period, so a plain double buffer is enough:
     -- the engine computes line N+1 during line N.  (Running further ahead
@@ -375,6 +379,12 @@ architecture nacre of program_top is
     -- knot walker / evaluation state
     signal ks_g   : signed(15 downto 0) := (others => '0');   -- next grid knot
     signal hm_last : std_logic := '0';   -- this knot closes the run
+    -- the run in flight is the CENTRAL one.  Its field is a CONE (the inner
+    -- circle degenerates towards a point), so edge + centre-column knots
+    -- alone interpolate it as a pyramid and the innermost disc renders as a
+    -- visible DIAMOND.  It gets half the grid step; the other runs cannot
+    -- afford it (SD went over the line budget at a quarter).
+    signal hm_ctr  : std_logic := '0';
     signal ks_n   : signed(15 downto 0) := (others => '0');   -- chosen next knot
     signal ks_n2  : signed(15 downto 0) := (others => '0');   -- and its regrid
     signal s_kstep : unsigned(7 downto 0) := to_unsigned(16, 8);
@@ -822,12 +832,20 @@ begin
                         -- running lines ahead buys latency, not throughput).
                         -- Two ring spacings keeps the field smooth there and
                         -- roughly halves the knot count.
-                        if s_spac >= 128 then
+                        -- ONE ring spacing, not two.  At two the only knots
+                        -- inside a run are its ends, so the field is linear
+                        -- in x across a whole ring width and the iso-contours
+                        -- come out as POLYGONS -- the innermost disc renders
+                        -- as a visible diamond at HD defaults.  (A small
+                        -- raster hides this: at spacing 14 the facets are
+                        -- 14 px and look round.)  One spacing halves the
+                        -- error, p99 58 -> 23.
+                        if s_spac >= 255 then
                             s_kstep <= to_unsigned(255, 8);
                         elsif s_spac < 8 then
-                            s_kstep <= to_unsigned(16, 8);
+                            s_kstep <= to_unsigned(8, 8);
                         else
-                            s_kstep <= resize(shift_left(s_spac, 1), 8);
+                            s_kstep <= resize(s_spac, 8);
                         end if;
 
                     when 4 =>
@@ -1284,6 +1302,8 @@ begin
                             hm_ean  <= C_NC - 1;      -- outermost = rigid
                             spst_ra <= C_NT - 1;      -- xa = L[C_NT-1]
                             hm_oR   <= s_rmax;
+                            if hm_lowp = C_NT - 1 then hm_ctr <= '1';
+                            else                       hm_ctr <= '0'; end if;
                             hm_ph   <= 49;
                         end if;
                     when 49 =>
@@ -1330,7 +1350,11 @@ begin
                         hq_l  <= (others => '0');
                         hq_df <= (others => '0');
                         hw_pend <= '1';
-                        ks_g <= hm_xae + signed(resize(s_kstep, 16));
+                        if hm_ctr = '1' then
+                            ks_g <= hm_xae + signed(resize(shift_right(s_kstep, 1), 16));
+                        else
+                            ks_g <= hm_xae + signed(resize(s_kstep, 16));
+                        end if;
                         hk_x <= hm_xae;
                         if hm_xbe <= hm_xae + 1 then
                             hm_ph <= 30;              -- outermost ring clipped
@@ -1435,7 +1459,11 @@ begin
                         end if;
                         hm_ph <= 13;
                     when 13 =>
-                        ks_n2 <= ks_n + signed(resize(s_kstep, 16));
+                        if hm_ctr = '1' then
+                            ks_n2 <= ks_n + signed(resize(shift_right(s_kstep, 1), 16));
+                        else
+                            ks_n2 <= ks_n + signed(resize(s_kstep, 16));
+                        end if;
                         -- "this knot closes the run" as a FLAG.  Leaving the
                         -- 16-bit compare in state 29 put a carry chain in
                         -- hk_x's load enable -- 18 logic levels, 13.5 ns, and
@@ -1529,6 +1557,8 @@ begin
                             if    hm_k < 2        then hm_ean <= 0;
                             elsif hm_k - 2 < C_NC then hm_ean <= hm_k - 2;
                             else                       hm_ean <= C_NC - 1; end if;
+                            if hm_k = hm_lowp + 1 then hm_ctr <= '1';
+                            else                       hm_ctr <= '0'; end if;
                             hm_ph <= 31;
                         elsif hm_side = '0' then
                             hm_side <= '1';               -- central run done
@@ -1536,6 +1566,7 @@ begin
                                 hm_k <= hm_lowp + 1;
                                 if hm_lowp + 1 < C_NC then hm_ean <= hm_lowp + 1;
                                 else                       hm_ean <= C_NC - 1; end if;
+                                hm_ctr <= '0';
                                 hm_ph <= 31;
                             else
                                 hm_ph <= 37;              -- nothing outside it
@@ -1544,6 +1575,7 @@ begin
                             hm_k <= hm_k + 1;
                             if hm_k + 1 < C_NC then hm_ean <= hm_k + 1;
                             else                    hm_ean <= C_NC - 1; end if;
+                            hm_ctr <= '0';
                             hm_ph <= 31;
                         else
                             hm_ph <= 37;                  -- outermost done
@@ -1579,7 +1611,11 @@ begin
                         hm_xae <= hm_xbe;                 -- the shared edge (the
                                                           -- run just closed; hk_x
                                                           -- is stale after a skip)
-                        ks_g   <= hm_xbe + signed(resize(s_kstep, 16));
+                        if hm_ctr = '1' then
+                            ks_g <= hm_xbe + signed(resize(shift_right(s_kstep, 1), 16));
+                        else
+                            ks_g <= hm_xbe + signed(resize(s_kstep, 16));
+                        end if;
                         hm_ph <= 34;
                     when 34 =>
                         hm_xbe <= sp_cl;
