@@ -32,7 +32,7 @@ rings. Nacre deletes all three and makes the seed stream the whole renderer.
 - Between knots the field is **linear**, so the pixel path is `f += d` and a
   triangle fold — one add per pixel, no multiply, no divide, no tracker.
 - **C_NC** chained discs (8 HD / 6 SD) plus **rigid outer rings** to C_NT
-  (12 / 10) that share the outermost chained offset: fills more screen for
+  (10 / 8) that share the outermost chained offset: fills more screen for
   free — no storage, just engine slots.
 - The engine computes line N+1 during line N — a plain double buffer. Running
   further ahead buys **latency, not throughput**, and never fixed the budget.
@@ -99,8 +99,8 @@ follows from the budget, since the floor is 2 knots per run and 2·C_NT runs.
 
 | | worst pass | line period | margin |
 |---|---|---|---|
-| HD (C_NT=12) | 1777 clk | 2200 clk | 19 % |
-| SD (C_NT=10) | ~1480 clk | 1716 clk | 14 % |
+| HD (C_NT=10) | 1945 clk | 2200 clk | 12 % |
+| SD (C_NT=8) | 1467 clk | 1716 clk | 15 % |
 
 ## Timing shaped the architecture
 
@@ -129,20 +129,44 @@ An 8-seed sweep of the pre-split netlist returned 63.4 / 71.0 / 63.4 / 66.0 /
 run of that same seed had reported 76.4 MHz PASS. Sweep, then judge from the
 last post-route report.
 
+## Round contours cost knots, and knots cost rings
+
+The knot grid is **one ring spacing**, and the central run gets **half** that
+again. Two spacings — the obvious choice, and what v0.2 shipped with — leaves
+a run's only knots at its ends, so the field is linear in x across a whole
+ring width and the iso-contours come out **polygonal**: the innermost disc
+renders as a visible diamond, the rings as hexagons. A small test raster
+hides this completely (at spacing 14 the facets are 14 px and look round),
+which is exactly why it survived into a build I had called correct.
+
+The central run needs its own step because its field is a **cone** — the
+inner circle degenerates towards a point — so edge plus centre-column knots
+interpolate a pyramid no matter how fine the outer grid is.
+
+| grid | mean | p99 | clk/line |
+|---|---|---|---|
+| 2 spacings | 8.11 | 58 | 1777 |
+| 1 spacing | 4.98 | 23 | 2017 |
+| 1 spacing, central run at ½ | **3.92** | **13** | **1749** |
+
+A ¼ step on the central run scored marginally better still but put SD over
+the line budget (1723 vs 1716) and left HD at 4 %. **The ring count pays for
+the grid**: at 12/10 rings the finer grid left only 4 % throughput margin,
+and a missed line trigger means a whole line's seed bank is never written.
+
 ## Model vs exact field
 `nacre_model.py --image` renders the engine's own seed stream and diffs it
 against the analytic field:
 
-| scenario | mean | p99 | max |
-|---|---|---|---|
-| concentric bullseye | 7.6 / 255 | 42 | 99 |
-| dragged nest | 9.7 / 255 | 54 | 141 |
+**mean 3.9 / 255, p99 13** on a dragged nest at HD-like scale — better than
+the design-study prototype (`../cascade/percircle_int2.py`, mean 8.2). The
+residual is edge quantisation: the engine's circle edges are integer `isqrt`.
 
-That is the same band the design-study prototype reached
-(`../cascade/percircle_int2.py`, mean 8.2). The residual is edge quantisation
-— the engine's circle edges are integer `isqrt` — plus linear interpolation
-between knots. `model_check.png` and `model_drag.png` are the sheets
-(engine / analytic / error ×4).
+**Test at the scale the program runs at.** The model is only as good as the
+geometry you feed it — a 480×270 raster at spacing 14 rated the polygonal
+build at mean 7.6 and looked round, and a concentric nest hid the stale-dy²
+bug entirely. `diag_centre.png` / `diag_fixed.png` are the before/after
+crops of the innermost disc.
 
 ## Controls
 | Phys | Control |
@@ -160,5 +184,5 @@ between knots. `model_check.png` and `model_drag.png` are the sheets
 - **`--decimation 1` is mandatory.** The engine's work is in *pixels* and does
   not shrink with the raster, but the sim's line period does (fixed 64-clk
   hblank), so a decimated sim starves the pass and renders garbage. At
-  decimation 1 the line is 1984 clk against the engine's 1777.
+  decimation 1 the line is 1984 clk against the engine's 1945.
 - TOML defaults apply in sim: S7/S8/S10 default ON, K4 defaults non-zero.
