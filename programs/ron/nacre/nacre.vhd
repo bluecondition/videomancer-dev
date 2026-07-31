@@ -100,7 +100,12 @@ architecture nacre of program_top is
     -- only rings out to the screen diagonal are ever visible anyway.
     function f_nc return integer is
     begin
-        if C_ENABLE_HD then return 8; else return 6; end if;
+        -- 6 chained at HD, not 8: hd_dual's router stalled at 2 overused
+        -- wires and topped out at 61 MHz with 8.  Six closes it at 77.3 --
+        -- and LC barely moves (7454 -> 7451), so the win is net TOPOLOGY
+        -- (fewer long chain-RAM-to-engine nets), not utilisation.  SD is not
+        -- failing, so it keeps 6.
+        if C_ENABLE_HD then return 6; else return 6; end if;
     end function;
     function f_nt return integer is
     begin
