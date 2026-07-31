@@ -48,9 +48,9 @@ analytic field in about two seconds. Five of the seven are one-cycle read
 skews, which is precisely the class of bug a picture cannot localise.
 
 **1. `rrom_q` trails `hn` by one cycle.** `p_norm` reads the ROM at the
-*pre-edge* `rrom_a`, so a normalise issued at T gives `hn` at T+3 and
-`rrom_q` at T+4. Reading both in the same cycle silently used the *previous*
-knot's reciprocal on every divide — distances, the gap, and the slope.
+*pre-edge* `rrom_a`, so `rrom_q` is always one cycle behind `hn` no matter how
+many stages the unit has. Reading both in the same cycle silently used the
+*previous* knot's reciprocal on every divide — distances, the gap, the slope.
 
 **2. The numerator must not saturate.** `hn` is 15 bits and `p_norm` scales it
 by the *same* exponent as the divisor, which for a short piece is a shift
@@ -80,7 +80,8 @@ right one; it only appears once the nest is dragged, which is the whole point
 of the program.
 
 **Latency contract:** shared multiply — operands at T, `m_p` at T+3; radix-2
-sqrt — loaded at T, readable at T+15; `p_norm` — `hn` at T+3, `rrom_q` at T+4.
+sqrt — loaded at T, readable at T+15; `p_norm` (4 stages) — `hn` at T+4,
+`rrom_q` at T+5.
 
 ## Throughput is a hard per-line budget
 
@@ -90,7 +91,7 @@ that line's bank is never written. The measured backlog for an over-budget
 engine reaches 40–70 lines, far past any bank count — so the frame has to fit,
 full stop.
 
-The knot frame is **29 cycles**. Getting there took dropping the sub-pixel
+The knot frame is **30 cycles**. Getting there took dropping the sub-pixel
 distance correction (measured worth 1.4/255 of mean error for 8 cycles a
 knot), pipelining the previous piece's slope divide into the next knot's sqrt
 shadow, and folding `d_out` and the gap into one cycle. The ring count then
@@ -98,17 +99,35 @@ follows from the budget, since the floor is 2 knots per run and 2·C_NT runs.
 
 | | worst pass | line period | margin |
 |---|---|---|---|
-| HD (C_NT=12) | 1727 clk | 2200 clk | 21 % |
-| SD (C_NT=10) | 1437 clk | 1716 clk | 16 % |
+| HD (C_NT=12) | 1777 clk | 2200 clk | 19 % |
+| SD (C_NT=10) | ~1480 clk | 1716 clk | 14 % |
 
-**Timing shaped the architecture twice.** The radix-4 sqrt (two chained 27-bit
-subtracts per cycle) measured **18.2 ns / 55 MHz** — it was the design's
-critical path, and radix-2 is what pays for the 29-cycle frame and the ring
-count. The next-knot chooser then took over as the critical path at 18 ns, so
-its compare/mux/add chain now runs across three states inside the sqrt's idle
-window (the next knot's x does not depend on this knot's `f`, so it can).
-Earlier, `p_norm`'s priority encoder + barrel + clamp in one cycle measured
-22.4 ns; it is now three pipeline stages.
+## Timing shaped the architecture
+
+Every one of these was measured on `hd_analog`, fixed, and re-measured; each
+fix simply exposed the next path.
+
+| critical path | measured | fix |
+|---|---|---|
+| `p_norm` encoder + barrel + clamp, one cycle | 22.4 ns (44.7 MHz) | split into stages |
+| radix-4 sqrt, two chained 27-bit subtracts | 18.2 ns (55.0 MHz) | **radix-2** |
+| next-knot chooser compare/mux/add chain | 18.0 ns (55.6 MHz) | spread over 3 states |
+| centre-glide accumulator (inherited) | ~15 ns (67.3 MHz) | split across sequencer slots |
+| span-store EBR read + edge clamp | 13.1 ns (75.8 MHz) | clamp registered (`sp_cl`) |
+| `p_norm` barrel + clamp | 14.0 ns (71.3 MHz) | coarse/fine barrel split |
+
+The radix-2 sqrt is what pays for the 30-cycle frame and therefore the ring
+count — it costs 7 cycles a knot. The chooser moved into the sqrt's idle
+window because the next knot's x does not depend on this knot's `f`. The
+final `p_norm` split pre-shifts left by a constant 9 so the whole normalise
+becomes a *right* shift of `nrm_sh+1` (1..18), then splits that into a
+multiple of 4 and a remainder — halving the mux depth.
+
+**Single Fmax readings prove nothing here: router2 is run-nondeterministic.**
+An 8-seed sweep of the pre-split netlist returned 63.4 / 71.0 / 63.4 / 66.0 /
+64.3 / 67.5 / 67.4 / 65.6 MHz — all failing — even though one earlier one-off
+run of that same seed had reported 76.4 MHz PASS. Sweep, then judge from the
+last post-route report.
 
 ## Model vs exact field
 `nacre_model.py --image` renders the engine's own seed stream and diffs it
@@ -141,5 +160,5 @@ between knots. `model_check.png` and `model_drag.png` are the sheets
 - **`--decimation 1` is mandatory.** The engine's work is in *pixels* and does
   not shrink with the raster, but the sim's line period does (fixed 64-clk
   hblank), so a decimated sim starves the pass and renders garbage. At
-  decimation 1 the line is 1984 clk against the engine's 1727.
+  decimation 1 the line is 1984 clk against the engine's 1777.
 - TOML defaults apply in sim: S7/S8/S10 default ON, K4 defaults non-zero.
