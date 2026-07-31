@@ -31,7 +31,7 @@ rings. Nacre deletes all three and makes the seed stream the whole renderer.
   and it renders as a flat blob).
 - Between knots the field is **linear**, so the pixel path is `f += d` and a
   triangle fold — one add per pixel, no multiply, no divide, no tracker.
-- **C_NC** chained discs (8 HD / 6 SD) plus **rigid outer rings** to C_NT
+- **C_NC** chained discs (6) plus **rigid outer rings** to C_NT
   (10 / 8) that share the outermost chained offset: fills more screen for
   free — no storage, just engine slots.
 - The engine computes line N+1 during line N — a plain double buffer. Running
@@ -131,19 +131,22 @@ multiple of 4 and a remainder — halving the mux depth.
 | SD Analog | 69.34 MHz (seed 1) | 27 | pass |
 | HD HDMI | 77.28 MHz (seed 1) | 74.25 | pass, 4.1 % |
 | SD HDMI | 77.15 MHz (seed 2) | 27 | pass |
-| **HD Dual** | **61.02 MHz (best of 6 seeds)** | 74.25 | **FAILS** |
+| HD Dual | 77.30 MHz (seed 1, C_NC=6) | 74.25 | pass, 4.1 % |
 | SD Dual | 66.95 MHz (seed 1) | 27 | pass |
 
-**HD Dual does not close, and it is a ROUTING failure, not a timing one.**
-nextpnr's router converges from 3383 overused wires down to **2 and then
-stalls there for 230 iterations** — at 7454/7680 (97 %) the dual config's
-extra core logic leaves no tracks to finish with. Pipelining cannot fix that;
-only LC headroom can. It closed at 75.60 MHz before the round-contour work,
-so the finer grid is what pushed it over. Check the router log for a stuck
-`overused=` count before attributing a dual-config miss to logic depth. **The packaged
-`out/rev_b/ron/nacre.vmprog` therefore contains a failing hd_dual bitstream
-and must not be treated as shippable** (the builder accepts a best-effort
-bitstream after its seed retries; see [[build_timing_verification]]).
+**HD Dual was the one config that would not close — and the cause was net
+TOPOLOGY, not utilisation.** With `C_NC = 8` chained discs it topped out at
+61.02 MHz across six seeds, nextpnr's router converging from 3383 overused
+wires down to **2 and then stalling there for 230 iterations**. Dropping to
+**six chained discs** routes it cleanly: 77.30 MHz on seed 1, 76.80 on seed 2
+— and **LC barely moves (7454 → 7451)**. Eight discs means eight sets of long
+chain-RAM-to-engine nets competing for the same channels; six fit. Check the
+router log for a stuck `overused=` count before blaming logic depth, and try
+net count before reaching for a ring cut. (The builder accepts a best-effort bitstream after its seed retries, so read
+the reported Fmax rather than trusting the "✓ Completed" line; see
+[[build_timing_verification]].) The five non-dual configs above were measured
+at C_NC=8 and need re-confirming at 6 — fewer discs only removes logic, but
+that is an assumption until the rebuild says so.
 
 **Single Fmax readings prove nothing here: router2 is run-nondeterministic.**
 An 8-seed sweep of the pre-split netlist returned 63.4 / 71.0 / 63.4 / 66.0 /
