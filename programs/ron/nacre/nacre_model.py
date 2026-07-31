@@ -77,7 +77,7 @@ class Engine:
             hp_x=0, hp_f=0, hp_v=0,
             ks_g=0, ks_n=0, ks_n2=0,
             nrm_in=0, nrm_nm=0, hn=0, rrom_a=0, rrom_q=0,
-            nrm_sh=0, nrm_in_q=0, nrm_nm_q=0,
+            nrm_sh=0, nrm_in_q=0, nrm_nm_q=0, nrm_r=0, nrm_in_c=0, nrm_nm_c=0,
             doa_ex=0, doa_ey=0,
         )
         self.s = z
@@ -109,7 +109,7 @@ class Engine:
 
         # ---- p_seedram (write only; the replay is modelled separately)
         if s['sd_we']:
-            slot = s['sd_wa'] & 0xFF
+            slot = s['sd_wa'] & 0x7F
             xn = (s['sd_wd'] >> 46) & 0x7FF
             f0 = sgn((s['sd_wd'] >> 28) & 0x3FFFF, 18)
             d0 = sgn(s['sd_wd'] & 0xFFFFFFF, 28)
@@ -123,13 +123,14 @@ class Engine:
         n['nrm_sh'] = msb18(s['nrm_in'])
         n['nrm_in_q'] = s['nrm_in']
         n['nrm_nm_q'] = s['nrm_nm']
-        nb = s['nrm_sh']
-        if nb >= 8:
-            v_tp = s['nrm_in_q'] >> (nb - 8)
-            v_nu = s['nrm_nm_q'] >> (nb - 8)
-        else:
-            v_tp = s['nrm_in_q'] << (8 - nb)
-            v_nu = s['nrm_nm_q'] << (8 - nb)
+        # 2a: coarse (multiple of 4) right shift of a constant <<9 pre-shift
+        q = (s['nrm_sh'] + 1) // 4
+        n['nrm_r'] = (s['nrm_sh'] + 1) - 4 * q
+        n['nrm_in_c'] = (s['nrm_in_q'] << 9) >> (4 * q)
+        n['nrm_nm_c'] = (s['nrm_nm_q'] << 9) >> (4 * q)
+        # 2b: fine shift + clamp
+        v_tp = s['nrm_in_c'] >> s['nrm_r']
+        v_nu = s['nrm_nm_c'] >> s['nrm_r']
         n['rrom_a'] = v_tp & 0xFF
         n['hn'] = max(-16384, min(16383, v_nu))
         n['rrom_q'] = C_RROM[s['rrom_a']]
@@ -261,7 +262,7 @@ class Engine:
             n['hp_v'] = 0
             n['hw_pend'] = 0
             if s['hm_lowp'] == C_NT:
-                n['hm_ph'] = 45
+                n['hm_ph'] = 47
             else:
                 n['hm_k'] = C_NT - 1
                 n['hm_side'] = 0
@@ -311,7 +312,7 @@ class Engine:
             n['hw_pend'] = 1
             n['ks_g'] = sgn(s['hm_xae'] + kstep, 16)
             n['hk_x'] = s['hm_xae']
-            n['hm_ph'] = 29 if s['hm_xbe'] <= s['hm_xae'] + 1 else 0
+            n['hm_ph'] = 30 if s['hm_xbe'] <= s['hm_xae'] + 1 else 0
 
         # --------------- knot frame (23 cycles) ---------------
         elif ph == 0:
@@ -342,28 +343,28 @@ class Engine:
             n['sqb_run'] = 1
             n['hm_ph'] = 5
         elif ph == 5:
+            n['hm_ph'] = 6
+        elif ph == 6:
             n['m_a'] = s['hn']          # previous piece's slope divide
             n['m_b'] = s['rrom_q']
-            n['hm_ph'] = 6
-        elif ph in (6, 7):
+            n['hm_ph'] = 7
+        elif ph in (7, 8):
             n['hm_ph'] = ph + 1
-        elif ph == 8:
+        elif ph == 9:
             if s['hw_pend']:
                 v_dp = s['m_p'] >> 3
                 v_dp = max(-134217728, min(134217727, v_dp))
                 n['sd_wd'] = (s['sd_wd'] & ~0xFFFFFFF) | uns(v_dp, 28)
-            n['hm_ph'] = 9
-        elif ph == 9:
+            n['hm_ph'] = 10
+        elif ph == 10:
             if s['hw_pend']:
-                n['sd_wa'] = (s['eng_bank'] << 8) | s['hm_slot']
+                n['sd_wa'] = ((s['eng_bank'] & 1) << 7) | s['hm_slot']
                 w = s['sd_wd'] & 0xFFFFFFF
                 w |= (uns(s['hw_xn'], 11) << 46) | (uns(s['hw_f0'], 18) << 28)
                 n['sd_wd'] = w
                 n['sd_we'] = 1
-                n['hm_slot'] = uns(s['hm_slot'] + 1, 8)
+                n['hm_slot'] = uns(s['hm_slot'] + 1, 7)
                 n['hw_pend'] = 0
-            n['hm_ph'] = 10
-        elif ph == 10:
             n['hm_ph'] = 11
         # The next knot's x does not depend on this knot's f, so the whole
         # candidate chain runs here in the sqrt's idle window.  As one cycle at
@@ -402,15 +403,15 @@ class Engine:
             n['nrm_in'] = v_rv
             n['nrm_nm'] = s['hw_di']
             n['hm_ph'] = 20
-        elif ph in (20, 21, 22):
+        elif ph in (20, 21, 22, 23):
             n['hm_ph'] = ph + 1
-        elif ph == 23:
+        elif ph == 24:
             n['m_a'] = s['hn']
             n['m_b'] = s['rrom_q']
-            n['hm_ph'] = 24
-        elif ph in (24, 25):
+            n['hm_ph'] = 25
+        elif ph in (25, 26):
             n['hm_ph'] = ph + 1
-        elif ph == 26:
+        elif ph == 27:
             v_fp = s['m_p'] >> 1
             n['hk_f'] = 0 if v_fp < 0 else (65536 if v_fp > 65536 else v_fp)
             self.trace.append(dict(
@@ -418,8 +419,8 @@ class Engine:
                 iR=s['hm_iR'], oR=s['hm_oR'], icx=s['hm_icx'], ocx=s['hm_ocx'],
                 idy2=s['hm_idy2'], ody2=s['hm_ody2'], k=s['hm_k'],
                 side=s['hm_side'], f=n['hk_f']))
-            n['hm_ph'] = 27
-        elif ph == 27:
+            n['hm_ph'] = 28
+        elif ph == 28:
             if s['hp_v'] and s['hk_x'] > s['hp_x']:
                 n['hw_xn'] = uns(s['hk_x'], 11)
                 n['hw_f0'] = s['hp_f']
@@ -432,42 +433,42 @@ class Engine:
             n['hp_x'] = s['hk_x']
             n['hp_f'] = s['hk_f']
             n['hp_v'] = 1
-            n['hm_ph'] = 28
-        elif ph == 28:
+            n['hm_ph'] = 29
+        elif ph == 29:
             if s['hk_x'] >= s['hm_xbe']:
-                n['hm_ph'] = 29
+                n['hm_ph'] = 30
             else:
                 n['hk_x'] = s['ks_n']          # chosen back in states 11..13
                 n['ks_g'] = s['ks_n2']         # grid re-anchors on every knot
                 n['hm_ph'] = 0
 
         # ---------------- run roll ---------------
-        elif ph == 29:
+        elif ph == 30:
             if s['hm_side'] == 0 and s['hm_k'] > s['hm_lowp']:
                 n['hm_k'] = s['hm_k'] - 1
                 n['hm_ean'] = 0 if s['hm_k'] < 2 else (s['hm_k'] - 2 if s['hm_k'] - 2 < C_NC else C_NC - 1)
-                n['hm_ph'] = 30
+                n['hm_ph'] = 31
             elif s['hm_side'] == 0:
                 n['hm_side'] = 1
                 if s['hm_lowp'] < C_NT - 1:
                     n['hm_k'] = s['hm_lowp'] + 1
                     n['hm_ean'] = s['hm_lowp'] + 1 if s['hm_lowp'] + 1 < C_NC else C_NC - 1
-                    n['hm_ph'] = 30
+                    n['hm_ph'] = 31
                 else:
-                    n['hm_ph'] = 36
+                    n['hm_ph'] = 37
             elif s['hm_k'] < C_NT - 1:
                 n['hm_k'] = s['hm_k'] + 1
                 n['hm_ean'] = s['hm_k'] + 1 if s['hm_k'] + 1 < C_NC else C_NC - 1
-                n['hm_ph'] = 30
+                n['hm_ph'] = 31
             else:
-                n['hm_ph'] = 36
-        elif ph == 30:
+                n['hm_ph'] = 37
+        elif ph == 31:
             if s['hm_side'] == 0 and s['hm_k'] > s['hm_lowp']:
                 n['spst_ra'] = s['hm_k'] - 1
             else:
                 n['spst_ra'] = C_NT + s['hm_k']
-            n['hm_ph'] = 31
-        elif ph == 31:
+            n['hm_ph'] = 32
+        elif ph == 32:
             if s['hm_side'] == 0:
                 n['hm_ocx'] = s['hm_icx']
                 n['hm_ody2'] = s['hm_idy2']
@@ -479,8 +480,8 @@ class Engine:
                 n['hm_iR'] = s['hm_oR']
                 n['hm_oR'] = uns(s['hm_oR'] + spac, 13)
             n['hm_dy_n'] = sgn(s['sp_dy'] - s['doa_ey'], 15)
-            n['hm_ph'] = 32
-        elif ph == 32:
+            n['hm_ph'] = 33
+        elif ph == 33:
             if s['hm_side'] == 0:
                 n['hm_icx'] = sgn(s['doa_ex'] + self.s_cx, 16)
             else:
@@ -489,13 +490,13 @@ class Engine:
             n['m_b'] = s['hm_dy_n']
             n['hm_xae'] = s['hm_xbe']
             n['ks_g'] = sgn(s['hm_xbe'] + kstep, 16)
-            n['hm_ph'] = 33
-        elif ph == 33:
-            n['hm_xbe'] = s['sp_cl']
             n['hm_ph'] = 34
         elif ph == 34:
+            n['hm_xbe'] = s['sp_cl']
             n['hm_ph'] = 35
         elif ph == 35:
+            n['hm_ph'] = 36
+        elif ph == 36:
             if s['hm_side'] == 0:
                 n['hm_idy2'] = s['m_p'] & 0x7FFFFFF
             else:
@@ -504,43 +505,43 @@ class Engine:
             # (f jumps 1 -> 0 across a ring edge), so it re-opens the piece
             n['hp_v'] = 0
             if s['hm_xbe'] <= s['hm_xae'] + 1:
-                n['hm_ph'] = 29
+                n['hm_ph'] = 30
             else:
                 n['hk_x'] = s['hm_xae']
                 n['hm_ph'] = 0
 
         # ---------------- finish ---------------
-        elif ph == 36:
+        elif ph == 37:
             n['nrm_in'] = s['hq_l'] & 0xFFF
             n['nrm_nm'] = s['hq_df']
-            n['hm_ph'] = 37
-        elif ph in (37, 38, 39):
+            n['hm_ph'] = 38
+        elif ph in (38, 39, 40, 41):
             n['hm_ph'] = ph + 1
-        elif ph == 40:
+        elif ph == 42:
             n['m_a'] = s['hn']
             n['m_b'] = s['rrom_q']
-            n['hm_ph'] = 41
-        elif ph in (41, 42):
+            n['hm_ph'] = 43
+        elif ph in (43, 44):
             n['hm_ph'] = ph + 1
-        elif ph == 43:
+        elif ph == 45:
             if s['hw_pend']:
                 v_dp = s['m_p'] >> 3
                 v_dp = max(-134217728, min(134217727, v_dp))
                 n['sd_wd'] = (s['sd_wd'] & ~0xFFFFFFF) | uns(v_dp, 28)
-            n['hm_ph'] = 44
-        elif ph == 44:
+            n['hm_ph'] = 46
+        elif ph == 46:
             if s['hw_pend']:
-                n['sd_wa'] = (s['eng_bank'] << 8) | s['hm_slot']
+                n['sd_wa'] = ((s['eng_bank'] & 1) << 7) | s['hm_slot']
                 w = s['sd_wd'] & 0xFFFFFFF
                 w |= (uns(s['hw_xn'], 11) << 46) | (uns(s['hw_f0'], 18) << 28)
                 n['sd_wd'] = w
                 n['sd_we'] = 1
-                n['hm_slot'] = uns(s['hm_slot'] + 1, 8)
+                n['hm_slot'] = uns(s['hm_slot'] + 1, 7)
                 n['hw_pend'] = 0
-            n['hm_ph'] = 45
-        elif ph == 45:
+            n['hm_ph'] = 47
+        elif ph == 47:
             # TRAILING GROUND sentinel: x_next = 2047 never matches
-            n['sd_wa'] = (s['eng_bank'] << 8) | s['hm_slot']
+            n['sd_wa'] = ((s['eng_bank'] & 1) << 7) | s['hm_slot']
             n['sd_wd'] = 0x7FF << 46
             n['sd_we'] = 1
             n['hm_ph'] = 57
@@ -561,7 +562,7 @@ class Engine:
 # -------------------------------------------------------------- pixel path
 def replay(seeds, W, stale_word=0):
     """Cycle-accurate p_fd + p_seedram.  Returns luma per fd_px."""
-    ram = [(0x7FF, 0, 0)] * 256
+    ram = [(0x7FF, 0, 0)] * 128
     for slot, xn, f0, d0 in seeds:
         ram[slot] = (xn, f0, d0)
 
@@ -574,7 +575,7 @@ def replay(seeds, W, stale_word=0):
     out = []
     # cycles -2,-1 = blanking (sd_ra parked on word 0); 0 = avid rise
     for c in range(-2, W + 4):
-        nsd_ra, nsd_q = sd_ra, ram[sd_ra & 0xFF]
+        nsd_ra, nsd_q = sd_ra, ram[sd_ra & 0x7F]
         nf, nd, nxn, nptr, npx, nld = fd_f, fd_d, fd_xn, fd_ptr, fd_px, fd_ld
         if c < 0:
             nsd_ra = 0                       # blanking park: prefetch word 0
@@ -593,7 +594,7 @@ def replay(seeds, W, stale_word=0):
                 nf = sd_q[1] << 6
                 nd = sd_q[2]
                 nxn = sd_q[0]
-                nptr = uns(fd_ptr + 1, 8)
+                nptr = uns(fd_ptr + 1, 7)
                 nsd_ra = fd_ptr + 1
             else:
                 nf = fd_f + fd_d

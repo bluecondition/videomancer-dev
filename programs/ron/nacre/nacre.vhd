@@ -356,12 +356,15 @@ architecture nacre of program_top is
     -- seed slot RAM: FOUR line banks x 256 pieces.  The engine runs
     -- C_NEARLY lines ahead of the raster, so it needs more than the classic
     -- double buffer; 4 banks make the bank index a free 2-bit wrap.
-    type t_seed is array(0 to 511) of std_logic_vector(56 downto 0);
+    -- 128 slots per bank x 2 banks = 256 deep, so each 16-bit slice is
+    -- exactly ONE EBR block and the RAM loses its output mux entirely.
+    -- Measured worst case is 26 seeds a line; the frame budget caps it near 63.
+    type t_seed is array(0 to 255) of std_logic_vector(56 downto 0);
     signal seedram : t_seed := (others => (others => '0'));
-    signal sd_wa : unsigned(9 downto 0) := (others => '0');
+    signal sd_wa : unsigned(7 downto 0) := (others => '0');
     signal sd_we : std_logic := '0';
     signal sd_wd : std_logic_vector(56 downto 0) := (others => '0');
-    signal sd_ra : unsigned(9 downto 0) := (others => '0');
+    signal sd_ra : unsigned(7 downto 0) := (others => '0');
     signal sd_q  : std_logic_vector(56 downto 0) := (others => '0');
     signal s_lbank   : unsigned(1 downto 0) := (others => '0');  -- raster bank
     signal eng_bank  : unsigned(1 downto 0) := (others => '0');  -- engine bank
@@ -392,7 +395,7 @@ architecture nacre of program_top is
     signal hm_icx, hm_ocx : signed(15 downto 0) := (others => '0');
     signal hm_idy2, hm_ody2 : unsigned(26 downto 0) := (others => '0');
     signal hm_iR, hm_oR : unsigned(12 downto 0) := (others => '0');
-    signal hm_slot : unsigned(7 downto 0) := (others => '0');
+    signal hm_slot : unsigned(6 downto 0) := (others => '0');
     signal hm_side : std_logic := '0';
     signal hm_ph  : integer range 0 to 63 := 0;
     signal hm_ean : integer range 0 to C_NC - 1 := 0;   -- chain read addr
@@ -412,6 +415,9 @@ architecture nacre of program_top is
     signal nrm_sh   : integer range 0 to 17 := 0;          -- stage-1 exponent
     signal nrm_in_q : unsigned(17 downto 0) := (others => '0');
     signal nrm_nm_q : signed(18 downto 0) := (others => '0');
+    signal nrm_r    : integer range 0 to 3 := 0;           -- stage-2a residue
+    signal nrm_in_c : unsigned(26 downto 0) := (others => '0');
+    signal nrm_nm_c : signed(27 downto 0) := (others => '0');
     signal hn     : signed(14 downto 0) := (others => '0');
     signal rrom_a : unsigned(7 downto 0) := (others => '0');
     signal rrom_q : unsigned(9 downto 0) := (others => '0');
@@ -420,7 +426,7 @@ architecture nacre of program_top is
     signal fd_f   : signed(24 downto 0) := (others => '0');   -- Q16 + 6 guard
     signal fd_d   : signed(22 downto 0) := (others => '0');
     signal fd_xn  : unsigned(10 downto 0) := (others => '1'); -- next reseed x
-    signal fd_ptr : unsigned(7 downto 0) := (others => '0');  -- seed read pointer
+    signal fd_ptr : unsigned(6 downto 0) := (others => '0');  -- seed read pointer
     signal fd_px  : unsigned(10 downto 0) := (others => '0'); -- pixel x at fd stage
     signal fd_ld  : std_logic := '0';                         -- line-start word0 load
     signal fd_lum : unsigned(7 downto 0) := (others => '0');  -- folded per-circle luma
@@ -489,8 +495,9 @@ begin
     ------------------------------------------------------------------------
     p_norm : process(clk)
         variable v_nb : integer range 0 to 17;
-        variable v_tp : unsigned(17 downto 0);
-        variable v_nu : signed(19 downto 0);
+        variable v_q  : integer range 0 to 4;
+        variable v_tp : unsigned(26 downto 0);
+        variable v_nu : signed(27 downto 0);
     begin
         if rising_edge(clk) then
             -- stage 1: priority encode ONLY.  Encoder + barrel + clamp in one
@@ -504,22 +511,27 @@ begin
             nrm_in_q <= nrm_in;
             nrm_nm_q <= nrm_nm;
 
-            -- stage 2: barrel-shift BOTH operands by the same exponent, so
-            -- every post-multiply shift downstream stays a constant
-            if nrm_sh >= 8 then
-                v_tp := shift_right(nrm_in_q, nrm_sh - 8);
-                v_nu := resize(shift_right(resize(nrm_nm_q, 20), nrm_sh - 8), 20);
-            else
-                v_tp := shift_left(nrm_in_q, 8 - nrm_sh);
-                v_nu := resize(shift_left(resize(nrm_nm_q, 20), 8 - nrm_sh), 20);
-            end if;
+            -- stage 2a: COARSE shift.  Pre-shifting left by a constant 9
+            -- turns the whole normalise into a RIGHT shift of nrm_sh+1
+            -- (1..18); splitting that into a multiple of 4 here and the
+            -- remainder next cycle halves the mux depth.  As one barrel it
+            -- measured 14.0 ns / 71 MHz -- the design's critical path.
+            v_q := (nrm_sh + 1) / 4;
+            nrm_r    <= (nrm_sh + 1) - 4 * v_q;
+            nrm_in_c <= shift_right(shift_left(resize(nrm_in_q, 27), 9), 4 * v_q);
+            nrm_nm_c <= shift_right(shift_left(resize(nrm_nm_q, 28), 9), 4 * v_q);
+
+            -- stage 2b: FINE shift (0..3) + clamp.  Both operands take the
+            -- SAME shift, so every post-multiply shift downstream is constant.
+            v_tp := shift_right(nrm_in_c, nrm_r);
+            v_nu := shift_right(nrm_nm_c, nrm_r);
             rrom_a <= v_tp(7 downto 0);
             if    v_nu >  16383 then hn <= to_signed(16383, 15);
             elsif v_nu < -16384 then hn <= to_signed(-16384, 15);
             else                     hn <= resize(v_nu, 15); end if;
 
             -- stage 3: the ROM read indexes the PRE-edge rrom_a, so rrom_q
-            -- ALWAYS trails hn by one cycle.  hn at T+3, rrom_q at T+4.
+            -- ALWAYS trails hn by one cycle.  hn at T+4, rrom_q at T+5.
             rrom_q <= C_RROM(to_integer(rrom_a));
         end if;
     end process p_norm;
@@ -548,8 +560,8 @@ begin
     p_seedram : process(clk)
     begin
         if rising_edge(clk) then
-            if sd_we = '1' then seedram(to_integer(sd_wa(8 downto 0))) <= sd_wd; end if;
-            sd_q <= seedram(to_integer(sd_ra(8 downto 0)));
+            if sd_we = '1' then seedram(to_integer(sd_wa)) <= sd_wd; end if;
+            sd_q <= seedram(to_integer(sd_ra));
         end if;
     end process p_seedram;
 
@@ -562,15 +574,18 @@ begin
         variable v_f  : signed(29 downto 0);
         variable v_t  : unsigned(16 downto 0);
         variable v_tr : unsigned(16 downto 0);
+        variable v_nxt, v_cur : unsigned(7 downto 0);   -- bank base addresses
     begin
         if rising_edge(clk) then
+            v_nxt := (others => '0');  v_nxt(7) := not s_lbank(0);  -- next line
+            v_cur := (others => '0');  v_cur(7) := s_lbank(0);      -- this line
             if data_in.avid = '1' and s_avid_p = '0' then
                 -- line start: word 0 is ALREADY in sd_q (parked during
                 -- blanking below -- the RAM needs 2 cycles from address to
                 -- data, and issuing the address here left the fd_ld load
                 -- reading the PREVIOUS line's leftover word), so point at
                 -- word 1 now and the first reseed can land on pixel 0
-                sd_ra <= ((s_lbank + 1) & "00000000") + 1;
+                sd_ra <= v_nxt + 1;
                 fd_ptr <= (others => '0');
                 fd_px  <= (others => '0');
                 fd_ld  <= '1';
@@ -579,8 +594,8 @@ begin
                 fd_f  <= shift_left(resize(signed(sd_q(45 downto 28)), 25), 6);
                 fd_d  <= resize(signed(sd_q(27 downto 0)), 23);
                 fd_xn <= unsigned(sd_q(56 downto 46));
-                fd_ptr <= to_unsigned(1, 8);
-                sd_ra <= (s_lbank & "00000000") + 1;
+                fd_ptr <= to_unsigned(1, 7);
+                sd_ra <= v_cur + 1;
                 fd_ld <= '0';
             elsif s_avid_p = '1' then
                 if fd_px = fd_xn then
@@ -589,7 +604,7 @@ begin
                     fd_d  <= resize(signed(sd_q(27 downto 0)), 23);
                     fd_xn <= unsigned(sd_q(56 downto 46));
                     fd_ptr <= fd_ptr + 1;
-                    sd_ra <= (s_lbank & "00000000") + resize(fd_ptr, 10) + 1;
+                    sd_ra <= v_cur + resize(fd_ptr, 8) + 1;
                 else
                     fd_f <= fd_f + resize(fd_d, 25);
                 end if;
@@ -597,7 +612,7 @@ begin
             else
                 -- blanking: park on the NEXT line's word 0 so it is in sd_q
                 -- before the raster needs it
-                sd_ra <= (s_lbank + 1) & "00000000";
+                sd_ra <= v_nxt;
             end if;
 
             -- fold: clamp Q16, triangle (dark at edges, bright mid-ring)
@@ -1261,7 +1276,7 @@ begin
                         hp_v    <= '0';
                         hw_pend <= '0';
                         if hm_lowp = C_NT then
-                            hm_ph <= 45;              -- no discs: ground sentinel only
+                            hm_ph <= 47;              -- no discs: ground sentinel only
                         else
                             hm_k    <= C_NT - 1;
                             hm_side <= '0';
@@ -1317,7 +1332,7 @@ begin
                         ks_g <= hm_xae + signed(resize(s_kstep, 16));
                         hk_x <= hm_xae;
                         if hm_xbe <= hm_xae + 1 then
-                            hm_ph <= 29;              -- outermost ring clipped
+                            hm_ph <= 30;              -- outermost ring clipped
                         else
                             hm_ph <= 0;
                         end if;
@@ -1362,11 +1377,13 @@ begin
                         sqb_run <= '1';
                         hm_ph <= 5;
                     when 5 =>
-                        m_a <= hn;  m_b <= signed(resize(rrom_q, 15));
                         hm_ph <= 6;
-                    when 6 | 7 =>
+                    when 6 =>
+                        m_a <= hn;  m_b <= signed(resize(rrom_q, 15));
+                        hm_ph <= 7;
+                    when 7 | 8 =>
                         hm_ph <= hm_ph + 1;
-                    when 8 =>
+                    when 9 =>
                         -- d0 (Q16 + 6 guard per px).  hn carries (df >> 8)
                         -- scaled by the SAME exponent as L, so hn*mant >> 3 is
                         -- df*2^6/L and the conversion is one CONSTANT shift.
@@ -1379,24 +1396,22 @@ begin
                             elsif v_dp < -4194304 then v_dp := to_signed(-4194304, 36); end if;
                             sd_wd(27 downto 0) <= std_logic_vector(resize(v_dp, 28));
                         end if;
-                        hm_ph <= 9;
-                    when 9 =>
+                        hm_ph <= 10;
+                    when 10 =>
                         if hw_pend = '1' then
-                            sd_wa <= eng_bank & hm_slot;
+                            sd_wa <= eng_bank(0) & hm_slot;
                             sd_wd(56 downto 46) <= std_logic_vector(hw_xn);
                             sd_wd(45 downto 28) <= std_logic_vector(hw_f0);
                             sd_we   <= '1';
                             hm_slot <= hm_slot + 1;
                             hw_pend <= '0';
                         end if;
-                        hm_ph <= 10;
+                        hm_ph <= 11;
                     -- radix-2 sqrt: loaded at 3 and 4, readable at 18 and
                     -- 19.  Radix-4 (two chained 27-bit subtracts in one cycle)
                     -- measured 18.2 ns / 55 MHz and was THE critical path of
                     -- the whole design; one step per cycle halves it, paid for
                     -- with these idle states and a smaller ring count.
-                    when 10 =>
-                        hm_ph <= 11;
                     -- The next knot's x does not depend on this knot's f, so
                     -- the whole candidate chain runs HERE, in the sqrt's idle
                     -- window.  As one cycle at the end of the frame it was an
@@ -1456,20 +1471,20 @@ begin
                         nrm_in <= resize(v_gp, 18);
                         nrm_nm <= resize(signed('0' & hw_di), 19);
                         hm_ph <= 20;
-                    when 20 | 21 | 22 =>
+                    when 20 | 21 | 22 | 23 =>
                         hm_ph <= hm_ph + 1;
-                    when 23 =>
+                    when 24 =>
                         m_a <= hn;  m_b <= signed(resize(rrom_q, 15));
-                        hm_ph <= 24;
-                    when 24 | 25 =>
+                        hm_ph <= 25;
+                    when 25 | 26 =>
                         hm_ph <= hm_ph + 1;
-                    when 26 =>
+                    when 27 =>
                         v_fp := resize(shift_right(m_p, 1), 30);     -- f, Q16
                         if    v_fp < 0     then hk_f <= (others => '0');
                         elsif v_fp > 65536 then hk_f <= to_signed(65536, 18);
                         else                    hk_f <= resize(v_fp, 18); end if;
-                        hm_ph <= 27;
-                    when 27 =>
+                        hm_ph <= 28;
+                    when 28 =>
                         -- stage the piece [hp_x, hk_x).  A piece is only
                         -- emitted if it covers pixels: rings far larger than
                         -- the raster clip to zero-length runs, and emitting
@@ -1483,11 +1498,10 @@ begin
                             hw_pend <= '1';
                         end if;
                         hp_x <= hk_x;  hp_f <= hk_f;  hp_v <= '1';
-                        hm_ph <= 28;
-                    -- (state 22 is unreachable: 21 jumps to 0 or to the roll)
-                    when 28 =>
+                        hm_ph <= 29;
+                    when 29 =>
                         if hk_x >= hm_xbe then
-                            hm_ph <= 29;                  -- roll to the next run
+                            hm_ph <= 30;                  -- roll to the next run
                         else
                             hk_x <= ks_n;                 -- chosen in 11..13
                             ks_g <= ks_n2;                -- grid re-anchors
@@ -1495,7 +1509,7 @@ begin
                         end if;
 
                     -- --------------- run roll (23..29) ---------------
-                    when 29 =>
+                    when 30 =>
                         -- Walk order: left edges outside-in, the innermost
                         -- present ring's central run, then right edges
                         -- inside-out.  The walk TERMINATES here (a run must
@@ -1506,33 +1520,33 @@ begin
                             if    hm_k < 2        then hm_ean <= 0;
                             elsif hm_k - 2 < C_NC then hm_ean <= hm_k - 2;
                             else                       hm_ean <= C_NC - 1; end if;
-                            hm_ph <= 30;
+                            hm_ph <= 31;
                         elsif hm_side = '0' then
                             hm_side <= '1';               -- central run done
                             if hm_lowp < C_NT - 1 then
                                 hm_k <= hm_lowp + 1;
                                 if hm_lowp + 1 < C_NC then hm_ean <= hm_lowp + 1;
                                 else                       hm_ean <= C_NC - 1; end if;
-                                hm_ph <= 30;
+                                hm_ph <= 31;
                             else
-                                hm_ph <= 36;              -- nothing outside it
+                                hm_ph <= 37;              -- nothing outside it
                             end if;
                         elsif hm_k < C_NT - 1 then
                             hm_k <= hm_k + 1;
                             if hm_k + 1 < C_NC then hm_ean <= hm_k + 1;
                             else                    hm_ean <= C_NC - 1; end if;
-                            hm_ph <= 30;
+                            hm_ph <= 31;
                         else
-                            hm_ph <= 36;                  -- outermost done
+                            hm_ph <= 37;                  -- outermost done
                         end if;
-                    when 30 =>
+                    when 31 =>
                         if hm_side = '0' and hm_k > hm_lowp then
                             spst_ra <= hm_k - 1;
                         else
                             spst_ra <= C_NT + hm_k;
                         end if;
-                        hm_ph <= 31;
-                    when 31 =>
+                        hm_ph <= 32;
+                    when 32 =>
                         -- shuffle the circle context along by one ring
                         if hm_side = '0' then
                             hm_ocx <= hm_icx;  hm_ody2 <= hm_idy2;
@@ -1545,8 +1559,8 @@ begin
                             hm_oR  <= resize(hm_oR + resize(s_spac, 13), 13);
                         end if;
                         hm_dy_n <= resize(resize(sp_dy, 16) - resize(doa_ey, 16), 15);
-                        hm_ph <= 32;
-                    when 32 =>
+                        hm_ph <= 33;
+                    when 33 =>
                         -- doa_ex still holds ram_ex(hm_ean) here (the address
                         -- settled two cycles ago), so the hm_icx0 staging
                         -- register is unnecessary
@@ -1557,13 +1571,13 @@ begin
                                                           -- run just closed; hk_x
                                                           -- is stale after a skip)
                         ks_g   <= hm_xbe + signed(resize(s_kstep, 16));
-                        hm_ph <= 33;
-                    when 33 =>
-                        hm_xbe <= sp_cl;
                         hm_ph <= 34;
                     when 34 =>
+                        hm_xbe <= sp_cl;
                         hm_ph <= 35;
                     when 35 =>
+                        hm_ph <= 36;
+                    when 36 =>
                         if hm_side = '0' then hm_idy2 <= unsigned(m_p(26 downto 0));
                         else                  hm_ody2 <= unsigned(m_p(26 downto 0)); end if;
                         -- The shared edge belongs to BOTH runs but with
@@ -1576,7 +1590,7 @@ begin
                         -- previous piece then smears across it.
                         hp_v <= '0';
                         if hm_xbe <= hm_xae + 1 then
-                            hm_ph <= 29;              -- run clipped away: skip
+                            hm_ph <= 30;              -- run clipped away: skip
                         else
                             hk_x <= hm_xae;           -- the shared edge
                             hm_ph <= 0;
@@ -1585,39 +1599,39 @@ begin
                     -- --------------- finish (30..38) ---------------
                     -- the last piece's slope divide has no next knot to ride
                     -- in, so it is run out here once per line
-                    when 36 =>
+                    when 37 =>
                         nrm_in <= resize(hq_l, 18);
                         nrm_nm <= resize(hq_df, 19);
-                        hm_ph <= 37;
-                    when 37 | 38 | 39 =>
+                        hm_ph <= 38;
+                    when 38 | 39 | 40 | 41 =>
                         hm_ph <= hm_ph + 1;
-                    when 40 =>
+                    when 42 =>
                         m_a <= hn;  m_b <= signed(resize(rrom_q, 15));
-                        hm_ph <= 41;
-                    when 41 | 42 =>
+                        hm_ph <= 43;
+                    when 43 | 44 =>
                         hm_ph <= hm_ph + 1;
-                    when 43 =>
+                    when 45 =>
                         if hw_pend = '1' then
                             v_dp := resize(shift_right(m_p, 3), 36);
                             if    v_dp >  4194303 then v_dp :=  to_signed(4194303, 36);
                             elsif v_dp < -4194304 then v_dp := to_signed(-4194304, 36); end if;
                             sd_wd(27 downto 0) <= std_logic_vector(resize(v_dp, 28));
                         end if;
-                        hm_ph <= 44;
-                    when 44 =>
+                        hm_ph <= 46;
+                    when 46 =>
                         if hw_pend = '1' then
-                            sd_wa <= eng_bank & hm_slot;
+                            sd_wa <= eng_bank(0) & hm_slot;
                             sd_wd(56 downto 46) <= std_logic_vector(hw_xn);
                             sd_wd(45 downto 28) <= std_logic_vector(hw_f0);
                             sd_we   <= '1';
                             hm_slot <= hm_slot + 1;
                             hw_pend <= '0';
                         end if;
-                        hm_ph <= 45;
-                    when 45 =>
+                        hm_ph <= 47;
+                    when 47 =>
                         -- TRAILING GROUND sentinel: x_next = 2047 never
                         -- matches, so the rest of the line stays flat
-                        sd_wa <= eng_bank & hm_slot;
+                        sd_wa <= eng_bank(0) & hm_slot;
                         sd_wd <= (others => '0');
                         sd_wd(56 downto 46) <= (others => '1');
                         sd_we <= '1';
