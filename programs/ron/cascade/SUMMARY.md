@@ -162,12 +162,14 @@ K4/S9 have made of it, scales the input's **chroma about neutral** —
 
 | field | saturation |
 |---|---|
-| black | **−50 %** (0.5x) |
+| black | **0x — fully decoloured** |
 | mid-grey | **unchanged** (1.0x) |
-| white | **+50 %** (1.5x) |
+| white | **2x** |
 
-(±25 % was HW-approved first, then judged "not prominent enough" — doubled
-per user request 2026-08-02.)
+(±25 % was HW-approved but subtle; ±50 % still read as weak. Multiplicative
+saturation only shows on already-coloured pixels — near-grey source pixels
+stay near-grey at any gain, and vivid ones clip — so the endpoints must be
+EXTREME to be prominent. 0..2x is the full physical range.)
 
 The user's "25 / 50 / 75 %" is the **proc-amp reading, where 50 % is normal** —
 NOT a fraction of the source. Reading it as 0.25x..0.75x caps the picture at
@@ -181,8 +183,8 @@ through it. Every ring look still applies: hard rings give a two-level
 25/75 split, K4 steps give banded saturation, S9 Smooth gives a continuous
 sweep.
 
-Costs **one 11×7 multiply per chroma component**: `m = 16 + (key+4)/8`
-(16..48, exact at black/grey/white) and `c' = (c·m)/32`. Folding the whole
+Costs **one 11×8 multiply per chroma component**: `m = (key+2)/4`
+(0..64, exact at black/grey/white) and `c' = (c·m)/32`. Folding the whole
 gain into `m` means no separate `c/2` term and no carried copy of `c`, which
 paid for the clamp that boost needs (1.25 × 512 = 640 overflows). The input is
 realigned to the field through a **BRAM delay line** (2 EBR, RAM 4 → 6)

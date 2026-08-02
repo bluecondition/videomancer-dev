@@ -380,15 +380,18 @@ architecture cascade of program_top is
 
     ----------------------------------------------------------------------
     -- S11 VIDEO SATURATION MOD.  The rendered ring field scales the input's
-    -- CHROMA about neutral: field black takes 50 % OFF the saturation,
-    -- mid-grey leaves it EXACTLY UNCHANGED, white adds 50 %.  Luma passes
+    -- CHROMA about neutral: field black strips the colour entirely, mid-grey
+    -- leaves it EXACTLY UNCHANGED, white doubles it.  Luma passes
     -- through untouched -- the full incoming picture goes out, only its
     -- saturation is modulated, and the circles are never drawn.
-    --   m    = 16 + (key + 4) / 8       -- 16..48, exact at black/grey/white
-    --   c'   = (c * m) / 32             -- ONE 11x7 multiply per component
-    -- so saturation is -50 % / UNCHANGED / +50 % at black / mid-grey / white
-    -- (+-25 % was HW-approved but "not prominent enough").  Boost overflows
-    -- (1.5 * 512 = 768), so the output is clamped to 0..1023.
+    --   m    = (key + 2) / 4            -- 0..64, exact at black/grey/white
+    --   c'   = (c * m) / 32             -- ONE 11x8 multiply per component
+    -- so saturation runs the FULL physical range: field black DECOLOURS the
+    -- picture completely (0x), mid-grey is a bit-exact no-op (1.0x), white
+    -- doubles it (2x).  (+-25 % then +-50 % both read as too subtle on
+    -- hardware: multiplicative saturation only shows on already-coloured
+    -- pixels, so the endpoints must be extreme to be prominent.)  Boost
+    -- overflows (2 * 512 = 1024), so the output is clamped to 0..1023.
     -- The video is NOT delayed to meet the field.  It used to go through a
     -- 30-bit BRAM delay line, which simulated pixel-exact but put noisy
     -- horizontal lines on real hardware -- silicon and GHDL do not agree on
@@ -397,10 +400,10 @@ architecture cascade of program_top is
     -- shifts the saturation pattern sideways by an invisible amount.  So the
     -- video takes its own 3-cycle path and the syncs are tapped to match.
     ----------------------------------------------------------------------
-    signal r12_h   : unsigned(5 downto 0) := (others => '0');   -- sat step 0..32
+    signal r12_h   : unsigned(6 downto 0) := (others => '0');   -- sat gain m, 0..64 (m/32 = 0..2x)
     signal r13_cu, r13_cv : signed(10 downto 0) := (others => '0');
     signal r13_y   : unsigned(9 downto 0) := (others => '0');
-    signal r14_pu, r14_pv : signed(17 downto 0) := (others => '0');
+    signal r14_pu, r14_pv : signed(18 downto 0) := (others => '0');  -- 11x8 product
     signal r14_y   : unsigned(9 downto 0) := (others => '0');
     signal s_out_u, s_out_v : unsigned(9 downto 0) := C_MID;
 
@@ -1428,8 +1431,7 @@ begin
             -- proc-amp reading where 50 % is normal -- NOT a fraction of the
             -- source, which would cap the picture at 3/4 saturation and make
             -- the whole image read as washed out.
-            r12_h   <= resize(shift_right(resize(v_key, 9) + 4, 3), 6)
-                       + to_unsigned(16, 6);
+            r12_h   <= resize(shift_right(resize(v_key, 9) + 2, 2), 7);
         end if;
     end process p_r12;
 
@@ -1448,9 +1450,8 @@ begin
             r13_cv <= signed(resize(unsigned(data_in.v), 11))
                       - to_signed(512, 11);
 
-            -- stage 6: ONE multiply per component.  The gain m already
-            -- carries the whole 0.5x..1.5x scale (m/32), so no c/2 term and
-            -- no carried copy of c is needed.
+            -- stage 6: ONE multiply per component.  The gain m carries the
+            -- whole 0..2x scale (m/32), so no separate c term is needed.
             r14_pu <= r13_cu * signed('0' & r12_h);
             r14_pv <= r13_cv * signed('0' & r12_h);
             r14_y  <= r13_y;

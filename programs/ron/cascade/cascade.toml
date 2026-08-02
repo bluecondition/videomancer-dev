@@ -16,14 +16,15 @@
 # re-anchored at each true disc edge so the shading cascades with the
 # rings; K4 = classic hard (left) then 2/4/8/16/32/64 gray steps within
 # each ring.
-# S11 Video: the ring field scales the INCOMING video's saturation --
-# field black = half saturation, mid-grey = unchanged, white = 1.5x.
-# Luma passes through untouched; the circles themselves are never drawn.
+# S11 Video: the ring field scales the INCOMING video's saturation over
+# the full range -- field black strips the colour entirely, mid-grey =
+# unchanged, white doubles it.  Luma passes through untouched; the
+# circles themselves are never drawn.
 # K5/K6/P12 are spare.
 
 [program]
 program_id = "com.bluecondition.cascade"
-program_version = "1.1.0"
+program_version = "1.2.0"
 abi_version = ">=1.0,<2.0"
 program_name = "Hypnos Cascade"
 author = "bluecondition"
