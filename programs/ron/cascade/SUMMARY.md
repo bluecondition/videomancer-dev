@@ -1,17 +1,111 @@
-# HYPNOS CASCADE — coupled concentric circles (v0.8: 24 discs, octagon slack, per-ring ramps — S9 Steps/Smooth, S11 multi-ring fade; Invert removed)
+# HYPNOS CASCADE — coupled concentric circles (v0.9: 96/48 discs, adaptive ring count, Catch-Up actually centres)
 
 Concentric black/white circles that **push each other**. Move the centre (K1/K2)
 and the innermost circle leads; each outer ring holds still until the one inside
 closes its slack, then is shoved rigidly outward — a wave of motion travelling
-outward ring-by-ring **through a 24-ring chain** (the outer field follows as one
-body once ring 23 is pushed). The rings are hard-coupled and **never overlap** —
-a band of the opposite colour always survives — and every edge is an **exact
-integer circle**. When you stop, they either glide home concentric
-(**Catch-Up = Home**) or freeze in the dragged nest (**Stay**).
+outward ring-by-ring **through a 96-ring chain at HD (48 at SD)** (the outer
+field follows as one body once the last modelled ring is pushed). The rings are
+hard-coupled and **never overlap** — a band of the opposite colour always
+survives — and every edge is an **exact integer circle**. When you stop, they
+either glide home concentric (**Catch-Up = Home**) or freeze in the dragged nest
+(**Stay**).
 
 A dedicated fork of **Hypnos** (v0.3 of the main program is untouched).
 
-## v4.1 — 24 discs, ~87 % slack (octagon clamp)
+## v0.9 — the whole screen cascades, and Catch-Up lands
+
+Two user reports, plus one defect found while fixing them.
+
+### 1. Catch-Up now actually centres
+
+The settle pull was `d + floor(-d/8)`, which is `d - ceil(d/8)`: exact for
+`d > 0`, but for `-7 <= d <= -1` `ceil(d/8)` is **0**, so it was a **no-op**.
+And the sign is not symmetric in practice — dragging the centre right/down
+makes every ring lag *left/up*, i.e. `d` **negative** — so the common case
+froze each ring up to 7 px off its parent and stopped. That is cumulative down
+the chain: ring 23 settled **161 px** off centre while ring 0 (pinned to the
+glided centre) sat exactly right, which is what "the centre circle isn't lined
+up with the other rings" looks like.
+
+Fixed by pulling the step's *magnitude* down by `ceil(|d|/8)`, rounding away
+from zero on both sides, so every ring lands on exactly 0 from any drag
+direction. Verified against a bit-exact model of the chain (`chain_settle.py`
+method: seed the per-ring steps, iterate the real octagon/rotate arithmetic,
+read the fixed point) — old: `(-7,-5)` per ring from a left/up seed; new:
+`(0,0)` from all four quadrants.
+
+**Catch-Up is a WAVE, so its duration scales with the ring count.** Ring *k*
+can only close once the one inside it has, which costs ~7 frames per ring at
+`C_SET = 3`. Measured in the chain model at spacing 30: 168 frames (2.8 s) at
+24 rings, but **672 frames (11.2 s) at 96**. Quadrupling the rings quadruples
+the glide home, which would read as broken. `C_SET` dropped 3 → 2 (pull
+`ceil(|d|/4)` per frame) to put 96 rings back at 294 frames (4.9 s), the same
+few-seconds character v0.8 had. `C_SET = 1` would be 105 frames (1.8 s) —
+snappier than v0.8 — if that reads better on hardware.
+
+**RTL-verified**: a 160-frame NTSC ÷1 run (SD config, 48 rings, `C_SET = 2`,
+Glide off so the centre jumps once and the chain lags fully) settles to an
+*exact* bullseye — centre-row edge gaps all exactly 30 px (the spacing), 59
+across the centre disc, edges at 0/30/…/330 | 389/419/…/689 → centre 359.5
+against `cx` = 360. v0.8 would have frozen every ring 7 px off its parent.
+
+### 2. Ring count 24 → 96 (HD) / 48 (SD)
+
+**Ring count is a throughput question, never a fit one.** Measured LC across a
+sweep at fixed everything else:
+
+| C_NR | 24 | 48 | 64 | 96 | 110 |
+|---|---|---|---|---|---|
+| LC | 7080 | 7108 | 7091 | 7091 | 7056 |
+| EBR | 4 | 4 | 4 | 4 | 4 |
+
+Flat, because the chain scan, the span pass and the pixel path are all
+serialized or constant-cost and the offsets live in EBR. The real bound is the
+per-line pass — E_SPAN (15 slots/ring, launched at the active rise, spilling
+into hblank via `l_pend`) + E_LINE (46) — which must be back in `E_IDLE`
+before the **next** active rise or that line's pass never launches:
+
+> `15*C_NR + 56 <= clocks_per_line`
+
+| | prog_clk | clk/line | max rings |
+|---|---|---|---|
+| HD | 74.25 MHz | 2200 | 142 |
+| SD | 13.5 MHz | 858 | 53 |
+
+**SD is 858 clocks, not 1716** — `prog_clk` is `i_vid_dec_clk`, the 13.5 MHz
+decoder pixel clock (`GEN_DIRECT_PROG_CLK`); the 27 MHz PLL feeds the *encoder*
+only and the 27 MHz build constraint is pure margin. (An earlier note claiming
+1716 was wrong and cost a wasted pass at 96 rings on SD.)
+
+Chose **96 / 48** for margin (HD 1496/2200, SD 776/858). What it buys: the nest
+reaches the HD screen corners for any spacing ≥ 12 px instead of ≥ 46 px, so
+the cascade wave travels the whole picture rather than a disc in the middle.
+
+Chain words stay 15-bit — `|e[k]|` is bounded by the **centre's own travel**
+(~10.2k worst case at W = 4095), never by `k*A`, so the 640 px slack cap does
+not have to scale with the ring count. Index words are 7-bit (`t_kl` is mod
+128), so `C_NR <= 126` is the hard ceiling.
+
+### 3. The radius clamp was inverting the screen (pre-existing)
+
+Ring *k*'s radius is `(k+1)*spacing`, clamped at `C_RCL` = 4095. At coarse
+spacings every ring past `C_RCL/spacing` **piles up at the same radius** and
+they all write their edge mark to the **same line-buffer cell**. The cell holds
+one mark, so the pile collapses to a single toggle and `pile-1` marks vanish —
+and when that count is odd the mark parity **inverts for the rest of the line**:
+a hard vertical seam with everything beyond it colour-flipped. It hits **54 %**
+of the Period range (whenever the pile edge lands on screen, i.e. HD with the
+centre knob in its outer ~18 %). Present in v0.8 at 24 rings over 40 % of the
+Period range; going to 96 would have widened that to 62 %.
+
+Fixed by making the modelled count **adaptive**: a running radius in the chain
+scan finds the largest **even** count whose outermost ring still fits under
+`C_RCL`, and the outer field seams onto *that* ring instead of ring `C_NR-1`
+(`s_nreff`, `s_racc`, `s_ocap`). No ring is ever clamped, so the parity is
+exact — and the per-line span cost now scales with the spacing rather than with
+`C_NR` (default Period spends 26 rings, not 96). Cost: ~63 LC.
+
+## v4.1 — 24 discs, ~87 % slack (octagon clamp)  *(historical — see v0.9 above for the current ring count)*
 
 Per user request: 24 modelled discs, and rings should nearly TOUCH before
 yielding — the minimum edge-to-edge gap at the push point is now **~12 % of
@@ -41,8 +135,8 @@ hblank), so:
   then — only the adds-only tracker runs per pixel). ~210 clks fit even SD's
   720-clk active line. The tracker line-seed (E_LINE, now ~50 clks) stays in
   the hblank. Frame startup: vblank chain E_CLEAR → E_SPAN → E_LINE.
-- **Outer field** (rings 24+): unchanged v3 incremental r² band tracker,
-  seamed exactly onto disc 23.
+- **Outer field** (rings past the nest): unchanged v3 incremental r² band
+  tracker, seamed exactly onto the last modelled disc.
 - **Timing fixes for 74.25 MHz**: E_LINE bracket corrections retimed to 2
   slots each (compare signs registered before the update — kills a 29-bit
   carry → enable-cone path), and the per-pixel tracker no longer maintains
@@ -126,6 +220,32 @@ The design study for it is in this directory and is worth keeping:
 
 ## Simulator notes (cost hours — read before simming)
 
+- **THE SIM PICKS AN HD CORE CONFIG FOR HD VIDEO MODES.** `--video-mode`
+  selects the config, so the default `1080p2997` elaborates an **HD** package
+  → `C_ENABLE_HD` true → **96 rings**, not 48. Combine that with
+  `--decimation 2` (line = 960 + 64 = 1024) and the span pass needs 1496 —
+  **starved**, and it renders as blank alternate lines plus horizontal seams
+  that look exactly like an RTL bug. It is not one. Cost me six bisect sims.
+  Budget check before every run — `15*C_NR + 56 <= W/decimation + 64`:
+
+  | raster | line | 26 rings | 48 | 68 | 96 |
+  |---|---|---|---|---|---|
+  | 1080p ÷1 | 1984 | ok | ok | ok | ok |
+  | 1080p ÷2 | 1024 | ok | ok | **starved** | **starved** |
+  | 1080p ÷4 | 544 | ok | **starved** | **starved** | **starved** |
+  | ntsc ÷1 | 784 | ok | ok (8 clk spare) | **starved** | **starved** |
+
+  So: **HD ring counts can only be simmed at `--decimation 1`.** `--video-mode
+  ntsc --decimation 1` is the honest SD test (720 active, 784 line — tighter
+  than real hardware's 858) and it also exercises the hblank spill.
+  The adaptive count helps here: at coarse Periods `s_nreff` is small, so
+  `--decimation 4` is fine at the default Period and starves at fine ones.
+- **Catch-Up needs hundreds of frames.** ~7 frames per ring at `C_SET = 3`,
+  ~3.5 at `C_SET = 2` — 294 frames to reach concentric at 96 rings. A
+  30-frame warmup captures a still-dragged nest; that is the model working,
+  not a settle bug. Verify the settle on the **SD** config (48 rings, 148
+  frames) where a full run is affordable.
+
 - **TOML defaults apply in sim.** S7/S8/S10 default ON; a "clean" scenario
   must explicitly `--set toggle_switch_7=0` etc., or the glide/settle
   dynamics contaminate the capture (settle's floor-shift walks each ring
@@ -144,22 +264,33 @@ The design study for it is in this directory and is worth keeping:
 
 ## Fit / timing
 
-**~7.0k LC (91 %), 4 EBR** (chain x/y + 2 mark banks). All six configs pass
+**~7.14k LC (93 %), 4 EBR** (chain x/y + 2 mark banks). All six configs pass
 **icetime sign-off STA** (never trust the build's pre-route estimate).  An
 early HW test showed rough ring edges + occasional full-width noise lines;
 that build's hd_analog margin was only 0.2 % — since then seeds are chosen
 for ≥ 2.7 % margin on every HD config as the suspected fix:
 
-| Config | Fmax (routed) | seed |
-|---|---|---|
-| HD Analog | 78.6 MHz | 4 |
-| HD HDMI | 78.0 MHz | 6 |
-| HD Dual | 80.2 MHz | 7 |
-| SD Analog | 59.4 MHz (Fmin 27) | 1 |
-| SD HDMI | 76.1 MHz (Fmin 27) | 1 |
-| SD Dual | 74.6 MHz (Fmin 27) | 1 |
+**v0.9 routed results** (7117–7148 LC = 93 %, 4 EBR, all six PASS):
 
-Shipped `out/rev_b/ron/cascade.vmprog` (program v0.8; presets: Gradient
+| Config | Fmax (routed) | margin | seed |
+|---|---|---|---|
+| HD Analog | 79.25 MHz | +6.7 % | 4 (swept) |
+| HD HDMI | 78.10 MHz | +5.2 % | 5 (swept) |
+| HD Dual | 78.49 MHz | +5.7 % | 5 |
+| SD Analog | 78.64 MHz (Fmin 27) | — | 1 |
+| SD HDMI | 73.07 MHz (Fmin 27) | — | 1 |
+| SD Dual | 79.05 MHz (Fmin 27) | — | 1 |
+
+**HD Analog is seed-fragile: only 1 of 10 seeds passes** (seed 4 at 79.25;
+the other nine land 62.9–73.8). The builder reported its last retry — seed 6
+at **64.31 MHz** — as "✓ Completed", which is the best-effort trap: always
+read the Fmax, never the tick. hd_hdmi's own run passed at 74.62 (+0.5 %,
+under the 2.7 % rule) and was swept to seed 5. Both icepacked in and
+repacked (`casc_sweep.sh`).
+
+v0.8 numbers, for comparison: HD 78.6/78.0/80.2, SD 59.4/76.1/74.6.
+
+Shipped `out/rev_b/ron/cascade.vmprog` (program v0.9; presets: Gradient
 Waves = S11 Smooth, Velvet Rings = S9 Smooth) repacked from these six
 bitstreams, validation PASSED. (v0.8 HD seeds were swept manually — the
 builder's own run best-efforted hd_analog at 70.6 — then icepacked into

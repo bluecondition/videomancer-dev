@@ -1,6 +1,6 @@
 -- Author: bluecondition
 
--- cascade.vhd  (v4 -- 24 coupled discs, line-buffer mark render)
+-- cascade.vhd  (v0.9 -- 96/48 coupled discs, line-buffer mark render)
 --
 -- HYPNOS CASCADE: concentric black/white discs that PUSH each other.  Move the
 -- centre (K1/K2) and the innermost disc leads; each outer ring holds still until
@@ -23,12 +23,25 @@
 --     ramp (re-anchored at each true disc edge), K4 sets the fineness, S9
 --     picks Steps/Smooth and S11 the multi-ring fade.
 --
---   OUTER field (rings 24+) -- incremental integer-radius tracker centred on
---     disc 23's centre, seamed exactly onto it.
+--   OUTER field -- incremental integer-radius tracker centred on the LAST
+--     modelled disc's centre, seamed exactly onto it.
 --
---   CHAIN -- coupled dead-zone chain in PIXEL units, 24 entries, with an
+--   CHAIN -- coupled dead-zone chain in PIXEL units, C_NR entries, with an
 --     OCTAGONAL coupling clamp: the slack is ~87% of the spacing in every
 --     drag direction, so rings nearly touch before yielding.
+--
+-- v0.9 (2026-07-31), both from user reports:
+--   * RING COUNT 24 -> 96 (HD) / 48 (SD).  Ring count is pure throughput,
+--     not fit -- see the C_NR budget note below.  The nest now reaches the
+--     screen corners for any spacing >= 12 px instead of >= 46, so the
+--     cascade wave travels the whole picture rather than a centre disc.
+--   * CATCH-UP now actually centres.  The settle pull was d + floor(-d/8),
+--     which is a NO-OP for -7 <= d <= -1 -- and a drag right/down makes the
+--     rings lag LEFT, i.e. d NEGATIVE, so the common case froze every ring
+--     up to 7 px off its parent and the nest never closed.
+--   * The radius clamp no longer piles rings on one radius (that dropped an
+--     odd number of edge marks half the time and inverted the screen); the
+--     modelled count adapts per frame to what fits under C_RCL.
 --
 -- No CORDIC, no cos/sin ROM, no per-pixel multiply anywhere; every edge is an
 -- exact integer circle.  C_NR MUST stay even (mark parity == k parity).
@@ -42,6 +55,7 @@ use ieee.numeric_std.all;
 library work;
 use work.all;
 use work.core_pkg.all;
+use work.core_config_pkg.all;
 use work.video_stream_pkg.all;
 
 architecture cascade of program_top is
@@ -61,8 +75,41 @@ architecture cascade of program_top is
     -- adjacent edge pair > 1 px apart on any scanline (mark writes never
     -- collide) and nesting strict.  NO accumulated cap -- the wave travels
     -- the chain.  C_NR MUST stay even (mark parity == k parity).
-    constant C_NR    : integer := 24;                                    -- modelled ring slots
-    constant C_SET   : integer := 3;                                     -- settle glide shift (toward inner)
+    --
+    -- RING COUNT BUDGET (v0.9: 96 rings at HD, 48 at SD -- v0.8 was 24/24):
+    --   * LC is FLAT in C_NR (7080 at 24, 7091 at 96 -- measured): the chain
+    --     scan, the span pass and the pixel path are all serialized or
+    --     constant-cost, and the offsets live in EBR.  Ring count is a
+    --     THROUGHPUT question, never a fit one.
+    --   * The per-LINE pass is E_SPAN (15 slots/ring, starts at the active
+    --     rise and spills into the hblank via l_pend) + E_LINE (46 slots),
+    --     and must be back in E_IDLE before the NEXT active rise or that
+    --     line's pass never launches:
+    --         15*C_NR + 56  <=  clocks_per_line
+    --     HD  prog_clk 74.25 MHz, 2200 clk/line  ->  142 rings
+    --     SD  prog_clk 13.5  MHz,  858 clk/line  ->   53 rings
+    --     (SD is 858, NOT 1716: prog_clk = i_vid_dec_clk, the 13.5 MHz
+    --     decoder pixel clock -- the 27 MHz PLL feeds the ENCODER only, and
+    --     the 27 MHz build constraint is pure margin.)
+    --     Sim raster is W/decimation + 64, so decimation 1 (1984 clk) is
+    --     needed to sim the HD count; decimation 4 (544) holds only 32.
+    --   * Chain words stay 15-bit: |e[k]| is bounded by the CENTRE's own
+    --     travel (~10.2k worst case at W = 4095), never by k*A, so the 640
+    --     slack cap does not have to scale with C_NR.
+    --   * Index words are 7-bit (t_kl is mod 128), so C_NR <= 126.
+    function f_nr return integer is
+    begin
+        if C_ENABLE_HD then return 96; else return 48; end if;
+    end function;
+    constant C_NR    : integer := f_nr;                                  -- modelled ring slots
+    -- Settle rate: the pull is ceil(|d| / 2^C_SET) per frame.  Catch-Up is a
+    -- WAVE -- ring k can only close once the one inside it has -- so the time
+    -- to reach concentric is ~(7 / 2^(C_SET-3)) frames PER RING, i.e. it
+    -- scales with C_NR.  Measured (spacing 30, model): C_SET 3 = 168 frames
+    -- at 24 rings but 672 (11 s) at 96; C_SET 2 = 294 (4.9 s); C_SET 1 = 105
+    -- (1.8 s).  Dropped 3 -> 2 with the ring count so 96 rings still glide
+    -- home in about the same few seconds v0.8 took at 24.
+    constant C_SET   : integer := 2;                                     -- settle glide shift (toward inner)
 
     constant C_RCL   : integer := 4095;                                  -- px clamp: nest disc radii
     constant C_OCL   : integer := 4095;                                  -- outer-centre offset clamp (px)
@@ -198,6 +245,25 @@ architecture cascade of program_top is
     signal s_mvx, s_mvy : signed(9 downto 0) := (others => '0');
     signal s_chain_d : std_logic := '0';
 
+    -- ADAPTIVE ring count.  Ring k's radius is (k+1)*spacing, and the span
+    -- engine clamps radii at C_RCL -- so at coarse spacings every ring past
+    -- C_RCL/spacing PILES UP at the same radius and they all write their edge
+    -- mark to the SAME line-buffer cell.  The cell holds one mark, so the pile
+    -- collapses to a single toggle: (pile-1) marks vanish, and when that count
+    -- is odd (54% of the Period range) the mark parity INVERTS for the rest of
+    -- the line -- a hard vertical seam with the screen colour-flipped beyond
+    -- it.  (Only reachable on HD with the centre knob near an extreme, which
+    -- is why v0.8 shipped with it.)  Fix: model only the rings that actually
+    -- fit under C_RCL.  s_nreff is that count, forced EVEN (mark parity == k
+    -- parity) and >= 2, recomputed per frame during the chain scan; the outer
+    -- field seams onto ring s_nreff-1 instead of ring C_NR-1.  It also makes
+    -- the per-line span cost scale with the spacing rather than with C_NR.
+    signal s_racc  : unsigned(13 downto 0) := (others => '0');     -- (k+1)*spacing, saturating
+    signal s_nrw   : unsigned(6 downto 0) := to_unsigned(C_NR, 7); -- working count during the scan
+    signal s_nreff : unsigned(6 downto 0) := to_unsigned(C_NR, 7); -- published, frame-stable
+    signal s_ocap  : std_logic := '0';                             -- capture e[] into the outer centre
+    signal s_codd  : std_logic := '1';                             -- s_chain_cnt is odd (toggle, not a mod)
+
     ----------------------------------------------------------------------
     -- frame-constant tracker terms (small p_frame tail after the chain,
     -- reusing its shared multiplier)
@@ -242,8 +308,8 @@ architecture cascade of program_top is
     -- per-pass line-start ring index (C_NR minus the discs overhanging the
     -- left edge): written by the pass (working/_done), latched live at the
     -- line's avid rise.  (The hit test is the counter itself: k < C_NR.)
-    signal m_kinit      : unsigned(4 downto 0) := to_unsigned(C_NR, 5);
-    signal m_kinit_done : unsigned(4 downto 0) := to_unsigned(C_NR, 5);
+    signal m_kinit      : unsigned(6 downto 0) := to_unsigned(C_NR, 7);
+    signal m_kinit_done : unsigned(6 downto 0) := to_unsigned(C_NR, 7);
     signal m0_w, m0_done : std_logic := '0';          -- a mark lands at x=0 (snap the seed)
 
     -- ONE 1-step/cycle sqrt unit (15-slot ring cadence; also roots r0).  The
@@ -648,7 +714,8 @@ begin
     -- frame every offset shifts by how far the inner ring moved (px), then is
     -- HARD-CLAMPED to the octagon around the ring inside -- the never-overlap
     -- guarantee AND the cascade dead-zone.  No accumulated cap: the wave
-    -- travels the full 24-ring chain.
+    -- travels the full C_NR-ring chain.  This scan also derives s_nreff, the
+    -- number of rings the span engine will actually render this frame.
     ------------------------------------------------------------------------
     p_chain : process(clk)
         variable v_mvx, v_mvy : integer;
@@ -657,6 +724,7 @@ begin
         if rising_edge(clk) then
             ew_wex <= '0';                              -- default: no write
             ew_wey <= '0';
+            s_ocap <= '0';                              -- default: 1-cycle pulse
             if s_vs_pulse = '1' then
                 v_mvx := to_integer(s_cx - s_cxp);
                 v_mvy := to_integer(s_cy - s_cyp);
@@ -679,6 +747,12 @@ begin
                 if s_seq = 3 then
                     s_chain_wt  <= '0';
                     s_chain_run <= '1';
+                    -- ring 1's radius = 2*spacing (this frame's spacing lands
+                    -- at sequencer slot 14, so it must be read HERE, not at
+                    -- vsync); floor the effective ring count at 2
+                    s_racc <= resize(s_spac, 14) + resize(s_spac, 14);
+                    s_nrw  <= to_unsigned(2, 7);
+                    s_codd <= '1';                  -- scan starts at ring 1
                 end if;
             elsif s_chain_run = '1' and data_in.avid = '0' then
                 case s_chain_ph is
@@ -698,12 +772,23 @@ begin
                     end if;
                     s_chain_ph <= s_chain_ph + 1;
                 when 3 | 6 =>
-                    -- SETTLE glide toward the ring inside: d + floor(-d/8)
-                    -- == the old pull-toward-inner exactly.  Also pre-register
-                    -- the next clamp's bound pair (keeps the clamp cone to
-                    -- register -> compare -> mux).
+                    -- SETTLE glide toward the ring inside, SYMMETRIC: pull the
+                    -- step's MAGNITUDE down by ceil(|d|/2^C_SET) so it lands on
+                    -- exactly 0 from either side.  (v0.8 used d + floor(-d/8),
+                    -- i.e. d - ceil(d/8): exact for d > 0 but a NO-OP for
+                    -- -7 <= d <= -1.  d is the step from the ring INSIDE, so a
+                    -- drag right/down makes the rings lag left/up and d comes
+                    -- out NEGATIVE -- the common case.  Every ring froze up to
+                    -- 7 px off its parent, cumulative down the chain (161 px
+                    -- at ring 23), and Catch-Up never finished centring.)
+                    -- Also pre-register the next clamp's bound pair (keeps the
+                    -- clamp cone to register -> compare -> mux).
                     if s_settle = '1' then
-                        s_dw <= s_dw + shift_right(-s_dw, C_SET);
+                        if s_dw(15) = '0' then
+                            s_dw <= s_dw - shift_right(s_dw + to_signed(2**C_SET - 1, 16), C_SET);
+                        else
+                            s_dw <= s_dw - shift_right(s_dw, C_SET);
+                        end if;
                     end if;
                     s_clb  <= signed(resize(s_apx, 16));
                     s_clbn <= -signed(resize(s_apx, 16));
@@ -760,6 +845,20 @@ begin
                         ew_wey   <= '1';
                         s_eprevy <= resize(vinx, 15);
                         s_chain_ph <= 0;
+                        -- adaptive count: s_racc is ring s_chain_cnt's radius.
+                        -- An ODD ring that still fits under C_RCL makes the
+                        -- (even) count s_chain_cnt+1, and its offset is the
+                        -- outer field's anchor.  Ring 1 always qualifies so a
+                        -- 2048-px spacing still has an anchor.
+                        s_codd <= not s_codd;
+                        if s_codd = '1'
+                           and (s_racc <= C_RCL or s_chain_cnt = 1) then
+                            s_nrw  <= to_unsigned(s_chain_cnt + 1, 7);
+                            s_ocap <= '1';
+                        end if;
+                        if s_racc <= C_RCL then
+                            s_racc <= s_racc + resize(s_spac, 14);
+                        end if;
                         if s_chain_cnt = C_NR - 1 then
                             s_chain_run <= '0';
                         else
@@ -779,16 +878,24 @@ begin
                 s_settle <= '0';
             end if;
 
-            -- outer-field recentre = the last ring's offset, clamped from the
-            -- REGISTERED write value one cycle after the scan (short path)
-            s_chain_d <= s_chain_run;
-            if s_chain_d = '1' and s_chain_run = '0' then
+            -- outer-field recentre = ring s_nreff-1's offset, clamped from the
+            -- REGISTERED write value one cycle after that ring's phase 13
+            -- (ew_dinx/ew_diny hold until the next write, so the pulse can
+            -- read them a cycle late -- same slot the old scan-end capture
+            -- used, so the frame tail still sees the new value in time).
+            if s_ocap = '1' then
                 if    ew_dinx >  C_OCL then s_exo <= to_signed( C_OCL, 13);
                 elsif ew_dinx < -C_OCL then s_exo <= to_signed(-C_OCL, 13);
                 else                        s_exo <= resize(ew_dinx, 13); end if;
                 if    ew_diny >  C_OCL then s_eyo <= to_signed( C_OCL, 13);
                 elsif ew_diny < -C_OCL then s_eyo <= to_signed(-C_OCL, 13);
                 else                        s_eyo <= resize(ew_diny, 13); end if;
+            end if;
+
+            -- publish the effective ring count one cycle after the scan ends
+            s_chain_d <= s_chain_run;
+            if s_chain_d = '1' and s_chain_run = '0' then
+                s_nreff <= s_nrw;
             end if;
         end if;
     end process p_chain;
@@ -817,7 +924,7 @@ begin
         variable v_q2 : std_logic_vector(1 downto 0);
         variable v_ud : signed(28 downto 0);
         variable v_tr : unsigned(26 downto 0);
-        variable v_ki : unsigned(4 downto 0);
+        variable v_ki : unsigned(6 downto 0);
         variable v_wide : signed(15 downto 0);
         -- radix-4 sqrt step temporaries
         variable v_sqn, v_sqr, v_sqo : unsigned(26 downto 0);
@@ -953,7 +1060,7 @@ begin
                     e_st     <= E_CLEAR;              -- chain here was critical)
                 elsif data_in.avid = '1' and s_avid_p = '0' then
                     sp_rr  <= resize(s_spac, 12);     -- pass for the NEXT line
-                    m_kinit <= to_unsigned(C_NR, 5);
+                    m_kinit <= s_nreff;
                     m0_w   <= '0';
                     e_cnt  <= 0;  e_ph <= 0;
                     e_st   <= E_SPAN;
@@ -969,7 +1076,7 @@ begin
                 if cl_cnt = cl_end then
                     sp_dy  <= s_dy0;                  -- frame's first line
                     sp_rr  <= resize(s_spac, 12);
-                    m_kinit <= to_unsigned(C_NR, 5);
+                    m_kinit <= s_nreff;
                     m0_w   <= '0';
                     e_cnt  <= 0;  e_ph <= 0;
                     e_st   <= E_SPAN;
@@ -984,24 +1091,24 @@ begin
                             sp_dy <= s_dyb;
                         end if;
                     when 1 =>
-                        if e_cnt < C_NR then
+                        if e_cnt < to_integer(s_nreff) then
                             sp_ey <= doa_ey;                  -- both axes arrive together
                             sp_ex <= doa_ex;
                         end if;
                     when 2 =>
-                        if e_cnt < C_NR then
+                        if e_cnt < to_integer(s_nreff) then
                             v_dy := resize(sp_dy, 16) - resize(sp_ey, 16);
                             v_ad := abs(v_dy);                -- <= 12500, bit 15 = 0
                             sp_ady <= unsigned(v_ad(14 downto 0));
                             sp_exc <= resize(sp_ex, 16) + resize(s_cx, 16);  -- raw screen x
                         end if;
                     when 3 =>
-                        if e_cnt < C_NR then
+                        if e_cnt < to_integer(s_nreff) then
                             if sp_ady > C_RCL then sp_emp <= '1'; sp_ady <= to_unsigned(C_RCL, 15);
                             else sp_emp <= '0'; end if;
                         end if;
                     when 4 =>
-                        if e_cnt < C_NR then
+                        if e_cnt < to_integer(s_nreff) then
                             -- w^2 = (R - |dy|) * (R + |dy|)
                             m_a <= signed(resize(sp_rr, 15)) - signed(resize(sp_ady(12 downto 0), 15));
                             m_b <= signed(resize(sp_rr, 15)) + signed(resize(sp_ady(12 downto 0), 15));
@@ -1016,7 +1123,7 @@ begin
                         sp_wl  <= sp_excq1 - v_w;
                         sp_wr1 <= sp_excq1 + v_w + 1;         -- first x OUTSIDE
                         sp_empq2 <= sp_empq1;
-                        if e_cnt < C_NR then
+                        if e_cnt < to_integer(s_nreff) then
                             if m_p < 0 then sqa_num <= (others => '0');
                             else sqa_num <= unsigned(m_p(26 downto 0)); end if;
                             sqa_res <= (others => '0');
@@ -1059,7 +1166,7 @@ begin
                             end if;
                             m_kinit <= v_ki;
                             -- last ring written: capture line-start k
-                            if e_cnt = C_NR then
+                            if e_cnt = to_integer(s_nreff) then
                                 m_kinit_done <= v_ki;
                                 m0_done      <= m0_w;
                                 -- drain group done
@@ -1225,7 +1332,7 @@ begin
 
             -- inside the nest <=> some disc covers <=> k < C_NR (the counter
             -- IS the exact hit test -- disc 23's comparators are gone)
-            if s_kx /= to_unsigned(C_NR, 7) and s_dyn = '1' then
+            if s_kx /= s_nreff and s_dyn = '1' then
                 g2_hit <= '1';
             else
                 g2_hit <= '0';
