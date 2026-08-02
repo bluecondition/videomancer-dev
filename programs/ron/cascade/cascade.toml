@@ -11,22 +11,25 @@
 # the true ring index, not a radial approximation.
 #
 # Controls: K1/K2 Centre X/Y, K3 Period, K4 Gradient fineness; S7 Glide,
-# S8 Cascade, S9 Invert, S10 Catch-Up (Stay/Home), S11 Shading.  Stepped:
+# S8 Cascade, S9 Ramp (Steps/Smooth), S10 Catch-Up (Stay/Home), S11 Video.
 # EVERY RING carries its own ramp-in/out (dark edges, bright mid-ring),
 # re-anchored at each true disc edge so the shading cascades with the
 # rings; K4 = classic hard (left) then 2/4/8/16/32/64 gray steps within
-# each ring.  Smooth: continuous multi-ring ramp, K4 = period.
+# each ring.
+# S11 Video: the ring field scales the INCOMING video's saturation --
+# field black = half saturation, mid-grey = unchanged, white = 1.5x.
+# Luma passes through untouched; the circles themselves are never drawn.
 # K5/K6/P12 are spare.
 
 [program]
 program_id = "com.bluecondition.cascade"
-program_version = "0.9.0"
+program_version = "1.1.0"
 abi_version = ">=1.0,<2.0"
 program_name = "Hypnos Cascade"
 author = "bluecondition"
 license = "GPL-3.0"
 categories = ["Illusion", "Optics", "Pattern"]
-program_type = "synthesis"
+program_type = "processing"
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 description = "Concentric circles that push each other: move the centre and rings cascade outward one-by-one, never overlapping"
@@ -128,9 +131,9 @@ initial_value_label = "Home"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
-name_label = "Shading"
-value_labels = ["Stepped", "Smooth"]
-initial_value_label = "Stepped"
+name_label = "Output"
+value_labels = ["Rings", "Video"]
+initial_value_label = "Rings"
 
 # --- Linear Potentiometer (Fader 12) ---
 
@@ -193,18 +196,18 @@ toggle_switch_11 = 0
 linear_potentiometer_12 = 0
 
 [[preset]]
-name = "Gradient Waves"         # 8-ring luma ramp on fine rings -- soft target
+name = "Sat Rings"              # rings drive the INPUT's saturation, 25-75%
 rotary_potentiometer_1 = 512
 rotary_potentiometer_2 = 512
 rotary_potentiometer_3 = 680    # fine rings
-rotary_potentiometer_4 = 700    # Gradient: 8-ring fold
+rotary_potentiometer_4 = 700    # Gradient: 8-ring fold -> smooth sat sweep
 rotary_potentiometer_5 = 512
 rotary_potentiometer_6 = 512
 toggle_switch_7 = 1            # Glide on
 toggle_switch_8 = 1            # Cascade
-toggle_switch_9 = 0
+toggle_switch_9 = 1            # per-ring ramp, full res -> smoothest sat
 toggle_switch_10 = 1          # Home
-toggle_switch_11 = 1          # Smooth ramp
+toggle_switch_11 = 1          # Video: Saturate
 linear_potentiometer_12 = 0
 
 [[preset]]

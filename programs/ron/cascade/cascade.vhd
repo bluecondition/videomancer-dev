@@ -60,7 +60,8 @@ use work.video_stream_pkg.all;
 
 architecture cascade of program_top is
 
-    constant C_LATENCY : integer := 6;    -- x/read 1 + parity 1 + g2 1 + merge 1 + key 1 + out 1
+    constant C_LATENCY : integer := 6;    -- RINGS: x/read 1 + parity 1 + g2 1 + merge 1 + key 1 + out 1
+    constant C_VLAT    : integer := 3;    -- VIDEO: split 1 + multiply 1 + recentre 1
     constant C_MID     : unsigned(9 downto 0) := to_unsigned(512, 10);   -- neutral chroma
 
     constant C_DB    : integer := 14;                                    -- detent deadband
@@ -99,7 +100,7 @@ architecture cascade of program_top is
     --   * Index words are 7-bit (t_kl is mod 128), so C_NR <= 126.
     function f_nr return integer is
     begin
-        if C_ENABLE_HD then return 96; else return 48; end if;
+        if C_ENABLE_HD then return 126; else return 48; end if;
     end function;
     constant C_NR    : integer := f_nr;                                  -- modelled ring slots
     -- Settle rate: the pull is ceil(|d| / 2^C_SET) per frame.  Catch-Up is a
@@ -188,7 +189,7 @@ architecture cascade of program_top is
     signal s_dyn    : std_logic := '0';              -- cascade motion (S8)
     signal s_ramp   : std_logic := '0';              -- S9: per-ring ramp Steps/Smooth
     signal s_home   : std_logic := '0';              -- Catch-Up (S10): glide home
-    signal s_soft   : std_logic := '0';              -- Shading (S11): stepped rings / smooth fade
+    signal s_vsat   : std_logic := '0';              -- S11: Rings / Video saturation mod
 
     ----------------------------------------------------------------------
     -- runtime raster measurement
@@ -378,6 +379,32 @@ architecture cascade of program_top is
     signal s_out_y  : unsigned(9 downto 0) := (others => '0');
 
     ----------------------------------------------------------------------
+    -- S11 VIDEO SATURATION MOD.  The rendered ring field scales the input's
+    -- CHROMA about neutral: field black takes 50 % OFF the saturation,
+    -- mid-grey leaves it EXACTLY UNCHANGED, white adds 50 %.  Luma passes
+    -- through untouched -- the full incoming picture goes out, only its
+    -- saturation is modulated, and the circles are never drawn.
+    --   m    = 16 + (key + 4) / 8       -- 16..48, exact at black/grey/white
+    --   c'   = (c * m) / 32             -- ONE 11x7 multiply per component
+    -- so saturation is -50 % / UNCHANGED / +50 % at black / mid-grey / white
+    -- (+-25 % was HW-approved but "not prominent enough").  Boost overflows
+    -- (1.5 * 512 = 768), so the output is clamped to 0..1023.
+    -- The video is NOT delayed to meet the field.  It used to go through a
+    -- 30-bit BRAM delay line, which simulated pixel-exact but put noisy
+    -- horizontal lines on real hardware -- silicon and GHDL do not agree on
+    -- that inferred memory.  It is unnecessary anyway: the ring field is a
+    -- SMOOTH pattern, so letting the gain lag the picture by a few pixels
+    -- shifts the saturation pattern sideways by an invisible amount.  So the
+    -- video takes its own 3-cycle path and the syncs are tapped to match.
+    ----------------------------------------------------------------------
+    signal r12_h   : unsigned(5 downto 0) := (others => '0');   -- sat step 0..32
+    signal r13_cu, r13_cv : signed(10 downto 0) := (others => '0');
+    signal r13_y   : unsigned(9 downto 0) := (others => '0');
+    signal r14_pu, r14_pv : signed(17 downto 0) := (others => '0');
+    signal r14_y   : unsigned(9 downto 0) := (others => '0');
+    signal s_out_u, s_out_v : unsigned(9 downto 0) := C_MID;
+
+    ----------------------------------------------------------------------
     -- sync delay
     ----------------------------------------------------------------------
     signal s_avid_sr    : std_logic_vector(0 to C_LATENCY - 1) := (others => '0');
@@ -511,8 +538,7 @@ begin
                 s_dyn <= registers_in(6)(1);   -- S8 Cascade (uniform / sequential)
                 s_ramp <= registers_in(6)(2);  -- S9 per-ring ramp: Steps / Smooth
                 s_home<= registers_in(6)(3);   -- S10 Catch-Up (stay-dragged / glide-home)
-                s_soft<= registers_in(6)(4);   -- S11 Shading (stepped rings / smooth ramp)
-                s_soft<= registers_in(6)(4);   -- S11 Shading (stepped rings / smooth ramp)
+                s_vsat<= registers_in(6)(4);   -- S11 Video (rings / saturation-mod the input)
 
                 s_fpar <= data_in.field_n;
                 if data_in.field_n /= s_fpar then s_ilace <= '1';
@@ -1367,36 +1393,43 @@ begin
     -- S11 Smooth = the continuous multi-ring phase ramp (K4 = its period).
     ------------------------------------------------------------------------
     p_r12 : process(clk)
-        variable v_t8 : unsigned(7 downto 0);
+        variable v_t8  : unsigned(7 downto 0);
+        variable v_key : unsigned(7 downto 0);
     begin
         if rising_edge(clk) then
-            if s_soft = '1' then
-                -- S11 SMOOTH: continuous multi-ring ramp (delayed phase fold)
-                r12_key <= r10_s;
-            elsif s_ramp = '1' then
+            if s_ramp = '1' then
                 -- S9 SMOOTH: per-ring ramp, full resolution (edge-anchored
                 -- -> cascades with the rings)
-                r12_key <= r10_t;
+                v_key := r10_t;
             else
                 v_t8 := r10_t;
                 case s_gn is
                     when 0 =>       -- classic: 1-bit fold of k(0)
-                        r12_key <= (others => not r10_k(0));
+                        v_key := (others => not r10_k(0));
                     when 1 =>       -- 2 steps per ring
-                        r12_key <= (others => v_t8(7));
+                        v_key := (others => v_t8(7));
                     when 2 =>       -- 4 steps, x85
-                        r12_key <= v_t8(7 downto 6) & v_t8(7 downto 6)
-                                   & v_t8(7 downto 6) & v_t8(7 downto 6);
+                        v_key := v_t8(7 downto 6) & v_t8(7 downto 6)
+                                 & v_t8(7 downto 6) & v_t8(7 downto 6);
                     when 3 =>       -- 8 steps, ~x36.4
-                        r12_key <= v_t8(7 downto 5) & v_t8(7 downto 5) & v_t8(7 downto 6);
+                        v_key := v_t8(7 downto 5) & v_t8(7 downto 5) & v_t8(7 downto 6);
                     when 4 =>       -- 16 steps, x17
-                        r12_key <= v_t8(7 downto 4) & v_t8(7 downto 4);
+                        v_key := v_t8(7 downto 4) & v_t8(7 downto 4);
                     when 5 =>       -- 32 steps, ~x8.2
-                        r12_key <= v_t8(7 downto 3) & v_t8(7 downto 5);
+                        v_key := v_t8(7 downto 3) & v_t8(7 downto 5);
                     when others =>  -- 64 steps within each ring, ~x4.05
-                        r12_key <= v_t8(7 downto 2) & v_t8(7 downto 6);
+                        v_key := v_t8(7 downto 2) & v_t8(7 downto 6);
                 end case;
             end if;
+            r12_key <= v_key;
+            -- Saturation GAIN m = 16 + (key+4)/8 -> 16..48, applied as
+            -- c*m/32, i.e. 0.5x at field black, 1.0x (UNMODIFIED) at
+            -- mid-grey, 1.5x at white.  The user's "25 / 50 / 75 %" is the
+            -- proc-amp reading where 50 % is normal -- NOT a fraction of the
+            -- source, which would cap the picture at 3/4 saturation and make
+            -- the whole image read as washed out.
+            r12_h   <= resize(shift_right(resize(v_key, 9) + 4, 3), 6)
+                       + to_unsigned(16, 6);
         end if;
     end process p_r12;
 
@@ -1404,10 +1437,69 @@ begin
     -- key -> true-black..true-white 10-bit luma (endpoints exact)
     ------------------------------------------------------------------------
     p_out : process(clk)
+        variable v_y : unsigned(9 downto 0);
+        variable v_u, v_v : signed(12 downto 0);
     begin
         if rising_edge(clk) then
-            s_out_y <= shift_left(resize(r12_key, 10), 2)
+            -- video stage 1: split the input, chroma referred to neutral
+            r13_y  <= unsigned(data_in.y);
+            r13_cu <= signed(resize(unsigned(data_in.u), 11))
+                      - to_signed(512, 11);
+            r13_cv <= signed(resize(unsigned(data_in.v), 11))
+                      - to_signed(512, 11);
+
+            -- stage 6: ONE multiply per component.  The gain m already
+            -- carries the whole 0.5x..1.5x scale (m/32), so no c/2 term and
+            -- no carried copy of c is needed.
+            r14_pu <= r13_cu * signed('0' & r12_h);
+            r14_pv <= r13_cv * signed('0' & r12_h);
+            r14_y  <= r13_y;
+
+            -- stage 7: c' = c*m/32, re-centred on neutral.
+            -- BLANKING GATE: outside active video emit exactly what ring mode
+            -- emits -- neutral chroma, black luma.  Without this the free-
+            -- running pipeline puts PROCESSED GARBAGE in the blanking
+            -- interval (input blanking chroma 0 scaled by 0.75 = 128, an
+            -- illegal non-neutral level sitting where the encoder's per-line
+            -- colour reference lives) and the WHOLE picture decodes with
+            -- rail-to-rail wrong colours + noisy lines, while every active
+            -- pixel is bit-correct.  Ring mode never hit this because its
+            -- chroma is constant 512.  s_avid_sr(C_VLAT - 2) here aligns with
+            -- the s_avid_sr(C_VLAT - 1) output tap after this register.
+            if s_vsat = '1' and s_avid_sr(C_VLAT - 2) = '0' then
+                s_out_y <= to_unsigned(64, 10);
+                s_out_u <= C_MID;
+                s_out_v <= C_MID;
+            elsif s_vsat = '1' then
+                s_out_y <= r14_y;
+                v_u := to_signed(512, 13) + resize(shift_right(r14_pu, 5), 13);
+                v_v := to_signed(512, 13) + resize(shift_right(r14_pv, 5), 13);
+                -- BOOST can overflow (1.5 * full-scale chroma = 768), so this
+                -- one DOES need clamping: v is in [-256, 1280].  Test the sign
+                -- bit and the two bits above the field, never resize(SIGNED,10)
+                -- -- that keeps the sign and drops bit 9, folding 896 -> 384
+                -- and collapsing the chroma to a saturated GREEN screen.
+                if v_u(12) = '1' then
+                    s_out_u <= (others => '0');
+                elsif v_u(11 downto 10) /= "00" then
+                    s_out_u <= (others => '1');
+                else
+                    s_out_u <= unsigned(v_u(9 downto 0));
+                end if;
+                if v_v(12) = '1' then
+                    s_out_v <= (others => '0');
+                elsif v_v(11 downto 10) /= "00" then
+                    s_out_v <= (others => '1');
+                else
+                    s_out_v <= unsigned(v_v(9 downto 0));
+                end if;
+            else
+                v_y := shift_left(resize(r12_key, 10), 2)
                        or resize(r12_key(7 downto 6), 10);
+                s_out_u <= C_MID;
+                s_out_v <= C_MID;
+                s_out_y <= v_y;
+            end if;
         end if;
     end process p_out;
 
@@ -1425,11 +1517,17 @@ begin
     end process p_sync;
 
     data_out.y       <= std_logic_vector(s_out_y);
-    data_out.u       <= std_logic_vector(C_MID);
-    data_out.v       <= std_logic_vector(C_MID);
-    data_out.avid    <= s_avid_sr(C_LATENCY - 1);
-    data_out.hsync_n <= s_hsync_n_sr(C_LATENCY - 1);
-    data_out.vsync_n <= s_vsync_n_sr(C_LATENCY - 1);
-    data_out.field_n <= s_field_n_sr(C_LATENCY - 1);
+    data_out.u       <= std_logic_vector(s_out_u);
+    data_out.v       <= std_logic_vector(s_out_v);
+    -- the two modes have different pipeline depths, so the syncs are tapped
+    -- to match whichever one is driving the output
+    data_out.avid    <= s_avid_sr(C_VLAT - 1)    when s_vsat = '1'
+                        else s_avid_sr(C_LATENCY - 1);
+    data_out.hsync_n <= s_hsync_n_sr(C_VLAT - 1) when s_vsat = '1'
+                        else s_hsync_n_sr(C_LATENCY - 1);
+    data_out.vsync_n <= s_vsync_n_sr(C_VLAT - 1) when s_vsat = '1'
+                        else s_vsync_n_sr(C_LATENCY - 1);
+    data_out.field_n <= s_field_n_sr(C_VLAT - 1) when s_vsat = '1'
+                        else s_field_n_sr(C_LATENCY - 1);
 
 end architecture cascade;

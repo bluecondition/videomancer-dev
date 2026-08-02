@@ -1,4 +1,4 @@
-# HYPNOS CASCADE — coupled concentric circles (v0.9: 96/48 discs, adaptive ring count, Catch-Up actually centres)
+# HYPNOS CASCADE — coupled concentric circles (v1.0: 96/48 discs, adaptive ring count, Catch-Up actually centres, S11 = video saturation mod)
 
 Concentric black/white circles that **push each other**. Move the centre (K1/K2)
 and the innermost circle leads; each outer ring holds still until the one inside
@@ -49,7 +49,16 @@ Glide off so the centre jumps once and the chain lags fully) settles to an
 across the centre disc, edges at 0/30/…/330 | 389/419/…/689 → centre 359.5
 against `cx` = 360. v0.8 would have frozen every ring 7 px off its parent.
 
-### 2. Ring count 24 → 96 (HD) / 48 (SD)
+**126 is the verifiable ceiling** (raised from 96, 2026-08-02, "all the way
+to the edges at high period"): hardware allows 142 (15·N+56 ≤ 2200) but the
+÷1 sim line is only 1984 clk → N ≤ 128, and 127 is the widest count the
+7-bit ring-index signals can hold with their C_NR sentinel — so 126 (even,
+for mark parity). Corners (1102 px) covered at spacing ≥ 9 px, was ≥ 12.
+Catch-Up cost: the settle wave is ~3 frames/ring at C_SET = 2, so home from
+a full drag is now ~384 frames (6.4 s), was 294 (4.9 s); C_SET = 1 would
+roughly halve it if that reads too slow.
+
+### 2. Ring count 24 → 126 (HD) / 48 (SD)
 
 **Ring count is a throughput question, never a fit one.** Measured LC across a
 sweep at fixed everything else:
@@ -143,6 +152,72 @@ hblank), so:
   the 12-bit ring index: crossings toggle a 1-bit **parity flop** (t_p); the
   full index lives only in the hblank seed. Without these, no seed passed.
 
+
+## v1.0 — S11 Video: the rings saturate the incoming picture
+
+S11 no longer picks Stepped/Smooth shading (that was the multi-ring fade, and
+the user asked for the switch back — K5/K6 are still free if it is wanted
+again). It now selects **Video: Saturate**: the rendered ring field, whatever
+K4/S9 have made of it, scales the input's **chroma about neutral** —
+
+| field | saturation |
+|---|---|
+| black | **−50 %** (0.5x) |
+| mid-grey | **unchanged** (1.0x) |
+| white | **+50 %** (1.5x) |
+
+(±25 % was HW-approved first, then judged "not prominent enough" — doubled
+per user request 2026-08-02.)
+
+The user's "25 / 50 / 75 %" is the **proc-amp reading, where 50 % is normal** —
+NOT a fraction of the source. Reading it as 0.25x..0.75x caps the picture at
+three-quarters saturation, so the whole image looks washed out and can never
+be boosted; that shipped once and was rejected on hardware. Grey must be a
+true no-op.
+
+Luma is passed through untouched, so the circles are never drawn — you only
+see the picture breathing between washed-out and vivid as the cascade moves
+through it. Every ring look still applies: hard rings give a two-level
+25/75 split, K4 steps give banded saturation, S9 Smooth gives a continuous
+sweep.
+
+Costs **one 11×7 multiply per chroma component**: `m = 16 + (key+4)/8`
+(16..48, exact at black/grey/white) and `c' = (c·m)/32`. Folding the whole
+gain into `m` means no separate `c/2` term and no carried copy of `c`, which
+paid for the clamp that boost needs (1.25 × 512 = 640 overflows). The input is
+realigned to the field through a **BRAM delay line** (2 EBR, RAM 4 → 6)
+rather than 4 ranks of flops — at 93 % LC the flops had nowhere to go.
+Latency 6 → 7.
+
+**Sim-verified**: 74.8 % and 125.1 % of source at the field's black/white
+endpoints, neutral grey in gives ONE colour out (no invented chroma), luma
+passthrough within 1 LSB and hue shift under 0.4 deg mean — a pure saturation
+change. Measure boost with a source that has headroom: a fully-saturated test
+image clips at the gamut and reads 112 % instead of 125 %, which looks like an
+RTL error and is not one.
+
+**Fit is now 98.9 % LC** (7582–7601 / 7680) — all six still close on the
+builder's own seeds, but there is no room left for another feature without
+reclaiming base LC first.
+
+| Config | Fmax | margin | seed |
+|---|---|---|---|
+| HD Analog | 75.85 MHz | +2.2 % | 1 |
+| HD HDMI | 76.92 MHz | +3.6 % | 1 |
+| HD Dual | 75.83 MHz | +2.1 % | 3 |
+| SD Analog | 77.15 MHz | — | 1 |
+| SD HDMI | 77.68 MHz | — | 1 |
+| SD Dual | 67.47 MHz | — | 1 |
+
+**HD Analog and HD Dual are at ~2.2 %, under this program's 2.7 % rule.** Far
+better than the 0.2 % build that showed rough ring edges on hardware, but if
+edge roughness or noise lines reappear, seed-sweep those two first.
+
+**Trap paid for here:** `resize(SIGNED, 10)` keeps the sign bit and drops bit
+9, so every chroma result above 511 folded back down (896 → 384) and the
+screen came out a saturated GREEN. Slice `v(9 downto 0)` when the value is
+provably in range; do not `resize` a signed down to its exact unsigned width.
+
 ## v0.2–v0.4 — K4 GRADIENT width + S11 Shading (Stepped/Smooth)
 
 The marks now carry an enter/leave **direction bit** (the EBR banks' free
@@ -203,6 +278,47 @@ The design study for it is in this directory and is worth keeping:
 `percircle_int2.py` (the validated integer model), `shading_compare.png`,
 `shading_settled.png`, `shading_percircle.png`, `percircle_lin.png`.
 
+### The blanking-interval bug (three hardware rounds to find)
+
+S11 Video showed rail-to-rail green/magenta garbage + noisy sheared lines on
+hardware while ring mode was pixel-perfect — and every verifiable layer
+passed: GHDL progressive AND 1080i5994 interlaced sims bit-clean, the exact
+multiply/clamp expressions synthesised through ghdl+yosys and exhaustively
+equivalence-tested on the netlist (34,816 vectors, 0 errors), icetime
+sign-off PASSED on all three HD bins. The fault was in the one place no sim
+checks: **the blanking interval**. The video pipeline free-runs, so outside
+avid it emitted PROCESSED blanking data — input blanking chroma 0 scaled by
+0.75 → 128 sitting where the encoder's per-line colour reference lives.
+Corrupt that reference and every ACTIVE pixel decodes wrong (whole-screen
+colour garbage, unstable lines) even though each one leaves the FPGA
+bit-correct. Ring mode never hit it because its chroma is a constant 512;
+the gain-1.0 diagnostic didn't either because 0 in → 0 out reproduced the
+input's own blanking. Fix: in Video mode, gate y/u/v to 64/512/512 whenever
+delayed avid = '0' — make blanking look exactly like the proven ring mode.
+
+**Rule for every future video-processing program: what you emit during
+blanking is part of the interface.** Sims only score the active region;
+neutral-gate your outputs outside avid.
+
+### Two config traps this cost a hardware round
+
+**`program_type` must be `processing`, not `synthesis`.** The docs define
+synthesis as "generates output without input", and the host uses the byte at
+program_config.bin offset 7916 (0 = processing, 1 = synthesis). Cascade was
+born a pure generator and still declared `synthesis`, so no input video was
+routed to it — chroma sat at **code 0, which is not neutral but saturated
+GREEN**, and the ring field scaled it into green/tan rings instead of
+modulating a picture. Any program that reads `data_in.y/u/v` in ANY mode must
+declare `processing`.
+
+**The packer silently reuses a stale `program_config.bin`.** It is generated
+from the TOML by `tools/toml-converter/toml_to_config_binary.py`, NOT by the
+packer, and the packer will happily package an old one — so new labels never
+reach the hardware while everything reports "Validation PASSED". Symptom: the
+switch on the unit still shows its previous name. Fix: delete
+`build/programs/<v>/<p>/{,rev_b/}program_config.bin`, regenerate, repack, and
+grep the binary for the new strings before believing it.
+
 ## Control map (unchanged)
 
 | Phys | Control | Range / detent |
@@ -215,7 +331,7 @@ The design study for it is in this directory and is worth keeping:
 | S9 | **Ramp** | Steps (K4 fineness, classic hard at 0) / Smooth (full-res per-ring ramp, K4 ignored — the soft gradient cascades with the rings). Invert is gone (v0.8) |
 | S10 | **Catch-Up** | Stay (freeze dragged) / Home (glide back concentric). Default ON |
 | K4 | **Gradient** | fineness: classic / 2..64 steps within each ring. Default classic |
-| S11 | **Shading** | Stepped (per-ring levels) / Smooth (continuous ramp). Default Stepped |
+| S11 | **Output** | Rings (generator, as always) / **Video** (the ring field scales the INPUT's chroma: field black = 25 %, mid-grey = 50 %, white = 75 % saturation; luma passes through, so you see only the modified video). Default Rings |
 | K5, K6, P12 | **spare** | |
 
 ## Simulator notes (cost hours — read before simming)
