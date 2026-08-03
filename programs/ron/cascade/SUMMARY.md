@@ -153,6 +153,21 @@ hblank), so:
   full index lives only in the hblank seed. Without these, no seed passed.
 
 
+## v1.5 — video path re-timed onto ring mode's sync taps (HDMI green fix)
+
+v1.4 on hd_hdmi hardware showed green hue + noise lines in Video mode at
+every Wave depth — with the device confirmed running v1.4 ("Ripple Glass"
+visible) and every layer verified (RTL + interlaced sims, the delay line
+netlist simulated gate-level against a reference model 0/799, icetime on
+the shipped bins). The one structural difference from every HW-validated
+build was the video mode's DEEPER sync tap (15 vs 6). v1.5 removes the
+difference: the refraction is now a ONE-SIDED push (read 1+disp back,
+disp 0..18 — a constant displacement term is an invisible whole-picture
+shift, so it looks identical to ±9 centred), which lands the video
+pipeline at exactly C_LATENCY = 6, so BOTH modes share the ring mode's
+proven taps and the mode switch changes data only. Depth-0 passthrough
+re-verified bit-exact at the shared tap.
+
 ## v1.4 — saturation mod removed; Video mode = pure refraction
 
 Once the refraction landed the user dropped the saturation mod ("we don't

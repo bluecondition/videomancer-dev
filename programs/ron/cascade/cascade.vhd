@@ -61,10 +61,13 @@ use work.video_stream_pkg.all;
 architecture cascade of program_top is
 
     constant C_LATENCY : integer := 6;    -- RINGS: x/read 1 + parity 1 + g2 1 + merge 1 + key 1 + out 1
-    -- VIDEO path latency: BRAM base delay C_VB (refraction headroom) + addr 1
-    -- + q 1 + split 1 + multiply 1 + recentre 1.  Sync tap = C_VB + 4.
-    constant C_VB      : integer := 10;   -- refraction base delay (max |d| = 9)
-    constant C_VTAP    : integer := 15;   -- video sync delay (C_VB + 5, measured)
+    -- VIDEO path: the refraction is a ONE-SIDED push (read 1 + disp back,
+    -- disp = 0..18).  A constant displacement term is an invisible whole-
+    -- picture shift, so 0..18 one-sided looks IDENTICAL to +-9 centred --
+    -- and it lands the video pipeline at delay 6 = C_LATENCY exactly, so
+    -- BOTH modes share the ring mode's PROVEN sync taps.  (v1.4's deeper
+    -- 15-cycle video-only tap was the ONE structural difference from every
+    -- hardware-validated build, and hd_hdmi showed green + noise lines.)
     constant C_MID     : unsigned(9 downto 0) := to_unsigned(512, 10);   -- neutral chroma
 
     constant C_DB    : integer := 14;                                    -- detent deadband
@@ -409,10 +412,10 @@ architecture cascade of program_top is
     ----------------------------------------------------------------------
     -- sync delay
     ----------------------------------------------------------------------
-    signal s_avid_sr    : std_logic_vector(0 to C_VTAP - 1) := (others => '0');
-    signal s_hsync_n_sr : std_logic_vector(0 to C_VTAP - 1) := (others => '1');
-    signal s_vsync_n_sr : std_logic_vector(0 to C_VTAP - 1) := (others => '1');
-    signal s_field_n_sr : std_logic_vector(0 to C_VTAP - 1) := (others => '0');
+    signal s_avid_sr    : std_logic_vector(0 to C_LATENCY - 1) := (others => '0');
+    signal s_hsync_n_sr : std_logic_vector(0 to C_LATENCY - 1) := (others => '1');
+    signal s_vsync_n_sr : std_logic_vector(0 to C_LATENCY - 1) := (others => '1');
+    signal s_field_n_sr : std_logic_vector(0 to C_LATENCY - 1) := (others => '0');
 
 begin
 
@@ -1433,10 +1436,9 @@ begin
     ------------------------------------------------------------------------
     p_out : process(clk)
         variable v_y : unsigned(9 downto 0);
-        variable v_dk : signed(8 downto 0);
         variable v_we : std_logic;
         variable v_wd : std_logic_vector(29 downto 0);
-        variable v_ds : signed(5 downto 0);
+        variable v_du : unsigned(4 downto 0);
     begin
         if rising_edge(clk) then
             -- REFRACTION: the ring field horizontally displaces WHERE the
@@ -1445,11 +1447,11 @@ begin
             -- is written to a BRAM delay line on ACTIVE pixels only (so a
             -- line-start read wraps onto the previous line's tail, a soft
             -- <=23 px left-edge smear, instead of processing blanking-level
-            -- garbage into a coloured stripe), and read C_VB - d back, where
-            --   d = (key - 128) >> zone-shift, clamped +-9; zone = P12 top bits.
+            -- garbage into a coloured stripe), and read 1 + disp back, where
+            --   disp = key >> zone-shift, 0..18; zone = P12 top bits.
             -- key respects K4/S9: hard rings shear in slices, S9 Smooth gives
             -- true waves.  d = 0 (slider down) realigns exactly -- no shift.
-            -- Writes continue C_VB+2 cycles past line end, repeating the
+            -- Writes continue 12 cycles past line end, repeating the
             -- held last pixel: without this the write pointer freezes at
             -- avid fall while the output tail still reads, so the last ~7
             -- columns repeated one pixel.  The tail slots also make the
@@ -1463,7 +1465,7 @@ begin
                 v_wd    := data_in.y & data_in.u & data_in.v;
                 v_we    := '1';
                 vd_hold <= data_in.y & data_in.u & data_in.v;
-                vd_tc   <= to_unsigned(C_VB + 2, 4);
+                vd_tc   <= to_unsigned(12, 4);
             elsif vd_tc /= 0 then
                 v_we  := '1';
                 vd_tc <= vd_tc - 1;
@@ -1472,22 +1474,19 @@ begin
                 s_vd(to_integer(vd_wa)) <= v_wd;
                 vd_wa <= vd_wa + 1;
             end if;
-            v_dk := signed(resize(r12_key, 9)) - to_signed(128, 9);
+            -- one-sided displacement 0..18 from the field key
             case s_wdep is
-                when "00"   => v_ds := (others => '0');
-                when "01"   => v_ds := resize(shift_right(v_dk, 5), 6);
-                when "10"   => v_ds := resize(shift_right(v_dk, 4), 6);
-                when others =>
-                    v_ds := resize(shift_right(v_dk, 4), 6)
-                            + resize(shift_right(v_dk, 6), 6);
+                when "00"   => v_du := (others => '0');
+                when "01"   => v_du := resize(r12_key(7 downto 5), 5);
+                when "10"   => v_du := resize(r12_key(7 downto 4), 5);
+                when others => v_du := resize(r12_key(7 downto 4), 5)
+                                       + resize(r12_key(7 downto 6), 5);
             end case;
-            if    v_ds >  9 then v_ds := to_signed( 9, 6);
-            elsif v_ds < -9 then v_ds := to_signed(-9, 6); end if;
-            vd_ra <= vd_wa - unsigned(resize(to_signed(C_VB, 6) - v_ds, 5));
+            vd_ra <= vd_wa - 1 - v_du;
             vd_q  <= s_vd(to_integer(vd_ra));
 
             -- video split + hold stages (two plain registers -- the depth
-            -- keeps the pipeline at C_VTAP so depth-0 alignment is untouched)
+            -- keeps the pipeline at C_LATENCY so both modes tap together)
             r13_y <= unsigned(vd_q(29 downto 20));
             r13_u <= unsigned(vd_q(19 downto 10));
             r13_v <= unsigned(vd_q( 9 downto  0));
@@ -1506,7 +1505,7 @@ begin
             -- pixel is bit-correct.  Ring mode never hit this because its
             -- chroma is constant 512.  s_avid_sr(C_VLAT - 2) here aligns with
             -- the s_avid_sr(C_VLAT - 1) output tap after this register.
-            if s_vsat = '1' and s_avid_sr(C_VTAP - 2) = '0' then
+            if s_vsat = '1' and s_avid_sr(C_LATENCY - 2) = '0' then
                 s_out_y <= to_unsigned(64, 10);
                 s_out_u <= C_MID;
                 s_out_v <= C_MID;
@@ -1530,10 +1529,10 @@ begin
     p_sync : process(clk)
     begin
         if rising_edge(clk) then
-            s_avid_sr    <= data_in.avid    & s_avid_sr   (0 to C_VTAP - 2);
-            s_hsync_n_sr <= data_in.hsync_n & s_hsync_n_sr(0 to C_VTAP - 2);
-            s_vsync_n_sr <= data_in.vsync_n & s_vsync_n_sr(0 to C_VTAP - 2);
-            s_field_n_sr <= data_in.field_n & s_field_n_sr(0 to C_VTAP - 2);
+            s_avid_sr    <= data_in.avid    & s_avid_sr   (0 to C_LATENCY - 2);
+            s_hsync_n_sr <= data_in.hsync_n & s_hsync_n_sr(0 to C_LATENCY - 2);
+            s_vsync_n_sr <= data_in.vsync_n & s_vsync_n_sr(0 to C_LATENCY - 2);
+            s_field_n_sr <= data_in.field_n & s_field_n_sr(0 to C_LATENCY - 2);
         end if;
     end process p_sync;
 
@@ -1542,13 +1541,11 @@ begin
     data_out.v       <= std_logic_vector(s_out_v);
     -- the two modes have different pipeline depths, so the syncs are tapped
     -- to match whichever one is driving the output
-    data_out.avid    <= s_avid_sr(C_VTAP - 1)    when s_vsat = '1'
-                        else s_avid_sr(C_LATENCY - 1);
-    data_out.hsync_n <= s_hsync_n_sr(C_VTAP - 1) when s_vsat = '1'
-                        else s_hsync_n_sr(C_LATENCY - 1);
-    data_out.vsync_n <= s_vsync_n_sr(C_VTAP - 1) when s_vsat = '1'
-                        else s_vsync_n_sr(C_LATENCY - 1);
-    data_out.field_n <= s_field_n_sr(C_VTAP - 1) when s_vsat = '1'
-                        else s_field_n_sr(C_LATENCY - 1);
+    -- ONE set of sync taps for both modes -- the video pipeline is depth-
+    -- matched to the ring path, so the mode switch changes DATA only.
+    data_out.avid    <= s_avid_sr(C_LATENCY - 1);
+    data_out.hsync_n <= s_hsync_n_sr(C_LATENCY - 1);
+    data_out.vsync_n <= s_vsync_n_sr(C_LATENCY - 1);
+    data_out.field_n <= s_field_n_sr(C_LATENCY - 1);
 
 end architecture cascade;
