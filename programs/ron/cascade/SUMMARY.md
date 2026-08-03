@@ -153,6 +153,25 @@ hblank), so:
   full index lives only in the hblank seed. Without these, no seed passed.
 
 
+## v1.3 — P12 Wave: ring refraction of the incoming video
+
+In S11 Video mode, P12 bends the picture: the ring field horizontally
+displaces WHERE the video is sampled, so each ring is a glass ripple and the
+cascade drags the ripples through the image. Vertical detail snakes along the
+rings; the saturation mod rides on top. `d = (key−128) >> zone`, clamped ±9,
+via a 32-tap BRAM delay line (2 EBR, active-pixel-gated writes so line starts
+wrap onto the previous line's tail — a soft ≤19 px left-edge smear — instead
+of processing blanking garbage into a coloured stripe). Depth 0 realigns
+**pixel-exactly** (sync tap C_VB+5 = 15, found by measurement, ±1-cycle
+theory was wrong twice). Hard rings shear in slices; S9 Smooth gives true
+waves.
+
+**Paying for it (was 102 % LC):** sat gain quantised to ¼× steps
+(`A = (key+16)/32`, 0..8, endpoints/grey still exact — 9 levels is under the
+saturation JND), chroma recentre `u−512` rewired as a free MSB invert,
+wave depth as shift zones instead of a multiply, 32-tap line instead of 256.
+Result 7575/7680 = 98.6 %.
+
 ## v1.0 — S11 Video: the rings saturate the incoming picture
 
 S11 no longer picks Stepped/Smooth shading (that was the multi-ring fade, and
@@ -334,7 +353,8 @@ grep the binary for the new strings before believing it.
 | S10 | **Catch-Up** | Stay (freeze dragged) / Home (glide back concentric). Default ON |
 | K4 | **Gradient** | fineness: classic / 2..64 steps within each ring. Default classic |
 | S11 | **Output** | Rings (generator, as always) / **Video** (the ring field scales the INPUT's chroma: field black = 25 %, mid-grey = 50 %, white = 75 % saturation; luma passes through, so you see only the modified video). Default Rings |
-| K5, K6, P12 | **spare** | |
+| P12 | **Wave** | refraction depth: the ring field horizontally displaces the video like glass ripples (S11 Video only). Off at bottom; 3 zones up to ±9 px. Slider per the primary-control rule |
+| K5, K6 | **spare** | |
 
 ## Simulator notes (cost hours — read before simming)
 
