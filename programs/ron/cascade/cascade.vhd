@@ -383,22 +383,10 @@ architecture cascade of program_top is
     signal s_out_y  : unsigned(9 downto 0) := (others => '0');
 
     ----------------------------------------------------------------------
-    -- S11 VIDEO SATURATION MOD.  The rendered ring field scales the input's
-    -- CHROMA about neutral: field black strips the colour entirely, mid-grey
-    -- leaves it EXACTLY UNCHANGED, white doubles it.  Luma passes
-    -- through untouched -- the full incoming picture goes out, only its
-    -- saturation is modulated, and the circles are never drawn.
-    --   A    = (key + 16) / 32          -- 0..8, exact at black/grey/white
-    --   c'   = (c * A) / 4              -- ONE 11x4 multiply per component
-    -- (A/4 quantises the gain to quarter-x steps -- 9 saturation levels --
-    -- which is below the visible JND for saturation and paid for the
-    -- refraction delay line: the 0..2x 8-bit-gain version was 102% LC.)
-    -- so saturation runs the FULL physical range: field black DECOLOURS the
-    -- picture completely (0x), mid-grey is a bit-exact no-op (1.0x), white
-    -- doubles it (2x).  (+-25 % then +-50 % both read as too subtle on
-    -- hardware: multiplicative saturation only shows on already-coloured
-    -- pixels, so the endpoints must be extreme to be prominent.)  Boost
-    -- overflows (2 * 512 = 1024), so the output is clamped to 0..1023.
+    -- S11 VIDEO: the incoming picture passes through UNTOUCHED in colour --
+    -- the rings act on it only as REFRACTION (P12 Wave).  The saturation
+    -- mod that used to live here (0..2x chroma about neutral) was dropped
+    -- by the user once the refraction landed: the wave carries the mode.
     -- The video is NOT delayed to meet the field.  It used to go through a
     -- 30-bit BRAM delay line, which simulated pixel-exact but put noisy
     -- horizontal lines on real hardware -- silicon and GHDL do not agree on
@@ -407,16 +395,15 @@ architecture cascade of program_top is
     -- shifts the saturation pattern sideways by an invisible amount.  So the
     -- video takes its own 3-cycle path and the syncs are tapped to match.
     ----------------------------------------------------------------------
-    signal r12_h   : unsigned(3 downto 0) := (others => '0');   -- sat gain A, 0..8 (A/4 = 0..2x)
     type t_vd is array(0 to 31) of std_logic_vector(29 downto 0);
     signal s_vd    : t_vd := (others => (others => '0'));
     signal vd_wa   : unsigned(4 downto 0) := (others => '0');
     signal vd_ra   : unsigned(4 downto 0) := (others => '0');
     signal vd_q    : std_logic_vector(29 downto 0) := (others => '0');
-    signal r13_cu, r13_cv : signed(10 downto 0) := (others => '0');
-    signal r13_y   : unsigned(9 downto 0) := (others => '0');
-    signal r14_pu, r14_pv : signed(15 downto 0) := (others => '0');  -- 11x5 product
-    signal r14_y   : unsigned(9 downto 0) := (others => '0');
+    signal vd_hold : std_logic_vector(29 downto 0) := (others => '0');
+    signal vd_tc   : unsigned(3 downto 0) := (others => '0');
+    signal r13_y, r13_u, r13_v : unsigned(9 downto 0) := (others => '0');
+    signal r14_y, r14_u, r14_v : unsigned(9 downto 0) := (others => '0');
     signal s_out_u, s_out_v : unsigned(9 downto 0) := C_MID;
 
     ----------------------------------------------------------------------
@@ -1438,13 +1425,6 @@ begin
                 end case;
             end if;
             r12_key <= v_key;
-            -- Saturation GAIN m = 16 + (key+4)/8 -> 16..48, applied as
-            -- c*m/32, i.e. 0.5x at field black, 1.0x (UNMODIFIED) at
-            -- mid-grey, 1.5x at white.  The user's "25 / 50 / 75 %" is the
-            -- proc-amp reading where 50 % is normal -- NOT a fraction of the
-            -- source, which would cap the picture at 3/4 saturation and make
-            -- the whole image read as washed out.
-            r12_h   <= resize(shift_right(resize(v_key, 9) + 16, 5), 4);
         end if;
     end process p_r12;
 
@@ -1453,8 +1433,9 @@ begin
     ------------------------------------------------------------------------
     p_out : process(clk)
         variable v_y : unsigned(9 downto 0);
-        variable v_u, v_v : signed(12 downto 0);
         variable v_dk : signed(8 downto 0);
+        variable v_we : std_logic;
+        variable v_wd : std_logic_vector(29 downto 0);
         variable v_ds : signed(5 downto 0);
     begin
         if rising_edge(clk) then
@@ -1468,8 +1449,27 @@ begin
             --   d = (key - 128) >> zone-shift, clamped +-9; zone = P12 top bits.
             -- key respects K4/S9: hard rings shear in slices, S9 Smooth gives
             -- true waves.  d = 0 (slider down) realigns exactly -- no shift.
+            -- Writes continue C_VB+2 cycles past line end, repeating the
+            -- held last pixel: without this the write pointer freezes at
+            -- avid fall while the output tail still reads, so the last ~7
+            -- columns repeated one pixel.  The tail slots also make the
+            -- next line's left-edge wrap a clean clamp of this line's edge.
+            -- ONE write statement only: a second s_vd assignment in an
+            -- elsif branch stops yosys inferring the single write port and
+            -- the whole line falls back to flip-flops (9205 LC = 120% chip).
+            v_we := '0';
+            v_wd := vd_hold;
             if data_in.avid = '1' then
-                s_vd(to_integer(vd_wa)) <= data_in.y & data_in.u & data_in.v;
+                v_wd    := data_in.y & data_in.u & data_in.v;
+                v_we    := '1';
+                vd_hold <= data_in.y & data_in.u & data_in.v;
+                vd_tc   <= to_unsigned(C_VB + 2, 4);
+            elsif vd_tc /= 0 then
+                v_we  := '1';
+                vd_tc <= vd_tc - 1;
+            end if;
+            if v_we = '1' then
+                s_vd(to_integer(vd_wa)) <= v_wd;
                 vd_wa <= vd_wa + 1;
             end if;
             v_dk := signed(resize(r12_key, 9)) - to_signed(128, 9);
@@ -1486,20 +1486,16 @@ begin
             vd_ra <= vd_wa - unsigned(resize(to_signed(C_VB, 6) - v_ds, 5));
             vd_q  <= s_vd(to_integer(vd_ra));
 
-            -- video split stage: chroma referred to neutral
-            r13_y  <= unsigned(vd_q(29 downto 20));
-            -- c = u - 512 for a 10-bit unsigned u is just the MSB inverted
-            -- and the result read as signed -- no subtractor at all
-            r13_cu <= resize(signed((not vd_q(19)) & vd_q(18 downto 10)), 11);
-            r13_cv <= resize(signed((not vd_q( 9)) & vd_q( 8 downto  0)), 11);
+            -- video split + hold stages (two plain registers -- the depth
+            -- keeps the pipeline at C_VTAP so depth-0 alignment is untouched)
+            r13_y <= unsigned(vd_q(29 downto 20));
+            r13_u <= unsigned(vd_q(19 downto 10));
+            r13_v <= unsigned(vd_q( 9 downto  0));
+            r14_y <= r13_y;
+            r14_u <= r13_u;
+            r14_v <= r13_v;
 
-            -- stage 6: ONE multiply per component.  The gain m carries the
-            -- whole 0..2x scale (m/32), so no separate c term is needed.
-            r14_pu <= r13_cu * signed('0' & r12_h);
-            r14_pv <= r13_cv * signed('0' & r12_h);
-            r14_y  <= r13_y;
-
-            -- stage 7: c' = c*m/32, re-centred on neutral.
+            -- output stage.
             -- BLANKING GATE: outside active video emit exactly what ring mode
             -- emits -- neutral chroma, black luma.  Without this the free-
             -- running pipeline puts PROCESSED GARBAGE in the blanking
@@ -1516,27 +1512,8 @@ begin
                 s_out_v <= C_MID;
             elsif s_vsat = '1' then
                 s_out_y <= r14_y;
-                v_u := to_signed(512, 13) + resize(shift_right(r14_pu, 2), 13);
-                v_v := to_signed(512, 13) + resize(shift_right(r14_pv, 2), 13);
-                -- BOOST can overflow (1.5 * full-scale chroma = 768), so this
-                -- one DOES need clamping: v is in [-256, 1280].  Test the sign
-                -- bit and the two bits above the field, never resize(SIGNED,10)
-                -- -- that keeps the sign and drops bit 9, folding 896 -> 384
-                -- and collapsing the chroma to a saturated GREEN screen.
-                if v_u(12) = '1' then
-                    s_out_u <= (others => '0');
-                elsif v_u(11 downto 10) /= "00" then
-                    s_out_u <= (others => '1');
-                else
-                    s_out_u <= unsigned(v_u(9 downto 0));
-                end if;
-                if v_v(12) = '1' then
-                    s_out_v <= (others => '0');
-                elsif v_v(11 downto 10) /= "00" then
-                    s_out_v <= (others => '1');
-                else
-                    s_out_v <= unsigned(v_v(9 downto 0));
-                end if;
+                s_out_u <= r14_u;
+                s_out_v <= r14_v;
             else
                 v_y := shift_left(resize(r12_key, 10), 2)
                        or resize(r12_key(7 downto 6), 10);

@@ -153,6 +153,18 @@ hblank), so:
   full index lives only in the hblank seed. Without these, no seed passed.
 
 
+## v1.4 — saturation mod removed; Video mode = pure refraction
+
+Once the refraction landed the user dropped the saturation mod ("we don't
+need it anymore"). S11 Video now passes the picture through **bit-exactly**
+at Wave = 0 (verified: zero differing pixels outside the ≤19 px left-edge
+wrap) and P12 bends it. The multiplies, gain derivation and clamps are gone
+(~140 LC back). The right-edge tail freeze found during this pass is fixed:
+writes continue C_VB+2 cycles past line end repeating the held last pixel,
+which also turns the left-edge wrap into a clean edge-clamp. The whole
+sat-mod saga (proc-amp %, blanking gate, prominence ladder 25→50→full,
+quarter-x steps) is retained below for the record.
+
 ## v1.3 — P12 Wave: ring refraction of the incoming video
 
 In S11 Video mode, P12 bends the picture: the ring field horizontally
@@ -352,7 +364,7 @@ grep the binary for the new strings before believing it.
 | S9 | **Ramp** | Steps (K4 fineness, classic hard at 0) / Smooth (full-res per-ring ramp, K4 ignored — the soft gradient cascades with the rings). Invert is gone (v0.8) |
 | S10 | **Catch-Up** | Stay (freeze dragged) / Home (glide back concentric). Default ON |
 | K4 | **Gradient** | fineness: classic / 2..64 steps within each ring. Default classic |
-| S11 | **Output** | Rings (generator, as always) / **Video** (the ring field scales the INPUT's chroma: field black = 25 %, mid-grey = 50 %, white = 75 % saturation; luma passes through, so you see only the modified video). Default Rings |
+| S11 | **Output** | Rings (generator, as always) / **Video**: the incoming picture, colour untouched, REFRACTED by the rings (P12 Wave). Default Rings |
 | P12 | **Wave** | refraction depth: the ring field horizontally displaces the video like glass ripples (S11 Video only). Off at bottom; 3 zones up to ±9 px. Slider per the primary-control rule |
 | K5, K6 | **spare** | |
 

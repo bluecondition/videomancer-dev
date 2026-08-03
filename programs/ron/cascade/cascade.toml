@@ -16,16 +16,16 @@
 # re-anchored at each true disc edge so the shading cascades with the
 # rings; K4 = classic hard (left) then 2/4/8/16/32/64 gray steps within
 # each ring.
-# S11 Video: the rings act on the INCOMING video.  Saturation: field
-# black strips the colour entirely, mid-grey = unchanged, white doubles
-# it (luma untouched).  P12 Wave adds REFRACTION: the ring field bends
-# the picture horizontally like glass ripples (off at slider bottom,
-# +-9 px at top).  The circles themselves are never drawn.
+# S11 Video: the rings REFRACT the incoming video -- P12 Wave sets the
+# depth (off at slider bottom, +-9 px at top).  The ring field bends
+# the picture horizontally like glass ripples; colour passes through
+# untouched, and the circles themselves are never drawn.  (The earlier
+# saturation mod was dropped -- refraction carries the mode.)
 # K5/K6/P12 are spare.
 
 [program]
 program_id = "com.bluecondition.cascade"
-program_version = "1.3.0"
+program_version = "1.4.0"
 abi_version = ">=1.0,<2.0"
 program_name = "Hypnos Cascade"
 author = "bluecondition"
@@ -198,19 +198,19 @@ toggle_switch_11 = 0
 linear_potentiometer_12 = 0
 
 [[preset]]
-name = "Sat Rings"              # rings drive the INPUT's saturation, 25-75%
+name = "Ripple Glass"           # rings refract the incoming video (S11 Video + Wave)
 rotary_potentiometer_1 = 512
 rotary_potentiometer_2 = 512
-rotary_potentiometer_3 = 680    # fine rings
-rotary_potentiometer_4 = 700    # Gradient: 8-ring fold -> smooth sat sweep
+rotary_potentiometer_3 = 680    # fine rings -> tight ripples
+rotary_potentiometer_4 = 0
 rotary_potentiometer_5 = 512
 rotary_potentiometer_6 = 512
 toggle_switch_7 = 1            # Glide on
 toggle_switch_8 = 1            # Cascade
-toggle_switch_9 = 1            # per-ring ramp, full res -> smoothest sat
+toggle_switch_9 = 1            # per-ring ramp, full res -> smooth waves
 toggle_switch_10 = 1          # Home
-toggle_switch_11 = 1          # Video: Saturate
-linear_potentiometer_12 = 0
+toggle_switch_11 = 1          # Output: Video
+linear_potentiometer_12 = 1023 # Wave: full depth
 
 [[preset]]
 name = "Velvet Rings"          # smooth per-ring ramp riding the cascade
