@@ -153,6 +153,16 @@ hblank), so:
   full index lives only in the hblank seed. Without these, no seed passed.
 
 
+## v1.6 — clean left edge (wave fade-in)
+
+The wave's left-edge smear (line-start reads wrapping onto the previous
+line's tail, ≤18 px) is gone: displacement is clamped to the pixels this
+line has produced (`disp ≤ vd_px − 1`, a 5-bit saturating counter), so the
+wave FADES IN over the first ~18 columns and reads never cross the line
+start. Worst case is now a subtle stretch of the line's own first pixels —
+an edge clamp — instead of foreign content. Depth-0 passthrough verified
+bit-exact over the FULL frame including the edge.
+
 ## v1.5 — video path re-timed onto ring mode's sync taps (HDMI green fix — **HW-CONFIRMED**)
 
 v1.4 on hd_hdmi hardware showed green hue + noise lines in Video mode at

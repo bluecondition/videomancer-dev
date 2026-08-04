@@ -405,6 +405,7 @@ architecture cascade of program_top is
     signal vd_q    : std_logic_vector(29 downto 0) := (others => '0');
     signal vd_hold : std_logic_vector(29 downto 0) := (others => '0');
     signal vd_tc   : unsigned(3 downto 0) := (others => '0');
+    signal vd_px   : unsigned(4 downto 0) := (others => '0');  -- pixels written this line (sat 31)
     signal r13_y, r13_u, r13_v : unsigned(9 downto 0) := (others => '0');
     signal r14_y, r14_u, r14_v : unsigned(9 downto 0) := (others => '0');
     signal s_out_u, s_out_v : unsigned(9 downto 0) := C_MID;
@@ -1444,10 +1445,8 @@ begin
             -- REFRACTION: the ring field horizontally displaces WHERE the
             -- video is sampled -- each ring bends the picture like a glass
             -- ripple, and the cascade drags the ripples with it.  The input
-            -- is written to a BRAM delay line on ACTIVE pixels only (so a
-            -- line-start read wraps onto the previous line's tail, a soft
-            -- <=23 px left-edge smear, instead of processing blanking-level
-            -- garbage into a coloured stripe), and read 1 + disp back, where
+            -- is written to a BRAM delay line on ACTIVE pixels only and
+            -- read 1 + disp back, where
             --   disp = key >> zone-shift, 0..18; zone = P12 top bits.
             -- key respects K4/S9: hard rings shear in slices, S9 Smooth gives
             -- true waves.  d = 0 (slider down) realigns exactly -- no shift.
@@ -1474,6 +1473,12 @@ begin
                 s_vd(to_integer(vd_wa)) <= v_wd;
                 vd_wa <= vd_wa + 1;
             end if;
+            -- pixels available so far on THIS line (saturating)
+            if data_in.avid = '0' then
+                vd_px <= (others => '0');
+            elsif vd_px /= 31 then
+                vd_px <= vd_px + 1;
+            end if;
             -- one-sided displacement 0..18 from the field key
             case s_wdep is
                 when "00"   => v_du := (others => '0');
@@ -1482,6 +1487,15 @@ begin
                 when others => v_du := resize(r12_key(7 downto 4), 5)
                                        + resize(r12_key(7 downto 6), 5);
             end case;
+            -- LEFT-EDGE CLEANUP: never read across the line start.  The
+            -- displacement is clamped to the pixels this line has actually
+            -- produced, so the wave fades in over the first ~18 columns
+            -- instead of smearing the previous line's tail into the edge.
+            if vd_px = 0 then
+                v_du := (others => '0');
+            elsif v_du > vd_px - 1 then
+                v_du := vd_px - 1;
+            end if;
             vd_ra <= vd_wa - 1 - v_du;
             vd_q  <= s_vd(to_integer(vd_ra));
 
