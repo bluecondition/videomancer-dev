@@ -153,7 +153,7 @@ hblank), so:
   full index lives only in the hblank seed. Without these, no seed passed.
 
 
-## v1.5 — video path re-timed onto ring mode's sync taps (HDMI green fix)
+## v1.5 — video path re-timed onto ring mode's sync taps (HDMI green fix — **HW-CONFIRMED**)
 
 v1.4 on hd_hdmi hardware showed green hue + noise lines in Video mode at
 every Wave depth — with the device confirmed running v1.4 ("Ripple Glass"
