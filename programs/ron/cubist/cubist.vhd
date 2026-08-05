@@ -76,43 +76,43 @@ architecture cubist of program_top is
     ----------------------------------------------------------------------
     -- quarter-sine table, Q12: C_SIN(k) = round(4096*sin(k*pi/128))
     ----------------------------------------------------------------------
-    type t_sin65 is array (0 to 64) of signed(13 downto 0);
-    constant C_SIN : t_sin65 := (
-        to_signed(   0, 14), to_signed( 101, 14), to_signed( 201, 14), to_signed( 301, 14), to_signed( 401, 14), to_signed( 501, 14), to_signed( 601, 14), to_signed( 700, 14),
-        to_signed( 799, 14), to_signed( 897, 14), to_signed( 995, 14), to_signed(1092, 14), to_signed(1189, 14), to_signed(1285, 14), to_signed(1380, 14), to_signed(1474, 14),
-        to_signed(1567, 14), to_signed(1660, 14), to_signed(1751, 14), to_signed(1842, 14), to_signed(1931, 14), to_signed(2019, 14), to_signed(2106, 14), to_signed(2191, 14),
-        to_signed(2276, 14), to_signed(2359, 14), to_signed(2440, 14), to_signed(2520, 14), to_signed(2598, 14), to_signed(2675, 14), to_signed(2751, 14), to_signed(2824, 14),
-        to_signed(2896, 14), to_signed(2967, 14), to_signed(3035, 14), to_signed(3102, 14), to_signed(3166, 14), to_signed(3229, 14), to_signed(3290, 14), to_signed(3349, 14),
-        to_signed(3406, 14), to_signed(3461, 14), to_signed(3513, 14), to_signed(3564, 14), to_signed(3612, 14), to_signed(3659, 14), to_signed(3703, 14), to_signed(3745, 14),
-        to_signed(3784, 14), to_signed(3822, 14), to_signed(3857, 14), to_signed(3889, 14), to_signed(3920, 14), to_signed(3948, 14), to_signed(3973, 14), to_signed(3996, 14),
-        to_signed(4017, 14), to_signed(4036, 14), to_signed(4052, 14), to_signed(4065, 14), to_signed(4076, 14), to_signed(4085, 14), to_signed(4091, 14), to_signed(4095, 14),
-        to_signed(4096, 14) );
-
-    -- full-circle sine from the quarter table, 12-bit angle (4096 = 360 deg).
-    -- Entry granularity is 16 angle steps; the frame FSM interpolates the
-    -- low 4 bits with the shared multiplier for glide-smooth rotation.
-    function f_qsin(a : unsigned(11 downto 0)) return signed is
-        variable k : integer range 0 to 64;
-        variable v : signed(13 downto 0);
-    begin
-        if a(10) = '0' then k := to_integer(a(9 downto 4));
-        else                k := 64 - to_integer(a(9 downto 4)); end if;
-        v := C_SIN(k);
-        if a(11) = '1' then return -v; else return v; end if;
-    end function;
-
-    -- next entry up (for interpolation), same folding
-    function f_qsin2(a : unsigned(11 downto 0)) return signed is
-        variable k : integer range 0 to 64;
-        variable v : signed(13 downto 0);
-    begin
-        if a(10) = '0' then k := to_integer(a(9 downto 4)) + 1;
-        else                k := 64 - to_integer(a(9 downto 4)) - 1; end if;
-        if k < 0 then k := 0; end if;
-        if k > 64 then k := 64; end if;
-        v := C_SIN(k);
-        if a(11) = '1' then return -v; else return v; end if;
-    end function;
+    -- Quarter-sine, Q12.  Padded to 256x16 so it maps to a block RAM:
+    -- at 65x14 yosys leaves it in logic, which cost ~600 cells on a
+    -- chip that is over budget on logic and has 23 spare memories.
+    type t_sin256 is array (0 to 255) of signed(15 downto 0);
+    constant C_SIN : t_sin256 := (
+        to_signed(    0,16), to_signed(  101,16), to_signed(  201,16), to_signed(  301,16), to_signed(  401,16), to_signed(  501,16), to_signed(  601,16), to_signed(  700,16),
+        to_signed(  799,16), to_signed(  897,16), to_signed(  995,16), to_signed( 1092,16), to_signed( 1189,16), to_signed( 1285,16), to_signed( 1380,16), to_signed( 1474,16),
+        to_signed( 1567,16), to_signed( 1660,16), to_signed( 1751,16), to_signed( 1842,16), to_signed( 1931,16), to_signed( 2019,16), to_signed( 2106,16), to_signed( 2191,16),
+        to_signed( 2276,16), to_signed( 2359,16), to_signed( 2440,16), to_signed( 2520,16), to_signed( 2598,16), to_signed( 2675,16), to_signed( 2751,16), to_signed( 2824,16),
+        to_signed( 2896,16), to_signed( 2967,16), to_signed( 3035,16), to_signed( 3102,16), to_signed( 3166,16), to_signed( 3229,16), to_signed( 3290,16), to_signed( 3349,16),
+        to_signed( 3406,16), to_signed( 3461,16), to_signed( 3513,16), to_signed( 3564,16), to_signed( 3612,16), to_signed( 3659,16), to_signed( 3703,16), to_signed( 3745,16),
+        to_signed( 3784,16), to_signed( 3822,16), to_signed( 3857,16), to_signed( 3889,16), to_signed( 3920,16), to_signed( 3948,16), to_signed( 3973,16), to_signed( 3996,16),
+        to_signed( 4017,16), to_signed( 4036,16), to_signed( 4052,16), to_signed( 4065,16), to_signed( 4076,16), to_signed( 4085,16), to_signed( 4091,16), to_signed( 4095,16),
+        to_signed( 4096,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16),
+        to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16),
+        to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16),
+        to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16),
+        to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16),
+        to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16),
+        to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16),
+        to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16),
+        to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16),
+        to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16),
+        to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16),
+        to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16),
+        to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16),
+        to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16),
+        to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16),
+        to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16),
+        to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16),
+        to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16),
+        to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16),
+        to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16),
+        to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16),
+        to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16),
+        to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16),
+        to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16) );
 
     function f_clamp10(v : signed) return unsigned is
     begin
@@ -454,7 +454,7 @@ architecture cubist of program_top is
     signal fr_wd  : std_logic_vector(15 downto 0) := (others => '0');
     signal fr_we  : std_logic := '0';
     -- shared quarter-sine ROM port (single instance)
-    signal t_sk   : unsigned(6 downto 0) := (others => '0');
+    signal t_sk   : unsigned(7 downto 0) := (others => '0');
     signal t_srd  : signed(13 downto 0) := (others => '0');
     signal t_sneg : std_logic := '0';
     signal t_ang  : unsigned(11 downto 0) := (others => '0');
@@ -980,9 +980,9 @@ begin
                         fr_st <= to_unsigned(3, 8);
                     when 3 =>
                         if t_ang(10) = '0' then
-                            t_sk <= resize(t_ang(9 downto 4), 7);
+                            t_sk <= resize(t_ang(9 downto 4), 8);
                         else
-                            t_sk <= to_unsigned(64, 7) - resize(t_ang(9 downto 4), 7);
+                            t_sk <= to_unsigned(64, 8) - resize(t_ang(9 downto 4), 8);
                         end if;
                         t_sneg <= t_ang(11);
                         fr_st <= to_unsigned(4, 8);
@@ -993,7 +993,7 @@ begin
                         else
                             v_kk := 64 - to_integer(t_ang(9 downto 4)) - 1;
                         end if;
-                        t_sk <= to_unsigned(v_kk, 7);
+                        t_sk <= to_unsigned(v_kk, 8);
                         fr_st <= to_unsigned(5, 8);
                     when 5 =>
                         if t_sneg = '1' then t_s0 <= -t_srd;
@@ -1925,7 +1925,7 @@ begin
     p_srom : process(clk)
     begin
         if rising_edge(clk) then
-            t_srd <= C_SIN(to_integer(t_sk));
+            t_srd <= resize(C_SIN(to_integer(t_sk)), 14);
         end if;
     end process p_srom;
 
