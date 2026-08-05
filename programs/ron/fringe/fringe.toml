@@ -1,9 +1,10 @@
 # Fringe — a moiré interference instrument.
 #
-# Two layers of transparent black-and-white line-work over a solid field.
-# Ten procedural textures per layer, each infinite and seamless at any scale;
-# where the two layers' pitches, forms or phases approach one another, large
-# interference fringes bloom across the frame.
+# Two layers of procedural black-and-white line-work, combined by a boolean
+# blend into a single mask and painted against a solid ground.  Ten textures
+# per layer, each infinite and seamless at any scale; where the two layers'
+# pitches, forms or phases approach one another, large interference fringes
+# bloom across the frame.
 #
 # Nothing animates by itself.  Scale, X phase and the slider's Y phase are
 # smoothed by a subtle one-pole glide (~16 frames); texture select and every
@@ -22,7 +23,7 @@ categories = ["Illusion", "Pattern", "Optics", "Grid"]
 program_type = "synthesis"
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
-description = "Moire instrument: two transparent black-and-white line textures overlaid, scale and phase performed by hand."
+description = "Moire instrument: two line textures blended by boolean logic, scale and phase performed by hand."
 url = "https://github.com/bluecondition/videomancer-dev"
 
 # --- Layer A ---------------------------------------------------------------
@@ -87,7 +88,7 @@ display_max_value = 100
 name_label = "Phase B"
 suffix_label = "%"
 
-# --- Performance slider: Y phase of whichever layer is on top --------------
+# --- Performance slider: Y phase of layer B (relative phase is what beats) --
 
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
@@ -97,43 +98,50 @@ max_value = 1023
 initial_value = 512
 display_min_value = -100
 display_max_value = 100
-name_label = "Y Phase"
+name_label = "Y Phase B"
 suffix_label = "%"
 
 # --- Switches --------------------------------------------------------------
 
+# S7 + S8 together select the blend of the two layer masks:
+#   S7 off, S8 off  Over    A or B        union
+#   S7 on,  S8 off  Meet    A and B       intersection
+#   S7 off, S8 on   Fringe  A xor B       pure interference
+#   S7 on,  S8 on   Cut     A and not B   A carved by B
+
 [[parameter]]
 parameter_id = "toggle_switch_7"
-name_label = "Invert A"
-value_labels = ["Off", "On"]
-initial_value_label = "Off"
+name_label = "Meet"
+value_labels = ["Over", "Meet"]
+initial_value_label = "Over"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
-name_label = "Invert B"
-value_labels = ["Off", "On"]
-initial_value_label = "Off"
+name_label = "Fringe"
+value_labels = ["Solid", "Fringe"]
+initial_value_label = "Solid"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
-name_label = "Order"
-value_labels = ["B Front", "A Front"]
-initial_value_label = "B Front"
+name_label = "Weight"
+value_labels = ["Bold", "Fine"]
+initial_value_label = "Bold"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
-name_label = "Backgrnd"
+name_label = "Ground"
 value_labels = ["Black", "White"]
 initial_value_label = "White"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
-name_label = "Inv Mode"
-value_labels = ["Mask", "Colour"]
-initial_value_label = "Mask"
+name_label = "Colour"
+value_labels = ["Mono", "Colour"]
+initial_value_label = "Mono"
 
 # --- Presets ---------------------------------------------------------------
 
+# Rings: the power-up state -- two circle fields beating into concentric moire.
 [[preset]]
 name = "Rings"
 rotary_potentiometer_1 = 51
@@ -149,6 +157,7 @@ toggle_switch_9 = 0
 toggle_switch_10 = 1
 toggle_switch_11 = 0
 
+# Riley Weave: two wavy fields XORed -- the fringe reads as a woven band.
 [[preset]]
 name = "Riley Weave"
 rotary_potentiometer_1 = 461
@@ -159,11 +168,12 @@ rotary_potentiometer_5 = 606
 rotary_potentiometer_6 = 512
 linear_potentiometer_12 = 512
 toggle_switch_7 = 0
-toggle_switch_8 = 0
+toggle_switch_8 = 1
 toggle_switch_9 = 0
 toggle_switch_10 = 1
 toggle_switch_11 = 0
 
+# Screen Clash: two grids intersected on Fine -- sparse jewels at the beats.
 [[preset]]
 name = "Screen Clash"
 rotary_potentiometer_1 = 666
@@ -173,14 +183,31 @@ rotary_potentiometer_4 = 666
 rotary_potentiometer_5 = 712
 rotary_potentiometer_6 = 540
 linear_potentiometer_12 = 620
+toggle_switch_7 = 1
+toggle_switch_8 = 0
+toggle_switch_9 = 1
+toggle_switch_10 = 1
+toggle_switch_11 = 0
+
+# Two Colour Press: circles over circles in subtractive process ink.
+[[preset]]
+name = "Two Colour"
+rotary_potentiometer_1 = 51
+rotary_potentiometer_2 = 560
+rotary_potentiometer_3 = 470
+rotary_potentiometer_4 = 51
+rotary_potentiometer_5 = 596
+rotary_potentiometer_6 = 554
+linear_potentiometer_12 = 512
 toggle_switch_7 = 0
 toggle_switch_8 = 0
 toggle_switch_9 = 0
 toggle_switch_10 = 1
-toggle_switch_11 = 0
+toggle_switch_11 = 1
 
+# Light Mix: spokes and circles in additive light on black.
 [[preset]]
-name = "Starburst"
+name = "Light Mix"
 rotary_potentiometer_1 = 256
 rotary_potentiometer_2 = 700
 rotary_potentiometer_3 = 512
@@ -191,11 +218,12 @@ linear_potentiometer_12 = 512
 toggle_switch_7 = 0
 toggle_switch_8 = 0
 toggle_switch_9 = 0
-toggle_switch_10 = 1
-toggle_switch_11 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 1
 
+# Carved Tile: honeycomb cut by brick, on black.
 [[preset]]
-name = "Negative Tile"
+name = "Carved Tile"
 rotary_potentiometer_1 = 768
 rotary_potentiometer_2 = 760
 rotary_potentiometer_3 = 512
@@ -204,11 +232,12 @@ rotary_potentiometer_5 = 740
 rotary_potentiometer_6 = 520
 linear_potentiometer_12 = 560
 toggle_switch_7 = 1
-toggle_switch_8 = 0
+toggle_switch_8 = 1
 toggle_switch_9 = 0
 toggle_switch_10 = 0
-toggle_switch_11 = 1
+toggle_switch_11 = 0
 
+# Slow Sweep: coarse circles against squares -- one slider pass is a whole cycle.
 [[preset]]
 name = "Slow Sweep"
 rotary_potentiometer_1 = 51

@@ -1,6 +1,6 @@
 [program]
 program_id = "com.ron.cga"
-program_version = "1.0.0"
+program_version = "1.3.2"
 abi_version = ">=1.0,<2.0"
 program_name = "CGA Emulator"
 author = "ron"
@@ -55,14 +55,9 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
-control_mode = "linear"
-min_value = 0
-max_value = 1023
-initial_value = 512
-display_min_value = 0
-display_max_value = 100
-name_label = "Reserve"
-suffix_label = "%"
+name_label = "Stability"
+value_labels = ["Off", "Low", "Medium", "High", "Freeze"]
+initial_value_label = "Medium"
 
 # --- Toggle Switches (7-11) ---
 

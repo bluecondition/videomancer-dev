@@ -86,16 +86,16 @@ chip, so nothing is ever clipped, and the rows disappear entirely.
 
 ## Implementation
 
-Streaming, `C_LATENCY = 21`, no CORDIC and no per-pixel divides.
+Streaming, `C_LATENCY = 22`, no CORDIC and no per-pixel divides.
 
 ```
 1-5    cell lattice: column -> column hash -> vertical phase -> cell row
 6-9    cell hash -> rotation/variant/size/jitter/presence + per-cell luma
 10-12  polar: |cx|,|cy| -> C_RTAB -> exact radius + octant fraction -> angle
-13-15  C_SHAPE silhouette radius, C_COS rim light, size multiply
-16-17  signed distance inside the silhouette; coverage + shading DECISIONS
-18-19  one shading add, one dough add, chip and dough colours
-20-21  alpha scale, composite
+13-16  C_SHAPE silhouette radius, C_COS rim light, register slice, multiply
+17-18  signed distance inside the silhouette; coverage + shading DECISIONS
+19-20  one shading add, one dough add, chip and dough colours
+21-22  alpha scale, composite
 ```
 
 `C_RTAB` (1024×12) returns **both** `radius*4` and the octant sub-angle from
@@ -134,20 +134,100 @@ area changes.
 3. Barrel-shifting the grain coordinates straight into the hash put
    `s_scl → shift → hash` in one cone; the shift is now registered.
 
-All 6 configs close with margin (68% LC, 11/32 BRAM, no clock divisor):
+All 6 configs close (71% LC, 11/32 BRAM, no clock divisor):
 
-| config | Fmax | required |
+| config | Fmax | required | seed |
+|---|---|---|---|
+| HD Analog | 86.46 MHz | 74.25 | 1 |
+| SD Analog | 74.23 MHz | 27 | 2 |
+| HD HDMI | 87.37 MHz | 74.25 | 1 |
+| SD HDMI | 79.67 MHz | 27 | 1 |
+| HD Dual | 82.10 MHz | 74.25 | 1 |
+| SD Dual | 85.27 MHz | 27 | 2 |
+
+Which seed stalls router2 moves around between edits (it was HD Analog before,
+the two SD configs here) — always ~360 s on the retry. Nothing to chase; the
+build script sweeps seeds automatically.
+
+`C_SHAPE`'s BRAM clk-to-q is 2.15 ns; feeding it straight into the size
+multiply left only 0.8 MHz of margin, so the ROM output has its own register
+slice (this is why `C_LATENCY` is 22).
+
+### Why chips were flashing, and why they must not resize either
+
+Chip presence is a compare: `cell_hash_byte < threshold`. The hash byte is
+fixed per cell forever, but the threshold moved by an LSB every field from
+three independent sources, so any cell sitting on the line toggled between
+"full chip" and "nothing" at frame rate:
+
+1. **The P12 fader's ADC dithers**, and `s_dens` is re-latched every field.
+   With 256 possible hash values, ~1 cell in 256 sits on the boundary — a
+   handful of chips on screen, flickering.
+2. **The per-cell luma was a single pixel** (cell-centre column, cell-row top
+   line), carrying the source's full noise straight into the compare.
+3. **Interlace.** `s_lcnt` resets every field, so both fields build the same
+   cell grid — but they sample *different physical lines* for that luma. The
+   threshold then alternated at 30 Hz, the loudest version of the fault.
+
+The first attempt made presence a *margin* and let marginal chips grow in from
+a speck. That removed the flashing but replaced it with something just as
+wrong: **chips changing size on their own.** A chip's size must be a fixed
+property of its cell — nothing that moves may touch it.
+
+So the compare is binary again, chip size comes from the cell hash and K6 and
+nothing else (the old luma-to-size term is gone too), and every source of
+threshold wobble is dealt with **at the source**:
+
+* **`s_dens` has a deadband** — fader dither alone cannot move the threshold.
+* **The luma sample averages the whole cell width** (8-128 px depending on
+  Scale) instead of one pixel, dropping sample noise 3-11x. Note that
+  *quantising* it instead would have made things worse, not better: coarse
+  steps amplify the dither for any cell near a step boundary.
+* **The cell buffer refreshes on one field only** when interlace is detected.
+  The other field then reads exactly the values the first one stored, so both
+  fields of a frame render identically and the 30 Hz alternation is gone. This
+  costs one AND gate — the ping-pong banking already makes it work out.
+
+What remains is that chips still appear and disappear when the *picture*
+genuinely changes, which is the point of Luma Mod. **S7 off freezes the chip
+layout completely** and leaves the video showing through the dough tone and
+emboss only.
+
+The general lesson: a hard binary decision on a live analog-derived quantity
+has to be stabilised on its INPUT. Softening the decision instead just moves
+the artifact somewhere the eye still catches it.
+
+### shift_left width trap (three dead/cycling knobs)
+
+Optimising the vblank sequencer for timing, three constant multiplies were
+rewritten as shift-adds:
+
+```vhdl
+v_m20 := resize(shift_left(s_k6, 3) - s_k6, 20);   -- WRONG: k6 * 7
+```
+
+`shift_left` on an `unsigned` returns **the operand's own width** — the bits
+shifted off the top are gone — and `"+"`/`"-"` return `max(L,R)`, so the whole
+expression silently became mod 1024. The `resize` at the end was far too late.
+The original `s_k6 * 56` was correct only because `"*"(unsigned, natural)`
+widens to `2*L`.
+
+Symptoms, all three from the same line pattern:
+
+| control | was | should be |
 |---|---|---|
-| HD Analog | 80.69 MHz (seed 2) | 74.25 |
-| SD Analog | 80.10 MHz | 27 |
-| HD HDMI | 79.13 MHz | 74.25 |
-| SD HDMI | 82.13 MHz | 27 |
-| HD Dual | 85.01 MHz | 74.25 |
-| SD Dual | 80.63 MHz | 27 |
+| K6 Chip Size | ramps 20→27 and **wraps 4×** across the knob | 20→75 monotonic |
+| K2 Shape | pinned at 0 — **a completely dead control** | 0→4 |
+| K4 specular | cycles 0→56 repeatedly | 0→319 |
 
-Note: **HD Analog seed 1 stalls router2** (reproducibly — both full builds hit
-it); seed 2 routes in ~390 s and passes. Build with `SEED=2` if iterating on
-that config alone.
+Fix: `resize` to the target width **before** shifting.
+
+The reason this shipped is worth noting: `preview_morsel.py` is bit-exact for
+the *pixel* path but computes per-frame constants in clean Python ints, and a
+still render cannot reveal the fault anyway — every individual frame looks
+correct, only *sweeping the knob* shows it. `check_frame_math.py` now
+re-implements each sequencer slot at the VHDL's real widths and asserts each
+knob is monotonic and spans its full range. Run it after touching `p_frame`.
 
 ### Hash trap (worth remembering)
 
@@ -168,5 +248,9 @@ renders the intended colours.
 
 ## Status
 
-All 6 configs built and timing-closed, `.vmprog` packaged.
-**Not yet hardware-tested.**
+All 6 configs built and timing-closed, `.vmprog` packaged. Hardware-tested
+visually; the chip-stability rework and the knob fixes are **not yet
+HW-confirmed**.
+
+Run `check_frame_math.py` after any change to `p_frame`, and
+`preview_morsel.py` after any change to the pixel path.

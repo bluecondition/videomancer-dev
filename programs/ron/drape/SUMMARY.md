@@ -8,17 +8,17 @@ Captures the split row into three inferred 2048×10 single-port BRAMs (one per Y
 
 ## Controls
 - K1 Split — capture row (0..max_y)
-- K2 Spread — horizontal outward stretch amount
+- K2 Stretch — Y where the stretch effect begins (always ≥8 rows below Split)
 - K3 Fade — ramp slope to black
-- K4 Stretch — Y where the stretch effect begins (always ≥8 rows below Split)
+- K4 Twist — horizontal lean per row (centred at 512)
 - K5 Soft W — Stretch-onset ramp width (used with Soft switch)
-- K6 Twist — horizontal lean per row (centred at 512)
+- K6 Mix — wet/dry between original and draped output
 - T7 Blur — 4-tap horizontal box blur on captured line
 - T8 Curve — Straight (LUT-based radial) vs Curved (hyperbolic)
 - T9 Soft — gradual Stretch onset over Soft W rows
 - T10 Curve+ — Curved-mode style: Hard (fast saturation) vs Soft (smoother)
 - T11 Bypass — passthrough
-- Slider Mix — wet/dry between original and draped output
+- Slider P12 Spread — horizontal outward stretch amount (headline performance control)
 
 ## Presets
 - Default

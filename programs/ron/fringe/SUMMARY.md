@@ -1,11 +1,10 @@
 # FRINGE
 
-**A moiré interference instrument.**  Two independent layers of transparent,
-programmatic black-and-white line-work are composited over a solid field; when
-their pitches, forms or phases approach one another, large-scale interference
-fringes bloom across the frame.  No video in — a pure generator
-(`program_type = "synthesis"`), pure luma, ink at Y 1023 or Y 0 on neutral
-chroma.
+**A moiré interference instrument.**  Two independent layers of programmatic
+black-and-white line-work are combined by a **boolean blend** into a single
+mask and painted against a solid ground; when their pitches, forms or phases
+approach one another, large-scale interference fringes bloom across the frame.
+No video in — a pure generator (`program_type = "synthesis"`).
 
 **Nothing animates by itself.**  When no control is moving and the glide has
 settled, the image is completely static.  Every movement you see was performed.
@@ -14,35 +13,61 @@ settled, the image is completely static.  Every movement you see was performed.
 
 | ctl | name | what it does | |
 |---|---|---|---|
-| **P12** | **Y Phase** | Y phase of whichever layer is **on top** — the primary gesture, rakes the front pattern across the back one | **glided** |
+| **P12** | **Y Phase B** | Y phase of layer B — the primary gesture, rakes one pattern across the other | **glided** |
 | K1 | **Texture A** | 10 textures, equal zones | snap, 8-count deadband |
 | K2 | **Scale A** | pattern pitch, 1024 px → 4.0 px | **continuous**, glided |
 | K3 | **Phase A** | X phase, ±1024 px (rotation for spokes) | **continuous**, glided |
 | K4 | **Texture B** | 10 textures | snap |
 | K5 | **Scale B** | pattern pitch | **continuous**, glided |
 | K6 | **Phase B** | X phase | **continuous**, glided |
-| S7 | **Invert A** | meaning set by S11 | |
-| S8 | **Invert B** | meaning set by S11 | |
-| S9 | **Order** | which layer draws in front — also re-targets P12 | |
-| S10 | **Backgrnd** | solid black / solid white | |
-| S11 | **Inv Mode** | what S7/S8 mean, globally | |
+| S7 | **Meet** | with S8, a 4-way blend of the two masks | |
+| S8 | **Fringe** | | |
+| S9 | **Weight** | Bold (50 % ink) / Fine (half of everything) | |
+| S10 | **Ground** | white / black — inverts the composite | |
+| S11 | **Colour** | mono / ink coloured by which layer made it | |
+
+### Blend (S7 + S8)
+
+| S7 | S8 | mode | mask | what you see |
+|---|---|---|---|---|
+| off | off | **Over** | A ∨ B | union — two transparencies stacked |
+| on | off | **Meet** | A ∧ B | intersection — sparse jewels at the beats |
+| off | on | **Fringe** | A ⊕ B | pure interference — the classic beat field |
+| on | on | **Cut** | A ∧ ¬B | A carved by B |
+
+With S10 polarity on top, that reaches NOR, NAND, XNOR and ¬A ∧ B by De
+Morgan — ten of the sixteen boolean functions of two masks.
+
+The slider needs no target switch: only the **relative** phase of the two
+layers makes fringes, so driving layer B's Y phase alone reaches every
+interference state.  The only thing given up is a global vertical shift of the
+whole composite.
 
 **Textures**, radial → linear → tiled: Circles · Squares · Spokes · Wavy H ·
 Wavy V · Diagonal · Grid · Hex · Checker · Brick.
 
-**The two invert modes.**  S11 = *Mask* swaps the layer's ink and its
-transparency — lines become gaps, gaps become ink, the ink stays black, and a
-grating turns into its own negative space.  S11 = *Colour* leaves the mask
-alone and flips the ink black ↔ white; white ink is invisible over a white
-background but carves through anything black beneath it, which is the fastest
-way to punch one layer's pattern *through* the other.  Both are live; flipping
-S11 re-reads S7/S8 instantly.
+**The colouriser (S11)** paints ink by *which layer made it*, so the
+interference itself carries the colour.  On a white ground that is subtractive
+process ink — cyan over magenta going deep blue where they meet, a two-colour
+print rosette.  On a black ground it flips to additive light: red plus green
+going yellow.  It stays orthogonal to the blend: the blend sets the shape, the
+palette sets the hue.  Palettes are authored in standard BT.601 and swapped at
+the output pin for the hardware's convention, so sim previews show swapped
+hues — judge shape in sim, hue on the device.
 
-Presets: Rings, Riley Weave, Screen Clash, Starburst, Negative Tile, Slow
-Sweep.  **Power-up** is white ground, both layers black, mask-invert, B in
-front, and *two* circle fields at 64 px and 46.5 px — so the unit wakes up
-already showing a strong concentric moiré.  If that is on screen, every part of
-the engine is working.
+**What is deliberately absent: per-layer mask invert.**  For a 50 %-duty
+grating, inverting the mask is mathematically identical to shifting the phase
+by half a period — which the phase knob already does, more finely.  It only
+differed on the three thin-line textures (grid, hex, brick), which is not worth
+a switch; Cut covers the useful negations and Ground covers global inversion.
+That, plus the fact that black ink on a black ground draws nothing, is why the
+original invert/order/background trio felt dead.
+
+Presets: Rings, Riley Weave, Screen Clash, Two Colour, Light Mix, Carved Tile,
+Slow Sweep.  **Power-up** is white ground, mono, Over blend, Bold weight, and
+*two* circle fields at 64 px and 46.5 px — so the unit wakes up already showing
+a strong concentric moiré.  If that is on screen, every part of the engine is
+working.
 
 ## One phase, one comparison
 
@@ -111,7 +136,7 @@ c10/c11     two partial products -> 10-bit radial phase
 c12         phase windows, sine table, diagonal fold
 c13         stripe phase mux + hex/brick cell space
 c14         all ten ink rules -> one mask per layer
-c15         invert mode, draw order, background -> luma
+c15         boolean blend -> source palette -> Y/U/V
 ```
 
 ## Judgment calls
@@ -120,6 +145,8 @@ c15         invert mode, draw order, background -> luma
   gratings, and the ratio that beats hardest against a second layer.  The tiled
   ones use line weights instead, tuned so cells read as cells: grid 18.75 % per
   axis, honeycomb ≈16 %, brick mortar 12.5 %.  Checker is a true 50/50 fill.
+  **Weight** (S9) halves every one of those, which is also what turns the
+  checkerboard into a windowpane — one threshold drives both.
 - **Spokes phase mapping.**  The centre stays put and the phases rotate: X winds
   the fan a full turn, the slider counter-winds it a half turn.  Radial
   breathing was the alternative; counter-rotation won because it keeps the
@@ -139,7 +166,12 @@ c15         invert mode, draw order, background -> luma
   63 %.  Fast enough to feel connected, slow enough that a flick reads as a
   swing.  Scale, X phase and Y phase glide; texture select and all five
   switches snap, including the P12 re-target when draw order flips.
-- **Nothing trimmed.**  All ten textures shipped; nothing added beyond the brief.
+- **Nothing trimmed.**  All ten textures shipped.
+- **Switch rework (v1.1).**  The original Invert A / Invert B / Draw Order trio
+  was replaced after it proved dead in use: invert is a half-period phase shift
+  on seven of the ten textures, draw order is meaningless once the layers
+  combine by boolean logic, and the background switch could only ever produce
+  black-on-black.  Blend + Weight + Ground + Colour replaced them.
 
 ## Verification
 
@@ -169,9 +201,13 @@ a 0 % mismatch.
 
 ## Timing (HX4K, no DSP)
 
-All 6 configs pass, seed 1–2: HD **79.13 / 78.19 / 77.54**, SD
-**73.15 / 76.63 / 72.58** MHz.  **7082–7111 / 7680 LCs (92 %)**, 0 EBR, no PLL
-on HD analog or dual.  Not yet hardware-tested.
+All 6 configs pass, seed 1–2: HD **77.98 / 77.95 / 75.57**, SD
+**74.87 / 76.99 / 73.10** MHz.  **7243–7274 / 7680 LCs (94.7 %)**, 0 EBR, no
+PLL on HD analog or dual.  Not yet hardware-tested.
+
+The v1.1 switch rework cost ~190 LCs (92 % → 94.7 %): the ink thresholds became
+per-frame signals rather than constants, so five comparators per layer widened,
+and the palette added three colour registers plus a chroma output path.
 
 Read those HD numbers as **run-to-run** figures, not a property of the design.
 An earlier build of nearly the same netlist landed at 74.64 / 74.56 / 80.79 —

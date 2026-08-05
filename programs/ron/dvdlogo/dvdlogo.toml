@@ -95,9 +95,9 @@ initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
-name_label = "Hold"
-value_labels = ["Cycle", "Hold"]
-initial_value_label = "Cycle"
+name_label = "Overlap"
+value_labels = ["Bounce", "Mix"]
+initial_value_label = "Bounce"
 
 # --- Linear Fader (12) ---
 
@@ -121,7 +121,6 @@ name = "Fast Chaos"
 rotary_potentiometer_1 = 768
 rotary_potentiometer_2 = 640
 rotary_potentiometer_4 = 384
-toggle_switch_11 = 0
 
 [[preset]]
 name = "Big & Slow"

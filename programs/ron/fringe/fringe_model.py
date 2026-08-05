@@ -112,9 +112,21 @@ W_HEXD = 190        # honeycomb slanted-edge half-width (gradient sqrt(5))
 W_MORT = 128        # brick mortar half-width
 A_WAVE = 1          # sine displacement shift: +/-127<<1 = +/-254 units
 
+# WEIGHT (S9) halves every ink dimension: Bold = broad bands, Fine = jewels.
+_W = dict(duty=DUTY, grid=W_GRID, hexv=W_HEXV, hexd=W_HEXD, mort=W_MORT)
 
-def layer_mask(tex, xs, ys, cx, cy, step, offx, offy, rot):
+
+def ink_geom(weight):
+    if weight:
+        return {k: v // 2 for k, v in _W.items()}
+    return dict(_W)
+
+
+def layer_mask(tex, xs, ys, cx, cy, step, offx, offy, rot, weight=0):
     """One layer's ink mask.  xs/ys are pixel coordinate grids."""
+    g = ink_geom(weight)
+    DUTY, W_GRID, W_HEXV, W_HEXD, W_MORT = (g['duty'], g['grid'], g['hexv'],
+                                            g['hexd'], g['mort'])
     stepc = step_diag(step) if tex == 5 else step
 
     # --- cartesian DDA accumulators (exact signed scaled coordinates, Q8)
@@ -169,8 +181,8 @@ def layer_mask(tex, xs, ys, cx, cy, step, offx, offy, rot):
         slant = np.abs(d) < W_HEXD
         return vert | slant
 
-    if tex == 8:                          # checkerboard
-        return ((ph_x >> 9) ^ (ph_y >> 9)) == 1
+    if tex == 8:                          # checkerboard / windowpane on Fine
+        return (ph_x < DUTY) != (ph_y < DUTY)
 
     # tex == 9                            # running-bond brick, mortar line-work
     row = (full_y >> 10) & 1
@@ -187,9 +199,21 @@ def spoke_count_of_step(step):
 
 # ------------------------------------------------------------------ composite
 
+# Blend modes: S7 = bit 0 (Meet), S8 = bit 1 (Fringe)
+B_OVER, B_MEET, B_FRINGE, B_CUT = 0, 1, 2, 3
+
+# Ink palettes by source region (A only, B only, both), standard BT.601.
+PAL_SUB = [(519, 760, 141), (347, 632, 939), (160, 670, 512)]   # process ink
+PAL_ADD = [(414, 346, 946), (569, 326, 106), (889, 100, 607)]   # light
+
+
 def render(texA, kscA, kphA, texB, kscB, kphB, kslider,
-           invA=0, invB=0, swap=0, bg_white=1, colour_mode=0):
-    """Full frame.  Returns a HxW uint8 luma image (0 or 255)."""
+           blend=B_OVER, weight=0, bg_white=1, colour=0, rgb=False):
+    """Full frame.
+
+    Returns a HxW uint8 luma image, or a HxWx3 uint8 YUV image when rgb=True
+    (channels are Y, U, V in standard BT.601 -- the VHDL swaps U/V at the pin).
+    """
     ys, xs = np.meshgrid(np.arange(H, dtype=np.int64),
                          np.arange(W, dtype=np.int64), indexing="ij")
     cx, cy = W // 2, H // 2
@@ -200,37 +224,38 @@ def render(texA, kscA, kphA, texB, kscB, kphB, kslider,
 
     offxA = (kphA - 512) * 2                 # +/-1024 px of translation
     offxB = (kphB - 512) * 2
-    offy_top = (kslider - 512) * 2
+    offyB = (kslider - 512) * 2              # slider always drives layer B
     rotA = ((kphA - 512) * 4) & 4095         # spokes: X phase == rotation
     rotB = ((kphB - 512) * 4) & 4095
-
-    top_is_B = (swap == 0)                   # default draw order: B on top
-    offyA = offy_top if not top_is_B else 0
-    offyB = offy_top if top_is_B else 0
-    if texA == 2:
-        rotA = (rotA - offyA) & 4095         # spokes: Y phase counter-rotates
     if texB == 2:
-        rotB = (rotB - offyB) & 4095
+        rotB = (rotB - offyB) & 4095         # spokes: Y phase counter-rotates
 
-    mA = layer_mask(texA, xs, ys, cx, cy, stepA, offxA, offyA, rotA)
-    mB = layer_mask(texB, xs, ys, cx, cy, stepB, offxB, offyB, rotB)
+    mA = layer_mask(texA, xs, ys, cx, cy, stepA, offxA, 0, rotA, weight)
+    mB = layer_mask(texB, xs, ys, cx, cy, stepB, offxB, offyB, rotB, weight)
 
-    if colour_mode == 0:                     # mask invert
-        mA, mB = mA ^ bool(invA), mB ^ bool(invB)
-        cA = cB = 0
-    else:                                    # colour flip
-        cA, cB = (255 if invA else 0), (255 if invB else 0)
+    if blend == B_MEET:     m = mA & mB
+    elif blend == B_FRINGE: m = mA ^ mB
+    elif blend == B_CUT:    m = mA & ~mB
+    else:                   m = mA | mB
 
-    bg = 255 if bg_white else 0
-    if top_is_B:
-        (mt, ct), (mb_, cb) = (mB, cB), (mA, cA)
+    # source region: 0 = A alone, 1 = B alone, 2 = both
+    idx = np.where(mA & mB, 2, np.where(mB, 1, 0))
+
+    if colour:
+        pal = PAL_SUB if bg_white else PAL_ADD
     else:
-        (mt, ct), (mb_, cb) = (mA, cA), (mB, cB)
+        ink = (0, 512, 512) if bg_white else (1023, 512, 512)
+        pal = [ink, ink, ink]
+    gnd = (1023, 512, 512) if bg_white else (0, 512, 512)
 
-    out = np.full((H, W), bg, dtype=np.uint8)
-    out = np.where(mb_, cb, out)
-    out = np.where(mt, ct, out)
-    return out.astype(np.uint8)
+    out = np.empty((H, W, 3), dtype=np.int64)
+    for c in range(3):
+        px = np.choose(idx, [pal[0][c], pal[1][c], pal[2][c]])
+        out[:, :, c] = np.where(m, px, gnd[c])
+
+    if rgb:
+        return (out >> 2).astype(np.uint8)          # Y, U, V as 8-bit
+    return (out[:, :, 0] >> 2).astype(np.uint8)     # luma only
 
 
 # ---------------------------------------------------------------------- main
@@ -251,8 +276,7 @@ def contact_sheet():
     """All 10 textures at a mid scale, single layer, on white."""
     tiles = []
     for t in range(N_TEX):
-        img = render(t, 640, 512, t, 640, 512, 512, bg_white=1,
-                     swap=1)             # A on top, B identical underneath
+        img = render(t, 640, 512, t, 640, 512, 512)   # both layers identical
         tiles.append(img[::4, ::4])      # 320x180 thumbnails
     rows = [np.hstack(tiles[i:i + 5]) for i in (0, 5)]
     sheet = np.vstack(rows)
@@ -271,12 +295,12 @@ def boot_frame():
 
 def moire_set():
     shots = [
-        ("rings",   dict(texA=0, kscA=512, kphA=512, texB=0, kscB=560, kphB=512, kslider=512)),
-        ("offset",  dict(texA=0, kscA=512, kphA=512, texB=0, kscB=560, kphB=560, kslider=640)),
-        ("grating", dict(texA=4, kscA=800, kphA=512, texB=5, kscB=810, kphB=512, kslider=512)),
-        ("spokes",  dict(texA=2, kscA=700, kphA=512, texB=2, kscB=712, kphB=560, kslider=512)),
-        ("hexgrid", dict(texA=7, kscA=760, kphA=512, texB=6, kscB=770, kphB=520, kslider=560)),
-        ("brickck", dict(texA=9, kscA=740, kphA=512, texB=8, kscB=752, kphB=512, kslider=530)),
+        ("over",   dict(texA=0, kscA=512, kphA=512, texB=0, kscB=560, kphB=512, kslider=512)),
+        ("meet",   dict(texA=6, kscA=700, kphA=512, texB=6, kscB=712, kphB=540, kslider=620, blend=B_MEET)),
+        ("fringe", dict(texA=4, kscA=600, kphA=512, texB=4, kscB=606, kphB=512, kslider=512, blend=B_FRINGE)),
+        ("cut",    dict(texA=7, kscA=760, kphA=512, texB=9, kscB=740, kphB=520, kslider=560, blend=B_CUT)),
+        ("fine",   dict(texA=0, kscA=512, kphA=512, texB=0, kscB=560, kphB=512, kslider=512, weight=1)),
+        ("spokes", dict(texA=2, kscA=700, kphA=512, texB=2, kscB=760, kphB=560, kslider=512)),
     ]
     for name, kw in shots:
         save(render(**kw), "model_moire_%s.png" % name)

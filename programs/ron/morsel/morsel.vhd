@@ -35,18 +35,19 @@
 -- boundaries move with the chip, nothing is ever clipped, and the rows are
 -- gone.
 --
--- Pipeline (streaming, C_LATENCY = 21):
+-- Pipeline (streaming, C_LATENCY = 22):
 --   1-5   cell lattice: column index -> column hash -> vertical phase -> cell
 --         row, in-cell coordinates
 --   6-9   cell hash -> rotation / variant / size / jitter / presence, and the
 --         per-cell luma sample (ping-pong cell buffer, one cell row of lag)
 --   10-12 polar: |cx|,|cy| -> C_RTAB -> exact radius and octant fraction ->
 --         128-step screen angle
---   13-15 C_SHAPE silhouette radius, C_COS rim light, size multiply
---   16-17 signed distance inside the silhouette; coverage and shading
+--   13-16 C_SHAPE silhouette radius, C_COS rim light, register slice, then
+--         the size multiply (the ROM's 2.15 ns clk-to-q needs that slice)
+--   17-18 signed distance inside the silhouette; coverage and shading
 --         DECISIONS (compares and muxes only)
---   18-19 one shading add, one dough add, chip and dough colours
---   20-21 alpha scale, then composite
+--   19-20 one shading add, one dough add, chip and dough colours
+--   21-22 alpha scale, then composite
 -- Multiplies (HX4K has no DSP): the size scale, the bake ramp, and the small
 -- noise gains.  Everything else is compares, shifts and table reads.
 --
@@ -82,7 +83,7 @@ use work.morsel_rom_pkg.all;
 
 architecture morsel of program_top is
 
-    constant C_LATENCY : integer := 21;
+    constant C_LATENCY : integer := 22;
     constant C_LIGHT   : integer := 80;      -- rim light: 225 deg (upper-left)
 
     ----------------------------------------------------------------------
@@ -149,6 +150,7 @@ architecture morsel of program_top is
     signal s_ms   : integer range 1 to 3 := 3;      -- grain block shift
     signal s_aa   : unsigned(5 downto 0) := to_unsigned(4, 6); -- AA half-width
     signal s_dens : unsigned(7 downto 0) := to_unsigned(155, 8);
+    signal s_dbase : signed(9 downto 0) := to_signed(27, 10);
     signal s_szb  : unsigned(6 downto 0) := to_unsigned(62, 7);
     signal s_jmax : unsigned(3 downto 0) := (others => '0');
 
@@ -198,6 +200,8 @@ architecture morsel of program_top is
     signal s_avid_q     : std_logic := '0';
     signal s_xcnt       : unsigned(11 downto 0) := (others => '0');
     signal s_lcnt       : unsigned(11 downto 0) := (others => '0');
+    signal s_fpar       : std_logic := '0';
+    signal s_ilace      : std_logic := '0';
 
     ----------------------------------------------------------------------
     -- chip pipeline registers (cN_* is aligned to pipeline stage N)
@@ -206,7 +210,6 @@ architecture morsel of program_top is
         : unsigned(11 downto 0) := (others => '0');
     signal c1_nx, c2_nx, c3_nx, c4_nx, c5_nx, c6_nx, c7_nx
         : unsigned(5 downto 0) := (others => '0');
-    signal c1_mid, c2_mid, c3_mid, c4_mid, c5_mid : std_logic := '0';
 
     signal c2_hca, c3_hcol : unsigned(15 downto 0) := (others => '0');
     signal c4_yo    : unsigned(11 downto 0) := (others => '0');
@@ -222,6 +225,7 @@ architecture morsel of program_top is
     type t_cbuf is array (0 to 255) of std_logic_vector(7 downto 0);
     signal cbuf0, cbuf1 : t_cbuf;
     signal cb0_q, cb1_q : std_logic_vector(7 downto 0) := (others => '0');
+    signal cacc : unsigned(14 downto 0) := (others => '0');
     type t_cbd is array (0 to 3) of std_logic_vector(7 downto 0);
     signal cb0_d, cb1_d : t_cbd := (others => (others => '0'));
     signal c7_cluma : unsigned(7 downto 0) := (others => '0');
@@ -255,7 +259,11 @@ architecture morsel of program_top is
     signal c12_a7   : unsigned(6 downto 0) := (others => '0');
     signal c13_sadr : unsigned(9 downto 0) := (others => '0');
     signal c13_cadr : unsigned(6 downto 0) := (others => '0');
-    signal c14_sq   : unsigned(7 downto 0) := (others => '0');
+    signal c14_sq, c14b_sq : unsigned(7 downto 0) := (others => '0');
+    signal c14b_szc : unsigned(6 downto 0) := (others => '0');
+    signal c14b_pr  : unsigned(8 downto 0) := (others => '0');
+    signal c14b_cq  : signed(7 downto 0) := (others => '0');
+    signal c14b_present, c14b_milk, c14b_white : std_logic := '0';
     signal c14_cq, c15_lit, c16_lit, c17_lit : signed(7 downto 0) := (others => '0');
     signal c15_sr, c16_sr : unsigned(8 downto 0) := (others => '0');
     signal c16_d    : signed(10 downto 0) := (others => '0');
@@ -291,7 +299,7 @@ architecture morsel of program_top is
     -- pre-shifted by Relief at INSERTION, so the shift is not in the cone
     -- that finally adds it to the dough tone
     signal d4_embs : signed(9 downto 0) := (others => '0');
-    type t_embsr is array (0 to 12) of signed(9 downto 0);
+    type t_embsr is array (0 to 13) of signed(9 downto 0);
     signal emb_sr : t_embsr := (others => (others => '0'));
 
     -- surface noise: only ever has to be a stable function of (x,y), so it is
@@ -310,7 +318,7 @@ architecture morsel of program_top is
     ----------------------------------------------------------------------
     -- video delay (internal standard BT.601: u = Cb, v = Cr)
     ----------------------------------------------------------------------
-    type t_sr is array (0 to 17) of std_logic_vector(9 downto 0);
+    type t_sr is array (0 to 18) of std_logic_vector(9 downto 0);
     signal s_y_sr, s_u_sr, s_v_sr : t_sr := (others => (others => '0'));
 
     signal s_avid_sr    : std_logic_vector(0 to C_LATENCY - 1) := (others => '0');
@@ -341,6 +349,10 @@ begin
             end if;
             if s_vs_pulse = '1' then
                 s_lcnt <= (others => '0');
+                -- interlace = field_n alternates between vertical syncs
+                s_fpar <= data_in.field_n;
+                if data_in.field_n /= s_fpar then s_ilace <= '1';
+                else                              s_ilace <= '0'; end if;
             end if;
         end if;
     end process p_measure;
@@ -387,7 +399,12 @@ begin
                         elsif s_k1 < 900 then s_scl <= 3;
                         else                  s_scl <= 4; end if;
                         -- K2 SHAPE: start of the 3-D orientation window
-                        v_m20 := resize(shift_left(s_k2, 2) + s_k2, 20);
+                        -- resize BEFORE shifting: shift_left on an unsigned
+                        -- keeps the operand's width and throws the top bits
+                        -- away, so shifting first silently computes mod 1024
+                        -- (this made K2 a no-op and K6 cycle -- see SUMMARY)
+                        v_m20 := shift_left(resize(s_k2, 20), 2)
+                                 + resize(s_k2, 20);            -- k2 * 5
                         s_vlo <= v_m20(12 downto 10);
                     when 62 =>
                         -- matching anti-alias half-width: one screen pixel
@@ -406,7 +423,8 @@ begin
                         -- capped at 76 so the largest silhouette plus its size
                         -- jitter still fits inside a half cell.  (k6*56)>>10
                         -- written as ((k6<<3)-k6)>>7: one subtract.
-                        v_m20 := resize(shift_left(s_k6, 3) - s_k6, 20);
+                        v_m20 := shift_left(resize(s_k6, 20), 3)
+                                 - resize(s_k6, 20);            -- k6 * 7
                         s_szb <= to_unsigned(20 + to_integer(v_m20(12 downto 7)), 7);
                     when 60 =>
                         s_jmax <= C_JMAX(to_integer(s_szb(6 downto 2)));
@@ -426,6 +444,23 @@ begin
                         end case;
                         s_sztab(to_integer(s_seq(2 downto 0))) <=
                             to_unsigned(to_integer(s_szb) + v_sj, 7);
+                    when 33 =>
+                        -- DEADBAND: the fader's bottom ADC bits dither by an
+                        -- LSB or two every frame, and the presence test below
+                        -- is a hard compare -- without this, every cell whose
+                        -- hash sits exactly on the threshold toggles at frame
+                        -- rate.  Only move when the fader really moved.
+                        if s_p12(9 downto 2) > s_dens + 1
+                           or s_p12(9 downto 2) + 1 < s_dens then
+                            s_dens <= s_p12(9 downto 2);
+                        end if;
+                    when 32 =>
+                        -- presence base, so the pixel path needs one add
+                        if s_lumamod = '1' then
+                            s_dbase <= resize(signed('0' & s_dens), 10) - 128;
+                        else
+                            s_dbase <= resize(signed('0' & s_dens), 10);
+                        end if;
                     when 16 to 31 =>
                         -- position jitter: +/- jmax * {1, 3/4, 1/2, 1/4, 1/8},
                         -- every level one shift-add, and the 16 entries sum to
@@ -460,8 +495,7 @@ begin
                         v_c := to_integer(s_vlo) + C_VOFF(to_integer(s_seq(2 downto 0)));
                         if v_c > 7 then v_c := 7; end if;
                         s_vtab(to_integer(s_seq(2 downto 0))) <= to_unsigned(v_c, 3);
-                    when 7 =>
-                        s_dens <= s_p12(9 downto 2);
+
                     when 6 =>
                         -- K3 BAKE: pale golden dough -> dark baked.  Both ends
                         -- stay cookie-coloured; the chips carry the contrast.
@@ -474,7 +508,8 @@ begin
                         else                   s_rel <= 0; end if;
                     when 3 =>
                         -- (k4*320)>>10 = (k4*5)>>4: one add, not a multiply
-                        v_m20 := resize(shift_left(s_k4, 2) + s_k4, 20);
+                        v_m20 := shift_left(resize(s_k4, 20), 2)
+                                 + resize(s_k4, 20);            -- k4 * 5
                         s_spec <= v_m20(12 downto 4);
                     when 2 =>
                         s_grain <= resize(s_k5(9 downto 7), 4);
@@ -499,7 +534,7 @@ begin
         variable v_mxs, v_mns : unsigned(4 downto 0);
         variable v_prod       : unsigned(15 downto 0);
         variable v_lm         : unsigned(7 downto 0);
-        variable v_thr, v_sum : unsigned(8 downto 0);
+        variable v_marg       : signed(11 downto 0);
         variable v_sel        : std_logic_vector(2 downto 0);
         variable v_band       : integer range 1 to 3;
         variable v_sh0        : signed(11 downto 0);
@@ -519,8 +554,6 @@ begin
                 when others => v_nx := s_xcnt(6 downto 1);
             end case;
             c1_nx <= v_nx;
-            -- centre column of the cell: where the per-cell luma is sampled
-            if v_nx = 32 then c1_mid <= '1'; else c1_mid <= '0'; end if;
 
             ------------------------------------------------------------
             -- 2-3: column hash (this column's vertical phase)
@@ -570,8 +603,9 @@ begin
             ------------------------------------------------------------
             -- 8: unpack the cell's chip
             ------------------------------------------------------------
-            if s_inv = '1' then v_lm := c7_cluma;
-            else                v_lm := 255 - c7_cluma; end if;
+            if    s_lumamod = '0' then v_lm := (others => '0');
+            elsif s_inv = '1'      then v_lm := c7_cluma;
+            else                        v_lm := 255 - c7_cluma; end if;
             c8_lm    <= v_lm;
             c8_pres  <= c7_h1(7 downto 0);
             c8_rot   <= c7_h1(14 downto 8);
@@ -588,18 +622,15 @@ begin
             -- 9: presence + size (both modulated by the cell's luma), and
             --    the first half of the polar conversion
             ------------------------------------------------------------
-            if s_lumamod = '1' then
-                v_sum := ('0' & s_dens) + ('0' & c8_lm);
-                if v_sum < 128 then v_thr := (others => '0');
-                else                v_thr := v_sum - 128; end if;
-                c9_szc <= s_sztab(to_integer(c8_szi))
-                          + resize(c8_lm(7 downto 4), 7);
-            else
-                v_thr := '0' & s_dens;
-                c9_szc <= s_sztab(to_integer(c8_szi));
-            end if;
-            if ('0' & c8_pres) < v_thr then c9_present <= '1';
-            else                            c9_present <= '0'; end if;
+            -- Presence is a plain compare again -- a chip is either there
+            -- or it is not, and its SIZE never depends on anything that moves
+            -- (hash + Chip Size only).  Everything that made this compare
+            -- unstable is dealt with at the source instead: see p_cellbuf.
+            v_marg := resize(s_dbase, 12) + signed('0' & c8_lm)
+                      - signed('0' & c8_pres);
+            if v_marg > 0 then c9_present <= '1';
+            else               c9_present <= '0'; end if;
+            c9_szc <= s_sztab(to_integer(c8_szi));
 
             if c8_cx < 0 then c9_ax <= resize(unsigned(-c8_cx), 6); c9_px <= '0';
             else              c9_ax <= resize(unsigned(c8_cx), 6);  c9_px <= '1';
@@ -667,9 +698,11 @@ begin
             c14_cq <= C_COS(to_integer(c13_cadr));
 
             ------------------------------------------------------------
-            -- 15: apply this chip's size
+            -- 15: apply this chip's size.  C_SHAPE's BRAM clk-to-q is 2.15 ns
+            --     and feeding it straight into the multiply left only 0.8 MHz
+            --     of margin, so the ROM output gets its own register slice.
             ------------------------------------------------------------
-            v_prod := resize(c14_sq * c14_szc, 16);
+            v_prod := resize(c14b_sq * c14b_szc, 16);
             if v_prod(15 downto 6) > 511 then
                 c15_sr <= to_unsigned(511, 9);
             else
@@ -766,30 +799,33 @@ begin
             c2_nx <= c1_nx; c3_nx <= c2_nx; c4_nx <= c3_nx; c5_nx <= c4_nx;
             c6_nx <= c5_nx; c7_nx <= c6_nx;
             c6_ny <= c5_ny; c7_ny <= c6_ny;
-            c2_mid <= c1_mid; c3_mid <= c2_mid; c4_mid <= c3_mid;
-            c5_mid <= c4_mid;
             c9_rot <= c8_rot;   c10_rot <= c9_rot;
             c11_rot <= c10_rot; c12_rot <= c11_rot;
             c9_var <= c8_var;   c10_var <= c9_var;
             c11_var <= c10_var; c12_var <= c11_var;
             c9_milk <= c8_milk; c10_milk <= c9_milk; c11_milk <= c10_milk;
             c12_milk <= c11_milk; c13_milk <= c12_milk; c14_milk <= c13_milk;
-            c15_milk <= c14_milk; c16_milk <= c15_milk;
+            c14b_milk <= c14_milk; c15_milk <= c14b_milk; c16_milk <= c15_milk;
             c9_white <= c8_white; c10_white <= c9_white; c11_white <= c10_white;
             c12_white <= c11_white; c13_white <= c12_white;
-            c14_white <= c13_white; c15_white <= c14_white;
+            c14_white <= c13_white; c14b_white <= c14_white;
+            c15_white <= c14b_white;
             c16_white <= c15_white;
             c10_present <= c9_present; c11_present <= c10_present;
             c12_present <= c11_present; c13_present <= c12_present;
-            c14_present <= c13_present; c15_present <= c14_present;
+            c14_present <= c13_present; c14b_present <= c14_present;
+            c15_present <= c14b_present;
             c16_present <= c15_present;
             c10_szc <= c9_szc; c11_szc <= c10_szc; c12_szc <= c11_szc;
             c13_szc <= c12_szc; c14_szc <= c13_szc;
+            c14b_szc <= c14_szc; c14b_sq <= c14_sq;
             c10_px <= c9_px; c10_py <= c9_py;
             c11_px <= c10_px; c11_py <= c10_py;
             c11_sw <= c10_sw; c11_hi <= c10_hi;
-            c13_pr <= c12_pr; c14_pr <= c13_pr; c15_pr <= c14_pr;
-            c15_lit <= c14_cq; c16_lit <= c15_lit; c17_lit <= c16_lit;
+            c13_pr <= c12_pr; c14_pr <= c13_pr; c14b_pr <= c14_pr;
+            c15_pr <= c14b_pr;
+            c14b_cq <= c14_cq; c15_lit <= c14b_cq;
+            c16_lit <= c15_lit; c17_lit <= c16_lit;
         end if;
     end process p_chip;
 
@@ -800,17 +836,46 @@ begin
     -- down its own body as the video under it changes.
     ------------------------------------------------------------------------
     p_cellbuf : process(clk)
+        variable v_l    : unsigned(14 downto 0);
+        variable v_sum  : unsigned(14 downto 0);
+        variable v_avg  : unsigned(7 downto 0);
+        variable v_wrf  : boolean;
     begin
         if rising_edge(clk) then
             cb0_q <= cbuf0(to_integer(c1_cellx(7 downto 0)));
             cb1_q <= cbuf1(to_integer(c1_cellx(7 downto 0)));
-            if c5_top = '1' and c5_mid = '1' then
+
+            -- Running sum of the luma across the WHOLE width of the cell.
+            -- The sample used to be a single pixel, which carried the source's
+            -- full noise straight into a hard presence compare -- so any cell
+            -- whose hash sat on the threshold toggled at frame rate.  An
+            -- 8..128 pixel average drops that noise by 3-11x.
+            v_l := resize(unsigned(s_y_sr(4)(9 downto 2)), 15);
+            if c5_nx = 0 then v_sum := v_l;
+            else              v_sum := cacc + v_l; end if;
+            cacc <= v_sum;
+            case s_scl is                       -- divide by the cell width
+                when 0      => v_avg := v_sum(10 downto 3);
+                when 1      => v_avg := v_sum(11 downto 4);
+                when 2      => v_avg := v_sum(12 downto 5);
+                when 3      => v_avg := v_sum(13 downto 6);
+                when others => v_avg := v_sum(14 downto 7);
+            end case;
+
+            -- On an INTERLACED source the two fields sample different physical
+            -- lines, so refreshing every field made the threshold alternate at
+            -- 30 Hz.  Writing on one field only leaves the other field reading
+            -- exactly the values the first one stored, so both fields of a
+            -- frame render identically.
+            v_wrf := (s_ilace = '0') or (data_in.field_n = '0');
+            if c5_top = '1' and c5_nx(5 downto 3) = "111" and v_wrf then
                 if c5_celly(0) = '0' then
-                    cbuf0(to_integer(c5_cellx(7 downto 0))) <= s_y_sr(4)(9 downto 2);
+                    cbuf0(to_integer(c5_cellx(7 downto 0))) <= std_logic_vector(v_avg);
                 else
-                    cbuf1(to_integer(c5_cellx(7 downto 0))) <= s_y_sr(4)(9 downto 2);
+                    cbuf1(to_integer(c5_cellx(7 downto 0))) <= std_logic_vector(v_avg);
                 end if;
             end if;
+
             cb0_d(0) <= cb0_q; cb1_d(0) <= cb1_q;
             for i in 1 to 3 loop
                 cb0_d(i) <= cb0_d(i - 1);
@@ -853,7 +918,7 @@ begin
             -- pre-shift by Relief HERE, not where it meets the dough tone
             d4_embs <= shift_left(resize(d3_emb, 10), s_rel);
             emb_sr(0) <= d4_embs;
-            for i in 1 to 12 loop
+            for i in 1 to 13 loop
                 emb_sr(i) <= emb_sr(i - 1);
             end loop;
 
@@ -891,15 +956,15 @@ begin
             end if;
 
             -- 17: bake ramp multiply
-            d17_prd <= unsigned(s_y_sr(15)(9 downto 2)) * s_bspan;
+            d17_prd <= unsigned(s_y_sr(16)(9 downto 2)) * s_bspan;
 
             -- 18: dough tone base, and the two surface offsets (with and
             -- without a cast shadow) so stage 19 is one add and a clamp
             v_bs := ('0' & s_blo) + ('0' & d17_prd(17 downto 8));
             if v_bs > 1023 then d18_base <= to_unsigned(1023, 10);
             else                d18_base <= v_bs(9 downto 0); end if;
-            d18_sfc0 <= resize(nz_o, 12) + resize(emb_sr(12), 12);
-            d18_sfc1 <= resize(nz_o, 12) + resize(emb_sr(12), 12)
+            d18_sfc0 <= resize(nz_o, 12) + resize(emb_sr(13), 12);
+            d18_sfc1 <= resize(nz_o, 12) + resize(emb_sr(13), 12)
                         - signed('0' & resize(s_shad, 11));
 
             -- 19: dough tone
@@ -1026,7 +1091,7 @@ begin
             s_y_sr(0) <= data_in.y;
             s_u_sr(0) <= data_in.v;                -- HW v carries Cb
             s_v_sr(0) <= data_in.u;                -- HW u carries Cr
-            for i in 1 to 17 loop
+            for i in 1 to 18 loop
                 s_y_sr(i) <= s_y_sr(i - 1);
                 s_u_sr(i) <= s_u_sr(i - 1);
                 s_v_sr(i) <= s_v_sr(i - 1);

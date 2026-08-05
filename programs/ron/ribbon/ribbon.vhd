@@ -33,7 +33,7 @@
 -- file.  Per-frame logic is still timed at the pixel clock, so every derived
 -- term gets its own sequencer cycle.
 --
--- Pipeline (streaming, C_LATENCY = 15, one line RAM):
+-- Pipeline (streaming, C_LATENCY = 14, one line RAM):
 --   A      accumulator snapshot (A, B, ripple phases, x)
 --   W1..W3 triangle bend -> one multiply -> added to both projections
 --   Q      one barrel shift yields stop index AND sub-stop position
@@ -55,7 +55,8 @@ use work.video_stream_pkg.all;
 
 architecture ribbon of program_top is
 
-    constant C_LATENCY : integer := 15;
+    -- pixel-data depth: A(1) W1..W3(4) Q(5) ST(6) R1/R2(8) cy_sr 0..4(13) O(14)
+    constant C_LATENCY : integer := 14;
 
     ----------------------------------------------------------------------
     -- helpers
@@ -497,8 +498,15 @@ begin
                 s_newframe <= '1';
             elsif data_in.avid = '1' and s_avid_p = '0' then
                 if s_newframe = '1' then
-                    -- an interlaced odd field starts one line down
-                    if s_ilace = '1' and data_in.field_n = '1' then
+                    -- FIELD PHASE: the BOTTOM field (field_n = '0', odd frame
+                    -- rows 1,3,5..) starts one line down.  This is the SDK
+                    -- testbench's polarity (top field = field_n '1' = even
+                    -- rows) and fixed a hardware field-weave comb -- every
+                    -- diagonal edge grew ~2 px teeth crawling at field rate.
+                    -- NB cascade/sugarcoat seed the OPPOSITE field; on a
+                    -- program that is all diagonal edges the wrong choice is
+                    -- very visible.
+                    if s_ilace = '1' and data_in.field_n = '0' then
                         v_ar := resize(s_sa, 23);
                         v_br := resize(s_ca, 23);
                         v_wr := resize(s_wstep, 20);

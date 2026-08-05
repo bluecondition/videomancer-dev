@@ -35,22 +35,24 @@
 --   T8  data_out : combinational mux of s7 vs latency-matched bypass.
 --
 -- Register map:
---   registers_in(0)   = Split   (0-1023 → 0..max_y, y where capture happens)
---   registers_in(1)   = Spread  (0-1023 → horizontal outward stretch amount)
---   registers_in(2)   = Fade    (0-1023 → ramp slope, anchored at Stretch.
+--   registers_in(0)   = K1 Split   (0-1023 → 0..max_y, y where capture happens)
+--   registers_in(1)   = K2 Stretch (0-1023 → 0..max_y, y where stretch begins;
+--                        clamped so stretch_y is always at least
+--                        STRETCH_MIN_MARGIN rows below split_y)
+--   registers_in(2)   = K3 Fade    (0-1023 → ramp slope, anchored at Stretch.
 --                        alpha = (pixel_y − stretch_y) × slope(knob), sat
 --                        1023. Slope from a 32-entry LUT, huge at knob 0
 --                        (drape blacks out close to stretch) and small at
 --                        knob max (gentle ramp over many rows). Top of
 --                        drape at stretch is always alpha = 0; only the
 --                        slope length changes.)
---   registers_in(3)   = Stretch (0-1023 → 0..max_y, y where stretch begins;
---                        clamped so stretch_y is always at least
---                        STRETCH_MIN_MARGIN rows below split_y)
---   registers_in(4)   = Soft W   (0-1023 → Stretch-onset ramp width)
---   registers_in(5)   = Twist    (0-1023 → centred at 512: left/right
+--   registers_in(3)   = K4 Twist   (0-1023 → centred at 512: left/right
 --                        horizontal lean of the drape. Per-row offset that
 --                        grows linearly with dy below split.)
+--   registers_in(4)   = K5 Soft W  (0-1023 → Stretch-onset ramp width)
+--   registers_in(5)   = K6 Mix (0 = original passthrough, 1023 = full
+--                        processed; intermediate values cross-fade the
+--                        original video against the drape-processed result)
 --   registers_in(6)(0) = Blur switch (4-tap horizontal box on lb output)
 --   registers_in(6)(1) = Curve switch (0 = Straight, 1 = Curved).
 --                        Straight: factor = eps/(1+eps/256) via an
@@ -69,9 +71,8 @@
 --                        0 = Hard — fast hyperbolic saturation (default)
 --                        1 = Soft — slower accumulation, smoother knob feel)
 --   registers_in(6)(4) = Bypass (latency-matched passthrough)
---   registers_in(7)   = Mix (0 = original passthrough, 1023 = full processed;
---                        intermediate values cross-fade the original video
---                        against the drape-processed result)
+--   registers_in(7)   = P12 Spread (0-1023 → horizontal outward stretch
+--                        amount — the headline performance control)
 --
 -- BRAM usage: 3 × 2048×10 inferred single-port BRAMs (one per Y/U/V).
 
@@ -436,12 +437,12 @@ begin
             -- Knob / switch reads
             -------------------------------------------------------------------
             split_knob   := unsigned(registers_in(0)(9 downto 0));
-            spread_knob  := unsigned(registers_in(1)(9 downto 0));
+            stretch_knob := unsigned(registers_in(1)(9 downto 0));
             fade_knob    := unsigned(registers_in(2)(9 downto 0));
-            stretch_knob := unsigned(registers_in(3)(9 downto 0));
+            twist_knob   := unsigned(registers_in(3)(9 downto 0));
             soft_knob    := unsigned(registers_in(4)(9 downto 0));
-            twist_knob   := unsigned(registers_in(5)(9 downto 0));
-            mix_knob     := unsigned(registers_in(7)(9 downto 0));
+            mix_knob     := unsigned(registers_in(5)(9 downto 0));
+            spread_knob  := unsigned(registers_in(7)(9 downto 0));
             blur_on      := registers_in(6)(0);
             curved_on    := registers_in(6)(1);
             soft_on      := registers_in(6)(2);

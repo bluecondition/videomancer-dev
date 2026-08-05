@@ -10,14 +10,30 @@
 -- Address = row * 24 + (col >> 4); leftmost pixel of each word is the MSB.
 -- Yosys infers ~17 iCE40 BRAMs.
 --
--- Render priority: lowest-index logo wins on overlap.  The BRAM only
--- services one read per cycle, so when two logos cover the same pixel only
--- the lower-index one is drawn there.
+-- Bitmap access — streaming prefetch.  Each logo consumes one 16-bit ROM
+-- word per 16 pixels, so the single ROM read port is round-robined across
+-- the 4 logos (slot = h_count mod 4).  Each slot fetches, 8 px ahead of the
+-- beam, the word that logo is about to need into a 2-entry (even/odd word
+-- index) per-logo buffer.  Every logo therefore has its own bitmap bit at
+-- every pixel: overlapping logos no longer occlude each other with the
+-- black rectangle of their bounding box — only lit glyph pixels count.
+-- (Caveat: no prefetch slots exist left of h_count 0, so while a logo is
+-- within ~8 px of the LEFT wall its first word can be one line stale — a
+-- few-pixel sliver, only during wall contact.)
 --
--- Physics (3-phase FSM, runs once per vsync):
---   Phase 0 (vsync_start) : predict each logo's new position + wall bounce
---   Phase 1               : pairwise AABB overlap checks (6 pairs for N=4)
---   Phase 2               : aggregate per-logo collision flag, flip both
+-- Overlap behavior (S11):
+--   Bounce : pairwise AABB collision physics as before; where logos overlap
+--            visually, the lowest-index LIT logo wins the color.
+--   Mix    : logos pass through each other; where lit glyph pixels overlap
+--            their palette colors mix additively (Y sums, U/V offsets sum,
+--            both clamped).
+--
+-- Physics (4-phase FSM, runs once per vsync):
+--   Phase 0 (vsync_start) : predict each logo's new position
+--   Phase 1               : clamp + wall bounce
+--   Phase 2               : pairwise AABB overlap checks (6 pairs for N=4)
+--                           — forced to no-hit in Mix mode
+--   Phase 3               : aggregate per-logo collision flag, flip both
 --                           sign bits of bumped logos, advance their colors,
 --                           commit positions
 --
@@ -26,11 +42,11 @@
 --   1 clk : pixel_counter
 --   1 clk : S1  — register coords + per-logo bbox snapshot + active mask
 --   1 clk : S2a — 4 x (dx, dy) deltas
---   1 clk : S2b — 4 x in_bbox flags
---   1 clk : S3a — priority encode + 4-way mux of (dx, dy, color)
---   1 clk : S3b — bitmap word address (by * 24 + bx >> 4) + wbit
---   1 clk : S4  — read 16-bit ROM word
---   1 clk : S5  — bit extract + color mux
+--   1 clk : S2b — 4 x in_bbox flags AND per-logo bitmap bit → lit flags
+--   1 clk : S3  — gate per-logo palette contributions by lit flags
+--   1 clk : S4  — pairwise sums + pairwise priority selects
+--   1 clk : S5  — Bounce: priority pick / Mix: final sum + clamp
+--   1 clk : S6  — output alignment
 --   4 clk : interpolator
 --   2 clk : IO alignment
 --   total : 9 render + 4 interp + 2 IO = 15 clocks
@@ -46,7 +62,8 @@
 --   reg(6)(1) : Matte     (1 = logo cuts through to underlying video)
 --   reg(6)(2) : BG        (0 = passthrough, 1 = solid black)
 --   reg(6)(3) : Pause     (1 = freeze position + color)
---   reg(6)(4) : Hold      (1 = don't advance color on bounce/collision)
+--   reg(6)(4) : Overlap   (0 = logos bounce off each other, 1 = pass
+--                          through + colors mix where glyphs overlap)
 --   reg(7)    : Mix       (wet/dry mix amount)
 
 library ieee;
@@ -98,7 +115,7 @@ architecture dvdlogo of program_top is
     signal s_matte      : std_logic;
     signal s_bg_black   : std_logic;
     signal s_pause      : std_logic;
-    signal s_hold       : std_logic;
+    signal s_mix_logos  : std_logic;    -- 0 = bounce off each other, 1 = mix
     signal s_mix_amount : unsigned(9 downto 0);
 
     -- 2-bit count = (s_count_raw[9:8]); active mask = "i <= count"
@@ -204,7 +221,6 @@ architecture dvdlogo of program_top is
     signal s_bnd_x       : t_pos_arr   := (others => (others => '0'));
     signal s_bnd_y       : t_pos_arr   := (others => (others => '0'));
     signal s_bnd_active  : std_logic_vector(0 to N_LOGOS - 1) := (others => '0');
-    signal s_bnd_color   : t_color_arr := (others => (others => '0'));
 
     -- S2a — register dx[i], dy[i] (one 13-bit subtract per axis per logo)
     type t_dx_arr is array (0 to N_LOGOS - 1) of signed(12 downto 0);
@@ -212,37 +228,76 @@ architecture dvdlogo of program_top is
     signal s_stg2a_dy     : t_dx_arr := (others => (others => '0'));
     signal s_stg2a_active : std_logic_vector(0 to N_LOGOS - 1)
                             := (others => '0');
-    signal s_stg2a_color  : t_color_arr := (others => (others => '0'));
 
-    -- S2b — register in_bbox flags + pass dx/dy/color through
-    signal s_stg2_dx       : t_dx_arr := (others => (others => '0'));
-    signal s_stg2_dy       : t_dx_arr := (others => (others => '0'));
-    signal s_stg2_in_bbox  : std_logic_vector(0 to N_LOGOS - 1)
-                             := (others => '0');
-    signal s_stg2_color    : t_color_arr := (others => (others => '0'));
+    -- S2b — per-logo lit flags (in_bbox AND that logo's bitmap bit)
+    signal s_stg2_lit : std_logic_vector(0 to N_LOGOS - 1) := (others => '0');
 
-    -- S3a — priority encoder + 4-way mux of (dx, dy, color)
-    signal s_stg3a_dx       : signed(12 downto 0) := (others => '0');
-    signal s_stg3a_dy       : signed(12 downto 0) := (others => '0');
-    signal s_stg3a_in_logo  : std_logic := '0';
-    signal s_stg3a_color    : unsigned(2 downto 0) := (others => '0');
+    -- ========================================================================
+    -- Streaming ROM prefetch — slot i (h_count mod 4) fetches logo i's word
+    -- 8 px ahead of the beam into a 2-entry (word-index parity) buffer.
+    -- PF0: bxf/byf deltas  PF1: validity + word address  PF2: ROM read
+    -- PF3: buffer write.
+    -- ========================================================================
+    type t_word2   is array (0 to 1) of
+                      std_logic_vector(C_LOGO_WORD_W - 1 downto 0);
+    type t_buf_arr is array (0 to N_LOGOS - 1) of t_word2;
+    signal s_pf_buf : t_buf_arr := (others => (others => (others => '0')));
 
-    -- S3b — bitmap address computation
-    signal s_stg3_word_addr : unsigned(12 downto 0) := (others => '0');
-    signal s_stg3_wbit      : unsigned(C_WBIT_BITS - 1 downto 0)
-                              := (others => '0');
-    signal s_stg3_in_logo   : std_logic := '0';
-    signal s_stg3_color     : unsigned(2 downto 0) := (others => '0');
+    signal s_pf0_bxf : signed(12 downto 0) := (others => '0');
+    signal s_pf0_byf : signed(12 downto 0) := (others => '0');
+    signal s_pf0_idx : unsigned(1 downto 0) := (others => '0');
 
-    -- S4
-    signal s_stg4_word    : std_logic_vector(C_LOGO_WORD_W - 1 downto 0)
-                            := (others => '0');
-    signal s_stg4_wbit    : unsigned(C_WBIT_BITS - 1 downto 0)
-                            := (others => '0');
-    signal s_stg4_in_logo : std_logic := '0';
-    signal s_stg4_color   : unsigned(2 downto 0) := (others => '0');
+    signal s_pf1_addr  : unsigned(12 downto 0) := (others => '0');
+    signal s_pf1_par   : std_logic := '0';
+    signal s_pf1_idx   : unsigned(1 downto 0) := (others => '0');
+    signal s_pf1_valid : std_logic := '0';
+
+    signal s_pf2_word  : std_logic_vector(C_LOGO_WORD_W - 1 downto 0)
+                         := (others => '0');
+    signal s_pf2_par   : std_logic := '0';
+    signal s_pf2_idx   : unsigned(1 downto 0) := (others => '0');
+    signal s_pf2_valid : std_logic := '0';
+
+    -- ========================================================================
+    -- Per-frame palette registers — one (Y, U-offset, V-offset) per logo,
+    -- refreshed continuously from color_idx + tint (changes only at vsync).
+    -- Mono mode substitutes Bright / zero offsets so Mix just sums brightness.
+    -- ========================================================================
+    type t_paly_arr   is array (0 to N_LOGOS - 1) of unsigned(9 downto 0);
+    type t_paloff_arr is array (0 to N_LOGOS - 1) of signed(10 downto 0);
+    signal s_pal_y  : t_paly_arr   := (others => (others => '0'));
+    signal s_pal_uo : t_paloff_arr := (others => (others => '0'));
+    signal s_pal_vo : t_paloff_arr := (others => (others => '0'));
+
+    -- S3 — gated per-logo contributions
+    signal s_stg3_y   : t_paly_arr   := (others => (others => '0'));
+    signal s_stg3_uo  : t_paloff_arr := (others => (others => '0'));
+    signal s_stg3_vo  : t_paloff_arr := (others => (others => '0'));
+    signal s_stg3_lit : std_logic_vector(0 to N_LOGOS - 1) := (others => '0');
+
+    -- S4 — pairwise sums (Mix) + pairwise priority selects (Bounce)
+    signal s_stg4_ysum01, s_stg4_ysum23 : unsigned(10 downto 0)
+                                          := (others => '0');
+    signal s_stg4_uo01,   s_stg4_uo23   : signed(11 downto 0)
+                                          := (others => '0');
+    signal s_stg4_vo01,   s_stg4_vo23   : signed(11 downto 0)
+                                          := (others => '0');
+    signal s_stg4_sely01, s_stg4_sely23 : unsigned(9 downto 0)
+                                          := (others => '0');
+    signal s_stg4_seluo01, s_stg4_seluo23 : signed(10 downto 0)
+                                            := (others => '0');
+    signal s_stg4_selvo01, s_stg4_selvo23 : signed(10 downto 0)
+                                            := (others => '0');
+    signal s_stg4_lit01, s_stg4_lit23   : std_logic := '0';
+    signal s_stg4_any                   : std_logic := '0';
 
     -- S5
+    signal s_stg5_y    : unsigned(9 downto 0) := (others => '0');
+    signal s_stg5_u    : unsigned(9 downto 0) := C_CHROMA_MID;
+    signal s_stg5_v    : unsigned(9 downto 0) := C_CHROMA_MID;
+    signal s_stg5_show : std_logic := '0';
+
+    -- S6 — output alignment
     signal s_out_y    : unsigned(9 downto 0) := (others => '0');
     signal s_out_u    : unsigned(9 downto 0) := C_CHROMA_MID;
     signal s_out_v    : unsigned(9 downto 0) := C_CHROMA_MID;
@@ -275,12 +330,49 @@ architecture dvdlogo of program_top is
     signal s_io_1 : t_video_stream_yuv444_30b;
 
     -- ========================================================================
-    -- Color palette (combinational) — indexed by S5's selected color
+    -- 8-color palette lookup functions (Y, U, V at 10 bit)
     -- ========================================================================
-    signal s_palette_y : unsigned(9 downto 0);
-    signal s_palette_u : unsigned(9 downto 0);
-    signal s_palette_v : unsigned(9 downto 0);
-    signal s_eff_color : unsigned(2 downto 0);
+    function f_pal_y(c : unsigned(2 downto 0)) return unsigned is
+    begin
+        case c is
+            when "000"  => return to_unsigned(940, 10);
+            when "001"  => return to_unsigned(290, 10);
+            when "010"  => return to_unsigned(550, 10);
+            when "011"  => return to_unsigned(870, 10);
+            when "100"  => return to_unsigned(620, 10);
+            when "101"  => return to_unsigned(820, 10);
+            when "110"  => return to_unsigned(170, 10);
+            when others => return to_unsigned(440, 10);
+        end case;
+    end function;
+
+    function f_pal_u(c : unsigned(2 downto 0)) return unsigned is
+    begin
+        case c is
+            when "000"  => return to_unsigned(512, 10);
+            when "001"  => return to_unsigned(425, 10);
+            when "010"  => return to_unsigned(350, 10);
+            when "011"  => return to_unsigned(130, 10);
+            when "100"  => return to_unsigned(195, 10);
+            when "101"  => return to_unsigned(600, 10);
+            when "110"  => return to_unsigned(880, 10);
+            when others => return to_unsigned(850, 10);
+        end case;
+    end function;
+
+    function f_pal_v(c : unsigned(2 downto 0)) return unsigned is
+    begin
+        case c is
+            when "000"  => return to_unsigned(512, 10);
+            when "001"  => return to_unsigned(900, 10);
+            when "010"  => return to_unsigned(750, 10);
+            when "011"  => return to_unsigned(560, 10);
+            when "100"  => return to_unsigned(143, 10);
+            when "101"  => return to_unsigned(128, 10);
+            when "110"  => return to_unsigned(580, 10);
+            when others => return to_unsigned(900, 10);
+        end case;
+    end function;
 
 begin
 
@@ -337,7 +429,7 @@ begin
     s_matte      <= registers_in(6)(1);
     s_bg_black   <= registers_in(6)(2);
     s_pause      <= registers_in(6)(3);
-    s_hold       <= registers_in(6)(4);
+    s_mix_logos  <= registers_in(6)(4);
     s_mix_amount <= unsigned(registers_in(7));
 
     s_count <= s_count_raw(9 downto 8);
@@ -475,13 +567,15 @@ begin
                     s_ph_phase <= to_unsigned(2, 2);
 
                 -- ----------------------------------------------------
-                -- Phase 2: pairwise AABB overlap detect
+                -- Phase 2: pairwise AABB overlap detect.  In Mix mode
+                -- logos pass through each other: no hits registered.
                 -- ----------------------------------------------------
                 when 2 =>
                     for k in 0 to N_PAIRS - 1 loop
                         v_i := C_PAIR_I(k);
                         v_j := C_PAIR_J(k);
-                        if s_active(v_i) = '1' and s_active(v_j) = '1' and
+                        if s_mix_logos = '0' and
+                           s_active(v_i) = '1' and s_active(v_j) = '1' and
                            s_pred_x(v_i) + C_LOGO_W_S > s_pred_x(v_j) and
                            s_pred_x(v_i) < s_pred_x(v_j) + C_LOGO_W_S and
                            s_pred_y(v_i) + C_LOGO_H_S > s_pred_y(v_j) and
@@ -522,8 +616,7 @@ begin
                                 s_vx_sign(i) <= s_pred_vx(i);
                                 s_vy_sign(i) <= s_pred_vy(i);
                             end if;
-                            if (s_wall_bp(i) = '1' or v_collide(i) = '1')
-                               and s_hold = '0' then
+                            if s_wall_bp(i) = '1' or v_collide(i) = '1' then
                                 s_color_idx(i) <= s_color_idx(i)
                                                   + s_step(2 downto 0);
                             end if;
@@ -551,40 +644,91 @@ begin
     end process;
 
     -- ========================================================================
-    -- Color Palette Lookup (combinational)
+    -- Per-frame palette registers.  color_idx only changes at vsync, so the
+    -- per-pixel path never touches the 8-entry LUT — it just gates these
+    -- pre-resolved (Y, U-offset, V-offset) values.  Mono mode substitutes
+    -- Bright with zero chroma offsets.
     -- ========================================================================
-    s_eff_color <= s_stg4_color + s_tint;
+    p_palette : process(clk)
+        variable v_eff : unsigned(2 downto 0);
+    begin
+        if rising_edge(clk) then
+            for i in 0 to N_LOGOS - 1 loop
+                v_eff := s_color_idx(i) + s_tint;
+                if s_color_mode = '1' then
+                    s_pal_y(i)  <= f_pal_y(v_eff);
+                    s_pal_uo(i) <= signed(resize(f_pal_u(v_eff), 11))
+                                   - to_signed(512, 11);
+                    s_pal_vo(i) <= signed(resize(f_pal_v(v_eff), 11))
+                                   - to_signed(512, 11);
+                else
+                    s_pal_y(i)  <= s_bright_pot;
+                    s_pal_uo(i) <= (others => '0');
+                    s_pal_vo(i) <= (others => '0');
+                end if;
+            end loop;
+        end if;
+    end process;
 
-    with s_eff_color select
-        s_palette_y <= to_unsigned(940, 10) when "000",
-                       to_unsigned(290, 10) when "001",
-                       to_unsigned(550, 10) when "010",
-                       to_unsigned(870, 10) when "011",
-                       to_unsigned(620, 10) when "100",
-                       to_unsigned(820, 10) when "101",
-                       to_unsigned(170, 10) when "110",
-                       to_unsigned(440, 10) when "111",
-                       to_unsigned(940, 10) when others;
-    with s_eff_color select
-        s_palette_u <= to_unsigned(512, 10) when "000",
-                       to_unsigned(425, 10) when "001",
-                       to_unsigned(350, 10) when "010",
-                       to_unsigned(130, 10) when "011",
-                       to_unsigned(195, 10) when "100",
-                       to_unsigned(600, 10) when "101",
-                       to_unsigned(880, 10) when "110",
-                       to_unsigned(850, 10) when "111",
-                       to_unsigned(512, 10) when others;
-    with s_eff_color select
-        s_palette_v <= to_unsigned(512, 10) when "000",
-                       to_unsigned(900, 10) when "001",
-                       to_unsigned(750, 10) when "010",
-                       to_unsigned(560, 10) when "011",
-                       to_unsigned(143, 10) when "100",
-                       to_unsigned(128, 10) when "101",
-                       to_unsigned(580, 10) when "110",
-                       to_unsigned(900, 10) when "111",
-                       to_unsigned(512, 10) when others;
+    -- ========================================================================
+    -- Streaming ROM prefetch.  Slot i = h_count mod 4 serves logo i; each
+    -- slot computes the word that logo needs 8 px ahead of the beam and
+    -- fetches it into s_pf_buf(i)(word-index parity).  A word is consumed
+    -- for 16 px and refreshed at most every 4, so the double buffer always
+    -- holds the current word by the time the render pipeline samples it.
+    -- ========================================================================
+    p_prefetch : process(clk)
+        variable v_i     : integer range 0 to N_LOGOS - 1;
+        variable v_valid : std_logic;
+        variable v_by    : unsigned(7 downto 0);
+    begin
+        if rising_edge(clk) then
+            -- PF0: per-slot deltas (13-bit add/subtract only)
+            v_i := to_integer(s_h_count(1 downto 0));
+            s_pf0_bxf <= signed(resize(s_h_count, 13)) + to_signed(8, 13)
+                         - resize(s_logo_x(v_i), 13);
+            s_pf0_byf <= signed(resize(s_v_count, 13))
+                         - resize(s_logo_y(v_i), 13);
+            s_pf0_idx <= s_h_count(1 downto 0);
+
+            -- PF1: bounds check + word address (by * 24 + bxf >> 4)
+            if s_pf0_bxf >= to_signed(0, 13) and s_pf0_bxf < C_LOGO_W_S and
+               s_pf0_byf >= to_signed(0, 13) and s_pf0_byf < C_LOGO_H_S then
+                v_valid := '1';
+            else
+                v_valid := '0';
+            end if;
+
+            if v_valid = '1' then
+                v_by := unsigned(s_pf0_byf(C_BY_HIGH downto 0));
+                s_pf1_addr <= resize(shift_left(resize(v_by, 13), 4), 13)
+                            + resize(shift_left(resize(v_by, 13), 3), 13)
+                            + resize(unsigned(
+                                  s_pf0_bxf(C_BX_HIGH downto C_WBIT_BITS)),
+                                  13);
+            else
+                s_pf1_addr <= (others => '0');
+            end if;
+            s_pf1_par   <= s_pf0_bxf(C_WBIT_BITS);
+            s_pf1_idx   <= s_pf0_idx;
+            s_pf1_valid <= v_valid;
+
+            -- PF2: synchronous ROM read (BRAM)
+            s_pf2_word  <= C_LOGO_ROM(to_integer(s_pf1_addr));
+            s_pf2_par   <= s_pf1_par;
+            s_pf2_idx   <= s_pf1_idx;
+            s_pf2_valid <= s_pf1_valid;
+
+            -- PF3: buffer write
+            if s_pf2_valid = '1' then
+                if s_pf2_par = '1' then
+                    s_pf_buf(to_integer(s_pf2_idx))(1) <= s_pf2_word;
+                else
+                    s_pf_buf(to_integer(s_pf2_idx))(0) <= s_pf2_word;
+                end if;
+            end if;
+        end if;
+    end process;
 
     -- ========================================================================
     -- S1 — coords + per-logo bbox snapshot
@@ -598,7 +742,6 @@ begin
                 s_bnd_x(i)      <= s_logo_x(i);
                 s_bnd_y(i)      <= s_logo_y(i);
                 s_bnd_active(i) <= s_active(i);
-                s_bnd_color(i)  <= s_color_idx(i);
             end loop;
         end if;
     end process;
@@ -615,17 +758,19 @@ begin
                 s_stg2a_dy(i)     <= resize(s_stg1_vy, 13)
                                      - resize(s_bnd_y(i), 13);
                 s_stg2a_active(i) <= s_bnd_active(i);
-                s_stg2a_color(i)  <= s_bnd_color(i);
             end loop;
         end if;
     end process;
 
     -- ========================================================================
-    -- S2b — per-logo bbox-inside flags from registered deltas
+    -- S2b — per-logo lit flags: inside bbox AND that logo's bitmap bit set
+    --       (bit sampled from the prefetch buffer, even/odd word by dx(4)).
     -- ========================================================================
     p_stage2b : process(clk)
         variable v_in_x : std_logic;
         variable v_in_y : std_logic;
+        variable v_bit  : std_logic;
+        variable v_word : std_logic_vector(C_LOGO_WORD_W - 1 downto 0);
     begin
         if rising_edge(clk) then
             for i in 0 to N_LOGOS - 1 loop
@@ -642,107 +787,147 @@ begin
                     v_in_y := '0';
                 end if;
 
-                s_stg2_dx(i)      <= s_stg2a_dx(i);
-                s_stg2_dy(i)      <= s_stg2a_dy(i);
-                s_stg2_in_bbox(i) <= v_in_x and v_in_y and s_stg2a_active(i);
-                s_stg2_color(i)   <= s_stg2a_color(i);
+                if s_stg2a_dx(i)(C_WBIT_BITS) = '1' then
+                    v_word := s_pf_buf(i)(1);
+                else
+                    v_word := s_pf_buf(i)(0);
+                end if;
+                v_bit := v_word(C_LOGO_WORD_W - 1 - to_integer(
+                             unsigned(s_stg2a_dx(i)(C_WBIT_BITS - 1 downto 0))));
+
+                s_stg2_lit(i) <= v_in_x and v_in_y and s_stg2a_active(i)
+                                 and v_bit;
             end loop;
         end if;
     end process;
 
     -- ========================================================================
-    -- S3a — Priority encoder + 4-way mux.  Lowest-index active logo wins.
-    --       Just selects (dx, dy, color, valid) — no arithmetic here so the
-    --       4-way mux stays shallow.
+    -- S3 — gate per-logo palette contributions by the lit flags.
     -- ========================================================================
-    p_stage3a : process(clk)
-        variable v_dx_sel    : signed(12 downto 0);
-        variable v_dy_sel    : signed(12 downto 0);
-        variable v_color_sel : unsigned(2 downto 0);
-        variable v_any       : std_logic;
+    p_stage3 : process(clk)
     begin
         if rising_edge(clk) then
-            v_any       := '0';
-            v_dx_sel    := (others => '0');
-            v_dy_sel    := (others => '0');
-            v_color_sel := (others => '0');
-            for i in N_LOGOS - 1 downto 0 loop
-                if s_stg2_in_bbox(i) = '1' then
-                    v_dx_sel    := s_stg2_dx(i);
-                    v_dy_sel    := s_stg2_dy(i);
-                    v_color_sel := s_stg2_color(i);
-                    v_any       := '1';
+            for i in 0 to N_LOGOS - 1 loop
+                if s_stg2_lit(i) = '1' then
+                    s_stg3_y(i)  <= s_pal_y(i);
+                    s_stg3_uo(i) <= s_pal_uo(i);
+                    s_stg3_vo(i) <= s_pal_vo(i);
+                else
+                    s_stg3_y(i)  <= (others => '0');
+                    s_stg3_uo(i) <= (others => '0');
+                    s_stg3_vo(i) <= (others => '0');
                 end if;
             end loop;
-
-            s_stg3a_dx      <= v_dx_sel;
-            s_stg3a_dy      <= v_dy_sel;
-            s_stg3a_in_logo <= v_any;
-            s_stg3a_color   <= v_color_sel;
+            s_stg3_lit <= s_stg2_lit;
         end if;
     end process;
 
     -- ========================================================================
-    -- S3b — bitmap address.
-    --   word_addr = by * 24 + (bx >> 4); 24 = 16 + 8 → two shifts + add.
-    --   Split off from S3a so the multiply-by-24 add chain doesn't stack on
-    --   top of the 4-way mux delay in one cycle.
-    -- ========================================================================
-    p_stage3b : process(clk)
-        variable v_bx        : unsigned(C_BX_HIGH downto 0);
-        variable v_by        : unsigned(C_BY_HIGH downto 0);
-        variable v_word_in_r : unsigned(C_BX_HIGH - C_WBIT_BITS downto 0);
-        variable v_by_x24    : unsigned(12 downto 0);
-        variable v_word_addr : unsigned(12 downto 0);
-    begin
-        if rising_edge(clk) then
-            v_bx := unsigned(s_stg3a_dx(C_BX_HIGH downto 0));
-            v_by := unsigned(s_stg3a_dy(C_BY_HIGH downto 0));
-
-            v_word_in_r := v_bx(C_BX_HIGH downto C_WBIT_BITS);
-            v_by_x24    := resize(shift_left(resize(v_by, 13), 4), 13)
-                         + resize(shift_left(resize(v_by, 13), 3), 13);
-            v_word_addr := v_by_x24 + resize(v_word_in_r, 13);
-
-            s_stg3_word_addr <= v_word_addr;
-            s_stg3_wbit      <= v_bx(C_WBIT_BITS - 1 downto 0);
-            s_stg3_in_logo   <= s_stg3a_in_logo;
-            s_stg3_color     <= s_stg3a_color;
-        end if;
-    end process;
-
-    -- ========================================================================
-    -- S4 — ROM read (synchronous → BRAM-friendly)
+    -- S4 — pairwise partial sums (Mix path) + pairwise priority selects
+    --      (Bounce path: lowest-index lit logo wins).
     -- ========================================================================
     p_stage4 : process(clk)
     begin
         if rising_edge(clk) then
-            s_stg4_word    <= C_LOGO_ROM(to_integer(s_stg3_word_addr));
-            s_stg4_wbit    <= s_stg3_wbit;
-            s_stg4_in_logo <= s_stg3_in_logo;
-            s_stg4_color   <= s_stg3_color;
+            s_stg4_ysum01 <= resize(s_stg3_y(0), 11) + resize(s_stg3_y(1), 11);
+            s_stg4_ysum23 <= resize(s_stg3_y(2), 11) + resize(s_stg3_y(3), 11);
+            s_stg4_uo01 <= resize(s_stg3_uo(0), 12) + resize(s_stg3_uo(1), 12);
+            s_stg4_uo23 <= resize(s_stg3_uo(2), 12) + resize(s_stg3_uo(3), 12);
+            s_stg4_vo01 <= resize(s_stg3_vo(0), 12) + resize(s_stg3_vo(1), 12);
+            s_stg4_vo23 <= resize(s_stg3_vo(2), 12) + resize(s_stg3_vo(3), 12);
+
+            if s_stg3_lit(0) = '1' then
+                s_stg4_sely01  <= s_stg3_y(0);
+                s_stg4_seluo01 <= s_stg3_uo(0);
+                s_stg4_selvo01 <= s_stg3_vo(0);
+            else
+                s_stg4_sely01  <= s_stg3_y(1);
+                s_stg4_seluo01 <= s_stg3_uo(1);
+                s_stg4_selvo01 <= s_stg3_vo(1);
+            end if;
+            if s_stg3_lit(2) = '1' then
+                s_stg4_sely23  <= s_stg3_y(2);
+                s_stg4_seluo23 <= s_stg3_uo(2);
+                s_stg4_selvo23 <= s_stg3_vo(2);
+            else
+                s_stg4_sely23  <= s_stg3_y(3);
+                s_stg4_seluo23 <= s_stg3_uo(3);
+                s_stg4_selvo23 <= s_stg3_vo(3);
+            end if;
+            s_stg4_lit01 <= s_stg3_lit(0) or s_stg3_lit(1);
+            s_stg4_lit23 <= s_stg3_lit(2) or s_stg3_lit(3);
+            s_stg4_any   <= s_stg3_lit(0) or s_stg3_lit(1)
+                            or s_stg3_lit(2) or s_stg3_lit(3);
         end if;
     end process;
 
     -- ========================================================================
-    -- S5 — bit extract + color mux
+    -- S5 — final combine.  Bounce: priority pick.  Mix: additive sum + clamp
+    --      (Y sums; U/V offsets from 512 sum, then re-center and clamp).
     -- ========================================================================
     p_stage5 : process(clk)
-        variable v_pixel : std_logic;
+        variable v_ysum : unsigned(11 downto 0);
+        variable v_uo   : signed(12 downto 0);
+        variable v_vo   : signed(12 downto 0);
+        variable v_u    : signed(12 downto 0);
+        variable v_v    : signed(12 downto 0);
     begin
         if rising_edge(clk) then
-            v_pixel := s_stg4_word(C_LOGO_WORD_W - 1 - to_integer(s_stg4_wbit));
-            s_out_show <= s_stg4_in_logo and v_pixel;
+            if s_mix_logos = '1' then
+                v_ysum := resize(s_stg4_ysum01, 12) + resize(s_stg4_ysum23, 12);
+                if v_ysum > to_unsigned(1023, 12) then
+                    s_stg5_y <= to_unsigned(1023, 10);
+                else
+                    s_stg5_y <= v_ysum(9 downto 0);
+                end if;
 
-            if s_color_mode = '1' then
-                s_out_y <= s_palette_y;
-                s_out_u <= s_palette_u;
-                s_out_v <= s_palette_v;
+                v_uo := resize(s_stg4_uo01, 13) + resize(s_stg4_uo23, 13);
+                v_vo := resize(s_stg4_vo01, 13) + resize(s_stg4_vo23, 13);
+                v_u  := to_signed(512, 13) + v_uo;
+                v_v  := to_signed(512, 13) + v_vo;
+                if v_u < to_signed(0, 13) then
+                    s_stg5_u <= (others => '0');
+                elsif v_u > to_signed(1023, 13) then
+                    s_stg5_u <= to_unsigned(1023, 10);
+                else
+                    s_stg5_u <= unsigned(v_u(9 downto 0));
+                end if;
+                if v_v < to_signed(0, 13) then
+                    s_stg5_v <= (others => '0');
+                elsif v_v > to_signed(1023, 13) then
+                    s_stg5_v <= to_unsigned(1023, 10);
+                else
+                    s_stg5_v <= unsigned(v_v(9 downto 0));
+                end if;
             else
-                s_out_y <= s_bright_pot;
-                s_out_u <= C_CHROMA_MID;
-                s_out_v <= C_CHROMA_MID;
+                -- Priority pick: selected offsets are single palette entries,
+                -- so 512 + offset is always in 0..1023 — no clamp needed.
+                if s_stg4_lit01 = '1' then
+                    s_stg5_y <= s_stg4_sely01;
+                    v_u := to_signed(512, 13) + resize(s_stg4_seluo01, 13);
+                    v_v := to_signed(512, 13) + resize(s_stg4_selvo01, 13);
+                else
+                    s_stg5_y <= s_stg4_sely23;
+                    v_u := to_signed(512, 13) + resize(s_stg4_seluo23, 13);
+                    v_v := to_signed(512, 13) + resize(s_stg4_selvo23, 13);
+                end if;
+                s_stg5_u <= unsigned(v_u(9 downto 0));
+                s_stg5_v <= unsigned(v_v(9 downto 0));
             end if;
+            s_stg5_show <= s_stg4_any;
+        end if;
+    end process;
+
+    -- ========================================================================
+    -- S6 — output alignment register
+    -- ========================================================================
+    p_stage6 : process(clk)
+    begin
+        if rising_edge(clk) then
+            s_out_y    <= s_stg5_y;
+            s_out_u    <= s_stg5_u;
+            s_out_v    <= s_stg5_v;
+            s_out_show <= s_stg5_show;
         end if;
     end process;
 

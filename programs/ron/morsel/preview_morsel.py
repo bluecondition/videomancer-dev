@@ -175,10 +175,12 @@ def render(rgb, c):
         cvo = ((f_hash(ci, ci + 733, 0x13D7) >> 3) & 0x3F) >> (6 - SH)
     cvo = np.asarray(cvo, dtype=np.int32)
     store = np.zeros((ncy, ncx), dtype=np.int32) + 128
-    xs = np.clip(ci * CELL + (CELL >> 1), 0, W - 1)
+    seg = np.arange(CELL)
+    cols = np.clip(ci[:, None] * CELL + seg[None, :], 0, W - 1)
     for j in range(ncy):
         yl = np.clip(j * CELL - cvo, 0, H - 1)           # this column's top line
-        store[j] = y8[yl, xs]
+        rows = y8[yl]                                    # (ncx, W)
+        store[j] = rows[np.arange(ncx)[:, None], cols].sum(axis=1) >> SH
     used = np.vstack([store[:1], store[:-1]])            # one cell row of lag
     cluma = used[np.clip(celly, 0, ncy - 1), np.clip(cellx, 0, ncx - 1)]
 
@@ -198,14 +200,17 @@ def render(rgb, c):
     variant = np.array(c.vartab, dtype=np.int32)[var3]
 
     # ---- luma drives the chips (S7): dark cells get more, and bigger, chips
-    lm = (255 - cluma) if not c.s9 else cluma
-    if c.s7:
-        thr = np.clip(c.dens + (lm - 128), 0, 255)
-        lsz = lm >> 4                                     # 0..15 -> +0..23%
+    if not c.s7:
+        lm = np.zeros_like(cluma)
+        dbase = c.dens
     else:
-        thr = np.full_like(pres, c.dens)
-        lsz = np.zeros_like(pres)
-    present = pres < thr
+        lm = cluma if c.s9 else (255 - cluma)
+        dbase = c.dens - 128
+    # Presence MARGIN, not a boolean: a chip only a few counts over the line
+    # is drawn small and grows in, so a cell sitting on the threshold wobbles
+    # in SIZE instead of flicking in and out.
+    marg = dbase + lm - pres
+    present = marg > 0
 
     # ---- polar coordinates about the (jittered) chip centre
     cx = nx - 32 - jx
@@ -234,7 +239,7 @@ def render(rgb, c):
     ar7 = (a7 - rot) & 127
     r4rom = SHAPE[(variant << 7) + ar7]
 
-    szc = np.array(c.sztab, dtype=np.int32)[sz3] + lsz
+    szc = np.array(c.sztab, dtype=np.int32)[sz3]
     R4 = np.minimum((r4rom * szc) >> 6, 255)
 
     d = R4 - r4
