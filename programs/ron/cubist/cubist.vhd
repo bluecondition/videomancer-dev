@@ -164,6 +164,8 @@ architecture cubist of program_top is
     ----------------------------------------------------------------------
     signal s_prev_vsync : std_logic := '1';
     signal s_vs_pulse   : std_logic := '0';
+    signal s_sawact     : std_logic := '0';
+    signal s_fstart     : std_logic := '0';
     signal s_avid_q     : std_logic := '0';
     signal s_avid_r     : std_logic := '0';   -- avid rising strobe
     signal s_avid_f     : std_logic := '0';   -- avid falling strobe
@@ -218,7 +220,7 @@ architecture cubist of program_top is
     -- addressing replaces every register-array mux the old FSM had).
     -- Map: 0..8 basis | 18+c*8+k corners | 42+k rx | 50+k ry | 58+k sx | 66+k sy
     type t_fram is array (0 to 127) of std_logic_vector(15 downto 0);
-    signal fram : t_fram;
+    signal fram : t_fram := (others => (others => '0'));
     signal fr_ra, fr_wa : unsigned(6 downto 0) := (others => '0');
     signal fr_rd2 : std_logic_vector(15 downto 0) := (others => '0');
     signal fr_wd  : std_logic_vector(15 downto 0) := (others => '0');
@@ -250,6 +252,7 @@ architecture cubist of program_top is
 
     signal f_zoom  : unsigned(11 downto 0) := to_unsigned(256, 12);  -- focal, px
     signal f_zsm   : unsigned(15 downto 0) := to_unsigned(256*16, 16); -- smoothed Q4
+    signal s_zfirst : std_logic := '1';
     signal hmax, wmax : unsigned(14 downto 0) := (others => '0');
 
     -- per-slot face meta for the pixel path (written by frame FSM)
@@ -305,7 +308,7 @@ architecture cubist of program_top is
     -- word 127: number of valid slots
     ----------------------------------------------------------------------
     type t_gram is array (0 to 255) of std_logic_vector(15 downto 0);
-    signal gram : t_gram;
+    signal gram : t_gram := (others => (others => '0'));
     attribute ram_style : string;
     attribute ram_style of gram : signal is "block";
     attribute ram_style of fram : signal is "block";
@@ -320,7 +323,7 @@ architecture cubist of program_top is
     -- 5-word records (x/type, u0, v0, du, dv); bank = target line parity.
     ----------------------------------------------------------------------
     type t_dram is array (0 to 255) of std_logic_vector(15 downto 0);
-    signal dram : t_dram;
+    signal dram : t_dram := (others => (others => '0'));
     attribute ram_style of dram : signal is "block";
     signal d_wa : unsigned(7 downto 0) := (others => '0');
     signal d_wd : std_logic_vector(15 downto 0) := (others => '0');
@@ -527,10 +530,17 @@ begin
             -- never latch height at vsync from a serrated counter)
             if s_avid_r = '1' then
                 s_ycnt <= s_ycnt + 1;
+                s_sawact <= '1';
             end if;
-            if s_vs_pulse = '1' then
+            -- Only the FIRST vsync edge after active video is a real frame
+            -- boundary; an analog serrated vsync gives several per field and
+            -- would latch a partial line count (and restart the frame FSM).
+            s_fstart <= '0';
+            if s_vs_pulse = '1' and s_sawact = '1' then
                 if s_ycnt > 16 then s_H <= s_ycnt; end if;
                 s_ycnt <= (others => '0');
+                s_sawact <= '0';
+                s_fstart <= '1';
                 s_fpar <= data_in.field_n;
                 s_field <= data_in.field_n;
                 if data_in.field_n /= s_fpar then s_ilace <= '1';
@@ -626,7 +636,7 @@ begin
             fr_we    <= '0';
             v_rd := signed(fr_rd2);
 
-            if s_vs_pulse = '1' then
+            if s_fstart = '1' then
                 fr_st   <= to_unsigned(1, 8);
                 fr_done <= '0';
                 fr_i    <= (others => '0');
@@ -666,6 +676,12 @@ begin
                             else            v_st := to_signed(-1, 12); end if;
                         end if;
                         an_rol <= an_rol + unsigned(v_st);
+                        if s_zfirst = '1' then
+                            an_yaw <= s_k1 & "00";
+                            an_pit <= s_k2 & "00";
+                            an_rol <= s_k3 & "00";
+                            s_zfirst <= '0';
+                        end if;
                         fr_st <= to_unsigned(2, 8);
 
                     ----------------------------------------------------------
@@ -861,8 +877,8 @@ begin
                     when 31 =>
                         if fr_w < 2 then fr_w <= fr_w + 1;
                         elsif dv_bsy = '0' then
-                            if dv_q > 16383 then f_y12 <= to_unsigned(4095, 12);
-                            else f_y12 <= resize(shift_right(dv_q, 2), 12); end if;
+                            if dv_q > 4095 then f_y12 <= to_unsigned(4095, 12);
+                            else f_y12 <= resize(dv_q, 12); end if;
                             frd_ns <= resize((shift_left(resize(s_W, 22), 5)
                                               - shift_left(resize(s_W, 22), 1))
                                              & "0000000000", 32);
@@ -874,17 +890,27 @@ begin
                     when 32 =>
                         if fr_w < 2 then fr_w <= fr_w + 1;
                         elsif dv_bsy = '0' then
-                            if dv_q > 16383 then v_f := to_unsigned(4095, 16);
-                            else v_f := resize(shift_right(dv_q, 2), 16); end if;
+                            if dv_q > 4095 then v_f := to_unsigned(4095, 16);
+                            else v_f := resize(dv_q, 16); end if;
                             if resize(f_y12, 16) < v_f then v_f := resize(f_y12, 16); end if;
                             f_zoom <= resize(v_f, 12);
                             fr_st <= to_unsigned(33, 8);
                         end if;
                     when 33 =>
+                        -- snap on the first frame; a glide from the reset value
+                        -- would take ~30 frames to reach the real framing
+                        -- Snap when the target moves a long way (startup, or a
+                        -- resolution change): the raster measurement is not
+                        -- valid for the first frames, and a 1/16 glide would
+                        -- take ~30 frames to walk off a bad initial value.
                         v_t := signed(resize(shift_left(resize(f_zoom, 18), 4), 18))
                                - signed(resize(f_zsm, 18));
-                        f_zsm <= unsigned(resize(signed(resize(f_zsm, 18))
-                                                 + shift_right(v_t, 4), 16));
+                        if abs(v_t) > signed(resize(shift_right(f_zsm, 3), 18)) then
+                            f_zsm <= shift_left(resize(f_zoom, 16), 4);
+                        else
+                            f_zsm <= unsigned(resize(signed(resize(f_zsm, 18))
+                                                     + shift_right(v_t, 4), 16));
+                        end if;
                         fr_st <= to_unsigned(34, 8);
                     when 34 =>
                         -- f is Q4 x 4 (the smoothing keeps 4 extra bits)
@@ -1142,7 +1168,7 @@ begin
                     when 72 =>
                         if fr_w < 2 then fr_w <= fr_w + 1;
                         elsif dv_bsy = '0' then
-                            if dv_q > 32767 then v_g := to_signed(32767, 17);
+                            if dv_q > 65535 then v_g := to_signed(65535, 17);
                             else v_g := signed(resize(dv_q(15 downto 0), 17)); end if;
                             if fd_sgn = '1' then v_g := -v_g; end if;
                             case to_integer(fr_c) is
@@ -1538,7 +1564,7 @@ begin
                     -- span scan (ln_i = slot): 4 edge intersections
                     ------------------------------------------------------
                     when 4 =>
-                        if resize(ln_i, 2) >= nslot_l then
+                        if ln_i > 2 or resize(ln_i, 2) >= nslot_l then
                             ln_st <= to_unsigned(12, 6);
                         else
                             g_ra <= shift_left(resize(ln_i, 8), 5);
@@ -1812,7 +1838,7 @@ begin
         variable v_dx  : unsigned(11 downto 0);
     begin
         if rising_edge(clk) then
-            if s_vs_pulse = '1' then
+            if s_fstart = '1' then
                 bg_ly <= to_unsigned(644 * 256, 18);
                 bg_uq <= to_unsigned(506 * 256, 18);
                 bg_vq <= to_unsigned(516 * 256, 18);
