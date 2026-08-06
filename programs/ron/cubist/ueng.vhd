@@ -78,7 +78,7 @@
                             when 8  => if v_a < v_b then v_r := v_a; else v_r := v_b; end if;
                             when 9  => if v_a > v_b then v_r := v_a; else v_r := v_b; end if;
                             when 10 =>                     -- MUL: start
-                                fm_a <= v_a;
+                                fm_a <= resize(v_a, 18);
                                 fm_b <= resize(v_b, 14);
                                 mu_go_f <= '1';
                             when 11 =>                     -- MRD: stall, then take
@@ -194,7 +194,6 @@
         resize(signed('0' & s_cx),   32) when 6,
         resize(signed('0' & s_cy),   32) when 7,
         (0 => s_ilace, others => '0')    when 8,
-        resize(signed('0' & s_k4),   32) when 9,     -- zoom knob
         (0 => s_zfirst, others => '0')   when 10,
         (others => '0')                  when others;
 
