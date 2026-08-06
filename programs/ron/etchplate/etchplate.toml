@@ -1,23 +1,23 @@
-# Etchplate v3.0 -- "shred" rework 2026-08-04
+# Etchplate v3.1 -- "hatch" rework 2026-08-04
 #
-# Target look (see memory etchplate-intended-look): stark 1-bit white on
-# black, the picture ripped into fine strands -- ragged horizontal streaks
-# off every vertical edge, vertical filaments dripping from horizontal
-# edges, black tear-cuts shredding the white body.  Mostly H/V, crackling.
+# Target look (see memory etchplate-intended-look): solid white, solid
+# black, and coherent GROUPS OF PARALLEL SINGLE-PIXEL LINES -- hatched
+# patches around every edge where the picture decomposes into thin white
+# lines with clean black gaps.  No static, no per-pixel noise.
 #
 # K1 Threshold  luma cut point
-# K2 Streaks    horizontal streak length off vertical edges (random per edge)
-# K3 Filaments  vertical strand length below horizontal edges
-# K4 Tear       black dash-cuts shredding the white body
-# K6 Grain      break-up gaps inside strands and streaks
-# P12 Shred     master climax: lengthens streaks/filaments, deepens tear+grain
+# K2 Streaks    fringe width off edges over black (patch width, px)
+# K3 Height     patch height (lines) + solo filament length
+# K4 Tear       fringe depth into the white body (px)
+# K6 Pitch      line/column spacing inside the groups (2..5 px)
+# P12 Shred     master climax: widens/deepens/tallens all patches
 # S7 Negate     invert B/W before everything
-# S8 Body/Bones Bones: white body shows only its tear-fibres (skeleton)
+# S8 Body/Bones Bones: entire white body rendered as thin lines
 # S9 Bypass     latency-matched passthru
 
 [program]
 program_id = "com.ron.etchplate"
-program_version = "3.0.0"
+program_version = "3.2.1"
 abi_version = ">=1.0,<2.0"
 program_name = "Etchplate"
 author = "ron"
@@ -26,7 +26,7 @@ categories = ["Process", "Edges"]
 program_type = "processing"
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
-description = "Stark 1-bit shredder: video ripped into fine white strands on black. Ragged streaks, vertical filaments, tear-cuts."
+description = "Stark 1-bit shredder: edges decompose into hatched groups of single thin white lines on black. No noise, all structure."
 url = "https://github.com/lzxindustries/videomancer-sdk"
 
 [[parameter]]
@@ -59,7 +59,7 @@ max_value = 1023
 initial_value = 512
 display_min_value = 0
 display_max_value = 100
-name_label = "Filaments"
+name_label = "Height"
 suffix_label = "%"
 
 [[parameter]]
@@ -78,11 +78,11 @@ parameter_id = "rotary_potentiometer_6"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 256
-display_min_value = 0
-display_max_value = 100
-name_label = "Grain"
-suffix_label = "%"
+initial_value = 384
+display_min_value = 2
+display_max_value = 5
+name_label = "Pitch"
+suffix_label = "px"
 
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
@@ -112,3 +112,15 @@ parameter_id = "toggle_switch_9"
 name_label = "Bypass"
 value_labels = ["Off", "On"]
 initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Thresh"
+value_labels = ["Hyst", "Raw"]
+initial_value_label = "Hyst"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Edges"
+value_labels = ["Strict", "Loose"]
+initial_value_label = "Strict"

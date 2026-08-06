@@ -35,6 +35,9 @@ OPS = {
     'END': 24,   # frame setup complete
     'CTL': 25,   # dst = control input imm (knobs, raster measurements)
     'SLR': 26,   # dst = per-slot input imm
+    'AND': 27,   # dst = A and imm      (bit-field extraction)
+    'BIT': 28,   # dst = (A >> imm) and 1
+    'SET': 29,   # dst = A with bit imm forced to 1
 }
 
 # per-slot output ports for SLW (must match the VHDL decoder)

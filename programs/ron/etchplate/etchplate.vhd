@@ -1,53 +1,63 @@
 -- Videomancer SDK - Open source FPGA-based video effects development kit
 -- Copyright (C) 2026 ron
--- File: etchplate.vhd - 1-bit shredder: white strands / streaks / tear-cuts
+-- File: etchplate.vhd - 1-bit shredder: hatch patches of single thin lines
 -- License: GNU General Public License v3.0
 --
--- Etchplate v3.0 "SHRED" - full rework of the look engine.
+-- Etchplate v3.1 "HATCH" - render rule rebuilt around the reference image.
 --
--- Goal (from the original inspiration shot): stark black & white, the
--- picture ripped into shards of fine white strands on black.  Ragged
--- horizontal streaks trail off every vertical edge, vertical filaments
--- drip down from horizontal edges, and black tear-cuts shred the white
--- body itself into fibres.  Predominantly horizontal/vertical, with
--- crackling per-frame randomness.
+-- The reference is made of exactly three things and nothing else:
+--   1. Solid white regions (thresholded subject)
+--   2. Solid black background
+--   3. GROUPS OF PARALLEL SINGLE-PIXEL LINES -- coherent hatched patches
+--      where a region decomposes into thin white lines with clean black
+--      gaps (a line every 2nd..5th scanline), patches tens of px wide and
+--      a handful..30 lines tall, anchored around edges; plus occasional
+--      solo 1px vertical strands.
+-- There is NO per-pixel noise / static anywhere.  All randomness is at
+-- the patch level: where a patch starts and how big it is.  Inside a
+-- patch the pattern is perfectly regular.
 --
 -- Engine (3-cycle latency, one dual-bank line buffer, two LFSRs):
 --
---   Stage d1/d2: delay video 2 cycles to meet the line buffer's 2-cycle
---     read latency.  bw = (y > threshold) xor negate, computed at d2.
+--   Fringe zones ("the patches"): at a white->black edge an OUT run of
+--   random length starts (fringe over black); at a black->white edge an
+--   IN run (fringe eating into the white body).  When a run fires it
+--   also latches a random patch HEIGHT; the line buffer carries a
+--   per-column life so the patch extends downward that many lines.
+--   Inside any fringe zone the output is simply line_hit -- white on
+--   every Nth scanline, black between.  That single rule produces the
+--   horizontal thin-line groups on both sides of every edge.
 --
---   Line buffer (7 bits/column): {bw_of_prev_line, vlife(5:0)}.
---     Read addr = hcnt (col of the incoming pixel); the data for column
---     x emerges exactly when the d2-delayed pixel x arrives.  Write addr
---     = hcnt delayed 3 = read addr delayed by the full pipeline depth
---     (the classic write-addr trap).  Writes park at addr 2047 (beyond
---     active width) during blanking because the buffer has no write
---     enable.  Bank toggle at hsync start; the <=3 pending tail writes
---     land before the toggle thanks to the front porch.
+--   Vertical hatch: where the line above was white and this pixel is
+--   black (bottom edge of white), a per-column life is seeded; while it
+--   lives the output over plain black is col_hit -- white on every Nth
+--   column = groups of thin vertical lines under horizontal edges.
 --
---   Horizontal streaks: on a white->black transition a down-counter is
---     loaded with (rand & length_mask) -- random length per edge, so a
---     vertical edge sheds a ragged fringe of different-length filaments
---     line by line.  A black->white transition loads a second counter
---     (half mask) that bites black into the white leading edge.
+--   Filaments: solo solid 1px vertical strands seeded at bottom edges,
+--   living longer than the hatch patches.
 --
---   Vertical filaments: when the line above was white and this pixel is
---     black (bottom edge of white), vlife is seeded from rand & fil_mask;
---     otherwise it decays by 1 per line while over black and dies inside
---     white.  vlife > 0 draws a 1px white strand.
+--   Pitch (K6): the line/column spacing inside all groups, 2..5 px.
+--   P12 Shred adds to streak/tear/height levels (always-on knobs,
+--   slider max = designed climax).  S8 Bones renders the entire white
+--   body as thin lines.  No noise gates anywhere.
 --
---   Tear: a run-length dash machine advances only inside white body:
---     keep-run (rand >> tear_level, so higher tear = shorter keeps) then
---     cut-run (rand & cut_mask).  Cuts render black inside white (Body
---     mode) or are the only place white shows (Bones mode = skeleton).
+-- Line buffer, 25 bits per column:
+--   [24]    bw of previous line
+--   [23:18] filament life      (solid vertical strand, lines remaining)
+--   [17:12] vertical hatch life
+--   [11:6]  out-fringe life    (patch over black)
+--   [5:0]   in-fringe life     (patch over white)
 --
---   Grain: strand/streak pixels drop out when lfsr_b(2:0) < gap_level --
---     per-pixel breaks that make everything fibrous and crackling.
---
---   P12 Shred adds to the streak/filament/tear/grain levels on top of
---   the knobs (bold always-on: knobs work everywhere, slider max is the
---   designed climax).
+-- v3.2: threshold hysteresis (+/-24) + edge qualification (a transition
+-- only fires when the run it ends was >= 6 px) -- real video is full of
+-- threshold-noise micro-edges; without these the fringe zones chain into
+-- full-width hatch bars.  Knob tables made strictly monotonic and wider
+-- (patch width to 255 px, height to 63 lines) so K2-K4 read clearly.
+-- Read addr = hcnt (column of incoming pixel); data for column x arrives
+-- exactly with the 2-cycle-delayed pixel x; write addr = hcnt delayed by
+-- the full 3-cycle pipeline depth (the classic write-addr trap).  Writes
+-- park at addr 2047 during blanking (buffer has no write enable); bank
+-- toggles at hsync start, front porch covers the pending tail writes.
 --
 -- Synthesis rule kept from v2.0: state-machine outer conditions never
 -- read a register they write inside (yosys collapse trap).
@@ -66,24 +76,31 @@ architecture etchplate of program_top is
     -- Parameters
     signal s_knob_thresh : unsigned(9 downto 0);
     signal s_knob_streak : unsigned(9 downto 0);
-    signal s_knob_fil    : unsigned(9 downto 0);
+    signal s_knob_height : unsigned(9 downto 0);
     signal s_knob_tear   : unsigned(9 downto 0);
-    signal s_knob_grain  : unsigned(9 downto 0);
+    signal s_knob_pitch  : unsigned(9 downto 0);
     signal s_slider      : unsigned(9 downto 0);
     signal s_sw_negate   : std_logic;
     signal s_sw_bones    : std_logic;
     signal s_sw_bypass   : std_logic;
+    signal s_sw_rawthr   : std_logic;  -- S10: bypass hysteresis (diagnostic)
+    signal s_sw_loose    : std_logic;  -- S11: bypass edge qualification
+
+    -- Hysteresis bands, registered (11-bit to avoid wrap at the rails)
+    signal s_thr_hi : unsigned(10 downto 0) := (others => '0');
+    signal s_thr_lo : unsigned(10 downto 0) := (others => '0');
 
     -- Effect levels 0..7 (knob + slider, saturated), registered per clock
     signal s_lvl_streak : unsigned(2 downto 0) := (others => '0');
-    signal s_lvl_fil    : unsigned(2 downto 0) := (others => '0');
+    signal s_lvl_height : unsigned(2 downto 0) := (others => '0');
     signal s_lvl_tear   : unsigned(2 downto 0) := (others => '0');
-    signal s_gap_lvl    : unsigned(2 downto 0) := (others => '0');
+    signal s_pitch_max  : unsigned(2 downto 0) := "001";  -- pitch-1: 1..4
 
     -- Level -> random-length masks, registered
-    signal s_streak_mask : unsigned(9 downto 0) := (others => '0');
-    signal s_fil_mask    : unsigned(5 downto 0) := (others => '0');
-    signal s_cut_mask    : unsigned(3 downto 0) := (others => '0');
+    signal s_out_mask   : unsigned(7 downto 0) := (others => '0');  -- out-run px
+    signal s_in_mask    : unsigned(7 downto 0) := (others => '0');  -- in-run px
+    signal s_patch_mask : unsigned(5 downto 0) := (others => '0');  -- patch lines
+    signal s_fil_mask   : unsigned(5 downto 0) := (others => '0');  -- strand lines
 
     -- Pixel pipeline delays
     signal s_y_d1, s_y_d2 : std_logic_vector(9 downto 0) := (others => '0');
@@ -93,26 +110,33 @@ architecture etchplate of program_top is
     signal s_hs_d1, s_hs_d2     : std_logic := '1';
     signal s_vs_d1, s_vs_d2     : std_logic := '1';
     signal s_fn_d1, s_fn_d2     : std_logic := '0';
-    signal s_bw_d2 : std_logic := '0';
+    signal s_bwr   : std_logic := '0';  -- hysteresis threshold state (pixel d2)
 
-    -- Column counter and its delays (write addr = read addr delayed 3)
+    -- Column counter and delays (write addr = read addr delayed 3)
     signal s_hcnt    : unsigned(10 downto 0) := (others => '0');
     signal s_hcnt_d1 : unsigned(10 downto 0) := (others => '0');
     signal s_hcnt_d2 : unsigned(10 downto 0) := (others => '0');
 
+    -- Line/column pitch phase
+    signal s_linep    : unsigned(2 downto 0) := (others => '0');
+    signal s_line_hit : std_logic := '1';
+    signal s_colp     : unsigned(2 downto 0) := (others => '0');
+
     -- Line buffer
-    signal s_lb_ab   : std_logic := '0';
-    signal s_hs_prev : std_logic := '1';
-    signal s_lb_wr_data : std_logic_vector(6 downto 0) := (others => '0');
+    signal s_lb_ab      : std_logic := '0';
+    signal s_hs_prev    : std_logic := '1';
+    signal s_vs_prev    : std_logic := '1';
+    signal s_lb_wr_data : std_logic_vector(24 downto 0) := (others => '0');
     signal s_lb_wr_addr : unsigned(10 downto 0) := (others => '1');
-    signal s_lb_rd_data : std_logic_vector(6 downto 0);
+    signal s_lb_rd_data : std_logic_vector(24 downto 0);
 
     -- Stage-3 state
     signal s_prev_bw  : std_logic := '0';
-    signal s_wht_cnt  : unsigned(9 downto 0) := (others => '0');
-    signal s_blk_cnt  : unsigned(9 downto 0) := (others => '0');
-    signal s_keep_cnt : unsigned(8 downto 0) := (others => '0');
-    signal s_cut_cnt  : unsigned(4 downto 0) := (others => '0');
+    signal s_run_len  : unsigned(3 downto 0) := (others => '0');
+    signal s_out_cnt  : unsigned(7 downto 0) := (others => '0');
+    signal s_out_life : unsigned(5 downto 0) := (others => '0');
+    signal s_in_cnt   : unsigned(7 downto 0) := (others => '0');
+    signal s_in_life  : unsigned(5 downto 0) := (others => '0');
 
     -- LFSRs (b gets a different seed via a one-shot load)
     signal s_lfsr_a, s_lfsr_b : std_logic_vector(15 downto 0);
@@ -137,13 +161,15 @@ begin
 
     s_knob_thresh <= unsigned(registers_in(0));
     s_knob_streak <= unsigned(registers_in(1));
-    s_knob_fil    <= unsigned(registers_in(2));
+    s_knob_height <= unsigned(registers_in(2));
     s_knob_tear   <= unsigned(registers_in(3));
-    s_knob_grain  <= unsigned(registers_in(5));
+    s_knob_pitch  <= unsigned(registers_in(5));
     s_slider      <= unsigned(registers_in(7));
     s_sw_negate   <= registers_in(6)(0);
     s_sw_bones    <= registers_in(6)(1);
     s_sw_bypass   <= registers_in(6)(2);
+    s_sw_rawthr   <= registers_in(6)(3);
+    s_sw_loose    <= registers_in(6)(4);
 
     --------------------------------------------------------------------------
     -- Effect levels and masks (slow -- knobs only), registered
@@ -154,49 +180,74 @@ begin
         if rising_edge(clk) then
             v_shred := s_slider(9 downto 8);
             s_lvl_streak <= f_sat7(s_knob_streak(9 downto 7), v_shred);
-            s_lvl_fil    <= f_sat7(s_knob_fil(9 downto 7), v_shred);
+            s_lvl_height <= f_sat7(s_knob_height(9 downto 7), v_shred);
             s_lvl_tear   <= f_sat7(s_knob_tear(9 downto 7), v_shred);
-            -- gap level 0..7 out of 8; grain knob 0..5 plus up to 2 from slider
-            s_gap_lvl    <= f_sat7('0' & s_knob_grain(9 downto 8), v_shred);
+            -- pitch: line/column spacing inside groups, 2..5 px
+            s_pitch_max  <= ('0' & s_knob_pitch(9 downto 8)) + 1;
 
-            -- streak length mask, calibrated to the reference image: fine
-            -- dashes a few px to a few dozen px; ~127 px only at full climax
+            -- hysteresis bands; S10 Raw collapses the dead band to zero
+            if s_sw_rawthr = '1' then
+                s_thr_hi <= '0' & s_knob_thresh;
+                s_thr_lo <= '0' & s_knob_thresh;
+            else
+                s_thr_hi <= ('0' & s_knob_thresh) + 24;
+                if s_knob_thresh > 24 then
+                    s_thr_lo <= '0' & (s_knob_thresh - 24);
+                else
+                    s_thr_lo <= (others => '0');
+                end if;
+            end if;
+
+            -- out-fringe run length (px over black): every level distinct,
+            -- 255 px at the top so the knob is unmistakable
             case to_integer(s_lvl_streak) is
-                when 0      => s_streak_mask <= to_unsigned(0, 10);
-                when 1      => s_streak_mask <= to_unsigned(3, 10);
-                when 2      => s_streak_mask <= to_unsigned(7, 10);
-                when 3      => s_streak_mask <= to_unsigned(15, 10);
-                when 4      => s_streak_mask <= to_unsigned(31, 10);
-                when 5      => s_streak_mask <= to_unsigned(31, 10);
-                when 6      => s_streak_mask <= to_unsigned(63, 10);
-                when others => s_streak_mask <= to_unsigned(127, 10);
+                when 0      => s_out_mask <= to_unsigned(0, 8);
+                when 1      => s_out_mask <= to_unsigned(7, 8);
+                when 2      => s_out_mask <= to_unsigned(15, 8);
+                when 3      => s_out_mask <= to_unsigned(31, 8);
+                when 4      => s_out_mask <= to_unsigned(63, 8);
+                when 5      => s_out_mask <= to_unsigned(127, 8);
+                when 6      => s_out_mask <= to_unsigned(255, 8);
+                when others => s_out_mask <= to_unsigned(255, 8);
             end case;
 
-            -- filament length mask: short vertical drips, matching the
-            -- streak scale (max 31 lines only at full climax)
-            case to_integer(s_lvl_fil) is
-                when 0      => s_fil_mask <= to_unsigned(0, 6);
-                when 1      => s_fil_mask <= to_unsigned(1, 6);
-                when 2      => s_fil_mask <= to_unsigned(3, 6);
-                when 3      => s_fil_mask <= to_unsigned(3, 6);
-                when 4      => s_fil_mask <= to_unsigned(7, 6);
-                when 5      => s_fil_mask <= to_unsigned(15, 6);
-                when others => s_fil_mask <= to_unsigned(31, 6);
-            end case;
-
-            -- cut length mask: level 0 = off, else 1..15 px cuts
+            -- in-fringe run length (px eaten into white)
             case to_integer(s_lvl_tear) is
-                when 0      => s_cut_mask <= to_unsigned(0, 4);
-                when 1 | 2  => s_cut_mask <= to_unsigned(1, 4);
-                when 3 | 4  => s_cut_mask <= to_unsigned(3, 4);
-                when 5 | 6  => s_cut_mask <= to_unsigned(7, 4);
-                when others => s_cut_mask <= to_unsigned(15, 4);
+                when 0      => s_in_mask <= to_unsigned(0, 8);
+                when 1      => s_in_mask <= to_unsigned(7, 8);
+                when 2      => s_in_mask <= to_unsigned(15, 8);
+                when 3      => s_in_mask <= to_unsigned(31, 8);
+                when 4      => s_in_mask <= to_unsigned(63, 8);
+                when 5      => s_in_mask <= to_unsigned(127, 8);
+                when others => s_in_mask <= to_unsigned(255, 8);
+            end case;
+
+            -- patch height (lines) and filament length (lines)
+            case to_integer(s_lvl_height) is
+                when 0 =>
+                    s_patch_mask <= to_unsigned(0, 6);
+                    s_fil_mask   <= to_unsigned(0, 6);
+                when 1 =>
+                    s_patch_mask <= to_unsigned(3, 6);
+                    s_fil_mask   <= to_unsigned(7, 6);
+                when 2 =>
+                    s_patch_mask <= to_unsigned(7, 6);
+                    s_fil_mask   <= to_unsigned(15, 6);
+                when 3 =>
+                    s_patch_mask <= to_unsigned(15, 6);
+                    s_fil_mask   <= to_unsigned(31, 6);
+                when 4 =>
+                    s_patch_mask <= to_unsigned(31, 6);
+                    s_fil_mask   <= to_unsigned(63, 6);
+                when others =>
+                    s_patch_mask <= to_unsigned(63, 6);
+                    s_fil_mask   <= to_unsigned(63, 6);
             end case;
         end if;
     end process;
 
     --------------------------------------------------------------------------
-    -- Delay pipeline, column counter, line-buffer bank toggle
+    -- Delay pipeline, counters, pitch phases, line-buffer bank toggle
     --------------------------------------------------------------------------
     p_delay : process(clk)
     begin
@@ -209,11 +260,16 @@ begin
             s_vs_d1   <= data_in.vsync_n;  s_vs_d2   <= s_vs_d1;
             s_fn_d1   <= data_in.field_n;  s_fn_d2   <= s_fn_d1;
 
-            -- bw threshold at d2 (from d1 data)
-            if unsigned(s_y_d1) > s_knob_thresh then
-                s_bw_d2 <= '1' xor s_sw_negate;
-            else
-                s_bw_d2 <= '0' xor s_sw_negate;
+            -- bw threshold at d2 (from d1 data) with hysteresis: white above
+            -- hi band, black below lo band, HOLD previous pixel in between
+            -- (plain clocked-if hold -- no variable feedback for yosys to
+            -- mangle; negate is applied downstream in p_shred)
+            if s_hs_d1 = '0' then
+                s_bwr <= '0';
+            elsif ('0' & unsigned(s_y_d1)) > s_thr_hi then
+                s_bwr <= '1';
+            elsif ('0' & unsigned(s_y_d1)) < s_thr_lo then
+                s_bwr <= '0';
             end if;
 
             -- column counter tracks the incoming pixel
@@ -225,10 +281,35 @@ begin
             s_hcnt_d1 <= s_hcnt;
             s_hcnt_d2 <= s_hcnt_d1;
 
-            -- bank toggle at hsync start (front porch covers pending writes)
             s_hs_prev <= data_in.hsync_n;
+            s_vs_prev <= data_in.vsync_n;
+
+            -- bank toggle + line pitch phase at hsync start
             if s_hs_prev = '1' and data_in.hsync_n = '0' then
                 s_lb_ab <= not s_lb_ab;
+                if s_vs_prev = '1' and data_in.vsync_n = '0' then
+                    s_linep <= (others => '0');
+                elsif s_linep >= s_pitch_max then
+                    s_linep <= (others => '0');
+                else
+                    s_linep <= s_linep + 1;
+                end if;
+            end if;
+            if s_linep = 0 then
+                s_line_hit <= '1';
+            else
+                s_line_hit <= '0';
+            end if;
+
+            -- column pitch phase, aligned with stage 3 (d2 pixel stream)
+            if s_hs_d2 = '0' then
+                s_colp <= (others => '0');
+            elsif s_avid_d2 = '1' then
+                if s_colp >= s_pitch_max then
+                    s_colp <= (others => '0');
+                else
+                    s_colp <= s_colp + 1;
+                end if;
             end if;
 
             s_boot <= '0';
@@ -236,97 +317,152 @@ begin
     end process;
 
     --------------------------------------------------------------------------
-    -- Stage 3: streak counters, tear dash machine, filament life, output
+    -- Stage 3: fringe runs + patch lives + hatch/filament, compose output
     --------------------------------------------------------------------------
     p_shred : process(clk)
         variable v_bw        : std_logic;
         variable v_bw_above  : std_logic;
-        variable v_vlife     : unsigned(5 downto 0);
-        variable v_vlife_new : unsigned(5 downto 0);
-        variable v_rand_a    : unsigned(9 downto 0);
-        variable v_rand_b    : unsigned(8 downto 0);
-        variable v_gap       : std_logic;
-        variable v_cutting   : std_logic;
-        variable v_body      : std_logic;
+        variable v_fil       : unsigned(5 downto 0);
+        variable v_vhatch    : unsigned(5 downto 0);
+        variable v_fout      : unsigned(5 downto 0);
+        variable v_fin       : unsigned(5 downto 0);
+        variable v_fil_new    : unsigned(5 downto 0);
+        variable v_vhatch_new : unsigned(5 downto 0);
+        variable v_fout_new   : unsigned(5 downto 0);
+        variable v_fin_new    : unsigned(5 downto 0);
+        variable v_rand_a    : unsigned(7 downto 0);
+        variable v_rand_b    : unsigned(7 downto 0);
+        variable v_randh_a   : unsigned(5 downto 0);
+        variable v_randh_b   : unsigned(5 downto 0);
+        variable v_qual      : std_logic;
+        variable v_col_hit   : std_logic;
+        variable v_h_edge    : std_logic;
+        variable v_out_zone  : std_logic;
+        variable v_in_zone   : std_logic;
         variable v_out_bit   : std_logic;
     begin
         if rising_edge(clk) then
-            v_bw       := s_bw_d2;
-            v_bw_above := s_lb_rd_data(6);
-            v_vlife    := unsigned(s_lb_rd_data(5 downto 0));
-            v_rand_a   := unsigned(s_lfsr_a(9 downto 0));
-            v_rand_b   := unsigned(s_lfsr_b(8 downto 0));
+            v_bw       := s_bwr xor s_sw_negate;
+            v_bw_above := s_lb_rd_data(24);
+            v_fil      := unsigned(s_lb_rd_data(23 downto 18));
+            v_vhatch   := unsigned(s_lb_rd_data(17 downto 12));
+            v_fout     := unsigned(s_lb_rd_data(11 downto 6));
+            v_fin      := unsigned(s_lb_rd_data(5 downto 0));
+            v_rand_a   := unsigned(s_lfsr_a(7 downto 0));
+            v_rand_b   := unsigned(s_lfsr_b(7 downto 0));
+            v_randh_a  := unsigned(s_lfsr_a(13 downto 8));
+            v_randh_b  := unsigned(s_lfsr_b(13 downto 8));
 
-            -- per-pixel break gate for strands/streaks
-            if unsigned(s_lfsr_b(11 downto 9)) < s_gap_lvl then
-                v_gap := '1';
+            if s_colp = 0 then
+                v_col_hit := '1';
             else
-                v_gap := '0';
+                v_col_hit := '0';
             end if;
 
             ------------------------------------------------------------------
-            -- Horizontal streak counters (edge-fired, random length)
+            -- Fringe runs: fire at edges with random length + random patch
+            -- height (latched per run -- coherent patches, never per-pixel)
             ------------------------------------------------------------------
+            -- Edge qualification: a transition only fires a patch when the
+            -- run it terminates was >= 6 px.  Threshold-noise flicker makes
+            -- micro-runs; without this every gray region becomes one giant
+            -- fringe zone = full-width hatch bars on real video.
+            -- S11 Loose bypasses the qualification (diagnostic / denser look).
+            v_qual := '0';
+            if s_run_len >= 6 or s_sw_loose = '1' then
+                v_qual := '1';
+            end if;
+
             if s_hs_d2 = '0' then
-                s_wht_cnt <= (others => '0');
-                s_blk_cnt <= (others => '0');
+                s_out_cnt <= (others => '0');
+                s_in_cnt  <= (others => '0');
                 s_prev_bw <= '0';
+                s_run_len <= (others => '0');
             elsif s_avid_d2 = '1' then
                 s_prev_bw <= v_bw;
-                -- white streak: fires where white ends (trails into black)
-                if s_prev_bw = '1' and v_bw = '0' and s_streak_mask /= 0 then
-                    s_wht_cnt <= (v_rand_a and s_streak_mask) or to_unsigned(1, 10);
-                elsif s_wht_cnt /= 0 then
-                    s_wht_cnt <= s_wht_cnt - 1;
+                if v_bw /= s_prev_bw then
+                    s_run_len <= to_unsigned(1, 4);
+                elsif s_run_len /= 15 then
+                    s_run_len <= s_run_len + 1;
                 end if;
-                -- black streak: bites into the leading edge of white
-                if s_prev_bw = '0' and v_bw = '1' and s_streak_mask /= 0 then
-                    s_blk_cnt <= (v_rand_a and ('0' & s_streak_mask(9 downto 1)))
-                                 or to_unsigned(1, 10);
-                elsif s_blk_cnt /= 0 then
-                    s_blk_cnt <= s_blk_cnt - 1;
+                -- out fringe: fires where white ends, extends over black
+                if s_prev_bw = '1' and v_bw = '0' and v_qual = '1'
+                   and s_out_mask /= 0 then
+                    s_out_cnt  <= (v_rand_a and s_out_mask) or to_unsigned(1, 8);
+                    s_out_life <= (v_randh_a and s_patch_mask) or to_unsigned(1, 6);
+                elsif s_out_cnt /= 0 then
+                    s_out_cnt <= s_out_cnt - 1;
                 end if;
-            end if;
-
-            ------------------------------------------------------------------
-            -- Tear dash machine: advances only inside white body
-            ------------------------------------------------------------------
-            v_cutting := '0';
-            if s_cut_cnt /= 0 then
-                v_cutting := '1';
-            end if;
-            if s_avid_d2 = '1' and v_bw = '1' then
-                if s_cut_cnt /= 0 then
-                    s_cut_cnt <= s_cut_cnt - 1;
-                elsif s_keep_cnt /= 0 then
-                    s_keep_cnt <= s_keep_cnt - 1;
-                elsif s_cut_mask /= 0 then
-                    -- start a new cut, then a new keep run (shorter at high tear)
-                    s_cut_cnt  <= ('0' & (v_rand_b(3 downto 0) and s_cut_mask))
-                                  + to_unsigned(1, 5);
-                    s_keep_cnt <= shift_right(v_rand_b, to_integer(s_lvl_tear))
-                                  + to_unsigned(4, 9);
-                else
-                    s_keep_cnt <= (others => '1');
+                -- in fringe: fires where white begins, eats into the body
+                if s_prev_bw = '0' and v_bw = '1' and v_qual = '1'
+                   and s_in_mask /= 0 then
+                    s_in_cnt  <= (v_rand_b and s_in_mask) or to_unsigned(1, 8);
+                    s_in_life <= (v_randh_b and s_patch_mask) or to_unsigned(1, 6);
+                elsif s_in_cnt /= 0 then
+                    s_in_cnt <= s_in_cnt - 1;
                 end if;
             end if;
 
             ------------------------------------------------------------------
-            -- Vertical filament life for this column (written to line buffer)
+            -- Zone membership for THIS pixel
             ------------------------------------------------------------------
-            v_vlife_new := (others => '0');
-            if s_avid_d2 = '1' then
-                if v_bw = '1' then
-                    v_vlife_new := (others => '0');
-                elsif v_bw_above = '1' and s_fil_mask /= 0 then
-                    -- bottom edge of white above: seed a strand
-                    v_vlife_new := (v_rand_a(5 downto 0) and s_fil_mask)
-                                   or to_unsigned(1, 6);
-                elsif v_vlife /= 0 then
-                    v_vlife_new := v_vlife - 1;
+            v_out_zone := '0';
+            if v_bw = '0' and (s_out_cnt /= 0 or v_fout /= 0) then
+                v_out_zone := '1';
+            end if;
+            v_in_zone := '0';
+            if v_bw = '1' and (s_in_cnt /= 0 or v_fin /= 0) then
+                v_in_zone := '1';
+            end if;
+
+            v_h_edge := '0';
+            if v_bw_above = '1' and v_bw = '0' then
+                v_h_edge := '1';
+            end if;
+
+            ------------------------------------------------------------------
+            -- Per-column lives written back to the line buffer
+            ------------------------------------------------------------------
+            v_fout_new := (others => '0');
+            if v_bw = '0' then
+                if s_out_cnt /= 0 then
+                    v_fout_new := s_out_life;
+                elsif v_fout /= 0 then
+                    v_fout_new := v_fout - 1;
                 end if;
             end if;
-            s_lb_wr_data <= v_bw & std_logic_vector(v_vlife_new);
+
+            v_fin_new := (others => '0');
+            if v_bw = '1' then
+                if s_in_cnt /= 0 then
+                    v_fin_new := s_in_life;
+                elsif v_fin /= 0 then
+                    v_fin_new := v_fin - 1;
+                end if;
+            end if;
+
+            v_vhatch_new := (others => '0');
+            if v_bw = '0' then
+                if v_h_edge = '1' and s_patch_mask /= 0 then
+                    v_vhatch_new := (v_randh_b and s_patch_mask) or to_unsigned(1, 6);
+                elsif v_vhatch /= 0 then
+                    v_vhatch_new := v_vhatch - 1;
+                end if;
+            end if;
+
+            v_fil_new := (others => '0');
+            if v_bw = '0' then
+                if v_h_edge = '1' and s_fil_mask /= 0 and v_rand_a(0) = '1' then
+                    v_fil_new := (v_randh_a and s_fil_mask) or to_unsigned(1, 6);
+                elsif v_fil /= 0 then
+                    v_fil_new := v_fil - 1;
+                end if;
+            end if;
+
+            s_lb_wr_data <= v_bw & std_logic_vector(v_fil_new)
+                            & std_logic_vector(v_vhatch_new)
+                            & std_logic_vector(v_fout_new)
+                            & std_logic_vector(v_fin_new);
             if s_avid_d2 = '1' then
                 s_lb_wr_addr <= s_hcnt_d2;
             else
@@ -334,32 +470,20 @@ begin
             end if;
 
             ------------------------------------------------------------------
-            -- Compose the output bit
+            -- Compose: fringe zones render as thin-line groups, everything
+            -- else is solid.  No noise anywhere.
             ------------------------------------------------------------------
-            -- body: white region, shredded by cuts (Bones = only cuts show)
-            if v_bw = '1' then
-                if s_sw_bones = '1' then
-                    v_body := v_cutting;
-                else
-                    v_body := not v_cutting;
-                end if;
-                -- black streak erosion of the leading edge
-                if s_blk_cnt /= 0 and v_gap = '0' then
-                    v_body := '0';
-                end if;
+            if v_out_zone = '1' or v_in_zone = '1'
+               or (s_sw_bones = '1' and v_bw = '1') then
+                v_out_bit := s_line_hit;
+            elsif v_bw = '1' then
+                v_out_bit := '1';
+            elsif v_fil /= 0 then
+                v_out_bit := '1';                 -- solo vertical strand
+            elsif v_vhatch /= 0 then
+                v_out_bit := v_col_hit;           -- thin vertical line group
             else
-                v_body := '0';
-            end if;
-
-            v_out_bit := v_body;
-            -- strands/streaks draw white over black, with grain breaks
-            if v_bw = '0' and v_gap = '0' then
-                if s_wht_cnt /= 0 then
-                    v_out_bit := '1';
-                end if;
-                if v_vlife /= 0 then
-                    v_out_bit := '1';
-                end if;
+                v_out_bit := '0';
             end if;
 
             ------------------------------------------------------------------
@@ -400,7 +524,7 @@ begin
 
     lb_inst : entity work.video_line_buffer
         generic map (
-            G_WIDTH => 7,
+            G_WIDTH => 25,
             G_DEPTH => 11
         )
         port map (
