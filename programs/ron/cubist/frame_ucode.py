@@ -26,6 +26,9 @@ T0, T1, T2, T3, T4, T5 = 46, 47, 48, 49, 50, 51
 ANG, SK, SNEG, S0, S1, KK = 52, 53, 54, 55, 56, 57
 ZERO, ONE = 58, 59
 EX, EY, FY, ZOOM, ZSM, FUSE, CXR, CYR = 60, 61, 62, 63, 64, 65, 66, 67
+R_VIS = 68          # 6 visibility flags
+R_TBL = 74          # packed face tables (corner/adj/axis), LDX by face
+R_SLOT, R_FACE = 92, 93
 
 a = Asm()
 
@@ -221,6 +224,36 @@ for k in range(8):
                 a.emit(op, dst=T0, a=T0, b=base + bit)
         if sub: a.emit('SUB', dst=out, a=CYR, b=T0)
         else:   a.emit('ADD', dst=out, a=CXR, b=T0)
+
+
+# ---------------------------- phase 8: visibility + face table in the RF
+# Orthographic, so a face shows iff its normal's z is positive: one compare
+# per face, no screen geometry.  Face normals are +/- basis rows 2,5,8.
+a.emit('LDI', dst=T4, imm=64)
+a.emit('NEG', dst=T5, a=T4)
+# bz0/bz1/bz2 are the Z components of the three rotated axes: basis words
+# 2, 5 and 8.  Faces 0/1 test axis 1, faces 2/3 axis 0, faces 4/5 axis 2.
+for f, (reg, pos) in enumerate(((R_BAS + 5, True), (R_BAS + 5, False),
+                                (R_BAS + 2, True), (R_BAS + 2, False),
+                                (R_BAS + 8, True), (R_BAS + 8, False))):
+    a.emit('LDI', dst=R_VIS + f, imm=0)
+    if pos: a.emit('JGE', a=T4, b=reg, imm=f'nv{f}')     # skip if 64 >= bz
+    else:   a.emit('JGE', a=reg, b=T5, imm=f'nv{f}')     # skip if bz >= -64
+    a.emit('LDI', dst=R_VIS + f, imm=1)
+    a.label(f'nv{f}')
+
+# The per-face loop reads its constants from the register file rather than
+# from six unrolled copies.  Each table entry is 3 bits, so all four corner
+# indices for a face pack into one word: 18 registers instead of 66, which
+# is what keeps the file inside 128 words.  Within the loop body the corner
+# slot j is a compile-time constant, so unpacking is SHR by an immediate.
+C_FCORN = [[2,6,7,3],[0,1,5,4],[1,3,7,5],[0,4,6,2],[4,5,7,6],[1,0,2,3]]
+C_FADJ  = [[5,4,3,2],[3,2,5,4],[1,0,5,4],[5,4,1,0],[3,2,1,0],[1,0,3,2]]
+C_FN, C_FU, C_FV = [2,3,0,1,4,5], [4,0,2,4,0,2], [0,4,4,2,2,0]
+for f in range(6):
+    a.emit('LDI', dst=R_TBL + f,      imm=sum(C_FCORN[f][j] << (3*j) for j in range(4)))
+    a.emit('LDI', dst=R_TBL + 6 + f,  imm=sum(C_FADJ[f][j]  << (3*j) for j in range(4)))
+    a.emit('LDI', dst=R_TBL + 12 + f, imm=C_FN[f] | (C_FU[f] << 3) | (C_FV[f] << 6))
 
 a.emit('END')
 
