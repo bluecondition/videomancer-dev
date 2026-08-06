@@ -38,6 +38,8 @@ OPS = {
     'AND': 27,   # dst = A and imm      (bit-field extraction)
     'BIT': 28,   # dst = (A >> imm) and 1
     'SET': 29,   # dst = A with bit imm forced to 1
+    'LDX': 30,   # dst = rf[A + imm]   (indexed load)
+    'STX': 31,   # rf[A + imm] = B     (indexed store)
 }
 
 # per-slot output ports for SLW (must match the VHDL decoder)

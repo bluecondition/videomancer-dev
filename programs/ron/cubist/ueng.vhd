@@ -42,6 +42,20 @@
                         u_rb <= unsigned(u_rom(20 downto 14));
                         u_st <= "10";
 
+                    -- INDEXED second access (LDX/STX only)
+                    when 3 =>
+                        u_st <= "00";
+                        u_pc <= u_pc + 1;
+                        if to_integer(unsigned(u_ir(39 downto 35))) = 30 then
+                            u_wa <= unsigned(u_ir(34 downto 28));
+                            u_wd <= u_rda;
+                            u_we <= '1';
+                        else
+                            u_wa <= u_xa;
+                            u_wd <= std_logic_vector(resize(u_xd, 32));
+                            u_we <= '1';
+                        end if;
+
                     -- EXECUTE
                     when others =>
                         v_op  := to_integer(unsigned(u_ir(39 downto 35)));
@@ -101,6 +115,7 @@
                             when 17 =>                     -- SLW
                                 u_slp <= unsigned(v_imm(3 downto 0));
                                 u_slv <= resize(v_a, 32);
+                                u_sls <= unsigned(v_b(1 downto 0));
                                 u_slw <= '1';
                             when 18 => u_pc <= unsigned(v_imm(8 downto 0));
                             when 19 => if v_a /= 0 then
@@ -116,6 +131,14 @@
                                 if v_a < 0 then v_r := (others => '0');
                                 elsif v_a > v_b then v_r := v_b;
                                 else v_r := v_a; end if;
+                            when 30 | 31 =>                -- LDX / STX
+                                u_xa <= resize(unsigned(v_a(6 downto 0))
+                                               + unsigned(v_imm(6 downto 0)), 7);
+                                u_xd <= resize(v_b, 32);
+                                u_ra <= resize(unsigned(v_a(6 downto 0))
+                                               + unsigned(v_imm(6 downto 0)), 7);
+                                u_st <= "11";
+                                u_pc <= u_pc;
                             when 24 => u_done <= '1';
                             when others => null;
                         end case;

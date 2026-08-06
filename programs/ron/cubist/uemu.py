@@ -57,9 +57,11 @@ class Emu:
             elif name == 'MRD': r = self.mul >> (imm & 31)
             elif name == 'DIV': self.div = 0 if B == 0 else int((A << (imm & 31)) / B)
             elif name == 'DRD': r = self.div
-            elif name == 'SLW': self.slots[(imm, A & 3)] = A
+            elif name == 'SLW': self.slots[(imm, B & 3)] = A
             elif name == 'GWR': self.gram[imm + A] = B
             elif name == 'CTL': r = self.ctl.get(imm, 0)
+            elif name == 'LDX': r = s16(self.rf[(A + imm) & 127])
+            elif name == 'STX': self.rf[(A + imm) & 127] = B & M32
             elif name == 'JMP': self.pc = imm
             elif name == 'JNZ':
                 if A != 0: self.pc = imm
