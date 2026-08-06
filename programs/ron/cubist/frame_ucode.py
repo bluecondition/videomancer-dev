@@ -25,6 +25,7 @@ J, I, C = 43, 44, 45
 T0, T1, T2, T3, T4, T5 = 46, 47, 48, 49, 50, 51
 ANG, SK, SNEG, S0, S1, KK = 52, 53, 54, 55, 56, 57
 ZERO, ONE = 58, 59
+EX, EY, FY, ZOOM, ZSM, FUSE, CXR, CYR = 60, 61, 62, 63, 64, 65, 66, 67
 
 a = Asm()
 
@@ -144,6 +145,82 @@ for (p0, p1, rc, rs) in AXES:
         a.emit('MUL', a=rb, b=rc); a.emit('MRD', dst=T3, imm=12)   # b*c
         a.emit('SUB', dst=ra, a=T0, b=T1)
         a.emit('ADD', dst=rb, a=T2, b=T3)
+
+
+# --------------------------- phase 5: orthographic extent + autozoom
+# The projected half-extent on each screen axis is just the sum of the three
+# basis vectors' magnitudes on that axis -- no corner projection needed.
+a.emit('ABS', dst=T0, a=R_BAS + 0)
+a.emit('ABS', dst=T1, a=R_BAS + 3); a.emit('ADD', dst=T0, a=T0, b=T1)
+a.emit('ABS', dst=T1, a=R_BAS + 6); a.emit('ADD', dst=T0, a=T0, b=T1)
+a.emit('ABS', dst=T2, a=R_BAS + 1)
+a.emit('ABS', dst=T1, a=R_BAS + 4); a.emit('ADD', dst=T2, a=T2, b=T1)
+a.emit('ABS', dst=T1, a=R_BAS + 7); a.emit('ADD', dst=T2, a=T2, b=T1)
+a.emit('SHR', dst=T1, a=T0, imm=1); a.emit('ADD', dst=EX, a=T0, b=T1)  # x1.5
+a.emit('SHR', dst=T1, a=T2, imm=1); a.emit('ADD', dst=EY, a=T2, b=T1)
+
+# f (px per cubie unit, Q4) = 0.42*H*65536/ext_y, 0.42*65536 taken as 27<<10
+a.emit('CTL', dst=T0, imm=5)                     # s_hf
+a.emit('SHL', dst=T1, a=T0, imm=5)
+a.emit('SHL', dst=T2, a=T0, imm=2)
+a.emit('SUB', dst=T1, a=T1, b=T2)
+a.emit('SUB', dst=T1, a=T1, b=T0)                # 27*hf
+a.emit('DIV', a=T1, b=EY, imm=10)
+a.emit('DRD', dst=T3)
+a.emit('LDI', dst=T4, imm=4095)
+a.emit('CLP', dst=FY, a=T3, b=T4)
+a.emit('CTL', dst=T0, imm=3)                     # s_W
+a.emit('SHL', dst=T1, a=T0, imm=5)
+a.emit('SHL', dst=T2, a=T0, imm=1)
+a.emit('SUB', dst=T1, a=T1, b=T2)                # 30*W
+a.emit('DIV', a=T1, b=EX, imm=10)
+a.emit('DRD', dst=T3)
+a.emit('CLP', dst=T3, a=T3, b=T4)
+a.emit('MIN', dst=ZOOM, a=T3, b=FY)
+
+# smoothing: snap when the target moves a long way (startup, or a resolution
+# change -- the raster measurement is not valid for the first frames and a
+# 1/16 glide would take ~30 frames to walk off a bad initial value)
+a.emit('SHL', dst=T0, a=ZOOM, imm=4)
+a.emit('SUB', dst=T1, a=T0, b=ZSM)
+a.emit('ABS', dst=T2, a=T1)
+a.emit('SHR', dst=T3, a=ZSM, imm=3)
+a.emit('JLT', a=T3, b=T2, imm='az_snap')
+a.emit('SHR', dst=T1, a=T1, imm=4)
+a.emit('ADD', dst=ZSM, a=ZSM, b=T1)
+a.emit('JMP', imm='az_done')
+a.label('az_snap'); a.emit('MOV', dst=ZSM, a=T0)
+a.label('az_done')
+a.emit('SHR', dst=FUSE, a=ZSM, imm=4)
+
+# ------------------------ phase 6: scaled half-basis (screen Q2)
+# sxh(i) = 1.5 * f * B(3i).x, syh(i) likewise on y
+for i in range(3):
+    for (comp, out) in ((0, R_HB + i), (1, R_HB + 3 + i)):
+        a.emit('MUL', a=R_BAS + 3 * i + comp, b=FUSE)
+        a.emit('MRD', dst=T0, imm=0)
+        a.emit('SHR', dst=T1, a=T0, imm=1)
+        a.emit('ADD', dst=T0, a=T0, b=T1)
+        a.emit('SHR', dst=out, a=T0, imm=14)
+
+# ------------------- phase 7: the 8 screen corners are sign sums
+# Each corner is a sign combination of the three half-basis vectors: adds
+# only, no per-corner multiply.
+a.emit('CTL', dst=CXR, imm=6); a.emit('SHL', dst=CXR, a=CXR, imm=2)
+a.emit('CTL', dst=CYR, imm=7); a.emit('SHL', dst=CYR, a=CYR, imm=2)
+for k in range(8):
+    for (base, out, sub) in ((R_HB, R_CX + k, False), (R_HB + 3, R_CY + k, True)):
+        first = True
+        for bit in range(3):
+            op = 'ADD' if (k >> bit) & 1 else 'SUB'
+            if first:
+                if (k >> bit) & 1: a.emit('MOV', dst=T0, a=base + bit)
+                else:              a.emit('NEG', dst=T0, a=base + bit)
+                first = False
+            else:
+                a.emit(op, dst=T0, a=T0, b=base + bit)
+        if sub: a.emit('SUB', dst=out, a=CYR, b=T0)
+        else:   a.emit('ADD', dst=out, a=CXR, b=T0)
 
 a.emit('END')
 
