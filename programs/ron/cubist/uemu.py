@@ -19,10 +19,12 @@ def s16(x):
 
 
 class Emu:
-    def __init__(self, code, sin_rom, ctl=None):
+    def __init__(self, code, sin_rom, ctl=None, gam_rom=None):
         self.code = code
         self.sin = sin_rom
+        self.gam = gam_rom or [0] * 256
         self.ctl = ctl or {}
+        self.divs = False
         self.rf = [0] * 128
         self.slots = {}
         self.gram = {}
@@ -35,6 +37,7 @@ class Emu:
         while self.steps < limit:
             self.steps += 1
             op, dst, sa, sb, imm = self.code[self.pc]
+            imm &= 0x3FFF                      # as the 14-bit ROM field holds it
             name = INV[op]
             A, B = s16(self.rf[sa]), s16(self.rf[sb])
             self.pc += 1
@@ -55,8 +58,13 @@ class Emu:
             elif name == 'SIN': r = self.sin[A & 0xFF]
             elif name == 'MUL': self.mul = A * B
             elif name == 'MRD': r = self.mul >> (imm & 31)
-            elif name == 'DIV': self.div = 0 if B == 0 else int((A << (imm & 31)) / B)
-            elif name == 'DRD': r = self.div
+            elif name == 'DIV':
+                # magnitudes into the restoring divider, sign carried alongside
+                self.divs = (A < 0) != (B < 0)
+                self.div = 0 if B == 0 else (abs(A) << (imm & 31)) // abs(B)
+                if self.div > 65535: self.div = 65535
+            elif name == 'DRD': r = -self.div if self.divs else self.div
+            elif name == 'GAM': r = self.gam[A & 0xFF]
             elif name == 'SLW': self.slots[(imm, B & 3)] = A
             elif name == 'GWR': self.gram[imm + A] = B
             elif name == 'CTL': r = self.ctl.get(imm, 0)

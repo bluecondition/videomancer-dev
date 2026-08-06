@@ -31,7 +31,7 @@ OPS = {
     'JLT': 20,   # pc = imm if A < B
     'JGE': 21,   # pc = imm if A >= B
     'CLP': 22,   # dst = clamp(A, 0, B)
-    'RDG': 23,   # dst = gram[imm + A]
+    'GAM': 23,   # dst = gamma ROM at A (linear Q8 -> video Q8)
     'END': 24,   # frame setup complete
     'CTL': 25,   # dst = control input imm (knobs, raster measurements)
     'SLR': 26,   # dst = per-slot input imm
@@ -47,6 +47,8 @@ SLOTW = {
     'gux': 0, 'guy': 1, 'gvx': 2, 'gvy': 3, 'px0': 4, 'py0': 5,
     'face': 6, 'sil': 7, 'cu': 8, 'cv': 9, 'ly': 10, 'lf': 11,
     'hn': 12, 'hu': 13, 'hv': 14, 'nslot': 15,
+    # port 16+ are globals, not slot-indexed
+    'qx0': 16,
 }
 
 # control inputs for CTL
