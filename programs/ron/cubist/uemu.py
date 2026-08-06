@@ -10,12 +10,12 @@ sys.path.insert(0, '.')
 from uasm import OPS
 
 INV = {v: k for k, v in OPS.items()}
-M16 = 0xFFFF
+M32 = 0xFFFFFFFF
 
 
 def s16(x):
-    x &= M16
-    return x - 0x10000 if x & 0x8000 else x
+    x &= M32
+    return x - 0x100000000 if x & 0x80000000 else x
 
 
 class Emu:
@@ -70,5 +70,5 @@ class Emu:
             elif name == 'END': return True
             elif name == 'NOP': pass
             if r is not None:
-                self.rf[dst] = r & M16
+                self.rf[dst] = r & M32
         raise RuntimeError(f'no END after {limit} steps (pc={self.pc})')

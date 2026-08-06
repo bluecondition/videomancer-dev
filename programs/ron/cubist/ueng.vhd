@@ -13,8 +13,8 @@
     -- ~1,500 dynamic instructions is ~4,500 clocks of the vblank budget.
     ------------------------------------------------------------------------
     p_ueng : process(clk)
-        variable v_a, v_b : signed(17 downto 0);
-        variable v_r      : signed(17 downto 0);
+        variable v_a, v_b : signed(31 downto 0);
+        variable v_r      : signed(31 downto 0);
         variable v_op     : integer range 0 to 31;
         variable v_imm    : signed(13 downto 0);
     begin
@@ -46,8 +46,8 @@
                     when others =>
                         v_op  := to_integer(unsigned(u_ir(39 downto 35)));
                         v_imm := signed(u_ir(13 downto 0));
-                        v_a   := resize(signed(u_rda), 18);
-                        v_b   := resize(signed(u_rdb), 18);
+                        v_a   := resize(signed(u_rda), 32);
+                        v_b   := resize(signed(u_rdb), 32);
                         v_r   := (others => '0');
                         u_st  <= "00";
                         u_pc  <= u_pc + 1;
@@ -72,7 +72,7 @@
                                     u_pc <= u_pc;
                                 else
                                     v_r := resize(shift_right(mu_p,
-                                              to_integer(v_imm(4 downto 0))), 18);
+                                              to_integer(v_imm(4 downto 0))), 32);
                                 end if;
                             when 12 =>                     -- DIV: start
                                 frd_ns <= shift_left(resize(unsigned(abs(v_a)), 32),
@@ -86,13 +86,13 @@
                                     u_st <= "10";
                                     u_pc <= u_pc;
                                 elsif fd_sgn = '1' then
-                                    v_r := -resize(signed(dv_q(15 downto 0)), 18);
+                                    v_r := -resize(signed(dv_q(15 downto 0)), 32);
                                 else
-                                    v_r := resize(signed(dv_q(15 downto 0)), 18);
+                                    v_r := resize(signed(dv_q(15 downto 0)), 32);
                                 end if;
                             when 14 => v_r := resize(C_SIN(to_integer(
-                                              unsigned(v_a(7 downto 0)))), 18);
-                            when 15 => v_r := resize(v_imm, 18);
+                                              unsigned(v_a(7 downto 0)))), 32);
+                            when 15 => v_r := resize(v_imm, 32);
                             when 16 =>                     -- GWR
                                 g_wa <= resize(unsigned(v_imm(7 downto 0))
                                                + unsigned(v_a(7 downto 0)), 8);
@@ -100,7 +100,7 @@
                                 g_we <= '1';
                             when 17 =>                     -- SLW
                                 u_slp <= unsigned(v_imm(3 downto 0));
-                                u_slv <= resize(v_a, 18);
+                                u_slv <= resize(v_a, 32);
                                 u_slw <= '1';
                             when 18 => u_pc <= unsigned(v_imm(8 downto 0));
                             when 19 => if v_a /= 0 then
@@ -125,7 +125,7 @@
                            and v_op /= 16 and v_op /= 17 and v_op /= 18
                            and v_op /= 19 and v_op /= 20 and v_op /= 21 then
                             u_wa <= unsigned(u_ir(34 downto 28));
-                            u_wd <= std_logic_vector(resize(v_r, 16));
+                            u_wd <= std_logic_vector(resize(v_r, 32));
                             u_we <= '1';
                         end if;
                 end case;
