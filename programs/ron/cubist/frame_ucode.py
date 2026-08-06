@@ -121,6 +121,30 @@ a.emit('ADD', dst=J, a=J, b=ONE)
 a.emit('LDI', dst=T4, imm=6)
 a.emit('JLT', a=J, b=T4, imm='trig')
 
+
+# ------------------------------------------ phase 3: basis = identity
+for c in range(9):
+    a.emit('LDI', dst=R_BAS + c, imm=4096 if c in (0, 4, 8) else 0)
+
+# ------------------------------- phase 4: basis rotation, UNROLLED
+# (a,b) := (a*c - b*s, a*s + b*c) for each basis vector about each axis.
+# Unrolled rather than looped: the loop body needs B[3i+p] -- a computed
+# register address -- and indexed addressing would cost an extra pipeline
+# state in the engine.  Microcode ROM is block RAM, which is the resource
+# this design has spare.
+AXES = ((0, 1, R_TRIG + 5, R_TRIG + 4),    # roll  : c = cs_rol_c, s = cs_rol_s
+        (1, 2, R_TRIG + 3, R_TRIG + 2),    # pitch
+        (2, 0, R_TRIG + 1, R_TRIG + 0))    # yaw
+for (p0, p1, rc, rs) in AXES:
+    for i in range(3):
+        ra, rb = R_BAS + 3 * i + p0, R_BAS + 3 * i + p1
+        a.emit('MUL', a=ra, b=rc); a.emit('MRD', dst=T0, imm=12)   # a*c
+        a.emit('MUL', a=rb, b=rs); a.emit('MRD', dst=T1, imm=12)   # b*s
+        a.emit('MUL', a=ra, b=rs); a.emit('MRD', dst=T2, imm=12)   # a*s
+        a.emit('MUL', a=rb, b=rc); a.emit('MRD', dst=T3, imm=12)   # b*c
+        a.emit('SUB', dst=ra, a=T0, b=T1)
+        a.emit('ADD', dst=rb, a=T2, b=T3)
+
 a.emit('END')
 
 if __name__ == '__main__':
