@@ -757,7 +757,7 @@ architecture cubist of program_top is
     attribute ram_style of rf_a : signal is "block";
     attribute ram_style of rf_b : signal is "block";
     signal u_pc  : unsigned(9 downto 0) := (others => '0');
-    signal u_st  : unsigned(1 downto 0) := (others => '0');
+    signal u_st  : unsigned(2 downto 0) := (others => '0');
     signal u_gwt : unsigned(1 downto 0) := (others => '0');
     signal u_ir, u_rom : std_logic_vector(39 downto 0) := (others => '0');
     signal u_ra, u_rb, u_wa, u_xa : unsigned(6 downto 0) := (others => '0');
@@ -1176,7 +1176,6 @@ begin
                 if s_ilace = '1' then s_hf <= resize(s_H & '0', 13);
                 else                  s_hf <= resize(s_H, 13); end if;
                 s_cx <= '0' & s_W(11 downto 1);
-                s_cy <= resize(s_hf(12 downto 1), 12);
                 hmax <= to_unsigned(1, 15);
                 wmax <= to_unsigned(1, 15);
             else
@@ -1250,7 +1249,7 @@ begin
 
             if s_fstart = '1' then
                 u_pc   <= (others => '0');
-                u_st   <= "00";
+                u_st   <= "000";
                 u_gwt  <= (others => '0');
                 u_done <= '0';
             elsif u_done = '0' then
@@ -1258,18 +1257,27 @@ begin
 
                     -- FETCH: the ROM answers next cycle
                     when 0 =>
-                        u_st <= "01";
+                        u_st <= "001";
 
                     -- DECODE: latch the instruction, issue both register reads
                     when 1 =>
                         u_ir <= u_rom;
                         u_ra <= unsigned(u_rom(27 downto 21));
                         u_rb <= unsigned(u_rom(20 downto 14));
-                        u_st <= "10";
+                        u_st <= "010";
+
+                    -- the register file is a block RAM: the operands it was
+                    -- just addressed for do not appear until the cycle after.
+                    when 2 =>
+                        u_st <= "011";
+
+                    -- same one-cycle read latency on the indexed address
+                    when 4 =>
+                        u_st <= "101";
 
                     -- INDEXED second access (LDX/STX only)
-                    when 3 =>
-                        u_st <= "00";
+                    when 5 =>
+                        u_st <= "000";
                         u_pc <= u_pc + 1;
                         if to_integer(unsigned(u_ir(39 downto 35))) = 30 then
                             u_wa <= unsigned(u_ir(34 downto 28));
@@ -1288,7 +1296,7 @@ begin
                         v_a   := resize(signed(u_rda), 32);
                         v_b   := resize(signed(u_rdb), 32);
                         v_r   := (others => '0');
-                        u_st  <= "00";
+                        u_st  <= "000";
                         u_pc  <= u_pc + 1;
 
                         case v_op is
@@ -1307,7 +1315,7 @@ begin
                                 mu_go_f <= '1';
                             when 11 =>                     -- MRD: stall, then take
                                 if mu_idle = '0' then
-                                    u_st <= "10";
+                                    u_st <= "011";
                                     u_pc <= u_pc;
                                 else
                                     v_r := resize(shift_right(mu_p,
@@ -1324,7 +1332,7 @@ begin
                                 -- the quotient is a MAGNITUDE up to 65535, so it
                                 -- has to be zero-extended before the sign goes on
                                 if dv_bsy = '1' then
-                                    u_st <= "10";
+                                    u_st <= "011";
                                     u_pc <= u_pc;
                                 else
                                     if dv_q > 65535 then
@@ -1374,7 +1382,7 @@ begin
                                 if u_gwt /= 2 then
                                     u_gama <= unsigned(v_a(7 downto 0));
                                     u_gwt  <= u_gwt + 1;
-                                    u_st   <= "10";
+                                    u_st   <= "011";
                                     u_pc   <= u_pc;
                                 else
                                     u_gwt <= (others => '0');
@@ -1396,7 +1404,7 @@ begin
                                 u_xd <= resize(v_b, 32);
                                 u_ra <= resize(unsigned(v_a(6 downto 0))
                                                + unsigned(v_imm(6 downto 0)), 7);
-                                u_st <= "11";
+                                u_st <= "100";
                                 u_pc <= u_pc;
                             when 24 => u_done <= '1';
                             when others => null;
@@ -1536,7 +1544,8 @@ begin
         end if;
     end process p_gamrom;
 
-    gm_a <= t_lf when fr_done = '0' else gm_ap;
+    s_cy <= resize(s_hf(12 downto 1), 12);
+    gm_a <= u_gama when fr_done = '0' else gm_ap;
 
     mu_idle <= '1' when (mu_bsy = '0' and mu_go_f = '0' and mu_go_l = '0')
               else '0';
