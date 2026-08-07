@@ -115,6 +115,7 @@ architecture cubist of program_top is
         to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16), to_signed(    0,16) );
 
     function f_clamp10(v : signed) return unsigned is
+
     begin
         if v < 0 then return to_unsigned(0, 10);
         elsif v > 1023 then return to_unsigned(1023, 10);
@@ -447,8 +448,6 @@ architecture cubist of program_top is
     -- FRAM: per-frame vertex/basis scratch EBR (one read + one write port;
     -- addressing replaces every register-array mux the old FSM had).
     -- Map: 0..8 basis | 18+c*8+k corners | 42+k rx | 50+k ry | 58+k sx | 66+k sy
-    type t_fram is array (0 to 127) of std_logic_vector(15 downto 0);
-    signal fram : t_fram := (others => (others => '0'));
     signal fr_ra, fr_wa : unsigned(6 downto 0) := (others => '0');
     signal fr_rd2 : std_logic_vector(15 downto 0) := (others => '0');
     signal fr_wd  : std_logic_vector(15 downto 0) := (others => '0');
@@ -547,7 +546,6 @@ architecture cubist of program_top is
     signal gram : t_gram := (others => (others => '0'));
     attribute ram_style : string;
     attribute ram_style of gram : signal is "block";
-    attribute ram_style of fram : signal is "block";
     signal g_wa : unsigned(7 downto 0) := (others => '0');
     signal g_wd : std_logic_vector(15 downto 0) := (others => '0');
     signal g_we : std_logic := '0';
@@ -750,6 +748,285 @@ architecture cubist of program_top is
     signal s_vsync_n_sr : std_logic_vector(0 to C_LATENCY - 1) := (others => '1');
     signal s_field_n_sr : std_logic_vector(0 to C_LATENCY - 1) := (others => '0');
 
+
+    ------------------------------------------------------------------------
+    -- microcoded geometry engine: register file, program counter, decode
+    ------------------------------------------------------------------------
+    type t_rf is array (0 to 127) of std_logic_vector(31 downto 0);
+    signal rf_a, rf_b : t_rf := (others => (others => '0'));
+    attribute ram_style of rf_a : signal is "block";
+    attribute ram_style of rf_b : signal is "block";
+    signal u_pc  : unsigned(9 downto 0) := (others => '0');
+    signal u_st  : unsigned(1 downto 0) := (others => '0');
+    signal u_gwt : unsigned(1 downto 0) := (others => '0');
+    signal u_ir, u_rom : std_logic_vector(39 downto 0) := (others => '0');
+    signal u_ra, u_rb, u_wa, u_xa : unsigned(6 downto 0) := (others => '0');
+    signal u_rda, u_rdb, u_wd : std_logic_vector(31 downto 0) := (others => '0');
+    signal u_xd, u_slv, u_ctlv : signed(31 downto 0) := (others => '0');
+    signal u_we, u_slw : std_logic := '0';
+    signal u_done : std_logic := '0';
+    signal u_slp : unsigned(4 downto 0) := (others => '0');
+    signal u_sls : unsigned(1 downto 0) := (others => '0');
+    signal u_gama : unsigned(7 downto 0) := (others => '0');
+
+    type t_ucode is array (0 to 1023) of std_logic_vector(39 downto 0);
+    constant C_UCODE : t_ucode := (
+        x"7BA0000000", x"7BB0000001", x"CAE0000000", x"2AE5C00002",
+        x"1AF5CA0000", x"2305E00004", x"980600000D", x"A005EE800C",
+        x"A0074BC00A", x"900000000D", x"0B07600000", x"900000000D",
+        x"3307600000", x"12850C0000", x"DA85000FFF", x"CB1000000A",
+        x"9806200012", x"9000000013", x"0A85C00000", x"CAE0000001",
+        x"2AE5C00002", x"1AF5CA4000", x"2305E00004", x"980600001E",
+        x"A005EE801D", x"A0074BC01B", x"900000001E", x"0B07600000",
+        x"900000001E", x"3307600000", x"12952C0000", x"DA95200FFF",
+        x"CB1000000A", x"9806200023", x"9000000024", x"0A95C00000",
+        x"CAE0000002", x"2AE5C00002", x"1AF5CA8000", x"2305E00004",
+        x"980600002F", x"A005EE802E", x"A0074BC02C", x"900000002F",
+        x"0B07600000", x"900000002F", x"3307600000", x"12A54C0000",
+        x"DAA5400FFF", x"CB1000000A", x"9806200034", x"9000000035",
+        x"0AA5C00000", x"7AB0000000", x"22E5600001", x"7B40000000",
+        x"9805C0003B", x"0B45000000", x"9000000040", x"1AF5CEC000",
+        x"9805E0003F", x"0B45200000", x"9000000040", x"0B45400000",
+        x"E305600000", x"9806000043", x"9000000046", x"7B10000400",
+        x"13468C4000", x"DB46800FFF", x"22E6800004", x"DAE5C0003F",
+        x"E2F680000A", x"E36680000B", x"9805E0004E", x"0B55C00000",
+        x"1395CEC000", x"9000000051", x"7B00000040", x"1B560B8000",
+        x"1B96AEC000", x"7376A00000", x"7387200000", x"9806C00055",
+        x"9000000057", x"3376E00000", x"3387000000", x"1AE70DC000",
+        x"DAF680000F", x"5005CBC000", x"5B00000004", x"1316EC0000",
+        x"7B20000000", x"1B356C8000", x"9806600060", x"0A26200000",
+        x"7B20000001", x"1B356C8000", x"9806600064", x"0A36200000",
+        x"7B20000002", x"1B356C8000", x"9806600068", x"0A46200000",
+        x"7B20000003", x"1B356C8000", x"980660006C", x"0A56200000",
+        x"7B20000004", x"1B356C8000", x"9806600070", x"0A66200000",
+        x"7B20000005", x"1B356C8000", x"9806600074", x"0A76200000",
+        x"12B56EC000", x"7B20000006", x"A0056C8036", x"7800001000",
+        x"7810000000", x"7820000000", x"7830000000", x"7840001000",
+        x"7850000000", x"7860000000", x"7870000000", x"7880001000",
+        x"500009C000", x"5AE000000C", x"5000298000", x"5AF000000C",
+        x"5000098000", x"5B0000000C", x"500029C000", x"5B1000000C",
+        x"1805CBC000", x"10160C4000", x"500069C000", x"5AE000000C",
+        x"5000898000", x"5AF000000C", x"5000698000", x"5B0000000C",
+        x"500089C000", x"5B1000000C", x"1835CBC000", x"10460C4000",
+        x"5000C9C000", x"5AE000000C", x"5000E98000", x"5AF000000C",
+        x"5000C98000", x"5B0000000C", x"5000E9C000", x"5B1000000C",
+        x"1865CBC000", x"10760C4000", x"5000294000", x"5AE000000C",
+        x"5000490000", x"5AF000000C", x"5000290000", x"5B0000000C",
+        x"5000494000", x"5B1000000C", x"1815CBC000", x"10260C4000",
+        x"5000894000", x"5AE000000C", x"5000A90000", x"5AF000000C",
+        x"5000890000", x"5B0000000C", x"5000A94000", x"5B1000000C",
+        x"1845CBC000", x"10560C4000", x"5000E94000", x"5AE000000C",
+        x"5001090000", x"5AF000000C", x"5000E90000", x"5B0000000C",
+        x"5001094000", x"5B1000000C", x"1875CBC000", x"10860C4000",
+        x"500048C000", x"5AE000000C", x"5000088000", x"5AF000000C",
+        x"5000488000", x"5B0000000C", x"500008C000", x"5B1000000C",
+        x"1825CBC000", x"10060C4000", x"5000A8C000", x"5AE000000C",
+        x"5000688000", x"5AF000000C", x"5000A88000", x"5B0000000C",
+        x"500068C000", x"5B1000000C", x"1855CBC000", x"10360C4000",
+        x"500108C000", x"5AE000000C", x"5000C88000", x"5AF000000C",
+        x"5001088000", x"5B0000000C", x"5000C8C000", x"5B1000000C",
+        x"1885CBC000", x"10660C4000", x"3AE0000000", x"3AF0600000",
+        x"12E5CBC000", x"3AF0C00000", x"12E5CBC000", x"3B00200000",
+        x"3AF0800000", x"13060BC000", x"3AF0E00000", x"13060BC000",
+        x"22F5C00001", x"13C5CBC000", x"22F6000001", x"13D60BC000",
+        x"CAE0000005", x"2AF5C00005", x"2B05C00002", x"1AF5EC0000",
+        x"1AF5EB8000", x"6005EF400A", x"6B10000000", x"7B20000FFF",
+        x"B3E62C8000", x"CAE0000003", x"2AF5C00005", x"2B05C00001",
+        x"1AF5EC0000", x"6005EF000A", x"6B10000000", x"B3162C8000",
+        x"43F62F8000", x"2AE7E00004", x"1AF5D00000", x"3B05E00000",
+        x"2318000003", x"A0062C0101", x"22F5E00004", x"14080BC000",
+        x"9000000102", x"0C05C00000", x"2418000004", x"5000104000",
+        x"5AE0000000", x"22F5C00001", x"12E5CBC000", x"20C5C0000E",
+        x"5000304000", x"5AE0000000", x"22F5C00001", x"12E5CBC000",
+        x"20F5C0000E", x"5000704000", x"5AE0000000", x"22F5C00001",
+        x"12E5CBC000", x"20D5C0000E", x"5000904000", x"5AE0000000",
+        x"22F5C00001", x"12E5CBC000", x"2105C0000E", x"5000D04000",
+        x"5AE0000000", x"22F5C00001", x"12E5CBC000", x"20E5C0000E",
+        x"5000F04000", x"5AE0000000", x"22F5C00001", x"12E5CBC000",
+        x"2115C0000E", x"CC20000006", x"2C28400002", x"CC30000007",
+        x"2C38600002", x"32E1800000", x"1AE5C34000", x"1AE5C38000",
+        x"11284B8000", x"32E1E00000", x"1AE5C40000", x"1AE5C44000",
+        x"19A86B8000", x"0AE1800000", x"1AE5C34000", x"1AE5C38000",
+        x"11384B8000", x"0AE1E00000", x"1AE5C40000", x"1AE5C44000",
+        x"19B86B8000", x"32E1800000", x"12E5C34000", x"1AE5C38000",
+        x"11484B8000", x"32E1E00000", x"12E5C40000", x"1AE5C44000",
+        x"19C86B8000", x"0AE1800000", x"12E5C34000", x"1AE5C38000",
+        x"11584B8000", x"0AE1E00000", x"12E5C40000", x"1AE5C44000",
+        x"19D86B8000", x"32E1800000", x"1AE5C34000", x"12E5C38000",
+        x"11684B8000", x"32E1E00000", x"1AE5C40000", x"12E5C44000",
+        x"19E86B8000", x"0AE1800000", x"1AE5C34000", x"12E5C38000",
+        x"11784B8000", x"0AE1E00000", x"1AE5C40000", x"12E5C44000",
+        x"19F86B8000", x"32E1800000", x"12E5C34000", x"12E5C38000",
+        x"11884B8000", x"32E1E00000", x"12E5C40000", x"12E5C44000",
+        x"1A086B8000", x"0AE1800000", x"12E5C34000", x"12E5C38000",
+        x"11984B8000", x"0AE1E00000", x"12E5C40000", x"12E5C44000",
+        x"1A186B8000", x"7B20000040", x"3336400000", x"7C40000000",
+        x"A80641416A", x"7C40000001", x"7C50000000", x"A800ACC16D",
+        x"7C50000001", x"7C60000000", x"A806408170", x"7C60000001",
+        x"7C70000000", x"A8004CC173", x"7C70000001", x"7C80000000",
+        x"A806420176", x"7C80000001", x"7C90000000", x"A8010CC179",
+        x"7C90000001", x"7CA00007F2", x"7D000004E5", x"7D60000022",
+        x"7CB0000948", x"7D10000953", x"7D70000103", x"7CC0000BD9",
+        x"7D20000941", x"7D80000110", x"7CD00005A0", x"7D30000065",
+        x"7D900000A1", x"7CE0000DEC", x"7D40000053", x"7DA0000084",
+        x"7CF0000681", x"7D500004C1", x"7DB0000015", x"7FB0000FA0",
+        x"2FBF600003", x"7AE0000001", x"2AE5C0000F", x"12E5CB8000",
+        x"1FC5CEC000", x"7AE0000200", x"2AE5C0000A", x"7AF0000200",
+        x"12E5CBC000", x"2AE5C0000A", x"7AF00003E3", x"1755CBC000",
+        x"7AE000028E", x"2AE5C0000A", x"7AF000005B", x"12E5CBC000",
+        x"2AE5C0000A", x"7AF0000327", x"1765CBC000", x"7AE000032B",
+        x"2AE5C0000A", x"7AF00001CC", x"12E5CBC000", x"2AE5C0000A",
+        x"7AF000014C", x"1775CBC000", x"7AE0000350", x"2AE5C0000A",
+        x"7AF00000F4", x"12E5CBC000", x"2AE5C0000A", x"7AF0000201",
+        x"1785CBC000", x"7AE00000EE", x"2AE5C0000A", x"7AF00001F0",
+        x"12E5CBC000", x"2AE5C0000A", x"7AF00001A0", x"1795CBC000",
+        x"7AE000014A", x"2AE5C0000A", x"7AF00002F5", x"12E5CBC000",
+        x"2AE5C0000A", x"7AF0000114", x"17A5CBC000", x"7DC0000000",
+        x"7AC0000000", x"F2E5800044", x"9805C001C0", x"900000030E",
+        x"7AF0000003", x"A80B8BC311", x"F65580004A", x"F665800050",
+        x"F675800056", x"DAECA00007", x"F5E5C00012", x"F5F5C0001A",
+        x"22FCA00003", x"DAF5E00007", x"F305E00012", x"1B06178000",
+        x"2606000002", x"F305E0001A", x"1B0617C000", x"2626000002",
+        x"22FCA00009", x"DAF5E00007", x"F305E00012", x"1B06178000",
+        x"2616000002", x"F305E0001A", x"1B0617C000", x"2636000002",
+        x"500C18C000", x"5E40000000", x"500C584000", x"5AE0000000",
+        x"1E4C8B8000", x"0AEC600000", x"12F5CB8000", x"12F5EB8000",
+        x"6005F90014", x"6B20000000", x"43265F0000", x"333F800000",
+        x"4B264CC000", x"8806570000", x"32EC200000", x"12F5CB8000",
+        x"12F5EB8000", x"6005F90014", x"6B20000000", x"43265F0000",
+        x"333F800000", x"4B264CC000", x"8806570001", x"32EC400000",
+        x"12F5CB8000", x"12F5EB8000", x"6005F90014", x"6B20000000",
+        x"43265F0000", x"333F800000", x"4B264CC000", x"8806570002",
+        x"0AEC000000", x"12F5CB8000", x"12F5EB8000", x"6005F90014",
+        x"6B20000000", x"43265F0000", x"333F800000", x"4B264CC000",
+        x"8806570003", x"22EBC00002", x"8805D70004", x"22EBE00002",
+        x"8805D70005", x"DAECA00007", x"F685C0001A", x"0E9D000000",
+        x"22ECA00003", x"DAE5C00007", x"F2F5C0001A", x"468D0BC000",
+        x"4E9D2BC000", x"22ECA00006", x"DAE5C00007", x"F2F5C0001A",
+        x"468D0BC000", x"4E9D2BC000", x"22ECA00009", x"DAE5C00007",
+        x"F2F5C0001A", x"468D0BC000", x"4E9D2BC000", x"2EDB800005",
+        x"22ED000002", x"4AE5CE8000", x"800DAB8000", x"22ED200002",
+        x"12E5CEC000", x"4AE5CE8000", x"800DAB8001", x"DAECA00007",
+        x"F305C00012", x"F315C0001A", x"22FCA00003", x"DAF5E00007",
+        x"F325E00012", x"F335E0001A", x"1F164C0000", x"1F266C4000",
+        x"800DAC4002", x"800DAC0003", x"3F3E400000", x"7F40000002",
+        x"A80E7D0231", x"A00E4E8230", x"0F2E800000", x"9000000231",
+        x"372E800000", x"600E3C8006", x"6F30000000", x"473E7EC000",
+        x"374F600000", x"4F3E7D0000", x"800DBCC004", x"22ECA00003",
+        x"DAE5C00007", x"F305C00012", x"F315C0001A", x"22FCA00006",
+        x"DAF5E00007", x"F325E00012", x"F335E0001A", x"1F164C0000",
+        x"1F266C4000", x"800DAC4005", x"800DAC0006", x"3F3E400000",
+        x"7F40000002", x"A80E7D024A", x"A00E4E8249", x"0F2E800000",
+        x"900000024A", x"372E800000", x"600E3C8006", x"6F30000000",
+        x"473E7EC000", x"374F600000", x"4F3E7D0000", x"800DBCC007",
+        x"22ECA00006", x"DAE5C00007", x"F305C00012", x"F315C0001A",
+        x"22FCA00009", x"DAF5E00007", x"F325E00012", x"F335E0001A",
+        x"1F164C0000", x"1F266C4000", x"800DAC4008", x"800DAC0009",
+        x"3F3E400000", x"7F40000002", x"A80E7D0263", x"A00E4E8262",
+        x"0F2E800000", x"9000000263", x"372E800000", x"600E3C8006",
+        x"6F30000000", x"473E7EC000", x"374F600000", x"4F3E7D0000",
+        x"800DBCC00A", x"22ECA00009", x"DAE5C00007", x"F305C00012",
+        x"F315C0001A", x"DAFCA00007", x"F325E00012", x"F335E0001A",
+        x"1F164C0000", x"1F266C4000", x"800DAC400B", x"800DAC000C",
+        x"3F3E400000", x"7F40000002", x"A80E7D027B", x"A00E4E827A",
+        x"0F2E800000", x"900000027B", x"372E800000", x"600E3C8006",
+        x"6F30000000", x"473E7EC000", x"374F600000", x"4F3E7D0000",
+        x"800DBCC00D", x"DAECE00007", x"22F5C00001", x"1305EBC000",
+        x"13060BC000", x"E315C00000", x"7B20000000", x"13260C8000",
+        x"F336400000", x"980620028B", x"900000028C", x"3336600000",
+        x"0EE6600000", x"7B20000001", x"13260C8000", x"F336400000",
+        x"9806200292", x"9000000293", x"3336600000", x"0EF6600000",
+        x"7B20000002", x"13260C8000", x"F336400000", x"9806200299",
+        x"900000029A", x"3336600000", x"0F06600000", x"7EA0000000",
+        x"7EB0000000", x"7B30003F95", x"500DCCC000", x"5AE000000C",
+        x"16AD4B8000", x"7B3000009A", x"500DECC000", x"5AE000000C",
+        x"16AD4B8000", x"7B300000B8", x"500E0CC000", x"5AE000000C",
+        x"16AD4B8000", x"7B3000008D", x"500DCCC000", x"5AE000000C",
+        x"16BD6B8000", x"7B30003F73", x"500DECC000", x"5AE000000C",
+        x"16BD6B8000", x"7B300000A1", x"500E0CC000", x"5AE000000C",
+        x"16BD6B8000", x"7AE000003E", x"A8075A82BA", x"22FD400002",
+        x"1B0D4BC000", x"12E5CC0000", x"A8075AC2BD", x"22FD600002",
+        x"12E5CBC000", x"7AF00000FF", x"46C5CBC000", x"8805970006",
+        x"7AE0000000", x"DAFCC00007", x"F305E00044", x"98060002C6",
+        x"7B10000001", x"12E5CC4000", x"22FCC00003", x"DAF5E00007",
+        x"F305E00044", x"98060002CC", x"7B10000002", x"12E5CC4000",
+        x"22FCC00006", x"DAF5E00007", x"F305E00044", x"98060002D2",
+        x"7B10000004", x"12E5CC4000", x"22FCC00009", x"DAF5E00007",
+        x"F305E00044", x"98060002D8", x"7B10000008", x"12E5CC4000",
+        x"8805D70007", x"DAECE00007", x"22F5C00001", x"F305E00009",
+        x"E315C00000", x"98062002DF", x"90000002E0", x"3306000000",
+        x"880617000C", x"22ECE00003", x"DAE5C00007", x"22F5C00001",
+        x"F305E00009", x"E315C00000", x"98062002E8", x"90000002E9",
+        x"3306000000", x"880617000D", x"22ECE00006", x"DAE5C00007",
+        x"22F5C00001", x"F305E00009", x"E315C00000", x"98062002F1",
+        x"90000002F2", x"3306000000", x"880617000E", x"F745800075",
+        x"DAEE8003FF", x"8805D7000A", x"880D97000B", x"BB2D800000",
+        x"22EE80000A", x"DAE5C003FF", x"7AF0000200", x"1AE5CBC000",
+        x"5005CC8000", x"5B00000008", x"13060BC000", x"7B100003FF",
+        x"B3060C4000", x"8806170008", x"22EE80000A", x"22E5C0000A",
+        x"DAE5C003FF", x"7AF0000200", x"1AE5CBC000", x"5005CC8000",
+        x"5B00000008", x"13060BC000", x"7B100003FF", x"B3060C4000",
+        x"8806170009", x"15CB8EC000", x"12C58EC000", x"7AE0000006",
+        x"A0058B81BD", x"CAE0000006", x"5005CB8000", x"5AF0000000",
+        x"DB05E03FFF", x"2315E0000E", x"DB162000FF", x"2B1620000E",
+        x"13060C4000", x"88060E8010", x"800757007F", x"C000000000",
+        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
+        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
+        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
+        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
+        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
+        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
+        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
+        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
+        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
+        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
+        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
+        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
+        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
+        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
+        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
+        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
+        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
+        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
+        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
+        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
+        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
+        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
+        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
+        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
+        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
+        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
+        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
+        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
+        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
+        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
+        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
+        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
+        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
+        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
+        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
+        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
+        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
+        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
+        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
+        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
+        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
+        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
+        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
+        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
+        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
+        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
+        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
+        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
+        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
+        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
+        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
+        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
+        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
+        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
+        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
+        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
+        x"0000000000", x"0000000000", x"0000000000", x"0000000000" );
 begin
 
     ------------------------------------------------------------------------
@@ -883,951 +1160,306 @@ begin
     -- FRAM map: 0..8 basis (vec*3+comp) | 18+c*8+k corners (c=0/1/2=x/y/z)
     --           42+k rx | 50+k ry | 58+k sx | 66+k sy   (k = corner 0..7)
     ------------------------------------------------------------------------
-    p_frame : process(clk)
-        variable v_ang  : unsigned(11 downto 0);
-        variable v_d    : signed(11 downto 0);
-        variable v_st   : signed(11 downto 0);
-        variable v_p0   : integer range 0 to 2;
-        variable v_p1   : integer range 0 to 2;
-        variable v_c, v_s : signed(13 downto 0);
-        variable v_k    : integer range 0 to 7;
-        variable v_f    : unsigned(15 downto 0);
-        variable v_n    : unsigned(29 downto 0);
-        variable v_t    : signed(17 downto 0);
-        variable v_rd   : signed(15 downto 0);
-        variable v_a3   : unsigned(6 downto 0);
-        variable v_c1   : integer range 0 to 2;
-        variable v_c2   : integer range 0 to 2;
-        variable v_l1   : signed(17 downto 0);
-        variable v_r1   : signed(13 downto 0);
-        variable v_y2   : signed(15 downto 0);
-        variable v_kk   : integer range 0 to 64;
-        variable v_px   : unsigned(7 downto 0);
-        variable v_e    : integer range 0 to 5;
-        variable v_mant : integer range 0 to 255;
-        variable v_t3   : signed(31 downto 0);
-        variable v_gn   : signed(13 downto 0);
-        variable v_g    : signed(16 downto 0);
+    ------------------------------------------------------------------------
+    -- What survives of the old frame FSM: latch the knobs and the raster
+    -- measurements at vblank, and clear the first-frame snap once the engine
+    -- has consumed it.  Everything else is microcode now.
+    ------------------------------------------------------------------------
+    p_fsetup : process(clk)
     begin
         if rising_edge(clk) then
-            frd_start <= '0';
-            g_we     <= '0';
-            fr_we    <= '0';
-            mu_go_f  <= '0';
-            v_rd := signed(fr_rd2);
-
             if s_fstart = '1' then
-                fr_st   <= to_unsigned(1, 8);
                 fr_done <= '0';
-                fr_i    <= (others => '0');
-                fr_j    <= (others => '0');
-                fr_c    <= (others => '0');
-                fr_w    <= (others => '0');
                 s_k1 <= unsigned(registers_in(0));
                 s_k2 <= unsigned(registers_in(1));
                 s_k3 <= unsigned(registers_in(2));
                 if s_ilace = '1' then s_hf <= resize(s_H & '0', 13);
                 else                  s_hf <= resize(s_H, 13); end if;
                 s_cx <= '0' & s_W(11 downto 1);
+                s_cy <= resize(s_hf(12 downto 1), 12);
                 hmax <= to_unsigned(1, 15);
                 wmax <= to_unsigned(1, 15);
             else
-                case to_integer(fr_st) is
-                    when 1 =>
-                        s_cy <= resize(s_hf(12 downto 1), 12);
-                        v_d := signed((s_k1 & "00") - an_yaw);
-                        v_st := shift_right(v_d, 4);
-                        if v_st = 0 and v_d /= 0 then
-                            if v_d > 0 then v_st := to_signed(1, 12);
-                            else            v_st := to_signed(-1, 12); end if;
-                        end if;
-                        an_yaw <= an_yaw + unsigned(v_st);
-                        v_d := signed((s_k2 & "00") - an_pit);
-                        v_st := shift_right(v_d, 4);
-                        if v_st = 0 and v_d /= 0 then
-                            if v_d > 0 then v_st := to_signed(1, 12);
-                            else            v_st := to_signed(-1, 12); end if;
-                        end if;
-                        an_pit <= an_pit + unsigned(v_st);
-                        v_d := signed((s_k3 & "00") - an_rol);
-                        v_st := shift_right(v_d, 4);
-                        if v_st = 0 and v_d /= 0 then
-                            if v_d > 0 then v_st := to_signed(1, 12);
-                            else            v_st := to_signed(-1, 12); end if;
-                        end if;
-                        an_rol <= an_rol + unsigned(v_st);
-                        if s_zfirst = '1' then
-                            an_yaw <= s_k1 & "00";
-                            an_pit <= s_k2 & "00";
-                            an_rol <= s_k3 & "00";
-                            s_zfirst <= '0';
-                        end if;
-                        fr_st <= to_unsigned(2, 8);
+                fr_done <= u_done;
+                if u_done = '1' then s_zfirst <= '0'; end if;
+            end if;
+        end if;
+    end process p_fsetup;
 
-                    ----------------------------------------------------------
-                    -- trig: 6 interpolated table reads through ONE ROM port
-                    ----------------------------------------------------------
-                    when 2 =>
-                        case to_integer(fr_j(2 downto 1)) is
-                            when 0 => v_ang := an_yaw;
-                            when 1 => v_ang := an_pit;
-                            when others => v_ang := an_rol;
-                        end case;
-                        if fr_j(0) = '1' then
-                            v_ang := v_ang + to_unsigned(1024, 12);
-                        end if;
-                        t_ang <= v_ang;
-                        fr_st <= to_unsigned(3, 8);
-                    when 3 =>
-                        if t_ang(10) = '0' then
-                            t_sk <= resize(t_ang(9 downto 4), 8);
-                        else
-                            t_sk <= to_unsigned(64, 8) - resize(t_ang(9 downto 4), 8);
-                        end if;
-                        t_sneg <= t_ang(11);
-                        fr_st <= to_unsigned(4, 8);
-                    when 4 =>
-                        -- second index (entry above/below per fold direction)
-                        if t_ang(10) = '0' then
-                            v_kk := to_integer(t_ang(9 downto 4)) + 1;
-                        else
-                            v_kk := 64 - to_integer(t_ang(9 downto 4)) - 1;
-                        end if;
-                        t_sk <= to_unsigned(v_kk, 8);
-                        fr_st <= to_unsigned(5, 8);
-                    when 5 =>
-                        if t_sneg = '1' then t_s0 <= -t_srd;
-                        else t_s0 <= t_srd; end if;
-                        fr_st <= to_unsigned(6, 8);
-                    when 6 =>
-                        if t_sneg = '1' then t_s1 <= -t_srd;
-                        else t_s1 <= t_srd; end if;
-                        fr_st <= to_unsigned(7, 8);
-                    when 7 =>
-                        fm_a <= resize(t_s1 - t_s0, 18);
-                        fm_b <= signed(resize(t_ang(3 downto 0), 14));
-                        mu_go_f <= '1';
-                        fr_st <= to_unsigned(8, 8);
-                    when 8 =>
-                        if mu_idle = '1' then fr_st <= to_unsigned(9, 8); end if;
-                    when 9 =>
-                        v_c := t_s0 + resize(shift_right(mu_p, 4), 14);
-                        case to_integer(fr_j) is
-                            when 0 => cs_yaw_s <= v_c;
-                            when 1 => cs_yaw_c <= v_c;
-                            when 2 => cs_pit_s <= v_c;
-                            when 3 => cs_pit_c <= v_c;
-                            when 4 => cs_rol_s <= v_c;
-                            when others => cs_rol_c <= v_c;
-                        end case;
-                        if fr_j = 5 then
-                            fr_j <= (others => '0');
-                            fr_c <= (others => '0');
-                            fr_st <= to_unsigned(10, 8);
-                        else
-                            fr_j <= fr_j + 1;
-                            fr_st <= to_unsigned(2, 8);
-                        end if;
-
-                    ----------------------------------------------------------
-                    -- basis init: identity * 4096 into FRAM 0..8
-                    ----------------------------------------------------------
-                    when 10 =>
-                        fr_wa <= resize(fr_c, 7);
-                        if fr_c = 0 or fr_c = 4 or fr_c = 8 then
-                            fr_wd <= std_logic_vector(to_signed(4096, 16));
-                        else
-                            fr_wd <= (others => '0');
-                        end if;
-                        fr_we <= '1';
-                        if fr_c = 8 then
-                            fr_c <= (others => '0');
-                            fr_i <= (others => '0');
-                            fr_j <= (others => '0');
-                            fr_st <= to_unsigned(11, 8);
-                        else
-                            fr_c <= fr_c + 1;
-                        end if;
-
-                    ----------------------------------------------------------
-                    -- basis rotation: (a,b) := (a*c - b*s, a*s + b*c)
-                    -- fr_i = vector 0..2, fr_j = axis (roll, pitch, yaw)
-                    ----------------------------------------------------------
-                    when 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 =>
-                        case to_integer(fr_j) is
-                            when 0 => v_p0 := 0; v_p1 := 1; v_c := cs_rol_c; v_s := cs_rol_s;
-                            when 1 => v_p0 := 1; v_p1 := 2; v_c := cs_pit_c; v_s := cs_pit_s;
-                            when others => v_p0 := 2; v_p1 := 0; v_c := cs_yaw_c; v_s := cs_yaw_s;
-                        end case;
-                        v_a3 := resize(fr_i(1 downto 0) & '0', 7)
-                                + resize(fr_i(1 downto 0), 7);       -- 3*i
-                        -- freeze the whole step while a product is in flight
-                        if fr_st >= 15 and fr_st <= 18 and mu_idle = '0' then
-                          null;
-                        else
-                        case to_integer(fr_st) is
-                            when 11 => fr_ra <= v_a3 + v_p0;
-                            when 12 => fr_ra <= v_a3 + v_p1;
-                            when 13 => opA <= v_rd;
-                            -- 14..18 each wait for the serial multiplier,
-                            -- bank the previous product and issue the next.
-                            when 14 => opB <= v_rd;
-                                       fm_a <= resize(opA, 18);
-                                       fm_b <= v_c;
-                                       mu_go_f <= '1';
-                            when 15 => t_ac0 <= resize(mu_p, 29);        -- a*c
-                                       fm_a <= resize(opB, 18);
-                                       fm_b <= v_s;
-                                       mu_go_f <= '1';
-                            when 16 => t_ac0 <= t_ac0 - resize(mu_p, 29); -- -b*s
-                                       fm_a <= resize(opA, 18);
-                                       fm_b <= v_s;
-                                       mu_go_f <= '1';
-                            when 17 => t_ac1 <= resize(mu_p, 29);        -- a*s
-                                       fm_a <= resize(opB, 18);
-                                       fm_b <= v_c;
-                                       mu_go_f <= '1';
-                            when 18 => t_ac1 <= t_ac1 + resize(mu_p, 29); -- +b*c
-                                       fr_wa <= v_a3 + v_p0;
-                                       fr_wd <= std_logic_vector(
-                                           resize(shift_right(t_ac0, 12), 16));
-                                       fr_we <= '1';
-                            when 19 => null;
-                            when others =>
-                                fr_wa <= v_a3 + v_p1;
-                                fr_wd <= std_logic_vector(
-                                    resize(shift_right(t_ac1, 12), 16));
-                                fr_we <= '1';
-                        end case;
-                        if fr_st = 20 then
-                            if fr_i = 2 then
-                                fr_i <= (others => '0');
-                                if fr_j = 2 then
-                                    fr_j <= (others => '0');
-                                    fr_st <= to_unsigned(21, 8);
-                                else
-                                    fr_j <= fr_j + 1;
-                                    fr_st <= to_unsigned(11, 8);
-                                end if;
-                            else
-                                fr_i <= fr_i + 1;
-                                fr_st <= to_unsigned(11, 8);
-                            end if;
-                        else
-                            fr_st <= fr_st + 1;
-                        end if;
-                        end if;
-
-                    ----------------------------------------------------------
-                    -- ORTHOGRAPHIC EXTENT.  With no perspective divide the
-                    -- cube's projected half-extent is just the sum of the
-                    -- three half-basis magnitudes on each axis -- no corner
-                    -- projection needed to frame the shot.
-                    ----------------------------------------------------------
-                    when 21 =>
-                        fr_ra <= to_unsigned(0, 7);
-                        fr_st <= to_unsigned(22, 8);
-                    when 22 =>
-                        fr_ra <= to_unsigned(3, 7);
-                        fr_st <= to_unsigned(23, 8);
-                    when 23 =>
-                        fr_ra <= to_unsigned(6, 7);
-                        t_ex <= resize(unsigned(abs(v_rd)), 17);
-                        fr_st <= to_unsigned(24, 8);
-                    when 24 =>
-                        fr_ra <= to_unsigned(1, 7);
-                        t_ex <= t_ex + resize(unsigned(abs(v_rd)), 17);
-                        fr_st <= to_unsigned(25, 8);
-                    when 25 =>
-                        fr_ra <= to_unsigned(4, 7);
-                        t_ex <= t_ex + resize(unsigned(abs(v_rd)), 17);
-                        fr_st <= to_unsigned(26, 8);
-                    when 26 =>
-                        fr_ra <= to_unsigned(7, 7);
-                        t_ey <= resize(unsigned(abs(v_rd)), 17);
-                        fr_st <= to_unsigned(27, 8);
-                    when 27 =>
-                        t_ey <= t_ey + resize(unsigned(abs(v_rd)), 17);
-                        fr_st <= to_unsigned(28, 8);
-                    when 28 =>
-                        t_ey <= t_ey + resize(unsigned(abs(v_rd)), 17);
-                        fr_st <= to_unsigned(29, 8);
-                    when 29 =>
-                        -- x1.5 for the half-cube, then frame it
-                        t_ex <= t_ex + shift_right(t_ex, 1);
-                        t_ey <= t_ey + shift_right(t_ey, 1);
-                        fr_st <= to_unsigned(30, 8);
-                    when 30 =>
-                        -- f (px per cubie unit, Q4) = 0.42*H*65536 / ext_y,
-                        -- with 0.42*65536 taken as 27<<10 (shift-adds only)
-                        frd_ns <= resize((shift_left(resize(s_hf, 22), 5)
-                                          - shift_left(resize(s_hf, 22), 2)
-                                          - resize(s_hf, 22)) & "0000000000", 32);
-                        frd_ds <= resize(t_ey, 21);
-                        fd_sgn <= '0';
-                        frd_start <= '1';
-                        fr_w <= (others => '0');
-                        fr_st <= to_unsigned(31, 8);
-                    when 31 =>
-                        if fr_w < 2 then fr_w <= fr_w + 1;
-                        elsif dv_bsy = '0' then
-                            if dv_q > 4095 then f_y12 <= to_unsigned(4095, 12);
-                            else f_y12 <= resize(dv_q, 12); end if;
-                            frd_ns <= resize((shift_left(resize(s_W, 22), 5)
-                                              - shift_left(resize(s_W, 22), 1))
-                                             & "0000000000", 32);
-                            frd_ds <= resize(t_ex, 21);
-                            frd_start <= '1';
-                            fr_w <= (others => '0');
-                            fr_st <= to_unsigned(32, 8);
-                        end if;
-                    when 32 =>
-                        if fr_w < 2 then fr_w <= fr_w + 1;
-                        elsif dv_bsy = '0' then
-                            if dv_q > 4095 then v_f := to_unsigned(4095, 16);
-                            else v_f := resize(dv_q, 16); end if;
-                            if resize(f_y12, 16) < v_f then v_f := resize(f_y12, 16); end if;
-                            f_zoom <= resize(v_f, 12);
-                            fr_st <= to_unsigned(33, 8);
-                        end if;
-                    when 33 =>
-                        -- snap on the first frame; a glide from the reset value
-                        -- would take ~30 frames to reach the real framing
-                        -- Snap when the target moves a long way (startup, or a
-                        -- resolution change): the raster measurement is not
-                        -- valid for the first frames, and a 1/16 glide would
-                        -- take ~30 frames to walk off a bad initial value.
-                        v_t := signed(resize(shift_left(resize(f_zoom, 18), 4), 18))
-                               - signed(resize(f_zsm, 18));
-                        if abs(v_t) > signed(resize(shift_right(f_zsm, 3), 18)) then
-                            f_zsm <= shift_left(resize(f_zoom, 16), 4);
-                        else
-                            f_zsm <= unsigned(resize(signed(resize(f_zsm, 18))
-                                                     + shift_right(v_t, 4), 16));
-                        end if;
-                        fr_st <= to_unsigned(34, 8);
-                    when 34 =>
-                        -- f is Q4 x 4 (the smoothing keeps 4 extra bits)
-                        s_fuse <= f_zsm(15 downto 4);
-                        fm_a <= signed(resize(f_zsm(15 downto 4), 18));
-                        fm_b <= to_signed(183, 14);      -- AA slope scale
-                        mu_go_f <= '1';
-                        fr_st <= to_unsigned(35, 8);
-                    when 35 =>
-                        if mu_idle = '1' then fr_st <= to_unsigned(36, 8); end if;
-                    when 36 =>
-                        v_px := resize(unsigned(shift_right(mu_p, 12)), 8);
-                        if    v_px >= 128 then v_e := 5;
-                        elsif v_px >= 64  then v_e := 4;
-                        elsif v_px >= 32  then v_e := 3;
-                        elsif v_px >= 16  then v_e := 2;
-                        elsif v_px >= 8   then v_e := 1;
-                        else                   v_e := 0; end if;
-                        v_mant := to_integer(shift_right(v_px, v_e));
-                        if v_mant < 4 then v_mant := 4; end if;
-                        if v_mant > 7 then v_mant := 7; end if;
-                        s_pxm <= to_unsigned(v_mant - 4, 2);
-                        s_pxe <= 5 - v_e;              -- shift = 8 - v_e
-                        fr_i <= (others => '0');
-                        fr_st <= to_unsigned(37, 8);
-
-                    ----------------------------------------------------------
-                    -- scaled half-basis: sxh(i) = 1.5 * f * b_i.x  (screen Q2)
-                    -- fr_i = basis vector 0..2
-                    ----------------------------------------------------------
-                    when 37 =>
-                        fr_ra <= resize(fr_i(1 downto 0) & '0', 7)
-                                 + resize(fr_i(1 downto 0), 7);          -- 3i
-                        fr_st <= to_unsigned(38, 8);
-                    when 38 =>
-                        fr_ra <= resize(fr_i(1 downto 0) & '0', 7)
-                                 + resize(fr_i(1 downto 0), 7) + 1;      -- 3i+1
-                        fr_st <= to_unsigned(39, 8);
-                    when 39 =>
-                        fm_a <= resize(v_rd, 18);
-                        fm_b <= signed(resize(s_fuse, 14));
-                        mu_go_f <= '1';
-                        fr_st <= to_unsigned(40, 8);
-                    when 40 =>
-                        -- bank the second basis component now: the FRAM read
-                        -- port moves on before the serial multiply finishes
-                        opB <= v_rd;
-                        fr_st <= to_unsigned(41, 8);
-                    when 41 =>
-                        if mu_idle = '1' then
-                            v_t3 := resize(mu_p, 32);
-                            fr_wa <= to_unsigned(12, 7) + resize(fr_i(1 downto 0), 7);
-                            fr_wd <= std_logic_vector(resize(
-                                shift_right(v_t3 + shift_right(v_t3, 1), 14), 16));
-                            fr_we <= '1';
-                            fm_a <= resize(opB, 18);
-                            fm_b <= signed(resize(s_fuse, 14));
-                            mu_go_f <= '1';
-                            fr_st <= to_unsigned(42, 8);
-                        end if;
-                    when 42 =>
-                        if mu_idle = '0' then
-                            fr_st <= to_unsigned(42, 8);
-                        else
-                        v_t3 := resize(mu_p, 32);
-                        fr_wa <= to_unsigned(15, 7) + resize(fr_i(1 downto 0), 7);
-                        fr_wd <= std_logic_vector(resize(
-                            shift_right(v_t3 + shift_right(v_t3, 1), 14), 16));
-                        fr_we <= '1';
-                        if fr_i = 2 then
-                            fr_i <= (others => '0');
-                            fr_st <= to_unsigned(43, 8);
-                        else
-                            fr_i <= fr_i + 1;
-                            fr_st <= to_unsigned(37, 8);
-                        end if;
-                        end if;
-
-                    ----------------------------------------------------------
-                    -- the 8 screen corners are sign combinations of the three
-                    -- half-basis vectors: pure adds, no per-corner multiply
-                    -- fr_i = corner k (bit c selects the sign of basis c)
-                    ----------------------------------------------------------
-                    when 43 =>
-                        fr_ra <= to_unsigned(12, 7);
-                        fr_st <= to_unsigned(44, 8);
-                    when 44 =>
-                        fr_ra <= to_unsigned(13, 7);
-                        fr_st <= to_unsigned(45, 8);
-                    when 45 =>
-                        fr_ra <= to_unsigned(14, 7);
-                        if fr_i(0) = '1' then t_cacc <= resize(v_rd, 18);
-                        else t_cacc <= resize(-v_rd, 18); end if;
-                        fr_st <= to_unsigned(46, 8);
-                    when 46 =>
-                        fr_ra <= to_unsigned(15, 7);
-                        if fr_i(1) = '1' then t_cacc <= t_cacc + resize(v_rd, 18);
-                        else t_cacc <= t_cacc - resize(v_rd, 18); end if;
-                        fr_st <= to_unsigned(47, 8);
-                    when 47 =>
-                        fr_ra <= to_unsigned(16, 7);
-                        if fr_i(2) = '1' then t_cacc <= t_cacc + resize(v_rd, 18);
-                        else t_cacc <= t_cacc - resize(v_rd, 18); end if;
-                        fr_st <= to_unsigned(48, 8);
-                    when 48 =>
-                        fr_ra <= to_unsigned(17, 7);
-                        fr_wa <= to_unsigned(18, 7) + resize(fr_i(2 downto 0), 7);
-                        fr_wd <= std_logic_vector(resize(
-                            signed(shift_left(resize(s_cx, 16), 2)) + resize(t_cacc, 16), 16));
-                        fr_we <= '1';
-                        if fr_i(0) = '1' then t_cacc <= resize(v_rd, 18);
-                        else t_cacc <= resize(-v_rd, 18); end if;
-                        fr_st <= to_unsigned(49, 8);
-                    when 49 =>
-                        if fr_i(1) = '1' then t_cacc <= t_cacc + resize(v_rd, 18);
-                        else t_cacc <= t_cacc - resize(v_rd, 18); end if;
-                        fr_st <= to_unsigned(50, 8);
-                    when 50 =>
-                        if fr_i(2) = '1' then t_cacc <= t_cacc + resize(v_rd, 18);
-                        else t_cacc <= t_cacc - resize(v_rd, 18); end if;
-                        fr_st <= to_unsigned(51, 8);
-                    when 51 =>
-                        fr_wa <= to_unsigned(26, 7) + resize(fr_i(2 downto 0), 7);
-                        fr_wd <= std_logic_vector(resize(
-                            signed(shift_left(resize(s_cy, 16), 2)) - resize(t_cacc, 16), 16));
-                        fr_we <= '1';
-                        if fr_i = 7 then
-                            fr_i <= (others => '0');
-                            fr_st <= to_unsigned(52, 8);
-                        else
-                            fr_i <= fr_i + 1;
-                            fr_st <= to_unsigned(43, 8);
-                        end if;
-
-                    ----------------------------------------------------------
-                    -- visibility: orthographic, so a face shows iff its
-                    -- normal's z is positive.  One compare per face.
-                    ----------------------------------------------------------
-                    when 52 =>
-                        fr_ra <= to_unsigned(2, 7);
-                        fr_st <= to_unsigned(53, 8);
-                    when 53 =>
-                        fr_ra <= to_unsigned(5, 7);
-                        fr_st <= to_unsigned(54, 8);
-                    when 54 =>
-                        fr_ra <= to_unsigned(8, 7);
-                        bz0 <= v_rd;
-                        fr_st <= to_unsigned(55, 8);
-                    when 55 =>
-                        bz1 <= v_rd;
-                        fr_st <= to_unsigned(56, 8);
-                    when 56 =>
-                        bz2 <= v_rd;
-                        fr_st <= to_unsigned(57, 8);
-                    when 57 =>
-                        if bz1 >  64 then s_fvis(0) <= '1'; else s_fvis(0) <= '0'; end if;
-                        if bz1 < -64 then s_fvis(1) <= '1'; else s_fvis(1) <= '0'; end if;
-                        if bz0 >  64 then s_fvis(2) <= '1'; else s_fvis(2) <= '0'; end if;
-                        if bz0 < -64 then s_fvis(3) <= '1'; else s_fvis(3) <= '0'; end if;
-                        if bz2 >  64 then s_fvis(4) <= '1'; else s_fvis(4) <= '0'; end if;
-                        if bz2 < -64 then s_fvis(5) <= '1'; else s_fvis(5) <= '0'; end if;
-                        fr_i <= (others => '0');
-                        s_nslot <= (others => '0');
-                        fr_c <= (others => '0');
-                        t_cacc <= (others => '0');
-                        fr_st <= to_unsigned(103, 8);
-
-                    ----------------------------------------------------------
-                    -- HALF-VECTOR projected on the three cube axes.  The
-                    -- camera is orthographic, so the view direction is the
-                    -- world +z constant and H = normalize(Lkey + V) is a
-                    -- constant too.  Every face's H.n, H.U and H.V is then
-                    -- just +/- one of these three numbers (the basis is
-                    -- orthonormal), so the whole specular rig costs three dot
-                    -- products a frame instead of three per face.
-                    ----------------------------------------------------------
-                    when 103 =>
-                        fr_ra <= resize(fr_i(1 downto 0) * 3, 7)
-                                 + resize(fr_c(1 downto 0), 7);
-                        fr_st <= to_unsigned(104, 8);
-                    when 104 => fr_st <= to_unsigned(105, 8);
-                    when 105 =>
-                        fm_a <= resize(v_rd, 18);
-                        case to_integer(fr_c) is
-                            when 0 => fm_b <= to_signed(C_HX, 14);
-                            when 1 => fm_b <= to_signed(C_HY, 14);
-                            when others => fm_b <= to_signed(C_HZ, 14);
-                        end case;
-                        mu_go_f <= '1';
-                        fr_st <= to_unsigned(106, 8);
-                    when 106 =>
-                        if mu_idle = '1' then fr_st <= to_unsigned(107, 8); end if;
-                    when 107 =>
-                        t_cacc <= t_cacc + resize(shift_right(mu_p, 12), 18);
-                        if fr_c = 2 then
-                            fr_c <= (others => '0');
-                            fr_st <= to_unsigned(108, 8);
-                        else
-                            fr_c <= fr_c + 1;
-                            fr_st <= to_unsigned(103, 8);
-                        end if;
-                    when 108 =>
-                        case to_integer(fr_i(1 downto 0)) is
-                            when 0 => t_dh0 <= resize(t_cacc, 12);
-                            when 1 => t_dh1 <= resize(t_cacc, 12);
-                            when others => t_dh2 <= resize(t_cacc, 12);
-                        end case;
-                        t_cacc <= (others => '0');
-                        if fr_i = 2 then
-                            fr_i <= (others => '0');
-                            fr_st <= to_unsigned(58, 8);
-                        else
-                            fr_i <= fr_i + 1;
-                            fr_st <= to_unsigned(103, 8);
-                        end if;
-
-                    ----------------------------------------------------------
-                    -- per-visible-face setup (fr_i = face id, slot = s_nslot)
-                    ----------------------------------------------------------
-                    when 58 =>
-                        v_k := to_integer(fr_i(2 downto 0));
-                        if s_fvis(v_k) = '0' or s_nslot = 3 then
-                            if fr_i = 5 then fr_st <= to_unsigned(90, 8);
-                            else fr_i <= fr_i + 1; end if;
-                        else
-                            fr_st <= to_unsigned(59, 8);
-                        end if;
-
-                    -- screen edge vectors from corners P0, P1, P3
-                    when 59 =>
-                        v_k := to_integer(fr_i(2 downto 0));
-                        fr_ra <= to_unsigned(18 + C_FCORN(v_k, 0), 7);
-                        fr_st <= to_unsigned(60, 8);
-                    when 60 =>
-                        v_k := to_integer(fr_i(2 downto 0));
-                        fr_ra <= to_unsigned(18 + C_FCORN(v_k, 1), 7);
-                        fr_st <= to_unsigned(61, 8);
-                    when 61 =>
-                        v_k := to_integer(fr_i(2 downto 0));
-                        fr_ra <= to_unsigned(18 + C_FCORN(v_k, 3), 7);
-                        t_px0 <= v_rd;
-                        fr_st <= to_unsigned(62, 8);
-                    when 62 =>
-                        v_k := to_integer(fr_i(2 downto 0));
-                        fr_ra <= to_unsigned(26 + C_FCORN(v_k, 0), 7);
-                        t_dx1 <= resize(shift_right(v_rd - t_px0, 2), 13);
-                        fr_st <= to_unsigned(63, 8);
-                    when 63 =>
-                        v_k := to_integer(fr_i(2 downto 0));
-                        fr_ra <= to_unsigned(26 + C_FCORN(v_k, 1), 7);
-                        t_dx2 <= resize(shift_right(v_rd - t_px0, 2), 13);
-                        fr_st <= to_unsigned(64, 8);
-                    when 64 =>
-                        v_k := to_integer(fr_i(2 downto 0));
-                        fr_ra <= to_unsigned(26 + C_FCORN(v_k, 3), 7);
-                        t_py0 <= v_rd;
-                        fr_st <= to_unsigned(65, 8);
-                    when 65 =>
-                        t_dy1 <= resize(shift_right(v_rd - t_py0, 2), 13);
-                        fr_st <= to_unsigned(66, 8);
-                    when 66 =>
-                        t_dy2 <= resize(shift_right(v_rd - t_py0, 2), 13);
-                        fr_st <= to_unsigned(67, 8);
-
-                    -- D = dx1*dy2 - dy1*dx2  (screen area, px^2)
-                    when 67 =>
-                        fm_a <= resize(t_dx1, 18);
-                        fm_b <= resize(t_dy2, 14);
-                        mu_go_f <= '1';
-                        fr_st <= to_unsigned(68, 8);
-                    when 68 =>
-                        if mu_idle = '1' then
-                            t_det <= resize(mu_p, 26);
-                            fm_a <= resize(t_dy1, 18);
-                            fm_b <= resize(t_dx2, 14);
-                            mu_go_f <= '1';
-                            fr_st <= to_unsigned(69, 8);
-                        end if;
-                    when 69 =>
-                        if mu_idle = '1' then fr_st <= to_unsigned(70, 8); end if;
-                    when 70 =>
-                        t_det <= t_det - resize(mu_p, 26);
-                        fr_c <= (others => '0');
-                        fr_st <= to_unsigned(71, 8);
-
-                    ----------------------------------------------------------
-                    -- UV gradients: with an affine (orthographic) map, u and v
-                    -- are linear in screen x,y, so four divides per face give
-                    -- the whole mapping -- no per-span or per-pixel division.
-                    --   gu_x = 12288*256*dy2/D    gu_y = -12288*256*dx2/D
-                    --   gv_x = -12288*256*dy1/D   gv_y =  12288*256*dx1/D
-                    -- (12288*256 = 3 << 20)
-                    ----------------------------------------------------------
-                    when 71 =>
-                        case to_integer(fr_c) is
-                            when 0 => v_gn := resize(t_dy2, 14);
-                            when 1 => v_gn := resize(-t_dx2, 14);
-                            when 2 => v_gn := resize(-t_dy1, 14);
-                            when others => v_gn := resize(t_dx1, 14);
-                        end case;
-                        if t_det < 0 then
-                            v_gn := -v_gn;
-                            frd_ds <= resize(unsigned(-t_det), 21);
-                        else
-                            frd_ds <= resize(unsigned(t_det), 21);
-                        end if;
-                        if v_gn < 0 then
-                            fd_sgn <= '1';
-                            frd_ns <= resize((unsigned(resize(-v_gn, 16))
-                                              + unsigned(resize(-v_gn, 16))
-                                              + unsigned(resize(-v_gn, 16)))
-                                             & "00000000000000000000", 32);
-                        else
-                            fd_sgn <= '0';
-                            frd_ns <= resize((unsigned(resize(v_gn, 16))
-                                              + unsigned(resize(v_gn, 16))
-                                              + unsigned(resize(v_gn, 16)))
-                                             & "00000000000000000000", 32);
-                        end if;
-                        frd_start <= '1';
-                        fr_w <= (others => '0');
-                        fr_st <= to_unsigned(72, 8);
-                    when 72 =>
-                        if fr_w < 2 then fr_w <= fr_w + 1;
-                        elsif dv_bsy = '0' then
-                            if dv_q > 65535 then v_g := to_signed(65535, 17);
-                            else v_g := signed(resize(dv_q(15 downto 0), 17)); end if;
-                            if fd_sgn = '1' then v_g := -v_g; end if;
-                            case to_integer(fr_c) is
-                                when 0 => sl_gux(to_integer(s_nslot)) <= resize(v_g, 17);
-                                when 1 => sl_guy(to_integer(s_nslot)) <= resize(v_g, 17);
-                                when 2 => sl_gvx(to_integer(s_nslot)) <= resize(v_g, 17);
-                                when others => sl_gvy(to_integer(s_nslot)) <= resize(v_g, 17);
-                            end case;
-                            if fr_c = 3 then
-                                sl_px0(to_integer(s_nslot)) <= resize(shift_right(t_px0, 2), 13);
-                                sl_py0(to_integer(s_nslot)) <= resize(shift_right(t_py0, 2), 13);
-                                fr_c <= (others => '0');
-                                t_ymin <= to_signed(32767, 16);
-                                t_ymax <= to_signed(-32768, 16);
-                                fr_st <= to_unsigned(73, 8);
-                            else
-                                fr_c <= fr_c + 1;
-                                fr_st <= to_unsigned(71, 8);
-                            end if;
-                        end if;
-
-                    ----------------------------------------------------------
-                    -- ymin/ymax then the four screen edges (y0, x0, slope)
-                    ----------------------------------------------------------
-                    when 73 =>
-                        v_k := to_integer(fr_i(2 downto 0));
-                        fr_ra <= to_unsigned(26 + C_FCORN(v_k, to_integer(fr_c(1 downto 0))), 7);
-                        fr_st <= to_unsigned(74, 8);
-                    when 74 => fr_st <= to_unsigned(75, 8);
-                    when 75 =>
-                        if resize(v_rd, 16) < t_ymin then t_ymin <= resize(v_rd, 16); end if;
-                        if resize(v_rd, 16) > t_ymax then t_ymax <= resize(v_rd, 16); end if;
-                        if fr_c = 3 then
-                            fr_c <= (others => '0');
-                            fr_st <= to_unsigned(76, 8);
-                        else
-                            fr_c <= fr_c + 1;
-                            fr_st <= to_unsigned(73, 8);
-                        end if;
-                    when 76 =>
-                        v_y2 := shift_right(t_ymin, 2);
-                        if v_y2 < 0 then v_y2 := (others => '0'); end if;
-                        g_wa <= shift_left(resize(s_nslot, 8), 5);
-                        g_wd <= std_logic_vector(v_y2);
-                        g_we <= '1';
-                        fr_st <= to_unsigned(77, 8);
-                    when 77 =>
-                        v_y2 := shift_right(t_ymax, 2) + 1;
-                        if v_y2 < 0 then v_y2 := (others => '0'); end if;
-                        g_wa <= shift_left(resize(s_nslot, 8), 5) + 1;
-                        g_wd <= std_logic_vector(v_y2);
-                        g_we <= '1';
-                        fr_st <= to_unsigned(78, 8);
-
-                    when 78 =>
-                        v_k := to_integer(fr_i(2 downto 0));
-                        fr_ra <= to_unsigned(18 + C_FCORN(v_k, to_integer(fr_c(1 downto 0))), 7);
-                        fr_st <= to_unsigned(79, 8);
-                    when 79 =>
-                        v_k := to_integer(fr_i(2 downto 0));
-                        fr_ra <= to_unsigned(18 + C_FCORN(v_k,
-                                     (to_integer(fr_c(1 downto 0)) + 1) mod 4), 7);
-                        fr_st <= to_unsigned(80, 8);
-                    when 80 =>
-                        v_k := to_integer(fr_i(2 downto 0));
-                        fr_ra <= to_unsigned(26 + C_FCORN(v_k, to_integer(fr_c(1 downto 0))), 7);
-                        t_sxa <= v_rd;
-                        fr_st <= to_unsigned(81, 8);
-                    when 81 =>
-                        v_k := to_integer(fr_i(2 downto 0));
-                        fr_ra <= to_unsigned(26 + C_FCORN(v_k,
-                                     (to_integer(fr_c(1 downto 0)) + 1) mod 4), 7);
-                        t_dxe <= resize(v_rd - t_sxa, 18);
-                        fr_st <= to_unsigned(82, 8);
-                    when 82 =>
-                        t_sya <= v_rd;
-                        g_wa <= shift_left(resize(s_nslot, 8), 5) + 2
-                                + resize(fr_c(1 downto 0) & '0', 8)
-                                + resize(fr_c(1 downto 0), 8);
-                        g_wd <= std_logic_vector(resize(v_rd, 16));
-                        g_we <= '1';
-                        fr_st <= to_unsigned(83, 8);
-                    when 83 =>
-                        v_t := resize(v_rd - t_sya, 18);
-                        if t_dxe < 0 then
-                            frd_ns <= resize(unsigned(resize(-t_dxe, 18)) & "000000", 32);
-                        else
-                            frd_ns <= resize(unsigned(resize(t_dxe, 18)) & "000000", 32);
-                        end if;
-                        if v_t < 0 then
-                            frd_ds <= resize(unsigned(resize(-v_t, 18)), 21);
-                        else
-                            frd_ds <= resize(unsigned(resize(v_t, 18)), 21);
-                        end if;
-                        if v_t > -2 and v_t < 2 then
-                            frd_ds <= to_unsigned(2, 21);
-                        end if;
-                        if (t_dxe < 0) /= (v_t < 0) then fd_sgn <= '1';
-                        else fd_sgn <= '0'; end if;
-                        frd_start <= '1';
-                        fr_w <= (others => '0');
-                        g_wa <= shift_left(resize(s_nslot, 8), 5) + 3
-                                + resize(fr_c(1 downto 0) & '0', 8)
-                                + resize(fr_c(1 downto 0), 8);
-                        g_wd <= std_logic_vector(resize(t_sxa, 16));
-                        g_we <= '1';
-                        fr_st <= to_unsigned(84, 8);
-                    when 84 =>
-                        if fr_w < 2 then fr_w <= fr_w + 1;
-                        elsif dv_bsy = '0' then
-                            if dv_q > 32000 then v_f := to_unsigned(32000, 16);
-                            else v_f := resize(dv_q, 16); end if;
-                            g_wa <= shift_left(resize(s_nslot, 8), 5) + 4
-                                    + resize(fr_c(1 downto 0) & '0', 8)
-                                    + resize(fr_c(1 downto 0), 8);
-                            if fd_sgn = '1' then
-                                g_wd <= std_logic_vector(-signed(resize(v_f, 16)));
-                            else
-                                g_wd <= std_logic_vector(signed(resize(v_f, 16)));
-                            end if;
-                            g_we <= '1';
-                            if fr_c = 3 then
-                                fr_c <= (others => '0');
-                                t_lacc <= (others => '0');
-                                t_ac1 <= (others => '0');
-                                fr_st <= to_unsigned(85, 8);
-                            else
-                                fr_c <= fr_c + 1;
-                                fr_st <= to_unsigned(78, 8);
-                            end if;
-                        end if;
-
-                    ----------------------------------------------------------
-                    -- flat face light (key + fill against the face normal)
-                    ----------------------------------------------------------
-                    when 85 =>
-                        v_k := to_integer(fr_i(2 downto 0));
-                        fr_ra <= to_unsigned((C_FN(v_k) / 2) * 3, 7)
-                                 + to_unsigned(to_integer(fr_c) mod 3, 7);
-                        fr_st <= to_unsigned(86, 8);
-                    when 86 => fr_st <= to_unsigned(87, 8);
-                    when 87 =>
-                        v_k := to_integer(fr_i(2 downto 0));
-                        if (C_FN(v_k) mod 2) = 1 then fm_a <= -resize(v_rd, 18);
-                        else                          fm_a <= resize(v_rd, 18); end if;
-                        v_p0 := to_integer(fr_c) mod 3;
-                        if fr_c < 3 then
-                            case v_p0 is
-                                when 0 => fm_b <= to_signed(-107, 14);
-                                when 1 => fm_b <= to_signed(154, 14);
-                                when others => fm_b <= to_signed(184, 14);
-                            end case;
-                        else
-                            case v_p0 is
-                                when 0 => fm_b <= to_signed(141, 14);
-                                when 1 => fm_b <= to_signed(-141, 14);
-                                when others => fm_b <= to_signed(161, 14);
-                            end case;
-                        end if;
-                        mu_go_f <= '1';
-                        fr_st <= to_unsigned(88, 8);
-                    when 88 =>
-                        if mu_idle = '1' then fr_st <= to_unsigned(89, 8); end if;
-                    when 89 =>
-                        if fr_c < 3 then
-                            t_lacc <= t_lacc + resize(shift_right(mu_p, 12), 16);
-                        else
-                            t_ac1 <= t_ac1 + resize(shift_right(mu_p, 12), 29);
-                        end if;
-                        if fr_c = 5 then
-                            fr_c <= (others => '0');
-                            fr_st <= to_unsigned(91, 8);
-                        else
-                            fr_c <= fr_c + 1;
-                            fr_st <= to_unsigned(85, 8);
-                        end if;
-                    when 91 =>
-                        v_t := to_signed(62, 18);
-                        if t_lacc > 0 then
-                            v_t := v_t + resize(t_lacc, 18)
-                                   - resize(shift_right(t_lacc, 2), 18);
-                        end if;
-                        if t_ac1 > 0 then
-                            v_t := v_t + resize(shift_right(t_ac1, 2), 18);
-                        end if;
-                        if v_t > 255 then v_t := to_signed(255, 18); end if;
-                        t_lf <= unsigned(v_t(7 downto 0));
-                        fr_st <= to_unsigned(92, 8);
-                    when 92 =>
-                        v_k := to_integer(fr_i(2 downto 0));
-                        sl_face(to_integer(s_nslot)) <= to_unsigned(v_k, 3);
-                        sl_sil(to_integer(s_nslot)) <=
-                                  (not s_fvis(C_FADJ(v_k, 3)))
-                                & (not s_fvis(C_FADJ(v_k, 2)))
-                                & (not s_fvis(C_FADJ(v_k, 1)))
-                                & (not s_fvis(C_FADJ(v_k, 0)));
-                        -- pick and sign the face's three H projections
-                        case C_FN(v_k) / 2 is
-                            when 0 => v_l1 := resize(t_dh0, 18);
-                            when 1 => v_l1 := resize(t_dh1, 18);
-                            when others => v_l1 := resize(t_dh2, 18);
-                        end case;
-                        if (C_FN(v_k) mod 2) = 1 then v_l1 := -v_l1; end if;
-                        sl_hn(to_integer(s_nslot)) <= resize(v_l1, 10);
-                        case C_FU(v_k) / 2 is
-                            when 0 => v_l1 := resize(t_dh0, 18);
-                            when 1 => v_l1 := resize(t_dh1, 18);
-                            when others => v_l1 := resize(t_dh2, 18);
-                        end case;
-                        if (C_FU(v_k) mod 2) = 1 then v_l1 := -v_l1; end if;
-                        sl_hu(to_integer(s_nslot)) <= resize(v_l1, 10);
-                        case C_FV(v_k) / 2 is
-                            when 0 => v_l1 := resize(t_dh0, 18);
-                            when 1 => v_l1 := resize(t_dh1, 18);
-                            when others => v_l1 := resize(t_dh2, 18);
-                        end case;
-                        if (C_FV(v_k) mod 2) = 1 then v_l1 := -v_l1; end if;
-                        sl_hv(to_integer(s_nslot)) <= resize(v_l1, 10);
-                        -- unlit sticker albedo + the flat face light, which the
-                        -- pixel path now gamma-encodes per pixel because the
-                        -- bevels move it
-                        sl_ly(to_integer(s_nslot)) <= C_STY(v_k);
-                        sl_lf(to_integer(s_nslot)) <= t_lf;
-                        fr_c <= (others => '0');
-                        fr_st <= to_unsigned(98, 8);
-
-                    -- one cycle for the shared gamma ROM to answer at t_lf
-                    when 98 =>
-                        fr_st <= to_unsigned(95, 8);
-
-                    ----------------------------------------------------------
-                    -- per-face LIT CHROMA (fr_c = 0 -> U, 1 -> V).  Scaling
-                    -- chroma by the face light here is what keeps a shadowed
-                    -- face from reading over-saturated once the pixel path
-                    -- stops touching chroma entirely.
-                    ----------------------------------------------------------
-                    when 95 =>
-                        v_k := to_integer(fr_i(2 downto 0));
-                        if fr_c = 0 then
-                            fm_a <= resize(signed(resize(C_STU(v_k), 11))
-                                           - to_signed(512, 11), 18);
-                        else
-                            fm_a <= resize(signed(resize(C_STV(v_k), 11))
-                                           - to_signed(512, 11), 18);
-                        end if;
-                        -- scale by the VIDEO light, matching the luma path, so
-                        -- a shadowed face desaturates by the same amount it dims
-                        fm_b <= signed(resize(gm_d, 14));
-                        mu_go_f <= '1';
-                        fr_st <= to_unsigned(96, 8);
-                    when 96 =>
-                        if mu_idle = '1' then fr_st <= to_unsigned(97, 8); end if;
-                    when 97 =>
-                        if fr_c = 0 then
-                            sl_cu(to_integer(s_nslot)) <= f_clamp10(
-                                to_signed(512, 12)
-                                + resize(shift_right(mu_p, 8), 12));
-                            fr_c <= to_unsigned(1, 4);
-                            fr_st <= to_unsigned(95, 8);
-                        else
-                            sl_cv(to_integer(s_nslot)) <= f_clamp10(
-                                to_signed(512, 12)
-                                + resize(shift_right(mu_p, 8), 12));
-                            s_nslot <= s_nslot + 1;
-                            if fr_i = 5 then fr_st <= to_unsigned(90, 8);
-                            else
-                                fr_i <= fr_i + 1;
-                                fr_st <= to_unsigned(58, 8);
-                            end if;
-                        end if;
-
-                    ----------------------------------------------------------
-                    -- vignette seed cx^2, then the slot-count word
-                    ----------------------------------------------------------
-                    when 90 =>
-                        fm_a <= signed(resize(s_cx, 18));
-                        fm_b <= signed(resize(s_cx(11 downto 0), 14));
-                        mu_go_f <= '1';
-                        fr_st <= to_unsigned(93, 8);
-                    when 93 =>
-                        if mu_idle = '1' then fr_st <= to_unsigned(94, 8); end if;
-                    when 94 =>
-                        s_qx0 <= resize(unsigned(mu_p(21 downto 0)), 22);
-                        fr_st <= to_unsigned(101, 8);
-                    when 101 =>
-                        g_wa <= to_unsigned(127, 8);
-                        g_wd <= std_logic_vector(resize(s_nslot, 16));
-                        g_we <= '1';
-                        fr_st <= to_unsigned(102, 8);
-
-                    when others =>
-                        fr_done <= '1';
-                        fr_st <= (others => '0');
+    ------------------------------------------------------------------------
+    -- SLW decoder.  Ports 0..14 are per-slot; 15 and 16 are globals, which
+    -- is why the port field is five bits and not four.
+    ------------------------------------------------------------------------
+    p_slotw : process(clk)
+        variable v_s : integer range 0 to 2;
+    begin
+        if rising_edge(clk) then
+            -- slot 3 never exists: the loop stops at three visible faces
+            if u_slw = '1' and u_sls /= 3 then
+                v_s := to_integer(u_sls(1 downto 0));
+                case to_integer(u_slp) is
+                    when  0 => sl_gux(v_s) <= resize(u_slv, 17);
+                    when  1 => sl_guy(v_s) <= resize(u_slv, 17);
+                    when  2 => sl_gvx(v_s) <= resize(u_slv, 17);
+                    when  3 => sl_gvy(v_s) <= resize(u_slv, 17);
+                    when  4 => sl_px0(v_s) <= resize(u_slv, 13);
+                    when  5 => sl_py0(v_s) <= resize(u_slv, 13);
+                    when  6 => sl_face(v_s) <= resize(unsigned(u_slv(2 downto 0)), 3);
+                    when  7 => sl_sil(v_s) <= std_logic_vector(u_slv(3 downto 0));
+                    when  8 => sl_cu(v_s) <= resize(unsigned(u_slv(9 downto 0)), 10);
+                    when  9 => sl_cv(v_s) <= resize(unsigned(u_slv(9 downto 0)), 10);
+                    when 10 => sl_ly(v_s) <= resize(unsigned(u_slv(9 downto 0)), 10);
+                    when 11 => sl_lf(v_s) <= resize(unsigned(u_slv(7 downto 0)), 8);
+                    when 12 => sl_hn(v_s) <= resize(u_slv, 10);
+                    when 13 => sl_hu(v_s) <= resize(u_slv, 10);
+                    when 14 => sl_hv(v_s) <= resize(u_slv, 10);
+                    when 15 => s_nslot <= resize(unsigned(u_slv(1 downto 0)), 2);
+                    when others => s_qx0 <= resize(unsigned(u_slv(21 downto 0)), 22);
                 end case;
             end if;
         end if;
-    end process p_frame;
+    end process p_slotw;
+
+    ------------------------------------------------------------------------
+    -- MICROCODED GEOMETRY ENGINE
+    --
+    -- Replaces ~110 hand-written frame-setup states.  Each of those states
+    -- carried its own adders, comparators and address arithmetic, and each
+    -- one that touched the multiplier was another input to an 18-bit operand
+    -- mux; together that measured 2,666 cells for math that runs once per
+    -- frame in blanking with ~99,000 spare clocks.
+    --
+    -- Here there is ONE ALU, the scratch RAM is the register file (two
+    -- copies so an instruction can read both operands in a cycle), and the
+    -- program lives in a block RAM.  Three cycles per instruction, which at
+    -- ~1,500 dynamic instructions is ~4,500 clocks of the vblank budget.
+    ------------------------------------------------------------------------
+    p_ueng : process(clk)
+        variable v_a, v_b : signed(31 downto 0);
+        variable v_r      : signed(31 downto 0);
+        variable v_op     : integer range 0 to 31;
+        variable v_imm    : signed(13 downto 0);
+        variable v_q      : unsigned(16 downto 0);
+    begin
+        if rising_edge(clk) then
+            u_we   <= '0';
+            g_we   <= '0';
+            mu_go_f <= '0';
+            frd_start <= '0';
+
+            if s_fstart = '1' then
+                u_pc   <= (others => '0');
+                u_st   <= "00";
+                u_gwt  <= (others => '0');
+                u_done <= '0';
+            elsif u_done = '0' then
+                case to_integer(u_st) is
+
+                    -- FETCH: the ROM answers next cycle
+                    when 0 =>
+                        u_st <= "01";
+
+                    -- DECODE: latch the instruction, issue both register reads
+                    when 1 =>
+                        u_ir <= u_rom;
+                        u_ra <= unsigned(u_rom(27 downto 21));
+                        u_rb <= unsigned(u_rom(20 downto 14));
+                        u_st <= "10";
+
+                    -- INDEXED second access (LDX/STX only)
+                    when 3 =>
+                        u_st <= "00";
+                        u_pc <= u_pc + 1;
+                        if to_integer(unsigned(u_ir(39 downto 35))) = 30 then
+                            u_wa <= unsigned(u_ir(34 downto 28));
+                            u_wd <= u_rda;
+                            u_we <= '1';
+                        else
+                            u_wa <= u_xa;
+                            u_wd <= std_logic_vector(resize(u_xd, 32));
+                            u_we <= '1';
+                        end if;
+
+                    -- EXECUTE
+                    when others =>
+                        v_op  := to_integer(unsigned(u_ir(39 downto 35)));
+                        v_imm := signed(u_ir(13 downto 0));
+                        v_a   := resize(signed(u_rda), 32);
+                        v_b   := resize(signed(u_rdb), 32);
+                        v_r   := (others => '0');
+                        u_st  <= "00";
+                        u_pc  <= u_pc + 1;
+
+                        case v_op is
+                            when 1  => v_r := v_a;
+                            when 2  => v_r := v_a + v_b;
+                            when 3  => v_r := v_a - v_b;
+                            when 4  => v_r := shift_right(v_a, to_integer(v_imm(3 downto 0)));
+                            when 5  => v_r := shift_left(v_a, to_integer(v_imm(3 downto 0)));
+                            when 6  => v_r := -v_a;
+                            when 7  => if v_a < 0 then v_r := -v_a; else v_r := v_a; end if;
+                            when 8  => if v_a < v_b then v_r := v_a; else v_r := v_b; end if;
+                            when 9  => if v_a > v_b then v_r := v_a; else v_r := v_b; end if;
+                            when 10 =>                     -- MUL: start
+                                fm_a <= resize(v_a, 18);
+                                fm_b <= resize(v_b, 14);
+                                mu_go_f <= '1';
+                            when 11 =>                     -- MRD: stall, then take
+                                if mu_idle = '0' then
+                                    u_st <= "10";
+                                    u_pc <= u_pc;
+                                else
+                                    v_r := resize(shift_right(mu_p,
+                                              to_integer(v_imm(4 downto 0))), 32);
+                                end if;
+                            when 12 =>                     -- DIV: start
+                                frd_ns <= shift_left(resize(unsigned(abs(v_a)), 32),
+                                                     to_integer(v_imm(4 downto 0)));
+                                if v_b = 0 then frd_ds <= to_unsigned(1, 21);
+                                else frd_ds <= resize(unsigned(abs(v_b)), 21); end if;
+                                fd_sgn <= (v_a(31) xor v_b(31));
+                                frd_start <= '1';
+                            when 13 =>                     -- DRD: stall, then take
+                                -- the quotient is a MAGNITUDE up to 65535, so it
+                                -- has to be zero-extended before the sign goes on
+                                if dv_bsy = '1' then
+                                    u_st <= "10";
+                                    u_pc <= u_pc;
+                                else
+                                    if dv_q > 65535 then
+                                        v_q := to_unsigned(65535, 17);
+                                    else
+                                        v_q := resize(dv_q(15 downto 0), 17);
+                                    end if;
+                                    if fd_sgn = '1' then
+                                        v_r := -resize(signed('0' & v_q), 32);
+                                    else
+                                        v_r := resize(signed('0' & v_q), 32);
+                                    end if;
+                                end if;
+                            when 14 => v_r := resize(C_SIN(to_integer(
+                                              unsigned(v_a(7 downto 0)))), 32);
+                            when 15 => v_r := resize(v_imm, 32);
+                            when 16 =>                     -- GWR
+                                g_wa <= resize(unsigned(v_imm(7 downto 0))
+                                               + unsigned(v_a(7 downto 0)), 8);
+                                g_wd <= std_logic_vector(resize(v_b, 16));
+                                g_we <= '1';
+                            when 17 =>                     -- SLW
+                                u_slp <= unsigned(v_imm(4 downto 0));
+                                u_slv <= resize(v_a, 32);
+                                u_sls <= unsigned(v_b(1 downto 0));
+                                u_slw <= '1';
+                            when 18 => u_pc <= unsigned(v_imm(9 downto 0));
+                            when 19 => if v_a /= 0 then
+                                           u_pc <= unsigned(v_imm(9 downto 0));
+                                       end if;
+                            when 20 => if v_a < v_b then
+                                           u_pc <= unsigned(v_imm(9 downto 0));
+                                       end if;
+                            when 21 => if v_a >= v_b then
+                                           u_pc <= unsigned(v_imm(9 downto 0));
+                                       end if;
+                            when 22 =>
+                                if v_a < 0 then v_r := (others => '0');
+                                elsif v_a > v_b then v_r := v_b;
+                                else v_r := v_a; end if;
+                            when 23 =>
+                                -- GAM reads the SAME gamma ROM the pixel path
+                                -- uses, so it costs no second table: drive the
+                                -- address, stall one cycle, then take gm_d.
+                                -- address registers, then the ROM registers:
+                                -- two stall cycles, not one.
+                                if u_gwt /= 2 then
+                                    u_gama <= unsigned(v_a(7 downto 0));
+                                    u_gwt  <= u_gwt + 1;
+                                    u_st   <= "10";
+                                    u_pc   <= u_pc;
+                                else
+                                    u_gwt <= (others => '0');
+                                    v_r := resize(signed('0' & gm_d), 32);
+                                end if;
+                            when 25 => v_r := u_ctlv;      -- knobs and raster
+                            when 27 => v_r := v_a and resize(signed('0' & v_imm), 32);
+                            when 28 => v_r := resize(shift_right(v_a,
+                                              to_integer(v_imm(3 downto 0)))
+                                              and to_signed(1, 32), 32);
+                            when 29 => v_r := v_a or shift_left(to_signed(1, 32),
+                                              to_integer(v_imm(3 downto 0)));
+                            when 30 | 31 =>                -- LDX / STX
+                                u_xa <= resize(unsigned(v_a(6 downto 0))
+                                               + unsigned(v_imm(6 downto 0)), 7);
+                                u_xd <= resize(v_b, 32);
+                                u_ra <= resize(unsigned(v_a(6 downto 0))
+                                               + unsigned(v_imm(6 downto 0)), 7);
+                                u_st <= "11";
+                                u_pc <= u_pc;
+                            when 24 => u_done <= '1';
+                            when others => null;
+                        end case;
+
+                        -- one write port, one write per instruction: every op
+                        -- that produced a value in v_r above, and only those
+                        if (v_op >= 1 and v_op <= 9) or v_op = 11 or v_op = 13
+                           or v_op = 14 or v_op = 15 or v_op = 22 or v_op = 23
+                           or v_op = 25 or (v_op >= 27 and v_op <= 29) then
+                          -- ...but not on the cycle a read op is still stalling
+                          if not ((v_op = 11 and mu_idle = '0')
+                                  or (v_op = 13 and dv_bsy = '1')
+                                  or (v_op = 23 and u_gwt /= 2)) then
+                            u_wa <= unsigned(u_ir(34 downto 28));
+                            u_wd <= std_logic_vector(resize(v_r, 32));
+                            u_we <= '1';
+                          end if;
+                        end if;
+                end case;
+            end if;
+        end if;
+    end process p_ueng;
+
+    ------------------------------------------------------------------------
+    -- CTL reads the outside world.  u_ir is latched at DECODE, so selecting
+    -- on its immediate field is stable through EXECUTE.
+    ------------------------------------------------------------------------
+    with to_integer(unsigned(u_ir(3 downto 0))) select u_ctlv <=
+        resize(signed('0' & s_k1),   32) when 0,
+        resize(signed('0' & s_k2),   32) when 1,
+        resize(signed('0' & s_k3),   32) when 2,
+        resize(signed('0' & s_W),    32) when 3,
+        resize(signed('0' & s_H),    32) when 4,
+        resize(signed('0' & s_hf),   32) when 5,
+        resize(signed('0' & s_cx),   32) when 6,
+        resize(signed('0' & s_cy),   32) when 7,
+        (0 => s_ilace, others => '0')    when 8,
+        (0 => s_zfirst, others => '0')   when 10,
+        (others => '0')                  when others;
+
+    ------------------------------------------------------------------------
+    -- microcode ROM and the two register-file copies (dual read)
+    ------------------------------------------------------------------------
+    p_urom : process(clk)
+    begin
+        if rising_edge(clk) then
+            u_rom <= C_UCODE(to_integer(u_pc));
+        end if;
+    end process p_urom;
+
+    p_rfa : process(clk)
+    begin
+        if rising_edge(clk) then
+            if u_we = '1' then rf_a(to_integer(u_wa)) <= u_wd; end if;
+            u_rda <= rf_a(to_integer(u_ra));
+        end if;
+    end process p_rfa;
+
+    p_rfb : process(clk)
+    begin
+        if rising_edge(clk) then
+            if u_we = '1' then rf_b(to_integer(u_wa)) <= u_wd; end if;
+            u_rdb <= rf_b(to_integer(u_rb));
+        end if;
+    end process p_rfb;
+
 
     ------------------------------------------------------------------------
     -- geometry EBR (write: frame FSM, read: line FSM)
@@ -1840,22 +1472,6 @@ begin
             end if;
         end if;
     end process p_gram_w;
-
-    p_fram_r : process(clk)
-    begin
-        if rising_edge(clk) then
-            fr_rd2 <= fram(to_integer(fr_ra));
-        end if;
-    end process p_fram_r;
-
-    p_fram_w : process(clk)
-    begin
-        if rising_edge(clk) then
-            if fr_we = '1' then
-                fram(to_integer(fr_wa)) <= fr_wd;
-            end if;
-        end if;
-    end process p_fram_w;
 
     ------------------------------------------------------------------------
     -- MATERIAL ROM ports.  Address combinational, data registered -- one
