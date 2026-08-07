@@ -1240,6 +1240,7 @@ begin
         variable v_op     : integer range 0 to 31;
         variable v_imm    : signed(13 downto 0);
         variable v_q      : unsigned(16 downto 0);
+        variable v_sh     : signed(31 downto 0);
     begin
         if rising_edge(clk) then
             u_we   <= '0';
@@ -1294,8 +1295,8 @@ begin
                             when 1  => v_r := v_a;
                             when 2  => v_r := v_a + v_b;
                             when 3  => v_r := v_a - v_b;
-                            when 4  => v_r := shift_right(v_a, to_integer(v_imm(3 downto 0)));
-                            when 5  => v_r := shift_left(v_a, to_integer(v_imm(3 downto 0)));
+                            when 4  => v_r := shift_right(v_a, to_integer(unsigned(v_imm(3 downto 0))));
+                            when 5  => v_r := shift_left(v_a, to_integer(unsigned(v_imm(3 downto 0))));
                             when 6  => v_r := -v_a;
                             when 7  => if v_a < 0 then v_r := -v_a; else v_r := v_a; end if;
                             when 8  => if v_a < v_b then v_r := v_a; else v_r := v_b; end if;
@@ -1310,11 +1311,11 @@ begin
                                     u_pc <= u_pc;
                                 else
                                     v_r := resize(shift_right(mu_p,
-                                              to_integer(v_imm(4 downto 0))), 32);
+                                              to_integer(unsigned(v_imm(4 downto 0)))), 32);
                                 end if;
                             when 12 =>                     -- DIV: start
                                 frd_ns <= shift_left(resize(unsigned(abs(v_a)), 32),
-                                                     to_integer(v_imm(4 downto 0)));
+                                                     to_integer(unsigned(v_imm(4 downto 0))));
                                 if v_b = 0 then frd_ds <= to_unsigned(1, 21);
                                 else frd_ds <= resize(unsigned(abs(v_b)), 21); end if;
                                 fd_sgn <= (v_a(31) xor v_b(31));
@@ -1332,9 +1333,9 @@ begin
                                         v_q := resize(dv_q(15 downto 0), 17);
                                     end if;
                                     if fd_sgn = '1' then
-                                        v_r := -resize(signed('0' & v_q), 32);
+                                        v_r := -signed(resize(v_q, 32));
                                     else
-                                        v_r := resize(signed('0' & v_q), 32);
+                                        v_r := signed(resize(v_q, 32));
                                     end if;
                                 end if;
                             when 14 => v_r := resize(C_SIN(to_integer(
@@ -1377,15 +1378,18 @@ begin
                                     u_pc   <= u_pc;
                                 else
                                     u_gwt <= (others => '0');
-                                    v_r := resize(signed('0' & gm_d), 32);
+                                    v_r := signed(resize(gm_d, 32));
                                 end if;
                             when 25 => v_r := u_ctlv;      -- knobs and raster
-                            when 27 => v_r := v_a and resize(signed('0' & v_imm), 32);
-                            when 28 => v_r := resize(shift_right(v_a,
-                                              to_integer(v_imm(3 downto 0)))
-                                              and to_signed(1, 32), 32);
+                            when 27 => v_r := v_a and signed(resize(unsigned(v_imm), 32));
+                            when 28 =>
+                                v_sh := shift_right(v_a,
+                                            to_integer(unsigned(v_imm(3 downto 0))));
+                                if v_sh(0) = '1' then v_r := to_signed(1, 32);
+                                else                  v_r := (others => '0');
+                                end if;
                             when 29 => v_r := v_a or shift_left(to_signed(1, 32),
-                                              to_integer(v_imm(3 downto 0)));
+                                              to_integer(unsigned(v_imm(3 downto 0))));
                             when 30 | 31 =>                -- LDX / STX
                                 u_xa <= resize(unsigned(v_a(6 downto 0))
                                                + unsigned(v_imm(6 downto 0)), 7);
@@ -1422,14 +1426,14 @@ begin
     -- on its immediate field is stable through EXECUTE.
     ------------------------------------------------------------------------
     with to_integer(unsigned(u_ir(3 downto 0))) select u_ctlv <=
-        resize(signed('0' & s_k1),   32) when 0,
-        resize(signed('0' & s_k2),   32) when 1,
-        resize(signed('0' & s_k3),   32) when 2,
-        resize(signed('0' & s_W),    32) when 3,
-        resize(signed('0' & s_H),    32) when 4,
-        resize(signed('0' & s_hf),   32) when 5,
-        resize(signed('0' & s_cx),   32) when 6,
-        resize(signed('0' & s_cy),   32) when 7,
+        signed(resize(s_k1, 32)) when 0,
+        signed(resize(s_k2, 32)) when 1,
+        signed(resize(s_k3, 32)) when 2,
+        signed(resize(s_W, 32)) when 3,
+        signed(resize(s_H, 32)) when 4,
+        signed(resize(s_hf, 32)) when 5,
+        signed(resize(s_cx, 32)) when 6,
+        signed(resize(s_cy, 32)) when 7,
         (0 => s_ilace, others => '0')    when 8,
         (0 => s_zfirst, others => '0')   when 10,
         (others => '0')                  when others;
