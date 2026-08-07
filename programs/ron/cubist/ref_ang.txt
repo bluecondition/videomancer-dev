@@ -1,0 +1,9 @@
+REF ang=0,0,0 nslot=0
+REF ang=3520,272,0 nslot=3
+REF ang=3520,272,0 nslot=3
+REF ang=3520,272,0 nslot=3
+REF ang=3520,272,0 nslot=3
+REF ang=3520,272,0 nslot=3
+REF ang=3520,272,0 nslot=3
+REF ang=3520,272,0 nslot=3
+REF ang=3520,272,0 nslot=3

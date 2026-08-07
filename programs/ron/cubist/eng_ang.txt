@@ -1,0 +1,36 @@
+DBG ang=0,0,0 bas=0,0,0 nslot=0
+DBG slot0 face=0 ly=0 cu=512 cv=512 lf=0 px0=0 py0=0
+DBG slot1 face=0 ly=0 cu=512 cv=512 lf=0 px0=0 py0=0
+DBG slot2 face=0 ly=0 cu=512 cv=512 lf=0 px0=0 py0=0
+DBG ang=3520,272,0 bas=2598,3745,2375 nslot=3
+DBG slot0 face=0 ly=995 cu=512 cv=512 lf=227 px0=51 py0=21
+DBG slot1 face=2 ly=332 cu=468 cv=760 lf=171 px0=116 py0=83
+DBG slot2 face=4 ly=416 cu=499 cv=289 lf=163 px0=25 py0=111
+DBG ang=3520,272,0 bas=2598,3745,2375 nslot=3
+DBG slot0 face=0 ly=995 cu=512 cv=512 lf=227 px0=55 py0=5
+DBG slot1 face=2 ly=332 cu=468 cv=760 lf=171 px0=95 py0=43
+DBG slot2 face=4 ly=416 cu=499 cv=289 lf=163 px0=38 py0=61
+DBG ang=3520,272,0 bas=2598,3745,2375 nslot=3
+DBG slot0 face=0 ly=995 cu=512 cv=512 lf=227 px0=55 py0=5
+DBG slot1 face=2 ly=332 cu=468 cv=760 lf=171 px0=95 py0=43
+DBG slot2 face=4 ly=416 cu=499 cv=289 lf=163 px0=38 py0=61
+DBG ang=3520,272,0 bas=2598,3745,2375 nslot=3
+DBG slot0 face=0 ly=995 cu=512 cv=512 lf=227 px0=55 py0=5
+DBG slot1 face=2 ly=332 cu=468 cv=760 lf=171 px0=95 py0=43
+DBG slot2 face=4 ly=416 cu=499 cv=289 lf=163 px0=38 py0=61
+DBG ang=3520,272,0 bas=2598,3745,2375 nslot=3
+DBG slot0 face=0 ly=995 cu=512 cv=512 lf=227 px0=55 py0=5
+DBG slot1 face=2 ly=332 cu=468 cv=760 lf=171 px0=95 py0=43
+DBG slot2 face=4 ly=416 cu=499 cv=289 lf=163 px0=38 py0=61
+DBG ang=3520,272,0 bas=2598,3745,2375 nslot=3
+DBG slot0 face=0 ly=995 cu=512 cv=512 lf=227 px0=55 py0=5
+DBG slot1 face=2 ly=332 cu=468 cv=760 lf=171 px0=95 py0=43
+DBG slot2 face=4 ly=416 cu=499 cv=289 lf=163 px0=38 py0=61
+DBG ang=3520,272,0 bas=2598,3745,2375 nslot=3
+DBG slot0 face=0 ly=995 cu=512 cv=512 lf=227 px0=55 py0=5
+DBG slot1 face=2 ly=332 cu=468 cv=760 lf=171 px0=95 py0=43
+DBG slot2 face=4 ly=416 cu=499 cv=289 lf=163 px0=38 py0=61
+DBG ang=3520,272,0 bas=2598,3745,2375 nslot=3
+DBG slot0 face=0 ly=995 cu=512 cv=512 lf=227 px0=55 py0=5
+DBG slot1 face=2 ly=332 cu=468 cv=760 lf=171 px0=95 py0=43
+DBG slot2 face=4 ly=416 cu=499 cv=289 lf=163 px0=38 py0=61

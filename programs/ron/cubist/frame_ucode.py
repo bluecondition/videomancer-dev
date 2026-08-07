@@ -256,6 +256,22 @@ for f in range(6):
     a.emit('LDI', dst=R_TBL + 12 + f, imm=C_FN[f] | (C_FU[f] << 3) | (C_FV[f] << 6))
 
 
+# ------------- phase 8b: the half-vector projected on the three cube axes
+# Orthographic camera, so the view dir is the world +z constant and
+# H = normalize(Lkey + V) is constant too.  Every face's H.n, H.U and H.V is
+# then +/- one of these three numbers, by orthonormality -- three dot products
+# a frame instead of three per face.
+C_HX, C_HY, C_HZ = -57, 81, 236
+for ax in range(3):
+    a.emit('LDI', dst=T2, imm=0)
+    for c, hc in enumerate((C_HX, C_HY, C_HZ)):
+        a.emit('LDI', dst=T1, imm=hc)
+        a.emit('MUL', a=R_BAS + ax * 3 + c, b=T1)
+        a.emit('MRD', dst=T0, imm=12)
+        a.emit('ADD', dst=T2, a=T2, b=T0)
+    a.emit('MOV', dst=R_H + ax, a=T2)
+
+
 # ============================ phase 9: the per-visible-face loop ===========
 # States 58-97 of the old FSM.  The face index is a runtime value, so every
 # per-face constant comes out of the register file by LDX; the four-corner

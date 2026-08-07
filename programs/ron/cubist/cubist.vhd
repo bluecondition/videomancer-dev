@@ -480,6 +480,7 @@ architecture cubist of program_top is
     signal f_zoom  : unsigned(11 downto 0) := to_unsigned(256, 12);  -- focal, px
     signal f_zsm   : unsigned(15 downto 0) := to_unsigned(256*16, 16); -- smoothed Q4
     signal s_zfirst : std_logic := '1';
+    signal s_frans  : std_logic := '0';   -- a frame has started
     signal hmax, wmax : unsigned(14 downto 0) := (others => '0');
 
     -- per-slot face meta for the pixel path (written by frame FSM)
@@ -764,7 +765,10 @@ architecture cubist of program_top is
     signal u_rda, u_rdb, u_wd : std_logic_vector(31 downto 0) := (others => '0');
     signal u_xd, u_slv, u_ctlv : signed(31 downto 0) := (others => '0');
     signal u_we, u_slw : std_logic := '0';
-    signal u_done : std_logic := '0';
+    -- '1' at reset: the engine must IDLE until the first s_fstart.  At '0'
+    -- it runs the whole program at power-up against default registers and
+    -- burns the one-shot s_zfirst snap on them.
+    signal u_done : std_logic := '1';
     signal u_slp : unsigned(4 downto 0) := (others => '0');
     signal u_sls : unsigned(1 downto 0) := (others => '0');
     signal u_gama : unsigned(7 downto 0) := (others => '0');
@@ -869,118 +873,118 @@ architecture cubist of program_top is
         x"7CB0000948", x"7D10000953", x"7D70000103", x"7CC0000BD9",
         x"7D20000941", x"7D80000110", x"7CD00005A0", x"7D30000065",
         x"7D900000A1", x"7CE0000DEC", x"7D40000053", x"7DA0000084",
-        x"7CF0000681", x"7D500004C1", x"7DB0000015", x"7FB0000FA0",
-        x"2FBF600003", x"7AE0000001", x"2AE5C0000F", x"12E5CB8000",
-        x"1FC5CEC000", x"7AE0000200", x"2AE5C0000A", x"7AF0000200",
-        x"12E5CBC000", x"2AE5C0000A", x"7AF00003E3", x"1755CBC000",
-        x"7AE000028E", x"2AE5C0000A", x"7AF000005B", x"12E5CBC000",
-        x"2AE5C0000A", x"7AF0000327", x"1765CBC000", x"7AE000032B",
-        x"2AE5C0000A", x"7AF00001CC", x"12E5CBC000", x"2AE5C0000A",
-        x"7AF000014C", x"1775CBC000", x"7AE0000350", x"2AE5C0000A",
-        x"7AF00000F4", x"12E5CBC000", x"2AE5C0000A", x"7AF0000201",
-        x"1785CBC000", x"7AE00000EE", x"2AE5C0000A", x"7AF00001F0",
-        x"12E5CBC000", x"2AE5C0000A", x"7AF00001A0", x"1795CBC000",
-        x"7AE000014A", x"2AE5C0000A", x"7AF00002F5", x"12E5CBC000",
-        x"2AE5C0000A", x"7AF0000114", x"17A5CBC000", x"7DC0000000",
-        x"7AC0000000", x"F2E5800044", x"9805C001C0", x"900000030E",
-        x"7AF0000003", x"A80B8BC311", x"F65580004A", x"F665800050",
-        x"F675800056", x"DAECA00007", x"F5E5C00012", x"F5F5C0001A",
-        x"22FCA00003", x"DAF5E00007", x"F305E00012", x"1B06178000",
-        x"2606000002", x"F305E0001A", x"1B0617C000", x"2626000002",
-        x"22FCA00009", x"DAF5E00007", x"F305E00012", x"1B06178000",
-        x"2616000002", x"F305E0001A", x"1B0617C000", x"2636000002",
-        x"500C18C000", x"5E40000000", x"500C584000", x"5AE0000000",
-        x"1E4C8B8000", x"0AEC600000", x"12F5CB8000", x"12F5EB8000",
-        x"6005F90014", x"6B20000000", x"43265F0000", x"333F800000",
-        x"4B264CC000", x"8806570000", x"32EC200000", x"12F5CB8000",
-        x"12F5EB8000", x"6005F90014", x"6B20000000", x"43265F0000",
-        x"333F800000", x"4B264CC000", x"8806570001", x"32EC400000",
+        x"7CF0000681", x"7D500004C1", x"7DB0000015", x"7B00000000",
+        x"7AF0003FC7", x"50000BC000", x"5AE000000C", x"13060B8000",
+        x"7AF0000051", x"50002BC000", x"5AE000000C", x"13060B8000",
+        x"7AF00000EC", x"50004BC000", x"5AE000000C", x"13060B8000",
+        x"0896000000", x"7B00000000", x"7AF0003FC7", x"50006BC000",
+        x"5AE000000C", x"13060B8000", x"7AF0000051", x"50008BC000",
+        x"5AE000000C", x"13060B8000", x"7AF00000EC", x"5000ABC000",
+        x"5AE000000C", x"13060B8000", x"08A6000000", x"7B00000000",
+        x"7AF0003FC7", x"5000CBC000", x"5AE000000C", x"13060B8000",
+        x"7AF0000051", x"5000EBC000", x"5AE000000C", x"13060B8000",
+        x"7AF00000EC", x"50010BC000", x"5AE000000C", x"13060B8000",
+        x"08B6000000", x"7FB0000FA0", x"2FBF600003", x"7AE0000001",
+        x"2AE5C0000F", x"12E5CB8000", x"1FC5CEC000", x"7AE0000200",
+        x"2AE5C0000A", x"7AF0000200", x"12E5CBC000", x"2AE5C0000A",
+        x"7AF00003E3", x"1755CBC000", x"7AE000028E", x"2AE5C0000A",
+        x"7AF000005B", x"12E5CBC000", x"2AE5C0000A", x"7AF0000327",
+        x"1765CBC000", x"7AE000032B", x"2AE5C0000A", x"7AF00001CC",
+        x"12E5CBC000", x"2AE5C0000A", x"7AF000014C", x"1775CBC000",
+        x"7AE0000350", x"2AE5C0000A", x"7AF00000F4", x"12E5CBC000",
+        x"2AE5C0000A", x"7AF0000201", x"1785CBC000", x"7AE00000EE",
+        x"2AE5C0000A", x"7AF00001F0", x"12E5CBC000", x"2AE5C0000A",
+        x"7AF00001A0", x"1795CBC000", x"7AE000014A", x"2AE5C0000A",
+        x"7AF00002F5", x"12E5CBC000", x"2AE5C0000A", x"7AF0000114",
+        x"17A5CBC000", x"7DC0000000", x"7AC0000000", x"F2E5800044",
+        x"9805C001EA", x"9000000338", x"7AF0000003", x"A80B8BC33B",
+        x"F65580004A", x"F665800050", x"F675800056", x"DAECA00007",
+        x"F5E5C00012", x"F5F5C0001A", x"22FCA00003", x"DAF5E00007",
+        x"F305E00012", x"1B06178000", x"2606000002", x"F305E0001A",
+        x"1B0617C000", x"2626000002", x"22FCA00009", x"DAF5E00007",
+        x"F305E00012", x"1B06178000", x"2616000002", x"F305E0001A",
+        x"1B0617C000", x"2636000002", x"500C18C000", x"5E40000000",
+        x"500C584000", x"5AE0000000", x"1E4C8B8000", x"0AEC600000",
         x"12F5CB8000", x"12F5EB8000", x"6005F90014", x"6B20000000",
-        x"43265F0000", x"333F800000", x"4B264CC000", x"8806570002",
-        x"0AEC000000", x"12F5CB8000", x"12F5EB8000", x"6005F90014",
+        x"43265F0000", x"333F800000", x"4B264CC000", x"8806570000",
+        x"32EC200000", x"12F5CB8000", x"12F5EB8000", x"6005F90014",
         x"6B20000000", x"43265F0000", x"333F800000", x"4B264CC000",
-        x"8806570003", x"22EBC00002", x"8805D70004", x"22EBE00002",
-        x"8805D70005", x"DAECA00007", x"F685C0001A", x"0E9D000000",
-        x"22ECA00003", x"DAE5C00007", x"F2F5C0001A", x"468D0BC000",
-        x"4E9D2BC000", x"22ECA00006", x"DAE5C00007", x"F2F5C0001A",
-        x"468D0BC000", x"4E9D2BC000", x"22ECA00009", x"DAE5C00007",
-        x"F2F5C0001A", x"468D0BC000", x"4E9D2BC000", x"2EDB800005",
-        x"22ED000002", x"4AE5CE8000", x"800DAB8000", x"22ED200002",
-        x"12E5CEC000", x"4AE5CE8000", x"800DAB8001", x"DAECA00007",
-        x"F305C00012", x"F315C0001A", x"22FCA00003", x"DAF5E00007",
+        x"8806570001", x"32EC400000", x"12F5CB8000", x"12F5EB8000",
+        x"6005F90014", x"6B20000000", x"43265F0000", x"333F800000",
+        x"4B264CC000", x"8806570002", x"0AEC000000", x"12F5CB8000",
+        x"12F5EB8000", x"6005F90014", x"6B20000000", x"43265F0000",
+        x"333F800000", x"4B264CC000", x"8806570003", x"22EBC00002",
+        x"8805D70004", x"22EBE00002", x"8805D70005", x"DAECA00007",
+        x"F685C0001A", x"0E9D000000", x"22ECA00003", x"DAE5C00007",
+        x"F2F5C0001A", x"468D0BC000", x"4E9D2BC000", x"22ECA00006",
+        x"DAE5C00007", x"F2F5C0001A", x"468D0BC000", x"4E9D2BC000",
+        x"22ECA00009", x"DAE5C00007", x"F2F5C0001A", x"468D0BC000",
+        x"4E9D2BC000", x"2EDB800005", x"22ED000002", x"4AE5CE8000",
+        x"800DAB8000", x"22ED200002", x"12E5CEC000", x"4AE5CE8000",
+        x"800DAB8001", x"DAECA00007", x"F305C00012", x"F315C0001A",
+        x"22FCA00003", x"DAF5E00007", x"F325E00012", x"F335E0001A",
+        x"1F164C0000", x"1F266C4000", x"800DAC4002", x"800DAC0003",
+        x"3F3E400000", x"7F40000002", x"A80E7D025B", x"A00E4E825A",
+        x"0F2E800000", x"900000025B", x"372E800000", x"600E3C8006",
+        x"6F30000000", x"473E7EC000", x"374F600000", x"4F3E7D0000",
+        x"800DBCC004", x"22ECA00003", x"DAE5C00007", x"F305C00012",
+        x"F315C0001A", x"22FCA00006", x"DAF5E00007", x"F325E00012",
+        x"F335E0001A", x"1F164C0000", x"1F266C4000", x"800DAC4005",
+        x"800DAC0006", x"3F3E400000", x"7F40000002", x"A80E7D0274",
+        x"A00E4E8273", x"0F2E800000", x"9000000274", x"372E800000",
+        x"600E3C8006", x"6F30000000", x"473E7EC000", x"374F600000",
+        x"4F3E7D0000", x"800DBCC007", x"22ECA00006", x"DAE5C00007",
+        x"F305C00012", x"F315C0001A", x"22FCA00009", x"DAF5E00007",
         x"F325E00012", x"F335E0001A", x"1F164C0000", x"1F266C4000",
-        x"800DAC4002", x"800DAC0003", x"3F3E400000", x"7F40000002",
-        x"A80E7D0231", x"A00E4E8230", x"0F2E800000", x"9000000231",
+        x"800DAC4008", x"800DAC0009", x"3F3E400000", x"7F40000002",
+        x"A80E7D028D", x"A00E4E828C", x"0F2E800000", x"900000028D",
         x"372E800000", x"600E3C8006", x"6F30000000", x"473E7EC000",
-        x"374F600000", x"4F3E7D0000", x"800DBCC004", x"22ECA00003",
-        x"DAE5C00007", x"F305C00012", x"F315C0001A", x"22FCA00006",
-        x"DAF5E00007", x"F325E00012", x"F335E0001A", x"1F164C0000",
-        x"1F266C4000", x"800DAC4005", x"800DAC0006", x"3F3E400000",
-        x"7F40000002", x"A80E7D024A", x"A00E4E8249", x"0F2E800000",
-        x"900000024A", x"372E800000", x"600E3C8006", x"6F30000000",
-        x"473E7EC000", x"374F600000", x"4F3E7D0000", x"800DBCC007",
-        x"22ECA00006", x"DAE5C00007", x"F305C00012", x"F315C0001A",
-        x"22FCA00009", x"DAF5E00007", x"F325E00012", x"F335E0001A",
-        x"1F164C0000", x"1F266C4000", x"800DAC4008", x"800DAC0009",
-        x"3F3E400000", x"7F40000002", x"A80E7D0263", x"A00E4E8262",
-        x"0F2E800000", x"9000000263", x"372E800000", x"600E3C8006",
-        x"6F30000000", x"473E7EC000", x"374F600000", x"4F3E7D0000",
-        x"800DBCC00A", x"22ECA00009", x"DAE5C00007", x"F305C00012",
-        x"F315C0001A", x"DAFCA00007", x"F325E00012", x"F335E0001A",
-        x"1F164C0000", x"1F266C4000", x"800DAC400B", x"800DAC000C",
-        x"3F3E400000", x"7F40000002", x"A80E7D027B", x"A00E4E827A",
-        x"0F2E800000", x"900000027B", x"372E800000", x"600E3C8006",
-        x"6F30000000", x"473E7EC000", x"374F600000", x"4F3E7D0000",
-        x"800DBCC00D", x"DAECE00007", x"22F5C00001", x"1305EBC000",
-        x"13060BC000", x"E315C00000", x"7B20000000", x"13260C8000",
-        x"F336400000", x"980620028B", x"900000028C", x"3336600000",
-        x"0EE6600000", x"7B20000001", x"13260C8000", x"F336400000",
-        x"9806200292", x"9000000293", x"3336600000", x"0EF6600000",
-        x"7B20000002", x"13260C8000", x"F336400000", x"9806200299",
-        x"900000029A", x"3336600000", x"0F06600000", x"7EA0000000",
-        x"7EB0000000", x"7B30003F95", x"500DCCC000", x"5AE000000C",
-        x"16AD4B8000", x"7B3000009A", x"500DECC000", x"5AE000000C",
-        x"16AD4B8000", x"7B300000B8", x"500E0CC000", x"5AE000000C",
-        x"16AD4B8000", x"7B3000008D", x"500DCCC000", x"5AE000000C",
-        x"16BD6B8000", x"7B30003F73", x"500DECC000", x"5AE000000C",
-        x"16BD6B8000", x"7B300000A1", x"500E0CC000", x"5AE000000C",
-        x"16BD6B8000", x"7AE000003E", x"A8075A82BA", x"22FD400002",
-        x"1B0D4BC000", x"12E5CC0000", x"A8075AC2BD", x"22FD600002",
-        x"12E5CBC000", x"7AF00000FF", x"46C5CBC000", x"8805970006",
-        x"7AE0000000", x"DAFCC00007", x"F305E00044", x"98060002C6",
-        x"7B10000001", x"12E5CC4000", x"22FCC00003", x"DAF5E00007",
-        x"F305E00044", x"98060002CC", x"7B10000002", x"12E5CC4000",
-        x"22FCC00006", x"DAF5E00007", x"F305E00044", x"98060002D2",
-        x"7B10000004", x"12E5CC4000", x"22FCC00009", x"DAF5E00007",
-        x"F305E00044", x"98060002D8", x"7B10000008", x"12E5CC4000",
-        x"8805D70007", x"DAECE00007", x"22F5C00001", x"F305E00009",
-        x"E315C00000", x"98062002DF", x"90000002E0", x"3306000000",
-        x"880617000C", x"22ECE00003", x"DAE5C00007", x"22F5C00001",
-        x"F305E00009", x"E315C00000", x"98062002E8", x"90000002E9",
-        x"3306000000", x"880617000D", x"22ECE00006", x"DAE5C00007",
-        x"22F5C00001", x"F305E00009", x"E315C00000", x"98062002F1",
-        x"90000002F2", x"3306000000", x"880617000E", x"F745800075",
-        x"DAEE8003FF", x"8805D7000A", x"880D97000B", x"BB2D800000",
-        x"22EE80000A", x"DAE5C003FF", x"7AF0000200", x"1AE5CBC000",
-        x"5005CC8000", x"5B00000008", x"13060BC000", x"7B100003FF",
-        x"B3060C4000", x"8806170008", x"22EE80000A", x"22E5C0000A",
-        x"DAE5C003FF", x"7AF0000200", x"1AE5CBC000", x"5005CC8000",
-        x"5B00000008", x"13060BC000", x"7B100003FF", x"B3060C4000",
-        x"8806170009", x"15CB8EC000", x"12C58EC000", x"7AE0000006",
-        x"A0058B81BD", x"CAE0000006", x"5005CB8000", x"5AF0000000",
-        x"DB05E03FFF", x"2315E0000E", x"DB162000FF", x"2B1620000E",
-        x"13060C4000", x"88060E8010", x"800757007F", x"C000000000",
-        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
-        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
-        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
-        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
-        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
-        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
-        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
-        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
-        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
-        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
-        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
+        x"374F600000", x"4F3E7D0000", x"800DBCC00A", x"22ECA00009",
+        x"DAE5C00007", x"F305C00012", x"F315C0001A", x"DAFCA00007",
+        x"F325E00012", x"F335E0001A", x"1F164C0000", x"1F266C4000",
+        x"800DAC400B", x"800DAC000C", x"3F3E400000", x"7F40000002",
+        x"A80E7D02A5", x"A00E4E82A4", x"0F2E800000", x"90000002A5",
+        x"372E800000", x"600E3C8006", x"6F30000000", x"473E7EC000",
+        x"374F600000", x"4F3E7D0000", x"800DBCC00D", x"DAECE00007",
+        x"22F5C00001", x"1305EBC000", x"13060BC000", x"E315C00000",
+        x"7B20000000", x"13260C8000", x"F336400000", x"98062002B5",
+        x"90000002B6", x"3336600000", x"0EE6600000", x"7B20000001",
+        x"13260C8000", x"F336400000", x"98062002BC", x"90000002BD",
+        x"3336600000", x"0EF6600000", x"7B20000002", x"13260C8000",
+        x"F336400000", x"98062002C3", x"90000002C4", x"3336600000",
+        x"0F06600000", x"7EA0000000", x"7EB0000000", x"7B30003F95",
+        x"500DCCC000", x"5AE000000C", x"16AD4B8000", x"7B3000009A",
+        x"500DECC000", x"5AE000000C", x"16AD4B8000", x"7B300000B8",
+        x"500E0CC000", x"5AE000000C", x"16AD4B8000", x"7B3000008D",
+        x"500DCCC000", x"5AE000000C", x"16BD6B8000", x"7B30003F73",
+        x"500DECC000", x"5AE000000C", x"16BD6B8000", x"7B300000A1",
+        x"500E0CC000", x"5AE000000C", x"16BD6B8000", x"7AE000003E",
+        x"A8075A82E4", x"22FD400002", x"1B0D4BC000", x"12E5CC0000",
+        x"A8075AC2E7", x"22FD600002", x"12E5CBC000", x"7AF00000FF",
+        x"46C5CBC000", x"8805970006", x"7AE0000000", x"DAFCC00007",
+        x"F305E00044", x"98060002F0", x"7B10000001", x"12E5CC4000",
+        x"22FCC00003", x"DAF5E00007", x"F305E00044", x"98060002F6",
+        x"7B10000002", x"12E5CC4000", x"22FCC00006", x"DAF5E00007",
+        x"F305E00044", x"98060002FC", x"7B10000004", x"12E5CC4000",
+        x"22FCC00009", x"DAF5E00007", x"F305E00044", x"9806000302",
+        x"7B10000008", x"12E5CC4000", x"8805D70007", x"DAECE00007",
+        x"22F5C00001", x"F305E00009", x"E315C00000", x"9806200309",
+        x"900000030A", x"3306000000", x"880617000C", x"22ECE00003",
+        x"DAE5C00007", x"22F5C00001", x"F305E00009", x"E315C00000",
+        x"9806200312", x"9000000313", x"3306000000", x"880617000D",
+        x"22ECE00006", x"DAE5C00007", x"22F5C00001", x"F305E00009",
+        x"E315C00000", x"980620031B", x"900000031C", x"3306000000",
+        x"880617000E", x"F745800075", x"DAEE8003FF", x"8805D7000A",
+        x"880D97000B", x"BB2D800000", x"22EE80000A", x"DAE5C003FF",
+        x"7AF0000200", x"1AE5CBC000", x"5005CC8000", x"5B00000008",
+        x"13060BC000", x"7B100003FF", x"B3060C4000", x"8806170008",
+        x"22EE80000A", x"22E5C0000A", x"DAE5C003FF", x"7AF0000200",
+        x"1AE5CBC000", x"5005CC8000", x"5B00000008", x"13060BC000",
+        x"7B100003FF", x"B3060C4000", x"8806170009", x"15CB8EC000",
+        x"12C58EC000", x"7AE0000006", x"A0058B81E7", x"CAE0000006",
+        x"5005CB8000", x"5AF0000000", x"DB05E03FFF", x"2315E0000E",
+        x"DB162000FF", x"2B1620000E", x"13060C4000", x"88060E8010",
+        x"800757007F", x"C000000000", x"0000000000", x"0000000000",
         x"0000000000", x"0000000000", x"0000000000", x"0000000000",
         x"0000000000", x"0000000000", x"0000000000", x"0000000000",
         x"0000000000", x"0000000000", x"0000000000", x"0000000000",
@@ -1178,9 +1182,13 @@ begin
                 s_cx <= '0' & s_W(11 downto 1);
                 hmax <= to_unsigned(1, 15);
                 wmax <= to_unsigned(1, 15);
+                s_frans <= '1';
             else
                 fr_done <= u_done;
-                if u_done = '1' then s_zfirst <= '0'; end if;
+                -- only once a frame has actually STARTED: u_done idles high out
+                -- of reset, so an ungated test clears the snap before the engine
+                -- has ever run.
+                if u_done = '1' and s_frans = '1' then s_zfirst <= '0'; end if;
             end if;
         end if;
     end process p_fsetup;
@@ -1545,6 +1553,35 @@ begin
     end process p_gamrom;
 
     s_cy <= resize(s_hf(12 downto 1), 12);
+
+    -- synthesis translate_off
+    p_dbg : process(clk)
+        variable prev : std_logic := '0';
+    begin
+        if rising_edge(clk) then
+            if u_done = '1' and prev = '0' then
+                report "DBG ang=" & integer'image(to_integer(unsigned(rf_a(40))))
+                    & "," & integer'image(to_integer(unsigned(rf_a(41))))
+                    & "," & integer'image(to_integer(unsigned(rf_a(42))))
+                    & " bas=" & integer'image(to_integer(signed(rf_a(0))))
+                    & "," & integer'image(to_integer(signed(rf_a(4))))
+                    & "," & integer'image(to_integer(signed(rf_a(8))))
+                    & " nslot=" & integer'image(to_integer(unsigned(rf_a(92))));
+                for k in 0 to 2 loop
+                    report "DBG slot" & integer'image(k)
+                        & " face=" & integer'image(to_integer(sl_face(k)))
+                        & " ly=" & integer'image(to_integer(sl_ly(k)))
+                        & " cu=" & integer'image(to_integer(sl_cu(k)))
+                        & " cv=" & integer'image(to_integer(sl_cv(k)))
+                        & " lf=" & integer'image(to_integer(sl_lf(k)))
+                        & " px0=" & integer'image(to_integer(sl_px0(k)))
+                        & " py0=" & integer'image(to_integer(sl_py0(k)));
+                end loop;
+            end if;
+            prev := u_done;
+        end if;
+    end process p_dbg;
+    -- synthesis translate_on
     gm_a <= u_gama when fr_done = '0' else gm_ap;
 
     mu_idle <= '1' when (mu_bsy = '0' and mu_go_f = '0' and mu_go_l = '0')
