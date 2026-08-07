@@ -196,6 +196,33 @@ a.label('az_snap'); a.emit('MOV', dst=ZSM, a=T0)
 a.label('az_done')
 a.emit('SHR', dst=FUSE, a=ZSM, imm=4)
 
+# --- block-float reciprocal for the AA slope, which the PIXEL path reads as
+# s_pxm/s_pxe.  The FSM did v_px >> v_e with a runtime shift; the ISA only
+# shifts by an immediate, so halve in a loop and count the steps -- the count
+# IS the exponent and the residue IS the mantissa.
+a.emit('LDI', dst=T1, imm=183)
+a.emit('MUL', a=FUSE, b=T1)
+a.emit('MRD', dst=T0, imm=12)
+a.emit('AND', dst=T0, a=T0, imm=255)
+a.emit('LDI', dst=T1, imm=0)                 # exponent
+a.emit('MOV', dst=T3, a=T0)                  # mantissa
+a.emit('LDI', dst=T4, imm=8)
+a.label('pxl')
+a.emit('JLT', a=T3, b=T4, imm='pxd')
+a.emit('SHR', dst=T3, a=T3, imm=1)
+a.emit('ADD', dst=T1, a=T1, b=ONE)
+a.emit('JMP', imm='pxl')
+a.label('pxd')
+a.emit('LDI', dst=T4, imm=4)
+a.emit('MAX', dst=T3, a=T3, b=T4)
+a.emit('LDI', dst=T5, imm=7)
+a.emit('MIN', dst=T3, a=T3, b=T5)
+a.emit('SUB', dst=T3, a=T3, b=T4)            # mant - 4
+a.emit('SLW', imm=SLOTW['pxm'], a=T3, b=ZERO)
+a.emit('LDI', dst=T4, imm=5)
+a.emit('SUB', dst=T4, a=T4, b=T1)            # 5 - e
+a.emit('SLW', imm=SLOTW['pxe'], a=T4, b=ZERO)
+
 # ------------------------ phase 6: scaled half-basis (screen Q2)
 # sxh(i) = 1.5 * f * B(3i).x, syh(i) likewise on y
 for i in range(3):

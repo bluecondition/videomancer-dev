@@ -104,6 +104,14 @@ def oracle(rf, ctl_cx):
             slots[(SLOTW[port], nslot)] = min(max(v, 0), 1023)
         nslot += 1
 
+    # block-float reciprocal for the AA slope (FSM states 34-36)
+    px = ((s16(rf[65]) * 183) >> 12) & 255
+    e = 5 if px >= 128 else 4 if px >= 64 else 3 if px >= 32 else \
+        2 if px >= 16 else 1 if px >= 8 else 0
+    mant = min(max(px >> e, 4), 7)
+    slots[(SLOTW['pxm'], 0)] = mant - 4
+    slots[(SLOTW['pxe'], 0)] = 5 - e
+
     qx0 = (ctl_cx * ctl_cx) & 0x3FFFFF
     slots[(SLOTW['qx0'], 0)] = qx0
     gram[127] = nslot

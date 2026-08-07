@@ -1,0 +1,87 @@
+# Cubist — a photoreal-clean Rubik's Cube floating on a soft backdrop.
+#
+# v0.1: static solved cube with whole-cube rotation on K1/K2/K3 (yaw, pitch,
+# roll — glide-smoothed), auto-zoom framing, satin-black rounded cubies with
+# inset rounded stickers, gap AO and silhouette anti-aliasing over a gradient
+# sweep background.  Layer turns, the specular rig, MANUAL/AUTO modes and the
+# on-chip layer-by-layer solver build on this renderer in later versions.
+#
+# Author: bluecondition
+
+[program]
+program_id = "com.bluecondition.cubistref"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+program_name = "CubistRef"
+author = "bluecondition"
+license = "GPL-3.0"
+categories = ["Pattern", "Render"]
+program_type = "synthesis"
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+description = "A clean, glossy Rubik's cube floating on a soft studio backdrop. Turn it with the knobs; solver and layer turns to come."
+url = "https://github.com/bluecondition/videomancer-dev"
+
+# --- Rotary Potentiometers (Knobs 1-6) ---
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 880
+display_min_value = 0
+display_max_value = 360
+name_label = "Yaw"
+suffix_label = "deg"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 68
+display_min_value = 0
+display_max_value = 360
+name_label = "Pitch"
+suffix_label = "deg"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 0
+display_min_value = 0
+display_max_value = 360
+name_label = "Roll"
+suffix_label = "deg"
+
+# --- Linear Potentiometer (Slider) ---
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 512
+display_min_value = 0
+display_max_value = 100
+name_label = "Gesture"
+suffix_label = "%"
+
+# --- Presets ---
+
+[[preset]]
+name = "Hero"
+rotary_potentiometer_1 = 880
+rotary_potentiometer_2 = 68
+rotary_potentiometer_3 = 0
+linear_potentiometer_12 = 512
+
+[[preset]]
+name = "Corner"
+rotary_potentiometer_1 = 896
+rotary_potentiometer_2 = 94
+rotary_potentiometer_3 = 0
+linear_potentiometer_12 = 512

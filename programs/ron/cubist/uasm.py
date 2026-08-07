@@ -48,7 +48,7 @@ SLOTW = {
     'face': 6, 'sil': 7, 'cu': 8, 'cv': 9, 'ly': 10, 'lf': 11,
     'hn': 12, 'hu': 13, 'hv': 14, 'nslot': 15,
     # port 16+ are globals, not slot-indexed
-    'qx0': 16,
+    'qx0': 16, 'pxm': 17, 'pxe': 18,
 }
 
 # control inputs for CTL
