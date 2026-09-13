@@ -89,27 +89,50 @@ Videomancer hardware output convention (mondrian/CGA/C64 rule); live video passe
 through native. Headless BT.601 sims show the inks U/V-swapped — verify geometry
 + luma in sim, trust colour from the palette rule.
 
-## Timing (all 6 configs, HX4K, ~82% LC / 18 EBR)
+## Timing (all 6 configs, HX4K, ~83% LC / 18 EBR) — v0.2
 
 | Config    | Target   | Fmax     | Seed |
 |-----------|----------|----------|------|
-| HD Analog | 74.25    | 74.35    | 2    |
-| SD Analog | 27       | 71.10    | 1    |
-| HD HDMI   | 74.25    | 79.63    | 1    |
-| SD HDMI   | 27       | 80.06    | 1    |
-| HD Dual   | 74.25    | 83.22    | 1    |
-| SD Dual   | 27       | 81.39    | 2    |
+| HD Analog | 74.25    | 76.75    | 1    |
+| SD Analog | 27       | 77.33    | 1    |
+| HD HDMI   | 74.25    | 76.56    | 4    |
+| SD HDMI   | 27       | 77.70    | 1    |
+| HD Dual   | 74.25    | 79.05    | 1    |
+| SD Dual   | 27       | 75.73    | 1    |
 
-~6300–6321/7680 LC. HD Analog's 74.35 is just seed variance (the design's real
-Fmax is ~80; other HD configs sit 79–83). All at full clock, no divisor.
-Packaged: `out/rev_b/ron/rollthebones.vmprog`.
+~6393–6428/7680 LC. All at full clock, no divisor. Packaged:
+`out/rev_b/ron/rollthebones.vmprog`. (The v0.2 denoise first regressed HD HDMI
+to ~66 MHz by adding `s_dh±7` arithmetic to the timing-critical `p_position`
+counter process; precomputing the window bounds in the frame FSM recovered it.)
+
+## v0.2/0.3 fixes (2026-08-24/26)
+
+- **Bypass green-out (HW HDMI, bypass-only).** S11 passthrough had a green cast;
+  the dice looked correct. First mis-diagnosed as a chroma-convention issue and
+  "fixed" with a U/V swap — WRONG (a true bypass changes nothing; the swap only
+  made it weirder). Correct fix (matching SDK `passthru`, which the user cited as
+  the reference): bypass is now a **dedicated 1-cycle raw forward of `data_in`**
+  (`s_bpass <= data_in`) muxed at the output — byte- and timing-identical to
+  `passthru` — instead of tapping the deep dice pipeline (which apparently
+  greened out on the HDMI encoder). The dice path is untouched. **Pending HW
+  re-confirmation.** Lesson: replicate the known-good reference exactly rather
+  than theorise about the encoder.
+- **Latency alignment.** Also set `LATENCY=12` so the dice video (c9) and the
+  sync tap land at the same delay (they were 1 apart), per prism's same-latency
+  rule.
+- **Dice flicker / noise.** Point-sampling one pixel per cell flickers when the
+  video is noisy (the face flips as luma crosses a threshold). Now the sample is
+  an **8-px horizontal area-average** around each cell centre on the sample line
+  (memoryless, no BRAM — the same denoise that fixed C64). Steadier faces.
+  (The window arithmetic must be precomputed in the frame FSM, not `p_position`,
+  or it regresses HD HDMI timing — see below.)
 
 ## Status
 
 Built (all 6 configs close, packaged) + sim-verified (default grid, big-die
-detail, full Tumble pile, Rainbow). NOT yet hardware-tested. On HW watch: the
-100-bit ping-pong BRAM (wide word — pad if corruption appears, cf. inferno vdly
-split) and the U/V ink convention.
+detail, full Tumble pile, Rainbow, denoise). HW: bypass/ink/table U/V swap and
+flicker fixes pending re-confirmation. On HW watch: the 100-bit ping-pong BRAM
+(wide word — pad if corruption appears, cf. inferno vdly split).
 
 ## Sims
 

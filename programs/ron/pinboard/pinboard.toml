@@ -1,0 +1,221 @@
+# Pinboard — an isometric board of square pins agitated by a hovering ball.
+#
+# Port of https://www.shadertoy.com/view/tssSDN : a grid of boxes whose heights
+# are sin(hash + t) attenuated by the distance to a moving sphere.  Here the
+# raymarch is an orthographic isometric heightfield march so it runs at pixel
+# rate on the HX4K.
+
+[program]
+program_id = "com.bluecondition.pinboard"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+program_name = "Pinboard"
+author = "bluecondition"
+license = "GPL-3.0"
+categories = ["Shape", "Render", "Grid", "Demo"]
+program_type = "synthesis"
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+description = "Isometric board of square pins that pop up and sink as a hovering ball skates over them."
+url = "https://github.com/bluecondition/videomancer-dev"
+
+# --- Rotary Potentiometers (Knobs 1-6) ---
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 300
+display_min_value = 0
+display_max_value = 100
+name_label = "Pin Size"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 400
+display_min_value = 0
+display_max_value = 100
+name_label = "Rate"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 620
+display_min_value = 0
+display_max_value = 100
+name_label = "Pop"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 420
+display_min_value = 0
+display_max_value = 100
+name_label = "Reach"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 700
+display_min_value = 0
+display_max_value = 100
+name_label = "Roam"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+control_mode = "polar_degs_360"
+name_label = "Hue"
+suffix_label = "°"
+initial_value = 352
+
+# --- Toggle Switches (7-11, binary) ---
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Edges"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Field"
+value_labels = ["Near", "Far"]
+initial_value_label = "Near"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "View"
+value_labels = ["Standard", "Shallow"]
+initial_value_label = "Standard"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Video"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Bulge"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+# --- Linear Potentiometer (Fader 12) ---
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 300
+display_min_value = 0
+display_max_value = 100
+name_label = "Ball Size"
+suffix_label = "%"
+
+# --- Presets ---
+
+[[preset]]
+name = "Shadertoy"
+rotary_potentiometer_1 = 260       # small pins, dense board
+rotary_potentiometer_2 = 420
+rotary_potentiometer_3 = 600
+rotary_potentiometer_4 = 380
+rotary_potentiometer_5 = 700
+rotary_potentiometer_6 = 352       # red sides, white tops
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 240
+
+[[preset]]
+name = "Wrecking Ball"
+rotary_potentiometer_1 = 200
+rotary_potentiometer_2 = 300
+rotary_potentiometer_3 = 900
+rotary_potentiometer_4 = 620
+rotary_potentiometer_5 = 850
+rotary_potentiometer_6 = 640
+toggle_switch_7 = 1
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 1                # ball presses a dome up out of the board
+linear_potentiometer_12 = 900       # huge ball
+
+[[preset]]
+name = "Calm Eye"
+rotary_potentiometer_1 = 340
+rotary_potentiometer_2 = 700
+rotary_potentiometer_3 = 700
+rotary_potentiometer_4 = 300
+rotary_potentiometer_5 = 600
+rotary_potentiometer_6 = 130
+toggle_switch_7 = 1
+toggle_switch_8 = 1                 # everything shimmers except near the ball
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 380
+
+[[preset]]
+name = "Shallow Tiles"
+rotary_potentiometer_1 = 520
+rotary_potentiometer_2 = 260
+rotary_potentiometer_3 = 500
+rotary_potentiometer_4 = 500
+rotary_potentiometer_5 = 500
+rotary_potentiometer_6 = 800
+toggle_switch_7 = 1
+toggle_switch_8 = 0
+toggle_switch_9 = 1                 # shallow projection, big tiles
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 420
+
+[[preset]]
+name = "Video Pins"
+rotary_potentiometer_1 = 230
+rotary_potentiometer_2 = 380
+rotary_potentiometer_3 = 640
+rotary_potentiometer_4 = 460
+rotary_potentiometer_5 = 720
+rotary_potentiometer_6 = 352
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 1                # live picture painted on the pin faces
+toggle_switch_11 = 1
+linear_potentiometer_12 = 300
+
+[[preset]]
+name = "Ball Pit"
+rotary_potentiometer_1 = 160
+rotary_potentiometer_2 = 900
+rotary_potentiometer_3 = 1023
+rotary_potentiometer_4 = 900
+rotary_potentiometer_5 = 900
+rotary_potentiometer_6 = 460
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 1023      # ball fills half the screen

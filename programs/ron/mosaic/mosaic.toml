@@ -1,0 +1,176 @@
+# Mosaic — multi-bit colour frame-store feedback test-bed (sibling of
+# afterimage).  A 64x32 grid of 16-bit colour cells {out luma, sample luma,
+# U, V} lives in two ping-pong EBR banks, so each frame's cell is computed
+# from this frame's sample AND last frame's cell (output + sample kept
+# separately, which is what a real temporal derivative needs).  Law picks
+# the recurrence (trails / blur / motion / hold), Feedback where the old
+# cell is read from (hold / zoom / drift / spin), Persist the decay.
+
+[program]
+program_id = "com.bluecondition.mosaic"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+program_name = "Mosaic"
+author = "bluecondition"
+license = "GPL-3.0"
+categories = ["Pixel", "Temporal", "Color"]
+program_type = "processing"
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+description = "64x32 colour block frame store, feedback laws: decay trails, blur echo, motion detect, block hold; zoom/drift/spin sources."
+url = "https://github.com/bluecondition/videomancer-dev"
+
+# --- Rotary Potentiometers (Knobs 1-6) ---
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Feedback"
+value_labels = ["Hold", "Zoom In", "Zoom Out", "Left", "Right", "Up", "Down", "Spin"]
+initial_value_label = "Hold"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Grid"
+value_labels = ["64x32", "32x16", "16x8", "8x4"]
+initial_value_label = "64x32"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 512
+display_min_value = -100
+display_max_value = 100
+name_label = "Exposure"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Law"
+value_labels = ["Trails", "Blur", "Motion", "Hold"]
+initial_value_label = "Trails"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Colour"
+value_labels = ["Video", "Mono", "Paper", "Game Boy", "Phosphor", "Amber", "Blueprint", "Neon"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 0
+display_min_value = 0
+display_max_value = 100
+name_label = "Diffuse"
+suffix_label = "%"
+
+# --- Toggle Switches (7-11) ---
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Invert"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Chroma"
+value_labels = ["Stored", "Live"]
+initial_value_label = "Stored"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Mirror"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Luma"
+value_labels = ["Cells", "Video"]
+initial_value_label = "Cells"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Input"
+value_labels = ["Live", "Freeze"]
+initial_value_label = "Live"
+
+# --- Linear Potentiometer (Fader 12) ---
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 400
+display_min_value = 25
+display_max_value = 100
+name_label = "Persist"
+suffix_label = "%"
+
+# --- Presets ---
+
+[[preset]]
+name = "Colour Trails"
+rotary_potentiometer_1 = 0
+rotary_potentiometer_2 = 0
+rotary_potentiometer_3 = 512
+rotary_potentiometer_4 = 0
+rotary_potentiometer_5 = 0
+rotary_potentiometer_6 = 0
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 600
+
+[[preset]]
+name = "Motion Only"
+rotary_potentiometer_1 = 0
+rotary_potentiometer_2 = 0
+rotary_potentiometer_3 = 512
+rotary_potentiometer_4 = 600
+rotary_potentiometer_5 = 0
+rotary_potentiometer_6 = 0
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 500
+
+[[preset]]
+name = "Block Hold"
+rotary_potentiometer_1 = 0
+rotary_potentiometer_2 = 0
+rotary_potentiometer_3 = 512
+rotary_potentiometer_4 = 900
+rotary_potentiometer_5 = 0
+rotary_potentiometer_6 = 0
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 700
+
+[[preset]]
+name = "Amber Tunnel"
+rotary_potentiometer_1 = 300
+rotary_potentiometer_2 = 0
+rotary_potentiometer_3 = 512
+rotary_potentiometer_4 = 0
+rotary_potentiometer_5 = 640
+rotary_potentiometer_6 = 150
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 850

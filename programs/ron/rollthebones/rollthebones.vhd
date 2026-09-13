@@ -54,7 +54,11 @@ use work.video_timing_pkg.all;
 
 architecture rollthebones of program_top is
 
-    constant LATENCY  : natural := 13;                 -- video pipe depth
+    constant LATENCY  : natural := 12;                 -- video pipe depth: sync/bypass
+                                                       -- tap (pipe 11) aligns with the
+                                                       -- dice content (c9), so all modes
+                                                       -- present ONE latency (avoids the
+                                                       -- mode-dependent-tap green hue).
     constant C_MAXCOL : natural := 128;
     constant C_MID    : unsigned(9 downto 0) := to_unsigned(512, 10);
 
@@ -114,6 +118,8 @@ architecture rollthebones of program_top is
     signal s_d    : unsigned(7 downto 0) := to_unsigned(71, 8);
     signal s_dm1  : unsigned(7 downto 0) := to_unsigned(70, 8);
     signal s_dh   : unsigned(7 downto 0) := to_unsigned(35, 8);
+    signal s_dhlo : unsigned(7 downto 0) := to_unsigned(28, 8);   -- Dh-7 (denoise win)
+    signal s_dhi  : unsigned(7 downto 0) := to_unsigned(36, 8);   -- Dh+1 (denoise strobe)
     signal s_r0   : unsigned(7 downto 0) := to_unsigned(31, 8);
     signal s_bw   : unsigned(7 downto 0) := to_unsigned(7, 8);
     signal s_rmax : unsigned(7 downto 0) := to_unsigned(34, 8);
@@ -158,6 +164,7 @@ architecture rollthebones of program_top is
     -- Sample pipe.
     --------------------------------------------------------------------------
     signal lfsr : unsigned(15 downto 0) := x"ACE1";
+    signal acc_y, acc_u, acc_v : unsigned(12 downto 0) := (others => '0');  -- 8px denoise
 
     signal w0_stb : std_logic := '0';
     signal w0_par : std_logic := '0';
@@ -279,7 +286,8 @@ architecture rollthebones of program_top is
 
     signal c9_y, c9_u, c9_v : unsigned(9 downto 0) := C_MID;
 
-    signal s_io : t_video_stream_yuv444_30b;
+    signal s_io   : t_video_stream_yuv444_30b;
+    signal s_bpass : t_video_stream_yuv444_30b;   -- 1-cycle raw passthrough (== SDK passthru)
 
     type t_pipe is array (natural range <>) of t_video_stream_yuv444_30b;
     signal pipe : t_pipe(0 to LATENCY - 1);
@@ -301,6 +309,8 @@ begin
         variable v_trig   : std_logic;
         variable v_tp     : std_logic;
         variable v_su, v_sv : signed(11 downto 0);
+        variable v_online : boolean;
+        variable v_avy, v_avu, v_avv : unsigned(9 downto 0);
     begin
         if rising_edge(clk) then
             prev_hsync_n <= data_in.hsync_n;
@@ -347,29 +357,45 @@ begin
                 dyc_line <= signed(resize(celly_loc, 10)) - signed(resize(s_dh, 10));
             end if;
 
-            -- sample trigger at each cell centre
+            -- 8px horizontal area-average around each cell centre on the sample
+            -- line (memoryless denoise -> far fewer frame-to-frame face flips
+            -- from video noise; a point sample flickers, an average is stable).
+            v_online := frame_act = '1' and data_in.avid = '1'
+                        and (line0 = '1' or celly_loc = s_dh);
+            if v_online and xloc = s_dhlo then
+                acc_y <= resize(unsigned(data_in.y), 13);
+                acc_u <= resize(unsigned(data_in.u), 13);
+                acc_v <= resize(unsigned(data_in.v), 13);
+            elsif v_online and xloc > s_dhlo and xloc <= s_dh then
+                acc_y <= acc_y + unsigned(data_in.y);
+                acc_u <= acc_u + unsigned(data_in.u);
+                acc_v <= acc_v + unsigned(data_in.v);
+            end if;
+
+            -- strobe one pixel after the 8px window closes
             v_trig := '0';
             v_tp   := not celly_par;
-            if data_in.avid = '1' and frame_act = '1' and xloc = s_dh then
-                if line0 = '1' then
-                    v_tp := '0'; v_trig := '1';
-                elsif celly_loc = s_dh then
-                    v_trig := '1';
-                end if;
+            if v_online and xloc = s_dhi then
+                if line0 = '1' then v_tp := '0'; end if;
+                v_trig := '1';
             end if;
 
             w0_stb <= v_trig;
             w0_par <= v_tp;
             w0_idx <= xidx;
-            w0_u   <= unsigned(data_in.u);
-            w0_v   <= unsigned(data_in.v);
-
-            v_su := signed(resize(unsigned(data_in.u), 12)) - 512;
-            v_sv := signed(resize(unsigned(data_in.v), 12)) - 512;
-            if s_src = '1' then
-                w0_drv <= resize(unsigned(abs(v_su)), 11) + resize(unsigned(abs(v_sv)), 11);
-            else
-                w0_drv <= '0' & unsigned(data_in.y);
+            if v_trig = '1' then
+                v_avy := resize(shift_right(acc_y, 3), 10);
+                v_avu := resize(shift_right(acc_u, 3), 10);
+                v_avv := resize(shift_right(acc_v, 3), 10);
+                w0_u <= v_avu;
+                w0_v <= v_avv;
+                v_su := signed(resize(v_avu, 12)) - 512;
+                v_sv := signed(resize(v_avv, 12)) - 512;
+                if s_src = '1' then
+                    w0_drv <= resize(unsigned(abs(v_su)), 11) + resize(unsigned(abs(v_sv)), 11);
+                else
+                    w0_drv <= '0' & v_avy;
+                end if;
             end if;
 
             if v_v = '1' then
@@ -590,6 +616,9 @@ begin
                         s_dh  <= '0' & s_d(7 downto 1);
                         ma <= signed(resize(lp12, 18));
                         mb <= signed(resize('0' & s_d(7 downto 2), 18));   -- Dh/2 = D/4
+                    when 2 =>
+                        s_dhlo <= s_dh - 7;   -- precomputed denoise window bounds
+                        s_dhi  <= s_dh + 1;   -- (keeps the arithmetic out of p_position)
                     when 4 =>
                         v_r0 := to_integer(s_dh) - 2 - to_integer(unsigned(mp(17 downto 10)));
                         if v_r0 < 6 then v_r0 := 6; end if;
@@ -867,30 +896,31 @@ begin
             end case;
 
             ----------------------------------------------------------------
-            -- c10: bypass mux + sync attach.
+            -- c10: processed output (sync latency-aligned to c9 content).
+            -- Bypass is a SEPARATE 1-cycle raw forward (s_bpass), muxed at the
+            -- output below, so S11 is byte- and timing-identical to SDK passthru.
             ----------------------------------------------------------------
-            if s_bypass = '1' then
-                s_io.y <= pipe(LATENCY - 1).y;
-                s_io.u <= pipe(LATENCY - 1).u;
-                s_io.v <= pipe(LATENCY - 1).v;
-            else
-                s_io.y <= std_logic_vector(c9_y);
-                s_io.u <= std_logic_vector(c9_u);
-                s_io.v <= std_logic_vector(c9_v);
-            end if;
+            s_io.y <= std_logic_vector(c9_y);
+            s_io.u <= std_logic_vector(c9_u);
+            s_io.v <= std_logic_vector(c9_v);
             s_io.hsync_n <= pipe(LATENCY - 1).hsync_n;
             s_io.vsync_n <= pipe(LATENCY - 1).vsync_n;
             s_io.avid    <= pipe(LATENCY - 1).avid;
             s_io.field_n <= pipe(LATENCY - 1).field_n;
+
+            -- 1-cycle raw passthrough (exactly SDK passthru: data_out <= data_in)
+            s_bpass <= data_in;
         end if;
     end process p_pipe;
 
-    data_out.y       <= s_io.y;
-    data_out.u       <= s_io.u;
-    data_out.v       <= s_io.v;
-    data_out.hsync_n <= s_io.hsync_n;
-    data_out.vsync_n <= s_io.vsync_n;
-    data_out.avid    <= s_io.avid;
-    data_out.field_n <= s_io.field_n;
+    -- S11 bypass forwards the raw input untouched (like passthru); otherwise the
+    -- rendered dice.  Mux at the output so bypass never inherits the pipeline.
+    data_out.y       <= s_bpass.y       when s_bypass = '1' else s_io.y;
+    data_out.u       <= s_bpass.u       when s_bypass = '1' else s_io.u;
+    data_out.v       <= s_bpass.v       when s_bypass = '1' else s_io.v;
+    data_out.hsync_n <= s_bpass.hsync_n when s_bypass = '1' else s_io.hsync_n;
+    data_out.vsync_n <= s_bpass.vsync_n when s_bypass = '1' else s_io.vsync_n;
+    data_out.avid    <= s_bpass.avid    when s_bypass = '1' else s_io.avid;
+    data_out.field_n <= s_bpass.field_n when s_bypass = '1' else s_io.field_n;
 
 end architecture rollthebones;

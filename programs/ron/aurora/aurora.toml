@@ -1,0 +1,170 @@
+[program]
+program_id = "com.ron.aurora"
+program_version = "1.7.0"
+abi_version = ">=1.0,<2.0"
+program_name = "Aurora"
+author = "ron"
+license = "GPL-3.0"
+categories = ["Curve", "Organic", "Render"]
+program_type = "processing"
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+description = "Soft rainbow ribbon anchored at both edges; the slider lengthens it so the middle snakes and coils."
+
+# --- Rotary Potentiometers (Knobs 1-6) ---
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 300
+display_min_value = 0
+display_max_value = 100
+name_label = "Height"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 512
+display_min_value = 0
+display_max_value = 100
+name_label = "Position"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 250
+display_min_value = 0
+display_max_value = 100
+name_label = "Wiggle"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 350
+display_min_value = 0
+display_max_value = 100
+name_label = "Rate"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 576
+display_min_value = -100
+display_max_value = 100
+name_label = "Flow"
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 146
+display_min_value = 5
+display_max_value = 40
+name_label = "Spectrum"
+suffix_label = ""
+
+# --- Toggle Switches (7-11) ---
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Color"
+value_labels = ["Gradient", "Solid"]
+initial_value_label = "Gradient"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Backdrop"
+value_labels = ["Black", "Video"]
+initial_value_label = "Black"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Freeze"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+# --- Linear Potentiometer (Slider) ---
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 0
+display_min_value = 0
+display_max_value = 100
+name_label = "Coil"
+suffix_label = "%"
+
+# --- Presets ---
+# (Coil is the performance gesture: both ends stay pinned to the screen
+#  edges and the ribbon lengthens between them, so the middle snakes deeper
+#  as the slider rises.  It never crosses itself.  Wiggle 0 = perfectly still.)
+
+[[preset]]
+name = "First Light"
+rotary_potentiometer_1 = 300
+rotary_potentiometer_2 = 512
+rotary_potentiometer_3 = 250
+rotary_potentiometer_4 = 350
+rotary_potentiometer_5 = 576
+rotary_potentiometer_6 = 146
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+linear_potentiometer_12 = 0
+
+[[preset]]
+name = "Silk Flag"
+rotary_potentiometer_1 = 420
+rotary_potentiometer_2 = 480
+rotary_potentiometer_3 = 300
+rotary_potentiometer_4 = 300
+rotary_potentiometer_5 = 512
+rotary_potentiometer_6 = 146
+toggle_switch_7 = 1
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+linear_potentiometer_12 = 560
+
+[[preset]]
+name = "Deep Water"
+rotary_potentiometer_1 = 220
+rotary_potentiometer_2 = 560
+rotary_potentiometer_3 = 420
+rotary_potentiometer_4 = 200
+rotary_potentiometer_5 = 620
+rotary_potentiometer_6 = 300
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+linear_potentiometer_12 = 1000
+
+[[preset]]
+name = "Over the Air"
+rotary_potentiometer_1 = 140
+rotary_potentiometer_2 = 400
+rotary_potentiometer_3 = 260
+rotary_potentiometer_4 = 400
+rotary_potentiometer_5 = 576
+rotary_potentiometer_6 = 146
+toggle_switch_7 = 0
+toggle_switch_8 = 1
+toggle_switch_9 = 0
+linear_potentiometer_12 = 340

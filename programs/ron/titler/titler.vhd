@@ -1,61 +1,75 @@
--- Titler: low-fi video text overlay generator.
+-- Titler: lo-res video character generator in the style of 1980s/90s
+-- hardware titlers (Chyron / Video Toaster CG / Videonics TitleMaker).
 --
 -- Renders two lines of 16 characters each (32 cells total) over the input
--- video. Knobs control horizontal position, vertical position, size, and
--- color. An Edit Mode (toggle 7) exposes a single editing cursor that walks
--- top-to-bottom across both lines (knob 5); knob 6 picks the letter under
--- the cursor; knob 4 erases (in edit mode); a Matte toggle (9) lets the
--- incoming video reveal through the text shapes.
+-- video.  Knobs place the text block, pick one of eight edge/box "styles",
+-- choose the ink colour and edit the message; the P12 slider scales the
+-- text from small caption to full-height hero type.
 --
--- Pipeline (5 cycles total from data_in to data_out):
---   S1: position counters (h_count, v_count) and Bresenham-style position
---       accumulators (hpos_acc, vpos_acc) that map physical pixels/lines to
---       a glyph-pixel index at any integer scale 1..32x. The accumulator
---       walks by step = floor(2^16 / scale) per pixel (or per line for the
---       vertical accumulator), so no multiplier is required.
---   S2: extract char_idx / line_idx / glyph_x / glyph_y from the integer
---       part of the accumulators; compute in_text + in_top_margin bounds.
---   S3: text buffer read, cursor box detect (with margin handling).
---   S4: font ROM read; register the 8-bit row plus the pass-through control
---       bits. Splitting the ROM out of the final mux gives the output stage
---       enough slack to clear 74.25 MHz with margin.
---   S5: pixel extract from the registered font row, output mux (text vs
---       matte vs background).
+-- Everything geometric derives from the RUNTIME-MEASURED active raster, so
+-- the position knobs and the size slider have the same full useful travel
+-- in every video mode (this was the biggest defect in v1.0: the H/V knobs
+-- were hard-coded to a 4092-pixel span, which crammed all of SD's placement
+-- into the bottom 20% of the knob).
+--
+-- Pipeline (7 cycles from data_in to data_out):
+--   S1: active-region counters (h_act / v_act) and Bresenham position
+--       accumulators (hpos_acc / vpos_acc) mapping physical pixels/lines to
+--       glyph-pixel indices at any integer scale.  The accumulator walks by
+--       step = floor(2^16 / scale) per pixel (or per ACTIVE line), so no
+--       multiplier is needed in the pixel path - only a 32-entry step LUT.
+--   S2: extract char/line/glyph-x/y from the accumulator integer parts;
+--       apply the centring offset; compute in_text / in_box / margin flags.
+--   S3: text-buffer read, cursor box and edit underscore.
+--   S4: font ROM read - the WHOLE 8x8 glyph as one 64-bit word.
+--   S5: select glyph rows y-1, y, y+1 out of that word; palette index.
+--   S6: 3x3 dilation and the diagonal shifts -> self / outline / shadow /
+--       highlight bits; palette lookup.
+--   S7: pixel-class decode, output mux, blanking gate.
+--
+-- Why the whole glyph is fetched at once: with rows y-1, y and y+1 in hand
+-- the entire 3x3 neighbourhood costs a couple of OR gates
+--     dil  = row(y-1) or row(y) or row(y+1)
+--     dil3 = dil or (dil sll 1) or (dil srl 1)
+-- which buys drop shadow, black edge, hollow and emboss for essentially
+-- nothing.  Glyphs live in columns 1..5 of an 8-wide cell and rows 0..6 of
+-- an 8-tall cell, so a one-glyph-pixel edge always stays inside its own
+-- cell HORIZONTALLY.  Vertically it does not: the row above a glyph's top
+-- row belongs to the cell above, which holds a different character.  So each
+-- text line is given its own dedicated top-margin row (rows 0 and 9 of the
+-- 18-row block).  On those rows the pipeline fetches the line's character but
+-- forces row(y-1) = row(y) = 0 and row(y+1) = glyph row 0, which is exactly
+-- the "one row above the glyph" the dilation needs.  Without it every
+-- character loses the top of its outline.
+-- At scale 8 an edge is 8 physical pixels thick - the chunky look of the
+-- period hardware.
 --
 -- Resources:
---   - Font ROM: 64 glyphs x 8 rows x 8 bits = 4 kbit (LUT-ROM)
---   - Text buffer: 32 entries x 6 bits = 192 register bits (2 lines x 16)
---   - Step LUT: 32 entries x 17 bits ~= 544 bits (LUT-ROM)
---   - Bypass delay: 4 stages x (3*10 + 4) bits
---
--- Font layout note: glyphs are stored shifted right by 1 column inside the
--- 8x8 cell, so column 0 is always blank, columns 1..5 hold the visible
--- glyph, and columns 6..7 are the inter-character gap. Row 7 is the
--- inter-line gap. The cursor box uses these blank cells to draw a frame
--- that fully encloses the letter without overlapping any pixel.
+--   - Font ROM: 128 glyphs x 64 bits = 8 kbit (EBR)
+--   - Text buffer: 32 entries x 6 bits = 192 register bits
+--   - Step LUT: 32 entries x 17 bits (LUT-ROM)
+--   - One shared serial shift-add multiplier for the per-frame geometry
 --
 -- Register Map:
---   reg(0)    : H Position       (0..1023, scaled to ~0..2046 px)
---   reg(1)    : V Position       (0..1023, scaled to ~0..2046 lines)
---   reg(2)    : Size             top 5 bits + 1 => continuous scale 1..32x
---   reg(3)    : Color / Erase    Dual purpose:
---                                  Edit Mode OFF -> top 3 bits select 1 of 8
---                                                   preset colors (latched)
---                                  Edit Mode ON  -> top 5 bits act as a
---                                                   second cursor: the
---                                                   cursor jumps to the
---                                                   knob's position and the
---                                                   cell there is blanked.
---                                                   Sweeping the knob erases
---                                                   each cell it passes.
---   reg(4)    : Cursor           top 5 bits select 1 of 32 cells (non-
---                                destructive). bit 4 is line index (0/1),
---                                bits 3..0 are column.
---   reg(5)    : Letter           (top 6 bits = char code 0..63)
---   reg(6)(0) : Edit Mode        (1 = enable cursor + writes)
---   reg(6)(1) : Background       (0 = passthrough video, 1 = solid black)
---   reg(6)(2) : Matte            (1 = text glyphs reveal incoming video)
---   reg(6)(3) : Font             (0 = default, 1 = sci-fi)
+--   reg(0)    : H Position    0..1023 -> text centre across the active width
+--   reg(1)    : V Position    0..1023 -> text centre down the active height
+--   reg(2)    : Style         top 3 bits select one of 8 looks
+--   reg(3)    : Colour / Erase   Edit Mode OFF -> top 3 bits pick 1 of 8 inks
+--                                Edit Mode ON  -> top 5 bits drag the cursor
+--                                                 and blank each cell passed
+--   reg(4)    : Cursor        top 5 bits select 1 of 32 cells (bit 4 = line)
+--   reg(5)    : Letter        top 6 bits = char code 0..63
+--   reg(6)(0) : Edit Mode     1 = enable cursor + writes
+--   reg(6)(1) : Background    0 = passthrough video, 1 = solid black
+--   reg(6)(2) : Matte         1 = glyph pixels reveal the incoming video
+--   reg(6)(3) : Font          0 = default, 1 = sci-fi
+--   reg(6)(4) : Justify       0 = left, 1 = centre each line
+--   reg(7)    : Size          P12 slider - screen-relative scale
+--
+-- Colour convention: the palette below is authored in standard BT.601 and
+-- swapped (U<->V) at the single compose point in S7, because Videomancer
+-- hardware wires Cr into the U register.  The passthrough / matte paths are
+-- NOT swapped - raw in is already raw out.
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -73,7 +87,7 @@ architecture titler of program_top is
     --==========================================================================
     -- Constants
     --==========================================================================
-    constant C_LATENCY      : integer := 5;
+    constant C_LATENCY      : integer := 7;
     constant C_DELAY_DEPTH  : integer := C_LATENCY - 1;  -- shift register depth
     constant C_TEXT_COLS    : integer := 16;             -- chars per line
     constant C_TEXT_ROWS    : integer := 2;              -- number of lines
@@ -94,6 +108,30 @@ architecture titler of program_top is
     constant C_POS_BITS     : integer := C_POS_INT + C_POS_FRAC;     -- 24
     constant C_STEP_BITS    : integer := C_POS_FRAC + 1;             -- 17
 
+    -- Style codes (reg(2) top 3 bits).
+    constant C_ST_PLAIN     : integer := 0;   -- ink only
+    constant C_ST_SHADOW    : integer := 1;   -- ink + black drop shadow
+    constant C_ST_EDGE      : integer := 2;   -- ink + black outline
+    constant C_ST_HOLLOW    : integer := 3;   -- outline only, interior open
+    constant C_ST_EMBOSS    : integer := 4;   -- white NW highlight, black SE
+    constant C_ST_BOX       : integer := 5;   -- ink on a solid black panel
+    constant C_ST_HALFBOX   : integer := 6;   -- ink on 50%-dimmed video
+    constant C_ST_REVERSE   : integer := 7;   -- black text knocked out of ink
+
+    -- Pixel classes handed from S6 to the S7 output mux.
+    constant C_CL_BG        : integer := 0;   -- background (video or black)
+    constant C_CL_INK       : integer := 1;   -- selected text/cursor colour
+    constant C_CL_BLACK     : integer := 2;
+    constant C_CL_WHITE     : integer := 3;
+    constant C_CL_DIM       : integer := 4;   -- video at 50%
+    constant C_CL_VIDEO     : integer := 5;   -- matte: raw video through glyph
+
+    -- Drawn luma is capped at 768: full-scale Y clips every RGB channel on
+    -- the encoder and kills chroma.
+    constant C_Y_WHITE      : integer := 768;
+    constant C_Y_BLACK      : integer := 64;
+    constant C_MID          : integer := 512;
+
     type t_step_lut is array (1 to C_SCALE_MAX)
         of unsigned(C_STEP_BITS - 1 downto 0);
 
@@ -108,28 +146,46 @@ architecture titler of program_top is
 
     constant C_STEP_LUT : t_step_lut := f_make_step_lut;
 
+    -- Extract one 8-bit glyph row out of the packed 64-bit word.  Written as
+    -- an explicit case rather than a computed slice: non-static slice bounds
+    -- are a synthesis hazard, and the case maps to a plain 8:1 mux anyway.
+    function f_row(g : std_logic_vector(63 downto 0);
+                   y : unsigned(2 downto 0)) return std_logic_vector is
+    begin
+        case to_integer(y) is
+            when 0      => return g(63 downto 56);
+            when 1      => return g(55 downto 48);
+            when 2      => return g(47 downto 40);
+            when 3      => return g(39 downto 32);
+            when 4      => return g(31 downto 24);
+            when 5      => return g(23 downto 16);
+            when 6      => return g(15 downto  8);
+            when others => return g( 7 downto  0);
+        end case;
+    end function;
+
     --==========================================================================
     -- Decoded parameters (concurrent)
     --==========================================================================
     signal s_h_pos       : unsigned(9 downto 0);
     signal s_v_pos       : unsigned(9 downto 0);
     signal s_size_raw    : unsigned(9 downto 0);
-    signal s_size_scale  : integer range 1 to C_SCALE_MAX;
-    signal s_size_step   : unsigned(C_STEP_BITS - 1 downto 0);
+    signal s_style       : unsigned(2 downto 0);
     signal s_letter      : unsigned(5 downto 0);
     signal s_edit_mode   : std_logic;
     signal s_bg_black    : std_logic;
     signal s_matte       : std_logic;
     signal s_font_sel    : std_logic;
+    signal s_justify     : std_logic;
 
-    -- Color is latched: only updates when not in edit mode (knob 4 is then
+    -- Colour is latched: only updates when not in edit mode (knob 4 is then
     -- repurposed as the Erase-and-scroll knob).
-    signal s_color_sel   : unsigned(2 downto 0) := "000";  -- 8 preset colors
+    signal s_color_sel   : unsigned(2 downto 0) := "000";  -- 8 preset colours
 
     -- Dual cursor sources: knob 5 (top 5 bits of reg(4)) walks the cursor
     -- non-destructively; knob 4 (top 5 bits of reg(3)) also drags the cursor
-    -- but blanks every cell it lands on. r_cursor is the latched "active
-    -- cursor" — it follows whichever source most recently moved.
+    -- but blanks every cell it lands on.  r_cursor is the latched "active
+    -- cursor" - it follows whichever source most recently moved.
     signal s_cursor_5p     : unsigned(C_CURSOR_BIT - 1 downto 0);
     signal s_erase_5p      : unsigned(C_CURSOR_BIT - 1 downto 0);
     signal r_cursor        : unsigned(C_CURSOR_BIT - 1 downto 0)
@@ -139,70 +195,103 @@ architecture titler of program_top is
     signal prev_erase_5p   : unsigned(C_CURSOR_BIT - 1 downto 0)
                              := (others => '0');
 
-    -- Downstream consumers see the cursor as (line, col) split, derived from
-    -- the latched r_cursor.
+    -- Downstream consumers see the cursor as (line, col) split.
     signal s_cursor_line : unsigned(C_LINE_BIT - 1 downto 0);
     signal s_cursor_col  : unsigned(C_COL_BIT  - 1 downto 0);
 
+    -- Where that cell is actually DRAWN once centring has shifted the line.
+    -- Without this the edit box would sit on the physical slot while the
+    -- letter it belongs to had moved right, which reads as a broken cursor.
+    signal s_cursor_disp : unsigned(C_COL_BIT - 1 downto 0);
+
     -- Edge detection for non-destructive letter writes.
-    signal prev_letter     : unsigned(5 downto 0) := (others => '0');
+    signal prev_letter   : unsigned(5 downto 0) := (others => '0');
 
-    -- H/V origin (signed conceptually): split into an unsigned magnitude
-    -- and a sign flag. When the origin is positive the accumulator behaves
-    -- like before — sentinel at hsync/vsync, then transitions to 0 when the
-    -- physical scan reaches s_h_origin / s_v_origin. When the origin is
-    -- negative the text has been scrolled off-screen to the left/top, so
-    -- the accumulator is pre-loaded with hpos_init / vpos_init (computed in
-    -- vblank by p_init_compute) — that captures how many glyph-pixels of
-    -- the text have already scrolled past the screen edge.
-    signal s_h_origin    : unsigned(11 downto 0);
-    signal s_v_origin    : unsigned(11 downto 0);
-    signal h_origin_neg  : std_logic := '0';
-    signal v_origin_neg  : std_logic := '0';
-    signal h_origin_abs  : unsigned(12 downto 0) := (others => '0');
-    signal v_origin_abs  : unsigned(12 downto 0) := (others => '0');
-    signal hpos_init     : unsigned(C_POS_BITS - 1 downto 0)
-                           := (others => '1');
-    signal vpos_init     : unsigned(C_POS_BITS - 1 downto 0)
-                           := (others => '1');
+    --==========================================================================
+    -- Raster measurement.  h_act / v_act count ACTIVE pixels and ACTIVE lines
+    -- only, so every geometry term below is expressed in active-picture
+    -- coordinates and the vertical DDA cannot drift between interlaced
+    -- fields.  Widths default to HD until the first frame has been measured.
+    --==========================================================================
+    signal prev_vsync_n  : std_logic := '1';
+    signal prev_avid     : std_logic := '0';
+    signal h_act         : unsigned(11 downto 0) := (others => '0');
+    signal v_act         : unsigned(11 downto 0) := (others => '0');
+    signal meas_w        : unsigned(11 downto 0) := to_unsigned(1920, 12);
+    signal meas_h        : unsigned(11 downto 0) := to_unsigned(1080, 12);
 
-    -- Vblank divide-by-subtraction state machine. Computes the integer
-    -- glyph-pixel offset for hpos_init / vpos_init when the corresponding
-    -- origin is negative.
-    type t_sm_state is (SM_IDLE, SM_H_DIV, SM_V_DIV);
+    -- Serration guard: analog vsync emits several falling edges per field.
+    -- Anything that toggles or increments must fire exactly once, gated on
+    -- having seen active video since the last time it fired.
+    signal saw_active    : std_logic := '0';
+    signal frame_counter : unsigned(7 downto 0) := (others => '0');
+
+    --==========================================================================
+    -- Per-frame geometry, produced by the vblank sequencer below.
+    --==========================================================================
+    signal s_size_step   : unsigned(C_STEP_BITS - 1 downto 0)
+                           := C_STEP_LUT(8);
+    signal s_h_origin    : unsigned(11 downto 0) := (others => '1');
+    signal s_v_origin    : unsigned(11 downto 0) := (others => '1');
+    signal hpos_init     : unsigned(C_POS_BITS - 1 downto 0) := (others => '1');
+    signal vpos_init     : unsigned(C_POS_BITS - 1 downto 0) := (others => '1');
+
+    -- Centring offsets, one per line (0 when Justify = Left).
+    signal s_off0        : unsigned(3 downto 0) := (others => '0');
+    signal s_off1        : unsigned(3 downto 0) := (others => '0');
+    signal s_used0       : unsigned(4 downto 0) := to_unsigned(16, 5);
+    signal s_used1       : unsigned(4 downto 0) := to_unsigned(16, 5);
+
+    -- Does each line carry any text at all?  The panel styles use these to
+    -- size the mask: a blank second line must not drag an empty line's worth
+    -- of panel down under the words.  Defaults match the power-on buffer
+    -- (line 0 holds the greeting, line 1 is blank).
+    signal s_len0_nz     : std_logic := '1';
+    signal s_len1_nz     : std_logic := '0';
+
+    --==========================================================================
+    -- Vblank sequencer.  Everything here is quasi-static (once per field) but
+    -- is still fully STA-timed at the pixel clock, so each state does exactly
+    -- one small operation and all three products run on ONE shared serial
+    -- shift-add multiplier.  Worst-case run length is ~130 cycles, against
+    -- ~38 000 clocks of SD vblank.
+    --==========================================================================
+    type t_sm_state is (SM_IDLE, SM_RANGE, SM_MUL_S, SM_SCALE,
+                        SM_MUL_CX, SM_CX, SM_MUL_CY, SM_CY,
+                        SM_ORIGIN, SM_H_DIV, SM_V_DIV, SM_SCAN, SM_JUST);
     signal sm_state    : t_sm_state := SM_IDLE;
-    signal sm_residue  : unsigned(12 downto 0) := (others => '0');
-    signal sm_quotient : unsigned(7 downto 0)  := (others => '0');
+
+    -- shared serial multiplier: acc = a * b, 10 iterations
+    signal mul_a       : unsigned(21 downto 0) := (others => '0');
+    signal mul_b       : unsigned(9 downto 0)  := (others => '0');
+    signal mul_acc     : unsigned(21 downto 0) := (others => '0');
+    signal mul_cnt     : unsigned(3 downto 0)  := (others => '0');
+
+    signal sq_smin     : unsigned(5 downto 0) := to_unsigned(1, 6);
+    signal sq_srange   : unsigned(5 downto 0) := to_unsigned(7, 6);
+    signal sq_scale    : unsigned(5 downto 0) := to_unsigned(8, 6);
+    signal sq_cx       : unsigned(11 downto 0) := (others => '0');
+    signal sq_cy       : unsigned(11 downto 0) := (others => '0');
+    signal sq_residue  : unsigned(12 downto 0) := (others => '0');
+    signal sq_quotient : unsigned(7 downto 0)  := (others => '0');
+    signal sq_hneg     : std_logic := '0';
+    signal sq_vneg     : std_logic := '0';
+    signal sq_vabs     : unsigned(12 downto 0) := (others => '0');
+
+    -- Justify scan state: walks all 32 cells recording the last non-space.
+    signal sq_scan_i   : unsigned(5 downto 0) := (others => '0');
+    signal sq_last0    : unsigned(4 downto 0) := (others => '0');
+    signal sq_last1    : unsigned(4 downto 0) := (others => '0');
 
     --==========================================================================
-    -- Position counters (S1)
+    -- Position counters + accumulators (S1)
     --==========================================================================
-    signal h_count      : unsigned(11 downto 0) := (others => '0');
-    signal v_count      : unsigned(11 downto 0) := (others => '0');
-    signal prev_hsync_n : std_logic := '1';
-    signal prev_vsync_n : std_logic := '1';
-
-    -- Bresenham accumulators (S1). Initialized to the sentinel value so that
-    -- the first scan starts cleanly "outside" the text band.
-    -- vpos_acc semantics (after the cursor-margin rework):
-    --   integer part 0          : margin row (lasts `scale` physical lines,
-    --                             so the cursor box top edge has the same
-    --                             thickness as its side/bottom edges)
-    --   integer part 1..16      : text rows; text_row_idx = int_part - 1
-    --                             decodes into line_idx + glyph_y
-    --   integer part >= 17      : past text
     signal hpos_acc     : unsigned(C_POS_BITS - 1 downto 0) := (others => '1');
     signal vpos_acc     : unsigned(C_POS_BITS - 1 downto 0) := (others => '1');
-
-    -- Frame counter: advances once per vsync. Drives the cycling cursor
-    -- color so the edit-mode box is visually distinct from the text.
-    signal frame_counter : unsigned(7 downto 0) := (others => '0');
 
     --==========================================================================
     -- Text buffer (32 chars x 6 bits = 2 lines x 16 cols)
     -- Indexing: text_buf(line * 16 + col).
-    -- Default line 0: "LZX VIDEOMANCER!"
-    -- Default line 1: 16 spaces (user fills in via edit mode).
     --==========================================================================
     type t_text_buf is array (0 to C_TEXT_LEN - 1) of unsigned(5 downto 0);
     signal text_buf : t_text_buf := (
@@ -245,33 +334,57 @@ architecture titler of program_top is
     --==========================================================================
     -- Pipeline stage signals
     --==========================================================================
-    -- Stage 2: char/line/glyph indices extracted from accumulator integer
-    -- parts. in_top_margin is the row of padding above line 0 (used by the
-    -- cursor-box logic for the top edge).
-    signal s2_char_idx     : unsigned(C_COL_BIT  - 1 downto 0);
+    -- Stage 2: glyph indices, centring applied, band flags.
+    signal s2_char_eff     : unsigned(C_COL_BIT  - 1 downto 0);
+    signal s2_char_raw     : unsigned(C_COL_BIT  - 1 downto 0);
+    signal s2_blank        : std_logic;
     signal s2_line_idx     : unsigned(C_LINE_BIT - 1 downto 0);
     signal s2_glyph_x      : unsigned(2 downto 0);
     signal s2_glyph_y      : unsigned(2 downto 0);
     signal s2_in_text      : std_logic;
-    signal s2_in_top_margin: std_logic;
+    signal s2_in_box       : std_logic;
+    signal s2_top: std_logic;
 
     -- Stage 3: char code + cursor box + edit-mode underscore guide
     signal s3_char_code    : unsigned(5 downto 0);
     signal s3_glyph_x      : unsigned(2 downto 0);
     signal s3_glyph_y      : unsigned(2 downto 0);
     signal s3_in_text      : std_logic;
-    signal s3_in_top_margin: std_logic;
+    signal s3_in_box       : std_logic;
+    signal s3_top: std_logic;
     signal s3_cursor_box   : std_logic;
     signal s3_underscore   : std_logic;
 
-    -- Stage 4: registered font-row + pass-through control bits. Putting the
-    -- font ROM in its own stage breaks the long S3->output mux chain.
-    signal s4_font_row     : std_logic_vector(7 downto 0);
+    -- Stage 4: whole-glyph ROM word + pass-through control bits.
+    signal s4_glyph        : std_logic_vector(63 downto 0);
     signal s4_glyph_x      : unsigned(2 downto 0);
+    signal s4_glyph_y      : unsigned(2 downto 0);
     signal s4_in_text      : std_logic;
-    signal s4_in_top_margin: std_logic;
+    signal s4_in_box       : std_logic;
+    signal s4_top: std_logic;
     signal s4_cursor_box   : std_logic;
     signal s4_underscore   : std_logic;
+
+    -- Stage 5: the three glyph rows we need, plus the palette index.
+    signal s5_row_m1       : std_logic_vector(7 downto 0);
+    signal s5_row_0        : std_logic_vector(7 downto 0);
+    signal s5_row_p1       : std_logic_vector(7 downto 0);
+    signal s5_glyph_x      : unsigned(2 downto 0);
+    signal s5_in_text      : std_logic;
+    signal s5_in_box       : std_logic;
+    signal s5_top: std_logic;
+    signal s5_cursor_box   : std_logic;
+    signal s5_underscore   : std_logic;
+    signal s5_pal_sel      : unsigned(2 downto 0);
+
+    -- Stage 6: neighbourhood bits + resolved ink colour + dimmed video.
+    signal s6_class        : unsigned(2 downto 0);
+    signal s6_ink_y        : unsigned(9 downto 0);
+    signal s6_ink_u        : unsigned(9 downto 0);
+    signal s6_ink_v        : unsigned(9 downto 0);
+    signal s6_dim_y        : unsigned(9 downto 0);
+    signal s6_dim_u        : unsigned(9 downto 0);
+    signal s6_dim_v        : unsigned(9 downto 0);
 
     --==========================================================================
     -- Bypass delay line (matches pipeline latency)
@@ -289,22 +402,14 @@ architecture titler of program_top is
     signal bypass_avid  : t_sync_delay := (others => '0');
 
     --==========================================================================
-    -- Text color palette (combinational)
+    -- Ink palette (combinational).  Standard BT.601 limited range, derived
+    -- from sRGB primaries and scaled to 10 bits; the U/V swap that Videomancer
+    -- hardware wants happens once, at the S7 compose.  White and yellow are
+    -- pulled down to the 768 luma cap.
     --==========================================================================
-    signal text_color_y : unsigned(9 downto 0);
-    signal text_color_u : unsigned(9 downto 0);
-    signal text_color_v : unsigned(9 downto 0);
-
-    --==========================================================================
-    -- Cursor color palette (combinational) - cycles through 8 saturated hues
-    -- driven by the top bits of the frame counter. The cycle advances roughly
-    -- every 8 frames (~135 ms at 60 Hz), so the cursor box pulses through a
-    -- full rainbow in about a second.
-    --==========================================================================
-    signal cursor_color_sel : unsigned(2 downto 0);
-    signal cursor_color_y   : unsigned(9 downto 0);
-    signal cursor_color_u   : unsigned(9 downto 0);
-    signal cursor_color_v   : unsigned(9 downto 0);
+    signal pal_y : unsigned(9 downto 0);
+    signal pal_u : unsigned(9 downto 0);
+    signal pal_v : unsigned(9 downto 0);
 
 begin
 
@@ -313,11 +418,7 @@ begin
     --==========================================================================
     s_h_pos       <= unsigned(registers_in(0));
     s_v_pos       <= unsigned(registers_in(1));
-    s_size_raw    <= unsigned(registers_in(2));
-    -- Two cursor sources: top 5 bits of reg(4) (knob 5) walks the cursor
-    -- without erasing; top 5 bits of reg(3) (knob 4) also walks the cursor
-    -- but blanks every cell it lands on. Bit 4 is line index, bits 3..0 are
-    -- the column index in both encodings.
+    s_style       <= unsigned(registers_in(2)(9 downto 7));
     s_cursor_5p   <= unsigned(registers_in(4)(9 downto 5));
     s_erase_5p    <= unsigned(registers_in(3)(9 downto 5));
     s_cursor_line <= r_cursor(C_CURSOR_BIT - 1 downto C_COL_BIT);
@@ -326,300 +427,161 @@ begin
     s_edit_mode   <= registers_in(6)(0);
     s_bg_black    <= registers_in(6)(1);
     s_matte       <= registers_in(6)(2);
-    s_font_sel    <= registers_in(6)(3);  -- toggle 10: 0 = default, 1 = sci-fi
+    s_font_sel    <= registers_in(6)(3);
+    s_justify     <= registers_in(6)(4);
+    s_size_raw    <= unsigned(registers_in(7));   -- P12 slider
 
-    -- Size: top 5 bits of the 10-bit pot give 0..31; add 1 for scale 1..32.
-    s_size_scale <= to_integer(unsigned(s_size_raw(9 downto 5))) + 1;
-    s_size_step  <= C_STEP_LUT(s_size_scale);
-
-    -- H/V Pos knobs set the CENTER of the text rectangle, so growing the
-    -- size knob expands the text symmetrically around the configured center
-    -- instead of dragging the lower-right corner.
-    --
-    --   center_h = h_pos * 4     (4x range so the text can fully clear the
-    --                             right side of the screen at scale=32)
-    --   half_w   = scale * 64    (text width is 128 glyph-px * scale)
-    --   origin_h = center_h - half_w   (signed; negative = off-screen left)
-    --
-    -- Vertical math is the same with half_h = scale * 8 (16 glyph-rows /2).
-    -- All halves and the wider knob mapping are pure left-shifts, so no
-    -- multiplier is needed. We register the result to keep the centering
-    -- subtractor off the per-pixel accumulator critical path.
-    --
-    -- The origin is split into a sign bit (h_origin_neg) and an unsigned
-    -- magnitude (h_origin_abs). When the origin is non-negative we hand
-    -- s_h_origin to the accumulator as the per-line reset point exactly
-    -- like before; when it's negative we force s_h_origin to a value
-    -- h_count can never reach (0xFFF) and let p_init_compute pre-load
-    -- hpos_init with the right starting accumulator value.
-    p_center_origin : process(clk)
-        variable v_center_h : unsigned(12 downto 0);
-        variable v_center_v : unsigned(12 downto 0);
-        variable v_half_w   : unsigned(12 downto 0);
-        variable v_half_h   : unsigned(12 downto 0);
-    begin
-        if rising_edge(clk) then
-            v_center_h := shift_left(resize(s_h_pos, 13), 2);
-            v_center_v := shift_left(resize(s_v_pos, 13), 2);
-            v_half_w   := shift_left(to_unsigned(s_size_scale, 13), 6);
-            v_half_h   := shift_left(to_unsigned(s_size_scale, 13), 3);
-
-            if v_center_h >= v_half_w then
-                h_origin_neg <= '0';
-                h_origin_abs <= resize(v_center_h - v_half_w, 13);
-                s_h_origin   <= resize(v_center_h - v_half_w, 12);
-            else
-                h_origin_neg <= '1';
-                h_origin_abs <= resize(v_half_w - v_center_h, 13);
-                s_h_origin   <= (others => '1');
-            end if;
-
-            if v_center_v >= v_half_h then
-                v_origin_neg <= '0';
-                v_origin_abs <= resize(v_center_v - v_half_h, 13);
-                s_v_origin   <= resize(v_center_v - v_half_h, 12);
-            else
-                v_origin_neg <= '1';
-                v_origin_abs <= resize(v_half_h - v_center_v, 13);
-                s_v_origin   <= (others => '1');
-            end if;
-        end if;
-    end process p_center_origin;
-
-    --==========================================================================
-    -- p_init_compute: pre-loads hpos_init / vpos_init at the start of every
-    -- frame. The hard math is "what value should the Bresenham accumulator
-    -- have at the first physical pixel of the scan, if the text has been
-    -- scrolled off-screen by |origin| physical pixels?". That's
-    --   init = |origin| * step  (= |origin| << 16 / scale, in q16)
-    -- which avoids a multiplier by doing a /scale via repeated subtraction.
-    -- Each subtraction step advances the integer quotient (= number of glyph
-    -- pixels already scrolled past) by 1; after |origin|/scale iterations
-    -- the quotient is loaded into the integer part of *_init. We ignore the
-    -- residue, accepting up to one physical-pixel of subpixel rounding.
-    --
-    -- The state machine runs for at most ~128 cycles per frame (H side) plus
-    -- ~16 (V side), well inside the vblank interval, so the result is ready
-    -- by the time active video begins.
-    p_init_compute : process(clk)
-        variable v_vs_falling : std_logic;
-    begin
-        if rising_edge(clk) then
-            v_vs_falling := prev_vsync_n and (not data_in.vsync_n);
-
-            case sm_state is
-                when SM_IDLE =>
-                    if v_vs_falling = '1' then
-                        if h_origin_neg = '1' then
-                            sm_state    <= SM_H_DIV;
-                            sm_residue  <= h_origin_abs;
-                            sm_quotient <= (others => '0');
-                        else
-                            hpos_init <= (others => '1');
-                            if v_origin_neg = '1' then
-                                sm_state    <= SM_V_DIV;
-                                sm_residue  <= v_origin_abs;
-                                sm_quotient <= (others => '0');
-                            else
-                                vpos_init <= (others => '1');
-                            end if;
-                        end if;
-                    end if;
-
-                when SM_H_DIV =>
-                    if sm_residue < to_unsigned(s_size_scale, 13) then
-                        hpos_init <= shift_left(
-                            resize(sm_quotient, C_POS_BITS), C_POS_FRAC);
-                        if v_origin_neg = '1' then
-                            sm_state    <= SM_V_DIV;
-                            sm_residue  <= v_origin_abs;
-                            sm_quotient <= (others => '0');
-                        else
-                            vpos_init <= (others => '1');
-                            sm_state  <= SM_IDLE;
-                        end if;
-                    else
-                        sm_residue  <= sm_residue
-                                       - to_unsigned(s_size_scale, 13);
-                        sm_quotient <= sm_quotient + 1;
-                    end if;
-
-                when SM_V_DIV =>
-                    if sm_residue < to_unsigned(s_size_scale, 13) then
-                        vpos_init <= shift_left(
-                            resize(sm_quotient, C_POS_BITS), C_POS_FRAC);
-                        sm_state <= SM_IDLE;
-                    else
-                        sm_residue  <= sm_residue
-                                       - to_unsigned(s_size_scale, 13);
-                        sm_quotient <= sm_quotient + 1;
-                    end if;
-            end case;
-        end if;
-    end process p_init_compute;
-
-    -- Color is latched while in edit mode (knob 4 then becomes Erase trigger).
+    -- Colour is latched while in edit mode (knob 4 then becomes the eraser).
+    -- The drawn cursor column is registered here too: it is quasi-static, and
+    -- keeping the add out of S3 leaves the cell compare a plain equality.
     p_color_latch : process(clk)
+        variable v_disp : unsigned(4 downto 0);
     begin
         if rising_edge(clk) then
             if s_edit_mode = '0' then
                 s_color_sel <= unsigned(registers_in(3)(9 downto 7));
             end if;
+
+            if s_cursor_line(0) = '0' then
+                v_disp := ('0' & s_cursor_col) + ('0' & s_off0);
+            else
+                v_disp := ('0' & s_cursor_col) + ('0' & s_off1);
+            end if;
+            if v_disp(4) = '1' then      -- shoved past the last cell: pin it
+                s_cursor_disp <= (others => '1');
+            else
+                s_cursor_disp <= v_disp(3 downto 0);
+            end if;
         end if;
     end process p_color_latch;
 
     --==========================================================================
-    -- Color palette (concurrent select) - 8 presets
-    -- Approximate BT.601 YUV constants. Y is full-swing 10-bit (~64..940);
-    -- U and V are centered at 512.
+    -- 8-entry ink palette, addressed by s5_pal_sel (text colour normally, the
+    -- cycling cursor hue while the edit box is being drawn).
     --==========================================================================
-    with s_color_sel select
-        text_color_y <= to_unsigned(940, 10) when "000",  -- White
-                        to_unsigned(290, 10) when "001",  -- Red
-                        to_unsigned(550, 10) when "010",  -- Orange
-                        to_unsigned(870, 10) when "011",  -- Yellow
-                        to_unsigned(620, 10) when "100",  -- Green
-                        to_unsigned(820, 10) when "101",  -- Cyan
-                        to_unsigned(170, 10) when "110",  -- Blue
-                        to_unsigned(440, 10) when "111",  -- Magenta
-                        to_unsigned(940, 10) when others;
-    with s_color_sel select
-        text_color_u <= to_unsigned(512, 10) when "000",
-                        to_unsigned(425, 10) when "001",
-                        to_unsigned(350, 10) when "010",
-                        to_unsigned(130, 10) when "011",
-                        to_unsigned(195, 10) when "100",
-                        to_unsigned(600, 10) when "101",
-                        to_unsigned(880, 10) when "110",
-                        to_unsigned(850, 10) when "111",
-                        to_unsigned(512, 10) when others;
-    with s_color_sel select
-        text_color_v <= to_unsigned(512, 10) when "000",
-                        to_unsigned(900, 10) when "001",
-                        to_unsigned(750, 10) when "010",
-                        to_unsigned(560, 10) when "011",
-                        to_unsigned(143, 10) when "100",
-                        to_unsigned(128, 10) when "101",
-                        to_unsigned(580, 10) when "110",
-                        to_unsigned(900, 10) when "111",
-                        to_unsigned(512, 10) when others;
+    with s5_pal_sel select
+        pal_y <= to_unsigned(768, 10) when "000",  -- White  (luma-capped)
+                 to_unsigned(326, 10) when "001",  -- Red
+                 to_unsigned(584, 10) when "010",  -- Orange
+                 to_unsigned(772, 10) when "011",  -- Yellow (luma-capped)
+                 to_unsigned(578, 10) when "100",  -- Green
+                 to_unsigned(678, 10) when "101",  -- Cyan
+                 to_unsigned(164, 10) when "110",  -- Blue
+                 to_unsigned(426, 10) when "111",  -- Magenta
+                 to_unsigned(768, 10) when others;
+    with s5_pal_sel select
+        pal_u <= to_unsigned(512, 10) when "000",
+                 to_unsigned(361, 10) when "001",
+                 to_unsigned(212, 10) when "010",
+                 to_unsigned(103, 10) when "011",
+                 to_unsigned(215, 10) when "100",
+                 to_unsigned(663, 10) when "101",
+                 to_unsigned(960, 10) when "110",
+                 to_unsigned(809, 10) when "111",
+                 to_unsigned(512, 10) when others;
+    with s5_pal_sel select
+        pal_v <= to_unsigned(512, 10) when "000",
+                 to_unsigned(960, 10) when "001",
+                 to_unsigned(772, 10) when "010",
+                 to_unsigned(578, 10) when "011",
+                 to_unsigned(137, 10) when "100",
+                 to_unsigned( 64, 10) when "101",
+                 to_unsigned(440, 10) when "110",
+                 to_unsigned(888, 10) when "111",
+                 to_unsigned(512, 10) when others;
 
     --==========================================================================
-    -- Cursor color: cycles through 8 high-saturation hues every ~135 ms,
-    -- driven by frame_counter(5 downto 3).
-    --==========================================================================
-    cursor_color_sel <= frame_counter(5 downto 3);
-
-    with cursor_color_sel select
-        cursor_color_y <= to_unsigned(290, 10) when "000",  -- Red
-                          to_unsigned(550, 10) when "001",  -- Orange
-                          to_unsigned(870, 10) when "010",  -- Yellow
-                          to_unsigned(620, 10) when "011",  -- Green
-                          to_unsigned(820, 10) when "100",  -- Cyan
-                          to_unsigned(170, 10) when "101",  -- Blue
-                          to_unsigned(440, 10) when "110",  -- Magenta
-                          to_unsigned(940, 10) when "111",  -- White
-                          to_unsigned(940, 10) when others;
-    with cursor_color_sel select
-        cursor_color_u <= to_unsigned(425, 10) when "000",
-                          to_unsigned(350, 10) when "001",
-                          to_unsigned(130, 10) when "010",
-                          to_unsigned(195, 10) when "011",
-                          to_unsigned(600, 10) when "100",
-                          to_unsigned(880, 10) when "101",
-                          to_unsigned(850, 10) when "110",
-                          to_unsigned(512, 10) when "111",
-                          to_unsigned(512, 10) when others;
-    with cursor_color_sel select
-        cursor_color_v <= to_unsigned(900, 10) when "000",
-                          to_unsigned(750, 10) when "001",
-                          to_unsigned(560, 10) when "010",
-                          to_unsigned(143, 10) when "011",
-                          to_unsigned(128, 10) when "100",
-                          to_unsigned(580, 10) when "101",
-                          to_unsigned(900, 10) when "110",
-                          to_unsigned(512, 10) when "111",
-                          to_unsigned(512, 10) when others;
-
-    --==========================================================================
-    -- S1: Position counters + Bresenham accumulators.
+    -- S1: raster measurement + Bresenham accumulators.
     --
-    -- h_count / v_count behave as before. The accumulators are the new bit:
-    -- they sit at the all-1s "past text" sentinel outside the text band, jump
-    -- to 0 when the active band begins (h_count crossing h_origin, or v_count
-    -- reaching v_origin at hsync), and otherwise advance by the per-scale
-    -- step value each pixel/line. Bit C_POS_BITS-1 of the accumulator is the
-    -- past-text flag (set as soon as the integer part reaches 128 / 16).
+    -- h_act counts active pixels from the start of active video; v_act counts
+    -- ACTIVE lines from the top of the field.  Freezing both outside avid
+    -- means the text band can only ever fall inside the picture, and gives
+    -- the vertical DDA the "advance on active lines only" behaviour that
+    -- keeps interlaced fields in step.
     --
-    -- The top-margin pulse covers exactly the scanline immediately above the
-    -- first text row, and feeds the cursor-box logic so the top edge of the
-    -- box on line 0 can draw above the glyphs. With the reworked vpos_acc
-    -- semantics the margin is encoded as integer-part 0 of the accumulator,
-    -- so it naturally lasts `scale` physical lines and the cursor box ends
-    -- up symmetric at every size.
-    --
-    -- frame_counter ticks on every vsync falling edge; its top bits drive
-    -- the cycling cursor color palette.
+    -- Every once-per-field action (frame counter, height capture, sequencer
+    -- start) is gated on saw_active so that serrated analog vsync - which
+    -- produces several falling edges per field - fires it exactly once.
     --==========================================================================
     p_pipeline_s1 : process(clk)
-        variable v_hs_falling : std_logic;
         variable v_vs_falling : std_logic;
+        variable v_avid_start : std_logic;
+        variable v_avid_end   : std_logic;
         variable v_h_next     : unsigned(11 downto 0);
-        variable v_new_line   : unsigned(11 downto 0);
     begin
         if rising_edge(clk) then
-            prev_hsync_n <= data_in.hsync_n;
             prev_vsync_n <= data_in.vsync_n;
-            v_hs_falling := prev_hsync_n and (not data_in.hsync_n);
+            prev_avid    <= data_in.avid;
             v_vs_falling := prev_vsync_n and (not data_in.vsync_n);
+            v_avid_start := data_in.avid and (not prev_avid);
+            v_avid_end   := prev_avid and (not data_in.avid);
 
-            -- h_count update + lookahead for accumulator reset.
-            if v_hs_falling = '1' then
-                h_count   <= (others => '0');
-                v_h_next  := (others => '0');
+            -- Horizontal active counter, and the width measurement taken at
+            -- the end of each active line.
+            if v_avid_start = '1' then
+                h_act    <= (others => '0');
+                v_h_next := (others => '0');
+            elsif data_in.avid = '1' then
+                h_act    <= h_act + 1;
+                v_h_next := h_act + 1;
             else
-                h_count   <= h_count + 1;
-                v_h_next  := h_count + 1;
+                v_h_next := h_act;
             end if;
 
-            -- v_count update + lookahead for vertical accumulator.
-            if v_vs_falling = '1' then
-                v_count    <= (others => '0');
-                v_new_line := (others => '0');
-            elsif v_hs_falling = '1' then
-                v_count    <= v_count + 1;
-                v_new_line := v_count + 1;
-            else
-                v_new_line := v_count;
+            if v_avid_end = '1' and h_act > 0 then
+                meas_w <= h_act + 1;   -- h_act ends on the LAST active index
             end if;
 
-            -- Frame counter: ticks once per vsync.
+            -- Vertical active-line counter.  v_act only advances on active
+            -- lines, so it holds its final value all through vblank and can
+            -- safely be sampled at vsync (the classic trap is a counter that
+            -- zeroes on blanking hsyncs first and reads back 0).
             if v_vs_falling = '1' then
+                v_act <= (others => '0');
+            elsif v_avid_start = '1' then
+                v_act <= v_act + 1;
+            end if;
+
+            -- Once-per-field, serration-guarded.
+            if data_in.avid = '1' then
+                saw_active <= '1';
+            elsif v_vs_falling = '1' and saw_active = '1' then
+                saw_active    <= '0';
                 frame_counter <= frame_counter + 1;
+                if v_act > 0 then
+                    meas_h <= v_act;
+                end if;
             end if;
 
-            -- Horizontal accumulator: load hpos_init at hsync (sentinel for
-            -- positive origins, pre-computed in-text value for negative
-            -- origins where the text has scrolled off-screen left). For
-            -- positive origins the reset to 0 still fires when h_count
-            -- reaches s_h_origin; for negative origins s_h_origin is forced
-            -- to a value h_count cannot equal, so the accumulator just
-            -- walks from hpos_init onward.
-            if v_hs_falling = '1' then
-                hpos_acc <= hpos_init;
-            elsif v_h_next = s_h_origin then
-                hpos_acc <= (others => '0');
-            elsif hpos_acc(C_POS_BITS - 1) = '0' then
-                hpos_acc <= hpos_acc + resize(s_size_step, C_POS_BITS);
+            -- Horizontal accumulator: reloaded at the start of every active
+            -- line, reset to 0 when the scan reaches the text origin, then
+            -- stepped once per active pixel until the integer part leaves the
+            -- 128-glyph-pixel band.  Frozen during blanking.
+            if data_in.avid = '1' then
+                if v_avid_start = '1' then
+                    -- Origin 0 means the text starts on the very first active
+                    -- pixel, which the "next pixel equals origin" test below
+                    -- can never see; catch it here.
+                    if s_h_origin = 0 then
+                        hpos_acc <= (others => '0');
+                    else
+                        hpos_acc <= hpos_init;
+                    end if;
+                elsif v_h_next = s_h_origin then
+                    hpos_acc <= (others => '0');
+                elsif hpos_acc(C_POS_BITS - 1) = '0' then
+                    hpos_acc <= hpos_acc + resize(s_size_step, C_POS_BITS);
+                end if;
             end if;
 
-            -- Vertical accumulator: same idea, but reloaded at vsync and
-            -- ticked per line. Resets at v_origin (start of margin) and
-            -- walks until the integer part exits the text region.
+            -- Vertical accumulator: reloaded at vsync (idempotent, so
+            -- serration is harmless) and stepped once per ACTIVE line.
+            -- v_act is compared BEFORE its increment, so it carries the
+            -- index of the line that is just starting (0 for the first).
             if v_vs_falling = '1' then
                 vpos_acc <= vpos_init;
-            elsif v_hs_falling = '1' then
-                if v_new_line = s_v_origin then
+            elsif v_avid_start = '1' then
+                if v_act = s_v_origin then
                     vpos_acc <= (others => '0');
                 elsif vpos_acc(C_POS_BITS - 1) = '0' then
                     vpos_acc <= vpos_acc + resize(s_size_step, C_POS_BITS);
@@ -629,16 +591,257 @@ begin
     end process p_pipeline_s1;
 
     --==========================================================================
+    -- Vblank sequencer: derives every per-frame geometry term from the
+    -- measured raster and the knobs.
+    --
+    --   chars   = meas_w >> 7          glyph scale at which one 16-char line
+    --                                  exactly fills the active width
+    --   smin    = max(1, chars >> 2)   slider at 0%   (small caption type)
+    --   smax    = min(32, chars * 2)   slider at 100% (hero type, ~8 chars
+    --                                  across the screen - the climax)
+    --   scale   = smin + (P12 * (smax - smin)) >> 10
+    --   cx      = (H Pos * meas_w) >> 10       text centre, active coords
+    --   cy      = (V Pos * meas_h) >> 10
+    --   origin  = centre - half extent         (may go negative: the text has
+    --                                           scrolled off the left/top, and
+    --                                           the accumulator is preloaded
+    --                                           with how much of it is gone)
+    --
+    -- The negative-origin preload needs |origin| / scale, which is done by
+    -- repeated subtraction: at most 64 iterations horizontally (|origin| can
+    -- never exceed half_w = scale*64) and 9 vertically.
+    --
+    -- SM_SCAN then walks the 32 text cells recording the last non-space in
+    -- each line, which is what Justify=Centre needs.
+    --==========================================================================
+    p_sequencer : process(clk)
+        variable v_vs_falling : std_logic;
+        variable v_chars      : unsigned(5 downto 0);
+        variable v_smax       : unsigned(6 downto 0);
+        variable v_smin       : unsigned(5 downto 0);
+        variable v_half_w     : unsigned(12 downto 0);
+        variable v_half_h     : unsigned(12 downto 0);
+        variable v_cx         : unsigned(12 downto 0);
+        variable v_cy         : unsigned(12 downto 0);
+        variable v_cell       : unsigned(5 downto 0);
+        variable v_u0, v_u1   : unsigned(4 downto 0);
+    begin
+        if rising_edge(clk) then
+            v_vs_falling := prev_vsync_n and (not data_in.vsync_n);
+
+            -- Shared serial shift-add multiplier: one partial product per
+            -- cycle, 10 cycles for a 10-bit multiplier operand.
+            if mul_cnt /= 0 then
+                if mul_b(0) = '1' then
+                    mul_acc <= mul_acc + mul_a;
+                end if;
+                mul_a   <= shift_left(mul_a, 1);
+                mul_b   <= '0' & mul_b(9 downto 1);
+                mul_cnt <= mul_cnt - 1;
+            end if;
+
+            case sm_state is
+                when SM_IDLE =>
+                    -- Serration-guarded start: saw_active is still '1' on the
+                    -- first vsync edge of the field and cleared by S1, so the
+                    -- sequencer launches exactly once.
+                    if v_vs_falling = '1' and saw_active = '1' then
+                        sm_state <= SM_RANGE;
+                    end if;
+
+                when SM_RANGE =>
+                    -- Scale range from the measured active width.
+                    v_chars := resize(shift_right(meas_w, 7), 6);
+                    if v_chars < 4 then
+                        v_smin := to_unsigned(1, 6);
+                    else
+                        v_smin := resize(shift_right(v_chars, 2), 6);
+                    end if;
+                    v_smax := shift_left(resize(v_chars, 7), 1);
+                    if v_smax > to_unsigned(C_SCALE_MAX, 7) then
+                        v_smax := to_unsigned(C_SCALE_MAX, 7);
+                    end if;
+                    if v_smax <= resize(v_smin, 7) then
+                        v_smax := resize(v_smin, 7) + 1;
+                    end if;
+                    sq_smin   <= v_smin;
+                    sq_srange <= resize(v_smax - resize(v_smin, 7), 6);
+                    sm_state  <= SM_MUL_S;
+
+                when SM_MUL_S =>
+                    mul_a   <= resize(sq_srange, 22);
+                    mul_b   <= s_size_raw;
+                    mul_acc <= (others => '0');
+                    mul_cnt <= to_unsigned(10, 4);
+                    sm_state <= SM_SCALE;
+
+                when SM_SCALE =>
+                    if mul_cnt = 0 then
+                        sq_scale <= sq_smin
+                                    + resize(shift_right(mul_acc, 10), 6);
+                        sm_state <= SM_MUL_CX;
+                    end if;
+
+                when SM_MUL_CX =>
+                    -- sq_scale is valid now; latch the step and the extents.
+                    s_size_step <= C_STEP_LUT(to_integer(sq_scale));
+                    mul_a    <= resize(meas_w, 22);
+                    mul_b    <= s_h_pos;
+                    mul_acc  <= (others => '0');
+                    mul_cnt  <= to_unsigned(10, 4);
+                    sm_state <= SM_CX;
+
+                when SM_CX =>
+                    if mul_cnt = 0 then
+                        sq_cx    <= resize(shift_right(mul_acc, 10), 12);
+                        sm_state <= SM_MUL_CY;
+                    end if;
+
+                when SM_MUL_CY =>
+                    mul_a    <= resize(meas_h, 22);
+                    mul_b    <= s_v_pos;
+                    mul_acc  <= (others => '0');
+                    mul_cnt  <= to_unsigned(10, 4);
+                    sm_state <= SM_CY;
+
+                when SM_CY =>
+                    if mul_cnt = 0 then
+                        sq_cy    <= resize(shift_right(mul_acc, 10), 12);
+                        sm_state <= SM_ORIGIN;
+                    end if;
+
+                when SM_ORIGIN =>
+                    -- Text block is 128 glyph pixels wide and 18 glyph rows
+                    -- tall (two 8-row lines plus a top-margin row each).
+                    -- Resize BEFORE shifting - shift_left keeps the operand's
+                    -- own width and would drop the top bits.
+                    v_half_w := shift_left(resize(sq_scale, 13), 6);
+                    v_half_h := shift_left(resize(sq_scale, 13), 3)
+                                + resize(sq_scale, 13);
+                    v_cx     := resize(sq_cx, 13);
+                    v_cy     := resize(sq_cy, 13);
+
+                    if v_cx >= v_half_w then
+                        s_h_origin <= resize(v_cx - v_half_w, 12);
+                        hpos_init  <= (others => '1');
+                        sq_hneg    <= '0';
+                        sq_residue <= (others => '0');   -- divide exits at once
+                    else
+                        s_h_origin <= (others => '1');   -- unreachable by h_act
+                        sq_hneg    <= '1';
+                        sq_residue <= v_half_w - v_cx;
+                    end if;
+                    sq_quotient <= (others => '0');
+                    sm_state    <= SM_H_DIV;
+
+                    if v_cy >= v_half_h then
+                        s_v_origin <= resize(v_cy - v_half_h, 12);
+                        sq_vneg    <= '0';
+                        sq_vabs    <= (others => '0');
+                    else
+                        s_v_origin <= (others => '1');
+                        sq_vneg    <= '1';
+                        sq_vabs    <= v_half_h - v_cy;
+                    end if;
+
+                when SM_H_DIV =>
+                    if sq_residue < resize(sq_scale, 13) then
+                        if sq_hneg = '1' then
+                            hpos_init <= shift_left(
+                                resize(sq_quotient, C_POS_BITS), C_POS_FRAC);
+                        end if;
+                        sq_residue  <= sq_vabs;
+                        sq_quotient <= (others => '0');
+                        sm_state    <= SM_V_DIV;
+                    else
+                        sq_residue  <= sq_residue - resize(sq_scale, 13);
+                        sq_quotient <= sq_quotient + 1;
+                    end if;
+
+                when SM_V_DIV =>
+                    if sq_residue < resize(sq_scale, 13) then
+                        if sq_vneg = '1' then
+                            vpos_init <= shift_left(
+                                resize(sq_quotient, C_POS_BITS), C_POS_FRAC);
+                        else
+                            vpos_init <= (others => '1');
+                        end if;
+                        sq_scan_i <= (others => '0');
+                        sq_last0  <= (others => '1');   -- 31 = "line is empty"
+                        sq_last1  <= (others => '1');
+                        sm_state  <= SM_SCAN;
+                    else
+                        sq_residue  <= sq_residue - resize(sq_scale, 13);
+                        sq_quotient <= sq_quotient + 1;
+                    end if;
+
+                when SM_SCAN =>
+                    -- One cell per cycle; record the highest column index that
+                    -- is not a space, per line.
+                    v_cell := sq_scan_i;
+                    if text_buf(to_integer(v_cell(4 downto 0))) /= 0 then
+                        if v_cell(4) = '0' then
+                            sq_last0 <= resize(v_cell(3 downto 0), 5);
+                        else
+                            sq_last1 <= resize(v_cell(3 downto 0), 5);
+                        end if;
+                    end if;
+                    if sq_scan_i = to_unsigned(31, 6) then
+                        sm_state <= SM_JUST;
+                    else
+                        sq_scan_i <= sq_scan_i + 1;
+                    end if;
+
+                when SM_JUST =>
+                    -- used = last + 1 (0 when the line held only spaces);
+                    -- offset centres those characters in the 16-cell field.
+                    if sq_last0(4) = '1' then
+                        v_u0 := (others => '0');
+                    else
+                        v_u0 := sq_last0 + 1;
+                    end if;
+                    if sq_last1(4) = '1' then
+                        v_u1 := (others => '0');
+                    else
+                        v_u1 := sq_last1 + 1;
+                    end if;
+
+                    -- The true lengths are kept in ALL cases, not just when
+                    -- justifying: the panel styles need them regardless, and
+                    -- clipping at the true length is a no-op with Justify=Left
+                    -- (the cells beyond it hold spaces anyway).
+                    s_used0 <= v_u0;
+                    s_used1 <= v_u1;
+                    if v_u0 = 0 then s_len0_nz <= '0';
+                    else             s_len0_nz <= '1'; end if;
+                    if v_u1 = 0 then s_len1_nz <= '0';
+                    else             s_len1_nz <= '1'; end if;
+
+                    if s_justify = '1' then
+                        s_off0 <= resize(shift_right(
+                                      to_unsigned(16, 5) - v_u0, 1), 4);
+                        s_off1 <= resize(shift_right(
+                                      to_unsigned(16, 5) - v_u1, 1), 4);
+                    else
+                        s_off0 <= (others => '0');
+                        s_off1 <= (others => '0');
+                    end if;
+                    sm_state <= SM_IDLE;
+            end case;
+        end if;
+    end process p_sequencer;
+
+    --==========================================================================
     -- Cursor tracking + text buffer write (Edit Mode)
     --
     -- The active cursor (r_cursor) follows whichever input source last moved:
     --   * knob 5 moves the cursor non-destructively (just position).
-    --   * knob 4 moves the cursor AND blanks the cell it lands on, so the
-    --     user can sweep knob 4 across a span of cells to erase them.
-    -- The letter knob (knob 6) writes its current code into whichever cell
-    -- the cursor is on. All three actions only take effect in Edit Mode; the
-    -- prev_* edge-detect registers update unconditionally so toggling into
-    -- Edit Mode never fires a spurious write.
+    --   * knob 4 moves the cursor AND blanks the cell it lands on, so a sweep
+    --     of knob 4 erases a span of cells.
+    -- Knob 6 writes its current code into whichever cell the cursor is on.
+    -- All three only take effect in Edit Mode; the prev_* edge registers
+    -- update unconditionally so entering Edit Mode never fires a spurious
+    -- write.
     --==========================================================================
     p_cursor_edit : process(clk)
         variable v_new_cursor : unsigned(C_CURSOR_BIT - 1 downto 0);
@@ -650,9 +853,6 @@ begin
             prev_cursor_5p <= s_cursor_5p;
             prev_erase_5p  <= s_erase_5p;
 
-            -- Cursor arbitration: knob 5 takes priority if both move on the
-            -- same cycle, but knob 4 wins by default since the user actively
-            -- intends to erase when they touch it.
             v_new_cursor := r_cursor;
             v_do_erase   := '0';
             if s_cursor_5p /= prev_cursor_5p then
@@ -679,84 +879,136 @@ begin
     end process p_cursor_edit;
 
     --==========================================================================
-    -- S2: Extract glyph indices from accumulator integer parts.
+    -- S2: glyph indices from the accumulator integer parts, plus the centring
+    -- shift.
     --
     -- Horizontal integer part [22:16] addresses the 128 glyph-pixels across
-    -- the text band: bits[22:19] = char_idx (0..15), bits[18:16] = glyph_x.
-    -- bit[23] is the past-text sentinel.
-    -- Vertical integer part [23:16] holds 0 (margin), 1..16 (text rows), or
-    -- >= 17 (past text). text_row_idx = int - 1 decodes into line_idx (bit 3)
-    -- and glyph_y (bits 2..0).
-    -- The top-margin region is included in in_text (so the cursor box can be
-    -- drawn there); the in_top_margin flag steers downstream stages.
+    -- the band: bits[22:19] = char index, bits[18:16] = glyph_x, bit[23] is
+    -- the past-text sentinel.
+    -- Vertical integer part [23:16] indexes an 18-row block plus one row of
+    -- bottom padding for the panel styles:
+    --     0       line 0 top margin  (carries line 0's top outline)
+    --     1..8    line 0, glyph rows 0..7   (row 7 is the blank gap)
+    --     9       line 1 top margin
+    --    10..17   line 1, glyph rows 0..7
+    --    18       bottom padding, panel only
+    --   >=19      past text
+    --
+    -- Justify=Centre shifts the whole line right by off(line) cells and
+    -- blanks everything outside [off, off+used) - a 5-bit subtract and one
+    -- compare, done here so S3 stays a plain buffer read.
     --==========================================================================
     p_stage2 : process(clk)
-        variable v_h_in         : std_logic;
-        variable v_v_int        : unsigned(C_POS_INT - 1 downto 0);  -- 8-bit
-        variable v_text_row     : unsigned(4 downto 0);
-        variable v_v_in_real    : std_logic;
-        variable v_in_margin    : std_logic;
+        variable v_h_in      : std_logic;
+        variable v_v_int     : unsigned(C_POS_INT - 1 downto 0);
+        variable v_in_rows   : std_logic;
+        variable v_top       : std_logic;
+        variable v_in_box_v  : std_logic;
+        variable v_box_lo    : unsigned(C_POS_INT - 1 downto 0);
+        variable v_box_hi    : unsigned(C_POS_INT - 1 downto 0);
+        variable v_base      : unsigned(C_POS_INT - 1 downto 0);
+        variable v_gy        : unsigned(2 downto 0);
+        variable v_char_raw  : unsigned(C_COL_BIT - 1 downto 0);
+        variable v_line      : std_logic;
+        variable v_off       : unsigned(3 downto 0);
+        variable v_used      : unsigned(4 downto 0);
+        variable v_eff       : unsigned(4 downto 0);
     begin
         if rising_edge(clk) then
-            s2_char_idx <= hpos_acc(C_POS_FRAC + 6 downto C_POS_FRAC + 3);
+            v_char_raw := hpos_acc(C_POS_FRAC + 6 downto C_POS_FRAC + 3);
+            s2_char_raw <= v_char_raw;
             s2_glyph_x  <= hpos_acc(C_POS_FRAC + 2 downto C_POS_FRAC);
 
-            -- Vertical: decode the integer part. text_row covers 0..15 when
-            -- the cursor is inside text; underflows to 31 in the margin row
-            -- (int = 0), which our in_text_real check rejects via bit 4.
-            v_v_int    := vpos_acc(C_POS_BITS - 1 downto C_POS_FRAC);
-            v_text_row := resize(v_v_int, 5) - 1;
-            s2_line_idx <= v_text_row(3 downto 3);
-            s2_glyph_y  <= v_text_row(2 downto 0);
+            v_v_int   := vpos_acc(C_POS_BITS - 1 downto C_POS_FRAC);
+            v_top     := '0';
+            v_in_rows := '0';
+            v_line    := '0';
+            v_base    := to_unsigned(1, C_POS_INT);
+            if v_v_int <= to_unsigned(8, C_POS_INT) then
+                if v_v_int = 0 then
+                    v_top := '1';
+                else
+                    v_in_rows := '1';
+                end if;
+            elsif v_v_int <= to_unsigned(17, C_POS_INT) then
+                v_line := '1';
+                v_base := to_unsigned(10, C_POS_INT);
+                if v_v_int = to_unsigned(9, C_POS_INT) then
+                    v_top := '1';
+                else
+                    v_in_rows := '1';
+                end if;
+            end if;
+            -- Garbage on the two margin rows; S5 discards it there.
+            v_gy := resize(v_v_int - v_base, 3);
+
+            s2_line_idx(0) <= v_line;
+            s2_glyph_y     <= v_gy;
+
+            -- Centring: shift the cell index and blank outside the used span.
+            if v_line = '0' then
+                v_off  := s_off0;
+                v_used := s_used0;
+            else
+                v_off  := s_off1;
+                v_used := s_used1;
+            end if;
+            v_eff := ('0' & v_char_raw) - ('0' & v_off);
+            s2_char_eff <= v_eff(3 downto 0);
+            if v_eff(4) = '1' or v_eff >= v_used then
+                s2_blank <= '1';
+            else
+                s2_blank <= '0';
+            end if;
 
             -- h band: bit 23 (integer MSB) clear means we're below 128.
             v_h_in := not hpos_acc(C_POS_BITS - 1);
 
-            -- Margin row: int == 0 (which uniquely happens after vpos_acc is
-            -- reset and before the first step add brings int to 1).
-            if v_v_int = to_unsigned(0, C_POS_INT) then
-                v_in_margin := '1';
+            -- Panel band.  The mask wraps only the lines that actually
+            -- carry text, so clearing line 1 shrinks the panel to a single
+            -- bar instead of leaving an empty line's worth hanging below:
+            --   both lines   rows 0..18
+            --   line 0 only  rows 0..9
+            --   line 1 only  rows 9..18
+            --   neither      no panel at all
+            -- Row 0 doubles as line 0's outline margin; rows 17/18 are the
+            -- inter-line gap and the bottom pad, and row 9 plays both parts
+            -- for a single-line panel, so the padding stays proportionate
+            -- whichever line is in use.
+            if s_len0_nz = '1' then
+                v_box_lo := to_unsigned(0, C_POS_INT);
             else
-                v_in_margin := '0';
+                v_box_lo := to_unsigned(9, C_POS_INT);
+            end if;
+            if s_len1_nz = '1' then
+                v_box_hi := to_unsigned(18, C_POS_INT);
+            else
+                v_box_hi := to_unsigned(9, C_POS_INT);
+            end if;
+            if (s_len0_nz or s_len1_nz) = '1'
+               and v_v_int >= v_box_lo and v_v_int <= v_box_hi then
+                v_in_box_v := '1';
+            else
+                v_in_box_v := '0';
             end if;
 
-            -- Text rows: int in [1, 16]. Equivalent to text_row(4) = 0 AND
-            -- the top 3 int bits being zero (which rules out wrap-around).
-            if v_text_row(4) = '0' and
-               vpos_acc(C_POS_BITS - 1 downto C_POS_FRAC + 5) =
-               to_unsigned(0, C_POS_INT - 5) then
-                v_v_in_real := '1';
-            else
-                v_v_in_real := '0';
-            end if;
-
-            s2_in_text       <= v_h_in and (v_v_in_real or v_in_margin);
-            s2_in_top_margin <= v_h_in and v_in_margin;
+            s2_in_text <= v_h_in and (v_in_rows or v_top);
+            s2_in_box  <= v_h_in and v_in_box_v;
+            s2_top     <= v_h_in and v_top;
         end if;
     end process p_stage2;
 
     --==========================================================================
-    -- S3: Text buffer read + cursor box detect.
+    -- S3: text buffer read + cursor box + edit underscore.
     --
-    -- A single editing cursor (knob 5) walks all 32 cells. When edit mode is
-    -- on, a 1-glyph-pixel-thick box is drawn around the perimeter of the
-    -- active cell. All four edges fall on cells/rows the font guarantees to
-    -- be blank, so the box never overlaps any letter pixel:
-    --   left  edge = glyph_x "000"  (column 0 of the cell, blank gap)
-    --   right edge = glyph_x "111"  (column 7 of the cell, blank gap)
-    --   bottom edge= glyph_y "111"  (row 7 of the cell, inter-line gap)
-    --   top edge   = row 7 of the line above (if cursor on line 1)
-    --                or the dedicated top margin row above line 0 (which now
-    --                lasts `scale` physical lines, matching the side/bottom
-    --                edge thickness at every size).
-    -- The box pixels are emitted with the cycling cursor color so they stay
-    -- visible against any background or text color.
-    --
-    -- Edit-mode also draws a flashing underscore guide along the cell
-    -- baseline (row 7 of every text cell) so the user can map out where each
-    -- letter slot is, even when the cell is empty. The flash uses bit 4 of
-    -- the frame counter (~2 Hz at 60 Hz fields), and underscore pixels use
-    -- the same cycling cursor color as the cursor box.
+    -- The cursor box is a one-glyph-pixel frame around the active cell.  All
+    -- four edges land on cells/rows the font guarantees blank:
+    --   left  edge = glyph_x 0   (blank gap column)
+    --   right edge = glyph_x 7   (blank gap column)
+    --   bottom     = glyph_y 7   (inter-line gap row)
+    --   top        = the line's own top-margin row
+    -- It is drawn at the cell's DISPLAYED column, so with Justify=Centre the
+    -- box travels with the letters instead of staying on the physical slot.
     --==========================================================================
     p_stage3 : process(clk)
         variable v_box        : std_logic;
@@ -765,42 +1017,35 @@ begin
     begin
         if rising_edge(clk) then
             v_flat_idx := to_integer(s2_line_idx) * C_TEXT_COLS
-                          + to_integer(s2_char_idx);
-            s3_char_code     <= text_buf(v_flat_idx);
+                          + to_integer(s2_char_eff);
+            if s2_blank = '1' then
+                s3_char_code <= (others => '0');
+            else
+                s3_char_code <= text_buf(v_flat_idx);
+            end if;
             s3_glyph_x       <= s2_glyph_x;
             s3_glyph_y       <= s2_glyph_y;
             s3_in_text       <= s2_in_text;
-            s3_in_top_margin <= s2_in_top_margin;
+            s3_in_box        <= s2_in_box;
+            s3_top           <= s2_top;
 
             v_box := '0';
-            if s_edit_mode = '1' and s2_char_idx = s_cursor_col then
-                if s2_in_top_margin = '1' then
-                    -- Top margin row only draws the top edge for a cursor
-                    -- positioned on line 0.
-                    if s_cursor_line(0) = '0' then
-                        v_box := '1';
-                    end if;
-                elsif s2_line_idx = s_cursor_line then
-                    -- Inside the cursor's own cell: left/right/bottom edges.
-                    if s2_glyph_x = "000" or s2_glyph_x = "111"
-                       or s2_glyph_y = "111" then
-                        v_box := '1';
-                    end if;
-                elsif s_cursor_line(0) = '1' and s2_line_idx(0) = '0'
-                      and s2_glyph_y = "111" then
-                    -- Cursor on line 1: its top edge lives in row 7 of line 0
-                    -- (the inter-line gap row, guaranteed blank).
-                    v_box := '1';
+            if s_edit_mode = '1' and s2_in_text = '1'
+               and s2_char_raw = s_cursor_disp
+               and s2_line_idx(0) = s_cursor_line(0) then
+                if s2_top = '1' then
+                    v_box := '1';                     -- full-width top edge
+                elsif s2_glyph_x = "000" or s2_glyph_x = "111"
+                      or s2_glyph_y = "111" then
+                    v_box := '1';                     -- sides and bottom
                 end if;
             end if;
 
-            -- Underscore guide: glyph_y = 7 of any text row, in edit mode,
-            -- gated by the slow frame-counter bit so it flashes. Restricted
-            -- to glyph_x in [1, 5] so it only sits under the letter slot,
-            -- leaving the inter-character gap (cols 0, 6, 7) dark for a
-            -- visible break between adjacent cells.
+            -- Underscore guide: baseline row of every text cell, flashing at
+            -- ~2 Hz, restricted to glyph_x 1..5 so the inter-character gaps
+            -- stay dark and the slots read as separate.
             if s_edit_mode = '1' and s2_in_text = '1'
-               and s2_in_top_margin = '0' and s2_glyph_y = "111"
+               and s2_top = '0' and s2_glyph_y = "111"
                and s2_glyph_x /= "000"
                and s2_glyph_x(2 downto 1) /= "11"
                and frame_counter(4) = '0' then
@@ -814,13 +1059,9 @@ begin
     end process p_stage3;
 
     --==========================================================================
-    -- S4: Font ROM lookup, registered into s4_font_row.
-    -- The full 8-bit row is captured here; the per-pixel column select and
-    -- the in_top_margin mask both happen in S5 from the registered row.
-    --
-    -- The ROM holds two fonts back-to-back (default at 0..63, sci-fi at
-    -- 64..127). s_font_sel becomes the top bit of the 7-bit char address,
-    -- so font switching is essentially free in logic.
+    -- S4: font ROM lookup.  One read returns the entire 8x8 glyph as a 64-bit
+    -- word (2 EBR pairs).  Fonts sit back to back, so the font picker is just
+    -- the top address bit.
     --==========================================================================
     p_stage4 : process(clk)
         variable v_font_addr : integer range 0 to C_FONT_CHAR_COUNT - 1;
@@ -831,75 +1072,242 @@ begin
             else
                 v_font_addr := to_integer(s3_char_code);
             end if;
-            s4_font_row     <= C_FONT_ROM(v_font_addr,
-                                          to_integer(s3_glyph_y));
-            s4_glyph_x      <= s3_glyph_x;
-            s4_in_text      <= s3_in_text;
-            s4_in_top_margin<= s3_in_top_margin;
-            s4_cursor_box   <= s3_cursor_box;
-            s4_underscore   <= s3_underscore;
+            s4_glyph         <= C_FONT_ROM(v_font_addr);
+            s4_glyph_x       <= s3_glyph_x;
+            s4_glyph_y       <= s3_glyph_y;
+            s4_in_text       <= s3_in_text;
+            s4_in_box        <= s3_in_box;
+            s4_top           <= s3_top;
+            s4_cursor_box    <= s3_cursor_box;
+            s4_underscore    <= s3_underscore;
         end if;
     end process p_stage4;
 
     --==========================================================================
-    -- S5: Pixel extract from registered font row + output mux.
+    -- S5: pick glyph rows y-1, y and y+1 out of the 64-bit word.
+    --
+    -- Row 7 of every glyph is blank by construction, so the y-1 wrap at y=0
+    -- is harmless.  The y+1 wrap at y=7 is NOT (it would pull row 0's pixels
+    -- into the inter-line gap), so it is masked explicitly.
+    --
+    -- On a line's top-margin row the pipeline is conceptually at glyph row -1:
+    -- nothing at or above it, and glyph row 0 below.  Forcing that here is
+    -- what gives the outline styles their top edge.
+    --
+    -- The palette index is resolved here too: the cursor box borrows the
+    -- cycling hue, everything else uses the latched ink colour.
     --==========================================================================
     p_stage5 : process(clk)
-        variable v_pixel_on  : std_logic;
-        variable v_show_text : std_logic;
-        variable v_bg_y      : std_logic_vector(9 downto 0);
-        variable v_bg_u      : std_logic_vector(9 downto 0);
-        variable v_bg_v      : std_logic_vector(9 downto 0);
     begin
         if rising_edge(clk) then
-            -- Mask the font lookup in the top margin row: the glyph indices
-            -- are sentinel-garbage there, so we must not treat any font bit
-            -- as a real pixel.
-            v_pixel_on := s4_font_row(7 - to_integer(s4_glyph_x))
-                          and not s4_in_top_margin;
-
-            v_show_text := s4_in_text and
-                           (v_pixel_on or s4_cursor_box or s4_underscore);
-
-            -- Background select: passthrough or solid black
-            if s_bg_black = '1' then
-                v_bg_y := std_logic_vector(to_unsigned(64, 10));
-                v_bg_u := std_logic_vector(to_unsigned(512, 10));
-                v_bg_v := std_logic_vector(to_unsigned(512, 10));
+            if s4_top = '1' then
+                s5_row_m1 <= (others => '0');
+                s5_row_0  <= (others => '0');
+                s5_row_p1 <= f_row(s4_glyph, "000");
             else
-                v_bg_y := bypass_y(C_DELAY_DEPTH - 1);
-                v_bg_u := bypass_u(C_DELAY_DEPTH - 1);
-                v_bg_v := bypass_v(C_DELAY_DEPTH - 1);
+                s5_row_0  <= f_row(s4_glyph, s4_glyph_y);
+                s5_row_m1 <= f_row(s4_glyph, s4_glyph_y - 1);
+                if s4_glyph_y = "111" then
+                    s5_row_p1 <= (others => '0');
+                else
+                    s5_row_p1 <= f_row(s4_glyph, s4_glyph_y + 1);
+                end if;
             end if;
 
-            if v_show_text = '1' then
-                if s4_cursor_box = '1' then
-                    -- Cursor box uses the cycling cursor color so it stays
-                    -- distinct against any background or text color.
-                    data_out.y <= std_logic_vector(cursor_color_y);
-                    data_out.u <= std_logic_vector(cursor_color_u);
-                    data_out.v <= std_logic_vector(cursor_color_v);
-                elsif s4_underscore = '1' then
-                    -- Cell-baseline underscores: always solid white so they
-                    -- read as a static "where letters can go" guide rather
-                    -- than competing with the cycling cursor.
-                    data_out.y <= std_logic_vector(to_unsigned(940, 10));
-                    data_out.u <= std_logic_vector(to_unsigned(512, 10));
-                    data_out.v <= std_logic_vector(to_unsigned(512, 10));
-                elsif s_matte = '1' then
-                    -- Matte mode: glyph pixels reveal the incoming video.
-                    data_out.y <= bypass_y(C_DELAY_DEPTH - 1);
-                    data_out.u <= bypass_u(C_DELAY_DEPTH - 1);
-                    data_out.v <= bypass_v(C_DELAY_DEPTH - 1);
-                else
-                    data_out.y <= std_logic_vector(text_color_y);
-                    data_out.u <= std_logic_vector(text_color_u);
-                    data_out.v <= std_logic_vector(text_color_v);
-                end if;
+            s5_glyph_x       <= s4_glyph_x;
+            s5_in_text       <= s4_in_text;
+            s5_in_box        <= s4_in_box;
+            s5_top           <= s4_top;
+            s5_cursor_box    <= s4_cursor_box;
+            s5_underscore    <= s4_underscore;
+
+            if s4_cursor_box = '1' then
+                s5_pal_sel <= frame_counter(5 downto 3);
             else
-                data_out.y <= v_bg_y;
-                data_out.u <= v_bg_u;
-                data_out.v <= v_bg_v;
+                s5_pal_sel <= s_color_sel;
+            end if;
+        end if;
+    end process p_stage5;
+
+    --==========================================================================
+    -- S6: the 3x3 neighbourhood, then the pixel class.
+    --
+    --   self    glyph pixel is lit
+    --   outl    a neighbour is lit but self is not   (black edge / hollow)
+    --   shad    the pixel up-and-left is lit         (drop shadow, SE)
+    --   hilo    the pixel down-and-right is lit      (emboss highlight, NW)
+    --
+    -- srl moves toward higher column numbers, i.e. to the RIGHT, so a shadow
+    -- cast down-and-right reads the row above shifted right.
+    --
+    -- The dimmed-video terms for the Half Box style are built here too, from
+    -- the bypass tap one stage upstream of the output.
+    --==========================================================================
+    p_stage6 : process(clk)
+        variable v_dil    : std_logic_vector(7 downto 0);
+        variable v_dil3   : std_logic_vector(7 downto 0);
+        variable v_shrow  : std_logic_vector(7 downto 0);
+        variable v_hirow  : std_logic_vector(7 downto 0);
+        variable v_bit    : integer range 0 to 7;
+        variable v_self   : std_logic;
+        variable v_outl   : std_logic;
+        variable v_shad   : std_logic;
+        variable v_hilo   : std_logic;
+        variable v_mask   : std_logic;
+        variable v_class  : unsigned(2 downto 0);
+        variable v_style  : integer range 0 to 7;
+    begin
+        if rising_edge(clk) then
+            v_dil   := s5_row_m1 or s5_row_0 or s5_row_p1;
+            v_dil3  := v_dil or std_logic_vector(shift_left(unsigned(v_dil), 1))
+                             or std_logic_vector(shift_right(unsigned(v_dil), 1));
+            v_shrow := std_logic_vector(shift_right(unsigned(s5_row_m1), 1));
+            v_hirow := std_logic_vector(shift_left(unsigned(s5_row_p1), 1));
+
+            v_bit := 7 - to_integer(s5_glyph_x);
+
+            -- The margin rows already arrive with their rows forced, so the
+            -- band flag is the only gate needed here.
+            v_mask := s5_in_text;
+            v_self := s5_row_0(v_bit)  and v_mask;
+            v_outl := v_dil3(v_bit)    and v_mask and not v_self;
+            v_shad := v_shrow(v_bit)   and v_mask and not v_self;
+            v_hilo := v_hirow(v_bit)   and v_mask and not v_self;
+
+            v_style := to_integer(s_style);
+            v_class := to_unsigned(C_CL_BG, 3);
+
+            -- Panel styles paint the whole text rectangle first; glyph pixels
+            -- then land on top of it.
+            if s5_in_box = '1' then
+                case v_style is
+                    when C_ST_BOX     => v_class := to_unsigned(C_CL_BLACK, 3);
+                    when C_ST_HALFBOX => v_class := to_unsigned(C_CL_DIM, 3);
+                    when C_ST_REVERSE => v_class := to_unsigned(C_CL_INK, 3);
+                    when others       => null;
+                end case;
+            end if;
+
+            case v_style is
+                when C_ST_SHADOW =>
+                    if v_shad = '1' then
+                        v_class := to_unsigned(C_CL_BLACK, 3);
+                    end if;
+                when C_ST_EDGE =>
+                    if v_outl = '1' then
+                        v_class := to_unsigned(C_CL_BLACK, 3);
+                    end if;
+                when C_ST_HOLLOW =>
+                    if v_outl = '1' then
+                        v_class := to_unsigned(C_CL_INK, 3);
+                    end if;
+                when C_ST_EMBOSS =>
+                    if v_hilo = '1' then
+                        v_class := to_unsigned(C_CL_WHITE, 3);
+                    elsif v_shad = '1' then
+                        v_class := to_unsigned(C_CL_BLACK, 3);
+                    end if;
+                when others => null;
+            end case;
+
+            -- The glyph body itself.  Hollow deliberately leaves it open;
+            -- Reverse knocks it out of the panel in black.
+            if v_self = '1' then
+                if v_style = C_ST_HOLLOW then
+                    null;
+                elsif v_style = C_ST_REVERSE then
+                    v_class := to_unsigned(C_CL_BLACK, 3);
+                elsif s_matte = '1' then
+                    v_class := to_unsigned(C_CL_VIDEO, 3);
+                else
+                    v_class := to_unsigned(C_CL_INK, 3);
+                end if;
+            end if;
+
+            -- Edit-mode overlays sit on top of every style.
+            if s5_underscore = '1' then
+                v_class := to_unsigned(C_CL_WHITE, 3);
+            end if;
+            if s5_cursor_box = '1' then
+                v_class := to_unsigned(C_CL_INK, 3);
+            end if;
+
+            s6_class <= v_class;
+            s6_ink_y <= pal_y;
+            s6_ink_u <= pal_u;
+            s6_ink_v <= pal_v;
+
+            -- 50% toward black / neutral, from the tap one stage early so
+            -- it lands aligned with the S7 output register.
+            s6_dim_y <= to_unsigned(32, 10)
+                        + shift_right(unsigned(bypass_y(C_DELAY_DEPTH - 2)), 1);
+            s6_dim_u <= to_unsigned(256, 10)
+                        + shift_right(unsigned(bypass_u(C_DELAY_DEPTH - 2)), 1);
+            s6_dim_v <= to_unsigned(256, 10)
+                        + shift_right(unsigned(bypass_v(C_DELAY_DEPTH - 2)), 1);
+        end if;
+    end process p_stage6;
+
+    --==========================================================================
+    -- S7: output mux and blanking gate.
+    --
+    -- Generated colour is swapped U<->V exactly here (Videomancer wires Cr
+    -- into the U register); passthrough and matte are left alone.
+    --
+    -- Outside active video every channel is forced neutral.  Without this a
+    -- text block placed near the picture edge writes ink into the blanking
+    -- interval and destroys the encoder's colour reference across the whole
+    -- frame - a failure no simulation can see, because the image tester only
+    -- scores the active region.
+    --==========================================================================
+    p_stage7 : process(clk)
+        variable v_class : integer range 0 to 7;
+    begin
+        if rising_edge(clk) then
+            v_class := to_integer(s6_class);
+
+            if bypass_avid(C_DELAY_DEPTH - 1) = '0' then
+                data_out.y <= std_logic_vector(to_unsigned(C_Y_BLACK, 10));
+                data_out.u <= std_logic_vector(to_unsigned(C_MID, 10));
+                data_out.v <= std_logic_vector(to_unsigned(C_MID, 10));
+            else
+                case v_class is
+                    when C_CL_INK =>
+                        data_out.y <= std_logic_vector(s6_ink_y);
+                        data_out.u <= std_logic_vector(s6_ink_v);  -- swap
+                        data_out.v <= std_logic_vector(s6_ink_u);  -- swap
+                    when C_CL_BLACK =>
+                        data_out.y <= std_logic_vector(
+                                          to_unsigned(C_Y_BLACK, 10));
+                        data_out.u <= std_logic_vector(to_unsigned(C_MID, 10));
+                        data_out.v <= std_logic_vector(to_unsigned(C_MID, 10));
+                    when C_CL_WHITE =>
+                        data_out.y <= std_logic_vector(
+                                          to_unsigned(C_Y_WHITE, 10));
+                        data_out.u <= std_logic_vector(to_unsigned(C_MID, 10));
+                        data_out.v <= std_logic_vector(to_unsigned(C_MID, 10));
+                    when C_CL_DIM =>
+                        data_out.y <= std_logic_vector(s6_dim_y);
+                        data_out.u <= std_logic_vector(s6_dim_u);
+                        data_out.v <= std_logic_vector(s6_dim_v);
+                    when C_CL_VIDEO =>
+                        data_out.y <= bypass_y(C_DELAY_DEPTH - 1);
+                        data_out.u <= bypass_u(C_DELAY_DEPTH - 1);
+                        data_out.v <= bypass_v(C_DELAY_DEPTH - 1);
+                    when others =>            -- C_CL_BG
+                        if s_bg_black = '1' then
+                            data_out.y <= std_logic_vector(
+                                              to_unsigned(C_Y_BLACK, 10));
+                            data_out.u <= std_logic_vector(
+                                              to_unsigned(C_MID, 10));
+                            data_out.v <= std_logic_vector(
+                                              to_unsigned(C_MID, 10));
+                        else
+                            data_out.y <= bypass_y(C_DELAY_DEPTH - 1);
+                            data_out.u <= bypass_u(C_DELAY_DEPTH - 1);
+                            data_out.v <= bypass_v(C_DELAY_DEPTH - 1);
+                        end if;
+                end case;
             end if;
 
             data_out.avid    <= bypass_avid(C_DELAY_DEPTH - 1);
@@ -907,12 +1315,12 @@ begin
             data_out.vsync_n <= bypass_vs(C_DELAY_DEPTH - 1);
             data_out.field_n <= bypass_field(C_DELAY_DEPTH - 1);
         end if;
-    end process p_stage5;
+    end process p_stage7;
 
     --==========================================================================
     -- Bypass delay line shift register
     -- Index 0 = newest (just-arrived data_in),
-    -- Index DEPTH-1 = oldest (consumed by p_stage5).
+    -- Index DEPTH-1 = oldest (consumed by p_stage7).
     --==========================================================================
     p_delay : process(clk)
     begin

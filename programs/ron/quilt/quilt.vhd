@@ -26,11 +26,16 @@
 --     lines border each patch; optional video-fill paints input video into some
 --     patches.
 --
--- Controls: K1 Grid Scale, K2 Composition Seed, K3 Sub-piece Seed, K4 Split
--- Jitter, K5 Palette Tint, K6 Texture Scale, S7 Seams, S8 Texture, S9 Grid
--- (Square / Not-Square off-grid overlap), S10 Luma Mod (incoming luma drives
--- per-cell piecing + hides cells over negative luma -> black), S11 Palette
--- (Fabric/Rainbow), P12 Density (KEY).  16 embossed texture types.
+-- Controls: K1 Grid Scale, K2 Composition Seed, K3 Sub-piece Seed, K4 Threshold
+-- (Luma Mod: fully off at 0, then incoming luma drives per-cell piecing density
+-- and hides cells whose held luma is below the threshold -> black), K5 Palette
+-- Tint, K6 Texture Scale, S7 Seams, S8 Texture, S9 Grid (Square / Not-Square
+-- off-grid overlap), S10 Piecing (Crazy = random split axis / Log Cabin =
+-- alternating axis, concentric frames), S11 Palette (Fabric/Rainbow), P12
+-- Density (KEY).  16 embossed texture types, always on; S8 Relief sets their
+-- depth.  K2 Seed re-randomises the whole layout; K3 Evolve is BIPOLAR — centre
+-- frozen, right = pieces change in scattered order, left = the change snakes
+-- from each piece to one it touches.  Split jitter is fixed at Medium.
 --
 -- Author: bluecondition
 
@@ -46,7 +51,7 @@ use work.video_timing_pkg.all;
 
 architecture quilt of program_top is
 
-    constant LATENCY : natural := 20;
+    constant LATENCY : natural := 22;   -- +1 S1a2 candidate-hash, +1 S10a2 evolve
     constant DMAX    : natural := 4;          -- subdivision levels
     constant MIN_W   : natural := 8;          -- don't split a span narrower than this
     constant SEAM_W  : natural := 2;          -- seam line half-thickness (px)
@@ -69,7 +74,7 @@ architecture quilt of program_top is
         px, py         : unsigned(11 downto 0);
         seed           : unsigned(15 downto 0);
         dens           : unsigned(7 downto 0);   -- per-cell subdivide threshold base
-        hide           : std_logic;              -- Luma Mod: cell over negative luma
+        hide           : std_logic;              -- Luma Mod: cell luma below K4 threshold
         frozen         : std_logic;
     end record;
 
@@ -169,7 +174,7 @@ architecture quilt of program_top is
 
     -- Coarse-cell column index for the per-column luma hold (video density).
     function cell_col(x : unsigned(11 downto 0); g : integer) return integer is
-        variable c : integer;
+        variable c : integer range 0 to 127;
     begin
         case g is
             when 5      => c := to_integer(x(11 downto 5));
@@ -256,18 +261,61 @@ architecture quilt of program_top is
     signal s_cellmask   : unsigned(11 downto 0) := to_unsigned(63, 12);
     signal s_cellcenter : unsigned(11 downto 0) := to_unsigned(32, 12);
     signal s_density    : unsigned(7 downto 0) := to_unsigned(160, 8);
-    signal s_dens_floor : integer range 0 to 255 := 95;     -- 255 - density (precomputed)
+    signal s_dens_floor : unsigned(7 downto 0) := to_unsigned(95, 8);  -- 255 - density (precomputed)
     signal s_line_top   : std_logic := '0';                 -- on a cell-row's top line
-    signal s_jit_mode   : unsigned(1 downto 0) := to_unsigned(2, 2);
+    -- Split jitter is now fixed at Medium (w/8); K4 became the Luma Mod
+    -- threshold.  Kept as a constant so calc_split's case folds away.
+    constant C_JIT_MODE : unsigned(1 downto 0) := to_unsigned(2, 2);
+    signal s_lum_thr    : unsigned(7 downto 0) := to_unsigned(128, 8);  -- K4: Luma Mod hide threshold
     signal s_tint       : unsigned(3 downto 0) := (others => '0');
     signal s_tex_shift  : integer range 3 to 6 := 5;
+    -- Both layout seeds now come from the single K2 Seed knob (composition and
+    -- sub-piecing used to be K2/K3; K3 is the Evolve Rate).
     signal s_comp_seed  : unsigned(15 downto 0) := x"1234";
     signal s_sub_seed   : unsigned(15 downto 0) := x"ABCD";
     signal s_seam_en    : std_logic := '1';
-    signal s_tex_en     : std_logic := '1';     -- S8: texture on/off
+    signal s_relief     : std_logic := '1';     -- S8: texture emboss depth (0 soft, 1 deep)
     signal s_notsq      : std_logic := '0';     -- S9: 0 = square grid, 1 = off-grid overlap
-    signal s_lumamod    : std_logic := '0';     -- S10: luma masks + drives density
+    signal s_lumamod    : std_logic := '0';     -- derived: K4 above its off deadband
+    signal s_logcabin   : std_logic := '0';     -- S10: 0 = crazy (random axis), 1 = log cabin
     signal s_palmode    : std_logic := '0';
+
+    --------------------------------------------------------------------------
+    -- Evolve engine (S8).  The quilt is memoryless — every pixel re-derives its
+    -- leaf from hashes — so "one piece changed" cannot be stored.  Instead each
+    -- leaf owns a slot k in a 65536-slot ring, and a per-frame phase sweeps a
+    -- cursor `pos` around that ring:  a leaf's GENERATION is
+    --     gen = pass + (k < pos)
+    -- where pass/pos are the high/low halves of the phase.  Advancing pos by one
+    -- therefore steps the generation of exactly the one slot it just passed, and
+    -- the change persists until the cursor laps.  Cumulative, one at a time, no
+    -- memory.  gen is split into a colour generation and a texture generation
+    -- that alternate (see S10a), so a change moves EITHER the colour or the
+    -- texture, never both.
+    --
+    -- The K3 knob is BIPOLAR and picks what k means, which is what makes the two
+    -- evolve modes fall out of one mechanism:
+    --   * right of centre (Random) — k is a mix of all 16 leaf seed bits, so the
+    --     cursor visits pieces in scattered hash order.
+    --   * left of centre (Snake) — k is the leaf's own POSITION on a serpentine
+    --     over 8 px bands, so consecutive visits land on pieces that touch and
+    --     the change crawls across the quilt.  Cells are visited in a hash-picked
+    --     order within each 2x2 block so the walk wanders instead of reading as a
+    --     scanline wipe.
+    --   * centre — the rate is zero, so nothing evolves.  gen only ever takes the values pass, pass+1 or
+    -- pass+2, so the three 4-bit slices it can contribute are precomputed here
+    -- once per frame and the pixel path just picks one.
+    type t_u4_3 is array (0 to 2) of unsigned(3 downto 0);
+    signal s_evo_rate   : unsigned(27 downto 0) := (others => '0');
+    signal s_evo_ph     : unsigned(27 downto 0) := (others => '0');
+    signal s_evo_pos    : unsigned(15 downto 0) := (others => '0');
+    signal s_evo_g      : t_u4_3 := (others => (others => '0'));
+    signal s_evo_on     : std_logic := '0';     -- K3 off centre
+    signal s_evo_snake  : std_logic := '0';     -- K3 left of centre: spatial walk
+    -- Analog vsync serrates (multiple edges per field), so the phase increment
+    -- needs the saw-active guard — a plain edge-triggered add would step several
+    -- times per frame.  Idempotent latches in the same branch are safe as-is.
+    signal s_saw_active : std_logic := '0';
 
     --------------------------------------------------------------------------
     -- Sync / video alignment pipe
@@ -294,6 +342,9 @@ architecture quilt of program_top is
     type t_u16_4  is array (0 to 3) of unsigned(15 downto 0);
     type t_s14_4  is array (0 to 3) of signed(13 downto 0);
     type t_u4_4   is array (0 to 3) of unsigned(3 downto 0);
+    -- S1c argmax priority: cov & rank(1:0) & z(3:0), packed so the compare
+    -- tree is 7-bit and needs no adders at all.
+    type t_u7_4   is array (0 to 3) of unsigned(6 downto 0);
     -- candidate bounds + seed only (px/py/dens are shared across all 4)
     type t_cand   is record
         x0, x1, y0, y1 : unsigned(11 downto 0);
@@ -303,11 +354,20 @@ architecture quilt of program_top is
     constant CK_X : integer_vector(0 to 3) := (0, 1, 0, 1);
     constant CK_Y : integer_vector(0 to 3) := (0, 0, 1, 1);
 
-    signal s1a_hk          : t_u16_4;                      -- per-candidate cell hash/seed
+    -- S1a holds only the sliced/subtracted ORIGINS; the four init_seed hashes
+    -- that used to sit in the same stage were the HD critical path (slice ->
+    -- 14-bit subtract -> 16-bit hash, x4, all combinational), so they now get
+    -- their own stage S1a2.
     signal s1a_ax, s1a_ay  : t_s14_4;                      -- per-candidate aligned origin
     signal s1a_px, s1a_py  : unsigned(11 downto 0);
     signal s1a_dens        : unsigned(7 downto 0);
-    signal s1a_base        : t_node;                       -- plain square cell
+    signal s1a_base        : t_node;                       -- plain square cell (seed unset)
+
+    signal s1a2_hk         : t_u16_4;                      -- per-candidate cell hash/seed
+    signal s1a2_ax, s1a2_ay: t_s14_4;
+    signal s1a2_px, s1a2_py: unsigned(11 downto 0);
+    signal s1a2_dens       : unsigned(7 downto 0);
+    signal s1a2_base       : t_node;                       -- plain square cell (seed filled)
 
     -- S1b builds all 4 clamped candidate cells in parallel; S1c just argmaxes.
     signal s1b_cand        : t_cand_4;
@@ -341,8 +401,23 @@ architecture quilt of program_top is
     -- leaf metrics, split across two stages
     signal s10a_lx, s10a_ly : unsigned(11 downto 0);
     signal s10a_m1, s10a_m2 : unsigned(11 downto 0);
-    signal s10a_seed        : unsigned(15 downto 0);
+    -- S10a also builds the leaf's evolve ring slot; the compare against the
+    -- cursor plus the generation lookup are a stage of their own (S10a2) because
+    -- the 16-bit compare will not fit alongside the leaf metrics.
+    signal s10a_k           : unsigned(15 downto 0);
+    signal s10a_cbase       : unsigned(3 downto 0);   -- leaf base colour number
+    signal s10a_tbase       : unsigned(3 downto 0);   -- leaf base texture number
+    signal s10a_p           : std_logic;              -- colour/texture alternation phase
     signal s10a_hide        : std_logic;
+
+    -- Evolved leaf indices: the base colour/texture numbers already advanced by
+    -- this leaf's colour/texture generation, so the 16-bit leaf seed never has to
+    -- reach S10b.
+    signal s10a2_lx, s10a2_ly : unsigned(11 downto 0);
+    signal s10a2_m1, s10a2_m2 : unsigned(11 downto 0);
+    signal s10a2_cidx       : unsigned(3 downto 0);
+    signal s10a2_tidx       : unsigned(3 downto 0);
+    signal s10a2_hide       : std_logic;
 
     signal s10_seamd      : unsigned(11 downto 0);
     signal s10_pidx       : unsigned(3 downto 0);
@@ -369,6 +444,13 @@ begin
     --------------------------------------------------------------------------
     p_position : process(clk)
         variable v_h_edge, v_v_edge : std_logic;
+        variable v_ph   : unsigned(27 downto 0);   -- evolve phase, next value
+        variable v_rate : unsigned(27 downto 0);
+        variable v_k3r  : unsigned(9 downto 0);
+        variable v_mag  : unsigned(8 downto 0);     -- distance from centre
+        variable v_mlo  : unsigned(6 downto 0);
+        variable v_off  : boolean;
+        variable v_p0, v_p1, v_p2 : unsigned(7 downto 0);   -- pass, pass+1, pass+2
     begin
         if rising_edge(clk) then
             prev_hsync_n <= data_in.hsync_n;
@@ -385,8 +467,29 @@ begin
             if v_h_edge = '1' then        pixel_x <= (others => '0');
             elsif data_in.avid = '1' then pixel_x <= pixel_x + 1; end if;
 
+            -- Saw-active flag for the evolve phase increment below.
+            if data_in.avid = '1' then s_saw_active <= '1'; end if;
+
             if v_v_edge = '1' then
                 pixel_y <= (others => '0');
+
+                -- Evolve phase: ONE step per field, guarded so a serrated analog
+                -- vsync (several falling edges per field) cannot advance it more
+                -- than once.  pos = ph(19:4) is the ring cursor, pass = ph(27:20)
+                -- the lap count; gen is pass or pass+1, and the colour/texture
+                -- split needs pass+2, so all three 4-bit slices are cut here.
+                if s_saw_active = '1' then
+                    s_saw_active <= '0';
+                    v_ph := s_evo_ph + s_evo_rate;
+                    s_evo_ph  <= v_ph;
+                    s_evo_pos <= v_ph(19 downto 4);
+                    v_p0 := v_ph(27 downto 20);
+                    v_p1 := v_p0 + 1;
+                    v_p2 := v_p0 + 2;
+                    s_evo_g(0) <= v_p0(4 downto 1);
+                    s_evo_g(1) <= v_p1(4 downto 1);
+                    s_evo_g(2) <= v_p2(4 downto 1);
+                end if;
 
                 -- Grid scale: K1 top 2 bits -> coarse cell 256/128/64/32 px
                 case to_integer(unsigned(registers_in(0)(9 downto 8))) is
@@ -400,9 +503,52 @@ begin
                                             s_cellcenter <= to_unsigned(16, 12);
                 end case;
 
+                -- K2 Seed drives BOTH layout seeds (composition + sub-piecing).
                 s_comp_seed <= mix16(unsigned(registers_in(1)), x"9E37");
-                s_sub_seed  <= mix16(unsigned(registers_in(2)), x"C2B5");
-                s_jit_mode  <= unsigned(registers_in(3)(9 downto 8));
+                s_sub_seed  <= mix16(unsigned(registers_in(1)), x"C2B5");
+
+                -- K3 Evolve: BIPOLAR about centre.  Centre (within a deadband
+                -- wide enough to swallow pot ADC noise) = rate 0 = frozen; right
+                -- = Random mode; left = Snake mode.  Both halves ramp the same
+                -- way, so the two modes run at matching speeds at matching
+                -- distances from centre.
+                v_k3r := unsigned(registers_in(2)(9 downto 0));
+                v_off := true;
+                if v_k3r >= to_unsigned(536, 10) then
+                    v_off := false;
+                    s_evo_on <= '1'; s_evo_snake <= '0';
+                    v_mag := resize(v_k3r - 536, 9);
+                elsif v_k3r <= to_unsigned(488, 10) then
+                    v_off := false;
+                    s_evo_on <= '1'; s_evo_snake <= '1';
+                    v_mag := resize(488 - v_k3r, 9);
+                else
+                    s_evo_on <= '0'; s_evo_snake <= '0';
+                    v_mag := (others => '0');
+                end if;
+
+                -- Magnitude -> phase step.  Four shift zones with carried offsets
+                -- give a monotonic, roughly exponential 16..42945 span.  pos
+                -- advances rate/16 slots per frame over a 65536-slot ring, so the
+                -- bottom is about one piece a second and the top laps the whole
+                -- quilt in ~24 frames.  Resize BEFORE shifting — shift_left keeps
+                -- the operand's own width.
+                v_mlo := v_mag(6 downto 0);
+                case to_integer(v_mag(8 downto 7)) is
+                    when 0      => v_rate := shift_left(resize(v_mlo, 28), 1) + 16;
+                    when 1      => v_rate := shift_left(resize(v_mlo, 28), 4) + 271;
+                    when 2      => v_rate := shift_left(resize(v_mlo, 28), 6) + 2304;
+                    when others => v_rate := shift_left(resize(v_mlo, 28), 8) + 10433;
+                end case;
+                if v_off then s_evo_rate <= (others => '0');
+                else          s_evo_rate <= v_rate; end if;
+                -- K4 Threshold IS the Luma Mod control: fully anticlockwise turns
+                -- luma modulation off entirely, anything above the deadband turns
+                -- it on and sets the hide cut point.  The deadband (16/1023) keeps
+                -- pot ADC noise from flickering the mode at the bottom of travel.
+                s_lum_thr   <= unsigned(registers_in(3)(9 downto 2));
+                if registers_in(3)(9 downto 4) = "000000" then s_lumamod <= '0';
+                else                                           s_lumamod <= '1'; end if;
                 s_tint      <= unsigned(registers_in(4)(9 downto 6));
 
                 -- K6 Texture Scale: Fine / Small / Medium / Coarse.  Periods are
@@ -416,13 +562,13 @@ begin
                 end case;
 
                 s_seam_en <= registers_in(6)(0);
-                s_tex_en  <= registers_in(6)(1);   -- S8 texture on/off
+                s_relief  <= registers_in(6)(1);   -- S8 Relief: soft / deep
                 s_notsq   <= registers_in(6)(2);
-                s_lumamod <= registers_in(6)(3);   -- S10
+                s_logcabin <= registers_in(6)(3);  -- S10 Piecing: Crazy / Log Cabin
                 s_palmode <= registers_in(6)(4);
 
                 s_density   <= unsigned(registers_in(7)(9 downto 2));
-                s_dens_floor <= 255 - to_integer(unsigned(registers_in(7)(9 downto 2)));
+                s_dens_floor <= 255 - unsigned(registers_in(7)(9 downto 2));
             elsif v_h_edge = '1' then
                 pixel_y <= pixel_y + 1;
             end if;
@@ -434,21 +580,22 @@ begin
     --------------------------------------------------------------------------
     p_pipe : process(clk)
         variable v_x0, v_y0 : unsigned(11 downto 0);
-        variable v_sz       : integer;
+        variable v_sz       : integer range 32 to 256;
         variable v_col      : integer range 0 to 63;
-        variable v_dt       : integer;
         variable v_densv    : unsigned(7 downto 0);
         variable v_hide     : std_logic;
         variable v_axk, v_ayk : signed(13 downto 0);
+        variable v_hk       : unsigned(15 downto 0);   -- S1a2 candidate hash
+        variable v_bn       : t_node;                  -- S1a2 base node + seed
         variable v_cells    : signed(13 downto 0);
         variable v_pxs, v_pys : signed(13 downto 0);
         variable v_jx, v_jy : unsigned(11 downto 0);
         variable v_x0s, v_y0s : signed(13 downto 0);
-        variable v_szc      : integer;                 -- cell size in px (= cellmask+1)
-        variable v_wcx, v_wcy : integer;               -- candidate extent in px (1 or 2 cells)
+        variable v_szc      : integer range 32 to 256; -- cell size in px (= cellmask+1)
+        variable v_wcx, v_wcy : integer range 32 to 512; -- candidate extent (1 or 2 cells)
         variable v_rank     : integer range 0 to 2;    -- candidate size rank (#2-cell axes)
-        variable vv         : integer_vector(0 to 3);
-        variable v_m01, v_m23 : integer;
+        variable vv         : t_u7_4;
+        variable v_m01, v_m23 : unsigned(6 downto 0);
         variable v_i01, v_i23, v_kw : integer range 0 to 3;
         variable dtmp       : t_dec;
         variable n          : t_node;
@@ -462,6 +609,14 @@ begin
         variable v_adiag    : unsigned(11 downto 0);
         variable v_pm       : unsigned(11 downto 0);
         variable v_bv       : unsigned(3 downto 0);
+        variable v_kmix     : unsigned(11 downto 0);   -- evolve: seed remix
+        variable v_k, v_krnd, v_ksnk : unsigned(15 downto 0);  -- evolve ring slot
+        variable v_qx, v_qy : unsigned(7 downto 0);    -- leaf corner, 8 px units
+        variable v_bx, v_by, v_bxs, v_bsum : unsigned(6 downto 0);
+        variable v_h2, v_cell : unsigned(1 downto 0);
+        variable v_thi, v_td1, v_td2 : unsigned(9 downto 0);  -- emboss deltas
+        variable v_cg, v_tg : unsigned(3 downto 0);    -- colour/texture generation
+        variable v_ic, v_it : integer range 0 to 2;    -- which s_evo_g slice
         variable v_nv, v_nh : boolean;
         variable v_t2       : unsigned(1 downto 0);
         variable v_rx, v_ry, v_rd, v_ra : unsigned(1 downto 0);   -- 2-bit ramp fields
@@ -486,18 +641,31 @@ begin
             variable h  : unsigned(15 downto 0);
             variable nn : t_node;
             variable o  : std_logic;
-            variable t8 : integer;
+            variable t8 : unsigned(7 downto 0);
             variable lo, hi : unsigned(11 downto 0);
             variable sum : unsigned(12 downto 0);
         begin
             h  := hash_lvl(n_in.seed, s_sub_seed, C_LC(lvl));
             nn := n_in; nn.seed := h;
-            o  := h(0);
-            t8 := to_integer(n_in.dens) - lvl * 32;      -- density tapers with depth
-            if t8 < 0 then t8 := 0; end if;
+            -- Piecing (S10): Crazy takes the split axis from the hash, Log Cabin
+            -- alternates it strictly by depth so every patch nests as concentric
+            -- frames.  In Log Cabin the axis is a compile-time constant per level,
+            -- so it drops off the lo/hi select path entirely.
+            if s_logcabin = '1' then
+                if (lvl mod 2) = 1 then o := '1'; else o := '0'; end if;
+            else
+                o := h(0);
+            end if;
+            -- density tapers with depth.  Kept in unsigned(8) — an unconstrained
+            -- integer here inferred a 32-bit subtract + compare in EVERY level.
+            if n_in.dens > to_unsigned(lvl * 32, 8) then
+                t8 := n_in.dens - to_unsigned(lvl * 32, 8);
+            else
+                t8 := (others => '0');
+            end if;
             q_n  <= nn;
             q_or <= o;
-            if (n_in.frozen = '0') and (to_integer(h(15 downto 8)) < t8) then
+            if (n_in.frozen = '0') and (h(15 downto 8) < t8) then
                 q_ds <= '1';
             else
                 q_ds <= '0';
@@ -541,41 +709,58 @@ begin
                                v_y0 := s0_y(11 downto 8) & "00000000"; v_sz := 256;
             end case;
             -- Luma Mod: when on, the held cell luma both biases the subdivide
-            -- density (bright -> more pieces) and hides cells over negative luma
-            -- (<= mid, i.e. <=128 in the 8-bit hold).
+            -- density (bright -> more pieces) and hides cells whose held luma
+            -- falls below the K4 threshold (0 = hide nothing, 255 = hide all
+            -- but pure white).
             if s_lumamod = '1' then
-                v_dt := to_integer(s0_luma) - s_dens_floor;
-                if v_dt < 0 then v_dt := 0; end if;
-                v_densv := to_unsigned(v_dt, 8);
-                if s0_luma <= to_unsigned(128, 8) then v_hide := '1'; else v_hide := '0'; end if;
+                if s0_luma > s_dens_floor then v_densv := s0_luma - s_dens_floor;
+                else                            v_densv := (others => '0'); end if;
+                if s0_luma < s_lum_thr then v_hide := '1'; else v_hide := '0'; end if;
             else
                 v_densv := s_density;
                 v_hide  := '0';
             end if;
-            -- square base cell (also the gap fallback in Not-Square)
+            -- square base cell (also the gap fallback in Not-Square).  Its seed
+            -- is candidate 0's hash, filled in by S1a2.
             s1a_base.x0     <= v_x0;
             s1a_base.x1     <= v_x0 + v_sz;
             s1a_base.y0     <= v_y0;
             s1a_base.y1     <= v_y0 + v_sz;
             s1a_base.px     <= s0_x;
             s1a_base.py     <= s0_y;
-            s1a_base.seed   <= init_seed(s_comp_seed, v_x0, v_y0);
+            s1a_base.seed   <= (others => '0');
             s1a_base.dens   <= v_densv;
             s1a_base.hide   <= v_hide;
             s1a_base.frozen <= '0';
-            -- 2x2 candidate cells (current + three up-left neighbours)
+            -- 2x2 candidate cell origins (current + three up-left neighbours)
             for k in 0 to 3 loop
                 v_axk := signed(resize(v_x0, 14)) - to_signed(CK_X(k) * v_sz, 14);
                 v_ayk := signed(resize(v_y0, 14)) - to_signed(CK_Y(k) * v_sz, 14);
                 s1a_ax(k) <= v_axk;
                 s1a_ay(k) <= v_ayk;
-                s1a_hk(k) <= init_seed(s_comp_seed,
-                                       unsigned(v_axk(11 downto 0)),
-                                       unsigned(v_ayk(11 downto 0)));
             end loop;
             s1a_px   <= s0_x;
             s1a_py   <= s0_y;
             s1a_dens <= v_densv;
+
+            -- S1a2: the four candidate cell hashes, on their own stage so the
+            -- origin subtract and the 16-bit init_seed no longer chain inside one
+            -- clock.  Candidate 0 IS the base cell, so its hash doubles as the
+            -- base node's seed (one hash saved).
+            v_bn := s1a_base;
+            for k in 0 to 3 loop
+                v_hk := init_seed(s_comp_seed,
+                                  unsigned(s1a_ax(k)(11 downto 0)),
+                                  unsigned(s1a_ay(k)(11 downto 0)));
+                s1a2_hk(k) <= v_hk;
+                if k = 0 then v_bn.seed := v_hk; end if;
+            end loop;
+            s1a2_base <= v_bn;
+            s1a2_ax   <= s1a_ax;
+            s1a2_ay   <= s1a_ay;
+            s1a2_px   <= s1a_px;
+            s1a2_py   <= s1a_py;
+            s1a2_dens <= s1a_dens;
 
             -- S1b: size + jitter each candidate, test 2x2 coverage, and build the
             -- clamped candidate node — all 4 in parallel (no cross-candidate
@@ -583,58 +768,64 @@ begin
             -- cells (hash bits 7/6); a size-2 cell stays grid-aligned (no jitter)
             -- so its reach never exceeds 2 cells and the 2x2 neighbourhood holds.
             v_szc   := to_integer(s_cellmask) + 1;
-            v_pxs   := signed(resize(s1a_px, 14));
-            v_pys   := signed(resize(s1a_py, 14));
+            v_pxs   := signed(resize(s1a2_px, 14));
+            v_pys   := signed(resize(s1a2_py, 14));
             for k in 0 to 3 loop
                 v_rank := 0;
-                if s1a_hk(k)(7) = '1' and s1a_hk(k)(3) = '1' then
+                if s1a2_hk(k)(7) = '1' and s1a2_hk(k)(3) = '1' then
                     v_wcx := v_szc + v_szc;  v_jx := (others => '0');  v_rank := v_rank + 1;
                 else
-                    v_wcx := v_szc;          v_jx := s1a_hk(k)(11 downto 0) and s_cellmask;
+                    v_wcx := v_szc;          v_jx := s1a2_hk(k)(11 downto 0) and s_cellmask;
                 end if;
-                if s1a_hk(k)(6) = '1' and s1a_hk(k)(2) = '1' then
+                if s1a2_hk(k)(6) = '1' and s1a2_hk(k)(2) = '1' then
                     v_wcy := v_szc + v_szc;  v_jy := (others => '0');  v_rank := v_rank + 1;
                 else
-                    v_wcy := v_szc;          v_jy := s1a_hk(k)(15 downto 4) and s_cellmask;
+                    v_wcy := v_szc;          v_jy := s1a2_hk(k)(15 downto 4) and s_cellmask;
                 end if;
-                v_x0s := s1a_ax(k) + signed(resize(v_jx, 14));
-                v_y0s := s1a_ay(k) + signed(resize(v_jy, 14));
-                if (v_pxs >= v_x0s) and (v_pxs < v_x0s + to_signed(v_wcx, 14)) and
+                v_x0s := s1a2_ax(k) + signed(resize(v_jx, 14));
+                v_y0s := s1a2_ay(k) + signed(resize(v_jy, 14));
+                -- Square mode folds in here as "nothing covers", so S1c's select
+                -- is a plain zero-test and s_notsq stays off that critical path.
+                if s_notsq = '1' and
+                   (v_pxs >= v_x0s) and (v_pxs < v_x0s + to_signed(v_wcx, 14)) and
                    (v_pys >= v_y0s) and (v_pys < v_y0s + to_signed(v_wcy, 14)) then
                     s1b_cov(k) <= '1';
                 else
                     s1b_cov(k) <= '0';
                 end if;
-                s1b_z(k)         <= s1a_hk(k)(15 downto 12);
+                s1b_z(k)         <= s1a2_hk(k)(15 downto 12);
                 s1b_rank(k)      <= to_unsigned(v_rank, 4);
                 s1b_cand(k).x0   <= clamp0(v_x0s);
                 s1b_cand(k).x1   <= clamp0(v_x0s + to_signed(v_wcx, 14));
                 s1b_cand(k).y0   <= clamp0(v_y0s);
                 s1b_cand(k).y1   <= clamp0(v_y0s + to_signed(v_wcy, 14));
-                s1b_cand(k).seed <= s1a_hk(k);
+                s1b_cand(k).seed <= s1a2_hk(k);
             end loop;
-            s1b_px   <= s1a_px;
-            s1b_py   <= s1a_py;
-            s1b_dens <= s1a_dens;
-            s1b_base <= s1a_base;
+            s1b_px   <= s1a2_px;
+            s1b_py   <= s1a2_py;
+            s1b_dens <= s1a2_dens;
+            s1b_base <= s1a2_base;
 
-            -- S1c: tree argmax over covered candidates by priority (covered always
-            -- beats uncovered via the +16 bias); Square mode or no cover -> base.
-            -- priority: larger cells win first (so a big cell owns its whole
-            -- footprint and the grid line inside it disappears); z breaks ties.
+            -- S1c: tree argmax over covered candidates by priority; no cover
+            -- (which includes Square mode, folded into cov above) -> base.  Priority is PACKED, not arithmetic (an
+            -- integer_vector here inferred 32-bit adders + comparators and was
+            -- the HD critical path): coverage in the top bit so covered always
+            -- beats uncovered, then rank so larger cells win (a big cell owns
+            -- its whole footprint and the grid line inside it disappears), then
+            -- z as the tie-break.  Uncovered candidates zero out so the
+            -- "nothing covered" test below is still a plain compare to 0.
             for k in 0 to 3 loop
-                if s1b_cov(k) = '1' then
-                    vv(k) := 16 + 16 * to_integer(s1b_rank(k)) + to_integer(s1b_z(k));
-                else
-                    vv(k) := 0;
-                end if;
+                vv(k)(6)          := s1b_cov(k);
+                vv(k)(5 downto 4) := s1b_rank(k)(1 downto 0);
+                vv(k)(3 downto 0) := s1b_z(k);
+                if s1b_cov(k) = '0' then vv(k) := (others => '0'); end if;
             end loop;
             if vv(0) >= vv(1) then v_m01 := vv(0); v_i01 := 0;
             else                   v_m01 := vv(1); v_i01 := 1; end if;
             if vv(2) >= vv(3) then v_m23 := vv(2); v_i23 := 2;
             else                   v_m23 := vv(3); v_i23 := 3; end if;
             if v_m01 >= v_m23 then v_kw := v_i01; else v_kw := v_i23; end if;
-            if s_notsq = '0' or (v_m01 = 0 and v_m23 = 0) then
+            if v_m01 = 0 and v_m23 = 0 then
                 s1_n <= s1b_base;
             else
                 s1_n.x0     <= s1b_cand(v_kw).x0;
@@ -651,25 +842,25 @@ begin
 
             -- Level 0 : hash -> decide -> descend
             do_hash(h0_n, h0_or, h0_ds, h0_sg, h0_hf, h0_w, h0_mid, 0, s1_n);
-            dtmp := calc_split(h0_w, h0_mid, h0_ds, h0_sg, h0_hf, s_jit_mode);
+            dtmp := calc_split(h0_w, h0_mid, h0_ds, h0_sg, h0_hf, C_JIT_MODE);
             d0_n <= h0_n; d0_or <= h0_or; d0_dt <= dtmp.doit; d0_nx <= dtmp.nx;
             n0 <= descend(d0_n, d0_or, d0_dt, d0_nx);
 
             -- Level 1
             do_hash(h1_n, h1_or, h1_ds, h1_sg, h1_hf, h1_w, h1_mid, 1, n0);
-            dtmp := calc_split(h1_w, h1_mid, h1_ds, h1_sg, h1_hf, s_jit_mode);
+            dtmp := calc_split(h1_w, h1_mid, h1_ds, h1_sg, h1_hf, C_JIT_MODE);
             d1_n <= h1_n; d1_or <= h1_or; d1_dt <= dtmp.doit; d1_nx <= dtmp.nx;
             n1 <= descend(d1_n, d1_or, d1_dt, d1_nx);
 
             -- Level 2
             do_hash(h2_n, h2_or, h2_ds, h2_sg, h2_hf, h2_w, h2_mid, 2, n1);
-            dtmp := calc_split(h2_w, h2_mid, h2_ds, h2_sg, h2_hf, s_jit_mode);
+            dtmp := calc_split(h2_w, h2_mid, h2_ds, h2_sg, h2_hf, C_JIT_MODE);
             d2_n <= h2_n; d2_or <= h2_or; d2_dt <= dtmp.doit; d2_nx <= dtmp.nx;
             n2 <= descend(d2_n, d2_or, d2_dt, d2_nx);
 
             -- Level 3
             do_hash(h3_n, h3_or, h3_ds, h3_sg, h3_hf, h3_w, h3_mid, 3, n2);
-            dtmp := calc_split(h3_w, h3_mid, h3_ds, h3_sg, h3_hf, s_jit_mode);
+            dtmp := calc_split(h3_w, h3_mid, h3_ds, h3_sg, h3_hf, C_JIT_MODE);
             d3_n <= h3_n; d3_or <= h3_or; d3_dt <= dtmp.doit; d3_nx <= dtmp.nx;
             n3 <= descend(d3_n, d3_or, d3_dt, d3_nx);
 
@@ -683,25 +874,85 @@ begin
             dd := (lh - 1) - ly;
             if lx < bb then m1 := lx; else m1 := bb; end if;
             if ly < dd then m2 := ly; else m2 := dd; end if;
-            s10a_lx   <= lx;
-            s10a_ly   <= ly;
-            s10a_m1   <= m1;
-            s10a_m2   <= m2;
-            s10a_seed <= n.seed;
-            s10a_hide <= n.hide;
+            -- Evolve, part 1: the leaf's ring slot k.
+            --
+            -- RANDOM (K3 right): mix all 16 seed bits so consecutive slots do NOT
+            -- share a base colour — k(7:4) becomes colour xor texture.  Feeding
+            -- raw seed bits would put the colour field in k's low bits and the
+            -- cursor would visibly sweep the palette in order.
+            --
+            -- SNAKE (K3 left): k is the leaf's own top-left corner, quantised to
+            -- 8 px (the minimum split, so distinct leaves land in distinct slots)
+            -- and laid out as a serpentine — the column index is inverted on odd
+            -- bands, which is just an xor with the band's low bit.  Sweeping k in
+            -- order therefore walks the quilt band by band, alternating direction,
+            -- and every step lands on a piece touching the last.  Within each 2x2
+            -- block the four cells are visited in a hash-picked order (an xor
+            -- permutation, keyed off a cheap add of the block coords so it is not
+            -- purely linear) so the walk wanders locally instead of reading as a
+            -- scanline wipe.
+            v_kmix := n.seed(3 downto 0) & n.seed(15 downto 8);
+            v_krnd := n.seed(15 downto 12) & (n.seed(11 downto 0) xor v_kmix);
+            v_qx   := n.x0(10 downto 3);
+            v_qy   := n.y0(10 downto 3);
+            v_bx   := v_qx(7 downto 1);
+            v_by   := v_qy(7 downto 1);
+            v_bsum := v_bx + v_by;
+            v_h2   := v_bsum(1 downto 0) xor v_bx(3 downto 2);
+            v_bxs  := v_bx xor (6 downto 0 => v_by(0));
+            v_cell := (v_qy(0) & v_qx(0)) xor v_h2;
+            v_ksnk := v_by & v_bxs & v_cell;
+            if s_evo_snake = '1' then v_k := v_ksnk; else v_k := v_krnd; end if;
+            s10a_lx    <= lx;
+            s10a_ly    <= ly;
+            s10a_m1    <= m1;
+            s10a_m2    <= m2;
+            s10a_k     <= v_k;
+            s10a_cbase <= n.seed(7 downto 4);
+            s10a_tbase <= n.seed(11 downto 8);
+            s10a_p     <= n.seed(12);
+            s10a_hide  <= n.hide;
+
+            -- Evolve, part 2 (S10a2): gen = pass + (k < pos).  The colour and
+            -- texture generations alternate off the per-leaf phase bit, so each
+            -- step of gen moves EXACTLY ONE of them:
+            --     p=0: cgen = gen,   tgen = gen+1
+            --     p=1: cgen = gen+1, tgen = gen
+            -- Each is one of pass/pass+1/pass+2, already sliced per frame into
+            -- s_evo_g, so this is a 3:1 mux — no arithmetic on gen at pixel rate.
+            -- The indices then just advance the leaf's base colour / texture
+            -- number, which wraps in 4 bits for free.
+            v_ic := 0;
+            v_it := 0;
+            if s10a_k < s_evo_pos then v_ic := v_ic + 1; v_it := v_it + 1; end if;
+            if s10a_p = '1' then v_ic := v_ic + 1; else v_it := v_it + 1; end if;
+            if s_evo_on = '1' then
+                v_cg := s_evo_g(v_ic);
+                v_tg := s_evo_g(v_it);
+            else
+                v_cg := (others => '0');
+                v_tg := (others => '0');
+            end if;
+            s10a2_lx   <= s10a_lx;
+            s10a2_ly   <= s10a_ly;
+            s10a2_m1   <= s10a_m1;
+            s10a2_m2   <= s10a_m2;
+            s10a2_cidx <= s10a_cbase + v_cg;
+            s10a2_tidx <= s10a_tbase + v_tg;
+            s10a2_hide <= s10a_hide;
 
             -- S10b: seam distance + palette index + texture emboss shade.  The
             -- texture is computed HERE (one stage ahead of the palette fetch) so
             -- the 16-way pattern logic and the palette muxes don't share a stage.
             -- Texture -> 2-bit shade: stripe/diagonal types ramp across the period
             -- (rounded "thread" -> depth); the rest are deep binary.  Shift/AND/add.
-            if s10a_m1 < s10a_m2 then seamd := s10a_m1; else seamd := s10a_m2; end if;
+            if s10a2_m1 < s10a2_m2 then seamd := s10a2_m1; else seamd := s10a2_m2; end if;
             s10_seamd <= seamd;
-            s10_pidx  <= s10a_seed(7 downto 4) xor s_tint;
-            s10_hide  <= s10a_hide;
+            s10_pidx  <= s10a2_cidx xor s_tint;
+            s10_hide  <= s10a2_hide;
 
-            vdiag   := s10a_lx + s10a_ly;
-            v_adiag := s10a_lx + (not s10a_ly);
+            vdiag   := s10a2_lx + s10a2_ly;
+            v_adiag := s10a2_lx + (not s10a2_ly);
             -- All texture coords are read as small fixed bit-slices selected by the
             -- Texture knob (a 4:1 mux), NOT 12-bit barrel shifters — the texture
             -- only needs a 2-bit ramp field (coord>>(s-1))(1:0) and a couple of
@@ -710,40 +961,40 @@ begin
             --   v_r* = 2-bit ramp field at [s:s-1]; v_*b = bit s; v_w*b = bit s+1.
             case s_tex_shift is
                 when 3 =>
-                    v_rx := s10a_lx(3 downto 2); v_ry := s10a_ly(3 downto 2);
+                    v_rx := s10a2_lx(3 downto 2); v_ry := s10a2_ly(3 downto 2);
                     v_rd := vdiag(3 downto 2);   v_ra := v_adiag(3 downto 2);
-                    v_bxb := s10a_lx(3); v_byb := s10a_ly(3);
-                    v_wxb := s10a_lx(4); v_wyb := s10a_ly(4);
-                    v_drow := s10a_ly(2 downto 1); v_dcol := s10a_lx(2 downto 1);
+                    v_bxb := s10a2_lx(3); v_byb := s10a2_ly(3);
+                    v_wxb := s10a2_lx(4); v_wyb := s10a2_ly(4);
+                    v_drow := s10a2_ly(2 downto 1); v_dcol := s10a2_lx(2 downto 1);
                     v_pm := to_unsigned(7, 12);
                 when 4 =>
-                    v_rx := s10a_lx(4 downto 3); v_ry := s10a_ly(4 downto 3);
+                    v_rx := s10a2_lx(4 downto 3); v_ry := s10a2_ly(4 downto 3);
                     v_rd := vdiag(4 downto 3);   v_ra := v_adiag(4 downto 3);
-                    v_bxb := s10a_lx(4); v_byb := s10a_ly(4);
-                    v_wxb := s10a_lx(5); v_wyb := s10a_ly(5);
-                    v_drow := s10a_ly(3 downto 2); v_dcol := s10a_lx(3 downto 2);
+                    v_bxb := s10a2_lx(4); v_byb := s10a2_ly(4);
+                    v_wxb := s10a2_lx(5); v_wyb := s10a2_ly(5);
+                    v_drow := s10a2_ly(3 downto 2); v_dcol := s10a2_lx(3 downto 2);
                     v_pm := to_unsigned(15, 12);
                 when 5 =>
-                    v_rx := s10a_lx(5 downto 4); v_ry := s10a_ly(5 downto 4);
+                    v_rx := s10a2_lx(5 downto 4); v_ry := s10a2_ly(5 downto 4);
                     v_rd := vdiag(5 downto 4);   v_ra := v_adiag(5 downto 4);
-                    v_bxb := s10a_lx(5); v_byb := s10a_ly(5);
-                    v_wxb := s10a_lx(6); v_wyb := s10a_ly(6);
-                    v_drow := s10a_ly(4 downto 3); v_dcol := s10a_lx(4 downto 3);
+                    v_bxb := s10a2_lx(5); v_byb := s10a2_ly(5);
+                    v_wxb := s10a2_lx(6); v_wyb := s10a2_ly(6);
+                    v_drow := s10a2_ly(4 downto 3); v_dcol := s10a2_lx(4 downto 3);
                     v_pm := to_unsigned(31, 12);
                 when others =>
-                    v_rx := s10a_lx(6 downto 5); v_ry := s10a_ly(6 downto 5);
+                    v_rx := s10a2_lx(6 downto 5); v_ry := s10a2_ly(6 downto 5);
                     v_rd := vdiag(6 downto 5);   v_ra := v_adiag(6 downto 5);
-                    v_bxb := s10a_lx(6); v_byb := s10a_ly(6);
-                    v_wxb := s10a_lx(7); v_wyb := s10a_ly(7);
-                    v_drow := s10a_ly(5 downto 4); v_dcol := s10a_lx(5 downto 4);
+                    v_bxb := s10a2_lx(6); v_byb := s10a2_ly(6);
+                    v_wxb := s10a2_lx(7); v_wyb := s10a2_ly(7);
+                    v_drow := s10a2_ly(5 downto 4); v_dcol := s10a2_lx(5 downto 4);
                     v_pm := to_unsigned(63, 12);
             end case;
             bidx := to_integer(v_drow & v_dcol);
             v_bv := C_BAYER(bidx);
-            v_nv := (s10a_lx and v_pm) < 2;    -- near a vertical cell line
-            v_nh := (s10a_ly and v_pm) < 2;    -- near a horizontal cell line
+            v_nv := (s10a2_lx and v_pm) < 2;    -- near a vertical cell line
+            v_nh := (s10a2_ly and v_pm) < 2;    -- near a horizontal cell line
             v_t2 := "01";
-            case to_integer(s10a_seed(11 downto 8)) is
+            case to_integer(s10a2_tidx) is
                 when 0  => v_t2 := "01";                                       -- solid
                 when 1  => v_t2 := v_rx;                                       -- v ridges
                 when 2  => v_t2 := v_ry;                                       -- h ridges
@@ -793,33 +1044,41 @@ begin
                 s12_y <= to_unsigned(64, 10);
                 s12_u <= C_MID;
                 s12_v <= C_MID;
-            elsif s_tex_en = '1' then
+            else
+                -- S8 Relief picks the emboss depth: Deep is the full weave, Soft
+                -- halves every delta for a flatter, printed-cotton read.  Two
+                -- constant sets, so it is a mux ahead of the existing add/sub.
+                if s_relief = '1' then
+                    v_thi := to_unsigned(TEX_HI, 10);
+                    v_td1 := to_unsigned(TEX_D1, 10);
+                    v_td2 := to_unsigned(TEX_D2, 10);
+                else
+                    v_thi := to_unsigned(TEX_HI / 2, 10);
+                    v_td1 := to_unsigned(TEX_D1 / 2, 10);
+                    v_td2 := to_unsigned(TEX_D2 / 2, 10);
+                end if;
                 case s11_tval is
                     when "00" =>   -- highlight (valley)
-                        if s11_y < to_unsigned(1023 - TEX_HI, 10) then
-                            s12_y <= s11_y + TEX_HI;
+                        if s11_y < (to_unsigned(1023, 10) - v_thi) then
+                            s12_y <= s11_y + v_thi;
                         else
                             s12_y <= to_unsigned(1023, 10);
                         end if;
                     when "10" =>   -- shadow
-                        if s11_y > to_unsigned(TEX_D1, 10) then
-                            s12_y <= s11_y - TEX_D1;
+                        if s11_y > v_td1 then
+                            s12_y <= s11_y - v_td1;
                         else
                             s12_y <= (others => '0');
                         end if;
                     when "11" =>   -- deep shadow (thread core)
-                        if s11_y > to_unsigned(TEX_D2, 10) then
-                            s12_y <= s11_y - TEX_D2;
+                        if s11_y > v_td2 then
+                            s12_y <= s11_y - v_td2;
                         else
                             s12_y <= (others => '0');
                         end if;
                     when others => -- flat
                         s12_y <= s11_y;
                 end case;
-                s12_u <= s11_u;
-                s12_v <= s11_v;
-            else
-                s12_y <= s11_y;
                 s12_u <= s11_u;
                 s12_v <= s11_v;
             end if;

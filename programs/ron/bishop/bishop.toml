@@ -9,7 +9,7 @@ categories = ["Render", "Shape", "Demo", "Computer"]
 program_type = "synthesis"
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
-description = "Wireframe head. K1 mouth, K2 thickness, K3 palette, K4 expression blend, K5/K6 noise, T7 fill features, T8 eye blink."
+description = "Wireframe head. P12 grows the head to fill the screen. K1 mouth, K2 line weight, K3 palette, K4 expression, K5/K6 noise."
 
 # --- Rotary Potentiometers (K1-K6) ---
 
@@ -26,9 +26,9 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
-name_label = "Thickness"
-value_labels = ["1 px", "2 px", "3 px", "4 px"]
-initial_value_label = "1 px"
+name_label = "Line Weight"
+value_labels = ["1 px", "3 px", "5 px", "7 px"]
+initial_value_label = "3 px"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
@@ -92,9 +92,9 @@ initial_value_label = "Smooth"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
-name_label = "Grid Lines"
-value_labels = ["Thin", "Thick"]
-initial_value_label = "Thin"
+name_label = "Brightness"
+value_labels = ["Normal", "Bright"]
+initial_value_label = "Bright"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
@@ -106,11 +106,11 @@ initial_value_label = "Black"
 
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
-name_label = "Brightness"
+name_label = "Head Size"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 900
+initial_value = 0
 display_min_value = 0
 display_max_value = 100
 suffix_label = "%"
@@ -120,7 +120,7 @@ suffix_label = "%"
 [[preset]]
 name = "Neutral"
 rotary_potentiometer_1   = 1023  # Mouth = open (neutral)
-rotary_potentiometer_2   = 0     # Thickness = 1 px
+rotary_potentiometer_2   = 384   # Line Weight = 3 px
 rotary_potentiometer_3   = 0     # Palette = Green
 rotary_potentiometer_4   = 0     # Expression = Neutral
 rotary_potentiometer_5   = 512   # Noise Speed
@@ -128,14 +128,14 @@ rotary_potentiometer_6   = 0     # Noise Spread = off
 toggle_switch_7          = 0     # Fill = Outline
 toggle_switch_8          = 0
 toggle_switch_9          = 0     # Noise = Smooth
-toggle_switch_10         = 0
+toggle_switch_10         = 1     # Brightness = Bright
 toggle_switch_11         = 0
-linear_potentiometer_12  = 900
+linear_potentiometer_12  = 0     # Head Size
 
 [[preset]]
 name = "Happy"
 rotary_potentiometer_1   = 1023  # Mouth = open
-rotary_potentiometer_2   = 0
+rotary_potentiometer_2   = 384
 rotary_potentiometer_3   = 256   # Palette = Amber
 rotary_potentiometer_4   = 256   # Expression = Happy
 rotary_potentiometer_5   = 512   # Noise Speed
@@ -143,14 +143,14 @@ rotary_potentiometer_6   = 0     # Noise Spread = off
 toggle_switch_7          = 0     # Fill = Outline
 toggle_switch_8          = 0
 toggle_switch_9          = 0
-toggle_switch_10         = 0
+toggle_switch_10         = 1     # Brightness = Bright
 toggle_switch_11         = 0
-linear_potentiometer_12  = 1000
+linear_potentiometer_12  = 640   # Head Size
 
 [[preset]]
 name = "Angry"
 rotary_potentiometer_1   = 1023  # Mouth = open
-rotary_potentiometer_2   = 384   # Thickness = 2 px
+rotary_potentiometer_2   = 640   # Line Weight = 5 px
 rotary_potentiometer_3   = 384   # Palette = Red
 rotary_potentiometer_4   = 768   # Expression = Angry
 rotary_potentiometer_5   = 512   # Noise Speed
@@ -158,14 +158,14 @@ rotary_potentiometer_6   = 0     # Noise Spread = off
 toggle_switch_7          = 0     # Fill = Outline
 toggle_switch_8          = 0
 toggle_switch_9          = 0
-toggle_switch_10         = 0
+toggle_switch_10         = 1     # Brightness = Bright
 toggle_switch_11         = 0
-linear_potentiometer_12  = 900
+linear_potentiometer_12  = 0     # Head Size
 
 [[preset]]
 name = "Surprised"
 rotary_potentiometer_1   = 1023  # Mouth = open
-rotary_potentiometer_2   = 256
+rotary_potentiometer_2   = 640
 rotary_potentiometer_3   = 128   # Palette = Cyan
 rotary_potentiometer_4   = 896   # Expression = Surprised
 rotary_potentiometer_5   = 512   # Noise Speed
@@ -173,6 +173,6 @@ rotary_potentiometer_6   = 0     # Noise Spread = off
 toggle_switch_7          = 0     # Fill = Outline
 toggle_switch_8          = 0
 toggle_switch_9          = 0
-toggle_switch_10         = 0
+toggle_switch_10         = 1     # Brightness = Bright
 toggle_switch_11         = 0
-linear_potentiometer_12  = 1000
+linear_potentiometer_12  = 640   # Head Size

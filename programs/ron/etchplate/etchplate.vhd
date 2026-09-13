@@ -473,7 +473,12 @@ begin
             -- Compose: fringe zones render as thin-line groups, everything
             -- else is solid.  No noise anywhere.
             ------------------------------------------------------------------
-            if v_out_zone = '1' or v_in_zone = '1'
+            if s_sw_rawthr = '1' then
+                -- S10 Raw: pure 1-bit threshold, engine fully out of the
+                -- path (hard bisect: if this is black, the fault is in the
+                -- threshold/output plumbing, not the hatch engine)
+                v_out_bit := v_bw;
+            elsif v_out_zone = '1' or v_in_zone = '1'
                or (s_sw_bones = '1' and v_bw = '1') then
                 v_out_bit := s_line_hit;
             elsif v_bw = '1' then

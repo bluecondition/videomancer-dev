@@ -1,27 +1,32 @@
 # Titler Program Configuration
 #
-# Low-fi video titler: renders editable text over the input video.
+# Lo-res video character generator in the style of 1980s/90s hardware
+# titlers: editable text over video, eight edge/box styles, screen-relative
+# placement and a size slider that runs from caption to full-height type.
 
 [program]
 program_id = "com.example.titler"
 program_name = "Titler"
-program_version = "1.0.0"
+program_version = "2.1.0"
 abi_version = ">=1.0,<2.0"
 author = "Ron"
 license = "GPL-3.0"
 categories = ["Text"]
 program_type = "processing"
-description = "Lo-fi 16-character video titler with on-the-fly editing"
+description = "Lo-res 80s/90s character generator: 2x16 editable text, 8 edge styles"
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
+# Position knobs are screen-relative: 0% puts the text centre on the left /
+# top edge of the ACTIVE picture, 100% on the right / bottom edge, in every
+# video mode. 50% is dead centre.
 [[parameter]]
 parameter_id = "rotary_potentiometer_1"
 name_label = "H Position"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 256
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
@@ -31,18 +36,21 @@ name_label = "V Position"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 256
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
+# The classic character-generator "style" button. The first five are edge
+# treatments on the letterforms; the last three drop a panel behind the whole
+# text block.
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
-name_label = "Size"
-control_mode = "steps_32"
-display_min_value = 1
-display_max_value = 32
-initial_value = 32
-suffix_label = "x"
+name_label = "Style"
+value_labels = [
+    "Plain", "Drop Shadow", "Black Edge", "Hollow",
+    "Emboss", "Box", "Half Box", "Reverse",
+]
+initial_value_label = "Drop Shadow"
 
 # Knob 4 is dual-purpose. With Edit Mode OFF it picks one of 8 preset text
 # colors (the latched value persists when Edit Mode is enabled). With Edit
@@ -103,3 +111,73 @@ parameter_id = "toggle_switch_10"
 name_label = "Font"
 value_labels = ["Default", "Sci-Fi"]
 initial_value_label = "Default"
+
+# Justify: Centre trims trailing spaces on each line (rescanned every field)
+# and centres what is left in the 16-cell field, so a short word sits on the
+# H Position point instead of hanging off to the left of it.
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Justify"
+value_labels = ["Left", "Center"]
+initial_value_label = "Center"
+
+# Size is screen-relative: 0% is small caption type, 100% is hero type about
+# eight characters wide across the picture. The usable travel is the same in
+# HD, 720p and SD.
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Size"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 400
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Lower Third"
+rotary_potentiometer_1 = 512
+rotary_potentiometer_2 = 780
+rotary_potentiometer_3 = 800
+rotary_potentiometer_4 = 0
+toggle_switch_11 = 1
+linear_potentiometer_12 = 330
+
+[[preset]]
+name = "News Bar"
+rotary_potentiometer_1 = 512
+rotary_potentiometer_2 = 830
+rotary_potentiometer_3 = 700
+rotary_potentiometer_4 = 0
+toggle_switch_11 = 1
+linear_potentiometer_12 = 300
+
+[[preset]]
+name = "Hero Card"
+rotary_potentiometer_1 = 512
+rotary_potentiometer_2 = 512
+rotary_potentiometer_3 = 300
+rotary_potentiometer_4 = 448
+toggle_switch_8 = 1
+toggle_switch_11 = 1
+linear_potentiometer_12 = 900
+
+[[preset]]
+name = "Video Fill"
+rotary_potentiometer_1 = 512
+rotary_potentiometer_2 = 512
+rotary_potentiometer_3 = 300
+toggle_switch_8 = 1
+toggle_switch_9 = 1
+toggle_switch_11 = 1
+linear_potentiometer_12 = 850
+
+[[preset]]
+name = "Sci-Fi Emboss"
+rotary_potentiometer_1 = 512
+rotary_potentiometer_2 = 512
+rotary_potentiometer_3 = 580
+rotary_potentiometer_4 = 640
+toggle_switch_10 = 1
+toggle_switch_11 = 1
+linear_potentiometer_12 = 600

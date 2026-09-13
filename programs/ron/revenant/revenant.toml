@@ -66,10 +66,10 @@ parameter_id = "rotary_potentiometer_5"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 256
+initial_value = 320
 display_min_value = 0
-display_max_value = 400
-name_label = "Saturation"
+display_max_value = 100
+name_label = "Drift Speed"
 suffix_label = "%"
 
 [[parameter]]
@@ -99,9 +99,9 @@ initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
-name_label = "Text"
-value_labels = ["Off", "On"]
-initial_value_label = "Off"
+name_label = "Motion"
+value_labels = ["Smooth", "Glitch"]
+initial_value_label = "Smooth"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
@@ -136,7 +136,7 @@ rotary_potentiometer_1 = 280
 rotary_potentiometer_2 = 512
 rotary_potentiometer_3 = 260
 rotary_potentiometer_4 = 0
-rotary_potentiometer_5 = 256
+rotary_potentiometer_5 = 200
 rotary_potentiometer_6 = 950
 toggle_switch_7 = 1
 toggle_switch_8 = 1
@@ -151,7 +151,7 @@ rotary_potentiometer_1 = 240
 rotary_potentiometer_2 = 760
 rotary_potentiometer_3 = 360
 rotary_potentiometer_4 = 0
-rotary_potentiometer_5 = 380
+rotary_potentiometer_5 = 700
 rotary_potentiometer_6 = 900
 toggle_switch_7 = 1
 toggle_switch_8 = 1
@@ -166,7 +166,7 @@ rotary_potentiometer_1 = 200
 rotary_potentiometer_2 = 880
 rotary_potentiometer_3 = 300
 rotary_potentiometer_4 = 256
-rotary_potentiometer_5 = 320
+rotary_potentiometer_5 = 400
 rotary_potentiometer_6 = 970
 toggle_switch_7 = 1
 toggle_switch_8 = 0

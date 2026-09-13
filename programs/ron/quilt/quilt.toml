@@ -5,6 +5,12 @@
 # (log-cabin / crazy-quilt), each leaf getting a fabric colour and a procedural
 # texture.  Static image; re-randomise the layout and the internal pieces with
 # two independent seed knobs.  P12 (Density) is the master recursion control.
+# K2 re-randomises the whole layout (composition and sub-piecing together).
+# K4 is the whole Luma Mod control: at 0 it is off, above that incoming video
+# luma drives per-cell piecing density and cells below the threshold are hidden
+# (black).  S8 Evolve makes one random piece at a time change its colour OR its
+# texture (never both) at the K3 rate; S10 flips the piecing style.  Textures are
+# always on and the split jitter is fixed.
 
 [program]
 program_id = "com.bluecondition.quilt"
@@ -34,7 +40,7 @@ control_mode = "linear"
 min_value = 0
 max_value = 1023
 initial_value = 300
-name_label = "Composition"
+name_label = "Seed"
 suffix_label = ""
 
 [[parameter]]
@@ -42,15 +48,28 @@ parameter_id = "rotary_potentiometer_3"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 620
-name_label = "Sub-Pieces"
-suffix_label = ""
+initial_value = 512
+display_min_value = -100
+display_max_value = 100
+name_label = "Evolve"
+suffix_label = "%"
+# BIPOLAR.  Centre = frozen.  Turn RIGHT and pieces change one at a time in
+# scattered order; turn LEFT and the change snakes instead, stepping from each
+# piece to one it touches.  Either way the far end laps the whole quilt in well
+# under a second.
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
-name_label = "Split Jitter"
-value_labels = ["Centered", "Slight", "Medium", "Wild"]
-initial_value_label = "Medium"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 0
+display_min_value = 0
+display_max_value = 100
+name_label = "Threshold"
+suffix_label = "%"
+# 0 = Luma Mod off entirely.  Above the deadband, incoming luma drives per-cell
+# piecing density and cells below the threshold are hidden (black).
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
@@ -78,9 +97,9 @@ initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
-name_label = "Texture"
-value_labels = ["Off", "On"]
-initial_value_label = "On"
+name_label = "Relief"
+value_labels = ["Soft", "Deep"]
+initial_value_label = "Deep"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
@@ -90,9 +109,9 @@ initial_value_label = "Square"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
-name_label = "Luma Mod"
-value_labels = ["Off", "On"]
-initial_value_label = "Off"
+name_label = "Piecing"
+value_labels = ["Crazy", "Log Cabin"]
+initial_value_label = "Crazy"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
@@ -119,14 +138,14 @@ suffix_label = "%"
 name = "Crazy Quilt"
 rotary_potentiometer_1 = 600       # medium grid
 rotary_potentiometer_2 = 300
-rotary_potentiometer_3 = 620
-rotary_potentiometer_4 = 700       # wild jitter
+rotary_potentiometer_3 = 512       # evolve: centre = frozen
+rotary_potentiometer_4 = 0         # luma mod off
 rotary_potentiometer_5 = 0
 rotary_potentiometer_6 = 350       # small texture
 toggle_switch_7 = 1                # seams on
-toggle_switch_8 = 1                # texture on
+toggle_switch_8 = 1                # deep relief
 toggle_switch_9 = 0                # square grid
-toggle_switch_10 = 0               # luma mod off
+toggle_switch_10 = 0               # crazy piecing
 toggle_switch_11 = 0               # fabric
 linear_potentiometer_12 = 820      # high density
 
@@ -134,14 +153,14 @@ linear_potentiometer_12 = 820      # high density
 name = "Log Cabin"
 rotary_potentiometer_1 = 200       # big blocks
 rotary_potentiometer_2 = 512
-rotary_potentiometer_3 = 480
-rotary_potentiometer_4 = 350       # slight jitter
+rotary_potentiometer_3 = 512       # evolve: centre = frozen
+rotary_potentiometer_4 = 0         # luma mod off
 rotary_potentiometer_5 = 0
 rotary_potentiometer_6 = 600       # medium texture
 toggle_switch_7 = 1
-toggle_switch_8 = 1                # texture on
+toggle_switch_8 = 1                # deep relief
 toggle_switch_9 = 0
-toggle_switch_10 = 0
+toggle_switch_10 = 1               # log cabin piecing
 toggle_switch_11 = 0
 linear_potentiometer_12 = 600
 
@@ -149,14 +168,14 @@ linear_potentiometer_12 = 600
 name = "Off-Grid"
 rotary_potentiometer_1 = 300       # biggish cells so overlap reads clearly
 rotary_potentiometer_2 = 740
-rotary_potentiometer_3 = 200
-rotary_potentiometer_4 = 500
+rotary_potentiometer_3 = 512       # evolve: centre = frozen
+rotary_potentiometer_4 = 0         # luma mod off
 rotary_potentiometer_5 = 0
 rotary_potentiometer_6 = 350       # fine texture
 toggle_switch_7 = 1
-toggle_switch_8 = 1                # texture on
+toggle_switch_8 = 1                # deep relief
 toggle_switch_9 = 1                # not square -> off-grid overlapping rectangles
-toggle_switch_10 = 0
+toggle_switch_10 = 0               # crazy piecing
 toggle_switch_11 = 0
 linear_potentiometer_12 = 600
 
@@ -164,14 +183,14 @@ linear_potentiometer_12 = 600
 name = "Solid Patches"
 rotary_potentiometer_1 = 600
 rotary_potentiometer_2 = 880
-rotary_potentiometer_3 = 320
-rotary_potentiometer_4 = 0         # centered
+rotary_potentiometer_3 = 512       # evolve: centre = frozen
+rotary_potentiometer_4 = 0         # luma mod off
 rotary_potentiometer_5 = 0
 rotary_potentiometer_6 = 300
 toggle_switch_7 = 1
-toggle_switch_8 = 0                # texture off
+toggle_switch_8 = 1                # deep relief
 toggle_switch_9 = 0
-toggle_switch_10 = 0
+toggle_switch_10 = 0               # crazy piecing
 toggle_switch_11 = 0
 linear_potentiometer_12 = 420      # lower density -> bigger patches
 
@@ -179,14 +198,14 @@ linear_potentiometer_12 = 420      # lower density -> bigger patches
 name = "Rainbow Crazy"
 rotary_potentiometer_1 = 800       # small grid
 rotary_potentiometer_2 = 140
-rotary_potentiometer_3 = 900
-rotary_potentiometer_4 = 700
+rotary_potentiometer_3 = 512       # evolve: centre = frozen
+rotary_potentiometer_4 = 0         # luma mod off
 rotary_potentiometer_5 = 256
 rotary_potentiometer_6 = 350       # fine texture
 toggle_switch_7 = 1
-toggle_switch_8 = 1                # texture on
+toggle_switch_8 = 1                # deep relief
 toggle_switch_9 = 0
-toggle_switch_10 = 0
+toggle_switch_10 = 0               # crazy piecing
 toggle_switch_11 = 1               # rainbow palette
 linear_potentiometer_12 = 900      # max density
 
@@ -194,13 +213,43 @@ linear_potentiometer_12 = 900      # max density
 name = "Luma Mod"
 rotary_potentiometer_1 = 200       # big base cells so luma detail shows
 rotary_potentiometer_2 = 420
-rotary_potentiometer_3 = 560
-rotary_potentiometer_4 = 500
+rotary_potentiometer_3 = 512       # evolve: centre = frozen
+rotary_potentiometer_4 = 512       # luma mod on, cut at mid grey
 rotary_potentiometer_5 = 0
 rotary_potentiometer_6 = 350       # fine texture
 toggle_switch_7 = 1
-toggle_switch_8 = 1                # texture on
+toggle_switch_8 = 1                # deep relief
 toggle_switch_9 = 0
-toggle_switch_10 = 1               # luma mod on (mask + density); hidden cells -> black
+toggle_switch_10 = 0               # crazy piecing
 toggle_switch_11 = 0
 linear_potentiometer_12 = 1023     # full range so bright video fully subdivides
+
+[[preset]]
+name = "Evolving"
+rotary_potentiometer_1 = 600       # medium grid
+rotary_potentiometer_2 = 300
+rotary_potentiometer_3 = 760       # evolve right: random order
+rotary_potentiometer_4 = 0         # luma mod off
+rotary_potentiometer_5 = 0
+rotary_potentiometer_6 = 350       # small texture
+toggle_switch_7 = 1                # seams on
+toggle_switch_8 = 1                # deep relief
+toggle_switch_9 = 0                # square grid
+toggle_switch_10 = 0               # crazy piecing
+toggle_switch_11 = 0               # fabric
+linear_potentiometer_12 = 700
+
+[[preset]]
+name = "Snake"
+rotary_potentiometer_1 = 600       # medium grid
+rotary_potentiometer_2 = 300
+rotary_potentiometer_3 = 260       # evolve left: snaking walk
+rotary_potentiometer_4 = 0         # luma mod off
+rotary_potentiometer_5 = 0
+rotary_potentiometer_6 = 350       # small texture
+toggle_switch_7 = 1                # seams on
+toggle_switch_8 = 1                # deep relief
+toggle_switch_9 = 0                # square grid
+toggle_switch_10 = 0               # crazy piecing
+toggle_switch_11 = 0               # fabric
+linear_potentiometer_12 = 700

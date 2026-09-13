@@ -1,6 +1,6 @@
 [program]
 program_id = "com.ron.gilt"
-program_version = "0.6.0"
+program_version = "0.9.1"
 abi_version = ">=1.0,<2.0"
 program_name = "Gilt"
 author = "ron"
@@ -73,19 +73,19 @@ parameter_id = "rotary_potentiometer_6"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 102
+initial_value = 716
 display_min_value = 0
 display_max_value = 100
-name_label = "Drift"
+name_label = "Chaos"
 suffix_label = "%"
 
 # --- Toggle Switches (7-11) ---
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
-name_label = "Mosaic"
-value_labels = ["Off", "On"]
-initial_value_label = "On"
+name_label = "Flow"
+value_labels = ["Luma X", "Luma Y"]
+initial_value_label = "Luma X"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
@@ -133,8 +133,8 @@ rotary_potentiometer_2 = 400
 rotary_potentiometer_3 = 640
 rotary_potentiometer_4 = 384
 rotary_potentiometer_5 = 300
-rotary_potentiometer_6 = 90
-toggle_switch_7 = 1
+rotary_potentiometer_6 = 716
+toggle_switch_7 = 0
 toggle_switch_8 = 1
 toggle_switch_9 = 0
 toggle_switch_10 = 0
@@ -148,7 +148,7 @@ rotary_potentiometer_2 = 720
 rotary_potentiometer_3 = 720
 rotary_potentiometer_4 = 512
 rotary_potentiometer_5 = 512
-rotary_potentiometer_6 = 60
+rotary_potentiometer_6 = 870
 toggle_switch_7 = 1
 toggle_switch_8 = 1
 toggle_switch_9 = 0
@@ -163,8 +163,8 @@ rotary_potentiometer_2 = 460
 rotary_potentiometer_3 = 96
 rotary_potentiometer_4 = 300
 rotary_potentiometer_5 = 0
-rotary_potentiometer_6 = 0
-toggle_switch_7 = 1
+rotary_potentiometer_6 = 460
+toggle_switch_7 = 0
 toggle_switch_8 = 1
 toggle_switch_9 = 0
 toggle_switch_10 = 0
@@ -178,8 +178,8 @@ rotary_potentiometer_2 = 460
 rotary_potentiometer_3 = 614
 rotary_potentiometer_4 = 409
 rotary_potentiometer_5 = 358
-rotary_potentiometer_6 = 102
-toggle_switch_7 = 1
+rotary_potentiometer_6 = 640
+toggle_switch_7 = 0
 toggle_switch_8 = 1
 toggle_switch_9 = 0
 toggle_switch_10 = 0
@@ -193,7 +193,7 @@ rotary_potentiometer_2 = 440
 rotary_potentiometer_3 = 700
 rotary_potentiometer_4 = 448
 rotary_potentiometer_5 = 384
-rotary_potentiometer_6 = 90
+rotary_potentiometer_6 = 716
 toggle_switch_7 = 1
 toggle_switch_8 = 1
 toggle_switch_9 = 1
@@ -208,8 +208,8 @@ rotary_potentiometer_2 = 440
 rotary_potentiometer_3 = 700
 rotary_potentiometer_4 = 448
 rotary_potentiometer_5 = 384
-rotary_potentiometer_6 = 90
-toggle_switch_7 = 1
+rotary_potentiometer_6 = 716
+toggle_switch_7 = 0
 toggle_switch_8 = 0
 toggle_switch_9 = 1
 toggle_switch_10 = 0
