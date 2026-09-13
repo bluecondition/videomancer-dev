@@ -1,0 +1,150 @@
+# Tonecurve - Program Configuration
+#
+# Three catalogue effects (seed 20260918): colour bleeding / NTSC dot
+# crawl, picture-in-picture with warping, and gamma / S-curve contrast.
+# Two knobs each; switches and slider set the interaction.
+
+[program]
+program_id = "com.ron.tonecurve"
+program_name = "Tonecurve"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "ron"
+license = "GPL-3.0"
+categories = ["Colorizer", "Mixer", "Retro"]
+program_type = "processing"
+description = "Eight tone curves with contrast, bled and lagging chroma, and a wobbling inset; each effect goes to the main or the inset."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Curve"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 7
+initial_value = 512
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Contrast"
+control_mode = "linear"
+display_min_value = 25
+display_max_value = 425
+initial_value = 192
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Size"
+control_mode = "linear"
+display_min_value = 1
+display_max_value = 3
+initial_value = 512
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Warp"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 150
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Bleed"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 7
+initial_value = 400
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Lag"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 31
+initial_value = 200
+display_float_digits = 0
+suffix_label = " px"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Curve"
+value_labels = ["Main", "Inset"]
+initial_value_label = "Main"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Place"
+value_labels = ["Corner", "Centre"]
+initial_value_label = "Corner"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Bleed"
+value_labels = ["Main", "Inset"]
+initial_value_label = "Main"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Inset"
+value_labels = ["Picture", "Negative"]
+initial_value_label = "Picture"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Lag"
+value_labels = ["Main", "Inset"]
+initial_value_label = "Main"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Amount"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 1023
+display_float_digits = 1
+suffix_label = "%"
+
+[[preset]]
+name = "Default"
+
+[[preset]]
+name = "Hard Press"
+rotary_potentiometer_1 = 700
+rotary_potentiometer_2 = 400
+rotary_potentiometer_5 = 700
+rotary_potentiometer_6 = 500
+toggle_switch_10 = 1
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Soft Monitor"
+rotary_potentiometer_1 = 550
+rotary_potentiometer_2 = 150
+rotary_potentiometer_3 = 0
+rotary_potentiometer_4 = 400
+toggle_switch_7 = 1
+toggle_switch_8 = 1
+toggle_switch_9 = 1
+toggle_switch_11 = 1
+linear_potentiometer_12 = 800
+
+[[preset]]
+name = "Crushed"
+rotary_potentiometer_1 = 1023
+rotary_potentiometer_2 = 300
+rotary_potentiometer_5 = 0
+rotary_potentiometer_6 = 0
+linear_potentiometer_12 = 700

@@ -1,0 +1,152 @@
+# Noisetone - Program Configuration
+#
+# Catalogue combo #137 (seed 20260927): Perlin / value-noise displacement
+# + gamma curves / S-curve contrast.  See noisetone.vhd.
+
+[program]
+program_id = "com.ron.noisetone"
+program_name = "Noisetone"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "ron"
+license = "GPL-3.0"
+categories = ["Distortion", "Colorizer", "Glitch"]
+program_type = "processing"
+description = "Value-noise warp under eight tone curves: the noise can shift the exposure, move luma alone, and the storm slider boils both."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Scale"
+control_mode = "linear"
+display_min_value = 4
+display_max_value = 512
+initial_value = 384
+display_float_digits = 0
+suffix_label = " px"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Amount"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 200
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Drift"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 600
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Curve"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 7
+initial_value = 512
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Contrast"
+control_mode = "linear"
+display_min_value = 25
+display_max_value = 425
+initial_value = 192
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Pivot"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 502
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Patchy"
+value_labels = ["Flat", "Patchy"]
+initial_value_label = "Flat"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Displace"
+value_labels = ["All", "Luma"]
+initial_value_label = "All"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Stretch"
+value_labels = ["Tall", "Wide"]
+initial_value_label = "Tall"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Field"
+value_labels = ["Smooth", "Blocky"]
+initial_value_label = "Smooth"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Chroma"
+value_labels = ["Flat", "Contrast"]
+initial_value_label = "Flat"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Storm"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 150
+display_float_digits = 1
+suffix_label = "%"
+
+[[preset]]
+name = "Default"
+
+[[preset]]
+name = "Heat Shimmer"
+rotary_potentiometer_1 = 300
+rotary_potentiometer_2 = 80
+rotary_potentiometer_3 = 700
+rotary_potentiometer_4 = 100
+rotary_potentiometer_5 = 140
+linear_potentiometer_12 = 60
+
+[[preset]]
+name = "Patchy Print"
+rotary_potentiometer_1 = 700
+rotary_potentiometer_2 = 120
+rotary_potentiometer_3 = 540
+rotary_potentiometer_4 = 1000
+rotary_potentiometer_5 = 400
+toggle_switch_7 = 1
+toggle_switch_10 = 1
+toggle_switch_11 = 1
+linear_potentiometer_12 = 300
+
+[[preset]]
+name = "Colour Slip"
+rotary_potentiometer_1 = 500
+rotary_potentiometer_2 = 400
+rotary_potentiometer_3 = 380
+rotary_potentiometer_4 = 640
+rotary_potentiometer_5 = 260
+toggle_switch_8 = 1
+toggle_switch_9 = 1
+linear_potentiometer_12 = 700

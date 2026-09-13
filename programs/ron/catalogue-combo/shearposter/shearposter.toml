@@ -1,0 +1,145 @@
+# Shearposter - Program Configuration
+#
+# Catalogue combo #110 (seed 20260925): pixelation + scanline shear
+# + posterization.  See shearposter.vhd.
+
+[program]
+program_id = "com.ron.shearposter"
+program_name = "Shearposter"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "ron"
+license = "GPL-3.0"
+categories = ["Retro", "Glitch", "Colorizer"]
+program_type = "processing"
+description = "Pixelated cells posterized to a few levels, sheared per line by a wave or tears, cell-aligned or free, mirrored edges, dither."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Cell"
+control_mode = "linear"
+display_min_value = 2
+display_max_value = 64
+initial_value = 400
+display_float_digits = 0
+suffix_label = "px"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Rows"
+control_mode = "linear"
+display_min_value = 1
+display_max_value = 32
+initial_value = 400
+display_float_digits = 0
+suffix_label = "ln"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Shear"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 255
+initial_value = 300
+display_float_digits = 0
+suffix_label = "px"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Rate"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 300
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Luma"
+control_mode = "linear"
+display_min_value = 1
+display_max_value = 8
+initial_value = 300
+display_float_digits = 0
+suffix_label = "b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Chroma"
+control_mode = "linear"
+display_min_value = 1
+display_max_value = 8
+initial_value = 300
+display_float_digits = 0
+suffix_label = "b"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Shear"
+value_labels = ["Sine", "Tear"]
+initial_value_label = "Sine"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Shift"
+value_labels = ["Free", "Cells"]
+initial_value_label = "Free"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Cells"
+value_labels = ["Stay", "Shear"]
+initial_value_label = "Shear"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Edges"
+value_labels = ["Black", "Mirror"]
+initial_value_label = "Black"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Chroma"
+value_labels = ["Clean", "Poster"]
+initial_value_label = "Poster"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Pitch"
+control_mode = "linear"
+display_min_value = 1
+display_max_value = 8
+initial_value = 0
+display_float_digits = 0
+suffix_label = "px"
+
+[[preset]]
+name = "Default"
+
+[[preset]]
+name = "Torn Mosaic"
+rotary_potentiometer_1 = 700
+rotary_potentiometer_2 = 700
+rotary_potentiometer_3 = 800
+rotary_potentiometer_4 = 500
+toggle_switch_7 = 1
+toggle_switch_8 = 1
+
+[[preset]]
+name = "Sliding Cells"
+rotary_potentiometer_3 = 500
+rotary_potentiometer_5 = 100
+toggle_switch_9 = 0
+toggle_switch_10 = 1
+linear_potentiometer_12 = 600
+
+[[preset]]
+name = "Two Bit Wave"
+rotary_potentiometer_1 = 0
+rotary_potentiometer_2 = 0
+rotary_potentiometer_5 = 150
+rotary_potentiometer_6 = 150
+linear_potentiometer_12 = 1023

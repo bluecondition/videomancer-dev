@@ -1,0 +1,144 @@
+# Hatchglass - Program Configuration
+#
+# Catalogue combo #93 (seed 20260924): kaleidoscope + crosshatch + key.
+# See hatchglass.vhd.
+
+[program]
+program_id = "com.ron.hatchglass"
+program_name = "Hatchglass"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "ron"
+license = "GPL-3.0"
+categories = ["Geometry", "Stylize", "Keyer"]
+program_type = "processing"
+description = "Nested mirror folds of a sliding strip, redrawn as crosshatch where a luma or sat key allows (or the reverse), on paper or over"
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Segment"
+control_mode = "linear"
+display_min_value = 64
+display_max_value = 1024
+initial_value = 500
+display_float_digits = 0
+suffix_label = "px"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Slide"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 560
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Weight"
+control_mode = "linear"
+display_min_value = 1
+display_max_value = 8
+initial_value = 150
+display_float_digits = 0
+suffix_label = "px"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Pitch"
+control_mode = "linear"
+display_min_value = 4
+display_max_value = 32
+initial_value = 300
+display_float_digits = 0
+suffix_label = "px"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Level"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 1023
+initial_value = 0
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Soft"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 300
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Key"
+value_labels = ["Luma", "Sat"]
+initial_value_label = "Luma"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Invert"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Keyed"
+value_labels = ["Picture", "Hatch"]
+initial_value_label = "Hatch"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Paper"
+value_labels = ["White", "Over"]
+initial_value_label = "White"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Fold"
+value_labels = ["Mirror", "Repeat"]
+initial_value_label = "Mirror"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Depth"
+control_mode = "linear"
+display_min_value = 1
+display_max_value = 4
+initial_value = 300
+display_float_digits = 0
+suffix_label = ""
+
+[[preset]]
+name = "Default"
+
+[[preset]]
+name = "Etched Mirrors"
+rotary_potentiometer_1 = 300
+rotary_potentiometer_3 = 300
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Dark Keyed"
+rotary_potentiometer_5 = 500
+rotary_potentiometer_6 = 700
+toggle_switch_8 = 1
+toggle_switch_10 = 1
+linear_potentiometer_12 = 0
+
+[[preset]]
+name = "Sat Tiles"
+rotary_potentiometer_1 = 700
+rotary_potentiometer_4 = 1023
+rotary_potentiometer_5 = 200
+toggle_switch_7 = 1
+toggle_switch_9 = 0
+toggle_switch_11 = 1
+linear_potentiometer_12 = 600

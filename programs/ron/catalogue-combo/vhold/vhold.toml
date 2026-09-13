@@ -1,0 +1,145 @@
+# Vhold - Program Configuration
+#
+# Catalogue combo #73 (seed 20260922): rolling shutter / sync roll
+# + sync loss / horizontal collapse.  See vhold.vhd.
+
+[program]
+program_id = "com.ron.vhold"
+program_name = "Vhold"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "ron"
+license = "GPL-3.0"
+categories = ["Glitch", "Retro", "Distortion"]
+program_type = "processing"
+description = "Rolling blanking bar with jello skew; rows squeeze toward the centre, hardest at the seam and fading with reach, brightening."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Roll"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 560
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Bar"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 255
+initial_value = 120
+display_float_digits = 0
+suffix_label = "ln"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Jello"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 200
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Collapse"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 100
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Reach"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 7
+initial_value = 500
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Beam"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 500
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Bar"
+value_labels = ["Black", "Show"]
+initial_value_label = "Black"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Centre"
+value_labels = ["Screen", "Jello"]
+initial_value_label = "Screen"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Edges"
+value_labels = ["Black", "Mirror"]
+initial_value_label = "Black"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Tear"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Pull"
+value_labels = ["Squeeze", "Stretch"]
+initial_value_label = "Squeeze"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Pull"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 500
+display_float_digits = 1
+suffix_label = "%"
+
+[[preset]]
+name = "Default"
+
+[[preset]]
+name = "Dying Set"
+rotary_potentiometer_1 = 620
+rotary_potentiometer_4 = 400
+rotary_potentiometer_6 = 1000
+toggle_switch_9 = 1
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Jello Stretch"
+rotary_potentiometer_3 = 900
+rotary_potentiometer_5 = 800
+toggle_switch_7 = 1
+toggle_switch_8 = 1
+toggle_switch_11 = 1
+linear_potentiometer_12 = 800
+
+[[preset]]
+name = "Torn Below"
+rotary_potentiometer_1 = 700
+rotary_potentiometer_2 = 40
+rotary_potentiometer_5 = 200
+toggle_switch_10 = 1
+linear_potentiometer_12 = 300

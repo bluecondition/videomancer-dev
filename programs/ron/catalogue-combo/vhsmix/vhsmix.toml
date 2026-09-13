@@ -1,0 +1,143 @@
+# Vhsmix - Program Configuration
+#
+# Catalogue combo #87 (seed 20260923): posterization + head-switch noise
+# band + multi-source mixing.  See vhsmix.vhd.
+
+[program]
+program_id = "com.ron.vhsmix"
+program_name = "Vhsmix"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "ron"
+license = "GPL-3.0"
+categories = ["Mixer", "VHS", "Colorizer"]
+program_type = "processing"
+description = "The posterized picture blended onto the original (add/screen/multiply/difference/overlay) under a noisy head-switch band."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Luma"
+control_mode = "linear"
+display_min_value = 1
+display_max_value = 8
+initial_value = 300
+display_float_digits = 0
+suffix_label = "b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Chroma"
+control_mode = "linear"
+display_min_value = 1
+display_max_value = 8
+initial_value = 300
+display_float_digits = 0
+suffix_label = "b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Band"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 255
+initial_value = 200
+display_float_digits = 0
+suffix_label = "ln"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Noise"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 500
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Blend"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 4
+initial_value = 700
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Mix"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 1023
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Order"
+value_labels = ["Post-Orig", "Orig-Post"]
+initial_value_label = "Post-Orig"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Band"
+value_labels = ["Blend", "Negative"]
+initial_value_label = "Blend"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Roll"
+value_labels = ["Fixed", "Roll"]
+initial_value_label = "Fixed"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Noise"
+value_labels = ["Luma", "Colour"]
+initial_value_label = "Luma"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Chroma"
+value_labels = ["Blend", "Keep"]
+initial_value_label = "Blend"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Static"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 0
+display_float_digits = 1
+suffix_label = "%"
+
+[[preset]]
+name = "Default"
+
+[[preset]]
+name = "Difference"
+rotary_potentiometer_1 = 200
+rotary_potentiometer_5 = 700
+toggle_switch_8 = 1
+toggle_switch_9 = 1
+
+[[preset]]
+name = "Static Screen"
+rotary_potentiometer_5 = 300
+rotary_potentiometer_6 = 600
+toggle_switch_10 = 1
+linear_potentiometer_12 = 500
+
+[[preset]]
+name = "Overlay Roll"
+rotary_potentiometer_2 = 100
+rotary_potentiometer_3 = 400
+rotary_potentiometer_5 = 1023
+toggle_switch_7 = 1
+toggle_switch_9 = 1
+toggle_switch_11 = 1
