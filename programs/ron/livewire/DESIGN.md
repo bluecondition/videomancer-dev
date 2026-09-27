@@ -539,3 +539,64 @@ halo only stains chroma (dark material), so the halo GAIN `s_halog` now ramps
 0 -> 127 over K6's first eighth (`g_k6(13 downto 11) = 0`), then the normal
 120 + overdrive.  Hue still follows K6 everywhere.  Per-frame only, no pixel
 cost.  Build9 6/6: HD 79.25 (s2) / 78.21 / 85.37, SD 81-84; 6520 LC.
+
+## 16. The field wrapped vertically (2026-09-19)
+
+User: "when stuff goes off the bottom, or even the haze/clouds around edges,
+it shows up at the top".  Two wraps at the cell-row edges, both invisible in
+any still and neither caught by a sim:
+
+1. **aux crossed the frame boundary.**  `aux` carries {above-row value,
+   running inject} per column.  Row 63 writes its handoff on its last line;
+   nothing clears it, so row 0 of the NEXT frame read it as its "above"
+   neighbour.  Bottom of the picture -> top, one frame later, decaying like
+   the field because it IS the field.
+2. **`s_crow + 1` wrapped.**  `s_crow` is 6 bits, so the below-row prefetch at
+   row 63 addressed row 0 -- top bleeding into the bottom, and the bottom
+   edge's bilinear lerp pulled toward the top row's field.
+
+Fix: `s_crowb` (= s_crow+1 clamped to 63), `s_row0`, `s_rowl`, all registered
+off `s_crow` -- which only moves at hsync, while the engine is idle -- so the
+pixel path sees plain signals and no address mux.  `f_above` is forced to 0 on
+row 0; `fb_p1` (the below neighbour, used ONLY by the recursion) is forced to 0
+on row 63, while `fb_n`/`fb_pf` still read the clamped row 63 so the DISPLAY's
+bottom edge stays flat instead of fading out over the last cell row.
+
+Lesson for any frame-recursive field: the recursion's edge conditions and the
+display's edge conditions are NOT the same.  The neighbour that does not exist
+contributes nothing to the recursion, but the display wants the edge value
+held, not zeroed.  Splitting those was free here because the two uses already
+read different registers of the prefetch chain.
+
+### 16.1 Global fog-off on MATERIAL 0% (2026-09-19)
+
+User asked whether the halo could be switched off and remembered only the CEL
+K6 fade (15.1).  It was CEL-only; K4 at 0% still left spread at 9/16 and S11
+only trades halo for trails.  `s_halog` now ramps 0 -> 127 over K4's bottom
+eighth in every mode, so MATERIAL 0% is a bare line -- the right home, since
+that knob already means reach, and unlike K6 it costs no range.  CEL's K6 fade
+is KEPT (the brief forbids dropping a feature silently), so CEL has both; a
+priority chain, not a comparator.
+
+### 16.2 Still wrapping -- the partial bottom row (2026-09-20)
+
+16 was real but not the path the user saw.  `s_ch = height/64 + 1`, so 64 rows
+ALWAYS overshoot the frame and the bottom row is always partial (HD: row 63 =
+lines 1071..1087, frame ends at 1079).  A row's field write and its aux
+clear happen on its LAST line -- which row 63 never reaches.  So its running
+inject accumulator (the low aux nibble, the brightest edges in the bottom 9
+lines) sat there through vblank and row 0 of the next frame read it as its own
+`f_injr`: max(inject) -> straight into the top row's field.  16 zeroed only the
+HIGH nibble (`f_above`).  Line-buffer staleness was already handled (inject is
+blanked for s_aline < 3).
+
+Fix: latch `s_hlast <= s_meas_h` at vsync (s_meas_h tracks the current line
+mid-frame, so it cannot be compared against directly); `s_lastl` also fires
+when `s_aline + 1 = s_hlast`, so the partial row completes like any other --
+its field gets written (it was stale since power-on) and its accumulator
+clears.  Plus `s_rowf` (first line of a row) forces `f_injr` to 0, which is
+redundant in steady state and the guard when the height changes.
+
+Lesson: when a per-row state machine's "close" step is what resets its
+per-row state, check that EVERY row actually closes.  Grid dimensions that are
+rounded UP from the raster guarantee one that does not.

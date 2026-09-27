@@ -261,6 +261,23 @@ architecture livewire of program_top is
     signal s_inrow : unsigned(5 downto 0) := (others => '0');
     signal s_crow  : unsigned(5 downto 0) := (others => '0');
     signal s_lastl : std_logic := '0';             -- last line of a cell row
+    -- vertical edge guards.  The field is a FRAME-RECURSIVE memory, so any
+    -- wrap at the cell-row edges hands the bottom of the picture to the top:
+    -- s_crow+1 wraps 63 -> 0 (the below-row read), and the aux handoff row 63
+    -- writes on its last line is still sitting there when row 0 reads "above"
+    -- at the top of the next frame.  Registered off s_crow, which only moves
+    -- at hsync, so the pixel path sees plain signals.
+    signal s_crowb : unsigned(5 downto 0) := to_unsigned(1, 6);
+    signal s_row0  : std_logic := '1';             -- no row above this one
+    signal s_rowl  : std_logic := '0';             -- no row below this one
+    signal s_rowf  : std_logic := '1';             -- first line of a cell row
+    -- last active line index, latched at vsync.  s_meas_h itself tracks the
+    -- CURRENT line mid-frame, so "is this the frame's last line" needs a copy
+    -- that holds still: 64 cell rows never divide the height exactly, so the
+    -- bottom row is always partial and without this it never gets its
+    -- last-line write -- its inject accumulator sat in aux over vblank and
+    -- row 0 of the next frame read it as its own.
+    signal s_hlast : unsigned(10 downto 0) := to_unsigned(1079, 11);
 
     ----------------------------------------------------------------------
     -- pipeline
@@ -570,6 +587,7 @@ begin
                     s_cwsh <= 3;
                 end if;
                 s_ch <= resize(shift_right(s_meas_h, 6), 6) + 1;
+                s_hlast <= s_meas_h;
             end if;
 
             ------------------------------------------------------------
@@ -783,9 +801,14 @@ begin
                                         + resize(g_k4(13 downto 12), 4);
                             s_perst  <= (others => '0');
                         end if;
-                        -- CEL: K6 fades the shade in over its first eighth,
-                        -- so 0% is a bare line and hue still follows the knob
-                        if s_mode = 3 and g_k6(13 downto 11) = 0 then
+                        -- MATERIAL is reach, so 0% must mean none: the fog
+                        -- ramps in over K4's bottom eighth in EVERY mode,
+                        -- leaving a bare line.  CEL keeps its own fade on K6
+                        -- as well; a priority chain is a cheaper "whichever
+                        -- is lower" than a comparator.
+                        if g_k4(13 downto 11) = 0 then
+                            s_halog <= resize(g_k4(10 downto 4), 8);
+                        elsif s_mode = 3 and g_k6(13 downto 11) = 0 then
                             s_halog <= resize(g_k6(10 downto 4), 8);
                         else
                             s_halog <= to_unsigned(120, 8)
@@ -1432,7 +1455,9 @@ begin
                     else
                         s_inrow <= s_inrow + 1;
                     end if;
-                    if s_inrow + 2 >= s_ch then
+                    -- the frame's last active line closes whatever row it
+                    -- is in, so the partial bottom row completes too
+                    if s_inrow + 2 >= s_ch or s_aline + 1 = s_hlast then
                         s_lastl <= '1';
                     else
                         s_lastl <= '0';
@@ -1632,6 +1657,26 @@ begin
             f_we  <= '0';
             x_we  <= '0';
 
+            -- cell-row edge flags (s_crow moves at hsync, the engine is idle
+            -- then, so one clock of registration is free)
+            if s_crow = 63 then
+                s_crowb <= to_unsigned(63, 6);     -- clamp: no row 64
+                s_rowl  <= '1';
+            else
+                s_crowb <= s_crow + 1;
+                s_rowl  <= '0';
+            end if;
+            if s_crow = 0 then
+                s_row0 <= '1';
+            else
+                s_row0 <= '0';
+            end if;
+            if s_inrow = 0 then
+                s_rowf <= '1';
+            else
+                s_rowf <= '0';
+            end if;
+
             if s_cwsh = 4 then
                 v_sub := resize(s_xf(3 downto 0), 5);
                 v_col := resize(shift_right(s_xf, 4), 7);
@@ -1671,21 +1716,40 @@ begin
                         fa_p1 <= fa_c;
                         fa_c  <= fa_n;
                         fa_n  <= fa_pf;
-                        fb_p1 <= fb_c;
+                        -- the bottom row has no row below it: the DISPLAY
+                        -- still reads row 63 (clamped, so the bottom edge
+                        -- stays flat instead of fading), but the recursion
+                        -- must not take a neighbour from there
+                        if s_rowl = '1' then
+                            fb_p1 <= (others => '0');
+                        else
+                            fb_p1 <= fb_c;
+                        end if;
                         fb_c  <= fb_n;
                         fb_n  <= fb_pf;
                         f_injd <= f_inja;
 
                     when 1 =>
-                        f_addr <= (s_crow + 1) & (v_col + 2);
+                        f_addr <= s_crowb & (v_col + 2);
 
                     when 2 =>
                         fa_pf <= unsigned(f_q);
 
                     when 3 =>
                         fb_pf <= unsigned(f_q);
-                        f_above <= unsigned(x_q(7 downto 4));
-                        f_injr  <= unsigned(x_q(3 downto 0));
+                        -- the top row's "above" is last frame's row 63
+                        if s_row0 = '1' then
+                            f_above <= (others => '0');
+                        else
+                            f_above <= unsigned(x_q(7 downto 4));
+                        end if;
+                        -- a row's inject accumulator starts empty; guards
+                        -- the frame boundary if the height ever changes
+                        if s_rowf = '1' then
+                            f_injr <= (others => '0');
+                        else
+                            f_injr <= unsigned(x_q(3 downto 0));
+                        end if;
 
                     when 4 =>
                         -- the recursion is spread over four of the cell's
