@@ -6,7 +6,7 @@
 [program]
 program_id = "com.ron.bajaweave"
 program_name = "Bajaweave"
-program_version = "0.5.0"
+program_version = "0.6.0"
 abi_version = ">=1.0,<2.0"
 author = "ron"
 license = "GPL-3.0"

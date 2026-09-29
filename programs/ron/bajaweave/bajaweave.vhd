@@ -29,10 +29,24 @@
 --   1x video_timing_generator
 --   2x video_timing_accumulator (G_W=20, C_VERTICAL, lock=1)    : per-line LFOs
 --   2x video_timing_accumulator (G_W=20, C_HORIZONTAL, lock=1)  : per-pixel carriers
---   1x frame_phase_accumulator (G_W=16)                          : sway drift
+--   1x 16-bit drift register (once per field, serration-guarded) : sway drift
 --   2x sin_cos_full_lut_10x10                                    : per-osc LFO sine
 --   2x sin_cos_full_lut_10x10                                    : per-osc carrier sine
 --   2x sin_cos_full_lut_10x10                                    : per-osc hue -> (U,V)
+--
+-- Hardware contracts (v0.6):
+--   * Luma is drawn into 64..765 (black..~75%): full-scale Y clips RGB and
+--     kills the chroma at every line's crest, and 1..63 is below black.
+--   * The program generates its OWN avid (Cubist's parity-locked version):
+--     it starts 2-3 clocks after the source's first avid rise, keeping the
+--     hsync->start parity at the source's usual value, and runs exactly the
+--     field-latched line width.  The encoders pair Cb/Cr by counting from
+--     hsync, so a wandering source avid swaps U/V for a line (thin coloured
+--     lines over the bars).  The timing generator is fed this avid too, so
+--     the carriers reset and the LFOs step off the clean signal.
+--   * Y/U/V are gated to 64/512/512 outside the generated avid.
+--   * The sway drift steps once per FIELD -- only on the first vsync edge
+--     after active video, since analog vsync serrates (several edges).
 --
 -- Pipeline (data_in -> data_out):
 --   1 clk : video_timing_generator
@@ -43,7 +57,8 @@
 --           the first register; this one splits EBR read from the output mux)
 --   1 clk : sine/triangle select + 512 -> register luma
 --   1 clk : keyer (max / blend mode) register
---   Total: 8 clk
+--   1 clk : luma remap to 64..765 + blanking gate -> output register
+--   Total: 9 clk  (sync/avid delay, all modes)
 --   (The LFO side chain has two extra registers -- the LFO angle =
 --   phase+drift register before its sine LUT and the same second sin/tri
 --   register.  The LFO value is line-stable, so neither affects the
@@ -81,7 +96,7 @@ use work.video_stream_pkg.all;
 
 architecture bajaweave of program_top is
 
-    constant C_DELAY_CLKS    : integer := 8;
+    constant C_DELAY_CLKS    : integer := 9;
 
     constant C_CARRIER_W     : integer := 20;
     constant C_LFO_W         : integer := 20;
@@ -158,8 +173,27 @@ architecture bajaweave of program_top is
     signal s_lfo1_phase     : unsigned(C_LFO_W-1 downto 0);
     signal s_lfo2_phase     : unsigned(C_LFO_W-1 downto 0);
 
-    -- Sway drift accumulator (per-field, rate = Speed slider / 2)
-    signal s_drift_phase : unsigned(C_DRIFT_W-1 downto 0);
+    -- Sway drift accumulator (steps once per field by r_drift_rate)
+    signal s_drift_phase : unsigned(C_DRIFT_W-1 downto 0) := (others => '0');
+
+    -- Raster measurement + serration-guarded field start
+    signal s_prev_vsync : std_logic := '1';
+    signal s_vs_pulse   : std_logic := '0';
+    signal s_sawact     : std_logic := '0';
+    signal s_fstart     : std_logic := '0';
+    signal s_avid_q     : std_logic := '0';
+    signal s_avid_r     : std_logic := '0';
+    signal s_hs_q       : std_logic := '1';
+    signal s_hs_r       : std_logic := '0';
+    signal s_xcnt       : unsigned(11 downto 0) := (others => '0');
+    signal s_W          : unsigned(11 downto 0) := to_unsigned(1920, 12);
+    signal s_Wl         : unsigned(11 downto 0) := to_unsigned(1920, 12);
+
+    -- Generated avid: parity-locked start, runs exactly s_Wl pixels
+    signal g_ph, g_arm, g_par, g_sel, g_avid : std_logic := '0';
+    signal g_rsr : std_logic_vector(2 downto 0) := (others => '0');
+    signal g_pc  : unsigned(3 downto 0) := "1000";
+    signal g_x   : unsigned(11 downto 0) := (others => '0');
 
     -- Registered LFO LUT angle = LFO phase [top 10b] +/- drift [top 10b]
     -- (+ for osc1, - for osc2: equal speed, opposite directions).
@@ -235,22 +269,33 @@ architecture bajaweave of program_top is
     signal r_sin1_r, r_cos1_r : signed(9 downto 0) := (others => '0');
     signal r_sin2_r, r_cos2_r : signed(9 downto 0) := (others => '0');
 
+    -- Scaled chroma (Bright: c/2, Deep: c - c/8 = +/-448, the legal limit),
+    -- one more register stage before the 512 offset add.
+    signal r_cu1, r_cv1 : signed(9 downto 0) := (others => '0');
+    signal r_cu2, r_cv2 : signed(9 downto 0) := (others => '0');
+
     -- Per-frame UV
     signal r_u1, r_v1 : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal r_u2, r_v2 : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal r_vsync_d  : std_logic := '0';
     signal r_vsync_d2 : std_logic := '0';
+    signal r_vsync_d3 : std_logic := '0';
 
-    -- Keyer output register
-    signal r_y_out : unsigned(9 downto 0) := (others => '0');
+    -- Keyer register (luma still 0..1023 here)
+    signal r_y_k : unsigned(9 downto 0) := (others => '0');
+    signal r_u_k : unsigned(9 downto 0) := to_unsigned(512, 10);
+    signal r_v_k : unsigned(9 downto 0) := to_unsigned(512, 10);
+
+    -- Output register (luma remapped to 64..765, blanking-gated)
+    signal r_y_out : unsigned(9 downto 0) := to_unsigned(64, 10);
     signal r_u_out : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal r_v_out : unsigned(9 downto 0) := to_unsigned(512, 10);
 
-    -- Sync delay (align data_in timing with our processed Y/U/V)
-    signal s_avid_d    : std_logic := '0';
-    signal s_hsync_n_d : std_logic := '1';
-    signal s_vsync_n_d : std_logic := '1';
-    signal s_field_n_d : std_logic := '1';
+    -- Sync delay (align the generated avid and data_in syncs with Y/U/V)
+    signal s_avid_sr    : std_logic_vector(0 to C_DELAY_CLKS-1) := (others => '0');
+    signal s_hsync_n_sr : std_logic_vector(0 to C_DELAY_CLKS-1) := (others => '1');
+    signal s_vsync_n_sr : std_logic_vector(0 to C_DELAY_CLKS-1) := (others => '1');
+    signal s_field_n_sr : std_logic_vector(0 to C_DELAY_CLKS-1) := (others => '1');
 
     -- ========================================================================
     -- Triangle wave from 10-bit phase, range matches sine LUT (-510..+510).
@@ -278,6 +323,18 @@ architecture bajaweave of program_top is
         end if;
     end function;
 
+    -- 512 + a signed offset (|x| <= 511) as a 10-bit code, by SLICING.
+    -- (v0.1-0.5 used unsigned(resize(<11-bit signed>, 10)): signed resize
+    -- keeps the sign bit + low 9 bits, so every code >= 512 folded down by
+    -- 512 -- luma never exceeded 511 and snapped black at each zero
+    -- crossing, and U/V were confined below 512.)
+    function off512(x : signed(9 downto 0)) return unsigned is
+        variable v : signed(10 downto 0);
+    begin
+        v := resize(x, 11) + to_signed(512, 11);
+        return unsigned(v(9 downto 0));
+    end function;
+
 begin
 
     -- ========================================================================
@@ -297,14 +354,94 @@ begin
     s_k12 <= unsigned(registers_in(7));
 
     -- ========================================================================
-    -- Video Timing Generator
+    -- Raster measurement, serration-guarded field start, generated avid
+    -- ========================================================================
+    p_measure : process(clk)
+    begin
+        if rising_edge(clk) then
+            s_prev_vsync <= data_in.vsync_n;
+            s_vs_pulse   <= '0';
+            if data_in.vsync_n = '0' and s_prev_vsync = '1' then
+                s_vs_pulse <= '1';
+            end if;
+
+            s_avid_q <= data_in.avid;
+            s_avid_r <= data_in.avid and not s_avid_q;
+            s_hs_q   <= data_in.hsync_n;
+            s_hs_r   <= s_hs_q and not data_in.hsync_n;   -- falling edge of _n
+
+            -- Source line width (avid run length), latched per field below.
+            if data_in.avid = '1' then
+                s_xcnt <= s_xcnt + 1;
+            elsif s_avid_q = '1' then
+                if s_xcnt > 16 then s_W <= s_xcnt; end if;
+                s_xcnt <= (others => '0');
+            end if;
+
+            -- Field start: only the FIRST vsync edge after active video.
+            -- Analog vsync serrates (several edges per field); acting on
+            -- every edge would step the drift several times per field.
+            s_fstart <= '0';
+            if s_avid_r = '1' then
+                s_sawact <= '1';
+            end if;
+            if s_vs_pulse = '1' and s_sawact = '1' then
+                s_sawact <= '0';
+                s_fstart <= '1';
+                s_Wl     <= s_W;
+            end if;
+
+            -- CLEAN AVID (from Cubist v0.3.3, HW-confirmed).  The encoders
+            -- get no data-enable, so they pair Cb/Cr by counting from hsync,
+            -- while the core's 4:4:4->4:2:2 packer restarts on Cb at every
+            -- avid rise.  A source avid that wanders a clock against hsync,
+            -- or drops out mid-line, swaps U/V for that line.  So: start 2 or
+            -- 3 clocks after the source's first avid rise of the line --
+            -- whichever keeps the hsync->start distance at the source's USUAL
+            -- parity (saturating vote) -- and end after exactly s_Wl pixels,
+            -- so dropouts and ragged line ends are ignored.
+            if s_hs_r = '1' then
+                g_ph  <= '0';
+                g_arm <= '1';
+            else
+                g_ph <= not g_ph;
+            end if;
+            g_rsr <= g_rsr(1 downto 0) & '0';
+            if s_avid_r = '1' and g_arm = '1' then
+                g_arm    <= '0';
+                g_rsr(0) <= '1';
+                g_sel    <= g_ph xor g_par;
+                if g_ph = '1' then
+                    if g_pc /= 15 then g_pc <= g_pc + 1; end if;
+                else
+                    if g_pc /= 0 then g_pc <= g_pc - 1; end if;
+                end if;
+            end if;
+            if g_pc = 15 then g_par <= '1';
+            elsif g_pc = 0 then g_par <= '0'; end if;
+            if (g_sel = '0' and g_rsr(1) = '1') or (g_sel = '1' and g_rsr(2) = '1') then
+                g_avid <= '1';
+                g_x    <= to_unsigned(1, 12);
+            elsif g_avid = '1' then
+                if g_x >= s_Wl then
+                    g_avid <= '0';
+                else
+                    g_x <= g_x + 1;
+                end if;
+            end if;
+        end if;
+    end process;
+
+    -- ========================================================================
+    -- Video Timing Generator (fed the generated avid: carriers reset and
+    -- LFOs step off the clean line start)
     -- ========================================================================
     timing_gen_inst : entity work.video_timing_generator
         port map (
             clk         => clk,
             ref_hsync_n => data_in.hsync_n,
             ref_vsync_n => data_in.vsync_n,
-            ref_avid    => data_in.avid,
+            ref_avid    => g_avid,
             timing      => s_timing
         );
 
@@ -330,7 +467,7 @@ begin
 
             -- Bipolar sway rate (see the header constants).  Computed
             -- every clock from the frame-stable r_speed; consumed by the
-            -- drift frame_phase_accumulator at vsync.
+            -- drift register at the guarded field start (p_drift).
             if r_speed >= to_unsigned(512, 10) then
                 r_vel_mag <= r_speed - to_unsigned(512, 10);
                 r_vel_neg <= '0';
@@ -350,6 +487,7 @@ begin
 
             r_vsync_d  <= s_timing.vsync_start;
             r_vsync_d2 <= r_vsync_d;
+            r_vsync_d3 <= r_vsync_d2;
 
             -- Register the hue LUT outputs (free-running; they only change
             -- when the hue latches above, and we consume them one clock
@@ -359,22 +497,30 @@ begin
             r_cos2_r <= s_cos2;
             r_sin2_r <= s_sin2;
 
-            if r_vsync_d2 = '1' then
-                -- Registered LUT outputs reflect the newly-latched hues
-                -- (r_deep too: it latched two clocks earlier at vsync_start).
-                if r_deep = '1' then
-                    -- Deep: full amplitude, UV = 512 +/- 511 -> 1..1023.
-                    r_u1 <= unsigned(resize(to_signed(512, 11) + resize(r_cos1_r, 11), 10));
-                    r_v1 <= unsigned(resize(to_signed(512, 11) + resize(r_sin1_r, 11), 10));
-                    r_u2 <= unsigned(resize(to_signed(512, 11) + resize(r_cos2_r, 11), 10));
-                    r_v2 <= unsigned(resize(to_signed(512, 11) + resize(r_sin2_r, 11), 10));
-                else
-                    -- Bright: UV = 512 + (sin/cos >> 1), landing in 257..767.
-                    r_u1 <= unsigned(resize(to_signed(512, 11) + resize(shift_right(r_cos1_r, 1), 11), 10));
-                    r_v1 <= unsigned(resize(to_signed(512, 11) + resize(shift_right(r_sin1_r, 1), 11), 10));
-                    r_u2 <= unsigned(resize(to_signed(512, 11) + resize(shift_right(r_cos2_r, 1), 11), 10));
-                    r_v2 <= unsigned(resize(to_signed(512, 11) + resize(shift_right(r_sin2_r, 1), 11), 10));
-                end if;
+            -- Chroma amplitude (free-running off frame-stable inputs):
+            --   Deep  : c - c/8, +/-448 -- full legal saturation (the 10-bit
+            --           inverse-BT.601 chroma divisor is 896); the old +/-511
+            --           ran 14% out of gamut and clipped.
+            --   Bright: c/2, +/-255 (legacy).
+            if r_deep = '1' then
+                r_cu1 <= r_cos1_r - shift_right(r_cos1_r, 3);
+                r_cv1 <= r_sin1_r - shift_right(r_sin1_r, 3);
+                r_cu2 <= r_cos2_r - shift_right(r_cos2_r, 3);
+                r_cv2 <= r_sin2_r - shift_right(r_sin2_r, 3);
+            else
+                r_cu1 <= shift_right(r_cos1_r, 1);
+                r_cv1 <= shift_right(r_sin1_r, 1);
+                r_cu2 <= shift_right(r_cos2_r, 1);
+                r_cv2 <= shift_right(r_sin2_r, 1);
+            end if;
+
+            if r_vsync_d3 = '1' then
+                -- r_cu*/r_cv* reflect the hues and r_deep latched three
+                -- clocks earlier at vsync_start.
+                r_u1 <= off512(r_cu1);
+                r_v1 <= off512(r_cv1);
+                r_u2 <= off512(r_cu2);
+                r_v2 <= off512(r_cv2);
             end if;
         end if;
     end process;
@@ -451,20 +597,19 @@ begin
     -- Speed slider; a negative rate is 2^16-|rate|, which decrements the
     -- phase via the natural mod-2^16 wrap).  Slider centre = rate 0 = the
     -- accumulator holds its phase, so the picture freezes in place and
-    -- resumes without a pop.
+    -- resumes without a pop.  Steps on s_fstart (the first vsync edge after
+    -- active video), NOT every vsync edge: the SDK frame_phase_accumulator
+    -- steps per edge, which on a serrated analog vsync ran the flow several
+    -- times too fast.
     -- ========================================================================
-    drift_inst : entity work.frame_phase_accumulator
-        generic map (
-            G_PHASE_WIDTH => C_DRIFT_W,
-            G_SPEED_WIDTH => 16
-        )
-        port map (
-            clk     => clk,
-            vsync_n => data_in.vsync_n,
-            enable  => '1',
-            speed   => r_drift_rate,
-            phase   => s_drift_phase
-        );
+    p_drift : process(clk)
+    begin
+        if rising_edge(clk) then
+            if s_fstart = '1' then
+                s_drift_phase <= s_drift_phase + r_drift_rate;
+            end if;
+        end if;
+    end process;
 
     -- Register LFO angle = phase +/- drift (keeps the add out of the sine
     -- LUT path).  Osc1 always adds the drift (follows the slider); osc2
@@ -647,8 +792,8 @@ begin
     p_luma_reg : process(clk)
     begin
         if rising_edge(clk) then
-            r_luma1 <= unsigned(resize(s_osc1_shaped + to_signed(512, 11), 10));
-            r_luma2 <= unsigned(resize(s_osc2_shaped + to_signed(512, 11), 10));
+            r_luma1 <= off512(s_osc1_shaped);
+            r_luma2 <= off512(s_osc2_shaped);
         end if;
     end process;
 
@@ -697,82 +842,97 @@ begin
 
                 when "00" =>  -- MAX winner-take-all
                     if v_winner_is_1 then
-                        r_y_out <= r_luma1;
+                        r_y_k <= r_luma1;
                     else
-                        r_y_out <= r_luma2;
+                        r_y_k <= r_luma2;
                     end if;
-                    r_u_out <= v_win_u;
-                    r_v_out <= v_win_v;
+                    r_u_k <= v_win_u;
+                    r_v_k <= v_win_v;
 
                 when "01" =>  -- ADD
                     if r_deep = '1' then
                         -- DC-removed: L1+L2-1024, clamped at 0 (max 1022).
                         if v_sum_y(10) = '1' then
-                            r_y_out <= v_sum_y(9 downto 0);
+                            r_y_k <= v_sum_y(9 downto 0);
                         else
-                            r_y_out <= (others => '0');
+                            r_y_k <= (others => '0');
                         end if;
-                        r_u_out <= v_win_u;
-                        r_v_out <= v_win_v;
+                        r_u_k <= v_win_u;
+                        r_v_k <= v_win_v;
                     else
                         -- Saturating add.
                         if v_sum_y(10) = '1' then
-                            r_y_out <= (others => '1');
+                            r_y_k <= (others => '1');
                         else
-                            r_y_out <= v_sum_y(9 downto 0);
+                            r_y_k <= v_sum_y(9 downto 0);
                         end if;
-                        r_u_out <= v_sum_u(10 downto 1);  -- average
-                        r_v_out <= v_sum_v(10 downto 1);
+                        r_u_k <= v_sum_u(10 downto 1);  -- average
+                        r_v_k <= v_sum_v(10 downto 1);
                     end if;
 
                 when "10" =>  -- DIFF abs(L1-L2)
                     if r_luma1 >= r_luma2 then
-                        r_y_out <= r_luma1 - r_luma2;
+                        r_y_k <= r_luma1 - r_luma2;
                     else
-                        r_y_out <= r_luma2 - r_luma1;
+                        r_y_k <= r_luma2 - r_luma1;
                     end if;
-                    r_u_out <= v_win_u;
-                    r_v_out <= v_win_v;
+                    r_u_k <= v_win_u;
+                    r_v_k <= v_win_v;
 
                 when "11" =>  -- HARDKEY threshold (FKG3 style)
                     -- Wherever osc1 is above mid-luma it keys over osc2.
                     if r_luma1 > to_unsigned(512, 10) then
-                        r_y_out <= r_luma1;
-                        r_u_out <= r_u1;
-                        r_v_out <= r_v1;
+                        r_y_k <= r_luma1;
+                        r_u_k <= r_u1;
+                        r_v_k <= r_v1;
                     else
-                        r_y_out <= r_luma2;
-                        r_u_out <= r_u2;
-                        r_v_out <= r_v2;
+                        r_y_k <= r_luma2;
+                        r_u_k <= r_u2;
+                        r_v_k <= r_v2;
                     end if;
 
                 when others =>
-                    r_y_out <= r_luma1;
-                    r_u_out <= r_u1;
-                    r_v_out <= r_v1;
+                    r_y_k <= r_luma1;
+                    r_u_k <= r_u1;
+                    r_v_k <= r_v1;
             end case;
         end if;
     end process;
 
     -- ========================================================================
-    -- Sync Delay (align data_in timing with our processed Y/U/V)
+    -- Output stage: luma remap + blanking gate
+    --   y = 64 + L*(1/2 + 1/8 + 1/16) = 64..765 for L = 0..1023 -- black to
+    --   ~75%: full-scale Y clips every RGB channel and kills the chroma.
+    --   Outside the (latency-aligned, generated) avid: y/u/v = 64/512/512.
+    --   The gate taps one stage before the output tap, so it lines up with
+    --   data_out.avid.
     -- ========================================================================
-    p_sync_delay : process(clk)
-        type t_sdly is array (0 to C_DELAY_CLKS-1) of std_logic;
-        variable v_avid : t_sdly := (others => '0');
-        variable v_hs   : t_sdly := (others => '1');
-        variable v_vs   : t_sdly := (others => '1');
-        variable v_fd   : t_sdly := (others => '1');
+    p_out : process(clk)
     begin
         if rising_edge(clk) then
-            v_avid := data_in.avid    & v_avid(0 to C_DELAY_CLKS-2);
-            v_hs   := data_in.hsync_n & v_hs  (0 to C_DELAY_CLKS-2);
-            v_vs   := data_in.vsync_n & v_vs  (0 to C_DELAY_CLKS-2);
-            v_fd   := data_in.field_n & v_fd  (0 to C_DELAY_CLKS-2);
-            s_avid_d    <= v_avid(C_DELAY_CLKS-1);
-            s_hsync_n_d <= v_hs  (C_DELAY_CLKS-1);
-            s_vsync_n_d <= v_vs  (C_DELAY_CLKS-1);
-            s_field_n_d <= v_fd  (C_DELAY_CLKS-1);
+            if s_avid_sr(C_DELAY_CLKS-2) = '1' then
+                r_y_out <= to_unsigned(64, 10) + shift_right(r_y_k, 1)
+                         + shift_right(r_y_k, 3) + shift_right(r_y_k, 4);
+                r_u_out <= r_u_k;
+                r_v_out <= r_v_k;
+            else
+                r_y_out <= to_unsigned(64, 10);
+                r_u_out <= to_unsigned(512, 10);
+                r_v_out <= to_unsigned(512, 10);
+            end if;
+        end if;
+    end process;
+
+    -- ========================================================================
+    -- Sync Delay (generated avid + data_in syncs, C_DELAY_CLKS in ALL modes)
+    -- ========================================================================
+    p_sync_delay : process(clk)
+    begin
+        if rising_edge(clk) then
+            s_avid_sr    <= g_avid          & s_avid_sr   (0 to C_DELAY_CLKS-2);
+            s_hsync_n_sr <= data_in.hsync_n & s_hsync_n_sr(0 to C_DELAY_CLKS-2);
+            s_vsync_n_sr <= data_in.vsync_n & s_vsync_n_sr(0 to C_DELAY_CLKS-2);
+            s_field_n_sr <= data_in.field_n & s_field_n_sr(0 to C_DELAY_CLKS-2);
         end if;
     end process;
 
@@ -782,9 +942,9 @@ begin
     data_out.y       <= std_logic_vector(r_y_out);
     data_out.u       <= std_logic_vector(r_u_out);
     data_out.v       <= std_logic_vector(r_v_out);
-    data_out.avid    <= s_avid_d;
-    data_out.hsync_n <= s_hsync_n_d;
-    data_out.vsync_n <= s_vsync_n_d;
-    data_out.field_n <= s_field_n_d;
+    data_out.avid    <= s_avid_sr   (C_DELAY_CLKS-1);
+    data_out.hsync_n <= s_hsync_n_sr(C_DELAY_CLKS-1);
+    data_out.vsync_n <= s_vsync_n_sr(C_DELAY_CLKS-1);
+    data_out.field_n <= s_field_n_sr(C_DELAY_CLKS-1);
 
 end architecture bajaweave;
