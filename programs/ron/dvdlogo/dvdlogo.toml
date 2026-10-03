@@ -1,18 +1,20 @@
 # DVD Logo Bouncer
 #
-# Classic bouncing DVD-logo screensaver: a 128x64 1-bit logo bitmap drifts
-# diagonally across the screen and changes palette color on every wall hit.
+# Classic bouncing DVD-logo screensaver: up to four 1-bit logos (0.5x-3x of
+# 384x174) drift diagonally across the screen and change palette color on
+# every hit.  A
+# corner hit strobes every logo through the palette.
 
 [program]
 program_id = "com.ron.dvdlogo"
 program_name = "DVD Logo"
-program_version = "0.1.0"
+program_version = "1.0.0"
 abi_version = ">=1.0,<2.0"
 author = "Ron"
 license = "GPL-3.0"
 categories = ["Pattern", "Game"]
 program_type = "processing"
-description = "Classic bouncing DVD logo screensaver with palette-cycling color on each wall bounce"
+description = "Bouncing DVD logo screensaver: colour changes on every bounce, corner hits set off a palette strobe"
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
@@ -20,20 +22,20 @@ core = "yuv444_30b"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_1"
-name_label = "X Spd"
+name_label = "Angle"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 384
+initial_value = 368
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
-name_label = "Y Spd"
+name_label = "Size"
 control_mode = "linear"
-display_min_value = 0
-display_max_value = 100
-initial_value = 256
+display_min_value = 50
+display_max_value = 300
+initial_value = 205
 suffix_label = "%"
 
 [[parameter]]
@@ -45,10 +47,8 @@ initial_value_label = "4"
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
 name_label = "Clr Step"
-control_mode = "steps_8"
-display_min_value = 1
-display_max_value = 8
-initial_value = 128
+value_labels = ["1", "2", "3", "4", "5", "6", "7", "Random"]
+initial_value_label = "2"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
@@ -62,9 +62,9 @@ initial_value = 0
 parameter_id = "rotary_potentiometer_6"
 name_label = "Bright"
 control_mode = "linear"
-display_min_value = 0
+display_min_value = 25
 display_max_value = 100
-initial_value = 940
+initial_value = 1023
 suffix_label = "%"
 
 # --- Toggle Switches (7-11) ---
@@ -103,12 +103,11 @@ initial_value_label = "Bounce"
 
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
-name_label = "Mix"
+name_label = "Speed"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 1023
-display_float_digits = 1
+initial_value = 448
 suffix_label = "%"
 
 # --- Presets ---
@@ -118,12 +117,21 @@ name = "Classic DVD"
 
 [[preset]]
 name = "Fast Chaos"
-rotary_potentiometer_1 = 768
-rotary_potentiometer_2 = 640
-rotary_potentiometer_4 = 384
+rotary_potentiometer_4 = 1023
+linear_potentiometer_12 = 900
 
 [[preset]]
-name = "Big & Slow"
-rotary_potentiometer_1 = 192
-rotary_potentiometer_2 = 128
-rotary_potentiometer_3 = 614
+name = "Lone Drifter"
+rotary_potentiometer_3 = 0
+linear_potentiometer_12 = 200
+
+[[preset]]
+name = "Glass Mix"
+toggle_switch_11 = 1
+linear_potentiometer_12 = 560
+
+[[preset]]
+name = "Jumbo"
+rotary_potentiometer_2 = 1023
+rotary_potentiometer_3 = 256
+linear_potentiometer_12 = 560

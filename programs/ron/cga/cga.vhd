@@ -1,42 +1,43 @@
--- Videomancer CGA (Color Graphics Adapter) Emulator
+-- Videomancer CGA (Color Graphics Adapter) Emulator  v2.0
 -- LZX Industries Community FPGA Program
 --
--- Pixelation algorithm: downsample + nearest-neighbour upscale.
---   1. DOWNSAMPLE: each horizontal cell on the FIRST line of its cell row
---      accumulates H input pixels and divides for the average colour.
---   2. STORE: palette-match the average and write the 2-bit index into a
---      per-cell-column buffer indexed by column number.
---   3. UPSCALE (nearest-neighbour): every output pixel reads the palette
---      index for its cell column and emits the corresponding colour, giving
---      solid blocks across all V lines of each cell row.
+-- Re-renders the picture in the IBM CGA's own modes:
+--   * Mode 4 four-colour palettes (Green/Red/Brown, Cyan/Magenta/Gray,
+--     Cyan/Red/Gray), low/high intensity, colour 0 = selectable Ink
+--     (the real mode-4 background register)
+--   * Mode 6 640-dot Mono: black + one Ink foreground
+--   * Composite: 640-dot mono bits read four at a time as the NTSC
+--     artifact-colour nibble -> the famous 16 composite colours
+-- at a native 320x200 (640x200) block grid sized from the measured raster,
+-- with per-block ordered dither (P12), block-row scanlines and CGA snow.
 --
--- Anti-flicker (v1.2):
---   * TEMPORAL HYSTERESIS ("Stability", knob 6): a ping-pong pair of BRAM
---     grids remembers per 16x16-PIXEL tile the current colour and a pending
---     challenger (two-field debounce); a cell
---     only changes colour when the new match beats the incumbent's distance
---     by the Stability margin.  Monte-Carlo modelling puts this at ~10-400x
---     fewer noise-flipped cells (margin 1-2); cell-size quantisation tricks
---     (v1.1's 4-bit coarse match) modelled as a placebo and were reverted.
---     Cells >= 8x8 px map 1:1 to tiles; smaller cells share a tile, which
---     still pins the flat areas where flicker is actually visible.
---   * Pipeline reworked to genuinely close HD timing (74.25 MHz); the old
---     build shipped through timing violations at HD via timing-allow-fail.
---   * Contrast highlight wrap fixed (result now clamps at 1023 instead of
---     wrapping to black on bright pixels at >50% contrast).
---   * Scanlines softened: 25% dim with chroma tracking the same factor.
+-- Pixelation: downsample + nearest-neighbour upscale.
+--   1. DOWNSAMPLE: each cell on the FIRST line of its cell row averages its
+--      first 2^k pixels (all of them for power-of-2 cells; 4 of 6 / 2 of 3
+--      for the native sizes -- the look, not the bits).
+--   2. STORE: palette-match the average and write the index (or, in
+--      Composite, the 4-cell nibble) into a per-column BRAM.
+--   3. UPSCALE: every output pixel reads its column's entry -> solid blocks.
+--      (The read on a row's first line precedes that row's write, so the
+--      block grid sits one line low; the field's first line is blanked.)
 --
--- Pipeline (10 stages, C_LATENCY = 10):
---   T1  input register, controls, cell tracking, horizontal accumulator
---   T1b average divide (barrel shift) + match-input select
---   T2a contrast multiply (7-bit coefficient) + clamp
---   T2b 4 palette distances (top-5-bit Manhattan) + luma-zone index
---   T3  4-way minimum -> palette index, register buffer write
---   buf per-cell-column BRAM (1 clock read)
---   T4a display palette-entry lookup (buffered or per-pixel index)
---   T4b saturation: subtract 512, 12x9 signed multiply
---   T5  saturation slice/add/clamp, scanlines, output register
---   + interpolator wet/dry mix (dry tap s_yuv_sr(5))
+-- Anti-flicker ("Stability", switch 7): a ping-pong pair of BRAM grids
+-- keeps 4 bits per 16x16-pixel tile, used two ways:
+--   * Dither off -> DECISION hysteresis {pending, current}: margin-on-
+--     challenger + two-field debounce (HW-validated in v1.3).
+--   * Dither on  -> VALUE hysteresis: the tile stores luma bits 7:4 (16-code
+--     steps, modulo 256 -- the live pixel resolves the wrap); a cell's
+--     undithered luma snaps to it while within +-24 codes, and the dither
+--     is added AFTER the snap.  (Storing bits 9:6, as v2.0 did, posterised
+--     gradients to 64-code steps: thick flat bars on hardware.)  Decision hysteresis on shared tiles
+--     would scramble dither patterns (a cell judged against another cell's
+--     dither phase); value snapping keeps each cell's pattern and still
+--     pins noise.
+-- Any decision-side control change re-seeds the grids (two plain fields).
+--
+-- Pipeline: match/decision path T1..T3b (writes land 11 clocks after the
+-- pixel, for later lines); display path buf -> T4a -> T4b -> T5, output
+-- latency 7 clocks for every mode.
 --
 -- License: GPL-3.0
 -- Author: Claude (Anthropic)
@@ -56,71 +57,65 @@ architecture cga of program_top is
   -- Constants
   -- ==========================================================================
 
-  constant C_LATENCY  : integer := 10;
-  constant C_MAX_COLS : integer := 2048;  -- 2048x2 fits one iCE40 BRAM; covers
-                                          -- up to 1920 cells/line at H=1 (Off).
+  constant C_LATENCY  : integer := 7;
+  constant C_MAX_COLS : integer := 2048;  -- 2048x4 = 2 EBR; covers 1920
+                                          -- cells/line at H Off.
 
-  -- Palette entry type
   type t_pal_entry is record
     y : unsigned(9 downto 0);
     u : unsigned(9 downto 0);
     v : unsigned(9 downto 0);
   end record;
+  type t_pal16 is array(0 to 15) of t_pal_entry;
 
-  type t_cga_pal4 is array(0 to 3) of t_pal_entry;
-  type t_cga_pals is array(0 to 5) of t_cga_pal4;
+  -- The 16 RGBI colours, BT.601 limited range re-levelled to black 64 /
+  -- white 768 (full-scale luma clips chroma on hardware), chroma at nominal
+  -- amplitude.  Stored (y, u=Cr, v=Cb): U/V swapped for Videomancer.  The
+  -- v1 hand-calibrated table was exactly full-range BT.601 of these RGBs.
+  constant C_RGBI : t_pal16 := (
+    (y => to_unsigned( 64, 10), u => to_unsigned(512, 10), v => to_unsigned(512, 10)),  --  0 black
+    (y => to_unsigned(118, 10), u => to_unsigned(463, 10), v => to_unsigned(811, 10)),  --  1 blue
+    (y => to_unsigned(339, 10), u => to_unsigned(262, 10), v => to_unsigned(314, 10)),  --  2 green
+    (y => to_unsigned(393, 10), u => to_unsigned(213, 10), v => to_unsigned(613, 10)),  --  3 cyan
+    (y => to_unsigned(204, 10), u => to_unsigned(811, 10), v => to_unsigned(411, 10)),  --  4 red
+    (y => to_unsigned(258, 10), u => to_unsigned(762, 10), v => to_unsigned(710, 10)),  --  5 magenta
+    (y => to_unsigned(342, 10), u => to_unsigned(686, 10), v => to_unsigned(312, 10)),  --  6 brown
+    (y => to_unsigned(533, 10), u => to_unsigned(512, 10), v => to_unsigned(512, 10)),  --  7 lt gray
+    (y => to_unsigned(299, 10), u => to_unsigned(512, 10), v => to_unsigned(512, 10)),  --  8 dk gray
+    (y => to_unsigned(352, 10), u => to_unsigned(463, 10), v => to_unsigned(811, 10)),  --  9 lt blue
+    (y => to_unsigned(574, 10), u => to_unsigned(262, 10), v => to_unsigned(314, 10)),  -- 10 lt green
+    (y => to_unsigned(628, 10), u => to_unsigned(213, 10), v => to_unsigned(613, 10)),  -- 11 lt cyan
+    (y => to_unsigned(439, 10), u => to_unsigned(811, 10), v => to_unsigned(411, 10)),  -- 12 lt red
+    (y => to_unsigned(493, 10), u => to_unsigned(762, 10), v => to_unsigned(710, 10)),  -- 13 lt magenta
+    (y => to_unsigned(714, 10), u => to_unsigned(561, 10), v => to_unsigned(213, 10)),  -- 14 yellow
+    (y => to_unsigned(768, 10), u => to_unsigned(512, 10), v => to_unsigned(512, 10))   -- 15 white
+  );
 
-  -- Six CGA palettes: 3 modes × 2 intensities (U/V swapped for Videomancer)
-  constant C_CGA_PAL : t_cga_pals := (
-    -- Palette 0 Low: Black, Red, Green, Yellow
-    (
-      (y => to_unsigned(0, 10),   u => to_unsigned(512, 10), v => to_unsigned(512, 10)),
-      (y => to_unsigned(204, 10), u => to_unsigned(852, 10), v => to_unsigned(396, 10)),
-      (y => to_unsigned(400, 10), u => to_unsigned(226, 10), v => to_unsigned(286, 10)),
-      (y => to_unsigned(404, 10), u => to_unsigned(709, 10), v => to_unsigned(283, 10))
-    ),
-    -- Palette 0 High: Black, Red, Green, Yellow
-    (
-      (y => to_unsigned(0, 10),   u => to_unsigned(512, 10), v => to_unsigned(512, 10)),
-      (y => to_unsigned(546, 10), u => to_unsigned(853, 10), v => to_unsigned(397, 10)),
-      (y => to_unsigned(743, 10), u => to_unsigned(226, 10), v => to_unsigned(286, 10)),
-      (y => to_unsigned(947, 10), u => to_unsigned(568, 10), v => to_unsigned(171, 10))
-    ),
-    -- Palette 1 Low: Black, Cyan, Magenta, Lt Gray
-    (
-      (y => to_unsigned(0, 10),   u => to_unsigned(512, 10), v => to_unsigned(512, 10)),
-      (y => to_unsigned(478, 10), u => to_unsigned(171, 10), v => to_unsigned(627, 10)),
-      (y => to_unsigned(282, 10), u => to_unsigned(798, 10), v => to_unsigned(738, 10)),
-      (y => to_unsigned(683, 10), u => to_unsigned(512, 10), v => to_unsigned(512, 10))
-    ),
-    -- Palette 1 High: Black, Lt Cyan, Lt Magenta, White
-    (
-      (y => to_unsigned(0, 10),   u => to_unsigned(512, 10), v => to_unsigned(512, 10)),
-      (y => to_unsigned(820, 10), u => to_unsigned(171, 10), v => to_unsigned(628, 10)),
-      (y => to_unsigned(624, 10), u => to_unsigned(798, 10), v => to_unsigned(739, 10)),
-      (y => to_unsigned(1023, 10), u => to_unsigned(512, 10), v => to_unsigned(512, 10))
-    ),
-    -- Palette 2 Low: Black, Cyan, Red, Lt Gray
-    (
-      (y => to_unsigned(0, 10),   u => to_unsigned(512, 10), v => to_unsigned(512, 10)),
-      (y => to_unsigned(478, 10), u => to_unsigned(171, 10), v => to_unsigned(627, 10)),
-      (y => to_unsigned(204, 10), u => to_unsigned(852, 10), v => to_unsigned(396, 10)),
-      (y => to_unsigned(683, 10), u => to_unsigned(512, 10), v => to_unsigned(512, 10))
-    ),
-    -- Palette 2 High: Black, Lt Cyan, Lt Red, White
-    (
-      (y => to_unsigned(0, 10),   u => to_unsigned(512, 10), v => to_unsigned(512, 10)),
-      (y => to_unsigned(820, 10), u => to_unsigned(171, 10), v => to_unsigned(628, 10)),
-      (y => to_unsigned(546, 10), u => to_unsigned(853, 10), v => to_unsigned(397, 10)),
-      (y => to_unsigned(1023, 10), u => to_unsigned(512, 10), v => to_unsigned(512, 10))
-    )
+  -- Composite artifact colours of 640x200 mono on NTSC (old-style CGA),
+  -- indexed by the 4-dot nibble (first dot = MSB).  Nibble 0 is replaced by
+  -- the Ink background at display.  Same re-levelling as C_RGBI.
+  constant C_COMPOSITE : t_pal16 := (
+    (y => to_unsigned( 64, 10), u => to_unsigned(512, 10), v => to_unsigned(512, 10)),  --  0 black
+    (y => to_unsigned(258, 10), u => to_unsigned(336, 10), v => to_unsigned(470, 10)),  --  1 dk green
+    (y => to_unsigned(199, 10), u => to_unsigned(512, 10), v => to_unsigned(920, 10)),  --  2 blue
+    (y => to_unsigned(368, 10), u => to_unsigned(236, 10), v => to_unsigned(799, 10)),  --  3 sky blue
+    (y => to_unsigned(217, 10), u => to_unsigned(791, 10), v => to_unsigned(499, 10)),  --  4 crimson
+    (y => to_unsigned(390, 10), u => to_unsigned(512, 10), v => to_unsigned(512, 10)),  --  5 gray
+    (y => to_unsigned(367, 10), u => to_unsigned(829, 10), v => to_unsigned(800, 10)),  --  6 violet
+    (y => to_unsigned(535, 10), u => to_unsigned(553, 10), v => to_unsigned(679, 10)),  --  7 lavender
+    (y => to_unsigned(250, 10), u => to_unsigned(466, 10), v => to_unsigned(378, 10)),  --  8 olive
+    (y => to_unsigned(419, 10), u => to_unsigned(190, 10), v => to_unsigned(257, 10)),  --  9 green
+    (y => to_unsigned(390, 10), u => to_unsigned(512, 10), v => to_unsigned(512, 10)),  -- 10 gray
+    (y => to_unsigned(580, 10), u => to_unsigned(216, 10), v => to_unsigned(512, 10)),  -- 11 aqua
+    (y => to_unsigned(419, 10), u => to_unsigned(781, 10), v => to_unsigned(257, 10)),  -- 12 orange
+    (y => to_unsigned(588, 10), u => to_unsigned(505, 10), v => to_unsigned(136, 10)),  -- 13 lime
+    (y => to_unsigned(539, 10), u => to_unsigned(720, 10), v => to_unsigned(542, 10)),  -- 14 pink
+    (y => to_unsigned(768, 10), u => to_unsigned(512, 10), v => to_unsigned(512, 10))   -- 15 white
   );
 
   -- ==========================================================================
   -- Manhattan distance on top 5 bits (32 levels per channel).
-  -- NOTE: coarsening this to 4 bits was tried (v1.1) and modelled: it does
-  -- NOT reduce boundary flicker (the noise-flip zone just moves with the
-  -- decision boundary; its size is set by the noise, not the quantum).
+  -- (Coarsening to 4 bits was modelled in v1.1 as a flicker placebo.)
   -- ==========================================================================
   function f_dist(
     py, pu, pv : unsigned(9 downto 0);
@@ -147,294 +142,423 @@ architecture cga of program_top is
   end function;
 
   -- ==========================================================================
-  -- Luma-mode palette mapping
+  -- Luma-mode mapping (4-colour palettes): luma zone (0 darkest) -> entry.
+  -- Palette 0 sorts {0,1,2,3}; palettes 1 and 2 swap the middle pair
+  -- (magenta/red is darker than cyan).  Self-inverse, so it also maps a
+  -- stored entry back to its zone.  Entry 0 (the Ink background) is always
+  -- zone 0: the darks take the background colour, whatever it is.
   -- ==========================================================================
-  -- For each of the 6 palette variants, maps a 2-bit input-luma zone
-  -- (0 = darkest quarter of Y, 3 = brightest) to the palette entry index
-  -- whose luma sorts to that rank.  Computed offline by sorting each
-  -- palette's 4 entries by Y value.  Entries within a palette with the
-  -- same rank use the entry whose Y happens to be closest (stable sort).
-  type t_luma_map  is array(0 to 3) of unsigned(1 downto 0);
-  type t_luma_maps is array(0 to 5) of t_luma_map;
-  constant C_LUMA_MAP : t_luma_maps := (
-    -- Pal 0 Low:  Y = {0, 204, 400, 404} -> sorted indices {0,1,2,3}
-    0 => (0 => "00", 1 => "01", 2 => "10", 3 => "11"),
-    -- Pal 0 High: Y = {0, 546, 743, 947} -> {0,1,2,3}
-    1 => (0 => "00", 1 => "01", 2 => "10", 3 => "11"),
-    -- Pal 1 Low:  Y = {0, 478, 282, 683} -> {0,2,1,3}
-    2 => (0 => "00", 1 => "10", 2 => "01", 3 => "11"),
-    -- Pal 1 High: Y = {0, 820, 624, 1023} -> {0,2,1,3}
-    3 => (0 => "00", 1 => "10", 2 => "01", 3 => "11"),
-    -- Pal 2 Low:  Y = {0, 478, 204, 683} -> {0,2,1,3}
-    4 => (0 => "00", 1 => "10", 2 => "01", 3 => "11"),
-    -- Pal 2 High: Y = {0, 820, 546, 1023} -> {0,2,1,3}
-    5 => (0 => "00", 1 => "10", 2 => "01", 3 => "11")
-  );
+  function f_luma_map(pal : unsigned(1 downto 0); z : unsigned(1 downto 0))
+    return unsigned is
+  begin
+    if pal /= "00" and (z = "01" or z = "10") then
+      return not z;          -- 01 <-> 10
+    end if;
+    return z;
+  end function;
+
+  -- Luma zone bounds over the legal 64..940 range after the mid-pivot
+  -- contrast (quarters: 283 / 502 / 721; halves: 502).
+  type t_bound6 is array(0 to 5) of unsigned(9 downto 0);
+  -- index: 0..3 = 4-zone quarters, 4..5 = 2-zone halves
+  constant C_ZLO : t_bound6 := (to_unsigned(0, 10), to_unsigned(283, 10),
+                                to_unsigned(502, 10), to_unsigned(721, 10),
+                                to_unsigned(0, 10), to_unsigned(502, 10));
+  constant C_ZHI : t_bound6 := (to_unsigned(282, 10), to_unsigned(501, 10),
+                                to_unsigned(720, 10), to_unsigned(1023, 10),
+                                to_unsigned(501, 10), to_unsigned(1023, 10));
+
+  -- 4x4 Bayer matrix, index = row(1:0) & col(1:0)
+  type t_bayer is array(0 to 15) of integer range 0 to 15;
+  constant C_BAYER : t_bayer := ( 0,  8,  2, 10,
+                                 12,  4, 14,  6,
+                                  3, 11,  1,  9,
+                                 15,  7, 13,  5);
 
   -- ==========================================================================
-  -- Signal declarations
+  -- Signals
   -- ==========================================================================
 
   -- Sync handling
-  signal s_pixel_y : unsigned(11 downto 0) := (others => '0');
   signal s_prev_hsync_n : std_logic := '1';
   signal s_prev_vsync_n : std_logic := '1';
+  signal s_in           : t_video_stream_yuv444_30b;
 
-  -- Shift registers for sync passthrough and dry-tap
   type t_sr_logic is array(0 to C_LATENCY - 1) of std_logic;
-  type t_sr_yuv   is array(0 to C_LATENCY - 1) of t_video_stream_yuv444_30b;
   signal s_avid_sr  : t_sr_logic := (others => '0');
   signal s_hsync_sr : t_sr_logic := (others => '1');
   signal s_vsync_sr : t_sr_logic := (others => '1');
   signal s_field_sr : t_sr_logic := (others => '0');
-  signal s_yuv_sr   : t_sr_yuv;
 
-  -- Cell sizing (decoded from knobs 2, 3). Registered controls: the cell
-  -- tracking below must use these, never the freshly-decoded values, to keep
-  -- the slow SPI-RAM register net off the per-pixel critical path.
-  signal s_h_size  : unsigned(4 downto 0) := to_unsigned(4, 5);
-  signal s_v_size  : unsigned(4 downto 0) := to_unsigned(4, 5);
+  -- Controls (registered; decoded off the SPI register net)
+  signal s_mode       : unsigned(2 downto 0) := to_unsigned(1, 3);  -- 0-2 pal, 3 mono, 4 comp
+  signal s_intens     : std_logic := '1';
+  signal s_ink3       : unsigned(2 downto 0) := (others => '0');
+  signal s_stab_on    : std_logic := '1';
+  signal s_scanlines  : std_logic := '0';
+  signal s_color_mode : std_logic := '0';  -- switch 10: nearest / luma (comp: phase)
+  signal s_snow_on    : std_logic := '0';
+  signal s_contrast   : unsigned(9 downto 0) := to_unsigned(512, 10);
+  signal s_color      : unsigned(9 downto 0) := to_unsigned(512, 10);
+  signal s_damp       : unsigned(7 downto 0) := (others => '0');
+  signal s_dith_on    : std_logic := '0';
+  signal s_hcode      : unsigned(2 downto 0) := to_unsigned(3, 3);
+  signal s_vcode      : unsigned(2 downto 0) := to_unsigned(3, 3);
+  signal s_luma_on    : std_logic := '0';  -- decisions by luma zone
+  signal s_zone2      : std_logic := '0';  -- 2-zone (mono / composite)
+  signal s_is_comp    : std_logic := '0';
+  signal s_pal2       : unsigned(1 downto 0) := "01";
+
+  -- Per-frame arithmetic constants
+  signal s_c64   : signed(7 downto 0) := (others => '0');       -- 64 - c7
+  signal s_cbias_a : signed(17 downto 0) := (others => '0');
+  signal s_cbias : signed(17 downto 0) := (others => '0');      -- 502*(64-c7)
+  signal s_c7    : unsigned(6 downto 0) := to_unsigned(64, 7);
+  signal s_cg    : unsigned(7 downto 0) := to_unsigned(32, 8);  -- chroma gain, 32 = 1x
+  signal s_qbias : signed(18 downto 0) := (others => '0');      -- 512*(32-cg)
+  signal s_osat  : unsigned(7 downto 0) := to_unsigned(128, 8); -- 128 = 1x (max)
+
+  -- Palette entries (decision + display), rebuilt from the controls
+  type t_pe4 is array(0 to 3) of t_pal_entry;
+  signal s_pe    : t_pe4;
+  signal s_bg    : t_pal_entry;   -- composite nibble-0 background
+
+  -- Raster measurement -> native CGA block size
+  signal s_width   : unsigned(10 downto 0) := to_unsigned(1920, 11);
+  signal s_height  : unsigned(10 downto 0) := to_unsigned(1080, 11);
+  signal s_nat_h   : unsigned(2 downto 0) := to_unsigned(6, 3);
+  signal s_nat_v   : unsigned(2 downto 0) := to_unsigned(5, 3);
+
+  -- Cell sizing (registered)
+  signal s_h_size  : unsigned(4 downto 0) := to_unsigned(6, 5);
+  signal s_v_size  : unsigned(4 downto 0) := to_unsigned(5, 5);
   signal s_h_shift : unsigned(2 downto 0) := to_unsigned(2, 3);
+  signal s_acc_lim : unsigned(4 downto 0) := to_unsigned(4, 5);
 
   -- Cell tracking
   signal s_cell_x   : unsigned(4 downto 0)  := (others => '0');
   signal s_cell_y   : unsigned(4 downto 0)  := (others => '0');
   signal s_cell_col : unsigned(10 downto 0) := (others => '0');
+  signal s_cell_row : unsigned(7 downto 0)  := (others => '0');
+  signal s_line_act : std_logic := '0';
+  signal s_act_row  : unsigned(10 downto 0) := (others => '0');
+  signal s_px       : unsigned(10 downto 0) := (others => '0');
+  signal s_saw_act  : std_logic := '0';
+  signal s_fcount   : unsigned(6 downto 0) := (others => '0');
 
-  -- Horizontal accumulator (first line of cell row only)
-  signal s_acc_y : unsigned(13 downto 0) := (others => '0');
-  signal s_acc_u : unsigned(13 downto 0) := (others => '0');
-  signal s_acc_v : unsigned(13 downto 0) := (others => '0');
-
-  -- T1 -> T1b: use the completed cell average (vs raw pixel) next stage
+  signal s_acc_y, s_acc_u, s_acc_v : unsigned(13 downto 0) := (others => '0');
   signal s_use_avg : std_logic := '0';
 
-  -- Per-cell palette-index buffer
-  type t_pidx_buf is array(0 to C_MAX_COLS - 1) of unsigned(1 downto 0);
-  signal s_pidx_buf : t_pidx_buf := (others => "00");
+  -- Bootstrap / re-seed (two plain-match fields)
+  signal s_boot     : unsigned(1 downto 0) := (others => '0');
+  signal s_sig      : std_logic_vector(15 downto 0) := (others => '0');
+  signal s_sig_snap : std_logic_vector(15 downto 0) := (others => '0');
+  signal s_con_snap : unsigned(9 downto 0) := to_unsigned(512, 10);
+  signal s_col_snap : unsigned(9 downto 0) := to_unsigned(512, 10);
+  signal s_sig_chg, s_con_chg, s_col_chg : std_logic := '0';
+  signal s_vsnap    : std_logic := '0';   -- value-hysteresis active
+  signal s_dhyst    : std_logic := '0';   -- decision-hysteresis active
 
-  -- ==========================================================================
-  -- Temporal hysteresis grid (v1.3): per fixed 16x16-PIXEL tile, a 4-bit
-  -- entry packing {pending(2b), current(2b)} for the two-field debounce.
-  -- 120 x 68 = 8160 entries covers 1080p's full 1080 active lines (the v1.2
-  -- 8x8 grid was sized for 540i fields and WRAPPED on progressive HD,
-  -- aliasing the bottom half onto the top -- seen directly in Freeze mode).
-  -- Cells of 16x16 px map 1:1; smaller cells share a tile, which still
-  -- stabilises the flat areas where flicker is visible.  Two banks ping-pong
-  -- on field parity: reads always reference the bank written LAST field, so
-  -- a same-address read+write collision (the suspected killer of the old C64
-  -- hysteresis attempt) is impossible by construction.  Both banks are read
-  -- unconditionally and muxed after the register, or yosys maps them to
-  -- logic instead of BRAM (C64 double-buffer lesson).  8 EBRs per bank.
-  -- ==========================================================================
+  -- Per-column buffer (index, or composite nibble)
+  type t_pidx_buf is array(0 to C_MAX_COLS - 1) of unsigned(3 downto 0);
+  signal s_pidx_buf : t_pidx_buf := (others => "0000");
+  signal s_buf_we    : std_logic := '0';
+  signal s_buf_waddr : unsigned(10 downto 0) := (others => '0');
+  signal s_buf_wdata : unsigned(3 downto 0) := (others => '0');
+  signal s_buf_raddr : unsigned(10 downto 0) := (others => '0');
+  signal s_buf_rdata : unsigned(3 downto 0) := (others => '0');
+  signal s_bufq, s_bufq2 : unsigned(3 downto 0) := (others => '0');
+  signal s_nib       : unsigned(2 downto 0) := (others => '0');
+
+  -- Hysteresis grid (16x16-px tiles, 120x68 at 1080p), ping-pong banks
   constant C_GRID_SIZE : integer := 8192;
   type t_hyst_grid is array(0 to C_GRID_SIZE - 1) of unsigned(3 downto 0);
   signal s_grid_a : t_hyst_grid := (others => "0000");
   signal s_grid_b : t_hyst_grid := (others => "0000");
+  signal s_fparity    : std_logic := '0';
+  signal s_grid_raddr : unsigned(12 downto 0) := (others => '0');
+  signal s_grid_waddr : unsigned(12 downto 0) := (others => '0');
+  signal s_grid_we    : std_logic := '0';
+  signal s_grid_wdata : unsigned(3 downto 0) := (others => '0');
+  signal s_grid_rd_a, s_grid_rd_b : unsigned(3 downto 0) := (others => '0');
 
-  signal s_fparity     : std_logic := '0';
-  signal s_grid_raddr  : unsigned(12 downto 0) := (others => '0');
-  signal s_grid_waddr  : unsigned(12 downto 0) := (others => '0');
-  signal s_grid_we     : std_logic := '0';
-  signal s_grid_wdata  : unsigned(3 downto 0) := (others => '0');
-  signal s_grid_rd_a   : unsigned(3 downto 0) := (others => '0');
-  signal s_grid_rd_b   : unsigned(3 downto 0) := (others => '0');
-  signal s_grid_prev   : unsigned(3 downto 0) := (others => '0');
-
-  -- Tile coordinates captured at cell end (T1) and folded to a grid address
-  -- in T1b (addr = row * 120 + col, done as (row<<7) - (row<<3) + col).
-  signal s_trow_d1 : unsigned(6 downto 0) := (others => '0');
-  signal s_tcol_d1 : unsigned(6 downto 0) := (others => '0');
-  signal s_gaddr_d3, s_gaddr_d4 : unsigned(12 downto 0) := (others => '0');
-
-  -- Active-line-gated row phase (blanking hsyncs must not advance the cell
-  -- row/tile phase or the two interlaced fields land on different phases --
-  -- the C64 red-bar lesson).
-  signal s_line_act : std_logic := '0';
-  signal s_act_row  : unsigned(10 downto 0) := (others => '0');  -- 11 bits:
-                     -- 1080p has 1080 active lines; 10 bits wrapped at 1024
-  signal s_px       : unsigned(10 downto 0) := (others => '0');
-
-  -- Set once active video has been seen this field; cleared when the bank
-  -- parity toggles.  Analog vsync is SERRATED (multiple falling edges per
-  -- field): a bare edge-toggle would flip parity an even number of times,
-  -- making reads hit the bank being written -> same-address EBR collisions
-  -- -> garbage.  Resets may repeat harmlessly; the toggle must not.
-  signal s_saw_act  : std_logic := '0';
-
-  -- Stability knob (rotary 6): hysteresis margin, 0 = off
-  signal s_margin   : unsigned(2 downto 0) := to_unsigned(2, 3);
-
-  -- Bootstrap: for the first fields after configuration the grid holds all
-  -- zeros (black); in content far from every palette entry the four
-  -- distances nearly tie, so nothing would ever beat a black incumbent by
-  -- the margin and the init state would stick.  Seed the grid with the
-  -- plain match for two fields before engaging the keep-rule.
-  signal s_boot     : unsigned(1 downto 0) := (others => '0');
-
-  -- Decision-side controls (contrast, colour mode) only influence NEW match
-  -- decisions, which Freeze suppresses entirely -- so turning them would do
-  -- nothing at high Stability.  Snapshot them once per field and re-run the
-  -- two-field bootstrap seed when they move, so the image re-quantises with
-  -- the new setting and then re-stabilises.
-  signal s_con_snap : unsigned(9 downto 0) := to_unsigned(410, 10);
-  signal s_cm_snap  : std_logic := '0';
-
-  signal s_buf_we      : std_logic := '0';
-  signal s_buf_waddr   : unsigned(10 downto 0) := (others => '0');
-  signal s_buf_wdata   : unsigned(1 downto 0) := (others => '0');
-  signal s_buf_raddr   : unsigned(10 downto 0) := (others => '0');
-  signal s_buf_rdata   : unsigned(1 downto 0) := (others => '0');
-
-  -- Palette match pipeline
-  signal s_match_y : unsigned(9 downto 0) := (others => '0');
-  signal s_match_u : unsigned(9 downto 0) := (others => '0');
-  signal s_match_v : unsigned(9 downto 0) := (others => '0');
-
-  -- T2a -> T2b: contrast-adjusted Y + delayed chroma
-  signal s_ycon    : unsigned(9 downto 0) := (others => '0');
-  signal s_mu_d1   : unsigned(9 downto 0) := (others => '0');
-  signal s_mv_d1   : unsigned(9 downto 0) := (others => '0');
+  -- Match pipeline
+  signal s_trow_d1, s_tcol_d1 : unsigned(6 downto 0) := (others => '0');
+  signal s_bay_d1   : unsigned(3 downto 0) := (others => '0');
+  signal s_match_y, s_match_u, s_match_v : unsigned(9 downto 0) := (others => '0');
+  signal s_dith2, s_dith3, s_dith4 : signed(10 downto 0) := (others => '0');
+  signal s_yprod    : unsigned(16 downto 0) := (others => '0');
+  signal s_uprod, s_vprod : unsigned(17 downto 0) := (others => '0');
+  signal s_ycon, s_ucon4, s_vcon4 : unsigned(9 downto 0) := (others => '0');
+  signal s_gprev4, s_gprev5, s_gprev6, s_gprev7, s_gprev8 : unsigned(3 downto 0) := (others => '0');
+  signal s_d8       : signed(7 downto 0) := (others => '0');
+  signal s_q5, s_l5 : unsigned(3 downto 0) := (others => '0');
+  signal s_snap6    : std_logic := '0';
+  signal s_ya5, s_ya6, s_yb6 : signed(11 downto 0) := (others => '0');
+  signal s_lnew6, s_lnew7, s_lnew8, s_lnew9 : unsigned(3 downto 0) := (others => '0');
+  signal s_uc5, s_vc5, s_uc6, s_vc6, s_uc7, s_vc7 : unsigned(9 downto 0) := (others => '0');
+  signal s_ym7, s_ym8 : unsigned(9 downto 0) := (others => '0');
 
   type t_dist_arr is array(0 to 3) of unsigned(6 downto 0);
-  signal s_dist : t_dist_arr := (others => (others => '0'));
-  signal s_match_idx : unsigned(1 downto 0) := (others => '0');
-
-  -- Luma-mode: palette entry chosen by input-Y zone (set in T2b, used in T3)
+  signal s_dist     : t_dist_arr := (others => (others => '0'));
   signal s_luma_idx : unsigned(1 downto 0) := (others => '0');
 
-  -- Switch 10: '0' = nearest-colour (Manhattan), '1' = luma-zone mapping
-  signal s_color_mode : std_logic := '0';
-
-  -- Pipelined fill (write to buffer), aligned to the match pipeline depth
-  signal s_we_d1, s_we_d2, s_we_d3, s_we_d4, s_we_d5 : std_logic := '0';
-  signal s_wcol_d1, s_wcol_d2, s_wcol_d3, s_wcol_d4, s_wcol_d5 : unsigned(10 downto 0) := (others => '0');
-
-  -- T3a -> T3b: challenger + distances for the hysteresis decision
   signal s_chal      : unsigned(1 downto 0) := (others => '0');
   signal s_chal_dist : unsigned(6 downto 0) := (others => '0');
   signal s_prev_dist : unsigned(6 downto 0) := (others => '0');
-  signal s_ycon_d1   : unsigned(9 downto 0) := (others => '0');
-  signal s_prev_d5   : unsigned(1 downto 0) := (others => '0');  -- current
-  signal s_pend_d5   : unsigned(1 downto 0) := (others => '0');  -- pending
-  signal s_gaddr_d5  : unsigned(12 downto 0) := (others => '0');
+  signal s_prev9, s_pend9 : unsigned(1 downto 0) := (others => '0');
 
-  -- Palette selection (knob 1 + intensity switch). Only changes on a knob
-  -- turn, so no per-stage alignment delays are needed.
-  signal s_pal_sel : unsigned(2 downto 0) := (others => '0');
+  -- write-side delay chains (index = stage)
+  -- (stage 1 is driven by p_t1, so it gets its own signals: one driver
+  -- per signal, or GHDL resolves the arrays to 'X')
+  type t_col_arr  is array(2 to 9) of unsigned(10 downto 0);
+  type t_gad_arr  is array(3 to 9) of unsigned(12 downto 0);
+  signal s_we1   : std_logic := '0';
+  signal s_wcol1 : unsigned(10 downto 0) := (others => '0');
+  signal s_we    : std_logic_vector(2 to 9) := (others => '0');
+  signal s_wcol  : t_col_arr := (others => (others => '0'));
+  signal s_gaddr : t_gad_arr := (others => (others => '0'));
 
-  -- T4a -> T4b: display palette entry
+  -- Snow hash stages
+  signal s_sh1, s_sh2, s_sh3 : unsigned(23 downto 0) := (others => '0');
+
+  -- Display
   signal s_disp_y, s_disp_u, s_disp_v : unsigned(9 downto 0) := (others => '0');
-
-  -- T4b -> T5 saturation intermediates (12x9 signed product)
-  signal s_t4_su_prod : signed(20 downto 0) := (others => '0');
-  signal s_t4_sv_prod : signed(20 downto 0) := (others => '0');
-  signal s_t4_y       : unsigned(9 downto 0) := (others => '0');
-
-  -- Output
+  signal s_t4_su_prod, s_t4_sv_prod : signed(20 downto 0) := (others => '0');
+  signal s_t4_y     : unsigned(9 downto 0) := (others => '0');
   signal s_out_y, s_out_u, s_out_v : unsigned(9 downto 0) := (others => '0');
-
-  -- Controls
-  signal s_bypass     : std_logic := '0';
-  signal s_pixelate   : std_logic := '0';
-  signal s_scanlines  : std_logic := '0';
-  signal s_contrast   : unsigned(9 downto 0) := (others => '0');
-  signal s_saturation : unsigned(9 downto 0) := to_unsigned(512, 10);
-  -- Mix, registered locally and reduced to 8 bits: keeps the slow SPI-RAM
-  -- register net off the interpolators and shrinks their per-channel
-  -- multiply (the mix multiplier was the HD critical path at 10 bits).
-  signal s_mix_t      : unsigned(7 downto 0) := (others => '0');
-
-  signal s_interp_y_result : unsigned(9 downto 0);
-  signal s_interp_u_result : unsigned(9 downto 0);
-  signal s_interp_v_result : unsigned(9 downto 0);
 
 begin
 
-  s_bypass <= registers_in(6)(4);
+  -- ==========================================================================
+  -- Controls: decode, palette entries, per-frame constants, change flags.
+  -- ==========================================================================
+  p_ctl : process(clk)
+    variable v_r0, v_r1, v_r2, v_r7 : unsigned(9 downto 0);
+    variable v_mode  : unsigned(2 downto 0);
+    variable v_ink4  : unsigned(3 downto 0);
+    variable v_fg4   : unsigned(3 downto 0);
+    variable v_pal   : unsigned(1 downto 0);
+    variable v_i1, v_i2, v_i3 : integer range 0 to 15;
+    variable v_luma  : std_logic;
+    variable v_c     : unsigned(9 downto 0);
+    variable v_cg    : unsigned(7 downto 0);
+  begin
+    if rising_edge(clk) then
+      v_r0 := unsigned(registers_in(0));
+      v_r1 := unsigned(registers_in(1));
+      v_r2 := unsigned(registers_in(2));
+      v_r7 := unsigned(registers_in(7));
+
+      -- K1 Mode: 5 labels
+      if    v_r0 < 205 then v_mode := "000";
+      elsif v_r0 < 410 then v_mode := "001";
+      elsif v_r0 < 615 then v_mode := "010";
+      elsif v_r0 < 820 then v_mode := "011";
+      else                  v_mode := "100";
+      end if;
+      s_mode <= v_mode;
+
+      s_stab_on    <= registers_in(6)(0);
+      s_intens     <= registers_in(6)(1);
+      s_scanlines  <= registers_in(6)(2);
+      s_color_mode <= registers_in(6)(3);
+      s_snow_on    <= registers_in(6)(4);
+      s_ink3       <= unsigned(registers_in(5)(9 downto 7));  -- K6: 8 labels
+      s_contrast   <= unsigned(registers_in(3));
+      s_color      <= unsigned(registers_in(4));
+
+      -- P12 Dither (deadband at the bottom so pot noise can't flip modes)
+      s_damp <= v_r7(9 downto 2);
+      if v_r7 >= 32 then s_dith_on <= '1'; else s_dith_on <= '0'; end if;
+
+      -- K2/K3: 5 labels  2x / 4x / CGA / 8x / 16x.  No Off: 1-px cells with
+      -- dither on showed noisy colour bars on HDMI (cause not found).
+      if    v_r1 < 205 then s_hcode <= "001";
+      elsif v_r1 < 410 then s_hcode <= "010";
+      elsif v_r1 < 615 then s_hcode <= "011";
+      elsif v_r1 < 820 then s_hcode <= "100";
+      else                  s_hcode <= "101";
+      end if;
+      if    v_r2 < 205 then s_vcode <= "001";
+      elsif v_r2 < 410 then s_vcode <= "010";
+      elsif v_r2 < 615 then s_vcode <= "011";
+      elsif v_r2 < 820 then s_vcode <= "100";
+      else                  s_vcode <= "101";
+      end if;
+
+      -- Native CGA block from the measured raster: 320 (or 640) columns,
+      -- 200 rows, rounded to whole pixels.
+      if s_width >= 1600 then                       -- 1920
+        if s_is_comp = '1' or s_mode = "011" then s_nat_h <= "011";  -- 3
+        else                                          s_nat_h <= "110";  -- 6
+        end if;
+      elsif s_width >= 1100 then                    -- 1280
+        if s_is_comp = '1' or s_mode = "011" then s_nat_h <= "010";
+        else                                          s_nat_h <= "100";
+        end if;
+      else                                          -- 720
+        if s_is_comp = '1' or s_mode = "011" then s_nat_h <= "001";
+        else                                          s_nat_h <= "010";
+        end if;
+      end if;
+      if    s_height >= 1000 then s_nat_v <= "101";   -- 1080 -> 5
+      elsif s_height >=  650 then s_nat_v <= "100";   -- 720  -> 4
+      elsif s_height >=  500 then s_nat_v <= "011";   -- 540/576 -> 3
+      elsif s_height >=  400 then s_nat_v <= "010";   -- 480  -> 2
+      else                        s_nat_v <= "001";   -- SD fields
+      end if;
+
+      -- H size / accumulate count (power of 2 samples) / divide shift
+      case s_hcode is
+        when "000" => s_h_size <= to_unsigned(1, 5);  s_acc_lim <= to_unsigned(1, 5);  s_h_shift <= "000";
+        when "001" => s_h_size <= to_unsigned(2, 5);  s_acc_lim <= to_unsigned(2, 5);  s_h_shift <= "001";
+        when "010" => s_h_size <= to_unsigned(4, 5);  s_acc_lim <= to_unsigned(4, 5);  s_h_shift <= "010";
+        when "100" => s_h_size <= to_unsigned(8, 5);  s_acc_lim <= to_unsigned(8, 5);  s_h_shift <= "011";
+        when "101" => s_h_size <= to_unsigned(16, 5); s_acc_lim <= to_unsigned(16, 5); s_h_shift <= "100";
+        when others =>
+          s_h_size <= resize(s_nat_h, 5);
+          case s_nat_h is
+            when "110" | "100" => s_acc_lim <= to_unsigned(4, 5); s_h_shift <= "010";
+            when "011" | "010" => s_acc_lim <= to_unsigned(2, 5); s_h_shift <= "001";
+            when others        => s_acc_lim <= to_unsigned(1, 5); s_h_shift <= "000";
+          end case;
+      end case;
+      case s_vcode is
+        when "000" => s_v_size <= to_unsigned(1, 5);
+        when "001" => s_v_size <= to_unsigned(2, 5);
+        when "010" => s_v_size <= to_unsigned(4, 5);
+        when "100" => s_v_size <= to_unsigned(8, 5);
+        when "101" => s_v_size <= to_unsigned(16, 5);
+        when others => s_v_size <= resize(s_nat_v, 5);
+      end case;
+
+      -- Mode flags
+      if s_mode = "100" then s_is_comp <= '1'; else s_is_comp <= '0'; end if;
+      if s_mode(2) = '1' or s_mode = "011" then s_zone2 <= '1'; else s_zone2 <= '0'; end if;
+      if s_mode = "100" or s_color_mode = '1' then v_luma := '1'; else v_luma := '0'; end if;
+      s_luma_on <= v_luma;
+      s_pal2    <= s_mode(1 downto 0);
+
+      -- Palette entries.  Ink = RGBI colour with the intensity switch as I.
+      -- Black ink stays black at High intensity (RGBI 8 = dark grey read as
+      -- a washed-out black on hardware); the other inks take the I bit.
+      if s_ink3 = "000" then v_ink4 := "0000";
+      else                   v_ink4 := s_intens & s_ink3;
+      end if;
+      if s_ink3 = "000" then v_fg4 := s_intens & "111";  -- mono: Black ink -> gray/white
+      else                   v_fg4 := v_ink4;
+      end if;
+      v_pal := s_mode(1 downto 0);
+      if s_intens = '0' then
+        case v_pal is
+          when "00"   => v_i1 := 4;  v_i2 := 2;  v_i3 := 6;    -- red green brown
+          when "01"   => v_i1 := 3;  v_i2 := 5;  v_i3 := 7;    -- cyan magenta gray
+          when others => v_i1 := 3;  v_i2 := 4;  v_i3 := 7;    -- cyan red gray
+        end case;
+      else
+        case v_pal is
+          when "00"   => v_i1 := 12; v_i2 := 10; v_i3 := 14;
+          when "01"   => v_i1 := 11; v_i2 := 13; v_i3 := 15;
+          when others => v_i1 := 11; v_i2 := 12; v_i3 := 15;
+        end case;
+      end if;
+      if s_mode(2) = '1' or s_mode = "011" then
+        -- mono / composite: {black, fg, black, fg}
+        s_pe(0) <= C_RGBI(0);
+        s_pe(1) <= C_RGBI(to_integer(v_fg4));
+        s_pe(2) <= C_RGBI(0);
+        s_pe(3) <= C_RGBI(to_integer(v_fg4));
+      else
+        s_pe(0) <= C_RGBI(to_integer(v_ink4));
+        s_pe(1) <= C_RGBI(v_i1);
+        s_pe(2) <= C_RGBI(v_i2);
+        s_pe(3) <= C_RGBI(v_i3);
+      end if;
+      s_bg <= C_RGBI(to_integer(v_ink4));
+
+      -- Contrast pivots at mid-grey 502; 50% = unity.  ycon =
+      -- (y*c7 + 502*(64-c7)) >> 6, bias built one add per stage.
+      s_c7      <= s_contrast(9 downto 3);
+      s_c64     <= to_signed(64, 8) - signed('0' & s_c7);
+      s_cbias_a <= shift_left(resize(s_c64, 18), 9) - shift_left(resize(s_c64, 18), 3);
+      s_cbias   <= s_cbias_a - shift_left(resize(s_c64, 18), 1);
+
+      -- Color (K5).  Nearest decisions: input chroma gain before matching,
+      -- 0..1x below 50%, 1..5x above.  Luma decisions: palette saturation.
+      v_c := s_color;
+      if v_c(9) = '0' then v_cg := "000" & v_c(8 downto 4);
+      else                 v_cg := to_unsigned(32, 8) + ('0' & v_c(8 downto 2));
+      end if;
+      if s_luma_on = '1' then
+        -- Palette saturation 0..1x: the CGA colours already sit on the RGB
+        -- gamut edge, so anything above 1x only pushed chroma onto the
+        -- rails (light cyan Cr -> code 0) = glitch bars on hardware.
+        s_cg <= to_unsigned(32, 8);
+        if s_color >= 1016 then s_osat <= to_unsigned(128, 8);
+        else                    s_osat <= "0" & s_color(9 downto 3);
+        end if;
+      else
+        s_cg   <= v_cg;
+        s_osat <= to_unsigned(128, 8);
+      end if;
+      s_qbias <= shift_left(to_signed(32, 19) - signed(resize(s_cg, 19)), 9);
+
+      -- Decision-side signature: any change re-seeds the grids.
+      s_sig <= std_logic_vector(s_mode) & s_intens & std_logic_vector(s_ink3)
+               & std_logic_vector(s_hcode) & std_logic_vector(s_vcode)
+               & s_color_mode & s_dith_on & s_stab_on;
+      if s_sig /= s_sig_snap then s_sig_chg <= '1'; else s_sig_chg <= '0'; end if;
+      if (s_contrast > s_con_snap and s_contrast - s_con_snap > 16)
+         or (s_con_snap > s_contrast and s_con_snap - s_contrast > 16) then
+        s_con_chg <= '1';
+      else
+        s_con_chg <= '0';
+      end if;
+      if (s_color > s_col_snap and s_color - s_col_snap > 16)
+         or (s_col_snap > s_color and s_col_snap - s_color > 16) then
+        s_col_chg <= '1';
+      else
+        s_col_chg <= '0';
+      end if;
+
+      -- Both modes wait out a pending control change: the grids switch
+      -- meaning with the dither/stability setting, and until the re-seed at
+      -- the next field they hold the other mode's data.
+      if s_stab_on = '1' and s_boot = "11" and s_sig_chg = '0' then
+        s_vsnap <= s_dith_on;
+        s_dhyst <= not s_dith_on;
+      else
+        s_vsnap <= '0';
+        s_dhyst <= '0';
+      end if;
+    end if;
+  end process p_ctl;
 
   -- ==========================================================================
-  -- Pipeline T1: input register, controls, cell tracking, accumulator.
+  -- T1: input register, cell tracking, accumulator, raster measurement.
   -- ==========================================================================
   p_t1 : process(clk)
-    variable v_h_size  : unsigned(4 downto 0);
-    variable v_v_size  : unsigned(4 downto 0);
-    variable v_h_shift : unsigned(2 downto 0);
-    variable v_pal_idx : unsigned(1 downto 0);
     variable v_at_cell_end : boolean;
     variable v_origin : unsigned(10 downto 0);
+    variable v_bc, v_br : unsigned(1 downto 0);
   begin
     if rising_edge(clk) then
       s_avid_sr(0)  <= data_in.avid;
       s_hsync_sr(0) <= data_in.hsync_n;
       s_vsync_sr(0) <= data_in.vsync_n;
       s_field_sr(0) <= data_in.field_n;
-      s_yuv_sr(0)   <= data_in;
       for i in 1 to C_LATENCY - 1 loop
         s_avid_sr(i)  <= s_avid_sr(i - 1);
         s_hsync_sr(i) <= s_hsync_sr(i - 1);
         s_vsync_sr(i) <= s_vsync_sr(i - 1);
         s_field_sr(i) <= s_field_sr(i - 1);
-        s_yuv_sr(i)   <= s_yuv_sr(i - 1);
       end loop;
+      s_in <= data_in;
 
       s_prev_hsync_n <= data_in.hsync_n;
       s_prev_vsync_n <= data_in.vsync_n;
 
-      -- Controls
-      s_pixelate   <= registers_in(6)(0);
-      s_scanlines  <= registers_in(6)(2);
-      s_color_mode <= registers_in(6)(3);  -- switch 10: nearest vs luma
-      s_contrast   <= unsigned(registers_in(3));
-      s_saturation <= unsigned(registers_in(4));
-      s_mix_t      <= unsigned(registers_in(7)(9 downto 2));
-
-      -- Stability (knob 6): hysteresis margin in top-5-bit distance units.
-      -- "111" = Max = hard freeze (keep the stored colour unconditionally
-      -- after bootstrap) -- also a hardware diagnostic: if Max still
-      -- flashes, the grid BRAM itself is not working on silicon.
-      if    unsigned(registers_in(5)) < 205 then s_margin <= "000";  -- Off
-      elsif unsigned(registers_in(5)) < 410 then s_margin <= "001";
-      elsif unsigned(registers_in(5)) < 615 then s_margin <= "010";
-      elsif unsigned(registers_in(5)) < 820 then s_margin <= "011";
-      else                                       s_margin <= "111";  -- Freeze
-      end if;
-
-      -- H/V sizes. Pixelate OFF forces 1x1 (per-pixel quantisation).
-      -- Zone thresholds match the framework's 5-label divide of the 0-1023
-      -- register range (5 equal zones of ~205 units), so the displayed
-      -- label always matches the actual block size.
-      if registers_in(6)(0) = '0' then
-        v_h_size  := to_unsigned(1, 5);
-        v_v_size  := to_unsigned(1, 5);
-        v_h_shift := to_unsigned(0, 3);
-      else
-        if    unsigned(registers_in(1)) < 205 then v_h_size := to_unsigned( 1, 5); v_h_shift := to_unsigned(0, 3);
-        elsif unsigned(registers_in(1)) < 410 then v_h_size := to_unsigned( 2, 5); v_h_shift := to_unsigned(1, 3);
-        elsif unsigned(registers_in(1)) < 615 then v_h_size := to_unsigned( 4, 5); v_h_shift := to_unsigned(2, 3);
-        elsif unsigned(registers_in(1)) < 820 then v_h_size := to_unsigned( 8, 5); v_h_shift := to_unsigned(3, 3);
-        else                                       v_h_size := to_unsigned(16, 5); v_h_shift := to_unsigned(4, 3);
-        end if;
-
-        if    unsigned(registers_in(2)) < 205 then v_v_size := to_unsigned( 1, 5);
-        elsif unsigned(registers_in(2)) < 410 then v_v_size := to_unsigned( 2, 5);
-        elsif unsigned(registers_in(2)) < 615 then v_v_size := to_unsigned( 4, 5);
-        elsif unsigned(registers_in(2)) < 820 then v_v_size := to_unsigned( 8, 5);
-        else                                       v_v_size := to_unsigned(16, 5);
-        end if;
-      end if;
-      s_h_size  <= v_h_size;
-      s_v_size  <= v_v_size;
-      s_h_shift <= v_h_shift;
-
-      -- Palette selection (knob 1, 3 zones; switch 8 = intensity)
-      v_pal_idx := "00";
-      if    unsigned(registers_in(0)) >= 683 then v_pal_idx := "10";
-      elsif unsigned(registers_in(0)) >= 341 then v_pal_idx := "01";
-      end if;
-      s_pal_sel <= v_pal_idx & registers_in(6)(1);
-
-      -- Cell tracking + horizontal accumulator (registered sizes only)
       v_at_cell_end := false;
 
       if data_in.avid = '1' then
@@ -449,12 +573,13 @@ begin
           s_cell_x <= s_cell_x + 1;
         end if;
 
+        -- Average the first acc_lim (power of 2) pixels of the cell
         if s_cell_y = 0 then
           if s_cell_x = 0 then
             s_acc_y <= resize(unsigned(data_in.y), 14);
             s_acc_u <= resize(unsigned(data_in.u), 14);
             s_acc_v <= resize(unsigned(data_in.v), 14);
-          else
+          elsif s_cell_x < s_acc_lim then
             s_acc_y <= s_acc_y + resize(unsigned(data_in.y), 14);
             s_acc_u <= s_acc_u + resize(unsigned(data_in.u), 14);
             s_acc_v <= s_acc_v + resize(unsigned(data_in.v), 14);
@@ -466,13 +591,15 @@ begin
         s_cell_x   <= (others => '0');
         s_cell_col <= (others => '0');
         s_px       <= (others => '0');
-        s_pixel_y  <= s_pixel_y + 1;
-        -- Advance the row phase on ACTIVE lines only: blanking hsyncs must
-        -- not desync it or the interlaced fields land on different phases.
+        -- Active lines only advance the row phase (interlace-safe); the
+        -- line width is measured here too (per-line jitter is absorbed by
+        -- the coarse class thresholds).
         if s_line_act = '1' then
+          s_width   <= s_px;
           s_act_row <= s_act_row + 1;
           if s_cell_y >= s_v_size - 1 then
-            s_cell_y <= (others => '0');
+            s_cell_y   <= (others => '0');
+            s_cell_row <= s_cell_row + 1;
           else
             s_cell_y <= s_cell_y + 1;
           end if;
@@ -481,190 +608,201 @@ begin
       end if;
 
       if data_in.vsync_n = '0' and s_prev_vsync_n = '1' then
-        s_pixel_y  <= (others => '0');
         s_cell_x   <= (others => '0');
         s_cell_y   <= (others => '0');
         s_cell_col <= (others => '0');
+        s_cell_row <= (others => '0');
         s_px       <= (others => '0');
         s_act_row  <= (others => '0');
         s_line_act <= '0';
-        -- Swap grid banks once per field: only on the FIRST vsync edge
-        -- after active video (serration-proof; see s_saw_act).
+        -- Once per field, on the first vsync edge after active video
+        -- (analog vsync is serrated): bank swap, field height, boot and
+        -- re-seed.  Change flags are free-running 1-bit registers.
         if s_saw_act = '1' then
           s_fparity <= not s_fparity;
           s_saw_act <= '0';
+          s_height  <= s_act_row;
+          s_fcount  <= s_fcount + 1;
           if s_boot /= "11" then
             s_boot <= s_boot + 1;
           end if;
-          -- Re-seed on decision-side control changes (threshold rides out
-          -- pot jitter; snapshot only updates on trigger so slow turns
-          -- accumulate and still fire).
-          if (s_contrast > s_con_snap and s_contrast - s_con_snap > 16)
-             or (s_con_snap > s_contrast and s_con_snap - s_contrast > 16) then
-            s_con_snap <= s_contrast;
-            s_boot     <= "01";
-          end if;
-          if s_color_mode /= s_cm_snap then
-            s_cm_snap <= s_color_mode;
-            s_boot    <= "01";
+          if s_con_chg = '1' then s_con_snap <= s_contrast; end if;
+          if s_col_chg = '1' then s_col_snap <= s_color;    end if;
+          if s_sig_chg = '1' then s_sig_snap <= s_sig;      end if;
+          if s_con_chg = '1' or s_col_chg = '1' or s_sig_chg = '1' then
+            s_boot <= "01";
           end if;
         end if;
       end if;
 
-      -- T1b selects the completed cell average when this flag is set; the
-      -- accumulator registered this edge holds the full cell sum then.
       if v_at_cell_end and s_cell_y = 0 and data_in.avid = '1' then
         s_use_avg <= '1';
-      else
-        s_use_avg <= '0';
-      end if;
-
-      -- Buffer write enable + address (pipelined to match T3 timing).
-      -- Not gated on pixelate: in per-pixel mode every pixel is a cell end,
-      -- and the hysteresis grid wants those writes too (the display buffer
-      -- write is simply unused then).
-      if v_at_cell_end and s_cell_y = 0 and data_in.avid = '1' then
-        s_we_d1   <= '1';
-        s_wcol_d1 <= s_cell_col;
-        -- 16x16-px tile of the ENDING cell's origin pixel
+        s_we1     <= '1';
+        s_wcol1   <= s_cell_col;
         v_origin  := s_px - resize(s_h_size, 11) + 1;
         s_trow_d1 <= s_act_row(10 downto 4);
         s_tcol_d1 <= v_origin(10 downto 4);
+        -- Dither grain never finer than 2 px: a 1x1-pixel checkerboard (H
+        -- and V Off) renders as thick glitch bars on hardware, like other
+        -- programs' 1-2 px high-contrast patterns.
+        if s_h_size = 1 then v_bc := s_cell_col(2 downto 1);
+        else                 v_bc := s_cell_col(1 downto 0);
+        end if;
+        if s_v_size = 1 then v_br := s_cell_row(2 downto 1);
+        else                 v_br := s_cell_row(1 downto 0);
+        end if;
+        s_bay_d1  <= to_unsigned(C_BAYER(to_integer(v_br & v_bc)), 4);
       else
-        s_we_d1   <= '0';
-        s_wcol_d1 <= (others => '0');
+        s_use_avg <= '0';
+        s_we1     <= '0';
+        s_wcol1   <= (others => '0');
       end if;
     end if;
   end process p_t1;
 
   -- ==========================================================================
-  -- Pipeline T1b: average divide (barrel shift) + match-input select.
-  -- Kept off T1: the variable shift after the 14-bit accumulate was on the
-  -- per-pixel critical path.
+  -- Match / decision path
   -- ==========================================================================
-  p_t1b : process(clk)
+  p_match : process(clk)
+    variable v_sb    : signed(5 downto 0);
+    variable v_dp    : signed(14 downto 0);
+    variable v_ys    : signed(18 downto 0);
+    variable v_us, v_vs : signed(19 downto 0);
+    variable v_ysel  : signed(11 downto 0);
+    variable v_z     : unsigned(1 downto 0);
+    variable v_min   : unsigned(6 downto 0);
+    variable v_chal  : unsigned(1 downto 0);
+    variable v_pz    : integer range 0 to 5;
+    variable v_lo, v_hi, v_dy : unsigned(9 downto 0);
+    variable v_idx, v_cur, v_pend : unsigned(1 downto 0);
   begin
     if rising_edge(clk) then
+      -- ---- T1b: average divide / raw select, grid address, dither offset
       if s_use_avg = '1' then
         s_match_y <= resize(s_acc_y srl to_integer(s_h_shift), 10);
         s_match_u <= resize(s_acc_u srl to_integer(s_h_shift), 10);
         s_match_v <= resize(s_acc_v srl to_integer(s_h_shift), 10);
       else
-        s_match_y <= unsigned(s_yuv_sr(0).y);
-        s_match_u <= unsigned(s_yuv_sr(0).u);
-        s_match_v <= unsigned(s_yuv_sr(0).v);
+        s_match_y <= unsigned(s_in.y);
+        s_match_u <= unsigned(s_in.u);
+        s_match_v <= unsigned(s_in.v);
       end if;
-
-      -- Grid address of the cell being matched: row * 120 + col, computed
-      -- as (row<<7) - (row<<3) + col in 14 bits (shift_left keeps operand
-      -- width, so the intermediate must be wider than the result).
       s_grid_raddr <= resize(
           shift_left(resize(s_trow_d1, 14), 7)
         - shift_left(resize(s_trow_d1, 14), 3)
         + resize(s_tcol_d1, 14), 13);
-
-      s_we_d2   <= s_we_d1;
-      s_wcol_d2 <= s_wcol_d1;
-    end if;
-  end process p_t1b;
-
-  -- ==========================================================================
-  -- Pipeline T2a: contrast (7-bit coefficient, clamped result).
-  -- ==========================================================================
-  p_t2a : process(clk)
-    variable v_g    : unsigned(6 downto 0);
-    variable v_ce   : unsigned(9 downto 0);
-    variable v_sum  : unsigned(10 downto 0);
-  begin
-    if rising_edge(clk) then
-      if s_contrast < 512 then
-        v_g    := s_contrast(8 downto 2);
-        s_ycon <= resize((s_match_y * v_g) srl 7, 10);
+      -- Bayer offset: (2b - 15) * amp / 16  ->  +-239 codes at 100%
+      v_sb := signed('0' & s_bay_d1 & '0') - to_signed(15, 6);
+      if s_dith_on = '1' then
+        v_dp := v_sb * signed('0' & s_damp);
       else
-        v_ce  := s_contrast - 512;
-        v_g   := v_ce(8 downto 2);
-        v_sum := resize(s_match_y, 11) + resize((s_match_y * v_g) srl 7, 11);
-        if v_sum > 1023 then
-          s_ycon <= to_unsigned(1023, 10);
-        else
-          s_ycon <= resize(v_sum, 10);
-        end if;
+        v_dp := (others => '0');
       end if;
+      s_dith2 <= resize(shift_right(v_dp, 4), 11);
 
-      s_mu_d1 <= s_match_u;
-      s_mv_d1 <= s_match_v;
+      -- ---- T2a: contrast and chroma-gain products
+      s_yprod <= s_match_y * s_c7;
+      s_uprod <= s_match_u * s_cg;
+      s_vprod <= s_match_v * s_cg;
+      s_dith3 <= s_dith2;
 
-      s_we_d3    <= s_we_d2;
-      s_wcol_d3  <= s_wcol_d2;
-      s_gaddr_d3 <= s_grid_raddr;
-    end if;
-  end process p_t2a;
+      -- ---- T2c: bias, scale, clamp; last field's grid entry (bank mux)
+      v_ys := signed(resize(s_yprod, 19)) + resize(s_cbias, 19);
+      v_ys := shift_right(v_ys, 6);
+      if    v_ys < 0    then s_ycon <= (others => '0');
+      elsif v_ys > 1023 then s_ycon <= to_unsigned(1023, 10);
+      else                   s_ycon <= unsigned(v_ys(9 downto 0));
+      end if;
+      v_us := shift_right(signed(resize(s_uprod, 20)) + resize(s_qbias, 20), 5);
+      v_vs := shift_right(signed(resize(s_vprod, 20)) + resize(s_qbias, 20), 5);
+      if    v_us < 0    then s_ucon4 <= (others => '0');
+      elsif v_us > 1023 then s_ucon4 <= to_unsigned(1023, 10);
+      else                   s_ucon4 <= unsigned(v_us(9 downto 0));
+      end if;
+      if    v_vs < 0    then s_vcon4 <= (others => '0');
+      elsif v_vs > 1023 then s_vcon4 <= to_unsigned(1023, 10);
+      else                   s_vcon4 <= unsigned(v_vs(9 downto 0));
+      end if;
+      if s_fparity = '0' then s_gprev4 <= s_grid_rd_a;
+      else                    s_gprev4 <= s_grid_rd_b;
+      end if;
+      s_dith4 <= s_dith3;
 
-  -- ==========================================================================
-  -- Pipeline T2b: compute 4 palette distances + luma-zone index.
-  -- ==========================================================================
-  p_t2b : process(clk)
-  begin
-    if rising_edge(clk) then
+      -- ---- T2d: distance to the tile's stored level.  The grid keeps
+      -- luma bits 7:4 (16-code steps, modulo 256); the live pixel resolves
+      -- the wrap, since noise is a few codes, not 128.  (v2.0 stored bits
+      -- 9:6 -- 64-code steps posterised gradients into flat bars.)
+      s_d8  <= signed(s_ycon(7 downto 0) - (s_gprev4 & "1000"));
+      s_q5  <= s_ycon(7 downto 4);
+      s_l5  <= s_gprev4;
+      s_ya5 <= signed(resize(s_ycon, 12)) + resize(s_dith4, 12);
+      s_uc5 <= s_ucon4;
+      s_vc5 <= s_vcon4;
+      s_gprev5 <= s_gprev4;
+
+      -- ---- T2e: snap within +-24 (stored centre is within 8 of the value
+      -- it was quantised from, leaving 16 codes of noise margin)
+      if s_vsnap = '1' and s_d8 >= -24 and s_d8 <= 24 then
+        s_snap6 <= '1';
+        s_lnew6 <= s_l5;
+      else
+        s_snap6 <= '0';
+        s_lnew6 <= s_q5;
+      end if;
+      s_ya6 <= s_ya5;
+      s_yb6 <= s_ya5 - resize(s_d8, 12);
+      s_uc6 <= s_uc5;
+      s_vc6 <= s_vc5;
+      s_gprev6 <= s_gprev5;
+
+      -- ---- T2f: select + clamp the match luma
+      if s_snap6 = '1' then v_ysel := s_yb6; else v_ysel := s_ya6; end if;
+      if    v_ysel < 0    then s_ym7 <= (others => '0');
+      elsif v_ysel > 1023 then s_ym7 <= to_unsigned(1023, 10);
+      else                     s_ym7 <= unsigned(v_ysel(9 downto 0));
+      end if;
+      s_uc7 <= s_uc6;
+      s_vc7 <= s_vc6;
+      s_lnew7  <= s_lnew6;
+      s_gprev7 <= s_gprev6;
+
+      -- ---- T2g: four palette distances + luma-zone pick
       for i in 0 to 3 loop
-        s_dist(i) <= f_dist(s_ycon, s_mu_d1, s_mv_d1,
-                            C_CGA_PAL(to_integer(s_pal_sel))(i).y,
-                            C_CGA_PAL(to_integer(s_pal_sel))(i).u,
-                            C_CGA_PAL(to_integer(s_pal_sel))(i).v);
+        s_dist(i) <= f_dist(s_ym7, s_uc7, s_vc7, s_pe(i).y, s_pe(i).u, s_pe(i).v);
       end loop;
-
-      -- Luma-zone mapping: top 2 bits of contrast-adjusted Y pick the
-      -- palette entry whose luma rank matches.
-      s_luma_idx <= C_LUMA_MAP(to_integer(s_pal_sel))
-                              (to_integer(s_ycon(9 downto 8)));
-
-      -- Last field's palette index for this tile (bank mux after register)
-      if s_fparity = '0' then
-        s_grid_prev <= s_grid_rd_a;
+      if s_zone2 = '1' then
+        if s_ym7 >= 502 then s_luma_idx <= "01"; else s_luma_idx <= "00"; end if;
       else
-        s_grid_prev <= s_grid_rd_b;
+        if    s_ym7 < 283 then v_z := "00";
+        elsif s_ym7 < 502 then v_z := "01";
+        elsif s_ym7 < 721 then v_z := "10";
+        else                   v_z := "11";
+        end if;
+        s_luma_idx <= f_luma_map(s_pal2, v_z);
       end if;
+      s_ym8    <= s_ym7;
+      s_lnew8  <= s_lnew7;
+      s_gprev8 <= s_gprev7;
 
-      s_ycon_d1 <= s_ycon;
-
-      s_we_d4    <= s_we_d3;
-      s_wcol_d4  <= s_wcol_d3;
-      s_gaddr_d4 <= s_gaddr_d3;
-    end if;
-  end process p_t2b;
-
-  -- ==========================================================================
-  -- Pipeline T3: 4-way minimum -> palette index. Register buffer write.
-  -- ==========================================================================
-  p_t3a : process(clk)
-    variable v_chal : unsigned(1 downto 0);
-    variable v_min  : unsigned(6 downto 0);
-    variable v_pz   : unsigned(1 downto 0);
-    variable v_lo, v_hi, v_dy : unsigned(9 downto 0);
-  begin
-    if rising_edge(clk) then
-      -- Challenger: this frame's plain match
+      -- ---- T3a: challenger + incumbent distance
       v_min := s_dist(0); v_chal := "00";
       if s_dist(1) < v_min then v_min := s_dist(1); v_chal := "01"; end if;
       if s_dist(2) < v_min then v_min := s_dist(2); v_chal := "10"; end if;
       if s_dist(3) < v_min then v_min := s_dist(3); v_chal := "11"; end if;
-      if s_color_mode = '1' then
-        -- Luma mode: hysteresis is judged in LUMA-ZONE terms, not colour
-        -- distance (which could lock a cell against a legitimate zone
-        -- change).  Challenger distance 0 (its zone contains y); incumbent
-        -- distance = how far y sits OUTSIDE the stored entry's zone, in the
-        -- same 32-code units the Manhattan distances use, so T3b's margin
-        -- and debounce apply unchanged.  C_LUMA_MAP is its own inverse
-        -- (identity or middle-swap per palette), so it also maps the stored
-        -- entry index back to its zone.
-        v_pz := C_LUMA_MAP(to_integer(s_pal_sel))
-                          (to_integer(s_grid_prev(1 downto 0)));
-        v_lo := v_pz & "00000000";
-        v_hi := v_lo + 255;
-        if s_ycon_d1 < v_lo then
-          v_dy := v_lo - s_ycon_d1;
-        elsif s_ycon_d1 > v_hi then
-          v_dy := s_ycon_d1 - v_hi;
+      if s_luma_on = '1' then
+        -- Luma decisions: incumbent distance = how far y sits outside the
+        -- stored entry's zone, in the same 32-code units.
+        if s_zone2 = '1' then
+          v_pz := 4 + to_integer(s_gprev8(0 downto 0));
+        else
+          v_pz := to_integer(f_luma_map(s_pal2, s_gprev8(1 downto 0)));
+        end if;
+        v_lo := C_ZLO(v_pz);
+        v_hi := C_ZHI(v_pz);
+        if s_ym8 < v_lo then
+          v_dy := v_lo - s_ym8;
+        elsif s_ym8 > v_hi then
+          v_dy := s_ym8 - v_hi;
         else
           v_dy := (others => '0');
         end if;
@@ -674,70 +812,69 @@ begin
       else
         s_chal      <= v_chal;
         s_chal_dist <= v_min;
-        s_prev_dist <= s_dist(to_integer(s_grid_prev(1 downto 0)));
+        s_prev_dist <= s_dist(to_integer(s_gprev8(1 downto 0)));
       end if;
-      s_prev_d5   <= s_grid_prev(1 downto 0);
-      s_pend_d5   <= s_grid_prev(3 downto 2);
+      s_prev9 <= s_gprev8(1 downto 0);
+      s_pend9 <= s_gprev8(3 downto 2);
+      s_lnew9 <= s_lnew8;
 
-      s_we_d5    <= s_we_d4;
-      s_wcol_d5  <= s_wcol_d4;
-      s_gaddr_d5 <= s_gaddr_d4;
-    end if;
-  end process p_t3a;
-
-  -- ==========================================================================
-  -- Pipeline T3b: temporal hysteresis decision.  Keep last field's colour
-  -- for this tile unless the challenger beats it by the Stability margin.
-  -- Cannot oscillate on a static input (the incumbent only ever loses to a
-  -- strictly better match), and a garbage incumbent loses immediately.
-  -- Luma-zone mode bypasses it: judging the luma pick by full colour
-  -- distance could lock a cell against a legitimate zone change.
-  -- (Split from T3a: min-tree -> margin add/compare in one clock was the
-  -- HD critical path.)
-  -- ==========================================================================
-  p_t3b : process(clk)
-    variable v_idx, v_cur, v_pend : unsigned(1 downto 0);
-  begin
-    if rising_edge(clk) then
-      if s_margin = "000" or s_boot /= "11" then
-        -- Stability Off / bootstrap: plain match (luma mode included --
-        -- its challenger/distances are set in luma-zone terms in T3a)
+      -- ---- T3b: decision (margin 2 + debounce), buffer + grid writes
+      if s_dhyst = '0' then
         v_idx := s_chal; v_cur := s_chal; v_pend := s_chal;
-      elsif s_margin = "111" then
-        -- Freeze: hold the stored colour unconditionally
-        v_idx := s_prev_d5; v_cur := s_prev_d5; v_pend := s_pend_d5;
-      elsif resize(s_chal_dist, 8) + s_margin + 4 < resize(s_prev_dist, 8) then
-        -- Decisively better: switch immediately (keeps solid regions
-        -- rendering correctly even where several cells share a tile)
+      elsif resize(s_chal_dist, 8) + 6 < resize(s_prev_dist, 8) then
         v_idx := s_chal; v_cur := s_chal; v_pend := s_chal;
-      elsif resize(s_chal_dist, 8) + s_margin < resize(s_prev_dist, 8) then
-        -- Moderately better: DEBOUNCE -- adopt only if the same challenger
-        -- also won last field.  A cell straddling a colour edge alternates
-        -- challengers field to field, never confirms, and holds still --
-        -- this is the defence edge jitter needs that no margin can give.
-        if s_chal = s_pend_d5 then
-          v_idx := s_chal;    v_cur := s_chal;    v_pend := s_chal;
+      elsif resize(s_chal_dist, 8) + 2 < resize(s_prev_dist, 8) then
+        if s_chal = s_pend9 then
+          v_idx := s_chal;  v_cur := s_chal;  v_pend := s_chal;
         else
-          v_idx := s_prev_d5; v_cur := s_prev_d5; v_pend := s_chal;
+          v_idx := s_prev9; v_cur := s_prev9; v_pend := s_chal;
         end if;
       else
-        -- Not better by margin: hold and clear any pending challenger
-        v_idx := s_prev_d5; v_cur := s_prev_d5; v_pend := s_prev_d5;
+        v_idx := s_prev9; v_cur := s_prev9; v_pend := s_prev9;
       end if;
-      s_match_idx <= v_idx;
 
-      s_buf_we    <= s_we_d5;
-      s_buf_waddr <= s_wcol_d5;
-      s_buf_wdata <= v_idx;
+      if s_is_comp = '1' then
+        -- 4 consecutive dots -> one nibble, written at the group's last dot
+        if s_we(9) = '1' then
+          s_nib <= s_nib(1 downto 0) & v_idx(0);
+        end if;
+        if s_we(9) = '1' and s_wcol(9)(1 downto 0) = "11" then
+          s_buf_we <= '1';
+        else
+          s_buf_we <= '0';
+        end if;
+        s_buf_waddr <= "00" & s_wcol(9)(10 downto 2);
+        s_buf_wdata <= s_nib & v_idx(0);
+      else
+        s_buf_we    <= s_we(9);
+        s_buf_waddr <= s_wcol(9);
+        s_buf_wdata <= "00" & v_idx;
+      end if;
 
-      s_grid_we    <= s_we_d5;
-      s_grid_waddr <= s_gaddr_d5;
-      s_grid_wdata <= v_pend & v_cur;
+      s_grid_we    <= s_we(9);
+      s_grid_waddr <= s_gaddr(9);
+      if s_dith_on = '1' then
+        s_grid_wdata <= s_lnew9;
+      else
+        s_grid_wdata <= v_pend & v_cur;
+      end if;
+
+      -- write-side delay chains
+      s_we(2)   <= s_we1;
+      s_wcol(2) <= s_wcol1;
+      for i in 3 to 9 loop
+        s_we(i)   <= s_we(i - 1);
+        s_wcol(i) <= s_wcol(i - 1);
+      end loop;
+      s_gaddr(3) <= s_grid_raddr;
+      for i in 4 to 9 loop
+        s_gaddr(i) <= s_gaddr(i - 1);
+      end loop;
     end if;
-  end process p_t3b;
+  end process p_match;
 
   -- ==========================================================================
-  -- Per-cell-column palette-index BRAM
+  -- Per-column BRAM (1W1R)
   -- ==========================================================================
   p_buf : process(clk)
   begin
@@ -749,13 +886,10 @@ begin
     end if;
   end process p_buf;
 
-  s_buf_raddr <= s_cell_col;
+  s_buf_raddr <= "00" & s_cell_col(10 downto 2) when s_is_comp = '1'
+                 else s_cell_col;
 
-  -- ==========================================================================
-  -- Hysteresis grid banks.  Read bank = the one written LAST field, so read
-  -- and write never touch the same BRAM (no read-during-write collision).
-  -- Each bank: unconditional read + enabled write, 1W1R -> clean EBR inference.
-  -- ==========================================================================
+  -- Hysteresis grid banks: read the bank written LAST field (no collision).
   p_grid_a : process(clk)
   begin
     if rising_edge(clk) then
@@ -777,119 +911,129 @@ begin
   end process p_grid_b;
 
   -- ==========================================================================
-  -- Pipeline T4a: display palette-entry lookup (single muxed ROM read).
-  -- In pixelate mode the index comes from the per-column buffer; otherwise
-  -- from the per-pixel match (which lags the buffered path by 3 clocks --
-  -- a 3-pixel shift in Off mode, invisible at full resolution).
+  -- Display path: buffer read -> fabric registers (+ snow hash) -> palette
+  -- lookup -> saturation -> scanlines / blanking gate -> output.
   -- ==========================================================================
-  p_t4a : process(clk)
-    variable v_idx : unsigned(1 downto 0);
-  begin
-    if rising_edge(clk) then
-      if s_pixelate = '1' then
-        v_idx := s_buf_rdata;
-      else
-        v_idx := s_match_idx;
-      end if;
-      s_disp_y <= C_CGA_PAL(to_integer(s_pal_sel))(to_integer(v_idx)).y;
-      s_disp_u <= C_CGA_PAL(to_integer(s_pal_sel))(to_integer(v_idx)).u;
-      s_disp_v <= C_CGA_PAL(to_integer(s_pal_sel))(to_integer(v_idx)).v;
-    end if;
-  end process p_t4a;
-
-  -- ==========================================================================
-  -- Pipeline T4b: start saturation scaling (subtract 512, then 12x9 signed
-  -- multiply, 8-bit coefficient).  The slice/add/clamp is deferred to T5.
-  -- ==========================================================================
-  p_t4b : process(clk)
+  p_disp : process(clk)
+    variable v_g    : unsigned(8 downto 0);
+    variable v_k    : unsigned(23 downto 0);
+    variable v_n    : unsigned(3 downto 0);
+    variable v_e    : t_pal_entry;
     variable v_su, v_sv : signed(11 downto 0);
-    variable v_sat      : signed(8 downto 0);
+    variable v_sat  : signed(8 downto 0);
   begin
     if rising_edge(clk) then
+      s_bufq  <= s_buf_rdata;
+      s_bufq2 <= s_bufq;
+
+      -- CGA snow: a hashed 1-in-64 of the character-wide groups (4 cells;
+      -- 8 dots in the 640 modes) flash a random colour each field.
+      if s_zone2 = '1' then v_g := '0' & s_cell_col(10 downto 3);
+      else                  v_g := s_cell_col(10 downto 2);
+      end if;
+      v_k := s_fcount & s_cell_row & v_g;
+      s_sh1 <= v_k + shift_left(v_k, 7);
+      s_sh2 <= (s_sh1 xor rotate_left(s_sh1, 13)) + to_unsigned(16#5A3C95#, 24);
+      s_sh3 <= s_sh2 + shift_left(s_sh2, 3);
+
+      -- T4a: palette lookup (with snow override)
+      v_n := s_bufq2;
+      if s_snow_on = '1' and s_sh3(23 downto 18) = "000000" then
+        v_n := s_sh3(11 downto 8);
+        if s_is_comp = '0' and v_n(1 downto 0) = "00" then
+          v_n(1 downto 0) := "11";
+        end if;
+      end if;
+      if s_is_comp = '1' then
+        if s_color_mode = '1' then
+          v_n := v_n(1 downto 0) & v_n(3 downto 2);   -- burst phase flip
+        end if;
+        if v_n = "0000" then v_e := s_bg;
+        else                 v_e := C_COMPOSITE(to_integer(v_n));
+        end if;
+      else
+        v_e := s_pe(to_integer(v_n(1 downto 0)));
+      end if;
+      s_disp_y <= v_e.y;
+      s_disp_u <= v_e.u;
+      s_disp_v <= v_e.v;
+
+      -- T4b: saturation multiply (128 = unity)
       v_su  := signed(resize(s_disp_u, 12)) - to_signed(512, 12);
       v_sv  := signed(resize(s_disp_v, 12)) - to_signed(512, 12);
-      v_sat := signed('0' & s_saturation(9 downto 2));  -- 128 = unity
+      v_sat := signed('0' & s_osat);
       s_t4_su_prod <= v_su * v_sat;
       s_t4_sv_prod <= v_sv * v_sat;
       s_t4_y       <= s_disp_y;
     end if;
-  end process p_t4b;
+  end process p_disp;
 
-  -- ==========================================================================
-  -- Pipeline T5: finish saturation (slice/add/clamp), apply scanlines, output.
-  -- ==========================================================================
   p_t5 : process(clk)
     variable v_su_out, v_sv_out : signed(11 downto 0);
-    variable v_final_y : unsigned(9 downto 0);
+    variable v_yd : unsigned(9 downto 0);
     variable v_u, v_v : unsigned(9 downto 0);
     variable v_cu, v_cv : signed(10 downto 0);
+    variable v_dim : boolean;
   begin
     if rising_edge(clk) then
       v_su_out := s_t4_su_prod(18 downto 7) + to_signed(512, 12);
       v_sv_out := s_t4_sv_prod(18 downto 7) + to_signed(512, 12);
-
-      if    v_su_out < 0    then v_u := (others => '0');
-      elsif v_su_out > 1023 then v_u := to_unsigned(1023, 10);
-      else                       v_u := unsigned(v_su_out(9 downto 0));
+      -- Legal chroma range only (64..960): rail codes overdrive the encoders.
+      if    v_su_out < 64  then v_u := to_unsigned(64, 10);
+      elsif v_su_out > 960 then v_u := to_unsigned(960, 10);
+      else                      v_u := unsigned(v_su_out(9 downto 0));
       end if;
-      if    v_sv_out < 0    then v_v := (others => '0');
-      elsif v_sv_out > 1023 then v_v := to_unsigned(1023, 10);
-      else                       v_v := unsigned(v_sv_out(9 downto 0));
-      end if;
-
-      -- Scanlines: 25% dim (was a harsh 50%), and chroma excursion tracks
-      -- the same factor so dark lines keep the same hue/saturation balance
-      -- instead of reading as oversaturated stripes -- a more even texture.
-      v_final_y := s_t4_y;
-      if s_scanlines = '1' and s_pixel_y(0) = '1' then
-        v_final_y := v_final_y - (v_final_y srl 2);
-        v_cu := signed(resize(v_u, 11)) - to_signed(512, 11);
-        v_cu := v_cu - shift_right(v_cu, 2) + to_signed(512, 11);
-        v_u  := unsigned(v_cu(9 downto 0));
-        v_cv := signed(resize(v_v, 11)) - to_signed(512, 11);
-        v_cv := v_cv - shift_right(v_cv, 2) + to_signed(512, 11);
-        v_v  := unsigned(v_cv(9 downto 0));
+      if    v_sv_out < 64  then v_v := to_unsigned(64, 10);
+      elsif v_sv_out > 960 then v_v := to_unsigned(960, 10);
+      else                      v_v := unsigned(v_sv_out(9 downto 0));
       end if;
 
-      s_out_y <= v_final_y;
-      s_out_u <= v_u;
-      s_out_v <= v_v;
+      -- Scanlines on the CGA line grid: the bottom line of every block row
+      -- (cell_y = 0 is the displayed block's last line -- see header), 50%
+      -- for tall blocks, 25% where they'd alternate (V <= 2).  Dimming
+      -- pivots on black (64) / neutral chroma (512).
+      if s_v_size = 1 then
+        v_dim := s_act_row(0) = '1';
+      else
+        v_dim := s_cell_y = 0;
+      end if;
+      v_yd := s_t4_y - 64;
+      v_cu := signed(resize(v_u, 11)) - to_signed(512, 11);
+      v_cv := signed(resize(v_v, 11)) - to_signed(512, 11);
+      if s_scanlines = '1' and v_dim then
+        if s_v_size <= 2 then
+          v_yd := v_yd - (v_yd srl 2);
+          v_cu := v_cu - shift_right(v_cu, 2);
+          v_cv := v_cv - shift_right(v_cv, 2);
+        else
+          v_yd := v_yd srl 1;
+          v_cu := shift_right(v_cu, 1);
+          v_cv := shift_right(v_cv, 1);
+        end if;
+      end if;
+
+      -- Blanking gate (latency-aligned avid) + blank the field's first
+      -- line, which shows the previous field's bottom row.
+      if s_avid_sr(C_LATENCY - 2) = '0' or s_act_row = 0 then
+        s_out_y <= to_unsigned(64, 10);
+        s_out_u <= to_unsigned(512, 10);
+        s_out_v <= to_unsigned(512, 10);
+      else
+        v_cu := v_cu + to_signed(512, 11);
+        v_cv := v_cv + to_signed(512, 11);
+        s_out_y <= v_yd + 64;
+        s_out_u <= unsigned(v_cu(9 downto 0));
+        s_out_v <= unsigned(v_cv(9 downto 0));
+      end if;
     end if;
   end process p_t5;
 
   -- ==========================================================================
-  -- Interpolator (wet/dry mix)
-  -- ==========================================================================
-  interp_y : entity work.interpolator_u
-    generic map(G_WIDTH => 10, G_FRAC_BITS => 8,
-                G_OUTPUT_MIN => 0, G_OUTPUT_MAX => 1023)
-    port map(clk => clk, enable => '1',
-             a => unsigned(s_yuv_sr(5).y), b => s_out_y, t => s_mix_t,
-             result => s_interp_y_result, valid => open);
-
-  interp_u : entity work.interpolator_u
-    generic map(G_WIDTH => 10, G_FRAC_BITS => 8,
-                G_OUTPUT_MIN => 0, G_OUTPUT_MAX => 1023)
-    port map(clk => clk, enable => '1',
-             a => unsigned(s_yuv_sr(5).u), b => s_out_u, t => s_mix_t,
-             result => s_interp_u_result, valid => open);
-
-  interp_v : entity work.interpolator_u
-    generic map(G_WIDTH => 10, G_FRAC_BITS => 8,
-                G_OUTPUT_MIN => 0, G_OUTPUT_MAX => 1023)
-    port map(clk => clk, enable => '1',
-             a => unsigned(s_yuv_sr(5).v), b => s_out_v, t => s_mix_t,
-             result => s_interp_v_result, valid => open);
-
-  -- ==========================================================================
   -- Output
   -- ==========================================================================
-  data_out.y <= s_yuv_sr(C_LATENCY - 1).y when s_bypass = '1'
-                else std_logic_vector(s_interp_y_result);
-  data_out.u <= s_yuv_sr(C_LATENCY - 1).u when s_bypass = '1'
-                else std_logic_vector(s_interp_u_result);
-  data_out.v <= s_yuv_sr(C_LATENCY - 1).v when s_bypass = '1'
-                else std_logic_vector(s_interp_v_result);
+  data_out.y <= std_logic_vector(s_out_y);
+  data_out.u <= std_logic_vector(s_out_u);
+  data_out.v <= std_logic_vector(s_out_v);
 
   data_out.hsync_n <= s_hsync_sr(C_LATENCY - 1);
   data_out.vsync_n <= s_vsync_sr(C_LATENCY - 1);

@@ -32,7 +32,7 @@ url = "https://github.com/bluecondition/videomancer-dev"
 parameter_id = "rotary_potentiometer_1"
 name_label = "Texture A"
 value_labels = ["Circles", "Squares", "Spokes", "Wavy H", "Wavy V",
-                "Diagonal", "Grid", "Hex", "Checker", "Brick"]
+                "Diagonal", "Anti-Diag", "Grid", "Hex", "Checker"]
 initial_value_label = "Circles"
 
 [[parameter]]
@@ -51,7 +51,7 @@ parameter_id = "rotary_potentiometer_3"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 512
+initial_value = 538
 display_min_value = -100
 display_max_value = 100
 name_label = "Phase A"
@@ -63,7 +63,7 @@ suffix_label = "%"
 parameter_id = "rotary_potentiometer_4"
 name_label = "Texture B"
 value_labels = ["Circles", "Squares", "Spokes", "Wavy H", "Wavy V",
-                "Diagonal", "Grid", "Hex", "Checker", "Brick"]
+                "Diagonal", "Anti-Diag", "Grid", "Hex", "Checker"]
 initial_value_label = "Circles"
 
 [[parameter]]
@@ -71,7 +71,7 @@ parameter_id = "rotary_potentiometer_5"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 560
+initial_value = 440
 display_min_value = 0
 display_max_value = 100
 name_label = "Scale B"
@@ -82,23 +82,23 @@ parameter_id = "rotary_potentiometer_6"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 512
+initial_value = 543
 display_min_value = -100
 display_max_value = 100
 name_label = "Phase B"
 suffix_label = "%"
 
-# --- Performance slider: Y phase of layer B (relative phase is what beats) --
+# --- Performance slider: Sweep = Y phase of layer B (relative phase is what beats)
 
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 512
+initial_value = 322
 display_min_value = -100
 display_max_value = 100
-name_label = "Y Phase B"
+name_label = "Sweep"
 suffix_label = "%"
 
 # --- Switches --------------------------------------------------------------
@@ -119,7 +119,7 @@ initial_value_label = "Over"
 parameter_id = "toggle_switch_8"
 name_label = "Fringe"
 value_labels = ["Solid", "Fringe"]
-initial_value_label = "Solid"
+initial_value_label = "Fringe"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
@@ -131,124 +131,10 @@ initial_value_label = "Bold"
 parameter_id = "toggle_switch_10"
 name_label = "Ground"
 value_labels = ["Black", "White"]
-initial_value_label = "White"
+initial_value_label = "Black"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
 name_label = "Colour"
 value_labels = ["Mono", "Colour"]
 initial_value_label = "Mono"
-
-# --- Presets ---------------------------------------------------------------
-
-# Rings: the power-up state -- two circle fields beating into concentric moire.
-[[preset]]
-name = "Rings"
-rotary_potentiometer_1 = 51
-rotary_potentiometer_2 = 512
-rotary_potentiometer_3 = 512
-rotary_potentiometer_4 = 51
-rotary_potentiometer_5 = 560
-rotary_potentiometer_6 = 512
-linear_potentiometer_12 = 512
-toggle_switch_7 = 0
-toggle_switch_8 = 0
-toggle_switch_9 = 0
-toggle_switch_10 = 1
-toggle_switch_11 = 0
-
-# Riley Weave: two wavy fields XORed -- the fringe reads as a woven band.
-[[preset]]
-name = "Riley Weave"
-rotary_potentiometer_1 = 461
-rotary_potentiometer_2 = 600
-rotary_potentiometer_3 = 512
-rotary_potentiometer_4 = 461
-rotary_potentiometer_5 = 606
-rotary_potentiometer_6 = 512
-linear_potentiometer_12 = 512
-toggle_switch_7 = 0
-toggle_switch_8 = 1
-toggle_switch_9 = 0
-toggle_switch_10 = 1
-toggle_switch_11 = 0
-
-# Screen Clash: two grids intersected on Fine -- sparse jewels at the beats.
-[[preset]]
-name = "Screen Clash"
-rotary_potentiometer_1 = 666
-rotary_potentiometer_2 = 700
-rotary_potentiometer_3 = 512
-rotary_potentiometer_4 = 666
-rotary_potentiometer_5 = 712
-rotary_potentiometer_6 = 540
-linear_potentiometer_12 = 620
-toggle_switch_7 = 1
-toggle_switch_8 = 0
-toggle_switch_9 = 1
-toggle_switch_10 = 1
-toggle_switch_11 = 0
-
-# Two Colour Press: circles over circles in subtractive process ink.
-[[preset]]
-name = "Two Colour"
-rotary_potentiometer_1 = 51
-rotary_potentiometer_2 = 560
-rotary_potentiometer_3 = 470
-rotary_potentiometer_4 = 51
-rotary_potentiometer_5 = 596
-rotary_potentiometer_6 = 554
-linear_potentiometer_12 = 512
-toggle_switch_7 = 0
-toggle_switch_8 = 0
-toggle_switch_9 = 0
-toggle_switch_10 = 1
-toggle_switch_11 = 1
-
-# Light Mix: spokes and circles in additive light on black.
-[[preset]]
-name = "Light Mix"
-rotary_potentiometer_1 = 256
-rotary_potentiometer_2 = 700
-rotary_potentiometer_3 = 512
-rotary_potentiometer_4 = 51
-rotary_potentiometer_5 = 640
-rotary_potentiometer_6 = 512
-linear_potentiometer_12 = 512
-toggle_switch_7 = 0
-toggle_switch_8 = 0
-toggle_switch_9 = 0
-toggle_switch_10 = 0
-toggle_switch_11 = 1
-
-# Carved Tile: honeycomb cut by brick, on black.
-[[preset]]
-name = "Carved Tile"
-rotary_potentiometer_1 = 768
-rotary_potentiometer_2 = 760
-rotary_potentiometer_3 = 512
-rotary_potentiometer_4 = 973
-rotary_potentiometer_5 = 740
-rotary_potentiometer_6 = 520
-linear_potentiometer_12 = 560
-toggle_switch_7 = 1
-toggle_switch_8 = 1
-toggle_switch_9 = 0
-toggle_switch_10 = 0
-toggle_switch_11 = 0
-
-# Slow Sweep: coarse circles against squares -- one slider pass is a whole cycle.
-[[preset]]
-name = "Slow Sweep"
-rotary_potentiometer_1 = 51
-rotary_potentiometer_2 = 180
-rotary_potentiometer_3 = 512
-rotary_potentiometer_4 = 154
-rotary_potentiometer_5 = 200
-rotary_potentiometer_6 = 512
-linear_potentiometer_12 = 512
-toggle_switch_7 = 0
-toggle_switch_8 = 0
-toggle_switch_9 = 0
-toggle_switch_10 = 1
-toggle_switch_11 = 0

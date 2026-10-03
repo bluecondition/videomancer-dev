@@ -9,7 +9,7 @@
 
 [program]
 program_id = "com.bluecondition.gumball"
-program_version = "0.1.0"
+program_version = "1.0.1"
 abi_version = ">=1.0,<2.0"
 program_name = "Gumball"
 author = "bluecondition"

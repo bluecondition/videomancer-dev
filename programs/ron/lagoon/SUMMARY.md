@@ -50,7 +50,15 @@ sidewinder's dual-bank line-buffer displacement engine.
    measured lines-per-field, so the gradient depth-matches SD/HD.
 4. **Tint** (K5): U/V lerp toward the S7 target (Aqua or Abyss) through two
    interpolator_u instances; Y rides a matched 4-deep delay.
-5. **Depth** (P12): master dry/wet mix (3 interpolators) — the headline
+5. **Prism** (S11, v1.4.0): chromatic refraction — U and V read the line
+   buffer at their own displaced addresses, split to either side of luma:
+   U reads 2× the ripple and V none (pure shifts of the single ripple
+   product, so ±1× ripple dispersion with no extra multiply), plus ±¼ of
+   the swell and a fixed ±4 px split (per-line bases from the hblank
+   sequencer) so the switch shows even with Ripple/Waves at 0. Each
+   channel clamps to [C_LEDGE, width]; the left fill still keys off luma.
+   Replaced v1.3's Bypass, which duplicated Depth = 0.
+6. **Depth** (P12): master dry/wet mix (3 interpolators) — the headline
    fader, from clean video down into the deep.
 
 ## Controls
@@ -67,7 +75,7 @@ sidewinder's dual-bank line-buffer displacement engine.
 | S8 | Glitter | twinkling blown-white caustic cores |
 | S9 | Murk | depth-gradient darkening |
 | S10 | Sea | Calm / Storm (swell 3rd harmonic, 1.5× amp, 2× rate) |
-| S11 | Bypass | |
+| S11 | Prism | chromatic refraction: U/V split around luma |
 | P12 | Depth | master dry→wet fader |
 
 ## Colour convention
@@ -101,10 +109,21 @@ warm/olive in sim — correct on hardware.
   stand-in; real cellular noise would need per-pixel hash + min-distance.
 - **Bubbles / particles** — could fork fireworks' counter-rasterized
   sprites as a rising-bubble layer (line-buffer sprite engine).
-- **Chromatic refraction** (offset U/V read address a few px from Y) —
-  cheap to add: second clamp + separate UV pointer; candidate for v1.1.
+- **Chromatic refraction** — DONE in v1.4.0 as S11 Prism.
 - **Waterline mode** (top of screen dry, effect ramps in below a K-set
   line) — murk accumulator already gives the vertical ramp hook.
+
+## Timing / build (v1.4.0, 2026-09-27)
+
+Prism added ~270 LCs: 6352 LCs (83%), 23 EBR. `SEED=9 ./build_programs.sh
+ron lagoon`: hd_hdmi seed 12 (74.40), hd_dual seed 11 (76.27); hd_analog
+MISSED on all builder seeds 9-14 (71.75 best-effort). An 8-seed spread on
+the hd_analog netlist ran 69.5-76.1 MHz (3/8 pass); critical paths are
+the depth-mix interpolator and the per-line s_prod_c1 multiply, NOT the
+Prism adders -- placement noise. Shipped vmprog has hd_analog seed 4
+(76.10) hand-installed + repacked. A plain builder rerun will NOT
+reproduce it (seeds 9-14 miss hd_analog); use the solo-rebuild + repack
+recipe.
 
 ## Timing / build (v1.3.0, 2026-07-12)
 
@@ -129,6 +148,9 @@ Timing-closure history (44 -> pass on HD configs):
    grep for "Max frequency" generically when verifying.
 
 ## Status
+
+- **v1.4.0 (2026-09-27)** — S11 Bypass → Prism (chromatic refraction).
+  Not yet HW-tested.
 
 - **v1.3.1 COMPLETE 2026-07-12** — HW-validated and user-approved through five
   rounds of hardware iteration (caustic brightness, checkerboard dither,

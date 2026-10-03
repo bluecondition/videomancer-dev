@@ -8,28 +8,23 @@
 -- MANUAL/AUTO modes and the solver stack on top of this datapath in later
 -- stages (see SUMMARY.md).
 --
--- ARCHITECTURE (streaming, no line buffer):
---   FRAME FSM (vblank): glide the three angles, rotate the cube basis
---     (quarter-sine ROM + shared multiplier), project the 8 corners
---     (serial divider), auto-zoom, backface-cull the 6 faces by screen
---     winding, and for each visible face (<= 3) write a record to the
---     GEOMETRY EBR: screen edge table + the projective inverse vectors
---       A = (C-O) x V,   B = U x (C-O),   N = U x V     (block-float/face)
---     so that   u = d.A / d.N,  v = d.B / d.N   with  d = (px, -py, -f).
---     uw/vw/w are LINEAR in screen x -- the whole perspective problem
---     collapses to two multiplies per attribute per line + one serial
---     divide per 64 px node (128 px on SD: an 858-clock line budget).
---   LINE FSM (runs during line y for line y+1): reads the geometry EBR,
---     intersects the <=3 spans, walks each span in 64 px segments emitting
---     5-word records (x, u0, v0, du, dv) into the double-buffered DISPLAY
---     LIST EBR (halves by line parity).  Spans are padded +/-2 px so
---     silhouette AA can ramp out; min segment spacing ~32 px guarantees
---     the pixel-side prefetcher always has time.
---   PIXEL PIPE (C_LATENCY stages): ONE u/v DDA fed by the display list,
---     rounded-rect SDFs for sticker / cubie gaps / face bevel + silhouette
---     (all sqrt-free: squared distances linearized near the zero crossing,
---     pipedream band trick), per-face flat lighting (v0.1), backdrop from
---     pure second-difference accumulators, alpha compose, blanking gate.
+-- ARCHITECTURE (streaming, no line buffer; orthographic camera):
+--   GEOMETRY ENGINE (vblank): a small microcoded processor (frame_ucode.py,
+--     assembled by uasm.py, checked by uemu.py) glides the three angles,
+--     rotates the cube basis, auto-zooms, culls, and for each visible face
+--     (<= 3 slots) writes the per-slot descriptors (H projections, light,
+--     albedo, chroma) and the face's affine UV map: gradient, field seed and
+--     per-line wrap for u and v.  ~9,500 clocks per field.
+--   PER-FACE DDAs (p_dda): six accumulators, u and v of every visible face,
+--     stepped per active pixel and wrapped once per line.  The owner of a
+--     pixel is whichever face's (u, v) lies inside the square -- the faces of
+--     a convex solid never overlap on screen -- with a 64-unit padded
+--     fallback for crease pixels that independent rounding leaves unclaimed.
+--   PIXEL PIPE (C_LATENCY stages): cell split, rounded-rect SDFs for sticker
+--     / cubie gaps / face bevel + silhouette (sqrt-free: squared distances by
+--     table, linearized near the zero crossing), half-vector tilt/specular
+--     rig, analytic AA, gradient + vignette backdrop, alpha compose,
+--     blanking gate.
 --
 -- Q formats: angles 12b/turn; sin/cos Q12; basis vectors Q2.12; cube spans
 -- +/-1.5 units (one cubie = 4096); camera at D = 13.0 (Q12).  UV in Q12
@@ -47,7 +42,7 @@ use work.video_stream_pkg.all;
 
 architecture cubist of program_top is
 
-    constant C_LATENCY : integer := 12;
+    constant C_LATENCY : integer := 16;
 
     ----------------------------------------------------------------------
     -- geometry constants (Q12 cubie units)
@@ -61,6 +56,7 @@ architecture cubist of program_top is
     constant C_RS    : integer := 348;           -- sticker corner radius
     constant C_RS2   : integer := 15138;         -- C_RS^2 >> 3 (ROM domain)
     constant C_INSET : integer := 98;            -- silhouette inset 0.024
+    constant C_CRH   : integer := 32;            -- outline-corner bevel half-leg
     constant C_SEW   : integer := 123;           -- sticker edge bevel 0.030
     constant C_AMB   : integer := 62;            -- ambient, linear Q8
     constant C_SEDEF : integer := 55;            -- sticker rim light deficit
@@ -121,6 +117,102 @@ architecture cubist of program_top is
         elsif v > 1023 then return to_unsigned(1023, 10);
         else return resize(unsigned(v), 10); end if;
     end function;
+
+    -- (u or v) of one face DDA inside [0, 3 cubies)?  Q8 when e = '0', and
+    -- integer units when e = '1' (a steep face, gradient block-floated by 8)
+    -- (u or v) of one face DDA inside [0, n cubies)?  Q6 units when e = '0',
+    -- whole units when e = '1' (a steep face, block-floated by 6)
+    -- (u or v) of one face DDA inside [0, n cubies)?  Q6 units when e = '0',
+    -- whole units when e = '1' (a steep face, block-floated by 6).  Written
+    -- as zero tests plus a 2-bit compare: as magnitude compares they became
+    -- 24 carry chains.
+    function f_inside(a : signed(26 downto 0); e : std_logic;
+                      n : unsigned(1 downto 0)) return boolean is
+    begin
+        if a(26) = '1' then return false; end if;
+        if e = '0' then return a(25 downto 20) = 0 and unsigned(a(19 downto 18)) < n;
+        else            return a(25 downto 14) = 0 and unsigned(a(13 downto 12)) < n; end if;
+    end function;
+
+    -- the same test widened by 64 units each side: the fallback owner for a
+    -- pixel on a crease that both faces' independently-rounded DDAs reject
+    function f_inpad(a : signed(26 downto 0); e : std_logic;
+                     n : unsigned(1 downto 0)) return boolean is
+    begin
+        if e = '0' then
+            if a(26) = '1' then return a(25 downto 12) = -1; end if;
+            return a(25 downto 20) = 0
+                   and (unsigned(a(19 downto 18)) < n
+                        or (unsigned(a(19 downto 18)) = n and a(17 downto 12) = 0));
+        else
+            if a(26) = '1' then return a(25 downto 6) = -1; end if;
+            return a(25 downto 14) = 0
+                   and (unsigned(a(13 downto 12)) < n
+                        or (unsigned(a(13 downto 12)) = n and a(11 downto 6) = 0));
+        end if;
+    end function;
+
+    -- index of the lowest set bit of a 6-bit vector (0 if none)
+    function f_first6(v : std_logic_vector(5 downto 0)) return unsigned is
+    begin
+        if    v(0) = '1' then return "000";
+        elsif v(1) = '1' then return "001";
+        elsif v(2) = '1' then return "010";
+        elsif v(3) = '1' then return "011";
+        elsif v(4) = '1' then return "100";
+        else                  return "101"; end if;
+    end function;
+
+    -- two or more bits set
+    function f_two6(v : std_logic_vector(5 downto 0)) return boolean is
+        variable c : integer range 0 to 6;
+    begin
+        c := 0;
+        for k in 0 to 5 loop
+            if v(k) = '1' then c := c + 1; end if;
+        end loop;
+        return c >= 2;
+    end function;
+
+    function f_uvsl(a : signed(26 downto 0); e : std_logic) return signed is
+    begin
+        if e = '1' then return a(15 downto 0);
+        else            return a(21 downto 6); end if;
+    end function;
+
+    -- Cell split by bit slicing.  One cubie is 4096 units, so the cell is
+    -- bits 13..12 and the in-cell coordinate p = low 12 bits - 2048.  The
+    -- two distances every zone needs come straight off the low 11 bits:
+    --   d = 2048 - |p|  (to the nearest grid line)
+    --   q = |p| - HSRS  (past the sticker inset)
+    -- each two parallel subtracts and a mux, instead of abs -> subtract ->
+    -- clamp in series.  Out of range (the one-pixel ownership lag) clamps
+    -- to the face edge, which is what the old saturating chain produced.
+    procedure p_cell(x : in signed(15 downto 0); n : in unsigned(1 downto 0);
+                     d : out unsigned(11 downto 0); q : out signed(11 downto 0);
+                     ng : out std_logic; cell : out unsigned(1 downto 0)) is
+        variable m : unsigned(11 downto 0);
+    begin
+        m := resize(unsigned(x(10 downto 0)), 12);
+        if x(15) = '1' then
+            d := (others => '0'); q := to_signed(643, 12); ng := '1'; cell := "00";
+        elsif unsigned(x(14 downto 12)) >= n then       -- past the far edge
+            d := (others => '0'); q := to_signed(643, 12); ng := '0'; cell := n - 1;
+        else
+            cell := unsigned(x(13 downto 12));
+            if x(11) = '1' then
+                d := to_unsigned(2048, 12) - m;
+                q := signed(m) - to_signed(C_HSRS, 12);
+                ng := '0';
+            else
+                d := m;
+                q := to_signed(2048 - C_HSRS, 12) - signed(m);
+                ng := '1';
+            end if;
+        end if;
+    end procedure;
+
+
 
     ----------------------------------------------------------------------
     -- sticker colors, 10-bit BT.601 (chroma centred 512), by face id
@@ -348,8 +440,6 @@ architecture cubist of program_top is
         to_unsigned(  242,8), to_unsigned(  243,8), to_unsigned(  243,8), to_unsigned(  244,8), to_unsigned(  244,8), to_unsigned(  245,8), to_unsigned(  245,8), to_unsigned(  246,8), to_unsigned(  246,8), to_unsigned(  247,8), to_unsigned(  247,8), to_unsigned(  248,8),
         to_unsigned(  248,8), to_unsigned(  249,8), to_unsigned(  249,8), to_unsigned(  249,8), to_unsigned(  250,8), to_unsigned(  250,8), to_unsigned(  251,8), to_unsigned(  251,8), to_unsigned(  252,8), to_unsigned(  252,8), to_unsigned(  253,8), to_unsigned(  253,8),
         to_unsigned(  254,8), to_unsigned(  254,8), to_unsigned(  255,8), to_unsigned(  255,8) );
-
-
     ----------------------------------------------------------------------
     -- face tables (single chunk).  Face axes as +/- axis codes 0..5 =
     -- +x,-x,+y,-y,+z,-z.  n = Uv x Vv (matches the python model FACES).
@@ -399,6 +489,20 @@ architecture cubist of program_top is
     signal s_field      : std_logic := '0';   -- latched field_n at vsync
 
     signal s_k1, s_k2, s_k3 : unsigned(9 downto 0) := to_unsigned(512, 10);
+    signal s_sw   : std_logic_vector(4 downto 0) := "00001";
+    signal s_sld  : unsigned(9 downto 0) := to_unsigned(512, 10);
+    signal s_lfsr : unsigned(15 downto 0) := x"ACE1";
+    signal s_estart, s_earm : std_logic := '0';
+    signal s_idle : unsigned(12 downto 0) := (others => '0');
+    -- line width latched for the field: the DDAs step exactly this many
+    -- times per line and the engine's line wrap uses the same value
+    signal s_Wl   : unsigned(11 downto 0) := to_unsigned(720, 12);
+    signal dd_x   : unsigned(11 downto 0) := (others => '0');
+    signal dd_run, dd_wrap : std_logic := '0';
+    -- generated avid (see p_measure): parity-locked start, ends with the DDA
+    signal g_ph, g_arm, g_par, g_sel, g_avid, g_avid_q : std_logic := '0';
+    signal g_rsr : std_logic_vector(2 downto 0) := (others => '0');
+    signal g_pc  : unsigned(3 downto 0) := "1000";
 
     ----------------------------------------------------------------------
     -- FRAME FSM
@@ -426,6 +530,13 @@ architecture cubist of program_top is
     signal mu_ac  : signed(31 downto 0) := (others => '0');
     signal mu_cnt : unsigned(3 downto 0) := (others => '0');
     signal mu_idle : std_logic := '1';
+    -- right-shifting serial multiplier: the addend (sign already folded in)
+    -- holds still and the product shifts down past it, so the adder is 20
+    -- bits instead of 32 and there is no output negation
+    signal mu_pa : signed(19 downto 0) := (others => '0');
+    signal mu_ph : signed(21 downto 0) := (others => '0');
+    signal mu_bp : std_logic := '0';
+    signal mu_pl : unsigned(15 downto 0) := (others => '0');
 
     signal dv_na : unsigned(33 downto 0) := (others => '0');
     signal dv_da : unsigned(20 downto 0) := (others => '1');
@@ -509,7 +620,10 @@ architecture cubist of program_top is
     -- only a shift-add tree
     signal s_pxm   : unsigned(1 downto 0) := (others => '0');
     signal s_pxe   : integer range 0 to 5 := 3;   -- actual shift = 3 + s_pxe
-    signal s_nslot : unsigned(1 downto 0) := (others => '0');
+    signal s_nslot : unsigned(2 downto 0) := (others => '0');
+    -- per-slot face extent in cubies (1..3), for the stage-A limits
+    type t_sl6u2 is array (0 to 5) of unsigned(1 downto 0);
+    signal sl_nu, sl_nv : t_sl6u2 := (others => "11");
 
     -- frame FSM loop counters / scratch
     signal fr_i    : unsigned(3 downto 0) := (others => '0');
@@ -565,6 +679,187 @@ architecture cubist of program_top is
     signal d_we : std_logic := '0';
     signal d_ra : unsigned(7 downto 0) := (others => '0');
     signal d_rd : std_logic_vector(15 downto 0) := (others => '0');
+
+    ----------------------------------------------------------------------
+    -- PER-FACE AFFINE DDAs (replace the line engine + display list)
+    -- wram: 0..11 wrap step, 16..27 field seed, 32..43 gx  (index 2*slot+coord)
+    ----------------------------------------------------------------------
+    type t_acc12 is array (0 to 11) of signed(26 downto 0);
+    signal dd_acc : t_acc12 := (others => (others => '0'));
+    signal dd_gx  : t_acc12 := (others => (others => '0'));
+    signal dd_e   : std_logic_vector(11 downto 0) := (others => '0');
+    signal dd_kick : std_logic := '0';
+    signal dq_run, dq_seed : std_logic := '0';
+    signal dq_v1, dq_v2, dq_k1, dq_k2, dq_st : std_logic := '0';
+    signal dq_t : unsigned(4 downto 0) := (others => '0');
+    signal dq_a1, dq_a2, dq_a3 : unsigned(3 downto 0) := (others => '0');
+    type t_wram is array (0 to 255) of std_logic_vector(31 downto 0);
+    signal wram : t_wram := (others => (others => '0'));
+    attribute ram_style of wram : signal is "block";
+    signal w_wa, w_ra : unsigned(7 downto 0) := (others => '0');
+    signal w_wd, w_rd : std_logic_vector(31 downto 0) := (others => '0');
+    signal w_we : std_logic := '0';
+    signal a_cr, a_cp : std_logic_vector(5 downto 0) := (others => '0');
+    signal a_own : unsigned(2 downto 0) := (others => '0');   -- owner slot
+    signal a_any, a_bh : std_logic := '0';
+
+    ----------------------------------------------------------------------
+    -- per-slot descriptors in block RAM, each read at the stage that uses
+    -- it (3 live words of 256).  As register files they cost a flip-flop
+    -- per bit per slot plus a 3:1 mux per read, ~300 cells in all.
+    --   sd_h1: hu(10) & hn(5:0)    sd_h2: hv(10) & hn(9:6)     (stage E)
+    --   sd_lf: ly>>2 (8) & lf (8)                                (stage G)
+    --   sd_cv: cv>>2 (8) & cu>>2 (8)                             (stage L)
+    ----------------------------------------------------------------------
+    type t_sd is array (0 to 255) of std_logic_vector(15 downto 0);
+    -- generated by regen_ucode.py: sticker state + turn tables, and sticker
+    -- chroma by (light level, colour)
+    constant C_TABLE : t_sd := (
+        x"0000", x"0000", x"0000", x"0000", x"0000", x"0000", x"0000", x"0000", x"0000", x"0001", x"0001", x"0001",
+        x"0001", x"0001", x"0001", x"0001", x"0001", x"0001", x"0002", x"0002", x"0002", x"0002", x"0002", x"0002",
+        x"0002", x"0002", x"0002", x"0003", x"0003", x"0003", x"0003", x"0003", x"0003", x"0003", x"0003", x"0003",
+        x"0004", x"0004", x"0004", x"0004", x"0004", x"0004", x"0004", x"0004", x"0004", x"0005", x"0005", x"0005",
+        x"0005", x"0005", x"0005", x"0005", x"0005", x"0005", x"0000", x"0000", x"0000", x"0002", x"0008", x"0006",
+        x"0001", x"0005", x"0007", x"0003", x"0014", x"002F", x"0023", x"002C", x"0017", x"0032", x"0022", x"002B",
+        x"001A", x"0035", x"0021", x"002A", x"0009", x"000F", x"0011", x"000B", x"000A", x"000C", x"0010", x"000E",
+        x"0012", x"002D", x"001D", x"0026", x"0015", x"0030", x"001C", x"0025", x"0018", x"0033", x"001B", x"0024",
+        x"0006", x"002C", x"0011", x"0033", x"0007", x"0029", x"000E", x"0034", x"0008", x"0026", x"000B", x"0035",
+        x"0012", x"0014", x"001A", x"0018", x"0013", x"0017", x"0019", x"0015", x"0000", x"002A", x"000F", x"002D",
+        x"0001", x"0027", x"000C", x"002E", x"0002", x"0024", x"0009", x"002F", x"001B", x"0021", x"0023", x"001D",
+        x"001C", x"001E", x"0022", x"0020", x"0002", x"001D", x"0011", x"001A", x"0005", x"0020", x"0010", x"0019",
+        x"0008", x"0023", x"000F", x"0018", x"0024", x"0026", x"002C", x"002A", x"0025", x"0029", x"002B", x"0027",
+        x"0000", x"001B", x"000B", x"0014", x"0003", x"001E", x"000A", x"0013", x"0006", x"0021", x"0009", x"0012",
+        x"002D", x"0033", x"0035", x"002F", x"002E", x"0030", x"0034", x"0032", x"0000", x"003F", x"0014", x"0021",
+        x"002A", x"002F", x"003F", x"0009", x"0012", x"001B", x"0024", x"002D", x"003F", x"0009", x"0012", x"001B",
+        x"0024", x"002D", x"0000", x"003F", x"0013", x"001E", x"0027", x"002E", x"0006", x"000B", x"0012", x"003F",
+        x"0026", x"0033", x"0000", x"0009", x"003F", x"001B", x"0024", x"002D", x"0000", x"0009", x"003F", x"001B",
+        x"0024", x"002D", x"0003", x"000A", x"0012", x"003F", x"0025", x"0030", x"0002", x"000F", x"0018", x"001D",
+        x"0024", x"003F", x"0000", x"0009", x"0012", x"001B", x"003F", x"002D", x"0000", x"0009", x"0012", x"001B",
+        x"003F", x"002D", x"0001", x"000C", x"0015", x"001C", x"0024", x"003F", x"04E5", x"0953", x"0941", x"0065",
+        x"0053", x"04C1", x"0000", x"0000" );
+    constant C_CHROMA : t_sd := (
+        x"8080", x"963C", x"AF77", x"B555", x"547D", x"62A6", x"8080", x"8080", x"8080", x"963B", x"AF77", x"B654",
+        x"537D", x"62A7", x"8080", x"8080", x"8080", x"973A", x"B077", x"B753", x"527D", x"61A8", x"8080", x"8080",
+        x"8080", x"9738", x"B177", x"B852", x"517D", x"61A8", x"8080", x"8080", x"8080", x"9737", x"B277", x"B952",
+        x"507D", x"60A9", x"8080", x"8080", x"8080", x"9836", x"B376", x"BA51", x"507D", x"60AA", x"8080", x"8080",
+        x"8080", x"9835", x"B476", x"BB50", x"4F7D", x"5FAB", x"8080", x"8080", x"8080", x"9933", x"B576", x"BC4F",
+        x"4E7D", x"5EAB", x"8080", x"8080", x"8080", x"9932", x"B676", x"BD4F", x"4D7D", x"5EAC", x"8080", x"8080",
+        x"8080", x"9931", x"B676", x"BE4E", x"4C7D", x"5DAD", x"8080", x"8080", x"8080", x"9A30", x"B776", x"BF4D",
+        x"4B7C", x"5DAD", x"8080", x"8080", x"8080", x"9A2E", x"B876", x"C04C", x"4B7C", x"5CAE", x"8080", x"8080",
+        x"8080", x"9B2D", x"B975", x"C14B", x"4A7C", x"5CAF", x"8080", x"8080", x"8080", x"9B2C", x"BA75", x"C24B",
+        x"497C", x"5BB0", x"8080", x"8080", x"8080", x"9C2B", x"BB75", x"C34A", x"487C", x"5BB0", x"8080", x"8080",
+        x"8080", x"9C29", x"BC75", x"C449", x"477C", x"5AB1", x"8080", x"8080", x"8080", x"9C28", x"BC75", x"C548",
+        x"477C", x"5AB2", x"8080", x"8080", x"8080", x"9D27", x"BD75", x"C647", x"467C", x"59B2", x"8080", x"8080",
+        x"8080", x"9D26", x"BE74", x"C747", x"457C", x"59B3", x"8080", x"8080", x"8080", x"9E24", x"BF74", x"C846",
+        x"447C", x"58B4", x"8080", x"8080", x"8080", x"9E23", x"C074", x"C945", x"437C", x"57B5", x"8080", x"8080",
+        x"8080", x"9E22", x"C174", x"CA44", x"437C", x"57B5", x"8080", x"8080", x"8080", x"9F21", x"C274", x"CB44",
+        x"427C", x"56B6", x"8080", x"8080", x"8080", x"9F1F", x"C374", x"CC43", x"417C", x"56B7", x"8080", x"8080",
+        x"8080", x"A01E", x"C374", x"CD42", x"407C", x"55B7", x"8080", x"8080", x"8080", x"A01D", x"C473", x"CE41",
+        x"3F7C", x"55B8", x"8080", x"8080", x"8080", x"A01C", x"C573", x"CF40", x"3F7C", x"54B9", x"8080", x"8080",
+        x"8080", x"A11A", x"C673", x"D040", x"3E7C", x"54BA", x"8080", x"8080", x"8080", x"A119", x"C773", x"D13F",
+        x"3D7C", x"53BA", x"8080", x"8080", x"8080", x"A218", x"C873", x"D23E", x"3C7C", x"53BB", x"8080", x"8080",
+        x"8080", x"A217", x"C973", x"D33D", x"3B7C", x"52BC", x"8080", x"8080", x"8080", x"A316", x"CA73", x"D43D",
+        x"3B7C", x"52BD", x"8080", x"8080" );
+    signal sd_h1, sd_h2, sd_lf, sd_fd : t_sd := (others => (others => '0'));
+    attribute ram_style of sd_h1 : signal is "block";
+    attribute ram_style of sd_h2 : signal is "block";
+    attribute ram_style of sd_lf : signal is "block";
+    attribute ram_style of sd_fd : signal is "block";
+    signal sd_wa : unsigned(7 downto 0) := (others => '0');
+    signal sd_wd : std_logic_vector(15 downto 0) := (others => '0');
+    signal sd_we : std_logic_vector(3 downto 0) := (others => '0');
+    signal sd_fdd : std_logic_vector(15 downto 0) := x"FC00";
+    -- sticker state + turn tables (engine reads/writes in blanking, the
+    -- pixel path reads the state during active video)
+    signal tbl : t_sd := C_TABLE;
+    attribute ram_style of tbl : signal is "block";
+    signal tb_era, tb_wa, px_ta : unsigned(7 downto 0) := (others => '0');
+    signal tb_wd, tb_rd : std_logic_vector(15 downto 0) := (others => '0');
+    signal tb_we : std_logic := '0';
+    signal sd_h1d, sd_h2d, sd_lfd : std_logic_vector(15 downto 0) := (others => '0');
+    signal sd_cvd : std_logic_vector(15 downto 0) := x"8080";
+    -- K4 sticker sheen (x/4) and K5 video stickers (colour mask)
+    signal s_vsel  : unsigned(2 downto 0) := (others => '0');
+    signal x14_vid : std_logic := '0';
+    signal g_hn : signed(9 downto 0) := (others => '0');
+    signal i_ly, j_ly : unsigned(7 downto 0) := (others => '0');
+
+    ----------------------------------------------------------------------
+    -- pixel pipe, stages E..O (x<N>_ = register written by stage N)
+    ----------------------------------------------------------------------
+    signal c_du, c_dv : unsigned(11 downto 0) := (others => '0');
+    signal c_base : unsigned(5 downto 0) := (others => '1');
+    signal c_gap  : unsigned(2 downto 0) := (others => '0');
+    signal c_sil  : std_logic_vector(3 downto 0) := (others => '0');
+    signal c_nu, c_nv : unsigned(1 downto 0) := "11";
+    signal b_bh, c_bh, e_bh, f_bh, x5_bh, x6_bh, x7_bh, x8_bh : std_logic := '0';
+    -- owned only through the 64-unit padding (no strict claimant)
+    signal a_po, b_po, c_po : std_logic := '0';
+    signal f_col, x5_col, x6_col, x7_col : unsigned(2 downto 0) := (others => '0');
+    -- chroma ROM address (light level & colour), carried to stage N
+    signal x8_ca, x9_ca, x10_ca, x11_ca, x12_ca, x13_ca : unsigned(2 downto 0) := (others => '0');
+    signal c_qu, c_qv : signed(11 downto 0) := (others => '0');
+    signal c_ngu, c_ngv : std_logic := '0';
+    signal x5_cm1, x5_snu, x5_snv : unsigned(5 downto 0) := (others => '0');
+    signal x5_hn : signed(9 downto 0) := (others => '0');
+    signal x5_hn8, x5_hu, x5_hv : signed(7 downto 0) := (others => '0');
+    signal x5_c19 : signed(19 downto 0) := (others => '0');
+    signal x5_tmax : unsigned(7 downto 0) := (others => '0');
+    signal x5_dst : signed(10 downto 0) := (others => '0');
+    signal x5_dstr : signed(12 downto 0) := (others => '0');
+    signal x5_cact, x5_2m, x5_silz, x5_stz, x5_stc, x5_on : std_logic := '0';
+    signal x5_sl : unsigned(2 downto 0) := (others => '0');
+    signal x6_p0, x6_p1, x6_p2 : signed(14 downto 0) := (others => '0');
+    signal x6_dlin : signed(11 downto 0) := (others => '0');
+    signal x6_ao, x6_tmax : unsigned(7 downto 0) := (others => '0');
+    signal x6_hn : signed(9 downto 0) := (others => '0');
+    signal x6_dst : signed(10 downto 0) := (others => '0');
+    signal x6_dstr : signed(12 downto 0) := (others => '0');
+    signal x6_cact, x6_2m, x6_silz, x6_stz, x6_stc, x6_on : std_logic := '0';
+    signal x6_sl : unsigned(2 downto 0) := (others => '0');
+    signal x7_del : signed(11 downto 0) := (others => '0');
+    signal x7_dsil : signed(13 downto 0) := (others => '0');
+    signal x7_ds : signed(10 downto 0) := (others => '0');
+    signal x7_occ, x7_sed, x7_ly : unsigned(7 downto 0) := (others => '0');
+    signal x7_ao2 : unsigned(6 downto 0) := (others => '0');
+    signal x7_hn : signed(9 downto 0) := (others => '0');
+    signal x7_lfa, x7_p1, x7_p2 : signed(9 downto 0) := (others => '0');
+    signal x7_q : signed(10 downto 0) := (others => '0');
+    signal x7_sl : unsigned(2 downto 0) := (others => '0');
+    signal x7_on : std_logic := '0';
+    signal x8_ams, x8_amt : signed(16 downto 0) := (others => '0');
+    signal x8_dly : signed(10 downto 0) := (others => '0');
+    signal x8_sl : unsigned(2 downto 0) := (others => '0');
+    signal x8_on : std_logic := '0';
+    signal x9_asil, x9_ast : unsigned(4 downto 0) := (others => '0');
+    signal x9_dly : signed(10 downto 0) := (others => '0');
+    signal x9_sl : unsigned(2 downto 0) := (others => '0');
+    signal x10_gam, x10_spl : unsigned(7 downto 0) := (others => '0');
+    signal x10_dsp : signed(9 downto 0) := (others => '0');
+    signal x10_py : signed(16 downto 0) := (others => '0');
+    signal x10_ast, x10_asil : unsigned(4 downto 0) := (others => '0');
+    signal x10_ston : std_logic := '0';
+    signal x10_sl : unsigned(2 downto 0) := (others => '0');
+    signal x11_y : unsigned(9 downto 0) := (others => '0');
+    signal x11_ps : signed(15 downto 0) := (others => '0');
+    signal x11_gam, x11_spl : unsigned(7 downto 0) := (others => '0');
+    signal x11_asil : unsigned(4 downto 0) := (others => '0');
+    signal x11_ston : std_logic := '0';
+    signal x11_sl : unsigned(2 downto 0) := (others => '0');
+    signal x12_pm : unsigned(17 downto 0) := (others => '0');
+    signal x12_spec : unsigned(11 downto 0) := (others => '0');
+    signal x12_asil : unsigned(4 downto 0) := (others => '0');
+    signal x12_ston : std_logic := '0';
+    signal x12_sl : unsigned(2 downto 0) := (others => '0');
+    signal x13_dy : signed(10 downto 0) := (others => '0');
+    signal x13_bg : unsigned(9 downto 0) := (others => '0');
+    signal x13_asil : unsigned(4 downto 0) := (others => '0');
+    signal x13_ston : std_logic := '0';
+    signal x13_sl : unsigned(2 downto 0) := (others => '0');
+    signal x14_pn : signed(16 downto 0) := (others => '0');
+    signal x14_bg : unsigned(9 downto 0) := (others => '0');
+    signal x14_asil : unsigned(4 downto 0) := (others => '0');
+    signal x14_ston : std_logic := '0';
 
     ----------------------------------------------------------------------
     -- LINE FSM
@@ -642,11 +937,11 @@ architecture cubist of program_top is
 
     -- pipeline stage registers (see stage comments in p_pix)
     signal b_u, b_v : signed(15 downto 0) := (others => '0');
-    signal b_sl : unsigned(1 downto 0) := (others => '0');
+    signal b_sl : unsigned(2 downto 0) := (others => '0');
     signal b_on : std_logic := '0';
     signal c_pu, c_pv : signed(13 downto 0) := (others => '0');
     signal c_cu, c_cv : unsigned(1 downto 0) := (others => '0');
-    signal c_sl : unsigned(1 downto 0) := (others => '0');
+    signal c_sl : unsigned(2 downto 0) := (others => '0');
     signal c_on : std_logic := '0';
     signal e_mu, e_mv : unsigned(8 downto 0) := (others => '0');
     signal e_gu, e_gv : unsigned(8 downto 0) := (others => '0');
@@ -672,10 +967,14 @@ architecture cubist of program_top is
     signal t_dh0, t_dh1, t_dh2 : signed(11 downto 0) := (others => '0');
     signal e_dst : signed(10 downto 0) := (others => '0');
     signal e_dstr : signed(12 downto 0) := (others => '0');
+    -- outline-corner chamfer: du+dv at a corner where both nearest lines are
+    -- outline and one is a silhouette; s_crh = half the chamfer leg (K4)
+    signal e_chs  : signed(13 downto 0) := (others => '0');
+    signal e_chz  : std_logic := '0';
     signal e_cact : std_logic := '0';
     signal e_silz : std_logic := '0';
     signal e_stc : std_logic := '0';
-    signal e_sl : unsigned(1 downto 0) := (others => '0');
+    signal e_sl : unsigned(2 downto 0) := (others => '0');
     signal e_on : std_logic := '0';
     signal sq_du, sq_dv : unsigned(15 downto 0) := (others => '0');
     signal f_stz : std_logic := '0';
@@ -685,7 +984,7 @@ architecture cubist of program_top is
     signal f_2m : std_logic := '0';
     signal f_silz : std_logic := '0';
     signal f_stc : std_logic := '0';
-    signal f_sl : unsigned(1 downto 0) := (others => '0');
+    signal f_sl : unsigned(2 downto 0) := (others => '0');
     signal f_on : std_logic := '0';
     signal g_sx : unsigned(18 downto 0) := (others => '0');
     signal g_stz : std_logic := '0';
@@ -727,11 +1026,14 @@ architecture cubist of program_top is
     signal pf_consume : std_logic := '0';
     signal s_qx0 : unsigned(21 downto 0) := (others => '0');
     signal bg_vy : unsigned(9 downto 0) := (others => '0');
+    signal bg_bx : unsigned(11 downto 0) := (others => '0');
+    signal bg_bup : std_logic := '0';
+    signal bg_wide : std_logic := '0';
+    signal bg_vg, bg_v0, bg_st : unsigned(17 downto 0) := (others => '0');
 
     ----------------------------------------------------------------------
     -- background accumulators (second differences: no multiplies)
     ----------------------------------------------------------------------
-    signal bg_ly   : unsigned(17 downto 0) := to_unsigned(644*256, 18); -- line luma Q8
     signal bg_uq   : unsigned(17 downto 0) := to_unsigned(506*256, 18);
     signal bg_vq   : unsigned(17 downto 0) := to_unsigned(516*256, 18);
     signal bg_u    : unsigned(9 downto 0) := to_unsigned(506, 10);
@@ -760,7 +1062,10 @@ architecture cubist of program_top is
     signal u_pc  : unsigned(9 downto 0) := (others => '0');
     signal u_st  : unsigned(2 downto 0) := (others => '0');
     signal u_gwt : unsigned(1 downto 0) := (others => '0');
-    signal u_ir, u_rom : std_logic_vector(39 downto 0) := (others => '0');
+    signal u_ir, u_rom : std_logic_vector(31 downto 0) := (others => '0');
+    signal u_fa  : unsigned(9 downto 0) := (others => '0');
+    signal u_jr  : unsigned(9 downto 0) := (others => '0');
+    signal u_wlast : std_logic := '0';
     signal u_ra, u_rb, u_wa, u_xa : unsigned(6 downto 0) := (others => '0');
     signal u_rda, u_rdb, u_wd : std_logic_vector(31 downto 0) := (others => '0');
     signal u_xd, u_slv, u_ctlv : signed(31 downto 0) := (others => '0');
@@ -770,267 +1075,191 @@ architecture cubist of program_top is
     -- burns the one-shot s_zfirst snap on them.
     signal u_done : std_logic := '1';
     signal u_slp : unsigned(4 downto 0) := (others => '0');
-    signal u_sls : unsigned(1 downto 0) := (others => '0');
-    signal u_gama : unsigned(7 downto 0) := (others => '0');
+    signal u_sls : unsigned(2 downto 0) := (others => '0');
+    -- serial shifter for SHR/SHL (one bit per cycle, instruction stalls)
+    signal u_sh  : signed(31 downto 0) := (others => '0');
+    signal u_shc : unsigned(3 downto 0) := (others => '0');
+    signal u_shb : std_logic := '0';
+    signal u_blt, u_bnz : std_logic := '0';   -- branch conditions (LATCH)
+    signal u_rsel : unsigned(3 downto 0) := (others => '0');
+    signal u_rwr, u_cin : std_logic := '0';
+    signal u_ctlr : signed(31 downto 0) := (others => '0');
+    signal u_romr : signed(16 downto 0) := (others => '0');
+    signal dv_post, dv_ovf : std_logic := '0';
 
-    type t_ucode is array (0 to 1023) of std_logic_vector(39 downto 0);
+    type t_ucode is array (0 to 1023) of std_logic_vector(31 downto 0);
     constant C_UCODE : t_ucode := (
-        x"7BA0000000", x"7BB0000001", x"CAE0000000", x"2AE5C00002",
-        x"1AF5CA0000", x"2305E00004", x"980600000D", x"A005EE800C",
-        x"A0074BC00A", x"900000000D", x"0B07600000", x"900000000D",
-        x"3307600000", x"12850C0000", x"DA85000FFF", x"CB1000000A",
-        x"9806200012", x"9000000013", x"0A85C00000", x"CAE0000001",
-        x"2AE5C00002", x"1AF5CA4000", x"2305E00004", x"980600001E",
-        x"A005EE801D", x"A0074BC01B", x"900000001E", x"0B07600000",
-        x"900000001E", x"3307600000", x"12952C0000", x"DA95200FFF",
-        x"CB1000000A", x"9806200023", x"9000000024", x"0A95C00000",
-        x"CAE0000002", x"2AE5C00002", x"1AF5CA8000", x"2305E00004",
-        x"980600002F", x"A005EE802E", x"A0074BC02C", x"900000002F",
-        x"0B07600000", x"900000002F", x"3307600000", x"12A54C0000",
-        x"DAA5400FFF", x"CB1000000A", x"9806200034", x"9000000035",
-        x"0AA5C00000", x"7AB0000000", x"22E5600001", x"7B40000000",
-        x"9805C0003B", x"0B45000000", x"9000000040", x"1AF5CEC000",
-        x"9805E0003F", x"0B45200000", x"9000000040", x"0B45400000",
-        x"E305600000", x"9806000043", x"9000000046", x"7B10000400",
-        x"13468C4000", x"DB46800FFF", x"22E6800004", x"DAE5C0003F",
-        x"E2F680000A", x"E36680000B", x"9805E0004E", x"0B55C00000",
-        x"1395CEC000", x"9000000051", x"7B00000040", x"1B560B8000",
-        x"1B96AEC000", x"7376A00000", x"7387200000", x"9806C00055",
-        x"9000000057", x"3376E00000", x"3387000000", x"1AE70DC000",
-        x"DAF680000F", x"5005CBC000", x"5B00000004", x"1316EC0000",
-        x"7B20000000", x"1B356C8000", x"9806600060", x"0A26200000",
-        x"7B20000001", x"1B356C8000", x"9806600064", x"0A36200000",
-        x"7B20000002", x"1B356C8000", x"9806600068", x"0A46200000",
-        x"7B20000003", x"1B356C8000", x"980660006C", x"0A56200000",
-        x"7B20000004", x"1B356C8000", x"9806600070", x"0A66200000",
-        x"7B20000005", x"1B356C8000", x"9806600074", x"0A76200000",
-        x"12B56EC000", x"7B20000006", x"A0056C8036", x"7800001000",
-        x"7810000000", x"7820000000", x"7830000000", x"7840001000",
-        x"7850000000", x"7860000000", x"7870000000", x"7880001000",
-        x"500009C000", x"5AE000000C", x"5000298000", x"5AF000000C",
-        x"5000098000", x"5B0000000C", x"500029C000", x"5B1000000C",
-        x"1805CBC000", x"10160C4000", x"500069C000", x"5AE000000C",
-        x"5000898000", x"5AF000000C", x"5000698000", x"5B0000000C",
-        x"500089C000", x"5B1000000C", x"1835CBC000", x"10460C4000",
-        x"5000C9C000", x"5AE000000C", x"5000E98000", x"5AF000000C",
-        x"5000C98000", x"5B0000000C", x"5000E9C000", x"5B1000000C",
-        x"1865CBC000", x"10760C4000", x"5000294000", x"5AE000000C",
-        x"5000490000", x"5AF000000C", x"5000290000", x"5B0000000C",
-        x"5000494000", x"5B1000000C", x"1815CBC000", x"10260C4000",
-        x"5000894000", x"5AE000000C", x"5000A90000", x"5AF000000C",
-        x"5000890000", x"5B0000000C", x"5000A94000", x"5B1000000C",
-        x"1845CBC000", x"10560C4000", x"5000E94000", x"5AE000000C",
-        x"5001090000", x"5AF000000C", x"5000E90000", x"5B0000000C",
-        x"5001094000", x"5B1000000C", x"1875CBC000", x"10860C4000",
-        x"500048C000", x"5AE000000C", x"5000088000", x"5AF000000C",
-        x"5000488000", x"5B0000000C", x"500008C000", x"5B1000000C",
-        x"1825CBC000", x"10060C4000", x"5000A8C000", x"5AE000000C",
-        x"5000688000", x"5AF000000C", x"5000A88000", x"5B0000000C",
-        x"500068C000", x"5B1000000C", x"1855CBC000", x"10360C4000",
-        x"500108C000", x"5AE000000C", x"5000C88000", x"5AF000000C",
-        x"5001088000", x"5B0000000C", x"5000C8C000", x"5B1000000C",
-        x"1885CBC000", x"10660C4000", x"3AE0000000", x"3AF0600000",
-        x"12E5CBC000", x"3AF0C00000", x"12E5CBC000", x"3B00200000",
-        x"3AF0800000", x"13060BC000", x"3AF0E00000", x"13060BC000",
-        x"22F5C00001", x"13C5CBC000", x"22F6000001", x"13D60BC000",
-        x"CAE0000005", x"2AF5C00005", x"2B05C00002", x"1AF5EC0000",
-        x"1AF5EB8000", x"6005EF400A", x"6B10000000", x"7B20000FFF",
-        x"B3E62C8000", x"CAE0000003", x"2AF5C00005", x"2B05C00001",
-        x"1AF5EC0000", x"6005EF000A", x"6B10000000", x"B3162C8000",
-        x"43F62F8000", x"2AE7E00004", x"1AF5D00000", x"3B05E00000",
-        x"2318000003", x"A0062C0101", x"22F5E00004", x"14080BC000",
-        x"9000000102", x"0C05C00000", x"2418000004", x"7AF00000B7",
-        x"50082BC000", x"5AE000000C", x"DAE5C000FF", x"7AF0000000",
-        x"0B15C00000", x"7B20000008", x"A0062C810E", x"2316200001",
-        x"12F5EEC000", x"900000010A", x"7B20000004", x"4B162C8000",
-        x"7B30000007", x"43162CC000", x"1B162C8000", x"88062E8011",
-        x"7B20000005", x"1B264BC000", x"88064E8012", x"5000104000",
-        x"5AE0000000", x"22F5C00001", x"12E5CBC000", x"20C5C0000E",
-        x"5000304000", x"5AE0000000", x"22F5C00001", x"12E5CBC000",
-        x"20F5C0000E", x"5000704000", x"5AE0000000", x"22F5C00001",
-        x"12E5CBC000", x"20D5C0000E", x"5000904000", x"5AE0000000",
-        x"22F5C00001", x"12E5CBC000", x"2105C0000E", x"5000D04000",
-        x"5AE0000000", x"22F5C00001", x"12E5CBC000", x"20E5C0000E",
-        x"5000F04000", x"5AE0000000", x"22F5C00001", x"12E5CBC000",
-        x"2115C0000E", x"CC20000006", x"2C28400002", x"CC30000007",
-        x"2C38600002", x"32E1800000", x"1AE5C34000", x"1AE5C38000",
-        x"11284B8000", x"32E1E00000", x"1AE5C40000", x"1AE5C44000",
-        x"19A86B8000", x"0AE1800000", x"1AE5C34000", x"1AE5C38000",
-        x"11384B8000", x"0AE1E00000", x"1AE5C40000", x"1AE5C44000",
-        x"19B86B8000", x"32E1800000", x"12E5C34000", x"1AE5C38000",
-        x"11484B8000", x"32E1E00000", x"12E5C40000", x"1AE5C44000",
-        x"19C86B8000", x"0AE1800000", x"12E5C34000", x"1AE5C38000",
-        x"11584B8000", x"0AE1E00000", x"12E5C40000", x"1AE5C44000",
-        x"19D86B8000", x"32E1800000", x"1AE5C34000", x"12E5C38000",
-        x"11684B8000", x"32E1E00000", x"1AE5C40000", x"12E5C44000",
-        x"19E86B8000", x"0AE1800000", x"1AE5C34000", x"12E5C38000",
-        x"11784B8000", x"0AE1E00000", x"1AE5C40000", x"12E5C44000",
-        x"19F86B8000", x"32E1800000", x"12E5C34000", x"12E5C38000",
-        x"11884B8000", x"32E1E00000", x"12E5C40000", x"12E5C44000",
-        x"1A086B8000", x"0AE1800000", x"12E5C34000", x"12E5C38000",
-        x"11984B8000", x"0AE1E00000", x"12E5C40000", x"12E5C44000",
-        x"1A186B8000", x"7B20000040", x"3336400000", x"7C40000000",
-        x"A80641417E", x"7C40000001", x"7C50000000", x"A800ACC181",
-        x"7C50000001", x"7C60000000", x"A806408184", x"7C60000001",
-        x"7C70000000", x"A8004CC187", x"7C70000001", x"7C80000000",
-        x"A80642018A", x"7C80000001", x"7C90000000", x"A8010CC18D",
-        x"7C90000001", x"7CA00007F2", x"7D000004E5", x"7D60000022",
-        x"7CB0000948", x"7D10000953", x"7D70000103", x"7CC0000BD9",
-        x"7D20000941", x"7D80000110", x"7CD00005A0", x"7D30000065",
-        x"7D900000A1", x"7CE0000DEC", x"7D40000053", x"7DA0000084",
-        x"7CF0000681", x"7D500004C1", x"7DB0000015", x"7B00000000",
-        x"7AF0003FC7", x"50000BC000", x"5AE000000C", x"13060B8000",
-        x"7AF0000051", x"50002BC000", x"5AE000000C", x"13060B8000",
-        x"7AF00000EC", x"50004BC000", x"5AE000000C", x"13060B8000",
-        x"0896000000", x"7B00000000", x"7AF0003FC7", x"50006BC000",
-        x"5AE000000C", x"13060B8000", x"7AF0000051", x"50008BC000",
-        x"5AE000000C", x"13060B8000", x"7AF00000EC", x"5000ABC000",
-        x"5AE000000C", x"13060B8000", x"08A6000000", x"7B00000000",
-        x"7AF0003FC7", x"5000CBC000", x"5AE000000C", x"13060B8000",
-        x"7AF0000051", x"5000EBC000", x"5AE000000C", x"13060B8000",
-        x"7AF00000EC", x"50010BC000", x"5AE000000C", x"13060B8000",
-        x"08B6000000", x"7FB0000FA0", x"2FBF600003", x"7AE0000001",
-        x"2AE5C0000F", x"12E5CB8000", x"1FC5CEC000", x"7AE0000200",
-        x"2AE5C0000A", x"7AF0000200", x"12E5CBC000", x"2AE5C0000A",
-        x"7AF00003E3", x"1755CBC000", x"7AE000028E", x"2AE5C0000A",
-        x"7AF000005B", x"12E5CBC000", x"2AE5C0000A", x"7AF0000327",
-        x"1765CBC000", x"7AE000032B", x"2AE5C0000A", x"7AF00001CC",
-        x"12E5CBC000", x"2AE5C0000A", x"7AF000014C", x"1775CBC000",
-        x"7AE0000350", x"2AE5C0000A", x"7AF00000F4", x"12E5CBC000",
-        x"2AE5C0000A", x"7AF0000201", x"1785CBC000", x"7AE00000EE",
-        x"2AE5C0000A", x"7AF00001F0", x"12E5CBC000", x"2AE5C0000A",
-        x"7AF00001A0", x"1795CBC000", x"7AE000014A", x"2AE5C0000A",
-        x"7AF00002F5", x"12E5CBC000", x"2AE5C0000A", x"7AF0000114",
-        x"17A5CBC000", x"7DC0000000", x"7AC0000000", x"F2E5800044",
-        x"9805C001FE", x"900000034C", x"7AF0000003", x"A80B8BC34F",
-        x"F65580004A", x"F665800050", x"F675800056", x"DAECA00007",
-        x"F5E5C00012", x"F5F5C0001A", x"22FCA00003", x"DAF5E00007",
-        x"F305E00012", x"1B06178000", x"2606000002", x"F305E0001A",
-        x"1B0617C000", x"2626000002", x"22FCA00009", x"DAF5E00007",
-        x"F305E00012", x"1B06178000", x"2616000002", x"F305E0001A",
-        x"1B0617C000", x"2636000002", x"500C18C000", x"5E40000000",
-        x"500C584000", x"5AE0000000", x"1E4C8B8000", x"0AEC600000",
-        x"12F5CB8000", x"12F5EB8000", x"6005F90014", x"6B20000000",
-        x"43265F0000", x"333F800000", x"4B264CC000", x"8806570000",
-        x"32EC200000", x"12F5CB8000", x"12F5EB8000", x"6005F90014",
-        x"6B20000000", x"43265F0000", x"333F800000", x"4B264CC000",
-        x"8806570001", x"32EC400000", x"12F5CB8000", x"12F5EB8000",
-        x"6005F90014", x"6B20000000", x"43265F0000", x"333F800000",
-        x"4B264CC000", x"8806570002", x"0AEC000000", x"12F5CB8000",
-        x"12F5EB8000", x"6005F90014", x"6B20000000", x"43265F0000",
-        x"333F800000", x"4B264CC000", x"8806570003", x"22EBC00002",
-        x"8805D70004", x"22EBE00002", x"8805D70005", x"DAECA00007",
-        x"F685C0001A", x"0E9D000000", x"22ECA00003", x"DAE5C00007",
-        x"F2F5C0001A", x"468D0BC000", x"4E9D2BC000", x"22ECA00006",
-        x"DAE5C00007", x"F2F5C0001A", x"468D0BC000", x"4E9D2BC000",
-        x"22ECA00009", x"DAE5C00007", x"F2F5C0001A", x"468D0BC000",
-        x"4E9D2BC000", x"2EDB800005", x"22ED000002", x"4AE5CE8000",
-        x"800DAB8000", x"22ED200002", x"12E5CEC000", x"4AE5CE8000",
-        x"800DAB8001", x"DAECA00007", x"F305C00012", x"F315C0001A",
-        x"22FCA00003", x"DAF5E00007", x"F325E00012", x"F335E0001A",
-        x"1F164C0000", x"1F266C4000", x"800DAC4002", x"800DAC0003",
-        x"3F3E400000", x"7F40000002", x"A80E7D026F", x"A00E4E826E",
-        x"0F2E800000", x"900000026F", x"372E800000", x"600E3C8006",
-        x"6F30000000", x"473E7EC000", x"374F600000", x"4F3E7D0000",
-        x"800DBCC004", x"22ECA00003", x"DAE5C00007", x"F305C00012",
-        x"F315C0001A", x"22FCA00006", x"DAF5E00007", x"F325E00012",
-        x"F335E0001A", x"1F164C0000", x"1F266C4000", x"800DAC4005",
-        x"800DAC0006", x"3F3E400000", x"7F40000002", x"A80E7D0288",
-        x"A00E4E8287", x"0F2E800000", x"9000000288", x"372E800000",
-        x"600E3C8006", x"6F30000000", x"473E7EC000", x"374F600000",
-        x"4F3E7D0000", x"800DBCC007", x"22ECA00006", x"DAE5C00007",
-        x"F305C00012", x"F315C0001A", x"22FCA00009", x"DAF5E00007",
-        x"F325E00012", x"F335E0001A", x"1F164C0000", x"1F266C4000",
-        x"800DAC4008", x"800DAC0009", x"3F3E400000", x"7F40000002",
-        x"A80E7D02A1", x"A00E4E82A0", x"0F2E800000", x"90000002A1",
-        x"372E800000", x"600E3C8006", x"6F30000000", x"473E7EC000",
-        x"374F600000", x"4F3E7D0000", x"800DBCC00A", x"22ECA00009",
-        x"DAE5C00007", x"F305C00012", x"F315C0001A", x"DAFCA00007",
-        x"F325E00012", x"F335E0001A", x"1F164C0000", x"1F266C4000",
-        x"800DAC400B", x"800DAC000C", x"3F3E400000", x"7F40000002",
-        x"A80E7D02B9", x"A00E4E82B8", x"0F2E800000", x"90000002B9",
-        x"372E800000", x"600E3C8006", x"6F30000000", x"473E7EC000",
-        x"374F600000", x"4F3E7D0000", x"800DBCC00D", x"DAECE00007",
-        x"22F5C00001", x"1305EBC000", x"13060BC000", x"E315C00000",
-        x"7B20000000", x"13260C8000", x"F336400000", x"98062002C9",
-        x"90000002CA", x"3336600000", x"0EE6600000", x"7B20000001",
-        x"13260C8000", x"F336400000", x"98062002D0", x"90000002D1",
-        x"3336600000", x"0EF6600000", x"7B20000002", x"13260C8000",
-        x"F336400000", x"98062002D7", x"90000002D8", x"3336600000",
-        x"0F06600000", x"7EA0000000", x"7EB0000000", x"7B30003F95",
-        x"500DCCC000", x"5AE000000C", x"16AD4B8000", x"7B3000009A",
-        x"500DECC000", x"5AE000000C", x"16AD4B8000", x"7B300000B8",
-        x"500E0CC000", x"5AE000000C", x"16AD4B8000", x"7B3000008D",
-        x"500DCCC000", x"5AE000000C", x"16BD6B8000", x"7B30003F73",
-        x"500DECC000", x"5AE000000C", x"16BD6B8000", x"7B300000A1",
-        x"500E0CC000", x"5AE000000C", x"16BD6B8000", x"7AE000003E",
-        x"A8075A82F8", x"22FD400002", x"1B0D4BC000", x"12E5CC0000",
-        x"A8075AC2FB", x"22FD600002", x"12E5CBC000", x"7AF00000FF",
-        x"46C5CBC000", x"8805970006", x"7AE0000000", x"DAFCC00007",
-        x"F305E00044", x"9806000304", x"7B10000001", x"12E5CC4000",
-        x"22FCC00003", x"DAF5E00007", x"F305E00044", x"980600030A",
-        x"7B10000002", x"12E5CC4000", x"22FCC00006", x"DAF5E00007",
-        x"F305E00044", x"9806000310", x"7B10000004", x"12E5CC4000",
-        x"22FCC00009", x"DAF5E00007", x"F305E00044", x"9806000316",
-        x"7B10000008", x"12E5CC4000", x"8805D70007", x"DAECE00007",
-        x"22F5C00001", x"F305E00009", x"E315C00000", x"980620031D",
-        x"900000031E", x"3306000000", x"880617000C", x"22ECE00003",
-        x"DAE5C00007", x"22F5C00001", x"F305E00009", x"E315C00000",
-        x"9806200326", x"9000000327", x"3306000000", x"880617000D",
-        x"22ECE00006", x"DAE5C00007", x"22F5C00001", x"F305E00009",
-        x"E315C00000", x"980620032F", x"9000000330", x"3306000000",
-        x"880617000E", x"F745800075", x"DAEE8003FF", x"8805D7000A",
-        x"880D97000B", x"BB2D800000", x"22EE80000A", x"DAE5C003FF",
-        x"7AF0000200", x"1AE5CBC000", x"5005CC8000", x"5B00000008",
-        x"13060BC000", x"7B100003FF", x"B3060C4000", x"8806170008",
-        x"22EE80000A", x"22E5C0000A", x"DAE5C003FF", x"7AF0000200",
-        x"1AE5CBC000", x"5005CC8000", x"5B00000008", x"13060BC000",
-        x"7B100003FF", x"B3060C4000", x"8806170009", x"15CB8EC000",
-        x"12C58EC000", x"7AE0000006", x"A0058B81FB", x"CAE0000006",
-        x"5005CB8000", x"5AF0000000", x"DB05E03FFF", x"2315E0000E",
-        x"DB162000FF", x"2B1620000E", x"13060C4000", x"88060E8010",
-        x"800757007F", x"C000000000", x"0000000000", x"0000000000",
-        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
-        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
-        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
-        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
-        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
-        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
-        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
-        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
-        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
-        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
-        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
-        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
-        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
-        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
-        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
-        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
-        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
-        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
-        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
-        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
-        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
-        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
-        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
-        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
-        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
-        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
-        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
-        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
-        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
-        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
-        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
-        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
-        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
-        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
-        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
-        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
-        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
-        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
-        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
-        x"0000000000", x"0000000000", x"0000000000", x"0000000000",
-        x"0000000000", x"0000000000", x"0000000000", x"0000000000" );
+        x"9000003D", x"20504008", x"D850A03F", x"2060400E", x"D860C001", x"9800C00A",
+        x"7070A000", x"1050A040", x"7050A000", x"9000000F", x"78600040", x"1850C140",
+        x"7070A000", x"1850A040", x"7050A000", x"1850A1C0", x"D84040FF", x"5000A100",
+        x"58500000", x"2050A008", x"1030E140", x"2060400F", x"D860C001", x"9800C019",
+        x"D001C000", x"183000C0", x"D001C000", x"A0004020", x"60004ED0", x"68300000",
+        x"9801E024", x"D001C000", x"18200080", x"60004ED0", x"68300000", x"9801E025",
+        x"183000C0", x"D001C000", x"08304000", x"78600004", x"A80041AD", x"78600002",
+        x"10304180", x"A00041AD", x"18304180", x"20604001", x"1060C180", x"78400004",
+        x"18408180", x"78500006", x"1850A180", x"78600006", x"A000A1B6", x"78500000",
+        x"D8604001", x"9800C039", x"D001C000", x"08608000", x"0840A000", x"0850C000",
+        x"D001C000", x"78000000", x"78100001", x"C990000B", x"C9A0000C", x"C880000A",
+        x"CA000000", x"7A300048", x"CA100001", x"7A40002D", x"CA200002", x"7A50001C",
+        x"20D32001", x"78900000", x"F0212020", x"F0A12010", x"18304280", x"A0106010",
+        x"08306000", x"90000051", x"183000C0", x"78400003", x"A0106114", x"08A04000",
+        x"98010056", x"90000057", x"08A04000", x"F8012290", x"28214006", x"F0B12013",
+        x"183042C0", x"28306008", x"28306008", x"20306008", x"2030600B", x"10B160C0",
+        x"98010062", x"90000063", x"08B04000", x"F80122D3", x"D831A001", x"98006067",
+        x"9000006B", x"F0412016", x"F0512023", x"10408140", x"F8012116", x"20D1A001",
+        x"10912040", x"78200003", x"A011208A", x"D8232001", x"98004072", x"900000B2",
+        x"9803C089", x"C820000D", x"78700005", x"D8304007", x"78400006", x"A810613A",
+        x"185067C0", x"9800A081", x"20204003", x"1870E040", x"9800E075", x"1033E040",
+        x"78400006", x"A0206101", x"78300000", x"09C06000", x"09F06000", x"C820000D",
+        x"21D0400F", x"D9D3A001", x"79B00000", x"79E00001", x"900000C1", x"28234002",
+        x"10204680", x"7830019A", x"102040C0", x"11B36080", x"2023600F", x"20204001",
+        x"D8204001", x"98004093", x"900000C1", x"78200014", x"50038080", x"58C00000",
+        x"78200038", x"10C18080", x"78D00005", x"80218000", x"80318001", x"80418002",
+        x"80518003", x"80604000", x"80706000", x"80808000", x"8090A000", x"9803A0A7",
+        x"B0006180", x"B00081C0", x"B000A200", x"B0004240", x"900000AB", x"B00041C0",
+        x"B0006200", x"B0008240", x"B000A180", x"78200004", x"10C18080", x"18D1A040",
+        x"9801A099", x"79E00000", x"79B00000", x"900000BF", x"78200000", x"78300000",
+        x"78400009", x"B00040C0", x"10204040", x"18408040", x"980080B5", x"78400009",
+        x"10306040", x"78500006", x"A0206175", x"79E00000", x"79B00000", x"7BB00000",
+        x"900000CB", x"20236001", x"78E000C4", x"900000DF", x"78401000", x"10408100",
+        x"103060C0", x"1BB080C0", x"9803A0CA", x"900000CB", x"1BB00EC0", x"12826580",
+        x"129285C0", x"12A2A600", x"0AB76000", x"78800000", x"78900000", x"F0210028",
+        x"78E000D4", x"90000001", x"F80120E0", x"F0210028", x"78E000D8", x"900000DF",
+        x"F80120E1", x"10810040", x"10912040", x"10912040", x"78200004", x"A0310091",
+        x"900000E3", x"78401000", x"28408002", x"10204100", x"90000001", x"7AC01000",
+        x"7AD00000", x"7AE00000", x"7AF00000", x"7B001000", x"7B100000", x"7B200000",
+        x"7B300000", x"7B401000", x"78900000", x"F061202C", x"F071202D", x"5000C940",
+        x"58200008", x"5000E900", x"58300008", x"5000C900", x"58400008", x"5000E940",
+        x"58500008", x"182040C0", x"10408140", x"F80120AC", x"F801212D", x"78200003",
+        x"10912080", x"78200009", x"A03120AD", x"78900000", x"F061202D", x"F071202E",
+        x"5000C8C0", x"58200008", x"5000E880", x"58300008", x"5000C880", x"58400008",
+        x"5000E8C0", x"58500008", x"182040C0", x"10408140", x"F80120AD", x"F801212E",
+        x"78200003", x"10912080", x"78200009", x"A0412080", x"78900000", x"F061202E",
+        x"F071202C", x"5000C840", x"58200008", x"5000E800", x"58300008", x"5000C800",
+        x"58400008", x"5000E840", x"58500008", x"182040C0", x"10408140", x"F80120AE",
+        x"F801212C", x"78200003", x"10912080", x"78200009", x"A0412093", x"C8200005",
+        x"C830000E", x"784013BC", x"28408002", x"10408040", x"50006100", x"58500008",
+        x"784018A4", x"1050A100", x"50004140", x"58600008", x"788000FF", x"83510000",
+        x"C870000A", x"9800E13E", x"1830CD40", x"A0406038", x"08406000", x"90000139",
+        x"184000C0", x"7850000C", x"A040817F", x"20306003", x"1356A0C0", x"9000013F",
+        x"0B50C000", x"B0010D40", x"CB600006", x"2B66C006", x"CB700007", x"2B76E006",
+        x"783000B7", x"5006A0C0", x"58200008", x"D82040FF", x"78300000", x"08504000",
+        x"78600008", x"A050A18F", x"2050A001", x"10306040", x"9000014B", x"78600006",
+        x"A050A192", x"10306040", x"78600005", x"A0506196", x"0830C000", x"90000157",
+        x"08306000", x"1860C0C0", x"8800C012", x"C8200008", x"C8300009", x"13802080",
+        x"184020C0", x"A0504120", x"0B908000", x"90000161", x"0B904000", x"78900000",
+        x"78800056", x"F0A1202C", x"F0B1202D", x"F0C1202E", x"50014D40", x"58200000",
+        x"2020400A", x"F8010080", x"50016D40", x"58200000", x"2020400A", x"18200080",
+        x"F8010083", x"F8010306", x"78400000", x"78303FC7", x"500140C0", x"58200008",
+        x"10408080", x"78300051", x"500160C0", x"58200008", x"10408080", x"783000EC",
+        x"500180C0", x"58200008", x"10408080", x"F8010109", x"78400000", x"78303F95",
+        x"500140C0", x"58200008", x"10408080", x"7830009A", x"500160C0", x"58200008",
+        x"10408080", x"783000B8", x"500180C0", x"58200008", x"10408080", x"F801010C",
+        x"78400000", x"7830008D", x"500140C0", x"58200008", x"10408080", x"78303F73",
+        x"500160C0", x"58200008", x"10408080", x"783000A1", x"500180C0", x"58200008",
+        x"10408080", x"F801010F", x"10810040", x"78200003", x"10912080", x"78200009",
+        x"A05120A3", x"78200004", x"08338000", x"A86380A7", x"78200002", x"A06380A6",
+        x"18338080", x"900001A7", x"10338080", x"27E06001", x"DFF06001", x"10AFC040",
+        x"78200003", x"A06140AD", x"78A00000", x"10B14040", x"A06160B0", x"78B00000",
+        x"78C00000", x"10619F80", x"F020C056", x"F800C0BC", x"10718280", x"F080E056",
+        x"109182C0", x"F0D12056", x"500109C0", x"58200008", x"5001A980", x"58300008",
+        x"102040C0", x"F800E0BC", x"5001A9C0", x"58200008", x"50010980", x"58300008",
+        x"182040C0", x"F80120BC", x"78200003", x"10C18080", x"78200012", x"A06180B1",
+        x"20278001", x"14E78080", x"2027E001", x"1517E080", x"2027A001", x"14F7A080",
+        x"20280001", x"15280080", x"2027C001", x"1507C080", x"20282001", x"15382080",
+        x"202AC001", x"168AC080", x"202B2001", x"16BB2080", x"202AE001", x"169AE080",
+        x"202B4001", x"16CB4080", x"202B0001", x"16AB0080", x"202B6001", x"16DB6080",
+        x"F02FC056", x"20304001", x"7850004E", x"1050BF80", x"F800A0C0", x"78500068",
+        x"1050BF80", x"F800A080", x"980FE1EB", x"08604000", x"900001EC", x"18600080",
+        x"1546C180", x"980FE1F0", x"08606000", x"900001F1", x"186000C0", x"1EE6C180",
+        x"F02FC059", x"20304001", x"78500051", x"1050BF80", x"F800A0C0", x"7850006B",
+        x"1050BF80", x"F800A080", x"980FE1FD", x"08604000", x"900001FE", x"18600080",
+        x"1556E180", x"980FE202", x"08606000", x"90000203", x"186000C0", x"1EF6E180",
+        x"78900000", x"78B00070", x"08212000", x"78E00209", x"90000026", x"20406001",
+        x"D8506001", x"F0608042", x"9800A20F", x"0860C000", x"90000210", x"18600180",
+        x"78700008", x"78200000", x"A880E194", x"78200001", x"F8016080", x"F060805C",
+        x"9800A219", x"0860C000", x"9000021A", x"18600180", x"78700008", x"78200000",
+        x"A880E19E", x"78200001", x"F8016086", x"10B16040", x"10912040", x"78200006",
+        x"A0812086", x"F02FC05C", x"980FE227", x"08304000", x"90000228", x"18300080",
+        x"7FC00000", x"A08000EB", x"7FC00001", x"7FD00000", x"7AC00002", x"7AD00003",
+        x"7AE00004", x"7AF00006", x"7B00003F", x"7B100080", x"7B2000FF", x"7B3000B0",
+        x"7B40000C", x"0A0F8000", x"7A20003C", x"98040239", x"9000023A", x"7A200056",
+        x"7BA00070", x"9804023D", x"9000023E", x"7BA00076", x"7A100000", x"10274840",
+        x"F0304000", x"98006243", x"9000039A", x"08242000", x"78E00246", x"90000026",
+        x"22306001", x"12346880", x"DB506001", x"22408001", x"12448880", x"DB608001",
+        x"2250A001", x"1254A880", x"DB70A001", x"F0348000", x"9806C253", x"0A606000",
+        x"90000254", x"1A6000C0", x"F0348003", x"9806C258", x"0A706000", x"90000259",
+        x"1A7000C0", x"F034A000", x"9806E25D", x"0A806000", x"9000025E", x"1A8000C0",
+        x"F034A003", x"9806E262", x"0A906000", x"90000263", x"1A9000C0", x"F2A44018",
+        x"F2B44019", x"F0346012", x"9806A269", x"08506000", x"9000026A", x"185000C0",
+        x"12A54140", x"F0346015", x"9806A26F", x"08506000", x"90000270", x"185000C0",
+        x"12B56140", x"F0348012", x"9806C275", x"08506000", x"90000276", x"185000C0",
+        x"1AA54140", x"F0348015", x"9806C27B", x"08506000", x"9000027C", x"185000C0",
+        x"1AB56140", x"F034A012", x"9806E281", x"08506000", x"90000282", x"185000C0",
+        x"1AA54140", x"F034A015", x"9806E287", x"08506000", x"90000288", x"185000C0",
+        x"1AB56140", x"5004CA40", x"58200000", x"5004EA00", x"58300000", x"182040C0",
+        x"78F00000", x"A0A00092", x"78F00001", x"18200080", x"23B04008", x"08252000",
+        x"78E00296", x"9000001B", x"08A06000", x"18200A00", x"78E0029A", x"9000001B",
+        x"08B06000", x"182009C0", x"78E0029E", x"9000001B", x"08C06000", x"0824C000",
+        x"78E002A2", x"9000001B", x"08D06000", x"22A54002", x"22B56002", x"78900003",
+        x"2891200C", x"78800FFF", x"10912200", x"A0A1402C", x"08214000", x"900002AD",
+        x"18200280", x"A0A16030", x"08316000", x"900002B1", x"183002C0", x"A0A040F4",
+        x"08204000", x"900002B5", x"08206000", x"A0A120BA", x"08414000", x"08516000",
+        x"88001F53", x"900002C0", x"78600020", x"10414180", x"20408006", x"10516180",
+        x"2050A006", x"88003F53", x"88009F40", x"18600A80", x"50008180", x"58700000",
+        x"28672004", x"1860CAC0", x"5000A180", x"58800000", x"1070E200", x"2070E004",
+        x"8800FF44", x"5000AE00", x"58800000", x"C8600003", x"50008180", x"58700000",
+        x"188101C0", x"88011F41", x"A0B18015", x"08218000", x"900002D6", x"18200300",
+        x"A0B1A019", x"0831A000", x"900002DA", x"18300340", x"A0B040DD", x"08204000",
+        x"900002DE", x"08206000", x"A0B120A3", x"08418000", x"0851A000", x"88001F54",
+        x"900002E9", x"78600020", x"10418180", x"20408006", x"1051A180", x"2050A006",
+        x"88003F54", x"88009F42", x"18600A80", x"50008180", x"58700000", x"28672004",
+        x"1860CAC0", x"5000A180", x"58800000", x"1070E200", x"2070E004", x"8800FF45",
+        x"5000AE00", x"58800000", x"C8600003", x"50008180", x"58700000", x"188101C0",
+        x"88011F43", x"50038D00", x"58800000", x"50040BC0", x"58200000", x"10810080",
+        x"10810CC0", x"10210840", x"80A04000", x"78B00000", x"78C00000", x"782000F8",
+        x"10204840", x"80D04000", x"0821A000", x"D8204007", x"10410080", x"80508000",
+        x"1870AC00", x"9800E310", x"18714C00", x"9800E316", x"10474080", x"F0508000",
+        x"9800A317", x"78500001", x"10B16140", x"90000317", x"78C00001", x"2021A003",
+        x"D8204007", x"10410080", x"80508000", x"1870AC00", x"9800E31F", x"18714C00",
+        x"9800E325", x"10474080", x"F0508000", x"9800A326", x"78500002", x"10B16140",
+        x"90000326", x"78C00002", x"2021A006", x"D8204007", x"10410080", x"80508000",
+        x"1870AC00", x"9800E32E", x"18714C00", x"9800E334", x"10474080", x"F0508000",
+        x"9800A335", x"78500004", x"10B16140", x"90000335", x"78C00003", x"2021A009",
+        x"D8204007", x"10410080", x"80508000", x"1870AC00", x"9800E33D", x"18714C00",
+        x"9800E343", x"10474080", x"F0508000", x"9800A344", x"78500008", x"10B16140",
+        x"90000344", x"78C00004", x"18248880", x"78600003", x"18205F80", x"98004349",
+        x"10602800", x"1824A880", x"78700003", x"18205F80", x"9800434E", x"10702800",
+        x"78200000", x"1030C1C0", x"A8D06BE1", x"78200001", x"78400001", x"1830E100",
+        x"98006356", x"90000361", x"78200002", x"78400001", x"1830C100", x"9800635B",
+        x"90000361", x"78200003", x"78400002", x"1830E100", x"98006360", x"90000361",
+        x"78200004", x"2831400A", x"28204007", x"10306080", x"28218004", x"10306080",
+        x"103062C0", x"88007F46", x"F0346009", x"9806A36C", x"08B06000", x"9000036D",
+        x"18B000C0", x"F0348009", x"9806C371", x"08C06000", x"90000372", x"18C000C0",
+        x"F034A009", x"9806E376", x"08D06000", x"90000377", x"18D000C0", x"D82183FF",
+        x"28204006", x"D831603F", x"102040C0", x"88005F47", x"D821A3FF", x"28204006",
+        x"20316006", x"D830600F", x"102040C0", x"88005F48", x"F034600C", x"9806A386",
+        x"08B06000", x"90000387", x"18B000C0", x"F034600F", x"9806A38B", x"08C06000",
+        x"9000038C", x"18C000C0", x"7850003E", x"A8E002D1", x"20316002", x"184160C0",
+        x"1050A100", x"A8E00314", x"20318002", x"1050A0C0", x"A0E0AC97", x"08564000",
+        x"90000398", x"0850A000", x"8800BF49", x"17DFA040", x"12142040", x"A0842BFF",
+        x"1A002800", x"18241F00", x"98004236", x"880FA00F", x"88000019", x"C0000000",
+        x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000",
+        x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000",
+        x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000",
+        x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000",
+        x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000",
+        x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000",
+        x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000",
+        x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000",
+        x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000",
+        x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000",
+        x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000",
+        x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000",
+        x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000",
+        x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000",
+        x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000",
+        x"00000000", x"00000000", x"00000000", x"00000000" );
 begin
 
     ------------------------------------------------------------------------
@@ -1058,11 +1287,67 @@ begin
                 s_xcnt <= (others => '0');
             end if;
 
+            -- CLEAN AVID.  The encoders get no data-enable -- only hsync and
+            -- the 4:2:2 bus -- so they pair Cb/Cr by counting from hsync, while
+            -- the core's 4:4:4->4:2:2 packer restarts on Cb at every avid
+            -- rise and resets at every avid fall.  An analog source's avid
+            -- wanders a clock against hsync and can drop out mid-line: either
+            -- one swaps U/V for (the rest of) that line -- thin coloured lines
+            -- over the stickers, faces flipping hue.  So the program makes its
+            -- own avid: it starts 2 or 3 clocks after the source's first avid
+            -- rise of the line, whichever keeps the hsync->start distance at
+            -- the source's USUAL parity (a saturating vote, so jitter can't
+            -- move it), and ends with the DDA's line (dd_wrap), so dropouts
+            -- are ignored.
+            if s_hs_r = '1' then
+                g_ph  <= '0';
+                g_arm <= '1';
+            else
+                g_ph <= not g_ph;
+            end if;
+            g_rsr <= g_rsr(1 downto 0) & '0';
+            if s_avid_r = '1' and g_arm = '1' then
+                g_arm    <= '0';
+                g_rsr(0) <= '1';
+                g_sel    <= g_ph xor g_par;
+                if g_ph = '1' then
+                    if g_pc /= 15 then g_pc <= g_pc + 1; end if;
+                else
+                    if g_pc /= 0 then g_pc <= g_pc - 1; end if;
+                end if;
+            end if;
+            if g_pc = 15 then g_par <= '1';
+            elsif g_pc = 0 then g_par <= '0'; end if;
+            g_avid_q <= g_avid;
+            if (g_sel = '0' and g_rsr(1) = '1') or (g_sel = '1' and g_rsr(2) = '1') then
+                g_avid <= '1';
+            elsif dd_wrap = '1' then
+                g_avid <= '0';
+            end if;
+
             -- count active lines on the ACTIVE edge (vsync height-capture trap:
             -- never latch height at vsync from a serrated counter)
             if s_avid_r = '1' then
                 s_ycnt <= s_ycnt + 1;
                 s_sawact <= '1';
+            end if;
+
+            -- The engine starts once active video has been absent for two
+            -- line widths -- early in vertical blanking, not at vsync (the
+            -- whole blanking, ~21 lines in NTSC instead of ~17).  No hsync
+            -- involved: a noisy or doubled hsync edge must never start it in
+            -- mid-picture, where it would take the sticker-colour RAM and
+            -- reset the face DDAs.  Re-arms only on active video.
+            s_estart <= '0';
+            if data_in.avid = '1' then
+                s_idle <= (others => '0');
+                s_earm <= '1';
+            else
+                if s_idle /= "1111111111111" then s_idle <= s_idle + 1; end if;
+                if s_earm = '1' and s_idle = (s_W & '0') then
+                    s_estart <= '1';
+                    s_earm   <= '0';
+                end if;
             end if;
             -- Only the FIRST vsync edge after active video is a real frame
             -- boundary; an analog serrated vsync gives several per field and
@@ -1092,69 +1377,6 @@ begin
     -- mux -- half the arithmetic area for free.  Latency is unchanged
     -- (operands registered by the caller at N, product readable at N+2).
     ------------------------------------------------------------------------
-    p_dmath : process(clk)
-        variable v_ma : signed(17 downto 0);
-        variable v_mb : signed(13 downto 0);
-        variable v_r  : unsigned(21 downto 0);
-        variable v_r2 : unsigned(21 downto 0);
-    begin
-        if rising_edge(clk) then
-            -- SERIAL shift-add multiply.  A parallel 18x14 array costs about
-            -- 765 logic cells on a chip with no hardware multipliers; this
-            -- costs well under a tenth of that and takes 16 cycles.  Both
-            -- callers run during blanking -- the frame FSM in vblank (~99,000
-            -- spare clocks) and the line FSM a whole line ahead of the pixel
-            -- it feeds -- so the latency is invisible.
-            if mu_go_f = '1' or mu_go_l = '1' then
-                if fr_done = '0' then v_ma := fm_a; v_mb := fm_b;
-                else                  v_ma := lm_a; v_mb := lm_b; end if;
-                mu_sa <= resize(v_ma, 32);
-                if v_mb < 0 then
-                    mu_sb <= unsigned(-v_mb);
-                    mu_ng <= '1';
-                else
-                    mu_sb <= unsigned(v_mb);
-                    mu_ng <= '0';
-                end if;
-                mu_ac  <= (others => '0');
-                mu_cnt <= to_unsigned(14, 4);
-                mu_bsy <= '1';
-            elsif mu_bsy = '1' then
-                if mu_cnt = 0 then
-                    if mu_ng = '1' then mu_p <= -mu_ac; else mu_p <= mu_ac; end if;
-                    mu_bsy <= '0';
-                else
-                    if mu_sb(0) = '1' then mu_ac <= mu_ac + mu_sa; end if;
-                    mu_sa  <= shift_left(mu_sa, 1);
-                    mu_sb  <= shift_right(mu_sb, 1);
-                    mu_cnt <= mu_cnt - 1;
-                end if;
-            end if;
-
-            if dv_bsy = '1' then
-                v_r := dv_ra(20 downto 0) & dv_na(33);
-                if v_r >= resize(dv_da, 22) then
-                    dv_ra <= v_r - resize(dv_da, 22);
-                    dv_q  <= dv_q(32 downto 0) & '1';
-                else
-                    dv_ra <= v_r;
-                    dv_q  <= dv_q(32 downto 0) & '0';
-                end if;
-                dv_na <= dv_na(32 downto 0) & '0';
-                if dv_cnt = 0 then dv_bsy <= '0';
-                else dv_cnt <= dv_cnt - 1; end if;
-            end if;
-
-            if frd_start = '1' then
-                dv_na  <= resize(frd_ns, 34);
-                dv_da  <= frd_ds;
-                dv_ra  <= (others => '0');
-                dv_q   <= (others => '0');
-                dv_cnt <= to_unsigned(33, 6);
-                dv_bsy <= '1';
-            end if;
-        end if;
-    end process p_dmath;
 
     ------------------------------------------------------------------------
     -- FRAME FSM (microcoded).  All per-frame vertex/basis data lives in the
@@ -1173,15 +1395,19 @@ begin
     begin
         if rising_edge(clk) then
             if s_fstart = '1' then
+                if s_ilace = '1' then s_hf <= resize(s_H & '0', 13);
+                else                  s_hf <= resize(s_H, 13); end if;
+                s_cx <= '0' & s_W(11 downto 1);
+            end if;
+            if s_estart = '1' then
                 fr_done <= '0';
                 s_k1 <= unsigned(registers_in(0));
                 s_k2 <= unsigned(registers_in(1));
                 s_k3 <= unsigned(registers_in(2));
-                if s_ilace = '1' then s_hf <= resize(s_H & '0', 13);
-                else                  s_hf <= resize(s_H, 13); end if;
-                s_cx <= '0' & s_W(11 downto 1);
-                hmax <= to_unsigned(1, 15);
-                wmax <= to_unsigned(1, 15);
+                s_sw <= registers_in(6)(4 downto 0);
+                s_sld <= unsigned(registers_in(7));
+                s_vsel <= unsigned(registers_in(4)(9 downto 7));
+                s_Wl <= s_W;
                 s_frans <= '1';
             else
                 fr_done <= u_done;
@@ -1198,32 +1424,41 @@ begin
     -- is why the port field is five bits and not four.
     ------------------------------------------------------------------------
     p_slotw : process(clk)
-        variable v_s : integer range 0 to 2;
+        variable v_s : integer range 0 to 5;
     begin
         if rising_edge(clk) then
-            -- slot 3 never exists: the loop stops at three visible faces
-            if u_slw = '1' and u_sls /= 3 then
-                v_s := to_integer(u_sls(1 downto 0));
+            w_we <= '0';
+            sd_we <= (others => '0');
+            dd_kick <= '0';
+            if u_slw = '1' and u_sls < 6 then
+                v_s := to_integer(u_sls);
                 case to_integer(u_slp) is
-                    when  0 => sl_gux(v_s) <= resize(u_slv, 17);
-                    when  1 => sl_guy(v_s) <= resize(u_slv, 17);
-                    when  2 => sl_gvx(v_s) <= resize(u_slv, 17);
-                    when  3 => sl_gvy(v_s) <= resize(u_slv, 17);
-                    when  4 => sl_px0(v_s) <= resize(u_slv, 13);
-                    when  5 => sl_py0(v_s) <= resize(u_slv, 13);
-                    when  6 => sl_face(v_s) <= resize(unsigned(u_slv(2 downto 0)), 3);
-                    when  7 => sl_sil(v_s) <= std_logic_vector(u_slv(3 downto 0));
-                    when  8 => sl_cu(v_s) <= resize(unsigned(u_slv(9 downto 0)), 10);
-                    when  9 => sl_cv(v_s) <= resize(unsigned(u_slv(9 downto 0)), 10);
-                    when 10 => sl_ly(v_s) <= resize(unsigned(u_slv(9 downto 0)), 10);
-                    when 11 => sl_lf(v_s) <= resize(unsigned(u_slv(7 downto 0)), 8);
-                    when 12 => sl_hn(v_s) <= resize(u_slv, 10);
-                    when 13 => sl_hu(v_s) <= resize(u_slv, 10);
-                    when 14 => sl_hv(v_s) <= resize(u_slv, 10);
-                    when 15 => s_nslot <= resize(unsigned(u_slv(1 downto 0)), 2);
-                    when 16 => s_qx0 <= resize(unsigned(u_slv(21 downto 0)), 22);
-                    when 17 => s_pxm <= resize(unsigned(u_slv(1 downto 0)), 2);
-                    when others => s_pxe <= to_integer(unsigned(u_slv(2 downto 0)));
+                    -- DDA table: wrap step 0.., field seed 16.., gx 32..
+                    when  0 => w_wa <= to_unsigned(32 + 2*v_s, 8); w_we <= '1';
+                    when  1 => w_wa <= to_unsigned( 0 + 2*v_s, 8); w_we <= '1';
+                    when  2 => w_wa <= to_unsigned(33 + 2*v_s, 8); w_we <= '1';
+                    when  3 => w_wa <= to_unsigned( 1 + 2*v_s, 8); w_we <= '1';
+                    when  4 => w_wa <= to_unsigned(16 + 2*v_s, 8); w_we <= '1';
+                    when  5 => w_wa <= to_unsigned(17 + 2*v_s, 8); w_we <= '1';
+                    -- face descriptor; the stage-A limits keep a copy of the shape
+                    when  6 =>
+                        sd_wa <= to_unsigned(v_s, 8); sd_we(3) <= '1';
+                        case to_integer(unsigned(u_slv(9 downto 7))) is
+                            when 1 => sl_nu(v_s) <= "11"; sl_nv(v_s) <= "01";
+                            when 2 => sl_nu(v_s) <= "01"; sl_nv(v_s) <= "11";
+                            when 3 => sl_nu(v_s) <= "11"; sl_nv(v_s) <= "10";
+                            when 4 => sl_nu(v_s) <= "10"; sl_nv(v_s) <= "11";
+                            when others => sl_nu(v_s) <= "11"; sl_nv(v_s) <= "11";
+                        end case;
+                    when  7 => sd_wa <= to_unsigned(v_s, 8); sd_we(0) <= '1';
+                    when  8 => sd_wa <= to_unsigned(v_s, 8); sd_we(1) <= '1';
+                    when  9 => sd_wa <= to_unsigned(v_s, 8); sd_we(2) <= '1';
+                    when 15 => s_nslot <= unsigned(u_slv(2 downto 0));
+                    when 18 => s_pxe <= to_integer(unsigned(u_slv(2 downto 0)));
+                    when 19 => dd_e(2*v_s) <= u_slv(0);
+                    when 20 => dd_e(2*v_s + 1) <= u_slv(0);
+                    when 25 => dd_kick <= '1';
+                    when others => null;
                 end case;
             end if;
         end if;
@@ -1247,17 +1482,62 @@ begin
         variable v_a, v_b : signed(31 downto 0);
         variable v_r      : signed(31 downto 0);
         variable v_op     : integer range 0 to 31;
+        variable v_op2    : integer range 0 to 31;
         variable v_imm    : signed(13 downto 0);
-        variable v_q      : unsigned(16 downto 0);
-        variable v_sh     : signed(31 downto 0);
+        variable v_stl    : boolean;
+        variable v_jmp    : boolean;
+        variable v_dr     : unsigned(21 downto 0);
+        variable v_ms     : signed(21 downto 0);
+        variable v_pr     : signed(31 downto 0);
+        variable v_fa, v_fb : std_logic_vector(31 downto 0);
     begin
         if rising_edge(clk) then
-            u_we   <= '0';
-            g_we   <= '0';
-            mu_go_f <= '0';
-            frd_start <= '0';
+            u_wlast <= u_we;
+            -- serial multiply, radix-4 Booth, 8 steps: {mu_ph, mu_pl} =
+            -- mu_pa * B for a two's-complement B, two bits a step with the
+            -- digit in {0, +-A, +-2A} -- no operand or product negation.
+            if mu_bsy = '1' then
+                case std_logic_vector'(mu_pl(1) & mu_pl(0) & mu_bp) is
+                    when "001" | "010" => v_ms := mu_ph + resize(mu_pa, 22);
+                    when "011"         => v_ms := mu_ph + shift_left(resize(mu_pa, 22), 1);
+                    when "100"         => v_ms := mu_ph - shift_left(resize(mu_pa, 22), 1);
+                    when "101" | "110" => v_ms := mu_ph - resize(mu_pa, 22);
+                    when others        => v_ms := mu_ph;
+                end case;
+                mu_ph <= shift_right(v_ms, 2);
+                mu_pl <= unsigned(v_ms(1 downto 0)) & mu_pl(15 downto 2);
+                mu_bp <= mu_pl(1);
+                if mu_cnt = 0 then mu_bsy <= '0';
+                else mu_cnt <= mu_cnt - 1; end if;
+            end if;
 
-            if s_fstart = '1' then
+            -- serial restoring divider.  The numerator shifts out of the top
+            -- of dv_na as the quotient shifts in at the bottom, so after 34
+            -- steps dv_na IS the quotient: one register, not two.
+            if dv_bsy = '1' and dv_post = '0' then
+                v_dr := dv_ra(20 downto 0) & dv_na(33);
+                if v_dr >= resize(dv_da, 22) then
+                    dv_ra <= v_dr - resize(dv_da, 22);
+                    dv_na <= dv_na(32 downto 0) & '1';
+                else
+                    dv_ra <= v_dr;
+                    dv_na <= dv_na(32 downto 0) & '0';
+                end if;
+                if dv_cnt = 0 then dv_post <= '1';
+                else dv_cnt <= dv_cnt - 1; end if;
+            end if;
+            if dv_post = '1' then                 -- one step after the last
+                if dv_na(33 downto 20) /= 0 then dv_ovf <= '1';
+                else dv_ovf <= '0'; end if;
+                dv_post <= '0';
+                dv_bsy  <= '0';
+            end if;
+
+            u_we   <= '0';
+            u_slw  <= '0';
+            tb_we  <= '0';
+
+            if s_estart = '1' then
                 u_pc   <= (others => '0');
                 u_st   <= "000";
                 u_gwt  <= (others => '0');
@@ -1265,174 +1545,240 @@ begin
             elsif u_done = '0' then
                 case to_integer(u_st) is
 
-                    -- FETCH: the ROM answers next cycle
+                    -- FETCH (after a jump only): the ROM answers next cycle
                     when 0 =>
                         u_st <= "001";
 
-                    -- DECODE: latch the instruction, issue both register reads
+                    -- DECODE: latch the instruction.  The register-file reads
+                    -- are addressed straight off the ROM output this cycle
+                    -- (see p_rfa/p_rfb), so the operands arrive next cycle.
                     when 1 =>
                         u_ir <= u_rom;
-                        u_ra <= unsigned(u_rom(27 downto 21));
-                        u_rb <= unsigned(u_rom(20 downto 14));
                         u_st <= "010";
 
-                    -- the register file is a block RAM: the operands it was
-                    -- just addressed for do not appear until the cycle after.
+                    -- OPERAND LATCH: block-RAM outputs into fabric before any
+                    -- arithmetic.  Operand A lands in the shifter register and
+                    -- B in the write-data register -- both idle here, since
+                    -- the previous result was written two cycles ago.
                     when 2 =>
-                        u_st <= "011";
+                        v_op2 := to_integer(unsigned(u_ir(31 downto 27)));
+                        -- Forwarding: the previous instruction's register write
+                        -- lands on the same edge as this one's read, and an
+                        -- iCE40 block RAM returns undefined data for a
+                        -- read-during-write -- so a just-written source comes
+                        -- from the write-data register instead.
+                        if u_wlast = '1' and unsigned(u_ir(19 downto 13)) = u_wa then
+                            v_fa := u_wd;
+                        else
+                            v_fa := u_rda;
+                        end if;
+                        if u_wlast = '1' and unsigned(u_ir(12 downto 6)) = u_wa then
+                            v_fb := u_wd;
+                        else
+                            v_fb := u_rdb;
+                        end if;
+                        u_sh  <= signed(v_fa);
+                        -- SUB = A + not B + 1 on the one adder
+                        if v_op2 = 3 then
+                            u_wd <= not v_fb;  u_cin <= '1';
+                        else
+                            u_wd <= v_fb;      u_cin <= '0';
+                        end if;
+                        u_ctlr <= u_ctlv;
+                        -- result source and write flag, off EXEC's cone
+                        case v_op2 is
+                            when 1 | 4 | 5    => u_rsel <= x"0"; u_rwr <= '1';
+                            when 2 | 3        => u_rsel <= x"1"; u_rwr <= '1';
+                            when 27           => u_rsel <= x"2"; u_rwr <= '1';
+                            when 15           => u_rsel <= x"3"; u_rwr <= '1';
+                            when 11           => u_rsel <= x"4"; u_rwr <= '1';
+                            when 13           => u_rsel <= x"5"; u_rwr <= '1';
+                            when 14 | 16 => u_rsel <= x"6"; u_rwr <= '1';
+                            when 25           => u_rsel <= x"8"; u_rwr <= '1';
+                            when 31           => u_rsel <= x"9"; u_rwr <= '1';
+                            when others       => u_rsel <= x"0"; u_rwr <= '0';
+                        end case;
+                        u_shc <= unsigned(u_ir(3 downto 0));
+                        u_wa  <= unsigned(u_ir(26 downto 20));
+                        -- branch conditions a state early, into flip-flops:
+                        -- from EXEC's subtract the compare had to cross the
+                        -- die to the program counter beside the ROM
+                        if signed(v_fa) < signed(v_fb) then u_blt <= '1';
+                        else u_blt <= '0'; end if;
+                        if v_fa /= x"00000000" then u_bnz <= '1';
+                        else u_bnz <= '0'; end if;
+                        u_jr <= unsigned(v_fa(9 downto 0));
+                        -- Every unit launches HERE, from the register-file
+                        -- outputs, into registers that live beside it.  From
+                        -- EXEC, operand A fanned out to the ALU, multiplier,
+                        -- divider, three address ports and the slot writer at
+                        -- once, and one hop of that net cost 9 ns of routing.
+                        case v_op2 is
+                            when 10 =>                     -- MUL
+                                mu_pa  <= signed(v_fa(19 downto 0));
+                                mu_pl  <= unsigned(v_fb(15 downto 0));
+                                mu_ph  <= (others => '0');
+                                mu_bp  <= '0';
+                                mu_cnt <= to_unsigned(7, 4);
+                                mu_bsy <= '1';
+                            when 12 =>                     -- DIV: A << 0/16
+                                -- operands are magnitudes (microcode contract)
+                                if u_ir(4) = '1' then
+                                    dv_na <= shift_left(resize(unsigned(v_fa), 34), 16);
+                                else
+                                    dv_na <= resize(unsigned(v_fa), 34);
+                                end if;
+                                if unsigned(v_fb(20 downto 0)) = 0 then
+                                    dv_da <= to_unsigned(1, 21);
+                                else
+                                    dv_da <= unsigned(v_fb(20 downto 0));
+                                end if;
+                                dv_ra   <= (others => '0');
+                                dv_cnt  <= to_unsigned(33, 6);
+                                dv_bsy  <= '1';
+                            when 14 => t_sk   <= unsigned(v_fa(7 downto 0));
+                            when 16 =>                     -- SRD address
+                                tb_era <= unsigned(v_fa(7 downto 0))
+                                          + unsigned(u_ir(6 downto 0));
+                            when 22 =>                     -- SWR
+                                tb_wa <= unsigned(v_fa(7 downto 0));
+                                tb_wd <= v_fb(15 downto 0);
+                            when 30 =>                     -- LDX address
+                                u_ra <= unsigned(v_fa(6 downto 0))
+                                        + unsigned(u_ir(6 downto 0));
+                            when 31 =>                     -- STX address
+                                u_wa <= unsigned(v_fa(6 downto 0))
+                                        + unsigned(u_ir(5 downto 0));
+                            when 17 =>                     -- SLW operands
+                                u_slp <= unsigned(u_ir(4 downto 0));
+                                u_slv <= signed(v_fa);
+                                u_sls <= unsigned(v_fb(2 downto 0));
+                            when others => null;
+                        end case;
+                        u_st  <= "011";
 
                     -- same one-cycle read latency on the indexed address
                     when 4 =>
                         u_st <= "101";
 
-                    -- INDEXED second access (LDX/STX only)
+                    -- INDEXED second access (LDX).  The ROM has been reading
+                    -- pc+1 meanwhile, so the next instruction decodes directly.
                     when 5 =>
-                        u_st <= "000";
+                        u_st <= "001";
                         u_pc <= u_pc + 1;
-                        if to_integer(unsigned(u_ir(39 downto 35))) = 30 then
-                            u_wa <= unsigned(u_ir(34 downto 28));
-                            u_wd <= u_rda;
-                            u_we <= '1';
-                        else
-                            u_wa <= u_xa;
-                            u_wd <= std_logic_vector(resize(u_xd, 32));
-                            u_we <= '1';
-                        end if;
+                        u_wa <= unsigned(u_ir(26 downto 20));
+                        u_wd <= u_rda;
+                        u_we <= '1';
 
-                    -- EXECUTE
+                    -- EXECUTE.  Everything this state reads is a register:
+                    -- the operands and branch conditions from the latch, the
+                    -- result SOURCE pre-decoded there too, the units' outputs.
+                    -- One adder (ADD, and SUB via B inverted at the latch), one
+                    -- serial shifter, fixed MRD/DIV shift sets, no negators --
+                    -- NEG, MIN/MAX/CLP/ABS and BIT are assembler macros, and
+                    -- DIV operands are magnitudes by microcode contract.  The
+                    -- ROM reads pc+1 throughout, so a straight-line instruction
+                    -- takes 3 clocks; a taken jump refetches (4).
                     when others =>
-                        v_op  := to_integer(unsigned(u_ir(39 downto 35)));
+                        v_op  := to_integer(unsigned(u_ir(31 downto 27)));
                         v_imm := signed(u_ir(13 downto 0));
-                        v_a   := resize(signed(u_rda), 32);
-                        v_b   := resize(signed(u_rdb), 32);
-                        v_r   := (others => '0');
-                        u_st  <= "000";
-                        u_pc  <= u_pc + 1;
+                        v_a   := u_sh;
+                        v_b   := signed(u_wd);
+                        v_stl := false;
+                        v_jmp := false;
 
-                        case v_op is
-                            when 1  => v_r := v_a;
-                            when 2  => v_r := v_a + v_b;
-                            when 3  => v_r := v_a - v_b;
-                            when 4  => v_r := shift_right(v_a, to_integer(unsigned(v_imm(3 downto 0))));
-                            when 5  => v_r := shift_left(v_a, to_integer(unsigned(v_imm(3 downto 0))));
-                            when 6  => v_r := -v_a;
-                            when 7  => if v_a < 0 then v_r := -v_a; else v_r := v_a; end if;
-                            when 8  => if v_a < v_b then v_r := v_a; else v_r := v_b; end if;
-                            when 9  => if v_a > v_b then v_r := v_a; else v_r := v_b; end if;
-                            when 10 =>                     -- MUL: start
-                                fm_a <= resize(v_a, 18);
-                                fm_b <= resize(v_b, 14);
-                                mu_go_f <= '1';
-                            when 11 =>                     -- MRD: stall, then take
-                                if mu_idle = '0' then
-                                    u_st <= "011";
-                                    u_pc <= u_pc;
+                        -- the value, by the pre-decoded source
+                        case to_integer(u_rsel) is
+                            when 0 => v_r := u_sh;          -- MOV, SHR/SHL
+                            when 1 => if u_cin = '1' then v_r := v_a + v_b + 1;
+                                      else                v_r := v_a + v_b; end if;
+                            when 2 => v_r := v_a and signed(resize(unsigned(u_ir(12 downto 0)), 32));
+                            when 3 => v_r := resize(v_imm, 32);
+                            when 4 =>                        -- MRD: low 32 bits
+                                v_pr := signed(std_logic_vector'(
+                                            std_logic_vector(mu_ph(15 downto 0))
+                                            & std_logic_vector(mu_pl)));
+                                if u_ir(3) = '1' then v_r := shift_right(v_pr, 12);
+                                else                  v_r := v_pr; end if;
+                            when 5 =>                        -- DRD: clamped magnitude
+                                if dv_ovf = '1' then
+                                    v_r := to_signed(1048575, 32);
                                 else
-                                    v_r := resize(shift_right(mu_p,
-                                              to_integer(unsigned(v_imm(4 downto 0)))), 32);
+                                    v_r := signed(resize(dv_na(19 downto 0), 32));
                                 end if;
-                            when 12 =>                     -- DIV: start
-                                frd_ns <= shift_left(resize(unsigned(abs(v_a)), 32),
-                                                     to_integer(unsigned(v_imm(4 downto 0))));
-                                if v_b = 0 then frd_ds <= to_unsigned(1, 21);
-                                else frd_ds <= resize(unsigned(abs(v_b)), 21); end if;
-                                fd_sgn <= (v_a(31) xor v_b(31));
-                                frd_start <= '1';
-                            when 13 =>                     -- DRD: stall, then take
-                                -- the quotient is a MAGNITUDE up to 65535, so it
-                                -- has to be zero-extended before the sign goes on
-                                if dv_bsy = '1' then
-                                    u_st <= "011";
-                                    u_pc <= u_pc;
-                                else
-                                    if dv_q > 65535 then
-                                        v_q := to_unsigned(65535, 17);
-                                    else
-                                        v_q := resize(dv_q(15 downto 0), 17);
-                                    end if;
-                                    if fd_sgn = '1' then
-                                        v_r := -signed(resize(v_q, 32));
-                                    else
-                                        v_r := signed(resize(v_q, 32));
-                                    end if;
-                                end if;
-                            when 14 => v_r := resize(C_SIN(to_integer(
-                                              unsigned(v_a(7 downto 0)))), 32);
-                            when 15 => v_r := resize(v_imm, 32);
-                            when 16 =>                     -- GWR
-                                g_wa <= resize(unsigned(v_imm(7 downto 0))
-                                               + unsigned(v_a(7 downto 0)), 8);
-                                g_wd <= std_logic_vector(resize(v_b, 16));
-                                g_we <= '1';
-                            when 17 =>                     -- SLW
-                                u_slp <= unsigned(v_imm(4 downto 0));
-                                u_slv <= resize(v_a, 32);
-                                u_sls <= unsigned(v_b(1 downto 0));
-                                u_slw <= '1';
-                            when 18 => u_pc <= unsigned(v_imm(9 downto 0));
-                            when 19 => if v_a /= 0 then
-                                           u_pc <= unsigned(v_imm(9 downto 0));
-                                       end if;
-                            when 20 => if v_a < v_b then
-                                           u_pc <= unsigned(v_imm(9 downto 0));
-                                       end if;
-                            when 21 => if v_a >= v_b then
-                                           u_pc <= unsigned(v_imm(9 downto 0));
-                                       end if;
-                            when 22 =>
-                                if v_a < 0 then v_r := (others => '0');
-                                elsif v_a > v_b then v_r := v_b;
-                                else v_r := v_a; end if;
-                            when 23 =>
-                                -- GAM reads the SAME gamma ROM the pixel path
-                                -- uses, so it costs no second table: drive the
-                                -- address, stall one cycle, then take gm_d.
-                                -- address registers, then the ROM registers:
-                                -- two stall cycles, not one.
-                                if u_gwt /= 2 then
-                                    u_gama <= unsigned(v_a(7 downto 0));
-                                    u_gwt  <= u_gwt + 1;
-                                    u_st   <= "011";
-                                    u_pc   <= u_pc;
-                                else
-                                    u_gwt <= (others => '0');
-                                    v_r := signed(resize(gm_d, 32));
-                                end if;
-                            when 25 => v_r := u_ctlv;      -- knobs and raster
-                            when 27 => v_r := v_a and signed(resize(unsigned(v_imm), 32));
-                            when 28 =>
-                                v_sh := shift_right(v_a,
-                                            to_integer(unsigned(v_imm(3 downto 0))));
-                                if v_sh(0) = '1' then v_r := to_signed(1, 32);
-                                else                  v_r := (others => '0');
-                                end if;
-                            when 29 => v_r := v_a or shift_left(to_signed(1, 32),
-                                              to_integer(unsigned(v_imm(3 downto 0))));
-                            when 30 | 31 =>                -- LDX / STX
-                                u_xa <= resize(unsigned(v_a(6 downto 0))
-                                               + unsigned(v_imm(6 downto 0)), 7);
-                                u_xd <= resize(v_b, 32);
-                                u_ra <= resize(unsigned(v_a(6 downto 0))
-                                               + unsigned(v_imm(6 downto 0)), 7);
-                                u_st <= "100";
-                                u_pc <= u_pc;
-                            when 24 => u_done <= '1';
-                            when others => null;
+                            when 6 => v_r := resize(u_romr, 32);  -- SIN/GAM/SRD
+                            when 9 => v_r := v_b;           -- STX data
+                            when others => v_r := u_ctlr;   -- knobs and raster
                         end case;
 
-                        -- one write port, one write per instruction: every op
-                        -- that produced a value in v_r above, and only those
-                        if (v_op >= 1 and v_op <= 9) or v_op = 11 or v_op = 13
-                           or v_op = 14 or v_op = 15 or v_op = 22 or v_op = 23
-                           or v_op = 25 or (v_op >= 27 and v_op <= 29) then
-                          -- ...but not on the cycle a read op is still stalling
-                          if not ((v_op = 11 and mu_idle = '0')
-                                  or (v_op = 13 and dv_bsy = '1')
-                                  or (v_op = 23 and u_gwt /= 2)) then
-                            u_wa <= unsigned(u_ir(34 downto 28));
-                            u_wd <= std_logic_vector(resize(v_r, 32));
+                        -- control
+                        case v_op is
+                            when 4 | 5 =>                  -- SHR / SHL
+                                -- A is already in u_sh with the count beside it
+                                if u_shc /= 0 then
+                                    if v_op = 4 then u_sh <= shift_right(u_sh, 1);
+                                    else             u_sh <= shift_left(u_sh, 1); end if;
+                                    u_shc <= u_shc - 1;
+                                    v_stl := true;
+                                end if;
+                            when 11 => if mu_bsy = '1' then v_stl := true; end if;
+                            when 13 => if dv_bsy = '1' then v_stl := true; end if;
+                            when 14 | 16 =>                -- SIN / SRD
+                                -- the ROM answers on the second cycle; take it
+                                -- into fabric before the result mux sees it,
+                                -- or the mux gets placed beside the EBR
+                                if u_gwt = 0 then
+                                    u_gwt <= "01";
+                                    v_stl := true;
+                                elsif u_gwt = 1 then
+                                    if v_op = 14 then u_romr <= resize(t_srd, 17);
+                                    else u_romr <= signed('0' & tb_rd); end if;
+                                    u_gwt <= "10";
+                                    v_stl := true;
+                                else
+                                    u_gwt <= (others => '0');
+                                end if;
+                            when 17 => u_slw <= '1';       -- SLW (operands latched)
+                            when 22 => tb_we <= '1';       -- SWR (operands latched)
+                            when 18 => v_jmp := true;
+                                       u_pc <= unsigned(u_ir(9 downto 0));
+                            when 19 => if u_bnz = '1' then
+                                           v_jmp := true;
+                                           u_pc <= unsigned(u_ir(9 downto 0));
+                                       end if;
+                            when 20 => if u_blt = '1' then
+                                           v_jmp := true;
+                                           u_pc <= unsigned(u_ir(23 downto 20))
+                                                   & unsigned(u_ir(5 downto 0));
+                                       end if;
+                            when 21 => if u_blt = '0' then
+                                           v_jmp := true;
+                                           u_pc <= unsigned(u_ir(23 downto 20))
+                                                   & unsigned(u_ir(5 downto 0));
+                                       end if;
+                            when 26 => v_jmp := true;      -- JR
+                                       u_pc <= u_jr;
+                            when 24 => u_done <= '1';
+                            when others => null;           -- MUL/DIV launched
+                        end case;
+
+                        if v_stl then
+                            u_st <= "011";
+                        elsif v_op = 30 then
+                            u_st <= "100";                 -- LDX second access
+                        elsif v_jmp then
+                            u_st <= "000";
+                        else
+                            u_st <= "001";
+                            u_pc <= u_pc + 1;
+                        end if;
+
+                        -- The result register loads every EXEC cycle (nothing
+                        -- that stalls still needs operand B), so its enable is
+                        -- just the state; the strobe carries the conditions.
+                        u_wd <= std_logic_vector(resize(v_r, 32));
+                        if u_rwr = '1' and not v_stl then
                             u_we <= '1';
-                          end if;
                         end if;
                 end case;
             end if;
@@ -1447,30 +1793,59 @@ begin
         signed(resize(s_k1, 32)) when 0,
         signed(resize(s_k2, 32)) when 1,
         signed(resize(s_k3, 32)) when 2,
-        signed(resize(s_W, 32)) when 3,
+        signed(resize(s_Wl, 32)) when 3,
         signed(resize(s_H, 32)) when 4,
         signed(resize(s_hf, 32)) when 5,
         signed(resize(s_cx, 32)) when 6,
         signed(resize(s_cy, 32)) when 7,
         (0 => s_ilace, others => '0')    when 8,
+        -- the engine runs in the blanking BEFORE the next field, whose
+        -- parity is the opposite of the one just shown
+        (0 => not s_field, others => '0') when 9,
         (0 => s_zfirst, others => '0')   when 10,
+        signed(resize(unsigned(s_sw), 32))  when 11,
+        signed(resize(s_sld, 32))        when 12,
+        signed(resize(s_lfsr, 32))       when 13,
+        -- K6 size, read live: one CTL a field, so no latch is needed
+        signed(resize(unsigned(registers_in(5)), 32)) when 14,
         (others => '0')                  when others;
+
+    -- free-running random source for the turn picker
+    p_lfsr : process(clk)
+    begin
+        if rising_edge(clk) then
+            if s_lfsr(0) = '1' then
+                s_lfsr <= ('0' & s_lfsr(15 downto 1)) xor x"B400";
+            else
+                s_lfsr <= '0' & s_lfsr(15 downto 1);
+            end if;
+        end if;
+    end process p_lfsr;
 
     ------------------------------------------------------------------------
     -- microcode ROM and the two register-file copies (dual read)
     ------------------------------------------------------------------------
+    -- the ROM reads pc+1 during EXEC and LDX's second access, so a
+    -- straight-line instruction decodes on the very next clock
+    u_fa <= u_pc + 1 when (u_st = "011" or u_st = "101") else u_pc;
+
     p_urom : process(clk)
     begin
         if rising_edge(clk) then
-            u_rom <= C_UCODE(to_integer(u_pc));
+            u_rom <= C_UCODE(to_integer(u_fa));
         end if;
     end process p_urom;
 
     p_rfa : process(clk)
+        variable v_ra : unsigned(6 downto 0);
     begin
         if rising_edge(clk) then
             if u_we = '1' then rf_a(to_integer(u_wa)) <= u_wd; end if;
-            u_rda <= rf_a(to_integer(u_ra));
+            -- DECODE reads srcA straight off the ROM; LDX's second access
+            -- reads the index it computed
+            if u_st = "001" then v_ra := unsigned(u_rom(19 downto 13));
+            else                 v_ra := u_ra; end if;
+            u_rda <= rf_a(to_integer(v_ra));
         end if;
     end process p_rfa;
 
@@ -1478,22 +1853,101 @@ begin
     begin
         if rising_edge(clk) then
             if u_we = '1' then rf_b(to_integer(u_wa)) <= u_wd; end if;
-            u_rdb <= rf_b(to_integer(u_rb));
+            u_rdb <= rf_b(to_integer(unsigned(u_rom(12 downto 6))));
         end if;
     end process p_rfb;
 
 
     ------------------------------------------------------------------------
-    -- geometry EBR (write: frame FSM, read: line FSM)
+    -- DDA table (write: engine via SLW, read: DDA step sequencer)
     ------------------------------------------------------------------------
-    p_gram_w : process(clk)
+    ------------------------------------------------------------------------
+    -- per-slot descriptor RAMs: write from the engine, read by the pixel
+    -- pipe with the address one stage ahead of the use (data registered)
+    ------------------------------------------------------------------------
+    sd_wd <= std_logic_vector(u_slv(15 downto 0));
+
+    p_sdh1 : process(clk)
     begin
         if rising_edge(clk) then
-            if g_we = '1' then
-                gram(to_integer(g_wa)) <= g_wd;
+            if sd_we(0) = '1' then sd_h1(to_integer(sd_wa)) <= sd_wd; end if;
+            sd_h1d <= sd_h1(to_integer(e_sl));
+        end if;
+    end process p_sdh1;
+
+    p_sdh2 : process(clk)
+    begin
+        if rising_edge(clk) then
+            if sd_we(1) = '1' then sd_h2(to_integer(sd_wa)) <= sd_wd; end if;
+            sd_h2d <= sd_h2(to_integer(e_sl));
+        end if;
+    end process p_sdh2;
+
+    p_sdlf : process(clk)
+    begin
+        if rising_edge(clk) then
+            if sd_we(2) = '1' then sd_lf(to_integer(sd_wa)) <= sd_wd; end if;
+            sd_lfd <= sd_lf(to_integer(x5_sl));
+        end if;
+    end process p_sdlf;
+
+    -- sticker chroma lit by the face's light level: a ROM, no engine work
+    p_sdcv : process(clk)
+    begin
+        if rising_edge(clk) then
+            -- full-saturation sticker chroma: the luma carries all the
+            -- shading (a light-stepped chroma read as flicker)
+            case to_integer(x13_ca) is
+                when 1      => sd_cvd <= x"A316";
+                when 2      => sd_cvd <= x"CA73";
+                when 3      => sd_cvd <= x"D43D";
+                when 4      => sd_cvd <= x"3B7C";
+                when 5      => sd_cvd <= x"52BD";
+                when others => sd_cvd <= x"8080";
+            end case;
+        end if;
+    end process p_sdcv;
+
+    -- face descriptor, read with the owner slot straight out of stage A
+    p_sdfd : process(clk)
+    begin
+        if rising_edge(clk) then
+            if sd_we(3) = '1' then sd_fd(to_integer(sd_wa)) <= sd_wd; end if;
+            sd_fdd <= sd_fd(to_integer(a_own));
+        end if;
+    end process p_sdfd;
+
+    -- sticker state + turn tables: one read port, the engine's in blanking
+    -- and the pixel path's (stage C, the sticker under the pixel) otherwise
+    p_tbl : process(clk)
+        variable v_ta : unsigned(7 downto 0);
+    begin
+        if rising_edge(clk) then
+            if tb_we = '1' then tbl(to_integer(tb_wa)) <= tb_wd; end if;
+            if u_done = '0' then v_ta := tb_era;
+            else                 v_ta := px_ta; end if;
+            tb_rd <= tbl(to_integer(v_ta));
+        end if;
+    end process p_tbl;
+
+    -- u_slv holds still until the next SLW, several clocks after this write
+    w_wd <= std_logic_vector(u_slv);
+
+    p_wram_w : process(clk)
+    begin
+        if rising_edge(clk) then
+            if w_we = '1' then
+                wram(to_integer(w_wa)) <= w_wd;
             end if;
         end if;
-    end process p_gram_w;
+    end process p_wram_w;
+
+    p_wram_r : process(clk)
+    begin
+        if rising_edge(clk) then
+            w_rd <= wram(to_integer(w_ra));
+        end if;
+    end process p_wram_r;
 
     ------------------------------------------------------------------------
     -- MATERIAL ROM ports.  Address combinational, data registered -- one
@@ -1507,7 +1961,6 @@ begin
     begin
         if rising_edge(clk) then
             if e_stz = '1' then v := e_qsu;
-            elsif e_silz = '1' then v := e_mu;
             else v := e_gu; end if;
             sq_du <= C_SQA(to_integer(v(8 downto 1)));
         end if;
@@ -1518,7 +1971,6 @@ begin
     begin
         if rising_edge(clk) then
             if e_stz = '1' then v := e_qsv;
-            elsif e_silz = '1' then v := e_mv;
             else v := e_gv; end if;
             sq_dv <= C_SQB(to_integer(v(8 downto 1)));
         end if;
@@ -1545,8 +1997,7 @@ begin
         end if;
     end process p_srom2;
 
-    -- one gamma port, shared: the frame FSM only runs with fr_done = '0' and
-    -- the pixel path only matters with it '1', exactly like the multiplier.
+    -- gamma: one port for the pixel path, one for the engine
     p_gamrom : process(clk)
     begin
         if rising_edge(clk) then
@@ -1554,12 +2005,12 @@ begin
         end if;
     end process p_gamrom;
 
+
     s_cy <= resize(s_hf(12 downto 1), 12);
 
-    gm_a <= u_gama when fr_done = '0' else gm_ap;
+    gm_a <= gm_ap;
 
-    mu_idle <= '1' when (mu_bsy = '0' and mu_go_f = '0' and mu_go_l = '0')
-              else '0';
+    mu_idle <= not mu_bsy;
 
     -- the ONE quarter-sine ROM read port
     p_srom : process(clk)
@@ -1569,426 +2020,116 @@ begin
         end if;
     end process p_srom;
 
-    p_gram_r : process(clk)
-    begin
-        if rising_edge(clk) then
-            g_rd <= gram(to_integer(g_ra));
-        end if;
-    end process p_gram_r;
-
-    ------------------------------------------------------------------------
-    -- display list EBR (write: line FSM, read: pixel prefetcher)
-    ------------------------------------------------------------------------
-    p_dram_w : process(clk)
-    begin
-        if rising_edge(clk) then
-            if d_we = '1' then
-                dram(to_integer(d_wa)) <= d_wd;
-            end if;
-        end if;
-    end process p_dram_w;
-
-    p_dram_r : process(clk)
-    begin
-        if rising_edge(clk) then
-            d_rd <= dram(to_integer(d_ra));
-        end if;
-    end process p_dram_r;
 
 
 
     ------------------------------------------------------------------------
-    -- LINE FSM.  With an affine (orthographic) UV map there are no segments
-    -- and no per-span division: each visible face contributes ONE record --
-    -- span extent plus the UV value at the span's first pixel, obtained from
-    -- the per-face screen gradients.  The pixel path then just accumulates.
+    -- PER-FACE AFFINE DDAs.  The camera is orthographic, so each visible
+    -- face's (u, v) is affine in screen x/y and runs as a plain accumulator:
+    -- +gx per active pixel, then once per line (after avid falls) +wrap,
+    -- wrap = gy*ystep - W*gx, which lands it on x = 0 of the next line.  All
+    -- six run in parallel, and which face owns a pixel is simply whose (u, v)
+    -- lies inside the square: the faces of a convex solid never overlap on
+    -- screen.  This replaces the line engine, the display list and the
+    -- prefetcher -- no spans, no edge tables, no per-line multiplies.
+    --
+    -- The adder only ever adds gx.  To add a wrap (or the field seed after
+    -- the frame reset) the sequencer parks that value in gx for one step and
+    -- then restores gx from the table, so the accumulator has no input mux.
     ------------------------------------------------------------------------
-    p_line : process(clk)
-        variable v_tgt  : unsigned(10 downto 0);
-        variable v_yf   : unsigned(11 downto 0);
-        variable v_e1   : integer range 0 to 3;
-        variable v_x    : signed(15 downto 0);
-        variable v_q    : signed(15 downto 0);
-        variable v_sel  : unsigned(1 downto 0);
-        variable v_best : signed(13 downto 0);
-        variable v_go   : std_logic;
-        variable v_uv   : signed(19 downto 0);
+    p_dda : process(clk)
+        variable v_a : integer range 0 to 15;
     begin
         if rising_edge(clk) then
-            d_we <= '0';
-            mu_go_l <= '0';
-
-            v_go := '0';
-            if fr_done = '1' then
-                if s_avid_r = '1' then
-                    v_go := '1';
-                    v_tgt := s_ycnt + 1;
-                elsif s_hs_r = '1' and s_ycnt = 0 then
-                    v_go := '1';
-                    v_tgt := (others => '0');
-                end if;
-            end if;
-
-            if v_go = '1' then
-                if s_ilace = '1' then
-                    if s_field = '0' then v_yf := (v_tgt(10 downto 0) & '0') + 1;
-                    else                  v_yf := v_tgt(10 downto 0) & '0'; end if;
+            -- sequencer: t = 2a + k, k=0 issues a's wrap/seed, k=1 its gx
+            -- Exactly s_Wl steps per line, from the first active pixel --
+            -- carried on into the front porch if a line comes up short, cut
+            -- off if it runs long.  An analog source's line lengths wander
+            -- by a pixel; stepping per ACTIVE pixel let that error pile up
+            -- down the screen (a wavy cube), and a width measured on one odd
+            -- line sheared the whole field.
+            dd_wrap <= '0';
+            if g_avid = '1' and g_avid_q = '0' then
+                dd_x   <= to_unsigned(1, 12);
+                dd_run <= '1';
+            elsif dd_run = '1' then
+                if dd_x >= s_Wl then
+                    dd_run  <= '0';
+                    dd_wrap <= '1';
                 else
-                    v_yf := '0' & v_tgt(10 downto 0);
+                    dd_x <= dd_x + 1;
                 end if;
-                ln_ys   <= signed(resize(v_yf, 16));
-                ln_yc2  <= signed(resize(v_yf & "10", 16));
-                d_wp    <= v_tgt(0) & "0000000";
-                sp_ok   <= (others => '0');
-                ln_i    <= (others => '0');
-                if v_tgt >= s_H then ln_st <= to_unsigned(30, 6);
-                else                 ln_st <= to_unsigned(1, 6); end if;
-            else
-                case to_integer(ln_st) is
-                    when 0 => null;
-                    when 1 =>
-                        g_ra <= to_unsigned(127, 8);
-                        ln_st <= to_unsigned(2, 6);
-                    when 2 => ln_st <= to_unsigned(3, 6);
-                    when 3 =>
-                        nslot_l <= unsigned(g_rd(1 downto 0));
-                        ln_st <= to_unsigned(4, 6);
-
-                    ------------------------------------------------------
-                    -- span scan (ln_i = slot): 4 edge intersections
-                    ------------------------------------------------------
-                    when 4 =>
-                        if ln_i > 2 or resize(ln_i, 2) >= nslot_l then
-                            ln_st <= to_unsigned(12, 6);
-                        else
-                            g_ra <= shift_left(resize(ln_i, 8), 5);
-                            ln_st <= to_unsigned(5, 6);
-                        end if;
-                    when 5 =>
-                        g_ra <= shift_left(resize(ln_i, 8), 5) + 1;
-                        ln_st <= to_unsigned(6, 6);
-                    when 6 =>
-                        ln_t0 <= signed(g_rd);
-                        ln_st <= to_unsigned(7, 6);
-                    when 7 =>
-                        if ln_ys < ln_t0 or ln_ys >= signed(g_rd) then
-                            sp_ok(to_integer(ln_i)) <= '0';
-                            ln_i <= ln_i + 1;
-                            ln_st <= to_unsigned(4, 6);
-                        else
-                            ln_e <= (others => '0');
-                            ln_xmin <= to_signed(32767, 16);
-                            ln_xmax <= to_signed(-32768, 16);
-                            ln_st <= to_unsigned(8, 6);
-                        end if;
-                    when 8 =>
-                        g_ra <= shift_left(resize(ln_i, 8), 5) + 2
-                                + resize(ln_e(1 downto 0) & '0', 8)
-                                + resize(ln_e(1 downto 0), 8);
-                        ln_st <= to_unsigned(9, 6);
-                    when 9 => ln_st <= to_unsigned(10, 6);
-                    when 10 =>
-                        cy4(to_integer(ln_e(1 downto 0))) <= signed(g_rd);
-                        if ln_e = 3 then
-                            ln_e <= (others => '0');
-                            ln_st <= to_unsigned(11, 6);
-                        else
-                            ln_e <= ln_e + 1;
-                            ln_st <= to_unsigned(8, 6);
-                        end if;
-                    when 11 =>
-                        v_e1 := (to_integer(ln_e(1 downto 0)) + 1) mod 4;
-                        if (ln_yc2 >= cy4(to_integer(ln_e(1 downto 0))))
-                           /= (ln_yc2 >= cy4(v_e1)) then
-                            g_ra <= shift_left(resize(ln_i, 8), 5) + 3
-                                    + resize(ln_e(1 downto 0) & '0', 8)
-                                    + resize(ln_e(1 downto 0), 8);
-                            ln_st <= to_unsigned(13, 6);
-                        elsif ln_e = 3 then
-                            ln_st <= to_unsigned(18, 6);
-                        else
-                            ln_e <= ln_e + 1;
-                        end if;
-                    when 13 =>
-                        g_ra <= shift_left(resize(ln_i, 8), 5) + 4
-                                + resize(ln_e(1 downto 0) & '0', 8)
-                                + resize(ln_e(1 downto 0), 8);
-                        ln_st <= to_unsigned(14, 6);
-                    when 14 =>
-                        ln_edge_x0 <= signed(g_rd);
-                        ln_st <= to_unsigned(15, 6);
-                    when 15 =>
-                        lm_a <= resize(signed(g_rd), 18);
-                        lm_b <= resize(ln_yc2 - cy4(to_integer(ln_e(1 downto 0))), 14);
-                        mu_go_l <= '1';
-                        ln_st <= to_unsigned(16, 6);
-                    when 16 =>
-                        if mu_idle = '1' then ln_st <= to_unsigned(17, 6); end if;
-                    when 17 =>
-                        v_x := ln_edge_x0 + resize(shift_right(mu_p, 6), 16);
-                        if v_x < ln_xmin then ln_xmin <= v_x; end if;
-                        if v_x > ln_xmax then ln_xmax <= v_x; end if;
-                        if ln_e = 3 then
-                            ln_st <= to_unsigned(18, 6);
-                        else
-                            ln_e <= ln_e + 1;
-                            ln_st <= to_unsigned(11, 6);
-                        end if;
-                    when 18 =>
-                        v_x := shift_right(ln_xmin, 2);
-                        if v_x < 0 then v_x := (others => '0'); end if;
-                        sp_xl(to_integer(ln_i)) <= resize(v_x, 14);
-                        v_q := shift_right(ln_xmax, 2) + 1;
-                        if v_q > signed(resize(s_W, 16)) then
-                            v_q := signed(resize(s_W, 16));
-                        end if;
-                        sp_xr(to_integer(ln_i)) <= resize(v_q, 14);
-                        if ln_xmin <= ln_xmax and v_q > v_x then
-                            sp_ok(to_integer(ln_i)) <= '1';
-                        else
-                            sp_ok(to_integer(ln_i)) <= '0';
-                        end if;
-                        ln_i <= ln_i + 1;
-                        ln_st <= to_unsigned(4, 6);
-
-                    ------------------------------------------------------
-                    -- x-sort the up-to-3 spans
-                    ------------------------------------------------------
-                    when 12 =>
-                        sp_msk <= sp_ok;
-                        ocnt <= (others => '0');
-                        ln_st <= to_unsigned(19, 6);
-                    when 19 | 20 | 21 =>
-                        v_best := to_signed(8191, 14);
-                        v_sel := "11";
-                        for i in 0 to 2 loop
-                            if sp_msk(i) = '1' and sp_xl(i) < v_best then
-                                v_best := sp_xl(i);
-                                v_sel := to_unsigned(i, 2);
-                            end if;
-                        end loop;
-                        if v_sel /= "11" then
-                            sp_msk(to_integer(v_sel)) <= '0';
-                            case to_integer(ln_st) is
-                                when 19 => ord0 <= v_sel;
-                                when 20 => ord1 <= v_sel;
-                                when others => ord2 <= v_sel;
-                            end case;
-                            ocnt <= ocnt + 1;
-                        end if;
-                        if ln_st = 21 then
-                            ln_k <= (others => '0');
-                            ln_st <= to_unsigned(22, 6);
-                        else
-                            ln_st <= ln_st + 1;
-                        end if;
-
-                    ------------------------------------------------------
-                    -- one record per span: u,v at the first pixel come from
-                    -- the face gradients (2 multiplies each), then the pixel
-                    -- path accumulates gu_x / gv_x across the span
-                    ------------------------------------------------------
-                    when 22 =>
-                        if resize(ln_k, 2) >= ocnt then
-                            ln_st <= to_unsigned(30, 6);
-                        else
-                            case to_integer(ln_k) is
-                                when 0 => v_sel := ord0;
-                                when 1 => v_sel := ord1;
-                                when others => v_sel := ord2;
-                            end case;
-                            ln_slot <= v_sel;
-                            ln_x0 <= sp_xl(to_integer(v_sel));
-                            ln_x1 <= sp_xr(to_integer(v_sel));
-                            ln_dxp <= resize(sp_xl(to_integer(v_sel))
-                                             - resize(sl_px0(to_integer(v_sel)), 14), 14);
-                            ln_dyp <= resize(resize(ln_ys, 14)
-                                             - resize(sl_py0(to_integer(v_sel)), 14), 14);
-                            ln_st <= to_unsigned(23, 6);
-                        end if;
-                    -- Four products for the span's UV seed, one at a time on
-                    -- the serial multiplier.  The line engine runs a whole
-                    -- line ahead of the pixel it feeds, so ~2200 clocks are
-                    -- available and 4 x 16 costs nothing.
-                    when 23 =>
-                        lm_a <= resize(sl_gux(to_integer(ln_slot)), 18);
-                        lm_b <= ln_dxp;
-                        mu_go_l <= '1';
-                        ln_st <= to_unsigned(24, 6);
-                    when 24 =>
-                        if mu_idle = '1' then
-                            ln_acc <= resize(mu_p, 32);
-                            lm_a <= resize(sl_guy(to_integer(ln_slot)), 18);
-                            lm_b <= ln_dyp;
-                            mu_go_l <= '1';
-                            ln_st <= to_unsigned(25, 6);
-                        end if;
-                    when 25 =>
-                        if mu_idle = '1' then
-                            ln_acc <= ln_acc + resize(mu_p, 32);
-                            lm_a <= resize(sl_gvx(to_integer(ln_slot)), 18);
-                            lm_b <= ln_dxp;
-                            mu_go_l <= '1';
-                            ln_st <= to_unsigned(26, 6);
-                        end if;
-                    when 26 =>
-                        if mu_idle = '1' then
-                            ln_acc2 <= resize(mu_p, 32);
-                            v_uv := resize(shift_right(ln_acc, 8), 20);
-                            if v_uv > 16383 then v_uv := to_signed(16383, 20); end if;
-                            if v_uv < -16384 then v_uv := to_signed(-16384, 20); end if;
-                            ln_useed <= resize(v_uv, 16);
-                            lm_a <= resize(sl_gvy(to_integer(ln_slot)), 18);
-                            lm_b <= ln_dyp;
-                            mu_go_l <= '1';
-                            ln_st <= to_unsigned(27, 6);
-                        end if;
-                    when 27 =>
-                        if mu_idle = '1' then
-                            ln_acc2 <= ln_acc2 + resize(mu_p, 32);
-                            ln_st <= to_unsigned(29, 6);
-                        end if;
-                    when 28 => null;
-                    when 29 =>
-                        v_uv := resize(shift_right(ln_acc2, 8), 20);
-                        if v_uv > 16383 then v_uv := to_signed(16383, 20); end if;
-                        if v_uv < -16384 then v_uv := to_signed(-16384, 20); end if;
-                        ln_vseed <= resize(v_uv, 16);
-                        ln_st <= to_unsigned(31, 6);
-                    when 31 =>
-                        d_wa <= d_wp;  d_wp <= d_wp + 1;  d_we <= '1';
-                        d_wd <= "00" & std_logic_vector(ln_slot)
-                                & std_logic_vector(resize(unsigned(resize(ln_x0, 14)), 12));
-                        ln_st <= to_unsigned(32, 6);
-                    when 32 =>
-                        d_wa <= d_wp;  d_wp <= d_wp + 1;  d_we <= '1';
-                        d_wd <= "0000" & std_logic_vector(resize(unsigned(resize(ln_x1, 14)), 12));
-                        ln_st <= to_unsigned(33, 6);
-                    when 33 =>
-                        d_wa <= d_wp;  d_wp <= d_wp + 1;  d_we <= '1';
-                        d_wd <= std_logic_vector(ln_useed);
-                        ln_st <= to_unsigned(34, 6);
-                    when 34 =>
-                        d_wa <= d_wp;  d_wp <= d_wp + 1;  d_we <= '1';
-                        d_wd <= std_logic_vector(ln_vseed);
-                        ln_k <= ln_k + 1;
-                        ln_st <= to_unsigned(22, 6);
-
-                    ------------------------------------------------------
-                    -- end-of-line marker
-                    ------------------------------------------------------
-                    when 30 =>
-                        d_wa <= d_wp;  d_wp <= d_wp + 1;  d_we <= '1';
-                        d_wd <= "1100" & x"FFF";
-                        ln_e <= (others => '0');
-                        ln_st <= to_unsigned(35, 6);
-                    when 35 =>
-                        d_wa <= d_wp;  d_wp <= d_wp + 1;  d_we <= '1';
-                        d_wd <= (others => '0');
-                        if ln_e = 2 then ln_st <= (others => '0');
-                        else ln_e <= ln_e + 1; end if;
-
-                    when others =>
-                        ln_st <= (others => '0');
-                end case;
             end if;
-        end if;
-    end process p_line;
 
-    ------------------------------------------------------------------------
-    -- record prefetcher: keeps the NEXT display-list record in nx_* shadow
-    -- regs (record spacing >= ~28 px guarantees the 7-cycle fetch fits)
-    ------------------------------------------------------------------------
-    p_pref : process(clk)
-    begin
-        if rising_edge(clk) then
-            if s_hs_r = '1' then
-                pf_rdp <= s_ycnt(0) & "0000000";
-                nx_end <= '1';
-                pf_st  <= (others => '0');
-            else
-                case to_integer(pf_st) is
-                    when 0 =>
-                        d_ra <= pf_rdp;
-                        pf_st <= to_unsigned(1, 3);
-                    when 1 =>
-                        d_ra <= pf_rdp + 1;
-                        pf_st <= to_unsigned(2, 3);
-                    when 2 =>
-                        nx_x   <= unsigned(d_rd(11 downto 0));
-                        nx_sl  <= unsigned(d_rd(13 downto 12));
-                        nx_end <= d_rd(15);
-                        d_ra <= pf_rdp + 2;
-                        pf_st <= to_unsigned(3, 3);
-                    when 3 =>
-                        nx_xe <= unsigned(d_rd(11 downto 0));
-                        d_ra <= pf_rdp + 3;
-                        pf_st <= to_unsigned(4, 3);
-                    when 4 =>
-                        nx_u <= signed(d_rd);
-                        pf_st <= to_unsigned(5, 3);
-                    when 5 =>
-                        nx_v <= signed(d_rd);
-                        pf_rdp <= pf_rdp + 4;
-                        pf_st <= to_unsigned(6, 3);
-                    when others =>
-                        if pf_consume = '1' then
-                            pf_st <= (others => '0');
-                        end if;
-                end case;
+            dq_v1 <= '0';
+            if dd_wrap = '1' or dd_kick = '1' then
+                dq_run  <= '1';
+                dq_seed <= dd_kick;
+                dq_t    <= (others => '0');
+            elsif dq_run = '1' then
+                if dq_t(0) = '0' then
+                    w_ra <= "000" & dq_seed & dq_t(4 downto 1);
+                else
+                    w_ra <= "0010" & dq_t(4 downto 1);
+                end if;
+                dq_v1 <= '1';
+                dq_k1 <= dq_t(0);
+                dq_a1 <= dq_t(4 downto 1);
+                if dq_t = 23 then dq_run <= '0'; end if;
+                dq_t <= dq_t + 1;
             end if;
+            -- the table answers a cycle after the address
+            dq_v2 <= dq_v1;
+            dq_k2 <= dq_k1;
+            dq_a2 <= dq_a1;
+            dq_st <= '0';
+            if dq_v2 = '1' then
+                v_a := to_integer(dq_a2);
+                if v_a < 12 then dd_gx(v_a) <= signed(w_rd(26 downto 0)); end if;
+                dq_st <= not dq_k2;
+            end if;
+            dq_a3 <= dq_a2;
+
+            -- reset when the engine starts (in blanking); it kicks the new
+            -- field's seeds in when it finishes
+            for a in 0 to 11 loop
+                if s_estart = '1' then
+                    dd_acc(a) <= (others => '0');
+                elsif (g_avid = '1' and g_avid_q = '0')
+                      or (dd_run = '1' and dd_x < s_Wl)
+                      or (dq_st = '1' and to_integer(dq_a3) = a) then
+                    dd_acc(a) <= dd_acc(a) + dd_gx(a);
+                end if;
+            end loop;
         end if;
-    end process p_pref;
+    end process p_dda;
 
     ------------------------------------------------------------------------
     -- background: gradient + horizontal vignette, all accumulators
     ------------------------------------------------------------------------
+    -- backdrop: a soft vertical luma sweep over a flat cool grey (the
+    -- horizontal vignette and chroma drift went to make room for the turns)
+    -- backdrop: a flat cool grey.  The vertical sweep went for timing: a
+    -- CONSTANT backdrop luma folds away the silhouette blend's subtract and
+    -- the backdrop pipeline registers (~116 LC at 98% full, seed odds 1/8 ->
+    -- 3/8; a cheaper sweep saved only 52 LC and nothing in odds).
     p_bg : process(clk)
-        variable v_vig : unsigned(17 downto 0);
-        variable v_y   : unsigned(17 downto 0);
-        variable v_dx  : unsigned(11 downto 0);
     begin
         if rising_edge(clk) then
-            if s_fstart = '1' then
-                bg_ly <= to_unsigned(644 * 256, 18);
-                bg_uq <= to_unsigned(506 * 256, 18);
-                bg_vq <= to_unsigned(516 * 256, 18);
-            elsif s_avid_f = '1' then
-                if s_H > 700 then
-                    bg_ly <= bg_ly - 56;
-                    bg_uq <= bg_uq + 3;
-                    bg_vq <= bg_vq - 2;
-                else
-                    bg_ly <= bg_ly - 126;
-                    bg_uq <= bg_uq + 6;
-                    bg_vq <= bg_vq - 4;
-                end if;
-            end if;
-
-            -- horizontal falloff straight off the pixel counter: a triangle
-            -- reads the same as the parabola once it is this soft, and costs
-            -- one subtract instead of a pair of wide accumulators
-            if s_xcnt > s_cx then v_dx := resize(s_xcnt - s_cx, 12);
-            else                  v_dx := resize(s_cx - s_xcnt, 12); end if;
-            if s_W > 1200 then v_dx := shift_right(v_dx, 1); end if;
-            v_vig := resize(shift_left(resize(v_dx, 18), 4)
-                            + shift_left(resize(v_dx, 18), 3), 18);
-            if bg_ly > v_vig then v_y := bg_ly - v_vig;
-            else v_y := (others => '0'); end if;
-            bg_vy <= v_y(17 downto 8);
-
-            bgy_sr(0) <= bg_vy;
-            for i in 1 to 13 loop
-                bgy_sr(i) <= bgy_sr(i - 1);
-            end loop;
-            bg_u <= bg_uq(17 downto 8);
-            bg_v <= bg_vq(17 downto 8);
+            bg_vy <= to_unsigned(530, 10);
+            bg_u <= to_unsigned(508, 10);
+            bg_v <= to_unsigned(514, 10);
         end if;
     end process p_bg;
 
     ------------------------------------------------------------------------
     -- PIXEL PIPE (stages A..L + output reg = C_LATENCY 13)
     ------------------------------------------------------------------------
+
+    -- the sticker under the pixel: base + 3 v cell + u cell (stage C)
+    px_ta <= resize(c_base + resize(c_cv & '0', 6) + resize(c_cv, 6)
+                    + resize(c_cu, 6), 8);
+
     p_pix : process(clk)
         variable v_off  : signed(15 downto 0);
         variable v_apu, v_apv : signed(14 downto 0);
@@ -2000,11 +2141,13 @@ begin
         variable v_ad   : signed(13 downto 0);
         variable v_am   : signed(16 downto 0);
         variable v_str  : signed(12 downto 0);
+        variable v_ch   : signed(13 downto 0);
         variable v_qcu, v_qcv : unsigned(8 downto 0);
         variable v_w    : signed(27 downto 0);
         variable v_w8   : unsigned(25 downto 0);
         variable v_a    : signed(15 downto 0);
         variable v_a5   : unsigned(4 downto 0);
+        variable v_bgy  : unsigned(9 downto 0);
         variable v_dy   : signed(11 downto 0);
         variable v_c    : signed(16 downto 0);
         variable v_c19  : signed(19 downto 0);
@@ -2021,84 +2164,112 @@ begin
         variable v_t8   : signed(8 downto 0);
         variable v_sil4 : std_logic_vector(3 downto 0);
         variable v_face : integer range 0 to 5;
+        variable v_d12  : unsigned(11 downto 0);
+        variable v_q12  : signed(11 downto 0);
+        variable v_ng   : std_logic;
+        variable v_cl   : unsigned(1 downto 0);
+        variable v_c20  : signed(19 downto 0);
+        variable v_os   : signed(13 downto 0);
+        variable v_my   : unsigned(9 downto 0);
+        variable v_ndh  : unsigned(7 downto 0);
+        variable v_s6   : integer range 0 to 5;
+        variable v_oh   : std_logic_vector(5 downto 0);
+        variable v_cr, v_cp, v_f : std_logic_vector(5 downto 0);
+        variable v_nu, v_nv : unsigned(1 downto 0);
     begin
         if rising_edge(clk) then
-            pf_consume <= '0';
 
             ------------------------------------------------------ stage A
-            -- Affine UV: one accumulator pair, re-seeded at each span start
-            -- and stepped by that face's screen gradient.  No division and no
-            -- segment records anywhere in the pixel path.
-            if data_in.avid = '1' then
-                if nx_end = '0' and s_xcnt = nx_x then
-                    uacc <= shift_left(resize(nx_u, 26), 8);
-                    vacc <= shift_left(resize(nx_v, 26), 8);
-                    cu_sl <= nx_sl;
-                    cu_xe <= nx_xe;
-                    cu_du <= resize(sl_gux(to_integer(nx_sl)), 26);
-                    cu_dv <= resize(sl_gvx(to_integer(nx_sl)), 26);
-                    cu_on <= '1';
-                    pf_consume <= '1';
-                    b_u <= resize(shift_right(shift_left(resize(nx_u, 26), 8), 8), 16);
-                    b_v <= resize(shift_right(shift_left(resize(nx_v, 26), 8), 8), 16);
-                    b_sl <= nx_sl;
-                    b_on <= '1';
-                else
-                    if cu_on = '1' and s_xcnt >= cu_xe then
-                        cu_on <= '0';
+            -- Affine UV straight off the per-face DDAs (p_dda).  Ownership
+            -- flags come from the PREVIOUS pixel (registered off the
+            -- accumulators) and (u, v) from this one: a one-pixel lag on the
+            -- ownership edge only, which lands inside the silhouette inset or
+            -- on the crease's own bevel.  Slots are ordered near box first,
+            -- so the first owner is also the front one.
+            for s in 0 to 5 loop
+                v_cr(s) := '0';  v_cp(s) := '0';
+                if g_avid = '1' and to_unsigned(s, 3) < s_nslot then
+                    if f_inside(dd_acc(2*s), dd_e(2*s), sl_nu(s))
+                       and f_inside(dd_acc(2*s + 1), dd_e(2*s + 1), sl_nv(s)) then
+                        v_cr(s) := '1';
                     end if;
-                    uacc <= uacc + cu_du;
-                    vacc <= vacc + cu_dv;
-                    b_u <= resize(shift_right(uacc, 8), 16);
-                    b_v <= resize(shift_right(vacc, 8), 16);
-                    b_sl <= cu_sl;
-                    b_on <= cu_on;
+                    if f_inpad(dd_acc(2*s), dd_e(2*s), sl_nu(s))
+                       and f_inpad(dd_acc(2*s + 1), dd_e(2*s + 1), sl_nv(s)) then
+                        v_cp(s) := '1';
+                    end if;
                 end if;
+            end loop;
+            -- the owner, encoded here so the next stage only muxes: first
+            -- strict claimant, else first padded one -- both encoders in
+            -- parallel, then one select (a priority chain was 14 LUTs deep)
+            if v_cr /= "000000" then a_own <= f_first6(v_cr); a_po <= '0';
+            else                     a_own <= f_first6(v_cp); a_po <= '1'; end if;
+            if v_cr /= "000000" or v_cp /= "000000" then a_any <= '1';
+            else a_any <= '0'; end if;
+            -- a second strict claimant lies behind the owner, so the owner's
+            -- silhouette must not blend to the backdrop there
+            if f_two6(v_cr) then a_bh <= '1'; else a_bh <= '0'; end if;
+
+            if g_avid = '1' and a_any = '1' then
+                v_s6 := to_integer(a_own);
+                b_u <= f_uvsl(dd_acc(2*v_s6), dd_e(2*v_s6));
+                b_v <= f_uvsl(dd_acc(2*v_s6 + 1), dd_e(2*v_s6 + 1));
+                b_sl <= a_own;
+                b_on <= '1';
+                b_bh <= a_bh;
+                b_po <= a_po;
             else
                 b_on <= '0';
-                cu_on <= '0';
+                b_bh <= '0';
+                b_po <= '0';
             end if;
 
             ------------------------------------------------------ stage B
-            -- Cell split only.  Every boundary distance the shader needs --
-            -- cubie gap AND face bevel -- is 2048 - |p| off the in-cubie
-            -- coordinate, because the face edge is simply the outermost grid
-            -- line.  That collapses eight wide subtract/compare chains into
-            -- one per axis.
-            if b_u < 4096 then v_off := to_signed(0, 16); c_cu <= "00";
-            elsif b_u < 8192 then v_off := to_signed(4096, 16); c_cu <= "01";
-            else v_off := to_signed(8192, 16); c_cu <= "10"; end if;
-            c_pu <= resize(b_u - v_off - 2048, 14);
-            if b_v < 4096 then v_off := to_signed(0, 16); c_cv <= "00";
-            elsif b_v < 8192 then v_off := to_signed(4096, 16); c_cv <= "01";
-            else v_off := to_signed(8192, 16); c_cv <= "10"; end if;
-            c_pv <= resize(b_v - v_off - 2048, 14);
+            -- Cell split only (p_cell): every boundary distance the shader
+            -- needs -- cubie gap AND face bevel -- is 2048 - |p| off the
+            -- in-cubie coordinate, because the face edge is simply the
+            -- outermost grid line.
+            -- the owner's face descriptor arrived with this stage
+            case to_integer(unsigned(sd_fdd(9 downto 7))) is
+                when 1 => v_nu := "11"; v_nv := "01";
+                when 2 => v_nu := "01"; v_nv := "11";
+                when 3 => v_nu := "11"; v_nv := "10";
+                when 4 => v_nu := "10"; v_nv := "11";
+                when others => v_nu := "11"; v_nv := "11";
+            end case;
+            p_cell(b_u, v_nu, v_d12, v_q12, v_ng, v_cl);
+            c_du <= v_d12;  c_qu <= v_q12;  c_ngu <= v_ng;  c_cu <= v_cl;
+            p_cell(b_v, v_nv, v_d12, v_q12, v_ng, v_cl);
+            c_dv <= v_d12;  c_qv <= v_q12;  c_ngv <= v_ng;  c_cv <= v_cl;
+            c_nu <= v_nu;  c_nv <= v_nv;
+            c_base <= unsigned(sd_fdd(15 downto 10));
+            c_gap  <= unsigned(sd_fdd(6 downto 4));
+            c_sil  <= sd_fdd(3 downto 0);
             c_sl <= b_sl;
             c_on <= b_on;
+            c_bh <= b_bh;
+            c_po <= b_po;
 
             ------------------------------------------------------ stage C
-            v_apu := resize(abs(c_pu), 15);
-            v_apv := resize(abs(c_pv), 15);
-            v_sil4 := sl_sil(to_integer(c_sl));
+            v_sil4 := c_sil;
+            v_du := signed(resize(c_du, 13));
+            v_dv := signed(resize(c_dv, 13));
 
-            -- distance to the nearest grid line on each axis, saturated to
-            -- 12 bits: nothing downstream cares past the bevel radius
-            v_du := to_signed(2048, 13) - resize(v_apu, 13);
-            if v_du < 0 then v_du := (others => '0'); end if;
-            v_dv := to_signed(2048, 13) - resize(v_apv, 13);
-            if v_dv < 0 then v_dv := (others => '0'); end if;
-
-            -- is that line the face outline (bevel) or an interior seam (gap)?
+            -- Is the nearest line the face outline or a seam?  An outline edge
+            -- is a silhouette (rounds away 80 degrees, anti-aliased), a crease
+            -- (the rounded corner of the solid, 45 degrees to meet the next
+            -- face), or a CUT edge beside the other box -- a layer gap, drawn
+            -- exactly like the seams between cubies.
             v_outu := '0';  v_su := '0';
-            if c_cu = "00" and c_pu < 0 then
+            if c_cu = "00" and c_ngu = '1' and c_gap /= 1 then
                 v_outu := '1';  v_su := v_sil4(0);
-            elsif c_cu = "10" and c_pu > 0 then
+            elsif c_cu = c_nu - 1 and c_ngu = '0' and c_gap /= 2 then
                 v_outu := '1';  v_su := v_sil4(1);
             end if;
             v_outv := '0';  v_sv := '0';
-            if c_cv = "00" and c_pv < 0 then
+            if c_cv = "00" and c_ngv = '1' and c_gap /= 3 then
                 v_outv := '1';  v_sv := v_sil4(2);
-            elsif c_cv = "10" and c_pv > 0 then
+            elsif c_cv = c_nv - 1 and c_ngv = '0' and c_gap /= 4 then
                 v_outv := '1';  v_sv := v_sil4(3);
             end if;
 
@@ -2117,27 +2288,29 @@ begin
             e_mu <= v_mu;  e_mv <= v_mv;
             e_gu <= v_gqu; e_gv <= v_gqv;
 
-            -- Bevel tilt index.  Both rounded zones -- the face boundary
-            -- (radius C_RB) and the cubie rounding at an interior gap (radius
-            -- CBW) -- get rescaled onto ONE profile table, so the tilt costs a
-            -- shift pair instead of a second ROM: >>1 for the face bevel,
-            -- *0.75 for the gap, which lands both at index 164 = 80 degrees.
-            -- Outward direction is just the sign of the in-cubie coordinate,
-            -- identical in both zones, so it is a single bit.
-            if v_outu = '1' then
+            -- Bevel tilt index: every rounded zone rescales onto ONE profile
+            -- table (>>1 for a silhouette bevel and *0.75 for a gap -> index
+            -- 164 = 80 degrees; a crease stops at 45, index ~92, where the
+            -- neighbouring face's rounding takes over).  Outward direction is
+            -- the sign of p, one bit.
+            if v_outu = '1' and v_su = '1' then
                 e_tu <= resize(shift_right(v_mu, 1), 8);
+            elsif v_outu = '1' then
+                e_tu <= resize(shift_right(v_mu, 2) + shift_right(v_mu, 5), 8);
             else
                 e_tu <= resize(shift_right(v_gqu, 1)
                                + shift_right(v_gqu, 2), 8);
             end if;
-            if v_outv = '1' then
+            if v_outv = '1' and v_sv = '1' then
                 e_tv <= resize(shift_right(v_mv, 1), 8);
+            elsif v_outv = '1' then
+                e_tv <= resize(shift_right(v_mv, 2) + shift_right(v_mv, 5), 8);
             else
                 e_tv <= resize(shift_right(v_gqv, 1)
                                + shift_right(v_gqv, 2), 8);
             end if;
-            e_su <= c_pu(13);
-            e_sv <= c_pv(13);
+            e_su <= c_ngu;
+            e_sv <= c_ngv;
             if v_du < v_dv then e_tmax <= resize(shift_right(v_gqu, 1)
                                                  + shift_right(v_gqu, 2), 8);
             else                e_tmax <= resize(shift_right(v_gqv, 1)
@@ -2145,21 +2318,26 @@ begin
             end if;
 
             -- straight silhouette distance = distance to the nearest outline
-            -- edge that actually is a silhouette (a far one can never cut here)
+            -- edge that actually is a silhouette
             v_str := to_signed(4095, 13);
-            if v_su = '1' then v_str := resize(v_du, 13); end if;
-            if v_sv = '1' and resize(v_dv, 13) < v_str then
-                v_str := resize(v_dv, 13);
+            if v_su = '1' then v_str := v_du; end if;
+            if v_sv = '1' and v_dv < v_str then v_str := v_dv; end if;
+            -- a pixel claimed only through the padding is past its face's
+            -- true edge; at a silhouette it shows as a sliver sticking out
+            -- where the neighbour's corner is bevelled away, so it goes to
+            -- the backdrop.  (Crease holes, the padding's job, are interior.)
+            if c_po = '1' and (v_su = '1' or v_sv = '1') then
+                e_dstr <= to_signed(-2048, 13);
+            else
+                e_dstr <= v_str;
             end if;
-            e_dstr <= v_str;
+            e_chs <= resize(v_du, 14) + resize(v_dv, 14);
+            e_chz <= v_outu and v_outv and (v_su or v_sv);
             e_cact <= v_su or v_sv;
 
-            -- Sticker rounded rect.  Take the distance from the ALREADY
-            -- CLAMPED corner coordinates: past 511 the edge is far enough
-            -- that coverage saturates either way, so carrying the true
-            -- (wide) value downstream buys nothing and costs a 15-bit chain.
-            v_qsu := resize(v_apu, 14) - C_HSRS;
-            v_qsv := resize(v_apv, 14) - C_HSRS;
+            -- sticker rounded rect off the clamped corner coordinates
+            v_qsu := resize(c_qu, 14);
+            v_qsv := resize(c_qv, 14);
             if v_qsu < 0 then v_qcu := (others => '0');
             elsif v_qsu > 511 then v_qcu := to_unsigned(511, 9);
             else v_qcu := resize(unsigned(v_qsu(8 downto 0)), 9); end if;
@@ -2179,6 +2357,8 @@ begin
                 e_silz <= '1'; e_stz <= '0';
             elsif v_gqu > 0 or v_gqv > 0 then
                 e_silz <= '0'; e_stz <= '0';
+            elsif c_base = 63 then                   -- a cut face: bare plastic
+                e_silz <= '0'; e_stz <= '0';
             else
                 e_silz <= '0'; e_stz <= '1';
             end if;
@@ -2186,15 +2366,21 @@ begin
             if v_qsu > 0 and v_qsv > 0 then e_stc <= '1'; end if;
             e_sl <= c_sl;
             e_on <= c_on;
+            e_bh <= c_bh;
 
             ------------------------------------------------------ stage D
-            -- Squared distance by table, muxed by zone (see stage C).  The
-            -- index drops the low bit of the 9-bit coordinate; that shifts
-            -- the squared distance by under 0.4% and only where it is large,
-            -- which is a small fraction of the anti-aliasing feather.
-
+            -- squared distance / tilt profile / descriptor block-RAM reads
+            -- are in flight (their ports take the stage-C registers)
             f_dst <= e_dst;
-            f_dstr <= e_dstr;
+            -- a slight 45-degree chamfer on outline corners, small enough
+            -- that the faces' in-plane cuts can't visibly disagree: the
+            -- line du + dv = K (+2 insets), distance taken at half scale
+            v_ch := resize(shift_right(e_chs, 1), 14) - to_signed(C_CRH, 14);
+            if e_chz = '1' and v_ch < resize(e_dstr, 14) then
+                f_dstr <= resize(v_ch, 13);
+            else
+                f_dstr <= e_dstr;
+            end if;
             f_cact <= e_cact;
             if e_mu > 0 and e_mv > 0 then f_2m <= '1'; else f_2m <= '0'; end if;
             f_silz <= e_silz;
@@ -2205,232 +2391,266 @@ begin
             f_su <= e_su;
             f_sv <= e_sv;
             f_tmax <= e_tmax;
+            f_col <= unsigned(tb_rd(2 downto 0));   -- sticker colour (px_ta)
+            f_bh <= e_bh;
 
             ------------------------------------------------------ stage E
+            -- Block-RAM outputs land here.  Each gets at most one short op so
+            -- the multiplies next stage start from fabric registers.
+            v_cm1 := resize(tr_du(7 downto 0), 10) + resize(tr_dv(7 downto 0), 10);
+            if v_cm1 > 255 then v_cm1 := to_unsigned(255, 10); end if;
+            -- the rig multiplies run at 6 x 8 bits (1/16 scale, restored at
+            -- stage G): a bevel is a few pixels wide, 64 tilt levels suffice
+            x5_cm1 <= v_cm1(7 downto 2);
+            x5_snu <= tr_du(15 downto 10);
+            x5_snv <= tr_dv(15 downto 10);
+            v_hh := signed(std_logic_vector'(sd_h2d(3 downto 0) & sd_h1d(5 downto 0)));
+            x5_hn <= v_hh;
+            x5_hn8 <= v_hh(9 downto 2);
+            v_hh := signed(sd_h1d(15 downto 6));
+            if f_su = '1' then v_hh := -v_hh; end if;
+            x5_hu <= v_hh(9 downto 2);
+            v_hh := signed(sd_h2d(15 downto 6));
+            if f_sv = '1' then v_hh := -v_hh; end if;
+            x5_hv <= v_hh(9 downto 2);
+            -- R^2 - (x^2 + y^2) for whichever rounded corner this zone uses
+            if f_stz = '1' then v_c20 := to_signed(C_RS2, 20);
+            else                v_c20 := to_signed(C_RB2, 20); end if;
+            x5_c19 <= v_c20 - signed(resize(sq_du, 20)) - signed(resize(sq_dv, 20));
+            x5_tmax <= f_tmax;
+            x5_dst <= f_dst;
+            x5_dstr <= f_dstr;
+            x5_cact <= f_cact;
+            x5_2m <= f_2m;
+            x5_silz <= f_silz;
+            x5_stz <= f_stz;
+            x5_stc <= f_stc;
+            x5_sl <= f_sl;
+            x5_on <= f_on;
+            x5_col <= f_col;
+            x5_bh <= f_bh;
+
+            ------------------------------------------------------ stage F
             -- SPECULAR / TILT DOT PRODUCT.  N = cos(phi)*n + sin(phi)*dir, and
             -- the camera is orthographic, so one half-vector serves both the
             -- diffuse tilt and the highlight:
             --   N.H = H.n + [ -(1-cos)*H.n + sin_u*H.U + sin_v*H.V ] / 256
-            -- Three 9x10 multiplies -- the whole material rig.  Corners sum
-            -- the two axes' (1-cos) terms, which is exact on a straight bevel
-            -- (the other axis is zero) and close enough on the arcs.
-            v_cm1 := resize(tr_du(7 downto 0), 10) + resize(tr_dv(7 downto 0), 10);
-            if v_cm1 > 255 then v_cm1 := to_unsigned(255, 10); end if;
-            v_hh := sl_hn(to_integer(f_sl));
-            g_p0 <= resize(signed('0' & v_cm1(8 downto 0)) * v_hh, 19);
-            v_hh := sl_hu(to_integer(f_sl));
-            if f_su = '1' then v_hh := -v_hh; end if;
-            g_p1 <= resize(signed('0' & tr_du(15 downto 8)) * v_hh, 19);
-            v_hh := sl_hv(to_integer(f_sl));
-            if f_sv = '1' then v_hh := -v_hh; end if;
-            g_p2 <= resize(signed('0' & tr_dv(15 downto 8)) * v_hh, 19);
-
-            g_sx <= resize(sq_du, 19) + resize(sq_dv, 19);
-            g_tmax <= f_tmax;
-            g_dst <= f_dst;
-            g_dstr <= f_dstr;
-            g_cact <= f_cact;
-            g_2m <= f_2m;
-            g_silz <= f_silz;
-            g_stz <= f_stz;
-            g_stc <= f_stc;
-            g_sl2 <= f_sl;
-            g_on <= f_on;
-
-            ------------------------------------------------------ stage F
-            -- Linearize the squared distance near its zero crossing.  The
-            -- 1/(2r) scale factors (25 and 24) are shift-adds, not multiplies:
-            -- x*25>>14 = x>>9 + x>>11 + x>>14,  x*24>>14 = x>>10 + x>>11.
-            if g_stz = '1' then
-                v_c19 := to_signed(C_RS2, 20) - signed(resize(g_sx, 20));
-                h_dlin <= resize(shift_right(v_c19, 7)
-                                 + shift_right(v_c19, 8), 12);
+            -- Three 9x10 multiplies -- the whole material rig -- each alone.
+            x6_p0 <= resize(signed('0' & x5_cm1) * x5_hn8, 15);
+            x6_p1 <= resize(signed('0' & x5_snu) * x5_hu, 15);
+            x6_p2 <= resize(signed('0' & x5_snv) * x5_hv, 15);
+            -- Linearize the squared distance near its zero crossing: the
+            -- 1/(2r) factors are shift-adds, x*25>>14 and x*24>>14.
+            if x5_stz = '1' then
+                x6_dlin <= resize(shift_right(x5_c19, 7)
+                                  + shift_right(x5_c19, 8), 12);
             else
-                v_c19 := to_signed(C_RB2, 20) - signed(resize(g_sx, 20));
-                h_dlin <= resize(shift_right(v_c19, 6)
-                                 + shift_right(v_c19, 8)
-                                 + shift_right(v_c19, 11), 12);
+                x6_dlin <= resize(shift_right(x5_c19, 6)
+                                  + shift_right(x5_c19, 8)
+                                  + shift_right(x5_c19, 11), 12);
             end if;
-            -- N.H, and the tilt's signed departure from the flat face value
-            v_del := resize(shift_right(-g_p0 + g_p1 + g_p2, 8), 12);
-            v_nd := resize(sl_hn(to_integer(g_sl2)), 13) + resize(v_del, 13);
-            if v_nd < 0 then h_ndh <= (others => '0');
-            elsif v_nd > 255 then h_ndh <= to_unsigned(255, 8);
-            else h_ndh <= resize(unsigned(v_nd(7 downto 0)), 8); end if;
-            h_dif <= resize(v_del, 11);
-
-            -- crevice AO (the old blanket bevel darkening is gone: the tilt
-            -- shades the rounding properly now)
-            if g_silz = '1' or g_stz = '1' or g_sx <= C_CBW2 then
-                h_ao <= (others => '0');
+            -- crevice AO: x^2+y^2 - CBW^2 = (RB^2 - CBW^2) - c19 in the gaps
+            if x5_silz = '1' or x5_stz = '1' or x5_c19 >= C_RB2 - C_CBW2 then
+                x6_ao <= (others => '0');
             else
-                v_w8 := resize(shift_right(g_sx - to_unsigned(C_CBW2, 19), 5), 26);
-                if v_w8 > 255 then h_ao <= to_unsigned(255, 8);
-                else h_ao <= resize(v_w8, 8); end if;
+                v_c20 := shift_right(to_signed(C_RB2 - C_CBW2, 20) - x5_c19, 5);
+                if v_c20 > 255 then x6_ao <= to_unsigned(255, 8);
+                else x6_ao <= unsigned(v_c20(7 downto 0)); end if;
             end if;
-            h_tmax <= g_tmax;
-            h_dst <= g_dst;
-            h_dstr <= g_dstr;
-            h_cact <= g_cact;
-            h_2m <= g_2m;
-            h_silz <= g_silz;
-            h_stz <= g_stz;
-            h_stc <= g_stc;
-            h_sl <= g_sl2;
-            h_on <= g_on;
+            x6_hn <= x5_hn;
+            x6_tmax <= x5_tmax;
+            x6_dst <= x5_dst;
+            x6_dstr <= x5_dstr;
+            x6_cact <= x5_cact;
+            x6_2m <= x5_2m;
+            x6_silz <= x5_silz;
+            x6_stz <= x5_stz;
+            x6_stc <= x5_stc;
+            x6_sl <= x5_sl;
+            x6_on <= x5_on;
+            x6_col <= x5_col;
+            x6_bh <= x5_bh;
 
             ------------------------------------------------------ stage G
-            v_str := h_dstr;
-            if h_cact = '1' and h_2m = '1' and h_stz = '0'
-               and resize(h_dlin, 14) < resize(v_str, 14) then
-                v_str := resize(h_dlin, 13);
-            end if;
-            i_dsil <= resize(v_str, 14);
-            if h_stz = '0' then
-                i_ds <= to_signed(-1024, 11);       -- bevel/gap: plastic only
-            elsif h_stc = '1' then
-                i_ds <= resize(h_dlin, 11);          -- sticker corner arc
+            -- the tilt's signed departure from the flat face value
+            x7_del <= resize(shift_right(resize(x6_p1, 16) + resize(x6_p2, 16)
+                                         - resize(x6_p0, 16), 4), 12);
+
+            -- CRISP outline corners: the silhouette is the straight edges
+            -- only.  Every face runs to the cube's true vertex, so two or
+            -- three faces always meet at ONE point (an in-plane corner arc
+            -- per face disagreed on steep faces and left spikes); the
+            -- rounding reads through the bevel shading, as at the seams.
+            x7_dsil <= resize(x6_dstr, 14) - to_signed(C_INSET, 14);
+            if x6_stz = '0' then
+                x7_ds <= to_signed(-1024, 11);       -- bevel/gap: plastic only
+            elsif x6_stc = '1' then
+                x7_ds <= resize(x6_dlin, 11);        -- sticker corner arc
             else
-                i_ds <= h_dst;                       -- sticker straight edge
-            end if;
-            i_sl <= h_sl;
-            i_on <= h_on;
-
-            -- STICKER EDGE BEVEL.  The inset sticker's own rim turns away from
-            -- the light over the last SEW of its edge.  Rather than scale the
-            -- albedo (a multiply), subtract the deficit from the light index:
-            -- the sticker alpha is already ~1 everywhere this is non-zero.
-            v_sed := (others => '0');
-            if h_stz = '1' then
-                if h_stc = '1' then v_dsx := resize(h_dlin, 11);
-                else                v_dsx := h_dst; end if;
-                if v_dsx < C_SEW then
-                    v_ramp := shift_right(v_dsx, 1) - shift_right(v_dsx, 4);
-                    if v_dsx <= 0 then
-                        v_sed := to_unsigned(C_SEDEF, 8);
-                    elsif v_ramp >= C_SEDEF then
-                        v_sed := (others => '0');
-                    else
-                        v_sed := to_unsigned(C_SEDEF, 8)
-                                 - resize(unsigned(v_ramp(6 downto 0)), 8);
-                    end if;
-                end if;
+                x7_ds <= x6_dst;                     -- sticker straight edge
             end if;
 
-            -- LIGHT INDEX, linear Q8.  Only the DIRECTIONAL part of the face
-            -- light may be turned away by the bevel: ambient does not depend
-            -- on the normal, so it is held out of the tilt and floors the
-            -- shading.  Without this every surface tilting away from the key
-            -- crushes to black instead of going dark grey.
-            v_dir := resize(signed(resize(sl_lf(to_integer(h_sl)), 12)), 14)
-                     - to_signed(C_AMB, 14) + resize(h_dif, 14);
-            if v_dir < 0 then v_dir := (others => '0'); end if;
-            -- crevice occlusion, scaled to darken the ambient floor by the
-            -- model's 3/4 at full gap depth, and the contact shadow where a
-            -- cubie's rounding meets the seam
-            v_occ := resize(signed('0' & (shift_right(h_ao, 3)
-                                          + shift_right(h_ao, 5)
-                                          + shift_right(h_ao, 6))), 14);
-            -- Contact shadow on the cubie's rounding.  It has to CROSS-FADE
-            -- out as the crevice term takes over -- gating it on a threshold
-            -- instead leaves a visible step right where the two ramps meet.
-            if h_silz = '0' and h_stz = '0' then
-                v_t8 := signed('0' & shift_right(h_tmax, 3))
-                        - signed('0' & shift_right(h_ao, 3));
-                if v_t8 > 0 then v_occ := v_occ + resize(v_t8, 14); end if;
-            end if;
-            v_li := to_signed(C_AMB, 14) + v_dir - v_occ
-                    - resize(signed('0' & v_sed), 14);
-            if v_li < 0 then gm_ap <= (others => '0');
-            elsif v_li > 255 then gm_ap <= to_unsigned(255, 8);
-            else gm_ap <= resize(unsigned(v_li(7 downto 0)), 8); end if;
 
-            -- the highlight is occluded in the crevices too
-            v_li := resize(signed('0' & h_ndh), 14)
-                    - resize(signed('0' & shift_right(h_ao, 1)), 14);
-            if v_li < 0 then sp_a <= (others => '0');
-            else sp_a <= resize(unsigned(v_li(7 downto 0)), 8); end if;
+            -- crevice occlusion (the model's 3/4 at full gap depth)
+            v_occ := resize(signed('0' & (shift_right(x6_ao, 3)
+                                          + shift_right(x6_ao, 5)
+                                          + shift_right(x6_ao, 6))), 14);
+            -- the tilt-independent halves of stage H's sums, so stage H is one
+            -- add, one select and a clamp
+            x7_lfa <= signed(resize(unsigned(sd_lfd(7 downto 0)), 10)) - to_signed(C_AMB, 10);
+            x7_p1 <= signed(resize(unsigned(sd_lfd(7 downto 0)), 10)) - resize(v_occ, 10);
+            x7_p2 <= to_signed(C_AMB, 10) - resize(v_occ, 10);
+            x7_q  <= resize(x6_hn, 11) - signed(resize(x6_ao(7 downto 1), 11));
+            x7_col <= x6_col;
+            x7_bh <= x6_bh;
+            x7_sl <= x6_sl;
+            x7_on <= x6_on;
 
             ------------------------------------------------------ stage H
-            -- Coverage from distance.  s_pxs is carried as a 3-bit mantissa
-            -- and a shift (frame-computed), so the AA slope costs a small
-            -- shift-add tree instead of two 16x9 multiplies.  Quantizing the
-            -- slope to ~6% only dithers the feather width sub-pixel.
-            v_ad := resize(i_dsil - to_signed(C_INSET, 14), 14);
-            case to_integer(s_pxm) is
-                when 0 => v_am := shift_left(resize(v_ad, 17), 2);
-                when 1 => v_am := shift_left(resize(v_ad, 17), 2) + resize(v_ad, 17);
-                when 2 => v_am := shift_left(resize(v_ad, 17), 2)
-                                  + shift_left(resize(v_ad, 17), 1);
-                when others => v_am := shift_left(resize(v_ad, 17), 3)
-                                       - resize(v_ad, 17);
+            -- the highlight: N.H less the crevice occlusion, clamped
+            --   (H.n - ao/2) + tilt
+            v_li := resize(x7_q, 14) + resize(x7_del, 14);
+            if v_li < 0 then sp_a <= (others => '0');
+            elsif v_li > 255 then sp_a <= to_unsigned(255, 8);
+            else sp_a <= unsigned(v_li(7 downto 0)); end if;
+
+            -- LIGHT INDEX, linear Q8.  Only the DIRECTIONAL part of the face
+            -- light may be turned away by the bevel: ambient is held out of
+            -- the tilt and floors the shading, else every surface tilting
+            -- away from the key crushes to black instead of dark grey.
+            --   li = AMB + max(lf - AMB + tilt, 0) - occ
+            --      = (lf - AMB + tilt >= 0) ? (lf - occ) + tilt : AMB - occ
+            v_dir := resize(x7_lfa, 14) + resize(x7_del, 14);
+            if v_dir < 0 then v_li := resize(x7_p2, 14);
+            else              v_li := resize(x7_p1, 14) + resize(x7_del, 14); end if;
+            if v_li < 0 then gm_ap <= (others => '0');
+            elsif v_li > 255 then gm_ap <= to_unsigned(255, 8);
+            else gm_ap <= unsigned(v_li(7 downto 0)); end if;
+
+            -- Coverage, part 1: scale the distances by the AA slope, a frame
+            -- constant rounded to a power of two (within 10% in every video
+            -- mode).  The shift comes FIRST, on the narrow distance: under one
+            -- coverage LSB, and it keeps the barrel out of the clamp stage.
+            v_ad := shift_right(x7_dsil, s_pxe);
+            x8_ams <= shift_left(resize(v_ad, 17), 2);
+            v_ad := shift_right(resize(x7_ds, 14), s_pxe);
+            x8_amt <= shift_left(resize(v_ad, 17), 2);
+            -- sticker albedo relative to the satin plastic, by colour
+            case to_integer(x7_col) is
+                when 0 => x8_dly <= to_signed(995 - C_PLY_I, 11);
+                when 1 => x8_dly <= to_signed(807 - C_PLY_I, 11);
+                when 2 => x8_dly <= to_signed(332 - C_PLY_I, 11);
+                when 3 => x8_dly <= to_signed(513 - C_PLY_I, 11);
+                when 4 => x8_dly <= to_signed(416 - C_PLY_I, 11);
+                when others => x8_dly <= to_signed(276 - C_PLY_I, 11);
             end case;
-            v_a := resize(shift_right(shift_right(v_am, 3), s_pxe), 16) + 8;
-            if i_on = '0' or v_a < 0 then v_a5 := (others => '0');
+            x8_ca <= x7_col;
+            x8_bh <= x7_bh;
+            x8_sl <= x7_sl;
+            x8_on <= x7_on;
+
+            ------------------------------------------------------ stage I
+            -- Coverage, part 2: the +/-8 ramp and its clamp.
+            v_a := resize(shift_right(x8_ams, 3), 16) + 8;
+            if x8_on = '0' or v_a < 0 then v_a5 := (others => '0');
             elsif v_a > 16 then v_a5 := to_unsigned(16, 5);
             else v_a5 := resize(unsigned(v_a(4 downto 0)), 5); end if;
-            j_asil <= v_a5;
-            v_ad := resize(i_ds, 14);
-            case to_integer(s_pxm) is
-                when 0 => v_am := shift_left(resize(v_ad, 17), 2);
-                when 1 => v_am := shift_left(resize(v_ad, 17), 2) + resize(v_ad, 17);
-                when 2 => v_am := shift_left(resize(v_ad, 17), 2)
-                                  + shift_left(resize(v_ad, 17), 1);
-                when others => v_am := shift_left(resize(v_ad, 17), 3)
-                                       - resize(v_ad, 17);
-            end case;
-            v_a := resize(shift_right(shift_right(v_am, 3), s_pxe), 16) + 8;
+            -- over the other box, not the backdrop: a hard edge beats a halo
+            if x8_on = '1' and x8_bh = '1' then v_a5 := to_unsigned(16, 5); end if;
+            x9_asil <= v_a5;
+            x9_ca <= x8_ca;
+            v_a := resize(shift_right(x8_amt, 3), 16) + 8;
             if v_a < 0 then v_a5 := (others => '0');
             elsif v_a > 16 then v_a5 := to_unsigned(16, 5);
             else v_a5 := resize(unsigned(v_a(4 downto 0)), 5); end if;
-            j_ast <= v_a5;
-            j_sl <= i_sl;
-            j_on <= i_on;
-
-            ------------------------------------------------------ stage I
-            -- LUMA carries all the shading.  CHROMA is a per-face constant
-            -- (lit at frame time) hard-switched at the sticker edge: the
-            -- encoder subsamples chroma to 4:2:2 on the way out, so per-pixel
-            -- chroma blending, lighting and AA would be thrown away downstream.
-            -- UNLIT albedo: satin-black plastic blended to the face's sticker
-            -- across the sticker's anti-aliased edge.
-            v_c := resize((signed(resize(sl_ly(to_integer(j_sl)), 11))
-                           - to_signed(C_PLY_I, 11))
-                          * signed(resize(j_ast, 6)), 17);
-            k_y <= f_clamp10(to_signed(C_PLY_I, 12)
-                             + resize(shift_right(v_c, 4), 12));
-            k_gam <= gm_d;
-            -- specular: plastic sheen blended to the (much glossier) sticker
-            -- sheen over the same edge, stored as a video-luma delta
-            v_c := resize((signed(resize(sp_d(15 downto 8), 11))
-                           - signed(resize(sp_d(7 downto 0), 11)))
-                          * signed(resize(j_ast, 6)), 17);
-            k_spec <= resize(shift_left(unsigned(resize(
-                          signed(resize(sp_d(7 downto 0), 12))
-                          + resize(shift_right(v_c, 4), 12), 10)), 2), 12);
-            if j_ast >= 8 then k_ston <= '1'; else k_ston <= '0'; end if;
-            k_sl2 <= j_sl;
-            k_asil <= j_asil;
+            x9_ast <= v_a5;
+            x9_dly <= x8_dly;
+            x9_sl <= x8_sl;
 
             ------------------------------------------------------ stage J
-            -- albedo * light, then add the highlight (already in video units)
-            m_y <= f_clamp10(resize(signed('0' & shift_right(k_y * k_gam, 8)), 14)
-                             + resize(signed('0' & k_spec), 14));
-            m_ston <= k_ston;
-            m_sl2 <= k_sl2;
-            m_asil <= k_asil;
+            -- LUMA carries all the shading; CHROMA is a per-face constant hard-
+            -- switched at the sticker edge (the encoder subsamples it 4:2:2).
+            -- Gamma and specular block-RAM outputs land here.
+            x10_gam <= gm_d;
+            -- specular: the glossier sticker sheen or the plastic one, switched
+            -- where the chroma switches (the blend's multiply went for area)
+            x10_spl <= sp_d(7 downto 0);       -- plastic sheen only
+            -- unlit albedo: satin plastic blended to the sticker over its AA edge
+            x10_py <= resize(x9_dly * signed(resize(x9_ast, 6)), 17);
+            if x9_ast >= 8 then x10_ston <= '1'; else x10_ston <= '0'; end if;
+            x10_ast <= x9_ast;
+            x10_asil <= x9_asil;
+            x10_sl <= x9_sl;
+            x10_ca <= x9_ca;
+
+            ------------------------------------------------------ stage K
+            x11_y <= f_clamp10(to_signed(C_PLY_I, 12)
+                               + resize(shift_right(x10_py, 4), 12));
+            x11_gam <= x10_gam;
+            x11_spl <= x10_spl;
+            x11_asil <= x10_asil;
+            x11_ston <= x10_ston;
+            x11_sl <= x10_sl;
+            x11_ca <= x10_ca;
 
             ------------------------------------------------------ stage L
-            v_c := resize((signed(resize(m_y, 11)) - signed(resize(bgy_sr(9), 11)))
-                          * signed(resize(m_asil, 6)), 17);
-            n_y <= f_clamp10(signed(resize(bgy_sr(9), 12))
-                             + resize(shift_right(v_c, 4), 12));
-            if m_asil < 8 then
-                n_u <= bg_u;
-                n_v <= bg_v;
-            elsif m_ston = '1' then
-                n_u <= sl_cu(to_integer(m_sl2));
-                n_v <= sl_cv(to_integer(m_sl2));
+            -- albedo * light
+            x12_pm <= x11_y * x11_gam;
+            -- matte stickers (sheen fixed at 0); the black plastic shines
+            if x11_ston = '1' then x12_spec <= (others => '0');
+            else x12_spec <= resize(shift_left(resize(x11_spl, 12), 2), 12); end if;
+            x12_asil <= x11_asil;
+            x12_ston <= x11_ston;
+            x12_sl <= x11_sl;
+            x12_ca <= x11_ca;
+
+            ------------------------------------------------------ stage M
+            -- add the highlight (already in video units), then take the
+            -- distance to the backdrop for the silhouette blend
+            v_my := f_clamp10(resize(signed('0' & shift_right(x12_pm, 8)), 14)
+                              + resize(signed('0' & x12_spec), 14));
+            -- S11: the backdrop is the incoming video instead of the sweep
+            -- (its luma enters HERE so the silhouette blends into it)
+            if s_sw(4) = '1' then v_bgy := unsigned(data_in.y(9 downto 2)) & "00";
+            else                  v_bgy := bg_vy; end if;
+            x13_dy <= signed(resize(v_my, 11)) - signed(resize(v_bgy, 11));
+            x13_bg <= v_bgy;
+            x13_asil <= x12_asil;
+            x13_ston <= x12_ston;
+            x13_sl <= x12_sl;
+            x13_ca <= x12_ca;
+
+            ------------------------------------------------------ stage N
+            x14_pn <= resize(x13_dy * signed(resize(x13_asil, 6)), 17);
+            x14_bg <= x13_bg;
+            x14_asil <= x13_asil;
+            x14_ston <= x13_ston;
+            if x13_ston = '1' and s_vsel /= 0
+               and (s_vsel = 7 or x13_ca = s_vsel - 1) then x14_vid <= '1';
+            else x14_vid <= '0'; end if;
+
+            ------------------------------------------------------ stage O
+            n_y <= f_clamp10(signed(resize(x14_bg, 12))
+                             + resize(shift_right(x14_pn, 4), 12));
+            if x14_asil < 8 then
+                if s_sw(4) = '1' then          -- video backdrop, pre-swapped
+                    n_u <= unsigned(data_in.v(9 downto 2)) & "00";
+                    n_v <= unsigned(data_in.u(9 downto 2)) & "00";
+                else
+                    n_u <= bg_u;
+                    n_v <= bg_v;
+                end if;
+            elsif x14_vid = '1' then
+                -- incoming video, straight in (a fixed 16-pixel offset nobody
+                -- can see through a sticker window), pre-swapped so the output
+                -- swap hands the encoder data_in's own U/V: the dry path is
+                -- never swapped
+                n_y <= unsigned(data_in.y(9 downto 2)) & "00";
+                n_u <= unsigned(data_in.v(9 downto 2)) & "00";
+                n_v <= unsigned(data_in.u(9 downto 2)) & "00";
+            elsif x14_ston = '1' then
+                n_u <= unsigned(sd_cvd(7 downto 0)) & "00";
+                n_v <= unsigned(sd_cvd(15 downto 8)) & "00";
             else
                 n_u <= to_unsigned(512, 10);       -- black plastic: neutral
                 n_v <= to_unsigned(512, 10);
@@ -2455,7 +2675,7 @@ begin
     p_sync : process(clk)
     begin
         if rising_edge(clk) then
-            s_avid_sr    <= data_in.avid    & s_avid_sr   (0 to C_LATENCY - 2);
+            s_avid_sr    <= g_avid          & s_avid_sr   (0 to C_LATENCY - 2);
             s_hsync_n_sr <= data_in.hsync_n & s_hsync_n_sr(0 to C_LATENCY - 2);
             s_vsync_n_sr <= data_in.vsync_n & s_vsync_n_sr(0 to C_LATENCY - 2);
             s_field_n_sr <= data_in.field_n & s_field_n_sr(0 to C_LATENCY - 2);

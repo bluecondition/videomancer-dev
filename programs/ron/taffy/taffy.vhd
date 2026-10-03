@@ -59,9 +59,10 @@
 -- STA-timed).
 --
 -- In Stretch the source always lands between x and the centre, so reads can
--- never leave the line -- only Squeeze runs off the end. Those reads land in
--- the edge-fill zone and paint the line's average colour, so the picture
--- shrinks into a soft matte of its own colour rather than a black bar.
+-- never leave the line -- only Squeeze runs off the end. Every read is clamped
+-- to [C_EDGE, width-1-C_EDGE], so the reveal is the line's own edge colour
+-- drawn outward (catalogue-combo edge clamp, HW-preferred over an average
+-- matte) and the source's black blanking columns never reach the screen.
 --
 -- Buffer = inlined dual-bank ping-pong BRAM (from sidewinder): each line
 -- WRITES its own parity bank, READS the other (the line above). Y full 2048
@@ -70,10 +71,11 @@
 -- Pipeline (rising-edge clocks, data_in -> data_out):
 --   E1  p_ctrl: register inputs, pixel_x / acc counters, parity, line + frame
 --       step sequencers
---   E2  p_rdaddr: zone-test the accumulator -> registered read addr + fill
---       flag; write of the live pixel lands
---   E3  bank reads registered; capture fill/rbank
---   E4  p_wet: edge fill / bank select -> data_out (combinational bypass mux)
+--   E2  p_rdaddr: edge-clamp the accumulator -> registered read addr; write
+--       of the live pixel lands
+--   E3  bank reads registered; capture rbank
+--   E4  p_wet: bank select + blanking gate -> data_out (combinational bypass
+--       mux)
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -98,14 +100,13 @@ architecture taffy of program_top is
     -- Smallest inv (largest magnification): 256/4 = 64x.
     constant C_INV_MIN       : integer := 4;
 
-    -- Edge fill (lagoon's left-fill, applied to both edges as redshift v2.1
-    -- does). Squeeze pulls the picture in from the borders, and the reads that
-    -- reveal used to clamp onto the source's edge column -- which on a capture
-    -- source is a black blanking column, so the reveal came in as a black bar.
-    -- Reads landing within C_EDGE columns of either border instead paint the
-    -- line's own average colour, and the average window starts past those same
-    -- blanking columns so the black never enters the average either.
-    constant C_EDGE          : integer := 6;
+    -- Edge clamp. Squeeze pulls the picture in from the borders; a read that
+    -- runs off the line used to land on the source's edge column -- a black
+    -- blanking column on capture sources -> a black bar. Reads within C_EDGE
+    -- columns of either border are redirected to that inset column, so the
+    -- reveal is the line's own edge colour and the blanking columns never
+    -- show (12 = the catalogue-combo value, wide enough for capture sources).
+    constant C_EDGE          : integer := 12;
 
     --------------------------------------------------------------------------
     -- Inlined dual-bank line buffers
@@ -159,23 +160,14 @@ architecture taffy of program_top is
     signal s_line_y       : unsigned(10 downto 0) := (others => '0');
     signal s_active_h     : unsigned(10 downto 0) := to_unsigned(1080, 11);
 
-    --------------------------------------------------------------------------
-    -- Edge fill: each line sums 64 pixels (starting past the blanking columns)
-    -- and latches the average at hsync -- that finished line is the one read
-    -- back during the next line, so the fill colour always belongs to the line
-    -- it is filling.
-    --------------------------------------------------------------------------
-    signal s_sum_y, s_sum_u, s_sum_v : unsigned(15 downto 0) := (others => '0');
-    signal s_avg_cnt                 : unsigned(6 downto 0) := (others => '0');
-    signal s_avg_y : unsigned(C_DW - 1 downto 0) := (others => '0');
-    signal s_avg_u : unsigned(C_DW - 1 downto 0) := to_unsigned(512, C_DW);
-    signal s_avg_v : unsigned(C_DW - 1 downto 0) := to_unsigned(512, C_DW);
+    -- Write column: the pixel index of s_in_y (s_pixel_x one clock late), so
+    -- pixel k lands at address k and a 2:1 chroma address k>>1 holds k's own
+    -- pair.
+    signal s_wr_x         : unsigned(C_Y_AW - 1 downto 0) := (others => '0');
 
     -- Pre-registered right-edge bound (mercurial/redshift lesson: per-pixel
     -- compares must see a registered bound, never `width - const` inline).
     signal s_w_edge  : unsigned(C_Y_AW - 1 downto 0) := (others => '0');
-    -- This line is actually displaced; gates the fill so env = 0 stays dry.
-    signal s_fill_en : std_logic := '0';
 
     -- Run-along read accumulator: 14.8 fixed, integer part = s_acc(21 downto 8).
     -- Kept as narrow as the worst case allows (Squeeze at full Depth reaches
@@ -203,6 +195,7 @@ architecture taffy of program_top is
     signal s_cwc      : unsigned(10 downto 0) := (others => '0');
     signal s_lo       : unsigned(10 downto 0) := (others => '0');
     signal s_hi       : unsigned(10 downto 0) := (others => '0');
+    signal s_lo_m1    : signed(11 downto 0) := (others => '0');   -- lo - 1
 
     --------------------------------------------------------------------------
     -- Per-line step sequencer (horizontal blanking)
@@ -243,13 +236,11 @@ architecture taffy of program_top is
     signal s_rd_addr_y  : unsigned(C_Y_AW - 1 downto 0) := (others => '0');
     signal s_rd_addr_uv : unsigned(C_UV_AW - 1 downto 0) := (others => '0');
     signal s_r_rbank    : std_logic := '0';
-    signal s_r_fill     : std_logic := '0';
 
     --------------------------------------------------------------------------
     -- Stage E3 capture
     --------------------------------------------------------------------------
     signal s_a_rbank : std_logic := '0';
-    signal s_a_fill  : std_logic := '0';
 
     --------------------------------------------------------------------------
     -- Wet result (E3)
@@ -292,7 +283,7 @@ begin
     --------------------------------------------------------------------------
     -- E2: read address from the DDA accumulator, REGISTERED. Stretch keeps the
     -- source between x and the centre, so only Squeeze ever runs off the line,
-    -- and those reads clamp to the end pixels (the edge columns smear).
+    -- and those reads clamp to the inset edge columns (the edge colour smears).
     --
     -- This range test is a 14-bit carry chain, and letting it run on into the
     -- line buffer's address pins made one combinational cone from s_acc all the
@@ -303,28 +294,23 @@ begin
     p_rdaddr : process(clk)
         variable v_int  : signed(13 downto 0);
         variable v_rd   : unsigned(C_Y_AW - 1 downto 0);
-        variable v_fill : std_logic;
     begin
         if rising_edge(clk) then
             v_int  := s_acc(21 downto 8);
-            v_fill := '0';
             -- Both bounds are compares against pre-registered values, kept
             -- parallel: neither extends the acc -> RAM.RADDR chain.
             if v_int < to_signed(C_EDGE, 14) then
-                v_rd   := to_unsigned(C_EDGE, C_Y_AW);
-                v_fill := s_fill_en;
+                v_rd := to_unsigned(C_EDGE, C_Y_AW);
             elsif v_int > signed(resize(s_w_edge, 14)) then
-                v_rd   := s_w_edge;
-                v_fill := s_fill_en;
+                v_rd := s_w_edge;
             else
                 v_rd := unsigned(v_int(C_Y_AW - 1 downto 0));
             end if;
             s_rd_addr_y  <= v_rd;
             s_rd_addr_uv <= v_rd(C_Y_AW - 1 downto 1);  -- >> 1 decimate
-            -- read parity + fill flag travel with the address so the bank
-            -- select stays aligned with the data it selects
+            -- read parity travels with the address so the bank select stays
+            -- aligned with the data it selects
             s_r_rbank    <= not s_par;
-            s_r_fill     <= v_fill;
         end if;
     end process p_rdaddr;
 
@@ -380,15 +366,7 @@ begin
                 end if;
             end if;
 
-            -- Edge-fill average: 64 registered pixels, starting past the
-            -- (often black) source edge columns so they never enter it.
-            if s_in_avid = '1' and s_pixel_x > to_unsigned(8, C_Y_AW)
-               and s_avg_cnt < to_unsigned(64, 7) then
-                s_sum_y   <= s_sum_y + resize(s_in_y, 16);
-                s_sum_u   <= s_sum_u + resize(s_in_u, 16);
-                s_sum_v   <= s_sum_v + resize(s_in_v, 16);
-                s_avg_cnt <= s_avg_cnt + 1;
-            end if;
+            s_wr_x <= s_pixel_x;
 
             ------------------------------------------------------------------
             -- Per-line sequencer: one registered step per clock during
@@ -465,8 +443,14 @@ begin
                         case to_integer(s_st_r2) is
                             when 0 =>       -- ARMED
                                 if s_tgt /= 0 then
-                                    s_st_new  <= C_ST_ATK;
-                                    s_env_new <= v_a(7 downto 0);
+                                    -- saturate: a line flipped over from
+                                    -- Sustain can still be part-stretched
+                                    if v_a(8) = '1' then
+                                        s_env_new <= to_unsigned(255, 8);
+                                    else
+                                        s_env_new <= v_a(7 downto 0);
+                                    end if;
+                                    s_st_new <= C_ST_ATK;
                                 else
                                     s_st_new <= C_ST_ARMED;
                                     -- normally already 0; this also walks a line
@@ -520,14 +504,6 @@ begin
                     s_lstep    <= s_lstep + 1;
                 when 6 =>       -- effect amount -> source step
                     v_eff := s_eff_prod(15 downto 8);
-                    -- Only a displaced line may paint the fill; at v_eff = 0
-                    -- (env or Depth zero) inv is 256 and the line is exactly
-                    -- dry, so its own columns 0..C_EDGE must read themselves.
-                    if v_eff = 0 then
-                        s_fill_en <= '0';
-                    else
-                        s_fill_en <= '1';
-                    end if;
                     if s_squeeze = '1' then
                         s_inv <= to_unsigned(256, 12)
                                + resize(shift_left(resize(v_eff, 12), 2), 12);
@@ -540,8 +516,11 @@ begin
                 when 7 =>       -- seed term for x = 0
                     s_lo_prod <= s_lo * s_inv;
                     s_lstep   <= s_lstep + 1;
-                when 8 =>       -- load the DDA: acc(0) = (lo - lo*inv/256) << 8
-                    v_lohi := signed(resize(shift_left(resize(s_lo, 19), 8), 22));
+                when 8 =>       -- load the DDA: acc(0) = (lo - lo*inv/256 - 1) << 8
+                    -- The -1 is because the accumulator steps on the first
+                    -- pixel before its address is read, so output pixel x
+                    -- samples src(x+1) - 1: with inv = 256 that is exactly x.
+                    v_lohi := shift_left(resize(s_lo_m1, 22), 8);
                     v_prod := signed(resize(s_lo_prod, 22));
                     s_acc      <= v_lohi - v_prod;
                     s_inv_step <= signed(resize(s_inv, 13));
@@ -603,13 +582,16 @@ begin
                 when 4 =>
                     s_lo    <= s_c - s_cwc;
                     s_hi    <= s_c + s_cwc;
-                    -- right-edge fill bound, pre-registered for the per-pixel
+                    -- right-edge clamp bound, pre-registered for the per-pixel
                     -- compare; degenerate widths just disable the right zone
-                    if s_line_width > to_unsigned(2 * C_EDGE, C_Y_AW) then
-                        s_w_edge <= s_line_width - C_EDGE;
+                    if s_line_width > to_unsigned(2 * C_EDGE + 1, C_Y_AW) then
+                        s_w_edge <= s_line_width - (C_EDGE + 1);
                     else
                         s_w_edge <= s_line_width;
                     end if;
+                    s_vstep <= s_vstep + 1;
+                when 5 =>
+                    s_lo_m1 <= signed(resize(s_lo, 12)) - 1;
                     s_vstep <= s_vstep + 1;
                 when others =>
                     null;
@@ -631,23 +613,6 @@ begin
                     s_line_y <= s_line_y + 1;
                     s_lstep  <= (others => '0');
                 end if;
-
-                -- Latch the finished line's average for the edge fill (that
-                -- line is the one read back during the next line); neutral
-                -- black when the line had no video (vblank).
-                if s_avg_cnt = to_unsigned(64, 7) then
-                    s_avg_y <= s_sum_y(15 downto 6);
-                    s_avg_u <= s_sum_u(15 downto 6);
-                    s_avg_v <= s_sum_v(15 downto 6);
-                else
-                    s_avg_y <= (others => '0');
-                    s_avg_u <= to_unsigned(512, C_DW);
-                    s_avg_v <= to_unsigned(512, C_DW);
-                end if;
-                s_sum_y   <= (others => '0');
-                s_sum_u   <= (others => '0');
-                s_sum_v   <= (others => '0');
-                s_avg_cnt <= (others => '0');
             end if;
 
             -- vsync falling edge = new frame: latch the active height, re-sync
@@ -660,7 +625,7 @@ begin
                 s_line_y   <= (others => '0');
                 s_par      <= '0';
                 s_vstep    <= (others => '0');
-                s_acc      <= (others => '0');
+                s_acc      <= to_signed(-256, 22);   -- identity seed
                 s_inv_step <= to_signed(256, 13);
                 s_inz      <= '0';
             end if;
@@ -707,21 +672,24 @@ begin
     begin
         if rising_edge(clk) then
             s_a_rbank <= s_r_rbank;
-            s_a_fill  <= s_r_fill;
         end if;
     end process p_stage_a;
 
     --------------------------------------------------------------------------
-    -- E4: edge fill / bank select -> wet result. The fill is a stable-select
-    -- mux on the BRAM outputs (sidewinder p_wet precedent).
+    -- E4: bank select -> wet result, gated to neutral outside active video.
+    -- The line buffer is read on every clock, so without the gate the blanking
+    -- interval carries picture (edge pixels) where the encoder expects its
+    -- neutral colour reference (blanking-interval contract; no sim sees it).
+    -- s_avid_sr(C_TOTAL_LATENCY - 2) lands in the same register stage as
+    -- data_out.avid = s_avid_sr(C_TOTAL_LATENCY - 1).
     --------------------------------------------------------------------------
     p_wet : process(clk)
     begin
         if rising_edge(clk) then
-            if s_a_fill = '1' then
-                s_wet_y <= s_avg_y;
-                s_wet_u <= s_avg_u;
-                s_wet_v <= s_avg_v;
+            if s_avid_sr(C_TOTAL_LATENCY - 2) = '0' then
+                s_wet_y <= to_unsigned(64, C_DW);
+                s_wet_u <= to_unsigned(512, C_DW);
+                s_wet_v <= to_unsigned(512, C_DW);
             elsif s_a_rbank = '1' then
                 s_wet_y <= unsigned(s_rdY1);
                 s_wet_u <= unsigned(s_rdU1);
@@ -736,15 +704,15 @@ begin
 
     --------------------------------------------------------------------------
     -- Bank arrays: one process per bank (single driver, single write port).
-    -- Write = live E1-registered pixel into this line's parity bank; read =
-    -- combinational shifted address, registered out (valid E2).
+    -- Write = live E1-registered pixel at its own index (s_wr_x) into this
+    -- line's parity bank; read = registered E2 address, registered out.
     --------------------------------------------------------------------------
     p_lbY0 : process(clk)
     begin
         if rising_edge(clk) then
             s_rdY0 <= lbY0(to_integer(s_rd_addr_y));
             if s_in_avid = '1' and s_par = '0' then
-                lbY0(to_integer(s_pixel_x)) <= std_logic_vector(s_in_y);
+                lbY0(to_integer(s_wr_x)) <= std_logic_vector(s_in_y);
             end if;
         end if;
     end process p_lbY0;
@@ -754,7 +722,7 @@ begin
         if rising_edge(clk) then
             s_rdY1 <= lbY1(to_integer(s_rd_addr_y));
             if s_in_avid = '1' and s_par = '1' then
-                lbY1(to_integer(s_pixel_x)) <= std_logic_vector(s_in_y);
+                lbY1(to_integer(s_wr_x)) <= std_logic_vector(s_in_y);
             end if;
         end if;
     end process p_lbY1;
@@ -764,7 +732,7 @@ begin
         if rising_edge(clk) then
             s_rdU0 <= lbU0(to_integer(s_rd_addr_uv));
             if s_in_avid = '1' and s_par = '0' then
-                lbU0(to_integer(s_pixel_x(C_Y_AW - 1 downto 1))) <= std_logic_vector(s_in_u);
+                lbU0(to_integer(s_wr_x(C_Y_AW - 1 downto 1))) <= std_logic_vector(s_in_u);
             end if;
         end if;
     end process p_lbU0;
@@ -774,7 +742,7 @@ begin
         if rising_edge(clk) then
             s_rdU1 <= lbU1(to_integer(s_rd_addr_uv));
             if s_in_avid = '1' and s_par = '1' then
-                lbU1(to_integer(s_pixel_x(C_Y_AW - 1 downto 1))) <= std_logic_vector(s_in_u);
+                lbU1(to_integer(s_wr_x(C_Y_AW - 1 downto 1))) <= std_logic_vector(s_in_u);
             end if;
         end if;
     end process p_lbU1;
@@ -784,7 +752,7 @@ begin
         if rising_edge(clk) then
             s_rdV0 <= lbV0(to_integer(s_rd_addr_uv));
             if s_in_avid = '1' and s_par = '0' then
-                lbV0(to_integer(s_pixel_x(C_Y_AW - 1 downto 1))) <= std_logic_vector(s_in_v);
+                lbV0(to_integer(s_wr_x(C_Y_AW - 1 downto 1))) <= std_logic_vector(s_in_v);
             end if;
         end if;
     end process p_lbV0;
@@ -794,14 +762,15 @@ begin
         if rising_edge(clk) then
             s_rdV1 <= lbV1(to_integer(s_rd_addr_uv));
             if s_in_avid = '1' and s_par = '1' then
-                lbV1(to_integer(s_pixel_x(C_Y_AW - 1 downto 1))) <= std_logic_vector(s_in_v);
+                lbV1(to_integer(s_wr_x(C_Y_AW - 1 downto 1))) <= std_logic_vector(s_in_v);
             end if;
         end if;
     end process p_lbV1;
 
     --------------------------------------------------------------------------
-    -- Output mux at E3. env = 0 already reproduces the input exactly (inv =
-    -- 256, acc = 0), so there is no dry/wet mix to carry.
+    -- Output mux. env = 0 reproduces the input exactly (inv = 256, pixel x
+    -- reads x) apart from the C_EDGE clamp columns, so there is no dry/wet
+    -- mix to carry.
     --------------------------------------------------------------------------
     data_out.hsync_n <= s_hsync_sr(C_TOTAL_LATENCY - 1);
     data_out.vsync_n <= s_vsync_sr(C_TOTAL_LATENCY - 1);

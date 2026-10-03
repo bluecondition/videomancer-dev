@@ -1,4 +1,4 @@
--- cleave.vhd  (v0.4 — "Cleave": dark/light split re-texturizer)
+-- cleave.vhd  (v0.9 — "Cleave": dark/light split re-texturizer)
 --
 -- Full-screen two-texture split:
 --
@@ -29,18 +29,24 @@
 -- sharpening the class split, the band relief and the static density —
 -- the incoming image defines the whole picture harder.
 --
--- P12 "Flip" rotates the posterized class wheel: class = (level*128 +
--- wobble/4 + dither + flip) mod 1024, dark when < 512.  Mid-travel bands
--- the luma extremes and statics the midtones; full travel is the inversion.
+-- P12 "Flip" rotates the posterized class wheel: class = (level*128 + 64 +
+-- wobble/4 + dither + flip) mod 1024, dark when < 512 (levels sit at slot
+-- centres).  Mid-travel bands the luma extremes and statics the midtones;
+-- full travel is the exact inversion.
 --
 -- Controls:
---   K1 Band Size
+--   K1 Band Size (right = bigger; exponential, glided, zooms about the
+--      screen centre)
 --   K2 Wave (STAGED: grows the chevron, then stretches it — frequency
 --      halves while amplitude climbs, full-swing 512 px swells at the end;
 --      serration strength rides the same knob)
 --   K3 Drift (BIDIRECTIONAL: centre stopped, left up, right down)
---   K4 Static Size K5 Ink                          K6 Fringe
---   S7 Patchwork (Off/On: 128px patches double band frequency)
+--   K4 Static Size K5 Boil (rate / manual pattern)  K6 Fringe
+--      S11 Boil: K5 sets the boil RATE — the grain DISSOLVES cell by cell
+--      from one random pattern into the next (~4 s simmer .. a fresh
+--      pattern every frame).  S11 Still: K5 scrubs the grain by hand,
+--      dissolving through 16 fixed patterns as the knob turns.
+--   S7 Patchwork (Off/On: 128px patch tiles — see above)
 --   S8 Contrast (Normal/Boost)   S9 Outline (Thin/Thick)
 --   S10 Bands (Horizontal/Vertical)
 --   S11 Grain (Still/Boil — STATIC LAYER ONLY: the band serration, band
@@ -114,6 +120,24 @@ architecture cleave of program_top is
 
     constant PSEED : unsigned(9 downto 0) := "0101010101";  -- patch seed
 
+    -- 16 manual grain patterns (S11 Still, K5 scrubs through them).
+    -- Chosen so each neighbouring pair's static fields share <=3.8% of
+    -- values at any shift, so the dissolve between them reads as new grain.
+    type t_seed16 is array (0 to 15) of unsigned(9 downto 0);
+    constant SEEDTAB : t_seed16 := (
+        "0110100101", "1110011110", "1110011101", "0110000100",
+        "0101111010", "0101111101", "0011000000", "1001101101",
+        "0100100010", "0010111001", "0001010101", "1100101011",
+        "0000011110", "0010000001", "0001111001", "1010011100");
+    -- The 1px hashes key on 10-bit px/py, which repeat every 1024 px/lines
+    -- at 1080p (the right 896 px of Fine static was an exact copy of the
+    -- left).  Bit 10 of each coordinate xors one of these into the seed
+    -- ahead of the nonlinear rounds — checked: <=3% value match at any
+    -- shift (random ~0.1%), no spatially coherent copy.
+    constant C_HX  : unsigned(9 downto 0) := "1011001101";
+    constant C_HY  : unsigned(9 downto 0) := "0110110011";
+    constant C_JX  : unsigned(9 downto 0) := "1100101011";
+
     --------------------------------------------------------------------------
     -- Raster position / accumulators.
     --------------------------------------------------------------------------
@@ -127,15 +151,30 @@ architecture cleave of program_top is
     signal line_act    : std_logic := '0';
 
     signal lfsr   : unsigned(15 downto 0) := x"ACE1";
-    signal seed10 : unsigned(9 downto 0) := "0110100101";
+    -- static grain: two seeds + a per-cell dissolve fraction
+    signal seed_a : unsigned(9 downto 0) := "0110100101";
+    signal seed_b : unsigned(9 downto 0) := "1110011110";
+    signal s_frac : unsigned(9 downto 0) := (others => '0');
+    signal bacc   : unsigned(12 downto 0) := (others => '0');
 
-    signal bph_v : unsigned(9 downto 0) := (others => '0');
-    signal bph_h : unsigned(9 downto 0) := (others => '0');
+    -- band phase: 10 integer + 8 fractional bits (continuous K1 zoom)
+    signal bph_v : unsigned(17 downto 0) := (others => '0');
+    signal bph_h : unsigned(17 downto 0) := (others => '0');
+    signal bph0  : unsigned(17 downto 0) := (others => '0');
     signal wob_v : unsigned(9 downto 0) := (others => '0');
     signal wob_h : unsigned(9 downto 0) := (others => '0');
 
     signal scroll_acc : unsigned(15 downto 0) := (others => '0');
     signal wobt       : unsigned(9 downto 0) := (others => '0');
+
+    -- measured raster (active lines / pixels) for the centre-anchored zoom
+    signal w_meas : unsigned(11 downto 0) := to_unsigned(1920, 12);
+    signal h_meas : unsigned(10 downto 0) := to_unsigned(1080, 11);
+    -- vblank serial multiply: bph0 = scroll - vstep * (half screen)
+    signal seq_cnt : unsigned(4 downto 0) := (others => '0');
+    signal m_acc   : unsigned(17 downto 0) := (others => '0');
+    signal m_cand  : unsigned(17 downto 0) := (others => '0');
+    signal m_plr   : unsigned(10 downto 0) := (others => '0');
 
     --------------------------------------------------------------------------
     -- Free-running control decode.
@@ -143,7 +182,9 @@ architecture cleave of program_top is
     signal rk1, rk2, rk3, rk4, rk5, rk6, rp12 : unsigned(9 downto 0) := (others => '0');
     signal rsw : std_logic_vector(4 downto 0) := (others => '0');
 
-    signal s_vstep  : unsigned(6 downto 0) := to_unsigned(14, 7);
+    signal k1g      : unsigned(9 downto 0) := to_unsigned(213, 10);
+    signal s_k1t    : unsigned(9 downto 0) := to_unsigned(608, 10);
+    signal s_vstep  : unsigned(12 downto 0) := to_unsigned(3584, 13);  -- x/256
     signal k2g      : unsigned(9 downto 0) := to_unsigned(560, 10);
     signal s_wstep  : unsigned(4 downto 0) := to_unsigned(16, 5);
     signal s_wamp   : integer range 0 to 6 := 3;
@@ -153,7 +194,8 @@ architecture cleave of program_top is
     signal s_spd    : unsigned(11 downto 0) := (others => '0');
     signal s_dneg   : std_logic := '0';
     signal s_gsel   : unsigned(1 downto 0) := "01";
-    signal s_dens   : unsigned(6 downto 0) := (others => '0');
+    signal k5g      : unsigned(9 downto 0) := to_unsigned(1023, 10);
+    signal s_bstep  : unsigned(12 downto 0) := to_unsigned(8064, 13);
     signal s_frsel  : unsigned(2 downto 0) := (others => '0');
     signal s_flip   : unsigned(9 downto 0) := (others => '0');
 
@@ -188,6 +230,9 @@ architecture cleave of program_top is
     signal r1_px   : unsigned(11 downto 0) := (others => '0');
     signal r1_par  : std_logic := '0';
     signal r1_pok  : std_logic := '0';
+    signal r1_top  : std_logic := '0';
+    signal r1_shi, r1_qhi : std_logic_vector(1 downto 0) := (others => '0');
+    signal r1_jhi  : std_logic := '0';
     -- s2: contrast boost, posterize, tri fold, base hash products
     signal r2_tri  : signed(9 downto 0) := (others => '0');
     signal r2_lev  : unsigned(2 downto 0) := (others => '0');
@@ -198,10 +243,12 @@ architecture cleave of program_top is
     signal r2_jh   : unsigned(9 downto 0) := (others => '0');
     signal r2_pa, r2_pb : unsigned(9 downto 0) := (others => '0');
     signal r2_px   : unsigned(11 downto 0) := (others => '0');
-    signal r2_par, r2_pok : std_logic := '0';
+    signal r2_par, r2_pok, r2_top : std_logic := '0';
+    signal r2_shi, r2_qhi : std_logic_vector(1 downto 0) := (others => '0');
     -- s3: wobble sel, hash combine, 1D/patch rounds, relief
     signal r3_wob  : signed(9 downto 0) := (others => '0');
     signal r3_h1   : unsigned(9 downto 0) := (others => '0');
+    signal r3_g1   : unsigned(9 downto 0) := (others => '0');  -- seed_b chain
     signal r3_q1   : unsigned(9 downto 0) := (others => '0');
     signal r3_jh2  : unsigned(9 downto 0) := (others => '0');
     signal r3_p1   : unsigned(9 downto 0) := (others => '0');
@@ -210,9 +257,10 @@ architecture cleave of program_top is
     signal r3_l    : unsigned(9 downto 0) := (others => '0');
     signal r3_bph  : unsigned(9 downto 0) := (others => '0');
     signal r3_px   : unsigned(11 downto 0) := (others => '0');
-    signal r3_par, r3_pok : std_logic := '0';
+    signal r3_par, r3_pok, r3_top : std_logic := '0';
     -- s4: hash round B, band+wobble, jitter value, patch round, class base
     signal r4_h1b  : unsigned(9 downto 0) := (others => '0');
+    signal r4_g1b  : unsigned(9 downto 0) := (others => '0');
     signal r4_q1b  : unsigned(9 downto 0) := (others => '0');
     signal r4_bph  : unsigned(9 downto 0) := (others => '0');
     signal r4_jsv  : signed(10 downto 0) := (others => '0');
@@ -221,9 +269,10 @@ architecture cleave of program_top is
     signal r4_rel  : unsigned(7 downto 0) := (others => '0');
     signal r4_l    : unsigned(9 downto 0) := (others => '0');
     signal r4_px   : unsigned(11 downto 0) := (others => '0');
-    signal r4_par, r4_pok : std_logic := '0';
+    signal r4_par, r4_pok, r4_top : std_logic := '0';
     -- s5: hash round C, band+relief, patch final, class+dither
     signal r5_h2   : unsigned(9 downto 0) := (others => '0');
+    signal r5_g2   : unsigned(9 downto 0) := (others => '0');
     signal r5_q2   : unsigned(9 downto 0) := (others => '0');
     signal r5_bph  : unsigned(9 downto 0) := (others => '0');
     signal r5_pf   : unsigned(9 downto 0) := (others => '0');
@@ -231,9 +280,10 @@ architecture cleave of program_top is
     signal r5_jsv  : signed(10 downto 0) := (others => '0');
     signal r5_l    : unsigned(9 downto 0) := (others => '0');
     signal r5_px   : unsigned(11 downto 0) := (others => '0');
-    signal r5_par, r5_pok : std_logic := '0';
+    signal r5_par, r5_pok, r5_top : std_logic := '0';
     -- s6: static value final, scaled jitter, class+flip
     signal r6_hn   : unsigned(9 downto 0) := (others => '0');
+    signal r6_gn   : unsigned(9 downto 0) := (others => '0');
     signal r6_qn   : unsigned(9 downto 0) := (others => '0');
     signal r6_bph  : unsigned(9 downto 0) := (others => '0');
     signal r6_jit  : signed(9 downto 0) := (others => '0');
@@ -241,7 +291,7 @@ architecture cleave of program_top is
     signal r6_class: unsigned(9 downto 0) := (others => '0');
     signal r6_l    : unsigned(9 downto 0) := (others => '0');
     signal r6_px   : unsigned(11 downto 0) := (others => '0');
-    signal r6_par, r6_pok : std_logic := '0';
+    signal r6_par, r6_pok, r6_top : std_logic := '0';
     -- s7: band + serration, dark bit + h-edge, base ink threshold
     signal r7_hn   : unsigned(9 downto 0) := (others => '0');
     signal r7_qn   : unsigned(9 downto 0) := (others => '0');
@@ -251,7 +301,7 @@ architecture cleave of program_top is
     signal r7_thr  : unsigned(7 downto 0) := (others => '0');
     signal r7_pf   : unsigned(9 downto 0) := (others => '0');
     signal r7_px   : unsigned(11 downto 0) := (others => '0');
-    signal r7_par  : std_logic := '0';
+    signal r7_par, r7_top : std_logic := '0';
     signal d_hist  : std_logic_vector(5 downto 0) := (others => '0');
     -- s8: static-fuzzed band phase, contour resolve
     signal r8_hn   : unsigned(9 downto 0) := (others => '0');
@@ -300,6 +350,9 @@ begin
     p_ctrl : process(clk)
         variable v_m12 : signed(11 downto 0);
         variable v_mag : unsigned(10 downto 0);
+        variable v_u   : unsigned(9 downto 0);
+        variable v_man : unsigned(7 downto 0);
+        variable v_bm  : unsigned(5 downto 0);
     begin
         if rising_edge(clk) then
             rk1  <= unsigned(registers_in(0)(9 downto 0));
@@ -311,7 +364,21 @@ begin
             rsw  <= registers_in(6)(4 downto 0);
             rp12 <= unsigned(registers_in(7)(9 downto 0));
 
-            s_vstep  <= to_unsigned(3, 7) + resize(rk1(9 downto 4), 7);
+            -- K1 Band Size from the GLIDED k1g: right = BIGGER bands.
+            -- Exponential over 6 octaves: t = (1023-k1g)*3/4, step =
+            -- (128 + t(6:0)) << t(9:7), in 1/256 phase units per line/px
+            -- -> 0.5 (knob max, 2048-line cycle) .. 32 (knob min).
+            v_u   := not k1g;
+            s_k1t <= v_u - shift_right(v_u, 2);
+            v_man := '1' & s_k1t(6 downto 0);
+            case to_integer(s_k1t(9 downto 7)) is
+                when 0      => s_vstep <= resize(v_man, 13);
+                when 1      => s_vstep <= shift_left(resize(v_man, 13), 1);
+                when 2      => s_vstep <= shift_left(resize(v_man, 13), 2);
+                when 3      => s_vstep <= shift_left(resize(v_man, 13), 3);
+                when 4      => s_vstep <= shift_left(resize(v_man, 13), 4);
+                when others => s_vstep <= shift_left(resize(v_man, 13), 5);
+            end case;
 
             -- K2 staged wave, decoded from the GLIDED value k2g: base amp
             -- shift from the top 3 bits with a 2-bit mantissa (25% sub-
@@ -351,7 +418,20 @@ begin
             end if;
 
             s_gsel   <= rk4(9 downto 8);
-            s_dens   <= rk5(9 downto 3);
+            -- K5 boil rate, exponential over 8 octaves from the glided
+            -- k5g: step = (32 + k5g(6:2)) << k5g(9:7) into a 13-bit
+            -- accumulator -> one full dissolve per 256 frames .. ~1 frame
+            v_bm := '1' & k5g(6 downto 2);
+            case to_integer(k5g(9 downto 7)) is
+                when 0      => s_bstep <= resize(v_bm, 13);
+                when 1      => s_bstep <= shift_left(resize(v_bm, 13), 1);
+                when 2      => s_bstep <= shift_left(resize(v_bm, 13), 2);
+                when 3      => s_bstep <= shift_left(resize(v_bm, 13), 3);
+                when 4      => s_bstep <= shift_left(resize(v_bm, 13), 4);
+                when 5      => s_bstep <= shift_left(resize(v_bm, 13), 5);
+                when 6      => s_bstep <= shift_left(resize(v_bm, 13), 6);
+                when others => s_bstep <= shift_left(resize(v_bm, 13), 7);
+            end case;
             s_frsel  <= rk6(9 downto 7);
             -- (rp12+1)/2 reaches 512 at full travel = the EXACT class
             -- complement (511 left the blackest level unflipped, flickering
@@ -372,6 +452,9 @@ begin
     p_position : process(clk)
         variable v_h_edge, v_v_edge : std_logic;
         variable v_kd, v_ks, v_kn : signed(11 downto 0);
+        variable v_b0 : unsigned(17 downto 0);
+        variable v_bs : unsigned(13 downto 0);
+        variable v_si : unsigned(3 downto 0);
     begin
         if rising_edge(clk) then
             prev_hsync_n <= data_in.hsync_n;
@@ -392,7 +475,7 @@ begin
                 frame_armed <= '0';
                 frame_act   <= '0';
                 py          <= (others => '0');
-                bph_v       <= scroll_acc(14 downto 5);
+                seq_cnt     <= to_unsigned(1, 5);   -- bph0/bph_v via vblank mult
                 wob_v       <= wobt;
                 if s_dneg = '1' then
                     scroll_acc <= scroll_acc - resize(s_spd, 16);
@@ -413,30 +496,104 @@ begin
                 v_kn := signed(resize(k2g, 12)) + v_ks;
                 k2g  <= unsigned(v_kn(9 downto 0));
 
+                -- K1 glide: same ease, but with a +/-2 deadband so pot
+                -- noise can't toggle the band pitch (one step of pitch
+                -- shifts the screen edges by a whole colour slot)
+                v_kd := signed(resize(rk1, 12)) - signed(resize(k1g, 12));
+                if v_kd > 2 or v_kd < -2 then
+                    v_ks := shift_right(v_kd, 3);
+                    if v_ks = 0 and v_kd > 0 then
+                        v_ks := to_signed(1, 12);
+                    elsif v_ks = 0 and v_kd < 0 then
+                        v_ks := to_signed(-1, 12);
+                    end if;
+                    v_kn := signed(resize(k1g, 12)) + v_ks;
+                    k1g  <= unsigned(v_kn(9 downto 0));
+                end if;
+
+                -- K5 glide, +/-2 deadband (in Still mode one count moves the
+                -- dissolve by 16/1024 — pot noise must not sparkle the grain)
+                v_kd := signed(resize(rk5, 12)) - signed(resize(k5g, 12));
+                if v_kd > 2 or v_kd < -2 then
+                    v_ks := shift_right(v_kd, 3);
+                    if v_ks = 0 and v_kd > 0 then
+                        v_ks := to_signed(1, 12);
+                    elsif v_ks = 0 and v_kd < 0 then
+                        v_ks := to_signed(-1, 12);
+                    end if;
+                    v_kn := signed(resize(k5g, 12)) + v_ks;
+                    k5g  <= unsigned(v_kn(9 downto 0));
+                end if;
+
+                -- Static grain: each cell shows seed_a's pattern until the
+                -- dissolve fraction passes its own mask value, then seed_b's.
                 if sw_boil = '1' then
-                    seed10 <= lfsr(9 downto 0);
+                    -- Boil: the fraction ramps at the K5 rate; on wrap the
+                    -- new pattern becomes the old one and a fresh one queues
+                    v_bs := resize(bacc, 14) + resize(s_bstep, 14);
+                    bacc <= v_bs(12 downto 0);
+                    if v_bs(13) = '1' then
+                        seed_a <= seed_b;
+                        seed_b <= lfsr(9 downto 0);
+                    end if;
+                    s_frac <= v_bs(12 downto 3);
                 else
-                    seed10 <= "0110100101";
+                    -- Still: K5 position = pattern index + dissolve fraction
+                    v_si   := k5g(9 downto 6);
+                    seed_a <= SEEDTAB(to_integer(v_si));
+                    seed_b <= SEEDTAB(to_integer(v_si + 1));
+                    s_frac <= k5g(5 downto 0) & "0000";
                 end if;
             elsif v_h_edge = '1' then
                 px    <= (others => '0');
-                bph_h <= scroll_acc(14 downto 5);
+                bph_h <= bph0;
                 wob_h <= wobt;
                 if line_act = '1' then
                     line_act <= '0';
                     py       <= py + 1;
-                    bph_v    <= bph_v + resize(s_vstep, 10);
+                    w_meas   <= px;          -- measured on active lines only
+                    h_meas   <= py + 1;
+                    bph_v    <= bph_v + resize(s_vstep, 18);
                     wob_v    <= wob_v + resize(s_wstep, 10);
                 end if;
             elsif data_in.avid = '1' then
                 frame_armed <= '1';
                 line_act    <= '1';
                 px    <= px + 1;
-                bph_h <= bph_h + resize(s_vstep, 10);
+                bph_h <= bph_h + resize(s_vstep, 18);
                 wob_h <= wob_h + resize(s_wstep, 10);
                 if frame_act = '0' then
                     frame_act <= '1';
                     py        <= (others => '0');
+                end if;
+            end if;
+
+            -- Vblank serial multiply (starts at the armed vsync, done in
+            -- ~18 clocks, long before the first active line): the band
+            -- phase is anchored at the screen CENTRE, so K1 zooms the bands
+            -- about the middle instead of racing the bottom/right edge.
+            -- bph0 = scroll - vstep * (H/2, or W/2 for vertical bands).
+            if seq_cnt /= 0 then
+                seq_cnt <= seq_cnt + 1;
+                if seq_cnt = 6 then        -- s_vstep has settled from k1g
+                    m_acc  <= (others => '0');
+                    m_cand <= resize(s_vstep, 18);
+                    if sw_vert = '1' then
+                        m_plr <= w_meas(11 downto 1);
+                    else
+                        m_plr <= resize(h_meas(10 downto 1), 11);
+                    end if;
+                elsif seq_cnt >= 7 and seq_cnt <= 17 then
+                    if m_plr(0) = '1' then
+                        m_acc <= m_acc + m_cand;
+                    end if;
+                    m_cand <= shift_left(m_cand, 1);
+                    m_plr  <= shift_right(m_plr, 1);
+                elsif seq_cnt = 18 then
+                    v_b0    := (scroll_acc(14 downto 0) & "000") - m_acc;
+                    bph0    <= v_b0;
+                    bph_v   <= v_b0;
+                    seq_cnt <= (others => '0');
                 end if;
             end if;
         end if;
@@ -467,6 +624,8 @@ begin
         variable v_idx4 : unsigned(3 downto 0);
         variable v_fu   : signed(9 downto 0);
         variable v_fv   : signed(9 downto 0);
+        variable v_sx   : unsigned(9 downto 0);
+        variable v_lc   : unsigned(9 downto 0);
     begin
         if rising_edge(clk) then
             -- sync/video delay line
@@ -485,19 +644,23 @@ begin
             end if;
 
             if sw_vert = '1' then
-                r1_bph  <= bph_h;
+                r1_bph  <= bph_h(17 downto 8);
                 r1_warg <= wob_v;
-                r1_jarg <= resize(py, 10);
+                r1_jarg <= py(9 downto 0);
+                r1_jhi  <= py(10);
             else
-                r1_bph  <= bph_v;
+                r1_bph  <= bph_v(17 downto 8);
                 r1_warg <= wob_h;
                 r1_jarg <= px(9 downto 0);
+                r1_jhi  <= px(10);
             end if;
 
+            r1_shi <= "00";
             case to_integer(s_gsel) is
-                when 0 =>      -- 1 px static
-                    r1_cx <= px(9 downto 0);
-                    r1_cy <= resize(py(9 downto 0), 10);
+                when 0 =>      -- 1 px static (bit 10 goes to the seed)
+                    r1_cx  <= px(9 downto 0);
+                    r1_cy  <= resize(py(9 downto 0), 10);
+                    r1_shi <= px(10) & py(10);
                 when 1 =>      -- 2 px
                     r1_cx <= px(10 downto 1);
                     r1_cy <= resize(py(10 downto 1), 10);
@@ -514,7 +677,11 @@ begin
             r1_pyl <= resize(py(9 downto 0), 10);
             r1_px  <= px;
             r1_par <= py(0);
+            r1_qhi <= px(10) & py(10);
             if px >= 8 and py /= 0 then r1_pok <= '1'; else r1_pok <= '0'; end if;
+            -- first line: the line buffer still holds the previous frame's
+            -- LAST line — no vertical edge / age carry-over on line 0
+            if py = 0 then r1_top <= '1'; else r1_top <= '0'; end if;
 
             -----------------------------------------------------------------
             -- s2: contrast boost (x2 centered stretch), posterize, triangle
@@ -552,12 +719,14 @@ begin
             -- layer's hash boils (S11 must never shimmer the bands).
             r2_qa <= r1_px(9 downto 0) + shift_left(r1_px(9 downto 0), 3);
             r2_qb <= r1_pyl + shift_left(r1_pyl, 2);
+            if r1_jhi = '1' then v_sx := C_JX; else v_sx := (others => '0'); end if;
             r2_jh <= (r1_jarg + shift_left(r1_jarg, 3))
-                   xor "0011010110";                                -- 1D col
+                   xor "0011010110" xor v_sx;                       -- 1D col
             r2_pa <= r1_ppx + shift_left(r1_ppx, 3);                -- patch
             r2_pb <= r1_ppy + shift_left(r1_ppy, 2);
 
-            r2_px <= r1_px; r2_par <= r1_par; r2_pok <= r1_pok;
+            r2_px <= r1_px; r2_par <= r1_par; r2_pok <= r1_pok; r2_top <= r1_top;
+            r2_shi <= r1_shi; r2_qhi <= r1_qhi;
 
             -----------------------------------------------------------------
             -- s3: wobble amp (case), hash combine + seed, 1D/patch rounds.
@@ -580,15 +749,22 @@ begin
             end if;
             r3_wob <= v_wob;
 
-            r3_h1  <= (r2_ha xor rotate_left(r2_hb, 5)) xor seed10;
-            r3_q1  <= (r2_qa xor rotate_left(r2_qb, 5)) xor "1010011100";
+            v_sx := (others => '0');
+            if r2_shi(1) = '1' then v_sx := v_sx xor C_HX; end if;
+            if r2_shi(0) = '1' then v_sx := v_sx xor C_HY; end if;
+            r3_h1  <= (r2_ha xor rotate_left(r2_hb, 5)) xor seed_a xor v_sx;
+            r3_g1  <= (r2_ha xor rotate_left(r2_hb, 5)) xor seed_b xor v_sx;
+            v_sx := (others => '0');
+            if r2_qhi(1) = '1' then v_sx := v_sx xor C_HX; end if;
+            if r2_qhi(0) = '1' then v_sx := v_sx xor C_HY; end if;
+            r3_q1  <= (r2_qa xor rotate_left(r2_qb, 5)) xor "1010011100" xor v_sx;
             r3_jh2 <= (r2_jh + shift_left(r2_jh, 2)) + to_unsigned(341, 10);
             r3_p1  <= (r2_pa xor rotate_left(r2_pb, 5)) xor PSEED;
             r3_rel <= r2_l(9 downto 2);
             r3_lev <= r2_lev;
             r3_l   <= r2_l;
             r3_bph <= r2_bph;
-            r3_px <= r2_px; r3_par <= r2_par; r3_pok <= r2_pok;
+            r3_px <= r2_px; r3_par <= r2_par; r3_pok <= r2_pok; r3_top <= r2_top;
 
             -----------------------------------------------------------------
             -- s4: hash round B, band+wobble, jitter value, patch round B,
@@ -596,6 +772,8 @@ begin
             -----------------------------------------------------------------
             v_hr := r3_h1 + shift_left(r3_h1, 2);
             r4_h1b <= v_hr xor shift_right(v_hr, 4);
+            v_hr := r3_g1 + shift_left(r3_g1, 2);
+            r4_g1b <= v_hr xor shift_right(v_hr, 4);
             v_hr := r3_q1 + shift_left(r3_q1, 2);
             r4_q1b <= v_hr xor shift_right(v_hr, 4);
 
@@ -608,17 +786,24 @@ begin
             r4_p2  <= (r3_p1 + shift_left(r3_p1, 2))
                     xor shift_right(r3_p1 + shift_left(r3_p1, 2), 4);
 
-            r4_c1  <= shift_left(signed(resize(r3_lev, 12)), 7)
+            -- each level sits at the CENTRE of its 128-wide class slot
+            -- (lev*128 + 64): with levels on the slot edges the +/-32 dither
+            -- split levels 0 and 4 pixel-by-pixel at flip 0 and max, the
+            -- outline fired everywhere and they rendered solid black —
+            -- the real cause of "black doesn't flip"
+            v_lc   := r3_lev & "1000000";
+            r4_c1  <= signed(resize(v_lc, 12))
                     + resize(shift_right(r3_wob, 2), 12);
 
             r4_rel <= r3_rel;
             r4_l   <= r3_l;
-            r4_px <= r3_px; r4_par <= r3_par; r4_pok <= r3_pok;
+            r4_px <= r3_px; r4_par <= r3_par; r4_pok <= r3_pok; r4_top <= r3_top;
 
             -----------------------------------------------------------------
             -- s5: hash round C, band+relief, patch final, class + dither.
             -----------------------------------------------------------------
             r5_h2  <= (r4_h1b + shift_left(r4_h1b, 2)) + to_unsigned(341, 10);
+            r5_g2  <= (r4_g1b + shift_left(r4_g1b, 2)) + to_unsigned(341, 10);
             r5_q2  <= (r4_q1b + shift_left(r4_q1b, 2)) + to_unsigned(341, 10);
 
             r5_bph <= r4_bph + resize(r4_rel, 10);
@@ -633,29 +818,33 @@ begin
 
             r5_jsv <= r4_jsv;
             r5_l   <= r4_l;
-            r5_px <= r4_px; r5_par <= r4_par; r5_pok <= r4_pok;
+            r5_px <= r4_px; r5_par <= r4_par; r5_pok <= r4_pok; r5_top <= r4_top;
 
             -----------------------------------------------------------------
             -- s6: final static value, serration jitter (K2 + patch scaled),
             -- class + flip.  Also issue the class line-buffer read.
             -----------------------------------------------------------------
             r6_hn <= r5_h2 xor shift_right(r5_h2, 4);
+            r6_gn <= r5_g2 xor shift_right(r5_g2, 4);
             r6_qn <= r5_q2 xor shift_right(r5_q2, 4);
 
-            -- per-patch serration boost only when Patchwork is on
+            -- serration: K2 sets +/-32..+/-192 phase units (a colour slot
+            -- is 64 — the old +/-8 floor was invisible); per-patch
+            -- boost/cut when Patchwork is on (+/-16..+/-256)
             if sw_patch = '1' then
                 v_jsel := resize(s_jbase, 3)
-                        + resize(r5_pf(1 downto 0), 3);
+                        + resize(r5_pf(1 downto 0), 3) + 1;
             else
-                v_jsel := resize(s_jbase, 3) + 1;
+                v_jsel := resize(s_jbase, 3) + 2;
             end if;
             case to_integer(v_jsel) is
-                when 0      => r6_jit <= resize(shift_right(r5_jsv, 7), 10);
-                when 1      => r6_jit <= resize(shift_right(r5_jsv, 6), 10);
-                when 2      => r6_jit <= resize(shift_right(r5_jsv, 5), 10);
-                when 3      => r6_jit <= resize(shift_right(r5_jsv, 4), 10);
-                when 4      => r6_jit <= resize(shift_right(r5_jsv, 3), 10);
-                when others => r6_jit <= resize(shift_right(r5_jsv, 2), 10);
+                when 1      => r6_jit <= resize(shift_right(r5_jsv, 5), 10);
+                when 2      => r6_jit <= resize(shift_right(r5_jsv, 4), 10);
+                when 3      => r6_jit <= resize(shift_right(r5_jsv, 3), 10);
+                when 4      => r6_jit <= resize(shift_right(r5_jsv, 2), 10);
+                when 5      => r6_jit <= resize(shift_right(r5_jsv, 2), 10)
+                                       + resize(shift_right(r5_jsv, 3), 10);
+                when others => r6_jit <= resize(shift_right(r5_jsv, 1), 10);
             end case;
 
             v_cls    := r5_c2 + signed(resize(s_flip, 12));
@@ -670,7 +859,7 @@ begin
             end if;
             r6_pf  <= r5_pf;
             r6_l   <= r5_l;
-            r6_px <= r5_px; r6_par <= r5_par; r6_pok <= r5_pok;
+            r6_px <= r5_px; r6_par <= r5_par; r6_pok <= r5_pok; r6_top <= r5_top;
 
             -- class line-buffer read (both banks, unconditional)
             rd_a <= lb_a(to_integer(r5_px(10 downto 0)));
@@ -703,15 +892,22 @@ begin
             end if;
 
             -- ink threshold: density bias + inverted luma (content term)
-            r7_thr <= resize(s_dens, 8) + resize(not r6_l(9 downto 3), 8);
+            -- (fixed density bias = the old K5 Ink default)
+            r7_thr <= to_unsigned(48, 8) + resize(not r6_l(9 downto 3), 8);
 
             rda_f <= rd_a;
             rdb_f <= rd_b;
 
-            r7_hn <= r6_hn;
+            -- grain dissolve: mask = hn xor gn (uniform and independent of
+            -- the chosen value, so ink density never shifts mid-dissolve)
+            if (r6_hn xor r6_gn) < s_frac then
+                r7_hn <= r6_gn;
+            else
+                r7_hn <= r6_hn;
+            end if;
             r7_qn <= r6_qn;
             r7_pf <= r6_pf;
-            r7_px <= r6_px; r7_par <= r6_par;
+            r7_px <= r6_px; r7_par <= r6_par; r7_top <= r6_top;
 
             -----------------------------------------------------------------
             -- s8: static fuzz on the band phase (cross-mod static->bands),
@@ -728,6 +924,10 @@ begin
             else
                 v_prvc := rda_f(3);
                 v_agep := unsigned(rda_f(2 downto 0));
+            end if;
+            if r7_top = '1' then
+                v_prvc := r7_dark;
+                v_agep := (others => '0');
             end if;
             v_edge := r7_hedge or (v_prvc xor r7_dark);
             if v_edge = '1' or v_agep /= 0 then

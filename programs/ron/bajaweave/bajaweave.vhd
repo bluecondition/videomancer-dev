@@ -15,10 +15,11 @@
 --     way or OPPOSITE (counter-flow).
 --
 -- The two oscillators are layered Woven (over/under alternating at each
--- crossing) or Stacked (S7), both keeping BOTH lines intact.  S8 adds
--- saturated edge rims with a highlight on the outside of each bend; S9
--- tints the crossings a third colour 90 deg from both lines.  Every
--- crossing also rings: a damped ripple trailing to the right.
+-- crossing) or Stacked (S7), both keeping BOTH lines intact, in fully
+-- saturated complementary colours.  S8 draws dark full-colour outlines
+-- with a highlight on the outside of each bend; S9 selects Normal or
+-- Darker overall brightness.  Every crossing also rings: a damped ripple
+-- trailing to the right.
 --
 -- The per-line LFO accumulators are FRAME-LOCKED (reset at field start), so
 -- K2/K5 purely set the sway's vertical wavelength.  The swing is a fixed
@@ -63,9 +64,9 @@
 --   1 clk : second sin/tri register (the sine LUT infers as EBR and eats
 --           the first register; this one splits EBR read from the output mux)
 --   3 clk : sine/triangle glide (diff, partial sums, sum) + 512 -> luma
---   1 clk : S8 edge rims + outer-bend highlight (per oscillator)
+--   1 clk : S8 edge outlines + outer-bend highlight (per oscillator)
 --   4 clk : layering keyer (select, B*m partials, scale, max)
---   4 clk : analog crossing reaction (third colour, ringing tail, clamp)
+--   4 clk : analog crossing reaction (ringing tail, clamp)
 --   2 clk : luma-scaled chroma (partial products, then sum)
 --   1 clk : luma remap to 64..765 + blanking gate -> output register
 --   Total: 21 clk  (sync/avid delay, all modes)
@@ -85,9 +86,10 @@
 --                          lines .. max = ~4x the default swing)
 --   registers_in(6)  = switches:
 --                        bit 0 = S7  layering: 0 = Woven, 1 = Stacked
---                        bit 1 = S8  edges: saturated rims + outer-bend
---                                    highlight
---                        bit 2 = S9  crossings: 0 = plain, 1 = third colour
+--                        bit 1 = S8  edges: dark full-colour outlines +
+--                                    outer-bend highlight
+--                        bit 2 = S9  brightness: 0 = Normal (~75% peak),
+--                                    1 = Darker (~60% peak)
 --                        bit 3 = S10 flow: 0 = osc2 opposite osc1, 1 = same
 --                        bit 4 = S11 shape: 0 = sine, 1 = triangle
 --                                (carriers and LFOs; GLIDES between the
@@ -133,8 +135,7 @@ architecture bajaweave of program_top is
 
     -- Analog crossing reaction.  x = crossing strength = the DIMMER wave's
     -- luma above mid (0..511; zero unless both are bright).
-    --   colour: (S9) chroma eases to a THIRD hue, 90 deg from both lines
-    --           (x >= 128 half, x >= 256 full)
+    --   (v0.11 also tinted crossings a third hue on S9 -- removed in v0.12.)
     --   ring  : peak-hold e decays C_RING_DECAY per pixel after each crossing
     --           and drives a damped 8-px ripple of +/-(e*3/8) trailing to the
     --           right -- an overdriven, band-limited video amp
@@ -202,7 +203,7 @@ architecture bajaweave of program_top is
     signal r_osc2_hue  : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal r_stacked   : std_logic := '0';   -- S7 Layering: 0 Woven, 1 Stacked
     signal r_edges     : std_logic := '0';   -- S8 Edges
-    signal r_third     : std_logic := '1';   -- S9 Crossings: 1 = third colour
+    signal r_dark      : std_logic := '0';   -- S9 Brightness: 1 = Darker
     signal r_flow_same : std_logic := '0';
     signal r_speed     : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal r_tri_en    : std_logic := '0';
@@ -367,12 +368,17 @@ architecture bajaweave of program_top is
     signal r_par1_sr, r_par2_sr   : std_logic_vector(5 downto 0) := (others => '0');
     signal r_side1_sr, r_side2_sr : std_logic_vector(4 downto 0) := (others => '0');
     -- per-line outer-bend highlight: |lfo|/128 and the lfo sign
-    signal lm_h1, lm_h2 : unsigned(7 downto 0) := (others => '0');
-    signal r_hl1, r_hl2 : unsigned(7 downto 0) := (others => '0');
+    signal lm_h1, lm_h2 : unsigned(8 downto 0) := (others => '0');
+    signal r_hl1, r_hl2 : unsigned(8 downto 0) := (others => '0');
     signal r_ls1, r_ls2 : std_logic := '0';
     -- edge stage outputs (per oscillator)
     signal r_eL1, r_eL2 : unsigned(9 downto 0) := (others => '0');
     signal r_eu1, r_ev1, r_eu2, r_ev2 : unsigned(9 downto 0) := to_unsigned(512, 10);
+    -- rim flags: a darkened outline keeps FULL chroma (the luma-scaled
+    -- chroma stage would otherwise grey it out); carried with the winner
+    signal r_eR1, r_eR2 : std_logic := '0';
+    signal r_kRT, r_kRB, r_kRT2, r_kRB2, r_kRT3, r_kRB3, r_rim_k : std_logic := '0';
+    signal r_rim1, r_rim2, r_rim3, r_rim4 : std_logic := '0';
 
     -- Carrier sine LUT outputs (combinational; PM phase -> sin)
     signal s_osc1_sin : signed(9 downto 0);
@@ -390,10 +396,7 @@ architecture bajaweave of program_top is
 
     -- Scaled chroma (Bright: c/2, Deep: c - c/8 = +/-448, the legal limit),
     -- one more register stage before the 512 offset add.
-    signal r_cu1, r_cv1 : signed(9 downto 0) := (others => '0');   -- bright
-    signal r_du1, r_dv1 : signed(9 downto 0) := (others => '0');   -- deep
-    signal r_ud1, r_vd1, r_ud2, r_vd2 : unsigned(9 downto 0) := to_unsigned(512, 10);
-    signal r_u3,  r_v3  : unsigned(9 downto 0) := to_unsigned(512, 10);
+    signal r_du1, r_dv1 : signed(9 downto 0) := (others => '0');   -- +/-448
 
     -- Per-frame UV
     signal r_u1, r_v1 : unsigned(9 downto 0) := to_unsigned(512, 10);
@@ -693,7 +696,7 @@ begin
                 r_osc2_hue  <= s_k6;          -- K6 = Sway amount
                 r_stacked   <= s_s7;
                 r_edges     <= s_s8;
-                r_third     <= s_s9;
+                r_dark      <= s_s9;
                 r_flow_same <= s_s10;
                 r_tri_en    <= s_s11;
                 r_speed     <= s_k12;
@@ -761,13 +764,8 @@ begin
             r_cos1_r <= s_cos1;
             r_sin1_r <= s_sin1;
 
-            -- Chroma amplitude:
-            --   bright: c/2, +/-255 -- the line bodies
-            --   deep  : c - c/8, +/-448 -- full legal saturation (the 10-bit
-            --           inverse-BT.601 chroma divisor is 896); S8 edge rims
-            --           and the S9 crossing colour
-            r_cu1 <= shift_right(r_cos1_r, 1);
-            r_cv1 <= shift_right(r_sin1_r, 1);
+            -- Chroma at full legal saturation: c - c/8 = +/-448 (the 10-bit
+            -- inverse-BT.601 chroma divisor is 896).
             r_du1 <= r_cos1_r - shift_right(r_cos1_r, 3);
             r_dv1 <= r_sin1_r - shift_right(r_sin1_r, 3);
 
@@ -775,18 +773,10 @@ begin
             -- negated chroma), so the sweep passes through red/cyan,
             -- orange/blue, yellow/violet, green/magenta ...  Free-running;
             -- the inputs only move in vertical blanking.
-            r_u1  <= off512(r_cu1);
-            r_v1  <= off512(r_cv1);
-            r_u2  <= off512(-r_cu1);
-            r_v2  <= off512(-r_cv1);
-            r_ud1 <= off512(r_du1);
-            r_vd1 <= off512(r_dv1);
-            r_ud2 <= off512(-r_du1);
-            r_vd2 <= off512(-r_dv1);
-            -- S9 crossing colour: the hue 90 deg from BOTH lines (osc1's hue
-            -- rotated +90: (u,v) -> (-v,u)), deep -- rotates with K3.
-            r_u3  <= off512(-r_dv1);
-            r_v3  <= off512(r_du1);
+            r_u1  <= off512(r_du1);
+            r_v1  <= off512(r_dv1);
+            r_u2  <= off512(-r_du1);
+            r_v2  <= off512(-r_dv1);
         end if;
     end process;
 
@@ -1155,8 +1145,8 @@ begin
                 if v_l2 < 0 then v_l2 := -v_l2; end if;
                 lm_m1  <= unsigned(v_l1(15 downto 0));
                 lm_m2  <= unsigned(v_l2(15 downto 0));
-                lm_h1  <= unsigned(v_l1(14 downto 7));
-                lm_h2  <= unsigned(v_l2(14 downto 7));
+                lm_h1  <= unsigned(v_l1(14 downto 6));
+                lm_h2  <= unsigned(v_l2(14 downto 6));
                 lm_s1  <= r_lfo1_fine(16);
                 lm_s2  <= r_lfo2_fine(16);
                 lm_a1  <= (others => '0');
@@ -1328,10 +1318,11 @@ begin
 
     -- ========================================================================
     -- S8 EDGES (per oscillator, one stage).  Each line's flanks -- the band
-    -- where its luma is 640..767 -- become a rim in the line's own colour
-    -- at DEEP saturation (the body stays bright).  The rim on the OUTER side
-    -- of each bend also gets a highlight of |lfo|/128 (up to +255 luma,
-    -- strongest at the sway's extremes where the curve is tightest).
+    -- where its luma is 576..831 (sin 0.125..0.625, ~1/11 of a period per
+    -- side) -- become an OUTLINE: luma halved, chroma kept at full
+    -- saturation (rim flag).  The rim on the OUTER side of each bend also
+    -- gets a lighter accent of |lfo|/64 (up to +511 luma, strongest at the
+    -- sway's extremes where the curve is tightest).
     -- Outer side: a positive PM offset moves a line LEFT, so with lfo >= 0
     -- the outer rim is the left (rising, phase bit 8 = 0) flank, and with
     -- lfo < 0 the right one.
@@ -1340,27 +1331,33 @@ begin
         variable v_rim1, v_rim2 : boolean;
     begin
         if rising_edge(clk) then
-            v_rim1 := r_edges = '1' and r_luma1(9 downto 7) = "101";
-            v_rim2 := r_edges = '1' and r_luma2(9 downto 7) = "101";
+            v_rim1 := r_edges = '1' and r_luma1 >= to_unsigned(576, 10)
+                                    and r_luma1 <  to_unsigned(832, 10);
+            v_rim2 := r_edges = '1' and r_luma2 >= to_unsigned(576, 10)
+                                    and r_luma2 <  to_unsigned(832, 10);
+            r_eu1 <= r_u1;  r_ev1 <= r_v1;
+            r_eu2 <= r_u2;  r_ev2 <= r_v2;
             if v_rim1 then
-                r_eu1 <= r_ud1;  r_ev1 <= r_vd1;
+                r_eR1 <= '1';
                 if (r_side1_sr(4) xor r_ls1) = '0' then
-                    r_eL1 <= r_luma1 + resize(r_hl1, 10);
+                    r_eL1 <= shift_right(r_luma1, 1) + resize(r_hl1, 10);
                 else
-                    r_eL1 <= r_luma1;
+                    r_eL1 <= shift_right(r_luma1, 1);
                 end if;
             else
-                r_eu1 <= r_u1;  r_ev1 <= r_v1;  r_eL1 <= r_luma1;
+                r_eR1 <= '0';
+                r_eL1 <= r_luma1;
             end if;
             if v_rim2 then
-                r_eu2 <= r_ud2;  r_ev2 <= r_vd2;
+                r_eR2 <= '1';
                 if (r_side2_sr(4) xor r_ls2) = '0' then
-                    r_eL2 <= r_luma2 + resize(r_hl2, 10);
+                    r_eL2 <= shift_right(r_luma2, 1) + resize(r_hl2, 10);
                 else
-                    r_eL2 <= r_luma2;
+                    r_eL2 <= shift_right(r_luma2, 1);
                 end if;
             else
-                r_eu2 <= r_u2;  r_ev2 <= r_v2;  r_eL2 <= r_luma2;
+                r_eR2 <= '0';
+                r_eL2 <= r_luma2;
             end if;
         end if;
     end process;
@@ -1391,9 +1388,11 @@ begin
             if v_swap then
                 v_lt := r_eL2; v_ut := r_eu2; v_vt := r_ev2;
                 v_lb := r_eL1; v_ub := r_eu1; v_vb := r_ev1;
+                r_kRT <= r_eR2;  r_kRB <= r_eR1;
             else
                 v_lt := r_eL1; v_ut := r_eu1; v_vt := r_ev1;
                 v_lb := r_eL2; v_ub := r_eu2; v_vb := r_ev2;
+                r_kRT <= r_eR1;  r_kRB <= r_eR2;
             end if;
             r_kT <= v_lt;  r_kuT <= v_ut;  r_kvT <= v_vt;
             r_kB <= v_lb;  r_kuB <= v_ub;  r_kvB <= v_vb;
@@ -1419,6 +1418,7 @@ begin
             r_kuT2 <= r_kuT;  r_kvT2 <= r_kvT;
             r_kuB2 <= r_kuB;  r_kvB2 <= r_kvB;
             r_cx1  <= r_cx0;
+            r_kRT2 <= r_kRT;  r_kRB2 <= r_kRB;
 
             -- K3: Bs = B*m/32
             v_bs   := shift_right(r_kh + r_kl, 5);
@@ -1427,14 +1427,17 @@ begin
             r_kuT3 <= r_kuT2;  r_kvT3 <= r_kvT2;
             r_kuB3 <= r_kuB2;  r_kvB3 <= r_kvB2;
             r_cx2  <= r_cx1;
+            r_kRT3 <= r_kRT2;  r_kRB3 <= r_kRB2;
 
             -- K4: out = max(T, Bs) -- continuous: no hard key edges and no
             -- seam where Weave's upper/lower swap (the swap happens at a
             -- wave's trough, where it is ~0 and loses the max anyway)
             if r_kT3 >= r_kBs then
                 r_y_k <= r_kT3;  r_u_k <= r_kuT3;  r_v_k <= r_kvT3;
+                r_rim_k <= r_kRT3;
             else
                 r_y_k <= r_kBs;  r_u_k <= r_kuB3;  r_v_k <= r_kvB3;
+                r_rim_k <= r_kRB3;
             end if;
             -- crossing strength, gated to active video so no reaction tail
             -- leaks from blanking into a line start
@@ -1448,9 +1451,7 @@ begin
 
     -- ========================================================================
     -- Analog crossing reaction (see C_RING_DECAY)
-    --   R1: peak-hold e (decays C_RING_DECAY/px) + ring phase counter; S9
-    --       crossing colour (toward the third hue: half at x >= 128, full at
-    --       x >= 256)
+    --   R1: peak-hold e (decays C_RING_DECAY/px) + ring phase counter
     --   R2: ring magnitude from e and the counter (+/- e/8, 3e/8 over 8 px)
     --   R3: +/- ring
     --   R4: clamp 0..1023
@@ -1476,18 +1477,9 @@ begin
                 r_rc <= r_rc + 1;
             end if;
             r_y_1 <= r_y_k;
-            if r_third = '1' and r_cx(8) = '1' then
-                r_u_1 <= r_u3;
-                r_v_1 <= r_v3;
-            elsif r_third = '1' and r_cx(7) = '1' then
-                v_su  := ('0' & r_u_k) + ('0' & r_u3);
-                v_sv  := ('0' & r_v_k) + ('0' & r_v3);
-                r_u_1 <= v_su(10 downto 1);
-                r_v_1 <= v_sv(10 downto 1);
-            else
-                r_u_1 <= r_u_k;
-                r_v_1 <= r_v_k;
-            end if;
+            r_u_1  <= r_u_k;
+            r_v_1  <= r_v_k;
+            r_rim1 <= r_rim_k;
 
             -- R2
             if r_rc(1 downto 0) = "01" or r_rc(1 downto 0) = "10" then
@@ -1497,7 +1489,7 @@ begin
             end if;
             r_rneg <= r_rc(2);
             r_ya  <= '0' & r_y_1;
-            r_u_2 <= r_u_1;  r_v_2 <= r_v_1;
+            r_u_2 <= r_u_1;  r_v_2 <= r_v_1;  r_rim2 <= r_rim1;
 
             -- R3
             if r_rneg = '1' then
@@ -1505,7 +1497,7 @@ begin
             else
                 r_ys <= signed(resize(r_ya, 13)) + signed(resize(r_rmag, 13));
             end if;
-            r_u_3 <= r_u_2;  r_v_3 <= r_v_2;
+            r_u_3 <= r_u_2;  r_v_3 <= r_v_2;  r_rim3 <= r_rim2;
 
             -- R4
             v_ys := r_ys;
@@ -1516,7 +1508,7 @@ begin
             else
                 r_y_r <= unsigned(v_ys(9 downto 0));
             end if;
-            r_u_4 <= r_u_3;  r_v_4 <= r_v_3;
+            r_u_4 <= r_u_3;  r_v_4 <= r_v_3;  r_rim4 <= r_rim3;
         end if;
     end process;
 
@@ -1563,7 +1555,7 @@ begin
                 r_ub <= v_cu;
                 r_vb <= v_cv;
             end if;
-            r_cfull <= r_y_r(9);
+            r_cfull <= r_y_r(9) or r_rim4;
             r_y_k2  <= r_y_r;
             r_u_k2  <= r_u_4;
             r_v_k2  <= r_v_4;
@@ -1586,6 +1578,8 @@ begin
     -- Output stage: luma remap + blanking gate
     --   y = 64 + L*(1/2 + 1/8 + 1/16) = 64..765 for L = 0..1023 -- black to
     --   ~75%: full-scale Y clips every RGB channel and kills the chroma.
+    --   S9 Darker: y = 64 + L*(1/2 + 1/64) = 64..592 (~60%).  Chroma was
+    --   scaled from the undimmed L, so darker reads richer, not duller.
     --   Outside the (latency-aligned, generated) avid: y/u/v = 64/512/512.
     --   The gate taps one stage before the output tap, so it lines up with
     --   data_out.avid.
@@ -1594,8 +1588,14 @@ begin
     begin
         if rising_edge(clk) then
             if s_avid_sr(C_DELAY_CLKS-2) = '1' then
-                r_y_out <= to_unsigned(64, 10) + shift_right(r_y_c, 1)
-                         + shift_right(r_y_c, 3) + shift_right(r_y_c, 4);
+                if r_dark = '1' then
+                    -- Darker: 64 + L*(1/2 + 1/64) = 64..592 (~60%)
+                    r_y_out <= to_unsigned(64, 10) + shift_right(r_y_c, 1)
+                             + shift_right(r_y_c, 6);
+                else
+                    r_y_out <= to_unsigned(64, 10) + shift_right(r_y_c, 1)
+                             + shift_right(r_y_c, 3) + shift_right(r_y_c, 4);
+                end if;
                 r_u_out <= r_u_c;
                 r_v_out <= r_v_c;
             else

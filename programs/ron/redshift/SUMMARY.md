@@ -65,6 +65,31 @@ a stable-select mux on BRAM outputs). Gated on dx /= 0 so Collapse = 0
 stays exactly dry. The fill enters before the grades, so it inherits the
 darkening and the red/blue Doppler drag near masses.
 
+## 1080p bottom-edge fix (v2.2)
+
+The HD hardware is 1080p PROGRESSIVE; v2.1 was written against 540-line
+fields. Four faults, all at the bottom of the frame or on analog vsync:
+1. `s_aline` was 10 bits, saturating at line 1000, so lines 1000-1079 all read
+   as line 1000. The mass field, shells, core and debris hit-test stopped
+   changing, and the bottom ~80 lines (about an inch) became vertical
+   stripes. Fixed by making it 11 bits.
+2. 16-line cell rows on 1080 lines = 68 rows x 60 > 2048, so the mass RAM
+   wrapped and the bottom half's field aliased onto the top half, shifted 8
+   cells right (ghost lenses). The geometry now also keys on the measured
+   field height: 1080p uses 32x32 cells (34 rows, max address 2039), 1080i
+   keeps 32x16. On 32-line rows the vacc IIR accumulates even lines only,
+   so it still covers half the cell row.
+3. The last cell row's lower bilinear corners read the row past the bottom
+   (unwritten, or aliased to row 0). They now replicate the last row
+   (`s_lastrow` per field, `s_row` counter).
+4. Debris runs in half-rows on tall rasters (`s_dline`), so the 10-bit
+   particle/surface words, off-screen sky (960+) and streak/speed scale
+   are unchanged from the 540-row design.
+Also added: a serrated-vsync guard (animation phases and the debris walk
+fire once per field; before, each serration edge advanced them again), and
+the blanking contract (output neutral 64/512/512 outside avid; it used to
+hold the line's last pixel through blanking).
+
 ## Status
 
 v2.1.0 — all 6 configs routed-closed at full clock (five seed 1, one seed

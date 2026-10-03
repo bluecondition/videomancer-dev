@@ -1,5 +1,7 @@
 # Taffy — slider-scanned horizontal stretch bands
 
+**v0.4.0 (2026-09-28): FINAL — signed off by Ron on hardware ("I like the way this looks").**
+
 ## What it does
 P12 scans a scanline down the picture (100% = top, 0% = bottom). The lines it
 touches stretch horizontally outward from the centre column, and snap back
@@ -48,7 +50,7 @@ test is registered one pixel ahead so the per-pixel path is mux → add, never
 compare → mux → add.
 
 In Stretch the source always lands between x and the centre, so reads can never
-leave the line — the edge logic only ever fires in Squeeze.
+leave the line — only Squeeze runs off the ends, into the edge clamp below.
 
 ## Controls
 - **K1 Pull** — how fast a line grows to full stretch (quadratic: 1–255 env
@@ -71,44 +73,52 @@ leave the line — the edge logic only ever fires in Squeeze.
 - **P12 Position** — the scanned line.
 
 The Black-fill option that lived on S10 in v0.1 was dropped to free the switch
-for Mode; the edge fill below replaced it outright.
+for Mode; the edge clamp below replaced it outright.
 
-## Edge fill (v0.3)
-Squeeze pulls the picture in from the borders, and the reads that reveal used to
-clamp onto the source's edge column — which on a capture source is a **black
-blanking column**, so the reveal came in as a black bar. (Left only, in
-practice: the right border clamped onto real picture. Lagoon documents the same
-asymmetry.)
+## Edge clamp (v0.4)
+Squeeze pulls the picture in from the borders, and reads that run off the line
+used to land on the source's edge column — a **black blanking column** on
+capture sources, so the reveal came in as a black bar.
 
-Lagoon's left-fill pattern, applied to both edges as redshift v2.1 does: each
-line sums 64 pixels starting past pixel 8 (past the blanking columns, so the
-black never enters the average either), latches `sum >> 6` at hsync, and reads
-landing within `C_EDGE = 6` columns of either border paint that colour instead.
-The latch timing is free — the line that just finished is exactly the line read
-back during the next one, so the fill colour always belongs to the line it
-fills. The mux sits on the BRAM outputs at `p_wet` (sidewinder's stable-select
-precedent). The picture now shrinks into a soft matte of its own colour.
+v0.3 painted a 64-px line-average matte there (lagoon/redshift pattern, 3×16-bit
+accumulators + a fill mux). v0.4 replaces it with the catalogue-combo **address
+clamp** the user preferred on hardware (2026-09-13: the average left a black
+seam between picture and fill; wanted "one colour = the colour leading up to
+it"): every read `< C_EDGE` or `> width−1−C_EDGE` (C_EDGE = 12) is redirected to
+that inset column, so the reveal is the line's own edge colour drawn outward and
+the blanking columns never reach the screen. The clamp is ungated (as in the
+catalogue programs), so every line — dry or displaced — shows the same edges
+and a band never exposes a ragged black border against its neighbours.
 
-Two Taffy-specific details:
-- The fill triggers on reads of columns `< C_EDGE`, **not** merely off-screen
-  reads — that's lagoon's actual insight, and it's what kills the black seam
-  between the fill and the picture.
-- It's gated on `s_fill_en` (per line, `v_eff /= 0`). Without that gate, a line
-  at env = 0 would paint its own columns 0–5, breaking the exact-dry null.
-  Redshift gates the same way on `dx /= 0`.
+No dry/wet mix: env = 0 reproduces the input exactly (inv = 256, pixel x reads
+x) apart from those 12 clamp columns each side.
 
-No dry/wet mix: env = 0 already reproduces the input exactly (inv = 256,
-acc = 0), so the effect has a real null.
+## v0.4 review fixes (2026-09-28)
+- **Blanking gate.** The line buffer is read every clock, so the wet output
+  carried picture (edge pixels) through h/v blanking where the encoder takes its
+  colour reference — the blanking-interval contract that no sim checks. `p_wet`
+  now forces Y/U/V to 64/512/512 on the latency-aligned avid (tap
+  `C_TOTAL_LATENCY−2`, one stage before `data_out.avid`).
+- **Pixel alignment.** Pixel k was written at address k+1 (the write used the
+  already-incremented counter), and the identity read happened to cancel it for
+  Y — but the 2:1 chroma address `(k+1)>>1` split every chroma pair, giving odd
+  pixels their right neighbour's chroma. Writes now use `s_wr_x` (the pixel's
+  own index) and the DDA seed carries a −1 (pre-computed as `s_lo_m1` in the
+  frame sequencer so the seed stage stays one subtract).
+- **One Shot flip saturation.** A Sustain line flipped to One Shot while still
+  part-stretched sits ARMED with env > 0; when the band returned, ARMED→ATTACK
+  took `env + Pull` unsaturated and could wrap (200 + 100 → 44). Now clamps at
+  255.
 
 ## Multiply ledger (5) — all in blanking-time sequencers, none per-pixel
 Per frame: `p12d × active_h` (selected line), `K1²` and `K2²` (rate curves).
 Per line: `env × Depth` (effect amount), `lo × inv` (DDA seed).
 
 ## Timing
-All 6 configs close at **seed 1, no retries**: 78.1–93.4 MHz (HD needs 74.25).
-3812/7680 LCs (50%), 27/32 EBR (22 line buffer + 5 envelope), full clock
-everywhere — no divisor. The edge fill cost ~174 LCs (three 16-bit accumulators)
-and no BRAM.
+v0.4: all 6 configs close at **seed 1, no retries** — HD Analog 78.7, HD HDMI
+78.3, HD Dual 76.5 MHz (HD needs 74.25); SD 75.5–82.4. 3672–3691/7680 LCs (48%,
+−130 vs v0.3's average fill), 27/32 EBR (22 line buffer + 5 envelope), full
+clock everywhere — no divisor. (v0.3 was 3812 LCs, 78.1–93.4 MHz.)
 
 ## Timing lessons
 1. **The read-address range test was the whole problem.** Leaving `p_rdaddr`
@@ -135,7 +145,7 @@ and no BRAM.
 Built and timing-verified on all 6 configs (routed Fmax read from nextpnr's
 Warning/Info line, not the pre-route estimate — the build script's
 "✓ Completed" on a last-seed retry is a best-effort **miss**, which is exactly
-how the original hd_hdmi failure hid). **Not yet simulated or HW-tested.**
+how the original hd_hdmi failure hid). v0.4 **HW-validated** 2026-09-28 and signed off as final (not simulated).
 
 ## Presets
 - Scanner, Long Trail, Single Line, Soft Lens, Terraces, Wake (One Shot), Pinch

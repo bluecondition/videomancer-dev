@@ -244,6 +244,11 @@ architecture redshift of program_top is
 
     signal s_prev_vsync_n : std_logic := '1';
     signal s_prev_hsync_n : std_logic := '1';
+    -- serrated-vsync guard: analog vsync has several falling edges per
+    -- field; the per-field increments (animation phases, debris walk)
+    -- fire once, on the first edge after active video
+    signal s_saw_act  : std_logic := '0';
+    signal s_vfire    : std_logic := '0';
 
     ----------------------------------------------------------------------
     -- valid chain + coordinates
@@ -254,7 +259,14 @@ architecture redshift of program_top is
     signal wx        : unsigned(10 downto 0) := (others => '0');  -- write (S1)
     signal x_s2      : unsigned(10 downto 0) := (others => '0');
     signal rd_x      : unsigned(10 downto 0) := (others => '0');  -- read (S7)
-    signal s_aline   : unsigned(9 downto 0) := (others => '0');
+    -- active line: 11 bits (1080p is PROGRESSIVE -- the old 10-bit count
+    -- saturated at line 1000 and froze the bottom 80 lines into vertical
+    -- stripes). s_dline = the debris system's row, halved on tall rasters
+    -- so 1080p debris keeps its 540-row design scale.
+    signal s_aline   : unsigned(10 downto 0) := (others => '0');
+    signal s_dline   : unsigned(9 downto 0) := (others => '0');
+    signal s_fheight : unsigned(10 downto 0) := to_unsigned(1080, 11);
+    signal s_tall    : std_logic := '1';
     signal s_seen    : std_logic := '0';
     signal s_lwidth  : unsigned(10 downto 0) := to_unsigned(1920, 11);
     signal s_wmax    : unsigned(10 downto 0) := to_unsigned(1919, 11);
@@ -281,8 +293,9 @@ architecture redshift of program_top is
     -- MASS FIELD (v0.2)
     --
     -- Mercurial's coarse-grid machinery: cells 2^xsh px x 2^ysh field
-    -- lines from the MEASURED line width (1080i: 32x16 -> 60 cols, stride
-    -- 60; 720p: 40 cols; SD: 16x8 -> 45 cols, stride 48; max address
+    -- lines from the MEASURED line width + field height (1080p: 32x32 ->
+    -- 60 cols x 34 rows, stride 60; 1080i: 32x16; 720p: 32x32, 40 cols;
+    -- SD: 16x8 (16x16 progressive) -> 45 cols, stride 48; max address
     -- 2039 < 2048). Per-column vacc accumulates the area-averaged luma
     -- (polarity applied here -- Dark Mass inverts the whole universe with
     -- one mux); the updater walks one cell row per hblank (delayed 8
@@ -299,6 +312,14 @@ architecture redshift of program_top is
     signal s_ysh    : natural range 3 to 5 := 4;
     signal s_cols   : unsigned(5 downto 0) := to_unsigned(60, 6);
     signal s_stride : unsigned(5 downto 0) := to_unsigned(60, 6);
+    -- bottom-edge replicate: the last cell row's lower bilinear corners
+    -- read the last row itself (the row below it is unwritten / aliased)
+    signal s_row     : unsigned(5 downto 0) := (others => '0');
+    signal s_lastrow : unsigned(5 downto 0) := to_unsigned(33, 6);
+    signal s_lastm1  : unsigned(5 downto 0) := to_unsigned(32, 6);
+    -- vacc line subsample on 32-line cell rows (keeps the IIR's coverage
+    -- at half the cell row, as on 16-line rows)
+    signal s_vsamp   : std_logic := '1';
 
     -- display-side cell tracking
     signal fx5, fy5 : unsigned(4 downto 0) := (others => '0');
@@ -414,7 +435,6 @@ architecture redshift of program_top is
     signal pu_we, pu_swe : std_logic := '0';
     signal pu_waddr : unsigned(7 downto 0) := (others => '0');
     signal pu_wdata, pu_swdata : std_logic_vector(15 downto 0) := (others => '0');
-    signal pu_prev_vsync_n : std_logic := '1';
     signal s_nrows  : unsigned(9 downto 0) := to_unsigned(540, 10);
     signal s_lfsr   : unsigned(15 downto 0) := x"ACE1";
 
@@ -524,13 +544,24 @@ begin
     p_frame : process(clk)
         variable v_ge : signed(10 downto 0);
         variable v_pz : unsigned(7 downto 0);
+        variable v_h  : unsigned(10 downto 0);
     begin
         if rising_edge(clk) then
             s_prev_vsync_n <= data_in.vsync_n;
             s_qs_ar <= s_qs_a;
             s_qs_r  <= f_qsin(s_qs_ar);
 
-            if data_in.vsync_n = '0' and s_prev_vsync_n = '1' then
+            -- serrated-vsync guard (one registered fire per field)
+            s_vfire <= '0';
+            if data_in.avid = '1' then
+                s_saw_act <= '1';
+            elsif data_in.vsync_n = '0' and s_prev_vsync_n = '1'
+                  and s_saw_act = '1' then
+                s_saw_act <= '0';
+                s_vfire   <= '1';
+            end if;
+
+            if s_vfire = '1' then
                 s_p12  <= unsigned(registers_in(7));
                 s_k4   <= unsigned(registers_in(3));
                 s_k6   <= unsigned(registers_in(5));
@@ -570,15 +601,36 @@ begin
                 end if;
                 s_dop8 <= unsigned(registers_in(3)(9 downto 2));
 
-                -- grid geometry from the measured line width (mercurial)
+                -- grid geometry from the measured line width AND field
+                -- height: 1080p needs 32-line cell rows (34 rows x 60 =
+                -- 2040 < 2048; 16-line rows overflowed the mass RAM and
+                -- aliased the bottom half onto the top); 1080i fields keep
+                -- 16. Debris runs in half-rows on tall rasters.
+                if s_fheight > 600 then
+                    s_tall  <= '1';
+                    s_nrows <= s_fheight(10 downto 1);
+                else
+                    s_tall  <= '0';
+                    s_nrows <= s_fheight(9 downto 0);
+                end if;
                 if s_lwidth >= 1600 then
-                    s_xsh <= 5; s_ysh <= 4;
+                    s_xsh <= 5;
+                    if s_fheight > 600 then
+                        s_ysh <= 5;
+                    else
+                        s_ysh <= 4;
+                    end if;
                     s_cols <= to_unsigned(60, 6); s_stride <= to_unsigned(60, 6);
                 elsif s_lwidth >= 1000 then
                     s_xsh <= 5; s_ysh <= 5;
                     s_cols <= to_unsigned(40, 6); s_stride <= to_unsigned(60, 6);
                 else
-                    s_xsh <= 4; s_ysh <= 3;
+                    s_xsh <= 4;
+                    if s_fheight > 300 then
+                        s_ysh <= 4;
+                    else
+                        s_ysh <= 3;
+                    end if;
                     s_cols <= to_unsigned(45, 6); s_stride <= to_unsigned(48, 6);
                 end if;
 
@@ -601,6 +653,13 @@ begin
                         s_dk8    <= '0' & s_p12(9 downto 3);    -- darken
                         s_hazeg8 <= '0' & s_p12(9 downto 3);    -- turbulence
                         s_pspd4  <= "0010" + resize(s_p12(9 downto 8) & '0', 4);
+                        -- last cell row index = (height-1) >> ysh
+                        v_h := s_fheight - 1;
+                        case s_ysh is
+                            when 3      => s_lastrow <= v_h(8 downto 3);
+                            when 4      => s_lastrow <= v_h(9 downto 4);
+                            when others => s_lastrow <= v_h(10 downto 5);
+                        end case;
                     when 8 =>
                         -- horizon: fully engaged only at P12 max
                         s_thr10 <= to_unsigned(255, 10)
@@ -608,6 +667,7 @@ begin
                                    + resize(shift_right(to_unsigned(1023, 10)
                                             - s_p12, 1), 10);
                         s_dkc10 <= resize(s_dk8 & '0', 10);     -- 2*dk8
+                        s_lastm1 <= s_lastrow - 1;
                         -- debris density: K5 capped by P12 engagement
                         if s_p12(9 downto 2) > 127 then
                             v_pz := (others => '1');
@@ -700,7 +760,7 @@ begin
         variable v_mv  : signed(9 downto 0);
         variable v_gv  : signed(9 downto 0);
         variable v_rowend : boolean;
-        variable v_nal : unsigned(9 downto 0);
+        variable v_nal : unsigned(10 downto 0);
         variable v_pd  : unsigned(9 downto 0);
         variable v_fx3 : unsigned(2 downto 0);
     begin
@@ -746,10 +806,10 @@ begin
                         -- raster bright-surface detect on this column's
                         -- lane pixel (r0_y is x%8 = 4): min-write
                         if r0_y(9 downto 2) > 168
-                           and s_aline < sc_bs then
+                           and s_dline < sc_bs then
                             sw_we   <= '1';
                             sw_addr <= s_x_count(10 downto 3);
-                            sw_data <= std_logic_vector(s_aline) & "000000";
+                            sw_data <= std_logic_vector(s_dline) & "000000";
                         end if;
                     when others =>
                         null;
@@ -817,7 +877,7 @@ begin
                                                    - signed(resize(vq_disp, 14)), 2)),
                             16);
                     end if;
-                    vacc_we <= '1';
+                    vacc_we <= s_vsamp;
                 end if;
                 if v_pos = 14 then
                     vq_disp <= unsigned(vacc_q(11 downto 0));
@@ -928,7 +988,7 @@ begin
                 -- debris hit test (1-bit flag piped to the S12 lane
                 -- select; the S0-aligned column registers are close enough
                 -- for 8-px columns). 1x3 streak; x wanders as it falls.
-                v_pd  := s_aline - pc_pos(11 downto 2);
+                v_pd  := s_dline - pc_pos(11 downto 2);
                 v_fx3 := pc_h8(4 downto 2) + pc_pos(4 downto 2);
                 if pc_h8 < s_pgate8
                    and v_pd(9 downto 2) = 0 and v_pd(1 downto 0) /= "11"
@@ -1219,6 +1279,11 @@ begin
                         s_out_u <= ln_vu;
                         s_out_v <= ln_vv;
                 end case;
+            else
+                -- blanking contract: neutral outside (aligned) avid
+                s_out_y <= to_unsigned(64, 10);
+                s_out_u <= to_unsigned(512, 10);
+                s_out_v <= to_unsigned(512, 10);
             end if;
 
             -- line bookkeeping: width measure, counter resets, aline,
@@ -1262,18 +1327,22 @@ begin
 
                 if s_seen = '1' then
                     s_seen <= '0';
-                    if s_aline < 1000 then
+                    if s_aline < 2000 then
                         s_aline <= s_aline + 1;
                     end if;
                     v_nal := s_aline + 1;
                     if v_rowend then
                         -- this cell row is complete: update it, then
-                        -- advance the display row bases
+                        -- advance the display row bases (the last row's
+                        -- lower corners replicate the last row itself)
                         u_go       <= '1';
                         u_rb       <= dsp_rb;
                         s_pend_row <= '0';
+                        s_row      <= s_row + 1;
                         dsp_rb     <= dsp_rb + resize(s_stride, 11);
-                        dsp_rb1    <= dsp_rb1 + resize(s_stride, 11);
+                        if s_row /= s_lastm1 then
+                            dsp_rb1 <= dsp_rb1 + resize(s_stride, 11);
+                        end if;
                     else
                         s_pend_row <= '1';
                     end if;
@@ -1286,12 +1355,25 @@ begin
                         s_pend_row <= '0';
                     end if;
                     if s_aline /= 0 then
-                        s_nrows <= s_aline;     -- measured field height
+                        s_fheight <= s_aline;   -- measured field height
                     end if;
                     s_aline <= (others => '0');
                     v_nal   := (others => '0');
+                    s_row   <= (others => '0');
                     dsp_rb  <= (others => '0');
                     dsp_rb1 <= resize(s_stride, 11);
+                end if;
+
+                if s_tall = '1' then
+                    s_dline <= v_nal(10 downto 1);
+                else
+                    s_dline <= v_nal(9 downto 0);
+                end if;
+                -- 32-line cell rows: accumulate even lines only
+                if s_ysh = 5 then
+                    s_vsamp <= not v_nal(0);
+                else
+                    s_vsamp <= '1';
                 end if;
 
                 case s_ysh is
@@ -1460,12 +1542,11 @@ begin
             v_fb := s_lfsr(15) xor s_lfsr(13) xor s_lfsr(12) xor s_lfsr(10);
             s_lfsr <= s_lfsr(14 downto 0) & v_fb;
 
-            pu_prev_vsync_n <= data_in.vsync_n;
             pu_we  <= '0';
             pu_swe <= '0';
             case pu_state is
                 when PU_IDLE =>
-                    if data_in.vsync_n = '0' and pu_prev_vsync_n = '1' then
+                    if s_vfire = '1' then
                         pu_cnt   <= (others => '0');
                         pu_busy  <= '1';
                         pu_state <= PU_REQ;

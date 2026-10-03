@@ -32,7 +32,11 @@
 --   S9 Murk      depth gradient: Y darkens toward screen bottom (max -288),
 --                per-line accumulator, resolution-adaptive step
 --   S10 Sea      Calm / Storm: swell 3rd harmonic + 1.5x amplitude + 2x rate
---   S11 Bypass (forces the depth-mix t to 0 -- exact dry passthrough)
+--   S11 Prism    chromatic refraction: U and V read the line buffer at
+--                their own displaced addresses, split to either side of
+--                luma (U = 2x ripple, V = no ripple, +-1/4 swell, +-4 px
+--                fixed) -- colour fringes that writhe with the water.
+--                (Replaces v1.3's Bypass, which duplicated Depth = 0.)
 --   P12 Depth    master dry/wet -- the headline fader
 --
 -- Colour convention: tint targets are stored U/V (Cb/Cr) SWAPPED to match the
@@ -63,15 +67,15 @@
 --   E2   ripple triangle folds registered; caustic accumulators delayed;
 --        live pixel write lands in its bank
 --   E3   ripple sum; caustic folds (phase-modulated by the ripple folds)
---   E4   ripple multiply; base read position; caustic sum + hash dither
---   E5   read address add + clamp (registered); highlight threshold
+--   E4   ripple multiply; base read positions (Y, Prism U/V); caustic
+--        sum + hash dither
+--   E5   read address add + clamp (registered; Y, U, V); highlight threshold
 --   E6   bank reads registered; Y-add (caustic + glitter)
 --   E7   bank select -> wet pixel
 --   E8   grade: Y + caustic - murk (saturating)
 --   E9   tint: U/V shift-lerp toward target, 16-level knob (no multiply
 --        wider than 11x5 -- convex, so no clamp needed)
---   E10-13 depth-mix interpolators (dry tap = shift register index 8;
---        Bypass forces t=0, so no separate full-latency dry path exists)
+--   E10-13 depth-mix interpolators (dry tap = shift register index 8)
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -100,6 +104,10 @@ architecture lagoon of program_top is
     -- the picture. The average window starts past the edge for the same
     -- reason.
     constant C_LEDGE : integer := 6;
+
+    -- Prism: fixed U/V split (px each way) on top of the swell/ripple
+    -- dispersion, so the switch reads even with Ripple and Waves at 0.
+    constant C_PRISM : integer := 4;
 
     -- Tint targets, U/V swapped for hardware (see header).
     constant C_AQUA_U  : unsigned(C_DW - 1 downto 0) := to_unsigned(390, C_DW);
@@ -186,6 +194,7 @@ architecture lagoon of program_top is
     signal s_glitter : std_logic := '0';
     signal s_murk_en : std_logic := '0';
     signal s_storm   : std_logic := '0';
+    signal s_prism   : std_logic := '0';
     signal s_tgt_u   : unsigned(C_DW - 1 downto 0) := C_AQUA_U;
     signal s_tgt_v   : unsigned(C_DW - 1 downto 0) := C_AQUA_V;
 
@@ -267,6 +276,9 @@ architecture lagoon of program_top is
     -- mod 2^16 -- the caustic field sways with the displaced picture.
     signal s_prod_c1  : signed(23 downto 0) := (others => '0');
     signal s_prod_c2  : signed(24 downto 0) := (others => '0');
+    -- Prism: per-line U/V base offsets (= base_off when Prism is off)
+    signal s_base_u   : signed(10 downto 0) := (others => '0');
+    signal s_base_v   : signed(10 downto 0) := (others => '0');
 
     --------------------------------------------------------------------------
     -- Per-pixel pipeline (E2..E8)
@@ -283,11 +295,13 @@ architecture lagoon of program_top is
 
     signal s4_rip  : signed(19 downto 0) := (others => '0');
     signal s4_q    : signed(12 downto 0) := (others => '0');
+    signal s4_qu, s4_qv : signed(12 downto 0) := (others => '0');
     signal s4_caus : signed(10 downto 0) := (others => '0');
     signal s4_g    : unsigned(1 downto 0) := (others => '0');
 
     signal s_rd_addr_y  : unsigned(C_Y_AW - 1 downto 0) := (others => '0');
-    signal s_rd_addr_uv : unsigned(C_UV_AW - 1 downto 0) := (others => '0');
+    signal s_rd_addr_u  : unsigned(C_UV_AW - 1 downto 0) := (others => '0');
+    signal s_rd_addr_v  : unsigned(C_UV_AW - 1 downto 0) := (others => '0');
     signal s5_hl : unsigned(9 downto 0) := (others => '0');
     signal s5_g  : unsigned(1 downto 0) := (others => '0');
     signal s5_lfill, s6_lfill : std_logic := '0';
@@ -350,13 +364,8 @@ begin
             s_glitter <= registers_in(6)(1);
             s_murk_en <= registers_in(6)(2);
             s_storm   <= registers_in(6)(3);
-
-            -- Bypass = exact dry passthrough via the mix stage (t = 0)
-            if registers_in(6)(4) = '1' then
-                s_mix_t <= (others => '0');
-            else
-                s_mix_t <= unsigned(registers_in(7));
-            end if;
+            s_prism   <= registers_in(6)(4);
+            s_mix_t   <= unsigned(registers_in(7));
 
             if s_hue = '1' then
                 s_tgt_u <= C_ABYSS_U;
@@ -421,9 +430,19 @@ begin
                         s_base_off <= resize(shift_right(s_prod_sw, 8), 11);
                     end if;
                     s_lstep <= s_lstep + 1;
-                when 4 =>       -- caustic swell-tracking multiplies; murk
+                when 4 =>       -- caustic swell-tracking multiplies; murk;
+                                -- Prism U/V bases (+-1/4 swell, +-C_PRISM)
                     s_prod_c1 <= s_base_off * signed('0' & s_fc1);
                     s_prod_c2 <= s_base_off * signed('0' & s_fc2);
+                    if s_prism = '1' then
+                        s_base_u <= s_base_off + shift_right(s_base_off, 2)
+                                  + to_signed(C_PRISM, 11);
+                        s_base_v <= s_base_off - shift_right(s_base_off, 2)
+                                  - to_signed(C_PRISM, 11);
+                    else
+                        s_base_u <= s_base_off;
+                        s_base_v <= s_base_off;
+                    end if;
                     if s_murk_en = '1' then
                         if s_murk_acc(15 downto 6) > to_unsigned(288, 10) then
                             s_murk_sub <= to_unsigned(288, 10);
@@ -635,6 +654,8 @@ begin
         variable v_h4  : unsigned(3 downto 0);
         variable v_q   : signed(12 downto 0);
         variable v_w   : signed(12 downto 0);
+        variable v_ru, v_rv : signed(12 downto 0);
+        variable v_qu, v_qv : signed(12 downto 0);
         variable v_y   : signed(11 downto 0);
         variable v_du, v_dv : signed(10 downto 0);
         variable v_pu, v_pv : signed(15 downto 0);
@@ -666,6 +687,8 @@ begin
             -- (+-32, reseeded per frame) to roughen the contour edges
             s4_rip <= s3_fine * signed('0' & s_rip_k(9 downto 2));
             s4_q   <= signed(resize(s3_x, 13)) + resize(s_base_off, 13);
+            s4_qu  <= signed(resize(s3_x, 13)) + resize(s_base_u, 13);
+            s4_qv  <= signed(resize(s3_x, 13)) + resize(s_base_v, 13);
             v_h4   := s3_x(4 downto 1) xor s3_x(8 downto 5)
                       xor s_lfsr_ln(3 downto 0);
             s4_caus <= resize(s3_c1, 11) + resize(s3_c2, 11)
@@ -673,8 +696,19 @@ begin
                                          - to_signed(8, 5), 11), 1);
             s4_g <= s3_g;
 
-            -- E5: read address add + clamp; highlight threshold
+            -- E5: read address add + clamp; highlight threshold. Prism
+            -- splits the ripple around luma: U reads 2x ripple, V none
+            -- (pure shifts of the one product -- no extra multiply).
             v_q := s4_q + resize(shift_right(s4_rip, 10), 13);
+            if s_prism = '1' then
+                v_ru := resize(shift_right(s4_rip, 9), 13);
+                v_rv := (others => '0');
+            else
+                v_ru := resize(shift_right(s4_rip, 10), 13);
+                v_rv := resize(shift_right(s4_rip, 10), 13);
+            end if;
+            v_qu := s4_qu + v_ru;
+            v_qv := s4_qv + v_rv;
             v_w := signed(resize(s_line_width, 13));
             s5_lfill <= '0';
             if s_line_width > to_unsigned(8, C_Y_AW) then
@@ -684,11 +718,24 @@ begin
                 elsif v_q > v_w then
                     v_q := v_w;
                 end if;
+                if v_qu < to_signed(C_LEDGE, 13) then
+                    v_qu := to_signed(C_LEDGE, 13);
+                elsif v_qu > v_w then
+                    v_qu := v_w;
+                end if;
+                if v_qv < to_signed(C_LEDGE, 13) then
+                    v_qv := to_signed(C_LEDGE, 13);
+                elsif v_qv > v_w then
+                    v_qv := v_w;
+                end if;
             else
-                v_q := to_signed(1, 13);
+                v_q  := to_signed(1, 13);
+                v_qu := to_signed(1, 13);
+                v_qv := to_signed(1, 13);
             end if;
-            s_rd_addr_y  <= unsigned(v_q(C_Y_AW - 1 downto 0));
-            s_rd_addr_uv <= unsigned(v_q(C_Y_AW - 1 downto 1));
+            s_rd_addr_y <= unsigned(v_q(C_Y_AW - 1 downto 0));
+            s_rd_addr_u <= unsigned(v_qu(C_Y_AW - 1 downto 1));
+            s_rd_addr_v <= unsigned(v_qv(C_Y_AW - 1 downto 1));
 
             v_hl := resize(s4_caus, 12) - resize(s_thr, 12);
             if v_hl < 0 then
@@ -786,7 +833,7 @@ begin
     p_lbU0 : process(clk)
     begin
         if rising_edge(clk) then
-            s_rdU0 <= lbU0(to_integer(s_rd_addr_uv));
+            s_rdU0 <= lbU0(to_integer(s_rd_addr_u));
             if s_in_avid = '1' and s_par = '0' then
                 lbU0(to_integer(s_pixel_x(C_Y_AW - 1 downto 1))) <= std_logic_vector(s_in_u);
             end if;
@@ -796,7 +843,7 @@ begin
     p_lbU1 : process(clk)
     begin
         if rising_edge(clk) then
-            s_rdU1 <= lbU1(to_integer(s_rd_addr_uv));
+            s_rdU1 <= lbU1(to_integer(s_rd_addr_u));
             if s_in_avid = '1' and s_par = '1' then
                 lbU1(to_integer(s_pixel_x(C_Y_AW - 1 downto 1))) <= std_logic_vector(s_in_u);
             end if;
@@ -806,7 +853,7 @@ begin
     p_lbV0 : process(clk)
     begin
         if rising_edge(clk) then
-            s_rdV0 <= lbV0(to_integer(s_rd_addr_uv));
+            s_rdV0 <= lbV0(to_integer(s_rd_addr_v));
             if s_in_avid = '1' and s_par = '0' then
                 lbV0(to_integer(s_pixel_x(C_Y_AW - 1 downto 1))) <= std_logic_vector(s_in_v);
             end if;
@@ -816,7 +863,7 @@ begin
     p_lbV1 : process(clk)
     begin
         if rising_edge(clk) then
-            s_rdV1 <= lbV1(to_integer(s_rd_addr_uv));
+            s_rdV1 <= lbV1(to_integer(s_rd_addr_v));
             if s_in_avid = '1' and s_par = '1' then
                 lbV1(to_integer(s_pixel_x(C_Y_AW - 1 downto 1))) <= std_logic_vector(s_in_v);
             end if;
@@ -825,7 +872,7 @@ begin
 
     --------------------------------------------------------------------------
     -- Depth mix: dry -> wet master fader (E10..E13). Wet is valid at E9,
-    -- so the dry tap is shift register index 8. Bypass forces t = 0.
+    -- so the dry tap is shift register index 8.
     --------------------------------------------------------------------------
     s_mix_y_a <= unsigned(s_y_sr(C_DRY_TAP));
     s_mix_u_a <= unsigned(s_u_sr(C_DRY_TAP));
@@ -884,7 +931,7 @@ begin
 
     --------------------------------------------------------------------------
     -- Output at E13. Sync from the shift register; video from the mix
-    -- interpolators (Bypass is handled upstream by forcing the mix t to 0).
+    -- interpolators.
     --------------------------------------------------------------------------
     data_out.hsync_n <= s_hsync_sr(C_TOTAL_LATENCY - 1);
     data_out.vsync_n <= s_vsync_sr(C_TOTAL_LATENCY - 1);

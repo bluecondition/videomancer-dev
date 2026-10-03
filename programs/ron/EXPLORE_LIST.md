@@ -51,3 +51,18 @@ Newest at the bottom.
 | 2026-09-13 | noisetone | programs/ron/catalogue-combo/noisetone/ | "noisetone is good" (batch 3 #137: value-noise displacement + 8 tone curves, noise can shift the exposure pivot; moved out of testing/) |
 | 2026-09-13 | stratamix | programs/ron/catalogue-combo/stratamix/ | "stratamix is good" (batch 3 #132: luma-parallax layer blended with the still picture via add/screen/multiply/difference/overlay, posterized strata + contours; moved out of testing/) |
 | 2026-09-13 | syncbleed | programs/ron/catalogue-combo/syncbleed/ | "syncbleed is good" (batch 3 #131: chroma bleed/lag/dot-crawl + horizontal collapse toward a seam under a rolling wave; v0.1.1 split seam products; moved out of testing/) |
+| 2026-09-27 | clacker | programs/ron/clacker/ | signed off in the release audit ("Clacker ... is good"): no open to-dos or issues |
+| 2026-09-27 | fringe | programs/ron/fringe/ | signed off in the release audit (same as clacker): no open to-dos or issues |
+| 2026-09-27 | lagoon | programs/ron/lagoon/ | marked completed in the release audit: no open issues |
+| 2026-09-28 | redshift | programs/ron/redshift/ | marked finalized in the release audit: no open issues |
+| 2026-09-28 | ruttetra | programs/ron/ruttetra/ | marked complete in the release audit: no open issues; v0.2.0 (connected strokes, Roll, Video colour) "looks good as a final version" |
+| 2026-09-28 | taffy | programs/ron/taffy/ | marked final after the v0.4 review (blanking gate, chroma alignment, One Shot saturation, edge clamp): "I like the way this looks" |
+| 2026-09-28 | taffy | programs/ron/taffy/ | marked completed in the release audit: no open issues |
+| 2026-09-28 | titler | programs/ron/titler/ | "Titler seems good now" — v2.2.0 with P12 Crawl; marked completed in the release audit |
+| 2026-09-28 | ziffern | programs/ron/ziffern/ | v1.0.0 finalized ("Everything seems good, I'm happy with it"): blanking gate, legal black, vsync guard, balanced digits 1-9, Luma Pop/Burn presets; marked finished in the release audit |
+| 2026-09-28 | cga | programs/ron/cga/ | "These changes seem good" (v2.0: composite artifact colour, Mono 640, Ink, native 320x200 grid, Bayer dither on P12, snow, block-row scanlines) |
+| 2026-09-30 | drape | programs/ron/drape/ | v1.3 finalized in the release audit ("they are done"); presets still to be made by Ron |
+| 2026-09-30 | daedalus | programs/ron/daedalus/ | v1.0.0 finalized in the release audit ("they are done"); presets still to be made by Ron |
+| 2026-09-30 | cleave | programs/ron/cleave/ | v0.10.0 "Cleave looks good" — finalized except presets (v0.9 black-flip root-cause fix + K1 rework, v0.10 K5 Boil Rate / manual grain scrub) |
+| 2026-10-01 | cubist | programs/ron/cubist/ | v0.5.3 marked completed in the release audit |
+| 2026-10-02 | dvdlogo | programs/ron/dvdlogo/ | v1.0.0 "I like the way it looks and runs" — finalized except presets (v0.2 HW-contract fixes + P12 Speed + corner party, v0.3 K2 Size 0.5–3x / K1 Angle) |

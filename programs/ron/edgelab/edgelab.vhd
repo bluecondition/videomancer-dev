@@ -4,9 +4,10 @@
 -- image-cleanup chain you want in front of a detector (brightness, contrast,
 -- posterize, optional Gaussian smoothing), edge thickening, a not-edges
 -- negative, overlay and raw-gradient views.  Built to *compare* detectors:
--- flip K1 and nothing else changes.
+-- flip K6 and nothing else changes.
 --
--- Detectors (K1):
+-- Detectors (K6, default Morph; all normalized so a luma step of h reads
+-- about h, so one Sensitivity setting suits every detector):
 --   0 Roberts   2x2 cross difference          |a-d| + |b-c|
 --   1 Prewitt   3x3 box-derivative            [1 1 1] columns
 --   2 Sobel     3x3 smoothed derivative       [1 2 1] columns
@@ -25,27 +26,32 @@
 --   7 Canny     Sobel + gradient-direction quantize + non-maximum
 --               suppression + double threshold + causal hysteresis
 --               (weak edges survive next to an accepted left/upper edge).
---   8 Phosphor  1-D horizontal first difference |e(x) - e(x-1)|, the
---               phosphor program's detector (luma-only): orientation-blind,
---               sees only vertical edges.  Here for comparison.
+--   8 Morph     morphological gradient: 3x3 max - 3x3 min (dilate minus
+--               erode).  Thick, even, chalky outlines on both sides of
+--               every edge.
 --
 -- Cleanup / display:
---   K2 Threshold  binarize level (Canny: high; low = high/2)
+--   K2 Mix        dry/wet crossfade
 --   K3 Brightness pre-offset, +-512
 --   K4 Contrast   pre-gain 0..4x around mid-grey (unity at 25%)
 --   K5 Posterize  quantize luma to 128..2 levels before detection
---   K6 Thickness  dilate the edge map: 1px / 2x2 / 3x3 / 5x3
+--   K1 Thickness  dilate the edge map: 1 / 2 / 3 / 4 / 5 px squares
 --   S7 Smooth     3x3 Gaussian pre-blur feeding every 3x3 detector
 --                 (Laplace+Smooth is the classic separable LoG recipe)
 --   S8 Invert     negative: not-edges (black lines on white)
---   S9 View       Edges / Source (see exactly what the detector sees,
---                 for dialing in K3-K5 before flipping back)
+--   S9 Color      White / Compass: edges hued by gradient direction
+--                 (16-sector Sobel angle on a 360-degree hue wheel, so the
+--                 two sides of a bright line take opposite hues).  Invert
+--                 flips to the complementary hue.
 --   S10 Overlay   draw edges on top of the live picture instead of black
---   S11 Output    Binary / Gradient (raw magnitude as grayscale; Canny
---                 shows the post-NMS magnitude -- thinned ridges)
---   P12 Mix       dry/wet crossfade
+--   S11 Output    Binary / Gradient (raw magnitude as grayscale or hued;
+--                 Canny shows the post-NMS magnitude -- thinned ridges)
+--   P12 Sensitivity  live threshold, glided: up = more edges; 100% dissolves
+--                 the picture into dense edge grain (Canny low = high/2)
 --
--- Structure (all luma; chroma is neutral except overlay/mix):
+-- Video levels: black 64, white 940, gradient 64..924, blanking neutral.
+--
+-- Structure (all luma; chroma is neutral except overlay/mix/compass):
 --   S1-S4   preprocess: (y-512)*gain>>4 + bright, clamp, posterize -> 8 bit
 --   S5      4 chained line buffers -> 5x5 raw window + per-column sums
 --   S6-S8   LoG column pipeline; [1 2 1]^2 blurred 3x3; Smooth mux -> e-cols
@@ -55,16 +61,21 @@
 --   S16-S17 magnitude line buffers -> 3x3 mag window, NMS (Canny only,
 --           passthrough otherwise so every mode shares one latency)
 --   S18     threshold + hysteresis (accept-bit line buffer)
---   S19     thickness dilate (2-line packed bit buffer)
+--   S19     thickness dilate (4-line packed bit buffer, 5x5 window)
 --   S20     compose views; then interpolator_u dry/wet mix (4 clocks)
+--
+-- Compass hue runs on its own small Sobel over window rows 2..4 (one line
+-- below the displayed edge row, which is invisible for a hue) so it needs
+-- no direction line buffer; S7-S11 compute the 16-sector angle, then a
+-- valid-gated shift chain lines it up with the dilated output column.
 --
 -- All line buffers are canonical 1W1R single-process BRAMs, chained by
 -- rewriting each read value one buffer down (inferno lesson).  The dry-video
 -- delay for overlay/mix is a 32-deep EBR ring (2 EBR) instead of a 24-stage
--- 30-bit shift register (~700 LCs saved).  ~29 EBR total.
+-- 30-bit shift register (~700 LCs saved).  ~30 EBR total.
 --
--- The output is a fixed few pixels left / 3 lines up of the input (window
--- centering); constant, and invisible in practice.
+-- The edge layer is 4 lines above the input row (window centering); the
+-- dry ring is tapped 5 columns late so overlay/mix line up horizontally.
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -102,24 +113,54 @@ architecture edgelab of program_top is
         end if;
     end function;
 
+    -- Compass palette: 16 hues (HSV s=0.8 v=0.88), stored as offsets from
+    -- black: Y-64 & (U-512) & (V-512), U/V-swapped BT.601 for hardware.
+    -- Index 8 apart = complementary hue.
+    function f_pal(i : unsigned(3 downto 0)) return std_logic_vector is
+        variable y, u, v : integer;
+    begin
+        case to_integer(i) is
+            when  0 => y := 339; u :=  315; v := -106;
+            when  1 => y := 474; u :=  216; v := -185;
+            when  2 => y := 610; u :=  117; v := -263;
+            when  3 => y := 678; u :=   12; v := -302;
+            when  4 => y := 608; u := -106; v := -262;
+            when  5 => y := 539; u := -225; v := -222;
+            when  6 => y := 534; u := -277; v := -130;
+            when  7 => y := 560; u := -296; v :=  -12;
+            when  8 => y := 586; u := -315; v :=  106;
+            when  9 => y := 451; u := -216; v :=  185;
+            when 10 => y := 315; u := -117; v :=  263;
+            when 11 => y := 248; u :=  -12; v :=  302;
+            when 12 => y := 317; u :=  106; v :=  262;
+            when 13 => y := 386; u :=  225; v :=  222;
+            when 14 => y := 391; u :=  277; v :=  130;
+            when others => y := 365; u :=  296; v :=   12;
+        end case;
+        return std_logic_vector(to_unsigned(y, 10))
+             & std_logic_vector(to_signed(u, 10))
+             & std_logic_vector(to_signed(v, 10));
+    end function;
+
     ----------------------------------------------------------------------
     -- Line buffers (BRAM)
     ----------------------------------------------------------------------
     type t_lb8 is array (0 to 2047) of std_logic_vector(7 downto 0);
     type t_lb2 is array (0 to 2047) of std_logic_vector(1 downto 0);
+    type t_lb4 is array (0 to 2047) of std_logic_vector(3 downto 0);
     type t_lb1 is array (0 to 2047) of std_logic_vector(0 downto 0);
 
     signal lb1, lb2, lb3, lb4 : t_lb8 := (others => (others => '0'));  -- luma
     signal mb1, mb2           : t_lb8 := (others => (others => '0'));  -- mag
     signal db1                : t_lb2 := (others => (others => '0'));  -- dir
     signal ab1                : t_lb1 := (others => (others => '0'));  -- accept
-    signal dd1                : t_lb2 := (others => (others => '0'));  -- dilate
+    signal dd1                : t_lb4 := (others => (others => '0'));  -- dilate
 
     signal q1, q2, q3, q4 : std_logic_vector(7 downto 0) := (others => '0');
     signal mq1, mq2       : std_logic_vector(7 downto 0) := (others => '0');
     signal dq             : std_logic_vector(1 downto 0) := (others => '0');
     signal aq             : std_logic_vector(0 downto 0) := (others => '0');
-    signal ddq            : std_logic_vector(1 downto 0) := (others => '0');
+    signal ddq            : std_logic_vector(3 downto 0) := (others => '0');
 
     -- Dry video delay ring (overlay + mix): 32 x 30 EBR
     type t_ring is array (0 to 31) of std_logic_vector(29 downto 0);
@@ -142,8 +183,9 @@ architecture edgelab of program_top is
     signal obx      : unsigned(10 downto 0) := (others => '0');  -- guard @S19
 
     signal s_prev_hsync_n, s_prev_vsync_n : std_logic := '1';
-    signal s_aline : unsigned(9 downto 0) := (others => '0');
+    signal s_aline : unsigned(10 downto 0) := (others => '0');  -- 1080 rows
     signal s_seen  : std_logic := '0';
+    signal s_fseen : std_logic := '0';   -- saw active video this field
 
     ----------------------------------------------------------------------
     -- Frame-latched controls
@@ -155,12 +197,18 @@ architecture edgelab of program_top is
     signal s_glo    : unsigned(2 downto 0) := "000";
     signal s_ghi    : unsigned(2 downto 0) := "010";
     signal s_pmask  : std_logic_vector(9 downto 0) := (others => '1');
-    signal s_thick  : unsigned(1 downto 0) := (others => '0');
+    signal s_thick  : unsigned(2 downto 0) := (others => '0');
     signal s_smooth : std_logic := '0';
     signal s_inv    : std_logic := '0';
-    signal s_view   : std_logic := '0';
+    signal s_col    : std_logic := '0';
     signal s_ovl    : std_logic := '0';
     signal s_gview  : std_logic := '0';
+
+    -- P12 Sensitivity glide (10.3 fixed point, eased once per field)
+    signal s_p12   : unsigned(9 downto 0) := (others => '0');
+    signal s_gacc  : unsigned(12 downto 0) := to_unsigned(768 * 8, 13);
+    signal s_gstep : signed(13 downto 0) := (others => '0');
+    signal s_sv    : unsigned(7 downto 0) := (others => '0');
 
     ----------------------------------------------------------------------
     -- S1-S4 preprocess
@@ -180,6 +228,23 @@ architecture edgelab of program_top is
 
     signal a5_ga, a5_gb, a5_gc : unsigned(9 downto 0) := (others => '0');
     signal a5_ldn : unsigned(11 downto 0) := (others => '0');
+
+    -- Compass hue: Sobel over raw window rows 2..4 (center row 3)
+    signal a5_hdy, hd1, hd2 : signed(8 downto 0) := (others => '0');
+    signal h_gx, h_gy       : signed(10 downto 0) := (others => '0');
+    signal h_ax, h_ay       : unsigned(10 downto 0) := (others => '0');
+    signal h_a, h_b         : unsigned(10 downto 0) := (others => '0');
+    signal h_sx1, h_sy1, h_sx2, h_sy2, h_sx3, h_sy3 : std_logic := '0';
+    signal h_sw2, h_sw3     : std_logic := '0';
+    signal h_na, h_nd       : std_logic := '0';
+    type t_hsr is array (0 to 11) of unsigned(3 downto 0);
+    signal hsr : t_hsr := (others => (others => '0'));
+    signal pal_dy           : unsigned(9 downto 0) := (others => '0');
+    signal pal_du, pal_dv   : signed(9 downto 0) := (others => '0');
+    signal pf_y, pf_u, pf_v : unsigned(9 downto 0) := (others => '0');
+    signal pr_y             : unsigned(9 downto 0) := (others => '0');
+    signal pr_u, pr_v       : signed(9 downto 0) := (others => '0');
+    signal g_y              : unsigned(9 downto 0) := (others => '0');
 
     ----------------------------------------------------------------------
     -- S6-S8 LoG / blur / e-columns
@@ -217,7 +282,13 @@ architecture edgelab of program_top is
     signal a10_gxs, a10_gys : signed(11 downto 0) := (others => '0');
     signal a10_gxc, a10_gyc : signed(12 downto 0) := (others => '0');
     signal a10_r1, a10_r2   : unsigned(7 downto 0) := (others => '0');
-    signal a10_ph           : unsigned(7 downto 0) := (others => '0');
+    -- Morph: column max/min of the effective 3 rows, then 3-column tree
+    signal a9_m02, a9_n02   : unsigned(7 downto 0) := (others => '0');
+    signal a10_cmx, a10_cmn : unsigned(7 downto 0) := (others => '0');
+    signal cmx1, cmx2, cmn1, cmn2 : unsigned(7 downto 0) := (others => '0');
+    signal a11_pmx, a11_pmn, a11_c2x, a11_c2n : unsigned(7 downto 0) := (others => '0');
+    signal a12_mx, a12_mn   : unsigned(7 downto 0) := (others => '0');
+    signal a13_mor, mor_d   : unsigned(7 downto 0) := (others => '0');
     signal a10_t9  : unsigned(11 downto 0) := (others => '0');
     signal a10_l9c : unsigned(11 downto 0) := (others => '0');
     signal a10_cen : unsigned(7 downto 0) := (others => '0');
@@ -231,8 +302,6 @@ architecture edgelab of program_top is
     signal a11_ms  : unsigned(11 downto 0) := (others => '0');
     signal a11_mc  : unsigned(12 downto 0) := (others => '0');
     signal a11_rob : unsigned(8 downto 0) := (others => '0');
-    signal a11_ph  : unsigned(7 downto 0) := (others => '0');
-    signal ph_d1, ph_d2, ph_d3 : unsigned(7 downto 0) := (others => '0');
     signal a11_lap : unsigned(11 downto 0) := (others => '0');
     signal a11_t3  : unsigned(12 downto 0) := (others => '0');
     signal a11_ax, a11_ay : unsigned(11 downto 0) := (others => '0');
@@ -275,17 +344,15 @@ architecture edgelab of program_top is
     signal leftacc : std_logic := '0';
     signal aw1, aw2 : std_logic := '0';
 
-    signal ddqr : std_logic_vector(1 downto 0) := (others => '0');
+    signal ddqr : std_logic_vector(3 downto 0) := (others => '0');
     signal hb : std_logic_vector(0 to 3) := (others => '0');
-    signal v1, v2 : std_logic_vector(0 to 4) := (others => '0');
+    signal v1, v2, v3, v4 : std_logic_vector(0 to 4) := (others => '0');
     signal a19_bit : std_logic := '0';
-    signal mg_0, mg_1, mg_2 : unsigned(7 downto 0) := (others => '0');
+    signal mg_0, mg_1 : unsigned(7 downto 0) := (others => '0');
 
     ----------------------------------------------------------------------
-    -- S20 compose + source-view delay
+    -- S20 compose
     ----------------------------------------------------------------------
-    type t_src is array (0 to 10) of unsigned(7 downto 0);
-    signal srcd : t_src := (others => (others => '0'));
     signal a20_y, a20_u, a20_v : unsigned(C_DW - 1 downto 0) := (others => '0');
 
     ----------------------------------------------------------------------
@@ -304,7 +371,7 @@ architecture edgelab of program_top is
 
 begin
 
-    s_mix_t <= unsigned(registers_in(7));
+    s_mix_t <= unsigned(registers_in(1));   -- K2 Mix
 
     ----------------------------------------------------------------------
     -- Main pipeline
@@ -327,9 +394,19 @@ begin
         variable v_keep  : std_logic;
         variable v_str, v_wk, v_acc : std_logic;
         variable v_bit   : std_logic;
-        variable v_mag   : unsigned(7 downto 0);
         variable v_g6    : unsigned(5 downto 0);
         variable v_k1    : unsigned(9 downto 0);
+        variable v_p3    : unsigned(2 downto 0);
+        variable v_hf    : unsigned(2 downto 0);
+        variable v_hq    : unsigned(4 downto 0);
+        variable v_hs    : unsigned(4 downto 0);
+        variable v_b5, v_b3 : unsigned(13 downto 0);
+        variable v_gm    : unsigned(7 downto 0);
+        variable v_gl    : unsigned(10 downto 0);
+        variable v_pal   : std_logic_vector(29 downto 0);
+        variable v_ga    : signed(13 downto 0);
+        variable v_sy    : unsigned(9 downto 0);
+        variable v_su, v_sv : signed(9 downto 0);
     begin
         if rising_edge(clk) then
             s_prev_hsync_n <= data_in.hsync_n;
@@ -341,7 +418,8 @@ begin
                 av(i) <= av(i - 1);
             end loop;
             if data_in.avid = '1' then
-                s_seen <= '1';
+                s_seen  <= '1';
+                s_fseen <= '1';
             end if;
 
             ------------------------------------------------------------------
@@ -413,6 +491,8 @@ begin
                 v_p13 := resize(v_wc(1), 10) + resize(v_wc(3), 10);
                 v_p2  := resize(v_wc(0), 9) + resize(v_wc(4), 9);
                 a5_ldn <= resize(v_p2, 12) + shift_left(resize(v_p13, 12), 1);
+                -- compass hue column term: row 2 (lower) - row 4 (upper)
+                a5_hdy <= signed(resize(v_wc(2), 9)) - signed(resize(v_wc(4), 9));
 
                 lwx <= lwx + 1;
             end if;
@@ -426,6 +506,7 @@ begin
                 g1c <= a5_gb;  g2c <= g1c;  g3c <= g2c;  g4c <= g3c;
                 t1c <= a5_ga;  t2c <= t1c;
                 b1c <= a5_gc;  b2c <= b1c;
+                hd1 <= a5_hdy; hd2 <= hd1;
             end if;
 
             ------------------------------------------------------------------
@@ -446,6 +527,11 @@ begin
                 a7_bb <= resize(shift_right(resize(b2c, 12)
                          + shift_left(resize(b1c, 12), 1)
                          + resize(a5_gc, 12), 4), 8);
+                -- compass Sobel, centered on this stage's column (b1c):
+                -- gx = right - left, gy = lower - upper ([1 2 1] across)
+                h_gx <= signed(resize(a5_gc, 11)) - signed(resize(b2c, 11));
+                h_gy <= resize(a5_hdy, 11) + shift_left(resize(hd1, 11), 1)
+                        + resize(hd2, 11);
             end if;
 
             ------------------------------------------------------------------
@@ -454,6 +540,11 @@ begin
             ------------------------------------------------------------------
             if av(7) = '1' then
                 a8_log <= a7_lp - signed(resize(a7_ws, 15));
+                -- compass: magnitudes + signs
+                h_ax  <= f_absu(h_gx);
+                h_ay  <= f_absu(h_gy);
+                h_sx1 <= h_gx(10);
+                h_sy1 <= h_gy(10);
                 if s_smooth = '1' then
                     a8_e0 <= a7_bt;
                     a8_e1 <= a7_bm;
@@ -484,10 +575,20 @@ begin
                 ec0(0) <= a8_e0;  ec0(1) <= a8_e1;  ec0(2) <= a8_e2;
                 ec1 <= ec0;
                 ec2 <= ec1;
-                srcd(0) <= a8_e1;
-                for i in 1 to 10 loop
-                    srcd(i) <= srcd(i - 1);
-                end loop;
+                -- Morph: max/min of the outer pair (one shared compare)
+                if a8_e0 > a8_e2 then
+                    a9_m02 <= a8_e0;  a9_n02 <= a8_e2;
+                else
+                    a9_m02 <= a8_e2;  a9_n02 <= a8_e0;
+                end if;
+                -- compass: fold to the first octant
+                if h_ay > h_ax then
+                    h_sw2 <= '1';  h_a <= h_ay;  h_b <= h_ax;
+                else
+                    h_sw2 <= '0';  h_a <= h_ax;  h_b <= h_ay;
+                end if;
+                h_sx2 <= h_sx1;
+                h_sy2 <= h_sy1;
             end if;
 
             ------------------------------------------------------------------
@@ -511,9 +612,34 @@ begin
                                  - signed(resize(ec0(1), 9)))(7 downto 0);
                 a10_r2 <= f_absu(signed(resize(ec0(0), 9))
                                  - signed(resize(ec1(1), 9)))(7 downto 0);
-                -- Phosphor: adjacent horizontal difference, center row
-                a10_ph <= f_absu(signed(resize(ec0(1), 9))
-                                 - signed(resize(ec1(1), 9)))(7 downto 0);
+                -- Morph: finish this column's max/min with the center row
+                if ec0(1) > a9_m02 then
+                    a10_cmx <= ec0(1);
+                else
+                    a10_cmx <= a9_m02;
+                end if;
+                if ec0(1) < a9_n02 then
+                    a10_cmn <= ec0(1);
+                else
+                    a10_cmn <= a9_n02;
+                end if;
+                -- compass: sector boundaries at tan 11.25 (~1/5) and
+                -- tan 33.75 (~2/3) inside the folded octant
+                v_b5 := shift_left(resize(h_b, 14), 2) + resize(h_b, 14);
+                v_b3 := shift_left(resize(h_b, 14), 1) + resize(h_b, 14);
+                if v_b5 < resize(h_a, 14) then
+                    h_na <= '1';
+                else
+                    h_na <= '0';
+                end if;
+                if v_b3 > shift_left(resize(h_a, 14), 1) then
+                    h_nd <= '1';
+                else
+                    h_nd <= '0';
+                end if;
+                h_sw3 <= h_sw2;
+                h_sx3 <= h_sx2;
+                h_sy3 <= h_sy2;
                 -- Laplace: 9*center vs 3x3 total
                 v_tot9 := resize(a9_sp, 12) + sp1 + sp2;
                 a10_t9  <= v_tot9;
@@ -543,7 +669,48 @@ begin
                 a11_ms  <= resize(f_absu(a10_gxs), 12) + f_absu(a10_gys);
                 a11_mc  <= resize(f_absu(a10_gxc), 13) + f_absu(a10_gyc);
                 a11_rob <= resize(a10_r1, 9) + a10_r2;
-                a11_ph  <= a10_ph;
+                -- Morph: 3-column max/min tree, level 1
+                if a10_cmx > cmx1 then
+                    a11_pmx <= a10_cmx;
+                else
+                    a11_pmx <= cmx1;
+                end if;
+                if a10_cmn < cmn1 then
+                    a11_pmn <= a10_cmn;
+                else
+                    a11_pmn <= cmn1;
+                end if;
+                a11_c2x <= cmx2;
+                a11_c2n <= cmn2;
+                cmx1 <= a10_cmx;  cmx2 <= cmx1;
+                cmn1 <= a10_cmn;  cmn2 <= cmn1;
+                -- compass: 16-sector angle, 0 = +x, counting toward +y
+                -- (screen down); f = 0 near axis, 1 mid, 2 near diagonal
+                if h_na = '1' then
+                    v_hf := "000";
+                elsif h_nd = '1' then
+                    v_hf := "010";
+                else
+                    v_hf := "001";
+                end if;
+                if h_sw3 = '1' then
+                    v_hq := to_unsigned(4, 5) - resize(v_hf, 5);
+                else
+                    v_hq := resize(v_hf, 5);
+                end if;
+                if h_sx3 = '0' and h_sy3 = '0' then
+                    v_hs := v_hq;
+                elsif h_sx3 = '1' and h_sy3 = '0' then
+                    v_hs := to_unsigned(8, 5) - v_hq;
+                elsif h_sx3 = '1' then
+                    v_hs := to_unsigned(8, 5) + v_hq;
+                else
+                    v_hs := to_unsigned(16, 5) - v_hq;
+                end if;
+                hsr(0) <= v_hs(3 downto 0);
+                for i in 1 to 11 loop
+                    hsr(i) <= hsr(i - 1);
+                end loop;
                 a11_lap <= f_absu(signed(resize(a10_l9c, 13))
                                   - signed(resize(a10_t9, 13)))(11 downto 0);
                 v_t := a10_t9 - a10_cen;                       -- ring sum T
@@ -593,7 +760,17 @@ begin
                 t3d1 <= a11_t3;
                 mp_d1 <= a11_mp;  ms_d1 <= a11_ms;  mc_d1 <= a11_mc;
                 rob_d1 <= a11_rob;  lap_d1 <= a11_lap;  log_d1 <= log_a;
-                ph_d1 <= a11_ph;
+                -- Morph level 2
+                if a11_pmx > a11_c2x then
+                    a12_mx <= a11_pmx;
+                else
+                    a12_mx <= a11_c2x;
+                end if;
+                if a11_pmn < a11_c2n then
+                    a12_mn <= a11_pmn;
+                else
+                    a12_mn <= a11_c2n;
+                end if;
             end if;
 
             ------------------------------------------------------------------
@@ -614,7 +791,7 @@ begin
                 dir_d1 <= a12_dir;
                 mp_d2 <= mp_d1;  ms_d2 <= ms_d1;  mc_d2 <= mc_d1;
                 rob_d2 <= rob_d1;  lap_d2 <= lap_d1;  log_d2 <= log_d1;
-                ph_d2 <= ph_d1;
+                a13_mor <= a12_mx - a12_mn;
             end if;
 
             ------------------------------------------------------------------
@@ -633,7 +810,7 @@ begin
                 dir_d2 <= dir_d1;
                 mp_d3 <= mp_d2;  ms_d3 <= ms_d2;  mc_d3 <= mc_d2;
                 rob_d3 <= rob_d2;  lap_d3 <= lap_d2;  log_d3 <= log_d2;
-                ph_d3 <= ph_d2;
+                mor_d <= a13_mor;
                 mrx <= mrx + 1;   -- mag-window reads presented this cycle
             end if;
 
@@ -643,14 +820,14 @@ begin
             if av(14) = '1' then
                 case to_integer(s_mode) is
                     when 0      => v_m := f_c255(shift_right(resize(rob_d3, 9), 1));
-                    when 1      => v_m := f_c255(shift_right(mp_d3, 2));
-                    when 2      => v_m := f_c255(shift_right(ms_d3, 3));
-                    when 3      => v_m := f_c255(shift_right(mc_d3, 5));
+                    when 1      => v_m := f_c255(shift_right(mp_d3, 1));
+                    when 2      => v_m := f_c255(shift_right(ms_d3, 2));
+                    when 3      => v_m := f_c255(shift_right(mc_d3, 4));
                     when 4      => v_m := f_c255(shift_right(a14_kir, 4));
-                    when 5      => v_m := f_c255(shift_right(lap_d3, 3));
-                    when 6      => v_m := f_c255(shift_right(log_d3, 4));
-                    when 8      => v_m := ph_d3;
-                    when others => v_m := f_c255(shift_right(ms_d3, 3));
+                    when 5      => v_m := f_c255(shift_right(lap_d3, 2));
+                    when 6      => v_m := f_c255(shift_right(log_d3, 2));
+                    when 8      => v_m := mor_d;
+                    when others => v_m := f_c255(shift_right(ms_d3, 2));
                 end case;
                 -- blank warm-up lines (window straddles previous frame) and
                 -- left columns (shift chains carry the previous line's tail)
@@ -687,10 +864,12 @@ begin
                         v_na := mr1(0);  v_nb := mr1(2);
                     when 2 =>      -- vertical gradient: up/down
                         v_na := mr2(1);  v_nb := mr0(1);
-                    when 3 =>      -- gx,gy opposite signs: DR / UL
+                    -- gx = right-left, gy = lower-upper, so same signs
+                    -- point down-right (v1.0 had the diagonals swapped)
+                    when 3 =>      -- gx,gy opposite signs: UR / DL
+                        v_na := mr2(0);  v_nb := mr0(2);
+                    when others => -- same signs: DR / UL
                         v_na := mr0(0);  v_nb := mr2(2);
-                    when others => -- same signs: DL / UR
-                        v_na := mr0(2);  v_nb := mr2(0);
                 end case;
                 v_keep := '0';
                 if mr1(1) >= v_na and mr1(1) > v_nb then
@@ -725,7 +904,13 @@ begin
                 end if;
                 a18_bit <= v_acc;
                 leftacc <= v_acc;
-                a18_mag <= a17_mag;
+                -- gradient view shows strength only where the threshold
+                -- passes, so Sensitivity stays live in every view
+                if v_str = '1' then
+                    a18_mag <= a17_mag;
+                else
+                    a18_mag <= (others => '0');
+                end if;
                 abw <= abw + 1;
                 gbx <= gbx + 1;
             end if;
@@ -739,8 +924,9 @@ begin
             end if;
 
             ------------------------------------------------------------------
-            -- S19: thickness dilate over a 5x3 bit window
-            -- rows: current (a18_bit + hb), v1 = line-1 (center), v2 = line-2
+            -- S19: thickness dilate over a 5x5 bit window
+            -- rows: current (a18_bit + hb), v1 = line-1 (1 px center),
+            -- v2..v4 = lines -2..-4; hb(k) sits in column k+1 of the v rows
             ------------------------------------------------------------------
             if av(17) = '1' then
                 ddqr <= ddq;
@@ -750,11 +936,15 @@ begin
                 for i in 1 to 3 loop
                     hb(i) <= hb(i - 1);
                 end loop;
-                v1(0) <= ddqr(1);
-                v2(0) <= ddqr(0);
+                v1(0) <= ddqr(3);
+                v2(0) <= ddqr(2);
+                v3(0) <= ddqr(1);
+                v4(0) <= ddqr(0);
                 for i in 1 to 4 loop
                     v1(i) <= v1(i - 1);
                     v2(i) <= v2(i - 1);
+                    v3(i) <= v3(i - 1);
+                    v4(i) <= v4(i - 1);
                 end loop;
                 case to_integer(s_thick) is
                     when 0 =>
@@ -765,10 +955,17 @@ begin
                         v_bit := hb(0) or hb(1) or hb(2)
                               or v1(1) or v1(2) or v1(3)
                               or v2(1) or v2(2) or v2(3);
-                    when others =>
+                    when 3 =>      -- 4x4
+                        v_bit := a18_bit or hb(0) or hb(1) or hb(2)
+                              or v1(0) or v1(1) or v1(2) or v1(3)
+                              or v2(0) or v2(1) or v2(2) or v2(3)
+                              or v3(0) or v3(1) or v3(2) or v3(3);
+                    when others => -- 5x5
                         v_bit := a18_bit or hb(0) or hb(1) or hb(2) or hb(3)
                               or v1(0) or v1(1) or v1(2) or v1(3) or v1(4)
-                              or v2(0) or v2(1) or v2(2) or v2(3) or v2(4);
+                              or v2(0) or v2(1) or v2(2) or v2(3) or v2(4)
+                              or v3(0) or v3(1) or v3(2) or v3(3) or v3(4)
+                              or v4(0) or v4(1) or v4(2) or v4(3) or v4(4);
                 end case;
                 if obx < 20 then
                     v_bit := '0';
@@ -776,51 +973,95 @@ begin
                 a19_bit <= v_bit;
                 mg_0 <= a18_mag;
                 mg_1 <= mg_0;
-                mg_2 <= mg_1;
                 dwx <= dwx + 1;
                 obx <= obx + 1;
+                -- gradient level (inverted = not-edges); grey ramp 64..924
+                -- and the compass colour scaled by its top 3 bits (8 steps
+                -- of shift-add: three soft multipliers cost 570 LUTs)
+                if s_inv = '1' then
+                    v_gm := not mg_1;
+                else
+                    v_gm := mg_1;
+                end if;
+                v_gl := shift_left(resize(v_gm, 11), 2)
+                        - resize(shift_right(v_gm, 1), 11)
+                        - resize(shift_right(v_gm, 3), 11) + 64;
+                g_y  <= v_gl(9 downto 0);
+                v_sy := (others => '0');
+                v_su := (others => '0');
+                v_sv := (others => '0');
+                if v_gm(7) = '1' then
+                    v_sy := shift_right(pal_dy, 1);
+                    v_su := shift_right(pal_du, 1);
+                    v_sv := shift_right(pal_dv, 1);
+                end if;
+                if v_gm(6) = '1' then
+                    v_sy := v_sy + shift_right(pal_dy, 2);
+                    v_su := v_su + shift_right(pal_du, 2);
+                    v_sv := v_sv + shift_right(pal_dv, 2);
+                end if;
+                if v_gm(5) = '1' then
+                    v_sy := v_sy + shift_right(pal_dy, 3);
+                    v_su := v_su + shift_right(pal_du, 3);
+                    v_sv := v_sv + shift_right(pal_dv, 3);
+                end if;
+                pr_y <= v_sy;
+                pr_u <= v_su;
+                pr_v <= v_sv;
+                pf_y <= pal_dy + 64;
+                pf_u <= unsigned(pal_du) + 512;
+                pf_v <= unsigned(pal_dv) + 512;
             end if;
 
             ------------------------------------------------------------------
-            -- S20: compose the wet pixel
+            -- S18 (side): compass palette for the column composed at S20;
+            -- hsr(11) is the hue 5 columns behind this token (= the dilated
+            -- output column).  Invert rotates to the complementary hue.
+            ------------------------------------------------------------------
+            if av(17) = '1' then
+                v_pal  := f_pal(hsr(11) xor (s_inv & "000"));
+                pal_dy <= unsigned(v_pal(29 downto 20));
+                pal_du <= signed(v_pal(19 downto 10));
+                pal_dv <= signed(v_pal(9 downto 0));
+            end if;
+
+            ------------------------------------------------------------------
+            -- S20: compose the wet pixel; neutral black outside active video
             ------------------------------------------------------------------
             if av(19) = '1' then
-                v_mag := mg_2;
-                if s_inv = '1' then
-                    v_mag := 255 - v_mag;
-                end if;
                 v_bit := a19_bit xor s_inv;
-                if s_view = '1' then                     -- Source view
-                    a20_y <= srcd(10) & "00";
-                    a20_u <= to_unsigned(512, C_DW);
-                    a20_v <= to_unsigned(512, C_DW);
-                elsif s_gview = '1' then                 -- Gradient view
-                    a20_y <= v_mag & "00";
-                    a20_u <= to_unsigned(512, C_DW);
-                    a20_v <= to_unsigned(512, C_DW);
-                elsif s_ovl = '1' then                   -- Overlay
-                    if a19_bit = '1' then
-                        if s_inv = '1' then
-                            a20_y <= (others => '0');
-                        else
-                            a20_y <= (others => '1');
-                        end if;
+                if s_gview = '1' then                    -- Gradient view
+                    if s_col = '1' then
+                        a20_y <= pr_y + 64;
+                        a20_u <= unsigned(pr_u) + 512;
+                        a20_v <= unsigned(pr_v) + 512;
+                    else
+                        a20_y <= g_y;
                         a20_u <= to_unsigned(512, C_DW);
                         a20_v <= to_unsigned(512, C_DW);
-                    else
-                        a20_y <= unsigned(vr_q(29 downto 20));
-                        a20_u <= unsigned(vr_q(19 downto 10));
-                        a20_v <= unsigned(vr_q(9 downto 0));
                     end if;
-                else                                     -- Binary edges
-                    if v_bit = '1' then
-                        a20_y <= (others => '1');
+                elsif a19_bit = '1' and s_col = '1' then -- compass edge
+                    a20_y <= pf_y;
+                    a20_u <= pf_u;
+                    a20_v <= pf_v;
+                elsif s_ovl = '1' and a19_bit = '0' then -- overlay ground
+                    a20_y <= unsigned(vr_q(29 downto 20));
+                    a20_u <= unsigned(vr_q(19 downto 10));
+                    a20_v <= unsigned(vr_q(9 downto 0));
+                else                                     -- white / black
+                    if (s_ovl = '0' and v_bit = '1')
+                       or (s_ovl = '1' and s_inv = '0') then
+                        a20_y <= to_unsigned(940, C_DW);
                     else
-                        a20_y <= (others => '0');
+                        a20_y <= to_unsigned(64, C_DW);
                     end if;
                     a20_u <= to_unsigned(512, C_DW);
                     a20_v <= to_unsigned(512, C_DW);
                 end if;
+            else
+                a20_y <= to_unsigned(64, C_DW);
+                a20_u <= to_unsigned(512, C_DW);
+                a20_v <= to_unsigned(512, C_DW);
             end if;
 
             ------------------------------------------------------------------
@@ -849,9 +1090,16 @@ begin
                 s_aline <= (others => '0');
                 s_seen  <= '0';
 
-                -- latch controls once per frame; K1 has 9 zones (1024/9)
-                v_k1 := unsigned(registers_in(0));
-                if    v_k1 < 114 then s_mode <= to_unsigned(0, 4);
+                -- latch controls once per frame; K6 Detector has 9 zones
+                -- (1024/9), K1 Thickness 5 (1024/5), K5 Posterize 8.
+                -- Labelled defaults: at program load the firmware writes the
+                -- initial_value_label's INDEX (0..N-1) into the register, not
+                -- a 0..1023 position (HW-measured 2026-10-02), so a value
+                -- below the label count is taken as the label index itself.
+                v_k1 := unsigned(registers_in(5));
+                if v_k1 < 9 then
+                    s_mode <= v_k1(3 downto 0);
+                elsif v_k1 < 114 then s_mode <= to_unsigned(0, 4);
                 elsif v_k1 < 228 then s_mode <= to_unsigned(1, 4);
                 elsif v_k1 < 341 then s_mode <= to_unsigned(2, 4);
                 elsif v_k1 < 455 then s_mode <= to_unsigned(3, 4);
@@ -861,14 +1109,25 @@ begin
                 elsif v_k1 < 910 then s_mode <= to_unsigned(7, 4);
                 else                  s_mode <= to_unsigned(8, 4);
                 end if;
-                s_thr   <= unsigned(registers_in(1)(9 downto 2));
-                s_thrlo <= unsigned('0' & registers_in(1)(9 downto 3));
+                -- P12 glide: ease 1/8 of the way once per field (the
+                -- saw-active guard keeps serrated vsync to one step)
+                if s_fseen = '1' then
+                    s_fseen <= '0';
+                    v_ga    := signed(resize(s_gacc, 14)) + s_gstep;
+                    s_gacc  <= unsigned(v_ga(12 downto 0));
+                end if;
                 s_base <= to_signed(512, 12)
                           + (signed(resize(unsigned(registers_in(2)), 12)) - 512);
                 v_g6  := unsigned(registers_in(3)(9 downto 4));
                 s_glo <= v_g6(2 downto 0);
                 s_ghi <= v_g6(5 downto 3);
-                case to_integer(unsigned(registers_in(4)(9 downto 7))) is
+                v_k1 := unsigned(registers_in(4));
+                if v_k1 < 8 then
+                    v_p3 := v_k1(2 downto 0);
+                else
+                    v_p3 := v_k1(9 downto 7);
+                end if;
+                case to_integer(v_p3) is
                     when 0      => s_pmask <= "1111111111";
                     when 1      => s_pmask <= "1111111000";
                     when 2      => s_pmask <= "1111110000";
@@ -878,13 +1137,33 @@ begin
                     when 6      => s_pmask <= "1100000000";
                     when others => s_pmask <= "1000000000";
                 end case;
-                s_thick  <= unsigned(registers_in(5)(9 downto 8));
+                v_k1 := unsigned(registers_in(0));
+                if v_k1 < 5 then
+                    s_thick <= v_k1(2 downto 0);
+                elsif v_k1 < 205 then s_thick <= to_unsigned(0, 3);
+                elsif v_k1 < 410 then s_thick <= to_unsigned(1, 3);
+                elsif v_k1 < 614 then s_thick <= to_unsigned(2, 3);
+                elsif v_k1 < 819 then s_thick <= to_unsigned(3, 3);
+                else                  s_thick <= to_unsigned(4, 3);
+                end if;
                 s_smooth <= registers_in(6)(0);
                 s_inv    <= registers_in(6)(1);
-                s_view   <= registers_in(6)(2);
+                s_col    <= registers_in(6)(2);
                 s_ovl    <= registers_in(6)(3);
                 s_gview  <= registers_in(6)(4);
             end if;
+
+            ------------------------------------------------------------------
+            -- Sensitivity -> threshold, free-running and registered (out of
+            -- the vsync cone): thr = 240 - s*15/16, so 0% still shows the
+            -- strongest edges and 100% (thr 1) floods the frame.
+            ------------------------------------------------------------------
+            s_p12   <= unsigned(registers_in(7));
+            s_gstep <= shift_right(signed(shift_left(resize(s_p12, 14), 3))
+                                   - signed(resize(s_gacc, 14)), 3);
+            s_sv    <= s_gacc(12 downto 5) - shift_right(s_gacc(12 downto 5), 4);
+            s_thr   <= to_unsigned(240, 8) - s_sv;
+            s_thrlo <= '0' & s_thr(7 downto 1);
 
             ------------------------------------------------------------------
             -- Sync delay chain
@@ -993,26 +1272,27 @@ begin
     end process p_ab1;
 
     ----------------------------------------------------------------------
-    -- Dilate bit buffer: 2 lines packed (bit 1 = line-1, bit 0 = line-2)
+    -- Dilate bit buffer: 4 lines packed (bit 3 = line-1 ... bit 0 = line-4)
     ----------------------------------------------------------------------
     p_dd1 : process(clk)
     begin
         if rising_edge(clk) then
             ddq <= dd1(to_integer(drx));
             if av(18) = '1' then
-                dd1(to_integer(dwx)) <= a18_bit & v1(0);
+                dd1(to_integer(dwx)) <= a18_bit & v1(0) & v2(0) & v3(0);
             end if;
         end if;
     end process p_dd1;
 
     ----------------------------------------------------------------------
-    -- Dry video delay ring: tap 20 clocks (compose) and 21 (mix dry leg)
+    -- Dry video delay ring: 24 clocks at compose, 25 at the mix dry leg
+    -- (5 columns behind the wet token = the dilated edge column)
     ----------------------------------------------------------------------
     p_ring : process(clk)
     begin
         if rising_edge(clk) then
             vring(to_integer(vr_wp)) <= data_in.y & data_in.u & data_in.v;
-            vr_q  <= vring(to_integer(vr_wp - 18));
+            vr_q  <= vring(to_integer(vr_wp - 23));  -- +5: edge-layer column
             vr_q2 <= vr_q;
             vr_wp <= vr_wp + 1;
         end if;

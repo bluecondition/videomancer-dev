@@ -12,7 +12,7 @@
 
 [program]
 program_id = "com.bluecondition.clacker"
-program_version = "0.2.1"
+program_version = "0.3.0"
 abi_version = ">=1.0,<2.0"
 program_name = "Clacker"
 author = "bluecondition"
@@ -31,7 +31,7 @@ parameter_id = "rotary_potentiometer_1"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 380
+initial_value = 48
 display_min_value = 34
 display_max_value = 162
 name_label = "Disc Size"
@@ -42,7 +42,7 @@ parameter_id = "rotary_potentiometer_2"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 1023
+initial_value = 219
 display_min_value = 2
 display_max_value = 16
 name_label = "Levels"
@@ -53,9 +53,9 @@ parameter_id = "rotary_potentiometer_3"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 760
-display_min_value = 25
-display_max_value = 56
+initial_value = 819
+display_min_value = 50
+display_max_value = 100
 name_label = "Fill"
 suffix_label = "%"
 
@@ -64,7 +64,7 @@ parameter_id = "rotary_potentiometer_4"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 1023
+initial_value = 512
 display_min_value = 0
 display_max_value = 100
 name_label = "Refresh"
@@ -75,10 +75,10 @@ parameter_id = "rotary_potentiometer_5"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 700
+initial_value = 0
 display_min_value = 0
 display_max_value = 100
-name_label = "Tilt Shade"
+name_label = "Tilt"
 suffix_label = "%"
 
 [[parameter]]
@@ -86,9 +86,9 @@ parameter_id = "rotary_potentiometer_6"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 400
+initial_value = 440
 display_min_value = 75
-display_max_value = 270
+display_max_value = 273
 name_label = "Chroma"
 suffix_label = "%"
 
@@ -138,15 +138,17 @@ name_label = "Clack"
 suffix_label = "%"
 
 # --- Presets ---
+# K3 Fill = disc diameter as % of the cell (100% = just touching).
+# K4 Refresh: full-wall sweep time 0 = 1 s, 50% = 7.5 frames, top = every frame.
 
 [[preset]]
 name = "Departures"
-rotary_potentiometer_1 = 380      # ~81 px discs
-rotary_potentiometer_2 = 1023     # 16 colour levels
-rotary_potentiometer_3 = 760      # discs nearly touching
-rotary_potentiometer_4 = 1023     # every row, every frame
-rotary_potentiometer_5 = 700
-rotary_potentiometer_6 = 400
+rotary_potentiometer_1 = 48       # 40 px discs
+rotary_potentiometer_2 = 219      # 5 levels
+rotary_potentiometer_3 = 819      # 90% fill
+rotary_potentiometer_4 = 512      # wave: a wall every 7.5 frames
+rotary_potentiometer_5 = 0        # face-on
+rotary_potentiometer_6 = 440      # 160% chroma
 toggle_switch_7 = 0
 toggle_switch_8 = 0
 toggle_switch_9 = 0
@@ -157,10 +159,10 @@ linear_potentiometer_12 = 620     # realistic ~8-frame flip
 [[preset]]
 name = "Flip-Dot Sign"
 rotary_potentiometer_1 = 180      # small dots
-rotary_potentiometer_2 = 200      # ~5 tilt levels: crunchy, posterised
-rotary_potentiometer_3 = 700
-rotary_potentiometer_4 = 1023
-rotary_potentiometer_5 = 1023     # full edge-on blackout
+rotary_potentiometer_2 = 200      # 5 tilt levels: crunchy, posterised
+rotary_potentiometer_3 = 870
+rotary_potentiometer_4 = 1023     # every row, every frame
+rotary_potentiometer_5 = 0
 rotary_potentiometer_6 = 400
 toggle_switch_7 = 0
 toggle_switch_8 = 1               # Luma Mod: tilt carries the image
@@ -173,9 +175,9 @@ linear_potentiometer_12 = 700
 name = "Slow Wave"
 rotary_potentiometer_1 = 300
 rotary_potentiometer_2 = 620
-rotary_potentiometer_3 = 820      # overfilled, discs kissing
-rotary_potentiometer_4 = 120      # 16-frame refresh: update wave crawls up
-rotary_potentiometer_5 = 850
+rotary_potentiometer_3 = 1023     # discs kissing
+rotary_potentiometer_4 = 100      # slow: ~1 s per wall
+rotary_potentiometer_5 = 250      # slight lean
 rotary_potentiometer_6 = 620      # heavy chroma
 toggle_switch_7 = 0
 toggle_switch_8 = 0
@@ -188,9 +190,9 @@ linear_potentiometer_12 = 1023    # long lazy overshooting tumbles
 name = "Split-Flap"
 rotary_potentiometer_1 = 520      # big cards
 rotary_potentiometer_2 = 400
-rotary_potentiometer_3 = 900      # square cards filling the cell
+rotary_potentiometer_3 = 1023     # square cards filling the cell
 rotary_potentiometer_4 = 600
-rotary_potentiometer_5 = 500
+rotary_potentiometer_5 = 450      # cards leaning back
 rotary_potentiometer_6 = 300
 toggle_switch_7 = 1               # Square
 toggle_switch_8 = 0

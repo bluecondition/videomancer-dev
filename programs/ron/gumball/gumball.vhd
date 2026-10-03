@@ -1,4 +1,4 @@
--- gumball.vhd  (v0.1 — video as a wall of glossy spheres)
+-- gumball.vhd  (v1.0.1 — video as a wall of glossy spheres)
 --
 -- Replaces the incoming video with a hex-packed field of shaded spheres, one
 -- per cell, coloured by the live video (a pixelation, but every "pixel" is a
@@ -30,8 +30,19 @@
 -- buffer while the raster scans the CENTRE line of row R-1 — before any pixel
 -- of row R's spheres can win the Voronoi test (they first win ~0.16*H later),
 -- so the buffer swap is never visible.  Row 0 is sampled on the first active
--- line.  Per-cell radius^2 is stored alongside the colour so Luma Size costs
--- nothing per pixel.
+-- line (which is drawn as backdrop: it is read while being written).  A
+-- right-edge partial cell whose centre lies past the line end is sampled at
+-- the last active pixel.  Per-cell radius^2 is stored alongside the colour so
+-- Luma Size costs nothing per pixel.
+--
+-- Buffers (v1.0): rsq (15 b) + sample-line hsync->avid parity live in two
+-- 128x16 memories read for both candidates at c1; the colour (Y-64 10 b,
+-- U/V offsets 11 b = 32 b) lives in ONE 256x32 memory addressed {parity,
+-- cell} and is re-read for the Voronoi WINNER at c10 — no colour delay pipes.
+-- Hardware contracts: blanking gate at compose; U/V swapped where the sample
+-- line's hsync->avid parity differs from the display line's (drape); row
+-- anchor re-armed by 2 avid-less lines, not the vsync edge; luma drawn
+-- black-referenced with a soft knee capped at 800.
 --
 -- Controls:
 --   K1  Ball Size    (smooth 12..128 px)
@@ -40,15 +51,17 @@
 --   K4  Shine        (highlight tightness: broad satin sheen -> pinpoint gloss)
 --   K5  Squash       (radius vs cell: separated beads -> touching -> pressed
 --                     flat into a full-coverage domed mosaic)
---   K6  Candy        (chroma gain on the sampled colours; 0.75x .. 2.7x)
+--   K6  Candy        (chroma gain on the sampled colours; 0.75x .. 2.7x;
+--                     under Chrome: tint amount, mono .. 0.5x colour)
 --   S7  Backdrop     (Black / dimmed live video behind and between the balls)
 --   S8  Luma Size    (bright cells grow, dark cells shrink, +/- r/2)
 --   S9  Packing      (Hex offset rows / straight square grid)
---   S10 Chrome       (drop chroma: monochrome ball-bearings)
+--   S10 Chrome       (ball-bearings: chroma down to a K6-set tint, mono backdrop)
 --   S11 Bypass
---   P12 Relief       (THE fader: 0 = flat unlit mosaic tiles, max = deep
+--   P12 Relief       (THE fader: 0 = soft low-relief satin balls, max = deep
 --                     shadowed, wet-gloss 3D — shading span and specular
---                     master gain ride it together)
+--                     master gain ride it together; floored so K2-K4 always
+--                     read)
 --
 -- Author: bluecondition
 
@@ -64,7 +77,7 @@ use work.video_timing_pkg.all;
 
 architecture gumball of program_top is
 
-    constant LATENCY  : natural := 15;                 -- video pipe 0..14, out at c16
+    constant LATENCY  : natural := 16;                 -- video pipe 0..15, out at c17
     constant C_MAXCOL : natural := 128;                -- max cell columns (W >= 12 -> <= 107 + guard)
 
     constant C_MID : unsigned(9 downto 0) := to_unsigned(512, 10);
@@ -85,6 +98,13 @@ architecture gumball of program_top is
     --------------------------------------------------------------------------
     signal prev_hsync_n : std_logic := '1';
     signal prev_vsync_n : std_logic := '1';
+    signal prev_avid    : std_logic := '0';
+    signal line_av      : std_logic := '0';            -- avid seen since last h edge
+    signal idle_ln      : unsigned(1 downto 0) := (others => '0');  -- avid-less lines
+    signal hpar         : std_logic := '0';            -- clock parity since hsync
+    signal line_par     : std_logic := '0';            -- hsync->avid parity, this line
+    signal srow_r       : std_logic := '0';            -- this line is a sample line
+    signal tp_r         : std_logic := '0';            -- its target row parity
     signal r_hedge      : std_logic := '0';            -- registered h edge (line maths kick)
     signal r_anchor     : std_logic := '0';            -- first-active-line event
 
@@ -100,6 +120,7 @@ architecture gumball of program_top is
     -- Per-frame parameters (latched at vsync, then refined by the frame FSM).
     --------------------------------------------------------------------------
     signal lk1, lk2, lk3, lk4, lk5, lk6, lp12 : unsigned(9 downto 0) := (others => '0');
+    signal k1_mv, k4_mv, k5_mv : std_logic := '0';     -- knob left its deadband
 
     signal s_w      : unsigned(7 downto 0) := to_unsigned(48, 8);   -- cell width W
     signal s_wm1    : unsigned(7 downto 0) := to_unsigned(47, 8);
@@ -169,13 +190,19 @@ architecture gumball of program_top is
     signal eyj2sq   : unsigned(15 downto 0) := (others => '0');     -- (H + oy)^2
 
     --------------------------------------------------------------------------
-    -- Cell buffers: one per row parity, word = Y10 & U10 & V10 & rsq16.
-    -- 1W1R, registered read (BRAM).
+    -- Cell buffers (all 1W1R, registered read, power-of-2 word widths):
+    --   bufr0/bufr1 : per parity, word = line_par & rsq15 (both read at c1)
+    --   bufc        : {parity, cell} -> (Y-64)10 & Uoff11 & Voff11 (winner
+    --                 re-read at c10; chroma offsets signed about 512)
     --------------------------------------------------------------------------
-    subtype t_cword is std_logic_vector(45 downto 0);
-    type t_cbuf is array(0 to C_MAXCOL - 1) of t_cword;
-    signal buf0, buf1 : t_cbuf := (others => (others => '0'));
-    signal rd0, rd1   : t_cword := (others => '0');
+    subtype t_rword is std_logic_vector(15 downto 0);
+    type t_rbuf is array(0 to C_MAXCOL - 1) of t_rword;
+    signal bufr0, bufr1 : t_rbuf := (others => (others => '0'));
+    signal rd0, rd1     : t_rword := (others => '0');
+    subtype t_cword is std_logic_vector(31 downto 0);
+    type t_cbuf is array(0 to 2 * C_MAXCOL - 1) of t_cword;
+    signal bufc : t_cbuf := (others => (others => '0'));   -- 0 offsets = neutral
+    signal rdc  : t_cword := (others => '0');
 
     -- sample/write pipe (W0..W3 -> write)
     signal w0_stb : std_logic := '0';
@@ -185,18 +212,20 @@ architecture gumball of program_top is
     signal w1_stb : std_logic := '0';
     signal w1_par : std_logic := '0';
     signal w1_idx : unsigned(6 downto 0) := (others => '0');
-    signal w1_y   : unsigned(9 downto 0) := C_MID;
+    signal w1_y   : unsigned(9 downto 0) := (others => '0');   -- Y - 64
     signal w1_pu, w1_pv : signed(19 downto 0) := (others => '0');
     signal w1_pl  : signed(19 downto 0) := (others => '0');
     signal w2_stb : std_logic := '0';
     signal w2_par : std_logic := '0';
     signal w2_idx : unsigned(6 downto 0) := (others => '0');
-    signal w2_y, w2_u, w2_v : unsigned(9 downto 0) := C_MID;
+    signal w2_y   : unsigned(9 downto 0) := (others => '0');
+    signal w2_u, w2_v : signed(10 downto 0) := (others => '0');
     signal w2_rr  : unsigned(7 downto 0) := (others => '0');
     signal w3_stb : std_logic := '0';
     signal w3_par : std_logic := '0';
     signal w3_idx : unsigned(6 downto 0) := (others => '0');
-    signal w3_y, w3_u, w3_v : unsigned(9 downto 0) := C_MID;
+    signal w3_y   : unsigned(9 downto 0) := (others => '0');
+    signal w3_u, w3_v : signed(10 downto 0) := (others => '0');
     signal w3_rsq : unsigned(15 downto 0) := (others => '0');
 
     --------------------------------------------------------------------------
@@ -205,25 +234,31 @@ architecture gumball of program_top is
     signal g0_dx1, g0_dx2 : signed(7 downto 0) := (others => '0');
     signal g0_a0, g0_a1   : unsigned(6 downto 0) := (others => '0');
     signal g0_noadj       : std_logic := '0';
+    signal g0_blank       : std_logic := '0';
 
     signal p2_dx1, p2_dx2 : signed(7 downto 0) := (others => '0');
     signal p2_noadj       : std_logic := '0';
+    signal p2_blank       : std_logic := '0';
+    signal p2_a0, p2_a1   : unsigned(6 downto 0) := (others => '0');
     signal q1, q2         : unsigned(13 downto 0) := (others => '0');
 
     signal p3_dx1, p3_dx2 : signed(7 downto 0) := (others => '0');
-    signal p3_rd0, p3_rd1 : t_cword := (others => '0');
+    signal p3_rd0, p3_rd1 : t_rword := (others => '0');
+    signal p3_blank       : std_logic := '0';
+    signal p3_a0, p3_a1   : unsigned(6 downto 0) := (others => '0');
     signal d1, d2         : unsigned(15 downto 0) := (others => '0');
 
     signal p4_dsq  : unsigned(15 downto 0) := (others => '0');
     signal p4_dx   : signed(7 downto 0) := (others => '0');
     signal p4_eys  : unsigned(15 downto 0) := (others => '0');
-    signal p4_word : t_cword := (others => '0');
+    signal p4_word : t_rword := (others => '0');
+    signal p4_blank : std_logic := '0';
+    signal p4_ca   : unsigned(7 downto 0) := (others => '0');  -- winner {parity, cell}
 
     signal p5_ex   : signed(7 downto 0) := (others => '0');
     signal p5_in   : std_logic := '0';
     signal p5_core : std_logic := '0';
     signal p5_eys  : unsigned(15 downto 0) := (others => '0');
-    signal p5_y, p5_u, p5_v : unsigned(9 downto 0) := C_MID;
 
     signal p6_exq  : unsigned(13 downto 0) := (others => '0');
     signal p6_eys  : unsigned(15 downto 0) := (others => '0');
@@ -243,16 +278,21 @@ architecture gumball of program_top is
     signal p13_cf  : unsigned(7 downto 0) := (others => '0');
     signal p13_s   : unsigned(8 downto 0) := (others => '0');
     signal p14_um, p14_vm : signed(19 downto 0) := (others => '0');
-    signal p14_y   : unsigned(9 downto 0) := (others => '0');
+    signal p14_yd  : unsigned(10 downto 0) := (others => '0');
     signal p15_y, p15_u, p15_v : unsigned(9 downto 0) := C_MID;
+    signal p16_y, p16_u, p16_v : unsigned(9 downto 0) := C_MID;
 
-    -- flag / colour pipes
-    signal in_p   : std_logic_vector(0 to 8) := (others => '0');
-    signal core_p : std_logic_vector(0 to 8) := (others => '0');
-    type t_c10p is array (natural range <>) of unsigned(9 downto 0);
-    signal yp : t_c10p(0 to 7) := (others => C_MID);
-    signal up : t_c10p(0 to 7) := (others => C_MID);
-    signal vp : t_c10p(0 to 7) := (others => C_MID);
+    -- winner colour re-read: address pipe c5..c10, data c12, swapped c13
+    type t_ca_p is array (natural range <>) of unsigned(7 downto 0);
+    signal ca_p   : t_ca_p(5 to 10) := (others => (others => '0'));
+    signal wpar_p : std_logic_vector(5 to 12) := (others => '0');
+    signal c12_y  : unsigned(9 downto 0) := (others => '0');
+    signal c12_u, c12_v : signed(10 downto 0) := (others => '0');
+    signal c13_u, c13_v : signed(10 downto 0) := (others => '0');
+
+    -- flag pipes
+    signal in_p   : std_logic_vector(0 to 9) := (others => '0');
+    signal core_p : std_logic_vector(0 to 9) := (others => '0');
 
     --------------------------------------------------------------------------
     -- Sync / video alignment pipe
@@ -275,20 +315,38 @@ begin
     -- Raster position counters + sample trigger.
     --------------------------------------------------------------------------
     p_position : process(clk)
-        variable v_h_edge, v_v_edge : std_logic;
-        variable v_tp   : std_logic;
-        variable v_trig : std_logic;
+        variable v_h_edge : std_logic;
+        variable v_tp     : std_logic;
+        variable v_trig   : std_logic;
+        variable v_loc    : unsigned(7 downto 0);
     begin
         if rising_edge(clk) then
             prev_hsync_n <= data_in.hsync_n;
             prev_vsync_n <= data_in.vsync_n;
+            prev_avid    <= data_in.avid;
 
-            v_h_edge := '0'; v_v_edge := '0';
+            v_h_edge := '0';
             if data_in.hsync_n = '0' and prev_hsync_n = '1' then v_h_edge := '1'; end if;
-            if data_in.vsync_n = '0' and prev_vsync_n = '1' then v_v_edge := '1'; end if;
 
             r_hedge  <= v_h_edge;
             r_anchor <= '0';
+
+            -- hsync->avid offset parity of this line (encoder Cb/Cr pairing)
+            hpar <= not hpar;
+            if v_h_edge = '1' then hpar <= '0'; end if;
+            if data_in.avid = '1' and prev_avid = '0' then line_par <= hpar; end if;
+
+            -- avid-less line count: re-arms the row anchor (not the vsync edge,
+            -- which decoders may assert before the last active line ends)
+            if data_in.avid = '1' then line_av <= '1'; end if;
+            if v_h_edge = '1' then
+                line_av <= '0';
+                if line_av = '1' then
+                    idle_ln <= (others => '0');
+                elsif idle_ln /= 3 then
+                    idle_ln <= idle_ln + 1;
+                end if;
+            end if;
 
             -- X lattices: A aligned, B half-offset (or aligned too in square mode).
             if v_h_edge = '1' then
@@ -316,12 +374,7 @@ begin
             end if;
 
             -- Y row counter, anchored to the first active line of the frame.
-            if v_v_edge = '1' then
-                celly_loc <= (others => '0');
-                celly_par <= '0';
-                frame_act <= '0';
-                band0     <= '1';
-            elsif data_in.avid = '1' and frame_act = '0' then
+            if data_in.avid = '1' and frame_act = '0' then
                 frame_act <= '1';
                 celly_loc <= (others => '0');
                 celly_par <= '0';
@@ -330,6 +383,9 @@ begin
                 r_anchor  <= '1';
             elsif v_h_edge = '1' then
                 line0 <= '0';
+                if idle_ln(1) = '1' then
+                    frame_act <= '0';
+                end if;
                 if celly_loc = s_hm1 then
                     celly_loc <= (others => '0');
                     celly_par <= not celly_par;
@@ -341,32 +397,55 @@ begin
 
             -- Sample trigger: row R's colours are grabbed on the centre line of
             -- row R-1 (target parity = not current), at the target lattice's
-            -- cell centres; row 0 is grabbed on the first active line.
+            -- cell centres; row 0 is grabbed on the first active line.  A
+            -- right-edge cell whose centre was never reached is grabbed from
+            -- the last active pixel (held in w0_*) on the first blank clock.
+            -- Hex lattice B's cell 0 is a half-cell centred ON the left edge:
+            -- its centre is the first active pixel, which analog decoders
+            -- deliver black (offset rows began with a black ball), so it is
+            -- grabbed at its LAST pixel instead (~W/2 in, like lattice A).
+            -- (row-level terms change only at h edges / the anchor, >= 6 clocks
+            -- before any sample point, so they are registered to keep the
+            -- trigger cone short; the w0 data hold is ANY avid fall — w0 is
+            -- only consumed under w0_stb — so no trigger logic drives the
+            -- 30-bit clock enable)
+            v_tp := not celly_par;
+            if line0 = '1' then v_tp := '0'; end if;
+            tp_r <= v_tp;
+            if frame_act = '1' and (line0 = '1' or celly_loc = s_hh) then
+                srow_r <= '1';
+            else
+                srow_r <= '0';
+            end if;
+
+            if tp_r = '0' then v_loc := xa_loc; else v_loc := xb_loc; end if;
             v_trig := '0';
-            v_tp   := not celly_par;
-            if data_in.avid = '1' and frame_act = '1' then
-                if line0 = '1' then
-                    v_tp := '0';
-                    if xa_loc = s_wh then v_trig := '1'; end if;
-                elsif celly_loc = s_hh then
-                    if v_tp = '0' then
-                        if xa_loc = s_wh then v_trig := '1'; end if;
-                    else
-                        if xb_loc = s_wh then v_trig := '1'; end if;
+            if srow_r = '1' then
+                if data_in.avid = '1' then
+                    if tp_r = '1' and xb_idx = 0 and s_square = '0' then
+                        if xb_loc = s_wm1 then v_trig := '1'; end if;
+                    elsif v_loc = s_wh then
+                        v_trig := '1';
+                    end if;
+                elsif prev_avid = '1' then
+                    if v_loc /= 0 and v_loc <= s_wh then
+                        v_trig := '1';
                     end if;
                 end if;
             end if;
 
             w0_stb <= v_trig;
-            w0_par <= v_tp;
-            if v_tp = '0' then
+            w0_par <= tp_r;
+            if tp_r = '0' then
                 w0_idx <= xa_idx;
             else
                 w0_idx <= xb_idx;
             end if;
-            w0_y <= unsigned(data_in.y);
-            w0_u <= unsigned(data_in.u);
-            w0_v <= unsigned(data_in.v);
+            if not (prev_avid = '1' and data_in.avid = '0') then
+                w0_y <= unsigned(data_in.y);
+                w0_u <= unsigned(data_in.u);
+                w0_v <= unsigned(data_in.v);
+            end if;
         end if;
     end process p_position;
 
@@ -388,14 +467,20 @@ begin
             w1_stb <= w0_stb;
             w1_par <= w0_par;
             w1_idx <= w0_idx;
-            w1_y   <= w0_y;
+            -- luma stored black-referenced so shading darkens toward black 64
+            if w0_y < 64 then
+                w1_y <= (others => '0');
+            else
+                w1_y <= w0_y - 64;
+            end if;
 
-            -- W2: recombine + clamp
-            v_u := to_signed(512, 12) + resize(shift_right(w1_pu, 6), 12);
-            if v_u < 0 then v_u := (others => '0'); end if;
+            -- W2: chroma offsets, clamped +/-1023 (11-bit signed; the output
+            -- clamp after shading keeps hue on boosted, darkened cells)
+            v_u := resize(shift_right(w1_pu, 6), 12);
+            if v_u < -1023 then v_u := to_signed(-1023, 12); end if;
             if v_u > 1023 then v_u := to_signed(1023, 12); end if;
-            v_vv := to_signed(512, 12) + resize(shift_right(w1_pv, 6), 12);
-            if v_vv < 0 then v_vv := (others => '0'); end if;
+            v_vv := resize(shift_right(w1_pv, 6), 12);
+            if v_vv < -1023 then v_vv := to_signed(-1023, 12); end if;
             if v_vv > 1023 then v_vv := to_signed(1023, 12); end if;
 
             if s_lsize = '1' then
@@ -406,8 +491,8 @@ begin
                 v_rr := signed(resize(s_r, 12));
             end if;
 
-            w2_u   <= unsigned(v_u(9 downto 0));
-            w2_v   <= unsigned(v_vv(9 downto 0));
+            w2_u   <= v_u(10 downto 0);
+            w2_v   <= v_vv(10 downto 0);
             w2_rr  <= unsigned(v_rr(7 downto 0));
             w2_stb <= w1_stb;
             w2_par <= w1_par;
@@ -428,27 +513,36 @@ begin
     --------------------------------------------------------------------------
     -- Cell buffers (canonical 1W1R, registered read, pre-muxed write word).
     --------------------------------------------------------------------------
-    p_buf0 : process(clk)
+    p_bufr0 : process(clk)
     begin
         if rising_edge(clk) then
             if w3_stb = '1' and w3_par = '0' then
-                buf0(to_integer(w3_idx)) <= std_logic_vector(w3_y) & std_logic_vector(w3_u)
-                                          & std_logic_vector(w3_v) & std_logic_vector(w3_rsq);
+                bufr0(to_integer(w3_idx)) <= line_par & std_logic_vector(w3_rsq(14 downto 0));
             end if;
-            rd0 <= buf0(to_integer(g0_a0));
+            rd0 <= bufr0(to_integer(g0_a0));
         end if;
-    end process p_buf0;
+    end process p_bufr0;
 
-    p_buf1 : process(clk)
+    p_bufr1 : process(clk)
     begin
         if rising_edge(clk) then
             if w3_stb = '1' and w3_par = '1' then
-                buf1(to_integer(w3_idx)) <= std_logic_vector(w3_y) & std_logic_vector(w3_u)
-                                          & std_logic_vector(w3_v) & std_logic_vector(w3_rsq);
+                bufr1(to_integer(w3_idx)) <= line_par & std_logic_vector(w3_rsq(14 downto 0));
             end if;
-            rd1 <= buf1(to_integer(g0_a1));
+            rd1 <= bufr1(to_integer(g0_a1));
         end if;
-    end process p_buf1;
+    end process p_bufr1;
+
+    p_bufc : process(clk)
+    begin
+        if rising_edge(clk) then
+            if w3_stb = '1' then
+                bufc(to_integer(w3_par & w3_idx)) <= std_logic_vector(w3_y)
+                    & std_logic_vector(w3_u) & std_logic_vector(w3_v);
+            end if;
+            rdc <= bufc(to_integer(ca_p(10)));
+        end if;
+    end process p_bufc;
 
     --------------------------------------------------------------------------
     -- Per-line maths: dy / (dy - oy) squared for both row candidates,
@@ -511,9 +605,28 @@ begin
         variable v_w   : integer range 0 to 255;
         variable v_e   : unsigned(8 downto 0);
         variable v_acc : unsigned(9 downto 0);
+
+        -- '1' when a knob has moved >= ~4 codes from its latched value:
+        -- geometry knobs only follow real turns, so ADC noise on a cell-size
+        -- or radius step boundary cannot flicker the whole grid.
+        function moved(reg : std_logic_vector; l : unsigned(9 downto 0))
+            return std_logic is
+            variable d : signed(10 downto 0);
+        begin
+            d := signed(resize(unsigned(reg(9 downto 0)), 11)) - signed(resize(l, 11));
+            if d(10 downto 2) = "000000000" or d(10 downto 2) = "111111111" then
+                return '0';
+            end if;
+            return '1';
+        end function;
     begin
         if rising_edge(clk) then
             mp <= ma * mb;
+
+            -- free-running deadband flags (kept out of the vsync cone)
+            k1_mv <= moved(registers_in(0), lk1);
+            k4_mv <= moved(registers_in(3), lk4);
+            k5_mv <= moved(registers_in(4), lk5);
 
             -- serial restoring divider (18-bit dividend / 8-bit divisor)
             if div_run = '1' then
@@ -534,11 +647,11 @@ begin
             end if;
 
             if prev_vsync_n = '1' and data_in.vsync_n = '0' then
-                lk1  <= unsigned(registers_in(0)(9 downto 0));
+                if k1_mv = '1' then lk1 <= unsigned(registers_in(0)(9 downto 0)); end if;
                 lk2  <= unsigned(registers_in(1)(9 downto 0));
                 lk3  <= unsigned(registers_in(2)(9 downto 0));
-                lk4  <= unsigned(registers_in(3)(9 downto 0));
-                lk5  <= unsigned(registers_in(4)(9 downto 0));
+                if k4_mv = '1' then lk4 <= unsigned(registers_in(3)(9 downto 0)); end if;
+                if k5_mv = '1' then lk5 <= unsigned(registers_in(4)(9 downto 0)); end if;
                 lk6  <= unsigned(registers_in(5)(9 downto 0));
                 lp12 <= unsigned(registers_in(7)(9 downto 0));
                 s_bgvid  <= registers_in(6)(0);
@@ -555,14 +668,21 @@ begin
                         v_w := 12 + to_integer(lk1(9 downto 3));
                         if v_w > 128 then v_w := 128; end if;
                         s_w      <= to_unsigned(v_w, 8);
-                        s_sp     <= lp12(9 downto 2);
-                        s_amb    <= 255 - lp12(9 downto 2);
+                        -- relief span 63..255: floored so light angle /
+                        -- specular / shine still read at P12 = 0
+                        s_sp     <= to_unsigned(63, 8) + lp12(9 downto 2)
+                                  - ("00" & lp12(9 downto 4));
                         s_si     <= lk3(9 downto 1);
-                        s_sg     <= resize(to_unsigned(48, 8) + lk6(9 downto 3), 8);
+                        if s_mono = '1' then
+                            s_sg <= "000" & lk6(9 downto 5);           -- tint 0..0.48x
+                        else
+                            s_sg <= resize(to_unsigned(48, 8) + lk6(9 downto 3), 8);
+                        end if;
                         s_rfrac  <= resize(to_unsigned(676, 11) + lk5(9 downto 1)
                                          + lk5(9 downto 3), 11);
                         s_kshine <= to_unsigned(1088, 11) - resize(lk4, 11);
                     when 1 =>
+                        s_amb <= 255 - s_sp;
                         s_wm1 <= s_w - 1;
                         s_wh  <= '0' & s_w(7 downto 1);
                         if s_square = '1' then
@@ -676,7 +796,7 @@ begin
     --------------------------------------------------------------------------
     p_pipe : process(clk)
         variable v_par    : std_logic;
-        variable v_word   : t_cword;
+        variable v_word   : t_rword;
         variable v_rsq    : unsigned(15 downto 0);
         variable v_rin    : signed(17 downto 0);
         variable v_dl     : signed(17 downto 0);
@@ -685,6 +805,7 @@ begin
         variable v_s      : unsigned(10 downto 0);
         variable v_cf     : signed(10 downto 0);
         variable v_yd     : unsigned(10 downto 0);
+        variable v_yk     : unsigned(10 downto 0);
         variable v_su     : signed(11 downto 0);
         variable v_sy, v_uu, v_vv : unsigned(9 downto 0);
         variable v_bgy, v_bgu, v_bgv : unsigned(9 downto 0);
@@ -713,13 +834,18 @@ begin
             else
                 g0_noadj <= '0';
             end if;
+            -- row 0's line is read while being written (undefined EBR data)
+            g0_blank <= line0 or not frame_act;
 
-            -- c2: dx squares (buffer reads land in rd0/rd1 this cycle too)
+            -- c2: dx squares (rsq reads land in rd0/rd1 this cycle too)
             q1 <= resize(unsigned(g0_dx1 * g0_dx1), 14);
             q2 <= resize(unsigned(g0_dx2 * g0_dx2), 14);
             p2_dx1   <= g0_dx1;
             p2_dx2   <= g0_dx2;
             p2_noadj <= g0_noadj;
+            p2_blank <= g0_blank;
+            p2_a0    <= g0_a0;
+            p2_a1    <= g0_a1;
 
             -- c3: full squared distances to both candidate centres
             d1 <= resize(q1, 16) + resize(dy1sq_r, 16);
@@ -728,14 +854,17 @@ begin
             else
                 d2 <= resize(q2, 16) + resize(dy2sq_r, 16);
             end if;
-            p3_dx1 <= p2_dx1;
-            p3_dx2 <= p2_dx2;
-            p3_rd0 <= rd0;
-            p3_rd1 <= rd1;
+            p3_dx1   <= p2_dx1;
+            p3_dx2   <= p2_dx2;
+            p3_rd0   <= rd0;
+            p3_rd1   <= rd1;
+            p3_blank <= p2_blank;
+            p3_a0    <= p2_a0;
+            p3_a1    <= p2_a1;
 
             ------------------------------------------------------------------
             -- c4: Voronoi select.  Winning candidate's parity = row parity xor
-            -- sel, which picks the buffer word directly.
+            -- sel, which picks the rsq word and the colour address directly.
             ------------------------------------------------------------------
             if d2 < d1 then
                 p4_dsq <= d2;
@@ -750,15 +879,18 @@ begin
             end if;
             if v_par = '1' then
                 p4_word <= p3_rd1;
+                p4_ca   <= '1' & p3_a1;
             else
                 p4_word <= p3_rd0;
+                p4_ca   <= '0' & p3_a0;
             end if;
+            p4_blank <= p3_blank;
 
-            -- c5: inside / core tests + light-relative dx + colour unpack
+            -- c5: inside / core tests + light-relative dx
             v_word := p4_word;
-            v_rsq  := unsigned(v_word(15 downto 0));
+            v_rsq  := "0" & unsigned(v_word(14 downto 0));
             v_rin  := signed(resize(v_rsq, 18)) - signed(resize(s_rim2, 18));
-            if resize(p4_dsq, 16) < v_rsq then
+            if p4_dsq < v_rsq and p4_blank = '0' then
                 p5_in <= '1';
             else
                 p5_in <= '0';
@@ -770,9 +902,6 @@ begin
             end if;
             p5_ex  <= p4_dx - s_ox;
             p5_eys <= p4_eys;
-            p5_y   <= unsigned(v_word(45 downto 36));
-            p5_u   <= unsigned(v_word(35 downto 26));
-            p5_v   <= unsigned(v_word(25 downto 16));
 
             -- c6: light-relative dx squared
             p6_exq <= resize(unsigned(p5_ex * p5_ex), 14);
@@ -797,55 +926,84 @@ begin
             p10_dlb <= shift_left(p9_dlc, to_integer(s_sle(1 downto 0)))(15 downto 8);
             p10_dsb <= shift_left(p9_dsc, to_integer(s_sls(1 downto 0)))(15 downto 8);
 
-            -- c11: normalise gains
+            -- c11: normalise gains (winner colour read issued from ca_p(10))
             p11_pl <= p10_dlb * s_kd8;
             p11_ps <= p10_dsb * s_ks9;
 
-            -- c12: diffuse level (ambient floor) + specular level
+            -- c12: diffuse level (ambient floor) + specular level; colour
+            -- word re-registered in fabric before any arithmetic
             v_l := resize(s_amb, 10) + resize(p11_pl(15 downto 7), 10);
             if v_l > 255 then v_l := to_unsigned(255, 10); end if;
             p12_l <= v_l(7 downto 0);
             v_s := resize(p11_ps(17 downto 7), 11);
             if v_s > 511 then v_s := to_unsigned(511, 11); end if;
             p12_s <= v_s(8 downto 0);
+            c12_y <= unsigned(rdc(31 downto 22));
+            c12_u <= signed(rdc(21 downto 11));
+            c12_v <= signed(rdc(10 downto 0));
 
-            -- c13: Y * diffuse; chroma factor = diffuse minus spec desat
-            p13_ym <= yp(6) * p12_l;
+            -- c13: Y * diffuse; chroma factor = diffuse minus spec desat;
+            -- U/V swapped where the sample line's hsync->avid parity differs
+            -- from this line's (the encoder pairs Cb/Cr from hsync)
+            p13_ym <= c12_y * p12_l;
             v_cf := signed(resize(p12_l, 11)) - signed(resize(p12_s(8 downto 1), 11));
             if v_cf < 0 then v_cf := (others => '0'); end if;
             p13_cf <= unsigned(v_cf(7 downto 0));
             p13_s  <= p12_s;
+            if (wpar_p(12) xor line_par) = '1' then
+                c13_u <= c12_v;
+                c13_v <= c12_u;
+            else
+                c13_u <= c12_u;
+                c13_v <= c12_v;
+            end if;
 
             -- c14: chroma * factor; Y + specular
-            p14_um <= (signed(resize(up(7), 11)) - to_signed(512, 11))
-                    * signed(resize(p13_cf, 9));
-            p14_vm <= (signed(resize(vp(7), 11)) - to_signed(512, 11))
-                    * signed(resize(p13_cf, 9));
-            v_yd := resize(p13_ym(17 downto 8), 11) + resize(p13_s, 11);
-            if v_yd > 1023 then v_yd := to_unsigned(1023, 11); end if;
-            p14_y <= v_yd(9 downto 0);
+            p14_um <= c13_u * signed(resize(p13_cf, 9));
+            p14_vm <= c13_v * signed(resize(p13_cf, 9));
+            p14_yd <= resize(p13_ym(17 downto 8), 11) + resize(p13_s, 11);
+
+            -- c15: luma back onto black 64 with a soft knee (slope 1/4 above
+            -- 704, capped at 800: full-scale Y clips RGB on hardware);
+            -- chroma back about 512, clamped
+            if p14_yd < 640 then
+                v_yk := p14_yd + 64;
+            else
+                v_yk := to_unsigned(704, 11) + shift_right(p14_yd - 640, 2);
+                if v_yk > 800 then v_yk := to_unsigned(800, 11); end if;
+            end if;
+            p15_y <= v_yk(9 downto 0);
+            v_su := to_signed(512, 12) + resize(shift_right(p14_um, 8), 12);
+            if v_su < 0 then v_su := (others => '0'); end if;
+            if v_su > 1023 then v_su := to_signed(1023, 12); end if;
+            p15_u <= unsigned(v_su(9 downto 0));
+            v_su := to_signed(512, 12) + resize(shift_right(p14_vm, 8), 12);
+            if v_su < 0 then v_su := (others => '0'); end if;
+            if v_su > 1023 then v_su := to_signed(1023, 12); end if;
+            p15_v <= unsigned(v_su(9 downto 0));
 
             ------------------------------------------------------------------
-            -- c15: compose sphere over backdrop (rim row gets a 50% AA blend).
+            -- c16: blanking gate / bypass / sphere over backdrop (rim row gets
+            -- a 50% AA blend).
             ------------------------------------------------------------------
-            v_sy := p14_y;
-            v_su := to_signed(512, 12) + resize(shift_right(p14_um, 8), 12);
-            v_uu := unsigned(v_su(9 downto 0));
-            v_su := to_signed(512, 12) + resize(shift_right(p14_vm, 8), 12);
-            v_vv := unsigned(v_su(9 downto 0));
+            v_sy := p15_y;  v_uu := p15_u;  v_vv := p15_v;
 
             if s_bgvid = '1' then
-                v_bgy := resize(unsigned(pipe(13).y(9 downto 1)), 10) + 32;
-                v_bgu := resize(unsigned(pipe(13).u(9 downto 1)), 10) + 256;
-                v_bgv := resize(unsigned(pipe(13).v(9 downto 1)), 10) + 256;
+                v_bgy := resize(unsigned(pipe(14).y(9 downto 1)), 10) + 32;
+                v_bgu := resize(unsigned(pipe(14).u(9 downto 1)), 10) + 256;
+                v_bgv := resize(unsigned(pipe(14).v(9 downto 1)), 10) + 256;
             else
                 v_bgy := to_unsigned(64, 10);
                 v_bgu := C_MID;
                 v_bgv := C_MID;
             end if;
+            if s_mono = '1' then
+                v_bgu := C_MID;
+                v_bgv := C_MID;
+            end if;
 
-            if in_p(8) = '1' then
-                if core_p(8) = '1' then
+            if in_p(9) = '1' then
+                if core_p(9) = '1' then
                     v_oy2 := v_sy;  v_ou := v_uu;  v_ov := v_vv;
                 else
                     v_oy2 := ('0' & v_sy(9 downto 1)) + ('0' & v_bgy(9 downto 1));
@@ -856,43 +1014,40 @@ begin
                 v_oy2 := v_bgy;  v_ou := v_bgu;  v_ov := v_bgv;
             end if;
 
-            if s_mono = '1' then
-                v_ou := C_MID;
-                v_ov := C_MID;
-            end if;
-
-            p15_y <= v_oy2;
-            p15_u <= v_ou;
-            p15_v <= v_ov;
-
-            -- c16: bypass mux + sync attach
-            if s_bypass = '1' then
-                s_io.y <= pipe(LATENCY - 1).y;
-                s_io.u <= pipe(LATENCY - 1).u;
-                s_io.v <= pipe(LATENCY - 1).v;
+            if pipe(14).avid = '0' then
+                p16_y <= to_unsigned(64, 10);
+                p16_u <= C_MID;
+                p16_v <= C_MID;
+            elsif s_bypass = '1' then
+                p16_y <= unsigned(pipe(14).y);
+                p16_u <= unsigned(pipe(14).u);
+                p16_v <= unsigned(pipe(14).v);
             else
-                s_io.y <= std_logic_vector(p15_y);
-                s_io.u <= std_logic_vector(p15_u);
-                s_io.v <= std_logic_vector(p15_v);
+                p16_y <= v_oy2;
+                p16_u <= v_ou;
+                p16_v <= v_ov;
             end if;
+
+            -- c17: sync attach
+            s_io.y       <= std_logic_vector(p16_y);
+            s_io.u       <= std_logic_vector(p16_u);
+            s_io.v       <= std_logic_vector(p16_v);
             s_io.hsync_n <= pipe(LATENCY - 1).hsync_n;
             s_io.vsync_n <= pipe(LATENCY - 1).vsync_n;
             s_io.avid    <= pipe(LATENCY - 1).avid;
             s_io.field_n <= pipe(LATENCY - 1).field_n;
 
-            -- flag / colour pipes
+            -- flag / address pipes
             in_p(0)   <= p5_in;
             core_p(0) <= p5_core;
-            for i in 1 to 8 loop
+            for i in 1 to 9 loop
                 in_p(i)   <= in_p(i - 1);
                 core_p(i) <= core_p(i - 1);
             end loop;
-            yp(0) <= p5_y;  up(0) <= p5_u;  vp(0) <= p5_v;
-            for i in 1 to 7 loop
-                yp(i) <= yp(i - 1);
-                up(i) <= up(i - 1);
-                vp(i) <= vp(i - 1);
-            end loop;
+            ca_p(5)   <= p4_ca;
+            wpar_p(5) <= p4_word(15);
+            for i in 6 to 10 loop ca_p(i) <= ca_p(i - 1); end loop;
+            for i in 6 to 12 loop wpar_p(i) <= wpar_p(i - 1); end loop;
         end if;
     end process p_pipe;
 

@@ -11,7 +11,7 @@
 --   K2 SCALE A     pattern pitch, 1024 px .. 4 px, continuous + glided
 --   K3 PHASE A     X phase, +/-1024 px of translation (rotation for spokes)
 --   K4 TEXTURE B / K5 SCALE B / K6 PHASE B  -- same for the second layer
---   P12 Y PHASE    Y phase of layer B -- the primary gesture: rakes one
+--   P12 SWEEP      Y phase of layer B (reversed) -- the primary gesture: rakes one
 --                  pattern across the other.  Only the RELATIVE phase makes
 --                  fringes, so one layer's Y reaches every interference state.
 --   S7  MEET   / S8 FRINGE   together a 4-way BLEND of the two masks:
@@ -32,7 +32,7 @@
 -- NOTE on what is deliberately absent: per-layer mask invert.  For a 50 %
 -- duty grating, inverting the mask is mathematically identical to shifting
 -- the phase by half a period -- which the phase knob already does, more
--- finely.  It only differed on the three thin-line textures, so it was not
+-- finely.  It only differed on the two thin-line textures, so it was not
 -- worth a switch; the blend's Cut mode covers the useful negations.
 --
 -- ENGINE.  Every texture reduces to a 10-bit PHASE -- 1024 units = one
@@ -91,10 +91,10 @@ architecture fringe of program_top is
     constant T_WAVEH  : integer := 3;
     constant T_WAVEV  : integer := 4;
     constant T_DIAG   : integer := 5;
-    constant T_GRID   : integer := 6;
-    constant T_HEX    : integer := 7;
-    constant T_CHECK  : integer := 8;
-    constant T_BRICK  : integer := 9;
+    constant T_ANTI   : integer := 6;     -- mirror of T_DIAG
+    constant T_GRID   : integer := 7;
+    constant T_HEX    : integer := 8;
+    constant T_CHECK  : integer := 9;
 
     -- ink geometry, in phase units (1024 = one period).  WEIGHT (S9) halves
     -- every one of them: Bold is the classic 50 % grating, Fine turns the
@@ -103,7 +103,6 @@ architecture fringe of program_top is
     constant C_WGRID : integer := 192;    -- square-grid line width (18.75%)
     constant C_WHEXV : integer := 84;     -- honeycomb vertical edge, half-width
     constant C_WHEXD : integer := 190;    -- honeycomb slanted edge (grad sqrt5)
-    constant C_WMORT : integer := 128;    -- brick mortar width
     constant C_GSH   : integer := 4;      -- glide one-pole shift (~16 frames)
 
     -- blend modes (S7 = bit 0 Meet, S8 = bit 1 Fringe)
@@ -235,7 +234,6 @@ architecture fringe of program_top is
     signal s_wgrid : unsigned(9 downto 0) := to_unsigned(C_WGRID, 10);
     signal s_whexv : unsigned(9 downto 0) := to_unsigned(C_WHEXV, 10);
     signal s_whexd : unsigned(11 downto 0) := to_unsigned(C_WHEXD, 12);
-    signal s_wmort : unsigned(9 downto 0) := to_unsigned(C_WMORT, 10);
 
     -- ink palette, resolved once per frame: index 0 = A only, 1 = B only,
     -- 2 = both.  In mono every entry is the same ink, so the pixel path has
@@ -315,6 +313,7 @@ architecture fringe of program_top is
     signal w_fx, w_fy   : t_l12 := (others => (others => '0'));
     signal w_lox, w_loy : t_l1  := (others => '0');   -- low byte all-zero flags
     signal w_dg         : t_l10 := (others => (others => '0'));
+    signal w_ad         : t_l10 := (others => (others => '0'));
     signal w_base       : t_l10 := (others => (others => '0'));
     signal w_sin        : t_l8s := (others => (others => '0'));
     signal w_rp         : t_l10 := (others => (others => '0'));
@@ -324,7 +323,6 @@ architecture fringe of program_top is
     signal q_phy  : t_l10 := (others => (others => '0'));
     signal q_hexa : t_l10 := (others => (others => '0'));
     signal q_hexb : t_l10 := (others => (others => '0'));
-    signal q_brk  : t_l11 := (others => (others => '0'));
 
     signal s_mask : t_l1 := (others => '0');
 
@@ -402,7 +400,7 @@ begin
                 s_gtgt(1) <= unsigned(registers_in(2));
                 s_gtgt(2) <= unsigned(registers_in(4));
                 s_gtgt(3) <= unsigned(registers_in(5));
-                s_gtgt(4) <= unsigned(registers_in(7));
+                s_gtgt(4) <= not unsigned(registers_in(7));   -- reversed slider
                 -- one-pole slew toward the target latched LAST frame; a frame
                 -- of extra lag is nothing against a 16-frame time constant,
                 -- and it keeps the panel read off this cycle's adder path.
@@ -439,13 +437,11 @@ begin
                             s_wgrid <= to_unsigned(C_WGRID / 2, 10);
                             s_whexv <= to_unsigned(C_WHEXV / 2, 10);
                             s_whexd <= to_unsigned(C_WHEXD / 2, 12);
-                            s_wmort <= to_unsigned(C_WMORT / 2, 10);
                         else
                             s_duty  <= to_unsigned(C_DUTY,  10);
                             s_wgrid <= to_unsigned(C_WGRID, 10);
                             s_whexv <= to_unsigned(C_WHEXV, 10);
                             s_whexd <= to_unsigned(C_WHEXD, 12);
-                            s_wmort <= to_unsigned(C_WMORT, 10);
                         end if;
 
                     when 7 =>
@@ -598,7 +594,7 @@ begin
                         when 0 | 1 =>
                             -- 45-degree textures run both axes at 1/sqrt(2) so
                             -- the pitch ACROSS the stripes matches the menu
-                            if s_tex(v_L) = T_DIAG then
+                            if s_tex(v_L) = T_DIAG or s_tex(v_L) = T_ANTI then
                                 s_step(v_L) <= resize(shift_right(s_macc, 8), 16);
                             else
                                 s_step(v_L) <= s_sb(v_L);
@@ -868,6 +864,10 @@ begin
                 v_s := resize(s_px(L)(17 downto 0), 19)
                      + resize(s_py(L)(17 downto 0), 19);
                 w_dg(L) <= v_s(17 downto 8);
+                -- anti-diagonal: the difference runs the stripes the other way
+                v_s := resize(s_px(L)(17 downto 0), 19)
+                     - resize(s_py(L)(17 downto 0), 19);
+                w_ad(L) <= v_s(17 downto 8);
 
                 -- wavy H is y displaced by sin(x); wavy V is the transpose
                 if s_tex(L) = T_WAVEH then
@@ -936,6 +936,7 @@ begin
                     when T_SPOKE  => q_str(L) <= w_rp(L);
                     when T_SQUARE => q_str(L) <= v_sq;
                     when T_DIAG   => q_str(L) <= w_dg(L);
+                    when T_ANTI   => q_str(L) <= w_ad(L);
                     when others   => q_str(L) <= unsigned(std_logic_vector(
                                                     v_w(9 downto 0)));
                 end case;
@@ -958,9 +959,6 @@ begin
                 q_hexa(L) <= unsigned(std_logic_vector(v_au(9 downto 0)));
                 q_hexb(L) <= unsigned(std_logic_vector(v_av(9 downto 0)));
 
-                -- running bond: courses are two periods wide, half-offset
-                if v_r = '1' then q_brk(L) <= w_fx(L)(10 downto 0) + 1024;
-                else              q_brk(L) <= w_fx(L)(10 downto 0); end if;
             end loop;
         end if;
     end process p_ph;
@@ -999,10 +997,6 @@ begin
                         -- one threshold drives both weights: at 512 this is the
                         -- classic 50/50 board, at 256 a thinner windowpane
                         if (q_phx(L) < s_duty) /= (q_phy(L) < s_duty) then
-                            v_m := '1'; else v_m := '0'; end if;
-                    when T_BRICK =>
-                        if q_phy(L) < s_wmort
-                           or q_brk(L) < resize(s_wmort, 11) then
                             v_m := '1'; else v_m := '0'; end if;
                     when others =>
                         if q_str(L) < s_duty then v_m := '1'; else v_m := '0'; end if;

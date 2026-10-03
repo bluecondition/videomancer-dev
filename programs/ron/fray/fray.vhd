@@ -3,7 +3,7 @@
 -- File: fray.vhd - edge-launched scanline filaments
 -- License: GNU General Public License v3.0
 --
--- FRAY v0.1 -- every scanline frays to the right of its edges.
+-- FRAY v0.4 -- every scanline frays to the right of its edges.
 --
 -- Where prism grows one even rainbow band off every edge, FRAY launches an
 -- individual FILAMENT: a 1-px-tall run whose length, firing decision and
@@ -29,13 +29,17 @@
 --      ahead so the length multiply gets two stages) lands len / fire / run
 --      seed here; dry video ring read lands here (vr)
 --   8  run state machine (launch / count / phase)
---   9  pattern -> ink + intensity + palette index; glow/negative video
---  10  base colour select + ground select
---  11  base - ground (signed)
---  12  x intensity, hi/lo partial products (multiplies alone)
---  13  partial sum
---  14  ground + product
---  15  negative, blanking gate, output register
+--   9  pattern -> ink + intensity + palette index; tail taper level;
+--      glow/negative video
+--  10  intensity = min(pattern, taper); Heat palette index from it
+--  11  base colour select + ground select
+--  12  base - ground (signed)
+--  13  x intensity, hi/lo partial products (multiplies alone)
+--  14  partial sum
+--  15  ground + product
+--  16  negative, blanking gate
+--  17  chroma [1 2 1] history (luma waits)
+--  18  chroma low-pass, blanking gate, output register
 --
 -- EBR: 2 x 2048x8 luma line buffers (8) + 256x32 dry-video ring (2) = 10.
 
@@ -51,7 +55,7 @@ use work.video_timing_pkg.all;
 
 architecture fray of program_top is
 
-    constant C_LAT  : integer := 15;
+    constant C_LAT  : integer := 18;
     constant C_SEED : unsigned(15 downto 0) := x"3C5A";
 
     ----------------------------------------------------------------------------
@@ -108,6 +112,51 @@ architecture fray of program_top is
         end if;
     end function;
 
+    -- Pot deadband: follow the raw value only on a move of 2+ LSB (or at
+    -- either end of travel), so ADC noise never reaches the glide
+    -- (one subtract; |d| <= 1 iff d(10..1) is all-0 or all-1)
+    function f_dead(raw, tgt : unsigned(9 downto 0)) return std_logic is
+        variable v_d : unsigned(10 downto 0);
+    begin
+        v_d := resize(raw, 11) - resize(tgt, 11);
+        if raw = 0 or raw = 1023 then
+            return '1';
+        elsif v_d(10 downto 1) = 0 or v_d(10 downto 1) = 1023 then
+            return '0';
+        else
+            return '1';
+        end if;
+    end function;
+
+    -- Glide (10.3 fixed point): ease 1/8 of the way per field, no snap
+    function f_glide(tgt : unsigned(9 downto 0); g : unsigned(12 downto 0))
+        return unsigned is
+        variable v_t, v_g, v_d : signed(14 downto 0);
+    begin
+        v_t := signed(shift_left(resize(tgt, 15), 3));
+        v_g := signed(resize(g, 15));
+        v_d := v_t - v_g;
+        v_d := v_g + shift_right(v_d, 3);
+        return unsigned(v_d(12 downto 0));   -- slice, not resize (sign fold)
+    end function;
+
+    -- Tail taper: full level until the last T = 2^k pixels of the run, then
+    -- a linear ramp down (remaining * 256 / T).  k is fixed per run at launch.
+    function f_taper(rm : unsigned(11 downto 0); k : unsigned(3 downto 0))
+        return unsigned is
+        variable v_t : unsigned(8 downto 0);
+    begin
+        v_t := to_unsigned(256, 9);
+        for i in 0 to 8 loop
+            if to_integer(k) = i then
+                if shift_right(rm, i) = 0 then
+                    v_t := shift_left(resize(rm(7 downto 0), 9), 8 - i);
+                end if;
+            end if;
+        end loop;
+        return v_t;
+    end function;
+
     -- Controls (registered, quasi-static)
     signal s_pat     : unsigned(2 downto 0) := (others => '0');  -- K1 pattern
     signal s_thr     : unsigned(7 downto 0) := (others => '0');  -- K2 threshold
@@ -120,7 +169,12 @@ architecture fray of program_top is
     signal s_fall    : std_logic := '0';   -- S9  falling edges only
     signal s_hold    : std_logic := '0';   -- S10 hold run through edges
     signal s_neg     : std_logic := '0';   -- S11 negative output
-    signal s_len_k   : unsigned(9 downto 0) := (others => '0');  -- P12
+    signal s_k4_r, s_p12_r   : unsigned(9 downto 0) := (others => '0');  -- raw, registered
+    signal s_k4_mv, s_p12_mv : std_logic := '0';   -- pot moved past the deadband
+    signal s_k4_t    : unsigned(9 downto 0) := (others => '0');  -- K4 deadbanded
+    signal s_k4_g    : unsigned(12 downto 0) := (others => '0'); -- K4 glided 10.3
+    signal s_p12_t   : unsigned(9 downto 0) := (others => '0');  -- P12 deadbanded
+    signal s_p12_g   : unsigned(12 downto 0) := (others => '0'); -- P12 glided 10.3
     signal s_lm_prod : unsigned(20 downto 0) := (others => '0');
     signal s_len_max : unsigned(11 downto 0) := to_unsigned(8, 12);
 
@@ -133,7 +187,12 @@ architecture fray of program_top is
     signal s_avid_d   : std_logic := '0';
     signal s_seen     : std_logic := '0';
     signal s_aline    : unsigned(10 downto 0) := (others => '0');
-    signal s_fl       : unsigned(11 downto 0);                    -- true frame line
+    signal s_fl       : unsigned(11 downto 0) := (others => '0'); -- frame line key
+    signal s_nav      : unsigned(11 downto 0) := (others => '0'); -- clocks without avid
+    signal s_nav11_d  : std_logic := '0';
+    signal s_fev      : std_logic := '0';   -- once-per-field event pulse
+    signal s_saw_f0   : std_logic := '0';   -- field_n '0' seen this window
+    signal s_ilace    : std_logic := '0';   -- source is interlaced
     signal s_lg       : unsigned(11 downto 0) := (others => '0'); -- line group
     signal cx0        : unsigned(10 downto 0) := (others => '0'); -- column of data_in
     signal cx1        : unsigned(10 downto 0) := to_unsigned(1, 11); -- cx0 + 1 (hash look-ahead)
@@ -180,7 +239,7 @@ architecture fray of program_top is
     signal ring   : t_ring := (others => (others => '0'));
     signal wp     : unsigned(7 downto 0) := (others => '0');
     signal rq     : std_logic_vector(31 downto 0) := (others => '0');
-    signal vr7, vr8, vr9 : std_logic_vector(29 downto 0) := (others => '0');
+    signal vr7, vr8, vr9, vr10 : std_logic_vector(29 downto 0) := (others => '0');
 
     -- Run state (stage 8)
     signal r_act  : std_logic := '0';
@@ -192,6 +251,7 @@ architecture fray of program_top is
     signal r_pol  : std_logic := '0';
     signal r_tint : unsigned(2 downto 0) := (others => '0');
     signal r_wrap : std_logic := '0';   -- phase wrapped on the previous pixel
+    signal r_tk   : unsigned(3 downto 0) := (others => '0');  -- taper length log2
 
     -- Pattern stage (9)
     signal p_ink  : std_logic := '0';
@@ -200,6 +260,13 @@ architecture fray of program_top is
     signal hold9  : std_logic_vector(29 downto 0) := (others => '0');
     signal glow9  : std_logic_vector(29 downto 0) := (others => '0');
     signal neg9   : std_logic_vector(29 downto 0) := (others => '0');
+    signal p_tap  : unsigned(8 downto 0) := (others => '0');
+
+    -- Taper stage (10)
+    signal t_ink  : std_logic := '0';
+    signal t_int  : unsigned(8 downto 0) := (others => '0');
+    signal t_pidx : unsigned(4 downto 0) := (others => '0');
+    signal hold_t, glow_t, neg_t : std_logic_vector(29 downto 0) := (others => '0');
 
     -- Colour stages (10..13)
     signal b_y, b_u, b_v : unsigned(9 downto 0) := (others => '0');
@@ -220,6 +287,9 @@ architecture fray of program_top is
     signal o_y, o_u, o_v : unsigned(9 downto 0) := (others => '0');
 
     -- Output registers
+    signal g_y, g_u, g_v : std_logic_vector(9 downto 0) := (others => '0');   -- stage 16
+    signal h_y, h_u, h_v : std_logic_vector(9 downto 0) := (others => '0');   -- stage 17
+    signal h2_u, h2_v    : std_logic_vector(9 downto 0) := (others => '0');
     signal s_y_out, s_u_out, s_v_out : std_logic_vector(9 downto 0) := (others => '0');
     signal s_avid_sr    : std_logic_vector(C_LAT - 1 downto 0) := (others => '0');
     signal s_hsync_n_sr : std_logic_vector(C_LAT - 1 downto 0) := (others => '1');
@@ -237,9 +307,20 @@ begin
             s_pat   <= unsigned(registers_in(0)(9 downto 7));
             s_thr   <= unsigned(registers_in(1)(9 downto 2));
             s_col   <= unsigned(registers_in(2)(9 downto 7));
-            -- period: knob up = longer period. step 33024 -> 288 (2 .. ~228 px)
-            s_step  <= to_unsigned(33024, 16)
-                       - shift_left(resize(unsigned(registers_in(3)), 16), 5);
+            -- K4 / P12 accumulate along a run (a 1-LSB wobble moves the far
+            -- end of a long filament by half a period): deadband, glide,
+            -- and latch once per field so a change never tears mid-frame
+            -- (quasi-static: register, decide, then load -- 3 clocks of lag)
+            s_k4_r   <= unsigned(registers_in(3));
+            s_p12_r  <= unsigned(registers_in(7));
+            s_k4_mv  <= f_dead(s_k4_r, s_k4_t);
+            s_p12_mv <= f_dead(s_p12_r, s_p12_t);
+            if s_k4_mv = '1' then
+                s_k4_t <= s_k4_r;
+            end if;
+            if s_p12_mv = '1' then
+                s_p12_t <= s_p12_r;
+            end if;
             s_csh   <= unsigned(registers_in(4)(9 downto 7));
             s_dens  <= unsigned(registers_in(5)(9 downto 2));
             s_gnd_vid <= registers_in(6)(0);
@@ -247,15 +328,19 @@ begin
             s_fall    <= registers_in(6)(2);
             s_hold    <= registers_in(6)(3);
             s_neg     <= registers_in(6)(4);
-            s_len_k <= unsigned(registers_in(7));
             -- max filament length = slider fraction of the measured width + 8
-            s_lm_prod <= s_len_k * s_width;
-            s_len_max <= resize(s_lm_prod(20 downto 10), 12) + to_unsigned(8, 12);
+            s_lm_prod <= s_p12_g(12 downto 3) * s_width;
+            if s_fev = '1' then
+                s_k4_g    <= f_glide(s_k4_t, s_k4_g);
+                s_p12_g   <= f_glide(s_p12_t, s_p12_g);
+                -- period: knob up = longer period. step 33024 -> 288
+                -- (2 .. ~228 px); glide fraction bits give sub-LSB steps
+                s_step    <= to_unsigned(33024, 16)
+                             - shift_left(resize(s_k4_g, 16), 2);
+                s_len_max <= resize(s_lm_prod(20 downto 10), 12) + to_unsigned(8, 12);
+            end if;
         end if;
     end process p_ctl;
-
-    -- True frame line: bottom field (field_n = '0') holds the odd lines
-    s_fl <= s_aline & (not data_in.field_n);
 
     ----------------------------------------------------------------------------
     -- Pixel pipeline: Sobel edge bit, line/column bookkeeping, seed
@@ -277,6 +362,16 @@ begin
                 av(i) <= av(i - 1);
             end loop;
 
+            -- Frame-line key.  Interlaced: true frame line (bottom field,
+            -- field_n = '0', holds the odd lines).  Progressive: the core
+            -- holds field_n at '1', so use the active line itself -- the
+            -- appended constant bit would waste K5's first notch, halve the
+            -- Fray phase steps, and push 1080p lines 1024+ off the hash.
+            if s_ilace = '1' then
+                s_fl <= s_aline & (not data_in.field_n);
+            else
+                s_fl <= '0' & s_aline;
+            end if;
             -- line group for the hash (barrel by K5, quasi-static)
             s_lg <= shift_right(s_fl, to_integer(s_csh));
 
@@ -323,8 +418,11 @@ begin
             end if;
 
             -- S6: normalize, guards (window straddles previous field / hblank)
+            -- mag>>1: a vertical step of D codes reads 2*D, so the K2 sweep
+            -- covers luma steps 0..50% (>>3 put everything above ~12% of
+            -- the knob past any real edge -- a black screen at defaults)
             if av(5) = '1' then
-                v_m8 := f_c255(shift_right(s_mag, 3));
+                v_m8 := f_c255(shift_right(s_mag, 1));
                 if s_aline < 3 or cbx < 4 then
                     v_m8 := (others => '0');
                 end if;
@@ -345,10 +443,7 @@ begin
                 e7 <= '0';
             end if;
 
-            -- New line: reset column state; count active lines; a line
-            -- period with no active video is vertical blanking -- the FIRST
-            -- such line is the once-per-field event (immune to vsync
-            -- serration; never keyed on the vsync edge).
+            -- New line: reset column state; count active lines
             if data_in.hsync_n = '0' and s_prev_hs = '1' then
                 lrx <= (others => '0');
                 lwx <= (others => '0');
@@ -360,16 +455,34 @@ begin
                     if s_aline /= 2047 then
                         s_aline <= s_aline + 1;
                     end if;
-                else
-                    if s_aline /= 0 then
-                        -- field pulse
-                        s_fcnt <= s_fcnt + 1;
-                        if s_boil = '1' and s_fcnt = 0 then
-                            s_seed <= unsigned(s_lfsr_act);
-                        end if;
-                    end if;
-                    s_aline <= (others => '0');
                 end if;
+            end if;
+
+            -- Once-per-field event: avid absent for 2048 clocks (longer
+            -- than any hblank, shorter than any vblank).  Keyed on avid
+            -- alone, so neither vsync serration nor a doubled hsync edge
+            -- can fire it mid-picture.
+            if data_in.avid = '1' then
+                s_nav <= (others => '0');
+            elsif s_nav(11) = '0' then
+                s_nav <= s_nav + 1;
+            end if;
+            s_nav11_d <= s_nav(11);
+            s_fev     <= s_nav(11) and not s_nav11_d;
+            if s_fev = '1' then
+                s_aline <= (others => '0');
+                s_fcnt  <= s_fcnt + 1;
+                if s_boil = '1' and s_fcnt = 0 then
+                    s_seed <= unsigned(s_lfsr_act);
+                end if;
+                -- interlace = a bottom field seen within the last two fields
+                if s_fcnt(0) = '1' then
+                    s_ilace  <= s_saw_f0;
+                    s_saw_f0 <= '0';
+                end if;
+            end if;
+            if data_in.field_n = '0' then
+                s_saw_f0 <= '1';
             end if;
             if s_boil = '0' then
                 s_seed <= C_SEED;
@@ -417,6 +530,7 @@ begin
             vr7 <= rq(29 downto 0);
             vr8 <= vr7;
             vr9 <= vr8;
+            vr10 <= vr9;
         end if;
     end process p_vchain;
 
@@ -494,6 +608,7 @@ begin
         variable v_sum    : unsigned(16 downto 0);
         variable v_len    : unsigned(11 downto 0);
         variable v_x      : unsigned(15 downto 0);
+        variable v_tk     : unsigned(3 downto 0);
     begin
         if rising_edge(clk) then
             if s_hs_edge = '1' then
@@ -507,15 +622,36 @@ begin
                 if v_len < 2 then
                     v_len := to_unsigned(2, 12);
                 end if;
+                -- taper over the last T = 2^(msb(len)-1) pixels (a quarter
+                -- to a half of the run), capped at 256
+                if lp7(19 downto 17) /= 0 then    v_tk := to_unsigned(8, 4);
+                elsif lp7(16) = '1' then          v_tk := to_unsigned(7, 4);
+                elsif lp7(15) = '1' then          v_tk := to_unsigned(6, 4);
+                elsif lp7(14) = '1' then          v_tk := to_unsigned(5, 4);
+                elsif lp7(13) = '1' then          v_tk := to_unsigned(4, 4);
+                elsif lp7(12) = '1' then          v_tk := to_unsigned(3, 4);
+                elsif lp7(11) = '1' then          v_tk := to_unsigned(2, 4);
+                elsif lp7(10) = '1' then          v_tk := to_unsigned(1, 4);
+                else                              v_tk := to_unsigned(0, 4);
+                end if;
 
                 if v_launch = '1' then
                     r_act  <= '1';
                     r_rem  <= v_len;
                     r_seg  <= (others => '0');
                     r_sl   <= rhash7;
-                    r_hold <= vr9;                 -- pixel 2 left of the edge
+                    -- Hold colour: over video, the object side (left, so a
+                    -- falling edge streams its bright side into the dark);
+                    -- over black, always the BRIGHT side, else every rising
+                    -- edge launches an invisible dark filament
+                    if fall7 = '0' and s_gnd_vid = '0' then
+                        r_hold <= vr7;             -- right of the edge
+                    else
+                        r_hold <= vr9;             -- left of the edge
+                    end if;
                     r_pol  <= fall7;
                     r_tint <= rhash7(10 downto 8);
+                    r_tk   <= v_tk;
                     r_wrap <= '0';
                     if s_pat = 7 then
                         r_ph <= s_fl(3 downto 0) & x"000";   -- Fray: per-line phase
@@ -566,7 +702,6 @@ begin
     p_pattern : process(clk)
         variable v_ink  : std_logic;
         variable v_int  : unsigned(8 downto 0);
-        variable v_heat : unsigned(2 downto 0);
         variable v_y    : unsigned(10 downto 0);
         variable v_c    : signed(11 downto 0);
     begin
@@ -609,31 +744,22 @@ begin
                 v_ink := '0';
             end if;
 
-            -- heat index from intensity (256 -> top entry)
-            if v_int(8) = '1' then
-                v_heat := "111";
-            else
-                v_heat := v_int(7 downto 5);
-            end if;
-
             case to_integer(s_col) is
                 when 4      => p_pidx <= "00" & r_seg;       -- Rainbow
                 when 5      => p_pidx <= "1000" & r_pol;     -- Polarity
-                when 6      => p_pidx <= "01" & v_heat;      -- Heat
-                when others => p_pidx <= "00" & r_tint;      -- Tint
+                when others => p_pidx <= "00" & r_tint;      -- Tint (Heat: stage 10)
             end case;
-            if s_col = 6 then
-                v_int := to_unsigned(256, 9);      -- Heat: colour carries the fade
-            end if;
 
             p_ink <= v_ink;
             p_int <= v_int;
+            p_tap <= f_taper(r_rem, r_tk);
             hold9 <= r_hold;
 
-            -- Glow: luma +192 (cap 940), chroma x2 about 512 (clamp 64..960)
+            -- Glow: luma +192 (cap 768: full-scale luma kills chroma on
+            -- the hardware), chroma x2 about 512 (clamp 64..960)
             v_y := resize(unsigned(vr8(29 downto 20)), 11) + to_unsigned(192, 11);
-            if v_y > 940 then
-                v_y := to_unsigned(940, 11);
+            if v_y > 768 then
+                v_y := to_unsigned(768, 11);
             end if;
             glow9(29 downto 20) <= std_logic_vector(v_y(9 downto 0));
             v_c := shift_left(signed(resize(unsigned(vr8(19 downto 10)), 12)) - to_signed(512, 12), 1);
@@ -659,46 +785,79 @@ begin
     end process p_pattern;
 
     ----------------------------------------------------------------------------
-    -- Colour stages 10..13: out = ground + (base - ground) * int / 256
+    -- Taper stage (10): every filament fades out over its tail.  Heat takes
+    -- its palette index from the combined level, so it runs black -> red ->
+    -- yellow -> white along every pattern (not just the graded ones).
+    ----------------------------------------------------------------------------
+    p_taper_stage : process(clk)
+        variable v_c : unsigned(8 downto 0);
+    begin
+        if rising_edge(clk) then
+            if p_tap < p_int then
+                v_c := p_tap;
+            else
+                v_c := p_int;
+            end if;
+            if s_col = 6 then
+                if v_c(8) = '1' then
+                    t_pidx <= "01111";
+                else
+                    t_pidx <= "01" & v_c(7 downto 5);
+                end if;
+                t_int <= to_unsigned(256, 9);      -- Heat: colour carries the fade
+            else
+                t_pidx <= p_pidx;
+                t_int  <= v_c;
+            end if;
+            t_ink  <= p_ink;
+            hold_t <= hold9;
+            glow_t <= glow9;
+            neg_t  <= neg9;
+        end if;
+    end process p_taper_stage;
+
+    ----------------------------------------------------------------------------
+    -- Colour stages 11..14: out = ground + (base - ground) * int / 256
     ----------------------------------------------------------------------------
     p_colour : process(clk)
         variable v_sy, v_su, v_sv : signed(12 downto 0);
+        variable v_ny : unsigned(9 downto 0);
     begin
         if rising_edge(clk) then
-            -- S10: base colour + ground select
+            -- S11: base colour + ground select
             case to_integer(s_col) is
                 when 0 =>                                  -- Hold
-                    b_y <= unsigned(hold9(29 downto 20));
-                    b_u <= unsigned(hold9(19 downto 10));
-                    b_v <= unsigned(hold9(9 downto 0));
+                    b_y <= unsigned(hold_t(29 downto 20));
+                    b_u <= unsigned(hold_t(19 downto 10));
+                    b_v <= unsigned(hold_t(9 downto 0));
                 when 1 =>                                  -- Glow
-                    b_y <= unsigned(glow9(29 downto 20));
-                    b_u <= unsigned(glow9(19 downto 10));
-                    b_v <= unsigned(glow9(9 downto 0));
+                    b_y <= unsigned(glow_t(29 downto 20));
+                    b_u <= unsigned(glow_t(19 downto 10));
+                    b_v <= unsigned(glow_t(9 downto 0));
                 when 2 =>                                  -- Negative
-                    b_y <= unsigned(neg9(29 downto 20));
-                    b_u <= unsigned(neg9(19 downto 10));
-                    b_v <= unsigned(neg9(9 downto 0));
+                    b_y <= unsigned(neg_t(29 downto 20));
+                    b_u <= unsigned(neg_t(19 downto 10));
+                    b_v <= unsigned(neg_t(9 downto 0));
                 when 3 =>                                  -- White
                     b_y <= to_unsigned(768, 10);
                     b_u <= to_unsigned(512, 10);
                     b_v <= to_unsigned(512, 10);
                 when others =>                             -- palettes
-                    b_y <= C_PAL_Y(to_integer(p_pidx));
-                    b_u <= C_PAL_U(to_integer(p_pidx));
-                    b_v <= C_PAL_V(to_integer(p_pidx));
+                    b_y <= C_PAL_Y(to_integer(t_pidx));
+                    b_u <= C_PAL_U(to_integer(t_pidx));
+                    b_v <= C_PAL_V(to_integer(t_pidx));
             end case;
             if s_gnd_vid = '1' then
-                g10 <= vr9;
+                g10 <= vr10;
             else
                 g10 <= std_logic_vector(to_unsigned(64, 10))
                        & std_logic_vector(to_unsigned(512, 10))
                        & std_logic_vector(to_unsigned(512, 10));
             end if;
-            ink10 <= p_ink;
-            int10 <= p_int;
+            ink10 <= t_ink;
+            int10 <= t_int;
 
-            -- S11: difference
+            -- S12: difference
             d_y <= signed(resize(b_y, 11)) - signed(resize(unsigned(g10(29 downto 20)), 11));
             d_u <= signed(resize(b_u, 11)) - signed(resize(unsigned(g10(19 downto 10)), 11));
             d_v <= signed(resize(b_v, 11)) - signed(resize(unsigned(g10(9 downto 0)), 11));
@@ -708,7 +867,7 @@ begin
             int11_u <= int10;
             int11_v <= int10;
 
-            -- S12: partial products, each multiply alone (11x6 / 11x5)
+            -- S13: partial products, each multiply alone (11x6 / 11x5)
             pl_y <= d_y * signed('0' & std_logic_vector(int11_y(4 downto 0)));
             pl_u <= d_u * signed('0' & std_logic_vector(int11_u(4 downto 0)));
             pl_v <= d_v * signed('0' & std_logic_vector(int11_v(4 downto 0)));
@@ -718,14 +877,14 @@ begin
             g12   <= g11;
             ink12 <= ink11;
 
-            -- S13: combine partials
+            -- S14: combine partials
             pr_y <= resize(pl_y, 21) + shift_left(resize(ph_y, 21), 5);
             pr_u <= resize(pl_u, 21) + shift_left(resize(ph_u, 21), 5);
             pr_v <= resize(pl_v, 21) + shift_left(resize(ph_v, 21), 5);
             g13   <= g12;
             ink13 <= ink12;
 
-            -- S14: compose (result always lies between ground and base)
+            -- S15: compose (result always lies between ground and base)
             v_sy := signed(resize(unsigned(g13(29 downto 20)), 13)) + pr_y(20 downto 8);
             v_su := signed(resize(unsigned(g13(19 downto 10)), 13)) + pr_u(20 downto 8);
             v_sv := signed(resize(unsigned(g13(9 downto 0)), 13))   + pr_v(20 downto 8);
@@ -739,22 +898,64 @@ begin
                 o_v <= unsigned(g13(9 downto 0));
             end if;
 
-            -- S15: negative + blanking gate -> output register
-            if av(14) = '0' then
-                s_y_out <= std_logic_vector(to_unsigned(64, 10));
-                s_u_out <= std_logic_vector(to_unsigned(512, 10));
-                s_v_out <= std_logic_vector(to_unsigned(512, 10));
+            -- S16: negative + blanking gate.  Negative
+            -- luma maps 64 <-> 768 (black ground -> white at the drawn-luma
+            -- cap, never superwhite); clamp tests run on o_y in parallel
+            -- with the subtract.
+            v_ny := to_unsigned(832, 10) - o_y;
+            if o_y > 768 then
+                v_ny := to_unsigned(64, 10);
+            elsif o_y < 64 then
+                v_ny := to_unsigned(768, 10);
+            end if;
+            if av(15) = '0' then
+                g_y <= std_logic_vector(to_unsigned(64, 10));
+                g_u <= std_logic_vector(to_unsigned(512, 10));
+                g_v <= std_logic_vector(to_unsigned(512, 10));
             elsif s_neg = '1' then
-                s_y_out <= std_logic_vector(to_unsigned(1023, 10) - o_y);
-                s_u_out <= std_logic_vector(to_unsigned(1023, 10) - o_u);
-                s_v_out <= std_logic_vector(to_unsigned(1023, 10) - o_v);
+                g_y <= std_logic_vector(v_ny);
+                g_u <= std_logic_vector(to_unsigned(1023, 10) - o_u);
+                g_v <= std_logic_vector(to_unsigned(1023, 10) - o_v);
             else
-                s_y_out <= std_logic_vector(o_y);
-                s_u_out <= std_logic_vector(o_u);
-                s_v_out <= std_logic_vector(o_v);
+                g_y <= std_logic_vector(o_y);
+                g_u <= std_logic_vector(o_u);
+                g_v <= std_logic_vector(o_v);
             end if;
         end if;
     end process p_colour;
+
+    ----------------------------------------------------------------------------
+    -- Stages 17-18: horizontal [1 2 1]/4 low-pass on CHROMA only.  The core
+    -- sends 4:2:2 to the encoders (U from one pixel, V from the next), so
+    -- chroma alternating at the pixel rate -- 1-px dashes at short Period --
+    -- pairs U and V from different colours: a wrong hue that flips every
+    -- time the pattern slips against the pixel pairs = solid colour-changing
+    -- bars running to the right.  The filter turns a colour/black alternation
+    -- into steady half-strength colour; luma stays pixel-sharp.  Re-gated at
+    -- the output so the blanking interval stays exactly neutral.
+    ----------------------------------------------------------------------------
+    p_chroma_lp : process(clk)
+        variable v_su, v_sv : unsigned(11 downto 0);
+    begin
+        if rising_edge(clk) then
+            h_y  <= g_y;
+            h_u  <= g_u;   h2_u <= h_u;
+            h_v  <= g_v;   h2_v <= h_v;
+            v_su := resize(unsigned(h2_u), 12) + shift_left(resize(unsigned(h_u), 12), 1)
+                    + resize(unsigned(g_u), 12);
+            v_sv := resize(unsigned(h2_v), 12) + shift_left(resize(unsigned(h_v), 12), 1)
+                    + resize(unsigned(g_v), 12);
+            if av(17) = '0' then
+                s_y_out <= std_logic_vector(to_unsigned(64, 10));
+                s_u_out <= std_logic_vector(to_unsigned(512, 10));
+                s_v_out <= std_logic_vector(to_unsigned(512, 10));
+            else
+                s_y_out <= h_y;                    -- centre tap
+                s_u_out <= std_logic_vector(v_su(11 downto 2));
+                s_v_out <= std_logic_vector(v_sv(11 downto 2));
+            end if;
+        end if;
+    end process p_chroma_lp;
 
     ----------------------------------------------------------------------------
     -- Sync delay: C_LAT stages, identical in every mode

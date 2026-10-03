@@ -80,13 +80,12 @@ accumulator, one warp, and one Relief (the warp sits *before* the octave split,
 so all octaves drape as one surface); each octave pays only its own hash,
 mirror, and segment compares. Octaves OR together — fine ink inside coarse ink
 is invisible, so the finer weave automatically fills the *gaps* between the big
-lines. Octave k fades in via a per-frame width-cap ramp (`(6144 − step·2^k)/64`,
-clamped to C_WMAX — no pop) only while its cells are ≥ ~11 px, so at the default
-pitch there is one labyrinth, and as Pitch opens out toward big spread-apart
-lines, successively finer labyrinths appear between them with proportionally
-finer weight (base width doubles per octave in sub-cell units, which halves per
-octave in pixels). At minimum pitch all three octaves are fully present: 128,
-64, and 32 px cell heights (4× that in width).
+lines. Octave k fades in via a per-frame width-cap ramp (`(2048 − step·2^k)/32`,
+clamped to C_WMAX — no pop) only while its own cells are ≥ 32 px, so at the
+default pitch there is one labyrinth, and as Pitch opens out toward big
+spread-apart lines, successively finer labyrinths appear between them, each
+drawn with a finer pen (every octave takes the same sub-cell width, which is
+half the pixels per octave).
 
 **Relief warps the domain, not the pattern (P12, the headline).** VideoSky adds
 luma to the phase byte at R5, at the very end. Do that here and each tile
@@ -143,9 +142,11 @@ sub-cell units, so anything near 32 merges neighbouring runs into mush.
 
 ## The hash
 
-Two rounds of shift-and-add over `cx & cy` (16 bits), split across R6/R7 so the
-mix chain never lands on one critical path. Every step is a **bijection** on 16
-bits (odd multiplies `*9`, `*33`, `*5`; xor-with-own-high-bits), so distinct cells
+Three rounds of shift-and-add over `cx & cy` (16 bits), one per stage so the
+mix chain never lands on one critical path. (Two rounds left the top bits
+barely touched by the low byte — the mirror bit was 0.67 correlated between
+horizontal neighbours; round C, added in v0.5, flattens it.) Every step is a **bijection** on 16
+bits (odd multiplies `*9`, `*33`, `*5`, `*529`; xor-with-own-high-bits), so distinct cells
 never collide and the top bits are the well-mixed ones — which is what the Tangle
 threshold reads.
 
@@ -155,7 +156,7 @@ the nonlinearity.
 
 **K5 Tangle** thresholds two independent 6-bit fields of the same hash: bits
 15..10 pick the mirror, bits 9..4 pick the crossing. At 0 every cell takes tile
-0 and the staircases chain into long ordered diagonal runs. At max ~48% of cells
+0 and the staircases chain into long ordered diagonal runs. At max ~24% of cells
 are over/under crossings and the rest a coin flip of the two staircases —
 maximally knotted. (For the mirror bit, past 1/2 the pattern is merely the
 mirror of below it, so the knob stops at 1/2 and every position does something.)
@@ -163,7 +164,7 @@ mirror of below it, so the knob stops at 1/2 and every position does something.)
 ## Controls
 
 K1 Ink (ramp bias, ±256; doubles as blackout depth) · K2 Contrast (1.0×–4.9×) ·
-K3 Pitch (cell size, linear in *frequency*: ~128 px → ~4 px) · K4 Angle
+K3 Pitch (cell height, linear in *frequency*: ~164 px → ~13 px, steeper above 50%; v0.5.1) · K4 Angle
 (continuous 0–360°) · K5 Tangle (ordered runs → knotted labyrinth) · K6 Scheme
 (Parchment / Gallery / Night / Blueprint / Cyanotype / Copper, reused from
 VideoSky verbatim) · S7 Blackout · S8 Invert · S9 Tint (ink takes the source's
@@ -175,16 +176,16 @@ tearing mistake.
 
 ## Architecture
 
-10-stage streaming pipeline, `C_LATENCY = 10`. **Zero BRAM**, ~4350 LC (57%), and
-**two** pixel-rate multiplies (contrast, relief) — one fewer than VideoSky, since
-the maze needs no sine tap and a single `rel` drives both axes. The four octaves
-replicate only R6–R9 (hash, tile bits, mirror/measure, segment tests); the whole
-front end — accumulators, contrast, tone, warp — is shared.
+12-stage streaming pipeline, `C_LATENCY = 12` (same in every mode). One EBR (the
+256-entry quarter-sine, vblank only), ~5230 LC (68%), and **three** pixel-rate
+multiplies (contrast, relief, line weight). The three octaves replicate only the
+hash, tile bits, mirror/measure and segment tests; the whole front end —
+accumulators, contrast, tone, warp — is shared.
 
-The per-frame angle resolve shares ONE registered 9×8 multiplier, split-operand
+The per-frame angle resolve shares ONE registered 9×10 multiplier, split-operand
 across vblank cycles, so no wide combinational product lands on a vsync-latched
 register (the ziffern trap: those paths are still STA-timed). Interlace detected
-by field-parity toggle; the odd field starts half a line step down. Accumulators
+by field-parity toggle; one field starts half a line step down. Accumulators
 advance on **active lines only** — a blanking-hsync advance makes the phase
 field-dependent and the lattice twitters at 30 Hz.
 
@@ -195,26 +196,71 @@ Concatenation always yields an ascending range regardless of its operands; it
 only looks fine in VideoSky because every such expression there is immediately
 *assigned* to a descending signal, which reindexes by position.
 
+## v0.5 — legibility + hardware contracts (2026-09-29)
+
+From a finalization review; none of it was HW-reported, all found by reading
+the code and checking the numbers.
+
+- **Legible scale.** v0.4's Pitch ran to 4 px cells and the default sat at
+  9.5 px: parallel runs 2.4 px apart, horizontal strokes 0.67 px thick — thinner
+  than a scan line, so a third of the long runs fell between lines and vanished
+  (likely the real cause of v0.3's "too dense"). Pitch now spans ~164 → ~27 px
+  cells (`step = 400 + 2·K3`); default K3=400 = 55 px cells. **Line weight is
+  constant in pixels**: base weight in quarter-pixels × (step>>4) >> 6 gives
+  sub-cell units, so Pitch changes spacing, not thickness. Octaves appear only
+  while their own cells are ≥ 32 px (`C_OCT_LIM` 2048, ramp >>5), so the
+  default shows one labyrinth; finer octaves now draw with a finer pen (same
+  sub-cell width = half the pixels per octave — the documented intent; v0.4's
+  per-octave shift actually held pixels constant).
+- **Square elbows.** Each segment stopped at the next one's centreline, biting
+  a w×wv square out of every outer corner (4.5×6 px at coarse pitch). Segment
+  extents now test on coordinates pulled in/out by the perpendicular half-width
+  (um/up/vm/vp, saturating). Tile 1's mirror is now u→256−u (was 255−u, a
+  1-unit jog at every mirrored port).
+- **Hash round C** (`v ^= v>>7; v += v<<4 + v<<9`). The mirror bit (top 6 bits)
+  was 0.67 correlated between horizontal neighbours with a 43× FFT peak —
+  visible periodic structure. Now every neighbour correlation < 0.01, spectrum
+  flat, all three seeds.
+- **Relief at 10 bits** (was 6: 64 visible steps on the headline slider).
+- **Angle**: 256-entry quarter-sine (0.35°/LSB, was 1.4° with 7-bit cos/sin),
+  rotation and scale **pivot on the screen centre** (vblank loop walks the
+  origin back by measured W/2·dpx + H/2·dpy, one add per clock), 3-LSB deadband
+  on Pitch/Angle with end snaps (Angle 0 exactly upright).
+- **Contracts**: blanking gate (Y 64 / UV 512 outside avid); saw-active guard on
+  the Drift increment and interlace detect (serrated vsync); Drift counter
+  widened 12→16 bits (the 12-bit wrap re-randomised the whole maze every ~34 s).
+- **v0.5.1**: K3's top end doubled in density on request — above K3=512 the
+  step climbs 5/LSB instead of 2 (`step = 400 + 2·K3 + 5·max(0, K3−512)`), so
+  the finest cell is ~13 px; default and lower half unchanged.
+- Presets: only Circuit re-tuned (K3 700 ≈ 24 px cells, K1 300); the others' old K3 values
+  land on sensible sizes under the new mapping.
+
 ## Status
 
-v0.4: all 6 configs routed on **seed 1**, no retries:
+v1.0.0 build (engine = v0.5.1):
 
 | Config | Fmax | LCs |
 |---|---|---|
-| HD Analog | 91.10 MHz | 4125 |
-| SD Analog | 84.29 MHz | 4133 |
-| HD HDMI | 84.58 MHz | 4121 |
-| SD HDMI | 88.37 MHz | 4136 |
-| HD Dual | 93.81 MHz | 4136 |
-| SD Dual | 88.37 MHz | 4145 |
+| HD Analog | 77.08 MHz | 5268 |
+| SD Analog | 74.27 MHz | 5261 |
+| HD HDMI | 78.76 MHz | 5268 |
+| SD HDMI | 83.42 MHz | 5278 |
+| HD Dual | 81.05 MHz | 5268 |
+| SD Dual | 78.54 MHz | 5275 |
 
-Full clock everywhere (74.25 MHz required for HD). Packaged.
+(SD Fmin is 27 MHz.) HD Analog's critical path is the vblank sequencer's state decode into register
+clock-enables (10.7 of 13.2 ns routing). Margin is thin; if a rebuild misses,
+register the vsync edge and use the registered avid as the sequencer run
+condition to shorten that cone.
 
 Version history against user feedback: v0.2 Truchet weave HW-viewed = "OK";
 v0.3 added fractal octaves + under/over crossings, HW verdict = "too
 intricate/dense"; v0.4 = the dial-back (3 octaves, half crossing rate) + the
-4:1 meander cells. **v0.4's render is not yet sim-verified.** Open risks: hash
-quality (two rounds on 16 bits is thin; bias shows as periodic structure in the
-tile field); vertical-stroke quarter-widths at low w (during octave fade-in
-`(w+3)/4` rounds to 1 — hairline but present); and whether 512 px-wide base
-cells at minimum Pitch read as intended or as too-sparse giant runs.
+4:1 meander cells (never HW-viewed); v0.5 = legibility + contracts; v0.5.1 =
+K3 top end 2× denser on request.
+
+**v1.0.0 FINAL (2026-09-30)** — the user signed off on everything except the
+presets, which are to be revisited separately. Engine, controls and schemes are
+frozen as of v0.5.1; 1.0.0 changes only text (version, TOML header/description,
+docs). Left as-is in 1.0 (never HW-reported as a problem): schemes are authored
+in unswapped BT.601, and Tint uses the scheme's ink luma.

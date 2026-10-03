@@ -1,211 +1,455 @@
 #!/usr/bin/env python3
-"""CUBIST frame-setup microcode.
+"""CUBIST per-frame microcode, v0.3: a turning cube.
 
-Translation of the hand-written frame FSM (~110 states) onto the engine in
-ueng.vhd.  The arithmetic is identical; what disappears is ~110 private
-datapaths and the 18-bit operand mux feeding the shared multiplier.
+Runs once per field in vertical blanking on the engine in cubist.vhd
+(assembled by uasm.py, emulated by uemu.py).  Each field it:
 
-Register map (rf, 128 x signed 16):
-   0.. 8  basis B(axis,component), Q12
-   9..11  H projected on each cube axis, Q8
-  12..17  half-basis sxh/syh, screen Q2
-  18..25  corner x        26..33  corner y
-  34..39  cs_yaw_s, cs_yaw_c, cs_pit_s, cs_pit_c, cs_rol_s, cs_rol_c
-  40..42  glide-smoothed yaw / pitch / roll, 12-bit angle
-  43      loop counter j        44  loop counter i        45  loop counter c
-  46..59  scratch
+  1. reads the controls: knobs 1-3 (orientation, deadbanded and glided),
+     switches S7 run (off = solved) / S8-S10 auto yaw, pitch, roll, slider =
+     layer-turn speed;
+  2. steps the layer turn: a random face (never the same one twice running)
+     turns a quarter turn in a random direction with an eased angle, then the
+     sticker state is permuted and the next turn starts;
+  3. builds the cube basis from yaw/pitch/roll, and from it two boxes -- the
+     turning SLICE (3x3x1, rotated by theta about the turn axis) and the
+     BLOCK (3x3x2) -- and their visible faces, near box first;
+  4. for each visible face (<= 6 slots) writes the pixel path's descriptors:
+     the u/v DDAs (gradient, field seed, line wrap), the face descriptor
+     (sticker base, shape, gap edge, silhouette edges), the half-vector
+     projections, the flat light and the lit sticker chroma per colour.
+
+Screen geometry is in Q6 pixels throughout (no whole-pixel rounding, so
+faces neither skew nor snap as the cube moves); UV gradients come from the
+projected box axes, not from rounded corner deltas.
 """
 import sys
 sys.path.insert(0, '.')
-from uasm import Asm, emit_vhdl, SLOTW
-
-R_BAS, R_H, R_HB, R_CX, R_CY = 0, 9, 12, 18, 26
-R_TRIG, R_ANG = 34, 40
-J, I, C = 43, 44, 45
-T0, T1, T2, T3, T4, T5 = 46, 47, 48, 49, 50, 51
-ANG, SK, SNEG, S0, S1, KK = 52, 53, 54, 55, 56, 57
-ZERO, ONE = 58, 59
-EX, EY, FY, ZOOM, ZSM, FUSE, CXR, CYR = 60, 61, 62, 63, 64, 65, 66, 67
-R_VIS = 68          # 6 visibility flags
-R_TBL = 74          # packed face tables (corner/adj/axis), LDX by face
-R_SLOT, R_FACE = 92, 93
+from uasm import Asm, emit_vhdl, SLOTW, CTLR
+import turn_model as tm
 
 a = Asm()
 
-# ---------------------------------------------------------------- constants
-a.emit('LDI', dst=ZERO, imm=0)
-a.emit('LDI', dst=ONE,  imm=1)
+# ------------------------------------------------------------ register map
+ZERO, ONE = 0, 1
+T = list(range(2, 14))                      # T0..T11 scratch
+T0, T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11 = T
+RET, RET2 = 14, 15
+KH = [16, 17, 18]                           # deadbanded knob values
+GA = [19, 20, 21]                           # glided knob angles (16-bit)
+AP = [22, 23, 24]                           # auto-rotate phases
+SW, SLD, TT, TF, TD, TACT, TPREV = 25, 26, 27, 28, 29, 30, 31
+TRG = 32                                    # 32..39: sin/cos yaw,pitch,roll,theta
+B = 44                                      # 44..52 basis B[3i + comp], Q12
+Z, CX6, CY6, YST, Y0, K16M, TH = 53, 54, 55, 56, 57, 58, 59
+BOX0, BOX1 = 60, 86                         # 26 fields per box
+PX, PY, NZ, HD, KD, FD, HPX, HPY, CBX, CBY = 0, 3, 6, 9, 12, 15, 18, 20 + 1, 24, 25
+VIS = 112                                   # 112..123: VIS[6*box + face]
+FIRST, SLOT, AAX, ASIDE = 124, 125, 126, 127
 
-# -------------------------------------------------- phase 1: angle glide
-# an += clamp_to_at_least_one_step((knob<<2) - an) >> 4, so the cube eases
-# toward the knob instead of snapping.  s_zfirst forces a snap on the first
-# valid frame (see the autozoom note: raster measurements are only good from
-# frame 3, so everything that latches them must survive a mid-flight change).
-for k, (ctl, reg) in enumerate(((0, R_ANG), (1, R_ANG + 1), (2, R_ANG + 2))):
-    a.emit('CTL', dst=T0, imm=ctl)          # knob, 10 bits
-    a.emit('SHL', dst=T0, a=T0, imm=2)      # -> 12-bit angle
-    a.emit('SUB', dst=T1, a=T0, b=reg)      # delta
-    a.emit('SHR', dst=T2, a=T1, imm=4)      # one sixteenth of the way
-    # if the step rounded to zero but there is still a gap, move one tick
-    a.emit('JNZ', a=T2, imm=f'glide{k}')
-    a.emit('JLT', a=T1, b=ZERO, imm=f'gneg{k}')
-    a.emit('JLT', a=ZERO, b=T1, imm=f'gpos{k}')
-    a.emit('JMP', imm=f'glide{k}')
-    a.label(f'gpos{k}'); a.emit('MOV', dst=T2, a=ONE); a.emit('JMP', imm=f'glide{k}')
-    a.label(f'gneg{k}'); a.emit('NEG', dst=T2, a=ONE)
-    a.label(f'glide{k}')
-    a.emit('ADD', dst=reg, a=reg, b=T2)
-    a.emit('AND', dst=reg, a=reg, imm=0xFFF)
-    # first valid frame: snap
-    a.emit('CTL', dst=T3, imm=10)           # zfirst
-    a.emit('JNZ', a=T3, imm=f'snap{k}')
-    a.emit('JMP', imm=f'done{k}')
-    a.label(f'snap{k}'); a.emit('MOV', dst=reg, a=T0)
-    a.label(f'done{k}')
+a.zero = ZERO
 
-# ------------------------------------------- phase 2: six sine lookups
-# One ROM port, folded quarter table, linear interpolation between entries.
-# j = 0..5 selects (yaw,pitch,roll) x (sin,cos); cos is sin(a + 90 deg).
-a.emit('LDI', dst=J, imm=0)
-a.label('trig')
-a.emit('SHR', dst=T0, a=J, imm=1)                 # which angle
-a.emit('LDI', dst=ANG, imm=0)
-a.emit('JNZ', a=T0, imm='tr_np')
-a.emit('MOV', dst=ANG, a=R_ANG); a.emit('JMP', imm='tr_have')
-a.label('tr_np')
-a.emit('SUB', dst=T1, a=T0, b=ONE)
-a.emit('JNZ', a=T1, imm='tr_r')
-a.emit('MOV', dst=ANG, a=R_ANG + 1); a.emit('JMP', imm='tr_have')
-a.label('tr_r'); a.emit('MOV', dst=ANG, a=R_ANG + 2)
-a.label('tr_have')
-a.emit('BIT', dst=T2, a=J, imm=0)                 # odd j -> cosine
-a.emit('JNZ', a=T2, imm='tr_cos')
-a.emit('JMP', imm='tr_fold')
-a.label('tr_cos')
-a.emit('LDI', dst=T3, imm=1024)
-a.emit('ADD', dst=ANG, a=ANG, b=T3)
-a.emit('AND', dst=ANG, a=ANG, imm=0xFFF)
-a.label('tr_fold')
-# index = ang(9:4), mirrored in the upper half of each half-cycle
-a.emit('SHR', dst=T0, a=ANG, imm=4)
-a.emit('AND', dst=T0, a=T0, imm=0x3F)
-a.emit('BIT', dst=T1, a=ANG, imm=10)
-a.emit('BIT', dst=SNEG, a=ANG, imm=11)
-a.emit('JNZ', a=T1, imm='tr_mir')
-a.emit('MOV', dst=SK, a=T0)
-a.emit('ADD', dst=KK, a=T0, b=ONE)
-a.emit('JMP', imm='tr_rd')
-a.label('tr_mir')
-a.emit('LDI', dst=T2, imm=64)
-a.emit('SUB', dst=SK, a=T2, b=T0)
-a.emit('SUB', dst=KK, a=SK, b=ONE)
-a.label('tr_rd')
-a.emit('SIN', dst=S0, a=SK)
-a.emit('SIN', dst=S1, a=KK)
-a.emit('JNZ', a=SNEG, imm='tr_neg')
+# face-loop names (reuse 32..43, free once the boxes are built)
+BOX, FI, BB, NCD, UCD, VCD = 32, 33, 34, 35, 36, 37
+SUX, SUY, SVX, SVY, OX, OY = 38, 39, 40, 41, 42, 43
+DS, DA = RET2, TH                           # sign and magnitude of D
+
+C_HX, C_HY, C_HZ = -57, 81, 236             # half-vector, Q8
+KEY = (-107, 154, 184)                      # key light direction, Q8-ish
+FILL = (141, -141, 161)
+RATES = (72, 45, 28)                        # auto yaw/pitch/roll, per field
+C_AMB = 62
+
+_n = [0]
+
+
+def L(stem):
+    _n[0] += 1
+    return f'{stem}_{_n[0]}'
+
+
+def call(sub):
+    r = L('ret')
+    a.emit('LDI', dst=RET, imm=r)
+    a.emit('JMP', imm=sub)
+    a.label(r)
+
+
+def negif(dst, src, flag):
+    """dst = -src if flag /= 0 else src"""
+    l1, l2 = L('ng'), L('ng')
+    a.emit('JNZ', a=flag, imm=l1)
+    a.emit('MOV', dst=dst, a=src)
+    a.emit('JMP', imm=l2)
+    a.label(l1)
+    a.emit('NEG', dst=dst, a=src)
+    a.label(l2)
+
+
+def ldi(dst, v, scratch):
+    """any 32-bit constant (scratch is clobbered)"""
+    assert scratch != dst
+    if -8192 <= v < 8192:
+        a.emit('LDI', dst=dst, imm=v)
+        return
+    hi, lo = v >> 12, v & 0xFFF
+    ldi(dst, hi, scratch)
+    a.emit('SHL', dst=dst, a=dst, imm=12)
+    if lo:
+        a.emit('LDI', dst=scratch, imm=lo)
+        a.emit('ADD', dst=dst, a=dst, b=scratch)
+
+
+a.emit('JMP', imm='main')
+
+# ======================================================= subroutines
+# TRIG: T1 = sin(T0) in Q12, T0 a 16-bit angle (65536 = one turn).  Folded
+# quarter table (65 entries), linear interpolation on the low 8 bits.
+a.label('TRIG')
+a.emit('SHR', dst=T3, a=T0, imm=8)
+a.emit('AND', dst=T3, a=T3, imm=63)
+a.emit('BIT', dst=T4, a=T0, imm=14)
+a.emit('JNZ', a=T4, imm='tr_mir')
+a.emit('SIN', dst=T5, a=T3)
+a.emit('ADD', dst=T3, a=T3, b=ONE)
+a.emit('SIN', dst=T3, a=T3)
 a.emit('JMP', imm='tr_int')
-a.label('tr_neg')
-a.emit('NEG', dst=S0, a=S0)
-a.emit('NEG', dst=S1, a=S1)
+a.label('tr_mir')
+a.emit('LDI', dst=T4, imm=64)
+a.emit('SUB', dst=T3, a=T4, b=T3)
+a.emit('SIN', dst=T5, a=T3)
+a.emit('SUB', dst=T3, a=T3, b=ONE)
+a.emit('SIN', dst=T3, a=T3)
 a.label('tr_int')
-# interpolate the low 4 angle bits: s0 + (s1-s0)*frac/16
-a.emit('SUB', dst=T0, a=S1, b=S0)
-a.emit('AND', dst=T1, a=ANG, imm=0xF)
-a.emit('MUL', a=T0, b=T1)
-a.emit('MRD', dst=T2, imm=4)
-a.emit('ADD', dst=T3, a=S0, b=T2)
-# store to cs_* by j
-for n in range(6):
-    a.emit('LDI', dst=T4, imm=n)
-    a.emit('SUB', dst=T5, a=J, b=T4)
-    a.emit('JNZ', a=T5, imm=f'tr_s{n}')
-    a.emit('MOV', dst=R_TRIG + n, a=T3)
-    a.label(f'tr_s{n}')
-a.emit('ADD', dst=J, a=J, b=ONE)
+a.emit('SUB', dst=T3, a=T3, b=T5)
+a.emit('AND', dst=T2, a=T0, imm=255)
+a.emit('MUL', a=T3, b=T2)
+a.emit('MRD', dst=T3, imm=0)
+a.emit('SHR', dst=T3, a=T3, imm=8)
+a.emit('ADD', dst=T1, a=T5, b=T3)
+a.emit('BIT', dst=T4, a=T0, imm=15)
+a.emit('JNZ', a=T4, imm='tr_neg')
+a.emit('JR', a=RET)
+a.label('tr_neg')
+a.emit('NEG', dst=T1, a=T1)
+a.emit('JR', a=RET)
+
+# DIVS: T1 = +/- min((|T0| << 16) / DA, 2^20-1), negative iff T0 < 0 xor DS.
+# The divider takes magnitudes only; the signs are handled here.
+a.label('DIVS')
+a.emit('JLT', a=T0, b=ZERO, imm='dv_neg')
+a.emit('DIV', a=T0, b=DA, imm=16)
+a.emit('DRD', dst=T1)
+a.emit('JNZ', a=DS, imm='dv_flip')
+a.emit('JR', a=RET)
+a.label('dv_neg')
+a.emit('NEG', dst=T0, a=T0)
+a.emit('DIV', a=T0, b=DA, imm=16)
+a.emit('DRD', dst=T1)
+a.emit('JNZ', a=DS, imm='dv_out')
+a.label('dv_flip')
+a.emit('NEG', dst=T1, a=T1)
+a.label('dv_out')
+a.emit('JR', a=RET)
+
+# FCODE: axis codes of face T0 (U D R L F B): T1 = normal, T2 = U, T3 = V.
+# normal = face ^ 2 for faces 0..3; U = 4 - 2p, V = (6 - 2p) mod 6 for the
+# face pair p = face >> 1, swapped on odd faces.
+a.label('FCODE')
+a.emit('MOV', dst=T1, a=T0)
+a.emit('LDI', dst=T4, imm=4)
+a.emit('JGE', a=T0, b=T4, imm='fc_n')
+a.emit('LDI', dst=T4, imm=2)
+a.emit('ADD', dst=T1, a=T0, b=T4)
+a.emit('JLT', a=T0, b=T4, imm='fc_n')
+a.emit('SUB', dst=T1, a=T0, b=T4)
+a.label('fc_n')
+a.emit('SHR', dst=T4, a=T0, imm=1)
+a.emit('ADD', dst=T4, a=T4, b=T4)                 # 2p
+a.emit('LDI', dst=T2, imm=4)
+a.emit('SUB', dst=T2, a=T2, b=T4)
+a.emit('LDI', dst=T3, imm=6)
+a.emit('SUB', dst=T3, a=T3, b=T4)
 a.emit('LDI', dst=T4, imm=6)
-a.emit('JLT', a=J, b=T4, imm='trig')
+a.emit('JLT', a=T3, b=T4, imm='fc_v')
+a.emit('LDI', dst=T3, imm=0)
+a.label('fc_v')
+a.emit('AND', dst=T4, a=T0, imm=1)
+a.emit('JNZ', a=T4, imm='fc_sw')
+a.emit('JR', a=RET)
+a.label('fc_sw')
+a.emit('MOV', dst=T4, a=T2)
+a.emit('MOV', dst=T2, a=T3)
+a.emit('MOV', dst=T3, a=T4)
+a.emit('JR', a=RET)
 
+# ======================================================= main
+a.label('main')
+a.emit('LDI', dst=ZERO, imm=0)
+a.emit('LDI', dst=ONE, imm=1)
 
-# ------------------------------------------ phase 3: basis = identity
+# ---------------------------------------------------- 1. controls
+a.emit('CTL', dst=SW, imm=CTLR['sw'])
+a.emit('CTL', dst=SLD, imm=CTLR['slider'])
+a.emit('CTL', dst=T6, imm=CTLR['zfirst'])
+RAW, RATE = TRG, TRG + 3                    # scratch until the trig runs
+for k in range(3):
+    a.emit('CTL', dst=RAW + k, imm=CTLR['k%d' % (k + 1)])
+    a.emit('LDI', dst=RATE + k, imm=RATES[k])
+a.emit('SHR', dst=T11, a=SW, imm=1)               # S8.. walk down to bit 0
+a.emit('LDI', dst=T7, imm=0)                      # k
+a.label('kn')
+# deadband: the pot's ADC noise must never reach the rotation
+a.emit('LDX', dst=T0, a=T7, imm=RAW)
+a.emit('LDX', dst=T8, a=T7, imm=KH[0])
+a.emit('SUB', dst=T1, a=T0, b=T8)
+a.emit('ABS', dst=T1, a=T1)
+a.emit('LDI', dst=T2, imm=3)
+a.emit('JLT', a=T1, b=T2, imm='kn_keep')
+a.emit('MOV', dst=T8, a=T0)
+a.label('kn_keep')
+a.emit('JNZ', a=T6, imm='kn_snap')
+a.emit('JMP', imm='kn_glide')
+a.label('kn_snap')
+a.emit('MOV', dst=T8, a=T0)
+a.label('kn_glide')
+a.emit('STX', a=T7, b=T8, imm=KH[0])
+# glide toward the knob the short way round (16-bit wrap), 1/8 per field
+a.emit('SHL', dst=T0, a=T8, imm=6)
+a.emit('LDX', dst=T9, a=T7, imm=GA[0])
+a.emit('SUB', dst=T1, a=T0, b=T9)
+a.emit('SHL', dst=T1, a=T1, imm=8)
+a.emit('SHL', dst=T1, a=T1, imm=8)
+a.emit('SHR', dst=T1, a=T1, imm=8)
+a.emit('SHR', dst=T1, a=T1, imm=11)
+a.emit('ADD', dst=T9, a=T9, b=T1)
+a.emit('JNZ', a=T6, imm='kn_gs')
+a.emit('JMP', imm='kn_gd')
+a.label('kn_gs')
+a.emit('MOV', dst=T9, a=T0)
+a.label('kn_gd')
+a.emit('STX', a=T7, b=T9, imm=GA[0])
+# auto-rotate: S8 yaw, S9 pitch, S10 roll
+a.emit('AND', dst=T1, a=T11, imm=1)
+a.emit('JNZ', a=T1, imm='kn_auto')
+a.emit('JMP', imm='kn_next')
+a.label('kn_auto')
+a.emit('LDX', dst=T2, a=T7, imm=AP[0])
+a.emit('LDX', dst=T3, a=T7, imm=RATE)
+a.emit('ADD', dst=T2, a=T2, b=T3)
+a.emit('STX', a=T7, b=T2, imm=AP[0])
+a.label('kn_next')
+a.emit('SHR', dst=T11, a=T11, imm=1)
+a.emit('ADD', dst=T7, a=T7, b=ONE)
+a.emit('LDI', dst=T0, imm=3)
+a.emit('JLT', a=T7, b=T0, imm='kn')
+
+# ---------------------------------------------------- 2. the layer turn
+# S7 run: off = solved -- re-written every field while off (idempotent, so a
+# bouncing switch can't matter), which also snaps a turn in progress home
+a.emit('BIT', dst=T0, a=SW, imm=0)
+a.emit('JNZ', a=T0, imm='t_run')
+a.emit('JMP', imm='t_reset')
+a.label('t_run')
+a.emit('JNZ', a=TACT, imm='t_adv')
+
+a.label('t_start')                                # random face, not the last
+a.emit('CTL', dst=T0, imm=CTLR['rand'])
+a.emit('LDI', dst=T5, imm=5)
+a.label('t_pick')
+a.emit('AND', dst=T1, a=T0, imm=7)
+a.emit('LDI', dst=T2, imm=6)
+a.emit('JGE', a=T1, b=T2, imm='t_pnx')
+a.emit('SUB', dst=T3, a=T1, b=TPREV)
+a.emit('JNZ', a=T3, imm='t_got')
+a.label('t_pnx')
+a.emit('SHR', dst=T0, a=T0, imm=3)
+a.emit('SUB', dst=T5, a=T5, b=ONE)
+a.emit('JNZ', a=T5, imm='t_pick')
+a.emit('ADD', dst=T1, a=TPREV, b=ONE)             # fallback: the next face
+a.emit('LDI', dst=T2, imm=6)
+a.emit('JLT', a=T1, b=T2, imm='t_got')
+a.emit('LDI', dst=T1, imm=0)
+a.label('t_got')
+a.emit('MOV', dst=TF, a=T1)
+a.emit('MOV', dst=TPREV, a=T1)
+a.emit('CTL', dst=T0, imm=CTLR['rand'])
+a.emit('BIT', dst=TD, a=T0, imm=15)
+a.emit('LDI', dst=TT, imm=0)
+a.emit('LDI', dst=TACT, imm=1)
+a.emit('JMP', imm='t_theta')
+
+a.label('t_adv')                                  # slider = turn speed
+a.emit('SHL', dst=T0, a=SLD, imm=2)
+a.emit('ADD', dst=T0, a=T0, b=SLD)
+a.emit('LDI', dst=T1, imm=410)
+a.emit('ADD', dst=T0, a=T0, b=T1)
+a.emit('ADD', dst=TT, a=TT, b=T0)
+a.emit('BIT', dst=T0, a=TT, imm=16)
+a.emit('JNZ', a=T0, imm='t_done')
+a.emit('JMP', imm='t_theta')
+
+a.label('t_done')                                 # permute the stickers
+a.emit('LDI', dst=T0, imm=20)
+a.emit('MUL', a=TF, b=T0)
+a.emit('MRD', dst=T10, imm=0)
+a.emit('LDI', dst=T0, imm=tm.TABLE_CYC)
+a.emit('ADD', dst=T10, a=T10, b=T0)
+a.emit('LDI', dst=T11, imm=5)
+a.label('t_cyc')
+for m in range(4):
+    a.emit('SRD', dst=T0 + m, a=T10, imm=m)       # T0..T3 = members
+for m in range(4):
+    a.emit('SRD', dst=T4 + m, a=T0 + m, imm=0)    # T4..T7 = colours
+a.emit('JNZ', a=TD, imm='t_rev')
+a.emit('SWR', a=T1, b=T4)
+a.emit('SWR', a=T2, b=T5)
+a.emit('SWR', a=T3, b=T6)
+a.emit('SWR', a=T0, b=T7)
+a.emit('JMP', imm='t_cnx')
+a.label('t_rev')
+a.emit('SWR', a=T0, b=T5)
+a.emit('SWR', a=T1, b=T6)
+a.emit('SWR', a=T2, b=T7)
+a.emit('SWR', a=T3, b=T4)
+a.label('t_cnx')
+a.emit('LDI', dst=T0, imm=4)
+a.emit('ADD', dst=T10, a=T10, b=T0)
+a.emit('SUB', dst=T11, a=T11, b=ONE)
+a.emit('JNZ', a=T11, imm='t_cyc')
+a.emit('LDI', dst=TACT, imm=0)
+a.emit('LDI', dst=TT, imm=0)
+a.emit('JMP', imm='t_idle')
+
+a.label('t_reset')                                # write the solved colours
+a.emit('LDI', dst=T0, imm=tm.TABLE_STATE)
+a.emit('LDI', dst=T1, imm=0)
+a.emit('LDI', dst=T2, imm=9)
+a.label('t_rl')
+a.emit('SWR', a=T0, b=T1)
+a.emit('ADD', dst=T0, a=T0, b=ONE)
+a.emit('SUB', dst=T2, a=T2, b=ONE)
+a.emit('JNZ', a=T2, imm='t_rl')
+a.emit('LDI', dst=T2, imm=9)
+a.emit('ADD', dst=T1, a=T1, b=ONE)
+a.emit('LDI', dst=T3, imm=6)
+a.emit('JLT', a=T1, b=T3, imm='t_rl')
+a.emit('LDI', dst=TACT, imm=0)
+a.emit('LDI', dst=TT, imm=0)
+
+a.label('t_idle')
+a.emit('LDI', dst=TH, imm=0)
+a.emit('JMP', imm='t_trig')
+
+a.label('t_theta')                                # eased: 45 deg (1 - cos pi t)
+a.emit('SHR', dst=T0, a=TT, imm=1)
+call('TRIG_COS')
+a.emit('LDI', dst=T2, imm=4096)
+a.emit('ADD', dst=T2, a=T2, b=T2)                 # 8192
+a.emit('ADD', dst=T1, a=T1, b=T1)
+a.emit('SUB', dst=TH, a=T2, b=T1)
+a.emit('JNZ', a=TD, imm='t_thn')
+a.emit('JMP', imm='t_trig')
+a.label('t_thn')
+a.emit('NEG', dst=TH, a=TH)
+
+# ---------------------------------------------------- 3. trig
+ANG = TRG + 8                                     # 40..43
+a.label('t_trig')
+for k in range(3):
+    a.emit('ADD', dst=ANG + k, a=GA[k], b=AP[k])
+a.emit('MOV', dst=ANG + 3, a=TH)
+a.emit('LDI', dst=T6, imm=0)                      # k
+a.emit('LDI', dst=T7, imm=0)                      # 2k
+a.label('tg')
+a.emit('LDX', dst=T0, a=T6, imm=ANG)
+call('TRIG')
+a.emit('STX', a=T7, b=T1, imm=TRG)
+a.emit('LDX', dst=T0, a=T6, imm=ANG)
+call('TRIG_COS')
+a.emit('STX', a=T7, b=T1, imm=TRG + 1)
+a.emit('ADD', dst=T6, a=T6, b=ONE)
+a.emit('ADD', dst=T7, a=T7, b=ONE)
+a.emit('ADD', dst=T7, a=T7, b=ONE)
+a.emit('LDI', dst=T0, imm=4)
+a.emit('JLT', a=T6, b=T0, imm='tg')
+a.emit('JMP', imm='basis')
+
+# cos(T0) = sin(T0 + 16384); 16384 does not fit a 14-bit immediate
+a.label('TRIG_COS')
+a.emit('LDI', dst=T2, imm=4096)
+a.emit('SHL', dst=T2, a=T2, imm=2)
+a.emit('ADD', dst=T0, a=T0, b=T2)
+a.emit('JMP', imm='TRIG')
+
+# ---------------------------------------------------- 4. basis
+a.label('basis')
 for c in range(9):
-    a.emit('LDI', dst=R_BAS + c, imm=4096 if c in (0, 4, 8) else 0)
+    a.emit('LDI', dst=B + c, imm=4096 if c in (0, 4, 8) else 0)
+# (a, b) := (a c - b s, a s + b c) per basis vector: roll, pitch, yaw
+S_YAW, C_YAW, S_PIT, C_PIT, S_ROL, C_ROL, S_TH, C_TH = range(TRG, TRG + 8)
+for n, (p0, p1, rc, rs) in enumerate(((0, 1, C_ROL, S_ROL), (1, 2, C_PIT, S_PIT),
+                                      (2, 0, C_YAW, S_YAW))):
+    a.emit('LDI', dst=T7, imm=0)                  # 3i
+    lb = L('bas')
+    a.label(lb)
+    a.emit('LDX', dst=T4, a=T7, imm=B + p0)
+    a.emit('LDX', dst=T5, a=T7, imm=B + p1)
+    a.emit('MUL', a=T4, b=rc); a.emit('MRD', dst=T0, imm=12)
+    a.emit('MUL', a=T5, b=rs); a.emit('MRD', dst=T1, imm=12)
+    a.emit('MUL', a=T4, b=rs); a.emit('MRD', dst=T2, imm=12)
+    a.emit('MUL', a=T5, b=rc); a.emit('MRD', dst=T3, imm=12)
+    a.emit('SUB', dst=T0, a=T0, b=T1)
+    a.emit('ADD', dst=T2, a=T2, b=T3)
+    a.emit('STX', a=T7, b=T0, imm=B + p0)
+    a.emit('STX', a=T7, b=T2, imm=B + p1)
+    a.emit('LDI', dst=T0, imm=3)
+    a.emit('ADD', dst=T7, a=T7, b=T0)
+    a.emit('LDI', dst=T0, imm=9)
+    a.emit('JLT', a=T7, b=T0, imm=lb)
 
-# ------------------------------- phase 4: basis rotation, UNROLLED
-# (a,b) := (a*c - b*s, a*s + b*c) for each basis vector about each axis.
-# Unrolled rather than looped: the loop body needs B[3i+p] -- a computed
-# register address -- and indexed addressing would cost an extra pipeline
-# state in the engine.  Microcode ROM is block RAM, which is the resource
-# this design has spare.
-AXES = ((0, 1, R_TRIG + 5, R_TRIG + 4),    # roll  : c = cs_rol_c, s = cs_rol_s
-        (1, 2, R_TRIG + 3, R_TRIG + 2),    # pitch
-        (2, 0, R_TRIG + 1, R_TRIG + 0))    # yaw
-for (p0, p1, rc, rs) in AXES:
-    for i in range(3):
-        ra, rb = R_BAS + 3 * i + p0, R_BAS + 3 * i + p1
-        a.emit('MUL', a=ra, b=rc); a.emit('MRD', dst=T0, imm=12)   # a*c
-        a.emit('MUL', a=rb, b=rs); a.emit('MRD', dst=T1, imm=12)   # b*s
-        a.emit('MUL', a=ra, b=rs); a.emit('MRD', dst=T2, imm=12)   # a*s
-        a.emit('MUL', a=rb, b=rc); a.emit('MRD', dst=T3, imm=12)   # b*c
-        a.emit('SUB', dst=ra, a=T0, b=T1)
-        a.emit('ADD', dst=rb, a=T2, b=T3)
-
-
-# --------------------------- phase 5: orthographic extent + autozoom
-# The projected half-extent on each screen axis is just the sum of the three
-# basis vectors' magnitudes on that axis -- no corner projection needed.
-a.emit('ABS', dst=T0, a=R_BAS + 0)
-a.emit('ABS', dst=T1, a=R_BAS + 3); a.emit('ADD', dst=T0, a=T0, b=T1)
-a.emit('ABS', dst=T1, a=R_BAS + 6); a.emit('ADD', dst=T0, a=T0, b=T1)
-a.emit('ABS', dst=T2, a=R_BAS + 1)
-a.emit('ABS', dst=T1, a=R_BAS + 4); a.emit('ADD', dst=T2, a=T2, b=T1)
-a.emit('ABS', dst=T1, a=R_BAS + 7); a.emit('ADD', dst=T2, a=T2, b=T1)
-a.emit('SHR', dst=T1, a=T0, imm=1); a.emit('ADD', dst=EX, a=T0, b=T1)  # x1.5
-a.emit('SHR', dst=T1, a=T2, imm=1); a.emit('ADD', dst=EY, a=T2, b=T1)
-
-# f (px per cubie unit, Q4) = 0.42*H*65536/ext_y, 0.42*65536 taken as 27<<10
-a.emit('CTL', dst=T0, imm=5)                     # s_hf
-a.emit('SHL', dst=T1, a=T0, imm=5)
-a.emit('SHL', dst=T2, a=T0, imm=2)
-a.emit('SUB', dst=T1, a=T1, b=T2)
-a.emit('SUB', dst=T1, a=T1, b=T0)                # 27*hf
-a.emit('DIV', a=T1, b=EY, imm=10)
-a.emit('DRD', dst=T3)
-a.emit('LDI', dst=T4, imm=4095)
-a.emit('CLP', dst=FY, a=T3, b=T4)
-a.emit('CTL', dst=T0, imm=3)                     # s_W
-a.emit('SHL', dst=T1, a=T0, imm=5)
-a.emit('SHL', dst=T2, a=T0, imm=1)
-a.emit('SUB', dst=T1, a=T1, b=T2)                # 30*W
-a.emit('DIV', a=T1, b=EX, imm=10)
-a.emit('DRD', dst=T3)
-a.emit('CLP', dst=T3, a=T3, b=T4)
-a.emit('MIN', dst=ZOOM, a=T3, b=FY)
-
-# smoothing: snap when the target moves a long way (startup, or a resolution
-# change -- the raster measurement is not valid for the first frames and a
-# 1/16 glide would take ~30 frames to walk off a bad initial value)
-a.emit('SHL', dst=T0, a=ZOOM, imm=4)
-a.emit('SUB', dst=T1, a=T0, b=ZSM)
+# ---------------------------------------------------- 5. framing
+# Zoom from K6: the cube's body diagonal (5.196 cubies) is 50..90% of the
+# frame height, so it fits at every orientation.  Z = px per cubie in Q4
+# = hf * F / 4096 with F = 6308 + k6*20209/4096 (3.08*hf at 100%).
+# The glided zoom persists in table-RAM word 255 (every register is reused
+# within a field; the pixel path reads sticker words only): it moves 1/8 per
+# field toward the knob and ignores moves under 12 (about a Q4 pixel), so pot
+# noise never makes the cube breathe.
+a.emit('CTL', dst=T0, imm=CTLR['hf'])
+a.emit('CTL', dst=T1, imm=CTLR['k6'])
+a.emit('LDI', dst=T2, imm=5052); a.emit('SHL', dst=T2, a=T2, imm=2)
+a.emit('ADD', dst=T2, a=T2, b=ONE)               # 20209 (14-bit immediates)
+a.emit('MUL', a=T1, b=T2)
+a.emit('MRD', dst=T3, imm=12)
+a.emit('LDI', dst=T2, imm=6308)
+a.emit('ADD', dst=T3, a=T3, b=T2)
+a.emit('MUL', a=T0, b=T3)
+a.emit('MRD', dst=T4, imm=12)
+a.emit('LDI', dst=T6, imm=255)
+a.emit('SRD', dst=Z, a=T6, imm=0)
+a.emit('CTL', dst=T5, imm=CTLR['zfirst'])
+a.emit('JNZ', a=T5, imm='z_snap')
+a.emit('SUB', dst=T1, a=T4, b=Z)
 a.emit('ABS', dst=T2, a=T1)
-a.emit('SHR', dst=T3, a=ZSM, imm=3)
-a.emit('JLT', a=T3, b=T2, imm='az_snap')
-a.emit('SHR', dst=T1, a=T1, imm=4)
-a.emit('ADD', dst=ZSM, a=ZSM, b=T1)
-a.emit('JMP', imm='az_done')
-a.label('az_snap'); a.emit('MOV', dst=ZSM, a=T0)
-a.label('az_done')
-a.emit('SHR', dst=FUSE, a=ZSM, imm=4)
-
-# --- block-float reciprocal for the AA slope, which the PIXEL path reads as
-# s_pxm/s_pxe.  The FSM did v_px >> v_e with a runtime shift; the ISA only
-# shifts by an immediate, so halve in a loop and count the steps -- the count
-# IS the exponent and the residue IS the mantissa.
+a.emit('LDI', dst=T3, imm=12)
+a.emit('JLT', a=T2, b=T3, imm='z_store')
+a.emit('SHR', dst=T1, a=T1, imm=3)
+a.emit('ADD', dst=Z, a=Z, b=T1)
+a.emit('JMP', imm='z_store')
+a.label('z_snap')
+a.emit('MOV', dst=Z, a=T4)
+a.label('z_store')
+a.emit('SWR', a=T6, b=Z)
+a.emit('CTL', dst=CX6, imm=CTLR['cx']); a.emit('SHL', dst=CX6, a=CX6, imm=6)
+a.emit('CTL', dst=CY6, imm=CTLR['cy']); a.emit('SHL', dst=CY6, a=CY6, imm=6)
+# AA slope for the pixel path as mantissa (s_pxm) and exponent (s_pxe):
+# halve in a loop, counting -- the count is the exponent.
 a.emit('LDI', dst=T1, imm=183)
-a.emit('MUL', a=FUSE, b=T1)
+a.emit('MUL', a=Z, b=T1)
 a.emit('MRD', dst=T0, imm=12)
 a.emit('AND', dst=T0, a=T0, imm=255)
-a.emit('LDI', dst=T1, imm=0)                 # exponent
-a.emit('MOV', dst=T3, a=T0)                  # mantissa
+a.emit('LDI', dst=T1, imm=0)
+a.emit('MOV', dst=T3, a=T0)
 a.emit('LDI', dst=T4, imm=8)
 a.label('pxl')
 a.emit('JLT', a=T3, b=T4, imm='pxd')
@@ -213,340 +457,397 @@ a.emit('SHR', dst=T3, a=T3, imm=1)
 a.emit('ADD', dst=T1, a=T1, b=ONE)
 a.emit('JMP', imm='pxl')
 a.label('pxd')
-a.emit('LDI', dst=T4, imm=4)
-a.emit('MAX', dst=T3, a=T3, b=T4)
-a.emit('LDI', dst=T5, imm=7)
-a.emit('MIN', dst=T3, a=T3, b=T5)
-a.emit('SUB', dst=T3, a=T3, b=T4)            # mant - 4
-a.emit('SLW', imm=SLOTW['pxm'], a=T3, b=ZERO)
+# the pixel path uses mantissa 4 only: round a mantissa of 6+ up an octave
+a.emit('LDI', dst=T4, imm=6)
+a.emit('JLT', a=T3, b=T4, imm='px_rnd')
+a.emit('ADD', dst=T1, a=T1, b=ONE)
+a.label('px_rnd')
 a.emit('LDI', dst=T4, imm=5)
-a.emit('SUB', dst=T4, a=T4, b=T1)            # 5 - e
+a.emit('MIN', dst=T1, a=T1, b=T4)
+a.emit('SUB', dst=T4, a=T4, b=T1)
 a.emit('SLW', imm=SLOTW['pxe'], a=T4, b=ZERO)
+# DDA line stepping: interlace walks frame lines two at a time, and the field
+# with field_n = '0' starts on frame line 1
+a.emit('CTL', dst=T0, imm=CTLR['ilace'])
+a.emit('CTL', dst=T1, imm=CTLR['field'])
+a.emit('ADD', dst=YST, a=ONE, b=T0)
+a.emit('SUB', dst=T2, a=ONE, b=T1)
+a.emit('MIN', dst=Y0, a=T0, b=T2)
 
-# ------------------------ phase 6: scaled half-basis (screen Q2)
-# sxh(i) = 1.5 * f * B(3i).x, syh(i) likewise on y
-for i in range(3):
-    for (comp, out) in ((0, R_HB + i), (1, R_HB + 3 + i)):
-        a.emit('MUL', a=R_BAS + 3 * i + comp, b=FUSE)
-        a.emit('MRD', dst=T0, imm=0)
-        a.emit('SHR', dst=T1, a=T0, imm=1)
-        a.emit('ADD', dst=T0, a=T0, b=T1)
-        a.emit('SHR', dst=out, a=T0, imm=14)
-
-# ------------------- phase 7: the 8 screen corners are sign sums
-# Each corner is a sign combination of the three half-basis vectors: adds
-# only, no per-corner multiply.
-a.emit('CTL', dst=CXR, imm=6); a.emit('SHL', dst=CXR, a=CXR, imm=2)
-a.emit('CTL', dst=CYR, imm=7); a.emit('SHL', dst=CYR, a=CYR, imm=2)
-for k in range(8):
-    for (base, out, sub) in ((R_HB, R_CX + k, False), (R_HB + 3, R_CY + k, True)):
-        first = True
-        for bit in range(3):
-            op = 'ADD' if (k >> bit) & 1 else 'SUB'
-            if first:
-                if (k >> bit) & 1: a.emit('MOV', dst=T0, a=base + bit)
-                else:              a.emit('NEG', dst=T0, a=base + bit)
-                first = False
-            else:
-                a.emit(op, dst=T0, a=T0, b=base + bit)
-        if sub: a.emit('SUB', dst=out, a=CYR, b=T0)
-        else:   a.emit('ADD', dst=out, a=CXR, b=T0)
-
-
-# ---------------------------- phase 8: visibility + face table in the RF
-# Orthographic, so a face shows iff its normal's z is positive: one compare
-# per face, no screen geometry.  Face normals are +/- basis rows 2,5,8.
-a.emit('LDI', dst=T4, imm=64)
-a.emit('NEG', dst=T5, a=T4)
-# bz0/bz1/bz2 are the Z components of the three rotated axes: basis words
-# 2, 5 and 8.  Faces 0/1 test axis 1, faces 2/3 axis 0, faces 4/5 axis 2.
-for f, (reg, pos) in enumerate(((R_BAS + 5, True), (R_BAS + 5, False),
-                                (R_BAS + 2, True), (R_BAS + 2, False),
-                                (R_BAS + 8, True), (R_BAS + 8, False))):
-    a.emit('LDI', dst=R_VIS + f, imm=0)
-    if pos: a.emit('JGE', a=T4, b=reg, imm=f'nv{f}')     # skip if 64 >= bz
-    else:   a.emit('JGE', a=reg, b=T5, imm=f'nv{f}')     # skip if bz >= -64
-    a.emit('LDI', dst=R_VIS + f, imm=1)
-    a.label(f'nv{f}')
-
-# The per-face loop reads its constants from the register file rather than
-# from six unrolled copies.  Each table entry is 3 bits, so all four corner
-# indices for a face pack into one word: 18 registers instead of 66, which
-# is what keeps the file inside 128 words.  Within the loop body the corner
-# slot j is a compile-time constant, so unpacking is SHR by an immediate.
-C_FCORN = [[2,6,7,3],[0,1,5,4],[1,3,7,5],[0,4,6,2],[4,5,7,6],[1,0,2,3]]
-C_FADJ  = [[5,4,3,2],[3,2,5,4],[1,0,5,4],[5,4,1,0],[3,2,1,0],[1,0,3,2]]
-C_FN, C_FU, C_FV = [2,3,0,1,4,5], [4,0,2,4,0,2], [0,4,4,2,2,0]
-for f in range(6):
-    a.emit('LDI', dst=R_TBL + f,      imm=sum(C_FCORN[f][j] << (3*j) for j in range(4)))
-    a.emit('LDI', dst=R_TBL + 6 + f,  imm=sum(C_FADJ[f][j]  << (3*j) for j in range(4)))
-    a.emit('LDI', dst=R_TBL + 12 + f, imm=C_FN[f] | (C_FU[f] << 3) | (C_FV[f] << 6))
-
-
-# ------------- phase 8b: the half-vector projected on the three cube axes
-# Orthographic camera, so the view dir is the world +z constant and
-# H = normalize(Lkey + V) is constant too.  Every face's H.n, H.U and H.V is
-# then +/- one of these three numbers, by orthonormality -- three dot products
-# a frame instead of three per face.
-C_HX, C_HY, C_HZ = -57, 81, 236
-for ax in range(3):
+# ---------------------------------------------------- 6. the two boxes
+# BLOCK (box 1) straight off the basis: projected axes (Q6 px per cubie,
+# screen y down), axis z (visibility), and H / key / fill dotted with each
+# axis, so every face's value is just +/- one of these.
+a.emit('LDI', dst=T7, imm=0)                      # 3i
+a.emit('LDI', dst=T6, imm=BOX1)                   # BOX1 + i
+a.label('bx1')
+a.emit('LDX', dst=T8, a=T7, imm=B)
+a.emit('LDX', dst=T9, a=T7, imm=B + 1)
+a.emit('LDX', dst=T10, a=T7, imm=B + 2)
+a.emit('MUL', a=T8, b=Z); a.emit('MRD', dst=T0, imm=0)
+a.emit('SHR', dst=T0, a=T0, imm=10)
+a.emit('STX', a=T6, b=T0, imm=PX)
+a.emit('MUL', a=T9, b=Z); a.emit('MRD', dst=T0, imm=0)
+a.emit('SHR', dst=T0, a=T0, imm=10)
+a.emit('NEG', dst=T0, a=T0)
+a.emit('STX', a=T6, b=T0, imm=PY)
+a.emit('STX', a=T6, b=T10, imm=NZ)
+for fld, coef in ((HD, (C_HX, C_HY, C_HZ)), (KD, KEY), (FD, FILL)):
     a.emit('LDI', dst=T2, imm=0)
-    for c, hc in enumerate((C_HX, C_HY, C_HZ)):
-        a.emit('LDI', dst=T1, imm=hc)
-        a.emit('MUL', a=R_BAS + ax * 3 + c, b=T1)
+    for comp in range(3):
+        a.emit('LDI', dst=T1, imm=coef[comp])
+        a.emit('MUL', a=T8 + comp, b=T1)
         a.emit('MRD', dst=T0, imm=12)
         a.emit('ADD', dst=T2, a=T2, b=T0)
-    a.emit('MOV', dst=R_H + ax, a=T2)
+    a.emit('STX', a=T6, b=T2, imm=fld)
+a.emit('ADD', dst=T6, a=T6, b=ONE)
+a.emit('LDI', dst=T0, imm=3)
+a.emit('ADD', dst=T7, a=T7, b=T0)
+a.emit('LDI', dst=T0, imm=9)
+a.emit('JLT', a=T7, b=T0, imm='bx1')
 
+# turn axis a and side from the turn face (face <-> normal code is x ^ 2
+# for 0..3, identity for 4, 5)
+a.emit('LDI', dst=T0, imm=4)
+a.emit('MOV', dst=T1, a=TF)
+a.emit('JGE', a=TF, b=T0, imm='ax_ok')
+a.emit('LDI', dst=T0, imm=2)
+a.emit('JLT', a=TF, b=T0, imm='ax_up')
+a.emit('SUB', dst=T1, a=TF, b=T0)
+a.emit('JMP', imm='ax_ok')
+a.label('ax_up')
+a.emit('ADD', dst=T1, a=TF, b=T0)
+a.label('ax_ok')
+a.emit('SHR', dst=AAX, a=T1, imm=1)
+a.emit('AND', dst=ASIDE, a=T1, imm=1)             # 1 = negative side
 
-# ============================ phase 9: the per-visible-face loop ===========
-# States 58-97 of the old FSM.  The face index is a runtime value, so every
-# per-face constant comes out of the register file by LDX; the four-corner
-# and four-edge inner loops are unrolled instead, because their shift amounts
-# would otherwise have to be runtime values and SHR takes an immediate.
-F_PX0, F_PY0, F_DX1, F_DX2, F_DY1, F_DY2, F_DET = 94, 95, 96, 97, 98, 99, 100
-F_CORN, F_ADJ, F_AX = 101, 102, 103
-F_YMIN, F_YMAX, F_LACC, F_AC1, F_LF, F_GBASE = 104, 105, 106, 107, 108, 109
-BS = 110                                   # 110..112: signed face-normal basis
-T6, T7, T8, T9 = 113, 114, 115, 116
-R_COL = 117                                # 117..122: packed sticker colour
-K32000, K65535 = 123, 124
+# SLICE (box 0): the block's values, axes b and c turned by theta about a
+a.emit('ADD', dst=T8, a=AAX, b=ONE)               # T8 = b, T9 = c
+a.emit('LDI', dst=T0, imm=3)
+a.emit('JLT', a=T8, b=T0, imm='bc1')
+a.emit('LDI', dst=T8, imm=0)
+a.label('bc1')
+a.emit('ADD', dst=T9, a=T8, b=ONE)
+a.emit('JLT', a=T9, b=T0, imm='bc2')
+a.emit('LDI', dst=T9, imm=0)
+a.label('bc2')
+a.emit('LDI', dst=T10, imm=0)                     # field offset
+a.label('sl_fld')
+a.emit('ADD', dst=T4, a=T10, b=AAX)               # copy axis a
+a.emit('LDX', dst=T0, a=T4, imm=BOX1)
+a.emit('STX', a=T4, b=T0, imm=BOX0)
+a.emit('ADD', dst=T5, a=T10, b=T8)                # xb, xc
+a.emit('LDX', dst=T6, a=T5, imm=BOX1)
+a.emit('ADD', dst=T7, a=T10, b=T9)
+a.emit('LDX', dst=T11, a=T7, imm=BOX1)
+a.emit('MUL', a=T6, b=C_TH); a.emit('MRD', dst=T0, imm=12)
+a.emit('MUL', a=T11, b=S_TH); a.emit('MRD', dst=T1, imm=12)
+a.emit('ADD', dst=T0, a=T0, b=T1)
+a.emit('STX', a=T5, b=T0, imm=BOX0)
+a.emit('MUL', a=T11, b=C_TH); a.emit('MRD', dst=T0, imm=12)
+a.emit('MUL', a=T6, b=S_TH); a.emit('MRD', dst=T1, imm=12)
+a.emit('SUB', dst=T0, a=T0, b=T1)
+a.emit('STX', a=T7, b=T0, imm=BOX0)
+a.emit('LDI', dst=T0, imm=3)
+a.emit('ADD', dst=T10, a=T10, b=T0)
+a.emit('LDI', dst=T0, imm=18)
+a.emit('JLT', a=T10, b=T0, imm='sl_fld')
 
-C_STY = [995, 807, 332, 513, 416, 276]
-C_STU = [512,  91, 460, 244, 496, 757]
-C_STV = [512, 654, 811, 848, 238, 330]
+# half extents x projected axis (1.5 cubies, except along a: slice 0.5,
+# block 1.0), and the box centres (slice at +/-1 along a, block at -/+0.5)
+for bx in (BOX0, BOX1):
+    for i in range(3):
+        for src, dst in ((PX, HPX), (PY, HPY)):
+            a.emit('SHR', dst=T0, a=bx + src + i, imm=1)
+            a.emit('ADD', dst=bx + dst + i, a=bx + src + i, b=T0)
+for comp, (src, dst, cen) in enumerate(((PX, HPX, CX6), (PY, HPY, CY6))):
+    a.emit('LDX', dst=T0, a=AAX, imm=BOX1 + src)      # P along a
+    a.emit('SHR', dst=T1, a=T0, imm=1)                # 0.5 P
+    a.emit('LDI', dst=T3, imm=BOX0 + dst)
+    a.emit('ADD', dst=T3, a=T3, b=AAX)
+    a.emit('STX', a=T3, b=T1, imm=0)                  # slice: 0.5 P
+    a.emit('LDI', dst=T3, imm=BOX1 + dst)
+    a.emit('ADD', dst=T3, a=T3, b=AAX)
+    a.emit('STX', a=T3, b=T0, imm=0)                  # block: 1.0 P
+    negif(T4, T0, ASIDE)                              # +/- P
+    a.emit('ADD', dst=BOX0 + (CBX if comp == 0 else CBY), a=cen, b=T4)
+    negif(T4, T1, ASIDE)
+    a.emit('SUB', dst=BOX1 + (CBX if comp == 0 else CBY), a=cen, b=T4)
 
-# Constants too wide for a 14-bit immediate, built once.
-a.label('p9')
-a.emit('LDI', dst=K32000, imm=4000); a.emit('SHL', dst=K32000, a=K32000, imm=3)
-# (the shift field is four bits, so 65536 is two steps)
-a.emit('LDI', dst=T0, imm=1); a.emit('SHL', dst=T0, a=T0, imm=15)
-a.emit('ADD', dst=T0, a=T0, b=T0)
-a.emit('SUB', dst=K65535, a=T0, b=ONE)
+# visibility: a face shows iff its normal points at the viewer
+a.emit('LDI', dst=T7, imm=0)                      # face
+a.emit('LDI', dst=T9, imm=VIS)                    # &VIS[face]
+a.label('vis')
+a.emit('MOV', dst=T0, a=T7)
+call('FCODE')                                     # T1 = normal code
+a.emit('SHR', dst=T2, a=T1, imm=1)                # axis
+a.emit('AND', dst=T3, a=T1, imm=1)                # negative?
+for bi, bx in enumerate((BOX0, BOX1)):
+    a.emit('LDX', dst=T4, a=T2, imm=bx + NZ)
+    negif(T4, T4, T3)
+    # cull only faces under a pixel across: a culled face that still shows
+    # would leave a hole between the two boxes
+    a.emit('LDI', dst=T5, imm=8)
+    a.emit('LDI', dst=T0, imm=0)
+    lv = L('vs')
+    a.emit('JGE', a=T5, b=T4, imm=lv)
+    a.emit('LDI', dst=T0, imm=1)
+    a.label(lv)
+    a.emit('STX', a=T9, b=T0, imm=6 * bi)
+a.emit('ADD', dst=T9, a=T9, b=ONE)
+a.emit('ADD', dst=T7, a=T7, b=ONE)
+a.emit('LDI', dst=T0, imm=6)
+a.emit('JLT', a=T7, b=T0, imm='vis')
+# the box on the viewer's side of the cut plane is drawn first
+a.emit('LDX', dst=T0, a=AAX, imm=BOX1 + NZ)
+negif(T1, T0, ASIDE)
+a.emit('LDI', dst=FIRST, imm=0)
+a.emit('JLT', a=ZERO, b=T1, imm='near_ok')
+a.emit('LDI', dst=FIRST, imm=1)
+a.label('near_ok')
 
-# sticker colour packed three 10-bit fields to a word: 6 registers, not 18
-for f in range(6):
-    # built ten bits at a time: a 14-bit immediate is sign-extended, so every
-    # chunk has to stay under 8192, and the shift field is only four bits.
-    a.emit('LDI', dst=T0, imm=C_STV[f])
-    a.emit('SHL', dst=T0, a=T0, imm=10)
-    a.emit('LDI', dst=T1, imm=C_STU[f]); a.emit('ADD', dst=T0, a=T0, b=T1)
-    a.emit('SHL', dst=T0, a=T0, imm=10)
-    a.emit('LDI', dst=T1, imm=C_STY[f]); a.emit('ADD', dst=R_COL + f, a=T0, b=T1)
-
-a.emit('LDI', dst=R_SLOT, imm=0)
-a.emit('LDI', dst=I, imm=0)
-a.label('face_top')
-a.emit('LDX', dst=T0, a=I, imm=R_VIS)
-a.emit('JNZ', a=T0, imm='f_vis')
+# ---------------------------------------------------- 7. the face loop
+IN, IU, IV = 35, 36, 37                           # box data index per axis
+VB = K16M
+NS, US, VS = Z, CX6, CY6                          # axis signs (1 = negative)
+a.emit('LDI', dst=SLOT, imm=0)
+# face-loop constants, in the basis registers (free by now)
+a.emit('LDI', dst=44, imm=2)
+a.emit('LDI', dst=45, imm=3)
+a.emit('LDI', dst=46, imm=4)
+a.emit('LDI', dst=47, imm=6)
+a.emit('LDI', dst=48, imm=63)
+a.emit('LDI', dst=49, imm=128)
+a.emit('LDI', dst=50, imm=255)
+a.emit('LDI', dst=51, imm=176)
+a.emit('LDI', dst=52, imm=12)
+a.emit('MOV', dst=BOX, a=FIRST)
+a.label('pass')
+a.emit('LDI', dst=BB, imm=BOX0)
+a.emit('JNZ', a=BOX, imm='bb1')
+a.emit('JMP', imm='bb_ok')
+a.label('bb1')
+a.emit('LDI', dst=BB, imm=BOX1)
+a.label('bb_ok')
+# VB = &VIS[6 box] (kept in K16M, which the face loop does not use)
+a.emit('LDI', dst=VB, imm=VIS)
+a.emit('JNZ', a=BOX, imm='vb1')
+a.emit('JMP', imm='vb_ok')
+a.label('vb1')
+a.emit('LDI', dst=VB, imm=VIS + 6)
+a.label('vb_ok')
+a.emit('LDI', dst=FI, imm=0)
+a.label('face')
+a.emit('ADD', dst=T0, a=VB, b=FI)
+a.emit('LDX', dst=T1, a=T0, imm=0)
+a.emit('JNZ', a=T1, imm='f_vis')
 a.emit('JMP', imm='f_next')
 a.label('f_vis')
-a.emit('LDI', dst=T1, imm=3)
-a.emit('JGE', a=R_SLOT, b=T1, imm='f_end')       # the slot table holds three
-
-a.emit('LDX', dst=F_CORN, a=I, imm=R_TBL)
-a.emit('LDX', dst=F_ADJ,  a=I, imm=R_TBL + 6)
-a.emit('LDX', dst=F_AX,   a=I, imm=R_TBL + 12)
-
-
-def corner_idx(dst, slot):
-    """dst = the packed corner table's 3-bit field for this face vertex."""
-    if slot == 0:
-        a.emit('AND', dst=dst, a=F_CORN, imm=7)
-    else:
-        a.emit('SHR', dst=dst, a=F_CORN, imm=3 * slot)
-        a.emit('AND', dst=dst, a=dst, imm=7)
+a.emit('MOV', dst=T0, a=FI)
+call('FCODE')
+for code, idx, sgn in ((T1, IN, NS), (T2, IU, US), (T3, IV, VS)):
+    a.emit('SHR', dst=idx, a=code, imm=1)
+    a.emit('ADD', dst=idx, a=idx, b=BB)
+    a.emit('AND', dst=sgn, a=code, imm=1)
 
 
-# --- screen edge vectors from P0, P1, P3 (the two spanning edges)
-corner_idx(T0, 0)
-a.emit('LDX', dst=F_PX0, a=T0, imm=R_CX)
-a.emit('LDX', dst=F_PY0, a=T0, imm=R_CY)
-for slot, (dx, dy) in ((1, (F_DX1, F_DY1)), (3, (F_DX2, F_DY2))):
-    corner_idx(T1, slot)
-    a.emit('LDX', dst=T2, a=T1, imm=R_CX)
-    a.emit('SUB', dst=T2, a=T2, b=F_PX0); a.emit('SHR', dst=dx, a=T2, imm=2)
-    a.emit('LDX', dst=T2, a=T1, imm=R_CY)
-    a.emit('SUB', dst=T2, a=T2, b=F_PY0); a.emit('SHR', dst=dy, a=T2, imm=2)
+def ld(dst, idx, sgn, fld):
+    """dst = +/- box[fld + axis]"""
+    a.emit('LDX', dst=T1, a=idx, imm=fld)
+    negif(dst, T1, sgn)
 
-# --- D = dx1*dy2 - dy1*dx2, the signed screen area
-a.emit('MUL', a=F_DX1, b=F_DY2); a.emit('MRD', dst=F_DET, imm=0)
-a.emit('MUL', a=F_DY1, b=F_DX2); a.emit('MRD', dst=T0, imm=0)
-a.emit('SUB', dst=F_DET, a=F_DET, b=T0)
 
-# --- the four UV gradients.  The FSM negates the numerator when D < 0 and
-# divides by |D|; the divider already takes its sign from both operands, so
-# passing the signed numerator and signed D gives the same result in one step.
-for src, neg, port in ((F_DY2, False, 'gux'), (F_DX2, True, 'guy'),
-                       (F_DY1, True, 'gvx'), (F_DX1, False, 'gvy')):
+# screen axis vectors of the face (per cubie) and its origin corner
+ld(SUX, IU, US, PX); ld(SUY, IU, US, PY)
+ld(SVX, IV, VS, PX); ld(SVY, IV, VS, PY)
+a.emit('LDX', dst=OX, a=BB, imm=CBX)
+a.emit('LDX', dst=OY, a=BB, imm=CBY)
+for idx, sgn, op in ((IN, NS, 'ADD'), (IU, US, 'SUB'), (IV, VS, 'SUB')):
+    ld(T3, idx, sgn, HPX); a.emit(op, dst=OX, a=OX, b=T3)
+    ld(T3, idx, sgn, HPY); a.emit(op, dst=OY, a=OY, b=T3)
+
+# D = cross(SU, SV) in Q12; gradients (units Q6 per px) = 2^24 * P / D
+a.emit('MUL', a=SUX, b=SVY); a.emit('MRD', dst=T0, imm=0)
+a.emit('MUL', a=SUY, b=SVX); a.emit('MRD', dst=T1, imm=0)
+a.emit('SUB', dst=T0, a=T0, b=T1)
+a.emit('LDI', dst=DS, imm=0)
+a.emit('JLT', a=ZERO, b=T0, imm='d_pos')
+a.emit('LDI', dst=DS, imm=1)
+a.emit('NEG', dst=T0, a=T0)
+a.label('d_pos')
+a.emit('SHR', dst=DA, a=T0, imm=8)
+GUX, GUY, GVX, GVY = T8, T9, T10, T11
+for src, neg, dst in ((SVY, False, GUX), (SVX, True, GUY),
+                      (SUY, True, GVX), (SUX, False, GVY)):
     if neg: a.emit('NEG', dst=T0, a=src)
     else:   a.emit('MOV', dst=T0, a=src)
-    a.emit('ADD', dst=T1, a=T0, b=T0)
-    a.emit('ADD', dst=T1, a=T1, b=T0)            # 3*gn, then << 20 in the DIV
-    a.emit('DIV', a=T1, b=F_DET, imm=20)
-    a.emit('DRD', dst=T4)
-    a.emit('MIN', dst=T4, a=T4, b=K65535)
-    a.emit('NEG', dst=T5, a=K65535)
-    a.emit('MAX', dst=T4, a=T4, b=T5)
-    a.emit('SLW', imm=SLOTW[port], a=T4, b=R_SLOT)
-a.emit('SHR', dst=T0, a=F_PX0, imm=2); a.emit('SLW', imm=SLOTW['px0'], a=T0, b=R_SLOT)
-a.emit('SHR', dst=T0, a=F_PY0, imm=2); a.emit('SLW', imm=SLOTW['py0'], a=T0, b=R_SLOT)
+    call('DIVS')
+    a.emit('MOV', dst=dst, a=T1)
 
-# --- ymin / ymax over the four corners, seeded from corner 0
-corner_idx(T0, 0)
-a.emit('LDX', dst=F_YMIN, a=T0, imm=R_CY)
-a.emit('MOV', dst=F_YMAX, a=F_YMIN)
-for slot in (1, 2, 3):
-    corner_idx(T0, slot)
-    a.emit('LDX', dst=T1, a=T0, imm=R_CY)
-    a.emit('MIN', dst=F_YMIN, a=F_YMIN, b=T1)
-    a.emit('MAX', dst=F_YMAX, a=F_YMAX, b=T1)
-a.emit('SHL', dst=F_GBASE, a=R_SLOT, imm=5)
-a.emit('SHR', dst=T0, a=F_YMIN, imm=2)
-a.emit('MAX', dst=T0, a=T0, b=ZERO)
-a.emit('GWR', imm=0, a=F_GBASE, b=T0)
-a.emit('SHR', dst=T0, a=F_YMAX, imm=2)
-a.emit('ADD', dst=T0, a=T0, b=ONE)
-a.emit('MAX', dst=T0, a=T0, b=ZERO)
-a.emit('GWR', imm=1, a=F_GBASE, b=T0)
+# the face's two DDAs.  u(x, y) = gx*(x - ox) + gy*(y - oy), Q6 units, with
+# the origin in Q4 (so the seed products fit 32 bits).  A gradient past 14
+# bits (a face under ~48 px across) is block-floated by 6: the DDA then
+# counts whole units with a mantissa of 8+ bits, and 27 bits cover the
+# screen either way (DRD clamps gradients at 2^20: faces under ~0.75 px).
+a.emit('SHR', dst=OX, a=OX, imm=2)
+a.emit('SHR', dst=OY, a=OY, imm=2)
+ldi(T7, 16383, T6)
+for c, (gx, gy) in enumerate(((GUX, GUY), (GVX, GVY))):
+    pe, pg, pw, ps = (('eu', 'gu', 'wu', 'su'), ('ev', 'gv', 'wv', 'sv'))[c]
+    a.emit('ABS', dst=T0, a=gx)
+    a.emit('ABS', dst=T1, a=gy)
+    a.emit('MAX', dst=T0, a=T0, b=T1)
+    lbf, lbd = L('bf'), L('bfd')
+    a.emit('JLT', a=T7, b=T0, imm=lbf)
+    a.emit('MOV', dst=T2, a=gx)
+    a.emit('MOV', dst=T3, a=gy)
+    a.emit('SLW', imm=SLOTW[pe], a=ZERO, b=SLOT)
+    a.emit('JMP', imm=lbd)
+    a.label(lbf)
+    a.emit('LDI', dst=T4, imm=32)
+    a.emit('ADD', dst=T2, a=gx, b=T4); a.emit('SHR', dst=T2, a=T2, imm=6)
+    a.emit('ADD', dst=T3, a=gy, b=T4); a.emit('SHR', dst=T3, a=T3, imm=6)
+    a.emit('SLW', imm=SLOTW[pe], a=ONE, b=SLOT)
+    a.label(lbd)
+    a.emit('SLW', imm=SLOTW[pg], a=T2, b=SLOT)
+    # seed = (gx*(0 - ox4) + gy*(16 y0 - oy4)) >> 4
+    a.emit('NEG', dst=T4, a=OX)
+    a.emit('MUL', a=T2, b=T4); a.emit('MRD', dst=T5, imm=0)
+    a.emit('SHL', dst=T4, a=Y0, imm=4)
+    a.emit('SUB', dst=T4, a=T4, b=OY)
+    a.emit('MUL', a=T3, b=T4); a.emit('MRD', dst=T6, imm=0)
+    a.emit('ADD', dst=T5, a=T5, b=T6)
+    a.emit('SHR', dst=T5, a=T5, imm=4)
+    a.emit('SLW', imm=SLOTW[ps], a=T5, b=SLOT)
+    # wrap = gy*ystep - gx*W
+    a.emit('MUL', a=T3, b=YST); a.emit('MRD', dst=T6, imm=0)
+    a.emit('CTL', dst=T4, imm=CTLR['W'])
+    a.emit('MUL', a=T2, b=T4); a.emit('MRD', dst=T5, imm=0)
+    a.emit('SUB', dst=T6, a=T6, b=T5)
+    a.emit('SLW', imm=SLOTW[pw], a=T6, b=SLOT)
 
-# --- the four screen edges: y0, x0 and dx/dy, written straight to the
-# geometry RAM the line engine reads.
-for c in range(4):
-    n = (c + 1) % 4
-    corner_idx(T0, c)
-    a.emit('LDX', dst=T2, a=T0, imm=R_CX)        # sxa
-    a.emit('LDX', dst=T3, a=T0, imm=R_CY)        # sya
-    corner_idx(T1, n)
-    a.emit('LDX', dst=T4, a=T1, imm=R_CX)
-    a.emit('LDX', dst=T5, a=T1, imm=R_CY)
-    a.emit('SUB', dst=T6, a=T4, b=T2)            # dx along the edge
-    a.emit('SUB', dst=T7, a=T5, b=T3)            # dy along the edge
-    a.emit('GWR', imm=2 + 3 * c, a=F_GBASE, b=T3)
-    a.emit('GWR', imm=3 + 3 * c, a=F_GBASE, b=T2)
-    # a near-horizontal edge would divide by ~0; floor the denominator at 2
-    # but keep its sign, because the slope's sign comes from both operands.
-    a.emit('ABS', dst=T8, a=T7)
-    a.emit('LDI', dst=T9, imm=2)
-    a.emit('JGE', a=T8, b=T9, imm=f'ed{c}')
-    a.emit('JLT', a=T7, b=ZERO, imm=f'edn{c}')
-    a.emit('MOV', dst=T7, a=T9); a.emit('JMP', imm=f'ed{c}')
-    a.label(f'edn{c}'); a.emit('NEG', dst=T7, a=T9)
-    a.label(f'ed{c}')
-    a.emit('DIV', a=T6, b=T7, imm=6)
-    a.emit('DRD', dst=T8)
-    a.emit('MIN', dst=T8, a=T8, b=K32000)
-    a.emit('NEG', dst=T9, a=K32000)
-    a.emit('MAX', dst=T8, a=T8, b=T9)
-    a.emit('GWR', imm=4 + 3 * c, a=F_GBASE, b=T8)
+# ---- face descriptor: sticker base, shape, gap edge, silhouette edges
+# T6 = TABLE_BASE + 12 turnface + 6 box: this box's six base entries
+a.emit('MUL', a=TF, b=52)
+a.emit('MRD', dst=T6, imm=0)
+a.emit('MUL', a=BOX, b=47)
+a.emit('MRD', dst=T0, imm=0)
+a.emit('ADD', dst=T6, a=T6, b=T0)
+a.emit('ADD', dst=T6, a=T6, b=51)                 # + TABLE_BASE
+a.emit('ADD', dst=T0, a=T6, b=FI)
+a.emit('SRD', dst=T8, a=T0, imm=0)                # T8 = base (63 = interior)
+a.emit('LDI', dst=T9, imm=0)                      # T9 = silhouette bits
+a.emit('LDI', dst=T10, imm=0)                     # T10 = gap code
+a.emit('LDI', dst=T0, imm=tm.TABLE_ADJ)
+a.emit('ADD', dst=T0, a=T0, b=FI)
+a.emit('SRD', dst=T11, a=T0, imm=0)               # T11 = the four neighbours
+for e in range(4):
+    # neighbour face across edge e (-U +U -V +V)
+    if e: a.emit('SHR', dst=T0, a=T11, imm=3 * e)
+    else: a.emit('MOV', dst=T0, a=T11)
+    a.emit('AND', dst=T0, a=T0, imm=7)
+    # an exterior face next to an interior one: a cut edge, drawn as a gap
+    a.emit('ADD', dst=T2, a=T6, b=T0)
+    a.emit('SRD', dst=T3, a=T2, imm=0)            # neighbour base
+    lsil, lgap, lnx = L('es'), L('eg'), L('en')
+    a.emit('SUB', dst=T5, a=T3, b=48)             # (48 holds 63)
+    a.emit('JNZ', a=T5, imm=lsil)
+    a.emit('SUB', dst=T5, a=T8, b=48)
+    a.emit('JNZ', a=T5, imm=lgap)
+    a.label(lsil)                                 # else silhouette iff hidden
+    a.emit('ADD', dst=T2, a=VB, b=T0)
+    a.emit('LDX', dst=T3, a=T2, imm=0)
+    a.emit('JNZ', a=T3, imm=lnx)
+    a.emit('LDI', dst=T3, imm=1 << e)
+    a.emit('ADD', dst=T9, a=T9, b=T3)
+    a.emit('JMP', imm=lnx)
+    a.label(lgap)
+    a.emit('LDI', dst=T10, imm=e + 1)
+    a.label(lnx)
 
-# --- flat face light: key and fill dotted against the face normal, which is
-# +/- one basis row, so it is three multiplies each and no normalisation.
-a.emit('AND', dst=T0, a=F_AX, imm=7)             # C_FN for this face
-a.emit('SHR', dst=T1, a=T0, imm=1)
-a.emit('ADD', dst=T2, a=T1, b=T1); a.emit('ADD', dst=T2, a=T2, b=T1)
-a.emit('BIT', dst=T3, a=T0, imm=0)               # odd -> negated axis
-for p in range(3):
-    a.emit('LDI', dst=T4, imm=p)
-    a.emit('ADD', dst=T4, a=T2, b=T4)
-    a.emit('LDX', dst=T5, a=T4, imm=R_BAS)
-    a.emit('JNZ', a=T3, imm=f'bn{p}')
-    a.emit('JMP', imm=f'bs{p}')
-    a.label(f'bn{p}'); a.emit('NEG', dst=T5, a=T5)
-    a.label(f'bs{p}'); a.emit('MOV', dst=BS + p, a=T5)
-a.emit('LDI', dst=F_LACC, imm=0)
-a.emit('LDI', dst=F_AC1, imm=0)
-for c, coef in enumerate((-107, 154, 184, 141, -141, 161)):
-    a.emit('LDI', dst=T5, imm=coef)
-    a.emit('MUL', a=BS + (c % 3), b=T5)
-    a.emit('MRD', dst=T0, imm=12)
-    acc = F_LACC if c < 3 else F_AC1
-    a.emit('ADD', dst=acc, a=acc, b=T0)
-a.emit('LDI', dst=T0, imm=62)                    # ambient floor
-a.emit('JGE', a=ZERO, b=F_LACC, imm='nokey')
-a.emit('SHR', dst=T1, a=F_LACC, imm=2)
-a.emit('SUB', dst=T2, a=F_LACC, b=T1)
-a.emit('ADD', dst=T0, a=T0, b=T2)
-a.label('nokey')
-a.emit('JGE', a=ZERO, b=F_AC1, imm='nofill')
-a.emit('SHR', dst=T1, a=F_AC1, imm=2)
-a.emit('ADD', dst=T0, a=T0, b=T1)
-a.label('nofill')
-a.emit('LDI', dst=T1, imm=255)
-a.emit('MIN', dst=F_LF, a=T0, b=T1)
 
-# --- the per-slot descriptor the line and pixel engines read
-a.emit('SLW', imm=SLOTW['face'], a=I, b=R_SLOT)
+def ext(dst, idx):
+    """dst = box extent along the axis of idx: 3 cubies, except along the
+    turn axis (slice 1, block 2)."""
+    l2 = L('ex')
+    a.emit('SUB', dst=T0, a=idx, b=BB)
+    a.emit('LDI', dst=dst, imm=3)
+    a.emit('SUB', dst=T0, a=T0, b=AAX)
+    a.emit('JNZ', a=T0, imm=l2)
+    a.emit('ADD', dst=dst, a=ONE, b=BOX)
+    a.label(l2)
+
+
+# shape code: (nu, nv) = (3,3) 0, (3,1) 1, (1,3) 2, (3,2) 3, (2,3) 4
+ext(T4, IU)
+ext(T5, IV)
 a.emit('LDI', dst=T0, imm=0)
-for j in range(4):
-    if j == 0: a.emit('AND', dst=T1, a=F_ADJ, imm=7)
-    else:
-        a.emit('SHR', dst=T1, a=F_ADJ, imm=3 * j)
-        a.emit('AND', dst=T1, a=T1, imm=7)
-    a.emit('LDX', dst=T2, a=T1, imm=R_VIS)
-    a.emit('JNZ', a=T2, imm=f'sil{j}')           # neighbour visible -> no rim
-    a.emit('LDI', dst=T3, imm=1 << j)
-    a.emit('ADD', dst=T0, a=T0, b=T3)
-    a.label(f'sil{j}')
-a.emit('SLW', imm=SLOTW['sil'], a=T0, b=R_SLOT)
-# the three half-vector projections, picked and signed by the face's axes
-for shift, port in ((0, 'hn'), (3, 'hu'), (6, 'hv')):
-    if shift == 0: a.emit('AND', dst=T0, a=F_AX, imm=7)
-    else:
-        a.emit('SHR', dst=T0, a=F_AX, imm=shift)
-        a.emit('AND', dst=T0, a=T0, imm=7)
-    a.emit('SHR', dst=T1, a=T0, imm=1)
-    a.emit('LDX', dst=T2, a=T1, imm=R_H)
-    a.emit('BIT', dst=T3, a=T0, imm=0)
-    a.emit('JNZ', a=T3, imm=f'hn{shift}')
-    a.emit('JMP', imm=f'hs{shift}')
-    a.label(f'hn{shift}'); a.emit('NEG', dst=T2, a=T2)
-    a.label(f'hs{shift}')
-    a.emit('SLW', imm=SLOTW[port], a=T2, b=R_SLOT)
+a.emit('ADD', dst=T1, a=T4, b=T5)
+a.emit('JGE', a=T1, b=47, imm='sh_done')
+for code, reg, val in ((1, T5, 1), (2, T4, 1), (3, T5, 2)):
+    a.emit('LDI', dst=T0, imm=code)
+    a.emit('LDI', dst=T2, imm=val)
+    a.emit('SUB', dst=T1, a=reg, b=T2)
+    lnx = L('sh')
+    a.emit('JNZ', a=T1, imm=lnx)
+    a.emit('JMP', imm='sh_done')
+    a.label(lnx)
+a.emit('LDI', dst=T0, imm=4)
+a.label('sh_done')
+# fd = base << 10 | shape << 7 | gap << 4 | sil
+a.emit('SHL', dst=T1, a=T8, imm=10)
+a.emit('SHL', dst=T0, a=T0, imm=7)
+a.emit('ADD', dst=T1, a=T1, b=T0)
+a.emit('SHL', dst=T0, a=T10, imm=4)
+a.emit('ADD', dst=T1, a=T1, b=T0)
+a.emit('ADD', dst=T1, a=T1, b=T9)
+a.emit('SLW', imm=SLOTW['fd'], a=T1, b=SLOT)
 
-# --- unlit albedo, the flat light, and the chroma scaled by that light so a
-# shadowed face desaturates by exactly as much as it dims.
-a.emit('LDX', dst=T9, a=I, imm=R_COL)
-a.emit('AND', dst=T0, a=T9, imm=0x3FF)
-a.emit('SLW', imm=SLOTW['ly'], a=T0, b=R_SLOT)
-a.emit('SLW', imm=SLOTW['lf'], a=F_LF, b=R_SLOT)
-a.emit('GAM', dst=T4, a=F_LF)
-for steps, port in ((1, 'cu'), (2, 'cv')):
-    a.emit('SHR', dst=T0, a=T9, imm=10)
-    if steps == 2: a.emit('SHR', dst=T0, a=T0, imm=10)
-    a.emit('AND', dst=T0, a=T0, imm=0x3FF)
-    a.emit('LDI', dst=T1, imm=512)
-    a.emit('SUB', dst=T0, a=T0, b=T1)
-    a.emit('MUL', a=T0, b=T4)
-    a.emit('MRD', dst=T2, imm=8)
-    a.emit('ADD', dst=T2, a=T2, b=T1)
-    a.emit('LDI', dst=T3, imm=1023)
-    a.emit('CLP', dst=T2, a=T2, b=T3)
-    a.emit('SLW', imm=SLOTW[port], a=T2, b=R_SLOT)
+# ---- half-vector projections: h1 = hu << 6 | hn[5:0], h2 = hv << 6 | hn[9:6]
+ld(T9, IN, NS, HD)
+ld(T10, IU, US, HD)
+ld(T11, IV, VS, HD)
+a.emit('AND', dst=T0, a=T10, imm=0x3FF); a.emit('SHL', dst=T0, a=T0, imm=6)
+a.emit('AND', dst=T1, a=T9, imm=0x3F); a.emit('ADD', dst=T0, a=T0, b=T1)
+a.emit('SLW', imm=SLOTW['h1'], a=T0, b=SLOT)
+a.emit('AND', dst=T0, a=T11, imm=0x3FF); a.emit('SHL', dst=T0, a=T0, imm=6)
+a.emit('SHR', dst=T1, a=T9, imm=6); a.emit('AND', dst=T1, a=T1, imm=0xF)
+a.emit('ADD', dst=T0, a=T0, b=T1)
+a.emit('SLW', imm=SLOTW['h2'], a=T0, b=SLOT)
 
-a.emit('ADD', dst=R_SLOT, a=R_SLOT, b=ONE)
+# ---- flat light: ambient + 3/4 key + 1/4 fill against the face normal
+ld(T9, IN, NS, KD)
+ld(T10, IN, NS, FD)
+a.emit('LDI', dst=T3, imm=C_AMB)
+a.emit('JGE', a=ZERO, b=T9, imm='lt_k')
+a.emit('SHR', dst=T1, a=T9, imm=2)
+a.emit('SUB', dst=T2, a=T9, b=T1)
+a.emit('ADD', dst=T3, a=T3, b=T2)
+a.label('lt_k')
+a.emit('JGE', a=ZERO, b=T10, imm='lt_f')
+a.emit('SHR', dst=T1, a=T10, imm=2)
+a.emit('ADD', dst=T3, a=T3, b=T1)
+a.label('lt_f')
+a.emit('MIN', dst=T3, a=T3, b=50)
+# lf word = lf (sticker chroma is full-saturation since v0.4, so the old
+# gamma-level byte, and with it the engine's GAM op, is gone)
+a.emit('SLW', imm=SLOTW['lf'], a=T3, b=SLOT)
+
+a.emit('ADD', dst=SLOT, a=SLOT, b=ONE)
 a.label('f_next')
-a.emit('ADD', dst=I, a=I, b=ONE)
-a.emit('LDI', dst=T0, imm=6)
-a.emit('JLT', a=I, b=T0, imm='face_top')
-a.label('f_end')
+a.emit('ADD', dst=FI, a=FI, b=ONE)
+a.emit('JLT', a=FI, b=47, imm='face')
+a.emit('SUB', dst=BOX, a=ONE, b=BOX)              # the other box ...
+a.emit('SUB', dst=T0, a=BOX, b=FIRST)             # ... unless back at FIRST
+a.emit('JNZ', a=T0, imm='pass')
 
-# --- vignette seed cx^2 (low 22 bits, as the pixel path takes it) and the
-# slot count the line engine loops over
-a.emit('CTL', dst=T0, imm=6)
-a.emit('MUL', a=T0, b=T0)
-a.emit('MRD', dst=T1, imm=0)
-a.emit('AND', dst=T2, a=T1, imm=0x3FFF)
-a.emit('SHR', dst=T3, a=T1, imm=14)
-a.emit('AND', dst=T3, a=T3, imm=0xFF)
-a.emit('SHL', dst=T3, a=T3, imm=14)
-a.emit('ADD', dst=T2, a=T2, b=T3)
-a.emit('SLW', imm=SLOTW['qx0'], a=T2, b=ZERO)
-a.emit('GWR', imm=127, a=ZERO, b=R_SLOT)
-
+# ---------------------------------------------------- 8. publish
+a.emit('SLW', imm=SLOTW['nslot'], a=SLOT, b=ZERO)
+a.emit('SLW', imm=SLOTW['kick'], a=ZERO, b=ZERO)
 a.emit('END')
 
 if __name__ == '__main__':
     w = a.words()
     print(f'-- {len(w)} instructions', file=sys.stderr)
+    assert len(w) <= 1024
     print(emit_vhdl(w, depth=1024))

@@ -6,7 +6,7 @@
 [program]
 program_id = "com.ron.bajaweave"
 program_name = "Bajaweave"
-program_version = "0.11.1"
+program_version = "0.12.0"
 abi_version = ">=1.0,<2.0"
 author = "ron"
 license = "GPL-3.0"
@@ -14,7 +14,7 @@ categories = ["Synthesis", "Pattern"]
 program_type = "synthesis"
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
-description = "Two swaying line oscillators woven together: complementary colour sweep, sway, smooth flow, edge rims, crossing colour."
+description = "Two swaying line oscillators woven together in saturated complementary colour: sway, smooth flow, outlines."
 url = "https://github.com/bluecondition/videomancer-dev"
 
 # --- Rotary Potentiometers ---
@@ -101,9 +101,9 @@ initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
-name_label = "Crossings"
-value_labels = ["Plain", "Color"]
-initial_value_label = "Color"
+name_label = "Brightness"
+value_labels = ["Normal", "Darker"]
+initial_value_label = "Normal"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
@@ -142,7 +142,7 @@ rotary_potentiometer_5 = 266
 rotary_potentiometer_6 = 256
 toggle_switch_7 = 0
 toggle_switch_8 = 0
-toggle_switch_9 = 1
+toggle_switch_9 = 0
 toggle_switch_10 = 1
 toggle_switch_11 = 0
 linear_potentiometer_12 = 407

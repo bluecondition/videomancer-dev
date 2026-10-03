@@ -42,6 +42,8 @@
 --   K5 Tint (hue rotate; speed in Cycle)      K6 Color Mode
 --   S1 Swap (bg <-> dot)   S2 Backdrop (palette/video)
 --   S3 Fill (paint/porthole)   S4 Edges (hard/soft)
+--   (S2 Video + S3 Porthole = spotlight: colour video portholes over a
+--    half-bright grey copy of the video)
 --   S5 Motion (still/sway: slow drift + wave animation)
 --   P12 SWELL
 --
@@ -123,6 +125,45 @@ architecture polka of program_top is
         -- 7 Linen & Ink: linen / ink / signal red / warm gray
         28 => pv(768,  41, 854), 29 => pv(188,  11, 843),
         30 => pv(381, 280, 971), 31 => pv(521,  29, 841));
+
+    --------------------------------------------------------------------------
+    -- Enum-knob zone decider ROM (one EBR pair, replaces three compare banks).
+    -- Index = knob select (1 = K6 colour mode, 5 even bands; 2 = K3 layout,
+    -- 3 = K4 palette, 8 bands of 128) & current zone & knob(9:4).  The panel
+    -- divides 0..1023 EVENLY across a knob's labels, so the bands must match.
+    -- Stay in the current zone within +/-12 of its band, else jump to the
+    -- band holding the 16-step bucket's centre.
+    --------------------------------------------------------------------------
+    type t_zrom is array (0 to 2047) of std_logic_vector(3 downto 0);
+    function f_zrom return t_zrom is
+        variable r : t_zrom;
+        variable nz, cz, sel, q, v, lo, hi, nom : integer;
+    begin
+        for i in 0 to 2047 loop
+            sel := i / 512;
+            cz  := (i / 64) mod 8;
+            q   := i mod 64;
+            v   := q * 16 + 8;
+            if sel = 1 then
+                nz  := 5;
+                nom := (v * 5) / 1024;
+                lo  := (cz * 1024) / 5 - 12;
+                hi  := ((cz + 1) * 1024) / 5 + 12;
+            else
+                nz  := 8;
+                nom := v / 128;
+                lo  := cz * 128 - 12;
+                hi  := (cz + 1) * 128 + 12;
+            end if;
+            if cz < nz and v >= lo and v < hi then
+                r(i) := std_logic_vector(to_unsigned(cz, 4));
+            else
+                r(i) := std_logic_vector(to_unsigned(nom, 4));
+            end if;
+        end loop;
+        return r;
+    end function;
+    constant C_ZROM : t_zrom := f_zrom;
 
     function norm18(v : unsigned(17 downto 0)) return natural is
     begin
@@ -269,6 +310,9 @@ architecture polka of program_top is
     --------------------------------------------------------------------------
     signal fsm_t   : unsigned(8 downto 0) := (others => '1');
     signal lf_seed : std_logic := '0';
+    signal fsm_run : std_logic := '0';     -- registered "fsm_t /= idle" (keeps
+                                           -- the 9-bit idle compare out of every
+                                           -- state register's enable cone)
 
     signal sm_run  : std_logic := '0';
     signal sm_cnt  : unsigned(3 downto 0) := (others => '0');
@@ -291,6 +335,8 @@ architecture polka of program_top is
     signal fr_h1, fr_h2, fr_h3 : signed(10 downto 0) := (others => '0');
     signal fr_rh2  : unsigned(16 downto 0) := (others => '0');
     signal fr_m3s  : unsigned(3 downto 0) := (others => '0');
+    signal fr_z    : std_logic_vector(3 downto 0) := (others => '0');
+    signal zi_r    : std_logic_vector(10 downto 0) := (others => '0');
     signal fr_jb   : signed(10 downto 0) := (others => '0');
     signal fr_sneg  : std_logic := '0';
     signal pal_hij : std_logic := '0';
@@ -431,6 +477,13 @@ architecture polka of program_top is
     signal vring : t_vring := (others => (others => '0'));
     signal wptr  : unsigned(4 downto 0) := (others => '0');
     signal vr_rd : std_logic_vector(31 downto 0) := (others => '0');
+    -- spotlight backdrop (S2 Video + S3 Porthole): half-bright grey video,
+    -- dimmed at the input and delayed in its own 16-bit ring so no maths
+    -- ever sits on EBR read data
+    type t_dring is array (0 to 31) of std_logic_vector(15 downto 0);
+    signal dring : t_dring := (others => (others => '0'));
+    signal vd_r  : unsigned(9 downto 0) := C_BLKY;
+    signal vd_rd : std_logic_vector(15 downto 0) := (others => '0');
 
     signal sh_av, sh_hs, sh_vs, sh_fl : std_logic_vector(0 to LATENCY - 1)
         := (others => '0');
@@ -559,7 +612,6 @@ begin
         variable v_acc  : unsigned(13 downto 0);
         variable v_z    : integer range 0 to 5;
         variable v_raw  : integer range 0 to 1023;
-        variable v_zp   : integer range 0 to 7;
         variable v_dk   : signed(10 downto 0);
         variable v_w    : unsigned(9 downto 0);
         variable v_span : signed(10 downto 0);
@@ -569,6 +621,7 @@ begin
         variable v_pw   : t_palv;
         variable v_u12  : signed(11 downto 0);
         variable v_l11  : signed(10 downto 0);
+        variable v_zi   : std_logic_vector(10 downto 0);
     begin
         if rising_edge(clk) then
             -- serial unsigned shift-add multiplier: 11 cycles, smp = a*b
@@ -603,20 +656,23 @@ begin
                 end if;
             end if;
 
+            -- enum zone ROM: states 1/2/3 index K6/K3/K4, result lands two
+            -- states later (3/4/5).  The index is registered in fabric so the
+            -- EBR address never sees the FSM's next-state cone.
+            case fsm_t(1 downto 0) is
+                when "01"   => v_zi := "01" & std_logic_vector(m_mode) & std_logic_vector(rk6(9 downto 4));
+                when "10"   => v_zi := "10" & std_logic_vector(m_lay)  & std_logic_vector(rk3(9 downto 4));
+                when others => v_zi := "11" & std_logic_vector(s_pal)  & std_logic_vector(rk4(9 downto 4));
+            end case;
+            zi_r <= v_zi;
+            fr_z <= C_ZROM(to_integer(unsigned(zi_r)));
+
             ------------------------------------------------------------------
-            -- Triggers
+            -- State bodies run on fsm_run alone; the triggers below come
+            -- AFTER the case so they override it without sitting in every
+            -- state register's enable cone
             ------------------------------------------------------------------
-            if prev_vsync_n = '1' and vs_r = '0' and anchor_seen = '1' then
-                anchor_seen <= '0';
-                fsm_t <= (others => '0');
-            elsif r_arise = '1' and fsm_t = "111111111" then
-                lf_seed <= '0';
-                if r_anchor = '1' then
-                    fsm_t <= to_unsigned(290, 9);
-                else
-                    fsm_t <= to_unsigned(300, 9);
-                end if;
-            elsif fsm_t /= "111111111" then
+            if fsm_run = '1' then
                 fsm_t <= fsm_t + 1;
 
                 case to_integer(fsm_t) is
@@ -639,20 +695,7 @@ begin
                         s_sway  <= registers_in(6)(4);
                         field_lat <= fl_r;
                     when 1 =>
-                        -- colour-mode zone: 8 bands of 128, top bands = Cycle
-                        v_zp := to_integer(rk6(9 downto 7));
-                        if v_zp > 4 then
-                            v_zp := 4;
-                        end if;
-                        if v_zp > to_integer(m_mode) then
-                            if to_integer(rk6(6 downto 0)) >= 10 then
-                                m_mode <= to_unsigned(v_zp, 3);
-                            end if;
-                        elsif v_zp < to_integer(m_mode) then
-                            if to_integer(rk6(6 downto 0)) < 118 then
-                                m_mode <= to_unsigned(v_zp, 3);
-                            end if;
-                        end if;
+                        -- (zone ROM indexes K6 this state -> m_mode in 3)
                         -- aspect-corrected vertical step (Q4 hpx per line)
                         if ilace = '1' then
                             if act_h >= 400 then
@@ -674,31 +717,9 @@ begin
                         s_xc <= act_w(11 downto 1);
                         s_rmax <= act_w(11 downto 4);
                     when 2 =>
-                        -- layout zone: 8 bands of 128
-                        v_zp := to_integer(rk3(9 downto 7));
-                        if v_zp > to_integer(m_lay) then
-                            if to_integer(rk3(6 downto 0)) >= 10 then
-                                m_lay <= to_unsigned(v_zp, 3);
-                            end if;
-                        elsif v_zp < to_integer(m_lay) then
-                            if to_integer(rk3(6 downto 0)) < 118 then
-                                m_lay <= to_unsigned(v_zp, 3);
-                            end if;
-                        end if;
-                        -- palette zone (8 zones of 128, +/-10 hysteresis)
-                        v_zp := to_integer(rk4(9 downto 7));
-                        if v_zp /= to_integer(s_pal) then
-                            if v_zp > to_integer(s_pal) then
-                                if to_integer(rk4) >= v_zp * 128 + 10 then
-                                    s_pal <= to_unsigned(v_zp, 3);
-                                end if;
-                            else
-                                if to_integer(rk4) < to_integer(s_pal) * 128 - 10 then
-                                    s_pal <= to_unsigned(v_zp, 3);
-                                end if;
-                            end if;
-                        end if;
+                        null;
                     when 3 =>
+                        m_mode <= unsigned(fr_z(2 downto 0));
                         if ilace = '1' then
                             vstep_eff <= shift_left(resize(vstep_base, 7), 1);
                         else
@@ -711,7 +732,9 @@ begin
                         sm_run <= '1';
                     -- knob glide, one shared sub/step unit, 3 states per knob
                     when 4  => sl_cur <= slk2; sl_raw <= rk2;
+                               m_lay <= unsigned(fr_z(2 downto 0));
                     when 5  => sl_d <= signed(resize(sl_raw, 12)) - signed(resize(sl_cur, 12));
+                               s_pal <= unsigned(fr_z(2 downto 0));
                     when 6  => slk2 <= slstep(sl_cur, sl_d);
                     when 7  => sl_cur <= slk1; sl_raw <= rk1;
                     when 8  => sl_d <= signed(resize(sl_raw, 12)) - signed(resize(sl_cur, 12));
@@ -793,6 +816,13 @@ begin
                     when 73 =>
                         s_rbase <= to_unsigned(2, 9) + smp(17 downto 10);
                     when 74 =>
+                        -- Swell always owns kiss -> merge -> invert: the Size
+                        -- radius stops at the kiss (W/2), so it can never eat
+                        -- the fader's travel (rtop >= 0.69W in every layout)
+                        if s_rbase > resize(s_wh, 9) then
+                            s_rbase <= resize(s_wh, 9);
+                        end if;
+                    when 75 =>
                         v_span := signed(resize(s_rtop, 11)) - signed(resize(s_rbase, 11));
                         if v_span < 0 then
                             v_span := (others => '0');
@@ -802,15 +832,15 @@ begin
                         smp  <= (others => '0');
                         sm_cnt <= (others => '0');
                         sm_run <= '1';
-                    when 87 =>
-                        fr_t <= resize(s_rbase, 11) + resize(smp(18 downto 10), 11);
                     when 88 =>
+                        fr_t <= resize(s_rbase, 11) + resize(smp(18 downto 10), 11);
+                    when 89 =>
                         if fr_t > resize(s_rcap, 11) then
                             s_reff <= s_rcap;
                         else
                             s_reff <= fr_t(8 downto 0);
                         end if;
-                    when 89 =>
+                    when 90 =>
                         if (m_lay = 1 or m_lay = 2 or m_lay = 3)
                            and s_reff < resize(s_octc, 9) then
                             s_bdot <= '1';
@@ -827,7 +857,7 @@ begin
                             s_ebg <= "00";
                             s_ed1 <= "01";
                         end if;
-                    when 90 =>
+                    when 91 =>
                         v_l11 := fr_jb;
                         if v_l11 > signed(resize(s_w(9 downto 2), 11)) then
                             v_l11 := signed(resize(s_w(9 downto 2), 11));
@@ -845,7 +875,7 @@ begin
                             v_l11 := (others => '0');
                         end if;
                         s_jclu <= unsigned(v_l11(5 downto 0));
-                    when 91 =>
+                    when 92 =>
                         -- x-jitter magnitude 8<<jsh <= jb (quantized budget)
                         if s_jb >= 64 then
                             s_jsh <= "11"; s_jon <= '1';
@@ -1315,9 +1345,27 @@ begin
                         end if;
                     when 372 =>
                         fsm_t <= (others => '1');
+                        fsm_run <= '0';
 
                     when others => null;
                 end case;
+            end if;
+
+            ------------------------------------------------------------------
+            -- Triggers
+            ------------------------------------------------------------------
+            if prev_vsync_n = '1' and vs_r = '0' and anchor_seen = '1' then
+                anchor_seen <= '0';
+                fsm_t <= (others => '0');
+                fsm_run <= '1';
+            elsif r_arise = '1' and fsm_run = '0' then
+                fsm_run <= '1';
+                lf_seed <= '0';
+                if r_anchor = '1' then
+                    fsm_t <= to_unsigned(290, 9);
+                else
+                    fsm_t <= to_unsigned(300, 9);
+                end if;
             end if;
         end if;
     end process p_fsm;
@@ -1355,6 +1403,9 @@ begin
             vv_r <= data_in.v;
             vring(to_integer(wptr)) <= "00" & vy_r & vv_r & vu_r;
             vr_rd <= vring(to_integer(wptr - 14));
+            vd_r  <= resize(unsigned(data_in.y(9 downto 1)), 10) + 32;   -- 64 + (y-64)/2
+            dring(to_integer(wptr)) <= "000000" & std_logic_vector(vd_r);
+            vd_rd <= dring(to_integer(wptr - 14));
             wptr  <= wptr + 1;
             sh_av(0) <= av_r;
             sh_hs(0) <= hs_r;
@@ -1667,9 +1718,16 @@ begin
                 c14_fgy <= unsigned(vr_rd(29 downto 20));
                 c14_fgu <= unsigned(vr_rd(19 downto 10));
                 c14_fgv <= unsigned(vr_rd(9 downto 0));
-                c14_bgy <= s_bgy;
-                c14_bgu <= s_bgu;
-                c14_bgv <= s_bgv;
+                if s_bgvid = '1' then
+                    -- spotlight: colour portholes in a dim grey video field
+                    c14_bgy <= unsigned(vd_rd(9 downto 0));
+                    c14_bgu <= C_MID;
+                    c14_bgv <= C_MID;
+                else
+                    c14_bgy <= s_bgy;
+                    c14_bgu <= s_bgu;
+                    c14_bgv <= s_bgv;
+                end if;
             else
                 c14_fgy <= v_dy10;
                 c14_fgu <= v_du10;

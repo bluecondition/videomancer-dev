@@ -3,14 +3,15 @@
 # Forked from VideoSky, which cut the video into a line-screen: rules that were
 # the level sets of a rotatable accumulator field. A maze is not a level set,
 # it is a tiling -- so Daedalus reads the half of the accumulator VideoSky threw
-# away (the period index) as a cell grid, hashes each cell BOUNDARY to decide
-# whether a path crosses it, and draws an arm from the cell centre to each live
-# port. Relief then warps the coordinate before it is split into cell and
-# sub-cell, so the whole labyrinth drapes over the image instead of tearing.
+# away (the period index) as a cell grid and draws a Truchet weave on it: every
+# tile joins its four edge ports in pairs (two staircases, or an over/under
+# crossing), so the ink is unbroken right-angle lines that never branch. Relief
+# warps the coordinate before it is split into cell and sub-cell, so the whole
+# labyrinth drapes over the image instead of tearing.
 
 [program]
 program_id = "com.bluecondition.daedalus"
-program_version = "0.4.0"
+program_version = "1.0.0"
 abi_version = ">=1.0,<2.0"
 program_name = "Daedalus"
 author = "bluecondition"
@@ -19,7 +20,7 @@ categories = ["Print", "Render", "Edges"]
 program_type = "processing"
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
-description = "The picture drawn as a labyrinth: right-angle paths that thicken with the shadows and drape over the form. Relief bends it"
+description = "One continuous right-angle labyrinth that weaves over and under itself, redrawing the picture and draping over its form"
 url = "https://github.com/bluecondition/videomancer-dev"
 
 # --- Rotary Potentiometers (Knobs 1-6) ---
@@ -70,8 +71,8 @@ suffix_label = "deg"
 
 # The knotted-ness: raises the tile-mirror and crossing probabilities together.
 # At 0 every cell takes the same tile and the staircases chain into long ordered
-# diagonal runs; at max nearly half the cells are over/under crossings and the
-# rest a coin flip of the two staircases. Every position does something.
+# diagonal runs; at max ~24% of cells are over/under crossings and the rest a
+# coin flip of the two staircases. Every position does something.
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
 control_mode = "linear"
@@ -175,10 +176,10 @@ toggle_switch_11 = 0
 linear_potentiometer_12 = 0   # flat
 
 [[preset]]
-name = "Circuit"              # fine pitch, thin constant trace
-rotary_potentiometer_1 = 460
+name = "Circuit"              # finest pitch, thin constant trace
+rotary_potentiometer_1 = 300  # thin pen
 rotary_potentiometer_2 = 560
-rotary_potentiometer_3 = 760
+rotary_potentiometer_3 = 700  # ~24 px cells
 rotary_potentiometer_4 = 0
 rotary_potentiometer_5 = 900
 rotary_potentiometer_6 = 613  # Blueprint

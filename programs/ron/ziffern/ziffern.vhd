@@ -73,7 +73,8 @@ architecture ziffern of program_top is
     type t_gsh is array (0 to NP - 1) of integer range 0 to 15;
     constant C_GSHIFT : t_gsh := (1, 2, 3, 15);
 
-    constant C_MID : unsigned(9 downto 0) := to_unsigned(512, 10);
+    constant C_MID   : unsigned(9 downto 0) := to_unsigned(512, 10);
+    constant C_BLACK : unsigned(9 downto 0) := to_unsigned(64, 10);
 
     --------------------------------------------------------------------------
     -- Reciprocal LUT: C_RECIP(w) = (1<<FRAC)/w  (step = cells-per-pixel, Q.FRAC).
@@ -139,11 +140,9 @@ architecture ziffern of program_top is
         16 => (x"00",x"20",x"20",x"3C",x"3C",x"20",x"20",x"00"),
         17 => (x"00",x"20",x"20",x"20",x"34",x"30",x"38",x"20"));
 
-    type t_dlut is array (0 to 15) of integer range 0 to 8;
-    constant C_DIGLUT : t_dlut := (0,1,2,3,4,5,6,7,8,0,1,2,3,4,5,6);
-
     -- Flattened glyph ROM for BRAM inference: one row byte per (glyph, row),
-    -- addr = idx*8 + gy.  One synchronous read per plane replaces the wide
+    -- addr = slot*8 + gy.  Plain digits in slots 0..8, alien in 16..24, so the
+    -- S10 font select is address bit 7 (no +9 add on the hash path).  One synchronous read per plane replaces the wide
     -- LUT muxes whose fanout wiring congests the router at NP=4.  (Glow no
     -- longer needs neighbour rows: it is a SCREEN-space window on the
     -- composited lit mask, not a glyph-space ring.)
@@ -153,7 +152,11 @@ architecture ziffern of program_top is
     begin
         for idx in 0 to 17 loop
             for gy in 0 to 7 loop
-                r(idx * 8 + gy) := C_DIGITS(idx, gy);
+                if idx < 9 then
+                    r(idx * 8 + gy) := C_DIGITS(idx, gy);
+                else
+                    r((idx + 7) * 8 + gy) := C_DIGITS(idx, gy);
+                end if;
             end loop;
         end loop;
         return r;
@@ -168,7 +171,7 @@ architecture ziffern of program_top is
     type t_u3arr  is array (0 to NP - 1) of unsigned(2 downto 0);
     type t_u16arr is array (0 to NP - 1) of unsigned(15 downto 0);
     type t_slv8arr is array (0 to NP - 1) of std_logic_vector(7 downto 0);
-    type t_idxarr is array (0 to NP - 1) of integer range 0 to 17;
+    type t_idxarr is array (0 to NP - 1) of integer range 0 to 31;
     type t_slarr  is array (0 to NP - 1) of std_logic;
     type t_zparr  is array (0 to NP - 1) of unsigned(31 downto 0);
     type t_czarr  is array (0 to NP - 1) of unsigned(16 downto 0);   -- Q10.6 progress
@@ -241,14 +244,13 @@ architecture ziffern of program_top is
     -- Timing / resolution
     --------------------------------------------------------------------------
     signal s_timing  : t_video_timing_port;
-    signal s_h_count : unsigned(11 downto 0);
-    signal s_v_count : unsigned(11 downto 0);
     signal s_h_pixel_counter : unsigned(11 downto 0) := (others => '0');
     signal s_v_line_counter  : unsigned(11 downto 0) := (others => '0');
     signal s_measured_h      : unsigned(11 downto 0) := to_unsigned(960, 12);
     signal s_measured_v      : unsigned(11 downto 0) := to_unsigned(540, 12);
     signal s_vsync_prev  : std_logic := '1';
     signal s_vsync_pulse : std_logic := '0';
+    signal s_sawact      : std_logic := '0';
 
     --------------------------------------------------------------------------
     -- Per-frame constants
@@ -361,7 +363,7 @@ architecture ziffern of program_top is
 
     signal s4_center : t_slarr := (others => '0');
 
-    -- screen-space glow: composited lit mask through a +/-4 px window; the
+    -- screen-space glow: composited lit mask through a +/-3 px window; the
     -- output pixel is the window centre, glow level = distance to nearest lit
     signal s_litw : std_logic_vector(0 to 6) := (others => '0');
 
@@ -401,10 +403,6 @@ begin
                   ref_vsync_n => data_in.vsync_n, ref_avid => data_in.avid,
                   timing => s_timing);
 
-    pixel_counter_inst : entity work.pixel_counter
-        port map (clk => clk, timing => s_timing,
-                  h_count => s_h_count, v_count => s_v_count);
-
     p_measure_resolution : process(clk)
     begin
         if rising_edge(clk) then
@@ -423,12 +421,18 @@ begin
         end if;
     end process;
 
+    -- Analog vsync serrates (several edges per field): fire the per-frame
+    -- pulse once per field only, on the first edge after active video.
+    -- Without the guard s_T and the glide filter step several times per
+    -- field on analog sources (faster, uneven change rate and glide).
     p_vsync_edge : process(clk)
     begin
         if rising_edge(clk) then
             s_vsync_prev <= s_timing.vsync_n;
-            if s_vsync_prev = '0' and s_timing.vsync_n = '1' then
+            if s_timing.avid = '1' then s_sawact <= '1'; end if;
+            if s_vsync_prev = '0' and s_timing.vsync_n = '1' and s_sawact = '1' then
                 s_vsync_pulse <= '1';
+                s_sawact <= '0';
             else
                 s_vsync_pulse <= '0';
             end if;
@@ -748,9 +752,9 @@ begin
 
     -- Glow + background colours from the REGISTERED number colour.  Halo =
     -- three rings at 75/50/25% of the CURRENT digit Y (which itself rises
-    -- 50%->100% with K6), and the halo CHROMA eases from neutral to full
-    -- saturation with the K6 curve -- chroma must scale or the RGB
-    -- conversion is chroma-dominated and the knob shows no range.
+    -- 50%->100% with K6) in the full digit chroma.  Background sits at legal
+    -- black (Y 64); Tint lifts it by digit Y/8 so the tint is visible (the
+    -- old Y/16 with no pedestal was sub-black).
     p_colaux : process(clk)
     begin
         if rising_edge(clk) then
@@ -759,9 +763,9 @@ begin
             s_glow3_y <= shift_right(s_num_y, 2);
             if s_glow > to_unsigned(32, 10) then s_glow_on <= '1'; else s_glow_on <= '0'; end if;
             if s_bg_tint = '1' then
-                s_bg_y <= shift_right(s_num_y, 4); s_bg_u <= s_num_u; s_bg_v <= s_num_v;
+                s_bg_y <= C_BLACK + shift_right(s_num_y, 3); s_bg_u <= s_num_u; s_bg_v <= s_num_v;
             else
-                s_bg_y <= (others => '0'); s_bg_u <= C_MID; s_bg_v <= C_MID;
+                s_bg_y <= C_BLACK; s_bg_u <= C_MID; s_bg_v <= C_MID;
             end if;
         end if;
     end process;
@@ -958,13 +962,19 @@ begin
     --------------------------------------------------------------------------
     p_hashB : process(clk)
         variable v_h : unsigned(15 downto 0);
+        variable v_m : unsigned(11 downto 0);
         variable v_off : integer range 0 to 8;
     begin
         if rising_edge(clk) then
             for i in 0 to NP - 1 loop
                 v_h := mix16(sA_base(i) xor s_seed xor (unsigned(sA_gen8(i)) & unsigned(sA_gen8(i))));
-                v_off := C_DIGLUT(to_integer(v_h(7 downto 4)));
-                if s_font_sel = '1' then s2_idx(i) <= v_off + 9;
+                -- balanced 1-of-9 pick: (h8 * 9) >> 8 -> each glyph gets 28
+                -- or 29 of 256 hash values (the old 16->9 table gave 8 and 9
+                -- half the share of 1..7)
+                v_m := shift_left(resize(v_h(11 downto 4), 12), 3)
+                       + resize(v_h(11 downto 4), 12);
+                v_off := to_integer(v_m(11 downto 8));
+                if s_font_sel = '1' then s2_idx(i) <= v_off + 16;
                 else                     s2_idx(i) <= v_off; end if;
                 s2_gx(i) <= sA_gx(i); s2_gy(i) <= sA_gy(i);
                 -- Luma Mod: ownership is LUMA-selected, not hash-split --
@@ -984,9 +994,8 @@ begin
     end process;
 
     --------------------------------------------------------------------------
-    -- S3: glyph rows (centre + above/below for the dilation glow), one packed
-    -- 24-bit BRAM read per plane (own generate block so each plane reliably
-    -- infers its own EBR pair instead of a 4-read-port memory).
+    -- S3: glyph row byte, one BRAM read per plane (own generate block so each
+    -- plane reliably infers its own EBR instead of a 4-read-port memory).
     --------------------------------------------------------------------------
     g_font : for i in 0 to NP - 1 generate
         p_font : process(clk)
@@ -1015,10 +1024,10 @@ begin
     end process;
 
     --------------------------------------------------------------------------
-    -- S5w: composite the planes' lit bits and slide them through a 9-tap
-    -- window.  The colour stage outputs the window CENTRE (litw(4)); taps
-    -- 3/5, 2/6, 1/7, 0/8 are the pixels 1..4 SCREEN px away, giving a glow
-    -- that fades with true screen distance regardless of digit size.
+    -- S5w: composite the planes' lit bits and slide them through a 7-tap
+    -- window.  The colour stage outputs the window CENTRE (litw(3)); taps
+    -- 2/4, 1/5, 0/6 are the pixels 1..3 SCREEN px away, giving a glow that
+    -- fades with true screen distance regardless of digit size.
     --------------------------------------------------------------------------
     p_lit : process(clk)
         variable v_any : std_logic;
@@ -1033,7 +1042,7 @@ begin
     end process;
 
     --------------------------------------------------------------------------
-    -- S5: composite front-to-back, colour, depth fade, video key, invert.
+    -- S5: composite, colour, glow rings, video key, invert.
     --------------------------------------------------------------------------
     p_color : process(clk)
         variable v_y, v_u, v_v : unsigned(9 downto 0);
@@ -1089,14 +1098,24 @@ begin
     end process;
 
     --------------------------------------------------------------------------
-    -- Output.
+    -- Output.  Blanking gate: outside active video the accumulators hold, so
+    -- the pipeline would keep emitting the last pixel (digit colour, or the
+    -- whole blanking in digit colour under Invert/Tint) -- corrupts the
+    -- encoder's colour reference.  Force neutral whenever the aligned avid
+    -- is low (constant load = FF sync set/reset, ~free).
     --------------------------------------------------------------------------
     p_io : process(clk)
     begin
         if rising_edge(clk) then
-            s_io.y       <= std_logic_vector(s5_y);
-            s_io.u       <= std_logic_vector(s5_u);
-            s_io.v       <= std_logic_vector(s5_v);
+            if s5_sync(2) = '1' then
+                s_io.y <= std_logic_vector(s5_y);
+                s_io.u <= std_logic_vector(s5_u);
+                s_io.v <= std_logic_vector(s5_v);
+            else
+                s_io.y <= std_logic_vector(C_BLACK);
+                s_io.u <= std_logic_vector(C_MID);
+                s_io.v <= std_logic_vector(C_MID);
+            end if;
             s_io.hsync_n <= s5_sync(0);
             s_io.vsync_n <= s5_sync(1);
             s_io.avid    <= s5_sync(2);

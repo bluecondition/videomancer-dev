@@ -13,7 +13,7 @@ settled, the image is completely static.  Every movement you see was performed.
 
 | ctl | name | what it does | |
 |---|---|---|---|
-| **P12** | **Y Phase B** | Y phase of layer B — the primary gesture, rakes one pattern across the other | **glided** |
+| **P12** | **Sweep** | Y phase of layer B — the primary gesture, rakes one pattern across the other (reversed: slider up moves B the other way) | **glided** |
 | K1 | **Texture A** | 10 textures, equal zones | snap, 8-count deadband |
 | K2 | **Scale A** | pattern pitch, 1024 px → 4.0 px | **continuous**, glided |
 | K3 | **Phase A** | X phase, ±1024 px (rotation for spokes) | **continuous**, glided |
@@ -44,7 +44,7 @@ interference state.  The only thing given up is a global vertical shift of the
 whole composite.
 
 **Textures**, radial → linear → tiled: Circles · Squares · Spokes · Wavy H ·
-Wavy V · Diagonal · Grid · Hex · Checker · Brick.
+Wavy V · Diagonal · Anti-Diag · Grid · Hex · Checker.
 
 **The colouriser (S11)** paints ink by *which layer made it*, so the
 interference itself carries the colour.  On a white ground that is subtractive
@@ -58,16 +58,14 @@ hues — judge shape in sim, hue on the device.
 **What is deliberately absent: per-layer mask invert.**  For a 50 %-duty
 grating, inverting the mask is mathematically identical to shifting the phase
 by half a period — which the phase knob already does, more finely.  It only
-differed on the three thin-line textures (grid, hex, brick), which is not worth
+differed on the thin-line textures (grid, hex), which is not worth
 a switch; Cut covers the useful negations and Ground covers global inversion.
 That, plus the fact that black ink on a black ground draws nothing, is why the
 original invert/order/background trio felt dead.
 
-Presets: Rings, Riley Weave, Screen Clash, Two Colour, Light Mix, Carved Tile,
-Slow Sweep.  **Power-up** is white ground, mono, Over blend, Bold weight, and
-*two* circle fields at 64 px and 46.5 px — so the unit wakes up already showing
-a strong concentric moiré.  If that is on screen, every part of the engine is
-working.
+Presets: none for now (cleared 2026-09-27; new set to be authored on hardware).  **Power-up** (set 2026-09-27 on hardware) is black ground, mono, Fringe (XOR)
+blend, Bold weight, two circle fields (Scale A 50 %, Scale B 43 %, Phase A +5 %,
+Phase B +6 %) with Sweep at −37 %.
 
 ## One phase, one comparison
 

@@ -1,4 +1,13 @@
--- clacker.vhd  (v0.2 — video as a mechanical flip-disc wall)
+-- clacker.vhd  (v0.3 — video as a mechanical flip-disc wall)
+--
+-- v0.3: Fill tops out with the discs just touching (never overlapping); the
+-- rim bevel scales with face brightness so black discs no longer leave gray
+-- rings; K5 is now TILT — every disc rests leaned back (thinner and dimmer),
+-- always visible; Refresh is a continuous single-front wave from one wall
+-- per second to every row every frame, and every row is still re-pinned every frame so a
+-- slow wave can never let a settled disc's age wrap into a phantom re-flip.
+-- The frame counter / interlace detect advance once per field (serrated
+-- analog vsync guard).
 --
 -- v0.2: 1080i keeps discs round (field_n-toggle interlace detect, row pitch
 -- halved in field lines, dy steps 2 with odd-field +1 interleave offset);
@@ -52,9 +61,9 @@
 -- Controls:
 --   K1  Disc Size   (cell pitch, smooth 34..162 px)
 --   K2  Levels      (2..16 quantization steps: colour steps / tilt steps)
---   K3  Fill        (disc radius vs cell: gapped -> touching -> overfilled)
---   K4  Refresh     (travelling 16-frame update wave -> every row every frame)
---   K5  Tilt Shade  (0 = flat unlit, max = full edge-on blackout)
+--   K3  Fill        (disc diameter vs cell: 50% -> just touching)
+--   K4  Refresh     (update wave: 1 s per wall -> every row every frame)
+--   K5  Tilt        (resting lean of every disc: face-on -> steep and dim)
 --   K6  Chroma      (chroma gain on the faces, 0.75x .. 2.7x)
 --   S7  Shape       (Disc / Square card)
 --   S8  Mode        (Colour / Luma Mod)
@@ -140,6 +149,11 @@ architecture clacker of program_top is
     constant C_PANEL  : unsigned(9 downto 0) := to_unsigned( 64, 10);   -- backing
     constant C_BEZEL  : unsigned(9 downto 0) := to_unsigned( 32, 10);   -- grid line
 
+    -- Tilt shade: face brightness = C_AMB + s * C_SPAN / 256 (s = squash,
+    -- 256 = face-on), so an edge-on disc falls to ~18% before vanishing.
+    constant C_SPAN : unsigned(7 downto 0) := to_unsigned(208, 8);
+    constant C_AMB  : unsigned(7 downto 0) := to_unsigned( 47, 8);
+
     ----------------------------------------------------------------------------
     -- Raster position.
     ----------------------------------------------------------------------------
@@ -159,6 +173,22 @@ architecture clacker of program_top is
     signal s_fprev : std_logic := '0';
     signal s_ilace : std_logic := '0';
     signal s_fodd  : std_logic := '0';
+
+    -- Refresh wave: a single front sweeping top-down.  Its position is a
+    -- FRACTION of the wall (wv_ph, Q16, wrapping for free), advanced by s_rate
+    -- walls/frame, so the sweep time is the same at every Disc Size.  The row
+    -- band it crossed this frame is [h0, h1) = floor(ph * nrows) at the old and
+    -- new phase (circular); s_wall = every row every frame.
+    signal s_rv       : unsigned(12 downto 0) := (others => '0');   -- K4 * 6
+    signal s_rb       : unsigned(11 downto 0) := (others => '0');   -- rate mantissa
+    signal s_rate     : unsigned(16 downto 0) := to_unsigned(8704, 17);
+    signal s_wall     : std_logic := '0';
+    signal s_nrows    : unsigned(5 downto 0) := to_unsigned(32, 6);
+    signal nrows_meas : unsigned(5 downto 0) := to_unsigned(32, 6);
+    signal wv_ph      : unsigned(15 downto 0) := (others => '0');
+    signal wv_ph0     : unsigned(15 downto 0) := (others => '0');
+    signal wv_h0      : unsigned(4 downto 0) := (others => '0');
+    signal wv_h1      : unsigned(4 downto 0) := (others => '0');
 
     ----------------------------------------------------------------------------
     -- Per-frame parameters (latched at vsync, refined by the frame FSM).
@@ -181,10 +211,8 @@ architecture clacker of program_top is
     signal s_nlev  : unsigned(4 downto 0) := to_unsigned(16, 5);    -- 2..16
     signal s_r15   : unsigned(11 downto 0) := to_unsigned(256, 12);
     signal s_spd   : unsigned(9 downto 0) := to_unsigned(80, 10);   -- clack rate
-    signal s_span  : unsigned(7 downto 0) := to_unsigned(175, 8);   -- tilt shade
-    signal s_amb   : unsigned(7 downto 0) := to_unsigned(80, 8);
+    signal s_tf    : unsigned(8 downto 0) := to_unsigned(256, 9);   -- tilt factor (Q8)
     signal s_sg    : unsigned(7 downto 0) := to_unsigned(98, 8);    -- chroma gain
-    signal s_rmask : unsigned(4 downto 0) := (others => '0');       -- refresh mask
     signal s_r2rim : unsigned(13 downto 0) := (others => '0');      -- r^2 * 7/8 (side bevel)
     signal s_perp  : std_logic := '0';                              -- P12 top band
 
@@ -215,6 +243,9 @@ architecture clacker of program_top is
     signal lg_wen   : std_logic := '0';
     signal lg_a     : unsigned(5 downto 0) := (others => '0');
     signal lg_d     : unsigned(8 downto 0) := (others => '0');
+    signal lg_wen2  : std_logic := '0';
+    signal lg_a2    : unsigned(5 downto 0) := (others => '0');
+    signal lg_d2    : unsigned(8 downto 0) := (others => '0');
 
     ----------------------------------------------------------------------------
     -- Per-line dy and dy^2.  dy advances by exactly +1 per line, so the square
@@ -260,6 +291,7 @@ architecture clacker of program_top is
     -- Sample / read-modify-write pipe (w0..w3).
     ----------------------------------------------------------------------------
     signal w0_stb : std_logic := '0';
+    signal w0_fr, w1_fr, w2_fr : std_logic := '0';     -- row takes new video
     signal w0_idx : unsigned(5 downto 0) := (others => '0');
     signal w0_y, w0_u, w0_v : unsigned(9 downto 0) := C_MID;
 
@@ -334,6 +366,7 @@ architecture clacker of program_top is
     signal p12_in, p12_rim : std_logic := '0';
 
     signal p13_y   : unsigned(9 downto 0) := C_MID;
+    signal p13_yr  : unsigned(9 downto 0) := C_MID;    -- rim-lit luma
     signal p13_um, p13_vm : signed(19 downto 0) := (others => '0');
     signal p13_in, p13_rim : std_logic := '0';
 
@@ -381,11 +414,24 @@ begin
 
             r_hedge <= v_h_edge;
 
-            if v_v_edge = '1' then
+            -- Once per field: analog vsync serrates (several edges per
+            -- field), so every increment here is guarded by frame_act, which
+            -- only the first edge after active video still sees set.
+            if v_v_edge = '1' and frame_act = '1' then
                 fcnt    <= fcnt + 1;
                 s_fprev <= data_in.field_n;
                 s_ilace <= data_in.field_n xor s_fprev;
                 s_fodd  <= data_in.field_n;
+                -- advance the refresh wave (h0/h1 follow in the frame FSM)
+                wv_ph0  <= wv_ph;
+                wv_ph   <= wv_ph + s_rate(15 downto 0);
+                s_nrows <= nrows_meas;
+            end if;
+
+            -- row count = rows whose centre line (the sample line) is on
+            -- screen; captured on active lines, never at vsync
+            if data_in.avid = '1' and frame_act = '1' and celly_loc = s_rc then
+                nrows_meas <= resize(celly_idx, 6) + 1;
             end if;
 
             -- X lattice
@@ -425,30 +471,43 @@ begin
                 end if;
             end if;
 
-            -- Refresh gate: rows satisfying ((row - fcnt) and mask) = 0 are
-            -- re-evaluated this frame.  With mask = 15 that is one row in 16,
-            -- and the selected row INCREASES by one each frame, so the update
-            -- wave sweeps TOP-DOWN like a real flip sign repainting.
+            -- Refresh gate: rows the wave front crossed this frame, [h0, h1)
+            -- circular, take new video; the front moves DOWN, so the wall
+            -- repaints top-down like a real flip sign.
             -- Gated on the REGISTERED h edge: celly_idx has been incremented to
             -- the new row by then, so this tests the row we are entering.
             if r_hedge = '1' then
-                if ((celly_idx - fcnt(4 downto 0)) and s_rmask) = 0 then
+                if s_wall = '1' then
                     row_fresh <= '1';
+                elsif wv_h1 >= wv_h0 then
+                    if celly_idx >= wv_h0 and celly_idx < wv_h1 then
+                        row_fresh <= '1';
+                    else
+                        row_fresh <= '0';
+                    end if;
                 else
-                    row_fresh <= '0';
+                    if celly_idx >= wv_h0 or celly_idx < wv_h1 then
+                        row_fresh <= '1';
+                    else
+                        row_fresh <= '0';
+                    end if;
                 end if;
             end if;
 
             -- Sample trigger: at row R's centre line, at each cell's centre
             -- column.  The pixel path's own grid read is already addressing
             -- {R, c} here, so the old cell word arrives with the w1 stage.
+            -- EVERY row runs the read-modify-write every frame; rows off the
+            -- wave just keep their value and re-pin their stamp, so however
+            -- slow the wave, no settled disc's age can wrap into a re-flip.
             v_trig := '0';
-            if data_in.avid = '1' and frame_act = '1' and row_fresh = '1'
+            if data_in.avid = '1' and frame_act = '1'
                and celly_loc = s_rc and x_loc = s_wh then
                 v_trig := '1';
             end if;
 
             w0_stb <= v_trig;
+            w0_fr  <= row_fresh;
             w0_idx <= x_idx;
             w0_y   <= unsigned(data_in.y);
             w0_u   <= unsigned(data_in.u);
@@ -482,6 +541,7 @@ begin
             w1_pq  <= resize(shift_right(w0_y(9 downto 6) * s_nlev, 4), 9);
             w1_stb <= w0_stb;
             w1_idx <= w0_idx;
+            w1_fr  <= w0_fr;
 
             -- w2: expand the level index back to a 4-bit face value.  In Luma
             -- Mod the stored chroma is forced to zero: it drives nothing there,
@@ -513,6 +573,7 @@ begin
             end if;
             w2_stb <= w1_stb;
             w2_idx <= w1_idx;
+            w2_fr  <= w1_fr;
             -- rd_w is the registered grid read of the address the pixel path
             -- latched one cycle ago — which at the cell centre is exactly this
             -- cell.  Captured here rather than at w1 so it lands in the same
@@ -532,8 +593,12 @@ begin
             else
                 v_y4 := w2_py(11 downto 8);
             end if;
-            v_new := std_logic_vector(v_y4) & std_logic_vector(w2_u3)
-                   & std_logic_vector(w2_v3);
+            if w2_fr = '1' then
+                v_new := std_logic_vector(v_y4) & std_logic_vector(w2_u3)
+                       & std_logic_vector(w2_v3);
+            else
+                v_new := w2_old(15 downto 6);       -- off the wave: hold
+            end if;
             v_age := fcnt - unsigned(w2_old(5 downto 0));
 
             w3_val <= v_new;
@@ -542,8 +607,9 @@ begin
             elsif v_age >= 47 then
                 -- Settled.  Normally pin age at 47 (guards the 6-bit wrap);
                 -- with Clack in its top band, re-flip instead — same value,
-                -- full swing — so the wall tumbles forever even on a still.
-                if s_perp = '1' then
+                -- full swing — so the wall tumbles forever even on a still,
+                -- staggered by the refresh wave.
+                if s_perp = '1' and w2_fr = '1' then
                     w3_stm <= fcnt;
                 else
                     w3_stm <= fcnt - 47;
@@ -631,12 +697,18 @@ begin
 
     ----------------------------------------------------------------------------
     -- Swing-curve table generator.  Runs 64 cycles in vblank, long before any
-    -- active pixel can read the table.
+    -- active pixel can read the table.  The Tilt factor is folded into every
+    -- entry here (cv * tf / 256), so the resting squash of every disc — and
+    -- its tilt shade — follow K5 without any per-pixel arithmetic.
     ----------------------------------------------------------------------------
     p_lutgen : process(clk)
         variable v_ph : unsigned(11 downto 0);
     begin
         if rising_edge(clk) then
+            lg_wen2 <= lg_wen;
+            lg_a2   <= lg_a;
+            lg_d2   <= resize(shift_right(lg_d * s_tf, 8), 9);
+
             lg_wen <= '0';
             if lg_run = '1' then
                 v_ph := resize(shift_right(lg_acc - 16, 4), 12);
@@ -664,8 +736,8 @@ begin
     p_cvlut : process(clk)
     begin
         if rising_edge(clk) then
-            if lg_wen = '1' then
-                cvlut(to_integer(lg_a)) <= std_logic_vector(lg_d);
+            if lg_wen2 = '1' then
+                cvlut(to_integer(lg_a2)) <= std_logic_vector(lg_d2);
             end if;
             p5_cv <= unsigned(cvlut(to_integer(p4_age)));
         end if;
@@ -736,6 +808,8 @@ begin
     p_frame : process(clk)
         variable v_w : integer range 0 to 511;
         variable v_n : integer range 0 to 31;
+        variable v_l : unsigned(13 downto 0);
+        variable v_m : unsigned(12 downto 0);
     begin
         if rising_edge(clk) then
             mp <= ma * mb;
@@ -764,18 +838,28 @@ begin
                         if v_w > 162 then v_w := 162; end if;
                         s_w <= to_unsigned(v_w, 8);
 
-                        -- Levels: 2..16
-                        v_n := 2 + to_integer(lk2(9 downto 6));
-                        if v_n > 16 then v_n := 16; end if;
+                        -- Levels: 2 + round(k * 14/1023), so the level count
+                        -- matches the 2..16 display value exactly
+                        v_l := shift_left(resize(lk2, 14), 4)
+                             - shift_left(resize(lk2, 14), 1) + 512;
+                        v_n := 2 + to_integer(v_l(13 downto 10));
                         s_nlev <= to_unsigned(v_n, 5);
 
-                        -- Fill: r/W = 0.25 .. 0.56
-                        s_rfrac <= resize(to_unsigned(512, 11) + lk3(9 downto 1)
-                                        + lk3(9 downto 3), 11);
+                        -- Fill: r/W = 0.25 .. 0.4995 (diameter 50% .. just
+                        -- touching the neighbours — never overlapping)
+                        s_rfrac <= resize(to_unsigned(512, 11) + lk3(9 downto 1), 11);
 
-                        -- Tilt Shade: span 0..255, the ambient floor takes the rest
-                        s_span <= lk5(9 downto 2);
-                        s_amb  <= 255 - lk5(9 downto 2);
+                        -- Tilt: resting squash factor 256 (face-on) .. 64
+                        s_tf <= resize(to_unsigned(256, 10) - lk5(9 downto 2)
+                                     + lk5(9 downto 4), 9);
+
+                        -- Refresh, exponential over 6 octaves:
+                        -- rate = 17 * (64 + f) << e walls/frame (Q16), with
+                        -- e.f = K4 * 6/1024 — 1088/65536 = one wall per
+                        -- 60 frames (1 s) at 0, one wall per frame at the top.
+                        -- One shift-add per state (states 0..3).
+                        s_rv <= shift_left(resize(lk4, 13), 2)
+                              + shift_left(resize(lk4, 13), 1);
 
                         s_sg <= resize(to_unsigned(48, 8) + lk6(9 downto 3), 8);
 
@@ -794,13 +878,9 @@ begin
                         s_wh  <= '0' & s_w(7 downto 1);
                         s_r15 <= R15_ROM(to_integer(s_nlev) - 2);
 
-                        -- Refresh: mask 0 (every row every frame) .. 15
-                        case to_integer(lk4(9 downto 8)) is
-                            when 3      => s_rmask <= to_unsigned( 0, 5);
-                            when 2      => s_rmask <= to_unsigned( 1, 5);
-                            when 1      => s_rmask <= to_unsigned( 3, 5);
-                            when others => s_rmask <= to_unsigned(15, 5);
-                        end case;
+                        -- 17 * (64 + f); 64 + f is just f with bit 6 set
+                        v_m := resize('1' & s_rv(9 downto 4), 13);
+                        s_rb <= resize(shift_left(v_m, 4) + v_m, 12);
 
                         ma <= signed(resize(s_w, 12));
                         mb <= signed(resize(s_rfrac, 12));
@@ -815,9 +895,25 @@ begin
                         -- s_spd settled at t=0; rebuild the swing-curve table
                         lg_start <= '1';
                     when 2 =>
+                        case to_integer(s_rv(12 downto 10)) is
+                            when 0      => s_rate <= resize(s_rb, 17);
+                            when 1      => s_rate <= shift_left(resize(s_rb, 17), 1);
+                            when 2      => s_rate <= shift_left(resize(s_rb, 17), 2);
+                            when 3      => s_rate <= shift_left(resize(s_rb, 17), 3);
+                            when 4      => s_rate <= shift_left(resize(s_rb, 17), 4);
+                            when others => s_rate <= shift_left(resize(s_rb, 17), 5);
+                        end case;
                         s_hh   <= s_wh;
                         s_rpm1 <= s_rp - 1;
                         s_rc   <= '0' & s_rp(7 downto 1);
+                    when 3 =>
+                        -- a wall or more per frame, or the top band = every
+                        -- row every frame
+                        if s_rate(16) = '1' or lk4(9 downto 5) = "11111" then
+                            s_wall <= '1';
+                        else
+                            s_wall <= '0';
+                        end if;
                     when 4 =>
                         -- r = W * rfrac / 2048
                         if mp(18 downto 11) < 3 then
@@ -836,9 +932,18 @@ begin
                         hh2qo <= hh2q - resize(s_hh & '0', 16) + 1;
                     when 10 =>
                         s_r2 <= unsigned(mp(13 downto 0));
+                        -- wave rows: h = floor(phase * nrows)
+                        ma <= signed(resize(wv_ph0(15 downto 5), 12));
+                        mb <= signed(resize(s_nrows, 12));
                     when 11 =>
                         -- side-bevel threshold: r^2 * 7/8
                         s_r2rim <= s_r2 - ("000" & s_r2(13 downto 3));
+                        ma <= signed(resize(wv_ph(15 downto 5), 12));
+                        mb <= signed(resize(s_nrows, 12));
+                    when 12 =>
+                        wv_h0 <= unsigned(mp(15 downto 11));
+                    when 13 =>
+                        wv_h1 <= unsigned(mp(15 downto 11));
                     when others => null;
                 end case;
             end if;
@@ -955,7 +1060,7 @@ begin
             -- than behind one.
             ------------------------------------------------------------------
             p8_s2  <= resize(shift_right(p7_s * p7_s, 8), 9);
-            p8_shm <= resize(shift_right(p7_s * s_span, 8), 9);
+            p8_shm <= resize(shift_right(p7_s * C_SPAN, 8), 9);
 
             ------------------------------------------------------------------
             -- c9: the shape limit s2*t, as two HALF-WIDTH products.  As one
@@ -964,13 +1069,13 @@ begin
             -- on a 3.2 ns logic path, holding HD Analog at 73.6 MHz.  Splitting
             -- s2 into nibbles halves each tree and each fanout; c10 recombines.
             --
-            -- The shade sum cannot actually exceed 255 (amb = 255 - span and
+            -- The shade sum cannot actually exceed 255 (amb + span = 255 and
             -- s <= 256 after the fold); the clamp is a guard, and free here
             -- because it sits parallel to the multiplies rather than behind one.
             ------------------------------------------------------------------
             p9_hi <= p8_s2(8 downto 4) * tp(3);
             p9_lo <= p8_s2(3 downto 0) * tp(3);
-            v_sh  := resize(s_amb, 10) + resize(p8_shm, 10);
+            v_sh  := resize(C_AMB, 10) + resize(p8_shm, 10);
             if v_sh > 255 then v_sh := to_unsigned(255, 10); end if;
             p9_sh <= v_sh(7 downto 0);
 
@@ -1038,6 +1143,17 @@ begin
             p13_vm <= (signed(resize(p12_v, 11)) - to_signed(512, 11))
                     * signed(resize(p12_sh, 9));
             p13_y   <= p12_ym(17 downto 8);
+            -- rim-lit luma: +220, but never more than the face's own luma, so
+            -- the bevel scales down with a dark face and a black disc on the
+            -- black panel leaves no gray ring behind
+            if p12_ym(17 downto 8) < 220 then
+                v_ry := resize(p12_ym(17 downto 8), 11)
+                      + resize(p12_ym(17 downto 8), 11);
+            else
+                v_ry := resize(p12_ym(17 downto 8), 11) + 220;
+            end if;
+            if v_ry > 1023 then v_ry := to_unsigned(1023, 11); end if;
+            p13_yr  <= v_ry(9 downto 0);
             p13_in  <= p12_in;
             p13_rim <= p12_rim;
 
@@ -1063,9 +1179,7 @@ begin
             if p13_in = '1' then
                 if p13_rim = '1' then
                     -- lit metal bevel around the disc edge
-                    v_ry := resize(v_oy, 11) + 220;
-                    if v_ry > 1023 then v_ry := to_unsigned(1023, 11); end if;
-                    v_oy := v_ry(9 downto 0);
+                    v_oy := p13_yr;
                     v_ou := ('0' & v_ou(9 downto 1)) + 256;
                     v_ov := ('0' & v_ov(9 downto 1)) + 256;
                 end if;

@@ -1,4 +1,31 @@
-# Clacker — video as a mechanical flip-disc wall (v0.2.1)
+# Clacker — video as a mechanical flip-disc wall (v0.3.0)
+
+**v0.3.0 (finalizing pass, 2026-09-27, from HW feedback):**
+- **K3 Fill** now reads disc DIAMETER as % of the cell, 50..100% — 100% = just
+  touching; the old overfilled range (discs running into each other) is gone.
+- **Gray outlines with no disc** (moved with K2 Levels): the bevel rim was a flat
+  +220 luma on every disc, so a level-0 (black) face left a gray ring on the
+  black panel, and Levels moved cells in and out of level 0. Rim is now
+  `+min(220, face)` — dark discs get a proportionally dim bevel, black none.
+- **K5 Tilt Shade → Tilt**: it only scaled darkening of *tilted* discs, and in
+  Colour mode discs rest flat — invisible at rest. Now K5 is a resting lean for
+  every disc (squash factor 1 → 0.25, folded into the vblank swing-curve table
+  as `cv*tf/256`, zero per-pixel cost); shade span fixed at 208/47. Discs resting
+  leaned also stop overshooting past flat, so the black-back flash only shows
+  near face-on.
+- **K4 Refresh** was 4 hard steps (1/16, 1/4, 1/2, all rows per frame). Now a
+  single wave front whose position is a Q16 FRACTION of the wall (sweep time
+  independent of Disc Size): exponential over 6 octaves, 1 s per wall (60
+  frames) at 0 → 7.5 frames at 50% → every row every frame at the top.
+  h0/h1 rows = floor(phase × nrows) on the frame FSM's shared multiplier.
+  Every row still runs the RMW every frame (off-wave rows hold their value and
+  re-pin stamps), so a slow wave can never let a 6-bit age wrap into a phantom
+  re-flip.
+- K2 Levels count now matches the 2..16 display (round, not floor); K6 display
+  max corrected to 273. fcnt / interlace detect / wave advance guarded against
+  serrated analog vsync (frame_act).
+- Defaults = "Departures": 40 px, 5 levels, 90% fill, Refresh 50%, Tilt 0,
+  Chroma 160%, Disc / Colour / Black / Grid off.
 
 **v0.2.1 (HW bug fix):** "sometimes green half circles on the right side or
 bottom of screen" — the commit burst copied ALL 64 row-buffer words into the

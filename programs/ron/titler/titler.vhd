@@ -3,11 +3,13 @@
 --
 -- Renders two lines of 16 characters each (32 cells total) over the input
 -- video.  Knobs place the text block, pick one of eight edge/box "styles",
--- choose the ink colour and edit the message; the P12 slider scales the
--- text from small caption to full-height hero type.
+-- choose the ink colour and edit the message.  The P12 slider is a bipolar
+-- news-ticker Crawl: centre holds the text still, above centre it crawls
+-- left, below centre right, faster toward either end.  Size lives on K5
+-- (outside Edit Mode) and runs from small caption to full-height hero type.
 --
 -- Everything geometric derives from the RUNTIME-MEASURED active raster, so
--- the position knobs and the size slider have the same full useful travel
+-- the position knobs and the Size control have the same full useful travel
 -- in every video mode (this was the biggest defect in v1.0: the H/V knobs
 -- were hard-coded to a 4092-pixel span, which crammed all of SD's placement
 -- into the bottom 20% of the knob).
@@ -26,6 +28,8 @@
 --   S6: 3x3 dilation and the diagonal shifts -> self / outline / shadow /
 --       highlight bits; palette lookup.
 --   S7: pixel-class decode, output mux, blanking gate.
+-- The crawl adds nothing to this pipeline: it is one more term in the
+-- per-field text origin, computed by the vblank sequencer.
 --
 -- Why the whole glyph is fetched at once: with rows y-1, y and y+1 in hand
 -- the entire 3x3 neighbourhood costs a couple of OR gates
@@ -49,6 +53,7 @@
 --   - Text buffer: 32 entries x 6 bits = 192 register bits
 --   - Step LUT: 32 entries x 17 bits (LUT-ROM)
 --   - One shared serial shift-add multiplier for the per-frame geometry
+--     and the crawl velocity
 --
 -- Register Map:
 --   reg(0)    : H Position    0..1023 -> text centre across the active width
@@ -57,14 +62,17 @@
 --   reg(3)    : Colour / Erase   Edit Mode OFF -> top 3 bits pick 1 of 8 inks
 --                                Edit Mode ON  -> top 5 bits drag the cursor
 --                                                 and blank each cell passed
---   reg(4)    : Cursor        top 5 bits select 1 of 32 cells (bit 4 = line)
+--   reg(4)    : Size / Cursor    Edit Mode OFF -> screen-relative Size
+--                                Edit Mode ON  -> top 5 bits select 1 of 32
+--                                                 cells (bit 4 = line)
 --   reg(5)    : Letter        top 6 bits = char code 0..63
 --   reg(6)(0) : Edit Mode     1 = enable cursor + writes
 --   reg(6)(1) : Background    0 = passthrough video, 1 = solid black
 --   reg(6)(2) : Matte         1 = glyph pixels reveal the incoming video
 --   reg(6)(3) : Font          0 = default, 1 = sci-fi
 --   reg(6)(4) : Justify       0 = left, 1 = centre each line
---   reg(7)    : Size          P12 slider - screen-relative scale
+--   reg(7)    : Crawl         P12 slider, bipolar: centre = stopped,
+--                             above = crawl left, below = crawl right
 --
 -- Colour convention: the palette below is authored in standard BT.601 and
 -- swapped (U<->V) at the single compose point in S7, because Videomancer
@@ -169,7 +177,7 @@ architecture titler of program_top is
     --==========================================================================
     signal s_h_pos       : unsigned(9 downto 0);
     signal s_v_pos       : unsigned(9 downto 0);
-    signal s_size_raw    : unsigned(9 downto 0);
+    signal s_crawl_raw   : unsigned(9 downto 0);
     signal s_style       : unsigned(2 downto 0);
     signal s_letter      : unsigned(5 downto 0);
     signal s_edit_mode   : std_logic;
@@ -206,6 +214,20 @@ architecture titler of program_top is
 
     -- Edge detection for non-destructive letter writes.
     signal prev_letter   : unsigned(5 downto 0) := (others => '0');
+
+    -- Registered write request: the text buffer is written one clock after
+    -- the knob edge, from the already-registered r_cursor.  Keeps the edge
+    -- compare, the cursor mux and the 32-way cell decode out of one cone.
+    signal wr_letter     : std_logic := '0';
+    signal wr_erase      : std_logic := '0';
+    signal wr_code       : unsigned(5 downto 0) := (others => '0');
+
+    -- Size shares K5 with the cursor.  r_size is the latched size; it only
+    -- follows K5 while size_follow is set, which Edit Mode clears and a real
+    -- K5 move (outside Edit Mode) sets again - so leaving Edit Mode keeps the
+    -- size you had instead of jumping to wherever the cursor was left.
+    signal r_size        : unsigned(9 downto 0) := to_unsigned(400, 10);
+    signal size_follow   : std_logic := '1';
 
     --==========================================================================
     -- Raster measurement.  h_act / v_act count ACTIVE pixels and ACTIVE lines
@@ -252,19 +274,22 @@ architecture titler of program_top is
     --==========================================================================
     -- Vblank sequencer.  Everything here is quasi-static (once per field) but
     -- is still fully STA-timed at the pixel clock, so each state does exactly
-    -- one small operation and all three products run on ONE shared serial
-    -- shift-add multiplier.  Worst-case run length is ~130 cycles, against
+    -- one small operation and all five products run on ONE shared serial
+    -- shift-add multiplier.  Worst-case run length is ~140 cycles, against
     -- ~38 000 clocks of SD vblank.
     --==========================================================================
     type t_sm_state is (SM_IDLE, SM_RANGE, SM_MUL_S, SM_SCALE,
                         SM_MUL_CX, SM_CX, SM_MUL_CY, SM_CY,
-                        SM_ORIGIN, SM_H_DIV, SM_V_DIV, SM_SCAN, SM_JUST);
+                        SM_MUL_V, SM_V, SM_PERIOD, SM_CRAWL, SM_WRAP,
+                        SM_LEFT, SM_LEFT2, SM_LWRAP, SM_ORIGIN,
+                        SM_MUL_H, SM_H, SM_V_DIV, SM_SCAN, SM_JUST);
     signal sm_state    : t_sm_state := SM_IDLE;
 
-    -- shared serial multiplier: acc = a * b, 10 iterations
-    signal mul_a       : unsigned(21 downto 0) := (others => '0');
-    signal mul_b       : unsigned(9 downto 0)  := (others => '0');
-    signal mul_acc     : unsigned(21 downto 0) := (others => '0');
+    -- shared serial multiplier: acc = a * b, one partial product per cycle
+    -- (10 iterations for the knob products, 13 for the left-edge preload)
+    signal mul_a       : unsigned(23 downto 0) := (others => '0');
+    signal mul_b       : unsigned(12 downto 0) := (others => '0');
+    signal mul_acc     : unsigned(23 downto 0) := (others => '0');
     signal mul_cnt     : unsigned(3 downto 0)  := (others => '0');
 
     signal sq_smin     : unsigned(5 downto 0) := to_unsigned(1, 6);
@@ -276,7 +301,18 @@ architecture titler of program_top is
     signal sq_quotient : unsigned(7 downto 0)  := (others => '0');
     signal sq_hneg     : std_logic := '0';
     signal sq_vneg     : std_logic := '0';
-    signal sq_vabs     : unsigned(12 downto 0) := (others => '0');
+
+    -- Crawl.  crawl_q is the text's offset from its resting position in
+    -- 1/16 px (14 integer + 4 fractional bits), kept in [0, P) where
+    -- P = meas_w + 2*half_w is the wrap period: the text leaves one side
+    -- completely before it re-enters the other.  At hero size half_w reaches
+    -- 32*64 = 2048, so P reaches ~6016 px - hence the wide terms here.
+    signal crawl_q     : unsigned(17 downto 0) := (others => '0');
+    signal sq_ctmp     : signed(18 downto 0)   := (others => '0');
+    signal sq_vel      : unsigned(7 downto 0)  := (others => '0');
+    signal sq_left     : std_logic := '0';      -- '1' = crawl leftward
+    signal sq_period   : unsigned(13 downto 0) := to_unsigned(1920, 14);
+    signal sq_l        : signed(14 downto 0)   := (others => '0');
 
     -- Justify scan state: walks all 32 cells recording the last non-space.
     signal sq_scan_i   : unsigned(5 downto 0) := (others => '0');
@@ -429,7 +465,7 @@ begin
     s_matte       <= registers_in(6)(2);
     s_font_sel    <= registers_in(6)(3);
     s_justify     <= registers_in(6)(4);
-    s_size_raw    <= unsigned(registers_in(7));   -- P12 slider
+    s_crawl_raw   <= unsigned(registers_in(7));   -- P12 slider
 
     -- Colour is latched while in edit mode (knob 4 then becomes the eraser).
     -- The drawn cursor column is registered here too: it is quasi-static, and
@@ -440,6 +476,19 @@ begin
         if rising_edge(clk) then
             if s_edit_mode = '0' then
                 s_color_sel <= unsigned(registers_in(3)(9 downto 7));
+            end if;
+
+            -- Size pickup: Edit Mode drops the link to K5; outside Edit Mode
+            -- a real K5 move (its top 5 bits change - the same edge that moves
+            -- the cursor) picks it up again.  Power-on starts linked, so the
+            -- knob and presets work straight away.
+            if s_edit_mode = '1' then
+                size_follow <= '0';
+            elsif s_cursor_5p /= prev_cursor_5p then
+                size_follow <= '1';
+            end if;
+            if s_edit_mode = '0' and size_follow = '1' then
+                r_size <= unsigned(registers_in(4));
             end if;
 
             if s_cursor_line(0) = '0' then
@@ -596,20 +645,37 @@ begin
     --
     --   chars   = meas_w >> 7          glyph scale at which one 16-char line
     --                                  exactly fills the active width
-    --   smin    = max(1, chars >> 2)   slider at 0%   (small caption type)
-    --   smax    = min(32, chars * 2)   slider at 100% (hero type, ~8 chars
+    --   smin    = max(1, chars >> 2)   Size at 0%   (small caption type)
+    --   smax    = min(32, chars * 2)   Size at 100% (hero type, ~8 chars
     --                                  across the screen - the climax)
-    --   scale   = smin + (P12 * (smax - smin)) >> 10
+    --   scale   = smin + (Size * (smax - smin)) >> 10
     --   cx      = (H Pos * meas_w) >> 10       text centre, active coords
     --   cy      = (V Pos * meas_h) >> 10
-    --   origin  = centre - half extent         (may go negative: the text has
-    --                                           scrolled off the left/top, and
-    --                                           the accumulator is preloaded
-    --                                           with how much of it is gone)
     --
-    -- The negative-origin preload needs |origin| / scale, which is done by
-    -- repeated subtraction: at most 64 iterations horizontally (|origin| can
-    -- never exceed half_w = scale*64) and 9 vertically.
+    -- Crawl (P12, bipolar):
+    --   d       = max(0, |P12 - 512| - 24)     +-24 deadband holds it still
+    --   v       = (d * d) >> 10                1/16 px per field, 0..231
+    --                                          (~14.5 px/field flat out; the
+    --                                          square gives fine control near
+    --                                          the centre)
+    --   P       = meas_w + 2 * half_w          wrap period
+    --   crawl   = (crawl -/+ v) mod P          above centre = leftward
+    --   L       = cx - half_w + int(crawl)     left edge; if L >= meas_w then
+    --                                          L -= P, so L in [-2*half_w,
+    --                                          meas_w): the text is fully gone
+    --                                          on one side before it returns
+    --                                          on the other
+    --
+    -- A negative left edge (text partly off the left) preloads the
+    -- horizontal accumulator with |L| * step - exactly the value it would
+    -- have reached walking from the true origin, so the text keeps moving a
+    -- pixel at a time across the edge.  (A plain |L| / scale divide drops
+    -- the remainder and would make crawling text jump a whole glyph pixel,
+    -- up to 32 px, at a time.)  |L| <= 2*half_w = 128*scale, so the product
+    -- never exceeds 2^23; exactly 2^23 sets the past-text bit, as it should.
+    --
+    -- The vertical negative-origin preload is still |origin| / scale by
+    -- repeated subtraction (at most 9 iterations; nothing moves vertically).
     --
     -- SM_SCAN then walks the 32 text cells recording the last non-space in
     -- each line, which is what Justify=Centre needs.
@@ -619,10 +685,13 @@ begin
         variable v_chars      : unsigned(5 downto 0);
         variable v_smax       : unsigned(6 downto 0);
         variable v_smin       : unsigned(5 downto 0);
-        variable v_half_w     : unsigned(12 downto 0);
         variable v_half_h     : unsigned(12 downto 0);
-        variable v_cx         : unsigned(12 downto 0);
         variable v_cy         : unsigned(12 downto 0);
+        variable v_dev        : unsigned(8 downto 0);
+        variable v_d          : unsigned(8 downto 0);
+        variable v_p16        : signed(19 downto 0);
+        variable v_sub        : signed(19 downto 0);
+        variable v_neg        : signed(14 downto 0);
         variable v_cell       : unsigned(5 downto 0);
         variable v_u0, v_u1   : unsigned(4 downto 0);
     begin
@@ -630,13 +699,15 @@ begin
             v_vs_falling := prev_vsync_n and (not data_in.vsync_n);
 
             -- Shared serial shift-add multiplier: one partial product per
-            -- cycle, 10 cycles for a 10-bit multiplier operand.
+            -- cycle.  mul_a may shift past bit 23; that only ever drops bits
+            -- of partial products that are never added (every product here
+            -- fits 24 bits).
             if mul_cnt /= 0 then
                 if mul_b(0) = '1' then
                     mul_acc <= mul_acc + mul_a;
                 end if;
                 mul_a   <= shift_left(mul_a, 1);
-                mul_b   <= '0' & mul_b(9 downto 1);
+                mul_b   <= '0' & mul_b(12 downto 1);
                 mul_cnt <= mul_cnt - 1;
             end if;
 
@@ -669,8 +740,8 @@ begin
                     sm_state  <= SM_MUL_S;
 
                 when SM_MUL_S =>
-                    mul_a   <= resize(sq_srange, 22);
-                    mul_b   <= s_size_raw;
+                    mul_a   <= resize(sq_srange, 24);
+                    mul_b   <= resize(r_size, 13);
                     mul_acc <= (others => '0');
                     mul_cnt <= to_unsigned(10, 4);
                     sm_state <= SM_SCALE;
@@ -685,8 +756,8 @@ begin
                 when SM_MUL_CX =>
                     -- sq_scale is valid now; latch the step and the extents.
                     s_size_step <= C_STEP_LUT(to_integer(sq_scale));
-                    mul_a    <= resize(meas_w, 22);
-                    mul_b    <= s_h_pos;
+                    mul_a    <= resize(meas_w, 24);
+                    mul_b    <= resize(s_h_pos, 13);
                     mul_acc  <= (others => '0');
                     mul_cnt  <= to_unsigned(10, 4);
                     sm_state <= SM_CX;
@@ -698,8 +769,8 @@ begin
                     end if;
 
                 when SM_MUL_CY =>
-                    mul_a    <= resize(meas_h, 22);
-                    mul_b    <= s_v_pos;
+                    mul_a    <= resize(meas_h, 24);
+                    mul_b    <= resize(s_v_pos, 13);
                     mul_acc  <= (others => '0');
                     mul_cnt  <= to_unsigned(10, 4);
                     sm_state <= SM_CY;
@@ -707,55 +778,135 @@ begin
                 when SM_CY =>
                     if mul_cnt = 0 then
                         sq_cy    <= resize(shift_right(mul_acc, 10), 12);
-                        sm_state <= SM_ORIGIN;
+                        sm_state <= SM_MUL_V;
                     end if;
+
+                when SM_MUL_V =>
+                    -- |P12 - 512| by ones' complement: bit 9 says which half,
+                    -- the low 9 bits (inverted below centre) are the distance.
+                    if s_crawl_raw(9) = '1' then
+                        v_dev := s_crawl_raw(8 downto 0);
+                    else
+                        v_dev := not s_crawl_raw(8 downto 0);
+                    end if;
+                    if v_dev > to_unsigned(24, 9) then
+                        v_d := v_dev - to_unsigned(24, 9);
+                    else
+                        v_d := (others => '0');
+                    end if;
+                    sq_left  <= s_crawl_raw(9);
+                    mul_a    <= resize(v_d, 24);
+                    mul_b    <= resize(v_d, 13);
+                    mul_acc  <= (others => '0');
+                    mul_cnt  <= to_unsigned(10, 4);
+                    sm_state <= SM_V;
+
+                when SM_V =>
+                    if mul_cnt = 0 then
+                        sq_vel   <= mul_acc(17 downto 10);   -- <= 487^2 >> 10
+                        sm_state <= SM_PERIOD;
+                    end if;
+
+                when SM_PERIOD =>
+                    -- P = meas_w + 2*half_w = meas_w + scale*128.
+                    sq_period <= resize(meas_w, 14)
+                                 + shift_left(resize(sq_scale, 14), 7);
+                    sm_state  <= SM_CRAWL;
+
+                when SM_CRAWL =>
+                    if sq_left = '1' then
+                        sq_ctmp <= signed(resize(crawl_q, 19))
+                                   - signed(resize(sq_vel, 19));
+                    else
+                        sq_ctmp <= signed(resize(crawl_q, 19))
+                                   + signed(resize(sq_vel, 19));
+                    end if;
+                    sm_state <= SM_WRAP;
+
+                when SM_WRAP =>
+                    -- Back into [0, P).  One correction per field: if Size
+                    -- shrank P a lot the offset converges over a few fields,
+                    -- and SM_ORIGIN hides the text meanwhile if it lands
+                    -- off-screen.
+                    v_p16 := signed(resize(shift_left(resize(sq_period, 18), 4),
+                                           20));
+                    v_sub := resize(sq_ctmp, 20) - v_p16;
+                    if sq_ctmp(18) = '1' then
+                        crawl_q <= unsigned(resize(resize(sq_ctmp, 20) + v_p16,
+                                                   18));
+                    elsif v_sub(19) = '0' then
+                        crawl_q <= unsigned(v_sub(17 downto 0));
+                    else
+                        crawl_q <= unsigned(sq_ctmp(17 downto 0));
+                    end if;
+                    sm_state <= SM_LEFT;
+
+                when SM_LEFT =>
+                    -- cx - half_w, half_w = scale*64.  Resize BEFORE shifting.
+                    sq_l <= signed(resize(sq_cx, 15))
+                            - signed(shift_left(resize(sq_scale, 15), 6));
+                    sm_state <= SM_LEFT2;
+
+                when SM_LEFT2 =>
+                    sq_l <= sq_l + signed(resize(crawl_q(17 downto 4), 15));
+                    sm_state <= SM_LWRAP;
+
+                when SM_LWRAP =>
+                    if sq_l >= signed(resize(meas_w, 15)) then
+                        sq_l <= sq_l - signed(resize(sq_period, 15));
+                    end if;
+                    sm_state <= SM_ORIGIN;
 
                 when SM_ORIGIN =>
-                    -- Text block is 128 glyph pixels wide and 18 glyph rows
-                    -- tall (two 8-row lines plus a top-margin row each).
-                    -- Resize BEFORE shifting - shift_left keeps the operand's
-                    -- own width and would drop the top bits.
-                    v_half_w := shift_left(resize(sq_scale, 13), 6);
-                    v_half_h := shift_left(resize(sq_scale, 13), 3)
-                                + resize(sq_scale, 13);
-                    v_cx     := resize(sq_cx, 13);
-                    v_cy     := resize(sq_cy, 13);
-
-                    if v_cx >= v_half_w then
-                        s_h_origin <= resize(v_cx - v_half_w, 12);
+                    -- Horizontal: the left edge from the crawl.  L >= meas_w
+                    -- can only happen while crawl_q is still converging after
+                    -- a Size change - hide the text rather than wrap it.
+                    if sq_l >= signed(resize(meas_w, 15)) then
+                        s_h_origin <= (others => '1');   -- unreachable by h_act
+                        hpos_init  <= (others => '1');   -- past-text sentinel
+                        sq_hneg    <= '0';
+                    elsif sq_l(14) = '0' then
+                        s_h_origin <= unsigned(sq_l(11 downto 0));
                         hpos_init  <= (others => '1');
                         sq_hneg    <= '0';
-                        sq_residue <= (others => '0');   -- divide exits at once
                     else
-                        s_h_origin <= (others => '1');   -- unreachable by h_act
+                        s_h_origin <= (others => '1');
                         sq_hneg    <= '1';
-                        sq_residue <= v_half_w - v_cx;
                     end if;
-                    sq_quotient <= (others => '0');
-                    sm_state    <= SM_H_DIV;
 
+                    -- Vertical: 18 glyph rows tall (two 8-row lines plus a
+                    -- top-margin row each), so half_h = scale*9.
+                    v_half_h := shift_left(resize(sq_scale, 13), 3)
+                                + resize(sq_scale, 13);
+                    v_cy     := resize(sq_cy, 13);
                     if v_cy >= v_half_h then
                         s_v_origin <= resize(v_cy - v_half_h, 12);
                         sq_vneg    <= '0';
-                        sq_vabs    <= (others => '0');
+                        sq_residue <= (others => '0');   -- divide exits at once
                     else
                         s_v_origin <= (others => '1');
                         sq_vneg    <= '1';
-                        sq_vabs    <= v_half_h - v_cy;
+                        sq_residue <= v_half_h - v_cy;
+                    end if;
+                    sq_quotient <= (others => '0');
+                    sm_state    <= SM_MUL_H;
+
+                when SM_MUL_H =>
+                    if sq_hneg = '1' then
+                        v_neg    := -sq_l;               -- 1 .. 2*half_w
+                        mul_a    <= resize(s_size_step, 24);
+                        mul_b    <= unsigned(v_neg(12 downto 0));
+                        mul_acc  <= (others => '0');
+                        mul_cnt  <= to_unsigned(13, 4);
+                        sm_state <= SM_H;
+                    else
+                        sm_state <= SM_V_DIV;
                     end if;
 
-                when SM_H_DIV =>
-                    if sq_residue < resize(sq_scale, 13) then
-                        if sq_hneg = '1' then
-                            hpos_init <= shift_left(
-                                resize(sq_quotient, C_POS_BITS), C_POS_FRAC);
-                        end if;
-                        sq_residue  <= sq_vabs;
-                        sq_quotient <= (others => '0');
-                        sm_state    <= SM_V_DIV;
-                    else
-                        sq_residue  <= sq_residue - resize(sq_scale, 13);
-                        sq_quotient <= sq_quotient + 1;
+                when SM_H =>
+                    if mul_cnt = 0 then
+                        hpos_init <= mul_acc;
+                        sm_state  <= SM_V_DIV;
                     end if;
 
                 when SM_V_DIV =>
@@ -774,7 +925,6 @@ begin
                         sq_residue  <= sq_residue - resize(sq_scale, 13);
                         sq_quotient <= sq_quotient + 1;
                     end if;
-
                 when SM_SCAN =>
                     -- One cell per cycle; record the highest column index that
                     -- is not a space, per line.
@@ -842,6 +992,12 @@ begin
     -- All three only take effect in Edit Mode; the prev_* edge registers
     -- update unconditionally so entering Edit Mode never fires a spurious
     -- write.
+    --
+    -- The write itself lands one clock after the edge: the request is
+    -- registered alongside r_cursor, and the next cycle decodes r_cursor into
+    -- the cell enables.  (Doing it all in one cycle put the edge compare, the
+    -- cursor mux and the 32-way decode into the enables of all 192 buffer
+    -- flip-flops - the design's critical path, almost all routing.)
     --==========================================================================
     p_cursor_edit : process(clk)
         variable v_new_cursor : unsigned(C_CURSOR_BIT - 1 downto 0);
@@ -863,17 +1019,27 @@ begin
             end if;
             r_cursor <= v_new_cursor;
 
-            v_flat_idx :=
-                to_integer(v_new_cursor(C_CURSOR_BIT - 1 downto C_COL_BIT))
-                * C_TEXT_COLS
-                + to_integer(v_new_cursor(C_COL_BIT - 1 downto 0));
-
+            -- Stage 1: register the request (r_cursor above is its address).
+            wr_letter <= '0';
+            wr_erase  <= '0';
+            wr_code   <= s_letter;
             if s_edit_mode = '1' then
                 if s_letter /= prev_letter then
-                    text_buf(v_flat_idx) <= s_letter;
+                    wr_letter <= '1';
                 elsif v_do_erase = '1' then
-                    text_buf(v_flat_idx) <= to_unsigned(0, 6);
+                    wr_erase  <= '1';
                 end if;
+            end if;
+
+            -- Stage 2: write at the registered cursor.
+            v_flat_idx :=
+                to_integer(r_cursor(C_CURSOR_BIT - 1 downto C_COL_BIT))
+                * C_TEXT_COLS
+                + to_integer(r_cursor(C_COL_BIT - 1 downto 0));
+            if wr_letter = '1' then
+                text_buf(v_flat_idx) <= wr_code;
+            elsif wr_erase = '1' then
+                text_buf(v_flat_idx) <= to_unsigned(0, 6);
             end if;
         end if;
     end process p_cursor_edit;

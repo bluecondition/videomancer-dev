@@ -8,7 +8,7 @@
 
 [program]
 program_id = "com.bluecondition.polka"
-program_version = "2.1.0"
+program_version = "2.2.0"
 abi_version = ">=1.0,<2.0"
 program_name = "POLKA"
 author = "bluecondition"
@@ -142,7 +142,7 @@ rotary_potentiometer_2 = 300
 rotary_potentiometer_3 = 320          # honeycomb
 rotary_potentiometer_4 = 200          # seafoam coral
 rotary_potentiometer_5 = 0
-rotary_potentiometer_6 = 450          # confetti... (zone 3)
+rotary_potentiometer_6 = 716          # confetti (5 even label bands)
 toggle_switch_7 = 0
 toggle_switch_8 = 0
 toggle_switch_9 = 0
@@ -157,7 +157,7 @@ rotary_potentiometer_2 = 560
 rotary_potentiometer_3 = 576          # cluster
 rotary_potentiometer_4 = 330          # atomic teal
 rotary_potentiometer_5 = 0
-rotary_potentiometer_6 = 300          # rows
+rotary_potentiometer_6 = 512          # rows
 toggle_switch_7 = 0
 toggle_switch_8 = 0
 toggle_switch_9 = 0
@@ -172,7 +172,7 @@ rotary_potentiometer_2 = 330
 rotary_potentiometer_3 = 832          # scatter
 rotary_potentiometer_4 = 850          # midnight fiesta
 rotary_potentiometer_5 = 0
-rotary_potentiometer_6 = 450          # confetti
+rotary_potentiometer_6 = 716          # confetti
 toggle_switch_7 = 0
 toggle_switch_8 = 0
 toggle_switch_9 = 0

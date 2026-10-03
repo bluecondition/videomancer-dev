@@ -2,18 +2,18 @@
 #
 # Lo-res video character generator in the style of 1980s/90s hardware
 # titlers: editable text over video, eight edge/box styles, screen-relative
-# placement and a size slider that runs from caption to full-height type.
+# placement and size, and a news-ticker Crawl on the slider.
 
 [program]
 program_id = "com.example.titler"
 program_name = "Titler"
-program_version = "2.1.0"
+program_version = "2.2.0"
 abi_version = ">=1.0,<2.0"
 author = "Ron"
 license = "GPL-3.0"
 categories = ["Text"]
 program_type = "processing"
-description = "Lo-res 80s/90s character generator: 2x16 editable text, 8 edge styles"
+description = "Lo-res 80s/90s character generator: 2x16 editable text, 8 edge styles, news-ticker crawl"
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
@@ -66,13 +66,21 @@ value_labels = [
 ]
 initial_value_label = "White"
 
+# Knob 5 is dual-purpose too, the same way. With Edit Mode OFF it is Size:
+# screen-relative, 0% is small caption type, 100% is hero type about eight
+# characters wide across the picture, with the same travel in HD, 720p and
+# SD. With Edit Mode ON it walks the editing cursor over the 32 cells
+# (top 5 bits: line, column). Leaving Edit Mode keeps the size you had; it
+# only follows the knob again once the knob is actually turned.
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
-name_label = "Cursor"
-control_mode = "steps_32"
-display_min_value = 1
-display_max_value = 32
-initial_value = 0
+name_label = "Size/Cursor"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 400
+display_float_digits = 0
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
@@ -121,16 +129,17 @@ name_label = "Justify"
 value_labels = ["Left", "Center"]
 initial_value_label = "Center"
 
-# Size is screen-relative: 0% is small caption type, 100% is hero type about
-# eight characters wide across the picture. The usable travel is the same in
-# HD, 720p and SD.
+# Crawl is a bipolar news-ticker scroll: centre holds the text still (with a
+# small deadband), above centre it crawls left, below centre right, faster
+# toward either end. The text leaves one side completely before it re-enters
+# the other; H Position sets where it rests.
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
-name_label = "Size"
+name_label = "Crawl"
 control_mode = "linear"
-display_min_value = 0
+display_min_value = -100
 display_max_value = 100
-initial_value = 400
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
@@ -141,7 +150,8 @@ rotary_potentiometer_2 = 780
 rotary_potentiometer_3 = 800
 rotary_potentiometer_4 = 0
 toggle_switch_11 = 1
-linear_potentiometer_12 = 330
+rotary_potentiometer_5 = 330
+linear_potentiometer_12 = 512
 
 [[preset]]
 name = "News Bar"
@@ -150,7 +160,8 @@ rotary_potentiometer_2 = 830
 rotary_potentiometer_3 = 700
 rotary_potentiometer_4 = 0
 toggle_switch_11 = 1
-linear_potentiometer_12 = 300
+rotary_potentiometer_5 = 300
+linear_potentiometer_12 = 512
 
 [[preset]]
 name = "Hero Card"
@@ -160,7 +171,8 @@ rotary_potentiometer_3 = 300
 rotary_potentiometer_4 = 448
 toggle_switch_8 = 1
 toggle_switch_11 = 1
-linear_potentiometer_12 = 900
+rotary_potentiometer_5 = 900
+linear_potentiometer_12 = 512
 
 [[preset]]
 name = "Video Fill"
@@ -170,7 +182,8 @@ rotary_potentiometer_3 = 300
 toggle_switch_8 = 1
 toggle_switch_9 = 1
 toggle_switch_11 = 1
-linear_potentiometer_12 = 850
+rotary_potentiometer_5 = 850
+linear_potentiometer_12 = 512
 
 [[preset]]
 name = "Sci-Fi Emboss"
@@ -180,4 +193,15 @@ rotary_potentiometer_3 = 580
 rotary_potentiometer_4 = 640
 toggle_switch_10 = 1
 toggle_switch_11 = 1
-linear_potentiometer_12 = 600
+rotary_potentiometer_5 = 600
+linear_potentiometer_12 = 512
+
+[[preset]]
+name = "Ticker"
+rotary_potentiometer_1 = 512
+rotary_potentiometer_2 = 830
+rotary_potentiometer_3 = 700
+rotary_potentiometer_4 = 0
+rotary_potentiometer_5 = 300
+toggle_switch_11 = 1
+linear_potentiometer_12 = 740

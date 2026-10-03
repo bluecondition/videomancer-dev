@@ -1,0 +1,30 @@
+[program]
+program_id = "com.ron.lineprobe"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+program_name = "Line Probe"
+author = "ron"
+license = "GPL-3.0"
+categories = ["Analysis"]
+core = "yuv444_30b"
+program_type = "processing"
+hardware_compatibility = ["rev_b"]
+description = "Flags input timing glitches (avid dropout, early hsync, length/offset change) and shows HDMI stress patterns."
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Pattern"
+value_labels = ["Video", "Black", "Grey", "Orange", "Stripes", "Checker", "Noise", "Bars"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Markers"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Tolerance"
+value_labels = ["Strict", "Loose"]
+initial_value_label = "Strict"
