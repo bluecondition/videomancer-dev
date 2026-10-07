@@ -22,7 +22,9 @@
 -- visible radial judder at slow warp) runs through ONE shared 13x13
 -- multiplier in a vblank sequencer. Rendering downstream of the hash
 -- (kernel ROMs in EBR, twinkle, shimmer palettes, nebula background,
--- luma mode) is inherited from starfield. 6 shells instead of 8 is the
+-- luma mode) is inherited from starfield; T8 overlays the stars on the
+-- input picture (alpha 'over' composite: opaque cores, transparent glow
+-- edges, alpha from the star's kernel weight). 6 shells instead of 8 is the
 -- fit budget: the render path scales linearly in shells and 8 was 115%
 -- of the HX4K.
 --
@@ -30,11 +32,13 @@
 --   registers_in(0) = Layers     (6 zones: 1..6 shells)
 --   registers_in(1) = Density    (0-1023, manual density / luma gain)
 --   registers_in(2) = Brightness (0-1023, linear multiply)
---   registers_in(3) = Palette+Mood (bits 8:7 = Mixed/Cool/Warm/Rainbow,
---                     bit 9 = Lively: deeper faster twinkle, faster shimmer)
+--   registers_in(3) = Palette (bits 9:7 = Silver/Candle/Twilight/Neon/
+--                     Ember/Honey/Rainbow/B&W -- 8 distinct colour sets)
 --   registers_in(4) = Size       (adds 0..3 glow levels, dithered)
 --   registers_in(5) = Drift      (vanishing-point Lissajous amplitude)
---   registers_in(6) = Switches   (bit0=Dir bit1=BW bit2=Luma bit3=BG bit4=LumaGate)
+--   registers_in(6) = Switches   (bit0=Dir bit1=Video bit2=Luma bit3=BG bit4=Gate)
+--                     Video = stars composited OVER the input picture
+--                     Lively mood (deeper, faster twinkle/shimmer) = Warp >= 50%
 --   registers_in(7) = Warp       (P12 slider: speed, quadratic curve)
 
 library ieee;
@@ -50,7 +54,7 @@ use work.all;
 
 architecture warpfield of program_top is
 
-    constant LATENCY   : natural := 15;
+    constant LATENCY   : natural := 17;
     constant NUM_LYRS  : natural := 6;
 
     -- Scaled-space origin bias keeps shell coordinates unsigned:
@@ -78,15 +82,30 @@ architecture warpfield of program_top is
         to_unsigned(43691, 24), to_unsigned(54613, 24)
     );
 
-    -- Centre-weighted sub-cell position map (see starfield): cell-edge
-    -- positions are rarer so large kernels seldom clip at cell borders.
+    -- Sub-cell star position map: 4..11 only, so a kernel of reach 4 can
+    -- NEVER cross the cell edge (offsets 2..13 sliced big stars flat at
+    -- cell borders -- the neighbouring cell draws only its own star).
     type t_offmap is array (0 to 15) of unsigned(3 downto 0);
     constant C_OFFMAP : t_offmap := (
-        x"2", x"3", x"4", x"5", x"6", x"6", x"7", x"7",
-        x"8", x"8", x"9", x"9", x"A", x"B", x"C", x"D"
+        x"4", x"4", x"5", x"5", x"6", x"6", x"7", x"7",
+        x"8", x"8", x"9", x"9", x"A", x"A", x"B", x"B"
     );
 
     signal pipe : t_pipe(0 to LATENCY - 1);
+
+    -- Video delay for the overlay: an EBR circular buffer, NOT the FF pipe.
+    -- Only pipe(0..3).y and the syncs are otherwise read, so yosys prunes
+    -- the pipe's y/u/v chains; reading pipe(14).u/v made ~450 FFs live and
+    -- overflowed the HX4K (7722 LC). Read pointer = write pointer - 13 so
+    -- that, after the EBR output register and one fabric re-register, the
+    -- sample lands at stage 5b (two before the output register) aligned
+    -- with the star path (LATENCY 17).
+    type t_vdly is array (0 to 15) of std_logic_vector(31 downto 0);
+    signal vdly_ram : t_vdly := (others => (others => '0'));
+    signal vdly_wa  : unsigned(3 downto 0) := to_unsigned(0, 4);
+    signal vdly_ra  : unsigned(3 downto 0) := to_unsigned(3, 4);
+    signal vdly_q   : std_logic_vector(31 downto 0) := (others => '0');
+    signal vdly_q2  : std_logic_vector(31 downto 0) := (others => '0');
 
     -- Raster tracking / measurement (width from the avid run, height from
     -- active-line count -- cascade's pattern; both halved for the centre)
@@ -94,6 +113,7 @@ architecture warpfield of program_top is
     signal pixel_y      : unsigned(11 downto 0) := (others => '0');
     signal prev_hsync_n : std_logic := '1';
     signal prev_vsync_n : std_logic := '1';
+    signal s_sawact     : std_logic := '0';   -- active video seen since last frame start
     signal s_avid_q     : std_logic := '0';
     signal s_xcnt       : unsigned(11 downto 0) := (others => '0');
     signal s_lcnt       : unsigned(11 downto 0) := (others => '0');
@@ -128,6 +148,7 @@ architecture warpfield of program_top is
     signal speed10_r : unsigned(9 downto 0) := (others => '0');
     signal amp10_r   : unsigned(9 downto 0) := (others => '0');
     signal size10_r  : unsigned(9 downto 0) := (others => '0');
+    signal size_eff_r : unsigned(9 downto 0) := (others => '0');  -- size * 3/4: adds 0..3 levels
     signal p24_i    : unsigned(23 downto 0) := (others => '0');
     signal phl8_r   : unsigned(7 downto 0) := (others => '0');
     signal kfrac_r  : unsigned(7 downto 0) := (others => '0');
@@ -148,13 +169,17 @@ architecture warpfield of program_top is
 
     -- Registered knob helpers (threshold_r pattern from starfield)
     signal threshold_r : unsigned(12 downto 0) := (others => '0');
+    signal thr_base_r  : unsigned(9 downto 0)  := (others => '0');
+    signal thr_gain_r  : unsigned(4 downto 0)  := (others => '0');
+    signal gate_r      : std_logic := '0';
     signal luma_mode_r : std_logic := '0';
     signal first_act_r : unsigned(2 downto 0) := (others => '0');
-    signal pal_sel_r   : unsigned(1 downto 0) := (others => '0');
+    signal pal_sel_r   : unsigned(2 downto 0) := (others => '0');
     signal bw_r        : std_logic := '0';
     signal bg_on_r     : std_logic := '0';
     signal dir_r       : std_logic := '0';
     signal mood_r      : std_logic := '0';
+    signal video_on_r  : std_logic := '0';
     signal tw_rate_r   : unsigned(2 downto 0) := (others => '0');
     signal shim_rate_r : unsigned(7 downto 0) := (others => '0');
 
@@ -188,6 +213,7 @@ architecture warpfield of program_top is
     signal s3p_color_idx  : t_u2_arr;
     signal s3p_mag        : t_u2_arr;
     signal s3p_dith       : std_logic_vector(0 to NUM_LYRS-1) := (others => '0');
+    signal s3p_lboost     : std_logic_vector(0 to NUM_LYRS-1) := (others => '0');
     signal s3p_pt         : t_u8_arr;
     signal s3p_active_hit : std_logic_vector(0 to NUM_LYRS-1) := (others => '0');
 
@@ -233,9 +259,12 @@ architecture warpfield of program_top is
     signal s4c2_max0123_ci, s4c2_max45_ci     : unsigned(1 downto 0) := (others => '0');
     signal s4c3_w  : unsigned(9 downto 0) := (others => '0');
     signal s4c3_ci : unsigned(1 downto 0) := (others => '0');
-    signal s4c3_sf : std_logic := '0';
-    signal s4m1_sf : std_logic := '0';
-    signal s4m2_sf : std_logic := '0';
+    -- alpha band from the brightest star's kernel weight: 4 = opaque,
+    -- 3/2/1 = 3/4, 1/2, 1/4 (the glow edges), 0 = no star
+    signal s4c3_a  : unsigned(2 downto 0) := (others => '0');
+    signal s4m1_a  : unsigned(2 downto 0) := (others => '0');
+    signal s4m2_a  : unsigned(2 downto 0) := (others => '0');
+    signal bright_s_r : unsigned(9 downto 0) := (others => '0');  -- Brightness * 11/16
 
     -- Stage 4m1/4m2: shared 10x10 brightness multiply + shimmer palette
     signal s4m1_w      : unsigned(9 downto 0) := (others => '0');
@@ -245,10 +274,38 @@ architecture warpfield of program_top is
     signal s4m2_u      : unsigned(9 downto 0) := (others => '0');
     signal s4m2_v      : unsigned(9 downto 0) := (others => '0');
 
-    -- Stage 5
+    -- Stage 5a: star colour over black + alpha band
+    signal s5a_y  : unsigned(9 downto 0) := (others => '0');
+    signal s5a_u  : unsigned(9 downto 0) := (others => '0');
+    signal s5a_v  : unsigned(9 downto 0) := (others => '0');
+    signal s5a_a  : unsigned(2 downto 0) := (others => '0');
+    -- Stage 5b: under-layer (video, or black with alpha forced to 1) and
+    -- star-minus-under differences
+    signal s5b_vy, s5b_vu, s5b_vv : unsigned(9 downto 0) := (others => '0');
+    signal s5b_dy, s5b_du, s5b_dv : signed(10 downto 0)  := (others => '0');
+    signal s5b_a  : unsigned(2 downto 0) := (others => '0');
+    -- Stage 5c: alpha mix + blanking gate
     signal s5_y : unsigned(9 downto 0);
     signal s5_u : unsigned(9 downto 0);
     signal s5_v : unsigned(9 downto 0);
+
+    -- out = under + d * a, a in {0, 1/4, 1/2, 3/4, 1} by shift-adds. Both
+    -- layers are legal-range codes, so the convex mix needs no clamp.
+    function f_mix(under : unsigned(9 downto 0); d : signed(10 downto 0);
+                   a : unsigned(2 downto 0)) return unsigned is
+        variable dd : signed(10 downto 0);
+        variable t  : signed(11 downto 0);
+    begin
+        case a is
+            when "100"  => dd := d;
+            when "011"  => dd := d - shift_right(d, 2);
+            when "010"  => dd := shift_right(d, 1);
+            when "001"  => dd := shift_right(d, 2);
+            when others => dd := (others => '0');
+        end case;
+        t := signed(resize(under, 12)) + resize(dd, 12);
+        return unsigned(t(9 downto 0));
+    end function;
 
 begin
 
@@ -256,10 +313,11 @@ begin
         -- Controls
         variable v_k1          : unsigned(9 downto 0);
         variable density       : unsigned(9 downto 0);
-        variable palette_sel   : unsigned(1 downto 0);
+        variable palette_sel   : unsigned(2 downto 0);
         variable bright        : unsigned(9 downto 0);
+        variable dim_v         : std_logic_vector(1 downto 0);
         variable v_diff_y      : unsigned(9 downto 0);
-        variable v_scaled_thr  : unsigned(13 downto 0);
+        variable v_thr_prod    : unsigned(14 downto 0);
 
         -- Sequencer
         variable v_li   : integer range 0 to NUM_LYRS-1;
@@ -271,14 +329,13 @@ begin
         variable v_k    : unsigned(12 downto 0);
 
         -- Stage 3/4 per-shell
-        variable hash_prod     : unsigned(31 downto 0);
         variable hash_tmp      : unsigned(15 downto 0);
         variable hash_v        : unsigned(15 downto 0);
         variable offset_x      : unsigned(3 downto 0);
         variable offset_y      : unsigned(3 downto 0);
         variable dith8         : unsigned(7 downto 0);
-        variable lvl_i         : integer range -3 to 12;
-        variable boost_i       : integer range 0 to 3;
+        variable frac9         : unsigned(8 downto 0);
+        variable lvl_i         : integer range -3 to 13;
         variable d4            : unsigned(3 downto 0);
         variable inr_x         : boolean;
         variable inr_y         : boolean;
@@ -297,10 +354,11 @@ begin
         variable sum12         : unsigned(11 downto 0);
 
         -- Composite
+        variable vy, vu, vv    : unsigned(9 downto 0);
         variable total_w       : unsigned(10 downto 0);
         variable best_ci       : unsigned(1 downto 0);
         variable max_w         : unsigned(7 downto 0);
-        variable paddr_v       : unsigned(7 downto 0);
+        variable paddr_v       : unsigned(8 downto 0);
         variable prod_v        : unsigned(19 downto 0);
     begin
         if rising_edge(clk) then
@@ -312,6 +370,13 @@ begin
             for i in 1 to LATENCY - 1 loop
                 pipe(i) <= pipe(i - 1);
             end loop;
+
+            -- video delay line (one write, one registered read -> EBR)
+            vdly_ram(to_integer(vdly_wa)) <= "00" & data_in.y & data_in.u & data_in.v;
+            vdly_q  <= vdly_ram(to_integer(vdly_ra));
+            vdly_q2 <= vdly_q;
+            vdly_wa <= vdly_wa + 1;
+            vdly_ra <= vdly_ra + 1;
 
             ----------------------------------------------------------------
             -- Raster tracking + measurement + shell coordinate accumulators
@@ -356,7 +421,14 @@ begin
             -- vertical accumulator seed, level/dither/fade envelope.
             -- Done at 256, well before the first active line.
             ----------------------------------------------------------------
-            if data_in.vsync_n = '0' and prev_vsync_n = '1' then
+            -- Frame start = the FIRST vsync edge after active video: analog
+            -- vsync serrates (several edges per field), and every per-field
+            -- step below must happen exactly once.
+            if data_in.avid = '1' then
+                s_sawact <= '1';
+            end if;
+            if data_in.vsync_n = '0' and prev_vsync_n = '1' and s_sawact = '1' then
+                s_sawact <= '0';
                 s_seq <= (others => '0');
                 s_run <= '1';
                 speed10_r <= unsigned(registers_in(7));
@@ -457,21 +529,22 @@ begin
                             kfrac_r <= p24_i(7 downto 0);
                             -- re-seed epoch (XOR-folded into the hash at 3a)
                             epoch4(v_li) <= p24_i(19 downto 16);
-                            -- shell fade envelope: in over the first 16
-                            -- phase counts, out over the last 16
-                            if v_phl8(7 downto 4) = "0000" then
-                                env_l(v_li) <= '0' & v_phl8(3 downto 0);
-                            elsif v_phl8(7 downto 4) = "1111" then
-                                env_l(v_li) <= '0' & not v_phl8(3 downto 0);
+                            -- shell fade envelope: in over the first 32
+                            -- phase counts, out over the last 32 (16 was one
+                            -- field at full Warp -- stars popped)
+                            if v_phl8(7 downto 5) = "000" then
+                                env_l(v_li) <= '0' & v_phl8(4 downto 1);
+                            elsif v_phl8(7 downto 5) = "111" then
+                                env_l(v_li) <= '0' & not v_phl8(4 downto 1);
                             else
                                 env_l(v_li) <= to_unsigned(16, 5);
                             end if;
                             -- glow level = depth phase + Size knob, in
                             -- integer + dither-fraction form
                             v_f9 := ('0' & v_phl8(5 downto 0) & "00")
-                                  + resize(size10_r(7 downto 0), 9);
+                                  + resize(size_eff_r(7 downto 0), 9);
                             lint_l(v_li)  <= resize(v_phl8(7 downto 6), 3)
-                                           + resize(size10_r(9 downto 8), 3)
+                                           + resize(size_eff_r(9 downto 8), 3)
                                            + ("00" & v_f9(8));
                             gfrac_l(v_li) <= v_f9(7 downto 0);
                         when 6 =>
@@ -510,6 +583,13 @@ begin
 
             -- shared multiplier (registered operands, registered product)
             s_mprod <= s_ma * s_mb;
+            -- Size knob scaled to 0..3 added glow levels (free-running, so
+            -- the vsync latch stays a plain register copy)
+            size_eff_r <= size10_r - shift_right(size10_r, 2);
+            -- Brightness * 11/16 (free-running): over black stars then peak
+            -- at Y 768 -- full-scale Y clips RGB and kills star chroma
+            bright := unsigned(registers_in(2));
+            bright_s_r <= bright - shift_right(bright, 2) - shift_right(bright, 4);
             -- zoom table read (EBR: registered address, sync read,
             -- consumed into fabric registers a few ticks later)
             exp_d <= C_EXP2(to_integer(exp_a));
@@ -518,7 +598,7 @@ begin
             -- Registered knob helpers (quasi-static, one cycle stale)
             ----------------------------------------------------------------
             density      := unsigned(registers_in(1));
-            palette_sel  := unsigned(registers_in(3)(8 downto 7));
+            palette_sel  := unsigned(registers_in(3)(9 downto 7));
 
             -- K1 Layers: 6 zones -> first active shell index 5..0
             v_k1 := unsigned(registers_in(0));
@@ -532,12 +612,19 @@ begin
 
             luma_mode_r <= registers_in(6)(2);
             pal_sel_r   <= palette_sel;
-            bw_r        <= registers_in(6)(1);
+            if palette_sel = "111" then          -- K4 position 8 = B&W
+                bw_r <= '1';
+            else
+                bw_r <= '0';
+            end if;
             bg_on_r     <= registers_in(6)(3);
             dir_r       <= registers_in(6)(0);
 
-            mood_r <= registers_in(3)(9);
-            if registers_in(3)(9) = '1' then
+            video_on_r <= registers_in(6)(1);
+            -- Lively mood rides the Warp slider: top half = deeper, faster
+            -- twinkle and faster shimmer (the slider's climax)
+            mood_r <= speed10_r(9);
+            if speed10_r(9) = '1' then
                 tw_rate_r   <= to_unsigned(5, 3);
                 shim_rate_r <= to_unsigned(128, 8);  -- hue orbit ~8.5 s
             else
@@ -545,29 +632,34 @@ begin
                 shim_rate_r <= to_unsigned(36, 8);   -- hue orbit ~30 s
             end if;
 
-            -- Density threshold: manual knob or input video luma, with the
-            -- optional Luma Gate slope (identical to starfield)
+            -- Density threshold = base * gain / 2, two stages:
+            --   manual : base = Density knob, gain 16  (= density * 8)
+            --   luma   : base = input luma (Gate: (luma-256)*2 saturating,
+            --            a steeper map), gain = Density(9:6) 0..15, so K2
+            --            stays live as the luma gain
+            gate_r <= registers_in(6)(4);
             if registers_in(6)(2) = '1' then
+                thr_gain_r <= '0' & density(9 downto 6);
                 if registers_in(6)(4) = '1' then
-                    if unsigned(pipe(1).y) > to_unsigned(256, 10) then
-                        v_diff_y := unsigned(pipe(1).y) - to_unsigned(256, 10);
-                        v_scaled_thr := resize(v_diff_y, 14)
-                                      + resize(v_diff_y & "0", 14)
-                                      + resize(v_diff_y & "000", 14);
-                        if v_scaled_thr > to_unsigned(8191, 14) then
-                            threshold_r <= to_unsigned(8191, 13);
+                    if unsigned(pipe(0).y) > to_unsigned(256, 10) then
+                        v_diff_y := unsigned(pipe(0).y) - to_unsigned(256, 10);
+                        if v_diff_y(9) = '1' then
+                            thr_base_r <= (others => '1');
                         else
-                            threshold_r <= v_scaled_thr(12 downto 0);
+                            thr_base_r <= v_diff_y(8 downto 0) & '0';
                         end if;
                     else
-                        threshold_r <= (others => '0');
+                        thr_base_r <= (others => '0');
                     end if;
                 else
-                    threshold_r <= unsigned(pipe(1).y) & "000";
+                    thr_base_r <= unsigned(pipe(0).y);
                 end if;
             else
-                threshold_r <= density & "000";
+                thr_gain_r <= to_unsigned(16, 5);
+                thr_base_r <= density;
             end if;
+            v_thr_prod  := thr_base_r * thr_gain_r;     -- <= 1023*16 = 16368
+            threshold_r <= v_thr_prod(13 downto 1);
 
             ----------------------------------------------------------------
             -- STAGE 3a : cell hash pre-multiply. Shell cell coordinates
@@ -588,8 +680,12 @@ begin
             -- STAGE 3 : hash multiply + finalise
             ----------------------------------------------------------------
             for i in 0 to NUM_LYRS-1 loop
-                hash_prod := s3a_h(i) * to_unsigned(16#9E37#, 16);
-                hash_tmp  := hash_prod(15 downto 0);
+                -- x 0x9E37 mod 2^16 in canonical signed-digit form
+                -- (2^15 + 2^13 - 2^9 + 2^6 - 2^3 - 1): 5 adders instead of
+                -- the 9 yosys makes of the 10-set-bit constant (-384 LUT)
+                hash_tmp  := shift_left(s3a_h(i), 15) + shift_left(s3a_h(i), 13)
+                           - shift_left(s3a_h(i), 9)  + shift_left(s3a_h(i), 6)
+                           - shift_left(s3a_h(i), 3)  - s3a_h(i);
                 hash_tmp  := hash_tmp xor shift_right(hash_tmp, 5);
                 hash_tmp  := hash_tmp xor (hash_tmp(10 downto 0) & "00000");
                 s3_hash(i)  <= hash_tmp;
@@ -610,8 +706,19 @@ begin
                 s3p_offset_y(i) <= C_OFFMAP(to_integer(hash_v(7 downto 4)));
                 s3p_shape(i)    <= hash_v(9 downto 8);
                 s3p_color_idx(i) <= hash_v(5 downto 4) xor hash_v(9 downto 8);
+                -- Level fraction = shell depth/Size fraction (+ in Luma
+                -- Mode the pixel's luma, so bright video adds up to ONE
+                -- level, ~+40% size at white, ~+20% at mid grey); the
+                -- carry is a whole level, the rest dithers per star.
                 dith8 := hash_v(11 downto 4) xor hash_v(7 downto 0);
-                if dith8 < gfrac_l(i) then
+                if luma_mode_r = '1' then
+                    frac9 := resize(gfrac_l(i), 9)
+                           + resize(unsigned(pipe(2).y(9 downto 2)), 9);
+                else
+                    frac9 := resize(gfrac_l(i), 9);
+                end if;
+                s3p_lboost(i) <= frac9(8);
+                if dith8 < frac9(7 downto 0) then
                     s3p_dith(i) <= '1';
                 else
                     s3p_dith(i) <= '0';
@@ -619,7 +726,11 @@ begin
                 s3p_mag(i)  <= hash_v(7 downto 6) xor hash_v(1 downto 0);
                 s3p_sub_x(i) <= s3_sub_x(i);
                 s3p_sub_y(i) <= s3_sub_y(i);
-                if layer_active and hash_v < resize(threshold_r, 16) then
+                -- Manual-mode Gate thins the field to the two bold
+                -- magnitude classes (mag(1) = hash(7) xor hash(1))
+                if layer_active and hash_v < resize(threshold_r, 16)
+                   and not (gate_r = '1' and luma_mode_r = '0'
+                            and (hash_v(7) xor hash_v(1)) = '1') then
                     s3p_active_hit(i) <= '1';
                 else
                     s3p_active_hit(i) <= '0';
@@ -638,42 +749,26 @@ begin
             end loop;
 
             ----------------------------------------------------------------
-            -- STAGE 4a1 : glow-level combine + spike offset clamp.
+            -- STAGE 4a1 : glow-level combine.
             -- Level = shell depth phase + Size knob (integer part, with the
-            -- per-star dither verdict blending adjacent levels)
-            -- - per-star magnitude penalty + luma-mode bump, clamp 0..3.
+            -- per-star dither verdict blending adjacent levels, and the
+            -- Luma-Mode luma carry) - per-star magnitude penalty, clamp 0..3.
             ----------------------------------------------------------------
             for i in 0 to NUM_LYRS-1 loop
                 offset_x := s3p_offset_x(i);
                 offset_y := s3p_offset_y(i);
-                if s3p_shape(i) = "10" then
-                    if offset_x < to_unsigned(5, 4) then
-                        offset_x := to_unsigned(5, 4);
-                    elsif offset_x > to_unsigned(10, 4) then
-                        offset_x := to_unsigned(10, 4);
-                    end if;
-                    if offset_y < to_unsigned(5, 4) then
-                        offset_y := to_unsigned(5, 4);
-                    elsif offset_y > to_unsigned(10, 4) then
-                        offset_y := to_unsigned(10, 4);
-                    end if;
-                end if;
 
                 lvl_i := to_integer(lint_l(i));
                 if s3p_dith(i) = '1' then
+                    lvl_i := lvl_i + 1;
+                end if;
+                if s3p_lboost(i) = '1' then
                     lvl_i := lvl_i + 1;
                 end if;
                 if s3p_mag(i) = "10" then
                     lvl_i := lvl_i - 1;
                 elsif s3p_mag(i) = "11" then
                     lvl_i := lvl_i - 2;
-                end if;
-                if luma_mode_r = '1' then
-                    boost_i := to_integer(unsigned(pipe(3).y(9 downto 8)));
-                    if boost_i > 2 then
-                        boost_i := 2;
-                    end if;
-                    lvl_i := lvl_i + boost_i;
                 end if;
                 if lvl_i < 0 then
                     lvl_i := 0;
@@ -850,7 +945,7 @@ begin
             s4c2_max45_ci <= s4c1_max45_ci;
 
             ----------------------------------------------------------------
-            -- STAGE 4c3 : final sum + clamp + final max + star flag
+            -- STAGE 4c3 : final sum + clamp + final max + alpha band
             ----------------------------------------------------------------
             total_w := resize(s4c2_sum_0123, 11) + resize(s4c2_sum_45d, 11)
                      + resize(bg3_w, 11);
@@ -869,19 +964,32 @@ begin
                 s4c3_w <= total_w(9 downto 0);
             end if;
             s4c3_ci <= best_ci;
-            if max_w >= to_unsigned(8, 8) then
-                s4c3_sf <= '1';
-            else
-                s4c3_sf <= '0';
+            if    max_w >= to_unsigned(160, 8) then s4c3_a <= "100";
+            elsif max_w >= to_unsigned(96, 8)  then s4c3_a <= "011";
+            elsif max_w >= to_unsigned(48, 8)  then s4c3_a <= "010";
+            elsif max_w >= to_unsigned(16, 8)  then s4c3_a <= "001";
+            else                                    s4c3_a <= "000";
             end if;
 
             ----------------------------------------------------------------
-            -- STAGE 4m1 : brightness operands + shimmer-palette EBR read
+            -- STAGE 4m1 : brightness operand + shimmer-palette EBR read.
+            -- Per-entry luma dim (silver, gold, amber...) scales the
+            -- brightness operand for STAR pixels only -- with no star the
+            -- winning colour index is a random hash bit, and dimming the
+            -- nebula by it would be noise.
             ----------------------------------------------------------------
-            bright := unsigned(registers_in(2));
-            s4m1_w      <= s4c3_w;
-            s4m1_bright <= bright;
-            s4m1_sf     <= s4c3_sf;
+            s4m1_w <= s4c3_w;
+            dim_v := C_PALDIM(to_integer(pal_sel_r & s4c3_ci));
+            if s4c3_a = "000" or bw_r = '1' then
+                dim_v := "00";
+            end if;
+            case dim_v is
+                when "01"   => s4m1_bright <= bright_s_r - shift_right(bright_s_r, 3);
+                when "10"   => s4m1_bright <= bright_s_r - shift_right(bright_s_r, 2);
+                when "11"   => s4m1_bright <= shift_right(bright_s_r, 1);
+                when others => s4m1_bright <= bright_s_r;
+            end case;
+            s4m1_a      <= s4c3_a;
             paddr_v     := shim_cnt(15 downto 12) & pal_sel_r & s4c3_ci;
             s4m1_pal    <= C_SHIMPAL(to_integer(paddr_v));
 
@@ -890,7 +998,7 @@ begin
             ----------------------------------------------------------------
             prod_v := s4m1_w * s4m1_bright;
             s4m2_y <= prod_v(19 downto 8);
-            s4m2_sf <= s4m1_sf;
+            s4m2_a <= s4m1_a;
             if bw_r = '1' then
                 s4m2_u <= to_unsigned(512, 10);
                 s4m2_v <= to_unsigned(512, 10);
@@ -900,23 +1008,71 @@ begin
             end if;
 
             ----------------------------------------------------------------
-            -- STAGE 5 : final clamp + chroma select
+            -- STAGE 5a : star colour over black. Y = 64 + product, capped
+            -- at 768; chroma = palette on a star, nebula tint / neutral off.
             ----------------------------------------------------------------
-            if s4m2_y > to_unsigned(1023, 12) then
-                s5_y <= (others => '1');
+            if s4m2_y > to_unsigned(704, 12) then
+                s5a_y <= to_unsigned(768, 10);
             else
-                s5_y <= s4m2_y(9 downto 0);
+                s5a_y <= to_unsigned(64, 10) + s4m2_y(9 downto 0);
             end if;
-
-            if s4m2_sf = '1' then
-                s5_u <= s4m2_u;
-                s5_v <= s4m2_v;
+            if s4m2_a /= "000" then
+                s5a_u <= s4m2_u;
+                s5a_v <= s4m2_v;
             elsif bg_on_r = '1' and bw_r = '0' then
-                s5_u <= to_unsigned(430, 10);
-                s5_v <= to_unsigned(620, 10);
+                s5a_u <= to_unsigned(430, 10);
+                s5a_v <= to_unsigned(620, 10);
             else
+                s5a_u <= to_unsigned(512, 10);
+                s5a_v <= to_unsigned(512, 10);
+            end if;
+            s5a_a <= s4m2_a;
+
+            ----------------------------------------------------------------
+            -- STAGE 5b : under-layer + differences. Video (T8): the delayed
+            -- input picture, with a faint blue-violet cast under Deep
+            -- Space. Off: black with alpha forced to 1, so the same mix
+            -- path renders the plain starfield.
+            ----------------------------------------------------------------
+            if video_on_r = '1' then
+                vy := unsigned(vdly_q2(29 downto 20));
+                vu := unsigned(vdly_q2(19 downto 10));
+                vv := unsigned(vdly_q2(9 downto 0));
+                if bg_on_r = '1' and bw_r = '0' then
+                    if vu > to_unsigned(20, 10) then
+                        vu := vu - to_unsigned(20, 10);
+                    end if;
+                    if vv < to_unsigned(996, 10) then
+                        vv := vv + to_unsigned(27, 10);
+                    end if;
+                end if;
+                s5b_a <= s5a_a;
+            else
+                vy := to_unsigned(64, 10);
+                vu := to_unsigned(512, 10);
+                vv := to_unsigned(512, 10);
+                s5b_a <= "100";
+            end if;
+            s5b_vy <= vy;
+            s5b_vu <= vu;
+            s5b_vv <= vv;
+            s5b_dy <= signed(resize(s5a_y, 11)) - signed(resize(vy, 11));
+            s5b_du <= signed(resize(s5a_u, 11)) - signed(resize(vu, 11));
+            s5b_dv <= signed(resize(s5a_v, 11)) - signed(resize(vv, 11));
+
+            ----------------------------------------------------------------
+            -- STAGE 5c : alpha mix + blanking gate. Outside the latency-
+            -- aligned avid the output is neutral black (the accumulators
+            -- freeze in blanking and would repeat a star).
+            ----------------------------------------------------------------
+            if pipe(LATENCY - 2).avid = '0' then
+                s5_y <= to_unsigned(64, 10);
                 s5_u <= to_unsigned(512, 10);
                 s5_v <= to_unsigned(512, 10);
+            else
+                s5_y <= f_mix(s5b_vy, s5b_dy, s5b_a);
+                s5_u <= f_mix(s5b_vu, s5b_du, s5b_a);
+                s5_v <= f_mix(s5b_vv, s5b_dv, s5b_a);
             end if;
 
             ----------------------------------------------------------------

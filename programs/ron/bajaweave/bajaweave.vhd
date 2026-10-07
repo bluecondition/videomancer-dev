@@ -17,9 +17,9 @@
 -- The two oscillators are layered Woven (over/under alternating at each
 -- crossing) or Stacked (S7), both keeping BOTH lines intact, in fully
 -- saturated complementary colours.  S8 draws dark full-colour outlines
--- with a highlight on the outside of each bend; S9 selects Normal or
--- Darker overall brightness.  Every crossing also rings: a damped ripple
--- trailing to the right.
+-- with a highlight on the outside of each bend.  Both waves are drawn as
+-- solid crisp-edged bands; S9 Depth adds a drop shadow from the upper
+-- ribbon onto the one passing under it, so over/under reads as depth.
 --
 -- The per-line LFO accumulators are FRAME-LOCKED (reset at field start), so
 -- K2/K5 purely set the sway's vertical wavelength.  The swing is a fixed
@@ -37,7 +37,7 @@
 --   1x per-line LFO interpolation (sin + cos*frac) + serial PM-offset
 --      multiply (both oscs, in hblank)
 --   2x video_timing_accumulator (G_W=21, C_HORIZONTAL, lock=1)  : per-pixel carriers
---   1x 16-bit drift register (once per field, serration-guarded) : sway drift
+--   2x 20-bit drift accumulators + per-field rate multiply       : sway travel
 --   2x sin_cos_full_lut_10x10 (sin+cos)                          : per-osc LFO
 --   2x sin_cos_full_lut_10x10                                    : per-osc carrier sine
 --   1x sin_cos_full_lut_10x10                                    : K3 hue -> (U,V)
@@ -64,12 +64,12 @@
 --   1 clk : second sin/tri register (the sine LUT infers as EBR and eats
 --           the first register; this one splits EBR read from the output mux)
 --   3 clk : sine/triangle glide (diff, partial sums, sum) + 512 -> luma
+--   1 clk : band sharpening + shadow delay tap (per oscillator)
 --   1 clk : S8 edge outlines + outer-bend highlight (per oscillator)
---   4 clk : layering keyer (select, B*m partials, scale, max)
---   4 clk : analog crossing reaction (ringing tail, clamp)
+--   5 clk : layering keyer (select, shadow, B*m partials, scale, max)
 --   2 clk : luma-scaled chroma (partial products, then sum)
 --   1 clk : luma remap to 64..765 + blanking gate -> output register
---   Total: 21 clk  (sync/avid delay, all modes)
+--   Total: 19 clk  (sync/avid delay, all modes)
 --   (The LFO side chain runs in horizontal blanking: the LFO steps at the
 --   end of each active line, and the next line's PM offset lfo*G/512 is
 --   ready ~20 clocks later.  G = inc*D/step is computed once per field.)
@@ -88,18 +88,95 @@
 --                        bit 0 = S7  layering: 0 = Woven, 1 = Stacked
 --                        bit 1 = S8  edges: dark full-colour outlines +
 --                                    outer-bend highlight
---                        bit 2 = S9  brightness: 0 = Normal (~75% peak),
---                                    1 = Darker (~60% peak)
---                        bit 3 = S10 flow: 0 = osc2 opposite osc1, 1 = same
+--                        bit 2 = S9  depth: 0 = Flat, 1 = Shadow (the upper
+--                                    ribbon casts a dark shadow onto the one
+--                                    under it, lit from the left)
+--                        bit 3 = S10 flow: 0 = osc2 opposite osc1 (equal
+--                                    counter-speed), 1 = same way, osc2 drifting
+--                                    slowly ahead of / behind osc1
 --                        bit 4 = S11 shape: 0 = sine, 1 = triangle
 --                                (carriers and LFOs; GLIDES between the
 --                                two over 32 fields, ~0.53 s at 60 Hz)
 --   registers_in(7)  = slider 12: Speed, BIPOLAR -- centre = frozen,
---                                 ends = ~0.53 s per sway cycle each way;
---                                 speed only (eased), never the wave shape
+--                                 ends = ~23 lines/field each way, the SAME
+--                                 vertical speed for both waves (eased)
 --
 -- License: GPL-3.0
 -- Author: ron
+
+-- ============================================================================
+-- Knob smoother (one per geometry knob).  Pot ADC noise of +/-1 count jumped
+-- the picture every frame -- at K1 = 60 one count of Freq moved the bars at
+-- the right edge by ~18 px.  Two parts, both stepped once per field (tick):
+--   * deadband: the held value h follows the raw knob only when they differ
+--     by 5 or more counts (wider than +/-2 ADC flicker peak-to-peak), so
+--     steady noise never reaches the picture
+--   * glide: the 10.4 output e eases toward h by 1/8 of the gap per field
+--     (snapping inside half a count), so a turned knob sweeps smoothly
+-- Pipelined so the tick-time update is a plain mux (per-field logic is still
+-- timed at the pixel clock).  The first two ticks snap to the knob.
+-- ============================================================================
+library ieee;
+use ieee.std_logic_1164.all;
+use ieee.numeric_std.all;
+
+entity bajaweave_knob_smooth is
+    port (
+        clk  : in  std_logic;
+        tick : in  std_logic;
+        raw  : in  unsigned(9 downto 0);
+        e    : out unsigned(13 downto 0)
+    );
+end entity;
+
+architecture rtl of bajaweave_knob_smooth is
+    signal r_h    : unsigned(9 downto 0)  := (others => '0');
+    signal r_e    : unsigned(13 downto 0) := (others => '0');
+    signal r_d    : signed(10 downto 0)   := (others => '0');
+    signal r_upd  : std_logic := '0';
+    signal r_ed   : signed(14 downto 0)   := (others => '0');
+    signal r_snap : std_logic := '1';
+    signal r_nxt  : unsigned(13 downto 0) := (others => '0');
+    signal r_init : unsigned(1 downto 0)  := "00";
+begin
+    e <= r_e;
+    process(clk)
+        variable v_n : signed(14 downto 0);
+    begin
+        if rising_edge(clk) then
+            r_d  <= signed('0' & raw) - signed('0' & r_h);
+            if r_d >= 5 or r_d <= -5 then
+                r_upd <= '1';
+            else
+                r_upd <= '0';
+            end if;
+            r_ed <= signed('0' & r_h & "0000") - signed('0' & r_e);
+            if r_ed > -8 and r_ed < 8 then
+                r_snap <= '1';
+            else
+                r_snap <= '0';
+            end if;
+            v_n   := signed('0' & r_e) + shift_right(r_ed, 3);
+            r_nxt <= unsigned(v_n(13 downto 0));
+            if tick = '1' then
+                if r_init /= "11" then
+                    r_init <= r_init + 1;
+                    r_h    <= raw;
+                    r_e    <= raw & "0000";
+                else
+                    if r_upd = '1' then
+                        r_h <= raw;
+                    end if;
+                    if r_snap = '1' then
+                        r_e <= r_h & "0000";
+                    else
+                        r_e <= r_nxt;
+                    end if;
+                end if;
+            end if;
+        end if;
+    end process;
+end architecture;
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -113,12 +190,14 @@ use work.video_stream_pkg.all;
 
 architecture bajaweave of program_top is
 
-    constant C_DELAY_CLKS    : integer := 21;
+    constant C_DELAY_CLKS    : integer := 19;
 
     -- Carrier accumulators are 21 bits: the top 11 bits are an 11-bit PM
     -- phase whose bit 10 is the stripe PARITY (odd/even line) for Weave.
     constant C_CARRIER_W     : integer := 21;
-    constant C_LFO_W         : integer := 20;
+    -- 24-bit per-line LFO accumulators: the step carries 4 fraction bits
+    -- from the smoothed K2/K5 (angle = acc(23 downto 8)).
+    constant C_LFO_W         : integer := 24;
 
     -- Carrier increment scaling.  Per-pixel inc = (base << 5) + C_FREQ_MIN.
     --   At K=0     : inc = 1456,  cycle ~720 px = 1 sine peak across a line
@@ -133,17 +212,12 @@ architecture bajaweave of program_top is
     constant C_FREQ_KNOB_SH_C : integer := 6;
     constant C_FREQ_MIN_C     : integer := 2912;
 
-    -- Analog crossing reaction.  x = crossing strength = the DIMMER wave's
-    -- luma above mid (0..511; zero unless both are bright).
-    --   (v0.11 also tinted crossings a third hue on S9 -- removed in v0.12.)
-    --   ring  : peak-hold e decays C_RING_DECAY per pixel after each crossing
-    --           and drives a damped 8-px ripple of +/-(e*3/8) trailing to the
-    --           right -- an overdriven, band-limited video amp
-    --   (v0.9-v0.11 also added +/-16 LFSR grain in the tail -- REMOVED: it
-    --   re-rolled every frame, and a shift-register LFSR's adjacent pixels
-    --   are bit-shifted copies, so it read as thin flickering horizontal
-    --   streaks on hardware once the crossing flare no longer clipped it.)
-    constant C_RING_DECAY    : integer := 8;
+    -- S9 Depth = Shadow: the upper ribbon casts a dark shadow onto the one
+    -- passing under it, offset C_SHADOW_PX to the right (lit from the left).
+    -- The lower wave's layering gain m/32 is cut by 1.5x the upper body's
+    -- brightness C_SHADOW_PX pixels back (4-bit, so the shadow edge follows
+    -- the band's own crisp ramp): under a full body m drops 32 -> 10 (~31%).
+    constant C_SHADOW_PX     : integer := 12;
 
     -- LFO step (sway wavelength) from K2/K5 -- a two-segment knee, so the
     -- lower half of the knob covers long waves and the upper half tight ones:
@@ -165,24 +239,39 @@ architecture bajaweave of program_top is
     --   K6 = 256  : D = 128 -> ~0.79 -> 38 deg (the v0.7-v0.9 look)
     --   K6 = 1023 : D = 511 -> ~3.1  -> 72 deg, lines knot/fold
 
-    -- Sway travel rate from the BIPOLAR P12 Speed slider (K = 0..1023):
-    --   v = K - 512 (signed), |v| < C_SPEED_DEADBAND -> rate 0 (a centre
-    --   detent you can actually hit), otherwise rate = 4*|v| per field
-    --   into a 16-bit accumulator, run backwards when v < 0 (the rate is
-    --   passed as 16-bit two's complement; the phase add wraps mod 2^16).
-    -- Full sway cycle = 2^16/rate fields:
-    --   slider end    (|v|=512) : rate 2048, ~32 fields ~= 0.53 s @ 60
-    --   +/-25% travel (|v|=256) : rate 1024, ~64 fields ~= 1.1 s
-    --   +/-6%         (|v|= 64) : rate  256, ~256 fields ~= 4.3 s
+    -- Sway travel SPEED from the BIPOLAR P12 Speed slider (K = 0..1023):
+    --   v = K - 512 (signed), |v| < C_SPEED_DEADBAND -> 0 (a centre detent
+    --   you can actually hit), otherwise L = 11.5*|v| in 1/256 lines per
+    --   field, run backwards when v < 0:
+    --   slider end    (|v|=512) : ~23 lines/field (~1380 lines/s at 60)
+    --   +/-25% travel (|v|=256) : ~11.5 lines/field
     --   centre        (|v|<  8) : frozen -- holds phase, resumes pop-free.
-    -- Osc1 always follows the slider direction; osc2 adds or subtracts
-    -- the same phase per S10 (Flow: opposite / same).
-    -- SMOOTHNESS: the rate is carried with 4 fraction bits and EASED toward
-    -- the slider by 1/8 of the gap per field (slider moves accelerate
-    -- smoothly, pot noise is filtered); the 20-bit drift keeps 16 bits of
-    -- sway angle, and the LFO interpolates between sine-table entries, so
-    -- the pattern moves exactly rate/65536 of a cycle EVERY field instead of
-    -- in whole 1/1024 table steps (the old 6,6,7,6,6,7 judder).
+    -- The speed is a VERTICAL PIXEL speed, the same for both waves whatever
+    -- their wavelengths: each oscillator's per-field angle rate is
+    --   rate_k = L * step16_k / 4096   (16.4 angle units per field)
+    -- computed once per field.  (v0.5-v0.14 advanced both sways by the same
+    -- ANGLE per field, so a 728-line sway travelled 22.7 lines/field while a
+    -- 410-line one did 12.8 -- in Flow=Same the woven crossings then slid at
+    -- a speed that cycled 23 -> 16 -> 23 lines/field every 0.54 s, which read
+    -- as a stutter.  Equal pixel speed makes the weave translate rigidly.)
+    -- Osc1 always follows the slider direction; osc2 adds or subtracts its
+    -- own drift per S10 (Flow: opposite / same).
+    -- RELATIVE DRIFT (Flow = Same only): equal speeds make the weave slide
+    -- as one rigid sheet, so osc2 runs at L2 = L + d*tri(t), where
+    -- d = min(|L|/2, C_DRIFT_CAP) and tri(t) is a slow triangle (period
+    -- C_DRIFT_PERIOD fields, ~16 s) -- the lead swings smoothly from osc2
+    -- ahead to osc2 behind, so the crossings travel along the threads one
+    -- way, then the other.  Any speed difference wobbles the crossing speed
+    -- at the sway rate (the v0.14 stutter: 23 vs 13 lines/field = +/-28%);
+    -- the 3-lines/field cap keeps that to ~+/-6% at full speed, and at low
+    -- speeds the wobble is slow enough to read as motion, not stutter.
+    constant C_DRIFT_CAP     : integer := 768;    -- 3 lines/field, 1/256 units
+    constant C_DRIFT_PERIOD  : integer := 1092;   -- 2^20/960 fields
+    -- SMOOTHNESS: L is EASED toward the slider by 1/8 of the gap per field
+    -- (slider moves accelerate smoothly, pot noise is filtered); the 20-bit
+    -- drifts keep 16 bits of sway angle plus 4 fraction bits, and the LFO
+    -- interpolates between sine-table entries, so the pattern moves by the
+    -- exact rate EVERY field.
     constant C_DRIFT_W        : integer := 20;
     constant C_SPEED_DEADBAND : integer := 8;
 
@@ -203,17 +292,19 @@ architecture bajaweave of program_top is
     signal r_osc2_hue  : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal r_stacked   : std_logic := '0';   -- S7 Layering: 0 Woven, 1 Stacked
     signal r_edges     : std_logic := '0';   -- S8 Edges
-    signal r_dark      : std_logic := '0';   -- S9 Brightness: 1 = Darker
+    signal r_shadow    : std_logic := '0';   -- S9 Depth: 0 = Flat, 1 = Shadow
     signal r_flow_same : std_logic := '0';
     signal r_speed     : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal r_tri_en    : std_logic := '0';
 
     -- Bipolar speed -> signed drift rate, two registered stages off the
     -- frame-stable r_speed (magnitude/sign split, then deadband + scale).
-    -- r_rate_tgt / r_rate_s are signed 16.4 fixed point.
+    -- r_rate_tgt / r_rate_s are the signed vertical speed L in 1/256 lines/field.
     signal r_vel_mag    : unsigned(9 downto 0) := (others => '0');
     signal r_vel_neg    : std_logic := '0';
-    signal r_rate_tgt   : signed(19 downto 0) := (others => '0');  -- 16.4
+    signal r_rate_tgt   : signed(19 downto 0) := (others => '0');  -- L, 1/256 line/field
+    signal r_t11, r_t12, r_tsum : unsigned(13 downto 0) := (others => '0');
+    signal r_tzero, r_tneg, r_tzero2, r_tneg2 : std_logic := '1';
     signal r_rate_s     : signed(19 downto 0) := (others => '0');  -- eased
     signal r_rate_d, r_rate_nxt : signed(19 downto 0) := (others => '0');
     signal r_rate_snap  : std_logic := '1';
@@ -229,9 +320,12 @@ architecture bajaweave of program_top is
     signal s_lfo2_phase     : unsigned(C_LFO_W-1 downto 0);
 
     -- LFO steps: knee operands registered, then one 3-input add
-    signal r_st1_a, r_st1_b, r_st1_c : unsigned(13 downto 0) := (others => '0');
-    signal r_st2_a, r_st2_b, r_st2_c : unsigned(13 downto 0) := (others => '0');
+    signal r_st1_a, r_st1_b, r_st1_c : unsigned(17 downto 0) := (others => '0');
+    signal r_st2_a, r_st2_b, r_st2_c : unsigned(17 downto 0) := (others => '0');
+    signal r_lfo1_st16, r_lfo2_st16  : unsigned(17 downto 0) := to_unsigned(34560, 18);
     signal r_lfo1_step, r_lfo2_step  : unsigned(13 downto 0) := to_unsigned(2160, 14);
+    -- smoothed knobs (10.4): K1, K2, K4, K5, K6
+    signal s_e1, s_e2, s_e4, s_e5, s_e6 : unsigned(13 downto 0);
     signal r_lfo1_acc,  r_lfo2_acc   : unsigned(C_LFO_W-1 downto 0) := (others => '0');
 
     -- Carrier increments (frame-stable, registered for the gain sequencer)
@@ -263,8 +357,33 @@ architecture bajaweave of program_top is
     signal lm_a1, lm_a2 : unsigned(25 downto 0) := (others => '0');
     signal r_lfo1_off, r_lfo2_off : unsigned(10 downto 0) := (others => '0');
 
-    -- Sway drift accumulator (steps once per field by the eased r_rate_s)
-    signal s_drift_phase : unsigned(C_DRIFT_W-1 downto 0) := (others => '0');
+    -- Per-oscillator sway drift accumulators (16.4 angle), stepped once per
+    -- field by the per-field rates r_rk1/r_rk2 = L * step16_k / 4096
+    signal s_drift1, s_drift2 : unsigned(C_DRIFT_W-1 downto 0) := (others => '0');
+    signal r_rk1, r_rk2 : signed(19 downto 0) := (others => '0');
+    -- rate multiply (serial, 13 iterations, kicked by fg_done)
+    signal rm_st  : unsigned(1 downto 0) := "00";   -- 0 idle, 1 delta, 2 rate
+    signal rm_fin, rm_neg1, rm_neg2 : std_logic := '0';
+    signal rm_cnt : unsigned(3 downto 0) := (others => '0');
+    signal rm_m1, rm_m2 : unsigned(12 downto 0) := (others => '0');
+    signal rm_a1, rm_a2 : unsigned(30 downto 0) := (others => '0');
+    -- relative drift: slow triangle phase, |tri| x d serial product
+    signal r_dph   : unsigned(19 downto 0) := (others => '0');
+    signal dm_m    : unsigned(7 downto 0) := (others => '0');
+    signal dm_neg  : std_logic := '0';
+    signal dm_cap  : unsigned(9 downto 0) := (others => '0');
+    signal dm_a    : unsigned(17 downto 0) := (others => '0');
+    signal dm_L    : signed(19 downto 0) := (others => '0');
+    signal dm_Labs : unsigned(12 downto 0) := (others => '0');
+    signal dm_d    : signed(19 downto 0) := (others => '0');
+    signal dm_L2   : signed(19 downto 0) := (others => '0');
+    -- free-running precomputes (one op each) for the FSM to copy
+    signal r_Labs   : signed(19 downto 0) := (others => '0');
+    signal r_capsel : std_logic := '0';
+    signal r_cap_pre : unsigned(9 downto 0) := (others => '0');
+    signal r_tri    : signed(9 downto 0) := (others => '0');
+    signal r_tri_neg : std_logic := '0';
+    signal r_tri_mag : unsigned(7 downto 0) := (others => '0');
 
     -- Raster measurement + serration-guarded field start
     signal s_prev_vsync : std_logic := '1';
@@ -365,8 +484,21 @@ architecture bajaweave of program_top is
     -- stripe parity (Weave), delayed to line up with the edge stage output;
     -- flank side (phase bit 8: 0 = rising/left, 1 = falling/right), lined
     -- up with r_luma1/2
-    signal r_par1_sr, r_par2_sr   : std_logic_vector(5 downto 0) := (others => '0');
-    signal r_side1_sr, r_side2_sr : std_logic_vector(4 downto 0) := (others => '0');
+    signal r_par1_sr, r_par2_sr   : std_logic_vector(6 downto 0) := (others => '0');
+    signal r_side1_sr, r_side2_sr : std_logic_vector(5 downto 0) := (others => '0');
+    -- S9 Clean: sharpened luma (and the soft luma kept for rim detection)
+    signal r_sL1, r_sL2 : unsigned(9 downto 0) := (others => '0');   -- sharpened
+    signal r_fL1, r_fL2 : unsigned(9 downto 0) := (others => '0');   -- raw sine (rims)
+    -- shadow: the sharpened body's top 4 bits, C_SHADOW_PX pixels back
+    -- (one flat vector, newest nibble at the bottom; an array-of-unsigned
+    -- type here made every "unsigned & literal" in the design ambiguous)
+    signal r_dl1, r_dl2 : unsigned(4*C_SHADOW_PX-1 downto 0) := (others => '0');
+    -- keyer stage K1b (shadow applied to the lower gain)
+    signal r_km0  : unsigned(5 downto 0) := (others => '0');
+    signal r_kTd  : unsigned(3 downto 0) := (others => '0');
+    signal r_kT1, r_kB1 : unsigned(9 downto 0) := (others => '0');
+    signal r_kuT1, r_kvT1, r_kuB1, r_kvB1 : unsigned(9 downto 0) := to_unsigned(512, 10);
+    signal r_kRT1, r_kRB1 : std_logic := '0';
     -- per-line outer-bend highlight: |lfo|/128 and the lfo sign
     signal lm_h1, lm_h2 : unsigned(8 downto 0) := (others => '0');
     signal r_hl1, r_hl2 : unsigned(8 downto 0) := (others => '0');
@@ -378,7 +510,6 @@ architecture bajaweave of program_top is
     -- chroma stage would otherwise grey it out); carried with the winner
     signal r_eR1, r_eR2 : std_logic := '0';
     signal r_kRT, r_kRB, r_kRT2, r_kRB2, r_kRT3, r_kRB3, r_rim_k : std_logic := '0';
-    signal r_rim1, r_rim2, r_rim3, r_rim4 : std_logic := '0';
 
     -- Carrier sine LUT outputs (combinational; PM phase -> sin)
     signal s_osc1_sin : signed(9 downto 0);
@@ -408,7 +539,6 @@ architecture bajaweave of program_top is
     signal r_y_k : unsigned(9 downto 0) := (others => '0');
     signal r_u_k : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal r_v_k : unsigned(9 downto 0) := to_unsigned(512, 10);
-    signal r_cx  : unsigned(8 downto 0) := (others => '0');
     -- keyer stages K1..K3 (the K4 register is r_y_k/u/v)
     signal r_kT, r_kB, r_kT2, r_kT3, r_kBs : unsigned(9 downto 0) := (others => '0');
     signal r_kuT, r_kvT, r_kuB, r_kvB : unsigned(9 downto 0) := to_unsigned(512, 10);
@@ -416,18 +546,7 @@ architecture bajaweave of program_top is
     signal r_kuT3, r_kvT3, r_kuB3, r_kvB3 : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal r_km  : unsigned(5 downto 0) := (others => '0');
     signal r_kh, r_kl : signed(16 downto 0) := (others => '0');
-    signal r_cx0, r_cx1, r_cx2 : unsigned(8 downto 0) := (others => '0');
 
-    -- Crossing reaction stages R1..R4
-    signal r_e    : unsigned(8 downto 0) := (others => '0');
-    signal r_rc   : unsigned(2 downto 0) := (others => '0');
-    signal r_y_1  : unsigned(9 downto 0) := (others => '0');
-    signal r_u_1, r_v_1, r_u_2, r_v_2, r_u_3, r_v_3, r_u_4, r_v_4 : unsigned(9 downto 0) := to_unsigned(512, 10);
-    signal r_ya   : unsigned(10 downto 0) := (others => '0');
-    signal r_rmag : unsigned(7 downto 0) := (others => '0');
-    signal r_rneg : std_logic := '0';
-    signal r_ys   : signed(12 downto 0) := (others => '0');
-    signal r_y_r  : unsigned(9 downto 0) := (others => '0');
 
     -- Luma-scaled chroma (dark gaps go black, lines glow): two stages
     signal r_ua, r_ub, r_va, r_vb : signed(13 downto 0) := (others => '0');
@@ -666,6 +785,22 @@ begin
     end process;
 
     -- ========================================================================
+    -- Knob smoothing (deadband + glide, per field) for the geometry knobs:
+    -- K1/K4 carrier frequency, K2/K5 sway wavelength, K6 sway amount.
+    -- (K3 colour and P12 speed have their own easing.)
+    -- ========================================================================
+    ks1_inst : entity work.bajaweave_knob_smooth
+        port map (clk => clk, tick => s_fstart, raw => r_osc1_base, e => s_e1);
+    ks2_inst : entity work.bajaweave_knob_smooth
+        port map (clk => clk, tick => s_fstart, raw => r_osc1_lfo,  e => s_e2);
+    ks4_inst : entity work.bajaweave_knob_smooth
+        port map (clk => clk, tick => s_fstart, raw => r_osc2_base, e => s_e4);
+    ks5_inst : entity work.bajaweave_knob_smooth
+        port map (clk => clk, tick => s_fstart, raw => r_osc2_lfo,  e => s_e5);
+    ks6_inst : entity work.bajaweave_knob_smooth
+        port map (clk => clk, tick => s_fstart, raw => r_osc2_hue,  e => s_e6);
+
+    -- ========================================================================
     -- Video Timing Generator (fed the generated avid: carriers reset and
     -- LFOs step off the clean line start)
     -- ========================================================================
@@ -696,17 +831,17 @@ begin
                 r_osc2_hue  <= s_k6;          -- K6 = Sway amount
                 r_stacked   <= s_s7;
                 r_edges     <= s_s8;
-                r_dark      <= s_s9;
+                r_shadow    <= s_s9;
                 r_flow_same <= s_s10;
                 r_tri_en    <= s_s11;
                 r_speed     <= s_k12;
             end if;
 
             -- Sway amount D = K6/2 (0..511)
-            r_depth <= '0' & r_osc2_hue(9 downto 1);
+            r_depth <= resize(shift_right(s_e6, 5), 10);
 
-            -- Bipolar sway rate target (see the header constants), in 16.4
-            -- fixed point: +/- 4|v| << 4.
+            -- Bipolar vertical speed target L = +/- 11.5*|v| in 1/256 lines
+            -- per field (see the header constants).
             if r_speed >= to_unsigned(512, 10) then
                 r_vel_mag <= r_speed - to_unsigned(512, 10);
                 r_vel_neg <= '0';
@@ -714,12 +849,26 @@ begin
                 r_vel_mag <= to_unsigned(512, 10) - r_speed;
                 r_vel_neg <= '1';
             end if;
+            -- 11.5*|v| in three single-add stages (per-field logic is still
+            -- timed at the pixel clock; the fused 4-term add was a critical
+            -- path at 90% utilization)
+            r_t11 <= resize(r_vel_mag & "000", 14) + resize(r_vel_mag & '0', 14);
+            r_t12 <= resize(r_vel_mag, 14) + resize(r_vel_mag(9 downto 1), 14);
             if r_vel_mag < to_unsigned(C_SPEED_DEADBAND, 10) then
-                r_rate_tgt <= (others => '0');
-            elsif r_vel_neg = '0' then
-                r_rate_tgt <= signed(resize(r_vel_mag & "000000", 20));
+                r_tzero <= '1';
             else
-                r_rate_tgt <= -signed(resize(r_vel_mag & "000000", 20));
+                r_tzero <= '0';
+            end if;
+            r_tneg  <= r_vel_neg;
+            r_tsum  <= r_t11 + r_t12;
+            r_tzero2 <= r_tzero;
+            r_tneg2  <= r_tneg;
+            if r_tzero2 = '1' then
+                r_rate_tgt <= (others => '0');
+            elsif r_tneg2 = '0' then
+                r_rate_tgt <= signed(resize(r_tsum, 20));
+            else
+                r_rate_tgt <= -signed(resize(r_tsum, 20));
             end if;
 
             -- Once per field: ease the rate toward the target by 1/8 of the
@@ -802,35 +951,40 @@ begin
     p_lfo_acc : process(clk)
     begin
         if rising_edge(clk) then
-            -- step knee: K<512 -> 960 + 4k + 2k ; K>=512 -> 4032 + 16k + 8k
-            -- (k = low 9 bits).  Operands registered first, one add after.
-            if r_osc1_lfo(9) = '0' then
-                r_st1_a <= to_unsigned(C_LFO_FLOOR, 14);
-                r_st1_b <= shift_left(resize(r_osc1_lfo(8 downto 0), 14), 2);
-                r_st1_c <= shift_left(resize(r_osc1_lfo(8 downto 0), 14), 1);
+            -- step knee, x16 (4 fraction bits from the smoothed knob e):
+            --   K<512 : 16*960  + 4f + 2f      K>=512 : 16*4032 + 16f + 8f
+            -- (f = e(12 downto 0) = 16*(K mod 512) + fraction).  Operands
+            -- registered first, one add after; the integer step (>>4) feeds
+            -- the gain divider.
+            if s_e2(13) = '0' then
+                r_st1_a <= to_unsigned(16*C_LFO_FLOOR, 18);
+                r_st1_b <= shift_left(resize(s_e2(12 downto 0), 18), 2);
+                r_st1_c <= shift_left(resize(s_e2(12 downto 0), 18), 1);
             else
-                r_st1_a <= to_unsigned(C_LFO_KNEE, 14);
-                r_st1_b <= shift_left(resize(r_osc1_lfo(8 downto 0), 14), 4);
-                r_st1_c <= shift_left(resize(r_osc1_lfo(8 downto 0), 14), 3);
+                r_st1_a <= to_unsigned(16*C_LFO_KNEE, 18);
+                r_st1_b <= shift_left(resize(s_e2(12 downto 0), 18), 4);
+                r_st1_c <= shift_left(resize(s_e2(12 downto 0), 18), 3);
             end if;
-            if r_osc2_lfo(9) = '0' then
-                r_st2_a <= to_unsigned(C_LFO_FLOOR, 14);
-                r_st2_b <= shift_left(resize(r_osc2_lfo(8 downto 0), 14), 2);
-                r_st2_c <= shift_left(resize(r_osc2_lfo(8 downto 0), 14), 1);
+            if s_e5(13) = '0' then
+                r_st2_a <= to_unsigned(16*C_LFO_FLOOR, 18);
+                r_st2_b <= shift_left(resize(s_e5(12 downto 0), 18), 2);
+                r_st2_c <= shift_left(resize(s_e5(12 downto 0), 18), 1);
             else
-                r_st2_a <= to_unsigned(C_LFO_KNEE, 14);
-                r_st2_b <= shift_left(resize(r_osc2_lfo(8 downto 0), 14), 4);
-                r_st2_c <= shift_left(resize(r_osc2_lfo(8 downto 0), 14), 3);
+                r_st2_a <= to_unsigned(16*C_LFO_KNEE, 18);
+                r_st2_b <= shift_left(resize(s_e5(12 downto 0), 18), 4);
+                r_st2_c <= shift_left(resize(s_e5(12 downto 0), 18), 3);
             end if;
-            r_lfo1_step <= r_st1_a + r_st1_b + r_st1_c;
-            r_lfo2_step <= r_st2_a + r_st2_b + r_st2_c;
+            r_lfo1_st16 <= r_st1_a + r_st1_b + r_st1_c;
+            r_lfo2_st16 <= r_st2_a + r_st2_b + r_st2_c;
+            r_lfo1_step <= r_lfo1_st16(17 downto 4);
+            r_lfo2_step <= r_lfo2_st16(17 downto 4);
 
             if s_fstart = '1' then
                 r_lfo1_acc <= (others => '0');
                 r_lfo2_acc <= (others => '0');
             elsif s_timing.avid_end = '1' then
-                r_lfo1_acc <= r_lfo1_acc + resize(r_lfo1_step, C_LFO_W);
-                r_lfo2_acc <= r_lfo2_acc + resize(r_lfo2_step, C_LFO_W);
+                r_lfo1_acc <= r_lfo1_acc + resize(r_lfo1_st16, C_LFO_W);
+                r_lfo2_acc <= r_lfo2_acc + resize(r_lfo2_st16, C_LFO_W);
             end if;
         end if;
     end process;
@@ -851,9 +1005,9 @@ begin
         variable v_r1, v_r2 : unsigned(14 downto 0);
     begin
         if rising_edge(clk) then
-            r_osc1_inc <= shift_left(resize(r_osc1_base, 16), C_FREQ_KNOB_SH)
+            r_osc1_inc <= shift_left(resize(s_e1, 16), C_FREQ_KNOB_SH - 4)
                           + to_unsigned(C_FREQ_MIN, 16);
-            r_osc2_inc <= shift_left(resize(r_osc2_base, 16), C_FREQ_KNOB_SH)
+            r_osc2_inc <= shift_left(resize(s_e4, 16), C_FREQ_KNOB_SH - 4)
                           + to_unsigned(C_FREQ_MIN, 16);
 
 
@@ -924,20 +1078,136 @@ begin
     end process;
 
     -- ========================================================================
-    -- Sway Drift Accumulator (per-field, signed rate from the bipolar
-    -- Speed slider; a negative rate is 2^16-|rate|, which decrements the
-    -- phase via the natural mod-2^16 wrap).  Slider centre = rate 0 = the
-    -- accumulator holds its phase, so the picture freezes in place and
-    -- resumes without a pop.  Steps on s_fstart (the first vsync edge after
-    -- active video), NOT every vsync edge: the SDK frame_phase_accumulator
-    -- steps per edge, which on a serrated analog vsync ran the flow several
-    -- times too fast.
+    -- Per-field sway rates and drift accumulators.
+    --   rate_k = L_k * step16_k >> 12   (L = eased 1/256 lines per field,
+    --   step16_k = 16 * the per-line angle step); L1 = L, L2 = L (+ the
+    --   relative drift in Flow=Same, see C_DRIFT_CAP).  A 7-step product for
+    --   the drift, then both rates in parallel on a 13-step serial shift-add,
+    --   kicked by fg_done (knobs, steps and the eased L have all settled by
+    --   then).  Used at the NEXT field start -- a one-field lag only matters
+    --   while the slider moves.  |L2| <= 5876 + 768 (13 bits), step16 < 2^18
+    --   -> product < 2^31, rate < 2^19.
+    -- Drift: each accumulator adds its own rate once per field (a negative
+    -- rate is 2^20-|rate|, decrementing via the mod-2^20 wrap).  Slider
+    -- centre = rate 0 = frozen, resumes without a pop.  Steps on s_fstart
+    -- (the first vsync edge after active video), never every vsync edge.
     -- ========================================================================
+    p_rate_mul : process(clk)
+        variable v_t9  : unsigned(8 downto 0);
+        variable v_abs : signed(19 downto 0);
+        variable v_r1, v_r2 : signed(19 downto 0);
+    begin
+        if rising_edge(clk) then
+            rm_fin <= '0';
+            if s_fstart = '1' then
+                r_dph <= r_dph + to_unsigned(C_DRIFT_PERIOD, 20);
+            end if;
+
+            -- free-running precomputes, one operation per register:
+            --   |L|; d = min(|L|/2, cap); tri from the phase; |tri| and sign
+            r_Labs <= abs(r_rate_s);
+            if r_Labs(19 downto 1) > to_signed(C_DRIFT_CAP, 19) then
+                r_cap_pre <= to_unsigned(C_DRIFT_CAP, 10);
+            else
+                r_cap_pre <= unsigned(r_Labs(10 downto 1));
+            end if;
+            v_t9 := r_dph(19 downto 11);
+            if v_t9(8) = '0' then
+                r_tri <= signed('0' & v_t9) - to_signed(128, 10);
+            else
+                r_tri <= to_signed(383, 10) - signed('0' & v_t9);
+            end if;
+            r_tri_neg <= r_tri(9);
+            if r_tri(9) = '1' then
+                r_tri_mag <= unsigned(resize(-r_tri, 8));
+            else
+                r_tri_mag <= unsigned(resize(r_tri, 8));
+            end if;
+
+            case rm_st is
+                when "00" =>
+                    if fg_done = '1' then
+                        dm_cap  <= r_cap_pre;
+                        dm_m    <= r_tri_mag;
+                        dm_neg  <= r_tri_neg;
+                        dm_a    <= (others => '0');
+                        dm_L    <= r_rate_s;
+                        dm_Labs <= unsigned(r_Labs(12 downto 0));
+                        rm_cnt  <= (others => '0');
+                        rm_st   <= "01";
+                    end if;
+                when "01" =>                          -- dm_a = d * |tri|, 8 steps
+                    if dm_m(7) = '1' then
+                        dm_a <= (dm_a(16 downto 0) & '0') + resize(dm_cap, 18);
+                    else
+                        dm_a <= dm_a(16 downto 0) & '0';
+                    end if;
+                    dm_m   <= dm_m(6 downto 0) & '0';
+                    rm_cnt <= rm_cnt + 1;
+                    if rm_cnt = 7 then
+                        rm_cnt <= (others => '0');
+                        rm_st  <= "10";
+                    end if;
+                when "10" =>                          -- L2 = L + d*tri, one op per step
+                    rm_cnt <= rm_cnt + 1;
+                    case rm_cnt(1 downto 0) is
+                        when "00" =>
+                            if dm_neg = '1' then
+                                dm_d <= -signed(resize(dm_a(17 downto 7), 20));
+                            else
+                                dm_d <= signed(resize(dm_a(17 downto 7), 20));
+                            end if;
+                        when "01" =>
+                            if r_flow_same = '1' then
+                                dm_L2 <= dm_L + dm_d;
+                            else
+                                dm_L2 <= dm_L;
+                            end if;
+                        when others =>
+                            v_abs   := abs(dm_L2);
+                            rm_m2   <= unsigned(v_abs(12 downto 0));
+                            rm_neg2 <= dm_L2(19);
+                            rm_m1   <= dm_Labs;
+                            rm_neg1 <= dm_L(19);
+                            rm_a1   <= (others => '0');
+                            rm_a2   <= (others => '0');
+                            rm_cnt  <= (others => '0');
+                            rm_st   <= "11";
+                    end case;
+                when others =>                        -- rate_k = |L_k| * step16_k, 13 steps
+                    if rm_m1(12) = '1' then
+                        rm_a1 <= (rm_a1(29 downto 0) & '0') + resize(r_lfo1_st16, 31);
+                    else
+                        rm_a1 <= rm_a1(29 downto 0) & '0';
+                    end if;
+                    if rm_m2(12) = '1' then
+                        rm_a2 <= (rm_a2(29 downto 0) & '0') + resize(r_lfo2_st16, 31);
+                    else
+                        rm_a2 <= rm_a2(29 downto 0) & '0';
+                    end if;
+                    rm_m1  <= rm_m1(11 downto 0) & '0';
+                    rm_m2  <= rm_m2(11 downto 0) & '0';
+                    rm_cnt <= rm_cnt + 1;
+                    if rm_cnt = 12 then
+                        rm_fin <= '1';
+                        rm_st  <= "00";
+                    end if;
+            end case;
+            if rm_fin = '1' then
+                v_r1 := signed('0' & rm_a1(30 downto 12));
+                v_r2 := signed('0' & rm_a2(30 downto 12));
+                if rm_neg1 = '1' then r_rk1 <= -v_r1; else r_rk1 <= v_r1; end if;
+                if rm_neg2 = '1' then r_rk2 <= -v_r2; else r_rk2 <= v_r2; end if;
+            end if;
+        end if;
+    end process;
+
     p_drift : process(clk)
     begin
         if rising_edge(clk) then
             if s_fstart = '1' then
-                s_drift_phase <= s_drift_phase + unsigned(r_rate_s);
+                s_drift1 <= s_drift1 + unsigned(r_rk1);
+                s_drift2 <= s_drift2 + unsigned(r_rk2);
             end if;
         end if;
     end process;
@@ -951,13 +1221,13 @@ begin
     begin
         if rising_edge(clk) then
             r_lfo1_angle <= s_lfo1_phase(C_LFO_W-1 downto C_LFO_W-16)
-                          + s_drift_phase(C_DRIFT_W-1 downto C_DRIFT_W-16);
+                          + s_drift1(C_DRIFT_W-1 downto C_DRIFT_W-16);
             if r_flow_same = '1' then
                 r_lfo2_angle <= s_lfo2_phase(C_LFO_W-1 downto C_LFO_W-16)
-                              + s_drift_phase(C_DRIFT_W-1 downto C_DRIFT_W-16);
+                              + s_drift2(C_DRIFT_W-1 downto C_DRIFT_W-16);
             else
                 r_lfo2_angle <= s_lfo2_phase(C_LFO_W-1 downto C_LFO_W-16)
-                              - s_drift_phase(C_DRIFT_W-1 downto C_DRIFT_W-16);
+                              - s_drift2(C_DRIFT_W-1 downto C_DRIFT_W-16);
             end if;
         end if;
     end process;
@@ -1196,9 +1466,9 @@ begin
     -- modulation is applied as a PHASE OFFSET below, which gives smoother
     -- waveforms than true FM.
     -- ========================================================================
-    s_osc1_inc_slv <= std_logic_vector(shift_left(resize(r_osc1_base, C_CARRIER_W), C_FREQ_KNOB_SH_C)
+    s_osc1_inc_slv <= std_logic_vector(shift_left(resize(s_e1, C_CARRIER_W), C_FREQ_KNOB_SH_C - 4)
                                         + to_unsigned(C_FREQ_MIN_C, C_CARRIER_W));
-    s_osc2_inc_slv <= std_logic_vector(shift_left(resize(r_osc2_base, C_CARRIER_W), C_FREQ_KNOB_SH_C)
+    s_osc2_inc_slv <= std_logic_vector(shift_left(resize(s_e4, C_CARRIER_W), C_FREQ_KNOB_SH_C - 4)
                                         + to_unsigned(C_FREQ_MIN_C, C_CARRIER_W));
 
     osc1_inst : entity work.video_timing_accumulator
@@ -1248,12 +1518,12 @@ begin
             r_osc2_pm_phase <= s_osc2_pm_phase;
 
             -- stripe parity = bit 10 of (phase + 256); flank side = bit 8
-            r_par1_sr <= r_par1_sr(4 downto 0)
+            r_par1_sr <= r_par1_sr(5 downto 0)
                          & (r_osc1_pm_phase(10) xor (r_osc1_pm_phase(9) and r_osc1_pm_phase(8)));
-            r_par2_sr <= r_par2_sr(4 downto 0)
+            r_par2_sr <= r_par2_sr(5 downto 0)
                          & (r_osc2_pm_phase(10) xor (r_osc2_pm_phase(9) and r_osc2_pm_phase(8)));
-            r_side1_sr <= r_side1_sr(3 downto 0) & r_osc1_pm_phase(8);
-            r_side2_sr <= r_side2_sr(3 downto 0) & r_osc2_pm_phase(8);
+            r_side1_sr <= r_side1_sr(4 downto 0) & r_osc1_pm_phase(8);
+            r_side2_sr <= r_side2_sr(4 downto 0) & r_osc2_pm_phase(8);
         end if;
     end process;
 
@@ -1317,6 +1587,40 @@ begin
     end process;
 
     -- ========================================================================
+    -- BAND SHARPENING (per oscillator, one stage).  The sine profile is
+    -- steepened 8x about mid-level:
+    --   L' = clamp(8*L - 3584, 0, 1023)
+    -- so each line is a solid flat band with a crisp edge (the 448..575
+    -- ramp is ~4% of a carrier period, ~3 px at the default Freq).  The
+    -- raw sine rides along so S8 rims stay where they were.  Also taps the
+    -- body brightness into the S9 shadow delay line.
+    -- ========================================================================
+    p_blend : process(clk)
+        function sharpen(l : unsigned(9 downto 0)) return unsigned is
+            variable v : signed(13 downto 0);
+        begin
+            v := signed(shift_left(resize(l, 14), 3)) - to_signed(3584, 14);
+            if v < 0 then
+                return to_unsigned(0, 10);
+            elsif v > 1023 then
+                return to_unsigned(1023, 10);
+            else
+                return unsigned(v(9 downto 0));
+            end if;
+        end function;
+    begin
+        if rising_edge(clk) then
+            r_sL1 <= sharpen(r_luma1);
+            r_sL2 <= sharpen(r_luma2);
+            r_fL1 <= r_luma1;
+            r_fL2 <= r_luma2;
+            -- shadow source: each body's brightness, delayed C_SHADOW_PX
+            r_dl1 <= r_dl1(4*C_SHADOW_PX-5 downto 0) & r_sL1(9 downto 6);
+            r_dl2 <= r_dl2(4*C_SHADOW_PX-5 downto 0) & r_sL2(9 downto 6);
+        end if;
+    end process;
+
+    -- ========================================================================
     -- S8 EDGES (per oscillator, one stage).  Each line's flanks -- the band
     -- where its luma is 576..831 (sin 0.125..0.625, ~1/11 of a period per
     -- side) -- become an OUTLINE: luma halved, chroma kept at full
@@ -1331,33 +1635,33 @@ begin
         variable v_rim1, v_rim2 : boolean;
     begin
         if rising_edge(clk) then
-            v_rim1 := r_edges = '1' and r_luma1 >= to_unsigned(576, 10)
-                                    and r_luma1 <  to_unsigned(832, 10);
-            v_rim2 := r_edges = '1' and r_luma2 >= to_unsigned(576, 10)
-                                    and r_luma2 <  to_unsigned(832, 10);
+            v_rim1 := r_edges = '1' and r_fL1 >= to_unsigned(576, 10)
+                                    and r_fL1 <  to_unsigned(832, 10);
+            v_rim2 := r_edges = '1' and r_fL2 >= to_unsigned(576, 10)
+                                    and r_fL2 <  to_unsigned(832, 10);
             r_eu1 <= r_u1;  r_ev1 <= r_v1;
             r_eu2 <= r_u2;  r_ev2 <= r_v2;
             if v_rim1 then
                 r_eR1 <= '1';
-                if (r_side1_sr(4) xor r_ls1) = '0' then
-                    r_eL1 <= shift_right(r_luma1, 1) + resize(r_hl1, 10);
+                if (r_side1_sr(5) xor r_ls1) = '0' then
+                    r_eL1 <= shift_right(r_sL1, 1) + resize(r_hl1, 10);
                 else
-                    r_eL1 <= shift_right(r_luma1, 1);
+                    r_eL1 <= shift_right(r_sL1, 1);
                 end if;
             else
                 r_eR1 <= '0';
-                r_eL1 <= r_luma1;
+                r_eL1 <= r_sL1;
             end if;
             if v_rim2 then
                 r_eR2 <= '1';
-                if (r_side2_sr(4) xor r_ls2) = '0' then
-                    r_eL2 <= shift_right(r_luma2, 1) + resize(r_hl2, 10);
+                if (r_side2_sr(5) xor r_ls2) = '0' then
+                    r_eL2 <= shift_right(r_sL2, 1) + resize(r_hl2, 10);
                 else
-                    r_eL2 <= shift_right(r_luma2, 1);
+                    r_eL2 <= shift_right(r_sL2, 1);
                 end if;
             else
                 r_eR2 <= '0';
-                r_eL2 <= r_luma2;
+                r_eL2 <= r_sL2;
             end if;
         end if;
     end process;
@@ -1371,54 +1675,66 @@ begin
     -- Layering is CONTINUOUS: out = max(T, B*m/32), where the lower wave's
     -- gain m/32 fades 1 -> 0 (32 steps) as the upper wave T rises from 256
     -- to 768 -- the lower line dims as it passes under, with no hard edge to
-    -- crawl as the pattern moves.  4 stages: select, partial sums, scale,
-    -- max.  Also carries the crossing strength x to the reaction.
+    -- crawl as the pattern moves.  S9 Shadow cuts that gain further where
+    -- the upper body sat C_SHADOW_PX pixels to the left (see the constant).
+    -- 5 stages: select, shadow, partial sums, scale, max.
     -- ========================================================================
     p_keyer : process(clk)
         variable v_swap : boolean;
         variable v_lt, v_lb : unsigned(9 downto 0);
         variable v_ut, v_ub : unsigned(9 downto 0);
         variable v_vt, v_vb : unsigned(9 downto 0);
-        variable v_min      : unsigned(9 downto 0);
+        variable v_sh       : unsigned(5 downto 0);
         variable v_bs       : signed(16 downto 0);
     begin
         if rising_edge(clk) then
-            -- K1: pick upper (T) / lower (B) and the lower wave's gain m/32
-            v_swap := r_stacked = '0' and (r_par1_sr(5) xor r_par2_sr(5)) = '1';
+            -- K1: pick upper (T) / lower (B), the lower wave's gain m/32 and
+            -- the upper body's brightness C_SHADOW_PX back (shadow source)
+            v_swap := r_stacked = '0' and (r_par1_sr(6) xor r_par2_sr(6)) = '1';
             if v_swap then
                 v_lt := r_eL2; v_ut := r_eu2; v_vt := r_ev2;
                 v_lb := r_eL1; v_ub := r_eu1; v_vb := r_ev1;
                 r_kRT <= r_eR2;  r_kRB <= r_eR1;
+                r_kTd <= r_dl2(4*C_SHADOW_PX-1 downto 4*C_SHADOW_PX-4);
             else
                 v_lt := r_eL1; v_ut := r_eu1; v_vt := r_ev1;
                 v_lb := r_eL2; v_ub := r_eu2; v_vb := r_ev2;
                 r_kRT <= r_eR1;  r_kRB <= r_eR2;
+                r_kTd <= r_dl1(4*C_SHADOW_PX-1 downto 4*C_SHADOW_PX-4);
             end if;
             r_kT <= v_lt;  r_kuT <= v_ut;  r_kvT <= v_vt;
             r_kB <= v_lb;  r_kuB <= v_ub;  r_kvB <= v_vb;
             if v_lt(9 downto 8) = "00" then
-                r_km <= to_unsigned(32, 6);                  -- T < 256: full
+                r_km0 <= to_unsigned(32, 6);                 -- T < 256: full
             elsif v_lt(9 downto 8) = "11" then
-                r_km <= (others => '0');                     -- T >= 768: hidden
+                r_km0 <= (others => '0');                    -- T >= 768: hidden
             else
                 -- T = 256..767: m = 32 - (T-256)/16
-                r_km <= to_unsigned(32, 6) - resize(v_lt(9) & v_lt(7 downto 4), 6);
-            end if;
-            if r_eL1 < r_eL2 then v_min := r_eL1; else v_min := r_eL2; end if;
-            if v_min(9) = '1' then
-                r_cx0 <= v_min(8 downto 0);
-            else
-                r_cx0 <= (others => '0');
+                r_km0 <= to_unsigned(32, 6) - resize(v_lt(9) & v_lt(7 downto 4), 6);
             end if;
 
+            -- K1b: S9 Shadow -- cut the lower gain by 1.5x the upper body's
+            -- brightness C_SHADOW_PX back (saturating at 0)
+            v_sh := resize(r_kTd, 6) + resize(r_kTd(3 downto 1), 6);
+            if r_shadow = '0' then
+                r_km <= r_km0;
+            elsif r_km0 > v_sh then
+                r_km <= r_km0 - v_sh;
+            else
+                r_km <= (others => '0');
+            end if;
+            r_kT1  <= r_kT;   r_kB1  <= r_kB;
+            r_kuT1 <= r_kuT;  r_kvT1 <= r_kvT;
+            r_kuB1 <= r_kuB;  r_kvB1 <= r_kvB;
+            r_kRT1 <= r_kRT;  r_kRB1 <= r_kRB;
+
             -- K2: partial sums of B*m
-            r_kh   <= glide_hi(signed('0' & r_kB), r_km);
-            r_kl   <= glide_lo(signed('0' & r_kB), r_km);
-            r_kT2  <= r_kT;
-            r_kuT2 <= r_kuT;  r_kvT2 <= r_kvT;
-            r_kuB2 <= r_kuB;  r_kvB2 <= r_kvB;
-            r_cx1  <= r_cx0;
-            r_kRT2 <= r_kRT;  r_kRB2 <= r_kRB;
+            r_kh   <= glide_hi(signed('0' & r_kB1), r_km);
+            r_kl   <= glide_lo(signed('0' & r_kB1), r_km);
+            r_kT2  <= r_kT1;
+            r_kuT2 <= r_kuT1;  r_kvT2 <= r_kvT1;
+            r_kuB2 <= r_kuB1;  r_kvB2 <= r_kvB1;
+            r_kRT2 <= r_kRT1;  r_kRB2 <= r_kRB1;
 
             -- K3: Bs = B*m/32
             v_bs   := shift_right(r_kh + r_kl, 5);
@@ -1426,7 +1742,6 @@ begin
             r_kT3  <= r_kT2;
             r_kuT3 <= r_kuT2;  r_kvT3 <= r_kvT2;
             r_kuB3 <= r_kuB2;  r_kvB3 <= r_kvB2;
-            r_cx2  <= r_cx1;
             r_kRT3 <= r_kRT2;  r_kRB3 <= r_kRB2;
 
             -- K4: out = max(T, Bs) -- continuous: no hard key edges and no
@@ -1439,76 +1754,6 @@ begin
                 r_y_k <= r_kBs;  r_u_k <= r_kuB3;  r_v_k <= r_kvB3;
                 r_rim_k <= r_kRB3;
             end if;
-            -- crossing strength, gated to active video so no reaction tail
-            -- leaks from blanking into a line start
-            if s_avid_sr(C_DELAY_CLKS-9) = '1' then
-                r_cx <= r_cx2;
-            else
-                r_cx <= (others => '0');
-            end if;
-        end if;
-    end process;
-
-    -- ========================================================================
-    -- Analog crossing reaction (see C_RING_DECAY)
-    --   R1: peak-hold e (decays C_RING_DECAY/px) + ring phase counter
-    --   R2: ring magnitude from e and the counter (+/- e/8, 3e/8 over 8 px)
-    --   R3: +/- ring
-    --   R4: clamp 0..1023
-    -- ========================================================================
-    p_react : process(clk)
-        variable v_ed  : unsigned(8 downto 0);
-        variable v_su  : unsigned(10 downto 0);
-        variable v_sv  : unsigned(10 downto 0);
-        variable v_ys  : signed(12 downto 0);
-    begin
-        if rising_edge(clk) then
-            -- R1
-            if r_e > to_unsigned(C_RING_DECAY, 9) then
-                v_ed := r_e - to_unsigned(C_RING_DECAY, 9);
-            else
-                v_ed := (others => '0');
-            end if;
-            if r_cx >= v_ed then
-                r_e  <= r_cx;
-                r_rc <= (others => '0');
-            else
-                r_e  <= v_ed;
-                r_rc <= r_rc + 1;
-            end if;
-            r_y_1 <= r_y_k;
-            r_u_1  <= r_u_k;
-            r_v_1  <= r_v_k;
-            r_rim1 <= r_rim_k;
-
-            -- R2
-            if r_rc(1 downto 0) = "01" or r_rc(1 downto 0) = "10" then
-                r_rmag <= resize(shift_right(r_e, 2), 8) + resize(shift_right(r_e, 3), 8);
-            else
-                r_rmag <= resize(shift_right(r_e, 3), 8);
-            end if;
-            r_rneg <= r_rc(2);
-            r_ya  <= '0' & r_y_1;
-            r_u_2 <= r_u_1;  r_v_2 <= r_v_1;  r_rim2 <= r_rim1;
-
-            -- R3
-            if r_rneg = '1' then
-                r_ys <= signed(resize(r_ya, 13)) - signed(resize(r_rmag, 13));
-            else
-                r_ys <= signed(resize(r_ya, 13)) + signed(resize(r_rmag, 13));
-            end if;
-            r_u_3 <= r_u_2;  r_v_3 <= r_v_2;  r_rim3 <= r_rim2;
-
-            -- R4
-            v_ys := r_ys;
-            if v_ys < 0 then
-                r_y_r <= (others => '0');
-            elsif v_ys > 1023 then
-                r_y_r <= (others => '1');
-            else
-                r_y_r <= unsigned(v_ys(9 downto 0));
-            end if;
-            r_u_4 <= r_u_3;  r_v_4 <= r_v_3;  r_rim4 <= r_rim3;
         end if;
     end process;
 
@@ -1528,9 +1773,9 @@ begin
     begin
         if rising_edge(clk) then
             -- stage 1: partial products
-            v_cu := resize(signed((not r_u_4(9)) & r_u_4(8 downto 0)), 14);
-            v_cv := resize(signed((not r_v_4(9)) & r_v_4(8 downto 0)), 14);
-            v_n  := r_y_r(8 downto 5);
+            v_cu := resize(signed((not r_u_k(9)) & r_u_k(8 downto 0)), 14);
+            v_cv := resize(signed((not r_v_k(9)) & r_v_k(8 downto 0)), 14);
+            v_n  := r_y_k(8 downto 5);
             r_ua <= (others => '0');
             r_ub <= (others => '0');
             r_va <= (others => '0');
@@ -1555,10 +1800,10 @@ begin
                 r_ub <= v_cu;
                 r_vb <= v_cv;
             end if;
-            r_cfull <= r_y_r(9) or r_rim4;
-            r_y_k2  <= r_y_r;
-            r_u_k2  <= r_u_4;
-            r_v_k2  <= r_v_4;
+            r_cfull <= r_y_k(9) or r_rim_k;
+            r_y_k2  <= r_y_k;
+            r_u_k2  <= r_u_k;
+            r_v_k2  <= r_v_k;
 
             -- stage 2: sum, /16, back to offset-512 codes
             r_y_c <= r_y_k2;
@@ -1578,8 +1823,6 @@ begin
     -- Output stage: luma remap + blanking gate
     --   y = 64 + L*(1/2 + 1/8 + 1/16) = 64..765 for L = 0..1023 -- black to
     --   ~75%: full-scale Y clips every RGB channel and kills the chroma.
-    --   S9 Darker: y = 64 + L*(1/2 + 1/64) = 64..592 (~60%).  Chroma was
-    --   scaled from the undimmed L, so darker reads richer, not duller.
     --   Outside the (latency-aligned, generated) avid: y/u/v = 64/512/512.
     --   The gate taps one stage before the output tap, so it lines up with
     --   data_out.avid.
@@ -1588,14 +1831,8 @@ begin
     begin
         if rising_edge(clk) then
             if s_avid_sr(C_DELAY_CLKS-2) = '1' then
-                if r_dark = '1' then
-                    -- Darker: 64 + L*(1/2 + 1/64) = 64..592 (~60%)
-                    r_y_out <= to_unsigned(64, 10) + shift_right(r_y_c, 1)
-                             + shift_right(r_y_c, 6);
-                else
-                    r_y_out <= to_unsigned(64, 10) + shift_right(r_y_c, 1)
-                             + shift_right(r_y_c, 3) + shift_right(r_y_c, 4);
-                end if;
+                r_y_out <= to_unsigned(64, 10) + shift_right(r_y_c, 1)
+                         + shift_right(r_y_c, 3) + shift_right(r_y_c, 4);
                 r_u_out <= r_u_c;
                 r_v_out <= r_v_c;
             else

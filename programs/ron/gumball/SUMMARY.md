@@ -131,3 +131,8 @@ Chrome = K6 tint) — retune on hardware (`./capture_preset.sh`).
 
 Sims: `sim_001_default.png` (+`_input`), `sim_002_squashed.png`,
 `sim_003_beads.png`.
+
+Defaults captured from the hardware 2026-10-03 (K1 148, K2 617, K3 328,
+K4 998, K5 603, K6 1023, P12 731, all switches off).
+
+**v1.0.1 FINAL — signed off 2026-10-03.** The four v0.1 presets ship as-is.

@@ -4,24 +4,27 @@
 --
 -- The frame is redrawn as a copperplate engraving: hatch strokes that
 -- follow the image's form (stroke direction = the local luma-gradient
--- direction, bucketed into 8 coherent stroke families 22.5 degrees apart),
+-- direction, bucketed into 4 coherent stroke families 45 degrees apart),
 -- stroke THICKNESS carrying the tone, crosshatch engaging level by level
 -- in the shadows, clean paper in the highlights, and dark contour ink on
 -- edges. Everything is streaming and stateless -- no coarse field, no
 -- frame memory, no warm-up: every control reacts on the next frame.
 --
---   P12 "Bite" (headline): acid depth. Low = a barely-touched plate (only
---        the deepest shadows carry strokes); mid = full tonal engraving;
---        high = over-bitten, crosshatch swallowing the midtones.
+--   P12 "Bite" (headline): acid depth. 0 = contours only; 0-60% walks the
+--        tonal ladder in (hatch / cross / third direction); 60-100% is the
+--        over-bitten climax -- strokes swell until the shadows go solid,
+--        crosshatch floods the midtones, foul-bite pits speckle the paper
+--        and the contours thicken.
 --
 -- Controls:
---   K1 Pitch    stroke spacing (4 zones, ~8/16/33/66 px)
+--   K1 Pitch    stroke spacing, continuous ~6..89 px (exponential)
 --   K2 Angle    plate rotation (continuous 0..180, per-frame qsin consts)
 --   K3 Ink      stroke width gain + contour ink weight
---   K4 Tint     ink hue (black / sepia / blood / iron-gall blue sweep)
+--   K4 Palette  8 ink/paper pairs (copper, sepia, sanguine, prussian,
+--               banknote, iron gall, gold-on-black, blueprint)
 --   K5 Hand     hand tremor: per-line stroke-phase jitter
 --   K6 Style    stipple  /  engraving  /  woodcut (parameter presets)
---   S7 Invert   scratchboard (white strokes on inked ground)
+--   S7 Invert   scratchboard (ink and paper swap roles)
 --   S8 Wash     half-saturation video colour under-print on the paper
 --   S9 Contour  edge ink on/off
 --   S10 Cross   crosshatch at 90 (classic) / 45 (freehand) degrees
@@ -31,24 +34,31 @@
 -- ZERO per-pixel multiplies, 4 EBR (two 2048x8 luma line buffers).
 --
 --   * 3x3 Sobel over [1 2 1]-h-blurred luma (prism/mercurial window, 2
---     line buffers). Direction is bucketed into 8 bins over 180 degrees
---     with four shift-approximated tan() boundary compares -- no atan2.
---   * STRIPE-FIELD ACCUMULATORS (the trick that makes it cheap): the 8
---     possible stroke families are global stripe fields p_k = x*cos_k +
---     y*sin_k, maintained as running accumulators (+cos_k per pixel,
---     +sin_k per line) -- zero multiplies, and every pixel that picks
---     family k sees the same coherent field, so strokes are continuous
---     across bucket regions. cos/sin come from 16 borrowed qsin taps
---     rebuilt each frame, which is what makes K2 a continuous plate
---     rotation. Interlace is detected (field parity toggle) and the line
---     step doubled so stroke ANGLES are true in frame space.
---   * Tone -> ink: dark = 255 - luma; the tonal ladder t1/t2/t3 (hatch /
---     cross / third direction at 45) slides down as Bite rises; stroke
---     width = base + (dark - t)>>wsh, distance-to-stripe-center compare
---     with a half-ink antialias band. Contour ink from the Sobel
+--     line buffers). Direction is bucketed into 4 bins (0/45/90/135 deg)
+--     with two shift-approximated tan(22.5)/tan(67.5) compares -- no
+--     atan2. The gradient's y is measured UPWARD (row above minus row);
+--     the stripe fields step DOWN per line, so the diagonal bins are
+--     assigned in screen (y-down) space: signs differing = 45 deg.
+--   * STRIPE-FIELD ACCUMULATORS (the trick that makes it cheap): the 4
+--     stroke families are global stripe fields p_k = x*cos_k + y*sin_k,
+--     maintained as running accumulators (+cos_k per pixel, +sin_k per
+--     line) -- zero multiplies, and every pixel that picks family k sees
+--     the same coherent field, so strokes are continuous across bucket
+--     regions. Phase = p(15:8) for every pitch: the PITCH scale lives in
+--     the constants (qsin * 2^-(n/32), one serial shift-add multiply per
+--     tap in vblank), which makes K1 continuous and K2 rotation smooth.
+--     Interlace is detected (field parity toggle) and the line step
+--     doubled so stroke ANGLES are true in frame space.
+--   * Tone -> ink: dark = 255 - luma; the tonal ladder t1/t2/t3 slides
+--     down as Bite rises (signed: past 60% it goes negative = overbite);
+--     stroke width = base + (dark - t)>>wsh, distance-to-stripe-center
+--     compare with a half-ink antialias band. Contour ink from the Sobel
 --     magnitude on top. Stipple swaps the stripe test for a hash-lattice
 --     dot test (diamond sub-cell distance); woodcut is a pure per-frame
---     parameter preset (single bold direction, fat strokes, heavy edge).
+--     parameter preset (fat strokes).
+--   * Generated colours (ink/paper palette) are stored U/V-SWAPPED -- the
+--     hardware swaps U/V; the Wash video under-print is a dry path and
+--     is not swapped.
 --------------------------------------------------------------------------------
 
 library ieee;
@@ -63,17 +73,6 @@ use work.video_stream_pkg.all;
 architecture intaglio of program_top is
 
     constant C_LATENCY : integer := 13;
-
-    function f_cu10(v : signed) return unsigned is
-    begin
-        if v < 0 then
-            return to_unsigned(0, 10);
-        elsif v > 1023 then
-            return to_unsigned(1023, 10);
-        else
-            return resize(unsigned(v), 10);
-        end if;
-    end function;
 
     function f_absu(v : signed) return unsigned is
     begin
@@ -113,6 +112,47 @@ architecture intaglio of program_top is
         end if;
     end function;
 
+    -- pitch mantissa: round(64 * 2^(-f/32)), f = 0..31 (32 steps/octave)
+    type t_mant is array(0 to 31) of unsigned(6 downto 0);
+    constant C_MANT : t_mant := (
+        to_unsigned(64, 7), to_unsigned(63, 7), to_unsigned(61, 7), to_unsigned(60, 7),
+        to_unsigned(59, 7), to_unsigned(57, 7), to_unsigned(56, 7), to_unsigned(55, 7),
+        to_unsigned(54, 7), to_unsigned(53, 7), to_unsigned(52, 7), to_unsigned(50, 7),
+        to_unsigned(49, 7), to_unsigned(48, 7), to_unsigned(47, 7), to_unsigned(46, 7),
+        to_unsigned(45, 7), to_unsigned(44, 7), to_unsigned(43, 7), to_unsigned(42, 7),
+        to_unsigned(41, 7), to_unsigned(41, 7), to_unsigned(40, 7), to_unsigned(39, 7),
+        to_unsigned(38, 7), to_unsigned(37, 7), to_unsigned(36, 7), to_unsigned(36, 7),
+        to_unsigned(35, 7), to_unsigned(34, 7), to_unsigned(33, 7), to_unsigned(33, 7));
+
+    -- ink / paper palette, authored in standard BT.601 10-bit (paper luma
+    -- held near 768 so its tint survives). Separate 1-D constants: GHDL
+    -- synth crashes on parallel reads of an array-of-arrays constant.
+    --   0 copper  1 sepia  2 sanguine  3 prussian  4 banknote
+    --   5 iron gall  6 gold on black  7 blueprint
+    type t_pal is array(0 to 7) of unsigned(9 downto 0);
+    constant C_INK_Y : t_pal := (
+        to_unsigned(110, 10), to_unsigned(221, 10), to_unsigned(278, 10), to_unsigned(170, 10),
+        to_unsigned(228, 10), to_unsigned(201, 10), to_unsigned(634, 10), to_unsigned(760, 10));
+    constant C_INK_U : t_pal := (
+        to_unsigned(508, 10), to_unsigned(457, 10), to_unsigned(429, 10), to_unsigned(623, 10),
+        to_unsigned(493, 10), to_unsigned(574, 10), to_unsigned(274, 10), to_unsigned(540, 10));
+    constant C_INK_V : t_pal := (
+        to_unsigned(518, 10), to_unsigned(576, 10), to_unsigned(708, 10), to_unsigned(460, 10),
+        to_unsigned(430, 10), to_unsigned(553, 10), to_unsigned(640, 10), to_unsigned(494, 10));
+    constant C_PAP_Y : t_pal := (
+        to_unsigned(760, 10), to_unsigned(760, 10), to_unsigned(765, 10), to_unsigned(765, 10),
+        to_unsigned(762, 10), to_unsigned(760, 10), to_unsigned(111, 10), to_unsigned(269, 10));
+    constant C_PAP_U : t_pal := (
+        to_unsigned(440, 10), to_unsigned(428, 10), to_unsigned(452, 10), to_unsigned(494, 10),
+        to_unsigned(455, 10), to_unsigned(458, 10), to_unsigned(515, 10), to_unsigned(672, 10));
+    constant C_PAP_V : t_pal := (
+        to_unsigned(549, 10), to_unsigned(559, 10), to_unsigned(564, 10), to_unsigned(515, 10),
+        to_unsigned(504, 10), to_unsigned(546, 10), to_unsigned(516, 10), to_unsigned(427, 10));
+
+    -- direction floor: low enough that soft form shading steers the
+    -- strokes, above dither noise
+    constant C_MAGFL : unsigned(12 downto 0) := to_unsigned(24, 13);
+
     -- two-stage value-noise hash (inferno lesson: 1-add hashes weave)
     function f_hash_a(cx, cy : unsigned(7 downto 0);
                       seed   : unsigned(15 downto 0)) return unsigned is
@@ -138,7 +178,7 @@ architecture intaglio of program_top is
     -- frame-latched controls + per-frame terms
     ----------------------------------------------------------------------
     signal s_p12   : unsigned(9 downto 0) := to_unsigned(512, 10);
-    signal s_k2    : unsigned(9 downto 0) := (others => '0');
+    signal s_k1    : unsigned(9 downto 0) := to_unsigned(384, 10);
     signal s_k3    : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal s_k4    : unsigned(9 downto 0) := (others => '0');
     signal s_k5    : unsigned(9 downto 0) := (others => '0');
@@ -146,40 +186,54 @@ architecture intaglio of program_top is
     signal s_wash  : std_logic := '0';                       -- S8
     signal s_edge_on : std_logic := '1';                     -- S9
     signal s_cross45 : std_logic := '0';                     -- S10
-    signal s_drift : std_logic := '0';                       -- S11
 
     -- style decode (K6): 0 stipple, 1 engraving, 2 woodcut
     signal s_style : unsigned(1 downto 0) := "01";
 
-    -- stripe-field constants (per frame, from 16 qsin taps)
-    type t_s8arr is array (0 to 7) of signed(7 downto 0);
-    signal s_ck, s_sk : t_s8arr := (others => (others => '0'));
-    -- line step (doubled when interlaced) + field-parity start offset
-    signal s_sk2 : t_s8arr := (others => (others => '0'));
-    signal s_pitch_sh : natural range 0 to 3 := 1;
-    signal s_bin0  : unsigned(2 downto 0) := (others => '0');  -- flat-area bin
-    signal s_xoff  : unsigned(2 downto 0) := "010";            -- cross offset
+    -- stripe-field constants (per frame): 4 families at th0 + j*45 deg,
+    -- pitch-scaled; the line step is doubled when interlaced
+    type t_s16arr is array (0 to 3) of signed(15 downto 0);
+    signal s_ck, s_sk, s_sk2 : t_s16arr := (others => (others => '0'));
+    signal s_xoff  : unsigned(1 downto 0) := "10";   -- cross family offset
+    signal s_toff  : unsigned(1 downto 0) := "01";   -- third family offset
 
-    -- tonal ladder + widths (per frame)
-    signal s_t1, s_t2, s_t3 : unsigned(8 downto 0) := (others => '1');
+    -- pitch: n = K1/8 + 16 -> octave e = n(7:5), mantissa C_MANT(n(4:0))
+    signal s_pn    : unsigned(7 downto 0) := to_unsigned(64, 8);
+    signal s_pe    : unsigned(2 downto 0) := "010";
+    signal s_mant  : unsigned(6 downto 0) := to_unsigned(64, 7);
+    signal s_pitch_sh : natural range 0 to 3 := 1;   -- stipple lattice only
+
+    -- serial shift-add multiplier (qsin * mantissa), vblank only
+    signal s_mul_a : signed(9 downto 0) := (others => '0');
+    signal s_mul_m : unsigned(6 downto 0) := (others => '0');
+    signal s_mul_p : signed(16 downto 0) := (others => '0');
+
+    -- tonal ladder + widths (per frame). Ladder thresholds are signed:
+    -- negative = overbite (every tone exceeds them, with extra width)
+    signal s_pa    : unsigned(9 downto 0) := (others => '0');
+    signal s_ob    : unsigned(8 downto 0) := (others => '0');
+    signal s_tq    : unsigned(9 downto 0) := (others => '0');
+    signal s_t1, s_t2, s_t3 : signed(10 downto 0) := to_signed(511, 11);
     signal s_wsh   : natural range 2 to 4 := 3;
     signal s_wbase : unsigned(6 downto 0) := to_unsigned(10, 7);
     signal s_wmax  : unsigned(6 downto 0) := to_unsigned(96, 7);
     signal s_ethr  : unsigned(11 downto 0) := to_unsigned(400, 12);
-    signal s_magfl : unsigned(11 downto 0) := to_unsigned(24, 12);
     signal s_jsh   : natural range 0 to 4 := 4;               -- hand tremor
     signal s_stip  : std_logic := '0';
+    signal s_pd    : unsigned(7 downto 0) := (others => '0'); -- pit density
+    signal s_pit_seed : unsigned(15 downto 0) := x"C3A5";
 
-    -- ink / paper palette (per frame)
+    -- ink / paper palette (per frame, stored U/V-swapped)
     signal s_ink_u, s_ink_v : unsigned(9 downto 0) := to_unsigned(512, 10);
-    signal s_ink_y  : unsigned(9 downto 0) := to_unsigned(120, 10);
-    signal s_pap_y  : unsigned(9 downto 0) := to_unsigned(930, 10);
-    signal s_pap_u  : unsigned(9 downto 0) := to_unsigned(506, 10);
-    signal s_pap_v  : unsigned(9 downto 0) := to_unsigned(518, 10);
+    signal s_ink_y  : unsigned(9 downto 0) := to_unsigned(110, 10);
+    signal s_pap_y  : unsigned(9 downto 0) := to_unsigned(760, 10);
+    signal s_pap_u  : unsigned(9 downto 0) := to_unsigned(512, 10);
+    signal s_pap_v  : unsigned(9 downto 0) := to_unsigned(512, 10);
 
     signal s_dracc : unsigned(11 downto 0) := (others => '0');  -- drift
 
-    signal s_seq   : unsigned(4 downto 0) := (others => '0');
+    signal s_seq   : unsigned(7 downto 0) := (others => '0');
+    signal s_run   : std_logic := '0';
     signal s_qs_a  : unsigned(9 downto 0) := (others => '0');
     signal s_qs_ar : unsigned(9 downto 0) := (others => '0');
     signal s_qs_r  : signed(9 downto 0) := (others => '0');
@@ -187,9 +241,11 @@ architecture intaglio of program_top is
 
     signal s_prev_vsync_n : std_logic := '1';
     signal s_prev_hsync_n : std_logic := '1';
+    -- serrated analog vsync: act on the first edge after active video only
+    signal s_saw   : std_logic := '0';
 
     -- interlace detect: field parity of this and the previous field
-    signal s_fpar, s_fpar_p : std_logic := '0';
+    signal s_fpar  : std_logic := '0';
     signal s_ilace : std_logic := '1';
 
     ----------------------------------------------------------------------
@@ -198,8 +254,7 @@ architecture intaglio of program_top is
     signal av : std_logic_vector(1 to 12) := (others => '0');
 
     signal r0_y, r0_u, r0_v : unsigned(9 downto 0) := (others => '0');
-    signal s_x_count : unsigned(10 downto 0) := (others => '0');
-    signal s_aline   : unsigned(9 downto 0) := (others => '0');
+    signal s_aline   : unsigned(10 downto 0) := (others => '0');
     signal s_seen    : std_logic := '0';
 
     -- per-line tremor jitter (lstep sequencer)
@@ -230,8 +285,8 @@ architecture intaglio of program_top is
     signal mag5 : unsigned(12 downto 0) := (others => '0');
     signal ax5, ay5 : unsigned(11 downto 0) := (others => '0');
     signal sgn5 : std_logic := '0';
-    signal bin6 : unsigned(2 downto 0) := (others => '0');
-    signal bin_hold : unsigned(2 downto 0) := (others => '0');
+    signal bin6 : unsigned(1 downto 0) := (others => '0');
+    signal bin_hold : unsigned(1 downto 0) := (others => '0');
     signal hold_cnt : unsigned(5 downto 0) := (others => '0');
     signal mag6 : unsigned(12 downto 0) := (others => '0');
     signal x_s6 : unsigned(10 downto 0) := (others => '0');
@@ -242,9 +297,13 @@ architecture intaglio of program_top is
     signal sj8  : unsigned(7 downto 0) := (others => '0');
     signal d1_7, d2_7 : unsigned(5 downto 0) := (others => '0');
     signal d1_8, d2_8 : unsigned(5 downto 0) := (others => '0');
+    -- foul-bite pit track (2x2-pixel cells)
+    signal ph7  : unsigned(11 downto 0) := (others => '0');
+    signal pj8  : unsigned(7 downto 0) := (others => '0');
+    signal pit9 : unsigned(1 downto 0) := (others => '0');
 
     -- stripe-field accumulators (advance under av(6); read same clock)
-    type t_p16 is array (0 to 7) of unsigned(15 downto 0);
+    type t_p16 is array (0 to 3) of unsigned(15 downto 0);
     signal p_acc : t_p16 := (others => (others => '0'));
     signal b_acc : t_p16 := (others => (others => '0'));
 
@@ -274,7 +333,8 @@ architecture intaglio of program_top is
     signal sel11 : unsigned(1 downto 0) := (others => '0');
     signal ink10 : unsigned(1 downto 0) := (others => '0');
     signal edge10 : std_logic := '0';
-    signal s_out_y, s_out_u, s_out_v : unsigned(9 downto 0) := (others => '0');
+    signal s_out_y : unsigned(9 downto 0) := to_unsigned(64, 10);
+    signal s_out_u, s_out_v : unsigned(9 downto 0) := to_unsigned(512, 10);
 
     ----------------------------------------------------------------------
     -- sync delay
@@ -287,37 +347,42 @@ architecture intaglio of program_top is
 begin
 
     ------------------------------------------------------------------------
-    -- shared qsin port: the sequencer rebuilds the 8 stripe-field constant
-    -- pairs (16 taps) + 2 ink-hue taps each frame; both the angle and ROM
-    -- output are registered (mercurial rule). No per-pixel consumer, so
-    -- the port is the sequencer's alone.
+    -- shared qsin port: during the tap slots (s_seq(7) = '1') it presents
+    -- family j = s_seq(5:4) at th0 + j*45 deg, +90 for the cos taps
+    -- (s_seq(6) = '0'), steady for the whole 16-step slot. Address and ROM
+    -- output are both registered (mercurial rule).
     ------------------------------------------------------------------------
-    s_qs_a <= s_th0 + shift_left(resize(31 - resize(s_seq, 10), 10), 6)
-                    + to_unsigned(256, 10)          when s_seq >= 24 else
-              s_th0 + shift_left(resize(23 - resize(s_seq, 10), 10), 6)
-                                                    when s_seq >= 16 else
-              resize(s_k4, 10) + to_unsigned(256, 10) when s_seq = 8 else
-              resize(s_k4, 10);
+    s_qs_a <= s_th0 + shift_left(resize(s_seq(5 downto 4), 10), 7)
+                    + to_unsigned(256, 10) when s_seq(6) = '0' else
+              s_th0 + shift_left(resize(s_seq(5 downto 4), 10), 7);
 
     ------------------------------------------------------------------------
-    -- per-frame control latch + vblank sequencer (one add per step).
-    -- Steps 31..24: present cos angles k=0..7 (captured 29..22 into ck)
-    -- Steps 23..16: present sin angles      (captured 21..14 into sk)
-    -- Steps 13..1 : tonal ladder, style presets, palette
+    -- per-frame control latch + vblank sequencer (one op per step).
+    -- s_seq 0..127  : scalar steps (pitch, ladder, widths, palette)
+    -- s_seq 128..255: 8 tap slots of 16 steps -- present angle, capture
+    --                 qsin at step 3, 7-step shift-add multiply by the
+    --                 pitch mantissa, octave shift + store at step 11
     ------------------------------------------------------------------------
     p_frame : process(clk)
-        variable v_t1 : signed(10 downto 0);
-        variable v_k  : integer range 0 to 7;
-        variable v_c8 : signed(7 downto 0);
+        variable v_w  : unsigned(7 downto 0);
+        variable v_j  : integer range 0 to 3;
+        variable v_c  : signed(16 downto 0);
+        variable v_pi : integer range 0 to 7;
     begin
         if rising_edge(clk) then
             s_prev_vsync_n <= data_in.vsync_n;
             s_qs_ar <= s_qs_a;
             s_qs_r  <= f_qsin(s_qs_ar);
 
-            if data_in.vsync_n = '0' and s_prev_vsync_n = '1' then
+            if data_in.avid = '1' then
+                s_saw <= '1';
+            end if;
+
+            if data_in.vsync_n = '0' and s_prev_vsync_n = '1'
+               and s_saw = '1' then
+                s_saw <= '0';
                 s_p12 <= unsigned(registers_in(7));
-                s_k2  <= unsigned(registers_in(1));
+                s_k1  <= unsigned(registers_in(0));
                 s_k3  <= unsigned(registers_in(2));
                 s_k4  <= unsigned(registers_in(3));
                 s_k5  <= unsigned(registers_in(4));
@@ -325,13 +390,10 @@ begin
                 s_wash    <= registers_in(6)(1);
                 s_edge_on <= registers_in(6)(2);
                 s_cross45 <= registers_in(6)(3);
-                s_drift   <= registers_in(6)(4);
 
-                s_pitch_sh <= to_integer(unsigned(registers_in(0)(9 downto 8)));
                 s_style    <= unsigned(registers_in(5)(9 downto 8));
 
                 -- interlace detect: parity toggled since last field?
-                s_fpar_p <= s_fpar;
                 s_fpar   <= data_in.field_n;
                 if data_in.field_n /= s_fpar then
                     s_ilace <= '1';
@@ -346,112 +408,172 @@ begin
                     s_dracc <= s_dracc + 5;
                 end if;
 
-                s_seq <= to_unsigned(31, 5);
-            elsif s_seq /= 0 and data_in.avid = '0' then
-                -- qsin captures land two steps behind the presented angle
-                if s_seq <= 29 and s_seq >= 22 then
-                    v_k := to_integer(to_unsigned(29, 5) - s_seq);
-                    v_c8 := resize(shift_right(s_qs_r, 4), 8);
-                    s_ck(v_k) <= v_c8;
-                end if;
-                if s_seq <= 21 and s_seq >= 14 then
-                    v_k := to_integer(to_unsigned(21, 5) - s_seq);
-                    v_c8 := resize(shift_right(s_qs_r, 4), 8);
-                    s_sk(v_k) <= v_c8;
-                    if s_ilace = '1' then
-                        s_sk2(v_k) <= shift_left(v_c8, 1);
-                    else
-                        s_sk2(v_k) <= v_c8;
-                    end if;
-                end if;
-                case to_integer(s_seq) is
-                    when 13 =>
-                        -- tonal ladder from Bite: thresholds slide DOWN as
-                        -- the plate bites deeper (dark8 must exceed t)
-                        v_t1 := to_signed(300, 11)
-                                - signed(resize(shift_right(s_p12, 1), 11));
-                        if v_t1 < 0 then
-                            s_t1 <= (others => '0');
-                        else
-                            s_t1 <= resize(unsigned(v_t1), 9);
-                        end if;
-                    when 12 =>
-                        if s_t1 > 383 then
-                            s_t2 <= (others => '1');
-                        else
+                s_seq <= (others => '0');
+                s_run <= '1';
+            elsif s_run = '1' and data_in.avid = '0' then
+                if s_seq(7) = '1' then
+                    -- tap slot: family v_j, cos (s_seq(6)='0') or sin
+                    v_j := to_integer(s_seq(5 downto 4));
+                    case to_integer(s_seq(3 downto 0)) is
+                        when 3 =>
+                            s_mul_a <= s_qs_r;
+                            s_mul_m <= s_mant;
+                            s_mul_p <= (others => '0');
+                        when 4 to 10 =>
+                            -- Horner, mantissa MSB first
+                            if s_mul_m(6) = '1' then
+                                s_mul_p <= shift_left(s_mul_p, 1)
+                                           + resize(s_mul_a, 17);
+                            else
+                                s_mul_p <= shift_left(s_mul_p, 1);
+                            end if;
+                            s_mul_m <= shift_left(s_mul_m, 1);
+                        when 11 =>
+                            -- octave: c = qsin*mant >> (e+1); phase =
+                            -- acc(15:8), so period = 65536/|c| px
+                            case s_pe is
+                                when "000"  => v_c := shift_right(s_mul_p, 1);
+                                when "001"  => v_c := shift_right(s_mul_p, 2);
+                                when "010"  => v_c := shift_right(s_mul_p, 3);
+                                when "011"  => v_c := shift_right(s_mul_p, 4);
+                                when others => v_c := shift_right(s_mul_p, 5);
+                            end case;
+                            if s_seq(6) = '0' then
+                                s_ck(v_j) <= v_c(15 downto 0);
+                            else
+                                s_sk(v_j) <= v_c(15 downto 0);
+                                if s_ilace = '1' then
+                                    s_sk2(v_j) <= v_c(14 downto 0) & '0';
+                                else
+                                    s_sk2(v_j) <= v_c(15 downto 0);
+                                end if;
+                            end if;
+                        when others =>
+                            null;
+                    end case;
+                else
+                    case to_integer(s_seq(6 downto 0)) is
+                        when 0 =>
+                            -- pitch index: 4 octaves, 32 steps each
+                            s_pn <= resize(s_k1(9 downto 3), 8) + 16;
+                        when 1 =>
+                            s_pe   <= s_pn(7 downto 5);
+                            s_mant <= C_MANT(to_integer(s_pn(4 downto 0)));
+                            -- stipple lattice stays power-of-2 (cell ~ pitch)
+                            case s_pn(7 downto 5) is
+                                when "000" | "001" => s_pitch_sh <= 0;
+                                when "010"         => s_pitch_sh <= 1;
+                                when "011"         => s_pitch_sh <= 2;
+                                when others        => s_pitch_sh <= 3;
+                            end case;
+                        when 2 =>
+                            -- Bite split: 0..60% walks the ladder, the top
+                            -- 40% is overbite
+                            if s_p12 > 614 then
+                                s_pa <= to_unsigned(614, 10);
+                                s_ob <= resize(s_p12 - 614, 9);
+                            else
+                                s_pa <= s_p12;
+                                s_ob <= (others => '0');
+                            end if;
+                        when 3 =>
+                            -- 0.39 * pa: t1 runs 240 -> 0 over 0..60%
+                            s_tq <= shift_right(s_pa, 2) + shift_right(s_pa, 3);
+                        when 4 =>
+                            s_tq <= s_tq + shift_right(s_pa, 6);
+                        when 5 =>
+                            s_t1 <= to_signed(240, 11) - signed(resize(s_tq, 11));
+                        when 6 =>
+                            s_t1 <= s_t1 - signed(resize(shift_right(s_ob, 4), 11));
+                        when 7 =>
                             s_t2 <= s_t1 + 128;
-                        end if;
-                        -- ink width gain
-                        case s_k3(9 downto 8) is
-                            when "00"   => s_wsh <= 4;
-                            when "01"   => s_wsh <= 3;
-                            when others => s_wsh <= 2;
-                        end case;
-                    when 11 =>
-                        if s_t2 > 415 then
-                            s_t3 <= (others => '1');
-                        else
+                        when 8 =>
+                            s_t2 <= s_t2 - signed(resize(shift_right(s_ob, 2), 11));
+                        when 9 =>
                             s_t3 <= s_t2 + 96;
-                        end if;
-                        -- contour threshold: Ink opens it, Bite lowers it
-                        s_ethr <= to_unsigned(160, 12)
-                                  + resize(not s_k3(9 downto 3), 12)
-                                  + resize(not s_p12(9 downto 3), 12);
-                    when 10 =>
-                        -- style presets (parameter-only: woodcut = bold
-                        -- single-direction, stipple flag swaps the test)
-                        s_stip <= '0';
-                        case s_style is
-                            when "00" =>            -- stipple
-                                s_stip  <= '1';
-                                s_wbase <= to_unsigned(8, 7);
-                                s_wmax  <= to_unsigned(80, 7);
-                            when "11" =>            -- woodcut
-                                s_wbase <= to_unsigned(22, 7);
-                                s_wmax  <= to_unsigned(116, 7);
-                            when others =>          -- engraving
-                                s_wbase <= to_unsigned(10, 7);
-                                s_wmax  <= to_unsigned(96, 7);
-                        end case;
-                        if s_cross45 = '1' then
-                            s_xoff <= "010";        -- 45 degrees
-                        else
-                            s_xoff <= "100";        -- 90 degrees
-                        end if;
-                        -- flat-area default bin follows the plate angle
-                        -- (rounded to the even 4-direction set)
-                        s_bin0 <= (s_th0(8 downto 6) + 1) and "110";
-                        -- tremor depth
-                        if s_k5(9 downto 7) = 0 then
-                            s_jsh <= 0;
-                        else
-                            s_jsh <= to_integer(s_k5(9 downto 8)) + 1;
-                        end if;
-                    when 9 =>
-                        -- paper (warm cream; scratchboard swaps at compose)
-                        s_pap_y <= to_unsigned(930, 10);
-                        s_pap_u <= to_unsigned(506, 10);
-                        s_pap_v <= to_unsigned(518, 10);
-                        s_ink_y <= to_unsigned(110, 10);
-                        -- direction floor: low enough that soft form
-                        -- shading steers the strokes, above dither noise
-                        s_magfl <= to_unsigned(24, 12);
-                    when 6 =>
-                        -- capture two-behind: qsin(K4 + 256) -> ink U.
-                        -- Subtle tint only (>>4, warm bias): printing ink
-                        -- stays near-black, K4 steers the tint direction
-                        s_ink_u <= f_cu10(to_signed(504, 11)
-                                          + resize(shift_right(s_qs_r, 4), 11));
-                    when 5 =>
-                        null;
-                    when 4 =>
-                        -- capture: qsin(K4) -> ink V
-                        s_ink_v <= f_cu10(to_signed(524, 11)
-                                          + resize(shift_right(s_qs_r, 4), 11));
-                    when others =>
-                        null;
-                end case;
-                s_seq <= s_seq - 1;
+                        when 10 =>
+                            s_t3 <= s_t3 - signed(resize(shift_right(s_ob, 3), 11));
+                        when 11 =>
+                            -- ink width gain
+                            case s_k3(9 downto 8) is
+                                when "00"   => s_wsh <= 4;
+                                when "01"   => s_wsh <= 3;
+                                when others => s_wsh <= 2;
+                            end case;
+                        when 12 =>
+                            -- contour threshold: Ink opens it, Bite lowers it
+                            s_ethr <= to_unsigned(160, 12)
+                                      + resize(not s_k3(9 downto 3), 12)
+                                      + resize(not s_p12(9 downto 3), 12);
+                        when 13 =>
+                            -- overbite floods the contours
+                            s_ethr <= s_ethr - resize(shift_right(s_ob, 2), 12);
+                        when 14 =>
+                            -- style presets (parameter-only: woodcut = fat
+                            -- strokes, stipple flag swaps the test)
+                            s_stip <= '0';
+                            case s_style is
+                                when "00" =>            -- stipple
+                                    s_stip  <= '1';
+                                    s_wbase <= to_unsigned(8, 7);
+                                    s_wmax  <= to_unsigned(80, 7);
+                                when "11" =>            -- woodcut
+                                    s_wbase <= to_unsigned(22, 7);
+                                    s_wmax  <= to_unsigned(116, 7);
+                                when others =>          -- engraving
+                                    s_wbase <= to_unsigned(10, 7);
+                                    s_wmax  <= to_unsigned(96, 7);
+                            end case;
+                            -- families: 90 mode = hatch / +90 cross / +45
+                            -- third; 45 mode = hatch / +45 cross / +135 third
+                            if s_cross45 = '1' then
+                                s_xoff <= "01";
+                                s_toff <= "11";
+                            else
+                                s_xoff <= "10";
+                                s_toff <= "01";
+                            end if;
+                            -- tremor depth
+                            if s_k5(9 downto 7) = 0 then
+                                s_jsh <= 0;
+                            else
+                                s_jsh <= to_integer(s_k5(9 downto 8)) + 1;
+                            end if;
+                        when 15 =>
+                            -- overbite swells every stroke
+                            s_wbase <= s_wbase + resize(shift_right(s_ob, 5), 7);
+                        when 16 =>
+                            -- and lets the shadow strokes merge solid
+                            v_w := resize(s_wmax, 8) + resize(shift_right(s_ob, 2), 8);
+                            if v_w > 127 then
+                                s_wmax <= to_unsigned(127, 7);
+                            else
+                                s_wmax <= v_w(6 downto 0);
+                            end if;
+                        when 17 =>
+                            -- palette; generated colours stored U/V-swapped
+                            -- (the hardware swaps U/V)
+                            v_pi := to_integer(s_k4(9 downto 7));
+                            s_ink_y <= C_INK_Y(v_pi);
+                            s_ink_u <= C_INK_V(v_pi);
+                            s_ink_v <= C_INK_U(v_pi);
+                            s_pap_y <= C_PAP_Y(v_pi);
+                            s_pap_u <= C_PAP_V(v_pi);
+                            s_pap_v <= C_PAP_U(v_pi);
+                        when 18 =>
+                            -- foul-bite pits: density rises through the
+                            -- overbite; they boil with the live plate
+                            s_pd <= resize(shift_right(s_ob, 2), 8);
+                            s_pit_seed <= x"C3A5" + resize(s_dracc(11 downto 5), 16);
+                        when others =>
+                            null;
+                    end case;
+                end if;
+                if s_seq = 255 then
+                    s_run <= '0';
+                else
+                    s_seq <= s_seq + 1;
+                end if;
             end if;
         end if;
     end process p_frame;
@@ -461,13 +583,12 @@ begin
     ------------------------------------------------------------------------
     p_pix : process(clk)
         variable v_a, v_b : unsigned(11 downto 0);
-        variable v_t1c, v_t2c, v_t3c, v_t4c : unsigned(14 downto 0);
-        variable v_bq : unsigned(2 downto 0);
+        variable v_lo, v_hi : unsigned(14 downto 0);
+        variable v_d  : unsigned(1 downto 0);
         variable v_ph : unsigned(7 downto 0);
-        variable v_pp : unsigned(15 downto 0);
         variable v_w  : unsigned(8 downto 0);
         variable v_ink : unsigned(1 downto 0);
-        variable v_iy : signed(11 downto 0);
+        variable v_iy : unsigned(10 downto 0);
         variable v_dd : unsigned(6 downto 0);
         variable v_hf : signed(6 downto 0);
         variable v_rad, v_cap : unsigned(6 downto 0);
@@ -489,7 +610,6 @@ begin
                 r0_y <= unsigned(data_in.y);
                 r0_u <= unsigned(data_in.u);
                 r0_v <= unsigned(data_in.v);
-                s_x_count <= s_x_count + 1;
             end if;
 
             -- S1: [1 2 1]/4 write-path blur history; read addr counter
@@ -523,7 +643,7 @@ begin
                 cl3 <= qr1;
             end if;
 
-            -- S4: gradients (gx horizontal, gy vertical)
+            -- S4: gradients (gx rightward, gy UPWARD: row above minus row)
             if av(4) = '1' then
                 s_gx <= signed(resize(ss, 12)) - signed(resize(ss2, 12));
                 s_gy <= resize(dy, 12) + shift_left(resize(dy1, 12), 1)
@@ -537,53 +657,45 @@ begin
                 ay5 <= resize(f_absu(s_gy), 12);
                 mag5 <= resize(f_absu(s_gx), 13) + resize(f_absu(s_gy), 13);
                 if (s_gx < 0) /= (s_gy < 0) then
-                    sgn5 <= '1';                     -- 90..180 quadrant
+                    sgn5 <= '1';
                 else
                     sgn5 <= '0';
                 end if;
                 cl5 <= cl4;
             end if;
 
-            -- S6: direction bucket -- |gy| against four shift-approximated
-            -- tan boundaries of |gx| (11.25/33.75/56.25/78.75 deg); flat
-            -- areas (below the mag floor) fall to the plate-angle bin.
-            -- The stripe accumulators advance this stage; the warm-up
-            -- guard blanks the window's first lines/columns.
+            -- S6: direction bucket -- |gy| against tan(22.5) ~ .406 and
+            -- tan(67.5) ~ 2.406 of |gx| (symmetric 45-degree bins). The
+            -- stripe families step y DOWN, gy points UP: in screen space
+            -- a gradient whose components' signs differ points at +45.
+            -- Flat areas (below the mag floor) fall to family 0 = the
+            -- plate angle. The stripe accumulators advance this stage;
+            -- the warm-up guard blanks the window's first lines/columns.
             if av(6) = '1' then
                 v_a := ax5;
                 v_b := ay5;
-                v_t1c := resize(shift_right(v_a, 3), 15)
-                         + resize(shift_right(v_a, 4), 15);
-                v_t2c := resize(shift_right(v_a, 1), 15)
-                         + resize(shift_right(v_a, 3), 15)
-                         + resize(shift_right(v_a, 5), 15);
-                v_t3c := resize(v_a, 15) + resize(shift_right(v_a, 1), 15);
-                v_t4c := shift_left(resize(v_a, 15), 2) + resize(v_a, 15);
-                if resize(v_b, 15) < v_t1c then
-                    v_bq := "000";
-                elsif resize(v_b, 15) < v_t2c then
-                    v_bq := "001";
-                elsif resize(v_b, 15) < v_t3c then
-                    v_bq := "010";
-                elsif resize(v_b, 15) < v_t4c then
-                    v_bq := "011";
+                v_lo := resize(shift_right(v_a, 2), 15)
+                        + resize(shift_right(v_a, 3), 15)
+                        + resize(shift_right(v_a, 5), 15);
+                v_hi := shift_left(resize(v_a, 15), 1)
+                        + resize(shift_right(v_a, 2), 15)
+                        + resize(shift_right(v_a, 3), 15)
+                        + resize(shift_right(v_a, 5), 15);
+                if resize(v_b, 15) < v_lo then
+                    v_d := "00";
+                elsif resize(v_b, 15) > v_hi then
+                    v_d := "10";
+                elsif sgn5 = '1' then
+                    v_d := "01";
                 else
-                    v_bq := "100";
+                    v_d := "11";
                 end if;
-                if sgn5 = '1' and v_bq /= 0 then
-                    v_bq := to_unsigned(8, 4)(2 downto 0) - v_bq;
-                end if;
-                -- round to the nearest EVEN family (4 stroke directions,
-                -- 45 apart): 22.5-degree selection granularity flips
-                -- family on tiny gradient changes and shreds soft shading
-                -- into patchwork
-                v_bq := (v_bq + 1) and "110";
                 if s_aline < 4 or x_s6 < 8 then
-                    bin6 <= s_bin0;
+                    bin6 <= "00";
                     hold_cnt <= (others => '0');
-                elsif mag5 >= s_magfl then
-                    bin6 <= v_bq;
-                    bin_hold <= v_bq;
+                elsif mag5 >= C_MAGFL then
+                    bin6 <= v_d;
+                    bin_hold <= v_d;
                     hold_cnt <= (others => '1');
                 elsif hold_cnt /= 0 then
                     -- ridge/valley zones (gradient through zero) inherit
@@ -592,18 +704,16 @@ begin
                     bin6 <= bin_hold;
                     hold_cnt <= hold_cnt - 1;
                 else
-                    bin6 <= s_bin0;
+                    bin6 <= "00";
                 end if;
                 mag6 <= mag5;
                 x_s6 <= x_s6 + 1;
 
                 -- stipple lattice coords + sub-cell diagonal coords
-                st1_8 <= resize(shift_right(x_s6 + resize(s_aline, 11),
-                                            s_pitch_sh + 3), 8);
-                st2_8 <= resize(shift_right(x_s6 - resize(s_aline, 11),
-                                            s_pitch_sh + 3), 8);
-                v_sub := x_s6 + resize(s_aline, 11);
-                v_sb2 := x_s6 - resize(s_aline, 11);
+                st1_8 <= resize(shift_right(x_s6 + s_aline, s_pitch_sh + 3), 8);
+                st2_8 <= resize(shift_right(x_s6 - s_aline, s_pitch_sh + 3), 8);
+                v_sub := x_s6 + s_aline;
+                v_sb2 := x_s6 - s_aline;
                 case s_pitch_sh is
                     when 0 =>
                         d1_6 <= resize(v_sub(2 downto 0), 6);
@@ -620,38 +730,31 @@ begin
                 end case;
 
                 -- width ladder stage 1: tone excess over each threshold
-                wd1_6 <= signed(resize(not cl5, 11))
-                         - signed(resize(s_t1, 11));
-                wd2_6 <= signed(resize(not cl5, 11))
-                         - signed(resize(s_t2, 11));
-                wd3_6 <= signed(resize(not cl5, 11))
-                         - signed(resize(s_t3, 11));
+                wd1_6 <= signed(resize(not cl5, 11)) - s_t1;
+                wd2_6 <= signed(resize(not cl5, 11)) - s_t2;
+                wd3_6 <= signed(resize(not cl5, 11)) - s_t3;
 
-                for k in 0 to 7 loop
-                    p_acc(k) <= p_acc(k) + unsigned(resize(s_ck(k), 16));
+                for k in 0 to 3 loop
+                    p_acc(k) <= p_acc(k) + unsigned(s_ck(k));
                 end loop;
             end if;
 
             -- S7: pick the three stroke phases (hatch / cross / third) by
-            -- bucket mux (shift by pitch, then a STATIC slice); hand
-            -- tremor jitters the phase per line; stipple hash stage A
+            -- bucket mux -- phase is the static slice p(15:8) at every
+            -- pitch; hand tremor jitters the phase per line; stipple and
+            -- pit hashes stage A
             if av(7) = '1' then
-                v_pp := shift_right(p_acc(to_integer(bin6)), s_pitch_sh);
-                v_ph := v_pp(7 downto 0);
+                v_ph := p_acc(to_integer(bin6))(15 downto 8);
                 if s_jsh /= 0 then
                     v_ph := v_ph + shift_right(s_ljit8, 4 - s_jsh);
                 end if;
                 ph_h7 <= v_ph;
-                v_pp := shift_right(p_acc(to_integer(bin6 + s_xoff)),
-                                    s_pitch_sh);
-                v_ph := v_pp(7 downto 0);
+                v_ph := p_acc(to_integer(bin6 + s_xoff))(15 downto 8);
                 if s_jsh /= 0 then
                     v_ph := v_ph + shift_right(s_ljit8, 4 - s_jsh);
                 end if;
                 ph_x7 <= v_ph;
-                v_pp := shift_right(p_acc(to_integer(bin6 + "010")),
-                                    s_pitch_sh);
-                ph_t7 <= v_pp(7 downto 0);
+                ph_t7 <= p_acc(to_integer(bin6 + s_toff))(15 downto 8);
                 mag7 <= mag6;
 
                 -- width ladder stage 2: shift + base + clamp per level
@@ -659,8 +762,7 @@ begin
                 if wd1_6 >= 0 then
                     en1_7 <= '1';
                     v_w := resize(s_wbase, 9)
-                           + resize(shift_right(unsigned(resize(wd1_6, 11)),
-                                                s_wsh), 9);
+                           + resize(shift_right(unsigned(wd1_6), s_wsh), 9);
                     if v_w > resize(s_wmax, 9) then
                         w1_7 <= s_wmax;
                     else
@@ -671,8 +773,7 @@ begin
                 if wd2_6 >= 0 then
                     en2_7 <= '1';
                     v_w := resize(s_wbase, 9)
-                           + resize(shift_right(unsigned(resize(wd2_6, 11)),
-                                                s_wsh), 9);
+                           + resize(shift_right(unsigned(wd2_6), s_wsh), 9);
                     if v_w > resize(s_wmax, 9) then
                         w2_7 <= s_wmax;
                     else
@@ -683,8 +784,7 @@ begin
                 if wd3_6 >= 0 then
                     en3_7 <= '1';
                     v_w := resize(s_wbase, 9)
-                           + resize(shift_right(unsigned(resize(wd3_6, 11)),
-                                                s_wsh), 9);
+                           + resize(shift_right(unsigned(wd3_6), s_wsh), 9);
                     if v_w > resize(s_wmax, 9) then
                         w3_7 <= s_wmax;
                     else
@@ -693,11 +793,13 @@ begin
                 end if;
 
                 sh7  <= f_hash_a(st1_8, st2_8, x"7A3C");
+                ph7  <= f_hash_a(x_s6(8 downto 1), s_aline(8 downto 1),
+                                 s_pit_seed);
                 d1_7 <= d1_6;
                 d2_7 <= d2_6;
             end if;
 
-            -- S8: stripe-center distances + tonal widths; stipple hash B
+            -- S8: stripe-center distances + tonal widths; hashes stage B
             if av(8) = '1' then
                 if ph_h7 >= 128 then
                     dh8 <= resize(shift_right(ph_h7 - 128, 1), 7);
@@ -722,6 +824,7 @@ begin
                 mag8 <= mag7;
 
                 sj8  <= f_hash_b(sh7);
+                pj8  <= f_hash_b(ph7);
                 d1_8 <= d1_7;
                 d2_8 <= d2_7;
             end if;
@@ -729,6 +832,7 @@ begin
             -- S9: ink decision. Engraving: union of the three stroke
             -- levels with a half-ink antialias band. Stipple: hash-gated
             -- diamond dots sized by tone. Contour ink on top (S9 switch).
+            -- Foul-bite pits decided alongside, merged at S10.
             if av(9) = '1' then
                 v_ink := "00";
                 if s_stip = '0' then
@@ -776,6 +880,13 @@ begin
                     end if;
                 end if;
                 ink9 <= v_ink;
+                if pj8 < shift_right(s_pd, 1) then
+                    pit9 <= "10";
+                elsif pj8 < s_pd then
+                    pit9 <= "01";
+                else
+                    pit9 <= "00";
+                end if;
                 if s_edge_on = '1' and mag8 > resize(s_ethr, 13) then
                     edge9 <= '1';
                 else
@@ -789,12 +900,17 @@ begin
                 ln_iy <= s_ink_y;
                 ln_iu <= s_ink_u;
                 ln_iv <= s_ink_v;
-                -- paper lane (wash = half-sat video under-print + grain)
+                -- paper lane (wash = half-sat video under-print, luma held
+                -- under ~768 so the colour survives; else paper + grain)
                 if s_wash = '1' then
-                    v_iy := signed(resize(to_unsigned(560, 10), 12))
-                            + signed(resize(dyy(10)(9 downto 2), 12))
-                            + signed(resize(dyy(10)(9 downto 3), 12));
-                    ln_py <= f_cu10(v_iy);
+                    v_iy := to_unsigned(440, 11)
+                            + resize(dyy(10)(9 downto 2), 11)
+                            + resize(dyy(10)(9 downto 3), 11);
+                    if v_iy > 768 then
+                        ln_py <= to_unsigned(768, 10);
+                    else
+                        ln_py <= v_iy(9 downto 0);
+                    end if;
                     ln_pu <= resize(shift_right(resize(du(10), 11)
                                     + to_unsigned(512, 11), 1), 10);
                     ln_pv <= resize(shift_right(resize(dv(10), 11)
@@ -811,7 +927,12 @@ begin
                          + ('0' & s_ink_u(9 downto 1));
                 ln_hv <= ('0' & s_pap_v(9 downto 1))
                          + ('0' & s_ink_v(9 downto 1));
-                ink10  <= ink9;
+                -- pits land only on bare paper
+                if ink9 = "00" then
+                    ink10 <= pit9;
+                else
+                    ink10 <= ink9;
+                end if;
                 edge10 <= edge9;
             end if;
 
@@ -829,7 +950,7 @@ begin
             end if;
 
             -- S12: mux -> output (Invert swaps ink and paper roles:
-            -- scratchboard)
+            -- scratchboard). Blanking gate: neutral outside active video.
             if av(12) = '1' then
                 case sel11 is
                     when "11" | "10" =>
@@ -857,6 +978,10 @@ begin
                             s_out_v <= ln_pv;
                         end if;
                 end case;
+            else
+                s_out_y <= to_unsigned(64, 10);
+                s_out_u <= to_unsigned(512, 10);
+                s_out_v <= to_unsigned(512, 10);
             end if;
 
             -- video delay pipes for the wash lane
@@ -874,7 +999,7 @@ begin
                 -- tremor pattern boils at ~10 Hz when the plate is live
                 -- (full-rate reseeding strobes at field rate); locked
                 -- plate = static hand wobble
-                s_lh_a  <= f_hash_a(resize(s_aline, 8),
+                s_lh_a  <= f_hash_a(s_aline(7 downto 0),
                                     resize(s_dracc(11 downto 5), 8), x"B33F");
                 s_lstep <= "10";
             elsif s_lstep = 2 then
@@ -886,7 +1011,6 @@ begin
             -- row bases, step the bases (doubled per line when interlaced
             -- so stroke angles are true in frame space)
             if data_in.hsync_n = '0' and s_prev_hsync_n = '1' then
-                s_x_count <= (others => '0');
                 lrx <= (others => '0');
                 lwx <= (others => '0');
                 x_s6 <= (others => '0');
@@ -894,26 +1018,27 @@ begin
 
                 if s_seen = '1' then
                     s_seen <= '0';
-                    if s_aline < 1000 then
+                    if s_aline /= 2047 then
                         s_aline <= s_aline + 1;
                     end if;
-                    for k in 0 to 7 loop
-                        b_acc(k) <= b_acc(k) + unsigned(resize(s_sk2(k), 16));
-                        p_acc(k) <= b_acc(k) + unsigned(resize(s_sk2(k), 16));
+                    for k in 0 to 3 loop
+                        b_acc(k) <= b_acc(k) + unsigned(s_sk2(k));
+                        p_acc(k) <= b_acc(k) + unsigned(s_sk2(k));
                     end loop;
                 else
                     s_aline <= (others => '0');
-                    -- field start: base = drift phase + field parity
-                    -- half-step (interlace)
-                    for k in 0 to 7 loop
-                        if s_ilace = '1' and data_in.field_n = '1' then
-                            b_acc(k) <= resize(s_dracc, 16)
-                                        + unsigned(resize(s_sk(k), 16));
-                            p_acc(k) <= resize(s_dracc, 16)
-                                        + unsigned(resize(s_sk(k), 16));
+                    -- field start: base = drift phase (pitch-independent,
+                    -- 2.5 phase units per field) + one frame line for the
+                    -- BOTTOM field (field_n = '0') when interlaced
+                    for k in 0 to 3 loop
+                        if s_ilace = '1' and data_in.field_n = '0' then
+                            b_acc(k) <= shift_left(resize(s_dracc(8 downto 0), 16), 7)
+                                        + unsigned(s_sk(k));
+                            p_acc(k) <= shift_left(resize(s_dracc(8 downto 0), 16), 7)
+                                        + unsigned(s_sk(k));
                         else
-                            b_acc(k) <= resize(s_dracc, 16);
-                            p_acc(k) <= resize(s_dracc, 16);
+                            b_acc(k) <= shift_left(resize(s_dracc(8 downto 0), 16), 7);
+                            p_acc(k) <= shift_left(resize(s_dracc(8 downto 0), 16), 7);
                         end if;
                     end loop;
                 end if;

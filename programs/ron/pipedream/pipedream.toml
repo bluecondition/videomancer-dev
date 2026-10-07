@@ -1,26 +1,26 @@
-# Pipedream — a generative network of glossy 3D pipes.
+# Pipedream — a woven Truchet network of glossy 3D pipes.
 #
-# No video in: the screen fills with brightly-coloured 3D pipes that connect in
-# every configuration — straight runs, elbows, tees, crosses — decided by
-# hashing the shared grid edges, so pipes always link up.  Bends are clean
-# rounded 90° elbows (S7 = Round/Square); specular gloss, a flowing rainbow
-# (or a colour per cell), and liquid-light pulses coursing along the network on
-# the Flow fader.  Everything is shaped by the knobs, switches and slider.
+# Every cell holds two quarter-circle elbows or an over/under crossing, so
+# every pipe is a continuous closed loop: no dead ends, no tees.  Weave sets
+# how many crossings (pure loops -> basket weave), Rings closes the elbows into
+# chain-mail rings, and Image (P12) lets the input's luma set the pipe
+# thickness per pixel, so the picture is drawn by the weave itself.  Gloss or
+# Chrome finish; Flow pulses circulate along each loop.
 #
 # Author: bluecondition
 
 [program]
 program_id = "com.bluecondition.pipedream"
-program_version = "2.1.0"
+program_version = "3.2.0"
 abi_version = ">=1.0,<2.0"
 program_name = "Pipedream"
 author = "bluecondition"
 license = "GPL-3.0"
 categories = ["Tube", "Render", "Pattern"]
-program_type = "synthesis"
+program_type = "processing"
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
-description = "A generative network of bright glossy 3D pipes connecting in every configuration."
+description = "A woven Truchet network of glossy 3D pipes; the input's luma swells or thins the pipes."
 url = "https://github.com/bluecondition/videomancer-dev"
 
 # --- Rotary Potentiometers (Knobs 1-6) ---
@@ -30,9 +30,9 @@ parameter_id = "rotary_potentiometer_1"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 420
-display_min_value = 48
-display_max_value = 176
+initial_value = 360
+display_min_value = 32
+display_max_value = 158
 name_label = "Scale"
 suffix_label = "px"
 
@@ -41,10 +41,10 @@ parameter_id = "rotary_potentiometer_2"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 560
+initial_value = 300
 display_min_value = 0
 display_max_value = 100
-name_label = "Connections"
+name_label = "Weave"
 suffix_label = "%"
 
 [[parameter]]
@@ -52,7 +52,7 @@ parameter_id = "rotary_potentiometer_3"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 520
+initial_value = 640
 display_min_value = 0
 display_max_value = 100
 name_label = "Fatness"
@@ -63,10 +63,10 @@ parameter_id = "rotary_potentiometer_4"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 520
+initial_value = 350
 display_min_value = 0
 display_max_value = 100
-name_label = "Shine"
+name_label = "Flow"
 suffix_label = "%"
 
 [[parameter]]
@@ -95,15 +95,15 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
-name_label = "Corners"
-value_labels = ["Square", "Round"]
-initial_value_label = "Round"
+name_label = "Pattern"
+value_labels = ["Random", "Rings"]
+initial_value_label = "Random"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
-name_label = "Colour"
-value_labels = ["Rainbow", "Per-Cell"]
-initial_value_label = "Rainbow"
+name_label = "Finish"
+value_labels = ["Gloss", "Chrome"]
+initial_value_label = "Gloss"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
@@ -119,9 +119,9 @@ initial_value_label = "Fixed"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
-name_label = "Bypass"
+name_label = "Image"
 value_labels = ["Off", "On"]
-initial_value_label = "Off"
+initial_value_label = "On"
 
 # --- Linear Potentiometer (Fader 12) ---
 
@@ -130,70 +130,100 @@ parameter_id = "linear_potentiometer_12"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 0
-display_min_value = 0
+initial_value = 512
+display_min_value = -100
 display_max_value = 100
-name_label = "Flow"
+name_label = "Image"
 suffix_label = "%"
 
 # --- Presets ---
 
 [[preset]]
-name = "Plumbing"
-rotary_potentiometer_1 = 420      # ~100 px pipes
-rotary_potentiometer_2 = 520      # a moderate mesh
-rotary_potentiometer_3 = 560      # fat pipes
-rotary_potentiometer_4 = 520
-rotary_potentiometer_5 = 700      # cyan/blue base
-rotary_potentiometer_6 = 400      # gentle colour spread
-toggle_switch_7 = 1               # round elbows
+name = "Truchet"   # pure looping Truchet
+rotary_potentiometer_1 = 420
+rotary_potentiometer_2 = 0
+rotary_potentiometer_3 = 700
+rotary_potentiometer_4 = 300
+rotary_potentiometer_5 = 700
+rotary_potentiometer_6 = 400
+toggle_switch_7 = 0
 toggle_switch_8 = 0
 toggle_switch_9 = 0
 toggle_switch_10 = 0
 toggle_switch_11 = 0
-linear_potentiometer_12 = 200
+linear_potentiometer_12 = 512
 
 [[preset]]
-name = "Circuit Board"
-rotary_potentiometer_1 = 120      # small, dense
-rotary_potentiometer_2 = 760      # lots of tees & crosses
-rotary_potentiometer_3 = 380      # thinner traces
-rotary_potentiometer_4 = 820      # tight gloss
-rotary_potentiometer_5 = 320      # green-ish
-rotary_potentiometer_6 = 200      # near-solid colour
-toggle_switch_7 = 0               # square corners (shows the non-rounded option)
-toggle_switch_8 = 0
-toggle_switch_9 = 0
-toggle_switch_10 = 0
-toggle_switch_11 = 0
-linear_potentiometer_12 = 1023    # coursing with light
-
-[[preset]]
-name = "Rainbow Reactor"
+name = "Basket Weave"   # all crossings, over/under
 rotary_potentiometer_1 = 300
-rotary_potentiometer_2 = 620
-rotary_potentiometer_3 = 620      # chunky
-rotary_potentiometer_4 = 620
-rotary_potentiometer_5 = 0
-rotary_potentiometer_6 = 900      # full rainbow spread
-toggle_switch_7 = 1               # round elbows
-toggle_switch_8 = 0               # rainbow
-toggle_switch_9 = 1               # reshuffling
-toggle_switch_10 = 1              # spinning light
-toggle_switch_11 = 0
-linear_potentiometer_12 = 700
-
-[[preset]]
-name = "Confetti Pipes"
-rotary_potentiometer_1 = 200
-rotary_potentiometer_2 = 500
-rotary_potentiometer_3 = 480
-rotary_potentiometer_4 = 700
-rotary_potentiometer_5 = 512
-rotary_potentiometer_6 = 512
-toggle_switch_7 = 1
-toggle_switch_8 = 1              # per-cell random colours
+rotary_potentiometer_2 = 1023
+rotary_potentiometer_3 = 900
+rotary_potentiometer_4 = 200
+rotary_potentiometer_5 = 90
+rotary_potentiometer_6 = 150
+toggle_switch_7 = 0
+toggle_switch_8 = 0
 toggle_switch_9 = 0
 toggle_switch_10 = 0
 toggle_switch_11 = 0
-linear_potentiometer_12 = 400
+linear_potentiometer_12 = 512
+
+[[preset]]
+name = "Chain Mail"   # rings + crossings, chrome
+rotary_potentiometer_1 = 260
+rotary_potentiometer_2 = 420
+rotary_potentiometer_3 = 760
+rotary_potentiometer_4 = 250
+rotary_potentiometer_5 = 600
+rotary_potentiometer_6 = 0
+toggle_switch_7 = 1
+toggle_switch_8 = 1
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 512
+
+[[preset]]
+name = "Portrait"   # bright grows the pipes
+rotary_potentiometer_1 = 0
+rotary_potentiometer_2 = 250
+rotary_potentiometer_3 = 1023
+rotary_potentiometer_4 = 150
+rotary_potentiometer_5 = 512
+rotary_potentiometer_6 = 500
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 1
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Negative"   # bright thins fat pipes
+rotary_potentiometer_1 = 0
+rotary_potentiometer_2 = 250
+rotary_potentiometer_3 = 1023
+rotary_potentiometer_4 = 150
+rotary_potentiometer_5 = 200
+rotary_potentiometer_6 = 300
+toggle_switch_7 = 0
+toggle_switch_8 = 1
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 1
+linear_potentiometer_12 = 0
+
+[[preset]]
+name = "Neon Circuit"   # racing light, swell wave
+rotary_potentiometer_1 = 140
+rotary_potentiometer_2 = 600
+rotary_potentiometer_3 = 600
+rotary_potentiometer_4 = 1023
+rotary_potentiometer_5 = 300
+rotary_potentiometer_6 = 900
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 1
+toggle_switch_10 = 1
+toggle_switch_11 = 0
+linear_potentiometer_12 = 800

@@ -1,0 +1,266 @@
+{
+ "nodes": [
+  {
+   "id": "vin",
+   "type": "video_in",
+   "cfg": "default",
+   "variant": "full",
+   "cost": {
+    "lc": 35,
+    "lut": 0,
+    "ff": 34,
+    "bramBlocks": 0,
+    "bramBits": 0,
+    "mult": 0,
+    "latency": 1,
+    "logicDepth": 0,
+    "controls": 0
+   },
+   "fmaxMHz": 626.6
+  },
+  {
+   "id": "ctl_grain",
+   "type": "control",
+   "cfg": "bit-1_latchF",
+   "variant": "full",
+   "cost": {
+    "lc": 11,
+    "lut": 0,
+    "ff": 10,
+    "bramBlocks": 0,
+    "bramBits": 0,
+    "mult": 0,
+    "latency": 1,
+    "logicDepth": 0,
+    "controls": 1
+   },
+   "fmaxMHz": 626.6
+  },
+  {
+   "id": "ctl_key_level",
+   "type": "control",
+   "cfg": "bit-1_latchF",
+   "variant": "full",
+   "cost": {
+    "lc": 11,
+    "lut": 0,
+    "ff": 10,
+    "bramBlocks": 0,
+    "bramBits": 0,
+    "mult": 0,
+    "latency": 1,
+    "logicDepth": 0,
+    "controls": 1
+   },
+   "fmaxMHz": 626.6
+  },
+  {
+   "id": "ctl_key_soft",
+   "type": "control",
+   "cfg": "bit-1_latchF",
+   "variant": "full",
+   "cost": {
+    "lc": 11,
+    "lut": 0,
+    "ff": 10,
+    "bramBlocks": 0,
+    "bramBits": 0,
+    "mult": 0,
+    "latency": 1,
+    "logicDepth": 0,
+    "controls": 1
+   },
+   "fmaxMHz": 626.6
+  },
+  {
+   "id": "grain",
+   "type": "noise",
+   "cfg": "animateT",
+   "variant": "full",
+   "cost": {
+    "lc": 207,
+    "lut": 194,
+    "ff": 73,
+    "bramBlocks": 0,
+    "bramBits": 0,
+    "mult": 0,
+    "latency": 3,
+    "logicDepth": 12,
+    "controls": 0
+   },
+   "fmaxMHz": 110.7
+  },
+  {
+   "id": "hb",
+   "type": "hblur",
+   "cfg": "taps5_chromaT",
+   "variant": "full",
+   "cost": {
+    "lc": 786,
+    "lut": 570,
+    "ff": 559,
+    "bramBlocks": 0,
+    "bramBits": 0,
+    "mult": 0,
+    "latency": 7,
+    "logicDepth": 16,
+    "controls": 0
+   },
+   "fmaxMHz": 109.5
+  },
+  {
+   "id": "key",
+   "type": "threshold",
+   "cfg": "channel0_softT",
+   "variant": "chroma_dead",
+   "cost": {
+    "lc": 183,
+    "lut": 133,
+    "ff": 57,
+    "bramBlocks": 0,
+    "bramBits": 0,
+    "mult": 0,
+    "latency": 3,
+    "logicDepth": 22,
+    "controls": 0
+   },
+   "fmaxMHz": 97.8
+  },
+  {
+   "id": "osc",
+   "type": "shaper",
+   "cfg": "opsquare",
+   "variant": "full",
+   "cost": {
+    "lc": 2,
+    "lut": 0,
+    "ff": 1,
+    "bramBlocks": 0,
+    "bramBits": 0,
+    "mult": 0,
+    "latency": 1,
+    "logicDepth": 0,
+    "controls": 0
+   },
+   "fmaxMHz": 626.6
+  },
+  {
+   "id": "pal",
+   "type": "colorizer",
+   "cfg": "entries_bits2",
+   "variant": "full",
+   "cost": {
+    "lc": 22,
+    "lut": 3,
+    "ff": 18,
+    "bramBlocks": 0,
+    "bramBits": 0,
+    "mult": 0,
+    "latency": 2,
+    "logicDepth": 0,
+    "controls": 0
+   },
+   "fmaxMHz": 180.4
+  },
+  {
+   "id": "mix",
+   "type": "mix",
+   "cfg": "implshift_bits4",
+   "variant": "full",
+   "cost": {
+    "lc": 537,
+    "lut": 439,
+    "ff": 432,
+    "bramBlocks": 0,
+    "bramBits": 0,
+    "mult": 0,
+    "latency": 4,
+    "logicDepth": 8,
+    "controls": 0
+   },
+   "fmaxMHz": 129.4
+  },
+  {
+   "id": "fringe",
+   "type": "chroma_shift",
+   "cfg": "pixels6_leadluma",
+   "variant": "full",
+   "cost": {
+    "lc": 155,
+    "lut": 0,
+    "ff": 154,
+    "bramBlocks": 0,
+    "bramBits": 0,
+    "mult": 0,
+    "latency": 1,
+    "logicDepth": 0,
+    "controls": 0
+   },
+   "fmaxMHz": 345.1
+  },
+  {
+   "id": "vout",
+   "type": "video_out",
+   "cfg": "default",
+   "variant": "full",
+   "cost": {
+    "lc": 37,
+    "lut": 1,
+    "ff": 34,
+    "bramBlocks": 0,
+    "bramBits": 0,
+    "mult": 0,
+    "latency": 1,
+    "logicDepth": 2,
+    "controls": 0
+   },
+   "fmaxMHz": 338.9
+  }
+ ],
+ "delays": {
+  "ff": 166,
+  "lc": 166,
+  "chains": [
+   {
+    "src": "osc.out",
+    "width": 10,
+    "taps": [
+     3
+    ]
+   },
+   {
+    "src": "hb.out",
+    "width": 34,
+    "taps": [
+     3
+    ]
+   },
+   {
+    "src": "pal.out",
+    "width": 34,
+    "taps": [
+     1
+    ]
+   }
+  ]
+ },
+ "shell": {
+  "lc": 1145,
+  "lut": 660,
+  "ff": 624
+ },
+ "total": {
+  "lc": 3308,
+  "lut": 2000,
+  "ff": 2182,
+  "bramBlocks": 0,
+  "mult": 0,
+  "controls": 3,
+  "latency": 17
+ },
+ "lcPct": 43.1,
+ "bramPct": 0,
+ "zone": "green",
+ "worstNodeFmaxMHz": 97.8,
+ "warnings": []
+}

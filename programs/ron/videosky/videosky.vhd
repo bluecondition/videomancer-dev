@@ -1,4 +1,4 @@
--- videosky.vhd  (v0.1 -- the picture cut into a copper line-screen)
+-- videosky.vhd  (v1.0 -- the picture cut into a copper line-screen)
 --
 -- Lifted out of PENROSE, whose "Video Sky" switch engraved the incoming video
 -- into the sky behind the impossible staircase.  That was eight lines of code:
@@ -35,6 +35,12 @@
 -- shares ONE registered 9x8 multiplier, split-operand across vblank cycles, so
 -- no wide combinational product ever lands on a vsync-latched register
 -- (the ziffern trap: those paths are still timed).
+--
+-- Hardware contracts (v1.0): output gated to neutral outside active video;
+-- generated palette U/V-swapped at the compose (the hardware swaps U/V; the
+-- Tint path carries source chroma and is NOT swapped); vsync edges act once
+-- per field via a saw-active flag (analog vsync serrates); the interlace
+-- half-step goes to the BOTTOM field (field_n = '0').
 --
 -- Author: bluecondition
 
@@ -108,7 +114,7 @@ architecture videosky of program_top is
     ----------------------------------------------------------------------
     signal s_k1_ink   : unsigned(9 downto 0) := to_unsigned(512, 10);   -- K1 Ink
     signal s_k2_con   : unsigned(9 downto 0) := to_unsigned(256, 10);   -- K2 Contrast
-    signal s_k3_pit   : unsigned(9 downto 0) := to_unsigned(400, 10);   -- K3 Pitch
+    signal s_k3_pit   : unsigned(9 downto 0) := to_unsigned(480, 10);   -- K3 Pitch
     signal s_k4_ang   : unsigned(9 downto 0) := (others => '0');        -- K4 Angle
     signal s_k5_wav   : unsigned(9 downto 0) := (others => '0');        -- K5 Waver
     signal s_scheme   : unsigned(9 downto 0) := (others => '0');        -- K6 Scheme
@@ -123,7 +129,7 @@ architecture videosky of program_top is
     -- per-frame resolved terms
     ----------------------------------------------------------------------
     signal s_cos8, s_sin8 : signed(7 downto 0) := (others => '0');
-    signal s_step   : unsigned(14 downto 0) := to_unsigned(6912, 15);
+    signal s_step   : unsigned(14 downto 0) := to_unsigned(8192, 15);
     signal s_dpx, s_dpy : signed(17 downto 0) := (others => '0');
     signal s_dqx, s_dqy : signed(17 downto 0) := (others => '0');
     signal s_bias   : signed(9 downto 0)  := (others => '0');   -- Ink, +/-256
@@ -151,6 +157,8 @@ architecture videosky of program_top is
 
     signal s_prev_vsync_n : std_logic := '1';
     signal s_vs_pulse : std_logic := '0';
+    signal s_saw   : std_logic := '0';     -- active video seen since last acted vsync
+    signal s_sch3  : unsigned(2 downto 0) := (others => '0');
     signal s_fpar  : std_logic := '0';
     signal s_ilace : std_logic := '0';
     signal s_dracc : unsigned(11 downto 0) := (others => '0');
@@ -226,7 +234,14 @@ begin
 
             s_vs_pulse <= '0';
 
-            if data_in.vsync_n = '0' and s_prev_vsync_n = '1' then
+            if data_in.avid = '1' then
+                s_saw <= '1';
+            end if;
+
+            -- act on the FIRST vsync edge after active video only: analog
+            -- vsync serrates into several edges per field.
+            if data_in.vsync_n = '0' and s_prev_vsync_n = '1' and s_saw = '1' then
+                s_saw <= '0';
                 s_vs_pulse <= '1';
 
                 s_k1_ink <= unsigned(registers_in(0));
@@ -251,7 +266,7 @@ begin
                 end if;
 
                 if registers_in(6)(4) = '1' then
-                    s_dracc <= s_dracc + 2;
+                    s_dracc <= s_dracc + 8;     -- one period per 32 frames
                 end if;
 
                 s_seq <= to_unsigned(31, 5);
@@ -314,34 +329,48 @@ begin
                         s_gain <= to_unsigned(16, 7) + resize(s_k2_con(9 downto 4), 7);
 
                     when 14 => s_depth6 <= s_p12(9 downto 4);
-                    when 13 => s_wav4   <= s_k5_wav(9 downto 6);
+                    when 13 =>
+                        s_wav4 <= s_k5_wav(9 downto 6);
+                        -- K6 Scheme: the firmware loads a labelled default as
+                        -- its raw label INDEX (0..5), a knob/preset as 0..1023.
+                        if    s_scheme < 6   then s_sch3 <= s_scheme(2 downto 0);
+                        elsif s_scheme < 102 then s_sch3 <= "000";   -- Parchment
+                        elsif s_scheme < 307 then s_sch3 <= "001";   -- Gallery
+                        elsif s_scheme < 511 then s_sch3 <= "010";   -- Night
+                        elsif s_scheme < 716 then s_sch3 <= "011";   -- Blueprint
+                        elsif s_scheme < 920 then s_sch3 <= "100";   -- Cyanotype
+                        else                      s_sch3 <= "101";   -- Copper
+                        end if;
 
                     when 12 =>      -- constant rule weight when Width is Fixed
+                        -- floored at 8 so Ink can never blank the plate
                         v_t := to_signed(64, 12) + resize(shift_right(s_bias, 2), 12);
+                        if v_t < 8 then v_t := to_signed(8, 12); end if;
                         s_fixedw <= f_ct(v_t);
 
-                    when 11 =>      -- print scheme (K6)
-                        if s_scheme < 102 then                  -- Parchment
+                    when 11 =>      -- print scheme (K6), authored standard
+                                    -- BT.601 and U/V-swapped at the compose
+                        if s_sch3 = 0 then                      -- Parchment
                             s_pap_y <= to_unsigned(740, 10);
                             s_pap_u <= to_unsigned(470, 10); s_pap_v <= to_unsigned(540, 10);
                             s_ink_y <= to_unsigned(30, 10);
                             s_ink_u <= to_unsigned(495, 10); s_ink_v <= to_unsigned(522, 10);
-                        elsif s_scheme < 307 then               -- Gallery
+                        elsif s_sch3 = 1 then                   -- Gallery
                             s_pap_y <= to_unsigned(830, 10);
                             s_pap_u <= C_CHROMA_MID;         s_pap_v <= C_CHROMA_MID;
                             s_ink_y <= to_unsigned(40, 10);
                             s_ink_u <= C_CHROMA_MID;         s_ink_v <= C_CHROMA_MID;
-                        elsif s_scheme < 511 then               -- Night
+                        elsif s_sch3 = 2 then                   -- Night
                             s_pap_y <= to_unsigned(120, 10);
                             s_pap_u <= C_CHROMA_MID;         s_pap_v <= C_CHROMA_MID;
                             s_ink_y <= to_unsigned(750, 10);
                             s_ink_u <= C_CHROMA_MID;         s_ink_v <= C_CHROMA_MID;
-                        elsif s_scheme < 716 then               -- Blueprint
+                        elsif s_sch3 = 3 then                   -- Blueprint
                             s_pap_y <= to_unsigned(300, 10);
                             s_pap_u <= to_unsigned(700, 10); s_pap_v <= to_unsigned(450, 10);
                             s_ink_y <= to_unsigned(850, 10);
                             s_ink_u <= to_unsigned(500, 10); s_ink_v <= to_unsigned(506, 10);
-                        elsif s_scheme < 920 then               -- Cyanotype
+                        elsif s_sch3 = 4 then                   -- Cyanotype
                             s_pap_y <= to_unsigned(200, 10);
                             s_pap_u <= to_unsigned(640, 10); s_pap_v <= to_unsigned(470, 10);
                             s_ink_y <= to_unsigned(880, 10);
@@ -361,9 +390,9 @@ begin
 
     ------------------------------------------------------------------------
     -- Screen accumulators.  Origin at the top-left active pixel; Drift walks
-    -- the frame origin so the rules crawl.  On an interlaced source each field
-    -- starts half a line step down so the two fields interleave instead of
-    -- printing the same rules twice.
+    -- the frame origin so the rules crawl.  On an interlaced source the BOTTOM
+    -- field (field_n = '0', odd frame rows) starts half a line step down so the
+    -- two fields interleave instead of printing the same rules twice.
     ------------------------------------------------------------------------
     p_acc : process(clk)
     begin
@@ -371,7 +400,7 @@ begin
             s_avid_p <= data_in.avid;
 
             if s_vs_pulse = '1' then
-                if s_ilace = '1' and data_in.field_n = '1' then
+                if s_ilace = '1' and data_in.field_n = '0' then
                     s_linp <= shift_left(resize(signed('0' & s_dracc), 24), 8)
                               + shift_right(resize(s_dpy, 24), 1);
                     s_linq <= shift_right(resize(s_dqy, 24), 1);
@@ -508,25 +537,38 @@ begin
     end process p_r6;
 
     ------------------------------------------------------------------------
-    -- R7: ink or paper.  Tint hands the ink the source's own chroma, so the
-    -- rules print in the colour of whatever they are cutting.
+    -- R7: ink or paper.  Tint hands BOTH ink and paper the source's own
+    -- chroma, so the print takes the colour of whatever it is cutting (the
+    -- paper carries it visibly; dark ink alone clips to black on hardware).
+    -- Generated colours are U/V-SWAPPED here (the hardware swaps U/V); the
+    -- Tint chroma is a dry path and is not.  Blanking gate: neutral outside
+    -- active video, one stage before the output register.
     ------------------------------------------------------------------------
     p_r7 : process(clk)
     begin
         if rising_edge(clk) then
-            if (r6_ink xor s_invert) = '1' then
+            if s_avid_sr(C_LATENCY - 2) = '0' then
+                s_out_y <= to_unsigned(64, 10);
+                s_out_u <= C_CHROMA_MID;
+                s_out_v <= C_CHROMA_MID;
+            elsif (r6_ink xor s_invert) = '1' then
                 s_out_y <= s_ink_y;
                 if s_tint = '1' then
                     s_out_u <= s_ud(5);
                     s_out_v <= s_vd(5);
                 else
-                    s_out_u <= s_ink_u;
-                    s_out_v <= s_ink_v;
+                    s_out_u <= s_ink_v;
+                    s_out_v <= s_ink_u;
                 end if;
             else
                 s_out_y <= s_pap_y;
-                s_out_u <= s_pap_u;
-                s_out_v <= s_pap_v;
+                if s_tint = '1' then
+                    s_out_u <= s_ud(5);
+                    s_out_v <= s_vd(5);
+                else
+                    s_out_u <= s_pap_v;
+                    s_out_v <= s_pap_u;
+                end if;
             end if;
         end if;
     end process p_r7;

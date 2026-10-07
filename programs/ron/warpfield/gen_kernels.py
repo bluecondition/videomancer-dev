@@ -32,32 +32,62 @@ import os
 NUM_LAYERS = 6
 LEVEL_GAIN = [150, 190, 225, 255]          # /255 per glow level (depth ramp)
 
-GAUSS_SIGMA = [0.70, 1.15, 1.80, 2.80]     # shape 0, per glow level
-SQUARE_R = [0.90, 1.40, 2.10, 2.90]        # shape 1 superellipse radius
-SPIKE_CORE = [0.70, 0.90, 1.15, 1.45]      # shape 2 core sigma
-SPIKE_LAMBDA = [1.00, 1.50, 2.30, 3.20]    # shape 2 arm decay
+# Every kernel must be invisible beyond 4 sub-cell units: the star offset
+# map is 4..11 in a 16-unit cell, so nothing reaches a cell edge (the old
+# 7.2-unit window with offsets 2..13 sliced big stars flat at the edges).
+GAUSS_SIGMA = [0.60, 0.90, 1.30, 1.80]     # shape 0, per glow level
+SQUARE_R = [0.80, 1.20, 1.65, 2.20]        # shape 1 superellipse radius
+SPIKE_CORE = [0.60, 0.75, 0.95, 1.15]      # shape 2 core sigma
+SPIKE_LAMBDA = [0.80, 1.10, 1.50, 2.00]    # shape 2 arm decay
 SPIKE_AMP = 0.75                           # arm peak vs core peak
 SPIKE_WIDTH = 0.40                         # arm perpendicular sigma
-HALO_SIGMA = [0.55, 0.75, 0.95, 1.20]      # shape 3 halo sigma
+HALO_SIGMA = [0.50, 0.65, 0.80, 1.00]      # shape 3 halo sigma
 HALO_AMP = 0.30
 
-WINDOW_START = 4.5   # radial window: 1.0 inside, cos-roll to 0
-WINDOW_END = 7.2
+WINDOW_START = 2.5   # radial window: 1.0 inside, cos-roll to 0
+WINDOW_END = 4.0     # == max offset-to-edge distance: zero at the cell edge
 
-# Shimmer palette ROM: {shim_phase(4b), palette(2b), entry(2b)} -> U,V
-# (hardware U/V convention, same values as starfield).
+# Shimmer palette ROM: {shim_phase(4b), palette(3b), entry(2b)} -> U,V.
+# Entries are authored as sRGB hues and converted with BT.601
+# (U = 512 + 896*Cr, V = 512 + 896*Cb -- the hardware's U/V-swapped
+# convention, verified on a scope: red = U 960 / V 360), then scaled to a
+# chroma magnitude.  Every palette has three DISTINCT hues (no same-hue
+# saturation ladders -- they read as one colour) and its own white tint.
+# Palette 7 is B&W (decoded in VHDL; entries here are white).
+def _hue(rgb, mag):
+    r, g, b = (c / 255.0 for c in rgb)
+    cr = 0.5 * r - 0.4187 * g - 0.0813 * b
+    cb = -0.1687 * r - 0.3313 * g + 0.5 * b
+    n = math.hypot(cr, cb)
+    if n == 0:
+        return (512, 512)
+    cr, cb = cr / n * mag, cb / n * mag
+    return (int(round(512 + cr)), int(round(512 + cb)))
+
+# Each entry: (sRGB hue, chroma magnitude, luma dim) -- dim 0 = x1,
+# 1 = x7/8, 2 = x3/4, 3 = x1/2, applied to the brightness operand for star
+# pixels only (entry 0 must stay dim 0: it also rides under the nebula).
+W = ((255, 255, 255), 0, 0)
 PALETTES = [
-    # Mixed
-    [(512, 512), (300, 760), (622, 347), (597, 647)],
-    # Cool
-    [(512, 512), (280, 800), (620, 720), (480, 560)],
-    # Warm
-    [(512, 512), (720, 340), (640, 400), (560, 460)],
-    # Rainbow
-    [(512, 512), (800, 350), (180, 660), (780, 760)],
+    # Silver -- white, silver, blue, ice blue
+    [W, ((200, 210, 255), 45, 2), ((40, 80, 255), 330, 0), ((130, 180, 255), 180, 1)],
+    # Candle -- white with some yellow / orange
+    [W, ((255, 240, 190), 60, 0), ((255, 220, 40), 280, 0), ((255, 140, 20), 320, 0)],
+    # Twilight -- blue / purple / pink (lavender-white sparkle)
+    [((220, 210, 255), 90, 0), ((40, 70, 255), 330, 0), ((140, 40, 255), 320, 0), ((255, 70, 180), 300, 0)],
+    # Neon -- green and magenta only
+    [((40, 255, 80), 340, 0), ((255, 0, 255), 360, 0), ((120, 255, 140), 160, 1), ((255, 90, 230), 250, 0)],
+    # Ember -- red / pink / orange (peach-white sparkle)
+    [((255, 225, 205), 90, 0), ((255, 20, 20), 340, 0), ((255, 70, 150), 300, 0), ((255, 130, 0), 320, 0)],
+    # Honey -- all yellow hues: yellow, gold, pale yellow, deep amber
+    [((255, 250, 220), 110, 0), ((255, 230, 0), 300, 0), ((255, 180, 0), 290, 1), ((230, 150, 0), 320, 2)],
+    # Rainbow -- white, red, green, blue (wide shimmer swing)
+    [W, ((255, 0, 0), 340, 0), ((0, 255, 0), 340, 0), ((0, 0, 255), 340, 0)],
+    # B&W (VHDL forces neutral chroma)
+    [W, W, W, W],
 ]
 SHIM_STEPS = 16
-SHIM_AMP_DEG = [12.0, 12.0, 12.0, 25.0]
+SHIM_AMP_DEG = [8.0, 10.0, 20.0, 15.0, 15.0, 10.0, 45.0, 0.0]
 
 # Nebula texture: 64x64 tileable 3-octave value noise (same as starfield).
 NEB_SIZE = 64
@@ -118,12 +148,13 @@ def build_kernel():
 def build_shimpal():
     rom = []
     for step in range(SHIM_STEPS):
-        for pal in range(4):
+        for pal in range(8):
             amp = math.radians(SHIM_AMP_DEG[pal])
             theta = amp * math.sin(2.0 * math.pi * step / SHIM_STEPS)
             c, s = math.cos(theta), math.sin(theta)
             for entry in range(4):
-                u0, v0 = PALETTES[pal][entry]
+                rgb, mag, _dim = PALETTES[pal][entry]
+                u0, v0 = _hue(rgb, mag)
                 du, dv = u0 - 512, v0 - 512
                 u = 512 + du * c - dv * s
                 v = 512 + du * s + dv * c
@@ -211,15 +242,25 @@ def emit_vhdl(path):
         lines.extend(body)
         lines.append("    );")
         lines.append("")
-    lines.append("    -- Shimmer palette: {shim_phase(4b), palette(2b), entry(2b)}")
+    lines.append("    -- Shimmer palette: {shim_phase(4b), palette(3b), entry(2b)}")
     lines.append("    -- -> U(19:10) & V(9:0), hardware U/V convention.")
-    lines.append("    type t_shim_rom is array (0 to 255) of std_logic_vector(19 downto 0);")
+    lines.append("    type t_shim_rom is array (0 to 511) of std_logic_vector(19 downto 0);")
     lines.append("    constant C_SHIMPAL : t_shim_rom := (")
     shim = build_shimpal()
-    for base in range(0, 256, 4):
+    for base in range(0, 512, 4):
         chunk = ", ".join(f'x"{(u << 10) | v:05X}"' for u, v in shim[base:base + 4])
-        sep = "," if base + 4 < 256 else ""
+        sep = "," if base + 4 < 512 else ""
         lines.append(f"        {chunk}{sep}")
+    lines.append("    );")
+    lines.append("")
+    lines.append("    -- Per-entry luma dim {palette(3b), entry(2b)} -> 0 = x1, 1 = x7/8,")
+    lines.append("    -- 2 = x3/4, 3 = x1/2 (star pixels only)")
+    lines.append("    type t_dim_rom is array (0 to 31) of std_logic_vector(1 downto 0);")
+    lines.append("    constant C_PALDIM : t_dim_rom := (")
+    dims = [f'"{PALETTES[pal][e][2]:02b}"' for pal in range(8) for e in range(4)]
+    for base in range(0, 32, 8):
+        sep = "," if base + 8 < 32 else ""
+        lines.append("        " + ", ".join(dims[base:base + 8]) + sep)
     lines.append("    );")
     lines.append("")
     lines.append("    -- Nebula texture: 64x64 tileable FBM wisps, address {y(5:0), x(5:0)}")

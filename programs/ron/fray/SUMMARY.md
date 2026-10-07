@@ -6,7 +6,20 @@ are only the point where a filament launches. Streaming pipeline, no frame buffe
 filaments can only extend to the right (a leftward/mirror pass would need a
 line-reversal buffer — see prism notes).
 
-Status: v0.4 built 2026-10-02; v0.3 flashed (look liked; colour bars at short Period).
+Status: **v0.4.2 FINAL except presets** (Ron signed off 2026-10-03). The cross-program colour bars are
+not a Fray bug (downstream of FPGA logic) and are tracked separately.
+
+## v0.4.1 / v0.4.2 (2026-10-03) — control ranges from HW
+
+- K2 Thresh: above ~60% nothing fired. Full travel now = old 0..62.5%
+  (thr = raw8/2 + raw8/8). Default 128 -> 205, presets x1.6, same effective thresholds.
+- K4 Period: below ~30% the ~2-px dash pitch only aliased. Full travel now = old
+  30..100% (step = 23200 - g*2.797 via two registered partial sums; 2.8 .. ~210 px).
+  Default 900 -> 847; presets 900->847, 700->561, 300/200 -> 0 (bottom of range).
+
+**Build seeds (v0.4.2):** all 6 configs seed 1 (HD Analog 85.2, HD HDMI 84.9, HD Dual
+87.3, SD 80.1-85.0 MHz), router2, 5007 LC. Earlier: v0.4 HD Dual seed 2 (seed 1
+timed out); v0.2 HD Dual seed 2.
 
 ## v0.4 HW result (2026-10-02): the low-pass did NOT fix the bars
 
@@ -122,9 +135,9 @@ product splits into two 4×12 partials).
 |---|---|---|
 | P12 | Length | max filament length as % of screen width; 100 % = full-width streaks |
 | K1 | Pattern | Dash · Morse (random duty per period) · Comet (sawtooth heads) · Beads (triangle) · Sparks (dim thread + specks) · Bits (the run's 16-bit code) · Stutter (pixel-stretch blocks, 1/16 gap) · Fray (dashes with per-line phase → diagonal weave inside bundles) |
-| K2 | Thresh | Sobel threshold 0..255 |
+| K2 | Thresh | Sobel threshold, full travel = luma steps 0..~31% |
 | K3 | Colour | Hold (edge colour) · Glow (video +192 luma capped 768, 2× chroma) · Negative (inverted video) · White · Rainbow (ROYGBIV per period) · Polarity (cyan rising / red falling) · Heat (black→red→yellow→white along the tail taper × pattern level) · Tint (one random rainbow hue per filament) |
-| K4 | Period | pattern pitch, ~2 px (left) to ~228 px (right) |
+| K4 | Period | pattern pitch, ~2.8 px (left) to ~210 px (right) |
 | K5 | Bundle | line-group size for the hash: 1, 2, 4 … 128 lines |
 | K6 | Density | fraction of edges that fire (hash gate), 1/256 .. all |
 | S7 | Ground | Black (filaments only) / Video (filaments over the source) |

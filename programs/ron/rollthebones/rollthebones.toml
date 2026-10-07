@@ -6,9 +6,13 @@
 # movable light — a soft pillow bevel that catches the rounded corners and a
 # tiny specular glint inside every recessed pip — so the dice look cast, not
 # computed.  Selectable dice colours (casino white, blood red, onyx, ivory,
-# jade felt, gold, plus per-die Rainbow and video-driven Spectrum inks).  The
-# Tumble fader spills the neat grid into a scattered, rotated, shadow-casting
-# pile — rolling the bones.
+# jade felt, gold, plus per-die Rainbow and video-driven Spectrum inks); Hue
+# rotates the felt and inks and tints the pips of white/onyx/ivory dice (with
+# Ink=Video, Hue becomes the video colour's saturation, 50% = unchanged).  An
+# auto-level keeps every source (and Chroma mode) spread over all six faces.
+# Gloss runs matte chalk to lacquer, with a white glint along the lit edges.
+# The Tumble fader spills the neat grid into a scattered, tilted, shadow-
+# casting pile — dice tilted up to 45 degrees at full travel.
 #
 # K1 Zoom  K2 Palette  K3 Hue  K4 Light  K5 Gloss  K6 Contrast
 # S7 Source(Luma/Chroma)  S8 Luma Size  S9 Table  S10 Ink  S11 Bypass
@@ -18,7 +22,7 @@
 
 [program]
 program_id = "com.bluecondition.rollthebones"
-program_version = "0.1.0"
+program_version = "1.0.1"
 abi_version = ">=1.0,<2.0"
 program_name = "Roll the Bones"
 author = "bluecondition"
@@ -178,7 +182,7 @@ linear_potentiometer_12 = 1023    # full rolled pile
 [[preset]]
 name = "Onyx Grid"
 rotary_potentiometer_1 = 300
-rotary_potentiometer_2 = 400      # onyx
+rotary_potentiometer_2 = 300      # onyx (index 2 = 256..383)
 rotary_potentiometer_3 = 512
 rotary_potentiometer_4 = 600
 rotary_potentiometer_5 = 900      # hard gloss

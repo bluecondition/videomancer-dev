@@ -1,0 +1,64 @@
+{
+ "nodes": [
+  {
+   "id": "vin",
+   "type": "video_in",
+   "cfg": "default",
+   "variant": "full",
+   "cost": {
+    "lc": 35,
+    "lut": 0,
+    "ff": 34,
+    "bramBlocks": 0,
+    "bramBits": 0,
+    "mult": 0,
+    "latency": 1,
+    "logicDepth": 0,
+    "controls": 0
+   },
+   "fmaxMHz": 626.6
+  },
+  {
+   "id": "vout",
+   "type": "video_out",
+   "cfg": "default",
+   "variant": "full",
+   "cost": {
+    "lc": 37,
+    "lut": 1,
+    "ff": 34,
+    "bramBlocks": 0,
+    "bramBits": 0,
+    "mult": 0,
+    "latency": 1,
+    "logicDepth": 2,
+    "controls": 0
+   },
+   "fmaxMHz": 338.9
+  }
+ ],
+ "delays": {
+  "ff": 0,
+  "lc": 0,
+  "chains": []
+ },
+ "shell": {
+  "lc": 1145,
+  "lut": 660,
+  "ff": 624
+ },
+ "total": {
+  "lc": 1217,
+  "lut": 661,
+  "ff": 692,
+  "bramBlocks": 0,
+  "mult": 0,
+  "controls": 0,
+  "latency": 2
+ },
+ "lcPct": 15.8,
+ "bramPct": 0,
+ "zone": "green",
+ "worstNodeFmaxMHz": 338.9,
+ "warnings": []
+}

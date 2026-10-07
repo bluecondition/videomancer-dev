@@ -1,6 +1,6 @@
 [program]
 program_id = "com.ron.inferno"
-program_version = "1.0.0"
+program_version = "2.0.0"
 abi_version = ">=1.0,<2.0"
 program_name = "Inferno"
 author = "ron"
@@ -9,7 +9,7 @@ categories = ["Render", "Pattern", "Screen"]
 program_type = "processing"
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
-description = "Two-layer domain-warped noise fire: yellow-orange-red palette, rolling smoke, Canny luma-edge mode, blue flame, overlay."
+description = "Pixelated two-layer noise fire: K2 block size, 32-step palette, rolling smoke, Canny luma-edge mode, blue flame, overlay."
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_1"
@@ -22,11 +22,11 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
-name_label = "Width"
+name_label = "Pixels"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 256
+initial_value = 128
 suffix_label = "%"
 
 [[parameter]]
@@ -49,7 +49,7 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
-name_label = "Edge Sens"
+name_label = "Depth/Edge"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100

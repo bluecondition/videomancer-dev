@@ -7,8 +7,8 @@ each rule's thickness set by the top three bits of the inverted luma, drawn
 in ink on paper. Dark video → fat rule → the paper reads dark. It is the
 oldest reproduction trick there is — a mezzotint line screen.
 
-VideoSky keeps that kernel exactly (K4=0, P12=0, Waver=0 reproduces it
-verbatim — the "Penrose Sky" preset) and builds a whole instrument around it.
+VideoSky keeps that kernel exactly (K4=0, P12=0, Waver=0, Pitch 480 = 8 px
+reproduces it verbatim — the "Penrose Sky" preset, also the power-on default) and builds a whole instrument around it.
 Fully streaming and stateless: no line buffer, no frame memory, no warm-up;
 every control lands on the next frame.
 
@@ -29,8 +29,10 @@ hand: sine-of-Q wobble along the rule, ~4 line-spacings per period) ·
 K6 Scheme (Parchment / Gallery / Night / Blueprint / Cyanotype / Copper) ·
 S7 Cross (second field down the Q axis, biting **only** into the dark half of
 the ramp, doubled — how a real engraver builds shadow) · S8 Invert ·
-S9 Tint (ink takes the source's own chroma — the rules print in the colour of
-what they cut) · S10 Width (Fixed / Modulated) · S11 Drift (rules crawl).
+S9 Tint (ink AND paper take the source's own chroma — the print takes the
+colour of what it cuts; the paper carries it visibly, dark ink alone clips to
+black) · S10 Width (Fixed / Modulated; fixed weight floored at 8 so Ink can
+never blank the plate) · S11 Drift (rules crawl, one period per 32 frames).
 
 ## Architecture
 
@@ -57,12 +59,28 @@ three small pixel-rate multiplies.
   (`step = sh·256 + sl`) across vblank cycles, so no wide combinational
   product ever lands on a vsync-latched register — *the ziffern trap: those
   paths are still STA-timed even though they only fire once a frame.*
-- Interlace detected by field-parity toggle; the odd field starts half a line
-  step down so the two fields interleave instead of printing the same rules.
+- Interlace detected by field-parity toggle; the BOTTOM field (`field_n='0'`)
+  starts half a line step down so the two fields interleave instead of
+  printing the same rules.
+
+## Hardware contracts (v1.0.0, 2026-10-06)
+
+The July v0.1 predated four CLAUDE.md contracts; v1.0 applies them all:
+
+- **Blanking gate** — output forced to neutral (64/512/512) whenever the
+  stage-aligned avid is low; v0.1 printed paper colour through blanking.
+- **Generated palette U/V-swapped at the compose** (the hardware swaps U/V);
+  palette constants stay authored in readable BT.601. The Tint chroma is a
+  dry path and is not swapped.
+- **Saw-active vsync guard** — Drift's increment and the interlace detect act
+  on the first vsync edge after active video only (analog vsync serrates).
+- **Interlace half-step on the bottom field** (`field_n='0'`), not the top.
+- **Scheme decode treats values below 6 as a label index** (the firmware
+  loads a labelled default as its raw index).
 
 ## Status
 
-All 6 configs routed on **seed 1**, no retries, comfortable margin:
+v0.1 (2026-07-16): all 6 configs routed on **seed 1**, no retries:
 
 | Config | Fmax | LCs |
 |---|---|---|
@@ -73,5 +91,22 @@ All 6 configs routed on **seed 1**, no retries, comfortable margin:
 | HD Dual | 95.7 MHz | 3124 |
 | SD Dual | 96.8 MHz | 3129 |
 
+v1.0.0 (2026-10-06): all 6 configs routed on **seed 1**, no retries:
+
+| Config | Fmax | LCs | Seed |
+|---|---|---|---|
+| HD Analog | 91.5 MHz | 3136 | 1 |
+| SD Analog | 88.8 MHz | 3115 | 1 |
+| HD HDMI | 86.9 MHz | 3118 | 1 |
+| SD HDMI | 82.4 MHz | 3112 | 1 |
+| HD Dual | 84.3 MHz | 3130 | 1 |
+| SD Dual | 84.8 MHz | 3115 | 1 |
+
+
 Full clock everywhere (74.25 MHz required for HD). Packaged.
-**Not yet HW-tested, and the render is not yet sim-verified.**
+
+**v1.0.0 FINAL, HW-VALIDATED — flashed and signed off by Ron 2026-10-06**
+("I think Videosky can be finalized"). Power-on defaults captured from the device 2026-10-06 (Ink 517, Contrast 534,
+Pitch 343, Angle 376, Waver 618, Relief 864; Parchment, all switches at their
+labelled defaults). Presets are still hand-written; capture from the device
+with `./capture_preset.sh` when looks are dialled in.

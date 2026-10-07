@@ -1,5 +1,145 @@
 # SUGARCOAT
 
+**STATUS: v1.2.0 FINAL except presets (Ron signed off 2026-10-07: "Sugarcoat
+can be finalized for now").  Presets are placeholders — capture on hardware
+with `./capture_preset.sh` when looks are dialled in, then rebuild (HD HDMI
+needs SEED 2).**
+
+**v1.2.0 (2026-10-07) — logical THEME maps replace the arithmetic K1
+permutations (Ron: v1.1 "feels like a regression in other ways"; wanted the
+64 maps separated by density / colour / style so dark dense textures land in
+dark areas, mid in grey, bright in white, and hues map to hue-matched
+candies).**
+
+Build: 6/6 — HD Analog 79.54 (seed 1) / **HD HDMI 76.52 (SEED 2)** / HD Dual
+77.14 (seed 1); SD 78-85; ~4495 LC (58%), 7 EBR.  C_LATENCY = 32.
+
+Design:
+- **16 classes**: 0-7 = luma band (Luma map, AND neutral pixels in the Chroma
+  map, so grey reads identically in both modes); 8-15 = hue octant (green,
+  teal, cyan, blue, red, amber, pink, violet).  P12 Strength: Luma mode masks
+  the band to 2/4/8 varieties; Chroma mode sweeps the saturation floor.
+- **Theme ROM** (`C_TMAP`, 16 x 16 x 4 bits, LUT ROM): per theme a luma ramp
+  of 8 textures SORTED by the texture's mean brightness (verified in the
+  generator) and a hue map chosen by colour.  Bank A themes (K1 top 3 bits):
+  Classic, Bakery, Liquorice, Sweet Shop, Cocoa, Stripes, Pastel, Bits.  Bank
+  B (S9): Classic B, Bakery B, Dark, Bright, Mono, Multi, Bakery Dark,
+  Stripes B.  K1 bit 6 = pair SWAP (adjacent luma bands / adjacent hues),
+  bit 5 = TONE (luma ramp one step brighter; hues untouched) — both keep the
+  ordering.  8 x 2 x 2 x 2 banks = 64 maps, every one logical.
+- MAP is 3 stages: class adjust (26) -> ROM read (27) -> register (28);
+  PH1 29, PH2 30, CO 31, out 32.  Gloss/outline/shade taps moved +2.
+- Texture brightness used for sorting: choc 170, twist 200, nonpareils 250,
+  cream 300, allsorts 400, cookie 480, taffy 510, gingerbread 550, waffle 560,
+  cane 680, Battenberg 750, beans 750, white choc 780, mint 845, icing 900,
+  frosting 950.
+
+Everything else as v1.1.0 (K2 Clean, K4 Contrast, K5 Level, S7 Outline, S8
+Shade, S10 Sprinkles, S11 Map, big chips, blanking gate, line-RAM fixes).
+K1 is labelled "Theme" (0-63).  Presets still placeholders.
+
+---
+
+**v1.1.0 (2026-10-06) — rework from Ron's first hardware look at v1.0.0
+("looking very good"; wanted more texture combinations, no Palette/Warp,
+Density + Melt invisible, a contrast knob or cleaner textures, 2-3 more
+candies, bigger chips).**  Not yet flashed.
+
+Build: all 6 configs **seed 1, zero retries** — HD Analog 86.16 / HD HDMI
+80.66 / HD Dual 76.15 MHz (builder figures; netlists not kept, so not
+independently re-routed this round — the v1.0.0 builder figures matched the
+independent re-route exactly), SD 75-82 MHz; **~4265 LC (56%)**, 7 EBR.
+C_LATENCY = 30.
+
+Design:
+- **16-texture bank**: 0 dark chocolate, 1 cookies & cream, 2 choc-chip
+  cookie (chips now ~14x11 px of a 16 px cell, density 28%), 3 candy cane
+  (red/white diagonal), 4 mint (green/white other diagonal), 5 piped icing,
+  6 rainbow taffy (now HORIZONTAL fixed-rainbow stripes so it never reads as
+  cane), 7 frosting + confetti, 8 Battenberg (pink/yellow checks), 9 liquorice
+  allsorts (black/pink/black/yellow bands), 10 waffle cone (tan + brown grid),
+  11 jelly beans (4-colour capsules on white), 12 gingerbread (brown + white
+  icing scallops), 13 liquorice twist (black/grey diagonal), 14 nonpareils
+  (4-colour dots on dark chocolate), 15 white chocolate (cream bar + grooves).
+- **K1 Texture** = 64 class->texture maps: texture = (class*a + r) mod 16 with
+  a in {1,3,5,7} (K1 bits 9:8) and r = K1 bits 7:4.  K1 = 0 is the identity
+  (the designed assignment).  Each map shows 8 of the 16; **S9 Bank** (A/B)
+  xors 8 = the complementary 8.
+- **K2 Clean** = run-length speck filter on the class stream: a class is
+  accepted after N = 1..16 consecutive pixels (K2 bits 9:6), or immediately
+  when it matches the clean class on the line above (class line RAM 2048x4,
+  2 EBR); otherwise the last accepted class holds.  The accepted stream is
+  read back through a variable tap (17 - N) so the total class delay is fixed
+  at 24 and genuine edges do not shift.  0% = raw.
+- **K4 Contrast** (steps 0.375 .. 3, 50% = unity) and **K5 Level** (bipolar
+  luma offset, centre deadband = exact unity) form a proc-amp on the
+  classifier input (G1 two shifted terms -> G2 add -> G3 recentre+clamp).
+- **Removed**: K4 Palette (56-entry ROMs -> one fixed 8-stop rainbow), K5
+  Warp (W1/W2 stages), K2 Density (stripe pitch fixed at bit 4 of the
+  pre-scaled projection), S10 Melt.  **S10 is now Sprinkles** (Off/On).
+- Pattern stage is sampled ~26 px ahead of the class stream (a constant,
+  invisible texture offset) instead of delaying 4 projections by 16 taps;
+  dx / xrun therefore keep counting through blanking and the cell engine
+  uses the line count latched at avid rise (s_lrun), so the overrun never
+  sees the next line's values.
+- Kept from v1.0.0: blanking gate, line-RAM write-behind, vsync-serration
+  guard, S7 Outline, S8 Shade, K3 Scale labels + index-trap decode.
+- Presets (placeholders, re-capture on HW): Candy Shop, Sweet Shelf (Bank B),
+  Big Bites, Bakeshop, Cel Candy.
+
+HW check list: 16 textures all legible at 1080p, chips big enough, Clean
+sweep removes speckle without eating thin features, Contrast/Level centre =
+unchanged, K1 sweep gives distinct looks, Bank flip, no blanking cast.
+
+---
+
+**v1.0.0 (2026-10-06) — finalization pass on the v3.4 candy-map design.**
+Not yet flashed; HW check pending (see below).
+
+Build 2026-10-06: all 6 configs **seed 1, zero retries**; routed Fmax
+(independently re-routed, last post-route line) HD Analog 78.19 / HD HDMI
+82.05 / HD Dual 82.53 MHz; SD 77-87 MHz; **3748 LC (49%)**, 5 EBR.  Packed to
+`out/rev_b/ron/sugarcoat.vmprog`.
+
+Contract fixes:
+- **Blanking gate** added: a final registered stage drives Y 64 / U,V 512
+  outside latency-aligned avid (`p_out`, `s_avid_sr(C_LATENCY-2)`).  The old
+  build ran candy texture through blanking (mix was pinned at 100%).
+- **Gloss line RAM** no longer reads and writes the same address in one cycle
+  (undefined on iCE40 EBR): the write is registered one clock behind the read.
+- **Interlace detect** ignores repeat vsync edges (analog serration): field
+  parity / `s_ilace` only update on a vsync that followed real active lines.
+
+Optimisation:
+- The SUGAR RUSH dry/wet mixer (3 multipliers, 13-deep dry delay line, 3
+  pipeline stages) was dead weight at a fixed 100% and still bled 1/64 of the
+  source into every candy colour.  Removed.  **C_LATENCY 16 -> 14** (all
+  modes).  The source-luma delay line is kept to depth 9 (Melt tap 8, Shade
+  tap 9).
+
+Controls:
+- **S7 Outline** (Off/On): dark cocoa contour wherever |gx|+|gy| of the source
+  luma exceeds 96, reusing the gloss gradient; drawn over everything, no gloss
+  or shade on the line.  Flag computed at L2, delayed in `ol_sr` (read 7).
+- **S8 Shade** (Flat/Shaded): source luma shades the candy colour,
+  `(y-512)>>1` added into the gloss term at PH2, so the picture reads through
+  the texture.
+- **K4 Palette** now also colours frosting confetti and the jimmies (stops
+  1/3/4/6 of the active ramp) through the same single PH1 palette read,
+  index-muxed on the class; **S9 Bakery** therefore recolours the sprinkles to
+  cocoa/caramel tones as well as the taffy.
+- **K3 Scale** is a labelled param (8/16/32/64 px) with the labelled-default
+  index-trap decode (`s_k3 < 4` = label index).
+- Presets renamed for the candy-map look (Candy Shop, Fine Print, Big Bites,
+  Bakeshop, Melted, Cel Candy) — **placeholder values**, to be re-captured
+  from hardware with `./capture_preset.sh`.
+
+HW check list: cookie reads amber (not blue); all 8 hue octants land on the
+right candy (hue-sweep source); P12 sweep in both Map modes; gloss visible;
+Outline / Shade flips; no green/magenta blanking corruption.
+
+---
+
 **v3 (current): a pure 1:1 colour -> candy-texture map.**  Each pixel is
 classified by its chroma (hue octant vs. saturation threshold) or, when
 neutral, by its luma; the class picks one of 8 flat screen-space candy

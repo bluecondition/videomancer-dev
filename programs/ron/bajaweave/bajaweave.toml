@@ -6,7 +6,7 @@
 [program]
 program_id = "com.ron.bajaweave"
 program_name = "Bajaweave"
-program_version = "0.12.0"
+program_version = "0.17.0"
 abi_version = ">=1.0,<2.0"
 author = "ron"
 license = "GPL-3.0"
@@ -14,7 +14,7 @@ categories = ["Synthesis", "Pattern"]
 program_type = "synthesis"
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
-description = "Two swaying line oscillators woven together in saturated complementary colour: sway, smooth flow, outlines."
+description = "Two swaying line oscillators woven together in saturated complementary colour: sway, smooth flow, outlines, drop shadow."
 url = "https://github.com/bluecondition/videomancer-dev"
 
 # --- Rotary Potentiometers ---
@@ -25,7 +25,7 @@ name_label = "Osc1 Freq"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 341
+initial_value = 134
 display_min_value = 0
 display_max_value = 90
 suffix_label = ""
@@ -36,7 +36,7 @@ name_label = "Osc1 Wave"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 93
+initial_value = 351
 display_min_value = 0
 display_max_value = 100
 suffix_label = "%"
@@ -47,7 +47,7 @@ name_label = "Color"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 361
+initial_value = 0
 display_min_value = 0
 display_max_value = 360
 suffix_label = "deg"
@@ -58,7 +58,7 @@ name_label = "Osc2 Freq"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 251
+initial_value = 113
 display_min_value = 0
 display_max_value = 90
 suffix_label = ""
@@ -69,7 +69,7 @@ name_label = "Osc2 Wave"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 266
+initial_value = 285
 display_min_value = 0
 display_max_value = 100
 suffix_label = "%"
@@ -80,7 +80,7 @@ name_label = "Sway"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 256
+initial_value = 693
 display_min_value = 0
 display_max_value = 100
 suffix_label = "%"
@@ -101,15 +101,15 @@ initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
-name_label = "Brightness"
-value_labels = ["Normal", "Darker"]
-initial_value_label = "Normal"
+name_label = "Depth"
+value_labels = ["Flat", "Shadow"]
+initial_value_label = "Shadow"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
 name_label = "Flow"
 value_labels = ["Opposite", "Same"]
-initial_value_label = "Same"
+initial_value_label = "Opposite"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
@@ -125,7 +125,7 @@ name_label = "Speed"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 407
+initial_value = 599
 display_min_value = -100
 display_max_value = 100
 suffix_label = "%"
@@ -134,18 +134,18 @@ suffix_label = "%"
 
 [[preset]]
 name = "Default Weave"
-rotary_potentiometer_1 = 341
-rotary_potentiometer_2 = 93
-rotary_potentiometer_3 = 361
-rotary_potentiometer_4 = 251
-rotary_potentiometer_5 = 266
-rotary_potentiometer_6 = 256
+rotary_potentiometer_1 = 134
+rotary_potentiometer_2 = 351
+rotary_potentiometer_3 = 0
+rotary_potentiometer_4 = 113
+rotary_potentiometer_5 = 285
+rotary_potentiometer_6 = 693
 toggle_switch_7 = 0
 toggle_switch_8 = 0
-toggle_switch_9 = 0
-toggle_switch_10 = 1
+toggle_switch_9 = 1
+toggle_switch_10 = 0
 toggle_switch_11 = 0
-linear_potentiometer_12 = 407
+linear_potentiometer_12 = 599
 
 [[preset]]
 name = "Slow Drift"

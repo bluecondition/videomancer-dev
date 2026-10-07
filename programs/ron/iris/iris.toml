@@ -11,7 +11,7 @@
 
 [program]
 program_id = "com.bluecondition.iris"
-program_version = "0.1.0"
+program_version = "1.2.0"
 abi_version = ">=1.0,<2.0"
 program_name = "Iris"
 author = "bluecondition"
@@ -130,7 +130,7 @@ parameter_id = "linear_potentiometer_12"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 410            # 40% split (reference image)
+initial_value = 325            # 32% split (the reference image's separation)
 display_min_value = 0
 display_max_value = 100
 name_label = "Split"
@@ -151,7 +151,7 @@ toggle_switch_8 = 0
 toggle_switch_9 = 0
 toggle_switch_10 = 0
 toggle_switch_11 = 0
-linear_potentiometer_12 = 410
+linear_potentiometer_12 = 325
 
 [[preset]]
 name = "Sunburst"               # straight spokes, white dots, no split
@@ -181,7 +181,7 @@ toggle_switch_8 = 0
 toggle_switch_9 = 1
 toggle_switch_10 = 0
 toggle_switch_11 = 0
-linear_potentiometer_12 = 700
+linear_potentiometer_12 = 566
 
 [[preset]]
 name = "Vortex"                 # full bleed, flowing, tight twist
@@ -196,4 +196,49 @@ toggle_switch_8 = 0
 toggle_switch_9 = 0
 toggle_switch_10 = 1
 toggle_switch_11 = 1
-linear_potentiometer_12 = 500
+linear_potentiometer_12 = 400
+
+[[preset]]
+name = "Honeycomb"              # Mesh: dark interstices become the figure
+rotary_potentiometer_1 = 512
+rotary_potentiometer_2 = 512
+rotary_potentiometer_3 = 250
+rotary_potentiometer_4 = 400
+rotary_potentiometer_5 = 560
+rotary_potentiometer_6 = 512
+toggle_switch_7 = 1
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 1
+linear_potentiometer_12 = 0
+
+[[preset]]
+name = "Phosphor"               # Glow, flowing, the living eye
+rotary_potentiometer_1 = 420
+rotary_potentiometer_2 = 540
+rotary_potentiometer_3 = 380
+rotary_potentiometer_4 = 478
+rotary_potentiometer_5 = 614
+rotary_potentiometer_6 = 680
+toggle_switch_7 = 0
+toggle_switch_8 = 1
+toggle_switch_9 = 0
+toggle_switch_10 = 1
+toggle_switch_11 = 0
+linear_potentiometer_12 = 300
+
+[[preset]]
+name = "Triad"                  # Split at the top: the outer iris in RGB triads
+rotary_potentiometer_1 = 307
+rotary_potentiometer_2 = 563
+rotary_potentiometer_3 = 317
+rotary_potentiometer_4 = 478
+rotary_potentiometer_5 = 614
+rotary_potentiometer_6 = 716
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 1023

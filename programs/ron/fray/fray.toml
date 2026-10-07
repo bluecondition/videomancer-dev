@@ -1,6 +1,6 @@
 [program]
 program_id = "com.ron.fray"
-program_version = "0.4.0"
+program_version = "0.4.2"
 abi_version = ">=1.0,<2.0"
 program_name = "Fray"
 author = "ron"
@@ -23,7 +23,7 @@ name_label = "Thresh"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 128
+initial_value = 205
 suffix_label = "%"
 
 [[parameter]]
@@ -38,7 +38,7 @@ name_label = "Period"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 900
+initial_value = 847
 suffix_label = "%"
 
 [[parameter]]
@@ -101,9 +101,9 @@ suffix_label = "%"
 [[preset]]
 name = "Pixel Stretch"
 rotary_potentiometer_1 = 877
-rotary_potentiometer_2 = 160
+rotary_potentiometer_2 = 256
 rotary_potentiometer_3 = 0
-rotary_potentiometer_4 = 900
+rotary_potentiometer_4 = 847
 rotary_potentiometer_5 = 128
 rotary_potentiometer_6 = 700
 toggle_switch_7 = 1
@@ -116,9 +116,9 @@ linear_potentiometer_12 = 900
 [[preset]]
 name = "Data Burst"
 rotary_potentiometer_1 = 731
-rotary_potentiometer_2 = 200
+rotary_potentiometer_2 = 320
 rotary_potentiometer_3 = 1023
-rotary_potentiometer_4 = 300
+rotary_potentiometer_4 = 0
 rotary_potentiometer_5 = 0
 rotary_potentiometer_6 = 512
 toggle_switch_7 = 0
@@ -131,9 +131,9 @@ linear_potentiometer_12 = 512
 [[preset]]
 name = "Ember Trails"
 rotary_potentiometer_1 = 292
-rotary_potentiometer_2 = 160
+rotary_potentiometer_2 = 256
 rotary_potentiometer_3 = 877
-rotary_potentiometer_4 = 700
+rotary_potentiometer_4 = 561
 rotary_potentiometer_5 = 384
 rotary_potentiometer_6 = 800
 toggle_switch_7 = 0
@@ -146,9 +146,9 @@ linear_potentiometer_12 = 640
 [[preset]]
 name = "Etching"
 rotary_potentiometer_1 = 1023
-rotary_potentiometer_2 = 120
+rotary_potentiometer_2 = 192
 rotary_potentiometer_3 = 438
-rotary_potentiometer_4 = 200
+rotary_potentiometer_4 = 0
 rotary_potentiometer_5 = 640
 rotary_potentiometer_6 = 1023
 toggle_switch_7 = 0

@@ -9,7 +9,13 @@ fans them on the far side, like a cone seen in perspective. Three transparent
 layers (red, green, blue) draw the same field; SPLIT fans them apart with
 distance from the pupil.
 
-Status: v0.7, hardware-iterating. v0.6 fixed the artifacts found on HD HDMI
+Status: v1.2.0. v1.1 is HW-validated on HD HDMI (the arm-cut phantom line is
+confirmed gone); v1.2 adds the living eye under Flow (hippus and saccades) and
+a designed top end for Split (the RGB triad), both sequencer-program changes
+only -- timing-closed, not yet flashed. HD Analog and HD Dual have never been
+viewed on hardware.
+
+History: v0.6 fixed the artifacts found on HD HDMI
 (stray dots down the left edge, arcs at the corners, arcs displaced across the
 picture) and sharpened the dots. v0.7 answers the second hardware session:
 the pupil knobs stop short of the dark extremes, Pupil Size now darkens the
@@ -31,11 +37,11 @@ quality, and Switches 7 and 8 repurposed as Fill (Dots/Mesh) and Edge
 | Knob 4 | Arms | Number of spiral arms = dots per ring, 6 to 96, always a whole number, with hysteresis so the count never flickers. |
 | Knob 5 | Rings | Rings between the (reference-size) pupil and the rim, 3 to 48. Dot size follows the smaller of ring spacing and arm spacing. |
 | Knob 6 | Twist | Bipolar with a centre dead zone. Centre = straight radial spokes; right winds clockwise, left counter-clockwise. The knob sets the arm pitch angle, so the spiral keeps its look when Arms or Rings change. |
-| Slider | Split | Fans the R/G/B layers apart, growing from the pupil outward (red leads, blue trails, green anchors, plus a small radial offset). Square-law weighted so the lower half gives fine control over subtle fringing. Below 3 % the three layers are exact copies, so the dots are pure white (or pure black in Ink) with no colour at their edges. |
+| Slider | Split | Fans the R/G/B layers apart, growing from the pupil outward (red leads, blue trails, green anchors, plus a small radial offset). Square-law weighted so the lower half gives fine control over subtle fringing. Below 3 % the three layers are exact copies, so the dots are pure white (or pure black in Ink) with no colour at their edges. The separation stops at one third of an arm, where red, green and blue sit evenly between each other's dots: a clean RGB triad with three times the dot count. From about 70 % that triad reaches the rim, and the rest of the travel grows the triad band inward until, at 100 %, the outer half of the iris is pure triad. |
 | Switch 7 | Fill: Dots / Mesh | Mesh grows every dot to 1.24x the radius at which neighbours touch, so they overlap and the black between them becomes the figure: a honeycomb of dark interstices in a bright field (bright holes in dark in Ink). With Twist off centre the strands show small notches where they cross ring boundaries, because each pixel tests only its own cell's disc. |
 | Switch 8 | Edge: Hard / Glow | Glow makes the coverage ramp span the whole dot instead of one pixel of its edge: every dot becomes a soft ball, brightest at its centre and fading to nothing at its geometric edge, a phosphor-matrix look. Smaller dots are dimmer, as glows are. In Ink they are soft dark blots. |
 | Switch 9 | Light / Ink | Light = additive R/G/B on black (the reference). Ink = the same field as cyan/magenta/yellow transparent dots on white paper, multiplying down to black. |
-| Switch 10 | Still / Flow | Flow streams the dots outward from the pupil (new pinpoints emerge from the pupil edge) and, through Twist, spins the field. The outermost ring fades out AS A WHOLE -- one level for the entire ring, walked by the flow phase -- over the ~2.4 s it takes to drift out through the rim, to black in Light and to paper in Ink. Straight spokes = pure outward flight. Still freezes where it is; at phase zero the rim is crisp. |
+| Switch 10 | Still / Flow | Flow streams the dots outward from the pupil (new pinpoints emerge from the pupil edge) and, through Twist, spins the field. The outermost ring fades out AS A WHOLE -- one level for the entire ring, walked by the flow phase -- over the ~2.4 s it takes to drift out through the rim, to black in Light and to paper in Ink. Straight spokes = pure outward flight. Flow also brings the eye to life: the pupil breathes (hippus -- every ~2.4 s it picks a new size within +-12.5 % and eases there over about a second, so the inner rings go out and come back irregularly) and the gaze makes saccades (after a random 0.7-2.8 s fixation it darts, in about three frames, to a new point within +-12.5 % of the pupil travel around where Pupil X/Y put it). Still freezes the flow where it is and the eye settles back exactly onto the knobs; at phase zero the rim is crisp. |
 | Switch 11 | Framed / Full Bleed | Framed = iris at 94 % of screen height on a black (or paper) backdrop. Full Bleed enlarges the iris past the screen corners and the pupil travel with it. The change is a dolly of equal ratios per frame, 16 frames end to end. |
 
 All knobs and the slider are glided (about 8 frames, first-order) so movement
@@ -44,11 +50,16 @@ is fluid without feeling detached.
 ## Reference image
 
 Preset **Reference** (the defaults): Pupil X 30 %, Pupil Y 55 %, Pupil Size
-31 %, Arms 48, Rings 30, Twist +40 %, Split 40 %, all switches in their first
+31 %, Arms 48, Rings 30, Twist +40 %, Split 32 %, all switches in their first
 position (Light, Still, Framed).
 
 Other presets: **Sunburst** (straight spokes, no split), **Misregister** (ink
-on paper, big split), **Vortex** (full bleed, flowing, tight twist).
+on paper, big split), **Vortex** (full bleed, flowing, tight twist),
+**Honeycomb** (Mesh, full bleed, white), **Phosphor** (Glow, flowing -- the
+living eye), **Triad** (the reference at Split 100 %). The v1.2 Split curve is
+stronger, so the older presets' slider values were remapped to keep the
+separation they had. All presets are hand-authored; recapture them from the
+hardware with `capture_preset.sh` once they have been dialled in.
 
 ## How it works (short)
 
@@ -243,16 +254,37 @@ Worked down the priority list from the bottom, as asked:
   about a fifth of that, so knob response at SD lags by several fields.
   Interlaced modes advance Flow on one field per frame.
 
+## Source: iris.vhd is generated
+
+`iris.vhd` is assembled by `gen/assemble.sh` from the four RTL parts in
+`gen/src/iris_r1..r4.vhd` plus the ROMs (`gen/gen_roms.py`) and the sequencer
+program (`gen/useq.py`, an assembler + emulator for the per-frame
+micro-sequencer). Edit those and re-run `gen/assemble.sh`, never `iris.vhd`
+itself. `IRIS_DEBUG=1` splices in `gen/src/iris_dbg.vhd` (report-only, for
+sims) and `IRIS_DEST=<dir>` writes elsewhere so a debug sim and a real build
+can coexist. The firmware build only globs `iris/*.vhd`, so `gen/` is never
+compiled. `gen/newgeom.py` is the float validation of the fixed-iris geometry;
+`gen/patch_video.py` is the 205-cell video halftone/backdrop attempt that did
+not fit (v0.7). A sequencer-only change does not touch the netlist's logic and
+reproduces seed-for-seed.
+
 ## Tunables (top of the sequencer program, useq.py, and iris.vhd)
 
 - `FLOW_RATE` (Q12 ring per frame; 28 is about 2.4 s per ring at 60 Hz).
+- Split curve `SPQ`/`SPL` (rim separation 0.50 s^2 + 0.17 s arm, Q11) and the
+  TS-table clamp 1365 (1/3 arm, Q12) that makes the top end a triad.
+- Living eye: hippus target `lcg >> 18` (+-12.5 % of the pupil radius, glide
+  >> 5), saccade target `>> 19` (+-12.5 % of the travel, glide >> 1),
+  fixation 40 + 0..127 frames.
 - `FILL_Q16` (dot radius as a fraction of the kissing radius; 0.92).
 - Layer offsets: red leads by +1 sep in angle and +1/2 sep in radius, blue
   trails by -1 sep and -1/4 sep (in `p_lat`, stage P7).
 
 ## Build notes
 
-All six configurations meet timing (v1.1, seed base 9):
+All six configurations meet timing (v1.2, `SEED=9 ./build_programs.sh ron iris`;
+v1.2 changed only ROM / register-file contents, so every config reproduced
+its v1.1 seed and frequency exactly):
 
 | Configuration | Required | Achieved | Seed |
 | --- | --- | --- | --- |

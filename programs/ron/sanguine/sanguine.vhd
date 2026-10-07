@@ -7,10 +7,12 @@
 -- The frame is divided into vertical drip lanes (16 px pitch in HD, 8 px in
 -- SD).  Each lane runs an independent drip lifecycle in a per-frame vblank
 -- walk: a bead swells at the top edge (surface tension), breaks, and falls
--- with stuttering gravity (creep / pause / surge), leaving a tapering wet
--- trail that darkens with age and can dry into a stain.  Rivulet paths
--- meander via per-lane-phased triangle waves of y ("grooves" in an invisible
--- surface: repeat drips retrace the same path, like real runs on glass).
+-- with stuttering gravity (creep / pause / surge), painting a PERMANENT solid
+-- record of its path that later drips fall on top of (S10 PURGE clears the
+-- canvas).  Rivulet paths meander via per-lane-phased triangle waves of y
+-- ("grooves" in an invisible surface: repeat drips retrace the same path,
+-- like real runs on glass), so the painted record lies exactly under every
+-- drip.
 --
 -- Rendering is raster-order with NO frame buffer: a sliding 3-lane window
 -- (prev / cur / next, prefetched during the scan) lets wandering paths cross
@@ -19,13 +21,9 @@
 -- Colour path is parametric (K3 hue rotates around arterial red, K4 depth
 -- shapes luma+saturation together) so other liquids are a later fork, not a
 -- rewrite.  Compositing: over black or over the incoming video (S7); blood
--- is OPAQUE in both modes and the wet trail fades top-down until it is gone.
--- With S8 CLING, the input luma at the drip head acts
--- as a virtual surface: bright content slows and pools the drip.
---
--- Panel mapping note (brief asked for 8 knobs; hardware has 6):
---   WANDER rides K2 VISCOSITY (thick = meander + pauses, thin = straight),
---   GLINT lives on S11 (Matte/Gloss).
+-- is OPAQUE in both modes and nothing fades or darkens.  With S8 CLING the
+-- input luma at the drip head acts as a virtual surface: bright content
+-- slows and pools the drip (sampled from the input even over black).
 --
 -- =====================================================================
 -- Register / front-panel map (registers_in indices)
@@ -33,12 +31,12 @@
 --   0x01 K2  Viscosity   thick+wandering+pausing <-> thin+straight+fast
 --   0x02 K3  Hue         arterial red at centre, orange-red..violet-red
 --   0x03 K4  Depth       bright fresh crimson <-> dark venous (luma+sat)
---   0x04 K5  Trail       wet trail length behind the head
---   0x05 K6  Coagulate   fade quickly <-> dry into permanent stains
+--   0x04 K5  Wander      straight runs <-> meandering rivulets
+--   0x05 K6  Size        base bead radius (trail / paint width follow)
 --   0x06b0 S7  Source    Black / Video background
---   0x06b1 S8  Cling     drips ignore video / ride its luma contours
---   0x06b2 S9  Age       fresh start / pre-aged stains
---   0x06b3 S10 Purge     any flip clears stains + finished trails
+--   0x06b1 S8  Cling     drips ignore the input / ride its luma contours
+--   0x06b2 S9  Age       fresh start / pre-painted runs
+--   0x06b3 S10 Purge     any flip clears the painted canvas
 --   0x06b4 S11 Sheen     Matte / Gloss (specular glints + wet sheen)
 --   0x07 P12 Hemorrhage  surge gesture (glide-smoothed flow/speed boost)
 -- =====================================================================
@@ -49,20 +47,21 @@
 -- BT.601) hues therefore read wrong - judge structure in sim, not hue.
 --
 -- =====================================================================
--- Pipeline (one pixel/clock; 8 register stages input -> output):
+-- Pipeline (one pixel/clock; 9 register stages input -> output):
 --   S0 p_acc     pixel coords + lane/offset split
 --   -- p_window  sliding 3-lane state window (shift at lane crossing,
 --                prefetch next lane via the shared BRAM read port)
 --   S1 p_s1      per-candidate snapshot: tri-wave raw values, cx, pos,
---                radius/width, age band (window regs -> per-pixel regs)
---   S1.5 p_wander  registered wander shift+sum and raw x/y differences
---   S2 p_geom    dx / dy-to-head / trail extent, clamps, taper width
---   S3 p_test    squares LUT, head/glint/trail/sheen/stain region tests
---   S4 p_prio    combine 3 candidates -> winning region + freshness
---   S5 p_pal     palette select (4-step fresh->dried) + sheen luma
+--                radius, paint depth/width (window regs -> per-pixel regs)
+--   S1.5 p_wander  registered wander shift+sum, raw x/y/paint-end diffs
+--   S2 p_geom    dx / dy-to-head clamps, blob shaping, paint-end rows
+--   S2.5 p_sq    |dx| |dy| and the squares-LUT lookups (registered)
+--   S3 p_test    head/glint/trail/sheen/paint region tests (add + compare)
+--   S4 p_prio    combine 3 candidates -> winning region
+--   S5 p_pal     palette select + sheen luma
 --   S6 p_comp    composite vs delayed video / black, blanking gate
 --   -- p_io      output registers
--- Sync passthrough C_SYNCD = 6 consumed at S6.
+-- Sync passthrough C_SYNCD = 7 consumed at S6.
 -- Latency is mode-independent (single path, fixed taps).
 -- =====================================================================
 
@@ -79,7 +78,7 @@ use work.video_timing_pkg.all;
 architecture sanguine of program_top is
 
     constant C_MID   : unsigned(9 downto 0) := to_unsigned(512, 10);
-    constant C_SYNCD : integer := 6;
+    constant C_SYNCD : integer := 7;
 
     -- lifecycle phases
     constant C_PH_IDLE : unsigned(1 downto 0) := "00";
@@ -165,7 +164,7 @@ architecture sanguine of program_top is
     --------------------------------------------------------------------------
     -- Controls
     --------------------------------------------------------------------------
-    signal k_flow, k_visc, k_hue, k_depth, k_trail, k_coag, k_slider
+    signal k_flow, k_visc, k_hue, k_depth, k_wander, k_size, k_slider
         : unsigned(9 downto 0);
     signal sw_video, sw_cling, sw_aged, sw_purge, sw_gloss : std_logic;
 
@@ -181,6 +180,7 @@ architecture sanguine of program_top is
     signal s_measured_v      : unsigned(11 downto 0) := to_unsigned(1080, 12);
     signal s_vsync_prev  : std_logic := '1';
     signal s_vsync_pulse : std_logic := '0';
+    signal s_saw         : std_logic := '0';   -- active video seen since last accepted vsync
     signal s_firstline   : std_logic := '1';
     signal s_x : unsigned(11 downto 0) := (others => '0');
     signal s_y : unsigned(11 downto 0) := (others => '0');
@@ -198,15 +198,12 @@ architecture sanguine of program_top is
     signal s_lshift  : integer range 3 to 4 := 4;
     signal s_small   : std_logic := '0';
     signal s_nlanes  : unsigned(7 downto 0) := to_unsigned(120, 8);
-    signal s_nrows   : unsigned(11 downto 0) := to_unsigned(1080, 12);
+    signal s_lim     : signed(12 downto 0) := to_signed(1092, 13);  -- nrows + 12
 
     -- colour path
     signal s_dcr, s_dcb : signed(10 downto 0) := (others => '0');
     signal s_y0      : unsigned(9 downto 0) := to_unsigned(280, 10);
     signal pal_y0, pal_u0, pal_v0 : unsigned(9 downto 0) := (others => '0');
-    signal pal_y1, pal_u1, pal_v1 : unsigned(9 downto 0) := (others => '0');
-    signal pal_y2, pal_u2, pal_v2 : unsigned(9 downto 0) := (others => '0');
-    signal pal_y3, pal_u3, pal_v3 : unsigned(9 downto 0) := (others => '0');
     signal head_y, head_u, head_v : unsigned(9 downto 0) := (others => '0');
     signal glint_y, glint_u, glint_v : unsigned(9 downto 0) := (others => '0');
     signal s_sheen_add : unsigned(7 downto 0) := (others => '0');
@@ -218,10 +215,8 @@ architecture sanguine of program_top is
     signal c_grav    : unsigned(4 downto 0) := to_unsigned(4, 5);
     signal c_velini  : unsigned(7 downto 0) := to_unsigned(8, 8);
     signal c_pp      : unsigned(7 downto 0) := to_unsigned(40, 8);
-    signal c_dry     : unsigned(3 downto 0) := to_unsigned(4, 4);
-    signal c_tlen    : unsigned(11 downto 0) := to_unsigned(1000, 12);
     signal c_wa      : unsigned(1 downto 0) := "10";
-    signal c_k6band  : unsigned(1 downto 0) := "10";
+    signal c_rbase   : unsigned(3 downto 0) := to_unsigned(3, 4);
     -- per-bead release thresholds (0.5x/0.75x/1x/1.5x of c_beadthr) and the
     -- gush launch velocity, precomputed per frame
     signal c_bt0, c_bt1, c_bt2, c_bt3 : unsigned(8 downto 0) := (others => '0');
@@ -232,29 +227,24 @@ architecture sanguine of program_top is
     -- Per-lane state BRAMs (128 x 16 each, 1W1R)
     --   A: head position, signed Q12.4 rows
     --   B: [15:8] mass, [7:0] velocity Q4.4 rows/frame
-    --   C: [15:14] phase, [13:6] age, [5:0] per-spawn seed
-    --   D: [15:8] stain depth (rows/8), [7:0] stain strength
-    --   E: [10:0] wet-top (rows; trail fades top-down to here),
-    --      [12:11] drift (1S = diagonal jog, sign S), [14:13] shape
+    --   C: [15:14] phase, [13:12] bead shape, [5:0] per-spawn seed
+    --   D: [15:4] paint depth (deepest head row), [3:0] paint half-width
     --------------------------------------------------------------------------
     type t_lram is array (0 to 127) of std_logic_vector(15 downto 0);
     signal mem_a : t_lram := (others => (others => '0'));
     signal mem_b : t_lram := (others => (others => '0'));
     signal mem_c : t_lram := (others => (others => '0'));
     signal mem_d : t_lram := (others => (others => '0'));
-    signal mem_e : t_lram := (others => (others => '0'));
     attribute ram_style : string;
     attribute ram_style of mem_a : signal is "block";
     attribute ram_style of mem_b : signal is "block";
     attribute ram_style of mem_c : signal is "block";
     attribute ram_style of mem_d : signal is "block";
-    attribute ram_style of mem_e : signal is "block";
 
     signal s_ln_ra : unsigned(6 downto 0) := (others => '0');
-    signal qa, qb, qc, qd, qe : std_logic_vector(15 downto 0) := (others => '0');
+    signal qa, qb, qc, qd : std_logic_vector(15 downto 0) := (others => '0');
     signal s_ln_we : std_logic := '0';
     signal s_ln_wa : unsigned(6 downto 0) := (others => '0');
-    signal s_we_d : std_logic_vector(15 downto 0) := (others => '0');
     signal s_wa_d, s_wb_d, s_wc_d, s_wd_d
         : std_logic_vector(15 downto 0) := (others => '0');
 
@@ -282,13 +272,13 @@ architecture sanguine of program_top is
     -- walk working registers (state is latched, computed, then packed over
     -- three cycles so no single cycle sees BRAM-out -> physics -> writeback)
     signal u_pos  : signed(15 downto 0) := (others => '0');
-    signal u_vel, u_mass, u_age, u_std, u_sts : unsigned(7 downto 0) := (others => '0');
+    signal u_vel, u_mass : unsigned(7 downto 0) := (others => '0');
+    signal u_std  : unsigned(11 downto 0) := (others => '0');
+    signal u_sts  : unsigned(3 downto 0) := (others => '0');
     signal u_phz  : unsigned(1 downto 0) := "00";
     signal u_tmr  : unsigned(5 downto 0) := (others => '0');
-    signal u_wett : unsigned(10 downto 0) := (others => '0');
-    signal u_drift, u_shp : unsigned(1 downto 0) := "00";
+    signal u_shp  : unsigned(1 downto 0) := "00";
     signal u_cl_hit : std_logic := '0';
-    signal u_dk_hit : std_logic := '0';   -- this lane decays its stain this frame
     signal u_dep_hit : std_logic := '0';  -- this lane deposits trail mass this frame
     signal u_drag_hit : std_logic := '0'; -- vel exceeds the mass-coupled cap
     signal u_grv : unsigned(7 downto 0) := (others => '0'); -- gravity + per-bead jitter
@@ -297,6 +287,8 @@ architecture sanguine of program_top is
     signal u_lvel : unsigned(7 downto 0) := (others => '0'); -- per-bead launch speed
     signal u_pa_hit : std_logic := '0';   -- stutter pause fires this frame
     signal u_vcap   : std_logic := '0';   -- velocity below the hard cap
+    signal u_bot_hit : std_logic := '0';  -- head past the bottom edge
+    signal u_wid    : unsigned(3 downto 0) := (others => '0'); -- paint width this frame
 
     --------------------------------------------------------------------------
     -- Sliding 3-lane render window (0 = prev, 1 = cur, 2 = next)
@@ -306,14 +298,12 @@ architecture sanguine of program_top is
         vel  : unsigned(7 downto 0);
         mass : unsigned(7 downto 0);
         ph   : unsigned(1 downto 0);
-        age  : unsigned(7 downto 0);
-        std  : unsigned(7 downto 0);
-        sts  : unsigned(7 downto 0);
+        std  : unsigned(11 downto 0);  -- paint depth (rows)
+        sts  : unsigned(3 downto 0);   -- paint half-width
         ph1  : unsigned(7 downto 0);
         ph2  : unsigned(7 downto 0);
-        pres : unsigned(7 downto 0);
+        pres : unsigned(11 downto 0);  -- S9 pre-painted depth (hash)
         cx   : unsigned(11 downto 0);
-        wett : unsigned(10 downto 0);
         drift : unsigned(1 downto 0);
         shp   : unsigned(1 downto 0);
         joff : signed(4 downto 0);   -- jog offset for the CURRENT line
@@ -323,10 +313,10 @@ architecture sanguine of program_top is
     type t_lwin is array (0 to 2) of t_lst;
     signal w : t_lwin := (others => (
         pos => (others => '0'), vel => (others => '0'), mass => (others => '0'),
-        ph => "00", age => (others => '0'), std => (others => '0'),
+        ph => "00", std => (others => '0'),
         sts => (others => '0'), ph1 => (others => '0'), ph2 => (others => '0'),
         pres => (others => '0'), cx => (others => '0'),
-        wett => (others => '0'), drift => "00", shp => "00",
+        drift => "00", shp => "00",
         joff => (others => '0'), jact => '0', vld => '0'));
 
     signal s_pf_cnt  : unsigned(2 downto 0) := "111";  -- line-start prefetch
@@ -360,13 +350,11 @@ architecture sanguine of program_top is
     signal s1_ph   : t_u2a := (others => "00");
     signal s1_r    : t_u4a := (others => "0010");
     signal s1_fast : t_sla := (others => '0');
-    signal s1_agep : t_u2a := (others => "00");
     signal s1_doff : t_s6a := (others => (others => '0'));  -- diagonal jog
     signal s1_drf  : t_sla := (others => '0');
     signal s1_shp  : t_u2a := (others => "00");
-    signal s1_wetok : t_sla := (others => '0');   -- y below the fade edge
-    signal s1_std  : t_u8a := (others => (others => '0'));
-    signal s1_sts  : t_u8a := (others => (others => '0'));
+    signal s1_std  : t_u12a := (others => (others => '0'));
+    signal s1_sts  : t_u4a := (others => (others => '0'));
     signal s1_vld  : t_sla := (others => '0');
 
     -- S1.5: registered wander + raw difference terms (splits the old S2
@@ -379,15 +367,13 @@ architecture sanguine of program_top is
     signal s15_wan  : t_s9a := (others => (others => '0'));
     signal s15_dxb  : t_s13a := (others => (others => '0'));
     signal s15_dyhb : t_s13a := (others => (others => '0'));
+    signal s15_dsb  : t_s13a := (others => (others => '0'));  -- y - paint depth
     signal s15_ph   : t_u2a := (others => "00");
     signal s15_r    : t_u4a := (others => "0010");
     signal s15_fast : t_sla := (others => '0');
-    signal s15_agep : t_u2a := (others => "00");
     signal s15_drf  : t_sla := (others => '0');
     signal s15_shp  : t_u2a := (others => "00");
-    signal s15_wetok : t_sla := (others => '0');
-    signal s15_std  : t_u8a := (others => (others => '0'));
-    signal s15_sts  : t_u8a := (others => (others => '0'));
+    signal s15_sts  : t_u4a := (others => (others => '0'));
     signal s15_vld  : t_sla := (others => '0');
 
     -- S2: geometry
@@ -396,34 +382,43 @@ architecture sanguine of program_top is
     signal s2_render : std_logic := '0';
     signal s2_dx  : t_s6a := (others => (others => '0'));
     signal s2_dye : t_s6a := (others => (others => '0'));  -- shaped head dy
-    signal s2_tup : t_u12a := (others => (others => '0'));
-    signal s2_tupok : t_sla := (others => '0');
-    signal s2_tw  : t_u4a := (others => "0001");
+    signal s2_abv : t_sla := (others => '0');   -- y at/above the head centre
+    signal s2_tail : t_sla := (others => '0');  -- y at/below the paint depth
+    signal s2_dsd : t_u4a := (others => "0000"); -- rows past the paint depth
     signal s2_ph  : t_u2a := (others => "00");
     signal s2_r   : t_u4a := (others => "0010");
     signal s2_fast : t_sla := (others => '0');
-    signal s2_agep : t_u2a := (others => "00");
     signal s2_drf  : t_sla := (others => '0');
     signal s2_shp  : t_u2a := (others => "00");
-    signal s2_wetok : t_sla := (others => '0');
-    signal s2_std : t_u8a := (others => (others => '0'));
-    signal s2_sts : t_u8a := (others => (others => '0'));
+    signal s2_sts : t_u4a := (others => (others => '0'));
     signal s2_vld : t_sla := (others => '0');
     signal s2_dith : std_logic := '0';
 
-    -- S3: per-candidate region flags + freshness (priority encoding is S4's)
+    -- S2.5: magnitudes + squares lookups (registered so S3 is add+compare)
+    type t_u5a is array (0 to 2) of unsigned(4 downto 0);
+    signal s25_adx, s25_ady : t_u5a := (others => (others => '0'));
+    signal s25_sqx, s25_sqy, s25_sqr, s25_sqd, s25_sqw
+        : t_u8a := (others => (others => '0'));
+    signal s25_dx  : t_s6a := (others => (others => '0'));
+    signal s25_dye : t_s6a := (others => (others => '0'));
+    signal s25_abv, s25_tail : t_sla := (others => '0');
+    signal s25_ph  : t_u2a := (others => "00");
+    signal s25_r   : t_u4a := (others => "0010");
+    signal s25_drf : t_sla := (others => '0');
+    signal s25_sts : t_u4a := (others => (others => '0'));
+    signal s25_vld : t_sla := (others => '0');
+    signal s25_dith : std_logic := '0';
+    signal s25_render : std_logic := '0';
+
+    -- S3: per-candidate region flags (priority encoding is S4's)
     signal s3_head, s3_glint, s3_trail, s3_sheen, s3_stain
         : t_sla := (others => '0');
     signal s3_vld  : t_sla := (others => '0');
-    signal s3_fidx : t_u2a := (others => "00");
     signal s3_drf  : t_sla := (others => '0');
-    signal s3_sts  : t_u8a := (others => (others => '0'));
     signal s3_render : std_logic := '0';
 
     -- S4: winner
     signal s4_code : unsigned(2 downto 0) := "000";
-    signal s4_fidx : unsigned(1 downto 0) := "00";
-    signal s4_sts  : unsigned(7 downto 0) := (others => '0');
     signal s4_drf  : std_logic := '0';
     signal s4_render : std_logic := '0';
 
@@ -439,7 +434,7 @@ architecture sanguine of program_top is
     -- sync + video delay lines
     type t_syncp is array (0 to C_SYNCD) of std_logic_vector(4 downto 0);
     signal s_syncp : t_syncp := (others => (others => '0'));
-    type t_vd is array (0 to 6) of unsigned(9 downto 0);
+    type t_vd is array (0 to 7) of unsigned(9 downto 0);
     signal vd_y : t_vd := (others => (others => '0'));
     signal vd_u : t_vd := (others => C_MID);
     signal vd_v : t_vd := (others => C_MID);
@@ -455,8 +450,8 @@ begin
     k_visc   <= unsigned(registers_in(1));
     k_hue    <= unsigned(registers_in(2));
     k_depth  <= unsigned(registers_in(3));
-    k_trail  <= unsigned(registers_in(4));
-    k_coag   <= unsigned(registers_in(5));
+    k_wander <= unsigned(registers_in(4));
+    k_size   <= unsigned(registers_in(5));
     sw_video <= registers_in(6)(0);
     sw_cling <= registers_in(6)(1);
     sw_aged  <= registers_in(6)(2);
@@ -539,7 +534,14 @@ begin
     begin
         if rising_edge(clk) then
             s_go <= '0';
-            if s_vsync_pulse = '1' then
+            if s_timing.avid = '1' then
+                s_saw <= '1';
+            end if;
+            -- serrated analog vsync = several edges per field: only the
+            -- first edge after active video restarts the frame sequence
+            -- (frame count, glide, purge and the lane walk run once/field)
+            if s_vsync_pulse = '1' and s_saw = '1' then
+                s_saw   <= '0';
                 s_seq   <= "000";
                 s_frame <= s_frame + 1;
                 -- purge on ANY flip of S10 (momentary-style)
@@ -569,7 +571,7 @@ begin
                             s_lshift <= 4; s_small <= '0';
                             s_nlanes <= resize(shift_right(s_measured_h, 4), 8);
                         end if;
-                        s_nrows <= s_measured_v;
+                        s_lim   <= signed(resize(s_measured_v, 13)) + 12;
                     when 1 =>
                         -- hue lookup + depth saturation shaping
                         v_i := to_integer(k_hue(9 downto 6));
@@ -609,19 +611,7 @@ begin
                         if sw_gloss = '1' then s_sheen_add <= to_unsigned(96, 8);
                         else                   s_sheen_add <= (others => '0');
                         end if;
-                    when 3 =>
-                        -- ageing palette: darker, browner (Cb drifts up)
-                        pal_y1 <= s_y0 - shift_right(s_y0, 3);
-                        pal_u1 <= u_sat10(512 + to_integer(s_dcr)
-                                              - to_integer(shift_right(s_dcr, 3)));
-                        pal_v1 <= u_sat10(512 + to_integer(s_dcb) + 8);
-                        pal_y2 <= u_sat10(to_integer(shift_right(s_y0, 1)) + 20);
-                        pal_u2 <= u_sat10(512 + to_integer(shift_right(s_dcr, 1))
-                                              + to_integer(shift_right(s_dcr, 3)));
-                        pal_v2 <= u_sat10(512 + to_integer(shift_right(s_dcb, 1)) + 12);
-                        pal_y3 <= to_unsigned(78, 10);
-                        pal_u3 <= u_sat10(512 + to_integer(shift_right(s_dcr, 2)) + 8);
-                        pal_v3 <= u_sat10(512 + to_integer(shift_right(s_dcb, 2)) - 8);
+                    when 3 => null;
                     when 4 =>
                         -- physics constants (hemorrhage folded in)
                         v_sp := shift_left(to_unsigned(4, 20), to_integer(k_flow(9 downto 6)))
@@ -654,14 +644,16 @@ begin
                         elsif v_i < 0 then v_i := 0;
                         end if;
                         c_pp <= to_unsigned(v_i, 8);
-                        -- darkening is slow everywhere; K6 mostly picks the
-                        -- BEHAVIOUR (bright-red / distance / age+distance)
-                        c_dry <= resize(to_unsigned(1, 4)
-                                 + resize(k_coag(9 downto 7), 4), 4);
-                        c_tlen <= to_unsigned(8, 12)
-                                  + shift_left(resize(k_trail, 12), 1);
-                        c_wa   <= "11" - k_visc(9 downto 8);
-                        c_k6band <= k_coag(9 downto 8);
+                        -- K5 WANDER: meander amplitude (tri shift 6..3;
+                        -- 3 keeps paths inside the 3-lane render window)
+                        c_wa <= k_wander(9 downto 8);
+                        -- K6 SIZE: base bead radius 1..8 HD / 1..4 SD; mass
+                        -- adds up to +7 / +3 on top, clamped to 15
+                        if s_small = '1' then
+                            c_rbase <= resize(k_size(9 downto 8), 4) + 1;
+                        else
+                            c_rbase <= resize(k_size(9 downto 7), 4) + 1;
+                        end if;
                     when 5 =>
                         c_bt0 <= '0' & shift_right(c_beadthr, 1);
                         c_bt1 <= resize(c_beadthr, 9)
@@ -695,17 +687,12 @@ begin
         variable v_vel  : unsigned(7 downto 0);
         variable v_mass : unsigned(7 downto 0);
         variable v_phz  : unsigned(1 downto 0);
-        variable v_age  : unsigned(7 downto 0);
         variable v_tmr  : unsigned(5 downto 0);
-        variable v_std  : unsigned(7 downto 0);
-        variable v_sts  : unsigned(7 downto 0);
+        variable v_std  : unsigned(11 downto 0);
+        variable v_sts  : unsigned(3 downto 0);
         variable v_vi   : integer;
-        variable v_lim  : signed(12 downto 0);
-        variable v_wett : unsigned(10 downto 0);
-        variable v_drift, v_shp : unsigned(1 downto 0);
+        variable v_shp  : unsigned(1 downto 0);
         variable v_thr  : unsigned(8 downto 0);
-        variable v_vmax : unsigned(8 downto 0);
-        variable v_er   : unsigned(3 downto 0);
     begin
         if rising_edge(clk) then
             s_ln_we <= '0';
@@ -722,11 +709,6 @@ begin
                 when U_W1 =>
                     s_sp_h <= mix16(resize(s_ucnt, 16)
                               xor (s_frame(9 downto 0) & "000000") xor x"5DC1");
-                    if s_frame(3 downto 0) = s_ucnt(3 downto 0) then
-                        u_dk_hit <= '1';
-                    else
-                        u_dk_hit <= '0';
-                    end if;
                     if s_frame(1 downto 0) = s_ucnt(1 downto 0) then
                         u_dep_hit <= '1';
                     else
@@ -742,13 +724,10 @@ begin
                     u_mass <= unsigned(qb(15 downto 8));
                     u_vel  <= unsigned(qb(7 downto 0));
                     u_phz  <= unsigned(qc(15 downto 14));
-                    u_age  <= unsigned(qc(13 downto 6));
+                    u_shp  <= unsigned(qc(13 downto 12));
                     u_tmr  <= unsigned(qc(5 downto 0));
-                    u_std  <= unsigned(qd(15 downto 8));
-                    u_sts  <= unsigned(qd(7 downto 0));
-                    u_wett <= unsigned(qe(10 downto 0));
-                    u_drift <= unsigned(qe(12 downto 11));
-                    u_shp  <= unsigned(qe(14 downto 13));
+                    u_std  <= unsigned(qd(15 downto 4));
+                    u_sts  <= unsigned(qd(3 downto 0));
                     -- drag test against last frame's velocity/mass (a frame
                     -- of lag is invisible; keeps the CALC cone shallow)
                     if resize(unsigned(qb(7 downto 0)), 9)
@@ -784,8 +763,27 @@ begin
                     if unsigned(qb(7 downto 0)) < 240 then u_vcap <= '1';
                     else                                   u_vcap <= '0';
                     end if;
-                    if sw_cling = '1' and sw_video = '1'
-                       and unsigned(q_cl) > C_CLTH then
+                    -- bottom-edge test against last frame's position (keeps
+                    -- the CALC2 cone to the add + paint max)
+                    if resize(signed(qa(15 downto 4)), 13) > s_lim then
+                        u_bot_hit <= '1';
+                    else
+                        u_bot_hit <= '0';
+                    end if;
+                    -- paint width from last frame's mass (same formula as
+                    -- the render-side radius; one frame of lag is invisible)
+                    if s_small = '1' then
+                        v_vi := to_integer(c_rbase)
+                                + to_integer(unsigned(qb(14 downto 13)));
+                    else
+                        v_vi := to_integer(c_rbase)
+                                + to_integer(unsigned(qb(15 downto 13)));
+                    end if;
+                    if v_vi > 15 then v_vi := 15; end if;
+                    u_wid <= to_unsigned(v_vi, 4);
+                    -- cling samples the INPUT luma, so it is live over
+                    -- black too (drips pool on an unseen surface)
+                    if sw_cling = '1' and unsigned(q_cl) > C_CLTH then
                         u_cl_hit <= '1';
                     else
                         u_cl_hit <= '0';
@@ -799,26 +797,16 @@ begin
                     v_vel  := u_vel;
                     v_phz  := u_phz;
                     v_tmr  := u_tmr;
-                    v_wett := u_wett;
-                    v_drift := u_drift;
                     v_shp  := u_shp;
 
                     case v_phz is
                         when C_PH_IDLE =>
                             u_pos <= to_signed(-64, 16);   -- park 4 rows up
                             if s_sp_h < c_spawn then
-                                -- per-bead draws: seed, diagonal jog (25%),
-                                -- shape; trail fade edge resets to the top
+                                -- per-bead draws: seed + shape (the diagonal
+                                -- jog is lane-static, drawn render-side)
                                 v_tmr := unsigned(s_lfsr(5 downto 0));
-                                if s_lfsr(7 downto 6) = "11" then
-                                    if s_lfsr(8) = '1' then v_drift := "11";
-                                    else                    v_drift := "10";
-                                    end if;
-                                else
-                                    v_drift := "00";
-                                end if;
-                                v_shp  := unsigned(s_lfsr(10 downto 9));
-                                v_wett := (others => '0');
+                                v_shp := unsigned(s_lfsr(10 downto 9));
                                 if s_hem > 512 then
                                     -- gushing wound: skip surface tension,
                                     -- burst straight into the fall
@@ -881,8 +869,6 @@ begin
                     u_vel  <= v_vel;
                     u_phz  <= v_phz;
                     u_tmr  <= v_tmr;
-                    u_wett <= v_wett;
-                    u_drift <= v_drift;
                     u_shp  <= v_shp;
                     s_ustate <= U_CALC2;
 
@@ -890,7 +876,6 @@ begin
                     -- position integrate + stain / ageing / clear checks
                     v_pos := u_pos;
                     v_phz := u_phz;
-                    v_age := u_age;
                     v_std := u_std;
                     v_sts := u_sts;
                     v_pi  := v_pos(15 downto 4);
@@ -904,67 +889,48 @@ begin
                         when C_PH_FALL =>
                             v_pos := v_pos + signed(resize(u_vel, 16));
                             -- paint the permanent record while passing:
-                            -- depth (rows/8) + the bead's width
+                            -- deepest head row (exact) + the bead's width
+                            -- (same formula as the render-side radius)
                             if v_pi > 0 then
-                                v_vi := to_integer(unsigned(v_pi(10 downto 3)));
-                                if v_vi > 255 then v_vi := 255; end if;
-                                if v_vi > to_integer(v_std) then
-                                    v_std := to_unsigned(v_vi, 8);
+                                if unsigned(v_pi(11 downto 0)) > v_std then
+                                    v_std := unsigned(v_pi(11 downto 0));
                                 end if;
-                                if s_small = '1' then
-                                    v_vi := 2 + to_integer(u_mass(7 downto 6));
-                                else
-                                    v_vi := 3 + to_integer(u_mass(7 downto 5));
-                                end if;
-                                if v_vi > to_integer(v_sts) then
-                                    v_sts := to_unsigned(v_vi, 8);
+                                if u_wid > v_sts then
+                                    v_sts := u_wid;
                                 end if;
                             end if;
-                            v_lim := signed(resize(s_nrows, 13)) + 12;
-                            if resize(v_pos(15 downto 4), 13) > v_lim then
+                            if u_bot_hit = '1' then
                                 v_phz := C_PH_DONE;
                             end if;
                         when C_PH_DONE =>
                             -- drip over: the painted record stays; respawn
                             -- immediately so more blood falls on top
                             v_phz := C_PH_IDLE;
-                            v_age := (others => '0');
                         when others => null;
                     end case;
 
                     u_pos <= v_pos;
                     u_phz <= v_phz;
-                    u_age <= v_age;
                     u_std <= v_std;
                     u_sts <= v_sts;
                     s_ustate <= U_WRITE;
 
                 when U_WRITE =>
-                    v_phz := u_phz;
-                    v_age := u_age;
                     v_std := u_std;
                     v_sts := u_sts;
-                    v_wett := u_wett;
 
                     -- the painted record is permanent: no decay, no erosion.
                     -- purge clears the canvas, keeping live drips
                     if s_purge = '1' then
                         v_std := (others => '0');
                         v_sts := (others => '0');
-                        if v_phz = C_PH_DONE then
-                            v_phz := C_PH_IDLE;
-                            v_age := (others => '0');
-                        end if;
                     end if;
 
                     s_wa_d <= std_logic_vector(u_pos);
                     s_wb_d <= std_logic_vector(u_mass) & std_logic_vector(u_vel);
-                    s_wc_d <= std_logic_vector(v_phz) & std_logic_vector(v_age)
-                              & std_logic_vector(u_tmr);
+                    s_wc_d <= std_logic_vector(u_phz) & std_logic_vector(u_shp)
+                              & "000000" & std_logic_vector(u_tmr);
                     s_wd_d <= std_logic_vector(v_std) & std_logic_vector(v_sts);
-                    s_we_d <= '0' & std_logic_vector(u_shp)
-                              & std_logic_vector(u_drift)
-                              & std_logic_vector(v_wett);
                     s_ln_wa <= s_ucnt(6 downto 0);
                     s_ln_we <= '1';
 
@@ -1014,14 +980,6 @@ begin
         end if;
     end process;
 
-    p_ram_e : process(clk)
-    begin
-        if rising_edge(clk) then
-            if s_ln_we = '1' then mem_e(to_integer(s_ln_wa)) <= s_we_d; end if;
-            qe <= mem_e(to_integer(s_ln_ra));
-        end if;
-    end process;
-
     p_ram_cl : process(clk)
     begin
         if rising_edge(clk) then
@@ -1044,7 +1002,7 @@ begin
             vd_y(0) <= unsigned(data_in.y);
             vd_u(0) <= unsigned(data_in.u);
             vd_v(0) <= unsigned(data_in.v);
-            for k in 1 to 6 loop
+            for k in 1 to 7 loop
                 vd_y(k) <= vd_y(k - 1);
                 vd_u(k) <= vd_u(k - 1);
                 vd_v(k) <= vd_v(k - 1);
@@ -1137,12 +1095,9 @@ begin
                     v_new.mass := unsigned(qb(15 downto 8));
                     v_new.vel  := unsigned(qb(7 downto 0));
                     v_new.ph   := unsigned(qc(15 downto 14));
-                    v_new.age  := unsigned(qc(13 downto 6));
-                    v_new.std  := unsigned(qd(15 downto 8));
-                    v_new.sts  := unsigned(qd(7 downto 0));
-                    v_new.wett := unsigned(qe(10 downto 0));
-                    v_new.drift := unsigned(qe(12 downto 11));
-                    v_new.shp  := unsigned(qe(14 downto 13));
+                    v_new.shp  := unsigned(qc(13 downto 12));
+                    v_new.std  := unsigned(qd(15 downto 4));
+                    v_new.sts  := unsigned(qd(3 downto 0));
                     v_new.ph1  := v_h(7 downto 0);
                     v_new.ph2  := v_h(15 downto 8);
                     -- diagonal jog is LANE-static (hash), not per-spawn, so
@@ -1156,8 +1111,9 @@ begin
                     end if;
                     v_new.joff := (others => '0');   -- computed 1-2 cycles later
                     v_new.jact := '0';
-                    if v_p(7) = '1' then
-                        v_new.pres := '0' & v_p(6 downto 0);
+                    -- S9 pre-painted runs: half the lanes, hash depth
+                    if v_p(15) = '1' then
+                        v_new.pres := "00" & v_p(9 downto 0);
                     else
                         v_new.pres := (others => '0');
                     end if;
@@ -1243,7 +1199,7 @@ begin
     p_s1 : process(clk)
         variable v_t1 : unsigned(7 downto 0);
         variable v_t2 : unsigned(6 downto 0);
-        variable v_r, v_wt : integer range 0 to 31;
+        variable v_r : integer range 0 to 31;
     begin
         if rising_edge(clk) then
             s1_x <= s0_x; s1_y <= s0_y;
@@ -1257,15 +1213,15 @@ begin
                 s1_cx(c)  <= w(c).cx;
                 s1_pos(c) <= w(c).pos(15 downto 4);
                 s1_ph(c)  <= w(c).ph;
-                -- size follows mass; the wider VISCOSITY threshold range now
-                -- carries the size spread (big blobs only at thick settings).
-                -- Trail width is derived from r in S2 so drop and trail meet
-                -- at exactly the same width.
+                -- radius = K6 base + mass term (big blobs at thick
+                -- VISCOSITY settings); the trail uses r directly so drop
+                -- and trail meet at exactly the same width
                 if s_small = '1' then
-                    v_r := 2 + to_integer(w(c).mass(7 downto 6));
+                    v_r := to_integer(c_rbase) + to_integer(w(c).mass(7 downto 6));
                 else
-                    v_r := 3 + to_integer(w(c).mass(7 downto 5));
+                    v_r := to_integer(c_rbase) + to_integer(w(c).mass(7 downto 5));
                 end if;
+                if v_r > 15 then v_r := 15; end if;
                 s1_r(c)  <= to_unsigned(v_r, 4);
 
                 -- diagonal jog: precomputed per slot in p_window
@@ -1273,19 +1229,14 @@ begin
                 s1_drf(c)  <= w(c).jact;
                 s1_shp(c)  <= w(c).shp;
 
-                -- trail fade disabled: blood stays put until PURGE
-                s1_wetok(c) <= '1';
                 if w(c).vel >= 64 then s1_fast(c) <= '1';
                 else                   s1_fast(c) <= '0';
-                end if;
-                if w(c).age(7 downto 6) = "11" then s1_agep(c) <= "11";
-                else s1_agep(c) <= w(c).age(7 downto 6);
                 end if;
                 if sw_aged = '1' and w(c).pres /= 0 then
                     if w(c).pres > w(c).std then s1_std(c) <= w(c).pres;
                     else                         s1_std(c) <= w(c).std;
                     end if;
-                    if w(c).sts < 4 then s1_sts(c) <= to_unsigned(4, 8);
+                    if w(c).sts < 4 then s1_sts(c) <= to_unsigned(4, 4);
                     else                 s1_sts(c) <= w(c).sts;
                     end if;
                 else
@@ -1323,16 +1274,15 @@ begin
                               - signed(resize(s1_cx(c), 13));
                 s15_dyhb(c) <= signed(resize(s1_y, 13))
                                - resize(s1_pos(c), 13);
+                s15_dsb(c)  <= signed(resize(s1_y, 13))
+                               - signed(resize(s1_std(c), 13));
                 s15_ph(c)   <= s1_ph(c);
                 s15_r(c)    <= s1_r(c);
                 s15_fast(c) <= s1_fast(c);
-                s15_agep(c) <= s1_agep(c);
-                s15_std(c)  <= s1_std(c);
                 s15_sts(c)  <= s1_sts(c);
                 s15_vld(c)  <= s1_vld(c);
                 s15_drf(c)  <= s1_drf(c);
                 s15_shp(c)  <= s1_shp(c);
-                s15_wetok(c) <= s1_wetok(c);
             end loop;
         end if;
     end process;
@@ -1343,8 +1293,7 @@ begin
     p_geom : process(clk)
         variable v_dx   : signed(12 downto 0);
         variable v_dyh  : signed(12 downto 0);
-        variable v_tup  : signed(12 downto 0);
-        variable v_tw   : integer range 0 to 15;
+        variable v_dsb  : signed(12 downto 0);
     begin
         if rising_edge(clk) then
             s2_x <= s15_x; s2_y <= s15_y;
@@ -1371,40 +1320,33 @@ begin
                 end if;
                 s2_dye(c) <= resize(v_dyh, 6);
 
-                v_tup := -s15_dyhb(c);
-                if v_tup >= 0 then
-                    s2_tupok(c) <= '1';
-                    s2_tup(c) <= unsigned(v_tup(11 downto 0));
-                else
-                    s2_tupok(c) <= '0';
-                    s2_tup(c) <= (others => '0');
+                -- at/above the head centre: the live trail zone (width =
+                -- the bead radius exactly; the paint record carries the
+                -- fatter upstream width)
+                if s15_dyhb(c) <= 0 then s2_abv(c) <= '1';
+                else                     s2_abv(c) <= '0';
                 end if;
 
-                -- trail width: EXACTLY the bead radius at the contact point,
-                -- widening slowly with height above the head (the bead was
-                -- fatter when it deposited there).  Drop is never wider than
-                -- the trail touching it.
-                v_tw := to_integer(s15_r(c));
-                if v_tup >= 0 then
-                    if v_tup(11 downto 8) /= "0000" then
-                        v_tw := v_tw + 2;
-                    elsif v_tup(7) = '1' then
-                        v_tw := v_tw + 1;
+                -- painted record end: rows at/below the deepest head row
+                -- get a rounded cap (squares test in S3 on dsd = rows past)
+                v_dsb := s15_dsb(c);
+                if v_dsb < 0 then
+                    s2_tail(c) <= '0';
+                    s2_dsd(c)  <= (others => '0');
+                else
+                    s2_tail(c) <= '1';
+                    if v_dsb > 15 then s2_dsd(c) <= to_unsigned(15, 4);
+                    else               s2_dsd(c) <= unsigned(v_dsb(3 downto 0));
                     end if;
                 end if;
-                if v_tw > 11 then v_tw := 11; end if;
-                s2_tw(c) <= to_unsigned(v_tw, 4);
 
                 s2_ph(c)   <= s15_ph(c);
                 s2_r(c)    <= s15_r(c);
                 s2_fast(c) <= s15_fast(c);
-                s2_agep(c) <= s15_agep(c);
-                s2_std(c)  <= s15_std(c);
                 s2_sts(c)  <= s15_sts(c);
                 s2_vld(c)  <= s15_vld(c);
                 s2_drf(c)  <= s15_drf(c);
                 s2_shp(c)  <= s15_shp(c);
-                s2_wetok(c) <= s15_wetok(c);
             end loop;
         end if;
     end process;
@@ -1425,87 +1367,120 @@ begin
     end process;
 
     --------------------------------------------------------------------------
-    -- S3: region tests per candidate
+    -- S2.5: magnitudes and squares lookups (the LUT fetches were the S3
+    -- critical path once the paint-end test shared them)
+    --------------------------------------------------------------------------
+    p_sq : process(clk)
+        variable v_adx, v_ady : unsigned(4 downto 0);
+        variable v_sw : unsigned(3 downto 0);
+    begin
+        if rising_edge(clk) then
+            s25_render <= s2_render;
+            s25_dith   <= s2_dith;
+            for c in 0 to 2 loop
+                v_adx := resize(unsigned(abs(s2_dx(c))), 5);
+                v_ady := resize(unsigned(abs(s2_dye(c))), 5);
+                s25_adx(c) <= v_adx;
+                s25_ady(c) <= v_ady;
+                s25_sqx(c) <= C_SQ(to_integer(v_adx(3 downto 0)));
+                -- per-bead shape via pre-scaled vertical squares table
+                case s2_shp(c) is
+                    when "10"   => s25_sqy(c) <= C_SQT(to_integer(v_ady(3 downto 0)));
+                    when "11"   => s25_sqy(c) <= C_SQW(to_integer(v_ady(3 downto 0)));
+                    when others => s25_sqy(c) <= C_SQ(to_integer(v_ady(3 downto 0)));
+                end case;
+                s25_sqr(c) <= C_SQ(to_integer(s2_r(c)));
+                s25_sqd(c) <= C_SQ(to_integer(s2_dsd(c)));
+                v_sw := s2_sts(c);
+                s25_sqw(c) <= C_SQ(to_integer(v_sw));
+                s25_dx(c)  <= s2_dx(c);
+                s25_dye(c) <= s2_dye(c);
+                s25_abv(c) <= s2_abv(c);
+                s25_tail(c) <= s2_tail(c);
+                s25_ph(c)  <= s2_ph(c);
+                s25_r(c)   <= s2_r(c);
+                s25_drf(c) <= s2_drf(c);
+                s25_sts(c) <= s2_sts(c);
+                s25_vld(c) <= s2_vld(c);
+            end loop;
+        end if;
+    end process;
+
+    --------------------------------------------------------------------------
+    -- S3: region tests per candidate (adds + compares only)
     --------------------------------------------------------------------------
     p_test : process(clk)
         variable v_adx  : unsigned(4 downto 0);
         variable v_ady  : unsigned(4 downto 0);
         variable v_r    : unsigned(3 downto 0);
         variable v_head, v_trail, v_sheen, v_glint, v_stain : std_logic;
-        variable v_f    : integer range 0 to 7;
         variable v_sw   : unsigned(3 downto 0);
         variable v_gl   : signed(5 downto 0);
         variable v_glw  : signed(5 downto 0);
-        variable v_sqy  : unsigned(7 downto 0);
     begin
         if rising_edge(clk) then
-            s3_render <= s2_render;
+            s3_render <= s25_render;
             for c in 0 to 2 loop
-                v_adx := resize(unsigned(abs(s2_dx(c))), 5);
-                v_ady := resize(unsigned(abs(s2_dye(c))), 5);
-                v_r   := s2_r(c);
-
-                -- per-bead shape via pre-scaled vertical squares table
-                case s2_shp(c) is
-                    when "10"   => v_sqy := C_SQT(to_integer(v_ady(3 downto 0)));
-                    when "11"   => v_sqy := C_SQW(to_integer(v_ady(3 downto 0)));
-                    when others => v_sqy := C_SQ(to_integer(v_ady(3 downto 0)));
-                end case;
+                v_adx := s25_adx(c);
+                v_ady := s25_ady(c);
+                v_r   := s25_r(c);
 
                 v_head := '0';
-                if (s2_ph(c) = C_PH_BEAD or s2_ph(c) = C_PH_FALL)
+                if (s25_ph(c) = C_PH_BEAD or s25_ph(c) = C_PH_FALL)
                    and v_adx <= 15 and v_ady <= 15 then
                     -- 9-bit sum: two 8-bit squares can pass 255
-                    if resize(C_SQ(to_integer(v_adx(3 downto 0))), 9)
-                       + resize(v_sqy, 9)
-                       <= resize(C_SQ(to_integer(v_r)), 9) then
+                    if resize(s25_sqx(c), 9) + resize(s25_sqy(c), 9)
+                       <= resize(s25_sqr(c), 9) then
                         v_head := '1';
                     end if;
                 end if;
 
                 -- small specular highlight, upper-left of centre
                 v_glint := '0';
-                v_gl  := s2_dye(c) + signed('0' & resize(shift_right(v_r, 1), 5));
+                v_gl  := s25_dye(c) + signed('0' & resize(shift_right(v_r, 1), 5));
                 v_glw := signed('0' & resize(shift_right(v_r, 3), 5))
                          + to_signed(1, 6);
                 if sw_gloss = '1'
-                   and s2_dx(c) >= -v_glw and s2_dx(c) <= 0
+                   and s25_dx(c) >= -v_glw and s25_dx(c) <= 0
                    and v_gl >= -1 and v_gl <= 0 then
                     v_glint := '1';
                 end if;
 
-                -- trail band behind (above) the head, dithered edge; only
-                -- below the top-down fade edge
+                -- live trail behind (above) the head: solid through the
+                -- bead radius, dither 1 px outside (covers the one-frame
+                -- gap between the paint record and the head)
                 v_trail := '0';
-                if s2_ph(c) /= C_PH_IDLE and s2_tupok(c) = '1'
-                   and s2_tup(c) <= c_tlen and s2_wetok(c) = '1' then
-                    -- solid through the full bead radius, dither just outside
-                    if v_adx <= resize(s2_tw(c), 5)
-                       or (v_adx = resize(s2_tw(c), 5) + 1 and s2_dith = '1') then
+                if s25_ph(c) /= C_PH_IDLE and s25_abv(c) = '1' then
+                    if v_adx <= resize(v_r, 5)
+                       or (v_adx = resize(v_r, 5) + 1 and s25_dith = '1') then
                         v_trail := '1';
                     end if;
                 end if;
 
-                -- colour changes disabled: everything is bright fresh red
-                v_f := 0;
-
                 -- wet sheen stripe widens with the trail
                 v_sheen := '0';
-                if v_adx <= resize(shift_right(s2_tw(c), 2), 5) + 1
+                if v_adx <= resize(shift_right(v_r, 2), 5) + 1
                    and sw_gloss = '1' then
                     v_sheen := '1';
                 end if;
 
                 -- painted record: every drip's full path stays as solid
-                -- bright red at its bead's width (sts stores the width)
+                -- bright red at its widest bead width, down to the deepest
+                -- row reached, with a rounded end (same squares test as
+                -- the head, on rows past the end)
                 v_stain := '0';
-                v_sw := s2_sts(c)(3 downto 0);
-                if v_sw > 11 then v_sw := to_unsigned(11, 4); end if;
-                if s2_std(c) /= 0 and s2_sts(c) /= 0
-                   and s2_y < shift_left(resize(s2_std(c), 12), 3) then
-                    if v_adx <= resize(v_sw, 5)
-                       or (v_adx = resize(v_sw, 5) + 1 and s2_dith = '1') then
-                        v_stain := '1';
+                v_sw := s25_sts(c);
+                if s25_sts(c) /= 0 then
+                    if s25_tail(c) = '0' then
+                        if v_adx <= resize(v_sw, 5)
+                           or (v_adx = resize(v_sw, 5) + 1 and s25_dith = '1') then
+                            v_stain := '1';
+                        end if;
+                    elsif v_adx <= 15 then
+                        if resize(s25_sqx(c), 9) + resize(s25_sqd(c), 9)
+                           <= resize(s25_sqw(c), 9) then
+                            v_stain := '1';
+                        end if;
                     end if;
                 end if;
 
@@ -1514,11 +1489,8 @@ begin
                 s3_trail(c) <= v_trail;
                 s3_sheen(c) <= v_sheen;
                 s3_stain(c) <= v_stain;
-                s3_vld(c)   <= s2_vld(c);
-                s3_drf(c)   <= s2_drf(c);
-
-                s3_fidx(c) <= to_unsigned(v_f, 2);
-                s3_sts(c)  <= s2_sts(c);
+                s3_vld(c)   <= s25_vld(c);
+                s3_drf(c)   <= s25_drf(c);
             end loop;
         end if;
     end process;
@@ -1554,18 +1526,8 @@ begin
             else                   s4_code <= C_RG_NONE;
             end if;
 
-            -- params select independently of the region priority: fidx from
-            -- the trail-owning candidate (cur first), sts from the
-            -- stain-owning one, drift flag from the sheen-owning one.  Head
-            -- and glint use fixed palettes so they never read these.
-            if    v_tr(1) = '1' then s4_fidx <= s3_fidx(1);
-            elsif v_tr(2) = '1' then s4_fidx <= s3_fidx(2);
-            else                     s4_fidx <= s3_fidx(0);
-            end if;
-            if    v_st(1) = '1' then s4_sts <= s3_sts(1);
-            elsif v_st(2) = '1' then s4_sts <= s3_sts(2);
-            else                     s4_sts <= s3_sts(0);
-            end if;
+            -- the diagonal-jog flag comes from the sheen-owning candidate
+            -- (cur first) independently of the region priority
             if    v_sh(1) = '1' then s4_drf <= s3_drf(1);
             elsif v_sh(2) = '1' then s4_drf <= s3_drf(2);
             else                     s4_drf <= s3_drf(0);
@@ -1575,7 +1537,7 @@ begin
     end process;
 
     --------------------------------------------------------------------------
-    -- S5: palette select (4-step fresh -> dried) + sheen luma
+    -- S5: palette select + sheen luma
     --------------------------------------------------------------------------
     p_pal : process(clk)
         variable v_y, v_u, v_v : unsigned(9 downto 0);
@@ -1630,7 +1592,7 @@ begin
             -- except where blood covers it
             if s5_code = C_RG_NONE then
                 if sw_video = '1' then
-                    v_y := vd_y(6); v_u := vd_u(6); v_v := vd_v(6);
+                    v_y := vd_y(7); v_u := vd_u(7); v_v := vd_v(7);
                 else
                     v_y := (others => '0'); v_u := C_MID; v_v := C_MID;
                 end if;

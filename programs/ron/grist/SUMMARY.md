@@ -1,6 +1,7 @@
 # GRIST — film grain to mezzotint
 
-Status: **v0.3.0 timing-closed, not yet flashed** (2026-10-01).
+Status: **v0.3.0 FINAL except presets** (signed off 2026-10-03). Flashed on
+hardware. Defaults captured from the device (Soft on).
 Processing program. Morsel's dough-grain hash promoted to a whole instrument:
 three hash octaves + pores feed one comparator,
 `out = clamp(512 + (Y - thr + N) * gain)`, and P12 DEVELOP rides the gain
@@ -85,8 +86,6 @@ of the same family were still 65–155×.
 
 ## Still to do
 
-- First flash: sweep Develop (check the climax reads as tonal stipple), Mono
-  on/off at the climax, Animate rate, Etch, Invert, SD analog interlace.
 - Retune presets after HW eyes. Develop now also widens the grain, so the
   low-Develop presets (Film Stock 180, Star Dust 250) carry ~1.6–1.9× more
   grain than in v0.1. Capture retuned looks straight from the device with

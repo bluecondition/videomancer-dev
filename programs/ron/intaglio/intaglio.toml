@@ -1,6 +1,6 @@
 [program]
 program_id = "com.ron.intaglio"
-program_version = "0.1.0"
+program_version = "0.2.0"
 abi_version = ">=1.0,<2.0"
 program_name = "Intaglio"
 author = "ron"
@@ -48,14 +48,9 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
-control_mode = "linear"
-min_value = 0
-max_value = 1023
-initial_value = 96
-display_min_value = 0
-display_max_value = 100
-name_label = "Tint"
-suffix_label = "%"
+name_label = "Palette"
+value_labels = ["Copper", "Sepia", "Sanguine", "Prussian", "Banknote", "Iron Gall", "Gold", "Blueprint"]
+initial_value_label = "Copper"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
@@ -131,7 +126,7 @@ name = "Copperplate"
 rotary_potentiometer_1 = 384
 rotary_potentiometer_2 = 256
 rotary_potentiometer_3 = 512
-rotary_potentiometer_4 = 96
+rotary_potentiometer_4 = 64
 rotary_potentiometer_5 = 128
 rotary_potentiometer_6 = 512
 toggle_switch_7 = 0
@@ -146,7 +141,7 @@ name = "Scratchboard"
 rotary_potentiometer_1 = 256
 rotary_potentiometer_2 = 400
 rotary_potentiometer_3 = 640
-rotary_potentiometer_4 = 0
+rotary_potentiometer_4 = 64
 rotary_potentiometer_5 = 256
 rotary_potentiometer_6 = 512
 toggle_switch_7 = 1
@@ -161,7 +156,7 @@ name = "Woodcut Poster"
 rotary_potentiometer_1 = 640
 rotary_potentiometer_2 = 128
 rotary_potentiometer_3 = 768
-rotary_potentiometer_4 = 200
+rotary_potentiometer_4 = 192
 rotary_potentiometer_5 = 384
 rotary_potentiometer_6 = 900
 toggle_switch_7 = 0
@@ -176,7 +171,7 @@ name = "Mezzotint"
 rotary_potentiometer_1 = 384
 rotary_potentiometer_2 = 256
 rotary_potentiometer_3 = 512
-rotary_potentiometer_4 = 64
+rotary_potentiometer_4 = 704
 rotary_potentiometer_5 = 0
 rotary_potentiometer_6 = 100
 toggle_switch_7 = 0

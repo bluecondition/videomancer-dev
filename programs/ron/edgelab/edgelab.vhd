@@ -1,78 +1,71 @@
--- Edge Lab: an edge-detection laboratory.
+-- Edge Lab: video redrawn as edge lines.
 --
--- One program, eight classic edge detectors on a knob, plus the standard
--- image-cleanup chain you want in front of a detector (brightness, contrast,
--- posterize, optional Gaussian smoothing), edge thickening, a not-edges
--- negative, overlay and raw-gradient views.  Built to *compare* detectors:
--- flip K6 and nothing else changes.
+-- Two line styles (S9): Fine = Canny (thin, connected single-pixel
+-- tracing) and Chalk = morphological gradient (thick, even bands), fed by
+-- the image-cleanup chain you want in front of a detector (brightness,
+-- contrast, posterize, optional Gaussian smoothing), with edge thickening,
+-- four colour modes, a not-edges negative, overlay and gradient views.
 --
--- Detectors (K6, default Morph; all normalized so a luma step of h reads
--- about h, so one Sensitivity setting suits every detector):
---   0 Roberts   2x2 cross difference          |a-d| + |b-c|
---   1 Prewitt   3x3 box-derivative            [1 1 1] columns
---   2 Sobel     3x3 smoothed derivative       [1 2 1] columns
---   3 Scharr    3x3 rotation-optimal          [3 10 3] columns
---   4 Kirsch    8-direction compass, max of |5,-3| templates.
---               Uses max_i |8*Si - 3*T| = max(8*maxSi-3T, 3T-8*minSi)
---               (Si = 3 contiguous ring neighbours, T = ring sum), so only
---               a min/max tree over the 8 Si is needed -- no 8 wide ALUs.
---   5 Laplace   3x3 8-neighbour second derivative |9c - sum9|
---   6 LoG       true 5x5 Laplacian-of-Gaussian kernel
---                  0  0 -1  0  0
---                  0 -1 -2 -1  0
---                 -1 -2 16 -2 -1     (all coefficients shift-only)
---                  0 -1 -2 -1  0
---                  0  0 -1  0  0
---   7 Canny     Sobel + gradient-direction quantize + non-maximum
---               suppression + double threshold + causal hysteresis
---               (weak edges survive next to an accepted left/upper edge).
---   8 Morph     morphological gradient: 3x3 max - 3x3 min (dilate minus
---               erode).  Thick, even, chalky outlines on both sides of
---               every edge.
+-- Styles (S9; both normalized so a luma step of h reads about h, so one
+-- Sensitivity setting suits either):
+--   Fine    Canny: Sobel + gradient-direction quantize + non-maximum
+--           suppression + double threshold + causal hysteresis (weak edges
+--           survive next to an accepted left/upper edge).
+--   Chalk   morphological gradient: 3x3 max - 3x3 min (dilate minus
+--           erode).  Thick, even, chalky outlines on both sides of every
+--           edge.
+-- (v1.0-1.2 carried nine detectors; Roberts/Prewitt/Sobel/Scharr/Kirsch
+-- looked alike once normalized and Laplace/LoG were just noisier, so v1.3
+-- keeps the two distinct looks and gives K6 to colour.)
 --
--- Cleanup / display:
+-- Controls:
+--   K1 Thickness  dilate the edge map: 1 / 2 / 3 / 4 / 5 px squares
 --   K2 Mix        dry/wet crossfade
 --   K3 Brightness pre-offset, +-512
 --   K4 Contrast   pre-gain 0..4x around mid-grey (unity at 25%)
 --   K5 Posterize  quantize luma to 128..2 levels before detection
---   K1 Thickness  dilate the edge map: 1 / 2 / 3 / 4 / 5 px squares
---   S7 Smooth     3x3 Gaussian pre-blur feeding every 3x3 detector
---                 (Laplace+Smooth is the classic separable LoG recipe)
---   S8 Invert     negative: not-edges (black lines on white)
---   S9 Color      White / Compass: edges hued by gradient direction
---                 (16-sector Sobel angle on a 360-degree hue wheel, so the
---                 two sides of a bright line take opposite hues).  Invert
---                 flips to the complementary hue.
+--   K6 Color      White   white lines (Invert: black)
+--                 Compass hue by gradient direction (16-sector Sobel angle
+--                         on a 360-degree wheel; Invert: complementary)
+--                 Source  the input's own colour, saturation x2 (Invert:
+--                         complementary chroma)
+--                 Heat    by edge strength, dark red -> orange -> yellow ->
+--                         white (Invert: reversed ramp)
+--   S7 Smooth     3x3 Gaussian pre-blur feeding the detector
+--   S8 Invert     negative: not-edges, and the colour mode's inverse
+--   S9 Style      Fine / Chalk
 --   S10 Overlay   draw edges on top of the live picture instead of black
---   S11 Output    Binary / Gradient (raw magnitude as grayscale or hued;
---                 Canny shows the post-NMS magnitude -- thinned ridges)
+--   S11 Output    Binary / Gradient (edge strength as grey or colour; Fine
+--                 shows the post-NMS magnitude -- thinned ridges)
 --   P12 Sensitivity  live threshold, glided: up = more edges; 100% dissolves
 --                 the picture into dense edge grain (Canny low = high/2)
 --
 -- Video levels: black 64, white 940, gradient 64..924, blanking neutral.
 --
--- Structure (all luma; chroma is neutral except overlay/mix/compass):
+-- Structure (all luma; chroma is neutral except overlay/mix/colour):
 --   S1-S4   preprocess: (y-512)*gain>>4 + bright, clamp, posterize -> 8 bit
 --   S5      4 chained line buffers -> 5x5 raw window + per-column sums
---   S6-S8   LoG column pipeline; [1 2 1]^2 blurred 3x3; Smooth mux -> e-cols
---   S9-S14  detector arithmetic (everything computed in parallel, one
---           registered add-level per stage; Kirsch min/max tree sets depth)
---   S15     per-detector normalize to 0..255, clamp, mode mux, edge blank
---   S16-S17 magnitude line buffers -> 3x3 mag window, NMS (Canny only,
---           passthrough otherwise so every mode shares one latency)
+--   S6-S8   [1 2 1]^2 blurred 3x3; Smooth mux -> effective 3-row column
+--   S9-S14  Sobel / Canny direction and the Morph max-min tree, one
+--           registered op-level per stage (S13-S14 are pure delays that
+--           keep the v1.2 latency)
+--   S15     normalize to 0..255, style mux, edge blank
+--   S16-S17 magnitude line buffers -> 3x3 mag window, NMS (Fine only,
+--           passthrough for Chalk so both styles share one latency)
 --   S18     threshold + hysteresis (accept-bit line buffer)
 --   S19     thickness dilate (4-line packed bit buffer, 5x5 window)
 --   S20     compose views; then interpolator_u dry/wet mix (4 clocks)
 --
--- Compass hue runs on its own small Sobel over window rows 2..4 (one line
--- below the displayed edge row, which is invisible for a hue) so it needs
--- no direction line buffer; S7-S11 compute the 16-sector angle, then a
--- valid-gated shift chain lines it up with the dilated output column.
+-- Compass hue and Heat strength run on their own small Sobel over window
+-- rows 2..4 (one line below the displayed edge row, which is invisible for
+-- a colour) so they need no line buffer; S7-S11 compute the 16-sector angle
+-- and a 4-bit strength, then a valid-gated shift chain lines them up with
+-- the dilated output column.
 --
 -- All line buffers are canonical 1W1R single-process BRAMs, chained by
 -- rewriting each read value one buffer down (inferno lesson).  The dry-video
--- delay for overlay/mix is a 32-deep EBR ring (2 EBR) instead of a 24-stage
--- 30-bit shift register (~700 LCs saved).  ~30 EBR total.
+-- delay for overlay/mix/Source colour is a 32-deep EBR ring (2 EBR) instead
+-- of a 24-stage 30-bit shift register (~700 LCs saved).  ~30 EBR total.
 --
 -- The edge layer is 4 lines above the input row (window centering); the
 -- dry ring is tapped 5 columns late so overlay/mix line up horizontally.
@@ -113,9 +106,9 @@ architecture edgelab of program_top is
         end if;
     end function;
 
-    -- Compass palette: 16 hues (HSV s=0.8 v=0.88), stored as offsets from
-    -- black: Y-64 & (U-512) & (V-512), U/V-swapped BT.601 for hardware.
-    -- Index 8 apart = complementary hue.
+    -- Colour palettes, stored as offsets from black: Y-64 & (U-512) &
+    -- (V-512), U/V-swapped BT.601 for hardware.
+    -- Compass: 16 hues (HSV s=0.8 v=0.88); index 8 apart = complementary.
     function f_pal(i : unsigned(3 downto 0)) return std_logic_vector is
         variable y, u, v : integer;
     begin
@@ -142,6 +135,33 @@ architecture edgelab of program_top is
              & std_logic_vector(to_signed(v, 10));
     end function;
 
+    -- Heat: 16 steps by edge strength, dark red -> orange -> yellow -> white.
+    function f_heat(i : unsigned(3 downto 0)) return std_logic_vector is
+        variable y, u, v : integer;
+    begin
+        case to_integer(i) is
+            when  0 => y :=  78; u :=  133; v :=  -45;
+            when  1 => y := 107; u :=  183; v :=  -62;
+            when  2 => y := 137; u :=  234; v :=  -79;
+            when  3 => y := 166; u :=  284; v :=  -96;
+            when  4 => y := 232; u :=  308; v := -134;
+            when  5 => y := 319; u :=  316; v := -184;
+            when  6 => y := 388; u :=  292; v := -224;
+            when  7 => y := 445; u :=  250; v := -257;
+            when  8 => y := 503; u :=  208; v := -290;
+            when  9 => y := 561; u :=  166; v := -324;
+            when 10 => y := 623; u :=  121; v := -337;
+            when 11 => y := 696; u :=   68; v := -301;
+            when 12 => y := 734; u :=   40; v := -246;
+            when 13 => y := 749; u :=   29; v := -177;
+            when 14 => y := 764; u :=   18; v := -109;
+            when others => y := 823; u :=    7; v :=  -43;
+        end case;
+        return std_logic_vector(to_unsigned(y, 10))
+             & std_logic_vector(to_signed(u, 10))
+             & std_logic_vector(to_signed(v, 10));
+    end function;
+
     ----------------------------------------------------------------------
     -- Line buffers (BRAM)
     ----------------------------------------------------------------------
@@ -162,10 +182,11 @@ architecture edgelab of program_top is
     signal aq             : std_logic_vector(0 downto 0) := (others => '0');
     signal ddq            : std_logic_vector(3 downto 0) := (others => '0');
 
-    -- Dry video delay ring (overlay + mix): 32 x 30 EBR
+    -- Dry video delay ring (overlay + mix + Source colour): 32 x 30 EBR
     type t_ring is array (0 to 31) of std_logic_vector(29 downto 0);
     signal vring : t_ring := (others => (others => '0'));
     signal vr_wp : unsigned(4 downto 0) := (others => '0');
+    signal vr_qa, vr_qb, vr_qc : std_logic_vector(29 downto 0) := (others => '0');
     signal vr_q  : std_logic_vector(29 downto 0) := (others => '0');
     signal vr_q2 : std_logic_vector(29 downto 0) := (others => '0');
 
@@ -190,7 +211,8 @@ architecture edgelab of program_top is
     ----------------------------------------------------------------------
     -- Frame-latched controls
     ----------------------------------------------------------------------
-    signal s_mode   : unsigned(3 downto 0) := (others => '0');
+    signal s_chalk  : std_logic := '0';                       -- S9 Style
+    signal s_cmode  : unsigned(1 downto 0) := (others => '0'); -- K6 Color
     signal s_thr    : unsigned(7 downto 0) := (others => '0');
     signal s_thrlo  : unsigned(7 downto 0) := (others => '0');
     signal s_base   : signed(11 downto 0) := to_signed(512, 12);  -- 512+bright
@@ -200,7 +222,7 @@ architecture edgelab of program_top is
     signal s_thick  : unsigned(2 downto 0) := (others => '0');
     signal s_smooth : std_logic := '0';
     signal s_inv    : std_logic := '0';
-    signal s_col    : std_logic := '0';
+    signal s_col    : std_logic := '0';   -- any colour mode but White
     signal s_ovl    : std_logic := '0';
     signal s_gview  : std_logic := '0';
 
@@ -224,12 +246,10 @@ architecture edgelab of program_top is
     type t_row5 is array (0 to 4) of unsigned(7 downto 0);
     type t_win  is array (0 to 4) of t_row5;
     signal win : t_win := (others => (others => (others => '0')));
-    signal w2x : unsigned(7 downto 0) := (others => '0');  -- win(2) 6th tap
 
     signal a5_ga, a5_gb, a5_gc : unsigned(9 downto 0) := (others => '0');
-    signal a5_ldn : unsigned(11 downto 0) := (others => '0');
 
-    -- Compass hue: Sobel over raw window rows 2..4 (center row 3)
+    -- Compass hue + Heat strength: Sobel over raw window rows 2..4
     signal a5_hdy, hd1, hd2 : signed(8 downto 0) := (others => '0');
     signal h_gx, h_gy       : signed(10 downto 0) := (others => '0');
     signal h_ax, h_ay       : unsigned(10 downto 0) := (others => '0');
@@ -237,8 +257,12 @@ architecture edgelab of program_top is
     signal h_sx1, h_sy1, h_sx2, h_sy2, h_sx3, h_sy3 : std_logic := '0';
     signal h_sw2, h_sw3     : std_logic := '0';
     signal h_na, h_nd       : std_logic := '0';
-    type t_hsr is array (0 to 11) of unsigned(3 downto 0);
+    signal h_ht             : unsigned(3 downto 0) := (others => '0');
+    -- hsr entries: heat (7..4) & hue sector (3..0)
+    type t_hsr is array (0 to 11) of unsigned(7 downto 0);
     signal hsr : t_hsr := (others => (others => '0'));
+    signal src_dy           : unsigned(9 downto 0) := (others => '0');
+    signal src_du, src_dv   : signed(9 downto 0) := (others => '0');
     signal pal_dy           : unsigned(9 downto 0) := (others => '0');
     signal pal_du, pal_dv   : signed(9 downto 0) := (others => '0');
     signal pf_y, pf_u, pf_v : unsigned(9 downto 0) := (others => '0');
@@ -247,41 +271,25 @@ architecture edgelab of program_top is
     signal g_y              : unsigned(9 downto 0) := (others => '0');
 
     ----------------------------------------------------------------------
-    -- S6-S8 LoG / blur / e-columns
+    -- S6-S8 blur / e-columns
     ----------------------------------------------------------------------
-    signal a6_ld : signed(13 downto 0) := (others => '0');
-    signal ld1   : signed(13 downto 0) := (others => '0');
-    signal g1c, g2c, g3c, g4c : unsigned(9 downto 0) := (others => '0');
-    signal t1c, t2c           : unsigned(9 downto 0) := (others => '0');
-    signal b1c, b2c           : unsigned(9 downto 0) := (others => '0');
+    signal g1c, g2c   : unsigned(9 downto 0) := (others => '0');
+    signal t1c, t2c   : unsigned(9 downto 0) := (others => '0');
+    signal b1c, b2c   : unsigned(9 downto 0) := (others => '0');
 
-    signal a7_lp : signed(14 downto 0) := (others => '0');
-    signal a7_ws : unsigned(8 downto 0) := (others => '0');
     signal a7_bt, a7_bm, a7_bb : unsigned(7 downto 0) := (others => '0');
-    signal a8_log : signed(14 downto 0) := (others => '0');
     signal a8_e0, a8_e1, a8_e2 : unsigned(7 downto 0) := (others => '0');
 
     ----------------------------------------------------------------------
-    -- S9 sums + e-column history
+    -- S9-S14 Sobel / Canny direction / Morph
     ----------------------------------------------------------------------
-    signal a9_sp : unsigned(9 downto 0) := (others => '0');
-    signal a9_ss : unsigned(9 downto 0) := (others => '0');
-    signal a9_sc : unsigned(11 downto 0) := (others => '0');
-    signal a9_dy : signed(8 downto 0) := (others => '0');
-    signal sp1, sp2 : unsigned(9 downto 0) := (others => '0');
+    signal a9_ss    : unsigned(9 downto 0) := (others => '0');
+    signal a9_dy    : signed(8 downto 0) := (others => '0');
+    signal a9_e1    : unsigned(7 downto 0) := (others => '0');
     signal ss1, ss2 : unsigned(9 downto 0) := (others => '0');
-    signal sc1, sc2 : unsigned(11 downto 0) := (others => '0');
     signal dy1, dy2 : signed(8 downto 0) := (others => '0');
-    type t_ecol is array (0 to 2) of unsigned(7 downto 0);
-    signal ec0, ec1, ec2 : t_ecol := (others => (others => '0'));
 
-    ----------------------------------------------------------------------
-    -- S10 gradients / ring
-    ----------------------------------------------------------------------
-    signal a10_gxp, a10_gyp : signed(10 downto 0) := (others => '0');
     signal a10_gxs, a10_gys : signed(11 downto 0) := (others => '0');
-    signal a10_gxc, a10_gyc : signed(12 downto 0) := (others => '0');
-    signal a10_r1, a10_r2   : unsigned(7 downto 0) := (others => '0');
     -- Morph: column max/min of the effective 3 rows, then 3-column tree
     signal a9_m02, a9_n02   : unsigned(7 downto 0) := (others => '0');
     signal a10_cmx, a10_cmn : unsigned(7 downto 0) := (others => '0');
@@ -289,43 +297,14 @@ architecture edgelab of program_top is
     signal a11_pmx, a11_pmn, a11_c2x, a11_c2n : unsigned(7 downto 0) := (others => '0');
     signal a12_mx, a12_mn   : unsigned(7 downto 0) := (others => '0');
     signal a13_mor, mor_d   : unsigned(7 downto 0) := (others => '0');
-    signal a10_t9  : unsigned(11 downto 0) := (others => '0');
-    signal a10_l9c : unsigned(11 downto 0) := (others => '0');
-    signal a10_cen : unsigned(7 downto 0) := (others => '0');
-    type t_si is array (0 to 7) of unsigned(9 downto 0);
-    signal a10_si : t_si := (others => (others => '0'));
 
-    ----------------------------------------------------------------------
-    -- S11-S14 magnitudes, Kirsch tree, dir, LoG delay
-    ----------------------------------------------------------------------
-    signal a11_mp  : unsigned(10 downto 0) := (others => '0');
     signal a11_ms  : unsigned(11 downto 0) := (others => '0');
-    signal a11_mc  : unsigned(12 downto 0) := (others => '0');
-    signal a11_rob : unsigned(8 downto 0) := (others => '0');
-    signal a11_lap : unsigned(11 downto 0) := (others => '0');
-    signal a11_t3  : unsigned(12 downto 0) := (others => '0');
     signal a11_ax, a11_ay : unsigned(11 downto 0) := (others => '0');
     signal a11_ds  : std_logic := '0';
-    type t_si4 is array (0 to 3) of unsigned(9 downto 0);
-    type t_si2 is array (0 to 1) of unsigned(9 downto 0);
-    signal simax1, simin1 : t_si4 := (others => (others => '0'));
-    signal simax2, simin2 : t_si2 := (others => (others => '0'));
-    signal simax3, simin3 : unsigned(9 downto 0) := (others => '0');
-    signal t3d1, t3d2 : unsigned(12 downto 0) := (others => '0');
-    signal a14_kir : unsigned(12 downto 0) := (others => '0');
+    signal ms_d1, ms_d2, ms_d3 : unsigned(11 downto 0) := (others => '0');
 
     signal a12_dir : unsigned(1 downto 0) := (others => '0');
     signal dir_d1, dir_d2 : unsigned(1 downto 0) := (others => '0');
-
-    -- pass-along delays to the S15 mux (Kirsch is the long pole)
-    signal mp_d1, mp_d2, mp_d3    : unsigned(10 downto 0) := (others => '0');
-    signal ms_d1, ms_d2, ms_d3    : unsigned(11 downto 0) := (others => '0');
-    signal mc_d1, mc_d2, mc_d3    : unsigned(12 downto 0) := (others => '0');
-    signal rob_d1, rob_d2, rob_d3 : unsigned(8 downto 0) := (others => '0');
-    signal lap_d1, lap_d2, lap_d3 : unsigned(11 downto 0) := (others => '0');
-    signal log_a  : unsigned(13 downto 0) := (others => '0');  -- |log| @S11
-    signal log_d1, log_d2, log_d3 : unsigned(13 downto 0) := (others => '0');
-    signal logp_1, logp_2 : signed(14 downto 0) := (others => '0');
 
     ----------------------------------------------------------------------
     -- S15-S19 mag select, NMS, threshold, dilate
@@ -364,14 +343,29 @@ architecture edgelab of program_top is
     signal s_field_sr : t_bit_shift := (others => '1');
     signal s_avid_sr  : t_bit_shift := (others => '0');
 
-    signal s_mix_t : unsigned(C_DW - 1 downto 0);
+    -- K2 Mix, one registered copy per interpolator: a single shared t
+    -- register fans out to all three multipliers and its first routing
+    -- hop set Fmax (~74.8 MHz HD); keep stops opt_merge re-merging them
+    signal s_mix_ty, s_mix_tu, s_mix_tv : unsigned(C_DW - 1 downto 0)
+        := (others => '0');
+    attribute keep : boolean;
+    attribute keep of s_mix_ty : signal is true;
+    attribute keep of s_mix_tu : signal is true;
+    attribute keep of s_mix_tv : signal is true;
     signal s_interp_y_result, s_interp_u_result, s_interp_v_result
         : unsigned(C_DW - 1 downto 0);
     signal s_interp_y_valid, s_interp_u_valid, s_interp_v_valid : std_logic;
 
 begin
 
-    s_mix_t <= unsigned(registers_in(1));   -- K2 Mix
+    p_mix_t : process(clk)
+    begin
+        if rising_edge(clk) then
+            s_mix_ty <= unsigned(registers_in(1));   -- K2 Mix
+            s_mix_tu <= unsigned(registers_in(1));
+            s_mix_tv <= unsigned(registers_in(1));
+        end if;
+    end process p_mix_t;
 
     ----------------------------------------------------------------------
     -- Main pipeline
@@ -380,15 +374,8 @@ begin
         variable v_sum   : signed(19 downto 0);
         variable v_v     : signed(12 downto 0);
         variable v_wc    : t_row5;
-        variable v_p13   : unsigned(9 downto 0);
-        variable v_p2    : unsigned(8 downto 0);
         variable v_e02   : unsigned(8 downto 0);
-        variable v_tot9  : unsigned(11 downto 0);
-        variable v_ring  : t_si;
         variable v_p10   : unsigned(9 downto 0);
-        variable v_dysum : signed(9 downto 0);
-        variable v_t     : unsigned(11 downto 0);
-        variable v_ka, v_kb : signed(14 downto 0);
         variable v_m     : unsigned(7 downto 0);
         variable v_na, v_nb : unsigned(7 downto 0);
         variable v_keep  : std_logic;
@@ -407,6 +394,9 @@ begin
         variable v_ga    : signed(13 downto 0);
         variable v_sy    : unsigned(9 downto 0);
         variable v_su, v_sv : signed(9 downto 0);
+        variable v_ca, v_cb : signed(10 downto 0);
+        variable v_cd    : signed(11 downto 0);
+        variable v_inv4  : unsigned(3 downto 0);
     begin
         if rising_edge(clk) then
             s_prev_hsync_n <= data_in.hsync_n;
@@ -478,7 +468,6 @@ begin
                         win(r)(c) <= win(r)(c - 1);
                     end loop;
                 end loop;
-                w2x <= win(2)(4);
 
                 -- [1 2 1] vertical sums for blurred rows 1..3
                 a5_ga <= resize(v_wc(0), 10) + resize(v_wc(2), 10)
@@ -487,37 +476,27 @@ begin
                          + shift_left(resize(v_wc(2), 10), 1);
                 a5_gc <= resize(v_wc(2), 10) + resize(v_wc(4), 10)
                          + shift_left(resize(v_wc(3), 10), 1);
-                -- LoG center-column negative part: w0 + 2w1 + 2w3 + w4
-                v_p13 := resize(v_wc(1), 10) + resize(v_wc(3), 10);
-                v_p2  := resize(v_wc(0), 9) + resize(v_wc(4), 9);
-                a5_ldn <= resize(v_p2, 12) + shift_left(resize(v_p13, 12), 1);
-                -- compass hue column term: row 2 (lower) - row 4 (upper)
+                -- colour Sobel column term: row 2 (lower) - row 4 (upper)
                 a5_hdy <= signed(resize(v_wc(2), 9)) - signed(resize(v_wc(4), 9));
 
                 lwx <= lwx + 1;
             end if;
 
             ------------------------------------------------------------------
-            -- S6: LoG center column 16*w2 - ldn; start delay chains
+            -- S6: start the column delay chains
             ------------------------------------------------------------------
             if av(5) = '1' then
-                a6_ld <= signed(shift_left(resize(win(2)(0), 14), 4))
-                         - signed(resize(a5_ldn, 14));
-                g1c <= a5_gb;  g2c <= g1c;  g3c <= g2c;  g4c <= g3c;
+                g1c <= a5_gb;  g2c <= g1c;
                 t1c <= a5_ga;  t2c <= t1c;
                 b1c <= a5_gc;  b2c <= b1c;
                 hd1 <= a5_hdy; hd2 <= hd1;
             end if;
 
             ------------------------------------------------------------------
-            -- S7: LoG partial (center - inner columns); 3x3 Gaussian blur
-            -- (horizontal [1 2 1] over the vertical sums, /16)
+            -- S7: 3x3 Gaussian blur (horizontal [1 2 1] over the vertical
+            -- sums, /16); colour Sobel
             ------------------------------------------------------------------
             if av(6) = '1' then
-                ld1   <= a6_ld;
-                a7_lp <= resize(ld1, 15)
-                         - signed(resize(resize(g1c, 11) + g3c, 15));
-                a7_ws <= resize(win(2)(1), 9) + w2x;
                 a7_bt <= resize(shift_right(resize(t2c, 12)
                          + shift_left(resize(t1c, 12), 1)
                          + resize(a5_ga, 12), 4), 8);
@@ -527,7 +506,7 @@ begin
                 a7_bb <= resize(shift_right(resize(b2c, 12)
                          + shift_left(resize(b1c, 12), 1)
                          + resize(a5_gc, 12), 4), 8);
-                -- compass Sobel, centered on this stage's column (b1c):
+                -- colour Sobel, centered on this stage's column (b1c):
                 -- gx = right - left, gy = lower - upper ([1 2 1] across)
                 h_gx <= signed(resize(a5_gc, 11)) - signed(resize(b2c, 11));
                 h_gy <= resize(a5_hdy, 11) + shift_left(resize(hd1, 11), 1)
@@ -535,12 +514,11 @@ begin
             end if;
 
             ------------------------------------------------------------------
-            -- S8: LoG complete; Smooth mux -> effective 3-row column
+            -- S8: Smooth mux -> effective 3-row column
             -- (e0 = upper row, e1 = center, e2 = lower row)
             ------------------------------------------------------------------
             if av(7) = '1' then
-                a8_log <= a7_lp - signed(resize(a7_ws, 15));
-                -- compass: magnitudes + signs
+                -- colour: magnitudes + signs
                 h_ax  <= f_absu(h_gx);
                 h_ay  <= f_absu(h_gy);
                 h_sx1 <= h_gx(10);
@@ -557,31 +535,22 @@ begin
             end if;
 
             ------------------------------------------------------------------
-            -- S9: per-column detector sums + histories
+            -- S9: Sobel column sums + histories
             ------------------------------------------------------------------
             if av(8) = '1' then
                 v_e02 := resize(a8_e0, 9) + a8_e2;
-                a9_sp <= resize(v_e02, 10) + a8_e1;
                 a9_ss <= resize(v_e02, 10) + shift_left(resize(a8_e1, 10), 1);
-                -- Scharr column: 3*(e0+e2) + 10*e1
-                a9_sc <= resize(v_e02, 12) + shift_left(resize(v_e02, 12), 1)
-                         + shift_left(resize(a8_e1, 12), 3)
-                         + shift_left(resize(a8_e1, 12), 1);
                 a9_dy <= signed(resize(a8_e0, 9)) - signed(resize(a8_e2, 9));
-                sp1 <= a9_sp;  sp2 <= sp1;
+                a9_e1 <= a8_e1;
                 ss1 <= a9_ss;  ss2 <= ss1;
-                sc1 <= a9_sc;  sc2 <= sc1;
                 dy1 <= a9_dy;  dy2 <= dy1;
-                ec0(0) <= a8_e0;  ec0(1) <= a8_e1;  ec0(2) <= a8_e2;
-                ec1 <= ec0;
-                ec2 <= ec1;
                 -- Morph: max/min of the outer pair (one shared compare)
                 if a8_e0 > a8_e2 then
                     a9_m02 <= a8_e0;  a9_n02 <= a8_e2;
                 else
                     a9_m02 <= a8_e2;  a9_n02 <= a8_e0;
                 end if;
-                -- compass: fold to the first octant
+                -- colour: fold to the first octant
                 if h_ay > h_ax then
                     h_sw2 <= '1';  h_a <= h_ay;  h_b <= h_ax;
                 else
@@ -592,34 +561,21 @@ begin
             end if;
 
             ------------------------------------------------------------------
-            -- S10: gradients (center = middle column of the histories),
-            -- Roberts diffs, Laplace terms, Kirsch ring sums
+            -- S10: Sobel gradients (center = middle column of the
+            -- histories); Morph column max/min; colour sector tests
             ------------------------------------------------------------------
             if av(9) = '1' then
-                a10_gxp <= signed(resize(a9_sp, 11)) - signed(resize(sp2, 11));
                 a10_gxs <= signed(resize(a9_ss, 12)) - signed(resize(ss2, 12));
-                a10_gxc <= signed(resize(a9_sc, 13)) - signed(resize(sc2, 13));
-                a10_gyp <= resize(a9_dy, 11) + resize(dy1, 11) + resize(dy2, 11);
                 a10_gys <= resize(a9_dy, 12) + shift_left(resize(dy1, 12), 1)
                            + resize(dy2, 12);
-                v_dysum := resize(a9_dy, 10) + resize(dy2, 10);
-                a10_gyc <= resize(v_dysum, 13)
-                           + shift_left(resize(v_dysum, 13), 1)
-                           + shift_left(resize(dy1, 13), 3)
-                           + shift_left(resize(dy1, 13), 1);
-                -- Roberts cross on the 2x2 (rows e0/e1, this + previous col)
-                a10_r1 <= f_absu(signed(resize(ec1(0), 9))
-                                 - signed(resize(ec0(1), 9)))(7 downto 0);
-                a10_r2 <= f_absu(signed(resize(ec0(0), 9))
-                                 - signed(resize(ec1(1), 9)))(7 downto 0);
                 -- Morph: finish this column's max/min with the center row
-                if ec0(1) > a9_m02 then
-                    a10_cmx <= ec0(1);
+                if a9_e1 > a9_m02 then
+                    a10_cmx <= a9_e1;
                 else
                     a10_cmx <= a9_m02;
                 end if;
-                if ec0(1) < a9_n02 then
-                    a10_cmn <= ec0(1);
+                if a9_e1 < a9_n02 then
+                    a10_cmn <= a9_e1;
                 else
                     a10_cmn <= a9_n02;
                 end if;
@@ -637,38 +593,27 @@ begin
                 else
                     h_nd <= '0';
                 end if;
+                -- heat: strength = max(|gx|,|gy|) / 32, saturating at 15
+                -- (a full-scale luma step is ~1020)
+                if h_a(10 downto 9) /= "00" then
+                    h_ht <= (others => '1');
+                else
+                    h_ht <= h_a(8 downto 5);
+                end if;
                 h_sw3 <= h_sw2;
                 h_sx3 <= h_sx2;
                 h_sy3 <= h_sy2;
-                -- Laplace: 9*center vs 3x3 total
-                v_tot9 := resize(a9_sp, 12) + sp1 + sp2;
-                a10_t9  <= v_tot9;
-                a10_l9c <= shift_left(resize(ec1(1), 12), 3) + ec1(1);
-                a10_cen <= ec1(1);
-                -- Kirsch ring, clockwise from upper-left (row 0 = up)
-                v_ring(0) := resize(ec2(0), 10);   -- UL
-                v_ring(1) := resize(ec1(0), 10);   -- U
-                v_ring(2) := resize(ec0(0), 10);   -- UR
-                v_ring(3) := resize(ec0(1), 10);   -- R
-                v_ring(4) := resize(ec0(2), 10);   -- DR
-                v_ring(5) := resize(ec1(2), 10);   -- D
-                v_ring(6) := resize(ec2(2), 10);   -- DL
-                v_ring(7) := resize(ec2(1), 10);   -- L
-                for i in 0 to 7 loop
-                    a10_si(i) <= v_ring(i) + v_ring((i + 1) mod 8)
-                                 + v_ring((i + 2) mod 8);
-                end loop;
             end if;
 
             ------------------------------------------------------------------
-            -- S11: |gx|+|gy| magnitudes, Roberts/Laplace finals, Kirsch
-            -- 3T and min/max level 1, Canny |gx| |gy| for direction
+            -- S11: |gx|+|gy|, Canny |gx| |gy| for direction, Morph tree
+            -- level 1, colour sector
             ------------------------------------------------------------------
             if av(10) = '1' then
-                a11_mp  <= resize(f_absu(a10_gxp), 11) + f_absu(a10_gyp);
                 a11_ms  <= resize(f_absu(a10_gxs), 12) + f_absu(a10_gys);
-                a11_mc  <= resize(f_absu(a10_gxc), 13) + f_absu(a10_gyc);
-                a11_rob <= resize(a10_r1, 9) + a10_r2;
+                a11_ax  <= f_absu(a10_gxs);
+                a11_ay  <= f_absu(a10_gys);
+                a11_ds  <= a10_gxs(11) xor a10_gys(11);
                 -- Morph: 3-column max/min tree, level 1
                 if a10_cmx > cmx1 then
                     a11_pmx <= a10_cmx;
@@ -707,33 +652,14 @@ begin
                 else
                     v_hs := to_unsigned(16, 5) - v_hq;
                 end if;
-                hsr(0) <= v_hs(3 downto 0);
+                hsr(0) <= h_ht & v_hs(3 downto 0);
                 for i in 1 to 11 loop
                     hsr(i) <= hsr(i - 1);
                 end loop;
-                a11_lap <= f_absu(signed(resize(a10_l9c, 13))
-                                  - signed(resize(a10_t9, 13)))(11 downto 0);
-                v_t := a10_t9 - a10_cen;                       -- ring sum T
-                a11_t3 <= resize(v_t, 13) + shift_left(resize(v_t, 13), 1);
-                for i in 0 to 3 loop
-                    if a10_si(2 * i) > a10_si(2 * i + 1) then
-                        simax1(i) <= a10_si(2 * i);
-                        simin1(i) <= a10_si(2 * i + 1);
-                    else
-                        simax1(i) <= a10_si(2 * i + 1);
-                        simin1(i) <= a10_si(2 * i);
-                    end if;
-                end loop;
-                a11_ax <= f_absu(a10_gxs);
-                a11_ay <= f_absu(a10_gys);
-                a11_ds <= a10_gxs(11) xor a10_gys(11);
-                logp_1 <= a8_log;   -- LoG align: +2 to reach S11 timing
-                logp_2 <= logp_1;
-                log_a  <= f_absu(logp_2)(13 downto 0);
             end if;
 
             ------------------------------------------------------------------
-            -- S12: Canny direction quantize; Kirsch level 2; delays
+            -- S12: Canny direction quantize; Morph level 2
             ------------------------------------------------------------------
             if av(11) = '1' then
                 if a11_ay > shift_left(resize(a11_ax, 13), 1) then
@@ -745,22 +671,7 @@ begin
                 else
                     a12_dir <= "01";
                 end if;
-                for i in 0 to 1 loop
-                    if simax1(2 * i) > simax1(2 * i + 1) then
-                        simax2(i) <= simax1(2 * i);
-                    else
-                        simax2(i) <= simax1(2 * i + 1);
-                    end if;
-                    if simin1(2 * i) < simin1(2 * i + 1) then
-                        simin2(i) <= simin1(2 * i);
-                    else
-                        simin2(i) <= simin1(2 * i + 1);
-                    end if;
-                end loop;
-                t3d1 <= a11_t3;
-                mp_d1 <= a11_mp;  ms_d1 <= a11_ms;  mc_d1 <= a11_mc;
-                rob_d1 <= a11_rob;  lap_d1 <= a11_lap;  log_d1 <= log_a;
-                -- Morph level 2
+                ms_d1 <= a11_ms;
                 if a11_pmx > a11_c2x then
                     a12_mx <= a11_pmx;
                 else
@@ -774,61 +685,33 @@ begin
             end if;
 
             ------------------------------------------------------------------
-            -- S13: Kirsch level 3; delays
+            -- S13: Morph max - min; delays
             ------------------------------------------------------------------
             if av(12) = '1' then
-                if simax2(0) > simax2(1) then
-                    simax3 <= simax2(0);
-                else
-                    simax3 <= simax2(1);
-                end if;
-                if simin2(0) < simin2(1) then
-                    simin3 <= simin2(0);
-                else
-                    simin3 <= simin2(1);
-                end if;
-                t3d2 <= t3d1;
-                dir_d1 <= a12_dir;
-                mp_d2 <= mp_d1;  ms_d2 <= ms_d1;  mc_d2 <= mc_d1;
-                rob_d2 <= rob_d1;  lap_d2 <= lap_d1;  log_d2 <= log_d1;
+                dir_d1  <= a12_dir;
+                ms_d2   <= ms_d1;
                 a13_mor <= a12_mx - a12_mn;
             end if;
 
             ------------------------------------------------------------------
-            -- S14: Kirsch final: max(8*maxSi - 3T, 3T - 8*minSi)
+            -- S14: delays (keeps the v1.2 latency)
             ------------------------------------------------------------------
             if av(13) = '1' then
-                v_ka := signed(resize(shift_left(resize(simax3, 13), 3), 15))
-                        - signed(resize(t3d2, 15));
-                v_kb := signed(resize(t3d2, 15))
-                        - signed(resize(shift_left(resize(simin3, 13), 3), 15));
-                if v_ka > v_kb then
-                    a14_kir <= unsigned(v_ka(12 downto 0));
-                else
-                    a14_kir <= unsigned(v_kb(12 downto 0));
-                end if;
                 dir_d2 <= dir_d1;
-                mp_d3 <= mp_d2;  ms_d3 <= ms_d2;  mc_d3 <= mc_d2;
-                rob_d3 <= rob_d2;  lap_d3 <= lap_d2;  log_d3 <= log_d2;
-                mor_d <= a13_mor;
+                ms_d3  <= ms_d2;
+                mor_d  <= a13_mor;
                 mrx <= mrx + 1;   -- mag-window reads presented this cycle
             end if;
 
             ------------------------------------------------------------------
-            -- S15: normalize every detector to ~0..255, mode mux, blanking
+            -- S15: normalize to ~0..255, style mux, blanking
             ------------------------------------------------------------------
             if av(14) = '1' then
-                case to_integer(s_mode) is
-                    when 0      => v_m := f_c255(shift_right(resize(rob_d3, 9), 1));
-                    when 1      => v_m := f_c255(shift_right(mp_d3, 1));
-                    when 2      => v_m := f_c255(shift_right(ms_d3, 2));
-                    when 3      => v_m := f_c255(shift_right(mc_d3, 4));
-                    when 4      => v_m := f_c255(shift_right(a14_kir, 4));
-                    when 5      => v_m := f_c255(shift_right(lap_d3, 2));
-                    when 6      => v_m := f_c255(shift_right(log_d3, 2));
-                    when 8      => v_m := mor_d;
-                    when others => v_m := f_c255(shift_right(ms_d3, 2));
-                end case;
+                if s_chalk = '1' then
+                    v_m := mor_d;
+                else
+                    v_m := f_c255(shift_right(ms_d3, 2));
+                end if;
                 -- blank warm-up lines (window straddles previous frame) and
                 -- left columns (shift chains carry the previous line's tail)
                 if s_aline < 6 or cbx < 12 then
@@ -856,7 +739,7 @@ begin
             end if;
 
             ------------------------------------------------------------------
-            -- S17: non-maximum suppression (Canny), passthrough otherwise
+            -- S17: non-maximum suppression (Fine), passthrough for Chalk
             ------------------------------------------------------------------
             if av(16) = '1' then
                 case to_integer(dird3) is
@@ -875,7 +758,7 @@ begin
                 if mr1(1) >= v_na and mr1(1) > v_nb then
                     v_keep := '1';
                 end if;
-                if to_integer(s_mode) = 7 and v_keep = '0' then
+                if s_chalk = '0' and v_keep = '0' then
                     a17_mag <= (others => '0');
                 else
                     a17_mag <= mr1(1);
@@ -883,7 +766,7 @@ begin
             end if;
 
             ------------------------------------------------------------------
-            -- S18: threshold; Canny double threshold + causal hysteresis
+            -- S18: threshold; Fine double threshold + causal hysteresis
             ------------------------------------------------------------------
             if av(17) = '1' then
                 v_str := '0';
@@ -894,7 +777,7 @@ begin
                 if a17_mag > s_thrlo then
                     v_wk := '1';
                 end if;
-                if to_integer(s_mode) = 7 then
+                if s_chalk = '0' then
                     v_acc := v_str or (v_wk and (leftacc or aq(0) or aw1 or aw2));
                 else
                     v_acc := v_str;
@@ -967,16 +850,24 @@ begin
                               or v3(0) or v3(1) or v3(2) or v3(3) or v3(4)
                               or v4(0) or v4(1) or v4(2) or v4(3) or v4(4);
                 end case;
-                if obx < 20 then
+                -- left guard, and a top guard: the edge layer trails the
+                -- input by up to 7 rows (window + NMS + 5x5 dilate), so the
+                -- first lines would show the previous frame's bottom rows
+                -- still held in the mag / accept / dilate line buffers
+                if obx < 20 or s_aline < 6 then
                     v_bit := '0';
                 end if;
                 a19_bit <= v_bit;
-                mg_0 <= a18_mag;
+                if s_aline < 6 then
+                    mg_0 <= (others => '0');
+                else
+                    mg_0 <= a18_mag;
+                end if;
                 mg_1 <= mg_0;
                 dwx <= dwx + 1;
                 obx <= obx + 1;
                 -- gradient level (inverted = not-edges); grey ramp 64..924
-                -- and the compass colour scaled by its top 3 bits (8 steps
+                -- and the edge colour scaled by its top 3 bits (8 steps
                 -- of shift-add: three soft multipliers cost 570 LUTs)
                 if s_inv = '1' then
                     v_gm := not mg_1;
@@ -1014,12 +905,61 @@ begin
             end if;
 
             ------------------------------------------------------------------
-            -- S18 (side): compass palette for the column composed at S20;
-            -- hsr(11) is the hue 5 columns behind this token (= the dilated
-            -- output column).  Invert rotates to the complementary hue.
+            -- S17 (side): Source colour from the dry ring, for the column
+            -- composed at S20: Y lifted to 400 + y/2, chroma x2 clamped to
+            -- +-448; Invert takes the complementary chroma.
+            ------------------------------------------------------------------
+            src_dy <= resize(shift_right(unsigned(vr_qa(29 downto 20)), 1), 10) + 336;
+            if s_inv = '1' then
+                v_ca := to_signed(512, 11);
+                v_cb := signed(resize(unsigned(vr_qa(19 downto 10)), 11));
+            else
+                v_ca := signed(resize(unsigned(vr_qa(19 downto 10)), 11));
+                v_cb := to_signed(512, 11);
+            end if;
+            v_cd := shift_left(resize(v_ca - v_cb, 12), 1);
+            if v_cd > 448 then
+                src_du <= to_signed(448, 10);
+            elsif v_cd < -448 then
+                src_du <= to_signed(-448, 10);
+            else
+                src_du <= v_cd(9 downto 0);
+            end if;
+            if s_inv = '1' then
+                v_ca := to_signed(512, 11);
+                v_cb := signed(resize(unsigned(vr_qa(9 downto 0)), 11));
+            else
+                v_ca := signed(resize(unsigned(vr_qa(9 downto 0)), 11));
+                v_cb := to_signed(512, 11);
+            end if;
+            v_cd := shift_left(resize(v_ca - v_cb, 12), 1);
+            if v_cd > 448 then
+                src_dv <= to_signed(448, 10);
+            elsif v_cd < -448 then
+                src_dv <= to_signed(-448, 10);
+            else
+                src_dv <= v_cd(9 downto 0);
+            end if;
+
+            ------------------------------------------------------------------
+            -- S18 (side): edge colour for the column composed at S20;
+            -- hsr(11) is the hue/heat 5 columns behind this token (= the
+            -- dilated output column).  Invert: complementary hue, reversed
+            -- heat ramp.
             ------------------------------------------------------------------
             if av(17) = '1' then
-                v_pal  := f_pal(hsr(11) xor (s_inv & "000"));
+                v_inv4 := (others => s_inv);
+                case to_integer(s_cmode) is
+                    when 3 =>
+                        v_pal := f_heat(hsr(11)(7 downto 4) xor v_inv4);
+                    when 2 =>
+                        v_pal := std_logic_vector(src_dy)
+                               & std_logic_vector(src_du)
+                               & std_logic_vector(src_dv);
+                    when others =>
+                        v_inv4 := (3 => s_inv, others => '0');
+                        v_pal := f_pal(hsr(11)(3 downto 0) xor v_inv4);
+                end case;
                 pal_dy <= unsigned(v_pal(29 downto 20));
                 pal_du <= signed(v_pal(19 downto 10));
                 pal_dv <= signed(v_pal(9 downto 0));
@@ -1040,7 +980,7 @@ begin
                         a20_u <= to_unsigned(512, C_DW);
                         a20_v <= to_unsigned(512, C_DW);
                     end if;
-                elsif a19_bit = '1' and s_col = '1' then -- compass edge
+                elsif a19_bit = '1' and s_col = '1' then -- coloured edge
                     a20_y <= pf_y;
                     a20_u <= pf_u;
                     a20_v <= pf_v;
@@ -1090,26 +1030,19 @@ begin
                 s_aline <= (others => '0');
                 s_seen  <= '0';
 
-                -- latch controls once per frame; K6 Detector has 9 zones
-                -- (1024/9), K1 Thickness 5 (1024/5), K5 Posterize 8.
+                -- latch controls once per frame; K1 Thickness has 5 zones
+                -- (1024/5), K5 Posterize 8, K6 Color 4.
                 -- Labelled defaults: at program load the firmware writes the
                 -- initial_value_label's INDEX (0..N-1) into the register, not
                 -- a 0..1023 position (HW-measured 2026-10-02), so a value
                 -- below the label count is taken as the label index itself.
                 v_k1 := unsigned(registers_in(5));
-                if v_k1 < 9 then
-                    s_mode <= v_k1(3 downto 0);
-                elsif v_k1 < 114 then s_mode <= to_unsigned(0, 4);
-                elsif v_k1 < 228 then s_mode <= to_unsigned(1, 4);
-                elsif v_k1 < 341 then s_mode <= to_unsigned(2, 4);
-                elsif v_k1 < 455 then s_mode <= to_unsigned(3, 4);
-                elsif v_k1 < 569 then s_mode <= to_unsigned(4, 4);
-                elsif v_k1 < 683 then s_mode <= to_unsigned(5, 4);
-                elsif v_k1 < 796 then s_mode <= to_unsigned(6, 4);
-                elsif v_k1 < 910 then s_mode <= to_unsigned(7, 4);
-                else                  s_mode <= to_unsigned(8, 4);
+                if v_k1 < 4 then
+                    s_cmode <= v_k1(1 downto 0);
+                else
+                    s_cmode <= v_k1(9 downto 8);
                 end if;
-                -- P12 glide: ease 1/8 of the way once per field (the
+                -- P12 glide: ease 1/4 of the way once per field (the
                 -- saw-active guard keeps serrated vsync to one step)
                 if s_fseen = '1' then
                     s_fseen <= '0';
@@ -1148,21 +1081,31 @@ begin
                 end if;
                 s_smooth <= registers_in(6)(0);
                 s_inv    <= registers_in(6)(1);
-                s_col    <= registers_in(6)(2);
+                s_chalk  <= registers_in(6)(2);
                 s_ovl    <= registers_in(6)(3);
                 s_gview  <= registers_in(6)(4);
             end if;
 
+            -- any colour mode but White (free-running, out of the vsync cone)
+            if s_cmode /= 0 then
+                s_col <= '1';
+            else
+                s_col <= '0';
+            end if;
+
             ------------------------------------------------------------------
             -- Sensitivity -> threshold, free-running and registered (out of
-            -- the vsync cone): thr = 240 - s*15/16, so 0% still shows the
-            -- strongest edges and 100% (thr 1) floods the frame.
+            -- the vsync cone): thr = 61 - s*15/64, so 0% still shows the
+            -- strongest edges and 100% (thr 1) floods the frame.  (v1.1's
+            -- 240..1 range went black below ~80%: Ron asked for 0..100% to
+            -- cover the old 75..100%.)
             ------------------------------------------------------------------
             s_p12   <= unsigned(registers_in(7));
             s_gstep <= shift_right(signed(shift_left(resize(s_p12, 14), 3))
-                                   - signed(resize(s_gacc, 14)), 3);
-            s_sv    <= s_gacc(12 downto 5) - shift_right(s_gacc(12 downto 5), 4);
-            s_thr   <= to_unsigned(240, 8) - s_sv;
+                                   - signed(resize(s_gacc, 14)), 2);
+            s_sv    <= shift_right(s_gacc(12 downto 5), 2)
+                       - shift_right(s_gacc(12 downto 5), 6);
+            s_thr   <= to_unsigned(61, 8) - s_sv;
             s_thrlo <= '0' & s_thr(7 downto 1);
 
             ------------------------------------------------------------------
@@ -1285,14 +1228,19 @@ begin
     end process p_dd1;
 
     ----------------------------------------------------------------------
-    -- Dry video delay ring: 24 clocks at compose, 25 at the mix dry leg
-    -- (5 columns behind the wet token = the dilated edge column)
+    -- Dry video delay ring: read 20 back, then 3 registers, so vr_q is 24
+    -- clocks at compose and vr_q2 25 at the mix dry leg (5 columns behind
+    -- the wet token = the dilated edge column); vr_qa feeds the Source
+    -- colour 3 stages ahead of compose.
     ----------------------------------------------------------------------
     p_ring : process(clk)
     begin
         if rising_edge(clk) then
             vring(to_integer(vr_wp)) <= data_in.y & data_in.u & data_in.v;
-            vr_q  <= vring(to_integer(vr_wp - 23));  -- +5: edge-layer column
+            vr_qa <= vring(to_integer(vr_wp - 20));
+            vr_qb <= vr_qa;
+            vr_qc <= vr_qb;
+            vr_q  <= vr_qc;
             vr_q2 <= vr_q;
             vr_wp <= vr_wp + 1;
         end if;
@@ -1313,7 +1261,7 @@ begin
             enable => '1',
             a      => unsigned(vr_q2(29 downto 20)),
             b      => a20_y,
-            t      => s_mix_t,
+            t      => s_mix_ty,
             result => s_interp_y_result,
             valid  => s_interp_y_valid
         );
@@ -1330,7 +1278,7 @@ begin
             enable => '1',
             a      => unsigned(vr_q2(19 downto 10)),
             b      => a20_u,
-            t      => s_mix_t,
+            t      => s_mix_tu,
             result => s_interp_u_result,
             valid  => s_interp_u_valid
         );
@@ -1347,7 +1295,7 @@ begin
             enable => '1',
             a      => unsigned(vr_q2(9 downto 0)),
             b      => a20_v,
-            t      => s_mix_t,
+            t      => s_mix_tv,
             result => s_interp_v_result,
             valid  => s_interp_v_valid
         );

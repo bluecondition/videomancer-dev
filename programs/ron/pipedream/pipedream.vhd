@@ -1,39 +1,49 @@
--- pipedream.vhd  (v2.0 — a generative network of glossy 3D pipes)
+-- pipedream.vhd  (v3.0 -- a woven Truchet network of glossy 3D pipes)
 --
--- No video in: this is a SYNTHESIS program.  The screen is tiled by an
--- invisible cell grid; each cell decides which of its four edges carry a pipe
--- by HASHING that edge.  Because an edge is shared by two cells and both hash
--- the same edge coordinate, neighbours always agree -- so the pipes connect by
--- construction, with no stored grid and no neighbour lookups.  The four
--- edge-bits give every join type for free: straight-throughs, elbows, tees and
--- crosses, plus rounded caps at dead-ends.  Connection DENSITY is a knob; the
--- network can also slowly reshuffle (Morph).
+-- The screen is tiled by an invisible cell grid and every cell holds one of
+-- three Truchet tiles: two quarter-circle elbows (either diagonal pairing) or
+-- a straight over/under CROSSING.  Every tile uses each of its four edge
+-- midpoints exactly once, so every pipe is a continuous closed loop (or runs
+-- off-screen) -- no dead ends, no tees, no seams.  Weave (K2) sets how many
+-- tiles are crossings: 0 = pure looping Truchet, 100% = a basket weave whose
+-- over/under alternates on a checkerboard.  Rings (S7) replaces the random
+-- elbow choice with the checkerboard, closing every elbow pair into a ring
+-- (chain mail once crossings join them).
 --
--- Each pipe is a rounded, specular-lit 3D tube (gumball's fake-Phong on the 1-D
--- cross-section: an offset-light field drives a bright diffuse band + a tight
--- white highlight), with a glossy ball at every bend / junction / cap.  Colour
--- is a bright, saturated hue generated straight into chroma -- a flowing
--- rainbow across the screen, or a distinct colour per cell -- drifting over
--- time.  Bright pipes on a near-black field.
+-- IMAGE (S11 on, P12 bipolar): the input's luma sets the tube THICKNESS per
+-- pixel, so the picture is drawn by the weave itself.  Right of centre the
+-- pipes start thin and grow where the picture is bright; left of centre they
+-- start fat and thin where it is bright; centre = plain Fatness.  With Image
+-- off, P12 drives the same thickness from a slow diagonal swell wave.
 --
--- No divide on the pixel path; the per-line dy and the ball's (dy-oy)^2 advance
--- incrementally (adds only).  Per-frame radius / light / range maths + two
--- serial divides run in a ~60-cycle FSM on one shared multiplier in vblank.
+-- Elbows: the exact cross-section rho - wh comes from a sqrt table rebuilt
+-- every vblank (add-only walk), indexed by the incrementally kept rho^2 --
+-- within 0.17 px at every scale, so elbows meet each other and the straights
+-- flush.  Highlights: the light's projection on the local normal goes
+-- through a smooth saturating ROM (soft knee), the same for both families.
+--
+-- Shading: every tube cross-section is normalised to unit radius (d * 64/r,
+-- r = the luma-scaled radius, reciprocal from an EBR ROM), so ONE 256-entry
+-- shading ROM gives the same Phong (Gloss) or banded Chrome profile at any
+-- thickness.  The highlight sits at the light's projection on the local
+-- normal (radial on elbows), clamped so it runs concentric round every bend.
+-- Flow pulses circulate ALONG each loop: the phase is continuous at every
+-- port (N/S ports = 0, E/W ports = half a period) and its direction follows
+-- the Truchet 2-colouring, so a loop's pulses all travel the same way round.
 --
 -- Controls:
---   K1  Scale      (pipe/cell size, 48..176 px)
---   K2  Connections(sparse strands -> dense mesh of tees & crosses)
+--   K1  Scale      (cell size, 32..158 px, always even)
+--   K2  Weave      (pure loops -> all crossings, over/under)
 --   K3  Fatness    (tube radius)
---   K4  Shine      (broad sheen -> pinpoint gloss)
+--   K4  Flow       (liquid-light pulses circulating along the loops)
 --   K5  Hue        (base colour)
 --   K6  Spread     (one solid colour -> full rainbow across the screen)
---   S7  Joints     (Sharp elbows / Beaded ball joints)
---   S8  Colour     (Rainbow flow / Per-cell)
---   S9  Morph      (Static network / slowly reshuffling)
+--   S7  Pattern    (Random / Rings)
+--   S8  Finish     (Gloss / Chrome)
+--   S9  Morph      (Static / slowly reshuffling network)
 --   S10 Light      (Fixed / Spinning highlight)
---   S11 Bypass     (show the input instead)
---   P12 Flow       (THE fader: bright liquid-light pulses coursing ALONG the
---                   pipes; max = the whole network alight)
+--   S11 Image      (thickness from the input's luma / from a swell wave)
+--   P12 Image      (bipolar: bright grows <- centre -> bright thins)
 --
 -- Author: bluecondition
 
@@ -49,17 +59,113 @@ use work.video_timing_pkg.all;
 
 architecture pipedream of program_top is
 
-    constant LATENCY : natural := 17;  -- +3 for the rounded-elbow stages (c3b/c3c/c3d)
+    constant LATENCY : natural := 14;
     constant C_MID : unsigned(9 downto 0) := to_unsigned(512, 10);
-    constant C_MAXCOL : natural := 48;                 -- <= this many cells wide
+    constant C_BLK : unsigned(9 downto 0) := to_unsigned(64, 10);
+    constant C_MAXCOL : natural := 128;                -- <= this many cells wide
 
-    function norm_shift(v : unsigned(15 downto 0)) return natural is
-    begin
-        for i in 15 downto 0 loop
-            if v(i) = '1' then return 15 - i; end if;
-        end loop;
-        return 15;
-    end function;
+    type t_rom256 is array(0 to 255) of std_logic_vector(15 downto 0);
+    -- GEN-BEGIN (gen_tables.py)
+    constant C_KROM : t_rom256 := (
+        x"0000", x"4000", x"2000", x"1555", x"1000", x"0CCD", x"0AAB", x"0925",
+        x"0800", x"071C", x"0666", x"05D1", x"0555", x"04EC", x"0492", x"0444",
+        x"0400", x"03C4", x"038E", x"035E", x"0333", x"030C", x"02E9", x"02C8",
+        x"02AB", x"028F", x"0276", x"025F", x"0249", x"0235", x"0222", x"0211",
+        x"0200", x"01F0", x"01E2", x"01D4", x"01C7", x"01BB", x"01AF", x"01A4",
+        x"019A", x"0190", x"0186", x"017D", x"0174", x"016C", x"0164", x"015D",
+        x"0155", x"014E", x"0148", x"0141", x"013B", x"0135", x"012F", x"012A",
+        x"0125", x"011F", x"011A", x"0116", x"0111", x"010D", x"0108", x"0104",
+        x"0100", x"00FC", x"00F8", x"00F5", x"00F1", x"00ED", x"00EA", x"00E7",
+        x"00E4", x"00E0", x"00DD", x"00DA", x"00D8", x"00D5", x"00D2", x"00CF",
+        x"00CD", x"00CA", x"00C8", x"00C5", x"00C3", x"00C1", x"00BF", x"00BC",
+        x"00BA", x"00B8", x"00B6", x"00B4", x"00B2", x"00B0", x"00AE", x"00AC",
+        x"00AB", x"00A9", x"00A7", x"00A5", x"00A4", x"00A2", x"00A1", x"009F",
+        x"009E", x"009C", x"009B", x"0099", x"0098", x"0096", x"0095", x"0094",
+        x"0092", x"0091", x"0090", x"008E", x"008D", x"008C", x"008B", x"008A",
+        x"0089", x"0087", x"0086", x"0085", x"0084", x"0083", x"0082", x"0081",
+        x"0080", x"007F", x"007E", x"007D", x"007C", x"007B", x"007A", x"0079",
+        x"0078", x"0078", x"0077", x"0076", x"0075", x"0074", x"0073", x"0073",
+        x"0072", x"0071", x"0070", x"006F", x"006F", x"006E", x"006D", x"006D",
+        x"006C", x"006B", x"006A", x"006A", x"0069", x"0068", x"0068", x"0067",
+        x"0066", x"0066", x"0065", x"0065", x"0064", x"0063", x"0063", x"0062",
+        x"0062", x"0061", x"0060", x"0060", x"005F", x"005F", x"005E", x"005E",
+        x"005D", x"005D", x"005C", x"005C", x"005B", x"005B", x"005A", x"005A",
+        x"0059", x"0059", x"0058", x"0058", x"0057", x"0057", x"0056", x"0056",
+        x"0055", x"0055", x"0054", x"0054", x"0054", x"0053", x"0053", x"0052",
+        x"0052", x"0052", x"0051", x"0051", x"0050", x"0050", x"0050", x"004F",
+        x"004F", x"004E", x"004E", x"004E", x"004D", x"004D", x"004D", x"004C",
+        x"004C", x"004C", x"004B", x"004B", x"004A", x"004A", x"004A", x"0049",
+        x"0049", x"0049", x"0048", x"0048", x"0048", x"0048", x"0047", x"0047",
+        x"0047", x"0046", x"0046", x"0046", x"0045", x"0045", x"0045", x"0045",
+        x"0044", x"0044", x"0044", x"0043", x"0043", x"0043", x"0043", x"0042",
+        x"0042", x"0042", x"0042", x"0041", x"0041", x"0041", x"0041", x"0040");
+    constant C_SHADE : t_rom256 := (
+        x"C814", x"C816", x"C81C", x"C825", x"C832", x"C841", x"C853", x"C866",
+        x"C47B", x"BA90", x"B2A4", x"A9B8", x"A1CA", x"9ADA", x"94E7", x"8FF1",
+        x"8CF8", x"8AFD", x"88FF", x"88FF", x"87FF", x"86FF", x"86FF", x"85FF",
+        x"84FF", x"84FF", x"83FF", x"82FF", x"81FF", x"80FF", x"80FF", x"7FFF",
+        x"7EFF", x"7DFF", x"7CFF", x"7BFF", x"7AFF", x"79FF", x"78FF", x"77FF",
+        x"75FF", x"74FF", x"73FF", x"72FF", x"70FF", x"6FFF", x"6EFF", x"6CFF",
+        x"6BFF", x"6AFF", x"68FF", x"67FF", x"65FF", x"64FF", x"62FF", x"60FF",
+        x"5FFF", x"5DFF", x"5BFF", x"5AFF", x"58FF", x"56FF", x"54FF", x"53FF",
+        x"51FF", x"4FFF", x"4DFF", x"4BFF", x"49FF", x"47FF", x"45FF", x"43FF",
+        x"41FF", x"3FFF", x"3DFF", x"3AFF", x"38FF", x"36FF", x"34FF", x"31FF",
+        x"2FFF", x"2DFF", x"2AFF", x"28FF", x"25FF", x"23FF", x"20FF", x"1FFF",
+        x"1FFF", x"1FFF", x"1FFF", x"1FFF", x"1FFF", x"1FFF", x"1FFF", x"1FFF",
+        x"1FFF", x"1FFF", x"1FFF", x"1FFF", x"1FFF", x"1FFF", x"1FFF", x"1FFF",
+        x"1FFF", x"1FFF", x"1FFF", x"1FFF", x"1FFF", x"1FFF", x"1FFF", x"1FFF",
+        x"1FFF", x"1FFF", x"1FFF", x"1FFF", x"1FFF", x"1FFF", x"1FFF", x"1FFF",
+        x"1FFF", x"1FFF", x"1FFF", x"1FFF", x"1FFF", x"1FFF", x"1FFF", x"1FFF",
+        x"C800", x"C800", x"C800", x"C800", x"C800", x"C800", x"C805", x"C815",
+        x"BF2A", x"B23C", x"AA46", x"A746", x"A446", x"A146", x"9D46", x"9946",
+        x"9546", x"9146", x"8C46", x"8846", x"8446", x"8046", x"7C46", x"7946",
+        x"7546", x"7246", x"7046", x"6E46", x"6D46", x"6246", x"4446", x"2646",
+        x"1746", x"1746", x"1264", x"1264", x"1264", x"1764", x"2064", x"2864",
+        x"2B64", x"2C64", x"2D64", x"2F64", x"3164", x"3364", x"3664", x"3864",
+        x"3B64", x"3E64", x"4264", x"4564", x"4864", x"4C64", x"4F64", x"5364",
+        x"5664", x"5964", x"5C64", x"5F64", x"6264", x"6464", x"6664", x"6864",
+        x"6A64", x"6B64", x"6C64", x"6C64", x"6C64", x"6B64", x"6A64", x"6964",
+        x"6764", x"6564", x"6264", x"6064", x"5D64", x"5A64", x"5764", x"5464",
+        x"5164", x"4F64", x"4C64", x"4964", x"4764", x"4564", x"4364", x"4264",
+        x"4164", x"4064", x"4064", x"4064", x"4064", x"4064", x"4064", x"4064",
+        x"4064", x"4064", x"4064", x"4064", x"4064", x"4064", x"4064", x"4064",
+        x"4064", x"4064", x"4064", x"4064", x"4064", x"4064", x"4064", x"4064",
+        x"4064", x"4064", x"4064", x"4064", x"4064", x"4064", x"4064", x"4064",
+        x"4064", x"4064", x"4064", x"4064", x"4064", x"4064", x"4064", x"4064");
+    constant C_SATOFF : t_rom256 := (
+        x"0000", x"0000", x"0001", x"0001", x"0002", x"0002", x"0003", x"0003",
+        x"0004", x"0004", x"0004", x"0005", x"0005", x"0006", x"0006", x"0007",
+        x"0007", x"0007", x"0008", x"0008", x"0008", x"0009", x"0009", x"000A",
+        x"000A", x"000A", x"000B", x"000B", x"000B", x"000C", x"000C", x"000C",
+        x"000C", x"000D", x"000D", x"000D", x"000E", x"000E", x"000E", x"000E",
+        x"000F", x"000F", x"000F", x"000F", x"000F", x"0010", x"0010", x"0010",
+        x"0010", x"0010", x"0011", x"0011", x"0011", x"0011", x"0011", x"0012",
+        x"0012", x"0012", x"0012", x"0012", x"0012", x"0012", x"0013", x"0013",
+        x"0013", x"0013", x"0013", x"0013", x"0013", x"0013", x"0013", x"0014",
+        x"0014", x"0014", x"0014", x"0014", x"0014", x"0014", x"0014", x"0014",
+        x"0014", x"0015", x"0015", x"0015", x"0015", x"0015", x"0015", x"0015",
+        x"0015", x"0015", x"0015", x"0015", x"0015", x"0015", x"0015", x"0015",
+        x"0016", x"0016", x"0016", x"0016", x"0016", x"0016", x"0016", x"0016",
+        x"0016", x"0016", x"0016", x"0016", x"0016", x"0016", x"0016", x"0016",
+        x"0016", x"0016", x"0016", x"0016", x"0016", x"0016", x"0016", x"0016",
+        x"0017", x"0017", x"0017", x"0017", x"0017", x"0017", x"0017", x"0017",
+        x"FFE9", x"FFE9", x"FFE9", x"FFE9", x"FFE9", x"FFE9", x"FFE9", x"FFE9",
+        x"FFE9", x"FFEA", x"FFEA", x"FFEA", x"FFEA", x"FFEA", x"FFEA", x"FFEA",
+        x"FFEA", x"FFEA", x"FFEA", x"FFEA", x"FFEA", x"FFEA", x"FFEA", x"FFEA",
+        x"FFEA", x"FFEA", x"FFEA", x"FFEA", x"FFEA", x"FFEA", x"FFEA", x"FFEA",
+        x"FFEA", x"FFEB", x"FFEB", x"FFEB", x"FFEB", x"FFEB", x"FFEB", x"FFEB",
+        x"FFEB", x"FFEB", x"FFEB", x"FFEB", x"FFEB", x"FFEB", x"FFEB", x"FFEB",
+        x"FFEC", x"FFEC", x"FFEC", x"FFEC", x"FFEC", x"FFEC", x"FFEC", x"FFEC",
+        x"FFEC", x"FFEC", x"FFED", x"FFED", x"FFED", x"FFED", x"FFED", x"FFED",
+        x"FFED", x"FFED", x"FFED", x"FFEE", x"FFEE", x"FFEE", x"FFEE", x"FFEE",
+        x"FFEE", x"FFEE", x"FFEF", x"FFEF", x"FFEF", x"FFEF", x"FFEF", x"FFF0",
+        x"FFF0", x"FFF0", x"FFF0", x"FFF0", x"FFF1", x"FFF1", x"FFF1", x"FFF1",
+        x"FFF1", x"FFF2", x"FFF2", x"FFF2", x"FFF2", x"FFF3", x"FFF3", x"FFF3",
+        x"FFF4", x"FFF4", x"FFF4", x"FFF4", x"FFF5", x"FFF5", x"FFF5", x"FFF6",
+        x"FFF6", x"FFF6", x"FFF7", x"FFF7", x"FFF8", x"FFF8", x"FFF8", x"FFF9",
+        x"FFF9", x"FFF9", x"FFFA", x"FFFA", x"FFFB", x"FFFB", x"FFFC", x"FFFC",
+        x"FFFC", x"FFFD", x"FFFD", x"FFFE", x"FFFE", x"FFFF", x"FFFF", x"0000");
+    -- GEN-END
 
     function f_absu(v : signed) return unsigned is
     begin
@@ -69,24 +175,6 @@ architecture pipedream of program_top is
     function f_b(b : boolean) return std_logic is
     begin
         if b then return '1'; else return '0'; end if;
-    end function;
-
-    -- Saturating highlight-offset map: clamp(4*d, +/-m).  Applied to the SAME
-    -- (light . cross-section) projection d on straights (per-frame) and elbows
-    -- (per-pixel), so the highlight sits at a CONSTANT +/-m offset -- concentric
-    -- with the tube, following an elbow's curve -- except in a short transition
-    -- where d crosses zero; junctions stay flush because both sides map the
-    -- same continuous d.
-    -- Takes d pre-scaled by 4 (keeps 1/4-px resolution through the gain so the
-    -- transition sweep doesn't staircase in 4-px steps).
-    function f_oclamp(d4 : signed(13 downto 0); m : unsigned(8 downto 0)) return signed is
-        variable v : signed(13 downto 0);
-        variable mm : signed(13 downto 0);
-    begin
-        v  := d4;
-        mm := signed(resize(m, 14));
-        if v > mm then v := mm; elsif v < -mm then v := -mm; end if;
-        return resize(v, 12);
     end function;
 
     -- quarter-wave sine ROM (fireworks): sin/cos over 0..2pi, 0 EBR.
@@ -101,6 +189,27 @@ architecture pipedream of program_top is
         to_signed(472, 10), to_signed(477, 10), to_signed(481, 10), to_signed(485, 10), to_signed(489, 10), to_signed(492, 10), to_signed(496, 10), to_signed(499, 10),
         to_signed(501, 10), to_signed(503, 10), to_signed(505, 10), to_signed(507, 10), to_signed(509, 10), to_signed(510, 10), to_signed(510, 10), to_signed(511, 10));
 
+    -- the same quarter-wave pre-scaled by the vivid chroma saturation
+    -- (430/512), so the pixel path needs no saturation multiply
+    constant C_QSAT : t_qsin := (
+        to_signed(  0, 10), to_signed( 11, 10), to_signed( 21, 10), to_signed( 32, 10), to_signed( 42, 10), to_signed( 53, 10), to_signed( 63, 10), to_signed( 73, 10),
+        to_signed( 84, 10), to_signed( 94, 10), to_signed(104, 10), to_signed(114, 10), to_signed(124, 10), to_signed(134, 10), to_signed(144, 10), to_signed(155, 10),
+        to_signed(165, 10), to_signed(174, 10), to_signed(183, 10), to_signed(193, 10), to_signed(202, 10), to_signed(212, 10), to_signed(221, 10), to_signed(229, 10),
+        to_signed(239, 10), to_signed(247, 10), to_signed(255, 10), to_signed(264, 10), to_signed(272, 10), to_signed(281, 10), to_signed(288, 10), to_signed(296, 10),
+        to_signed(303, 10), to_signed(311, 10), to_signed(318, 10), to_signed(325, 10), to_signed(332, 10), to_signed(338, 10), to_signed(344, 10), to_signed(351, 10),
+        to_signed(357, 10), to_signed(363, 10), to_signed(368, 10), to_signed(374, 10), to_signed(379, 10), to_signed(383, 10), to_signed(388, 10), to_signed(392, 10),
+        to_signed(396, 10), to_signed(401, 10), to_signed(404, 10), to_signed(407, 10), to_signed(411, 10), to_signed(413, 10), to_signed(417, 10), to_signed(419, 10),
+        to_signed(421, 10), to_signed(422, 10), to_signed(424, 10), to_signed(426, 10), to_signed(427, 10), to_signed(428, 10), to_signed(428, 10), to_signed(429, 10));
+
+    function f_qsat(a : unsigned(9 downto 0)) return signed is
+        variable v_i : unsigned(5 downto 0);
+        variable v_t : signed(9 downto 0);
+    begin
+        if a(8) = '0' then v_i := a(7 downto 2); else v_i := not a(7 downto 2); end if;
+        v_t := C_QSAT(to_integer(v_i));
+        if a(9) = '1' then return -v_t; else return v_t; end if;
+    end function;
+
     function f_qsin(a : unsigned(9 downto 0)) return signed is
         variable v_i : unsigned(5 downto 0);
         variable v_t : signed(9 downto 0);
@@ -110,29 +219,12 @@ architecture pipedream of program_top is
         if a(9) = '1' then return -v_t; else return v_t; end if;
     end function;
 
-    -- Cheap edge hash: mixes the edge's grid coords + a domain bit + seed into
-    -- 8 bits with a couple of shift-adds and xor-folds (visual variety, not
-    -- crypto).  Deterministic in (a,b,dom) so a shared edge hashes identically
-    -- from either cell.
-    -- Edge hash, SPLIT so the long mix is not one combinational chain: f_hraw
-    -- is the linear add-tree (registered at c1), f_hfold the avalanche (c2).
-    function f_hraw(a : unsigned(6 downto 0); b : unsigned(6 downto 0);
-                    dom : std_logic; seed : unsigned(7 downto 0)) return unsigned is
-        variable h : unsigned(15 downto 0);
-    begin
-        h := (resize(a, 16) sll 5) + (resize(a, 16) sll 2) + resize(a, 16)
-           + (resize(b, 16) sll 7) + (resize(b, 16) sll 4) + (resize(b, 16) sll 1)
-           + resize(seed, 16);
-        if dom = '1' then h := h + to_unsigned(16#B5A3#, 16); end if;
-        return h;
-    end function;
-
-    function f_hfold(h : unsigned(15 downto 0)) return unsigned is
+    -- one add / xorshift hash round (the carries are the nonlinearity)
+    function f_round(h : unsigned(15 downto 0); s1, s2 : natural) return unsigned is
         variable v : unsigned(15 downto 0);
     begin
-        v := h xor (h srl 7);
-        v := v xor (v srl 4);
-        return v(7 downto 0);
+        v := h + shift_left(h, s1);
+        return v xor shift_right(v, s2);
     end function;
 
     ----------------------------------------------------------------------------
@@ -161,52 +253,74 @@ architecture pipedream of program_top is
     signal s_morphp  : unsigned(7 downto 0)  := (others => '0');  -- network reshuffle
     signal s_lightp  : unsigned(9 downto 0)  := (others => '0');  -- spinning light
 
+    -- per-cell tile, hashed a few clocks ahead on the NEXT cell index and
+    -- latched at each cell boundary (the hash changes only once per cell)
+    signal hs_a, hs_b : unsigned(15 downto 0) := (others => '0');
+    signal hs_1, hs_2, hs_3, hs_4, hs_5 : unsigned(15 downto 0) := (others => '0');
+    signal hs_xc, hs_or : std_logic := '0';
+    signal s_cxc, s_cor : std_logic := '0';    -- current cell: crossing / elbow pairing
+
+    -- Ring breaker (Random pattern): the tiles of the cell row ABOVE live in a
+    -- 256-entry EBR (bit1 = crossing, bit0 = pairing), rewritten with the
+    -- current row's FINAL tiles on the first line of each cell row and read
+    -- back on its other lines, so every line of a row sees the same tiles.
+    type t_rt is array (0 to 255) of std_logic_vector(7 downto 0);
+    signal rt_mem  : t_rt;
+    signal rt_ra   : unsigned(7 downto 0) := (others => '0');
+    signal rt_rd, rt_rd2 : std_logic_vector(7 downto 0) := (others => '0');
+    signal rt_we1, rt_we2 : std_logic := '0';
+    signal rt_wa1, rt_wa2 : unsigned(7 downto 0) := (others => '0');
+    signal rt_wd1, rt_wd2 : std_logic_vector(7 downto 0) := (others => '0');
+    signal s_pab   : std_logic_vector(1 downto 0) := (others => '0');   -- above-left's final tile
+    signal s_avid_d : std_logic := '0';
+
+    signal s_yprev : unsigned(9 downto 0) := (others => '0');
+
     ----------------------------------------------------------------------------
     -- Per-frame parameters (latched at vsync, refined by the frame FSM).
     ----------------------------------------------------------------------------
     signal lk1, lk2, lk3, lk4, lk5, lk6, lp12 : unsigned(9 downto 0) := (others => '0');
 
-    signal s_w     : unsigned(7 downto 0) := to_unsigned(96, 8);
+    signal s_w     : unsigned(7 downto 0) := to_unsigned(96, 8);    -- always EVEN (2*wh)
     signal s_wm1   : unsigned(7 downto 0) := to_unsigned(95, 8);
     signal s_wh    : unsigned(7 downto 0) := to_unsigned(48, 8);
+    signal s_wh3   : unsigned(9 downto 0) := to_unsigned(144, 10);   -- 3*wh
+    signal s_wh4   : signed(10 downto 0) := to_signed(192, 11);      -- 4*wh
+    -- wh fans out to every pixel stage: one keep'd copy per consumer so the
+    -- placer can park each beside its sink
+    signal s_whp, s_whq, s_whr, s_whl : unsigned(7 downto 0) := to_unsigned(48, 8);
+    attribute keep : boolean;
+    attribute keep of s_whp, s_whq, s_whr, s_whl : signal is true;
     signal s_rp    : unsigned(7 downto 0) := to_unsigned(96, 8);
     signal s_rpm1  : unsigned(7 downto 0) := to_unsigned(95, 8);
-    signal s_rfrac : unsigned(10 downto 0) := to_unsigned(560, 11);
-    signal s_r     : unsigned(7 downto 0) := to_unsigned(24, 8);
-    signal s_ls    : unsigned(7 downto 0) := to_unsigned(15, 8);
-    signal s_omag  : signed(8 downto 0) := to_signed(15, 9);
-    signal s_es    : unsigned(7 downto 0) := to_unsigned(12, 8);
-    signal s_oh, s_ov : signed(8 downto 0) := (others => '0');
-    signal s_omax : unsigned(8 downto 0) := (others => '0');   -- max(|s_ov|,|s_oh|): shared highlight-offset magnitude
-    signal s_ediff2 : unsigned(15 downto 0) := to_unsigned(1521, 16);
-    signal s_espec2 : unsigned(15 downto 0) := to_unsigned(144, 16);
-    signal s_sle   : unsigned(3 downto 0) := (others => '0');
-    signal s_sls   : unsigned(3 downto 0) := (others => '0');
-    signal s_kd8   : unsigned(7 downto 0) := (others => '0');
-    signal s_ks9   : unsigned(9 downto 0) := (others => '0');
-    signal s_amb   : unsigned(7 downto 0) := to_unsigned(120, 8);
-    signal s_span  : unsigned(7 downto 0) := to_unsigned(135, 8);
-    signal s_speff : unsigned(9 downto 0) := to_unsigned(420, 10);
-    signal s_kshine : unsigned(10 downto 0) := to_unsigned(560, 11);
+    signal s_rfrac : unsigned(10 downto 0) := to_unsigned(300, 11);
+    signal s_r     : unsigned(7 downto 0) := to_unsigned(14, 8);     -- Fatness radius
+    signal s_rmax  : unsigned(7 downto 0) := to_unsigned(19, 8);     -- largest clean radius
+    signal s_pv, s_ph : signed(7 downto 0) := (others => '0');       -- straights' light projection
     signal s_lx, s_ly : signed(9 downto 0) := (others => '0');
-    signal s_lx6, s_ly6 : signed(6 downto 0) := (others => '0');       -- narrowed light dir for the elbow dot-product
+    signal s_lx6, s_ly6 : signed(6 downto 0) := (others => '0');
+    signal s_lxw, s_lyw : signed(7 downto 0) := (others => '0');  -- light dir scaled by 1/wh
 
-    signal s_thresh : unsigned(7 downto 0) := to_unsigned(150, 8);  -- edge density
+    signal s_xthresh : unsigned(8 downto 0) := to_unsigned(100, 9); -- crossing density
     signal s_seed   : unsigned(7 downto 0) := to_unsigned(90, 8);
     signal s_hue    : unsigned(9 downto 0) := (others => '0');
     signal s_hshift : unsigned(2 downto 0) := to_unsigned(3, 3);    -- rainbow scale
-    signal s_sat    : unsigned(9 downto 0) := to_unsigned(430, 10);  -- vivid chroma
 
-    -- rounded-elbow per-frame constants (quarter-torus of radius wh, centred on
-    -- the cell corner the bend wraps).  Membership = squared-distance band;
-    -- shading = linearised radial distance (rho^2 - wh^2) * 1/(2wh).
+    -- Image (P12, bipolar): radius = c0 + c1 * L'/64 (quarter px), where
+    -- L' = luma (right half: bright grows) or 63-luma (left half: bright thins)
+    signal s_a6    : unsigned(5 downto 0) := (others => '0');       -- |P12 - centre|
+    signal s_pos   : std_logic := '1';
+    signal s_c0q   : unsigned(8 downto 0) := to_unsigned(56, 9);
+    signal s_c1q   : unsigned(8 downto 0) := (others => '0');
+    signal s_swp   : unsigned(7 downto 0) := (others => '0');       -- swell-wave phase (Image off)
+
+    -- elbow geometry: quarter-torus of radius wh centred on the cell corner
     signal s_wh2   : unsigned(15 downto 0) := to_unsigned(2304, 16);   -- wh^2
-    signal s_qlo   : unsigned(16 downto 0) := to_unsigned(576, 17);    -- (wh-r)^2
-    signal s_qhi   : unsigned(16 downto 0) := to_unsigned(5184, 17);   -- (wh+r)^2
-    signal s_krec  : unsigned(6 downto 0)  := to_unsigned(43, 7);      -- round(4096/(2wh)): etb = ((u>>6)*krec)>>6, exact at any scale
+    signal s_krec  : unsigned(6 downto 0)  := to_unsigned(43, 7);      -- round(4096/(2wh))
     signal s_twh   : unsigned(8 downto 0)  := to_unsigned(96, 9);      -- 2*wh
     signal s_w2    : unsigned(16 downto 0) := to_unsigned(9216, 17);   -- (2wh)^2  (qxE/qyS reset)
     signal s_w2o   : unsigned(16 downto 0) := to_unsigned(9025, 17);   -- (2wh-1)^2 (interlace-odd reset)
+    signal s_sqs   : unsigned(1 downto 0)  := to_unsigned(1, 2);       -- sqrt-table rho^2 shift
 
     signal s_flowspd : unsigned(9 downto 0) := (others => '0');
     signal s_floww   : unsigned(6 downto 0) := to_unsigned(24, 7);
@@ -214,15 +328,15 @@ architecture pipedream of program_top is
     signal s_flowon  : std_logic := '0';
     signal s_huespd  : unsigned(9 downto 0) := to_unsigned(6, 10);
 
-    signal s_round  : std_logic := '1';                -- S7 (1 = rounded elbows, 0 = square)
-    signal s_percell : std_logic := '0';               -- S8 (1 = per-cell colour)
+    signal s_rings  : std_logic := '0';                -- S7
+    signal s_chrome : std_logic := '0';                -- S8
     signal s_morph  : std_logic := '0';                -- S9
     signal s_spin   : std_logic := '0';                -- S10
-    signal s_bypass : std_logic := '0';                -- S11
+    signal s_image  : std_logic := '1';                -- S11
 
     signal fsm_t   : unsigned(7 downto 0) := (others => '1');
     signal ma, mb  : signed(12 downto 0) := (others => '0');
-    signal mp      : signed(25 downto 0) := (others => '0');
+    signal mpa, mp : signed(25 downto 0) := (others => '0');
     signal div_run : std_logic := '0';
     signal div_cnt : unsigned(4 downto 0) := (others => '0');
     signal div_d   : unsigned(17 downto 0) := (others => '0');
@@ -230,96 +344,117 @@ architecture pipedream of program_top is
     signal div_rem : unsigned(8 downto 0)  := (others => '0');
     signal div_v   : unsigned(7 downto 0)  := (others => '1');
 
+    -- Exact elbow cross-section: a 2048-entry table of round(4*rho) - 4wh
+    -- against rho^2 >> sqs, rebuilt in vblank by an add-only integer sqrt
+    -- walk (~2.6k clocks), read once per pixel.
+    type t_sq is array (0 to 2047) of std_logic_vector(15 downto 0);
+    signal sqtab   : t_sq;
+    signal sb_go, sb_run : std_logic := '0';
+    signal sb_k    : unsigned(10 downto 0) := (others => '0');
+    signal sb_r4   : unsigned(9 downto 0)  := (others => '0');
+    signal sb_msq, sb_inc, sb_tgt, sb_step : unsigned(21 downto 0) := (others => '0');
+    signal bw_we   : std_logic := '0';
+    signal bw_addr : unsigned(10 downto 0) := (others => '0');
+    signal bw_data : std_logic_vector(15 downto 0) := (others => '0');
+
     ----------------------------------------------------------------------------
-    -- Per-line dy and ball (dy-oy)^2, incremental at each h edge.
+    -- Per-line dy and the corner-distance squares, incremental.
     ----------------------------------------------------------------------------
     signal lm_dy   : signed(9 downto 0) := (others => '0');
-
-    -- Corner-distance squares for the rounded elbow, kept incrementally (adds
-    -- only, NO multiply): qxW/qxE = (dx+wh)^2 / (dx-wh)^2 per pixel; qyN/qyS =
-    -- (dy+wh)^2 / (dy-wh)^2 per line.  rho^2 to the bend corner = pick one of
-    -- each by the cell's ports and add.
+    signal ln_n, ln_s : signed(10 downto 0) := (others => '0');   -- next line's (dy+wh), (dy-wh), precomputed
+    -- qxW/qxE = (dx+wh)^2 / (dx-wh)^2 per pixel; qyN/qyS = (dy+wh)^2 /
+    -- (dy-wh)^2 per line.  rho^2 to an elbow's corner = one of each, added.
     signal qxW, qxE : unsigned(15 downto 0) := (others => '0');
     signal qyN, qyS : unsigned(15 downto 0) := (others => '0');
 
     ----------------------------------------------------------------------------
     -- Pixel pipeline.
     ----------------------------------------------------------------------------
-    signal g0_dx   : signed(9 downto 0) := (others => '0');
-    signal g0_dy   : signed(9 downto 0) := (others => '0');
-    signal g0_xf, g0_yf : unsigned(11 downto 0) := (others => '0');
-    signal g0_hN, g0_hS, g0_hE, g0_hW : unsigned(15 downto 0) := (others => '0');
-    signal g0_ang  : unsigned(9 downto 0) := (others => '0');
-    signal g0_qxw, g0_qxe, g0_qyn, g0_qys : unsigned(15 downto 0) := (others => '0');
+    signal g0_dx, g0_dy : signed(9 downto 0) := (others => '0');
+    signal g0_qx, g0_qy : unsigned(15 downto 0) := (others => '0');
+    signal g0_cN, g0_cE : std_logic := '0';
+    signal g0_xc, g0_par : std_logic := '0';
+    signal g0_l    : unsigned(5 downto 0) := (others => '0');
 
-    signal p2_absdx, p2_absdy : unsigned(9 downto 0) := (others => '0');
-    signal p2_dx, p2_dy : signed(9 downto 0) := (others => '0');
-    signal p2_xf, p2_yf : unsigned(11 downto 0) := (others => '0');
-    signal p2_mask : std_logic_vector(3 downto 0) := (others => '0');  -- N S E W
+    signal p2_rho2 : unsigned(16 downto 0) := (others => '0');
+    signal p2_excx, p2_eycy : signed(9 downto 0) := (others => '0');
+    signal p2_aex, p2_d1 : signed(10 downto 0) := (others => '0');  -- |excx|, |eycy| + wh
+    signal p2_lp   : unsigned(5 downto 0) := (others => '0');       -- L' (Image drive)
+    signal p2_dxc, p2_dyc : signed(6 downto 0) := (others => '0');
+    signal p2_adx, p2_ady : unsigned(6 downto 0) := (others => '0');
+    signal p2_xc, p2_par : std_logic := '0';
 
-    signal p2_qxw, p2_qxe, p2_qyn, p2_qys : unsigned(15 downto 0) := (others => '0');
+    signal p3_sqa  : unsigned(10 downto 0) := (others => '0');      -- sqrt-table address
+    signal p3_mx, p3_my : signed(17 downto 0) := (others => '0');
+    signal p3_rpm  : unsigned(14 downto 0) := (others => '0');
+    signal p3_alarc : signed(10 downto 0) := (others => '0');
+    signal p3_dxc, p3_dyc : signed(6 downto 0) := (others => '0');
+    signal p3_adx, p3_ady : unsigned(6 downto 0) := (others => '0');
+    signal p3_xc, p3_par : std_logic := '0';
 
-    signal p3_hit  : std_logic := '0';
-    signal p3_et   : signed(11 downto 0) := (others => '0');
-    signal p3_along : signed(12 downto 0) := (others => '0');
+    signal p4_sq   : std_logic_vector(15 downto 0) := (others => '0');  -- sqrt table (EBR) out
+    signal p4_do   : signed(7 downto 0) := (others => '0');
+    signal p4_rp4  : unsigned(7 downto 0) := (others => '0');     -- tube radius, 1/4 px
+    signal p4_alarc : signed(10 downto 0) := (others => '0');
+    signal p4_dxc, p4_dyc : signed(6 downto 0) := (others => '0');
+    signal p4_adx, p4_ady : unsigned(6 downto 0) := (others => '0');
+    signal p4_xc, p4_par : std_logic := '0';
 
+    signal p5_e4   : signed(9 downto 0) := (others => '0');       -- elbow cross-section, 1/4 px
+    signal p5_k    : unsigned(14 downto 0) := (others => '0');    -- K ROM (EBR) out
+    signal p5_saddr : unsigned(7 downto 0) := (others => '0');
+    signal p5_dcr  : signed(6 downto 0) := (others => '0');
+    signal p5_rp4  : unsigned(7 downto 0) := (others => '0');
+    signal p5_alarc : signed(10 downto 0) := (others => '0');
+    signal p5_adx, p5_ady : unsigned(6 downto 0) := (others => '0');
+    signal p5_strH, p5_shad, p5_xc, p5_par : std_logic := '0';
 
-    -- rounded-elbow: rho^2 to the bend corner (c3, picked from the accumulators),
-    -- then the two inserted stages (u = rho^2-wh^2, then the isolated linearise).
-    signal p3_rho2 : unsigned(16 downto 0) := (others => '0');
-    signal p3_elb  : std_logic := '0';
-    signal p3_excx, p3_eycy : signed(9 downto 0) := (others => '0');   -- corner-relative coords (radial dir)
-    signal p3b_mx, p3b_my   : signed(16 downto 0) := (others => '0');  -- light . radial  (dot-product terms)
+    signal p6_off  : std_logic_vector(15 downto 0) := (others => '0');  -- offset ROM (EBR) out
+    signal p6_k    : unsigned(14 downto 0) := (others => '0');
+    signal p6_d4   : signed(8 downto 0) := (others => '0');
+    signal p6_hit  : std_logic := '0';
+    signal p6_al   : signed(10 downto 0) := (others => '0');
+    signal p6_shad : std_logic := '0';
 
-    signal p3b_ehit  : std_logic := '0';                         -- rho^2 band test (done at c3b)
-    signal p3b_u     : signed(17 downto 0) := (others => '0');   -- rho^2 - wh^2
-    signal p3b_et    : signed(11 downto 0) := (others => '0');
-    signal p3b_hit, p3b_elb : std_logic := '0';
-    signal p3b_along : signed(12 downto 0) := (others => '0');
+    signal p7_off  : signed(7 downto 0) := (others => '0');
+    signal p7_ph   : signed(17 downto 0) := (others => '0');      -- d4 * K split hi/lo
+    signal p7_pl   : signed(16 downto 0) := (others => '0');
+    signal p7_aln  : unsigned(7 downto 0) := (others => '0');
+    signal p7_shad : std_logic := '0';
 
+    signal p8_dn   : signed(7 downto 0) := (others => '0');
+    signal p8_off  : signed(7 downto 0) := (others => '0');
+    signal p8_aln  : unsigned(7 downto 0) := (others => '0');
+    signal p8_shad : std_logic := '0';
 
-    signal p3c_et    : signed(11 downto 0) := (others => '0');   -- straight-tube cross-section (carried)
-    signal p3c_ets   : signed(11 downto 0) := (others => '0');   -- elbow cross-section, scaled to px
-    signal p3c_do    : signed(11 downto 0) := (others => '0');   -- raw x4 light projection (pre-clamp)
-    signal p3c_elb, p3c_ehit, p3c_hit : std_logic := '0';
-    signal p3c_along : signed(12 downto 0) := (others => '0');
+    signal p9_addr : unsigned(7 downto 0) := (others => '0');
+    signal p9_rim  : unsigned(1 downto 0) := (others => '0');
+    signal p9_fph  : unsigned(6 downto 0) := (others => '0');
+    signal p9_shad : std_logic := '0';
 
-    signal p3d_et    : signed(11 downto 0) := (others => '0');
-    signal p3d_hit   : std_logic := '0';
-    signal p3d_along : signed(12 downto 0) := (others => '0');
+    signal p10_sh   : std_logic_vector(15 downto 0) := (others => '0');  -- shade ROM (EBR) out
+    signal p10_rim  : unsigned(1 downto 0) := (others => '0');
+    signal p10_flow : unsigned(9 downto 0) := (others => '0');
+    signal p10_shad : std_logic := '0';
 
+    signal p11_y8, p11_cf : unsigned(7 downto 0) := (others => '0');
+    signal p11_rim  : unsigned(1 downto 0) := (others => '0');
+    signal p11_flow : unsigned(9 downto 0) := (others => '0');
+    signal p11_shad : std_logic := '0';
+    signal p11_ang  : unsigned(9 downto 0) := (others => '0');
 
-    signal p4_e2   : unsigned(16 downto 0) := (others => '0');
-    signal p5_dl   : unsigned(15 downto 0) := (others => '0');
-    signal p5_ds   : unsigned(15 downto 0) := (others => '0');
-    signal p6_dlc  : unsigned(15 downto 0) := (others => '0');
-    signal p6_dsc  : unsigned(15 downto 0) := (others => '0');
-    signal p7_dlb  : unsigned(7 downto 0) := (others => '0');
-    signal p7_dsb  : unsigned(7 downto 0) := (others => '0');
-    signal p8_pl   : unsigned(15 downto 0) := (others => '0');
-    signal p8_ps   : unsigned(17 downto 0) := (others => '0');
-    signal p8_flow : unsigned(9 downto 0) := (others => '0');
-    signal p9_l    : unsigned(7 downto 0) := (others => '0');
-    signal p9_s    : unsigned(9 downto 0) := (others => '0');
-    signal p9_flow : unsigned(9 downto 0) := (others => '0');
-    signal p10_cf  : unsigned(7 downto 0) := (others => '0');
-    signal p10_y   : unsigned(9 downto 0) := (others => '0');
-    signal p11_um, p11_vm : signed(19 downto 0) := (others => '0');
-    signal p11_y   : unsigned(9 downto 0) := (others => '0');
-    signal p12_y, p12_u, p12_v : unsigned(9 downto 0) := C_MID;
-
-    -- carry pipes (from c3)
-    type t_c10 is array (natural range <>) of unsigned(9 downto 0);
-    -- hue rides the pipe as its 10-bit ANGLE and becomes chroma only at the
-    -- end (qsin at c9, saturation multiply + clamp at c10): one carried value
-    -- instead of two, ~110 fewer flops than carrying U/V chroma from c3.
-    signal angA : t_c10(0 to 9) := (others => (others => '0'));
+    signal p12_y    : unsigned(9 downto 0) := (others => '0');
+    signal p12_cf   : unsigned(5 downto 0) := (others => '0');
     signal cosR, sinR : signed(9 downto 0) := (others => '0');
-    signal scu, scv   : signed(9 downto 0) := (others => '0');
-    signal hitA : std_logic_vector(0 to 8) := (others => '0');
+    signal p13_um, p13_vm : signed(16 downto 0) := (others => '0');
+    signal p13_y    : unsigned(9 downto 0) := (others => '0');
+    signal p14_y, p14_u, p14_v : unsigned(9 downto 0) := C_MID;
 
-    type t_pipe is array (natural range <>) of t_video_stream_yuv444_30b;
-    signal pipe : t_pipe(0 to LATENCY - 1);
+    signal hitA : std_logic_vector(0 to 6) := (others => '0');
+
+    -- syncs ride a 4-bit pipe (hsync, vsync, avid, field)
+    type t_sync is array (natural range <>) of std_logic_vector(3 downto 0);
+    signal syncp : t_sync(0 to LATENCY - 1) := (others => (others => '1'));
     signal s_io : t_video_stream_yuv444_30b;
 
 begin
@@ -347,6 +482,7 @@ begin
                 s_huep   <= s_huep + s_huespd;
                 if s_morph = '1' then s_morphp <= s_morphp + 1; end if;
                 if s_spin  = '1' then s_lightp <= s_lightp + 3; end if;
+                s_swp    <= s_swp + 1;
             end if;
 
             if v_h_edge = '1' then
@@ -390,6 +526,87 @@ begin
     end process p_position;
 
     ----------------------------------------------------------------------------
+    -- Cell hash pipe: hashes the cell that comes NEXT (x_idx+1 during active
+    -- video, x_idx = 0 in blanking); 7 clocks deep, cells are >= 32 px wide.
+    ----------------------------------------------------------------------------
+    p_hash : process(clk)
+        variable v_a : unsigned(6 downto 0);
+        variable v_m : unsigned(7 downto 0);
+    begin
+        if rising_edge(clk) then
+            if data_in.avid = '1' then v_a := x_idx + 1; else v_a := x_idx; end if;
+            hs_a <= (resize(v_a, 16) sll 5) + (resize(v_a, 16) sll 2) + resize(v_a, 16);          -- a*37
+            hs_b <= (resize(celly_idx, 16) sll 7) + (resize(celly_idx, 16) sll 4)
+                  + (resize(celly_idx, 16) sll 1) + resize(s_seed, 16);                            -- b*146 + seed
+            hs_1 <= hs_a + hs_b;
+            hs_2 <= f_round(hs_1, 5, 3);
+            hs_3 <= f_round(hs_2, 4, 10);
+            hs_4 <= f_round(hs_3, 9, 7);
+            hs_5 <= f_round(hs_4, 8, 4);
+            hs_xc <= f_b(('0' & (hs_5(7 downto 0) + s_morphp)) < s_xthresh);
+            v_m := hs_5(15 downto 8) + s_morphp;
+            hs_or <= v_m(7);
+        end if;
+    end process p_hash;
+
+    ----------------------------------------------------------------------------
+    -- Tile latch + ring breaker.  A lone ring closes round a grid vertex
+    -- exactly when the four cells around it are elbows with the vertex-facing
+    -- pairing: above-left NW/SE, above NE/SW, left NE/SW, this cell NW/SE.
+    -- Each cell checks its own top-left vertex against the FINAL tiles of its
+    -- left, above and above-left neighbours and, if it would close a ring,
+    -- takes the NE/SW pairing instead.  Scanning left-to-right, top-to-bottom,
+    -- every vertex is checked once with its other three cells already final,
+    -- so no lone ring survives anywhere.  Random pattern only (Rings wants
+    -- them).  Target t = the cell the hash pipe is working on (x_idx+1 in
+    -- active video, 0 in blanking); its row-above tile is read 3 clocks
+    -- after t settles, the hash 7 clocks after, the latch >= 32 clocks after.
+    ----------------------------------------------------------------------------
+    p_tiles : process(clk)
+        variable v_first, v_ring : boolean;
+        variable v_fin : std_logic_vector(1 downto 0);
+    begin
+        if rising_edge(clk) then
+            s_avid_d <= data_in.avid;
+            if data_in.avid = '1' then rt_ra <= resize(x_idx, 8) + 1; else rt_ra <= (others => '0'); end if;
+            rt_rd  <= rt_mem(to_integer(rt_ra));
+            rt_rd2 <= rt_rd;
+
+            v_first := celly_loc = 0;
+            v_ring  := s_rings = '0' and celly_idx /= 0 and data_in.avid = '1'
+                       and hs_xc = '0' and hs_or = '1'                  -- this cell: NW/SE elbows
+                       and s_cxc = '0' and s_cor = '0'                  -- left:  NE/SW elbows
+                       and rt_rd2(1 downto 0) = "00"                    -- above: NE/SW elbows
+                       and s_pab = "01";                                -- above-left: NW/SE elbows
+            if not v_first then
+                v_fin := rt_rd2(1 downto 0);                           -- this row, stored on its first line
+            elsif v_ring then
+                v_fin := "00";
+            else
+                v_fin := hs_xc & hs_or;
+            end if;
+
+            rt_we1 <= '0';
+            if data_in.avid = '0' or x_loc = s_wm1 then
+                s_cxc <= v_fin(1); s_cor <= v_fin(0);
+                if v_first then
+                    s_pab <= rt_rd2(1 downto 0);
+                    if data_in.avid = '1' then                           -- store cell t's final tile
+                        rt_we1 <= '1'; rt_wa1 <= resize(x_idx, 8) + 1; rt_wd1 <= "000000" & v_fin;
+                    end if;
+                end if;
+            end if;
+            if v_first and data_in.avid = '1' and s_avid_d = '0' then     -- cell 0, at the line's first pixel
+                rt_we1 <= '1'; rt_wa1 <= (others => '0'); rt_wd1 <= "000000" & s_cxc & s_cor;
+            end if;
+            -- writes land two clocks late, after the read address has moved on
+            -- (EBR read-during-write at one address is undefined)
+            rt_we2 <= rt_we1; rt_wa2 <= rt_wa1; rt_wd2 <= rt_wd1;
+            if rt_we2 = '1' then rt_mem(to_integer(rt_wa2)) <= rt_wd2; end if;
+        end if;
+    end process p_tiles;
+
+    ----------------------------------------------------------------------------
     -- Per-line dy and the elbow corner y-squares (adds only).
     ----------------------------------------------------------------------------
     p_line : process(clk)
@@ -400,11 +617,10 @@ begin
             variable v : signed(18 downto 0);
         begin v := signed(resize(sq, 19)) + resize(dn & "00", 19) - 4; return unsigned(v(15 downto 0)); end function;
         variable v_hh  : signed(9 downto 0);
-        variable v_ynn, v_yns : signed(10 downto 0);   -- new (dy+wh), (dy-wh)
     begin
         if rising_edge(clk) then
             if r_hedge = '1' or r_anchor = '1' then
-                v_hh := signed(resize(s_wh, 10));
+                v_hh := signed(resize(s_whl, 10));
                 if celly_loc = 0 then
                     if s_ilace = '1' and s_fodd = '1' then
                         lm_dy <= -v_hh + 1;
@@ -415,29 +631,32 @@ begin
                     end if;
                 elsif s_ilace = '1' then
                     lm_dy <= lm_dy + 2;
-                    v_ynn := resize(lm_dy + 2, 11) + signed(resize(s_wh, 11));
-                    v_yns := resize(lm_dy + 2, 11) - signed(resize(s_wh, 11));
-                    qyN <= upd2(qyN, v_ynn); qyS <= upd2(qyS, v_yns);
+                    qyN <= upd2(qyN, ln_n); qyS <= upd2(qyS, ln_s);
                 else
                     lm_dy <= lm_dy + 1;
-                    v_ynn := resize(lm_dy + 1, 11) + signed(resize(s_wh, 11));
-                    v_yns := resize(lm_dy + 1, 11) - signed(resize(s_wh, 11));
-                    qyN <= upd1(qyN, v_ynn); qyS <= upd1(qyS, v_yns);
+                    qyN <= upd1(qyN, ln_n); qyS <= upd1(qyS, ln_s);
                 end if;
             end if;
+            -- lm_dy only moves at an h edge (>= 858 clocks apart), so the next
+            -- line's corner offsets are precomputed here, off the update path
+            if s_ilace = '1' then v_hh := to_signed(2, 10); else v_hh := to_signed(1, 10); end if;
+            ln_n <= resize(lm_dy + v_hh, 11) + signed(resize(s_whl, 11));
+            ln_s <= resize(lm_dy + v_hh, 11) - signed(resize(s_whl, 11));
         end if;
     end process p_line;
 
     ----------------------------------------------------------------------------
-    -- Frame FSM: knob shaping, light vector, ranges, 2 serial divides.
+    -- Frame FSM: knob shaping, radius, Image coefficients, light vector, the
+    -- 1/(2wh) divide; kicks the sqrt-table builder.
     ----------------------------------------------------------------------------
     p_frame : process(clk)
-        variable v_w   : integer range 0 to 255;
-        variable v_hpo : signed(10 downto 0);
+        variable v_wh  : integer range 0 to 255;
         variable v_acc : unsigned(9 downto 0);
     begin
         if rising_edge(clk) then
-            mp <= ma * mb;
+            mpa <= ma * mb;                      -- product valid 3 clocks after ma/mb
+            mp  <= mpa;
+            sb_go <= '0';
             if div_run = '1' then
                 v_acc := (div_rem & div_d(17)) - resize(div_v, 10);
                 if v_acc(9) = '0' then
@@ -459,117 +678,105 @@ begin
                 lk5  <= unsigned(registers_in(4)(9 downto 0));
                 lk6  <= unsigned(registers_in(5)(9 downto 0));
                 lp12 <= unsigned(registers_in(7)(9 downto 0));
-                s_round   <= registers_in(6)(0);
-                s_percell <= registers_in(6)(1);
+                s_rings   <= registers_in(6)(0);
+                s_chrome  <= registers_in(6)(1);
                 s_morph   <= registers_in(6)(2);
                 s_spin    <= registers_in(6)(3);
-                s_bypass  <= registers_in(6)(4);
+                s_image   <= registers_in(6)(4);
                 fsm_t <= (others => '0');
             elsif fsm_t /= x"FF" then
                 fsm_t <= fsm_t + 1;
                 case to_integer(fsm_t) is
                     when 0 =>
-                        v_w := 48 + to_integer(lk1(9 downto 3));   -- 48..175
-                        if v_w > 176 then v_w := 176; end if;
-                        s_w      <= to_unsigned(v_w, 8);
-                        s_rfrac  <= resize(to_unsigned(430, 11) + lk3(9 downto 1), 11);  -- radius frac
-                        s_kshine <= to_unsigned(1088, 11) - resize(lk4, 11);
-                        s_thresh <= resize(to_unsigned(70, 8) + lk2(9 downto 3), 8);     -- density
+                        -- cells are always an EVEN width, so every grid vertex sits
+                        -- on a pixel centre and neighbouring cells share it exactly
+                        v_wh := 16 + to_integer(lk1(9 downto 4));   -- 16..79
+                        s_wh     <= to_unsigned(v_wh, 8);
+                        s_w      <= to_unsigned(2 * v_wh, 8);
+                        -- r = w*rfrac/2048 = (0.12..0.40)*wh: elbow pairs kiss
+                        -- at the cell centre at 0.41*wh, so the top stays clear
+                        s_rfrac  <= resize(to_unsigned(120, 11) + lk3(9 downto 2) + lk3(9 downto 5), 11);
+                        s_xthresh <= resize(lk2(9 downto 2), 9) + resize(lk2(9 downto 9), 9);  -- 0..256
                         s_hue    <= lk5;
-                        s_hshift <= resize(7 - lk6(9 downto 7), 3);                      -- high Spread = small shift = more rainbow
-                        s_flowspd <= resize(lp12(9 downto 3), 10);
-                        s_floww   <= resize(to_unsigned(8, 7) + lp12(9 downto 5), 7);
-                        s_flowg   <= resize(lp12(9 downto 8), 3);
-                        if lp12 > 32 then s_flowon <= '1'; else s_flowon <= '0'; end if;
+                        s_hshift <= resize(7 - lk6(9 downto 7), 3);                      -- high Spread = more rainbow
+                        if lp12(9) = '1' then s_pos <= '1'; s_a6 <= lp12(8 downto 3);
+                        else                  s_pos <= '0'; s_a6 <= not lp12(8 downto 3); end if;
+                        s_flowspd <= resize(lk4(9 downto 3), 10);
+                        s_floww   <= resize(to_unsigned(8, 7) + lk4(9 downto 5), 7);
+                        s_flowg   <= resize(lk4(9 downto 8), 3);
+                        if lk4 > 32 then s_flowon <= '1'; else s_flowon <= '0'; end if;
                         if s_spin = '1' then s_lx <= f_qsin(s_lightp + 256); s_ly <= f_qsin(s_lightp);
-                        else                 s_lx <= f_qsin(to_unsigned(160, 10)); s_ly <= f_qsin(to_unsigned(160, 10)); end if;
+                        else                 s_lx <= f_qsin(to_unsigned(672, 10)); s_ly <= f_qsin(to_unsigned(672, 10)); end if;  -- upper-left
                     when 1 =>
                         s_wm1 <= s_w - 1;
-                        s_wh  <= '0' & s_w(7 downto 1);
-                        if s_ilace = '1' then s_rp <= '0' & s_w(7 downto 1); else s_rp <= s_w; end if;
+                        s_twh <= s_wh & '0';                 -- 2*wh
+                        if s_ilace = '1' then s_rp <= s_wh; else s_rp <= s_w; end if;
+                        s_whp <= s_wh; s_whq <= s_wh; s_whr <= s_wh; s_whl <= s_wh;
+                        s_lx6 <= resize(shift_right(s_lx, 3), 7);
+                        s_ly6 <= resize(shift_right(s_ly, 3), 7);
                         ma <= signed(resize(s_w, 13)); mb <= signed(resize(s_rfrac, 13));
                     when 2 =>
                         s_rpm1 <= s_rp - 1;
-                        s_twh  <= s_wh & '0';                 -- 2*wh
-                        s_lx6  <= resize(shift_right(s_lx, 3), 7);   -- narrowed light dir
-                        s_ly6  <= resize(shift_right(s_ly, 3), 7);
-                    when 4 =>
-                        if mp(18 downto 11) < 4 then s_r <= to_unsigned(4, 8); else s_r <= unsigned(mp(18 downto 11)); end if;
-                    when 5 =>
-                        s_ls <= ('0' & s_r(7 downto 1)) + ("000" & s_r(7 downto 3));     -- 5r/8
-                        ma <= signed(resize(s_r, 13)); mb <= signed(resize(s_kshine, 13));
-                    when 6 =>
-                        s_omag <= signed(resize(s_ls, 9));
-                    when 8 =>
-                        s_es <= resize(to_unsigned(2, 8) + unsigned(mp(18 downto 11)), 8);
-                        ma <= signed(resize(s_wh, 13)); mb <= resize(s_lx6, 13);          -- wh*lx6
-                    when 10 =>
-                        -- straight-tube highlight offset, PROPORTIONAL to the light
-                        -- (wh*light >> 8) -- same model the elbow uses, so straight
-                        -- and elbow highlights line up exactly at every junction.
-                        s_ov <= resize(shift_right(mp, 8), 9);                            -- vertical tube: wh*lx6 >> 8
-                        ma <= signed(resize(s_wh, 13)); mb <= resize(s_ly6, 13);          -- wh*ly6
-                    when 12 =>
-                        s_oh <= resize(shift_right(mp, 8), 9);                            -- horizontal tube: wh*ly6 >> 8
-                        ma <= signed(resize(s_r, 13)) + resize(s_omag, 13);
-                        mb <= signed(resize(s_r, 13)) + resize(s_omag, 13);
-                    when 13 =>
-                        if f_absu(s_ov) > f_absu(s_oh) then s_omax <= f_absu(s_ov);
-                        else                                s_omax <= f_absu(s_oh); end if;
-                    when 14 =>
-                        -- run the straight offsets through the SAME saturating map
-                        -- the elbow applies per pixel: both tube families get one
-                        -- constant highlight-offset magnitude, elbow arcs stay
-                        -- concentric, junctions meet flush.
-                        s_ov <= resize(f_oclamp(resize(s_ov, 14) sll 2, s_omax), 9);
-                        s_oh <= resize(f_oclamp(resize(s_oh, 14) sll 2, s_omax), 9);
-                    when 15 =>
-                        s_ediff2 <= unsigned(mp(15 downto 0));
-                        ma <= signed(resize(s_es, 13)); mb <= signed(resize(s_es, 13));
-                    when 18 =>
-                        s_espec2 <= unsigned(mp(15 downto 0));
-                    when 21 =>
-                        s_sle <= to_unsigned(norm_shift(s_ediff2), 4);
-                    when 22 =>
-                        div_d   <= resize(s_span, 18) sll 7;
-                        div_v   <= resize(shift_right(shift_left(resize(s_ediff2, 24), to_integer(s_sle)), 8), 8);
-                        div_q <= (others => '0'); div_rem <= (others => '0'); div_cnt <= (others => '0'); div_run <= '1';
-                    when 43 =>
-                        if div_q > 255 then s_kd8 <= (others => '1'); else s_kd8 <= div_q(7 downto 0); end if;
-                        s_sls <= to_unsigned(norm_shift(s_espec2), 4);
-                    when 44 =>
-                        div_d   <= resize(s_speff, 18) sll 7;
-                        div_v   <= resize(shift_right(shift_left(resize(s_espec2, 24), to_integer(s_sls)), 8), 8);
-                        div_q <= (others => '0'); div_rem <= (others => '0'); div_cnt <= (others => '0'); div_run <= '1';
-                    when 65 =>
-                        if div_q > 1023 then s_ks9 <= (others => '1'); else s_ks9 <= div_q(9 downto 0); end if;
-                    -- rounded-elbow constants (all in vblank, shared multiplier + divider)
-                    when 66 =>
-                        ma <= signed(resize(s_wh, 13)); mb <= signed(resize(s_wh, 13));               -- wh^2
-                    when 69 =>
-                        s_wh2 <= unsigned(mp(15 downto 0));
-                        ma <= signed(resize(s_wh, 13)) - signed(resize(s_r, 13));
-                        mb <= signed(resize(s_wh, 13)) - signed(resize(s_r, 13));                     -- (wh-r)^2
-                    when 72 =>
-                        s_qlo <= unsigned(mp(16 downto 0));
-                        s_w2  <= resize(s_wh2 & "00", 17);                                            -- (2wh)^2
-                        s_w2o <= resize(s_wh2 & "00", 17) - resize(s_wh & "00", 17) + 1;              -- (2wh-1)^2
-                        ma <= signed(resize(s_wh, 13)) + signed(resize(s_r, 13));
-                        mb <= signed(resize(s_wh, 13)) + signed(resize(s_r, 13));                     -- (wh+r)^2
-                    when 75 =>
-                        s_qhi <= unsigned(mp(16 downto 0));
-                    when 78 =>
-                        -- s_krec = round(4096 / 2wh): the exact reciprocal the pixel
-                        -- path multiplies in after a FIXED >>6, so the elbow
-                        -- cross-section is in TRUE pixel units at any scale (the old
-                        -- power-of-2 shift alone was off by 0.71..1.41x with scale,
-                        -- which is why highlights only matched near 2wh = 64/128).
+                        s_wh3  <= resize(s_twh, 10) + resize(s_wh, 10);
+                        s_wh4  <= signed(resize(s_twh & '0', 11));
+                        -- s_krec = round(4096 / 2wh): normalises the light and the
+                        -- flow phase (period 4wh) at every scale
                         div_d <= resize(to_unsigned(4096, 13) + resize(s_wh, 13), 18);
                         div_v <= s_twh(7 downto 0);
                         div_q <= (others => '0'); div_rem <= (others => '0'); div_cnt <= (others => '0'); div_run <= '1';
-                    when 99 =>
+                    when 4 =>
+                        if mp(18 downto 11) < 2 then s_r <= to_unsigned(2, 8); else s_r <= unsigned(mp(18 downto 11)); end if;
+                        ma <= signed(resize(s_wh, 13)); mb <= signed(resize(s_wh, 13));               -- wh^2
+                    when 7 =>
+                        s_wh2 <= unsigned(mp(15 downto 0));
+                        ma <= signed(resize(s_w, 13)); mb <= to_signed(406, 13);                     -- max radius
+                    when 8 =>
+                        s_w2  <= resize(s_wh2 & "00", 17);                                            -- (2wh)^2
+                        s_w2o <= resize(s_wh2 & "00", 17) - resize(s_wh & "00", 17) + 1;              -- (2wh-1)^2
+                        -- sqrt table covers rho^2 up to 2048 << sqs >= 2.05 wh^2 (the 0.41 wh band)
+                        if    s_wh2 <= 992  then s_sqs <= "00";
+                        elsif s_wh2 <= 1984 then s_sqs <= "01";
+                        elsif s_wh2 <= 3968 then s_sqs <= "10";
+                        else                     s_sqs <= "11"; end if;
+                    when 10 =>
+                        s_rmax <= unsigned(mp(18 downto 11));
+                        ma <= signed(resize(s_r & "00", 13)); mb <= signed(resize(s_a6, 13));
+                    when 11 =>
+                        sb_go <= '1';
+                    when 13 =>
+                        -- c0 = 4r(1-a): the radius left where L' = 0
+                        s_c0q <= resize(s_r & "00", 9) - unsigned(mp(14 downto 6));
+                        ma <= signed(resize(s_rmax & "00", 13)); mb <= signed(resize(s_a6, 13));
+                    when 16 =>
+                        -- c1 = 4 rmax a: added in proportion to L'
+                        s_c1q <= unsigned(mp(14 downto 6));
+                    when 17 =>
+                        -- never let a pipe vanish: squeeze the radius range to
+                        -- [rmax/8, rmax] (r' = 7/8 r + rmax/8), at least 1.25 px
+                        s_c0q <= s_c0q - shift_right(s_c0q, 3) + resize(shift_right(s_rmax & "00", 3), 9);
+                        s_c1q <= s_c1q - shift_right(s_c1q, 3);
+                    when 18 =>
+                        if s_c0q < 5 then s_c0q <= to_unsigned(5, 9); end if;
+                    when 24 =>
                         if div_q > 127 then s_krec <= (others => '1');
                         else s_krec <= div_q(6 downto 0); end if;
+                    when 25 =>
+                        ma <= resize(s_lx6, 13); mb <= signed(resize(s_krec, 13));
+                    when 28 =>
+                        s_lxw <= resize(shift_right(mp, 6), 8);                                       -- lx6*krec/64
+                        ma <= resize(s_ly6, 13); mb <= signed(resize(s_krec, 13));
+                    when 31 =>
+                        s_lyw <= resize(shift_right(mp, 6), 8);
+                    when 32 =>
+                        ma <= signed(resize(s_wh, 13)); mb <= resize(s_lxw, 13);
+                    when 35 =>
+                        -- straights' light projection = the elbow's evaluated at the
+                        -- port (|wh*lxw| <= 32*63, so >>4 stays within +/-127); both
+                        -- go through the same offset ROM, so joints stay flush
+                        s_pv <= resize(shift_right(mp, 4), 8);                                        -- vertical tube
+                        ma <= signed(resize(s_wh, 13)); mb <= resize(s_lyw, 13);
+                    when 38 =>
+                        s_ph <= resize(shift_right(mp, 4), 8);                                        -- horizontal tube
                     when others => null;
                 end case;
             end if;
@@ -577,267 +784,320 @@ begin
     end process p_frame;
 
     ----------------------------------------------------------------------------
+    -- Sqrt-table builder (vblank): for k = 0..2047, rho^2 = (k+1/2) << sqs,
+    -- walk r4 = round(4 rho) upward with adds only -- advance while
+    -- (2 r4 + 1)^2 <= 64 rho^2 -- and write r4 - 4wh.  <= ~2.6k clocks.
+    ----------------------------------------------------------------------------
+    p_sqb : process(clk)
+    begin
+        if rising_edge(clk) then
+            bw_we <= '0';
+            if sb_go = '1' then
+                sb_run  <= '1';
+                sb_k    <= (others => '0');
+                sb_r4   <= (others => '0');
+                sb_msq  <= to_unsigned(1, 22);
+                sb_inc  <= to_unsigned(8, 22);
+                sb_tgt  <= shift_left(to_unsigned(32, 22), to_integer(s_sqs));
+                sb_step <= shift_left(to_unsigned(64, 22), to_integer(s_sqs));
+            elsif sb_run = '1' then
+                if sb_msq <= sb_tgt then
+                    sb_r4  <= sb_r4 + 1;
+                    sb_msq <= sb_msq + sb_inc;
+                    sb_inc <= sb_inc + 8;
+                else
+                    bw_we   <= '1';
+                    bw_addr <= sb_k;
+                    bw_data <= std_logic_vector(resize(signed('0' & sb_r4) - s_wh4, 16));
+                    sb_tgt  <= sb_tgt + sb_step;
+                    sb_k    <= sb_k + 1;
+                    if sb_k = 2047 then sb_run <= '0'; end if;
+                end if;
+            end if;
+        end if;
+    end process p_sqb;
+
+    ----------------------------------------------------------------------------
     -- Pixel pipeline.
     ----------------------------------------------------------------------------
     p_pipe : process(clk)
-        variable v_ang  : unsigned(9 downto 0);
-        variable v_cxp1, v_cyp1 : unsigned(6 downto 0);
-        variable v_mask : std_logic_vector(3 downto 0);
-        variable v_hitH, v_hitV : boolean;
-        variable v_along : signed(12 downto 0);
-        variable v_et   : signed(11 downto 0);
-        variable v_hit : std_logic;
-        variable v_e2   : unsigned(16 downto 0);
-        variable v_dl, v_ds : signed(17 downto 0);
-        variable v_lv   : unsigned(9 downto 0);
-        variable v_sv   : unsigned(10 downto 0);
-        variable v_cf   : signed(10 downto 0);
-        variable v_yd   : unsigned(11 downto 0);
-        variable v_fph  : unsigned(6 downto 0);
+        variable v_dx   : signed(9 downto 0);
+        variable v_par, v_or, v_dA, v_dB : std_logic;
+        variable v_cN, v_cE : std_logic;
+        variable v_ys   : unsigned(10 downto 0);
+        variable v_lv   : signed(11 downto 0);
+        variable v_l    : unsigned(7 downto 0);
+        variable v_sw   : unsigned(7 downto 0);
+        variable v_cx, v_cy : signed(9 downto 0);
+        variable v_r2   : unsigned(16 downto 0);
+        variable v_do   : signed(18 downto 0);
+        variable v_rp   : unsigned(9 downto 0);
+        variable v_inH, v_inV, v_shH, v_shV, v_sH : boolean;
+        variable v_rp6  : unsigned(9 downto 0);
+        variable v_e4   : signed(9 downto 0);
+        variable v_d4   : signed(8 downto 0);
+        variable v_dn   : signed(24 downto 0);
+        variable v_al   : signed(19 downto 0);
+        variable v_et   : signed(9 downto 0);
+        variable v_aet  : unsigned(9 downto 0);
+        variable v_adn  : unsigned(7 downto 0);
         variable v_tri  : unsigned(6 downto 0);
+        variable v_y    : unsigned(10 downto 0);
+        variable v_cf   : signed(8 downto 0);
         variable v_su   : signed(11 downto 0);
-        variable v_chu, v_chv : signed(12 downto 0);
-        variable v_elb  : std_logic;
-        variable v_qx, v_qy : unsigned(15 downto 0);    -- selected corner-distance squares
-        variable v_cx, v_cy : signed(9 downto 0);       -- selected corner (radial origin)
-        variable v_off  : signed(11 downto 0);          -- light . radial highlight offset
-        variable v_etb0 : signed(9 downto 0);           -- (rho^2 - wh^2) >> 6
-        variable v_etb  : signed(11 downto 0);          -- linearised radial dist
     begin
         if rising_edge(clk) then
-            pipe(0) <= data_in;
-            for i in 1 to LATENCY - 1 loop pipe(i) <= pipe(i - 1); end loop;
+            syncp(0) <= data_in.hsync_n & data_in.vsync_n & data_in.avid & data_in.field_n;
+            for i in 1 to LATENCY - 1 loop syncp(i) <= syncp(i - 1); end loop;
 
             ------------------------------------------------------------------
-            -- c1: local coords + the four edge-pipe bits + hue angle.
+            -- c1: local coords; pick this pixel's elbow corner (the nearer of
+            -- the cell's pair) and its corner-distance squares; Image drive.
             ------------------------------------------------------------------
-            g0_dx  <= signed(resize(x_loc, 10)) - signed(resize(s_wh, 10));
-            g0_dy  <= lm_dy;
-            g0_xf  <= x_f; g0_yf <= y_f;
-            g0_qxw <= qxW; g0_qxe <= qxE; g0_qyn <= qyN; g0_qys <= qyS;
+            v_dx := signed(resize(x_loc, 10)) - signed(resize(s_whp, 10));
+            g0_dx <= v_dx;
+            g0_dy <= lm_dy;
+            v_par := x_idx(0) xor celly_idx(0);
+            if s_rings = '1' then v_or := v_par; else v_or := s_cor; end if;
+            v_dA := f_b(v_dx > lm_dy);                                    -- nearer NE than SW
+            v_dB := f_b(resize(v_dx, 11) + resize(lm_dy, 11) < 0);        -- nearer NW than SE
+            if v_or = '0' then v_cN := v_dA; v_cE := v_dA;                -- NE / SW pair
+            else               v_cN := v_dB; v_cE := not v_dB; end if;    -- NW / SE pair
+            if v_cE = '1' then g0_qx <= qxE; else g0_qx <= qxW; end if;
+            if v_cN = '1' then g0_qy <= qyN; else g0_qy <= qyS; end if;
+            g0_cN <= v_cN; g0_cE <= v_cE;
+            g0_xc <= s_cxc; g0_par <= v_par;
 
-            -- linear part of each of the four edge hashes (avalanche at c2)
-            v_cxp1 := x_idx + 1;
-            v_cyp1 := celly_idx + 1;
-            g0_hN <= f_hraw(x_idx,  celly_idx, '0', s_seed);
-            g0_hS <= f_hraw(x_idx,  v_cyp1,    '0', s_seed);
-            g0_hW <= f_hraw(x_idx,  celly_idx, '1', s_seed);
-            g0_hE <= f_hraw(v_cxp1, celly_idx, '1', s_seed);
+            -- Image drive 0..63: the input's luma (2-tap smoothed), or with
+            -- Image off a slow diagonal swell wave so P12 still breathes
+            s_yprev <= unsigned(data_in.y);
+            v_ys := resize(unsigned(data_in.y), 11) + resize(s_yprev, 11);
+            v_lv := signed(resize(v_ys(10 downto 1), 12)) - 64;
+            if v_lv < 0 then v_lv := (others => '0'); end if;
+            v_l := resize(shift_right(unsigned(v_lv), 4), 8) + resize(shift_right(unsigned(v_lv), 6), 8);
+            v_sw := resize(shift_right(resize(x_f, 13) + resize(y_f, 13), 2), 8) + s_swp;
+            if s_image = '0' then
+                if v_sw(7) = '1' then g0_l <= not v_sw(6 downto 1); else g0_l <= v_sw(6 downto 1); end if;
+            elsif v_l > 63 then g0_l <= (others => '1');
+            else                g0_l <= v_l(5 downto 0); end if;
 
-            -- hue angle: flowing rainbow across the screen, or per-cell
-            if s_percell = '1' then
-                v_ang := f_hraw(x_idx, celly_idx, '0', s_seed + 51)(9 downto 2) & "00";
+            ------------------------------------------------------------------
+            -- c2: rho^2 to the corner, radial coords, |d|, L'.
+            ------------------------------------------------------------------
+            p2_rho2 <= resize(g0_qx, 17) + resize(g0_qy, 17);
+            if g0_cE = '1' then v_cx := signed(resize(s_whq, 10)); else v_cx := -signed(resize(s_whq, 10)); end if;
+            if g0_cN = '1' then v_cy := -signed(resize(s_whq, 10)); else v_cy := signed(resize(s_whq, 10)); end if;
+            p2_excx <= g0_dx - v_cx;
+            p2_eycy <= g0_dy - v_cy;
+            -- |excx| and |eycy|+wh without an abs (|dx|,|dy| <= wh)
+            if g0_cE = '1' then p2_aex <= signed(resize(s_whq, 11)) - resize(g0_dx, 11);
+            else                p2_aex <= signed(resize(s_whq, 11)) + resize(g0_dx, 11); end if;
+            if g0_cN = '1' then p2_d1 <= signed(resize(s_whq & '0', 11)) + resize(g0_dy, 11);
+            else                p2_d1 <= signed(resize(s_whq & '0', 11)) - resize(g0_dy, 11); end if;
+            p2_adx <= resize(f_absu(g0_dx), 7);
+            p2_ady <= resize(f_absu(g0_dy), 7);
+            if    g0_dx > 63  then p2_dxc <= to_signed(63, 7);
+            elsif g0_dx < -63 then p2_dxc <= to_signed(-63, 7);
+            else                   p2_dxc <= resize(g0_dx, 7); end if;
+            if    g0_dy > 63  then p2_dyc <= to_signed(63, 7);
+            elsif g0_dy < -63 then p2_dyc <= to_signed(-63, 7);
+            else                   p2_dyc <= resize(g0_dy, 7); end if;
+            if s_pos = '1' then p2_lp <= g0_l; else p2_lp <= 63 - g0_l; end if;
+            p2_xc <= g0_xc; p2_par <= g0_par;
+
+            ------------------------------------------------------------------
+            -- c3: sqrt-table address, light . radial, Image radius product,
+            -- flow phase on the elbow.
+            ------------------------------------------------------------------
+            case s_sqs is
+                when "00"   => v_r2 := p2_rho2;
+                when "01"   => v_r2 := shift_right(p2_rho2, 1);
+                when "10"   => v_r2 := shift_right(p2_rho2, 2);
+                when others => v_r2 := shift_right(p2_rho2, 3);
+            end case;
+            if v_r2 > 2047 then p3_sqa <= (others => '1'); else p3_sqa <= v_r2(10 downto 0); end if;
+            p3_mx  <= p2_excx * s_lxw;
+            p3_my  <= p2_eycy * s_lyw;
+            p3_rpm <= s_c1q * p2_lp;
+            -- Flow phase "along" the pipe, continuous at every port: N/S ports
+            -- sit at 0, E/W ports at 2wh (half the 4wh period).  The sign
+            -- follows the Truchet 2-colouring (cell parity) so every loop
+            -- circulates one way.  (elbow: +/-(|ey| - |ex| + wh))
+            if p2_par = '1' then p3_alarc <= p2_d1 - p2_aex;
+            else                 p3_alarc <= p2_aex - p2_d1; end if;
+            p3_dxc <= p2_dxc; p3_dyc <= p2_dyc;
+            p3_adx <= p2_adx; p3_ady <= p2_ady;
+            p3_xc  <= p2_xc; p3_par <= p2_par;
+
+            ------------------------------------------------------------------
+            -- c4: sqrt table read (EBR); projection; this pixel's radius.
+            ------------------------------------------------------------------
+            if bw_we = '1' then sqtab(to_integer(bw_addr)) <= bw_data; end if;
+            p4_sq <= sqtab(to_integer(p3_sqa));
+            v_do := shift_right(resize(p3_mx, 19) + resize(p3_my, 19), 4);
+            if    v_do > 127  then p4_do <= to_signed(127, 8);
+            elsif v_do < -127 then p4_do <= to_signed(-127, 8);
+            else                   p4_do <= resize(v_do, 8); end if;
+            v_rp := resize(s_c0q, 10) + resize(p3_rpm(14 downto 6), 10);
+            if v_rp > 255 then p4_rp4 <= (others => '1'); else p4_rp4 <= v_rp(7 downto 0); end if;
+            p4_alarc <= p3_alarc;
+            p4_dxc <= p3_dxc; p4_dyc <= p3_dyc;
+            p4_adx <= p3_adx; p4_ady <= p3_ady;
+            p4_xc  <= p3_xc; p4_par <= p3_par;
+
+            ------------------------------------------------------------------
+            -- c5: elbow section into the fabric; K ROM read; crossing strand
+            -- pick (over strand by parity, under strand shadowed beside it);
+            -- highlight-offset ROM address.
+            ------------------------------------------------------------------
+            p5_e4 <= signed(p4_sq(9 downto 0));
+            p5_k  <= unsigned(C_KROM(to_integer(p4_rp4))(14 downto 0));
+            v_rp6 := resize(p4_rp4, 10) + resize(p4_rp4(7 downto 1), 10);   -- 1.5 r
+            v_inH := (resize(p4_ady, 10) sll 2) + 2 < resize(p4_rp4, 10);
+            v_inV := (resize(p4_adx, 10) sll 2) + 2 < resize(p4_rp4, 10);
+            v_shH := (resize(p4_ady, 10) sll 2) < v_rp6;
+            v_shV := (resize(p4_adx, 10) sll 2) < v_rp6;
+            if p4_par = '1' then v_sH := v_inH or not v_inV;               -- H strand over
+            else                 v_sH := v_inH and not v_inV; end if;      -- V strand over
+            p5_strH <= f_b(v_sH);
+            p5_shad <= '0';
+            if p4_xc = '1' then
+                if p4_par = '1' and not v_inH and v_inV and v_shH then p5_shad <= '1'; end if;
+                if p4_par = '0' and not v_inV and v_inH and v_shV then p5_shad <= '1'; end if;
+            end if;
+            if v_sH then p5_dcr <= p4_dyc; else p5_dcr <= p4_dxc; end if;
+            if p4_xc = '0' then p5_saddr <= unsigned(p4_do);
+            elsif v_sH then     p5_saddr <= unsigned(s_ph);
+            else                p5_saddr <= unsigned(s_pv); end if;
+            p5_rp4 <= p4_rp4; p5_alarc <= p4_alarc;
+            p5_adx <= p4_adx; p5_ady <= p4_ady;
+            p5_xc  <= p4_xc; p5_par <= p4_par;
+
+            ------------------------------------------------------------------
+            -- c6: offset ROM read (EBR); cross-section d (1/4 px) and the ONE
+            -- membership test both families share; flow phase pick.
+            ------------------------------------------------------------------
+            p6_off <= C_SATOFF(to_integer(p5_saddr));
+            p6_k   <= p5_k;
+            if p5_xc = '1' then
+                v_d4 := shift_left(resize(p5_dcr, 9), 2);
             else
-                v_ang := resize(shift_right(resize(x_f, 13) + resize(y_f, 13), to_integer(s_hshift)), 10);
+                v_e4 := p5_e4;
+                if    v_e4 > 255  then v_e4 := to_signed(255, 10);
+                elsif v_e4 < -255 then v_e4 := to_signed(-255, 10); end if;
+                v_d4 := resize(v_e4, 9);
             end if;
-            g0_ang <= v_ang + s_hue + s_huep(15 downto 6);
-
-            ------------------------------------------------------------------
-            -- c2: abs terms, ball dx^2, finished port mask, sin/cos.
-            ------------------------------------------------------------------
-            p2_absdx <= f_absu(g0_dx);
-            p2_absdy <= f_absu(g0_dy);
-            p2_dx    <= g0_dx; p2_dy <= g0_dy;
-            p2_xf    <= g0_xf; p2_yf <= g0_yf;
-            p2_mask  <= f_b((f_hfold(g0_hN) + s_morphp) < s_thresh)
-                      & f_b((f_hfold(g0_hS) + s_morphp) < s_thresh)
-                      & f_b((f_hfold(g0_hE) + s_morphp) < s_thresh)
-                      & f_b((f_hfold(g0_hW) + s_morphp) < s_thresh);
-            angA(0) <= g0_ang;
-            for i in 1 to 9 loop angA(i) <= angA(i - 1); end loop;
-            p2_qxw   <= g0_qxw; p2_qxe <= g0_qxe; p2_qyn <= g0_qyn; p2_qys <= g0_qys;
-
-            ------------------------------------------------------------------
-            -- c3: hit tests (H/V tubes gated by ports).  Pure elbows are rounded
-            -- downstream (S7); tees/crosses/caps are the straight-tube overlap.
-            ------------------------------------------------------------------
-            v_mask := p2_mask;                            -- N S E W
-
-            v_hitV := (p2_absdx < resize(s_r, 10)) and
-                      ((v_mask(3) = '1' and p2_dy < 0) or (v_mask(2) = '1' and p2_dy >= 0));
-            v_hitH := (p2_absdy < resize(s_r, 10)) and
-                      ((v_mask(1) = '1' and p2_dx >= 0) or (v_mask(0) = '1' and p2_dx < 0));
-
-            v_hit := '0';
-            v_et := (others => '0'); v_along := (others => '0');
-            if v_hitH and (not v_hitV or p2_absdy <= p2_absdx) then
-                v_hit := '1';
-                v_et := resize(p2_dy, 12) - resize(s_oh, 12);
-                v_along := resize(signed(p2_xf), 13);
-            elsif v_hitV then
-                v_hit := '1';
-                v_et := resize(p2_dx, 12) - resize(s_ov, 12);
-                v_along := resize(signed(p2_yf), 13);
-            end if;
-
-            p3_hit  <= v_hit;
-            p3_et   <= v_et;
-            p3_along <= v_along;
-
-            -- rounded elbow (Sharp mode only): a PURE elbow = exactly one of N/S
-            -- and one of E/W.  rho^2 to the bend's corner = the near-edge
-            -- x-square + the near-edge y-square, read from the incremental
-            -- accumulators (a select + an add here -- no pixel multiply); the
-            -- corner-relative coords feed the (light . radial) highlight offset.
-            v_elb := (p2_mask(3) xor p2_mask(2)) and (p2_mask(1) xor p2_mask(0))
-                     and s_round;
-            if p2_mask(1) = '1' then v_qx := p2_qxe; v_cx := signed(resize(s_wh, 10));      -- E corner
-            else                     v_qx := p2_qxw; v_cx := -signed(resize(s_wh, 10)); end if; -- W corner
-            if p2_mask(3) = '1' then v_qy := p2_qyn; v_cy := -signed(resize(s_wh, 10));     -- N corner
-            else                     v_qy := p2_qys; v_cy := signed(resize(s_wh, 10)); end if;  -- S corner
-            p3_rho2 <= resize(v_qx, 17) + resize(v_qy, 17);
-            p3_excx <= resize(p2_dx, 10) - v_cx;      -- radial direction from the bend corner
-            p3_eycy <= resize(p2_dy, 10) - v_cy;
-            p3_elb  <= v_elb;
-
-            ------------------------------------------------------------------
-            -- c3b: u = rho^2 - wh^2 (isolated subtract) + light.radial (two small
-            -- mults) + the rho^2 band test (so c3c only merges).
-            ------------------------------------------------------------------
-            p3b_ehit <= f_b(p3_rho2 >= s_qlo and p3_rho2 <= s_qhi);
-            p3b_u    <= signed(resize(p3_rho2, 18)) - signed(resize(s_wh2, 18));
-            p3b_mx   <= p3_excx * s_lx6;              -- light . radial (x, y terms)
-            p3b_my   <= p3_eycy * s_ly6;
-            p3b_et    <= p3_et;
-            p3b_hit   <= p3_hit;
-            p3b_elb   <= p3_elb;
-            p3b_along <= p3_along;
-
-            ------------------------------------------------------------------
-            -- c3c: linearise the radial distance u/(2wh) into the tube
-            -- cross-section (the ONE isolated multiply), band-test membership,
-            -- and MERGE the elbow over the straight-tube result for elbow cells.
-            ------------------------------------------------------------------
-            -- linearise u/(2wh) EXACTLY: fixed >>6 (free wiring) then multiply by
-            -- the per-frame reciprocal krec = 4096/(2wh), so the elbow
-            -- cross-section is in TRUE pixel units at every scale.  The old
-            -- power-of-2 shift alone was off by 0.71..1.41x depending on scale,
-            -- which made elbow highlight width/position match the straights only
-            -- when 2wh sat near a power of 2.  The (light . radial) projection
-            -- sum registers RAW here; its saturating clamp + the subtract live
-            -- in their own stage (c3d) -- one stage was too long post-route.
-            v_etb0 := resize(shift_right(p3b_u, 6), 10);
-            p3c_ets  <= resize(shift_right(v_etb0 * signed('0' & s_krec), 6), 12);
-            p3c_do   <= resize(shift_right(resize(p3b_mx, 18) + resize(p3b_my, 18), 6), 12);
-            p3c_et   <= p3b_et;
-            p3c_elb  <= p3b_elb;
-            p3c_ehit <= p3b_ehit;
-            p3c_hit  <= p3b_hit;
-            p3c_along <= p3b_along;
-
-            ------------------------------------------------------------------
-            -- c3d: clamp the highlight offset, subtract it, and MERGE the elbow
-            -- over the straight-tube result.
-            ------------------------------------------------------------------
-            if p3c_elb = '1' then
-                p3d_et  <= p3c_ets - f_oclamp(resize(p3c_do, 14), s_omax);
-                p3d_hit <= p3c_ehit;
+            p6_d4  <= v_d4;
+            p6_hit <= f_b(resize(f_absu(v_d4), 10) + 2 < resize(p5_rp4, 10));
+            if p5_xc = '0' then
+                p6_al <= p5_alarc;
+            elsif p5_strH = '1' then
+                if p5_par = '1' then p6_al <= signed(resize(p5_adx, 11)) + signed(resize(s_whr, 11));
+                else                 p6_al <= signed(resize(s_wh3, 11)) - signed(resize(p5_adx, 11)); end if;
             else
-                p3d_et  <= p3c_et;
-                p3d_hit <= p3c_hit;
+                if p5_par = '1' then p6_al <= signed(resize(s_whr, 11)) - signed(resize(p5_ady, 11));
+                else                 p6_al <= signed(resize(p5_ady, 11)) - signed(resize(s_whr, 11)); end if;
             end if;
-            p3d_along <= p3c_along;
+            p6_shad <= p5_shad;
 
             ------------------------------------------------------------------
-            -- c4: shading field e2 (rounded 1-D tube cross-section).
+            -- c7: unit-radius normalise, split on K's operand bits; flow phase.
             ------------------------------------------------------------------
-            v_e2 := resize(unsigned(p3d_et * p3d_et), 17);
-            p4_e2 <= v_e2;
+            p7_off <= signed(p6_off(7 downto 0));
+            p7_ph  <= p6_d4 * signed('0' & p6_k(14 downto 7));
+            p7_pl  <= p6_d4 * signed('0' & p6_k(6 downto 0));
+            v_al := resize(p6_al * signed('0' & s_krec), 20);
+            p7_aln <= unsigned(v_al(12 downto 5));                       -- period 4wh -> 256
+            p7_shad <= p6_shad;
+            hitA(0) <= p6_hit;
+            for i in 1 to 6 loop hitA(i) <= hitA(i - 1); end loop;
 
             ------------------------------------------------------------------
-            -- c5: diffuse / specular head-room.
+            -- c8: dn = d4 * K >> 8 (|dn| = 64 at the wall at any radius).
             ------------------------------------------------------------------
-            v_dl := signed(resize(s_ediff2, 18)) - signed(resize(p4_e2, 18));
-            if v_dl < 0 then v_dl := (others => '0'); end if;
-            p5_dl <= unsigned(v_dl(15 downto 0));
-            v_ds := signed(resize(s_espec2, 18)) - signed(resize(p4_e2, 18));
-            if v_ds < 0 then v_ds := (others => '0'); end if;
-            p5_ds <= unsigned(v_ds(15 downto 0));
-
-            -- c6/c7: barrel normalise
-            p6_dlc <= shift_left(p5_dl, 4 * to_integer(s_sle(3 downto 2)));
-            p6_dsc <= shift_left(p5_ds, 4 * to_integer(s_sls(3 downto 2)));
-            p7_dlb <= shift_left(p6_dlc, to_integer(s_sle(1 downto 0)))(15 downto 8);
-            p7_dsb <= shift_left(p6_dsc, to_integer(s_sls(1 downto 0)))(15 downto 8);
+            v_dn := shift_right(shift_left(resize(p7_ph, 25), 7) + resize(p7_pl, 25), 8);
+            if    v_dn > 127  then p8_dn <= to_signed(127, 8);
+            elsif v_dn < -127 then p8_dn <= to_signed(-127, 8);
+            else                   p8_dn <= resize(v_dn, 8); end if;
+            p8_off <= p7_off; p8_aln <= p7_aln; p8_shad <= p7_shad;
 
             ------------------------------------------------------------------
-            -- c8: gains + flow pulse.
+            -- c9: shading ROM address |dn - off|, rim, flow phase.
             ------------------------------------------------------------------
-            p8_pl <= p7_dlb * s_kd8;
-            p8_ps <= p7_dsb * s_ks9;
-            v_fph := unsigned(p3d_along(7 downto 1)) + s_phase(14 downto 8);
-            if s_flowon = '1' and v_fph < s_floww then
-                if v_fph < (s_floww - v_fph) then v_tri := v_fph; else v_tri := s_floww - v_fph; end if;
-                p8_flow <= resize(shift_left(resize(v_tri, 10), to_integer(s_flowg)), 10);
+            v_et  := resize(p8_dn, 10) - resize(p8_off, 10);
+            v_aet := f_absu(v_et);
+            if v_aet > 127 then v_aet := to_unsigned(127, 10); end if;
+            p9_addr <= s_chrome & v_aet(6 downto 0);
+            v_adn := f_absu(p8_dn);
+            if    v_adn >= 60 then p9_rim <= "10";
+            elsif v_adn >= 53 then p9_rim <= "01";
+            else                   p9_rim <= "00"; end if;
+            p9_fph  <= p8_aln(7 downto 1) + s_phase(14 downto 8);
+            p9_shad <= p8_shad;
+
+            ------------------------------------------------------------------
+            -- c10: shading ROM (EBR); flow pulse.  c11: into the fabric; the
+            -- hue angle is taken late from the live raster counters.
+            ------------------------------------------------------------------
+            p10_sh <= C_SHADE(to_integer(p9_addr));
+            p10_rim <= p9_rim; p10_shad <= p9_shad;
+            if s_flowon = '1' and p9_fph < s_floww then
+                if p9_fph < (s_floww - p9_fph) then v_tri := p9_fph; else v_tri := s_floww - p9_fph; end if;
+                p10_flow <= resize(shift_left(resize(v_tri, 10), to_integer(s_flowg)), 10);
             else
-                p8_flow <= (others => '0');
+                p10_flow <= (others => '0');
             end if;
 
-            ------------------------------------------------------------------
-            -- c9: diffuse level (bright ambient floor) + specular level.
-            ------------------------------------------------------------------
-            cosR <= f_qsin(angA(9) + 256);
-            sinR <= f_qsin(angA(9));
-            v_lv := resize(s_amb, 10) + resize(p8_pl(15 downto 7), 10);
-            if v_lv > 255 then v_lv := to_unsigned(255, 10); end if;
-            p9_l <= v_lv(7 downto 0);
-            v_sv := resize(p8_ps(17 downto 7), 11) + resize(p8_flow, 11);
-            if v_sv > 511 then v_sv := to_unsigned(511, 11); end if;
-            p9_s <= '0' & v_sv(8 downto 0);
-            p9_flow <= p8_flow;
+            p11_y8 <= unsigned(p10_sh(15 downto 8));
+            p11_cf <= unsigned(p10_sh(7 downto 0));
+            p11_rim <= p10_rim; p11_flow <= p10_flow; p11_shad <= p10_shad;
+            p11_ang <= resize(shift_right(resize(x_f, 13) + resize(y_f, 13), to_integer(s_hshift)), 10)
+                     + s_hue + s_huep(15 downto 6);
 
             ------------------------------------------------------------------
-            -- c10: chroma desaturation factor (highlight -> white) + luma.
+            -- c12: luma = shade + flow, rim fall-off + crossing shadow; chroma
+            -- factor (flow whitens); saturated hue sin/cos.
             ------------------------------------------------------------------
-            v_chu := resize(shift_right(signed('0' & s_sat) * cosR, 9), 13);
-            if v_chu < -512 then v_chu := to_signed(-512, 13); elsif v_chu > 511 then v_chu := to_signed(511, 13); end if;
-            scu <= resize(v_chu, 10);
-            v_chv := resize(shift_right(signed('0' & s_sat) * sinR, 9), 13);
-            if v_chv < -512 then v_chv := to_signed(-512, 13); elsif v_chv > 511 then v_chv := to_signed(511, 13); end if;
-            scv <= resize(v_chv, 10);
-            v_cf := to_signed(255, 11) - signed(resize(p9_s(9 downto 1), 11));
+            v_y := resize(p11_y8 & "00", 11) + resize(p11_flow, 11);
+            if v_y > 800 then v_y := to_unsigned(800, 11); end if;
+            if p11_shad = '1' or p11_rim = "10" then
+                v_y := shift_right(v_y + 64, 1);
+            elsif p11_rim = "01" then
+                v_y := v_y - shift_right(v_y - 64, 2);
+            end if;
+            p12_y <= v_y(9 downto 0);
+            v_cf := signed(resize(p11_cf, 9)) - signed(resize(p11_flow(9 downto 2), 9));
             if v_cf < 0 then v_cf := (others => '0'); end if;
-            p10_cf <= unsigned(v_cf(7 downto 0));
-            v_yd := resize(p9_l, 12) + resize(p9_s, 12) + resize(p9_flow(9 downto 1), 12);
-            if v_yd > 1023 then v_yd := to_unsigned(1023, 12); end if;
-            p10_y <= v_yd(9 downto 0);
+            if p11_shad = '1' then p12_cf <= unsigned(v_cf(8 downto 3));
+            else                   p12_cf <= unsigned(v_cf(7 downto 2)); end if;
+            cosR <= f_qsat(p11_ang + 256);
+            sinR <= f_qsat(p11_ang);
 
             ------------------------------------------------------------------
-            -- c11: bright hue chroma * factor.
+            -- c13: hue chroma * chroma factor.
             ------------------------------------------------------------------
-            p11_um <= resize(scu * signed(resize(p10_cf, 9)), 20);
-            p11_vm <= resize(scv * signed(resize(p10_cf, 9)), 20);
-            p11_y  <= p10_y;
+            p13_um <= cosR * signed('0' & p12_cf);
+            p13_vm <= sinR * signed('0' & p12_cf);
+            p13_y  <= p12_y;
 
             ------------------------------------------------------------------
-            -- c12: compose pipe over the near-black field.
+            -- c14: compose over black; neutral outside active video.
             ------------------------------------------------------------------
-            if hitA(7) = '1' then
-                v_su := to_signed(512, 12) + resize(shift_right(p11_um, 8), 12);
-                p12_u <= unsigned(v_su(9 downto 0));
-                v_su := to_signed(512, 12) + resize(shift_right(p11_vm, 8), 12);
-                p12_v <= unsigned(v_su(9 downto 0));
-                p12_y <= p11_y;
+            if syncp(12)(1) = '1' and hitA(6) = '1' then
+                v_su := to_signed(512, 12) + resize(shift_right(p13_um, 6), 12);
+                p14_u <= unsigned(v_su(9 downto 0));
+                v_su := to_signed(512, 12) + resize(shift_right(p13_vm, 6), 12);
+                p14_v <= unsigned(v_su(9 downto 0));
+                p14_y <= p13_y;
             else
-                p12_y <= to_unsigned(28, 10);  -- near-black field
-                p12_u <= C_MID; p12_v <= C_MID;
+                p14_y <= C_BLK; p14_u <= C_MID; p14_v <= C_MID;
             end if;
 
-            ------------------------------------------------------------------
-            -- carry pipes + output.
-            ------------------------------------------------------------------
-            hitA(0) <= p3d_hit;
-            for i in 1 to 8 loop hitA(i) <= hitA(i - 1); end loop;
-
-            if s_bypass = '1' then
-                s_io.y <= pipe(LATENCY - 1).y; s_io.u <= pipe(LATENCY - 1).u; s_io.v <= pipe(LATENCY - 1).v;
-            else
-                s_io.y <= std_logic_vector(p12_y); s_io.u <= std_logic_vector(p12_u); s_io.v <= std_logic_vector(p12_v);
-            end if;
-            s_io.hsync_n <= pipe(LATENCY - 1).hsync_n;
-            s_io.vsync_n <= pipe(LATENCY - 1).vsync_n;
-            s_io.avid    <= pipe(LATENCY - 1).avid;
-            s_io.field_n <= pipe(LATENCY - 1).field_n;
+            s_io.y <= std_logic_vector(p14_y); s_io.u <= std_logic_vector(p14_u); s_io.v <= std_logic_vector(p14_v);
+            s_io.hsync_n <= syncp(LATENCY - 1)(3);
+            s_io.vsync_n <= syncp(LATENCY - 1)(2);
+            s_io.avid    <= syncp(LATENCY - 1)(1);
+            s_io.field_n <= syncp(LATENCY - 1)(0);
         end if;
     end process p_pipe;
 

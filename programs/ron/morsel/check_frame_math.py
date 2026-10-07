@@ -59,8 +59,17 @@ def s_jmax(k6):                                  # slot 60
     return C_JMAX[s_szb(k6) >> 2]
 
 
-def s_dens(p12):                                 # slot 33 (deadband ignored)
+def s_dens1(p12):                                # slot 36 (deadband ignored)
     return (p12 >> 2) & 0xFF
+
+
+def s_blo(k3):                                   # slots 37 + 6: Bake
+    bk = u((k3 >> 2) + (k3 >> 4), 10)
+    return u(480 - bk, 10)
+
+
+def s_ckt(k4):                                   # slot 39
+    return u(52 - (k4 >> 5), 9)
 
 
 def s_scl(k1):                                   # slot 63
@@ -95,7 +104,11 @@ print("-" * 46)
 check("Chip Size", s_szb, 20, 75)
 check("Shape", s_vlo, 0, 4)
 check("Specular", s_spec, 0, 319)
-check("Chips", s_dens, 0, 255)
+check("Chips", s_dens1, 0, 255)
+check("Bake base", s_blo, 480, 162, monotonic=False)
+check("Crack thr", s_ckt, 52, 21, monotonic=False)
+if any(b > a for a, b in zip([s_blo(k) for k in range(1024)], [s_blo(k) for k in range(1, 1024)])):
+    FAILS.append("Bake base    NOT MONOTONIC DECREASING")
 check("Scale", s_scl, 0, 4)
 # jitter room legitimately falls as chips grow
 check("Jitter room", s_jmax, 15, 0, monotonic=False)

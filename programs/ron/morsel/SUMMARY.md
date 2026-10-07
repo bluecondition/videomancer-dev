@@ -73,16 +73,19 @@ chip, so nothing is ever clipped, and the rows disappear entirely.
 |---|---|
 | K1 | **Scale** — cell 8 / 16 / 32 / 64 / 128 px |
 | K2 | **Shape** — which slice of the 8 3-D orientations: side-on teardrops ↔ round chips with a point |
-| K3 | **Bake** — pale golden dough → dark baked |
+| K3 | **Bake** — pale golden dough → dark baked (v0.2.2 reaches ~25% darker) |
 | K4 | **Relief** — shading depth + specular glint |
 | K5 | **Grain** — dough surface texture |
 | K6 | **Chip Size** |
-| P12 | **Chips** — density (headline: plain dough → loaded) |
-| S7 | **Luma Mod** — image drives chip density + size |
+| P12 | **Chips** — headline: chip density over the whole fader, plain dough (0) → every white cell (100%) |
+| S7 | **Luma Drives** — Density: chips where the picture is white, none on black (chance = whiteness × P12) · Size: P12 alone sets which cells get chips, and the picture sets each chip's size (none on black, full on white) |
 | S8 | **Tint** — dough takes the video's chroma |
 | S9 | **Invert** — flip the luma polarity |
-| S10 | **Emboss** — relief from the video gradient |
+| S10 | **Cracks** — the crust splits along the picture's hard edges (dark crack, lit lip); Relief sets how many and how deep |
 | S11 | **White Chips** — white chocolate in the mix |
+
+The emboss (relief from the video gradient) is always on. S10 was labelled
+"Emboss" in v0.1 but nothing read it, so it was a dead switch.
 
 ## Implementation
 
@@ -239,6 +242,71 @@ a **single constant for every column**, silently restoring the exact row
 lattice the phase was there to destroy. Rotating one half before the xor
 fixes both (diagonal correlation −0.03).
 
+## v0.2 — finalization pass (2026-10-04)
+
+**Hardware contract fixes**, all things v0.1 predates:
+
+* **Blanking gate.** The output was never gated, so the blanking interval
+  carried dough colour (U/V ≠ 512). It's now forced to Y 64 / U V 512 whenever
+  the latency-aligned avid is low.
+* **Interlace detection vs serrated vsync.** `s_ilace` was judged at every
+  vsync falling edge. Analog vsync has several per field, so the second edge
+  compared the field with itself and cleared the flag. That quietly disabled
+  the one-field cell refresh (the 30 Hz flashing fix) on interlaced analog SD.
+  It's now judged at the first active pixel of each field.
+* **Emboss line buffer read/write collision.** Same-address read and write in
+  one cycle is undefined on iCE40 EBR. The write now trails the read by one
+  pixel.
+* **P12 deadband wrap.** `s_dens + 1` was 8 bits and wrapped at the top of the
+  fader, so 254/255 dither re-triggered the threshold every field. The
+  deadband now runs on the 10-bit fader, compared one bit wider.
+
+**Look changes** (v0.2.2 state, 2026-10-06):
+
+* **P12 = chip density over the whole fader**: plain dough at 0, every white
+  cell at 100%.
+* **S7 Density: chips where the picture is WHITE, none on black** (Ron,
+  2026-10-06). v0.1 and v0.2.0 put chips on the dark cells. A cell's chance of a
+  chip is now `whiteness × P12`. Whiteness is the held cell luma measured from
+  video black, `(L − 16) × (1 + 1/8 + 1/32)` clamped to 0..255, so black never
+  gets a chip at any P12. The threshold is one 8×8 multiply on stage 10, with
+  the compare `hash < thr` on stage 11. S9 flips the polarity.
+* **S7 Size** (v0.2.1, Ron's spec): P12 alone picks the cells, and the same
+  whiteness scales each chip's SIZE: no chip on black, a full-size (K6) chip on
+  white, a classic size halftone. A 7×8 multiply on its own stage, then a mode
+  mux; a zero-size chip is absent. This is NOT the size wobble rejected in
+  August: the input is the held whole-cell average (one-field refresh), so a
+  still picture never moves a chip. Chip colour is the hash dark/milk in both
+  modes.
+* **S10 Cracks.** `|gx| + |gy|` above a threshold (52 → 21 across K4) replaces
+  the emboss value with a dark crack (−140/−210/−280 by Relief). The pixel
+  after a crack gets a lit lip. This is folded into the emboss stream, so it
+  costs no delay line and no extra dough add.
+* **K3 Bake darker** (v0.2.2): the dough base is `480 − (k3/4 + k3/16)`, so
+  it ends at 162 instead of 225.
+
+**Tried and removed:**
+
+* **v0.2.0 drop-lattice climax** (HW-rejected 2026-10-06, "I don't like the
+  circle chips"). A second half-cell-offset lattice of round chocolate drops
+  behind the morsels filled in over the top quarter of P12. Fit lesson worth
+  keeping (TECHNIQUES): its first cut cost +1,680 LC, almost all FLIP-FLOPS
+  from a 19-stage parallel pipeline. A single chocolate layer before one blend,
+  a chroma flag, and late cell-buffer reads got it to 89%; removing it
+  entirely puts v0.2.2 at 74%.
+* **v0.2.0 S7 Tone** (chip shade from luma), replaced by Size in v0.2.1.
+
+Kept from that work: cell-luma buffers read at the stage where the cell row is
+known (no 4-deep delay chains; collision-free because a row reads the bank it
+doesn't write), chocolate chroma as one white/dark flag, and a 3-step chroma
+blend. Latency is 23 (stage 20 is an alignment slot), the same in every mode.
+
+v0.2.2 build: see Status. Presets: P12 values were reset for the new curve
+(Fresh Batch 820, Fine Halftone 900, Loaded 1023, Giant Morsels 820,
+Dark & White 880, Cracked Crust 700, Size Halftone 1000). Capture real ones on
+hardware. `preview_morsel.py` does NOT model the v0.2 changes;
+`check_frame_math.py` covers P12, Bake and the crack slots.
+
 ## Colour convention
 
 Authored in **standard BT.601** (U = Cb, V = Cr) and swapped at both ends,
@@ -248,9 +316,12 @@ renders the intended colours.
 
 ## Status
 
-All 6 configs built and timing-closed, `.vmprog` packaged. Hardware-tested
-visually; the chip-stability rework and the knob fixes are **not yet
-HW-confirmed**.
-
-Run `check_frame_math.py` after any change to `p_frame`, and
-`preview_morsel.py` after any change to the pixel path.
+v0.2.2 (2026-10-06): all 6 configs closed on **seed 1**, 74% LC, 11/32 EBR,
+no clock divisor, `.vmprog` packaged. HD Analog 81.50, HD HDMI 78.87,
+HD Dual 85.31 MHz (74.25 required); SD Analog 79.78, SD HDMI 81.08,
+SD Dual 75.04 MHz (27 required). **Not yet flashed** (v0.2.1 was seen on
+HW, which is where the drops were rejected). Still to check on hardware: no
+flashing on stills and moving video at several Scales, with an interlaced SD
+source, and at P12 100%; Density now chips the WHITE areas; S7 Size; S10
+Cracks (threshold and depth may want tuning); the darker Bake; a clean picture
+edge (blanking gate). Then capture presets from the hardware.

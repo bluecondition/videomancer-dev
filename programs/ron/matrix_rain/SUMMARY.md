@@ -1,54 +1,98 @@
 # Matrix Rain
 
+**Status: v1.0.0 FINAL except presets** (Ron signed off 2026-10-05; HW-validated). The 8 presets are hand-written placeholders — recapture on the device with `./capture_preset.sh`. HW history: v0.3 Reveal masked the rain into a block and static vertical colour blocks covered the screen (most likely Reveal's video-lit glyph field) → v0.4 Luma Size + Black/Video background, Rainbow dropped → v0.4 too subtle (shrink-only, lit rain only, invisible at low density) → v0.5 Image (size both ways + tail persistence) → v0.5.1 slower K1 range, K5 0% = green → v0.6 brighter fade (hot rows, glow 520) + vertical glitches.
+
 Classic "Matrix" digital rain for Videomancer. A black field is divided into
-fixed **16×16 glyph cells**. Every vertical column has an independently-seeded
-**falling head** that advances once per video frame (vsync tick) at a
-per-column randomized speed. The head glyph is a bright near-white green; the
-trailing glyphs fade bright-green → dark-green → black over a configurable tail.
-Glyphs **mutate** to new characters at random, staggered times. Pure synthesis —
-the incoming video is ignored (genlocked to its sync only).
+square glyph cells (16<<zoom px). Every column carries **three independent
+falling drops**: each advances once per frame at its own speed (re-rolled at
+every respawn), draws a hot white-green head glyph and a green tail that fades
+smoothly into black over the tail length, then waits a random gap above the top
+before falling again. Glyphs are a static random field the rain reveals: the
+head glyph shimmers, 1 cell in 8 flickers fast, the rest re-roll slowly.
+**Image** (P12) is the strength of the input picture's hold on the rain. The
+rain keeps falling across the whole screen; under bright parts of the picture
+glyphs grow (up to 2× wide, bold) and tails stretch (up to ~3.8×, so even
+sparse rain fills bright areas and lingers there); under dark parts glyphs
+shrink to 0.4× with normal tails. 0% = plain rain. **Background** (S10)
+is black or the input video; nothing else ever colours the background.
 
 ## Controls
 
 | Ctl | Reg | Name | Effect |
 |-----|-----|------|--------|
-| K1 | 0x00 | Fall Speed | base fall step per frame |
-| K2 | 0x01 | Density | fraction of columns actively raining |
-| K3 | 0x02 | Tail Length | number of visible trail rows |
+| K1 | 0x00 | Fall Speed | base fall rate 0.125–1.3 rows/frame (= v0.5.0's 0–30%; each drop runs 1.0–1.875× of it); default 25% |
+| K2 | 0x01 | Density | upper half: respawn gap long → zero; lower half also thins how many respawned drops are visible |
+| K3 | 0x02 | Tail Length | 2–33 trail rows; the fade curve always spans the whole tail |
 | K4 | 0x03 | Mutation | glyph re-roll speed |
-| K5 | 0x04 | Hue Tint | shifts the green hue (centre = pure phosphor green) |
-| K6 | 0x05 | Brightness | overall luma scale |
-| S7 | 0x06 b0 | Head Glow | 1px horizontal bloom on the head glyph |
+| K5 | 0x04 | Colour | 0% = phosphor green, then cyan→blue→violet→red→orange→amber→lime (64-step wheel); top step = white |
+| K6 | 0x05 | Glyph Size | cell size = 16<<zoom px (16 / 32 / 64 / 128) |
+| S7 | 0x06 b0 | Head Glow | 1-glyph-px horizontal bloom on the head glyph |
 | S8 | 0x06 b1 | Mirror | mirror glyphs horizontally (authentic look) |
-| P12 | 0x07 | Glyph Size | cell size = 16<<zoom px (16 / 32 / 64 / 128) |
+| S9 | 0x06 b2 | Rise | drops travel upward (glyph field unchanged) |
+| S10 | 0x06 b3 | Background | Black / Video (rain drawn over the input) |
+| S11 | 0x06 b4 | Glitch | every 0.5–2.5 s a band of 1–4 rows (torn sideways) **or** 1–4 columns (torn vertically), 50/50, lights and scrambles for 2–17 frames; whole field mutation-bursts |
+| P12 | 0x07 | Image | input luma → glyph size (0.4×…2× wide) + tail persistence (1×…3.8×); 0% = plain rain |
 
 ## Implementation notes
 
-- **Grid:** the 16×16 glyph bitmap is drawn into a cell of `16<<zoom` px (zoom
-  0..3 from P12 → 16/32/64/128 px). `col = x>>(4+zoom)` and the glyph pixel is
-  `(x>>zoom) mod 16` — a nearest-neighbour upscale. All power-of-two bit-slicing:
-  no dividers, no multipliers, no zoom reducer (cf. ziffern, which it is forked from).
-- **Per-column heads:** a 128-entry **BRAM** holds each column's head position in
-  8.6 fixed point. Once per frame, during vblank, an FSM walks the columns and
-  does `head += speed[col]`; when the head + tail scroll off the bottom it
-  respawns a random few rows above the top (LFSR-seeded gap). `speed[col]` is
-  `base + per-column hash jitter` — all shift-only.
-- **Randomness:** a free-running 16-bit Fibonacci LFSR (taps 16,14,13,11) plus
-  integer hash (`mix16`) for column seeds, speeds, density test, glyph indices
-  and mutation phase. No DRAM.
-- **Tail fade:** a fixed 16-entry brightness curve indexed by distance-below-head,
-  cut off at the tail-length knob; scaled by the brightness knob via a shift-only
-  `scale8` LUT. Implemented as a per-row luma multiplier on the green output.
-- **Glyph ROM:** generated at build time by `matrix_rain.py` into
-  `matrix_rain_glyphs_pkg.vhd` (16×16 1bpp), flattened into a single-port BRAM
-  (`addr = glyph*16 + row`, the `*16` is a shift) — one registered read per pixel.
-- **Colour:** BT.601 YUV stored U/V-swapped for the Videomancer hardware
-  convention (stored U=Cr, V=Cb), matching ziffern / the verified phosphor table.
-  Body green Y=831 U=155 V=262; head whitens chroma halfway to neutral with
-  luma ≈ max.
-- **Pipeline:** 7 register stages (S0 coords → S1 head-BRAM align → S2 distance/
-  lit/hash → S3 glyph index/mutation → S4 glyph ROM read → S5 bit+glow → S6
-  colour) + output regs. Sync passthrough delayed `C_SYNCD` (=5) to land with S6.
+- **Grid:** the 16×16 glyph bitmap is drawn into a cell of `16<<zoom` px.
+  `col = x>>(4+zoom)`, glyph pixel `(x>>zoom) mod 16` — pure bit-slicing.
+  Column count is rounded UP so a partial right-hand column still rains.
+- **Drops:** three 128×16 head BRAMs (one per drop, read in parallel by the
+  renderer) hold signed 11.5 fixed-point row positions (negative = waiting above
+  the top), plus a drop-info BRAM with 4 bits per drop (alive, speed factor j).
+  Once per frame a vblank FSM walks the columns (9 clocks/column, all drops in
+  parallel): `pos += base*(8+j)/8`; off the bottom → respawn at `-(gap)` with
+  fresh j and alive bit. Gap = `rnd8 * (255-density) >> (6+zoom)` rows; a drop
+  waiting further up than the current longest gap is respawned at once, so
+  raising Density responds within a frame. Density never pops a column mid-fall.
+- **Render:** per drop, distance below head → lit/head flags; the nearest lit
+  drop wins. Fade index = `dist * round(512/tail) >> 5` (constant 32-entry k
+  table) into a 16-entry level curve `500*(1-i/16)^1.5`.
+- **Colour:** every lit pixel is a level L above black: `Y = 64 + L·k`,
+  `U/V = 512 ± L·k·|c|/512` (chroma scales with luma, so the tail truly fades
+  to black). c (signed chroma per level) and k (scale8 luma gain) come from the
+  palette ROM `C_PAL` generated by `genpal.py`: 64-entry hue wheel + white,
+  stored U/V-swapped (U = Cr); k keeps dim hues (blue, red ×½) from sitting
+  clipped. Fade curve (v0.6, brighter): two "hot" leading rows at L 620/580
+  drawn with ¾ chroma (pale bright green — saturated green tops out near
+  L≈520), then `520·(1−(i/16)²)`, holding near full for the first half of the
+  tail. Head L=704 (Y=768 cap) and glow L=520, both half chroma. Chroma mode
+  (full / ¾ / ½) applied in its own stage (S12c). Palette word read once per frame.
+- **Image:** a luma map (8192×4 EBR, two frame-parity banks of 64×64) holds
+  the luma level l (0..15) per luma cell (the glyph cell; 2×2 cells at 16 px),
+  sampled at each cell's centre (4-px average) into this frame's bank; the
+  renderer reads last frame's (no collision, no mid-glyph change). A per-frame
+  sequencer (`p_pseq`, 5 clocks × 16 levels in vblank) fills a 16-entry param
+  RAM: with b = r·l, d = r·(15−l): scale `s = 1 + b/256 − 0.6·d/256` (→ 16/s
+  via `C_INV16`; growth widens only, shrink is both axes), tail stretch
+  `m = 1 + (b>>8)/5` (stretched tail `tail·m`, fade scale `4096/(tail·m)` via
+  `C_KF12`·`C_RM`). Per pixel the param word is looked up by l: lit test
+  `dist < stretched tail`, fade index `dist·scale >> 8`, glyph pixel = centre
+  offset × 16/s >> (4+zoom) (outside −8..7 = off-glyph). The drop respawn limit
+  is rows + longest stretched tail so bright-area trails finish.
+- **Video background:** input y/u/v written to a 256×32 EBR ring every clock,
+  read 17 behind (output trails M by 16, M trails the source by 4–5). Dry path,
+  no U/V swap.
+- **Hardware contracts:** generated avid (cubist pattern: parity-locked start
+  2–3 clocks after the source avid, fixed per-field pixel count = the field's
+  longest source line); frame start = first vsync edge after active video
+  (serration-safe); height from the generated avid's line count; output gated to
+  Y=64 / U=V=512 outside the generated avid.
+- **Pipeline:** M → S0 coords + centre offset + RAM addresses → S1 align / Rise
+  flip → S2 per-drop distance, luma level → S3 param RAM → S4 params → S5 lit /
+  head vs stretched tail → S6 glyph index, nearest drop → S7 offset × 16/s, fade
+  product → S8 glyph pixel + inside, fade level → S9 glyph ROM → S10 bit/glow →
+  S11 select × colour gain → S12 Y + chroma partials → S12b recombine → S13
+  chroma, background, gate → output regs (16 clocks). `C_SYNCD` = 13.
+- **Not handled yet:** 480i renders glyphs 2:1 tall (rows count field lines).
+
+## Build seeds
+
+v0.6.0 / v1.0.0 (same bitstreams): all six configs pass on seed 1 — HD Analog 82.0, HD HDMI 82.3,
+HD Dual 76.4, SD 76.1 / 86.3 / 78.5 MHz; 7120 LC (93%), 21 EBR. Near the fit
+ceiling: new features need logic removed first. (v0.5.1 needed seed 2 on both
+Analog configs after a router2 stall.)
 
 ## Glyph set / font
 
@@ -66,9 +110,5 @@ is 8×16 and is centred in its 16×16 cell, so the **Mirror** switch is meaningf
 
 ```
 ./build_programs.sh ron matrix_rain          # runs the py hook, synth, packs .vmprog
-# -> out/<hardware>/ron/matrix_rain.vmprog
-
-# render a frame and sweep pots:
-cd tools/vhdl-image-tester
-lzx-vhdl-cli simulate matrix_rain --set 0x00=900 --set 0x02=1023 --set 0x06=0x03
+# -> out/rev_b/ron/matrix_rain.vmprog
 ```

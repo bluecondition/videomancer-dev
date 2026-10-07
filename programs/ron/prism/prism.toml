@@ -1,6 +1,6 @@
 [program]
 program_id = "com.ron.prism"
-program_version = "1.0.0"
+program_version = "1.1.0"
 abi_version = ">=1.0,<2.0"
 program_name = "Prism"
 author = "ron"
@@ -23,10 +23,10 @@ initial_value = 0
 parameter_id = "linear_potentiometer_12"
 name_label = "Band W"
 control_mode = "linear"
-display_min_value = 1
-display_max_value = 128
-initial_value = 192
-suffix_label = "px"
+display_min_value = 0
+display_max_value = 100
+initial_value = 444
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"

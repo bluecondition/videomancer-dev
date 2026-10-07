@@ -9,15 +9,20 @@ every control reacts on the next frame. (Built as the deliberate
 anti-thesis of the mercurial/redshift/kudzu field-overlay genre after that
 approach was rejected — see feedback_no_field_overlay_genre.)
 
-**P12 "Bite"** (headline): acid depth — barely-touched plate → full tonal
-engraving → over-bitten crosshatch swallowing the midtones. The whole tonal
-ladder (t1/t2/t3) slides with it.
+**P12 "Bite"** (headline): acid depth. 0 = contours only; 0–60% walks the
+tonal ladder in (hatch → cross → third direction); 60–100% is the
+over-bitten climax — strokes swell until shadows go solid, crosshatch floods
+the midtones, foul-bite pits (2×2 hash speckle) spread over bare paper,
+contours thicken. (v0.1's ladder froze above 59% and showed nothing below
+~12%.)
 
 ## Controls
 
-K1 Pitch (stroke spacing, 4 zones ~8/16/33/66 px) · K2 Angle (continuous
-plate rotation 0–180°) · K3 Ink (stroke width gain + contour weight) · K4
-Tint (near-black ink tint direction: black/sepia/blood/iron-blue) · K5 Hand
+K1 Pitch (continuous, exponential 5.7–89 px, 32 steps/octave) · K2 Angle
+(continuous plate rotation 0–180°; 0 = strokes run along the contours) ·
+K3 Ink (stroke width gain + contour weight) · K4 Palette (8 labelled
+ink/paper pairs: Copper, Sepia, Sanguine, Prussian, Banknote, Iron Gall,
+Gold-on-black, Blueprint) · K5 Hand
 (hand tremor: per-line stroke-phase jitter) · K6 Style (stipple / engraving
 / woodcut) · S7 Invert (scratchboard: white strokes on inked ground —
 gorgeous) · S8 Wash (half-sat video colour under-print) · S9 Contour ·
@@ -30,17 +35,22 @@ Streaming pipeline S0..S12, `C_LATENCY = 13`. **Zero per-pixel multiplies,
 4 EBR** (two 2048×8 luma line buffers), ~4230 LC (55%).
 
 - **3×3 Sobel** over [1 2 1]-h-blurred luma (prism window, 2 line buffers).
-- **Stripe-field accumulators** (the load-bearing trick): the 8 candidate
-  stroke families are global stripe fields p_k = x·cos + y·sin, maintained
+- **Stripe-field accumulators** (the load-bearing trick): the 4 candidate
+  stroke families (45° apart; v0.1 kept 8 but only ever selected the even 4) are global stripe fields p_k = x·cos + y·sin, maintained
   as running accumulators (+cos per pixel at S6, +sin per line at hsync) —
   zero multiplies, and every pixel picking family k sees the same coherent
   field, so strokes are continuous across regions. The 16 cos/sin constants
-  are rebuilt each frame from borrowed qsin taps → K2 rotates the plate
-  continuously. Interlace is detected (field-parity toggle) and the line
+  are rebuilt each frame from qsin taps, each scaled by the pitch mantissa
+  on a serial shift-add multiplier in vblank (8 tap slots × 16 steps) →
+  K2 rotates and K1 scales continuously; phase is always the static slice
+  p(15:8), so the pixel path lost its three pitch barrel shifters. Interlace is detected (field-parity toggle) and the line
   step doubled + parity offset so stroke angles are TRUE in frame space.
-- **Direction selection**: |gy| vs four shift-approximated tan() boundaries
-  of |gx| → 8 bins over 180°, then ROUNDED to the even 4-direction set
-  (22.5° selection granularity shreds soft shading into patchwork), with a
+- **Direction selection**: |gy| vs tan 22.5° (≈.406) and tan 67.5° (≈2.406)
+  of |gx| → 4 symmetric bins (22.5° selection granularity shreds soft
+  shading into patchwork). gy is measured UPWARD but the stripe fields step
+  DOWN, so differing signs = the 45° family (v0.1 had the diagonals
+  mirrored: strokes ran ACROSS diagonal forms; its rounding was also skewed
+  ~11°). With a
   63-px **hold-last-direction run** so ridge/valley zones (gradient through
   zero) inherit the neighbouring slope's stroke direction instead of
   striping with the default family. Flat areas fall to the plate-angle bin.
@@ -71,6 +81,17 @@ before the distances it pairs with.
   stipple carries tone; woodcut bold; scratchboard excellent; Drift+Hand
   boil at ~10 Hz (was field-rate strobe: mean |Δframe| 85 → seed the line
   hash from s_dracc(11:5)).
+
+## v0.2.0 (2026-10-04) — review fixes
+
+Mirrored diagonals fixed + symmetric bins; blanking gate (neutral outside
+avid; outputs also reset to neutral); palette stored U/V-swapped (Wash dry
+path untouched); paper luma ~760 and Wash luma clamped at 768; 11-bit
+active-line counter (stipple froze below line 1000 on 1080p); serrated-vsync
+guard on drift/interlace detect/sequencer restart; interlace offset now on
+the bottom field (field_n='0'); Cross 45° third level uses +135° (was the
+same family as the cross → dead level); P12 remap + overbite climax;
+continuous Pitch; K4 palette knob. v0.1 sources in .intaglio_work/.
 
 ## Status
 

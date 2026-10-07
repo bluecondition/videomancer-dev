@@ -7,13 +7,13 @@
 --
 -- At each detected edge the output resets to RED; subsequent pixels on the
 -- same scanline step through ORANGE, YELLOW, GREEN, BLUE, INDIGO, VIOLET,
--- then black, each band occupying `band_width` pixels (knob 1). Pipeline
--- resets at hsync so trails never cross lines.
+-- then black, each band occupying `band_width` pixels (P12 slider).
+-- Pipeline resets at hsync so trails never cross lines.
 --
 -- Edge detect : 3x3 Sobel on preprocessed luma (the Edge Lab detector).
 --               Four chained line buffers give a 5-row window; the Sobel
---               rows are raw, 3x3 Gaussian-blurred (switch 9, default on,
---               per Edge Lab's Smooth).
+--               rows are raw, or 3x3 Gaussian-blurred (S9 Smooth, per
+--               Edge Lab).
 --               Magnitude |gx| + |gy| against the knob 2 threshold.
 -- Solidify    : the thresholded edge bit is OR'd with the same column of
 --               the previous two lines (two 1-bit line buffers), so a line
@@ -23,9 +23,13 @@
 --               the band machine at red: the outline renders as a solid red
 --               region as thick as the detected edge, rainbow trailing off
 --               its right side.
--- Preprocess  : contrast around mid-grey (K5), then posterize (K4,
---               128..2 luma levels, Edge Lab mapping), then 8-bit reduce.
--- Color path  : 3-bit band index → 8-entry YUV LUT (7 rainbow + black).
+-- Preprocess  : contrast/blowout around a sliding pivot (K5), then
+--               posterize (K4, 128..2 luma levels, Edge Lab mapping), then
+--               8-bit reduce.
+-- Color path  : 3-bit band index → 8-entry registered YUV palette (7 bands
+--               + black), built by a background engine from K6 scheme / K1
+--               phase-or-fade / S11 reverse. Output gated to neutral black
+--               outside active video (blanking contract).
 --------------------------------------------------------------------------------
 
 library ieee;
@@ -55,7 +59,7 @@ architecture prism of program_top is
         to_unsigned(164, 10),  -- Blue   (  0,   0, 255)
         to_unsigned(192, 10),  -- Indigo ( 75,   0, 130)
         to_unsigned(349, 10),  -- Violet (180,   0, 255)
-        to_unsigned(  0, 10)); -- Black
+        to_unsigned( 64, 10)); -- Black (BT.601 black level, not 0)
     constant C_PAL_U : t_pal := (
         to_unsigned(960, 10),  -- Red
         to_unsigned(772, 10),  -- Orange
@@ -105,7 +109,6 @@ architecture prism of program_top is
     signal s_sw_key_over     : std_logic;  -- S10: keyed video above the rainbow
     signal s_knob_color      : unsigned(9 downto 0);  -- K1: colour phase, animatable
     signal s_sw_reverse      : std_logic;             -- S11: violet-first / fade-up
-    signal s_band_width      : unsigned(7 downto 0);  -- 1..128 (8 bits: 128 must not wrap)
     signal s_min_run_m1      : unsigned(4 downto 0);  -- min run length - 1 (0..15)
     signal s_contrast_gain   : unsigned(10 downto 0) := to_unsigned(128, 11);  -- 128..1151 (1.0x..~9.0x in 7-bit fixed)
     signal s_pivot           : unsigned(9 downto 0)  := to_unsigned(512, 10);  -- contrast pivot: 512 -> 64 as K5 rises
@@ -208,10 +211,11 @@ architecture prism of program_top is
     signal s_pby, s_pby_d1, s_pby_d2 : unsigned(9 downto 0) := (others => '0');
     signal s_pbu, s_pbu_d1, s_pbu_d2 : signed(10 downto 0) := (others => '0');
     signal s_pbv, s_pbv_d1, s_pbv_d2 : signed(10 downto 0) := (others => '0');
-    signal s_pb7_a, s_pb7_b, s_pb7_c, s_pb7_d : std_logic := '0';  -- band-7 pipe
-    signal s_ptw_a, s_ptw_b, s_ptw_c, s_ptw_d : std_logic := '0';  -- to-white pipe
+    signal s_pb7_a, s_pb7_b, s_pb7_c : std_logic := '0';  -- band-7 pipe
+    signal s_ptw_a, s_ptw_b, s_ptw_c : std_logic := '0';  -- to-white pipe
     signal s_pwp  : unsigned(17 downto 0) := (others => '0');  -- depth * coeff
-    signal s_pw, s_pw_d : unsigned(8 downto 0) := (others => '0');  -- weight 0..256
+    signal s_pw         : unsigned(8 downto 0) := (others => '0');  -- weight 0..256
+    signal s_ptgt       : unsigned(9 downto 0) := (others => '0');  -- target * w / 256
     signal s_pwc  : unsigned(8 downto 0) := to_unsigned(256, 9);    -- 256 - weight
     signal s_ply  : unsigned(18 downto 0) := (others => '0');       -- y * (256-w)
     signal s_plu, s_plv : signed(20 downto 0) := (others => '0');
@@ -243,6 +247,12 @@ architecture prism of program_top is
 
     -- Curve engine: one 8x9 multiply cycles through the bands, one per
     -- clock (full table refresh every 8 clocks -- instant for a knob)
+    -- Band width from P12 with a SQUARED response: 1 + knob^2 / 8192 gives
+    -- 1..128 px, putting the fine 1-16 px trails on the first ~35% of the
+    -- slider (linear gave 1-8 px only 6%). Must be 8 bits: 127+1 in 7 bits
+    -- wraps to 0 and the band machine sticks on red forever.
+    signal r_k       : unsigned(9 downto 0) := (others => '0');
+    signal r_ksq     : unsigned(19 downto 0) := (others => '0');
     signal r_bw      : unsigned(7 downto 0) := to_unsigned(128, 8);
     signal s_ccnt    : unsigned(2 downto 0) := (others => '0');
     signal s_ccnt_d1 : unsigned(2 downto 0) := (others => '0');
@@ -287,10 +297,8 @@ begin
     s_sw_curve_en   <= registers_in(6)(3);  -- S10: Curve En
     s_sw_reverse    <= registers_in(6)(4);
 
-    -- Band width: knob top 7 bits + 1 gives 1..128 pixels. Must be 8 bits:
-    -- in 7 bits the max setting wraps 127+1 -> 0 and the band machine sticks
-    -- on red forever.
-    s_band_width <= resize(unsigned(s_knob_width(9 downto 3)), 8) + to_unsigned(1, 8);
+    -- Band width (1..128 px, squared slider response) is computed in
+    -- p_curve.
     -- Min run length: knob top 4 bits + 1 gives 1..16 pixels; stored minus 1
     -- so the run-count compare needs no subtract
     s_min_run_m1 <= resize(unsigned(s_knob_noise(9 downto 6)), 5);
@@ -633,9 +641,9 @@ begin
     end process p_elb2;
 
     ----------------------------------------------------------------------------
-    -- Curve: per-band effective widths. With curve enabled (switch 8) the
-    -- widths grow toward violet along the K6-selected profile:
-    --   width(i) = max(1, band_width * C_CURVE(shape)(i) / 256)
+    -- Curve: per-band effective widths. With curve enabled (S10) the
+    -- widths grow linearly toward violet:
+    --   width(i) = max(1, band_width * C_CURVE(i) / 256)
     -- so red is the thinnest band and violet gets the full width. One 8x9
     -- multiply is time-multiplexed across the bands (one per clock; band 7
     -- and curve-off get the plain width) -- the table refreshes every 8
@@ -646,7 +654,10 @@ begin
         variable v_w : unsigned(8 downto 0);
     begin
         if rising_edge(clk) then
-            r_bw <= s_band_width;
+            -- band width: register knob, square alone, scale + 1
+            r_k   <= s_knob_width;
+            r_ksq <= r_k * r_k;
+            r_bw  <= resize(r_ksq(19 downto 13), 8) + to_unsigned(1, 8);
 
             -- stage 0: fetch the coefficient (ROM mux gets its own register
             -- -- sharing a stage with the multiply cost ~20 MHz)
@@ -682,8 +693,8 @@ begin
     --   end of band → advance band_idx (saturates at 7 = black)
     --   hsync edge  → back to black (idx 7)
     --
-    -- With curve enabled (switch 8), band widths follow the geometric curve
-    -- in s_sizes: thin red first, each colour wider toward violet.
+    -- With curve enabled (S10), band widths follow the linear curve in
+    -- s_sizes_m1: thin red first, each colour wider toward violet.
     -- The >= compare (not =) means a band can never overshoot its terminal
     -- count and run away to the 7-bit counter wrap.
     ----------------------------------------------------------------------------
@@ -870,16 +881,19 @@ begin
             s_ply <= s_pby_d2 * s_pwc;
             s_plu <= s_pbu_d2 * signed('0' & std_logic_vector(s_pwc));
             s_plv <= s_pbv_d2 * signed('0' & std_logic_vector(s_pwc));
-            s_pw_d   <= s_pw;
-            s_pb7_d  <= s_pb7_c;  s_ptw_d <= s_ptw_c;
+            -- lerp target term target*w/256: white 960 (3.75w), black 64
+            -- (w/4) -- limited-range levels, never super-black/white
+            if s_ptw_c = '1' and s_pb7_c = '0' then
+                s_ptgt <= resize(shift_left(resize(s_pw, 11), 2)
+                                 - resize(shift_right(s_pw, 2), 11), 10);
+            else
+                s_ptgt <= resize(shift_right(s_pw, 2), 10);
+            end if;
             s_pcnt_d4 <= s_pcnt_d3;
 
-            -- stage E: recombine (white target adds 4w = w * 1024/256),
-            -- clamp, recenter chroma, store
-            v_y := resize(shift_right(s_ply, 8), 12);
-            if s_ptw_d = '1' and s_pb7_d = '0' then
-                v_y := v_y + shift_left(resize(s_pw_d, 12), 2);
-            end if;
+            -- stage E: recombine with the target term, clamp, recenter
+            -- chroma, store
+            v_y := resize(shift_right(s_ply, 8), 12) + resize(s_ptgt, 12);
             if v_y > 1023 then
                 v_y := to_unsigned(1023, 12);
             end if;
@@ -892,7 +906,7 @@ begin
     end process p_pal;
 
     -- Video key: source video fills the past-violet black region. With
-    -- Key Pos = Over (S10), it ALSO rides on top of the colour bands
+    -- Key Pos = Over (S8), it ALSO rides on top of the colour bands
     -- wherever the luma-key matte is high (preprocessed luma >= 50%) --
     -- trails stream out from behind the keyed image instead of covering
     -- it. K5 blowout hardens the matte.
@@ -902,15 +916,24 @@ begin
                                  and s_matte_sr(C_SYNC_DELAY - 4) = '1'))
                    else '0';
 
-    data_out.y <= s_y_in_sr(C_SYNC_DELAY - 1)
+    -- Blanking gate: neutral black (Y 64, U=V 512) whenever the aligned
+    -- avid is low. Without it the last band colour (or keyed video) runs
+    -- through hblank and corrupts the encoder's colour reference.
+    data_out.y <= std_logic_vector(to_unsigned(64, 10))
+                      when s_avid_sr(C_SYNC_DELAY - 1) = '0'
+                  else s_y_in_sr(C_SYNC_DELAY - 1)
                       when s_key_video = '1'
-                      else std_logic_vector(s_pal_y(to_integer(s_band_idx)));
-    data_out.u <= s_u_in_sr(C_SYNC_DELAY - 1)
+                  else std_logic_vector(s_pal_y(to_integer(s_band_idx)));
+    data_out.u <= std_logic_vector(to_unsigned(512, 10))
+                      when s_avid_sr(C_SYNC_DELAY - 1) = '0'
+                  else s_u_in_sr(C_SYNC_DELAY - 1)
                       when s_key_video = '1'
-                      else std_logic_vector(s_pal_u(to_integer(s_band_idx)));
-    data_out.v <= s_v_in_sr(C_SYNC_DELAY - 1)
+                  else std_logic_vector(s_pal_u(to_integer(s_band_idx)));
+    data_out.v <= std_logic_vector(to_unsigned(512, 10))
+                      when s_avid_sr(C_SYNC_DELAY - 1) = '0'
+                  else s_v_in_sr(C_SYNC_DELAY - 1)
                       when s_key_video = '1'
-                      else std_logic_vector(s_pal_v(to_integer(s_band_idx)));
+                  else std_logic_vector(s_pal_v(to_integer(s_band_idx)));
     data_out.avid    <= s_avid_sr   (C_SYNC_DELAY - 1);
     data_out.hsync_n <= s_hsync_n_sr(C_SYNC_DELAY - 1);
     data_out.vsync_n <= s_vsync_n_sr(C_SYNC_DELAY - 1);

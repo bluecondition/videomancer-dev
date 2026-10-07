@@ -3,7 +3,7 @@
 -- File: fray.vhd - edge-launched scanline filaments
 -- License: GNU General Public License v3.0
 --
--- FRAY v0.4 -- every scanline frays to the right of its edges.
+-- FRAY v0.4.2 -- every scanline frays to the right of its edges.
 --
 -- Where prism grows one even rainbow band off every edge, FRAY launches an
 -- individual FILAMENT: a 1-px-tall run whose length, firing decision and
@@ -160,6 +160,7 @@ architecture fray of program_top is
     -- Controls (registered, quasi-static)
     signal s_pat     : unsigned(2 downto 0) := (others => '0');  -- K1 pattern
     signal s_thr     : unsigned(7 downto 0) := (others => '0');  -- K2 threshold
+    signal s_thr_r   : unsigned(7 downto 0) := (others => '0');  -- K2 raw, registered
     signal s_col     : unsigned(2 downto 0) := (others => '0');  -- K3 colour
     signal s_step    : unsigned(15 downto 0) := (others => '0'); -- K4 phase step
     signal s_csh     : unsigned(2 downto 0) := (others => '0');  -- K5 bundle shift
@@ -173,6 +174,7 @@ architecture fray of program_top is
     signal s_k4_mv, s_p12_mv : std_logic := '0';   -- pot moved past the deadband
     signal s_k4_t    : unsigned(9 downto 0) := (others => '0');  -- K4 deadbanded
     signal s_k4_g    : unsigned(12 downto 0) := (others => '0'); -- K4 glided 10.3
+    signal s_k4_a, s_k4_b, s_k4_sc : unsigned(15 downto 0) := (others => '0'); -- g * 2.797
     signal s_p12_t   : unsigned(9 downto 0) := (others => '0');  -- P12 deadbanded
     signal s_p12_g   : unsigned(12 downto 0) := (others => '0'); -- P12 glided 10.3
     signal s_lm_prod : unsigned(20 downto 0) := (others => '0');
@@ -305,7 +307,10 @@ begin
     begin
         if rising_edge(clk) then
             s_pat   <= unsigned(registers_in(0)(9 downto 7));
-            s_thr   <= unsigned(registers_in(1)(9 downto 2));
+            -- K2: full travel = 0 .. 5/8 of the old range (HW: above ~60%
+            -- nothing fired any more); thr = raw8/2 + raw8/8, max 158
+            s_thr_r <= unsigned(registers_in(1)(9 downto 2));
+            s_thr   <= shift_right(s_thr_r, 1) + shift_right(s_thr_r, 3);
             s_col   <= unsigned(registers_in(2)(9 downto 7));
             -- K4 / P12 accumulate along a run (a 1-LSB wobble moves the far
             -- end of a long filament by half a period): deadband, glide,
@@ -330,13 +335,19 @@ begin
             s_neg     <= registers_in(6)(4);
             -- max filament length = slider fraction of the measured width + 8
             s_lm_prod <= s_p12_g(12 downto 3) * s_width;
+            -- K4 travel = the old 30..100% (HW: below ~30% the 2-px dash
+            -- pitch is all aliasing): step = 23200 - g*2.797, built as two
+            -- registered partial sums (2 + 1/2) and (1/4 + 1/32 + 1/64)
+            s_k4_a  <= shift_left(resize(s_k4_g, 16), 1) + shift_right(resize(s_k4_g, 16), 1);
+            s_k4_b  <= shift_right(resize(s_k4_g, 16), 2) + shift_right(resize(s_k4_g, 16), 5)
+                       + shift_right(resize(s_k4_g, 16), 6);
+            s_k4_sc <= s_k4_a + s_k4_b;
             if s_fev = '1' then
                 s_k4_g    <= f_glide(s_k4_t, s_k4_g);
                 s_p12_g   <= f_glide(s_p12_t, s_p12_g);
-                -- period: knob up = longer period. step 33024 -> 288
-                -- (2 .. ~228 px); glide fraction bits give sub-LSB steps
-                s_step    <= to_unsigned(33024, 16)
-                             - shift_left(resize(s_k4_g, 16), 2);
+                -- period: knob up = longer period. step 23200 -> ~310
+                -- (2.8 .. ~210 px); glide fraction bits give sub-LSB steps
+                s_step    <= to_unsigned(23200, 16) - s_k4_sc;
                 s_len_max <= resize(s_lm_prod(20 downto 10), 12) + to_unsigned(8, 12);
             end if;
         end if;

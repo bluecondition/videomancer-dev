@@ -66,3 +66,17 @@ Newest at the bottom.
 | 2026-09-30 | cleave | programs/ron/cleave/ | v0.10.0 "Cleave looks good" — finalized except presets (v0.9 black-flip root-cause fix + K1 rework, v0.10 K5 Boil Rate / manual grain scrub) |
 | 2026-10-01 | cubist | programs/ron/cubist/ | v0.5.3 marked completed in the release audit |
 | 2026-10-02 | dvdlogo | programs/ron/dvdlogo/ | v1.0.0 "I like the way it looks and runs" — finalized except presets (v0.2 HW-contract fixes + P12 Speed + corner party, v0.3 K2 Size 0.5–3x / K1 Angle) |
+| 2026-10-03 | fray | programs/ron/fray/ | v0.4.2 marked completed in the release audit |
+| 2026-10-03 | edgelab | programs/ron/edgelab/ | v1.3.0 marked completed in the release audit (Fine/Chalk styles, P12 Sensitivity) |
+| 2026-10-03 | grist | programs/ron/grist/ | v0.3.0 marked completed in the release audit |
+| 2026-10-03 | gumball | programs/ron/gumball/ | v1.0.1 marked completed in the release audit |
+| 2026-10-03 | hypnos | programs/ron/hypnos/ | v1.0.0 (razor-sharp rewrite) marked completed in the release audit |
+| 2026-10-04 | inferno | programs/ron/inferno/ | v1.1.0 marked completed in the release audit (no presets yet) |
+| 2026-10-04 | prism | programs/ron/prism/ | v1.1.0 marked completed in the release audit (no presets yet) |
+| 2026-10-05 | matrix_rain | programs/ron/matrix_rain/ | v1.0.0 marked completed in the release audit (presets are placeholders) |
+| 2026-10-05 | intaglio | programs/ron/intaglio/ | v0.2.0 marked completed in the release audit (presets hand-written) |
+| 2026-10-05 | orbifold | programs/ron/orbifold/ | v0.3.0 marked completed in the release audit (presets hand-written) |
+| 2026-10-06 | overlook | programs/ron/overlook/ | v1.3.1 marked completed in the release audit (presets hand-set) |
+| 2026-10-06 | pyre | programs/ron/pyre/ | "for realistic fire, I think I prefer the program pyre"; finalized v1.0.0 (advected 256x64 4-bit fire sim; Width, Blaze, random gusts) |
+| 2026-10-06 | videosky | programs/ron/videosky/ | "I think Videosky can be finalized" — v1.0.0 (blanking gate, U/V-swapped palette, vsync guard, bottom-field interlace, Tint paper+ink, Pitch 480 = Penrose 8 px); presets still hand-written |
+| 2026-10-07 | sugarcoat | programs/ron/sugarcoat/ | "I think Sugarcoat can be finalized for now" — v1.2.0 (16 candy textures, 16 curated themes sorted by value / matched by hue, K2 Clean speck filter, Contrast/Level, Outline/Shade, blanking gate); v1.0 "looking very good" on HW; presets still placeholders |

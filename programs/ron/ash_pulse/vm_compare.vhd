@@ -1,0 +1,1 @@
+../../../vm-nodes/nodes/compare/compare.vhd

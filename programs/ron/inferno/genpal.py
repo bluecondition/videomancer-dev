@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Generate the 512-entry packed palette ROM (fire + blue flame) as VHDL."""
+"""Generate the 1024-entry packed palette ROM (fire, dark red, blue, violet) as VHDL.
+
+Usage: genpal.py [--legacy] > pal.txt   (splice the C_PAL constant into inferno.vhd)"""
 import numpy as np
 
 def ramp(tp, rp, gp, bp):
@@ -26,14 +28,29 @@ violet = ramp([0.00, 0.12, 0.30, 0.50, 0.75, 0.92, 1.00],
               [0.00, 0.00, 0.02, 0.05, 0.15, 0.45, 0.85],
               [0.00, 0.20, 0.55, 0.85, 1.00, 1.00, 1.00])
 
+import sys
+LEGACY = '--legacy' in sys.argv   # pre-v3.9 full-range mapping (A/B reference)
+
 def yuv(rgb):
+    """BT.601 -> 10-bit Videomancer codes.  Luma 64 (black) .. 940, with a
+    soft knee above 704 (/2) and a hard cap at 768 so bright cores keep their
+    chroma on hardware; chroma +-0.5 -> +-448 (x896), clipped 64..960.
+    --legacy reproduces the original full-range mapping (Y = y*1023, black at
+    0, chroma x1023), which crushed the dim ends of every ramp below black."""
     r, g, b = rgb
     y = 0.299 * r + 0.587 * g + 0.114 * b
     cb = 0.564 * (b - y)
     cr = 0.713 * (r - y)
-    Y = np.clip(np.round(y * 1023), 0, 1023).astype(int)
-    U = np.clip(np.round(512 + cr * 1023), 0, 1023).astype(int)  # U <= Cr (HW swap)
-    V = np.clip(np.round(512 + cb * 1023), 0, 1023).astype(int)  # V <= Cb (HW swap)
+    if LEGACY:
+        Y = np.clip(np.round(y * 1023), 0, 1023).astype(int)
+        U = np.clip(np.round(512 + cr * 1023), 0, 1023).astype(int)
+        V = np.clip(np.round(512 + cb * 1023), 0, 1023).astype(int)
+        return Y, U, V
+    yl = 64 + y * 876
+    yl = np.where(yl > 704, 704 + (yl - 704) / 2, yl)
+    Y = np.clip(np.round(yl), 64, 768).astype(int)
+    U = np.clip(np.round(512 + cr * 896), 64, 960).astype(int)  # U <= Cr (HW swap)
+    V = np.clip(np.round(512 + cb * 896), 64, 960).astype(int)  # V <= Cb (HW swap)
     return Y, U, V
 
 # layer 2 in NORMAL mode: deep dark red — embers/dying fire behind the main

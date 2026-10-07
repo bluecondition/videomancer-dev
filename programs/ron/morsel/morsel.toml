@@ -4,12 +4,14 @@
 # a real 3-D morsel: a flat-based, bulging-sided, curl-tipped chip modelled in
 # Python, photographed from eight 3-D orientations and stored as polar
 # silhouettes.  Every chip is freely rotated, size-jittered and scattered.
-# The video is baked in twice — the dough tone follows the luma pixel for
-# pixel, and the chip density and size follow a per-cell luma sample.
+# The video is baked in three ways — the dough tone follows the luma pixel
+# for pixel, the chips follow a per-cell luma sample (Density: chips where the
+# picture is white, none on black; Size: chip size, none on black, full on
+# white), and S10 splits the crust into cracks along the picture's edges.
 
 [program]
 program_id = "com.bluecondition.morsel"
-program_version = "0.1.0"
+program_version = "0.2.2"
 abi_version = ">=1.0,<2.0"
 program_name = "Morsel"
 author = "bluecondition"
@@ -93,9 +95,9 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
-name_label = "Luma Mod"
-value_labels = ["Off", "On"]
-initial_value_label = "On"
+name_label = "Luma Drives"
+value_labels = ["Size", "Density"]
+initial_value_label = "Density"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
@@ -111,9 +113,9 @@ initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
-name_label = "Emboss"
+name_label = "Cracks"
 value_labels = ["Off", "On"]
-initial_value_label = "On"
+initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
@@ -128,7 +130,7 @@ parameter_id = "linear_potentiometer_12"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 620
+initial_value = 820
 display_min_value = 0
 display_max_value = 100
 name_label = "Chips"
@@ -147,9 +149,9 @@ rotary_potentiometer_6 = 780
 toggle_switch_7 = 1
 toggle_switch_8 = 0
 toggle_switch_9 = 0
-toggle_switch_10 = 1
+toggle_switch_10 = 0
 toggle_switch_11 = 0
-linear_potentiometer_12 = 620
+linear_potentiometer_12 = 820
 
 [[preset]]
 name = "Fine Halftone"
@@ -162,9 +164,9 @@ rotary_potentiometer_6 = 800
 toggle_switch_7 = 1
 toggle_switch_8 = 0
 toggle_switch_9 = 0
-toggle_switch_10 = 1
+toggle_switch_10 = 0
 toggle_switch_11 = 0
-linear_potentiometer_12 = 700
+linear_potentiometer_12 = 900
 
 [[preset]]
 name = "Loaded"
@@ -177,9 +179,9 @@ rotary_potentiometer_6 = 900
 toggle_switch_7 = 1
 toggle_switch_8 = 0
 toggle_switch_9 = 0
-toggle_switch_10 = 1
+toggle_switch_10 = 0
 toggle_switch_11 = 0
-linear_potentiometer_12 = 1023    # every cell gets a chip
+linear_potentiometer_12 = 1023    # every white cell
 
 [[preset]]
 name = "Giant Morsels"
@@ -192,9 +194,9 @@ rotary_potentiometer_6 = 830
 toggle_switch_7 = 1
 toggle_switch_8 = 0
 toggle_switch_9 = 0
-toggle_switch_10 = 1
+toggle_switch_10 = 0
 toggle_switch_11 = 0
-linear_potentiometer_12 = 620
+linear_potentiometer_12 = 820
 
 [[preset]]
 name = "Dark & White"
@@ -207,6 +209,36 @@ rotary_potentiometer_6 = 780
 toggle_switch_7 = 1
 toggle_switch_8 = 1               # dough takes the video's colour
 toggle_switch_9 = 0
-toggle_switch_10 = 1
+toggle_switch_10 = 0
 toggle_switch_11 = 1              # white chocolate in the mix
-linear_potentiometer_12 = 760
+linear_potentiometer_12 = 880
+
+[[preset]]
+name = "Cracked Crust"
+rotary_potentiometer_1 = 700
+rotary_potentiometer_2 = 512
+rotary_potentiometer_3 = 560      # darker bake shows the cracks
+rotary_potentiometer_4 = 860      # deep relief: more, deeper cracks
+rotary_potentiometer_5 = 560
+rotary_potentiometer_6 = 700
+toggle_switch_7 = 1
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 1              # the picture's edges split the crust
+toggle_switch_11 = 0
+linear_potentiometer_12 = 700
+
+[[preset]]
+name = "Size Halftone"
+rotary_potentiometer_1 = 450      # 32 px cells
+rotary_potentiometer_2 = 700
+rotary_potentiometer_3 = 380
+rotary_potentiometer_4 = 620
+rotary_potentiometer_5 = 480
+rotary_potentiometer_6 = 820
+toggle_switch_7 = 0               # Size: chip size carries the picture
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 1000
