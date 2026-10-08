@@ -6,7 +6,7 @@
 [program]
 program_id = "com.ron.bajaweave"
 program_name = "Bajaweave"
-program_version = "0.17.0"
+program_version = "1.0.0"
 abi_version = ">=1.0,<2.0"
 author = "ron"
 license = "GPL-3.0"
@@ -21,13 +21,13 @@ url = "https://github.com/bluecondition/videomancer-dev"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_1"
-name_label = "Osc1 Freq"
+name_label = "Osc1 Bars"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
 initial_value = 134
-display_min_value = 0
-display_max_value = 90
+display_min_value = 5
+display_max_value = 125
 suffix_label = ""
 
 [[parameter]]
@@ -54,13 +54,13 @@ suffix_label = "deg"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
-name_label = "Osc2 Freq"
+name_label = "Osc2 Bars"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
 initial_value = 113
-display_min_value = 0
-display_max_value = 90
+display_min_value = 5
+display_max_value = 125
 suffix_label = ""
 
 [[parameter]]

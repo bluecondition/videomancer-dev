@@ -1,8 +1,8 @@
 # Bajaweave — two swaying line oscillators, woven
 
-**v0.14.0 (2026-10-06): HW-iterating, finalizing.** Look signed off on hardware
-at v0.13 ("everything visually is looking perfect"); v0.14 adds knob smoothing
-for an occasional stutter in the scroll.
+**v1.0.0 (2026-10-07): FINAL — signed off by Ron on hardware ("Bajaweave can be finalized").**
+Defaults and the "Default Weave" preset are HW-captured (Opposite flow, Shadow depth,
++17% speed); "Slow Drift" and "Frantic Stripes" are hand-written.
 
 ## What it does
 Two phase-modulated carriers draw vertical stripes whose sway travels up or down
@@ -12,7 +12,7 @@ complementary colour pair that K3 turns around the wheel.
 
 | Control | Function |
 |---|---|
-| K1 / K4 | Osc1 / Osc2 stripe frequency |
+| K1 / K4 | Osc1 / Osc2 bars across the screen (~5–125 at HD) |
 | K2 / K5 | Osc1 / Osc2 sway wavelength (~1–17 cycles per screen) |
 | K3 | Colour: osc1 hue; osc2 is always its complement |
 | K6 | Sway amount (0 = straight lines … ~4× default) |
@@ -24,7 +24,7 @@ complementary colour pair that K3 turns around the wheel.
 | P12 | Speed, bipolar: centre = frozen, ends = ~23 lines/field each way, the same vertical speed for both waves (eased) |
 
 ## Build notes
-- **v0.17.0 build (2026-10-07):** all 6 configs on seed 1 except **SD HDMI = seed 2**
+- **v1.0.0 build (2026-10-07, bitstreams = the v0.17.0 build, TOML-only repack):** all 6 configs on seed 1 except **SD HDMI = seed 2**
   (seed 1 stalled router2; not a timing miss). Post-route Fmax: HD Analog 89.0,
   HD HDMI 93.6, HD Dual 91.6, SD Analog 98.4, SD HDMI 100.0, SD Dual 87.9 MHz.
   6945/7680 LC (90%), 24/32 EBR, pipeline latency 19 clocks in all modes.

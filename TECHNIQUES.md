@@ -209,6 +209,9 @@ Any screen-anchored frequency/fan term slips against scrolling terrain (apparent
 ### Stateless per-column sprite evaluation for clean edge scroll
 Objects attached to scrolling terrain must derive per-pixel from current-line values only — any held per-slot anchor mis-evaluates the leading partial slot at screen-left (sprites pop). If a held anchor is unavoidable, seed it from column 0 at line start and keep it line-local. — **candyhills** bushes, HW-iterating.
 
+### Woven PM line oscillators: equal PIXEL speed per wave, parity weave, interpolated LFO
+Two per-pixel sine carriers phase-modulated by per-line LFO sines. The LFO angle keeps 6 fraction bits and its value is sin + cos·frac (tangent interpolation: 0.55 vs 3.6 table-unit error), so a slow vertical sway moves by its exact rate every field instead of in whole-table-step judder. Layering: the stripe parity (bit 10 of an 11-bit PM phase, sampled at the trough) picks over/under per crossing — a checkerboard in (stripe1, stripe2) is a plain weave — with a continuous out = max(T, B·m/32) gain fade instead of a hard key, so nothing crawls as the pattern moves. The motion rule learned the hard way: advancing both sways by the same ANGLE per field (one shared drift) gives pixel speeds ∝ wavelength; when both flow the same way, the woven crossings' speed then cycles between the two wave speeds once per sway period (23 → 16 → 23 lines/field every 0.54 s) and reads as a STUTTER although each wave alone is perfectly uniform — diagnosed with an exact-RTL Python model of the per-line offsets plus a crossing tracker (`.bajaweave_work/motion_model.py`, `crossings.py`). Give each wave its own per-field rate L·step_k (equal lines/field, one serial multiply per field) so the weave translates rigidly, and add life as a small slow RELATIVE drift (≤ 3 lines/field, swinging over ~16 s) rather than a speed ratio. — **bajaweave**, HW-validated v1.0.
+
 ### Rotated-coordinate field for slanted banding
 Register `y_rot = y − x/2` once; use its bit-slices for band selection, border tests, and per-band seeds — every derived feature automatically shares the slope. — **solitude**, user-approved (52% LC).
 
@@ -393,6 +396,9 @@ A running N-sum from an EBR ring: at cycle c write s(c) at w and read w-(N-1); t
 ### Sine/curve ROM output needs a second fabric register before a multiply
 A `s_q <= ROM(addr)` register is absorbed into the EBR output latch; feeding `s_q` straight into a sequencer multiply puts EBR clk-to-q + column routing + the multiplier in one period (reflector/outliner: 66-70 MHz). Add `s_q2 <= s_q` and one wait state. — **reflector**, **outliner** (v2: 79-87 MHz), **tremor**, **collapse**, **tonecurve**.
 
+### Knob smoother: deadband + 10.4 glide, one tiny entity per geometry knob
+Pot ADC flicker of ±1–2 counts reached the picture every field (one count of a stripe-frequency knob moved the right-edge bars 18 px — "stutter at times"). A small entity per knob: the hold h follows raw only when |raw − h| ≥ 5 (3 still hopped under ±2 noise in a model), and a 10.4 output eases toward h by diff>>3 per field (snapping inside half a count), pipelined so the field-start update is a plain mux. Feed the SMOOTHED 10.4 value into the per-frame maths (carrier increment, LFO step carried ×16 into a wider accumulator). ~180 LC for five knobs. Corollary at 90% LC: every fused per-field operation in the drift/gain sequencer (abs → compare → min; a 4-term constant multiply; L+d then abs) became the HD critical path in turn (seed spread 75–88 MHz) — one operation per register restored 89–94 MHz. — **bajaweave** v0.14/v0.17, HW-validated.
+
 ## Verification & debugging methods
 
 - **RTL-faithful Python cycle model**: translate engine processes mechanically (read pre-edge, write post-edge) so it emits the identical stream as the die; diff against analytic math in ~2 s. Reach for it immediately on any streaming-engine bug — 5 of nacre's 7 defects were one-cycle read skews a picture can't localise. Taxonomy: sync-RAM prefetch is 2 cycles; ROM reads trail consumers by one; write strobes need explicit '0' defaults; clamp run ends to W not W−1. Always test dragged/asymmetric geometry — symmetry hides wrong-operand bugs. — **nacre** (program dropped; method transfers).
@@ -417,6 +423,7 @@ Quick lookup — details in the entries above.
 
 | Dead-end | Program |
 |---|---|
+| Shared-angle drift for two sways of different wavelength flowing the same way (crossing-speed wobble = stutter) | bajaweave |
 | Per-edge case-mux geometry fetch (vs active-mesh BRAM) | bishop |
 | XOR/parity boundary buffer (RMW); runtime crossing-count arithmetic | bishop |
 | Per-column RMW accumulator BRAM (sim-clean, HW black screen) | c64 |
