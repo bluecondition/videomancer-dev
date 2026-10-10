@@ -1,29 +1,70 @@
--- Oracle: Glitched Divinatory Portal
+-- oracle.vhd  (v2.0.1)
 --
--- A three-zone triptych effect:
---   * Top strip  : high-frequency vertical rainbow stripes (shimmering)
---   * Middle     : a torn "window" of noise containing a tall elliptical
---                  portal whose interior reveals the rainbow spectrum
---   * Bottom     : slow horizontal rainbow bands (ROYGBIV)
+-- ORACLE: a divinatory eye opening in a wall of static, with ordered spectra
+-- above and below.  The v1 triptych, redrawn at full resolution:
 --
--- Zone seams are optionally "torn" (jittered per-row) for a datamoshed
--- look. The portal shape is an octagonal approximation of a 3:1 tall
--- ellipse, which costs only add + compare + mux — no squared-distance
--- multiplies. All other multiplies are split across registered stages
--- so the combinational path between any two flops is short enough to
--- close timing at 74.25 MHz on the iCE40-HX4K (no DSP blocks).
+--   TOP     Spectrograph -- fine vertical spectral bars from a chirped phase
+--           DDA (dense at the edges, wide at the centre), each bar one full
+--           spectrum crossed by soft dark absorption lines; the bars ripple
+--           row by row on two sines.  S9 lays a second, 1/32 faster line
+--           screen over them: sliding colour moire.
+--   MIDDLE  A bevelled window (bright rule, inner shadow, spectrum leaking
+--           through the gutter) full of static: 1-px grain that re-rolls
+--           every frame, horizontal streak runs (random length/brightness/
+--           sepia, latched per run), a drifting two-wave cloud that sets the
+--           density, prismatic sparks (runs that reveal the spectrum behind),
+--           and Newton's rings rippling outward from the eye.
+--   EYE     A mandorla (vesica -> circle as it opens) built per line from a
+--           half-width profile ROM, so each pixel is one compare plus a 1-px
+--           anti-aliased edge whose ramp follows the boundary slope.  A white
+--           rim, a rainbow corona that falls off in elliptical rho^2, and an
+--           interior of lensed bands (S8: concentric iris rings + pupil).
+--   BOTTOM  Horizontal spectral bands swaying on two travelling triangle
+--           waves.  S10 Horizon puts them in perspective (receding into a
+--           glowing haze under the window) with the eye reflected in the
+--           floor as a shimmering column of light.
+--   TEAR    S7: random bursts of rows displaced sideways (chroma a few px
+--           off the luma) and jagged-tooth seams.  Done by reading the
+--           composed picture back out of a 256-px circular buffer with a
+--           per-line delay, so every layer tears together.
 --
--- Register map (t_spi_ram, each std_logic_vector(9 downto 0)):
---   registers_in(0) = Portal Size (0..1023 -> ellipse radius scale)
---   registers_in(1) = Portal X    (0..1023 -> X center, linear across max_x)
---   registers_in(2) = Portal Y    (0..1023 -> Y center, linear across max_y)
---   registers_in(3) = Noise       (0..1023 -> hash density / variety)
---   registers_in(4) = Hue Speed   (0..1023 -> hue DDS rate)
---   registers_in(5) = Band Freq   (0..1023 -> stripe/band multiplier)
---   registers_in(6) = Switches    (b0 Top  b1 Bot  b2 Portal  b3 Tear  b4 Bypass)
---   registers_in(7) = Brightness  (0..1023 -> Y/chroma attenuator)
+-- ENGINE
+--   Raster: measured active width/height (frame rows on interlace, bottom
+--   field = field_n '0'), generated parity-locked avid (aurora/cubist recipe,
+--   the HW fix for U/V-swap lines on saturated colour), output gated to
+--   64/512/512 outside it, one latency for all modes.
+--   Control is a MICROCODED ENGINE (port of cubist's, HW-validated): one
+--   32-bit ALU, a 256-word block-RAM register file (two copies, dual read),
+--   a 512-word program ROM (gen/oracle_ucode.py -> oracle_ucode_pkg.vhd),
+--   a serial Booth multiplier and a serial divider.  Each field it smooths
+--   the knobs, derives every per-field constant (eye size and wander, bar
+--   chirp, band frequency and perspective numerator, aura scales, tear
+--   bands) and writes them to output ports; then, one line ahead of the
+--   beam, it computes each line's parameter block (ripple, cloud warps, eye
+--   half-width and AA ramp, rho^2 row term, perspective band phase, haze,
+--   reflection, tear delay), which XFER copies into the pixel path while
+--   the previous line is in blanking.  A hardwired block derives the zone /
+--   window / seam flags from the line's row.  Motion phases advance once
+--   per FIELD on a saw-active-guarded vsync.
 --
--- License: GPL-3.0
+-- CONTROLS
+--   K1  Size      eye height
+--   K2  Gaze      eye wanders on a slow Lissajous (0 = fixed at centre)
+--   K3  Aura      corona width + ring density
+--   K4  Static    fine grain .. long streaks
+--   K5  Flow      one speed for every drift (0 = still; static still boils)
+--   K6  Spectrum  bar and band density
+--   S7  Tear      off / glitch bursts + torn seams
+--   S8  Eye       Lens (bands through the eye) / Iris (rings + pupil)
+--   S9  Moire     off / sliding line screens on bars and bands
+--   S10 Horizon   Flat bands / perspective floor + haze + reflection
+--   S11 Palette   Spectrum / Opal (cool iridescent fold of the spectrum)
+--   P12 VISION    the eye opens: glowing hairline slit -> almond -> full
+--                 circle; corona, rings, sparks, ripple and sway all swell
+--
+-- Palette: oracle_tables_pkg (gen/gen_tables.py), hardware convention (the
+-- u register carries Cr), so the sim shows mirrored hues.
+--
 -- Author: ron
 
 library ieee;
@@ -31,1008 +72,1628 @@ use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 
 library work;
-use work.video_timing_pkg.all;
-use work.video_stream_pkg.all;
-use work.core_pkg.all;
 use work.all;
+use work.core_pkg.all;
+use work.video_stream_pkg.all;
+use work.video_timing_pkg.all;
+use work.oracle_tables_pkg.all;
+use work.oracle_ucode_pkg.all;
 
 architecture oracle of program_top is
 
-    ----------------------------------------------------------------------
-    -- Pipeline depth
-    ----------------------------------------------------------------------
-    constant LATENCY : natural := 14;
+    -- zones
+    constant Z_A : unsigned(2 downto 0) := "000";   -- spectrograph bars
+    constant Z_G : unsigned(2 downto 0) := "001";   -- gutter (bands leak)
+    constant Z_R : unsigned(2 downto 0) := "010";   -- window rule
+    constant Z_W : unsigned(2 downto 0) := "011";   -- window static
+    constant Z_C : unsigned(2 downto 0) := "100";   -- horizon bands
 
-    type t_pipe is array (natural range <>) of t_video_stream_yuv444_30b;
-    signal pipe : t_pipe(0 to LATENCY - 1);
+    -- output buffer: base read delay and the stage that writes it
+    constant C_D0 : integer := 40;
+    constant C_NW : integer := 17;
+    -- line-register block size (gen/oasm.py XFER_FIELDS)
+    constant C_NXF : integer := 23;
 
-    ----------------------------------------------------------------------
-    -- Rainbow palette (ROYGBIV + wrap) in 10-bit YUV (U/V-swapped,
-    -- calibrated). Copied verbatim from Phosphor's verified constants.
-    ----------------------------------------------------------------------
-    type t_pal10 is array (0 to 7) of unsigned(9 downto 0);
+    constant C_MID : unsigned(9 downto 0) := to_unsigned(512, 10);
+    constant C_BLK : unsigned(9 downto 0) := to_unsigned(64, 10);
 
-    constant C_PAL_Y : t_pal10 := (
-        to_unsigned(328, 10),   -- 0 Red
-        to_unsigned(584, 10),   -- 1 Orange
-        to_unsigned(840, 10),   -- 2 Yellow
-        to_unsigned(580, 10),   -- 3 Green
-        to_unsigned(164, 10),   -- 4 Blue
-        to_unsigned(192, 10),   -- 5 Indigo
-        to_unsigned(349, 10),   -- 6 Violet
-        to_unsigned(328, 10));  -- 7 Red (wrap)
+    -- ==== timing / raster ====
+    signal s_timing  : t_video_timing_port;
+    signal s_hcnt    : unsigned(11 downto 0) := (others => '0');
+    signal s_vcnt    : unsigned(11 downto 0) := (others => '0');
+    signal s_meas_h  : unsigned(11 downto 0) := to_unsigned(1920, 12);
+    signal s_meas_v  : unsigned(11 downto 0) := to_unsigned(1080, 12);
+    signal s_ilace   : std_logic := '0';
+    signal s_botf    : std_logic := '0';
+    signal s_fh      : unsigned(11 downto 0) := to_unsigned(1080, 12);
 
-    constant C_PAL_U : t_pal10 := (
-        to_unsigned(960, 10), to_unsigned(772, 10), to_unsigned(584, 10),
-        to_unsigned(136, 10), to_unsigned(440, 10), to_unsigned(608, 10),
-        to_unsigned(756, 10), to_unsigned(960, 10));
+    -- ==== generated avid (aurora / cubist) ====
+    signal g_hsq, g_hsr, g_avq, g_avr : std_logic := '0';
+    signal g_ph, g_arm, g_par, g_sel, g_avid : std_logic := '0';
+    signal g_pc   : unsigned(3 downto 0) := to_unsigned(8, 4);
+    signal g_rsr  : std_logic_vector(2 downto 0) := (others => '0');
+    signal g_cnt  : unsigned(11 downto 0) := (others => '0');
+    signal g_wm1  : unsigned(11 downto 0) := to_unsigned(1919, 12);
+    signal s_bcol : unsigned(10 downto 0) := (others => '0');
 
-    constant C_PAL_V : t_pal10 := (
-        to_unsigned(360, 10), to_unsigned(212, 10), to_unsigned( 64, 10),
-        to_unsigned(216, 10), to_unsigned(960, 10), to_unsigned(696, 10),
-        to_unsigned(852, 10), to_unsigned(360, 10));
+    -- ==== field tick, line trigger, switches ====
+    signal s_saw   : std_logic := '0';
+    signal s_vs_go : std_logic := '0';
+    signal tq      : std_logic := '0';
+    signal tcnt    : unsigned(4 downto 0) := (others => '0');
+    signal sw_tear, sw_iris, sw_moire, sw_opal : std_logic := '0';
+    signal s_lfsr  : unsigned(15 downto 0) := x"ACE1";
 
-    -- Neutral chroma for grayscale noise
-    constant C_NEUTRAL_U : unsigned(9 downto 0) := to_unsigned(512, 10);
-    constant C_NEUTRAL_V : unsigned(9 downto 0) := to_unsigned(512, 10);
-
-    ----------------------------------------------------------------------
-    -- Position tracking
-    ----------------------------------------------------------------------
-    signal pixel_x      : unsigned(11 downto 0) := (others => '0');
-    signal pixel_y      : unsigned(11 downto 0) := (others => '0');
-    -- last_x/y_r track the highest pixel_x/y observed in the current frame.
-    -- Initialising to a small value means the first output frame uses stale
-    -- zero-derived zone bounds, but the tester warmup skips those frames.
-    signal last_x_r     : unsigned(11 downto 0) := (others => '0');
-    signal last_y_r     : unsigned(11 downto 0) := (others => '0');
-    signal max_x_r      : unsigned(11 downto 0) := to_unsigned(1920, 12);
-    signal max_y_r      : unsigned(11 downto 0) := to_unsigned(1080, 12);
-    signal prev_hsync_n : std_logic := '1';
-    signal prev_vsync_n : std_logic := '1';
-    signal frame_count  : unsigned(15 downto 0) := (others => '0');
-    signal hue_phase    : unsigned(15 downto 0) := (others => '0');
-
-    ----------------------------------------------------------------------
-    -- Parameters latched at vsync (keeps timing off the user-control path)
-    ----------------------------------------------------------------------
-    signal portal_size_r : unsigned(9 downto 0) := to_unsigned(512, 10);
-    signal portal_x_r    : unsigned(9 downto 0) := to_unsigned(512, 10);
-    signal portal_y_r    : unsigned(9 downto 0) := to_unsigned(512, 10);
-    signal noise_k_r     : unsigned(9 downto 0) := to_unsigned(600, 10);
-    signal hue_speed_r   : unsigned(9 downto 0) := to_unsigned(128, 10);
-    signal band_k_r      : unsigned(9 downto 0) := to_unsigned(700, 10);
-    signal top_en_r      : std_logic := '1';
-    signal bot_en_r      : std_logic := '1';
-    signal portal_en_r   : std_logic := '1';
-    signal tear_en_r     : std_logic := '1';
-    signal bypass_r      : std_logic := '0';
-    signal brt_r         : unsigned(9 downto 0) := to_unsigned(900, 10);
-
-    ----------------------------------------------------------------------
-    -- Per-frame derived constants (pipelined across vblank so the
-    -- multipliers only need to close at a single pipeline stage).
-    ----------------------------------------------------------------------
-    -- cx = max_x * portal_x_r / 1024, cy = max_y * portal_y_r / 1024
-    signal cx_mul_r       : unsigned(21 downto 0) := (others => '0');
-    signal cy_mul_r       : unsigned(21 downto 0) := (others => '0');
-    signal cx_r           : unsigned(11 downto 0) := to_unsigned(960, 12);
-    signal cy_r           : unsigned(11 downto 0) := to_unsigned(540, 12);
-
-    -- Per-frame band-frequency factors (extracted from band_k_r).
-    --   band_A_r: 4..67, picks vertical-stripe density in Zone A (many bars)
-    --   band_C_r: 1..16, picks horizontal-band density in Zone C (few bars)
-    signal band_A_r       : unsigned(6 downto 0) := to_unsigned(20, 7);
-    signal band_C_r       : unsigned(4 downto 0) := to_unsigned(6, 5);
-
-    -- Portal radius (horizontal half-width), driven by portal_size_r.
-    -- Scaled so at size=1023, rx ≈ max_x/4 (vertical reach ≈ max_y*3/4 via 3:1 aspect).
-    signal rx_mul_r       : unsigned(21 downto 0) := (others => '0');
-    signal portal_rx_r    : unsigned(11 downto 0) := to_unsigned(200, 12);
-
-    -- Zone seam y-positions: zoneA = [0, max_y>>3], zoneC = [max_y*7/8, max_y].
-    signal zoneA_y_r      : unsigned(11 downto 0) := to_unsigned(135, 12);
-    signal zoneC_y_r      : unsigned(11 downto 0) := to_unsigned(945, 12);
-
-    -- Noise shift: maps noise_k_r to a right-shift amount 1..4
-    -- (selects grain size).
-    signal noise_shift_r  : integer range 0 to 5 := 3;
-
-    -- Hue phase offset for animation (added to hue_C_idx so bands drift).
-    signal hue_offset_r   : unsigned(9 downto 0) := (others => '0');
-
-    ----------------------------------------------------------------------
-    -- Stage 1 signals: position register + coarse zone classification
-    -- + portal absolute diffs + hash raw material.
-    ----------------------------------------------------------------------
-    signal s1_x           : unsigned(11 downto 0) := (others => '0');
-    signal s1_y           : unsigned(11 downto 0) := (others => '0');
-    signal s1_zone_A      : std_logic := '0';        -- strict zone-A (top)
-    signal s1_zone_C      : std_logic := '0';        -- strict zone-C (bottom)
-    signal s1_near_topA   : std_logic := '0';        -- y near A/B seam
-    signal s1_near_botC   : std_logic := '0';        -- y near B/C seam
-    signal s1_dx          : unsigned(11 downto 0) := (others => '0');
-    signal s1_dy          : unsigned(11 downto 0) := (others => '0');
-    signal s1_hue_base_A  : unsigned(9 downto 0)  := (others => '0');  -- x-only component
-    signal s1_hue_base_C  : unsigned(9 downto 0)  := (others => '0');  -- y-only component
-    signal s1_noise_xi    : unsigned(11 downto 0) := (others => '0');  -- x >> shift
-    signal s1_noise_yi    : unsigned(11 downto 0) := (others => '0');  -- y >> shift
-
-    ----------------------------------------------------------------------
-    -- Stage 2 signals: hue indices including animation & per-row tear,
-    -- scaled dx for octagonal distance, noise hash XOR step.
-    ----------------------------------------------------------------------
-    signal s2_x           : unsigned(11 downto 0) := (others => '0');
-    signal s2_y           : unsigned(11 downto 0) := (others => '0');
-    signal s2_zone_A      : std_logic := '0';
-    signal s2_zone_C      : std_logic := '0';
-    signal s2_hue_A_idx   : unsigned(9 downto 0) := (others => '0');   -- fast vertical stripes
-    signal s2_hue_C_idx   : unsigned(9 downto 0) := (others => '0');   -- slow horizontal bands
-    signal s2_dx3         : unsigned(13 downto 0) := (others => '0');  -- 3*dx for 3:1 aspect
-    signal s2_dy_r        : unsigned(11 downto 0) := (others => '0');
-    signal s2_noise_mix   : unsigned(15 downto 0) := (others => '0');  -- xor mix
-    signal s2_noise_select: unsigned(2 downto 0) := (others => '0');   -- top bits of earlier hash
-    signal s2_tear_hit_A  : std_logic := '0';
-    signal s2_tear_hit_C  : std_logic := '0';
-
-    ----------------------------------------------------------------------
-    -- Stage 3 signals: octagonal distance pre-step (big vs small),
-    -- hash multiply first half, selected hue for palette lookup.
-    ----------------------------------------------------------------------
-    signal s3_x           : unsigned(11 downto 0) := (others => '0');
-    signal s3_y           : unsigned(11 downto 0) := (others => '0');
-    signal s3_zone_A      : std_logic := '0';
-    signal s3_zone_C      : std_logic := '0';
-    signal s3_octa_big    : unsigned(13 downto 0) := (others => '0');  -- max(3*dx, dy)
-    signal s3_octa_small  : unsigned(13 downto 0) := (others => '0');  -- min(3*dx, dy)
-    signal s3_hue_sel     : unsigned(9 downto 0) := (others => '0');   -- final hue for palette
-    signal s3_noise_prod  : unsigned(31 downto 0) := (others => '0');  -- hash multiply result
-    signal s3_tear_hit_A  : std_logic := '0';
-    signal s3_tear_hit_C  : std_logic := '0';
-
-    ----------------------------------------------------------------------
-    -- Stage 4 signals: octagonal distance sum, hash finalise,
-    -- palette base/next indices.
-    ----------------------------------------------------------------------
-    signal s4_x           : unsigned(11 downto 0) := (others => '0');
-    signal s4_y           : unsigned(11 downto 0) := (others => '0');
-    signal s4_zone_A      : std_logic := '0';
-    signal s4_zone_C      : std_logic := '0';
-    signal s4_octa_dist   : unsigned(14 downto 0) := (others => '0');  -- big + (small>>1)
-    signal s4_hash        : unsigned(15 downto 0) := (others => '0');  -- finalised hash bits
-    signal s4_hue_base_i  : unsigned(2 downto 0) := (others => '0');
-    signal s4_hue_next_i  : unsigned(2 downto 0) := (others => '0');
-    signal s4_hue_frac    : unsigned(6 downto 0) := (others => '0');
-    signal s4_tear_hit_A  : std_logic := '0';
-    signal s4_tear_hit_C  : std_logic := '0';
-
-    ----------------------------------------------------------------------
-    -- Stage 5 signals: portal_hit decided, palette entries fetched,
-    -- noise values computed.
-    ----------------------------------------------------------------------
-    signal s5_zone_A      : std_logic := '0';
-    signal s5_zone_C      : std_logic := '0';
-    signal s5_portal_hit  : std_logic := '0';
-    signal s5_pal_base_y  : unsigned(9 downto 0) := (others => '0');
-    signal s5_pal_next_y  : unsigned(9 downto 0) := (others => '0');
-    signal s5_pal_base_u  : unsigned(9 downto 0) := (others => '0');
-    signal s5_pal_next_u  : unsigned(9 downto 0) := (others => '0');
-    signal s5_pal_base_v  : unsigned(9 downto 0) := (others => '0');
-    signal s5_pal_next_v  : unsigned(9 downto 0) := (others => '0');
-    signal s5_hue_frac    : unsigned(6 downto 0) := (others => '0');
-    signal s5_noise_luma  : unsigned(9 downto 0) := (others => '0');
-    signal s5_noise_poke  : std_logic := '0';        -- occasional rainbow pokethrough
-    signal s5_noise_pkidx : unsigned(2 downto 0) := (others => '0');
-    signal s5_tear_hit_A  : std_logic := '0';
-    signal s5_tear_hit_C  : std_logic := '0';
-
-    ----------------------------------------------------------------------
-    -- Stage 6 signals: palette diffs (signed).
-    ----------------------------------------------------------------------
-    signal s6_zone_A      : std_logic := '0';
-    signal s6_zone_C      : std_logic := '0';
-    signal s6_portal_hit  : std_logic := '0';
-    signal s6_diff_y      : signed(10 downto 0) := (others => '0');
-    signal s6_diff_u      : signed(10 downto 0) := (others => '0');
-    signal s6_diff_v      : signed(10 downto 0) := (others => '0');
-    signal s6_pal_base_y  : unsigned(9 downto 0) := (others => '0');
-    signal s6_pal_base_u  : unsigned(9 downto 0) := (others => '0');
-    signal s6_pal_base_v  : unsigned(9 downto 0) := (others => '0');
-    signal s6_hue_frac    : unsigned(6 downto 0) := (others => '0');
-    signal s6_noise_luma  : unsigned(9 downto 0) := (others => '0');
-    signal s6_noise_poke  : std_logic := '0';
-    signal s6_noise_pk_y  : unsigned(9 downto 0) := (others => '0');
-    signal s6_noise_pk_u  : unsigned(9 downto 0) := (others => '0');
-    signal s6_noise_pk_v  : unsigned(9 downto 0) := (others => '0');
-    signal s6_tear_hit_A  : std_logic := '0';
-    signal s6_tear_hit_C  : std_logic := '0';
-
-    ----------------------------------------------------------------------
-    -- Stage 7 signals: palette blend multiplies (pipelined mul).
-    ----------------------------------------------------------------------
-    signal s7_zone_A      : std_logic := '0';
-    signal s7_zone_C      : std_logic := '0';
-    signal s7_portal_hit  : std_logic := '0';
-    signal s7_prod_y      : signed(18 downto 0) := (others => '0');
-    signal s7_prod_u      : signed(18 downto 0) := (others => '0');
-    signal s7_prod_v      : signed(18 downto 0) := (others => '0');
-    signal s7_pal_base_y  : unsigned(9 downto 0) := (others => '0');
-    signal s7_pal_base_u  : unsigned(9 downto 0) := (others => '0');
-    signal s7_pal_base_v  : unsigned(9 downto 0) := (others => '0');
-    signal s7_noise_luma  : unsigned(9 downto 0) := (others => '0');
-    signal s7_noise_poke  : std_logic := '0';
-    signal s7_noise_pk_y  : unsigned(9 downto 0) := (others => '0');
-    signal s7_noise_pk_u  : unsigned(9 downto 0) := (others => '0');
-    signal s7_noise_pk_v  : unsigned(9 downto 0) := (others => '0');
-    signal s7_tear_hit_A  : std_logic := '0';
-    signal s7_tear_hit_C  : std_logic := '0';
-
-    ----------------------------------------------------------------------
-    -- Stage 8 signals: palette blend sums (rainbow_y/u/v), noise final.
-    ----------------------------------------------------------------------
-    signal s8_zone_A      : std_logic := '0';
-    signal s8_zone_C      : std_logic := '0';
-    signal s8_portal_hit  : std_logic := '0';
-    signal s8_rainbow_y   : unsigned(9 downto 0) := (others => '0');
-    signal s8_rainbow_u   : unsigned(9 downto 0) := (others => '0');
-    signal s8_rainbow_v   : unsigned(9 downto 0) := (others => '0');
-    signal s8_noise_y     : unsigned(9 downto 0) := (others => '0');
-    signal s8_noise_u     : unsigned(9 downto 0) := (others => '0');
-    signal s8_noise_v     : unsigned(9 downto 0) := (others => '0');
-    signal s8_tear_hit_A  : std_logic := '0';
-    signal s8_tear_hit_C  : std_logic := '0';
-
-    ----------------------------------------------------------------------
-    -- Stage 9 signals: zone color select (mux across zones / portal / noise).
-    ----------------------------------------------------------------------
-    signal s9_y           : unsigned(9 downto 0) := (others => '0');
-    signal s9_u           : unsigned(9 downto 0) := (others => '0');
-    signal s9_v           : unsigned(9 downto 0) := (others => '0');
-    signal s9_is_bypass   : std_logic := '0';
-
-    ----------------------------------------------------------------------
-    -- Stage 10 signals: brightness multiply (luma scale).
-    ----------------------------------------------------------------------
-    signal s10_y_mul      : unsigned(19 downto 0) := (others => '0');
-    signal s10_u          : unsigned(9 downto 0) := (others => '0');
-    signal s10_v          : unsigned(9 downto 0) := (others => '0');
-    signal s10_is_bypass  : std_logic := '0';
-
-    ----------------------------------------------------------------------
-    -- Stage 11 signals: chroma scale toward neutral using brightness.
-    -- u_out = 512 + (u_in - 512) * brt / 1024
-    ----------------------------------------------------------------------
-    signal s11_y          : unsigned(9 downto 0) := (others => '0');
-    signal s11_u_mul      : signed(21 downto 0) := (others => '0');
-    signal s11_v_mul      : signed(21 downto 0) := (others => '0');
-    signal s11_is_bypass  : std_logic := '0';
-
-    ----------------------------------------------------------------------
-    -- Stage 12 signals: final chroma assembly.
-    ----------------------------------------------------------------------
-    signal s12_y          : unsigned(9 downto 0) := (others => '0');
-    signal s12_u          : unsigned(9 downto 0) := (others => '0');
-    signal s12_v          : unsigned(9 downto 0) := (others => '0');
-    signal s12_is_bypass  : std_logic := '0';
-
-    ----------------------------------------------------------------------
-    -- Stage 13 signals: final output mux (bypass vs effect).
-    ----------------------------------------------------------------------
-    signal s13_y          : unsigned(9 downto 0) := (others => '0');
-    signal s13_u          : unsigned(9 downto 0) := (others => '0');
-    signal s13_v          : unsigned(9 downto 0) := (others => '0');
-
-    ----------------------------------------------------------------------
-    -- Helper: saturating addition (11-bit -> 10-bit)
-    ----------------------------------------------------------------------
-    function sat10_add(a : unsigned(9 downto 0); b : signed(10 downto 0))
-        return unsigned is
-        variable s : signed(11 downto 0);
+    -- ==== microcoded engine (cubist's design, 24-bit datapath) ====
+    -- register file: two copies (dual read), each a 256x16 + a 256x8 RAM
+    type t_rf16 is array (0 to 255) of std_logic_vector(15 downto 0);
+    type t_rf8  is array (0 to 255) of std_logic_vector(7 downto 0);
+    function rf_lo(c : t_rf) return t_rf16 is
+        variable r : t_rf16;
     begin
-        s := signed(std_logic_vector(resize(a, 12))) + resize(b, 12);
-        if s < 0 then
-            return to_unsigned(0, 10);
-        elsif s > 1023 then
-            return to_unsigned(1023, 10);
+        for i in 0 to 255 loop r(i) := c(i)(15 downto 0); end loop;
+        return r;
+    end function;
+    function rf_hi(c : t_rf) return t_rf8 is
+        variable r : t_rf8;
+    begin
+        for i in 0 to 255 loop r(i) := c(i)(23 downto 16); end loop;
+        return r;
+    end function;
+    signal rf_al, rf_bl : t_rf16 := rf_lo(C_RFINIT);
+    signal rf_ah, rf_bh : t_rf8  := rf_hi(C_RFINIT);
+    attribute ram_style : string;
+    attribute ram_style of rf_al : signal is "block";
+    attribute ram_style of rf_ah : signal is "block";
+    attribute ram_style of rf_bl : signal is "block";
+    attribute ram_style of rf_bh : signal is "block";
+    attribute no_rw_check : boolean;
+    attribute no_rw_check of rf_al : signal is true;
+    attribute no_rw_check of rf_ah : signal is true;
+    attribute no_rw_check of rf_bl : signal is true;
+    attribute no_rw_check of rf_bh : signal is true;
+    signal u_pc  : unsigned(8 downto 0) := (others => '0');
+    signal u_st  : unsigned(1 downto 0) := (others => '0');
+    signal u_gwt : unsigned(2 downto 0) := (others => '0');
+    signal u_ir, u_rom : std_logic_vector(31 downto 0) := (others => '0');
+    signal u_fa  : unsigned(8 downto 0) := (others => '0');
+    signal u_wlast : std_logic := '0';
+    signal u_wa  : unsigned(7 downto 0) := (others => '0');
+    signal u_rdal, u_rdbl : std_logic_vector(15 downto 0) := (others => '0');
+    signal u_rdah, u_rdbh : std_logic_vector(7 downto 0) := (others => '0');
+    signal u_rda, u_rdb : std_logic_vector(23 downto 0);
+    signal u_wd  : std_logic_vector(23 downto 0) := (others => '0');
+    signal u_ctlv, u_ctlr : signed(23 downto 0) := (others => '0');
+    signal u_we  : std_logic := '0';
+    signal u_sh  : signed(23 downto 0) := (others => '0');   -- operand A / shifter
+    signal u_b   : signed(23 downto 0) := (others => '0');   -- operand B (inverted for compares)
+    signal u_shc : unsigned(3 downto 0) := (others => '0');
+    signal u_rsel : unsigned(3 downto 0) := (others => '0');
+    signal u_rwr, u_cin, u_ismin, u_bltr : std_logic := '0';
+    signal u_romr : signed(13 downto 0) := (others => '0');
+    signal u_fpend, u_lpend : std_logic := '0';
+    -- serial multiplier (unsigned 16 x 12, right-shifting) and restoring
+    -- divider (unsigned 25 / 12); operands are magnitudes by microcode
+    -- contract (gen/oemu.py asserts it)
+    signal mu_pa  : unsigned(15 downto 0) := (others => '0');
+    signal mu_pl  : unsigned(11 downto 0) := (others => '0');
+    signal mu_ph  : unsigned(16 downto 0) := (others => '0');
+    signal mu_bsy : std_logic := '0';
+    signal mu_cnt : unsigned(3 downto 0) := (others => '0');
+    signal dv_na  : unsigned(24 downto 0) := (others => '0');
+    signal dv_ra  : unsigned(12 downto 0) := (others => '0');
+    signal dv_da  : unsigned(11 downto 0) := to_unsigned(1, 12);
+    signal dv_cnt : unsigned(4 downto 0) := (others => '0');
+    signal dv_bsy, dv_post, dv_ovf : std_logic := '0';
+    -- line-register block transfer
+    signal xf_run, xf_d1 : std_logic := '0';
+    signal xf_i, xf_i1   : unsigned(4 downto 0) := (others => '0');
+    -- engine ROM ports: quarter sine (10-bit angle), eye profiles
+    signal qs_ang  : unsigned(9 downto 0) := (others => '0');
+    signal qs_q    : unsigned(11 downto 0) := (others => '0');
+    signal qs_d    : unsigned(11 downto 0) := (others => '0');
+    signal qs_n1, qs_n2 : std_logic := '0';
+    signal pr_a    : unsigned(7 downto 0) := (others => '0');
+    signal pr_qv, pr_qc, pr_dv, pr_dc : unsigned(11 downto 0) := (others => '0');
+
+    -- ==== per-field constants (engine output ports) ====
+    signal f_cx    : unsigned(10 downto 0) := to_unsigned(960, 11);
+    signal f_cA    : unsigned(23 downto 0) := (others => '0');
+    signal f_kS1, f_kS2, f_kW1x, f_kW2x : unsigned(9 downto 0) := (others => '0');
+    signal t_M, t_G, t_Rg : unsigned(15 downto 0) := (others => '0');
+    signal f_spk   : unsigned(7 downto 0) := (others => '0');
+    signal f_lenm  : unsigned(5 downto 0) := (others => '0');
+    signal f_as4   : unsigned(3 downto 0) := (others => '0');
+    signal f_kR    : unsigned(5 downto 0) := (others => '0');
+    signal f_se    : unsigned(2 downto 0) := (others => '0');
+    signal f_sm    : unsigned(1 downto 0) := (others => '0');
+    signal f_g3    : unsigned(2 downto 0) := (others => '0');
+    signal f_rsh   : unsigned(1 downto 0) := (others => '0');
+    signal f_pup2  : unsigned(13 downto 0) := (others => '0');
+    signal f_boost : unsigned(5 downto 0) := (others => '0');
+    signal f_wx0, f_wx1m, f_xhm1 : unsigned(10 downto 0) := (others => '0');
+    signal f_tseed : unsigned(15 downto 0) := x"ACE1";
+    signal f_hs2   : unsigned(17 downto 0) := (others => '0');
+    signal f_hxm1  : signed(11 downto 0) := (others => '1');
+    -- rho^2 DDA (stage 5): u^2 in Q24, saturating at 16.0
+    signal h_q     : unsigned(28 downto 0) := to_unsigned(2**28 - 1, 29);
+    signal h_d     : signed(27 downto 0) := (others => '0');
+    signal h_x     : unsigned(10 downto 0) := (others => '0');
+    signal h_run   : std_logic := '0';
+    signal h_sat   : std_logic := '0';
+    signal f_yA, f_yC, f_wy0, f_wy1 : unsigned(11 downto 0) := (others => '0');
+
+    -- ==== per-line parameters (XFER) and the derived zone flags ====
+    signal cu_rc   : unsigned(11 downto 0) := (others => '0');
+    signal cu_lb, cu_phC : unsigned(15 downto 0) := (others => '0');
+    signal cu_v2, cu_w4 : unsigned(13 downto 0) := (others => '0');
+    signal cu_eye, cu_ref : std_logic := '0';
+    signal cu_k    : unsigned(2 downto 0) := (others => '0');
+    signal cu_swA  : unsigned(6 downto 0) := (others => '0');
+    signal cu_ah, cu_aref : unsigned(4 downto 0) := (others => '0');
+    signal cu_rx0, cu_rx1 : unsigned(10 downto 0) := (others => '0');
+    signal cu_d, cu_dc : unsigned(7 downto 0) := to_unsigned(C_D0, 8);
+    signal cu_zA, cu_zC, cu_win, cu_rr, cu_nA, cu_nC : std_logic := '0';
+    signal cu_dt, cu_db : unsigned(4 downto 0) := (others => '0');
+    signal cu_sA, cu_sC : signed(5 downto 0) := (others => '0');
+
+    -- ==== stage 0: per-pixel DDAs, RNG, run engine, seam teeth ====
+    signal dA_ph, dA_fr : unsigned(23 downto 0) := (others => '0');
+    signal dA_lf   : std_logic := '1';
+    signal dS1, dS2, dW1, dW2 : unsigned(15 downto 0) := (others => '0');
+    signal rng     : unsigned(31 downto 0) := x"6D2B79F5";
+    signal rn_rem  : unsigned(6 downto 0) := (others => '0');
+    signal rn_b    : unsigned(7 downto 0) := (others => '0');
+    signal rn_sp   : std_logic := '0';
+    signal rn_tn   : unsigned(2 downto 0) := (others => '0');
+    signal tl      : unsigned(15 downto 0) := x"ACE1";
+
+    -- ==== pixel pipeline ====
+    signal av      : std_logic_vector(1 to C_NW) := (others => '0');
+    type t_z is array(2 to 11) of unsigned(2 downto 0);
+    signal zn      : t_z := (others => Z_W);
+    -- s1
+    signal p1_hA   : unsigned(7 downto 0) := (others => '0');
+    signal p1_ma   : unsigned(15 downto 0) := (others => '0');
+    signal c_ad1, c_ad2 : unsigned(8 downto 0) := (others => '0');
+    signal p1_t1, p1_t2 : unsigned(8 downto 0) := (others => '0');
+    signal p1_dxs, p1_dl, p1_dr : signed(12 downto 0) := (others => '0');
+    signal p1_rf   : std_logic := '0';
+    signal p1_rb, p1_g : unsigned(7 downto 0) := (others => '0');
+    signal p1_sp   : std_logic := '0';
+    signal p1_tn   : unsigned(2 downto 0) := (others => '0');
+    signal p1_tA, p1_tC : signed(3 downto 0) := (others => '0');
+    -- s2
+    signal p2_iA   : unsigned(7 downto 0) := (others => '0');
+    signal p2_ma   : unsigned(15 downto 0) := (others => '0');
+    signal p2_sw   : signed(10 downto 0) := (others => '0');
+    signal p2_dx   : unsigned(10 downto 0) := (others => '0');
+    signal p2_dlc, p2_drc : unsigned(4 downto 0) := (others => '0');
+    signal p2_md   : signed(8 downto 0) := (others => '0');
+    signal p2_g    : unsigned(7 downto 0) := (others => '0');
+    signal p2_sp, p2_rf : std_logic := '0';
+    signal p2_tn   : unsigned(2 downto 0) := (others => '0');
+    signal c_q1, c_q2 : signed(7 downto 0) := (others => '0');
+    -- s3
+    signal p3_c1, p3_c2 : signed(7 downto 0) := (others => '0');
+    signal p3_e    : signed(15 downto 0) := (others => '0');
+    signal p3_swp  : unsigned(11 downto 0) := (others => '0');
+    signal p3_swn  : std_logic := '0';
+    signal p3_mp   : unsigned(11 downto 0) := (others => '0');
+    signal p3_mpn  : std_logic := '0';
+    signal p3_scA  : unsigned(3 downto 0) := (others => '0');
+    signal p3_iA   : unsigned(7 downto 0) := (others => '0');
+    signal p3_g    : unsigned(7 downto 0) := (others => '0');
+    signal p3_dlc, p3_drc : unsigned(4 downto 0) := (others => '0');
+    signal p3_sp, p3_rf : std_logic := '0';
+    signal p3_tn   : unsigned(2 downto 0) := (others => '0');
+    -- s4
+    signal p4_ar   : signed(15 downto 0) := (others => '0');
+    signal p4_hC   : unsigned(15 downto 0) := (others => '0');
+    signal p4_m    : unsigned(7 downto 0) := (others => '0');
+    signal p4_D    : unsigned(4 downto 0) := (others => '0');
+    signal p4_scA  : unsigned(3 downto 0) := (others => '0');
+    signal p4_iA   : unsigned(7 downto 0) := (others => '0');
+    signal p4_dlc, p4_drc : unsigned(4 downto 0) := (others => '0');
+    signal p4_sp, p4_rf : std_logic := '0';
+    signal p4_tn   : unsigned(2 downto 0) := (others => '0');
+    -- s5
+    signal p5_a    : unsigned(4 downto 0) := (others => '0');
+    signal p5_iC   : unsigned(7 downto 0) := (others => '0');
+    signal p5_mc   : unsigned(15 downto 0) := (others => '0');
+    signal p5_L    : unsigned(12 downto 0) := (others => '0');
+    signal p5_scA  : unsigned(3 downto 0) := (others => '0');
+    signal p5_iA   : unsigned(7 downto 0) := (others => '0');
+    signal p5_dlc, p5_drc : unsigned(4 downto 0) := (others => '0');
+    signal p5_sp, p5_rf : std_logic := '0';
+    signal p5_tn   : unsigned(2 downto 0) := (others => '0');
+    -- s6
+    signal p6_r2   : unsigned(13 downto 0) := (others => '0');
+    signal p6_mc   : unsigned(15 downto 0) := (others => '0');
+    signal p6_Ys   : unsigned(9 downto 0) := (others => '0');
+    signal p6_a    : unsigned(4 downto 0) := (others => '0');
+    signal p6_scA  : unsigned(3 downto 0) := (others => '0');
+    signal p6_iA, p6_iC : unsigned(7 downto 0) := (others => '0');
+    signal p6_dlc, p6_drc : unsigned(4 downto 0) := (others => '0');
+    signal p6_sp, p6_rf : std_logic := '0';
+    signal p6_tn   : unsigned(2 downto 0) := (others => '0');
+    -- s7
+    signal p7_gd   : unsigned(13 downto 0) := (others => '0');
+    signal p7_rp   : unsigned(19 downto 0) := (others => '0');
+    signal p7_hl, p7_hi : unsigned(15 downto 0) := (others => '0');
+    signal p7_pd   : signed(14 downto 0) := (others => '0');
+    signal p7_sc   : unsigned(3 downto 0) := (others => '0');
+    signal p7_sl   : unsigned(1 downto 0) := (others => '0');
+    signal p7_lift : unsigned(6 downto 0) := (others => '0');
+    signal p7_Ys   : unsigned(9 downto 0) := (others => '0');
+    signal p7_a    : unsigned(4 downto 0) := (others => '0');
+    signal p7_iA, p7_iC : unsigned(7 downto 0) := (others => '0');
+    signal p7_sp, p7_rf : std_logic := '0';
+    signal p7_tn   : unsigned(2 downto 0) := (others => '0');
+    -- s8
+    signal p8_gq   : unsigned(16 downto 0) := (others => '0');
+    signal p8_ring : unsigned(7 downto 0) := (others => '0');
+    signal p8_hE   : unsigned(7 downto 0) := (others => '0');
+    signal p8_Ysh  : unsigned(9 downto 0) := (others => '0');
+    signal p8_pa   : unsigned(1 downto 0) := (others => '0');
+    signal p8_lift : unsigned(6 downto 0) := (others => '0');
+    signal p8_sc   : unsigned(3 downto 0) := (others => '0');
+    signal p8_a    : unsigned(4 downto 0) := (others => '0');
+    signal p8_sp, p8_rf : std_logic := '0';
+    signal p8_iA, p8_iC : unsigned(7 downto 0) := (others => '0');
+    signal p8_tn   : unsigned(2 downto 0) := (others => '0');
+    -- s9
+    signal p9_t6   : unsigned(5 downto 0) := (others => '0');
+    signal p9_ring : unsigned(7 downto 0) := (others => '0');
+    signal p9_iE   : unsigned(7 downto 0) := (others => '0');
+    signal p9_Yf   : unsigned(9 downto 0) := (others => '0');
+    signal p9_pa   : unsigned(1 downto 0) := (others => '0');
+    signal p9_sc   : unsigned(3 downto 0) := (others => '0');
+    signal p9_a    : unsigned(4 downto 0) := (others => '0');
+    signal p9_sp, p9_rf : std_logic := '0';
+    signal p9_tn   : unsigned(2 downto 0) := (others => '0');
+    signal rA_ad, rC_ad : unsigned(7 downto 0) := (others => '0');
+    signal rA_qy, rA_qu, rA_qv, rC_qy, rC_qu, rC_qv : unsigned(9 downto 0) := (others => '0');
+    -- s10
+    signal p10_G2  : unsigned(5 downto 0) := (others => '0');
+    signal p10_rt  : unsigned(7 downto 0) := (others => '0');
+    signal p10_Yf  : unsigned(9 downto 0) := (others => '0');
+    signal p10_pa  : unsigned(1 downto 0) := (others => '0');
+    signal p10_sc  : unsigned(3 downto 0) := (others => '0');
+    signal p10_a   : unsigned(4 downto 0) := (others => '0');
+    signal p10_sp, p10_rf : std_logic := '0';
+    signal p10_tn  : unsigned(2 downto 0) := (others => '0');
+    -- s11
+    signal p11_Gv  : unsigned(4 downto 0) := (others => '0');
+    signal p11_rl  : unsigned(7 downto 0) := (others => '0');
+    signal p11_aY, p11_aU, p11_aV, p11_cY, p11_cU, p11_cV : unsigned(9 downto 0) := (others => '0');
+    signal p11_Yf  : unsigned(9 downto 0) := (others => '0');
+    signal p11_pa  : unsigned(1 downto 0) := (others => '0');
+    signal p11_sc  : unsigned(3 downto 0) := (others => '0');
+    signal p11_a   : unsigned(4 downto 0) := (others => '0');
+    signal p11_sp, p11_rf : std_logic := '0';
+    signal p11_tn  : unsigned(2 downto 0) := (others => '0');
+    -- s12: base colour, blend targets, raw eye colour
+    signal p12_by, p12_bu, p12_bv : unsigned(9 downto 0) := (others => '0');
+    signal p12_ty, p12_tu, p12_tv : unsigned(9 downto 0) := (others => '0');
+    signal p12_eY, p12_eU, p12_eV : unsigned(9 downto 0) := (others => '0');
+    signal p12_a1  : unsigned(3 downto 0) := (others => '0');
+    signal p12_aE  : unsigned(4 downto 0) := (others => '0');
+    signal p12_rim : unsigned(4 downto 0) := (others => '0');
+    signal p12_pa  : unsigned(1 downto 0) := (others => '0');
+    signal rE_ad   : unsigned(7 downto 0) := (others => '0');
+    signal rE_qy, rE_qu, rE_qv : unsigned(9 downto 0) := (others => '0');
+    -- s13..s16: ONE blend toward the stronger target (eye/corona or the
+    -- moire/haze/reflection target), as |difference| x 4-bit alpha
+    signal p13_ty, p13_tu, p13_tv : unsigned(9 downto 0) := (others => '0');
+    signal p13_by, p13_bu, p13_bv : unsigned(9 downto 0) := (others => '0');
+    signal p13_a   : unsigned(4 downto 0) := (others => '0');
+    signal p13_rim : unsigned(4 downto 0) := (others => '0');
+    signal p14_my : unsigned(9 downto 0) := (others => '0');
+    signal p14_mu, p14_mv : unsigned(7 downto 0) := (others => '0');
+    signal p14_ny, p14_nu, p14_nv : std_logic := '0';
+    signal p14_by, p14_bu, p14_bv : unsigned(9 downto 0) := (others => '0');
+    signal p14_a   : unsigned(4 downto 0) := (others => '0');
+    signal p14_rim : unsigned(4 downto 0) := (others => '0');
+    signal p15_py : unsigned(13 downto 0) := (others => '0');
+    signal p15_pu, p15_pv : unsigned(11 downto 0) := (others => '0');
+    signal p15_ny, p15_nu, p15_nv : std_logic := '0';
+    signal p15_by, p15_bu, p15_bv : unsigned(9 downto 0) := (others => '0');
+    signal p15_rim : unsigned(4 downto 0) := (others => '0');
+    signal p16_y, p16_u, p16_v : unsigned(9 downto 0) := (others => '0');
+    signal p16_rim : unsigned(4 downto 0) := (others => '0');
+    -- s17: composed pixel -> output buffer
+    signal p17_y, p17_u, p17_v : unsigned(9 downto 0) := (others => '0');
+
+    -- ==== output buffer (tear displacement) + sync delay ====
+    type t_ram10 is array(0 to 255) of unsigned(9 downto 0);
+    type t_ram4  is array(0 to 255) of std_logic_vector(3 downto 0);
+    signal ob_y, ob_u, ob_v : t_ram10 := (others => (others => '0'));
+    signal ob_s   : t_ram4 := (others => (others => '0'));
+    signal ob_qy, ob_qu, ob_qv : unsigned(9 downto 0) := (others => '0');
+    signal ob_qs  : std_logic_vector(3 downto 0) := (others => '0');
+    attribute no_rw_check of ob_y : signal is true;
+    attribute no_rw_check of ob_u : signal is true;
+    attribute no_rw_check of ob_v : signal is true;
+    attribute no_rw_check of ob_s : signal is true;
+    signal o_wp   : unsigned(7 downto 0) := (others => '0');
+    signal o_ray, o_rac, o_ras : unsigned(7 downto 0) := (others => '0');
+    signal o_dY, o_dC : unsigned(7 downto 0) := to_unsigned(C_D0, 8);
+    signal o_lq   : std_logic := '0';
+    signal o_lcnt : unsigned(4 downto 0) := (others => '0');
+    signal o_fy, o_fu, o_fv : unsigned(9 downto 0) := (others => '0');
+    signal o_fs   : std_logic_vector(3 downto 0) := (others => '0');
+    signal s_io   : t_video_stream_yuv444_30b
+        := ((others => '0'), (others => '0'), (others => '0'), '0', '1', '1', '1');
+
+    -- ==== helpers ====
+    function tri9(a : unsigned(9 downto 0)) return unsigned is
+    begin
+        if a(9) = '1' then
+            return not a(8 downto 0);
         else
-            return unsigned(std_logic_vector(s(9 downto 0)));
+            return a(8 downto 0);
         end if;
     end function;
 
-    ----------------------------------------------------------------------
-    -- Helper: clamp signed(21 downto 0) -> unsigned(9 downto 0), with
-    -- centering. Used to recover u_out after multiplying centered
-    -- (signed 11-bit) u by brt (unsigned 10-bit, lifted to signed 11-bit).
-    ----------------------------------------------------------------------
-    function sat10_from_centered(c : signed(21 downto 0))
-        return unsigned is
-        variable t : signed(22 downto 0);
+    function tri8(h : unsigned(7 downto 0)) return unsigned is
+        variable r : unsigned(7 downto 0);
     begin
-        -- c = (u - 512) * brt, range ±512*1023; we divide by 1024
-        -- then add 512 to re-center.
-        t := resize(shift_right(c, 10), 23) + to_signed(512, 23);
-        if t < 0 then
-            return to_unsigned(0, 10);
-        elsif t > 1023 then
-            return to_unsigned(1023, 10);
+        if h(7) = '1' then
+            r := (not h(6 downto 0)) & '1';
         else
-            return unsigned(std_logic_vector(t(9 downto 0)));
+            r := h(6 downto 0) & '0';
         end if;
+        return r;
+    end function;
+
+    -- Opal: fold the spectrum into its cool third (green..violet)
+    function opal(h : unsigned(7 downto 0); en : std_logic) return unsigned is
+        variable t : unsigned(7 downto 0);
+    begin
+        if en = '0' then
+            return h;
+        end if;
+        t := tri8(h);
+        return to_unsigned(110, 8) + shift_right(t, 1) - shift_right(t, 4);
+    end function;
+
+    -- moire screen: phase -> brightness factor 0..15 (soft-edged bar)
+    function screen(h : unsigned(7 downto 0)) return unsigned is
+        variable t : unsigned(7 downto 0);
+        variable s : unsigned(4 downto 0);
+    begin
+        t := tri8(h);
+        s := t(7 downto 3);
+        if s < 4 then
+            return to_unsigned(0, 4);
+        elsif s >= 19 then
+            return to_unsigned(15, 4);
+        else
+            return resize(s - 4, 4);
+        end if;
+    end function;
+
+    function clamp5(v : signed(12 downto 0)) return unsigned is
+    begin
+        if v < 0 then
+            return to_unsigned(0, 5);
+        elsif v > 31 then
+            return to_unsigned(31, 5);
+        else
+            return unsigned(v(4 downto 0));
+        end if;
+    end function;
+
+    function min5(a, b : unsigned(4 downto 0)) return unsigned is
+    begin
+        if a < b then return a; else return b; end if;
     end function;
 
 begin
 
-    ----------------------------------------------------------------------
-    -- Position tracking + parameter latching + per-frame derived values.
-    -- All happens in one process so the control state is coherent.
-    ----------------------------------------------------------------------
-    p_position : process(clk)
-        variable v_hsync_edge : std_logic;
-        variable v_vsync_edge : std_logic;
+    timing_gen_inst : entity work.video_timing_generator
+        port map (clk => clk, ref_hsync_n => data_in.hsync_n,
+                  ref_vsync_n => data_in.vsync_n, ref_avid => data_in.avid,
+                  timing => s_timing);
+
+    -- ====================================================================
+    -- Raster measurement (aurora): active width per line, active lines per
+    -- field, interlace + field parity at vsync.
+    -- ====================================================================
+    p_measure : process(clk)
     begin
         if rising_edge(clk) then
-            prev_hsync_n <= data_in.hsync_n;
-            prev_vsync_n <= data_in.vsync_n;
-
-            v_hsync_edge := '0';
-            if data_in.hsync_n = '0' and prev_hsync_n = '1' then
-                v_hsync_edge := '1';
+            if s_timing.hsync_start = '1' then
+                if s_hcnt > 0 then s_meas_h <= s_hcnt; end if;
+                s_hcnt <= (others => '0');
+            elsif s_timing.avid = '1' then
+                s_hcnt <= s_hcnt + 1;
             end if;
 
-            v_vsync_edge := '0';
-            if data_in.vsync_n = '0' and prev_vsync_n = '1' then
-                v_vsync_edge := '1';
-            end if;
-
-            -- Track pixel_x: reset at hsync leading edge, increment when avid.
-            -- last_x_r tracks the MAX pixel_x across the frame — only update
-            -- on hsync when the just-finished line was longer than any prior
-            -- (otherwise blanking lines with pixel_x=0 would wipe it out).
-            if v_hsync_edge = '1' then
-                if pixel_x > last_x_r then
-                    last_x_r <= pixel_x;
-                end if;
-                pixel_x <= (others => '0');
-            elsif data_in.avid = '1' then
-                pixel_x <= pixel_x + 1;
-            end if;
-
-            -- Track pixel_y: reset at vsync, increment at hsync. Also use
-            -- max-tracking: we latch at vsync the highest pixel_y seen so
-            -- far (resets every new frame by not-reaching-max the first
-            -- time through, but it's more robust than unconditional load).
-            if v_vsync_edge = '1' then
-                if pixel_y > last_y_r then
-                    last_y_r <= pixel_y;
-                end if;
-                pixel_y <= (others => '0');
-                frame_count <= frame_count + 1;
-
-                -- Latch screen bounds and parameters for the frame
-                max_x_r <= last_x_r;
-                max_y_r <= last_y_r;
-
-                portal_size_r <= unsigned(registers_in(0));
-                portal_x_r    <= unsigned(registers_in(1));
-                portal_y_r    <= unsigned(registers_in(2));
-                noise_k_r     <= unsigned(registers_in(3));
-                hue_speed_r   <= unsigned(registers_in(4));
-                band_k_r      <= unsigned(registers_in(5));
-                top_en_r      <= registers_in(6)(0);
-                bot_en_r      <= registers_in(6)(1);
-                portal_en_r   <= registers_in(6)(2);
-                tear_en_r     <= registers_in(6)(3);
-                bypass_r      <= registers_in(6)(4);
-                brt_r         <= unsigned(registers_in(7));
-
-                -- Animate the palette phase (only on frame boundaries so
-                -- the main pipeline sees a stable offset within a frame).
-                -- At hue_speed_r=128 the phase increment is ~1024/frame, so
-                -- hue_offset_r (top 10 bits) completes one rainbow cycle in
-                -- ~64 frames (~1 second at 60Hz).
-                hue_phase    <= hue_phase + shift_left(resize(hue_speed_r, 16), 3);
-                hue_offset_r <= hue_phase(15 downto 6);
-
-                -- Pick a noise grain size: smaller noise_k -> finer grain.
-                if noise_k_r(9 downto 7) = "000" then
-                    noise_shift_r <= 1;
-                elsif noise_k_r(9 downto 7) = "001" then
-                    noise_shift_r <= 2;
-                elsif noise_k_r(9 downto 7) = "010" then
-                    noise_shift_r <= 2;
-                elsif noise_k_r(9 downto 7) = "011" then
-                    noise_shift_r <= 3;
-                elsif noise_k_r(9 downto 7) = "100" then
-                    noise_shift_r <= 3;
-                elsif noise_k_r(9 downto 7) = "101" then
-                    noise_shift_r <= 4;
-                elsif noise_k_r(9 downto 7) = "110" then
-                    noise_shift_r <= 4;
+            if s_timing.vsync_start = '1' then
+                if s_vcnt > 0 then s_meas_v <= s_vcnt; end if;
+                s_vcnt  <= (others => '0');
+                s_ilace <= s_timing.is_interlaced;
+                s_botf  <= not s_timing.field_n;      -- bottom field = field_n '0'
+                if s_timing.is_interlaced = '1' then
+                    s_fh <= s_meas_v(10 downto 0) & '0';
                 else
-                    noise_shift_r <= 5;
+                    s_fh <= s_meas_v;
                 end if;
-
-                -- Zone seams: Zone A = top ~3/16 (~20%), Zone C = bottom ~3/16.
-                zoneA_y_r <= resize(shift_right(last_y_r, 2), 12) -
-                             resize(shift_right(last_y_r, 4), 12);
-                zoneC_y_r <= last_y_r -
-                             (resize(shift_right(last_y_r, 2), 12) -
-                              resize(shift_right(last_y_r, 4), 12));
-
-                -- Band-frequency factors for the hue multipliers.
-                -- band_A = 4 + band_k(9:4)   (high-frequency vertical)
-                -- band_C = 1 + band_k(9:6)   (low-frequency horizontal)
-                band_A_r <= resize(band_k_r(9 downto 4), 7) + to_unsigned(4, 7);
-                band_C_r <= resize(band_k_r(9 downto 6), 5) + to_unsigned(1, 5);
-
-            elsif v_hsync_edge = '1' then
-                pixel_y <= pixel_y + 1;
+            elsif s_timing.avid_start = '1' then
+                s_vcnt <= s_vcnt + 1;
             end if;
-
-            -- Per-frame multipliers — run EVERY cycle so we don't depend on
-            -- the exact timing of the vsync latch. last_x_r / last_y_r /
-            -- portal_* are stable within a frame, so the product is constant
-            -- during a frame and updates one cycle after parameters change.
-            -- (Using last_*_r directly avoids the extra frame of staleness
-            -- introduced by going through max_*_r.)
-            cx_mul_r    <= last_x_r * portal_x_r;
-            cy_mul_r    <= last_y_r * portal_y_r;
-            rx_mul_r    <= last_x_r * ('0' & portal_size_r(9 downto 1));
-            cx_r        <= cx_mul_r(21 downto 10);
-            cy_r        <= cy_mul_r(21 downto 10);
-            portal_rx_r <= resize(rx_mul_r(21 downto 12), 12);
         end if;
-    end process p_position;
+    end process p_measure;
 
-    ----------------------------------------------------------------------
-    -- Stage 1: register incoming video into pipe(0), classify zones,
-    -- start portal abs-diff, derive noise-sample indices, prep hue bases.
-    ----------------------------------------------------------------------
-    p_stage1 : process(clk)
-        variable v_dx      : unsigned(11 downto 0);
-        variable v_dy      : unsigned(11 downto 0);
-        variable v_near_A  : std_logic;
-        variable v_near_C  : std_logic;
+    -- ====================================================================
+    -- Generated avid (aurora v3.0.2, HW-confirmed): start 2-3 clocks after
+    -- the source's first avid rise at the voted usual hsync parity, run the
+    -- field-latched width.  s_bcol counts it from hsync.
+    -- ====================================================================
+    p_gavid : process(clk)
     begin
         if rising_edge(clk) then
-            pipe(0) <= data_in;
+            g_hsq <= data_in.hsync_n;
+            g_hsr <= g_hsq and not data_in.hsync_n;
+            g_avq <= data_in.avid;
+            g_avr <= data_in.avid and not g_avq;
 
-            s1_x <= pixel_x;
-            s1_y <= pixel_y;
-
-            -- Zone classification: strict A/C plus "near seam" for tear.
-            if pixel_y < zoneA_y_r then
-                s1_zone_A <= '1';
+            if g_hsr = '1' then
+                g_ph  <= '0';
+                g_arm <= '1';
             else
-                s1_zone_A <= '0';
+                g_ph <= not g_ph;
+            end if;
+            g_rsr <= g_rsr(1 downto 0) & '0';
+            if g_avr = '1' and g_arm = '1' then
+                g_arm    <= '0';
+                g_rsr(0) <= '1';
+                g_sel    <= g_ph xor g_par;
+                if g_ph = '1' then
+                    if g_pc /= 15 then g_pc <= g_pc + 1; end if;
+                else
+                    if g_pc /= 0 then g_pc <= g_pc - 1; end if;
+                end if;
+            end if;
+            if g_pc = 15 then g_par <= '1';
+            elsif g_pc = 0 then g_par <= '0'; end if;
+
+            if (g_sel = '0' and g_rsr(1) = '1') or (g_sel = '1' and g_rsr(2) = '1') then
+                g_avid <= '1';
+                g_cnt  <= (others => '0');
+            elsif g_avid = '1' then
+                g_cnt <= g_cnt + 1;
+                if g_cnt = g_wm1 or g_hsr = '1' then
+                    g_avid <= '0';
+                end if;
             end if;
 
-            if pixel_y > zoneC_y_r then
-                s1_zone_C <= '1';
+            if g_hsr = '1' then
+                s_bcol <= (others => '0');
+            elsif g_avid = '1' then
+                s_bcol <= s_bcol + 1;
+            end if;
+        end if;
+    end process p_gavid;
+
+    -- ====================================================================
+    -- Field tick (first vsync edge after active video: analog vsync
+    -- serrates), switch latch, line trigger (the drawn line has left the
+    -- part of the pixel pipe that reads the line registers), random source.
+    -- ====================================================================
+    p_ctl : process(clk)
+    begin
+        if rising_edge(clk) then
+            s_vs_go <= '0';
+            if s_timing.avid = '1' then
+                s_saw <= '1';
+            elsif s_timing.vsync_start = '1' and s_saw = '1' then
+                s_saw   <= '0';
+                s_vs_go <= '1';
+            end if;
+            if s_vs_go = '1' then
+                g_wm1    <= s_meas_h - 1;
+                sw_tear  <= registers_in(6)(0);
+                sw_iris  <= registers_in(6)(1);
+                sw_moire <= registers_in(6)(2);
+                sw_opal  <= registers_in(6)(4);
+            end if;
+
+            tq <= g_avid;
+            if tq = '1' and g_avid = '0' then
+                tcnt <= to_unsigned(20, 5);
+            elsif tcnt /= 0 then
+                tcnt <= tcnt - 1;
+            end if;
+
+            if s_lfsr(0) = '1' then
+                s_lfsr <= ('0' & s_lfsr(15 downto 1)) xor x"B400";
             else
-                s1_zone_C <= '0';
+                s_lfsr <= '0' & s_lfsr(15 downto 1);
+            end if;
+        end if;
+    end process p_ctl;
+
+    -- ====================================================================
+    -- MICROCODED ENGINE (port of cubist's p_ueng, HW-validated).
+    --
+    -- One ALU, the register file in two block-RAM copies (dual read), the
+    -- program in block RAM.  DECODE -> LATCH -> EXEC: three clocks per
+    -- straight-line instruction; a taken jump refetches (4).  The ROM reads
+    -- pc+1 during EXEC so the next instruction decodes on the next clock.
+    -- Forwarding covers the previous result landing on the same edge as
+    -- this instruction's register read (iCE40 block RAM returns undefined
+    -- data for a read-during-write).  Every unit launches at LATCH from the
+    -- register-file outputs; EXEC reads only registers.
+    -- ====================================================================
+    p_ueng : process(clk)
+        variable v_r      : signed(23 downto 0);
+        variable v_op     : integer range 0 to 31;
+        variable v_op2    : integer range 0 to 31;
+        variable v_stl    : boolean;
+        variable v_jmp    : boolean;
+        variable v_dr     : unsigned(12 downto 0);
+        variable v_ms     : unsigned(16 downto 0);
+        variable v_pr     : unsigned(27 downto 0);
+        variable v_fa, v_fb : std_logic_vector(23 downto 0);
+        variable v_sum    : signed(24 downto 0);
+        variable v_blt    : std_logic;
+        variable v_bt     : signed(23 downto 0);
+    begin
+        if rising_edge(clk) then
+            u_wlast <= u_we;
+            if s_vs_go = '1' then u_fpend <= '1'; end if;
+            if tcnt = 1 then u_lpend <= '1'; end if;
+
+            -- serial multiply, 12 steps: {mu_ph, mu_pl} = mu_pa * B
+            if mu_bsy = '1' then
+                if mu_pl(0) = '1' then
+                    v_ms := mu_ph + resize(mu_pa, 17);
+                else
+                    v_ms := mu_ph;
+                end if;
+                mu_ph <= '0' & v_ms(16 downto 1);
+                mu_pl <= v_ms(0) & mu_pl(11 downto 1);
+                if mu_cnt = 0 then mu_bsy <= '0';
+                else mu_cnt <= mu_cnt - 1; end if;
             end if;
 
-            -- "Near seam" is within ±16 px of the boundary
-            v_near_A := '0';
-            if (pixel_y + 16 >= zoneA_y_r) and (pixel_y < zoneA_y_r + 16) then
-                v_near_A := '1';
+            -- serial restoring divider: the numerator shifts out of the top
+            -- of dv_na as the quotient shifts in at the bottom
+            if dv_bsy = '1' and dv_post = '0' then
+                v_dr := dv_ra(11 downto 0) & dv_na(24);
+                if v_dr >= resize(dv_da, 13) then
+                    dv_ra <= v_dr - resize(dv_da, 13);
+                    dv_na <= dv_na(23 downto 0) & '1';
+                else
+                    dv_ra <= v_dr;
+                    dv_na <= dv_na(23 downto 0) & '0';
+                end if;
+                if dv_cnt = 0 then dv_post <= '1';
+                else dv_cnt <= dv_cnt - 1; end if;
             end if;
-            v_near_C := '0';
-            if (pixel_y + 16 >= zoneC_y_r) and (pixel_y < zoneC_y_r + 16) then
-                v_near_C := '1';
+            if dv_post = '1' then
+                if dv_na(24 downto 20) /= 0 then dv_ovf <= '1';
+                else dv_ovf <= '0'; end if;
+                dv_post <= '0';
+                dv_bsy  <= '0';
             end if;
-            s1_near_topA <= v_near_A;
-            s1_near_botC <= v_near_C;
 
-            -- Absolute diffs toward the portal center
-            if pixel_x >= cx_r then
-                v_dx := pixel_x - cx_r;
-            else
-                v_dx := cx_r - pixel_x;
+            -- line-register block transfer: rf[base + i] arrives a clock
+            -- after its address
+            xf_d1 <= xf_run;
+            xf_i1 <= xf_i;
+            if xf_run = '1' then
+                if xf_i = C_NXF - 1 then xf_run <= '0'; end if;
+                xf_i <= xf_i + 1;
             end if;
-            if pixel_y >= cy_r then
-                v_dy := pixel_y - cy_r;
-            else
-                v_dy := cy_r - pixel_y;
-            end if;
-            s1_dx <= v_dx;
-            s1_dy <= v_dy;
 
-            -- Hue base components via real multipliers — 12x7 and 12x5
-            -- are comfortably within one clock at 74.25 MHz on ice40.
-            -- Truncating to bottom 10 bits implicitly wraps the hue.
-            s1_hue_base_A <= resize(pixel_x * band_A_r, 10);
-            s1_hue_base_C <= resize(pixel_y * band_C_r, 10);
+            u_we <= '0';
 
-            -- Noise sampling indices. X shifted 1 more than Y → cells ~2x
-            -- wider than tall, giving subtle horizontal streaks without
-            -- dominating the texture.
-            case noise_shift_r is
-                when 1 => s1_noise_xi <= shift_right(pixel_x, 2);
-                          s1_noise_yi <= shift_right(pixel_y, 1);
-                when 2 => s1_noise_xi <= shift_right(pixel_x, 3);
-                          s1_noise_yi <= shift_right(pixel_y, 2);
-                when 3 => s1_noise_xi <= shift_right(pixel_x, 4);
-                          s1_noise_yi <= shift_right(pixel_y, 3);
-                when 4 => s1_noise_xi <= shift_right(pixel_x, 5);
-                          s1_noise_yi <= shift_right(pixel_y, 4);
-                when others => s1_noise_xi <= shift_right(pixel_x, 6);
-                               s1_noise_yi <= shift_right(pixel_y, 5);
+            case to_integer(u_st) is
+
+                -- FETCH (after a jump only): the ROM answers next cycle
+                when 0 =>
+                    u_st <= "01";
+
+                -- DECODE: latch the instruction; the register-file reads
+                -- are addressed straight off the ROM output this cycle
+                when 1 =>
+                    u_ir <= u_rom;
+                    u_st <= "10";
+
+                -- OPERAND LATCH: block-RAM outputs into fabric (forwarding
+                -- the previous result, which lands on this read's edge).
+                -- Nothing else reads the forwarded nets: every compare,
+                -- branch and unit launch works from these two registers.
+                when 2 =>
+                    v_op2 := to_integer(unsigned(u_ir(31 downto 27)));
+                    if u_wlast = '1' and unsigned(u_ir(18 downto 11)) = u_wa then
+                        v_fa := u_wd;
+                    else
+                        v_fa := u_rda;
+                    end if;
+                    if u_wlast = '1' and unsigned(u_ir(10 downto 3)) = u_wa then
+                        v_fb := u_wd;
+                    else
+                        v_fb := u_rdb;
+                    end if;
+                    u_sh <= signed(v_fa);
+                    -- SUB, compares and MIN/MAX use A + not B + 1
+                    case v_op2 is
+                        when 3 | 20 | 21 | 28 | 29 =>
+                            u_b <= signed(not v_fb);  u_cin <= '1';
+                        when others =>
+                            u_b <= signed(v_fb);      u_cin <= '0';
+                    end case;
+                    if v_op2 = 28 then u_ismin <= '1'; else u_ismin <= '0'; end if;
+                    u_ctlr <= u_ctlv;
+                    case v_op2 is
+                        when 1 | 4 | 5    => u_rsel <= x"0"; u_rwr <= '1';   -- MOV SHR SHL
+                        when 2 | 3        => u_rsel <= x"1"; u_rwr <= '1';   -- ADD SUB
+                        when 27           => u_rsel <= x"2"; u_rwr <= '1';   -- AND
+                        when 15           => u_rsel <= x"3"; u_rwr <= '1';   -- LDI
+                        when 11           => u_rsel <= x"4"; u_rwr <= '1';   -- MRD
+                        when 13           => u_rsel <= x"5"; u_rwr <= '1';   -- DRD
+                        when 14 | 16 | 23 => u_rsel <= x"6"; u_rwr <= '1';   -- SIN PRV PRC
+                        when 28 | 29      => u_rsel <= x"7"; u_rwr <= '1';   -- MIN MAX
+                        when 25           => u_rsel <= x"8"; u_rwr <= '1';   -- CTL
+                        when others       => u_rsel <= x"0"; u_rwr <= '0';
+                    end case;
+                    u_shc <= unsigned(u_ir(6 downto 3));
+                    u_wa  <= unsigned(u_ir(26 downto 19));
+                    u_st  <= "11";
+
+                -- EXECUTE.  Everything this state reads is a register.
+                when others =>
+                    v_op  := to_integer(unsigned(u_ir(31 downto 27)));
+                    v_stl := false;
+                    v_jmp := false;
+                    -- the one adder: A + B (+1); its 25th bit is A < B for
+                    -- the compares (B arrived inverted)
+                    v_sum := resize(u_sh, 25) + resize(u_b, 25);
+                    if u_cin = '1' then v_sum := v_sum + 1; end if;
+                    v_blt := v_sum(24);
+                    v_bt  := not u_b;                    -- B again, for MIN/MAX
+
+                    case to_integer(u_rsel) is
+                        when 0 => v_r := u_sh;
+                        when 1 => v_r := v_sum(23 downto 0);
+                        when 2 => v_r := u_sh and signed(resize(unsigned(u_ir(10 downto 0)), 24));
+                        when 3 => v_r := resize(signed(u_ir(18 downto 0)), 24);
+                        when 4 =>                    -- MRD: 28-bit product (>> 12)
+                            v_pr := mu_ph(15 downto 0) & mu_pl;
+                            if u_ir(0) = '1' then v_r := signed(resize(v_pr(27 downto 12), 24));
+                            else                  v_r := signed(v_pr(23 downto 0)); end if;
+                        when 5 =>                    -- DRD: clamped magnitude
+                            if dv_ovf = '1' then
+                                v_r := to_signed(1048575, 24);
+                            else
+                                v_r := signed(resize(dv_na(19 downto 0), 24));
+                            end if;
+                        when 6 => v_r := resize(u_romr, 24);
+                        when 7 => if (u_bltr xor u_ismin) = '0' then v_r := u_sh; else v_r := v_bt; end if;
+                        when others => v_r := u_ctlr;
+                    end case;
+
+                    case v_op is
+                        when 4 | 5 =>                  -- SHR / SHL, serial
+                            if u_shc /= 0 then
+                                if v_op = 4 then u_sh <= shift_right(u_sh, 1);
+                                else             u_sh <= shift_left(u_sh, 1); end if;
+                                u_shc <= u_shc - 1;
+                                v_stl := true;
+                            end if;
+                        when 10 =>                     -- MUL (magnitudes)
+                            mu_pa  <= unsigned(u_sh(15 downto 0));
+                            mu_pl  <= unsigned(u_b(11 downto 0));
+                            mu_ph  <= (others => '0');
+                            mu_cnt <= to_unsigned(11, 4);
+                            mu_bsy <= '1';
+                        when 12 =>                     -- DIV (magnitudes)
+                            dv_na <= resize(unsigned(u_sh), 25);
+                            if unsigned(u_b(11 downto 0)) = 0 then
+                                dv_da <= to_unsigned(1, 12);
+                            else
+                                dv_da <= unsigned(u_b(11 downto 0));
+                            end if;
+                            dv_ra   <= (others => '0');
+                            dv_cnt  <= to_unsigned(24, 5);
+                            dv_bsy  <= '1';
+                        when 28 | 29 =>                -- MIN / MAX: compare, then select
+                            if u_gwt = 0 then
+                                u_bltr <= v_blt;
+                                u_gwt  <= "001";
+                                v_stl  := true;
+                            else
+                                u_gwt <= (others => '0');
+                            end if;
+                        when 11 => if mu_bsy = '1' then v_stl := true; end if;
+                        when 13 => if dv_bsy = '1' then v_stl := true; end if;
+                        when 14 | 16 | 23 =>           -- ROM reads
+                            -- 0: address; 1: EBR reads; 2: into fabric;
+                            -- 3: into the result source; 4: done
+                            if u_gwt = 0 then
+                                qs_ang <= unsigned(u_sh(9 downto 0));
+                                pr_a   <= unsigned(u_sh(7 downto 0));
+                            end if;
+                            if u_gwt = 3 then
+                                case v_op is
+                                    when 14     => if qs_n2 = '1' then u_romr <= -signed(resize(qs_d, 14));
+                                                   else u_romr <= signed(resize(qs_d, 14)); end if;
+                                    when 16     => u_romr <= signed(resize(pr_dv, 14));
+                                    when others => u_romr <= signed(resize(pr_dc, 14));
+                                end case;
+                            end if;
+                            if u_gwt = 4 then
+                                u_gwt <= (others => '0');
+                            else
+                                u_gwt <= u_gwt + 1;
+                                v_stl := true;
+                            end if;
+                        when 17 => null;               -- OUT: p_ports writes from u_sh
+                        when 22 =>                     -- XFER: stall until done
+                            if u_gwt = 0 then
+                                xf_run <= '1';
+                                xf_i   <= (others => '0');
+                                u_gwt  <= "001";
+                                v_stl  := true;
+                            elsif xf_run = '1' or xf_d1 = '1' then
+                                v_stl := true;
+                            else
+                                u_gwt <= (others => '0');
+                            end if;
+                        when 24 =>                     -- WAIT
+                            if u_ir(11) = '0' then
+                                if u_fpend = '1' then
+                                    u_fpend <= '0';
+                                    u_lpend <= '0';
+                                else
+                                    v_stl := true;
+                                end if;
+                            else
+                                if u_fpend = '1' then
+                                    v_jmp := true;          -- restart the field program
+                                    u_pc  <= (others => '0');
+                                elsif u_lpend = '1' then
+                                    u_lpend <= '0';
+                                else
+                                    v_stl := true;
+                                end if;
+                            end if;
+                        when 18 => v_jmp := true;
+                                   u_pc <= unsigned(u_ir(8 downto 0));
+                        when 19 => if u_sh /= 0 then
+                                       v_jmp := true;
+                                       u_pc <= unsigned(u_ir(8 downto 0));
+                                   end if;
+                        when 20 => if v_blt = '1' then
+                                       v_jmp := true;
+                                       u_pc <= unsigned(u_ir(24 downto 19)) & unsigned(u_ir(2 downto 0));
+                                   end if;
+                        when 21 => if v_blt = '0' then
+                                       v_jmp := true;
+                                       u_pc <= unsigned(u_ir(24 downto 19)) & unsigned(u_ir(2 downto 0));
+                                   end if;
+                        when 26 => v_jmp := true;      -- JR
+                                   u_pc <= unsigned(u_sh(8 downto 0));
+                        when others => null;
+                    end case;
+
+                    if v_stl then
+                        u_st <= "11";
+                    elsif v_jmp then
+                        u_st <= "00";
+                    else
+                        u_st <= "01";
+                        u_pc <= u_pc + 1;
+                    end if;
+
+                    u_wd <= std_logic_vector(v_r);
+                    if u_rwr = '1' and not v_stl then
+                        u_we <= '1';
+                    end if;
             end case;
         end if;
-    end process p_stage1;
+    end process p_ueng;
 
-    ----------------------------------------------------------------------
-    -- Stage 2: derive full hue indices with band_k/hue_offset applied,
-    -- build 3*dx (octagonal aspect), start noise hash (XOR mix).
-    ----------------------------------------------------------------------
-    p_stage2 : process(clk)
-        variable v_dx3   : unsigned(13 downto 0);
-        variable v_hueA  : unsigned(9 downto 0);
-        variable v_hueC  : unsigned(9 downto 0);
-        variable v_mix   : unsigned(15 downto 0);
-        variable v_tearA : std_logic;
-        variable v_tearC : std_logic;
+    -- CTL reads the outside world (u_ir is stable from DECODE)
+    with to_integer(unsigned(u_ir(14 downto 11))) select u_ctlv <=
+        signed(resize(unsigned(registers_in(0)), 24)) when 0,
+        signed(resize(unsigned(registers_in(1)), 24)) when 1,
+        signed(resize(unsigned(registers_in(2)), 24)) when 2,
+        signed(resize(unsigned(registers_in(3)), 24)) when 3,
+        signed(resize(unsigned(registers_in(4)), 24)) when 4,
+        signed(resize(unsigned(registers_in(5)), 24)) when 5,
+        signed(resize(unsigned(registers_in(6)), 24)) when 6,
+        signed(resize(unsigned(registers_in(7)), 24)) when 7,
+        signed(resize(s_fh, 24))                      when 8,
+        signed(resize(s_meas_h, 24))                  when 9,
+        (0 => s_ilace, others => '0')                 when 10,
+        (0 => s_botf, others => '0')                  when 11,
+        signed(resize(s_lfsr, 24))                    when 12,
+        (others => '0')                               when others;
+
+    -- the ROM reads pc+1 during EXEC, so a straight-line instruction
+    -- decodes on the very next clock
+    u_fa <= u_pc + 1 when u_st = "11" else u_pc;
+
+    p_urom : process(clk)
     begin
         if rising_edge(clk) then
-            pipe(1) <= pipe(0);
-
-            s2_x      <= s1_x;
-            s2_y      <= s1_y;
-            s2_zone_A <= s1_zone_A;
-            s2_zone_C <= s1_zone_C;
-
-            -- Hue A index (vertical stripes) with per-row shimmer + slow
-            -- frame-based twinkle. The per-row term offsets each scanline
-            -- by a few palette slots, producing the "scanline jitter" look
-            -- visible in the reference image's top strip.
-            v_hueA := s1_hue_base_A +
-                      resize(s1_y(5 downto 1), 10) +
-                      resize(frame_count(8 downto 3), 10);
-            s2_hue_A_idx <= v_hueA;
-
-            -- Hue C index (horizontal bands) with slow animated scroll.
-            v_hueC := s1_hue_base_C + hue_offset_r;
-            s2_hue_C_idx <= v_hueC;
-
-            -- 3*dx for octagonal 3:1 aspect ratio (tall ellipse shape)
-            v_dx3 := resize(s1_dx, 14) + shift_left(resize(s1_dx, 14), 1);
-            s2_dx3  <= v_dx3;
-            s2_dy_r <= s1_dy;
-
-            -- Noise hash XOR mix (combine x, y, frame, seed)
-            v_mix := s1_noise_xi(7 downto 0) & s1_noise_yi(7 downto 0);
-            v_mix := v_mix xor frame_count;
-            v_mix := v_mix xor to_unsigned(16#A3B1#, 16);
-            s2_noise_mix   <= v_mix;
-            s2_noise_select <= s1_noise_xi(2 downto 0) xor s1_noise_yi(2 downto 0);
-
-            -- Tear seam detection: only fire when tear_en and near a seam
-            v_tearA := s1_near_topA and tear_en_r;
-            v_tearC := s1_near_botC and tear_en_r;
-            s2_tear_hit_A <= v_tearA;
-            s2_tear_hit_C <= v_tearC;
+            u_rom <= C_UCODE(to_integer(u_fa));
         end if;
-    end process p_stage2;
+    end process p_urom;
 
-    ----------------------------------------------------------------------
-    -- Stage 3: octagonal distance pre-compute (big/small), start 16x16
-    -- hash multiply, select which hue to feed into the palette.
-    ----------------------------------------------------------------------
-    p_stage3 : process(clk)
-        variable v_dy14  : unsigned(13 downto 0);
-        variable v_big   : unsigned(13 downto 0);
-        variable v_small : unsigned(13 downto 0);
-        variable v_sel   : unsigned(9 downto 0);
+    -- register file: the A port also serves XFER
+    p_rfa : process(clk)
+        variable v_ra : unsigned(7 downto 0);
     begin
         if rising_edge(clk) then
-            pipe(2) <= pipe(1);
-
-            s3_x      <= s2_x;
-            s3_y      <= s2_y;
-            s3_zone_A <= s2_zone_A;
-            s3_zone_C <= s2_zone_C;
-
-            -- max(3*dx, dy), min(3*dx, dy) for octagonal distance
-            v_dy14 := resize(s2_dy_r, 14);
-            if s2_dx3 >= v_dy14 then
-                v_big   := s2_dx3;
-                v_small := v_dy14;
+            if u_we = '1' then
+                rf_al(to_integer(u_wa)) <= u_wd(15 downto 0);
+                rf_ah(to_integer(u_wa)) <= u_wd(23 downto 16);
+            end if;
+            if xf_run = '1' then
+                v_ra := to_unsigned(C_XFER_BASE, 8) + resize(xf_i, 8);
             else
-                v_big   := v_dy14;
-                v_small := s2_dx3;
+                v_ra := unsigned(u_rom(18 downto 11));
             end if;
-            s3_octa_big   <= v_big;
-            s3_octa_small <= v_small;
+            u_rdal <= rf_al(to_integer(v_ra));
+            u_rdah <= rf_ah(to_integer(v_ra));
+        end if;
+    end process p_rfa;
 
-            -- Pre-select hue index: zone A uses hue_A, everything else uses hue_C
-            if s2_zone_A = '1' then
-                v_sel := s2_hue_A_idx;
+    p_rfb : process(clk)
+    begin
+        if rising_edge(clk) then
+            if u_we = '1' then
+                rf_bl(to_integer(u_wa)) <= u_wd(15 downto 0);
+                rf_bh(to_integer(u_wa)) <= u_wd(23 downto 16);
+            end if;
+            u_rdbl <= rf_bl(to_integer(unsigned(u_rom(10 downto 3))));
+            u_rdbh <= rf_bh(to_integer(unsigned(u_rom(10 downto 3))));
+        end if;
+    end process p_rfb;
+
+    u_rda <= u_rdah & u_rdal;
+    u_rdb <= u_rdbh & u_rdbl;
+
+    -- engine ROM ports (one inferred EBR each)
+    p_qrom : process(clk)
+        variable v_i : unsigned(7 downto 0);
+    begin
+        if rising_edge(clk) then
+            if qs_ang(8) = '1' then v_i := not qs_ang(7 downto 0); else v_i := qs_ang(7 downto 0); end if;
+            qs_q  <= C_QSIN(to_integer(v_i));
+            qs_n1 <= qs_ang(9);
+            qs_d  <= qs_q;
+            qs_n2 <= qs_n1;
+        end if;
+    end process p_qrom;
+
+    p_prv : process(clk) begin if rising_edge(clk) then pr_qv <= C_PVES(to_integer(pr_a)); pr_dv <= pr_qv; end if; end process;
+    p_prc : process(clk) begin if rising_edge(clk) then pr_qc <= C_PCIR(to_integer(pr_a)); pr_dc <= pr_qc; end if; end process;
+
+    -- ====================================================================
+    -- OUT ports: per-field constants for the pixel path (gen/oasm.py PORTS)
+    -- ====================================================================
+    p_ports : process(clk)
+        variable v : unsigned(23 downto 0);
+    begin
+        if rising_edge(clk) then
+            if u_st = "11" and u_ir(31 downto 27) = "10001" then
+                v := unsigned(u_sh);
+                case to_integer(unsigned(u_ir(24 downto 19))) is
+                    when 0  => f_cx    <= v(10 downto 0);
+                    when 2  => f_cA    <= v(23 downto 0);
+                    when 4  => f_kS1   <= v(9 downto 0);
+                    when 5  => f_kS2   <= v(9 downto 0);
+                    when 6  => f_kW1x  <= v(9 downto 0);
+                    when 7  => f_kW2x  <= v(9 downto 0);
+                    when 10 => t_M     <= v(15 downto 0);
+                    when 11 => t_G     <= v(15 downto 0);
+                    when 12 => t_Rg    <= v(15 downto 0);
+                    when 13 => f_spk   <= v(7 downto 0);
+                    when 14 => f_lenm  <= v(5 downto 0);
+                    when 15 => f_as4   <= v(3 downto 0);
+                    when 16 => f_kR    <= v(5 downto 0);
+                    when 17 => f_se    <= v(2 downto 0);
+                    when 18 => f_sm    <= v(1 downto 0);
+                    when 19 => f_g3    <= v(2 downto 0);
+                    when 20 => f_rsh   <= v(1 downto 0);
+                    when 21 => f_pup2  <= v(13 downto 0);
+                    when 22 => f_boost <= v(5 downto 0);
+                    when 23 => f_wx0   <= v(10 downto 0);
+                    when 24 => f_wx1m  <= v(10 downto 0);
+                    when 25 => f_xhm1  <= v(10 downto 0);
+                    when 26 => f_tseed <= v(15 downto 0);
+                    when 29 => f_yA    <= v(11 downto 0);
+                    when 30 => f_yC    <= v(11 downto 0);
+                    when 31 => f_wy0   <= v(11 downto 0);
+                    when 32 => f_wy1   <= v(11 downto 0);
+                    when 35 => f_hs2   <= v(17 downto 0);
+                    when 36 => f_hxm1  <= signed(v(11 downto 0));
+                    when others => null;
+                end case;
+            end if;
+        end if;
+    end process p_ports;
+
+    -- ====================================================================
+    -- XFER loader: the line-register block, one word a clock
+    -- (gen/oasm.py XFER_FIELDS order)
+    -- ====================================================================
+    p_xfer : process(clk)
+        variable v : unsigned(23 downto 0);
+    begin
+        if rising_edge(clk) then
+            if xf_d1 = '1' then
+                v := unsigned(u_rda);
+                case to_integer(xf_i1) is
+                    when 0  => cu_rc   <= v(11 downto 0);
+                    when 4  => cu_v2   <= v(13 downto 0);
+                    when 5  => cu_lb   <= v(15 downto 0);
+                    when 6  => cu_w4   <= v(13 downto 0);
+                    when 7  => cu_eye  <= v(0);
+                    when 8  => cu_k    <= v(2 downto 0);
+                    when 9  => cu_phC  <= v(15 downto 0);
+                    when 10 => cu_swA  <= v(6 downto 0);
+                    when 11 => cu_ah   <= v(4 downto 0);
+                    when 12 => cu_aref <= v(4 downto 0);
+                    when 13 => cu_ref  <= v(0);
+                    when 14 => cu_rx0  <= v(10 downto 0);
+                    when 15 => cu_rx1  <= v(10 downto 0);
+                    when 16 => cu_d    <= v(7 downto 0);
+                    when 17 => cu_dc   <= v(7 downto 0);
+                    when others => null;
+                end case;
+            end if;
+        end if;
+    end process p_xfer;
+
+    -- ====================================================================
+    -- Zone / window / seam flags from the line's row (hardwired; settles
+    -- in two clocks after XFER, well before the line starts)
+    -- ====================================================================
+    p_zone : process(clk)
+        variable v_d : signed(12 downto 0);
+    begin
+        if rising_edge(clk) then
+            if cu_rc < f_yA then cu_zA <= '1'; else cu_zA <= '0'; end if;
+            if cu_rc >= f_yC then cu_zC <= '1'; else cu_zC <= '0'; end if;
+            if cu_rc >= f_wy0 and cu_rc < f_wy1 then cu_win <= '1'; else cu_win <= '0'; end if;
+            if (cu_rc >= f_wy0 and cu_rc < f_wy0 + 2) or (cu_rc + 2 >= f_wy1 and cu_rc < f_wy1) then
+                cu_rr <= '1';
             else
-                v_sel := s2_hue_C_idx;
+                cu_rr <= '0';
             end if;
-            s3_hue_sel <= v_sel;
-
-            -- Hash multiply: noise_mix * Fibonacci constant 0x9E37.
-            -- 16x16 -> 32. On HX4K this is a ~400-LC combinational mul;
-            -- registering the product breaks the long path.
-            s3_noise_prod <= s2_noise_mix * to_unsigned(16#9E37#, 16);
-
-            s3_tear_hit_A <= s2_tear_hit_A;
-            s3_tear_hit_C <= s2_tear_hit_C;
+            cu_dt <= clamp5(signed('0' & cu_rc) - signed('0' & f_wy0));
+            cu_db <= clamp5(signed('0' & f_wy1) - signed('0' & cu_rc) - 1);
+            v_d := signed('0' & cu_rc) - signed('0' & f_yA);
+            if v_d >= -16 and v_d < 16 then cu_nA <= '1'; else cu_nA <= '0'; end if;
+            cu_sA <= resize(v_d(4 downto 0), 6);
+            v_d := signed('0' & cu_rc) - signed('0' & f_yC);
+            if v_d >= -16 and v_d < 16 then cu_nC <= '1'; else cu_nC <= '0'; end if;
+            cu_sC <= resize(v_d(4 downto 0), 6);
         end if;
-    end process p_stage3;
+    end process p_zone;
 
-    ----------------------------------------------------------------------
-    -- Stage 4: octagonal distance sum, hash final XOR shift,
-    -- split hue_sel into base palette index + fractional blend weight.
-    ----------------------------------------------------------------------
-    p_stage4 : process(clk)
-        variable v_dist   : unsigned(14 downto 0);
-        variable v_h      : unsigned(15 downto 0);
-        variable v_base_i : unsigned(2 downto 0);
+    -- ====================================================================
+    -- Stage 0: per-pixel DDAs (loaded from the line/frame parameters in
+    -- blanking, stepped on the generated avid), RNG, streak runs, teeth.
+    -- ====================================================================
+    p_s0 : process(clk)
+        variable v : unsigned(31 downto 0);
     begin
         if rising_edge(clk) then
-            pipe(3) <= pipe(2);
-
-            s4_x      <= s3_x;
-            s4_y      <= s3_y;
-            s4_zone_A <= s3_zone_A;
-            s4_zone_C <= s3_zone_C;
-
-            -- octa = big + (small >> 1) — very close to true L2 distance
-            v_dist := resize(s3_octa_big, 15) + resize(shift_right(s3_octa_small, 1), 15);
-            s4_octa_dist <= v_dist;
-
-            -- Hash finalise: XOR-shift mixing for avalanche
-            v_h := s3_noise_prod(23 downto 8);
-            v_h := v_h xor shift_right(v_h, 5);
-            s4_hash <= v_h;
-
-            -- Palette indexing
-            v_base_i := s3_hue_sel(9 downto 7);
-            s4_hue_base_i <= v_base_i;
-            s4_hue_next_i <= v_base_i + 1;   -- modulo 8 by natural 3-bit wrap
-            s4_hue_frac   <= s3_hue_sel(6 downto 0);
-
-            s4_tear_hit_A <= s3_tear_hit_A;
-            s4_tear_hit_C <= s3_tear_hit_C;
-        end if;
-    end process p_stage4;
-
-    ----------------------------------------------------------------------
-    -- Stage 5: portal_hit compare, palette LUT fetch, noise value compute.
-    ----------------------------------------------------------------------
-    p_stage5 : process(clk)
-        variable v_thresh  : unsigned(14 downto 0);
-        variable v_hit     : std_logic;
-        variable v_noise_y : unsigned(9 downto 0);
-        variable v_poke    : std_logic;
-    begin
-        if rising_edge(clk) then
-            pipe(4) <= pipe(3);
-
-            s5_zone_A <= s4_zone_A;
-            s5_zone_C <= s4_zone_C;
-
-            -- Portal hit if octa_dist < 3*portal_rx_r (scaled 15-bit).
-            v_thresh := resize(portal_rx_r, 15) + resize(shift_left(portal_rx_r, 1), 15);
-            if s4_octa_dist < v_thresh then
-                v_hit := '1';
+            -- chirped bars: frequency falls toward the centre, then rises
+            if g_avid = '1' then
+                dA_ph <= dA_ph + dA_fr;
+                if dA_lf = '1' then
+                    dA_fr <= dA_fr - f_cA;
+                else
+                    dA_fr <= dA_fr + f_cA;
+                end if;
+                if s_bcol < f_xhm1 then dA_lf <= '1'; else dA_lf <= '0'; end if;
+                dS1 <= dS1 + f_kS1;
+                dS2 <= dS2 - f_kS2;
+                dW1 <= dW1 + f_kW1x;
+                dW2 <= dW2 - f_kW2x;
             else
-                v_hit := '0';
+                -- blanking: the line's start values arrive by XFER (straight
+                -- from the engine's register file, no holding registers)
+                dA_lf <= '1';
+                if xf_d1 = '1' then
+                    case to_integer(xf_i1) is
+                        when 1  => dA_ph <= unsigned(u_rda(23 downto 8)) & x"00";
+                        when 2  => dS1   <= unsigned(u_rda(15 downto 0));
+                        when 3  => dS2   <= unsigned(u_rda(15 downto 0));
+                        when 18 => dA_fr <= unsigned(u_rda(23 downto 0));
+                        when 19 => dW1   <= unsigned(u_rda(15 downto 0));
+                        when 20 => dW2   <= unsigned(u_rda(15 downto 0));
+                        when others => null;
+                    end case;
+                end if;
             end if;
-            s5_portal_hit <= v_hit;
 
-            -- Palette fetch (constant ROM lookup — inlines to LUT4s)
-            s5_pal_base_y <= C_PAL_Y(to_integer(s4_hue_base_i));
-            s5_pal_next_y <= C_PAL_Y(to_integer(s4_hue_next_i));
-            s5_pal_base_u <= C_PAL_U(to_integer(s4_hue_base_i));
-            s5_pal_next_u <= C_PAL_U(to_integer(s4_hue_next_i));
-            s5_pal_base_v <= C_PAL_V(to_integer(s4_hue_base_i));
-            s5_pal_next_v <= C_PAL_V(to_integer(s4_hue_next_i));
-            s5_hue_frac   <= s4_hue_frac;
+            -- xorshift32, every clock
+            v := rng;
+            v := v xor shift_left(v, 13);
+            v := v xor shift_right(v, 17);
+            v := v xor shift_left(v, 5);
+            rng <= v;
 
-            -- Noise luma: map top 8 bits of hash to [100..865] grayscale.
-            -- v_noise_y = 100 + 3 * hash_byte, where 3*x = (x<<1) + x.
-            v_noise_y := to_unsigned(100, 10) +
-                         resize(s4_hash(15 downto 8), 10) +
-                         resize(shift_left(resize(s4_hash(15 downto 8), 10), 1), 10);
-            s5_noise_luma <= v_noise_y;
-
-            -- Rainbow pokethrough: 1/32 probability (bottom 5 bits = 0)
-            if s4_hash(4 downto 0) = "00000" then
-                v_poke := '1';
+            -- streak runs: even lengths from x = 0, so a run never splits
+            -- a 4:2:2 chroma pair
+            if g_avid = '0' then
+                rn_rem <= (others => '0');
+            elsif rn_rem = 0 then
+                rn_rem <= (rng(13 downto 8) and f_lenm) & '1';
+                rn_b   <= rng(21 downto 14);
+                if rng(29 downto 22) < f_spk then rn_sp <= '1'; else rn_sp <= '0'; end if;
+                rn_tn  <= rng(31 downto 30) & rng(0);
             else
-                v_poke := '0';
+                rn_rem <= rn_rem - 1;
             end if;
-            s5_noise_poke  <= v_poke;
-            s5_noise_pkidx <= s4_hash(10 downto 8);
 
-            s5_tear_hit_A <= s4_tear_hit_A;
-            s5_tear_hit_C <= s4_tear_hit_C;
+            -- seam teeth: one random step per 8 columns, same on every row
+            if g_avid = '0' then
+                tl <= f_tseed;
+            elsif s_bcol(2 downto 0) = "111" then
+                if tl(0) = '1' then
+                    tl <= ('0' & tl(15 downto 1)) xor x"B400";
+                else
+                    tl <= '0' & tl(15 downto 1);
+                end if;
+            end if;
         end if;
-    end process p_stage5;
+    end process p_s0;
 
-    ----------------------------------------------------------------------
-    -- Stage 6: palette diffs (signed) and noise pokethrough palette.
-    ----------------------------------------------------------------------
-    p_stage6 : process(clk)
+    -- ====================================================================
+    -- rho^2 DDA, aligned to stage 5: u^2 = s*(x - cx)^2 in Q24 by second
+    -- differences (two adders, exact), from n columns left of the eye
+    -- (n = min(cx, 4 Wa): further out rho^2 >= 16 anyway); holds 16.0
+    -- before the start and once it passes 16 on the far side.  Start value,
+    -- step and column come from the microcode once per field.
+    -- ====================================================================
+    p_rho : process(clk)
+        variable v : signed(29 downto 0);
     begin
         if rising_edge(clk) then
-            pipe(5) <= pipe(4);
-
-            s6_zone_A     <= s5_zone_A;
-            s6_zone_C     <= s5_zone_C;
-            s6_portal_hit <= s5_portal_hit;
-
-            -- Signed differences for palette interpolation
-            s6_diff_y <= signed('0' & std_logic_vector(s5_pal_next_y)) -
-                         signed('0' & std_logic_vector(s5_pal_base_y));
-            s6_diff_u <= signed('0' & std_logic_vector(s5_pal_next_u)) -
-                         signed('0' & std_logic_vector(s5_pal_base_u));
-            s6_diff_v <= signed('0' & std_logic_vector(s5_pal_next_v)) -
-                         signed('0' & std_logic_vector(s5_pal_base_v));
-
-            s6_pal_base_y <= s5_pal_base_y;
-            s6_pal_base_u <= s5_pal_base_u;
-            s6_pal_base_v <= s5_pal_base_v;
-            s6_hue_frac   <= s5_hue_frac;
-
-            s6_noise_luma <= s5_noise_luma;
-            s6_noise_poke <= s5_noise_poke;
-            -- Pokethrough palette fetch — constant LUT, no combinational delay concern
-            s6_noise_pk_y <= C_PAL_Y(to_integer(s5_noise_pkidx));
-            s6_noise_pk_u <= C_PAL_U(to_integer(s5_noise_pkidx));
-            s6_noise_pk_v <= C_PAL_V(to_integer(s5_noise_pkidx));
-
-            s6_tear_hit_A <= s5_tear_hit_A;
-            s6_tear_hit_C <= s5_tear_hit_C;
-        end if;
-    end process p_stage6;
-
-    ----------------------------------------------------------------------
-    -- Stage 7: palette blend multiplies (diff * frac, signed 11b x 7b).
-    ----------------------------------------------------------------------
-    p_stage7 : process(clk)
-        variable v_frac : signed(7 downto 0);
-    begin
-        if rising_edge(clk) then
-            pipe(6) <= pipe(5);
-
-            s7_zone_A     <= s6_zone_A;
-            s7_zone_C     <= s6_zone_C;
-            s7_portal_hit <= s6_portal_hit;
-
-            v_frac := signed('0' & std_logic_vector(s6_hue_frac));
-            s7_prod_y <= s6_diff_y * v_frac;
-            s7_prod_u <= s6_diff_u * v_frac;
-            s7_prod_v <= s6_diff_v * v_frac;
-
-            s7_pal_base_y <= s6_pal_base_y;
-            s7_pal_base_u <= s6_pal_base_u;
-            s7_pal_base_v <= s6_pal_base_v;
-
-            s7_noise_luma <= s6_noise_luma;
-            s7_noise_poke <= s6_noise_poke;
-            s7_noise_pk_y <= s6_noise_pk_y;
-            s7_noise_pk_u <= s6_noise_pk_u;
-            s7_noise_pk_v <= s6_noise_pk_v;
-
-            s7_tear_hit_A <= s6_tear_hit_A;
-            s7_tear_hit_C <= s6_tear_hit_C;
-        end if;
-    end process p_stage7;
-
-    ----------------------------------------------------------------------
-    -- Stage 8: palette blend sums -> rainbow_y/u/v, noise_y/u/v finalise.
-    ----------------------------------------------------------------------
-    p_stage8 : process(clk)
-        variable v_shift_y : signed(11 downto 0);
-        variable v_shift_u : signed(11 downto 0);
-        variable v_shift_v : signed(11 downto 0);
-    begin
-        if rising_edge(clk) then
-            pipe(7) <= pipe(6);
-
-            s8_zone_A     <= s7_zone_A;
-            s8_zone_C     <= s7_zone_C;
-            s8_portal_hit <= s7_portal_hit;
-
-            -- rainbow = base + (diff * frac) >> 7
-            v_shift_y := resize(shift_right(s7_prod_y, 7), 12);
-            v_shift_u := resize(shift_right(s7_prod_u, 7), 12);
-            v_shift_v := resize(shift_right(s7_prod_v, 7), 12);
-            s8_rainbow_y <= sat10_add(s7_pal_base_y, resize(v_shift_y, 11));
-            s8_rainbow_u <= sat10_add(s7_pal_base_u, resize(v_shift_u, 11));
-            s8_rainbow_v <= sat10_add(s7_pal_base_v, resize(v_shift_v, 11));
-
-            -- Noise output: either grayscale or rainbow pokethrough
-            if s7_noise_poke = '1' then
-                s8_noise_y <= s7_noise_pk_y;
-                s8_noise_u <= s7_noise_pk_u;
-                s8_noise_v <= s7_noise_pk_v;
+            if av(5) = '0' then
+                h_x <= (others => '0');
+                if xf_d1 = '1' and xf_i1 = 21 then h_d <= resize(signed(u_rda), 28); end if;
+                if xf_d1 = '1' and xf_i1 = 22 then h_q <= shift_left(resize(unsigned(u_rda(20 downto 0)), 29), 8); end if;
+                if f_hxm1 = -1 then h_run <= '1'; else h_run <= '0'; end if;
             else
-                s8_noise_y <= s7_noise_luma;
-                s8_noise_u <= C_NEUTRAL_U;
-                s8_noise_v <= C_NEUTRAL_V;
+                h_x <= h_x + 1;
+                if h_run = '1' then
+                    v := signed(resize(h_q, 30)) + resize(h_d, 30);
+                    if v < 0 then
+                        h_q <= (others => '0');
+                    elsif v > 2**28 - 1 then
+                        -- 16.0 exactly: h_q(28:14) + v^2 must not wrap 15 bits
+                        h_q <= to_unsigned(2**28 - 1, 29);
+                        if h_d > 0 then h_run <= '0'; h_sat <= '1'; end if;
+                    else
+                        h_q <= unsigned(v(28 downto 0));
+                    end if;
+                    h_d <= h_d + signed(resize(f_hs2, 28));
+                elsif signed(resize(h_x, 12)) = f_hxm1 then
+                    h_run <= '1';                 -- h_q has held Q0 since XFER
+                end if;
             end if;
-
-            s8_tear_hit_A <= s7_tear_hit_A;
-            s8_tear_hit_C <= s7_tear_hit_C;
+            -- before the start column the field reads 16.0
+            if av(5) = '0' then
+                h_sat <= '0';
+            end if;
         end if;
-    end process p_stage8;
+    end process p_rho;
 
-    ----------------------------------------------------------------------
-    -- Stage 9: zone color select. Combines tear-seam swap, zone disables.
-    --   * bypass -> pass-through flag (applied at final mux)
-    --   * tear seam hit -> use opposite-zone color (creates ragged edges)
-    --   * zone_A + top_en -> rainbow (vertical stripes)
-    --   * zone_C + bot_en -> rainbow (horizontal bands)
-    --   * zone_B + portal_hit + portal_en -> rainbow (band through portal)
-    --   * zone_B otherwise -> noise
-    ----------------------------------------------------------------------
-    p_stage9 : process(clk)
-        variable v_is_zone_A   : std_logic;
-        variable v_is_zone_C   : std_logic;
-        variable v_in_portal   : std_logic;
-        variable v_y           : unsigned(9 downto 0);
-        variable v_u           : unsigned(9 downto 0);
-        variable v_v           : unsigned(9 downto 0);
-        variable v_tear_hash   : unsigned(2 downto 0);
+    -- ==== cloud sine ROMs (512 x 8, one EBR each) ====
+    p_cr1 : process(clk) begin if rising_edge(clk) then c_q1 <= C_CSIN(to_integer(c_ad1)); end if; end process;
+    p_cr2 : process(clk) begin if rising_edge(clk) then c_q2 <= C_CSIN(to_integer(c_ad2)); end if; end process;
+
+    -- ==== palette ports: A (bars + sparks), C (bands), E (eye + corona) ====
+    p_ray : process(clk) begin if rising_edge(clk) then rA_qy <= C_PA_Y(to_integer(rA_ad)); end if; end process;
+    p_rau : process(clk) begin if rising_edge(clk) then rA_qu <= C_PA_U(to_integer(rA_ad)); end if; end process;
+    p_rav : process(clk) begin if rising_edge(clk) then rA_qv <= C_PA_V(to_integer(rA_ad)); end if; end process;
+    p_rcy : process(clk) begin if rising_edge(clk) then rC_qy <= C_PS_Y(to_integer(rC_ad)); end if; end process;
+    p_rcu : process(clk) begin if rising_edge(clk) then rC_qu <= C_PS_U(to_integer(rC_ad)); end if; end process;
+    p_rcv : process(clk) begin if rising_edge(clk) then rC_qv <= C_PS_V(to_integer(rC_ad)); end if; end process;
+    p_rey : process(clk) begin if rising_edge(clk) then rE_qy <= C_PS_Y(to_integer(rE_ad)); end if; end process;
+    p_reu : process(clk) begin if rising_edge(clk) then rE_qu <= C_PS_U(to_integer(rE_ad)); end if; end process;
+    p_rev : process(clk) begin if rising_edge(clk) then rE_qv <= C_PS_V(to_integer(rE_ad)); end if; end process;
+
+    -- ====================================================================
+    -- Pixel pipeline, stages 1..17 (one op per stage after each EBR read,
+    -- every multiply in a stage of its own).
+    -- ====================================================================
+    p_pix : process(clk)
+        variable v_inA, v_inC, v_inx : std_logic;
+        variable v_s6  : signed(6 downto 0);
+        variable v_z   : unsigned(2 downto 0);
+        variable v_ab  : signed(12 downto 0);
+        variable v_e   : signed(15 downto 0);
+        variable v_ms  : signed(9 downto 0);
+        variable v_cs  : signed(9 downto 0);
+        variable v_r2  : unsigned(14 downto 0);
+        variable v_10  : unsigned(9 downto 0);
+        variable v_11  : unsigned(10 downto 0);
+        variable v_t8  : unsigned(7 downto 0);
+        variable v_m   : unsigned(4 downto 0);
+        variable v_gp  : unsigned(16 downto 0);
+        variable v_y, v_u, v_v : unsigned(9 downto 0);
+        variable v_df  : signed(10 downto 0);
+        variable v_sw  : signed(10 downto 0);
+        variable v_md  : signed(8 downto 0);
     begin
         if rising_edge(clk) then
-            pipe(8) <= pipe(7);
+            av <= g_avid & av(1 to C_NW - 1);
 
-            -- Tear effect: if within seam band, use a per-row hash to
-            -- decide whether to apply zone A or zone B/C coloring.
-            v_tear_hash := s8_rainbow_y(4 downto 2) xor s8_noise_y(4 downto 2);
-
-            v_is_zone_A := s8_zone_A;
-            v_is_zone_C := s8_zone_C;
-            if s8_tear_hit_A = '1' and v_tear_hash(0) = '1' then
-                v_is_zone_A := not v_is_zone_A;
-            end if;
-            if s8_tear_hit_C = '1' and v_tear_hash(1) = '1' then
-                v_is_zone_C := not v_is_zone_C;
-            end if;
-
-            v_in_portal := s8_portal_hit and portal_en_r;
-
-            if bypass_r = '1' then
-                -- Bypass path handled at final mux; put placeholder.
-                v_y := s8_rainbow_y;
-                v_u := s8_rainbow_u;
-                v_v := s8_rainbow_v;
-            elsif v_is_zone_A = '1' and top_en_r = '1' then
-                v_y := s8_rainbow_y;
-                v_u := s8_rainbow_u;
-                v_v := s8_rainbow_v;
-            elsif v_is_zone_C = '1' and bot_en_r = '1' then
-                v_y := s8_rainbow_y;
-                v_u := s8_rainbow_u;
-                v_v := s8_rainbow_v;
-            elsif v_is_zone_A = '0' and v_is_zone_C = '0' and v_in_portal = '1' then
-                v_y := s8_rainbow_y;
-                v_u := s8_rainbow_u;
-                v_v := s8_rainbow_v;
-            elsif v_is_zone_A = '0' and v_is_zone_C = '0' then
-                -- Zone B without portal: noise
-                v_y := s8_noise_y;
-                v_u := s8_noise_u;
-                v_v := s8_noise_v;
+            -- ---- s1 ----
+            p1_hA <= dA_ph(23 downto 16);
+            p1_ma <= dA_ph(23 downto 8) + resize(dA_ph(23 downto 13), 16);
+            c_ad1 <= dS1(15 downto 7);
+            c_ad2 <= dS2(15 downto 7);
+            p1_t1 <= tri9(dW1(15 downto 6));
+            p1_t2 <= tri9(dW2(15 downto 6));
+            p1_dxs <= signed(resize(s_bcol, 13)) - signed(resize(f_cx, 13));
+            p1_dl  <= signed(resize(s_bcol, 13)) - signed(resize(f_wx0, 13));
+            p1_dr  <= signed(resize(f_wx1m, 13)) - signed(resize(s_bcol, 13));
+            if s_bcol >= cu_rx0 and s_bcol <= cu_rx1 then
+                p1_rf <= cu_ref;
             else
-                -- Zone enabled-off fallback: desaturated neutral dark gray
-                v_y := to_unsigned(64, 10);
-                v_u := C_NEUTRAL_U;
-                v_v := C_NEUTRAL_V;
+                p1_rf <= '0';
             end if;
-
-            s9_y          <= v_y;
-            s9_u          <= v_u;
-            s9_v          <= v_v;
-            s9_is_bypass  <= bypass_r;
-        end if;
-    end process p_stage9;
-
-    ----------------------------------------------------------------------
-    -- Stage 10: luma brightness multiply.
-    ----------------------------------------------------------------------
-    p_stage10 : process(clk)
-    begin
-        if rising_edge(clk) then
-            pipe(9) <= pipe(8);
-
-            s10_y_mul     <= s9_y * brt_r;
-            s10_u         <= s9_u;
-            s10_v         <= s9_v;
-            s10_is_bypass <= s9_is_bypass;
-        end if;
-    end process p_stage10;
-
-    ----------------------------------------------------------------------
-    -- Stage 11: chroma scale toward neutral using brightness.
-    --   u_out_centered = (u_in - 512) * brt  (range ±512*1023)
-    -- Final sum & shift happens in stage 12.
-    ----------------------------------------------------------------------
-    p_stage11 : process(clk)
-        variable v_uc : signed(10 downto 0);
-        variable v_vc : signed(10 downto 0);
-    begin
-        if rising_edge(clk) then
-            pipe(10) <= pipe(9);
-
-            -- Final Y = (y*brt) >> 10, saturated
-            if s10_y_mul > to_unsigned(1023 * 1024, 20) then
-                s11_y <= to_unsigned(1023, 10);
+            if rn_rem = 0 then
+                p1_rb <= rng(21 downto 14);
+                if rng(29 downto 22) < f_spk then p1_sp <= '1'; else p1_sp <= '0'; end if;
+                p1_tn <= rng(31 downto 30) & rng(0);
             else
-                s11_y <= s10_y_mul(19 downto 10);
+                p1_rb <= rn_b;
+                p1_sp <= rn_sp;
+                p1_tn <= rn_tn;
             end if;
+            p1_g  <= rng(7 downto 0);
+            p1_tA <= signed(std_logic_vector'(tl(15) & tl(11) & tl(7) & tl(3)));
+            p1_tC <= signed(std_logic_vector'(tl(13) & tl(9) & tl(5) & tl(1)));
 
-            -- Signed, centered chroma
-            v_uc := signed('0' & std_logic_vector(s10_u)) - to_signed(512, 11);
-            v_vc := signed('0' & std_logic_vector(s10_v)) - to_signed(512, 11);
-            s11_u_mul <= v_uc * signed('0' & std_logic_vector(brt_r));
-            s11_v_mul <= v_vc * signed('0' & std_logic_vector(brt_r));
-            s11_is_bypass <= s10_is_bypass;
-        end if;
-    end process p_stage11;
-
-    ----------------------------------------------------------------------
-    -- Stage 12: chroma re-center and saturate.
-    ----------------------------------------------------------------------
-    p_stage12 : process(clk)
-    begin
-        if rising_edge(clk) then
-            pipe(11) <= pipe(10);
-
-            s12_y         <= s11_y;
-            s12_u         <= sat10_from_centered(s11_u_mul);
-            s12_v         <= sat10_from_centered(s11_v_mul);
-            s12_is_bypass <= s11_is_bypass;
-        end if;
-    end process p_stage12;
-
-    ----------------------------------------------------------------------
-    -- Stage 13: bypass mux (effect vs data_in).
-    ----------------------------------------------------------------------
-    p_stage13 : process(clk)
-    begin
-        if rising_edge(clk) then
-            pipe(12) <= pipe(11);
-
-            if s12_is_bypass = '1' then
-                s13_y <= unsigned(pipe(11).y);
-                s13_u <= unsigned(pipe(11).u);
-                s13_v <= unsigned(pipe(11).v);
+            -- ---- s2 ----
+            p2_iA <= opal(p1_hA, sw_opal);
+            p2_ma <= p1_ma + t_M;
+            p2_sw <= signed(resize(p1_t1, 11)) + signed(resize(p1_t2, 11)) - 511;
+            if p1_dxs < 0 then v_ab := -p1_dxs; else v_ab := p1_dxs; end if;
+            if v_ab > 2047 then p2_dx <= (others => '1'); else p2_dx <= unsigned(v_ab(10 downto 0)); end if;
+            p2_dlc <= clamp5(p1_dl);
+            p2_drc <= clamp5(p1_dr);
+            if p1_dl >= 0 and p1_dr >= 0 then v_inx := '1'; else v_inx := '0'; end if;
+            -- zone, with torn seams near the A/B and B/C cuts
+            v_inA := cu_zA;
+            v_inC := cu_zC;
+            if sw_tear = '1' and cu_nA = '1' then
+                v_s6 := resize(cu_sA, 7) + resize(p1_tA, 7);
+                if v_s6 < 0 then v_inA := '1'; else v_inA := '0'; end if;
+            end if;
+            if sw_tear = '1' and cu_nC = '1' then
+                v_s6 := resize(cu_sC, 7) + resize(p1_tC, 7);
+                if v_s6 >= 0 then v_inC := '1'; else v_inC := '0'; end if;
+            end if;
+            if v_inA = '1' then
+                v_z := Z_A;
+            elsif v_inC = '1' then
+                v_z := Z_C;
+            elsif cu_win = '1' and v_inx = '1' then
+                if cu_rr = '1' or p1_dl < 2 or p1_dr < 2 then v_z := Z_R; else v_z := Z_W; end if;
             else
-                s13_y <= s12_y;
-                s13_u <= s12_u;
-                s13_v <= s12_v;
+                v_z := Z_G;
+            end if;
+            zn(2) <= v_z;
+            p2_md <= signed(resize(p1_rb, 9)) - signed(resize(p1_g, 9));
+            p2_g  <= p1_g;
+            p2_sp <= p1_sp;
+            p2_tn <= p1_tn;
+            p2_rf <= p1_rf;
+
+            -- ---- s3 ----
+            p3_c1  <= c_q1;
+            p3_c2  <= c_q2;
+            p3_e   <= signed(resize(cu_w4, 16)) - signed(resize(p2_dx & "0000", 16));
+            -- sway and static mix as |value| x factor (sign carried)
+            if p2_sw < 0 then
+                p3_swn <= '1';  v_sw := -p2_sw;
+            else
+                p3_swn <= '0';  v_sw := p2_sw;
+            end if;
+            p3_swp <= unsigned(v_sw(9 downto 4)) * cu_swA(6 downto 1);
+            if p2_md < 0 then
+                p3_mpn <= '1';  v_md := -p2_md;
+            else
+                p3_mpn <= '0';  v_md := p2_md;
+            end if;
+            p3_mp <= unsigned(v_md(7 downto 0)) * f_as4;
+            p3_scA <= screen(p2_ma(15 downto 8));
+            p3_iA  <= p2_iA;
+            p3_g   <= p2_g;
+            p3_dlc <= p2_dlc;  p3_drc <= p2_drc;
+            p3_sp  <= p2_sp;   p3_tn  <= p2_tn;  p3_rf <= p2_rf;
+            zn(3)  <= zn(2);
+
+            -- ---- s4 ----
+            -- eye coverage ramp: 0.5 + e / 2^k px
+            -- (the edge distance is clamped to +-127 px first: narrower barrel)
+            if p3_e > 2047 then v_e := to_signed(2047, 16);
+            elsif p3_e < -2048 then v_e := to_signed(-2048, 16);
+            else v_e := p3_e; end if;
+            case to_integer(cu_k) is
+                when 0      => v_e := v_e;
+                when 1      => v_e := shift_right(v_e, 1);
+                when 2      => v_e := shift_right(v_e, 2);
+                when 3      => v_e := shift_right(v_e, 3);
+                when 4      => v_e := shift_right(v_e, 4);
+                when 5      => v_e := shift_right(v_e, 5);
+                when others => v_e := shift_right(v_e, 6);
+            end case;
+            p4_ar <= v_e + 8;
+            if p3_swn = '1' then
+                p4_hC <= cu_phC - shift_left(resize(p3_swp, 16), 4);
+            else
+                p4_hC <= cu_phC + shift_left(resize(p3_swp, 16), 4);
+            end if;
+            if p3_mpn = '1' then
+                v_ms := resize(signed('0' & p3_g), 10) - signed(resize(p3_mp(11 downto 4), 10));
+            else
+                v_ms := resize(signed('0' & p3_g), 10) + signed(resize(p3_mp(11 downto 4), 10));
+            end if;
+            if v_ms < 0 then p4_m <= (others => '0');
+            elsif v_ms > 255 then p4_m <= (others => '1');
+            else p4_m <= unsigned(v_ms(7 downto 0)); end if;
+            v_cs := to_signed(96, 10) + resize(shift_right(resize(p3_c1, 10) + resize(p3_c2, 10), 1), 10)
+                    + resize(shift_right(resize(p3_c1, 10) + resize(p3_c2, 10), 2), 10)
+                    + signed(resize(f_boost, 10));
+            if v_cs < 0 then p4_D <= (others => '0');
+            elsif v_cs > 255 then p4_D <= (others => '1');
+            else p4_D <= unsigned(v_cs(7 downto 3)); end if;
+            p4_scA <= p3_scA;  p4_iA <= p3_iA;
+            p4_dlc <= p3_dlc;  p4_drc <= p3_drc;
+            p4_sp  <= p3_sp;   p4_tn <= p3_tn;  p4_rf <= p3_rf;
+            zn(4)  <= zn(3);
+
+            -- ---- s5 ----
+            if cu_eye = '0' or p4_ar < 0 then
+                p5_a <= (others => '0');
+            elsif p4_ar > 16 then
+                p5_a <= to_unsigned(16, 5);
+            else
+                p5_a <= unsigned(p4_ar(4 downto 0));
+            end if;
+            p5_iC <= opal(p4_hC(15 downto 8), sw_opal);
+            p5_mc <= p4_hC + shift_right(p4_hC, 4);
+            p5_L  <= p4_m * p4_D;
+            p5_scA <= p4_scA;  p5_iA <= p4_iA;
+            p5_dlc <= p4_dlc;  p5_drc <= p4_drc;
+            p5_sp  <= p4_sp;   p5_tn <= p4_tn;  p5_rf <= p4_rf;
+            zn(5)  <= zn(4);
+
+            -- ---- s6 ----
+            if h_run = '1' or h_sat = '1' then
+                v_r2 := resize(h_q(28 downto 14), 15) + resize(cu_v2, 15);
+            else
+                v_r2 := to_unsigned(16383, 15) + resize(cu_v2, 15);
+            end if;
+            if v_r2 > 16383 then p6_r2 <= (others => '1'); else p6_r2 <= v_r2(13 downto 0); end if;
+            p6_mc <= p5_mc + t_M;
+            v_10  := resize(p5_L(12 downto 5), 10);
+            p6_Ys <= C_BLK + shift_left(v_10, 1) + shift_right(v_10, 1);
+            p6_a  <= p5_a;
+            p6_scA <= p5_scA;  p6_iA <= p5_iA;  p6_iC <= p5_iC;
+            p6_dlc <= p5_dlc;  p6_drc <= p5_drc;
+            p6_sp  <= p5_sp;   p6_tn <= p5_tn;  p6_rf <= p5_rf;
+            zn(6)  <= zn(5);
+
+            -- ---- s7 ----
+            if p6_r2 > 1024 then p7_gd <= p6_r2 - 1024; else p7_gd <= (others => '0'); end if;
+            p7_rp <= resize(p6_r2(13 downto 2) * f_kR, 20);
+            p7_hl <= cu_lb + shift_left(resize(p6_r2, 16), 4) + shift_left(resize(p6_r2, 16), 3);
+            p7_hi <= (not t_Rg) - shift_left(resize(p6_r2, 16), 8) - shift_left(resize(p6_r2, 16), 7);
+            p7_pd <= signed(resize(p6_r2, 15)) - signed(resize(f_pup2, 15));
+            if zn(6) = Z_A then
+                p7_sc <= p6_scA;
+            else
+                p7_sc <= screen(p6_mc(15 downto 8));
+            end if;
+            -- inset bevel: shadow on the inner top/left walls ...
+            v_m := min5(p6_dlc, cu_dt);
+            if    v_m < 3  then p7_sl <= "00";
+            elsif v_m < 7  then p7_sl <= "01";
+            elsif v_m < 14 then p7_sl <= "10";
+            else                p7_sl <= "11";
+            end if;
+            -- ... light on the bottom/right ones
+            v_m := min5(p6_drc, cu_db);
+            if v_m < 6 then
+                p7_lift <= resize((6 - v_m) * 12, 7);
+            else
+                p7_lift <= (others => '0');
+            end if;
+            p7_Ys <= p6_Ys;
+            p7_a  <= p6_a;
+            p7_iA <= p6_iA;  p7_iC <= p6_iC;
+            p7_sp <= p6_sp;  p7_tn <= p6_tn;  p7_rf <= p6_rf;
+            zn(7) <= zn(6);
+
+            -- ---- s8 ----
+            -- corona falloff numerator gd * (4 + sm); the 2^se is in s9
+            v_gp := shift_left(resize(p7_gd, 17), 2);
+            if f_sm(1) = '1' then v_gp := v_gp + shift_left(resize(p7_gd, 17), 1); end if;
+            if f_sm(0) = '1' then v_gp := v_gp + resize(p7_gd, 17); end if;
+            p8_gq <= v_gp;
+            -- Newton's rings expanding outward
+            v_t8 := tri8(p7_rp(7 downto 0) - t_Rg(15 downto 8));
+            if v_t8 > 200 then
+                v_10 := shift_left(resize(v_t8 - 200, 10), 2);
+                if v_10 > 255 then p8_ring <= (others => '1'); else p8_ring <= v_10(7 downto 0); end if;
+            else
+                p8_ring <= (others => '0');
+            end if;
+            if p7_a >= 8 then
+                if sw_iris = '1' then p8_hE <= p7_hi(15 downto 8); else p8_hE <= p7_hl(15 downto 8); end if;
+            else
+                -- corona hue runs 0.6 cycle per unit of rho^2 outward
+                p8_hE <= t_G(15 downto 8) + resize(shift_right(p7_gd, 3), 8) + resize(shift_right(p7_gd, 5), 8);
+            end if;
+            v_10 := p7_Ys - C_BLK;
+            case p7_sl is
+                when "00"   => p8_Ysh <= shift_right(v_10, 2);
+                when "01"   => p8_Ysh <= shift_right(v_10, 1);
+                when "10"   => p8_Ysh <= shift_right(v_10, 1) + shift_right(v_10, 2);
+                when others => p8_Ysh <= v_10;
+            end case;
+            if sw_iris = '1' and p7_a /= 0 and p7_pd < 6 then
+                if p7_pd < 0 then p8_pa <= "10"; else p8_pa <= "01"; end if;
+            else
+                p8_pa <= "00";
+            end if;
+            p8_iA <= p7_iA;  p8_iC <= p7_iC;
+            p8_lift <= p7_lift;
+            p8_sc <= p7_sc;
+            p8_a  <= p7_a;
+            p8_sp <= p7_sp;  p8_tn <= p7_tn;  p8_rf <= p7_rf;
+            zn(8) <= zn(7);
+
+            -- ---- s9 ----
+            -- t6 = 63 - (gd * sA) >> 10, with sA = (4+sm)/4 * 2^se
+            case to_integer(f_se) is
+                when 0      => v_gp := shift_right(p8_gq, 12);
+                when 1      => v_gp := shift_right(p8_gq, 11);
+                when 2      => v_gp := shift_right(p8_gq, 10);
+                when 3      => v_gp := shift_right(p8_gq, 9);
+                when 4      => v_gp := shift_right(p8_gq, 8);
+                when 5      => v_gp := shift_right(p8_gq, 7);
+                when 6      => v_gp := shift_right(p8_gq, 6);
+                when others => v_gp := shift_right(p8_gq, 5);
+            end case;
+            if v_gp >= 63 then p9_t6 <= (others => '0'); else p9_t6 <= 63 - v_gp(5 downto 0); end if;
+            p9_ring <= p8_ring;
+            p9_iE <= opal(p8_hE, sw_opal);
+            -- palette A/C addresses: data out of the EBR during s10,
+            -- into fabric at s11
+            rA_ad <= p8_iA;
+            rC_ad <= p8_iC;
+            v_11 := resize(p8_Ysh, 11) + C_BLK + resize(p8_lift, 11);
+            if v_11 > 1023 then p9_Yf <= (others => '1'); else p9_Yf <= v_11(9 downto 0); end if;
+            p9_pa <= p8_pa;
+            p9_sc <= p8_sc;
+            p9_a  <= p8_a;
+            p9_sp <= p8_sp;  p9_tn <= p8_tn;  p9_rf <= p8_rf;
+            zn(9) <= zn(8);
+
+            -- ---- s10 ----
+            p10_G2 <= resize(shift_right(p9_t6 * p9_t6, 6), 6);
+            case p9_t6(5 downto 4) is
+                when "11"   => p10_rt <= resize(p9_ring, 8);
+                when "10"   => p10_rt <= resize(shift_right(p9_ring, 1), 8);
+                when "01"   => p10_rt <= resize(shift_right(p9_ring, 2), 8);
+                when others => p10_rt <= resize(shift_right(p9_ring, 4), 8);
+            end case;
+            rE_ad  <= p9_iE;                       -- eye/corona colour into fabric at s12
+            p10_Yf <= p9_Yf;
+            p10_pa <= p9_pa;
+            p10_sc <= p9_sc;
+            p10_a  <= p9_a;
+            p10_sp <= p9_sp;  p10_tn <= p9_tn;  p10_rf <= p9_rf;
+            zn(10) <= zn(9);
+
+            -- ---- s11 ----
+            p11_Gv <= resize(shift_right(p10_G2 * f_g3, 5), 5);
+            p11_rl <= shift_right(p10_rt, to_integer(f_rsh));
+            p11_aY <= rA_qy;  p11_aU <= rA_qu;  p11_aV <= rA_qv;
+            p11_cY <= rC_qy;  p11_cU <= rC_qu;  p11_cV <= rC_qv;
+            p11_Yf <= p10_Yf;
+            p11_pa <= p10_pa;
+            p11_sc <= p10_sc;
+            p11_a  <= p10_a;
+            p11_sp <= p10_sp;  p11_tn <= p10_tn;  p11_rf <= p10_rf;
+            zn(11) <= zn(10);
+
+            -- ---- s12: base colour, blend targets, raw eye colour ----
+            v_y := C_BLK; v_u := C_MID; v_v := C_MID;
+            p12_ty <= C_BLK; p12_tu <= C_MID; p12_tv <= C_MID;
+            p12_a1 <= (others => '0');
+            case zn(11) is
+                when Z_A =>
+                    v_y := p11_aY; v_u := p11_aU; v_v := p11_aV;
+                    if sw_moire = '1' then p12_a1 <= 15 - p11_sc; end if;
+                when Z_C | Z_G =>
+                    v_y := p11_cY; v_u := p11_cU; v_v := p11_cV;
+                    if zn(11) = Z_C and p11_rf = '1' then
+                        p12_ty <= to_unsigned(820, 10);
+                        p12_tu <= to_unsigned(560, 10);
+                        p12_tv <= to_unsigned(470, 10);
+                        p12_a1 <= cu_aref(3 downto 0);
+                    elsif zn(11) = Z_C and cu_ah /= 0 then
+                        p12_ty <= to_unsigned(640, 10);
+                        p12_a1 <= cu_ah(3 downto 0);
+                    elsif sw_moire = '1' then
+                        p12_a1 <= 15 - p11_sc;
+                    end if;
+                when Z_R =>
+                    v_y := to_unsigned(720, 10);
+                when others =>
+                    if p11_sp = '1' then
+                        v_y := p11_aY; v_u := p11_aU; v_v := p11_aV;
+                    else
+                        v_11 := resize(p11_Yf, 11) + resize(p11_rl, 11);
+                        if v_11 > 900 then v_y := to_unsigned(900, 10); else v_y := v_11(9 downto 0); end if;
+                        v_u := C_MID + resize(p11_tn & "00", 10) + resize(p11_tn, 10);
+                        v_v := C_MID - resize(p11_tn & "00", 10);
+                    end if;
+            end case;
+            p12_by <= v_y;  p12_bu <= v_u;  p12_bv <= v_v;
+            p12_eY <= rE_qy;  p12_eU <= rE_qu;  p12_eV <= rE_qv;
+            if p11_a > resize(p11_Gv, 5) then p12_aE <= p11_a; else p12_aE <= resize(p11_Gv, 5); end if;
+            -- rim: peaks at half coverage, 0 inside and out
+            p12_rim <= resize(shift_right(resize(p11_a, 10) * resize(16 - p11_a, 10), 2), 5);
+            p12_pa <= p11_pa;
+
+            -- ---- s13: the stronger target wins (the iris pupil darkens the eye) ----
+            if p12_aE > resize(p12_a1, 5) then
+                case p12_pa is
+                    when "00" =>
+                        p13_ty <= p12_eY; p13_tu <= p12_eU; p13_tv <= p12_eV;
+                    when "01" =>
+                        p13_ty <= C_BLK + shift_right(p12_eY - C_BLK, 2);
+                        p13_tu <= shift_right(p12_eU, 2) + 384;
+                        p13_tv <= shift_right(p12_eV, 2) + 384;
+                    when others =>
+                        p13_ty <= C_BLK; p13_tu <= C_MID; p13_tv <= C_MID;
+                end case;
+                p13_a <= p12_aE;
+            else
+                p13_ty <= p12_ty; p13_tu <= p12_tu; p13_tv <= p12_tv;
+                p13_a <= resize(p12_a1, 5);
+            end if;
+            p13_by <= p12_by;  p13_bu <= p12_bu;  p13_bv <= p12_bv;
+            p13_rim <= p12_rim;
+
+            -- ---- s14: |target - base| ----
+            v_df := signed(resize(p13_ty, 11)) - signed(resize(p13_by, 11));
+            if v_df < 0 then p14_ny <= '1'; p14_my <= unsigned(resize(-v_df, 10));
+            else             p14_ny <= '0'; p14_my <= unsigned(v_df(9 downto 0)); end if;
+            v_df := signed(resize(p13_tu, 11)) - signed(resize(p13_bu, 11));
+            if v_df < 0 then p14_nu <= '1'; v_df := -v_df; else p14_nu <= '0'; end if;
+            p14_mu <= unsigned(v_df(9 downto 2));
+            v_df := signed(resize(p13_tv, 11)) - signed(resize(p13_bv, 11));
+            if v_df < 0 then p14_nv <= '1'; v_df := -v_df; else p14_nv <= '0'; end if;
+            p14_mv <= unsigned(v_df(9 downto 2));
+            p14_by <= p13_by;  p14_bu <= p13_bu;  p14_bv <= p13_bv;
+            p14_a <= p13_a;  p14_rim <= p13_rim;
+
+            -- ---- s15: x alpha (full coverage takes the whole difference) ----
+            if p14_a(4) = '1' then
+                p15_py <= p14_my & "0000";
+                p15_pu <= p14_mu & "0000";
+                p15_pv <= p14_mv & "0000";
+            else
+                p15_py <= p14_my * p14_a(3 downto 0);
+                p15_pu <= p14_mu * p14_a(3 downto 0);
+                p15_pv <= p14_mv * p14_a(3 downto 0);
+            end if;
+            p15_ny <= p14_ny;  p15_nu <= p14_nu;  p15_nv <= p14_nv;
+            p15_by <= p14_by;  p15_bu <= p14_bu;  p15_bv <= p14_bv;
+            p15_rim <= p14_rim;
+
+            -- ---- s16 ----
+            if p15_ny = '1' then p16_y <= p15_by - p15_py(13 downto 4); else p16_y <= p15_by + p15_py(13 downto 4); end if;
+            if p15_nu = '1' then p16_u <= p15_bu - p15_pu(11 downto 2); else p16_u <= p15_bu + p15_pu(11 downto 2); end if;
+            if p15_nv = '1' then p16_v <= p15_bv - p15_pv(11 downto 2); else p16_v <= p15_bv + p15_pv(11 downto 2); end if;
+            p16_rim <= p15_rim;
+
+            -- ---- s17: white rim, blanking gate ----
+            if av(16) = '0' then
+                p17_y <= C_BLK;  p17_u <= C_MID;  p17_v <= C_MID;
+            else
+                v_11 := resize(p16_y, 11) + resize(p16_rim & "0000", 11) + resize(p16_rim & "000", 11)
+                        + resize(p16_rim & "00", 11);
+                if v_11 > 900 then p17_y <= to_unsigned(900, 10); else p17_y <= v_11(9 downto 0); end if;
+                if p16_rim >= 8 then
+                    p17_u <= shift_right(p16_u, 1) + 256;
+                    p17_v <= shift_right(p16_v, 1) + 256;
+                else
+                    p17_u <= p16_u;
+                    p17_v <= p16_v;
+                end if;
             end if;
         end if;
-    end process p_stage13;
+    end process p_pix;
 
-    ----------------------------------------------------------------------
-    -- Final pipe stage — last sync delay slot.
-    ----------------------------------------------------------------------
-    p_stage_last : process(clk)
+    -- ====================================================================
+    -- Output buffer: the composed picture (stage 17) and the stage-0 syncs
+    -- go into 256-deep circular RAMs written at the same pointer.  Syncs are
+    -- read back a fixed D0+17 later; video D0 later on normal rows, so the
+    -- two line up.  Tear rows read video with their own delay (and chroma a
+    -- little further), displacing the whole composed line.  Reads never
+    -- touch the address being written (delays 2..254).
+    -- ====================================================================
+    p_oby : process(clk) begin if rising_edge(clk) then ob_y(to_integer(o_wp)) <= p17_y; ob_qy <= ob_y(to_integer(o_ray)); end if; end process;
+    p_obu : process(clk) begin if rising_edge(clk) then ob_u(to_integer(o_wp)) <= p17_u; ob_qu <= ob_u(to_integer(o_rac)); end if; end process;
+    p_obv : process(clk) begin if rising_edge(clk) then ob_v(to_integer(o_wp)) <= p17_v; ob_qv <= ob_v(to_integer(o_rac)); end if; end process;
+    p_obs : process(clk)
     begin
         if rising_edge(clk) then
-            pipe(13) <= pipe(12);
+            ob_s(to_integer(o_wp)) <= std_logic_vector'(data_in.hsync_n & data_in.vsync_n & data_in.field_n & g_avid);
+            ob_qs <= ob_s(to_integer(o_ras));
         end if;
-    end process p_stage_last;
+    end process;
 
-    ----------------------------------------------------------------------
-    -- Output: merge the sync/avid pipeline delay with the processed pixel.
-    ----------------------------------------------------------------------
-    data_out.y       <= std_logic_vector(s13_y);
-    data_out.u       <= std_logic_vector(s13_u);
-    data_out.v       <= std_logic_vector(s13_v);
-    data_out.avid    <= pipe(LATENCY - 1).avid;
-    data_out.hsync_n <= pipe(LATENCY - 1).hsync_n;
-    data_out.vsync_n <= pipe(LATENCY - 1).vsync_n;
-    data_out.field_n <= pipe(LATENCY - 1).field_n;
+    p_out : process(clk)
+    begin
+        if rising_edge(clk) then
+            o_wp  <= o_wp + 1;
+            o_ray <= o_wp - o_dY;
+            o_rac <= o_wp - o_dC;
+            o_ras <= o_wp - to_unsigned(C_D0 + C_NW, 8);
+
+            -- per-line read delay, latched while the line is mid-pipe
+            o_lq <= g_avid;
+            if o_lq = '0' and g_avid = '1' then
+                o_lcnt <= to_unsigned(30, 5);
+            elsif o_lcnt /= 0 then
+                o_lcnt <= o_lcnt - 1;
+                if o_lcnt = 1 then
+                    o_dY <= cu_d;
+                    o_dC <= cu_dc;
+                end if;
+            end if;
+
+            o_fy <= ob_qy;  o_fu <= ob_qu;  o_fv <= ob_qv;
+            o_fs <= ob_qs;
+
+            if o_fs(0) = '1' then
+                s_io.y <= std_logic_vector(o_fy);
+                s_io.u <= std_logic_vector(o_fu);
+                s_io.v <= std_logic_vector(o_fv);
+            else
+                s_io.y <= std_logic_vector(C_BLK);
+                s_io.u <= std_logic_vector(C_MID);
+                s_io.v <= std_logic_vector(C_MID);
+            end if;
+            s_io.hsync_n <= o_fs(3);
+            s_io.vsync_n <= o_fs(2);
+            s_io.field_n <= o_fs(1);
+            s_io.avid    <= o_fs(0);
+        end if;
+    end process p_out;
+
+    data_out.y       <= s_io.y;
+    data_out.u       <= s_io.u;
+    data_out.v       <= s_io.v;
+    data_out.hsync_n <= s_io.hsync_n;
+    data_out.vsync_n <= s_io.vsync_n;
+    data_out.avid    <= s_io.avid;
+    data_out.field_n <= s_io.field_n;
 
 end architecture oracle;

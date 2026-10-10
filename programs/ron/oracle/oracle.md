@@ -1,3 +1,6 @@
+> **Historical: v1 design spec.** v2 (2026-10-10) keeps this composition but
+> replaces the implementation — see SUMMARY.md.
+
 # Oracle — Deep Image Analysis & Design Spec
 
 > A glitched triptych portal effect.  A divinatory "eye" opens in a static-torn
