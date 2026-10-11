@@ -1,6 +1,6 @@
 -- pulp.vhd
 --
--- PULP v0.1 -- an authentic newsprint / comic book press.
+-- PULP v1.0 -- an authentic newsprint / comic book press.
 --
 -- The picture is reproduced as a 1965 four-colour newspaper page:
 -- clustered-dot halftone screens at the classic rotated angles (C 15,
@@ -9,21 +9,21 @@
 -- 50%, WHITE dots on solid ink in shadows), dot gain, ink layers
 -- multiplied over warm pulp paper, plate misregistration, ragged dot
 -- perimeters and paper grain.  On top: comic posterize flats, solid
--- Sobel ink linework, panel frames with paper gutters, and speech /
--- thought / starburst bubbles with baked-in grawlix lettering.
+-- Roberts-cross ink linework, panel frames with paper gutters, and speech
+-- / thought / starburst bubbles with baked-in grawlix lettering.
 --
 -- Controls:
 --   K1 Screen    halftone cell 8..96 px (16-step exponential ladder)
 --   K2 Shape     dot shape: line / diamond / round / elliptical / square
 --   K3 Ink       density: threshold bias + dot gain
---   K4 Paper     bright stock - cream - aged pulp (grain rises)
+--   K4 Paper     bright stock - cream - aged - pulp (grain rises)
 --   K5 Linework  comic outline weight (off / hairline .. heavy, 0-3 px)
---   K6 Register  plate misregistration
+--   K6 Register  plate misregistration (linear)
 --   S7 Color     B&W single 45-degree screen / CMYK four-colour process
---   S8 Posterize continuous tone / flat comic quantization
---   S9 Panels    comic panel frames (template re-rolls on a slow timer)
---   S10 Bubbles  speech balloon generator
---   S11 Aged     pristine / bad run (dot dropouts, faded ink, raggeder)
+--   S8 Posterize full comic flats at any Press (off: Press ramps to half)
+--   S9 Panels    comic page layout, re-rolled each time the switch flips on
+--   S10 Bubbles  speech balloon generator, 2-3 on screen
+--   S11 Spot     two-colour press: black + spot red (B&W: red only)
 --   P12 Press    THE gesture: clean video -> newsprint -> Ben-Day pop art
 --
 -- Architecture -- fully streaming, racing the beam, NO frame buffer.
@@ -34,6 +34,8 @@
 --     u_M = 2f cos15 y - v_C, v_M = 2f sin15 y - u_C (two subtracts
 --     from line-constant registers); K (45) derives v_K = 2f cos45 y -
 --     u_K from its own u; Y (0) is a vertical line screen (u only).
+--     The line registers step one frame row per advance: twice per field
+--     line on interlaced sources, once per line on progressive (1080p).
 --   * Spot function: fold each cell coordinate to the nearer of centre
 --     and corner (the corner region gives the shadow-half white dots),
 --     square the two shape-selected components (8x8), and threshold:
@@ -44,22 +46,25 @@
 --     u+v, round = (u,v), elliptical = (u,v) with u scaled, square =
 --     max(u,v) -- K2 picks one of five authentic press screens.
 --   * Ink compositing: the 16 C/M/Y/K overlap combinations are built
---     into a YUV LUT by the vblank sequencer (one shared multiplier);
---     per-pixel compositing is a 4-bit lookup.
+--     into a YUV LUT by the vblank sequencer (one shared multiplier), in
+--     video range (paper ~740) and hardware U/V order; per-pixel
+--     compositing is a 4-bit lookup.
 --   * Misregistration: per-plate screen phase offsets folded into the
 --     per-line accumulator reload (K is the reference plate).  True
 --     per-channel sampling shifts would need line buffers per channel;
 --     phase-only is the documented approximation.
---   * Sobel linework: 2 luma line buffers, |gx|+|gy|, 0-3px dilate +
---     1-line vertical dilate.  Lands 1px left/1 line up: invisible.
+--   * Roberts-cross linework: 1 luma line buffer, threshold, 0-3 px
+--     dilate + 1-line vertical dilate.  Lands 1px left/1 line up.
 --   * Bubbles: 64x64 2-bit sprite ROMs (fill / outline / grawlix baked
---     in), scaled x2/x4 by shifts, tail mirrored by address reflection,
---     spawned by an LFSR FSM during vblank.  3 ROMs = 6 EBR.
+--     in), scaled per mode by slice selects, tail mirrored by address
+--     reflection, spawned by an LFSR FSM during vblank.  3 ROMs = 6 EBR.
 --   * Panels: beam-position compares against per-frame boundaries.
---   * Dry/wet: BRAM delay ring + 8-step shift blend on the Press ramp.
+--   * Dry/wet: BRAM delay ring + 4-step shift blend on the Press ramp.
+--   * Output: [1 2 1] smoothing on Y/U/V (HD HDMI bar fix) + blanking
+--     gate.  Latency 15 in every mode.
 --
--- EBR: 2x luma line buffer (8) + edge buffer (1) + dry ring (2) +
--- 3 sprite ROMs (6) = 17 of 32.
+-- EBR: luma line buffer (4) + edge buffer (1) + ink LUT (2) + bubble
+-- slots (2) + dry ring (2) + 3 sprite ROMs (6) = 17 of 32.
 --------------------------------------------------------------------------------
 
 library ieee;
@@ -73,7 +78,7 @@ use work.video_stream_pkg.all;
 
 architecture pulp of program_top is
 
-    constant C_LATENCY : integer := 13;
+    constant C_LATENCY : integer := 15;
 
     ----------------------------------------------------------------------
     -- helpers
@@ -946,6 +951,19 @@ architecture pulp of program_top is
     signal s_poster  : std_logic := '0';   -- S8
     signal s_panels  : std_logic := '0';   -- S9
     signal s_bubbles : std_logic := '0';   -- S10
+    signal s_spot    : std_logic := '0';   -- S11
+    signal s_spm     : std_logic := '0';   -- spot AND process colour
+    -- vsync saw-active guard: analog vsync serrates (several edges per
+    -- field), so the per-frame start fires only on the first edge after
+    -- a line of active video
+    signal s_vsa     : std_logic := '0';
+
+    -- Stepped controls (K1 ladder, K2 shapes, K4 stocks) are held as a
+    -- 16-zone index with +-8 count hysteresis, so pot noise parked on a
+    -- zone edge can't flip the whole screen frame to frame.
+    signal s_z1, s_z2, s_z4 : unsigned(3 downto 0) := to_unsigned(8, 4);
+    signal s_hk     : unsigned(6 downto 0) := (others => '0');
+    signal s_ha, s_hb : unsigned(3 downto 0) := (others => '0');
 
     ----------------------------------------------------------------------
     -- sequencer state + shared multiplier
@@ -1009,12 +1027,13 @@ architecture pulp of program_top is
     -- geometry: captured frame size, panels, bubble
     ----------------------------------------------------------------------
     signal s_w    : unsigned(10 downto 0) := to_unsigned(720, 11);
-    signal s_h    : unsigned(9 downto 0) := to_unsigned(288, 10);
+    -- 11 bits: the HD hardware runs 1080p (1080 active lines)
+    signal s_h    : unsigned(10 downto 0) := to_unsigned(288, 11);
     -- comic page layout: up to 3 rows (ry1/ry2, park at 1023 = off), one
     -- x-split pair for the top row (A) and one for the rows below (B,
     -- park at 2047 = off); row splits apply only right of xgate (0 = all)
     signal s_tpl  : unsigned(2 downto 0) := (others => '0');
-    signal s_ry1, s_ry2 : unsigned(9 downto 0) := to_unsigned(1023, 10);
+    signal s_ry1, s_ry2 : unsigned(10 downto 0) := to_unsigned(2047, 11);
     -- The gate position is always the row's column split, so it needs no
     -- register of its own -- just an enable, reusing the rxa comparator.
     signal s_gate_en : std_logic := '0';
@@ -1026,10 +1045,10 @@ architecture pulp of program_top is
     signal s_bwx  : unsigned(4 downto 0) := to_unsigned(4, 5);
     signal s_bwy  : unsigned(3 downto 0) := to_unsigned(3, 4);
     signal s_wmg  : unsigned(10 downto 0) := to_unsigned(700, 11);
-    signal s_hmg  : unsigned(9 downto 0) := to_unsigned(280, 10);
+    signal s_hmg  : unsigned(10 downto 0) := to_unsigned(280, 11);
     -- inner edge of the page border ring (margin + border weight)
     signal s_wmgb : unsigned(10 downto 0) := to_unsigned(696, 11);
-    signal s_hmgb : unsigned(9 downto 0) := to_unsigned(277, 10);
+    signal s_hmgb : unsigned(10 downto 0) := to_unsigned(277, 11);
     -- page margin, and margin + border weight, pre-summed (keeps the
     -- pixel path to compares against registers)
     signal s_omx  : unsigned(6 downto 0) := to_unsigned(15, 7);
@@ -1038,11 +1057,13 @@ architecture pulp of program_top is
     signal s_omyb : unsigned(5 downto 0) := to_unsigned(9, 6);
 
     -- bubble state
-    -- THREE bubble slots, one per vertical third of the field.  A sprite
-    -- is 128 field lines tall (HD) / 64 (SD) and a third is 180 / 80, so a
-    -- slot's sprite can never cross its band -- which is what lets ONE
-    -- sprite path serve all three: the active slot is chosen PER LINE
-    -- (free, at line rate) and the per-pixel path is untouched.
+    -- THREE bubble slots, one per vertical third of the frame.  The sprite
+    -- is sized per mode (see s_bxs/s_bys) so it always fits inside a
+    -- third (1080p 256 of 360 lines, 1080i 128 of 180 field lines, 720p
+    -- 128 of 240, SD 64 of 80) -- so a slot's sprite can never cross its
+    -- band, which is what lets ONE sprite path serve all three: the
+    -- active slot is chosen PER LINE (free, at line rate) and the
+    -- per-pixel path is untouched.
     -- One slot is re-rolled per tick, round-robin, and each comes up ~75%
     -- of the time, so 2-3 are on screen and one changes about every
     -- second.
@@ -1053,27 +1074,30 @@ architecture pulp of program_top is
     -- left is the address.  Padded to 256 deep so yosys infers EBR rather
     -- than distributed logic; only entries 0..2 are used, and EBRs are
     -- free here (15/32) while LCs are not.
-    --   layout: bx(11) & bcy(10) & bk(2) & dir(1) & on(1)
-    type t_bslot is array (0 to 255) of std_logic_vector(24 downto 0);
+    --   layout: bx(11) & bcy(11) & bk(2) & dir(1) & on(1)
+    type t_bslot is array (0 to 255) of std_logic_vector(25 downto 0);
     signal bslot : t_bslot := (others => (others => '0'));
-    signal bq    : std_logic_vector(24 downto 0) := (others => '0');
+    signal bq    : std_logic_vector(25 downto 0) := (others => '0');
     signal bra   : unsigned(7 downto 0) := (others => '0');
     signal bwa   : unsigned(7 downto 0) := (others => '0');
-    signal bwd   : std_logic_vector(24 downto 0) := (others => '0');
+    signal bwd   : std_logic_vector(25 downto 0) := (others => '0');
     signal bwen  : std_logic := '0';
     signal s_rr     : unsigned(1 downto 0) := (others => '0');
-    signal s_b3a, s_b3b : unsigned(9 downto 0) := to_unsigned(80, 10);
+    signal s_b3a, s_b3b : unsigned(10 downto 0) := to_unsigned(80, 11);
     signal s_btimer : unsigned(8 downto 0) := to_unsigned(40, 9);
     signal s_bkind  : unsigned(1 downto 0) := (others => '0');
     -- The active bubble IS the RAM output (bq), so there are no register
     -- copies at all.  Only ONE x anchor is stored: the mirror direction is
     -- fixed at spawn, so only one of (bcx-half, bcx+half) is ever used.
-    alias  s_bx    : std_logic_vector(10 downto 0) is bq(24 downto 14);
-    alias  s_bcya  : std_logic_vector(9 downto 0)  is bq(13 downto 4);
+    alias  s_bx    : std_logic_vector(10 downto 0) is bq(25 downto 15);
+    alias  s_bcya  : std_logic_vector(10 downto 0) is bq(14 downto 4);
     alias  s_bk_v  : std_logic_vector(1 downto 0)  is bq(3 downto 2);
     alias  s_btdir : std_logic is bq(1);
     alias  s_bslot_on : std_logic is bq(0);
-    signal s_bsc    : unsigned(1 downto 0) := "01";  -- sprite scale shift
+    -- sprite scale, per mode: x4 wide only at 1920; tall x4 on 1080p,
+    -- x2 on 1080i fields / 720p, x1 on SD fields -- square on screen
+    signal s_bxs    : std_logic := '0';                 -- 1 = x4 wide
+    signal s_bys    : unsigned(1 downto 0) := "00";     -- 2:x4 1:x2 0:x1
 
     signal s_frame  : unsigned(15 downto 0) := (others => '0');
     signal s_lfsr   : unsigned(15 downto 0) := x"ACE1";
@@ -1085,9 +1109,9 @@ architecture pulp of program_top is
     -- position bookkeeping
     ----------------------------------------------------------------------
     signal s_x_count : unsigned(10 downto 0) := (others => '0');
-    signal s_aline   : unsigned(9 downto 0) := (others => '0');
+    signal s_aline   : unsigned(10 downto 0) := (others => '0');
     signal s_seen    : std_logic := '0';
-    signal s_fld     : std_logic := '0';   -- field, latched at vsync
+    signal s_fld     : std_logic := '0';   -- 1 = bottom (odd-row) field
     signal s_rowok   : std_logic := '0';
 
     ----------------------------------------------------------------------
@@ -1104,18 +1128,18 @@ architecture pulp of program_top is
     ----------------------------------------------------------------------
     -- pixel pipeline stage registers
     ----------------------------------------------------------------------
-    signal av : std_logic_vector(1 to 14) := (others => '0');
+    signal av : std_logic_vector(1 to 15) := (others => '0');
 
     -- E1
     signal y1, u1c, v1c : unsigned(9 downto 0) := (others => '0');
     signal cu1, cv1, yu1 : unsigned(11 downto 0) := (others => '0');
     signal ku1 : unsigned(11 downto 0) := (others => '0');
     signal dxb1 : signed(11 downto 0) := (others => '0');
-    signal dyl1 : signed(10 downto 0) := (others => '0');
+    signal dyl1 : signed(11 downto 0) := (others => '0');
     signal xda1 : unsigned(10 downto 0) := (others => '0');
     signal xg1 : std_logic := '0';
     -- per-line layout state (loaded at hsync for the coming line)
-    signal al_nx : unsigned(9 downto 0) := (others => '0');
+    signal al_nx : unsigned(10 downto 0) := (others => '0');
     signal rxa_ln : unsigned(10 downto 0) := to_unsigned(2047, 11);
     signal ygut_ln, ybord_ln, ymar_ln, ymbd_ln : std_logic := '0';
 
@@ -1206,6 +1230,29 @@ architecture pulp of program_top is
     signal ring_q : std_logic_vector(29 downto 0) := (others => '0');
 
     signal oy14, ou14, ov14 : unsigned(9 downto 0) := (others => '0');
+    -- output conditioning (the HD HDMI bar fix, HW-confirmed on damier):
+    -- [1 2 1] horizontal smoothing on Y, U and V.  The wet luma is already
+    -- capped (~740 paper) by the ink-LUT build, so no output luma scale.
+    signal g1_y, g1_u, g1_v, g2_y, g2_u, g2_v : unsigned(9 downto 0)
+        := (others => '0');
+    signal sm_y, sm_u, sm_v : unsigned(9 downto 0) := (others => '0');
+    signal oy16 : unsigned(9 downto 0) := to_unsigned(64, 10);
+    signal ou16, ov16 : unsigned(9 downto 0) := to_unsigned(512, 10);
+
+    -- Collision-free RAMs: without this yosys emulates VHDL
+    -- read-before-write with a delayed write port + bypass mux on every
+    -- RAM that is both written and read (~70 LC each).  Each one here
+    -- either never reads the address being written (lb1, ebuf: read x,
+    -- write x-1; dring: read wp-11) or never USES a colliding read (the
+    -- LUT and slot RAMs collide only on sequencer cycles whose read data
+    -- is overwritten before it is consumed).  Needs the read register's
+    -- init value to take effect.
+    attribute no_rw_check : boolean;
+    attribute no_rw_check of lb1     : signal is true;
+    attribute no_rw_check of ebuf    : signal is true;
+    attribute no_rw_check of lut_ram : signal is true;
+    attribute no_rw_check of bslot   : signal is true;
+    attribute no_rw_check of dring   : signal is true;
 
     signal s_avid_sr    : std_logic_vector(0 to C_LATENCY - 1) := (others => '0');
     signal s_hsync_n_sr : std_logic_vector(0 to C_LATENCY - 1) := (others => '1');
@@ -1235,15 +1282,42 @@ begin
         variable v_ik   : integer range 0 to 15;
         variable v_pr   : unsigned(11 downto 0);
         variable v_cx, v_hf : unsigned(10 downto 0);
-        variable v_jit, v_by : unsigned(9 downto 0);
+        variable v_jit, v_by : unsigned(10 downto 0);
         variable v_bx   : unsigned(10 downto 0);
         variable v_k    : unsigned(1 downto 0);
         variable v_i    : integer range 0 to 2;
         variable v_w2, v_w38, v_w58, v_off : unsigned(10 downto 0);
-        variable v_h2, v_h3, v_h23, v_yof : unsigned(9 downto 0);
+        variable v_h2, v_h3, v_h23, v_yof : unsigned(10 downto 0);
+        variable v_t7   : unsigned(6 downto 0);
+        variable v_trr, v_trg, v_trb : unsigned(7 downto 0);
     begin
         if rising_edge(clk) then
-            if data_in.vsync_n = '0' and s_prev_vsync_n = '1' then
+            -- hysteresis helper, free-running on the knob the sequencer
+            -- put in s_hk (top 7 bits): the 16-zone index of k-8 and of
+            -- k+8.  A held zone moves up only once k is 8 counts into the
+            -- next zone, down only once it is 8 counts into the one below.
+            v_t7 := s_hk - 1;
+            if s_hk = 0 then
+                s_ha <= (others => '0');
+            else
+                s_ha <= v_t7(6 downto 3);
+            end if;
+            v_t7 := s_hk + 1;
+            if s_hk = 127 then
+                s_hb <= (others => '1');
+            else
+                s_hb <= v_t7(6 downto 3);
+            end if;
+
+            if data_in.avid = '1' then
+                s_vsa <= '1';
+            end if;
+            -- Per-frame start: the FIRST vsync edge after active video.
+            -- Analog vsync serrates; restarting on every edge ran the
+            -- bubble timer 2-5x faster on analog sources than on HDMI.
+            if data_in.vsync_n = '0' and s_prev_vsync_n = '1'
+               and s_vsa = '1' then
+                s_vsa <= '0';
                 s_k1 <= unsigned(registers_in(0));
                 s_k2 <= unsigned(registers_in(1));
                 s_k3 <= unsigned(registers_in(2));
@@ -1255,6 +1329,7 @@ begin
                 s_poster  <= registers_in(6)(1);       -- switch 8
                 s_panels  <= registers_in(6)(2);       -- switch 9
                 s_bubbles <= registers_in(6)(3);       -- switch 10
+                s_spot    <= registers_in(6)(4);       -- switch 11
 
                 s_frame <= s_frame + 1;
                 s_lfsr  <= f_lfsr(s_lfsr);
@@ -1271,7 +1346,10 @@ begin
                         case to_integer(s_st) is
                             when 0 =>
                                 -- base screen frequency + wet amount
-                                s_f <= C_FRQ(to_integer(s_k1(9 downto 6)));
+                                -- (ladder runs coarse -> fine, so the
+                                -- held K1 zone is inverted: knob up =
+                                -- bigger cells, matching the px label)
+                                s_f <= C_FRQ(to_integer(not s_z1));
                                 s_wet10 <= f_sat10(resize(s_p12 & "00", 13)
                                            + resize(s_p12 & '0', 13));
                                 s_ma <= to_unsigned(2929, 13);
@@ -1321,13 +1399,14 @@ begin
                             when 10 =>
                                 s_ie <= f_sat10(resize(s_k3, 11)
                                         + resize(s_mp(19 downto 10), 11));
+                                -- register: LINEAR in K6 (it was
+                                -- K6^2, which left the bottom third of
+                                -- the knob, and the default, invisible)
                                 s_ma <= resize(s_k6, 13);
-                                s_mb <= resize(s_k6, 13);
-                            when 12 =>
-                                s_ma <= resize(s_mp(19 downto 10), 13);
                                 s_mb <= to_unsigned(144, 13);
-                            when 14 =>
+                            when 12 =>
                                 s_mis9 <= resize(s_mp(17 downto 10), 9);
+                            when 14 =>
                                 if s_ie >= 512 then
                                     s_ma <= resize(s_ie - 512, 13);
                                     s_bsign <= '0';
@@ -1371,10 +1450,11 @@ begin
                                     s_gc <= "11";
                                 end if;
                             when 21 =>
-                                -- posterize: off / half / full
+                                -- posterize: S8 = full comic flats at ANY
+                                -- Press; off, the Press ramp tops out at
+                                -- half, so the switch always flips the
+                                -- look (it used to be dead above 70%)
                                 if s_poster = '1' then
-                                    s_pa <= to_unsigned(4, 3);
-                                elsif s_p12 >= 716 then
                                     s_pa <= to_unsigned(4, 3);
                                 elsif s_p12 >= 524 then
                                     s_pa <= to_unsigned(2, 3);
@@ -1393,7 +1473,7 @@ begin
                                     s_lineon <= '0';
                                 end if;
                                 -- paper: four preset stocks
-                                case s_k4(9 downto 8) is
+                                case s_z4(3 downto 2) is
                                     when "00" =>
                                         s_pap_r <= to_unsigned(993, 10);
                                         s_pap_g <= to_unsigned(988, 10);
@@ -1411,35 +1491,38 @@ begin
                                         s_pap_g <= to_unsigned(780, 10);
                                         s_pap_b <= to_unsigned(560, 10);
                                 end case;
-                                case s_k4(9 downto 8) is
+                                case s_z4(3 downto 2) is
                                     when "00"   => s_gsh <= "101";
                                     when "01"   => s_gsh <= "100";
                                     when "10"   => s_gsh <= "100";
                                     when others => s_gsh <= "011";
                                 end case;
                             when 24 =>
-                                -- dot shape + per-shape square scaling
-                                if s_k2 < 205 then
-                                    s_shp <= "000";     -- line
-                                    s_sac <= "00";
-                                    s_sbc <= "11";
-                                elsif s_k2 < 410 then
-                                    s_shp <= "001";     -- diamond
-                                    s_sac <= "00";
-                                    s_sbc <= "11";
-                                elsif s_k2 < 614 then
-                                    s_shp <= "010";     -- round
-                                    s_sac <= "00";
-                                    s_sbc <= "00";
-                                elsif s_k2 < 819 then
-                                    s_shp <= "011";     -- elliptical
-                                    s_sac <= "01";
-                                    s_sbc <= "00";
-                                else
-                                    s_shp <= "100";     -- square
-                                    s_sac <= "00";
-                                    s_sbc <= "11";
-                                end if;
+                                -- dot shape + per-shape square scaling,
+                                -- from the held 16-zone K2 index
+                                case to_integer(s_z2) is
+                                    when 0 to 2 =>
+                                        s_shp <= "000";     -- line
+                                        s_sac <= "00";
+                                        s_sbc <= "11";
+                                    when 3 to 5 =>
+                                        s_shp <= "001";     -- diamond
+                                        s_sac <= "00";
+                                        s_sbc <= "11";
+                                    when 6 to 9 =>
+                                        s_shp <= "010";     -- round
+                                        s_sac <= "00";
+                                        s_sbc <= "00";
+                                    when 10 to 12 =>
+                                        s_shp <= "011";     -- elliptical
+                                        s_sac <= "01";
+                                        s_sbc <= "00";
+                                    when others =>
+                                        s_shp <= "100";     -- square
+                                        s_sac <= "00";
+                                        s_sbc <= "11";
+                                end case;
+                                s_spm <= s_spot and not s_bw;
                                 -- ragged-edge noise: coarse screens step
                                 -- down (amplitude must shrink as cells grow
                                 -- or it reads as spray-paint fuzz)
@@ -1531,22 +1614,40 @@ begin
                         end if;
                         v_base := s_cc;
                         v_base(v_lbit) := '0';
+                        -- S11 SPOT: a two-colour press.  C and Y print
+                        -- as bare paper, M becomes a warm spot red, K
+                        -- stays black -- or turns red too in B&W, for a
+                        -- one-ink red print.  All of it lives in the LUT
+                        -- build; the pixel path only swaps M's tone.
+                        if s_spot = '1' and (v_lbit = 0 or v_lbit = 2) then
+                            v_trr := to_unsigned(255, 8);
+                            v_trg := to_unsigned(255, 8);
+                            v_trb := to_unsigned(255, 8);
+                        elsif s_spot = '1' and (v_lbit = 1 or s_bw = '1') then
+                            v_trr := to_unsigned(245, 8);
+                            v_trg := to_unsigned(52, 8);
+                            v_trb := to_unsigned(40, 8);
+                        else
+                            v_trr := C_TR_R(v_lbit);
+                            v_trg := C_TR_G(v_lbit);
+                            v_trb := C_TR_B(v_lbit);
+                        end if;
                         case to_integer(s_sc) is
                             when 0 =>
                                 s_lra <= v_base;
                             when 2 =>
                                 s_ma <= resize(
                                     unsigned(lutq(29 downto 20)), 13);
-                                s_mb <= resize(C_TR_R(v_lbit), 13);
+                                s_mb <= resize(v_trr, 13);
                             when 3 =>
                                 s_ma <= resize(
                                     unsigned(lutq(19 downto 10)), 13);
-                                s_mb <= resize(C_TR_G(v_lbit), 13);
+                                s_mb <= resize(v_trg, 13);
                             when 4 =>
                                 s_wR <= resize(s_mp(17 downto 8), 10);
                                 s_ma <= resize(
                                     unsigned(lutq(9 downto 0)), 13);
-                                s_mb <= resize(C_TR_B(v_lbit), 13);
+                                s_mb <= resize(v_trb, 13);
                             when 5 =>
                                 s_wG <= resize(s_mp(17 downto 8), 10);
                             when 6 =>
@@ -1571,7 +1672,14 @@ begin
                         end if;
 
                     ----------------------------------------------------
-                    -- PH4: LUT RGB -> YUV (BT.601), converted in place
+                    -- PH4: LUT RGB -> YUV (BT.601), converted in place.
+                    -- Video-range output: Y = 64 + 0.6875 Y' (bright paper
+                    -- ~740, under the ~768 drawn-luma cap where the
+                    -- hardware still shows the stock's tint; full CMYK
+                    -- ~75, above black), chroma 512 +- 0.876 C' (the
+                    -- 896-per-unit swing; |C| <= 448, so no clamps).
+                    -- Stored U/V-SWAPPED (hardware order: the u slot
+                    -- carries Cr) -- the input latch swaps to match.
                     ----------------------------------------------------
                     when 4 =>
                         s_lwen <= '0';
@@ -1606,7 +1714,7 @@ begin
                                     s_ma <= resize(s_yv - s_cB, 13);
                                     s_dsign <= '1';
                                 end if;
-                                s_mb <= to_unsigned(144, 13);
+                                s_mb <= to_unsigned(126, 13);
                             when 8 =>
                                 if s_cR >= s_yv then
                                     s_ma <= resize(s_cR - s_yv, 13);
@@ -1615,30 +1723,34 @@ begin
                                     s_ma <= resize(s_yv - s_cR, 13);
                                     s_bsign <= '1';
                                 end if;
-                                s_mb <= to_unsigned(183, 13);
+                                s_mb <= to_unsigned(160, 13);
                             when 9 =>
+                                -- Cb
                                 if s_dsign = '1' then
-                                    s_wG <= f_cu10(to_signed(512, 12)
-                                        - signed(resize(s_mp(17 downto 8), 12)));
+                                    s_wG <= to_unsigned(512, 10)
+                                            - s_mp(17 downto 8);
                                 else
-                                    s_wG <= f_cu10(to_signed(512, 12)
-                                        + signed(resize(s_mp(17 downto 8), 12)));
+                                    s_wG <= to_unsigned(512, 10)
+                                            + s_mp(17 downto 8);
                                 end if;
+                                s_ma <= resize(s_yv, 13);
+                                s_mb <= to_unsigned(176, 13);
                             when 10 =>
-                                s_lwa <= s_cc;
+                                -- Cr
                                 if s_bsign = '1' then
-                                    s_lwd <= std_logic_vector(s_yv)
-                                        & std_logic_vector(s_wG)
-                                        & std_logic_vector(f_cu10(
-                                            to_signed(512, 12)
-                                            - signed(resize(s_mp(17 downto 8), 12))));
+                                    s_wR <= to_unsigned(512, 10)
+                                            - s_mp(17 downto 8);
                                 else
-                                    s_lwd <= std_logic_vector(s_yv)
-                                        & std_logic_vector(s_wG)
-                                        & std_logic_vector(f_cu10(
-                                            to_signed(512, 12)
-                                            + signed(resize(s_mp(17 downto 8), 12))));
+                                    s_wR <= to_unsigned(512, 10)
+                                            + s_mp(17 downto 8);
                                 end if;
+                            when 11 =>
+                                s_lwa <= s_cc;
+                                s_lwd <= std_logic_vector(
+                                             to_unsigned(64, 10)
+                                             + s_mp(17 downto 8))
+                                         & std_logic_vector(s_wR)
+                                         & std_logic_vector(s_wG);
                                 s_lwen <= '1';
                                 if s_cc = 15 then
                                     s_ph <= to_unsigned(5, 3);
@@ -1650,7 +1762,7 @@ begin
                             when others =>
                                 null;
                         end case;
-                        if s_sc /= 10 then
+                        if s_sc /= 11 then
                             s_sc <= s_sc + 1;
                         end if;
 
@@ -1679,10 +1791,18 @@ begin
                                 -- clock, and as a single cone it WAS the
                                 -- routed critical path (s_h -> s_omxb,
                                 -- 68 MHz).  House rule, the hard way.
-                                s_guy <= to_unsigned(4, 5)
-                                         + resize(s_h(9 downto 8), 5);
-                                s_bwy <= to_unsigned(2, 4)
-                                         + resize(s_h(9 downto 9), 4);
+                                --
+                                -- gutter 3 + h/128 lines (SD 4-5, 1080i 7,
+                                -- 720p 8, 1080p 11); border weight by
+                                -- height band (SD 2, 1080i/720p 3, 1080p 5)
+                                s_guy <= to_unsigned(3, 5)
+                                         + resize(s_h(10 downto 7), 5);
+                                case s_h(10 downto 9) is
+                                    when "00"   => s_bwy <= to_unsigned(2, 4);
+                                    when "01"   => s_bwy <= to_unsigned(3, 4);
+                                    when "10"   => s_bwy <= to_unsigned(5, 4);
+                                    when others => s_bwy <= to_unsigned(6, 4);
+                                end case;
                                 if s_w > (s_h & '0') then
                                     s_wide <= '1';
                                 else
@@ -1708,10 +1828,10 @@ begin
                                 s_omxb <= s_omx + resize(s_bwx, 7);
                                 s_omyb <= s_omy + resize(s_bwy, 6);
                                 s_wmg <= s_w - resize(s_omx, 11);
-                                s_hmg <= s_h - resize(s_omy, 10);
+                                s_hmg <= s_h - resize(s_omy, 11);
                             when 4 =>
                                 s_wmgb <= s_wmg - resize(s_bwx, 11);
-                                s_hmgb <= s_hmg - resize(s_bwy, 10);
+                                s_hmgb <= s_hmg - resize(s_bwy, 11);
                             when 5 =>
                                 s_ink_y <= unsigned(lutq(29 downto 20));
                                 s_ink_u <= unsigned(lutq(19 downto 10));
@@ -1728,16 +1848,26 @@ begin
                                 v_w38 := resize(s_w(10 downto 2), 11)
                                          + resize(s_w(10 downto 3), 11);
                                 v_w58 := v_w2 + resize(s_w(10 downto 3), 11);
-                                v_h2  := '0' & s_h(9 downto 1);
-                                v_h3  := resize(s_h(9 downto 2), 10)
-                                         + resize(s_h(9 downto 4), 10)
-                                         + resize(s_h(9 downto 6), 10);
+                                v_h2  := '0' & s_h(10 downto 1);
+                                v_h3  := resize(s_h(10 downto 2), 11)
+                                         + resize(s_h(10 downto 4), 11)
+                                         + resize(s_h(10 downto 6), 11);
                                 v_h23 := s_h - v_h3;
                                 v_off := to_unsigned(2047, 11);
-                                v_yof := to_unsigned(1023, 10);
+                                v_yof := to_unsigned(2047, 11);
                                 -- the bubble slots' vertical bands
                                 s_b3a <= v_h3;
                                 s_b3b <= v_h23;
+                                -- sprite scale: square on screen in every
+                                -- mode, and always shorter than a band
+                                s_bxs <= s_w(10) and s_w(9);    -- >= 1536
+                                if s_h >= 768 then
+                                    s_bys <= "10";              -- 1080p
+                                elsif s_h >= 384 then
+                                    s_bys <= "01";              -- 1080i, 720p
+                                else
+                                    s_bys <= "00";              -- SD fields
+                                end if;
                                 s_gate_en <= '0';
                                 -- Each row carries ONE column split (A =
                                 -- top row, B = the rows below), which is
@@ -1798,18 +1928,20 @@ begin
                                     else
                                         v_k := "00";        -- speech
                                     end if;
-                                    if s_w > 1024 then
-                                        s_bsc <= "10";
+                                    if s_bxs = '1' then
                                         v_hf := to_unsigned(128, 11);
                                     else
-                                        s_bsc <= "01";
                                         v_hf := to_unsigned(64, 11);
                                     end if;
-                                    -- x: anywhere across the page
+                                    -- x: anywhere across the page, centres
+                                    -- 1/8 .. 7/8 of the width (the old
+                                    -- w/8 + w/4 + w/8 + w/16 ladder topped
+                                    -- out at 9/16 -- the right ~40% of the
+                                    -- page never got a bubble)
                                     v_cx := resize(s_w(10 downto 3), 11);
                                     if s_lfsr(8) = '1' then
                                         v_cx := v_cx
-                                            + resize(s_w(10 downto 2), 11);
+                                            + resize(s_w(10 downto 1), 11);
                                     end if;
                                     if s_lfsr(9) = '1' then
                                         v_cx := v_cx
@@ -1817,7 +1949,7 @@ begin
                                     end if;
                                     if s_lfsr(10) = '1' then
                                         v_cx := v_cx
-                                            + resize(s_w(10 downto 4), 11);
+                                            + resize(s_w(10 downto 3), 11);
                                     end if;
                                     -- store only the anchor the mirror
                                     -- direction will actually use
@@ -1828,10 +1960,14 @@ begin
                                     end if;
                                     -- y: jitter inside this slot's band,
                                     -- so the sprite never crosses it
-                                    v_jit := resize(s_lfsr(3 downto 0), 10);
-                                    if s_w > 1024 then
-                                        v_jit := v_jit(8 downto 0) & '0';
-                                    end if;
+                                    case s_bys is
+                                        when "10" => v_jit := resize(
+                                            s_lfsr(3 downto 0) & "00", 11);
+                                        when "01" => v_jit := resize(
+                                            s_lfsr(3 downto 0) & '0', 11);
+                                        when others => v_jit := resize(
+                                            s_lfsr(3 downto 0), 11);
+                                    end case;
                                     case v_i is
                                         when 0      => v_by := v_jit;
                                         when 1      => v_by := s_b3a + v_jit;
@@ -1849,11 +1985,39 @@ begin
                                 end if;
                             when 8 =>
                                 s_panels_d <= s_panels;
+                                -- one write per re-roll: a write enable
+                                -- left high rewrote the slot all frame
+                                -- long, colliding with the pixel reads
+                                bwen <= '0';
+                                s_hk <= s_k1(9 downto 3);
+                            -- stepped-control hysteresis (s_ha/s_hb land
+                            -- two steps after s_hk is loaded); the held
+                            -- zones are used from the next frame on
+                            when 10 =>
+                                if s_ha > s_z1 then
+                                    s_z1 <= s_ha;
+                                elsif s_hb < s_z1 then
+                                    s_z1 <= s_hb;
+                                end if;
+                                s_hk <= s_k2(9 downto 3);
+                            when 12 =>
+                                if s_ha > s_z2 then
+                                    s_z2 <= s_ha;
+                                elsif s_hb < s_z2 then
+                                    s_z2 <= s_hb;
+                                end if;
+                                s_hk <= s_k4(9 downto 3);
+                            when 14 =>
+                                if s_ha > s_z4 then
+                                    s_z4 <= s_ha;
+                                elsif s_hb < s_z4 then
+                                    s_z4 <= s_hb;
+                                end if;
                                 s_ph <= (others => '0');
                             when others =>
                                 null;
                         end case;
-                        if s_st /= 8 then
+                        if s_st /= 14 then
                             s_st <= s_st + 1;
                         end if;
 
@@ -1885,14 +2049,17 @@ begin
         variable v_s13  : signed(12 downto 0);
         variable v_sp   : std_logic_vector(1 downto 0);
         variable v_ra, v_rb : unsigned(8 downto 0);
-        variable v_yd1, v_yd2 : unsigned(9 downto 0);
+        variable v_yd1, v_yd2 : unsigned(10 downto 0);
+        variable v_inx, v_iny : boolean;
+        variable v_sy, v_su, v_sv : unsigned(11 downto 0);
+        variable v_row, v_col : unsigned(5 downto 0);
     begin
         if rising_edge(clk) then
             s_prev_hsync_n <= data_in.hsync_n;
             s_prev_vsync_n <= data_in.vsync_n;
 
             av(1) <= data_in.avid;
-            for i in 2 to 14 loop
+            for i in 2 to 15 loop
                 av(i) <= av(i - 1);
             end loop;
 
@@ -1900,8 +2067,11 @@ begin
             -- E1: capture, position, DDA advance, panel zones, bubble dx
             --------------------------------------------------------------
             y1  <= unsigned(data_in.y);
-            u1c <= unsigned(data_in.u);
-            v1c <= unsigned(data_in.v);
+            -- the hardware carries chroma U<->V swapped vs BT.601: swap
+            -- once here so the press works in BT.601 (u1c = Cb); the ink
+            -- LUT is stored back in hardware order (see PH4)
+            u1c <= unsigned(data_in.v);
+            v1c <= unsigned(data_in.u);
             px_pipe(1) <= s_x_count;
             for i in 2 to 6 loop
                 px_pipe(i) <= px_pipe(i - 1);
@@ -1942,8 +2112,8 @@ begin
                 dxb1 <= signed(resize(s_x_count, 12))
                         - signed(resize(unsigned(s_bx), 12));
             end if;
-            dyl1 <= signed(resize(s_aline, 11))
-                    - signed(resize(unsigned(s_bcya), 11));
+            dyl1 <= signed(resize(s_aline, 12))
+                    - signed(resize(unsigned(s_bcya), 12));
 
             --------------------------------------------------------------
             -- E2: plate cell distances (M and K's v derived from line
@@ -2017,25 +2187,32 @@ begin
 
             -- bubble sprite address: pre-biased coords make this a
             -- couple of slice selects and zero tests
-            if s_bsc = "10" then
-                if dxb1(11 downto 8) = "0000"
-                   and dyl1(10 downto 7) = "0000" then
-                    bval2 <= s_bslot_on and s_bubbles;
-                else
-                    bval2 <= '0';
-                end if;
-                saddr2 <= unsigned(dyl1(6 downto 1))
-                          & unsigned(dxb1(7 downto 2));
+            -- (x and y scales are independent per-frame selects, so the
+            -- sprite stays square in every mode)
+            if s_bxs = '1' then
+                v_inx := dxb1(11 downto 8) = "0000";
+                v_col := unsigned(dxb1(7 downto 2));
             else
-                if dxb1(11 downto 7) = "00000"
-                   and dyl1(10 downto 6) = "00000" then
-                    bval2 <= s_bslot_on and s_bubbles;
-                else
-                    bval2 <= '0';
-                end if;
-                saddr2 <= unsigned(dyl1(5 downto 0))
-                          & unsigned(dxb1(6 downto 1));
+                v_inx := dxb1(11 downto 7) = "00000";
+                v_col := unsigned(dxb1(6 downto 1));
             end if;
+            case s_bys is
+                when "10" =>
+                    v_iny := dyl1(11 downto 8) = "0000";
+                    v_row := unsigned(dyl1(7 downto 2));
+                when "01" =>
+                    v_iny := dyl1(11 downto 7) = "00000";
+                    v_row := unsigned(dyl1(6 downto 1));
+                when others =>
+                    v_iny := dyl1(11 downto 6) = "000000";
+                    v_row := unsigned(dyl1(5 downto 0));
+            end case;
+            if v_inx and v_iny then
+                bval2 <= s_bslot_on and s_bubbles;
+            else
+                bval2 <= '0';
+            end if;
+            saddr2 <= v_row & v_col;
 
             -- keyed to the true frame line y = 2*aline + field (a bit
             -- concat, free): paper grain/ragged edges are a property of
@@ -2208,7 +2385,13 @@ begin
             end loop;
 
             c5  <= 1023 - r4;
-            m5  <= 1023 - g4;
+            -- SPOT: the red plate prints min(M, Y) -- the warm tones --
+            -- so blue sky stays off it (plain M put red dots in the sky)
+            if s_spm = '1' and b4 > g4 then
+                m5 <= 1023 - b4;
+            else
+                m5 <= 1023 - g4;
+            end if;
             yy5 <= 1023 - b4;
             v_t := 1023 - r4;
             if 1023 - g4 < v_t then
@@ -2391,6 +2574,41 @@ begin
             end if;
 
             --------------------------------------------------------------
+            -- E14: output conditioning -- horizontal [1 2 1]/4 on Y, U
+            -- and V around the pixel one back (g1 is the centre, g2 and
+            -- the new pixel its neighbours).  Halftone dots are the
+            -- textbook HD HDMI bar trigger: full-swing pixel-to-pixel
+            -- edges moving with the video.  (damier v0.4.4, A/B on HW)
+            --------------------------------------------------------------
+            g1_y <= oy14;  g2_y <= g1_y;
+            g1_u <= ou14;  g2_u <= g1_u;
+            g1_v <= ov14;  g2_v <= g1_v;
+            v_sy := resize(g2_y, 12) + shift_left(resize(g1_y, 12), 1)
+                    + resize(oy14, 12);
+            v_su := resize(g2_u, 12) + shift_left(resize(g1_u, 12), 1)
+                    + resize(ou14, 12);
+            v_sv := resize(g2_v, 12) + shift_left(resize(g1_v, 12), 1)
+                    + resize(ov14, 12);
+            sm_y <= v_sy(11 downto 2);
+            sm_u <= v_su(11 downto 2);
+            sm_v <= v_sv(11 downto 2);
+
+            --------------------------------------------------------------
+            -- E15: blanking gate -- neutral whenever the latency-aligned
+            -- avid is low (the press draws paper and ink colours into
+            -- blanking otherwise)
+            --------------------------------------------------------------
+            if av(14) = '0' then
+                oy16 <= to_unsigned(64, 10);
+                ou16 <= to_unsigned(512, 10);
+                ov16 <= to_unsigned(512, 10);
+            else
+                oy16 <= sm_y;
+                ou16 <= sm_u;
+                ov16 <= sm_v;
+            end if;
+
+            --------------------------------------------------------------
             -- flag/value pipes
             --------------------------------------------------------------
             gut_p(3) <= gut2;
@@ -2442,12 +2660,12 @@ begin
             else
                 v_yd2 := s_ry2 - al_nx;
             end if;
-            if v_yd1 < resize(s_guy, 10)
-               or v_yd2 < resize(s_guy, 10) then
+            if v_yd1 < resize(s_guy, 11)
+               or v_yd2 < resize(s_guy, 11) then
                 ygut_ln <= '1';
                 ybord_ln <= '0';
-            elsif v_yd1 < resize(s_guy, 10) + resize(s_bwy, 10)
-               or v_yd2 < resize(s_guy, 10) + resize(s_bwy, 10) then
+            elsif v_yd1 < resize(s_guy, 11) + resize(s_bwy, 11)
+               or v_yd2 < resize(s_guy, 11) + resize(s_bwy, 11) then
                 ygut_ln <= '0';
                 ybord_ln <= '1';
             else
@@ -2464,10 +2682,10 @@ begin
                 bra <= to_unsigned(2, 8);
             end if;
 
-            if al_nx < resize(s_omy, 10) or al_nx >= s_hmg then
+            if al_nx < resize(s_omy, 11) or al_nx >= s_hmg then
                 ymar_ln <= '1';
                 ymbd_ln <= '0';
-            elsif al_nx < resize(s_omyb, 10) or al_nx >= s_hmgb then
+            elsif al_nx < resize(s_omyb, 11) or al_nx >= s_hmgb then
                 ymar_ln <= '0';
                 ymbd_ln <= '1';
             else
@@ -2492,22 +2710,30 @@ begin
             -- screen with no vertical structure and K ~ 0 there).
             --
             -- Now the phase is a pure function of (x, y):
-            --   field 0, line L -> y = 2L    -> 4Ac*L
-            --   field 1, line L -> y = 2L+1  -> 2Ac + 4Ac*L
-            -- both = 2Ac*y, so the two fields interleave into one screen.
+            --   top field,    line L -> y = 2L
+            --   bottom field, line L -> y = 2L+1
+            -- so the two fields interleave into one screen.
             --
-            -- Fires 4 clocks after avid falls: late enough that the last
-            -- real pixel has cleared E2 (which reads these registers),
-            -- early enough to beat the hsync edge by the front porch.
-            -- The enable is a free DFFE CE, so the load above stays a
-            -- plain copy -- as a mux on the adder output this cost 8 MHz.
-            if av(5) = '1' and av(4) = '0' then
-                lu_c <= lu_c + (s_Bc(10 downto 0) & '0');
-                lv_c <= lv_c + (s_Ac(10 downto 0) & '0');
-                lu_k <= lu_k + (s_Ak(10 downto 0) & '0');
-                r_lc <= r_lc + (s_Ac(9 downto 0) & "00");
-                r_ls <= r_ls + (s_Bc(9 downto 0) & "00");
-                r_lk <= r_lk + (s_Ak(9 downto 0) & "00");
+            -- Each advance is ONE frame row; an interlaced field line is
+            -- two rows, so the advance fires twice there (4 and 5 clocks
+            -- after avid falls) and once on a progressive source.  (v0.1
+            -- always stepped two rows: on 1080p every screen was squashed
+            -- 2:1 vertically -- flat dots, angles 28/82/63 instead of
+            -- 15/75/45, no rosette.)
+            --
+            -- Fires after the last real pixel has cleared E2 (which reads
+            -- these registers), and before the hsync edge by the front
+            -- porch.  The enable is a free DFFE CE, so the load above
+            -- stays a plain copy -- as a mux on the adder output this cost
+            -- 8 MHz.
+            if (av(5) = '1' and av(4) = '0')
+               or (s_wide = '1' and av(6) = '1' and av(5) = '0') then
+                lu_c <= lu_c + s_Bc;
+                lv_c <= lv_c + s_Ac;
+                lu_k <= lu_k + s_Ak;
+                r_lc <= r_lc + (s_Ac(10 downto 0) & '0');
+                r_ls <= r_ls + (s_Bc(10 downto 0) & '0');
+                r_lk <= r_lk + (s_Ak(10 downto 0) & '0');
             end if;
 
             --------------------------------------------------------------
@@ -2520,18 +2746,19 @@ begin
                 s_x_count <= (others => '0');
                 if s_seen = '1' then
                     s_seen <= '0';
-                    if s_aline < 1000 then
-                        s_aline <= s_aline + 1;
-                        -- field height, captured on every ACTIVE line.
-                        -- It CANNOT be latched at vsync: the first
-                        -- blanking hsync (which precedes vsync) has
-                        -- already reset s_aline to 0, so a vsync capture
-                        -- reads 0 -- that killed every horizontal panel
-                        -- split and the bottom margin.  s_h holds the
-                        -- last field's height throughout blanking, which
-                        -- is when the sequencer reads it.
-                        s_h <= s_aline + 1;
-                    end if;
+                    -- 11 bits, no cap: v0.1 stopped at line 1000, which
+                    -- on 1080p froze the grain on the bottom 80 lines and
+                    -- read the page as 1000 tall (fat bottom margin)
+                    s_aline <= s_aline + 1;
+                    -- field height, captured on every ACTIVE line.
+                    -- It CANNOT be latched at vsync: the first
+                    -- blanking hsync (which precedes vsync) has
+                    -- already reset s_aline to 0, so a vsync capture
+                    -- reads 0 -- that killed every horizontal panel
+                    -- split and the bottom margin.  s_h holds the
+                    -- last field's height throughout blanking, which
+                    -- is when the sequencer reads it.
+                    s_h <= s_aline + 1;
                 else
                     s_aline <= (others => '0');
                 end if;
@@ -2544,9 +2771,7 @@ begin
                 -- derived in a free-running stage below (they settle
                 -- during blanking, long before active pixels)
                 if s_seen = '1' then
-                    if s_aline < 1000 then
-                        al_nx <= s_aline + 1;
-                    end if;
+                    al_nx <= s_aline + 1;
                 else
                     al_nx <= (others => '0');
                 end if;
@@ -2561,8 +2786,12 @@ begin
             end if;
             if data_in.vsync_n = '0' and s_prev_vsync_n = '1' then
                 s_aline <= (others => '0');
-                s_fld <= data_in.field_n;
-                if data_in.field_n = '1' then       -- y = 1 on line 0
+                -- Bottom field (odd rows) is field_n = '0' (the SDK
+                -- stimulus; ribbon's HW comb confirmed it) -- v0.1 seeded
+                -- the opposite field.  HD inputs tie field_n high, so a
+                -- progressive source always starts at y = 0.
+                s_fld <= not data_in.field_n;
+                if data_in.field_n = '0' then       -- y = 1 on line 0
                     lu_c <= s_Bc + s_ouc;
                     lv_c <= s_Ac + s_ovc;
                     lu_k <= s_Ak;
@@ -2684,9 +2913,9 @@ begin
         end if;
     end process p_sync;
 
-    data_out.y       <= std_logic_vector(oy14);
-    data_out.u       <= std_logic_vector(ou14);
-    data_out.v       <= std_logic_vector(ov14);
+    data_out.y       <= std_logic_vector(oy16);
+    data_out.u       <= std_logic_vector(ou16);
+    data_out.v       <= std_logic_vector(ov16);
     data_out.avid    <= s_avid_sr(C_LATENCY - 1);
     data_out.hsync_n <= s_hsync_n_sr(C_LATENCY - 1);
     data_out.vsync_n <= s_vsync_n_sr(C_LATENCY - 1);

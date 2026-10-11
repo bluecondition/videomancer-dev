@@ -193,6 +193,7 @@ Write bank(par), read bank(!par) — collision impossible; read BOTH arrays ever
 
 ### Interlace-correct circular geometry
 Detect interlace by field_n toggling (recompute every vsync so it self-clears on mode change); halve row pitch, step dy by 2/line with incremental squares, start the odd field +1 line. — **clacker v0.2**. Most of the library renders 2:1 tall on 1080i without this; not sim-testable in the progressive image sim.
+The mirror trap: a design built around FIELDS (step 2 rows per line, always) renders 2:1 FLAT on 1080p — pulp v0.1's halftone dots went oval and its 15/75/45° screens landed at 28/82/63°. Cheapest fix for an end-of-active-video advance: step ONE row per advance and fire the clock-enable twice (avid fall +4 and +5) when the source is interlaced, once otherwise — two CE terms, no registers, no mux on the load path. HD inputs tie field_n high, so detect interlace geometrically: measured width > 2 × measured field height. — **pulp v0.2**, timing-closed (not flashed).
 
 ### N sprite ghosts for the price of one row mux
 Space echo copies ≥ sprite width apart so at most one covers any pixel → pick the covering ghost early, do ONE wide ROM-row mux regardless of count; carry a small selector index down the pipe. — **invaders**, timing-closed. DEAD-END: overlapping ghosts (each needs its own 128:1 mux; 3 of them = 66 MHz). Companion: prefix-OR trailing-edge shadow, coarsened to 4-px groups (full 128-bit prefix-OR ×2 = ~1500 LC, DEAD-END).

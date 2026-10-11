@@ -1,8 +1,14 @@
 # PULP — an authentic newsprint / comic book press
 
-**v0.1.0** — 2026-07-16. Built + packaged, all 6 configs routed at full clock.
-HW-tested: the look is approved; the reported blue-flicker (an interlace
-screen-phase bug) is fixed and awaiting re-test on hardware.
+**v1.0.0 FINAL** — signed off by Ron on hardware, 2026-10-11. Same bitstreams
+as the v0.2.0 finalization pass (hardware-contract fixes, control fixes, HD
+HDMI bar conditioning, S11 Spot); only the TOML changed (version, preset 6).
+All 6 configs routed at full clock on **seed 1** with router1 — repack only
+for TOML edits (`vmprog_pack.py`), so the screened HD HDMI placement stays.
+
+v0.1.0 (2026-07-16): HW-tested, look approved; the reported blue flicker (an
+interlace screen-phase bug) was fixed but never re-tested. v0.1 sources and
+vmprog are kept in `.pulp_work/v010/`.
 
 Reproduces incoming video as a 1965 four-colour newspaper page: clustered-dot
 halftone screens at the classic press angles (C 15°, M 75°, Y 0°, K 45° —
@@ -18,17 +24,21 @@ runs the image from nearly-clean video through newsprint to Ben-Day pop art.
 
 | Control | Function |
 |---|---|
-| K1 Screen | halftone cell 8..96 px (16-step exponential ladder) |
+| K1 Screen | halftone cell 8..96 px (16-step exponential ladder; knob up = bigger cells) |
 | K2 Shape | dot shape: line / diamond / round / elliptical / square (5 zones) |
 | K3 Ink | density: threshold bias + dot gain |
 | K4 Paper | 4 stocks: bright white → cream → aged → pulp (grain rises) |
 | K5 Linework | comic outline weight (off / hairline .. heavy, 0–3 px dilate) |
-| K6 Register | plate misregistration |
+| K6 Register | plate misregistration (linear) |
 | S7 Color | B&W single 45° screen ↔ CMYK process |
-| S8 Posterize | continuous tone ↔ flat comic quantization |
+| S8 Posterize | full comic flats at any Press; off, the Press ramp tops out at half |
 | S9 Panels | comic page layout — 8 templates, re-rolled every time the switch flips on |
 | S10 Bubbles | speech balloon generator — 2–3 on screen, one changing ~every second |
+| S11 Spot | two-colour press: black + spot red (with S7 B&W: one red ink) |
 | P12 Press | master: clean video → newsprint → pop art (screen/ink/posterize macro) |
+
+K1, K2 and K4 are stepped; each is held as a 16-zone index with ±8-count
+hysteresis so pot noise parked on a step edge can't flip the whole screen.
 
 ## Look development
 
@@ -243,29 +253,31 @@ endpoints. Latency 13 clocks.
 ## Build
 
 ```
-./build_programs.sh ron pulp
+NEXTPNR_ROUTER="--router router1" ./build_programs.sh ron pulp
 ```
 
-All 6 configs pass **routed** timing at full clock. Verified post-route
-(the number that counts, not the pre-route estimate):
+**Use router1.** v0.2.0, all routed post-route, all **seed 1**:
 
-| config | seed | pre-route | **routed** | required |
-|---|---|---|---|---|
-| HD Analog | 3 | 75.64 | **76.72** | 74.25 |
-| HD HDMI | 4 | 80.65 | **74.28** | 74.25 |
-| HD Dual | 4 | 79.59 | **74.60** | 74.25 |
-| SD Analog / HDMI / Dual | 1 | 80.7–82.6 | — | 27 |
+| config | routed | LCs | required |
+|---|---|---|---|
+| HD Analog | **80.08** | 7,640 | 74.25 |
+| HD HDMI | **77.74** | 7,630 | 74.25 |
+| HD Dual | **77.72** | 7,623 | 74.25 |
+| SD Analog / HDMI / Dual | 72.0 / 78.8 / 79.4 | 7,636–7,653 | 27 |
 
-LCs 7,510–7,558 / 7,680 (98.4%), RAMs 15/32. At this utilization the HD
-configs need a seed sweep; the build script's retry loop finds them, but
-**check the accepted seed isn't the last one tried** — that would be a
-best-effort accept, not a real pass.
+RAMs 17/32. 99.4–99.6% LC — the chip is FULL; anything new must pay for
+itself. v0.1.0 on today's SDK with router1 seed 1 was 7,532 LC and 74.13 MHz
+(FAIL) on HD Analog; on router2 it needed seeds 3/4/4 and passed HD HDMI by
+0.03 MHz. v0.2 is +179 LUT / +29 FF net, yet routes 3–6 MHz faster.
 
-HD HDMI's 74.28 is a 0.04% margin — passing, but with nothing to spare.
-Its critical path is the vblank sequencer's step decode (`s_st → s_ma/s_mb`),
-and it is **routing-dominated** (9.7 ns routing vs 3.8 ns logic), i.e. pure
-congestion at 98% LC. Pipelining it would make it worse (see the
-counter-lesson below); the only real lever left is removing logic.
+HD HDMI pin-skew screen (`tools/hdmi_pin_skew.py`, router1 seeds 1–10; seed 5
+stalled in router1 congestion): the shipped **seed 1** is the best placement —
+HSYNC **+1.36 ns** (window +1.2..+2), closest data bit −0.57 (damier's clean
+build was −0.56). Seeds 2/3/6/7 put HSYNC at +0.3..+0.9 and 4/8/9/10 below 0.
+Only re-route HD HDMI with a hardware A/B.
+
+v0.1.0 build record (router2): HD Analog seed 3 76.72, HD HDMI seed 4 74.28,
+HD Dual seed 4 74.60, SD seed 1; 7,510–7,558 LC.
 
 **Critical-path lesson**: at ~95% utilization the design first missed HD
 timing (routed 69.7 vs pre-route estimate 79–81 — the two "Max frequency"
@@ -296,10 +308,92 @@ missed on all 6 seeds. At 98.8% LC the ~21 added registers cost more in
 routing/placement pressure than the shorter logic path bought. Reverted to
 the single stage. At this utilization, **remove logic, don't restructure it**.
 
+## v0.2 finalization pass (2026-10-11)
+
+An audit against the hardware contracts learned since July found Pulp was
+designed around FIELDS (480i / 1080i) and predated most of them.
+
+**HD (1080p) geometry**
+* The screen DDAs stepped two frame rows per line unconditionally — right for
+  an interlaced field, wrong for progressive. On 1080p every screen was
+  squashed 2:1 vertically: flat oval dots, and the plate angles landed at
+  ~28° / 82° / 63° instead of 15° / 75° / 45°, so no proper rosette. Now
+  each advance is one row; it fires TWICE per line (4 and 5 clocks after avid
+  falls) when the source is interlaced (`s_wide`: width > 2 × field height)
+  and once otherwise. Two clock-enable terms; no registers, no mux on the
+  load path.
+* Bubbles were 256 px × 128 lines on 1080p (designed for 1080i fields).
+  The sprite now scales x and y independently per mode — 1080p ×4/×4,
+  1080i ×4/×2, 720p ×2/×2, SD ×2/×1 — square on screen and always shorter
+  than a slot band.
+* The line counter was 10 bits and capped at 1000: on 1080p the bottom 80
+  lines reused one row of paper grain (vertical streaks) and the page read
+  as 1000 tall (a ~93-line bottom margin against ~13 at the top). Now 11
+  bits, no cap; every height register widened (`s_h`, row splits, bands,
+  margins, slot anchor). Gutters re-derived from the true height
+  (3 + h/128 lines; border 2/3/5 by height band).
+
+**Hardware contracts**
+* Blanking gate added (neutral Y 64 / UV 512 outside the latency-aligned
+  avid). v0.1 drew paper and ink colours into blanking.
+* Interlace field polarity flipped: the bottom (odd-row) field is
+  `field_n = '0'`. v0.1 seeded the opposite field (ribbon's 2 px crawling
+  comb on diagonals).
+* Ink LUT built in video range: Y = 64 + 0.6875·Y′ (bright paper ~742, under
+  the ~768 drawn-luma cap; full CMYK ~75 instead of ~10, below black), chroma
+  512 ± 0.876·C′ (no clamps needed). v0.1's paper at Y ≈ 987 was clipped to
+  plain white on HW, killing the stock tints — so K4 mostly only changed the
+  grain.
+* U/V swapped at the input latch and stored in hardware order in the LUT
+  (gilt convention); the dry path is untouched.
+* HD HDMI bar conditioning: [1 2 1] horizontal smoothing on Y, U and V
+  (damier's HW-A/B fix) — halftone dots are the textbook trigger. The luma
+  half of that fix is the LUT scaling above. Latency 13 → 15, all modes.
+* Vsync serration guard: the per-frame start fires on the first vsync edge
+  after active video only (analog sources ran the bubble timer 2–5× fast).
+* `no_rw_check` on the five collision-free RAMs (`emulate_transparency` 4 →
+  0). Found while auditing it: the slot-RAM write enable was never cleared,
+  so the slot was rewritten all frame long — fixed (one write per re-roll).
+
+**Controls**
+* K1 Screen ran backwards against its 8 → 96 px label (knob up made cells
+  smaller). Inverted; preset K1 values mirrored. The px label is exact at
+  the ends; the ladder is exponential, so mid-knob readings are approximate.
+* K6 Register is linear (was K6²: the bottom third, and the default 160,
+  moved the plates by <0.2 px). Default now ~1.4 px-equivalent of phase.
+* S8 Posterize was dead above 70% Press (Press forced full flats there).
+  Now S8 = full flats at any Press; with S8 off, the Press ramp stops at
+  half — so the switch always flips the look.
+* K1/K2/K4 stepped-control hysteresis (above). K2 zones are now
+  0–191 line / 192–383 diamond / 384–639 round / 640–831 ellipse / 832+ square.
+* **S11 Spot** (new): a two-colour press — C and Y print as bare paper, M
+  becomes a warm spot red (Q8 transmittance 245/52/40), K stays black; with
+  S7 on B&W the single K screen prints red. Built entirely in the LUT
+  (zero pixel-path cost) plus one compare: the red plate prints
+  min(M, Y) so blue sky stays off it. Linework/borders follow the inks.
+* Bubble x placement: centres now span 1/8–7/8 of the width (v0.1's ladder
+  topped out at 9/16 — the right ~40% of the page never got a bubble).
+
+### v0.2 hardware checks (for Ron)
+1. HD 1080p source, K2 on Round, coarse K1: dots must be ROUND (not flat
+   ovals) and the rosette visible.
+2. SD interlaced source over blue sky: no flicker / twitter (the v0.1 re-test
+   that never happened), no crawling comb on dot edges.
+3. U/V: K4 fully clockwise (pulp stock) must look yellow-brown, not teal;
+   on colour bars yellow prints as fine vertical lines. If the paper is
+   teal, the input/LUT swap goes back out (free wiring).
+4. Bottom of a 1080p picture with Panels on: margins equal top and bottom,
+   no streaky grain in the last inch.
+5. HD HDMI with motion: no thick bright bars, no thin coloured lines.
+6. S11 Spot on/off at a few Press positions; K6 low end now visible.
+
 ## Status / next
 
-* Built + packaged (`out/rev_b/ron/pulp.vmprog`), sim-verified look,
-  **not hardware-tested**.
+* **v1.0.0 FINAL**, signed off on hardware 2026-10-11
+  (`out/rev_b/ron/pulp.vmprog`). Presets 1-5 are hand-written (K1 values
+  mirrored for v0.2); preset 6 "Misprint Comic" was captured from the device.
+  Defaults are still the hand-set ones; more presets can be captured with
+  `capture_preset.sh` and repacked.
 * v0.2 candidates: press drift breathing, roller streaks, per-panel screen
   re-seed, channel sampling misregistration via the spare EBR, glyph
   variety on the sprite sheets, starburst on a control gesture.
