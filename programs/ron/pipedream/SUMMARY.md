@@ -1,6 +1,6 @@
 # Pipedream — a woven Truchet network of glossy 3D pipes
 
-**Status:** v3.3.0 FINAL — signed off by Ron 2026-10-11 ("good as is - let's finalize"); live device settings matched the TOML defaults, so the defaults stand as captured; presets hand-written.  History: v3.3.0 (stronger Image); v3.2.0 (no lone rings, 12.5% minimum thickness); v3.1.0 — joint accuracy, smooth highlights, bipolar
+**Status:** v3.3.0 FINAL — signed off by Ron 2026-10-11 ("good as is - let's finalize"); defaults then captured from the device (K1 217, K2 591, K3 703, K4 743, K5 460, K6 584, S8 Chrome, S11 Image On, P12 +100%); presets hand-written.  History: v3.3.0 (stronger Image); v3.2.0 (no lone rings, 12.5% minimum thickness); v3.1.0 — joint accuracy, smooth highlights, bipolar
 Image on S11/P12.  v3.0 HW-seen by Ron ("very interesting now"); v3.1 not flashed.
 v2.3 and v3.0 source + vmprog kept in `.pipedream_work/`.
 
