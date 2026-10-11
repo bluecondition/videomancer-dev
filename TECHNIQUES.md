@@ -457,6 +457,11 @@ Quick lookup — details in the entries above.
 | Field-overlay genre (as a genre) | mercurial/redshift/kudzu |
 | nacre program as a whole (line budget + routing topology) | nacre |
 
+Rail snap + pipelining (**revenant** v0.5–v0.6, signed off 2026-10-10): a deadband capture needs `raw < DB → 0` and `raw > 1023−DB → 1023`. Without them a slow sweep parks 1..DB codes short of the end, so "0 = frozen" crept instead of freezing. Compute the capture free-running into a `_n` register (one signed subtract covers both directions) and only latch it at hsync. Fed straight into the hsync-gated enable, the compare chain became the HD HDMI critical path (74.8 MHz, 9.9 ns routing); latched, it closed at 87.5.
+
+### Parity-free 4:2:2 pair averaging from a chroma delay line
+A cheaper form of bishop's pair-averaged chroma (see that entry). The core's packer point-samples U on EVEN and V on ODD avid pixels, so emit U = mean(U[n], U[n+1]) and V = mean(V[n−1], V[n]) on EVERY pixel. Whichever pixel the packer samples then carries its pair's mean, with no phase tracking. If the colour stage already feeds a delay line (chroma separation), write the averages at its input: `uf(0) <= (u_in + u_prev)/2` lines up with `yd(k+1)` and `vb(0) <= (v_in + v_prev)/2` with `yd(k)`. The lookahead is then free and latency does not change. Per-channel separation taps read `uf(i−1)` and `vb(j)`. About 25 LC. — **revenant v1.0.0**, signed off 2026-10-10.
+
 ### Slope-scaled stroke width (uniform line weight in a scanline stamper)
 **Exemplar:** bishop (`dense-wireframe-model`, v0.3). **HW status:** timing-closed only.
 

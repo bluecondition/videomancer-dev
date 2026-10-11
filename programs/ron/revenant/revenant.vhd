@@ -1,38 +1,51 @@
--- revenant.vhd  (v0.1 — "Ghost in the Signal": analog luma-contour glitch)
+-- revenant.vhd  (v1.0.0 — "Ghost in the Signal": analog luma-contour glitch)
 --
 -- Re-draws a live source (a portrait on near-black ground) as a degrading analog
--- signal: the BRIGHT parts of the figure are redrawn by swarms of thin electric
--- contour lines that hug the volume, the DARK parts fall into true black, the very
--- brightest cores (eyes) blow out into a solid icy fill + halo, and the whole thing
+-- signal: the BRIGHT parts of the figure are redrawn by swarms of electric contour
+-- strokes that hug the volume, the DARK parts fall into true black, the very
+-- brightest cores (eyes) blow out into a solid icy fill, and the whole thing
 -- frays / fringes / jitters under a master "signal decay" fader.
 --
--- This is a STREAMING pipeline (no frame buffer): every effect is computed per
--- pixel in the coordinate + luma domain, so it needs no BRAM.  The contour lines
--- are iso-lines of a height field = (row) + (luma * displacement) + ripple + jitter;
--- because luma varies across the form, the iso-lines bow around the volume — a
--- topographic / oscilloscope redraw.  Line presence is gated by a luma key, so the
--- silhouette frays into the black exactly where the body ends.
+-- This is a STREAMING pipeline (no frame buffer, no BRAM): every effect is
+-- computed per pixel in the coordinate + luma domain.  The strokes are iso-lines
+-- of a phase field = (x phase DDA) + (luma * bend gain) + per-line offset; px
+-- dominates, so they run vertically and bow left/right around the form.  Stroke
+-- presence is gated by a luma key, so the silhouette frays into the black exactly
+-- where the body ends (S10 Invert flips the key: strokes fill the dark instead).
 --
 -- Fixed colours are stored with U/V (Cb/Cr) SWAPPED to match the Videomancer
 -- hardware output convention used by the HW-validated mondrian / c64 palettes
 -- (stored U = Cr, stored V = Cb).
 --
+-- Hardware shell (v0.5, back-ported from glitchscape / rollthebones, both
+-- HW-validated): output gated to neutral outside a generated, hsync-parity-locked
+-- avid; the sync pipe carries syncs only (no raw video rides deep); S11 Bypass is
+-- the SDK's 1-cycle passthrough; drawn luma stays within 64..900.
+--
+-- Signal quality (v0.6): a 4-tap horizontal luma box filter calms analog noise
+-- before the crush and bend amplify it (key edges / bends boiled); output chroma
+-- is 4:2:2 pair-averaged (U with the next pixel, V with the previous) so a thin
+-- stroke reaches the encoder with both axes; grain comes from xorshift32 with
+-- disjoint bit fields; strokes just below the eye threshold glow icy (halo).
+--
 -- Controls:
---   K1 Luma Key     (brightness above which line-fill begins; high = sparse)
---   K2 Line Density (CONTINUOUS contour pitch, 48 px .. 4.9 px, phase-DDA)
---   K3 Contrast     (black-point crush + gain; high = more falls to black)
+--   K1 Luma Key     (crushed luma above which strokes appear; high = sparse)
+--   K2 Line Density (CONTINUOUS stroke pitch, 48 px .. 4.9 px, phase-DDA)
+--   K3 Contrast     (black-point crush, fixed x1.5 gain; high = more falls to black)
 --   K4 Hue Rotate   (spin the violet/cyan/white tritone in 90-deg steps)
 --   K5 Drift Speed  (0 = frozen; up = a constant ONE-WAY scroll of the contour
 --                    phase, ~1 stroke every 4 s at mid travel to ~7/s wide open)
---   K6 Eye Key      (top-luma percentile that flips lines -> solid icy fill + halo)
---   S7 Warp         (contour displacement on/off; amount rides P12)
---   S8 Chroma Sep   (RGB-style U/V fringe on/off; amount rides P12)
+--   K6 Eye Glow     (0 = off; up = more of the brightest raw highlights flip to a
+--                    solid icy fill -- raw-luma threshold 960 -> 642 -- with a
+--                    halo of icy strokes in the 64 codes below it)
+--   S7 Warp         (Off = gentle base bend; On = 3x deeper bend, P12 adds more)
+--   S8 Chroma Sep   (U/V fringe, 3..15 px at HD (2..8 SD); amount rides P12)
 --   S9 Motion       (Smooth = continuous drift; Glitch = frame-tear walk)
---   S10 Windows     (cascading wireframe dialog boxes, lower-right)
---   S11 Bypass      (pass the raw input through)
---   P12 Master Chaos (HERO fader: scales warp + ripple + jitter + chroma fringe +
---                     dither + line bloom + glitch rate all at once.  0 = nearly
---                     clean stable portrait; 1 = fully possessed, fraying ghost.)
+--   S10 Invert      (strokes fill the DARK, the figure becomes a black silhouette)
+--   S11 Bypass      (SDK passthrough of the raw input)
+--   P12 Signal Decay (HERO fader, all CONTINUOUS: warp bend, ripple, row jitter,
+--                     glitch walk + rate, chroma fringe, grain and line bloom.
+--                     0 = nearly clean stable portrait; 1 = fully possessed.)
 --
 -- Author: bluecondition
 
@@ -48,43 +61,45 @@ use work.video_timing_pkg.all;
 
 architecture revenant of program_top is
 
-    -- Total datapath latency: 11 assembly stages + CHR_MAX (8) chroma-delay taps.
-    constant CHR_MAX : natural := 8;
-    constant LATENCY : natural := 11 + CHR_MAX;       -- = 19
+    -- Total datapath latency: 11 assembly stages + CHR_MAX chroma-delay taps.
+    constant CHR_MAX : natural := 16;
+    constant NSTG    : natural := 11;
+    constant LATENCY : natural := NSTG + CHR_MAX;     -- = 27, every mode
 
     constant C_MID   : unsigned(9 downto 0) := to_unsigned(512, 10);
-    constant C_BLK   : unsigned(9 downto 0) := to_unsigned( 24, 10);  -- true-black floor
+    constant C_BLACK : unsigned(9 downto 0) := to_unsigned( 64, 10);
+    -- Drawn-luma caps: full-scale Y clips RGB and kills chroma on hardware.
+    constant Y_CAP   : unsigned(9 downto 0) := to_unsigned(768, 10);  -- coloured strokes
+    constant Y_CAPW  : unsigned(9 downto 0) := to_unsigned(900, 10);  -- near-white top zone
 
     --------------------------------------------------------------------------
-    -- Electric tritone palette: black -> indigo -> violet -> blue -> cyan ->
-    -- bright cyan -> white, indexed by crushed-luma zone (top 3 bits).
+    -- Electric tritone palette: dim indigo -> violet -> blue -> cyan ->
+    -- bright cyan -> near-white, indexed by crushed-luma zone (top 3 bits).
     -- Stored U = Cr, stored V = Cb (HW convention).
     --------------------------------------------------------------------------
     type t_pal8 is array(0 to 7) of unsigned(9 downto 0);
     constant PAL_Y : t_pal8 := (
-        to_unsigned( 24,10), to_unsigned(140,10), to_unsigned(250,10), to_unsigned(330,10),
-        to_unsigned(470,10), to_unsigned(640,10), to_unsigned(820,10), to_unsigned(980,10));
+        to_unsigned( 96,10), to_unsigned(150,10), to_unsigned(240,10), to_unsigned(320,10),
+        to_unsigned(440,10), to_unsigned(580,10), to_unsigned(720,10), to_unsigned(880,10));
     constant PAL_U : t_pal8 := (   -- = Cr
-        to_unsigned(512,10), to_unsigned(560,10), to_unsigned(590,10), to_unsigned(486,10),
+        to_unsigned(536,10), to_unsigned(560,10), to_unsigned(590,10), to_unsigned(486,10),
         to_unsigned(360,10), to_unsigned(220,10), to_unsigned(330,10), to_unsigned(500,10));
     constant PAL_V : t_pal8 := (   -- = Cb
-        to_unsigned(512,10), to_unsigned(684,10), to_unsigned(720,10), to_unsigned(760,10),
+        to_unsigned(600,10), to_unsigned(684,10), to_unsigned(720,10), to_unsigned(760,10),
         to_unsigned(700,10), to_unsigned(640,10), to_unsigned(600,10), to_unsigned(520,10));
 
-    -- Eye solid-key + halo colours (icy blue-white).
-    constant EYE_Y  : unsigned(9 downto 0) := to_unsigned(990, 10);
-    constant EYE_U  : unsigned(9 downto 0) := to_unsigned(470, 10);   -- = Cr
-    constant EYE_V  : unsigned(9 downto 0) := to_unsigned(560, 10);   -- = Cb
-    constant HALO_Y : unsigned(9 downto 0) := to_unsigned(560, 10);
+    -- Eye solid-key colour (icy blue-white, kept clear of RGB clipping) and the
+    -- halo: STROKES (never a fill -- a halo fill flooded lit areas) recoloured a
+    -- stronger icy cyan where raw luma sits within HALO_W codes below the eye key.
+    constant EYE_Y  : unsigned(9 downto 0) := to_unsigned(880, 10);
+    constant EYE_U  : unsigned(9 downto 0) := to_unsigned(488, 10);   -- = Cr
+    constant EYE_V  : unsigned(9 downto 0) := to_unsigned(540, 10);   -- = Cb
+    constant HALO_Y : unsigned(9 downto 0) := to_unsigned(740, 10);
+    constant HALO_U : unsigned(9 downto 0) := to_unsigned(440, 10);   -- = Cr
+    constant HALO_V : unsigned(9 downto 0) := to_unsigned(590, 10);   -- = Cb
+    constant HALO_W : unsigned(9 downto 0) := to_unsigned( 64, 10);
 
-    -- Window-cascade stroke colour (hot cyan-white).
-    constant WIN_Y  : unsigned(9 downto 0) := to_unsigned(900, 10);
-    constant WIN_U  : unsigned(9 downto 0) := to_unsigned(300, 10);
-    constant WIN_V  : unsigned(9 downto 0) := to_unsigned(610, 10);
-
-    constant N_WIN     : natural := 5;     -- window-cascade depth
-    constant WIN_STROK : integer := 2;     -- stroke thickness (px)
-    -- Stroke duty as a fraction of the (now continuous) pitch: 3/8 of 65536.
+    -- Stroke duty as a fraction of the (continuous) pitch: 3/8 of 65536.
     constant THICK_PH  : unsigned(15 downto 0) := to_unsigned(24576, 16);
 
     function clamp10(v : signed) return unsigned is
@@ -105,19 +120,25 @@ architecture revenant of program_top is
         return resize(signed('0' & q(6 downto 0)), 9) - 64;
     end function;
 
-    -- Deadbanded pot capture.  Every QUANTISED decode (hue step, pitch shift,
-    -- chaos zone) flips whenever the pot's ADC noise straddles a step boundary,
-    -- and a flip re-draws the whole picture -> reads as the image "jumping" at
-    -- random every few seconds.  Only accept a new pot reading once it has moved
-    -- more than KNOB_DB codes away from the captured one.
+    -- Deadbanded pot capture for QUANTISED decodes (hue step, drift zone): a
+    -- decode flips whenever the pot's ADC noise straddles a step boundary, and a
+    -- flip re-draws the whole picture.  Only accept a new reading once it has
+    -- moved more than KNOB_DB codes.  Within KNOB_DB of either end the capture
+    -- snaps to the rail, so 0 / 1023 are always reachable (without the snap a
+    -- slow sweep parks 1..24 codes short -- K5 then creeps instead of freezing).
     constant KNOB_DB : unsigned(9 downto 0) := to_unsigned(24, 10);
+    constant KNOB_HI : unsigned(9 downto 0) := to_unsigned(1023 - 24, 10);
     function db_upd(cur : unsigned(9 downto 0); raw : unsigned(9 downto 0))
         return unsigned is
+        variable d : signed(10 downto 0);
     begin
-        if raw > cur then
-            if raw - cur > KNOB_DB then return raw; end if;
-        else
-            if cur - raw > KNOB_DB then return raw; end if;
+        d := signed(resize(raw, 11)) - signed(resize(cur, 11));   -- one subtract
+        if raw < KNOB_DB then
+            return to_unsigned(0, 10);
+        elsif raw > KNOB_HI then
+            return to_unsigned(1023, 10);
+        elsif d > 24 or d < -24 then
+            return raw;
         end if;
         return cur;
     end function;
@@ -131,168 +152,178 @@ architecture revenant of program_top is
     signal px        : unsigned(11 downto 0) := (others => '0');  -- x in active line
     signal py        : unsigned(10 downto 0) := (others => '0');  -- line index
     signal frame_act : std_logic := '0';
-    signal frame_cnt : unsigned(9 downto 0) := (others => '0');   -- frame counter
+    signal max_px    : unsigned(11 downto 0) := (others => '0');  -- widest line this field
+    signal s_hd      : std_logic := '1';                         -- HD-width raster
 
-    signal act_w     : unsigned(11 downto 0) := to_unsigned(1280, 12); -- active width
-    signal act_h     : unsigned(10 downto 0) := to_unsigned( 720, 11); -- active height
-    signal max_px    : unsigned(11 downto 0) := (others => '0');
-    signal max_py    : unsigned(10 downto 0) := (others => '0');
-
-    signal lfsr      : unsigned(15 downto 0) := x"ACE1";          -- free-running noise
-    signal row_jit   : signed(7 downto 0)    := (others => '0');  -- per-row sync jitter
-    signal noise_walk: signed(9 downto 0)    := (others => '0');  -- chaotic per-row drift
-    signal s_glitchframe : std_logic := '0';                     -- this frame tears (occasional)
-    signal s_glitchp : integer range 0 to 1023 := 0;             -- glitch-frame probability (P12)
+    -- xorshift32 noise (period 2^32-1).  Disjoint bit fields per use: grain 7..2,
+    -- glitch walk 18..12, glitch lottery 31..22.  (The old 1-bit-per-clock LFSR
+    -- gave neighbouring pixels shifted copies of the same bits = diagonal grain.)
+    signal xs        : unsigned(31 downto 0) := x"2545F491";
+    signal noise_walk: signed(9 downto 0)    := (others => '0');  -- glitch per-row walk
+    signal s_glitchframe : std_logic := '0';                     -- this frame tears
+    signal s_glitchp : integer range 0 to 1023 := 32;            -- glitch-frame odds /1024
     signal vs_armed  : std_logic := '0';                         -- serrated-vsync one-shot arm
-    signal db_k4, db_k5, db_p12 : unsigned(9 downto 0) := to_unsigned(512, 10);
-    -- K2 Line Density is a SMOOTH control now: a phase-DDA step, so it must be
-    -- rock-stable (1 LSB of pot noise = 1/3 of a stroke pitch of phase error by
-    -- the right-hand edge).  Glide-filter it instead of deadbanding: the >>4
-    -- truncation gives an inherent 15-code dead zone when parked, and eases
-    -- smoothly (no snap) when the knob moves.
+
+    -- SPI snapshot: keeps SPI routing out of the frame-latch cone.
+    type t_reg10 is array(0 to 7) of unsigned(9 downto 0);
+    signal reg_q     : t_reg10 := (others => (others => '0'));
+    signal db_k4, db_k5 : unsigned(9 downto 0) := to_unsigned(512, 10);
+    -- next captures, computed free-running and latched at hsync (keeps the
+    -- compare chain out of the hsync-gated enable -- it was the HD HDMI path)
+    signal db_k4_n, db_k5_n : unsigned(9 downto 0) := to_unsigned(512, 10);
+    -- K2 Line Density is a phase-DDA step: 1 LSB of pot noise = 1/3 of a stroke
+    -- pitch of phase error at the right edge.  Glide, never snap (the >>4
+    -- truncation is its own 15-code dead zone when parked).
     signal k2_f      : unsigned(9 downto 0) := to_unsigned(512, 10);
-    -- Fractional line-phase accumulator: stroke pitch = 65536 / s_step pixels,
-    -- so density is continuous instead of a power-of-two mask.
+    -- P12 feeds continuous gains whose 1-LSB steps move every contour; glide it
+    -- (>>3: 7-code dead zone, ~0.4 s to settle a full throw).
+    signal p12_f     : unsigned(9 downto 0) := to_unsigned(300, 10);
+
+    -- Fractional line-phase accumulator: stroke pitch = 65536 / s_step pixels.
     signal xacc      : unsigned(15 downto 0) := (others => '0');
-    signal row_ph    : signed(15 downto 0) := (others => '0');    -- per-line phase offset
+    signal row_ph    : unsigned(15 downto 0) := (others => '0');  -- per-line phase offset
     -- Smooth drift: a constant one-way scroll of the contour phase.  The field is
-    -- periodic in phase, so the 16-bit wrap is exactly one stroke pitch and the
-    -- scroll is seamless -- no bounce, no turnaround.
-    signal drift     : signed(15 downto 0) := (others => '0');    -- scrolling phase offset
+    -- periodic in phase, so the 16-bit wrap is exactly one stroke pitch.
+    signal drift     : unsigned(15 downto 0) := (others => '0');
     signal s_drinc   : unsigned(12 downto 0) := (others => '0');  -- phase per frame (K5)
-    signal s_smooth  : std_logic := '1';                         -- S9: smooth drift / glitch tear
-    signal trk_top   : unsigned(10 downto 0) := (others => '0');  -- tracking-band top
+    signal s_smooth  : std_logic := '1';                         -- S9: smooth / glitch
+
+    -- Free-running per-line offset chain.  py and noise_walk change only at
+    -- hsync, so every term settles a few clocks into the line and the sum is
+    -- latched into row_ph at the next hsync (a constant one-line lag).
+    signal fw_wave   : signed(8 downto 0)    := (others => '0');  -- 3-octave wobble -112..109
+    signal fw_t1, fw_t2, fw_t3 : unsigned(10 downto 0) := (others => '0');  -- row hash rounds
+    signal fw_hash   : signed(6 downto 0)    := (others => '0');  -- row hash -32..31
+    signal fw_rip    : signed(16 downto 0)   := (others => '0');  -- wobble * ck
+    signal fw_jit    : signed(14 downto 0)   := (others => '0');  -- hash * jk
+    signal fw_walk   : signed(17 downto 0)   := (others => '0');  -- glitch walk * ck
+    signal fw_s1     : unsigned(15 downto 0) := (others => '0');
+    signal fw_sum    : unsigned(15 downto 0) := (others => '0');
 
     --------------------------------------------------------------------------
     -- Per-frame latched parameters.
     --------------------------------------------------------------------------
     signal s_blk     : unsigned(9 downto 0) := (others => '0');   -- black point (crush)
-    signal s_key     : unsigned(9 downto 0) := to_unsigned(300,10);-- luma key (line start)
-    signal s_key2    : unsigned(9 downto 0) := to_unsigned(660,10);-- dense-hatch zone
+    signal s_key     : unsigned(9 downto 0) := to_unsigned(300,10);-- luma key (stroke start)
     signal s_step    : unsigned(13 downto 0) := to_unsigned(4096, 14); -- phase step / px
     signal s_hue     : unsigned(1 downto 0) := (others => '0');   -- hue rotation (x90)
-    signal s_eyek    : unsigned(9 downto 0) := to_unsigned(950,10);-- eye solid-key
-    signal s_eyeh    : unsigned(9 downto 0) := to_unsigned(880,10);-- eye halo threshold
+    signal s_eyek    : unsigned(9 downto 0) := to_unsigned(898,10);-- eye raw-luma threshold
+    signal s_halok   : unsigned(9 downto 0) := to_unsigned(834,10);-- halo raw-luma threshold
+    signal s_eye_en  : std_logic := '1';
 
-    signal s_warp    : std_logic := '0';
-    signal s_chroma  : std_logic := '0';
-    signal s_windows : std_logic := '0';
+    signal s_invert  : std_logic := '0';
     signal s_bypass  : std_logic := '0';
 
-    -- chaos-derived (P12) intensities (all shift-based — no multiplies)
-    signal s_dispsh  : integer range 6 to 9 := 6;                 -- luma->phase shift (bend depth)
-    signal s_riplsh  : integer range 0 to 3 := 0;                 -- ripple amplitude shift
-    signal s_walksh  : integer range 5 to 8 := 5;                 -- glitch-walk -> phase shift
-    signal s_jitmsk  : unsigned(5 downto 0) := (others => '0');   -- row-jitter mask
-    signal s_chroff  : integer range 0 to CHR_MAX := 0;           -- base chroma fringe (px)
-    signal s_noisem  : unsigned(5 downto 0) := (others => '0');   -- dither mask
-    signal s_trk     : std_logic := '0';                         -- tracking active
-    signal s_bright  : unsigned(9 downto 0) := (others => '0');   -- line bloom boost
-
-    -- window-cascade edges, precomputed once per frame (keeps act_w/act_h adds
-    -- out of the per-pixel path).
-    type t_wedge is array(0 to N_WIN - 1) of unsigned(11 downto 0);
-    signal win_l,  win_r  : t_wedge := (others => (others => '0'));  -- outer edges
-    signal win_t,  win_b  : t_wedge := (others => (others => '0'));
-    signal win_li, win_ri : t_wedge := (others => (others => '0'));  -- inner (stroke) edges
-    signal win_ti, win_bi : t_wedge := (others => (others => '0'));
+    -- P12-derived (continuous) gains
+    signal s_g8      : unsigned(7 downto 0) := to_unsigned(32, 8); -- luma bend: lc*g8*2 phase
+    signal s_ck      : unsigned(6 downto 0) := to_unsigned(8, 7);  -- ripple + walk gain 8..63
+    signal s_jk      : unsigned(6 downto 0) := to_unsigned(16, 7); -- row-jitter gain 16..63
+    signal s_chroff  : integer range 0 to CHR_MAX := 0;            -- chroma fringe (px)
+    signal s_noisem  : unsigned(5 downto 0) := (others => '0');    -- grain mask
+    signal s_bright  : unsigned(9 downto 0) := (others => '0');    -- stroke bloom
 
     --------------------------------------------------------------------------
-    -- Sync / video alignment pipe.
+    -- Generated avid (parity-locked start, fixed-width end) — see p_gavid.
     --------------------------------------------------------------------------
-    type t_pipe is array (natural range <>) of t_video_stream_yuv444_30b;
-    signal pipe : t_pipe(0 to LATENCY - 1);
+    signal g_hsq, g_hsr, g_avq, g_avr : std_logic := '0';
+    signal g_ph, g_arm, g_par, g_sel, g_avid : std_logic := '0';
+    signal g_pc   : unsigned(3 downto 0) := to_unsigned(8, 4);
+    signal g_rsr  : std_logic_vector(2 downto 0) := (others => '0');
+    signal g_cnt  : unsigned(11 downto 0) := (others => '0');
+    signal g_wm1  : unsigned(11 downto 0) := to_unsigned(1919, 12);
+
+    --------------------------------------------------------------------------
+    -- Sync alignment (syncs only — no raw video is carried).
+    --------------------------------------------------------------------------
+    signal hs_d, vs_d, fl_d : std_logic_vector(0 to LATENCY - 1) := (others => '1');
+    signal gv_d             : std_logic_vector(0 to LATENCY - 1) := (others => '0');
+    -- source avid for the content gate: 3 extra taps cover the luma pre-filter
+    signal av_d             : std_logic_vector(0 to NSTG + 1)    := (others => '0');
 
     --------------------------------------------------------------------------
     -- Datapath stage registers.
     --------------------------------------------------------------------------
-    -- s1: input capture + crush stage 1
+    -- s0: luma pre-filter (4-tap horizontal box) + raw-luma taps for the eye key
+    signal y_d1, y_d2, y_d3 : unsigned(9 downto 0) := (others => '0');
+    signal f_p, f_p1, f_p2  : unsigned(10 downto 0) := (others => '0');  -- pair sums
+    signal f_box     : unsigned(9 downto 0) := (others => '0');
+    -- s1: black-point subtract, eye / halo keys on RAW luma
     signal r1_lsub   : signed(11 downto 0) := (others => '0');
-    signal r1_px     : unsigned(11 downto 0) := (others => '0');
-    signal r1_py     : unsigned(10 downto 0) := (others => '0');
-    signal r1_rip    : signed(15 downto 0) := (others => '0');   -- ripple+jitter+drift phase
-    signal r1_xac    : unsigned(15 downto 0) := (others => '0'); -- line-phase DDA
-    signal r1_trk    : std_logic := '0';
-    -- s2: crush stage (black-point sub then x1.5 via shift-add)
+    signal r1_xac    : unsigned(15 downto 0) := (others => '0');
+    signal r1_rip    : unsigned(15 downto 0) := (others => '0');
+    signal r1_eye, r1_halo : std_logic := '0';
+    -- s2: crush x1.5; line offset folded into the DDA
     signal r2_lp     : signed(13 downto 0) := (others => '0');
-    signal r2_px     : unsigned(11 downto 0) := (others => '0');
-    signal r2_py     : unsigned(10 downto 0) := (others => '0');
-    signal r2_xac    : unsigned(15 downto 0) := (others => '0'); -- DDA + ripple, folded
-    signal r2_trk    : std_logic := '0';
+    signal r2_xac    : unsigned(15 downto 0) := (others => '0');
+    signal r2_eye, r2_halo : std_logic := '0';
     -- s3: crushed luma Lc
     signal r3_lc     : unsigned(9 downto 0) := (others => '0');
-    signal r3_px     : unsigned(11 downto 0) := (others => '0');
-    signal r3_py     : unsigned(10 downto 0) := (others => '0');
     signal r3_xac    : unsigned(15 downto 0) := (others => '0');
-    signal r3_trk    : std_logic := '0';
-    -- s4: contour displacement (luma >> shift, field-ready px)
-    signal r4_disp   : unsigned(15 downto 0) := (others => '0');
+    signal r3_eye, r3_halo : std_logic := '0';
+    -- s4: bend product halves
+    signal r4_plo    : unsigned(13 downto 0) := (others => '0');
+    signal r4_phi    : unsigned(13 downto 0) := (others => '0');
     signal r4_lc     : unsigned(9 downto 0) := (others => '0');
-    signal r4_px     : unsigned(11 downto 0) := (others => '0');
-    signal r4_py     : unsigned(10 downto 0) := (others => '0');
     signal r4_xac    : unsigned(15 downto 0) := (others => '0');
-    signal r4_trk    : std_logic := '0';
-    -- s5: line decision + flags
-    signal r5_line   : std_logic := '0';
-    signal r5_eye    : std_logic := '0';
-    signal r5_halo   : std_logic := '0';
-    signal r5_idx    : integer range 0 to 7 := 0;
-    signal r5_lc     : unsigned(9 downto 0) := (others => '0');
-    signal r5_px     : unsigned(11 downto 0) := (others => '0');
-    signal r5_py     : unsigned(10 downto 0) := (others => '0');
-    signal r5_trk    : std_logic := '0';
-    -- s6: palette lookup + sat products
-    signal r6_line   : std_logic := '0';
-    signal r6_eye    : std_logic := '0';
-    signal r6_halo   : std_logic := '0';
-    signal r6_py     : unsigned(10 downto 0) := (others => '0');
-    signal r6_px     : unsigned(11 downto 0) := (others => '0');
-    signal r6_trk    : std_logic := '0';
-    signal r6_paly   : unsigned(9 downto 0) := (others => '0');
-    signal r6_su     : signed(13 downto 0) := (others => '0');   -- saturated chroma delta U
-    signal r6_sv     : signed(13 downto 0) := (others => '0');   -- saturated chroma delta V
-    -- s7: hue-rotated palette chroma (line/fill colour) + carries
-    signal r7_pu, r7_pv : signed(12 downto 0) := (others => '0');
-    signal r7_paly   : unsigned(9 downto 0) := (others => '0');
-    signal r7_line, r7_eye, r7_halo, r7_trk : std_logic := '0';
-    signal r7_px     : unsigned(11 downto 0) := (others => '0');
-    signal r7_py     : unsigned(10 downto 0) := (others => '0');
-    -- s8: colour select (eye / halo / line / gap)
-    signal r8_y, r8_u, r8_v : unsigned(9 downto 0) := C_MID;
-    signal r8_trk    : std_logic := '0';
-    signal r8_px     : unsigned(11 downto 0) := (others => '0');
-    signal r8_py     : unsigned(10 downto 0) := (others => '0');
-    -- s9: analog degradation
-    signal r9_y, r9_u, r9_v : unsigned(9 downto 0) := C_MID;
-    signal r9_px     : unsigned(11 downto 0) := (others => '0');
-    signal r9_py     : unsigned(10 downto 0) := (others => '0');
-    -- s10: per-window membership bits (X/Y factored) + carried base colour
-    signal r10_y, r10_u, r10_v : unsigned(9 downto 0) := C_MID;
-    signal r10_xin, r10_xstr : std_logic_vector(N_WIN - 1 downto 0) := (others => '0');
-    signal r10_yin, r10_ystr : std_logic_vector(N_WIN - 1 downto 0) := (others => '0');
+    signal r4_eye, r4_halo : std_logic := '0';
+    -- s5: bend phase, key test, palette zone
+    signal r5_disp   : unsigned(15 downto 0) := (others => '0');
+    signal r5_xac    : unsigned(15 downto 0) := (others => '0');
+    signal r5_keyok  : std_logic := '0';
+    signal r5_idx    : unsigned(2 downto 0) := (others => '0');
+    signal r5_eye, r5_halo : std_logic := '0';
+    -- s6: stroke decision + flags
+    signal r6_line, r6_eye, r6_halo : std_logic := '0';
+    signal r6_idx    : unsigned(2 downto 0) := (others => '0');
+    -- s7: palette lookup
+    signal r7_line, r7_eye, r7_halo, r7_top : std_logic := '0';
+    signal r7_paly, r7_pu, r7_pv : unsigned(9 downto 0) := C_MID;
+    -- s8: hue rotation + bloom add
+    signal r8_line, r8_eye, r8_halo : std_logic := '0';
+    signal r8_u, r8_v : unsigned(9 downto 0) := C_MID;
+    signal r8_lsum   : unsigned(10 downto 0) := (others => '0');
+    signal r8_cap    : unsigned(9 downto 0) := Y_CAP;
+    -- s9: colour select (eye / halo / stroke / gap)
+    signal r9_y      : unsigned(9 downto 0) := C_BLACK;
+    signal r9_u, r9_v : unsigned(9 downto 0) := C_MID;
+    -- s10: analog degradation (grain)
+    signal r10_y     : unsigned(9 downto 0) := C_BLACK;
+    signal r10_u, r10_v : unsigned(9 downto 0) := C_MID;
 
-    -- chroma-separation delay lines (length 0..2*CHR_MAX).
+    -- chroma-separation delay lines (length 0..2*CHR_MAX).  The chroma lines
+    -- hold 4:2:2 PAIR-AVERAGED values: the core's packer point-samples U on even
+    -- and V on odd avid pixels, so a 1-2 px stroke on black reached the encoder
+    -- with one chroma axis (bishop: blue strokes read red/yellow).  uf(k) = mean
+    -- of pixel k's U and the NEXT pixel's; vb(k) = mean of pixel k's V and the
+    -- PREVIOUS pixel's.  Whichever pixel the packer samples then carries its
+    -- pair's average -- no parity tracking, no extra latency.  uf(k) aligns with
+    -- yd(k+1), vb(k) with yd(k).
     type t_chr is array(0 to 2*CHR_MAX) of unsigned(9 downto 0);
-    signal yd : t_chr := (others => C_MID);
-    signal ud : t_chr := (others => C_MID);
-    signal vd : t_chr := (others => C_MID);
+    signal yd : t_chr := (others => C_BLACK);
+    signal uf : t_chr := (others => C_MID);
+    signal vb : t_chr := (others => C_MID);
+    signal u_prev, v_prev : unsigned(9 downto 0) := C_MID;
 
-    signal s_io : t_video_stream_yuv444_30b;
+    signal s_io    : t_video_stream_yuv444_30b;
+    signal s_bpass : t_video_stream_yuv444_30b;   -- 1-cycle raw passthrough (S11)
 
 begin
 
     --------------------------------------------------------------------------
-    -- Raster position, animation counters, per-frame parameter latch.
+    -- Raster position, animation, per-line offsets, per-frame parameter latch.
     --------------------------------------------------------------------------
     p_position : process(clk)
         variable v_h_edge, v_v_edge : std_logic;
-        variable v_k3, v_chaos, v_chz, v_k5 : integer;
-        variable v_k2raw : unsigned(9 downto 0);
-        variable v_nw : signed(9 downto 0);
-        variable v_hash : unsigned(5 downto 0);
-        variable v_jit  : signed(7 downto 0);
+        variable v_k5    : integer;
+        variable v_k2raw, v_praw : unsigned(9 downto 0);
+        variable v_nw    : signed(9 downto 0);
         variable v_ph1, v_ph2, v_ph3 : unsigned(7 downto 0);
-        variable v_wave : signed(11 downto 0);
+        variable v_wave  : signed(11 downto 0);
+        variable v_t     : unsigned(10 downto 0);
+        variable v_pw    : unsigned(13 downto 0);
+        variable v_p7, v_p3, v_p5, v_p13 : unsigned(13 downto 0);
+        variable v_cs    : unsigned(4 downto 0);
+        variable v_x1, v_x2 : unsigned(31 downto 0);
     begin
         if rising_edge(clk) then
             prev_hsync_n <= data_in.hsync_n;
@@ -301,59 +332,66 @@ begin
             if data_in.hsync_n = '0' and prev_hsync_n = '1' then v_h_edge := '1'; end if;
             if data_in.vsync_n = '0' and prev_vsync_n = '1' then v_v_edge := '1'; end if;
 
-            -- free-running LFSR (16-bit Galois, taps 16,14,13,11)
-            if lfsr(0) = '1' then
-                lfsr <= ('0' & lfsr(15 downto 1)) xor x"B400";
-            else
-                lfsr <= '0' & lfsr(15 downto 1);
-            end if;
+            -- xorshift32 (13, 17, 5)
+            v_x1 := xs xor shift_left(xs, 13);
+            v_x2 := v_x1 xor shift_right(v_x1, 17);
+            xs   <= v_x2 xor shift_left(v_x2, 5);
 
-            -- Deadbanded pot captures, refreshed once per line (see db_upd).
-            -- Reading them here also keeps the SPI carry chains out of the vsync
-            -- decision cone.
-            if v_h_edge = '1' then
-                db_k4  <= db_upd(db_k4,  unsigned(registers_in(3)(9 downto 0)));
-                db_k5  <= db_upd(db_k5,  unsigned(registers_in(4)(9 downto 0)));
-                db_p12 <= db_upd(db_p12, unsigned(registers_in(7)(9 downto 0)));
-            end if;
+            for i in 0 to 7 loop
+                reg_q(i) <= unsigned(registers_in(i)(9 downto 0));
+            end loop;
+            db_k4_n <= db_upd(db_k4, reg_q(3));
+            db_k5_n <= db_upd(db_k5, reg_q(4));
+
+            -----------------------------------------------------------------
+            -- Per-line offset chain (free-running; see fw_* declarations).
+            -- STATIC multi-octave wobble (function of py only, so the strokes
+            -- stand still) + deterministic per-row jitter + the glitch walk.
+            -- Everything is a phase, so its amplitude is measured in stroke
+            -- periods and is independent of the density knob.
+            -----------------------------------------------------------------
+            v_ph1 := py(9 downto 2);   -- slow
+            v_ph2 := py(8 downto 1);   -- medium
+            v_ph3 := py(7 downto 0);   -- fast
+            v_wave := resize(tri(v_ph1), 12)
+                    + resize(shift_right(tri(v_ph2), 1), 12)
+                    + resize(shift_right(tri(v_ph3), 2), 12);
+            fw_wave <= resize(v_wave, 9);
+            -- Row hash: x*0x6D+0x3B; ^>>4; *0x35; ^>>5; bits 10..5 (glitchscape's
+            -- mix at 11 bits).  Spot-checked over 1080 rows: lag correlations
+            -- <= 0.12, no equal-step runs (the old py xor hash was a sawtooth).
+            fw_t1 <= resize(py * to_unsigned(16#6D#, 7), 11) + to_unsigned(16#3B#, 11);
+            fw_t2 <= fw_t1 xor shift_right(fw_t1, 4);
+            fw_t3 <= resize(fw_t2 * to_unsigned(16#35#, 6), 11);
+            v_t   := fw_t3 xor shift_right(fw_t3, 5);
+            fw_hash <= signed(resize(v_t(10 downto 5), 7)) - 32;
+            -- gains: ripple = wave*ck<<6 (0.9..6.9 periods), jitter = hash*jk<<3
+            -- (+-1/16..+-1/4 period: contours stay legible at the top), walk =
+            -- walk*ck<<2 (+-0.23..+-1.85 periods).  16-bit wrap = contour modulo.
+            fw_rip  <= fw_wave * signed('0' & s_ck);
+            fw_jit  <= fw_hash * signed('0' & s_jk);
+            fw_walk <= noise_walk * signed('0' & s_ck);
+            fw_s1   <= shift_left(unsigned(fw_rip(15 downto 0)), 6)
+                     + shift_left(unsigned(resize(fw_jit, 16)), 3);
+            fw_sum  <= fw_s1 + shift_left(unsigned(fw_walk(15 downto 0)), 2);
 
             -- Arm the once-per-field work; analog vsync SERRATES (many edges per
-            -- field) so the frame lottery / measurement latch must fire once only.
+            -- field) so the lottery / glides / drift step must fire once only.
             if data_in.avid = '1' then vs_armed <= '1'; end if;
 
-            -- X counter
+            -- X counter + per-line work
             if v_h_edge = '1' then
                 if px > max_px then max_px <= px; end if;
                 px   <= (others => '0');
                 xacc <= (others => '0');
-                -- per-row texture jitter from a DETERMINISTIC py hash: same every
-                -- frame, so the lines have a fixed jagged character that does NOT
-                -- shimmer/scroll.  Amplitude rides chaos (s_jitmsk).
-                v_hash := py(5 downto 0) xor py(10 downto 5);
-                v_jit  := signed(resize(v_hash and s_jitmsk, 8))
-                        - signed(resize('0' & s_jitmsk(5 downto 1), 8));
-                row_jit <= v_jit;
-                -- Whole per-line phase offset, built once per line (keeps the three
-                -- tri() evaluations and two barrels out of the per-pixel path).
-                -- STATIC multi-octave wobble (function of py only, so the strokes
-                -- stand still) + deterministic per-row texture jitter + the glitch
-                -- random walk + the smooth per-frame drift.  Everything is a phase,
-                -- so its amplitude is measured in stroke periods and is independent
-                -- of the density knob.
-                v_ph1 := resize(py(9 downto 2), 8);   -- slow
-                v_ph2 := resize(py(8 downto 1), 8);   -- medium
-                v_ph3 := resize(py(7 downto 0), 8);   -- fast
-                v_wave := resize(tri(v_ph1), 12)
-                        + resize(shift_right(tri(v_ph2), 1), 12)
-                        + resize(shift_right(tri(v_ph3), 2), 12);
-                row_ph <= shift_left(resize(v_wave, 16), 9 + s_riplsh)
-                        + shift_left(resize(v_jit, 16), 12)
-                        + shift_left(resize(noise_walk, 16), s_walksh)
-                        + drift;
+                row_ph <= fw_sum + drift;
+                -- deadbanded zone decodes, refreshed once per line
+                db_k4 <= db_k4_n;
+                db_k5 <= db_k5_n;
                 -- random-walk drift ONLY during a glitch frame -> mostly still, with
-                -- occasional tearing.  Otherwise noise_walk is left to settle (below).
+                -- occasional tearing.  Otherwise noise_walk settles (below).
                 if s_glitchframe = '1' and s_smooth = '0' then
-                    v_nw := noise_walk + resize(signed(resize(lfsr(6 downto 0), 8)) - 64, 10);
+                    v_nw := noise_walk + resize(signed(resize(xs(18 downto 12), 8)) - 64, 10);
                     if    v_nw >  480 then v_nw := to_signed( 480, 10);
                     elsif v_nw < -480 then v_nw := to_signed(-480, 10);
                     end if;
@@ -370,29 +408,34 @@ begin
                 frame_act <= '0';
                 if vs_armed = '1' then
                     vs_armed  <= '0';
-                    frame_cnt <= frame_cnt + 1;
                     -- K2 glide (see k2_f): ease toward the pot, never snap.
-                    v_k2raw := unsigned(registers_in(1)(9 downto 0));
+                    v_k2raw := reg_q(1);
                     if v_k2raw > k2_f then
                         k2_f <= k2_f + shift_right(v_k2raw - k2_f, 4);
                     elsif v_k2raw < k2_f then
                         k2_f <= k2_f - shift_right(k2_f - v_k2raw, 4);
                     end if;
-                    -- latch measured active size, reset trackers
-                    act_w  <= max_px;
-                    act_h  <= max_py;
+                    -- P12 glide (see p12_f).
+                    v_praw := reg_q(7);
+                    if v_praw > p12_f then
+                        p12_f <= p12_f + shift_right(v_praw - p12_f, 3);
+                    elsif v_praw < p12_f then
+                        p12_f <= p12_f - shift_right(p12_f - v_praw, 3);
+                    end if;
+                    -- measured width -> generated-avid end + HD flag
+                    if max_px > 64 then g_wm1 <= max_px - 1; end if;
+                    if max_px > 1000 then s_hd <= '1'; else s_hd <= '0'; end if;
                     max_px <= (others => '0');
-                    max_py <= (others => '0');
 
                     -- SMOOTH drift: one constant-velocity scroll of the whole contour
                     -- phase, K5 sets the rate.  It runs in BOTH motion modes, so K5
                     -- is never dead (S9 Glitch only ADDS the tearing walk on top).
-                    drift <= drift + signed(resize(s_drinc, 16));
+                    drift <= drift + resize(s_drinc, 16);
 
-                    -- GLITCH motion (S9): occasional frames get the tearing random
-                    -- walk (probability rises with P12); calm frames settle back.
+                    -- GLITCH motion (S9): some frames get the tearing random walk
+                    -- (1 in 32 at P12 = 0, ~28% at full); calm frames settle back.
                     if s_smooth = '0'
-                       and to_integer(unsigned(lfsr(9 downto 0))) < s_glitchp then
+                       and to_integer(xs(31 downto 22)) < s_glitchp then
                         s_glitchframe <= '1';
                     else
                         s_glitchframe <= '0';
@@ -405,33 +448,21 @@ begin
                 end if;
 
                 ---------------------------------------------------------------
-                -- Parameter latch (once per frame).
+                -- Parameter latch (idempotent: safe on every serration edge).
                 ---------------------------------------------------------------
-                -- K3 Contrast: black point (crush comes from a fixed x1.5 gain in
-                -- the datapath, so no multiply).
-                v_k3 := to_integer(unsigned(registers_in(2)(9 downto 2)));   -- 0..255
-                s_blk  <= to_unsigned(v_k3, 10);
-
-                -- K1 Luma Key + derived dense-hatch zone.
-                s_key  <= unsigned(registers_in(0)(9 downto 0));
-                s_key2 <= unsigned('0' & registers_in(0)(9 downto 1)) + to_unsigned(384, 10);
-
-                -- K2 Line Density: CONTINUOUS stroke pitch via the phase DDA.
-                -- step = 1365 + 12*k2  ->  pitch = 65536/step = 48.0 .. 4.9 px,
-                -- swept smoothly (no power-of-two steps).  Stroke width stays a
-                -- fixed 3/8 of the pitch for free (THICK_PH is a constant).
+                -- K3 Contrast: black point (crush is a fixed x1.5 in the datapath).
+                s_blk <= resize(reg_q(2)(9 downto 2), 10);                 -- 0..255
+                -- K1 Luma Key.
+                s_key <= reg_q(0);
+                -- K2 Line Density: step = 1365 + 12*k2 -> pitch 48.0 .. 4.9 px.
                 s_step <= to_unsigned(1365, 14)
                         + shift_left(resize(k2_f, 14), 3)
                         + shift_left(resize(k2_f, 14), 2);
-
                 -- K4 Hue rotate (90-deg steps).
                 s_hue <= db_k4(9 downto 8);
-
-                -- K5 Drift Speed: phase added to the scroll every frame, on a
-                -- pseudo-exponential ramp so the slow end keeps real travel.
-                -- 65536 phase = one stroke pitch, so at 60 Hz the pattern crawls one
-                -- stroke width every ~2 min just off zero, and flows at ~7 strokes
-                -- per second wide open.  0 is exact (the deadband snaps to the pot).
+                -- K5 Drift Speed: phase per frame on a pseudo-exponential ramp.
+                -- 65536 = one stroke pitch: ~2 min per stroke just off zero, ~7
+                -- strokes/s wide open.  0 is exact (the deadband snaps to the rail).
                 v_k5 := to_integer(db_k5);
                 case v_k5 / 256 is
                     when 0      => s_drinc <= to_unsigned(        v_k5,           13);
@@ -439,56 +470,46 @@ begin
                     when 2      => s_drinc <= to_unsigned( 768 + (v_k5 - 512) * 4, 13);
                     when others => s_drinc <= to_unsigned(1792 + (v_k5 - 768) * 24, 13);
                 end case;
-
-                -- K6 Eye solid-key + halo (a touch below).
-                s_eyek <= unsigned(registers_in(5)(9 downto 0));
-                if unsigned(registers_in(5)(9 downto 0)) > to_unsigned(80, 10) then
-                    s_eyeh <= unsigned(registers_in(5)(9 downto 0)) - to_unsigned(80, 10);
-                else
-                    s_eyeh <= (others => '0');
-                end if;
+                -- K6 Eye Glow: raw-luma threshold 960 (off for legal video) down to
+                -- 642 over the whole knob (below ~640 lit areas flood solid).
+                s_eyek <= to_unsigned(960, 10) - shift_right(reg_q(5), 2)
+                                               - shift_right(reg_q(5), 4);
+                s_halok <= to_unsigned(960, 10) - shift_right(reg_q(5), 2)
+                                                - shift_right(reg_q(5), 4) - HALO_W;
+                if reg_q(5) >= 24 then s_eye_en <= '1'; else s_eye_en <= '0'; end if;
 
                 -- toggles
-                s_warp    <= registers_in(6)(0);   -- S7
-                s_chroma  <= registers_in(6)(1);   -- S8
-                s_smooth  <= not registers_in(6)(2);   -- S9 (0 = Smooth, 1 = Glitch)
-                s_windows <= registers_in(6)(3);   -- S10
-                s_bypass  <= registers_in(6)(4);   -- S11
+                s_smooth  <= not reg_q(6)(2);    -- S9 (0 = Smooth, 1 = Glitch)
+                s_invert  <= reg_q(6)(3);        -- S10
+                s_bypass  <= reg_q(6)(4);        -- S11
 
-                -- P12 master chaos -> per-effect intensities (all shift-based).
-                v_chaos := to_integer(unsigned(registers_in(7)(9 downto 0)));   -- 0..1023
-                v_chz   := to_integer(db_p12);                                  -- deadbanded
-                -- Contour curvature is ALWAYS on (lines must follow the luma); a base
-                -- of luma>>6 (~16 px max bend), with Warp+chaos pushing it stronger.
-                if registers_in(6)(0) = '1' then
-                    s_dispsh <= 6 + v_chz / 256;                               -- 6..9 (more chaos = bigger bend)
+                -- P12 Signal Decay -> continuous gains (glided fader).
+                v_pw  := resize(p12_f, 14);
+                -- S7 Warp: bend phase = lc*g8*2.  Off = 64/code (1 period per full
+                -- luma swing); On = 192..510/code (3..8 periods), P12 riding it.
+                v_p5 := shift_left(v_pw, 2) + v_pw;                         -- x5
+                if reg_q(6)(0) = '1' then
+                    s_g8 <= to_unsigned(96, 8) + resize(v_p5(13 downto 5), 8);  -- 96..255
                 else
-                    s_dispsh <= 6;                                             -- base curvature
+                    s_g8 <= to_unsigned(32, 8);
                 end if;
-                s_riplsh <= v_chz / 256;                                       -- 0..3
-                s_walksh <= 5 + v_chz / 256;                                   -- 5..8
-                s_jitmsk <= to_unsigned((2 ** (2 + v_chz / 256)) - 1, 6);      -- 3..31
-                if registers_in(6)(1) = '1' then
-                    s_chroff <= 1 + v_chz / 128;                               -- 1..8
-                else
+                v_p7 := shift_left(v_pw, 3) - v_pw;                         -- x7
+                s_ck <= to_unsigned(8, 7) + resize(v_p7(13 downto 7), 7);    -- 8..63
+                v_p3 := shift_left(v_pw, 1) + v_pw;                         -- x3
+                s_jk <= to_unsigned(16, 7) + resize(v_p3(13 downto 6), 7);   -- 16..63
+                -- S8 Chroma Sep: 3..15 px at HD, halved (2..8) at SD.
+                v_p13 := shift_left(v_pw, 3) + shift_left(v_pw, 2) + v_pw;  -- x13
+                v_cs  := to_unsigned(3, 5) + resize(v_p13(13 downto 10), 5);
+                if reg_q(6)(1) = '0' then
                     s_chroff <= 0;
+                elsif s_hd = '1' then
+                    s_chroff <= to_integer(v_cs);
+                else
+                    s_chroff <= to_integer(shift_right(v_cs + 1, 1));
                 end if;
-                s_noisem <= to_unsigned(v_chaos / 32, 6);                      -- 0..31
-                s_glitchp <= v_chaos / 4;                                       -- glitch-frame prob (0..255/1024)
-                s_bright <= to_unsigned(v_chaos / 4, 10);                      -- 0..255
-
-                -- Precompute window-cascade edges from measured active size, so
-                -- the per-pixel overlay only does compares (no act_w/act_h adds).
-                for k in 0 to N_WIN - 1 loop
-                    win_l(k)  <= act_w - to_unsigned(360, 12) + to_unsigned(k*46, 12);
-                    win_r(k)  <= act_w - to_unsigned( 40, 12) + to_unsigned(k*46, 12);
-                    win_t(k)  <= ('0' & act_h) - to_unsigned(300, 12) + to_unsigned(k*38, 12);
-                    win_b(k)  <= ('0' & act_h) - to_unsigned( 24, 12) + to_unsigned(k*38, 12);
-                    win_li(k) <= act_w - to_unsigned(360, 12) + to_unsigned(k*46 + WIN_STROK, 12);
-                    win_ri(k) <= act_w - to_unsigned( 42, 12) + to_unsigned(k*46, 12);  -- 40+stroke
-                    win_ti(k) <= ('0' & act_h) - to_unsigned(300, 12) + to_unsigned(k*38 + WIN_STROK, 12);
-                    win_bi(k) <= ('0' & act_h) - to_unsigned( 26, 12) + to_unsigned(k*38, 12);  -- 24+stroke
-                end loop;
+                s_noisem  <= resize(p12_f(9 downto 5), 6);                  -- grain 0..31
+                s_glitchp <= 32 + to_integer(p12_f(9 downto 2));            -- 32..287 /1024
+                s_bright  <= resize(p12_f(9 downto 2), 10);                 -- bloom 0..255
 
             elsif data_in.avid = '1' and frame_act = '0' then
                 frame_act <= '1';
@@ -500,224 +521,283 @@ begin
     end process p_position;
 
     --------------------------------------------------------------------------
+    -- Clean avid (cubist/aurora/glitchscape recipe).  The encoders get no
+    -- data-enable and pair Cb/Cr by counting from hsync, so an avid that wanders
+    -- a clock against hsync swaps U/V for that line.  g_ph is this line's
+    -- hsync->avid-rise parity, g_par the voted usual parity; an off-parity line
+    -- starts one clock later.  Ends after the field-latched width, or at hsync.
+    --------------------------------------------------------------------------
+    p_gavid : process(clk)
+    begin
+        if rising_edge(clk) then
+            g_hsq <= data_in.hsync_n;
+            g_hsr <= g_hsq and not data_in.hsync_n;    -- hsync_n falling
+            g_avq <= data_in.avid;
+            g_avr <= data_in.avid and not g_avq;       -- avid rising
+
+            if g_hsr = '1' then
+                g_ph  <= '0';
+                g_arm <= '1';
+            else
+                g_ph <= not g_ph;
+            end if;
+            g_rsr <= g_rsr(1 downto 0) & '0';
+            if g_avr = '1' and g_arm = '1' then
+                g_arm    <= '0';
+                g_rsr(0) <= '1';
+                g_sel    <= g_ph xor g_par;
+                if g_ph = '1' then
+                    if g_pc /= 15 then g_pc <= g_pc + 1; end if;
+                else
+                    if g_pc /= 0 then g_pc <= g_pc - 1; end if;
+                end if;
+            end if;
+            if g_pc = 15 then g_par <= '1';
+            elsif g_pc = 0 then g_par <= '0'; end if;
+
+            if (g_sel = '0' and g_rsr(1) = '1') or (g_sel = '1' and g_rsr(2) = '1') then
+                g_avid <= '1';
+                g_cnt  <= (others => '0');
+            elsif g_avid = '1' then
+                g_cnt <= g_cnt + 1;
+                if g_cnt = g_wm1 or g_hsr = '1' then
+                    g_avid <= '0';
+                end if;
+            end if;
+        end if;
+    end process p_gavid;
+
+    --------------------------------------------------------------------------
     -- Main datapath.
     --------------------------------------------------------------------------
     p_pipe : process(clk)
         variable v_ph    : unsigned(15 downto 0);
-        variable v_lc    : unsigned(9 downto 0);
-        variable v_lp    : signed(13 downto 0);
-        variable v_idx   : integer range 0 to 7;
-        variable v_du, v_dv : signed(11 downto 0);   -- raw palette chroma deltas
-        variable v_su, v_sv : signed(13 downto 0);   -- saturation-scaled deltas
-        variable v_y     : unsigned(9 downto 0);
-        variable v_u, v_v : signed(12 downto 0);
-        variable v_cu, v_cv : signed(12 downto 0);
+        variable v_bp    : unsigned(15 downto 0);
+        variable v_cu, v_cv : unsigned(10 downto 0);
+        variable v_u, v_v   : unsigned(10 downto 0);
         variable v_dimy  : signed(12 downto 0);
         variable v_noise : signed(7 downto 0);
-        variable v_anystroke : boolean;
+        variable v_box   : unsigned(11 downto 0);
+        variable v_gy, v_gu, v_gv : unsigned(9 downto 0);
+        variable v_sum   : unsigned(10 downto 0);
     begin
         if rising_edge(clk) then
-            -- sync/video delay line
-            pipe(0) <= data_in;
-            for i in 1 to LATENCY - 1 loop pipe(i) <= pipe(i - 1); end loop;
+            -- sync delay line (the output avid is the generated one)
+            hs_d(0) <= data_in.hsync_n;
+            vs_d(0) <= data_in.vsync_n;
+            fl_d(0) <= data_in.field_n;
+            gv_d(0) <= g_avid;
+            for i in 1 to LATENCY - 1 loop
+                hs_d(i) <= hs_d(i - 1);
+                vs_d(i) <= vs_d(i - 1);
+                fl_d(i) <= fl_d(i - 1);
+                gv_d(i) <= gv_d(i - 1);
+            end loop;
+            -- source avid for the content gate (s11).  r1 holds the pixel 3 clocks
+            -- behind data_in (luma pre-filter), so the gate reads 3 taps deeper.
+            av_d(0) <= data_in.avid;
+            for i in 1 to NSTG + 1 loop av_d(i) <= av_d(i - 1); end loop;
 
             -----------------------------------------------------------------
-            -- s1: capture + crush stage 1 (subtract black point) + ripple.
+            -- s0: luma pre-filter.  Analog source noise is amplified x1.5 by the
+            -- crush and by up to 510 phase/code in the bend, so key edges and
+            -- bends crawled on a still picture; a 4-tap horizontal box halves it.
+            -- Box = pixels t-1..t-4 of the s1 sample; the 1.5 px whole-picture
+            -- shift is invisible (the stroke DDA phase is arbitrary).
             -----------------------------------------------------------------
-            r1_lsub <= signed(resize(unsigned(data_in.y), 12)) - signed(resize(s_blk, 12));
-            r1_px <= px; r1_py <= py;
+            y_d1  <= unsigned(data_in.y);
+            y_d2  <= y_d1;
+            y_d3  <= y_d2;
+            f_p   <= resize(unsigned(data_in.y), 11) + resize(y_d1, 11);
+            f_p1  <= f_p;
+            f_p2  <= f_p1;
+            v_box := resize(f_p, 12) + resize(f_p2, 12);
+            f_box <= v_box(11 downto 2);
 
-            -- The whole ripple/jitter/drift offset is a per-line constant now
-            -- (built in p_position), so s1 just samples it alongside the DDA.
+            -----------------------------------------------------------------
+            -- s1: black-point subtract; eye + halo keys on RAW luma (the crush
+            -- clamps whole lit areas to full Lc, so only raw luma can tell a true
+            -- specular highlight).  y_d3 lines up with the box centre.  Raw video
+            -- goes no deeper than this stage.
+            -----------------------------------------------------------------
+            r1_lsub <= signed(resize(f_box, 12)) - signed(resize(s_blk, 12));
+            r1_eye <= '0'; r1_halo <= '0';
+            if s_eye_en = '1' then
+                if y_d3 >= s_eyek then
+                    r1_eye <= '1';
+                elsif y_d3 >= s_halok then
+                    r1_halo <= '1';
+                end if;
+            end if;
             r1_xac <= xacc;
             r1_rip <= row_ph;
 
-            r1_trk <= '0';   -- tracking band removed (no full-width horizontal bands)
-
             -----------------------------------------------------------------
-            -- s2: crush — fixed x1.5 gain via shift-add (steepens contrast).
+            -- s2: crush — fixed x1.5 gain via shift-add; fold in the line offset.
             -----------------------------------------------------------------
-            r2_lp <= resize(r1_lsub, 14) + resize(shift_right(r1_lsub, 1), 14);
-            r2_xac <= r1_xac + unsigned(r1_rip);   -- fold the line offset into the DDA
-            r2_px <= r1_px; r2_py <= r1_py; r2_trk <= r1_trk;
+            r2_lp  <= resize(r1_lsub, 14) + resize(shift_right(r1_lsub, 1), 14);
+            r2_xac <= r1_xac + r1_rip;
+            r2_eye <= r1_eye; r2_halo <= r1_halo;
 
             -----------------------------------------------------------------
             -- s3: crushed luma Lc.
             -----------------------------------------------------------------
-            v_lp := r2_lp;
-            v_lc := clamp10(resize(v_lp, 13));
-            r3_lc <= v_lc;
+            r3_lc  <= clamp10(resize(r2_lp, 13));
             r3_xac <= r2_xac;
-            r3_px <= r2_px; r3_py <= r2_py; r3_trk <= r2_trk;
+            r3_eye <= r2_eye; r3_halo <= r2_halo;
 
             -----------------------------------------------------------------
-            -- s4: contour displacement = luma >> shift (no multiply).
+            -- s4: luma bend = lc * g8, as two 10x4 halves (own stage).
             -----------------------------------------------------------------
-            -- Bend depth in PHASE units: <<6 is one stroke period of bow per full
-            -- luma swing, <<9 is eight.  16-bit wrap IS the contour modulo.
-            r4_disp <= shift_left(resize(r3_lc, 16), s_dispsh);
-            r4_lc <= r3_lc;
+            r4_plo <= r3_lc * s_g8(3 downto 0);
+            r4_phi <= r3_lc * s_g8(7 downto 4);
+            r4_lc  <= r3_lc;
             r4_xac <= r3_xac;
-            r4_px <= r3_px; r4_py <= r3_py; r4_trk <= r3_trk;
+            r4_eye <= r3_eye; r4_halo <= r3_halo;
 
             -----------------------------------------------------------------
-            -- s5: contour-line decision, luma key gate, eye / halo flags.
-            -- Height field = row + (luma*disp) + ripple/jitter.  Iso-lines of
-            -- this field bow around the form -> topographic redraw.
+            -- s5: bend phase (lc*g8*2; the 16-bit wrap IS the contour modulo),
+            -- key test (S10 Invert flips it) and palette zone (Invert flips the
+            -- ramp so the dark field gets the bright end).
             -----------------------------------------------------------------
-            -- VERTICAL contour lines: field is dominated by px, so iso-lines run
-            -- vertically and bow left/right as the luma (r4_disp) changes down the
-            -- column -> thick vertical strokes that follow the form's curvature,
-            -- with the y-dependent wave + row jitter adding chaotic wobble/noise.
-            v_ph := r4_xac + r4_disp;   -- 16-bit wrap = the contour modulo
-
-            -- Eye solid-key is gated on RAW luma (pipe(3).y, aligned with r4) so ONLY
-            -- genuinely bright specular highlights flip to solid.  The contrast crush
-            -- pushes whole lit areas to full Lc, which must still render as vertical
-            -- lines (not a solid block), so the key can't use Lc here.
-            r5_line <= '0'; r5_eye <= '0'; r5_halo <= '0';
-            if unsigned(pipe(3).y) >= s_eyek then
-                r5_eye  <= '1';
-            elsif r4_lc >= s_key and v_ph < THICK_PH then
-                r5_line <= '1';
+            v_bp    := shift_left(resize(r4_phi, 16), 4) + resize(r4_plo, 16);
+            r5_disp <= shift_left(v_bp, 1);
+            r5_xac  <= r4_xac;
+            r5_eye  <= r4_eye; r5_halo <= r4_halo;
+            if (r4_lc >= s_key) xor (s_invert = '1') then
+                r5_keyok <= '1';
+            else
+                r5_keyok <= '0';
+            end if;
+            if s_invert = '1' then
+                r5_idx <= not r4_lc(9 downto 7);
+            else
+                r5_idx <= r4_lc(9 downto 7);
             end if;
 
-            r5_idx <= to_integer(r4_lc(9 downto 7));
-            r5_lc  <= r4_lc;
-            r5_px  <= r4_px; r5_py <= r4_py; r5_trk <= r4_trk;
+            -----------------------------------------------------------------
+            -- s6: stroke decision.  Field = x phase + bend + line offset; px
+            -- dominates, so strokes run vertically and bow around the form.
+            -----------------------------------------------------------------
+            v_ph := r5_xac + r5_disp;
+            r6_line <= '0'; r6_eye <= '0'; r6_halo <= '0';
+            if r5_eye = '1' then
+                r6_eye <= '1';
+            elsif r5_keyok = '1' and v_ph < THICK_PH then
+                if r5_halo = '1' then
+                    r6_halo <= '1';     -- icy stroke just below the eye key
+                else
+                    r6_line <= '1';
+                end if;
+            end if;
+            r6_idx <= r5_idx;
 
             -----------------------------------------------------------------
-            -- s6: palette lookup (line colour by luma zone) + sat products.
-            -- Hue rotate handled at assembly via swap/negate of the products.
+            -- s7: palette lookup (stroke colour by luma zone).
             -----------------------------------------------------------------
-            v_idx := r5_idx;
-            r6_paly <= PAL_Y(v_idx);
-            -- saturation via shift-add scale of the chroma delta about mid.
-            v_du := signed(resize(PAL_U(v_idx), 12)) - 512;
-            v_dv := signed(resize(PAL_V(v_idx), 12)) - 512;
-            -- Saturation is fixed at the palette's native level (K5 is now Drift
-            -- Speed); the scaler stays as a plain widen.
-            v_su := resize(v_du, 14);
-            v_sv := resize(v_dv, 14);
-            r6_su <= v_su; r6_sv <= v_sv;
-            r6_line <= r5_line; r6_eye <= r5_eye; r6_halo <= r5_halo;
-            r6_px <= r5_px; r6_py <= r5_py; r6_trk <= r5_trk;
+            r7_paly <= PAL_Y(to_integer(r6_idx));
+            r7_pu   <= PAL_U(to_integer(r6_idx));
+            r7_pv   <= PAL_V(to_integer(r6_idx));
+            if r6_idx = 7 then r7_top <= '1'; else r7_top <= '0'; end if;
+            r7_line <= r6_line; r7_eye <= r6_eye; r7_halo <= r6_halo;
 
             -----------------------------------------------------------------
-            -- s7: hue rotation of the saturated palette chroma (90-deg steps).
+            -- s8: hue rotation (90-deg steps about 512) + bloom add.
             -----------------------------------------------------------------
-            v_cu := to_signed(512, 13) + resize(r6_su, 13);
-            v_cv := to_signed(512, 13) + resize(r6_sv, 13);
+            v_cu := resize(r7_pu, 11);
+            v_cv := resize(r7_pv, 11);
             case to_integer(s_hue) is
-                when 1 =>
-                    v_u := to_signed(512,13) - (v_cv - 512);
-                    v_v := to_signed(512,13) + (v_cu - 512);
-                when 2 =>
-                    v_u := to_signed(512,13) - (v_cu - 512);
-                    v_v := to_signed(512,13) - (v_cv - 512);
-                when 3 =>
-                    v_u := to_signed(512,13) + (v_cv - 512);
-                    v_v := to_signed(512,13) - (v_cu - 512);
-                when others =>
-                    v_u := v_cu; v_v := v_cv;
+                when 1 =>      v_u := 1024 - v_cv; v_v := v_cu;
+                when 2 =>      v_u := 1024 - v_cu; v_v := 1024 - v_cv;
+                when 3 =>      v_u := v_cv;        v_v := 1024 - v_cu;
+                when others => v_u := v_cu;        v_v := v_cv;
             end case;
-            r7_pu <= v_u; r7_pv <= v_v;
-            r7_paly <= r6_paly;
-            r7_line <= r6_line; r7_eye <= r6_eye; r7_halo <= r6_halo; r7_trk <= r6_trk;
-            r7_px <= r6_px; r7_py <= r6_py;
+            r8_u <= v_u(9 downto 0);
+            r8_v <= v_v(9 downto 0);
+            r8_lsum <= resize(r7_paly, 11) + resize(s_bright, 11);
+            if r7_top = '1' then r8_cap <= Y_CAPW; else r8_cap <= Y_CAP; end if;
+            r8_line <= r7_line; r8_eye <= r7_eye; r8_halo <= r7_halo;
 
             -----------------------------------------------------------------
-            -- s8: colour select (eye solid / halo / contour line / black gap).
+            -- s9: colour select (eye solid / halo / stroke / black gap).  Bloom
+            -- brightens strokes up to the cap instead of clipping.
             -----------------------------------------------------------------
-            if r7_eye = '1' then
-                r8_y <= EYE_Y;  r8_u <= EYE_U; r8_v <= EYE_V;
-            elsif r7_halo = '1' then
-                r8_y <= HALO_Y; r8_u <= EYE_U; r8_v <= EYE_V;   -- icy halo, dim luma
-            elsif r7_line = '1' then
-                r8_y <= clamp10(signed(resize(r7_paly,13)) + signed(resize(s_bright,13)));
-                r8_u <= clamp10(r7_pu); r8_v <= clamp10(r7_pv);
+            if r8_eye = '1' then
+                r9_y <= EYE_Y;  r9_u <= EYE_U; r9_v <= EYE_V;
+            elsif r8_halo = '1' then
+                r9_y <= HALO_Y; r9_u <= HALO_U; r9_v <= HALO_V;
+            elsif r8_line = '1' then
+                if r8_lsum > resize(r8_cap, 11) then
+                    r9_y <= r8_cap;
+                else
+                    r9_y <= r8_lsum(9 downto 0);
+                end if;
+                r9_u <= r8_u; r9_v <= r8_v;
             else
-                r8_y <= C_BLK;  r8_u <= C_MID; r8_v <= C_MID;    -- true black gap
+                r9_y <= C_BLACK; r9_u <= C_MID; r9_v <= C_MID;
             end if;
-            r8_trk <= r7_trk; r8_px <= r7_px; r8_py <= r7_py;
 
             -----------------------------------------------------------------
-            -- s9: analog degradation — fine luma dither only (scanline dimming
-            -- removed: it striped solid regions into horizontal bars).
+            -- s10: analog degradation — fine luma grain (floored at black).
             -----------------------------------------------------------------
-            v_dimy := signed(resize(r8_y,13));
-            v_noise := signed(resize(lfsr(5 downto 0) and s_noisem, 8))
+            v_noise := signed(resize(xs(7 downto 2) and s_noisem, 8))
                      - signed(resize('0' & s_noisem(5 downto 1), 8));
-            v_dimy := v_dimy + resize(v_noise, 13);
-            r9_y <= clamp10(v_dimy);
-            r9_u <= r8_u; r9_v <= r8_v;
-            r9_px <= r8_px; r9_py <= r8_py;
-
-            -----------------------------------------------------------------
-            -- s10: window-cascade membership.  A rectangle test factorises into
-            -- independent X-only and Y-only comparisons, so compute all per-window
-            -- bits here (short parallel compares) and just AND/OR them next stage.
-            -----------------------------------------------------------------
-            r10_y <= r9_y; r10_u <= r9_u; r10_v <= r9_v;
-            for k in 0 to N_WIN - 1 loop
-                if (r9_px >= win_l(k)) and (r9_px <= win_r(k)) then
-                    r10_xin(k) <= '1'; else r10_xin(k) <= '0'; end if;
-                if (r9_px <= win_li(k)) or (r9_px >= win_ri(k)) then
-                    r10_xstr(k) <= '1'; else r10_xstr(k) <= '0'; end if;
-                if (resize(r9_py,12) >= win_t(k)) and (resize(r9_py,12) <= win_b(k)) then
-                    r10_yin(k) <= '1'; else r10_yin(k) <= '0'; end if;
-                if (resize(r9_py,12) <= win_ti(k)) or (resize(r9_py,12) >= win_bi(k)) then
-                    r10_ystr(k) <= '1'; else r10_ystr(k) <= '0'; end if;
-            end loop;
-
-            -----------------------------------------------------------------
-            -- s11: combine membership -> stroke, overlay, and feed chroma-delay.
-            -- chroma sep: Y centred, U pulled ahead, V pushed back -> opposite
-            -- cyan/magenta fringes.  Fixed total delay CHR_MAX.
-            -----------------------------------------------------------------
-            v_anystroke := false;
-            if s_windows = '1' then
-                for k in 0 to N_WIN - 1 loop
-                    if r10_xin(k) = '1' and r10_yin(k) = '1'
-                       and (r10_xstr(k) = '1' or r10_ystr(k) = '1') then
-                        v_anystroke := true;
-                    end if;
-                end loop;
-            end if;
-            if v_anystroke then
-                yd(0) <= WIN_Y; ud(0) <= WIN_U; vd(0) <= WIN_V;
+            v_dimy := signed(resize(r9_y, 13)) + resize(v_noise, 13);
+            if v_dimy < 64 then
+                r10_y <= C_BLACK;
+            elsif v_dimy > 1023 then
+                r10_y <= to_unsigned(1023, 10);
             else
-                yd(0) <= r10_y; ud(0) <= r10_u; vd(0) <= r10_v;
+                r10_y <= unsigned(v_dimy(9 downto 0));
             end if;
+            r10_u <= r9_u; r10_v <= r9_v;
+
+            -----------------------------------------------------------------
+            -- s11: content gate (source avid) -> 4:2:2 pair averages -> chroma-
+            -- separation delay lines.  Outside the source line the fringe taps
+            -- pull neutral.
+            -----------------------------------------------------------------
+            if av_d(NSTG + 1) = '1' then
+                v_gy := r10_y; v_gu := r10_u; v_gv := r10_v;
+            else
+                v_gy := C_BLACK; v_gu := C_MID; v_gv := C_MID;
+            end if;
+            yd(0)  <= v_gy;
+            u_prev <= v_gu;
+            v_prev <= v_gv;
+            v_sum  := resize(v_gu, 11) + resize(u_prev, 11);   -- u_prev's pixel + next
+            uf(0)  <= v_sum(10 downto 1);
+            v_sum  := resize(v_gv, 11) + resize(v_prev, 11);   -- this pixel + previous
+            vb(0)  <= v_sum(10 downto 1);
             for i in 1 to 2*CHR_MAX loop
-                yd(i) <= yd(i-1); ud(i) <= ud(i-1); vd(i) <= vd(i-1);
+                yd(i) <= yd(i-1); uf(i) <= uf(i-1); vb(i) <= vb(i-1);
             end loop;
 
             -----------------------------------------------------------------
-            -- output: bypass passes raw input (delayed to match LATENCY).
+            -- output: chroma sep pulls U ahead / pushes V back.  Blanking gate:
+            -- neutral outside the generated active window.
             -----------------------------------------------------------------
-            if s_bypass = '1' then
-                s_io.y <= pipe(LATENCY - 1).y;
-                s_io.u <= pipe(LATENCY - 1).u;
-                s_io.v <= pipe(LATENCY - 1).v;
-            else
+            if gv_d(LATENCY - 1) = '1' then
                 s_io.y <= std_logic_vector(yd(CHR_MAX));
-                s_io.u <= std_logic_vector(ud(CHR_MAX - s_chroff));
-                s_io.v <= std_logic_vector(vd(CHR_MAX + s_chroff));
+                s_io.u <= std_logic_vector(uf(CHR_MAX - 1 - s_chroff));   -- = yd(CHR_MAX - s_chroff)
+                s_io.v <= std_logic_vector(vb(CHR_MAX + s_chroff));
+            else
+                s_io.y <= std_logic_vector(C_BLACK);
+                s_io.u <= std_logic_vector(C_MID);
+                s_io.v <= std_logic_vector(C_MID);
             end if;
-            s_io.hsync_n <= pipe(LATENCY - 1).hsync_n;
-            s_io.vsync_n <= pipe(LATENCY - 1).vsync_n;
-            s_io.avid    <= pipe(LATENCY - 1).avid;
-            s_io.field_n <= pipe(LATENCY - 1).field_n;
+            s_io.hsync_n <= hs_d(LATENCY - 1);
+            s_io.vsync_n <= vs_d(LATENCY - 1);
+            s_io.avid    <= gv_d(LATENCY - 1);
+            s_io.field_n <= fl_d(LATENCY - 1);
+
+            -- S11: 1-cycle raw forward, exactly SDK passthru (data_out <= data_in)
+            s_bpass <= data_in;
         end if;
     end process p_pipe;
 
-    data_out.y       <= s_io.y;
-    data_out.u       <= s_io.u;
-    data_out.v       <= s_io.v;
-    data_out.hsync_n <= s_io.hsync_n;
-    data_out.vsync_n <= s_io.vsync_n;
-    data_out.avid    <= s_io.avid;
-    data_out.field_n <= s_io.field_n;
+    -- S11 bypass = SDK passthru (raw input + its own syncs, 1 cycle); a deep
+    -- raw-video path read green + noisy on HD HDMI hardware (rollthebones).
+    data_out <= s_bpass when s_bypass = '1' else s_io;
 
 end architecture revenant;
