@@ -21,7 +21,7 @@ package oubliette_sprites_pkg is
     constant C_S_BAT        : integer := 7;
     constant C_S_ORC        : integer := 8;
     constant C_S_WRAITH     : integer := 9;
-    constant C_S_CHEST      : integer := 10;
+    constant C_S_DRAGON     : integer := 10;
 
     type t_spr_rom is array (0 to C_NSPR - 1, 0 to C_SPR_H - 1)
         of std_logic_vector(C_SPR_W - 1 downto 0);
@@ -38,11 +38,11 @@ package oubliette_sprites_pkg is
          7 => (x"0000", x"0000", x"43C2", x"67E6", x"77EE", x"7FFE", x"5BDA", x"0BD0", x"05A0", x"03C0", x"0000", x"0000", x"0000", x"0000", x"0000", x"0000"),  -- BAT
          8 => (x"03C0", x"0420", x"05A0", x"07E0", x"03C0", x"1FF8", x"2BD4", x"2BD4", x"0FF0", x"0420", x"0C30", x"0810", x"1818", x"1008", x"0000", x"0000"),  -- ORC
          9 => (x"0180", x"03C0", x"05A0", x"0420", x"0DB0", x"0810", x"13C8", x"17E8", x"17E8", x"17E8", x"0BD0", x"0AA0", x"0540", x"0280", x"0000", x"0000"),  -- WRAITH
-        10 => (x"0000", x"0000", x"1FF8", x"2004", x"2FF4", x"3FFC", x"27E4", x"2814", x"2BD4", x"2814", x"3FFC", x"2004", x"1FF8", x"0000", x"0000", x"0000")   -- CHEST
+        10 => (x"8001", x"C423", x"E667", x"F7EF", x"F5AF", x"FBDF", x"7BDE", x"3A5C", x"03C0", x"07E0", x"0E70", x"0DB0", x"1998", x"1188", x"300C", x"0000")   -- DRAGON
     );
 
-    constant C_SPR_Y : t_spal := (442, 498, 613, 843, 497, 862, 668, 509, 525, 819, 727);
-    constant C_SPR_U : t_spal := (798, 414, 332, 583, 615, 527, 351, 606, 409, 429, 651);
-    constant C_SPR_V : t_spal := (387, 763, 393, 308, 401, 479, 339, 689, 386, 559, 238);
+    constant C_SPR_Y : t_spal := (442, 490, 589, 702, 490, 709, 636, 500, 514, 694, 500);
+    constant C_SPR_U : t_spal := (762, 426, 355, 567, 602, 523, 371, 595, 422, 446, 771);
+    constant C_SPR_V : t_spal := (403, 732, 407, 354, 415, 486, 361, 667, 401, 549, 657);
 
 end package oubliette_sprites_pkg;
