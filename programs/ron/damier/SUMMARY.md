@@ -1,12 +1,11 @@
-# DAMIER (v0.4.4-diag — op-art checkerboard engine)
+# DAMIER (v0.4.5 — op-art checkerboard engine)
 
-**STATUS: HW-iterating, DIAGNOSTIC BUILD out.** Ron on v0.4.3: "the slider is
-better and appearance is great, but getting those thick bright bars that
-start at various points horizontally". He is firm that the cause is in the
-program, not the cable or display. v0.4.4-diag repurposes S10 (normally
-Zigzag) as a "bar guard" A/B switch on one fixed placement. When the A/B
-result is in: make the guard permanent (or drop it), restore S10 Zigzag and
-its TOML labels, then capture presets with `./capture_preset.sh`.
+**STATUS: FINAL except presets (signed off by Ron on hardware, 2026-10-11:
+"OK I think we can mark damier as completed in the report").** Marked
+Completed in the Program Shelf report. Remaining: capture real presets with
+`./capture_preset.sh`. The HD seeds are hand-installed, so for a
+preset-only TOML change, regenerate `program_config.bin` and repack; never
+run a full rebuild.
 
 DAMIER (French for checkerboard; Vasarely's word for his grids) is a
 synthesis program loosely descended from GILT's Kiss robe. A clean
@@ -94,16 +93,27 @@ the solo seeds and repack.
 
 ## Status
 
-v0.4.4-diag: S10 = bar guard. Off = the v0.4.3 picture at the same latency;
-on = a [1 2 1]/4 horizontal smoothing on Y, U and V, plus luma scaled toward
-black (64 + 13/16 (y − 64), white about 775). Zigzag is forced off.
-Pin-skew-screened HD seeds: HD HDMI router2 s24 (91.1 MHz, HSYNC +1.70, data
-−3.26..−1.18, the cleanest DAMIER placement yet), HD Analog s4 (89.3,
-+0.97 / −0.65), HD Dual s6 (92.0, −2.28 / −1.29). ~5,800 LC. Builder bins
-in `.damier_work/v044_builder/`; v0.4.3 sources and vmprog in
-`.damier_work/v043_shipped/`.
+v0.4.5: output conditioning always on. A [1 2 1]/4 horizontal smoothing on
+Y/U/V, plus luma 64 + 13/16 (y − 64) (white about 775), sits before the
+blanking gate (+2 stages over v0.4.3). S10 is Zigzag again. ~5,810 LC, all 6
+on seed 1 in the build; HD placements pin-skew screened and hand-installed:
+
+| Config | Seed | Fmax (MHz) | HDMI hs-clk / data (ns) |
+|---|---|---|---|
+| HD HDMI | router2 **s3** | 89.45 | +1.14 / −3.48..−1.26 |
+| HD Analog | router2 **s4** | 88.58 | +0.80 / −3.86..−1.19 |
+| HD Dual | router2 s1 (builder) | 82.6 | −2.50 / −2.86..−1.38 |
+
+HD HDMI s3 was the best of 17 seeds, matching v0.2.3's HW-clean +1.16 with
+twice the data margin. The builder bins are in `.damier_work/v045_builder/`.
+A rebuild does not reproduce the picks: re-route the solo seeds and repack.
 
 ## History
+
+- **v0.4.5** (2026-10-11). Ron: "The bars stop with guard." The guard is
+  now permanent (the on/off mux removed) and S10 Zigzag is restored. The
+  bar fix is recorded for every program in CLAUDE.md (hardware contracts),
+  TECHNIQUES.md and memory avid-dropout-uv-bars.
 
 - **v0.4.4-diag** (2026-10-11). Bar-guard A/B on S10. The prior evidence
   (memory avid-dropout-uv-bars) is that the bars need sharp, high-contrast
