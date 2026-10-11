@@ -1,83 +1,103 @@
-# Slit Scan — true time-strip slit-scan
+# Slit Scan — clean blocks of lines, offset in simulated time
 
 ## What it does
-A slit (one column of the picture in Vertical mode, one row in Horizontal mode) is
-sampled every frame and pushed into a history canvas. The history flows away from the
-slit across the screen, so one axis of the output is **time**. Still scenery turns into
-streaks, and anything that moves through the slit is drawn as a stretched or squeezed
-time-shape. The live picture stays full resolution on the other side of the slit
-(Right/Left layouts), or the whole screen can be history (Mirror, Full).
+The picture is cut into clean bands of lines (Horizontal) or strips of columns
+(Vertical). Each band shows the live picture slid sideways by its own amount, as if
+every band were a different moment of a moving shot (the classic frame-buffer
+slit-scan look). Videomancer has no frame buffer, so the time is simulated. A virtual
+camera sways or drifts, and its position is remembered for 256 frames. Band k is
+offset by how far that camera moved since its moment, plus a staircase pattern scaled
+by P12. The bands ripple down the screen. Everything stays at full resolution with
+sharp edges.
 
-## Why v1 never worked (rewritten as v2.0.0, 2026-10-11)
-v1 used three `variable_delay_u` buffers that were 2048 samples deep. One HD line is 2200
-clocks, so the deepest "delay" was less than one line. Its "time" axis was really a
-sideways shift of each band, which wrapped the previous line's end and the horizontal
-blanking into the picture. A `Y <= 16 → hold pixel` hack hid part of this. The old
-SUMMARY's "two frames of history" was wrong. v1 also had no blanking gate, labelled
-defaults that load as an index, invalid categories, two knobs that both just added delay,
-and P12 as a plain Mix. The v1 sources are in git (0360e56) and in `.slitscan_work/`.
-
-The EBR cannot hold even one HD frame (128 kbit against ~62 Mbit). The only true
-slit-scan that fits is the time strip: one slit per frame into a coarse canvas.
+## History
+- **v1** used a 2048-sample delay line, less than one HD line. It only slid bands
+  sideways, with blanking wrapped into the picture and no blanking gate.
+- **v2.0.0** (2026-10-11) was a true time-strip: a slit sampled into a coarse EBR
+  canvas. Ron liked parts of it, but it isn't what he means by slit scan. It lives on
+  as **programs/ron/timestrip** (com.ron.timestrip).
+- **v3.0.0** (2026-10-11) is this program. Ron chose "pattern + time-lag" offsets and
+  "strips slide sideways" for Vertical; a true vertical shift would need many stored
+  lines.
 
 ## How it works
-- **Canvas**:
-  - 128 time columns × 128 slit cells of 4-bit luma (16 EBR), and 128 × 32 cells of
-    U4 V4 chroma (8 EBR). Chroma is stored canonical and signed, so zero RAM is black
-    and neutral.
-  - Each store is split into 4 sub-banks by (time parity, slit parity), so one read per
-    sub-bank gives all four bilinear taps. This is the same store as feedback.
-  - The time axis is a circular buffer. A pixel's age is just an address offset from the
-    newest column.
-  - The display never reads past age 125, so the column being written is never read
-    (`no_rw_check`).
-- **Capture**:
-  - Vertical: an 8 px window at the slit (4 px below 1024 wide), box-summed over the
-    first 2^kl lines of each slit cell.
-  - Horizontal: the first line at or below the slit, box-summed over the first 8 (4) px
-    of each cell.
-  - Samples are pre-shifted so every box lands at the same scale (no divides).
-- **Exposure**: each cell runs an IIR, `acc += (sample − acc)·m/64`, held in a 256×16
-  accumulator RAM. It is a pipelined read-modify-write at cell rate.
-- **Commit**: a per-frame phase accumulator (P12 Speed) commits a column on each carry
-  and writes the accumulator with stochastic rounding. Above 1 column/frame it writes two
-  columns. The display subtracts the fraction, so the history glides smoothly at any
-  speed.
-- **Rainbow**: each committed column's chroma is turned by a per-column angle on the way
-  in. This uses one multiplier over 7 clocks, with a parabolic sin/cos from the vblank
-  sequencer. A luma "bloom" is added, so a mono source still gets colour. The stripes
-  scroll with the history.
-- **Read**:
-  - Lookahead DDAs, 9 px ahead of the raster, give the coordinates in canvas units.
-    Layout, flow, wave and time key build the age.
-  - The age picks two columns (bilinear in time) and the slit coordinate picks two cells
-    (bilinear along the slit). Fade then scales by age.
-  - The live picture comes from a 16-deep EBR delay (warpfield pattern), not the FF pipe.
-- **Blanking gate** on the output. One latency (9) in every mode.
-- **Chroma parity** (drape/feedback pattern): the capture swaps U/V on odd hsync→avid
-  lines, and the display swaps them back on odd rows.
+- **Line buffer:** sidewinder's design. It is dual-bank ping-pong by line parity,
+  with Y 2048 deep and U/V 2:1 decimated (22 EBR). Three run-along read pointers
+  (Y, U, V) step ±1 per pixel and wrap or bounce at the inset bounds [12, W−13]. The
+  picture shows the line above, which is invisible.
+- **Per-frame sequencer (vblank):**
+  - Knob curves.
+  - Camera position X: sway = M·sin(φ); drift = eases 1/16 per frame toward a random
+    target, which is re-picked each time φ wraps. X is written to a 256-entry
+    history.
+  - Then for each band k:
+    - pattern(k)·A, plus X(now) − X(now − k·span/N);
+    - chroma split ±;
+    - fold each channel's start column into [L, R] (sidewinder's reduce steps);
+    - write {dir, pointer} into three 256-entry tables.
+  - It takes 43 clocks per band (5.5k for 128 bands; NTSC has ~13k after vsync).
+  - Multiplier loads are requested one step ahead through a registered strobe and
+    select code.
+- **Horizontal:** a band DDA per line picks the table entry in hblank.
+- **Vertical:**
+  - Strip 0 loads at the line start.
+  - A pixel DDA, kept as the signed excess `(pN mod W) + N − W` so its sign bit is
+    the boundary flag, reloads the pointers at each strip boundary.
+  - The next strip's entry is prefetched during the current strip, via a fabric
+    re-register.
+  - Strip starts are computed per frame as `ceil(kW/N)`, so they match the pixel DDA.
+- **Gaps:** black for the first ~W/512 px of each strip, or ~H/512 lines of each band
+  (band 0 excepted).
+- **Output:** latency 3 in every mode, with a blanking gate.
 
 ## Controls
-- **K1 Slit**: slit position (glided, 1/8 per frame).
-- **K2 Time Key** (bipolar): right = bright parts of the live picture show older history,
-  left = dark parts do. Centre is off.
-- **K3 Exposure**: motion blur of each new column (instant → ~1 s).
-- **K4 Fade**: history darkens with age (gone within 1/8 screen at max).
-- **K5 Rainbow** (bipolar): each new column's hue turns a step further, so candy stripes
-  scroll with the history; adds colour from luma. Centre is off.
-- **K6 Layout**: Right/Down, Left/Up, Mirror, Full.
-- **S7 Axis**: Vertical slit (time runs sideways) / Horizontal slit (time runs down/up).
-- **S8 Flow**: Out (newest at the slit) / In (newest at the far edge, flowing into the
-  slit).
-- **S9 Pixels**: Smooth (bilinear) / Blocks (nearest cell).
-- **S10 Ghost**: the live picture is lightened over the history.
-- **S11 Wave**: the slit bends into a travelling sine wave (±8 columns).
-- **P12 Speed**: 1/32 → 2 columns per frame (quadratic). At 1 column/frame, 2.1 s of
-  history spans the screen.
+- **K1 Bands:** 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128 (labelled; a raw value
+  below 13 is treated as the label index).
+- **K2 Pattern:**
+  - Ramp (staircase);
+  - Fold (edges far, centre home);
+  - Random (golden-ratio scatter);
+  - Wave (one cycle);
+  - Zigzag (alternate ±).
+- **K3 Motion:** size of the camera move, W/256 to W/4 (quadratic).
+- **K4 Span:** how far back the last band reaches, 4 to 255 frames (quadratic).
+- **K5 Speed:** sway / drift rate. The phase step is 32 + K5²/256 per frame, so the
+  period runs from ~2048 frames (34 s) to ~16 frames (¼ s).
+- **K6 Split:** chroma dispersion: U slides further than Y, V less.
+- **S7 Axis:** Horizontal bands / Vertical strips.
+- **S8 Edges:** Wrap / Mirror.
+- **S9 Gaps:** thin black lines between the blocks.
+- **S10 Motion:** Sway / Drift.
+- **S11 Flip:** reverses the band order (pattern and lag).
+- **P12 Offset:** staircase amount, W/64 to W (quadratic).
 
-## Presets
-Hand-written starting points: Time Strip, Waterfall, Mirror Wave, Ghost Trail, Rainbow
-Smear, Time Key. Capture real ones from hardware.
+## Defaults
+Captured from the hardware on 2026-10-11:
+- Bands 48, Pattern Random, Vertical strips, Drift.
+- Motion 793, Span 217, Speed 184 (a new drift target every ~400 frames ≈ 6.7 s),
+  Split 352.
+- Wrap, Gaps off, Flip off, Offset 840.
+
+## Build (2026-10-11, builder default router2)
+
+| Config    | Fmax (MHz) | LC          | Seed |
+|-----------|-----------:|------------:|-----:|
+| HD Analog | 89.58      | 4355 (57%)  | 1    |
+| SD Analog | 73.69      | 4366        | 1    |
+| HD HDMI   | 77.27      | 4382        | 1    |
+| SD HDMI   | 83.06      | 4384        | 1    |
+| HD Dual   | 78.36      | 4377        | 1    |
+| SD Dual   | 79.18      | 4379        | 1    |
+
+27/32 EBR: 22 line buffer, 3 tables, history, sine ROM. Three timing fixes, all
+routing-bound paths at only 57% LC:
+- the strip DDA's add→compare→enable became a sign bit;
+- the band DDA was split into two steps;
+- table RDATA is re-registered before pointer loads, and the sequencer's multiplier
+  operand enables became registered strobes.
+
+The HD Analog seed spread went from 67–80 to 76–90 MHz.
 
 ## Status
-- v2.0.0 (2026-10-11): full rewrite. Built; NOT flashed.
+- v3.0.0 (2026-10-11): timing-closed 6/6; NOT flashed (an 11:54 build had thin HD
+  margins and is superseded by the 12:08 one).
