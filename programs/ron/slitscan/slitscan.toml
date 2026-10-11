@@ -1,15 +1,21 @@
+# Slit Scan v2 -- a true time-strip slit-scan.  A slit (one column, or one
+# row) is sampled every frame into a history canvas in EBR and the history
+# flows away from the slit, so one axis of the picture is TIME: still
+# scenery becomes streaks, anything crossing the slit is drawn as a
+# time-warped shape.  Live video stays full-resolution on the far side.
+
 [program]
 program_id = "com.ron.slitscan"
-program_version = "1.0.0"
+program_version = "2.0.0"
 abi_version = ">=1.0,<2.0"
 program_name = "Slit Scan"
 author = "ron"
 license = "GPL-3.0"
-categories = ["Process", "Time", "Motion"]
+categories = ["Temporal", "Film", "Warp"]
 program_type = "processing"
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
-description = "Temporal slit-scan: maps position to time so moving objects leave motion-smear artifacts."
+description = "True time-strip slit-scan: a slit sampled every frame flows across the screen; motion becomes time-warped shapes."
 
 # --- Rotary Potentiometers (Knobs 1-6) ---
 
@@ -18,10 +24,10 @@ parameter_id = "rotary_potentiometer_1"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 256
+initial_value = 512
 display_min_value = 0
 display_max_value = 100
-name_label = "Delay"
+name_label = "Slit"
 suffix_label = "%"
 
 [[parameter]]
@@ -29,17 +35,22 @@ parameter_id = "rotary_potentiometer_2"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 0
-display_min_value = 0
+initial_value = 512
+display_min_value = -100
 display_max_value = 100
-name_label = "Chroma Lag"
+name_label = "Time Key"
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
-name_label = "Slices"
-value_labels = ["2", "4", "8", "16", "32", "64", "128"]
-initial_value_label = "8"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 300
+display_min_value = 0
+display_max_value = 100
+name_label = "Exposure"
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
@@ -49,7 +60,7 @@ max_value = 1023
 initial_value = 0
 display_min_value = 0
 display_max_value = 100
-name_label = "Offset"
+name_label = "Fade"
 suffix_label = "%"
 
 [[parameter]]
@@ -57,52 +68,47 @@ parameter_id = "rotary_potentiometer_5"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 0
-display_min_value = 0
+initial_value = 512
+display_min_value = -100
 display_max_value = 100
-name_label = "Luma Mod"
+name_label = "Rainbow"
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
-control_mode = "linear"
-min_value = 0
-max_value = 1023
-initial_value = 512
-display_min_value = 0
-display_max_value = 100
-name_label = "UV Diverge"
-suffix_label = "%"
+name_label = "Layout"
+value_labels = ["Right/Down", "Left/Up", "Mirror", "Full"]
+initial_value_label = "Right/Down"
 
 # --- Toggle Switches (7-11) ---
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
 name_label = "Axis"
-value_labels = ["Horiz", "Vert"]
-initial_value_label = "Horiz"
+value_labels = ["Vertical", "Horizontal"]
+initial_value_label = "Vertical"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
-name_label = "Reverse"
-value_labels = ["Off", "On"]
-initial_value_label = "Off"
+name_label = "Flow"
+value_labels = ["Out", "In"]
+initial_value_label = "Out"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
-name_label = "Fold"
+name_label = "Pixels"
+value_labels = ["Smooth", "Blocks"]
+initial_value_label = "Smooth"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Ghost"
 value_labels = ["Off", "On"]
 initial_value_label = "Off"
 
 [[parameter]]
-parameter_id = "toggle_switch_10"
-name_label = "Pattern"
-value_labels = ["Random", "Sine"]
-initial_value_label = "Random"
-
-[[parameter]]
 parameter_id = "toggle_switch_11"
-name_label = "Bypass"
+name_label = "Wave"
 value_labels = ["Off", "On"]
 initial_value_label = "Off"
 
@@ -113,85 +119,100 @@ parameter_id = "linear_potentiometer_12"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 1023
+initial_value = 640
 display_min_value = 0
 display_max_value = 100
-name_label = "Mix"
+name_label = "Speed"
 suffix_label = "%"
 
-# --- Presets ---
+# --- Presets (hand-written starting points; capture real ones on HW) ---
 
 [[preset]]
-name = "Wide Bands"
-rotary_potentiometer_1 = 600
-rotary_potentiometer_2 = 0
-rotary_potentiometer_3 = 102
+name = "Time Strip"
+rotary_potentiometer_1 = 512
+rotary_potentiometer_2 = 512
+rotary_potentiometer_3 = 300
 rotary_potentiometer_4 = 0
-rotary_potentiometer_5 = 0
-rotary_potentiometer_6 = 512
+rotary_potentiometer_5 = 512
+rotary_potentiometer_6 = 896
 toggle_switch_7 = 0
 toggle_switch_8 = 0
 toggle_switch_9 = 0
 toggle_switch_10 = 0
 toggle_switch_11 = 0
-linear_potentiometer_12 = 1023
+linear_potentiometer_12 = 900
 
 [[preset]]
-name = "Fine Slices"
-rotary_potentiometer_1 = 400
-rotary_potentiometer_2 = 0
-rotary_potentiometer_3 = 921
-rotary_potentiometer_4 = 0
-rotary_potentiometer_5 = 0
-rotary_potentiometer_6 = 512
-toggle_switch_7 = 0
-toggle_switch_8 = 0
-toggle_switch_9 = 0
-toggle_switch_10 = 0
-toggle_switch_11 = 0
-linear_potentiometer_12 = 1023
-
-[[preset]]
-name = "Vert Columns"
-rotary_potentiometer_1 = 500
-rotary_potentiometer_2 = 0
-rotary_potentiometer_3 = 512
-rotary_potentiometer_4 = 0
-rotary_potentiometer_5 = 0
-rotary_potentiometer_6 = 512
+name = "Waterfall"
+rotary_potentiometer_1 = 300
+rotary_potentiometer_2 = 512
+rotary_potentiometer_3 = 450
+rotary_potentiometer_4 = 300
+rotary_potentiometer_5 = 512
+rotary_potentiometer_6 = 128
 toggle_switch_7 = 1
 toggle_switch_8 = 0
 toggle_switch_9 = 0
 toggle_switch_10 = 0
 toggle_switch_11 = 0
-linear_potentiometer_12 = 1023
+linear_potentiometer_12 = 640
 
 [[preset]]
-name = "Fold Mirror"
-rotary_potentiometer_1 = 700
-rotary_potentiometer_2 = 0
-rotary_potentiometer_3 = 307
+name = "Mirror Wave"
+rotary_potentiometer_1 = 512
+rotary_potentiometer_2 = 512
+rotary_potentiometer_3 = 300
 rotary_potentiometer_4 = 0
-rotary_potentiometer_5 = 0
-rotary_potentiometer_6 = 512
+rotary_potentiometer_5 = 512
+rotary_potentiometer_6 = 640
 toggle_switch_7 = 0
 toggle_switch_8 = 0
-toggle_switch_9 = 1
+toggle_switch_9 = 0
 toggle_switch_10 = 0
-toggle_switch_11 = 0
-linear_potentiometer_12 = 1023
+toggle_switch_11 = 1
+linear_potentiometer_12 = 760
 
 [[preset]]
-name = "Chroma Split"
+name = "Ghost Trail"
 rotary_potentiometer_1 = 400
-rotary_potentiometer_2 = 600
-rotary_potentiometer_3 = 512
+rotary_potentiometer_2 = 512
+rotary_potentiometer_3 = 600
+rotary_potentiometer_4 = 500
+rotary_potentiometer_5 = 512
+rotary_potentiometer_6 = 640
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 1
+toggle_switch_11 = 0
+linear_potentiometer_12 = 800
+
+[[preset]]
+name = "Rainbow Smear"
+rotary_potentiometer_1 = 200
+rotary_potentiometer_2 = 512
+rotary_potentiometer_3 = 750
 rotary_potentiometer_4 = 0
-rotary_potentiometer_5 = 0
-rotary_potentiometer_6 = 200
+rotary_potentiometer_5 = 900
+rotary_potentiometer_6 = 128
 toggle_switch_7 = 0
 toggle_switch_8 = 0
 toggle_switch_9 = 0
 toggle_switch_10 = 0
 toggle_switch_11 = 0
 linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Time Key"
+rotary_potentiometer_1 = 512
+rotary_potentiometer_2 = 1000
+rotary_potentiometer_3 = 300
+rotary_potentiometer_4 = 0
+rotary_potentiometer_5 = 512
+rotary_potentiometer_6 = 896
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 700

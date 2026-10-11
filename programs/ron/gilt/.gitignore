@@ -1,0 +1,12 @@
+# reference images: public domain, re-fetch with analysis/fetch_refs.py (SOURCES.md + manifest.json are tracked)
+refs/*.jpg
+# large regenerable check figures
+analysis/figs/cells_*.png
+analysis/__pycache__/
+# test clips: personal footage, stays local (README.md and SOURCES.md are tracked)
+testmedia/*
+!testmedia/README.md
+!testmedia/SOURCES.md
+# build scratch + version backups (vmprog/vhd kept locally)
+.synth/
+versions/

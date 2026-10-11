@@ -29,8 +29,7 @@ t1x t1y dl lg inv idx r0 r1 lo fv tv
 g13 kr ka k k2 lgk ktd T x2 i sp step
 C90 C45 C120 C19899 C3932 C39322 C2400 FILL M1 M2 M4 M8 M255 M4095
 C8192 C32768 C4096 M65535 SPQ SPL C42598 C49152 k2m sk rk M511 M2047 C65536 C196608 K94560 K145162 C32767 CM32768 C2048 C131072 C524288 C1M C64M C2G sq_n sq_x sq_t
-invn invo cs lgx lge nx sl cur la vst
-lcg sct sxt syt sox soy hst hsc C69069""".split()
+invn invo cs lgx lge nx sl cur la vst""".split()
 R = {n: i for i, n in enumerate(REGS)}
 assert len(REGS) <= 128, len(REGS)
 
@@ -132,25 +131,7 @@ def build():
     a.LDX('FLAGS'); a.AND('M4'); a.JZ('phadv')
     a.LDX('FLAGS'); a.AND('M8'); a.JZ('phdone')
     a.L('phadv'); a.LD('ph'); a.ADDI(FLOW_RATE); a.AND('M4095'); a.ST('ph')
-    # living eye (Flow only).  HIPPUS: each time the flow phase wraps (~2.4 s) the pupil
-    # picks a new random size within +-12.5 %, and eases there slowly (below), so it
-    # breathes irregularly.  SACCADES: after a random 0.7-2.8 s fixation the gaze jumps
-    # to a new random offset within +-12.5 % of the pupil travel, and darts there in ~3
-    # frames.  Random numbers: LCG x*69069 + 1 (mod 2^32), high bits only.
-    a.ADDI(-(FLOW_RATE - 1)); a.JP('ey_h')
-    a.LD('lcg'); a.MUL('C69069'); a.LDP(0); a.ADDI(1); a.ST('lcg'); a.SHR(18); a.ST('hst')
-    a.L('ey_h'); a.LD('sct'); a.ADDI(-1); a.ST('sct'); a.JP('phdone')
-    a.LD('lcg'); a.MUL('C69069'); a.LDP(0); a.ADDI(1); a.ST('lcg'); a.SHR(19); a.ST('sxt')
-    a.LD('lcg'); a.SHL(13); a.SHR(19); a.ST('syt')
-    a.LD('lcg'); a.SHR(5); a.AND('M255'); a.SHR(1); a.ADDI(40); a.ST('sct')
     a.L('phdone')
-    # Still: the eye settles back onto the knobs.  The glides run every field.
-    a.LDX('FLAGS'); a.AND('M1'); a.JNZ('ey_live')
-    a.LDI(0); a.ST('sxt'); a.ST('syt'); a.ST('hst')
-    a.L('ey_live')
-    a.LD('sxt'); a.SUB('sox'); a.SHR(1); a.ADD('sox'); a.ST('sox')
-    a.LD('syt'); a.SUB('soy'); a.SHR(1); a.ADD('soy'); a.ST('soy')
-    a.LD('hst'); a.SUB('hsc'); a.SHR(5); a.ADD('hsc'); a.ST('hsc')
     # ---- arms / rings with hysteresis
     for g, c, base, cur, lab in [('g_ka', 'C90', 1536, 'a_cur', 'a'), ('g_kr', 'C45', 768, 'n_cur', 'n')]:
         a.LD(g); a.SHL(8); a.MUL(c); a.LDP(16); a.ADDI(base); a.ST('af')
@@ -196,13 +177,9 @@ def build():
     a.MUL('C42598'); a.LDP(16); a.ST('lim')
     a.ADDI(-16); a.JP('limok'); a.LDI(16); a.ST('lim')
     a.L('limok')
-    # hippus: p *= 1 + hsc (Q16).  Applied after the travel limit so the breathing cannot
-    # move the pupil; lim keeps >= 0.15 R of slack beyond the largest pupil, so +12.5 %
-    # can never reach the rim.
-    a.LD('p'); a.MUL('hsc'); a.LDP(16); a.ADD('p'); a.ST('p')
     # pupil offset t (Q4 px), circularly clamped to the travel limit
-    a.LD('g_kx'); a.SUB('C32768'); a.ADD('sox'); a.SHL(1); a.MUL('lim'); a.LDP(16); a.ST('tx')
-    a.LD('g_ky'); a.SUB('C32768'); a.ADD('soy'); a.SHL(1); a.MUL('lim'); a.LDP(16); a.ST('ty')
+    a.LD('g_kx'); a.SUB('C32768'); a.SHL(1); a.MUL('lim'); a.LDP(16); a.ST('tx')
+    a.LD('g_ky'); a.SUB('C32768'); a.SHL(1); a.MUL('lim'); a.LDP(16); a.ST('ty')
     a.LD('tx'); a.MUL('tx'); a.LDP(0); a.ST('t0')
     a.LD('ty'); a.MUL('ty'); a.LDP(0); a.ADD('t0'); a.CALL('sqrt'); a.ST('d')
     a.LD('d'); a.ADDI(-1); a.JP('dok')
@@ -237,7 +214,15 @@ def build():
     a.LD('am'); a.MUL('ey'); a.LDP(16); a.ST('ay')
     # pupil image radius at the reference pupil's outer edge: eps = |(De - a)/(1 - a De)|
     # with De = D + Pref (Pref = 0.06 exactly).  This anchors the ring lattice.
-    a.LD('nd'); a.ADD('C3932'); a.CALL('wmag'); a.ST('eps')                          # Q16, < 1
+    # The anchor is taken with the PINPOINT pupil's limiting point (a = D when P = 0), which
+    # gives eps = Pref / (1 - D (D + Pref)) and keeps the lattice independent of Pupil Size.
+    # Using the real |a| here made the lattice BOUNCE: as the pupil grows, a drifts outward
+    # through De, eps passes through zero, and the ring stack stretched by up to 8 octaves
+    # and snapped back (at 70-85 % Pupil Size with the pupil well off-centre).  Below about
+    # P = Pref the two forms agree to four decimals.
+    a.LD('nd'); a.ADD('C3932'); a.MUL('nd'); a.LDP(16); a.ST('t2')                   # D (D + Pref), Q16
+    a.LD('C65536'); a.SUB('t2'); a.SHR(1); a.ST('t2')                                # 1 - D (D + Pref), Q15
+    a.LD('C3932'); a.SHL(15); a.DIV('t2'); a.LDQ(); a.ST('eps')                      # Q16, < 1
     a.LD('eps'); a.JNZ('eps_ok'); a.LDI(1); a.ST('eps')
     a.L('eps_ok')
     # Lref = -log2(eps) in Q12 octaves (eps is Q16, so log2(eps) = log2(int) - 16)
@@ -535,7 +520,7 @@ class Emu:
 
 RFINIT = dict(C90=90, C45=45, C120=120, C19899=19899, C3932=3932, C39322=39322,
               C2400=2400, FILL=FILL_Q16, M1=1, M2=2, M4=4, M8=8, M255=255, M4095=4095,
-              C8192=8192, C32768=32768, C4096=4096, M65535=65535, SPQ=1017, SPL=349, M511=511, M2047=2047, C65536=65536, C196608=196608, K94560=94560, K145162=171783, C32767=32767, CM32768=-32768, C2048=2048, C42598=42598, C49152=49152, C131072=131072, C524288=524288, C1M=1048576, C64M=67108864, C2G=-2147483648, a_cur=48, n_cur=30, lcg=0x2545F491, sct=60, C69069=69069,
+              C8192=8192, C32768=32768, C4096=4096, M65535=65535, SPQ=1017, SPL=349, M511=511, M2047=2047, C65536=65536, C196608=196608, K94560=94560, K145162=171783, C32767=32767, CM32768=-32768, C2048=2048, C42598=42598, C49152=49152, C131072=131072, C524288=524288, C1M=1048576, C64M=67108864, C2G=-2147483648, a_cur=48, n_cur=30,
               g_kx=307 * 64, g_ky=563 * 64, g_ks=317 * 64, g_ka=478 * 64, g_kr=614 * 64,
               g_kt=716 * 64, g_sp=325 * 64)
 

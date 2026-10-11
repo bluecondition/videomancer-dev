@@ -1,39 +1,40 @@
+# Slipframe - Program Configuration
+#
+# Codec meltdown: the picture redrawn as a broken compressed stream. Damage
+# follows a macroblock grid and grows across a GOP until a keyframe snaps it
+# clean: slice slips, dripping stuck blocks, Walsh "DCT" garble, smeared and
+# melted blocks, magenta/green chroma errors.
+
 [program]
-program_id = "com.lzxindustries.slipframe"
-program_version = "1.0.0"
+program_id = "com.ron.slipframe"
+program_version = "2.0.0"
 abi_version = ">=1.0,<2.0"
 program_name = "Slipframe"
-author = ""
+author = "ron"
 license = "GPL-3.0"
-categories = ["Process", "Glitch", "Feedback"]
+categories = ["Glitch", "Pixel", "Warp"]
 program_type = "processing"
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
-description = "Datamosh-style processor: horizontal smear, chroma lag, scanline tear, line persistence, bit-crush."
-url = "https://github.com/lzxindustries/videomancer-sdk"
+description = "Codec meltdown: macroblock slips, dripping stuck blocks, DCT garble and chroma errors that grow until a keyframe."
 
 # --- Rotary Potentiometers (Knobs 1-6) ---
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_1"
-control_mode = "linear"
-min_value = 0
-max_value = 1023
-initial_value = 0
-display_min_value = 0
-display_max_value = 100
-name_label = "Smear"
-suffix_label = "%"
+name_label = "Block"
+value_labels = ["8 px", "16 px", "32 px", "64 px"]
+initial_value_label = "16 px"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 0
+initial_value = 400
 display_min_value = 0
 display_max_value = 100
-name_label = "Smear Mod"
+name_label = "Slip"
 suffix_label = "%"
 
 [[parameter]]
@@ -41,10 +42,10 @@ parameter_id = "rotary_potentiometer_3"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 0
+initial_value = 450
 display_min_value = 0
 display_max_value = 100
-name_label = "Chroma Lag"
+name_label = "Drip"
 suffix_label = "%"
 
 [[parameter]]
@@ -52,10 +53,10 @@ parameter_id = "rotary_potentiometer_4"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 0
+initial_value = 512
 display_min_value = 0
 display_max_value = 100
-name_label = "Tear"
+name_label = "Garble"
 suffix_label = "%"
 
 [[parameter]]
@@ -63,47 +64,52 @@ parameter_id = "rotary_potentiometer_5"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 0
+initial_value = 400
 display_min_value = 0
 display_max_value = 100
-name_label = "Persist"
+name_label = "Chroma"
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
-name_label = "Crush"
-value_labels = ["Off", "1", "2", "3", "4", "5", "6", "7"]
-initial_value_label = "Off"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 512
+display_min_value = 0
+display_max_value = 100
+name_label = "GOP"
+suffix_label = "%"
 
 # --- Toggle Switches (7-11) ---
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
-name_label = "Smear Src"
-value_labels = ["Luma", "Noise"]
-initial_value_label = "Luma"
+name_label = "Drip"
+value_labels = ["Freeze", "Flow"]
+initial_value_label = "Flow"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
-name_label = "Tear Mode"
-value_labels = ["Lines", "Random"]
-initial_value_label = "Lines"
+name_label = "Keyframe"
+value_labels = ["Snap", "Breathe"]
+initial_value_label = "Snap"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
-name_label = "Chroma Dir"
-value_labels = ["Same", "Split"]
-initial_value_label = "Same"
-
-[[parameter]]
-parameter_id = "toggle_switch_10"
-name_label = "Glitch"
+name_label = "Quant"
 value_labels = ["Off", "On"]
 initial_value_label = "Off"
 
 [[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Bleed"
+value_labels = ["Full", "Color"]
+initial_value_label = "Full"
+
+[[parameter]]
 parameter_id = "toggle_switch_11"
-name_label = "Bypass"
+name_label = "Comb"
 value_labels = ["Off", "On"]
 initial_value_label = "Off"
 
@@ -114,85 +120,100 @@ parameter_id = "linear_potentiometer_12"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 1023
+initial_value = 300
 display_min_value = 0
 display_max_value = 100
-name_label = "Mix"
+name_label = "Mosh"
 suffix_label = "%"
 
-# --- Presets ---
-
-[[preset]]
-name = "Clean"
-rotary_potentiometer_1 = 0
-rotary_potentiometer_2 = 0
-rotary_potentiometer_3 = 0
-rotary_potentiometer_4 = 0
-rotary_potentiometer_5 = 0
-rotary_potentiometer_6 = 0
-toggle_switch_7 = 0
-toggle_switch_8 = 0
-toggle_switch_9 = 0
-toggle_switch_10 = 0
-toggle_switch_11 = 0
-linear_potentiometer_12 = 1023
+# --- Presets (hand-written placeholders; capture from hardware) ---
 
 [[preset]]
 name = "P-Frame Drift"
-rotary_potentiometer_1 = 200
-rotary_potentiometer_2 = 600
-rotary_potentiometer_3 = 120
-rotary_potentiometer_4 = 0
+rotary_potentiometer_1 = 384
+rotary_potentiometer_2 = 400
+rotary_potentiometer_3 = 450
+rotary_potentiometer_4 = 512
 rotary_potentiometer_5 = 400
-rotary_potentiometer_6 = 0
-toggle_switch_7 = 0
+rotary_potentiometer_6 = 512
+toggle_switch_7 = 1
 toggle_switch_8 = 0
 toggle_switch_9 = 0
 toggle_switch_10 = 0
 toggle_switch_11 = 0
-linear_potentiometer_12 = 900
+linear_potentiometer_12 = 300
 
 [[preset]]
-name = "Torn Transport"
-rotary_potentiometer_1 = 80
-rotary_potentiometer_2 = 200
-rotary_potentiometer_3 = 60
-rotary_potentiometer_4 = 700
-rotary_potentiometer_5 = 0
-rotary_potentiometer_6 = 256
+name = "Melt"
+rotary_potentiometer_1 = 640
+rotary_potentiometer_2 = 150
+rotary_potentiometer_3 = 900
+rotary_potentiometer_4 = 300
+rotary_potentiometer_5 = 250
+rotary_potentiometer_6 = 800
 toggle_switch_7 = 1
 toggle_switch_8 = 1
 toggle_switch_9 = 0
 toggle_switch_10 = 0
 toggle_switch_11 = 0
-linear_potentiometer_12 = 1023
+linear_potentiometer_12 = 550
 
 [[preset]]
-name = "Chroma Wreck"
-rotary_potentiometer_1 = 0
-rotary_potentiometer_2 = 0
-rotary_potentiometer_3 = 900
-rotary_potentiometer_4 = 0
-rotary_potentiometer_5 = 0
-rotary_potentiometer_6 = 0
+name = "Torn Slices"
+rotary_potentiometer_1 = 384
+rotary_potentiometer_2 = 900
+rotary_potentiometer_3 = 100
+rotary_potentiometer_4 = 200
+rotary_potentiometer_5 = 300
+rotary_potentiometer_6 = 650
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 1
+linear_potentiometer_12 = 450
+
+[[preset]]
+name = "DCT Garbage"
+rotary_potentiometer_1 = 128
+rotary_potentiometer_2 = 200
+rotary_potentiometer_3 = 200
+rotary_potentiometer_4 = 1023
+rotary_potentiometer_5 = 700
+rotary_potentiometer_6 = 300
 toggle_switch_7 = 0
 toggle_switch_8 = 0
 toggle_switch_9 = 1
 toggle_switch_10 = 0
 toggle_switch_11 = 0
-linear_potentiometer_12 = 1023
+linear_potentiometer_12 = 600
 
 [[preset]]
-name = "Full Mosh"
-rotary_potentiometer_1 = 350
-rotary_potentiometer_2 = 800
-rotary_potentiometer_3 = 450
-rotary_potentiometer_4 = 300
-rotary_potentiometer_5 = 600
-rotary_potentiometer_6 = 384
-toggle_switch_7 = 0
+name = "Color Bleed"
+rotary_potentiometer_1 = 640
+rotary_potentiometer_2 = 250
+rotary_potentiometer_3 = 800
+rotary_potentiometer_4 = 250
+rotary_potentiometer_5 = 900
+rotary_potentiometer_6 = 700
+toggle_switch_7 = 1
 toggle_switch_8 = 1
-toggle_switch_9 = 1
-toggle_switch_10 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 1
 toggle_switch_11 = 0
+linear_potentiometer_12 = 500
+
+[[preset]]
+name = "Meltdown"
+rotary_potentiometer_1 = 384
+rotary_potentiometer_2 = 700
+rotary_potentiometer_3 = 1023
+rotary_potentiometer_4 = 800
+rotary_potentiometer_5 = 700
+rotary_potentiometer_6 = 512
+toggle_switch_7 = 1
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 1
 linear_potentiometer_12 = 1023

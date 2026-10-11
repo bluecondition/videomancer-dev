@@ -1,0 +1,244 @@
+# WAKE -- motion-keyed effects (see wake.vhd / motion_key.vhd / PROGRESS.md)
+# Knob mappings match model/wake_model.py, the golden model.
+
+[program]
+program_id = "com.ron.wake"
+program_version = "0.3.0"
+abi_version = ">=1.0,<2.0"
+program_name = "WAKE"
+author = "bluecondition"
+license = "GPL-3.0"
+categories = ["Mask", "Analysis", "Temporal"]
+program_type = "processing"
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+description = "Motion key: effects land only where the picture moves, not where it is bright. Wake trails, presence mode, tracking."
+url = "https://github.com/bluecondition/videomancer-dev"
+
+# --- Rotary Potentiometers (Knobs 1-6) ---
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 614            # release tau 1/61 s .. 1 s, exponential; 60% keeps a stopped object ~0.75 s
+display_min_value = 0
+display_max_value = 100
+name_label = "Wake"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 256            # v3 coring = FLOOR >> 4 quarter-steps (0..16 cell-average steps); 25% = 4 (footage-tuned)
+display_min_value = 0
+display_max_value = 100
+name_label = "Floor"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 512            # chroma weight: 0 = luma only, centre = equal, max = chroma 2x
+display_min_value = 0
+display_max_value = 200
+name_label = "Chroma"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 512            # <12% blocky nearest cell; then hard -> wide soft glow
+display_min_value = 0
+display_max_value = 100
+name_label = "Softness"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 0              # edge gate: 0 = soft blobs .. 100% = effect clings to moving edges/texture
+display_min_value = 0
+display_max_value = 100
+name_label = "Detail"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Effect"
+value_labels = ["Matte", "Heat", "Mono", "Quarter Turn", "Negative", "Solarize", "Crush", "Smear", "Cloak"]
+initial_value_label = "Heat"
+
+# --- Toggle Switches (7-11) ---
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Mode"
+value_labels = ["Motion", "Presence"]
+initial_value_label = "Motion"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Plate"
+value_labels = ["Live", "Hold"]
+initial_value_label = "Live"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Steady"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Track"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Key"
+value_labels = ["Normal", "Invert"]
+initial_value_label = "Normal"
+
+# --- Linear Potentiometer (Slider) ---
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 614            # sensitivity, 8-octave exponential; bottom ~6% = nothing keyed
+display_min_value = 0
+display_max_value = 100
+name_label = "Stir"
+suffix_label = "%"
+
+# --- Presets ---
+# Effect values are zone centres ((index + 0.5) * 1024 / 9): Matte 57, Heat 171,
+# Mono 284, Quarter Turn 398, Negative 512, Solarize 626, Crush 739, Smear 853, Cloak 967.
+# Clean Plate (Presence + Hold + Cloak) arrives with Phase 4.
+
+[[preset]]
+# Heat view at the initial values, for orientation: fire colours = motion strength
+name = "First Look"
+rotary_potentiometer_1 = 614
+rotary_potentiometer_2 = 256
+rotary_potentiometer_3 = 512
+rotary_potentiometer_4 = 512
+rotary_potentiometer_5 = 0
+rotary_potentiometer_6 = 171
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 614
+
+[[preset]]
+# Mono with KEY Invert: the world goes grey, colour survives only where things
+# move; short wake, mid softness, a little DETAIL so colour hugs the movers
+name = "Color Pop"
+rotary_potentiometer_1 = 360
+rotary_potentiometer_2 = 256
+rotary_potentiometer_3 = 512
+rotary_potentiometer_4 = 512
+rotary_potentiometer_5 = 300
+rotary_potentiometer_6 = 284
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 1
+linear_potentiometer_12 = 650
+
+[[preset]]
+# Quarter Turn, long WAKE, soft key: hue-shifted ghost trails linger behind movers
+name = "Long Wake"
+rotary_potentiometer_1 = 940
+rotary_potentiometer_2 = 256
+rotary_potentiometer_3 = 512
+rotary_potentiometer_4 = 870
+rotary_potentiometer_5 = 0
+rotary_potentiometer_6 = 398
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 700
+
+[[preset]]
+# Solarize on the blocky nearest-cell matte, no wake, low floor: twitchy and digital
+name = "Nervous"
+rotary_potentiometer_1 = 0
+rotary_potentiometer_2 = 100
+rotary_potentiometer_3 = 512
+rotary_potentiometer_4 = 0
+rotary_potentiometer_5 = 0
+rotary_potentiometer_6 = 626
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 720
+
+[[preset]]
+# Negative clinging to the edges and texture of whatever moves (DETAIL max), short wake
+name = "Contour"
+rotary_potentiometer_1 = 260
+rotary_potentiometer_2 = 256
+rotary_potentiometer_3 = 512
+rotary_potentiometer_4 = 512
+rotary_potentiometer_5 = 1023
+rotary_potentiometer_6 = 512
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 760
+
+[[preset]]
+# Mono with KEY Invert and TRACK on: a colour follow-spot in a mono world
+# (TRACK lands in Phase 4; until then this plays like a soft Color Pop)
+name = "Spotlight"
+rotary_potentiometer_1 = 614
+rotary_potentiometer_2 = 256
+rotary_potentiometer_3 = 512
+rotary_potentiometer_4 = 760
+rotary_potentiometer_5 = 0
+rotary_potentiometer_6 = 284
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 1
+toggle_switch_11 = 1
+linear_potentiometer_12 = 650
+
+[[preset]]
+# Smear with STEADY on: handheld/panning sources key the subject, not the camera
+# move, and scene cuts don't flash
+name = "Steady Smear"
+rotary_potentiometer_1 = 480
+rotary_potentiometer_2 = 256
+rotary_potentiometer_3 = 512
+rotary_potentiometer_4 = 600
+rotary_potentiometer_5 = 0
+rotary_potentiometer_6 = 853
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 1
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 640

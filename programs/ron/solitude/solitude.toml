@@ -1,6 +1,6 @@
 [program]
 program_id = "com.ron.solitude"
-program_version = "0.2.0"
+program_version = "0.3.0"
 abi_version = ">=1.0,<2.0"
 program_name = "Solitude"
 author = "ron"
@@ -9,7 +9,7 @@ categories = ["Render", "Pattern", "Screen"]
 program_type = "synthesis"
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
-description = "Ragged central mass of vertical pixel-sort stripes in jewel tones on flat teal, with hot spots and lightning veins."
+description = "Ragged mass of crawling pixel-sort streaks in jewel tones on flat teal: slanted passes, skyline top, falling drips, lightning."
 
 # --- Rotary Potentiometers (Knobs 1-6) ---
 
@@ -19,7 +19,7 @@ name_label = "Edge"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 900
+initial_value = 512
 display_min_value = 0
 display_max_value = 100
 suffix_label = "%"
@@ -48,11 +48,11 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
-name_label = "Cascade"
+name_label = "Flow"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 700
+initial_value = 512
 display_min_value = 0
 display_max_value = 100
 suffix_label = "%"
@@ -95,9 +95,9 @@ initial_value_label = "Teal"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
-name_label = "Cascade"
+name_label = "Seams"
 value_labels = ["Off", "On"]
-initial_value_label = "Off"
+initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
@@ -107,9 +107,9 @@ initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
-name_label = "Bypass"
-value_labels = ["Off", "On"]
-initial_value_label = "Off"
+name_label = "Sort"
+value_labels = ["Down", "Up"]
+initial_value_label = "Down"
 
 # --- Linear Potentiometer (Slider) ---
 
@@ -119,7 +119,7 @@ name_label = "Bright"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 900
+initial_value = 512
 display_min_value = 0
 display_max_value = 100
 suffix_label = "%"
@@ -128,10 +128,10 @@ suffix_label = "%"
 
 [[preset]]
 name = "Default"
-rotary_potentiometer_1 = 900
+rotary_potentiometer_1 = 512
 rotary_potentiometer_2 = 500
 rotary_potentiometer_3 = 500
-rotary_potentiometer_4 = 700
+rotary_potentiometer_4 = 512
 rotary_potentiometer_5 = 400
 rotary_potentiometer_6 = 700
 toggle_switch_7 = 0
@@ -139,14 +139,14 @@ toggle_switch_8 = 0
 toggle_switch_9 = 1
 toggle_switch_10 = 1
 toggle_switch_11 = 0
-linear_potentiometer_12 = 900
+linear_potentiometer_12 = 512
 
 [[preset]]
 name = "Tight Mass"
 rotary_potentiometer_1 = 250
 rotary_potentiometer_2 = 200
 rotary_potentiometer_3 = 300
-rotary_potentiometer_4 = 400
+rotary_potentiometer_4 = 300
 rotary_potentiometer_5 = 700
 rotary_potentiometer_6 = 150
 toggle_switch_7 = 0
@@ -154,7 +154,7 @@ toggle_switch_8 = 0
 toggle_switch_9 = 1
 toggle_switch_10 = 1
 toggle_switch_11 = 0
-linear_potentiometer_12 = 900
+linear_potentiometer_12 = 512
 
 [[preset]]
 name = "Dissolving"
@@ -169,22 +169,22 @@ toggle_switch_8 = 0
 toggle_switch_9 = 1
 toggle_switch_10 = 1
 toggle_switch_11 = 0
-linear_potentiometer_12 = 800
+linear_potentiometer_12 = 480
 
 [[preset]]
 name = "Cool Corruption"
 rotary_potentiometer_1 = 600
 rotary_potentiometer_2 = 500
 rotary_potentiometer_3 = 250
-rotary_potentiometer_4 = 300
+rotary_potentiometer_4 = 450
 rotary_potentiometer_5 = 400
 rotary_potentiometer_6 = 250
 toggle_switch_7 = 1
 toggle_switch_8 = 0
-toggle_switch_9 = 1
+toggle_switch_9 = 0
 toggle_switch_10 = 1
-toggle_switch_11 = 0
-linear_potentiometer_12 = 850
+toggle_switch_11 = 1
+linear_potentiometer_12 = 512
 
 [[preset]]
 name = "Black Void"
@@ -199,4 +199,4 @@ toggle_switch_8 = 1
 toggle_switch_9 = 1
 toggle_switch_10 = 1
 toggle_switch_11 = 0
-linear_potentiometer_12 = 1000
+linear_potentiometer_12 = 560

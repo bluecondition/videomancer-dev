@@ -1,0 +1,1984 @@
+{
+ "_meta": {
+  "generated_by": "programs/ron/gilt/analysis/build_spec.py",
+  "phase": 1,
+  "status": "zone polygons (analysis/zones.json) approved by Ron 2026-10-10",
+  "colour_convention": "sRGB is the source of truth; lab = CIELAB D65; y10/cb10/cr10 = BT.709 10-bit legal range (reporting only, hardware constants are generated in Phase 4)",
+  "scale_convention": "px1080 = px when the painting's short side is shown as 1080 lines; pct_robe_width = % of the robe zone's horizontal extent",
+  "references": "refs/SOURCES.md"
+ },
+ "palette": {
+  "ground_gold_kiss": {
+   "hex": "#87733D",
+   "lab": [
+    49.2,
+    0.5,
+    32.5
+   ],
+   "y10": 460,
+   "cb10": 409,
+   "cr10": 556,
+   "note": "Kiss field (brass leaf) median"
+  },
+  "figure_gold_kiss": {
+   "hex": "#C3A74D",
+   "lab": [
+    69.3,
+    -0.5,
+    49.3
+   ],
+   "y10": 636,
+   "cb10": 343,
+   "cr10": 576,
+   "note": "Kiss robe gold median"
+  },
+  "ground_gold_adele": {
+   "hex": "#A87111",
+   "lab": [
+    52.0,
+    14.5,
+    55.2
+   ],
+   "y10": 469,
+   "cb10": 321,
+   "cr10": 624,
+   "note": "Adele field (orange gold) median"
+  },
+  "figure_gold_adele": {
+   "hex": "#A47D30",
+   "lab": [
+    54.8,
+    7.0,
+    46.2
+   ],
+   "y10": 503,
+   "cb10": 361,
+   "cr10": 593,
+   "note": "Adele ornament gold median"
+  },
+  "cream_stoclet": {
+   "hex": "#D3B786",
+   "lab": [
+    75.7,
+    3.1,
+    28.6
+   ],
+   "y10": 701,
+   "cb10": 415,
+   "cr10": 569,
+   "note": "Stoclet cartoon ground (paper + gold paint)"
+  },
+  "ink": {
+   "hex": "#1F1611",
+   "lab": [
+    8.2,
+    3.6,
+    4.7
+   ],
+   "y10": 145,
+   "cb10": 500,
+   "cr10": 529,
+   "note": "darkest ornament/hair cluster"
+  },
+  "umber": {
+   "hex": "#3B3229",
+   "lab": [
+    21.5,
+    2.3,
+    7.2
+   ],
+   "y10": 240,
+   "cb10": 493,
+   "cr10": 529,
+   "note": "Kiss dark bar umber"
+  },
+  "silver_warm": {
+   "hex": "#C4B796",
+   "lab": [
+    74.7,
+    -0.7,
+    18.5
+   ],
+   "y10": 694,
+   "cb10": 449,
+   "cr10": 540,
+   "note": "Kiss silver tablet cluster (aged, warm)"
+  },
+  "silver_cool": {
+   "hex": "#AEABA1",
+   "lab": [
+    70.0,
+    -0.7,
+    5.5
+   ],
+   "y10": 651,
+   "cb10": 493,
+   "cr10": 519,
+   "note": "Fulfillment checker silver"
+  },
+  "white": {
+   "hex": "#D9DAD5",
+   "lab": [
+    86.8,
+    -1.2,
+    2.3
+   ],
+   "y10": 811,
+   "cb10": 504,
+   "cr10": 511,
+   "note": "Fulfillment checker white"
+  },
+  "flesh_kiss": {
+   "hex": "#B2A381",
+   "lab": [
+    67.5,
+    0.1,
+    19.7
+   ],
+   "y10": 626,
+   "cb10": 446,
+   "cr10": 544,
+   "note": "Kiss flesh median"
+  },
+  "flesh_adele": {
+   "hex": "#AF9D77",
+   "lab": [
+    65.4,
+    0.8,
+    22.3
+   ],
+   "y10": 607,
+   "cb10": 438,
+   "cr10": 550,
+   "note": "Adele flesh median"
+  },
+  "flesh_stoclet": {
+   "hex": "#BCA688",
+   "lab": [
+    69.3,
+    3.4,
+    18.5
+   ],
+   "y10": 643,
+   "cb10": 450,
+   "cr10": 555,
+   "note": "Fulfillment flesh median"
+  },
+  "flush": {
+   "hex": "#CA5E31",
+   "lab": [
+    52.7,
+    40.1,
+    45.0
+   ],
+   "y10": 455,
+   "cb10": 389,
+   "cr10": 709,
+   "note": "Kiss lips/cheek (top 3 % chroma in flesh)"
+  },
+  "jewels": [
+   {
+    "hex": "#646695",
+    "lab": [
+     44.8,
+     10.8,
+     -25.9
+    ],
+    "y10": 425,
+    "cb10": 595,
+    "cr10": 501,
+    "weight": 0.3309
+   },
+   {
+    "hex": "#B23608",
+    "lab": [
+     41.4,
+     48.6,
+     50.7
+    ],
+    "y10": 329,
+    "cb10": 381,
+    "cr10": 737,
+    "weight": 0.1555
+   },
+   {
+    "hex": "#C95F53",
+    "lab": [
+     53.2,
+     41.2,
+     27.0
+    ],
+    "y10": 465,
+    "cb10": 448,
+    "cr10": 700,
+    "weight": 0.1377
+   },
+   {
+    "hex": "#956D9A",
+    "lab": [
+     51.5,
+     23.9,
+     -18.2
+    ],
+    "y10": 479,
+    "cb10": 575,
+    "cr10": 575,
+    "weight": 0.134
+   },
+   {
+    "hex": "#A66464",
+    "lab": [
+     49.7,
+     26.6,
+     11.4
+    ],
+    "y10": 456,
+    "cb10": 485,
+    "cr10": 628,
+    "weight": 0.0911
+   },
+   {
+    "hex": "#4B4894",
+    "lab": [
+     34.5,
+     22.6,
+     -41.6
+    ],
+    "y10": 332,
+    "cb10": 644,
+    "cr10": 505,
+    "weight": 0.0732
+   },
+   {
+    "hex": "#944017",
+    "lab": [
+     37.9,
+     33.0,
+     40.2
+    ],
+    "y10": 335,
+    "cb10": 406,
+    "cr10": 666,
+    "weight": 0.0674
+   },
+   {
+    "hex": "#39797E",
+    "lab": [
+     47.0,
+     -18.9,
+     -9.0
+    ],
+    "y10": 434,
+    "cb10": 547,
+    "cr10": 399,
+    "weight": 0.0103
+   }
+  ],
+  "orange_enamel": [
+   {
+    "hex": "#B66B1F",
+    "lab": [
+     52.5,
+     24.4,
+     51.8
+    ],
+    "y10": 468,
+    "cb10": 348,
+    "cr10": 656,
+    "weight": 0.3863
+   },
+   {
+    "hex": "#935209",
+    "lab": [
+     41.6,
+     22.4,
+     48.1
+    ],
+    "y10": 375,
+    "cb10": 358,
+    "cr10": 638,
+    "weight": 0.3856
+   },
+   {
+    "hex": "#D07815",
+    "lab": [
+     58.9,
+     28.2,
+     61.7
+    ],
+    "y10": 516,
+    "cb10": 303,
+    "cr10": 683,
+    "weight": 0.2281
+   }
+  ],
+  "meadow_greens": [
+   {
+    "hex": "#B4B894",
+    "lab": [
+     73.6,
+     -7.6,
+     17.9
+    ],
+    "y10": 684,
+    "cb10": 450,
+    "cr10": 511,
+    "weight": 0.3012
+   },
+   {
+    "hex": "#4D583B",
+    "lab": [
+     35.7,
+     -10.1,
+     15.4
+    ],
+    "y10": 351,
+    "cb10": 465,
+    "cr10": 497,
+    "weight": 0.2979
+   },
+   {
+    "hex": "#577329",
+    "lab": [
+     44.9,
+     -22.7,
+     36.7
+    ],
+    "y10": 420,
+    "cb10": 393,
+    "cr10": 475,
+    "weight": 0.2373
+   },
+   {
+    "hex": "#6A9F6F",
+    "lab": [
+     60.8,
+     -27.7,
+     19.6
+    ],
+    "y10": 560,
+    "cb10": 449,
+    "cr10": 427,
+    "weight": 0.1636
+   }
+  ],
+  "leaf_axis": [
+   {
+    "hex": "#AEABA1",
+    "lab": [
+     70.0,
+     -0.7,
+     5.5
+    ],
+    "y10": 651,
+    "cb10": 493,
+    "cr10": 519,
+    "note": "Fulfillment checker silver",
+    "stop": "silver / platinum"
+   },
+   {
+    "hex": "#87733D",
+    "lab": [
+     49.2,
+     0.5,
+     32.5
+    ],
+    "y10": 460,
+    "cb10": 409,
+    "cr10": 556,
+    "note": "Kiss field (brass leaf) median",
+    "stop": "olive brass"
+   },
+   {
+    "hex": "#C3A74D",
+    "lab": [
+     69.3,
+     -0.5,
+     49.3
+    ],
+    "y10": 636,
+    "cb10": 343,
+    "cr10": 576,
+    "note": "Kiss robe gold median",
+    "stop": "warm gold"
+   },
+   {
+    "hex": "#A87111",
+    "lab": [
+     52.0,
+     14.5,
+     55.2
+    ],
+    "y10": 469,
+    "cb10": 321,
+    "cr10": 624,
+    "note": "Adele field (orange gold) median",
+    "stop": "orange gold"
+   }
+  ]
+ },
+ "two_golds": {
+  "kiss": {
+   "dY10_median": 177,
+   "dCb10": -68,
+   "dCr10": 16,
+   "dCstar_median": 18,
+   "dHue_median": 3,
+   "field_y10_p10_p90": [
+    359,
+    589
+   ],
+   "robe_y10_p10_p90": [
+    496,
+    719
+   ]
+  },
+  "adele1": {
+   "dY10_median": 32,
+   "dCb10": 38,
+   "dCr10": -29,
+   "dCstar_median": -10,
+   "dHue_median": 6,
+   "field_y10_p10_p90": [
+    394,
+    576
+   ],
+   "robe_y10_p10_p90": [
+    364,
+    671
+   ]
+  }
+ },
+ "gold_by_zone": {
+  "kiss": {
+   "field": {
+    "n_frac": 0.9969716778643678,
+    "median_hex": "#87733D",
+    "median_lab": [
+     49.1,
+     0.9,
+     32.2
+    ],
+    "Lstar_pct": [
+     31,
+     37,
+     49,
+     64,
+     74
+    ],
+    "Cstar_pct": [
+     19,
+     24,
+     32,
+     42,
+     48
+    ],
+    "hue_pct": [
+     79,
+     84,
+     88,
+     93,
+     96
+    ],
+    "y10_pct": [
+     305,
+     359,
+     460,
+     589,
+     685
+    ],
+    "cb10_median": 410,
+    "cr10_median": 556
+   },
+   "robe": {
+    "n_frac": 0.8362034658812728,
+    "median_hex": "#C3A74D",
+    "median_lab": [
+     69.4,
+     -0.5,
+     49.4
+    ],
+    "Lstar_pct": [
+     30,
+     54,
+     69,
+     78,
+     83
+    ],
+    "Cstar_pct": [
+     12,
+     18,
+     50,
+     55,
+     58
+    ],
+    "hue_pct": [
+     77,
+     86,
+     91,
+     95,
+     98
+    ],
+    "y10_pct": [
+     300,
+     496,
+     637,
+     719,
+     763
+    ],
+    "cb10_median": 342,
+    "cr10_median": 572
+   }
+  },
+  "adele1": {
+   "field": {
+    "n_frac": 0.9991569026361988,
+    "median_hex": "#A87111",
+    "median_lab": [
+     52.1,
+     14.1,
+     55.1
+    ],
+    "Lstar_pct": [
+     37,
+     43,
+     52,
+     64,
+     72
+    ],
+    "Cstar_pct": [
+     27,
+     50,
+     57,
+     62,
+     65
+    ],
+    "hue_pct": [
+     68,
+     71,
+     75,
+     80,
+     84
+    ],
+    "y10_pct": [
+     346,
+     394,
+     469,
+     576,
+     653
+    ],
+    "cb10_median": 320,
+    "cr10_median": 623
+   },
+   "robe": {
+    "n_frac": 0.9468008776816434,
+    "median_hex": "#A47D30",
+    "median_lab": [
+     54.8,
+     7.4,
+     46.3
+    ],
+    "Lstar_pct": [
+     28,
+     39,
+     55,
+     74,
+     85
+    ],
+    "Cstar_pct": [
+     18,
+     27,
+     47,
+     62,
+     69
+    ],
+    "hue_pct": [
+     66,
+     73,
+     81,
+     89,
+     96
+    ],
+    "y10_pct": [
+     277,
+     364,
+     501,
+     671,
+     777
+    ],
+    "cb10_median": 358,
+    "cr10_median": 594
+   }
+  },
+  "stoclet_fulfillment": {
+   "field": {
+    "n_frac": 0.9810584452735587,
+    "median_hex": "#D3B786",
+    "median_lab": [
+     75.8,
+     3.0,
+     28.9
+    ],
+    "Lstar_pct": [
+     45,
+     53,
+     76,
+     84,
+     87
+    ],
+    "Cstar_pct": [
+     22,
+     25,
+     29,
+     37,
+     41
+    ],
+    "hue_pct": [
+     71,
+     75,
+     84,
+     88,
+     90
+    ],
+    "y10_pct": [
+     426,
+     493,
+     701,
+     783,
+     806
+    ],
+    "cb10_median": 414,
+    "cr10_median": 569
+   },
+   "robe": {
+    "n_frac": 0.5769186361579417,
+    "median_hex": "#B08E5F",
+    "median_lab": [
+     61.2,
+     6.4,
+     30.0
+    ],
+    "Lstar_pct": [
+     43,
+     51,
+     61,
+     80,
+     90
+    ],
+    "Cstar_pct": [
+     14,
+     22,
+     31,
+     36,
+     40
+    ],
+    "hue_pct": [
+     48,
+     71,
+     78,
+     96,
+     103
+    ],
+    "y10_pct": [
+     405,
+     478,
+     565,
+     745,
+     842
+    ],
+    "cb10_median": 414,
+    "cr10_median": 578
+   }
+  }
+ },
+ "coverage": {
+  "kiss": {
+   "gold": 0.8044,
+   "black": 0.0152,
+   "neutral": 0.0413,
+   "green": 0.1009,
+   "red": 0.0067,
+   "violet": 0.0292,
+   "blue": 0.0023
+  },
+  "adele1": {
+   "gold": 0.9334,
+   "black": 0.0292,
+   "neutral": 0.0059,
+   "green": 0.0271,
+   "red": 0.0038,
+   "violet": 0.0003,
+   "blue": 0.0003
+  },
+  "stoclet_fulfillment": {
+   "gold": 0.7717,
+   "black": 0.0127,
+   "neutral": 0.1199,
+   "green": 0.0333,
+   "red": 0.0495,
+   "violet": 0.003,
+   "blue": 0.0098
+  },
+  "stoclet_expectation": {
+   "gold": 0.8433,
+   "black": 0.0074,
+   "neutral": 0.0964,
+   "green": 0.0371,
+   "red": 0.0021,
+   "violet": 0.0101,
+   "blue": 0.0036
+  },
+  "stoclet_treeoflife": {
+   "gold": 0.8612,
+   "black": 0.0141,
+   "neutral": 0.0762,
+   "green": 0.0377,
+   "red": 0.0042,
+   "violet": 0.0057,
+   "blue": 0.001
+  },
+  "danae": {
+   "gold": 0.2979,
+   "black": 0.0486,
+   "neutral": 0.5923,
+   "green": 0.02,
+   "red": 0.0005,
+   "violet": 0.04,
+   "blue": 0.0006
+  },
+  "judith1": {
+   "gold": 0.5443,
+   "black": 0.1839,
+   "neutral": 0.2534,
+   "green": 0.0151,
+   "red": 0.0013,
+   "violet": 0.0018,
+   "blue": 0.0002
+  },
+  "fritza_riedler": {
+   "gold": 0.6035,
+   "black": 0.0142,
+   "neutral": 0.3783,
+   "green": 0.0019,
+   "red": 0.001,
+   "violet": 0.0008,
+   "blue": 0.0003
+  },
+  "hope2": {
+   "gold": 0.7723,
+   "black": 0.0263,
+   "neutral": 0.0238,
+   "green": 0.1071,
+   "red": 0.0591,
+   "violet": 0.008,
+   "blue": 0.0034
+  },
+  "water_serpents1": {
+   "gold": 0.4571,
+   "black": 0.1002,
+   "neutral": 0.3737,
+   "green": 0.0562,
+   "red": 0.0046,
+   "violet": 0.0079,
+   "blue": 0.0003
+  }
+ },
+ "coverage_by_zone": {
+  "kiss": {
+   "field": {
+    "gold": 0.997,
+    "black": 0.0004,
+    "neutral": 0.0006,
+    "green": 0.0017,
+    "red": 0.0,
+    "violet": 0.0003,
+    "blue": 0.0
+   },
+   "meadow": {
+    "gold": 0.3415,
+    "black": 0.0003,
+    "neutral": 0.0757,
+    "green": 0.4546,
+    "red": 0.0048,
+    "violet": 0.1124,
+    "blue": 0.0108
+   },
+   "robe": {
+    "gold": 0.8362,
+    "black": 0.0337,
+    "neutral": 0.0673,
+    "green": 0.0228,
+    "red": 0.0194,
+    "violet": 0.0201,
+    "blue": 0.0005
+   },
+   "hair": {
+    "gold": 0.4867,
+    "black": 0.2782,
+    "neutral": 0.1251,
+    "green": 0.0844,
+    "red": 0.0,
+    "violet": 0.0254,
+    "blue": 0.0001
+   },
+   "flesh": {
+    "gold": 0.8138,
+    "black": 0.0042,
+    "neutral": 0.1224,
+    "green": 0.0383,
+    "red": 0.0081,
+    "violet": 0.0129,
+    "blue": 0.0003
+   }
+  },
+  "adele1": {
+   "field": {
+    "gold": 0.9992,
+    "black": 0.0008,
+    "neutral": 0.0,
+    "green": 0.0,
+    "red": 0.0,
+    "violet": 0.0,
+    "blue": 0.0
+   },
+   "meadow": {
+    "gold": 0.1036,
+    "black": 0.0521,
+    "neutral": 0.0046,
+    "green": 0.8397,
+    "red": 0.0,
+    "violet": 0.0,
+    "blue": 0.0
+   },
+   "robe": {
+    "gold": 0.9468,
+    "black": 0.027,
+    "neutral": 0.0094,
+    "green": 0.0098,
+    "red": 0.0061,
+    "violet": 0.0006,
+    "blue": 0.0005
+   },
+   "hair": {
+    "gold": 0.2174,
+    "black": 0.7717,
+    "neutral": 0.0067,
+    "green": 0.0032,
+    "red": 0.0003,
+    "violet": 0.0,
+    "blue": 0.0007
+   },
+   "flesh": {
+    "gold": 0.9665,
+    "black": 0.0145,
+    "neutral": 0.0028,
+    "green": 0.0117,
+    "red": 0.0045,
+    "violet": 0.0,
+    "blue": 0.0
+   }
+  },
+  "stoclet_fulfillment": {
+   "field": {
+    "gold": 0.9811,
+    "black": 0.0,
+    "neutral": 0.0119,
+    "green": 0.0032,
+    "red": 0.0007,
+    "violet": 0.0003,
+    "blue": 0.0028
+   },
+   "meadow": {
+    "gold": 0.6449,
+    "black": 0.0008,
+    "neutral": 0.2385,
+    "green": 0.0644,
+    "red": 0.0111,
+    "violet": 0.0101,
+    "blue": 0.0302
+   },
+   "robe": {
+    "gold": 0.5769,
+    "black": 0.0297,
+    "neutral": 0.2026,
+    "green": 0.0612,
+    "red": 0.1116,
+    "violet": 0.0046,
+    "blue": 0.0134
+   },
+   "hair": {
+    "gold": 0.4142,
+    "black": 0.0368,
+    "neutral": 0.3822,
+    "green": 0.0012,
+    "red": 0.1655,
+    "violet": 0.0,
+    "blue": 0.0
+   },
+   "flesh": {
+    "gold": 0.6886,
+    "black": 0.0028,
+    "neutral": 0.2692,
+    "green": 0.0029,
+    "red": 0.0352,
+    "violet": 0.0005,
+    "blue": 0.0009
+   }
+  }
+ },
+ "luma_y10_p2_p10_p50_p90_p98": {
+  "kiss": [
+   244,
+   365,
+   516,
+   677,
+   736
+  ],
+  "adele1": [
+   171,
+   352,
+   481,
+   643,
+   749
+  ],
+  "stoclet_fulfillment": [
+   257,
+   443,
+   609,
+   781,
+   832
+  ],
+  "stoclet_expectation": [
+   355,
+   457,
+   619,
+   757,
+   830
+  ],
+  "stoclet_treeoflife": [
+   253,
+   422,
+   651,
+   760,
+   809
+  ],
+  "danae": [
+   186,
+   283,
+   584,
+   758,
+   806
+  ],
+  "judith1": [
+   150,
+   172,
+   451,
+   682,
+   788
+  ],
+  "fritza_riedler": [
+   247,
+   404,
+   511,
+   701,
+   741
+  ],
+  "hope2": [
+   216,
+   261,
+   335,
+   569,
+   691
+  ],
+  "water_serpents1": [
+   108,
+   227,
+   633,
+   809,
+   857
+  ]
+ },
+ "luma_by_zone": {
+  "kiss": {
+   "field": [
+    305,
+    359,
+    460,
+    589,
+    685
+   ],
+   "meadow": [
+    359,
+    425,
+    546,
+    665,
+    720
+   ],
+   "robe": [
+    209,
+    358,
+    623,
+    714,
+    760
+   ],
+   "hair": [
+    168,
+    194,
+    303,
+    539,
+    650
+   ],
+   "flesh": [
+    341,
+    485,
+    624,
+    691,
+    721
+   ]
+  },
+  "adele1": {
+   "field": [
+    345,
+    394,
+    469,
+    576,
+    653
+   ],
+   "meadow": [
+    71,
+    304,
+    367,
+    437,
+    606
+   ],
+   "robe": [
+    193,
+    339,
+    496,
+    669,
+    777
+   ],
+   "hair": [
+    84,
+    107,
+    153,
+    464,
+    582
+   ],
+   "flesh": [
+    255,
+    446,
+    601,
+    676,
+    753
+   ]
+  },
+  "stoclet_fulfillment": {
+   "field": [
+    421,
+    491,
+    701,
+    784,
+    807
+   ],
+   "meadow": [
+    336,
+    427,
+    591,
+    722,
+    809
+   ],
+   "robe": [
+    218,
+    398,
+    558,
+    782,
+    858
+   ],
+   "hair": [
+    221,
+    246,
+    302,
+    383,
+    671
+   ],
+   "flesh": [
+    283,
+    445,
+    636,
+    760,
+    788
+   ]
+  }
+ },
+ "band_energy_px1080": {
+  "bands": {
+   "grain": [
+    0.5,
+    1.5
+   ],
+   "detail": [
+    1.5,
+    5.0
+   ],
+   "motif": [
+    5.0,
+    20.0
+   ]
+  },
+  "by_zone": {
+   "kiss": {
+    "grain": {
+     "field": 19.6,
+     "meadow": 23.9,
+     "robe": 22.9,
+     "hair": 12.3,
+     "flesh": 11.7,
+     "robe_dress": 19.5,
+     "robe_rect": 25.8
+    },
+    "detail": {
+     "field": 10.5,
+     "meadow": 26.6,
+     "robe": 30.5,
+     "hair": 17.5,
+     "flesh": 15.6,
+     "robe_dress": 20.9,
+     "robe_rect": 38.7
+    },
+    "motif": {
+     "field": 10.5,
+     "meadow": 20.0,
+     "robe": 38.5,
+     "hair": 40.2,
+     "flesh": 29.1,
+     "robe_dress": 25.8,
+     "robe_rect": 48.9
+    }
+   },
+   "adele1": {
+    "grain": {
+     "field": 18.3,
+     "meadow": 10.7,
+     "robe": 32.3,
+     "hair": 9.7,
+     "flesh": 11.5,
+     "robe_gown": 26.7,
+     "robe_halo": 39.4,
+     "robe_panel": 21.8,
+     "robe_chair": 43.5,
+     "robe_dress": 30.1
+    },
+    "detail": {
+     "field": 15.2,
+     "meadow": 16.0,
+     "robe": 33.7,
+     "hair": 14.1,
+     "flesh": 16.7,
+     "robe_gown": 27.9,
+     "robe_halo": 37.5,
+     "robe_panel": 35.6,
+     "robe_chair": 28.2,
+     "robe_dress": 41.1
+    },
+    "motif": {
+     "field": 11.3,
+     "meadow": 13.4,
+     "robe": 33.9,
+     "hair": 58.6,
+     "flesh": 32.9,
+     "robe_gown": 27.9,
+     "robe_halo": 40.1,
+     "robe_panel": 28.8,
+     "robe_chair": 21.6,
+     "robe_dress": 45.7
+    }
+   },
+   "stoclet_fulfillment": {
+    "grain": {
+     "field": 14.8,
+     "meadow": 19.3,
+     "robe": 22.1,
+     "hair": 12.6,
+     "flesh": 15.8,
+     "robe_ovals": 20.1,
+     "robe_dress_w": 29.6,
+     "robe_checker": 32.8
+    },
+    "detail": {
+     "field": 31.7,
+     "meadow": 23.7,
+     "robe": 32.7,
+     "hair": 11.8,
+     "flesh": 23.7,
+     "robe_ovals": 27.3,
+     "robe_dress_w": 44.4,
+     "robe_checker": 69.9
+    },
+    "motif": {
+     "field": 45.8,
+     "meadow": 36.5,
+     "robe": 46.8,
+     "hair": 74.1,
+     "flesh": 49.5,
+     "robe_ovals": 38.2,
+     "robe_dress_w": 49.1,
+     "robe_checker": 121.1
+    }
+   }
+  },
+  "motif_ratio_to_field": {
+   "kiss": {
+    "meadow": 1.9,
+    "robe": 3.67,
+    "hair": 3.83,
+    "flesh": 2.77,
+    "robe_dress": 2.46,
+    "robe_rect": 4.66
+   },
+   "adele1": {
+    "meadow": 1.19,
+    "robe": 3.0,
+    "hair": 5.19,
+    "flesh": 2.91,
+    "robe_gown": 2.47,
+    "robe_halo": 3.55,
+    "robe_panel": 2.55,
+    "robe_chair": 1.91,
+    "robe_dress": 4.04
+   },
+   "stoclet_fulfillment": {
+    "meadow": 0.8,
+    "robe": 1.02,
+    "hair": 1.62,
+    "flesh": 1.08,
+    "robe_ovals": 0.83,
+    "robe_dress_w": 1.07,
+    "robe_checker": 2.64
+   }
+  }
+ },
+ "field_texture_px1080": {
+  "nebula_kiss": {
+   "grain_std_y10": 35.353065490722656,
+   "grain_p98_abs_y10": 90.81027221679688,
+   "blotch_std_y10": 13.81974983215332,
+   "field_y10_pct": [
+    336,
+    383,
+    464,
+    552,
+    620
+   ],
+   "flecks_gt40": {
+    "pixel_frac": 0.1657,
+    "count_per_100x100px": 282.3,
+    "eqdiam_px_p50": 1.95,
+    "eqdiam_px_p90": 3.19,
+    "silver_frac": 0.00017641129032258063
+   },
+   "flecks_gt80": {
+    "pixel_frac": 0.06,
+    "count_per_100x100px": 98.41,
+    "eqdiam_px_p50": 1.6,
+    "eqdiam_px_p90": 2.76,
+    "silver_frac": 0.0
+   }
+  },
+  "leaf_adele": {
+   "grain_std_y10": 27.174354553222656,
+   "grain_p98_abs_y10": 71.0342025756836,
+   "blotch_std_y10": 19.46628189086914,
+   "field_y10_pct": [
+    365,
+    406,
+    473,
+    566,
+    635
+   ],
+   "flecks_gt40": {
+    "pixel_frac": 0.1744,
+    "count_per_100x100px": 195.93,
+    "eqdiam_px_p50": 2.26,
+    "eqdiam_px_p90": 4.92,
+    "silver_frac": 0.0
+   },
+   "flecks_gt80": {
+    "pixel_frac": 0.0616,
+    "count_per_100x100px": 103.9,
+    "eqdiam_px_p50": 1.95,
+    "eqdiam_px_p90": 3.57,
+    "silver_frac": 0.0
+   }
+  },
+  "stoclet_cartoon": {
+   "grain_std_y10": 23.818069458007812,
+   "grain_p98_abs_y10": 77.7705307006836,
+   "blotch_std_y10": 53.91712188720703,
+   "field_y10_pct": [
+    426,
+    493,
+    702,
+    786,
+    808
+   ],
+   "flecks_gt40": {
+    "pixel_frac": 0.2448,
+    "count_per_100x100px": 13.01,
+    "eqdiam_px_p50": 2.26,
+    "eqdiam_px_p90": 20.82,
+    "silver_frac": 0.030146822641978634
+   },
+   "flecks_gt80": {
+    "pixel_frac": 0.0874,
+    "count_per_100x100px": 37.88,
+    "eqdiam_px_p50": 2.52,
+    "eqdiam_px_p90": 7.98,
+    "silver_frac": 0.07278265283921967
+   }
+  }
+ },
+ "cells": {
+  "kiss/robe_rect": {
+   "mode": "ground",
+   "robe_width_native_px": 1890,
+   "px1080_per_robe_pct": 5.32,
+   "region_area_frac_of_robe": 0.49608027936641286,
+   "all": {
+    "n": 129,
+    "eqd_pct_robe_width": [
+     0.99,
+     1.33,
+     1.99,
+     3.03,
+     4.24,
+     10.33
+    ],
+    "long_side_pct_robe_width": [
+     1.32,
+     1.75,
+     2.67,
+     5.33,
+     7.37,
+     12.07
+    ],
+    "eqd_px1080": [
+     5.28,
+     7.09,
+     10.56,
+     16.08,
+     22.52,
+     54.89
+    ],
+    "lognormal_eqd": {
+     "mu_ln_pct": 0.73,
+     "sigma_ln": 0.58
+    },
+    "aspect_hw": [
+     0.9,
+     1.75,
+     3.52
+    ],
+    "shapes": {
+     "disc": 0.109,
+     "irregular": 0.512,
+     "rect": 0.264,
+     "triangle": 0.116
+    },
+    "rings": 0,
+    "rim_ratio": null,
+    "rim_px1080": null
+   },
+   "interior": {
+    "n": 118,
+    "eqd_pct_robe_width": [
+     0.97,
+     1.26,
+     1.93,
+     2.81,
+     4.02,
+     10.55
+    ],
+    "long_side_pct_robe_width": [
+     1.25,
+     1.75,
+     2.67,
+     4.98,
+     7.55,
+     12.2
+    ],
+    "eqd_px1080": [
+     5.17,
+     6.71,
+     10.25,
+     14.95,
+     21.37,
+     56.09
+    ],
+    "lognormal_eqd": {
+     "mu_ln_pct": 0.695,
+     "sigma_ln": 0.575
+    },
+    "aspect_hw": [
+     0.85,
+     1.83,
+     3.58
+    ],
+    "shapes": {
+     "disc": 0.119,
+     "irregular": 0.483,
+     "rect": 0.288,
+     "triangle": 0.11
+    },
+    "rings": 0,
+    "rim_ratio": null,
+    "rim_px1080": null
+   }
+  },
+  "kiss/robe_dress": {
+   "mode": "ground",
+   "robe_width_native_px": 1890,
+   "px1080_per_robe_pct": 5.32,
+   "region_area_frac_of_robe": 0.5036209393914985,
+   "all": {
+    "n": 154,
+    "eqd_pct_robe_width": [
+     0.88,
+     1.15,
+     1.94,
+     3.39,
+     4.37,
+     5.96
+    ],
+    "long_side_pct_robe_width": [
+     1.17,
+     1.5,
+     2.67,
+     4.79,
+     6.5,
+     9.22
+    ],
+    "eqd_px1080": [
+     4.7,
+     6.11,
+     10.3,
+     18.01,
+     23.2,
+     31.67
+    ],
+    "lognormal_eqd": {
+     "mu_ln_pct": 0.687,
+     "sigma_ln": 0.609
+    },
+    "aspect_hw": [
+     0.62,
+     0.89,
+     1.56
+    ],
+    "shapes": {
+     "disc": 0.143,
+     "irregular": 0.597,
+     "rect": 0.071,
+     "triangle": 0.188
+    },
+    "rings": 0,
+    "rim_ratio": null,
+    "rim_px1080": null
+   },
+   "interior": {
+    "n": 108,
+    "eqd_pct_robe_width": [
+     0.89,
+     1.11,
+     1.78,
+     3.39,
+     4.29,
+     5.91
+    ],
+    "long_side_pct_robe_width": [
+     1.08,
+     1.42,
+     2.25,
+     4.67,
+     6.55,
+     8.75
+    ],
+    "eqd_px1080": [
+     4.71,
+     5.88,
+     9.47,
+     18.03,
+     22.79,
+     31.41
+    ],
+    "lognormal_eqd": {
+     "mu_ln_pct": 0.655,
+     "sigma_ln": 0.619
+    },
+    "aspect_hw": [
+     0.62,
+     0.85,
+     1.47
+    ],
+    "shapes": {
+     "disc": 0.194,
+     "irregular": 0.593,
+     "rect": 0.093,
+     "triangle": 0.12
+    },
+    "rings": 0,
+    "rim_ratio": null,
+    "rim_px1080": null
+   }
+  },
+  "stoclet_fulfillment/robe_ovals": {
+   "mode": "ground",
+   "robe_width_native_px": 2842,
+   "px1080_per_robe_pct": 7.99,
+   "region_area_frac_of_robe": 0.8445363152088625,
+   "all": {
+    "n": 112,
+    "eqd_pct_robe_width": [
+     1.96,
+     2.77,
+     4.31,
+     11.27,
+     17.94,
+     26.73
+    ],
+    "long_side_pct_robe_width": [
+     2.75,
+     3.65,
+     6.0,
+     14.44,
+     23.9,
+     37.96
+    ],
+    "eqd_px1080": [
+     15.65,
+     22.18,
+     34.47,
+     90.05,
+     143.44,
+     213.7
+    ],
+    "lognormal_eqd": {
+     "mu_ln_pct": 1.65,
+     "sigma_ln": 0.858
+    },
+    "aspect_hw": [
+     0.52,
+     0.86,
+     1.42
+    ],
+    "shapes": {
+     "disc": 0.223,
+     "irregular": 0.393,
+     "rect": 0.161,
+     "triangle": 0.223
+    },
+    "rings": 0,
+    "rim_ratio": null,
+    "rim_px1080": null
+   },
+   "interior": {
+    "n": 66,
+    "eqd_pct_robe_width": [
+     1.7,
+     2.68,
+     3.26,
+     5.81,
+     10.7,
+     19.79
+    ],
+    "long_side_pct_robe_width": [
+     2.12,
+     3.12,
+     4.17,
+     6.4,
+     12.17,
+     26.03
+    ],
+    "eqd_px1080": [
+     13.56,
+     21.45,
+     26.05,
+     46.4,
+     85.49,
+     158.16
+    ],
+    "lognormal_eqd": {
+     "mu_ln_pct": 1.318,
+     "sigma_ln": 0.7
+    },
+    "aspect_hw": [
+     0.66,
+     0.85,
+     1.18
+    ],
+    "shapes": {
+     "disc": 0.303,
+     "irregular": 0.318,
+     "rect": 0.152,
+     "triangle": 0.227
+    },
+    "rings": 0,
+    "rim_ratio": null,
+    "rim_px1080": null
+   }
+  },
+  "stoclet_fulfillment/robe_checker": {
+   "mode": "classes",
+   "robe_width_native_px": 2842,
+   "px1080_per_robe_pct": 7.99,
+   "region_area_frac_of_robe": 0.08774294438339658,
+   "all": {
+    "n": 158,
+    "eqd_pct_robe_width": [
+     0.91,
+     1.04,
+     1.4,
+     2.3,
+     3.75,
+     7.63
+    ],
+    "long_side_pct_robe_width": [
+     1.33,
+     1.6,
+     2.25,
+     3.9,
+     6.03,
+     12.76
+    ],
+    "eqd_px1080": [
+     7.24,
+     8.31,
+     11.22,
+     18.38,
+     29.98,
+     61.02
+    ],
+    "lognormal_eqd": {
+     "mu_ln_pct": 0.514,
+     "sigma_ln": 0.579
+    },
+    "aspect_hw": [
+     0.48,
+     1.16,
+     2.64
+    ],
+    "shapes": {
+     "disc": 0.044,
+     "irregular": 0.759,
+     "rect": 0.095,
+     "ring": 0.013,
+     "triangle": 0.089
+    },
+    "rings": 2,
+    "rim_ratio": null,
+    "rim_px1080": null
+   },
+   "interior": {
+    "n": 158,
+    "eqd_pct_robe_width": [
+     0.91,
+     1.04,
+     1.4,
+     2.3,
+     3.75,
+     7.63
+    ],
+    "long_side_pct_robe_width": [
+     1.33,
+     1.6,
+     2.25,
+     3.9,
+     6.03,
+     12.76
+    ],
+    "eqd_px1080": [
+     7.24,
+     8.31,
+     11.22,
+     18.38,
+     29.98,
+     61.02
+    ],
+    "lognormal_eqd": {
+     "mu_ln_pct": 0.514,
+     "sigma_ln": 0.579
+    },
+    "aspect_hw": [
+     0.48,
+     1.16,
+     2.64
+    ],
+    "shapes": {
+     "disc": 0.044,
+     "irregular": 0.759,
+     "rect": 0.095,
+     "ring": 0.013,
+     "triangle": 0.089
+    },
+    "rings": 2,
+    "rim_ratio": null,
+    "rim_px1080": null
+   }
+  },
+  "stoclet_fulfillment/robe_dress_w": {
+   "mode": "ground",
+   "robe_width_native_px": 2842,
+   "px1080_per_robe_pct": 7.99,
+   "region_area_frac_of_robe": 0.06833390339085156,
+   "all": {
+    "n": 31,
+    "eqd_pct_robe_width": [
+     1.75,
+     2.06,
+     3.65,
+     5.6,
+     6.1,
+     11.11
+    ],
+    "long_side_pct_robe_width": [
+     2.08,
+     2.67,
+     4.67,
+     7.71,
+     8.92,
+     13.16
+    ],
+    "eqd_px1080": [
+     13.96,
+     16.47,
+     29.21,
+     44.78,
+     48.75,
+     88.77
+    ],
+    "lognormal_eqd": {
+     "mu_ln_pct": 1.181,
+     "sigma_ln": 0.601
+    },
+    "aspect_hw": [
+     0.9,
+     1.34,
+     3.46
+    ],
+    "shapes": {
+     "disc": 0.097,
+     "irregular": 0.581,
+     "rect": 0.194,
+     "triangle": 0.129
+    },
+    "rings": 0,
+    "rim_ratio": null,
+    "rim_px1080": null
+   },
+   "interior": {
+    "n": 11,
+    "eqd_pct_robe_width": [
+     1.75,
+     1.96,
+     2.15,
+     2.86,
+     3.69,
+     5.41
+    ],
+    "long_side_pct_robe_width": [
+     1.92,
+     2.33,
+     2.67,
+     4.08,
+     6.08,
+     6.31
+    ],
+    "eqd_px1080": [
+     13.96,
+     15.66,
+     17.17,
+     22.83,
+     29.47,
+     43.22
+    ],
+    "lognormal_eqd": {
+     "mu_ln_pct": 0.844,
+     "sigma_ln": 0.427
+    },
+    "aspect_hw": [
+     1.03,
+     1.34,
+     2.81
+    ],
+    "shapes": {
+     "disc": 0.091,
+     "irregular": 0.364,
+     "rect": 0.455,
+     "triangle": 0.091
+    },
+    "rings": 0,
+    "rim_ratio": null,
+    "rim_px1080": null
+   }
+  }
+ },
+ "manual": {
+  "_doc": [
+   "Hand measurements from gridded zooms (grid_view.py), where automatic segmentation fails.",
+   "Sizes: fraction of canvas width, and px at 1080-equivalent (canvas short side = 1080 px;",
+   "for the square Kiss/Adele canvases 1.0 canvas width = 1080 px; for the Stoclet cartoons the",
+   "panel width = 1080 px). Counts are rough tallies by eye, +/- ~30 %."
+  ],
+  "adele1_motifs": {
+   "dress_width_canvas": 0.27,
+   "eye": {
+    "w_canvas": 0.071,
+    "h_canvas": 0.019,
+    "w_px1080": 77,
+    "h_px1080": 20,
+    "aspect_hw": 0.27,
+    "pupil_px1080": 10,
+    "n_measured": 7,
+    "note": "almond, dark lid line, white, dark or blue iris; usually set at the top of a gold triangle"
+   },
+   "eye_triangle": {
+    "base_canvas": 0.057,
+    "h_canvas": 0.026,
+    "base_px1080": 62,
+    "h_px1080": 28,
+    "n_measured": 4
+   },
+   "small_triangle": {
+    "base_canvas_range": [
+     0.014,
+     0.02
+    ],
+    "base_px1080_range": [
+     15,
+     22
+    ],
+    "colours": "silver, umber, dark grey",
+    "density_per_100x100px1080": 13,
+    "note": "dense scatter between the eyes: Ravenna tesserae in triangle form"
+   },
+   "vertical_bar": {
+    "w_canvas": 0.009,
+    "h_canvas": 0.041,
+    "w_px1080": 10,
+    "h_px1080": 44,
+    "aspect_hw": 4.5,
+    "colours": "near-black, cobalt blue",
+    "n_measured": 6
+   },
+   "gold_tablet": {
+    "w_canvas": 0.03,
+    "h_canvas": 0.05,
+    "note": "engraved spiral / AB-like emblems, gold-on-gold, dress edges"
+   }
+  },
+  "rims": {
+   "kiss_black_bar": {
+    "rim": "none",
+    "note": "flat dark-umber bar straight on the leaf"
+   },
+   "kiss_silver_tablet": {
+    "border": "black",
+    "border_over_width": [
+     0.15,
+     0.18
+    ],
+    "border_px1080": 3
+   },
+   "fulfillment_oval": {
+    "rim": "fine dark pencil outline",
+    "rim_px1080": 1,
+    "interior": "concentric engraved rings every 9-12 px1080",
+    "note": "cartoon only; the executed mosaic outlines cells in gold (cloisonne) - not visible here"
+   },
+   "ring_disc": {
+    "ring_over_diameter": [
+     0.25,
+     0.35
+    ],
+    "note": "Fulfillment and Kiss small discs are thick rings round a contrasting centre"
+   },
+   "adele_eye": {
+    "outline": "dark",
+    "rim_px1080": 2
+   },
+   "gap_between_ovals_px1080": [
+    11,
+    22
+   ]
+  },
+  "motif_tallies": {
+   "kiss": {
+    "dark_bars": 45,
+    "silver_or_white_tablets": 35,
+    "button_pair_tablets": 20,
+    "ring_disc_clusters": 6,
+    "discs_in_clusters": 55,
+    "small_coloured_ovals_on_mantle": 25,
+    "gold_on_gold_spiral_circles": 30,
+    "field_motifs": 0,
+    "meadow_flowers": "hundreds (pointillist)"
+   },
+   "adele1": {
+    "eyes": 22,
+    "eye_triangles": 12,
+    "small_triangles": 300,
+    "vertical_bars": 18,
+    "halo_roundels_discs_spirals": 45,
+    "hollow_squares_panel": 16,
+    "gown_emblems": 25,
+    "chair_spirals": 60,
+    "field_silver_rectangles": 3,
+    "checker_trim_squares": 30
+   },
+   "stoclet_fulfillment": {
+    "large_ovals": 24,
+    "ovals_with_eye_slit": 10,
+    "small_ring_discs": 55,
+    "green_triangles": 35,
+    "picture_squares_bird_fish": 8,
+    "checker_blocks": 1,
+    "checker_squares": 60,
+    "field_tree_spirals": 40
+   },
+   "stoclet_treeoflife": {
+    "branch_spirals": 70,
+    "eyes_of_horus": 3,
+    "falcon": 1
+   },
+   "stoclet_expectation": {
+    "stacked_triangles": 70
+   },
+   "hope2": {
+    "ring_discs_on_robe": 80
+   }
+  }
+ },
+ "zone_area": {
+  "kiss": {
+   "field": 0.4622267443195737,
+   "meadow": 0.19935080842724154,
+   "robe": 0.28194402445186184,
+   "hair": 0.019022872902376285,
+   "flesh": 0.037455549898946595
+  },
+  "adele1": {
+   "field": 0.3334081172943115,
+   "meadow": 0.02482438087463379,
+   "robe": 0.5944697856903076,
+   "hair": 0.01446843147277832,
+   "flesh": 0.03282928466796875
+  },
+  "stoclet_fulfillment": {
+   "field": 0.4627370652119825,
+   "meadow": 0.09676871330115445,
+   "robe": 0.41751390202030253,
+   "hair": 0.005088854747213376,
+   "flesh": 0.017891464719347133
+  }
+ }
+}

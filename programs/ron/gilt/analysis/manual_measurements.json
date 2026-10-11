@@ -1,0 +1,43 @@
+{
+ "_doc": [
+  "Hand measurements from gridded zooms (grid_view.py), where automatic segmentation fails.",
+  "Sizes: fraction of canvas width, and px at 1080-equivalent (canvas short side = 1080 px;",
+  "for the square Kiss/Adele canvases 1.0 canvas width = 1080 px; for the Stoclet cartoons the",
+  "panel width = 1080 px). Counts are rough tallies by eye, +/- ~30 %."
+ ],
+ "adele1_motifs": {
+  "dress_width_canvas": 0.27,
+  "eye": {"w_canvas": 0.071, "h_canvas": 0.019, "w_px1080": 77, "h_px1080": 20, "aspect_hw": 0.27,
+          "pupil_px1080": 10, "n_measured": 7, "note": "almond, dark lid line, white, dark or blue iris; usually set at the top of a gold triangle"},
+  "eye_triangle": {"base_canvas": 0.057, "h_canvas": 0.026, "base_px1080": 62, "h_px1080": 28, "n_measured": 4},
+  "small_triangle": {"base_canvas_range": [0.014, 0.020], "base_px1080_range": [15, 22], "colours": "silver, umber, dark grey",
+                     "density_per_100x100px1080": 13, "note": "dense scatter between the eyes: Ravenna tesserae in triangle form"},
+  "vertical_bar": {"w_canvas": 0.009, "h_canvas": 0.041, "w_px1080": 10, "h_px1080": 44, "aspect_hw": 4.5,
+                   "colours": "near-black, cobalt blue", "n_measured": 6},
+  "gold_tablet": {"w_canvas": 0.03, "h_canvas": 0.05, "note": "engraved spiral / AB-like emblems, gold-on-gold, dress edges"}
+ },
+ "rims": {
+  "kiss_black_bar": {"rim": "none", "note": "flat dark-umber bar straight on the leaf"},
+  "kiss_silver_tablet": {"border": "black", "border_over_width": [0.15, 0.18], "border_px1080": 3},
+  "fulfillment_oval": {"rim": "fine dark pencil outline", "rim_px1080": 1,
+                       "interior": "concentric engraved rings every 9-12 px1080",
+                       "note": "cartoon only; the executed mosaic outlines cells in gold (cloisonne) - not visible here"},
+  "ring_disc": {"ring_over_diameter": [0.25, 0.35], "note": "Fulfillment and Kiss small discs are thick rings round a contrasting centre"},
+  "adele_eye": {"outline": "dark", "rim_px1080": 2},
+  "gap_between_ovals_px1080": [11, 22]
+ },
+ "motif_tallies": {
+  "kiss": {"dark_bars": 45, "silver_or_white_tablets": 35, "button_pair_tablets": 20,
+           "ring_disc_clusters": 6, "discs_in_clusters": 55, "small_coloured_ovals_on_mantle": 25,
+           "gold_on_gold_spiral_circles": 30, "field_motifs": 0, "meadow_flowers": "hundreds (pointillist)"},
+  "adele1": {"eyes": 22, "eye_triangles": 12, "small_triangles": 300, "vertical_bars": 18,
+             "halo_roundels_discs_spirals": 45, "hollow_squares_panel": 16, "gown_emblems": 25,
+             "chair_spirals": 60, "field_silver_rectangles": 3, "checker_trim_squares": 30},
+  "stoclet_fulfillment": {"large_ovals": 24, "ovals_with_eye_slit": 10, "small_ring_discs": 55,
+                          "green_triangles": 35, "picture_squares_bird_fish": 8, "checker_blocks": 1,
+                          "checker_squares": 60, "field_tree_spirals": 40},
+  "stoclet_treeoflife": {"branch_spirals": 70, "eyes_of_horus": 3, "falcon": 1},
+  "stoclet_expectation": {"stacked_triangles": 70},
+  "hope2": {"ring_discs_on_robe": 80}
+ }
+}

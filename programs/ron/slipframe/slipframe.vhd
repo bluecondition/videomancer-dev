@@ -1,62 +1,80 @@
--- Slipframe: datamosh-flavoured video processor.
+-- Slipframe v2.0: codec meltdown.
 --
--- Effects (all applied in one pass through the YUV444_30b pipeline):
---   * Horizontal smear     - per-pixel variable delay on Y/U/V via a
---                            1024-sample variable_delay_u. The delay is
---                            base_smear + luma-or-noise modulation + per-line
---                            tear offset, giving the "P-frame slipping"
---                            horizontal drag aesthetic.
---   * Chroma lag           - extra delay added to U and V on top of the Y
---                            smear, optionally in opposite directions on U
---                            and V (Split mode), for classic chromatic bleed.
---   * Scanline tear        - either every alternate line or LFSR-picked lines
---                            get an additional horizontal offset applied to
---                            the smear delay.
---   * Line-to-line persist - dual-bank video_line_buffer holding the previous
---                            line's raw input Y, blended into the current
---                            smeared Y.
---   * Bit-crush            - mask the lowest N bits of Y/U/V.
---   * Glitch               - momentary "boost everything" toggle that forces
---                            smear / mod / tear / chroma lag knobs to max.
---   * Dry/wet mix          - crossfade processed video against the
---                            latency-matched input with interpolator_u.
---   * Bypass               - clean latency-matched passthrough.
+-- The picture is redrawn as a broken compressed stream. All damage follows a
+-- macroblock grid and grows over a GOP (group of pictures). A keyframe then
+-- snaps it clean (or the damage heals: Breathe) and the pattern reseeds.
 --
--- Pipeline (rising-edge clocks from data_in to data_out):
---   T0  data_in combinational
---   T1  p_input_stage: register inputs, pixel_x/ab tracking, LFSR latch,
---       shift bypass line
---   T2  p_delay_calc:  compute per-pixel s_delay_y/u/v, register s_s2_y/u/v
---   T3  variable_delay_u address-gen stage
---   T4  variable_delay_u BRAM read → s_smear_y/u/v valid
---       video_line_buffer input register (for persist)
---       smear_y/u/v first align register
---   T5  video_line_buffer BRAM read
---       smear_y/u/v second align register → s_smear_*_d2 ready
---   T6  (s_persist_y_slv and s_smear_*_d2 are available together here)
---   T7  p_blend_crush:  persist blend + bit-crush registered into s_proc_y/u/v
---   T8-T11 interpolator_u (4-clock latency) per channel
---   T11 data_out
+-- Damage layers (all stateless hashes of {block, epoch seed} except drips):
+--   * Slice slips  - per 4-block-row slice: from a random error block on a
+--                    random row to the end of the slice, the row slides by d
+--                    (wrapping into the previous row like a codec slice).
+--                    d = hash x K2 x width, plus a per-slice drift that
+--                    keeps sliding with GOP age.
+--   * Corrupt blocks - Walsh "DCT" AC pattern (luma +-A, A = K4), smear (the
+--                    block reads its own left column), or melt (reads back by
+--                    luma >> m). Corrupt blocks also get a magenta/green chroma
+--                    DC error (U and V offset equally = immune to the
+--                    hardware U/V-swap parity, K5).
+--   * Drips        - per block column: the line buffer stops being written,
+--                    so the block's row streaks downward. Flow (S7) scrolls
+--                    the frozen row +-1..2 px per line, wrapping inside its
+--                    own block column: a diagonal melt. Bleed
+--                    (S10) freezes only chroma: colour smears over live luma.
+--   * Chroma slip  - damaged pixels read U/V K5 px further back than Y.
+--   Damage grows across the GOP: block/slice/drip hashes compare their top
+--   6 bits against a ramp7 that rises over the GOP (monotone: blocks join,
+--   never flicker), and a second field against the P12 Mosh density.
 --
--- BRAM budget (iCE40 HX4K, 32 × 4 Kbit EBR):
---   3 × variable_delay_u(G_WIDTH=10, G_DEPTH=11)   ≈ 3 × 20 Kbit
---   1 × video_line_buffer(G_WIDTH=10, G_DEPTH=11)  ≈ 40 Kbit (dual bank)
---   Total ≈ 100 Kbit of 128 Kbit. Drop persist line buffer if this overflows.
+-- Memory: one SINGLE-bank line buffer per channel (Y/U/V, 2048x10, 15 EBR),
+-- addressed by active-pixel column. Every pixel - clean or damaged - is read
+-- back from it at column (x - off) mod W, so the output video comes out of
+-- EBR (raw input is only 6 FFs deep). Writes lead reads by K_COL = 5
+-- columns: addresses <= x+4 hold this line, >= x+6 the previous line (or a
+-- frozen row), and the one colliding offset (W - K_COL) is redirected to x.
+-- The U RAM stores u(9:1) & hsync->avid parity of the row that wrote it; U/V
+-- are swapped at output wherever that differs from the display row's parity
+-- (drape's rule for replaying stored rows, per pixel here). Drip state =
+-- 256x32 column RAM (2 EBR), pipelined read-modify-write on the last pixel
+-- of each block column on block-row-start lines.
+--
+-- Pixel pipeline (LATENCY = 17, identical in every mode):
+--   s1  input register, column x
+--   s2  block decode (bx, xl, Walsh column cell), slice-slip test
+--   s3  hash round 1 (block key, or the sequencer's slice key in hblank);
+--       drip-state RAM read
+--   s4  hash round 2; state fabric register
+--   s5  hash round 3; drip frozen test, n = rows since capture
+--   s6  VIDEO RAM WRITE (frozen columns skip it); hash decode; per-pixel
+--       offset terms; drip-state update
+--   s7  offset partial sums; flow-scrolled column offset, column base
+--   s8  offset sums; drip address inside the block column
+--   s9  normalise mod W
+--   s10 W - off; collision flag
+--   s11 read address (x - off, wrapped; frozen columns: drip address)
+--   s12 RAM read; s13 fabric register
+--   s14 U/V parity swap, Walsh luma, chroma DC error
+--   s15 clamp; s16 Quant; s17 blanking gate
+--
+-- Per-line sequencer (hblank, <= 49 clocks; SD hblank is 138, sim 64):
+--   slice hash (borrowed from the pixel hash pipe while avid is low), slip
+--   start column, displacement and drift on one serial shift-add multiplier,
+--   mod W by repeated subtraction; committed as row_* registers.
 --
 -- Register map:
---   registers_in(0) = Smear       (0-1023, base horizontal delay samples)
---   registers_in(1) = Smear Mod   (0-1023, strength of luma/noise modulation)
---   registers_in(2) = Chroma Lag  (0-1023, adds 0-511 samples to U/V delay)
---   registers_in(3) = Tear        (0-1023, per-line horizontal offset)
---   registers_in(4) = Persist     (0-1023, blend with previous line Y)
---   registers_in(5) = Crush       (top 3 bits = LSBs to mask, 0-7)
---   registers_in(6) = Switches
---                       bit 0 = Smear Src (0=Luma, 1=Noise)
---                       bit 1 = Tear Mode (0=Lines, 1=Random)
---                       bit 2 = Chroma Dir (0=Same, 1=Split)
---                       bit 3 = Glitch     (boost all knobs to max)
---                       bit 4 = Bypass     (clean passthrough)
---   registers_in(7) = Mix         (0=dry input, 1023=full wet processed)
+--   registers_in(0)    K1 Block   8 / 16 / 32 / 64 px macroblocks (labelled)
+--   registers_in(1)    K2 Slip    slice displacement and drift speed
+--   registers_in(2)    K3 Drip    drip length
+--   registers_in(3)    K4 Garble  Walsh amplitude, melt depth
+--   registers_in(4)    K5 Chroma  chroma plane slip + magenta/green DC error
+--   registers_in(5)    K6 GOP     keyframe interval 0.13 .. 8.5 s
+--   registers_in(6)(0) S7  Drip     Freeze / Flow
+--   registers_in(6)(1) S8  Keyframe Snap / Breathe
+--   registers_in(6)(2) S9  Quant    coarse luma/chroma steps
+--   registers_in(6)(3) S10 Bleed    Full / Color (drips freeze chroma only)
+--   registers_in(6)(4) S11 Comb     odd lines of slipped rows slip one block
+--                                   further
+--   registers_in(7)    P12 Mosh   damage density; above 50% it also lifts
+--                                 the GOP ramp floor (100% = no clean frame)
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -70,590 +88,1038 @@ use work.all;
 
 architecture slipframe of program_top is
 
-    --------------------------------------------------------------------------
-    -- Constants
-    --------------------------------------------------------------------------
-    constant C_DATA_WIDTH         : integer := C_VIDEO_DATA_WIDTH;  -- 10
-    constant C_SMEAR_DEPTH_BITS   : integer := 11;                  -- 2048 samples
-    constant C_PERSIST_DEPTH_BITS : integer := 11;                  -- 2048 per bank
-    constant C_TOTAL_LATENCY      : integer := 13;
+    constant LATENCY   : integer := 17;
+    constant K_COL     : integer := 5;   -- video RAM write leads its read
+    constant C_Y_BLACK : unsigned(9 downto 0) := to_unsigned(64, 10);
+    constant C_UV_ZERO : unsigned(9 downto 0) := to_unsigned(512, 10);
 
-    --------------------------------------------------------------------------
-    -- Registered-input / position tracking
-    --------------------------------------------------------------------------
-    signal s_in_y                 : unsigned(C_DATA_WIDTH - 1 downto 0) := (others => '0');
-    signal s_in_u                 : unsigned(C_DATA_WIDTH - 1 downto 0) := (others => '0');
-    signal s_in_v                 : unsigned(C_DATA_WIDTH - 1 downto 0) := (others => '0');
+    -- GOP phase increment per field: GOP = 8 * 2^(6i/31) fields, 8 .. 512
+    type t_u14_32 is array(0 to 31) of unsigned(13 downto 0);
+    constant GOP_INC_LUT : t_u14_32 := (
+        to_unsigned( 8192, 14), to_unsigned( 7164, 14), to_unsigned( 6264, 14), to_unsigned( 5478, 14),
+        to_unsigned( 4790, 14), to_unsigned( 4189, 14), to_unsigned( 3663, 14), to_unsigned( 3203, 14),
+        to_unsigned( 2801, 14), to_unsigned( 2449, 14), to_unsigned( 2142, 14), to_unsigned( 1873, 14),
+        to_unsigned( 1638, 14), to_unsigned( 1432, 14), to_unsigned( 1252, 14), to_unsigned( 1095, 14),
+        to_unsigned(  958, 14), to_unsigned(  837, 14), to_unsigned(  732, 14), to_unsigned(  640, 14),
+        to_unsigned(  560, 14), to_unsigned(  490, 14), to_unsigned(  428, 14), to_unsigned(  374, 14),
+        to_unsigned(  327, 14), to_unsigned(  286, 14), to_unsigned(  250, 14), to_unsigned(  219, 14),
+        to_unsigned(  191, 14), to_unsigned(  167, 14), to_unsigned(  146, 14), to_unsigned(  128, 14)
+    );
 
-    signal s_pixel_x              : unsigned(C_PERSIST_DEPTH_BITS - 1 downto 0) := (others => '0');
-    signal s_prev_hsync_n         : std_logic := '1';
-    signal s_prev_vsync_n         : std_logic := '1';
-    signal s_ab_toggle            : std_logic := '0';
-    signal s_line_lfsr_latched    : std_logic_vector(15 downto 0) := (others => '0');
+    ----------------------------------------------------------------------------
+    -- Counters
+    ----------------------------------------------------------------------------
+    signal prev_hsync_n : std_logic := '1';
+    signal prev_vsync_n : std_logic := '1';
+    signal prev_avid    : std_logic := '0';
+    signal pixel_x      : unsigned(11 downto 0) := (others => '0');
+    signal max_x_r      : unsigned(11 downto 0) := to_unsigned(1920, 12);
+    signal aline        : unsigned(10 downto 0) := (others => '0');
+    signal h_cnt        : unsigned(10 downto 0) := to_unsigned(1080, 11);
+    signal max_y_r      : unsigned(10 downto 0) := to_unsigned(1080, 11);
+    signal saw_active   : std_logic := '0';
+    signal hpar         : std_logic := '0';  -- clock parity since hsync
+    signal line_par     : std_logic := '0';  -- hsync->avid parity, this line
 
-    -- Per-frame smear drift accumulator: a random walk driven by LFSR,
-    -- gated by the Smear Mod knob (and forced on by Glitch). Adds a wandering
-    -- baseline offset to the Y smear so the image slips around over time
-    -- instead of sitting still.
-    signal s_smear_drift          : unsigned(C_SMEAR_DEPTH_BITS - 1 downto 0) := (others => '0');
+    ----------------------------------------------------------------------------
+    -- Controls + per-frame values (free-running, one op per stage)
+    ----------------------------------------------------------------------------
+    signal k1_r, k2_r, k3_r, k4_r, k5_r, k6_r, p12_r : unsigned(9 downto 0) := (others => '0');
+    signal flow_r, breathe_r, quant_r, bleed_r, comb_r : std_logic := '0';
+    signal blk_r     : unsigned(1 downto 0) := "01";            -- 8 << blk px
+    signal short_r   : std_logic := '0';                         -- field <= 400 lines
+    signal sv_r      : unsigned(2 downto 0) := to_unsigned(4, 3); -- vertical shift 2..6
+    signal w_r       : unsigned(11 downto 0) := to_unsigned(1920, 12);
+    signal wk_r      : unsigned(11 downto 0) := to_unsigned(1920 - K_COL, 12);
+    signal wm1_r     : unsigned(11 downto 0) := to_unsigned(1919, 12);
 
-    --------------------------------------------------------------------------
-    -- Stage 2: registered data + computed per-pixel delays fed to smear lines
-    --------------------------------------------------------------------------
-    signal s_s2_y                 : unsigned(C_DATA_WIDTH - 1 downto 0) := (others => '0');
-    signal s_s2_u                 : unsigned(C_DATA_WIDTH - 1 downto 0) := (others => '0');
-    signal s_s2_v                 : unsigned(C_DATA_WIDTH - 1 downto 0) := (others => '0');
+    signal ph        : unsigned(15 downto 0) := (others => '0');
+    signal inc_r     : unsigned(13 downto 0) := to_unsigned(1095, 14);
+    signal seed      : unsigned(31 downto 0) := x"2545F491";
+    signal age       : unsigned(9 downto 0) := (others => '0');
+    signal ramp_r    : unsigned(6 downto 0) := (others => '0');
+    signal p12hi_r   : unsigned(6 downto 0) := (others => '0');
+    signal ramp7     : unsigned(6 downto 0) := (others => '0');
+    signal densb7    : unsigned(6 downto 0) := (others => '0');
+    signal denss7    : unsigned(6 downto 0) := (others => '0');
+    signal densd10   : unsigned(9 downto 0) := (others => '0');  -- x/512
+    signal msq_r     : unsigned(11 downto 0) := (others => '0'); -- (P12/16)^2
 
-    signal s_delay_y              : unsigned(C_SMEAR_DEPTH_BITS - 1 downto 0) := (others => '0');
-    signal s_delay_u              : unsigned(C_SMEAR_DEPTH_BITS - 1 downto 0) := (others => '0');
-    signal s_delay_v              : unsigned(C_SMEAR_DEPTH_BITS - 1 downto 0) := (others => '0');
+    signal sm_hi, sm_lo : unsigned(14 downto 0) := (others => '0');
+    signal slipmax   : unsigned(10 downto 0) := (others => '0');  -- K2 x W / 2
+    signal un_hi, un_lo : unsigned(9 downto 0) := (others => '0');
+    signal unit_r    : unsigned(8 downto 0) := (others => '0');   -- drip length unit
+    signal len1, len2, len3, len4 : unsigned(10 downto 0) := (others => '0');
+    signal amp_r     : unsigned(7 downto 0) := (others => '0');   -- Walsh amplitude
+    signal cm_r      : unsigned(8 downto 0) := (others => '0');   -- chroma DC error
+    signal cs_r      : unsigned(6 downto 0) := (others => '0');   -- chroma slip px
+    signal k2hi_r    : unsigned(1 downto 0) := (others => '0');
+    signal bsz_r     : unsigned(6 downto 0) := to_unsigned(16, 7); -- block size px
 
-    -- Pre-registered multiply outputs for p_delay_calc — breaks the 10x10
-    -- multiply out of the long add/clamp critical path.
-    signal s_mod_contrib_r        : unsigned(10 downto 0) := (others => '0');
-    signal s_tear_contrib_r       : unsigned(10 downto 0) := (others => '0');
+    ----------------------------------------------------------------------------
+    -- Row parameters (committed by the hblank sequencer)
+    ----------------------------------------------------------------------------
+    signal row_aline : unsigned(10 downto 0) := (others => '0');
+    signal row_by    : unsigned(7 downto 0) := (others => '0');
+    signal row_yl0   : std_logic := '0';
+    signal row_yc3   : unsigned(2 downto 0) := (others => '0');
+    signal row_x0    : unsigned(11 downto 0) := (others => '1');  -- slip start
+    signal row_d     : unsigned(11 downto 0) := (others => '0');  -- slip, [0,W)
 
-    -- Second-stage registers: clamped Y and chroma lag held between the
-    -- 4-way add/clamp stage and the per-channel chroma-lag compute stage.
-    signal s_clamp_y_r            : unsigned(C_SMEAR_DEPTH_BITS - 1 downto 0) := (others => '0');
-    signal s_chroma_lag_r         : unsigned(9 downto 0) := (others => '0');
-    signal s_toggle_split_r       : std_logic := '0';
+    signal seq_run   : std_logic := '0';
+    signal seq_cnt   : unsigned(5 downto 0) := (others => '0');
+    signal seq_ln    : unsigned(10 downto 0) := (others => '0');
+    signal seq_by    : unsigned(7 downto 0) := (others => '0');
+    signal seq_yl0   : std_logic := '0';
+    signal seq_yc3   : unsigned(2 downto 0) := (others => '0');
+    signal seq_key   : unsigned(15 downto 0) := (others => '0');
+    signal seq_rs    : unsigned(1 downto 0) := (others => '0');
+    signal seq_mode  : unsigned(1 downto 0) := (others => '0');  -- 0 none, 1 all, 2 from x0
+    signal seq_v     : unsigned(3 downto 0) := (others => '0');
+    signal seq_x0    : unsigned(11 downto 0) := (others => '0');
+    signal seq_d     : unsigned(14 downto 0) := (others => '0');
+    signal hs        : unsigned(31 downto 0) := (others => '0');
+    signal mul_a     : unsigned(5 downto 0) := (others => '0');
+    signal mul_b     : unsigned(17 downto 0) := (others => '0');
+    signal mul_acc   : unsigned(17 downto 0) := (others => '0');
 
-    -- One extra cycle of delay on the input data so it arrives at the
-    -- variable_delay_u buffers at the same pipeline cycle as s_delay_y/u/v.
-    signal s_s2_y_d1              : unsigned(C_DATA_WIDTH - 1 downto 0) := (others => '0');
-    signal s_s2_u_d1              : unsigned(C_DATA_WIDTH - 1 downto 0) := (others => '0');
-    signal s_s2_v_d1              : unsigned(C_DATA_WIDTH - 1 downto 0) := (others => '0');
+    ----------------------------------------------------------------------------
+    -- Memories (collision-free by construction: no_rw_check)
+    ----------------------------------------------------------------------------
+    type t_vram is array(0 to 2047) of std_logic_vector(9 downto 0);
+    signal ram_y  : t_vram := (others => "0001000000");
+    signal ram_u  : t_vram := (others => "1000000000");
+    signal ram_v  : t_vram := (others => "1000000000");
+    type t_sram is array(0 to 255) of std_logic_vector(31 downto 0);
+    signal ram_st : t_sram := (others => (others => '0'));
+    attribute no_rw_check : boolean;
+    attribute no_rw_check of ram_y, ram_u, ram_v, ram_st : signal is true;
 
-    -- Registered blend multiplier outputs — gets the two 10×10 multiplies out
-    -- of the long p_blend_crush combinational chain.
-    signal s_cur_mul_r            : unsigned(19 downto 0) := (others => '0');
-    signal s_prev_mul_r           : unsigned(19 downto 0) := (others => '0');
+    ----------------------------------------------------------------------------
+    -- Pixel pipeline
+    ----------------------------------------------------------------------------
+    signal s1_y, s1_u, s1_v : unsigned(9 downto 0) := (others => '0');
+    signal s1_avid : std_logic := '0';
+    signal s1_x    : unsigned(10 downto 0) := (others => '0');
 
-    --------------------------------------------------------------------------
-    -- Stage 4: smear outputs, plus their 2-clock aligned versions
-    --------------------------------------------------------------------------
-    signal s_smear_y              : unsigned(C_DATA_WIDTH - 1 downto 0);
-    signal s_smear_u              : unsigned(C_DATA_WIDTH - 1 downto 0);
-    signal s_smear_v              : unsigned(C_DATA_WIDTH - 1 downto 0);
+    signal s2_y, s2_u, s2_v : unsigned(9 downto 0) := (others => '0');
+    signal s2_avid, s2_slip, s2_last : std_logic := '0';
+    signal s2_x    : unsigned(10 downto 0) := (others => '0');
+    signal s2_bx   : unsigned(7 downto 0) := (others => '0');
+    signal s2_xl   : unsigned(5 downto 0) := (others => '0');
+    signal s2_xc3  : unsigned(2 downto 0) := (others => '0');
 
-    signal s_smear_y_d1           : unsigned(C_DATA_WIDTH - 1 downto 0) := (others => '0');
-    signal s_smear_u_d1           : unsigned(C_DATA_WIDTH - 1 downto 0) := (others => '0');
-    signal s_smear_v_d1           : unsigned(C_DATA_WIDTH - 1 downto 0) := (others => '0');
-    signal s_smear_y_d2           : unsigned(C_DATA_WIDTH - 1 downto 0) := (others => '0');
-    signal s_smear_u_d2           : unsigned(C_DATA_WIDTH - 1 downto 0) := (others => '0');
-    signal s_smear_v_d2           : unsigned(C_DATA_WIDTH - 1 downto 0) := (others => '0');
+    signal s3_y, s3_u, s3_v : unsigned(9 downto 0) := (others => '0');
+    signal s3_avid, s3_slip, s3_last : std_logic := '0';
+    signal s3_x    : unsigned(10 downto 0) := (others => '0');
+    signal s3_bx   : unsigned(7 downto 0) := (others => '0');
+    signal s3_xl   : unsigned(5 downto 0) := (others => '0');
+    signal s3_xc3  : unsigned(2 downto 0) := (others => '0');
+    signal s3_h    : unsigned(31 downto 0) := (others => '0');
+    signal s3_st   : std_logic_vector(31 downto 0) := (others => '0');
 
-    --------------------------------------------------------------------------
-    -- Persist line buffer output
-    --------------------------------------------------------------------------
-    signal s_persist_y_slv        : std_logic_vector(C_DATA_WIDTH - 1 downto 0);
+    signal s4_y, s4_u, s4_v : unsigned(9 downto 0) := (others => '0');
+    signal s4_avid, s4_slip, s4_last : std_logic := '0';
+    signal s4_x    : unsigned(10 downto 0) := (others => '0');
+    signal s4_bx   : unsigned(7 downto 0) := (others => '0');
+    signal s4_xl   : unsigned(5 downto 0) := (others => '0');
+    signal s4_xc3  : unsigned(2 downto 0) := (others => '0');
+    signal s4_h    : unsigned(31 downto 0) := (others => '0');
+    signal s4_st   : std_logic_vector(31 downto 0) := (others => '0');
 
-    --------------------------------------------------------------------------
-    -- Stage 7: processed outputs after persist blend + bit-crush
-    --------------------------------------------------------------------------
-    signal s_proc_y               : unsigned(C_DATA_WIDTH - 1 downto 0) := (others => '0');
-    signal s_proc_u               : unsigned(C_DATA_WIDTH - 1 downto 0) := (others => '0');
-    signal s_proc_v               : unsigned(C_DATA_WIDTH - 1 downto 0) := (others => '0');
+    signal s5_y, s5_u, s5_v : unsigned(9 downto 0) := (others => '0');
+    signal s5_avid, s5_slip, s5_last : std_logic := '0';
+    signal s5_x    : unsigned(10 downto 0) := (others => '0');
+    signal s5_bx   : unsigned(7 downto 0) := (others => '0');
+    signal s5_xl   : unsigned(5 downto 0) := (others => '0');
+    signal s5_xc3  : unsigned(2 downto 0) := (others => '0');
+    signal s5_h    : unsigned(31 downto 0) := (others => '0');
+    signal s5_valid, s5_frz, s5_le, s5_dneg, s5_dmag : std_logic := '0';
+    signal s5_len  : unsigned(1 downto 0) := (others => '0');
+    signal s5_start : unsigned(10 downto 0) := (others => '0');
+    signal s5_n    : unsigned(10 downto 0) := (others => '0');
 
-    --------------------------------------------------------------------------
-    -- Bypass / dry-path delay shift registers (length = C_TOTAL_LATENCY).
-    -- Index 0 = 1 clock delayed, index N = (N+1) clocks delayed.
-    --------------------------------------------------------------------------
-    type t_data_shift is array (0 to C_TOTAL_LATENCY - 1)
-        of std_logic_vector(C_DATA_WIDTH - 1 downto 0);
-    type t_bit_shift  is array (0 to C_TOTAL_LATENCY - 1) of std_logic;
+    -- s6: video RAM write port + decoded damage
+    signal s6_we_y, s6_we_c : std_logic := '0';
+    signal s6_wa   : unsigned(10 downto 0) := (others => '0');
+    signal s6_wy, s6_wu, s6_wv : std_logic_vector(9 downto 0) := (others => '0');
+    signal s6_st_we : std_logic := '0';
+    signal s6_st_wa : unsigned(7 downto 0) := (others => '0');
+    signal s6_st_wd : std_logic_vector(31 downto 0) := (others => '0');
+    signal s6_x    : unsigned(10 downto 0) := (others => '0');
+    signal s6_frz, s6_slip, s6_corrupt, s6_walsh, s6_wsign, s6_dneg : std_logic := '0';
+    signal s6_e    : signed(10 downto 0) := (others => '0');
+    signal s6_ym   : unsigned(7 downto 0) := (others => '0');
+    signal s6_xl   : unsigned(5 downto 0) := (others => '0');
+    signal s6_dslip : unsigned(11 downto 0) := (others => '0');
+    signal s6_m6   : unsigned(5 downto 0) := (others => '0');   -- flow shift mod 64
+    signal s6_xlr  : unsigned(5 downto 0) := (others => '0');   -- raw column offset
 
-    signal s_y_sr                 : t_data_shift := (others => (others => '0'));
-    signal s_u_sr                 : t_data_shift := (others => (others => '0'));
-    signal s_v_sr                 : t_data_shift := (others => (others => '0'));
-    signal s_hsync_sr             : t_bit_shift  := (others => '1');
-    signal s_vsync_sr             : t_bit_shift  := (others => '1');
-    signal s_field_sr             : t_bit_shift  := (others => '1');
-    signal s_avid_sr              : t_bit_shift  := (others => '0');
+    -- s7..s11: read-address pipeline
+    signal s7_x    : unsigned(10 downto 0) := (others => '0');
+    signal s7_frz  : std_logic := '0';
+    signal s7_a1, s7_a2 : unsigned(11 downto 0) := (others => '0');
+    signal s7_ym   : unsigned(7 downto 0) := (others => '0');
+    signal s7_t6   : unsigned(5 downto 0) := (others => '0');
+    signal s7_cb   : unsigned(10 downto 0) := (others => '0');
 
-    --------------------------------------------------------------------------
-    -- Interpolator I/O
-    --------------------------------------------------------------------------
-    signal s_mix_t                : unsigned(C_DATA_WIDTH - 1 downto 0);
-    signal s_interp_enable        : std_logic;
-    signal s_interp_y_a           : unsigned(C_DATA_WIDTH - 1 downto 0);
-    signal s_interp_u_a           : unsigned(C_DATA_WIDTH - 1 downto 0);
-    signal s_interp_v_a           : unsigned(C_DATA_WIDTH - 1 downto 0);
-    signal s_interp_y_result      : unsigned(C_DATA_WIDTH - 1 downto 0);
-    signal s_interp_u_result      : unsigned(C_DATA_WIDTH - 1 downto 0);
-    signal s_interp_v_result      : unsigned(C_DATA_WIDTH - 1 downto 0);
-    signal s_interp_y_valid       : std_logic;
-    signal s_interp_u_valid       : std_logic;
-    signal s_interp_v_valid       : std_logic;
+    signal s8_x    : unsigned(10 downto 0) := (others => '0');
+    signal s8_frz  : std_logic := '0';
+    signal s8_oy, s8_oc : unsigned(11 downto 0) := (others => '0');
+    signal s8_ad   : unsigned(10 downto 0) := (others => '0');
 
-    --------------------------------------------------------------------------
-    -- LFSR output
-    --------------------------------------------------------------------------
-    signal s_lfsr_q               : std_logic_vector(15 downto 0);
+    signal s9_x    : unsigned(10 downto 0) := (others => '0');
+    signal s9_offy, s9_offc : unsigned(11 downto 0) := (others => '0');
+    signal s9_ad   : unsigned(10 downto 0) := (others => '0');
+    signal s9_frz  : std_logic := '0';
 
-    --------------------------------------------------------------------------
-    -- Extracted control flags
-    --------------------------------------------------------------------------
-    signal s_bypass_enable        : std_logic;
-    signal s_glitch_enable        : std_logic;
+    signal s10_x   : unsigned(10 downto 0) := (others => '0');
+    signal s10_offy, s10_offc, s10_wmoy, s10_wmoc : unsigned(11 downto 0) := (others => '0');
+    signal s10_gy, s10_gc : std_logic := '0';
+    signal s10_ad  : unsigned(10 downto 0) := (others => '0');
+    signal s10_fy, s10_fc : std_logic := '0';
+
+    signal s11_ray, s11_rac : unsigned(10 downto 0) := (others => '0');
+
+    -- Per-pixel compose flags, s7 .. s13
+    type t_fx is record
+        walsh : std_logic;
+        wsign : std_logic;
+        dmg   : std_logic;
+        e     : signed(10 downto 0);
+    end record;
+    type t_fx_arr is array(7 to 13) of t_fx;
+    signal fx : t_fx_arr := (others => ('0', '0', '0', (others => '0')));
+
+    signal s12_ry, s12_ru, s12_rv : std_logic_vector(9 downto 0) := (others => '0');
+    signal s13_ry, s13_ru, s13_rv : std_logic_vector(9 downto 0) := (others => '0');
+
+    signal s14_y, s14_u, s14_v : signed(11 downto 0) := (others => '0');
+    signal s14_dmg : std_logic := '0';
+    signal s15_y, s15_u, s15_v : unsigned(9 downto 0) := (others => '0');
+    signal s15_dmg : std_logic := '0';
+    signal s16_y, s16_u, s16_v : unsigned(9 downto 0) := (others => '0');
+    signal s17_y   : unsigned(9 downto 0) := C_Y_BLACK;
+    signal s17_u, s17_v : unsigned(9 downto 0) := C_UV_ZERO;
+
+    ----------------------------------------------------------------------------
+    -- Sync delay lines (entry i = i+1 clocks old)
+    ----------------------------------------------------------------------------
+    type t_bit_sr is array(0 to LATENCY-1) of std_logic;
+    signal s_hsync_sr : t_bit_sr := (others => '1');
+    signal s_vsync_sr : t_bit_sr := (others => '1');
+    signal s_field_sr : t_bit_sr := (others => '1');
+    signal s_avid_sr  : t_bit_sr := (others => '0');
+
+    function f_parity(v : unsigned) return std_logic is
+        variable r : std_logic := '0';
+    begin
+        for i in v'range loop
+            r := r xor v(i);
+        end loop;
+        return r;
+    end function;
+
+    function f_xorshift(s : unsigned(31 downto 0)) return unsigned is
+        variable x : unsigned(31 downto 0);
+    begin
+        x := s xor shift_left(s, 13);
+        x := x xor shift_right(x, 17);
+        x := x xor shift_left(x, 5);
+        return x;
+    end function;
 
 begin
 
-    --------------------------------------------------------------------------
-    -- Register-fed concurrent assignments
-    --------------------------------------------------------------------------
-    s_bypass_enable <= registers_in(6)(4);
-    s_glitch_enable <= registers_in(6)(3);
-    s_mix_t         <= unsigned(registers_in(7));
-    s_interp_enable <= '1';
-
-    --------------------------------------------------------------------------
-    -- Stage 1: input register, position tracking, LFSR latch, bypass line
-    --------------------------------------------------------------------------
-    p_input_stage : process(clk)
-        variable v_drift_mod   : unsigned(9 downto 0);
-        variable v_drift_prod  : unsigned(19 downto 0);
-        variable v_drift_step  : unsigned(C_SMEAR_DEPTH_BITS - 1 downto 0);
+    main_p : process(clk)
+        variable v_ph     : unsigned(16 downto 0);
+        variable v_dn     : unsigned(7 downto 0);
+        variable v_ds     : unsigned(7 downto 0);
+        variable v_wc     : unsigned(11 downto 0);
+        variable v_x0     : unsigned(11 downto 0);
+        variable v_key    : unsigned(15 downto 0);
+        variable v_hx     : unsigned(31 downto 0);
+        variable v_t      : unsigned(31 downto 0);
+        variable v_h      : unsigned(31 downto 0);
+        variable v_start  : unsigned(10 downto 0);
+        variable v_e      : unsigned(10 downto 0);
+        variable v_corrupt, v_hit, v_act : std_logic;
+        variable v_typ    : unsigned(1 downto 0);
+        variable v_dr     : unsigned(8 downto 0);
+        variable v_mag    : unsigned(8 downto 0);
+        variable v_lsel   : unsigned(1 downto 0);
+        variable v_l      : unsigned(10 downto 0);
+        variable v_base   : unsigned(10 downto 0);
+        variable v_sum12  : unsigned(11 downto 0);
+        variable v_eend   : unsigned(10 downto 0);
+        variable v_dir    : std_logic_vector(1 downto 0);
+        variable v_sub    : signed(12 downto 0);
+        variable v_ra     : signed(12 downto 0);
+        variable v_rb     : unsigned(11 downto 0);
+        variable v_us, v_vs : unsigned(9 downto 0);
+        variable v_q      : unsigned(10 downto 0);
     begin
         if rising_edge(clk) then
-            -- Register the video data for downstream stages
-            s_in_y <= unsigned(data_in.y);
-            s_in_u <= unsigned(data_in.u);
-            s_in_v <= unsigned(data_in.v);
+            -------------------------------------------------------------------
+            -- Controls (free-running)
+            -------------------------------------------------------------------
+            k1_r      <= unsigned(registers_in(0)(9 downto 0));
+            k2_r      <= unsigned(registers_in(1)(9 downto 0));
+            k3_r      <= unsigned(registers_in(2)(9 downto 0));
+            k4_r      <= unsigned(registers_in(3)(9 downto 0));
+            k5_r      <= unsigned(registers_in(4)(9 downto 0));
+            k6_r      <= unsigned(registers_in(5)(9 downto 0));
+            p12_r     <= unsigned(registers_in(7)(9 downto 0));
+            flow_r    <= registers_in(6)(0);
+            breathe_r <= registers_in(6)(1);
+            quant_r   <= registers_in(6)(2);
+            bleed_r   <= registers_in(6)(3);
+            comb_r    <= registers_in(6)(4);
 
-            s_prev_hsync_n <= data_in.hsync_n;
-            s_prev_vsync_n <= data_in.vsync_n;
+            -- Labelled K1: the firmware loads the label INDEX at program
+            -- load, a real 0..1023 position once the knob moves.
+            if k1_r < 4 then
+                blk_r <= k1_r(1 downto 0);
+            else
+                blk_r <= k1_r(9 downto 8);
+            end if;
+            if max_y_r < 400 then
+                short_r <= '1';   -- interlaced SD field: halve block height
+            else
+                short_r <= '0';
+            end if;
+            if short_r = '1' then
+                sv_r <= resize(blk_r, 3) + 2;
+            else
+                sv_r <= resize(blk_r, 3) + 3;
+            end if;
+            case blk_r is
+                when "00"   => bsz_r <= to_unsigned(8, 7);
+                when "01"   => bsz_r <= to_unsigned(16, 7);
+                when "10"   => bsz_r <= to_unsigned(32, 7);
+                when others => bsz_r <= to_unsigned(64, 7);
+            end case;
+
+            if max_x_r > 2048 then
+                w_r <= to_unsigned(2048, 12);
+            else
+                w_r <= max_x_r;
+            end if;
+            wk_r  <= w_r - K_COL;
+            wm1_r <= w_r - 1;
+
+            inc_r <= GOP_INC_LUT(to_integer(k6_r(9 downto 5)));
+
+            -- GOP ramp: Snap = sawtooth (keyframe at the wrap), Breathe =
+            -- triangle (heals back to clean at the wrap)
+            if breathe_r = '0' then
+                ramp_r <= '0' & ph(15 downto 10);
+            elsif ph(15) = '0' then
+                ramp_r <= '0' & ph(14 downto 9);
+            else
+                ramp_r <= '0' & not ph(14 downto 9);
+            end if;
+            -- Mosh above 50% lifts the ramp floor; 100% = never clean
+            if p12_r(9) = '0' then
+                p12hi_r <= (others => '0');
+            elsif p12_r >= 1016 then
+                p12hi_r <= to_unsigned(64, 7);
+            else
+                p12hi_r <= '0' & p12_r(8 downto 3);
+            end if;
+            if p12hi_r > ramp_r then
+                ramp7 <= p12hi_r;
+            else
+                ramp7 <= ramp_r;
+            end if;
+
+            -- Densities on a quadratic Mosh curve m2 = (P12/16)^2 / 64
+            -- (0..62), so the lower half stays readable: blocks 4..48 /64,
+            -- slices 12..64 /64 (linear), drips 2..126 /512 per block-row
+            -- roll (a column rolls once per block row, so even 1/64 would
+            -- drip almost every column each frame); 100% = every column.
+            msq_r <= p12_r(9 downto 4) * p12_r(9 downto 4);
+            v_dn := resize(msq_r(11 downto 6), 8) + 4;
+            if v_dn > 48 then
+                densb7 <= to_unsigned(48, 7);
+            else
+                densb7 <= v_dn(6 downto 0);
+            end if;
+            v_ds := resize(p12_r(9 downto 4), 8) + 12;
+            if v_ds > 64 then
+                denss7 <= to_unsigned(64, 7);
+            else
+                denss7 <= v_ds(6 downto 0);
+            end if;
+            if p12_r >= 1016 then
+                densd10 <= to_unsigned(512, 10);
+            else
+                densd10 <= shift_left(resize(msq_r(11 downto 6), 10), 1) + 2;
+            end if;
+
+            -- slipmax = K2(6b) x W >> 7 (0 .. W/2), split 3b x 12b products
+            sm_hi   <= resize(k2_r(9 downto 7) * w_r, 15);
+            sm_lo   <= resize(k2_r(6 downto 4) * w_r, 15);
+            v_sum12 := resize(shift_right(shift_left(resize(sm_hi, 19), 3)
+                                          + resize(sm_lo, 19), 7), 12);
+            slipmax <= v_sum12(10 downto 0);
+
+            -- Drip length unit = K3(6b) x ramp7 >> 3 (0..504 rows)
+            un_hi  <= k3_r(9 downto 7) * ramp7;
+            un_lo  <= k3_r(6 downto 4) * ramp7;
+            unit_r <= resize(shift_right(shift_left(resize(un_hi, 13), 3)
+                                         + resize(un_lo, 13), 3), 9);
+            len1 <= resize(unit_r, 11);
+            len2 <= shift_left(resize(unit_r, 11), 1);
+            len3 <= shift_left(resize(unit_r, 11), 1) + resize(unit_r, 11);
+            len4 <= shift_left(resize(unit_r, 11), 2);
+
+            amp_r  <= k4_r(9 downto 2);
+            cm_r   <= k5_r(9 downto 1);
+            cs_r   <= k5_r(9 downto 3);
+            k2hi_r <= k2_r(9 downto 8);
+
+            -------------------------------------------------------------------
+            -- Counters. Rows count ACTIVE lines (advance at avid fall, reset
+            -- at vsync). Per-field work fires once on the first vsync edge
+            -- after active video (serration-safe).
+            -------------------------------------------------------------------
+            prev_hsync_n <= data_in.hsync_n;
+            prev_vsync_n <= data_in.vsync_n;
+            prev_avid    <= data_in.avid;
 
             if data_in.avid = '1' then
-                s_pixel_x <= s_pixel_x + 1;
+                pixel_x    <= pixel_x + 1;
+                saw_active <= '1';
             end if;
 
-            -- hsync falling edge = new line: reset x, flip ab, latch LFSR
-            if data_in.hsync_n = '0' and s_prev_hsync_n = '1' then
-                s_pixel_x           <= (others => '0');
-                s_ab_toggle         <= not s_ab_toggle;
-                s_line_lfsr_latched <= s_lfsr_q;
-            end if;
-
-            -- vsync falling edge = new frame: re-sync ab bank, tick drift
-            if data_in.vsync_n = '0' and s_prev_vsync_n = '1' then
-                s_ab_toggle <= '0';
-
-                -- Drift: random-walk step scaled by Smear Mod. When Glitch is
-                -- on, force max step. When both are zero, step is zero and the
-                -- accumulator holds.
-                if registers_in(6)(3) = '1' then
-                    v_drift_mod := (others => '1');
-                else
-                    v_drift_mod := unsigned(registers_in(1));
+            hpar <= not hpar;
+            if data_in.hsync_n = '0' and prev_hsync_n = '1' then
+                if pixel_x > to_unsigned(32, 12) then
+                    max_x_r <= pixel_x;
                 end if;
-                v_drift_prod := v_drift_mod * unsigned(s_lfsr_q(9 downto 0));
-                -- >> 10 brings it back to knob-scale, then >> 1 more so each
-                -- frame only nudges the baseline by up to ~knob/2 samples.
-                v_drift_step := resize(v_drift_prod(19 downto 11),
-                                       C_SMEAR_DEPTH_BITS);
-                s_smear_drift <= s_smear_drift + v_drift_step;
+                pixel_x <= (others => '0');
+                hpar    <= '0';
             end if;
 
-            ------------------------------------------------------------------
-            -- Bypass / dry path shift registers (C_TOTAL_LATENCY deep)
-            ------------------------------------------------------------------
-            s_y_sr(0)     <= data_in.y;
-            s_u_sr(0)     <= data_in.u;
-            s_v_sr(0)     <= data_in.v;
+            if data_in.avid = '1' and prev_avid = '0' then
+                line_par <= hpar;
+            end if;
+
+            if data_in.avid = '0' and prev_avid = '1' then
+                aline <= aline + 1;
+                h_cnt <= aline + 1;
+            end if;
+
+            if data_in.vsync_n = '0' and prev_vsync_n = '1' then
+                aline <= (others => '0');
+                if h_cnt > to_unsigned(32, 11) then
+                    max_y_r <= h_cnt;
+                end if;
+                if saw_active = '1' then
+                    saw_active <= '0';
+                    v_ph := resize(ph, 17) + resize(inc_r, 17);
+                    ph   <= v_ph(15 downto 0);
+                    if v_ph(16) = '1' then
+                        -- keyframe: new epoch
+                        seed <= f_xorshift(seed);
+                        age  <= (others => '0');
+                    elsif age /= 1023 then
+                        age <= age + 1;
+                    end if;
+                end if;
+            end if;
+
+            -------------------------------------------------------------------
+            -- Per-line sequencer: params for the NEXT line, run in hblank.
+            -- Started at the avid fall (aline advances on that edge) and
+            -- restarted at vsync (aline reset), committed at count 48.
+            -------------------------------------------------------------------
+            if (data_in.avid = '0' and prev_avid = '1')
+               or (data_in.vsync_n = '0' and prev_vsync_n = '1') then
+                seq_cnt <= (others => '0');
+                seq_run <= '1';
+            elsif seq_run = '1' then
+                seq_cnt <= seq_cnt + 1;
+                case to_integer(seq_cnt) is
+                    when 1 =>
+                        seq_ln <= aline;
+                    when 2 =>
+                        case to_integer(sv_r) is
+                            when 2 =>
+                                seq_by  <= seq_ln(9 downto 2);
+                                seq_yc3 <= seq_ln(1 downto 0) & '0';
+                                if seq_ln(1 downto 0) = 0 then seq_yl0 <= '1'; else seq_yl0 <= '0'; end if;
+                            when 3 =>
+                                seq_by  <= seq_ln(10 downto 3);
+                                seq_yc3 <= seq_ln(2 downto 0);
+                                if seq_ln(2 downto 0) = 0 then seq_yl0 <= '1'; else seq_yl0 <= '0'; end if;
+                            when 4 =>
+                                seq_by  <= '0' & seq_ln(10 downto 4);
+                                seq_yc3 <= seq_ln(3 downto 1);
+                                if seq_ln(3 downto 0) = 0 then seq_yl0 <= '1'; else seq_yl0 <= '0'; end if;
+                            when 5 =>
+                                seq_by  <= "00" & seq_ln(10 downto 5);
+                                seq_yc3 <= seq_ln(4 downto 2);
+                                if seq_ln(4 downto 0) = 0 then seq_yl0 <= '1'; else seq_yl0 <= '0'; end if;
+                            when others =>
+                                seq_by  <= "000" & seq_ln(10 downto 6);
+                                seq_yc3 <= seq_ln(5 downto 3);
+                                if seq_ln(5 downto 0) = 0 then seq_yl0 <= '1'; else seq_yl0 <= '0'; end if;
+                        end case;
+                    when 3 =>
+                        -- slice key: by field 0xF0 never occurs for blocks
+                        seq_key <= x"F0" & "00" & seq_by(7 downto 2);
+                        seq_rs  <= seq_by(1 downto 0);
+                    when 8 =>
+                        hs <= s5_h xor shift_right(s5_h, 15);
+                    when 9 =>
+                        -- slice: corrupt from row r0 / column x0 to slice end
+                        if resize(hs(31 downto 26), 7) < ramp7
+                           and resize(hs(25 downto 20), 7) < denss7 then
+                            if seq_rs > hs(19 downto 18) then
+                                seq_mode <= "01";
+                            elsif seq_rs = hs(19 downto 18) then
+                                seq_mode <= "10";
+                            else
+                                seq_mode <= "00";
+                            end if;
+                        else
+                            seq_mode <= "00";
+                        end if;
+                        -- drift speed px/field = vsel x K2 top bits (0..9)
+                        case hs(4 downto 3) is
+                            when "00"   => seq_v <= (others => '0');
+                            when "01"   => seq_v <= resize(k2hi_r, 4);
+                            when "10"   => seq_v <= shift_left(resize(k2hi_r, 4), 1);
+                            when others => seq_v <= shift_left(resize(k2hi_r, 4), 1) + resize(k2hi_r, 4);
+                        end case;
+                        mul_a   <= hs(17 downto 12);
+                        mul_b   <= resize(w_r, 18);
+                        mul_acc <= (others => '0');
+                    when 16 =>
+                        v_x0 := mul_acc(17 downto 6);
+                        case blk_r is
+                            when "00"   => v_x0(2 downto 0) := (others => '0');
+                            when "01"   => v_x0(3 downto 0) := (others => '0');
+                            when "10"   => v_x0(4 downto 0) := (others => '0');
+                            when others => v_x0(5 downto 0) := (others => '0');
+                        end case;
+                        seq_x0  <= v_x0;
+                        mul_a   <= hs(11 downto 6);
+                        mul_b   <= resize(slipmax, 18);
+                        mul_acc <= (others => '0');
+                    when 23 =>
+                        seq_d   <= resize(mul_acc(17 downto 6), 15);
+                        mul_a   <= resize(seq_v, 6);
+                        mul_b   <= resize(age, 18);
+                        mul_acc <= (others => '0');
+                    when 30 =>
+                        if comb_r = '1' and seq_ln(0) = '1' then
+                            seq_d <= seq_d + resize(mul_acc, 15) + resize(bsz_r, 15);
+                        else
+                            seq_d <= seq_d + resize(mul_acc, 15);
+                        end if;
+                    when 47 =>
+                        if hs(5) = '1' and seq_d /= 0 then
+                            seq_d <= resize(w_r, 15) - seq_d;
+                        end if;
+                    when 48 =>
+                        row_aline <= seq_ln;
+                        row_by    <= seq_by;
+                        row_yl0   <= seq_yl0;
+                        row_yc3   <= seq_yc3;
+                        case seq_mode is
+                            when "01"   => row_x0 <= (others => '0');
+                            when "10"   => row_x0 <= seq_x0;
+                            when others => row_x0 <= (others => '1');
+                        end case;
+                        row_d   <= seq_d(11 downto 0);
+                        seq_run <= '0';
+                    when others =>
+                        null;
+                end case;
+                -- shared serial multiplier (6 steps after each load)
+                if (seq_cnt >= 10 and seq_cnt <= 15)
+                   or (seq_cnt >= 17 and seq_cnt <= 22)
+                   or (seq_cnt >= 24 and seq_cnt <= 29) then
+                    if mul_a(0) = '1' then
+                        mul_acc <= mul_acc + mul_b;
+                    end if;
+                    mul_a <= shift_right(mul_a, 1);
+                    mul_b <= shift_left(mul_b, 1);
+                end if;
+                -- mod W by repeated subtraction
+                if seq_cnt >= 31 and seq_cnt <= 46 then
+                    if seq_d >= resize(w_r, 15) then
+                        seq_d <= seq_d - resize(w_r, 15);
+                    end if;
+                end if;
+            end if;
+
+            -------------------------------------------------------------------
+            -- s1: input
+            -------------------------------------------------------------------
+            s1_y    <= unsigned(data_in.y);
+            s1_u    <= unsigned(data_in.u);
+            s1_v    <= unsigned(data_in.v);
+            s1_avid <= data_in.avid;
+            s1_x    <= pixel_x(10 downto 0);
+
+            -------------------------------------------------------------------
+            -- s2: block decode, slip test
+            -------------------------------------------------------------------
+            case blk_r is
+                when "00" =>
+                    s2_bx  <= s1_x(10 downto 3);
+                    s2_xl  <= "000" & s1_x(2 downto 0);
+                    s2_xc3 <= s1_x(2 downto 0);
+                    if s1_x(2 downto 0) = "111" or ('0' & s1_x) = wm1_r then s2_last <= '1'; else s2_last <= '0'; end if;
+                when "01" =>
+                    s2_bx  <= '0' & s1_x(10 downto 4);
+                    s2_xl  <= "00" & s1_x(3 downto 0);
+                    s2_xc3 <= s1_x(3 downto 1);
+                    if s1_x(3 downto 0) = "1111" or ('0' & s1_x) = wm1_r then s2_last <= '1'; else s2_last <= '0'; end if;
+                when "10" =>
+                    s2_bx  <= "00" & s1_x(10 downto 5);
+                    s2_xl  <= '0' & s1_x(4 downto 0);
+                    s2_xc3 <= s1_x(4 downto 2);
+                    if s1_x(4 downto 0) = "11111" or ('0' & s1_x) = wm1_r then s2_last <= '1'; else s2_last <= '0'; end if;
+                when others =>
+                    s2_bx  <= "000" & s1_x(10 downto 6);
+                    s2_xl  <= s1_x(5 downto 0);
+                    s2_xc3 <= s1_x(5 downto 3);
+                    if s1_x(5 downto 0) = "111111" or ('0' & s1_x) = wm1_r then s2_last <= '1'; else s2_last <= '0'; end if;
+            end case;
+            if ('0' & s1_x) >= row_x0 then
+                s2_slip <= '1';
+            else
+                s2_slip <= '0';
+            end if;
+            s2_y <= s1_y; s2_u <= s1_u; s2_v <= s1_v;
+            s2_avid <= s1_avid;
+            s2_x    <= s1_x;
+
+            -------------------------------------------------------------------
+            -- s3: hash round 1 (block key; slice key while avid is low),
+            -- drip-state read
+            -------------------------------------------------------------------
+            if s2_avid = '1' then
+                v_key := row_by & s2_bx;
+            else
+                v_key := seq_key;
+            end if;
+            v_hx := seed xor (v_key & x"0000") xor resize(v_key, 32);
+            s3_h <= v_hx + shift_left(v_hx, 11);
+            s3_st <= ram_st(to_integer(s2_bx));
+            s3_y <= s2_y; s3_u <= s2_u; s3_v <= s2_v;
+            s3_avid <= s2_avid; s3_slip <= s2_slip; s3_last <= s2_last;
+            s3_x <= s2_x; s3_bx <= s2_bx; s3_xl <= s2_xl; s3_xc3 <= s2_xc3;
+
+            -------------------------------------------------------------------
+            -- s4: hash round 2, state fabric register
+            -------------------------------------------------------------------
+            v_t  := s3_h xor shift_right(s3_h, 12);
+            s4_h <= v_t + shift_left(v_t, 9);
+            s4_st <= s3_st;
+            s4_y <= s3_y; s4_u <= s3_u; s4_v <= s3_v;
+            s4_avid <= s3_avid; s4_slip <= s3_slip; s4_last <= s3_last;
+            s4_x <= s3_x; s4_bx <= s3_bx; s4_xl <= s3_xl; s4_xc3 <= s3_xc3;
+
+            -------------------------------------------------------------------
+            -- s5: hash round 3, drip frozen test
+            -- state word: 31 valid, 30 neg, 29 mag(2px), 28:27 len,
+            --             26:16 capture row, 10:0 last frozen row
+            -------------------------------------------------------------------
+            v_t  := s4_h xor shift_right(s4_h, 11);
+            s5_h <= v_t + shift_left(v_t, 9);
+            v_start := unsigned(s4_st(26 downto 16));
+            v_e     := unsigned(s4_st(10 downto 0));
+            if row_aline <= v_e then
+                s5_le <= '1';
+            else
+                s5_le <= '0';
+            end if;
+            if s4_st(31) = '1' and row_aline > v_start and row_aline <= v_e then
+                s5_frz <= '1';
+            else
+                s5_frz <= '0';
+            end if;
+            s5_valid <= s4_st(31);
+            s5_dneg  <= s4_st(30);
+            s5_dmag  <= s4_st(29);
+            s5_len   <= unsigned(s4_st(28 downto 27));
+            s5_start <= v_start;
+            s5_n     <= row_aline - v_start;
+            s5_y <= s4_y; s5_u <= s4_u; s5_v <= s4_v;
+            s5_avid <= s4_avid; s5_slip <= s4_slip; s5_last <= s4_last;
+            s5_x <= s4_x; s5_bx <= s4_bx; s5_xl <= s4_xl; s5_xc3 <= s4_xc3;
+
+            -------------------------------------------------------------------
+            -- s6: video RAM write (frozen columns keep their captured row),
+            -- hash decode, offset terms, drip-state update
+            -------------------------------------------------------------------
+            s6_we_y <= s5_avid and ((not s5_frz) or bleed_r);
+            s6_we_c <= s5_avid and (not s5_frz);
+            s6_wa   <= s5_x;
+            s6_wy   <= std_logic_vector(s5_y);
+            s6_wu   <= std_logic_vector(s5_u(9 downto 1)) & line_par;
+            s6_wv   <= std_logic_vector(s5_v);
+
+            -- h: 31:26 a (vs GOP ramp), 25:20 block density, 19:14 & 11:9
+            -- drip roll (9 bits), 13:12 type, 11:9 u, 8:6 v, 5 chroma size,
+            -- 4 chroma sign, 3:2 drip direction, 1:0 drip length
+            v_h := s5_h xor shift_right(s5_h, 15);
+            if resize(v_h(31 downto 26), 7) < ramp7
+               and resize(v_h(25 downto 20), 7) < densb7 then
+                v_corrupt := '1';
+            else
+                v_corrupt := '0';
+            end if;
+            v_dr := v_h(19 downto 14) & v_h(11 downto 9);
+            if resize(v_h(31 downto 26), 7) < ramp7
+               and resize(v_dr, 10) < densd10 and unit_r /= 0 then
+                v_hit := '1';
+            else
+                v_hit := '0';
+            end if;
+            v_typ := v_h(13 downto 12);
+            s6_corrupt <= v_corrupt;
+            if v_corrupt = '1' and (v_typ = "00" or v_typ = "11") then
+                s6_walsh <= '1';
+            else
+                s6_walsh <= '0';
+            end if;
+            s6_wsign <= f_parity(s5_xc3 and v_h(11 downto 9))
+                        xor f_parity(row_yc3 and v_h(8 downto 6));
+            if v_corrupt = '1' and (v_typ = "01" or v_typ = "11") then
+                s6_xl <= s5_xl;   -- smear: read the block's left column
+            else
+                s6_xl <= (others => '0');
+            end if;
+            if v_corrupt = '1' and v_typ = "10" then
+                case k4_r(9 downto 8) is   -- melt: read back by luma >> m
+                    when "11"   => s6_ym <= s5_y(9 downto 2);
+                    when "10"   => s6_ym <= '0' & s5_y(9 downto 3);
+                    when "01"   => s6_ym <= "00" & s5_y(9 downto 4);
+                    when others => s6_ym <= "000" & s5_y(9 downto 5);
+                end case;
+            else
+                s6_ym <= (others => '0');
+            end if;
+            if v_h(5) = '1' then
+                v_mag := cm_r;
+            else
+                v_mag := '0' & cm_r(8 downto 1);
+            end if;
+            if v_corrupt = '0' then
+                s6_e <= (others => '0');
+            elsif v_h(4) = '1' then
+                s6_e <= -signed(resize(v_mag, 11));
+            else
+                s6_e <= signed(resize(v_mag, 11));
+            end if;
+            if s5_slip = '1' then
+                s6_dslip <= row_d;
+            else
+                s6_dslip <= (others => '0');
+            end if;
+            -- Flow: the frozen row scrolls 1 or 2 px per row WITHIN its own
+            -- block column (wrap mod B), so a drip only ever shows its own
+            -- captured row; Freeze = no scroll
+            if flow_r = '0' then
+                s6_m6 <= (others => '0');
+            elsif s5_dmag = '1' then
+                s6_m6 <= s5_n(4 downto 0) & '0';
+            else
+                s6_m6 <= s5_n(5 downto 0);
+            end if;
+            s6_xlr  <= s5_xl;
+            s6_dneg <= s5_dneg;
+            s6_frz  <= s5_frz;
+            s6_slip <= s5_slip;
+            s6_x    <= s5_x;
+
+            -- Drip state: on block-row-start lines, at the column's last
+            -- pixel (the next column's reads are already past it). A live
+            -- drip keeps its capture row and grows/shrinks with the current
+            -- length; an expired or empty column may start a new drip here.
+            if s5_avid = '1' and s5_last = '1' and row_yl0 = '1' then
+                s6_st_we <= '1';
+                s6_st_wa <= s5_bx;
+                v_act := s5_valid and s5_le;
+                if v_act = '1' then
+                    v_base := s5_start;
+                    v_lsel := s5_len;
+                    v_dir  := s5_dneg & s5_dmag;
+                else
+                    v_base := row_aline;
+                    v_lsel := v_h(1 downto 0);
+                    v_dir  := std_logic_vector(v_h(3 downto 2));
+                end if;
+                case v_lsel is
+                    when "00"   => v_l := len1;
+                    when "01"   => v_l := len2;
+                    when "10"   => v_l := len3;
+                    when others => v_l := len4;
+                end case;
+                v_sum12 := resize(v_base, 12) + resize(v_l, 12);
+                if v_sum12(11) = '1' then
+                    v_eend := (others => '1');
+                else
+                    v_eend := v_sum12(10 downto 0);
+                end if;
+                s6_st_wd <= (v_act or v_hit) & v_dir & std_logic_vector(v_lsel)
+                            & std_logic_vector(v_base) & "00000"
+                            & std_logic_vector(v_eend);
+            else
+                s6_st_we <= '0';
+            end if;
+
+            -------------------------------------------------------------------
+            -- Memories: one write + one unconditional read per RAM
+            -------------------------------------------------------------------
+            if s6_we_y = '1' then
+                ram_y(to_integer(s6_wa)) <= s6_wy;
+            end if;
+            if s6_we_c = '1' then
+                ram_u(to_integer(s6_wa)) <= s6_wu;
+                ram_v(to_integer(s6_wa)) <= s6_wv;
+            end if;
+            if s6_st_we = '1' then
+                ram_st(to_integer(s6_st_wa)) <= s6_st_wd;
+            end if;
+            s12_ry <= ram_y(to_integer(s11_ray));
+            s12_ru <= ram_u(to_integer(s11_rac));
+            s12_rv <= ram_v(to_integer(s11_rac));
+
+            -------------------------------------------------------------------
+            -- s7: offset partial sums (all terms >= 0), drip offset mod W
+            -------------------------------------------------------------------
+            s7_a1 <= s6_dslip + resize(s6_xl, 12);
+            s7_ym <= s6_ym;
+            if s6_corrupt = '1' or s6_slip = '1' or s6_frz = '1' then
+                s7_a2 <= resize(s6_ym, 12) + resize(cs_r, 12);
+            else
+                s7_a2 <= resize(s6_ym, 12);
+            end if;
+            if s6_dneg = '1' then
+                s7_t6 <= s6_xlr + s6_m6;
+            else
+                s7_t6 <= s6_xlr - s6_m6;
+            end if;
+            case blk_r is
+                when "00"   => s7_cb <= s6_x(10 downto 3) & "000";
+                when "01"   => s7_cb <= s6_x(10 downto 4) & "0000";
+                when "10"   => s7_cb <= s6_x(10 downto 5) & "00000";
+                when others => s7_cb <= s6_x(10 downto 6) & "000000";
+            end case;
+            s7_frz  <= s6_frz;
+            s7_x    <= s6_x;
+            fx(7).walsh <= s6_walsh;
+            fx(7).wsign <= s6_wsign;
+            fx(7).dmg   <= s6_corrupt or s6_slip or s6_frz;
+            fx(7).e     <= s6_e;
+
+            -------------------------------------------------------------------
+            -- s8: Y/C offset sums (< 2W); drip address inside the column
+            -------------------------------------------------------------------
+            s8_oy <= s7_a1 + resize(s7_ym, 12);
+            s8_oc <= s7_a1 + s7_a2;
+            case blk_r is
+                when "00"   => s8_ad <= s7_cb(10 downto 3) & s7_t6(2 downto 0);
+                when "01"   => s8_ad <= s7_cb(10 downto 4) & s7_t6(3 downto 0);
+                when "10"   => s8_ad <= s7_cb(10 downto 5) & s7_t6(4 downto 0);
+                when others => s8_ad <= s7_cb(10 downto 6) & s7_t6(5 downto 0);
+            end case;
+            s8_frz <= s7_frz;
+            s8_x   <= s7_x;
+
+            -------------------------------------------------------------------
+            -- s9: normalise mod W
+            -------------------------------------------------------------------
+            if s8_oy >= w_r then
+                s9_offy <= s8_oy - w_r;
+            else
+                s9_offy <= s8_oy;
+            end if;
+            if s8_oc >= w_r then
+                s9_offc <= s8_oc - w_r;
+            else
+                s9_offc <= s8_oc;
+            end if;
+            s9_ad  <= s8_ad;
+            s9_frz <= s8_frz;
+            s9_x   <= s8_x;
+
+            -------------------------------------------------------------------
+            -- s10: wrap term, collision flag (offset W-K_COL would read the
+            -- column being written this clock)
+            -------------------------------------------------------------------
+            s10_wmoy <= w_r - s9_offy;
+            s10_wmoc <= w_r - s9_offc;
+            if s9_offy = wk_r then s10_gy <= '1'; else s10_gy <= '0'; end if;
+            if s9_offc = wk_r then s10_gc <= '1'; else s10_gc <= '0'; end if;
+            s10_offy <= s9_offy;
+            s10_offc <= s9_offc;
+            s10_x    <= s9_x;
+            s10_ad   <= s9_ad;
+            s10_fy   <= s9_frz and not bleed_r;
+            s10_fc   <= s9_frz;
+
+            -------------------------------------------------------------------
+            -- s11: read address = (x - off) mod W; frozen columns read their
+            -- own captured row (never written while frozen: no collision)
+            -------------------------------------------------------------------
+            v_ra := signed(resize(s10_x, 13)) - signed(resize(s10_offy, 13));
+            v_rb := resize(s10_x, 12) + s10_wmoy;
+            if s10_fy = '1' then
+                s11_ray <= s10_ad;
+            elsif s10_gy = '1' then
+                s11_ray <= s10_x;
+            elsif v_ra < 0 then
+                s11_ray <= v_rb(10 downto 0);
+            else
+                s11_ray <= unsigned(v_ra(10 downto 0));
+            end if;
+            v_ra := signed(resize(s10_x, 13)) - signed(resize(s10_offc, 13));
+            v_rb := resize(s10_x, 12) + s10_wmoc;
+            if s10_fc = '1' then
+                s11_rac <= s10_ad;
+            elsif s10_gc = '1' then
+                s11_rac <= s10_x;
+            elsif v_ra < 0 then
+                s11_rac <= v_rb(10 downto 0);
+            else
+                s11_rac <= unsigned(v_ra(10 downto 0));
+            end if;
+
+            -- compose flags ride along
+            for i in 8 to 13 loop
+                fx(i) <= fx(i-1);
+            end loop;
+
+            -------------------------------------------------------------------
+            -- s13: fabric register on the RAM data
+            -------------------------------------------------------------------
+            s13_ry <= s12_ry;
+            s13_ru <= s12_ru;
+            s13_rv <= s12_rv;
+
+            -------------------------------------------------------------------
+            -- s14: U/V swap where the stored row's parity differs from this
+            -- row's, Walsh luma pattern, chroma DC error (equal on U and V)
+            -------------------------------------------------------------------
+            if (s13_ru(0) xor line_par) = '1' then
+                v_us := unsigned(s13_rv);
+                v_vs := unsigned(s13_ru(9 downto 1)) & '0';
+            else
+                v_us := unsigned(s13_ru(9 downto 1)) & '0';
+                v_vs := unsigned(s13_rv);
+            end if;
+            s14_u <= signed(resize(v_us, 12)) + resize(fx(13).e, 12);
+            s14_v <= signed(resize(v_vs, 12)) + resize(fx(13).e, 12);
+            if fx(13).walsh = '0' then
+                s14_y <= signed(resize(unsigned(s13_ry), 12));
+            elsif fx(13).wsign = '1' then
+                s14_y <= signed(resize(unsigned(s13_ry), 12)) + signed(resize(amp_r, 12));
+            else
+                s14_y <= signed(resize(unsigned(s13_ry), 12)) - signed(resize(amp_r, 12));
+            end if;
+            s14_dmg <= fx(13).dmg;
+
+            -------------------------------------------------------------------
+            -- s15: clamp
+            -------------------------------------------------------------------
+            if s14_y < 64 then
+                s15_y <= C_Y_BLACK;
+            elsif s14_y > 940 then
+                s15_y <= to_unsigned(940, 10);
+            else
+                s15_y <= unsigned(s14_y(9 downto 0));
+            end if;
+            if s14_u < 16 then
+                s15_u <= to_unsigned(16, 10);
+            elsif s14_u > 1008 then
+                s15_u <= to_unsigned(1008, 10);
+            else
+                s15_u <= unsigned(s14_u(9 downto 0));
+            end if;
+            if s14_v < 16 then
+                s15_v <= to_unsigned(16, 10);
+            elsif s14_v > 1008 then
+                s15_v <= to_unsigned(1008, 10);
+            else
+                s15_v <= unsigned(s14_v(9 downto 0));
+            end if;
+            s15_dmg <= s14_dmg;
+
+            -------------------------------------------------------------------
+            -- s16: Quant. Damaged pixels: 8 luma levels (64, 192 .. 896),
+            -- chroma in 128 steps about 512; clean pixels: 16 floored luma
+            -- levels, chroma in 64 steps.
+            -------------------------------------------------------------------
+            if quant_r = '0' then
+                s16_y <= s15_y;
+                s16_u <= s15_u;
+                s16_v <= s15_v;
+            elsif s15_dmg = '1' then
+                if s15_y(9 downto 7) = "111" then
+                    s16_y <= to_unsigned(940, 10);
+                else
+                    s16_y <= s15_y(9 downto 7) & "1000000";
+                end if;
+                v_q := resize(s15_u, 11) + 64;
+                if v_q(10) = '1' then s16_u <= to_unsigned(896, 10); else s16_u <= v_q(9 downto 7) & "0000000"; end if;
+                v_q := resize(s15_v, 11) + 64;
+                if v_q(10) = '1' then s16_v <= to_unsigned(896, 10); else s16_v <= v_q(9 downto 7) & "0000000"; end if;
+            else
+                if s15_y(9 downto 6) = 0 then
+                    s16_y <= C_Y_BLACK;
+                else
+                    s16_y <= s15_y(9 downto 6) & "000000";
+                end if;
+                v_q := resize(s15_u, 11) + 32;
+                if v_q(10) = '1' then s16_u <= to_unsigned(960, 10); else s16_u <= v_q(9 downto 6) & "000000"; end if;
+                v_q := resize(s15_v, 11) + 32;
+                if v_q(10) = '1' then s16_v <= to_unsigned(960, 10); else s16_v <= v_q(9 downto 6) & "000000"; end if;
+            end if;
+
+            -------------------------------------------------------------------
+            -- s17: blanking gate
+            -------------------------------------------------------------------
+            if s_avid_sr(LATENCY-2) = '0' then
+                s17_y <= C_Y_BLACK;
+                s17_u <= C_UV_ZERO;
+                s17_v <= C_UV_ZERO;
+            else
+                s17_y <= s16_y;
+                s17_u <= s16_u;
+                s17_v <= s16_v;
+            end if;
+
+            -------------------------------------------------------------------
+            -- Sync delay lines
+            -------------------------------------------------------------------
             s_hsync_sr(0) <= data_in.hsync_n;
             s_vsync_sr(0) <= data_in.vsync_n;
             s_field_sr(0) <= data_in.field_n;
             s_avid_sr(0)  <= data_in.avid;
-            for i in 1 to C_TOTAL_LATENCY - 1 loop
-                s_y_sr(i)     <= s_y_sr(i - 1);
-                s_u_sr(i)     <= s_u_sr(i - 1);
-                s_v_sr(i)     <= s_v_sr(i - 1);
-                s_hsync_sr(i) <= s_hsync_sr(i - 1);
-                s_vsync_sr(i) <= s_vsync_sr(i - 1);
-                s_field_sr(i) <= s_field_sr(i - 1);
-                s_avid_sr(i)  <= s_avid_sr(i - 1);
+            for i in 1 to LATENCY-1 loop
+                s_hsync_sr(i) <= s_hsync_sr(i-1);
+                s_vsync_sr(i) <= s_vsync_sr(i-1);
+                s_field_sr(i) <= s_field_sr(i-1);
+                s_avid_sr(i)  <= s_avid_sr(i-1);
             end loop;
         end if;
-    end process p_input_stage;
+    end process main_p;
 
-    --------------------------------------------------------------------------
-    -- Stage 2: compute per-pixel delay targets
-    --------------------------------------------------------------------------
-    p_delay_calc : process(clk)
-        variable v_smear_knob    : unsigned(9 downto 0);
-        variable v_smear_scaled  : unsigned(10 downto 0);
-        variable v_mod_knob      : unsigned(9 downto 0);
-        variable v_lag_knob      : unsigned(9 downto 0);
-        variable v_tear_knob     : unsigned(9 downto 0);
-
-        variable v_mod_src       : unsigned(9 downto 0);
-        variable v_mod_prod_full : unsigned(19 downto 0);
-        variable v_mod_contrib   : unsigned(10 downto 0);
-
-        variable v_line_rand     : unsigned(9 downto 0);
-        variable v_tear_prod     : unsigned(19 downto 0);
-        variable v_tear_contrib  : unsigned(10 downto 0);
-
-        variable v_sum_y         : unsigned(13 downto 0);   -- ample headroom
-        variable v_clamp_y       : unsigned(C_SMEAR_DEPTH_BITS - 1 downto 0);
-        variable v_chroma_lag    : unsigned(9 downto 0);
-        variable v_sum_u         : unsigned(13 downto 0);
-        variable v_sum_v         : signed(14 downto 0);
-    begin
-        if rising_edge(clk) then
-
-            -- Forward the input data into the smear delay lines' write port
-            s_s2_y <= s_in_y;
-            s_s2_u <= s_in_u;
-            s_s2_v <= s_in_v;
-
-            -- Glitch toggle: force all amount knobs to their max value
-            if s_glitch_enable = '1' then
-                v_smear_knob := (others => '1');
-                v_mod_knob   := (others => '1');
-                v_lag_knob   := (others => '1');
-                v_tear_knob  := (others => '1');
-            else
-                v_smear_knob := unsigned(registers_in(0));
-                v_mod_knob   := unsigned(registers_in(1));
-                v_lag_knob   := unsigned(registers_in(2));
-                v_tear_knob  := unsigned(registers_in(3));
-            end if;
-
-            -- Modulation source: current pixel luma, or LFSR noise
-            if registers_in(6)(0) = '0' then
-                v_mod_src := s_in_y;
-            else
-                v_mod_src := unsigned(s_lfsr_q(9 downto 0));
-            end if;
-
-            -- Register the multiply results so they are not in the same
-            -- combinational path as the downstream 4-way add/clamp chain.
-            -- 1-cycle of extra latency on knob changes; invisible.
-            v_mod_prod_full := v_mod_knob * v_mod_src;
-            s_mod_contrib_r <= resize(v_mod_prod_full(19 downto 10), 11);
-
-            -- Per-line tear offset
-            if registers_in(6)(1) = '0' then
-                -- "Lines" mode: alternate lines carry the offset
-                if s_ab_toggle = '1' then
-                    s_tear_contrib_r <= resize(v_tear_knob, 11);
-                else
-                    s_tear_contrib_r <= (others => '0');
-                end if;
-            else
-                -- "Random" mode: LFSR-gated per line
-                v_line_rand  := unsigned(s_line_lfsr_latched(9 downto 0));
-                v_tear_prod  := v_tear_knob * v_line_rand;
-                s_tear_contrib_r <= resize(v_tear_prod(19 downto 10), 11);
-            end if;
-
-            -- Scale the smear knob ×2 so the full range reaches the 2048-sample
-            -- depth of the variable_delay_u buffers.
-            v_smear_scaled := shift_left(resize(v_smear_knob, 11), 1);
-
-            -- Stage A: combine base smear + luma/noise mod + per-line tear
-            -- + drift, then clamp to [0, 2047] and register. Also register
-            -- the chroma-lag and split toggle for use next cycle.
-            v_sum_y := resize(v_smear_scaled,     14)
-                     + resize(s_mod_contrib_r,    14)
-                     + resize(s_tear_contrib_r,   14)
-                     + resize(s_smear_drift,      14);
-            if v_sum_y > to_unsigned(2047, 14) then
-                v_clamp_y := to_unsigned(2047, C_SMEAR_DEPTH_BITS);
-            else
-                v_clamp_y := v_sum_y(C_SMEAR_DEPTH_BITS - 1 downto 0);
-            end if;
-            s_clamp_y_r      <= v_clamp_y;
-            s_chroma_lag_r   <= shift_right(v_lag_knob, 1);
-            s_toggle_split_r <= registers_in(6)(2);
-
-            -- Stage B: produce the three delay values from the registered
-            -- clamp_y and chroma_lag (pre-edge values = one cycle older than
-            -- v_clamp_y just computed above). Stage B's three outputs land on
-            -- the same cycle so Y/U/V stay aligned.
-            s_delay_y <= s_clamp_y_r;
-
-            v_sum_u := resize(s_clamp_y_r,    14) + resize(s_chroma_lag_r, 14);
-            if v_sum_u > to_unsigned(2047, 14) then
-                s_delay_u <= to_unsigned(2047, C_SMEAR_DEPTH_BITS);
-            else
-                s_delay_u <= v_sum_u(C_SMEAR_DEPTH_BITS - 1 downto 0);
-            end if;
-
-            if s_toggle_split_r = '1' then
-                v_sum_v := resize(signed('0' & std_logic_vector(s_clamp_y_r)),    15)
-                         - resize(signed('0' & std_logic_vector(s_chroma_lag_r)), 15);
-                if v_sum_v(14) = '1' then
-                    s_delay_v <= (others => '0');
-                elsif v_sum_v > to_signed(2047, 15) then
-                    s_delay_v <= to_unsigned(2047, C_SMEAR_DEPTH_BITS);
-                else
-                    s_delay_v <= unsigned(v_sum_v(C_SMEAR_DEPTH_BITS - 1 downto 0));
-                end if;
-            else
-                if v_sum_u > to_unsigned(2047, 14) then
-                    s_delay_v <= to_unsigned(2047, C_SMEAR_DEPTH_BITS);
-                else
-                    s_delay_v <= v_sum_u(C_SMEAR_DEPTH_BITS - 1 downto 0);
-                end if;
-            end if;
-
-            -- Align data inputs to the extra pipeline cycle.
-            s_s2_y_d1 <= s_s2_y;
-            s_s2_u_d1 <= s_s2_u;
-            s_s2_v_d1 <= s_s2_v;
-
-        end if;
-    end process p_delay_calc;
-
-    --------------------------------------------------------------------------
-    -- Smear delay lines: 3 × variable_delay_u, one per YUV channel
-    --------------------------------------------------------------------------
-    smear_y_inst : entity work.variable_delay_u
-        generic map(
-            G_WIDTH => C_DATA_WIDTH,
-            G_DEPTH => C_SMEAR_DEPTH_BITS
-        )
-        port map(
-            clk    => clk,
-            enable => '1',
-            delay  => s_delay_y,
-            a      => s_s2_y_d1,
-            result => s_smear_y,
-            valid  => open
-        );
-
-    smear_u_inst : entity work.variable_delay_u
-        generic map(
-            G_WIDTH => C_DATA_WIDTH,
-            G_DEPTH => C_SMEAR_DEPTH_BITS
-        )
-        port map(
-            clk    => clk,
-            enable => '1',
-            delay  => s_delay_u,
-            a      => s_s2_u_d1,
-            result => s_smear_u,
-            valid  => open
-        );
-
-    smear_v_inst : entity work.variable_delay_u
-        generic map(
-            G_WIDTH => C_DATA_WIDTH,
-            G_DEPTH => C_SMEAR_DEPTH_BITS
-        )
-        port map(
-            clk    => clk,
-            enable => '1',
-            delay  => s_delay_v,
-            a      => s_s2_v_d1,
-            result => s_smear_v,
-            valid  => open
-        );
-
-    --------------------------------------------------------------------------
-    -- Align smear Y/U/V by 2 clocks to match the persist line buffer's
-    -- 2-clock read latency.
-    --------------------------------------------------------------------------
-    p_smear_align : process(clk)
-    begin
-        if rising_edge(clk) then
-            s_smear_y_d1 <= s_smear_y;
-            s_smear_u_d1 <= s_smear_u;
-            s_smear_v_d1 <= s_smear_v;
-            s_smear_y_d2 <= s_smear_y_d1;
-            s_smear_u_d2 <= s_smear_u_d1;
-            s_smear_v_d2 <= s_smear_v_d1;
-        end if;
-    end process p_smear_align;
-
-    --------------------------------------------------------------------------
-    -- Persist line buffer: stores raw input Y per line. Read/write at the
-    -- live input pixel_x position. The output at any cycle is the previous
-    -- line's input Y at that column, with ~2 clocks of internal latency.
-    --
-    -- We feed raw data_in.y rather than smeared Y so that the address and
-    -- data are naturally aligned at the current pixel_x.
-    --------------------------------------------------------------------------
-    persist_y_inst : entity work.video_line_buffer
-        generic map(
-            G_WIDTH => C_DATA_WIDTH,
-            G_DEPTH => C_PERSIST_DEPTH_BITS
-        )
-        port map(
-            clk       => clk,
-            i_ab      => s_ab_toggle,
-            i_wr_addr => s_pixel_x,
-            i_rd_addr => s_pixel_x,
-            i_data    => data_in.y,
-            o_data    => s_persist_y_slv
-        );
-
-    --------------------------------------------------------------------------
-    -- Stage 7: persist blend + bit-crush
-    --------------------------------------------------------------------------
-    p_blend_crush : process(clk)
-        variable v_prev_y       : unsigned(C_DATA_WIDTH - 1 downto 0);
-        variable v_persist_t    : unsigned(9 downto 0);
-        variable v_inv_t        : unsigned(9 downto 0);
-        variable v_cur_mul      : unsigned(19 downto 0);
-        variable v_prev_mul     : unsigned(19 downto 0);
-        variable v_blend_sum    : unsigned(20 downto 0);
-        variable v_blend_y      : unsigned(C_DATA_WIDTH - 1 downto 0);
-        variable v_crush_n      : integer range 0 to 7;
-        variable v_crush_mask   : unsigned(C_DATA_WIDTH - 1 downto 0);
-        variable v_scramble_y   : unsigned(C_DATA_WIDTH - 1 downto 0);
-        variable v_out_u        : unsigned(C_DATA_WIDTH - 1 downto 0);
-        variable v_out_v        : unsigned(C_DATA_WIDTH - 1 downto 0);
-    begin
-        if rising_edge(clk) then
-            v_prev_y := unsigned(s_persist_y_slv);
-
-            -- Persist blend weight (0 = all current, 1023 ≈ all previous)
-            v_persist_t := unsigned(registers_in(4));
-            v_inv_t     := to_unsigned(1023, 10) - v_persist_t;
-
-            -- Register the two 10×10 multiplies so they live in their own
-            -- pipeline stage instead of chained into the 21-bit add + XOR +
-            -- crush combinational path.
-            s_cur_mul_r  <= s_smear_y_d2 * v_inv_t;
-            s_prev_mul_r <= v_prev_y     * v_persist_t;
-
-            -- Blend sum uses pre-edge registered multiplies (= results from
-            -- the previous cycle). 1-cycle knob/video lag is invisible.
-            v_blend_sum := resize(s_cur_mul_r, 21) + resize(s_prev_mul_r, 21);
-
-            -- Divide by 1024 (>> 10) and keep 10 bits. The sum's max is
-            -- 1023*1023 ≈ 1_046_529 which after >>10 stays ≤ 1023.
-            v_blend_y := v_blend_sum(19 downto 10);
-
-            -- Glitch: scramble Y with the live LFSR. XOR corrupts bit values
-            -- uniformly across the 10-bit range, giving a heavy "broken data"
-            -- look while the Glitch toggle is held.
-            if s_glitch_enable = '1' then
-                v_scramble_y := v_blend_y xor unsigned(s_lfsr_q(9 downto 0));
-            else
-                v_scramble_y := v_blend_y;
-            end if;
-
-            -- Glitch: chroma swap on LFSR-selected lines. Uses the per-line
-            -- latched LFSR so the decision is stable across a whole line.
-            if s_glitch_enable = '1' and s_line_lfsr_latched(0) = '1' then
-                v_out_u := s_smear_v_d2;
-                v_out_v := s_smear_u_d2;
-            else
-                v_out_u := s_smear_u_d2;
-                v_out_v := s_smear_v_d2;
-            end if;
-
-            -- Bit-crush mask: top 3 bits of Crush knob pick LSBs to mask
-            v_crush_n := to_integer(unsigned(registers_in(5)(9 downto 7)));
-            v_crush_mask := (others => '1');
-            for b in 0 to C_DATA_WIDTH - 1 loop
-                if b < v_crush_n then
-                    v_crush_mask(b) := '0';
-                end if;
-            end loop;
-
-            s_proc_y <= v_scramble_y and v_crush_mask;
-            s_proc_u <= v_out_u      and v_crush_mask;
-            s_proc_v <= v_out_v      and v_crush_mask;
-        end if;
-    end process p_blend_crush;
-
-    --------------------------------------------------------------------------
-    -- Dry-path taps for interpolator a input. s_proc_* is registered at T7
-    -- (7 clocks after data_in), which corresponds to shift-register index 6
-    -- (index 0 = 1 clk delayed ⇒ index 6 = 7 clks delayed).
-    --------------------------------------------------------------------------
-    s_interp_y_a <= unsigned(s_y_sr(6));
-    s_interp_u_a <= unsigned(s_u_sr(6));
-    s_interp_v_a <= unsigned(s_v_sr(6));
-
-    --------------------------------------------------------------------------
-    -- Dry/wet mix: interpolator_u, 4-clock latency per channel.
-    -- a = dry (bypass-delayed input), b = wet (processed), t = Mix slider.
-    --------------------------------------------------------------------------
-    interp_y_inst : entity work.interpolator_u
-        generic map(
-            G_WIDTH      => C_DATA_WIDTH,
-            G_FRAC_BITS  => C_DATA_WIDTH,
-            G_OUTPUT_MIN => 0,
-            G_OUTPUT_MAX => 1023
-        )
-        port map(
-            clk    => clk,
-            enable => s_interp_enable,
-            a      => s_interp_y_a,
-            b      => s_proc_y,
-            t      => s_mix_t,
-            result => s_interp_y_result,
-            valid  => s_interp_y_valid
-        );
-
-    interp_u_inst : entity work.interpolator_u
-        generic map(
-            G_WIDTH      => C_DATA_WIDTH,
-            G_FRAC_BITS  => C_DATA_WIDTH,
-            G_OUTPUT_MIN => 0,
-            G_OUTPUT_MAX => 1023
-        )
-        port map(
-            clk    => clk,
-            enable => s_interp_enable,
-            a      => s_interp_u_a,
-            b      => s_proc_u,
-            t      => s_mix_t,
-            result => s_interp_u_result,
-            valid  => s_interp_u_valid
-        );
-
-    interp_v_inst : entity work.interpolator_u
-        generic map(
-            G_WIDTH      => C_DATA_WIDTH,
-            G_FRAC_BITS  => C_DATA_WIDTH,
-            G_OUTPUT_MIN => 0,
-            G_OUTPUT_MAX => 1023
-        )
-        port map(
-            clk    => clk,
-            enable => s_interp_enable,
-            a      => s_interp_v_a,
-            b      => s_proc_v,
-            t      => s_mix_t,
-            result => s_interp_v_result,
-            valid  => s_interp_v_valid
-        );
-
-    --------------------------------------------------------------------------
-    -- LFSR noise source (free-running)
-    --------------------------------------------------------------------------
-    lfsr_inst : entity work.lfsr16
-        port map(
-            clk    => clk,
-            enable => '1',
-            seed   => x"0000",
-            load   => '0',
-            q      => s_lfsr_q
-        );
-
-    --------------------------------------------------------------------------
-    -- Output mux at T11. Sync signals always come from the bypass shift
-    -- register. Video data comes from the interpolator unless Bypass is on.
-    --------------------------------------------------------------------------
-    data_out.hsync_n <= s_hsync_sr(C_TOTAL_LATENCY - 1);
-    data_out.vsync_n <= s_vsync_sr(C_TOTAL_LATENCY - 1);
-    data_out.field_n <= s_field_sr(C_TOTAL_LATENCY - 1);
-    data_out.avid    <= s_avid_sr(C_TOTAL_LATENCY - 1);
-
-    data_out.y <= s_y_sr(C_TOTAL_LATENCY - 1) when s_bypass_enable = '1'
-                  else std_logic_vector(s_interp_y_result);
-    data_out.u <= s_u_sr(C_TOTAL_LATENCY - 1) when s_bypass_enable = '1'
-                  else std_logic_vector(s_interp_u_result);
-    data_out.v <= s_v_sr(C_TOTAL_LATENCY - 1) when s_bypass_enable = '1'
-                  else std_logic_vector(s_interp_v_result);
+    data_out.hsync_n <= s_hsync_sr(LATENCY-1);
+    data_out.vsync_n <= s_vsync_sr(LATENCY-1);
+    data_out.field_n <= s_field_sr(LATENCY-1);
+    data_out.avid    <= s_avid_sr(LATENCY-1);
+    data_out.y       <= std_logic_vector(s17_y);
+    data_out.u       <= std_logic_vector(s17_u);
+    data_out.v       <= std_logic_vector(s17_v);
 
 end architecture slipframe;
