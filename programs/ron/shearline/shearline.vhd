@@ -1,46 +1,61 @@
 -- Shearline: recursive line-feedback smear.
 --
--- The idea: buffer a whole scanline, then on the NEXT line re-draw the
--- *previous output* line shifted horizontally by a few pixels, blending a
--- little live video back in each line. Because every line re-draws the
--- already-shifted previous line (recursive feedback, not a one-shot skew), a
--- bright source pixel streaks into a diagonal comet trail sliding down-screen.
+-- Each scanline re-draws the previous OUTPUT line, read at a sheared and
+-- fanned column, blends the live line into it and writes the result back for
+-- the next line. Because every line re-draws the already-moved line above
+-- (recursive feedback, not a one-shot skew), bright detail streaks into
+-- diagonal comet trails sliding down-screen.
 --
--- Per active pixel (column p on the current line):
---   prev   = feedback_buffer[ p - shift ]      (previous line, slid sideways)
---   result = ( decay*prev + (1023-decay)*live ) >> 10
---   feedback_buffer[ p ] = result             (stored for the NEXT line)
---   out    = mix( live, result, Mix )
+-- Per active pixel x on the current line:
+--   rd     = x -/+ S_n - D(x)                     column read in the line above
+--   prev   = buffer[rd]                           (already Spectrum-rotated)
+--   ref    = live (Smear)  |  black/neutral (Comet)
+--   res    = ref + rtz( t * (prev - ref) / 1024 ) t = Trail weight
+--   wet    = res  (Smear)  |  brighter of live / res (Comet)
+--   buffer[x] = rotate(wet);   out = mix(live, wet, Mix)
 --
--- Decay = trail length. Using (1023-decay) as the live-inject weight keeps the
--- feedback loop's energy bounded (no runaway to white). This is exactly the
--- persist blend in slipframe, but fed its own output instead of raw input, and
--- read at a horizontally shifted address.
+-- Shear (P12): S_n is the integer carry of a per-line Bresenham accumulator
+--   of a 4.4 fixed-point slope, so fractional slopes (1/16 px/line) draw
+--   steep trails as regular staircases. Slope Mod adds per-line random jitter.
+-- Fan (K1): D(x) = k*(x - c), a per-pixel 7.14 fixed-point DDA about c = half
+--   the measured width: each line re-draws the one above zoomed about the
+--   centre, + sprays trails outward, - converges them. c*k comes free from a
+--   second accumulator latched at the centre pixel. A golden-ratio per-line
+--   dither on D's start keeps small fans moving (no rounding dead zone).
+-- Spectrum (K4): a Minsky circle step on the stored chroma at write-back
+--   (u -= a*v; v += a*u'), area-preserving so it never runs away, plus a
+--   luma-scaled seed along +U so grey trails cycle through the hues too.
+-- Rounding: the blend is round-toward-zero (t * |diff|, sign applied after),
+--   so the recursion settles exactly on its target -- floor() biased long
+--   trails toward green/black. The rotation rounds to nearest.
 --
--- Buffer = inlined dual-bank (ping-pong) BRAM arrays, one pair per channel.
---   * Each scanline READS the bank the previous line wrote and WRITES the other.
---   * The bank a pixel writes into is its line parity, captured at read-issue
---     time and carried down the pipeline to the write stage. Because the result
---     lands a couple of cycles after the read, the trailing writes at a line's
---     end carry the OLD parity and so finish into the correct (old) bank with no
---     special boundary handling -- this sidesteps the classic write-addr /
---     bank-flip race (see project memory: lb_write_addr_timing).
---   * Reads use the live (already-flipped at hsync) parity, so a new line
---     immediately reads what the line above just wrote.
+-- Buffer: dual-bank (ping-pong by line parity) EBR, one pair per channel.
+--   Reads use the live parity (the line above); each pixel's write parity is
+--   captured at read time and carried to the write, so trailing writes land
+--   in the right bank with no boundary special-casing (see project memory:
+--   lb_write_addr_timing). The read bank is never the write bank during
+--   active video, so all six banks carry no_rw_check.
+--   Y is full 2048-deep; U/V are 2:1 decimated (1024 deep, odd pixel wins).
+--   The chroma read column is rd-1+b, b toggling on every odd-shift line, so
+--   the chroma trail drifts at the luma rate instead of rounding to even.
+-- Field start: the first active line of every field is seeded from live
+--   video, so trails never wrap from the bottom of the frame to the top.
+-- Off-line reads (rd < 0 or rd >= measured width) pass live video.
 --
--- Chroma economy: Y is full 2048-deep; U and V are stored 2:1 horizontally
--- decimated (1024 deep). Chroma is low-frequency so this is near-invisible and
--- keeps total BRAM ~22 of 32 EBRs on the iCE40 HX4K.
---
--- Pipeline (rising-edge clocks, data_in -> data_out):
---   E0  data_in combinational
---   E1  p_input:  register inputs, pixel_x / parity / clear FSM, dry+sync SR
---       (combinational s_rd_addr_* drives the bank read ports)
---   E2  p_stage_a / bank reads: s_rd*0/1 valid; capture live/par/addr/we/bg
---   E3  p_stage_b: select prev bank, multiply (decay*prev, inj*live), carry
---   E4  s_res_* combinational sum>>10 -> bank WRITE + register s_wet_*
---   E5-E8 interpolator_u (4-clock) dry/wet mix
---   E8  data_out (combinational bypass mux)
+-- Pipeline (data_in -> data_out = 14 clocks in every mode):
+--   E1  input regs, counters, line/field bookkeeping
+--   E2  read columns (registered -> EBR address)
+--   E3  EBR read data, off-line flag
+--   E4  bank select
+--   E5  ref, |prev - ref|, sign, t
+--   E6  t * |diff|, operand split hi/lo
+--   E7  combine partial products
+--   E8  res = ref +/- q
+--   E9  Comet select -> wet / dry
+--   E10-E13 Mix: wet + rtz((dry - wet) * (1023 - Mix)), split multiply
+--           (exactly wet at 100%; Bypass selects dry at the same latency)
+--   E14 blanking gate -> data_out
+--   Write-back: E10-E15 Spectrum rotation, EBR write from the E15 registers.
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -60,239 +75,399 @@ architecture shearline of program_top is
     constant C_DW            : integer := C_VIDEO_DATA_WIDTH;  -- 10
     constant C_Y_AW          : integer := 11;                  -- 2048 (full)
     constant C_UV_AW         : integer := 10;                  -- 1024 (2:1 dec)
-    constant C_TOTAL_LATENCY : integer := 9;
-    constant C_MAX_SHIFT     : integer := 31;
+    constant C_RW            : integer := 13;                  -- signed read column
+    constant C_FW            : integer := 21;                  -- fan accumulators, 7.14
+    constant C_TOTAL_LATENCY : integer := 14;
+
+    constant C_BLACK  : unsigned(C_DW - 1 downto 0) := to_unsigned(64, C_DW);
+    constant C_NEUT   : unsigned(C_DW - 1 downto 0) := to_unsigned(512, C_DW);
+    constant C_GOLDEN : unsigned(13 downto 0)       := to_unsigned(10125, 14);  -- 0.618 * 2^14
+
+    type t_yuv is record
+        y : unsigned(C_DW - 1 downto 0);
+        u : unsigned(C_DW - 1 downto 0);
+        v : unsigned(C_DW - 1 downto 0);
+    end record;
+    constant C_YUV_BLACK : t_yuv := (y => C_BLACK, u => C_NEUT, v => C_NEUT);
+
+    -- Write-back context carried with every pixel from E2 to the EBR write.
+    type t_ctx is record
+        px  : unsigned(C_Y_AW - 1 downto 0);  -- write column
+        par : std_logic;                       -- write bank
+        we  : std_logic;                       -- active pixel
+    end record;
+    constant C_CTX_0 : t_ctx := (px => (others => '0'), par => '0', we => '0');
+
+    type t_live_pipe is array (2 to 9) of t_yuv;
+    type t_ctx_pipe  is array (2 to 15) of t_ctx;
+
+    -- |a - b| in the low C_DW bits, sign (a < b) in the top bit.
+    function f_sdiff(a, b : unsigned(C_DW - 1 downto 0)) return unsigned is
+        variable v_d, v_nd : signed(C_DW downto 0);
+        variable v_r       : unsigned(C_DW downto 0);
+    begin
+        v_d  := signed(resize(a, C_DW + 1)) - signed(resize(b, C_DW + 1));
+        v_nd := signed(resize(b, C_DW + 1)) - signed(resize(a, C_DW + 1));
+        if v_d(C_DW) = '1' then
+            v_r := '1' & unsigned(v_nd(C_DW - 1 downto 0));
+        else
+            v_r := '0' & unsigned(v_d(C_DW - 1 downto 0));
+        end if;
+        return v_r;
+    end function;
+
+    -- ref +/- (pm >> 10). pm <= t*|prev-ref| with t < 1024, so the result
+    -- always lies between ref and prev: no clamp needed.
+    function f_step(b : unsigned(C_DW - 1 downto 0); pm : unsigned(19 downto 0);
+                    neg : std_logic) return unsigned is
+    begin
+        if neg = '1' then
+            return b - pm(19 downto 10);
+        else
+            return b + pm(19 downto 10);
+        end if;
+    end function;
+
+    -- Clamp to signed 10-bit chroma (-512..511).
+    function f_clamp_c(x : signed) return signed is
+    begin
+        if x < -512 then
+            return to_signed(-512, C_DW);
+        elsif x > 511 then
+            return to_signed(511, C_DW);
+        else
+            return resize(x, C_DW);
+        end if;
+    end function;
 
     --------------------------------------------------------------------------
-    -- Inlined dual-bank line buffers (feedback store)
+    -- Dual-bank line buffers (feedback store). Y black / chroma neutral at
+    -- power-up: code 0 chroma is saturated green.
     --------------------------------------------------------------------------
     type t_lb_y  is array (0 to 2047) of std_logic_vector(C_DW - 1 downto 0);
     type t_lb_uv is array (0 to 1023) of std_logic_vector(C_DW - 1 downto 0);
 
-    signal lbY0, lbY1 : t_lb_y  := (others => (others => '0'));
-    signal lbU0, lbU1 : t_lb_uv := (others => (others => '0'));
-    signal lbV0, lbV1 : t_lb_uv := (others => (others => '0'));
+    signal lbY0, lbY1 : t_lb_y  := (others => "0001000000");
+    signal lbU0, lbU1 : t_lb_uv := (others => "1000000000");
+    signal lbV0, lbV1 : t_lb_uv := (others => "1000000000");
+
+    attribute no_rw_check : boolean;
+    attribute no_rw_check of lbY0 : signal is true;
+    attribute no_rw_check of lbY1 : signal is true;
+    attribute no_rw_check of lbU0 : signal is true;
+    attribute no_rw_check of lbU1 : signal is true;
+    attribute no_rw_check of lbV0 : signal is true;
+    attribute no_rw_check of lbV1 : signal is true;
 
     signal s_rdY0, s_rdY1 : std_logic_vector(C_DW - 1 downto 0) := (others => '0');
     signal s_rdU0, s_rdU1 : std_logic_vector(C_DW - 1 downto 0) := (others => '0');
     signal s_rdV0, s_rdV1 : std_logic_vector(C_DW - 1 downto 0) := (others => '0');
 
     --------------------------------------------------------------------------
-    -- Input registers / position tracking
+    -- Control (registered decode; quasi-static)
     --------------------------------------------------------------------------
-    signal s_in_y, s_in_u, s_in_v : unsigned(C_DW - 1 downto 0) := (others => '0');
-    signal s_in_avid              : std_logic := '0';
+    signal s_kq       : signed(9 downto 0)          := (others => '0');  -- Fan, 2^-14 px/px
+    signal s_g        : unsigned(7 downto 0)        := (others => '0');
+    signal s_t_trail  : unsigned(C_DW - 1 downto 0) := (others => '0');
+    signal s_sh_off   : unsigned(7 downto 0)        := (others => '0');
+    signal s_sh_inc   : unsigned(7 downto 0)        := (others => '0');
+    signal s_shear    : unsigned(7 downto 0)        := (others => '0');  -- 4.4 px/line
+    signal s_slope    : unsigned(C_DW - 1 downto 0) := (others => '0');
+    signal s_spec_a   : signed(8 downto 0)          := (others => '0');  -- 2^-10 rad/line
+    signal s_seed_sel : unsigned(2 downto 0)        := (others => '0');
+    signal s_dir      : std_logic := '0';
+    signal s_comet    : std_logic := '0';
+    signal s_mix_w    : unsigned(C_DW - 1 downto 0) := (others => '0');  -- 1023 - Mix
+    signal s_bypass   : std_logic := '0';
 
-    signal s_pixel_x      : unsigned(C_Y_AW - 1 downto 0) := (others => '0');
-    signal s_par          : std_logic := '0';
+    --------------------------------------------------------------------------
+    -- E1: input registers, counters, line / field bookkeeping
+    --------------------------------------------------------------------------
+    signal s_in           : t_yuv := C_YUV_BLACK;
+    signal s_in_avid      : std_logic := '0';
     signal s_prev_hsync_n : std_logic := '1';
     signal s_prev_vsync_n : std_logic := '1';
 
-    -- LFSR + per-line latched random for Slope Mod jitter
-    signal s_lfsr_q       : std_logic_vector(15 downto 0);
-    signal s_line_rand    : unsigned(4 downto 0) := (others => '0');
-    signal s_eff_shift    : unsigned(4 downto 0) := (others => '0');
+    signal s_px     : unsigned(C_Y_AW - 1 downto 0) := (others => '0');  -- write column
+    signal s_rp     : signed(C_RW - 1 downto 0)     := (others => '0');  -- x -/+ S
+    signal s_rpu    : signed(C_RW - 1 downto 0)     := (others => '0');  -- x -/+ S - 1 + b
+    signal s_dacc   : signed(C_FW - 1 downto 0)     := (others => '0');  -- k*(x - c) + g
+    signal s_kacc   : signed(C_FW - 1 downto 0)     := (others => '0');  -- k*x
+    signal s_kc     : signed(C_FW - 1 downto 0)     := (others => '0');  -- k*c
+    signal s_par    : std_logic := '0';
 
-    -- Clear sweep (Frame=Reset): wipe both banks during vblank
-    signal s_clearing     : std_logic := '0';
-    signal s_clr_addr     : unsigned(C_Y_AW - 1 downto 0) := (others => '0');
+    signal s_first    : std_logic := '1';  -- next active line is a field's first
+    signal s_seedline : std_logic := '0';  -- this line is seeded from live
+    signal s_afall    : std_logic := '0';
+    signal s_saw_act  : std_logic := '0';
+    signal s_wmax     : unsigned(C_Y_AW - 1 downto 0) := (others => '0');
+    signal s_width    : unsigned(C_Y_AW - 1 downto 0) := to_unsigned(1920, C_Y_AW);
+    signal s_half     : unsigned(C_Y_AW - 1 downto 0);
 
-    --------------------------------------------------------------------------
-    -- Control (decoded from registers)
-    --------------------------------------------------------------------------
-    signal s_decay        : unsigned(C_DW - 1 downto 0);
-    signal s_base_shift   : unsigned(4 downto 0);
-    signal s_slope        : unsigned(C_DW - 1 downto 0);
-    signal s_dir          : std_logic;
-    signal s_reset_mode   : std_logic;
-    signal s_bypass       : std_logic;
-    signal s_mix_t        : unsigned(C_DW - 1 downto 0);
+    signal s_phi      : unsigned(3 downto 0)  := (others => '0');  -- shear phase
+    signal s_gold     : unsigned(13 downto 0) := (others => '0');  -- fan dither
+    signal s_cbit     : std_logic := '0';                          -- chroma rounding toggle
+    signal s_shcur    : unsigned(5 downto 0)  := (others => '0');  -- S for the next line
 
-    --------------------------------------------------------------------------
-    -- Combinational read-address generation
-    --------------------------------------------------------------------------
-    signal s_rd_addr_y  : unsigned(C_Y_AW - 1 downto 0) := (others => '0');
-    signal s_rd_addr_uv : unsigned(C_UV_AW - 1 downto 0) := (others => '0');
-    signal s_rd_bg      : std_logic := '0';
-
-    --------------------------------------------------------------------------
-    -- Stage A: captured per-pixel context
-    --------------------------------------------------------------------------
-    signal s_a_live_y, s_a_live_u, s_a_live_v : unsigned(C_DW - 1 downto 0) := (others => '0');
-    signal s_a_bg      : std_logic := '0';
-    signal s_a_par     : std_logic := '0';
-    signal s_a_rbank   : std_logic := '0';
-    signal s_a_addr_y  : unsigned(C_Y_AW - 1 downto 0)  := (others => '0');
-    signal s_a_addr_uv : unsigned(C_UV_AW - 1 downto 0) := (others => '0');
-    signal s_a_we      : std_logic := '0';
+    -- line-rate precompute (settles within the front porch)
+    signal s_lfsr_q    : std_logic_vector(15 downto 0);
+    signal s_line_rand : unsigned(4 downto 0)        := (others => '0');
+    signal s_jit_p     : unsigned(14 downto 0)       := (others => '0');
+    signal s_sum       : unsigned(8 downto 0)        := (others => '0');
+    signal s_shnext    : unsigned(5 downto 0)        := (others => '0');
+    signal s_rp_load   : signed(C_RW - 1 downto 0)   := (others => '0');
+    signal s_rpu_load  : signed(C_RW - 1 downto 0)   := (others => '0');
+    signal s_dload     : signed(C_FW - 1 downto 0)   := (others => '0');
 
     --------------------------------------------------------------------------
-    -- Stage A2 "prep": prev bank selected, diff = (prev - live), blend amount
-    -- t (= decay, or 0 at a background read). Registered so the multiply in the
-    -- next stage sees clean register inputs (no mux in the multiply path).
+    -- Blend pipeline
     --------------------------------------------------------------------------
-    signal s_pp_diffY, s_pp_diffU, s_pp_diffV : signed(C_DW downto 0) := (others => '0');
-    signal s_pp_liveY, s_pp_liveU, s_pp_liveV : unsigned(C_DW - 1 downto 0) := (others => '0');
-    signal s_pp_t      : unsigned(C_DW - 1 downto 0) := (others => '0');
-    signal s_pp_par    : std_logic := '0';
-    signal s_pp_addr_y : unsigned(C_Y_AW - 1 downto 0)  := (others => '0');
-    signal s_pp_addr_uv: unsigned(C_UV_AW - 1 downto 0) := (others => '0');
-    signal s_pp_we     : std_logic := '0';
+    signal s_live : t_live_pipe := (others => C_YUV_BLACK);
+    signal s_ctx  : t_ctx_pipe  := (others => C_CTX_0);
+
+    signal s_rd_y, s_rd_uv : signed(C_RW - 1 downto 0) := (others => '0');   -- E2
+    signal s_ra_uv         : unsigned(C_UV_AW - 1 downto 0);
+    signal s_seed2, s_seed3 : std_logic := '0';
+    signal s_bg3           : std_logic := '0';                               -- E3
+    signal s_p4            : t_yuv := C_YUV_BLACK;                           -- E4
+    signal s_tz4           : std_logic := '0';
+
+    signal s_m5, s_b5      : t_yuv := C_YUV_BLACK;                           -- E5
+    signal s_n5            : std_logic_vector(2 downto 0) := (others => '0');
+    signal s_t5            : unsigned(C_DW - 1 downto 0) := (others => '0');
+
+    signal s_pa6_y, s_pa6_u, s_pa6_v : unsigned(14 downto 0) := (others => '0');  -- E6
+    signal s_pb6_y, s_pb6_u, s_pb6_v : unsigned(14 downto 0) := (others => '0');
+    signal s_b6            : t_yuv := C_YUV_BLACK;
+    signal s_n6            : std_logic_vector(2 downto 0) := (others => '0');
+
+    signal s_pm7_y, s_pm7_u, s_pm7_v : unsigned(19 downto 0) := (others => '0');  -- E7
+    signal s_b7            : t_yuv := C_YUV_BLACK;
+    signal s_n7            : std_logic_vector(2 downto 0) := (others => '0');
+
+    signal s_r8            : t_yuv := C_YUV_BLACK;                           -- E8
+    signal s_wet9, s_dry9  : t_yuv := C_YUV_BLACK;                           -- E9
 
     --------------------------------------------------------------------------
-    -- Stage B "mult": one signed multiply per channel, t * (prev - live).
-    -- result = live + (t*(prev-live)) >> 10  (a lerp: t=0 -> live, t=1023 -> prev)
+    -- Spectrum write-back pipeline (E10-E15)
     --------------------------------------------------------------------------
-    signal s_b_prodY, s_b_prodU, s_b_prodV : signed(C_DW + 11 downto 0) := (others => '0');
-    signal s_b_liveY, s_b_liveU, s_b_liveV : unsigned(C_DW - 1 downto 0) := (others => '0');
-    signal s_b_par     : std_logic := '0';
-    signal s_b_addr_y  : unsigned(C_Y_AW - 1 downto 0)  := (others => '0');
-    signal s_b_addr_uv : unsigned(C_UV_AW - 1 downto 0) := (others => '0');
-    signal s_b_we      : std_logic := '0';
+    signal s_p1_10 : signed(16 downto 0)         := (others => '0');
+    signal s_yb10  : unsigned(C_DW - 1 downto 0) := (others => '0');
+    signal s_cu10, s_cv10 : signed(C_DW - 1 downto 0) := (others => '0');
+    signal s_y10   : unsigned(C_DW - 1 downto 0) := (others => '0');
+
+    signal s_p1r11 : signed(8 downto 0)          := (others => '0');
+    signal s_cus11 : signed(C_DW downto 0)       := (others => '0');
+    signal s_cv11  : signed(C_DW - 1 downto 0)   := (others => '0');
+    signal s_y11   : unsigned(C_DW - 1 downto 0) := (others => '0');
+
+    signal s_u12, s_cv12  : signed(C_DW - 1 downto 0) := (others => '0');
+    signal s_y12   : unsigned(C_DW - 1 downto 0) := (others => '0');
+
+    signal s_p2_13 : signed(16 downto 0)         := (others => '0');
+    signal s_u13, s_cv13  : signed(C_DW - 1 downto 0) := (others => '0');
+    signal s_y13   : unsigned(C_DW - 1 downto 0) := (others => '0');
+
+    signal s_p2r14 : signed(8 downto 0)          := (others => '0');
+    signal s_u14, s_cv14  : signed(C_DW - 1 downto 0) := (others => '0');
+    signal s_y14   : unsigned(C_DW - 1 downto 0) := (others => '0');
+
+    signal s_wy15, s_wu15, s_wv15 : std_logic_vector(C_DW - 1 downto 0) := (others => '0');
 
     --------------------------------------------------------------------------
-    -- Stage C: combinational blend result (write-back + wet path)
-    --------------------------------------------------------------------------
-    signal s_resY, s_resU, s_resV : std_logic_vector(C_DW - 1 downto 0);
-
-    signal s_wet_y, s_wet_u, s_wet_v : unsigned(C_DW - 1 downto 0) := (others => '0');
-
-    --------------------------------------------------------------------------
-    -- Dry / sync delay shift registers (length = C_TOTAL_LATENCY)
+    -- Sync delay shift registers (length = C_TOTAL_LATENCY)
     -- index 0 = 1 clock delayed, index N = (N+1) clocks delayed
     --------------------------------------------------------------------------
-    type t_data_shift is array (0 to C_TOTAL_LATENCY - 1)
-        of std_logic_vector(C_DW - 1 downto 0);
-    type t_bit_shift  is array (0 to C_TOTAL_LATENCY - 1) of std_logic;
+    type t_bit_shift is array (0 to C_TOTAL_LATENCY - 1) of std_logic;
 
-    signal s_y_sr     : t_data_shift := (others => (others => '0'));
-    signal s_u_sr     : t_data_shift := (others => (others => '0'));
-    signal s_v_sr     : t_data_shift := (others => (others => '0'));
-    signal s_hsync_sr : t_bit_shift  := (others => '1');
-    signal s_vsync_sr : t_bit_shift  := (others => '1');
-    signal s_field_sr : t_bit_shift  := (others => '1');
-    signal s_avid_sr  : t_bit_shift  := (others => '0');
+    signal s_hsync_sr : t_bit_shift := (others => '1');
+    signal s_vsync_sr : t_bit_shift := (others => '1');
+    signal s_field_sr : t_bit_shift := (others => '1');
+    signal s_avid_sr  : t_bit_shift := (others => '0');
 
     --------------------------------------------------------------------------
-    -- Interpolator I/O
+    -- Dry/wet mix pipeline (E10-E13) and output register
     --------------------------------------------------------------------------
-    signal s_interp_y_a, s_interp_u_a, s_interp_v_a : unsigned(C_DW - 1 downto 0);
-    signal s_interp_y_result, s_interp_u_result, s_interp_v_result : unsigned(C_DW - 1 downto 0);
-    signal s_interp_y_valid, s_interp_u_valid, s_interp_v_valid : std_logic;
+    signal s_mm10, s_mwet10, s_mdry10 : t_yuv := C_YUV_BLACK;
+    signal s_mn10  : std_logic_vector(2 downto 0) := (others => '0');
+    signal s_mpa11_y, s_mpa11_u, s_mpa11_v : unsigned(14 downto 0) := (others => '0');
+    signal s_mpb11_y, s_mpb11_u, s_mpb11_v : unsigned(14 downto 0) := (others => '0');
+    signal s_mwet11, s_mdry11 : t_yuv := C_YUV_BLACK;
+    signal s_mn11  : std_logic_vector(2 downto 0) := (others => '0');
+    signal s_mpm12_y, s_mpm12_u, s_mpm12_v : unsigned(19 downto 0) := (others => '0');
+    signal s_mwet12, s_mdry12 : t_yuv := C_YUV_BLACK;
+    signal s_mn12  : std_logic_vector(2 downto 0) := (others => '0');
+    signal s_mix13 : t_yuv := C_YUV_BLACK;
+
+    signal s_out : t_yuv := C_YUV_BLACK;
 
 begin
 
     --------------------------------------------------------------------------
-    -- Control decode
+    -- Control decode (registered; two stages where a shift feeds an add)
     --------------------------------------------------------------------------
-    s_decay      <= unsigned(registers_in(1));
-    s_base_shift <= unsigned('0' & registers_in(0)(9 downto 6));  -- 0..15 px
-    s_slope      <= unsigned(registers_in(2));
-    s_dir        <= registers_in(6)(0);
-    s_reset_mode <= registers_in(6)(1);
-    s_bypass     <= registers_in(6)(4);
-    s_mix_t      <= unsigned(registers_in(7));
-
-    --------------------------------------------------------------------------
-    -- Combinational read-address gen: column (p -/+ eff_shift), with edge
-    -- clamp -> background flag when the shifted address leaves the line.
-    --------------------------------------------------------------------------
-    p_rdaddr : process(s_pixel_x, s_eff_shift, s_dir)
-        variable v_p  : signed(C_Y_AW + 1 downto 0);
-        variable v_sh : signed(C_Y_AW + 1 downto 0);
-        variable v_rd : signed(C_Y_AW + 1 downto 0);
-    begin
-        v_p  := signed(resize(s_pixel_x, C_Y_AW + 2));
-        v_sh := signed(resize(s_eff_shift, C_Y_AW + 2));
-        if s_dir = '0' then
-            v_rd := v_p - v_sh;   -- Right slide: read from the left
-        else
-            v_rd := v_p + v_sh;   -- Left slide: read from the right
-        end if;
-
-        if v_rd < 0 or v_rd > 2047 then
-            s_rd_bg      <= '1';
-            s_rd_addr_y  <= (others => '0');
-            s_rd_addr_uv <= (others => '0');
-        else
-            s_rd_bg      <= '0';
-            s_rd_addr_y  <= unsigned(v_rd(C_Y_AW - 1 downto 0));
-            s_rd_addr_uv <= unsigned(v_rd(C_UV_AW downto 1));  -- >> 1 decimate
-        end if;
-    end process p_rdaddr;
-
-    --------------------------------------------------------------------------
-    -- Stage E1: input register, position/parity tracking, Slope Mod jitter,
-    -- clear FSM, dry+sync shift registers.
-    --------------------------------------------------------------------------
-    p_input : process(clk)
-        variable v_jit_prod : unsigned(14 downto 0);
-        variable v_jitter   : unsigned(4 downto 0);
-        variable v_eff      : unsigned(5 downto 0);
+    p_ctrl : process(clk)
+        variable v_k : signed(10 downto 0);
+        variable v_p : unsigned(9 downto 0);
+        variable v_a : unsigned(7 downto 0);
     begin
         if rising_edge(clk) then
-            s_in_y    <= unsigned(data_in.y);
-            s_in_u    <= unsigned(data_in.u);
-            s_in_v    <= unsigned(data_in.v);
+            -- K1 Fan: bipolar about noon with a +/-16 deadband, so the knob's
+            -- noise can't wobble an "off" fan.
+            v_k := signed(resize(unsigned(registers_in(0)), 11)) - 512;
+            if v_k(10 downto 4) = "0000000" or v_k(10 downto 4) = "1111111" then
+                s_kq <= (others => '0');
+            else
+                s_kq <= v_k(9 downto 0);
+            end if;
+
+            -- K2 Trail: exponential. t = 1024 - (('1' & ~m) >> e), e = top 3
+            -- bits: trail length doubles every 1/8 turn, 4 lines -> 1000+.
+            s_g <= shift_right('1' & not unsigned(registers_in(1)(6 downto 0)),
+                               to_integer(unsigned(registers_in(1)(9 downto 7))));
+            s_t_trail <= resize(to_unsigned(1024, 11) - resize(s_g, 11), C_DW);
+
+            -- P12 Shear: piecewise slope (4.4 px/line), half the travel below
+            -- 3 px/line where the steep angles live.
+            v_p := unsigned(registers_in(7));
+            case v_p(9 downto 8) is
+                when "00"   => s_sh_off <= to_unsigned(0, 8);   s_sh_inc <= resize(v_p(7 downto 4), 8);
+                when "01"   => s_sh_off <= to_unsigned(16, 8);  s_sh_inc <= resize(v_p(7 downto 3), 8);
+                when "10"   => s_sh_off <= to_unsigned(48, 8);  s_sh_inc <= resize(v_p(7 downto 2), 8);
+                when others => s_sh_off <= to_unsigned(112, 8); s_sh_inc <= resize(v_p(7 downto 1), 8);
+            end case;
+            s_shear <= s_sh_off + s_sh_inc;
+
+            -- K4 Spectrum: rotation step a (0..0.25 rad/line) and a luma seed
+            -- of ~a/4096 per line (shift by a's octave) so grey trails tint.
+            v_a := unsigned(registers_in(3)(9 downto 2));
+            s_spec_a <= signed(resize(v_a, 9));
+            if v_a(7) = '1' then    s_seed_sel <= "101";
+            elsif v_a(6) = '1' then s_seed_sel <= "100";
+            elsif v_a(5) = '1' then s_seed_sel <= "011";
+            elsif v_a(4) = '1' then s_seed_sel <= "010";
+            elsif v_a(3) = '1' then s_seed_sel <= "001";
+            else                    s_seed_sel <= "000";
+            end if;
+
+            s_slope <= unsigned(registers_in(2));
+            s_dir   <= registers_in(6)(0);
+            s_comet <= registers_in(6)(1);
+            s_bypass <= registers_in(6)(4);
+            s_mix_w  <= not unsigned(registers_in(4));
+        end if;
+    end process p_ctrl;
+
+    s_half <= '0' & s_width(C_Y_AW - 1 downto 1);
+
+    --------------------------------------------------------------------------
+    -- E1: input register, per-pixel counters, line and field bookkeeping.
+    -- Counters advance on s_in_avid, so each holds the value for the pixel
+    -- currently in s_in.
+    --------------------------------------------------------------------------
+    p_input : process(clk)
+        variable v_hs_edge, v_vs_edge, v_av_rise, v_av_fall : boolean;
+    begin
+        if rising_edge(clk) then
+            s_in.y    <= unsigned(data_in.y);
+            s_in.u    <= unsigned(data_in.u);
+            s_in.v    <= unsigned(data_in.v);
             s_in_avid <= data_in.avid;
 
             s_prev_hsync_n <= data_in.hsync_n;
             s_prev_vsync_n <= data_in.vsync_n;
 
-            if data_in.avid = '1' then
-                s_pixel_x <= s_pixel_x + 1;
-            end if;
+            v_hs_edge := data_in.hsync_n = '0' and s_prev_hsync_n = '1';
+            v_vs_edge := data_in.vsync_n = '0' and s_prev_vsync_n = '1';
+            v_av_rise := data_in.avid = '1' and s_in_avid = '0';
+            v_av_fall := data_in.avid = '0' and s_in_avid = '1';
 
-            -- hsync falling edge = new line: reset x, flip parity, latch the
-            -- per-line random and recompute the effective shift for the line.
-            if data_in.hsync_n = '0' and s_prev_hsync_n = '1' then
-                s_pixel_x  <= (others => '0');
-                s_par      <= not s_par;
+            -- hsync = new line: reload the read pointers and the fan DDA
+            -- (values precomputed during the previous line), flip the bank.
+            if v_hs_edge then
+                s_px        <= (others => '0');
+                s_rp        <= s_rp_load;
+                s_rpu       <= s_rpu_load;
+                s_dacc      <= s_dload;
+                s_kacc      <= (others => '0');
+                s_par       <= not s_par;
                 s_line_rand <= unsigned(s_lfsr_q(4 downto 0));
-
-                -- Slope Mod: per-line jitter added to the base shift. slope(10b)
-                -- x rand(5b) >> 10 gives 0..~31; gate by the slope knob.
-                v_jit_prod := s_slope * s_line_rand;
-                v_jitter   := v_jit_prod(14 downto 10);
-                v_eff      := resize(s_base_shift, 6) + resize(v_jitter, 6);
-                if v_eff > to_unsigned(C_MAX_SHIFT, 6) then
-                    s_eff_shift <= to_unsigned(C_MAX_SHIFT, 5);
-                else
-                    s_eff_shift <= v_eff(4 downto 0);
+            elsif s_in_avid = '1' then
+                s_px   <= s_px + 1;
+                s_rp   <= s_rp + 1;
+                s_rpu  <= s_rpu + 1;
+                s_dacc <= s_dacc + resize(s_kq, C_FW);
+                s_kacc <= s_kacc + resize(s_kq, C_FW);
+                if s_px = s_half then
+                    s_kc <= s_kacc;                  -- k*c for the next line
                 end if;
             end if;
 
-            -- vsync falling edge = new frame: re-sync parity; kick clear sweep
-            -- when Frame=Reset so trails don't bleed across frames.
-            if data_in.vsync_n = '0' and s_prev_vsync_n = '1' then
-                s_par <= '0';
-                if s_reset_mode = '1' then
-                    s_clearing <= '1';
-                    s_clr_addr <= (others => '0');
+            if v_av_rise then
+                s_seedline <= s_first;
+            end if;
+
+            -- End of an active line: advance the per-line DDAs (active lines
+            -- only, so both interlace fields step identically).
+            s_afall <= '0';
+            if v_av_fall then
+                s_afall <= '1';
+                if s_seedline = '1' then
+                    s_first <= '0';
+                end if;
+                s_phi   <= s_sum(3 downto 0);
+                s_shcur <= s_shnext;
+                if s_shnext(0) = '1' then
+                    s_cbit <= not s_cbit;
+                end if;
+                s_gold  <= s_gold + C_GOLDEN;
+            end if;
+
+            -- Line width: field maximum, one clock after the fall (s_px = W).
+            if s_afall = '1' then
+                s_saw_act <= '1';
+                if s_px > s_wmax then
+                    s_wmax <= s_px;
                 end if;
             end if;
 
-            -- Clear sweep advance
-            if s_clearing = '1' then
-                if s_clr_addr = to_unsigned(2047, C_Y_AW) then
-                    s_clearing <= '0';
-                else
-                    s_clr_addr <= s_clr_addr + 1;
+            -- vsync = new field. Resets are idempotent under serration; the
+            -- width copy is guarded by saw-active so later edges don't zero it.
+            if v_vs_edge then
+                s_par   <= '0';
+                s_first <= '1';
+                s_phi   <= (others => '0');
+                s_gold  <= (others => '0');
+                if s_saw_act = '1' then
+                    s_width   <= s_wmax;
+                    s_wmax    <= (others => '0');
+                    s_saw_act <= '0';
                 end if;
             end if;
 
-            -- Dry / sync shift registers
-            s_y_sr(0)     <= data_in.y;
-            s_u_sr(0)     <= data_in.u;
-            s_v_sr(0)     <= data_in.v;
+            -- Line-rate precompute for the next line's loads. Each term is one
+            -- op from registers; all settle long before the next hsync.
+            s_sum    <= resize(s_shear, 9) + resize(s_phi, 9);
+            s_jit_p  <= s_slope * s_line_rand;
+            s_shnext <= resize(s_sum(8 downto 4), 6) + resize(s_jit_p(14 downto 10), 6);
+            if s_dir = '0' then
+                s_rp_load <= -signed(resize(s_shcur, C_RW));  -- Right: read from the left
+            else
+                s_rp_load <= signed(resize(s_shcur, C_RW));   -- Left: read from the right
+            end if;
+            if s_cbit = '1' then
+                s_rpu_load <= s_rp_load;
+            else
+                s_rpu_load <= s_rp_load - 1;
+            end if;
+            s_dload <= signed(resize(s_gold, C_FW)) - s_kc;
+
+            -- Sync shift registers
             s_hsync_sr(0) <= data_in.hsync_n;
             s_vsync_sr(0) <= data_in.vsync_n;
             s_field_sr(0) <= data_in.field_n;
             s_avid_sr(0)  <= data_in.avid;
             for i in 1 to C_TOTAL_LATENCY - 1 loop
-                s_y_sr(i)     <= s_y_sr(i - 1);
-                s_u_sr(i)     <= s_u_sr(i - 1);
-                s_v_sr(i)     <= s_v_sr(i - 1);
                 s_hsync_sr(i) <= s_hsync_sr(i - 1);
                 s_vsync_sr(i) <= s_vsync_sr(i - 1);
                 s_field_sr(i) <= s_field_sr(i - 1);
@@ -302,315 +477,361 @@ begin
     end process p_input;
 
     --------------------------------------------------------------------------
-    -- Stage E2: capture per-pixel context aligned with the bank read data.
-    -- Read uses the LIVE parity (already flipped at hsync) -> reads the line
-    -- above; the write parity is this pixel's own parity, carried to the write.
+    -- Live video and write context, carried alongside the blend.
     --------------------------------------------------------------------------
-    p_stage_a : process(clk)
+    p_carry : process(clk)
     begin
         if rising_edge(clk) then
-            s_a_live_y  <= s_in_y;
-            s_a_live_u  <= s_in_u;
-            s_a_live_v  <= s_in_v;
-            s_a_bg      <= s_rd_bg;
-            s_a_par     <= s_par;
-            s_a_rbank   <= not s_par;
-            s_a_addr_y  <= s_pixel_x;
-            s_a_addr_uv <= s_pixel_x(C_Y_AW - 1 downto 1);
-            s_a_we      <= s_in_avid;
+            s_live(2) <= s_in;
+            for i in 3 to 9 loop
+                s_live(i) <= s_live(i - 1);
+            end loop;
+            s_ctx(2) <= (px => s_px, par => s_par, we => s_in_avid);
+            for i in 3 to 15 loop
+                s_ctx(i) <= s_ctx(i - 1);
+            end loop;
         end if;
-    end process p_stage_a;
+    end process p_carry;
 
     --------------------------------------------------------------------------
-    -- Stage E3: select previous bank, then the recursive blend multiplies.
-    -- At a background (off-line) read, force prev=0 and full live weight so
-    -- edge columns pass live video instead of darkening.
+    -- E2: read columns. Y reads rd; chroma reads pair (rd - 1 + b) >> 1.
     --------------------------------------------------------------------------
-    p_prep : process(clk)
-        variable v_prevY, v_prevU, v_prevV : unsigned(C_DW - 1 downto 0);
+    p_e2 : process(clk)
+        variable v_dint : signed(C_RW - 1 downto 0);
     begin
         if rising_edge(clk) then
-            if s_a_rbank = '1' then
-                v_prevY := unsigned(s_rdY1);
-                v_prevU := unsigned(s_rdU1);
-                v_prevV := unsigned(s_rdV1);
+            v_dint  := resize(s_dacc(C_FW - 1 downto 14), C_RW);
+            s_rd_y  <= s_rp - v_dint;
+            s_rd_uv <= s_rpu - v_dint;
+            s_seed2 <= s_seedline;
+        end if;
+    end process p_e2;
+
+    s_ra_uv <= (others => '0') when s_rd_uv(C_RW - 1) = '1'
+               else unsigned(s_rd_uv(C_UV_AW downto 1));
+
+    --------------------------------------------------------------------------
+    -- E3: EBR data arrives (bank processes); flag off-line columns.
+    --------------------------------------------------------------------------
+    p_e3 : process(clk)
+    begin
+        if rising_edge(clk) then
+            if s_rd_y < 0 or s_rd_y >= signed(resize(s_width, C_RW)) then
+                s_bg3 <= '1';
             else
-                v_prevY := unsigned(s_rdY0);
-                v_prevU := unsigned(s_rdU0);
-                v_prevV := unsigned(s_rdV0);
+                s_bg3 <= '0';
             end if;
+            s_seed3 <= s_seed2;
+        end if;
+    end process p_e3;
 
-            -- diff = prev - live  (signed, -1023..1023)
-            s_pp_diffY <= signed(resize(v_prevY, C_DW + 1)) - signed(resize(s_a_live_y, C_DW + 1));
-            s_pp_diffU <= signed(resize(v_prevU, C_DW + 1)) - signed(resize(s_a_live_u, C_DW + 1));
-            s_pp_diffV <= signed(resize(v_prevV, C_DW + 1)) - signed(resize(s_a_live_v, C_DW + 1));
-
-            s_pp_liveY <= s_a_live_y;
-            s_pp_liveU <= s_a_live_u;
-            s_pp_liveV <= s_a_live_v;
-
-            -- blend amount: decay, forced to 0 on an off-line read so edge
-            -- columns pass live video instead of feeding garbage back.
-            if s_a_bg = '1' then
-                s_pp_t <= (others => '0');
+    --------------------------------------------------------------------------
+    -- E4: select the bank the line above wrote (the one this pixel doesn't).
+    --------------------------------------------------------------------------
+    p_e4 : process(clk)
+    begin
+        if rising_edge(clk) then
+            if s_ctx(3).par = '1' then
+                s_p4 <= (y => unsigned(s_rdY0), u => unsigned(s_rdU0), v => unsigned(s_rdV0));
             else
-                s_pp_t <= s_decay;
+                s_p4 <= (y => unsigned(s_rdY1), u => unsigned(s_rdU1), v => unsigned(s_rdV1));
             end if;
-
-            s_pp_par     <= s_a_par;
-            s_pp_addr_y  <= s_a_addr_y;
-            s_pp_addr_uv <= s_a_addr_uv;
-            s_pp_we      <= s_a_we;
+            s_tz4 <= s_bg3 or s_seed3;
         end if;
-    end process p_prep;
+    end process p_e4;
 
     --------------------------------------------------------------------------
-    -- Stage B "mult": isolated signed multiply t*(prev-live), one per channel.
-    -- Register inputs (from p_prep) and outputs keep it off any other path.
+    -- E5: reference (live for Smear, black for Comet), |prev - ref| and its
+    -- sign, blend weight (0 off-line and on a field's first line).
     --------------------------------------------------------------------------
-    p_mult : process(clk)
-        variable v_t : signed(C_DW downto 0);
+    p_e5 : process(clk)
+        variable v_ref : t_yuv;
+        variable v_dy, v_du, v_dv : unsigned(C_DW downto 0);
     begin
         if rising_edge(clk) then
-            v_t := signed(resize(s_pp_t, C_DW + 1));   -- 0..1023, positive
-            s_b_prodY <= v_t * s_pp_diffY;             -- 11 x 11 -> 22-bit signed
-            s_b_prodU <= v_t * s_pp_diffU;
-            s_b_prodV <= v_t * s_pp_diffV;
-
-            s_b_liveY <= s_pp_liveY;
-            s_b_liveU <= s_pp_liveU;
-            s_b_liveV <= s_pp_liveV;
-
-            s_b_par     <= s_pp_par;
-            s_b_addr_y  <= s_pp_addr_y;
-            s_b_addr_uv <= s_pp_addr_uv;
-            s_b_we      <= s_pp_we;
+            if s_comet = '1' then
+                v_ref := C_YUV_BLACK;
+            else
+                v_ref := s_live(4);
+            end if;
+            v_dy := f_sdiff(s_p4.y, v_ref.y);
+            v_du := f_sdiff(s_p4.u, v_ref.u);
+            v_dv := f_sdiff(s_p4.v, v_ref.v);
+            s_m5 <= (y => v_dy(C_DW - 1 downto 0), u => v_du(C_DW - 1 downto 0),
+                     v => v_dv(C_DW - 1 downto 0));
+            s_n5 <= v_dv(C_DW) & v_du(C_DW) & v_dy(C_DW);
+            s_b5 <= v_ref;
+            if s_tz4 = '1' then
+                s_t5 <= (others => '0');
+            else
+                s_t5 <= s_t_trail;
+            end if;
         end if;
-    end process p_mult;
+    end process p_e5;
 
     --------------------------------------------------------------------------
-    -- Stage C (combinational): result = clamp( live + (t*(prev-live)) >> 10 ).
-    -- Slicing bits (21..10) of the signed product is an arithmetic >> 10.
+    -- E6: t * |diff|, operands split into 5-bit halves (two 10x5 per channel).
     --------------------------------------------------------------------------
-    p_result : process(s_b_prodY, s_b_prodU, s_b_prodV,
-                       s_b_liveY, s_b_liveU, s_b_liveV)
-        variable v_sumY, v_sumU, v_sumV : signed(C_DW + 2 downto 0);
-    begin
-        v_sumY := signed(resize(s_b_liveY, C_DW + 3)) + resize(s_b_prodY(C_DW + 11 downto 10), C_DW + 3);
-        v_sumU := signed(resize(s_b_liveU, C_DW + 3)) + resize(s_b_prodU(C_DW + 11 downto 10), C_DW + 3);
-        v_sumV := signed(resize(s_b_liveV, C_DW + 3)) + resize(s_b_prodV(C_DW + 11 downto 10), C_DW + 3);
-
-        if v_sumY < 0 then s_resY <= (others => '0');
-        elsif v_sumY > to_signed(1023, C_DW + 3) then s_resY <= std_logic_vector(to_unsigned(1023, C_DW));
-        else s_resY <= std_logic_vector(v_sumY(C_DW - 1 downto 0)); end if;
-
-        if v_sumU < 0 then s_resU <= (others => '0');
-        elsif v_sumU > to_signed(1023, C_DW + 3) then s_resU <= std_logic_vector(to_unsigned(1023, C_DW));
-        else s_resU <= std_logic_vector(v_sumU(C_DW - 1 downto 0)); end if;
-
-        if v_sumV < 0 then s_resV <= (others => '0');
-        elsif v_sumV > to_signed(1023, C_DW + 3) then s_resV <= std_logic_vector(to_unsigned(1023, C_DW));
-        else s_resV <= std_logic_vector(v_sumV(C_DW - 1 downto 0)); end if;
-    end process p_result;
-
-    -- Register the wet result for the dry/wet mixer.
-    p_wet : process(clk)
+    p_e6 : process(clk)
     begin
         if rising_edge(clk) then
-            s_wet_y <= unsigned(s_resY);
-            s_wet_u <= unsigned(s_resU);
-            s_wet_v <= unsigned(s_resV);
+            s_pa6_y <= s_t5 * s_m5.y(4 downto 0);
+            s_pb6_y <= s_t5 * s_m5.y(9 downto 5);
+            s_pa6_u <= s_t5 * s_m5.u(4 downto 0);
+            s_pb6_u <= s_t5 * s_m5.u(9 downto 5);
+            s_pa6_v <= s_t5 * s_m5.v(4 downto 0);
+            s_pb6_v <= s_t5 * s_m5.v(9 downto 5);
+            s_b6 <= s_b5;
+            s_n6 <= s_n5;
         end if;
-    end process p_wet;
+    end process p_e6;
+
+    -- E7: combine the partial products.
+    p_e7 : process(clk)
+    begin
+        if rising_edge(clk) then
+            s_pm7_y <= shift_left(resize(s_pb6_y, 20), 5) + resize(s_pa6_y, 20);
+            s_pm7_u <= shift_left(resize(s_pb6_u, 20), 5) + resize(s_pa6_u, 20);
+            s_pm7_v <= shift_left(resize(s_pb6_v, 20), 5) + resize(s_pa6_v, 20);
+            s_b7 <= s_b6;
+            s_n7 <= s_n6;
+        end if;
+    end process p_e7;
+
+    -- E8: res = ref +/- floor(t*|diff| / 1024)  (round toward zero).
+    p_e8 : process(clk)
+    begin
+        if rising_edge(clk) then
+            s_r8.y <= f_step(s_b7.y, s_pm7_y, s_n7(0));
+            s_r8.u <= f_step(s_b7.u, s_pm7_u, s_n7(1));
+            s_r8.v <= f_step(s_b7.v, s_pm7_v, s_n7(2));
+        end if;
+    end process p_e8;
+
+    -- E9: Comet keeps whichever of live / faded trail is brighter.
+    p_e9 : process(clk)
+    begin
+        if rising_edge(clk) then
+            if s_comet = '1' and s_live(8).y >= s_r8.y then
+                s_wet9 <= s_live(8);
+            else
+                s_wet9 <= s_r8;
+            end if;
+            s_dry9 <= s_live(8);
+        end if;
+    end process p_e9;
 
     --------------------------------------------------------------------------
-    -- Bank arrays: one process per bank (single driver). Each registers its
-    -- read at the combinational read address and writes either the clear sweep
-    -- or the carried blend result for the pixels whose parity matches the bank.
+    -- Spectrum write-back (E10-E15). Minsky step on signed chroma:
+    --   u' = clamp(u + seed - round(a*v/1024));  v' = clamp(v + round(a*u'/1024))
+    -- Multiplies take the top 8 chroma bits (so /256); identity at a = 0.
     --------------------------------------------------------------------------
-    -- NOTE: each bank has exactly ONE write port. The clear sweep and the
-    -- blend write-back are MUXED into a single (addr,data,we) so the array maps
-    -- to a single-write-port EBR. Splitting them into two addressed writes makes
-    -- yosys see two write ports and fall back to flip-flops (huge LC blow-up).
+    p_w1 : process(clk)
+        variable v_cv : signed(C_DW - 1 downto 0);
+    begin
+        if rising_edge(clk) then
+            v_cv    := signed(s_wet9.v xor C_NEUT);
+            s_p1_10 <= s_spec_a * v_cv(C_DW - 1 downto 2);
+            s_cu10  <= signed(s_wet9.u xor C_NEUT);
+            s_cv10  <= v_cv;
+            if s_wet9.y > C_BLACK then
+                s_yb10 <= s_wet9.y - C_BLACK;
+            else
+                s_yb10 <= (others => '0');
+            end if;
+            s_y10 <= s_wet9.y;
+        end if;
+    end process p_w1;
+
+    p_w2 : process(clk)
+        variable v_rb   : signed(1 downto 0);
+        variable v_seed : unsigned(4 downto 0);
+    begin
+        if rising_edge(clk) then
+            v_rb    := '0' & s_p1_10(7);
+            s_p1r11 <= s_p1_10(16 downto 8) + v_rb;
+            case s_seed_sel is
+                when "101"  => v_seed := s_yb10(9 downto 5);
+                when "100"  => v_seed := resize(s_yb10(9 downto 6), 5);
+                when "011"  => v_seed := resize(s_yb10(9 downto 7), 5);
+                when "010"  => v_seed := resize(s_yb10(9 downto 8), 5);
+                when "001"  => v_seed := resize(s_yb10(9 downto 9), 5);
+                when others => v_seed := (others => '0');
+            end case;
+            s_cus11 <= resize(s_cu10, C_DW + 1) + signed(resize(v_seed, C_DW + 1));
+            s_cv11  <= s_cv10;
+            s_y11   <= s_y10;
+        end if;
+    end process p_w2;
+
+    p_w3 : process(clk)
+    begin
+        if rising_edge(clk) then
+            s_u12  <= f_clamp_c(resize(s_cus11, C_DW + 2) - resize(s_p1r11, C_DW + 2));
+            s_cv12 <= s_cv11;
+            s_y12  <= s_y11;
+        end if;
+    end process p_w3;
+
+    p_w4 : process(clk)
+    begin
+        if rising_edge(clk) then
+            s_p2_13 <= s_spec_a * s_u12(C_DW - 1 downto 2);
+            s_u13   <= s_u12;
+            s_cv13  <= s_cv12;
+            s_y13   <= s_y12;
+        end if;
+    end process p_w4;
+
+    p_w5 : process(clk)
+        variable v_rb : signed(1 downto 0);
+    begin
+        if rising_edge(clk) then
+            v_rb    := '0' & s_p2_13(7);
+            s_p2r14 <= s_p2_13(16 downto 8) + v_rb;
+            s_u14   <= s_u13;
+            s_cv14  <= s_cv13;
+            s_y14   <= s_y13;
+        end if;
+    end process p_w5;
+
+    p_w6 : process(clk)
+    begin
+        if rising_edge(clk) then
+            s_wv15 <= std_logic_vector(unsigned(
+                          f_clamp_c(resize(s_cv14, C_DW + 1) + resize(s_p2r14, C_DW + 1)))
+                      xor C_NEUT);
+            s_wu15 <= std_logic_vector(unsigned(s_u14) xor C_NEUT);
+            s_wy15 <= std_logic_vector(s_y14);
+        end if;
+    end process p_w6;
+
+    --------------------------------------------------------------------------
+    -- Bank arrays: one process per bank, one write port each (canonical 1W1R:
+    -- a second addressed write makes yosys fall back to flip-flops). Each
+    -- reads unconditionally at the registered E2 column and writes the
+    -- carried result for the pixels whose parity matches the bank.
+    --------------------------------------------------------------------------
     p_lbY0 : process(clk)
-        variable v_we   : std_logic;
-        variable v_addr : unsigned(C_Y_AW - 1 downto 0);
-        variable v_data : std_logic_vector(C_DW - 1 downto 0);
     begin
         if rising_edge(clk) then
-            s_rdY0 <= lbY0(to_integer(s_rd_addr_y));
-            if s_clearing = '1' then
-                v_we := '1'; v_addr := s_clr_addr; v_data := (others => '0');
-            elsif s_b_we = '1' and s_b_par = '0' then
-                v_we := '1'; v_addr := s_b_addr_y; v_data := s_resY;
-            else
-                v_we := '0'; v_addr := s_b_addr_y; v_data := s_resY;
-            end if;
-            if v_we = '1' then
-                lbY0(to_integer(v_addr)) <= v_data;
+            s_rdY0 <= lbY0(to_integer(unsigned(s_rd_y(C_Y_AW - 1 downto 0))));
+            if s_ctx(15).we = '1' and s_ctx(15).par = '0' then
+                lbY0(to_integer(s_ctx(15).px)) <= s_wy15;
             end if;
         end if;
     end process p_lbY0;
 
     p_lbY1 : process(clk)
-        variable v_we   : std_logic;
-        variable v_addr : unsigned(C_Y_AW - 1 downto 0);
-        variable v_data : std_logic_vector(C_DW - 1 downto 0);
     begin
         if rising_edge(clk) then
-            s_rdY1 <= lbY1(to_integer(s_rd_addr_y));
-            if s_clearing = '1' then
-                v_we := '1'; v_addr := s_clr_addr; v_data := (others => '0');
-            elsif s_b_we = '1' and s_b_par = '1' then
-                v_we := '1'; v_addr := s_b_addr_y; v_data := s_resY;
-            else
-                v_we := '0'; v_addr := s_b_addr_y; v_data := s_resY;
-            end if;
-            if v_we = '1' then
-                lbY1(to_integer(v_addr)) <= v_data;
+            s_rdY1 <= lbY1(to_integer(unsigned(s_rd_y(C_Y_AW - 1 downto 0))));
+            if s_ctx(15).we = '1' and s_ctx(15).par = '1' then
+                lbY1(to_integer(s_ctx(15).px)) <= s_wy15;
             end if;
         end if;
     end process p_lbY1;
 
     p_lbU0 : process(clk)
-        variable v_we   : std_logic;
-        variable v_addr : unsigned(C_UV_AW - 1 downto 0);
-        variable v_data : std_logic_vector(C_DW - 1 downto 0);
     begin
         if rising_edge(clk) then
-            s_rdU0 <= lbU0(to_integer(s_rd_addr_uv));
-            if s_clearing = '1' and s_clr_addr < to_unsigned(1024, C_Y_AW) then
-                v_we := '1'; v_addr := s_clr_addr(C_UV_AW - 1 downto 0); v_data := (others => '0');
-            elsif s_b_we = '1' and s_b_par = '0' then
-                v_we := '1'; v_addr := s_b_addr_uv; v_data := s_resU;
-            else
-                v_we := '0'; v_addr := s_b_addr_uv; v_data := s_resU;
-            end if;
-            if v_we = '1' then
-                lbU0(to_integer(v_addr)) <= v_data;
+            s_rdU0 <= lbU0(to_integer(s_ra_uv));
+            if s_ctx(15).we = '1' and s_ctx(15).par = '0' then
+                lbU0(to_integer(s_ctx(15).px(C_Y_AW - 1 downto 1))) <= s_wu15;
             end if;
         end if;
     end process p_lbU0;
 
     p_lbU1 : process(clk)
-        variable v_we   : std_logic;
-        variable v_addr : unsigned(C_UV_AW - 1 downto 0);
-        variable v_data : std_logic_vector(C_DW - 1 downto 0);
     begin
         if rising_edge(clk) then
-            s_rdU1 <= lbU1(to_integer(s_rd_addr_uv));
-            if s_clearing = '1' and s_clr_addr < to_unsigned(1024, C_Y_AW) then
-                v_we := '1'; v_addr := s_clr_addr(C_UV_AW - 1 downto 0); v_data := (others => '0');
-            elsif s_b_we = '1' and s_b_par = '1' then
-                v_we := '1'; v_addr := s_b_addr_uv; v_data := s_resU;
-            else
-                v_we := '0'; v_addr := s_b_addr_uv; v_data := s_resU;
-            end if;
-            if v_we = '1' then
-                lbU1(to_integer(v_addr)) <= v_data;
+            s_rdU1 <= lbU1(to_integer(s_ra_uv));
+            if s_ctx(15).we = '1' and s_ctx(15).par = '1' then
+                lbU1(to_integer(s_ctx(15).px(C_Y_AW - 1 downto 1))) <= s_wu15;
             end if;
         end if;
     end process p_lbU1;
 
     p_lbV0 : process(clk)
-        variable v_we   : std_logic;
-        variable v_addr : unsigned(C_UV_AW - 1 downto 0);
-        variable v_data : std_logic_vector(C_DW - 1 downto 0);
     begin
         if rising_edge(clk) then
-            s_rdV0 <= lbV0(to_integer(s_rd_addr_uv));
-            if s_clearing = '1' and s_clr_addr < to_unsigned(1024, C_Y_AW) then
-                v_we := '1'; v_addr := s_clr_addr(C_UV_AW - 1 downto 0); v_data := (others => '0');
-            elsif s_b_we = '1' and s_b_par = '0' then
-                v_we := '1'; v_addr := s_b_addr_uv; v_data := s_resV;
-            else
-                v_we := '0'; v_addr := s_b_addr_uv; v_data := s_resV;
-            end if;
-            if v_we = '1' then
-                lbV0(to_integer(v_addr)) <= v_data;
+            s_rdV0 <= lbV0(to_integer(s_ra_uv));
+            if s_ctx(15).we = '1' and s_ctx(15).par = '0' then
+                lbV0(to_integer(s_ctx(15).px(C_Y_AW - 1 downto 1))) <= s_wv15;
             end if;
         end if;
     end process p_lbV0;
 
     p_lbV1 : process(clk)
-        variable v_we   : std_logic;
-        variable v_addr : unsigned(C_UV_AW - 1 downto 0);
-        variable v_data : std_logic_vector(C_DW - 1 downto 0);
     begin
         if rising_edge(clk) then
-            s_rdV1 <= lbV1(to_integer(s_rd_addr_uv));
-            if s_clearing = '1' and s_clr_addr < to_unsigned(1024, C_Y_AW) then
-                v_we := '1'; v_addr := s_clr_addr(C_UV_AW - 1 downto 0); v_data := (others => '0');
-            elsif s_b_we = '1' and s_b_par = '1' then
-                v_we := '1'; v_addr := s_b_addr_uv; v_data := s_resV;
-            else
-                v_we := '0'; v_addr := s_b_addr_uv; v_data := s_resV;
-            end if;
-            if v_we = '1' then
-                lbV1(to_integer(v_addr)) <= v_data;
+            s_rdV1 <= lbV1(to_integer(s_ra_uv));
+            if s_ctx(15).we = '1' and s_ctx(15).par = '1' then
+                lbV1(to_integer(s_ctx(15).px(C_Y_AW - 1 downto 1))) <= s_wv15;
             end if;
         end if;
     end process p_lbV1;
 
     --------------------------------------------------------------------------
-    -- Dry/wet mix: interpolator_u, 4-clock latency per channel.
-    -- a = dry (input delayed to match wet, 4 clocks), b = wet, t = Mix.
-    -- s_wet_* is valid 5 clocks after data_in -> dry tap is index 4.
+    -- Dry/wet mix (E10-E13): out = wet +/- rtz(|dry - wet| * (1023 - Mix)),
+    -- the same split-multiply shape as the blend (the SDK interpolator's
+    -- unsplit 11x11 multiply was the HD critical path). Mix 100% is exactly
+    -- wet; Bypass selects dry at the same latency.
     --------------------------------------------------------------------------
-    s_interp_y_a <= unsigned(s_y_sr(4));
-    s_interp_u_a <= unsigned(s_u_sr(4));
-    s_interp_v_a <= unsigned(s_v_sr(4));
+    p_m10 : process(clk)
+        variable v_dy, v_du, v_dv : unsigned(C_DW downto 0);
+    begin
+        if rising_edge(clk) then
+            v_dy := f_sdiff(s_dry9.y, s_wet9.y);
+            v_du := f_sdiff(s_dry9.u, s_wet9.u);
+            v_dv := f_sdiff(s_dry9.v, s_wet9.v);
+            s_mm10 <= (y => v_dy(C_DW - 1 downto 0), u => v_du(C_DW - 1 downto 0),
+                       v => v_dv(C_DW - 1 downto 0));
+            s_mn10   <= v_dv(C_DW) & v_du(C_DW) & v_dy(C_DW);
+            s_mwet10 <= s_wet9;
+            s_mdry10 <= s_dry9;
+        end if;
+    end process p_m10;
 
-    interp_y_inst : entity work.interpolator_u
-        generic map(
-            G_WIDTH      => C_DW,
-            G_FRAC_BITS  => C_DW,
-            G_OUTPUT_MIN => 0,
-            G_OUTPUT_MAX => 1023
-        )
-        port map(
-            clk    => clk,
-            enable => '1',
-            a      => s_interp_y_a,
-            b      => s_wet_y,
-            t      => s_mix_t,
-            result => s_interp_y_result,
-            valid  => s_interp_y_valid
-        );
+    p_m11 : process(clk)
+    begin
+        if rising_edge(clk) then
+            s_mpa11_y <= s_mix_w * s_mm10.y(4 downto 0);
+            s_mpb11_y <= s_mix_w * s_mm10.y(9 downto 5);
+            s_mpa11_u <= s_mix_w * s_mm10.u(4 downto 0);
+            s_mpb11_u <= s_mix_w * s_mm10.u(9 downto 5);
+            s_mpa11_v <= s_mix_w * s_mm10.v(4 downto 0);
+            s_mpb11_v <= s_mix_w * s_mm10.v(9 downto 5);
+            s_mwet11 <= s_mwet10;
+            s_mdry11 <= s_mdry10;
+            s_mn11   <= s_mn10;
+        end if;
+    end process p_m11;
 
-    interp_u_inst : entity work.interpolator_u
-        generic map(
-            G_WIDTH      => C_DW,
-            G_FRAC_BITS  => C_DW,
-            G_OUTPUT_MIN => 0,
-            G_OUTPUT_MAX => 1023
-        )
-        port map(
-            clk    => clk,
-            enable => '1',
-            a      => s_interp_u_a,
-            b      => s_wet_u,
-            t      => s_mix_t,
-            result => s_interp_u_result,
-            valid  => s_interp_u_valid
-        );
+    p_m12 : process(clk)
+    begin
+        if rising_edge(clk) then
+            s_mpm12_y <= shift_left(resize(s_mpb11_y, 20), 5) + resize(s_mpa11_y, 20);
+            s_mpm12_u <= shift_left(resize(s_mpb11_u, 20), 5) + resize(s_mpa11_u, 20);
+            s_mpm12_v <= shift_left(resize(s_mpb11_v, 20), 5) + resize(s_mpa11_v, 20);
+            s_mwet12 <= s_mwet11;
+            s_mdry12 <= s_mdry11;
+            s_mn12   <= s_mn11;
+        end if;
+    end process p_m12;
 
-    interp_v_inst : entity work.interpolator_u
-        generic map(
-            G_WIDTH      => C_DW,
-            G_FRAC_BITS  => C_DW,
-            G_OUTPUT_MIN => 0,
-            G_OUTPUT_MAX => 1023
-        )
-        port map(
-            clk    => clk,
-            enable => '1',
-            a      => s_interp_v_a,
-            b      => s_wet_v,
-            t      => s_mix_t,
-            result => s_interp_v_result,
-            valid  => s_interp_v_valid
-        );
+    p_m13 : process(clk)
+    begin
+        if rising_edge(clk) then
+            if s_bypass = '1' then
+                s_mix13 <= s_mdry12;
+            else
+                s_mix13.y <= f_step(s_mwet12.y, s_mpm12_y, s_mn12(0));
+                s_mix13.u <= f_step(s_mwet12.u, s_mpm12_u, s_mn12(1));
+                s_mix13.v <= f_step(s_mwet12.v, s_mpm12_v, s_mn12(2));
+            end if;
+        end if;
+    end process p_m13;
 
     --------------------------------------------------------------------------
     -- LFSR noise source (free-running) for Slope Mod
@@ -625,19 +846,26 @@ begin
         );
 
     --------------------------------------------------------------------------
-    -- Output mux at E8. Sync from the bypass shift register; video from the
-    -- interpolator unless Bypass is on.
+    -- E14: blanking gate -> output register. Neutral whenever the
+    -- latency-aligned avid is low.
     --------------------------------------------------------------------------
+    p_out : process(clk)
+    begin
+        if rising_edge(clk) then
+            if s_avid_sr(C_TOTAL_LATENCY - 2) = '1' then
+                s_out <= s_mix13;
+            else
+                s_out <= C_YUV_BLACK;
+            end if;
+        end if;
+    end process p_out;
+
     data_out.hsync_n <= s_hsync_sr(C_TOTAL_LATENCY - 1);
     data_out.vsync_n <= s_vsync_sr(C_TOTAL_LATENCY - 1);
     data_out.field_n <= s_field_sr(C_TOTAL_LATENCY - 1);
     data_out.avid    <= s_avid_sr(C_TOTAL_LATENCY - 1);
-
-    data_out.y <= s_y_sr(C_TOTAL_LATENCY - 1) when s_bypass = '1'
-                  else std_logic_vector(s_interp_y_result);
-    data_out.u <= s_u_sr(C_TOTAL_LATENCY - 1) when s_bypass = '1'
-                  else std_logic_vector(s_interp_u_result);
-    data_out.v <= s_v_sr(C_TOTAL_LATENCY - 1) when s_bypass = '1'
-                  else std_logic_vector(s_interp_v_result);
+    data_out.y       <= std_logic_vector(s_out.y);
+    data_out.u       <= std_logic_vector(s_out.u);
+    data_out.v       <= std_logic_vector(s_out.v);
 
 end architecture shearline;
