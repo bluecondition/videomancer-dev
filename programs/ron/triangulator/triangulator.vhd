@@ -1,4 +1,4 @@
--- triangulator.vhd  (v0.1 — triangle pixelation)
+-- triangulator.vhd  (v0.2 — triangle pixelation)
 --
 -- A pixelation effect that tiles the screen with a triangular lattice instead of
 -- square blocks.  Each cell is Wc wide x H = Wc*7/4 tall (~equilateral; the edge
@@ -7,39 +7,40 @@
 -- AND per ROW (half-offset lattice) so the two triangles of adjacent columns merge
 -- into the visual upright (▲) and inverted (▽) triangles, which alternate ▲▽▲▽
 -- across every row and meet flat-base-to-flat-base between rows.  Each triangle is
--- flat-filled with a colour point-sampled from the incoming live video (sampled
--- once per cell at the cell centre on each cell-row's top line, then held down the
--- cell — the c64/cga hold trick; a point sample so any cell size works, NO divide).
+-- flat-filled with a colour sampled from the incoming live video: an 8-px average
+-- on the line just above its cell row (the last line of the row above), held down
+-- the row — the c64/rollthebones memoryless hold, so any cell size works, NO divide.
 --
 -- The cell decomposition uses the mondrian continuous-scale counters (advance as
--- the raster scans), so K1 gives a VERY smooth 8..256 px size with no divide and
+-- the raster scans), so P12 gives a VERY smooth 8..256 px size with no divide and
 -- no power-of-2 quantisation.  The equilateral edge test is lx*7/4 vs ly (shift-add),
 -- so there is no per-pixel multiply in the geometry path.
 --
 -- Controls:
---   K1 Triangle Size (smooth 8..256 px)
---   K2 Luma Gain      (fill contrast around mid; 128 = unity)   [Luma Mod on]
---   K3 Luma Thresh    ("has luma" gate threshold)               [Luma Mod on]
---   K4 Colorize Mode  (Original / Duotone / Posterize / Hue-rotate)
---   K5 Colorize Param + grid/edge colour (8-entry palette)
+--   K1 Grid Colour    (black / white / red / orange / yellow / green / blue / violet)
+--   K2 Contrast       (fill contrast around mid; 50% = unity)
+--   K3 Luma Level     (S8 off: darker triangles lifted to it; S8 on: hidden below it)
+--   K4 Colorize Mode  (Original / Duotone / Posterize / Hue Spin)
+--   K5 Colorize Param (Original: saturation, 50% = unity | Duotone: colour pair |
+--                      Posterize: palette shift, top = grey | Hue Spin: 20..340 deg)
 --   K6 Line Width     (1..4 px)
 --   S7 Grid Lines     (triangle edges on/off, normal mode)
---   S8 Luma Mod       (GATE: show only luma-positive triangles)
+--   S8 Luma Gate      (show only triangles at or above K3)
 --   S9 Fill Mode      (Flat = one colour per ▲/▽ | Faceted = per half-cell)
 --   S10 Wireframe     (edges only, no fill)
---   S11 Bypass        (pass input through)
---   P12 Mix           (dry/wet: 0 = clean input, 100% = full effect)
+--   S11 Bypass        (1-cycle raw passthrough, identical to SDK passthru)
+--   P12 Triangle Size (smooth 8..256 px)
 --
--- Luma Mod / Wireframe matrix:
---   LM on,  WF off -> only lit triangles: fill + their own grid lines, else black
---   LM on,  WF on  -> only lit triangles' grid lines (K5), no fill, else black
---   LM off, WF on  -> full mesh, every edge coloured by the LIVE incoming video
---   LM off, WF off -> normal fill (+ optional K5 grid)
+-- Luma Gate / Wireframe matrix:
+--   Gate on,  WF off -> only lit triangles: fill + their own grid lines, else black
+--   Gate on,  WF on  -> only lit triangles' grid lines (K1), no fill, else black
+--   Gate off, WF on  -> full mesh, every edge coloured by the LIVE incoming video
+--   Gate off, WF off -> normal fill (+ optional K1 grid)
 -- Gating is per-triangle (own luma) so only COMPLETE lit triangles draw.
 --
 -- Fixed colours are stored with U/V (Cb/Cr) SWAPPED to match the Videomancer
--- hardware output convention used by the HW-validated mondrian / c64 palettes
--- (stored U = Cr, stored V = Cb).
+-- hardware output convention (stored U = Cr, stored V = Cb).  The grid palette is
+-- the scope-verified ROYGBIV table.
 --
 -- Author: bluecondition
 
@@ -55,11 +56,11 @@ use work.video_timing_pkg.all;
 
 architecture triangulator of program_top is
 
-    constant LATENCY  : natural := 12;
+    constant LATENCY  : natural := 11;
     constant C_MAXCOL : natural := 256;                       -- max cell columns (small triangles)
 
-    constant C_MID  : unsigned(9 downto 0) := to_unsigned(512, 10);
-    constant LINE_Y : unsigned(9 downto 0) := to_unsigned( 48, 10);  -- grid-line luma (deep black)
+    constant C_MID   : unsigned(9 downto 0) := to_unsigned(512, 10);
+    constant C_BLACK : unsigned(9 downto 0) := to_unsigned( 64, 10);
 
     --------------------------------------------------------------------------
     -- Colorize tables (U/V stored swapped: stored U = Cr, stored V = Cb).
@@ -81,16 +82,16 @@ architecture triangulator of program_top is
         to_unsigned( 64,10), to_unsigned(180,10), to_unsigned(300,10), to_unsigned(430,10),
         to_unsigned(560,10), to_unsigned(690,10), to_unsigned(820,10), to_unsigned(950,10));
 
-    -- Grid-line colour, selected by K5 top-3 bits: 0 black, 1 white, then hues.
+    -- Grid-line colour (K1): black, white, then the scope-verified R O Y G B V.
     constant GRID_Y : t_pal8 := (
-        to_unsigned( 48,10), to_unsigned(940,10), to_unsigned(320,10), to_unsigned(720,10),
-        to_unsigned(560,10), to_unsigned(650,10), to_unsigned(300,10), to_unsigned(360,10));
+        to_unsigned( 64,10), to_unsigned(940,10), to_unsigned(328,10), to_unsigned(584,10),
+        to_unsigned(840,10), to_unsigned(580,10), to_unsigned(164,10), to_unsigned(349,10));
     constant GRID_U : t_pal8 := (   -- = Cr
-        to_unsigned(512,10), to_unsigned(512,10), to_unsigned(850,10), to_unsigned(620,10),
-        to_unsigned(340,10), to_unsigned(290,10), to_unsigned(410,10), to_unsigned(620,10));
+        to_unsigned(512,10), to_unsigned(512,10), to_unsigned(960,10), to_unsigned(772,10),
+        to_unsigned(584,10), to_unsigned(136,10), to_unsigned(440,10), to_unsigned(756,10));
     constant GRID_V : t_pal8 := (   -- = Cb
-        to_unsigned(512,10), to_unsigned(512,10), to_unsigned(410,10), to_unsigned(170,10),
-        to_unsigned(300,10), to_unsigned(560,10), to_unsigned(760,10), to_unsigned(760,10));
+        to_unsigned(512,10), to_unsigned(512,10), to_unsigned(360,10), to_unsigned(212,10),
+        to_unsigned( 64,10), to_unsigned(216,10), to_unsigned(960,10), to_unsigned(852,10));
 
     -- Duotone: 4 shadow->highlight pairs.
     type t_duo4 is array(0 to 3) of unsigned(9 downto 0);
@@ -101,6 +102,38 @@ architecture triangulator of program_top is
     constant DUO_HI_U : t_duo4 := (to_unsigned(590,10), to_unsigned(512,10), to_unsigned(600,10), to_unsigned(680,10));
     constant DUO_HI_V : t_duo4 := (to_unsigned(430,10), to_unsigned(512,10), to_unsigned(180,10), to_unsigned(560,10));
 
+    -- Hue Spin: chroma rotation as a 3-multiply complex product (u + iv)(c + is):
+    --   k1 = c*(u+v), k2 = (s-c)*u, k3 = (c+s)*v;  u' = k1 - k3, v' = k1 + k2.
+    -- 64 angles over 20..340 deg (never the identity), coefficients x256.
+    type t_hue64 is array(0 to 63) of signed(10 downto 0);
+    constant HUE_C : t_hue64 := (
+        to_signed(  241,11), to_signed(  232,11), to_signed(  221,11), to_signed(  209,11), to_signed(  195,11), to_signed(  180,11), to_signed(  163,11), to_signed(  145,11),
+        to_signed(  126,11), to_signed(  105,11), to_signed(   84,11), to_signed(   62,11), to_signed(   40,11), to_signed(   18,11), to_signed(   -5,11), to_signed(  -28,11),
+        to_signed(  -50,11), to_signed(  -72,11), to_signed(  -94,11), to_signed( -114,11), to_signed( -134,11), to_signed( -153,11), to_signed( -170,11), to_signed( -187,11),
+        to_signed( -201,11), to_signed( -215,11), to_signed( -226,11), to_signed( -236,11), to_signed( -244,11), to_signed( -250,11), to_signed( -254,11), to_signed( -256,11),
+        to_signed( -256,11), to_signed( -254,11), to_signed( -250,11), to_signed( -244,11), to_signed( -236,11), to_signed( -226,11), to_signed( -215,11), to_signed( -201,11),
+        to_signed( -187,11), to_signed( -170,11), to_signed( -153,11), to_signed( -134,11), to_signed( -114,11), to_signed(  -94,11), to_signed(  -72,11), to_signed(  -50,11),
+        to_signed(  -28,11), to_signed(   -5,11), to_signed(   18,11), to_signed(   40,11), to_signed(   62,11), to_signed(   84,11), to_signed(  105,11), to_signed(  126,11),
+        to_signed(  145,11), to_signed(  163,11), to_signed(  180,11), to_signed(  195,11), to_signed(  209,11), to_signed(  221,11), to_signed(  232,11), to_signed(  241,11));
+    constant HUE_SMC : t_hue64 := (   -- (sin - cos) x256
+        to_signed( -153,11), to_signed( -123,11), to_signed(  -93,11), to_signed(  -61,11), to_signed(  -30,11), to_signed(    3,11), to_signed(   35,11), to_signed(   66,11),
+        to_signed(   98,11), to_signed(  128,11), to_signed(  158,11), to_signed(  186,11), to_signed(  213,11), to_signed(  238,11), to_signed(  261,11), to_signed(  282,11),
+        to_signed(  301,11), to_signed(  318,11), to_signed(  332,11), to_signed(  343,11), to_signed(  352,11), to_signed(  358,11), to_signed(  361,11), to_signed(  362,11),
+        to_signed(  359,11), to_signed(  354,11), to_signed(  346,11), to_signed(  335,11), to_signed(  322,11), to_signed(  306,11), to_signed(  288,11), to_signed(  267,11),
+        to_signed(  244,11), to_signed(  220,11), to_signed(  193,11), to_signed(  166,11), to_signed(  136,11), to_signed(  106,11), to_signed(   75,11), to_signed(   44,11),
+        to_signed(   12,11), to_signed(  -21,11), to_signed(  -52,11), to_signed(  -84,11), to_signed( -115,11), to_signed( -145,11), to_signed( -174,11), to_signed( -201,11),
+        to_signed( -227,11), to_signed( -251,11), to_signed( -273,11), to_signed( -293,11), to_signed( -311,11), to_signed( -326,11), to_signed( -339,11), to_signed( -349,11),
+        to_signed( -356,11), to_signed( -360,11), to_signed( -362,11), to_signed( -361,11), to_signed( -357,11), to_signed( -350,11), to_signed( -340,11), to_signed( -328,11));
+    constant HUE_SPC : t_hue64 := (   -- (cos + sin) x256
+        to_signed(  328,11), to_signed(  340,11), to_signed(  350,11), to_signed(  357,11), to_signed(  361,11), to_signed(  362,11), to_signed(  360,11), to_signed(  356,11),
+        to_signed(  349,11), to_signed(  339,11), to_signed(  326,11), to_signed(  311,11), to_signed(  293,11), to_signed(  273,11), to_signed(  251,11), to_signed(  227,11),
+        to_signed(  201,11), to_signed(  174,11), to_signed(  145,11), to_signed(  115,11), to_signed(   84,11), to_signed(   52,11), to_signed(   21,11), to_signed(  -12,11),
+        to_signed(  -44,11), to_signed(  -75,11), to_signed( -106,11), to_signed( -136,11), to_signed( -166,11), to_signed( -193,11), to_signed( -220,11), to_signed( -244,11),
+        to_signed( -267,11), to_signed( -288,11), to_signed( -306,11), to_signed( -322,11), to_signed( -335,11), to_signed( -346,11), to_signed( -354,11), to_signed( -359,11),
+        to_signed( -362,11), to_signed( -361,11), to_signed( -358,11), to_signed( -352,11), to_signed( -343,11), to_signed( -332,11), to_signed( -318,11), to_signed( -301,11),
+        to_signed( -282,11), to_signed( -261,11), to_signed( -238,11), to_signed( -213,11), to_signed( -186,11), to_signed( -158,11), to_signed( -128,11), to_signed(  -98,11),
+        to_signed(  -66,11), to_signed(  -35,11), to_signed(   -3,11), to_signed(   30,11), to_signed(   61,11), to_signed(   93,11), to_signed(  123,11), to_signed(  153,11));
+
     function clamp10(v : signed) return unsigned is
     begin
         if v < 0 then               return to_unsigned(0, 10);
@@ -110,60 +143,98 @@ architecture triangulator of program_top is
     end function;
 
     --------------------------------------------------------------------------
-    -- Position + per-frame parameters (continuous-scale cell counters: advance
-    -- as the raster scans -> arbitrary cell sizes with no divide/multiply).
+    -- Position (continuous-scale cell counters: advance as the raster scans ->
+    -- arbitrary cell sizes with no divide/multiply).
     --------------------------------------------------------------------------
     signal prev_hsync_n : std_logic := '1';
     signal prev_vsync_n : std_logic := '1';
 
-    signal cellx_loc : unsigned(11 downto 0) := (others => '0');   -- lx within cell
-    signal cellx_idx : unsigned(7 downto 0)  := (others => '0');   -- cell column index
-    signal celly_loc : unsigned(11 downto 0) := (others => '0');   -- ly within cell
-    signal celly_par : std_logic := '0';                           -- cell-row parity (half-offset)
-    signal frame_act : std_logic := '0';                           -- seen active video this frame
+    signal cellx_loc  : unsigned(11 downto 0) := (others => '0');   -- lx within cell
+    signal cellx_idx  : unsigned(7 downto 0)  := (others => '0');   -- cell column index
+    signal celly_loc  : unsigned(11 downto 0) := (others => '0');   -- ly within cell
+    signal celly_par  : std_logic := '0';                           -- cell-row parity (half-offset + bank)
+    signal celly_last : std_logic := '0';                           -- on the last line of a cell row
+    signal frame_act  : std_logic := '0';                           -- seen active video this frame
+    signal line0      : std_logic := '0';                           -- frame's first active line (pending from vsync)
 
-    signal s_csz     : unsigned(11 downto 0) := to_unsigned(64, 12);  -- cell width Wc
-    signal s_cszm1   : unsigned(11 downto 0) := to_unsigned(63, 12);  -- Wc - 1
-    signal s_cszc    : unsigned(11 downto 0) := to_unsigned(32, 12);  -- Wc / 2 (cell centre)
-    signal s_csz_h   : unsigned(11 downto 0) := to_unsigned(112, 12); -- row height H = Wc*7/4
-    signal s_csz_hm1 : unsigned(11 downto 0) := to_unsigned(111, 12); -- H - 1
+    --------------------------------------------------------------------------
+    -- Next-frame parameters, computed free-running (one small op per stage, so
+    -- the vsync latch is a plain register copy and no SPI read sits in its cone).
+    --------------------------------------------------------------------------
+    signal k_held  : unsigned(9 downto 0)  := to_unsigned(160, 10); -- P12 after hysteresis
+    signal n_csz   : unsigned(11 downto 0) := to_unsigned(47, 12);  -- cell width Wc
+    signal n_cszm1 : unsigned(11 downto 0) := to_unsigned(46, 12);
+    signal n_csh   : unsigned(11 downto 0) := to_unsigned(82, 12);  -- row height H = Wc*7/4
+    signal n_cshm1 : unsigned(11 downto 0) := to_unsigned(81, 12);
+    signal n_wst   : unsigned(11 downto 0) := to_unsigned(19, 12);  -- sample window start (lx)
+    signal n_wend  : unsigned(11 downto 0) := to_unsigned(26, 12);  -- sample window end (lx)
+    signal n_line_w  : unsigned(11 downto 0) := to_unsigned(1, 12);
+    signal n_line_wt : unsigned(11 downto 0) := to_unsigned(1, 12);
+    signal n_line_wb : unsigned(11 downto 0) := to_unsigned(0, 12);
 
-    signal s_lumamod : std_logic := '0';                           -- S8 luma mod enabled
-    signal s_lgain  : unsigned(7 downto 0) := to_unsigned(128, 8); -- luma gain (128 = unity)
-    signal s_floor  : unsigned(9 downto 0) := (others => '0');     -- luma black-lift floor
-    signal s_cmode  : unsigned(1 downto 0) := (others => '0');     -- colorize mode
-    signal s_duosel : unsigned(1 downto 0) := (others => '0');     -- duotone pair
-    signal s_palsel : std_logic := '0';                            -- posterize palette
-    signal s_hue    : unsigned(1 downto 0) := (others => '0');     -- hue angle (x90 deg)
-    signal s_line_w : unsigned(11 downto 0) := to_unsigned(2, 12); -- grid line width
-    signal s_line_wt : unsigned(11 downto 0) := to_unsigned(1, 12); -- horiz band, top of row
-    signal s_line_wb : unsigned(11 downto 0) := to_unsigned(1, 12); -- horiz band, bottom of row
+    -- per-frame latched geometry / switches (copied at vsync)
+    signal s_cszm1   : unsigned(11 downto 0) := to_unsigned(46, 12);
+    signal s_csz_h   : unsigned(11 downto 0) := to_unsigned(82, 12);
+    signal s_csz_hm1 : unsigned(11 downto 0) := to_unsigned(81, 12);
+    signal s_wst     : unsigned(11 downto 0) := to_unsigned(19, 12);
+    signal s_wend    : unsigned(11 downto 0) := to_unsigned(26, 12);
+    signal s_line_w  : unsigned(11 downto 0) := to_unsigned(1, 12);  -- grid line width
+    signal s_line_wt : unsigned(11 downto 0) := to_unsigned(1, 12);  -- horiz band, top of row
+    signal s_line_wb : unsigned(11 downto 0) := to_unsigned(0, 12);  -- horiz band, bottom of row
     signal s_grid   : std_logic := '1';
+    signal s_gate   : std_logic := '0';                            -- S8 luma gate
     signal s_fill   : std_logic := '0';                            -- 0 faceted, 1 flat
     signal s_wire   : std_logic := '0';                            -- S10: grid only, no fill
     signal s_bypass : std_logic := '0';                            -- S11
-    signal s_mix    : unsigned(6 downto 0) := to_unsigned(64, 7); -- P12 dry/wet, 64 steps (64 = full effect)
-    signal s_gy, s_gu, s_gv : unsigned(9 downto 0) := to_unsigned(48, 10); -- grid colour (K5)
 
-    -- per-frame selected duotone endpoints + deltas
-    signal s_dlo_y, s_dlo_u, s_dlo_v : unsigned(9 downto 0) := C_MID;
-    signal s_dd_y,  s_dd_u,  s_dd_v  : signed(10 downto 0)  := (others => '0');
+    -- colour parameters (free-running; a mid-frame change is invisible)
+    signal a_cmode : unsigned(1 downto 0) := (others => '0');
+    signal a_dlo_y, a_dlo_u, a_dlo_v : unsigned(9 downto 0) := C_MID;
+    signal a_dhi_y, a_dhi_u, a_dhi_v : unsigned(9 downto 0) := C_MID;
+    signal a_hc, a_hsm, a_hsp        : signed(10 downto 0) := (others => '0');
+    signal a_sat   : unsigned(8 downto 0) := to_unsigned(256, 9);
+    signal a_prot  : unsigned(2 downto 0) := (others => '0');
+    signal a_k3a, a_k3q : unsigned(9 downto 0) := (others => '0');
+    signal a_k3z   : std_logic := '1';
+    signal a_gate  : std_logic := '0';
+    signal b_lev   : unsigned(9 downto 0) := to_unsigned(64, 10);
+
+    signal s_lgain   : unsigned(7 downto 0) := to_unsigned(128, 8); -- contrast (128 = unity)
+    signal s_floor   : unsigned(9 downto 0) := (others => '0');     -- K3 lift (gate off)
+    signal s_gate_th : unsigned(9 downto 0) := (others => '0');     -- K3 threshold (gate on)
+    signal s_cmode   : unsigned(1 downto 0) := (others => '0');     -- colorize mode
+    signal s_a1, s_a2, s_a3 : signed(10 downto 0) := (others => '0'); -- per-mode multiplier coefficients
+    signal s_by, s_bu, s_bv : unsigned(9 downto 0) := (others => '0'); -- per-mode output bias
+    signal s_prot    : unsigned(2 downto 0) := (others => '0');     -- posterize palette shift
+    signal s_pgrey   : std_logic := '0';                            -- posterize grey ramp
+    signal s_gy, s_gu, s_gv : unsigned(9 downto 0) := C_MID;        -- grid colour (K1)
 
     --------------------------------------------------------------------------
-    -- Cell colour buffer (1W1R, per cell column).  Sampled at the cell centre on
-    -- each cell-row's top line, held for the whole cell.
+    -- Sampling: 8-px average written into a row-parity bank.
     --------------------------------------------------------------------------
-    type t_cbuf is array(0 to C_MAXCOL - 1) of unsigned(9 downto 0);
-    signal buf_y : t_cbuf := (others => C_MID);
-    signal buf_u : t_cbuf := (others => C_MID);
-    signal buf_v : t_cbuf := (others => C_MID);
-    signal s_we    : std_logic := '0';
-    signal s_waddr : unsigned(7 downto 0) := (others => '0');
-    signal s_wy, s_wu, s_wv : unsigned(9 downto 0) := C_MID;
-    signal s_buf_raddr : unsigned(7 downto 0) := (others => '0');
-    signal s_rd_y, s_rd_u, s_rd_v : unsigned(9 downto 0) := C_MID;
+    signal acc_y, acc_u, acc_v : unsigned(12 downto 0) := (others => '0');
+    signal w_pend  : std_logic := '0';
+    signal w_paddr : unsigned(8 downto 0) := (others => '0');
+    signal w_done  : std_logic := '0';
 
-    signal s_gate_th : unsigned(9 downto 0) := (others => '0');  -- "has luma" threshold (K3)
+    --------------------------------------------------------------------------
+    -- Cell colour buffer: 2 banks (row parity) x 256 columns, Y/U/V packed and
+    -- padded to 32 bits, 1W1R.  A row reads the bank written on the last line of
+    -- the row above, so reads never hit the address being written — except on the
+    -- frame's first line (row 0 samples there), which is drawn black.  Hence
+    -- no_rw_check: no read-before-write emulation logic.
+    --------------------------------------------------------------------------
+    type t_cbuf is array(0 to 2 * C_MAXCOL - 1) of std_logic_vector(31 downto 0);
+    constant C_BUF_INIT : std_logic_vector(31 downto 0) :=
+        "00" & std_logic_vector(C_MID) & std_logic_vector(C_MID) & std_logic_vector(C_MID);
+    signal buf : t_cbuf := (others => C_BUF_INIT);
+    attribute no_rw_check : boolean;
+    attribute no_rw_check of buf : signal is true;
+    signal s_we        : std_logic := '0';
+    signal s_waddr     : unsigned(8 downto 0) := (others => '0');
+    signal s_wdata     : std_logic_vector(31 downto 0) := C_BUF_INIT;
+    signal s_buf_raddr : unsigned(8 downto 0) := (others => '0');
+    signal s_rd        : std_logic_vector(31 downto 0) := (others => '0');
 
     -- geo0: pre-registered lx*7/4 (+ aligned ly/cx/parity) so p_comb's diagonal
     -- chain stays short enough to close HD timing (the *7/4 adds would otherwise
@@ -172,6 +243,8 @@ architecture triangulator of program_top is
     signal g0_ly   : unsigned(11 downto 0) := (others => '0');
     signal g0_cx   : unsigned(7 downto 0)  := (others => '0');
     signal g0_even : std_logic := '0';                         -- '1' = "/" column
+    signal g0_bank : std_logic := '0';                         -- buffer bank this row reads
+    signal g0_top  : std_logic := '0';                         -- frame's first active line
 
     -- combinational geometry outputs
     signal c_raddr : unsigned(7 downto 0) := (others => '0');
@@ -186,34 +259,168 @@ architecture triangulator of program_top is
     --------------------------------------------------------------------------
     -- Pipeline registers
     --------------------------------------------------------------------------
-    signal g_pipe    : std_logic_vector(0 to 5) := (others => '0');
-    signal lown_pipe : std_logic_vector(0 to 4) := (others => '0'); -- own-triangle lit (gates fill + own edges)
+    signal g_pipe    : std_logic_vector(0 to 8) := (others => '0'); -- grid flag
+    signal top_pipe  : std_logic_vector(0 to 8) := (others => '0'); -- frame top line
+    signal lown_pipe : std_logic_vector(0 to 6) := (others => '0'); -- own-triangle lit (gates fill + own edges)
 
-    signal samp_y, samp_u, samp_v : unsigned(9 downto 0) := C_MID;   -- St1
+    signal samp_y, samp_u, samp_v : unsigned(9 downto 0) := C_MID;          -- St1
     signal s2_lp                  : signed(20 downto 0) := (others => '0'); -- St2 luma product
-    signal s2_u, s2_v             : unsigned(9 downto 0) := C_MID;
-    signal s3_lm                  : unsigned(9 downto 0) := (others => '0'); -- St3 shaped luma
-    signal s3_u, s3_v             : unsigned(9 downto 0) := C_MID;
-    signal s4_pdy, s4_pdu, s4_pdv : signed(21 downto 0) := (others => '0'); -- St4 duotone products
-    signal s4_lm, s4_u, s4_v      : unsigned(9 downto 0) := C_MID;
-    signal s5_y, s5_u, s5_v       : unsigned(9 downto 0) := C_MID;          -- St5 colorized
+    signal s2_cu, s2_cv           : signed(10 downto 0) := (others => '0'); -- St2 centred chroma
+    signal s3_lm0                 : unsigned(9 downto 0) := (others => '0'); -- St3 contrast luma
+    signal s3_cs                  : signed(11 downto 0) := (others => '0'); -- St3 cu + cv
+    signal s3_cu, s3_cv           : signed(10 downto 0) := (others => '0');
+    signal s3b_lm                 : unsigned(9 downto 0) := (others => '0'); -- St3b lifted luma
+    signal s3b_b1, s3b_b2, s3b_b3 : signed(11 downto 0) := (others => '0'); -- St3b mult operands
+    signal s4a_h1, s4a_h2, s4a_h3 : signed(16 downto 0) := (others => '0'); -- St4a A x B(11..6)
+    signal s4a_l1, s4a_l2, s4a_l3 : signed(17 downto 0) := (others => '0'); -- St4a A x B(5..0)
+    signal s4a_lm                 : unsigned(9 downto 0) := (others => '0');
+    signal s4a_pidx               : unsigned(2 downto 0) := (others => '0');
+    signal s4_p1, s4_p2, s4_p3    : signed(22 downto 0) := (others => '0'); -- St4b products
+    signal s4_lm                  : unsigned(9 downto 0) := (others => '0');
+    signal s4_pidx                : unsigned(2 downto 0) := (others => '0'); -- posterize index
+    signal s5t_y, s5t_u, s5t_v    : signed(12 downto 0) := (others => '0'); -- St5 pre-bias
+    signal s5_y, s5_u, s5_v       : unsigned(9 downto 0) := C_MID;          -- St5b colorized
     signal s6_y, s6_u, s6_v       : unsigned(9 downto 0) := C_MID;          -- St6 grid overlay
     signal s6_vid                 : std_logic := '0';                       -- St6: colour this edge from live video
-    signal m7_dy, m7_du, m7_dv    : signed(10 downto 0) := (others => '0'); -- St7 effect - dry
-    signal m7_iy, m7_iu, m7_iv    : unsigned(9 downto 0) := C_MID;          -- St7 dry input
-    signal m8_py, m8_pu, m8_pv    : signed(18 downto 0) := (others => '0'); -- St8 mix products
-    signal m8_iy, m8_iu, m8_iv    : unsigned(9 downto 0) := C_MID;
 
-    signal s_io : t_video_stream_yuv444_30b;
+    signal s_io    : t_video_stream_yuv444_30b;
+    signal s_bpass : t_video_stream_yuv444_30b;   -- 1-cycle raw passthrough (== SDK passthru)
 
 begin
 
     --------------------------------------------------------------------------
-    -- Position counters + parameter latch (at vsync edge).
+    -- Next-frame parameters (free-running pipeline from the SPI registers).
+    --------------------------------------------------------------------------
+    p_params : process(clk)
+        variable v_dk  : signed(10 downto 0);
+        variable v_x   : unsigned(11 downto 0);
+        variable v_k3  : unsigned(9 downto 0);
+        variable v_i2  : integer range 0 to 3;
+        variable v_i6  : integer range 0 to 63;
+        variable v_i3  : integer range 0 to 7;
+        variable v_lw  : integer range 0 to 3;
+    begin
+        if rising_edge(clk) then
+            -- P12 Triangle Size, with hysteresis: the lattice is anchored at the left
+            -- edge, so 1 px of cell width moves column k by k px — pot noise flipping
+            -- one size step would shake the right side of the frame by up to ~240 px.
+            v_dk := signed('0' & registers_in(7)) - signed('0' & k_held);
+            if v_dk > 3 or v_dk < -3 then
+                k_held <= unsigned(registers_in(7));
+            end if;
+            -- Wc = 8 + x - x/32 (x = 0..255) -> 8..256 px with no dead zone at the top.
+            v_x   := resize(k_held(9 downto 2), 12);
+            n_csz <= to_unsigned(8, 12) + v_x - shift_right(v_x, 5);
+            -- Equilateral row height H = Wc*7/4 (~Wc*sqrt(3); apex ~59.4 deg).
+            n_csh   <= n_csz + shift_right(n_csz, 1) + shift_right(n_csz, 2);
+            n_cszm1 <= n_csz - 1;
+            n_cshm1 <= n_csh - 1;
+            -- Sample window (8 px).  Flat: both triangles that read a cell have their
+            -- axis on its RIGHT edge, so the window ends there.  Faceted: cell centre.
+            if registers_in(6)(2) = '1' then
+                n_wst  <= n_csz - 8;
+                n_wend <= n_csz - 1;
+            else
+                n_wst  <= shift_right(n_csz, 1) - 4;
+                n_wend <= shift_right(n_csz, 1) + 3;
+            end if;
+
+            -- K6 Line Width (top 2 bits) -> 1/2/3/4 px.  Horizontal edges are
+            -- shared base-to-base between cell rows, so each row draws only HALF
+            -- the width (top band wt + bottom band wb of the two adjacent rows sum
+            -- to W); the diagonal's [-W,W) band (2W units) is halved back to ~W px
+            -- by its ~2.0 edge gradient, so both match at ~W px.
+            -- At program load the firmware writes a labelled default as its label
+            -- INDEX (0..3), not a knob position, so a raw value < 4 is the index.
+            if unsigned(registers_in(5)) < 4 then
+                v_lw := to_integer(unsigned(registers_in(5)(1 downto 0)));
+            else
+                v_lw := to_integer(unsigned(registers_in(5)(9 downto 8)));
+            end if;
+            case v_lw is
+                when 0      => n_line_w  <= to_unsigned(1, 12);
+                               n_line_wt <= to_unsigned(1, 12);
+                               n_line_wb <= to_unsigned(0, 12);
+                when 1      => n_line_w  <= to_unsigned(2, 12);
+                               n_line_wt <= to_unsigned(1, 12);
+                               n_line_wb <= to_unsigned(1, 12);
+                when 2      => n_line_w  <= to_unsigned(3, 12);
+                               n_line_wt <= to_unsigned(2, 12);
+                               n_line_wb <= to_unsigned(1, 12);
+                when others => n_line_w  <= to_unsigned(4, 12);
+                               n_line_wt <= to_unsigned(2, 12);
+                               n_line_wb <= to_unsigned(2, 12);
+            end case;
+
+            -- K2 Contrast, always on (512 -> gain 128 = unity).
+            s_lgain <= unsigned(registers_in(1)(9 downto 2));
+
+            -- K3 Luma Level = 64 + K3*11/16 (64..767); the bottom 8 counts are 0 so
+            -- the knob's bottom is an exact no-op.  Gate off: lift darker fills to
+            -- it.  Gate on: hide triangles below it.
+            v_k3  := unsigned(registers_in(2));
+            a_k3a <= shift_right(v_k3, 1) + shift_right(v_k3, 3);
+            a_k3q <= shift_right(v_k3, 4);
+            if v_k3(9 downto 3) = 0 then a_k3z <= '1'; else a_k3z <= '0'; end if;
+            a_gate <= registers_in(6)(1);
+            b_lev  <= to_unsigned(64, 10) + a_k3a + a_k3q;
+            if a_k3z = '1' then
+                s_gate_th <= (others => '0');
+                s_floor   <= (others => '0');
+            else
+                s_gate_th <= b_lev;
+                if a_gate = '1' then s_floor <= (others => '0'); else s_floor <= b_lev; end if;
+            end if;
+
+            -- K4 mode + K5 parameter -> per-mode multiplier coefficients and bias.
+            v_i2 := to_integer(unsigned(registers_in(4)(9 downto 8)));
+            v_i6 := to_integer(unsigned(registers_in(4)(9 downto 4)));
+            a_cmode <= unsigned(registers_in(3)(9 downto 8));
+            a_dlo_y <= DUO_LO_Y(v_i2);  a_dlo_u <= DUO_LO_U(v_i2);  a_dlo_v <= DUO_LO_V(v_i2);
+            a_dhi_y <= DUO_HI_Y(v_i2);  a_dhi_u <= DUO_HI_U(v_i2);  a_dhi_v <= DUO_HI_V(v_i2);
+            a_hc    <= HUE_C(v_i6);  a_hsm <= HUE_SMC(v_i6);  a_hsp <= HUE_SPC(v_i6);
+            a_sat   <= unsigned(registers_in(4)(9 downto 1));
+            a_prot  <= unsigned(registers_in(4)(9 downto 7));
+
+            s_cmode <= a_cmode;
+            case to_integer(a_cmode) is
+                when 1 =>      -- Duotone: lo + (hi - lo) * luma / 1024
+                    s_a1 <= signed(resize(a_dhi_y, 11)) - signed(resize(a_dlo_y, 11));
+                    s_a2 <= signed(resize(a_dhi_u, 11)) - signed(resize(a_dlo_u, 11));
+                    s_a3 <= signed(resize(a_dhi_v, 11)) - signed(resize(a_dlo_v, 11));
+                    s_by <= a_dlo_y;  s_bu <= a_dlo_u;  s_bv <= a_dlo_v;
+                when 2 =>      -- Posterize: palette (no products)
+                    s_a1 <= (others => '0');  s_a2 <= (others => '0');  s_a3 <= (others => '0');
+                    s_by <= (others => '0');  s_bu <= (others => '0');  s_bv <= (others => '0');
+                when 3 =>      -- Hue Spin: rotate chroma by the K5 angle
+                    s_a1 <= a_hc;  s_a2 <= a_hsm;  s_a3 <= a_hsp;
+                    s_by <= (others => '0');  s_bu <= C_MID;  s_bv <= C_MID;
+                when others => -- Original: saturation s/256 = the same product with angle 0
+                    s_a1 <= signed(resize(a_sat, 11));
+                    s_a2 <= -signed(resize(a_sat, 11));
+                    s_a3 <= signed(resize(a_sat, 11));
+                    s_by <= (others => '0');  s_bu <= C_MID;  s_bv <= C_MID;
+            end case;
+            -- Posterize: K5 zones 0..6 shift the rainbow, zone 7 = grey ramp.
+            if a_prot = 7 then
+                s_pgrey <= '1';  s_prot <= (others => '0');
+            else
+                s_pgrey <= '0';  s_prot <= a_prot;
+            end if;
+
+            -- K1 Grid Colour (top 3 bits).
+            v_i3 := to_integer(unsigned(registers_in(0)(9 downto 7)));
+            s_gy <= GRID_Y(v_i3);  s_gu <= GRID_U(v_i3);  s_gv <= GRID_V(v_i3);
+        end if;
+    end process p_params;
+
+    --------------------------------------------------------------------------
+    -- Position counters, sampling, and the per-frame latch (at vsync edge).
     --------------------------------------------------------------------------
     p_position : process(clk)
         variable v_h_edge, v_v_edge : std_logic;
-        variable v_csz, v_csh : integer;
+        variable v_sline : boolean;
+        variable v_sbank : std_logic;
     begin
         if rising_edge(clk) then
             prev_hsync_n <= data_in.hsync_n;
@@ -236,108 +443,89 @@ begin
                 end if;
             end if;
 
-            -- buffer write: sample the cell centre on each cell-row's top line.
-            if data_in.avid = '1' and celly_loc = 0 and cellx_loc = s_cszc then
-                s_we    <= '1';
-                s_waddr <= cellx_idx;
-                s_wy    <= unsigned(data_in.y);
-                s_wu    <= unsigned(data_in.u);
-                s_wv    <= unsigned(data_in.v);
+            -- Sample lines: the LAST line of each cell row samples the NEXT row's
+            -- colours into the next row's bank, so a row never reads the bank being
+            -- written and every line of a row shows that row's colours (rollthebones
+            -- scheme).  Row 0 has no row above: it samples on the frame's first
+            -- active line into bank 0, and that one line is drawn black.
+            v_sline := line0 = '1' or celly_last = '1';
+            if line0 = '1' then v_sbank := '0'; else v_sbank := not celly_par; end if;
+
+            -- 8-px horizontal average ending at s_wend (memoryless denoise: a single
+            -- point sample per triangle flickers with analog noise).
+            if cellx_loc = s_wst then
+                acc_y <= resize(unsigned(data_in.y), 13);
+                acc_u <= resize(unsigned(data_in.u), 13);
+                acc_v <= resize(unsigned(data_in.v), 13);
             else
-                s_we <= '0';
+                acc_y <= acc_y + unsigned(data_in.y);
+                acc_u <= acc_u + unsigned(data_in.u);
+                acc_v <= acc_v + unsigned(data_in.v);
             end if;
+
+            -- Window closes on this pixel: write the average next cycle.
+            w_pend <= '0';
+            if data_in.avid = '1' and v_sline and cellx_loc = s_wend then
+                w_pend  <= '1';
+                w_paddr <= v_sbank & cellx_idx;
+            end if;
+            -- Has the current cell's sample been taken?  (s_wend is never 0.)
+            if data_in.avid = '1' then
+                if cellx_loc = s_wend then
+                    w_done <= '1';
+                elsif cellx_loc = 0 then
+                    w_done <= '0';
+                end if;
+            end if;
+
+            -- Buffer write port (the RAM's single write statement is in p_buf).
+            s_we <= '0';
+            if w_pend = '1' then
+                s_we    <= '1';
+                s_waddr <= w_paddr;
+                s_wdata <= "00" & std_logic_vector(acc_y(12 downto 3))
+                                & std_logic_vector(acc_u(12 downto 3))
+                                & std_logic_vector(acc_v(12 downto 3));
+            elsif v_sline and data_in.avid = '0' and pipe(0).avid = '1' and w_done = '0' then
+                -- The line ended inside a partial last cell before its window
+                -- closed: point-sample the last active pixel so the right-edge
+                -- strip doesn't show a stale row.
+                s_we    <= '1';
+                s_waddr <= v_sbank & cellx_idx;
+                s_wdata <= "00" & pipe(0).y & pipe(0).u & pipe(0).v;
+            end if;
+
+            if celly_loc = s_csz_hm1 then celly_last <= '1'; else celly_last <= '0'; end if;
 
             if v_v_edge = '1' then
                 celly_loc <= (others => '0');
                 celly_par <= '0';
                 frame_act <= '0';
+                line0     <= '1';
 
-                -- K1 Triangle Size: continuous 8..256 px (small end goes very fine).
-                v_csz := 8 + to_integer(unsigned(registers_in(0)(9 downto 2)));
-                if v_csz > 256 then v_csz := 256; end if;
-                -- Equilateral row height H = Wc*7/4 (~Wc*sqrt(3); apex ~59.4 deg).
-                v_csh := v_csz + v_csz / 2 + v_csz / 4;
-                s_csz     <= to_unsigned(v_csz, 12);
-                s_cszm1   <= to_unsigned(v_csz - 1, 12);
-                s_cszc    <= to_unsigned(v_csz / 2, 12);
-                s_csz_h   <= to_unsigned(v_csh, 12);
-                s_csz_hm1 <= to_unsigned(v_csh - 1, 12);
+                -- Per-frame geometry + switches (pre-computed in p_params).
+                s_cszm1   <= n_cszm1;
+                s_csz_h   <= n_csh;
+                s_csz_hm1 <= n_cshm1;
+                s_wst     <= n_wst;
+                s_wend    <= n_wend;
+                s_line_w  <= n_line_w;
+                s_line_wt <= n_line_wt;
+                s_line_wb <= n_line_wb;
 
-                -- Wireframe "has luma" threshold (K3, raw luma).
-                s_gate_th <= unsigned(registers_in(2)(9 downto 0));
-
-                -- Luma Mod (S8): a luma GATE (only luma-positive triangles show) plus
-                -- fill contrast via K2 gain.  Off -> unity gain, no gate (everything shows).
-                s_lumamod <= registers_in(6)(1);
-                if registers_in(6)(1) = '1' then
-                    s_lgain <= unsigned(registers_in(1)(9 downto 2));
-                else
-                    s_lgain <= to_unsigned(128, 8);
-                end if;
-                s_floor <= (others => '0');
-
-                s_cmode  <= unsigned(registers_in(3)(9 downto 8));
-                s_duosel <= unsigned(registers_in(4)(9 downto 8));
-                s_palsel <= registers_in(4)(9);
-                s_hue    <= unsigned(registers_in(4)(9 downto 8));
-
-                -- Line Width (K6 top 2 bits) -> 1/2/3/4 px.  Horizontal edges are
-                -- shared base-to-base between cell rows, so each row draws only
-                -- HALF the width (top band wt + bottom band wb of the two adjacent
-                -- rows sum to W); the diagonal's [-W,W) band (2W units) is halved
-                -- back to ~W px by its ~2.0 edge gradient, so both match at ~W px.
-                case to_integer(unsigned(registers_in(5)(9 downto 8))) is
-                    when 0      => s_line_w  <= to_unsigned(1, 12);
-                                   s_line_wt <= to_unsigned(1, 12);
-                                   s_line_wb <= to_unsigned(0, 12);
-                    when 1      => s_line_w  <= to_unsigned(2, 12);
-                                   s_line_wt <= to_unsigned(1, 12);
-                                   s_line_wb <= to_unsigned(1, 12);
-                    when 2      => s_line_w  <= to_unsigned(3, 12);
-                                   s_line_wt <= to_unsigned(2, 12);
-                                   s_line_wb <= to_unsigned(1, 12);
-                    when others => s_line_w  <= to_unsigned(4, 12);
-                                   s_line_wt <= to_unsigned(2, 12);
-                                   s_line_wb <= to_unsigned(2, 12);
-                end case;
-
-                s_grid   <= registers_in(6)(0);
-                s_fill   <= registers_in(6)(2);
+                s_grid   <= registers_in(6)(0);   -- S7 Grid Lines
+                s_gate   <= registers_in(6)(1);   -- S8 Luma Gate
+                s_fill   <= registers_in(6)(2);   -- S9 Fill Mode
                 s_wire   <= registers_in(6)(3);   -- S10 Wireframe (grid only)
                 s_bypass <= registers_in(6)(4);   -- S11 Bypass
-
-                -- P12 Mix (dry/wet), 64 steps (visually seamless, and an 11x8 mult
-                -- instead of 11x12 -- the full-width version cost ~500 LCs more and
-                -- broke HD routing).  Adding the top bit maps 63 -> 64 so the fader
-                -- top is EXACT full effect (no 63/64 residue of the dry).
-                s_mix <= resize(unsigned(registers_in(7)(9 downto 4)), 7)
-                       + resize(unsigned(registers_in(7)(9 downto 9)), 7);
-
-                -- Grid-line colour from K5 (top 3 bits).
-                s_gy <= GRID_Y(to_integer(unsigned(registers_in(4)(9 downto 7))));
-                s_gu <= GRID_U(to_integer(unsigned(registers_in(4)(9 downto 7))));
-                s_gv <= GRID_V(to_integer(unsigned(registers_in(4)(9 downto 7))));
-
-                -- Pre-select duotone endpoints + deltas once per frame.
-                s_dlo_y <= DUO_LO_Y(to_integer(unsigned(registers_in(4)(9 downto 8))));
-                s_dlo_u <= DUO_LO_U(to_integer(unsigned(registers_in(4)(9 downto 8))));
-                s_dlo_v <= DUO_LO_V(to_integer(unsigned(registers_in(4)(9 downto 8))));
-                s_dd_y  <= signed(resize(DUO_HI_Y(to_integer(unsigned(registers_in(4)(9 downto 8)))), 11))
-                         - signed(resize(DUO_LO_Y(to_integer(unsigned(registers_in(4)(9 downto 8)))), 11));
-                s_dd_u  <= signed(resize(DUO_HI_U(to_integer(unsigned(registers_in(4)(9 downto 8)))), 11))
-                         - signed(resize(DUO_LO_U(to_integer(unsigned(registers_in(4)(9 downto 8)))), 11));
-                s_dd_v  <= signed(resize(DUO_HI_V(to_integer(unsigned(registers_in(4)(9 downto 8)))), 11))
-                         - signed(resize(DUO_LO_V(to_integer(unsigned(registers_in(4)(9 downto 8)))), 11));
             elsif data_in.avid = '1' and frame_act = '0' then
-                -- Anchor the vertical cell grid to the FIRST active line of the frame.
-                -- celly_loc increments on hsync (incl. the vertical back porch), so
-                -- without this the top cell-row's sample line (celly_loc=0) lands in
-                -- blanking, never gets written, and the top row shows the previous
-                -- frame's bottom row (stale per-column buffer).
+                -- Anchor the vertical cell grid to the FIRST active line of the frame
+                -- (celly_loc increments on hsync, incl. the vertical back porch).
                 frame_act <= '1';
                 celly_loc <= (others => '0');
                 celly_par <= '0';
             elsif v_h_edge = '1' then
+                if frame_act = '1' then line0 <= '0'; end if;
                 if celly_loc = s_csz_hm1 then
                     celly_loc <= (others => '0');
                     celly_par <= not celly_par;   -- flip per row: half-offsets the lattice
@@ -350,7 +538,6 @@ begin
 
     --------------------------------------------------------------------------
     -- Combinational geometry: triangle classification, read address, grid flag.
-    -- 45-degree diagonal => no multiply.
     --------------------------------------------------------------------------
     p_comb : process(g0_lxs, g0_ly, g0_cx, g0_even, s_csz_h, s_csz_hm1,
                      s_line_w, s_line_wt, s_line_wb, s_fill)
@@ -396,7 +583,7 @@ begin
         end if;
     end process p_comb;
 
-    s_buf_raddr <= c_raddr;
+    s_buf_raddr <= g0_bank & c_raddr;
 
     --------------------------------------------------------------------------
     -- Cell colour buffer (1W1R, registered read).
@@ -405,13 +592,9 @@ begin
     begin
         if rising_edge(clk) then
             if s_we = '1' then
-                buf_y(to_integer(s_waddr)) <= s_wy;
-                buf_u(to_integer(s_waddr)) <= s_wu;
-                buf_v(to_integer(s_waddr)) <= s_wv;
+                buf(to_integer(s_waddr)) <= s_wdata;
             end if;
-            s_rd_y <= buf_y(to_integer(s_buf_raddr));
-            s_rd_u <= buf_u(to_integer(s_buf_raddr));
-            s_rd_v <= buf_v(to_integer(s_buf_raddr));
+            s_rd <= buf(to_integer(s_buf_raddr));
         end if;
     end process p_buf;
 
@@ -420,18 +603,25 @@ begin
     --------------------------------------------------------------------------
     p_pipe : process(clk)
         variable v_lm   : signed(12 downto 0);
+        variable v_l    : unsigned(9 downto 0);
+        variable v_du, v_dv : signed(23 downto 0);
         variable v_idx  : integer range 0 to 7;
-        variable v_cu, v_cv : signed(11 downto 0);
-        variable v_y, v_u, v_v : unsigned(9 downto 0);
+        variable v_b    : signed(11 downto 0);
+        variable v_bl   : signed(6 downto 0);
     begin
         if rising_edge(clk) then
-            -- sync/video delay line
+            -- sync/video delay line (only the first few taps carry y/u/v; the
+            -- rest are pruned to syncs)
             pipe(0) <= data_in;
             for i in 1 to LATENCY - 1 loop pipe(i) <= pipe(i - 1); end loop;
 
-            -- grid flag delay (align with the colour path at St6)
+            -- grid / top-line flag delays (align with the colour path at St6)
             g_pipe(0) <= c_grid;
-            for i in 1 to 5 loop g_pipe(i) <= g_pipe(i - 1); end loop;
+            top_pipe(0) <= g0_top;
+            for i in 1 to 8 loop
+                g_pipe(i) <= g_pipe(i - 1);
+                top_pipe(i) <= top_pipe(i - 1);
+            end loop;
 
             -- geo0: pre-register lx*7/4 with ly/cx/parity aligned, so the diagonal
             -- + grid arithmetic in p_comb is a short combinational chain.
@@ -442,120 +632,146 @@ begin
             -- orientation alternates per column AND per row, so every other row is
             -- half-offset and flat triangle edges (▲ base <-> ▽ base) meet.
             g0_even <= not (cellx_idx(0) xor celly_par);
+            g0_bank <= celly_par;
+            g0_top  <= line0;
 
-            -- St1: capture the sampled cell colour (buffer read now valid).
-            samp_y <= s_rd_y;
-            samp_u <= s_rd_u;
-            samp_v <= s_rd_v;
+            -- St1: capture the sampled cell colour into fabric (EBR output -> FF).
+            samp_y <= unsigned(s_rd(29 downto 20));
+            samp_u <= unsigned(s_rd(19 downto 10));
+            samp_v <= unsigned(s_rd(9 downto 0));
 
-            -- St1: per-pixel "own triangle has luma" gate, carried alongside the
-            -- colour path (St2..St5) to line up with the St6 overlay.  Each pixel is
-            -- gated by ITS OWN triangle (flat read), so only complete lit triangles
-            -- draw — fill and their own edges; non-lit triangles draw nothing.
-            lown_pipe(0) <= '0';
-            if s_rd_y >= s_gate_th then
-                lown_pipe(0) <= '1';
-            end if;
-            for i in 1 to 4 loop lown_pipe(i) <= lown_pipe(i - 1); end loop;
-
-            -- St2: luma-mod stage 1 — contrast multiply about mid (isolated).
+            -- St2: contrast multiply about mid (isolated); centred chroma; and the
+            -- per-pixel "own triangle is lit" gate (flat read), carried to St6 so
+            -- only complete lit triangles draw — fill and their own edges.
             s2_lp <= (signed(resize(samp_y, 11)) - to_signed(512, 11))
                    * signed(resize(s_lgain, 10));
-            s2_u  <= samp_u;
-            s2_v  <= samp_v;
+            s2_cu <= signed(resize(samp_u, 11)) - to_signed(512, 11);
+            s2_cv <= signed(resize(samp_v, 11)) - to_signed(512, 11);
+            lown_pipe(0) <= '0';
+            if samp_y >= s_gate_th then
+                lown_pipe(0) <= '1';
+            end if;
+            for i in 1 to 6 loop lown_pipe(i) <= lown_pipe(i - 1); end loop;
 
-            -- St3: luma-mod stage 2 — recombine, clamp, lift to floor.
+            -- St3: recombine + clamp luma; chroma sum for the complex product.
             v_lm := resize(shift_right(s2_lp, 7), 13) + to_signed(512, 13);
             if v_lm < 0 then v_lm := (others => '0'); end if;
             if v_lm > 1023 then v_lm := to_signed(1023, 13); end if;
-            if v_lm < resize(signed('0' & s_floor), 13) then
-                v_lm := resize(signed('0' & s_floor), 13);
+            s3_lm0 <= unsigned(v_lm(9 downto 0));
+            s3_cs  <= resize(s2_cu, 12) + resize(s2_cv, 12);
+            s3_cu  <= s2_cu;
+            s3_cv  <= s2_cv;
+
+            -- St3b: K3 lift; select the multiplier operands for the mode
+            -- (Duotone: luma x3 | Original/Hue Spin: cu+cv, cu, cv).
+            if s3_lm0 < s_floor then v_l := s_floor; else v_l := s3_lm0; end if;
+            s3b_lm <= v_l;
+            if s_cmode = 1 then
+                s3b_b1 <= signed(resize(v_l, 12));
+                s3b_b2 <= signed(resize(v_l, 12));
+                s3b_b3 <= signed(resize(v_l, 12));
+            else
+                s3b_b1 <= s3_cs;
+                s3b_b2 <= resize(s3_cu, 12);
+                s3b_b3 <= resize(s3_cv, 12);
             end if;
-            s3_lm <= unsigned(v_lm(9 downto 0));
-            s3_u  <= s2_u;
-            s3_v  <= s2_v;
 
-            -- St4: colorize stage 1 — duotone products (only used in mode 1).
-            s4_pdy <= s_dd_y * signed('0' & s3_lm);
-            s4_pdu <= s_dd_u * signed('0' & s3_lm);
-            s4_pdv <= s_dd_v * signed('0' & s3_lm);
-            s4_lm  <= s3_lm;
-            s4_u   <= s3_u;
-            s4_v   <= s3_v;
+            -- St4a: the three products, operand B split hi/lo (B = hi*64 + lo, hi
+            -- signed, lo unsigned): two 11x6 partial products per channel instead
+            -- of one 11x12 — the single-stage 11x12 was the HD HDMI critical path.
+            v_b := s3b_b1;
+            s4a_h1 <= s_a1 * v_b(11 downto 6);
+            v_bl := signed('0' & std_logic_vector(v_b(5 downto 0)));
+            s4a_l1 <= s_a1 * v_bl;
+            v_b := s3b_b2;
+            s4a_h2 <= s_a2 * v_b(11 downto 6);
+            v_bl := signed('0' & std_logic_vector(v_b(5 downto 0)));
+            s4a_l2 <= s_a2 * v_bl;
+            v_b := s3b_b3;
+            s4a_h3 <= s_a3 * v_b(11 downto 6);
+            v_bl := signed('0' & std_logic_vector(v_b(5 downto 0)));
+            s4a_l3 <= s_a3 * v_bl;
+            s4a_lm   <= s3b_lm;
+            s4a_pidx <= s3b_lm(9 downto 7) + s_prot;
 
-            -- St5: colorize stage 2 — assemble per mode.
+            -- St4b: recombine (resize BEFORE the shift).
+            s4_p1   <= shift_left(resize(s4a_h1, 23), 6) + resize(s4a_l1, 23);
+            s4_p2   <= shift_left(resize(s4a_h2, 23), 6) + resize(s4a_l2, 23);
+            s4_p3   <= shift_left(resize(s4a_h3, 23), 6) + resize(s4a_l3, 23);
+            s4_lm   <= s4a_lm;
+            s4_pidx <= s4a_pidx;
+
+            -- St5: assemble per mode (pre-bias, signed).
             case to_integer(s_cmode) is
-                when 1 =>      -- Duotone: lerp endpoints by shaped luma
-                    v_y := clamp10(signed(resize(s_dlo_y, 12)) + resize(shift_right(s4_pdy, 10), 12));
-                    v_u := clamp10(signed(resize(s_dlo_u, 12)) + resize(shift_right(s4_pdu, 10), 12));
-                    v_v := clamp10(signed(resize(s_dlo_v, 12)) + resize(shift_right(s4_pdv, 10), 12));
+                when 1 =>      -- Duotone: (hi - lo) * luma / 1024 (+ lo in St5b)
+                    s5t_y <= resize(shift_right(s4_p1, 10), 13);
+                    s5t_u <= resize(shift_right(s4_p2, 10), 13);
+                    s5t_v <= resize(shift_right(s4_p3, 10), 13);
                 when 2 =>      -- Posterize: luma zone -> palette
-                    v_idx := to_integer(s4_lm(9 downto 7));
-                    if s_palsel = '0' then
-                        v_y := RNB_Y(v_idx); v_u := RNB_U(v_idx); v_v := RNB_V(v_idx);
+                    v_idx := to_integer(s4_pidx);
+                    if s_pgrey = '1' then
+                        s5t_y <= signed(resize(GRY_Y(v_idx), 13));
+                        s5t_u <= signed(resize(C_MID, 13));
+                        s5t_v <= signed(resize(C_MID, 13));
                     else
-                        v_y := GRY_Y(v_idx); v_u := C_MID;        v_v := C_MID;
+                        s5t_y <= signed(resize(RNB_Y(v_idx), 13));
+                        s5t_u <= signed(resize(RNB_U(v_idx), 13));
+                        s5t_v <= signed(resize(RNB_V(v_idx), 13));
                     end if;
-                when 3 =>      -- Hue-rotate: spin chroma about mid (90-deg steps)
-                    v_cu := signed(resize(s4_u, 12)) - 512;
-                    v_cv := signed(resize(s4_v, 12)) - 512;
-                    case to_integer(s_hue) is
-                        when 1 =>
-                            v_u := clamp10(to_signed(512, 13) - resize(v_cv, 13));
-                            v_v := clamp10(to_signed(512, 13) + resize(v_cu, 13));
-                        when 2 =>
-                            v_u := clamp10(to_signed(512, 13) - resize(v_cu, 13));
-                            v_v := clamp10(to_signed(512, 13) - resize(v_cv, 13));
-                        when 3 =>
-                            v_u := clamp10(to_signed(512, 13) + resize(v_cv, 13));
-                            v_v := clamp10(to_signed(512, 13) - resize(v_cu, 13));
-                        when others =>
-                            v_u := s4_u; v_v := s4_v;
-                    end case;
-                    v_y := s4_lm;
-                when others => -- Original
-                    v_y := s4_lm; v_u := s4_u; v_v := s4_v;
+                when others => -- Original / Hue Spin: u' = k1 - k3, v' = k1 + k2 (+512 in St5b)
+                    v_du := resize(s4_p1, 24) - resize(s4_p3, 24);
+                    v_dv := resize(s4_p1, 24) + resize(s4_p2, 24);
+                    s5t_y <= signed(resize(s4_lm, 13));
+                    s5t_u <= resize(shift_right(v_du, 8), 13);
+                    s5t_v <= resize(shift_right(v_dv, 8), 13);
             end case;
-            s5_y <= v_y; s5_u <= v_u; s5_v <= v_v;
 
-            -- St6: grid / wireframe / luma-gate overlay.  Edge = g_pipe(5); each
+            -- St5b: per-mode bias + clamp.
+            s5_y <= clamp10(resize(s5t_y, 14) + signed(resize(s_by, 14)));
+            s5_u <= clamp10(resize(s5t_u, 14) + signed(resize(s_bu, 14)));
+            s5_v <= clamp10(resize(s5t_v, 14) + signed(resize(s_bv, 14)));
+
+            -- St6: grid / wireframe / luma-gate overlay.  Edge = g_pipe(8); each
             -- pixel is gated by its OWN triangle's luma (lown_pipe), so only complete
             -- lit triangles draw (fill + their own edges) — no partial outlines.
-            -- Luma Mod is a GATE: only luma-positive triangles show.  s6_vid marks
-            -- edges to be coloured from the live video at St7.
+            -- s6_vid marks edges to be coloured from the live video at the output.
             s6_vid <= '0';
-            if s_wire = '1' then
-                if s_lumamod = '1' then
-                    -- only the lit triangles' edges, K5, over black
-                    if g_pipe(5) = '1' and lown_pipe(4) = '1' then
+            if top_pipe(8) = '1' then
+                -- frame's first active line: row 0's bank is being written (EBR
+                -- read-during-write is undefined) -> black
+                s6_y <= C_BLACK; s6_u <= C_MID; s6_v <= C_MID;
+            elsif s_wire = '1' then
+                if s_gate = '1' then
+                    -- only the lit triangles' edges, K1 colour, over black
+                    if g_pipe(8) = '1' and lown_pipe(6) = '1' then
                         s6_y <= s_gy; s6_u <= s_gu; s6_v <= s_gv;
                     else
-                        s6_y <= (others => '0'); s6_u <= C_MID; s6_v <= C_MID;
+                        s6_y <= C_BLACK; s6_u <= C_MID; s6_v <= C_MID;
                     end if;
                 else
                     -- full mesh, every edge coloured by the live incoming video
-                    if g_pipe(5) = '1' then
+                    if g_pipe(8) = '1' then
                         s6_vid <= '1';
-                        s6_y <= s_gy; s6_u <= s_gu; s6_v <= s_gv;   -- placeholder (St7 -> video)
+                        s6_y <= s_gy; s6_u <= s_gu; s6_v <= s_gv;   -- placeholder (output -> video)
                     else
-                        s6_y <= (others => '0'); s6_u <= C_MID; s6_v <= C_MID;
+                        s6_y <= C_BLACK; s6_u <= C_MID; s6_v <= C_MID;
                     end if;
                 end if;
-            elsif s_lumamod = '1' then
-                -- non-wireframe + luma gate: show only luma-positive triangles
-                -- (fill) and their surrounding grid lines; black elsewhere.
-                if s_grid = '1' and g_pipe(5) = '1' then
-                    if lown_pipe(4) = '1' then
+            elsif s_gate = '1' then
+                -- non-wireframe + luma gate: show only lit triangles (fill) and
+                -- their surrounding grid lines; black elsewhere.
+                if s_grid = '1' and g_pipe(8) = '1' then
+                    if lown_pipe(6) = '1' then
                         s6_y <= s_gy; s6_u <= s_gu; s6_v <= s_gv;
                     else
-                        s6_y <= (others => '0'); s6_u <= C_MID; s6_v <= C_MID;
+                        s6_y <= C_BLACK; s6_u <= C_MID; s6_v <= C_MID;
                     end if;
-                elsif lown_pipe(4) = '1' then
+                elsif lown_pipe(6) = '1' then
                     s6_y <= s5_y; s6_u <= s5_u; s6_v <= s5_v;
                 else
-                    s6_y <= (others => '0'); s6_u <= C_MID; s6_v <= C_MID;
+                    s6_y <= C_BLACK; s6_u <= C_MID; s6_v <= C_MID;
                 end if;
-            elsif s_grid = '1' and g_pipe(5) = '1' then
+            elsif s_grid = '1' and g_pipe(8) = '1' then
                 s6_y <= s_gy; s6_u <= s_gu; s6_v <= s_gv;
             else
                 s6_y <= s5_y;
@@ -563,55 +779,39 @@ begin
                 s6_v <= s5_v;
             end if;
 
-            -- St7: mix prep — capture the dry input (aligned with St6 here) and the
-            -- per-channel (effect - dry) difference.  s6_vid edges are coloured by
-            -- the live video, so their effect IS the dry pixel (diff = 0).
-            m7_iy <= unsigned(pipe(LATENCY - 3).y);
-            m7_iu <= unsigned(pipe(LATENCY - 3).u);
-            m7_iv <= unsigned(pipe(LATENCY - 3).v);
-            if s6_vid = '1' then
-                m7_dy <= (others => '0');
-                m7_du <= (others => '0');
-                m7_dv <= (others => '0');
+            -- Output: blanking gate (neutral outside avid).  Live-video edges come
+            -- from a SHORT tap (pipe(3), 8 px ahead): raw input video carried ~12
+            -- deep went green + noisy on HD HDMI (cascade, rollthebones).
+            if pipe(LATENCY - 1).avid = '0' then
+                s_io.y <= std_logic_vector(C_BLACK);
+                s_io.u <= std_logic_vector(C_MID);
+                s_io.v <= std_logic_vector(C_MID);
+            elsif s6_vid = '1' then
+                if pipe(3).avid = '1' then
+                    s_io.y <= pipe(3).y;
+                    s_io.u <= pipe(3).u;
+                    s_io.v <= pipe(3).v;
+                else
+                    s_io.y <= std_logic_vector(C_BLACK);
+                    s_io.u <= std_logic_vector(C_MID);
+                    s_io.v <= std_logic_vector(C_MID);
+                end if;
             else
-                m7_dy <= signed(resize(s6_y, 11)) - signed(resize(unsigned(pipe(LATENCY - 3).y), 11));
-                m7_du <= signed(resize(s6_u, 11)) - signed(resize(unsigned(pipe(LATENCY - 3).u), 11));
-                m7_dv <= signed(resize(s6_v, 11)) - signed(resize(unsigned(pipe(LATENCY - 3).v), 11));
-            end if;
-
-            -- St8: P12 mix products (one mult per channel, operands + product
-            -- registered, nothing else in the stage).
-            m8_py <= m7_dy * signed('0' & s_mix);
-            m8_pu <= m7_du * signed('0' & s_mix);
-            m8_pv <= m7_dv * signed('0' & s_mix);
-            m8_iy <= m7_iy;
-            m8_iu <= m7_iu;
-            m8_iv <= m7_iv;
-
-            -- St9: output = dry + (effect - dry) * mix / 64.  Bypass passes the
-            -- raw input (pipe is aligned with the output sync here).
-            if s_bypass = '1' then
-                s_io.y <= pipe(LATENCY - 1).y;
-                s_io.u <= pipe(LATENCY - 1).u;
-                s_io.v <= pipe(LATENCY - 1).v;
-            else
-                s_io.y <= std_logic_vector(clamp10(signed(resize(m8_iy, 14)) + resize(shift_right(m8_py, 6), 14)));
-                s_io.u <= std_logic_vector(clamp10(signed(resize(m8_iu, 14)) + resize(shift_right(m8_pu, 6), 14)));
-                s_io.v <= std_logic_vector(clamp10(signed(resize(m8_iv, 14)) + resize(shift_right(m8_pv, 6), 14)));
+                s_io.y <= std_logic_vector(s6_y);
+                s_io.u <= std_logic_vector(s6_u);
+                s_io.v <= std_logic_vector(s6_v);
             end if;
             s_io.hsync_n <= pipe(LATENCY - 1).hsync_n;
             s_io.vsync_n <= pipe(LATENCY - 1).vsync_n;
             s_io.avid    <= pipe(LATENCY - 1).avid;
             s_io.field_n <= pipe(LATENCY - 1).field_n;
+
+            -- S11: 1-cycle raw forward, exactly SDK passthru (data_out <= data_in)
+            s_bpass <= data_in;
         end if;
     end process p_pipe;
 
-    data_out.y       <= s_io.y;
-    data_out.u       <= s_io.u;
-    data_out.v       <= s_io.v;
-    data_out.hsync_n <= s_io.hsync_n;
-    data_out.vsync_n <= s_io.vsync_n;
-    data_out.avid    <= s_io.avid;
-    data_out.field_n <= s_io.field_n;
+    -- S11 bypass = SDK passthru (raw input + its own syncs, 1 cycle).
+    data_out <= s_bpass when s_bypass = '1' else s_io;
 
 end architecture triangulator;
