@@ -150,7 +150,7 @@ architecture iris of program_top is
     signal seq_req   : std_logic := '0';
     signal dcnt      : unsigned(7 downto 0) := (others => '0');
     signal sw_ink, sw_flow, sw_full : std_logic := '0';
-    signal sw_mesh, sw_glow : std_logic := '0';                    -- S7 Dots/Mesh, S8 Hard/Glow
+    signal sw_mesh, sw_vid : std_logic := '0';                     -- S7 Dots/Mesh, S8 Backdrop Solid/Video
     -- local copies of the control registers: the SPI-decoded words come from the far
     -- side of the die, and the sequencer's operand mux should not reach that far
     type t_regs is array(0 to 7) of unsigned(9 downto 0);
@@ -337,6 +337,11 @@ architecture iris of program_top is
     signal y18 : unsigned(7 downto 0) := (others => '0');
     signal u18, v18 : signed(8 downto 0) := (others => '0');
     -- output (P19)
+    -- S8 Video backdrop: the live input's three forms of ground + (video - ground) * k
+    -- for Y (k = 1, 1/2), raw chroma, and the ground's share k of each output pixel
+    signal vya, vyh : signed(10 downto 0) := (others => '0');
+    signal vu, vv   : unsigned(9 downto 0) := to_unsigned(512, 10);
+    signal kq18     : unsigned(1 downto 0) := (others => '0');
     signal s_out_y : unsigned(9 downto 0) := to_unsigned(64, 10);
     signal s_out_u : unsigned(9 downto 0) := C_MID;
     signal s_out_v : unsigned(9 downto 0) := C_MID;
@@ -455,6 +460,13 @@ architecture iris of program_top is
         if vld = '0' or v <= 0 then return to_unsigned(0, 8);
         elsif v > 255 then return to_unsigned(255, 8);
         else return unsigned(v(7 downto 0)); end if;
+    end function;
+
+    function f_sat10(v : signed(12 downto 0)) return unsigned is
+    begin
+        if v(12) = '1' then return to_unsigned(0, 10);
+        elsif v(11 downto 10) /= "00" then return to_unsigned(1023, 10);
+        else return unsigned(v(9 downto 0)); end if;
     end function;
 
     function f_comp(al : unsigned(7 downto 0); ink : std_logic) return unsigned is

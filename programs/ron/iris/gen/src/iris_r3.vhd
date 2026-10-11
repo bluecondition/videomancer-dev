@@ -158,18 +158,19 @@
         variable v_y  : unsigned(11 downto 0);
         variable v_bmy, v_rmy : signed(9 downto 0);
         variable v_u, v_v : signed(9 downto 0);
-        variable v_yo : unsigned(10 downto 0);
-        variable v_uo, v_vo : signed(11 downto 0);
         variable v_ax : unsigned(7 downto 0);
+        variable v_k8 : unsigned(7 downto 0);
+        variable v_ty : signed(12 downto 0);
+        variable v_tu, v_tv : signed(12 downto 0);
+        variable v_my : signed(10 downto 0);
+        variable v_mu, v_mv : unsigned(9 downto 0);
     begin
         if rising_edge(clk) then
-            -- P14.  Glow: shift by a constant 11 -- the scale at which a dot is one
-            -- pixel wide -- so the ramp spans the whole dot instead of one pixel of
-            -- its edge, and every dot becomes a soft ball with its peak at the centre.
-            if sw_glow = '1' then v_rd := "1011"; else v_rd := rd_h1; end if;
+            -- P14
+            v_rd := rd_h1;
             bar14_g <= f_bar(dfg13, v_rd);
             -- P15
-            v_ax := f_alpha(bar14_g, vldg_d(13), not sw_glow);
+            v_ax := f_alpha(bar14_g, vldg_d(13), '1');
             if v_ax > att_d(14) then v_ax := v_ax - att_d(14); else v_ax := (others => '0'); end if;
             if lay_d(13)(2) = '1' and lay_d(14)(2) = '0' then    -- first active pixel of the line
                 fr_r <= '1'; fr_b <= '1';
@@ -209,20 +210,55 @@
             v_v := shift_right(v_rmy, 1) + shift_right(v_rmy, 2) - shift_right(v_rmy, 5);
             u18 <= resize(v_u, 9);
             v18 <= resize(v_v, 9);
-            -- P19: to 10-bit (Y 64..~768, chroma 512 +/- 3*U8), blanking gate, U/V swap
-            v_yo := to_unsigned(64, 11) + shift_left(resize(y18, 11), 1)
-                    + resize(shift_right(y18, 1), 11) + resize(shift_right(y18, 2), 11);
-            v_uo := to_signed(512, 12) + resize(u18, 12) + resize(u18, 12) + resize(u18, 12);
-            v_vo := to_signed(512, 12) + resize(v18, 12) + resize(v18, 12) + resize(v18, 12);
+            -- S8 Video backdrop.  The video replaces the GROUND -- black in Light, white
+            -- paper in Ink:  out = dots + (video - ground) * k,  k = the ground's share of
+            -- the pixel, 1 between dots, 0 under a dot's core, 1/2 on its anti-aliased edge.
+            -- The share is read off the composite's own luma (paper brightness in Ink, its
+            -- complement in Light), so faint colour fringes let the picture through like
+            -- the transparent layers they are, and every fade crossfades into the picture.
+            -- No multiplier and no extra stage: "ground + (video - ground) * k" takes only
+            -- three forms, precomputed at the input (Y) or plain rewiring (chroma: the
+            -- half step of u is u(9) & not u(9) & u(8:1) = u/2 + 256), and the result
+            -- simply replaces the constant (64, 512) the YUV assembly used to add.  The
+            -- input is read LIVE, one register deep (raw video must stay shallow), and held
+            -- through blanking: the picture lands ~19 px left of passthrough and the line's
+            -- last ~19 px repeat its last active sample.  Chroma is the dry path -- never
+            -- U/V-swapped (the generated colour still is, at the lane assignment below).
+            if sw_ink = '1' then v_k8 := yy17(11 downto 4); else v_k8 := not yy17(11 downto 4); end if;
+            if sw_vid = '0' or v_k8(7 downto 6) = "00" then kq18 <= "00";
+            elsif v_k8(7 downto 6) = "11" then kq18 <= "11";
+            else kq18 <= "01"; end if;
+            if data_in.avid = '1' then
+                if sw_ink = '1' then
+                    vya <= signed(resize(unsigned(data_in.y), 11)) - to_signed(700, 11);
+                    vyh <= signed(resize(unsigned(data_in.y(9 downto 1)), 11)) - to_signed(318, 11);
+                else
+                    vya <= signed(resize(unsigned(data_in.y), 11));
+                    vyh <= signed(resize(unsigned(data_in.y(9 downto 1)), 11)) + to_signed(32, 11);
+                end if;
+                vu <= unsigned(data_in.u); vv <= unsigned(data_in.v);
+            end if;
+            -- P19: to 10-bit with the backdrop folded in, clamp, blanking gate, U/V swap
+            case kq18 is
+                when "11"   => v_my := vya; v_mu := vu; v_mv := vv;
+                when "01"   => v_my := vyh;
+                               v_mu := vu(9) & (not vu(9)) & vu(8 downto 1);
+                               v_mv := vv(9) & (not vv(9)) & vv(8 downto 1);
+                when others => v_my := to_signed(64, 11); v_mu := C_MID; v_mv := C_MID;
+            end case;
+            v_ty := resize(v_my, 13) + signed(resize(shift_left(resize(y18, 11), 1)
+                    + resize(shift_right(y18, 1), 11) + resize(shift_right(y18, 2), 11), 13));
+            v_tu := signed(resize(v_mu, 13)) + resize(v18, 13) + resize(v18, 13) + resize(v18, 13);
+            v_tv := signed(resize(v_mv, 13)) + resize(u18, 13) + resize(u18, 13) + resize(u18, 13);
             sd_o <= sd_q;
             if sd_q(3) = '0' then
                 s_out_y <= to_unsigned(64, 10);
                 s_out_u <= C_MID;
                 s_out_v <= C_MID;
             else
-                s_out_y <= v_yo(9 downto 0);
-                s_out_u <= unsigned(v_vo(9 downto 0));
-                s_out_v <= unsigned(v_uo(9 downto 0));
+                s_out_y <= f_sat10(v_ty);
+                s_out_u <= f_sat10(v_tu);
+                s_out_v <= f_sat10(v_tv);
             end if;
         end if;
     end process p_out;

@@ -9,7 +9,12 @@ fans them on the far side, like a cone seen in perspective. Three transparent
 layers (red, green, blue) draw the same field; SPLIT fans them apart with
 distance from the pupil.
 
-Status: v1.3.0. v1.1 is HW-validated on HD HDMI (the arm-cut phantom line is
+Status: v1.4.0, HW-checked on 2026-10-11 ("it looks good"). v1.4 replaces
+Switch 8's Glow with a VIDEO BACKDROP: the incoming picture takes the place of
+the black (Light) or white paper (Ink) ground, with the dots on top. Presets
+are still hand-authored -- recapture them from the hardware.
+
+v1.3.0: v1.1 is HW-validated on HD HDMI (the arm-cut phantom line is
 confirmed gone). v1.2 gave Split a designed top end (the RGB triad) and tried a
 "living eye" under Flow (pupil breathing + saccades), which was rejected on
 hardware and removed in v1.3. v1.3 also fixes a long-standing BOUNCE of the
@@ -42,7 +47,7 @@ quality, and Switches 7 and 8 repurposed as Fill (Dots/Mesh) and Edge
 | Knob 6 | Twist | Bipolar with a centre dead zone. Centre = straight radial spokes; right winds clockwise, left counter-clockwise. The knob sets the arm pitch angle, so the spiral keeps its look when Arms or Rings change. |
 | Slider | Split | Fans the R/G/B layers apart, growing from the pupil outward (red leads, blue trails, green anchors, plus a small radial offset). Square-law weighted so the lower half gives fine control over subtle fringing. Below 3 % the three layers are exact copies, so the dots are pure white (or pure black in Ink) with no colour at their edges. The separation stops at one third of an arm, where red, green and blue sit evenly between each other's dots: a clean RGB triad with three times the dot count. From about 70 % that triad reaches the rim, and the rest of the travel grows the triad band inward until, at 100 %, the outer half of the iris is pure triad. |
 | Switch 7 | Fill: Dots / Mesh | Mesh grows every dot to 1.24x the radius at which neighbours touch, so they overlap and the black between them becomes the figure: a honeycomb of dark interstices in a bright field (bright holes in dark in Ink). With Twist off centre the strands show small notches where they cross ring boundaries, because each pixel tests only its own cell's disc. |
-| Switch 8 | Edge: Hard / Glow | Glow makes the coverage ramp span the whole dot instead of one pixel of its edge: every dot becomes a soft ball, brightest at its centre and fading to nothing at its geometric edge, a phosphor-matrix look. Smaller dots are dimmer, as glows are. In Ink they are soft dark blots. |
+| Switch 8 | Backdrop: Solid / Video | Video puts the incoming picture where the ground was -- in place of the black in Light, of the white paper in Ink -- with the dots on top: out = dots + (video - ground) x k, where k is the ground's share of the pixel (1 between dots, 1/2 on a dot's anti-aliased edge, 0 under its core), read off the composite's own luma. So the gaps, the pupil and everything outside the iris become the picture; white dots sit solid on it in Light, black ink cores in Ink; faint colour fringes let it through like transparent light (Light) or tinted ink (Ink); Mesh turns the honeycomb interstices into windows. The input is read live, so the picture sits about 20 px left of passthrough and the last ~20 px of each line repeat its last pixel. |
 | Switch 9 | Light / Ink | Light = additive R/G/B on black (the reference). Ink = the same field as cyan/magenta/yellow transparent dots on white paper, multiplying down to black. |
 | Switch 10 | Still / Flow | Flow streams the dots outward from the pupil (new pinpoints emerge from the pupil edge) and, through Twist, spins the field. The outermost ring fades out AS A WHOLE -- one level for the entire ring, walked by the flow phase -- over the ~2.4 s it takes to drift out through the rim, to black in Light and to paper in Ink. Straight spokes = pure outward flight. Still freezes where it is; at phase zero the rim is crisp. |
 | Switch 11 | Framed / Full Bleed | Framed = iris at 94 % of screen height on a black (or paper) backdrop. Full Bleed enlarges the iris past the screen corners and the pupil travel with it. The change is a dolly of equal ratios per frame, 16 frames end to end. |
@@ -58,7 +63,7 @@ position (Light, Still, Framed).
 
 Other presets: **Sunburst** (straight spokes, no split), **Misregister** (ink
 on paper, big split), **Vortex** (full bleed, flowing, tight twist),
-**Honeycomb** (Mesh, full bleed, white), **Phosphor** (Glow, flowing), **Triad** (the reference at Split 100 %). The v1.2 Split curve is
+**Honeycomb** (Mesh, full bleed, white), **Window** (the reference over incoming video, flowing, full bleed), **Triad** (the reference at Split 100 %). The v1.2 Split curve is
 stronger, so the older presets' slider values were remapped to keep the
 separation they had. All presets are hand-authored; recapture them from the
 hardware with `capture_preset.sh` once they have been dialled in.
@@ -186,8 +191,9 @@ only the outer band of large dots.
 
 Worked down the priority list from the bottom, as asked:
 
-- **Video halftone and video backdrop (priority 5) are dropped; switches 7
-  and 8 now carry Fill and Edge instead.** The video path was re-attempted in v0.7 and measured
+- **Video halftone (priority 5) is dropped; v1.4 brought the video BACKDROP
+  back on Switch 8 (replacing Glow), as a cheaper ground-replacement blend
+  with no delay line. Before v1.4 switches 7 and 8 carried Fill and Edge.** The video path was re-attempted in v0.7 and measured
   rather than estimated. The cheapest form that keeps both -- the incoming
   luma attenuating dot coverage for the halftone, and a lighten/darken key
   (not a blend, which would need a multiply per channel per pixel) for the
@@ -281,6 +287,29 @@ reproduces seed-for-seed.
 
 ## Build notes
 
+All six configurations meet timing (v1.4, 7551-7568 cells = 98 %, 20 block RAMs).
+**v1.4 must be built with router1**: the video input alone costs ~120 cells (the
+core's input video path had been pruned while Iris never read `data_in`), and at
+98 % router2 passes about one seed in five while router1 passes about half; its
+failures are router STALLS (a pass takes ~60 s, a stall never ends), so cap them:
+
+    NEXTPNR_ROUTER="--router router1" SEED=1 SEED_MAX_RETRIES=10 MAKE_TIMEOUT=240 \
+        ./build_programs.sh ron iris
+
+HD Dual and SD Dual were landed by hand from parallel seed sweeps (make with
+`SEED=<n> ROUTER="--router router1"` into `build/programs/ron/iris/rev_b`, then
+`vmprog_pack.py --no-sign`), because the builder walks seeds one stall at a time:
+
+| Configuration | Required | Achieved | Seed (router1) |
+| --- | --- | --- | --- |
+| HD Analog | 74.25 MHz | 77.12 MHz | 1 |
+| HD HDMI | 74.25 MHz | 79.03 MHz | 1 |
+| HD Dual | 74.25 MHz | 80.03 MHz | 17 (also 13, 15 pass) |
+| SD Analog | 27 MHz | 82.96 MHz | 3 |
+| SD HDMI | 27 MHz | 78.95 MHz | 1 |
+| SD Dual | 27 MHz | 78.02 MHz | 1 |
+
+v1.3 and earlier (router2, 95 %):
 All six configurations meet timing (v1.3, `SEED=9 ./build_programs.sh ron iris`;
 v1.2 and v1.3 changed only ROM / register-file contents, so every config
 reproduced its v1.1 seed and frequency exactly; HD Dual walks seeds 9-13,

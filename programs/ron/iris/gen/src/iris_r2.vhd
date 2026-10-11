@@ -7,7 +7,7 @@
             sw_flow <= registers_in(6)(3);
             sw_full <= registers_in(6)(4);
             sw_mesh <= registers_in(6)(0);
-            sw_glow <= registers_in(6)(1);
+            sw_vid  <= registers_in(6)(1);
         end if;
     end process p_relay;
 
