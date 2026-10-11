@@ -1,14 +1,16 @@
 # Candy Hills — side-scrolling striped candy landscape
 
-**v1.0.0 (2026-09-28): finalization build — timing-closed, awaiting a hardware check.**
+**v1.1.0 FINAL except presets: signed off by Ron on hardware, 2026-10-11 ("good to finalize this and move to ready").**
 Build: all 6 configs at the full 74.25 MHz clock with **router1**, **all
-seed 1**. HD Analog 77.9, HD HDMI 79.5, HD Dual 76.4, SD 76.7–78.7.
-**7469–7482 LC (97%)**: the design is at its ceiling, so remove logic before
-adding any. 24/32 EBR. vmprog 485947 B. Rebuild with
+seed 1**. HD Analog 82.5, HD HDMI 87.8, HD Dual 87.6, SD 82.7–84.0 MHz.
+6725–6759 LC (88%, down from 98%), 26/32 EBR. vmprog 468837 B. Rebuild with
 `NEXTPNR_ROUTER="--router router1" MAKE_TIMEOUT=600
 ./build_programs.sh ron candyhills`.
-The last flashed look was v0.18. The v0.19 crest-lit shading, the v0.19b contrast
-punch and everything below are new to hardware.
+v1.0.x was iterated on hardware through 2026-09-29 (bush shiver fixed by the
+integer world grid, defaults set). v1.1.0 confirmed on hardware, including
+S10 Video Sky through its new EBR-ring input path. Defaults come from Ron's
+notes; the 4 presets are hand-written, so capture real ones with
+./capture_preset.sh.
 
 ## What it does
 A Tiny-Wings-style landscape that scrolls forever and never repeats. Three
@@ -68,11 +70,14 @@ It streams with no frame buffer, and only the input sync drives the raster
     past both edges in hblank: a post-roll after avid falls and a pre-roll
     from x = −64. The old slope extrapolation lifted or buried bushes near
     screen-left.
+  - |dx| and |dy| are carry-free folds (dx about the slot centre at 63.5,
+    dy as a ones'-complement absolute value), computed in s5b from a
+    dedicated `anchor − py` subtract in s5a.
   - Slots are 128/64/32 px per layer.
   - Groups of 3 or 6 slots are placed by a 4-bit S-box permutation of the
     region index, so K6 density d lights exactly d of every 16 regions.
 - **Sky:** a per-line luma gradient (744 at the top, rising ~120–145 toward
-  the horizon, scaled by the measured height). K3 tints it.
+  the horizon, scaled by the measured height). K3 picks its hue.
 
 ## Controls
 - **K1 Scroll Speed** (default 3x): continuous, 1/8x–~12x (1–95 sub-steps per frame). It never stops.
@@ -98,6 +103,26 @@ It streams with no frame buffer, and only the input sync drives the raster
 - **Vsync:** per-field work runs only on the first vsync edge after active
   video (the `frame_act` guard). Analog serration would otherwise re-scroll
   and latch `act_h` near 0, which gives an all-stripes screen.
+- **Raw video stays shallow:** S10 Video Sky reads the input through a 16-deep
+  EBR ring (2 EBR, read pointer LATENCY−2 behind the write pointer, plus one
+  fabric register), not the FF sync pipe. Deep FF-carried raw video went green
+  and noisy on HD HDMI in three other programs.
+
+## Timing notes (v1.1, 98% → 88% LC, HD +5–9 MHz)
+- `no_rw_check` on the anchor-store RAMs and the Video Sky ring, both
+  collision-free by construction. The yosys log must show 0
+  `emulate_transparency`.
+- The fan-cosine ROM is addressed from a combinational copy of the winner
+  select (`fang_c`), so the EBR absorbs `r5_cos` and `r6_cos` is a fabric
+  register before the multiply. Before, the multiply hung off the RDATA pins.
+- Bush geometry moved a stage earlier with carry-free absolute values (above).
+- Stripe soft-edge compares in s9 (`r9_isB`/`r9_isA`), so s10 is flag muxing
+  plus one glow add.
+- Shading is one multiply, `y·(64 − shade) >> 6`, with `64 − shade` from s9.
+- One kept copy of the amplitude gain per layer multiplier.
+- Remaining critical paths are mostly routing: the s11 shade multiply and the
+  s10 colour mux. The next big lever, if room is ever needed, is moving the
+  48 hazed-colour registers (480 FFs + a 12:1 mux) into EBR (+1 stage).
 
 ## Watch on hardware
 - **Clipping on bright palettes:** Lemon/Berry reaches luma 983 in the lit band

@@ -1,4 +1,4 @@
--- candyhills.vhd  (v1.0 — "Candy Hills")
+-- candyhills.vhd  (v1.1 — "Candy Hills")
 --
 -- A real-time, side-scrolling 2D generative landscape: large, long, sweeping
 -- rolling candy hills filled with bold 45-degree stripes, dotted with round
@@ -326,7 +326,12 @@ architecture candyhills of program_top is
     -- Datapath-local copies of per-frame params, re-registered every clock so
     -- placement keeps them next to the multipliers (avoids long routes from the
     -- config/SPI region into the pixel pipeline).
-    signal d_gainA : unsigned(6 downto 0) := to_unsigned(70, 7);
+    -- One kept copy of the amplitude gain per layer multiplier (a single
+    -- shared register fanned out to all three and routed across the die).
+    type t_l3g7 is array(0 to 2) of unsigned(6 downto 0);
+    signal d_gainA : t_l3g7 := (others => to_unsigned(70, 7));
+    attribute keep : boolean;
+    attribute keep of d_gainA : signal is true;
     signal d_F     : unsigned(8 downto 0) := to_unsigned(32, 9);
     signal d_fane  : unsigned(6 downto 0) := to_unsigned(44, 7);
 
@@ -371,7 +376,8 @@ architecture candyhills of program_top is
     signal r5_cl   : std_logic := '0';
     signal r5_sx   : unsigned(13 downto 0) := (others => '0');  -- world-x of winner
     signal r5_py   : unsigned(10 downto 0) := (others => '0');
-    signal r5_fang : std_logic_vector(9 downto 0) := (others => '0');  -- winner's crest angle
+    signal fang_c  : std_logic_vector(9 downto 0);                     -- winner's crest angle (comb)
+    signal r5_cos  : signed(9 downto 0) := (others => '0');            -- absorbed into the EBR
     signal r5_glow : unsigned(6 downto 0) := (others => '0');   -- crest lift (120 in lit band -> 0)
     signal r5_shade : unsigned(5 downto 0) := (others => '0');  -- shade 0..40 (-> 37.5% bright)
     -- s6: base frequency (freq<<layer) + the crest-fan multiply.
@@ -426,14 +432,13 @@ architecture candyhills of program_top is
     signal r9_layer : integer range 0 to 2 := 0;
     signal r9_sky  : std_logic := '0';
     signal r9_cl   : std_logic := '0';
-    signal r9_ssin : signed(9 downto 0) := (others => '0');
-    signal r9_thr  : unsigned(7 downto 0) := to_unsigned(16, 8);
+    signal r9_isB, r9_isA : std_logic := '0';   -- stripe colour B / A (else mid blend)
     signal r9_glow : unsigned(6 downto 0) := (others => '0');
-    signal r9_shade : unsigned(5 downto 0) := (others => '0');
+    signal r9_k    : unsigned(6 downto 0) := to_unsigned(64, 7);   -- 64 - shade
     -- s10: assembled base colour (+ sky flag for the video-sky option)
     signal r10_y, r10_u, r10_v : unsigned(9 downto 0) := C_MID;
     signal r10_sky : std_logic := '0';
-    signal r10_shade : unsigned(5 downto 0) := (others => '0');
+    signal r10_k   : unsigned(6 downto 0) := to_unsigned(64, 7);   -- 64 - shade (stripes)
 
     -- BUSH sub-pipeline (parallel to the colour path; overrides colour at s10).
     --   LINE-LOCAL state only (the per-slot crest anchor is re-derived every
@@ -456,16 +461,16 @@ architecture candyhills of program_top is
     signal anc_we    : std_logic_vector(2 downto 0);
     signal anc_waddr : t_l3a8;
     signal anc_raddr : t_l3a8;
-    signal anc_rdata : t_l3v16;
-    signal r5_anc    : t_l3s14 := (others => (others => '0'));   -- registered anchor (s5)
-    signal r5_sxL   : t_l3u14 := (others => (others => '0'));    -- world-x per layer
-    signal r5_ddL   : t_l3s14 := (others => (others => '0'));    -- py - crest per layer
-    signal r5_bpl   : std_logic_vector(2 downto 0) := "000";     -- slot is in a placed group
-    signal r6_adx   : t_l3u6 := (others => (others => '0'));     -- |dx| per layer
-    signal r6_dyi   : t_l3u6 := (others => (others => '0'));     -- dy = crest-py per layer
-    signal r6_bok   : std_logic_vector(2 downto 0) := "000";     -- placed + above crest
-    signal r6b_d2   : t_l3u13 := (others => (others => '0'));    -- dx^2 + dy^2 (own stage)
-    signal r6b_bok  : std_logic_vector(2 downto 0) := "000";
+    signal anc_rdata : t_l3v16 := (others => (others => '0'));  -- init: lets no_rw_check apply
+    type t_l3s15 is array(0 to 2) of signed(14 downto 0);
+    signal r4_anc    : t_l3s13 := (others => (others => '0'));   -- registered anchor (s4)
+    signal r5a_dya   : t_l3s15 := (others => (others => '0'));   -- anchor - py (s5a)
+    signal r5_adx   : t_l3u6 := (others => (others => '0'));     -- |dx| per layer (s5b)
+    signal r5_dyi   : t_l3u6 := (others => (others => '0'));     -- |anchor - py| clamped (s5b)
+    signal r5_bok   : std_logic_vector(2 downto 0) := "000";     -- placed + above crest
+    signal r6_d2    : t_l3u13 := (others => (others => '0'));    -- dx^2 + dy^2 (s6)
+    signal r6_bok   : std_logic_vector(2 downto 0) := "000";
+    signal r6b_bcode : t_bcode := (others => "00");              -- (s6b)
     signal r7_bcode, r8_bcode, r9_bcode : t_bcode := (others => "00");
 
     --------------------------------------------------------------------------
@@ -473,6 +478,18 @@ architecture candyhills of program_top is
     --------------------------------------------------------------------------
     type t_pipe is array (natural range <>) of t_video_stream_yuv444_30b;
     signal pipe : t_pipe(0 to LATENCY - 1);
+    -- VIDEO SKY delay: a 16-deep ring in EBR (2 x 256x16) instead of reading
+    -- y/u/v from the FF pipe (which kept 14 x 30 = 420 FFs alive and carried
+    -- raw video deep through the program).  Read pointer runs LATENCY-2
+    -- behind the write pointer; + EBR output reg + one fabric reg = LATENCY.
+    type t_vs_mem is array(0 to 255) of std_logic_vector(31 downto 0);
+    signal vs_mem : t_vs_mem := (others => (others => '0'));
+    attribute no_rw_check : boolean;
+    attribute no_rw_check of vs_mem : signal is true;   -- rp /= wp always
+    signal vs_wp  : unsigned(3 downto 0) := (others => '0');
+    signal vs_rp  : unsigned(3 downto 0) := to_unsigned((16 - (LATENCY - 2)) mod 16, 4);
+    signal vs_rd  : std_logic_vector(31 downto 0) := (others => '0');
+    signal vs_rr  : std_logic_vector(31 downto 0) := (others => '0');
     signal s_io : t_video_stream_yuv444_30b;
 
 begin
@@ -495,23 +512,48 @@ begin
         port map (angle_in => curve_ang, sin_out => curve_sin, cos_out => open);
 
     -- Crest-fan cosine: shared single LUT on the winner's primary angle
-    -- (r5_fang, registered at s5b; output registered into r6_cos at s6 —
-    -- BRAM read port registered before the s6b multiply).
+    -- (fang_c below; EBR output = r5_cos at s5b, re-registered in fabric as
+    -- r6_cos at s6, before the s6b multiply).
     u_fancos : entity work.sin_cos_full_lut_10x10
-        port map (angle_in => r5_fang, sin_out => open, cos_out => fan_cos);
+        port map (angle_in => fang_c, sin_out => open, cos_out => fan_cos);
+    -- Same priority as the s5b winner select, straight off the s5a registers:
+    -- the ROM's EBR samples this address at the s5b edge (r5_cos = its
+    -- absorbed output register) and r6_cos is then a true fabric register,
+    -- so the fan multiply no longer hangs off the EBR RDATA pins.
+    fang_c <= r5a_ang(0) when r5a_dd(0)(13) = '0' else
+              r5a_ang(1) when s_lay3 = '1' and r5a_dd(1)(13) = '0' else
+              r5a_ang(2) when r5a_dd(2)(13) = '0' else
+              r5a_ang(0);
+
+    --------------------------------------------------------------------------
+    -- Video Sky delay ring (see vs_mem).
+    --------------------------------------------------------------------------
+    p_vsring : process(clk)
+    begin
+        if rising_edge(clk) then
+            vs_mem(to_integer("0000" & vs_wp)) <= data_in.y & data_in.u & data_in.v & "00";
+            vs_rd <= vs_mem(to_integer("0000" & vs_rp));
+            vs_rr <= vs_rd;
+            vs_wp <= vs_wp + 1;
+            vs_rp <= vs_rp + 1;
+        end if;
+    end process p_vsring;
 
     --------------------------------------------------------------------------
     -- Bush anchor store: per layer, write at s4 (slot centre), read addressed
-    -- from s3 so the data lines up with s4 and is re-registered into r5_anc.
+    -- from s2 so the data lines up with s3 and is re-registered into r4_anc.
     --------------------------------------------------------------------------
     gen_anc : for L in 0 to 2 generate
         signal mem : t_anc_mem := (others => (others => '0'));
+        -- Collision-free by scan-parity banking: skip yosys's read-during-write
+        -- emulation (a delayed write port + bypass mux per RAM).
+        attribute no_rw_check of mem : signal is true;
     begin
         anc_we(L)    <= '1' when r4_sx(L)(BSLOTLOG - 1 - L downto 0)
                                  = to_unsigned(2 ** (BSLOTLOG - 1 - L), BSLOTLOG - L)
                         else '0';
         anc_waddr(L) <= r4_par & r4_sx(L)(BSLOTLOG + 6 - L downto BSLOTLOG - L);
-        anc_raddr(L) <= (not r3_par) & r3_sx(L)(BSLOTLOG + 6 - L downto BSLOTLOG - L);
+        anc_raddr(L) <= (not r2_par) & r2_sx(L)(BSLOTLOG + 6 - L downto BSLOTLOG - L);
         p_anc : process(clk)
         begin
             if rising_edge(clk) then
@@ -788,15 +830,11 @@ begin
         variable v_a14  : unsigned(13 downto 0);    -- x'*Feff + (diagonal + curve)<<4
         variable v_thu  : unsigned(13 downto 0);    -- soft-edge threshold raw
         variable v_e    : unsigned(13 downto 0);    -- depth past the lit band
-        variable v_shp  : unsigned(15 downto 0);    -- y * shade product
+        variable v_shp  : unsigned(16 downto 0);    -- y * (64 - shade) product
+        variable v_tri  : signed(9 downto 0);       -- stripe triangle wave
         variable v_y    : signed(11 downto 0);
-        variable v_dx   : signed(8 downto 0);       -- bush: px within slot - centre
-        variable v_axu  : unsigned(8 downto 0);     -- bush: |dx| (unclamped)
-        variable v_adx  : integer range 0 to 63;    -- bush: |dx| (clamped)
-        variable v_dya  : signed(14 downto 0);      -- bush: anchor - py (raw)
-        variable v_dyu  : unsigned(14 downto 0);    -- bush: |anchor - py| (unclamped)
-        variable v_dyi  : integer range 0 to 63;    -- bush: |anchor - py| (clamped)
-        variable v_dyy  : signed(14 downto 0);      -- bush: crest - py (per-column clip)
+        variable v_lo6  : unsigned(5 downto 0);     -- bush: low slot bits
+        variable v_dyx  : unsigned(14 downto 0);    -- bush: ones'-complement |anchor - py|
         variable v_rg   : unsigned(5 downto 0);     -- bush: 8-slot region index
         variable v_ix   : unsigned(3 downto 0);     -- bush: S-box input
         variable v_len  : integer range 0 to 7;     -- bush: group length (3 or 6)
@@ -808,7 +846,7 @@ begin
             for i in 1 to LATENCY - 1 loop pipe(i) <= pipe(i - 1); end loop;
 
             -- local copies of per-frame params (short routes to the multipliers)
-            d_gainA <= s_gainA; d_F <= s_F; d_fane <= s_fane;
+            d_gainA <= (others => s_gainA); d_F <= s_F; d_fane <= s_fane;
 
             -----------------------------------------------------------------
             -- s1: capture both crest sines (+ the primary's cosine, for the
@@ -835,7 +873,7 @@ begin
             -----------------------------------------------------------------
             for l in 0 to 2 loop
                 v_dr := resize(shift_right(r2_disp(l), 2), 9);          -- +/-191
-                r3_scl(l) <= resize(shift_right(v_dr * signed('0' & d_gainA), 5), 13);
+                r3_scl(l) <= resize(shift_right(v_dr * signed('0' & d_gainA(l)), 5), 13);
             end loop;
             r3_par <= r2_par; r3_py <= r2_py; r3_sx <= r2_sx; r3_ang <= r2_ang;
 
@@ -853,7 +891,7 @@ begin
             -- slot's centre, from the previous scan) before any arithmetic.
             -----------------------------------------------------------------
             for L in 0 to 2 loop
-                r5_anc(L) <= resize(signed(anc_rdata(L)(12 downto 0)), 14);
+                r4_anc(L) <= signed(anc_rdata(L)(12 downto 0));
             end loop;
 
             -----------------------------------------------------------------
@@ -864,6 +902,10 @@ begin
                 r5a_dd(l) <= resize(v_pys, 14) - resize(r4_crest(l), 14);
             end loop;
             r5a_sx <= r4_sx; r5a_py <= r4_py; r5a_ang <= r4_ang;
+            -- BUSH dy = anchor - py: its own subtract, parallel to the dd ones.
+            for L in 0 to 2 loop
+                r5a_dya(L) <= resize(r4_anc(L), 15) - signed(resize(r4_py, 15));
+            end loop;
             -- BUSH group hash (per layer): region = 8 slots.  S-box of the low
             -- 4 region bits xor the high bits (+ a per-layer constant): a
             -- permutation within every 16 regions -> density d = exactly d/16.
@@ -896,7 +938,7 @@ begin
             if v_dd < to_signed(THICK, 14) then r5_cl <= '1'; else r5_cl <= '0'; end if;
             r5_sx  <= r5a_sx(v_win);
             r5_py  <= r5a_py;
-            r5_fang <= r5a_ang(v_win);
+            r5_cos  <= fan_cos;
             -- CREST-LIT SHADING (follows the crest curve, peaks and valleys
             -- alike): the top ~15% of frame height below the crest is fully
             -- lit (+120 luma); past the band the lift fades out over 120 px
@@ -915,27 +957,37 @@ begin
                 if v_e >= to_unsigned(640, 14) then r5_shade <= to_unsigned(40, 6);
                 else r5_shade <= v_e(9 downto 4); end if;
             end if;
-            -- BUSH: capture ALL layers' world-x and (py - crest) so each layer's
-            -- bushes ride its own crest (dy = crest - py = -ddL, per column).
-            r5_sxL <= r5a_sx;
-            r5_ddL <= r5a_dd;
-            -- BUSH placement: region lit by density, first 3 or 6 slots of it;
-            -- the mid layer's bushes vanish with the layer (S7 off).
+            -- BUSH geometry (per layer L): slot = 128>>L, radius 48>>L.  Both
+            -- distances are CARRY-FREE folds, so this stage is muxes only:
+            --   |dx| about the slot centre (between pixels 63/64 >> L): the low
+            --        bits, inverted when the centre bit is 0;
+            --   |dy| = ones'-complement |anchor - py| (anchor - 0.5 centre),
+            --        clamped to 63.
+            -- The circle is a TRUE circle about the exact crest under its centre
+            -- (anchor store), clipped per column at the crest (dd < 0 = above).
+            -- Placement: region lit by density, first 3 or 6 slots of it; the
+            -- mid layer's bushes vanish with the layer (S7 off).
             for L in 0 to 2 loop
+                v_lo6 := resize(r5a_sx(L)(BSLOTLOG - 2 - L downto 0), 6);
+                if r5a_sx(L)(BSLOTLOG - 1 - L) = '1' then r5_adx(L) <= v_lo6;
+                else r5_adx(L) <= v_lo6 xor to_unsigned(2 ** (BSLOTLOG - 1 - L) - 1, 6); end if;
+                v_dyx := unsigned(r5a_dya(L)) xor (14 downto 0 => r5a_dya(L)(14));
+                if v_dyx(14 downto 6) /= 0 then r5_dyi(L) <= to_unsigned(63, 6);
+                else                            r5_dyi(L) <= v_dyx(5 downto 0); end if;
                 v_sis := r5a_sx(L)(BSLOTLOG + 2 - L downto BSLOTLOG - L);
                 if r5a_bl(L) = '1' then v_len := 6; else v_len := 3; end if;
                 if r5a_bh(L) < s_bden and to_integer(v_sis) < v_len
-                   and (L /= 1 or s_lay3 = '1') then
-                    r5_bpl(L) <= '1';
+                   and (L /= 1 or s_lay3 = '1') and r5a_dd(L)(13) = '1' then
+                    r5_bok(L) <= '1';
                 else
-                    r5_bpl(L) <= '0';
+                    r5_bok(L) <= '0';
                 end if;
             end loop;
 
             -----------------------------------------------------------------
             -- s6: CREST FAN operand.  Feff = F<<layer (per-layer width).
-            --     Register the shared fan-cosine LUT output (addressed by the
-            --     winner's angle from s5b).  The fan WARPS world-x before the
+            --     Re-register the shared fan-cosine EBR output (r5_cos,
+            --     addressed by the winner's angle).  The fan WARPS world-x before the
             --     stripe multiply: x' = x + cos(winner crest angle)*fan, whose
             --     derivative 1 - k*sinA follows hill height — stripes widen over
             --     tall hills, tighten in valleys, and (being a warp) the effect
@@ -944,42 +996,16 @@ begin
             --     so the stripes stay glued to the terrain.
             -----------------------------------------------------------------
             r6_freqeff <= shift_left(resize(d_F, 11), r5_layer);
-            r6_cos  <= fan_cos;
+            r6_cos  <= r5_cos;
             r6_glow <= r5_glow; r6_shade <= r5_shade;
             r6_sx <= r5_sx; r6_py <= r5_py;
             r6_layer <= r5_layer; r6_sky <= r5_sky; r6_cl <= r5_cl;
 
-            -----------------------------------------------------------------
-            -- s6 (bush geometry, per layer L): slot = 128>>L, centre 64>>L, radius
-            --   48>>L.  dy is measured from the per-slot ANCHOR (the exact crest
-            --   under the dome centre, from the anchor store) -> a TRUE circle at
-            --   any crest slope, right up to both screen edges;
-            --   the per-column crest test below only CLIPS it at the crest.
-            --   Placement (groups, density, S7) was resolved at s5b.
-            -----------------------------------------------------------------
+            -- s6 (bush): squared radial distance dx^2+dy^2 in its own stage.
             for L in 0 to 2 loop
-                -- dx = distance from the slot centre (centre = slot/2).
-                v_dx := signed('0' & r5_sxL(L)(BSLOTLOG - 1 - L downto 0))
-                        - to_signed(2 ** (BSLOTLOG - 1 - L), 9);
-                if v_dx(8) = '1' then v_axu := unsigned(-v_dx);
-                else                  v_axu := unsigned(v_dx); end if;
-                if v_axu > 63 then v_adx := 63;                              -- incl. dx = -64
-                else               v_adx := to_integer(v_axu(5 downto 0)); end if;
-                r6_adx(L) <= to_unsigned(v_adx, 6);
-                -- dy = anchor - py (signed: the circle continues BELOW the anchor
-                -- until the per-column crest clip, so downslopes show a part-buried
-                -- round rim instead of a sheared base).
-                v_dya := resize(r5_anc(L), 15) - signed(resize(r5_py, 15));
-                if v_dya(14) = '1' then v_dyu := unsigned(-v_dya);
-                else                    v_dyu := unsigned(v_dya); end if;
-                if v_dyu > 63 then v_dyi := 63;
-                else               v_dyi := to_integer(v_dyu(5 downto 0)); end if;
-                r6_dyi(L) <= to_unsigned(v_dyi, 6);
-                -- per-column crest clip: draw only strictly above the crest.
-                v_dyy := resize(-r5_ddL(L), 15);
-                -- draw only above the crest (dy>=1) and where placed (stateless).
-                if v_dyy >= to_signed(1, 15) then r6_bok(L) <= r5_bpl(L);
-                else                              r6_bok(L) <= '0'; end if;
+                r6_d2(L)  <= to_unsigned(to_integer(r5_adx(L)) * to_integer(r5_adx(L))
+                                       + to_integer(r5_dyi(L)) * to_integer(r5_dyi(L)), 13);
+                r6_bok(L) <= r5_bok(L);
             end loop;
 
             -----------------------------------------------------------------
@@ -990,12 +1016,15 @@ begin
             r6b_glow <= r6_glow; r6b_shade <= r6_shade;
             r6b_py <= r6_py;
             r6b_layer <= r6_layer; r6b_sky <= r6_sky; r6b_cl <= r6_cl;
-            -- s6b (bush): squared radial distance dx^2+dy^2 in its OWN stage (the
-            --   multiplies are the tallest logic) -> compared in s7.
+            -- s6b (bush code): inside inner radius -> fill; annulus to outer ->
+            --   even dark outline; else none.
             for L in 0 to 2 loop
-                r6b_d2(L)  <= to_unsigned(to_integer(r6_adx(L)) * to_integer(r6_adx(L))
-                                        + to_integer(r6_dyi(L)) * to_integer(r6_dyi(L)), 13);
-                r6b_bok(L) <= r6_bok(L);
+                if r6_bok(L) = '1' and to_integer(r6_d2(L)) <= BR2(L) then
+                    if to_integer(r6_d2(L)) <= BRIN2(L) then r6b_bcode(L) <= "01";
+                    else                                     r6b_bcode(L) <= "10"; end if;
+                else
+                    r6b_bcode(L) <= "00";
+                end if;
             end loop;
 
             -----------------------------------------------------------------
@@ -1005,16 +1034,7 @@ begin
             r7_feff <= r6b_feff;
             r7_py <= r6b_py; r7_glow <= r6b_glow; r7_shade <= r6b_shade;
             r7_layer <= r6b_layer; r7_sky <= r6b_sky; r7_cl <= r6b_cl;
-            -- s7 (bush code): inside inner radius -> fill; annulus to outer -> even
-            --   dark outline; else none.
-            for L in 0 to 2 loop
-                if r6b_bok(L) = '1' and to_integer(r6b_d2(L)) <= BR2(L) then
-                    if to_integer(r6b_d2(L)) <= BRIN2(L) then r7_bcode(L) <= "01";
-                    else                                      r7_bcode(L) <= "10"; end if;
-                else
-                    r7_bcode(L) <= "00";
-                end if;
-            end loop;
+            r7_bcode <= r6b_bcode;
 
             -----------------------------------------------------------------
             -- s7b: stripe base product x'*Feff mod 2^14 (only bits 13:4 = the
@@ -1049,9 +1069,12 @@ begin
             -----------------------------------------------------------------
             -- s9: stripe wave = triangle of the angle (sign picks colour A/B).
             -----------------------------------------------------------------
-            r9_ssin <= tri10(unsigned(r8_ang));
-            r9_thr  <= r8_thr;
-            r9_glow <= r8_glow; r9_shade <= r8_shade;
+            -- Both soft-edge compares here (the triangle is a fold + bit flip),
+            -- so s10 is flag-driven muxing plus the one glow add.
+            v_tri := tri10(unsigned(r8_ang));
+            if v_tri > signed(resize(r8_thr, 10)) then r9_isB <= '1'; else r9_isB <= '0'; end if;
+            if v_tri < -signed(resize(r8_thr, 10)) then r9_isA <= '1'; else r9_isA <= '0'; end if;
+            r9_glow <= r8_glow; r9_k <= to_unsigned(64, 7) - resize(r8_shade, 7);
             r9_layer <= r8_layer; r9_sky <= r8_sky; r9_cl <= r8_cl;
             r9_bcode <= r8_bcode;
 
@@ -1070,7 +1093,7 @@ begin
             else
                 v_bsel := "00";
             end if;
-            r10_shade <= (others => '0');       -- only stripe pixels shade
+            r10_k <= to_unsigned(64, 7);        -- only stripe pixels shade
             if pipe(LATENCY - 2).avid = '0' then
                 -- BLANKING GATE: neutral black outside active video (aligned one
                 -- stage before the output register; shade 0 passes y=64 through).
@@ -1085,32 +1108,32 @@ begin
                 r10_y <= sky_ly; r10_u <= sky_u; r10_v <= sky_v; r10_sky <= '1';
             elsif r9_cl = '1' and s_creston = '1' then
                 r10_y <= gC_y(r9_layer); r10_u <= gC_u(r9_layer); r10_v <= gC_v(r9_layer); r10_sky <= '0';
-            elsif r9_ssin > signed(resize(r9_thr, 10)) then
+            elsif r9_isB = '1' then
                 r10_y <= gB_y(r9_layer) + resize(r9_glow, 10);
                 r10_u <= gB_u(r9_layer); r10_v <= gB_v(r9_layer); r10_sky <= '0';
-                r10_shade <= r9_shade;
-            elsif r9_ssin < -signed(resize(r9_thr, 10)) then
+                r10_k <= r9_k;
+            elsif r9_isA = '1' then
                 r10_y <= gA_y(r9_layer) + resize(r9_glow, 10);
                 r10_u <= gA_u(r9_layer); r10_v <= gA_v(r9_layer); r10_sky <= '0';
-                r10_shade <= r9_shade;
+                r10_k <= r9_k;
             else
                 r10_y <= gM_y(r9_layer) + resize(r9_glow, 10);
                 r10_u <= gM_u(r9_layer); r10_v <= gM_v(r9_layer); r10_sky <= '0';
-                r10_shade <= r9_shade;
+                r10_k <= r9_k;
             end if;
 
             -----------------------------------------------------------------
-            -- s11: crest-lit shading: y' = y - y*shade/64 (shade <= 40 ->
-            --      floor at 37.5% brightness; no underflow, no clamp needed).
+            -- s11: crest-lit shading: y' = y*(64 - shade)/64 — ONE multiply, no
+            --      trailing subtract (shade <= 40 -> floor at 37.5% brightness).
             --      In Video Sky mode, pass the input through on the sky.
             -----------------------------------------------------------------
             if r10_sky = '1' and s_vidsky = '1' then
-                s_io.y <= pipe(LATENCY - 1).y;
-                s_io.u <= pipe(LATENCY - 1).u;
-                s_io.v <= pipe(LATENCY - 1).v;
+                s_io.y <= vs_rr(31 downto 22);
+                s_io.u <= vs_rr(21 downto 12);
+                s_io.v <= vs_rr(11 downto 2);
             else
-                v_shp := r10_y * r10_shade;
-                s_io.y <= std_logic_vector(r10_y - resize(v_shp(15 downto 6), 10));
+                v_shp := r10_y * r10_k;
+                s_io.y <= std_logic_vector(v_shp(15 downto 6));
                 s_io.u <= std_logic_vector(r10_u);
                 s_io.v <= std_logic_vector(r10_v);
             end if;
