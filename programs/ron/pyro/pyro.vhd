@@ -12,9 +12,39 @@
 --   Palm   -- a few thick comet arms (forced spark heads)
 -- On top of the fireworks chassis: night-sky gradient + hashed starfield
 -- + detonation sky-flash, water reflection below a 78% horizon (per-line
--- shimmer wobble), hand-fired shells on the slider, FINALE barrage mode,
+-- shimmer wobble), BLAST on the slider, FINALE barrage mode,
 -- and FREEZE + time scrub (memoryless replot = age is scrubbable, so
 -- bursts collapse back into rising shells).
+--
+-- v0.10 (2026-10-11): SHARP HEADS at 1080p -- every burning spark (plus
+-- rockets and burst cores) also draws a crisp native-resolution head (3x3
+-- plus, bold = 5x5 diamond) over the soft canvas glow, positioned to a
+-- quarter cell (1.5 px). The engine writes a per-frame head table (2 EBR);
+-- a per-line renderer stamps the next line's heads into a two-bank line
+-- buffer (1 EBR each; the displayed bank is cleared behind the beam).
+-- EBR came from: canvas 180 -> 172 rows (2), physics ROM -> computed on the
+-- shared multiplier (1), nebula tile at 16 px texels (1).
+-- v0.9 (2026-10-10): ONE colour per shell for its whole life (no two-tone
+-- split, no white-hot start, no ember recolour); a shell's colour region
+-- HOLDS through idle + the next ascent (embers no longer recolour when the
+-- slot relaunches), rockets get a white launch column, and overlaps split
+-- at "deeper inside whose ball" instead of lowest-slot-wins.
+-- v0.8 (2026-10-10): P12 = BLAST (live burst scale, glided; top eighth
+-- adds bold heads + full flash) -- swirl dropped (fireworks don't swirl);
+-- K2 = spark count only (the slider owns size: no knob-times-slider).
+-- v0.7 (2026-10-10): hand-fire removed; FREEZE scrub is
+-- relative to the slider position at the freeze edge; K1 minimum = the
+-- slowest rate (no silence); palette Indigo/Violet -> Cyan/Purple (the
+-- wheel had a 120 deg cyan hole and a 78 deg magenta hole); K4 reads a
+-- labelled-default INDEX (firmware loads 0..4) as that bank.
+--
+-- v0.6 (2026-10-10): decay sweep writes back at the 2-clock BRAM tap (the
+-- 1-clock tap slid the canvas one cell right per frame = the "trails always
+-- go right" HW report) and sweeps only the displayed rows (NTSC never
+-- finished a full sweep, starving the engine); saw-active per-field tick
+-- (serrated analog vsync); generated avid + avid blanking gate, black 64;
+-- slot lifecycle serialized into the engine FSM (one copy, was 4 in the
+-- vsync cone); no_rw_check canvas; one-adder plus-head addressing.
 --
 -- LC/congestion cuts (85% ceiling, all pre-planned): crackle micro-bursts,
 -- flat-ring orientation, explicit full-throw flick detect (the release
@@ -37,14 +67,15 @@
 -- products go through ONE shared 8x10 multiplier (operand@k -> product@k+2).
 --
 -- COLOR: the 2-bit canvas stores only brightness, so chroma is attributed at
--- readout: each pixel takes the palette color of the NEAREST shell center
--- (octagonal distance, 5 candidates, pipelined argmin) -- zero extra BRAM.
--- Rockets show gold during ascent; the slot switches to its shell color at
--- burst. Dead shells keep claiming their embers until the slot relaunches.
+-- readout: each pixel takes the ONE colour of the shell whose ball it sits
+-- deepest inside (octagonal distance minus radius, 4-way argmin) -- zero
+-- extra BRAM. A shell's colour region holds from its burst until the slot
+-- bursts again, so embers keep their colour through the relaunch; rising
+-- rockets draw white via a per-slot launch-column test.
 --
 -- Control map (PYRO):
---   K1 (reg0) LAUNCH  rate; <32 = manual-only silence
---   K2 (reg1) SIZE    burst radius + sparks per shell
+--   K1 (reg0) LAUNCH  rate (min = one shell per slot every ~9 s)
+--   K2 (reg1) SPARKS  sparks per shell (10..60)
 --   K3 (reg2) GRAVITY heavy fast-falling .. floaty near-zero-g
 --   K4 (reg3) HUE     Gold/Primaries/Pastel/Red-Wht-Blue/Random banks
 --   K5 (reg4) TAIL    trail persistence (decay threshold)
@@ -54,10 +85,12 @@
 --   S9 (reg6.2) WATER  reflection below the horizon
 --   S10(reg6.3) FINALE barrage choreography (4x rate, tight salvos)
 --   S11(reg6.4) FREEZE physics halt (slider becomes time scrub)
---   P12(reg7)   FIRE   hand-fly a shell / detonate on release / scrub
+--   P12(reg7)   BLAST  live burst scale (8..102 cells), every shell at
+--                      once; top eighth = bold spark heads + full sky
+--                      flash (the climax); in FREEZE: time scrub
 --
--- Inherited fireworks passes: two-tone shells (inner/outer color split at
--- half the shell radius), bright persistent core, crisp-spark decay (bright
+-- Inherited fireworks passes (two-tone shells removed in v0.9): bright
+-- persistent core, crisp-spark decay (bright
 -- cells collapse every sweep; only val-1 embers linger on the dithered
 -- path), cell/phase COUNTER rasterization (4-px cells on <=1280 rasters,
 -- 6-px on 1080-class = the FULL 320x180 canvas), and RADIUS-WEIGHTED color
@@ -85,14 +118,19 @@ use work.video_stream_pkg.all;
 architecture pyro of program_top is
 
     constant C_CW      : integer := 320;   -- canvas width  (cells)
-    constant C_CH      : integer := 180;   -- canvas height (cells)
+    constant C_CH      : integer := 172;   -- canvas height (cells)
+    -- screen cell rows (1080p = 180): rows 172..179 have no canvas behind
+    -- them -- with WATER on they show the reflection anyway (it mirrors rows
+    -- above the horizon); with it off they show sky without fireworks.
+    -- The 2 EBRs this frees feed the sharp-head overlay.
+    constant C_SH      : integer := 180;
     constant C_USHIFT  : integer := 2;     -- 4 screen px per cell
     constant C_VW      : integer := 1280;  -- canvas viewport width  (px)
     constant C_VH      : integer := 720;   -- canvas viewport height (px)
     constant C_LATENCY : integer := 7;     -- input->output register stages
-    constant C_CELLS   : integer := C_CW * C_CH;  -- 57600 (29 EBRs at 2 bit)
+    constant C_CELLS   : integer := C_CW * C_CH;  -- 55040 (27 EBRs at 2 bit)
 
-    constant C_GROUND  : integer := 176;   -- launch pad row (cells)
+    constant C_GROUND  : integer := 168;   -- launch pad row (cells)
 
     -- canvas address = cy*320 + cx (320 = 256+64 -> two shifts + an add)
     function f_addr(cy : unsigned(7 downto 0); cx : unsigned(8 downto 0)) return unsigned is
@@ -100,6 +138,16 @@ architecture pyro of program_top is
     begin
         v := resize(cy, 16);
         return shift_left(v, 8) + shift_left(v, 6) + resize(cx, 16);
+    end function;
+
+    -- quarter-cell coordinate -> 1080p pixel (6 px per cell = x1.5). No
+    -- clamp: x stays in range (canvas range check), and a slightly negative
+    -- y wraps to 2045+, which never matches a line
+    function f_px(v : signed(12 downto 0)) return unsigned is
+        variable t : signed(12 downto 0);
+    begin
+        t := v + shift_right(v, 1);
+        return unsigned(t(10 downto 0));
     end function;
 
     -- per-particle hash: theta = h(9:0) walks the circle in ~6.3deg steps,
@@ -145,28 +193,15 @@ architecture pyro of program_top is
         end case;
     end function;
 
-    -- ==== physics ROM: ease (expansion) + droop (gravity), 128 x 16 ====
-    -- Curves are stored HALVED (0..126) so every product fits the shared
-    -- 8x10 multiplier (spiroscope-size; the first cut's 10x11 missed timing);
-    -- consumers shift products >>7 instead of >>8.
-    type t_tbl is array(0 to 127) of unsigned(15 downto 0);
-    function f_tbl_init return t_tbl is
-        variable v    : t_tbl;
-        variable e, d : integer;
-        variable s    : integer;
-    begin
-        for i in 0 to 127 loop
-            s := 127 - i;
-            e := 127 - ((s * s) / 128) - 1;    -- 0 .. 126, decelerating rise
-            if e < 0 then e := 0; end if;
-            d := (i * i) / 128;                -- 0 .. 126, accelerating fall
-            v(i) := to_unsigned(d, 8) & to_unsigned(e, 8);
-        end loop;
-        return v;
-    end function;
-    signal s_tbl      : t_tbl := f_tbl_init;
-    signal s_tbl_addr : unsigned(6 downto 0) := (others => '0');
-    signal s_tbl_q    : unsigned(15 downto 0) := (others => '0');
+    -- ==== physics curves: ease (expansion) + droop (gravity) ====
+    --   ease[i]  = 126 - floor((127-i)^2 / 128)   (decelerating rise)
+    --   droop[i] = floor(i^2 / 128)               (accelerating fall)
+    -- both 0..126, computed per shell pass on the shared multiplier
+    -- (EST_T*) -- this was a 128x16 ROM; its EBR went to the head overlay.
+    -- Values are exactly the old table (consumers shift products >>7).
+    signal s_tic, s_tip : unsigned(6 downto 0) := (others => '0'); -- index now / prev
+    signal s_eC, s_eP   : unsigned(6 downto 0) := (others => '0'); -- ease
+    signal s_dC, s_dP   : unsigned(6 downto 0) := (others => '0'); -- droop
 
     -- ==== Timing / pixel counters (c64 pattern) ====
     signal s_prev_hsync_n : std_logic := '1';
@@ -177,6 +212,11 @@ architecture pyro of program_top is
     signal s_frame_height : unsigned(11 downto 0) := to_unsigned(720, 12);
     signal s_line_active  : std_logic := '0';
     signal s_frame_cnt    : unsigned(7 downto 0) := (others => '0');
+    -- once-per-field tick: analog vsync serrates into several edges per
+    -- field, so only the first edge after active video counts (every
+    -- per-frame increment -- ages, frame counter, sky flash -- uses this)
+    signal s_saw   : std_logic := '0';
+    signal s_ftick : std_logic := '0';
 
     -- Cell/phase COUNTERS replace all divide/shift rasterization: cells are
     -- 4 px (rasters <= 1280 wide) or 6 px (1080-class: 1920/6 = 320 cells,
@@ -185,6 +225,11 @@ architecture pyro of program_top is
     -- the phase wraps and the cell increments.
     signal s_pfx  : unsigned(2 downto 0) := (others => '0');   -- x sub-phase
     signal s_pcx  : unsigned(8 downto 0) := (others => '0');   -- cell column
+    -- prefetch column min(pcx+2, 319) as its own lockstep counter: stage 2
+    -- then adds two registers instead of clamp -> +2 -> clamp -> add
+    signal s_pcx2 : unsigned(8 downto 0) := to_unsigned(2, 9);
+    -- next cell min(pcx+1, 319) for the time-multiplexed attribution
+    signal s_pcx1 : unsigned(8 downto 0) := to_unsigned(1, 9);
     signal s_pfy  : unsigned(2 downto 0) := (others => '0');   -- y sub-phase
     signal s_pcy  : unsigned(7 downto 0) := (others => '0');   -- cell row
     signal s_xdiv6   : std_logic := '0';                       -- 6-px cells
@@ -204,6 +249,11 @@ architecture pyro of program_top is
     signal s_cv_wdata : unsigned(1 downto 0)  := (others => '0');
     signal s_cv_raddr : unsigned(15 downto 0) := (others => '0');
     signal s_cv_rdata : unsigned(1 downto 0)  := (others => '0');
+    -- collision-free enough to skip yosys's read-before-write emulation:
+    -- the sweep writes cell k while reading k+2, and a pen write landing on
+    -- a display prefetch only blurs one cell for one frame
+    attribute no_rw_check : boolean;
+    attribute no_rw_check of s_canvas : signal is true;
 
     -- ==== Readout stage 2 (registered from raw counters) ====
     signal s_insq2 : std_logic := '0';
@@ -213,10 +263,12 @@ architecture pyro of program_top is
     signal s_ftop2, s_fbot2 : std_logic := '0';
     signal s_addr_top2, s_addr_bot2 : unsigned(15 downto 0) := (others => '0');
 
-    -- ==== Nebula cloud layer (starfield technique, scaled to 2 EBR) ====
-    -- 64x32 4-bit seamless value-noise tile, 8x16-px texels (512x512 px
-    -- wrap), read per pixel and added to the sky gradient. Generated at
-    -- elaboration: 2-octave bilinear noise over a wrapping 8x4 lattice.
+    -- ==== Nebula cloud layer (starfield technique, 1 EBR) ====
+    -- 32x32 4-bit seamless value-noise tile, 16x16-px texels (512x512 px
+    -- wrap; v0.9 had 64x32 at 8x16 px in 2 EBR -- the clouds are soft
+    -- either way, the EBR went to the head overlay), read per pixel and
+    -- added to the sky gradient. Generated at elaboration: 2-octave
+    -- bilinear noise over a wrapping 4x4 lattice.
     function f_nebh(xi, yi : integer) return integer is
         variable t : integer;
     begin
@@ -227,30 +279,30 @@ architecture pyro of program_top is
     end function;
     function f_nebbi(x, y, lg : integer) return integer is
         -- bilinear value noise; lattice cells are 2**lg texels, lattice
-        -- wraps mod (64/2**lg) in x and mod (32/2**lg) in y (seamless)
+        -- wraps mod (32/2**lg) in x and y (seamless)
         variable cx, cy, fx, fy, s : integer;
         variable h00, h10, h01, h11, top, bot : integer;
     begin
         s   := 2 ** lg;
         cx  := x / s;  cy := y / s;
         fx  := x mod s;  fy := y mod s;
-        h00 := f_nebh(cx mod (64 / s),       cy mod (32 / s));
-        h10 := f_nebh((cx + 1) mod (64 / s), cy mod (32 / s));
-        h01 := f_nebh(cx mod (64 / s),       (cy + 1) mod (32 / s));
-        h11 := f_nebh((cx + 1) mod (64 / s), (cy + 1) mod (32 / s));
+        h00 := f_nebh(cx mod (32 / s),       cy mod (32 / s));
+        h10 := f_nebh((cx + 1) mod (32 / s), cy mod (32 / s));
+        h01 := f_nebh(cx mod (32 / s),       (cy + 1) mod (32 / s));
+        h11 := f_nebh((cx + 1) mod (32 / s), (cy + 1) mod (32 / s));
         top := h00 * (s - fx) + h10 * fx;
         bot := h01 * (s - fx) + h11 * fx;
         return (top * (s - fy) + bot * fy) / (s * s);   -- 0..255
     end function;
-    type t_neb is array(0 to 2047) of unsigned(3 downto 0);
+    type t_neb is array(0 to 1023) of unsigned(3 downto 0);
     function f_neb_init return t_neb is
         variable v : t_neb;
         variable n : integer;
     begin
         for y in 0 to 31 loop
-            for x in 0 to 63 loop
+            for x in 0 to 31 loop
                 n := (3 * f_nebbi(x, y, 3) + f_nebbi(x * 2, y * 2, 3)) / 4;
-                v(y * 64 + x) := to_unsigned(n / 16, 4);
+                v(y * 32 + x) := to_unsigned(n / 16, 4);
             end loop;
         end loop;
         return v;
@@ -285,7 +337,10 @@ architecture pyro of program_top is
     -- blend neighbor -- stage 2 then needs ONE 16-bit add per address
     -- instead of clamp -> wobble -> 3-term f_addr (which missed HD timing)
     signal s_ryc   : unsigned(7 downto 0)  := (others => '0');
-    signal s_rowin : std_logic := '1';     -- current row inside the canvas
+    signal s_rowin : std_logic := '1';     -- current row on the screen grid
+    -- readout row has canvas behind it (rows >= C_CH: sky only)
+    signal s_cvrow : std_logic := '1';
+    signal s_cvok2, s_cvok3, s_cvok4, s_cvok5, s_cvok6, s_cvok7 : std_logic := '0';
     signal s_rowb  : unsigned(15 downto 0) := (others => '0');
     signal s_rowb1 : unsigned(15 downto 0) := to_unsigned(320, 16);
 
@@ -311,6 +366,15 @@ architecture pyro of program_top is
     signal s_decay_rd     : std_logic := '0';
     signal s_decay_k      : unsigned(15 downto 0) := (others => '0');
     signal s_decay_k_d1   : unsigned(15 downto 0) := (others => '0');
+    -- read data lands TWO clocks after issue (raddr reg + BRAM output reg);
+    -- writing back at the 1-clock tap stored cell k-1's decayed value into
+    -- cell k = the whole canvas slid one cell right per frame
+    signal s_decay_rd2    : std_logic := '0';
+    signal s_decay_k_d2   : unsigned(15 downto 0) := (others => '0');
+    -- last cell swept: the displayed rows (+1 for the blend neighbour) only.
+    -- An NTSC field has ~47k blanking clocks, fewer than the 57,600 cells,
+    -- so a full sweep never finished there and the engine never ran.
+    signal s_sw_last      : unsigned(15 downto 0) := to_unsigned(C_CELLS - 1, 16);
     signal s_decay_thr    : unsigned(9 downto 0)  := to_unsigned(108, 10);
     -- per-frame random dither offset: the old hash+framecount pattern
     -- TRANSLATED across the screen each frame, reading as a rightward
@@ -346,24 +410,21 @@ architecture pyro of program_top is
                                      to_unsigned(C_GROUND, 8), to_unsigned(C_GROUND, 8));
     signal s_sl_apy   : t_sl_u8  := (others => to_unsigned(60, 8));
     signal s_sl_typ   : t_sl_u3  := (others => "000");
-    -- col = inner zone / col2 = outer zone (two-tone radial attribution)
+    -- the shell's one colour (palette index; pastel flag in s_sl_pas)
     signal s_sl_col   : t_sl_u3  := ("000", "011", "001", "001");
-    signal s_sl_col2  : t_sl_u3  := ("010", "000", "001", "001");
     -- current color-split radius (half the shell's expansion radius)
     signal s_sl_rsp   : t_sl_u7  := (others => to_unsigned(12, 7));
     signal s_sl_n     : t_sl_u6  := (others => to_unsigned(24, 6));
     signal s_sl_ever  : std_logic_vector(3 downto 0) := "0011";
-    -- free-running helper flags: relaunch timers + shared drift pacing
-    -- (decoded OUTSIDE the vsync cone -- the 10-bit age/delay compare and
-    -- per-slot pace decodes were routed critical paths at 89% util)
-    signal s_expd    : std_logic_vector(3 downto 0) := "0000";
+    -- free-running shared drift pacing (frame-counter decodes, one per
+    -- pace, read by the lifecycle for every slot)
     signal s_pc_sink : std_logic := '0';
     signal s_pc_mom8 : std_logic := '0';
     signal s_pc_mom16: std_logic := '0';
 
     -- raster-scaled layout (recomputed each vsync from the measured raster,
     -- so the show fills the screen on SD rasters too, not just 1280x720)
-    signal s_ground : unsigned(7 downto 0) := to_unsigned(176, 8);
+    signal s_ground : unsigned(7 downto 0) := to_unsigned(C_GROUND, 8);
     signal s_apbase : unsigned(7 downto 0) := to_unsigned(33, 8);    -- apogee band top
     signal s_cwu    : unsigned(8 downto 0) := to_unsigned(320, 9);   -- usable cells
     signal s_cwm32  : signed(10 downto 0)  := to_signed(288, 11);    -- cwu - 32
@@ -372,7 +433,7 @@ architecture pyro of program_top is
 
     -- shell types (chrys = peony with forced heads + tight trailing spread;
     -- comet = a few max-speed straight streaks with bright heads and half
-    -- gravity -- the two-tone split recolors the trail behind the head)
+    -- gravity)
     constant C_TY_PEONY   : unsigned(2 downto 0) := "000";
     constant C_TY_RING    : unsigned(2 downto 0) := "001";
     constant C_TY_WILLOW  : unsigned(2 downto 0) := "010";
@@ -383,10 +444,9 @@ architecture pyro of program_top is
     signal s_sl_pas  : std_logic_vector(3 downto 0) := (others => '0');
 
     -- ==== Per-frame latched controls ====
-    signal s_sizeK   : unsigned(6 downto 0) := to_unsigned(52, 7);   -- 20..83
+    signal s_sizeK   : unsigned(6 downto 0) := to_unsigned(83, 7);   -- 8..102 (P12)
     signal s_gravK   : unsigned(5 downto 0) := to_unsigned(23, 6);   -- 0..63
     signal s_rateD   : unsigned(9 downto 0) := to_unsigned(180, 10);
-    signal s_silent  : std_logic := '0';                     -- K1 full CCW
     signal s_dens    : unsigned(5 downto 0) := to_unsigned(40, 6);
     signal s_hueSel  : unsigned(2 downto 0) := "000";        -- K4 palette bank
     signal s_sparkK  : unsigned(1 downto 0) := "01";         -- K6 level 0..3
@@ -397,26 +457,19 @@ architecture pyro of program_top is
     signal s_sw_finale : std_logic := '0';                   -- S10
     signal s_freeze    : std_logic := '0';                   -- S11
 
-    -- ==== P12 hand-fire: fly a shell by hand, detonate on release ====
-    -- 00 idle (armed), 01 flying (slot 3 hand-held), 10 wait re-arm
-    signal s_hf_state : unsigned(1 downto 0) := "00";
-    signal s_hf_act   : std_logic := '0';
-    signal s_hf_cy    : unsigned(7 downto 0) := to_unsigned(176, 8);
-    signal s_hf_cyp   : unsigned(7 downto 0) := to_unsigned(176, 8);
-    signal s_hf_max   : unsigned(9 downto 0) := (others => '0');
-    -- free-running slider decode: the raw SPI register's compare carry
-    -- chains were the routed critical path when read inside the vsync
-    -- cone -- decode to plain 1-bit flags a clock ahead instead
-    signal s_sldr    : unsigned(9 downto 0) := (others => '0');
-    signal s_hf_alt  : unsigned(7 downto 0) := to_unsigned(176, 8);
-    signal s_sf_go   : std_logic := '0';   -- slider >= 96
-    signal s_sf_960  : std_logic := '0';   -- slider >= 960: full throw
-    signal s_sf_64   : std_logic := '0';   -- slider < 64 (re-arm)
-    signal s_sf_8    : std_logic := '0';   -- slider < 8 (blackout zone)
-    signal s_sf_rel  : std_logic := '0';   -- slider dropped 48 below peak
-    signal s_sf_gtm  : std_logic := '0';   -- slider above recorded peak
-    -- LAUNCH at zero + slider at bottom = fade to black (P12 convention)
-    signal s_blk      : std_logic := '0';
+    -- ==== P12: BLAST (outside FREEZE) / time scrub (inside FREEZE) ====
+    signal s_sldr    : unsigned(9 downto 0) := (others => '0');  -- raw slider
+    -- blast amount, glided (ease by diff/8 per frame: no ADC jitter on
+    -- live shells, a smooth swell when the slider moves); 13 bits =
+    -- slider*8, power-on at the TOML default (800)
+    signal s_bla     : unsigned(12 downto 0) := to_unsigned(6400, 13);
+    -- climax zone (top eighth): share of sparks given bold plus heads
+    -- (0..15 sixteenths) and the full-strength sky flash
+    signal s_hboost  : unsigned(3 downto 0) := (others => '0');
+    signal s_bltop   : std_logic := '0';
+    -- slider position when FREEZE engaged: scrub = (slider - this)/4, so
+    -- flipping FREEZE holds the exact frame wherever the slider rests
+    signal s_scr_lat : unsigned(9 downto 0)  := (others => '0');
 
     -- ==== Free-running LFSR (seeds) ====
     signal s_lfsr : unsigned(15 downto 0) := x"BEEF";
@@ -430,8 +483,38 @@ architecture pyro of program_top is
     constant EST_Q0 : integer := 18;  -- particle: Q0..Q12 = 18..30
     constant EST_AGE  : integer := 31;  -- effective-timeline compute
     constant EST_AGE2 : integer := 32;  -- clamp/split + phase dispatch
+    -- per-frame slot lifecycle, ONE slot at a time ahead of its replot (was
+    -- four unrolled copies in the vsync cone: ~600 LUT+carry and the
+    -- recurring critical path of v0.3-v0.5)
+    constant EST_LIFE  : integer := 33;  -- hoist slot regs + new seed/spawn x
+    constant EST_LIFE1 : integer := 34;  -- age/spawn/transition (+ hand-fire)
+    constant EST_LIFE2 : integer := 35;  -- idle -> next slot, else replot
+    constant EST_LIFED : integer := 36;  -- decide: registered action flags
+    constant EST_T0    : integer := 37;  -- physics curves: T0..T6 = 37..43
 
-    signal s_est : integer range 0 to 32 := EST_IDLE;
+    signal s_est : integer range 0 to 43 := EST_IDLE;
+
+    -- lifecycle hoists: the current slot's fields as plain registers, so
+    -- the update logic never reaches through the 4-way slot-array muxes
+    signal s_lc_st   : unsigned(1 downto 0)  := "00";
+    signal s_lc_age  : unsigned(9 downto 0)  := (others => '0');
+    signal s_lc_exp  : std_logic := '0';                       -- age >= delay
+    signal s_lc_seed : unsigned(15 downto 0) := (others => '0');
+    signal s_lc_ns   : unsigned(15 downto 0) := (others => '0'); -- respawn seed
+    signal s_lc_bx   : signed(10 downto 0)   := (others => '0'); -- unclamped x
+    signal s_lc_cx   : unsigned(8 downto 0)  := (others => '0');
+    signal s_lc_cy   : unsigned(7 downto 0)  := (others => '0');
+    signal s_lc_apy  : unsigned(7 downto 0)  := (others => '0');
+    -- a detonation happened this frame: the sky flash reloads at the tick
+    signal s_boom    : std_logic := '0';
+    -- decide -> apply: one-cycle action flags + one-hot slot, so every slot
+    -- field's write enable is flag AND one-hot (2 register inputs). The
+    -- first v0.6 build drove ~300 slot FFs' CEN from the spawn decision
+    -- through 5 LUT levels: 12.7 ns of routing, HD 63-67 MHz.
+    signal s_lc_cxs  : unsigned(8 downto 0)  := (others => '0'); -- clamped x
+    signal s_lc_oh   : std_logic_vector(3 downto 0) := (others => '0');
+    signal s_lc_sp, s_lc_inc, s_lc_boom, s_lc_die : std_logic := '0';
+    signal s_lc_sink, s_lc_mvr, s_lc_mvl : std_logic := '0';
 
     -- ==== FREEZE + scrub: positions are pure functions of age, so the
     -- slider can offset a unified timeline (launch 0..63, burst 64..191)
@@ -542,23 +625,30 @@ architecture pyro of program_top is
     signal s_wk_ty : unsigned(7 downto 0) := (others => '0');
     signal s_w_val  : unsigned(1 downto 0) := "11";
     signal s_w_head : std_logic := '0';
+    -- head cell address, kept for the plus-shaped head: its four arms are
+    -- this +-1 / +-320 (one adder instead of four more f_addr copies)
+    signal s_wk_a   : unsigned(15 downto 0) := (others => '0');
 
     -- ==== Palette (U/V swapped for HW: stored U = Cr, stored V = Cb) ====
-    -- Full rainbow: 0 Red, 1 Orange, 2 Yellow, 3 Green, 4 Blue, 5 Indigo,
-    -- 6 Violet, 7 White (the scope-verified ROYGBIV chroma set);
+    -- Full hue wheel: 0 Red, 1 Orange, 2 Yellow, 3 Green, 4 Blue, 5 Cyan,
+    -- 6 Purple, 7 White. R/O/Y/G/B are the scope-verified set; Cyan (180
+    -- deg) and Purple (295 deg) replace Indigo/Violet (7.6 deg apart, while
+    -- cyan and magenta were 120/78 deg holes), computed by the same
+    -- sRGB -> BT.601-limited -> U/V-swap recipe (reproduces the verified
+    -- rows within 2 codes);
     -- entries 8..15 are the pastel bank (chroma halved toward 512) so the
     -- pastel flag is just index bit 3 -- no extra mux depth in stage 6
     type t_pal16 is array(0 to 15) of unsigned(9 downto 0);
     constant C_PAL_U : t_pal16 := (
         to_unsigned(960, 10), to_unsigned(772, 10), to_unsigned(584, 10), to_unsigned(136, 10),
-        to_unsigned(440, 10), to_unsigned(608, 10), to_unsigned(756, 10), to_unsigned(512, 10),
+        to_unsigned(440, 10), to_unsigned( 64, 10), to_unsigned(852, 10), to_unsigned(512, 10),
         to_unsigned(736, 10), to_unsigned(642, 10), to_unsigned(548, 10), to_unsigned(324, 10),
-        to_unsigned(476, 10), to_unsigned(560, 10), to_unsigned(634, 10), to_unsigned(512, 10));
+        to_unsigned(476, 10), to_unsigned(288, 10), to_unsigned(682, 10), to_unsigned(512, 10));
     constant C_PAL_V : t_pal16 := (
         to_unsigned(360, 10), to_unsigned(212, 10), to_unsigned( 64, 10), to_unsigned(216, 10),
-        to_unsigned(960, 10), to_unsigned(696, 10), to_unsigned(852, 10), to_unsigned(512, 10),
+        to_unsigned(960, 10), to_unsigned(663, 10), to_unsigned(821, 10), to_unsigned(512, 10),
         to_unsigned(436, 10), to_unsigned(362, 10), to_unsigned(288, 10), to_unsigned(364, 10),
-        to_unsigned(736, 10), to_unsigned(604, 10), to_unsigned(682, 10), to_unsigned(512, 10));
+        to_unsigned(736, 10), to_unsigned(587, 10), to_unsigned(666, 10), to_unsigned(512, 10));
     -- per-color LUMA CEILING (the palette's verified Y column, slightly
     -- lifted; pastels halfway to white): every hue is distinguished as
     -- much by brightness as by chroma -- red at a forced-bright 768 reads
@@ -566,48 +656,64 @@ architecture pyro of program_top is
     -- makes the full rainbow actually visible on screen.
     constant C_PAL_YC : t_pal16 := (
         to_unsigned(400, 10), to_unsigned(620, 10), to_unsigned(840, 10), to_unsigned(640, 10),
-        to_unsigned(320, 10), to_unsigned(360, 10), to_unsigned(450, 10), to_unsigned(768, 10),
+        to_unsigned(320, 10), to_unsigned(700, 10), to_unsigned(470, 10), to_unsigned(768, 10),
         to_unsigned(584, 10), to_unsigned(696, 10), to_unsigned(800, 10), to_unsigned(704, 10),
-        to_unsigned(544, 10), to_unsigned(564, 10), to_unsigned(608, 10), to_unsigned(768, 10));
-    -- ember cool-down: warm hues cool within family (white/yellow->orange,
-    -- orange->red); cool hues KEEP their identity (green/indigo/violet
-    -- hold, blue deepens to indigo) -- cooling everything toward red read
-    -- as a single color wash over the whole show
-    type t_map8 is array(0 to 7) of unsigned(2 downto 0);
-    constant C_EMBER : t_map8 := ("000", "000", "001", "011", "101", "101", "110", "001");
-
+        to_unsigned(544, 10), to_unsigned(734, 10), to_unsigned(619, 10), to_unsigned(768, 10));
     -- ==== Nearest-shell color attribution ====
     type t_at_u9  is array(0 to 3) of unsigned(8 downto 0);
     type t_at_u8  is array(0 to 4) of unsigned(7 downto 0);
     signal s_acx : t_at_u9 := (others => to_unsigned(160, 9));
     signal s_acy : t_at_u8 := (others => to_unsigned(90, 8));
     signal s_aen : std_logic_vector(3 downto 0) := "0000";
+    -- white launch column per slot (ascent only): rocket x, head row
+    signal s_rkon : std_logic_vector(3 downto 0) := (others => '0');
+    signal s_rkx  : t_at_u9 := (others => (others => '0'));
+    signal s_rky  : t_at_u8 := (others => (others => '0'));
+    signal s_rk6  : std_logic := '0';
     -- 3-bit palette indices (chroma resolved in stage 6 via the constant
     -- palette, spiroscope-style: 20x 10-bit color regs was ~250 LC)
     type t_at_u3 is array(0 to 3) of unsigned(2 downto 0);
     signal s_aci   : t_at_u3 := (others => "001");
-    signal s_aco   : t_at_u3 := (others => "001");
     signal s_apas  : std_logic_vector(3 downto 0) := (others => '0');
     type t_at_u7 is array(0 to 3) of unsigned(6 downto 0);
     signal s_arsp : t_at_u7 := (others => (others => '0'));
     -- stage 3: per-slot max/min of |dx|,|dy|
-    signal s_amax : t_at_u9 := (others => (others => '0'));
-    signal s_amin : t_at_u9 := (others => (others => '0'));
+
+
     -- stage 4: raw octagonal distance + inner/outer zone flag
     type t_at_u10a is array(0 to 3) of unsigned(9 downto 0);
-    signal s_draw4 : t_at_u10a := (others => (others => '1'));
-    signal s_far4  : std_logic_vector(3 downto 0) := (others => '0');
+
     -- stage 5: RADIUS-WEIGHTED distance (raw - 2*split_radius, clamped to
     -- 8 bits -- beyond 255 cells ownership is arbitrary, and the narrower
     -- compares keep the stage-6 argmin off the critical path):
     -- an active shell owns its own ball of sparks, so overlapping shells no
     -- longer carve each other into Voronoi color patches
     type t_at_u8a is array(0 to 3) of unsigned(7 downto 0);
-    signal s_deff  : t_at_u8a := (others => (others => '1'));
-    signal s_far5v : std_logic_vector(3 downto 0) := (others => '0');
+    -- TIME-MULTIPLEXED attribution: the distance inputs change only once
+    -- per cell (4 or 6 px), so ONE pipeline walks the 4 slots on the cell's
+    -- sub-phases (pfx 0..3) for the NEXT cell, writing result bank s_ar;
+    -- when a new cell's first pixel reaches stage 5 the bank commits to
+    -- s_ac, which the stage-6 argmin reads. Lossless vs 4 parallel copies
+    -- (was ~480 LUT / 230 carry of the chip).
+    signal s_tk2, s_tk3, s_tk4 : unsigned(1 downto 0) := (others => '0');
+    signal s_tv2, s_tv3, s_tv4 : std_logic := '0';          -- phase has a slot
+    signal s_tcx2 : unsigned(8 downto 0) := (others => '0'); -- next cell x
+    signal s_tcy2 : unsigned(7 downto 0) := (others => '0'); -- readout row
+    signal s_tax2 : unsigned(8 downto 0) := (others => '0');
+    signal s_tay2 : unsigned(7 downto 0) := (others => '0');
+    signal s_trs2, s_trs3, s_trs4 : unsigned(6 downto 0) := (others => '0');
+    signal s_ten2, s_ten3, s_ten4 : std_logic := '0';
+    signal s_trk2 : std_logic := '0';
+    signal s_trx2 : unsigned(8 downto 0) := (others => '0');
+    signal s_try2 : unsigned(7 downto 0) := (others => '0');
+    signal s_trkh3, s_trkh4 : std_logic := '0';
+    signal s_nc2, s_nc3, s_nc4 : std_logic := '0';           -- new-cell pixel
+    signal s_tmax3, s_tmin3 : unsigned(8 downto 0) := (others => '0');
+    signal s_td4  : unsigned(9 downto 0) := (others => '0');
+    signal s_ar, s_ac : t_at_u8a := (others => (others => '1'));
+    signal s_arrk, s_acrk : std_logic_vector(3 downto 0) := (others => '0');
     -- stage 6: final color index + far flag
     signal s_cidx6 : unsigned(2 downto 0) := "000";
-    signal s_far6  : std_logic := '0';
     signal s_t6    : unsigned(7 downto 0) := (others => '0');
     -- stage 6a->6b pipe: the argmin->pastel->palette->luma-cap cone was
     -- one combinational stage too deep for hd timing, so the owning color
@@ -616,14 +722,87 @@ architecture pyro of program_top is
     signal s_t7    : unsigned(7 downto 0) := (others => '0');
     signal s_star7, s_stwk7, s_mir7, s_insq7 : std_logic := '0';
 
+    -- ==== Sharp-head overlay (1080p) ====
+    -- Each frame the engine writes one entry per bright head: [30] bold,
+    -- [26:16] y px, [10:0] x px (1080p pixels from quarter-cell positions).
+    -- A per-line renderer stamps the NEXT line's heads into one bank of a
+    -- two-bank line buffer while the other bank is displayed (and cleared
+    -- one pixel behind the beam). Head x/y come from the same counters as
+    -- the canvas readout (x_count = 6*cell + phase), so a head lands on its
+    -- own glow by construction.
+    type t_ht is array(0 to 255) of std_logic_vector(31 downto 0);
+    signal s_ht    : t_ht := (others => (others => '0'));
+    attribute no_rw_check of s_ht : signal is true;
+    signal s_ht_we : std_logic := '0';
+    signal s_ht_wa : unsigned(7 downto 0) := (others => '0');
+    signal s_ht_wd : std_logic_vector(31 downto 0) := (others => '0');
+    signal s_ht_ra : unsigned(7 downto 0) := (others => '0');
+    signal s_ht_q  : std_logic_vector(31 downto 0) := (others => '0');
+    signal s_hq2   : std_logic_vector(31 downto 0) := (others => '0');
+    signal s_hcnt  : unsigned(8 downto 0) := (others => '0');  -- heads this frame
+    signal s_hn    : unsigned(8 downto 0) := (others => '0');  -- count for renderer
+    signal s_hrdy  : std_logic := '0';                         -- table is final
+    signal s_hd_on : std_logic := '0';                         -- 1080p raster
+    -- engine side: radius fraction, rf*cos/sin, droop and centre in quarter
+    -- cells, the head's quarter-cell position and its pixel coordinates
+    signal s_rf    : unsigned(1 downto 0) := (others => '0');
+    signal s_rfx, s_rfy : signed(11 downto 0) := (others => '0');
+    signal s_dfC4  : unsigned(9 downto 0) := (others => '0');
+    signal s_cyd4  : unsigned(11 downto 0) := (others => '0');
+    signal s_x4, s_y4 : signed(12 downto 0) := (others => '0');
+    signal s_hx, s_hy : unsigned(10 downto 0) := (others => '0');
+    -- renderer: 1 issue, 2 read, 3 copy, 4 row test, 5 span, 6 stamp
+    signal s_rs    : integer range 0 to 6 := 0;
+    signal s_ri    : unsigned(8 downto 0) := (others => '0');
+    signal s_rT    : unsigned(10 downto 0) := (others => '0');
+    signal s_rhit  : std_logic := '0';
+    signal s_rw    : unsigned(1 downto 0) := (others => '0');
+    signal s_rx    : unsigned(10 downto 0) := (others => '0');
+    signal s_rn    : unsigned(2 downto 0) := (others => '0');
+    signal s_rwe   : std_logic := '0';
+    signal s_rwa   : unsigned(10 downto 0) := (others => '0');
+    signal s_rwb   : std_logic := '0';
+    -- line buffer banks (one EBR each, 1 bit per 1080p pixel)
+    type t_lb is array(0 to 2047) of std_logic;
+    signal s_lb0, s_lb1 : t_lb := (others => '0');
+    attribute no_rw_check of s_lb0 : signal is true;
+    attribute no_rw_check of s_lb1 : signal is true;
+    signal s_lb0_we, s_lb1_we : std_logic := '0';
+    signal s_lb0_wa, s_lb1_wa : unsigned(10 downto 0) := (others => '0');
+    signal s_lb0_wd, s_lb1_wd : std_logic := '0';
+    signal s_lb_ra  : unsigned(10 downto 0) := (others => '0');
+    signal s_lb0_q, s_lb1_q : std_logic := '0';
+    signal s_lb_act2, s_dbank2, s_dbank3 : std_logic := '0';
+    signal s_lbc_a  : unsigned(10 downto 0) := (others => '0');
+    signal s_lbc_e, s_lbc_b : std_logic := '0';
+    signal s_hl4, s_hl5, s_hl6, s_hl7 : std_logic := '0';
+
     -- ==== Colour / output (stage 6) ====
     signal s_d_y   : unsigned(9 downto 0) := (others => '0');
     signal s_d_u   : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal s_d_v   : unsigned(9 downto 0) := to_unsigned(512, 10);
 
     -- ==== sync delay SR (output is fully synthesized: no video delay) ====
+    -- s_avid_sr carries the SOURCE avid (only its first taps are read, as
+    -- the decay sweep's guard band); the output avid is generated
     type t_bit_sr  is array(0 to C_LATENCY - 1) of std_logic;
     signal s_hsync_sr, s_vsync_sr, s_field_sr, s_avid_sr : t_bit_sr := (others => '0');
+    signal s_gav_sr : t_bit_sr := (others => '0');
+
+    -- ==== generated avid (aurora/cubist HW-confirmed recipe) ====
+    -- The encoders get no data-enable, so they pair Cb/Cr by counting from
+    -- hsync, while the core's 444->422 packer restarts on Cb at every avid
+    -- rise: a source avid that lands a clock off its usual hsync distance
+    -- swaps U/V for that line (thin wrong-coloured lines; neutral immune --
+    -- and pyro's sky is not neutral). Start 3 or 4 clocks after the
+    -- source's first avid rise, whichever keeps the hsync->start PARITY at
+    -- the voted usual value; end after the field-latched line width.
+    signal g_hsq, g_hsr, g_avq, g_avr : std_logic := '0';
+    signal g_ph, g_arm, g_par, g_sel, g_avid : std_logic := '0';
+    signal g_pc   : unsigned(3 downto 0) := to_unsigned(8, 4);
+    signal g_rsr  : std_logic_vector(2 downto 0) := (others => '0');
+    signal g_cnt  : unsigned(11 downto 0) := (others => '0');
+    signal g_wm1  : unsigned(11 downto 0) := to_unsigned(1279, 12);
 
 begin
 
@@ -649,6 +828,12 @@ begin
                        or (s_xdiv6 = '0' and s_pfx = 3) then
                         s_pfx <= (others => '0');
                         s_pcx <= s_pcx + 1;
+                        if s_pcx2 < to_unsigned(C_CW - 1, 9) then
+                            s_pcx2 <= s_pcx2 + 1;
+                        end if;
+                        if s_pcx1 < to_unsigned(C_CW - 1, 9) then
+                            s_pcx1 <= s_pcx1 + 1;
+                        end if;
                     else
                         s_pfx <= s_pfx + 1;
                     end if;
@@ -661,10 +846,12 @@ begin
                 if s_pcx > 0 then s_cwm <= s_pcx; end if;
                 s_pfx <= (others => '0');
                 s_pcx <= (others => '0');
+                s_pcx2 <= to_unsigned(2, 9);
+                s_pcx1 <= to_unsigned(1, 9);
                 if s_line_active = '1' then
                     s_y_count     <= s_y_count + 1;
                     s_line_active <= '0';
-                    if s_pcy < to_unsigned(C_CH, 8) then
+                    if s_pcy < to_unsigned(C_SH, 8) then
                         if (s_ydivsel = "01" and s_pfy = 2)
                            or (s_ydivsel = "00" and s_pfy = 3)
                            or (s_ydivsel = "10" and s_pfy = 5) then
@@ -677,6 +864,7 @@ begin
                 end if;
             end if;
 
+            -- counter resets are idempotent, so every vsync edge may do them
             if data_in.vsync_n = '0' and s_prev_vsync_n = '1' then
                 if s_y_count > 0 then s_frame_height <= s_y_count; end if;
                 s_y_count     <= (others => '0');
@@ -685,7 +873,15 @@ begin
                 s_pfy <= (others => '0');
                 s_pcy <= (others => '0');
                 s_line_active <= '0';
-                s_frame_cnt   <= s_frame_cnt + 1;
+            end if;
+            -- per-field tick: first vsync edge after active video only
+            s_ftick <= '0';
+            if data_in.avid = '1' then
+                s_saw <= '1';
+            elsif data_in.vsync_n = '0' and s_prev_vsync_n = '1' and s_saw = '1' then
+                s_saw       <= '0';
+                s_ftick     <= '1';
+                s_frame_cnt <= s_frame_cnt + 1;
             end if;
 
             -- divisor selects + clamped cell dims (settled registers; the
@@ -762,15 +958,20 @@ begin
             v_rb  := shift_left(resize(v_ryc, 16), 8) + shift_left(resize(v_ryc, 16), 6);
             v_rb1 := shift_left(resize(v_ry1, 16), 8) + shift_left(resize(v_ry1, 16), 6);
             s_ryc   <= v_ryc;
-            if s_pcy < to_unsigned(C_CH, 8) then
+            if s_pcy < to_unsigned(C_SH, 8) then
                 s_rowin <= '1';
             else
                 s_rowin <= '0';
             end if;
+            if s_ry < to_unsigned(C_CH, 8) then
+                s_cvrow <= '1';
+            else
+                s_cvrow <= '0';
+            end if;
             s_rowb  <= unsigned(signed(v_rb)  + resize(s_wob, 16));
             s_rowb1 <= unsigned(signed(v_rb1) + resize(s_wob, 16));
-            if s_chm > to_unsigned(C_CH, 8) then
-                s_ch2 <= to_unsigned(C_CH, 10);
+            if s_chm > to_unsigned(C_SH, 8) then
+                s_ch2 <= to_unsigned(C_SH, 10);
             elsif s_chm < to_unsigned(60, 8) then
                 s_ch2 <= to_unsigned(60, 10);
             else
@@ -818,8 +1019,8 @@ begin
             v_ph0 := s_pfx = 0;
             v_ph1 := s_pfx = 1;
             -- prefetch target: span S+1's RIGHT neighbour = cell S+2
-            if v_ccx >= to_unsigned(C_CW - 2, 9) then v_ccx1 := to_unsigned(C_CW - 1, 9);
-            else v_ccx1 := v_ccx + 2; end if;
+            -- (= min(pcx+2, 319), kept as a lockstep counter in p_count)
+            v_ccx1 := s_pcx2;
 
             s_cellx2 <= v_ccx;
             s_celly2 <= s_ryc;
@@ -831,6 +1032,32 @@ begin
             if v_in and v_ph1 then s_fbot2 <= '1'; else s_fbot2 <= '0'; end if;
             if v_in and v_ccx >= 2 then s_insq2 <= '1'; else s_insq2 <= '0'; end if;
             s_mir2 <= s_mirr;
+            s_cvok2 <= s_cvrow;
+            -- attribution: this phase's slot (pfx 0..3) for the next cell
+            s_tk2  <= s_pfx(1 downto 0);
+            if s_pfx(2) = '0' then
+                s_tv2 <= '1';
+            else
+                s_tv2 <= '0';
+            end if;
+            s_tcx2 <= s_pcx1;
+            s_tcy2 <= s_ryc;
+            s_tax2 <= s_acx(to_integer(s_pfx(1 downto 0)));
+            s_tay2 <= s_acy(to_integer(s_pfx(1 downto 0)));
+            s_trs2 <= s_arsp(to_integer(s_pfx(1 downto 0)));
+            s_ten2 <= s_aen(to_integer(s_pfx(1 downto 0)));
+            s_trk2 <= s_rkon(to_integer(s_pfx(1 downto 0)));
+            s_trx2 <= s_rkx(to_integer(s_pfx(1 downto 0)));
+            s_try2 <= s_rky(to_integer(s_pfx(1 downto 0)));
+            if s_pfx = 0 then
+                s_nc2 <= '1';
+            else
+                s_nc2 <= '0';
+            end if;
+            -- head line buffer: read this pixel; bank = line parity
+            s_lb_ra   <= s_x_count(10 downto 0);
+            s_lb_act2 <= s_avid_sr(0);
+            s_dbank2  <= s_y_count(0);
 
             -- static starfield: per-cell hash of the row base and column --
             -- XOR-fold only (a second 16-bit ADD here was carry-chain depth
@@ -872,8 +1099,19 @@ begin
     begin
         if rising_edge(clk) then
             s_cv_we <= '0';
+            s_decay_rd2  <= s_decay_rd;
+            s_decay_k_d2 <= s_decay_k_d1;
+            -- sweep end = last displayed row + 1 (cy*320 + 319); full
+            -- canvas on 180-row rasters, ~19.5k cells on an NTSC field
+            if s_ch2 >= to_unsigned(C_CH - 1, 10) then
+                s_sw_last <= to_unsigned(C_CELLS - 1, 16);
+            else
+                s_sw_last <= shift_left(resize(s_ch2, 16), 8)
+                             + shift_left(resize(s_ch2, 16), 6)
+                             + to_unsigned(C_CW - 1, 16);
+            end if;
 
-            if data_in.vsync_n = '0' and s_prev_vsync_n = '1' then
+            if s_ftick = '1' then
                 -- Bright cells (2/3) always step down every sweep, so sparks
                 -- that stop being replotted collapse in ~2 frames (crisp);
                 -- only val-1 cells (last embers) linger on the slow dithered
@@ -898,7 +1136,7 @@ begin
             if v_rd then
                 s_cv_raddr   <= s_decay_k;
                 s_decay_k_d1 <= s_decay_k;
-                if s_decay_k = to_unsigned(C_CELLS - 1, 16) then
+                if s_decay_k >= s_sw_last then
                     s_decay_done <= '1';
                 else
                     s_decay_k <= s_decay_k + 1;
@@ -919,12 +1157,12 @@ begin
                 end if;
             end if;
 
-            -- ---- write port ----
-            if s_decay_rd = '1' then
+            -- ---- write port (2-clock tap: rdata belongs to k_d2) ----
+            if s_decay_rd2 = '1' then
                 if s_cv_rdata >= 2 then
                     v_new := s_cv_rdata - 1;
                 elsif s_cv_rdata = 1 then
-                    v_hash := (s_decay_k_d1(9 downto 0) xor s_decay_k_d1(15 downto 6))
+                    v_hash := (s_decay_k_d2(9 downto 0) xor s_decay_k_d2(15 downto 6))
                               xor s_dith;
                     if v_hash < s_decay_thr then
                         v_new := (others => '0');
@@ -935,9 +1173,11 @@ begin
                     v_new := (others => '0');
                 end if;
                 s_cv_we    <= '1';
-                s_cv_waddr <= s_decay_k_d1;
+                s_cv_waddr <= s_decay_k_d2;
                 s_cv_wdata <= v_new;
-                if s_decay_done = '1' then
+                -- (a tail write landing on the tick must not cancel the
+                -- new sweep the tick just started)
+                if s_decay_done = '1' and s_ftick = '0' then
                     s_decay_active <= '0';
                 end if;
             elsif s_decay_active = '0' and s_pen_we = '1' then
@@ -959,14 +1199,6 @@ begin
         end if;
     end process p_canvas;
 
-    -- ==== physics ROM (1 EBR, read by the engine only) ====
-    p_tbl : process(clk)
-    begin
-        if rising_edge(clk) then
-            s_tbl_q <= s_tbl(to_integer(s_tbl_addr));
-        end if;
-    end process p_tbl;
-
     -- ==== nebula ROM (2 EBR): free-running per-pixel read; the 1-2 px
     -- lag against the color pipeline is a fixed shift of a wrapping
     -- texture (starfield trick) ====
@@ -974,7 +1206,7 @@ begin
     begin
         if rising_edge(clk) then
             s_neb_q <= s_neb(to_integer(s_y_count(8 downto 4)
-                                        & s_x_count(8 downto 3)));
+                                        & s_x_count(8 downto 4)));
         end if;
     end process p_neb;
 
@@ -1013,11 +1245,10 @@ begin
         variable v_dy  : signed(8 downto 0);
         variable v_ax  : unsigned(8 downto 0);
         variable v_ay  : unsigned(8 downto 0);
-        variable v_d0  : unsigned(9 downto 0);
         variable v_es  : signed(10 downto 0);
+        variable v_rx  : signed(9 downto 0);
         variable v_wad, v_wbd : unsigned(7 downto 0);
         variable v_wai, v_wbi : std_logic;
-        variable v_waf, v_wbf : std_logic;
     begin
         if rising_edge(clk) then
             -- pipes
@@ -1031,6 +1262,20 @@ begin
             s_stwk6 <= s_stwk5;
             s_mir3 <= s_mir2;    s_mir4 <= s_mir3;    s_mir5 <= s_mir4;
             s_mir6 <= s_mir5;
+            s_cvok3 <= s_cvok2;  s_cvok4 <= s_cvok3;  s_cvok5 <= s_cvok4;
+            s_cvok6 <= s_cvok5;
+            s_dbank3 <= s_dbank2;
+            if s_hd_on = '1' then
+                if s_dbank3 = '0' then
+                    s_hl4 <= s_lb0_q;
+                else
+                    s_hl4 <= s_lb1_q;
+                end if;
+            else
+                s_hl4 <= '0';
+            end if;
+            s_hl5 <= s_hl4;
+            s_hl6 <= s_hl5;
             s_t6 <= s_t5;
 
             -- stage 3->4: horizontal lerp (blend regs are span-stable)
@@ -1042,65 +1287,82 @@ begin
             v_wyl := "1000" - resize(s_fy4, 4);
             s_t5 <= resize(s_h0 * v_wyl, 8) + resize(s_h1 * s_fy4, 8);
 
-            -- stage 3: per-slot |dx|,|dy| -> registered max/min
-            for k in 0 to 3 loop
-                v_dx := signed(resize(s_cellx2, 10)) - signed(resize(s_acx(k), 10));
-                v_dy := signed(resize(s_celly2, 9))  - signed(resize(s_acy(k), 9));
-                if v_dx >= 0 then v_ax := resize(unsigned(v_dx), 9);
-                else              v_ax := resize(unsigned(-v_dx), 9); end if;
-                if v_dy >= 0 then v_ay := resize(unsigned(v_dy(8 downto 0)), 9);
-                else              v_ay := resize(unsigned(-v_dy), 9); end if;
-                if v_ax >= v_ay then
-                    s_amax(k) <= v_ax;  s_amin(k) <= v_ay;
-                else
-                    s_amax(k) <= v_ay;  s_amin(k) <= v_ax;
-                end if;
-            end loop;
-
-            -- stage 4: raw octagonal distance (max + min/2) + zone flag
-            for k in 0 to 3 loop
-                v_d0 := resize(s_amax(k), 10) + resize(s_amin(k)(8 downto 1), 10);
-                s_draw4(k) <= v_d0;
-                if v_d0 > resize(s_arsp(k), 10) then
-                    s_far4(k) <= '1';
-                else
-                    s_far4(k) <= '0';
-                end if;
-            end loop;
-
-            -- stage 5: subtract 2x split radius (= the shell's current
-            -- expansion radius) and clamp: pixels inside a shell's ball score
-            -- ~0 for that shell regardless of other centers
-            for k in 0 to 3 loop
-                v_es := signed(resize(s_draw4(k), 11))
-                        - signed(resize(s_arsp(k) & '0', 11));
-                if s_aen(k) = '0' then
-                    s_deff(k) <= (others => '1');
-                elsif v_es < 0 then
-                    s_deff(k) <= (others => '0');
-                elsif v_es > to_signed(255, 11) then
-                    s_deff(k) <= (others => '1');
-                else
-                    s_deff(k) <= unsigned(v_es(7 downto 0));
-                end if;
-                s_far5v(k) <= s_far4(k);
-            end loop;
-
-            -- stage 6: 4-way argmin over the weighted distances
-            if s_deff(0) <= s_deff(1) then
-                v_wad := s_deff(0);  v_wai := '0';  v_waf := s_far5v(0);
+            -- stage 3 (time-multiplexed, one slot per clock): |dx|,|dy| ->
+            -- max/min; plus that slot's white launch column test
+            s_tk3 <= s_tk2;  s_tv3 <= s_tv2;  s_trs3 <= s_trs2;
+            s_ten3 <= s_ten2;  s_nc3 <= s_nc2;
+            v_rx := signed(resize(s_tcx2, 10)) - signed(resize(s_trx2, 10))
+                    + to_signed(2, 10);
+            if s_trk2 = '1' and v_rx >= 0 and v_rx <= to_signed(4, 10)
+               and resize(s_tcy2, 9) + 1 >= resize(s_try2, 9) then
+                s_trkh3 <= '1';
             else
-                v_wad := s_deff(1);  v_wai := '1';  v_waf := s_far5v(1);
+                s_trkh3 <= '0';
             end if;
-            if s_deff(2) <= s_deff(3) then
-                v_wbd := s_deff(2);  v_wbi := '0';  v_wbf := s_far5v(2);
+            v_dx := signed(resize(s_tcx2, 10)) - signed(resize(s_tax2, 10));
+            v_dy := signed(resize(s_tcy2, 9))  - signed(resize(s_tay2, 9));
+            if v_dx >= 0 then v_ax := resize(unsigned(v_dx), 9);
+            else              v_ax := resize(unsigned(-v_dx), 9); end if;
+            if v_dy >= 0 then v_ay := resize(unsigned(v_dy(8 downto 0)), 9);
+            else              v_ay := resize(unsigned(-v_dy), 9); end if;
+            if v_ax >= v_ay then
+                s_tmax3 <= v_ax;  s_tmin3 <= v_ay;
             else
-                v_wbd := s_deff(3);  v_wbi := '1';  v_wbf := s_far5v(3);
+                s_tmax3 <= v_ay;  s_tmin3 <= v_ax;
+            end if;
+
+            -- stage 4: raw octagonal distance (max + min/2)
+            s_td4 <= resize(s_tmax3, 10) + resize(s_tmin3(8 downto 1), 10);
+            s_tk4 <= s_tk3;  s_tv4 <= s_tv3;  s_trs4 <= s_trs3;
+            s_ten4 <= s_ten3;  s_trkh4 <= s_trkh3;  s_nc4 <= s_nc3;
+
+            -- stage 5: commit the finished cell's bank as a new cell's first
+            -- pixel arrives (that pixel's stage-6 argmin is the first to read
+            -- it), then write this slot's result for the cell after.
+            -- Weighted distance = distance minus the shell's radius (2x split
+            -- radius), offset +128, clamped to 8 bits: inside its own ball a
+            -- shell scores below 128, and where two balls overlap the one the
+            -- pixel is DEEPER inside wins.
+            if s_nc4 = '1' then
+                s_ac   <= s_ar;
+                s_acrk <= s_arrk;
+            end if;
+            if s_tv4 = '1' then
+                v_es := signed(resize(s_td4, 11))
+                        - signed(resize(s_trs4 & '0', 11))
+                        + to_signed(128, 11);
+                if s_ten4 = '0' then
+                    s_ar(to_integer(s_tk4)) <= (others => '1');
+                elsif v_es < 0 then
+                    s_ar(to_integer(s_tk4)) <= (others => '0');
+                elsif v_es > to_signed(255, 11) then
+                    s_ar(to_integer(s_tk4)) <= (others => '1');
+                else
+                    s_ar(to_integer(s_tk4)) <= unsigned(v_es(7 downto 0));
+                end if;
+                s_arrk(to_integer(s_tk4)) <= s_trkh4;
+            end if;
+
+            -- stage 6: 4-way argmin over the committed cell's distances
+            if s_ac(0) <= s_ac(1) then
+                v_wad := s_ac(0);  v_wai := '0';
+            else
+                v_wad := s_ac(1);  v_wai := '1';
+            end if;
+            if s_ac(2) <= s_ac(3) then
+                v_wbd := s_ac(2);  v_wbi := '0';
+            else
+                v_wbd := s_ac(3);  v_wbi := '1';
             end if;
             if v_wbd < v_wad then
-                s_cidx6 <= "01" & v_wbi;  s_far6 <= v_wbf;
+                s_cidx6 <= "01" & v_wbi;
             else
-                s_cidx6 <= "00" & v_wai;  s_far6 <= v_waf;
+                s_cidx6 <= "00" & v_wai;
+            end if;
+            if s_acrk /= "0000" then
+                s_rk6 <= '1';
+            else
+                s_rk6 <= '0';
             end if;
         end if;
     end process p_blend;
@@ -1109,56 +1371,42 @@ begin
     -- Attribution registers: latched from slot state once per frame
     -- ====================================================================
     p_attr : process(clk)
-        variable v_tl : signed(9 downto 0);
     begin
         if rising_edge(clk) then
-            if data_in.vsync_n = '0' and s_prev_vsync_n = '1' then
+            if s_ftick = '1' then
                 for k in 0 to 3 loop
-                    s_aen(k)  <= s_sl_ever(k);
-                    s_arsp(k) <= s_sl_rsp(k);
-                    s_apas(k) <= s_sl_pas(k);
-                    -- attribution follows the center (which now drifts per
-                    -- frame in the lifecycle); idle slots hold so embers
-                    -- keep their last position and hue
-                    if s_sl_state(k) /= "00" then
-                        s_acx(k) <= s_sl_cx(k);
-                        s_acy(k) <= s_sl_cy(k);
+                    s_aen(k) <= s_sl_ever(k);
+                    -- A shell owns its colour region only while bursting
+                    -- (centre and radius follow the drift and expansion).
+                    -- Through idle AND the slot's next ascent the region
+                    -- HOLDS, so the old burst's fading embers keep their
+                    -- colour instead of being re-claimed by the nearest
+                    -- other shell when the slot relaunches. Look-ahead: an
+                    -- ascent at age 63 bursts this frame, at its apogee.
+                    if s_sl_state(k) = "10" then
+                        s_acx(k)  <= s_sl_cx(k);
+                        s_acy(k)  <= s_sl_cy(k);
+                        s_arsp(k) <= s_sl_rsp(k);
+                        s_aci(k)  <= s_sl_col(k);
+                        s_apas(k) <= s_sl_pas(k);
+                    elsif s_sl_state(k) = "01"
+                          and s_sl_age(k)(5 downto 0) = "111111" then
+                        s_acx(k)  <= s_sl_cx(k);
+                        s_acy(k)  <= s_sl_apy(k);
+                        s_arsp(k) <= to_unsigned(2, 7);
+                        s_aci(k)  <= s_sl_col(k);
+                        s_apas(k) <= s_sl_pas(k);
                     end if;
-                    -- color by EFFECTIVE timeline (scrub-aware, like the
-                    -- replot): white-hot bloom -> shell two-tone -> deep
-                    -- embers. During ASCENT the previous shell's colors are
-                    -- HELD, not forced gold: the old burst's embers are
-                    -- still fading on the canvas, and recoloring them under
-                    -- a fresh rocket read as a color wash over the show.
-                    -- Idle slots hold too (dead shells keep their embers).
-                    if s_sl_state(k) /= "00" then
-                        if s_sl_state(k) = "10" then
-                            v_tl := signed(resize(s_sl_age(k)(7 downto 0), 10))
-                                    + s_scr_b;
-                        else
-                            v_tl := signed(resize(s_sl_age(k)(7 downto 0), 10))
-                                    + s_scr_r;
-                        end if;
-                        if v_tl < to_signed(64, 10) then
-                            -- ascending rocket: white head with a yellow
-                            -- fringe (user-preferred launch look; white is
-                            -- chromatically neutral, so re-claimed embers
-                            -- shift far less than the old gold did)
-                            s_aci(k) <= "111";
-                            s_aco(k) <= "010";
-                        elsif v_tl < to_signed(70, 10) then
-                            s_aci(k) <= "111";
-                            s_aco(k) <= "111";
-                        elsif v_tl < to_signed(152, 10) then
-                            s_aci(k) <= s_sl_col(k);
-                            s_aco(k) <= s_sl_col2(k);
-                        else
-                            s_aci(k) <= C_EMBER(to_integer(s_sl_col(k)));
-                            s_aco(k) <= C_EMBER(to_integer(s_sl_col2(k)));
-                        end if;
+                    -- the rocket itself: a white column under its head
+                    -- (independent of the held colour region)
+                    if s_sl_state(k) = "01" then
+                        s_rkon(k) <= '1';
+                    else
+                        s_rkon(k) <= '0';
                     end if;
+                    s_rkx(k) <= s_sl_cx(k);
+                    s_rky(k) <= s_sl_cy(k);
                 end loop;
-
             end if;
         end if;
     end process p_attr;
@@ -1197,19 +1445,35 @@ begin
         variable v_d7   : unsigned(6 downto 0);
         variable v_idx  : unsigned(6 downto 0);
         variable v_seed : unsigned(15 downto 0);
-        variable v_bxs  : signed(10 downto 0);
         variable v_t3   : unsigned(2 downto 0);
         variable v_n7   : unsigned(6 downto 0);
         variable v_hue  : unsigned(9 downto 0);
         variable v_vis  : std_logic;
-        variable v_boom : std_logic;
-        variable v_hf_go : std_logic;
         variable v_sp   : boolean;
         variable v_tls  : signed(9 downto 0);
         variable v_scr  : signed(9 downto 0);
+        variable v_c1   : unsigned(2 downto 0);
+        variable v_pas  : std_logic;
+        variable v_n6   : unsigned(5 downto 0);
+        variable v_apy  : unsigned(7 downto 0);
+        variable v_dly  : unsigned(9 downto 0);
+        variable v_bl   : unsigned(9 downto 0);
+        variable v_d9   : unsigned(8 downto 0);
+        variable v_gd   : signed(13 downto 0);
+        variable v_gs   : signed(13 downto 0);
     begin
         if rising_edge(clk) then
             s_pl_stb <= '0';
+            -- head pixel coordinates, one shared free-running converter
+            -- (s_x4/s_y4 settle >= 2 states before any head is issued)
+            s_hx <= f_px(s_x4);
+            s_hy <= f_px(s_y4);
+            -- lifecycle action flags are one-cycle pulses: set in
+            -- EST_LIFED, applied (below the FSM case) during EST_LIFE1
+            s_lc_sp   <= '0';  s_lc_inc <= '0';  s_lc_boom <= '0';
+            s_lc_die  <= '0';  s_lc_sink <= '0'; s_lc_mvr <= '0';
+            s_lc_mvl  <= '0';
+            s_ht_we   <= '0';
 
             -- free-running layout regs off the settled cell dims (see p_count)
             s_cwu    <= s_cw2(8 downto 0);
@@ -1217,32 +1481,21 @@ begin
             if s_sw_water = '1' then
                 s_ground <= s_horiz - 2;
             else
-                s_ground <= resize(s_ch2 - 4, 8);
+                if s_ch2 > to_unsigned(C_CH, 10) then
+                    s_ground <= to_unsigned(C_CH - 4, 8);
+                else
+                    s_ground <= resize(s_ch2 - 4, 8);
+                end if;
             end if;
             s_apbase <= resize(shift_right(s_ch2, 2), 8) - 12;
 
-            -- free-running slider decode (plain registers; the vsync-edge
-            -- FSM reads 1-bit flags, never SPI-register carry chains)
+            -- slider into a plain register (never SPI carry chains in a cone)
             s_sldr <= unsigned(registers_in(7));
-            if s_sldr >= to_unsigned(96, 10)  then s_sf_go  <= '1'; else s_sf_go  <= '0'; end if;
-            if s_sldr >= to_unsigned(960, 10) then s_sf_960 <= '1'; else s_sf_960 <= '0'; end if;
-            if s_sldr <  to_unsigned(64, 10)  then s_sf_64  <= '1'; else s_sf_64  <= '0'; end if;
-            if s_sldr <  to_unsigned(8, 10)   then s_sf_8   <= '1'; else s_sf_8   <= '0'; end if;
-            if resize(s_sldr, 11) + to_unsigned(48, 11)
-               < resize(s_hf_max, 11)         then s_sf_rel <= '1'; else s_sf_rel <= '0'; end if;
-            if s_sldr > s_hf_max              then s_sf_gtm <= '1'; else s_sf_gtm <= '0'; end if;
             -- pre-registered spawn clamp bound (the spawn-x adder+clamp
             -- chain is the hd_hdmi critical path -- keep it shallow)
             s_cwm32 <= signed(resize(s_cwu, 11)) - to_signed(32, 11);
-            -- relaunch timers + drift pacing, decoded free-running (ages
-            -- change only at vsync, so these settle immediately after)
-            for k in 0 to 3 loop
-                if s_sl_age(k) >= s_sl_delay(k) then
-                    s_expd(k) <= '1';
-                else
-                    s_expd(k) <= '0';
-                end if;
-            end loop;
+            -- drift pacing, decoded free-running (the frame counter only
+            -- changes at the tick)
             if (s_gravK /= 0 and s_frame_cnt(2 downto 0) = "000")
                or (s_gravK(5) = '1' and s_frame_cnt(2 downto 0) = "100") then
                 s_pc_sink <= '1';
@@ -1258,14 +1511,6 @@ begin
                 s_pc_mom16 <= '1';
             else
                 s_pc_mom16 <= '0';
-            end if;
-            -- altitude map: 0..158 cells of rise, clamped at the apogee band
-            if resize(s_sldr(9 downto 3), 8) + resize(s_sldr(9 downto 5), 8)
-               >= s_ground - s_apbase then
-                s_hf_alt <= s_apbase;
-            else
-                s_hf_alt <= s_ground - (resize(s_sldr(9 downto 3), 8)
-                                        + resize(s_sldr(9 downto 5), 8));
             end if;
             -- pads at 1/8, 3/8, 5/8, 7/8 of the usable width
             s_pad(0) <= resize(shift_right(s_cw2, 3), 9);
@@ -1291,11 +1536,120 @@ begin
                     if s_decay_active = '0' then
                         if s_ei = 4 then
                             s_est <= EST_IDLE;
-                        elsif s_sl_state(s_ei) = "00" then
-                            if s_ei = 3 then s_ei <= 4; else s_ei <= s_ei + 1; end if;
+                            -- head table final for this frame
+                            s_hn   <= s_hcnt;
+                            s_hrdy <= '1';
                         else
-                            s_est <= EST_AGE;
+                            s_est <= EST_LIFE;
                         end if;
+                    end if;
+
+                -- ============ per-frame lifecycle of slot s_ei ============
+                -- hoist (slot -> plain regs) -> decide (registered 1-bit
+                -- action flags + one-hot slot) -> apply (below the case:
+                -- shared data, per-slot CEN = flag AND one-hot)
+                when EST_LIFE =>
+                    -- pre-add the respawn x (pad + seed jitter); EST_LIFED clamps
+                    s_lc_st   <= s_sl_state(s_ei);
+                    s_lc_age  <= s_sl_age(s_ei);
+                    if s_sl_age(s_ei) >= s_sl_delay(s_ei) then
+                        s_lc_exp <= '1';
+                    else
+                        s_lc_exp <= '0';
+                    end if;
+                    s_lc_seed <= s_sl_seed(s_ei);
+                    s_lc_cx   <= s_sl_cx(s_ei);
+                    s_lc_cy   <= s_sl_cy(s_ei);
+                    s_lc_apy  <= s_sl_apy(s_ei);
+                    v_seed := s_lfsr xor (x"1D" & to_unsigned(s_ei mod 4, 2)
+                                          & s_frame_cnt(5 downto 0));
+                    s_lc_ns <= v_seed;
+                    s_lc_bx <= signed(resize(s_pad(s_ei), 11))
+                               + resize(signed('0' & v_seed(5 downto 0)), 11)
+                               - to_signed(32, 11);
+                    s_est <= EST_LIFED;
+
+                when EST_LIFED =>
+                    -- 32-cell margin: near-edge shells lost half their
+                    -- sparks off-canvas ("cut off" look)
+                    if s_lc_bx < to_signed(32, 11) then
+                        s_lc_cxs <= to_unsigned(32, 9);
+                    elsif s_lc_bx > s_cwm32 then
+                        s_lc_cxs <= unsigned(s_cwm32(8 downto 0));
+                    else
+                        s_lc_cxs <= unsigned(s_lc_bx(8 downto 0));
+                    end if;
+                    for k in 0 to 3 loop
+                        if k = s_ei then
+                            s_lc_oh(k) <= '1';
+                        else
+                            s_lc_oh(k) <= '0';
+                        end if;
+                    end loop;
+                    -- age / spawn / transition (halted by FREEZE; the replot
+                    -- keeps running from the frozen ages)
+                    if s_freeze = '0' then
+                        case s_lc_st is
+                            when "00" =>   -- idle: wait out the relaunch delay
+                                if s_lc_exp = '1' then
+                                    s_lc_sp <= '1';
+                                else
+                                    s_lc_inc <= '1';
+                                end if;
+                            when "01" =>   -- launch: 64-frame ascent
+                                if s_lc_age = 63 then
+                                    s_lc_boom <= '1';
+                                else
+                                    s_lc_inc <= '1';
+                                end if;
+                            when "10" =>   -- burst: 128-frame bloom and fade
+                                if s_lc_age = 127 then
+                                    s_lc_die <= '1';
+                                else
+                                    s_lc_inc <= '1';
+                                    -- the whole cloud DRIFTS as it fades:
+                                    -- paced integer steps of the base center
+                                    -- (sparks, core and attribution follow;
+                                    -- FREEZE halts it). Sink: 1 cell / 8
+                                    -- frames, doubled on the heavy half of
+                                    -- GRAVITY; none at 0
+                                    if s_pc_sink = '1'
+                                       and s_lc_cy < to_unsigned(C_CH - 4, 8) then
+                                        s_lc_sink <= '1';
+                                    end if;
+                                    -- sideways momentum: seed-picked
+                                    -- direction, 1 cell / 8 or / 16 frames
+                                    if (s_lc_seed(2) = '1' and s_pc_mom8 = '1')
+                                       or (s_lc_seed(2) = '0'
+                                           and s_pc_mom16 = '1') then
+                                        if s_lc_seed(1) = '1' then
+                                            if signed(resize(s_lc_cx, 11)) < s_cwm32 then
+                                                s_lc_mvr <= '1';
+                                            end if;
+                                        else
+                                            if s_lc_cx > to_unsigned(32, 9) then
+                                                s_lc_mvl <= '1';
+                                            end if;
+                                        end if;
+                                    end if;
+                                end if;
+                            when others => -- unreachable: recover to idle
+                                s_lc_die <= '1';
+                        end case;
+                    end if;
+                    s_est <= EST_LIFE1;
+
+                when EST_LIFE1 =>
+                    -- the decided actions apply this cycle (below the case)
+                    s_est <= EST_LIFE2;
+
+                when EST_LIFE2 =>
+                    -- idle slots (embers fading) skip the replot
+                    if s_sl_state(s_ei) = "00" then
+                        if s_ei = 3 then s_ei <= 4; else s_ei <= s_ei + 1; end if;
+                        s_est <= EST_SLOT;
+                    else
+                        s_est <= EST_AGE;
                     end if;
 
                 when EST_AGE =>
@@ -1326,7 +1680,7 @@ begin
                         else
                             s_cage <= unsigned(v_tls(6 downto 0));
                         end if;
-                        s_est <= EST_P0;
+                        s_est <= EST_T0;
                     else
                         s_cphase <= '0';
                         if s_tl < to_signed(0, 10) then
@@ -1334,12 +1688,60 @@ begin
                         else
                             s_cage <= unsigned(s_tl(6 downto 0));
                         end if;
+                        s_est <= EST_T0;
+                    end if;
+
+                -- ============ physics curves for this pass (was a ROM) ============
+                -- curve index now / last frame: burst = cage, rocket = 2*cage
+                -- (64-frame ascent over the 128-entry curve)
+                when EST_T0 =>
+                    if s_cphase = '1' then
+                        s_tic <= s_cage;
+                        if s_cage = 0 then
+                            s_tip <= (others => '0');
+                        else
+                            s_tip <= s_cage - 1;
+                        end if;
+                    else
+                        s_tic <= s_cage(5 downto 0) & '0';
+                        if s_cage = 0 then
+                            s_tip <= (others => '0');
+                        else
+                            s_tip <= (s_cage(5 downto 0) - 1) & '0';
+                        end if;
+                    end if;
+                    s_est <= EST_T0 + 1;
+                when EST_T0 + 1 =>   -- (127 - i) is just NOT i on 7 bits
+                    s_mul_a <= signed('0' & not s_tic);
+                    s_mul_b <= signed(resize(not s_tic, 10));
+                    s_est <= EST_T0 + 2;
+                when EST_T0 + 2 =>
+                    s_mul_a <= signed('0' & s_tic);
+                    s_mul_b <= signed(resize(s_tic, 10));
+                    s_est <= EST_T0 + 3;
+                when EST_T0 + 3 =>
+                    s_eC <= to_unsigned(126, 7) - unsigned(s_mul_p(13 downto 7));
+                    s_mul_a <= signed('0' & not s_tip);
+                    s_mul_b <= signed(resize(not s_tip, 10));
+                    s_est <= EST_T0 + 4;
+                when EST_T0 + 4 =>
+                    s_dC <= unsigned(s_mul_p(13 downto 7));
+                    s_mul_a <= signed('0' & s_tip);
+                    s_mul_b <= signed(resize(s_tip, 10));
+                    s_est <= EST_T0 + 5;
+                when EST_T0 + 5 =>
+                    s_eP <= to_unsigned(126, 7) - unsigned(s_mul_p(13 downto 7));
+                    s_est <= EST_T0 + 6;
+                when EST_T0 + 6 =>
+                    s_dP <= unsigned(s_mul_p(13 downto 7));
+                    if s_cphase = '1' then
+                        s_est <= EST_P0;
+                    else
                         s_est <= EST_R0;
                     end if;
 
                 -- ============ ROCKET (launch phase, one streak/frame) ============
                 when EST_R0 =>
-                    s_tbl_addr <= s_cage(5 downto 0) & '0';
                     -- ascent height, registered so the multiplier operand mux
                     -- reads a plain register (not slot-array mux + subtract)
                     s_hsc <= s_ground - s_sl_apy(s_ei);
@@ -1353,43 +1755,32 @@ begin
                     end if;
                     s_est <= EST_R0 + 1;
                 when EST_R0 + 1 =>
-                    if s_cage = 0 then
-                        s_tbl_addr <= (others => '0');
-                    else
-                        s_tbl_addr <= (s_cage(5 downto 0) - 1) & '0';
-                    end if;
                     -- sway: one sine cycle over the 64-frame ascent
                     s_lut_angle <= std_logic_vector(s_cage(5 downto 0)) & "0000";
                     s_est <= EST_R0 + 2;
                 when EST_R0 + 2 =>
                     s_sinP <= s_lut_sin;
-                    s_mul_a <= signed(resize(s_tbl_q(7 downto 0), 8));   -- ease[idx]
+                    s_mul_a <= signed('0' & s_eC);                        -- ease[idx]
                     s_mul_b <= signed(resize(s_hsc, 10));
                     s_est <= EST_R0 + 3;
                 when EST_R0 + 3 =>
-                    s_mul_a <= signed(resize(s_tbl_q(7 downto 0), 8));   -- ease[idx-1]
+                    s_mul_a <= signed('0' & s_eP);                        -- ease[idx-1]
                     s_mul_b <= signed(resize(s_hsc, 10));
                     s_est <= EST_R0 + 4;
                 when EST_R0 + 4 =>
                     -- p = ease[idx]*height -> current rocket y (rise can reach
-                    -- 138, so take 8 product bits, not 7); a hand-held shell
-                    -- takes its altitude straight from the slider instead
-                    if s_hf_act = '1' and s_ei = 3 then
-                        s_yc <= signed(resize(s_hf_cy, 11));
-                        s_xc <= signed(resize(s_ccx, 11));      -- no sway
-                    else
-                        s_yc <= signed(resize(s_ground, 11)) - resize(signed('0' & s_mul_p(14 downto 7)), 11);
-                        s_xc <= signed(resize(s_ccx, 11))
-                                + resize(shift_right(s_sinP, 8), 11);
-                    end if;
+                    -- 138, so take 8 product bits, not 7)
+                    s_yc <= signed(resize(s_ground, 11)) - resize(signed('0' & s_mul_p(14 downto 7)), 11);
+                    s_xc <= signed(resize(s_ccx, 11))
+                            + resize(shift_right(s_sinP, 8), 11);
+                    s_y4 <= signed(shift_left(resize(s_ground, 13), 2))
+                            - signed(resize(unsigned(s_mul_p(14 downto 5)), 13));
+                    s_x4 <= signed(shift_left(resize(s_ccx, 13), 2))
+                            + resize(shift_right(s_sinP, 6), 13);
                     s_est <= EST_R0 + 5;
                 when EST_R0 + 5 =>
                     -- p = ease[idx-1]*height -> previous rocket y
-                    if s_hf_act = '1' and s_ei = 3 then
-                        s_yp <= signed(resize(s_hf_cyp, 11));
-                    else
-                        s_yp <= signed(resize(s_ground, 11)) - resize(signed('0' & s_mul_p(14 downto 7)), 11);
-                    end if;
+                    s_yp <= signed(resize(s_ground, 11)) - resize(signed('0' & s_mul_p(14 downto 7)), 11);
                     s_xp <= s_xc;
                     s_est <= EST_R0 + 6;
                 when EST_R0 + 6 =>
@@ -1403,6 +1794,13 @@ begin
                         s_pl_val <= "11";
                         s_pl_head <= s_apx;
                         s_pl_stb <= '1';
+                        if s_hcnt(8) = '0' then
+                            s_ht_we <= '1';
+                            s_ht_wa <= s_hcnt(7 downto 0);
+                            s_ht_wd <= '0' & s_apx & "000" & std_logic_vector(s_hy)
+                                       & "00000" & std_logic_vector(s_hx);
+                            s_hcnt  <= s_hcnt + 1;
+                        end if;
                         -- track attribution center up the ascent (only for a
                         -- genuinely ascending slot -- never during scrub)
                         if s_ctrack = '1' then
@@ -1414,7 +1812,6 @@ begin
 
                 -- ============ BURST prep: shared radius/droop for the shell ============
                 when EST_P0 =>
-                    s_tbl_addr <= s_cage;
                     s_ccx   <= s_sl_cx(s_ei);
                     s_ccy   <= s_sl_cy(s_ei);
                     s_ctyp  <= s_sl_typ(s_ei);
@@ -1455,20 +1852,15 @@ begin
                     end if;
                     s_est <= EST_P0 + 1;
                 when EST_P0 + 1 =>
-                    if s_cage = 0 then
-                        s_tbl_addr <= (others => '0');
-                    else
-                        s_tbl_addr <= s_cage - 1;
-                    end if;
                     s_est <= EST_P0 + 2;
                 when EST_P0 + 2 =>
-                    s_droopC <= s_tbl_q(15 downto 8);
-                    s_mul_a <= signed(resize(s_tbl_q(7 downto 0), 8));    -- ease[idx]
+                    s_droopC <= resize(s_dC, 8);
+                    s_mul_a <= signed('0' & s_eC);                         -- ease[idx]
                     s_mul_b <= signed(resize(s_sizeK, 10));
                     s_est <= EST_P0 + 3;
                 when EST_P0 + 3 =>
-                    s_easeP  <= s_tbl_q(7 downto 0);
-                    s_droopP <= s_tbl_q(15 downto 8);
+                    s_easeP  <= resize(s_eP, 8);
+                    s_droopP <= resize(s_dP, 8);
                     s_mul_a <= signed(resize(s_droopC, 8));
                     s_mul_b <= signed(resize(s_gravK, 10));
                     s_est <= EST_P0 + 4;
@@ -1490,11 +1882,23 @@ begin
                     else
                         s_dreffC <= v_d7;
                     end if;
+                    -- the same droop in quarter cells for the sharp head
+                    v_d9 := unsigned(s_mul_p(13 downto 5));
+                    if s_ctyp = C_TY_WILLOW then
+                        s_dfC4 <= v_d9 & '0';
+                    elsif s_ctyp = C_TY_PALM then
+                        s_dfC4 <= resize(v_d9, 10) + resize(v_d9(8 downto 1), 10);
+                    elsif s_ctyp = C_TY_COMET then
+                        s_dfC4 <= resize(v_d9(8 downto 1), 10);
+                    else
+                        s_dfC4 <= resize(v_d9, 10);
+                    end if;
                     s_mul_a <= signed(resize(s_droopP, 8));
                     s_mul_b <= signed(resize(s_gravK, 10));
                     s_est <= EST_P0 + 6;
                 when EST_P0 + 6 =>
                     s_rbaseP <= unsigned(s_mul_p(13 downto 7));
+                    s_cyd4   <= shift_left(resize(s_ccy, 12), 2) + resize(s_dfC4, 12);
                     s_est <= EST_P0 + 7;
                 when EST_P0 + 7 =>
                     v_d7 := unsigned(s_mul_p(13 downto 7));
@@ -1508,6 +1912,9 @@ begin
                         s_dreffP <= v_d7;
                     end if;
                     s_pi  <= (others => '0');
+                    -- core head: the shell centre
+                    s_x4 <= signed(shift_left(resize(s_ccx, 13), 2));
+                    s_y4 <= signed(shift_left(resize(s_ccy, 13), 2));
                     s_est <= EST_PC;
 
                 -- ============ persistent core: bright plus at the center ============
@@ -1522,6 +1929,13 @@ begin
                         s_pl_val <= s_core_val;
                         s_pl_head <= '1';
                         s_pl_stb <= '1';
+                        if s_core_val = "11" and s_hcnt(8) = '0' then
+                            s_ht_we <= '1';
+                            s_ht_wa <= s_hcnt(7 downto 0);
+                            s_ht_wd <= "01000" & std_logic_vector(s_hy)
+                                       & "00000" & std_logic_vector(s_hx);
+                            s_hcnt  <= s_hcnt + 1;
+                        end if;
                         s_est <= EST_Q0;
                     end if;
 
@@ -1583,11 +1997,28 @@ begin
                 when EST_Q0 + 4 =>
                     s_cosP <= s_lut_sin;                      -- sin(a+256) = cos(a)
                     s_rc <= unsigned(s_mul_p(13 downto 7));               -- r now
+                    s_rf <= unsigned(s_mul_p(6 downto 5));                -- + r/4 bits
                     s_est <= EST_Q0 + 5;
                 when EST_Q0 + 5 =>
                     s_riseP <= unsigned(s_mul_p(13 downto 7));            -- r last frame
                     s_mul_a <= signed(resize(s_rc, 8));
                     s_mul_b <= s_cosP;
+                    -- radius fraction x (cos, sin) for the head's sub-cell
+                    -- position (rf = 0..3 quarter cells: shift-adds)
+                    case s_rf is
+                        when "00" =>
+                            s_rfx <= (others => '0');
+                            s_rfy <= (others => '0');
+                        when "01" =>
+                            s_rfx <= resize(s_cosP, 12);
+                            s_rfy <= resize(s_sinP, 12);
+                        when "10" =>
+                            s_rfx <= shift_left(resize(s_cosP, 12), 1);
+                            s_rfy <= shift_left(resize(s_sinP, 12), 1);
+                        when others =>
+                            s_rfx <= resize(s_cosP, 12) + shift_left(resize(s_cosP, 12), 1);
+                            s_rfy <= resize(s_sinP, 12) + shift_left(resize(s_sinP, 12), 1);
+                    end case;
                     s_est <= EST_Q0 + 6;
                 when EST_Q0 + 6 =>
                     s_mul_a <= signed(resize(s_rc, 8));
@@ -1596,6 +2027,9 @@ begin
                 when EST_Q0 + 7 =>
                     s_xc <= signed(resize(s_ccx, 11))
                             + resize(shift_right(s_mul_p, 9), 11);        -- rc*cos
+                    s_x4 <= signed(shift_left(resize(s_ccx, 13), 2))
+                            + resize(shift_right(s_mul_p, 7), 13)
+                            + resize(shift_right(s_rfx, 9), 13);
                     s_mul_a <= signed(resize(s_riseP, 8));                -- (r prev)
                     s_mul_b <= s_cosP;
                     s_est <= EST_Q0 + 8;
@@ -1603,6 +2037,9 @@ begin
                     s_yc <= signed(resize(s_ccy, 11))
                             + resize(shift_right(s_mul_p, 9), 11)         -- rc*sin
                             + signed(resize(s_dreffC, 11));
+                    s_y4 <= signed(resize(s_cyd4, 13))
+                            + resize(shift_right(s_mul_p, 7), 13)
+                            + resize(shift_right(s_rfy, 9), 13);
                     s_mul_a <= signed(resize(s_riseP, 8));
                     s_mul_b <= s_sinP;
                     s_est <= EST_Q0 + 9;
@@ -1621,7 +2058,13 @@ begin
                     else
                         s_val <= s_val_pre;
                     end if;
-                    s_head <= s_head_pre;
+                    -- BLAST climax zone: a rising share of sparks gets the
+                    -- bold plus head (index-cycled hash bits = even spread)
+                    if s_head_pre = '1' or s_h(9 downto 6) < s_hboost then
+                        s_head <= '1';
+                    else
+                        s_head <= '0';
+                    end if;
                     v_vis := '1';
                     if s_crkl_en = '1'
                        and (s_h(1 downto 0) xor s_frame_cnt(1 downto 0)) >= 2 then
@@ -1636,8 +2079,8 @@ begin
                 when EST_Q0 + 11 =>
                     -- register the 8-comparator range check: computed inside
                     -- the issue state it gated the plot registers' CEN cone
-                    if (s_xc > 0) and (s_xc < 319) and (s_yc >= 0) and (s_yc <= 177)
-                       and (s_xp > 0) and (s_xp < 319) and (s_yp >= 0) and (s_yp <= 177) then
+                    if (s_xc > 0) and (s_xc < 319) and (s_yc >= 0) and (s_yc <= C_CH - 3)
+                       and (s_xp > 0) and (s_xp < 319) and (s_yp >= 0) and (s_yp <= C_CH - 3) then
                         s_ok <= '1';
                     else
                         s_ok <= '0';
@@ -1661,6 +2104,14 @@ begin
                         s_pl_val <= s_val;
                         s_pl_head <= s_head;
                         s_pl_stb <= '1';
+                        -- sharp head while the spark still burns bright
+                        if s_val = "11" and s_hcnt(8) = '0' then
+                            s_ht_we <= '1';
+                            s_ht_wa <= s_hcnt(7 downto 0);
+                            s_ht_wd <= '0' & s_head & "000" & std_logic_vector(s_hy)
+                                       & "00000" & std_logic_vector(s_hx);
+                            s_hcnt  <= s_hcnt + 1;
+                        end if;
                         if s_lastp = '1' then
                             if s_ei = 3 then s_ei <= 4; else s_ei <= s_ei + 1; end if;
                             s_est <= EST_SLOT;
@@ -1674,15 +2125,137 @@ begin
                     s_est <= EST_IDLE;
             end case;
 
-            -- ---------------- per-frame lifecycle (vsync edge wins) ----------------
-            if data_in.vsync_n = '0' and s_prev_vsync_n = '1' then
-                -- latch controls; shells scale down when the cell world is
-                -- short (1080i fields: 6x6 cells -> only ~180/3 rows usable)
+            -- ---------------- lifecycle apply (EST_LIFE1 cycle) ----------------
+            -- spawn data is computed ONCE from the registered respawn seed;
+            -- each slot only muxes it in under flag AND one-hot
+            v_seed := s_lc_ns;
+            -- type: S7 bank pick; S8 mixes in ring shells; comets salt both
+            -- banks (~1 in 4)
+            if s_ringOn = '1' and v_seed(2 downto 1) = "11" then
+                v_t3 := C_TY_RING;
+            elsif v_seed(8 downto 7) = "11" then
+                v_t3 := C_TY_COMET;
+            elsif s_bankB = '0' then
+                if v_seed(6) = '0' then v_t3 := C_TY_PEONY;
+                else v_t3 := C_TY_CHRYS; end if;
+            else
+                if v_seed(6) = '0' then v_t3 := C_TY_WILLOW;
+                else v_t3 := C_TY_PALM; end if;
+            end if;
+            -- K4 HUE bank picks the shell's ONE colour
+            case s_hueSel is
+                when "000" =>   -- Warm: white / yellow (gold) / orange
+                    case v_seed(12 downto 11) is
+                        when "00"   => v_c1 := "111";
+                        when "10"   => v_c1 := "001";
+                        when others => v_c1 := "010";
+                    end case;
+                when "001" =>   -- Primaries: red / green / blue
+                    case v_seed(12 downto 11) is
+                        when "01"   => v_c1 := "011";
+                        when "10"   => v_c1 := "100";
+                        when others => v_c1 := "000";
+                    end case;
+                when "011" =>   -- Red-White-Blue
+                    case v_seed(12 downto 11) is
+                        when "00"   => v_c1 := "000";
+                        when "01"   => v_c1 := "111";
+                        when others => v_c1 := "100";
+                    end case;
+                when others =>  -- Pastel / Rainbow: any of the 8
+                    v_c1 := v_seed(13 downto 11);
+            end case;
+            -- pastel bank is all-pastel; the Random bank salts in pastel
+            -- shells (~1 in 4) for more color variety
+            if s_hueSel = "010"
+               or (s_hueSel = "100" and v_seed(10 downto 9) = "11") then
+                v_pas := '1';
+            else
+                v_pas := '0';
+            end if;
+            -- spark count (palm/comet: few thick arms)
+            if v_t3 = C_TY_PALM then
+                v_n6 := to_unsigned(10, 6);
+            elsif v_t3 = C_TY_COMET then
+                v_n6 := to_unsigned(14, 6);
+            else
+                v_n7 := to_unsigned(10, 7) + resize(s_dens, 7);
+                if v_n7 > 60 then v_n7 := to_unsigned(60, 7); end if;
+                v_n6 := v_n7(5 downto 0);
+            end if;
+            v_apy := s_apbase + resize(v_seed(10 downto 6), 8);
+            -- relaunch delay (FINALE: tight jitter -> overlapping salvos)
+            if s_sw_finale = '1' then
+                v_dly := s_rateD + resize(s_lc_seed(2 downto 0), 10);
+            else
+                v_dly := s_rateD + resize(s_lc_seed(4 downto 0), 10);
+            end if;
+            for k in 0 to 3 loop
+                if s_lc_oh(k) = '1' then
+                    if s_lc_sp = '1' then
+                        s_sl_seed(k)  <= v_seed;
+                        s_sl_state(k) <= "01";
+                        s_sl_age(k)   <= (others => '0');
+                        s_sl_ever(k)  <= '1';
+                        s_sl_cx(k)    <= s_lc_cxs;
+                        s_sl_cy(k)    <= s_ground;
+                        s_sl_apy(k)   <= v_apy;
+                        s_sl_typ(k)   <= v_t3;
+                        s_sl_col(k)   <= v_c1;
+                        s_sl_pas(k)   <= v_pas;
+                        s_sl_rsp(k)   <= to_unsigned(2, 7);
+                        s_sl_n(k)     <= v_n6;
+                    end if;
+                    if s_lc_inc = '1' then
+                        s_sl_age(k) <= s_lc_age + 1;
+                    end if;
+                    if s_lc_boom = '1' then
+                        s_sl_state(k) <= "10";
+                        s_sl_age(k)   <= (others => '0');
+                        s_sl_cy(k)    <= s_lc_apy;
+                    end if;
+                    if s_lc_die = '1' then
+                        s_sl_state(k) <= "00";
+                        s_sl_age(k)   <= (others => '0');
+                        s_sl_delay(k) <= v_dly;
+                    end if;
+                    if s_lc_sink = '1' then
+                        s_sl_cy(k) <= s_lc_cy + 1;
+                    end if;
+                    if s_lc_mvr = '1' then
+                        s_sl_cx(k) <= s_lc_cx + 1;
+                    end if;
+                    if s_lc_mvl = '1' then
+                        s_sl_cx(k) <= s_lc_cx - 1;
+                    end if;
+                end if;
+            end loop;
+            if s_lc_boom = '1' then
+                s_boom <= '1';
+            end if;
+
+            -- ------------- per-frame tick: latch controls, restart replot -------------
+            -- (the slot lifecycle itself runs per slot in EST_LIFE*)
+            if s_ftick = '1' then
+                -- P12 BLAST (glided, see below): live scale of every burst,
+                -- 8..102 cells (slider 800 = the old K2-max 83); shells
+                -- scale down when the cell world is short (1080i fields:
+                -- 6x6 cells -> only ~180/3 rows usable)
+                v_bl := s_bla(12 downto 3);
                 if s_short = '1' then
-                    s_sizeK <= to_unsigned(12, 7)
-                               + resize(unsigned(registers_in(1)(9 downto 5)), 7);
+                    s_sizeK <= to_unsigned(4, 7) + resize(v_bl(9 downto 5), 7)
+                               + resize(v_bl(9 downto 6), 7);
                 else
-                    s_sizeK <= to_unsigned(20, 7) + resize(unsigned(registers_in(1)(9 downto 4)), 7);
+                    s_sizeK <= to_unsigned(8, 7) + resize(v_bl(9 downto 4), 7)
+                               + resize(v_bl(9 downto 5), 7);
+                end if;
+                -- climax zone = top eighth of the travel (896..1023)
+                if v_bl(9 downto 7) = "111" then
+                    s_hboost <= v_bl(6 downto 3);
+                    s_bltop  <= '1';
+                else
+                    s_hboost <= (others => '0');
+                    s_bltop  <= '0';
                 end if;
                 -- K3 GRAVITY (unsigned: the negative "embers rise" zone was
                 -- cut for LC/congestion -- see the cut list)
@@ -1698,16 +2271,14 @@ begin
                                + resize(shift_right(to_unsigned(1023, 10)
                                                     - unsigned(registers_in(0)), 1), 10);
                 end if;
-                if unsigned(registers_in(0)) < to_unsigned(32, 10) then
-                    s_silent <= '1';
-                else
-                    s_silent <= '0';
-                end if;
-                -- K2 SIZE also drives sparks per shell
+                -- K2 SPARKS: sparks per shell (the slider owns the size)
                 s_dens  <= unsigned(registers_in(1)(9 downto 4));
                 -- K4 HUE: 5 palette-bank zones
                 v_hue := unsigned(registers_in(3));
-                if    v_hue < 205 then s_hueSel <= "000";   -- Gold
+                -- at program load the firmware writes the labelled default's
+                -- INDEX (0..4), not a knob position: read small values as it
+                if v_hue < 5 then  s_hueSel <= v_hue(2 downto 0);
+                elsif v_hue < 205 then s_hueSel <= "000";   -- Gold
                 elsif v_hue < 410 then s_hueSel <= "001";   -- Primaries
                 elsif v_hue < 615 then s_hueSel <= "010";   -- Pastel
                 elsif v_hue < 820 then s_hueSel <= "011";   -- Red-Wht-Blue
@@ -1726,260 +2297,35 @@ begin
                 s_sw_finale <= registers_in(6)(3);
                 s_freeze    <= registers_in(6)(4);
 
-                -- P12: blackout when fully idle (flags pre-decoded above)
-                if s_silent = '1' and s_sf_8 = '1' then
-                    s_blk <= '1';
-                else
-                    s_blk <= '0';
+                -- P12. Outside FREEZE: BLAST amount, glided (diff/8 per
+                -- frame) and held while frozen. Inside FREEZE: timeline scrub
+                -- RELATIVE to where the slider sat at the freeze edge (+-255
+                -- frames), so flipping FREEZE holds the exact frame; +64 is
+                -- pre-folded for burst slots
+                if s_freeze = '0' then
+                    v_gd := signed(resize(s_sldr & "000", 14))
+                            - signed(resize(s_bla, 14));
+                    -- (slice, not resize: a signed narrowing would drop
+                    -- bit 12 and fold the top half of the slider)
+                    v_gs  := signed(resize(s_bla, 14)) + shift_right(v_gd, 3);
+                    s_bla <= unsigned(v_gs(12 downto 0));
+                    s_scr_lat <= s_sldr;
                 end if;
-                -- FREEZE turns the slider into a timeline scrub: center =
-                -- now, ends = -+128 frames; +64 pre-folded for burst slots
                 if s_freeze = '1' then
-                    v_scr := resize(shift_right(signed('0' & s_sldr)
-                                                - to_signed(512, 11), 2), 10);
+                    v_scr := resize(shift_right(signed(resize(s_sldr, 11))
+                                                - signed(resize(s_scr_lat, 11)), 2), 10);
                 else
                     v_scr := (others => '0');
                 end if;
                 s_scr_r <= v_scr;
                 s_scr_b <= v_scr + to_signed(64, 10);
-                -- hand-fire trigger: armed and pushed up from the bottom
-                v_hf_go := '0';
-                if s_freeze = '0' and s_hf_state = "00" and s_sf_go = '1' then
-                    v_hf_go := '1';
-                end if;
 
-                -- age / spawn / transition each slot (halted by FREEZE;
-                -- the per-frame replot keeps running from the frozen ages)
-                v_boom := '0';
-                if s_freeze = '0' then
-                for k in 0 to 3 loop
-                    case s_sl_state(k) is
-                        when "00" =>   -- idle: wait out the relaunch delay
-                            -- slot 3 doubles as the hand-fire shell: manual
-                            -- pushes spawn it instantly (even in silence);
-                            -- auto relaunch skips it while the hand owns it
-                            v_sp := s_silent = '0' and s_expd(k) = '1';
-                            if k = 3 then
-                                v_sp := (v_sp and s_hf_state = "00"
-                                         and v_hf_go = '0')
-                                        or v_hf_go = '1';
-                            end if;
-                            if v_sp then
-                                v_seed := s_lfsr xor (x"1D" & to_unsigned(k, 2) & s_frame_cnt(5 downto 0));
-                                s_sl_seed(k)  <= v_seed;
-                                s_sl_state(k) <= "01";
-                                s_sl_age(k)   <= (others => '0');
-                                s_sl_ever(k)  <= '1';
-                                v_bxs := signed(resize(s_pad(k), 11))
-                                         + resize(signed('0' & v_seed(5 downto 0)), 11)
-                                         - to_signed(32, 11);
-                                -- 32-cell margin: near-edge shells lost half
-                                -- their sparks off-canvas ("cut off" look)
-                                if v_bxs < to_signed(32, 11) then
-                                    v_bxs := to_signed(32, 11);
-                                elsif v_bxs > s_cwm32 then
-                                    v_bxs := s_cwm32;
-                                end if;
-                                s_sl_cx(k)    <= unsigned(v_bxs(8 downto 0));
-                                s_sl_cy(k)    <= s_ground;
-                                s_sl_apy(k)   <= s_apbase + resize(v_seed(10 downto 6), 8);
-                                -- type: S7 bank pick; S8 mixes in ring
-                                -- shells; comets salt both banks (~1 in 4)
-                                if s_ringOn = '1' and v_seed(2 downto 1) = "11" then
-                                    v_t3 := C_TY_RING;
-                                elsif v_seed(8 downto 7) = "11" then
-                                    v_t3 := C_TY_COMET;
-                                elsif s_bankB = '0' then
-                                    if v_seed(6) = '0' then v_t3 := C_TY_PEONY;
-                                    else v_t3 := C_TY_CHRYS; end if;
-                                else
-                                    if v_seed(6) = '0' then v_t3 := C_TY_WILLOW;
-                                    else v_t3 := C_TY_PALM; end if;
-                                end if;
-                                s_sl_typ(k)  <= v_t3;
-                                -- K4 HUE bank picks the color pair
-                                case s_hueSel is
-                                    when "000" =>   -- Gold: white into gold/yellow
-                                        s_sl_col(k) <= "111";
-                                        if v_seed(11) = '1' then
-                                            s_sl_col2(k) <= "010";
-                                        else
-                                            s_sl_col2(k) <= "001";
-                                        end if;
-                                    when "001" =>   -- Primaries: white into R/G/B
-                                        s_sl_col(k) <= "111";
-                                        case v_seed(12 downto 11) is
-                                            when "00"   => s_sl_col2(k) <= "000";
-                                            when "01"   => s_sl_col2(k) <= "011";
-                                            when "10"   => s_sl_col2(k) <= "100";
-                                            when others => s_sl_col2(k) <= "000";
-                                        end case;
-                                    when "011" =>   -- Red-White-Blue solids
-                                        case v_seed(12 downto 11) is
-                                            when "00"   => s_sl_col(k) <= "000";
-                                                           s_sl_col2(k) <= "000";
-                                            when "01"   => s_sl_col(k) <= "111";
-                                                           s_sl_col2(k) <= "111";
-                                            when others => s_sl_col(k) <= "100";
-                                                           s_sl_col2(k) <= "100";
-                                        end case;
-                                    when others =>  -- Pastel / Random: any pair
-                                        s_sl_col(k)  <= v_seed(13 downto 11);
-                                        s_sl_col2(k) <= v_seed(13 downto 11)
-                                                        + to_unsigned(2, 3)
-                                                        + resize(v_seed(15 downto 14), 3);
-                                end case;
-                                -- pastel bank is all-pastel; the Random
-                                -- bank salts in pastel shells (~1 in 4)
-                                -- for more color variety
-                                if s_hueSel = "010"
-                                   or (s_hueSel = "100"
-                                       and v_seed(10 downto 9) = "11") then
-                                    s_sl_pas(k) <= '1';
-                                else
-                                    s_sl_pas(k) <= '0';
-                                end if;
-                                s_sl_rsp(k) <= to_unsigned(2, 7);
-                                -- spark count (palm/comet: few thick arms)
-                                if v_t3 = C_TY_PALM then
-                                    s_sl_n(k) <= to_unsigned(10, 6);
-                                elsif v_t3 = C_TY_COMET then
-                                    s_sl_n(k) <= to_unsigned(14, 6);
-                                else
-                                    v_n7 := to_unsigned(10, 7) + resize(s_dens, 7);
-                                    if v_n7 > 60 then v_n7 := to_unsigned(60, 7); end if;
-                                    s_sl_n(k) <= v_n7(5 downto 0);
-                                end if;
-                            else
-                                s_sl_age(k) <= s_sl_age(k) + 1;
-                            end if;
-                        when "01" =>   -- launch: 64-frame ascent
-                            if k = 3 and s_hf_act = '1' then
-                                null;  -- hand-held: age frozen, altitude
-                                       -- comes from the slider override
-                            elsif s_sl_age(k) = 63 then
-                                s_sl_state(k) <= "10";
-                                s_sl_age(k)   <= (others => '0');
-                                s_sl_cy(k)    <= s_sl_apy(k);
-                                v_boom := '1';
-                            else
-                                s_sl_age(k) <= s_sl_age(k) + 1;
-                            end if;
-                        when "10" =>   -- burst: 128-frame bloom and fade
-                            if s_sl_age(k) = 127 then
-                                s_sl_state(k) <= "00";
-                                s_sl_age(k)   <= (others => '0');
-                                -- FINALE: tight jitter -> overlapping salvos
-                                if s_sw_finale = '1' then
-                                    s_sl_delay(k) <= s_rateD
-                                        + resize(s_sl_seed(k)(2 downto 0), 10);
-                                else
-                                    s_sl_delay(k) <= s_rateD
-                                        + resize(s_sl_seed(k)(4 downto 0), 10);
-                                end if;
-                            else
-                                s_sl_age(k) <= s_sl_age(k) + 1;
-                                -- the whole cloud DRIFTS as it fades: paced
-                                -- integer steps of the base center (sparks,
-                                -- core and attribution all follow for free;
-                                -- FREEZE halts it, scrub collapses the
-                                -- pattern around the drifted position).
-                                -- Pacing comes from SHARED free-running
-                                -- frame-counter decodes (s_pc_*), not
-                                -- per-slot age bits: one decode, 4 users.
-                                -- Sink: 1 cell / 8 frames, doubled on the
-                                -- heavy half of the GRAVITY knob; none at 0
-                                if s_pc_sink = '1' then
-                                    if s_sl_cy(k) < to_unsigned(176, 8) then
-                                        s_sl_cy(k) <= s_sl_cy(k) + 1;
-                                    end if;
-                                end if;
-                                -- sideways momentum: seed-picked direction,
-                                -- 1 cell / 8 or / 16 frames
-                                if (s_sl_seed(k)(2) = '1' and s_pc_mom8 = '1')
-                                   or (s_sl_seed(k)(2) = '0'
-                                       and s_pc_mom16 = '1') then
-                                    if s_sl_seed(k)(1) = '1' then
-                                        if signed(resize(s_sl_cx(k), 11)) < s_cwm32 then
-                                            s_sl_cx(k) <= s_sl_cx(k) + 1;
-                                        end if;
-                                    else
-                                        if s_sl_cx(k) > to_unsigned(32, 9) then
-                                            s_sl_cx(k) <= s_sl_cx(k) - 1;
-                                        end if;
-                                    end if;
-                                end if;
-                            end if;
-                        when others => -- unreachable: recover to idle
-                            s_sl_state(k) <= "00";
-                            s_sl_age(k)   <= (others => '0');
-                    end case;
-                end loop;
-                end if;
-
-                -- ==== hand-fire FSM (after the loop so a detonation wins
-                -- over the launch branch's writes to slot 3) ====
-                if s_freeze = '0' then
-                    -- altitude tracks the slider every frame (pre-mapped)
-                    s_hf_cyp <= s_hf_cy;
-                    s_hf_cy  <= s_hf_alt;
-                    case s_hf_state is
-                        when "00" =>            -- armed
-                            if v_hf_go = '1' then
-                                s_hf_state <= "01";
-                                s_hf_act   <= '1';
-                                s_hf_max   <= s_sldr;
-                                s_hf_cy    <= s_ground;
-                                s_hf_cyp   <= s_ground;
-                            end if;
-                        when "01" =>            -- flying by hand
-                            if s_sf_gtm = '1' then
-                                s_hf_max <= s_sldr;
-                            end if;
-                            -- FULL THROW (slider reaches the top): hand the
-                            -- shell off to a normal flight -- age jumps to
-                            -- the late-ascent point matching the altitude,
-                            -- so it keeps rising and bursts on the standard
-                            -- timer. Reload: back to 0, then push up again.
-                            if s_sf_960 = '1' then
-                                s_sl_age(3) <= to_unsigned(52, 10);
-                                s_sl_apy(3) <= s_hf_cy;
-                                s_hf_act    <= '0';
-                                s_hf_state  <= "10";
-                            -- otherwise detonate on release/reverse: a
-                            -- 48-count drop from the peak bursts right there
-                            elsif s_sf_rel = '1' then
-                                s_sl_state(3) <= "10";
-                                s_sl_age(3)   <= (others => '0');
-                                s_sl_cy(3)    <= s_hf_cy;
-                                s_sl_apy(3)   <= s_hf_cy;
-                                s_sl_rsp(3)   <= to_unsigned(2, 7);
-                                s_hf_act   <= '0';
-                                s_hf_state <= "10";
-                                v_boom := '1';
-                            end if;
-                        when others =>          -- wait for re-arm at bottom
-                            if s_sf_64 = '1' then
-                                s_hf_state <= "00";
-                            end if;
-                    end case;
-                elsif s_hf_act = '1' then
-                    -- freezing mid-flight captures the shell as a burst at
-                    -- the hand altitude (and hands the slider to the scrub)
-                    s_sl_state(3) <= "10";
-                    s_sl_age(3)   <= (others => '0');
-                    s_sl_cy(3)    <= s_hf_cy;
-                    s_sl_apy(3)   <= s_hf_cy;
-                    s_sl_rsp(3)   <= to_unsigned(2, 7);
-                    s_hf_act   <= '0';
-                    s_hf_state <= "10";
-                    v_boom := '1';
-                end if;
-
-                -- ambient sky flash: reload on any detonation, fade per
-                -- frame (FINALE: brighter reload, half-rate fade)
-                if v_boom = '1' then
-                    if s_sw_finale = '1' then
+                -- ambient sky flash: reload on any detonation of the last
+                -- frame, fade per frame (FINALE or the BLAST climax zone:
+                -- full-strength reload; FINALE: half-rate fade)
+                s_boom <= '0';
+                if s_boom = '1' then
+                    if s_sw_finale = '1' or s_bltop = '1' then
                         s_flash <= "11";
                     else
                         s_flash <= "10";
@@ -1989,12 +2335,160 @@ begin
                     s_flash <= s_flash - 1;
                 end if;
 
-                -- restart the replot pass for the new frame
-                s_go  <= '1';
-                s_est <= EST_IDLE;
+                -- restart the replot pass for the new frame (new head table)
+                s_go   <= '1';
+                s_est  <= EST_IDLE;
+                s_hcnt <= (others => '0');
+                s_hrdy <= '0';
             end if;
         end if;
     end process p_engine;
+
+    -- ====================================================================
+    -- Sharp heads: head table (engine writes, renderer reads), per-line
+    -- renderer, two-bank line buffer
+    -- ====================================================================
+    p_ht : process(clk)
+    begin
+        if rising_edge(clk) then
+            if s_ht_we = '1' then
+                s_ht(to_integer(s_ht_wa)) <= s_ht_wd;
+            end if;
+            s_ht_q <= s_ht(to_integer(s_ht_ra));
+        end if;
+    end process p_ht;
+
+    -- Renderer: at each active line's start, stamp line y+1's heads into
+    -- bank (y+1)&1 (the bank NOT being displayed); during the blanking
+    -- before the frame's first line, stamp line 0. Each table entry costs
+    -- 5 clocks + its span (<= 5 px), ~1.3k clocks for 250 heads of the
+    -- 2200-clock 1080p line. A new line start aborts an unfinished pass.
+    p_head : process(clk)
+        variable v_dy : signed(11 downto 0);
+    begin
+        if rising_edge(clk) then
+            if s_xdiv6 = '1' and s_ydivsel = "10" then
+                s_hd_on <= '1';
+            else
+                s_hd_on <= '0';
+            end if;
+            s_rwe <= '0';
+            if data_in.avid = '1' and s_avid_sr(0) = '0' then
+                s_ri <= (others => '0');
+                s_rT <= s_y_count(10 downto 0) + 1;
+                if s_hd_on = '1' and s_hrdy = '1' then
+                    s_rs <= 1;
+                else
+                    s_rs <= 0;
+                end if;
+            elsif data_in.hsync_n = '0' and s_prev_hsync_n = '1' and s_saw = '0' then
+                s_ri <= (others => '0');
+                s_rT <= (others => '0');
+                if s_hd_on = '1' and s_hrdy = '1' then
+                    s_rs <= 1;
+                else
+                    s_rs <= 0;
+                end if;
+            else
+                case s_rs is
+                    when 1 =>                       -- issue a table read
+                        if s_ri = s_hn then
+                            s_rs <= 0;
+                        else
+                            s_ht_ra <= s_ri(7 downto 0);
+                            s_rs <= 2;
+                        end if;
+                    when 2 =>                       -- EBR read in flight
+                        s_rs <= 3;
+                    when 3 =>                       -- fabric copy of the entry
+                        s_hq2 <= s_ht_q;
+                        s_rs <= 4;
+                    when 4 =>                       -- does this head cover line T?
+                        v_dy := signed('0' & s_rT) - signed('0' & s_hq2(26 downto 16));
+                        s_rhit <= '0';
+                        if v_dy = 0 then
+                            s_rhit <= '1';
+                            if s_hq2(30) = '1' then s_rw <= "10"; else s_rw <= "01"; end if;
+                        elsif v_dy = 1 or v_dy = -1 then
+                            s_rhit <= '1';
+                            if s_hq2(30) = '1' then s_rw <= "01"; else s_rw <= "00"; end if;
+                        elsif (v_dy = 2 or v_dy = -2) and s_hq2(30) = '1' then
+                            s_rhit <= '1';
+                            s_rw <= "00";
+                        end if;
+                        s_rs <= 5;
+                    when 5 =>                       -- span start, or next entry
+                        if s_rhit = '1' then
+                            s_rx <= unsigned(s_hq2(10 downto 0)) - resize(s_rw, 11);
+                            s_rn <= resize(s_rw & '0', 3);
+                            s_rs <= 6;
+                        else
+                            s_ri <= s_ri + 1;
+                            s_rs <= 1;
+                        end if;
+                    when 6 =>                       -- stamp one pixel per clock
+                        s_rwe <= '1';
+                        s_rwa <= s_rx;
+                        s_rwb <= s_rT(0);
+                        if s_rn = 0 then
+                            s_ri <= s_ri + 1;
+                            s_rs <= 1;
+                        else
+                            s_rx <= s_rx + 1;
+                            s_rn <= s_rn - 1;
+                        end if;
+                    when others =>
+                        null;
+                end case;
+            end if;
+        end if;
+    end process p_head;
+
+    -- line-buffer write ports: the displayed bank is cleared one pixel
+    -- behind the beam (never the address being read); the other bank
+    -- takes the renderer's stamps
+    p_lbw : process(clk)
+    begin
+        if rising_edge(clk) then
+            s_lbc_a <= s_lb_ra;
+            s_lbc_e <= s_lb_act2;
+            s_lbc_b <= s_dbank2;
+            if s_lbc_e = '1' and s_lbc_b = '0' then
+                s_lb0_we <= '1';  s_lb0_wa <= s_lbc_a;  s_lb0_wd <= '0';
+            elsif s_rwe = '1' and s_rwb = '0' then
+                s_lb0_we <= '1';  s_lb0_wa <= s_rwa;    s_lb0_wd <= '1';
+            else
+                s_lb0_we <= '0';
+            end if;
+            if s_lbc_e = '1' and s_lbc_b = '1' then
+                s_lb1_we <= '1';  s_lb1_wa <= s_lbc_a;  s_lb1_wd <= '0';
+            elsif s_rwe = '1' and s_rwb = '1' then
+                s_lb1_we <= '1';  s_lb1_wa <= s_rwa;    s_lb1_wd <= '1';
+            else
+                s_lb1_we <= '0';
+            end if;
+        end if;
+    end process p_lbw;
+
+    p_lb0 : process(clk)
+    begin
+        if rising_edge(clk) then
+            if s_lb0_we = '1' then
+                s_lb0(to_integer(s_lb0_wa)) <= s_lb0_wd;
+            end if;
+            s_lb0_q <= s_lb0(to_integer(s_lb_ra));
+        end if;
+    end process p_lb0;
+
+    p_lb1 : process(clk)
+    begin
+        if rising_edge(clk) then
+            if s_lb1_we = '1' then
+                s_lb1(to_integer(s_lb1_wa)) <= s_lb1_wd;
+            end if;
+            s_lb1_q <= s_lb1(to_integer(s_lb_ra));
+        end if;
+    end process p_lb1;
 
     -- ====================================================================
     -- Pen writer: 8-connected line-walker with optional plus-shaped head.
@@ -2003,6 +2497,8 @@ begin
     -- ====================================================================
     p_writer : process(clk)
         variable v_wake : unsigned(1 downto 0);
+        variable v_off  : unsigned(15 downto 0);
+        variable v_ha   : unsigned(15 downto 0);
     begin
         if rising_edge(clk) then
             s_pen_we <= '0';
@@ -2015,6 +2511,14 @@ begin
             else
                 v_wake := s_w_val;
             end if;
+            -- plus-head arm address: head cell -1 / +1 / -320 / +320
+            case s_w_step is
+                when 2      => v_off := x"FFFF";
+                when 3      => v_off := x"0001";
+                when 4      => v_off := to_unsigned(65536 - C_CW, 16);
+                when others => v_off := to_unsigned(C_CW, 16);
+            end case;
+            v_ha := s_wk_a + v_off;
             if s_w_active = '0' then
                 if s_pl_stb = '1' then
                     s_wk_x   <= s_pl_fx;
@@ -2038,6 +2542,7 @@ begin
                     when 1 =>      -- write the cell (head bright, wake dim)
                         s_pen_we    <= '1';
                         s_pen_waddr <= f_addr(s_wk_y, s_wk_x);
+                        s_wk_a      <= f_addr(s_wk_y, s_wk_x);
                         if (s_wk_x = s_wk_tx and s_wk_y = s_wk_ty)
                            or s_w_cnt = to_unsigned(24, 5) then
                             s_pen_wdata <= s_w_val;
@@ -2055,28 +2560,28 @@ begin
                         if s_wk_x > 0 then
                             s_pen_we    <= '1';
                             s_pen_wdata <= s_w_val;
-                            s_pen_waddr <= f_addr(s_wk_y, s_wk_x - 1);
+                            s_pen_waddr <= v_ha;
                         end if;
                         s_w_step <= 3;
                     when 3 =>
                         if s_wk_x < to_unsigned(C_CW - 1, 9) then
                             s_pen_we    <= '1';
                             s_pen_wdata <= s_w_val;
-                            s_pen_waddr <= f_addr(s_wk_y, s_wk_x + 1);
+                            s_pen_waddr <= v_ha;
                         end if;
                         s_w_step <= 4;
                     when 4 =>
                         if s_wk_y > 0 then
                             s_pen_we    <= '1';
                             s_pen_wdata <= s_w_val;
-                            s_pen_waddr <= f_addr(s_wk_y - 1, s_wk_x);
+                            s_pen_waddr <= v_ha;
                         end if;
                         s_w_step <= 5;
                     when others =>
                         if s_wk_y < to_unsigned(C_CH - 1, 8) then
                             s_pen_we    <= '1';
                             s_pen_wdata <= s_w_val;
-                            s_pen_waddr <= f_addr(s_wk_y + 1, s_wk_x);
+                            s_pen_waddr <= v_ha;
                         end if;
                         s_w_active <= '0';
                         s_w_step   <= 0;
@@ -2094,9 +2599,10 @@ begin
     begin
         if rising_edge(clk) then
             -- stage 6a: resolve the owning color index (argmin -> pastel
-            -- bit -> inner/outer) and pipe everything else one stage
-            if s_far6 = '1' then
-                s_ci7 <= s_apas(to_integer(s_cidx6)) & s_aco(to_integer(s_cidx6));
+            -- bit; rockets' launch column is white) and pipe everything
+            -- else one stage
+            if s_rk6 = '1' then
+                s_ci7 <= "0111";
             else
                 s_ci7 <= s_apas(to_integer(s_cidx6)) & s_aci(to_integer(s_cidx6));
             end if;
@@ -2105,12 +2611,20 @@ begin
             s_stwk7 <= s_stwk6;
             s_mir7  <= s_mir6;
             s_insq7 <= s_insq6;
+            s_cvok7 <= s_cvok6;
+            s_hl7   <= s_hl6;
 
             -- stage 6b: luma = t*4 (t <= 192 -> max 768), per-color cap,
             -- mirror attenuation, background branches
             v_t := s_t7;
             v_y := resize(v_t & "00", 11);
-            if s_insq7 = '1' and v_t /= 0 then
+            if s_hl7 = '1' and s_insq7 = '1' and s_mir7 = '0' then
+                -- sharp head: a hot core in the shell's colour at near-full
+                -- luma over the soft glow
+                s_d_y <= to_unsigned(768, 10);
+                s_d_u <= C_PAL_U(to_integer(s_ci7));
+                s_d_v <= C_PAL_V(to_integer(s_ci7));
+            elsif s_insq7 = '1' and s_cvok7 = '1' and v_t /= 0 then
                 -- per-color luma ceiling keeps hues saturated at full glow
                 if v_y > resize(C_PAL_YC(to_integer(s_ci7)), 11) then
                     v_y := resize(C_PAL_YC(to_integer(s_ci7)), 11);
@@ -2128,7 +2642,7 @@ begin
                 else
                     s_d_v <= C_PAL_V(to_integer(s_ci7));
                 end if;
-            elsif s_insq7 = '1' and s_star7 = '1' and s_blk = '0' then
+            elsif s_insq7 = '1' and s_star7 = '1' then
                 -- static star: crisp dot, cool white, slow twinkle;
                 -- reflected stars shimmer at reduced brightness
                 if s_stwk7 = '1' then
@@ -2140,19 +2654,29 @@ begin
                 end if;
                 s_d_u <= to_unsigned(504, 10);      -- stored U = Cr: cool
                 s_d_v <= to_unsigned(524, 10);      -- stored V = Cb: bluish
-            elsif s_insq7 = '1' and s_mir7 = '1' and s_blk = '0' then
+            elsif s_insq7 = '1' and s_mir7 = '1' then
                 -- open water: flat, dark, deep blue; half the sky flash
                 s_d_y <= s_wf;
                 s_d_u <= to_unsigned(494, 10);
                 s_d_v <= to_unsigned(548, 10);
-            elsif s_insq7 = '1' and s_blk = '0' then
+            elsif s_insq7 = '1' then
                 -- night sky: blue gradient + nebula clouds + ambient flash
                 -- (gradient+flash pre-composited at line rate: one add here)
                 s_d_y <= s_bgf + resize(s_neb_q & "00", 10);
                 s_d_u <= to_unsigned(500, 10);
                 s_d_v <= to_unsigned(534, 10);
             else
-                s_d_y <= (others => '0');
+                s_d_y <= to_unsigned(64, 10);
+                s_d_u <= to_unsigned(512, 10);
+                s_d_v <= to_unsigned(512, 10);
+            end if;
+            -- blanking gate: neutral wherever the (generated) output avid
+            -- is low -- the canvas window alone stayed open from avid fall
+            -- to hsync on rasters that don't end exactly on cell 320 (SD,
+            -- or an analog line one pixel short). Top priority so it maps
+            -- onto the output FFs' sync set/reset, not the colour cone.
+            if s_gav_sr(C_LATENCY - 2) = '0' then
+                s_d_y <= to_unsigned(64, 10);
                 s_d_u <= to_unsigned(512, 10);
                 s_d_v <= to_unsigned(512, 10);
             end if;
@@ -2169,19 +2693,72 @@ begin
             s_vsync_sr(0) <= data_in.vsync_n;
             s_field_sr(0) <= data_in.field_n;
             s_avid_sr(0)  <= data_in.avid;
+            s_gav_sr(0)   <= g_avid;
             for i in 1 to C_LATENCY - 1 loop
                 s_hsync_sr(i) <= s_hsync_sr(i - 1);
                 s_vsync_sr(i) <= s_vsync_sr(i - 1);
                 s_field_sr(i) <= s_field_sr(i - 1);
                 s_avid_sr(i)  <= s_avid_sr(i - 1);
+                s_gav_sr(i)   <= s_gav_sr(i - 1);
             end loop;
         end if;
     end process p_sr;
 
+    -- ====================================================================
+    -- Generated avid (see declarations; aurora p_gavid verbatim). g_ph is
+    -- the hsync->avid-rise distance parity of this line, g_par the voted
+    -- usual parity; an off-parity line starts one clock later, so the
+    -- generated start always sits at the same hsync parity. It ends after
+    -- the width latched per field, or at hsync at the latest. The window
+    -- trails the content by 3-4 px (invisible: a 1080p line keeps 1916+).
+    -- ====================================================================
+    p_gavid : process(clk)
+    begin
+        if rising_edge(clk) then
+            g_hsq <= data_in.hsync_n;
+            g_hsr <= g_hsq and not data_in.hsync_n;    -- hsync_n falling
+            g_avq <= data_in.avid;
+            g_avr <= data_in.avid and not g_avq;       -- avid rising
+            if s_ftick = '1' then
+                g_wm1 <= s_line_width - 1;
+            end if;
+
+            if g_hsr = '1' then
+                g_ph  <= '0';
+                g_arm <= '1';
+            else
+                g_ph <= not g_ph;
+            end if;
+            g_rsr <= g_rsr(1 downto 0) & '0';
+            if g_avr = '1' and g_arm = '1' then
+                g_arm    <= '0';
+                g_rsr(0) <= '1';
+                g_sel    <= g_ph xor g_par;
+                if g_ph = '1' then
+                    if g_pc /= 15 then g_pc <= g_pc + 1; end if;
+                else
+                    if g_pc /= 0 then g_pc <= g_pc - 1; end if;
+                end if;
+            end if;
+            if g_pc = 15 then g_par <= '1';
+            elsif g_pc = 0 then g_par <= '0'; end if;
+
+            if (g_sel = '0' and g_rsr(1) = '1') or (g_sel = '1' and g_rsr(2) = '1') then
+                g_avid <= '1';
+                g_cnt  <= (others => '0');
+            elsif g_avid = '1' then
+                g_cnt <= g_cnt + 1;
+                if g_cnt = g_wm1 or g_hsr = '1' then
+                    g_avid <= '0';
+                end if;
+            end if;
+        end if;
+    end process p_gavid;
+
     data_out.hsync_n <= s_hsync_sr(C_LATENCY - 1);
     data_out.vsync_n <= s_vsync_sr(C_LATENCY - 1);
     data_out.field_n <= s_field_sr(C_LATENCY - 1);
-    data_out.avid    <= s_avid_sr(C_LATENCY - 1);
+    data_out.avid    <= s_gav_sr(C_LATENCY - 1);
 
     data_out.y <= std_logic_vector(s_d_y);
     data_out.u <= std_logic_vector(s_d_u);
