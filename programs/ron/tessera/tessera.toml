@@ -1,11 +1,14 @@
-# Tessera — tumbling 3D triangles falling through the frame.
+# Tessera — tumbling triangles rain down the screen (line-buffer sprite engine).
 #
-# v0 scaffold: parameter wiring is complete; rendering is a placeholder
-# (a centered diamond) until the triangle-field pipeline is implemented.
+# v1.0.0 (v17 engine): 1-64 triangles (K5), random in-plane orientation, uniform end-over-end
+# tumble with flutter (side-to-side swing), shared spin (K2); P12 scales every
+# triangle 0.25x-1.5x of its count's natural size (0.75/sqrt(count) of the
+# screen); T10 depth layers; T11 two-sided video fill (back face = toned-down
+# outline colour).  BG knob uses a toned-down palette.  Switches 7-9 unused.
 
 [program]
 program_id = "com.bluecondition.tessera"
-program_version = "0.1.0"
+program_version = "1.0.0"
 abi_version = ">=1.0,<2.0"
 program_name = "Tessera"
 author = "bluecondition"
@@ -35,10 +38,10 @@ parameter_id = "rotary_potentiometer_2"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 640
+initial_value = 256
 display_min_value = 0
 display_max_value = 100
-name_label = "Fill Color"
+name_label = "Spin"
 suffix_label = "%"
 
 [[parameter]]
@@ -68,10 +71,10 @@ parameter_id = "rotary_potentiometer_5"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 256
+initial_value = 640
 display_min_value = 0
 display_max_value = 100
-name_label = "Spin"
+name_label = "Count"
 suffix_label = "%"
 
 [[parameter]]
@@ -88,28 +91,10 @@ suffix_label = "%"
 # --- Toggle Switches (7-11) ---
 
 [[parameter]]
-parameter_id = "toggle_switch_7"
-name_label = "Outline Color"
-value_labels = ["Same", "Multi"]
-initial_value_label = "Same"
-
-[[parameter]]
-parameter_id = "toggle_switch_8"
-name_label = "Fill"
-value_labels = ["Edge-Only", "Filled"]
-initial_value_label = "Filled"
-
-[[parameter]]
-parameter_id = "toggle_switch_9"
-name_label = "Outline Style"
-value_labels = ["Solid", "Invert"]
-initial_value_label = "Solid"
-
-[[parameter]]
 parameter_id = "toggle_switch_10"
-name_label = "Size Variation"
-value_labels = ["Same", "Varied"]
-initial_value_label = "Varied"
+name_label = "Depth"
+value_labels = ["Flat", "Layers"]
+initial_value_label = "Layers"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
@@ -124,7 +109,8 @@ parameter_id = "linear_potentiometer_12"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 256
-display_min_value = 1
-display_max_value = 20
-name_label = "Count"
+initial_value = 790
+display_min_value = 0
+display_max_value = 100
+name_label = "Scale"
+suffix_label = "%"
