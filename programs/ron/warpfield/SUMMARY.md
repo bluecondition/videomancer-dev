@@ -103,5 +103,11 @@ chip is full.** Any further feature must remove something first (candidates:
 manual-mode Gate, palette luma dim, Deep Space video cast). No non-1 seeds.
 
 ## Status
-v1.1.0 built + packed 2026-10-06, NOT HW-tested. Presets to be captured on
-hardware once the look is approved.
+**v1.1.0 FINAL except presets — Ron signed off 2026-10-07** ("I think we can
+finalize Warpfield"). HW-validated across the session: palettes ("colors look
+good"), cell-safe kernels ("looks really good now"), alpha-over Video. Presets
+are hand-written; capture from hardware with `./capture_preset.sh`.
+Identity fixed 2026-10-11 (Ron): `program_id` `com.lzxindustries.warpfield` →
+`com.ron.warpfield`, `author` "ron", url → bluecondition/videomancer-dev
+(TOML-only; vmprog repacked from the same bitstreams). Starfield got the
+same cell-edge kernel fix in its v3.1.0 pass.

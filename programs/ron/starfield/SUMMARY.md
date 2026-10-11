@@ -144,6 +144,7 @@ finalize Starfield"). HW-iterated across the session: the star size range
 (big near pair + unscaled brightness) and the exaggerated Luma Mode sizing
 were both made from hardware feedback; defaults captured from the device.
 The six presets are hand-remapped from v3.0 — recapture them on hardware
-with `./capture_preset.sh`. `program_id` still `com.lzxindustries.starfield`,
-`author` empty (never asked to change). The chip is completely full (10 LC
+with `./capture_preset.sh`. Identity fixed 2026-10-11 (Ron): `program_id`
+`com.lzxindustries.starfield` → `com.ron.starfield`, `author` "ron", url →
+bluecondition/videomancer-dev (TOML-only; vmprog repacked). The chip is completely full (10 LC
 spare on SD Dual): any new feature must remove one first.
