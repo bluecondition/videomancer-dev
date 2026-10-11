@@ -14,13 +14,16 @@
 --   R_CLEAR  2*hw_r cycles           write 0 across head's x bbox of next-line bank
 --                                    (edge update fires once per cycle for first
 --                                     N_EDGES cycles, in parallel with clears)
+--   R_WIPE   32 cycles                 rolling clear of the rest of the buffer
+--                                    (per-bank pointer: each bank fully
+--                                     wiped every 128 lines)
 --   R_STAMP  5 + (|slope| + 2*ext + 1) cycles per ACTIVE edge
 --                                    write 1 across the edge's row sweep,
 --                                    clamped to its own [xlo, xhi]
 --   R_IDLE                           wait for next hsync (writes gated off)
 --
 -- Worst-case HD budget (256 edges, K2 = 7 px, P12 = full size):
---   CLEAR 696 + STAMP ~1220  ≈ 1915 of the 2200 cycles in an HD line.
+--   CLEAR 696 + WIPE 32 + STAMP ~1220  ≈ 1950 of the 2200 cycles in an HD line.
 -- SD (858 cycles/line) cannot hold the full-size mesh; the head is drawn
 -- at mesh scale there and the rasterizer runs past the line, so SD shows a
 -- cropped, degraded face.  HD is the design target.
@@ -30,10 +33,10 @@
 --   registers_in(1) = K2 Thickness  (top 2 bits → PAD ∈ {0,1,2,3} = 1/3/5/7 px)
 --   registers_in(2) = K3 Palette    (top 3 bits = palette index)
 --   registers_in(3) = K4 Expression (blend across Neutral..Surprised)
---   registers_in(4) = K5 Noise speed
---   registers_in(5) = K6 Noise spread
+--   registers_in(4) = K5 Noise       (top 5 bits = spread; speed rises with it)
+--   registers_in(5) = K6 Position    (bipolar horizontal pan, +-511 px)
 --   registers_in(6) = Switches      (bit0 = T7 Fill, bit1 = T8 Eyes open,
---                                    bit2 = T9 noise streaks, bit3 = T10 Bright,
+--                                    bit2 = T9 noise streaks, bit3 = T10 Invert,
 --                                    bit4 = T11 BG-Video)
 --   registers_in(7) = P12 Head Size (0 = mesh size, 1023 = ~95% of screen height)
 --
@@ -77,12 +80,15 @@ architecture bishop of program_top is
 
     -- Inlined line buffer is 1 BRAM cycle + 1 output flop = 2 cycles.
     -- Plus palette-mul flop = 3.  Match the bypass pipe accordingly.
-    constant LATENCY : natural := 3;
+    -- 3 stages of line-buffer/eor alignment + 1 for the chroma-pair
+    -- lookahead + 1 for the registered output stage (see out_proc).
+    constant LATENCY : natural := 5;
 
     type t_pipe is array (natural range <>) of t_video_stream_yuv444_30b;
     signal pipe : t_pipe(0 to LATENCY - 1);
 
     constant C_CHROMA_MID : unsigned(9 downto 0) := to_unsigned(512, 10);
+    constant C_BLACK      : unsigned(9 downto 0) := to_unsigned(64, 10);
 
     -- Luma is stored PRE-SCALED (the old per-pixel `pal_y * bright` multiply
     -- is gone — P12 is the head-size slider now).  Values are the previous
@@ -115,6 +121,12 @@ architecture bishop of program_top is
     signal prev_vsync_n : std_logic := '1';
     signal hsync_falling_r  : std_logic := '0';
     signal vsync_falling_r  : std_logic := '0';
+    -- Saw-active guard: analog vsync serrates (several falling edges per
+    -- field).  Only the first edge after a field that carried avid counts;
+    -- the later ones would re-zero pixel_y (a one-line jitter), re-latch
+    -- max_y_r from a counter that has just been reset (v_centre -> 0, head
+    -- thrown off the top of the screen) and step the noise phase again.
+    signal saw_active_r     : std_logic := '0';
     signal max_x_r      : unsigned(11 downto 0) := to_unsigned(1920, 12);
     signal max_y_r      : unsigned(11 downto 0) := to_unsigned(1080, 12);
     -- ACTIVE line count of the previous frame (lines that carried avid), as
@@ -136,9 +148,15 @@ architecture bishop of program_top is
     -- Per-frame latched user controls (all updated on vsync_falling_r)
     -- ---------------------------------------------------------------
     signal pal_y_r    : unsigned(9 downto 0) := C_PAL_Y(0);
+    signal pal_yf_r   : unsigned(9 downto 0) := C_PAL_Y(0);  -- 3/4 luma: the Invert field
     signal pal_u_r    : unsigned(9 downto 0) := C_PAL_U(0);
     signal pal_v_r    : unsigned(9 downto 0) := C_PAL_V(0);
     signal bg_video_r : std_logic := '0';
+    signal invert_r   : std_logic := '0';   -- T10: black lines on a palette-colour field
+    -- K6 Position: bipolar horizontal pan in pixels, applied to the measured
+    -- line centre once per cycle (h_orig_r) so the hsync cone stays light.
+    signal pan_r      : signed(9 downto 0)    := (others => '0');
+    signal h_orig_r   : unsigned(11 downto 0) := to_unsigned(960, 12);
     -- K2 Thickness — half-width of the stroke in px.  Rendered perpendicular
     -- thickness is 2*pad+1 (1 / 3 / 5 / 7 px) for EVERY edge orientation.
     signal pad_r      : unsigned(1 downto 0) := "01";
@@ -216,11 +234,24 @@ architecture bishop of program_top is
     -- inline scan that indexed the full active vector every cycle (a wide
     -- N:1 mux that was the HD critical path) and walked all N edges — now
     -- the stamp phase is O(active-this-row) with no wide mux.
-    type t_raster_state is (R_IDLE, R_CLEAR, R_STAMP_SCAN, R_STAMP_SCAN2,
+    type t_raster_state is (R_IDLE, R_CLEAR, R_WIPE, R_STAMP_SCAN, R_STAMP_SCAN2,
                              R_STAMP_PRELOAD, R_STAMP_PRELOAD2, R_STAMP_PRELOAD3,
                              R_STAMP_PRELOAD4, R_STAMP, R_STAMP_DRAIN);
     signal raster_state    : t_raster_state := R_IDLE;
     signal raster_cycle    : unsigned(10 downto 0) := (others => '0');
+    -- Rolling wipe pointers: R_WIPE clears C_WIPE_LEN entries per line at
+    -- the pointer of the bank being prepared, so each bank's WHOLE 2048
+    -- entries are zeroed every 64 of its lines (128 lines).  The per-line
+    -- clear only covers the head's own x-range, so anything stamped
+    -- elsewhere before the mesh/geometry settled at power-up (or by a pan)
+    -- would otherwise sit there for ever as thin vertical lines.
+    -- ONE pointer for both banks does NOT work: the banks alternate per
+    -- line and 2048/32 = 64 chunks is even, so bank A only ever saw the
+    -- even chunks and bank B the odd ones -- half of each bank never wiped
+    -- (HW: lines present or not depending on where load garbage landed).
+    constant C_WIPE_LEN    : natural := 32;
+    signal wipe_ptr_a_r    : unsigned(10 downto 0) := (others => '0');
+    signal wipe_ptr_b_r    : unsigned(10 downto 0) := (others => '0');
     -- Active-edge list storage + pointers (single-driver: all in raster_proc).
     type t_act_list_ram is array (0 to 255) of std_logic_vector(7 downto 0);
     signal act_list_ram : t_act_list_ram := (others => (others => '0'));
@@ -694,6 +725,15 @@ architecture bishop of program_top is
     -- ---------------------------------------------------------------
     signal edge_hit_r : std_logic := '0';
     signal pix_y_r    : unsigned(9 downto 0) := (others => '0');
+    signal pix_yf_r   : unsigned(9 downto 0) := (others => '0');
+    -- Output stage (out_proc)
+    signal show_pix    : std_logic;
+    signal show_d1_r   : std_logic := '0';
+    signal show_d2_r   : std_logic := '0';
+    signal out_phase_r : std_logic := '0';   -- parity of the pixel in pipe(LATENCY-2)
+    signal out_y_r     : unsigned(9 downto 0) := C_BLACK;
+    signal out_u_r     : unsigned(9 downto 0) := C_CHROMA_MID;
+    signal out_v_r     : unsigned(9 downto 0) := C_CHROMA_MID;
     signal pix_u_r    : unsigned(9 downto 0) := C_CHROMA_MID;
     signal pix_v_r    : unsigned(9 downto 0) := C_CHROMA_MID;
 
@@ -745,7 +785,7 @@ begin
                 hsync_falling_r <= '0';
             end if;
 
-            if data_in.vsync_n = '0' and prev_vsync_n = '1' then
+            if data_in.vsync_n = '0' and prev_vsync_n = '1' and saw_active_r = '1' then
                 vsync_falling_r <= '1';
             else
                 vsync_falling_r <= '0';
@@ -754,6 +794,7 @@ begin
             if data_in.avid = '1' then
                 pixel_x <= pixel_x + 1;
                 avid_line_r <= '1';
+                saw_active_r <= '1';
             end if;
 
             if data_in.hsync_n = '0' and prev_hsync_n = '1' then
@@ -769,34 +810,29 @@ begin
                 avid_line_r <= '0';
             end if;
 
-            if data_in.vsync_n = '0' and prev_vsync_n = '1' then
+            if data_in.vsync_n = '0' and prev_vsync_n = '1' and saw_active_r = '1' then
+                saw_active_r <= '0';
                 if pixel_y > to_unsigned(0, 12) then
                     max_y_r    <= pixel_y;
                     v_centre_r <= '0' & pixel_y(11 downto 1);
                 end if;
                 pixel_y <= (others => '0');
-                -- Serrated analog vsync fires several times per field; the
-                -- >0 guard makes the later edges no-ops (the counter has
-                -- already been zeroed) instead of latching a bogus 0.
                 if aline_cnt_r > to_unsigned(0, 12) then
                     act_h_r <= aline_cnt_r;
                 end if;
                 aline_cnt_r <= (others => '0');
 
-                -- K3 Palette
-                -- K3 Palette.  Luma is pre-scaled in the LUT; T10 "Bright"
-                -- takes it as-is, "Normal" takes 3/4 (one shift-subtract
-                -- here instead of a per-pixel multiply).
-                if registers_in(6)(3) = '1' then    -- T10 Bright
-                    pal_y_r <= C_PAL_Y(to_integer(unsigned(registers_in(2)(9 downto 7))));
-                else
-                    pal_y_r <= C_PAL_Y(to_integer(unsigned(registers_in(2)(9 downto 7))))
-                             - shift_right(C_PAL_Y(to_integer(unsigned(registers_in(2)(9 downto 7)))), 2);
-                end if;
+                -- K3 Palette.  Luma is pre-scaled in the LUT (capped at 768);
+                -- the lines take it as-is, the Invert field takes 3/4 of it
+                -- (one shift-subtract here instead of a per-pixel multiply).
+                pal_y_r  <= C_PAL_Y(to_integer(unsigned(registers_in(2)(9 downto 7))));
+                pal_yf_r <= C_PAL_Y(to_integer(unsigned(registers_in(2)(9 downto 7))))
+                          - shift_right(C_PAL_Y(to_integer(unsigned(registers_in(2)(9 downto 7)))), 2);
                 pal_u_r <= C_PAL_U(to_integer(unsigned(registers_in(2)(9 downto 7))));
                 pal_v_r <= C_PAL_V(to_integer(unsigned(registers_in(2)(9 downto 7))));
                 -- T7-T11 switches
                 bg_video_r   <= registers_in(6)(4);  -- T11
+                invert_r     <= registers_in(6)(3);  -- T10
                 noise_streaks_r <= registers_in(6)(2);  -- T9 "Noise": allow streaks
                 fill_on_r <= registers_in(6)(0);  -- T7: 1 = solid-fill features
                 open_eyes_r  <= registers_in(6)(1);  -- T8: eyes  open(1)/closed(0)
@@ -817,13 +853,17 @@ begin
                 expr_base_r <= unsigned(registers_in(3)(9 downto 8));      -- 0..3 (A)
                 expr_frac_r <= unsigned(registers_in(3)(7 downto 3));      -- 0..31 (t)
                 -- P8 (open_eyes_r, registers_in(6)(1)) gates the eye-close morph.
-                -- K5 = noise SPEED (frame-phase rate), K6 = noise SPREAD
-                -- (amplitude level 0..7).  The grid these used to drive is
-                -- gone.  noise_t_r advances once per frame by the speed, so the
-                -- per-vertex Lissajous phase animates.
-                noise_speed_r  <= unsigned(registers_in(4)(9 downto 5));
-                noise_spread_r <= unsigned(registers_in(5)(9 downto 5));
+                -- K5 = NOISE: spread (amplitude 0..31) from the top 5 bits,
+                -- and the frame-phase speed rises with it (8..23) so one knob
+                -- is never gated by another.  noise_t_r advances once per
+                -- frame by the speed, so the per-vertex Lissajous phase
+                -- animates.
+                noise_spread_r <= unsigned(registers_in(4)(9 downto 5));
+                noise_speed_r  <= to_unsigned(8, 5) + ('0' & unsigned(registers_in(4)(9 downto 6)));
                 noise_t_r      <= noise_t_r + resize(noise_speed_r, 16);
+                -- K6 = POSITION: offset-binary knob -> two's complement pan
+                -- (flip the MSB), -512..+511 px about the measured centre.
+                pan_r <= signed(registers_in(5)(9 downto 0) xor "1000000000");
             end if;
         end if;
     end process;
@@ -1023,10 +1063,11 @@ begin
                         - signed(resize(v_centre_r, 13))
                         + to_signed(1, 13);
 
-            -- Pre-add h_centre once per cycle (1-cycle stale, fine
-            -- because h_centre_r only updates on hsync).
-            clear_base_r <= resize(h_centre_r, 11) - resize(hw_r, 11);
-            h_centre_s   <= signed(resize(h_centre_r, 14));
+            -- Pre-add h_centre + pan once per cycle (2 cycles stale, fine
+            -- because h_centre_r only updates on hsync and pan_r on vsync).
+            h_orig_r     <= h_centre_r + unsigned(resize(pan_r, 12));
+            clear_base_r <= resize(h_orig_r, 11) - resize(hw_r, 11);
+            h_centre_s   <= signed(resize(h_orig_r, 14));
 
             -- Stage 0a': 1-cycle delay of pre signals so they reach
             -- Stage 0b at the same cycle that act_*_rd presents the
@@ -1133,6 +1174,29 @@ begin
                     end if;
 
                     if raster_cycle = clear_m1_r then
+                        raster_state    <= R_WIPE;
+                        raster_cycle    <= (others => '0');
+                    else
+                        raster_cycle <= raster_cycle + 1;
+                    end if;
+
+                when R_WIPE =>
+                    -- Rolling clear of C_WIPE_LEN entries outside the head
+                    -- window (before the stamps, so it can never erase them).
+                    lb_wr_en_bin_r  <= '1';
+                    lb_wr_en_bout_r <= '1';
+                    lb_wr_en_det_r  <= '1';
+                    lb_wr_data_r    <= '0';
+                    lb_bnd_data_r   <= '0';
+                    if lb_ab_r = '0' then
+                        lb_wr_addr_r  <= wipe_ptr_a_r;
+                        wipe_ptr_a_r  <= wipe_ptr_a_r + 1;
+                    else
+                        lb_wr_addr_r  <= wipe_ptr_b_r;
+                        wipe_ptr_b_r  <= wipe_ptr_b_r + 1;
+                    end if;
+                    upd_valid_pre   <= '0';
+                    if raster_cycle = to_unsigned(C_WIPE_LEN - 1, 11) then
                         -- Active list is fully built; iterate it.  al_count
                         -- snapshots the build pointer; al_rd_addr starts the
                         -- read so al_rd_data = list[0] arrives in SCAN2.
@@ -2006,13 +2070,14 @@ begin
     -- ---------------------------------------------------------------
     -- Post-line-buffer pipeline
     -- ---------------------------------------------------------------
-    -- Luma is pre-scaled at vsync (T10 Bright/Normal), so the old per-pixel
-    -- pal_y * brightness multiply is gone from the render path entirely.
+    -- Luma is pre-scaled at vsync, so the old per-pixel pal_y * brightness
+    -- multiply is gone from the render path entirely.
     pix_proc : process(clk)
     begin
         if rising_edge(clk) then
             edge_hit_r <= lb_any_rd_data;
-            pix_y_r <= pal_y_r;
+            pix_y_r  <= pal_y_r;
+            pix_yf_r <= pal_yf_r;
             pix_u_r <= pal_u_r;
             pix_v_r <= pal_v_r;
         end if;
@@ -2058,30 +2123,105 @@ begin
     end process;
 
     -- ---------------------------------------------------------------
-    -- Output mux
+    -- Output stage
     -- ---------------------------------------------------------------
+    -- The core's 444->422 packer takes U from the EVEN avid-relative pixel
+    -- of each pair and V from the ODD one.  An isolated 1-px stroke pixel
+    -- therefore reaches the encoder with only ONE of its chroma axes and
+    -- its hue swings to that axis (blue strokes read red/yellow on
+    -- hardware at 1 px; thicker lines fill whole pairs and hide it).  Fix:
+    -- both pixels of a pair carry the PAIR-AVERAGED chroma (alpha = hits
+    -- in the pair, 0/1/2), so whichever axis the packer samples the pair's
+    -- chroma vector is exact.  Luma stays per-pixel (4:4:4).  The even
+    -- pixel needs one pixel of lookahead, so the sync/video pipe is one
+    -- stage deeper than the show path, plus one for the output register.
+    --
+    -- Alignment: show_pix (from edge_hit_r / eor_inside_d_r) goes with
+    -- pipe(LATENCY-3); show_d1_r with pipe(LATENCY-2), the pixel this
+    -- stage computes; the result registers out alongside pipe(LATENCY-1).
+    -- out_phase_r mirrors the packer's phase counter on pipe(LATENCY-2).
+    --
+    -- Blanking gate: outside avid the output is neutral (y 64, u/v 512)
+    -- in every mode -- the encoder takes its colour reference from
+    -- blanking.  Black inside the picture is 64, not 0.  The palette is
+    -- authored in BT.601; the hardware wants Cr in U and Cb in V, so the
+    -- drawn colour is swapped here (and only here -- the video passthrough
+    -- is a dry path).  T10 Invert: the lines go black and the black
+    -- background becomes the palette colour at 3/4 luma (over Video it is
+    -- just black ink).
+    show_pix <= edge_hit_r or (fill_on_r and eor_inside_d_r);
+
+    out_proc : process(clk)
+        variable v_alpha  : unsigned(1 downto 0);
+        variable v_line_y, v_line_u, v_line_v : unsigned(9 downto 0);
+        variable v_bg_y,   v_bg_u,   v_bg_v   : unsigned(9 downto 0);
+        variable v_y, v_u, v_v : unsigned(9 downto 0);
+        variable v_sum_u, v_sum_v : unsigned(10 downto 0);
+    begin
+        if rising_edge(clk) then
+            show_d1_r <= show_pix;
+            show_d2_r <= show_d1_r;
+
+            -- Packer phase mirror: 0 at the first active pixel, toggles per
+            -- active pixel, held at 0 through blanking.
+            if pipe(LATENCY - 2).avid = '1' then
+                out_phase_r <= not out_phase_r;
+            else
+                out_phase_r <= '0';
+            end if;
+
+            -- Hits in this pixel's 422 pair.
+            if out_phase_r = '0' then
+                v_alpha := ('0' & show_d1_r) + ('0' & show_pix);    -- even: me + next
+            else
+                v_alpha := ('0' & show_d2_r) + ('0' & show_d1_r);   -- odd: prev + me
+            end if;
+
+            -- Line and background colours for this frame's switches.
+            if invert_r = '1' then
+                v_line_y := C_BLACK;  v_line_u := C_CHROMA_MID;  v_line_v := C_CHROMA_MID;
+                if bg_video_r = '1' then
+                    v_bg_y := unsigned(pipe(LATENCY - 2).y);
+                    v_bg_u := unsigned(pipe(LATENCY - 2).u);
+                    v_bg_v := unsigned(pipe(LATENCY - 2).v);
+                else
+                    v_bg_y := pix_yf_r;  v_bg_u := pix_v_r;  v_bg_v := pix_u_r;
+                end if;
+            else
+                v_line_y := pix_y_r;  v_line_u := pix_v_r;  v_line_v := pix_u_r;
+                if bg_video_r = '1' then
+                    v_bg_y := unsigned(pipe(LATENCY - 2).y);
+                    v_bg_u := unsigned(pipe(LATENCY - 2).u);
+                    v_bg_v := unsigned(pipe(LATENCY - 2).v);
+                else
+                    v_bg_y := C_BLACK;  v_bg_u := C_CHROMA_MID;  v_bg_v := C_CHROMA_MID;
+                end if;
+            end if;
+
+            -- Luma per pixel; chroma by pair occupancy.
+            if show_d1_r = '1' then v_y := v_line_y; else v_y := v_bg_y; end if;
+            v_sum_u := resize(v_bg_u, 11) + resize(v_line_u, 11);
+            v_sum_v := resize(v_bg_v, 11) + resize(v_line_v, 11);
+            case v_alpha is
+                when "00"   => v_u := v_bg_u;               v_v := v_bg_v;
+                when "10"   => v_u := v_line_u;             v_v := v_line_v;
+                when others => v_u := v_sum_u(10 downto 1); v_v := v_sum_v(10 downto 1);
+            end case;
+
+            if pipe(LATENCY - 2).avid = '0' then
+                out_y_r <= C_BLACK;  out_u_r <= C_CHROMA_MID;  out_v_r <= C_CHROMA_MID;
+            else
+                out_y_r <= v_y;  out_u_r <= v_u;  out_v_r <= v_v;
+            end if;
+        end if;
+    end process;
+
     data_out.hsync_n <= pipe(LATENCY - 1).hsync_n;
     data_out.vsync_n <= pipe(LATENCY - 1).vsync_n;
     data_out.field_n <= pipe(LATENCY - 1).field_n;
     data_out.avid    <= pipe(LATENCY - 1).avid;
-
-    output_mux : block
-        signal show_pix  : std_logic;
-    begin
-        -- Outline always; T7 (fill_on_r) additionally lights the EOR-fill
-        -- interior of the feature loops (eyes/mouth, the bnd=1 edges),
-        -- so they read as solid blobs in the current palette colour.
-        show_pix <= edge_hit_r or (fill_on_r and eor_inside_d_r);
-
-        data_out.y <= std_logic_vector(pix_y_r) when show_pix = '1'
-                      else pipe(LATENCY - 1).y when bg_video_r = '1'
-                      else (others => '0');
-        data_out.u <= std_logic_vector(pix_u_r) when show_pix = '1'
-                      else pipe(LATENCY - 1).u when bg_video_r = '1'
-                      else std_logic_vector(C_CHROMA_MID);
-        data_out.v <= std_logic_vector(pix_v_r) when show_pix = '1'
-                      else pipe(LATENCY - 1).v when bg_video_r = '1'
-                      else std_logic_vector(C_CHROMA_MID);
-    end block;
+    data_out.y <= std_logic_vector(out_y_r);
+    data_out.u <= std_logic_vector(out_u_r);
+    data_out.v <= std_logic_vector(out_v_r);
 
 end architecture bishop;

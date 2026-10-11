@@ -11,16 +11,18 @@
 --        -> overdrive, until the image is consumed by its own outlines.
 --
 -- Controls:
---   K1 Mode     5 materials, dither-dissolved at the boundaries
+--   K1 Mode     5 materials, clean cuts (hysteresis on the zones)
 --   K2 Scale    continuous fine -> coarse (blends the luma PYRAMID, one Sobel)
 --   K3 Thresh   edge sensitivity
 --   K4 Material line weight + how far the material reaches past the edge
---   K5 Levels   per mode: cel flat count / Kirlian branch rate / lit side
+--   K5 Character per mode: Neon halo hue vs the tube / Kirlian + Ink filament
+--               scale / Spectral swirl speed / Cel flat count; S9's lit side
 --   K6 Colour   per mode palette (tube hue, ink tint, hue-wheel offset, shade)
---   S7  Invert     dark-on-light <-> light-on-dark
+--   S7  Invert     dark-on-light <-> light-on-dark (a true negative)
 --   S8  Interior   video (tinted) <-> the material's native fill
 --   S9  Polarity   one-sided edges (lit from one side) <-> both polarities
---   S10 Spectral   orientation-hue over ANY mode
+--   S10 Rainbow    orientation-hue over any mode; in Spectral it flips back
+--                  to the flat K6 palette
 --   S11 Persist    the field becomes a memory: trails instead of a halo
 --
 -- ARCHITECTURE -- two planes, both shared by every mode.
@@ -39,7 +41,7 @@
 -- every direction and decayed:
 --     F = max( inject, spread * max(4 neighbours), persist * F )
 -- Bilinear-upsampled, that one field is the neon halo, the Kirlian corona, the
--- ink bleed, the burin density and the persistence trails.  A halo wider than
+-- ink bleed, the cel shade and the persistence trails.  A halo wider than
 -- the ~3 px a line-buffer window can see needs lines the raster has not
 -- delivered yet, so on this part large spread MUST be built across frames --
 -- and that is also what makes trails free.  PERSIST does not add to the field
@@ -53,7 +55,8 @@
 -- comes off the registered medium scale.
 --
 -- BRAM: 2 luma line buffers (8) + field (8) + field aux (1) + coarse luma (1)
--- + dry-video ring (2) = 20 EBR.  Pipeline depth 16, identical in every mode.
+-- + dry-video ring (2) + sine ROM (1) + hue-wheel ROM (2) ~ 23 EBR.  Latency
+-- C_LATENCY = 19, identical in every mode.
 --------------------------------------------------------------------------------
 
 library ieee;
@@ -153,6 +156,22 @@ architecture livewire of program_top is
         end if;
     end function;
 
+    -- K1's five evenly divided label zones (the platform's own split)
+    function f_zone5(k : unsigned(10 downto 0)) return unsigned is
+    begin
+        if k < 205 then
+            return "000";
+        elsif k < 410 then
+            return "001";
+        elsif k < 614 then
+            return "010";
+        elsif k < 819 then
+            return "011";
+        else
+            return "100";
+        end if;
+    end function;
+
     type t_qsrom is array (0 to 255) of std_logic_vector(9 downto 0);
     function f_qsrom return t_qsrom is
         variable r : t_qsrom;
@@ -169,23 +188,6 @@ architecture livewire of program_top is
     signal qs_data : std_logic_vector(9 downto 0) := (others => '0');
     signal qs_neg1, qs_neg2 : std_logic := '0';
 
-    -- orientation hue wheel: 16 points at full chroma amplitude.  SPECTRAL
-    -- colours every edge by its angle, so a circle becomes a rainbow ring and
-    -- parallel edges share one hue; S10 lays the same wheel over any mode.
-    -- Held in BRAM, not LUTs (see p_hue): as a runtime-indexed constant
-    -- array this was a 16:1 mux of 20 bits sitting directly in the chroma
-    -- path.  The part has spare EBR and no spare LUTs.
-    type t_hue is array (0 to 15) of unsigned(9 downto 0);
-    constant C_HUE_U : t_hue := (
-        to_unsigned(952, 10), to_unsigned(919, 10), to_unsigned(823, 10), to_unsigned(680, 10),
-        to_unsigned(512, 10), to_unsigned(344, 10), to_unsigned(201, 10), to_unsigned(105, 10),
-        to_unsigned( 72, 10), to_unsigned(105, 10), to_unsigned(201, 10), to_unsigned(344, 10),
-        to_unsigned(512, 10), to_unsigned(680, 10), to_unsigned(823, 10), to_unsigned(919, 10));
-    constant C_HUE_V : t_hue := (
-        to_unsigned(512, 10), to_unsigned(680, 10), to_unsigned(823, 10), to_unsigned(919, 10),
-        to_unsigned(952, 10), to_unsigned(919, 10), to_unsigned(823, 10), to_unsigned(680, 10),
-        to_unsigned(512, 10), to_unsigned(344, 10), to_unsigned(201, 10), to_unsigned(105, 10),
-        to_unsigned( 72, 10), to_unsigned(105, 10), to_unsigned(201, 10), to_unsigned(344, 10));
 
     ----------------------------------------------------------------------
     -- controls (decoded free-running -- deadchannel lesson: latching every
@@ -199,8 +201,29 @@ architecture livewire of program_top is
     signal g_k2, g_k3, g_k4, g_k5, g_k6, g_p12 : unsigned(13 downto 0)
         := (others => '0');
     signal s_mode  : unsigned(2 downto 0) := (others => '0');
-    signal s_mmix  : unsigned(3 downto 0) := (others => '0');   -- crossfade
-    signal s_modeb : unsigned(2 downto 0) := (others => '0');
+    -- stepped decodes with hysteresis: a decode only moves once the knob is
+    -- clear of the boundary on BOTH sides (k-8 and k+8 agree), so pot noise
+    -- parked on a boundary cannot flicker the whole frame between steps
+    signal s_k1p, s_k1m : unsigned(10 downto 0) := (others => '0');
+    signal s_k1zp, s_k1zm : unsigned(2 downto 0) := (others => '0');
+    signal s_k5zp, s_k5zm : unsigned(3 downto 0) := (others => '0');
+    signal s_k5h   : unsigned(3 downto 0) := "1000";
+    -- K5 + K6 as one angle (NEON's halo hue sits K5 away from the tube's)
+    signal s_k65   : unsigned(9 downto 0) := (others => '0');
+    signal s_qhu, s_qhv : signed(9 downto 0) := (others => '0');
+    -- SPECTRAL swirl: the hue wheel turns at K5's rate, 8.8 of a turn
+    signal s_hdrift : unsigned(15 downto 0) := (others => '0');
+    signal s_hoff   : unsigned(7 downto 0) := (others => '0');
+    -- EMERGE dissolve level per frame (16 = fully in)
+    signal s_wetn  : unsigned(4 downto 0) := (others => '0');
+    -- per-frame LFSR: Kirlian crackle and Neon buzz
+    signal s_lfsr  : unsigned(15 downto 0) := x"ACE1";
+    signal s_crk   : unsigned(3 downto 0) := (others => '0');
+    signal s_jx, s_jy : unsigned(1 downto 0) := (others => '0');
+    signal s_xj    : unsigned(11 downto 0) := (others => '0');
+    signal s_alj   : unsigned(10 downto 0) := (others => '0');
+    signal s_buzzc : unsigned(3 downto 0) := (others => '0');
+    signal s_buzz  : std_logic := '0';
 
     ----------------------------------------------------------------------
     -- per-frame constants
@@ -211,7 +234,6 @@ architecture livewire of program_top is
     signal s_tglow  : unsigned(7 downto 0) := to_unsigned(13, 8);
     signal s_tinj   : unsigned(7 downto 0) := to_unsigned(60, 8);
     signal s_w2     : unsigned(4 downto 0) := (others => '0');  -- scale lerp b
-    signal s_interior : unsigned(7 downto 0) := (others => '0');
     signal s_wet    : unsigned(7 downto 0) := (others => '0');
     signal s_over   : unsigned(7 downto 0) := (others => '0');
     signal s_spread : unsigned(3 downto 0) := to_unsigned(11, 4);
@@ -220,8 +242,7 @@ architecture livewire of program_top is
     signal s_pkeep   : unsigned(2 downto 0) := "101";
     signal s_pmask_c : unsigned(9 downto 0) := (others => '1');
     signal s_phalf_c : unsigned(9 downto 0) := (others => '0');
-    signal s_hu, s_hv     : unsigned(9 downto 0) := to_unsigned(512, 10);
-    signal s_qc, s_qsn    : signed(9 downto 0) := (others => '0');
+    signal s_qc, s_qsn   : signed(9 downto 0) := (others => '0');
     signal s_bu, s_bv     : unsigned(9 downto 0) := to_unsigned(512, 10);
 
     -- spread/persist coefficients.  These were a 16-entry rebuilt-per-frame
@@ -343,13 +364,33 @@ architecture livewire of program_top is
     signal c15_y, c15_u, c15_v : unsigned(9 downto 0) := (others => '0');
     signal c16_y, c18_y : unsigned(9 downto 0) := (others => '0');
     signal hue14_u, hue14_v : unsigned(9 downto 0) := to_unsigned(512, 10);
+    -- orientation hue wheel at full chroma amplitude.  SPECTRAL colours
+    -- every edge by its angle, so a circle becomes a rainbow ring and
+    -- parallel edges share one hue; S10 lays the same wheel over any mode.
+    -- 256 steps around the circle: the address is {orientation bin, 0000}
+    -- plus an 8-bit per-frame offset (K6 + the Spectral swirl), so the
+    -- wheel turns smoothly instead of in 22.5-degree jumps.  Held in BRAM,
+    -- not LUTs: as a runtime-indexed constant array it was a 16:1 mux of
+    -- 20 bits sitting directly in the chroma path.
     type t_huerom is array (0 to 255) of std_logic_vector(19 downto 0);
+    function f_qsin256(i : integer) return integer is
+        variable j : integer := i mod 64;
+    begin
+        case (i mod 256) / 64 is
+            when 0      => return  to_integer(C_QSIN(j));
+            when 1      => return  to_integer(C_QSIN(63 - j));
+            when 2      => return -to_integer(C_QSIN(j));
+            when others => return -to_integer(C_QSIN(63 - j));
+        end case;
+    end function;
     function f_huerom return t_huerom is
         variable r : t_huerom;
     begin
         for i in 0 to 255 loop
-            r(i) := std_logic_vector(C_HUE_U(i mod 16))
-                    & std_logic_vector(C_HUE_V(i mod 16));
+            r(i) := std_logic_vector(to_unsigned(
+                        512 + (440 * f_qsin256(i + 64)) / 511, 10))
+                    & std_logic_vector(to_unsigned(
+                        512 + (440 * f_qsin256(i)) / 511, 10));
         end loop;
         return r;
     end function;
@@ -380,6 +421,11 @@ architecture livewire of program_top is
     -- per-pixel product plus a constant term computed once a frame -- half
     -- the depth of a general lerp and no clamp needed (it stays convex).
     signal s_intw : unsigned(5 downto 0) := (others => '0');
+    -- the buzz overrides land in their OWN registers: a second
+    -- writer state on s_tcore/s_halog (and s_intw) merged into the existing
+    -- per-frame cones and became the routed critical path (HD HDMI 73.5)
+    signal s_tcorex : unsigned(7 downto 0) := to_unsigned(72, 8);
+    signal s_halogx : unsigned(7 downto 0) := to_unsigned(160, 8);
     signal s_gndw_y, s_gndw_u, s_gndw_v : unsigned(9 downto 0) := (others => '0');
     signal pa_y, pa_u, pa_v : unsigned(13 downto 0) := (others => '0');
     signal pb_y, pb_u, pb_v : unsigned(12 downto 0) := (others => '0');
@@ -493,6 +539,8 @@ begin
     -- one state earlier than the capture states now that the table read
     -- costs a clock: fold at N, read at N-1, sign-flip at N-2, capture at N-3
     s_qs_a <= resize(g_k6(13 downto 4), 10) + to_unsigned(256, 10) when s_seq = 37 else
+              s_k65 + to_unsigned(768, 10)                           when s_seq = 35 else
+              s_k65                                                  when s_seq = 33 else
               resize(g_k6(13 downto 4), 10);
 
     ------------------------------------------------------------------------
@@ -557,21 +605,41 @@ begin
             v_g := signed(resize(g_p12, 16)) + shift_right(v_d, 4);
             g_p12 <= unsigned(v_g(13 downto 0));
 
-            -- MODE: five materials across K1, with a dither dissolve in the
-            -- last eighth of each zone so turning the knob crossfades rather
-            -- than cutting.  A dissolve, not a blend: two renderers would
-            -- cost a second of everything.
-            if s_k1 < 205 then
-                s_mode <= "000";                       -- NEON
-            elsif s_k1 < 410 then
-                s_mode <= "001";                       -- KIRLIAN
-            elsif s_k1 < 614 then
-                s_mode <= "010";                       -- SPECTRAL
-            elsif s_k1 < 819 then
-                s_mode <= "011";                       -- RELIEF
+            -- MODE: five materials across K1 (hard zones).  Hysteresis: the
+            -- zone of k+8 and of k-8 must agree before the mode moves, so a
+            -- knob parked on a boundary holds one mode instead of flickering.
+            s_k1p <= resize(s_k1, 11) + 8;
+            if s_k1 < 8 then
+                s_k1m <= (others => '0');
             else
-                s_mode <= "100";                       -- INK BLEED
+                s_k1m <= resize(s_k1 - 8, 11);
             end if;
+            s_k1zp <= f_zone5(s_k1p);
+            s_k1zm <= f_zone5(s_k1m);
+            if s_k1zp = s_k1zm then
+                s_mode <= s_k1zp;     -- 0 NEON 1 KIRLIAN 2 SPECTRAL 3 CEL 4 INK
+            end if;
+
+            -- K5's 16 steps (S9's lit side; its top two bits are the Cel
+            -- level count and the filament scale), same hysteresis.  A held
+            -- 4-bit index is a held 2-bit index too: every 2-bit boundary
+            -- is a 4-bit one.
+            if s_k5 >= 1016 then
+                s_k5zp <= "1111";
+            else
+                s_k5zp <= resize(shift_right(s_k5 + 8, 6), 4);
+            end if;
+            if s_k5 < 8 then
+                s_k5zm <= "0000";
+            else
+                s_k5zm <= resize(shift_right(s_k5 - 8, 6), 4);
+            end if;
+            if s_k5zp = s_k5zm then
+                s_k5h <= s_k5zp;
+            end if;
+
+            -- NEON halo angle: K6 + K5 (wraps; continuous, so no hysteresis)
+            s_k65 <= g_k6(13 downto 4) + g_k5(13 downto 4);
 
             -- vsync anchor, guarded (analog vsync serrates: act once per field)
             if data_in.avid = '1' then
@@ -608,6 +676,14 @@ begin
                             s_wet <= resize(v_e(7 downto 0) & '0', 8);
                         end if;
 
+                    when 59 =>
+                        -- per-frame LFSR (Galois, x^16+x^14+x^13+x^11+1)
+                        if s_lfsr(0) = '1' then
+                            s_lfsr <= shift_right(s_lfsr, 1) xor x"B400";
+                        else
+                            s_lfsr <= shift_right(s_lfsr, 1);
+                        end if;
+
                     when 58 =>
                         -- interior: video -> the material's own ground.  S8
                         -- caps it so the video stays visible THROUGH the
@@ -619,6 +695,14 @@ begin
                         else
                             s_intw <= resize(shift_right(v_e - 225, 3), 6)
                                       + resize(shift_right(v_e - 225, 5), 6);
+                        end if;
+
+                    when 57 =>
+                        -- the EMERGE dissolve level (16 = fully in)
+                        if s_wet = 255 then
+                            s_wetn <= to_unsigned(16, 5);
+                        else
+                            s_wetn <= resize(s_wet(7 downto 4), 5);
                         end if;
 
                     when 56 =>
@@ -694,7 +778,7 @@ begin
                         -- starts with; untouched (5) for the first eighth so
                         -- the outlines emerge before the flats do.  S8 Video
                         -- keeps at least 8 tones so the picture stays legible.
-                        v_i := 5 + to_integer(g_k5(13 downto 12))
+                        v_i := 5 + to_integer(s_k5h(3 downto 2))
                                - to_integer(v_e(9 downto 7));
                         if s_int_vid = '1' and v_i < 3 then
                             v_i := 3;
@@ -722,6 +806,37 @@ begin
 
                     when 46 =>
                         null;
+
+                    when 45 =>
+                        -- KIRLIAN crackle: on a random ~half of frames the
+                        -- filaments re-deal their reaches and hop a pixel
+                        -- or two, so the discharge flickers instead of
+                        -- sitting still.  Off in every other mode (Ink's
+                        -- fibre must not shimmer).
+                        if s_mode = 1 then
+                            if s_lfsr(8) = '1' then
+                                s_crk <= s_lfsr(12 downto 9);
+                                s_jx  <= s_lfsr(14 downto 13);
+                                s_jy  <= s_lfsr(15) & s_lfsr(3);
+                            end if;
+                        else
+                            s_crk <= (others => '0');
+                            s_jx  <= (others => '0');
+                            s_jy  <= (others => '0');
+                        end if;
+
+                    when 41 =>
+                        -- NEON buzz: now and then (~1 frame in 64) the tube
+                        -- stutters -- 1..4 on/off flickers of a frame each
+                        s_buzz <= '0';
+                        if s_buzzc /= 0 then
+                            s_buzzc <= s_buzzc - 1;
+                            if s_mode = 0 then
+                                s_buzz <= s_buzzc(0);
+                            end if;
+                        elsif s_lfsr(5 downto 0) = 0 then
+                            s_buzzc <= '0' & s_lfsr(7 downto 6) & '1';
+                        end if;
 
                     when 44 =>
                         v_t := resize(shift_right(mulp, 8), 14);
@@ -769,6 +884,14 @@ begin
                         s_tinj  <= f_s8(resize(s_tbody, 10)
                                    * resize(s_injm, 10));
 
+                    when 37 =>
+                        -- a buzz frame drops the white-hot core out
+                        if s_buzz = '1' then
+                            s_tcorex <= (others => '1');
+                        else
+                            s_tcorex <= s_tcore;
+                        end if;
+
                     when 36 =>
                         s_qc <= s_qs_r;
 
@@ -776,6 +899,7 @@ begin
                         s_qsn <= s_qs_r;
 
                     when 32 =>
+                        s_qhu <= s_qs_r;                   -- sin(K6+K5-90)
                         -- CEL chroma grid: one bit finer than the luma, on a
                         -- round-to-nearest grid so neutral stays neutral
                         case to_integer(s_pkeep) is
@@ -785,6 +909,17 @@ begin
                             when 4 => s_pmask_c <= "1111100000"; s_phalf_c <= "0000010000";
                             when others => s_pmask_c <= (others => '1'); s_phalf_c <= (others => '0');
                         end case;
+
+                    when 30 =>
+                        s_qhv <= s_qs_r;                   -- cos(K6+K5-90)
+                        -- SPECTRAL swirl: K5 is the wheel's turning rate,
+                        -- still at 0, about a turn a second at full
+                        if s_mode = 2 then
+                            s_hdrift <= s_hdrift + resize(g_k5(13 downto 4), 16);
+                        end if;
+
+                    when 29 =>
+                        s_hoff <= g_k6(13 downto 6) + s_hdrift(15 downto 8);
 
                     when 28 =>
                         -- field character.  MATERIAL sets the reach; PERSIST
@@ -813,6 +948,14 @@ begin
                         else
                             s_halog <= to_unsigned(120, 8)
                                        + resize(shift_right(s_over, 1), 8);
+                        end if;
+
+                    when 27 =>
+                        -- ...and halves the glow
+                        if s_buzz = '1' then
+                            s_halogx <= '0' & s_halog(7 downto 1);
+                        else
+                            s_halogx <= s_halog;
                         end if;
 
                     when 26 =>
@@ -857,11 +1000,13 @@ begin
                                 s_gnd_u <= to_unsigned(512, 10);
                                 s_gnd_v <= to_unsigned(512, 10);
                                 s_dark  <= '0';
-                                -- the halo hue is separable from the tube's
+                                -- the halo hue sits K5 round the wheel from
+                                -- the tube's (K5 50% = a quarter turn, the
+                                -- original fixed separation)
                                 s_qu <= f_cu10(to_signed(512, 11)
-                                        + resize(shift_right(s_qsn, 1), 11));
+                                        + resize(shift_right(s_qhu, 1), 11));
                                 s_qv <= f_cu10(to_signed(512, 11)
-                                        - resize(shift_right(s_qc, 1), 11));
+                                        + resize(shift_right(s_qhv, 1), 11));
                                 s_fil <= '0';
                                 s_ragged <= '0';
                                 s_sbias <= to_unsigned(552, 10);
@@ -918,7 +1063,7 @@ begin
                                 s_sbias <= to_unsigned(330, 10);
                                 s_injm <= "011";
                         end case;
-                        s_filsh <= 5 - to_integer(g_k5(13 downto 12));
+                        s_filsh <= 5 - to_integer(s_k5h(3 downto 2));
 
                     when 24 =>
                         s_intwc <= to_unsigned(64, 7) - resize(s_intw, 7);
@@ -1141,7 +1286,7 @@ begin
                 a_body <= f_ramp(signed(resize(v_mg, 10))
                           - signed(resize(s_tbody, 10)), 4);
                 a_core <= f_ramp(signed(resize(v_mg, 10))
-                          - signed(resize(s_tcore, 10)), 3);
+                          - signed(resize(s_tcorex, 10)), 3);
                 a_glow <= f_ramp(signed(resize(v_mg, 10))
                           - signed(resize(s_tglow, 10)), 2);
                 inj10  <= resize(shift_right(f_ramp(signed(resize(magn9, 10))
@@ -1150,14 +1295,14 @@ begin
                 -- local gradient, so discharge runs OUTWARD from a boundary
                 -- and ink fibre runs along the stroke
                 case to_integer(bin9(3 downto 2)) is
-                    when 0      => v_pj := resize(s_x, 13);
-                    when 1      => v_pj := resize(s_x, 13) + resize(s_aline, 13);
-                    when 2      => v_pj := resize(s_aline, 13);
-                    when others => v_pj := resize(s_x, 13) - resize(s_aline, 13);
+                    when 0      => v_pj := resize(s_xj, 13);
+                    when 1      => v_pj := resize(s_xj, 13) + resize(s_alj, 13);
+                    when 2      => v_pj := resize(s_alj, 13);
+                    when others => v_pj := resize(s_xj, 13) - resize(s_alj, 13);
                 end case;
                 -- per-stripe reach, straight out of the projection's own
                 -- bits: constant along a filament, different between them
-                fil_r10 <= v_pj(11 downto 8) xor v_pj(7 downto 4);
+                fil_r10 <= v_pj(11 downto 8) xor v_pj(7 downto 4) xor s_crk;
                 case s_filsh is
                     when 2      => fil10 <= resize(v_pj(4 downto 0) & "000", 8);
                     when 3      => fil10 <= resize(v_pj(5 downto 0) & "00", 8);
@@ -1177,15 +1322,14 @@ begin
                 end if;
                 -- S9 POLARITY: keep one half of the wheel (a one-sided,
                 -- lit-from-one-direction drawing) with a soft shoulder
-                if s_1pol = '1' and (bin9 - resize(g_k5(13 downto 10), 4)) >= 8 then
+                if s_1pol = '1' and (bin9 - s_k5h) >= 8 then
                     pol10 <= (others => '0');
                 else
                     pol10 <= (others => '1');
                 end if;
             end if;
 
-            -- S11: polarity gate + the RELIEF directional derivative (two
-            -- parallel products, each with its own stage)
+            -- S11: polarity gate, hue-wheel address, filament gate
             if av(11) = '1' then
                 -- S9 POLARITY attenuates the wrong-facing half of the wheel
                 -- by a shift; a multiply here bought nothing visible
@@ -1198,7 +1342,7 @@ begin
                 end if;
                 a_glow11 <= a_glow;
                 bin11 <= bin10;
-                hue_addr <= resize(bin10 + resize(g_k6(13 downto 10), 4), 8);
+                hue_addr <= (bin10 & "0000") + s_hoff;
                 hal11 <= f_disp;
                 -- filaments: a stripe centred gate, its length varied per
                 -- stripe so the discharge branches instead of glowing
@@ -1279,14 +1423,15 @@ begin
                 if s_matoff = '1' then
                     hal14g <= (others => '0');
                 else
-                    hal14g <= resize(shift_right(hal12 * s_halog, 8), 8);
+                    hal14g <= resize(shift_right(hal12 * s_halogx, 8), 8);
                 end if;
                 g14_grain <= grain;
                 a14_glow <= a_glow12;
                 a14_body <= a_body12;
                 a14_core <= a_core12;
-                hue14_u <= C_HUE_U(to_integer(bin12 + resize(g_k6(13 downto 10), 4)));
-                hue14_v <= C_HUE_V(to_integer(bin12 + resize(g_k6(13 downto 10), 4)));
+                -- the hue wheel lands off its EBR (address issued at S11)
+                hue14_u <= unsigned(hue_q(19 downto 10));
+                hue14_v <= unsigned(hue_q(9 downto 0));
             end if;
 
             -- S14: interior -- the video crossfading to the material's own
@@ -1301,7 +1446,9 @@ begin
 
                 -- material chroma: priority select over per-frame constants
                 -- (core > body > halo), one lerp instead of three
-                if s_is_spectral = '1' or s_spec = '1' then
+                -- S10 lays the wheel over any mode, and in SPECTRAL (already
+                -- the wheel) flips it back to the flat K6 palette
+                if (s_is_spectral xor s_spec) = '1' then
                     m14_u <= hue14_u;
                     m14_v <= hue14_v;
                 elsif a14_core > 128 then
@@ -1416,10 +1563,14 @@ begin
             end if;
 
             s_dith <= C_BAYER(to_integer(s_x(1 downto 0) & s_aline(1 downto 0)));
+            -- Kirlian crackle's per-frame jitter, pre-added off the S10 path
+            -- (a clock of lag on a free-running coordinate is invisible)
+            s_xj  <= s_x + resize(s_jx, 12);
+            s_alj <= s_aline + resize(s_jy, 11);
             -- one gate for the whole material, alphas AND field halo: the
             -- field keeps decaying for a few frames after EMERGE drops, and
             -- an ungated halo still tinted chroma at 0
-            if s_wet < 255 and resize(s_dith, 8) >= s_wet(7 downto 4) then
+            if resize(s_dith, 5) >= s_wetn then
                 s_matoff <= '1';
             else
                 s_matoff <= '0';
@@ -1860,11 +2011,12 @@ begin
         variable v_u, v_v : unsigned(9 downto 0);
     begin
         if rising_edge(clk) then
-            -- Invert swaps the chroma axes too; the swap back to hardware
-            -- order happens here, on generated chroma only
+            -- the swap back to hardware order happens here, in BOTH arms:
+            -- Invert is a true negative (both axes negated), and dropping
+            -- the swap under it turned passthrough into a swapped negative
             if s_inv = '1' then
-                v_u := f_cu10(to_signed(1024, 12) - signed(resize(c15_u, 12)));
-                v_v := f_cu10(to_signed(1024, 12) - signed(resize(c15_v, 12)));
+                v_u := f_cu10(to_signed(1024, 12) - signed(resize(c15_v, 12)));
+                v_v := f_cu10(to_signed(1024, 12) - signed(resize(c15_u, 12)));
             else
                 v_u := c15_v;
                 v_v := c15_u;

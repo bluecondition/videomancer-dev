@@ -187,7 +187,9 @@ renders contact sheets for any knob set).  Look validated on the model at
 default, max and low-fuel/high-smoke settings.
 
 ## Status
-**v1.0.2 built (two pipeline index fixes), awaiting HW.**  v1.0.0 FINAL except presets (restored 2026-10-07 after the v1.1.0 80-row attempt was HW-rejected).  v1.0.0 was signed off — Ron: "pyre can be finalized for now"
+**v1.0.2 FINAL except presets — HW-validated, signed off 2026-10-07** ("Pyre can be
+finalized" after flashing the index-fixed build: no more rightward drift).  256x64 grid;
+the 80-row v1.1 attempt stays rejected.  Presets still to capture (./capture_preset.sh).  v1.0.0 was signed off — Ron: "pyre can be finalized for now"
 (2026-10-06), after HW iteration v0.1 -> v0.5.1 (realistic fire preferred over
 Inferno).  v1.0.0 = v0.5.1 with the version bump, repacked.
 

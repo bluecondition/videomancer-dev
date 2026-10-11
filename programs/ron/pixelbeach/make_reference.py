@@ -28,6 +28,18 @@ row = []
 for pname, pal in genpal.PALS:
     row.append((n, f"G2 {pname[:5]}", pal["GULL2"])); n += 1
 sections.append(("GULL2 (white gull plumage, per palette)", [row]))
+row = []
+for pname, pal in genpal.PALS:
+    row.append((n, f"ST {pname[:5]}", pal["STAR"])); n += 1
+for pname, pal in genpal.PALS:
+    row.append((n, f"SD {pname[:5]}", pal["STARD"])); n += 1
+sections.append(("STARS (bright, then faint; per palette)", [row]))
+row = []
+for pname, pal in genpal.PALS:
+    row.append((n, f"CR {pname[:5]}", pal["CRAB"])); n += 1
+for pname, pal in genpal.PALS:
+    row.append((n, f"CD {pname[:5]}", pal["CRABD"])); n += 1
+sections.append(("CRAB (body, then eyes/legs; per palette)", [row]))
 
 cols = max(len(r) for _, rows in sections for r in rows)
 W = LM*2 + cols*(SW+GAP)

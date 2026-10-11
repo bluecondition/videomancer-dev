@@ -37,7 +37,8 @@
 --
 -- Controls
 --   Pot 1  (registers_in(0))    : Scan Lines - line density (CW = denser)
---   Pot 2  (registers_in(1))    : Thickness  - stroke height 1..8 rows
+--   Pot 2  (registers_in(1))    : Thickness  - stroke height 1..8 rows;
+--                                 a graded glow halo fades in from T=3
 --   Pot 3  (registers_in(2))    : Line Color - White/Green/Amber/Cyan/
 --                                 Magenta/Video/Fire/Terrain (luma tint)
 --   Pot 4  (registers_in(3))    : Contrast   - input gain into disp+shade
@@ -48,7 +49,8 @@
 --   Tog 7  (registers_in(6)(0)) : Peaks      - Bright rises / Dark rises
 --   Tog 8  (registers_in(6)(1)) : Hidden Line- terrain skirts on/off
 --   Tog 9  (registers_in(6)(2)) : Shading    - Banded (2-level) / Luma
---   Tog 10 (registers_in(6)(3)) : Line Style - Hard / Glow (soft halo)
+--   Tog 10 (registers_in(6)(3)) : Roll       - Run / Freeze (holds the
+--                                 grid where it is; Run resumes from there)
 --   Tog 11 (registers_in(6)(4)) : Input      - Positive / Negative
 --   Fader  (registers_in(7))    : RELIEF     - displacement depth (glided)
 --
@@ -96,7 +98,12 @@ architecture ruttetra of program_top is
     signal s_peakdark : std_logic := '0';
     signal s_hlr      : std_logic := '1';
     signal s_shade    : std_logic := '1';
+    -- K2 glow: halo on from T=3; inner-half shift 2 (T3-4) / 1 (T5-8),
+    -- outer half one step dimmer; s_half = ceil(T/2)
     signal s_glow     : std_logic := '0';
+    signal s_gsh      : unsigned(2 downto 0) := "010";
+    signal s_half     : unsigned(3 downto 0) := to_unsigned(1, 4);
+    signal s_rfreeze  : std_logic := '0';
     signal s_neg      : std_logic := '0';
 
     -- K5 Roll: line-grid phase in units of one line spacing (wraps free)
@@ -429,7 +436,16 @@ begin
                 s_peakdark <= registers_in(6)(0);
                 s_hlr      <= registers_in(6)(1);
                 s_shade    <= registers_in(6)(2);
-                s_glow     <= registers_in(6)(3);
+                s_rfreeze  <= registers_in(6)(3);
+                case registers_in(1)(9 downto 7) is
+                    when "000" | "001" =>
+                        s_glow <= '0'; s_gsh <= "010";
+                    when "010" | "011" =>
+                        s_glow <= '1'; s_gsh <= "010";
+                    when others =>
+                        s_glow <= '1'; s_gsh <= "001";
+                end case;
+                s_half <= to_unsigned(1, 4) + resize(unsigned(registers_in(1)(9 downto 8)), 4);
                 s_neg      <= registers_in(6)(4);
 
                 -- P12 Relief -> displacement scale, glided (ease by diff/4
@@ -437,7 +453,9 @@ begin
                 -- whole line field breathe.
                 if s_saw_frame = '1' then
                     s_saw_frame <= '0';
-                    if s_rdir = '0' then
+                    if s_rfreeze = '1' then
+                        null;
+                    elsif s_rdir = '0' then
                         s_rphase <= s_rphase + s_rspd;
                     else
                         s_rphase <= s_rphase - s_rspd;
@@ -606,6 +624,9 @@ begin
         variable v_t4   : unsigned(7 downto 0);
         variable v_core : boolean;
         variable v_halo : boolean;
+        variable v_hin  : boolean;
+        variable v_nh   : signed(10 downto 0);
+        variable v_th   : signed(10 downto 0);
         variable v_cov  : boolean;
         variable v_sh   : unsigned(2 downto 0);
         variable v_m9   : unsigned(8 downto 0);
@@ -701,6 +722,8 @@ begin
             v_t  := signed(resize(s_thick, 11));
             v_2t := signed(resize(shift_left(resize(s_thick, 5), 1), 11));
             v_nt := -v_t;
+            v_nh := -signed(resize(s_half, 11));
+            v_th := v_t + signed(resize(s_half, 11));
             for k in 0 to NB - 1 loop
                 v_cov  := s_live(k) = '1' and a3_slo(k) >= 0;
                 v_core := v_cov and a3_shi(k) < v_t;
@@ -709,10 +732,16 @@ begin
                            (a3_shi(k) >= v_t and a3_shi(k) < v_2t));
                 if v_core or v_halo then a4_hit(k) <= '1'; else a4_hit(k) <= '0'; end if;
                 if v_cov then a4_cov(k) <= '1'; else a4_cov(k) <= '0'; end if;
-                -- total dim shift: halo 2 + beam-speed 0..2
+                -- total dim shift: beam-speed 0..2, plus the glow level for
+                -- halo pixels (inner half of the halo / outer half +1)
+                v_hin := a3_slo(k) >= v_nh and a3_shi(k) < v_th;
                 v_sh := resize(a3_dim(k), 3);
                 if v_halo and not v_core then
-                    v_sh := v_sh + 2;
+                    if v_hin then
+                        v_sh := v_sh + s_gsh;
+                    else
+                        v_sh := v_sh + s_gsh + 1;
+                    end if;
                 end if;
                 a4_sh(k)  <= v_sh;
                 a4_brt(k) <= a3_brt(k);

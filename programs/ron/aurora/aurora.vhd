@@ -1,75 +1,81 @@
--- aurora.vhd  (v1.1)
+-- aurora.vhd  (v3.0)
 --
--- AURORA: a soft horizontal rainbow ribbon that drifts, undulates and -- the
--- signature gesture -- FOLDS BACK OVER ITSELF like silk in slow-moving water.
+-- AURORA: a big, smooth, travelling horizontal rainbow wave.
 --
--- ARCHITECTURE (no framebuffer; true self-overlap per scanline)
+-- ARCHITECTURE (no framebuffer; one line buffer, one column per clock)
 --
---   A y(x) band cannot double back, and an implicit field welds overlapping
---   folds together instead of layering them.  So the ribbon is PARAMETRIC:
---   during every line period a marcher walks the curve
+--   Once per line period a scanner sweeps left to right, ONE COLUMN PER
+--   CLOCK, and stamps {hue[10], alpha[6]} into a 2048 x 16 line buffer for
+--   the next display row.  The wave's centre line at column x is
 --
---       x(u) = x0 + u/4 + Fx*cos(thf)                (prolate cycloid: when
---       y(u) = P + Fd*sin(thf)                        Fx*wf > 1/4 the path
---              + W*(sin(th1) + sin(th2)/2)            runs BACKWARD -> loops)
+--       y(x) = C + A*sin(th1) + N*A*( sin(th2) + sin(th3) )/2
+--       th1 = k*x - ph1(t)        the wave itself; Speed moves ph1
+--       th2 = 1.61*k*x + ph2(t)   two incommensurate noise lobes that drift
+--       th3 = 0.38*k*x + ph3(t)   on their own, so the wave never repeats
 --
---   and stamps {hue[9], alpha[5]} into a line buffer at half-pixel columns
---   for the NEXT display row: alpha = feather(|y(u) - R|), and hue runs
---   ACROSS the ribbon's thickness (hue = phc - (y-R)*hscale, ROYGBV top to
---   bottom, hscale = spectrum/H from a per-frame divide) so the rainbow
---   stripes ride WITH the curve and fold with it.  Stamps land through a
---   max-alpha read-modify-write on the stamp bank's otherwise idle read
---   port: where the ribbon crosses itself the more-solid (and on ties the
---   later) pass wins per pixel -- fabric doubling over, cleanly layered.
---   P12 raises Fd first (waves -> S-curves), then Fx past the backward-
---   slope threshold (loops); loop width eases off at extreme Height to
---   respect the write-bandwidth wall.
+--   and the band is a constant VERTICAL thickness H about it (the classic
+--   flag-style rainbow wave: no slope correction, so it stays smooth at any
+--   steepness and the amplitude can reach half the screen).  Noise also
+--   breathes the thickness, H_eff = H*(1 + noise/2), so the band bulges
+--   where it bends.  All of C, A, H derive from the MEASURED raster.
 --
---   Budget: one stamp per clock, one line period per row.  An ADAPTIVE STEP
---   makes that fit every raster: far from the target row the marcher jumps
---   u by 16 units (phases are linear in u -- jumping is a shifted add), and
---   tiers down through 8/4/2 as |y-R| approaches the band (thresholds carry
---   a worst-slope * pipeline-staleness guard, precomputed per frame).  In
---   band it paces by predicted |dx/du| so columns are never skipped; a
---   1-clock bridge write covers the rare 2-column hop.  A hard clock cap
---   (shortest line of the raster class minus margin) bounds pathological
---   corners.
+--   Per column the pipeline is: three interpolated quarter-wave sine reads
+--   (6 ROMs) -> noise x N -> sum x A -> y -> vertical distance to this row
+--   (and to the row REFLECTED about the centre line) -> nearer copy wins ->
+--   alpha = feather(H_eff - |d|), hue = colour phase - d x hue-scale.  A
+--   mirrored copy costs only a second subtract and a compare, not a second
+--   pass.  It is a TRUE reflection -- the reflected band carries the colour
+--   of the row it mirrors, so its spectrum runs violet-on-top -- which makes
+--   both copies identical on the centre line: a seamless kaleidoscope fold.
+--   The axis is the true centre of the raster, (fh-1)/2 rows (539.5 at
+--   1080), and the wave is centred on it too.
 --
---   Line buffer: 2 banks x 1024 x 14b (4 EBR each).  While row R displays
---   from bank R&1 (each word cleared behind the beam), row R+1 is stamped
---   into the other bank; the march is triggered by avid_start so the write
---   window is exactly one line period.  Post-active vblank lines stamp row
---   0 into bank 0 (identical params -> idempotent restamps).  Six 256x9
---   quarter-wave sine ROMs (1 EBR each): 4 for the marcher, 2 for the beam.
+--   Line buffer: ONE bank, 2048 x 16 (8 EBR).  Column c of row R+1 is
+--   stamped ~16 clocks AFTER the beam read column c of row R, so one buffer
+--   serves both.  Post-active vblank lines restamp row 0 (idempotent).
 --
---   Beam: word -> hue -> (Solid: quantize to 6 flag stripes) -> vectorscope
---   angle -> sin/cos ROMs -> chroma at radius 440, Y = 764 - Cb/4 (yellow
---   bright, blue deep) -> alpha-composite over black or the live picture.
---   Chroma is authored DIRECTLY in the verified hardware convention (the u
---   register carries BT.601 Cr -- phosphor-palette anchors), so the sim
---   image shows mirrored hues; the scope and the screen show ROYGBV.
+--   Beam: word -> hue -> (Solid: snap to the 7 pure phosphor colours) ->
+--   Y/U/V from six 256 x 10 constant ROMs -> alpha-composite over black
+--   (Y 64) or the live picture.  Fill = Video replaces the band's luma with
+--   the live picture's (half-mixed with the rainbow's) and keeps the rainbow
+--   chroma.  The LUT is authored DIRECTLY in the verified hardware
+--   convention (the u register carries BT.601 Cr), so the sim shows
+--   mirrored hues; the screen shows ROYGBIV.
 --
 --   Geometry is computed in FRAME rows on every raster; interlaced fields
---   compare against R*2+parity (bottom field = field_n '0'), so both fields
---   sample the same curve with correct phase.  All motion phases advance
---   once per frame at vsync; K1/K2/K3/K6/P12 are slewed (1-pole, ~250 ms)
---   so performance moves are glitch-free.  Stillness is exact: K3 at zero
---   freezes the wiggle/fold phase clocks, K5 has a true center deadband,
---   and S9 hard-freezes everything.
+--   compare against R*2+parity (bottom field = field_n '0').  All motion
+--   phases advance once per field on a saw-active-guarded vsync (analog
+--   vsync serrates).  K1/K2/K4/K6/P12 are slewed (1-pole, ~250 ms).
+--   Stillness is exact: Speed and Flow have true centre deadbands, and at
+--   Noise 0 the drifting noise lobes contribute nothing.
 --
 -- CONTROLS
---   K1  Height     ribbon thickness: whisper stripe -> ~40%-screen sash
---   K2  Position   vertical home line
---   K3  Wiggle     undulation amplitude; fully CCW = dead still
---   K4  Rate       undulation speed (no effect while Wiggle is zero)
---   K5  Flow       rainbow drift along the ribbon; center = stopped
---   K6  Spectrum   rainbow cycles across the ribbon, 0.5 .. 4
---   S7  Color      Gradient (continuous) / Solid (6 flag stripes)
---   S8  Backdrop   Black / live video (ribbon composites on top)
---   S9  Freeze     hard-stop all animation at its current phase
---   P12 FOLD       the gesture: flat -> waves -> S-curves -> full loops
+--   K1  Height     band thickness: hairline -> the whole screen
+--   K2  Waves      wavelength: 0.5 -> 5 waves across the screen
+--   K3  Speed      wave travel, bipolar; centre = still
+--   K4  Noise      organic wobble of path and thickness; 0 = pure sine
+--   K5  Flow       rainbow drift; centre = stopped
+--   K6  Spectrum   rainbow cycles across the band (or screen), 0.5 .. 4
+--   S7  Color      Gradient / Solid (7 phosphor stripes)
+--   S8  Backdrop   Black / live video
+--   S9  Fill       Rainbow / Video (band luma from the live picture)
+--   S10 Rainbow    Across the band / Along the screen
+--   S11 Mirror     Off / On: top half reflects the bottom, seamless fold
+--   P12 SWELL      amplitude: gentle ripple -> crests at the screen edges
 --
--- Latency: 9 clocks, constant across all modes.  EBR: 14.  No DSP.
+--   CLEAN AVID.  The encoders get no data-enable -- only hsync and the
+--   4:2:2 bus -- so they pair Cb/Cr by counting from hsync, while the core's
+--   4:4:4->4:2:2 packer restarts on Cb at every avid rise.  A source avid
+--   that lands a clock off its usual hsync distance swaps U/V for that line:
+--   thin wrong-coloured lines across the band (black is immune).  So the
+--   program makes its own avid (cubist's HW-confirmed recipe): it starts 3
+--   or 4 clocks after the source's first avid rise of the line, whichever
+--   keeps the hsync->start PARITY at the source's usual value (saturating
+--   vote), and ends after the field-latched line width.  The beam reads the
+--   line buffer on that avid; the output is blanked to 64/512/512 outside
+--   it; the backdrop video is gated to black where the source is blank.
+--
+-- Latency: 8 clocks, constant across all modes.  EBR: 20.  No DSP.
 --
 -- Author: bluecondition
 
@@ -88,78 +94,11 @@ architecture aurora of program_top is
     constant C_LAT : integer := 8;
 
     constant C_MID : unsigned(9 downto 0) := to_unsigned(512, 10);
+    constant C_BLK : unsigned(9 downto 0) := to_unsigned(64, 10);
 
-    -- quarter-wave sine: qsin(i) = round(511*sin((i+0.5)*pi/512))
-    type t_qsin is array(0 to 255) of unsigned(8 downto 0);
-    constant C_QSIN : t_qsin := (
-        to_unsigned(  2, 9), to_unsigned(  5, 9), to_unsigned(  8, 9), to_unsigned( 11, 9),
-        to_unsigned( 14, 9), to_unsigned( 17, 9), to_unsigned( 20, 9), to_unsigned( 24, 9),
-        to_unsigned( 27, 9), to_unsigned( 30, 9), to_unsigned( 33, 9), to_unsigned( 36, 9),
-        to_unsigned( 39, 9), to_unsigned( 42, 9), to_unsigned( 45, 9), to_unsigned( 49, 9),
-        to_unsigned( 52, 9), to_unsigned( 55, 9), to_unsigned( 58, 9), to_unsigned( 61, 9),
-        to_unsigned( 64, 9), to_unsigned( 67, 9), to_unsigned( 70, 9), to_unsigned( 73, 9),
-        to_unsigned( 77, 9), to_unsigned( 80, 9), to_unsigned( 83, 9), to_unsigned( 86, 9),
-        to_unsigned( 89, 9), to_unsigned( 92, 9), to_unsigned( 95, 9), to_unsigned( 98, 9),
-        to_unsigned(101, 9), to_unsigned(104, 9), to_unsigned(107, 9), to_unsigned(110, 9),
-        to_unsigned(113, 9), to_unsigned(117, 9), to_unsigned(120, 9), to_unsigned(123, 9),
-        to_unsigned(126, 9), to_unsigned(129, 9), to_unsigned(132, 9), to_unsigned(135, 9),
-        to_unsigned(138, 9), to_unsigned(141, 9), to_unsigned(144, 9), to_unsigned(147, 9),
-        to_unsigned(150, 9), to_unsigned(153, 9), to_unsigned(156, 9), to_unsigned(159, 9),
-        to_unsigned(162, 9), to_unsigned(165, 9), to_unsigned(168, 9), to_unsigned(171, 9),
-        to_unsigned(174, 9), to_unsigned(177, 9), to_unsigned(180, 9), to_unsigned(182, 9),
-        to_unsigned(185, 9), to_unsigned(188, 9), to_unsigned(191, 9), to_unsigned(194, 9),
-        to_unsigned(197, 9), to_unsigned(200, 9), to_unsigned(203, 9), to_unsigned(206, 9),
-        to_unsigned(209, 9), to_unsigned(211, 9), to_unsigned(214, 9), to_unsigned(217, 9),
-        to_unsigned(220, 9), to_unsigned(223, 9), to_unsigned(226, 9), to_unsigned(228, 9),
-        to_unsigned(231, 9), to_unsigned(234, 9), to_unsigned(237, 9), to_unsigned(239, 9),
-        to_unsigned(242, 9), to_unsigned(245, 9), to_unsigned(248, 9), to_unsigned(251, 9),
-        to_unsigned(253, 9), to_unsigned(256, 9), to_unsigned(259, 9), to_unsigned(261, 9),
-        to_unsigned(264, 9), to_unsigned(267, 9), to_unsigned(269, 9), to_unsigned(272, 9),
-        to_unsigned(275, 9), to_unsigned(277, 9), to_unsigned(280, 9), to_unsigned(283, 9),
-        to_unsigned(285, 9), to_unsigned(288, 9), to_unsigned(290, 9), to_unsigned(293, 9),
-        to_unsigned(296, 9), to_unsigned(298, 9), to_unsigned(301, 9), to_unsigned(303, 9),
-        to_unsigned(306, 9), to_unsigned(308, 9), to_unsigned(311, 9), to_unsigned(313, 9),
-        to_unsigned(316, 9), to_unsigned(318, 9), to_unsigned(321, 9), to_unsigned(323, 9),
-        to_unsigned(325, 9), to_unsigned(328, 9), to_unsigned(330, 9), to_unsigned(333, 9),
-        to_unsigned(335, 9), to_unsigned(337, 9), to_unsigned(340, 9), to_unsigned(342, 9),
-        to_unsigned(344, 9), to_unsigned(347, 9), to_unsigned(349, 9), to_unsigned(351, 9),
-        to_unsigned(353, 9), to_unsigned(356, 9), to_unsigned(358, 9), to_unsigned(360, 9),
-        to_unsigned(362, 9), to_unsigned(365, 9), to_unsigned(367, 9), to_unsigned(369, 9),
-        to_unsigned(371, 9), to_unsigned(373, 9), to_unsigned(375, 9), to_unsigned(378, 9),
-        to_unsigned(380, 9), to_unsigned(382, 9), to_unsigned(384, 9), to_unsigned(386, 9),
-        to_unsigned(388, 9), to_unsigned(390, 9), to_unsigned(392, 9), to_unsigned(394, 9),
-        to_unsigned(396, 9), to_unsigned(398, 9), to_unsigned(400, 9), to_unsigned(402, 9),
-        to_unsigned(404, 9), to_unsigned(406, 9), to_unsigned(408, 9), to_unsigned(410, 9),
-        to_unsigned(411, 9), to_unsigned(413, 9), to_unsigned(415, 9), to_unsigned(417, 9),
-        to_unsigned(419, 9), to_unsigned(420, 9), to_unsigned(422, 9), to_unsigned(424, 9),
-        to_unsigned(426, 9), to_unsigned(427, 9), to_unsigned(429, 9), to_unsigned(431, 9),
-        to_unsigned(433, 9), to_unsigned(434, 9), to_unsigned(436, 9), to_unsigned(437, 9),
-        to_unsigned(439, 9), to_unsigned(441, 9), to_unsigned(442, 9), to_unsigned(444, 9),
-        to_unsigned(445, 9), to_unsigned(447, 9), to_unsigned(448, 9), to_unsigned(450, 9),
-        to_unsigned(451, 9), to_unsigned(453, 9), to_unsigned(454, 9), to_unsigned(456, 9),
-        to_unsigned(457, 9), to_unsigned(459, 9), to_unsigned(460, 9), to_unsigned(461, 9),
-        to_unsigned(463, 9), to_unsigned(464, 9), to_unsigned(465, 9), to_unsigned(467, 9),
-        to_unsigned(468, 9), to_unsigned(469, 9), to_unsigned(470, 9), to_unsigned(472, 9),
-        to_unsigned(473, 9), to_unsigned(474, 9), to_unsigned(475, 9), to_unsigned(476, 9),
-        to_unsigned(477, 9), to_unsigned(478, 9), to_unsigned(480, 9), to_unsigned(481, 9),
-        to_unsigned(482, 9), to_unsigned(483, 9), to_unsigned(484, 9), to_unsigned(485, 9),
-        to_unsigned(486, 9), to_unsigned(487, 9), to_unsigned(488, 9), to_unsigned(489, 9),
-        to_unsigned(489, 9), to_unsigned(490, 9), to_unsigned(491, 9), to_unsigned(492, 9),
-        to_unsigned(493, 9), to_unsigned(494, 9), to_unsigned(495, 9), to_unsigned(495, 9),
-        to_unsigned(496, 9), to_unsigned(497, 9), to_unsigned(498, 9), to_unsigned(498, 9),
-        to_unsigned(499, 9), to_unsigned(500, 9), to_unsigned(500, 9), to_unsigned(501, 9),
-        to_unsigned(501, 9), to_unsigned(502, 9), to_unsigned(503, 9), to_unsigned(503, 9),
-        to_unsigned(504, 9), to_unsigned(504, 9), to_unsigned(505, 9), to_unsigned(505, 9),
-        to_unsigned(506, 9), to_unsigned(506, 9), to_unsigned(507, 9), to_unsigned(507, 9),
-        to_unsigned(507, 9), to_unsigned(508, 9), to_unsigned(508, 9), to_unsigned(508, 9),
-        to_unsigned(509, 9), to_unsigned(509, 9), to_unsigned(509, 9), to_unsigned(509, 9),
-        to_unsigned(510, 9), to_unsigned(510, 9), to_unsigned(510, 9), to_unsigned(510, 9),
-        to_unsigned(510, 9), to_unsigned(511, 9), to_unsigned(511, 9), to_unsigned(511, 9),
-        to_unsigned(511, 9), to_unsigned(511, 9), to_unsigned(511, 9), to_unsigned(511, 9));
-
-    -- 13-bit quarter-wave sine for the coil sweep (Ax up to ~500 half-cols
-    -- amplifies every LSB, so the swing needs more amplitude resolution
-    -- than the 9-bit wiggle table; still one 256x16 EBR)
+    -- 12-bit quarter-wave sine, qsin(i) = round(4095*sin((i+0.5)*pi/512)):
+    -- the amplitude reaches ~2000 quarter-rows, so every LSB shows; one
+    -- 256x16 EBR per read
     type t_qsin13 is array(0 to 255) of unsigned(11 downto 0);
     constant C_QSIN13 : t_qsin13 := (
         to_unsigned(  13, 12), to_unsigned(  38, 12), to_unsigned(  63, 12), to_unsigned(  88, 12),
@@ -227,175 +166,217 @@ architecture aurora of program_top is
         to_unsigned(4091, 12), to_unsigned(4092, 12), to_unsigned(4093, 12), to_unsigned(4093, 12),
         to_unsigned(4094, 12), to_unsigned(4095, 12), to_unsigned(4095, 12), to_unsigned(4095, 12));
 
-    -- Precomputed ribbon color LUT: the seven HW-verified phosphor colors
-    -- (scope-confirmed palette) interpolated to 512 steps and packed
-    -- {Y[9:0], U[9:0], V[9:0]} -- the u register carries BT.601 Cr on this
-    -- hardware, so these are the raw register values.  As a constant this
-    -- infers EBR, replacing ~400 LC of runtime palette muxes/multiplies.
-    -- Segment starts (addr = k*73) hold the PURE colors, which is what
-    -- Solid mode addresses.
-    type t_clut is array(0 to 511) of std_logic_vector(31 downto 0);
-    constant C_CLUT : t_clut := (
-        x"148F0168", x"14BEF565", x"14FEE963", x"152EE161",
-        x"156ED55F", x"159ECD5D", x"15DEC15B", x"160EB959",
-        x"164EAD57", x"167EA155", x"16BE9953", x"16EE8D51",
-        x"172E854F", x"175E794D", x"179E714B", x"17CE6549",
-        x"180E5947", x"183E5145", x"187E4543", x"18AE3D41",
-        x"18EE313F", x"191E293D", x"195E1D3B", x"198E1139",
-        x"19CE0937", x"19FDFD35", x"1A3DF533", x"1A6DE931",
-        x"1AADE12F", x"1ADDD52D", x"1B1DC92B", x"1B4DC129",
-        x"1B8DB527", x"1BBDAD25", x"1BFDA123", x"1C2D9921",
-        x"1C6D8D1F", x"1C9D811D", x"1CDD791B", x"1D0D6D19",
-        x"1D4D6517", x"1D7D5915", x"1DBD5113", x"1DED4510",
-        x"1E2D390E", x"1E5D310C", x"1E9D250A", x"1ECD1D08",
-        x"1F0D1106", x"1F3D0904", x"1F7CFD02", x"1FACF100",
-        x"1FECE8FE", x"201CDCFC", x"205CD4FA", x"208CC8F8",
-        x"20CCC0F6", x"20FCB4F4", x"213CA8F2", x"216CA0F0",
-        x"21AC94EE", x"21DC8CEC", x"221C80EA", x"224C78E8",
-        x"228C6CE6", x"22BC60E4", x"22FC58E2", x"232C4CE0",
-        x"236C44DE", x"239C38DC", x"23DC30DA", x"240C24D8",
-        x"244C18D6", x"247C10D4", x"24BC04D2", x"24EBFCD0",
-        x"252BF0CE", x"255BE8CC", x"259BDCCA", x"25CBD0C8",
-        x"260BC8C6", x"263BBCC4", x"267BB4C2", x"26ABA8C0",
-        x"26EBA0BE", x"271B94BC", x"275B88B9", x"278B80B7",
-        x"27CB74B5", x"27FB6CB3", x"283B60B1", x"286B58AF",
-        x"28AB4CAD", x"28DB40AB", x"291B38A9", x"294B2CA7",
-        x"298B24A5", x"29BB18A3", x"29FB10A1", x"2A2B049F",
-        x"2A6AF89D", x"2A9AF09B", x"2ADAE499", x"2B0ADC97",
-        x"2B4AD095", x"2B7AC893", x"2BBABC91", x"2BEAB08F",
-        x"2C2AA88D", x"2C5A9C8B", x"2C9A9489", x"2CCA8887",
-        x"2D0A8085", x"2D3A7483", x"2D7A6881", x"2DAA607F",
-        x"2DEA547D", x"2E1A4C7B", x"2E5A4079", x"2E8A3877",
-        x"2ECA2C75", x"2EFA2073", x"2F3A1871", x"2F6A0C6F",
-        x"2FAA046D", x"2FD9F86B", x"3019F069", x"3049E467",
-        x"3089DC65", x"30B9D062", x"30F9C460", x"3129BC5E",
-        x"3169B05C", x"3199A85A", x"31D99C58", x"32099456",
-        x"32498854", x"32797C52", x"32B97450", x"32E9684E",
-        x"3329604C", x"3359544A", x"33994C48", x"33C94046",
-        x"34093444", x"34392C42", x"34792040", x"34590C41",
-        x"3418F443", x"33E8DC45", x"33A8C447", x"3378AC49",
-        x"3338944B", x"3308784D", x"32C86050", x"32984852",
-        x"32583054", x"32181856", x"31E80058", x"31A7E85A",
-        x"3177D05C", x"3137B45E", x"31079C60", x"30C78462",
-        x"30976C64", x"30575466", x"30173C68", x"2FE7246B",
-        x"2FA70C6D", x"2F76F06F", x"2F36D871", x"2F06C073",
-        x"2EC6A875", x"2E969077", x"2E567879", x"2E16607B",
-        x"2DE6487D", x"2DA62C7F", x"2D761481", x"2D35FC83",
-        x"2D05E486", x"2CC5CC88", x"2C95B48A", x"2C559C8C",
-        x"2C15848E", x"2BE56890", x"2BA55092", x"2B753894",
-        x"2B352096", x"2B050898", x"2AC4F09A", x"2A94D89C",
-        x"2A54C09F", x"2A14A4A1", x"29E48CA3", x"29A474A5",
-        x"29745CA7", x"293444A9", x"29042CAB", x"28C414AD",
-        x"2893FCAF", x"2853E0B1", x"2813C8B3", x"27E3B0B5",
-        x"27A398B7", x"277380BA", x"273368BC", x"270350BE",
-        x"26C338C0", x"26931CC2", x"265304C4", x"2612ECC6",
-        x"25E2D4C8", x"25A2BCCA", x"2572A4CC", x"25328CCE",
-        x"250274D0", x"24C258D2", x"249240D5", x"245228D7",
-        x"240228DD", x"23B238E7", x"235248F2", x"22F258FC",
-        x"22A26D06", x"22427D10", x"21E28D1A", x"21829D25",
-        x"2132AD2F", x"20D2BD39", x"2072CD43", x"2022E14D",
-        x"1FC2F157", x"1F630162", x"1F13116C", x"1EB32176",
-        x"1E533180", x"1E03458A", x"1DA35594", x"1D43659F",
-        x"1CF375A9", x"1C9385B3", x"1C3395BD", x"1BD3A5C7",
-        x"1B83B9D1", x"1B23C9DC", x"1AC3D9E6", x"1A73E9F0",
-        x"1A13F9FA", x"19B40A04", x"19641E0E", x"19042E19",
-        x"18A43E23", x"18544E2D", x"17F45E37", x"17946E41",
-        x"1744824C", x"16E49256", x"1684A260", x"1624B26A",
-        x"15D4C274", x"1574D27E", x"1514E289", x"14C4F693",
-        x"1465069D", x"140516A7", x"13B526B1", x"135536BB",
-        x"12F546C6", x"12A55AD0", x"12456ADA", x"11E57AE4",
-        x"11958AEE", x"11359AF8", x"10D5AB03", x"1075BB0D",
-        x"1025CF17", x"0FC5DF21", x"0F65EF2B", x"0F15FF35",
-        x"0EB60F40", x"0E561F4A", x"0E063354", x"0DA6435E",
-        x"0D465368", x"0CF66372", x"0C96737D", x"0C368387",
-        x"0BE69791", x"0B86A79B", x"0B26B7A5", x"0AC6C7B0",
-        x"0A76D7BA", x"0A46E3BE", x"0A46EFBA", x"0A46F7B7",
-        x"0A56FFB3", x"0A570BB0", x"0A6713AC", x"0A671BA8",
-        x"0A6727A5", x"0A772FA1", x"0A77379D", x"0A773F9A",
-        x"0A874B96", x"0A875393", x"0A975B8F", x"0A97678B",
-        x"0A976F88", x"0AA77784", x"0AA78381", x"0AB78B7D",
-        x"0AB79379", x"0AB79B76", x"0AC7A772", x"0AC7AF6F",
-        x"0AC7B76B", x"0AD7C367", x"0AD7CB64", x"0AE7D360",
-        x"0AE7DF5D", x"0AE7E759", x"0AF7EF55", x"0AF7F752",
-        x"0B08034E", x"0B080B4A", x"0B081347", x"0B181F43",
-        x"0B182740", x"0B182F3C", x"0B283738", x"0B284335",
-        x"0B384B31", x"0B38532E", x"0B385F2A", x"0B486726",
-        x"0B486F23", x"0B587B1F", x"0B58831C", x"0B588B18",
-        x"0B689314", x"0B689F11", x"0B68A70D", x"0B78AF09",
-        x"0B78BB06", x"0B88C302", x"0B88CAFF", x"0B88D6FB",
-        x"0B98DEF7", x"0B98E6F4", x"0B98EEF0", x"0BA8FAED",
-        x"0BA902E9", x"0BB90AE5", x"0BB916E2", x"0BB91EDE",
-        x"0BC926DB", x"0BC92ED7", x"0BD93AD3", x"0BD942D0",
-        x"0BD94ACC", x"0BE956C9", x"0BE95EC5", x"0BE966C1",
-        x"0BF972BE", x"0BF97ABA", x"0C0982B8", x"0C298ABA",
-        x"0C4992BC", x"0C799ABF", x"0C99A2C1", x"0CB9AAC3",
-        x"0CD9B2C5", x"0CF9BAC7", x"0D19C2C9", x"0D39CACB",
-        x"0D69D2CD", x"0D89DAD0", x"0DA9E2D2", x"0DC9EAD4",
-        x"0DE9F2D6", x"0E09FAD8", x"0E2A02DA", x"0E5A0ADC",
-        x"0E7A16DF", x"0E9A1EE1", x"0EBA26E3", x"0EDA2EE5",
-        x"0EFA36E7", x"0F1A3EE9", x"0F4A46EB", x"0F6A4EED",
-        x"0F8A56F0", x"0FAA5EF2", x"0FCA66F4", x"0FEA6EF6",
-        x"101A76F8", x"103A7EFA", x"105A86FC", x"107A8EFE",
-        x"109A9701", x"10BA9F03", x"10DAA705", x"110AAF07",
-        x"112AB709", x"114ABF0B", x"116AC70D", x"118ACF10",
-        x"11AAD712", x"11CADF14", x"11FAE716", x"121AEF18",
-        x"123AF71A", x"125AFF1C", x"127B071E", x"129B0F21",
-        x"12BB1723", x"12EB1F25", x"130B2727", x"132B2F29",
-        x"134B372B", x"136B3F2D", x"138B4730", x"13AB4F32",
-        x"13DB5734", x"13FB5F36", x"141B6738", x"143B733A",
-        x"145B7B3C", x"147B833E", x"149B8B41", x"14CB9343",
-        x"14EB9B45", x"150BA347", x"152BAB49", x"154BB34B",
-        x"156BBB4D", x"159BC350", x"15BBCB52", x"15CBD353",
-        x"15CBDF4C", x"15CBE745", x"15CBF33E", x"15BBFF38",
-        x"15BC0B31", x"15BC172A", x"15AC1F23", x"15AC2B1D",
-        x"15AC3716", x"15AC430F", x"159C4F09", x"159C5702",
-        x"159C62FB", x"158C6EF4", x"158C7AEE", x"158C86E7",
-        x"158C8EE0", x"157C9AD9", x"157CA6D3", x"157CB2CC",
-        x"156CBAC5", x"156CC6BF", x"156CD2B8", x"156CDEB1",
-        x"155CEAAA", x"155CF2A4", x"155CFE9D", x"154D0A96",
-        x"154D168F", x"154D2289", x"154D2A82", x"153D367B",
-        x"153D4275", x"153D4E6E", x"152D5A67", x"152D6260",
-        x"152D6E5A", x"152D7A53", x"151D864C", x"151D8E45",
-        x"151D9A3F", x"150DA638", x"150DB231", x"150DBE2B",
-        x"150DC624", x"14FDD21D", x"14FDDE16", x"14FDEA10",
-        x"14EDF609", x"14EDFE02", x"14EE09FB", x"14EE15F5",
-        x"14DE21EE", x"14DE2DE7", x"14DE35E1", x"14CE41DA",
-        x"14CE4DD3", x"14CE59CC", x"14CE61C6", x"14BE6DBF",
-        x"14BE79B8", x"14BE85B1", x"14AE91AB", x"14AE99A4",
-        x"14AEA59D", x"14AEB197", x"149EBD90", x"149EC989",
-        x"149ED182", x"148EDD7C", x"148EE975", x"148EF56E");
-
-    -- 4096/sqrt(1+slope^2) with slope in Q3, as (value, delta-to-next) so a
-    -- single read gives everything needed to INTERPOLATE.  Converts vertical
-    -- distance into distance perpendicular to the curve, keeping the ribbon
-    -- one constant width through every bend.
+    -- Ribbon colour LUT: the seven HW-verified phosphor colours interpolated
+    -- to 512 steps.  The u register carries BT.601 Cr on this hardware, so
+    -- these are the raw register values.  Segment starts (addr = k*73) hold
+    -- the PURE colours, which is what Solid mode addresses.
     --
-    -- Only 16 entries because the factor is clamped at 1.5x (slope 1.12): the
-    -- estimate is really distance to the TANGENT LINE, which underestimates
-    -- where the curve bends tighter than the ribbon is thick, and unclamped
-    -- it grows horns above every crest.
-    --
-    -- The interpolation is what keeps the edges SMOOTH.  Indexed on the raw
-    -- Q3 slope alone, each index step moved the ribbon edge by ~3 rows and
-    -- the top and bottom edges came out visibly toothed.
-    -- Two flat arrays rather than an array of records: a single record
-    -- constant read in two statements is the array-of-arrays pattern this
-    -- toolchain mishandles, and it produced garbage factors on scattered
-    -- columns (each one a solid vertical line).
-    type t_rfv is array(0 to 15) of unsigned(11 downto 0);
-    type t_rfd is array(0 to 15) of signed(9 downto 0);
-    constant C_RFV : t_rfv := (
-        to_unsigned(4095, 12), to_unsigned(4064, 12), to_unsigned(3974, 12), to_unsigned(3835, 12),
-        to_unsigned(3664, 12), to_unsigned(3473, 12), to_unsigned(3277, 12), to_unsigned(3083, 12),
-        to_unsigned(2896, 12), to_unsigned(2730, 12), to_unsigned(2730, 12), to_unsigned(2730, 12),
-        to_unsigned(2730, 12), to_unsigned(2730, 12), to_unsigned(2730, 12), to_unsigned(2730, 12));
-    constant C_RFD : t_rfd := (
-        to_signed( -31, 10), to_signed( -90, 10), to_signed(-139, 10), to_signed(-171, 10),
-        to_signed(-191, 10), to_signed(-196, 10), to_signed(-194, 10), to_signed(-187, 10),
-        to_signed(-166, 10), to_signed(   0, 10), to_signed(   0, 10), to_signed(   0, 10),
-        to_signed(   0, 10), to_signed(   0, 10), to_signed(   0, 10), to_signed(   0, 10));
-
-
+    -- SIX independent 256 x 10 ROMs (Y/U/V x low/high half), NOT one packed
+    -- 512 x 32 array: the packed form had two constant-zero bits, yosys
+    -- pruned it to 30 live bits and spread it over THREE EBR blocks -- the
+    -- odd-mapping trap that reads garbage on hardware while every sim is
+    -- bit-exact (this was the v1.6 "colours railed red/blue" regression and
+    -- the thin coloured lines across the band).  Each ROM here is the same
+    -- 256-deep, <=16-bit shape as the sine ROMs, which render correctly.
+    type t_c10 is array(0 to 255) of unsigned(9 downto 0);
+    constant C_CY_LO : t_c10 := (
+        to_unsigned( 328, 10), to_unsigned( 331, 10), to_unsigned( 335, 10), to_unsigned( 338, 10), to_unsigned( 342, 10), to_unsigned( 345, 10), to_unsigned( 349, 10), to_unsigned( 352, 10),
+        to_unsigned( 356, 10), to_unsigned( 359, 10), to_unsigned( 363, 10), to_unsigned( 366, 10), to_unsigned( 370, 10), to_unsigned( 373, 10), to_unsigned( 377, 10), to_unsigned( 380, 10),
+        to_unsigned( 384, 10), to_unsigned( 387, 10), to_unsigned( 391, 10), to_unsigned( 394, 10), to_unsigned( 398, 10), to_unsigned( 401, 10), to_unsigned( 405, 10), to_unsigned( 408, 10),
+        to_unsigned( 412, 10), to_unsigned( 415, 10), to_unsigned( 419, 10), to_unsigned( 422, 10), to_unsigned( 426, 10), to_unsigned( 429, 10), to_unsigned( 433, 10), to_unsigned( 436, 10),
+        to_unsigned( 440, 10), to_unsigned( 443, 10), to_unsigned( 447, 10), to_unsigned( 450, 10), to_unsigned( 454, 10), to_unsigned( 457, 10), to_unsigned( 461, 10), to_unsigned( 464, 10),
+        to_unsigned( 468, 10), to_unsigned( 471, 10), to_unsigned( 475, 10), to_unsigned( 478, 10), to_unsigned( 482, 10), to_unsigned( 485, 10), to_unsigned( 489, 10), to_unsigned( 492, 10),
+        to_unsigned( 496, 10), to_unsigned( 499, 10), to_unsigned( 503, 10), to_unsigned( 506, 10), to_unsigned( 510, 10), to_unsigned( 513, 10), to_unsigned( 517, 10), to_unsigned( 520, 10),
+        to_unsigned( 524, 10), to_unsigned( 527, 10), to_unsigned( 531, 10), to_unsigned( 534, 10), to_unsigned( 538, 10), to_unsigned( 541, 10), to_unsigned( 545, 10), to_unsigned( 548, 10),
+        to_unsigned( 552, 10), to_unsigned( 555, 10), to_unsigned( 559, 10), to_unsigned( 562, 10), to_unsigned( 566, 10), to_unsigned( 569, 10), to_unsigned( 573, 10), to_unsigned( 576, 10),
+        to_unsigned( 580, 10), to_unsigned( 583, 10), to_unsigned( 587, 10), to_unsigned( 590, 10), to_unsigned( 594, 10), to_unsigned( 597, 10), to_unsigned( 601, 10), to_unsigned( 604, 10),
+        to_unsigned( 608, 10), to_unsigned( 611, 10), to_unsigned( 615, 10), to_unsigned( 618, 10), to_unsigned( 622, 10), to_unsigned( 625, 10), to_unsigned( 629, 10), to_unsigned( 632, 10),
+        to_unsigned( 636, 10), to_unsigned( 639, 10), to_unsigned( 643, 10), to_unsigned( 646, 10), to_unsigned( 650, 10), to_unsigned( 653, 10), to_unsigned( 657, 10), to_unsigned( 660, 10),
+        to_unsigned( 664, 10), to_unsigned( 667, 10), to_unsigned( 671, 10), to_unsigned( 674, 10), to_unsigned( 678, 10), to_unsigned( 681, 10), to_unsigned( 685, 10), to_unsigned( 688, 10),
+        to_unsigned( 692, 10), to_unsigned( 695, 10), to_unsigned( 699, 10), to_unsigned( 702, 10), to_unsigned( 706, 10), to_unsigned( 709, 10), to_unsigned( 713, 10), to_unsigned( 716, 10),
+        to_unsigned( 720, 10), to_unsigned( 723, 10), to_unsigned( 727, 10), to_unsigned( 730, 10), to_unsigned( 734, 10), to_unsigned( 737, 10), to_unsigned( 741, 10), to_unsigned( 744, 10),
+        to_unsigned( 748, 10), to_unsigned( 751, 10), to_unsigned( 755, 10), to_unsigned( 758, 10), to_unsigned( 762, 10), to_unsigned( 765, 10), to_unsigned( 769, 10), to_unsigned( 772, 10),
+        to_unsigned( 776, 10), to_unsigned( 779, 10), to_unsigned( 783, 10), to_unsigned( 786, 10), to_unsigned( 790, 10), to_unsigned( 793, 10), to_unsigned( 797, 10), to_unsigned( 800, 10),
+        to_unsigned( 804, 10), to_unsigned( 807, 10), to_unsigned( 811, 10), to_unsigned( 814, 10), to_unsigned( 818, 10), to_unsigned( 821, 10), to_unsigned( 825, 10), to_unsigned( 828, 10),
+        to_unsigned( 832, 10), to_unsigned( 835, 10), to_unsigned( 839, 10), to_unsigned( 837, 10), to_unsigned( 833, 10), to_unsigned( 830, 10), to_unsigned( 826, 10), to_unsigned( 823, 10),
+        to_unsigned( 819, 10), to_unsigned( 816, 10), to_unsigned( 812, 10), to_unsigned( 809, 10), to_unsigned( 805, 10), to_unsigned( 801, 10), to_unsigned( 798, 10), to_unsigned( 794, 10),
+        to_unsigned( 791, 10), to_unsigned( 787, 10), to_unsigned( 784, 10), to_unsigned( 780, 10), to_unsigned( 777, 10), to_unsigned( 773, 10), to_unsigned( 769, 10), to_unsigned( 766, 10),
+        to_unsigned( 762, 10), to_unsigned( 759, 10), to_unsigned( 755, 10), to_unsigned( 752, 10), to_unsigned( 748, 10), to_unsigned( 745, 10), to_unsigned( 741, 10), to_unsigned( 737, 10),
+        to_unsigned( 734, 10), to_unsigned( 730, 10), to_unsigned( 727, 10), to_unsigned( 723, 10), to_unsigned( 720, 10), to_unsigned( 716, 10), to_unsigned( 713, 10), to_unsigned( 709, 10),
+        to_unsigned( 705, 10), to_unsigned( 702, 10), to_unsigned( 698, 10), to_unsigned( 695, 10), to_unsigned( 691, 10), to_unsigned( 688, 10), to_unsigned( 684, 10), to_unsigned( 681, 10),
+        to_unsigned( 677, 10), to_unsigned( 673, 10), to_unsigned( 670, 10), to_unsigned( 666, 10), to_unsigned( 663, 10), to_unsigned( 659, 10), to_unsigned( 656, 10), to_unsigned( 652, 10),
+        to_unsigned( 649, 10), to_unsigned( 645, 10), to_unsigned( 641, 10), to_unsigned( 638, 10), to_unsigned( 634, 10), to_unsigned( 631, 10), to_unsigned( 627, 10), to_unsigned( 624, 10),
+        to_unsigned( 620, 10), to_unsigned( 617, 10), to_unsigned( 613, 10), to_unsigned( 609, 10), to_unsigned( 606, 10), to_unsigned( 602, 10), to_unsigned( 599, 10), to_unsigned( 595, 10),
+        to_unsigned( 592, 10), to_unsigned( 588, 10), to_unsigned( 585, 10), to_unsigned( 581, 10), to_unsigned( 576, 10), to_unsigned( 571, 10), to_unsigned( 565, 10), to_unsigned( 559, 10),
+        to_unsigned( 554, 10), to_unsigned( 548, 10), to_unsigned( 542, 10), to_unsigned( 536, 10), to_unsigned( 531, 10), to_unsigned( 525, 10), to_unsigned( 519, 10), to_unsigned( 514, 10),
+        to_unsigned( 508, 10), to_unsigned( 502, 10), to_unsigned( 497, 10), to_unsigned( 491, 10), to_unsigned( 485, 10), to_unsigned( 480, 10), to_unsigned( 474, 10), to_unsigned( 468, 10),
+        to_unsigned( 463, 10), to_unsigned( 457, 10), to_unsigned( 451, 10), to_unsigned( 445, 10), to_unsigned( 440, 10), to_unsigned( 434, 10), to_unsigned( 428, 10), to_unsigned( 423, 10),
+        to_unsigned( 417, 10), to_unsigned( 411, 10), to_unsigned( 406, 10), to_unsigned( 400, 10), to_unsigned( 394, 10), to_unsigned( 389, 10), to_unsigned( 383, 10), to_unsigned( 377, 10));
+    constant C_CY_HI : t_c10 := (
+        to_unsigned( 372, 10), to_unsigned( 366, 10), to_unsigned( 360, 10), to_unsigned( 354, 10), to_unsigned( 349, 10), to_unsigned( 343, 10), to_unsigned( 337, 10), to_unsigned( 332, 10),
+        to_unsigned( 326, 10), to_unsigned( 320, 10), to_unsigned( 315, 10), to_unsigned( 309, 10), to_unsigned( 303, 10), to_unsigned( 298, 10), to_unsigned( 292, 10), to_unsigned( 286, 10),
+        to_unsigned( 281, 10), to_unsigned( 275, 10), to_unsigned( 269, 10), to_unsigned( 263, 10), to_unsigned( 258, 10), to_unsigned( 252, 10), to_unsigned( 246, 10), to_unsigned( 241, 10),
+        to_unsigned( 235, 10), to_unsigned( 229, 10), to_unsigned( 224, 10), to_unsigned( 218, 10), to_unsigned( 212, 10), to_unsigned( 207, 10), to_unsigned( 201, 10), to_unsigned( 195, 10),
+        to_unsigned( 190, 10), to_unsigned( 184, 10), to_unsigned( 178, 10), to_unsigned( 172, 10), to_unsigned( 167, 10), to_unsigned( 164, 10), to_unsigned( 164, 10), to_unsigned( 164, 10),
+        to_unsigned( 165, 10), to_unsigned( 165, 10), to_unsigned( 166, 10), to_unsigned( 166, 10), to_unsigned( 166, 10), to_unsigned( 167, 10), to_unsigned( 167, 10), to_unsigned( 167, 10),
+        to_unsigned( 168, 10), to_unsigned( 168, 10), to_unsigned( 169, 10), to_unsigned( 169, 10), to_unsigned( 169, 10), to_unsigned( 170, 10), to_unsigned( 170, 10), to_unsigned( 171, 10),
+        to_unsigned( 171, 10), to_unsigned( 171, 10), to_unsigned( 172, 10), to_unsigned( 172, 10), to_unsigned( 172, 10), to_unsigned( 173, 10), to_unsigned( 173, 10), to_unsigned( 174, 10),
+        to_unsigned( 174, 10), to_unsigned( 174, 10), to_unsigned( 175, 10), to_unsigned( 175, 10), to_unsigned( 176, 10), to_unsigned( 176, 10), to_unsigned( 176, 10), to_unsigned( 177, 10),
+        to_unsigned( 177, 10), to_unsigned( 177, 10), to_unsigned( 178, 10), to_unsigned( 178, 10), to_unsigned( 179, 10), to_unsigned( 179, 10), to_unsigned( 179, 10), to_unsigned( 180, 10),
+        to_unsigned( 180, 10), to_unsigned( 181, 10), to_unsigned( 181, 10), to_unsigned( 181, 10), to_unsigned( 182, 10), to_unsigned( 182, 10), to_unsigned( 182, 10), to_unsigned( 183, 10),
+        to_unsigned( 183, 10), to_unsigned( 184, 10), to_unsigned( 184, 10), to_unsigned( 184, 10), to_unsigned( 185, 10), to_unsigned( 185, 10), to_unsigned( 185, 10), to_unsigned( 186, 10),
+        to_unsigned( 186, 10), to_unsigned( 187, 10), to_unsigned( 187, 10), to_unsigned( 187, 10), to_unsigned( 188, 10), to_unsigned( 188, 10), to_unsigned( 189, 10), to_unsigned( 189, 10),
+        to_unsigned( 189, 10), to_unsigned( 190, 10), to_unsigned( 190, 10), to_unsigned( 190, 10), to_unsigned( 191, 10), to_unsigned( 191, 10), to_unsigned( 192, 10), to_unsigned( 194, 10),
+        to_unsigned( 196, 10), to_unsigned( 199, 10), to_unsigned( 201, 10), to_unsigned( 203, 10), to_unsigned( 205, 10), to_unsigned( 207, 10), to_unsigned( 209, 10), to_unsigned( 211, 10),
+        to_unsigned( 214, 10), to_unsigned( 216, 10), to_unsigned( 218, 10), to_unsigned( 220, 10), to_unsigned( 222, 10), to_unsigned( 224, 10), to_unsigned( 226, 10), to_unsigned( 229, 10),
+        to_unsigned( 231, 10), to_unsigned( 233, 10), to_unsigned( 235, 10), to_unsigned( 237, 10), to_unsigned( 239, 10), to_unsigned( 241, 10), to_unsigned( 244, 10), to_unsigned( 246, 10),
+        to_unsigned( 248, 10), to_unsigned( 250, 10), to_unsigned( 252, 10), to_unsigned( 254, 10), to_unsigned( 257, 10), to_unsigned( 259, 10), to_unsigned( 261, 10), to_unsigned( 263, 10),
+        to_unsigned( 265, 10), to_unsigned( 267, 10), to_unsigned( 269, 10), to_unsigned( 272, 10), to_unsigned( 274, 10), to_unsigned( 276, 10), to_unsigned( 278, 10), to_unsigned( 280, 10),
+        to_unsigned( 282, 10), to_unsigned( 284, 10), to_unsigned( 287, 10), to_unsigned( 289, 10), to_unsigned( 291, 10), to_unsigned( 293, 10), to_unsigned( 295, 10), to_unsigned( 297, 10),
+        to_unsigned( 299, 10), to_unsigned( 302, 10), to_unsigned( 304, 10), to_unsigned( 306, 10), to_unsigned( 308, 10), to_unsigned( 310, 10), to_unsigned( 312, 10), to_unsigned( 314, 10),
+        to_unsigned( 317, 10), to_unsigned( 319, 10), to_unsigned( 321, 10), to_unsigned( 323, 10), to_unsigned( 325, 10), to_unsigned( 327, 10), to_unsigned( 329, 10), to_unsigned( 332, 10),
+        to_unsigned( 334, 10), to_unsigned( 336, 10), to_unsigned( 338, 10), to_unsigned( 340, 10), to_unsigned( 342, 10), to_unsigned( 345, 10), to_unsigned( 347, 10), to_unsigned( 348, 10),
+        to_unsigned( 348, 10), to_unsigned( 348, 10), to_unsigned( 348, 10), to_unsigned( 347, 10), to_unsigned( 347, 10), to_unsigned( 347, 10), to_unsigned( 346, 10), to_unsigned( 346, 10),
+        to_unsigned( 346, 10), to_unsigned( 346, 10), to_unsigned( 345, 10), to_unsigned( 345, 10), to_unsigned( 345, 10), to_unsigned( 344, 10), to_unsigned( 344, 10), to_unsigned( 344, 10),
+        to_unsigned( 344, 10), to_unsigned( 343, 10), to_unsigned( 343, 10), to_unsigned( 343, 10), to_unsigned( 342, 10), to_unsigned( 342, 10), to_unsigned( 342, 10), to_unsigned( 342, 10),
+        to_unsigned( 341, 10), to_unsigned( 341, 10), to_unsigned( 341, 10), to_unsigned( 340, 10), to_unsigned( 340, 10), to_unsigned( 340, 10), to_unsigned( 340, 10), to_unsigned( 339, 10),
+        to_unsigned( 339, 10), to_unsigned( 339, 10), to_unsigned( 338, 10), to_unsigned( 338, 10), to_unsigned( 338, 10), to_unsigned( 338, 10), to_unsigned( 337, 10), to_unsigned( 337, 10),
+        to_unsigned( 337, 10), to_unsigned( 336, 10), to_unsigned( 336, 10), to_unsigned( 336, 10), to_unsigned( 336, 10), to_unsigned( 335, 10), to_unsigned( 335, 10), to_unsigned( 335, 10),
+        to_unsigned( 334, 10), to_unsigned( 334, 10), to_unsigned( 334, 10), to_unsigned( 334, 10), to_unsigned( 333, 10), to_unsigned( 333, 10), to_unsigned( 333, 10), to_unsigned( 332, 10),
+        to_unsigned( 332, 10), to_unsigned( 332, 10), to_unsigned( 332, 10), to_unsigned( 331, 10), to_unsigned( 331, 10), to_unsigned( 331, 10), to_unsigned( 330, 10), to_unsigned( 330, 10),
+        to_unsigned( 330, 10), to_unsigned( 330, 10), to_unsigned( 329, 10), to_unsigned( 329, 10), to_unsigned( 329, 10), to_unsigned( 328, 10), to_unsigned( 328, 10), to_unsigned( 328, 10));
+    constant C_CU_LO : t_c10 := (
+        to_unsigned( 960, 10), to_unsigned( 957, 10), to_unsigned( 954, 10), to_unsigned( 952, 10), to_unsigned( 949, 10), to_unsigned( 947, 10), to_unsigned( 944, 10), to_unsigned( 942, 10),
+        to_unsigned( 939, 10), to_unsigned( 936, 10), to_unsigned( 934, 10), to_unsigned( 931, 10), to_unsigned( 929, 10), to_unsigned( 926, 10), to_unsigned( 924, 10), to_unsigned( 921, 10),
+        to_unsigned( 918, 10), to_unsigned( 916, 10), to_unsigned( 913, 10), to_unsigned( 911, 10), to_unsigned( 908, 10), to_unsigned( 906, 10), to_unsigned( 903, 10), to_unsigned( 900, 10),
+        to_unsigned( 898, 10), to_unsigned( 895, 10), to_unsigned( 893, 10), to_unsigned( 890, 10), to_unsigned( 888, 10), to_unsigned( 885, 10), to_unsigned( 882, 10), to_unsigned( 880, 10),
+        to_unsigned( 877, 10), to_unsigned( 875, 10), to_unsigned( 872, 10), to_unsigned( 870, 10), to_unsigned( 867, 10), to_unsigned( 864, 10), to_unsigned( 862, 10), to_unsigned( 859, 10),
+        to_unsigned( 857, 10), to_unsigned( 854, 10), to_unsigned( 852, 10), to_unsigned( 849, 10), to_unsigned( 846, 10), to_unsigned( 844, 10), to_unsigned( 841, 10), to_unsigned( 839, 10),
+        to_unsigned( 836, 10), to_unsigned( 834, 10), to_unsigned( 831, 10), to_unsigned( 828, 10), to_unsigned( 826, 10), to_unsigned( 823, 10), to_unsigned( 821, 10), to_unsigned( 818, 10),
+        to_unsigned( 816, 10), to_unsigned( 813, 10), to_unsigned( 810, 10), to_unsigned( 808, 10), to_unsigned( 805, 10), to_unsigned( 803, 10), to_unsigned( 800, 10), to_unsigned( 798, 10),
+        to_unsigned( 795, 10), to_unsigned( 792, 10), to_unsigned( 790, 10), to_unsigned( 787, 10), to_unsigned( 785, 10), to_unsigned( 782, 10), to_unsigned( 780, 10), to_unsigned( 777, 10),
+        to_unsigned( 774, 10), to_unsigned( 772, 10), to_unsigned( 769, 10), to_unsigned( 767, 10), to_unsigned( 764, 10), to_unsigned( 762, 10), to_unsigned( 759, 10), to_unsigned( 756, 10),
+        to_unsigned( 754, 10), to_unsigned( 751, 10), to_unsigned( 749, 10), to_unsigned( 746, 10), to_unsigned( 744, 10), to_unsigned( 741, 10), to_unsigned( 738, 10), to_unsigned( 736, 10),
+        to_unsigned( 733, 10), to_unsigned( 731, 10), to_unsigned( 728, 10), to_unsigned( 726, 10), to_unsigned( 723, 10), to_unsigned( 720, 10), to_unsigned( 718, 10), to_unsigned( 715, 10),
+        to_unsigned( 713, 10), to_unsigned( 710, 10), to_unsigned( 708, 10), to_unsigned( 705, 10), to_unsigned( 702, 10), to_unsigned( 700, 10), to_unsigned( 697, 10), to_unsigned( 695, 10),
+        to_unsigned( 692, 10), to_unsigned( 690, 10), to_unsigned( 687, 10), to_unsigned( 684, 10), to_unsigned( 682, 10), to_unsigned( 679, 10), to_unsigned( 677, 10), to_unsigned( 674, 10),
+        to_unsigned( 672, 10), to_unsigned( 669, 10), to_unsigned( 666, 10), to_unsigned( 664, 10), to_unsigned( 661, 10), to_unsigned( 659, 10), to_unsigned( 656, 10), to_unsigned( 654, 10),
+        to_unsigned( 651, 10), to_unsigned( 648, 10), to_unsigned( 646, 10), to_unsigned( 643, 10), to_unsigned( 641, 10), to_unsigned( 638, 10), to_unsigned( 636, 10), to_unsigned( 633, 10),
+        to_unsigned( 631, 10), to_unsigned( 628, 10), to_unsigned( 625, 10), to_unsigned( 623, 10), to_unsigned( 620, 10), to_unsigned( 618, 10), to_unsigned( 615, 10), to_unsigned( 613, 10),
+        to_unsigned( 610, 10), to_unsigned( 607, 10), to_unsigned( 605, 10), to_unsigned( 602, 10), to_unsigned( 600, 10), to_unsigned( 597, 10), to_unsigned( 595, 10), to_unsigned( 592, 10),
+        to_unsigned( 589, 10), to_unsigned( 587, 10), to_unsigned( 584, 10), to_unsigned( 579, 10), to_unsigned( 573, 10), to_unsigned( 567, 10), to_unsigned( 561, 10), to_unsigned( 555, 10),
+        to_unsigned( 549, 10), to_unsigned( 542, 10), to_unsigned( 536, 10), to_unsigned( 530, 10), to_unsigned( 524, 10), to_unsigned( 518, 10), to_unsigned( 512, 10), to_unsigned( 506, 10),
+        to_unsigned( 500, 10), to_unsigned( 493, 10), to_unsigned( 487, 10), to_unsigned( 481, 10), to_unsigned( 475, 10), to_unsigned( 469, 10), to_unsigned( 463, 10), to_unsigned( 457, 10),
+        to_unsigned( 451, 10), to_unsigned( 444, 10), to_unsigned( 438, 10), to_unsigned( 432, 10), to_unsigned( 426, 10), to_unsigned( 420, 10), to_unsigned( 414, 10), to_unsigned( 408, 10),
+        to_unsigned( 402, 10), to_unsigned( 395, 10), to_unsigned( 389, 10), to_unsigned( 383, 10), to_unsigned( 377, 10), to_unsigned( 371, 10), to_unsigned( 365, 10), to_unsigned( 359, 10),
+        to_unsigned( 353, 10), to_unsigned( 346, 10), to_unsigned( 340, 10), to_unsigned( 334, 10), to_unsigned( 328, 10), to_unsigned( 322, 10), to_unsigned( 316, 10), to_unsigned( 310, 10),
+        to_unsigned( 304, 10), to_unsigned( 297, 10), to_unsigned( 291, 10), to_unsigned( 285, 10), to_unsigned( 279, 10), to_unsigned( 273, 10), to_unsigned( 267, 10), to_unsigned( 261, 10),
+        to_unsigned( 255, 10), to_unsigned( 248, 10), to_unsigned( 242, 10), to_unsigned( 236, 10), to_unsigned( 230, 10), to_unsigned( 224, 10), to_unsigned( 218, 10), to_unsigned( 212, 10),
+        to_unsigned( 206, 10), to_unsigned( 199, 10), to_unsigned( 193, 10), to_unsigned( 187, 10), to_unsigned( 181, 10), to_unsigned( 175, 10), to_unsigned( 169, 10), to_unsigned( 163, 10),
+        to_unsigned( 157, 10), to_unsigned( 150, 10), to_unsigned( 144, 10), to_unsigned( 138, 10), to_unsigned( 138, 10), to_unsigned( 142, 10), to_unsigned( 146, 10), to_unsigned( 150, 10),
+        to_unsigned( 155, 10), to_unsigned( 159, 10), to_unsigned( 163, 10), to_unsigned( 167, 10), to_unsigned( 171, 10), to_unsigned( 175, 10), to_unsigned( 179, 10), to_unsigned( 184, 10),
+        to_unsigned( 188, 10), to_unsigned( 192, 10), to_unsigned( 196, 10), to_unsigned( 200, 10), to_unsigned( 204, 10), to_unsigned( 209, 10), to_unsigned( 213, 10), to_unsigned( 217, 10),
+        to_unsigned( 221, 10), to_unsigned( 225, 10), to_unsigned( 229, 10), to_unsigned( 233, 10), to_unsigned( 238, 10), to_unsigned( 242, 10), to_unsigned( 246, 10), to_unsigned( 250, 10),
+        to_unsigned( 254, 10), to_unsigned( 258, 10), to_unsigned( 263, 10), to_unsigned( 267, 10), to_unsigned( 271, 10), to_unsigned( 275, 10), to_unsigned( 279, 10), to_unsigned( 283, 10));
+    constant C_CU_HI : t_c10 := (
+        to_unsigned( 288, 10), to_unsigned( 292, 10), to_unsigned( 296, 10), to_unsigned( 300, 10), to_unsigned( 304, 10), to_unsigned( 308, 10), to_unsigned( 312, 10), to_unsigned( 317, 10),
+        to_unsigned( 321, 10), to_unsigned( 325, 10), to_unsigned( 329, 10), to_unsigned( 333, 10), to_unsigned( 337, 10), to_unsigned( 342, 10), to_unsigned( 346, 10), to_unsigned( 350, 10),
+        to_unsigned( 354, 10), to_unsigned( 358, 10), to_unsigned( 362, 10), to_unsigned( 366, 10), to_unsigned( 371, 10), to_unsigned( 375, 10), to_unsigned( 379, 10), to_unsigned( 383, 10),
+        to_unsigned( 387, 10), to_unsigned( 391, 10), to_unsigned( 396, 10), to_unsigned( 400, 10), to_unsigned( 404, 10), to_unsigned( 408, 10), to_unsigned( 412, 10), to_unsigned( 416, 10),
+        to_unsigned( 421, 10), to_unsigned( 425, 10), to_unsigned( 429, 10), to_unsigned( 433, 10), to_unsigned( 437, 10), to_unsigned( 440, 10), to_unsigned( 443, 10), to_unsigned( 445, 10),
+        to_unsigned( 447, 10), to_unsigned( 450, 10), to_unsigned( 452, 10), to_unsigned( 454, 10), to_unsigned( 457, 10), to_unsigned( 459, 10), to_unsigned( 461, 10), to_unsigned( 463, 10),
+        to_unsigned( 466, 10), to_unsigned( 468, 10), to_unsigned( 470, 10), to_unsigned( 473, 10), to_unsigned( 475, 10), to_unsigned( 477, 10), to_unsigned( 480, 10), to_unsigned( 482, 10),
+        to_unsigned( 484, 10), to_unsigned( 486, 10), to_unsigned( 489, 10), to_unsigned( 491, 10), to_unsigned( 493, 10), to_unsigned( 496, 10), to_unsigned( 498, 10), to_unsigned( 500, 10),
+        to_unsigned( 503, 10), to_unsigned( 505, 10), to_unsigned( 507, 10), to_unsigned( 509, 10), to_unsigned( 512, 10), to_unsigned( 514, 10), to_unsigned( 516, 10), to_unsigned( 519, 10),
+        to_unsigned( 521, 10), to_unsigned( 523, 10), to_unsigned( 525, 10), to_unsigned( 528, 10), to_unsigned( 530, 10), to_unsigned( 532, 10), to_unsigned( 535, 10), to_unsigned( 537, 10),
+        to_unsigned( 539, 10), to_unsigned( 542, 10), to_unsigned( 544, 10), to_unsigned( 546, 10), to_unsigned( 548, 10), to_unsigned( 551, 10), to_unsigned( 553, 10), to_unsigned( 555, 10),
+        to_unsigned( 558, 10), to_unsigned( 560, 10), to_unsigned( 562, 10), to_unsigned( 565, 10), to_unsigned( 567, 10), to_unsigned( 569, 10), to_unsigned( 571, 10), to_unsigned( 574, 10),
+        to_unsigned( 576, 10), to_unsigned( 578, 10), to_unsigned( 581, 10), to_unsigned( 583, 10), to_unsigned( 585, 10), to_unsigned( 587, 10), to_unsigned( 590, 10), to_unsigned( 592, 10),
+        to_unsigned( 594, 10), to_unsigned( 597, 10), to_unsigned( 599, 10), to_unsigned( 601, 10), to_unsigned( 604, 10), to_unsigned( 606, 10), to_unsigned( 608, 10), to_unsigned( 610, 10),
+        to_unsigned( 612, 10), to_unsigned( 614, 10), to_unsigned( 616, 10), to_unsigned( 618, 10), to_unsigned( 620, 10), to_unsigned( 622, 10), to_unsigned( 624, 10), to_unsigned( 626, 10),
+        to_unsigned( 628, 10), to_unsigned( 630, 10), to_unsigned( 632, 10), to_unsigned( 634, 10), to_unsigned( 636, 10), to_unsigned( 638, 10), to_unsigned( 640, 10), to_unsigned( 642, 10),
+        to_unsigned( 645, 10), to_unsigned( 647, 10), to_unsigned( 649, 10), to_unsigned( 651, 10), to_unsigned( 653, 10), to_unsigned( 655, 10), to_unsigned( 657, 10), to_unsigned( 659, 10),
+        to_unsigned( 661, 10), to_unsigned( 663, 10), to_unsigned( 665, 10), to_unsigned( 667, 10), to_unsigned( 669, 10), to_unsigned( 671, 10), to_unsigned( 673, 10), to_unsigned( 675, 10),
+        to_unsigned( 677, 10), to_unsigned( 679, 10), to_unsigned( 681, 10), to_unsigned( 683, 10), to_unsigned( 685, 10), to_unsigned( 687, 10), to_unsigned( 689, 10), to_unsigned( 691, 10),
+        to_unsigned( 693, 10), to_unsigned( 695, 10), to_unsigned( 697, 10), to_unsigned( 699, 10), to_unsigned( 701, 10), to_unsigned( 703, 10), to_unsigned( 705, 10), to_unsigned( 707, 10),
+        to_unsigned( 709, 10), to_unsigned( 711, 10), to_unsigned( 713, 10), to_unsigned( 715, 10), to_unsigned( 717, 10), to_unsigned( 719, 10), to_unsigned( 721, 10), to_unsigned( 723, 10),
+        to_unsigned( 725, 10), to_unsigned( 727, 10), to_unsigned( 729, 10), to_unsigned( 732, 10), to_unsigned( 734, 10), to_unsigned( 736, 10), to_unsigned( 738, 10), to_unsigned( 740, 10),
+        to_unsigned( 742, 10), to_unsigned( 744, 10), to_unsigned( 746, 10), to_unsigned( 748, 10), to_unsigned( 750, 10), to_unsigned( 752, 10), to_unsigned( 754, 10), to_unsigned( 756, 10),
+        to_unsigned( 759, 10), to_unsigned( 761, 10), to_unsigned( 764, 10), to_unsigned( 767, 10), to_unsigned( 770, 10), to_unsigned( 773, 10), to_unsigned( 775, 10), to_unsigned( 778, 10),
+        to_unsigned( 781, 10), to_unsigned( 784, 10), to_unsigned( 787, 10), to_unsigned( 789, 10), to_unsigned( 792, 10), to_unsigned( 795, 10), to_unsigned( 798, 10), to_unsigned( 801, 10),
+        to_unsigned( 803, 10), to_unsigned( 806, 10), to_unsigned( 809, 10), to_unsigned( 812, 10), to_unsigned( 814, 10), to_unsigned( 817, 10), to_unsigned( 820, 10), to_unsigned( 823, 10),
+        to_unsigned( 826, 10), to_unsigned( 828, 10), to_unsigned( 831, 10), to_unsigned( 834, 10), to_unsigned( 837, 10), to_unsigned( 840, 10), to_unsigned( 842, 10), to_unsigned( 845, 10),
+        to_unsigned( 848, 10), to_unsigned( 851, 10), to_unsigned( 854, 10), to_unsigned( 856, 10), to_unsigned( 859, 10), to_unsigned( 862, 10), to_unsigned( 865, 10), to_unsigned( 867, 10),
+        to_unsigned( 870, 10), to_unsigned( 873, 10), to_unsigned( 876, 10), to_unsigned( 879, 10), to_unsigned( 881, 10), to_unsigned( 884, 10), to_unsigned( 887, 10), to_unsigned( 890, 10),
+        to_unsigned( 893, 10), to_unsigned( 895, 10), to_unsigned( 898, 10), to_unsigned( 901, 10), to_unsigned( 904, 10), to_unsigned( 907, 10), to_unsigned( 909, 10), to_unsigned( 912, 10),
+        to_unsigned( 915, 10), to_unsigned( 918, 10), to_unsigned( 920, 10), to_unsigned( 923, 10), to_unsigned( 926, 10), to_unsigned( 929, 10), to_unsigned( 932, 10), to_unsigned( 934, 10),
+        to_unsigned( 937, 10), to_unsigned( 940, 10), to_unsigned( 943, 10), to_unsigned( 946, 10), to_unsigned( 948, 10), to_unsigned( 951, 10), to_unsigned( 954, 10), to_unsigned( 957, 10));
+    constant C_CV_LO : t_c10 := (
+        to_unsigned( 360, 10), to_unsigned( 357, 10), to_unsigned( 355, 10), to_unsigned( 353, 10), to_unsigned( 351, 10), to_unsigned( 349, 10), to_unsigned( 347, 10), to_unsigned( 345, 10),
+        to_unsigned( 343, 10), to_unsigned( 341, 10), to_unsigned( 339, 10), to_unsigned( 337, 10), to_unsigned( 335, 10), to_unsigned( 333, 10), to_unsigned( 331, 10), to_unsigned( 329, 10),
+        to_unsigned( 327, 10), to_unsigned( 325, 10), to_unsigned( 323, 10), to_unsigned( 321, 10), to_unsigned( 319, 10), to_unsigned( 317, 10), to_unsigned( 315, 10), to_unsigned( 313, 10),
+        to_unsigned( 311, 10), to_unsigned( 309, 10), to_unsigned( 307, 10), to_unsigned( 305, 10), to_unsigned( 303, 10), to_unsigned( 301, 10), to_unsigned( 299, 10), to_unsigned( 297, 10),
+        to_unsigned( 295, 10), to_unsigned( 293, 10), to_unsigned( 291, 10), to_unsigned( 289, 10), to_unsigned( 287, 10), to_unsigned( 285, 10), to_unsigned( 283, 10), to_unsigned( 281, 10),
+        to_unsigned( 279, 10), to_unsigned( 277, 10), to_unsigned( 275, 10), to_unsigned( 272, 10), to_unsigned( 270, 10), to_unsigned( 268, 10), to_unsigned( 266, 10), to_unsigned( 264, 10),
+        to_unsigned( 262, 10), to_unsigned( 260, 10), to_unsigned( 258, 10), to_unsigned( 256, 10), to_unsigned( 254, 10), to_unsigned( 252, 10), to_unsigned( 250, 10), to_unsigned( 248, 10),
+        to_unsigned( 246, 10), to_unsigned( 244, 10), to_unsigned( 242, 10), to_unsigned( 240, 10), to_unsigned( 238, 10), to_unsigned( 236, 10), to_unsigned( 234, 10), to_unsigned( 232, 10),
+        to_unsigned( 230, 10), to_unsigned( 228, 10), to_unsigned( 226, 10), to_unsigned( 224, 10), to_unsigned( 222, 10), to_unsigned( 220, 10), to_unsigned( 218, 10), to_unsigned( 216, 10),
+        to_unsigned( 214, 10), to_unsigned( 212, 10), to_unsigned( 210, 10), to_unsigned( 208, 10), to_unsigned( 206, 10), to_unsigned( 204, 10), to_unsigned( 202, 10), to_unsigned( 200, 10),
+        to_unsigned( 198, 10), to_unsigned( 196, 10), to_unsigned( 194, 10), to_unsigned( 192, 10), to_unsigned( 190, 10), to_unsigned( 188, 10), to_unsigned( 185, 10), to_unsigned( 183, 10),
+        to_unsigned( 181, 10), to_unsigned( 179, 10), to_unsigned( 177, 10), to_unsigned( 175, 10), to_unsigned( 173, 10), to_unsigned( 171, 10), to_unsigned( 169, 10), to_unsigned( 167, 10),
+        to_unsigned( 165, 10), to_unsigned( 163, 10), to_unsigned( 161, 10), to_unsigned( 159, 10), to_unsigned( 157, 10), to_unsigned( 155, 10), to_unsigned( 153, 10), to_unsigned( 151, 10),
+        to_unsigned( 149, 10), to_unsigned( 147, 10), to_unsigned( 145, 10), to_unsigned( 143, 10), to_unsigned( 141, 10), to_unsigned( 139, 10), to_unsigned( 137, 10), to_unsigned( 135, 10),
+        to_unsigned( 133, 10), to_unsigned( 131, 10), to_unsigned( 129, 10), to_unsigned( 127, 10), to_unsigned( 125, 10), to_unsigned( 123, 10), to_unsigned( 121, 10), to_unsigned( 119, 10),
+        to_unsigned( 117, 10), to_unsigned( 115, 10), to_unsigned( 113, 10), to_unsigned( 111, 10), to_unsigned( 109, 10), to_unsigned( 107, 10), to_unsigned( 105, 10), to_unsigned( 103, 10),
+        to_unsigned( 101, 10), to_unsigned(  98, 10), to_unsigned(  96, 10), to_unsigned(  94, 10), to_unsigned(  92, 10), to_unsigned(  90, 10), to_unsigned(  88, 10), to_unsigned(  86, 10),
+        to_unsigned(  84, 10), to_unsigned(  82, 10), to_unsigned(  80, 10), to_unsigned(  78, 10), to_unsigned(  76, 10), to_unsigned(  74, 10), to_unsigned(  72, 10), to_unsigned(  70, 10),
+        to_unsigned(  68, 10), to_unsigned(  66, 10), to_unsigned(  64, 10), to_unsigned(  65, 10), to_unsigned(  67, 10), to_unsigned(  69, 10), to_unsigned(  71, 10), to_unsigned(  73, 10),
+        to_unsigned(  75, 10), to_unsigned(  77, 10), to_unsigned(  80, 10), to_unsigned(  82, 10), to_unsigned(  84, 10), to_unsigned(  86, 10), to_unsigned(  88, 10), to_unsigned(  90, 10),
+        to_unsigned(  92, 10), to_unsigned(  94, 10), to_unsigned(  96, 10), to_unsigned(  98, 10), to_unsigned( 100, 10), to_unsigned( 102, 10), to_unsigned( 104, 10), to_unsigned( 107, 10),
+        to_unsigned( 109, 10), to_unsigned( 111, 10), to_unsigned( 113, 10), to_unsigned( 115, 10), to_unsigned( 117, 10), to_unsigned( 119, 10), to_unsigned( 121, 10), to_unsigned( 123, 10),
+        to_unsigned( 125, 10), to_unsigned( 127, 10), to_unsigned( 129, 10), to_unsigned( 131, 10), to_unsigned( 134, 10), to_unsigned( 136, 10), to_unsigned( 138, 10), to_unsigned( 140, 10),
+        to_unsigned( 142, 10), to_unsigned( 144, 10), to_unsigned( 146, 10), to_unsigned( 148, 10), to_unsigned( 150, 10), to_unsigned( 152, 10), to_unsigned( 154, 10), to_unsigned( 156, 10),
+        to_unsigned( 159, 10), to_unsigned( 161, 10), to_unsigned( 163, 10), to_unsigned( 165, 10), to_unsigned( 167, 10), to_unsigned( 169, 10), to_unsigned( 171, 10), to_unsigned( 173, 10),
+        to_unsigned( 175, 10), to_unsigned( 177, 10), to_unsigned( 179, 10), to_unsigned( 181, 10), to_unsigned( 183, 10), to_unsigned( 186, 10), to_unsigned( 188, 10), to_unsigned( 190, 10),
+        to_unsigned( 192, 10), to_unsigned( 194, 10), to_unsigned( 196, 10), to_unsigned( 198, 10), to_unsigned( 200, 10), to_unsigned( 202, 10), to_unsigned( 204, 10), to_unsigned( 206, 10),
+        to_unsigned( 208, 10), to_unsigned( 210, 10), to_unsigned( 213, 10), to_unsigned( 215, 10), to_unsigned( 221, 10), to_unsigned( 231, 10), to_unsigned( 242, 10), to_unsigned( 252, 10),
+        to_unsigned( 262, 10), to_unsigned( 272, 10), to_unsigned( 282, 10), to_unsigned( 293, 10), to_unsigned( 303, 10), to_unsigned( 313, 10), to_unsigned( 323, 10), to_unsigned( 333, 10),
+        to_unsigned( 343, 10), to_unsigned( 354, 10), to_unsigned( 364, 10), to_unsigned( 374, 10), to_unsigned( 384, 10), to_unsigned( 394, 10), to_unsigned( 404, 10), to_unsigned( 415, 10),
+        to_unsigned( 425, 10), to_unsigned( 435, 10), to_unsigned( 445, 10), to_unsigned( 455, 10), to_unsigned( 465, 10), to_unsigned( 476, 10), to_unsigned( 486, 10), to_unsigned( 496, 10),
+        to_unsigned( 506, 10), to_unsigned( 516, 10), to_unsigned( 526, 10), to_unsigned( 537, 10), to_unsigned( 547, 10), to_unsigned( 557, 10), to_unsigned( 567, 10), to_unsigned( 577, 10));
+    constant C_CV_HI : t_c10 := (
+        to_unsigned( 588, 10), to_unsigned( 598, 10), to_unsigned( 608, 10), to_unsigned( 618, 10), to_unsigned( 628, 10), to_unsigned( 638, 10), to_unsigned( 649, 10), to_unsigned( 659, 10),
+        to_unsigned( 669, 10), to_unsigned( 679, 10), to_unsigned( 689, 10), to_unsigned( 699, 10), to_unsigned( 710, 10), to_unsigned( 720, 10), to_unsigned( 730, 10), to_unsigned( 740, 10),
+        to_unsigned( 750, 10), to_unsigned( 760, 10), to_unsigned( 771, 10), to_unsigned( 781, 10), to_unsigned( 791, 10), to_unsigned( 801, 10), to_unsigned( 811, 10), to_unsigned( 821, 10),
+        to_unsigned( 832, 10), to_unsigned( 842, 10), to_unsigned( 852, 10), to_unsigned( 862, 10), to_unsigned( 872, 10), to_unsigned( 882, 10), to_unsigned( 893, 10), to_unsigned( 903, 10),
+        to_unsigned( 913, 10), to_unsigned( 923, 10), to_unsigned( 933, 10), to_unsigned( 944, 10), to_unsigned( 954, 10), to_unsigned( 958, 10), to_unsigned( 954, 10), to_unsigned( 951, 10),
+        to_unsigned( 947, 10), to_unsigned( 944, 10), to_unsigned( 940, 10), to_unsigned( 936, 10), to_unsigned( 933, 10), to_unsigned( 929, 10), to_unsigned( 925, 10), to_unsigned( 922, 10),
+        to_unsigned( 918, 10), to_unsigned( 915, 10), to_unsigned( 911, 10), to_unsigned( 907, 10), to_unsigned( 904, 10), to_unsigned( 900, 10), to_unsigned( 897, 10), to_unsigned( 893, 10),
+        to_unsigned( 889, 10), to_unsigned( 886, 10), to_unsigned( 882, 10), to_unsigned( 879, 10), to_unsigned( 875, 10), to_unsigned( 871, 10), to_unsigned( 868, 10), to_unsigned( 864, 10),
+        to_unsigned( 861, 10), to_unsigned( 857, 10), to_unsigned( 853, 10), to_unsigned( 850, 10), to_unsigned( 846, 10), to_unsigned( 842, 10), to_unsigned( 839, 10), to_unsigned( 835, 10),
+        to_unsigned( 832, 10), to_unsigned( 828, 10), to_unsigned( 824, 10), to_unsigned( 821, 10), to_unsigned( 817, 10), to_unsigned( 814, 10), to_unsigned( 810, 10), to_unsigned( 806, 10),
+        to_unsigned( 803, 10), to_unsigned( 799, 10), to_unsigned( 796, 10), to_unsigned( 792, 10), to_unsigned( 788, 10), to_unsigned( 785, 10), to_unsigned( 781, 10), to_unsigned( 777, 10),
+        to_unsigned( 774, 10), to_unsigned( 770, 10), to_unsigned( 767, 10), to_unsigned( 763, 10), to_unsigned( 759, 10), to_unsigned( 756, 10), to_unsigned( 752, 10), to_unsigned( 749, 10),
+        to_unsigned( 745, 10), to_unsigned( 741, 10), to_unsigned( 738, 10), to_unsigned( 734, 10), to_unsigned( 731, 10), to_unsigned( 727, 10), to_unsigned( 723, 10), to_unsigned( 720, 10),
+        to_unsigned( 716, 10), to_unsigned( 713, 10), to_unsigned( 709, 10), to_unsigned( 705, 10), to_unsigned( 702, 10), to_unsigned( 698, 10), to_unsigned( 696, 10), to_unsigned( 698, 10),
+        to_unsigned( 700, 10), to_unsigned( 703, 10), to_unsigned( 705, 10), to_unsigned( 707, 10), to_unsigned( 709, 10), to_unsigned( 711, 10), to_unsigned( 713, 10), to_unsigned( 715, 10),
+        to_unsigned( 717, 10), to_unsigned( 720, 10), to_unsigned( 722, 10), to_unsigned( 724, 10), to_unsigned( 726, 10), to_unsigned( 728, 10), to_unsigned( 730, 10), to_unsigned( 732, 10),
+        to_unsigned( 735, 10), to_unsigned( 737, 10), to_unsigned( 739, 10), to_unsigned( 741, 10), to_unsigned( 743, 10), to_unsigned( 745, 10), to_unsigned( 747, 10), to_unsigned( 749, 10),
+        to_unsigned( 752, 10), to_unsigned( 754, 10), to_unsigned( 756, 10), to_unsigned( 758, 10), to_unsigned( 760, 10), to_unsigned( 762, 10), to_unsigned( 764, 10), to_unsigned( 766, 10),
+        to_unsigned( 769, 10), to_unsigned( 771, 10), to_unsigned( 773, 10), to_unsigned( 775, 10), to_unsigned( 777, 10), to_unsigned( 779, 10), to_unsigned( 781, 10), to_unsigned( 784, 10),
+        to_unsigned( 786, 10), to_unsigned( 788, 10), to_unsigned( 790, 10), to_unsigned( 792, 10), to_unsigned( 794, 10), to_unsigned( 796, 10), to_unsigned( 798, 10), to_unsigned( 801, 10),
+        to_unsigned( 803, 10), to_unsigned( 805, 10), to_unsigned( 807, 10), to_unsigned( 809, 10), to_unsigned( 811, 10), to_unsigned( 813, 10), to_unsigned( 816, 10), to_unsigned( 818, 10),
+        to_unsigned( 820, 10), to_unsigned( 822, 10), to_unsigned( 824, 10), to_unsigned( 826, 10), to_unsigned( 828, 10), to_unsigned( 830, 10), to_unsigned( 833, 10), to_unsigned( 835, 10),
+        to_unsigned( 837, 10), to_unsigned( 839, 10), to_unsigned( 841, 10), to_unsigned( 843, 10), to_unsigned( 845, 10), to_unsigned( 848, 10), to_unsigned( 850, 10), to_unsigned( 851, 10),
+        to_unsigned( 844, 10), to_unsigned( 837, 10), to_unsigned( 830, 10), to_unsigned( 824, 10), to_unsigned( 817, 10), to_unsigned( 810, 10), to_unsigned( 803, 10), to_unsigned( 797, 10),
+        to_unsigned( 790, 10), to_unsigned( 783, 10), to_unsigned( 777, 10), to_unsigned( 770, 10), to_unsigned( 763, 10), to_unsigned( 756, 10), to_unsigned( 750, 10), to_unsigned( 743, 10),
+        to_unsigned( 736, 10), to_unsigned( 729, 10), to_unsigned( 723, 10), to_unsigned( 716, 10), to_unsigned( 709, 10), to_unsigned( 703, 10), to_unsigned( 696, 10), to_unsigned( 689, 10),
+        to_unsigned( 682, 10), to_unsigned( 676, 10), to_unsigned( 669, 10), to_unsigned( 662, 10), to_unsigned( 655, 10), to_unsigned( 649, 10), to_unsigned( 642, 10), to_unsigned( 635, 10),
+        to_unsigned( 629, 10), to_unsigned( 622, 10), to_unsigned( 615, 10), to_unsigned( 608, 10), to_unsigned( 602, 10), to_unsigned( 595, 10), to_unsigned( 588, 10), to_unsigned( 581, 10),
+        to_unsigned( 575, 10), to_unsigned( 568, 10), to_unsigned( 561, 10), to_unsigned( 555, 10), to_unsigned( 548, 10), to_unsigned( 541, 10), to_unsigned( 534, 10), to_unsigned( 528, 10),
+        to_unsigned( 521, 10), to_unsigned( 514, 10), to_unsigned( 507, 10), to_unsigned( 501, 10), to_unsigned( 494, 10), to_unsigned( 487, 10), to_unsigned( 481, 10), to_unsigned( 474, 10),
+        to_unsigned( 467, 10), to_unsigned( 460, 10), to_unsigned( 454, 10), to_unsigned( 447, 10), to_unsigned( 440, 10), to_unsigned( 433, 10), to_unsigned( 427, 10), to_unsigned( 420, 10),
+        to_unsigned( 413, 10), to_unsigned( 407, 10), to_unsigned( 400, 10), to_unsigned( 393, 10), to_unsigned( 386, 10), to_unsigned( 380, 10), to_unsigned( 373, 10), to_unsigned( 366, 10));
 
     -- ==== timing / raster ====
     signal s_timing  : t_video_timing_port;
@@ -407,168 +388,159 @@ architecture aurora of program_top is
     signal s_botf    : std_logic := '0';
 
     -- ==== per-raster class constants (latched at vsync) ====
-    signal s_cols  : unsigned(10 downto 0) := to_unsigned(960, 11);
-    signal s_marg  : unsigned(6 downto 0)  := to_unsigned(64, 7);
-    signal s_cap   : unsigned(11 downto 0) := to_unsigned(2180, 12);
-    signal s_kwav  : unsigned(11 downto 0) := to_unsigned(68, 12);  -- 65536/cols
-    signal s_kenv  : unsigned(11 downto 0) := to_unsigned(34, 12);  -- 32768/cols
-    signal s_kw7   : unsigned(14 downto 0) := to_unsigned(476, 15); -- kwav * 7
+    signal s_cols  : unsigned(10 downto 0) := to_unsigned(1920, 11);
+    signal s_kwav  : unsigned(11 downto 0) := to_unsigned(34, 12);   -- 65536/cols
+    signal s_kw45  : unsigned(11 downto 0) := to_unsigned(153, 12);  -- kwav * 4.5
     signal s_fh    : unsigned(11 downto 0) := to_unsigned(1080, 12); -- frame rows
 
-    -- ==== controls (latched at vsync; slewed where noted) ====
+    -- ==== controls (latched once per field; slewed where noted) ====
     signal s_solid  : std_logic := '0';   -- S7
     signal s_bgvid  : std_logic := '0';   -- S8
-    signal s_freeze : std_logic := '0';   -- S9
-    signal s_k4     : unsigned(9 downto 0) := (others => '0');
-    signal s_k5     : unsigned(9 downto 0) := C_MID;
+    signal s_fill   : std_logic := '0';   -- S9
+    signal s_along  : std_logic := '0';   -- S10
+    signal s_mirror : std_logic := '0';   -- S11
+    signal s_k3     : unsigned(9 downto 0) := C_MID;   -- speed (raw)
+    signal s_k5     : unsigned(9 downto 0) := C_MID;   -- flow (raw)
+    -- analog vsync serrates into several edges per field: act on the first
+    -- edge after active video only (saw-active guard)
+    signal s_saw    : std_logic := '0';
+    -- generated avid (parity-locked start, fixed-width end)
+    signal g_hsq, g_hsr, g_avq, g_avr : std_logic := '0';
+    signal g_ph, g_arm, g_par, g_sel, g_avid : std_logic := '0';
+    signal g_pc   : unsigned(3 downto 0) := to_unsigned(8, 4);
+    signal g_rsr  : std_logic_vector(2 downto 0) := (others => '0');
+    signal g_cnt  : unsigned(11 downto 0) := (others => '0');
+    signal g_wm1  : unsigned(11 downto 0) := to_unsigned(1919, 12);
+    signal s_bcol : unsigned(10 downto 0) := (others => '0');
+    signal s_vs_go  : std_logic := '0';
 
     -- slew accumulators, Q10.4
-    signal s_a1  : unsigned(13 downto 0) := to_unsigned(300*16, 14);
-    signal s_a2  : unsigned(13 downto 0) := to_unsigned(512*16, 14);
-    signal s_a3  : unsigned(13 downto 0) := to_unsigned(250*16, 14);
-    signal s_a6  : unsigned(13 downto 0) := to_unsigned(146*16, 14);
-    signal s_a12 : unsigned(13 downto 0) := (others => '0');
-    signal s_k1s, s_k2s, s_k3s, s_k6s, s_p12s : unsigned(9 downto 0) := (others => '0');
+    signal s_a1  : unsigned(13 downto 0) := to_unsigned(360*16, 14);
+    signal s_a2  : unsigned(13 downto 0) := to_unsigned(400*16, 14);
+    signal s_a4  : unsigned(13 downto 0) := to_unsigned(250*16, 14);
+    signal s_a6  : unsigned(13 downto 0) := to_unsigned(256*16, 14);
+    signal s_a12 : unsigned(13 downto 0) := to_unsigned(350*16, 14);
+    signal s_k1s, s_k2s, s_k4s, s_k6s, s_p12s : unsigned(9 downto 0) := (others => '0');
 
-    -- motion phases (Q10.6 angle; hue/flow Q16 = one hue cycle)
+    -- motion phases (Q16 = one wave / one hue cycle)
     signal s_pht1 : unsigned(15 downto 0) := (others => '0');
-    signal s_phf  : unsigned(15 downto 0) := to_unsigned(9000, 16);
-    signal s_phc  : unsigned(15 downto 0) := to_unsigned(32768, 16);
-    signal s_inc1 : unsigned(10 downto 0) := to_unsigned(64, 11);
+    signal s_pht2 : unsigned(15 downto 0) := to_unsigned(9000, 16);
+    signal s_pht3 : unsigned(15 downto 0) := to_unsigned(41000, 16);
+    -- colour phase: 0.4375 cycle puts red at the band's top edge and violet
+    -- at its bottom at Spectrum 100% with Flow still
+    signal s_phc  : unsigned(15 downto 0) := to_unsigned(28672, 16);
+    signal s_vel  : signed(11 downto 0) := (others => '0');   -- wave speed / frame
+    signal s_vel2, s_vel3 : signed(11 downto 0) := (others => '0');
     signal s_flow : signed(11 downto 0) := (others => '0');
-    signal s_wigon : std_logic := '1';
-    signal s_fad   : unsigned(9 downto 0) := (others => '0');
+    signal s_sad, s_fad : unsigned(9 downto 0) := (others => '0');
+    signal s_sneg, s_fneg : std_logic := '0';
+    signal s_nq   : unsigned(5 downto 0) := (others => '0');  -- noise level Q6
 
     -- ==== per-frame parameters (written by the vblank sequencer) ====
-    signal s_cyc   : unsigned(10 downto 0) := to_unsigned(255, 11);
-    signal s_H31   : unsigned(12 downto 0) := to_unsigned(150, 13);  -- H_q2 + 31
-    signal s_Pq2   : unsigned(13 downto 0) := to_unsigned(2160, 14);
-    signal s_W     : unsigned(11 downto 0) := (others => '0');   -- wiggle amp, q2
-    signal s_Amax  : unsigned(12 downto 0) := to_unsigned(1000, 13); -- on-screen cap
-    signal s_Ap    : unsigned(12 downto 0) := (others => '0');   -- meander from P12
-    signal s_amp1  : unsigned(11 downto 0) := (others => '0');   -- primary amp, q2
-    signal s_k1inc : unsigned(11 downto 0) := to_unsigned(34, 12);
-    signal s_k2inc : unsigned(11 downto 0) := to_unsigned(80, 12);
-    signal s_kp    : unsigned(12 downto 0) := (others => '0');   -- k from P12
-    signal s_hscale : unsigned(11 downto 0) := to_unsigned(116, 12); -- hue/q2-row
-    signal s_fneg  : std_logic := '0';
-
+    signal s_cyc   : unsigned(10 downto 0) := to_unsigned(256, 11);  -- 256 = 1 cycle
+    signal s_Pq2   : unsigned(13 downto 0) := to_unsigned(2160, 14); -- centre, q2
+    signal s_Amin  : unsigned(11 downto 0) := to_unsigned(135, 12);
+    signal s_fh2m  : unsigned(12 downto 0) := to_unsigned(2025, 13); -- fh*2 - Amin
+    signal s_A     : unsigned(12 downto 0) := to_unsigned(800, 13);  -- amplitude, q2
+    signal s_hk    : unsigned(9 downto 0) := (others => '0');
+    signal s_Hq2   : unsigned(12 downto 0) := to_unsigned(300, 13);  -- half-thickness, q2
+    signal s_H31   : unsigned(12 downto 0) := to_unsigned(331, 13);  -- + feather
+    signal s_wsq   : unsigned(9 downto 0) := (others => '0');
+    signal s_k1add : unsigned(11 downto 0) := (others => '0');
+    signal s_k1inc : unsigned(11 downto 0) := to_unsigned(40, 12);
+    signal s_k2inc : unsigned(11 downto 0) := to_unsigned(64, 12);
+    signal s_k3inc : unsigned(11 downto 0) := to_unsigned(15, 12);
+    signal s_kx    : unsigned(11 downto 0) := to_unsigned(34, 12);   -- hue/column (Along)
+    signal s_hscale : unsigned(11 downto 0) := to_unsigned(99, 12);  -- hue/q2-row (Across)
 
     -- shared sequential multiplier + divider (all inside blanking)
     signal s_op   : integer range 0 to 31 := 31;
     signal s_bit  : integer range 0 to 24 := 0;
-    signal s_mA   : unsigned(21 downto 0) := (others => '0');
+    signal s_mA   : unsigned(23 downto 0) := (others => '0');
     signal s_mB   : unsigned(10 downto 0) := (others => '0');
-    signal s_acc  : unsigned(21 downto 0) := (others => '0');
+    signal s_acc  : unsigned(23 downto 0) := (others => '0');
     signal s_dn   : unsigned(23 downto 0) := (others => '0');    -- divide numerator
     signal s_dr   : unsigned(14 downto 0) := (others => '0');    -- remainder
     signal s_dq   : unsigned(23 downto 0) := (others => '0');    -- quotient
-    -- divisor is REGISTERED per divide: feeding a 3-way mux straight into
-    -- the 15-bit borrow chain made this vblank-only divider the design's
-    -- critical path (nextpnr times it at the full pixel clock)
+    -- divisor is REGISTERED per divide (a mux feeding the borrow chain was
+    -- once the design's critical path; nextpnr times vblank logic at the
+    -- pixel clock)
     signal s_dvsr : unsigned(14 downto 0) := to_unsigned(1, 15);
 
     -- ==== scanner (monotone left-to-right, one column per clock) ====
-    signal s_run    : std_logic := '0';
-    signal s_Rq2    : unsigned(13 downto 0) := (others => '0');
+    signal s_run     : std_logic := '0';
+    signal s_Rq2     : unsigned(13 downto 0) := (others => '0');
+    signal s_R2q2    : unsigned(13 downto 0) := (others => '0');  -- reflected row
+    signal s_fhm4    : unsigned(13 downto 0) := to_unsigned(4316, 14); -- (fh-1)*4
     signal s_nrow    : unsigned(11 downto 0) := (others => '0');
     signal s_trig_ok : std_logic := '0';
     signal s_vb_ok   : std_logic := '0';
     signal s_rq2n    : unsigned(13 downto 0) := (others => '0');
-    signal s_rq2m    : unsigned(13 downto 0) := (others => '0');
-    signal s_col    : unsigned(11 downto 0) := (others => '0');
-    signal s_wcol   : unsigned(11 downto 0) := (others => '0');
-    signal s_th1, s_th2, s_the : unsigned(15 downto 0) := (others => '0');
+    signal s_col     : unsigned(11 downto 0) := (others => '0');
+    signal s_wcol    : unsigned(11 downto 0) := (others => '0');
+    signal s_hxw     : unsigned(15 downto 0) := (others => '0');  -- Along hue
+    signal s_th1, s_th2, s_th3 : unsigned(15 downto 0) := (others => '0');
 
+    signal s_v : std_logic_vector(1 to 15) := (others => '0');
 
-    signal s_v : std_logic_vector(1 to 18) := (others => '0');
-
-    -- m1: quarter-wave fold -- both meander terms (idx and idx+1, so both
-    -- are interpolated) plus the end-anchor envelope
-    signal m1_if, m1_ic, m1_i1, m1_i2 : unsigned(7 downto 0) := (others => '0');
-    signal m1_ie, m1_ie2 : unsigned(7 downto 0) := (others => '0');
-    signal m1_sf, m1_sc, m1_s1, m1_s2 : std_logic := '0';
-    signal m1_fr, m1_fr2, m1_fre : unsigned(5 downto 0) := (others => '0');
+    -- m1: quarter-wave fold, each lobe at idx and idx+1 (interpolated)
+    signal m1_i1a, m1_i1b, m1_i2a, m1_i2b, m1_i3a, m1_i3b : unsigned(7 downto 0) := (others => '0');
+    signal m1_s1a, m1_s1b, m1_s2a, m1_s2b, m1_s3a, m1_s3b : std_logic := '0';
+    signal m1_f1, m1_f2, m1_f3 : unsigned(5 downto 0) := (others => '0');
     -- m2: ROM data
-    signal m2_qf, m2_qc, m2_q1, m2_q2 : unsigned(11 downto 0) := (others => '0');
-    signal m2_qe, m2_qe2 : unsigned(11 downto 0) := (others => '0');
-    signal m2_sf, m2_sc, m2_s1, m2_s2 : std_logic := '0';
-    signal m2_fr, m2_fr2, m2_fre : unsigned(5 downto 0) := (others => '0');
+    signal m2_q1a, m2_q1b, m2_q2a, m2_q2b, m2_q3a, m2_q3b : unsigned(11 downto 0) := (others => '0');
+    signal m2_s1a, m2_s1b, m2_s2a, m2_s2b, m2_s3a, m2_s3b : std_logic := '0';
+    signal m2_f1, m2_f2, m2_f3 : unsigned(5 downto 0) := (others => '0');
     -- m2b: registered signed ROM data + neighbour deltas
-    signal m2b_s0, m2b_g0 : signed(12 downto 0) := (others => '0');
-    signal m2b_sd, m2b_gd : signed(7 downto 0) := (others => '0');
-    signal m2b_fr, m2b_fr2 : unsigned(5 downto 0) := (others => '0');
-    signal m2b_e0  : unsigned(11 downto 0) := (others => '0');
-    signal m2b_ed  : signed(8 downto 0) := (others => '0');
-    signal m2b_fre : unsigned(5 downto 0) := (others => '0');
-    -- m3: interpolated sines; m3b: lobes summed + envelope applied to the
-    -- amplitude (the envelope is what pins both ends of the ribbon)
-    signal m3_sf, m3_sg : signed(12 downto 0) := (others => '0');
-    signal m3_env : unsigned(11 downto 0) := (others => '0');
-    signal m3_sum : signed(13 downto 0) := (others => '0');
-    signal m3b_ahi : unsigned(17 downto 0) := (others => '0');
-    signal m3b_alo : unsigned(17 downto 0) := (others => '0');
-    signal m3b_sum : signed(13 downto 0) := (others => '0');
-    -- m4: enveloped amplitude, then the amplitude x meander multiply
-    signal m4_aeff : unsigned(11 downto 0) := (others => '0');
-    signal m4_sum  : signed(13 downto 0) := (others => '0');
-    signal m4_hi  : signed(19 downto 0) := (others => '0');
-    signal m4_lo  : signed(20 downto 0) := (others => '0');
-    signal m4_p1  : signed(26 downto 0) := (others => '0');
-    -- m5: meander height for this column.  The slope is taken from the
-    -- FULL-PRECISION product difference (12 bits finer than the rounded
-    -- height), which is what makes a smooth edge possible.
+    signal m2b_v1, m2b_v2, m2b_v3 : signed(12 downto 0) := (others => '0');
+    signal m2b_d1, m2b_d2, m2b_d3 : signed(7 downto 0) := (others => '0');
+    signal m2b_f1, m2b_f2, m2b_f3 : unsigned(5 downto 0) := (others => '0');
+    -- m3: interpolated sines
+    signal m3_s1, m3_s2, m3_s3 : signed(12 downto 0) := (others => '0');
+    -- m3b: wave lobe + summed noise lobes
+    signal m3b_sf : signed(12 downto 0) := (others => '0');
+    signal m3b_ns : signed(13 downto 0) := (others => '0');
+    -- m4a: noise x level
+    signal m4a_sf : signed(12 downto 0) := (others => '0');
+    signal m4a_nz : signed(20 downto 0) := (others => '0');
+    -- m4s: wave + noise; thickness x noise
+    signal m4s_sum : signed(13 downto 0) := (others => '0');
+    signal m4s_hb  : signed(21 downto 0) := (others => '0');
+    -- m4b: amplitude x sum (split), breathed half-thickness
+    signal m4_hi  : signed(20 downto 0) := (others => '0');
+    signal m4_lo  : signed(21 downto 0) := (others => '0');
+    signal m4_h   : unsigned(12 downto 0) := (others => '0');
+    -- m4c: recombine
+    signal m4_p1  : signed(27 downto 0) := (others => '0');
+    signal m4c_h  : unsigned(12 downto 0) := (others => '0');
+    -- m5: centre height at this column
     signal m5_y   : signed(15 downto 0) := (others => '0');
-    -- only the top bits of the product matter for the slope (the low 8 can
-    -- shift the answer by at most one Q7 step), so the difference is taken
-    -- on 19 bits and split across two stages -- as one 27-bit
-    -- subtract-then-negate it was the critical path
-    signal s_p1prev : signed(18 downto 0) := (others => '0');
-    signal m5_d   : signed(18 downto 0) := (others => '0');
-    signal m5_dp  : unsigned(18 downto 0) := (others => '0');  -- prev |slope|
-    signal m5_dv0 : std_logic := '0';
-    signal m5_idx : unsigned(10 downto 0) := (others => '0');   -- slope, Q7
-    -- m6: vertical distance, signed offset (hue), slope index
-    signal m6_dv  : unsigned(14 downto 0) := (others => '0');
-    signal m6_off : signed(11 downto 0) := (others => '0');
-    signal m6_i   : unsigned(3 downto 0) := (others => '0');    -- table entry
-    signal m6_fr  : unsigned(3 downto 0) := (others => '0');    -- lerp fraction
-    -- m6b: table entry; m6c: the interpolated correction factor
-    signal m6b_v  : unsigned(11 downto 0) := (others => '0');
-    signal m6b_d  : signed(9 downto 0) := (others => '0');
-    signal m6b_fr : unsigned(3 downto 0) := (others => '0');
-    signal m6b_dv : unsigned(11 downto 0) := (others => '0');
-    signal m6b_off : signed(11 downto 0) := (others => '0');
-    signal m6c_rf : unsigned(11 downto 0) := (others => '0');
-    signal m6c_dv : unsigned(11 downto 0) := (others => '0');
-    signal m6c_off : signed(11 downto 0) := (others => '0');
-    -- m7: distance x correction (split), m8: perpendicular distance
-    signal m7_ph, m7_pl : unsigned(17 downto 0) := (others => '0');
-    signal m7_off : signed(11 downto 0) := (others => '0');
-    signal m8_dp  : unsigned(12 downto 0) := (others => '0');
-    signal m8_off : signed(11 downto 0) := (others => '0');
-    -- m8b: the SIGNED perpendicular offset, registered before it feeds the
-    -- hue multiply (a negate feeding a multiply in one stage was the path)
-    signal m8b_po : signed(13 downto 0) := (others => '0');
-    signal m8b_dp : unsigned(12 downto 0) := (others => '0');
+    signal m5_h   : unsigned(12 downto 0) := (others => '0');
+    -- m6: signed distances to this row and to the mirrored row
+    signal m6_d1  : signed(15 downto 0) := (others => '0');
+    signal m6_n2  : signed(15 downto 0) := (others => '0');
+    signal m6_a1, m6_a2 : unsigned(14 downto 0) := (others => '0');
+    signal m6_h   : unsigned(12 downto 0) := (others => '0');
+    -- m6b: nearer copy wins
+    signal m6b_dp : unsigned(12 downto 0) := (others => '0');
+    signal m6b_po : signed(15 downto 0) := (others => '0');
+    signal m6b_h  : unsigned(12 downto 0) := (others => '0');
+    -- m6c: saturated signed offset
+    signal m6c_dp : unsigned(12 downto 0) := (others => '0');
+    signal m6c_po : signed(13 downto 0) := (others => '0');
+    signal m6c_h  : unsigned(12 downto 0) := (others => '0');
     -- m9: alpha + hue partials, m10: recombined hue
     signal m9_a   : unsigned(5 downto 0) := (others => '0');
-    signal m9_wr  : std_logic := '0';
     signal m9_hhi, m9_hlo : signed(20 downto 0) := (others => '0');
     signal m10_a  : unsigned(5 downto 0) := (others => '0');
-    signal m10_wr : std_logic := '0';
     signal m10_hp : unsigned(15 downto 0) := (others => '0');
 
     signal s_st_we   : std_logic := '0';
     signal s_st_addr : unsigned(10 downto 0) := (others => '0');
     signal s_st_data : std_logic_vector(15 downto 0) := (others => '0');
 
-
     -- ==== line buffer: ONE bank, 2048 x 16, one writer, one reader ====
-    -- 16 LIVE bits (hue10 & alpha6) so the word is a power of two wide: a
-    -- 14-bit word at 2048 deep forced a 7-block 2048x2 EBR mapping, and a
-    -- word split across an odd number of blocks is the documented
-    -- posterise-on-hardware-while-sim-is-clean trap.
+    -- 16 LIVE bits (hue10 & alpha6) so the word is a power of two wide
     type t_lb is array(0 to 2047) of std_logic_vector(15 downto 0);
     signal s_lb     : t_lb := (others => (others => '0'));
     signal s_rd     : std_logic_vector(15 downto 0) := (others => '0');
@@ -578,7 +550,8 @@ architecture aurora of program_top is
     -- ==== beam pipeline (color from the packed phosphor LUT) ====
     signal b2_addr : unsigned(8 downto 0) := (others => '0');
     signal b2_a    : unsigned(5 downto 0) := (others => '0');
-    signal b3_rom  : std_logic_vector(31 downto 0) := (others => '0');
+    signal b3_ylo, b3_yhi, b3_ulo, b3_uhi, b3_vlo, b3_vhi : unsigned(9 downto 0) := (others => '0');
+    signal b3_hi   : std_logic := '0';
     signal b3_a    : unsigned(5 downto 0) := (others => '0');
     signal b5_y, b5_u, b5_v : unsigned(9 downto 0) := (others => '0');
     signal b5_a    : unsigned(5 downto 0) := (others => '0');
@@ -591,6 +564,8 @@ architecture aurora of program_top is
     type t_bsr is array(1 to C_LAT - 1) of std_logic;
     signal d_y, d_u, d_v : t_dsr := (others => (others => '0'));
     signal d_hs, d_vs, d_fl, d_av : t_bsr := (others => '0');
+    signal d_gv : t_bsr := (others => '0');            -- generated avid
+    signal s_bg5, s_bg7 : std_logic := '0';            -- video backdrop live
 
     signal s_io : t_video_stream_yuv444_30b
         := ((others => '0'), (others => '0'), (others => '0'), '0', '1', '1', '1');
@@ -627,20 +602,17 @@ begin
                     s_fh <= s_meas_v;
                 end if;
                 if s_meas_h >= to_unsigned(1600, 12) then       -- 1080p / 1080i
-                    s_cols <= to_unsigned(1920, 11); s_marg <= to_unsigned(64, 7);
-                    s_cap  <= to_unsigned(2180, 12);
+                    s_cols <= to_unsigned(1920, 11);
                     s_kwav <= to_unsigned(34, 12);
-                    s_kenv <= to_unsigned(17, 12);
+                    s_kw45 <= to_unsigned(153, 12);
                 elsif s_meas_h >= to_unsigned(1000, 12) then    -- 720p
-                    s_cols <= to_unsigned(1280, 11); s_marg <= to_unsigned(64, 7);
-                    s_cap  <= to_unsigned(1630, 12);
+                    s_cols <= to_unsigned(1280, 11);
                     s_kwav <= to_unsigned(51, 12);
-                    s_kenv <= to_unsigned(26, 12);
-                else                                -- SD: quarter-pixel columns
-                    s_cols <= to_unsigned(720, 11);  s_marg <= to_unsigned(16, 7);
-                    s_cap  <= to_unsigned(830, 12);
+                    s_kw45 <= to_unsigned(230, 12);
+                else                                            -- SD (NTSC / PAL)
+                    s_cols <= to_unsigned(720, 11);
                     s_kwav <= to_unsigned(91, 12);
-                    s_kenv <= to_unsigned(46, 12);
+                    s_kw45 <= to_unsigned(410, 12);
                 end if;
             elsif s_timing.avid_start = '1' then
                 s_vcnt <= s_vcnt + 1;
@@ -649,87 +621,100 @@ begin
     end process p_measure;
 
     -- ====================================================================
-    -- Per-frame control latch, slews, motion phases
+    -- Per-field control latch, motion phases, free-running derived terms
     -- ====================================================================
     p_frame : process(clk)
-        variable v_fd  : signed(11 downto 0);
-        variable v_fa  : unsigned(10 downto 0);
+        variable v_d   : signed(11 downto 0);
+        variable v_a   : unsigned(10 downto 0);
     begin
         if rising_edge(clk) then
-            if s_timing.vsync_start = '1' then
+            -- once-per-field pulse: the first vsync edge after active video
+            s_vs_go <= '0';
+            if s_timing.avid = '1' then
+                s_saw <= '1';
+            elsif s_timing.vsync_start = '1' and s_saw = '1' then
+                s_saw   <= '0';
+                s_vs_go <= '1';
+            end if;
+
+            if s_vs_go = '1' then
+                g_wm1    <= s_meas_h - 1;          -- generated-avid width
                 s_solid  <= registers_in(6)(0);
                 s_bgvid  <= registers_in(6)(1);
-                s_freeze <= registers_in(6)(2);
-                s_k4 <= unsigned(registers_in(3));
+                s_fill   <= registers_in(6)(2);
+                s_along  <= registers_in(6)(3);
+                s_mirror <= registers_in(6)(4);
+                s_k3 <= unsigned(registers_in(2));
                 s_k5 <= unsigned(registers_in(4));
 
-                -- phase clocks: wiggle/fold gated by K3 > 0, all by Freeze
-                if s_freeze = '0' and s_wigon = '1' then
-                    s_pht1 <= s_pht1 + resize(s_inc1, 16);
-                    s_phf  <= s_phf  + resize(shift_right(s_inc1, 3), 16);
-                end if;
-                if s_freeze = '0' then
-                    s_phc <= unsigned(signed(s_phc) + resize(s_flow, 16));
-                end if;
+                -- the wave travels (positive Speed = rightward); the noise
+                -- lobes ride at 0.62x / -0.38x of it plus a slow drift of
+                -- their own, so the shape keeps evolving even when still
+                s_pht1 <= s_pht1 - unsigned(resize(s_vel, 16));
+                s_pht2 <= s_pht2 + unsigned(resize(s_vel2, 16)) + 23;
+                s_pht3 <= s_pht3 - unsigned(resize(s_vel3, 16)) + 17;
+                s_phc  <= unsigned(signed(s_phc) + resize(s_flow, 16));
             end if;
 
             s_k1s  <= s_a1(13 downto 4);
             s_k2s  <= s_a2(13 downto 4);
-            s_k3s  <= s_a3(13 downto 4);
+            s_k4s  <= s_a4(13 downto 4);
             s_k6s  <= s_a6(13 downto 4);
             s_p12s <= s_a12(13 downto 4);
-            if s_a3 > to_unsigned(128, 14) then s_wigon <= '1';
-            else                                s_wigon <= '0';
-            end if;
+            s_nq   <= s_k4s(9 downto 4);
 
+            -- rainbow cycles: 128 .. 1023 in units of 256 = 0.5 .. 4
             s_cyc <= to_unsigned(128, 11)
                      + resize(shift_right(resize(s_k6s * 7, 13), 3), 11);
-            -- vertical headroom for the meander: half the screen minus the
-            -- ribbon's own half-thickness and a margin, all in q2 rows
-            if resize(s_fh & '0', 13) > resize(s_H31, 13) + 96 then
-                s_Amax <= resize(s_fh & '0', 13) - resize(s_H31, 13) - 96;
-            else
-                s_Amax <= (others => '0');
-            end if;
-            -- kwav * 6: at full Coil this gives ~6 waves across the
-            -- screen instead of ~2.7, so the ribbon bunches up much more
-            s_kw7 <= resize(s_kwav & "00", 15);
+            -- geometry from the measured raster, in quarter-rows
+            -- centre on the TRUE middle of the raster, (fh-1)/2 rows, so
+            -- the Mirror reflection axis and the wave's centre coincide
+            s_Pq2  <= resize((s_fh - 1) & '0', 14);
+            s_fhm4 <= resize((s_fh - 1) & "00", 14);
+            s_Amin <= resize(shift_right(s_fh, 3), 12);           -- ~3% ripple
+            s_fh2m <= resize(s_fh & '0', 13) - resize(s_Amin, 13);
 
-            -- color flow: center deadband +-48 (square law in the sequencer)
-            v_fd := resize(signed('0' & s_k5), 12) - to_signed(512, 12);
-            if v_fd < 0 then v_fa := resize(unsigned(-v_fd), 11); s_fneg <= '1';
-            else             v_fa := resize(unsigned(v_fd), 11);  s_fneg <= '0'; end if;
-            if v_fa > to_unsigned(48, 11) then
-                s_fad <= resize(v_fa - 48, 10);
-            else
-                s_fad <= (others => '0');
-            end if;
+            -- noise lobe speeds from the registered wave speed
+            s_vel2 <= shift_right(s_vel, 1) + shift_right(s_vel, 3) - shift_right(s_vel, 7);
+            s_vel3 <= shift_right(s_vel, 2) + shift_right(s_vel, 3) + shift_right(s_vel, 7);
+
+            -- bipolar deadbands (+-48) for Speed and Flow; square law in
+            -- the sequencer
+            v_d := resize(signed('0' & s_k3), 12) - to_signed(512, 12);
+            if v_d < 0 then v_a := resize(unsigned(-v_d), 11); s_sneg <= '1';
+            else            v_a := resize(unsigned(v_d), 11);  s_sneg <= '0'; end if;
+            if v_a > to_unsigned(48, 11) then s_sad <= resize(v_a - 48, 10);
+            else                              s_sad <= (others => '0'); end if;
+            v_d := resize(signed('0' & s_k5), 12) - to_signed(512, 12);
+            if v_d < 0 then v_a := resize(unsigned(-v_d), 11); s_fneg <= '1';
+            else            v_a := resize(unsigned(v_d), 11);  s_fneg <= '0'; end if;
+            if v_a > to_unsigned(48, 11) then s_fad <= resize(v_a - 48, 10);
+            else                              s_fad <= (others => '0'); end if;
         end if;
     end process p_frame;
 
     -- ====================================================================
-    -- Per-frame parameter sequencer: 5 knob slews, then 11 products on ONE
-    -- shared shift-add multiplier (12 cycles each), then the step-tier
-    -- thresholds.  ~150 cycles, all inside the blanking interval.
+    -- Per-frame parameter sequencer: 5 knob slews, 8 products on ONE shared
+    -- shift-add multiplier (13 cycles each), combines, one divide.
+    -- ~160 cycles, all inside the blanking interval.
     -- ====================================================================
     p_seq : process(clk)
         variable v_t   : unsigned(13 downto 0);
         variable v_d   : signed(14 downto 0);
         variable v_n   : signed(15 downto 0);
         variable v_dr  : unsigned(14 downto 0);
-        variable v_a, v_cl : unsigned(13 downto 0);
+        variable v_h   : unsigned(13 downto 0);
         variable v_k   : unsigned(12 downto 0);
-        variable v_g   : unsigned(13 downto 0);
     begin
         if rising_edge(clk) then
-            if s_timing.vsync_start = '1' then
+            if s_vs_go = '1' then
                 s_op  <= 0;
                 s_bit <= 0;
             elsif s_timing.avid = '0' then
                 case s_op is
                     -- 1-pole slews (Q10.4): acc += (target - acc) / 16.
-                    -- 16-bit intermediate, then SLICE: a signed resize here
-                    -- mangles values >= 8192 (the v1.0 upper-half-range bug)
+                    -- 16-bit intermediate, then SLICE (a signed resize here
+                    -- mangles values >= 8192)
                     when 0 =>
                         v_t := unsigned(registers_in(0)) & "0000";
                         v_d := signed('0' & v_t) - signed('0' & s_a1);
@@ -743,10 +728,10 @@ begin
                         s_a2 <= unsigned(v_n(13 downto 0));
                         s_op <= 2;
                     when 2 =>
-                        v_t := unsigned(registers_in(2)) & "0000";
-                        v_d := signed('0' & v_t) - signed('0' & s_a3);
-                        v_n := resize(signed('0' & s_a3), 16) + resize(shift_right(v_d, 4), 16);
-                        s_a3 <= unsigned(v_n(13 downto 0));
+                        v_t := unsigned(registers_in(3)) & "0000";
+                        v_d := signed('0' & v_t) - signed('0' & s_a4);
+                        v_n := resize(signed('0' & s_a4), 16) + resize(shift_right(v_d, 4), 16);
+                        s_a4 <= unsigned(v_n(13 downto 0));
                         s_op <= 3;
                     when 3 =>
                         v_t := unsigned(registers_in(5)) & "0000";
@@ -761,86 +746,87 @@ begin
                         s_a12 <= unsigned(v_n(13 downto 0));
                         s_op <= 5;
 
-                    -- shared multiplier ops (12-bit mB, load at 0, store one
-                    -- cycle AFTER the last partial lands -- storing at the
-                    -- last add drops bit 10, e.g. any multiply by 1024)
-                    -- shared multiplier ops (store one cycle AFTER the
-                    -- last partial lands -- storing at the last add drops
-                    -- bit 10, e.g. any multiply by exactly 1024)
+                    -- shared multiplier: mB is 11 bits, consumed at bits
+                    -- 1..11; the store at bit 12 sees the complete sum
                     when 5 to 12 =>
                         if s_bit = 0 then
                             s_acc <= (others => '0');
                             case s_op is
-                                when 5      => s_mA <= resize(s_fh, 22);   s_mB <= resize(s_k1s, 11);
-                                when 6      => s_mA <= resize(s_fh, 22);   s_mB <= resize(s_k2s, 11);
-                                when 7      => s_mA <= resize(s_fh, 22);   s_mB <= resize(s_k3s, 11);
-                                when 8      => s_mA <= resize(s_k4, 22);   s_mB <= resize(s_k4, 11);
-                                when 9      => s_mA <= resize(s_fad, 22);  s_mB <= resize(s_fad, 11);
-                                when 10     => s_mA <= resize(s_Amax, 22); s_mB <= resize(s_p12s, 11);
-                                when 11     => s_mA <= resize(s_kw7, 22);  s_mB <= resize(s_p12s, 11);
-                                -- H x Coil: the ribbon thins ~25% as it
-                                -- stretches.  Past a point the curve bends
-                                -- tighter than the ribbon is thick, which no
-                                -- constant-width non-overlapping ribbon can
-                                -- represent; thinning keeps the extreme clean.
-                                when others => s_mA <= resize(s_H31, 22);  s_mB <= resize(s_p12s, 11);
+                                when 5      => s_mA <= resize(s_fh2m, 24); s_mB <= resize(s_p12s, 11);
+                                when 6      => s_mA <= resize(s_k1s, 24);  s_mB <= resize(s_k1s, 11);
+                                when 7      => s_mA <= resize(s_Pq2, 24);  s_mB <= resize(s_hk, 11);
+                                when 8      => s_mA <= resize(s_k2s, 24);  s_mB <= resize(s_k2s, 11);
+                                when 9      => s_mA <= resize(s_kw45, 24); s_mB <= resize(s_wsq, 11);
+                                when 10     => s_mA <= resize(s_sad, 24);  s_mB <= resize(s_sad, 11);
+                                when 11     => s_mA <= resize(s_fad, 24);  s_mB <= resize(s_fad, 11);
+                                when others => s_mA <= resize(s_cyc, 24);  s_mB <= resize(s_kwav, 11);
                             end case;
                             s_bit <= 1;
                         else
                             if s_mB(0) = '1' then
                                 s_acc <= s_acc + s_mA;
                             end if;
-                            s_mA <= s_mA(20 downto 0) & '0';
+                            s_mA <= s_mA(22 downto 0) & '0';
                             s_mB <= '0' & s_mB(10 downto 1);
                             if s_bit = 12 then
                                 s_bit <= 0;
                                 s_op  <= s_op + 1;
                                 case s_op is
-                                    -- height at 3/4 scale (max ~40% of screen)
-                                    when 5      => s_H31 <= to_unsigned(43, 13)
-                                                            + resize(s_acc(21 downto 10), 13)
-                                                            - resize(s_acc(21 downto 12), 13);
-                                    when 6      => s_Pq2 <= resize(s_acc(21 downto 8), 14);
-                                    when 7      => s_W   <= resize(s_acc(21 downto 11), 12);
-                                    when 8      => s_inc1 <= to_unsigned(64, 11)
-                                                            + resize(s_acc(19 downto 10), 11);
-                                    when 9      => if s_fneg = '1' then
+                                    -- amplitude: ripple floor + Swell x headroom
+                                    when 5      => s_A  <= resize(s_Amin, 13) + resize(s_acc(23 downto 10), 13);
+                                    -- height squared, so the thin end has resolution
+                                    when 6      => s_hk <= s_acc(19 downto 10);
+                                    -- half-thickness = half the screen x height^2
+                                    when 7      => if s_acc(23 downto 10) < 8 then
+                                                       s_Hq2 <= to_unsigned(8, 13);
+                                                   else
+                                                       s_Hq2 <= resize(s_acc(23 downto 10), 13);
+                                                   end if;
+                                    when 8      => s_wsq <= s_acc(19 downto 10);
+                                    -- waves across the screen: 0.5 + 4.5 x waves^2
+                                    when 9      => s_k1add <= resize(s_acc(23 downto 10), 12);
+                                    when 10     => if s_sneg = '1' then
+                                                       s_vel <= -signed('0' & s_acc(18 downto 8));
+                                                   else
+                                                       s_vel <=  signed('0' & s_acc(18 downto 8));
+                                                   end if;
+                                    when 11     => if s_fneg = '1' then
                                                        s_flow <= -signed('0' & s_acc(19 downto 9));
                                                    else
                                                        s_flow <=  signed('0' & s_acc(19 downto 9));
                                                    end if;
-                                    when 10     => s_Ap <= resize(s_acc(21 downto 10), 13);
-                                    when 11     => s_kp <= resize(s_acc(21 downto 10), 13);
-                                    when others => s_H31 <= s_H31
-                                                            - resize(s_acc(21 downto 12), 13);
+                                    -- Along: hue step per column = cycles x 65536 / cols
+                                    when others => s_kx <= resize(s_acc(19 downto 8), 12);
                                 end case;
                             else
                                 s_bit <= s_bit + 1;
                             end if;
                         end if;
 
-                    -- combine: amplitude (clamped so the ribbon always stays
-                    -- on screen) and meander wavenumber
                     when 13 =>
-                        v_a := resize(s_Ap, 14) + resize(s_W, 14);
-                        v_cl := resize(shift_right(s_Amax, 1), 14)
-                                + resize(shift_right(s_Amax, 2), 14);   -- 0.75*Amax
-                        if v_a > v_cl then v_a := v_cl; end if;
-                        s_amp1 <= resize(v_a, 12);
+                        v_k := resize(shift_right(s_kwav, 1), 13) + resize(s_k1add, 13);
+                        s_k1inc <= resize(v_k, 12);
+                        s_H31   <= s_Hq2 + 31;
                         s_op <= 14;
                     when 14 =>
-                        -- 0.5 wave across the screen at Coil 0, ~4 at full
-                        v_k := resize(shift_right(s_kwav, 2), 13) + resize(s_kp, 13);
-                        s_k1inc <= resize(v_k, 12);
-                        -- second term at 2.375x: non-harmonic, so the shape
-                        -- never looks like a plain sine
-                        s_k2inc <= resize(v_k + shift_right(v_k, 1), 12);
+                        -- noise lobes at 1.61x and 0.38x the wavenumber
+                        v_k := resize(s_k1inc, 13) + resize(shift_right(s_k1inc, 1), 13)
+                               + resize(shift_right(s_k1inc, 3), 13)
+                               - resize(shift_right(s_k1inc, 6), 13);
+                        s_k2inc <= resize(v_k, 12);
+                        s_k3inc <= resize(shift_right(s_k1inc, 2), 12)
+                                   + resize(shift_right(s_k1inc, 3), 12)
+                                   + resize(shift_right(s_k1inc, 7), 12);
                         s_op <= 21;
 
-                    -- hue across thickness: hscale = cyc*128 / H31
+                    -- hue across the band: hscale = cyc*112 / Hq2, so at
+                    -- Spectrum 100% (cyc 256) the solid core spans 0.875 of
+                    -- the hue cycle = red .. violet, WITHOUT the violet->red
+                    -- wrap (a full cycle showed pink/red again at the bottom)
                     when 21 =>
-                        s_dn  <= resize(s_cyc & "0000000", 24);
-                        s_dvsr <= resize(s_H31, 15);
+                        s_dn  <= resize(s_cyc & "0000000", 24)
+                                 - resize(s_cyc & "0000", 24);
+                        s_dvsr <= resize(s_Hq2, 15);
                         s_dr  <= (others => '0');
                         s_dq  <= (others => '0');
                         s_bit <= 0;
@@ -876,23 +862,19 @@ begin
     end process p_seq;
 
     -- ====================================================================
-    -- Marcher: trigger + adaptive-step curve pipeline + stamp writer
+    -- Scanner: trigger + curve pipeline + stamp writer.  Exactly one column
+    -- per clock, every column written once.
     -- ====================================================================
-    -- The scan never stalls: exactly one column per clock, so there are no
-    -- gaps to fill and no overlap to arbitrate.
-
     p_march : process(clk)
         variable v_ph   : unsigned(9 downto 0);
         variable v_s0, v_s1 : signed(12 downto 0);
         variable v_yn   : signed(15 downto 0);
-        variable v_dv   : signed(15 downto 0);
-        variable v_du   : unsigned(18 downto 0);
+        variable v_d1, v_d2 : signed(15 downto 0);
+        variable v_he   : signed(15 downto 0);
         variable v_al   : signed(13 downto 0);
-        variable v_dp   : unsigned(25 downto 0);
-        variable v_rf13 : signed(12 downto 0);
-        variable v_env13 : signed(12 downto 0);
-        variable v_hpp  : signed(25 downto 0);
+        variable v_hpp  : signed(26 downto 0);
         variable v_h16  : unsigned(15 downto 0);
+        variable v_c1, v_c2 : unsigned(12 downto 0);
     begin
         if rising_edge(clk) then
             s_st_we <= '0';
@@ -912,23 +894,21 @@ begin
             else
                 s_rq2n <= resize(s_nrow(11 downto 0) & "00", 14);
             end if;
-            s_rq2m <= s_Rq2;
+            -- the row reflected about the centre line: (fh-1) - row, in
+            -- quarter-rows (row r <-> row fh-1-r exactly)
+            s_R2q2 <= s_fhm4 - s_Rq2;
 
             -- ---- triggers ----
-            -- A MONOTONE left-to-right sweep, one column per clock, every
-            -- column exactly once: y is single-valued in x, so the ribbon
-            -- provably cannot cross itself and nothing can be skipped.
             if s_run = '0' and s_timing.avid_start = '1' and s_trig_ok = '1' then
                 s_Rq2  <= s_rq2n;
                 s_run  <= '1';
                 s_col  <= (others => '0');
                 s_wcol <= (others => '0');
+                s_hxw  <= (others => '0');
                 s_th1  <= s_pht1;
-                s_th2  <= s_phf;
-                s_the  <= (others => '0');
+                s_th2  <= s_pht2;
+                s_th3  <= s_pht3;
                 s_v    <= (others => '0');
-                m9_wr  <= '0';
-                m10_wr <= '0';
             elsif s_run = '0' and s_timing.hsync_start = '1'
                   and s_vb_ok = '1' then
                 if s_ilace = '1' and s_botf = '1' then
@@ -939,201 +919,163 @@ begin
                 s_run  <= '1';
                 s_col  <= (others => '0');
                 s_wcol <= (others => '0');
+                s_hxw  <= (others => '0');
                 s_th1  <= s_pht1;
-                s_th2  <= s_phf;
-                s_the  <= (others => '0');
+                s_th2  <= s_pht2;
+                s_th3  <= s_pht3;
                 s_v    <= (others => '0');
-                m9_wr  <= '0';
-                m10_wr <= '0';
             elsif s_run = '1' then
                 s_col <= s_col + 1;
                 s_th1 <= s_th1 + resize(s_k1inc, 16);
                 s_th2 <= s_th2 + resize(s_k2inc, 16);
-                s_the <= s_the + resize(s_kenv, 16);   -- half a cycle edge to edge
+                s_th3 <= s_th3 + resize(s_k3inc, 16);
                 s_v(1) <= '1';
-                s_v(2 to 18) <= s_v(1 to 17);
-                if s_col >= resize(s_cols, 12) + 28 then
+                s_v(2 to 15) <= s_v(1 to 14);
+                if s_col >= resize(s_cols, 12) + 20 then
                     s_run <= '0';
                     s_v   <= (others => '0');
                 end if;
             end if;
 
-            -- ---- ribbon pipeline ----
+            -- ---- wave pipeline ----
             if s_run = '1' then
-                -- m1: quarter-wave fold for both lobes and the envelope
+                -- m1: quarter-wave fold, idx and idx+1 for each lobe
                 v_ph := s_th1(15 downto 6);
-                m1_sf <= v_ph(9);
-                if v_ph(8) = '1' then m1_if <= not v_ph(7 downto 0);
-                else                  m1_if <= v_ph(7 downto 0); end if;
+                m1_s1a <= v_ph(9);
+                if v_ph(8) = '1' then m1_i1a <= not v_ph(7 downto 0);
+                else                  m1_i1a <= v_ph(7 downto 0); end if;
                 v_ph := s_th1(15 downto 6) + 1;
-                m1_sc <= v_ph(9);
-                if v_ph(8) = '1' then m1_ic <= not v_ph(7 downto 0);
-                else                  m1_ic <= v_ph(7 downto 0); end if;
-                m1_fr <= s_th1(5 downto 0);
+                m1_s1b <= v_ph(9);
+                if v_ph(8) = '1' then m1_i1b <= not v_ph(7 downto 0);
+                else                  m1_i1b <= v_ph(7 downto 0); end if;
+                m1_f1 <= s_th1(5 downto 0);
+
                 v_ph := s_th2(15 downto 6);
-                m1_s1 <= v_ph(9);
-                if v_ph(8) = '1' then m1_i1 <= not v_ph(7 downto 0);
-                else                  m1_i1 <= v_ph(7 downto 0); end if;
+                m1_s2a <= v_ph(9);
+                if v_ph(8) = '1' then m1_i2a <= not v_ph(7 downto 0);
+                else                  m1_i2a <= v_ph(7 downto 0); end if;
                 v_ph := s_th2(15 downto 6) + 1;
-                m1_s2 <= v_ph(9);
-                if v_ph(8) = '1' then m1_i2 <= not v_ph(7 downto 0);
-                else                  m1_i2 <= v_ph(7 downto 0); end if;
-                m1_fr2 <= s_th2(5 downto 0);
-                -- Envelope: exactly half a sine cycle across the screen, so
-                -- it is 0 at both edges and 1 mid-screen.  Read at idx AND
-                -- idx+1: its index only advances ~0.53 entries per column,
-                -- so an un-interpolated envelope steps on ALTERNATE COLUMNS,
-                -- and since it scales the amplitude that showed up as a
-                -- ~2.5-row chop at high Coil.
-                v_ph := s_the(15 downto 6);
-                if v_ph(8) = '1' then m1_ie <= not v_ph(7 downto 0);
-                else                  m1_ie <= v_ph(7 downto 0); end if;
-                v_ph := s_the(15 downto 6) + 1;
-                if v_ph(8) = '1' then m1_ie2 <= not v_ph(7 downto 0);
-                else                  m1_ie2 <= v_ph(7 downto 0); end if;
-                m1_fre <= s_the(5 downto 0);
+                m1_s2b <= v_ph(9);
+                if v_ph(8) = '1' then m1_i2b <= not v_ph(7 downto 0);
+                else                  m1_i2b <= v_ph(7 downto 0); end if;
+                m1_f2 <= s_th2(5 downto 0);
+
+                v_ph := s_th3(15 downto 6);
+                m1_s3a <= v_ph(9);
+                if v_ph(8) = '1' then m1_i3a <= not v_ph(7 downto 0);
+                else                  m1_i3a <= v_ph(7 downto 0); end if;
+                v_ph := s_th3(15 downto 6) + 1;
+                m1_s3b <= v_ph(9);
+                if v_ph(8) = '1' then m1_i3b <= not v_ph(7 downto 0);
+                else                  m1_i3b <= v_ph(7 downto 0); end if;
+                m1_f3 <= s_th3(5 downto 0);
 
                 -- m2: ROM data settles in the p_rom* processes
-                m2_sf <= m1_sf;  m2_sc <= m1_sc;
-                m2_s1 <= m1_s1;  m2_s2 <= m1_s2;
-                m2_fr <= m1_fr;  m2_fr2 <= m1_fr2;  m2_fre <= m1_fre;
+                m2_s1a <= m1_s1a;  m2_s1b <= m1_s1b;  m2_f1 <= m1_f1;
+                m2_s2a <= m1_s2a;  m2_s2b <= m1_s2b;  m2_f2 <= m1_f2;
+                m2_s3a <= m1_s3a;  m2_s3b <= m1_s3b;  m2_f3 <= m1_f3;
 
                 -- m2b: signs + neighbour deltas (EBR data into fabric FFs
                 -- before any arithmetic)
-                if m2_sf = '1' then v_s0 := -signed('0' & m2_qf);
-                else                v_s0 :=  signed('0' & m2_qf); end if;
-                if m2_sc = '1' then v_s1 := -signed('0' & m2_qc);
-                else                v_s1 :=  signed('0' & m2_qc); end if;
-                m2b_s0 <= v_s0;
-                m2b_sd <= resize(v_s1 - v_s0, 8);
-                m2b_fr <= m2_fr;
-                if m2_s1 = '1' then v_s0 := -signed('0' & m2_q1);
-                else                v_s0 :=  signed('0' & m2_q1); end if;
-                if m2_s2 = '1' then v_s1 := -signed('0' & m2_q2);
-                else                v_s1 :=  signed('0' & m2_q2); end if;
-                m2b_g0 <= v_s0;
-                m2b_gd <= resize(v_s1 - v_s0, 8);
-                m2b_fr2 <= m2_fr2;
-                m2b_e0  <= m2_qe;
-                m2b_ed  <= resize(signed('0' & m2_qe2) - signed('0' & m2_qe), 9);
-                m2b_fre <= m2_fre;
+                if m2_s1a = '1' then v_s0 := -signed('0' & m2_q1a);
+                else                 v_s0 :=  signed('0' & m2_q1a); end if;
+                if m2_s1b = '1' then v_s1 := -signed('0' & m2_q1b);
+                else                 v_s1 :=  signed('0' & m2_q1b); end if;
+                m2b_v1 <= v_s0;
+                m2b_d1 <= resize(v_s1 - v_s0, 8);
+                m2b_f1 <= m2_f1;
+                if m2_s2a = '1' then v_s0 := -signed('0' & m2_q2a);
+                else                 v_s0 :=  signed('0' & m2_q2a); end if;
+                if m2_s2b = '1' then v_s1 := -signed('0' & m2_q2b);
+                else                 v_s1 :=  signed('0' & m2_q2b); end if;
+                m2b_v2 <= v_s0;
+                m2b_d2 <= resize(v_s1 - v_s0, 8);
+                m2b_f2 <= m2_f2;
+                if m2_s3a = '1' then v_s0 := -signed('0' & m2_q3a);
+                else                 v_s0 :=  signed('0' & m2_q3a); end if;
+                if m2_s3b = '1' then v_s1 := -signed('0' & m2_q3b);
+                else                 v_s1 :=  signed('0' & m2_q3b); end if;
+                m2b_v3 <= v_s0;
+                m2b_d3 <= resize(v_s1 - v_s0, 8);
+                m2b_f3 <= m2_f3;
 
-                -- m3: interpolate both lobes
-                m3_sf <= m2b_s0 + resize(shift_right(m2b_sd * signed('0' & m2b_fr), 6), 13);
-                m3_sg <= m2b_g0 + resize(shift_right(m2b_gd * signed('0' & m2b_fr2), 6), 13);
-                v_env13 := signed('0' & m2b_e0)
-                           + resize(shift_right(m2b_ed * signed('0' & m2b_fre), 6), 13);
-                if v_env13 < 0 then
-                    m3_env <= (others => '0');
-                else
-                    m3_env <= unsigned(v_env13(11 downto 0));
-                end if;
+                -- m3: interpolate all three lobes
+                m3_s1 <= m2b_v1 + resize(shift_right(m2b_d1 * signed('0' & m2b_f1), 6), 13);
+                m3_s2 <= m2b_v2 + resize(shift_right(m2b_d2 * signed('0' & m2b_f2), 6), 13);
+                m3_s3 <= m2b_v3 + resize(shift_right(m2b_d3 * signed('0' & m2b_f3), 6), 13);
 
-                -- m3b: fold the lobes together (the second is exactly A/8 --
-                -- at A/4 its slope contribution notched the peaks once the
-                -- wave count went up)
-                -- and start the envelope x amplitude multiply
-                m3_sum <= resize(m3_sf, 14) + resize(shift_right(m3_sg, 3), 14);
-                m3b_ahi <= s_amp1 * m3_env(11 downto 6);
-                m3b_alo <= s_amp1 * m3_env(5 downto 0);
-                m3b_sum <= m3_sum;
+                -- m3b: wave lobe, summed noise lobes
+                m3b_sf <= m3_s1;
+                m3b_ns <= resize(m3_s2, 14) + resize(m3_s3, 14);
 
-                -- m4a: the enveloped amplitude -- zero at both screen edges,
-                -- so the ribbon's ends stay put and all the added length
-                -- goes into the middle
-                m4_aeff <= resize(shift_right(shift_left(resize(m3b_ahi, 24), 6)
-                                              + resize(m3b_alo, 24), 12), 12);
-                m4_sum  <= m3b_sum;
+                -- m4a: noise x level (Q6; the result is Q12 after >> 7, so
+                -- full Noise puts each lobe at ~half the wave's amplitude)
+                m4a_sf <= m3b_sf;
+                m4a_nz <= m3b_ns * signed('0' & s_nq);
 
-                -- m4b: amplitude x meander, split hi/lo
-                m4_hi <= signed('0' & m4_aeff) * m4_sum(13 downto 7);
-                m4_lo <= signed('0' & m4_aeff) * signed('0' & m4_sum(6 downto 0));
+                -- m4s: wave + noise; half-thickness x noise (the band
+                -- breathes with the same noise that bends it)
+                m4s_sum <= resize(m4a_sf, 14) + resize(m4a_nz(20 downto 7), 14);
+                m4s_hb  <= signed('0' & s_Hq2) * m4a_nz(20 downto 13);
+
+                -- m4b: amplitude x sum, split hi/lo; H_eff = H + H*noise/2
+                m4_hi <= signed('0' & s_A) * m4s_sum(13 downto 7);
+                m4_lo <= signed('0' & s_A) * signed('0' & m4s_sum(6 downto 0));
+                v_he  := resize(signed('0' & s_H31), 16) + resize(m4s_hb(21 downto 7), 16);
+                m4_h  <= unsigned(v_he(12 downto 0));
 
                 -- m4c: recombine
-                m4_p1 <= shift_left(resize(m4_hi, 27), 7) + resize(m4_lo, 27);
+                m4_p1 <= shift_left(resize(m4_hi, 28), 7) + resize(m4_lo, 28);
+                m4c_h <= m4_h;
 
-                -- m5: the ribbon's centre height at this column
+                -- m5: the wave's centre height at this column (q2 rows)
                 v_yn := signed('0' & resize(s_Pq2, 15))
                         + resize(shift_right(m4_p1, 12), 16);
-                m5_y  <= v_yn;
-                -- slope straight from the un-rounded product: 12 bits finer
-                -- than differencing the quarter-row heights, which is what
-                -- made the edges tooth
-                s_p1prev <= m4_p1(25 downto 7);
-                m5_d   <= m4_p1(25 downto 7) - s_p1prev;
-                m5_dv0 <= s_v(10);      -- predecessor valid?
+                m5_y <= v_yn;
+                m5_h <= m4c_h;
 
-                -- m5b: magnitude, averaged over two columns.  The width
-                -- correction is a steep function of slope, so un-smoothed
-                -- slope noise near a crest turns into a comb on the edge.
-                if m5_d < 0 then v_du := unsigned(-m5_d);
-                else             v_du := unsigned(m5_d); end if;
-                m5_dp <= v_du;
-                v_du := shift_right(v_du, 1) + shift_right(m5_dp, 1);
-                -- one column == one pixel on every raster now, so the slope
-                -- scale is the same for all classes
-                if m5_dv0 = '0' then
-                    m5_idx <= (others => '0');   -- no predecessor yet
-                elsif v_du > 2047 then
-                    m5_idx <= to_unsigned(2047, 11);
+                -- m6: vertical distance to this row, and to the row
+                -- reflected about the centre line.  The reflected copy's
+                -- colour offset is the REFLECTED row's own offset (not
+                -- negated), so it is a true mirror image: on the centre
+                -- line both copies are identical and the fold is seamless.
+                v_d1 := m5_y - signed('0' & resize(s_Rq2, 15));
+                v_d2 := m5_y - signed('0' & resize(s_R2q2, 15));
+                m6_d1 <= v_d1;
+                m6_n2 <= v_d2;
+                if v_d1 < 0 then m6_a1 <= resize(unsigned(-v_d1), 15);
+                else             m6_a1 <= resize(unsigned(v_d1), 15); end if;
+                if v_d2 < 0 then m6_a2 <= resize(unsigned(-v_d2), 15);
+                else             m6_a2 <= resize(unsigned(v_d2), 15); end if;
+                m6_h <= m5_h;
+
+                -- m6b: the nearer copy wins (clamped distances)
+                if m6_a1 > 8191 then v_c1 := to_unsigned(8191, 13);
+                else                 v_c1 := resize(m6_a1, 13); end if;
+                if m6_a2 > 8191 then v_c2 := to_unsigned(8191, 13);
+                else                 v_c2 := resize(m6_a2, 13); end if;
+                if s_mirror = '1' and m6_a2 < m6_a1 then
+                    m6b_dp <= v_c2;
+                    m6b_po <= m6_n2;
                 else
-                    m5_idx <= resize(v_du, 11);
+                    m6b_dp <= v_c1;
+                    m6b_po <= m6_d1;
                 end if;
+                m6b_h <= m6_h;
 
-                -- m6: vertical distance, hue offset, and the local slope
-                -- (one column apart, so this IS dy/dx)
-                v_dv := m5_y - signed('0' & resize(s_rq2m, 15));
-                if v_dv < 0 then m6_dv <= resize(unsigned(-v_dv), 15);
-                else             m6_dv <= resize(unsigned(v_dv), 15); end if;
-                m6_off <= v_dv(11 downto 0);
-                if m5_idx(10 downto 4) > 15 then
-                    m6_i <= to_unsigned(15, 4);   -- past the clamp: flat
-                    m6_fr <= (others => '0');
+                -- m6c: saturate the signed offset for the hue multiply
+                if m6b_po > 8191 then
+                    m6c_po <= to_signed(8191, 14);
+                elsif m6b_po < -8191 then
+                    m6c_po <= to_signed(-8191, 14);
                 else
-                    m6_i  <= m5_idx(7 downto 4);
-                    m6_fr <= m5_idx(3 downto 0);
+                    m6c_po <= m6b_po(13 downto 0);
                 end if;
+                m6c_dp <= m6b_dp;
+                m6c_h  <= m6b_h;
 
-                -- m6b: table entry arrives (read in p_romrf)
-                if m6_dv > 4095 then m6b_dv <= to_unsigned(4095, 12);
-                else                 m6b_dv <= resize(m6_dv, 12); end if;
-                m6b_off <= m6_off;
-                m6b_fr  <= m6_fr;
-
-                -- m6c: interpolate between entries -- without this each table
-                -- step jumps the ribbon edge ~3 rows and the edges tooth
-                v_rf13 := signed('0' & m6b_v)
-                          + resize(shift_right(m6b_d * signed('0' & m6b_fr), 4), 13);
-                -- unity is 4096, which does NOT fit the 12-bit field: left
-                -- unclamped it wrapped to zero on every flat spot and lit
-                -- the whole column
-                if v_rf13 > 4095 then
-                    m6c_rf <= to_unsigned(4095, 12);
-                else
-                    m6c_rf <= unsigned(v_rf13(11 downto 0));
-                end if;
-                m6c_dv <= m6b_dv;
-                m6c_off <= m6b_off;
-
-                -- m7: distance x correction, split into two small multiplies
-                m7_ph <= m6c_dv * m6c_rf(11 downto 6);
-                m7_pl <= m6c_dv * m6c_rf(5 downto 0);
-                m7_off <= m6c_off;
-
-                -- m8: distance PERPENDICULAR to the curve -- this is what
-                -- keeps the ribbon one constant width through every bend
-                v_dp := shift_left(resize(m7_ph, 26), 6) + resize(m7_pl, 26);
-                m8_dp <= resize(shift_right(v_dp, 12), 13);
-                m8_off <= m7_off;
-
-                -- m8b: sign the perpendicular offset (colour follows the
-                -- ribbon), and carry the magnitude for alpha
-                if m8_off < 0 then m8b_po <= -signed('0' & m8_dp);
-                else               m8b_po <=  signed('0' & m8_dp); end if;
-                m8b_dp <= m8_dp;
-
-                -- m9: alpha from the perpendicular distance + hue partials
-                v_al := signed('0' & resize(s_H31, 13)) - signed('0' & m8b_dp);
+                -- m9: alpha from the breathed half-thickness; hue partials
+                v_al := signed('0' & m6c_h) - signed('0' & m6c_dp);
                 if v_al <= 0 then
                     m9_a <= (others => '0');
                 elsif v_al > 31 then
@@ -1141,108 +1083,111 @@ begin
                 else
                     m9_a <= unsigned(v_al(4 downto 0)) & '0';
                 end if;
-                -- EVERY column is stamped now, alpha 0 included: that is what
-                -- retires the clear-behind-beam write port and lets one bank
-                -- serve both the beam and the stamp.
-                if s_v(17) = '1' then m9_wr <= '1';
-                else                  m9_wr <= '0'; end if;
-                -- Colour is keyed to the signed PERPENDICULAR offset, so the
-                -- rainbow bands stay square to the ribbon through every bend.
-                m9_hhi <= m8b_po * signed('0' & s_hscale(11 downto 6));
-                m9_hlo <= m8b_po * signed('0' & s_hscale(5 downto 0));
+                m9_hhi <= m6c_po * signed('0' & s_hscale(11 downto 6));
+                m9_hlo <= m6c_po * signed('0' & s_hscale(5 downto 0));
 
                 -- m10: recombine the hue product
-                v_hpp := shift_left(resize(m9_hhi, 26), 6) + resize(m9_hlo, 26);
+                v_hpp := shift_left(resize(m9_hhi, 27), 6) + resize(m9_hlo, 27);
                 m10_hp <= unsigned(v_hpp(15 downto 0));
                 m10_a  <= m9_a;
-                m10_wr <= m9_wr;
             end if;
 
             -- ---- writer: one write per column, in order ----
-            v_h16 := s_phc - m10_hp;     -- hue rises downward: R..V top-down
-            if s_run = '1' and m10_wr = '1' and s_wcol < s_cols then
+            -- Across: hue rises downward from the colour phase (R..V top
+            -- to bottom).  Along: hue advances with the column instead.
+            if s_along = '1' then
+                v_h16 := s_phc + s_hxw;
+            else
+                v_h16 := s_phc - m10_hp;
+            end if;
+            if s_run = '1' and s_v(15) = '1' and s_wcol < s_cols then
                 s_st_we   <= '1';
                 s_st_addr <= s_wcol(10 downto 0);
                 s_st_data <= std_logic_vector(v_h16(15 downto 6))
                              & std_logic_vector(m10_a);
-            end if;
-            if s_run = '1' and s_v(18) = '1' then
                 s_wcol <= s_wcol + 1;
+                s_hxw  <= s_hxw + resize(s_kx, 16);
             end if;
         end if;
     end process p_march;
 
-    -- ==== meander sine ROMs: 4 reads (two terms, each at idx and idx+1
-    -- so both are interpolated) -- one inferred EBR each ====
-    p_romf : process(clk)
-    begin
-        if rising_edge(clk) then
-            m2_qf <= C_QSIN13(to_integer(m1_if));
-        end if;
-    end process p_romf;
+    -- ==== sine ROMs: 3 lobes x (idx, idx+1) -- one inferred EBR each ====
+    p_rom1a : process(clk) begin if rising_edge(clk) then m2_q1a <= C_QSIN13(to_integer(m1_i1a)); end if; end process;
+    p_rom1b : process(clk) begin if rising_edge(clk) then m2_q1b <= C_QSIN13(to_integer(m1_i1b)); end if; end process;
+    p_rom2a : process(clk) begin if rising_edge(clk) then m2_q2a <= C_QSIN13(to_integer(m1_i2a)); end if; end process;
+    p_rom2b : process(clk) begin if rising_edge(clk) then m2_q2b <= C_QSIN13(to_integer(m1_i2b)); end if; end process;
+    p_rom3a : process(clk) begin if rising_edge(clk) then m2_q3a <= C_QSIN13(to_integer(m1_i3a)); end if; end process;
+    p_rom3b : process(clk) begin if rising_edge(clk) then m2_q3b <= C_QSIN13(to_integer(m1_i3b)); end if; end process;
 
-    p_romc : process(clk)
-    begin
-        if rising_edge(clk) then
-            m2_qc <= C_QSIN13(to_integer(m1_ic));
-        end if;
-    end process p_romc;
-
-    p_rom1 : process(clk)
-    begin
-        if rising_edge(clk) then
-            m2_q1 <= C_QSIN13(to_integer(m1_i1));
-        end if;
-    end process p_rom1;
-
-    p_rom2 : process(clk)
-    begin
-        if rising_edge(clk) then
-            m2_q2 <= C_QSIN13(to_integer(m1_i2));
-        end if;
-    end process p_rom2;
-
-    -- envelope sine, read at idx and idx+1 so it can be interpolated
-    p_rome : process(clk)
-    begin
-        if rising_edge(clk) then
-            m2_qe <= C_QSIN13(to_integer(m1_ie));
-        end if;
-    end process p_rome;
-
-    p_rome2 : process(clk)
-    begin
-        if rising_edge(clk) then
-            m2_qe2 <= C_QSIN13(to_integer(m1_ie2));
-        end if;
-    end process p_rome2;
-
-    -- perpendicular-width correction factor
-    p_romrf : process(clk)
-    begin
-        if rising_edge(clk) then
-            m6b_v <= C_RFV(to_integer(m6_i));
-            m6b_d <= C_RFD(to_integer(m6_i));
-        end if;
-    end process p_romrf;
-
-    -- ==== ribbon color LUT (one read port -> one inferred ROM) ====
-    p_clut : process(clk)
-    begin
-        if rising_edge(clk) then
-            b3_rom <= C_CLUT(to_integer(b2_addr));
-        end if;
-    end process p_clut;
+    -- ==== ribbon colour LUT: six 256 x 10 ROMs, one inferred EBR each ====
+    p_cylo : process(clk) begin if rising_edge(clk) then b3_ylo <= C_CY_LO(to_integer(b2_addr(7 downto 0))); end if; end process;
+    p_cyhi : process(clk) begin if rising_edge(clk) then b3_yhi <= C_CY_HI(to_integer(b2_addr(7 downto 0))); end if; end process;
+    p_culo : process(clk) begin if rising_edge(clk) then b3_ulo <= C_CU_LO(to_integer(b2_addr(7 downto 0))); end if; end process;
+    p_cuhi : process(clk) begin if rising_edge(clk) then b3_uhi <= C_CU_HI(to_integer(b2_addr(7 downto 0))); end if; end process;
+    p_cvlo : process(clk) begin if rising_edge(clk) then b3_vlo <= C_CV_LO(to_integer(b2_addr(7 downto 0))); end if; end process;
+    p_cvhi : process(clk) begin if rising_edge(clk) then b3_vhi <= C_CV_HI(to_integer(b2_addr(7 downto 0))); end if; end process;
 
     -- ====================================================================
-    -- Line buffer: ONE bank.  The stamp for row R+1 writes column c about
-    -- 18 clocks AFTER the beam has read column c of row R, so a single
-    -- buffer serves both -- the read of every column always precedes its
-    -- overwrite by the depth of the marcher pipeline.  Because every column
-    -- is stamped (alpha 0 outside the ribbon) there is nothing to clear, so
-    -- the second write source is gone: one write statement, one read, and
-    -- half the EBR.
-    s_raddr <= s_hcnt(10 downto 0);
+    -- Line buffer: ONE bank.  Column c of row R+1 is stamped ~16 clocks
+    -- AFTER the beam read column c of row R, so every read precedes its own
+    -- overwrite.  Every column is stamped (alpha 0 outside the band), so
+    -- there is nothing to clear: one write statement, one read.
+    -- ====================================================================
+    s_raddr <= s_bcol;
+
+    -- ====================================================================
+    -- Clean avid (see header).  g_ph is the hsync->avid-rise distance
+    -- parity of this line; g_par is the voted usual parity; a line whose
+    -- avid lands off-parity starts one clock later, so the generated start
+    -- always sits at the same hsync parity.  It ends after the width
+    -- latched per field, or at hsync at the latest.
+    -- ====================================================================
+    p_gavid : process(clk)
+    begin
+        if rising_edge(clk) then
+            g_hsq <= data_in.hsync_n;
+            g_hsr <= g_hsq and not data_in.hsync_n;    -- hsync_n falling
+            g_avq <= data_in.avid;
+            g_avr <= data_in.avid and not g_avq;       -- avid rising
+
+            if g_hsr = '1' then
+                g_ph  <= '0';
+                g_arm <= '1';
+            else
+                g_ph <= not g_ph;
+            end if;
+            g_rsr <= g_rsr(1 downto 0) & '0';
+            if g_avr = '1' and g_arm = '1' then
+                g_arm    <= '0';
+                g_rsr(0) <= '1';
+                g_sel    <= g_ph xor g_par;
+                if g_ph = '1' then
+                    if g_pc /= 15 then g_pc <= g_pc + 1; end if;
+                else
+                    if g_pc /= 0 then g_pc <= g_pc - 1; end if;
+                end if;
+            end if;
+            if g_pc = 15 then g_par <= '1';
+            elsif g_pc = 0 then g_par <= '0'; end if;
+
+            if (g_sel = '0' and g_rsr(1) = '1') or (g_sel = '1' and g_rsr(2) = '1') then
+                g_avid <= '1';
+                g_cnt  <= (others => '0');
+            elsif g_avid = '1' then
+                g_cnt <= g_cnt + 1;
+                if g_cnt = g_wm1 or g_hsr = '1' then
+                    g_avid <= '0';
+                end if;
+            end if;
+
+            -- beam column: counts the generated avid from hsync
+            if g_hsr = '1' then
+                s_bcol <= (others => '0');
+            elsif g_avid = '1' then
+                s_bcol <= s_bcol + 1;
+            end if;
+        end if;
+    end process p_gavid;
 
     p_lb : process(clk)
     begin
@@ -1256,7 +1201,7 @@ begin
     end process p_lb;
 
     -- ====================================================================
-    -- Beam: readout, hue -> YUV, alpha composite (C_LAT = 9, all modes)
+    -- Beam: readout, hue -> YUV, alpha composite (C_LAT = 8, all modes)
     -- ====================================================================
     p_beam : process(clk)
         variable v_w    : std_logic_vector(15 downto 0);
@@ -1275,7 +1220,7 @@ begin
             b2_a <= unsigned(v_w(5 downto 0));
             v_hue := unsigned(v_w(15 downto 6));
             v_m6  := resize(v_hue & "00", 13) + resize(v_hue & '0', 13)
-                     + resize(v_hue, 13);                    -- hue9 * 7
+                     + resize(v_hue, 13);                    -- hue10 * 7
             if s_solid = '1' then
                 v_k := v_m6(12 downto 10);
                 b2_addr <= resize(v_k & "000000", 9) + resize(v_k & "000", 9)
@@ -1284,27 +1229,39 @@ begin
                 b2_addr <= v_hue(9 downto 1);
             end if;
 
-            -- b3: LUT read happens in p_clut
-
-            -- b4 (named b5_*): ROM data into fabric FFs before any arithmetic
-            b5_y <= unsigned(b3_rom(29 downto 20));
-            b5_u <= unsigned(b3_rom(19 downto 10));
-            b5_v <= unsigned(b3_rom(9 downto 0));
+            -- b3: the six ROM reads happen in p_c*; carry the half select
+            b3_hi <= b2_addr(8);
             b3_a  <= b2_a;
+
+            -- b4 (named b5_*): pick the half, into fabric FFs before any
+            -- arithmetic (one 2:1 mux after the EBR output)
+            if b3_hi = '1' then
+                b5_y <= b3_yhi;  b5_u <= b3_uhi;  b5_v <= b3_vhi;
+            else
+                b5_y <= b3_ylo;  b5_u <= b3_ulo;  b5_v <= b3_vlo;
+            end if;
             b5_a  <= b3_a;
 
-            -- b6: background select, differences, gain
-            v_yr := b5_y;  v_ur := b5_u;  v_vr := b5_v;
-            if s_bgvid = '1' then
+            -- b6: background select, differences, gain.  Black is Y 64
+            -- (code 0 is super-black).  Fill = Video: the band's luma is
+            -- the live picture's, half-mixed with the rainbow's so dark
+            -- video still shows the band; chroma stays the rainbow's.
+            if s_fill = '1' and d_av(5) = '1' then
+                v_yr := resize(shift_right(resize(b5_y, 11) + resize(d_y(5), 11), 1), 10);
+            else
+                v_yr := b5_y;
+            end if;
+            v_ur := b5_u;  v_vr := b5_v;
+            if s_bg5 = '1' then
                 v_by := d_y(5);
                 v_bu := d_u(5);
                 v_bv := d_v(5);
             else
-                v_by := (others => '0');
+                v_by := C_BLK;
                 v_bu := C_MID;
                 v_bv := C_MID;
             end if;
-            if d_av(5) = '0' then
+            if d_gv(5) = '0' then
                 v_g := (others => '0');
             elsif b5_a = to_unsigned(63, 6) then
                 v_g := to_unsigned(64, 7);
@@ -1323,12 +1280,12 @@ begin
 
             -- b8 -> s_io: composite over the SAME background sample, re-tapped
             -- from the delay line two stages later (convex blend: no clamp)
-            if s_bgvid = '1' then
+            if s_bg7 = '1' then
                 v_by := d_y(7);
                 v_bu := d_u(7);
                 v_bv := d_v(7);
             else
-                v_by := (others => '0');
+                v_by := C_BLK;
                 v_bu := C_MID;
                 v_bv := C_MID;
             end if;
@@ -1341,7 +1298,14 @@ begin
             s_io.hsync_n <= d_hs(C_LAT - 1);
             s_io.vsync_n <= d_vs(C_LAT - 1);
             s_io.field_n <= d_fl(C_LAT - 1);
-            s_io.avid    <= d_av(C_LAT - 1);
+            s_io.avid    <= d_gv(C_LAT - 1);
+            -- backdrop video only where BOTH avids are live: outside the
+            -- generated avid the gain is 0 and the background is black, so
+            -- the output is exactly neutral (blanking gate), and the few
+            -- columns where the generated line outruns the source are black
+            -- rather than the receiver's blanking codes
+            s_bg5 <= s_bgvid and d_av(4) and d_gv(4);
+            s_bg7 <= s_bgvid and d_av(6) and d_gv(6);
         end if;
     end process p_beam;
 
@@ -1358,6 +1322,7 @@ begin
             d_vs(1) <= data_in.vsync_n;
             d_fl(1) <= data_in.field_n;
             d_av(1) <= data_in.avid;
+            d_gv(1) <= g_avid;
             for i in 2 to C_LAT - 1 loop
                 d_y(i)  <= d_y(i - 1);
                 d_u(i)  <= d_u(i - 1);
@@ -1366,6 +1331,7 @@ begin
                 d_vs(i) <= d_vs(i - 1);
                 d_fl(i) <= d_fl(i - 1);
                 d_av(i) <= d_av(i - 1);
+                d_gv(i) <= d_gv(i - 1);
             end loop;
         end if;
     end process p_delay;

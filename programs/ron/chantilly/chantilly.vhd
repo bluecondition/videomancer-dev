@@ -1,4 +1,27 @@
--- chantilly.vhd  (v0.1 -- black-lace halftone: video as cream circles on black)
+-- chantilly.vhd  (v0.3 -- black-lace halftone: video as cream circles on black)
+--
+-- v0.3 (look pass):
+--   * ROUNDER DOTS: dot size reads a 2-D blurred luma -- 8-px running box,
+--     then a vertical one-pole IIR (k=1/4) kept in a dual-bank line buffer
+--     (8 EBR), so a dot no longer traces the video's contours.
+--   * 2-D INK: the same buffer gives a vertical gradient, so horizontal
+--     edges (eyes, mouths, horizons) ink too.
+--   * K4 Ink at 0 = no ink; S9 is now COLOUR (dots take the source chroma,
+--     ~1.75x saturation, scaled by the dot key; S7 Ivory warms it).
+--   * Ghost works on the White ground too (bright video in the ground).
+--   * K3 FLOW = scroll + SPIN: every fan/rosette rotates, adjacent bands
+--     counter-rotate (one angle add before theta*ring, seamless by mod 4096).
+--   * P12 spans +-1.75 octaves (HD s = 861..76): fine veil -> giant rosettes.
+--
+-- v0.2 (pre-first-flash hardware-contract pass):
+--   * P12 inverted (up = bigger lace) and SD gets a FINER lace (s<<1), not
+--     coarser -- s is lace units per pixel, so bigger s = smaller lace.
+--   * Luma capped at 766 (was 957: full-scale Y clips RGB and kills chroma).
+--   * Ivory tint ~2x stronger and U/V-swapped at the output compose.
+--   * Interlace: the +1-line offset goes on the BOTTOM field (field_n='0').
+--   * W/H latched with +-2 hysteresis (analog line-length jitter).
+--   * Generated avid (hsync-parity locked, fixed width) for the encoders.
+--   * Raw luma tapped early; only derived radius/ink/ghost values ride deep.
 --
 -- Source image: black Chantilly-style lace -- bands of white/cream dots in
 -- fans, rosettes and pebble rows on black ground, with a thick black wavy
@@ -115,7 +138,8 @@ architecture chantilly of program_top is
     signal s_zoom_k  : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal s_ivory   : std_logic := '1';    -- S7 Ivory/Mono
     signal s_inv     : std_logic := '0';    -- S8 invert (white ground)
-    signal s_inkon   : std_logic := '1';    -- S9 ink lines
+    signal s_inkon   : std_logic := '1';    -- K4 above detent = ink on
+    signal s_colour  : std_logic := '0';    -- S9 dots take source chroma
     signal s_weave   : std_logic := '0';    -- S10 0=Doily(4 styles) 1=Pebble(calm)
     signal s_ghost   : std_logic := '0';    -- S11 dim video in the ground
 
@@ -129,11 +153,27 @@ architecture chantilly of program_top is
     signal s_ilace : std_logic := '0';
     signal s_fpar  : std_logic := '0';
     signal s_avid_q : std_logic := '0';
+    signal s_xl, s_hl : unsigned(11 downto 0) := (others => '0');
+    signal s_xl_go, s_hl_go : std_logic := '0';
+    signal s_wp2, s_wm2, s_hp2, s_hm2 : unsigned(11 downto 0) := (others => '0');
+
+    -- generated avid (aurora/cubist pattern): start 3-4 clocks after the
+    -- source avid rise at the source's usual hsync PARITY (saturating vote),
+    -- end after W pixels.  The encoders pair Cb/Cr by counting from hsync,
+    -- so a wandering avid edge swaps U/V for that line (thin tint lines).
+    signal g_hsq, g_hsr, g_avq, g_avr : std_logic := '0';
+    signal g_ph, g_arm, g_par, g_sel, g_avid : std_logic := '0';
+    signal g_pc   : unsigned(3 downto 0) := to_unsigned(8, 4);
+    signal g_rsr  : std_logic_vector(2 downto 0) := (others => '0');
+    signal g_cnt  : unsigned(11 downto 0) := (others => '0');
+    signal s_wm1  : unsigned(11 downto 0) := to_unsigned(719, 12);
 
     ----------------------------------------------------------------------
     -- per-frame resolved terms
     ----------------------------------------------------------------------
-    signal s_scl   : unsigned(9 downto 0) := to_unsigned(256, 10);  -- scale s, Q8
+    signal s_scl   : unsigned(10 downto 0) := to_unsigned(256, 11); -- scale s, Q8
+    signal s_spin  : unsigned(15 downto 0) := (others => '0');      -- spin angle, Q4
+    signal s_spinp, s_spinn : unsigned(11 downto 0) := (others => '0'); -- +-spin
     signal s_u0    : unsigned(19 downto 0) := (others => '0');      -- line-start u
     signal s_v0    : unsigned(19 downto 0) := (others => '0');      -- frame-start v
     signal s_scroll : unsigned(19 downto 0) := (others => '0');     -- drift accum, Q8
@@ -141,6 +181,7 @@ architecture chantilly of program_top is
     signal s_bias  : unsigned(7 downto 0) := to_unsigned(55, 8);    -- dot radius floor
     signal s_twist : signed(7 downto 0) := (others => '0');
     signal s_inkth : unsigned(7 downto 0) := to_unsigned(60, 8);
+    signal s_pth, s_nth : signed(9 downto 0) := (others => '0');    -- +-inkth
     signal s_bw    : unsigned(8 downto 0) := to_unsigned(150, 9);   -- border weight Q2
     signal s_re0, s_re1, s_re2, s_re3 : unsigned(11 downto 0) := (others => '1');
     signal s_svi   : integer range -2 to 1 := 0;                    -- scale exp int part
@@ -153,10 +194,11 @@ architecture chantilly of program_top is
     -- vblank sequencer + one shared multiplier
     signal s_seq   : unsigned(4 downto 0) := (others => '0');
     signal s_prev_vsync : std_logic := '1';
+    signal s_lgt8, s_vtrig : std_logic := '0';  -- registered vsync trigger
     signal s_vs_pulse   : std_logic := '0';
     signal s_ma    : signed(12 downto 0) := (others => '0');
-    signal s_mb    : signed(10 downto 0) := (others => '0');
-    signal s_mp    : signed(23 downto 0) := (others => '0');
+    signal s_mb    : signed(11 downto 0) := (others => '0');
+    signal s_mp    : signed(24 downto 0) := (others => '0');
 
     ----------------------------------------------------------------------
     -- lace-space DDA accumulators (Q8)
@@ -175,6 +217,7 @@ architecture chantilly of program_top is
     signal a1_dy   : signed(12 downto 0) := (others => '0');
     signal a1_sty  : unsigned(1 downto 0) := (others => '0');
     signal a1_seam : std_logic := '0';
+    signal a1_kb   : std_logic := '0';                          -- band parity
 
     -- A2 (#3): abs + signs
     signal a2_a, a2_b : unsigned(11 downto 0) := (others => '0');
@@ -228,24 +271,52 @@ architecture chantilly of program_top is
     signal c1a_key : unsigned(7 downto 0) := (others => '0');
     -- C1b (#18): lace compose (invert / cut / ghost select)
     signal c1_key : unsigned(7 downto 0) := (others => '0');
-    signal c1_gh  : unsigned(7 downto 0) := (others => '0');
+    signal c1_gh  : unsigned(6 downto 0) := (others => '0');
     signal c1_useg : std_logic := '0';
+    signal c1_gw   : std_logic := '0';                          -- ghost on White
+    signal c1_cu, c1_cv : signed(8 downto 0) := (others => '0'); -- chroma x key3
 
     ----------------------------------------------------------------------
     -- luma side pipeline
     ----------------------------------------------------------------------
-    type t_ysr is array(0 to 15) of unsigned(9 downto 0);
+    -- Raw input luma is tapped EARLY (y_sr 0..4 only): carrying raw video
+    -- 12-15 FFs deep went green+noisy on HD HDMI elsewhere (cascade,
+    -- rollthebones).  Radius, ink and ghost are computed off the early taps
+    -- and only those derived values are delayed to the compose stage.
+    type t_ysr is array(0 to 8) of unsigned(9 downto 0);
     signal y_sr : t_ysr := (others => (others => '0'));
 
-    signal lp1_p  : unsigned(16 downto 0) := (others => '0');  -- lv*gain (#14)
-    signal lp2_l  : unsigned(7 downto 0) := (others => '0');   -- dot radius Q7ish (#15)
+    -- 8-px running box (8-bit luma) -> vertical IIR via the line buffer
+    signal bx_d   : signed(8 downto 0) := (others => '0');
+    signal bx_s   : signed(11 downto 0) := (others => '0');
+    signal s_avid_c : std_logic := '0';
+    signal s_col  : unsigned(10 downto 0) := (others => '1');  -- saturates at 2047
+    signal s_lpar : std_logic := '0';                          -- write-bank parity
+    signal s_line0, s_l0arm : std_logic := '0';                -- first line of frame
+    type t_lb is array(0 to 4095) of std_logic_vector(7 downto 0);
+    signal lb_mem : t_lb;
+    signal lb_ra, lb_wa : unsigned(11 downto 0) := (others => '0');
+    signal lb_rd, lb_wd : std_logic_vector(7 downto 0) := (others => '0');
+    signal lb_rdq : unsigned(7 downto 0) := (others => '0');
+    signal vi     : unsigned(7 downto 0) := (others => '0');   -- blurred luma (#V1)
+
+    signal lp1_p  : unsigned(16 downto 0) := (others => '0');  -- vi*gain
+    signal lp2_l  : unsigned(7 downto 0) := (others => '0');   -- dot radius Q7ish
+    type t_l8 is array(0 to 5) of unsigned(7 downto 0);
+    signal ld_sr  : t_l8 := (others => (others => '0'));       -- radius delay
     signal lp3_rsq : unsigned(15 downto 0) := (others => '0'); -- radius^2 (#16)
 
-    signal g1_ink : std_logic := '0';                          -- raw edge flag (#13)
+    signal gx_r, gy_r : signed(9 downto 0) := (others => '0'); -- h/v gradients
+    signal g1_ink : std_logic := '0';                          -- raw edge flag
     signal g1_sr  : std_logic_vector(0 to 4) := (others => '0');
-    signal g2_ink : std_logic := '0';                          -- dilated (#14)
-    signal i1_ink, i2_ink, i3_ink : std_logic := '0';          -- (#15,#16,#17)
-    signal gh_v, gh_v2 : unsigned(7 downto 0) := (others => '0'); -- ghost luma (#16,#17)
+    signal g2_ink : std_logic := '0';                          -- dilated
+    signal i_sr   : std_logic_vector(0 to 7) := (others => '0'); -- (.. #17)
+
+    -- source chroma, 5-bit (steps of 32, 512 = exact code 16), as offsets
+    type t_c5 is array(0 to 16) of signed(4 downto 0);
+    signal cu_sr, cv_sr : t_c5 := (others => (others => '0'));
+    type t_g7 is array(0 to 15) of unsigned(6 downto 0);
+    signal gh_sr  : t_g7 := (others => (others => '0'));       -- ghost luma/8 (#2..#17)
 
     ----------------------------------------------------------------------
     -- 1-bit carries
@@ -254,6 +325,7 @@ architecture chantilly of program_top is
     signal bord_sr : std_logic_vector(0 to 4) := (others => '0');  -- RB -> C1b
     type t_sty is array(0 to 8) of unsigned(1 downto 0);
     signal sty_sr : t_sty := (others => (others => '0'));          -- A1 -> RB
+    signal kb_sr  : std_logic_vector(0 to 8) := (others => '0');   -- A1 -> RB
 
     signal s_out_y : unsigned(9 downto 0) := to_unsigned(64, 10);
     signal s_out_u : unsigned(9 downto 0) := C_MID;
@@ -262,7 +334,9 @@ architecture chantilly of program_top is
     ----------------------------------------------------------------------
     -- sync delay
     ----------------------------------------------------------------------
-    signal s_avid_sr    : std_logic_vector(0 to C_LATENCY - 1) := (others => '0');
+    -- generated avid lags the source avid by 4 clocks (5 off-parity), so its
+    -- delay line is 4 shorter: gav_sr(14) lines up with the old sync tap 18.
+    signal gav_sr       : std_logic_vector(0 to C_LATENCY - 5) := (others => '0');
     signal s_hsync_n_sr : std_logic_vector(0 to C_LATENCY - 1) := (others => '1');
     signal s_vsync_n_sr : std_logic_vector(0 to C_LATENCY - 1) := (others => '1');
     signal s_field_n_sr : std_logic_vector(0 to C_LATENCY - 1) := (others => '0');
@@ -290,20 +364,88 @@ begin
             if data_in.avid = '1' then
                 s_xcnt <= s_xcnt + 1;
             elsif s_avid_q = '1' then                 -- avid just fell
-                if s_xcnt > 16 then s_W <= s_xcnt; end if;
                 s_xcnt <= (others => '0');
                 s_lcnt <= s_lcnt + 1;
             end if;
 
+            -- +-2 hysteresis: analog line lengths wander by a pixel, and W/2
+            -- sets the frame's u origin (1-px whole-frame shimmer).  Same for
+            -- H (interlaced fields can differ by a line).  Two-step: capture
+            -- the count, then compare against free-running W+-2 / H+-2 --
+            -- the fused add+compare was the hd_analog critical path.
+            s_wp2 <= s_W + 2;
+            s_wm2 <= s_W - 2;
+            s_hp2 <= s_H + 2;
+            s_hm2 <= s_H - 2;
+
+            s_xl_go <= '0';
+            if data_in.avid = '0' and s_avid_q = '1' then
+                s_xl    <= s_xcnt;
+                s_xl_go <= '1';
+            end if;
+            if s_xl_go = '1' and s_xl > 16 and (s_xl > s_wp2 or s_xl < s_wm2) then
+                s_W <= s_xl;
+            end if;
+
+            s_hl_go <= '0';
             if s_vs_pulse = '1' then
-                if s_lcnt > 8 then
-                    if s_ilace = '1' then s_H <= shift_left(s_lcnt, 1);
-                    else                  s_H <= s_lcnt; end if;
-                end if;
+                if s_ilace = '1' then s_hl <= shift_left(s_lcnt, 1);
+                else                  s_hl <= s_lcnt; end if;
+                s_hl_go <= '1';
                 s_lcnt <= (others => '0');
+            end if;
+            if s_hl_go = '1' and (s_hl > s_hp2 or s_hl < s_hm2) then
+                s_H <= s_hl;
             end if;
         end if;
     end process p_measure;
+
+    ------------------------------------------------------------------------
+    -- generated avid (aurora v3.0.2 pattern).  g_ph = hsync->avid-rise
+    -- distance parity of this line; g_par = the voted usual parity; a line
+    -- whose avid lands off-parity starts one clock later, so the output
+    -- avid always starts at the same hsync parity.  It ends after W pixels
+    -- (field-stable s_wm1) or at hsync at the latest.
+    ------------------------------------------------------------------------
+    p_gavid : process(clk)
+    begin
+        if rising_edge(clk) then
+            g_hsq <= data_in.hsync_n;
+            g_hsr <= g_hsq and not data_in.hsync_n;    -- hsync_n falling
+            g_avq <= data_in.avid;
+            g_avr <= data_in.avid and not g_avq;       -- avid rising
+
+            if g_hsr = '1' then
+                g_ph  <= '0';
+                g_arm <= '1';
+            else
+                g_ph <= not g_ph;
+            end if;
+            g_rsr <= g_rsr(1 downto 0) & '0';
+            if g_avr = '1' and g_arm = '1' then
+                g_arm    <= '0';
+                g_rsr(0) <= '1';
+                g_sel    <= g_ph xor g_par;
+                if g_ph = '1' then
+                    if g_pc /= 15 then g_pc <= g_pc + 1; end if;
+                else
+                    if g_pc /= 0 then g_pc <= g_pc - 1; end if;
+                end if;
+            end if;
+            if g_pc = 15 then g_par <= '1';
+            elsif g_pc = 0 then g_par <= '0'; end if;
+
+            if (g_sel = '0' and g_rsr(1) = '1') or (g_sel = '1' and g_rsr(2) = '1') then
+                g_avid <= '1';
+                g_cnt  <= (others => '0');
+            elsif g_avid = '1' then
+                g_cnt <= g_cnt + 1;
+                if g_cnt = s_wm1 or g_hsr = '1' then
+                    g_avid <= '0';
+                end if;
+            end if;
+        end if;
+    end process p_gavid;
 
     ------------------------------------------------------------------------
     -- per-frame control latch + vblank sequencer.  The vsync trigger is
@@ -320,9 +462,15 @@ begin
         if rising_edge(clk) then
             s_prev_vsync <= data_in.vsync_n;
             s_vs_pulse   <= '0';
+
+            -- the trigger is REGISTERED (free-running lines-seen flag, then
+            -- edge AND flag): v0.3's fused 12-bit compare fanned straight
+            -- into every sequencer-slot enable and was the HD critical path
+            if s_lcnt > 8 then s_lgt8 <= '1'; else s_lgt8 <= '0'; end if;
+            s_vtrig <= (not data_in.vsync_n) and s_prev_vsync and s_lgt8;
             s_mp <= s_ma * s_mb;
 
-            if data_in.vsync_n = '0' and s_prev_vsync = '1' and s_lcnt > 8 then
+            if s_vtrig = '1' then
                 s_vs_pulse <= '1';
 
                 s_k_fill  <= unsigned(registers_in(0));
@@ -334,7 +482,7 @@ begin
                 s_zoom_k  <= unsigned(registers_in(7));
                 s_ivory   <= registers_in(6)(0);
                 s_inv     <= registers_in(6)(1);
-                s_inkon   <= registers_in(6)(2);
+                s_colour  <= registers_in(6)(2);
                 s_weave   <= registers_in(6)(3);
                 s_ghost   <= registers_in(6)(4);
 
@@ -349,18 +497,21 @@ begin
 
                 case to_integer(s_seq) is
 
-                    -- SCALE: s = 2^((P12-512)/512) in Q8, one octave each way;
-                    -- SD sources get an extra >>1 (bands 128 px, not 256).
+                    -- SCALE: s = lace units per pixel (Q8), so BIGGER s =
+                    -- SMALLER lace.  s = 2^(1.75*(511-P12)/512): P12 up =
+                    -- bigger lace, +-1.75 octaves (HD s = 861..76; exponent
+                    -- Q6 = e/4 - e/32).  SD sources get s<<1 (bands 128 px,
+                    -- not 256): s <= 1722, hence the 11-bit s.
                     when 22 =>
-                        v_e  := signed('0' & s_zoom_k) - to_signed(512, 11);
-                        v_q6 := shift_right(v_e, 3);
+                        v_e  := to_signed(511, 11) - signed('0' & s_zoom_k);
+                        v_q6 := shift_right(v_e, 2) - shift_right(v_e, 5);
                         s_svi <= to_integer(shift_right(v_q6, 6));
                         s_svf <= unsigned(v_q6(5 downto 0));
                     when 21 =>
                         v_sh := 2 - s_svi;
-                        if s_W < 1000 then v_sh := v_sh + 1; end if;
+                        if s_W < 1000 then v_sh := v_sh - 1; end if;
                         v_s := shift_right(C_MANT(to_integer(s_svf)), v_sh);
-                        s_scl <= v_s(9 downto 0);
+                        s_scl <= v_s;
 
                     -- u0 = UOFF - (W/2)*s   (shared multiplier)
                     when 19 => s_ma <= signed(resize(s_W(11 downto 1), 13));
@@ -378,6 +529,25 @@ begin
                         if abs(v_d) >= C_DB then
                             s_scroll <= s_scroll + unsigned(resize(v_d, 20));
                         end if;
+
+                    -- SPIN rides the same knob: angle += (K3-512)/4 Q4/frame
+                    -- (max ~8/4096 turn per frame), same deadband
+                    when 13 =>
+                        v_d := signed('0' & s_k_drift) - to_signed(512, 11);
+                        if abs(v_d) >= C_DB then
+                            s_spin <= s_spin + unsigned(resize(shift_right(v_d, 2), 16));
+                        end if;
+
+                    -- +-threshold for the abs-free gradient compare (one
+                    -- frame behind s_inkth -- harmless)
+                    when 18 =>
+                        s_pth <= signed(resize(s_inkth, 10));
+                        s_nth <= to_signed(0, 10) - signed(resize(s_inkth, 10));
+
+                    -- K4 at its bottom detent = no ink at all
+                    when 15 =>
+                        if s_k_ink >= C_DB then s_inkon <= '1';
+                        else                    s_inkon <= '0'; end if;
 
                     -- luma -> dot radius mapping
                     when 11 => s_gain <= s_k_gain(9 downto 1);
@@ -401,6 +571,14 @@ begin
                     when 4 => s_re2 <= to_unsigned(C_REDGE0, 12) - resize(s_bw, 12);
                     when 3 => s_re3 <= to_unsigned(C_REDGE3, 12) - resize(s_bw, 12);
 
+                    -- generated-avid width
+                    when 2 => s_wm1 <= s_W - 1;
+
+                    -- +-spin for the counter-rotating bands
+                    when 1 =>
+                        s_spinp <= s_spin(15 downto 4);
+                        s_spinn <= to_unsigned(0, 12) - s_spin(15 downto 4);
+
                     when others => null;
                 end case;
             end if;
@@ -409,7 +587,7 @@ begin
 
     ------------------------------------------------------------------------
     -- lace-space DDA.  u loads u0 at each active-line start and steps +s per
-    -- pixel; v loads v0 at the frame's first active line (+s on the offset
+    -- pixel; v loads v0 at the frame's first active line (+s on the bottom
     -- field when interlaced) and steps +s per line (+2s interlaced).
     -- Advances on ACTIVE lines only (interlace screen-phase rule).
     ------------------------------------------------------------------------
@@ -426,7 +604,8 @@ begin
                 if s_ilace = '1' then v_st := shift_left(resize(s_scl, 20), 1);
                 else                  v_st := resize(s_scl, 20); end if;
                 if s_newframe = '1' then
-                    if s_ilace = '1' and data_in.field_n = '1' then
+                    -- bottom field (odd frame rows) = field_n '0'
+                    if s_ilace = '1' and data_in.field_n = '0' then
                         v_v0 := s_v0 + resize(s_scl, 20);
                     else
                         v_v0 := s_v0;
@@ -490,6 +669,7 @@ begin
             a1_dx  <= v_dx;
             a1_dy  <= signed(resize(s_vc(15 downto 6), 13)) - v_dep;
             a1_sty <= v_sty;
+            a1_kb  <= v_k(0);
 
             if v_dx < 0 then v_adx := -v_dx; else v_adx := v_dx; end if;
             if to_integer(v_adx) > v_seam then a1_seam <= '1';
@@ -605,6 +785,7 @@ begin
         variable v_ring : unsigned(5 downto 0);
         variable v_fr8  : unsigned(7 downto 0);
         variable v_re   : unsigned(11 downto 0);
+        variable v_a12  : unsigned(11 downto 0);
     begin
         if rising_edge(clk) then
             v_sty := sty_sr(8);
@@ -635,7 +816,11 @@ begin
             end case;
             if ru_r > v_re then rb_bord <= '1'; else rb_bord <= '0'; end if;
 
-            rb_ang <= ru_ang;
+            -- spin: one angle add before theta*ring; mod 4096 keeps the
+            -- 6*ring cell wrap seamless.  Odd bands turn the other way.
+            if kb_sr(8) = '1' then v_a12 := unsigned(ru_ang(11 downto 0)) + s_spinp;
+            else                   v_a12 := unsigned(ru_ang(11 downto 0)) + s_spinn; end if;
+            rb_ang <= signed('0' & v_a12);
         end if;
     end process p_rb;
 
@@ -695,45 +880,139 @@ begin
     end process p_d2;
 
     ------------------------------------------------------------------------
-    -- luma side: delayed input luma -> dot radius -> radius^2, plus the
-    -- gradient INK strokes and the ghost tap.  All aligned to land at C1.
+    -- luma side.  Timing labels: y_sr(k) at cycle c holds input pixel
+    -- d(c-1-k).  The box/IIR/ink values at the V1 stage are centred on
+    -- d(c-6); radius, ink and ghost are then delayed to land at C1.
+    --
+    -- Line buffer (one 4096x8 memory = 8 EBR, ONE write, ONE read): bank =
+    -- line parity, so a line reads the other bank (previous line) and writes
+    -- its own -- no same-address read/write.  Column label L(c) = s_col(c)-5
+    -- for the value at the V1 stage; the read is issued 3 cycles ahead
+    -- (s_col-2 -> EBR -> fabric register).  s_col saturates at 2047 so the
+    -- blanking tail writes a single dead label instead of wrapping onto the
+    -- start of this line's bank.
     ------------------------------------------------------------------------
+    p_col : process(clk)
+    begin
+        if rising_edge(clk) then
+            s_avid_c <= data_in.avid;
+            if data_in.avid = '1' and s_avid_c = '0' then       -- line start
+                s_col   <= (others => '0');
+                s_lpar  <= not s_lpar;
+                s_line0 <= s_l0arm;
+                s_l0arm <= '0';
+            elsif s_col /= 2047 then
+                s_col <= s_col + 1;
+            end if;
+            if s_vs_pulse = '1' then
+                s_l0arm <= '1';
+            end if;
+        end if;
+    end process p_col;
+
+    p_lb : process(clk)
+    begin
+        if rising_edge(clk) then
+            lb_mem(to_integer(lb_wa)) <= lb_wd;
+            lb_rd <= lb_mem(to_integer(lb_ra));
+        end if;
+    end process p_lb;
+
     p_luma : process(clk)
-        variable v_l  : unsigned(16 downto 0);
         variable v_li : integer;
+        variable v_h, v_p, v_n : unsigned(7 downto 0);
+        variable v_dd, v_t : signed(9 downto 0);
         variable v_ga, v_gb : unsigned(7 downto 0);
-        variable v_gd : integer;
+        variable v_e  : std_logic;
+        variable v_qu, v_qv : unsigned(10 downto 0);
+        variable v_u5, v_v5 : unsigned(4 downto 0);
     begin
         if rising_edge(clk) then
             y_sr(0) <= unsigned(data_in.y);
-            for i in 1 to 15 loop
+            for i in 1 to 8 loop
                 y_sr(i) <= y_sr(i - 1);
             end loop;
 
-            -- dot radius: l = clamp(bias + lv*gain/256, 0, 250)
-            lp1_p <= y_sr(12)(9 downto 2) * s_gain_d;
+            -- 8-px running box (exact: add the new sample, drop the 8th)
+            bx_d <= signed(resize(y_sr(0)(9 downto 2), 9)) - signed(resize(y_sr(8)(9 downto 2), 9));
+            bx_s <= bx_s + resize(bx_d, 12);
+
+            -- line-buffer read address (3 cycles ahead of label L)
+            lb_ra  <= (not s_lpar) & (s_col - 2);
+            lb_rdq <= unsigned(lb_rd);
+
+            -- V1: vertical one-pole IIR, new = above + (box - above)/4.  The
+            -- first line of a frame takes the box straight (no stale rows).
+            v_h  := unsigned(bx_s(10 downto 3));
+            v_p  := lb_rdq;
+            v_dd := signed(resize(v_h, 10)) - signed(resize(v_p, 10));
+            if s_line0 = '1' then
+                v_n := v_h;
+            else
+                -- result is 0..255 (between above and box): SLICE, never
+                -- resize a signed value down (sign + 7 bits would fold it)
+                v_t := signed(resize(v_p, 10)) + shift_right(v_dd, 2);
+                v_n := unsigned(v_t(7 downto 0));
+            end if;
+            vi    <= v_n;
+            lb_wd <= std_logic_vector(v_n);
+            lb_wa <= s_lpar & (s_col - 5);
+
+            -- dot radius: l = clamp(bias + vi*gain/256, 0, 250); the 8-bit
+            -- radius rides 6 stages to reach the square at #16.
+            lp1_p <= vi * s_gain_d;
             v_li  := to_integer(s_bias) + to_integer(lp1_p(16 downto 8));
             if v_li > 250 then v_li := 250; end if;
             lp2_l <= to_unsigned(v_li, 8);
-            lp3_rsq <= lp2_l * lp2_l;
+            ld_sr(0) <= lp2_l;
+            for i in 1 to 5 loop
+                ld_sr(i) <= ld_sr(i - 1);
+            end loop;
+            lp3_rsq <= ld_sr(5) * ld_sr(5);
 
-            -- ink: horizontal luma gradient over a 4-px baseline (taps chosen
-            -- so the dilated stroke lands centred on the key pixel at C1)
-            v_ga := y_sr(8)(9 downto 2);
-            v_gb := y_sr(12)(9 downto 2);
-            v_gd := to_integer(v_ga) - to_integer(v_gb);
-            if v_gd < 0 then v_gd := -v_gd; end if;
-            if v_gd > to_integer(s_inkth) then g1_ink <= '1';
-            else                               g1_ink <= '0'; end if;
+            -- ink: horizontal gradient (4-px baseline, centred on d(c-6))
+            -- OR vertical gradient (box vs the IIR of the rows above), then
+            -- a 6-px dilate; i_sr(6) lands the stroke centred at C1.  Two
+            -- stages: register the signed differences, then compare each
+            -- against +th and -th in parallel (no abs) -- the fused
+            -- EBR -> subtract -> abs -> compare was the HD HDMI critical path.
+            v_ga := y_sr(3)(9 downto 2);
+            v_gb := y_sr(7)(9 downto 2);
+            gx_r <= signed(resize(v_ga, 10)) - signed(resize(v_gb, 10));
+            if s_line0 = '1' then gy_r <= (others => '0');
+            else                  gy_r <= v_dd; end if;
+            v_e := '0';
+            if gx_r > s_pth or gx_r < s_nth then v_e := '1'; end if;
+            if gy_r > s_pth or gy_r < s_nth then v_e := '1'; end if;
+            g1_ink <= v_e;
             g1_sr <= g1_ink & g1_sr(0 to 3);
             g2_ink <= g1_ink or g1_sr(0) or g1_sr(1) or g1_sr(2) or g1_sr(3) or g1_sr(4);
-            i1_ink <= g2_ink;
-            i2_ink <= i1_ink;
-            i3_ink <= i2_ink;
+            i_sr(0) <= g2_ink;
+            for i in 1 to 7 loop
+                i_sr(i) <= i_sr(i - 1);
+            end loop;
 
-            -- ghost: dim video for the ground
-            gh_v  <= y_sr(14)(9 downto 2);
-            gh_v2 <= gh_v;
+            -- ghost: dim video for the ground (luma/8, 7 bits), from the
+            -- first tap; gh_sr(15) matches v0.1's y_sr(14) + 2 registers.
+            gh_sr(0) <= y_sr(0)(9 downto 3);
+            for i in 1 to 15 loop
+                gh_sr(i) <= gh_sr(i - 1);
+            end loop;
+
+            -- colour: source chroma rounded to 5 bits (steps of 32; 512 is
+            -- exactly code 16, so grey stays neutral), stored as an offset
+            -- (MSB flip = minus 16).  Input and output are both in the
+            -- hardware's U/V order -- a dry path, so no swap.
+            v_qu := resize(unsigned(data_in.u), 11) + 16;
+            v_qv := resize(unsigned(data_in.v), 11) + 16;
+            if v_qu(10) = '1' then v_u5 := (others => '1'); else v_u5 := v_qu(9 downto 5); end if;
+            if v_qv(10) = '1' then v_v5 := (others => '1'); else v_v5 := v_qv(9 downto 5); end if;
+            cu_sr(0) <= signed((not v_u5(4)) & v_u5(3 downto 0));
+            cv_sr(0) <= signed((not v_v5(4)) & v_v5(3 downto 0));
+            for i in 1 to 16 loop
+                cu_sr(i) <= cu_sr(i - 1);
+                cv_sr(i) <= cv_sr(i - 1);
+            end loop;
         end if;
     end process p_luma;
 
@@ -752,8 +1031,10 @@ begin
                 bord_sr(i) <= bord_sr(i - 1);
             end loop;
             sty_sr(0) <= a1_sty;
+            kb_sr(0)  <= a1_kb;
             for i in 1 to 8 loop
                 sty_sr(i) <= sty_sr(i - 1);
+                kb_sr(i)  <= kb_sr(i - 1);
             end loop;
         end if;
     end process p_carry;
@@ -781,21 +1062,40 @@ begin
     ------------------------------------------------------------------------
     p_c1b : process(clk)
         variable v_k   : unsigned(7 downto 0);
+        variable v_kc  : unsigned(7 downto 0);
         variable v_cut : std_logic;
     begin
         if rising_edge(clk) then
             v_k := c1a_key;
             if s_inv = '1' then v_k := not v_k; end if;
+            v_kc := v_k;
 
             v_cut := bord_sr(4) or seam_sr(14);
-            if s_inkon = '1' then v_cut := v_cut or i3_ink; end if;
+            if s_inkon = '1' then v_cut := v_cut or i_sr(6); end if;
             if v_cut = '1' then v_k := (others => '0'); end if;
 
             c1_key <= v_k;
-            c1_gh  <= gh_v2;
-            if s_ghost = '1' and s_inv = '0' and v_cut = '1' then c1_useg <= '1';
-            elsif s_ghost = '1' and s_inv = '0' and c1a_key = 0 then c1_useg <= '1';
-            else c1_useg <= '0'; end if;
+            c1_gh  <= gh_sr(15);
+
+            -- colour: source chroma x 3-bit key (cut lines stay neutral)
+            if v_cut = '1' then
+                c1_cu <= (others => '0');
+                c1_cv <= (others => '0');
+            else
+                c1_cu <= cu_sr(16) * signed('0' & v_kc(7 downto 5));
+                c1_cv <= cv_sr(16) * signed('0' & v_kc(7 downto 5));
+            end if;
+
+            -- ghost: Black ground = dim video in the ground and the cuts;
+            -- White ground = bright video in the (white) ground, cuts stay black
+            c1_gw <= s_inv;
+            if s_ghost = '1' and s_inv = '0' and (v_cut = '1' or c1a_key = 0) then
+                c1_useg <= '1';
+            elsif s_ghost = '1' and s_inv = '1' and v_cut = '0' and c1a_key = 0 then
+                c1_useg <= '1';
+            else
+                c1_useg <= '0';
+            end if;
         end if;
     end process p_c1b;
 
@@ -804,29 +1104,55 @@ begin
     ------------------------------------------------------------------------
     p_c2 : process(clk)
         variable v_y : unsigned(10 downto 0);   -- 11-bit: 64+1020 overflows 10
+        variable v_cu, v_cv : signed(8 downto 0);
+        variable v_ou, v_ov : signed(9 downto 0);
     begin
         if rising_edge(clk) then
-            if s_avid_sr(C_LATENCY - 2) = '0' then
+            if gav_sr(C_LATENCY - 6) = '0' then              -- generated avid
                 s_out_y <= to_unsigned(64, 10);
                 s_out_u <= C_MID;
                 s_out_v <= C_MID;
             elsif c1_useg = '1' then
-                s_out_y <= to_unsigned(64, 10) + resize(c1_gh(7 downto 1), 10);
+                if c1_gw = '1' then               -- 384..765: light video
+                    s_out_y <= to_unsigned(384, 10) + resize(c1_gh, 10)
+                               + shift_left(resize(c1_gh, 10), 1);
+                else                              -- 64..191: dim video
+                    s_out_y <= to_unsigned(64, 10) + resize(c1_gh, 10);
+                end if;
                 s_out_u <= C_MID;
                 s_out_v <= C_MID;
             else
-                -- Y = 64 + key*3.5 -> 64..957
+                -- Y = 64 + key*2.75 -> 64..766 (cap ~768: full-scale Y
+                -- clips every RGB channel and kills the ivory chroma)
                 v_y := to_unsigned(64, 11)
-                       + shift_left(resize(c1_key, 11), 2)
-                       - resize(c1_key(7 downto 1), 11);
+                       + shift_left(resize(c1_key, 11), 1)
+                       + resize(c1_key, 11)
+                       - resize(c1_key(7 downto 2), 11);
                 s_out_y <= v_y(9 downto 0);
-                if s_ivory = '1' then
-                    s_out_u <= C_MID - resize(c1_key(7 downto 3), 10);
-                    s_out_v <= C_MID + resize(c1_key(7 downto 4), 10);
-                else
-                    s_out_u <= C_MID;
-                    s_out_v <= C_MID;
+
+                -- chroma offset = colour (source chroma x key, clamped to
+                -- +-56 steps of 8 = +-448) + ivory.  Max |offset| 511, so
+                -- 512 + offset is just the offset with bit 9 flipped.
+                v_ou := (others => '0');
+                v_ov := (others => '0');
+                if s_colour = '1' then
+                    v_cu := c1_cu;
+                    v_cv := c1_cv;
+                    if v_cu > 56 then v_cu := to_signed(56, 9); end if;
+                    if v_cu < -56 then v_cu := to_signed(-56, 9); end if;
+                    if v_cv > 56 then v_cv := to_signed(56, 9); end if;
+                    if v_cv < -56 then v_cv := to_signed(-56, 9); end if;
+                    v_ou := shift_left(resize(v_cu, 10), 3);
+                    v_ov := shift_left(resize(v_cv, 10), 3);
                 end if;
+                if s_ivory = '1' then
+                    -- ivory = BT.601 U -key/4 (up to -63), V +key/8 (+31),
+                    -- U/V-SWAPPED here at the output compose (hardware)
+                    v_ou := v_ou + signed(resize(c1_key(7 downto 3), 10));
+                    v_ov := v_ov - signed(resize(c1_key(7 downto 2), 10));
+                end if;
+                s_out_u <= unsigned((not v_ou(9)) & std_logic_vector(v_ou(8 downto 0)));
+                s_out_v <= unsigned((not v_ov(9)) & std_logic_vector(v_ov(8 downto 0)));
             end if;
         end if;
     end process p_c2;
@@ -837,7 +1163,7 @@ begin
     p_sync : process(clk)
     begin
         if rising_edge(clk) then
-            s_avid_sr    <= data_in.avid    & s_avid_sr   (0 to C_LATENCY - 2);
+            gav_sr       <= g_avid          & gav_sr      (0 to C_LATENCY - 6);
             s_hsync_n_sr <= data_in.hsync_n & s_hsync_n_sr(0 to C_LATENCY - 2);
             s_vsync_n_sr <= data_in.vsync_n & s_vsync_n_sr(0 to C_LATENCY - 2);
             s_field_n_sr <= data_in.field_n & s_field_n_sr(0 to C_LATENCY - 2);
@@ -847,7 +1173,7 @@ begin
     data_out.y       <= std_logic_vector(s_out_y);
     data_out.u       <= std_logic_vector(s_out_u);
     data_out.v       <= std_logic_vector(s_out_v);
-    data_out.avid    <= s_avid_sr(C_LATENCY - 1);
+    data_out.avid    <= gav_sr(C_LATENCY - 5);
     data_out.hsync_n <= s_hsync_n_sr(C_LATENCY - 1);
     data_out.vsync_n <= s_vsync_n_sr(C_LATENCY - 1);
     data_out.field_n <= s_field_n_sr(C_LATENCY - 1);

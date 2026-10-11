@@ -11,7 +11,7 @@
 
 [program]
 program_id = "com.bluecondition.glitchscape"
-program_version = "0.1.0"
+program_version = "1.0.0"
 abi_version = ">=1.0,<2.0"
 program_name = "Glitchscape"
 author = "bluecondition"
@@ -61,7 +61,7 @@ suffix_label = "%"
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
 name_label = "Palette"
-value_labels = ["Jewel", "Neon", "Vaporwave", "Mono"]
+value_labels = ["Jewel", "Neon", "Vaporwave", "Inferno", "Toxic", "Glacier", "Candy", "Mono"]
 initial_value_label = "Jewel"
 
 [[parameter]]
@@ -114,9 +114,9 @@ initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
-name_label = "Bypass"
-value_labels = ["Off", "On"]
-initial_value_label = "Off"
+name_label = "Sort Axis"
+value_labels = ["Vertical", "Horizontal"]
+initial_value_label = "Vertical"
 
 # --- Linear Potentiometer (Fader 12) ---
 
@@ -168,7 +168,7 @@ name = "Neon Overload"
 rotary_potentiometer_1 = 240
 rotary_potentiometer_2 = 520
 rotary_potentiometer_3 = 820
-rotary_potentiometer_4 = 341
+rotary_potentiometer_4 = 192
 rotary_potentiometer_5 = 820
 rotary_potentiometer_6 = 700
 toggle_switch_7 = 1
@@ -183,7 +183,7 @@ name = "Vaporwave Drift"
 rotary_potentiometer_1 = 320
 rotary_potentiometer_2 = 320
 rotary_potentiometer_3 = 560
-rotary_potentiometer_4 = 682
+rotary_potentiometer_4 = 320
 rotary_potentiometer_5 = 420
 rotary_potentiometer_6 = 380
 toggle_switch_7 = 1

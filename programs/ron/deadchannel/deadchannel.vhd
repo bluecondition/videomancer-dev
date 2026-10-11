@@ -3,12 +3,15 @@
 -- Three cicero programs are folded into one signal path, in the order the
 -- artifacts really happen:
 --
---   TAPE  (from cicero/vhstrack) - wrap-around per-row horizontal skew, a
---         rolling head-switch tear band, tape hiss and vertical chroma drift.
+--   TAPE  (from cicero/vhstrack) - wrap-around per-row horizontal skew,
+--         random dropout bands that corrupt the picture (slips, block
+--         pixelation, posterize, U/V swap, white dropout comets), tape hiss
+--         and vertical chroma drift.
 --   BEAM  (from cicero/chromaticab) - U/V read the line buffer from opposite
 --         X positions, the split growing toward the screen edges.
 --   TUBE  (from cicero/crt) - scanline or RGB-triad grille, corner vignette
---         and phosphor glow (horizontal IIR bleed on brights).
+--         and phosphor glow (horizontal IIR bleed on brights).  Darkening
+--         desaturates with it, so dark corners and scanline gaps are black.
 --
 -- Differences from the three sources, deliberately:
 --   * the skew is a wrapped DDA, not a clamped offset, so the picture folds
@@ -19,8 +22,9 @@
 --     anchor and interlace-correct per-line accumulators.
 --
 -- Register map:
---   registers_in(0) = Dropout  (rotary 1 - head-switch band height; 0 = no
---                               band at all, up = taller and faster rolling)
+--   registers_in(0) = Dropout  (rotary 1 - random glitch-band events: how
+--                               often, how big, how long, how fast they
+--                               scroll; 0 = no band at all)
 --   registers_in(1) = Hiss     (rotary 2 - tape noise on luma)
 --   registers_in(2) = Drift    (rotary 3 - scrolling chroma wobble, depth
 --                               and rate together)
@@ -33,8 +37,10 @@
 --     b0  Grille  (0 = Scan lines / 1 = RGB Triad)
 --     b1  Cast    (0 = Cool       / 1 = Sick)
 --     b2  Chroma  (0 = Rich       / 1 = Faded)
---     b3  Band    (0 = Tear       / 1 = Flash)
---     b4  Invert  (0 = Off        / 1 = On)
+--     b3  Band    (0 = Tear - glitched video / 1 = Flash - glitched,
+--                  bleached light bar)
+--     b4  Invert  (0 = Off        / 1 = On - full video negative, luma
+--                                  about 64..940 and chroma about 512)
 --   registers_in(7) = Skew (slider, KEY, BIPOLAR - bounded tape pull: a flag
 --                            at the top of the frame plus a head-switch tear,
 --                            centre = straight, ends = a quarter-width bend)
@@ -48,7 +54,7 @@
 -- horizontal resolution and 8 bits (steps of 4 codes, neutral 128 -> 512
 -- exactly) purely to stay off the 30/32 EBR congestion cliff.
 --
--- Pipeline depth (both the video data and the sync tap): 13 clocks, the same
+-- Pipeline depth (both the video data and the sync tap): 14 clocks, the same
 -- in every mode.
 --
 library ieee;
@@ -63,9 +69,9 @@ use work.video_stream_pkg.all;
 
 architecture deadchannel of program_top is
 
-    -- 12 pipe taps; the output register makes the sync delay 13 clocks,
+    -- 13 pipe taps; the output register makes the sync delay 14 clocks,
     -- identical in every mode.
-    constant LATENCY : natural := 12;
+    constant LATENCY : natural := 13;
 
     constant C_BLKY : unsigned(9 downto 0) := to_unsigned(64, 10);
     constant C_MID  : unsigned(9 downto 0) := to_unsigned(512, 10);
@@ -82,15 +88,14 @@ architecture deadchannel of program_top is
     signal aline     : unsigned(11 downto 0) := (others => '0');
     signal act_w     : unsigned(11 downto 0) := to_unsigned(1920, 12);
     signal act_h     : unsigned(11 downto 0) := to_unsigned(1080, 12);
-    signal frame_act : std_logic := '0';
+    signal saw_act   : std_logic := '0';  -- active video seen since anchor
+    signal fld_seen  : std_logic := '0';  -- field_n sampled in active video
     signal anc_fld   : std_logic := '0';
     signal ilace     : std_logic := '0';
 
     -- ========================================================================
-    -- Parameters (latched once per frame at the active-video anchor)
+    -- Parameters (decoded free-running from the SPI registers every clock)
     -- ========================================================================
-    -- Only the values the pixel path actually reads are stored; the rest are
-    -- reduced to their derived form at latch time.
     signal hiss_r   : unsigned(9 downto 0) := to_unsigned(240, 10);
     signal grille_r : std_logic := '0';
     signal cast_r   : std_logic := '0';
@@ -99,7 +104,6 @@ architecture deadchannel of program_top is
     signal inv_r    : std_logic := '0';
 
     -- Derived, per frame
-    signal roll_step : signed(7 downto 0)  := (others => '0'); -- lines / frame
     signal conv_s    : signed(6 downto 0)  := (others => '0'); -- misconvergence
     signal drift_s   : unsigned(6 downto 0):= (others => '0');
     signal tube6     : unsigned(6 downto 0):= (others => '0'); -- vignette gain
@@ -150,6 +154,38 @@ architecture deadchannel of program_top is
     -- the tear rolls off one edge and back on at the other.
     signal band_pos : signed(13 downto 0) := (others => '0');
     signal band_hlf : unsigned(11 downto 0) := to_unsigned(24, 12);
+
+    -- Dropout scheduler (v1.4).  The band is an EVENT, not a smooth roll:
+    -- on a random frame it appears at a random height and size, holds for
+    -- 1..8 frames while scrolling, then vanishes until the next hit.  Every
+    -- random draw is formed free-running and the frame anchor only samples
+    -- it.  K1 sets the hit rate, the size, the hold and the scroll speed.
+    signal glfsr     : unsigned(22 downto 0) := to_unsigned(5167321, 23);
+    signal band_on   : std_logic := '0';
+    signal band_hold : unsigned(2 downto 0) := (others => '0');
+    signal band_up   : std_logic := '0';
+    signal roll_amt  : signed(13 downto 0) := (others => '0');
+    signal r_pos_mul : unsigned(19 downto 0) := (others => '0');
+    signal r_pos     : unsigned(11 downto 0) := (others => '0');
+    signal r_hlf_mul : unsigned(13 downto 0) := (others => '0');
+    signal r_hlf     : unsigned(11 downto 0) := (others => '0');
+    signal r_hit     : std_logic := '0';
+    signal r_hold    : unsigned(2 downto 0) := (others => '0');
+    -- K1 response curves (v1.5): exponential, so the lower half stays subtle
+    -- and the top end is frequent and large.
+    signal hit_thr   : unsigned(15 downto 0) := (others => '0');
+    signal sz8       : unsigned(7 downto 0) := (others => '0');
+    signal sz_mul    : unsigned(19 downto 0) := (others => '0');
+    signal jsh       : unsigned(2 downto 0) := (others => '0');
+
+    -- Per-line glitch recipe, drawn at hsync for band lines only.  Outside
+    -- the band every field is its identity value, so the pixel path applies
+    -- them unconditionally.
+    signal blkm_ln  : unsigned(11 downto 0) := (others => '0'); -- addr block mask
+    signal crush_ln : unsigned(9 downto 0) := (others => '1');  -- luma AND mask
+    signal swap_ln  : std_logic := '0';
+    signal linv_ln  : std_logic := '0';
+    signal stat_ln  : std_logic := '0';
     signal bt1, bb1 : signed(13 downto 0) := (others => '0');
     signal bt2, bb2 : signed(13 downto 0) := (others => '0');
     signal aline_s  : signed(13 downto 0) := (others => '0');
@@ -158,7 +194,14 @@ architecture deadchannel of program_top is
     signal in_band_p: std_logic := '0';
     signal dyd_r    : signed(12 downto 0) := (others => '0');
     signal dy_r     : unsigned(11 downto 0) := (others => '0');
+    signal dy_h     : unsigned(11 downto 0) := (others => '0');
+    signal dy_a     : unsigned(11 downto 0) := (others => '0'); -- aspect-scaled
+    signal scan_cnt : unsigned(1 downto 0) := (others => '0');  -- mod-3 line
     signal scan_par : std_logic := '0';
+    -- Per-line flags for the pixel path, latched at hsync so the last pixels
+    -- of a line (still in the pipe at active-video fall) keep their own line.
+    signal scan_ln  : std_logic := '0';
+    signal band_ln  : std_logic := '0';
 
     -- Chroma drift: free-running sine * depth, sampled once per line.
     signal drift_ph  : unsigned(13 downto 0) := (others => '0');
@@ -212,24 +255,25 @@ architecture deadchannel of program_top is
 
     signal c2_base : unsigned(12 downto 0);
     signal c2_cmul : signed(16 downto 0);
-    signal c2_dist : unsigned(12 downto 0);
+    signal c2_adx  : unsigned(11 downto 0);
     signal c2_x    : unsigned(11 downto 0);
     signal c2_lf   : unsigned(15 downto 0);
 
     signal c3_base : unsigned(11 downto 0);
     signal c3_coff : signed(8 downto 0);
-    signal c3_vmul : unsigned(16 downto 0);
+    signal c3_mx   : unsigned(11 downto 0);
+    signal c3_mn   : unsigned(11 downto 0);
     signal c3_x    : unsigned(11 downto 0);
     signal c3_lf   : unsigned(15 downto 0);
 
     signal c4_ya   : unsigned(10 downto 0);
     signal c4_ua   : unsigned(10 downto 0);
     signal c4_va   : unsigned(10 downto 0);
-    signal c4_vamt : unsigned(9 downto 0);
+    signal c4_dist : unsigned(12 downto 0);
     signal c4_x    : unsigned(11 downto 0);
     signal c4_lf   : unsigned(15 downto 0);
 
-    signal c5_vamt : unsigned(9 downto 0);
+    signal c5_vmul : unsigned(16 downto 0);
     signal c5_x    : unsigned(11 downto 0);
     signal c5_lf   : unsigned(15 downto 0);
 
@@ -245,6 +289,15 @@ architecture deadchannel of program_top is
     signal c7_v    : unsigned(9 downto 0);
     signal c7_vamt : unsigned(9 downto 0);
     signal c7_x    : unsigned(11 downto 0);
+    signal c7_yf   : unsigned(9 downto 0);
+    signal c7_lf   : unsigned(15 downto 0);
+
+    signal g_y     : unsigned(9 downto 0);
+    signal g_u     : unsigned(9 downto 0);
+    signal g_v     : unsigned(9 downto 0);
+    signal g_vamt  : unsigned(9 downto 0);
+    signal g_x     : unsigned(11 downto 0);
+    signal streak  : unsigned(6 downto 0) := (others => '0');
 
     signal bleed_r : unsigned(9 downto 0) := (others => '0');
     signal c8_y    : unsigned(9 downto 0);
@@ -269,6 +322,7 @@ architecture deadchannel of program_top is
     signal c11_y   : unsigned(9 downto 0);
     signal c11_u   : unsigned(9 downto 0);
     signal c11_v   : unsigned(9 downto 0);
+    signal c11_dsh : unsigned(2 downto 0);  -- chroma fade shift, 0..4
 
     signal c12_y   : unsigned(9 downto 0);
     signal c12_u   : unsigned(9 downto 0);
@@ -291,6 +345,18 @@ architecture deadchannel of program_top is
         -- v is proven in [0,1023] by the tests above; take the low 10 bits.
         -- resize(signed, 10) would keep the SIGN plus only 9 magnitude bits,
         -- folding every value >= 512 (512 -> 0 = saturated green).
+        return resize(unsigned(std_logic_vector(v)), 10);
+    end function;
+
+    -- Luma clamp to the legal 64..940 range: full-scale Y clips all three RGB
+    -- channels on hardware and kills the chroma with them.
+    function lim_y(v : signed) return unsigned is
+    begin
+        if v < 64 then
+            return to_unsigned(64, 10);
+        elsif v > 940 then
+            return to_unsigned(940, 10);
+        end if;
         return resize(unsigned(std_logic_vector(v)), 10);
     end function;
 
@@ -350,10 +416,8 @@ begin
         variable v_b1n    : signed(15 downto 0);
         variable v_b2n    : signed(15 downto 0);
         variable v_jraw   : signed(11 downto 0);
-        variable v_bp     : signed(13 downto 0);
         variable v_hlf    : signed(13 downto 0);
-        variable v_marg   : signed(13 downto 0);
-        variable v_span   : signed(13 downto 0);
+        variable v_gtap   : std_logic;
         variable v_jog    : signed(11 downto 0);
         variable v_eff    : signed(13 downto 0);
         variable v_ang    : unsigned(9 downto 0);
@@ -376,6 +440,10 @@ begin
             -- Free-running noise
             v_tap  := lfsr_r(15) xor lfsr_r(13) xor lfsr_r(12) xor lfsr_r(10);
             lfsr_r <= lfsr_r(14 downto 0) & v_tap;
+            -- Second, independent generator for band / glitch decisions
+            -- (x^23 + x^18 + 1, maximal length).
+            v_gtap := glfsr(22) xor glfsr(17);
+            glfsr  <= glfsr(21 downto 0) & v_gtap;
 
             -- Free-running chroma-drift sine and its depth multiply.  Both are
             -- registered every cycle and only SAMPLED at line start, so the
@@ -423,9 +491,100 @@ begin
 
             -- Dropout: half-height of the head-switch band as a fraction of
             -- the raster.  Zero means NO band - the bar has to be defeatable.
-            band_mul <= resize(act_h(11 downto 7) * drop_r(9 downto 6), 10);
-            band_hlf <= resize(band_mul, 12);
-            roll_step <= signed(resize(drop_r(9 downto 7), 8)) + to_signed(1, 8);
+            -- K1 response, exponential.  Per-frame hit chance (x/65536)
+            -- = 2^(12k - 12): ~1 event per 30 s at 10%, ~1/s at 50%, ~7/s at
+            -- 75%, every frame at 100%; none in the bottom 3%.  Band
+            -- half-height = 0.12 * 10^(2k - 2) of the raster: a few lines
+            -- up to 50% (~26-line band), ~190 lines on HD at 100%.
+            case to_integer(drop_r(9 downto 5)) is
+                when  0 => hit_thr <= to_unsigned(    0, 16);
+                when  1 => hit_thr <= to_unsigned(   21, 16);
+                when  2 => hit_thr <= to_unsigned(   27, 16);
+                when  3 => hit_thr <= to_unsigned(   36, 16);
+                when  4 => hit_thr <= to_unsigned(   47, 16);
+                when  5 => hit_thr <= to_unsigned(   61, 16);
+                when  6 => hit_thr <= to_unsigned(   80, 16);
+                when  7 => hit_thr <= to_unsigned(  105, 16);
+                when  8 => hit_thr <= to_unsigned(  137, 16);
+                when  9 => hit_thr <= to_unsigned(  179, 16);
+                when 10 => hit_thr <= to_unsigned(  234, 16);
+                when 11 => hit_thr <= to_unsigned(  306, 16);
+                when 12 => hit_thr <= to_unsigned(  400, 16);
+                when 13 => hit_thr <= to_unsigned(  524, 16);
+                when 14 => hit_thr <= to_unsigned(  685, 16);
+                when 15 => hit_thr <= to_unsigned(  895, 16);
+                when 16 => hit_thr <= to_unsigned( 1171, 16);
+                when 17 => hit_thr <= to_unsigned( 1531, 16);
+                when 18 => hit_thr <= to_unsigned( 2003, 16);
+                when 19 => hit_thr <= to_unsigned( 2619, 16);
+                when 20 => hit_thr <= to_unsigned( 3425, 16);
+                when 21 => hit_thr <= to_unsigned( 4479, 16);
+                when 22 => hit_thr <= to_unsigned( 5858, 16);
+                when 23 => hit_thr <= to_unsigned( 7661, 16);
+                when 24 => hit_thr <= to_unsigned(10018, 16);
+                when 25 => hit_thr <= to_unsigned(13101, 16);
+                when 26 => hit_thr <= to_unsigned(17133, 16);
+                when 27 => hit_thr <= to_unsigned(22406, 16);
+                when 28 => hit_thr <= to_unsigned(29302, 16);
+                when 29 => hit_thr <= to_unsigned(38320, 16);
+                when 30 => hit_thr <= to_unsigned(50113, 16);
+                when others => hit_thr <= to_unsigned(65535, 16);
+            end case;
+            case to_integer(drop_r(9 downto 6)) is
+                when  0 => sz8 <= to_unsigned(  2, 8);
+                when  1 => sz8 <= to_unsigned(  3, 8);
+                when  2 => sz8 <= to_unsigned(  5, 8);
+                when  3 => sz8 <= to_unsigned(  6, 8);
+                when  4 => sz8 <= to_unsigned(  8, 8);
+                when  5 => sz8 <= to_unsigned( 11, 8);
+                when  6 => sz8 <= to_unsigned( 16, 8);
+                when  7 => sz8 <= to_unsigned( 21, 8);
+                when  8 => sz8 <= to_unsigned( 29, 8);
+                when  9 => sz8 <= to_unsigned( 39, 8);
+                when 10 => sz8 <= to_unsigned( 53, 8);
+                when 11 => sz8 <= to_unsigned( 72, 8);
+                when 12 => sz8 <= to_unsigned( 98, 8);
+                when 13 => sz8 <= to_unsigned(133, 8);
+                when 14 => sz8 <= to_unsigned(181, 8);
+                when others => sz8 <= to_unsigned(246, 8);
+            end case;
+            sz_mul   <= act_h * sz8;
+            band_mul <= resize(sz_mul(19 downto 11), 10);
+
+            -- Per-line slip shift: raster class (HD 0 / 720p 1 / SD 2) plus
+            -- a knob term, so the slip is +-32 px below 25%, +-64 below 50%.
+            if drop_r(9 downto 8) = "00" then
+                jsh <= resize(wcls, 3) + to_unsigned(2, 3);
+            elsif drop_r(9) = '0' then
+                jsh <= resize(wcls, 3) + to_unsigned(1, 3);
+            else
+                jsh <= resize(wcls, 3);
+            end if;
+
+            -- Dropout event draws, free-running, sampled by the anchor:
+            --   position  anywhere in the raster (rand8 * height / 256)
+            --   half-size 1/2 .. 15/16 of the K1 maximum, never below 2 lines
+            --   hit       per-frame chance from the exponential table above
+            --   hold      1..2 frames below half travel, 1..4 to 3/4, 1..8 above
+            --   scroll    2..32 lines per frame, direction drawn per event
+            r_pos_mul <= lfsr_r(15 downto 8) * act_h;
+            r_pos     <= r_pos_mul(19 downto 8);
+            r_hlf_mul <= band_mul * ('1' & glfsr(14 downto 12));
+            r_hlf     <= resize(r_hlf_mul(13 downto 4), 12) + to_unsigned(2, 12);
+            if glfsr(22 downto 7) < hit_thr then
+                r_hit <= '1';
+            else
+                r_hit <= '0';
+            end if;
+            if drop_r(9) = '0' then
+                r_hold <= "00" & glfsr(0);
+            elsif drop_r(8) = '0' then
+                r_hold <= '0' & glfsr(1 downto 0);
+            else
+                r_hold <= glfsr(2 downto 0);
+            end if;
+            roll_amt <= signed(resize(drop_r(9 downto 6) & '0', 14)) +
+                        to_signed(2, 14);
 
             -- Free-running skew derivation (one op per stage, never in a
             -- decision cone).  Settles in five clocks - instant next to a frame.
@@ -463,32 +622,93 @@ begin
             bb1 <= band_pos + v_hlf;
             bt2 <= band_pos - shift_left(v_hlf, 1);
             bb2 <= band_pos + shift_left(v_hlf, 1);
-            if aline_s >= bt1 and aline_s < bb1 then
+            if aline_s >= bt1 and aline_s < bb1 and band_on = '1' then
                 in_band <= '1';
             else
                 in_band <= '0';
             end if;
-            if aline_s >= bt2 and aline_s < bb2 then
+            if aline_s >= bt2 and aline_s < bb2 and band_on = '1' then
                 near_bnd <= '1';
             else
                 near_bnd <= '0';
             end if;
-            scan_par <= aline(0);
+            -- Scanline grille: at 1080 lines a 1-px on/off alternation reads
+            -- as flat dimming, so the HD raster darkens one line in three
+            -- (2 on / 1 off).  720p and SD keep the classic alternation.
+            if wcls = "00" then
+                if scan_cnt = 2 then
+                    scan_par <= '1';
+                else
+                    scan_par <= '0';
+                end if;
+            else
+                scan_par <= aline(0);
+            end if;
 
-            -- Vertical distance from centre for the vignette
+            -- Vertical distance from centre for the vignette, scaled by the
+            -- raster's width/height so the falloff follows the screen shape
+            -- (x1.75 for 16:9, x1.5 for SD, doubled again for field lines).
             dyd_r <= signed(resize(aline, 13)) - signed(resize(cy_r, 13));
             if dyd_r < 0 then
                 dy_r <= unsigned(std_logic_vector(resize(-dyd_r, 12)));
             else
                 dy_r <= unsigned(std_logic_vector(resize(dyd_r, 12)));
             end if;
+            if wcls = "10" then
+                dy_h <= shift_right(dy_r, 1);
+            else
+                dy_h <= shift_right(dy_r, 1) + shift_right(dy_r, 2);
+            end if;
+            if ilace = '1' then
+                dy_a <= shift_left(dy_r + dy_h, 1);
+            else
+                dy_a <= dy_r + dy_h;
+            end if;
 
             -- ---------------------------------------------------------------
             -- Horizontal counter + measured active width
             -- ---------------------------------------------------------------
             if v_h_edge = '1' then
-                px    <= (others => '0');
-                lb_ab <= not lb_ab;
+                px      <= (others => '0');
+                lb_ab   <= not lb_ab;
+                scan_ln <= scan_par;
+                band_ln <= in_band;
+                -- Glitch recipe for this line (identity outside the band):
+                -- block pixelation 4..64 px on 5/8 of lines, luma posterize
+                -- on half, U/V swap on half, a negative line 1 in 8 and a
+                -- pure static line 1 in 8.
+                if in_band = '1' then
+                    case to_integer(glfsr(2 downto 0)) is
+                        when 3      => blkm_ln <= to_unsigned(3, 12);
+                        when 4      => blkm_ln <= to_unsigned(7, 12);
+                        when 5      => blkm_ln <= to_unsigned(15, 12);
+                        when 6      => blkm_ln <= to_unsigned(31, 12);
+                        when 7      => blkm_ln <= to_unsigned(63, 12);
+                        when others => blkm_ln <= (others => '0');
+                    end case;
+                    case glfsr(4 downto 3) is
+                        when "10"   => crush_ln <= "1110000000";
+                        when "11"   => crush_ln <= "1100000000";
+                        when others => crush_ln <= (others => '1');
+                    end case;
+                    swap_ln <= glfsr(5);
+                    if glfsr(8 downto 6) = "000" then
+                        linv_ln <= '1';
+                    else
+                        linv_ln <= '0';
+                    end if;
+                    if glfsr(11 downto 9) = "000" then
+                        stat_ln <= '1';
+                    else
+                        stat_ln <= '0';
+                    end if;
+                else
+                    blkm_ln  <= (others => '0');
+                    crush_ln <= (others => '1');
+                    swap_ln  <= '0';
+                    linv_ln  <= '0';
+                    stat_ln  <= '0';
+                end if;
             elsif av_r = '1' then
                 px <= px + 1;
             end if;
@@ -502,6 +722,11 @@ begin
                     act_w <= px;
                 end if;
                 aline   <= aline + 1;
+                if scan_cnt = 2 then
+                    scan_cnt <= (others => '0');
+                else
+                    scan_cnt <= scan_cnt + 1;
+                end if;
 
                 -- Both pulls decay once per ACTIVE line, so the two
                 -- interlaced fields stay in step.
@@ -543,10 +768,12 @@ begin
                 -- Row offset for the next line, formed here (a whole line of
                 -- slack) so hsync only has to wrap it.  The tear jog keys off
                 -- the REGISTERED band flags - one line of lag, invisible.
-                case to_integer(wcls) is
+                case to_integer(jsh) is
                     when 0      => v_jog := v_jraw;
-                    when 1      => v_jog := resize(shift_right(v_jraw, 1), 12);
-                    when others => v_jog := resize(shift_right(v_jraw, 2), 12);
+                    when 1      => v_jog := shift_right(v_jraw, 1);
+                    when 2      => v_jog := shift_right(v_jraw, 2);
+                    when 3      => v_jog := shift_right(v_jraw, 3);
+                    when others => v_jog := shift_right(v_jraw, 4);
                 end case;
                 row_pre <= resize(shift_right(v_b1n + v_b2n, 4), 14) +
                            resize(v_jog, 14);
@@ -572,44 +799,61 @@ begin
             end if;
 
             -- ---------------------------------------------------------------
-            -- Frame anchor: first active pixel after vsync.  Serration-safe -
-            -- frame_act is armed on the vsync saw and fires exactly once.
+            -- Frame anchor: the first vsync EDGE after active video.
+            --
+            -- v1.1/v1.2 used the vsync LEVEL ("clear while vsync_n is low,
+            -- fire on the next active pixel"), with the clear taking priority.
+            -- If the hardware vsync reads low across active video that anchor
+            -- never fires - and that matches the v1.1 failure exactly: every
+            -- latched knob dead, aline free-running to its 4096 wrap so the
+            -- tear band flashed and scrolled.  An edge fires once per frame
+            -- whichever way the pulse sits, the saw-active guard makes
+            -- serrated analog vsync fire once, and the line-count ceiling
+            -- (no format has 1200 active lines) is now OUTSIDE any vsync
+            -- condition so it backs up a vsync that never toggles at all.
             -- ---------------------------------------------------------------
-            -- The vsync arm is backed up by a line-count ceiling: no supported
-            -- format has more than 1080 active lines, so if the anchor has not
-            -- fired by line 1200 the frame housekeeping runs anyway.  Without
-            -- this a stuck anchor leaves aline free-running and the tear band
-            -- wanders and flashes at random.
-            if vs_r = '0' then
-                frame_act <= '0';
-            elsif av_r = '1' and (frame_act = '0' or aline >= 1200) then
-                frame_act <= '1';
+            if saw_act = '1' and
+               ((vs_r = '0' and prev_vsync_n = '1') or aline >= 1200) then
+                saw_act <= '0';
 
                 if aline > 50 then
                     act_h <= aline;
                     cy_r  <= shift_right(aline, 1);
                 end if;
-                aline <= (others => '0');
-                cx_r  <= shift_right(act_w, 1);
+                aline    <= (others => '0');
+                scan_cnt <= (others => '0');
+                cx_r     <= shift_right(act_w, 1);
 
-                if fl_r /= anc_fld then
+                -- field_n is sampled during active video, not at the vsync
+                -- edge where decoders may still be changing it.
+                if fld_seen /= anc_fld then
                     ilace <= '1';
                 else
                     ilace <= '0';
                 end if;
-                anc_fld <= fl_r;
+                anc_fld <= fld_seen;
 
-                -- Head-switch band drift: travels two band-heights past each
-                -- end of the raster so it rolls off one edge and back on.
-                v_bp  := band_pos + resize(roll_step, 14);
-                v_marg := signed(resize(band_hlf, 14));
-                v_span := signed(resize(act_h, 14)) + shift_left(v_marg, 2);
-                if v_bp >= signed(resize(act_h, 14)) + shift_left(v_marg, 1) then
-                    v_bp := v_bp - v_span;
-                elsif v_bp < -shift_left(v_marg, 1) then
-                    v_bp := v_bp + v_span;
+                -- Dropout events: a live band scrolls and counts down its
+                -- hold; an idle one waits for a random hit, then jumps in at
+                -- a random height and size.
+                if band_on = '1' then
+                    if band_hold = 0 then
+                        band_on <= '0';
+                    else
+                        band_hold <= band_hold - 1;
+                    end if;
+                    if band_up = '1' then
+                        band_pos <= band_pos - roll_amt;
+                    else
+                        band_pos <= band_pos + roll_amt;
+                    end if;
+                elsif r_hit = '1' then
+                    band_on   <= '1';
+                    band_pos  <= signed(resize(r_pos, 14));
+                    band_hlf  <= r_hlf;
+                    band_hold <= r_hold;
+                    band_up   <= glfsr(5);
                 end if;
-                band_pos <= v_bp;
 
                 drift_ph <= drift_ph + resize(drift_s, 14) + to_unsigned(24, 14);
 
@@ -624,6 +868,9 @@ begin
                     wcls <= "10";
                 end if;
 
+            elsif av_r = '1' and saw_act = '0' then
+                saw_act  <= '1';
+                fld_seen <= fl_r;
             end if;
         end if;
     end process p_position;
@@ -642,6 +889,13 @@ begin
         variable v_g     : signed(12 downto 0);
         variable v_dim   : unsigned(10 downto 0);
         variable v_cu    : signed(11 downto 0);
+        variable v_uin   : unsigned(9 downto 0);
+        variable v_vin   : unsigned(9 downto 0);
+        variable v_ds    : unsigned(2 downto 0);
+        variable v_gy    : unsigned(9 downto 0);
+        variable v_gu    : unsigned(9 downto 0);
+        variable v_gv    : unsigned(9 downto 0);
+        variable v_gt    : unsigned(9 downto 0);
         variable v_cv    : signed(11 downto 0);
     begin
         if rising_edge(clk) then
@@ -659,24 +913,32 @@ begin
             -- ---- depth 2: skew sum, misconvergence multiply, vignette dist --
             c2_base <= resize(row_eff, 13) + resize(c1_x, 13);
             c2_cmul <= resize(c1_dx(11 downto 2) * conv_s, 17);
+            -- Vignette distance is max + min/2 (a near-circle, aspect-scaled
+            -- through dy_a) instead of |dx|+|dy|, which drew a diamond.
             if c1_dx < 0 then
-                c2_dist <= resize(unsigned(std_logic_vector(-c1_dx)), 13) +
-                           resize(dy_r, 13);
+                c2_adx <= unsigned(std_logic_vector(-c1_dx));
             else
-                c2_dist <= resize(unsigned(std_logic_vector(c1_dx)), 13) +
-                           resize(dy_r, 13);
+                c2_adx <= unsigned(std_logic_vector(c1_dx));
             end if;
             c2_x  <= c1_x;
             c2_lf <= c1_lf;
 
             -- ---- depth 3: wrap the skewed X, form the chroma offset --------
+            -- Wrap, then the band's block pixelation (read-address hold).
             if c2_base >= resize(act_w, 13) then
-                c3_base <= resize(c2_base - resize(act_w, 13), 12);
+                c3_base <= resize(c2_base - resize(act_w, 13), 12) and
+                           not blkm_ln;
             else
-                c3_base <= resize(c2_base, 12);
+                c3_base <= resize(c2_base, 12) and not blkm_ln;
             end if;
             c3_coff <= resize(shift_right(c2_cmul, 8), 9) + resize(drift_off, 9);
-            c3_vmul <= resize(c2_dist(12 downto 3) * tube6, 17);
+            if c2_adx >= dy_a then
+                c3_mx <= c2_adx;
+                c3_mn <= dy_a;
+            else
+                c3_mx <= dy_a;
+                c3_mn <= c2_adx;
+            end if;
             c3_x    <= c2_x;
             c3_lf   <= c2_lf;
 
@@ -697,16 +959,12 @@ begin
                 v_ca := v_ca + v_w13;
             end if;
             c4_va <= unsigned(std_logic_vector(v_ca(10 downto 0)));
-            if c3_vmul(16 downto 4) > to_unsigned(700, 13) then
-                c4_vamt <= to_unsigned(700, 10);
-            else
-                c4_vamt <= c3_vmul(13 downto 4);
-            end if;
+            c4_dist <= resize(c3_mx, 13) + resize(shift_right(c3_mn, 1), 13);
             c4_x  <= c3_x;
             c4_lf <= c3_lf;
 
             -- ---- depth 5: line buffer read in flight ----------------------
-            c5_vamt <= c4_vamt;
+            c5_vmul <= resize(c4_dist(12 downto 3) * tube6, 17);
             c5_x    <= c4_x;
             c5_lf   <= c4_lf;
 
@@ -714,11 +972,15 @@ begin
             c6_y    <= unsigned(lb_y_out);
             c6_u    <= shift_left(resize(unsigned(lb_u_out), 10), 2);
             c6_v    <= shift_left(resize(unsigned(lb_v_out), 10), 2);
-            c6_vamt <= c5_vamt;
+            if c5_vmul(16 downto 4) > to_unsigned(700, 13) then
+                c6_vamt <= to_unsigned(700, 10);
+            else
+                c6_vamt <= c5_vmul(13 downto 4);
+            end if;
             c6_x    <= c5_x;
             c6_lf   <= c5_lf;
 
-            -- ---- depth 7: tape hiss + head-switch band --------------------
+            -- ---- depth 7: tape hiss -------------------------------------
             v_noise := signed(resize(c6_lf(8 downto 0), 12)) - to_signed(256, 12);
             case to_integer(hiss_r(9 downto 7)) is
                 when 0      => v_noise := to_signed(0, 12);
@@ -730,40 +992,75 @@ begin
             end case;
             v_yn := signed(resize(c6_y, 13)) + resize(v_noise, 13);
 
-            if in_band = '1' and bmode_r = '0' then
-                -- Tear: the band is torn-off tape, luma is pure static
-                c7_y <= resize(c6_lf(10 downto 2), 10) + to_unsigned(128, 10);
-                c7_u <= C_MID;
-                c7_v <= C_MID;
-            elsif in_band = '1' then
-                -- Flash: head-switch light bar, washed out and bleached
-                c7_y <= sat10(signed(resize(c6_y, 13)) + to_signed(360, 13) +
-                              resize(shift_right(v_noise, 1), 13));
-                c7_u <= C_MID;
-                c7_v <= C_MID;
-            else
-                c7_y <= sat10(v_yn);
-                c7_u <= c6_u;
-                c7_v <= c6_v;
-            end if;
+            c7_y  <= sat10(v_yn);
+            -- Flash variant (bleached light bar), formed in parallel
+            c7_yf <= sat10(signed(resize(c6_y, 13)) + to_signed(360, 13) +
+                           resize(shift_right(v_noise, 1), 13));
+            c7_u    <= c6_u;
+            c7_v    <= c6_v;
             c7_vamt <= c6_vamt;
             c7_x    <= c6_x;
+            c7_lf   <= c6_lf;
 
-            -- ---- depth 8: phosphor bleed (one-pole IIR along the line) -----
+            -- ---- depth 8: dropout band glitches ---------------------------
+            -- The band corrupts the picture instead of replacing it: the
+            -- per-line recipe (block hold, posterize, U/V swap, negative,
+            -- static) plus white tape-dropout comets, ~1 per 1024 px, 8..71
+            -- px long, bright at the head and fading along the tail.  Flash
+            -- runs the same glitches on a bleached, colourless bar.
+            v_gy := c7_y;
+            v_gu := c7_u;
+            v_gv := c7_v;
+            if band_ln = '1' and bmode_r = '1' then
+                v_gy := c7_yf;
+                v_gu := C_MID;
+                v_gv := C_MID;
+            end if;
+            if swap_ln = '1' then
+                v_gt := v_gu;
+                v_gu := v_gv;
+                v_gv := v_gt;
+            end if;
+            v_gy := v_gy and crush_ln;
+            if linv_ln = '1' then
+                v_gy := not v_gy;
+            end if;
+            if streak /= 0 then
+                streak <= streak - 1;
+            elsif band_ln = '1' and c7_lf(15 downto 6) = "1111111111" then
+                streak <= resize(c7_lf(5 downto 0), 7) + to_unsigned(8, 7);
+            end if;
+            if stat_ln = '1' and bmode_r = '0' then
+                g_y <= resize(c7_lf(10 downto 2), 10) + to_unsigned(128, 10);
+                g_u <= C_MID;
+                g_v <= C_MID;
+            elsif streak /= 0 then
+                g_y <= to_unsigned(640, 10) + shift_left(resize(streak, 10), 2);
+                g_u <= C_MID;
+                g_v <= C_MID;
+            else
+                g_y <= v_gy;
+                g_u <= v_gu;
+                g_v <= v_gv;
+            end if;
+            g_vamt <= c7_vamt;
+            g_x    <= c7_x;
+
+            -- ---- depth 9: phosphor bleed (one-pole IIR along the line) -----
             v_bl := resize(bleed_r, 13) - resize(shift_right(bleed_r, 2), 13) +
-                    resize(shift_right(c7_y, 2), 13);
-            if c7_x = 0 then
-                bleed_r <= c7_y;
+                    resize(shift_right(g_y, 2), 13);
+            if g_x = 0 then
+                bleed_r <= g_y;
             else
                 bleed_r <= v_bl(9 downto 0);
             end if;
-            c8_y    <= c7_y;
-            c8_u    <= c7_u;
-            c8_v    <= c7_v;
-            c8_vamt <= c7_vamt;
-            c8_x    <= c7_x;
+            c8_y    <= g_y;
+            c8_u    <= g_u;
+            c8_v    <= g_v;
+            c8_vamt <= g_vamt;
+            c8_x    <= g_x;
 
-            -- ---- depth 9: glow multiply -----------------------------------
+            -- ---- depth 10: glow multiply -----------------------------------
             c9_gmul <= resize(bleed_r * glow6, 16);
             c9_y    <= c8_y;
             c9_u    <= c8_u;
@@ -771,13 +1068,13 @@ begin
             c9_vamt <= c8_vamt;
             c9_x    <= c8_x;
 
-            -- ---- depth 10: add the glow, gather the tube darkening --------
+            -- ---- depth 11: add the glow, gather the tube darkening --------
             v_g := signed(resize(c9_y, 13)) +
                    signed(resize(c9_gmul(15 downto 8), 13));
             c10_y <= sat10(v_g);
             c10_u <= c9_u;
             c10_v <= c9_v;
-            if grille_r = '0' and scan_par = '1' then
+            if grille_r = '0' and scan_ln = '1' then
                 v_dim := resize(c9_vamt, 11) + resize(scan_amt, 11);
             else
                 v_dim := resize(c9_vamt, 11);
@@ -785,9 +1082,21 @@ begin
             c10_dim <= v_dim;
             c10_x   <= c9_x;
 
-            -- ---- depth 11: apply the darkening, RGB triad tint ------------
-            c11_y <= sat10(signed(resize(c10_y, 13)) -
+            -- ---- depth 12: apply the darkening, RGB triad tint ------------
+            c11_y <= lim_y(signed(resize(c10_y, 13)) -
                            signed(resize(c10_dim, 13)));
+            -- Chroma follows the darkening: vignette corners and scanline gaps
+            -- go dark, not dark-and-coloured.  One halving per 128 codes of
+            -- dimming (max 3), one more for Faded.
+            if c10_dim(10 downto 7) >= 3 then
+                v_ds := to_unsigned(3, 3);
+            else
+                v_ds := resize(c10_dim(8 downto 7), 3);
+            end if;
+            if faded_r = '1' then
+                v_ds := v_ds + 1;
+            end if;
+            c11_dsh <= v_ds;
             if grille_r = '1' then
                 -- 4-column phosphor stripe: red, green, blue, gap.  Hardware
                 -- sense: u carries Cr (red), v carries Cb (blue).
@@ -816,13 +1125,33 @@ begin
                 c11_v <= c10_v;
             end if;
 
-            -- ---- depth 12: chroma cast, fade, luma invert -----------------
-            v_cu := signed(resize(c11_u, 12)) - to_signed(512, 12);
-            v_cv := signed(resize(c11_v, 12)) - to_signed(512, 12);
-            if faded_r = '1' then
-                v_cu := resize(shift_right(v_cu, 1), 12);
-                v_cv := resize(shift_right(v_cv, 1), 12);
+            -- ---- depth 13: chroma cast, fade, luma invert -----------------
+            -- Invert is a true video negative: chroma flips too.  1023 - c is
+            -- a plain bitwise NOT, so it costs no adder.
+            if inv_r = '1' then
+                v_uin := not c11_u;
+                v_vin := not c11_v;
+            else
+                v_uin := c11_u;
+                v_vin := c11_v;
             end if;
+            v_cu := signed(resize(v_uin, 12)) - to_signed(512, 12);
+            v_cv := signed(resize(v_vin, 12)) - to_signed(512, 12);
+            case to_integer(c11_dsh) is
+                when 0 => null;
+                when 1 =>
+                    v_cu := shift_right(v_cu, 1);
+                    v_cv := shift_right(v_cv, 1);
+                when 2 =>
+                    v_cu := shift_right(v_cu, 2);
+                    v_cv := shift_right(v_cv, 2);
+                when 3 =>
+                    v_cu := shift_right(v_cu, 3);
+                    v_cv := shift_right(v_cv, 3);
+                when others =>
+                    v_cu := shift_right(v_cu, 4);
+                    v_cv := shift_right(v_cv, 4);
+            end case;
             if cast_r = '0' then
                 -- Cool: toward the blue axis (Cb up, Cr down)
                 v_cu := v_cu - to_signed(40, 12);
@@ -834,13 +1163,14 @@ begin
             end if;
             c12_u <= sat10(v_cu + to_signed(512, 12));
             c12_v <= sat10(v_cv + to_signed(512, 12));
+            -- Luma negative about the legal range: 64 <-> 940.
             if inv_r = '1' then
-                c12_y <= to_unsigned(1023, 10) - c11_y;
+                c12_y <= to_unsigned(1004, 10) - c11_y;
             else
                 c12_y <= c11_y;
             end if;
 
-            -- ---- depth 13: blanking gate + sync tap (output register) -----
+            -- ---- depth 14: blanking gate + sync tap (output register) -----
             if pipe(LATENCY - 1).avid = '0' then
                 s_io.y <= std_logic_vector(C_BLKY);
                 s_io.u <= std_logic_vector(C_MID);

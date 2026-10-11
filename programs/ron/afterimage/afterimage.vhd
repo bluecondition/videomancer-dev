@@ -1,4 +1,8 @@
--- afterimage.vhd  (v0.1 -- "Afterimage": 1-bit frame-store feedback test-bed)
+-- afterimage.vhd  (v1.0.0 -- "Afterimage": 1-bit frame-store feedback)
+--
+-- v1.0.0: Persist grain compare fixed to the labelled 25..100% (was 12.5..50%);
+--         horizontal [1 2 1]/4 luma low-pass at the output (latency 6 -> 8),
+--         re-gated on blanking, against the 1-px full-swing-step HDMI bars.
 --
 -- Videomancer has no frame buffer, but a 256x128 ONE-BIT frame fits in
 -- 8 EBR, and two of them (ping-pong by frame parity) give a genuine
@@ -50,7 +54,7 @@ use work.video_timing_pkg.all;
 
 architecture afterimage of program_top is
 
-    constant LATENCY : natural := 6;
+    constant LATENCY : natural := 8;
 
     constant C_MID  : unsigned(9 downto 0) := to_unsigned(512, 10);
     constant C_BLKY : unsigned(9 downto 0) := to_unsigned(64, 10);
@@ -262,6 +266,11 @@ architecture afterimage of program_top is
     signal pap4_y, pap4_u, pap4_v : unsigned(9 downto 0) := C_BLKY;
     signal col5_y, col5_u, col5_v : unsigned(9 downto 0) := C_BLKY;
     signal blank5 : std_logic := '1';
+    signal g6_y, g6_u, g6_v : unsigned(9 downto 0) := C_BLKY;
+    signal g6_bl : std_logic := '1';
+    signal d7_y, d7_u, d7_v : unsigned(9 downto 0) := C_BLKY;
+    signal d7_bl : std_logic := '1';
+    signal d8_y : unsigned(9 downto 0) := C_BLKY;
     signal s_io : t_video_stream_yuv444_30b;
 
 begin
@@ -287,7 +296,7 @@ begin
             s_dsel <= rk4(9 downto 8);
             s_psel <= rk5(9 downto 7);
             s_jp8  <= rk6(9 downto 2);
-            -- persistence 64..256 of 512 -> 25%..100% (bold minimum)
+            -- persistence 64..256 of 256 -> 25%..100% (256 = never clears)
             s_p9   <= to_unsigned(64, 9) + resize(rp12(9 downto 2), 9) - resize(rp12(9 downto 4), 9);
 
             sw_inv <= rsw(0);   -- S7  Invert
@@ -453,6 +462,7 @@ begin
         variable v_fbk, v_sf : std_logic;
         variable v_issue : std_logic;
         variable v_iy, v_iu, v_iv, v_py, v_pu, v_pv : unsigned(9 downto 0);
+        variable v_ysum : unsigned(11 downto 0);
     begin
         if rising_edge(clk) then
             pipe(0) <= data_in;
@@ -544,7 +554,7 @@ begin
             if sw_ord = '1' then
                 if ('0' & (p0_t8 xor fcnt) & "00") < s_p9 then p1_surv <= '1'; else p1_surv <= '0'; end if;
             else
-                if p0_h1(8 downto 0) < s_p9 then p1_surv <= '1'; else p1_surv <= '0'; end if;
+                if resize(p0_h1(7 downto 0), 9) < s_p9 then p1_surv <= '1'; else p1_surv <= '0'; end if;
             end if;
             if p0_h2(7 downto 0) < s_jp8 then p1_jon <= '1'; else p1_jon <= '0'; end if;
             p1_jx <= map3(p0_h1(11 downto 9));
@@ -666,7 +676,7 @@ begin
             end if;
 
             -----------------------------------------------------------------
-            -- Colour: palette (k=4), compose (k=5), output (k=6)
+            -- Colour: palette (k=4), compose (k=5), gate (k=6), luma LPF, output (k=8)
             -----------------------------------------------------------------
             v_iy := INK_Y(to_integer(s_psel)); v_iu := INK_U(to_integer(s_psel)); v_iv := INK_V(to_integer(s_psel));
             v_py := PAP_Y(to_integer(s_psel)); v_pu := PAP_U(to_integer(s_psel)); v_pv := PAP_V(to_integer(s_psel));
@@ -689,15 +699,27 @@ begin
             end if;
             blank5 <= not pipe(4).avid;
 
+            -- k=6: blanking gate
             if blank5 = '1' then
-                s_io.y <= std_logic_vector(C_BLKY);
-                s_io.u <= std_logic_vector(C_MID);
-                s_io.v <= std_logic_vector(C_MID);
+                g6_y <= C_BLKY; g6_u <= C_MID; g6_v <= C_MID;
             else
-                s_io.y <= std_logic_vector(col5_y);
-                s_io.u <= std_logic_vector(col5_u);
-                s_io.v <= std_logic_vector(col5_v);
+                g6_y <= col5_y; g6_u <= col5_u; g6_v <= col5_v;
             end if;
+            g6_bl <= blank5;
+
+            -- k=7: delay (centre tap of the luma low-pass)
+            d7_y <= g6_y; d7_u <= g6_u; d7_v <= g6_v; d7_bl <= g6_bl;
+
+            -- k=8: horizontal [1 2 1]/4 on luma only, re-gated on blanking
+            d8_y <= d7_y;
+            if d7_bl = '1' then
+                s_io.y <= std_logic_vector(C_BLKY);
+            else
+                v_ysum := resize(d8_y, 12) + (resize(d7_y, 12) sll 1) + resize(g6_y, 12) + 2;
+                s_io.y <= std_logic_vector(v_ysum(11 downto 2));
+            end if;
+            s_io.u <= std_logic_vector(d7_u);
+            s_io.v <= std_logic_vector(d7_v);
             s_io.hsync_n <= pipe(LATENCY - 1).hsync_n;
             s_io.vsync_n <= pipe(LATENCY - 1).vsync_n;
             s_io.avid    <= pipe(LATENCY - 1).avid;

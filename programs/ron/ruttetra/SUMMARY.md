@@ -49,15 +49,21 @@ Skirt = any candidate with `age ≥ disp` covering the pixel.
 ## Controls
 
 P12 **Relief** (headline, glided). K1 Scan Lines (density, CW = denser),
-K2 Thickness 1–8, K3 Line Color (White/Green/Amber/Cyan/Magenta/**Video**
+K2 Thickness/Glow (stroke 1–8; graded glow halo fades in from T=3: T3-4 inner 1/4 outer 1/8, T5-8 inner 1/2 outer 1/4 — moved off S10 in v0.2.1), K3 Line Color (White/Green/Amber/Cyan/Magenta/**Video**
 = source chroma ×2 at the drawn pixel/Fire/**Terrain** = altitude tint from
 the line's luma band — was disp[7:5], which collapsed to 1–2 colours at
 dense lines or low relief), K4 Contrast (unity at center), K5 **Roll**
 (bipolar, centre still, quadratic, ≤0.23 spacing/field; replaced v0.1's
 Backdrop ghost), K6 Smoothing (IIR shift 0–7). S7 Peaks Bright/Dark, S8 Hidden Line, S9 Shading
-Banded/Luma, S10 Hard/Glow (halo band ±T), S11 Positive/Negative.
+Banded/Luma, S10 Roll Motion Run/Freeze (v0.2.1; freezes the K5 roll phase in place), S11 Positive/Negative.
 
 ## Status
+
+**v0.2.1 (2026-10-07): built, not flashed.** Glow moved from S10 onto K2
+(graded halo fades in from T=3), S10 = Roll Motion Run/Freeze. 6/6:
+HD Analog 75.6 (seed 1), HD HDMI 74.35 (**seed 5**, marginal), HD Dual 75.1
+(**seed 4**), SD Analog 72.7 (1), SD HDMI 77.0 (1), SD Dual 72.6 (**seed 2**);
+~5990 LC (78%), 24/32 EBR. v0.2.0 source + vmprog kept in `.ruttetra_work/`.
 
 **v0.2.0 (2026-09-28): FINAL — signed off by Ron ("looks good as a final version").** Connected strokes +
 beam-speed dimming, relief normalised to the window, smoothing-lag

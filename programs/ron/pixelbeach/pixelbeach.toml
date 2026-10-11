@@ -1,6 +1,6 @@
 [program]
 program_id = "com.ron.pixelbeach"
-program_version = "3.16.0"
+program_version = "3.24.0"
 abi_version = ">=1.0,<2.0"
 program_name = "Pixel Beach"
 author = "ron"
@@ -95,9 +95,9 @@ initial_value_label = "Day"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
-name_label = "Bypass"
+name_label = "Crab"
 value_labels = ["Off", "On"]
-initial_value_label = "Off"
+initial_value_label = "On"
 
 # --- Linear Potentiometer (Slider) ---
 

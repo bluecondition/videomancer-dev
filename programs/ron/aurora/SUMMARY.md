@@ -1,74 +1,200 @@
-# AURORA (v1.7 — anchored snaking rainbow ribbon)
+# AURORA (v3.0.3 — big smooth travelling rainbow wave)
 
-**v1.6** replaces the fold with a **non-crossing meander**, and the color circle
-with the real phosphor palette:
+**STATUS: FINAL except presets — signed off by Ron 2026-10-09** ("we can
+finalize aurora for now"). The v3 look, the generated-avid line fix and the
+clean ROYGBIV were HW-confirmed on v3.0.2; the v3.0.3 Mirror reflection was
+built the same day, before sign-off. Remaining: the four presets are
+hand-typed placeholders — capture real ones from the device with
+`./capture_preset.sh` and rebuild. Ship build = v3.0.3 (HD HDMI seed 3,
+HD Dual seed 2; see Status).
 
-* **Colors** are now the seven scope-verified phosphor hues (deep red Y=328,
-  orange, yellow, green, blue, indigo, violet), interpolated to 512 steps and
-  baked into a constant LUT. The old vectorscope circle held luma constant,
-  which is why red never read as a distinctive red. Solid mode addresses the
-  LUT at the segment starts, so it shows the seven pure colors flat.
-* **P12 is COIL: both ends stay pinned at the left and right screen edges,
-  and the ribbon never overlaps itself.** Raising the slider lengthens the
-  ribbon between those fixed ends; the extra length has nowhere to go but
-  into curvature, so it snakes more deeply. Horizontal position advances
-  monotonically from the left edge to the right edge, which makes the path a
-  function graph — *mathematically incapable* of self-intersecting. That is a
-  structural guarantee, not a tuning compromise, and it holds at every
-  setting of every control.
-* **The ends stay anchored.** An envelope that is exactly zero at both screen
-  edges multiplies the meander, so the points where the ribbon meets the left
-  and right edges do not move no matter what Coil, Height, Wiggle or the
-  animation phase do. All the added length goes into the middle — the ribbon
-  reads as if it were growing and struggling to fit between two fixed points.
-* **Constant ribbon width through every bend.** Distance is measured
-  PERPENDICULAR to the curve, not vertically, so the ribbon no longer pinches
-  on steep sections and fattens at the crests.
-* **The rainbow follows the ribbon.** Colour is keyed to the signed
-  perpendicular offset too, so the bands stay square to the ribbon through
-  every bend instead of shearing. (Free: the magnitude is already computed
-  for the width correction, so this is a sign mux.)
-* **More length at full Coil** — ~4¼ waves across the screen instead of
-  ~2¾, so the ribbon bunches up considerably more.
-* **Smooth edges at any Coil.** Four things were needed, in order of effect:
-  1. **One stored column per PIXEL** (line buffer 1024 → 2048 deep). At
-     half-pixel (HD) or quarter-pixel (SD) columns each column painted 2 or
-     4 screen pixels, so as the curve steepened the edge became a staircase
-     with multi-pixel treads. This was the dominant cause — invisible while
-     shallow, worsening steadily with Coil.
-  2. **The envelope is interpolated.** Its lookup index advances only ~0.53
-     entries per column, so un-interpolated it stepped on ALTERNATE columns,
-     and since it scales the amplitude that was a ~2.5-row chop at full
-     Coil — the "every other vertical line" symptom.
-  3. **The slope is averaged over two columns.** The width correction is a
-     steep function of slope, so raw slope noise near a crest became a comb.
-  4. The slope comes from the FULL-PRECISION product (12 bits finer than the
-     rounded height) and the correction table is interpolated.
-* At coil 0 the ribbon is one nearly-straight horizontal pass with only the
-  wiggle on it. Amplitude is clamped against the measured frame height, so it
-  always stays fully on screen.
+
+**v3.0.3 (2026-10-08) — Mirror is a true reflection.** v3.0.2 was
+HW-confirmed by Ron ("both problems are fixed… almost finalized"), who then
+asked why the mirrored halves don't meet where their gradients line up. The
+reflected copy had been coloured as a second wave (red on its own top edge,
+colour offset negated), so where the bands overlap the nearer-copy switch on
+the centre line put one band's violet edge against the other's red edge: a
+hard seam. Now the reflected copy takes the reflected row's own offset —
+its spectrum runs violet-on-top, like a rainbow in water — and both copies
+are identical on the centre line, so the fold is seamless and the top half
+is an exact mirror of the bottom. The axis also moved from row 540 to the
+true raster centre (fh−1)/2 = 539.5 (row r ↔ row fh−1−r), with the wave
+centred on it, which removes a one-row step. Along mode was already
+seamless (its colour depends only on the column). The over/under braid look
+is gone by design.
+
+
+**v3.0.2 (2026-10-08).** Ron on v3.0.1, HD HDMI: still glitchy horizontal
+lines, rainbow colours still not correct. So the v3.0.1 LUT-split was NOT the
+cause (the packed LUT did map to an odd 3-block shape; the split stays as
+hygiene, but it changed nothing on screen). Two program-side changes:
+
+* **Generated avid (cubist's HW-confirmed recipe).** The encoders get no
+  data-enable and pair Cb/Cr by counting from hsync; the core's packer
+  restarts on Cb at every avid rise. Aurora passed the source avid straight
+  through, so any line whose avid lands a clock off its usual hsync parity
+  swaps U/V for that line — thin wrong-coloured lines across the band only
+  (black is immune), and blue/indigo swapped reads as RED. Aurora now makes
+  its own avid: start 3 or 4 clocks after the source's first avid rise,
+  whichever keeps the hsync→start parity at the voted usual value; end
+  after the field-latched width (or at hsync). The beam column counter runs
+  on it, the output is neutral outside it, and the video backdrop is gated
+  to black where the source is blank (the 3–4 columns at the right edge).
+* **One clean rainbow.** v3.0.0 changed the Spectrum default to 256, which
+  is 1.375 spectra across the band: red→violet then pink, red and orange
+  again. And even exactly one cycle includes the violet→red wrap. Across
+  mode now spans 0.875 of the hue cycle over the band's solid core at 100 %
+  (hscale = cyc·112 / Hq2) — red at the top edge, violet at the bottom, no
+  wrap — and the default is back to 146 (= 100 %). Initial colour phase
+  0.4375 cycle centres it.
+
+If thin lines persist on HD HDMI only after this, the next step is the
+documented HD HDMI re-seed + A/B (see memory hdmi_tx_placement_skew), and
+the Solid-mode stripe colours tell whether the palette itself reads right.
+
+
+**v3.0.1 (2026-10-08) — colour LUT split (diagnosis turned out WRONG; see v3.0.2).** Ron flashed v3.0.0: the
+wave looked right but the colours were wrong and thin red horizontal lines
+ran through the band. The build log showed why: the colour LUT was one
+packed 512×32 constant whose two top bits are always zero, so yosys pruned
+it to 30 live bits and spread it over THREE EBR blocks — the odd-mapping
+trap (sims bit-exact, hardware garbage). Bad entries at specific hue
+addresses read as thin wrong-coloured lines across the band, because hue
+runs vertically across it. This is the same LUT that v1.6 introduced when
+its colours first "railed red/blue"; the v1.7 line-buffer rework was a
+wrong diagnosis (harmless, kept). Fix: six independent 256×10 ROMs (Y/U/V ×
+low/high half), each the same 256-deep ≤16-bit shape as the sine ROMs that
+render correctly on hardware, with a 2:1 half mux after the read. 20/32 EBR.
+HW: no change — lines and wrong colours persisted.
+
+
+**v3.0.0 (2026-10-07) is a complete redesign of the look.** The "Coil"
+compression idea (ribbon pinned at the screen edges, lengthening into tighter
+and tighter meanders) never felt right, so it is gone. Aurora is now a big,
+smooth, horizontal rainbow wave that travels across the screen, with
+controls for speed, noise, amplitude, wavelength, thickness and colour.
+
+What is new:
+
+* **The wave.** y(x) = C + A·sin(k·x − φ) + Noise·A·(sin(1.61k·x + φ₂) +
+  sin(0.38k·x + φ₃))/2. The two noise lobes sit at incommensurate
+  wavenumbers and drift at their own rates, so the shape never repeats and
+  never looks like a textbook sine unless Noise is at zero.
+* **Constant VERTICAL thickness** (flag-style), not perpendicular. There is no
+  slope correction any more, so the band stays smooth at any steepness, the
+  horns and the 38 % width wobble of the old design are gone, and the
+  amplitude can go all the way to half the screen.
+* **Noise breathes the thickness** too (H_eff = H·(1 + noise/2)), so the band
+  bulges where it bends — organic rather than mechanical.
+* **P12 Swell** is the performance gesture: amplitude from a ~3 % ripple to
+  crests touching the top and bottom edges. With Height at 100 % and Swell
+  at full the whole screen becomes a waving rainbow wall.
+* **S11 Mirror** draws a second copy of the wave reflected about the centre
+  line, so two waves braid in an X pattern with the nearer one on top. It
+  costs only a second vertical-distance test per column, not a second pass.
+* **S10 Rainbow: Across / Along.** Across runs the spectrum across the band's
+  thickness (stripes that ride the wave); Along lays the spectrum across the
+  screen width so the colours are a field the wave passes through. Spectrum
+  sets the cycle count in both.
+* Kept from v2.0: Fill (Rainbow / Video), Backdrop (Black / Video), Color
+  (Gradient / Solid), the phosphor LUT, the saw-active vsync guard, black at
+  Y 64, the single-bank line buffer.
 
 ## Control reference card
 
 | Ctrl | Name     | Function |
 |------|----------|----------|
-| K1   | Height   | Ribbon thickness: whisper-thin stripe → ~40%-of-screen sash (soft-feathered edges at every size) |
-| K2   | Position | Vertical home line of the ribbon |
-| K3   | Wiggle   | Amplitude of the organic undulation. **Fully CCW = perfectly still** (also freezes the coil's slow crawl) |
-| K4   | Rate     | Undulation speed, ~17 s glacial drift → ~1 s lively. No effect while Wiggle is zero |
-| K5   | Flow     | Rainbow cycling across the ribbon. **Center detent (±5%) = true stop**; either side flows the colors, square-law speed |
-| K6   | Spectrum | Rainbow cycles across the ribbon's thickness: 0.5 → 4. Default = one full spectrum. In Solid mode this sets stripe width |
-| S7   | Color    | **Gradient** = continuous phosphor spectrum / **Solid** = the 7 pure phosphor colors as flat stripes (same geometry, same motion) |
-| S8   | Backdrop | **Black** field / **Video** = ribbon composites over the incoming picture (soft edges blend into it) |
-| S9   | Freeze   | Hard-stops all animation at its current phase (wiggle, coil crawl, color flow) |
-| P12  | **COIL** | The performance centerpiece: bottom = one near-straight pass; rising lengthens the ribbon so it coils back on itself, 2–3 doublings at the top. The ribbon never crosses itself at any setting |
+| K1   | Height   | Band thickness, square-law: hairline → the whole screen |
+| K2   | Waves    | Wavelength, square-law: 0.5 → 5 waves across the screen |
+| K3   | Speed    | Wave travel, bipolar; **centre (±5 %) = still**; square-law either side, positive = rightward |
+| K4   | Noise    | Organic wobble of the path AND the thickness; 0 = a pure sine |
+| K5   | Flow     | Rainbow drift; **centre = stopped**; square-law either side |
+| K6   | Spectrum | Rainbow cycles across the band (Across) or the screen (Along): 50–400 % |
+| S7   | Color    | **Gradient** = continuous phosphor spectrum / **Solid** = 7 pure phosphor stripes |
+| S8   | Backdrop | **Black** / **Video** = the wave composites over the incoming picture |
+| S9   | Fill     | **Rainbow** / **Video** = band luma from the live picture (half-mixed with the rainbow's), rainbow chroma |
+| S10  | Rainbow  | **Across** the band / **Along** the screen |
+| S11  | Mirror   | **Off** / **On**: the top half is a true reflection of the bottom (spectrum flipped, like a rainbow in water) — a seamless kaleidoscope fold on the centre line |
+| P12  | **SWELL**| Amplitude: gentle ripple → crests at the screen edges |
 
-Power-on look: medium sash, centered, gentle wiggle, slow color flow,
-gradient colors, black backdrop, coil at zero.
+Power-on look: medium band, ~1.2 waves, gentle rightward travel, a little
+noise, slow colour flow, one spectrum across the band, black backdrop,
+Swell at 35 %.
 
-Presets: **First Light** (power-on look), **Silk Flag** (solid stripes,
-mid coil), **Deep Water** (full coil, slow, compressed spectrum),
-**Over the Air** (thin ribbon coiling over live video).
+Presets (placeholders until captured from the hardware): **First Light**
+(power-on look), **Tidal Wall** (thick, full Swell, stretched spectrum),
+**Braid** (Mirror + Solid + Along), **Over the Air** (video backdrop, video
+fill).
+
+## Architecture (v3)
+
+Once per line period the scanner sweeps **left to right, one column per
+clock**, and stamps `{hue[10], alpha[6]}` into the single-bank 2048×16 line
+buffer for the next display row. Per column:
+
+1. Three quarter-wave sine reads (each at idx and idx+1 → interpolated; 6 EBR).
+2. Noise lobes summed and scaled by the Noise level (Q6).
+3. Wave + noise, times amplitude A (split hi/lo multiply). In parallel the
+   half-thickness is scaled by the same noise term (H_eff).
+4. y = centre + product. Signed vertical distance to this row, and to the row
+   reflected about the centre (the mirrored wave), both with magnitudes.
+5. Nearer copy wins (when Mirror is on); offset saturated to 14 bits.
+6. alpha = feather(H_eff − |d|) (8-row feather, 64 levels); hue = colour
+   phase − d·hscale (Across) or colour phase + column·kx (Along, from a
+   per-column accumulator that runs with the writer).
+
+Everything geometric is in quarter-rows of the MEASURED raster: centre =
+fh/2, amplitude A = fh/32 + Swell·(fh/2 − fh/32), half-thickness
+H = (fh/2)·Height², wavenumber k = kwav·(0.5 + 4.5·Waves²) with kwav =
+65536/cols. The per-frame sequencer runs 8 products on one shared shift-add
+multiplier (24-bit accumulator — fh·2 × 1023 overflows 22 bits) plus one
+divide (hscale = cycles·128 / H31), all in blanking.
+
+Pipeline depth 15 stages; column c of row R+1 is written ~16 clocks after
+the beam read column c of row R, so one bank serves both. Scan = cols + 20
+clocks per line (1940 of 2200 at HD). Latency 8 clocks, all modes. 20/32
+EBR (8 line buffer, 6 sine, 6 colour). No DSP.
+
+## Status
+
+v3.0.3 (2026-10-08) — built and packaged, all 6 configs timing-closed
+(post-route): HD Analog 75.1 (seed 1) / **HD HDMI 76.1 on SEED 3** (seed 1
+missed, seed 2 stalled router2) / **HD Dual 75.1 on SEED 2** vs 74.25; SD
+Analog 79.1 / SD HDMI 79.5 / SD Dual 80.5 vs 27. 6777–6802/7680 LC (88%),
+20/32 EBR. HD margins are under 2 MHz; if a rebuild misses, try router1
+before touching logic. Awaiting hardware.
+
+v3.0.2 (2026-10-08) — HW-CONFIRMED (lines and colours fixed); built and packaged, all 6 configs timing-closed
+(post-route): **HD Analog 78.0 on SEED 2** (seed 1 missed) / HD HDMI 76.4 /
+HD Dual 76.0 vs 74.25 required; SD Analog 73.7 / SD HDMI 75.7 / SD Dual
+81.1 vs 27. 6773–6801/7680 LC (88%), 20/32 EBR. Awaiting hardware.
+
+v3.0.1 (2026-10-08) — built and packaged, all 6 configs timing-closed
+(post-route): HD Analog 78.1 / HD HDMI 77.0 / **HD Dual 74.6 on SEED 2**
+(seed 1 missed) vs 74.25 required; SD Analog 79.3 / SD HDMI 79.1 / SD Dual
+82.6 vs 27. 6625–6640/7680 LC (86%), 20/32 EBR. HD Dual's margin is
+sub-MHz and run-marginal under router2: if a rebuild misses it, solo-route
+other seeds or use router1 before touching logic. Awaiting hardware.
+
+v3.0.0 (2026-10-07) — built and packaged, all 6 configs timing-closed on
+**seed 1** (post-route): HD Analog 81.6 / HD HDMI 75.3 / HD Dual 76.5 vs
+74.25 required; SD Analog 80.3 / SD HDMI 80.2 / SD Dual 82.8 vs 27.
+6621–6631/7680 LC (86%), 18/32 EBR. HD HDMI's 1 MHz margin is
+run-marginal under router2 — if a rebuild misses there, re-seed or use
+router1 before touching logic. **Not yet flashed.** Nothing from v1.7
+onwards has been seen on hardware, so the first flash verifies the single-bank
+line buffer, the v2.0 contract fixes and the v3 look together.
+
+---
+
+# Design history (v1.x – v2.0, superseded)
+
+v2.0.0 (2026-10-07) was a finalization pass on the coil design: S9 Freeze →
+Fill, saw-active vsync guard, black 64, dead-code purge. v1.7 reworked the
+dual-bank line buffer into one bank after v1.6 railed colours on hardware.
+The sections below describe the v1.x coil geometry and are kept for the
+lessons in them.
 
 ## Architecture
 
@@ -134,9 +260,16 @@ than a tuned result:
   2048×2 EBR mapping with two write sources contending for the one port.
 - Per line the scan costs `cols + ~28` clocks — one column per pixel, so
   1920/1280/720 for HD/720p/SD against 2200/1650/858 available.
-- Latency 8 clocks, constant across modes. 24/32 EBR. No DSP.
+- Latency 8 clocks, constant across modes. 18/32 EBR. No DSP.
 
 ## Status
+
+v2.0.0 (2026-10-07) — built and packaged, all 6 configs timing-closed on
+**seed 1** (post-route): HD Analog 77.4 / HD HDMI 80.7 / HD Dual 79.4 vs
+74.25 required; SD Analog 79.3 / SD HDMI 82.1 / SD Dual 77.9 vs 27.
+6646–6677/7680 LC (87%), 18/32 EBR. **Awaiting hardware** — the v1.7
+single-bank line-buffer fix for the v1.6 colour-rail regression has not been
+seen on the screen yet either, so the first flash of v2.0.0 verifies both.
 
 v1.7 — built and packaged, all 6 configs timing-closed (post-route):
 HD Analog 77.1 (seed 2), HD HDMI 80.6, HD Dual 79.2 vs 74.25 required;

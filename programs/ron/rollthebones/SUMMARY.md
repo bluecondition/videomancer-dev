@@ -292,9 +292,11 @@ later (it fit at 92% but needed seeds 2/3 + solo routes).
 
 ## Status
 
-v1.0.1 packaged 2026-10-07, 6/6 seed 1. v0.6 look HW-approved; v1.0.1 adds
-only Ink=Video saturation on K3 — quick HW look, then FINAL. Presets to
-capture from HW.
+**v1.0.1 FINAL except presets — signed off by Ron 2026-10-07** ("We can
+finalize Rollthebones"). HW-validated look (v0.6 approved on HD HDMI;
+v1.0.1 = v0.6 + Ink=Video saturation on K3). 6/6 seed 1, 88% LC, 14 EBR.
+Presets are hand-written (Onyx Grid fixed to K2=300): capture on hardware
+with ./capture_preset.sh (3 slots free), then rebuild.
 
 ## Sims
 

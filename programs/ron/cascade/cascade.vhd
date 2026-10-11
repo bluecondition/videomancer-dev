@@ -1,6 +1,7 @@
 -- Author: bluecondition
 
--- cascade.vhd  (v0.9 -- 96/48 coupled discs, line-buffer mark render)
+-- cascade.vhd  (v2.1.2 -- 126/48 coupled discs, line-buffer mark render;
+--   finalized 2026-10-10; developed + HW-verified in programs/ron/cascade_diag)
 --
 -- HYPNOS CASCADE: concentric black/white discs that PUSH each other.  Move the
 -- centre (K1/K2) and the innermost disc leads; each outer ring holds still until
@@ -18,10 +19,14 @@
 --     all idle during active video).  E_LINE (the tracker seed) runs in
 --     the hblank.
 --
---   GRADIENT (K4/S9/S11) -- the marks carry an enter/leave DIRECTION bit, so
+--   GRADIENT (K4/S9) -- the marks carry an enter/leave DIRECTION bit, so
 --     the pixel path counts the true ring index; every ring carries its own
---     ramp (re-anchored at each true disc edge), K4 sets the fineness, S9
---     picks Steps/Smooth and S11 the multi-ring fade.
+--     ramp (re-anchored at each true disc edge), K4 sets the fineness and
+--     S9 picks Steps/Smooth.
+--
+--   VIDEO (S11/P12) -- the ring field REFRACTS the input: a one-sided
+--     horizontal push of 0..53 px through a 64-tap EBR delay line, P12 =
+--     depth.  Same latency (6) and sync taps as ring mode.
 --
 --   OUTER field -- incremental integer-radius tracker centred on the LAST
 --     modelled disc's centre, seamed exactly onto it.
@@ -43,6 +48,54 @@
 --     odd number of edge marks half the time and inverted the screen); the
 --     modelled count adapts per frame to what fits under C_RCL.
 --
+-- v2.1 (2026-10-09, diag): S9 MOIRE -- the rings XOR a half-phase copy of
+--   themselves around the outer centre (doubles the rings at rest; moire
+--   flares while the cascade has them offset).  K4 setting 2 = 4 steps
+--   (v2.0.3).  Built with ROUTER1 (router2 can't close this netlist).
+--
+-- v2.0 (2026-10-09, diag -- LEAN PASS; Ron: keep the look, cascade,
+--   catch-up and gradients; Zoom/Video droppable; S9 free):
+--   * ONE SERIAL MULTIPLIER (shift-add, 14 steps, product at T+15) replaces
+--     TWO LUT array multipliers (~1060 LUT): the vblank 14x14 was merged into
+--     the engine's (v1.9), then the engine's 15x15 became serial (v2.0).  The
+--     span engine is re-pipelined around it (phase 4: stage ring k-2's edges,
+--     root ring k-1, multiply ring k; marks at phase 5; 15*(nreff+2) clocks),
+--     E_LINE re-scheduled (89 clocks, the two roots overlap the products), the
+--     vblank sequencer issues one product at a time and stalls on busy.
+--     Bit-exact vs v1.9 in four 720p sims.  LINE BUDGET 15*(nreff+2)+89:
+--     HD 2009/2200, SD 839/858.  E_LINE no longer fits the image-tester's
+--     fake 64-clk hblank -- sim with a 280-clk hblank copy of the tool
+--     (.cascade_diag_work/vit_hb).
+--   * K5 WIDTH: band balance, exact circles (every even disc's radius moves
+--     by delta = f*s; slack from the narrowest band; outer field per-parity
+--     thresholds).  Eased, deadbanded at the centre, off in Video mode.
+--   * LEFT-EDGE SEED: the per-ring phase at x=0 is seeded from the band's own
+--     off-screen left edge ((r0 - r_L)*Q1, r_L = 2nd root per line), so the
+--     edge band no longer "comes to a point" during catch-up.
+--   * K4 = 4 settings (hard / 2 / 8 grays / smooth); S9 Smooth folded in, S9
+--     free.  K3 x144 decode -> shift-adds.
+--
+-- v1.8 (2026-10-09, diag; Ron: manual control only -- no auto-animation):
+--   * v1.8.1: S7 Glide 2x quicker (C_GSH 6 -> 5: ~1/32 of the way per field,
+--     a full-screen move settles in ~1.6 s instead of ~3.2 s).
+--   * K1/K2 range +-0.625 W/H: the centre goes ~12% past each edge at most
+--     (was +-2 W/H -- the rings got lost off-screen).
+--   * P12 in RINGS mode = ZOOM: up to 3 octaves (x8) subtracted from K3's
+--     log-spacing -> the rings expand from the centre (clamped at 2048 px).
+--     (An exact band-WIDTH control was built first and did not fit at
+--     ~101% LC; shelved in .cascade_diag_work/v18_width_shelved/.)
+--   * P12 in VIDEO mode = wave depth, 8 levels, up to 53 px (was 4 zones,
+--     18 px); delay line 32 -> 64 taps (same 2 EBR).
+--
+-- v1.7 (2026-10-08, Tier-1 finalization, no look change; HW-verified):
+--   * ring luma in studio range 64..942 (was 0..1023: codes 0/1023 are the
+--     BT.656/1120 sync-word codes);
+--   * blanking gate covers BOTH modes (ring mode emitted the last pixel's
+--     key through every hblank);
+--   * the dead multi-ring smooth-fade phase (old S11 Smooth: ph_acc, Q
+--     decode + multiply, line seed) removed; its sequencer/E_LINE slots
+--     are kept as no-ops so the engine timing is unchanged.
+--
 -- No CORDIC, no cos/sin ROM, no per-pixel multiply anywhere; every edge is an
 -- exact integer circle.  C_NR MUST stay even (mark parity == k parity).
 --
@@ -62,7 +115,7 @@ architecture cascade of program_top is
 
     constant C_LATENCY : integer := 6;    -- RINGS: x/read 1 + parity 1 + g2 1 + merge 1 + key 1 + out 1
     -- VIDEO path: the refraction is a ONE-SIDED push (read 1 + disp back,
-    -- disp = 0..18).  A constant displacement term is an invisible whole-
+    -- disp = 0..18; v1.8: 0..53).  A constant displacement term is an invisible whole-
     -- picture shift, so 0..18 one-sided looks IDENTICAL to +-9 centred --
     -- and it lands the video pipeline at delay 6 = C_LATENCY exactly, so
     -- BOTH modes share the ring mode's PROVEN sync taps.  (v1.4's deeper
@@ -71,7 +124,7 @@ architecture cascade of program_top is
     constant C_MID     : unsigned(9 downto 0) := to_unsigned(512, 10);   -- neutral chroma
 
     constant C_DB    : integer := 14;                                    -- detent deadband
-    constant C_GSH   : integer := 6;                                     -- glide one-pole shift
+    constant C_GSH   : integer := 5;                                     -- glide one-pole shift (v1.8.1: 6 -> 5, 2x quicker)
 
     -- CASCADE chain: per-ring centre offsets.  The coupling clamp is an
     -- OCTAGON (per-axis +/-A AND 45-degree +/-C = A*sqrt2): a ring yields
@@ -185,18 +238,30 @@ architecture cascade of program_top is
     signal s_cx_k, s_cy_k : signed(10 downto 0) := (others => '0');      -- (Kn-512), deadbanded
     signal s_k3_per : unsigned(9 downto 0) := to_unsigned(430, 10);
     signal s_k4_gr  : unsigned(9 downto 0) := (others => '0');
-    signal s_gn     : integer range 0 to 6 := 0;     -- gradient: fold k over 2^(gn+1) rings (0 = hard)
-    signal s_qph    : unsigned(13 downto 0) := (others => '0');  -- smooth phase step / radial px
-    signal s_q1h    : signed(13 downto 0) := (others => '0');    -- 2^(17-sft-n), pre-decoded
+    signal s_gn     : unsigned(1 downto 0) := "00";  -- K4 GRADIENT: hard / 2 / 8 grays / smooth
     signal s_qp1    : unsigned(14 downto 0) := (others => '0');  -- stepped step: 2^16/s (per-ring)
     signal s_h1s    : signed(13 downto 0) := (others => '0');    -- 2^(16-sft), pre-decoded
     signal s_sm1    : unsigned(11 downto 0) := to_unsigned(41, 12);  -- spacing - 1 (m wrap)
     signal s_glx, s_gly : std_logic := '1';          -- GLIDE (S7) -- default on
     signal s_dyn    : std_logic := '0';              -- cascade motion (S8)
-    signal s_ramp   : std_logic := '0';              -- S9: per-ring ramp Steps/Smooth
     signal s_home   : std_logic := '0';              -- Catch-Up (S10): glide home
-    signal s_vsat   : std_logic := '0';              -- S11: Rings / Video saturation mod
-    signal s_wdep   : unsigned(1 downto 0) := (others => '0');  -- P12: wave depth zone (off/4/8/9)
+    signal s_vsat   : std_logic := '0';              -- S11: Rings / Video (refraction)
+    -- P12 (v1.8): Rings mode = ZOOM (log-domain spacing offset), Video = wave depth
+    signal s_p12    : unsigned(9 downto 0) := (others => '0');   -- latched at vsync
+    signal s_lfb    : signed(15 downto 0) := to_signed(-462, 16);-- K3 log-spacing, before zoom
+    signal s_zm     : unsigned(7 downto 0) := (others => '0');   -- zoom, Q6 octaves (0..191 = x8)
+    -- K5 WIDTH (v1.9): band balance.  Every EVEN disc's radius moves by
+    -- delta = f*s (f = (K5-512)/512, deadbanded at the centre), so bands
+    -- alternate s+delta / s-delta; the cascade slack is derived from the
+    -- NARROWEST band, and the outer field uses per-parity thresholds.
+    signal s_k5     : unsigned(9 downto 0) := to_unsigned(512, 10);  -- raw, latched at vsync
+    signal s_k5f    : unsigned(12 downto 0) := to_unsigned(4096, 13);-- eased (diff>>3 per run), Q3
+    signal s_fd     : signed(13 downto 0) := (others => '0');   -- k5f - centre (Q3)
+    signal s_fab    : unsigned(12 downto 0) := (others => '0'); -- |fd| (f = fd/4096)
+    signal s_fdz    : std_logic := '1';                         -- inside the centre deadband
+    signal s_dabs   : unsigned(12 downto 0) := (others => '0'); -- |delta| = |f|*s, capped s-4
+    signal s_dneg   : std_logic := '0';                         -- delta < 0 (thinner white)
+    signal s_seff   : unsigned(12 downto 0) := to_unsigned(42, 13); -- narrowest band = s - |delta|
 
     ----------------------------------------------------------------------
     -- runtime raster measurement
@@ -233,9 +298,15 @@ architecture cascade of program_top is
     signal s_vs_pulse   : std_logic := '0';
     signal s_ma    : signed(13 downto 0) := (others => '0');
     signal s_mb    : signed(13 downto 0) := (others => '0');
-    signal s_mph   : signed(20 downto 0) := (others => '0');      -- a * b[13:7]
-    signal s_mpl   : signed(21 downto 0) := (others => '0');      -- a * b[6:0]
-    signal s_mp    : signed(27 downto 0) := (others => '0');      -- 2-stage product
+    -- v2.0: the sequencer / frame tail request the ONE serial multiplier
+    -- (in p_engine) with s_mreq + s_ma/s_mb, and stall until it is done.
+    signal s_mreq  : std_logic := '0';
+    -- REGISTERED step-enable for the sequencer and frame tail (the combined
+    -- avid / engine-idle / multiplier-busy / request cone feeding every
+    -- slot register's enable was the HD critical path).  A slot that issues
+    -- a request also holds it low, so the 1-cycle-late decision can never
+    -- step past a pending product.
+    signal seq_go  : std_logic := '0';
 
     -- CASCADE chain FSM (once per frame in vblank, 4 clocks per ring)
     signal s_cxp, s_cyp : signed(13 downto 0) := (others => '0');  -- prev inner centre (px)
@@ -252,6 +323,11 @@ architecture cascade of program_top is
     signal s_pu,  s_pv  : signed(13 downto 0) := (others => '0');  -- rotated, clamped step
     signal s_mvx, s_mvy : signed(9 downto 0) := (others => '0');
     signal s_chain_d : std_logic := '0';
+    -- local registered "blanking" + slot-4 strobe for the chain FSM (the raw
+    -- core avid and the s_seq compare in its enable cones were routing-
+    -- critical; the chain only ever runs in vblank anyway)
+    signal ch_blank : std_logic := '0';
+    signal ch_go4   : std_logic := '0';
 
     -- ADAPTIVE ring count.  Ring k's radius is (k+1)*spacing, and the span
     -- engine clamps radii at C_RCL -- so at coarse spacings every ring past
@@ -278,7 +354,7 @@ architecture cascade of program_top is
     ----------------------------------------------------------------------
     signal s_chain_q : std_logic := '0';                          -- chain_run delayed (edge)
     signal s_tlrun : std_logic := '0';
-    signal s_tlph  : integer range 0 to 5 := 0;
+    signal s_tlph  : integer range 0 to 3 := 0;
     signal s_cv_done : std_logic := '0';                          -- pulse: frame terms ready
     signal s_dy0   : signed(14 downto 0) := (others => '0');      -- first active line's dy
     signal s_dx0   : signed(13 downto 0) := (others => '0');      -- dx0' = line-start dx - exo
@@ -292,25 +368,43 @@ architecture cascade of program_top is
     signal e_st : t_est := E_IDLE;
     signal e_cnt : integer range 0 to C_NR + 1 := 0;              -- ring group counter (2 drain groups)
     signal e_ph  : integer range 0 to 14 := 0;                    -- span slot (15-slot cadence)
-    signal l_ph  : integer range 0 to 45 := 0;                    -- line-seed slot
+    signal l_ph  : integer range 0 to 98 := 0;                    -- line-seed slot
     signal e_first : std_logic := '0';                            -- cv_done pass: chain SPAN->LINE
+    -- per-group ring-count flags, registered at phase 0 (the 7-bit compares
+    -- against s_nreff in every phase's enable cone were routing-critical)
+    signal f_lt, f_mid, f_ge2, f_last : std_logic := '0';
+    signal cl_hit  : std_logic := '0';                            -- E_CLEAR exit, registered
     signal l_pend  : std_logic := '0';                            -- avid fell while SPAN still busy
     signal cl_cnt  : unsigned(11 downto 0) := (others => '0');    -- E_CLEAR address counter
     signal cl_end  : unsigned(11 downto 0) := (others => '0');    -- E_CLEAR stop (W+2, latched)
-    signal m_a, m_b : signed(14 downto 0) := (others => '0');     -- engine multiply (2-stage)
-    signal m_ph     : signed(22 downto 0) := (others => '0');     -- a * b[14:7]
-    signal m_pl     : signed(22 downto 0) := (others => '0');     -- a * b[6:0]
-    signal m_p      : signed(29 downto 0) := (others => '0');
+    -- v2.0 SERIAL MULTIPLIER (replaces a 15x15 LUT array, ~570 LUT): signed
+    -- 15-bit multiplicand x UNSIGNED 14-bit multiplier, shift-and-add, one
+    -- 17-bit add per clock.  Loaded at slot T, 14 steps, product readable at
+    -- slot T+15 -- exactly one 15-slot span group.  Every user is arranged
+    -- so the multiplier operand is non-negative (squares use |x|).
+    signal mu_m    : signed(14 downto 0) := (others => '0');      -- multiplicand
+    signal mu_a    : signed(15 downto 0) := (others => '0');      -- high product bits
+    signal mu_q    : unsigned(13 downto 0) := (others => '0');    -- multiplier -> low bits
+    signal mu_cnt  : integer range 0 to 14 := 0;
+    signal mu_busy : std_logic := '0';
+    -- next-load operand registers: every load comes from these (the operand
+    -- arithmetic + load-gating compares in front of mu_* were the HD
+    -- critical path).  Request at T -> load at T+1 -> product at T+16.
+    signal nx_m    : signed(14 downto 0) := (others => '0');
+    signal nx_q    : unsigned(13 downto 0) := (others => '0');
+    signal nx_ld   : std_logic := '0';
+    signal m_p     : signed(29 downto 0);                         -- product view {mu_a, mu_q}
 
     signal sp_dy   : signed(14 downto 0) := (others => '0');      -- NEXT line's dy (from inner centre)
     signal sp_ey   : signed(14 downto 0) := (others => '0');
     signal sp_rr   : unsigned(11 downto 0) := (others => '0');    -- ring radius R (accumulated)
+    signal sp_rq   : unsigned(11 downto 0) := (others => '0');    -- R +- |delta| on even discs (WIDTH)
     signal sp_ady  : unsigned(14 downto 0) := (others => '0');    -- |dy| pre-clamp (<= 24574)
     signal sp_emp  : std_logic := '0';                            -- |dy| >= R -> empty span
     signal sp_ex   : signed(14 downto 0) := (others => '0');      -- ex of the ring in front-end
     signal sp_exc  : signed(15 downto 0) := (others => '0');      -- cx + ex (RAW screen x of centre)
-    signal sp_excq1 : signed(15 downto 0) := (others => '0');      -- delayed to the mark write
-    signal sp_empq1, sp_empq2 : std_logic := '0';
+    signal sp_excq0, sp_excq1 : signed(15 downto 0) := (others => '0'); -- centre x, ring k-1 / k-2
+    signal sp_empq0, sp_empq1, sp_empq2 : std_logic := '0';
     signal sp_wl, sp_wr1 : signed(15 downto 0) := (others => '0');    -- staged edges, raw x (slot 6)
 
     -- per-pass line-start ring index (C_NR minus the discs overhanging the
@@ -319,6 +413,40 @@ architecture cascade of program_top is
     signal m_kinit      : unsigned(6 downto 0) := to_unsigned(C_NR, 7);
     signal m_kinit_done : unsigned(6 downto 0) := to_unsigned(C_NR, 7);
     signal m0_w, m0_done : std_logic := '0';          -- a mark lands at x=0 (snap the seed)
+    -- v1.9 LEFT-EDGE SEED: the nearest disc edge at or left of x=0 on the
+    -- NEXT line (= the left boundary of the band x=0 sits in).  E_LINE roots
+    -- its outer-centre radius r_L and seeds the per-ring phase with
+    -- (r0 - r_L)*Q1 -- exactly how every on-screen band starts at its own
+    -- left edge -- instead of the outer-centre phase, which is wrong for an
+    -- offset nest (the edge band "came to a point" during catch-up).
+    signal xl_w, xl_done   : signed(15 downto 0) := (others => '0');
+    signal xlv_w, xlv_done : std_logic := '0';
+    signal xc_r   : signed(15 downto 0) := (others => '0');       -- candidate, registered (timing)
+    signal xcv_r  : std_logic := '0';
+    signal le_r0  : unsigned(13 downto 0) := (others => '0');     -- r0, kept across the 2nd root
+    signal le_dl  : signed(14 downto 0) := (others => '0');       -- r0 - r_L
+    -- v2.0.1: E_LINE's own copy of the spacing (s_spac's fanout made the
+    -- ring-index correction the HD Analog critical path) + the correction
+    -- split into 2 clocks per step (candidates, then select)
+    signal s_spl   : unsigned(12 downto 0) := to_unsigned(42, 13);
+    attribute keep : boolean;
+    attribute keep of s_spl : signal is true;
+    -- v2.0.2: per-consumer copies of the per-frame WIDTH / spacing registers
+    -- (one copy feeding the sequencer, the span engine AND the pixel path
+    -- across the die was HD HDMI's recurring critical path)
+    signal s_dabs_e, s_dabs_p : unsigned(12 downto 0) := (others => '0');
+    signal s_dneg_e, s_dneg_p : std_logic := '0';
+    signal s_seff_p : unsigned(12 downto 0) := to_unsigned(42, 13);
+    signal s_shalf_p : unsigned(11 downto 0) := to_unsigned(21, 12);   -- s/2 (S9 moire)
+    attribute keep of s_shalf_p : signal is true;
+    signal s_spac_e : unsigned(12 downto 0) := to_unsigned(42, 13);
+    attribute keep of s_dabs_e : signal is true;
+    attribute keep of s_dabs_p : signal is true;
+    attribute keep of s_dneg_e : signal is true;
+    attribute keep of s_dneg_p : signal is true;
+    attribute keep of s_seff_p : signal is true;
+    attribute keep of s_spac_e : signal is true;
+    signal le_dm, le_dp : signed(14 downto 0) := (others => '0');
 
     -- ONE 1-step/cycle sqrt unit (15-slot ring cadence; also roots r0).  The
     -- bit mask is a SHIFT REGISTER (>>2 per step), so a step is just an OR +
@@ -338,6 +466,8 @@ architecture cascade of program_top is
     signal t_q    : signed(15 downto 0) := (others => '0');       -- 2*dx'+1 (r^2 step)
     signal su_m   : unsigned(11 downto 0) := (others => '0');     -- r mod spacing (ring phase)
     signal k_ld1, k_ld2 : unsigned(6 downto 0) := (others => '0'); -- t_kl, delayed to merge
+    signal c_e1, c_o1   : std_logic := '0';                         -- outer-field WIDTH tests
+    signal h1, h2       : std_logic := '0';                         -- S9: past half a band (outer centre)
 
     -- SMOOTH-fade machinery: a spacing-1 SUB-TRACKER (same candidate-arm
     -- structure, taps degenerate to +4/0/+2) detects every integer-radius
@@ -346,8 +476,6 @@ architecture cascade of program_top is
     signal su_u    : signed(16 downto 0) := (others => '0');      -- r^2 - rint^2
     signal su_qmd  : signed(17 downto 0) := (others => '0');      -- q - D1
     signal su_qpdm : signed(17 downto 0) := (others => '0');      -- q + D1 - 2
-    signal ph_acc  : unsigned(15 downto 0) := (others => '0');    -- fold phase (wraps = period)
-    signal ph_f1, ph_f2 : unsigned(7 downto 0) := (others => '0');-- folded luma, delayed to merge
     signal ph1_acc : unsigned(15 downto 0) := (others => '0');    -- PER-RING phase (period 1 ring;
                                                                   -- SNAPPED to 0 at every disc edge)
     signal ph1_f1  : unsigned(7 downto 0) := (others => '0');
@@ -355,7 +483,6 @@ architecture cascade of program_top is
     signal st_v    : std_logic := '0';                            -- s_avid_p, delayed
     signal lb_lo   : signed(14 downto 0) := (others => '0');      -- B_lo maintained thru corrections
     signal le_d    : signed(14 downto 0) := (others => '0');      -- d0 = r0 - B_lo
-    signal ph_base : unsigned(15 downto 0) := (others => '0');    -- (k0 mod 2w) << (15-n)
     signal su_d1   : signed(15 downto 0) := (others => '0');      -- D1 = 2*r0+1 (seed)
 
     -- outer-field recentre (ring C_NR-1's converted offset), frame-stable
@@ -380,8 +507,8 @@ architecture cascade of program_top is
     signal g2_k   : unsigned(6 downto 0) := (others => '0');
 
     signal r10_k    : unsigned(6 downto 0) := (others => '0');  -- ring index at the merge
-    signal r10_s    : unsigned(7 downto 0) := (others => '0');  -- smooth luma at the merge
     signal r10_t    : unsigned(7 downto 0) := (others => '0');  -- per-ring ramp at the merge
+    signal r10_h    : std_logic := '0';                         -- S9 moire bit at the merge
     signal r12_key  : unsigned(7 downto 0) := (others => '0');
     signal s_out_y  : unsigned(9 downto 0) := (others => '0');
 
@@ -398,17 +525,23 @@ architecture cascade of program_top is
     -- shifts the saturation pattern sideways by an invisible amount.  So the
     -- video takes its own 3-cycle path and the syncs are tapped to match.
     ----------------------------------------------------------------------
-    type t_vd is array(0 to 31) of std_logic_vector(29 downto 0);
+    type t_vd is array(0 to 63) of std_logic_vector(29 downto 0);
     signal s_vd    : t_vd := (others => (others => '0'));
-    signal vd_wa   : unsigned(4 downto 0) := (others => '0');
-    signal vd_ra   : unsigned(4 downto 0) := (others => '0');
+    signal vd_wa   : unsigned(5 downto 0) := (others => '0');
+    signal vd_ra   : unsigned(5 downto 0) := (others => '0');
     signal vd_q    : std_logic_vector(29 downto 0) := (others => '0');
     signal vd_hold : std_logic_vector(29 downto 0) := (others => '0');
     signal vd_tc   : unsigned(3 downto 0) := (others => '0');
-    signal vd_px   : unsigned(4 downto 0) := (others => '0');  -- pixels written this line (sat 31)
+    signal vd_px   : unsigned(5 downto 0) := (others => '0');  -- pixels written this line (sat 63)
     signal r13_y, r13_u, r13_v : unsigned(9 downto 0) := (others => '0');
     signal r14_y, r14_u, r14_v : unsigned(9 downto 0) := (others => '0');
     signal s_out_u, s_out_v : unsigned(9 downto 0) := C_MID;
+    -- S9 MOIRE (v2.1): XOR the rings with a half-phase copy of the rings
+    -- around the outer centre.  At rest that DOUBLES the ring count; while
+    -- the cascade has the rings offset (half-way points from the outer
+    -- centre vs the true ring edges), moire flares and dissolves as they
+    -- catch up.
+    signal s_s9    : std_logic := '0';
 
     ----------------------------------------------------------------------
     -- sync delay
@@ -516,16 +649,17 @@ begin
         variable v_ip   : integer;
         variable v_e    : signed(27 downto 0);
         variable v_dy0  : signed(14 downto 0);
+        variable v_lz   : signed(15 downto 0);
+        variable v_pe   : signed(13 downto 0);
+        variable v_req  : std_logic;
     begin
         if rising_edge(clk) then
             s_prev_vsync <= data_in.vsync_n;
             s_vs_pulse   <= '0';
             s_cv_done    <= '0';
             s_chain_q    <= s_chain_run;
-            -- 2-stage shared multiply (partials, then combine)
-            s_mph <= s_ma * s_mb(13 downto 7);
-            s_mpl <= s_ma * signed('0' & s_mb(6 downto 0));
-            s_mp  <= shift_left(resize(s_mph, 28), 7) + resize(s_mpl, 28);
+            s_mreq       <= '0';                 -- 1-clock multiplier request
+            v_req        := '0';
 
             if data_in.vsync_n = '0' and s_prev_vsync = '1' then
                 s_vs_pulse <= '1';
@@ -539,51 +673,77 @@ begin
 
                 s_k3_per <= unsigned(registers_in(2));
                 s_k4_gr  <= unsigned(registers_in(3));
+                s_k5     <= unsigned(registers_in(4));      -- K5 Width
                 s_glx <= registers_in(6)(0);   -- S7 GLIDE
                 s_gly <= registers_in(6)(0);
                 s_dyn <= registers_in(6)(1);   -- S8 Cascade (uniform / sequential)
-                s_ramp <= registers_in(6)(2);  -- S9 per-ring ramp: Steps / Smooth
+                s_s9  <= registers_in(6)(2);   -- S9: Moire
                 s_home<= registers_in(6)(3);   -- S10 Catch-Up (stay-dragged / glide-home)
-                s_vsat<= registers_in(6)(4);   -- S11 Video (rings / saturation-mod the input)
-                s_wdep<= unsigned(registers_in(7)(9 downto 8));  -- P12 wave depth zone
+                s_vsat<= registers_in(6)(4);   -- S11 Output: Rings / Video (refraction)
+                s_p12 <= unsigned(registers_in(7));            -- P12 Zoom (Rings) / Wave depth (Video)
 
                 s_fpar <= data_in.field_n;
                 if data_in.field_n /= s_fpar then s_ilace <= '1';
                 else                              s_ilace <= '0'; end if;
 
-                s_seq <= to_unsigned(20, 5);
+                s_seq <= to_unsigned(21, 5);
 
-            elsif s_seq /= 0 and data_in.avid = '0' then
+            elsif s_seq /= 0 and seq_go = '1' then
                 s_seq <= s_seq - 1;
 
                 case to_integer(s_seq) is
+                    -- v2.0: ONE product at a time on the serial multiplier.
+                    -- A request slot raises s_mreq; the sequencer then stalls
+                    -- (mu_busy) and the NEXT slot reads the finished product.
 
-                    -- centre X: cx = W/2 + (K1-512)*W/256, via the shared mult
-                    -- (2-stage mult: operands at slot T, product readable T-3)
-                    when 20 => s_ma <= resize(s_cx_k, 14); s_mb <= resize(signed('0' & s_W), 14);
-                    when 17 =>
-                        v_ct := s_mp;
+                    -- ZOOM (P12 in Rings mode): the slider subtracts up to 3
+                    -- octaves from K3's log-spacing -> rings expand up to x8
+                    -- from the centre (clamped at the 2048 px maximum).  Off
+                    -- in Video mode, where P12 is the wave depth.
+                    when 21 =>
+                        s_lfb <= to_signed(-704, 16)
+                                 + signed(resize(shift_right(resize(s_k3_per, 14)        -- K3 * 9/16
+                                   + shift_left(resize(s_k3_per, 14), 3), 4), 16));
+                        if s_vsat = '1' then
+                            s_zm <= (others => '0');
+                        else                                -- P12 * 3/16 -> 0..191
+                            s_zm <= resize(shift_right(resize(s_p12, 12)
+                                    + shift_left(resize(s_p12, 12), 1), 4), 8);
+                        end if;
+
+                    -- centre: cx = W/2 + (K1-512)*1.25W/1024 (+-0.625 W: the
+                    -- centre goes ~12% past each edge at most)
+                    when 20 =>
+                        s_ma <= resize(s_cx_k, 14);
+                        s_mb <= signed(resize(resize(s_W, 13) + shift_right(resize(s_W, 13), 2), 14));
+                        s_mreq <= '1';  v_req := '1';
+                    when 19 =>
+                        v_ct := resize(m_p, 28);                          -- slot-20 product
                         v_targ := shift_left(resize(signed('0' & s_W(11 downto 1)), 22), 8)
-                                  + resize(v_ct, 22);
+                                  + resize(shift_right(v_ct, 2), 22);
                         if s_glx = '1' then s_cxs <= s_cxs + shift_right(v_targ - s_cxs, C_GSH);
                         else                s_cxs <= v_targ; end if;
-
-                    -- centre Y
-                    when 16 => s_ma <= resize(s_cy_k, 14); s_mb <= resize(signed('0' & s_H), 14);
-                    when 13 =>
-                        v_ct := s_mp;
+                        s_ma <= resize(s_cy_k, 14);                       -- centre Y
+                        s_mb <= signed(resize(resize(s_H, 13) + shift_right(resize(s_H, 13), 2), 14));
+                        s_mreq <= '1';  v_req := '1';
+                    when 18 =>
+                        v_ct := resize(m_p, 28);                          -- slot-19 product
                         v_targ := shift_left(resize(signed('0' & s_H(11 downto 1)), 22), 8)
-                                  + resize(v_ct, 22);
+                                  + resize(shift_right(v_ct, 2), 22);
                         if s_gly = '1' then s_cys <= s_cys + shift_right(v_targ - s_cys, C_GSH);
                         else                s_cys <= v_targ; end if;
-
-                    -- FREQUENCY: Lf(Q6) = -704 + Period*144/256.  The
-                    -- decode is pipelined one step per slot (a single-slot
-                    -- negate+ROM+barrel cone was hd_hdmi's critical path).
-                    when 19 =>
-                        s_lf <= to_signed(-704, 16)
-                                + resize(shift_right(signed('0' & s_k3_per) * to_signed(144, 9), 8), 16);
-                    when 18 =>
+                        -- FREQUENCY: Lf(Q6) = -704 + Period*9/16 - zoom
+                        v_lz := s_lfb - signed(resize(s_zm, 16));
+                        if v_lz < -704 then v_lz := to_signed(-704, 16); end if;   -- spacing <= 2048
+                        s_lf <= v_lz;
+                        -- K5 ease (pot noise would shimmer the ring edges)
+                        v_pe   := signed(resize(s_k5f, 14)) + shift_right(
+                                  signed(shift_left(resize(s_k5, 14), 3))
+                                  - signed(resize(s_k5f, 14)), 3);
+                        s_k5f  <= unsigned(v_pe(12 downto 0));
+                    -- the decode is pipelined one step per slot (a single-slot
+                    -- negate+ROM+barrel cone was hd_hdmi's critical path)
+                    when 17 =>
                         v_li  := to_integer(shift_right(s_lf, 6));
                         v_lfr := to_integer(unsigned(s_lf(5 downto 0)));
                         s_fnum <= C_MANT(v_lfr);
@@ -592,45 +752,73 @@ begin
                         elsif v_fsh > 15 then v_fsh := 15; end if;
                         s_sft <= v_fsh;
                         s_nl  <= unsigned(-s_lf);
-
+                        s_fd  <= signed(resize(s_k5f, 14)) - to_signed(4096, 14);
                     -- SPACING (px per ring) = 2^(-Lf/64) = C_MANT(frac) >> (10-int).
                     -- Lf in [-704,-129] -> int in [2,11] -> spacing in [4,2048].
-                    when 15 =>
+                    when 16 =>
                         s_mant <= C_MANT(to_integer(s_nl(5 downto 0)));
                         s_sip  <= to_integer(s_nl(9 downto 6));
-                    -- stepped per-ring phase step Q1 = 2^16/s = fnum*2^(16-sft)>>8
-                    when 12 =>
-                        s_h1s <= shift_left(to_signed(1, 14), 16 - s_sft);
-                    when 11 =>
-                        s_ma <= signed(resize(s_fnum, 14));
-                        s_mb <= s_h1s;
-                    when 14 =>
+                        -- WIDTH fraction f = fd/4096 = (K5-512)/512 -> +-1 over
+                        -- the full knob; the s-4 cap binds only at the ends
+                        s_fab  <= unsigned(resize(abs(s_fd), 13));   -- |fd| <= 4096
+                        s_dneg <= s_fd(13);
+                        if s_fd > -64 and s_fd < 64 then s_fdz <= '1'; else s_fdz <= '0'; end if;
+                    when 15 =>
                         if s_sip > 10 then
                             s_spac <= resize(shift_left(resize(s_mant, 13), s_sip - 10), 13);
+                            s_spl  <= resize(shift_left(resize(s_mant, 13), s_sip - 10), 13);
                         else
                             s_spac <= resize(shift_right(s_mant, 10 - s_sip), 13);
+                            s_spl  <= resize(shift_right(s_mant, 10 - s_sip), 13);
                         end if;
-
-                    -- octagon slack in px (pure shift-adds, no mult; one
-                    -- short step per slot -- the single-slot version was the
-                    -- 17.7 ns critical path):
-                    --   A = min(s - s/8,  min(s - s/16 - s/32 - 3, 640))
-                    -- (~0.875*s; the cap terms keep adjacent edges > 1 px
-                    -- apart on any scanline -- mark-write collision safety --
-                    -- and |e[23]| inside the 15-bit chain words)
-                    --   C = A * ~sqrt2 = A + A/4 + A/8 + A/32 + A/128
-                    when 9 =>
-                        s_araw <= resize(s_spac - shift_right(s_spac, 3), 12);
-                        s_acap <= resize(s_spac - shift_right(s_spac, 4)
-                                         - shift_right(s_spac, 5), 13);
-                    when 8 =>
-                        -- Q1 capture (slot-11 product; clamp to the 15-bit
-                        -- signed multiplier operand range)
-                        if unsigned(s_mp(23 downto 8)) > 16383 then
+                    -- stepped per-ring phase step Q1 = 2^16/s = fnum*2^(16-sft)>>8
+                    when 14 =>
+                        s_h1s <= shift_left(to_signed(1, 14), 16 - s_sft);
+                        s_spac_e <= s_spac;                          -- span-engine copy
+                    -- WIDTH: |delta| = |fd| * spacing >> 12.  Video mode and
+                    -- the centre deadband force classic bands.
+                    when 13 =>
+                        if s_vsat = '1' or s_fdz = '1' then
+                            s_ma <= (others => '0');
+                        else
+                            s_ma <= signed(resize(s_fab, 14));
+                        end if;
+                        s_mb <= signed(resize(s_spac, 14));
+                        s_mreq <= '1';  v_req := '1';
+                    when 12 =>
+                        s_dabs <= unsigned(m_p(24 downto 12));       -- slot-13 product
+                        s_ma <= s_h1s;                               -- Q1 = h1s * fnum
+                        s_mb <= signed(resize(s_fnum, 14));
+                        s_mreq <= '1';  v_req := '1';
+                    when 11 =>
+                        -- Q1 capture (slot-12 product; clamp to 14 bits, the
+                        -- serial multiplier's operand range)
+                        if unsigned(m_p(23 downto 8)) > 16383 then
                             s_qp1 <= to_unsigned(16383, 15);
                         else
-                            s_qp1 <= resize(unsigned(s_mp(22 downto 8)), 15);
+                            s_qp1 <= resize(unsigned(m_p(22 downto 8)), 15);
                         end if;
+                        if s_dabs + 4 > s_spac then s_dabs <= s_spac - 4; end if; -- bands >= 4 px
+                    when 10 =>
+                        s_seff <= s_spac - s_dabs;
+                    -- octagon slack in px from the NARROWEST band s_eff (pure
+                    -- shift-adds, one short step per slot):
+                    --   A = min(e - e/8,  min(e - e/16 - e/32 - 3, 640))
+                    -- (~0.875*e; the cap terms keep adjacent edges > 1 px apart
+                    -- on any scanline -- mark-write collision safety -- and the
+                    -- chain words inside 15 bits)
+                    --   C = A * ~sqrt2 = A + A/4 + A/8 + A/32 + A/128
+                    when 9 =>
+                        s_dabs_e <= s_dabs;  s_dabs_p <= s_dabs;    -- per-consumer copies
+                        s_dneg_e <= s_dneg;  s_dneg_p <= s_dneg;
+                        s_seff_p <= s_seff;
+                        s_shalf_p <= resize(shift_right(s_spac, 1), 12);
+                        s_araw <= resize(s_seff - shift_right(s_seff, 3), 12);
+                        s_acap <= resize(s_seff - shift_right(s_seff, 4)
+                                         - shift_right(s_seff, 5), 13);
+                        -- K4 GRADIENT: four quarters of the knob
+                        s_gn <= s_k4_gr(9 downto 8);
+                    when 8 =>
                         v_e := resize(signed(s_acap), 28) - 3;
                         if v_e < 0 then v_e := (others => '0'); end if;
                         if v_e > 640 then v_e := to_signed(640, 28); end if;
@@ -644,36 +832,16 @@ begin
                     when 6 =>
                         s_cpx <= resize(s_apx, 13) + resize(shift_right(s_apx, 2), 13)
                                  + resize(shift_right(s_apx, 3), 13);
-                        -- K4 GRADIENT width: 7 zones -> fold over
-                        -- 1/2/4/8/16/32/64 rings; n = (K4*7) >> 10
-                        s_gn <= to_integer(shift_right(shift_left(resize(s_k4_gr, 14), 3)
-                                - resize(s_k4_gr, 14), 10));
                     when 5 =>
                         s_cpx <= s_cpx + resize(shift_right(s_apx, 5), 13)
                                  + resize(shift_right(s_apx, 7), 13);
-                        -- pre-decode the Q operand (a one-hot in s_mb's mux
-                        -- cone was hd_hdmi's critical path).  Exponent floors
-                        -- at 0 (wide fold x huge spacing: Q clamps to
-                        -- ~fnum>>10, a near-flat fade -- period maxed out)
-                        v_li := 17 - s_sft - s_gn;
-                        if v_li < 0 then v_li := 0; end if;
-                        s_q1h <= shift_left(to_signed(1, 14), v_li);
-                    -- (the sequencer runs slots 20..1 only -- slot 0 never
-                    -- executes, so nothing may be scheduled there)
-                    when 4 =>
-                        -- smooth-fade phase step per radial px:
-                        -- Q = fnum * 2^(17-sft-n) >> 10 = 2^16/(2w*s)
-                        s_ma <= signed(resize(s_fnum, 14));
-                        s_mb <= s_q1h;
-                    when 1 =>
-                        s_qph <= unsigned(s_mp(23 downto 10));
-                        s_sm1 <= resize(s_spac - 1, 12);
-
-                    -- publish the glided centre in pixels
-                    when 2 =>
+                        -- publish the glided centre in pixels
                         s_cx <= resize(shift_right(s_cxs, 8), 14);
                         s_cy <= resize(shift_right(s_cys, 8), 14);
-
+                    when 4 =>
+                        s_sm1 <= resize(s_spac - 1, 12);
+                    -- (slots 3..1 free; the chain scan starts at s_seq = 4,
+                    -- after the slack decode -- slot 0 never executes)
                     when others => null;
                 end case;
             end if;
@@ -684,17 +852,17 @@ begin
             --------------------------------------------------------------
             if s_chain_q = '1' and s_chain_run = '0' then
                 s_tlrun <= '1'; s_tlph <= 0;
-            elsif s_tlrun = '1' then
+            elsif s_tlrun = '1' and seq_go = '1' then
                 case s_tlph is
                     when 0 =>
                         s_dx0 <= resize(-s_cx, 14) - resize(s_exo, 14);
                     when 1 =>
-                        s_ma <= s_dx0;  s_mb <= s_dx0;            -- dx0'^2
+                        s_ma <= abs(s_dx0);  s_mb <= abs(s_dx0);  -- dx0'^2 (serial mult)
+                        s_mreq <= '1';  v_req := '1';
                         s_q0 <= resize(shift_left(resize(s_dx0, 16), 1) + 1, 16);
-                    when 2 | 3 => null;                -- 2-stage product in flight
-                    when 4 =>
-                        s_dx0q <= unsigned(s_mp(26 downto 0));
-                    when others =>                     -- phase 5: publish + done
+                    when 2 =>
+                        s_dx0q <= unsigned(m_p(26 downto 0));
+                    when others =>                     -- phase 3: publish + done
                         -- first active line's dy (p_acc hasn't primed it yet)
                         if s_ilace = '1' and data_in.field_n = '1' then
                             v_dy0 := resize(-s_cy, 15) + 1;
@@ -705,7 +873,14 @@ begin
                         s_cv_done <= '1';
                         s_tlrun <= '0';
                 end case;
-                if s_tlph /= 5 then s_tlph <= s_tlph + 1; end if;
+                if s_tlph /= 3 then s_tlph <= s_tlph + 1; end if;
+            end if;
+
+            if data_in.avid = '0' and e_st = E_IDLE and mu_busy = '0'
+               and s_mreq = '0' and nx_ld = '0' and v_req = '0' then
+                seq_go <= '1';
+            else
+                seq_go <= '0';
             end if;
         end if;
     end process p_frame;
@@ -755,6 +930,8 @@ begin
         variable vinx, viny : signed(15 downto 0);
     begin
         if rising_edge(clk) then
+            ch_blank <= not data_in.avid;
+            if s_seq = 4 then ch_go4 <= '1'; else ch_go4 <= '0'; end if;
             ew_wex <= '0';                              -- default: no write
             ew_wey <= '0';
             s_ocap <= '0';                              -- default: 1-cycle pulse
@@ -777,7 +954,7 @@ begin
                 s_eprevx <= (others => '0'); s_eprevy <= (others => '0');
                 s_chain_cnt <= 1; s_chain_ph <= 0; s_chain_wt <= '1';
             elsif s_chain_wt = '1' then
-                if s_seq = 3 then
+                if ch_go4 = '1' then          -- s_seq reached 4: slack decode done
                     s_chain_wt  <= '0';
                     s_chain_run <= '1';
                     -- ring 1's radius = 2*spacing (this frame's spacing lands
@@ -787,7 +964,7 @@ begin
                     s_nrw  <= to_unsigned(2, 7);
                     s_codd <= '1';                  -- scan starts at ring 1
                 end if;
-            elsif s_chain_run = '1' and data_in.avid = '0' then
+            elsif s_chain_run = '1' and ch_blank = '1' then
                 case s_chain_ph is
                 when 0 =>
                     s_chain_ph <= 1;                    -- RD: issue e[k]_old read
@@ -959,6 +1136,15 @@ begin
         variable v_tr : unsigned(26 downto 0);
         variable v_ki : unsigned(6 downto 0);
         variable v_wide : signed(15 downto 0);
+        variable v_xl, v_xc : signed(15 downto 0);
+        variable v_xv, v_cv : std_logic;
+        -- serial-multiplier load request (any slot below may raise it)
+        variable v_ld  : std_logic;
+        variable v_lm  : signed(14 downto 0);
+        variable v_lq  : unsigned(13 downto 0);
+        variable v_sum : signed(16 downto 0);
+        variable v_mq  : unsigned(13 downto 0);
+        variable v_dxl : signed(14 downto 0);
         -- radix-4 sqrt step temporaries
         variable v_sqn, v_sqr, v_sqo : unsigned(26 downto 0);
         -- E_HERM temporaries
@@ -974,10 +1160,9 @@ begin
         variable v_iap, v_oap : std_logic;
     begin
         if rising_edge(clk) then
-            -- 2-stage engine multiply (partials, then combine)
-            m_ph <= m_a * m_b(14 downto 7);
-            m_pl <= m_a * signed('0' & m_b(6 downto 0));
-            m_p  <= shift_left(resize(m_ph, 30), 7) + resize(m_pl, 30);
+            v_ld := '0';
+            v_lm := (others => '0');
+            v_lq := (others => '0');
 
             -- pending right-edge mark: issue one cycle after it was staged
             -- (left/right of one ring are 8 slots apart -- never collides)
@@ -1026,7 +1211,7 @@ begin
             if s_avid_p = '1' then
                 -- INTEGER-RADIUS TRACKER (spacing 1: taps degenerate to
                 -- +4/0/+2, 17-bit arithmetic).  Every crossing is one radial
-                -- pixel: phase +/- Q (smooth fade), and the m = r mod s
+                -- pixel: the m = r mod s
                 -- counter wraps -> ring index +/-1 (stepped mode).  This
                 -- replaced the 28-bit r^2-bracket tracker outright.
                 v_s1 := resize(su_u, 18) + resize(t_q, 18);
@@ -1035,7 +1220,6 @@ begin
                 if v_s1 < 0 then                          -- inward: r-1
                     su_u    <= resize(v_i1, 17);
                     su_qmd  <= su_qmd + 4;
-                    ph_acc  <= ph_acc - resize(s_qph, 16);
                     su_cr   <= "11";                      -- -1 (applied next cycle)
                     if su_m = 0 then
                         su_m <= resize(s_sm1, 12);
@@ -1046,7 +1230,6 @@ begin
                 elsif v_o1 >= 0 then                      -- outward: r+1
                     su_u    <= resize(v_o1, 17);
                     su_qpdm <= su_qpdm + 4;
-                    ph_acc  <= ph_acc + resize(s_qph, 16);
                     su_cr   <= "01";                      -- +1 (applied next cycle)
                     if su_m = s_sm1 then
                         su_m <= (others => '0');
@@ -1089,12 +1272,14 @@ begin
                     s_lb_eng <= '0';                  -- line 0's marks -> bank 0
                     e_first  <= '1';
                     cl_cnt   <= (others => '0');
-                    cl_end   <= resize(s_W, 12) + 2;  -- equality exit (a >= carry
+                    cl_end   <= resize(s_W, 12) + 1;  -- registered equality exit (cl_hit)
+                    cl_hit   <= '0';
                     e_st     <= E_CLEAR;              -- chain here was critical)
                 elsif data_in.avid = '1' and s_avid_p = '0' then
-                    sp_rr  <= resize(s_spac, 12);     -- pass for the NEXT line
+                    sp_rr  <= resize(s_spac_e, 12);     -- pass for the NEXT line
                     m_kinit <= s_nreff;
                     m0_w   <= '0';
+                    xlv_w  <= '0';
                     e_cnt  <= 0;  e_ph <= 0;
                     e_st   <= E_SPAN;
                 elsif l_pend = '1' or (s_avid_p = '1' and data_in.avid = '0') then
@@ -1106,11 +1291,13 @@ begin
             when E_CLEAR =>
                 -- wipe both banks 0..W+1 (write-port muxes route this state)
                 cl_cnt <= cl_cnt + 1;
-                if cl_cnt = cl_end then
+                if cl_cnt = cl_end then cl_hit <= '1'; else cl_hit <= '0'; end if;
+                if cl_hit = '1' then                  -- cl_cnt = W+2, as before
                     sp_dy  <= s_dy0;                  -- frame's first line
-                    sp_rr  <= resize(s_spac, 12);
+                    sp_rr  <= resize(s_spac_e, 12);
                     m_kinit <= s_nreff;
                     m0_w   <= '0';
+                    xlv_w  <= '0';
                     e_cnt  <= 0;  e_ph <= 0;
                     e_st   <= E_SPAN;
                 end if;
@@ -1120,66 +1307,91 @@ begin
                     when 0 =>
                         -- chain RAM read settling; per-line trigger grabs the
                         -- next line's dy here (s_dyb updated at the rise edge)
+                        f_lt   <= '0';  f_mid <= '0';  f_ge2 <= '0';  f_last <= '0';
+                        if e_cnt < to_integer(s_nreff) then f_lt <= '1'; end if;
+                        if e_cnt >= 1 and e_cnt <= to_integer(s_nreff) then f_mid <= '1'; end if;
+                        if e_cnt >= 2 then f_ge2 <= '1'; end if;
+                        if e_cnt = to_integer(s_nreff) + 1 then f_last <= '1'; end if;
                         if e_cnt = 0 and e_first = '0' then
                             sp_dy <= s_dyb;
                         end if;
                     when 1 =>
-                        if e_cnt < to_integer(s_nreff) then
+                        if f_lt = '1' then
                             sp_ey <= doa_ey;                  -- both axes arrive together
                             sp_ex <= doa_ex;
                         end if;
                     when 2 =>
-                        if e_cnt < to_integer(s_nreff) then
+                        if f_lt = '1' then
                             v_dy := resize(sp_dy, 16) - resize(sp_ey, 16);
                             v_ad := abs(v_dy);                -- <= 12500, bit 15 = 0
                             sp_ady <= unsigned(v_ad(14 downto 0));
                             sp_exc <= resize(sp_ex, 16) + resize(s_cx, 16);  -- raw screen x
                         end if;
                     when 3 =>
-                        if e_cnt < to_integer(s_nreff) then
+                        if f_lt = '1' then
                             if sp_ady > C_RCL then sp_emp <= '1'; sp_ady <= to_unsigned(C_RCL, 15);
                             else sp_emp <= '0'; end if;
                         end if;
-                    when 4 =>
-                        if e_cnt < to_integer(s_nreff) then
-                            -- w^2 = (R - |dy|) * (R + |dy|)
-                            m_a <= signed(resize(sp_rr, 15)) - signed(resize(sp_ady(12 downto 0), 15));
-                            m_b <= signed(resize(sp_rr, 15)) + signed(resize(sp_ady(12 downto 0), 15));
+                        -- WIDTH: even discs get R +- |delta| (odd discs, incl.
+                        -- the outermost modelled one, keep R -> the outer seam
+                        -- is untouched).  Stays in 4..4095 by the s-4 cap.
+                        if (e_cnt mod 2) = 1 then
+                            sp_rq <= sp_rr;
+                        elsif s_dneg_e = '1' then
+                            sp_rq <= sp_rr - resize(s_dabs_e, 12);
+                        else
+                            sp_rq <= sp_rr + resize(s_dabs_e, 12);
                         end if;
-                    when 5 | 6 => null;                       -- m_p registers
-                    when 7 =>
-                        -- stage ring e_cnt-1's edges from the JUST-FINISHED
-                        -- sqrt (reads see the pre-load value), then hand the
-                        -- unit to ring e_cnt.  14 steps run in slots 8..14
-                        -- and 0..6 of the next group.
+                    when 4 =>
+                        -- v2.0 SERIAL-MULTIPLIER PIPELINE (request here, load
+                        -- next clock, product 16 clocks later = phase 5 of
+                        -- the next group).  Multiply ring k:
+                        --   w^2 = (R - |dy|) * (R + |dy|)
+                        if f_lt = '1' then
+                            v_ld := '1';
+                            v_lm := signed(resize(sp_rq, 15)) - signed(resize(sp_ady(12 downto 0), 15));
+                            v_lq := resize(sp_rq, 14) + resize(sp_ady(12 downto 0), 14);
+                        end if;
+                    when 5 =>
+                        -- all three read pre-edge values:
+                        --  (a) stage ring k-2's edges from the finished root
                         v_w := signed(resize(sqa_res(12 downto 0), 16));
                         sp_wl  <= sp_excq1 - v_w;
                         sp_wr1 <= sp_excq1 + v_w + 1;         -- first x OUTSIDE
                         sp_empq2 <= sp_empq1;
-                        if e_cnt < to_integer(s_nreff) then
+                        --  (b) root ring k-1's product (complete this slot)
+                        if f_mid = '1' then
                             if m_p < 0 then sqa_num <= (others => '0');
                             else sqa_num <= unsigned(m_p(26 downto 0)); end if;
                             sqa_res <= (others => '0');
                             sqa_one <= shift_left(to_unsigned(1, 27), 26);
                             sqa_run <= '1';
-                            -- next ring's radius
-                            if resize(sp_rr, 13) + resize(s_spac, 13) > C_RCL then
-                                sp_rr <= to_unsigned(C_RCL, 12);
-                            else
-                                sp_rr <= sp_rr + resize(s_spac, 12);
-                            end if;
                         end if;
-                        sp_excq1 <= sp_exc;
+                        sp_excq1 <= sp_excq0;
                         if m_p < 0 then sp_empq1 <= '1';
-                        else            sp_empq1 <= sp_emp; end if;
-                    when 8 =>
-                        -- ring e_cnt-1: DIRECTION-coded edge marks -> engine
+                        else            sp_empq1 <= sp_empq0; end if;
+                        --  (c) ring k's centre/empty flag ride with its product
+                        sp_excq0 <= sp_exc;
+                        sp_empq0 <= sp_emp;
+                    when 6 =>
+                        -- ring e_cnt-2: DIRECTION-coded edge marks -> engine
                         -- bank (left/enter now, right/leave staged one cycle);
                         -- discs overhanging the left screen edge decrement
                         -- the line-start ring index instead of a mark.
-                        if e_cnt >= 1 then
+                        if f_ge2 = '1' then
                             v_ki := m_kinit;
                             v_wide := signed(resize(s_W, 16));
+                            -- nearest-edge candidate at/left of x=0 (wr1 > wl,
+                            -- so the right edge wins when both qualify);
+                            -- compared into xl_w at phase 6 (a one-cycle cone
+                            -- here was the HD critical path)
+                            if sp_wr1 <= 0 then xc_r <= sp_wr1;
+                            else                xc_r <= sp_wl; end if;
+                            if sp_empq2 = '0' and (sp_wr1 <= 0 or sp_wl <= 0) then
+                                xcv_r <= '1';
+                            else
+                                xcv_r <= '0';
+                            end if;
                             if sp_empq2 = '0' then
                                 if sp_wl < 0 and sp_wr1 > 0 then
                                     v_ki := v_ki - 1;
@@ -1198,11 +1410,30 @@ begin
                                 end if;
                             end if;
                             m_kinit <= v_ki;
-                            -- last ring written: capture line-start k
-                            if e_cnt = to_integer(s_nreff) then
-                                m_kinit_done <= v_ki;
+                        end if;
+                    when 7 =>
+                        -- next ring's radius
+                        if f_lt = '1' then
+                            if resize(sp_rr, 13) + resize(s_spac_e, 13) > C_RCL then
+                                sp_rr <= to_unsigned(C_RCL, 12);
+                            else
+                                sp_rr <= sp_rr + resize(s_spac_e, 12);
+                            end if;
+                        end if;
+                        -- nearest-edge update, then (last ring) capture the
+                        -- line-start state and leave
+                        if f_ge2 = '1' then
+                            v_xl := xl_w;  v_xv := xlv_w;
+                            if xcv_r = '1' and (xlv_w = '0' or xc_r > xl_w) then
+                                v_xl := xc_r;  v_xv := '1';
+                            end if;
+                            xl_w <= v_xl;  xlv_w <= v_xv;
+                            if f_last = '1' then
+                                m_kinit_done <= m_kinit;
                                 m0_done      <= m0_w;
-                                -- drain group done
+                                xl_done      <= v_xl;
+                                xlv_done     <= v_xv;
+                                -- drain groups done
                                 if e_first = '1' then         -- vblank chain
                                     e_first <= '0';
                                     l_ph <= 0;
@@ -1226,110 +1457,165 @@ begin
                 end if;
 
             when E_LINE =>
+                -- v2.0: re-scheduled for the 15-slot serial multiplier (load
+                -- at T, product at T+15); the two roots overlap the products.
                 case l_ph is
                     when 0 =>
                         le_dyp <= resize(resize(sp_dy, 16) - resize(s_eyo, 16), 14);
                         t_q <= s_q0;                                      -- 2*dx0'+1 (frame tail)
-                    when 1 =>
-                        m_a <= resize(le_dyp, 15);  m_b <= resize(le_dyp, 15);
-                    when 2 | 3 => null;                                   -- 2-stage product
-                    when 4 =>
-                        le_r0sq <= s_dx0q + unsigned(m_p(26 downto 0));   -- dx0'^2 + dy'^2
-                    when 5 =>                                             -- root r0^2 on unit A
+                    when 1 =>                                             -- dy'^2
+                        v_ld := '1';
+                        v_lm := resize(abs(le_dyp), 15);
+                        v_lq := unsigned(resize(abs(le_dyp), 14));
+                    when 17 =>
+                        le_r0sq <= s_dx0q + unsigned(m_p(26 downto 0));   -- r0^2 = dx0'^2 + dy'^2
+                    when 18 =>
+                        sqa_num <= le_r0sq;                               -- root r0^2
+                        sqa_res <= (others => '0');
+                        sqa_one <= shift_left(to_unsigned(1, 27), 26);
+                        sqa_run <= '1';
+                        -- LEFT-EDGE SEED: (x_L - outer cx)^2, in parallel
+                        v_dxl := abs(resize(xl_done, 15) + resize(s_dx0, 15));   -- <= ~10.5k
+                        v_ld := '1';
+                        v_lm := v_dxl;
+                        v_lq := unsigned(v_dxl(13 downto 0));
+                    when 19 =>
+                        le_r0sq <= le_r0sq - s_dx0q;                      -- keep dy'^2 for r_L
+                    when 33 =>
+                        -- r0 done: tracker seeds (u1 = the sqrt REMAINDER,
+                        -- free; D1 = 2*r0+1) and r0 * fnum
+                        le_r0 <= sqa_res(13 downto 0);
+                        su_u  <= signed(resize(sqa_num(15 downto 0), 17));
+                        su_d1 <= signed(resize(shift_left(resize(sqa_res(13 downto 0), 15), 1), 16)) + 1;
+                        v_ld := '1';
+                        v_lm := signed(resize(sqa_res(13 downto 0), 15));
+                        v_lq := resize(s_fnum, 14);
+                    when 34 =>
+                        le_r0sq <= le_r0sq + unsigned(m_p(26 downto 0));  -- r_L^2 (slot-18 product)
+                    when 35 =>                                            -- root r_L^2
                         sqa_num <= le_r0sq;
                         sqa_res <= (others => '0');
                         sqa_one <= shift_left(to_unsigned(1, 27), 26);
                         sqa_run <= '1';
-                    when 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13
-                       | 14 | 15 | 16 | 17 | 18 | 19 => null;             -- 14 sqrt steps
-                    when 20 =>
-                        m_a <= signed(resize(sqa_res(13 downto 0), 15));  -- r0
-                        m_b <= signed(resize(s_fnum, 15));
-                    when 21 | 22 => null;
-                    when 23 =>
-                        le_k0p <= unsigned(m_p(24 downto 0));             -- r0 * fnum
-                    when 24 =>
-                        t_k <= resize(shift_right(le_k0p, s_sft + 8), 12);
-                    when 25 =>
-                        m_a <= signed(resize(t_k, 15));                   -- B_lo = k * spacing
-                        m_b <= signed(resize(s_spac, 15));
-                    when 26 | 27 => null;
-                    when 28 =>
-                        lb_lo <= m_p(14 downto 0);
-                    when 29 =>
-                        -- d0 = r0 - B_lo (estimate error is a few multiples
-                        -- of s -- corrected LINEARLY below, 15-bit ops only;
-                        -- the whole r^2-bracket machinery is gone)
-                        le_d <= signed(resize(sqa_res(13 downto 0), 15)) - lb_lo;
-                    when 30 | 31 | 32 | 33 | 34 | 35 =>
-                        v_dy := resize(le_d, 16) - signed(resize(s_spac, 16));
-                        if le_d < 0 then
-                            t_k  <= t_k - 1;
-                            le_d <= le_d + signed(resize(s_spac, 15));
-                        elsif v_dy >= 0 then
-                            t_k  <= t_k + 1;
-                            le_d <= resize(v_dy, 15);
-                        end if;
                     when 36 =>
-                        -- publish: ring index, ring phase m = d0, and the
-                        -- radius-tracker seeds (u1 = the sqrt REMAINDER,
-                        -- free; D1 = 2*r0+1)
-                        t_kl  <= t_k(6 downto 0);
-                        su_m  <= unsigned(le_d(11 downto 0));
-                        su_u  <= signed(resize(sqa_num(15 downto 0), 17));
-                        su_d1 <= signed(resize(shift_left(resize(sqa_res(13 downto 0), 15), 1), 16)) + 1;
-                        -- (k0 mod 2w) << (15-n)
-                        case s_gn is
-                            when 0 => ph_base <= unsigned(t_k(0 downto 0)) & "000000000000000";
-                            when 1 => ph_base <= unsigned(t_k(1 downto 0)) & "00000000000000";
-                            when 2 => ph_base <= unsigned(t_k(2 downto 0)) & "0000000000000";
-                            when 3 => ph_base <= unsigned(t_k(3 downto 0)) & "000000000000";
-                            when 4 => ph_base <= unsigned(t_k(4 downto 0)) & "00000000000";
-                            when 5 => ph_base <= unsigned(t_k(5 downto 0)) & "0000000000";
-                            when others => ph_base <= unsigned(t_k(6 downto 0)) & "000000000";
-                        end case;
-                    when 37 =>
-                        m_a <= resize(le_d, 15);                          -- d0 * Q
-                        m_b <= signed(resize(s_qph, 15));
-                    when 38 | 39 => null;                                 -- mult pipe
-                    when 40 =>
-                        ph_acc  <= ph_base + unsigned(m_p(15 downto 0));
                         su_qmd  <= resize(t_q, 18) - resize(su_d1, 18);
                         su_qpdm <= resize(t_q, 18) + resize(su_d1, 18) - 2;
-                    when 41 =>
-                        m_a <= resize(le_d, 15);                          -- d0 * Q1 (per-ring phase)
-                        m_b <= signed(resize(s_qp1, 15));
-                    when 42 | 43 => null;                                 -- mult pipe
-                    when 44 =>
+                    when 49 =>
+                        le_k0p <= unsigned(m_p(24 downto 0));             -- r0 * fnum
+                    when 50 =>
+                        t_k   <= resize(shift_right(le_k0p, s_sft + 8), 12);
+                        le_dl <= signed(resize(le_r0, 15)) - signed(resize(sqa_res(13 downto 0), 15));
+                    when 51 =>                                            -- B_lo = k * spacing
+                        v_ld := '1';
+                        v_lm := signed(resize(t_k, 15));
+                        v_lq := resize(s_spl, 14);
+                    when 67 =>
+                        lb_lo <= m_p(14 downto 0);
+                    when 68 =>
+                        -- d0 = r0 - B_lo (estimate error is a few multiples
+                        -- of s -- corrected LINEARLY below, 15-bit ops only)
+                        le_d <= signed(resize(le_r0, 15)) - lb_lo;
+                    when 69 | 71 | 73 | 75 | 77 | 79 =>
+                        -- correction step, clock A: both candidates
+                        le_dm <= le_d - signed(resize(s_spl, 15));
+                        le_dp <= le_d + signed(resize(s_spl, 15));
+                    when 70 | 72 | 74 | 76 | 78 | 80 =>
+                        -- clock B: select (d < 0 -> +s, k-1; d >= s -> -s, k+1)
+                        if le_d(14) = '1' then
+                            t_k  <= t_k - 1;
+                            le_d <= le_dp;
+                        elsif le_dm(14) = '0' then
+                            t_k  <= t_k + 1;
+                            le_d <= le_dm;
+                        end if;
+                    when 81 =>
+                        -- publish ring index + ring phase m = d0; seed the
+                        -- per-ring phase at x=0: (r0 - r_L)*Q1 when x=0 lies
+                        -- in the cascade nest and its band's left edge is
+                        -- known, else the outer-centre phase d0*Q1 (exact for
+                        -- the outer field and in Uniform mode)
+                        t_kl  <= t_k(6 downto 0);
+                        su_m  <= unsigned(le_d(11 downto 0));
+                        v_ld := '1';
+                        if xlv_done = '1' and s_dyn = '1' and m_kinit_done /= s_nreff then
+                            v_lm := le_dl;
+                        else
+                            v_lm := le_d;
+                        end if;
+                        v_lq := resize(s_qp1, 14);
+                    when 97 =>
                         if m0_done = '1' then
                             ph1_acc <= (others => '0');
                         else
                             ph1_acc <= unsigned(m_p(15 downto 0));
                         end if;
-                    when others =>
+                    when 98 =>
                         e_st <= E_IDLE;
+                    when others => null;
                 end case;
-                if l_ph < 45 then l_ph <= l_ph + 1; end if;
+                if l_ph < 98 then l_ph <= l_ph + 1; end if;
 
             end case;
+
+            ----------------------------------------------------------
+            -- SERIAL MULTIPLIER.  Sequencer / frame-tail requests are
+            -- time-disjoint with the engine (they only issue, and only
+            -- load, while it is idle).  Product = {mu_a, mu_q}.
+            ----------------------------------------------------------
+            if s_mreq = '1' and e_st = E_IDLE then
+                v_ld := '1';
+                v_lm := resize(s_ma, 15);
+                v_lq := unsigned(s_mb);
+            end if;
+            nx_ld <= v_ld;
+            nx_m  <= v_lm;
+            nx_q  <= v_lq;
+            if nx_ld = '1' then
+                mu_m    <= nx_m;
+                mu_q    <= nx_q;
+                mu_a    <= (others => '0');
+                mu_cnt  <= 14;
+                mu_busy <= '1';
+            elsif mu_cnt /= 0 then
+                if mu_q(0) = '1' then
+                    v_sum := resize(mu_a, 17) + resize(mu_m, 17);
+                else
+                    v_sum := resize(mu_a, 17);
+                end if;
+                v_mq := shift_right(mu_q, 1);
+                v_mq(13) := v_sum(0);
+                mu_a <= v_sum(16 downto 1);
+                mu_q <= v_mq;
+                mu_cnt <= mu_cnt - 1;
+                if mu_cnt = 1 then mu_busy <= '0'; end if;
+            end if;
         end if;
     end process p_engine;
+
+    m_p <= shift_left(resize(mu_a, 30), 14) or signed(resize(mu_q, 30));
 
     ------------------------------------------------------------------------
     -- tracker parity, delayed to meet the mark-parity path at the merge
     ------------------------------------------------------------------------
     p_par : process(clk)
+        variable v_kw : unsigned(6 downto 0);
     begin
         if rising_edge(clk) then
             k_ld1 <= t_kl;
-            k_ld2 <= k_ld1;
-            -- smooth fade: triangle fold of the phase top bits -> 8-bit luma
-            if ph_acc(15) = '1' then ph_f1 <= ph_acc(14 downto 7);
-            else                     ph_f1 <= not ph_acc(14 downto 7); end if;
-            ph_f2 <= ph_f1;
+            -- WIDTH (outer field): band k (radius k*s .. (k+1)*s, m = r mod s)
+            -- is white if  k even and m < te,  or  k odd and m < to, with
+            -- delta < 0: te = s - |d|, to = 0;  delta >= 0: te = s, to = |d|.
+            if s_dneg_p = '0' or su_m < s_seff_p then c_e1 <= '1'; else c_e1 <= '0'; end if;
+            if s_dneg_p = '0' and su_m < s_dabs_p then c_o1 <= '1'; else c_o1 <= '0'; end if;
+            -- S9 MOIRE: past half a band, aligned with k_ld1 -> k_ld2
+            if su_m >= s_shalf_p then h1 <= '1'; else h1 <= '0'; end if;
+            h2 <= h1;
+            v_kw := k_ld1;
+            v_kw(0) := not ((not k_ld1(0) and c_e1) or (k_ld1(0) and c_o1));
+            k_ld2 <= v_kw;
             -- per-ring stepped ramp: triangle fold, DARK at the ring edges
             -- (phase 0), bright mid-ring.  (One delay reg only:
-            -- ph1's update runs a cycle later than the smooth phase's.)
+            -- ph1's update runs a cycle after the crossing detect.)
             if ph1_acc(15) = '1' then ph1_f1 <= not ph1_acc(14 downto 7);
             else                      ph1_f1 <= ph1_acc(14 downto 7); end if;
         end if;
@@ -1385,8 +1671,15 @@ begin
         if rising_edge(clk) then
             if g2_hit = '1' then r10_k <= g2_k;
             else                 r10_k <= k_ld2; end if;
-            r10_s <= ph_f2;      -- smooth fade ignores the nest/field split
             r10_t <= ph1_f1;     -- per-ring ramp (already edge-anchored)
+            -- S9 MOIRE: XOR with the HALF-PHASE copy of the rings around the
+            -- outer centre (= outer parity xor (r mod s >= s/2) = round(r/s)
+            -- mod 2).  That reference only changes at HALF radii -- its two
+            -- terms flip together at every full radius -- so it never meets
+            -- the true ring edges (no residue dots, no d^2-1 hack needed; the
+            -- hack put a 1-px line on the centre row).  At rest the result is
+            -- the doubled pattern; with the nest offset, true per-pixel moire.
+            r10_h <= (h2 xor k_ld2(0)) and s_s9;
         end if;
     end process p_r10;
 
@@ -1397,49 +1690,40 @@ begin
     -- rings) -- and K4 picks the FINENESS: zone 0 = the classic hard look,
     -- zones 1..6 = 2/4/8/16/32/64 gray steps within each ring.
     -- S9 Smooth = the SAME per-ring ramp at full 8-bit resolution.
-    -- S11 Smooth = the continuous multi-ring phase ramp (K4 = its period).
     ------------------------------------------------------------------------
     p_r12 : process(clk)
         variable v_t8  : unsigned(7 downto 0);
         variable v_key : unsigned(7 downto 0);
     begin
         if rising_edge(clk) then
-            if s_ramp = '1' then
-                -- S9 SMOOTH: per-ring ramp, full resolution (edge-anchored
-                -- -> cascades with the rings)
-                v_key := r10_t;
-            else
-                v_t8 := r10_t;
-                case s_gn is
-                    when 0 =>       -- classic: 1-bit fold of k(0)
-                        v_key := (others => not r10_k(0));
-                    when 1 =>       -- 2 steps per ring
-                        v_key := (others => v_t8(7));
-                    when 2 =>       -- 4 steps, x85
-                        v_key := v_t8(7 downto 6) & v_t8(7 downto 6)
-                                 & v_t8(7 downto 6) & v_t8(7 downto 6);
-                    when 3 =>       -- 8 steps, ~x36.4
-                        v_key := v_t8(7 downto 5) & v_t8(7 downto 5) & v_t8(7 downto 6);
-                    when 4 =>       -- 16 steps, x17
-                        v_key := v_t8(7 downto 4) & v_t8(7 downto 4);
-                    when 5 =>       -- 32 steps, ~x8.2
-                        v_key := v_t8(7 downto 3) & v_t8(7 downto 5);
-                    when others =>  -- 64 steps within each ring, ~x4.05
-                        v_key := v_t8(7 downto 2) & v_t8(7 downto 6);
-                end case;
+            -- K4 (v1.9, 4 settings; S9 Smooth folded into the top one):
+            --   0 = classic hard black/white, 1 = 4 steps (black / 2 grays /
+            --   white -- v2.0.3, Ron: the 2-step setting looked like the hard
+            --   one), 2 = 8 steps, 3 = smooth (the full 8-bit per-ring ramp)
+            v_t8 := r10_t;
+            case s_gn is
+                when "00" =>    v_key := (others => not r10_k(0));
+                when "01" =>    v_key := v_t8(7 downto 6) & v_t8(7 downto 6)
+                                         & v_t8(7 downto 6) & v_t8(7 downto 6);
+                when "10" =>    v_key := v_t8(7 downto 5) & v_t8(7 downto 5) & v_t8(7 downto 6);
+                when others =>  v_key := v_t8;
+            end case;
+            -- S9 MOIRE: invert where the half-phase reference ring is set
+            if r10_h = '1' then
+                v_key := not v_key;
             end if;
             r12_key <= v_key;
         end if;
     end process p_r12;
 
     ------------------------------------------------------------------------
-    -- key -> true-black..true-white 10-bit luma (endpoints exact)
+    -- key -> studio-range 10-bit luma (64..942); VIDEO: refraction
     ------------------------------------------------------------------------
     p_out : process(clk)
         variable v_y : unsigned(9 downto 0);
         variable v_we : std_logic;
         variable v_wd : std_logic_vector(29 downto 0);
-        variable v_du : unsigned(4 downto 0);
+        variable v_du : unsigned(5 downto 0);
     begin
         if rising_edge(clk) then
             -- REFRACTION: the ring field horizontally displaces WHERE the
@@ -1447,7 +1731,7 @@ begin
             -- ripple, and the cascade drags the ripples with it.  The input
             -- is written to a BRAM delay line on ACTIVE pixels only and
             -- read 1 + disp back, where
-            --   disp = key >> zone-shift, 0..18; zone = P12 top bits.
+            --   disp = L*key/32, 0..53; L = P12 top 3 bits.
             -- key respects K4/S9: hard rings shear in slices, S9 Smooth gives
             -- true waves.  d = 0 (slider down) realigns exactly -- no shift.
             -- Writes continue 12 cycles past line end, repeating the
@@ -1476,20 +1760,19 @@ begin
             -- pixels available so far on THIS line (saturating)
             if data_in.avid = '0' then
                 vd_px <= (others => '0');
-            elsif vd_px /= 31 then
+            elsif vd_px /= 63 then
                 vd_px <= vd_px + 1;
             end if;
-            -- one-sided displacement 0..18 from the field key
-            case s_wdep is
-                when "00"   => v_du := (others => '0');
-                when "01"   => v_du := resize(r12_key(7 downto 5), 5);
-                when "10"   => v_du := resize(r12_key(7 downto 4), 5);
-                when others => v_du := resize(r12_key(7 downto 4), 5)
-                                       + resize(r12_key(7 downto 6), 5);
-            end case;
+            -- one-sided displacement from the field key (v1.8): du =
+            -- L*key/32, L = P12 top 3 bits (8 levels) as three gated
+            -- shifted terms -> 0..53 px (v1.7: 4 zones, 0..18)
+            v_du := (others => '0');
+            if s_p12(9) = '1' then v_du := v_du + resize(r12_key(7 downto 3), 6); end if;
+            if s_p12(8) = '1' then v_du := v_du + resize(r12_key(7 downto 4), 6); end if;
+            if s_p12(7) = '1' then v_du := v_du + resize(r12_key(7 downto 5), 6); end if;
             -- LEFT-EDGE CLEANUP: never read across the line start.  The
             -- displacement is clamped to the pixels this line has actually
-            -- produced, so the wave fades in over the first ~18 columns
+            -- produced, so the wave fades in over the first columns
             -- instead of smearing the previous line's tail into the edge.
             if vd_px = 0 then
                 v_du := (others => '0');
@@ -1516,10 +1799,14 @@ begin
             -- illegal non-neutral level sitting where the encoder's per-line
             -- colour reference lives) and the WHOLE picture decodes with
             -- rail-to-rail wrong colours + noisy lines, while every active
-            -- pixel is bit-correct.  Ring mode never hit this because its
-            -- chroma is constant 512.  s_avid_sr(C_VLAT - 2) here aligns with
-            -- the s_avid_sr(C_VLAT - 1) output tap after this register.
-            if s_vsat = '1' and s_avid_sr(C_LATENCY - 2) = '0' then
+            -- pixel is bit-correct.  s_avid_sr(C_LATENCY - 2) here aligns
+            -- with the s_avid_sr(C_LATENCY - 1) output tap after this register.
+            -- v1.7: the gate now covers BOTH modes -- ring mode used to
+            -- emit the last pixel's key (often white) through every hblank.
+            -- Ring luma is legal studio range: key 0..255 -> Y 64..942
+            -- (64 + 4k - k/2 - k/16, monotonic); v1.6 drove 0..1023, and
+            -- codes 0/1023 are the BT.656/1120 sync-word codes.
+            if s_avid_sr(C_LATENCY - 2) = '0' then
                 s_out_y <= to_unsigned(64, 10);
                 s_out_u <= C_MID;
                 s_out_v <= C_MID;
@@ -1529,7 +1816,9 @@ begin
                 s_out_v <= r14_v;
             else
                 v_y := shift_left(resize(r12_key, 10), 2)
-                       or resize(r12_key(7 downto 6), 10);
+                       - resize(r12_key(7 downto 1), 10)
+                       - resize(r12_key(7 downto 4), 10)
+                       + to_unsigned(64, 10);
                 s_out_u <= C_MID;
                 s_out_v <= C_MID;
                 s_out_y <= v_y;
@@ -1553,8 +1842,6 @@ begin
     data_out.y       <= std_logic_vector(s_out_y);
     data_out.u       <= std_logic_vector(s_out_u);
     data_out.v       <= std_logic_vector(s_out_v);
-    -- the two modes have different pipeline depths, so the syncs are tapped
-    -- to match whichever one is driving the output
     -- ONE set of sync taps for both modes -- the video pipeline is depth-
     -- matched to the ring path, so the mode switch changes DATA only.
     data_out.avid    <= s_avid_sr(C_LATENCY - 1);

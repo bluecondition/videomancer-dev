@@ -9,7 +9,7 @@
 
 [program]
 program_id = "com.bluecondition.ruttetra"
-program_version = "0.2.0"
+program_version = "0.2.1"
 abi_version = ">=1.0,<2.0"
 program_name = "Rutt Etra"
 author = "bluecondition"
@@ -35,7 +35,7 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
-name_label = "Thickness"
+name_label = "Thickness/Glow"
 control_mode = "linear"
 display_min_value = 1
 display_max_value = 8
@@ -100,9 +100,9 @@ initial_value_label = "Luma"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
-name_label = "Line Style"
-value_labels = ["Hard", "Glow"]
-initial_value_label = "Hard"
+name_label = "Roll Motion"
+value_labels = ["Run", "Freeze"]
+initial_value_label = "Run"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
@@ -126,8 +126,8 @@ suffix_label = "%"
 
 [[preset]]
 name = "Green Phosphor"
+rotary_potentiometer_2 = 300
 rotary_potentiometer_3 = 192
-toggle_switch_10 = 1
 linear_potentiometer_12 = 650
 
 [[preset]]

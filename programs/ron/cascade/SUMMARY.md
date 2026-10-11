@@ -1,4 +1,113 @@
-# HYPNOS CASCADE — coupled concentric circles (v1.0: 96/48 discs, adaptive ring count, Catch-Up actually centres, S11 = video saturation mod)
+# HYPNOS CASCADE — coupled concentric circles (v2.1.2 FINAL: lean serial-multiplier engine, K5 Width, S9 Moiré)
+
+**Status: v2.1.2 FINAL except presets — HW-verified 2026-10-10 (Ron: "good to finalize"),
+HW-captured defaults.** Developed in `programs/ron/cascade_diag/` (separate-program_id
+fork used for every hardware A/B; its SUMMARY.md has the full v1.8–v2.1 log).
+
+## v2.1.2 — what changed since v1.7
+
+- **Lean engine (~93–95 % LC, was 96.5–98.5 %).** Ablations showed that two LUT array
+  multipliers were ~1060 LUT (14 % of the chip). The vblank 14×14 was merged into the
+  engine's, and the engine's 15×15 became a **serial shift-add multiplier** (14 steps,
+  product at T+16 through a next-operand register stage). The span engine was
+  re-pipelined around it (phase 4 request, 5 stage/root, 6 marks, 7 nearest-edge/exit),
+  E_LINE re-scheduled (99 clocks; two roots overlap the products), and the vblank
+  sequencer issues one product at a time behind a registered `seq_go`. Every step was
+  **bit-exact in sim vs the previous version**.
+- **K1/K2:** ±0.625 W/H, so the centre goes at most ~12 % past each edge.
+- **K4 Gradient:** 4 settings by knob quarter (hard / 4 steps / 8 steps / smooth). The old
+  S9 Smooth folded in.
+- **K5 Width:** exact band balance (thin white lines ← classic → thin black lines). Every
+  even disc's radius moves by f·s, the slack comes from the narrowest band, and the
+  outer field uses per-parity thresholds.
+- **P12:** Zoom in Rings mode (log-spacing offset, up to ×8); Wave depth in Video mode
+  (8 levels, up to 53 px, 64-tap line).
+- **S9 Moiré:** XOR with a half-phase copy of the rings around the outer centre
+  (`round(r/s)` parity, which changes only at half radii). Doubled rings at rest;
+  per-pixel moiré arcs while the cascade drags.
+- **Left-edge gradient fix:** the per-ring phase at x=0 is seeded from the edge band's
+  own off-screen boundary (second root per line).
+- **Glide** is 2× quicker (C_GSH 5).
+
+**Control map (v2.1.2):** K1/K2 Center X/Y (±0.625 W/H) · K3 Period (spacing 4–2048 px) ·
+K4 Gradient (hard / 4 / 8 steps / smooth) · K5 Width (centre = classic) · K6 — ·
+S7 Glide · S8 Cascade (Uniform / Cascade) · S9 Moiré · S10 Catch-Up (Stay / Home) ·
+S11 Output (Rings / Video) · P12 Zoom (Rings) / Wave (Video).
+**Reproducible:** rebuilding from this source with router1 gives BIT-IDENTICAL bitstreams
+(md5 match: HD HDMI seed 5, HD Analog seed 1).
+HW-captured defaults: K1 475, K2 575, K3 764, K4 925 (smooth), K5 512, P12 610,
+S7 on, S8 Cascade, S9 off, S10 Home, S11 Rings. Presets: 5 (placeholder values, not
+HW-captured).
+
+**Build: ROUTER1** (router2 can't close this netlist). Shipped seeds: HD Analog 1 (76.58),
+HD HDMI **5** (88.07, HW-clean video), HD Dual 1 (83.54), SD 1/1/1. A plain builder run
+retries from seed 1 and HD HDMI seed 1 fails, so rebuild per config with `make ...
+SEED=<s> ROUTER="--router router1"`, install, and repack. **HD HDMI video is
+placement-sensitive:** after ANY RTL change, A/B several HD HDMI layouts on hardware
+in Video mode. SIMS: the line setup (99 clk) exceeds the stock image-tester's fake
+64-clk hblank, so sim with the 280-hblank copy in `.cascade_diag_work/vit_hb`.
+Backups: v1.7 main = `out/rev_b/ron/_diag/cascade_v1.7_main.vmprog` + `.cascade_diag_work/v17_main_source/`.
+
+---
+
+## v1.7 — Tier-1 finalization (no look change)
+
+- Ring luma in studio range **64..942** (was 0..1023 — 0/1023 are the BT.656/1120
+  sync-word codes): `64 + 4k − k/2 − k/16`, in the existing output stage, latency 6.
+- **Blanking gate in BOTH modes** (Rings mode used to emit the last pixel's key
+  through every hblank).
+- The dead multi-ring smooth fade (old S11 Smooth: `ph_acc`, Q decode/multiply,
+  line seed) is removed; its sequencer and E_LINE slots are kept as no-ops, so
+  engine timing is unchanged.
+- K5/K6 "Spare" are removed from the TOML. The controls are now K1–K4, S7–S11
+  and P12.
+
+### HD HDMI Video mode is a PLACEMENT LOTTERY — read before rebuilding
+
+The Video path RTL is byte-identical across these builds, and every layout
+passes timing, but on hardware:
+
+| HD HDMI layout | Fmax | Video on HW |
+|---|---|---|
+| router1 seed 1 | 83.17 MHz | strong GREEN |
+| router2 seed 1 | 78.41 MHz | faint green tinge |
+| **router2 seed 2** | **79.07 MHz** | **CLEAN (shipped)** |
+| router2 seed 3 / 4 | 77.10 / 76.58 MHz | not tried |
+
+Shipped seeds (router2): HD Analog **2** (80.92), HD HDMI **2** (79.07),
+HD Dual 1 (76.39), SD 1/1/1 (77.47 / 74.47 / 71.93). 96.6 % LC, 6 EBR.
+The verified bitstream set is in `.cascade_diag_work/release_v17/`, and
+`out/rev_b/ron/cascade.vmprog` was packed from exactly those files. Rebuilding HD HDMI from this source (router2,
+`SEED=2`) reproduces the verified bitstream **bit-for-bit** (same md5).
+**A plain `./build_programs.sh ron cascade` lands HD HDMI on seed 1 (green).**
+After any RTL change, A/B HD HDMI seeds on hardware in Video mode. **Never
+use router1 here** — the best Fmax gave the worst picture. Don't trust the
+"pad the 30-bit EBR word to 32" fix either: yosys strips constant pad lanes
+(`removing const-0 lane`), so it changes nothing but placement.
+
+v1.6 backup: `out/rev_b/ron/_diag/cascade_v1.6_shipped.vmprog`, with its
+source in `.cascade_diag_work/v16_source/`.
+
+## Control map (v1.7, historical -- see v2.1.2 below)
+
+| Phys | Control | |
+|---|---|---|
+| K1/K2 | Center X/Y | bipolar ±2 W/H, detent = frame centre |
+| K3 | Period | ring spacing 4..2048 px (exp) |
+| K4 | Gradient | classic hard at 0, then 2..64 gray steps within each ring |
+| S7 | Glide | one-pole slew on the centre (drives the cascade) |
+| S8 | Cascade | Uniform / Cascade |
+| S9 | Ramp | Steps (K4) / Smooth (per-ring ramp) |
+| S10 | Catch-Up | Stay / Home |
+| S11 | Output | Rings / Video (the rings refract the input) |
+| P12 | Wave | refraction depth, 4 zones (Video only) |
+
+---
+
+*History below (v0.2–v1.6). The v1.0 header that described a saturation
+mod is obsolete: the mod was dropped in v1.4.*
+
+## (old title) HYPNOS CASCADE — coupled concentric circles (v1.0: 96/48 discs, adaptive ring count, Catch-Up actually centres, S11 = video saturation mod)
 
 Concentric black/white circles that **push each other**. Move the centre (K1/K2)
 and the innermost circle leads; each outer ring holds still until the one inside
@@ -377,7 +486,7 @@ switch on the unit still shows its previous name. Fix: delete
 `build/programs/<v>/<p>/{,rev_b/}program_config.bin`, regenerate, repack, and
 grep the binary for the new strings before believing it.
 
-## Control map (unchanged)
+## Control map (v1.3-era, historical — K5/K6 now removed)
 
 | Phys | Control | Range / detent |
 |---|---|---|

@@ -1,6 +1,8 @@
-# LIVEWIRE — design proposal (pre-VHDL)
+# LIVEWIRE — design and build history
 
-Status: **proposal**, awaiting sign-off on the four open questions at the end.
+Status: **v1.1.1 FINAL except presets (signed off 2026-10-09, HW-validated)**
+— five modes (Neon, Kirlian, Spectral, Cel, Ink Bleed). Sections 1–7 are the
+original pre-VHDL proposal and look-dev; 8 onward is the build record.
 Target: HX4K, 74.25 MHz, `program_type = "processing"`, HD-first.
 
 ---
@@ -600,3 +602,95 @@ redundant in steady state and the guard when the height changes.
 Lesson: when a per-row state machine's "close" step is what resets its
 per-row state, check that EVERY row actually closes.  Grid dimensions that are
 rounded UP from the raster guarantee one that does not.
+
+## 17. v1.0.0 finalization pass (2026-10-09)
+
+A release review found one dead knob, one dead switch, one colour bug and an
+optimization that had quietly been undone. All changes are per-frame or
+address-side; the pixel path gained one 8-bit add (the hue address).
+
+- **K5 was dead in Neon and Spectral** (it only fed the Cel level count, the
+  Kirlian/Ink filament scale and S9's lit side). Renamed "Levels" ->
+  "Character" and given a job in both:
+  - NEON: the halo's hue sits K5 round the wheel from the tube's. Two more
+    reads of the shared sine ROM at angle K6+K5-90 deg (sequencer states
+    35/33, captured at 32/30). K5 50% = a quarter turn, which is the old fixed
+    separation, so existing presets look the same.
+  - SPECTRAL: K5 is the rate at which the hue wheel turns (a 16-bit per-frame
+    accumulator, top byte added to the wheel offset): still at 0, about a turn
+    a second at 100%.
+- **S10 was dead in Spectral** (the mode is already the wheel). It is now
+  `spectral xor S10`: in Spectral, S10 flips back to the flat K6 palette.
+  Renamed "Spectral" -> "Rainbow" so it no longer shares the mode's name.
+- **Invert dropped the output U/V swap**: the normal arm swaps back to
+  hardware order, the inverted arm negated without swapping, so Invert at
+  EMERGE 0 was a negative with U/V exchanged rather than a true negative.
+  Both arms now swap.
+- **The hue-wheel BRAM was orphaned.** `hue_q` was written and never read, so
+  yosys pruned the ROM and S13 read the 16-entry constant arrays as a 16:1 x
+  20-bit LUT mux again -- the section-12 fix had been undone somewhere along
+  the way. S13 now lands `hue_q`. The ROM is also now a real 256-step wheel
+  (built at elaboration from the qsin table, amplitude 440): the address is
+  `{bin, 0000} + offset8`, so K6 and the swirl turn the wheel smoothly instead
+  of in 22.5 deg jumps.
+- **Hysteresis on stepped decodes.** K5/K6 are not glided, and K1/K5 decode
+  to steps; pot noise parked on a boundary would flip the whole frame between
+  modes / level counts / lit sides. Each decode now moves only when the zones
+  of k-8 and k+8 agree. A held 4-bit K5 index is also a held 2-bit index
+  (every 2-bit boundary is a 4-bit boundary), so one hysteresis serves the
+  Cel levels, the filament scale and S9. K6's hue no longer needs one: it is
+  continuous at 256 steps.
+- Stale comments fixed (RELIEF, the never-built K1 dither dissolve, BRAM
+  count, latency); unused signals removed.
+
+## 18. v1.1.0 — making the material live (2026-10-09)
+
+All per-frame (sequencer states 59/57/45/43/41/37/27, previously idle); the
+pixel path gained only two free-running pre-added coordinates and a 4-bit xor.
+
+- **Kirlian crackle.** The filaments were fixed in screen space, so the
+  corona sat still. On a random ~half of frames (per-frame LFSR) the
+  per-filament reach is xor-re-dealt (`fil_r ^= crk`) and the projection
+  coordinates hop 0–3 px (`s_xj`/`s_alj`, pre-added one clock early so S10
+  keeps its depth). Kirlian only — Ink's fibre uses the same machinery and
+  must not shimmer.
+- **Neon buzz.** About one frame in 64 starts a stutter of 1–4 on/off
+  flickers, a frame each: the core threshold goes to 255 (white-hot core
+  drops out) and the halo gain halves. Thresholds and gains are already
+  per-frame, so it costs no pixel logic.
+- **K1 transition.** The promised "dither dissolve between modes" needs a second
+  full set of mode constants plus a per-pixel mux (one of them in front of
+  the interior multiply), estimated at 300–400 LC at 88% utilization. Built
+  instead: `s_mode` (hysteresis target) vs `s_model` (live). On a change,
+  `s_xfa` falls 16 -> 0 in steps of 2, capping the EMERGE dissolve level
+  (`s_wetn`, now one per-frame 5-bit compare against the Bayer cell),
+  scaling the interior weight (`s_intw * xfa >> 4` on the shared multiplier)
+  and easing the Cel posterizer back toward the video. At 0 the mode switches,
+  invisibly, and it climbs back. That's about 0.27 s from mode to mode, with no
+  hard cut.
+- **Interlace (review item, no change).** The field engine steps once per field;
+  1080i runs 60 fields/s like 1080p60's 60 frames/s, so trail decay per second
+  is the same. The review note claiming a 2x difference was wrong.
+
+### 18.1 Timing: a second writer state is not free
+
+The first v1.1.0 build put HD HDMI at 74.82 MHz (seed 2). Its router2 seed spread
+was 72.8 / 74.8 / 74.8 / 71.8 / 74.1 / 73.2: a real deficit. Every critical
+path was in the vblank sequencer: `s_seq` decode -> `s_tcore`. The buzz
+override had given `s_tcore` (and `s_halog`, and via the transition
+`s_intw`) a SECOND writer state, which folded a set/mux arm into the existing
+per-frame product cone (tbody x over + f_s8 saturation). Moving each override
+into its own register (`s_tcorex`, `s_halogx`, `s_intwx`, written once from
+the original plus the flag; consumers read the copy) restored the spread
+to 74.7 / 82.3 / 74.9 / 80.7 / 79.3 / 79.5 at identical LC. Rule: a
+sequencer override goes into a NEW register downstream, never a second
+assignment to an existing per-frame result.
+
+### 18.2 v1.1.1: the K1 dip removed (HW, 2026-10-09)
+
+Ron on hardware: the mode-change dip made **bright horizontal bars**, and
+mode changes "felt better before" as clean cuts. Removed entirely (s_model,
+s_xfa, the interior scale and the posterizer easing); K1 is a clean cut
+again, with the zone hysteresis kept. The per-frame `s_wetn` compare stays
+(it is the old EMERGE dissolve, unchanged). Kirlian crackle and Neon buzz
+stay. Don't re-offer a mode transition for this program.

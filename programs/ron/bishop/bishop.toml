@@ -1,15 +1,15 @@
 [program]
 program_id = "com.ron.bishop"
-program_version = "0.2.0"
+program_version = "1.0.0"
 abi_version = ">=1.0,<2.0"
 program_name = "Bishop"
 author = "ron"
 license = "GPL-3.0"
 categories = ["Render", "Shape", "Demo", "Computer"]
-program_type = "synthesis"
+program_type = "processing"
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
-description = "Wireframe head. P12 grows the head to fill the screen. K1 mouth, K2 line weight, K3 palette, K4 expression, K5/K6 noise."
+description = "Wireframe head. P12 grows the head to fill the screen. K1 mouth, K2 weight, K3 palette, K4 expression, K5 noise, K6 position."
 
 # --- Rotary Potentiometers (K1-K6) ---
 
@@ -49,23 +49,23 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
-name_label = "Noise Speed"
+name_label = "Noise"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 512
+initial_value = 0
 display_min_value = 0
 display_max_value = 100
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
-name_label = "Noise Spread"
+name_label = "Position"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 0
-display_min_value = 0
+initial_value = 512
+display_min_value = -100
 display_max_value = 100
 suffix_label = "%"
 
@@ -92,9 +92,9 @@ initial_value_label = "Smooth"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
-name_label = "Brightness"
-value_labels = ["Normal", "Bright"]
-initial_value_label = "Bright"
+name_label = "Invert"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
@@ -123,56 +123,116 @@ rotary_potentiometer_1   = 1023  # Mouth = open (neutral)
 rotary_potentiometer_2   = 384   # Line Weight = 3 px
 rotary_potentiometer_3   = 0     # Palette = Green
 rotary_potentiometer_4   = 0     # Expression = Neutral
-rotary_potentiometer_5   = 512   # Noise Speed
-rotary_potentiometer_6   = 0     # Noise Spread = off
+rotary_potentiometer_5   = 0     # Noise = off
+rotary_potentiometer_6   = 512   # Position = centre
 toggle_switch_7          = 0     # Fill = Outline
-toggle_switch_8          = 0
+toggle_switch_8          = 1     # Eyes = Open
 toggle_switch_9          = 0     # Noise = Smooth
-toggle_switch_10         = 1     # Brightness = Bright
-toggle_switch_11         = 0
+toggle_switch_10         = 0     # Invert = Off
+toggle_switch_11         = 0     # Background = Black
 linear_potentiometer_12  = 0     # Head Size
 
 [[preset]]
 name = "Happy"
-rotary_potentiometer_1   = 1023  # Mouth = open
+rotary_potentiometer_1   = 1023
 rotary_potentiometer_2   = 384
 rotary_potentiometer_3   = 256   # Palette = Amber
 rotary_potentiometer_4   = 256   # Expression = Happy
-rotary_potentiometer_5   = 512   # Noise Speed
-rotary_potentiometer_6   = 0     # Noise Spread = off
-toggle_switch_7          = 0     # Fill = Outline
-toggle_switch_8          = 0
+rotary_potentiometer_5   = 0
+rotary_potentiometer_6   = 512
+toggle_switch_7          = 0
+toggle_switch_8          = 1
 toggle_switch_9          = 0
-toggle_switch_10         = 1     # Brightness = Bright
+toggle_switch_10         = 0
 toggle_switch_11         = 0
-linear_potentiometer_12  = 640   # Head Size
+linear_potentiometer_12  = 640
 
 [[preset]]
 name = "Angry"
-rotary_potentiometer_1   = 1023  # Mouth = open
+rotary_potentiometer_1   = 1023
 rotary_potentiometer_2   = 640   # Line Weight = 5 px
 rotary_potentiometer_3   = 384   # Palette = Red
 rotary_potentiometer_4   = 768   # Expression = Angry
-rotary_potentiometer_5   = 512   # Noise Speed
-rotary_potentiometer_6   = 0     # Noise Spread = off
-toggle_switch_7          = 0     # Fill = Outline
-toggle_switch_8          = 0
+rotary_potentiometer_5   = 0
+rotary_potentiometer_6   = 512
+toggle_switch_7          = 0
+toggle_switch_8          = 1
 toggle_switch_9          = 0
-toggle_switch_10         = 1     # Brightness = Bright
+toggle_switch_10         = 0
 toggle_switch_11         = 0
-linear_potentiometer_12  = 0     # Head Size
+linear_potentiometer_12  = 0
 
 [[preset]]
 name = "Surprised"
-rotary_potentiometer_1   = 1023  # Mouth = open
+rotary_potentiometer_1   = 1023
 rotary_potentiometer_2   = 640
 rotary_potentiometer_3   = 128   # Palette = Cyan
 rotary_potentiometer_4   = 896   # Expression = Surprised
-rotary_potentiometer_5   = 512   # Noise Speed
-rotary_potentiometer_6   = 0     # Noise Spread = off
-toggle_switch_7          = 0     # Fill = Outline
-toggle_switch_8          = 0
+rotary_potentiometer_5   = 0
+rotary_potentiometer_6   = 512
+toggle_switch_7          = 0
+toggle_switch_8          = 1
 toggle_switch_9          = 0
-toggle_switch_10         = 1     # Brightness = Bright
+toggle_switch_10         = 0
 toggle_switch_11         = 0
-linear_potentiometer_12  = 640   # Head Size
+linear_potentiometer_12  = 640
+
+[[preset]]
+name = "Solid Fill"
+rotary_potentiometer_1   = 1023
+rotary_potentiometer_2   = 384
+rotary_potentiometer_3   = 640   # Palette = Magenta
+rotary_potentiometer_4   = 256   # Expression = Happy
+rotary_potentiometer_5   = 0
+rotary_potentiometer_6   = 512
+toggle_switch_7          = 1     # Fill = Solid
+toggle_switch_8          = 1
+toggle_switch_9          = 0
+toggle_switch_10         = 0
+toggle_switch_11         = 0
+linear_potentiometer_12  = 512
+
+[[preset]]
+name = "Static"
+rotary_potentiometer_1   = 1023
+rotary_potentiometer_2   = 128   # Line Weight = 1 px
+rotary_potentiometer_3   = 0     # Palette = Green
+rotary_potentiometer_4   = 0
+rotary_potentiometer_5   = 768   # Noise = 75%
+rotary_potentiometer_6   = 512
+toggle_switch_7          = 0
+toggle_switch_8          = 1
+toggle_switch_9          = 1     # Noise = Streaks
+toggle_switch_10         = 0
+toggle_switch_11         = 0
+linear_potentiometer_12  = 256
+
+[[preset]]
+name = "Big Head"
+rotary_potentiometer_1   = 1023
+rotary_potentiometer_2   = 640   # Line Weight = 5 px
+rotary_potentiometer_3   = 256   # Palette = Amber
+rotary_potentiometer_4   = 0
+rotary_potentiometer_5   = 0
+rotary_potentiometer_6   = 512
+toggle_switch_7          = 0
+toggle_switch_8          = 1
+toggle_switch_9          = 0
+toggle_switch_10         = 0
+toggle_switch_11         = 0
+linear_potentiometer_12  = 1023  # Head Size = max
+
+[[preset]]
+name = "Video Ink"
+rotary_potentiometer_1   = 1023
+rotary_potentiometer_2   = 640   # Line Weight = 5 px
+rotary_potentiometer_3   = 512   # Palette = White
+rotary_potentiometer_4   = 0
+rotary_potentiometer_5   = 0
+rotary_potentiometer_6   = 768   # Position = right of centre
+toggle_switch_7          = 1     # Fill = Solid
+toggle_switch_8          = 1
+toggle_switch_9          = 0
+toggle_switch_10         = 1     # Invert = On (black ink)
+toggle_switch_11         = 1     # Background = Video
+linear_potentiometer_12  = 384

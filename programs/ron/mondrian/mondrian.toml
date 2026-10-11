@@ -3,19 +3,20 @@
 # A mostly-white canvas recursively divided into clean axis-aligned rectangles
 # by thick black grid lines, with a scattering of blocks filled in primary red,
 # yellow and blue (optionally black) — in the style of Piet Mondrian.  A repaint
-# of the Quilt subdivision engine.  Static image; re-randomise the layout and the
-# internal pieces with two independent seed knobs.  P12 (Density) is the master
-# recursion control; K5 (Colour Amount) sets how much colour vs white.
+# of the Quilt subdivision engine.  Static image; K2 (Composition) re-randomises
+# the layout.  P12 (Density) is the master recursion control; K5 (Colour Amount)
+# sets how much colour vs white.  With S11 Luma Mod on, blocks take colour only
+# where the input luma is above K3 (Luma Level), else they stay white.
 
 [program]
 program_id = "com.bluecondition.mondrian"
-program_version = "0.1.0"
+program_version = "1.0.0"
 abi_version = ">=1.0,<2.0"
 program_name = "Mondrian"
 author = "bluecondition"
 license = "GPL-3.0"
-categories = ["Pattern", "Generative", "Art"]
-program_type = "synthesis"
+categories = ["Grid", "Pattern", "Shape"]
+program_type = "processing"
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 description = "De Stijl composition: white canvas, black grid lines, red/yellow/blue blocks."
@@ -28,7 +29,7 @@ parameter_id = "rotary_potentiometer_1"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 512
+initial_value = 501
 display_min_value = 32
 display_max_value = 256
 name_label = "Grid Scale"
@@ -39,7 +40,7 @@ parameter_id = "rotary_potentiometer_2"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 300
+initial_value = 603
 name_label = "Composition"
 suffix_label = ""
 
@@ -48,22 +49,24 @@ parameter_id = "rotary_potentiometer_3"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 620
-name_label = "Sub-Pieces"
-suffix_label = ""
+initial_value = 12
+display_min_value = 0
+display_max_value = 100
+name_label = "Luma Level"
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
 name_label = "Split Jitter"
 value_labels = ["Centered", "Slight", "Medium", "Wild"]
-initial_value_label = "Slight"
+initial_value_label = "Centered"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 220
+initial_value = 350
 display_min_value = 0
 display_max_value = 100
 name_label = "Colour Amount"
@@ -71,9 +74,14 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 0
+display_min_value = 2
+display_max_value = 32
 name_label = "Line Width"
-value_labels = ["Thin", "Medium", "Bold", "Heavy"]
-initial_value_label = "Bold"
+suffix_label = "px"
 
 # --- Toggle Switches (7-11, binary) ---
 
@@ -87,13 +95,13 @@ initial_value_label = "On"
 parameter_id = "toggle_switch_8"
 name_label = "Black Blocks"
 value_labels = ["Off", "On"]
-initial_value_label = "Off"
+initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
 name_label = "Grid"
 value_labels = ["Square", "Not Square"]
-initial_value_label = "Square"
+initial_value_label = "Not Square"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
@@ -114,7 +122,7 @@ parameter_id = "linear_potentiometer_12"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 600
+initial_value = 1023
 display_min_value = 0
 display_max_value = 100
 name_label = "Density"
@@ -129,7 +137,7 @@ rotary_potentiometer_2 = 300
 rotary_potentiometer_3 = 620
 rotary_potentiometer_4 = 350       # slight jitter
 rotary_potentiometer_5 = 220       # ~20% colour
-rotary_potentiometer_6 = 600       # bold lines
+rotary_potentiometer_6 = 600       # 20 px lines
 toggle_switch_7 = 1                # grid lines on
 toggle_switch_8 = 0                # no black blocks
 toggle_switch_9 = 0                # square grid
@@ -144,7 +152,7 @@ rotary_potentiometer_2 = 512
 rotary_potentiometer_3 = 480
 rotary_potentiometer_4 = 0         # centered, clean rectangles
 rotary_potentiometer_5 = 420       # ~40% colour
-rotary_potentiometer_6 = 800       # heavy lines
+rotary_potentiometer_6 = 800       # 26 px lines
 toggle_switch_7 = 1
 toggle_switch_8 = 1                # allow black blocks
 toggle_switch_9 = 0
@@ -159,7 +167,7 @@ rotary_potentiometer_2 = 740
 rotary_potentiometer_3 = 200
 rotary_potentiometer_4 = 200
 rotary_potentiometer_5 = 300
-rotary_potentiometer_6 = 350       # medium lines
+rotary_potentiometer_6 = 350       # 12 px lines
 toggle_switch_7 = 1
 toggle_switch_8 = 0
 toggle_switch_9 = 1                # not-square: rectangles span several grid cells
@@ -179,7 +187,7 @@ toggle_switch_7 = 1
 toggle_switch_8 = 0
 toggle_switch_9 = 1                # not-square merges
 toggle_switch_10 = 0
-toggle_switch_11 = 1               # luma mod: composition shows in bright input
+toggle_switch_11 = 1               # luma mod: colour blocks only where the input is bright
 linear_potentiometer_12 = 600
 
 [[preset]]

@@ -1,4 +1,27 @@
--- mondrian.vhd  (v0.1 — De Stijl composition generator)
+-- mondrian.vhd  (v1.0.0 — De Stijl composition generator)
+--
+-- v1.0.0 (2026-10-10): FINAL, signed off by Ron.  Same logic as v0.2.3; the
+-- defaults are captured from the hardware.
+--
+-- v0.2 (2026-10-10): hardware-contract pass.  Declared "processing" (S10/S11
+-- read data_in).  Own generated avid (parity-locked start, field-latched
+-- width) drives the pixel counters and data_out.avid, and y/u/v are gated to
+-- 64/512/512 outside it.  Video Fill is delayed in a 16-deep EBR ring, not
+-- the FF pipe (raw video stays shallow).  Black is 64, never below.  K1 spans
+-- 32..256 px over the whole travel; K6 is a continuous 2..32 px line; K4
+-- reads a labelled-default INDEX (0..3) as the label itself.
+--
+-- v0.2.1: S11 Luma Mod no longer blacks out dark cells.  The full white
+-- composition (blocks + lines) always shows; a block takes its colour only
+-- where the input luma is bright, else it stays white.  Merged cells follow
+-- the luma of the base cell at their origin, so a rectangle is all colour or
+-- all white.
+--
+-- v0.2.3: K3 is now Luma Level, the Luma Mod line between colour and white
+-- (0% = colour everywhere but black, 50% = mid-grey, 100% = no colour).  It
+-- replaces K3 Sub-Pieces: the sub-piece seed is a constant (K3's old default),
+-- and K2 still re-rolls the sub-pieces through each cell's root seed.  K5 is
+-- Colour Amount only again (v0.2.2's K5-driven threshold is gone).
 --
 -- Paints the screen in the style of Piet Mondrian: a mostly-white canvas carved
 -- into clean axis-aligned rectangles by thick black grid lines, with a scattering
@@ -20,10 +43,11 @@
 -- logic (no coordinate compares) — cheap enough to close HD timing.  Square mode
 -- (S9=0) keeps every cell 1x1 = the plain grid.
 --
--- Controls: K1 Grid Scale, K2 Composition, K3 Sub-Pieces, K4 Split Jitter,
+-- Controls: K1 Grid Scale, K2 Composition, K3 Luma Level, K4 Split Jitter,
 -- K5 Colour Amount, K6 Line Width, S7 Grid Lines, S8 Black Blocks, S9 Grid
--- (Square / Not-Square cell merge), S10 Video Fill, S11 Luma Mod (show the
--- composition only where input luma is positive, else black), P12 Density.
+-- (Square / Not-Square cell merge), S10 Video Fill, S11 Luma Mod (the whole
+-- composition stays; blocks take colour only where input luma is bright, else
+-- they stay white), P12 Density.
 --
 -- Author: bluecondition
 
@@ -44,7 +68,8 @@ architecture mondrian of program_top is
     constant MIN_W   : natural := 8;          -- don't split a span narrower than this
 
     constant C_MID   : unsigned(9 downto 0) := to_unsigned(512, 10);
-    constant LINE_Y  : unsigned(9 downto 0) := to_unsigned(48, 10);   -- grid-line luma (deep black)
+    constant LINE_Y  : unsigned(9 downto 0) := to_unsigned(64, 10);   -- grid-line luma (video black)
+    constant C_BLK   : unsigned(9 downto 0) := to_unsigned(64, 10);   -- video black (never below)
 
     -- per-level hash mixing constants (compile-time)
     type t_lc is array (0 to DMAX - 1) of unsigned(15 downto 0);
@@ -91,7 +116,7 @@ architecture mondrian of program_top is
     type t_pal is array (0 to 4) of unsigned(9 downto 0);
     constant MON_Y : t_pal := (
         to_unsigned(940,10), to_unsigned(332,10), to_unsigned(729,10),
-        to_unsigned(272,10), to_unsigned( 48,10));
+        to_unsigned(272,10), to_unsigned( 64,10));
     constant MON_U : t_pal := (
         to_unsigned(512,10), to_unsigned(843,10), to_unsigned(645,10),
         to_unsigned(410,10), to_unsigned(512,10));
@@ -226,12 +251,44 @@ architecture mondrian of program_top is
     signal s_color_amt  : unsigned(7 downto 0) := to_unsigned(55, 8);   -- white<->colour threshold
     signal s_line_w     : unsigned(11 downto 0) := to_unsigned(3, 12);  -- grid-line half-width (px)
     signal s_comp_seed  : unsigned(15 downto 0) := x"1234";
-    signal s_sub_seed   : unsigned(15 downto 0) := x"ABCD";
+    -- sub-piece seed: fixed at the value K3 Sub-Pieces gave at its old default
+    -- (mix16(620, x"C2B5")), so the default painting is unchanged
+    constant C_SUB_SEED : unsigned(15 downto 0) := x"A30F";
     signal s_seam_en    : std_logic := '1';
     signal s_blackblk   : std_logic := '0';
     signal s_notsq      : std_logic := '0';   -- S9: 0 = square grid, 1 = cell merge
     signal s_vid_en     : std_logic := '0';
-    signal s_lumamod    : std_logic := '0';   -- S11: per-cell luma gate (black where cell luma <= mid)
+    signal s_lumamod    : std_logic := '0';   -- S11: colour only where cell luma > threshold, else white
+    -- Luma Mod line, set by K3 Luma Level: T = 64 + r - r/8 (r = K3), so
+    -- 64 (black) at 0%, 512 (mid-grey) at 50%, 960 (white) at 100%; a cell is
+    -- coloured when its luma is above T.  Two free-running stages off the SPI
+    -- register, latched at vsync.
+    signal s_lsum       : unsigned(9 downto 0) := (others => '0');
+    signal s_lthr_f     : unsigned(9 downto 0) := to_unsigned(512, 10);
+    signal s_luma_thr   : unsigned(9 downto 0) := to_unsigned(512, 10);
+    -- K1 cell size, free-running off the SPI register (32..256 over the whole
+    -- travel: 32 + r/4 - r/32) so the vsync latch is only a -1 and two shifts.
+    signal s_k1sz       : unsigned(11 downto 0) := to_unsigned(144, 12);
+
+    --------------------------------------------------------------------------
+    -- Generated avid (cubist/aurora recipe).  The encoders get no data-enable:
+    -- they pair Cb/Cr by counting from hsync, while the core's 444->422 packer
+    -- restarts on Cb at every avid rise.  A source avid that wanders a clock
+    -- against hsync swaps U/V for that line -- thin coloured lines over the
+    -- flat primaries.  So the program makes its own avid: it starts 2 or 3
+    -- clocks after the source's first avid rise of the line, whichever keeps
+    -- the hsync->start PARITY at the source's usual value (saturating vote),
+    -- and ends after the field-latched line width (or at hsync at the latest).
+    -- It drives the pixel counters, data_out.avid and the blanking gate.
+    --------------------------------------------------------------------------
+    signal g_hsq, g_hsr, g_avq, g_avr : std_logic := '0';
+    signal g_ph, g_arm, g_par, g_sel, g_avid : std_logic := '0';
+    signal g_pc   : unsigned(3 downto 0) := to_unsigned(8, 4);
+    signal g_rsr  : std_logic_vector(2 downto 0) := (others => '0');
+    signal g_cnt  : unsigned(11 downto 0) := (others => '0');
+    signal g_wm1  : unsigned(11 downto 0) := to_unsigned(1919, 12);  -- width - 1, per field
+    signal s_xcnt : unsigned(11 downto 0) := (others => '0');        -- source avid run
+    signal s_wlin : unsigned(11 downto 0) := to_unsigned(1920, 12);  -- last line's width
 
     --------------------------------------------------------------------------
     -- Sync / video alignment pipe
@@ -245,11 +302,39 @@ architecture mondrian of program_top is
     signal s0_x, s0_y   : unsigned(11 downto 0);
     signal s0_x0, s0_y0 : unsigned(11 downto 0);   -- cell origin (px) for this pixel
 
-    -- Per-cell Luma Mod: one hide bit per base-cell column, sampled at the cell
-    -- centre on each cell-row's top line and held across the cell, then delayed to
-    -- the output so a whole cell gates on/off coherently (vs the old per-pixel matte).
-    signal cell_hide : std_logic_vector(0 to 63) := (others => '0');
-    signal hide_pipe : std_logic_vector(0 to LATENCY - 1) := (others => '0');
+    -- Per-cell Luma Mod: one dark bit per base-cell column for the current cell
+    -- row (cell_hide) and the row above (cell_hide_up), sampled at the cell
+    -- centre on each cell-row's top line (and on the field's first active line,
+    -- for a top row that starts in vblank) and held across the cell.  A merged
+    -- (Not-Square) cell takes the bit of the base cell at its ORIGIN -- left
+    -- and/or up of the pixel -- so a fused rectangle is coloured or white as one.
+    -- The winner's bit rides hide_pipe from S1b (stage 2) to S10a (stage 13),
+    -- where the colour pick turns a dark cell's blocks white.
+    signal cell_hide    : std_logic_vector(0 to 63) := (others => '0');
+    signal cell_hide_up : std_logic_vector(0 to 63) := (others => '0');
+    signal s0_hc, s0_hu, s0_hcl, s0_hul : std_logic := '0';  -- this/left column, this/up row
+    signal s1a_h        : std_logic_vector(0 to 3) := (others => '0');   -- per 2x2 candidate
+    signal hide_pipe    : std_logic_vector(2 to 13) := (others => '0');
+    signal s_first      : std_logic := '0';   -- first active line of the field
+    signal s_firstav    : std_logic := '0';
+
+    -- generated avid, aligned with the colour pipeline (gv_pipe(0) = S0)
+    signal gv_pipe : std_logic_vector(0 to LATENCY - 1) := (others => '0');
+
+    -- Video Fill delay: a 16-deep EBR circular buffer, NOT the FF pipe.  Raw
+    -- input carried ~15 FFs deep has gone green/noisy on HD HDMI (cascade,
+    -- rollthebones), and reading pipe(LATENCY-1).y/u/v kept ~500 delay FFs
+    -- alive.  Read pointer = write pointer - 15, so after the EBR output
+    -- register and one fabric re-register the sample equals pipe(LATENCY-1).
+    -- The read never hits the address being written -> no_rw_check.
+    type t_vdly is array (0 to 15) of std_logic_vector(31 downto 0);
+    signal vdly_ram : t_vdly := (others => (others => '0'));
+    signal vdly_wa  : unsigned(3 downto 0) := to_unsigned(0, 4);
+    signal vdly_ra  : unsigned(3 downto 0) := to_unsigned(1, 4);
+    signal vdly_q   : std_logic_vector(31 downto 0) := (others => '0');
+    signal vdly_q2  : std_logic_vector(31 downto 0) := (others => '0');
+    attribute no_rw_check : boolean;
+    attribute no_rw_check of vdly_ram : signal is true;
 
     -- S1a: 2x2 candidate hashes + base origin + edge validity (hash folded into
     -- S1a to drop the separate S1a2 stage's registers and ease routing).
@@ -311,7 +396,7 @@ begin
     --------------------------------------------------------------------------
     p_position : process(clk)
         variable v_h_edge, v_v_edge : std_logic;
-        variable v_csz : integer;
+        variable v_k : unsigned(9 downto 0);
     begin
         if rising_edge(clk) then
             prev_hsync_n <= data_in.hsync_n;
@@ -321,14 +406,38 @@ begin
             if data_in.hsync_n = '0' and prev_hsync_n = '1' then v_h_edge := '1'; end if;
             if data_in.vsync_n = '0' and prev_vsync_n = '1' then v_v_edge := '1'; end if;
 
+            -- K1 Grid Scale, free-running: 32 + r/4 - r/32 = 32..256 px over the
+            -- whole travel (the old 32 + r/4 clamped at 256 for the top 12%).
+            v_k    := unsigned(registers_in(0));
+            s_k1sz <= to_unsigned(32, 12) + resize(v_k(9 downto 2), 12)
+                      - resize(v_k(9 downto 5), 12);
+
+            -- Luma Mod line from K3 Luma Level, free-running: 64 + r - r/8
+            v_k      := unsigned(registers_in(2));
+            s_lsum   <= v_k - shift_right(v_k, 3);              -- 0..896
+            s_lthr_f <= s_lsum + to_unsigned(64, 10);           -- 64..960
+
+            -- Source line width (avid run), kept from the last active line; the
+            -- generated avid uses it, latched once per field at vsync (stable
+            -- through vblank, so a serrated vsync re-latches the same value).
+            if data_in.avid = '1' then
+                s_xcnt <= s_xcnt + 1;
+            elsif g_avq = '1' then
+                if s_xcnt > to_unsigned(16, 12) then
+                    s_wlin <= s_xcnt;
+                end if;
+                s_xcnt <= (others => '0');
+            end if;
+
             -- X position + X cell counter (origin / local / column index).  Counting
             -- as we scan gives arbitrary (continuous) cell sizes with no divide.
+            -- Counts the GENERATED avid, so the picture and data_out.avid agree.
             if v_h_edge = '1' then
                 pixel_x   <= (others => '0');
                 cellx_org <= (others => '0');
                 cellx_loc <= (others => '0');
                 cellx_idx <= (others => '0');
-            elsif data_in.avid = '1' then
+            elsif g_avid = '1' then
                 pixel_x <= pixel_x + 1;
                 if cellx_loc = s_cszm1 then
                     cellx_loc <= (others => '0');
@@ -339,33 +448,43 @@ begin
                 end if;
             end if;
 
+            if g_avid = '1' then s_firstav <= '1'; end if;
+
             if v_v_edge = '1' then
                 pixel_y   <= (others => '0');
                 celly_org <= (others => '0');
                 celly_loc <= (others => '0');
 
                 -- Grid Scale (K1): continuous cell size, 32..256 px.
-                v_csz := 32 + to_integer(unsigned(registers_in(0)(9 downto 2)));
-                if v_csz > 256 then v_csz := 256; end if;
-                s_csz   <= to_unsigned(v_csz, 12);
-                s_csz2  <= to_unsigned(v_csz + v_csz, 12);
-                s_cszm1 <= to_unsigned(v_csz - 1, 12);
-                s_cszc  <= to_unsigned(v_csz / 2, 12);
+                s_csz   <= s_k1sz;
+                s_csz2  <= s_k1sz(10 downto 0) & '0';
+                s_cszm1 <= s_k1sz - 1;
+                s_cszc  <= '0' & s_k1sz(11 downto 1);
+
+                -- generated-avid width for this field
+                g_wm1 <= s_wlin - 1;
 
                 s_comp_seed <= mix16(unsigned(registers_in(1)), x"9E37");
-                s_sub_seed  <= mix16(unsigned(registers_in(2)), x"C2B5");
-                s_jit_mode  <= unsigned(registers_in(3)(9 downto 8));
+
+                -- Split Jitter (K4, 4 labels).  At program load the firmware
+                -- writes the initial_value_label's INDEX (0..3), not a 0..1023
+                -- position, so a value below the label count IS the label.
+                v_k := unsigned(registers_in(3));
+                if v_k < 4 then
+                    s_jit_mode <= v_k(1 downto 0);
+                else
+                    s_jit_mode <= v_k(9 downto 8);
+                end if;
 
                 -- Colour Amount: 8-bit threshold; higher -> more coloured blocks.
                 s_color_amt <= unsigned(registers_in(4)(9 downto 2));
 
-                -- Line Width: K6 top 2 bits -> half-width 1/2/3/4 px.
-                case to_integer(unsigned(registers_in(5)(9 downto 8))) is
-                    when 0      => s_line_w <= to_unsigned(1, 12);
-                    when 1      => s_line_w <= to_unsigned(2, 12);
-                    when 2      => s_line_w <= to_unsigned(3, 12);
-                    when others => s_line_w <= to_unsigned(4, 12);
-                end case;
+                -- Luma Mod line (K3 Luma Level)
+                s_luma_thr  <= s_lthr_f;
+
+                -- Line Width (K6): continuous half-width 1..16 px per leaf edge,
+                -- so a shared seam is 2..32 px -- bold enough for 1080p.
+                s_line_w <= resize(unsigned(registers_in(5)(9 downto 6)), 12) + 1;
 
                 s_seam_en  <= registers_in(6)(0);
                 s_blackblk <= registers_in(6)(1);
@@ -374,7 +493,13 @@ begin
                 s_lumamod  <= registers_in(6)(4);
 
                 s_density  <= unsigned(registers_in(7)(9 downto 2));
+
+                -- Luma Mod samples the first active line too (idempotent under
+                -- a serrated vsync); cleared at the hsync that ends that line
+                s_first   <= '1';
+                s_firstav <= '0';
             elsif v_h_edge = '1' then
+                if s_firstav = '1' then s_first <= '0'; end if;
                 pixel_y <= pixel_y + 1;
                 -- Y cell counter advances per line
                 if celly_loc = s_cszm1 then
@@ -386,6 +511,52 @@ begin
             end if;
         end if;
     end process p_position;
+
+    --------------------------------------------------------------------------
+    -- Generated avid (see the signal declarations).  g_ph is the hsync->avid
+    -- rise distance parity of this line; g_par is the voted usual parity; a
+    -- line whose avid lands off-parity starts one clock later, so the
+    -- generated start always sits at the same hsync parity.
+    --------------------------------------------------------------------------
+    p_gavid : process(clk)
+    begin
+        if rising_edge(clk) then
+            g_hsq <= data_in.hsync_n;
+            g_hsr <= g_hsq and not data_in.hsync_n;    -- hsync_n falling
+            g_avq <= data_in.avid;
+            g_avr <= data_in.avid and not g_avq;       -- avid rising
+
+            if g_hsr = '1' then
+                g_ph  <= '0';
+                g_arm <= '1';
+            else
+                g_ph <= not g_ph;
+            end if;
+            g_rsr <= g_rsr(1 downto 0) & '0';
+            if g_avr = '1' and g_arm = '1' then
+                g_arm    <= '0';
+                g_rsr(0) <= '1';
+                g_sel    <= g_ph xor g_par;
+                if g_ph = '1' then
+                    if g_pc /= 15 then g_pc <= g_pc + 1; end if;
+                else
+                    if g_pc /= 0 then g_pc <= g_pc - 1; end if;
+                end if;
+            end if;
+            if g_pc = 15 then g_par <= '1';
+            elsif g_pc = 0 then g_par <= '0'; end if;
+
+            if (g_sel = '0' and g_rsr(1) = '1') or (g_sel = '1' and g_rsr(2) = '1') then
+                g_avid <= '1';
+                g_cnt  <= (others => '0');
+            elsif g_avid = '1' then
+                g_cnt <= g_cnt + 1;
+                if g_cnt = g_wm1 or g_hsr = '1' then
+                    g_avid <= '0';
+                end if;
+            end if;
+        end if;
+    end process p_gavid;
 
     --------------------------------------------------------------------------
     -- Main pipeline.
@@ -427,7 +598,7 @@ begin
             variable o  : std_logic;
             variable t8 : integer;
         begin
-            h  := hash_lvl(n_in.seed, s_sub_seed, C_LC(lvl));
+            h  := hash_lvl(n_in.seed, C_SUB_SEED, C_LC(lvl));
             nn := n_in; nn.seed := h;
             o  := h(0);
             t8 := to_integer(s_density) - lvl * 32;      -- density tapers with depth
@@ -444,9 +615,19 @@ begin
         end procedure;
     begin
         if rising_edge(clk) then
-            -- sync/video delay line
+            -- sync delay line (only syncs + source avid are read from it, so
+            -- yosys prunes its y/u/v chains)
             pipe(0) <= data_in;
             for i in 1 to LATENCY - 1 loop pipe(i) <= pipe(i - 1); end loop;
+            gv_pipe(0) <= g_avid;
+            for i in 1 to LATENCY - 1 loop gv_pipe(i) <= gv_pipe(i - 1); end loop;
+
+            -- Video Fill delay line (one write, one registered read -> EBR)
+            vdly_ram(to_integer(vdly_wa)) <= "00" & data_in.y & data_in.u & data_in.v;
+            vdly_q  <= vdly_ram(to_integer(vdly_ra));
+            vdly_q2 <= vdly_q;
+            vdly_wa <= vdly_wa + 1;
+            vdly_ra <= vdly_ra + 1;
 
             -- S0: latch pixel position + cell origin + per-cell Luma Mod sample/hold.
             s0_x  <= pixel_x;
@@ -455,11 +636,22 @@ begin
             s0_y0 <= celly_org;
             v_col := to_integer(cellx_idx);
             if v_col > 63 then v_col := 63; end if;
-            hide_pipe(0) <= cell_hide(v_col);
-            for i in 1 to LATENCY - 1 loop hide_pipe(i) <= hide_pipe(i - 1); end loop;
-            -- sample one hide bit per cell, at the cell centre on the cell-row's top line
-            if celly_loc = 0 and cellx_loc = s_cszc then
-                if unsigned(data_in.y) <= to_unsigned(512, 10) then
+            -- this column's bits for the current row and the row above; on the
+            -- first pixel of a column the previous pixel's bits are the left
+            -- column's, so the left neighbour costs no second 64:1 read
+            if cellx_loc = 0 then
+                s0_hcl <= s0_hc;
+                s0_hul <= s0_hu;
+            end if;
+            s0_hc <= cell_hide(v_col);
+            s0_hu <= cell_hide_up(v_col);
+            -- sample one dark bit per cell, at the cell centre on the cell-row's
+            -- top line (active video only: cellx_loc holds its last value through
+            -- hblank and must not resample the blanking level there); the old
+            -- bit moves to the row-above array
+            if g_avid = '1' and (celly_loc = 0 or s_first = '1') and cellx_loc = s_cszc then
+                cell_hide_up(v_col) <= cell_hide(v_col);
+                if unsigned(data_in.y) <= s_luma_thr then
                     cell_hide(v_col) <= '1';
                 else
                     cell_hide(v_col) <= '0';
@@ -481,6 +673,11 @@ begin
             s1a_py <= s0_y;
             if v_x0 >= s_csz then s1a_left_ok <= '1'; else s1a_left_ok <= '0'; end if;
             if v_y0 >= s_csz then s1a_up_ok   <= '1'; else s1a_up_ok   <= '0'; end if;
+            -- Luma Mod bits in candidate order (gx,gy) (gx-1,gy) (gx,gy-1) (gx-1,gy-1)
+            s1a_h(0) <= s0_hc;
+            s1a_h(1) <= s0_hcl;
+            s1a_h(2) <= s0_hu;
+            s1a_h(3) <= s0_hul;
             s1a_hk(0) <= init_seed(s_comp_seed, v_x0,  v_y0);
             s1a_hk(1) <= init_seed(s_comp_seed, v_x0L, v_y0);
             s1a_hk(2) <= init_seed(s_comp_seed, v_x0,  v_y0U);
@@ -518,6 +715,8 @@ begin
             -- register only the WINNER's data; the node (a couple of adds) is
             -- built next cycle in S1c so this stage's argmax path stays short.
             s1b_hkw  <= s1a_hk(v_kw);
+            hide_pipe(2) <= s1a_h(v_kw);      -- the owning cell's Luma Mod bit
+            for i in 3 to 13 loop hide_pipe(i) <= hide_pipe(i - 1); end loop;
             s1b_bigx <= v_bigx(v_kw);
             s1b_bigy <= v_bigy(v_kw);
             if CK_X(v_kw) = 1 then s1b_ckx <= '1'; else s1b_ckx <= '0'; end if;
@@ -602,6 +801,12 @@ begin
                 v_pidx  := PAL_WHITE;
                 v_iscol := '0';
             end if;
+            -- S11 Luma Mod: colour only where the owning cell's input luma is
+            -- bright; a dark cell's blocks stay white canvas (lines still drawn)
+            if s_lumamod = '1' and hide_pipe(13) = '1' then
+                v_pidx  := PAL_WHITE;
+                v_iscol := '0';
+            end if;
             s10_pidx    <= to_unsigned(v_pidx, 3);
             s10_iscolor <= v_iscol;
 
@@ -625,16 +830,19 @@ begin
                 s12_vid <= s11_iscolor;
             end if;
 
-            -- S_out: per-cell Luma Mod gate (black where the cell's held luma is not
-            -- positive) > video-fill override > flat block colour.
-            if s_lumamod = '1' and hide_pipe(LATENCY - 1) = '1' then
-                s_io.y <= (others => '0');
+            -- S_out: blanking gate (neutral outside the generated avid) >
+            -- video-fill override > flat block colour.  Video only where the
+            -- SOURCE avid is live too: the generated line starts/ends a few
+            -- clocks after the source's, and those columns keep the block colour
+            -- rather than the receiver's blanking codes.
+            if gv_pipe(LATENCY - 1) = '0' then
+                s_io.y <= std_logic_vector(C_BLK);
                 s_io.u <= std_logic_vector(C_MID);
                 s_io.v <= std_logic_vector(C_MID);
-            elsif s12_vid = '1' and s_vid_en = '1' then
-                s_io.y <= pipe(LATENCY - 1).y;
-                s_io.u <= pipe(LATENCY - 1).u;
-                s_io.v <= pipe(LATENCY - 1).v;
+            elsif s12_vid = '1' and s_vid_en = '1' and pipe(LATENCY - 1).avid = '1' then
+                s_io.y <= vdly_q2(29 downto 20);
+                s_io.u <= vdly_q2(19 downto 10);
+                s_io.v <= vdly_q2(9 downto 0);
             else
                 s_io.y <= std_logic_vector(s12_y);
                 s_io.u <= std_logic_vector(s12_u);
@@ -642,7 +850,7 @@ begin
             end if;
             s_io.hsync_n <= pipe(LATENCY - 1).hsync_n;
             s_io.vsync_n <= pipe(LATENCY - 1).vsync_n;
-            s_io.avid    <= pipe(LATENCY - 1).avid;
+            s_io.avid    <= gv_pipe(LATENCY - 1);
             s_io.field_n <= pipe(LATENCY - 1).field_n;
         end if;
     end process p_pipe;

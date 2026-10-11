@@ -12,25 +12,34 @@ PALS = [
               SAND=(232,200,144), SANDW=(176,144,96), SURF=(120,216,208),
               AQUA=(56,180,196), MID=(32,112,204), DEEP=(16,64,152),
               FOAM=(248,252,252), GULL=(60,60,72), GULL2=(238,240,244), SAND2=(216,184,120),
-              SANDM=(208,176,122))),
+              SANDM=(208,176,122),
+              STAR=(240,236,220), STARD=(124,132,172),
+              CRAB=(224,64,40), CRABD=(120,24,24))),
  ("Golden", dict(SKYHI=(232,160,96), SKYLO=(248,208,136), SUN=(255,200,64),
               SAND=(232,192,128), SANDW=(168,132,88), SURF=(152,208,184),
               AQUA=(72,168,168), MID=(48,104,168), DEEP=(24,56,120),
               FOAM=(252,244,224), GULL=(64,52,56), GULL2=(240,235,225), SAND2=(216,176,112),
-              SANDM=(196,158,104))),
+              SANDM=(196,158,104),
+              STAR=(240,236,220), STARD=(124,132,172),
+              CRAB=(228,80,44), CRABD=(124,32,24))),
  ("Sunset", dict(SKYHI=(120,64,144), SKYLO=(240,120,96), SUN=(255,120,48),
               SAND=(200,160,112), SANDW=(140,104,76), SURF=(168,144,176),
               AQUA=(48,104,136), MID=(56,72,144), DEEP=(24,40,104),
               FOAM=(248,224,216), GULL=(48,40,56), GULL2=(230,215,215), SAND2=(184,146,100),
-              SANDM=(166,128,90))),
+              SANDM=(166,128,90),
+              STAR=(240,236,220), STARD=(124,132,172),
+              CRAB=(192,52,48), CRABD=(100,24,30))),
  ("Night", dict(SKYHI=(16,24,64), SKYLO=(40,56,104), SUN=(232,240,248),
               SAND=(96,96,104), SANDW=(64,64,76), SURF=(96,160,168),
               AQUA=(48,104,136), MID=(24,64,112), DEEP=(8,32,72),
               FOAM=(216,232,240), GULL=(32,32,48), GULL2=(200,208,218), SAND2=(88,88,96),
-              SANDM=(76,76,86))),
+              SANDM=(76,76,86),
+              STAR=(240,236,220), STARD=(124,132,172),
+              CRAB=(112,44,56), CRABD=(56,22,34))),
 ]
 ORDER = ["SKYHI","SKYLO","SUN","SAND","SANDW","SURF",
-         "AQUA","MID","DEEP","FOAM","GULL","SAND2","SANDM","GULL2"]
+         "AQUA","MID","DEEP","FOAM","GULL","SAND2","SANDM","GULL2",
+         "STAR","STARD","CRAB","CRABD"]
 
 def yuv(r, g, b):
     y = 0.299*r + 0.587*g + 0.114*b
@@ -39,18 +48,21 @@ def yuv(r, g, b):
     q = lambda x: max(0, min(1023, int(round(x*4))))
     return q(y), q(cb), q(cr)
 
-print("    type t_pal is array (0 to 63) of std_logic_vector(29 downto 0);")
+print("    type t_pal is array (0 to 127) of std_logic_vector(29 downto 0);")
 print("    constant PAL_ROM : t_pal := (")
 for pi, (pname, pal) in enumerate(PALS):
     print(f"        -- {pi}: {pname} (U/V swapped for hardware)")
-    for ci, cn in enumerate(ORDER):
-        y, cb, cr = yuv(*pal[cn])
-        word = f"{y:010b}{cr:010b}{cb:010b}"   # U slot <- Cr, V slot <- Cb
-        print(f'        {pi*16+ci:2d} => "{word}",  -- {cn}')
-    for ci in range(14, 16):
-        idx = pi*16 + ci
-        comma = "" if idx == 63 else ","
-        print(f'        {idx:2d} => "{0:030b}"{comma}')
+    # 32 slots per palette (5-bit index); unused slots are zero
+    for ci in range(32):
+        idx = pi*32 + ci
+        comma = "" if idx == 127 else ","
+        if ci < len(ORDER):
+            cn = ORDER[ci]
+            y, cb, cr = yuv(*pal[cn])
+            word = f"{y:010b}{cr:010b}{cb:010b}"   # U slot <- Cr, V slot <- Cb
+            print(f'        {idx:3d} => "{word}"{comma}  -- {cn}')
+        else:
+            print(f'        {idx:3d} => "{0:030b}"{comma}')
 print("    );")
 
 

@@ -166,7 +166,30 @@ v0.3.2 build: HD Analog **76.44**, HD HDMI **77.75** (seed 1), HD Dual
 HD margins are ~3 % — the 10x13 warp multiply cost ~4 MHz; split its operand
 hi/lo if a later change squeezes it.
 
-## v0.3.3 (2026-10-05) — the recurring HDMI bars, found
+## v1.0.0 — FINAL except presets (Ron signed off 2026-10-09)
+
+Same six bitstreams as v0.3.3 (only the config binary was regenerated for the
+version bump) — the HD HDMI placement is the one Ron validated.  **Do not
+re-route HD HDMI without a hardware A/B**: this program sits in the HDMI
+placement lottery (below).  Seeds: HD HDMI 1, HD Dual 2, HD Analog 6 (hand-
+installed, 80.10 MHz), SD all 1.  Presets still to be re-captured on hardware.
+
+### The HDMI bars investigation, closed for now (2026-10-06)
+
+The v0.3.3 luma low-pass did NOT hold as a fix — bars returned.  A deep pass
+then measured the output pin timing (TX clock edge 1-2 ns after the data burst,
+all ADV7513 pins in one IO bank) and tested the ground-bounce theory with a
+diagnostic that injected a visually inert, maximally bus-hostile strip in the
+worst-margin placement: **no bars**.  That theory is dead.  Two further facts:
+(1) static pictures never barred in any build (Flow at centre, or Flow
+disabled), bars only with Flow on, more at 100%; (2) the rate drifted down over
+days with nothing changed.  Best reading: a marginal downstream link reacting
+to particular pixel-value sequences, which Flow keeps visiting as the edges
+sweep sub-pixel phases.  Unproven; the cable/display swap and the periodicity
+check (bursts every ~10 s at Flow 55 %) were never run.  Memory
+`avid_dropout_uv_bars` has the full chain.
+
+## v0.3.3 (2026-10-05) — luma 1-2-1 (did not hold, kept: harmless)
 
 Ron then saw the cross-program ~10 px bars (the CGA/Fray ones), none at Warp 0,
 worse up to 100%.  Bisected on hardware:

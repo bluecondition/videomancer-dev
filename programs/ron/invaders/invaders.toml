@@ -1,19 +1,19 @@
-# Space Invaders
+# Wizard Invaders
 #
-# Classic invaders clone: marching 6x8 alien formation, 4 destructible
-# shields, a player ship driven by the slider, and a bullet that fires on
-# any change of Switch 7.
+# Videomancer-themed Space Invaders: a marching 3x6 wave of CRT-TV aliens,
+# 4 destructible bunkers, the wizard slid by the fader, wand-shots fired on
+# any change of Switch 7, pixel-accurate collisions, arcade cellophane overlay.
 
 [program]
 program_id = "com.ron.invaders"
 program_name = "Invaders"
-program_version = "0.1.0"
+program_version = "0.7.3"
 abi_version = ">=1.0,<2.0"
 author = "Ron"
 license = "GPL-3.0"
 categories = ["Game", "Pattern"]
 program_type = "processing"
-description = "Space Invaders clone — 6x8 alien wave, destructible shields, slider-controlled ship, fire on any Switch 7 edge"
+description = "Space Invaders: 3x6 CRT-TV alien wave, destructible bunkers, fader-driven wizard, fire on any Switch 7 edge"
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
@@ -21,27 +21,30 @@ core = "yuv444_30b"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_1"
-name_label = "Unused"
+name_label = "Bomb Rate"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 0
+initial_value = 512
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
-name_label = "Unused"
+name_label = "Trail"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 0
+initial_value = 640
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
-name_label = "Unused"
+name_label = "Hue"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
 initial_value = 0
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
@@ -49,7 +52,7 @@ name_label = "Alien Spd"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 0
+initial_value = 410
 suffix_label = "%"
 
 [[parameter]]
@@ -58,7 +61,7 @@ name_label = "Bomb Drop Spd"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 0
+initial_value = 256
 suffix_label = "%"
 
 [[parameter]]
@@ -67,7 +70,7 @@ name_label = "Shot Spd"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 0
+initial_value = 384
 suffix_label = "%"
 
 # --- Toggle Switches (7-11) ---
@@ -86,9 +89,9 @@ initial_value_label = "Black"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
-name_label = "Color"
-value_labels = ["Mono", "Hue"]
-initial_value_label = "Mono"
+name_label = "Overlay"
+value_labels = ["Solid", "Cellophane"]
+initial_value_label = "Cellophane"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
@@ -115,19 +118,22 @@ display_float_digits = 1
 suffix_label = "%"
 
 # --- Presets ---
+# Hand-written placeholders; capture real ones on hardware with
+# ./capture_preset.sh once the controls are signed off.
 
 [[preset]]
-name = "Classic"
+name = "Arcade"
 
 [[preset]]
-name = "Fast Onslaught"
-rotary_potentiometer_1 = 900
-rotary_potentiometer_2 = 800
+name = "Onslaught"
+rotary_potentiometer_1 = 1023
 rotary_potentiometer_4 = 768
+rotary_potentiometer_5 = 768
+rotary_potentiometer_6 = 896
 
 [[preset]]
-name = "Color Overlay"
+name = "Video Raid"
+rotary_potentiometer_2 = 1023
+rotary_potentiometer_3 = 448
 toggle_switch_8 = 0
-toggle_switch_9 = 1
-rotary_potentiometer_5 = 256
-rotary_potentiometer_6 = 768
+toggle_switch_9 = 0
