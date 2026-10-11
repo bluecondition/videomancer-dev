@@ -295,7 +295,8 @@ architecture pipedream of program_top is
     signal s_rpm1  : unsigned(7 downto 0) := to_unsigned(95, 8);
     signal s_rfrac : unsigned(10 downto 0) := to_unsigned(300, 11);
     signal s_r     : unsigned(7 downto 0) := to_unsigned(14, 8);     -- Fatness radius
-    signal s_rmax  : unsigned(7 downto 0) := to_unsigned(19, 8);     -- largest clean radius
+    signal s_rmax  : unsigned(7 downto 0) := to_unsigned(19, 8);     -- largest clean radius (Fatness top)
+    signal s_rimg  : unsigned(7 downto 0) := to_unsigned(30, 8);     -- Image swell top (pipes merge)
     signal s_pv, s_ph : signed(7 downto 0) := (others => '0');       -- straights' light projection
     signal s_lx, s_ly : signed(9 downto 0) := (others => '0');
     signal s_lx6, s_ly6 : signed(6 downto 0) := (others => '0');
@@ -733,29 +734,35 @@ begin
                     when 8 =>
                         s_w2  <= resize(s_wh2 & "00", 17);                                            -- (2wh)^2
                         s_w2o <= resize(s_wh2 & "00", 17) - resize(s_wh & "00", 17) + 1;              -- (2wh-1)^2
-                        -- sqrt table covers rho^2 up to 2048 << sqs >= 2.05 wh^2 (the 0.41 wh band)
-                        if    s_wh2 <= 992  then s_sqs <= "00";
-                        elsif s_wh2 <= 1984 then s_sqs <= "01";
-                        elsif s_wh2 <= 3968 then s_sqs <= "10";
+                        -- sqrt table covers rho^2 up to 2048 << sqs >= 2.55 wh^2: the
+                        -- 0.6 wh band Image can swell to (worst error 0.20 px)
+                        if    s_wh2 <= 803  then s_sqs <= "00";
+                        elsif s_wh2 <= 1606 then s_sqs <= "01";
+                        elsif s_wh2 <= 3212 then s_sqs <= "10";
                         else                     s_sqs <= "11"; end if;
                     when 10 =>
                         s_rmax <= unsigned(mp(18 downto 11));
-                        ma <= signed(resize(s_r & "00", 13)); mb <= signed(resize(s_a6, 13));
+                        ma <= signed(resize(s_w, 13)); mb <= to_signed(634, 13);                     -- Image swell top
                     when 11 =>
                         sb_go <= '1';
                     when 13 =>
+                        -- rimg = 0.62 wh: Image swells bright (or dark) areas past
+                        -- the 0.41 wh kiss, so neighbouring pipes merge -- the climax
+                        s_rimg <= unsigned(mp(18 downto 11));
+                        ma <= signed(resize(s_r & "00", 13)); mb <= signed(resize(s_a6, 13));
+                    when 16 =>
                         -- c0 = 4r(1-a): the radius left where L' = 0
                         s_c0q <= resize(s_r & "00", 9) - unsigned(mp(14 downto 6));
-                        ma <= signed(resize(s_rmax & "00", 13)); mb <= signed(resize(s_a6, 13));
-                    when 16 =>
-                        -- c1 = 4 rmax a: added in proportion to L'
+                        ma <= signed(resize(s_rimg & "00", 13)); mb <= signed(resize(s_a6, 13));
+                    when 19 =>
+                        -- c1 = 4 rimg a: added in proportion to L'
                         s_c1q <= unsigned(mp(14 downto 6));
-                    when 17 =>
+                    when 20 =>
                         -- never let a pipe vanish: squeeze the radius range to
-                        -- [rmax/8, rmax] (r' = 7/8 r + rmax/8), at least 1.25 px
+                        -- r' = 7/8 r + rmax/8 (floor 1/8 of Fatness top, >= 1.25 px)
                         s_c0q <= s_c0q - shift_right(s_c0q, 3) + resize(shift_right(s_rmax & "00", 3), 9);
                         s_c1q <= s_c1q - shift_right(s_c1q, 3);
-                    when 18 =>
+                    when 21 =>
                         if s_c0q < 5 then s_c0q <= to_unsigned(5, 9); end if;
                     when 24 =>
                         if div_q > 127 then s_krec <= (others => '1');
@@ -872,9 +879,12 @@ begin
             -- Image off a slow diagonal swell wave so P12 still breathes
             s_yprev <= unsigned(data_in.y);
             v_ys := resize(unsigned(data_in.y), 11) + resize(s_yprev, 11);
-            v_lv := signed(resize(v_ys(10 downto 1), 12)) - 64;
+            -- contrast-stretched: Y 150..770 -> 0..63, so mid-tone video still
+            -- drives the pipes nearly end to end
+            v_lv := signed(resize(v_ys(10 downto 1), 12)) - 150;
             if v_lv < 0 then v_lv := (others => '0'); end if;
-            v_l := resize(shift_right(unsigned(v_lv), 4), 8) + resize(shift_right(unsigned(v_lv), 6), 8);
+            v_l := resize(shift_right(unsigned(v_lv), 4), 8) + resize(shift_right(unsigned(v_lv), 5), 8)
+                 + resize(shift_right(unsigned(v_lv), 7), 8);
             v_sw := resize(shift_right(resize(x_f, 13) + resize(y_f, 13), 2), 8) + s_swp;
             if s_image = '0' then
                 if v_sw(7) = '1' then g0_l <= not v_sw(6 downto 1); else g0_l <= v_sw(6 downto 1); end if;

@@ -1,8 +1,22 @@
 # Pipedream — a woven Truchet network of glossy 3D pipes
 
-**Status:** v3.2.0 (2026-10-04: no lone rings, 12.5% minimum thickness); v3.1.0 — joint accuracy, smooth highlights, bipolar
+**Status:** v3.3.0 FINAL — signed off by Ron 2026-10-11 ("good as is - let's finalize"); live device settings matched the TOML defaults, so the defaults stand as captured; presets hand-written.  History: v3.3.0 (stronger Image); v3.2.0 (no lone rings, 12.5% minimum thickness); v3.1.0 — joint accuracy, smooth highlights, bipolar
 Image on S11/P12.  v3.0 HW-seen by Ron ("very interesting now"); v3.1 not flashed.
 v2.3 and v3.0 source + vmprog kept in `.pipedream_work/`.
+
+## v3.3 (2026-10-11)
+Ron (near-final, all pipe behaviour liked): Image/luma "a little stronger, or
+on a knob".  Kept it on S11/P12 (no free knob) and made it stronger:
+- Image swells pipes up to `rimg = 0.62·wh` (w·634>>11), past the 0.41·wh kiss,
+  so at full Image bright (right) / dark (left) areas swell into each other —
+  the designed climax.  Fatness stays 0.12–0.40·wh; the 1/8 floor still keys
+  off the Fatness top.  `c1 = 4·rimg·a`.
+- Sqrt table widened to 2.55·wh² (sqs thresholds 803/1606/3212): worst
+  0.20 px over the 0.6·wh band (bit-exact model).
+- Luma contrast stretch: Y 150..770 → 0..63 (`(v>>4)+(v>>5)+(v>>7)`, v=Y−150),
+  so mid-tone video drives the pipes nearly end to end.
+- Build: 6/6 seed 1 router1 — HD Analog 85.24, HD HDMI 77.18, HD Dual 82.60;
+  SD 81.65 / 83.98 / 80.03 MHz; ~6680 LC (87%), 9 EBR.
 
 ## v3.2 (2026-10-04)
 - **No lone rings (Random pattern).**  A ring closes round a vertex exactly
