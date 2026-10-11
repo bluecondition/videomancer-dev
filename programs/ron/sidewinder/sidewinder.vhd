@@ -3,49 +3,66 @@
 -- Incoming video is written into a dual-bank line buffer and read back one
 -- line later at a horizontally shifted address. The shift is a triangle (or
 -- sine) wave of the line number, so the picture snakes left and right as it
--- goes down the screen; the wave phase advances every frame so the bends
+-- goes down the screen; the wave phase advances every field so the bends
 -- roll vertically.
 --
---   offset(line) = wave(frame_phase + y*freq) * Amount
---                + wave(3*(frame_phase + y*freq)) * Ripple      (3x harmonic)
---   out(x, y)    = in(x - offset, y - 1)
+--   offset(a)  = wave(phase(a)) * Amount + wave(3 * phase(a)) * Ripple
+--   phase(a+1) = phase(a) + freq(a),  phase(0) = frame phase
+--   freq(a)    = freq(Period) + (a - H/2) * Twist      (a = active line)
+--   Y(x) = prev.Y(x + offset)
+--   U(x) = prev.U(x + offset * (1 + Split))
+--   V(x) = prev.V(x + offset * (1 - Split))
 --
 -- Controls:
---   K1 Amount  displacement amplitude, 0..+-255 px
---   K2 Period  vertical wavelength; quadratic knob so the low end sweeps
---              slowly through long whole-screen bends (freq = K2^2 >> 8)
---   K3 Rate    bidirectional with a centre detent: centre = frozen, right =
---              wave rolls down, left = rolls up. Quadratic away from centre
---              (rate = sign * (K3-512)^2 >> 6) so near-centre gives ultra
---              slow drift and the extremes get properly violent.
---   K4 Ripple  3x-frequency harmonic amount, 0..+-63 px
---   S7 Shape   Triangle / Sine (sine table is -cos so shapes stay aligned)
---   S8 Swell   slow automatic triangle LFO on the amplitude (breathing)
---   S9 Steps   quantize the offset to 16 px -> staircase band shred
---   S10 Edge   Black (off-screen reads go black) / Wrap (screen is a tube)
---   S11 Bypass, P12 Mix (dry/wet)
+--   P12 Amount  headline gesture: amplitude as a fraction of the measured
+--               width, quadratic, from a 3% floor (so every other control
+--               always shows) up to +-W/2 -- in Wrap the picture coils
+--               round a tube
+--   K1 Period   vertical wavelength, freq = K1^2 >> 8 per line (glided:
+--               the phase at the bottom line is ~H * freq, so one LSB of
+--               pot noise would otherwise shake the bottom of the screen)
+--   K2 Rate     roll speed, bidirectional, centre detent = frozen,
+--               quadratic away from centre
+--   K3 Ripple   3x harmonic, quadratic, 0 .. +-W/8, independent of Amount
+--   K4 Twist    bidirectional, centre detent: the wavelength changes down
+--               the screen about the centre row; right bunches the bends
+--               towards the bottom, left towards the top (glided)
+--   K5 Split    chroma dispersion: U bends further than Y, V less
+--               (0 .. U at 2x / V at 0x), quadratic
+--   K6 Mix      dry/wet
+--   S7 Shape    Triangle / Sine (sine table is -cos so shapes stay aligned)
+--   S8 Swell    slow automatic triangle LFO on Amount (~6 s)
+--   S9 Steps    quantize the offset to 16 px -> staircase band shred
+--   S10 Edge    Mirror / Wrap, both over the inset columns [12, W-13] so
+--               the source's black blanking columns never reach the picture
+--   S11 Bypass  mix forced dry (same latency)
 --
--- All wave math runs once per line in a small step-sequenced pipeline during
--- horizontal blanking (and once per frame during vertical blanking), so every
--- multiply has registered inputs and outputs -- nothing per-pixel except the
--- buffer read/write and two run-along read counters (see ziffern memory:
--- combinational mults feeding latched signals are still STA-timed).
+-- All wave math runs in two step sequencers: once per field in vertical
+-- blanking (knob curves, glides, width-relative scaling; one shared
+-- registered multiplier) and once per line in horizontal blanking, kicked
+-- at the active-video fall (phase/freq advance, wave lookups, products,
+-- chroma split, edge folding; a second shared multiplier). The phase
+-- advances on ACTIVE lines only and the frame anchor is the vsync edge
+-- guarded by a saw-active flag, so serrated analog vsync and interlace
+-- cannot change the roll speed or the field-to-field phase.
 --
--- Wrap mode never computes (p + offset) mod width per pixel: the wrapped read
--- pointer is initialised once per line during blanking and then just runs
--- along with pixel_x, wrapping at width-1 with a single compare.
+-- Per pixel there is no arithmetic beyond three run-along read pointers
+-- (Y, U, V). Each is initialised once per line to its folded start column
+-- and then steps +-1, wrapping (R -> L) or bouncing (hold the edge column
+-- one pixel, turn) at the inset bounds. The pointers ARE the RAM read
+-- addresses -- no comparator sits in front of RADDR.
 --
--- Buffer = inlined dual-bank ping-pong BRAM (from shearline, minus the
--- feedback): each line WRITES its own parity bank, READS the other (the line
--- above). Y full 2048 deep; U/V 2:1 decimated (1024). ~22 EBRs.
+-- Buffer = inlined dual-bank ping-pong BRAM: each active line WRITES its
+-- own parity bank and READS the other (the line above); parity flips at the
+-- active-video fall, on the same edge as the line's last write. Pixel k is
+-- written at address k. Y 2048 deep; U/V 2:1 decimated (1024): 22 EBR plus
+-- the sine ROM.
 --
--- Pipeline (rising-edge clocks, data_in -> data_out):
---   E1  p_ctrl: register inputs, pixel_x / q / ptr counters, parity,
---       line + frame step sequencers (combinational read addr mux)
---   E2  bank reads registered; write of live pixel lands; capture bg/rbank
---   E3  p_wet: bank select / background fill -> s_wet_*
---   E4-E7 interpolator_u (4-clock) dry/wet mix
---   E7  data_out (combinational bypass mux)
+-- Pipeline (data_in -> data_out, 7 clocks):
+--   E0     input registers; bank reads at the pointers; pointers step
+--   E1     bank select -> s_wet_*
+--   E2     blanking gate: dry and wet forced to 64/512/512 outside avid
+--   E3-E6  dry/wet mix (split-multiply lerp, 4 clocks) -> data_out
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -63,12 +80,29 @@ architecture sidewinder of program_top is
     -- Constants
     --------------------------------------------------------------------------
     constant C_DW            : integer := C_VIDEO_DATA_WIDTH;  -- 10
-    constant C_Y_AW          : integer := 11;                  -- 2048 (full)
-    constant C_UV_AW         : integer := 10;                  -- 1024 (2:1 dec)
+    constant C_AW            : integer := 11;                  -- Y depth 2048
     constant C_TOTAL_LATENCY : integer := 7;
 
-    -- Swell LFO speed: added to a 16-bit phase every frame (~6 s per cycle).
+    -- Swell LFO speed: added to a 16-bit phase every field (~6 s per cycle).
     constant C_SWELL_RATE    : integer := 192;
+
+    -- Inset bounds: source columns < C_EDGE or > W-1-C_EDGE never shown.
+    constant C_EDGE          : integer := 12;
+    -- Active line the field width is measured on (away from half lines).
+    constant C_WIDTH_LINE    : integer := 8;
+    -- Centre detent half-width on the bipolar knobs.
+    constant C_DETENT        : integer := 8;
+    -- Amount floor (of 1023): ~3% of the width at slider 0.
+    constant C_AMP_FLOOR     : integer := 32;
+
+    constant C_Y_BLACK       : unsigned(C_DW - 1 downto 0) := to_unsigned(64, C_DW);
+    constant C_C_ZERO        : unsigned(C_DW - 1 downto 0) := to_unsigned(512, C_DW);
+
+    -- Sequencer idle states (the last step of each sequence parks there).
+    constant C_L_IDLE        : unsigned(5 downto 0) := "111111";
+    constant C_L_LAST        : integer := 33;
+    constant C_V_IDLE        : unsigned(4 downto 0) := "11111";
+    constant C_V_LAST        : integer := 18;
 
     --------------------------------------------------------------------------
     -- Sine ROM: 256 x signed, value = round(-255*cos(2*pi*i/256)) so index 0
@@ -122,100 +156,201 @@ architecture sidewinder of program_top is
         end if;
     end function f_tri;
 
+    -- One pixel of a run-along read pointer. Up: at R wrap to L (Wrap) or
+    -- hold R and turn (Mirror). Down (Mirror only): at L hold and turn.
+    -- Returns dir & ptr.
+    function f_bounce(ptr    : unsigned(C_AW - 1 downto 0);
+                      dir    : std_logic;
+                      r      : unsigned(C_AW - 1 downto 0);
+                      mirror : std_logic) return unsigned is
+        variable v : unsigned(C_AW downto 0);
+    begin
+        if dir = '0' then
+            if ptr = r then
+                if mirror = '1' then
+                    v := '1' & ptr;
+                else
+                    v := '0' & to_unsigned(C_EDGE, C_AW);
+                end if;
+            else
+                v := '0' & (ptr + 1);
+            end if;
+        elsif ptr = to_unsigned(C_EDGE, C_AW) then
+            v := '0' & ptr;
+        else
+            v := '1' & (ptr - 1);
+        end if;
+        return v;
+    end function f_bounce;
+
+    -- |a - b| with the sign of (a - b) in the MSB.
+    function f_sdiff(a, b : unsigned(C_DW - 1 downto 0)) return unsigned is
+        variable v_d, v_nd : signed(C_DW downto 0);
+        variable v_r       : unsigned(C_DW downto 0);
+    begin
+        v_d  := signed(resize(a, C_DW + 1)) - signed(resize(b, C_DW + 1));
+        v_nd := signed(resize(b, C_DW + 1)) - signed(resize(a, C_DW + 1));
+        if v_d(C_DW) = '1' then
+            v_r := '1' & unsigned(v_nd(C_DW - 1 downto 0));
+        else
+            v_r := '0' & unsigned(v_d(C_DW - 1 downto 0));
+        end if;
+        return v_r;
+    end function f_sdiff;
+
+    -- b +/- (pm >> 10). pm <= w * |a - b| with w < 1024, so the result
+    -- always lies between b and a: no clamp needed.
+    function f_step(b : unsigned(C_DW - 1 downto 0); pm : unsigned(19 downto 0);
+                    neg : std_logic) return unsigned is
+    begin
+        if neg = '1' then
+            return b - pm(19 downto 10);
+        else
+            return b + pm(19 downto 10);
+        end if;
+    end function f_step;
+
     --------------------------------------------------------------------------
-    -- Inlined dual-bank line buffers
+    -- Inlined dual-bank line buffers (initialised to black / neutral chroma)
     --------------------------------------------------------------------------
     type t_lb_y  is array (0 to 2047) of std_logic_vector(C_DW - 1 downto 0);
     type t_lb_uv is array (0 to 1023) of std_logic_vector(C_DW - 1 downto 0);
 
-    signal lbY0, lbY1 : t_lb_y  := (others => (others => '0'));
-    signal lbU0, lbU1 : t_lb_uv := (others => (others => '0'));
-    signal lbV0, lbV1 : t_lb_uv := (others => (others => '0'));
+    signal lbY0, lbY1 : t_lb_y  := (others => std_logic_vector(C_Y_BLACK));
+    signal lbU0, lbU1 : t_lb_uv := (others => std_logic_vector(C_C_ZERO));
+    signal lbV0, lbV1 : t_lb_uv := (others => std_logic_vector(C_C_ZERO));
+
+    -- A bank is only displayed on the lines it is not written, so a
+    -- read/write collision is harmless: skip yosys's read-before-write
+    -- emulation (needs the init values on the read-data registers below).
+    attribute no_rw_check : boolean;
+    attribute no_rw_check of lbY0, lbY1, lbU0, lbU1, lbV0, lbV1 : signal is true;
 
     signal s_rdY0, s_rdY1 : std_logic_vector(C_DW - 1 downto 0) := (others => '0');
     signal s_rdU0, s_rdU1 : std_logic_vector(C_DW - 1 downto 0) := (others => '0');
     signal s_rdV0, s_rdV1 : std_logic_vector(C_DW - 1 downto 0) := (others => '0');
 
     --------------------------------------------------------------------------
-    -- Input registers / position tracking (E1)
+    -- Write side / line and field tracking
     --------------------------------------------------------------------------
-    signal s_in_y, s_in_u, s_in_v : unsigned(C_DW - 1 downto 0) := (others => '0');
-    signal s_in_avid              : std_logic := '0';
-
-    signal s_pixel_x      : unsigned(C_Y_AW - 1 downto 0) := (others => '0');
+    signal s_in_y, s_in_u, s_in_v : std_logic_vector(C_DW - 1 downto 0) := (others => '0');
+    signal s_in_avid      : std_logic := '0';
+    signal s_wr_x         : unsigned(C_AW - 1 downto 0) := (others => '0');
     signal s_par          : std_logic := '0';
-    signal s_prev_hsync_n : std_logic := '1';
     signal s_prev_vsync_n : std_logic := '1';
-
-    signal s_line_width   : unsigned(C_Y_AW - 1 downto 0) := (others => '0');
-
-    -- Run-along read counters (init during hblank, +1 per active pixel)
-    signal s_q   : signed(12 downto 0)          := (others => '0');  -- unwrapped
-    signal s_ptr : unsigned(C_Y_AW - 1 downto 0) := (others => '0'); -- wrapped
+    signal s_saw_active   : std_logic := '0';
+    signal s_aline        : unsigned(10 downto 0) := (others => '0');
+    signal s_height_m     : unsigned(10 downto 0) := to_unsigned(1080, 11);
+    signal s_width_m      : unsigned(C_AW - 1 downto 0) := to_unsigned(1920, C_AW);
 
     --------------------------------------------------------------------------
-    -- Per-frame step sequencer (vertical blanking)
+    -- Per-field constants (latched by the frame sequencer)
     --------------------------------------------------------------------------
-    signal s_vstep       : unsigned(2 downto 0) := "111";
-    signal s_d           : signed(10 downto 0) := (others => '0');
-    signal s_absd        : unsigned(9 downto 0) := (others => '0');
-    signal s_dsq         : unsigned(19 downto 0) := (others => '0');
-    signal s_k2sq        : unsigned(19 downto 0) := (others => '0');
+    signal s_W        : unsigned(C_AW - 1 downto 0) := to_unsigned(1920, C_AW);
+    signal s_H        : unsigned(10 downto 0) := to_unsigned(1080, 11);
+    signal s_R        : unsigned(C_AW - 1 downto 0) := to_unsigned(1920 - 1 - C_EDGE, C_AW);
+    signal s_S        : unsigned(C_AW - 1 downto 0) := to_unsigned(1920 - 2 * C_EDGE, C_AW);
+    signal s_mod      : unsigned(C_AW downto 0) := to_unsigned(1920 - 2 * C_EDGE, C_AW + 1);
+    signal s_C1       : unsigned(C_AW downto 0) := to_unsigned(2 * (1920 - 2 * C_EDGE) + C_EDGE - 1, C_AW + 1);
+    signal s_mirror_f : std_logic := '0';
+
+    --------------------------------------------------------------------------
+    -- Per-field step sequencer (vertical blanking)
+    --------------------------------------------------------------------------
+    signal s_vstep       : unsigned(4 downto 0) := C_V_IDLE;
+    signal s_fm_a, s_fm_b : unsigned(10 downto 0) := (others => '0');
+    signal s_fm_pl       : unsigned(16 downto 0) := (others => '0');
+    signal s_fm_ph       : unsigned(15 downto 0) := (others => '0');
+    signal s_fm_p        : unsigned(21 downto 0) := (others => '0');
+    signal s_g_per       : unsigned(15 downto 0) := to_unsigned(340 * 64, 16);
+    signal s_g_tw        : unsigned(15 downto 0) := to_unsigned(512 * 64, 16);
+    signal s_gdiff       : signed(16 downto 0) := (others => '0');
+    signal s_d_rate      : signed(10 downto 0) := (others => '0');
+    signal s_absd_rate   : unsigned(9 downto 0) := (others => '0');
+    signal s_rate        : signed(13 downto 0) := (others => '0');
+    signal s_d_tw        : signed(10 downto 0) := (others => '0');
+    signal s_absd_tw     : unsigned(9 downto 0) := (others => '0');
+    signal s_tw_neg      : std_logic := '0';
+    signal s_tw_mag      : unsigned(10 downto 0) := (others => '0');
+    signal s_twist       : unsigned(23 downto 0) := (others => '0');
+    signal s_freq0       : unsigned(23 downto 0) := (others => '0');
+    signal s_pivot       : unsigned(21 downto 0) := (others => '0');
+    signal s_freq_top    : unsigned(23 downto 0) := (others => '0');
     signal s_swell_phase : unsigned(15 downto 0) := (others => '0');
     signal s_swell_tri   : unsigned(9 downto 0) := (others => '0');
-    signal s_swell_prod  : unsigned(19 downto 0) := (others => '0');
-    signal s_rate        : signed(13 downto 0) := (others => '0');
-    signal s_freq        : unsigned(11 downto 0) := (others => '0');
-    signal s_eff_amp     : unsigned(C_DW - 1 downto 0) := (others => '0');
-    signal s_frame_phase : unsigned(15 downto 0) := (others => '0');
+    signal s_aq          : unsigned(9 downto 0) := (others => '0');
+    signal s_amp_frac    : unsigned(9 downto 0) := (others => '0');
+    signal s_eff         : unsigned(9 downto 0) := (others => '0');
+    signal s_rip_q       : unsigned(9 downto 0) := (others => '0');
+    signal s_split_q     : unsigned(9 downto 0) := (others => '0');
+    signal s_amp_px      : unsigned(10 downto 0) := (others => '0');
+    signal s_rip_px      : unsigned(7 downto 0) := (others => '0');
+    signal s_frame_phase : unsigned(23 downto 0) := (others => '0');
 
     --------------------------------------------------------------------------
-    -- Per-line step sequencer (horizontal blanking)
+    -- Per-line step sequencer (horizontal blanking). Phase and freq are
+    -- 16.8 fixed point; the phase's top 16 bits are the wave phase.
     --------------------------------------------------------------------------
-    signal s_lstep      : unsigned(2 downto 0) := "111";
-    signal s_line_phase : unsigned(15 downto 0) := (others => '0');
+    signal s_lstep      : unsigned(5 downto 0) := C_L_IDLE;
+    signal s_phase      : unsigned(23 downto 0) := (others => '0');
+    signal s_freq       : unsigned(23 downto 0) := (others => '0');
     signal s_phase3     : unsigned(15 downto 0) := (others => '0');
+    signal s_rom_addr   : unsigned(7 downto 0) := (others => '0');
+    signal s_rom_q      : signed(9 downto 0) := (others => '0');
     signal s_sin_main   : signed(9 downto 0) := (others => '0');
     signal s_tri_main   : signed(9 downto 0) := (others => '0');
     signal s_sin_rip    : signed(9 downto 0) := (others => '0');
     signal s_tri_rip    : signed(9 downto 0) := (others => '0');
     signal s_wave_main  : signed(9 downto 0) := (others => '0');
     signal s_wave_rip   : signed(9 downto 0) := (others => '0');
-    signal s_prod_main  : signed(20 downto 0) := (others => '0');
-    signal s_prod_rip   : signed(20 downto 0) := (others => '0');
-    signal s_offset     : signed(9 downto 0) := (others => '0');
+    signal s_lm_a, s_lm_b : unsigned(10 downto 0) := (others => '0');
+    signal s_lm_pl      : unsigned(16 downto 0) := (others => '0');
+    signal s_lm_ph      : unsigned(15 downto 0) := (others => '0');
+    signal s_lm_p       : unsigned(21 downto 0) := (others => '0');
+    signal s_neg_main   : std_logic := '0';
+    signal s_neg_rip    : std_logic := '0';
+    signal s_neg_off    : std_logic := '0';
+    signal s_off_m      : signed(12 downto 0) := (others => '0');
+    signal s_off_r      : signed(12 downto 0) := (others => '0');
+    signal s_off        : signed(12 downto 0) := (others => '0');
+    signal s_dsplit     : signed(12 downto 0) := (others => '0');
+    signal s_off_u      : signed(13 downto 0) := (others => '0');
+    signal s_off_v      : signed(13 downto 0) := (others => '0');
+    signal s_red        : signed(13 downto 0) := (others => '0');
+    signal s_ge         : std_logic := '0';
+
+    -- Run-along read pointers (= RAM read addresses) and directions
+    signal s_ptr_y, s_ptr_u, s_ptr_v : unsigned(C_AW - 1 downto 0) := to_unsigned(C_EDGE, C_AW);
+    signal s_dir_y, s_dir_u, s_dir_v : std_logic := '0';
 
     --------------------------------------------------------------------------
     -- Control (decoded from registers)
     --------------------------------------------------------------------------
-    signal s_amount   : unsigned(C_DW - 1 downto 0);
     signal s_period_k : unsigned(C_DW - 1 downto 0);
     signal s_rate_k   : unsigned(C_DW - 1 downto 0);
     signal s_ripple_k : unsigned(C_DW - 1 downto 0);
+    signal s_twist_k  : unsigned(C_DW - 1 downto 0);
+    signal s_split_k  : unsigned(C_DW - 1 downto 0);
+    signal s_mix_k    : unsigned(C_DW - 1 downto 0);
+    signal s_amount   : unsigned(C_DW - 1 downto 0);
     signal s_shape    : std_logic;
     signal s_swell    : std_logic;
     signal s_steps    : std_logic;
     signal s_wrap     : std_logic;
     signal s_bypass   : std_logic;
-    signal s_mix_t    : unsigned(C_DW - 1 downto 0);
+    signal s_mix_w    : unsigned(C_DW - 1 downto 0) := (others => '0');  -- 1023 - Mix
 
     --------------------------------------------------------------------------
-    -- Combinational read address
+    -- Pixel path
     --------------------------------------------------------------------------
-    signal s_rd_addr_y  : unsigned(C_Y_AW - 1 downto 0) := (others => '0');
-    signal s_rd_addr_uv : unsigned(C_UV_AW - 1 downto 0) := (others => '0');
-    signal s_rd_bg      : std_logic := '0';
-
-    --------------------------------------------------------------------------
-    -- Stage E2 capture
-    --------------------------------------------------------------------------
-    signal s_a_bg    : std_logic := '0';
     signal s_a_rbank : std_logic := '0';
-
-    --------------------------------------------------------------------------
-    -- Wet result (E3)
-    --------------------------------------------------------------------------
     signal s_wet_y, s_wet_u, s_wet_v : unsigned(C_DW - 1 downto 0) := (others => '0');
+    signal s_g_dry_y : unsigned(C_DW - 1 downto 0) := C_Y_BLACK;
+    signal s_g_dry_u : unsigned(C_DW - 1 downto 0) := C_C_ZERO;
+    signal s_g_dry_v : unsigned(C_DW - 1 downto 0) := C_C_ZERO;
+    signal s_g_wet_y : unsigned(C_DW - 1 downto 0) := C_Y_BLACK;
+    signal s_g_wet_u : unsigned(C_DW - 1 downto 0) := C_C_ZERO;
+    signal s_g_wet_v : unsigned(C_DW - 1 downto 0) := C_C_ZERO;
 
     --------------------------------------------------------------------------
     -- Dry / sync delay shift registers
@@ -233,212 +368,393 @@ architecture sidewinder of program_top is
     signal s_avid_sr  : t_bit_shift  := (others => '0');
 
     --------------------------------------------------------------------------
-    -- Interpolator I/O
+    -- Dry/wet mix pipeline (E3-E6)
     --------------------------------------------------------------------------
-    signal s_interp_y_a, s_interp_u_a, s_interp_v_a : unsigned(C_DW - 1 downto 0);
-    signal s_interp_y_result, s_interp_u_result, s_interp_v_result : unsigned(C_DW - 1 downto 0);
-    signal s_interp_y_valid, s_interp_u_valid, s_interp_v_valid : std_logic;
+    type t_yuv is record
+        y, u, v : unsigned(C_DW - 1 downto 0);
+    end record;
+    constant C_YUV_BLACK : t_yuv := (y => C_Y_BLACK, u => C_C_ZERO, v => C_C_ZERO);
+
+    signal s_mm10           : t_yuv := C_YUV_BLACK;              -- |dry - wet|
+    signal s_mn10, s_mn11, s_mn12 : std_logic_vector(2 downto 0) := (others => '0');
+    signal s_mwet10, s_mwet11, s_mwet12 : t_yuv := C_YUV_BLACK;
+    signal s_mdry10, s_mdry11, s_mdry12 : t_yuv := C_YUV_BLACK;
+    signal s_mpa11_y, s_mpb11_y : unsigned(14 downto 0) := (others => '0');
+    signal s_mpa11_u, s_mpb11_u : unsigned(14 downto 0) := (others => '0');
+    signal s_mpa11_v, s_mpb11_v : unsigned(14 downto 0) := (others => '0');
+    signal s_mpm12_y, s_mpm12_u, s_mpm12_v : unsigned(19 downto 0) := (others => '0');
+    signal s_mix13          : t_yuv := C_YUV_BLACK;
 
 begin
 
     --------------------------------------------------------------------------
     -- Control decode
     --------------------------------------------------------------------------
-    s_amount   <= unsigned(registers_in(0));
-    s_period_k <= unsigned(registers_in(1));
-    s_rate_k   <= unsigned(registers_in(2));
-    s_ripple_k <= unsigned(registers_in(3));
+    s_period_k <= unsigned(registers_in(0));
+    s_rate_k   <= unsigned(registers_in(1));
+    s_ripple_k <= unsigned(registers_in(2));
+    s_twist_k  <= unsigned(registers_in(3));
+    s_split_k  <= unsigned(registers_in(4));
+    s_mix_k    <= unsigned(registers_in(5));
     s_shape    <= registers_in(6)(0);
     s_swell    <= registers_in(6)(1);
     s_steps    <= registers_in(6)(2);
     s_wrap     <= registers_in(6)(3);
     s_bypass   <= registers_in(6)(4);
-    s_mix_t    <= unsigned(registers_in(7));
+    s_amount   <= unsigned(registers_in(7));
 
     --------------------------------------------------------------------------
-    -- Combinational read address: wrap mode uses the pre-wrapped run-along
-    -- pointer; black mode uses the unwrapped counter with a range check.
+    -- Sine ROM: one registered read port shared by both lookups (the line
+    -- sequencer re-registers s_rom_q in fabric before using it).
     --------------------------------------------------------------------------
-    p_rdaddr : process(s_wrap, s_ptr, s_q, s_line_width)
-        variable v_rd : unsigned(C_Y_AW - 1 downto 0);
-    begin
-        if s_wrap = '1' then
-            s_rd_bg <= '0';
-            v_rd    := s_ptr;
-        elsif s_q < 0 or s_q >= signed(resize(s_line_width, 13)) then
-            s_rd_bg <= '1';
-            v_rd    := (others => '0');
-        else
-            s_rd_bg <= '0';
-            v_rd    := unsigned(s_q(C_Y_AW - 1 downto 0));
-        end if;
-        s_rd_addr_y  <= v_rd;
-        s_rd_addr_uv <= v_rd(C_Y_AW - 1 downto 1);  -- >> 1 decimate
-    end process p_rdaddr;
-
-    --------------------------------------------------------------------------
-    -- E1: input registers, counters, parity, and both step sequencers.
-    -- Everything phase/offset related lives in this one process (single
-    -- driver for s_line_phase, s_q, s_ptr).
-    --------------------------------------------------------------------------
-    p_ctrl : process(clk)
-        variable v_amp   : signed(10 downto 0);
-        variable v_rip   : signed(10 downto 0);
-        variable v_off   : signed(9 downto 0);
-        variable v_mag   : unsigned(13 downto 0);
-        variable v_fp    : unsigned(15 downto 0);
-        variable v_abs   : signed(10 downto 0);
-        variable v_off11 : signed(10 downto 0);
+    p_rom : process(clk)
     begin
         if rising_edge(clk) then
-            s_in_y    <= unsigned(data_in.y);
-            s_in_u    <= unsigned(data_in.u);
-            s_in_v    <= unsigned(data_in.v);
+            s_rom_q <= to_signed(C_SINE(to_integer(s_rom_addr)), 10);
+        end if;
+    end process p_rom;
+
+    --------------------------------------------------------------------------
+    -- E0: input registers, write column, read pointers, line/field events,
+    -- and both step sequencers. Single driver for every pointer and phase.
+    --------------------------------------------------------------------------
+    p_ctrl : process(clk)
+        variable v_n      : unsigned(C_AW downto 0);
+        variable v_ph     : unsigned(15 downto 0);
+        variable v_abs    : signed(10 downto 0);
+        variable v_abs13  : signed(12 downto 0);
+        variable v_off    : signed(12 downto 0);
+        variable v_hi8    : signed(12 downto 0);
+        variable v_hi10   : signed(12 downto 0);
+        variable v_add    : signed(13 downto 0);
+        variable v_sub    : signed(13 downto 0);
+        variable v_subs   : signed(13 downto 0);
+        variable v_fold   : signed(13 downto 0);
+        variable v_lin    : signed(13 downto 0);
+        variable v_g      : signed(16 downto 0);
+        variable v_mag    : unsigned(13 downto 0);
+        variable v_rate24 : signed(23 downto 0);
+    begin
+        if rising_edge(clk) then
+            s_in_y    <= data_in.y;
+            s_in_u    <= data_in.u;
+            s_in_v    <= data_in.v;
             s_in_avid <= data_in.avid;
 
-            s_prev_hsync_n <= data_in.hsync_n;
             s_prev_vsync_n <= data_in.vsync_n;
-
-            -- Per-pixel: write column counter and both read counters run
-            -- along together, so read stays (write - offset) all line.
             if data_in.avid = '1' then
-                s_pixel_x <= s_pixel_x + 1;
-                s_q       <= s_q + 1;
-                if s_ptr = s_line_width - 1 then
-                    s_ptr <= (others => '0');
-                else
-                    s_ptr <= s_ptr + 1;
-                end if;
+                s_saw_active <= '1';
             end if;
 
+            s_mix_w <= not s_mix_k;
+
+            -- Write column: pixel k of the line lands at address k.
+            if s_in_avid = '1' then
+                s_wr_x <= s_wr_x + 1;
+            else
+                s_wr_x <= (others => '0');
+            end if;
+
+            -- Run-along read pointers: one step per active pixel.
+            if data_in.avid = '1' then
+                v_n := f_bounce(s_ptr_y, s_dir_y, s_R, s_mirror_f);
+                s_ptr_y <= v_n(C_AW - 1 downto 0);
+                s_dir_y <= v_n(C_AW);
+                v_n := f_bounce(s_ptr_u, s_dir_u, s_R, s_mirror_f);
+                s_ptr_u <= v_n(C_AW - 1 downto 0);
+                s_dir_u <= v_n(C_AW);
+                v_n := f_bounce(s_ptr_v, s_dir_v, s_R, s_mirror_f);
+                s_ptr_v <= v_n(C_AW - 1 downto 0);
+                s_dir_v <= v_n(C_AW);
+            end if;
+
+            -- Shared multipliers, operand b split 6/5 hi/lo (an unsplit
+            -- 11x11 in one clock was the HD HDMI critical path): operands
+            -- registered by the sequencers, product readable THREE steps
+            -- after the operands are set.
+            s_lm_pl <= s_lm_a * s_lm_b(5 downto 0);
+            s_lm_ph <= s_lm_a * s_lm_b(10 downto 6);
+            s_lm_p  <= shift_left(resize(s_lm_ph, 22), 6) + resize(s_lm_pl, 22);
+            s_fm_pl <= s_fm_a * s_fm_b(5 downto 0);
+            s_fm_ph <= s_fm_a * s_fm_b(10 downto 6);
+            s_fm_p  <= shift_left(resize(s_fm_ph, 22), 6) + resize(s_fm_pl, 22);
+
+            -- Edge-fold arithmetic, hoisted so all three channels share
+            -- one instance: s_red holds (start column - L), reduced into
+            -- [0, mod) with mod = S (Wrap) or 2S (Mirror).
+            v_add  := s_red + signed(resize(s_mod, 14));
+            v_sub  := s_red - signed(resize(s_mod, 14));
+            v_subs := s_red - signed(resize(s_S, 14));
+            v_fold := signed(resize(s_C1, 14)) - s_red;     -- 2S + L - 1 - red
+            v_lin  := s_red + to_signed(C_EDGE, 14);         -- L + red
+            v_hi8  := signed(resize(s_lm_p(21 downto 8), 13));
+            v_hi10 := signed(resize(s_lm_p(21 downto 10), 13));
+
             ------------------------------------------------------------------
-            -- Per-line sequencer: one registered step per clock during
-            -- horizontal blanking; done long before active video starts.
+            -- Per-line sequencer: one registered step per clock, kicked at
+            -- the active-video fall (step 0) or by the frame sequencer for
+            -- the first line (step 1). 34 steps, well inside SD's 138-clock
+            -- horizontal blanking.
             ------------------------------------------------------------------
+            if s_lstep /= C_L_IDLE then
+                s_lstep <= s_lstep + 1;
+            end if;
+
             case to_integer(s_lstep) is
-                when 0 =>       -- 3x harmonic phase
-                    s_phase3 <= shift_left(s_line_phase, 1) + s_line_phase;
-                    s_lstep  <= s_lstep + 1;
-                when 1 =>       -- main wave lookup (both shapes)
-                    s_sin_main <= to_signed(C_SINE(to_integer(s_line_phase(15 downto 8))), 10);
-                    s_tri_main <= f_tri(s_line_phase);
-                    s_lstep    <= s_lstep + 1;
-                when 2 =>       -- ripple wave lookup; select main shape
-                    s_sin_rip <= to_signed(C_SINE(to_integer(s_phase3(15 downto 8))), 10);
-                    s_tri_rip <= f_tri(s_phase3);
+                when 0 =>       -- advance to this line
+                    s_phase <= s_phase + s_freq;
+                    s_freq  <= s_freq + s_twist;
+                when 1 =>       -- main lookup address, 3x phase, triangle
+                    v_ph       := s_phase(23 downto 8);
+                    s_rom_addr <= v_ph(15 downto 8);
+                    s_phase3   <= v_ph + shift_left(v_ph, 1);
+                    s_tri_main <= f_tri(v_ph);
+                when 2 =>       -- ripple lookup address, triangle
+                    s_rom_addr <= s_phase3(15 downto 8);
+                    s_tri_rip  <= f_tri(s_phase3);
+                when 3 =>
+                    s_sin_main <= s_rom_q;
+                when 4 =>
+                    s_sin_rip <= s_rom_q;
                     if s_shape = '1' then
                         s_wave_main <= s_sin_main;
                     else
                         s_wave_main <= s_tri_main;
                     end if;
-                    s_lstep <= s_lstep + 1;
-                when 3 =>       -- select ripple shape; main multiply
+                when 5 =>       -- main product: |wave| * amp_px
                     if s_shape = '1' then
                         s_wave_rip <= s_sin_rip;
                     else
                         s_wave_rip <= s_tri_rip;
                     end if;
-                    v_amp       := signed('0' & s_eff_amp);
-                    s_prod_main <= s_wave_main * v_amp;
-                    s_lstep     <= s_lstep + 1;
-                when 4 =>       -- ripple multiply
-                    v_rip      := signed('0' & s_ripple_k);
-                    s_prod_rip <= s_wave_rip * v_rip;
-                    s_lstep    <= s_lstep + 1;
-                when 5 =>       -- combine, optional 16 px quantize
-                    v_off := resize(shift_right(s_prod_main, 10), 10)
-                           + resize(shift_right(s_prod_rip, 12), 10);
+                    v_abs      := abs(resize(s_wave_main, 11));
+                    s_lm_a     <= unsigned(v_abs);
+                    s_lm_b     <= s_amp_px;
+                    s_neg_main <= s_wave_main(9);
+                when 6 =>       -- ripple product: |wave3| * rip_px
+                    v_abs     := abs(resize(s_wave_rip, 11));
+                    s_lm_a    <= unsigned(v_abs);
+                    s_lm_b    <= resize(s_rip_px, 11);
+                    s_neg_rip <= s_wave_rip(9);
+                when 8 =>       -- main product ready (set in step 5)
+                    if s_neg_main = '1' then
+                        s_off_m <= -v_hi8;
+                    else
+                        s_off_m <= v_hi8;
+                    end if;
+                when 9 =>       -- ripple product ready (set in step 6)
+                    if s_neg_rip = '1' then
+                        s_off_r <= -v_hi8;
+                    else
+                        s_off_r <= v_hi8;
+                    end if;
+                when 10 =>      -- combine, optional 16 px quantize
+                    v_off := s_off_m + s_off_r;
                     if s_steps = '1' then
                         v_off(3 downto 0) := (others => '0');
                     end if;
-                    s_offset <= v_off;
-                    s_lstep  <= s_lstep + 1;
-                when 6 =>       -- initialise the run-along read counters
-                    s_q     <= resize(s_offset, 13);
-                    v_off11 := resize(s_offset, 11);
-                    if s_line_width > to_unsigned(320, C_Y_AW) then
-                        -- |offset| <= 318 < width: one mod-2048 correction
-                        -- (unsigned(v_off11) is already offset mod 2048)
-                        if s_offset < 0 then
-                            s_ptr <= unsigned(v_off11) + s_line_width;
-                        else
-                            s_ptr <= unsigned(v_off11);
-                        end if;
+                    s_off <= v_off;
+                when 11 =>      -- split product: |offset| * split
+                    v_abs13   := abs(s_off);
+                    s_lm_a    <= unsigned(v_abs13(10 downto 0));
+                    s_lm_b    <= resize(s_split_q, 11);
+                    s_neg_off <= s_off(12);
+                when 14 =>
+                    if s_neg_off = '1' then
+                        s_dsplit <= -v_hi10;
                     else
-                        s_ptr <= (others => '0');
+                        s_dsplit <= v_hi10;
                     end if;
-                    s_lstep <= s_lstep + 1;
-                when others =>  -- idle
+                when 15 =>
+                    s_off_u <= resize(s_off, 14) + resize(s_dsplit, 14);
+                    s_off_v <= resize(s_off, 14) - resize(s_dsplit, 14);
+                -- Fold each channel's start column into [L, R]: load,
+                -- three reduce steps, mirror-half test, pointer load.
+                when 16 =>
+                    s_red <= resize(s_off, 14) - to_signed(C_EDGE, 14);
+                when 22 =>
+                    s_red <= s_off_u - to_signed(C_EDGE, 14);
+                when 28 =>
+                    s_red <= s_off_v - to_signed(C_EDGE, 14);
+                when 17 | 18 | 19 | 23 | 24 | 25 | 29 | 30 | 31 =>
+                    if s_red(13) = '1' then
+                        s_red <= v_add;
+                    elsif v_sub(13) = '0' then
+                        s_red <= v_sub;
+                    end if;
+                when 20 | 26 | 32 =>
+                    s_ge <= s_mirror_f and not v_subs(13);
+                when 21 =>
+                    if s_ge = '1' then
+                        s_ptr_y <= unsigned(v_fold(C_AW - 1 downto 0));
+                        s_dir_y <= '1';
+                    else
+                        s_ptr_y <= unsigned(v_lin(C_AW - 1 downto 0));
+                        s_dir_y <= '0';
+                    end if;
+                when 27 =>
+                    if s_ge = '1' then
+                        s_ptr_u <= unsigned(v_fold(C_AW - 1 downto 0));
+                        s_dir_u <= '1';
+                    else
+                        s_ptr_u <= unsigned(v_lin(C_AW - 1 downto 0));
+                        s_dir_u <= '0';
+                    end if;
+                when C_L_LAST =>
+                    if s_ge = '1' then
+                        s_ptr_v <= unsigned(v_fold(C_AW - 1 downto 0));
+                        s_dir_v <= '1';
+                    else
+                        s_ptr_v <= unsigned(v_lin(C_AW - 1 downto 0));
+                        s_dir_v <= '0';
+                    end if;
+                    s_lstep <= C_L_IDLE;
+                when others =>  -- 7, 12, 13 (multiplier waits) and idle
                     null;
             end case;
 
             ------------------------------------------------------------------
-            -- Per-frame sequencer (vertical blanking): rate curve, period
-            -- curve, swell LFO -> s_rate / s_freq / s_eff_amp, then advance
-            -- the frame phase.
+            -- Per-field sequencer (vertical blanking): knob curves, glides,
+            -- width-relative scaling on one shared multiplier, then the
+            -- frame phase, then kick the line sequencer for the first line.
             ------------------------------------------------------------------
+            if s_vstep /= C_V_IDLE then
+                s_vstep <= s_vstep + 1;
+            end if;
+
             case to_integer(s_vstep) is
                 when 0 =>
-                    s_d           <= signed('0' & s_rate_k) - to_signed(512, 11);
+                    s_d_rate      <= signed('0' & s_rate_k) - to_signed(512, 11);
                     s_swell_phase <= s_swell_phase + to_unsigned(C_SWELL_RATE, 16);
-                    s_vstep       <= s_vstep + 1;
+                    s_W           <= s_width_m;
+                    s_H           <= s_height_m;
+                    s_mirror_f    <= not s_wrap;
+                    s_gdiff       <= signed('0' & s_period_k & "000000") - signed('0' & s_g_per);
                 when 1 =>
-                    v_abs  := abs(s_d);
-                    s_absd <= unsigned(v_abs(9 downto 0));
+                    v_g     := signed('0' & s_g_per) + shift_right(s_gdiff, 3);
+                    s_g_per <= unsigned(v_g(15 downto 0));
+                    v_abs   := abs(s_d_rate);
+                    s_absd_rate <= unsigned(v_abs(9 downto 0));
                     if s_swell_phase(15) = '0' then
                         s_swell_tri <= s_swell_phase(14 downto 5);
                     else
                         s_swell_tri <= to_unsigned(1023, 10) - s_swell_phase(14 downto 5);
                     end if;
-                    s_vstep <= s_vstep + 1;
-                when 2 =>
-                    s_dsq        <= s_absd * s_absd;
-                    s_k2sq       <= s_period_k * s_period_k;
-                    s_swell_prod <= s_amount * s_swell_tri;
-                    s_vstep      <= s_vstep + 1;
-                when 3 =>
-                    v_mag := s_dsq(19 downto 6);
-                    if s_absd < to_unsigned(8, 10) then     -- centre detent
+                    s_R <= s_W - to_unsigned(C_EDGE + 1, C_AW);
+                    s_S <= s_W - to_unsigned(2 * C_EDGE, C_AW);
+                when 2 =>       -- mul: Rate^2
+                    s_gdiff <= signed('0' & s_twist_k & "000000") - signed('0' & s_g_tw);
+                    s_fm_a  <= resize(s_absd_rate, 11);
+                    s_fm_b  <= resize(s_absd_rate, 11);
+                    if s_mirror_f = '1' then
+                        s_mod <= shift_left(resize(s_S, C_AW + 1), 1);
+                    else
+                        s_mod <= resize(s_S, C_AW + 1);
+                    end if;
+                    s_C1 <= shift_left(resize(s_S, C_AW + 1), 1) + to_unsigned(C_EDGE - 1, C_AW + 1);
+                when 3 =>       -- mul: Period^2 (10.1)
+                    v_g    := signed('0' & s_g_tw) + shift_right(s_gdiff, 3);
+                    s_g_tw <= unsigned(v_g(15 downto 0));
+                    s_fm_a <= s_g_per(15 downto 5);
+                    s_fm_b <= s_g_per(15 downto 5);
+                when 4 =>       -- mul: Amount^2
+                    s_d_tw <= signed('0' & s_g_tw(15 downto 6)) - to_signed(512, 11);
+                    s_fm_a <= resize(s_amount, 11);
+                    s_fm_b <= resize(s_amount, 11);
+                when 5 =>       -- rate = sign * (|K2-512|^2 >> 6), detent; mul: Ripple^2
+                    v_mag := s_fm_p(19 downto 6);
+                    if s_absd_rate < to_unsigned(C_DETENT, 10) then
                         s_rate <= (others => '0');
-                    elsif s_d(10) = '1' then
+                    elsif s_d_rate(10) = '1' then
                         s_rate <= -signed(v_mag);
                     else
                         s_rate <= signed(v_mag);
                     end if;
-                    s_freq <= s_k2sq(19 downto 8);
-                    if s_swell = '1' then
-                        s_eff_amp <= s_swell_prod(19 downto 10);
+                    v_abs     := abs(s_d_tw);
+                    s_absd_tw <= unsigned(v_abs(9 downto 0));
+                    s_tw_neg  <= s_d_tw(10);
+                    s_fm_a    <= resize(s_ripple_k, 11);
+                    s_fm_b    <= resize(s_ripple_k, 11);
+                when 6 =>       -- freq0 = Period^2 >> 8, in 16.8; mul: Twist^2
+                    s_freq0 <= resize(s_fm_p(21 downto 2), 24);
+                    s_fm_a  <= resize(s_absd_tw, 11);
+                    s_fm_b  <= resize(s_absd_tw, 11);
+                when 7 =>       -- mul: Split^2
+                    s_aq   <= s_fm_p(19 downto 10);           -- Amount^2
+                    s_fm_a <= resize(s_split_k, 11);
+                    s_fm_b <= resize(s_split_k, 11);
+                when 8 =>
+                    s_amp_frac <= to_unsigned(C_AMP_FLOOR, 10) + s_aq - shift_right(s_aq, 5);
+                    s_rip_q    <= s_fm_p(19 downto 10);       -- Ripple^2
+                when 9 =>       -- twist magnitude (1/256 freq units per line); mul: swell
+                    if s_absd_tw < to_unsigned(C_DETENT, 10) then
+                        s_tw_mag <= (others => '0');
                     else
-                        s_eff_amp <= s_amount;
+                        s_tw_mag <= s_fm_p(18 downto 8);
                     end if;
-                    s_vstep <= s_vstep + 1;
-                when 4 =>
-                    v_fp := unsigned(signed(s_frame_phase) + resize(s_rate, 16));
-                    s_frame_phase <= v_fp;
-                    s_line_phase  <= v_fp;
-                    s_vstep       <= s_vstep + 1;
+                    s_fm_a <= resize(s_amp_frac, 11);
+                    s_fm_b <= resize(s_swell_tri, 11);
+                when 10 =>      -- mul: Ripple px
+                    s_split_q <= s_fm_p(19 downto 10);        -- Split^2
+                    s_fm_a    <= resize(s_rip_q, 11);
+                    s_fm_b    <= s_W;
+                when 11 =>      -- mul: twist pivot
+                    s_fm_a <= resize(s_H(10 downto 1), 11);   -- H / 2
+                    s_fm_b <= s_tw_mag;
+                when 12 =>
+                    if s_swell = '1' then
+                        s_eff <= s_fm_p(19 downto 10);
+                    else
+                        s_eff <= s_amp_frac;
+                    end if;
+                when 13 =>      -- mul: Amount px
+                    s_rip_px <= s_fm_p(20 downto 13);         -- rip * W / 8
+                    s_fm_a   <= resize(s_eff, 11);
+                    s_fm_b   <= s_W;
+                when 14 =>
+                    s_pivot <= s_fm_p;                        -- H/2 * twist
+                when 15 =>      -- freq at the top line = freq0 - H/2 * twist
+                    if s_tw_neg = '1' then
+                        s_freq_top <= s_freq0 + resize(s_pivot, 24);
+                        s_twist    <= to_unsigned(0, 24) - resize(s_tw_mag, 24);
+                    else
+                        s_freq_top <= s_freq0 - resize(s_pivot, 24);
+                        s_twist    <= resize(s_tw_mag, 24);
+                    end if;
+                when 16 =>
+                    s_amp_px <= s_fm_p(21 downto 11);         -- eff * W / 2
+                when 17 =>
+                    v_rate24      := shift_left(resize(s_rate, 24), 8);
+                    s_frame_phase <= s_frame_phase + unsigned(v_rate24);
+                when C_V_LAST =>
+                    s_phase <= s_frame_phase;
+                    s_freq  <= s_freq_top;
+                    s_lstep <= to_unsigned(1, 6);
+                    s_vstep <= C_V_IDLE;
                 when others =>
                     null;
             end case;
 
-            -- hsync falling edge = new line: latch width, reset counters,
-            -- flip parity, advance the wave phase, kick the line sequencer.
-            if data_in.hsync_n = '0' and s_prev_hsync_n = '1' then
-                if s_pixel_x /= 0 then
-                    s_line_width <= s_pixel_x;
+            -- Active-video fall = end of a line (same edge as its last
+            -- write, which still uses the old parity): flip parity, count
+            -- the line, capture height (every line) and width (one line),
+            -- kick the line sequencer for the next line.
+            if s_in_avid = '1' and data_in.avid = '0' then
+                s_par      <= not s_par;
+                s_aline    <= s_aline + 1;
+                s_height_m <= s_aline + 1;
+                if s_aline = to_unsigned(C_WIDTH_LINE, 11) then
+                    s_width_m <= s_wr_x + 1;
                 end if;
-                s_pixel_x    <= (others => '0');
-                s_par        <= not s_par;
-                s_line_phase <= s_line_phase + resize(s_freq, 16);
-                s_lstep      <= (others => '0');
+                s_lstep <= (others => '0');
             end if;
 
-            -- vsync falling edge = new frame: re-sync parity, kick the frame
-            -- sequencer (placed last so its line_phase load wins over the
-            -- hsync add on a coincident edge).
-            if data_in.vsync_n = '0' and s_prev_vsync_n = '1' then
-                s_par   <= '0';
-                s_vstep <= (others => '0');
+            -- New field: vsync falling edge, guarded so serrated analog
+            -- vsync fires once per field.
+            if data_in.vsync_n = '0' and s_prev_vsync_n = '1' and s_saw_active = '1' then
+                s_saw_active <= '0';
+                s_aline      <= (others => '0');
+                s_vstep      <= (others => '0');
             end if;
 
             -- Dry / sync shift registers
@@ -462,28 +778,77 @@ begin
     end process p_ctrl;
 
     --------------------------------------------------------------------------
-    -- E2: capture read-side context aligned with the bank read data.
-    -- Read uses the live (already flipped) parity -> the line above.
+    -- Bank arrays: one process per bank (single write port). Write = the
+    -- E0-registered pixel into this line's parity bank; read = the
+    -- registered pointer, registered out (valid with s_y_sr(0)).
     --------------------------------------------------------------------------
-    p_stage_a : process(clk)
+    p_lbY0 : process(clk)
     begin
         if rising_edge(clk) then
-            s_a_bg    <= s_rd_bg;
-            s_a_rbank <= not s_par;
+            s_rdY0 <= lbY0(to_integer(s_ptr_y));
+            if s_in_avid = '1' and s_par = '0' then
+                lbY0(to_integer(s_wr_x)) <= s_in_y;
+            end if;
         end if;
-    end process p_stage_a;
+    end process p_lbY0;
+
+    p_lbY1 : process(clk)
+    begin
+        if rising_edge(clk) then
+            s_rdY1 <= lbY1(to_integer(s_ptr_y));
+            if s_in_avid = '1' and s_par = '1' then
+                lbY1(to_integer(s_wr_x)) <= s_in_y;
+            end if;
+        end if;
+    end process p_lbY1;
+
+    p_lbU0 : process(clk)
+    begin
+        if rising_edge(clk) then
+            s_rdU0 <= lbU0(to_integer(s_ptr_u(C_AW - 1 downto 1)));
+            if s_in_avid = '1' and s_par = '0' then
+                lbU0(to_integer(s_wr_x(C_AW - 1 downto 1))) <= s_in_u;
+            end if;
+        end if;
+    end process p_lbU0;
+
+    p_lbU1 : process(clk)
+    begin
+        if rising_edge(clk) then
+            s_rdU1 <= lbU1(to_integer(s_ptr_u(C_AW - 1 downto 1)));
+            if s_in_avid = '1' and s_par = '1' then
+                lbU1(to_integer(s_wr_x(C_AW - 1 downto 1))) <= s_in_u;
+            end if;
+        end if;
+    end process p_lbU1;
+
+    p_lbV0 : process(clk)
+    begin
+        if rising_edge(clk) then
+            s_rdV0 <= lbV0(to_integer(s_ptr_v(C_AW - 1 downto 1)));
+            if s_in_avid = '1' and s_par = '0' then
+                lbV0(to_integer(s_wr_x(C_AW - 1 downto 1))) <= s_in_v;
+            end if;
+        end if;
+    end process p_lbV0;
+
+    p_lbV1 : process(clk)
+    begin
+        if rising_edge(clk) then
+            s_rdV1 <= lbV1(to_integer(s_ptr_v(C_AW - 1 downto 1)));
+            if s_in_avid = '1' and s_par = '1' then
+                lbV1(to_integer(s_wr_x(C_AW - 1 downto 1))) <= s_in_v;
+            end if;
+        end if;
+    end process p_lbV1;
 
     --------------------------------------------------------------------------
-    -- E3: bank select + background fill -> wet result.
+    -- E1: bank select (the bank NOT being written = the line above).
     --------------------------------------------------------------------------
     p_wet : process(clk)
     begin
         if rising_edge(clk) then
-            if s_a_bg = '1' then
-                s_wet_y <= (others => '0');
-                s_wet_u <= to_unsigned(512, C_DW);
-                s_wet_v <= to_unsigned(512, C_DW);
-            elsif s_a_rbank = '1' then
+            if s_a_rbank = '1' then
                 s_wet_y <= unsigned(s_rdY1);
                 s_wet_u <= unsigned(s_rdU1);
                 s_wet_v <= unsigned(s_rdV1);
@@ -495,144 +860,110 @@ begin
         end if;
     end process p_wet;
 
-    --------------------------------------------------------------------------
-    -- Bank arrays: one process per bank (single driver, single write port).
-    -- Write = live E1-registered pixel into this line's parity bank; read =
-    -- combinational shifted address, registered out (valid E2).
-    --------------------------------------------------------------------------
-    p_lbY0 : process(clk)
+    -- Read-bank flag captured with the bank reads (E0).
+    p_rbank : process(clk)
     begin
         if rising_edge(clk) then
-            s_rdY0 <= lbY0(to_integer(s_rd_addr_y));
-            if s_in_avid = '1' and s_par = '0' then
-                lbY0(to_integer(s_pixel_x)) <= std_logic_vector(s_in_y);
-            end if;
+            s_a_rbank <= not s_par;
         end if;
-    end process p_lbY0;
-
-    p_lbY1 : process(clk)
-    begin
-        if rising_edge(clk) then
-            s_rdY1 <= lbY1(to_integer(s_rd_addr_y));
-            if s_in_avid = '1' and s_par = '1' then
-                lbY1(to_integer(s_pixel_x)) <= std_logic_vector(s_in_y);
-            end if;
-        end if;
-    end process p_lbY1;
-
-    p_lbU0 : process(clk)
-    begin
-        if rising_edge(clk) then
-            s_rdU0 <= lbU0(to_integer(s_rd_addr_uv));
-            if s_in_avid = '1' and s_par = '0' then
-                lbU0(to_integer(s_pixel_x(C_Y_AW - 1 downto 1))) <= std_logic_vector(s_in_u);
-            end if;
-        end if;
-    end process p_lbU0;
-
-    p_lbU1 : process(clk)
-    begin
-        if rising_edge(clk) then
-            s_rdU1 <= lbU1(to_integer(s_rd_addr_uv));
-            if s_in_avid = '1' and s_par = '1' then
-                lbU1(to_integer(s_pixel_x(C_Y_AW - 1 downto 1))) <= std_logic_vector(s_in_u);
-            end if;
-        end if;
-    end process p_lbU1;
-
-    p_lbV0 : process(clk)
-    begin
-        if rising_edge(clk) then
-            s_rdV0 <= lbV0(to_integer(s_rd_addr_uv));
-            if s_in_avid = '1' and s_par = '0' then
-                lbV0(to_integer(s_pixel_x(C_Y_AW - 1 downto 1))) <= std_logic_vector(s_in_v);
-            end if;
-        end if;
-    end process p_lbV0;
-
-    p_lbV1 : process(clk)
-    begin
-        if rising_edge(clk) then
-            s_rdV1 <= lbV1(to_integer(s_rd_addr_uv));
-            if s_in_avid = '1' and s_par = '1' then
-                lbV1(to_integer(s_pixel_x(C_Y_AW - 1 downto 1))) <= std_logic_vector(s_in_v);
-            end if;
-        end if;
-    end process p_lbV1;
+    end process p_rbank;
 
     --------------------------------------------------------------------------
-    -- Dry/wet mix: interpolator_u, 4-clock latency.
-    -- s_wet_* is valid 3 clocks after data_in -> dry tap is index 2.
+    -- E2: blanking gate. Outside active video both mix inputs are black /
+    -- neutral chroma, so the mixed output is too (bypass included).
     --------------------------------------------------------------------------
-    s_interp_y_a <= unsigned(s_y_sr(2));
-    s_interp_u_a <= unsigned(s_u_sr(2));
-    s_interp_v_a <= unsigned(s_v_sr(2));
-
-    interp_y_inst : entity work.interpolator_u
-        generic map(
-            G_WIDTH      => C_DW,
-            G_FRAC_BITS  => C_DW,
-            G_OUTPUT_MIN => 0,
-            G_OUTPUT_MAX => 1023
-        )
-        port map(
-            clk    => clk,
-            enable => '1',
-            a      => s_interp_y_a,
-            b      => s_wet_y,
-            t      => s_mix_t,
-            result => s_interp_y_result,
-            valid  => s_interp_y_valid
-        );
-
-    interp_u_inst : entity work.interpolator_u
-        generic map(
-            G_WIDTH      => C_DW,
-            G_FRAC_BITS  => C_DW,
-            G_OUTPUT_MIN => 0,
-            G_OUTPUT_MAX => 1023
-        )
-        port map(
-            clk    => clk,
-            enable => '1',
-            a      => s_interp_u_a,
-            b      => s_wet_u,
-            t      => s_mix_t,
-            result => s_interp_u_result,
-            valid  => s_interp_u_valid
-        );
-
-    interp_v_inst : entity work.interpolator_u
-        generic map(
-            G_WIDTH      => C_DW,
-            G_FRAC_BITS  => C_DW,
-            G_OUTPUT_MIN => 0,
-            G_OUTPUT_MAX => 1023
-        )
-        port map(
-            clk    => clk,
-            enable => '1',
-            a      => s_interp_v_a,
-            b      => s_wet_v,
-            t      => s_mix_t,
-            result => s_interp_v_result,
-            valid  => s_interp_v_valid
-        );
+    p_gate : process(clk)
+    begin
+        if rising_edge(clk) then
+            if s_avid_sr(1) = '1' then
+                s_g_dry_y <= unsigned(s_y_sr(1));
+                s_g_dry_u <= unsigned(s_u_sr(1));
+                s_g_dry_v <= unsigned(s_v_sr(1));
+                s_g_wet_y <= s_wet_y;
+                s_g_wet_u <= s_wet_u;
+                s_g_wet_v <= s_wet_v;
+            else
+                s_g_dry_y <= C_Y_BLACK;
+                s_g_dry_u <= C_C_ZERO;
+                s_g_dry_v <= C_C_ZERO;
+                s_g_wet_y <= C_Y_BLACK;
+                s_g_wet_u <= C_C_ZERO;
+                s_g_wet_v <= C_C_ZERO;
+            end if;
+        end if;
+    end process p_gate;
 
     --------------------------------------------------------------------------
-    -- Output mux at E7. Sync from the shift register; video from the
-    -- interpolator unless Bypass is on.
+    -- E3-E6: dry/wet mix, out = wet +/- (|dry - wet| * (1023 - Mix)) >> 10,
+    -- multiply split 10x5 hi/lo (shearline's shape: the SDK interpolator's
+    -- unsplit 11x11 multiply was the HD critical path here too). Mix 100%
+    -- is exactly wet; Bypass selects the gated dry at the same latency.
+    --------------------------------------------------------------------------
+    p_m10 : process(clk)
+        variable v_dy, v_du, v_dv : unsigned(C_DW downto 0);
+    begin
+        if rising_edge(clk) then
+            v_dy := f_sdiff(s_g_dry_y, s_g_wet_y);
+            v_du := f_sdiff(s_g_dry_u, s_g_wet_u);
+            v_dv := f_sdiff(s_g_dry_v, s_g_wet_v);
+            s_mm10   <= (y => v_dy(C_DW - 1 downto 0), u => v_du(C_DW - 1 downto 0),
+                         v => v_dv(C_DW - 1 downto 0));
+            s_mn10   <= v_dv(C_DW) & v_du(C_DW) & v_dy(C_DW);
+            s_mwet10 <= (y => s_g_wet_y, u => s_g_wet_u, v => s_g_wet_v);
+            s_mdry10 <= (y => s_g_dry_y, u => s_g_dry_u, v => s_g_dry_v);
+        end if;
+    end process p_m10;
+
+    p_m11 : process(clk)
+    begin
+        if rising_edge(clk) then
+            s_mpa11_y <= s_mix_w * s_mm10.y(4 downto 0);
+            s_mpb11_y <= s_mix_w * s_mm10.y(9 downto 5);
+            s_mpa11_u <= s_mix_w * s_mm10.u(4 downto 0);
+            s_mpb11_u <= s_mix_w * s_mm10.u(9 downto 5);
+            s_mpa11_v <= s_mix_w * s_mm10.v(4 downto 0);
+            s_mpb11_v <= s_mix_w * s_mm10.v(9 downto 5);
+            s_mwet11  <= s_mwet10;
+            s_mdry11  <= s_mdry10;
+            s_mn11    <= s_mn10;
+        end if;
+    end process p_m11;
+
+    p_m12 : process(clk)
+    begin
+        if rising_edge(clk) then
+            s_mpm12_y <= shift_left(resize(s_mpb11_y, 20), 5) + resize(s_mpa11_y, 20);
+            s_mpm12_u <= shift_left(resize(s_mpb11_u, 20), 5) + resize(s_mpa11_u, 20);
+            s_mpm12_v <= shift_left(resize(s_mpb11_v, 20), 5) + resize(s_mpa11_v, 20);
+            s_mwet12  <= s_mwet11;
+            s_mdry12  <= s_mdry11;
+            s_mn12    <= s_mn11;
+        end if;
+    end process p_m12;
+
+    p_m13 : process(clk)
+    begin
+        if rising_edge(clk) then
+            if s_bypass = '1' then
+                s_mix13 <= s_mdry12;
+            else
+                s_mix13.y <= f_step(s_mwet12.y, s_mpm12_y, s_mn12(0));
+                s_mix13.u <= f_step(s_mwet12.u, s_mpm12_u, s_mn12(1));
+                s_mix13.v <= f_step(s_mwet12.v, s_mpm12_v, s_mn12(2));
+            end if;
+        end if;
+    end process p_m13;
+
+    --------------------------------------------------------------------------
+    -- Output (latency 7 for syncs and video in every mode).
     --------------------------------------------------------------------------
     data_out.hsync_n <= s_hsync_sr(C_TOTAL_LATENCY - 1);
     data_out.vsync_n <= s_vsync_sr(C_TOTAL_LATENCY - 1);
     data_out.field_n <= s_field_sr(C_TOTAL_LATENCY - 1);
     data_out.avid    <= s_avid_sr(C_TOTAL_LATENCY - 1);
 
-    data_out.y <= s_y_sr(C_TOTAL_LATENCY - 1) when s_bypass = '1'
-                  else std_logic_vector(s_interp_y_result);
-    data_out.u <= s_u_sr(C_TOTAL_LATENCY - 1) when s_bypass = '1'
-                  else std_logic_vector(s_interp_u_result);
-    data_out.v <= s_v_sr(C_TOTAL_LATENCY - 1) when s_bypass = '1'
-                  else std_logic_vector(s_interp_v_result);
+    data_out.y <= std_logic_vector(s_mix13.y);
+    data_out.u <= std_logic_vector(s_mix13.u);
+    data_out.v <= std_logic_vector(s_mix13.v);
 
 end architecture sidewinder;
