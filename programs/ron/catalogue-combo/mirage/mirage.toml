@@ -19,7 +19,7 @@ name_label = "Threshold"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 600
+initial_value = 499
 display_float_digits = 1
 suffix_label = "%"
 
@@ -29,7 +29,7 @@ name_label = "Gain"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 762
 display_float_digits = 1
 suffix_label = "%"
 
@@ -39,7 +39,7 @@ name_label = "Lift"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 512
+initial_value = 768
 display_float_digits = 1
 suffix_label = "%"
 
@@ -49,7 +49,7 @@ name_label = "Amount"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 700
+initial_value = 363
 display_float_digits = 1
 suffix_label = "%"
 
@@ -59,7 +59,7 @@ name_label = "Smooth"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 256
+initial_value = 656
 display_float_digits = 1
 suffix_label = "%"
 
@@ -69,7 +69,7 @@ name_label = "Pivot"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 350
 display_float_digits = 1
 suffix_label = "%"
 
@@ -77,13 +77,13 @@ suffix_label = "%"
 parameter_id = "toggle_switch_7"
 name_label = "Map"
 value_labels = ["Original", "Solar"]
-initial_value_label = "Original"
+initial_value_label = "Solar"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
 name_label = "Order"
 value_labels = ["Solar 1st", "Warp 1st"]
-initial_value_label = "Solar 1st"
+initial_value_label = "Warp 1st"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
@@ -109,7 +109,7 @@ name_label = "Bands"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 0
+initial_value = 591
 display_float_digits = 1
 suffix_label = "%"
 
