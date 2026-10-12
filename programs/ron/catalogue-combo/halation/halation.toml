@@ -3,13 +3,13 @@
 [program]
 program_id = "com.ron.halation"
 program_name = "Halation"
-program_version = "0.1.2"
+program_version = "1.0.0"
 abi_version = ">=1.0,<2.0"
 author = "ron"
 license = "GPL-3.0"
 categories = ["Optics", "Film", "Signal"]
 program_type = "processing"
-description = "Bloom meets magnetic wobble: the glow layer can wobble on its own, scale with row energy, tint warm, and streak into a halo."
+description = "Bloom meets magnetic wobble: a wide glow that can wobble on its own, and a red halation halo that splits into twin ghosts."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
