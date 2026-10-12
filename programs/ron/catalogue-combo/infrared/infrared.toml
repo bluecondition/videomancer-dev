@@ -1,15 +1,15 @@
-# Infrared - catalogue combo #10: keystone + false-colour thermal LUT.  See infrared.vhd.
+# Infrared - catalogue combo #10: keystone + thermal-camera false colour.  See infrared.vhd.
 
 [program]
 program_id = "com.ron.infrared"
 program_name = "Infrared"
-program_version = "0.1.0"
+program_version = "1.0.0"
 abi_version = ">=1.0,<2.0"
 author = "ron"
 license = "GPL-3.0"
 categories = ["Color", "Camera", "Analysis"]
 program_type = "processing"
-description = "Keystone meets false colour: thermal, ice, plasma and x-ray ramps with range, offset, isotherms, row drift and cycling heat."
+description = "Keystone meets thermal camera: 8 false-colour palettes with isotherms, row drift and a Heat slider that pushes or cycles."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
@@ -46,7 +46,7 @@ suffix_label = "%"
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
 name_label = "Palette"
-value_labels = ["Thermal", "Ice", "Plasma", "X-Ray"]
+value_labels = ["Thermal", "Ironbow", "Plasma", "Rainbow", "Ice", "Night Vision", "White Hot", "X-Ray"]
 initial_value_label = "Thermal"
 
 [[parameter]]
@@ -54,9 +54,9 @@ parameter_id = "rotary_potentiometer_5"
 name_label = "Range"
 control_mode = "linear"
 display_min_value = 0
-display_max_value = 100
+display_max_value = 400
 initial_value = 466
-display_float_digits = 1
+display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
@@ -65,7 +65,7 @@ name_label = "Offset"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 539
+initial_value = 519
 display_float_digits = 1
 suffix_label = "%"
 
@@ -83,9 +83,9 @@ initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
-name_label = "Pins"
-value_labels = ["Same", "Mirror"]
-initial_value_label = "Mirror"
+name_label = "Cycle"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
@@ -109,6 +109,12 @@ initial_value = 10
 display_float_digits = 1
 suffix_label = "%"
 
+# Palette knob positions (zone = value >> 7): Thermal 64, Ironbow 192,
+# Plasma 320, Rainbow 448, Ice 576, Night Vision 704, White Hot 832, X-Ray 960.
+# Defaults: Ron's hardware capture of 12 Oct (commit 544a9bf) carried into v1.0.0
+# (K6 539 -> 519 for the 4x Offset range; Pins = Mirror + Heat 1% was v0.1's
+# frozen wrap mode, now Cycle = On).  Presets hand-written for v1.0.0.
+
 [[preset]]
 name = "Default"
 
@@ -116,18 +122,38 @@ name = "Default"
 name = "Heat Map"
 rotary_potentiometer_5 = 400
 toggle_switch_8 = 1
-linear_potentiometer_12 = 200
+toggle_switch_9 = 1
+linear_potentiometer_12 = 400
 
 [[preset]]
 name = "Cold Wall"
 rotary_potentiometer_1 = 800
-rotary_potentiometer_4 = 300
+rotary_potentiometer_4 = 576
 toggle_switch_7 = 1
-toggle_switch_9 = 1
 
 [[preset]]
 name = "X-Ray Tilt"
 rotary_potentiometer_1 = 200
 rotary_potentiometer_2 = 700
-rotary_potentiometer_4 = 900
+rotary_potentiometer_4 = 960
 toggle_switch_10 = 1
+
+[[preset]]
+name = "Ironbow Burn"
+rotary_potentiometer_4 = 192
+toggle_switch_8 = 1
+linear_potentiometer_12 = 700
+
+[[preset]]
+name = "Night Scope"
+rotary_potentiometer_3 = 440
+rotary_potentiometer_4 = 704
+rotary_potentiometer_5 = 320
+toggle_switch_7 = 1
+
+[[preset]]
+name = "Rainbow Spin"
+rotary_potentiometer_1 = 620
+rotary_potentiometer_4 = 448
+toggle_switch_9 = 1
+linear_potentiometer_12 = 640
