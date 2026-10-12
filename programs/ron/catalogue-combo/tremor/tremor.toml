@@ -3,11 +3,15 @@
 # Three catalogue effects (seed 20260915): Perlin-style displacement,
 # scanline shear and duotone.  Two knobs each; switches and slider set the
 # interaction.  See tremor.vhd.
+#
+# v0.2.0: Scale is log (4..512 px, 64 steps per octave), Amount is glided
+# with a squared curve up to a quarter of the width.  The v0.1 defaults and
+# presets were translated to keep their cell sizes and amplitudes.
 
 [program]
 program_id = "com.ron.tremor"
 program_name = "Tremor"
-program_version = "0.1.2"
+program_version = "0.2.0"
 abi_version = ">=1.0,<2.0"
 author = "ron"
 license = "GPL-3.0"
@@ -21,11 +25,11 @@ core = "yuv444_30b"
 parameter_id = "rotary_potentiometer_1"
 name_label = "Scale"
 control_mode = "linear"
-display_min_value = 4
-display_max_value = 512
-initial_value = 384
-display_float_digits = 0
-suffix_label = " px"
+display_min_value = 0
+display_max_value = 100
+initial_value = 439
+display_float_digits = 1
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
@@ -113,7 +117,7 @@ name_label = "Amount"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 300
+initial_value = 389
 display_float_digits = 1
 suffix_label = "%"
 
@@ -122,26 +126,26 @@ name = "Default"
 
 [[preset]]
 name = "Heat Haze"
-rotary_potentiometer_1 = 512
+rotary_potentiometer_1 = 586
 rotary_potentiometer_2 = 400
 rotary_potentiometer_3 = 0
 rotary_potentiometer_5 = 40
 rotary_potentiometer_6 = 700
-linear_potentiometer_12 = 250
+linear_potentiometer_12 = 351
 
 [[preset]]
 name = "Venetian"
-rotary_potentiometer_1 = 200
+rotary_potentiometer_1 = 147
 rotary_potentiometer_3 = 500
 rotary_potentiometer_4 = 60
 rotary_potentiometer_5 = 600
 toggle_switch_8 = 1
 toggle_switch_9 = 1
-linear_potentiometer_12 = 100
+linear_potentiometer_12 = 206
 
 [[preset]]
 name = "Noise Print"
-rotary_potentiometer_1 = 640
+rotary_potentiometer_1 = 732
 rotary_potentiometer_2 = 250
 rotary_potentiometer_3 = 200
 rotary_potentiometer_4 = 900
@@ -149,4 +153,4 @@ rotary_potentiometer_5 = 850
 toggle_switch_7 = 1
 toggle_switch_10 = 1
 toggle_switch_11 = 1
-linear_potentiometer_12 = 800
+linear_potentiometer_12 = 590

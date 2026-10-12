@@ -164,10 +164,10 @@ Reflector: catalogue combo #8 (seed 20260912) -- mirror / kaleidoscope + bloom /
 ## tremor
 Tremor: catalogue combo #17 (seed 20260915) -- Perlin-style displacement + scanline shear + duotone.  Two knobs each; the switches and the slider decide how the three combine.
 
-- K1 Scale    noise cell size 4 .. 512 px
-- K2 Drift    noise field scrolls vertically (0 = still)
+- K1 Scale    noise cell size 4 .. 512 px, log (continuous)
+- K2 Drift    noise field scrolls vertically, 0 .. 8 px a frame (0 = still)
 - K3 Skew     scanline shear: rows lean by (row in period - P/2) * skew
-- K4 Period   shear sawtooth period 2 .. 256 lines
+- K4 Period   shear sawtooth period 2 .. 257 lines
 - K5 Hue      highlight tone hue
 - K6 Spread   angle between shadow and highlight hues (0 = one tint)
 - S7  Noise   warps the picture horizontally / grains the luma instead
@@ -175,7 +175,7 @@ Tremor: catalogue combo #17 (seed 20260915) -- Perlin-style displacement + scanl
 - S9  Bands   every other shear band swaps the two tones
 - S10 Field   smooth value noise / hard cells
 - S11 Tone    duotone keyed from luma / from the noise field itself
-- P12 Amount  displacement (or grain) amplitude, up to +-255 px
+- P12 Amount  displacement (or grain), glided, squared curve: +-5 px / +-30 luma at 0 up to +-1/4 width / +-511 luma at 100%
 
 ## vitrail
 Vitrail: catalogue combo #20 (seed 20260915) -- bloom / glow + palette quantization + mirror / kaleidoscope.  Two knobs each; the switches and the slider decide how the three combine.
