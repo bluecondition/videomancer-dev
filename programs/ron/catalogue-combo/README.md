@@ -21,7 +21,7 @@ Timing rework in the same pass: trapquant (sequencer multiplies pre-registered /
 Mirage: catalogue combo #4 (seed 20260912) -- Sabattier solarization + displacement mapping (the picture's own luma pushes it sideways).  Three knobs each; the switches and the slider decide how they combine.
 
 - K1 Threshold  solar threshold
-- K2 Gain       fold gain 0.125x .. 8x (log); >1x repeats into bands
+- K2 Gain       fold gain 0.125x .. 16x (log); >1x repeats into bands
 - K3 Lift       level of the folded zone
 - K4 Amount     displacement, bipolar (+-256 px at full map swing)
 - K5 Smooth     horizontal low-pass on the map

@@ -3,7 +3,7 @@
 -- knobs each; the switches and the slider decide how they combine.
 --
 --   K1 Threshold  solar threshold
---   K2 Gain       fold gain 0.125x .. 8x (log); >1x repeats into bands
+--   K2 Gain       fold gain 0.125x .. 16x (log); >1x repeats into bands
 --   K3 Lift       level of the folded zone
 --   K4 Amount     displacement, bipolar (+-256 px at full map swing)
 --   K5 Smooth     horizontal low-pass on the map
@@ -50,17 +50,18 @@ architecture mirage of program_top is
         end if;
     end function;
 
-    -- fold gain, Q8: 0.125x .. 8x over the knob, log spaced
+    -- fold gain, Q8: 0.125x .. 16x, one log ramp over the whole knob (x1.08
+    -- per step); entry 52 = 1801 (7.03x) keeps the captured default
     type t_gain_rom is array (0 to 63) of unsigned(11 downto 0);
     constant C_GAIN_ROM : t_gain_rom := (
-        to_unsigned(32, 12), to_unsigned(32, 12), to_unsigned(32, 12), to_unsigned(32, 12), to_unsigned(32, 12), to_unsigned(32, 12), to_unsigned(32, 12), to_unsigned(32, 12),
-        to_unsigned(32, 12), to_unsigned(32, 12), to_unsigned(32, 12), to_unsigned(32, 12), to_unsigned(32, 12), to_unsigned(32, 12), to_unsigned(32, 12), to_unsigned(32, 12),
-        to_unsigned(32, 12), to_unsigned(36, 12), to_unsigned(41, 12), to_unsigned(47, 12), to_unsigned(54, 12), to_unsigned(61, 12), to_unsigned(70, 12), to_unsigned(79, 12),
-        to_unsigned(90, 12), to_unsigned(103, 12), to_unsigned(117, 12), to_unsigned(134, 12), to_unsigned(152, 12), to_unsigned(173, 12), to_unsigned(197, 12), to_unsigned(225, 12),
-        to_unsigned(256, 12), to_unsigned(292, 12), to_unsigned(332, 12), to_unsigned(378, 12), to_unsigned(431, 12), to_unsigned(490, 12), to_unsigned(559, 12), to_unsigned(636, 12),
-        to_unsigned(725, 12), to_unsigned(825, 12), to_unsigned(940, 12), to_unsigned(1070, 12), to_unsigned(1219, 12), to_unsigned(1388, 12), to_unsigned(1581, 12), to_unsigned(1801, 12),
-        to_unsigned(2048, 12), to_unsigned(2048, 12), to_unsigned(2048, 12), to_unsigned(2048, 12), to_unsigned(2048, 12), to_unsigned(2048, 12), to_unsigned(2048, 12), to_unsigned(2048, 12),
-        to_unsigned(2048, 12), to_unsigned(2048, 12), to_unsigned(2048, 12), to_unsigned(2048, 12), to_unsigned(2048, 12), to_unsigned(2048, 12), to_unsigned(2048, 12), to_unsigned(2048, 12)
+        to_unsigned(32, 12), to_unsigned(35, 12), to_unsigned(37, 12), to_unsigned(40, 12), to_unsigned(44, 12), to_unsigned(47, 12), to_unsigned(51, 12), to_unsigned(55, 12),
+        to_unsigned(59, 12), to_unsigned(64, 12), to_unsigned(69, 12), to_unsigned(75, 12), to_unsigned(81, 12), to_unsigned(88, 12), to_unsigned(95, 12), to_unsigned(102, 12),
+        to_unsigned(111, 12), to_unsigned(120, 12), to_unsigned(129, 12), to_unsigned(140, 12), to_unsigned(151, 12), to_unsigned(163, 12), to_unsigned(176, 12), to_unsigned(190, 12),
+        to_unsigned(206, 12), to_unsigned(222, 12), to_unsigned(240, 12), to_unsigned(259, 12), to_unsigned(280, 12), to_unsigned(303, 12), to_unsigned(327, 12), to_unsigned(354, 12),
+        to_unsigned(382, 12), to_unsigned(413, 12), to_unsigned(446, 12), to_unsigned(482, 12), to_unsigned(521, 12), to_unsigned(563, 12), to_unsigned(609, 12), to_unsigned(658, 12),
+        to_unsigned(711, 12), to_unsigned(768, 12), to_unsigned(830, 12), to_unsigned(897, 12), to_unsigned(969, 12), to_unsigned(1047, 12), to_unsigned(1131, 12), to_unsigned(1222, 12),
+        to_unsigned(1321, 12), to_unsigned(1427, 12), to_unsigned(1542, 12), to_unsigned(1667, 12), to_unsigned(1801, 12), to_unsigned(1946, 12), to_unsigned(2103, 12), to_unsigned(2272, 12),
+        to_unsigned(2456, 12), to_unsigned(2653, 12), to_unsigned(2867, 12), to_unsigned(3098, 12), to_unsigned(3348, 12), to_unsigned(3618, 12), to_unsigned(3910, 12), to_unsigned(4095, 12)
     );
 
     --------------------------------------------------------------------------
@@ -287,8 +288,10 @@ begin
             else
                 v_src := s_yo(7);
             end if;
-            if s_avid_sr(6) = '0' then
-                s_macc <= to_unsigned(512 * 16, 14);
+            -- seeded with the line's first sample (not mid-grey), so the left
+            -- edge carries no fading Pivot offset at high Smooth
+            if s_avid_sr(7) = '0' then
+                s_macc <= v_src & "0000";
             else
                 s_macc <= s_macc - shift_right(s_macc, v_n) + shift_right(v_src & "0000", v_n);
             end if;
