@@ -19,7 +19,7 @@ name_label = "Keystone"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 512
+initial_value = 989
 display_float_digits = 1
 suffix_label = "%"
 
@@ -29,7 +29,7 @@ name_label = "Skew"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 512
+initial_value = 513
 display_float_digits = 1
 suffix_label = "%"
 
@@ -39,7 +39,7 @@ name_label = "Zoom"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 512
+initial_value = 490
 display_float_digits = 1
 suffix_label = "%"
 
@@ -55,7 +55,7 @@ name_label = "Range"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 256
+initial_value = 466
 display_float_digits = 1
 suffix_label = "%"
 
@@ -65,7 +65,7 @@ name_label = "Offset"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 512
+initial_value = 539
 display_float_digits = 1
 suffix_label = "%"
 
@@ -73,7 +73,7 @@ suffix_label = "%"
 parameter_id = "toggle_switch_7"
 name_label = "Rows"
 value_labels = ["Flat", "Drift"]
-initial_value_label = "Flat"
+initial_value_label = "Drift"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
@@ -85,13 +85,13 @@ initial_value_label = "Off"
 parameter_id = "toggle_switch_9"
 name_label = "Pins"
 value_labels = ["Same", "Mirror"]
-initial_value_label = "Same"
+initial_value_label = "Mirror"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
 name_label = "Luma"
 value_labels = ["Palette", "Original"]
-initial_value_label = "Palette"
+initial_value_label = "Original"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
@@ -105,7 +105,7 @@ name_label = "Heat"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 0
+initial_value = 10
 display_float_digits = 1
 suffix_label = "%"
 
