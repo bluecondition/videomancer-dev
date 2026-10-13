@@ -418,22 +418,25 @@ Snowglobe: catalogue combo #68 (seed 20260922) -- pixelation + RF noise / snow /
 The line buffer is written only on the first line of each row block and read from the other block-parity bank; the lens DDA address is truncated to cells.  Latency 20 clocks, all modes, blanking-gated.
 
 ## vhold
-Vhold: catalogue combo #73 (seed 20260922) -- rolling shutter / sync roll + sync loss / horizontal collapse.  Three knobs each; the switches and the slider decide how they combine.
+Vhold v0.2.0: catalogue combo #73 (seed 20260922) -- rolling shutter / sync roll + sync loss / horizontal collapse.  Three knobs each; the switches and the slider decide how they combine.  See vhold/SUMMARY.md.
 
-- K1 Roll     vertical-hold roll speed, bipolar (centre = locked)
-- K2 Bar      blanking bar height (0..255 lines)
-- K3 Jello    rows lean by a sine of row + time
-- K4 Collapse base squeeze of every row (0 = full width)
-- K5 Reach    how far below the seam the extra squeeze reaches
-- K6 Beam     collapsed rows brighten (beam concentrates)
-- S7  Bar     black / the squeezed picture shows through the bar
-- S8  Centre  rows collapse toward the screen centre / toward the jello offset
+- K1 Roll     vertical-hold roll speed, bipolar (centre = locked, deadband); same cycle time in every mode
+- K2 Bar      blanking bar height, 0.8 .. 26% of the screen
+- K3 Jello    rows lean by a sine of row + time, up to 1/8 of the width
+- K4 Collapse base squeeze of every row, 1x .. 9x
+- K5 Reach    how far below the bar the pull and the tear reach (1/32 .. 8 screen heights)
+- K6 Beam     squeezed rows brighten (beam concentrates), stretched rows dim
+- S7  Bar     black / the pulled picture shows through the bar
+- S8  Centre  rows collapse toward the screen centre (jello pans the content) / toward the jello offset (strips swing)
 - S9  Edges   outside the line: black / mirrored
-- S10 Tear    rows below the bar tear sideways (hashed per line)
-- S11 Pull    seam pull squeezes / stretches (negative pull)
-- P12 Pull    extra squeeze at the seam, decaying with Reach
+- S10 Tear    rows below the bar tear sideways, fading with Reach
+- S11 Pull    seam pull squeezes / stretches (the same factor, as a zoom)
+- P12 Pull    extra squeeze just below the bar, decaying with Reach (glided, small floor)
 
-Roll seam per frame (rollover), per-line squeeze factor from the seam distance, DDA line-buffer read.  Latency 15 clocks, all modes, blanking-gated.
+Heavy squeeze tiles the picture (13-bit source coordinate at HD, 12 at SD): the tiled strips are the look.
+v0.2.0 (2026-10-12, HW-validated 2026-10-13): Jello fold-back, pull overflow (8x-zoom band), dead S8 below the bar, mostly-dead Reach,
+bar wrap, saturating Stretch and full-bright stretched rows fixed; screen-relative sizes; luma knee + [1 2 1] bar fix,
+per-row U/V parity, interlace jello phase.  Latency 16 clocks, all modes, blanking-gated.
 
 ## negspin
 Negspin: catalogue combo #76 (seed 20260922) -- hue rotation / saturation crush-boost + invert / negative / bit-plane isolation.  Three knobs each; the switches and the slider decide how they combine.
