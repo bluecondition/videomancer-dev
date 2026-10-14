@@ -1,3 +1,9 @@
+-- Copyright (C) 2026 czartroniks
+-- SPDX-License-Identifier: GPL-3.0-only
+--
+-- This file is part of Videomancer Community Programs.
+-- See LICENSE file in the repository root for full license text.
+--
 -- Pyre: advected-field fire — a real 2D temperature field simulation
 -- LZX Industries Community FPGA Program
 --
@@ -28,7 +34,7 @@
 -- fires once per field even when analog vsync serrates.
 --
 -- License: GPL-3.0
--- Author: ron
+-- Author: czartroniks
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -40,6 +46,9 @@ use work.core_pkg.all;
 use work.all;
 
 architecture pyre of program_top is
+    -- data_in -> data_out latency is 12 clocks, already a multiple of 4 as the
+    -- SDK requires; must match processing_delay_clks in the TOML.
+    constant C_PROCESSING_DELAY_CLKS : natural := 12;
 
   constant C_LATENCY : integer := 12;
 
@@ -624,7 +633,7 @@ begin
         when BI =>
           if s_vsedge = '1' then
             b_p12 <= unsigned(registers_in(7));
-            -- K1 spans 0..86% of the raw fuel range (Ron: that is the right 0..100)
+            -- K1 spans 0..86% of the raw fuel range (tuned on hardware as the useful 0..100)
             v_k1 := unsigned(registers_in(0)) - resize(unsigned(registers_in(0)(9 downto 3)), 10)
                   - resize(unsigned(registers_in(0)(9 downto 6)), 10);
             s_fbk <= v_k1;
