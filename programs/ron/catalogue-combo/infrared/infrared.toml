@@ -1,11 +1,12 @@
 # Infrared - catalogue combo #10: keystone + thermal-camera false colour.  See infrared.vhd.
 
 [program]
-program_id = "com.ron.infrared"
+processing_delay_clks = 16
+program_id = "com.czartroniks.infrared"
 program_name = "Infrared"
-program_version = "1.0.0"
+program_version = "1.0.1"
 abi_version = ">=1.0,<2.0"
-author = "ron"
+author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Color", "Camera", "Analysis"]
 program_type = "processing"
@@ -111,7 +112,7 @@ suffix_label = "%"
 
 # Palette knob positions (zone = value >> 7): Thermal 64, Ironbow 192,
 # Plasma 320, Rainbow 448, Ice 576, Night Vision 704, White Hot 832, X-Ray 960.
-# Defaults: Ron's hardware capture of 12 Oct (commit 544a9bf) carried into v1.0.0
+# Defaults: hardware capture of 12 Oct (commit 544a9bf) carried into v1.0.0
 # (K6 539 -> 519 for the 4x Offset range; Pins = Mirror + Heat 1% was v0.1's
 # frozen wrap mode, now Cycle = On).  Presets hand-written for v1.0.0.
 

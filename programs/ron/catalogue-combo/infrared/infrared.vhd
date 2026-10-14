@@ -1,3 +1,9 @@
+-- Copyright (C) 2026 czartroniks
+-- SPDX-License-Identifier: GPL-3.0-only
+--
+-- This file is part of Videomancer Community Programs.
+-- See LICENSE file in the repository root for full license text.
+--
 -- Infrared v1.0.0: catalogue combo #10 (seed 20260912) -- perspective
 -- keystone / corner-pin + false colour (thermal-camera palettes).
 --
@@ -41,6 +47,9 @@ use work.core_pkg.all;
 use work.all;
 
 architecture infrared of program_top is
+    -- data_in -> data_out latency is 16 clocks, already a multiple of 4 as the
+    -- SDK requires; must match processing_delay_clks in the TOML.
+    constant C_PROCESSING_DELAY_CLKS : natural := 16;
 
     constant C_LAT : integer := 16;
 
