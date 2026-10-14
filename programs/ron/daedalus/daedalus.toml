@@ -10,18 +10,19 @@
 # labyrinth drapes over the image instead of tearing.
 
 [program]
-program_id = "com.bluecondition.daedalus"
-program_version = "1.0.0"
+processing_delay_clks = 12
+program_id = "com.czartroniks.daedalus"
+program_version = "1.0.1"
 abi_version = ">=1.0,<2.0"
 program_name = "Daedalus"
-author = "bluecondition"
+author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Print", "Render", "Edges"]
 program_type = "processing"
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 description = "One continuous right-angle labyrinth that weaves over and under itself, redrawing the picture and draping over its form"
-url = "https://github.com/bluecondition/videomancer-dev"
+url = "https://github.com/lzxindustries/videomancer-community-programs"
 
 # --- Rotary Potentiometers (Knobs 1-6) ---
 

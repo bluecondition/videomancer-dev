@@ -1,3 +1,9 @@
+-- Copyright (C) 2026 czartroniks
+-- SPDX-License-Identifier: GPL-3.0-only
+--
+-- This file is part of Videomancer Community Programs.
+-- See LICENSE file in the repository root for full license text.
+--
 -- daedalus.vhd  (v1.0 -- the picture drawn as a labyrinth)
 --
 -- Forked from VIDEOSKY, which cut the incoming video into a copper line-screen:
@@ -90,7 +96,7 @@
 -- from the centre by the measured half-width/half-height, one DDA step per
 -- clock, so no wide multiply is needed.
 --
--- Author: bluecondition
+-- Author: czartroniks
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -102,6 +108,9 @@ use work.core_pkg.all;
 use work.video_stream_pkg.all;
 
 architecture daedalus of program_top is
+    -- data_in -> data_out latency is 12 clocks, already a multiple of 4 as the
+    -- SDK requires; must match processing_delay_clks in the TOML.
+    constant C_PROCESSING_DELAY_CLKS : natural := 12;
 
     constant C_LATENCY : integer := 12;
     constant C_CHROMA_MID : unsigned(9 downto 0) := to_unsigned(512, 10);
