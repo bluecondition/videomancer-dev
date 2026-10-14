@@ -11,18 +11,19 @@
 # updates in a ripple rather than all at once.
 
 [program]
-program_id = "com.bluecondition.clacker"
-program_version = "0.3.0"
+processing_delay_clks = 16
+program_id = "com.czartroniks.clacker"
+program_version = "0.3.1"
 abi_version = ">=1.0,<2.0"
 program_name = "Clacker"
-author = "bluecondition"
+author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Pixel", "Pattern", "Color"]
 program_type = "processing"
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 description = "Video re-rendered as a mechanical flip-disc wall with swinging, overshooting discs."
-url = "https://github.com/bluecondition/videomancer-dev"
+url = "https://github.com/lzxindustries/videomancer-community-programs"
 
 # --- Rotary Potentiometers (Knobs 1-6) ---
 
