@@ -1,3 +1,9 @@
+-- Copyright (C) 2026 czartroniks
+-- SPDX-License-Identifier: GPL-3.0-only
+--
+-- This file is part of Videomancer Community Programs.
+-- See LICENSE file in the repository root for full license text.
+--
 -- Titler: lo-res video character generator in the style of 1980s/90s
 -- hardware titlers (Chyron / Video Toaster CG / Videonics TitleMaker).
 --
@@ -91,6 +97,13 @@ use work.core_pkg.all;
 use work.titler_font_pkg.all;
 
 architecture titler of program_top is
+    -- IO-align pad: 1 register stage after the program's own output so the
+    -- data_in -> data_out latency (7 + 1 = 8 clocks) is a multiple of 4,
+    -- as the SDK requires; must match processing_delay_clks in the TOML.
+    constant C_PROCESSING_DELAY_CLKS : natural := 8;
+    signal s_io_align_in : t_video_stream_yuv444_30b;
+    type t_io_align_pad is array (0 to 0) of t_video_stream_yuv444_30b;
+    signal s_io_align_pad : t_io_align_pad;
 
     --==========================================================================
     -- Constants
@@ -1433,53 +1446,53 @@ begin
             v_class := to_integer(s6_class);
 
             if bypass_avid(C_DELAY_DEPTH - 1) = '0' then
-                data_out.y <= std_logic_vector(to_unsigned(C_Y_BLACK, 10));
-                data_out.u <= std_logic_vector(to_unsigned(C_MID, 10));
-                data_out.v <= std_logic_vector(to_unsigned(C_MID, 10));
+                s_io_align_in.y <= std_logic_vector(to_unsigned(C_Y_BLACK, 10));
+                s_io_align_in.u <= std_logic_vector(to_unsigned(C_MID, 10));
+                s_io_align_in.v <= std_logic_vector(to_unsigned(C_MID, 10));
             else
                 case v_class is
                     when C_CL_INK =>
-                        data_out.y <= std_logic_vector(s6_ink_y);
-                        data_out.u <= std_logic_vector(s6_ink_v);  -- swap
-                        data_out.v <= std_logic_vector(s6_ink_u);  -- swap
+                        s_io_align_in.y <= std_logic_vector(s6_ink_y);
+                        s_io_align_in.u <= std_logic_vector(s6_ink_v);  -- swap
+                        s_io_align_in.v <= std_logic_vector(s6_ink_u);  -- swap
                     when C_CL_BLACK =>
-                        data_out.y <= std_logic_vector(
+                        s_io_align_in.y <= std_logic_vector(
                                           to_unsigned(C_Y_BLACK, 10));
-                        data_out.u <= std_logic_vector(to_unsigned(C_MID, 10));
-                        data_out.v <= std_logic_vector(to_unsigned(C_MID, 10));
+                        s_io_align_in.u <= std_logic_vector(to_unsigned(C_MID, 10));
+                        s_io_align_in.v <= std_logic_vector(to_unsigned(C_MID, 10));
                     when C_CL_WHITE =>
-                        data_out.y <= std_logic_vector(
+                        s_io_align_in.y <= std_logic_vector(
                                           to_unsigned(C_Y_WHITE, 10));
-                        data_out.u <= std_logic_vector(to_unsigned(C_MID, 10));
-                        data_out.v <= std_logic_vector(to_unsigned(C_MID, 10));
+                        s_io_align_in.u <= std_logic_vector(to_unsigned(C_MID, 10));
+                        s_io_align_in.v <= std_logic_vector(to_unsigned(C_MID, 10));
                     when C_CL_DIM =>
-                        data_out.y <= std_logic_vector(s6_dim_y);
-                        data_out.u <= std_logic_vector(s6_dim_u);
-                        data_out.v <= std_logic_vector(s6_dim_v);
+                        s_io_align_in.y <= std_logic_vector(s6_dim_y);
+                        s_io_align_in.u <= std_logic_vector(s6_dim_u);
+                        s_io_align_in.v <= std_logic_vector(s6_dim_v);
                     when C_CL_VIDEO =>
-                        data_out.y <= bypass_y(C_DELAY_DEPTH - 1);
-                        data_out.u <= bypass_u(C_DELAY_DEPTH - 1);
-                        data_out.v <= bypass_v(C_DELAY_DEPTH - 1);
+                        s_io_align_in.y <= bypass_y(C_DELAY_DEPTH - 1);
+                        s_io_align_in.u <= bypass_u(C_DELAY_DEPTH - 1);
+                        s_io_align_in.v <= bypass_v(C_DELAY_DEPTH - 1);
                     when others =>            -- C_CL_BG
                         if s_bg_black = '1' then
-                            data_out.y <= std_logic_vector(
+                            s_io_align_in.y <= std_logic_vector(
                                               to_unsigned(C_Y_BLACK, 10));
-                            data_out.u <= std_logic_vector(
+                            s_io_align_in.u <= std_logic_vector(
                                               to_unsigned(C_MID, 10));
-                            data_out.v <= std_logic_vector(
+                            s_io_align_in.v <= std_logic_vector(
                                               to_unsigned(C_MID, 10));
                         else
-                            data_out.y <= bypass_y(C_DELAY_DEPTH - 1);
-                            data_out.u <= bypass_u(C_DELAY_DEPTH - 1);
-                            data_out.v <= bypass_v(C_DELAY_DEPTH - 1);
+                            s_io_align_in.y <= bypass_y(C_DELAY_DEPTH - 1);
+                            s_io_align_in.u <= bypass_u(C_DELAY_DEPTH - 1);
+                            s_io_align_in.v <= bypass_v(C_DELAY_DEPTH - 1);
                         end if;
                 end case;
             end if;
 
-            data_out.avid    <= bypass_avid(C_DELAY_DEPTH - 1);
-            data_out.hsync_n <= bypass_hs(C_DELAY_DEPTH - 1);
-            data_out.vsync_n <= bypass_vs(C_DELAY_DEPTH - 1);
-            data_out.field_n <= bypass_field(C_DELAY_DEPTH - 1);
+            s_io_align_in.avid    <= bypass_avid(C_DELAY_DEPTH - 1);
+            s_io_align_in.hsync_n <= bypass_hs(C_DELAY_DEPTH - 1);
+            s_io_align_in.vsync_n <= bypass_vs(C_DELAY_DEPTH - 1);
+            s_io_align_in.field_n <= bypass_field(C_DELAY_DEPTH - 1);
         end if;
     end process p_stage7;
 
@@ -1500,5 +1513,16 @@ begin
             bypass_avid  <= data_in.avid    & bypass_avid(0 to C_DELAY_DEPTH - 2);
         end if;
     end process p_delay;
+
+    -- IO-align pad: video and syncs delayed together, so only the total
+    -- latency changes (7 -> 8).
+    p_io_align_pad : process(clk)
+    begin
+        if rising_edge(clk) then
+            s_io_align_pad(0) <= s_io_align_in;
+        end if;
+    end process p_io_align_pad;
+
+    data_out <= s_io_align_pad(0);
 
 end architecture titler;

@@ -5,11 +5,12 @@
 # placement and size, and a news-ticker Crawl on the slider.
 
 [program]
-program_id = "com.example.titler"
+processing_delay_clks = 8
+program_id = "com.czartroniks.titler"
 program_name = "Titler"
-program_version = "2.2.0"
+program_version = "2.2.1"
 abi_version = ">=1.0,<2.0"
-author = "Ron"
+author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Text"]
 program_type = "processing"
