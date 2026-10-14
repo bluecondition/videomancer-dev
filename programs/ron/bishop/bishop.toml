@@ -1,9 +1,10 @@
 [program]
-program_id = "com.ron.bishop"
-program_version = "1.0.0"
+processing_delay_clks = 8
+program_id = "com.czartroniks.bishop"
+program_version = "1.0.1"
 abi_version = ">=1.0,<2.0"
 program_name = "Bishop"
-author = "ron"
+author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Render", "Shape", "Demo", "Computer"]
 program_type = "processing"

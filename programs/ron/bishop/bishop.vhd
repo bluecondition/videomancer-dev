@@ -1,3 +1,9 @@
+-- Copyright (C) 2026 czartroniks
+-- SPDX-License-Identifier: GPL-3.0-only
+--
+-- This file is part of Videomancer Community Programs.
+-- See LICENSE file in the repository root for full license text.
+--
 -- Bishop v2 — line-buffer wireframe head.
 --
 -- Architecture:
@@ -41,7 +47,7 @@
 --   registers_in(7) = P12 Head Size (0 = mesh size, 1023 = ~95% of screen height)
 --
 -- License: GPL-3.0
--- Author: ron
+-- Author: czartroniks
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -55,6 +61,13 @@ use work.bishop_mesh_pkg.all;
 use work.all;
 
 architecture bishop of program_top is
+    -- IO-align pad: 3 register stages after the program's own output so the
+    -- data_in -> data_out latency (5 + 3 = 8 clocks) is a multiple of 4,
+    -- as the SDK requires; must match processing_delay_clks in the TOML.
+    constant C_PROCESSING_DELAY_CLKS : natural := 8;
+    signal s_io_align_in : t_video_stream_yuv444_30b;
+    type t_io_align_pad is array (0 to 2) of t_video_stream_yuv444_30b;
+    signal s_io_align_pad : t_io_align_pad;
 
     -- ---------------------------------------------------------------
     -- Geometry / rasterizer parameters
@@ -2216,12 +2229,26 @@ begin
         end if;
     end process;
 
-    data_out.hsync_n <= pipe(LATENCY - 1).hsync_n;
-    data_out.vsync_n <= pipe(LATENCY - 1).vsync_n;
-    data_out.field_n <= pipe(LATENCY - 1).field_n;
-    data_out.avid    <= pipe(LATENCY - 1).avid;
-    data_out.y <= std_logic_vector(out_y_r);
-    data_out.u <= std_logic_vector(out_u_r);
-    data_out.v <= std_logic_vector(out_v_r);
+    s_io_align_in.hsync_n <= pipe(LATENCY - 1).hsync_n;
+    s_io_align_in.vsync_n <= pipe(LATENCY - 1).vsync_n;
+    s_io_align_in.field_n <= pipe(LATENCY - 1).field_n;
+    s_io_align_in.avid    <= pipe(LATENCY - 1).avid;
+    s_io_align_in.y <= std_logic_vector(out_y_r);
+    s_io_align_in.u <= std_logic_vector(out_u_r);
+    s_io_align_in.v <= std_logic_vector(out_v_r);
+
+    -- IO-align pad: video and syncs delayed together, so only the total
+    -- latency changes (5 -> 8).
+    p_io_align_pad : process(clk)
+    begin
+        if rising_edge(clk) then
+            s_io_align_pad(0) <= s_io_align_in;
+            for i in 1 to 2 loop
+                s_io_align_pad(i) <= s_io_align_pad(i - 1);
+            end loop;
+        end if;
+    end process p_io_align_pad;
+
+    data_out <= s_io_align_pad(2);
 
 end architecture bishop;
