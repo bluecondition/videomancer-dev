@@ -11,18 +11,19 @@
 # Glide is always on (centre, period and warp ease to their new values).
 
 [program]
-program_id = "com.bluecondition.hypnos"
-program_version = "1.0.0"
+processing_delay_clks = 48
+program_id = "com.czartroniks.hypnos"
+program_version = "1.0.1"
 abi_version = ">=1.0,<2.0"
 program_name = "Hypnos"
-author = "bluecondition"
+author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Illusion", "Optics", "Pattern"]
 program_type = "synthesis"
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 description = "Razor-sharp op-art rings: circle/square/hex/flower, off-screen centre, Vertigo spiral, warp, palettes, bipolar speed"
-url = "https://github.com/bluecondition/videomancer-dev"
+url = "https://github.com/lzxindustries/videomancer-community-programs"
 
 # --- Rotary Potentiometers (Knobs 1-6) ---
 
