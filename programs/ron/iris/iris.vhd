@@ -1,3 +1,9 @@
+-- Copyright (C) 2026 czartroniks
+-- SPDX-License-Identifier: GPL-3.0-only
+--
+-- This file is part of Videomancer Community Programs.
+-- See LICENSE file in the repository root for full license text.
+--
 -- iris.vhd  (v0.4 -- IRIS: perspective dot-tunnel eye, three-layer colour split)
 --
 -- THE PICTURE: a large iris circle nearly filling the screen, a dark pupil
@@ -48,7 +54,7 @@
 -- S10 Still/Flow, S11 Framed/Full.  S7/S8 (video dots/backdrop) are inert
 -- in this build: the video halftone path did not fit the HX4K.
 --
--- Author: bluecondition
+-- Author: czartroniks
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -60,6 +66,13 @@ use work.core_pkg.all;
 use work.video_stream_pkg.all;
 
 architecture iris of program_top is
+    -- IO-align pad: 2 register stages after the program's own output so the
+    -- data_in -> data_out latency (22 + 2 = 24 clocks) is a multiple of 4,
+    -- as the SDK requires; must match processing_delay_clks in the TOML.
+    constant C_PROCESSING_DELAY_CLKS : natural := 24;
+    signal s_io_align_in : t_video_stream_yuv444_30b;
+    type t_io_align_pad is array (0 to 1) of t_video_stream_yuv444_30b;
+    signal s_io_align_pad : t_io_align_pad;
 
     constant C_LATENCY  : integer := 20;
     constant C_MID      : unsigned(9 downto 0) := to_unsigned(512, 10);
@@ -1467,13 +1480,13 @@ begin
         end if;
     end process p_out;
 
-    data_out.y       <= std_logic_vector(s_out_y);
-    data_out.u       <= std_logic_vector(s_out_u);
-    data_out.v       <= std_logic_vector(s_out_v);
-    data_out.avid    <= sd_o(3);
-    data_out.hsync_n <= sd_o(2);
-    data_out.vsync_n <= sd_o(1);
-    data_out.field_n <= sd_o(0);
+    s_io_align_in.y       <= std_logic_vector(s_out_y);
+    s_io_align_in.u       <= std_logic_vector(s_out_u);
+    s_io_align_in.v       <= std_logic_vector(s_out_v);
+    s_io_align_in.avid    <= sd_o(3);
+    s_io_align_in.hsync_n <= sd_o(2);
+    s_io_align_in.vsync_n <= sd_o(1);
+    s_io_align_in.field_n <= sd_o(0);
     ------------------------------------------------------------------------
     -- table write ports (one write statement per RAM)
     ------------------------------------------------------------------------
@@ -1711,5 +1724,19 @@ begin
             end if;
         end if;
     end process p_seq;
+
+    -- IO-align pad: video and syncs delayed together, so only the total
+    -- latency changes (22 -> 24).
+    p_io_align_pad : process(clk)
+    begin
+        if rising_edge(clk) then
+            s_io_align_pad(0) <= s_io_align_in;
+            for i in 1 to 1 loop
+                s_io_align_pad(i) <= s_io_align_pad(i - 1);
+            end loop;
+        end if;
+    end process p_io_align_pad;
+
+    data_out <= s_io_align_pad(1);
 
 end architecture iris;

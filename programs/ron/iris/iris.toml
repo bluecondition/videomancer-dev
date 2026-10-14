@@ -10,18 +10,19 @@
 # cores with coloured crescents to clean primaries at the rim.
 
 [program]
-program_id = "com.bluecondition.iris"
-program_version = "1.4.0"
+processing_delay_clks = 24
+program_id = "com.czartroniks.iris"
+program_version = "1.4.1"
 abi_version = ">=1.0,<2.0"
 program_name = "Iris"
-author = "bluecondition"
+author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Pattern", "Illusion", "Optics"]
 program_type = "processing"
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 description = "Perspective spiral dot tunnel: pupil-steered iris of growing round dots, RGB layers split by distance, ink and flow modes"
-url = "https://github.com/bluecondition/videomancer-dev"
+url = "https://github.com/lzxindustries/videomancer-community-programs"
 
 # --- Rotary Potentiometers (Knobs 1-6) ---
 
