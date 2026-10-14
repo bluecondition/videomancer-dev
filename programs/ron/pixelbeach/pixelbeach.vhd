@@ -1,3 +1,9 @@
+-- Copyright (C) 2026 czartroniks
+-- SPDX-License-Identifier: GPL-3.0-only
+--
+-- This file is part of Videomancer Community Programs.
+-- See LICENSE file in the repository root for full license text.
+--
 -- Pixel Beach v3 "Shorebreak": side-profile 8-bit ocean, real physics.
 --
 -- The screen is a cross-section of a beach: sky and blocky sun above, ocean
@@ -82,6 +88,13 @@ use work.core_pkg.all;
 use work.all;
 
 architecture pixelbeach of program_top is
+    -- IO-align pad: 3 register stages after the program's own output so the
+    -- data_in -> data_out latency (5 + 3 = 8 clocks) is a multiple of 4,
+    -- as the SDK requires; must match processing_delay_clks in the TOML.
+    constant C_PROCESSING_DELAY_CLKS : natural := 8;
+    signal s_io_align_in : t_video_stream_yuv444_30b;
+    type t_io_align_pad is array (0 to 2) of t_video_stream_yuv444_30b;
+    signal s_io_align_pad : t_io_align_pad;
 
     constant C_DW  : integer := C_VIDEO_DATA_WIDTH;   -- 10
     constant C_LAT : integer := 5;
@@ -2941,13 +2954,27 @@ begin
         end if;
     end process p_pipe;
 
-    data_out.hsync_n <= pipe(C_LAT - 1).hsync_n;
-    data_out.vsync_n <= pipe(C_LAT - 1).vsync_n;
-    data_out.field_n <= pipe(C_LAT - 1).field_n;
-    data_out.avid    <= pipe(C_LAT - 1).avid;
+    s_io_align_in.hsync_n <= pipe(C_LAT - 1).hsync_n;
+    s_io_align_in.vsync_n <= pipe(C_LAT - 1).vsync_n;
+    s_io_align_in.field_n <= pipe(C_LAT - 1).field_n;
+    s_io_align_in.avid    <= pipe(C_LAT - 1).avid;
 
-    data_out.y <= p4_y;
-    data_out.u <= p4_u;
-    data_out.v <= p4_v;
+    s_io_align_in.y <= p4_y;
+    s_io_align_in.u <= p4_u;
+    s_io_align_in.v <= p4_v;
+
+    -- IO-align pad: video and syncs delayed together, so only the total
+    -- latency changes (5 -> 8).
+    p_io_align_pad : process(clk)
+    begin
+        if rising_edge(clk) then
+            s_io_align_pad(0) <= s_io_align_in;
+            for i in 1 to 2 loop
+                s_io_align_pad(i) <= s_io_align_pad(i - 1);
+            end loop;
+        end if;
+    end process p_io_align_pad;
+
+    data_out <= s_io_align_pad(2);
 
 end architecture pixelbeach;
