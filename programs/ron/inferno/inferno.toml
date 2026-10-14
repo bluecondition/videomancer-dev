@@ -1,9 +1,10 @@
 [program]
-program_id = "com.ron.inferno"
-program_version = "2.0.0"
+processing_delay_clks = 24
+program_id = "com.czartroniks.inferno"
+program_version = "2.0.1"
 abi_version = ">=1.0,<2.0"
 program_name = "Inferno"
-author = "ron"
+author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Render", "Pattern", "Screen"]
 program_type = "processing"
