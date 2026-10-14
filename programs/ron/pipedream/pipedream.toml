@@ -7,21 +7,22 @@
 # thickness per pixel, so the picture is drawn by the weave itself.  Gloss or
 # Chrome finish; Flow pulses circulate along each loop.
 #
-# Author: bluecondition
+# Author: czartroniks
 
 [program]
-program_id = "com.bluecondition.pipedream"
-program_version = "3.3.0"
+processing_delay_clks = 16
+program_id = "com.czartroniks.pipedream"
+program_version = "3.3.1"
 abi_version = ">=1.0,<2.0"
 program_name = "Pipedream"
-author = "bluecondition"
+author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Tube", "Render", "Pattern"]
 program_type = "processing"
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 description = "A woven Truchet network of glossy 3D pipes; the input's luma swells or thins the pipes."
-url = "https://github.com/bluecondition/videomancer-dev"
+url = "https://github.com/lzxindustries/videomancer-community-programs"
 
 # --- Rotary Potentiometers (Knobs 1-6) ---
 
