@@ -5,11 +5,12 @@
 # Driven entirely by the front panel: one Switch-7 flip = one turn.
 
 [program]
-program_id = "com.ron.oubliette"
+processing_delay_clks = 12
+program_id = "com.czartroniks.oubliette"
 program_name = "Oubliette"
-program_version = "1.0.0"
+program_version = "1.0.1"
 abi_version = ">=1.0,<2.0"
-author = "Ron"
+author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Game", "Pattern"]
 program_type = "processing"

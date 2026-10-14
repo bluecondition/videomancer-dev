@@ -1,5 +1,5 @@
 -- oubliette.vhd
--- Copyright (C) 2026  bluecondition
+-- Copyright (C) 2026  czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
 -- Oubliette - a top-down, turn-based roguelike for the Videomancer.
@@ -92,6 +92,13 @@ use work.oubliette_hud_pkg.all;
 use work.oubliette_pal_pkg.all;
 
 architecture oubliette of program_top is
+    -- IO-align pad: 2 register stages after the program's own output so the
+    -- data_in -> data_out latency (10 + 2 = 12 clocks) is a multiple of 4,
+    -- as the SDK requires; must match processing_delay_clks in the TOML.
+    constant C_PROCESSING_DELAY_CLKS : natural := 12;
+    signal s_io_align_in : t_video_stream_yuv444_30b;
+    type t_io_align_pad is array (0 to 1) of t_video_stream_yuv444_30b;
+    signal s_io_align_pad : t_io_align_pad;
 
     constant C_MID : unsigned(9 downto 0) := to_unsigned(512, 10);
 
@@ -3079,12 +3086,26 @@ begin
         end if;
     end process;
 
-    data_out.y       <= s_io.y;
-    data_out.u       <= s_io.u;
-    data_out.v       <= s_io.v;
-    data_out.hsync_n <= s_io.hsync_n;
-    data_out.vsync_n <= s_io.vsync_n;
-    data_out.avid    <= s_io.avid;
-    data_out.field_n <= s_io.field_n;
+    s_io_align_in.y       <= s_io.y;
+    s_io_align_in.u       <= s_io.u;
+    s_io_align_in.v       <= s_io.v;
+    s_io_align_in.hsync_n <= s_io.hsync_n;
+    s_io_align_in.vsync_n <= s_io.vsync_n;
+    s_io_align_in.avid    <= s_io.avid;
+    s_io_align_in.field_n <= s_io.field_n;
+
+    -- IO-align pad: video and syncs delayed together, so only the total
+    -- latency changes (10 -> 12).
+    p_io_align_pad : process(clk)
+    begin
+        if rising_edge(clk) then
+            s_io_align_pad(0) <= s_io_align_in;
+            for i in 1 to 1 loop
+                s_io_align_pad(i) <= s_io_align_pad(i - 1);
+            end loop;
+        end if;
+    end process p_io_align_pad;
+
+    data_out <= s_io_align_pad(1);
 
 end architecture oubliette;
