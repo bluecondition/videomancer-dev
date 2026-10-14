@@ -1,3 +1,9 @@
+-- Copyright (C) 2026 czartroniks
+-- SPDX-License-Identifier: GPL-3.0-only
+--
+-- This file is part of Videomancer Community Programs.
+-- See LICENSE file in the repository root for full license text.
+--
 -- Blacklodge: Red Room (Twin Peaks) synthesiser
 --
 -- Crimson velvet curtain (fold-phase DDA, velvet sin^2 shading, sway =
@@ -26,7 +32,7 @@
 --   registers_in(7) = Horizon  (slider, top = curtain raised)
 --
 -- License: GPL-3.0
--- Author: ron
+-- Author: czartroniks
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -39,6 +45,9 @@ use work.core_pkg.all;
 use work.all;
 
 architecture blacklodge of program_top is
+    -- data_in -> data_out latency is 8 clocks, already a multiple of 4 as the
+    -- SDK requires; must match processing_delay_clks in the TOML.
+    constant C_PROCESSING_DELAY_CLKS : natural := 8;
 
     constant LATENCY : natural := 8;
 
