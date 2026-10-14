@@ -28,7 +28,7 @@ Oracle, Slit of Light, Full Vision, Iris, Opal Moire.
 ## Technical notes
 
 - Program type: synthesis; core `yuv444_30b`.
-- Input-to-output latency: 64 clocks (`processing_delay_clks`).
+- `processing_delay_clks` is declared 0 (allowed for synthesis programs); the sync latency through the program is 61 clocks.
 - Built and timed at the full 74.25 MHz HD pixel clock.
 
 ## License

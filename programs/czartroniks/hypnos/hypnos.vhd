@@ -43,13 +43,10 @@ use work.core_pkg.all;
 use work.video_stream_pkg.all;
 
 architecture hypnos of program_top is
-    -- IO-align pad: 2 register stages after the program's own output so the
-    -- data_in -> data_out latency (46 + 2 = 48 clocks) is a multiple of 4,
-    -- as the SDK requires; must match processing_delay_clks in the TOML.
-    constant C_PROCESSING_DELAY_CLKS : natural := 48;
-    signal s_io_align_in : t_video_stream_yuv444_30b;
-    type t_io_align_pad is array (0 to 1) of t_video_stream_yuv444_30b;
-    signal s_io_align_pad : t_io_align_pad;
+    -- Synthesis program: processing_delay_clks is declared 0 in the TOML (the SDK
+    -- allows 0 for synthesis programs, and it saves the IO-align pad registers).
+    -- The true data_in -> data_out sync latency is 46 clocks.
+    constant C_PROCESSING_DELAY_CLKS : natural := 0;
 
     constant C_MID   : unsigned(9 downto 0) := to_unsigned(512, 10);
     constant C_DB    : integer := 14;                 -- centre-knob detent deadband
@@ -1528,26 +1525,12 @@ begin
         end if;
     end process p_col;
 
-    s_io_align_in.y       <= std_logic_vector(o_y);
-    s_io_align_in.u       <= std_logic_vector(o_u);
-    s_io_align_in.v       <= std_logic_vector(o_v);
-    s_io_align_in.avid    <= dls_q2(3);
-    s_io_align_in.hsync_n <= dls_q2(2);
-    s_io_align_in.vsync_n <= dls_q2(1);
-    s_io_align_in.field_n <= dls_q2(0);
-
-    -- IO-align pad: video and syncs delayed together, so only the total
-    -- latency changes (46 -> 48).
-    p_io_align_pad : process(clk)
-    begin
-        if rising_edge(clk) then
-            s_io_align_pad(0) <= s_io_align_in;
-            for i in 1 to 1 loop
-                s_io_align_pad(i) <= s_io_align_pad(i - 1);
-            end loop;
-        end if;
-    end process p_io_align_pad;
-
-    data_out <= s_io_align_pad(1);
+    data_out.y       <= std_logic_vector(o_y);
+    data_out.u       <= std_logic_vector(o_u);
+    data_out.v       <= std_logic_vector(o_v);
+    data_out.avid    <= dls_q2(3);
+    data_out.hsync_n <= dls_q2(2);
+    data_out.vsync_n <= dls_q2(1);
+    data_out.field_n <= dls_q2(0);
 
 end architecture hypnos;

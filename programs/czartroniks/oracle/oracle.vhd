@@ -86,13 +86,10 @@ use work.oracle_tables_pkg.all;
 use work.oracle_ucode_pkg.all;
 
 architecture oracle of program_top is
-    -- IO-align pad: 3 register stages after the program's own output so the
-    -- data_in -> data_out latency (61 + 3 = 64 clocks) is a multiple of 4,
-    -- as the SDK requires; must match processing_delay_clks in the TOML.
-    constant C_PROCESSING_DELAY_CLKS : natural := 64;
-    signal s_io_align_in : t_video_stream_yuv444_30b;
-    type t_io_align_pad is array (0 to 2) of t_video_stream_yuv444_30b;
-    signal s_io_align_pad : t_io_align_pad;
+    -- Synthesis program: processing_delay_clks is declared 0 in the TOML (the SDK
+    -- allows 0 for synthesis programs, and it saves the IO-align pad registers).
+    -- The true data_in -> data_out sync latency is 61 clocks.
+    constant C_PROCESSING_DELAY_CLKS : natural := 0;
 
     -- zones
     constant Z_A : unsigned(2 downto 0) := "000";   -- spectrograph bars
@@ -1701,26 +1698,12 @@ begin
         end if;
     end process p_out;
 
-    s_io_align_in.y       <= s_io.y;
-    s_io_align_in.u       <= s_io.u;
-    s_io_align_in.v       <= s_io.v;
-    s_io_align_in.hsync_n <= s_io.hsync_n;
-    s_io_align_in.vsync_n <= s_io.vsync_n;
-    s_io_align_in.avid    <= s_io.avid;
-    s_io_align_in.field_n <= s_io.field_n;
-
-    -- IO-align pad: video and syncs delayed together, so only the total
-    -- latency changes (61 -> 64).
-    p_io_align_pad : process(clk)
-    begin
-        if rising_edge(clk) then
-            s_io_align_pad(0) <= s_io_align_in;
-            for i in 1 to 2 loop
-                s_io_align_pad(i) <= s_io_align_pad(i - 1);
-            end loop;
-        end if;
-    end process p_io_align_pad;
-
-    data_out <= s_io_align_pad(2);
+    data_out.y       <= s_io.y;
+    data_out.u       <= s_io.u;
+    data_out.v       <= s_io.v;
+    data_out.hsync_n <= s_io.hsync_n;
+    data_out.vsync_n <= s_io.vsync_n;
+    data_out.avid    <= s_io.avid;
+    data_out.field_n <= s_io.field_n;
 
 end architecture oracle;
