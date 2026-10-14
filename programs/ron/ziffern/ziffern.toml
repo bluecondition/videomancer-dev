@@ -11,18 +11,19 @@
 # Forked structurally from the ziggurat accumulator-coordinate engine.
 
 [program]
-program_id = "com.bluecondition.ziffern"
-program_version = "1.0.0"
+processing_delay_clks = 12
+program_id = "com.czartroniks.ziffern"
+program_version = "1.0.1"
 abi_version = ">=1.0,<2.0"
 program_name = "Ziffern"
-author = "bluecondition"
+author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Pattern", "Color", "Computer"]
 program_type = "processing"
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 description = "A zooming green wall of randomly-changing digits 1-9 (Kraftwerk-style number field)."
-url = "https://github.com/bluecondition/videomancer-dev"
+url = "https://github.com/lzxindustries/videomancer-community-programs"
 
 # --- Rotary Potentiometers (Knobs 1-6) ---
 
