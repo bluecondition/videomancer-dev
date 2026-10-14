@@ -1,0 +1,79 @@
+# GAMUT -- palette explorer (Phase 2: library + DIVE/LIFT)
+#
+# Browse a curated library of colour palettes drawn as rounded cards on a
+# tinted backdrop; dive into the cursor card with the slider.  Controls not
+# yet wired (K2 Swatch, K5 Motion, S8 Focus, S9 Source, S11 Video) are
+# deliberately undeclared until their phases land.
+
+[program]
+program_id = "com.czartroniks.gamut"
+program_name = "Gamut"
+program_version = "0.2.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Generator"]
+program_type = "processing"
+description = "Palette explorer: a scrolling library of curated colour-palette cards; dive into one with the slider"
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+processing_delay_clks = 16
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Browse"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 300
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Shelf"
+value_labels = [
+    "Wheel", "Dictionary", "Movements", "Decades", "Pigment", "Print", "Film",
+    "Hardware", "Broadcast", "Nature", "Spectra", "Night", "Sweets", "Quiet",
+]
+initial_value_label = "Nature"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "View"
+value_labels = ["Large", "Medium", "Grid 2", "Grid 3"]
+initial_value_label = "Medium"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Shape"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 340
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Glide"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Theme"
+value_labels = ["Dark", "Light"]
+initial_value_label = "Dark"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Dive"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 0
+display_min_value = 0
+display_max_value = 100
+display_float_digits = 0
+suffix_label = "%"

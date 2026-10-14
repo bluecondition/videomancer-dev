@@ -1,0 +1,247 @@
+# GAMUT palette library — human-readable source, compiled to ROM by gamut.py
+#
+# Format
+#   shelf NAME                      starts a shelf (K3 order = file order)
+#   NAME | colours | key=value ...  one palette per line, in K1 order
+#
+#   NAME     up to 16 characters, upper case
+#   colours  2..16 tokens, in the palette's intentional order:
+#              #rrggbb           sRGB hex
+#              yuv(Y,U,V)        10-bit BT.601 video codes (Y 64..940 legal, 4..1019 allowed; U/V 64..960, 512 = neutral)
+#              xy(x,y)           CIE 1931 chromaticity, shown at its brightest in-gamut luminance
+#   keys     roles=DSAN..   one letter per colour: D dominant, S secondary, A accent, N neutral
+#                           (WEIGHTED view; derived from chroma when absent)
+#            hushed         deliberately low lightness contrast (skips the contrast check)
+#            src=...        source note for factual palettes (free text, no spaces)
+#
+# Lines starting with '#' are comments. Edit freely, then: python3 gamut.py --sheets
+
+
+shelf WHEEL
+# Textbook harmony exemplars, each rule at several base hues.
+COMPLEMENT BLUE  | #0E3A8C #3F6FD8 #F2F0EA #F2A33A #B5651D | roles=DSNSA
+COMPLEMENT RED   | #8C1C2B #E63946 #F8F1E7 #2A9D8F #1B4F4A | roles=SDNSA
+COMPLEMENT LIME  | #3B1F6E #6C3FC5 #F7F9F0 #A4D43A #5B8C00 | roles=SDNSA
+SPLIT TEAL       | #0F7E7E #F2E9DC #E85D4A #F2B544          | roles=DNAA
+SPLIT VIOLET     | #5A3D9A #F6F2FA #E0A818 #8DBF2B          | roles=DNAA
+ANALOG SUNSET    | #FF3D6E #FF6A3D #FFA62B #FFD34E #FFF1B8
+ANALOG LAGOON    | #0C3C5E #0B6E8C #0DA3A3 #3ED1B5 #B8F5E1
+ANALOG ORCHID    | #7B2D8E #B5368F #E24A8A #F27A9A
+TRIAD PRIMARY    | #E63B2E #F6D23C #2F6FD3 #F5F1E6 #1D1D1D | roles=ASSDN
+TRIAD SECONDARY  | #F48C3B #3BB273 #6D4DD6 #FAF7F2          | roles=ASSD
+TETRAD SPICE     | #C8391E #F2B134 #1C7C87 #5C3F9E          | roles=ASDS
+SQUARE GARDEN    | #D7263D #9BC53D #1FA9C8 #7B4CC2          | roles=ASDS
+MONO INDIGO      | #0B1026 #1C2951 #334E8C #6F8BD6 #BFD0F5 #EEF2FB
+MONO OCHRE       | #2E1F0B #6B4A16 #B07D2A #D9A84E #F0D28F #FAF1DC
+
+
+shelf DICTIONARY
+# Original two-to-four colour combinations in the chalky, quietly surprising spirit of Sanzo Wada.
+CHALK & PLUM     | #E8DCC8 #6E3B5C
+DUSK ROSE        | #D9A6A0 #5E6B73 #2F3A3F
+SAGE & BRICK     | #A8BC94 #9E4630
+WISTERIA ASH     | #A99BC9 #C8C4B2 #4A4A54
+MUSTARD SLATE    | #D4A94A #5A6D7C #ECE4D1
+OLIVE & SHELL    | #6E7B3E #F2D7C9 #C9B28A
+PEACOCK TAN      | #2A6F77 #D2B48C #E9E2D0
+MAUVE CLAY       | #9C7C8B #C27A5C #EFE6DA
+POWDER COAL      | #B9CDE0 #3A3A3A
+CELADON ROUGE    | #ACC8B0 #B23A48 #F3EFE4
+TOBACCO MINT     | #7A5230 #BFE3D0 #E8DFC8
+STRAW & NAVY     | #E6D690 #2B3A67 #B8B1A3
+APRICOT GREY     | #F2B98B #8C8C8C #4F4F4F
+LILAC MOSS       | #C8B5D8 #6B7A4C #EDE7DD
+
+
+shelf MOVEMENTS
+BAUHAUS          | #E03A2E #F5C542 #1F5FA8 #F2EFE6 #1B1B1B | roles=SSADN
+DE STIJL         | #D81E05 #F7D117 #1C3F94 #F5F5F0 #CBCBCB #111111 | roles=ASSDNN
+CONSTRUCTIVIST   | #B71C1C #EFE3C8 #1A1A1A                  | roles=SDA
+ART DECO         | #111111 #C9A227 #EADFC4 #1E6B5E #6B1F2E | roles=DASSA
+MID-CENTURY      | #D96C2B #E8B13D #5F8C6B #2C5F6B #F1E5CF #6B4A2B | roles=ASSSDN
+SWISS INTL       | #E0201B #FFFFFF #000000 #8A8A8A          | roles=ADSN
+MEMPHIS          | #FF4F8B #FFD23F #1FB7C4 #6C4AB6 #F6F1EB #1A1A1A | roles=AASSDN
+POP ART          | #FF2D55 #FFE600 #00A3FF #000000 #FFFFFF | roles=ASSND
+ARTS & CRAFTS    | #7A5C3E #A8893A #556B2F #B04A33 #E6DCC3 | roles=SSSAD
+VIENNA SECESSION | #1A1A1A #C9B037 #F4EFE6 #6B8E8F          | roles=SADS
+BRUTALISM        | #C9C2B5 #9A9A9A #6E6E6E #4A4A4A #2B2B2B | hushed
+
+
+shelf DECADES
+50S DINER        | #F8E1C1 #E63B3B #4FC1C1 #1C1C1C #F2F2F2 | roles=DASNN
+60S PSYCHEDELIC  | #FF2E88 #FF7A00 #FFE600 #00C2A8 #7A1FA2
+70S HARVEST      | #C45A1C #D9A441 #6B6B2A #8C3B1B #F2DEB6 | roles=SDSAN
+70S EARTH        | #5B3A29 #A0522D #C19A6B #8A9A5B #E8DCC0 | roles=SASDN
+80S NEON         | #FF3CAC #00F0FF #F9F871 #B026FF #0B0B1E | roles=AASSD
+80S MIAMI        | #FF6EC7 #3CD1FF #FFF0B3 #FF9F1C #1B1F3B | roles=SSDAN
+90S TEAL PURPLE  | #00A0A0 #5B2A86 #F4EBD0 #FF5E5B          | roles=SSDA
+90S GRUNGE       | #3B2F2F #6B705C #A5A58D #8C3B3B #D8D2C0 | roles=SDSAN
+Y2K CHROME       | #FFFFFF #DCE8F5 #A9C1DC #6C8FB8 #3E5F8A
+Y2K BLOBBY       | #7CFC00 #FF66CC #66CCFF #FFCC00 #F8F8FF | roles=AASSD
+VAPORWAVE        | #FF71CE #01CDFE #05FFA1 #B967FF #FFFB96
+SYNTHWAVE        | #0D0221 #261447 #FF2975 #F706CF #FFD319 #00FFF7 | roles=DSAAAA
+
+
+shelf PIGMENT
+# Historical pigments as sRGB approximations of the dry pigment / masstone.
+EARTHS           | #CC7722 #D68A59 #E97451 #826644 #8A3324 | src=yellow-ochre,raw-sienna,burnt-sienna,raw-umber,burnt-umber
+ZORN PALETTE     | #C9A058 #E34234 #1E1E1E #F5F0E6          | roles=SAND src=yellow-ochre,vermilion,ivory-black,flake-white
+HISTORIC BLUES   | #120A8F #003153 #2A52BE #2E5894 #1034A6 | hushed src=ultramarine,prussian,cerulean,azurite,egyptian
+HISTORIC GREENS  | #40826D #43B3AE #4A9B6A #5F7C5A #507D2A | hushed src=viridian,verdigris,malachite,terre-verte,sap-green
+HISTORIC REDS    | #960018 #B83A4B #C80815 #E34234 #E35822 | hushed src=cochineal,madder,venetian-red,vermilion,red-lead
+HISTORIC YELLOWS | #F8E68A #E3A857 #E49B0F #FFB300 #C77D0A | src=lead-tin,indian-yellow,gamboge,orpiment,raw-gamboge
+INDIGO & MADDER  | #264E70 #3F5B8E #B83A4B #E8DCC8          | roles=DSAN
+LAPIS & GOLD     | #1034A6 #C9A227 #F3E9D2 #1A1A1A          | roles=SADN
+VELAZQUEZ        | #2B1E17 #6B4A2B #B5A079 #D9C7A8 #8A3324 #F0E8DA | roles=SSDNAN
+TYRIAN           | #66023C #8E2A66 #D4A5C2 #E8DCC8          | roles=ASDN
+IRON & CARBON    | #592720 #664228 #3D2B1F #2B2B2B #1C1C1C | hushed src=caput-mortuum,van-dyke,bistre,lamp-black,ivory-black
+FRESCO           | #F2EADB #D6B07A #5F7C5A #B5533C #4B5C7A | roles=DSSAS
+LASCAUX          | #3B2A1A #8A3324 #C87533 #D9B38C #1C1C1C | roles=SASDN
+INK WASH         | #704214 #A67B5B #D9C7A8 #F5F0E6          | src=sepia,bistre,wash,paper
+
+
+shelf PRINT
+CMYK PROCESS     | #00AEEF #EC008C #FFF100 #231F20          | src=adobe-process-cmyk-srgb
+CMYK OVERPRINT   | #00AEEF #EC008C #FFF100 #2E3192 #ED1C24 #00A651 #231F20 | src=C,M,Y,C+M,M+Y,C+Y,K
+RISO PINK TEAL   | #FF48B0 #00838A #F5F0E6                  | roles=ASD src=riso-fluorescent-pink,riso-teal
+RISO PINK BLUE   | #FF48B0 #0078BF #F5F0E6                  | roles=ASD src=riso-fluorescent-pink,riso-blue
+RISO PINK YELLOW | #FF48B0 #FFE800 #F5F0E6                  | roles=ASD src=riso-fluorescent-pink,riso-yellow
+RISO FOUR        | #0078BF #FF6C2F #00A95C #000000 #F5F0E6 | roles=SASND src=riso-blue,orange,green,black
+SCREENPRINT      | #1A1A1A #F2E8D5 #D63A2F #F2B705 #2A9D8F | roles=SDASS
+UKIYO-E          | #003153 #E34234 #E8D9B5 #8A7F6B #2B2B2B | roles=SADSN src=prussian-blue,vermilion,faded-beige,grey,sumi
+NEWSPRINT COMICS | #E8DFC8 #D9242B #F2C12E #1E73BE #1A1A1A | roles=DASSN
+DUOTONE NAVY     | #0B1F3A #5E7A9A #F2EDE4                  | roles=SSD
+DUOTONE RUST     | #7A2E12 #B9775A #F4EAD5                  | roles=SSD
+LETTERPRESS      | #F3EADB #2B2B2B #B5362E #4F6D7A          | roles=DNAS
+
+
+shelf FILM
+SLIDE FILM       | #10161C #E1272C #F58F1E #1A5E9A #1F6F3E #F5F1E6 | roles=NASSSD
+CROSS PROCESS    | #1C2A4A #3F8F7F #D9E24C #D14A8A #F0E6C8 | roles=SDASN
+BLEACH BYPASS    | #2A2A2A #5A5A55 #8C8A80 #C8C4B6 #E8E4DA #6B4A3A | roles=SSDSNA
+TWO-STRIP        | #3A2E28 #B8473D #2F7F7A #E8D5B5          | roles=NSSD src=two-colour-technicolor
+THREE-STRIP      | #1A1A1A #C8102E #FFD100 #0057B8 #1B8A4B #F2E6D0 | roles=NASSSD
+FADED 70S        | #4A4A4A #9B6B5B #7A8C7E #C7B38A #D9A48A #F0E2C8 | roles=NSSSAD
+CYANOTYPE        | #0A1F44 #1E3F7A #3F6DB3 #8FB3E0 #EEF3FA
+SEPIA            | #2E1F0F #5C4027 #8F6A47 #C4A77D #EEDFC4
+PLATINUM         | #1F1C1A #4A433E #7D7369 #B3AAA0 #E6E1DA | hushed
+TEAL & ORANGE    | #0B3C49 #146B7A #F2E7D5 #F29A3B #B5531A | roles=SSDAS
+KODACHROME       | #2A211C #B5312E #D98E2C #2E5F8A #4B6B3A #EFE4CF | roles=NASSSD
+DAY FOR NIGHT    | #0D1B2A #1B2F4A #30507A #7A8FAE #C8D4E6
+AEROCHROME       | #2A2F7A #E63E6D #FF8FB1 #F7F0E8          | roles=SASD src=kodak-aerochrome-infrared
+
+
+shelf HARDWARE
+# Accurate retro hardware palettes; sources in src=.
+CGA 0 LOW        | #000000 #00AA00 #AA0000 #AA5500          | src=cga-mode4-palette0-low
+CGA 0 HIGH       | #000000 #55FF55 #FF5555 #FFFF55          | src=cga-mode4-palette0-high
+CGA 1 LOW        | #000000 #00AAAA #AA00AA #AAAAAA          | src=cga-mode4-palette1-low
+CGA 1 HIGH       | #000000 #55FFFF #FF55FF #FFFFFF          | src=cga-mode4-palette1-high
+CGA MODE 5       | #000000 #55FFFF #FF5555 #FFFFFF          | src=cga-mode5-high
+EGA 16           | #000000 #0000AA #00AA00 #00AAAA #AA0000 #AA00AA #AA5500 #AAAAAA #555555 #5555FF #55FF55 #55FFFF #FF5555 #FF55FF #FFFF55 #FFFFFF | src=ega-default-16
+COMMODORE 64     | #000000 #FFFFFF #68372B #70A4B2 #6F3D86 #588D43 #352879 #B8C76F #6F4F25 #433900 #9A6759 #444444 #6C6C6C #9AD284 #6C5EB5 #959595 | src=pepto-2001-measured
+ZX SPECTRUM      | #000000 #0000D7 #D70000 #D700D7 #00D700 #00D7D7 #D7D700 #D7D7D7 #0000FF #FF0000 #FF00FF #00FF00 #00FFFF #FFFF00 #FFFFFF | src=zx-normal-then-bright
+GAME BOY DMG     | #0F380F #306230 #8BAC0F #9BBC0F          | src=dmg-01-greens
+APPLE II HIRES   | #000000 #14F53C #FF44FD #FF6A3C #14CFFD #FFFFFF | src=applewin-ntsc-hires
+TELETEXT 8       | #000000 #FF0000 #00FF00 #FFFF00 #0000FF #FF00FF #00FFFF #FFFFFF | src=teletext-level1-order
+NES OVERWORLD    | #5C94FC #FCFCFC #C84C0C #D82800 #FC9838 #00A800 #000000 | src=nes-2C02-$22,$30,$17,$16,$27,$1A,$0F
+NES PASTELS      | #A8E4FC #D4C8FC #FCC4FC #FCBCB0 #E0FCA0 #A8F0BC | hushed src=nes-2C02-$31,$33,$34,$36,$39,$3A
+NES DEEPS        | #000000 #24188C #8C0074 #A40000 #004400 #183C5C #747474 | src=nes-2C02-$0F,$01,$04,$06,$09,$0C,$00
+AMSTRAD CPC      | #000080 #FFFF00 #00FFFF #FF0000 #FFFFFF #000000 #0000FF #FF00FF #008080 #808000 #8080FF #FF8080 #00FF00 #80FF80 | src=cpc-mode0-default-inks-distinct
+MSX TMS9918      | #000000 #21C842 #5EDC78 #5455ED #7D76FC #D4524D #42EBF5 #FC5554 #FF7978 #D4C154 #E6CE80 #21B03B #C95BBA #CCCCCC #FFFFFF | src=tms9918-common-approximation
+PICO-8           | #000000 #1D2B53 #7E2553 #008751 #AB5236 #5F574F #C2C3C7 #FFF1E8 #FF004D #FFA300 #FFEC27 #00E436 #29ADFF #83769C #FF77A8 #FFCCAA | src=pico-8-fantasy-console
+
+
+shelf BROADCAST
+# Video-native. yuv() tokens are exact 10-bit codes; xy() tokens are phosphor chromaticities.
+SMPTE 75 BARS    | #BFBFBF #BFBF00 #00BFBF #00BF00 #BF00BF #BF0000 #0000BF | src=smpte-ecr-1-1978
+EBU 75 BARS      | #FFFFFF #BFBF00 #00BFBF #00BF00 #BF00BF #BF0000 #0000BF #000000 | src=ebu-100-0-75-0
+SMPTE BOTTOM     | #00214C #FFFFFF #32006A #000000          | src=-I,white,+Q,black
+PLUGE            | yuv(29,512,512) yuv(64,512,512) yuv(99,512,512) yuv(502,512,512) yuv(940,512,512) | hushed src=-4IRE,black,+4IRE,50%,white
+STAIRCASE        | yuv(64,512,512) yuv(161,512,512) yuv(259,512,512) yuv(356,512,512) yuv(453,512,512) yuv(551,512,512) yuv(648,512,512) yuv(745,512,512) yuv(843,512,512) yuv(940,512,512)
+KEY GREEN BLUE   | #00B140 #0047BB | hushed
+SCOPE TARGETS    | #BF0000 #BF00BF #0000BF #00BFBF #00BF00 #BFBF00 #D5A58B | src=vectorscope-clockwise-plus-flesh-line
+SKIN TONE LINE   | #F6D5C2 #E0A98A #C8835D #8D5A3B #5A3826
+CRT PHOSPHORS    | xy(0.218,0.712) xy(0.523,0.469) xy(0.270,0.300) xy(0.151,0.032) xy(0.193,0.420) | src=P1,P3,P4,P7-blue,P31
+P22 TRIAD        | xy(0.625,0.340) xy(0.280,0.595) xy(0.155,0.070) xy(0.270,0.300) | src=P22-red,green,blue,P4-white
+TERMINAL         | #0A0A0A xy(0.218,0.712) xy(0.523,0.469) #D0D0D0 | roles=DSSN src=black,P1-green,P3-amber,P4ish-text
+
+
+shelf NATURE
+DAWN SKY         | #2B2D5C #6B4C8A #C96A8E #F2A07B #FBD9A6
+DUSK SKY         | #0F1B3D #3A2D6B #8E3B6B #D9614C #F2B55C
+STORM SKY        | #1C2630 #3E4B5B #6E7B8B #A9B4BE #E0E4E8 #B8A64B | roles=SSDSNA
+CORAL REEF       | #1B4F72 #2EC4B6 #FF6F61 #FFB347 #8E44AD #F7F1E3 | roles=DSAASN
+ABYSS            | #020B14 #052A3B #0A5E7A #12A3B5 #7FE3DE
+TIDE POOL        | #2E5E4E #6AA68E #A1C5C0 #D9D2B6 #B8745A #4A3B5B | roles=SSSDAS
+DESERT           | #8FB7D9 #F2D8A9 #E0A96D #C97B3A #7A6B52 | roles=SDSAN
+MOSS & LICHEN    | #3F5E2A #7FA04A #B5C98A #C8C2A2 #8A8E6E #E7E3D2
+AUTUMN           | #5C4A2E #7A2E12 #C84B21 #E8A33D #F2D27A | roles=NSASD
+TUNDRA           | #3E4A4F #6B6F5C #8C9BA5 #A68A5B #C8CFD0 #E9ECE8 | roles=NSSADN
+TROPICAL BIRD    | #FF3B3B #FFB400 #00C853 #1E90FF #7B1FA2 | roles=DAASS
+DART FROG        | #1A1A1A #FFD200 #1E6FD9 #FF5A1F #00C070 | roles=DSSAA
+KOI POND         | #2F4F4F #86C5D8 #F2F2F2 #FF5E1A #D9A066 #1C1C1C | roles=DSSASN
+BEETLE SHELL     | #121212 #0B3D2E #1B7F5E #2FA3A0 #8C4AB8 #D9B33B | roles=NSDSAA
+OPAL             | #F7F4FC #DCEBFA #FFE3EE #E3F5E6 #FFEFC4 #C4CFFF | hushed
+MALACHITE        | #0A3D2A #116B4A #1F9C6B #4CC98B #A8E6C4
+AMETHYST         | #2E0F4A #5A2A8A #8E5BC2 #C39BE0 #EBDDF5
+
+
+shelf SPECTRA
+# Scientific colormaps sampled at 10 evenly spaced points (t = 0, 1/9, ... 1).
+VIRIDIS          | #440154 #482878 #3E4A89 #31688E #26828E #1F9E89 #35B779 #6DCD59 #B4DE2C #FDE725 | src=matplotlib-viridis
+MAGMA            | #000004 #180F3E #440F76 #721F81 #9E2F7F #CD4071 #F1605D #FD9668 #FEC287 #FCFDBF | src=matplotlib-magma
+INFERNO          | #000004 #1B0C41 #4A0C6B #781C6D #A52C60 #CF4446 #ED6925 #FB9B06 #F7D13D #FCFFA4 | src=matplotlib-inferno
+PLASMA           | #0D0887 #41049D #6A00A8 #8F0DA4 #B12A90 #CC4778 #E16462 #F2844B #FCA636 #F0F921 | src=matplotlib-plasma
+CIVIDIS          | #00224E #123570 #3B496C #575D6D #707173 #8A8678 #A69D75 #C4B56C #E4CF5B #FEE838 | src=matplotlib-cividis
+TURBO            | #30123B #4662D7 #36AAF9 #1AE4B6 #72FE5E #C7EF34 #FABA39 #F66B19 #CA2A04 #7A0403 | src=google-turbo
+KELVIN           | #FF3800 #FF8912 #FFB46B #FFD1A3 #FFE4CE #FFFFFF #E3E9FF #CAD7FF | src=blackbody-1000K..10000K-helland
+SPECTRUM         | #7F00FF #0000FF #007FFF #00FFFF #00FF00 #FFFF00 #FF7F00 #FF0000 | src=visible-400..650nm-approx
+IRONBOW          | #000000 #1E0045 #5A0094 #A3004D #DF2000 #F57C00 #FFD700 #FFFFFF | src=thermal-ironbow-approx
+HYPSOMETRIC      | #A8D4F0 #A8DC8C #F0E68C #DEB887 #A0522D #6E4A2E #FFFFFF | src=sea,lowland,plain,hill,upland,mountain,snow
+BATHYMETRY       | #C6DBEF #9ECAE1 #6BAED6 #3182BD #08519C #08306B | src=brewer-blues
+
+
+shelf NIGHT
+NEON SIGN        | #0A0A14 #FF2079 #00E5FF #FFEA00 #8A00FF | roles=DAAAS
+CYBERPUNK        | #0B0C20 #FF2A6D #05D9E8 #D1F7FF #FFD300 | roles=DASNA
+NIGHTCLUB        | #12001F #6A00F4 #E500A4 #FF4D00 #00FFD1 | roles=DSAAA
+SODIUM VAPOR     | #0E0C0A #2E2418 #8C6420 #E8A020 #FFC84A
+MERCURY VAPOR    | #0E1A1C #1F4A52 #4E9A9F #9FD8D4 #E6FFF8
+AURORA           | #04121F #0B3D4A #16A085 #6FE3A8 #B48CE8 #2B2E6B | roles=DSSAAS
+CITY RAIN        | #0F1A2B #1E3A5F #3E6FA8 #F2C14E #E85D75 | roles=DSSAA
+MOONLIGHT        | #0A1026 #1E2A5A #4B5B9E #9BA8D6 #E6E9F5
+CANDLELIGHT      | #2A0E04 #7A2E0A #C8581C #F5B866 #FFF0CC
+LASER SHOW       | #000000 #FF0033 #00FF66 #0066FF #FF00FF | roles=DAAAA
+TOKYO ALLEY      | #141A2A #D62246 #2E9CCA #F7C548 #EFEFEF | roles=DASAN
+
+
+shelf SWEETS
+CANDY SHOP       | #FFF5FA #FF5C8A #FFB800 #40C9A2 #6C5CE7 | roles=DAASS
+SHERBET          | #FFB3A7 #FFD59E #FDF6B2 #C8F0C0 #B5E8F5 | hushed
+MACARON          | #F7C8D4 #F9E6B3 #C9E4CA #B8E1E8 #D6C8F0 #F5E9DC | hushed
+BUBBLEGUM        | #FF73B3 #FFA5D2 #FFE0EF #7FDBFF #FFFFFF | roles=DSSAN
+SODA FOUNTAIN    | #F4A6C1 #FFDAC1 #FFF1BA #B5EAD7 #C7CEEA | hushed
+LIQUORICE        | #1A1A1A #FF2E63 #FFE135 #08D9D6 #EAEAEA | roles=DAAAN
+GUMMY BEARS      | #FF3B30 #FF9500 #FFCC00 #4CD964 #5AC8FA | hushed
+MINT CHIP        | #BFF2D4 #5FBF85 #3B2A24 #F8F4EC          | roles=DSAN
+COTTON CANDY     | #FFB8E0 #E8D6FF #B8E8FF #FFF9FC          | hushed
+CARAMEL          | #3E1F0C #8B4A1C #D2862E #F2C27B #FFF1D6
+JELLY BEANS      | #F1FAEE #E63946 #F4A261 #E9C46A #2A9D8F #8E44AD | roles=DAASSA
+ICE CREAM        | #F8E7D6 #F7B2A3 #F9E0A8 #B8E0D2 #C3B1E1 | hushed
+
+
+shelf QUIET
+MORANDI          | #D9CFC1 #C9B8A8 #A89F91 #8B8C7A #6E6A62 | hushed
+SCANDI           | #F4F1EC #D8D2C8 #A3A79E #6E7B74 #2E3336
+WABI-SABI        | #3B3531 #5A4E42 #8C7B6B #B8A998 #D9D0C3
+GREIGE           | #EDE8E0 #D3CBC0 #B4AA9D #978C80 #7A7066 | hushed
+STONE            | #EDEAE4 #C9C5BD #9A978F #6B6861 #3F3D39
+FOG              | #EEF0F0 #D2D8D8 #B2BABA #8E9898 #6A7474 | hushed
+LINEN & CLAY     | #F2EDE3 #D9C9B5 #B5917A #8C6B55 #4A3A30
+OLIVE GROVE      | #4B4A33 #6E6F4A #9A9B70 #C8C6A3 #E9E6D3
+DUST ROSE        | #E8DCD6 #D9B8B0 #B88E88 #8C6A66 #5A4845
+SEA GLASS        | #E4EEEA #BDD6CE #8FB3A8 #668C83 #44635C | hushed
+BLUE HOUR        | #D7DEE4 #AEB8C4 #8B9AA8 #6C7B8A #4A5560 | hushed
+NEAR MONO INK    | #1E1F22 #2E3035 #3F4248 #55585F #6E7178 | hushed
+NEAR MONO WHITE  | #FFFFFF #F7F6F3 #EEECE7 #E3E0D9 #D6D2C9 | hushed
