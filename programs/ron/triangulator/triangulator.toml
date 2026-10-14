@@ -8,18 +8,19 @@
 # line-buffer engines.
 
 [program]
-program_id = "com.bluecondition.triangulator"
-program_version = "1.0.0"
+processing_delay_clks = 12
+program_id = "com.czartroniks.triangulator"
+program_version = "1.0.1"
 abi_version = ">=1.0,<2.0"
 program_name = "Triangulator"
-author = "bluecondition"
+author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Pixel", "Pattern", "Color"]
 program_type = "processing"
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 description = "Triangle pixelation: video sampled into a lattice of upright/inverted triangles."
-url = "https://github.com/bluecondition/videomancer-dev"
+url = "https://github.com/lzxindustries/videomancer-community-programs"
 
 # --- Rotary Potentiometers (Knobs 1-6) ---
 
