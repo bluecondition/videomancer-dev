@@ -8,18 +8,19 @@
 # density.  S7 chooses a frozen etching or living frame-seeded grain.
 
 [program]
-program_id = "com.bluecondition.grist"
-program_version = "0.3.0"
+processing_delay_clks = 20
+program_id = "com.czartroniks.grist"
+program_version = "0.3.1"
 abi_version = ">=1.0,<2.0"
 program_name = "Grist"
-author = "bluecondition"
+author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Color", "Material", "Pattern"]
 program_type = "processing"
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 description = "Film grain to mezzotint: hash-grain octaves, pores and one develop comparator re-render the video as stipple."
-url = "https://github.com/bluecondition/videomancer-dev"
+url = "https://github.com/lzxindustries/videomancer-community-programs"
 
 # --- Rotary Potentiometers (Knobs 1-6) ---
 
