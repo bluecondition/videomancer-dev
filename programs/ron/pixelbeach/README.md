@@ -24,7 +24,7 @@ A side-on 8-bit beach driven by real shallow-water physics: waves roll in, steep
 ## Technical notes
 
 - Program type: synthesis; core `yuv444_30b`.
-- Input-to-output latency: 8 clocks (`processing_delay_clks`).
+- `processing_delay_clks` is declared 0 (allowed for synthesis programs); the sync latency through the program is 5 clocks.
 - Built and timed at the full 74.25 MHz HD pixel clock.
 
 ## License

@@ -1,5 +1,5 @@
 [program]
-processing_delay_clks = 8
+processing_delay_clks = 0
 program_id = "com.czartroniks.pixelbeach"
 program_version = "3.24.1"
 abi_version = ">=1.0,<2.0"
