@@ -6,18 +6,19 @@
 # slider, and live video as a fractal halftone (luma fattens the rings).
 
 [program]
-program_id = "com.bluecondition.orbifold"
-program_version = "0.3.0"
+processing_delay_clks = 20
+program_id = "com.czartroniks.orbifold"
+program_version = "0.3.1"
 abi_version = ">=1.0,<2.0"
 program_name = "Orbifold"
-author = "bluecondition"
+author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Pattern", "Generative", "Demo"]
 program_type = "processing"
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 description = "Iterated fract-ring fractal: rosettes in 8 shapes across 6 scales, seamless zoom, orbit + pulse animation."
-url = "https://github.com/bluecondition/videomancer-dev"
+url = "https://github.com/lzxindustries/videomancer-community-programs"
 
 # --- Rotary Potentiometers (Knobs 1-6) ---
 

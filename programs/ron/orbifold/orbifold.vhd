@@ -1,3 +1,9 @@
+-- Copyright (C) 2026 czartroniks
+-- SPDX-License-Identifier: GPL-3.0-only
+--
+-- This file is part of Videomancer Community Programs.
+-- See LICENSE file in the repository root for full license text.
+--
 -- orbifold.vhd  (v0.3 — iterated fract-ring rosette fractal)
 --
 -- The whole image is two shader lines iterated:
@@ -35,7 +41,7 @@
 -- rippling down through the scales; 100% = rosettes swing half a cell and
 -- collapse/swell.
 --
--- Author: bluecondition
+-- Author: czartroniks
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -48,6 +54,13 @@ use work.video_stream_pkg.all;
 use work.video_timing_pkg.all;
 
 architecture orbifold of program_top is
+    -- IO-align pad: 1 register stage after the program's own output so the
+    -- data_in -> data_out latency (19 + 1 = 20 clocks) is a multiple of 4,
+    -- as the SDK requires; must match processing_delay_clks in the TOML.
+    constant C_PROCESSING_DELAY_CLKS : natural := 20;
+    signal s_io_align_in : t_video_stream_yuv444_30b;
+    type t_io_align_pad is array (0 to 0) of t_video_stream_yuv444_30b;
+    signal s_io_align_pad : t_io_align_pad;
 
     constant LATENCY : natural := 18;   -- stage regs s0..s17; s_io pairs pipe(LATENCY-1)
     constant NLEV    : natural := 6;    -- fract depth levels
@@ -915,12 +928,23 @@ begin
         end if;
     end process p_pipe;
 
-    data_out.y       <= s_io.y;
-    data_out.u       <= s_io.u;
-    data_out.v       <= s_io.v;
-    data_out.hsync_n <= s_io.hsync_n;
-    data_out.vsync_n <= s_io.vsync_n;
-    data_out.avid    <= s_io.avid;
-    data_out.field_n <= s_io.field_n;
+    s_io_align_in.y       <= s_io.y;
+    s_io_align_in.u       <= s_io.u;
+    s_io_align_in.v       <= s_io.v;
+    s_io_align_in.hsync_n <= s_io.hsync_n;
+    s_io_align_in.vsync_n <= s_io.vsync_n;
+    s_io_align_in.avid    <= s_io.avid;
+    s_io_align_in.field_n <= s_io.field_n;
+
+    -- IO-align pad: video and syncs delayed together, so only the total
+    -- latency changes (19 -> 20).
+    p_io_align_pad : process(clk)
+    begin
+        if rising_edge(clk) then
+            s_io_align_pad(0) <= s_io_align_in;
+        end if;
+    end process p_io_align_pad;
+
+    data_out <= s_io_align_pad(0);
 
 end architecture orbifold;
