@@ -86,3 +86,10 @@ Not simulated (build-first rule); not flashed.
 - K5 Split: prism fringes on bends, then colour detaching at high values.
 - Thin coloured lines on analog sources would be the Drape U/V-parity case
   (each row replays the row above) — not fixed pre-emptively.
+
+## Build seeds — community port (stock LZX SDK 0a65d53, router1, all 8 configs)
+
+v1.1.1 (2026-10-14): **seed 4**, set as `[firmware] seed = 4` in sidewinder.toml. LZX's stock
+build uses one seed for all 8 configs. Why: seed 1 stalls nextpnr's router1 on SD Standalone (25+ min, no progress). Sweep: seeds 2–5 build 8/8; seed 6 also stalls SD Standalone.
+With seed 4, the program's own HD logic (scratch core without LZX's Sync Out
+generator) is 98.5 / 95.9 / 95.1 MHz (Analog / HDMI / Dual). The dev flow (router2) is unchanged.

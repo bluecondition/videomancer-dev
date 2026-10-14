@@ -160,3 +160,9 @@ passed on seed 1 — HD Analog 79.00, HD HDMI 79.50, HD Dual 79.04, SD Analog
 timing fixes (registered vsync trigger, abs-free ink compare) router2 closes
 too; router1 (`NEXTPNR_ROUTER="--router router1"`) gives more margin (HD 84-89).
 
+## Build seeds — community port (stock LZX SDK 0a65d53, router1, all 8 configs)
+
+v1.0.1 (2026-10-14): **seed 6**, set as `[firmware] seed = 6` in chantilly.toml. LZX's stock
+build uses one seed for all 8 configs. Why: seed 1 crashes nextpnr's router1 (assertion) on SD HDMI. Sweep: seeds 2, 3, 4, 5 and 6 all build 8/8.
+With seed 6, the program's own HD logic (scratch core without LZX's Sync Out
+generator) is 86.2 / 87.4 / 87.6 MHz (Analog / HDMI / Dual). The dev flow (router2) is unchanged.

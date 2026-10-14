@@ -102,3 +102,10 @@ Packaged (out/rev_b/ron/intaglio.vmprog); NOT yet hardware-tested. HW check item
 ink/paper tint polarity (BT.601-standard constants), tremor feel on live
 video, bucket flicker on noisy camera sources (if strokes shimmer, raise
 the direction floor or widen the hold run).
+
+## Build seeds — community port (stock LZX SDK 0a65d53, router1, all 8 configs)
+
+v0.2.1 (2026-10-14): **seed 3**, set as `[firmware] seed = 3` in intaglio.toml. LZX's stock
+build uses one seed for all 8 configs. Why: seed 1 builds, but the program's own HD Analog logic placed at 73.0 MHz (1.2 short). Sweep: seeds 2–6 all build 8/8 with own HD ≥74.8; seed 3 has the best worst case.
+With seed 3, the program's own HD logic (scratch core without LZX's Sync Out
+generator) is 86.4 / 90.0 / 87.5 MHz (Analog / HDMI / Dual). The dev flow (router2) is unchanged.
