@@ -11,21 +11,22 @@
 # (centre = still).  Scale is exponential over 7 octaves; Warp, Scale,
 # Palette and Ripple are all CONTINUOUS.
 #
-# Author: bluecondition
+# Author: czartroniks
 
 [program]
-program_id = "com.bluecondition.ribbon"
-program_version = "1.0.0"
+processing_delay_clks = 16
+program_id = "com.czartroniks.ribbon"
+program_version = "1.0.1"
 abi_version = ">=1.0,<2.0"
 program_name = "Ribbon"
-author = "bluecondition"
+author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Pattern", "Color", "Render"]
 program_type = "synthesis"
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 description = "Full-screen glossy candy ribbons: flowing, warping palette stripes, chevrons, woven tartan and ropes."
-url = "https://github.com/bluecondition/videomancer-dev"
+url = "https://github.com/lzxindustries/videomancer-community-programs"
 
 # --- Rotary Potentiometers (Knobs 1-6) ---
 

@@ -1,3 +1,9 @@
+-- Copyright (C) 2026 czartroniks
+-- SPDX-License-Identifier: GPL-3.0-only
+--
+-- This file is part of Videomancer Community Programs.
+-- See LICENSE file in the repository root for full license text.
+--
 -- ribbon.vhd
 --
 -- RIBBON -- full-screen candy-ribbon stripes.  A standalone fork of the
@@ -61,6 +67,9 @@ use work.core_pkg.all;
 use work.video_stream_pkg.all;
 
 architecture ribbon of program_top is
+    -- data_in -> data_out latency is 16 clocks, already a multiple of 4 as the
+    -- SDK requires; must match processing_delay_clks in the TOML.
+    constant C_PROCESSING_DELAY_CLKS : natural := 16;
 
     -- pixel-data depth: A(1) W1..W3(4) Q(5) ST(6) R1/R2(8) cy_sr 0..4(13) O(14)
     -- then the luma 1-2-1 (centre tap 15, output register 16)
@@ -1051,7 +1060,7 @@ begin
             o_u <= cv_sr(4);
             o_v <= cu_sr(4);
 
-            -- LUMA 1-2-1 (horizontal).  Ron's recurring ~10 px HDMI bars
+            -- LUMA 1-2-1 (horizontal).  The recurring ~10 px HDMI bars
             -- (CGA, Fray, ...) were reproduced on a dial here: Penny Candy's
             -- 7->0 wrap puts full white directly against true black, and Warp
             -- folds it into 1-px full-swing spikes.  Rope (no wrap edge) or
