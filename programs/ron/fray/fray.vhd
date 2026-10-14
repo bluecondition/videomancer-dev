@@ -1,5 +1,6 @@
 -- Videomancer SDK - Open source FPGA-based video effects development kit
--- Copyright (C) 2026 ron
+-- Copyright (C) 2026 czartroniks
+-- SPDX-License-Identifier: GPL-3.0-only
 -- File: fray.vhd - edge-launched scanline filaments
 -- License: GNU General Public License v3.0
 --
@@ -54,6 +55,13 @@ use work.video_stream_pkg.all;
 use work.video_timing_pkg.all;
 
 architecture fray of program_top is
+    -- IO-align pad: 2 register stages after the program's own output so the
+    -- data_in -> data_out latency (18 + 2 = 20 clocks) is a multiple of 4,
+    -- as the SDK requires; must match processing_delay_clks in the TOML.
+    constant C_PROCESSING_DELAY_CLKS : natural := 20;
+    signal s_io_align_in : t_video_stream_yuv444_30b;
+    type t_io_align_pad is array (0 to 1) of t_video_stream_yuv444_30b;
+    signal s_io_align_pad : t_io_align_pad;
 
     constant C_LAT  : integer := 18;
     constant C_SEED : unsigned(15 downto 0) := x"3C5A";
@@ -981,13 +989,13 @@ begin
         end if;
     end process p_sync_delay;
 
-    data_out.y       <= s_y_out;
-    data_out.u       <= s_u_out;
-    data_out.v       <= s_v_out;
-    data_out.avid    <= s_avid_sr   (C_LAT - 1);
-    data_out.hsync_n <= s_hsync_n_sr(C_LAT - 1);
-    data_out.vsync_n <= s_vsync_n_sr(C_LAT - 1);
-    data_out.field_n <= s_field_n_sr(C_LAT - 1);
+    s_io_align_in.y       <= s_y_out;
+    s_io_align_in.u       <= s_u_out;
+    s_io_align_in.v       <= s_v_out;
+    s_io_align_in.avid    <= s_avid_sr   (C_LAT - 1);
+    s_io_align_in.hsync_n <= s_hsync_n_sr(C_LAT - 1);
+    s_io_align_in.vsync_n <= s_vsync_n_sr(C_LAT - 1);
+    s_io_align_in.field_n <= s_field_n_sr(C_LAT - 1);
 
     lfsr_inst : entity work.lfsr16
         port map (
@@ -997,5 +1005,19 @@ begin
             load   => '0',
             q      => s_lfsr
         );
+
+    -- IO-align pad: video and syncs delayed together, so only the total
+    -- latency changes (18 -> 20).
+    p_io_align_pad : process(clk)
+    begin
+        if rising_edge(clk) then
+            s_io_align_pad(0) <= s_io_align_in;
+            for i in 1 to 1 loop
+                s_io_align_pad(i) <= s_io_align_pad(i - 1);
+            end loop;
+        end if;
+    end process p_io_align_pad;
+
+    data_out <= s_io_align_pad(1);
 
 end architecture fray;

@@ -1,9 +1,10 @@
 [program]
-program_id = "com.ron.fray"
-program_version = "0.4.2"
+processing_delay_clks = 20
+program_id = "com.czartroniks.fray"
+program_version = "0.4.3"
 abi_version = ">=1.0,<2.0"
 program_name = "Fray"
-author = "ron"
+author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Edges", "Glitch"]
 core = "yuv444_30b"
