@@ -1,3 +1,9 @@
+-- Copyright (C) 2026 czartroniks
+-- SPDX-License-Identifier: GPL-3.0-only
+--
+-- This file is part of Videomancer Community Programs.
+-- See LICENSE file in the repository root for full license text.
+--
 -- revenant.vhd  (v1.0.0 — "Ghost in the Signal": analog luma-contour glitch)
 --
 -- Re-draws a live source (a portrait on near-black ground) as a degrading analog
@@ -47,7 +53,7 @@
 --                     glitch walk + rate, chroma fringe, grain and line bloom.
 --                     0 = nearly clean stable portrait; 1 = fully possessed.)
 --
--- Author: bluecondition
+-- Author: czartroniks
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -60,6 +66,9 @@ use work.video_stream_pkg.all;
 use work.video_timing_pkg.all;
 
 architecture revenant of program_top is
+    -- data_in -> data_out latency is 28 clocks, already a multiple of 4 as the
+    -- SDK requires; must match processing_delay_clks in the TOML.
+    constant C_PROCESSING_DELAY_CLKS : natural := 28;
 
     -- Total datapath latency: 11 assembly stages + CHR_MAX chroma-delay taps.
     constant CHR_MAX : natural := 16;

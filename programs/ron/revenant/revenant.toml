@@ -7,18 +7,19 @@
 # Streaming pixel pipeline (no frame buffer) forked from the triangulator engine.
 
 [program]
-program_id = "com.bluecondition.revenant"
-program_version = "1.0.0"
+processing_delay_clks = 28
+program_id = "com.czartroniks.revenant"
+program_version = "1.0.1"
 abi_version = ">=1.0,<2.0"
 program_name = "Revenant"
-author = "bluecondition"
+author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Color", "Pattern", "Glitch"]
 program_type = "processing"
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 description = "Ghost in the Signal: luma-driven electric contour redraw with analog signal-decay glitch."
-url = "https://github.com/bluecondition/videomancer-dev"
+url = "https://github.com/lzxindustries/videomancer-community-programs"
 
 # --- Rotary Potentiometers (Knobs 1-6) ---
 
