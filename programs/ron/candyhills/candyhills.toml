@@ -13,18 +13,19 @@
 # incoming video, which is why this is a "processing" program.
 
 [program]
-program_id = "com.bluecondition.candyhills"
-program_version = "1.1.0"
+processing_delay_clks = 16
+program_id = "com.czartroniks.candyhills"
+program_version = "1.1.1"
 abi_version = ">=1.0,<2.0"
 program_name = "Candy Hills"
-author = "bluecondition"
+author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Render", "Pattern", "Organic"]
 program_type = "processing"
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 description = "Side-scrolling striped candy hills in 3 parallax layers under a pastel sky, with sunlit crests fading to shaded valleys."
-url = "https://github.com/bluecondition/videomancer-dev"
+url = "https://github.com/lzxindustries/videomancer-community-programs"
 
 # --- Rotary Potentiometers (Knobs 1-6) ---
 
