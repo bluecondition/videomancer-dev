@@ -1,16 +1,17 @@
 [program]
-program_id = "com.bluecondition.sidewinder"
-program_version = "1.1.0"
+processing_delay_clks = 8
+program_id = "com.czartroniks.sidewinder"
+program_version = "1.1.1"
 abi_version = ">=1.0,<2.0"
 program_name = "Sidewinder"
-author = "bluecondition"
+author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Warp", "Signal"]
 program_type = "processing"
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 description = "Per-scanline wave warp: the picture snakes left and right as a rolling wave, with twist, chroma split, mirror and wrap edges."
-url = "https://github.com/lzxindustries/videomancer-sdk"
+url = "https://github.com/lzxindustries/videomancer-community-programs"
 
 # --- Rotary Potentiometers (Knobs 1-6) ---
 
