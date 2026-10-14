@@ -1,3 +1,9 @@
+-- Copyright (C) 2026 czartroniks
+-- SPDX-License-Identifier: GPL-3.0-only
+--
+-- This file is part of Videomancer Community Programs.
+-- See LICENSE file in the repository root for full license text.
+--
 -- ruttetra.vhd - Classic Rutt-Etra scan processor for Videomancer
 --
 -- Incoming video is re-rendered as a field of horizontal scanlines whose
@@ -70,6 +76,13 @@ use work.video_timing_pkg.all;
 
 
 architecture ruttetra of program_top is
+    -- IO-align pad: 1 register stage after the program's own output so the
+    -- data_in -> data_out latency (15 + 1 = 16 clocks) is a multiple of 4,
+    -- as the SDK requires; must match processing_delay_clks in the TOML.
+    constant C_PROCESSING_DELAY_CLKS : natural := 16;
+    signal s_io_align_in : t_video_stream_yuv444_30b;
+    type t_io_align_pad is array (0 to 0) of t_video_stream_yuv444_30b;
+    signal s_io_align_pad : t_io_align_pad;
 
     constant C_LAT : integer := 15;      -- display pipeline registers
     constant NB    : integer := 8;       -- sampled-row banks
@@ -901,13 +914,24 @@ begin
     ----------------------------------------------------------------------
     -- Outputs
     ----------------------------------------------------------------------
-    data_out.y <= std_logic_vector(a11_y);
-    data_out.u <= std_logic_vector(a11_u);
-    data_out.v <= std_logic_vector(a11_v);
+    s_io_align_in.y <= std_logic_vector(a11_y);
+    s_io_align_in.u <= std_logic_vector(a11_u);
+    s_io_align_in.v <= std_logic_vector(a11_v);
 
-    data_out.avid    <= s_dly(C_LAT - 1).avid;
-    data_out.hsync_n <= s_dly(C_LAT - 1).hsync_n;
-    data_out.vsync_n <= s_dly(C_LAT - 1).vsync_n;
-    data_out.field_n <= s_dly(C_LAT - 1).field_n;
+    s_io_align_in.avid    <= s_dly(C_LAT - 1).avid;
+    s_io_align_in.hsync_n <= s_dly(C_LAT - 1).hsync_n;
+    s_io_align_in.vsync_n <= s_dly(C_LAT - 1).vsync_n;
+    s_io_align_in.field_n <= s_dly(C_LAT - 1).field_n;
+
+    -- IO-align pad: video and syncs delayed together, so only the total
+    -- latency changes (15 -> 16).
+    p_io_align_pad : process(clk)
+    begin
+        if rising_edge(clk) then
+            s_io_align_pad(0) <= s_io_align_in;
+        end if;
+    end process p_io_align_pad;
+
+    data_out <= s_io_align_pad(0);
 
 end ruttetra;
