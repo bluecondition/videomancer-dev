@@ -7,11 +7,12 @@
 # as the "Time Strip" program.)
 
 [program]
-program_id = "com.ron.slitscan"
-program_version = "3.0.0"
+processing_delay_clks = 4
+program_id = "com.czartroniks.slitscan"
+program_version = "3.0.1"
 abi_version = ">=1.0,<2.0"
 program_name = "Slit Scan"
-author = "ron"
+author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Temporal", "Glitch", "Warp"]
 program_type = "processing"
