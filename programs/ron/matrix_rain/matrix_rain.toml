@@ -8,18 +8,19 @@
 # linger under bright areas, shrink under dark. Background (S10): black or video.
 
 [program]
-program_id = "com.bluecondition.matrix_rain"
-program_version = "1.0.0"
+processing_delay_clks = 20
+program_id = "com.czartroniks.matrix_rain"
+program_version = "1.0.1"
 abi_version = ">=1.0,<2.0"
 program_name = "Matrix Rain"
-author = "bluecondition"
+author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Pattern", "Generator", "Color"]
 program_type = "processing"
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 description = "Matrix digital rain: falling katakana; the input image sizes the glyphs and holds the tails; black or video background."
-url = "https://github.com/bluecondition/videomancer-dev"
+url = "https://github.com/lzxindustries/videomancer-community-programs"
 
 # --- Rotary Potentiometers (Knobs 1-6) ---
 
