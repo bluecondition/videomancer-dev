@@ -6,18 +6,19 @@
 # horizon; S9 turns the red hexagons into a halftone of the input video.
 
 [program]
-program_id = "com.bluecondition.overlook"
-program_version = "1.3.1"
+processing_delay_clks = 8
+program_id = "com.czartroniks.overlook"
+program_version = "1.3.2"
 abi_version = ">=1.0,<2.0"
 program_name = "Overlook"
-author = "bluecondition"
+author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Pattern", "Film", "Render"]
 program_type = "processing"
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 description = "The Overlook Hotel carpet: orange serpentines and red hexagons, zoomed, drifted, tilted into a corridor, video halftone."
-url = "https://github.com/bluecondition/videomancer-dev"
+url = "https://github.com/lzxindustries/videomancer-community-programs"
 
 # --- Rotary Potentiometers (Knobs 1-6) ---
 
