@@ -1,9 +1,10 @@
 [program]
-program_id = "com.ron.intaglio"
-program_version = "0.2.0"
+processing_delay_clks = 16
+program_id = "com.czartroniks.intaglio"
+program_version = "0.2.1"
 abi_version = ">=1.0,<2.0"
 program_name = "Intaglio"
-author = "ron"
+author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Print", "Render", "Edges"]
 core = "yuv444_30b"
