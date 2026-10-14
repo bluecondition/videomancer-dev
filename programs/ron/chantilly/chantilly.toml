@@ -15,18 +15,19 @@
 # with the source colour, and Ghost works on the White ground.
 
 [program]
-program_id = "com.bluecondition.chantilly"
-program_version = "1.0.0"
+processing_delay_clks = 20
+program_id = "com.czartroniks.chantilly"
+program_version = "1.0.1"
 abi_version = ">=1.0,<2.0"
 program_name = "Chantilly"
-author = "bluecondition"
+author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Craft", "Pattern", "Print"]
 program_type = "processing"
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 description = "Black-lace halftone: video as cream dot fans, rosettes and pebble rows, cut by a scalloped cordonnet and video-edge ink"
-url = "https://github.com/bluecondition/videomancer-dev"
+url = "https://github.com/lzxindustries/videomancer-community-programs"
 
 # --- Rotary Potentiometers (Knobs 1-6) ---
 
