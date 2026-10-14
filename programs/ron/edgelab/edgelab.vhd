@@ -1,3 +1,9 @@
+-- Copyright (C) 2026 czartroniks
+-- SPDX-License-Identifier: GPL-3.0-only
+--
+-- This file is part of Videomancer Community Programs.
+-- See LICENSE file in the repository root for full license text.
+--
 -- Edge Lab: video redrawn as edge lines.
 --
 -- Two line styles (S9): Fine = Canny (thin, connected single-pixel
@@ -81,6 +87,9 @@ use work.core_pkg.all;
 use work.all;
 
 architecture edgelab of program_top is
+    -- data_in -> data_out latency is 24 clocks, already a multiple of 4 as the
+    -- SDK requires; must match processing_delay_clks in the TOML.
+    constant C_PROCESSING_DELAY_CLKS : natural := 24;
 
     constant C_DW            : integer := C_VIDEO_DATA_WIDTH;  -- 10
     constant C_TOTAL_LATENCY : integer := 24;                  -- 20 wet + 4 mix
@@ -1097,7 +1106,7 @@ begin
             -- Sensitivity -> threshold, free-running and registered (out of
             -- the vsync cone): thr = 61 - s*15/64, so 0% still shows the
             -- strongest edges and 100% (thr 1) floods the frame.  (v1.1's
-            -- 240..1 range went black below ~80%: Ron asked for 0..100% to
+            -- 240..1 range went black below ~80%: 0..100% was rescaled to
             -- cover the old 75..100%.)
             ------------------------------------------------------------------
             s_p12   <= unsigned(registers_in(7));

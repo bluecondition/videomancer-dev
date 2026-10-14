@@ -1,16 +1,17 @@
 [program]
-program_id = "com.bluecondition.edgelab"
-program_version = "1.3.0"
+processing_delay_clks = 24
+program_id = "com.czartroniks.edgelab"
+program_version = "1.3.1"
 abi_version = ">=1.0,<2.0"
 program_name = "Edge Lab"
-author = "bluecondition"
+author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Edges", "Analysis"]
 program_type = "processing"
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 description = "Video redrawn as edge lines: Fine or Chalk style, four colour modes (compass, source, heat), live Sensitivity slider."
-url = "https://github.com/lzxindustries/videomancer-sdk"
+url = "https://github.com/lzxindustries/videomancer-community-programs"
 
 # --- Rotary Potentiometers (Knobs 1-6) ---
 
