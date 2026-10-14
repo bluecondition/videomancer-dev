@@ -1,3 +1,9 @@
+-- Copyright (C) 2026 czartroniks
+-- SPDX-License-Identifier: GPL-3.0-only
+--
+-- This file is part of Videomancer Community Programs.
+-- See LICENSE file in the repository root for full license text.
+--
 -- quilt.vhd  (v1.0 — per-pixel recursive-subdivision improv quilt)
 --
 -- Fills the whole screen with a loosely grid-based field of randomly coloured
@@ -39,8 +45,10 @@
 --
 -- Output contracts: the program makes its own avid (hsync-parity locked, see
 -- p_gavid) and blanks to neutral outside it; drawn luma stays in 64..880.
+-- program_top latency is C_PROCESSING_DELAY_CLKS = 28 (a multiple of 4, as the
+-- SDK requires): the 24-deep pipe, the s_io register and three IO-align pads.
 --
--- Author: bluecondition
+-- Author: czartroniks
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -55,6 +63,9 @@ use work.video_timing_pkg.all;
 architecture quilt of program_top is
 
     constant LATENCY : natural := 24;   -- +1 S1a2 candidate-hash, +1 S10a2 evolve, +2 S10h Hilbert
+    -- data_in -> data_out: LATENCY pipe stages + s_io + 3 IO-align pads.  Must
+    -- match processing_delay_clks in quilt.toml.
+    constant C_PROCESSING_DELAY_CLKS : natural := LATENCY + 4;
     constant DMAX    : natural := 4;          -- subdivision levels
     constant MIN_W   : natural := 8;          -- don't split a span narrower than this
     constant SEAM_W  : natural := 2;          -- seam line half-thickness (px)
@@ -566,8 +577,11 @@ architecture quilt of program_top is
     signal s12_y, s12_u, s12_v : unsigned(9 downto 0);
     signal s12_hide            : std_logic;
 
-    -- output
-    signal s_io : t_video_stream_yuv444_30b;
+    -- output, then IO-align pads that bring the total latency to a multiple of 4
+    signal s_io       : t_video_stream_yuv444_30b;
+    signal s_io_pad_0 : t_video_stream_yuv444_30b;
+    signal s_io_pad_1 : t_video_stream_yuv444_30b;
+    signal s_io_pad_2 : t_video_stream_yuv444_30b;
 
 begin
 
@@ -1522,12 +1536,23 @@ begin
         end if;
     end process p_pipe;
 
-    data_out.y       <= s_io.y;
-    data_out.u       <= s_io.u;
-    data_out.v       <= s_io.v;
-    data_out.hsync_n <= s_io.hsync_n;
-    data_out.vsync_n <= s_io.vsync_n;
-    data_out.avid    <= s_io.avid;
-    data_out.field_n <= s_io.field_n;
+    -- IO-align pad: delays video and syncs together, so only the total
+    -- latency changes (25 -> 28).
+    p_io_align_pad : process(clk)
+    begin
+        if rising_edge(clk) then
+            s_io_pad_0 <= s_io;
+            s_io_pad_1 <= s_io_pad_0;
+            s_io_pad_2 <= s_io_pad_1;
+        end if;
+    end process p_io_align_pad;
+
+    data_out.y       <= s_io_pad_2.y;
+    data_out.u       <= s_io_pad_2.u;
+    data_out.v       <= s_io_pad_2.v;
+    data_out.hsync_n <= s_io_pad_2.hsync_n;
+    data_out.vsync_n <= s_io_pad_2.vsync_n;
+    data_out.avid    <= s_io_pad_2.avid;
+    data_out.field_n <= s_io_pad_2.field_n;
 
 end architecture quilt;

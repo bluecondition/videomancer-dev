@@ -18,18 +18,19 @@
 # draws its own picture and generates its own avid (see quilt.vhd).
 
 [program]
-program_id = "com.bluecondition.quilt"
-program_version = "1.0.0"
+processing_delay_clks = 28
+program_id = "com.czartroniks.quilt"
+program_version = "1.0.1"
 abi_version = ">=1.0,<2.0"
 program_name = "Quilt"
-author = "bluecondition"
+author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Pattern", "Craft", "Demo"]
 program_type = "processing"
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 description = "Recursive patchwork quilt of coloured, embossed rectangles; input luma can sculpt the piecing."
-url = "https://github.com/bluecondition/videomancer-dev"
+url = "https://github.com/lzxindustries/videomancer-community-programs"
 
 # --- Rotary Potentiometers (Knobs 1-6) ---
 
