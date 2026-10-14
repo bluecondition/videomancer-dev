@@ -1,3 +1,9 @@
+-- Copyright (C) 2026 czartroniks
+-- SPDX-License-Identifier: GPL-3.0-only
+--
+-- This file is part of Videomancer Community Programs.
+-- See LICENSE file in the repository root for full license text.
+--
 -- Bajaweave: Two Smooth Curvy Sine Lines (Phase-Modulated Carriers)
 --
 -- Generates two vertical "lines" whose sway travels up / down the screen.
@@ -102,7 +108,7 @@
 --                                 vertical speed for both waves (eased)
 --
 -- License: GPL-3.0
--- Author: ron
+-- Author: czartroniks
 
 -- ============================================================================
 -- Knob smoother (one per geometry knob).  Pot ADC noise of +/-1 count jumped
@@ -189,6 +195,13 @@ use work.video_timing_pkg.all;
 use work.video_stream_pkg.all;
 
 architecture bajaweave of program_top is
+    -- IO-align pad: 1 register stage after the program's own output so the
+    -- data_in -> data_out latency (19 + 1 = 20 clocks) is a multiple of 4,
+    -- as the SDK requires; must match processing_delay_clks in the TOML.
+    constant C_PROCESSING_DELAY_CLKS : natural := 20;
+    signal s_io_align_in : t_video_stream_yuv444_30b;
+    type t_io_align_pad is array (0 to 0) of t_video_stream_yuv444_30b;
+    signal s_io_align_pad : t_io_align_pad;
 
     constant C_DELAY_CLKS    : integer := 19;
 
@@ -1859,12 +1872,23 @@ begin
     -- ========================================================================
     -- Output assignment
     -- ========================================================================
-    data_out.y       <= std_logic_vector(r_y_out);
-    data_out.u       <= std_logic_vector(r_u_out);
-    data_out.v       <= std_logic_vector(r_v_out);
-    data_out.avid    <= s_avid_sr   (C_DELAY_CLKS-1);
-    data_out.hsync_n <= s_hsync_n_sr(C_DELAY_CLKS-1);
-    data_out.vsync_n <= s_vsync_n_sr(C_DELAY_CLKS-1);
-    data_out.field_n <= s_field_n_sr(C_DELAY_CLKS-1);
+    s_io_align_in.y       <= std_logic_vector(r_y_out);
+    s_io_align_in.u       <= std_logic_vector(r_u_out);
+    s_io_align_in.v       <= std_logic_vector(r_v_out);
+    s_io_align_in.avid    <= s_avid_sr   (C_DELAY_CLKS-1);
+    s_io_align_in.hsync_n <= s_hsync_n_sr(C_DELAY_CLKS-1);
+    s_io_align_in.vsync_n <= s_vsync_n_sr(C_DELAY_CLKS-1);
+    s_io_align_in.field_n <= s_field_n_sr(C_DELAY_CLKS-1);
+
+    -- IO-align pad: video and syncs delayed together, so only the total
+    -- latency changes (19 -> 20).
+    p_io_align_pad : process(clk)
+    begin
+        if rising_edge(clk) then
+            s_io_align_pad(0) <= s_io_align_in;
+        end if;
+    end process p_io_align_pad;
+
+    data_out <= s_io_align_pad(0);
 
 end architecture bajaweave;

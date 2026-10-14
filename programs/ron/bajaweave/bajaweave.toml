@@ -4,18 +4,19 @@
 # Two FM-modulated vertical-stripe oscillators (DWO3+BAJA+FKG3 emulation).
 
 [program]
-program_id = "com.ron.bajaweave"
+processing_delay_clks = 20
+program_id = "com.czartroniks.bajaweave"
 program_name = "Bajaweave"
-program_version = "1.0.0"
+program_version = "1.0.1"
 abi_version = ">=1.0,<2.0"
-author = "ron"
+author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Synthesis", "Pattern"]
 program_type = "synthesis"
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 description = "Two swaying line oscillators woven together in saturated complementary colour: sway, smooth flow, outlines, drop shadow."
-url = "https://github.com/bluecondition/videomancer-dev"
+url = "https://github.com/lzxindustries/videomancer-community-programs"
 
 # --- Rotary Potentiometers ---
 
