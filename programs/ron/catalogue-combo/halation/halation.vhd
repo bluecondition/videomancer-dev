@@ -1,3 +1,9 @@
+-- Copyright (C) 2026 czartroniks
+-- SPDX-License-Identifier: GPL-3.0-only
+--
+-- This file is part of Videomancer Community Programs.
+-- See LICENSE file in the repository root for full license text.
+--
 -- Halation: catalogue combo #5 (seed 20260912) -- bloom / glow / soft focus
 -- + magnetic warp (wobble).  Three knobs each; the switches and the slider
 -- decide how they combine.
@@ -44,6 +50,13 @@ use work.core_pkg.all;
 use work.all;
 
 architecture halation of program_top is
+    -- IO-align pad: 2 register stages after the program's own output so the
+    -- data_in -> data_out latency (14 + 2 = 16 clocks) is a multiple of 4,
+    -- as the SDK requires; must match processing_delay_clks in the TOML.
+    constant C_PROCESSING_DELAY_CLKS : natural := 16;
+    signal s_io_align_in : t_video_stream_yuv444_30b;
+    type t_io_align_pad is array (0 to 1) of t_video_stream_yuv444_30b;
+    signal s_io_align_pad : t_io_align_pad;
 
     constant C_LAT  : integer := 14;
     constant C_EDGE : integer := 12;
@@ -1035,12 +1048,26 @@ begin
         end if;
     end process p_pix;
 
-    data_out.y       <= std_logic_vector(s_y14);
-    data_out.u       <= std_logic_vector(s_u14);
-    data_out.v       <= std_logic_vector(s_v14);
-    data_out.hsync_n <= s_hsync_sr(C_LAT - 1);
-    data_out.vsync_n <= s_vsync_sr(C_LAT - 1);
-    data_out.field_n <= s_field_sr(C_LAT - 1);
-    data_out.avid    <= s_avid_sr(C_LAT - 1);
+    s_io_align_in.y       <= std_logic_vector(s_y14);
+    s_io_align_in.u       <= std_logic_vector(s_u14);
+    s_io_align_in.v       <= std_logic_vector(s_v14);
+    s_io_align_in.hsync_n <= s_hsync_sr(C_LAT - 1);
+    s_io_align_in.vsync_n <= s_vsync_sr(C_LAT - 1);
+    s_io_align_in.field_n <= s_field_sr(C_LAT - 1);
+    s_io_align_in.avid    <= s_avid_sr(C_LAT - 1);
+
+    -- IO-align pad: video and syncs delayed together, so only the total
+    -- latency changes (14 -> 16).
+    p_io_align_pad : process(clk)
+    begin
+        if rising_edge(clk) then
+            s_io_align_pad(0) <= s_io_align_in;
+            for i in 1 to 1 loop
+                s_io_align_pad(i) <= s_io_align_pad(i - 1);
+            end loop;
+        end if;
+    end process p_io_align_pad;
+
+    data_out <= s_io_align_pad(1);
 
 end architecture halation;

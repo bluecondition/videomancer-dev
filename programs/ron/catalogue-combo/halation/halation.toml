@@ -1,11 +1,12 @@
 # Halation - catalogue combo #5: bloom/glow + magnetic wobble.  See halation.vhd.
 
 [program]
-program_id = "com.ron.halation"
+processing_delay_clks = 16
+program_id = "com.czartroniks.halation"
 program_name = "Halation"
-program_version = "1.0.0"
+program_version = "1.0.1"
 abi_version = ">=1.0,<2.0"
-author = "ron"
+author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Optics", "Film", "Signal"]
 program_type = "processing"
