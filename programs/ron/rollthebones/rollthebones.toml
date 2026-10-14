@@ -18,21 +18,22 @@
 # S7 Source(Luma/Chroma)  S8 Luma Size  S9 Table  S10 Ink  S11 Bypass
 # P12 Tumble
 #
-# Author: bluecondition
+# Author: czartroniks
 
 [program]
-program_id = "com.bluecondition.rollthebones"
-program_version = "1.0.1"
+processing_delay_clks = 16
+program_id = "com.czartroniks.rollthebones"
+program_version = "1.0.2"
 abi_version = ">=1.0,<2.0"
 program_name = "Roll the Bones"
-author = "bluecondition"
+author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Pixel", "Pattern", "Color"]
 program_type = "processing"
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 description = "Video re-rendered as a lit tabletop of six-sided dice; pip count follows the picture, the fader spills them into a rolled pile."
-url = "https://github.com/bluecondition/videomancer-dev"
+url = "https://github.com/lzxindustries/videomancer-community-programs"
 
 # --- Rotary Potentiometers (Knobs 1-6) ---
 
