@@ -7,18 +7,19 @@
 # black outline traces the boundary between the two textures.
 
 [program]
-program_id = "com.bluecondition.cleave"
-program_version = "0.10.0"
+processing_delay_clks = 16
+program_id = "com.czartroniks.cleave"
+program_version = "0.10.1"
 abi_version = ">=1.0,<2.0"
 program_name = "Cleave"
-author = "bluecondition"
+author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Color", "Pattern", "Glitch"]
 program_type = "processing"
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 description = "Dark/light cleave: darks become serrated thermal bands, lights TV static, black outline between; fader flips the worlds."
-url = "https://github.com/bluecondition/videomancer-dev"
+url = "https://github.com/lzxindustries/videomancer-community-programs"
 
 # --- Rotary Potentiometers (Knobs 1-6) ---
 # K1-K3 shape the DARK texture (thermal bands), K4-K6 the LIGHT one (static).
