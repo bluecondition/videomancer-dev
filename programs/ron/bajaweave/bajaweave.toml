@@ -4,7 +4,7 @@
 # Two FM-modulated vertical-stripe oscillators (DWO3+BAJA+FKG3 emulation).
 
 [program]
-processing_delay_clks = 20
+processing_delay_clks = 0
 program_id = "com.czartroniks.bajaweave"
 program_name = "Bajaweave"
 program_version = "1.0.1"
