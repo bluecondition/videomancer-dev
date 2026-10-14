@@ -1,3 +1,9 @@
+-- Copyright (C) 2026 czartroniks
+-- SPDX-License-Identifier: GPL-3.0-only
+--
+-- This file is part of Videomancer Community Programs.
+-- See LICENSE file in the repository root for full license text.
+--
 -- glitchscape.vhd  (v1.0.0 — "Pixel-Sort Landscape")
 --
 -- Databends a live source into the glitch-landscape look: a dense rectangular
@@ -44,7 +50,7 @@
 --   P12 Glitch Intensity (HERO fader: bend, ripple, row wander, edge tear,
 --        fringe, bloom, hot-zone reach, drip length and grain, all continuous.)
 --
--- Author: bluecondition
+-- Author: czartroniks
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -57,6 +63,9 @@ use work.video_stream_pkg.all;
 use work.video_timing_pkg.all;
 
 architecture glitchscape of program_top is
+    -- data_in -> data_out latency is 28 clocks, already a multiple of 4 as the
+    -- SDK requires; must match processing_delay_clks in the TOML.
+    constant C_PROCESSING_DELAY_CLKS : natural := 28;
 
     -- Total datapath latency: 19 assembly stages + CHR_MAX (8) chroma-delay taps.
     constant CHR_MAX : natural := 8;

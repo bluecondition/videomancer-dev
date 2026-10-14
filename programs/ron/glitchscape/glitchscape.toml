@@ -10,18 +10,19 @@
 # corrupted JPEG / pixel-sorted mountain range melting into colored rain.
 
 [program]
-program_id = "com.bluecondition.glitchscape"
-program_version = "1.0.0"
+processing_delay_clks = 28
+program_id = "com.czartroniks.glitchscape"
+program_version = "1.0.1"
 abi_version = ">=1.0,<2.0"
 program_name = "Glitchscape"
-author = "bluecondition"
+author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Color", "Pattern", "Glitch"]
 program_type = "processing"
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 description = "Pixel-sort landscape: live source databent into vertical jewel-tone streaks on teal, with hot-zones, white filaments and drips."
-url = "https://github.com/bluecondition/videomancer-dev"
+url = "https://github.com/lzxindustries/videomancer-community-programs"
 
 # --- Rotary Potentiometers (Knobs 1-6) ---
 
