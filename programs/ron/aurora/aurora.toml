@@ -1,9 +1,10 @@
 [program]
-program_id = "com.ron.aurora"
-program_version = "3.0.3"
+processing_delay_clks = 8
+program_id = "com.czartroniks.aurora"
+program_version = "3.0.4"
 abi_version = ">=1.0,<2.0"
 program_name = "Aurora"
-author = "ron"
+author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Curve", "Organic", "Render"]
 program_type = "processing"

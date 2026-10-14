@@ -1,3 +1,9 @@
+-- Copyright (C) 2026 czartroniks
+-- SPDX-License-Identifier: GPL-3.0-only
+--
+-- This file is part of Videomancer Community Programs.
+-- See LICENSE file in the repository root for full license text.
+--
 -- aurora.vhd  (v3.0)
 --
 -- AURORA: a big, smooth, travelling horizontal rainbow wave.
@@ -77,7 +83,7 @@
 --
 -- Latency: 8 clocks, constant across all modes.  EBR: 20.  No DSP.
 --
--- Author: bluecondition
+-- Author: czartroniks
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -90,6 +96,9 @@ use work.video_stream_pkg.all;
 use work.video_timing_pkg.all;
 
 architecture aurora of program_top is
+    -- data_in -> data_out latency is 8 clocks, already a multiple of 4 as the
+    -- SDK requires; must match processing_delay_clks in the TOML.
+    constant C_PROCESSING_DELAY_CLKS : natural := 8;
 
     constant C_LAT : integer := 8;
 
