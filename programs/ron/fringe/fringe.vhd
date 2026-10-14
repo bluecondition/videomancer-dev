@@ -1,3 +1,9 @@
+-- Copyright (C) 2026 czartroniks
+-- SPDX-License-Identifier: GPL-3.0-only
+--
+-- This file is part of Videomancer Community Programs.
+-- See LICENSE file in the repository root for full license text.
+--
 -- fringe.vhd
 --
 -- FRINGE -- a moire interference instrument.  Two layers of transparent
@@ -65,7 +71,7 @@
 -- Pipeline (C_LATENCY = 16): acc -> abs -> max/min -> CORDIC x5 -> fold ->
 -- operand -> mul x2 -> windows -> phases -> ink -> composite.
 --
--- No BRAM, no video in.  Author: bluecondition
+-- No BRAM, no video in.  Author: czartroniks
 --------------------------------------------------------------------------------
 
 library ieee;
@@ -78,6 +84,9 @@ use work.core_pkg.all;
 use work.video_stream_pkg.all;
 
 architecture fringe of program_top is
+    -- data_in -> data_out latency is 16 clocks, already a multiple of 4 as the
+    -- SDK requires; must match processing_delay_clks in the TOML.
+    constant C_PROCESSING_DELAY_CLKS : natural := 16;
 
     constant C_LATENCY : integer := 16;
     constant C_DDA_TAP : integer := 10;   -- avid delay that clocks the DDAs
