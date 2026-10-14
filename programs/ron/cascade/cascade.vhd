@@ -1,7 +1,13 @@
--- Author: bluecondition
+-- Copyright (C) 2026 czartroniks
+-- SPDX-License-Identifier: GPL-3.0-only
+--
+-- This file is part of Videomancer Community Programs.
+-- See LICENSE file in the repository root for full license text.
+--
+-- Author: czartroniks
 
 -- cascade.vhd  (v2.1.2 -- 126/48 coupled discs, line-buffer mark render;
---   finalized 2026-10-10; developed + HW-verified in programs/ron/cascade_diag)
+--   finalized 2026-10-10; developed + HW-verified in a diagnostic copy)
 --
 -- HYPNOS CASCADE: concentric black/white discs that PUSH each other.  Move the
 -- centre (K1/K2) and the innermost disc leads; each outer ring holds still until
@@ -53,7 +59,7 @@
 --   flares while the cascade has them offset).  K4 setting 2 = 4 steps
 --   (v2.0.3).  Built with ROUTER1 (router2 can't close this netlist).
 --
--- v2.0 (2026-10-09, diag -- LEAN PASS; Ron: keep the look, cascade,
+-- v2.0 (2026-10-09, diag -- LEAN PASS; brief: keep the look, cascade,
 --   catch-up and gradients; Zoom/Video droppable; S9 free):
 --   * ONE SERIAL MULTIPLIER (shift-add, 14 steps, product at T+15) replaces
 --     TWO LUT array multipliers (~1060 LUT): the vblank 14x14 was merged into
@@ -75,7 +81,7 @@
 --   * K4 = 4 settings (hard / 2 / 8 grays / smooth); S9 Smooth folded in, S9
 --     free.  K3 x144 decode -> shift-adds.
 --
--- v1.8 (2026-10-09, diag; Ron: manual control only -- no auto-animation):
+-- v1.8 (2026-10-09, diag; brief: manual control only -- no auto-animation):
 --   * v1.8.1: S7 Glide 2x quicker (C_GSH 6 -> 5: ~1/32 of the way per field,
 --     a full-screen move settles in ~1.6 s instead of ~3.2 s).
 --   * K1/K2 range +-0.625 W/H: the centre goes ~12% past each edge at most
@@ -99,7 +105,7 @@
 -- No CORDIC, no cos/sin ROM, no per-pixel multiply anywhere; every edge is an
 -- exact integer circle.  C_NR MUST stay even (mark parity == k parity).
 --
--- Author: bluecondition
+-- Author: czartroniks
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -112,6 +118,13 @@ use work.core_config_pkg.all;
 use work.video_stream_pkg.all;
 
 architecture cascade of program_top is
+    -- IO-align pad: 2 register stages after the program's own output so the
+    -- data_in -> data_out latency (6 + 2 = 8 clocks) is a multiple of 4,
+    -- as the SDK requires; must match processing_delay_clks in the TOML.
+    constant C_PROCESSING_DELAY_CLKS : natural := 8;
+    signal s_io_align_in : t_video_stream_yuv444_30b;
+    type t_io_align_pad is array (0 to 1) of t_video_stream_yuv444_30b;
+    signal s_io_align_pad : t_io_align_pad;
 
     constant C_LATENCY : integer := 6;    -- RINGS: x/read 1 + parity 1 + g2 1 + merge 1 + key 1 + out 1
     -- VIDEO path: the refraction is a ONE-SIDED push (read 1 + disp back,
@@ -1698,7 +1711,7 @@ begin
         if rising_edge(clk) then
             -- K4 (v1.9, 4 settings; S9 Smooth folded into the top one):
             --   0 = classic hard black/white, 1 = 4 steps (black / 2 grays /
-            --   white -- v2.0.3, Ron: the 2-step setting looked like the hard
+            --   white -- v2.0.3, on hardware the 2-step setting looked like the hard
             --   one), 2 = 8 steps, 3 = smooth (the full 8-bit per-ring ramp)
             v_t8 := r10_t;
             case s_gn is
@@ -1839,14 +1852,28 @@ begin
         end if;
     end process p_sync;
 
-    data_out.y       <= std_logic_vector(s_out_y);
-    data_out.u       <= std_logic_vector(s_out_u);
-    data_out.v       <= std_logic_vector(s_out_v);
+    s_io_align_in.y       <= std_logic_vector(s_out_y);
+    s_io_align_in.u       <= std_logic_vector(s_out_u);
+    s_io_align_in.v       <= std_logic_vector(s_out_v);
     -- ONE set of sync taps for both modes -- the video pipeline is depth-
     -- matched to the ring path, so the mode switch changes DATA only.
-    data_out.avid    <= s_avid_sr(C_LATENCY - 1);
-    data_out.hsync_n <= s_hsync_n_sr(C_LATENCY - 1);
-    data_out.vsync_n <= s_vsync_n_sr(C_LATENCY - 1);
-    data_out.field_n <= s_field_n_sr(C_LATENCY - 1);
+    s_io_align_in.avid    <= s_avid_sr(C_LATENCY - 1);
+    s_io_align_in.hsync_n <= s_hsync_n_sr(C_LATENCY - 1);
+    s_io_align_in.vsync_n <= s_vsync_n_sr(C_LATENCY - 1);
+    s_io_align_in.field_n <= s_field_n_sr(C_LATENCY - 1);
+
+    -- IO-align pad: video and syncs delayed together, so only the total
+    -- latency changes (6 -> 8).
+    p_io_align_pad : process(clk)
+    begin
+        if rising_edge(clk) then
+            s_io_align_pad(0) <= s_io_align_in;
+            for i in 1 to 1 loop
+                s_io_align_pad(i) <= s_io_align_pad(i - 1);
+            end loop;
+        end if;
+    end process p_io_align_pad;
+
+    data_out <= s_io_align_pad(1);
 
 end architecture cascade;
