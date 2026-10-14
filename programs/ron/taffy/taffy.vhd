@@ -1,3 +1,9 @@
+-- Copyright (C) 2026 czartroniks
+-- SPDX-License-Identifier: GPL-3.0-only
+--
+-- This file is part of Videomancer Community Programs.
+-- See LICENSE file in the repository root for full license text.
+--
 -- Taffy: slider-scanned horizontal stretch bands.
 --
 -- P12 selects a scanline (100% = top, 0% = bottom). Lines inside the selected
@@ -88,6 +94,9 @@ use work.core_pkg.all;
 use work.all;
 
 architecture taffy of program_top is
+    -- data_in -> data_out latency is 4 clocks, already a multiple of 4 as the
+    -- SDK requires; must match processing_delay_clks in the TOML.
+    constant C_PROCESSING_DELAY_CLKS : natural := 4;
 
     --------------------------------------------------------------------------
     -- Constants
