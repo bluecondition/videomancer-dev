@@ -1,16 +1,17 @@
 [program]
-program_id = "com.ron.starfield"
-program_version = "3.1.0"
+processing_delay_clks = 20
+program_id = "com.czartroniks.starfield"
+program_version = "3.1.1"
 abi_version = ">=1.0,<2.0"
 program_name = "Starfield"
-author = "ron"
+author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Render", "Pattern", "Screen"]
 program_type = "processing"
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 description = "Glowing parallax starfield: 4 star shapes, twinkle, fading population, 8 palettes, nebula, luma mode, video overlay."
-url = "https://github.com/bluecondition/videomancer-dev"
+url = "https://github.com/lzxindustries/videomancer-community-programs"
 
 # --- Rotary Potentiometers (Knobs 1-6) ---
 
