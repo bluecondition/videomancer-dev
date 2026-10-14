@@ -1,16 +1,17 @@
 [program]
-program_id = "com.bluecondition.lagoon"
-program_version = "1.4.0"
+processing_delay_clks = 16
+program_id = "com.czartroniks.lagoon"
+program_version = "1.4.1"
 abi_version = ">=1.0,<2.0"
 program_name = "Lagoon"
-author = "bluecondition"
+author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Optics", "Warp"]
 program_type = "processing"
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 description = "Underwater filter: ripple refraction, rolling swell, dancing caustics, blue-green grade. Slider dives from dry to deep."
-url = "https://github.com/lzxindustries/videomancer-sdk"
+url = "https://github.com/lzxindustries/videomancer-community-programs"
 
 # --- Rotary Potentiometers (Knobs 1-6) ---
 
