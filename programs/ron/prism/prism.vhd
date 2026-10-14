@@ -1,3 +1,9 @@
+-- Copyright (C) 2026 czartroniks
+-- SPDX-License-Identifier: GPL-3.0-only
+--
+-- This file is part of Videomancer Community Programs.
+-- See LICENSE file in the repository root for full license text.
+--
 -- prism.vhd
 --
 -- Edge detection with rainbow band-trail to the right of each edge: every
@@ -43,6 +49,13 @@ use work.video_stream_pkg.all;
 use work.video_timing_pkg.all;
 
 architecture prism of program_top is
+    -- IO-align pad: 3 register stages after the program's own output so the
+    -- data_in -> data_out latency (13 + 3 = 16 clocks) is a multiple of 4,
+    -- as the SDK requires; must match processing_delay_clks in the TOML.
+    constant C_PROCESSING_DELAY_CLKS : natural := 16;
+    signal s_io_align_in : t_video_stream_yuv444_30b;
+    type t_io_align_pad is array (0 to 2) of t_video_stream_yuv444_30b;
+    signal s_io_align_pad : t_io_align_pad;
 
     constant C_SYNC_DELAY : integer := 13;
 
@@ -919,24 +932,38 @@ begin
     -- Blanking gate: neutral black (Y 64, U=V 512) whenever the aligned
     -- avid is low. Without it the last band colour (or keyed video) runs
     -- through hblank and corrupts the encoder's colour reference.
-    data_out.y <= std_logic_vector(to_unsigned(64, 10))
+    s_io_align_in.y <= std_logic_vector(to_unsigned(64, 10))
                       when s_avid_sr(C_SYNC_DELAY - 1) = '0'
                   else s_y_in_sr(C_SYNC_DELAY - 1)
                       when s_key_video = '1'
                   else std_logic_vector(s_pal_y(to_integer(s_band_idx)));
-    data_out.u <= std_logic_vector(to_unsigned(512, 10))
+    s_io_align_in.u <= std_logic_vector(to_unsigned(512, 10))
                       when s_avid_sr(C_SYNC_DELAY - 1) = '0'
                   else s_u_in_sr(C_SYNC_DELAY - 1)
                       when s_key_video = '1'
                   else std_logic_vector(s_pal_u(to_integer(s_band_idx)));
-    data_out.v <= std_logic_vector(to_unsigned(512, 10))
+    s_io_align_in.v <= std_logic_vector(to_unsigned(512, 10))
                       when s_avid_sr(C_SYNC_DELAY - 1) = '0'
                   else s_v_in_sr(C_SYNC_DELAY - 1)
                       when s_key_video = '1'
                   else std_logic_vector(s_pal_v(to_integer(s_band_idx)));
-    data_out.avid    <= s_avid_sr   (C_SYNC_DELAY - 1);
-    data_out.hsync_n <= s_hsync_n_sr(C_SYNC_DELAY - 1);
-    data_out.vsync_n <= s_vsync_n_sr(C_SYNC_DELAY - 1);
-    data_out.field_n <= s_field_n_sr(C_SYNC_DELAY - 1);
+    s_io_align_in.avid    <= s_avid_sr   (C_SYNC_DELAY - 1);
+    s_io_align_in.hsync_n <= s_hsync_n_sr(C_SYNC_DELAY - 1);
+    s_io_align_in.vsync_n <= s_vsync_n_sr(C_SYNC_DELAY - 1);
+    s_io_align_in.field_n <= s_field_n_sr(C_SYNC_DELAY - 1);
+
+    -- IO-align pad: video and syncs delayed together, so only the total
+    -- latency changes (13 -> 16).
+    p_io_align_pad : process(clk)
+    begin
+        if rising_edge(clk) then
+            s_io_align_pad(0) <= s_io_align_in;
+            for i in 1 to 2 loop
+                s_io_align_pad(i) <= s_io_align_pad(i - 1);
+            end loop;
+        end if;
+    end process p_io_align_pad;
+
+    data_out <= s_io_align_pad(2);
 
 end prism;
