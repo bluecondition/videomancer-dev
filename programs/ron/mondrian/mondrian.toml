@@ -9,18 +9,19 @@
 # where the input luma is above K3 (Luma Level), else they stay white.
 
 [program]
-program_id = "com.bluecondition.mondrian"
-program_version = "1.0.0"
+processing_delay_clks = 20
+program_id = "com.czartroniks.mondrian"
+program_version = "1.0.1"
 abi_version = ">=1.0,<2.0"
 program_name = "Mondrian"
-author = "bluecondition"
+author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Grid", "Pattern", "Shape"]
 program_type = "processing"
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 description = "De Stijl composition: white canvas, black grid lines, red/yellow/blue blocks."
-url = "https://github.com/bluecondition/videomancer-dev"
+url = "https://github.com/lzxindustries/videomancer-community-programs"
 
 # --- Rotary Potentiometers (Knobs 1-6) ---
 
