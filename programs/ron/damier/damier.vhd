@@ -1,3 +1,9 @@
+-- Copyright (C) 2026 czartroniks
+-- SPDX-License-Identifier: GPL-3.0-only
+--
+-- This file is part of Videomancer Community Programs.
+-- See LICENSE file in the repository root for full license text.
+--
 -- damier.vhd  (v0.4.5) -- op-art checkerboard engine
 --
 -- DAMIER (French: checkerboard; Vasarely's word for his grids).  A clean
@@ -67,7 +73,7 @@
 -- active video; line seeds advance on active lines only; bottom field
 -- (field_n = '0') starts one frame line down.
 --
--- Author: bluecondition
+-- Author: czartroniks
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -81,6 +87,9 @@ use work.video_timing_pkg.all;
 use work.damier_pkg.all;
 
 architecture damier of program_top is
+    -- data_in -> data_out latency is 40 clocks, already a multiple of 4 as the
+    -- SDK requires; must match processing_delay_clks in the TOML.
+    constant C_PROCESSING_DELAY_CLKS : natural := 40;
 
     constant C_BLK : unsigned(9 downto 0) := to_unsigned(64, 10);
     constant C_MID : unsigned(9 downto 0) := to_unsigned(512, 10);

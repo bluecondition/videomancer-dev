@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# Copyright (C) 2026 czartroniks
+# SPDX-License-Identifier: GPL-3.0-only
+#
+# This file is part of Videomancer Community Programs.
+# See LICENSE file in the repository root for full license text.
+#
 """DAMIER microcode: the per-field frame sequencer and the table builder.
 
 Runs from the field anchor:
@@ -184,7 +190,7 @@ def build():
         e('JMP', imm=lp)
         A.label(dn)
 
-    # Ron's range (v0.4.3): the slider's full travel spans what was its
+    # Tuned range (v0.4.3): the slider's full travel spans what was its
     # lower half -- past that the rings got too fine -- so the ring maths
     # sees half the glided slider: gr = gv / 2, vr = vt / 2
     e('SHR', 'gr', 'gv', imm=1)

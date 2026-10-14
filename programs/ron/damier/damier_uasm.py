@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# Copyright (C) 2026 czartroniks
+# SPDX-License-Identifier: GPL-3.0-only
+#
+# This file is part of Videomancer Community Programs.
+# See LICENSE file in the repository root for full license text.
+#
 """DAMIER microcode assembler (ported from CUBIST's, 16-bit datapath).
 
 One small engine runs the per-field work: a single adder ALU, a serial

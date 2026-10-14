@@ -8,18 +8,19 @@
 # they alias into moire.  Loosely descended from GILT's Kiss robe.
 
 [program]
-program_id = "com.bluecondition.damier"
-program_version = "0.4.5"
+processing_delay_clks = 40
+program_id = "com.czartroniks.damier"
+program_version = "0.4.6"
 abi_version = ">=1.0,<2.0"
 program_name = "Damier"
-author = "bluecondition"
+author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Pattern", "Illusion", "Mirror"]
 program_type = "synthesis"
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 description = "Op-art checkerboards: 16 square patterns, mirror folds, travelling waves, and rings that tighten into moire"
-url = "https://github.com/bluecondition/videomancer-dev"
+url = "https://github.com/lzxindustries/videomancer-community-programs"
 
 # --- Rotary Potentiometers (Knobs 1-6) ---
 
