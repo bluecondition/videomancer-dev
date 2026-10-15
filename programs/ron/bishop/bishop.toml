@@ -1,7 +1,7 @@
 [program]
 processing_delay_clks = 8
 program_id = "com.czartroniks.bishop"
-program_version = "1.0.1"
+program_version = "1.0.2"
 abi_version = ">=1.0,<2.0"
 program_name = "Bishop"
 author = "czartroniks"
@@ -237,3 +237,8 @@ toggle_switch_9          = 0
 toggle_switch_10         = 1     # Invert = On (black ink)
 toggle_switch_11         = 1     # Background = Video
 linear_potentiometer_12  = 384
+
+[firmware]
+# nextpnr placement seed for the stock LZX build: with v1.0.2 seed 1 stalls router1 on HD Analog
+# (overuse stuck for 10+ min) and seed 2 stalls too; seed 3 builds all 8 configs.
+seed = 3

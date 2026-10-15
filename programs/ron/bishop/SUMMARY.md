@@ -119,3 +119,11 @@ had S8 Eyes = Closed; they are Open now.)
 - `build_svg_mesh.py` — SVG → mesh package; `preview_face.py <morph>` — renders any morph overlay for tuning
 - `face12.svg` — source model; `face_labels_*.svg` — per-expression previews
 - `face_mesh.py`, `build_face_mesh.py`, `extract_mesh.py` — the earlier sparse-mesh generators (unused on this branch)
+
+## Build seeds — community port (stock LZX SDK 0a65d53, router1, all 8 configs)
+
+v1.0.2 (2026-10-15): **seed 3**, set as `[firmware] seed = 3` in bishop.toml. LZX's stock build uses one seed for all 8 configs.
+- **Why:** v1.0.2 adds the labelled-default decode (K2/K3). With it, seed 1 stalls router1 on HD Analog (overuse stuck at 6858 for 10+ min). v1.0.1 had built on seed 1.
+- **Sweep:** seed 2 built 7/8 (HD Analog stalled); seed 3 built 8/8.
+- **Own HD timing** on seed 3 (scratch core without LZX's Sync Out generator): 79.7 / 81.1 / 75.1 MHz (Analog / HDMI / Dual). Max 7057 LC (SD Standalone).
+- The dev flow (router2) is unchanged.

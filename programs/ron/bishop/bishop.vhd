@@ -173,6 +173,13 @@ architecture bishop of program_top is
     -- K2 Thickness — half-width of the stroke in px.  Rendered perpendicular
     -- thickness is 2*pad+1 (1 / 3 / 5 / 7 px) for EVERY edge orientation.
     signal pad_r      : unsigned(1 downto 0) := "01";
+    -- Free-running label decodes for K2/K3 (kept out of the vsync cone).
+    -- Labelled defaults: at program load the firmware writes the
+    -- initial_value_label's INDEX (0..N-1) into the register, not a 0..1023
+    -- position (HW-measured 2026-10-02), so a value below the label count is
+    -- taken as the label index itself.
+    signal k2_idx_r   : unsigned(1 downto 0) := "01";
+    signal k3_idx_r   : unsigned(2 downto 0) := (others => '0');
     -- S7 / S8 / T10 / T11.
     signal fill_on_r    : std_logic := '0';   -- T7: solid-fill eyes/mouth
     signal open_eyes_r  : std_logic := '0';
@@ -792,6 +799,17 @@ begin
             prev_hsync_n <= data_in.hsync_n;
             prev_vsync_n <= data_in.vsync_n;
 
+            if unsigned(registers_in(1)) < 4 then
+                k2_idx_r <= unsigned(registers_in(1)(1 downto 0));
+            else
+                k2_idx_r <= unsigned(registers_in(1)(9 downto 8));
+            end if;
+            if unsigned(registers_in(2)) < 8 then
+                k3_idx_r <= unsigned(registers_in(2)(2 downto 0));
+            else
+                k3_idx_r <= unsigned(registers_in(2)(9 downto 7));
+            end if;
+
             if data_in.hsync_n = '0' and prev_hsync_n = '1' then
                 hsync_falling_r <= '1';
             else
@@ -838,11 +856,11 @@ begin
                 -- K3 Palette.  Luma is pre-scaled in the LUT (capped at 768);
                 -- the lines take it as-is, the Invert field takes 3/4 of it
                 -- (one shift-subtract here instead of a per-pixel multiply).
-                pal_y_r  <= C_PAL_Y(to_integer(unsigned(registers_in(2)(9 downto 7))));
-                pal_yf_r <= C_PAL_Y(to_integer(unsigned(registers_in(2)(9 downto 7))))
-                          - shift_right(C_PAL_Y(to_integer(unsigned(registers_in(2)(9 downto 7)))), 2);
-                pal_u_r <= C_PAL_U(to_integer(unsigned(registers_in(2)(9 downto 7))));
-                pal_v_r <= C_PAL_V(to_integer(unsigned(registers_in(2)(9 downto 7))));
+                pal_y_r  <= C_PAL_Y(to_integer(k3_idx_r));
+                pal_yf_r <= C_PAL_Y(to_integer(k3_idx_r))
+                          - shift_right(C_PAL_Y(to_integer(k3_idx_r)), 2);
+                pal_u_r <= C_PAL_U(to_integer(k3_idx_r));
+                pal_v_r <= C_PAL_V(to_integer(k3_idx_r));
                 -- T7-T11 switches
                 bg_video_r   <= registers_in(6)(4);  -- T11
                 invert_r     <= registers_in(6)(3);  -- T10
@@ -850,7 +868,7 @@ begin
                 fill_on_r <= registers_in(6)(0);  -- T7: 1 = solid-fill features
                 open_eyes_r  <= registers_in(6)(1);  -- T8: eyes  open(1)/closed(0)
                 -- K2 Thickness: top 2 bits → pad 0..3 → stroke 1/3/5/7 px
-                pad_r      <= unsigned(registers_in(1)(9 downto 8));
+                pad_r      <= k2_idx_r;
                 -- ---- P12 head size ----
                 -- Only the raw knob is latched here; the height-derived
                 -- ceiling and the scale factor itself are formed in the copy
