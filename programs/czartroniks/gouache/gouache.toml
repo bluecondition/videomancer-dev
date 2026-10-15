@@ -27,7 +27,7 @@ name_label = "Luma"
 control_mode = "linear"
 display_min_value = 1
 display_max_value = 8
-initial_value = 300
+initial_value = 305
 display_float_digits = 0
 suffix_label = "b"
 
@@ -37,7 +37,7 @@ name_label = "Chroma"
 control_mode = "linear"
 display_min_value = 1
 display_max_value = 8
-initial_value = 300
+initial_value = 75
 display_float_digits = 0
 suffix_label = "b"
 
@@ -47,7 +47,7 @@ name_label = "Dither"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 256
+initial_value = 109
 display_float_digits = 1
 suffix_label = "%"
 
@@ -57,7 +57,7 @@ name_label = "Hue"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 360
-initial_value = 0
+initial_value = 620
 display_float_digits = 0
 suffix_label = "deg"
 
@@ -67,7 +67,7 @@ name_label = "Sat"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 400
-initial_value = 384
+initial_value = 853
 display_float_digits = 0
 suffix_label = "%"
 
@@ -77,7 +77,7 @@ name_label = "Spread"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 410
+initial_value = 268
 display_float_digits = 1
 suffix_label = "%"
 
@@ -103,13 +103,13 @@ initial_value_label = "Luma"
 parameter_id = "toggle_switch_10"
 name_label = "Dither"
 value_labels = ["Bayer", "Noise"]
-initial_value_label = "Bayer"
+initial_value_label = "Noise"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
 name_label = "Invert"
 value_labels = ["Off", "Alt"]
-initial_value_label = "Off"
+initial_value_label = "Alt"
 
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
@@ -117,7 +117,7 @@ name_label = "Spin"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 512
+initial_value = 409
 display_float_digits = 1
 suffix_label = "%"
 
