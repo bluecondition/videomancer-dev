@@ -140,7 +140,22 @@ architecture warpfield of program_top is
 
     -- Per-shell frame constants published by the vblank sequencer
     signal k16     : t_u13_arr := (others => to_unsigned(4096, 13));
-    signal x0      : t_u24_arr := (others => (others => '0'));
+    -- line origins x0 live in one EBR (8 x 32, shells 0-5): written by the
+    -- vblank sequencer, read back one shell per clock after each hsync to
+    -- reload the horizontal accumulators (x0_walk 0..5, 6 = idle), long
+    -- before the active line starts
+    type t_x0ram is array (0 to 7) of std_logic_vector(31 downto 0);
+    signal x0_ram  : t_x0ram := (others => (others => '0'));
+    attribute no_rw_check : boolean;
+    attribute no_rw_check of x0_ram : signal is true;
+    signal x0_rd   : std_logic_vector(31 downto 0) := (others => '0');
+    signal x0_we   : std_logic := '0';
+    signal x0_wa   : unsigned(2 downto 0) := (others => '0');
+    signal x0_wd   : unsigned(23 downto 0) := (others => '0');
+    signal x0_walk : unsigned(2 downto 0) := to_unsigned(6, 3);
+    signal x0_ra   : unsigned(2 downto 0) := (others => '0');
+    signal x0_v1, x0_v2 : std_logic := '0';
+    signal x0_j1, x0_j2 : unsigned(2 downto 0) := (others => '0');
     signal epoch4  : t_u4_arr  := (others => (others => '0'));
     signal env_l   : t_u5_arr  := (others => (others => '0'));  -- shell fade 0..16
     signal lint_l  : t_u3_arr  := (others => (others => '0'));  -- level int 0..7
@@ -151,9 +166,14 @@ architecture warpfield of program_top is
     signal sx_acc : t_u24_arr := (others => (others => '0'));
     signal sy_acc : t_u24_arr := (others => (others => '0'));
 
-    -- Vblank sequencer + shared 13x13 multiplier
+    -- Vblank sequencer (one step every 4 clocks) + shared 13x13 serial
+    -- multiplier (13 shift-add steps; started by s_mgo when a step writes
+    -- s_ma/s_mb, done within the 16 clocks before the product is read)
     signal s_seq    : unsigned(8 downto 0) := (others => '0');
     signal s_run    : std_logic := '0';
+    signal s_ce     : unsigned(1 downto 0) := (others => '0');
+    signal s_mgo    : std_logic := '0';
+    signal s_mcnt   : unsigned(3 downto 0) := (others => '0');
     signal s_ma     : unsigned(12 downto 0) := (others => '0');
     signal s_mb     : unsigned(12 downto 0) := (others => '0');
     signal s_mprod  : unsigned(25 downto 0) := (others => '0');
@@ -208,7 +228,14 @@ architecture warpfield of program_top is
     signal bg3_w      : unsigned(7 downto 0) := (others => '0');
 
     -- Stage 3a: hash pre-multiply (cell concat XOR seed XOR epoch)
-    signal s3a_h     : t_u16_arr;
+    signal s3a_hx    : t_u8_arr := (others => (others => '0'));
+    -- the hash input is (x cell, y cell): (hx*256 + hy) * 0x9E37 mod 2^16
+    -- = ((hx * 0x37 + Y_hi) mod 256) & Y_lo with Y = hy * 0x9E37 mod 2^16,
+    -- and hy is constant along a line -- so Y is computed once per line per
+    -- shell (in the hsync walk) and only an 8-bit multiply-add stays per pixel
+    signal y_hash    : t_u16_arr := (others => (others => '0'));
+    signal yh_a      : unsigned(15 downto 0) := (others => '0');
+    signal yh_p1, yh_p2 : unsigned(15 downto 0) := (others => '0');
     signal s3a_sub_x : t_u4_arr;
     signal s3a_sub_y : t_u4_arr;
 
@@ -322,6 +349,17 @@ architecture warpfield of program_top is
 
 begin
 
+    -- line-origin RAM: one write port, one registered read
+    p_x0ram : process(clk)
+    begin
+        if rising_edge(clk) then
+            if x0_we = '1' then
+                x0_ram(to_integer(x0_wa)) <= "00000000" & std_logic_vector(x0_wd);
+            end if;
+            x0_rd <= x0_ram(to_integer(x0_ra));
+        end if;
+    end process;
+
     process(clk)
         -- Controls
         variable v_k1          : unsigned(9 downto 0);
@@ -336,6 +374,7 @@ begin
         variable v_li   : integer range 0 to NUM_LYRS-1;
         variable v_tick : integer range 0 to 31;
         variable v_pos  : unsigned(11 downto 0);
+        variable v_msum : unsigned(13 downto 0);
         variable v_phl8 : unsigned(7 downto 0);
         variable v_f9   : unsigned(8 downto 0);
         variable v_t1   : unsigned(12 downto 0);
@@ -343,13 +382,15 @@ begin
 
         -- Stage 3/4 per-shell
         variable hash_tmp      : unsigned(15 downto 0);
+        variable v_hx8         : unsigned(7 downto 0);
+        variable v_wj          : integer range 0 to NUM_LYRS-1;
         variable hash_v        : unsigned(15 downto 0);
         variable offset_x      : unsigned(3 downto 0);
         variable offset_y      : unsigned(3 downto 0);
         variable dith8         : unsigned(7 downto 0);
         variable frac9         : unsigned(8 downto 0);
         variable lvl_i         : integer range -3 to 13;
-        variable d4            : unsigned(3 downto 0);
+        variable d5            : signed(4 downto 0);
         variable inr_x         : boolean;
         variable inr_y         : boolean;
         variable addr_v        : unsigned(9 downto 0);
@@ -362,6 +403,7 @@ begin
         variable env_t         : unsigned(4 downto 0);
         variable env_v         : unsigned(4 downto 0);
         variable prod13        : unsigned(12 downto 0);
+        variable prod12        : unsigned(11 downto 0);
 
         -- Background path
         variable sum12         : unsigned(11 downto 0);
@@ -420,10 +462,46 @@ begin
             if data_in.hsync_n = '0' and prev_hsync_n = '1' then
                 pixel_x <= (others => '0');
                 pixel_y <= pixel_y + 1;
+                x0_walk <= (others => '0');
+            end if;
+
+            -- line-origin reload: address, EBR read, then the load; the
+            -- hash's per-line half Y rides the same walk (y cell, two adder
+            -- stages, then the write)
+            if x0_walk <= NUM_LYRS-1 then
+                v_wj := to_integer(x0_walk);
+            else
+                v_wj := 0;
+            end if;
+            yh_a  <= resize(sy_acc(v_wj)(23 downto 16) xor SEEDS(v_wj)(7 downto 0)
+                            xor (epoch4(v_wj) & epoch4(v_wj)), 16);
+            yh_p1 <= shift_left(yh_a, 15) + shift_left(yh_a, 13) - shift_left(yh_a, 9);
+            yh_p2 <= shift_left(yh_a, 6) - shift_left(yh_a, 3) - yh_a;
+            if x0_v2 = '1' then
                 for i in 0 to NUM_LYRS-1 loop
-                    sx_acc(i) <= x0(i);
+                    if to_integer(x0_j2) = i then
+                        y_hash(i) <= yh_p1 + yh_p2;
+                    end if;
                 end loop;
             end if;
+            if x0_walk <= NUM_LYRS-1 then
+                x0_ra   <= x0_walk;
+                x0_j1   <= x0_walk;
+                x0_v1   <= '1';
+                x0_walk <= x0_walk + 1;
+            else
+                x0_v1   <= '0';
+            end if;
+            x0_v2 <= x0_v1;
+            x0_j2 <= x0_j1;
+            if x0_v2 = '1' then
+                for i in 0 to NUM_LYRS-1 loop
+                    if to_integer(x0_j2) = i then
+                        sx_acc(i) <= unsigned(x0_rd(23 downto 0));
+                    end if;
+                end loop;
+            end if;
+            x0_we <= '0';
 
             ----------------------------------------------------------------
             -- Vblank sequencer: at vsync, latch knobs and start; then one
@@ -437,6 +515,8 @@ begin
             -- Frame start = the FIRST vsync edge after active video: analog
             -- vsync serrates (several edges per field), and every per-field
             -- step below must happen exactly once.
+            s_ce  <= s_ce + 1;
+            s_mgo <= '0';
             if data_in.avid = '1' then
                 s_sawact <= '1';
             end if;
@@ -463,7 +543,7 @@ begin
                 end if;
                 s_lcnt  <= (others => '0');
                 pixel_y <= (others => '0');
-            elsif s_run = '1' then
+            elsif s_run = '1' and s_ce = 3 then
                 s_seq <= s_seq + 1;
                 if s_seq < to_unsigned(48, 9) then
                     case to_integer(s_seq) is
@@ -471,6 +551,7 @@ begin
                             -- quadratic speed curve: step = speed^2 / 256
                             s_ma <= resize(speed10_r, 13);
                             s_mb <= resize(speed10_r, 13);
+                            s_mgo <= '1';
                         when 4 =>
                             step12 <= s_mprod(19 downto 8);
                         when 6 =>
@@ -488,6 +569,7 @@ begin
                             end if;
                             s_ma  <= '0' & v_pos;
                             s_mb  <= to_unsigned(4096, 13) - resize(v_pos, 13);
+                            s_mgo <= '1';
                             sgx_r <= dphx(15);
                         when 12 =>
                             sxp_r <= s_mprod(22 downto 12);
@@ -498,19 +580,23 @@ begin
                             end if;
                             s_ma  <= '0' & v_pos;
                             s_mb  <= to_unsigned(4096, 13) - resize(v_pos, 13);
+                            s_mgo <= '1';
                             sgy_r <= dphy(15);
                         when 16 =>
                             syp_r <= s_mprod(22 downto 12);
                             s_ma  <= resize(sxp_r, 13);
                             s_mb  <= resize(amp10_r, 13);
+                            s_mgo <= '1';
                         when 20 =>
                             gx_r <= s_mprod(20 downto 11);
                             s_ma <= resize(syp_r, 13);
                             s_mb <= resize(amp10_r, 13);
+                            s_mgo <= '1';
                         when 24 =>
                             gy_r <= s_mprod(20 downto 11);
                             s_ma <= resize(gx_r, 13);
                             s_mb <= resize(halfw_r, 13);
+                            s_mgo <= '1';
                         when 28 =>
                             -- drift <= half-dim/2, so the centre never
                             -- leaves the picture (and is 0 until measured)
@@ -521,6 +607,7 @@ begin
                             end if;
                             s_ma <= resize(gy_r, 13);
                             s_mb <= resize(cyh_r, 13);
+                            s_mgo <= '1';
                         when 32 =>
                             if sgy_r = '1' then
                                 cy_r <= cyh_r - resize(s_mprod(19 downto 10), 11);
@@ -574,15 +661,20 @@ begin
                             end if;
                             s_ma <= resize(kfrac_r, 13);
                             s_mb <= t0_r - v_t1;   -- 2..12
+                            s_mgo <= '1';
                         when 14 =>
                             v_k := t0_r - resize(s_mprod(12 downto 8), 13);
                             k16(v_li) <= v_k;
                             s_ma <= resize(cx_r, 13);
                             s_mb <= v_k;
+                            s_mgo <= '1';
                         when 18 =>
-                            x0(v_li) <= C_BIAS - resize(s_mprod(22 downto 0), 24);
+                            x0_wd <= C_BIAS - resize(s_mprod(22 downto 0), 24);
+                            x0_wa <= to_unsigned(v_li, 3);
+                            x0_we <= '1';
+                            -- s_mb still holds k16(v_li) from tick 14
                             s_ma <= resize(cy_r, 13);
-                            s_mb <= k16(v_li);
+                            s_mgo <= '1';
                         when 22 =>
                             sy_acc(v_li) <= C_BIAS - resize(s_mprod(22 downto 0), 24);
                         when others => null;
@@ -594,8 +686,21 @@ begin
                 end if;
             end if;
 
-            -- shared multiplier (registered operands, registered product)
-            s_mprod <= s_ma * s_mb;
+            -- shared serial multiplier: s_mprod = [H | L], L preloaded with
+            -- the multiplier; each step adds s_ma to H when L(0) is set and
+            -- shifts the pair right one bit.  13 steps leave s_ma * s_mb.
+            if s_mgo = '1' then
+                s_mprod <= (25 downto 13 => '0') & s_mb;
+                s_mcnt  <= to_unsigned(13, 4);
+            elsif s_mcnt /= 0 then
+                if s_mprod(0) = '1' then
+                    v_msum := ('0' & s_mprod(25 downto 13)) + ('0' & s_ma);
+                else
+                    v_msum := '0' & s_mprod(25 downto 13);
+                end if;
+                s_mprod <= v_msum & s_mprod(12 downto 1);
+                s_mcnt  <= s_mcnt - 1;
+            end if;
             -- Size knob scaled to 0..3 added glow levels (free-running, so
             -- the vsync latch stays a plain register copy)
             size_eff_r <= size10_r - shift_right(size10_r, 2);
@@ -682,9 +787,8 @@ begin
             -- shell seed (3-input XOR per bit, still one LUT).
             ----------------------------------------------------------------
             for i in 0 to NUM_LYRS-1 loop
-                s3a_h(i) <= (sx_acc(i)(23 downto 16) & sy_acc(i)(23 downto 16))
-                            xor SEEDS(i)
-                            xor (epoch4(i) & epoch4(i) & epoch4(i) & epoch4(i));
+                s3a_hx(i) <= sx_acc(i)(23 downto 16) xor SEEDS(i)(15 downto 8)
+                             xor (epoch4(i) & epoch4(i));
                 s3a_sub_x(i) <= sx_acc(i)(15 downto 12);
                 s3a_sub_y(i) <= sy_acc(i)(15 downto 12);
             end loop;
@@ -696,9 +800,9 @@ begin
                 -- x 0x9E37 mod 2^16 in canonical signed-digit form
                 -- (2^15 + 2^13 - 2^9 + 2^6 - 2^3 - 1): 5 adders instead of
                 -- the 9 yosys makes of the 10-set-bit constant (-384 LUT)
-                hash_tmp  := shift_left(s3a_h(i), 15) + shift_left(s3a_h(i), 13)
-                           - shift_left(s3a_h(i), 9)  + shift_left(s3a_h(i), 6)
-                           - shift_left(s3a_h(i), 3)  - s3a_h(i);
+                v_hx8     := shift_left(s3a_hx(i), 6) - shift_left(s3a_hx(i), 3)
+                           - s3a_hx(i) + y_hash(i)(15 downto 8);
+                hash_tmp  := v_hx8 & y_hash(i)(7 downto 0);
                 hash_tmp  := hash_tmp xor shift_right(hash_tmp, 5);
                 hash_tmp  := hash_tmp xor (hash_tmp(10 downto 0) & "00000");
                 s3_hash(i)  <= hash_tmp;
@@ -828,21 +932,24 @@ begin
             -- STAGE 4ax : |sub - offset| per axis with in-range kill
             ----------------------------------------------------------------
             for i in 0 to NUM_LYRS-1 loop
-                if s4a1_sub_x(i) >= s4a1_offset_x(i) then
-                    d4 := s4a1_sub_x(i) - s4a1_offset_x(i);
+                -- one signed subtract, then |d| <= 7 and |d| mod 8
+                d5 := signed('0' & s4a1_sub_x(i)) - signed('0' & s4a1_offset_x(i));
+                if d5(4) = '0' then
+                    inr_x := d5(3) = '0';
+                    s4ax_adx(i) <= unsigned(d5(2 downto 0));
                 else
-                    d4 := s4a1_offset_x(i) - s4a1_sub_x(i);
+                    inr_x := d5(3) = '1' and d5(2 downto 0) /= "000";
+                    s4ax_adx(i) <= unsigned(not d5(2 downto 0)) + 1;
                 end if;
-                inr_x := d4 <= to_unsigned(7, 4);
-                s4ax_adx(i) <= d4(2 downto 0);
 
-                if s4a1_sub_y(i) >= s4a1_offset_y(i) then
-                    d4 := s4a1_sub_y(i) - s4a1_offset_y(i);
+                d5 := signed('0' & s4a1_sub_y(i)) - signed('0' & s4a1_offset_y(i));
+                if d5(4) = '0' then
+                    inr_y := d5(3) = '0';
+                    s4ax_ady(i) <= unsigned(d5(2 downto 0));
                 else
-                    d4 := s4a1_offset_y(i) - s4a1_sub_y(i);
+                    inr_y := d5(3) = '1' and d5(2 downto 0) /= "000";
+                    s4ax_ady(i) <= unsigned(not d5(2 downto 0)) + 1;
                 end if;
-                inr_y := d4 <= to_unsigned(7, 4);
-                s4ax_ady(i) <= d4(2 downto 0);
 
                 if s4a1_active_hit(i) = '1' and inr_x and inr_y then
                     s4ax_hit(i) <= '1';
@@ -894,9 +1001,15 @@ begin
             ----------------------------------------------------------------
             -- STAGE 4e : per-shell envelope multiply (8x5, >> 4)
             ----------------------------------------------------------------
+            -- (env is 0..16: 16 is the only value with bit 4 set, and
+            -- passes w unchanged; the rest is an 8x4 multiply)
             for i in 0 to NUM_LYRS-1 loop
-                prod13 := s4k1_w(i) * s4k1_env(i);
-                s4e_w(i)  <= prod13(11 downto 4);
+                if s4k1_env(i)(4) = '1' then
+                    s4e_w(i) <= s4k1_w(i);
+                else
+                    prod12 := s4k1_w(i) * s4k1_env(i)(3 downto 0);
+                    s4e_w(i) <= prod12(11 downto 4);
+                end if;
                 s4e_ci(i) <= s4k1_ci(i);
             end loop;
 

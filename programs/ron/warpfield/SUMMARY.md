@@ -111,3 +111,33 @@ Identity fixed 2026-10-11 (Ron): `program_id` `com.lzxindustries.warpfield` →
 `com.ron.warpfield`, `author` "ron", url → bluecondition/videomancer-dev
 (TOML-only; vmprog repacked from the same bitstreams). Starfield got the
 same cell-edge kernel fix in its v3.1.0 pass.
+
+## Community port — fit for the stock SDK (v1.1.2, 2026-10-14)
+- The stock LZX SDK builds 8 configs, and its SD Standalone core is ~600 LC
+  larger than HD. v1.1.1 packed to 8190/7680 LC there (HD Dual 7902).
+- v1.1.2: six bit-exact changes.
+  1. **Serial multiplier.** The shared 13x13 multiplier is now serial (13
+     shift-add steps, started by `s_mgo` when a step writes `s_ma`/`s_mb`). The
+     vblank sequencer steps every 4th clock (256 steps = 1024 clocks, still long
+     before the first active line). Every product is read exactly 4 steps after
+     its operands are written, with no write in between.
+  2. **Line origins in EBR.** `x0` (6 x 24 FF, feeding nothing but the hsync
+     reload) lives in a 8 x 32 EBR. It is read back one shell per clock after
+     each hsync.
+  3. **Dropped no-op reload.** Tick 18's `s_mb <= k16(v_li)` reloaded the value
+     tick 14 had just written.
+  4. **Cheaper distance test.** `|sub - offset|` is one signed subtract plus a
+     conditional negate (it was two subtracts and a mux).
+  5. **Envelope multiply.** env is 0..16, and 16 passes w unchanged, so
+     the rest is an 8x4 multiply.
+  6. **Split star hash.** The hash input is (x cell, y cell), so
+     `(hx*256 + hy) * 0x9E37 mod 2^16 = ((hx*0x37 + Y_hi) mod 256) & Y_lo` with
+     `Y = hy * 0x9E37 mod 2^16`. Y is computed once per line per shell in the
+     hsync walk, which leaves an 8-bit multiply-add per pixel.
+- Proven bit-exact against v1.1.1: GHDL side-by-side, 40 frames (403 x 201
+  raster), knobs and switches changing mid-picture, 0 mismatches in 3.24 M clocks.
+- Packed LC (stock SDK): SD Standalone 8190 → 7502, HD Dual 7902 → 7219.
+  EBR 24 → 26 (HD Dual 27).
+- Tried and dropped (no gain): one shared write port for `sy_acc` (+90 LC: the
+  per-shell adders already absorb the seed mux), and `sy_acc` in EBR with a
+  per-line snapshot (-30 LC only: FF-only snapshot registers each take an LC).
