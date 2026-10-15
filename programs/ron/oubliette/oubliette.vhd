@@ -399,8 +399,22 @@ architecture oubliette of program_top is
     signal s_gensp : std_logic := '0';                       -- splash active
     signal s_glfsr : std_logic_vector(23 downto 0) := x"ACE159";
     signal s_gaddr : unsigned(11 downto 0) := (others => '0');
-    type t_rc is array (0 to C_NROOM - 1) of unsigned(5 downto 0);
-    signal s_rcx, s_rcy : t_rc := (others => (others => '0'));
+    -- room centres: an EBR (address = room) written by GN_RSET through a
+    -- registered write port.  Its read address runs one state AHEAD of the
+    -- state that uses the data (s_rc_ra below), so the generator keeps its
+    -- exact clock-by-clock schedule (the level LFSR steps every clock).
+    -- Corridor j's first centre (room j-1) is the previous corridor's second
+    -- one (s_bx/s_by), or room 0 (s_r0x/s_r0y) for the first corridor and
+    -- the spawn.
+    type t_rcram is array (0 to 255) of std_logic_vector(15 downto 0);
+    signal s_rcram : t_rcram := (others => (others => '0'));
+    signal s_rc_we : std_logic := '0';
+    signal s_rc_wa : unsigned(2 downto 0) := (others => '0');
+    signal s_rc_wd : std_logic_vector(15 downto 0) := (others => '0');
+    signal s_rc_ra : unsigned(2 downto 0);
+    signal s_rc_rd : std_logic_vector(15 downto 0);
+    signal s_rc_q  : std_logic_vector(15 downto 0);
+    signal s_r0x, s_r0y : unsigned(5 downto 0) := (others => '0');
     signal s_gi  : integer range 0 to C_NROOM := 0;          -- room/work index
     signal s_rx0, s_ry0, s_rx1, s_ry1 : unsigned(5 downto 0) := (others => '0');
     signal s_cx, s_cy : unsigned(5 downto 0) := (others => '0');  -- carve cursor
@@ -420,8 +434,8 @@ architecture oubliette of program_top is
     -- corridor carving reads each cell first: the first wall cell of a
     -- crossing becomes a door
     signal s_cvert, s_cw2, s_pw2 : std_logic := '0';
-    -- corridor: previous-room index as a register (no s_gi-1 adder in front
-    -- of the room-table mux); both centres latched, then ordered
+    -- corridor: s_gp is unused since the room-centre RAM (the first centre is
+    -- s_r0x/y or the previous s_bx/y); both centres latched, then ordered
     signal s_gp : integer range 0 to C_NROOM - 1 := 0;
     signal s_ax, s_bx, s_ay, s_by : unsigned(5 downto 0) := (others => '0');
     signal s_vlo, s_vhi : unsigned(5 downto 0) := (others => '0');
@@ -479,7 +493,21 @@ architecture oubliette of program_top is
                            others => (others => '0'));
     signal s_mtype : t_m3 := (0 => "000", 1 => "001", 2 => "010", 3 => "100",
                               others => "000");
-    signal s_mhp : t_m8 := (others => to_unsigned(10, 8));
+    -- monster HP: only the turn / combat FSMs use it, so it lives in an EBR
+    -- (slot = address) instead of 48 FFs with index muxes.  One registered
+    -- read port whose address is the turn FSM's slot in TS_MREQ (data used
+    -- in TS_MCALC) and otherwise the highest slot standing on (s_tx, s_ty)
+    -- (the same compare p_mmatch registers, so in TS_PSCAN the data is that
+    -- of the highest s_mmatch bit).  Writes (GN_MONW, CS_PHIT2) go through a
+    -- registered write port; no read is used within a clock of a write.
+    type t_mhpram is array (0 to 255) of std_logic_vector(7 downto 0);
+    signal s_mhpram : t_mhpram := (others => x"0A");
+    signal s_hpr_addr : unsigned(2 downto 0);
+    signal s_hpr_rd   : std_logic_vector(7 downto 0);
+    signal s_hpr_q    : std_logic_vector(7 downto 0);
+    signal s_hpw_we   : std_logic := '0';
+    signal s_hpw_addr : unsigned(2 downto 0) := (others => '0');
+    signal s_hpw_data : std_logic_vector(7 downto 0) := (others => '0');
     signal s_mactive : std_logic_vector(0 to C_MONS - 1) :=
         (0 => '1', 1 => '1', 2 => '1', 3 => '1', others => '0');
 
@@ -525,13 +553,21 @@ architecture oubliette of program_top is
     -- per RAM).  Collision-free in use: the render reads during active video,
     -- game reads/writes happen in vblank, and the one same-address case (a
     -- pickup clearing the cell just read) has no consumer for that read.
-    -- Takes effect because the read register (s_map_q) has an init value.
+    -- Honoured: the read is async + a plain FF (no init), merged into the EBR.
     attribute no_rw_check : boolean;
     attribute no_rw_check of s_map : signal is true;
+    attribute ram_style of s_mhpram : signal is "block";
+    attribute no_rw_check of s_mhpram : signal is true;
+    -- room-centre RAM: reads only matter in the states after all 8 rooms are
+    -- written (a read colliding with a room write is never used)
+    attribute ram_style of s_rcram : signal is "block";
+    attribute no_rw_check of s_rcram : signal is true;
 
     signal s_g_raddr : unsigned(2 * C_MAP_LOG2 - 1 downto 0) := (others => '0');
     -- shared registered map read output (render during active video, game in vblank)
-    signal s_map_q   : std_logic_vector(3 downto 0) := (others => '0');
+    signal s_map_ra  : unsigned(2 * C_MAP_LOG2 - 1 downto 0);
+    signal s_map_rd  : std_logic_vector(3 downto 0);
+    signal s_map_q   : std_logic_vector(3 downto 0);
     -- generator write port (driven by p_game, applied in p_gmap)
     signal s_mw_we   : std_logic := '0';
     signal s_mw_addr : unsigned(2 * C_MAP_LOG2 - 1 downto 0) := (others => '0');
@@ -585,7 +621,7 @@ architecture oubliette of program_top is
     signal s_bcd : t_bcd := C_BCD;
     attribute ram_style of s_bcd : signal is "block";
     signal s_bcd_addr : unsigned(9 downto 0) := (others => '0');
-    signal s_bcd_q    : std_logic_vector(11 downto 0) := (others => '0');
+    signal s_bcd_q    : std_logic_vector(11 downto 0);   -- EBR output register: no init
 
     --------------------------------------------------------------------------
     -- HUD character RAM (block RAM, 128 x 7 - address bit 6 selects the top
@@ -612,7 +648,7 @@ architecture oubliette of program_top is
     type t_hu is (HU_IDLE, HU_DLY, HU_FREQ, HU_FWAIT, HU_FLAT, HU_FDIG, HU_NAME,
                   HU_NDRAIN, HU_LINE, HU_DRAIN);
     signal s_hu_state : t_hu := HU_IDLE;
-    signal s_hu_dly   : unsigned(7 downto 0) := (others => '0');
+    signal s_hu_dly   : unsigned(2 downto 0) := (others => '0');   -- drain waits
     signal s_hu_f     : integer range 0 to C_NFLD - 1 := 0;     -- numeric field
     signal s_hu_w     : integer range 0 to 3 := 0;              -- its width
     signal s_hu_j     : integer range 0 to 3 := 0;              -- digit index
@@ -631,18 +667,20 @@ architecture oubliette of program_top is
     signal s_fw_we   : std_logic := '0';
     signal s_fw_addr : unsigned(5 downto 0) := (others => '0');
     signal s_fw_data : std_logic_vector(6 downto 0) := (others => '0');
-    signal s_fr_q    : std_logic_vector(6 downto 0) := (others => '0');
+    signal s_fr_rd   : std_logic_vector(6 downto 0);
+    signal s_fr_q    : std_logic_vector(6 downto 0);
     -- layout ROM (32 layouts x 64 columns)
     signal s_lrom : t_hudlay := C_HUDLAY;
     attribute ram_style of s_lrom : signal is "block";
     signal s_lr_addr : unsigned(10 downto 0) := (others => '0');
-    signal s_lr_q    : std_logic_vector(6 downto 0) := (others => '0');
+    signal s_lr_q    : std_logic_vector(6 downto 0);   -- EBR output register: no init
     -- line-stream pipeline: issue -> ROM -> fabric reg -> field RAM -> write
     signal s_p0_v, s_p1_v, s_p2_v, s_p3_v : std_logic := '0';
     -- name mode: the pipeline copies a ROM name glyph into the field RAM
     signal s_p0_n, s_p1_n, s_p2_n, s_p3_n : std_logic := '0';
-    type t_pc is array (0 to 3) of unsigned(6 downto 0);        -- line & col
-    signal s_pcol : t_pc := (others => (others => '0'));
+    -- (the stream's write addresses are counters: the line stream writes HUD
+    -- RAM 64..127 then 0..63 one per clock, the name copy writes field RAM
+    -- slots C_NAME_BASE.. one per clock, so no column carry chain is needed)
     signal s_p2_g, s_p3_g : std_logic_vector(6 downto 0) := (others => '0');
 
     --------------------------------------------------------------------------
@@ -758,7 +796,7 @@ architecture oubliette of program_top is
     signal s2_dx, s2_dy : signed(6 downto 0) := (others => '0');      -- cell - player
     signal s2_inb, s2_intgt, s2_render, s2_edge : std_logic := '0';
     -- S3
-    signal s3_sprrow : std_logic_vector(15 downto 0) := (others => '0');
+    signal s3_sprrow : std_logic_vector(15 downto 0);   -- EBR output register: no init
     signal s3_ehit : std_logic := '0';
     signal s3_eid  : integer range 0 to C_NSPR - 1 := 0;
     signal s3_tile : integer range 0 to C_NTILES - 1 := 0;
@@ -767,7 +805,7 @@ architecture oubliette of program_top is
     signal s3_adx, s3_ady : unsigned(3 downto 0) := (others => '0');
     signal s3_inb, s3_intgt, s3_render, s3_edge : std_logic := '0';
     -- S4
-    signal s4_row : std_logic_vector(15 downto 0) := (others => '0');
+    signal s4_row : std_logic_vector(15 downto 0);   -- EBR output register: no init
     signal s4_sprrow : std_logic_vector(15 downto 0) := (others => '0');
     signal s4_ehit : std_logic := '0';
     signal s4_eid  : integer range 0 to C_NSPR - 1 := 0;
@@ -782,7 +820,7 @@ architecture oubliette of program_top is
     -- S6 (palette ROM read: one EBR pair, registered output)
     signal s_pal : t_palrom := C_PALROM;
     attribute ram_style of s_pal : signal is "block";
-    signal s6_pal  : std_logic_vector(29 downto 0) := (others => '0');
+    signal s6_pal  : std_logic_vector(29 downto 0);   -- EBR output register: no init
     signal s6_sync : std_logic_vector(2 downto 0) := (others => '0');
     signal s6_av, s6_tint : std_logic := '0';
     -- S7 (fabric copy of the ROM word)
@@ -806,12 +844,12 @@ architecture oubliette of program_top is
     signal s_seen : t_seen := (others => '0');
     attribute ram_style of s_seen : signal is "block";
     attribute no_rw_check of s_seen : signal is true;
-    signal s_seen_q : std_logic := '0';
+    signal s_seen_rd : std_logic;
+    signal s_seen_q : std_logic;
     signal s_sv_we, s_sv_data : std_logic := '0';
     signal s_sv_addr : unsigned(11 downto 0) := (others => '0');
     type t_rv is (RV_IDLE, RV_DLY, RV_RUN);
     signal s_rv_state : t_rv := RV_IDLE;
-    signal s_rv_dly : unsigned(8 downto 0) := (others => '0');
     signal s_rv_dx, s_rv_dy : integer range -9 to 9 := 0;
     signal s_rv_rr : integer range 0 to 9 := 0;
     signal s_rva_v : std_logic := '0';
@@ -823,10 +861,11 @@ architecture oubliette of program_top is
     signal s0_hud_top : std_logic := '0';
     signal s0_hud_col : unsigned(5 downto 0) := (others => '0');
     signal s0_frow, s0_fcol : unsigned(2 downto 0) := (others => '0');
-    signal s1_glyph : unsigned(6 downto 0) := (others => '0');
+    signal s1_glyph_rd : std_logic_vector(6 downto 0);
+    signal s1_glyph : unsigned(6 downto 0);
     signal s1_hud_active : std_logic := '0';
     signal s1_frow, s1_fcol : unsigned(2 downto 0) := (others => '0');
-    signal s2_fontrow : std_logic_vector(7 downto 0) := (others => '0');
+    signal s2_fontrow : std_logic_vector(7 downto 0);   -- EBR output register: no init
     signal s2_hud_active : std_logic := '0';
     signal s2_fcol : unsigned(2 downto 0) := (others => '0');
     signal s3_fontrow : std_logic_vector(7 downto 0) := (others => '0');
@@ -839,6 +878,28 @@ architecture oubliette of program_top is
     -- source syncs only (field_n & vsync_n & hsync_n); avid is generated
     type t_syncp is array (0 to C_SYNCD) of std_logic_vector(2 downto 0);
     signal s_syncp : t_syncp := (others => (others => '0'));
+    -- The two pure delay lines run through EBR circular buffers instead of
+    -- FF chains (an FF fed by an FF costs a whole logic cell):
+    --  * the source syncs, data_in -> s8 (9 clocks): written every clock,
+    --    read 8 entries behind (+1 for the EBR output register);
+    --  * the finished y/u/v, s8 -> data_out (the old s_io + 2-stage IO pad,
+    --    3 clocks): read 2 entries behind.
+    -- Read and write addresses never meet, so no read-during-write logic.
+    type t_sdl is array (0 to 15) of std_logic_vector(3 downto 0);
+    signal s_sdl    : t_sdl := (others => (others => '0'));
+    signal s_sdl_wa : unsigned(3 downto 0) := to_unsigned(0, 4);
+    signal s_sdl_ra : unsigned(3 downto 0) := to_unsigned(8, 4);     -- wa - 8
+    signal s_sdl_q  : std_logic_vector(3 downto 0) := (others => '0');
+    type t_odl is array (0 to 15) of std_logic_vector(31 downto 0);
+    signal s_odl    : t_odl := (others => (others => '0'));
+    signal s_odl_wa : unsigned(3 downto 0) := to_unsigned(0, 4);
+    signal s_odl_ra : unsigned(3 downto 0) := to_unsigned(14, 4);    -- wa - 2
+    signal s_odl_rd : std_logic_vector(31 downto 0);
+    signal s_odl_q  : std_logic_vector(31 downto 0);
+    attribute ram_style of s_sdl : signal is "block";
+    attribute no_rw_check of s_sdl : signal is true;
+    attribute ram_style of s_odl : signal is "block";
+    attribute no_rw_check of s_odl : signal is true;
 
     signal s_io : t_video_stream_yuv444_30b;
 
@@ -927,7 +988,10 @@ begin
     -- changes have no step direction, so the camera simply jumps.
     --------------------------------------------------------------------------
     p_frame : process(clk)
-        variable v_t : integer range -4096 to 8191;
+        variable v_mx, v_my : signed(13 downto 0);
+        variable v_op       : signed(13 downto 0);
+        variable v_ci       : std_logic;
+        variable v_a15, v_b15, v_s15 : signed(14 downto 0);
     begin
         if rising_edge(clk) then
             if s_ftick = '1' then
@@ -980,26 +1044,23 @@ begin
             end if;
 
             if s_firstline = '1' then
-                -- target: scroll = px*cell + cell/2 - screen/2 (or map centre)
+                -- target: scroll = px*cell + cell/2 - screen/2 (or map centre);
+                -- px*cell + cell/2 = (2*px + 1) << (cl + 3): a bit placement
+                v_mx := (others => '0');
+                v_my := (others => '0');
                 if s_map_on = '1' then
-                    s_pscroll_x <= to_signed(512 - to_integer(s_measured_h) / 2, 14);
-                    s_pscroll_y <= to_signed(512 - to_integer(s_measured_v) / 2, 14);
+                    v_mx(9) := '1';                 -- 512
+                    v_my(9) := '1';
                 else
                     case s_cl is
-                        when "00"   => v_t := to_integer(s_px) * 16 + 8;
-                        when "01"   => v_t := to_integer(s_px) * 32 + 16;
-                        when "10"   => v_t := to_integer(s_px) * 64 + 32;
-                        when others => v_t := to_integer(s_px) * 128 + 64;
+                        when "00"   => v_mx(9 downto 3)  := signed(s_px & '1'); v_my(9 downto 3)  := signed(s_py & '1');
+                        when "01"   => v_mx(10 downto 4) := signed(s_px & '1'); v_my(10 downto 4) := signed(s_py & '1');
+                        when "10"   => v_mx(11 downto 5) := signed(s_px & '1'); v_my(11 downto 5) := signed(s_py & '1');
+                        when others => v_mx(12 downto 6) := signed(s_px & '1'); v_my(12 downto 6) := signed(s_py & '1');
                     end case;
-                    s_pscroll_x <= to_signed(v_t - to_integer(s_measured_h) / 2, 14);
-                    case s_cl is
-                        when "00"   => v_t := to_integer(s_py) * 16 + 8;
-                        when "01"   => v_t := to_integer(s_py) * 32 + 16;
-                        when "10"   => v_t := to_integer(s_py) * 64 + 32;
-                        when others => v_t := to_integer(s_py) * 128 + 64;
-                    end case;
-                    s_pscroll_y <= to_signed(v_t - to_integer(s_measured_v) / 2, 14);
                 end if;
+                s_pscroll_x <= v_mx - signed(resize(s_measured_h(11 downto 1), 14));
+                s_pscroll_y <= v_my - signed(resize(s_measured_v(11 downto 1), 14));
                 s_hud_y0 <= s_measured_v - (C_HUD_H + C_HUD_MARG);
                 s_hud_y1 <= s_measured_v - C_HUD_MARG;
                 s_logo_y0 <= ('0' & s_measured_v(11 downto 1)) - 220;
@@ -1038,16 +1099,28 @@ begin
 
             -- camera = target - (player step) * glide; stable through active
             -- video (target, glide and step only change in vblank)
+            -- one adder per axis: target + (step "01": -mgf = not mgf + 1,
+            -- "11": +mgf, else 0); the carry-in rides an extra low bit
+            v_op := signed(resize(s_mgf, 14)); v_ci := '0';
             case s_pdx is
-                when "01"   => s_scroll_x <= s_pscroll_x - signed(resize(s_mgf, 14));
-                when "11"   => s_scroll_x <= s_pscroll_x + signed(resize(s_mgf, 14));
-                when others => s_scroll_x <= s_pscroll_x;
+                when "01"   => v_op := not v_op; v_ci := '1';
+                when "11"   => null;
+                when others => v_op := (others => '0');
             end case;
+            v_a15 := s_pscroll_x & '1';
+            v_b15 := v_op & v_ci;
+            v_s15 := v_a15 + v_b15;
+            s_scroll_x <= v_s15(14 downto 1);
+            v_op := signed(resize(s_mgf, 14)); v_ci := '0';
             case s_pdy is
-                when "01"   => s_scroll_y <= s_pscroll_y - signed(resize(s_mgf, 14));
-                when "11"   => s_scroll_y <= s_pscroll_y + signed(resize(s_mgf, 14));
-                when others => s_scroll_y <= s_pscroll_y;
+                when "01"   => v_op := not v_op; v_ci := '1';
+                when "11"   => null;
+                when others => v_op := (others => '0');
             end case;
+            v_a15 := s_pscroll_y & '1';
+            v_b15 := v_op & v_ci;
+            v_s15 := v_a15 + v_b15;
+            s_scroll_y <= v_s15(14 downto 1);
             if (s_pdx /= "00" or s_pdy /= "00") and s_mgf /= 0 then
                 s_moving <= '1';
             else
@@ -1145,17 +1218,15 @@ begin
     -- The select is the render-valid flag at the same stage as s1_addr (the
     -- raw source avid ended 2 clocks early: the last 2 columns read the
     -- game address).
+    s_map_ra <= s1_addr when s1_render = '1' else s_g_raddr;   -- render / game read
+    s_map_rd <= s_map(to_integer(s_map_ra));
     p_mapport : process(clk)
-        variable v_raddr : unsigned(2 * C_MAP_LOG2 - 1 downto 0);
     begin
         if rising_edge(clk) then
             if s_mw_we = '1' then
                 s_map(to_integer(s_mw_addr)) <= s_mw_data;
             end if;
-            if s1_render = '1' then v_raddr := s1_addr;          -- render read
-            else                        v_raddr := s_g_raddr;    -- game-logic read
-            end if;
-            s_map_q <= s_map(to_integer(v_raddr));
+            s_map_q <= s_map_rd;
         end if;
     end process;
 
@@ -1181,6 +1252,65 @@ begin
                     s_mmatch(j) <= '0';
                 end if;
             end loop;
+        end if;
+    end process;
+
+    -- monster HP RAM read address: the turn FSM's slot in TS_MREQ, else the
+    -- highest slot matching (s_tx, s_ty) this clock (= s_mmatch next clock)
+    p_hpraddr : process(all)
+        variable v_a : unsigned(2 downto 0);
+    begin
+        v_a := (others => '0');
+        for j in 0 to C_MONS - 1 loop
+            if s_mactive(j) = '1' and s_mx(j) = s_tx and s_my(j) = s_ty then
+                v_a := to_unsigned(j, 3);
+            end if;
+        end loop;
+        if s_ts = TS_MREQ then
+            v_a := to_unsigned(s_mi, 3);
+        end if;
+        s_hpr_addr <= v_a;
+    end process;
+
+    -- room-centre RAM.  The read address is the room the NEXT state reads:
+    --   RCARVE -> CORR (room 1)      CWR -> CORR (room s_gi+1) / PLACE (room 1)
+    --   PLACE  -> PLACE (rooms 2, 7) / MON (room 3)
+    --   MONW   -> MON (room s_gr+1, which stays 7 once reached)
+    p_rcraddr : process(all)
+    begin
+        case s_gst is
+            when GN_RCARVE => s_rc_ra <= to_unsigned(1, 3);
+            when GN_CWR =>
+                if s_gi = C_NROOM - 1 then s_rc_ra <= to_unsigned(1, 3);
+                else s_rc_ra <= to_unsigned(s_gi + 1, 3); end if;
+            when GN_PLACE =>
+                if s_gi = 0 then    s_rc_ra <= to_unsigned(2, 3);
+                elsif s_gi = 1 then s_rc_ra <= to_unsigned(C_NROOM - 1, 3);
+                else                s_rc_ra <= to_unsigned(3, 3); end if;
+            when others =>          -- GN_MONW
+                if s_gr = C_NROOM - 1 then s_rc_ra <= to_unsigned(C_NROOM - 1, 3);
+                else s_rc_ra <= to_unsigned(s_gr + 1, 3); end if;
+        end case;
+    end process;
+    s_rc_rd <= s_rcram(to_integer(s_rc_ra));
+    p_rcram : process(clk)
+    begin
+        if rising_edge(clk) then
+            if s_rc_we = '1' then
+                s_rcram(to_integer(s_rc_wa)) <= s_rc_wd;
+            end if;
+            s_rc_q <= s_rc_rd;
+        end if;
+    end process;
+
+    s_hpr_rd <= s_mhpram(to_integer(s_hpr_addr));
+    p_mhpram : process(clk)
+    begin
+        if rising_edge(clk) then
+            if s_hpw_we = '1' then
+                s_mhpram(to_integer(s_hpw_addr)) <= s_hpw_data;
+            end if;
+            s_hpr_q <= s_hpr_rd;
         end if;
     end process;
 
@@ -1256,6 +1386,8 @@ begin
             if s_sw_new  /= s_new_prev  then v_newedge := '1'; end if;
             if s_sw_use  /= s_use_prev  then v_uedge := '1'; end if;
             s_mw_we <= '0';   -- pulse high only when a generator state writes
+            s_hpw_we <= '0';
+            s_rc_we  <= '0';
             s_mg_start <= '0';
             -- an S7 / S9 flip is held pending and acted on at the next field
             -- tick, so every action resolves inside vertical blank (no
@@ -1430,8 +1562,14 @@ begin
                                 -- far corner and centre
                                 s_rx1 <= s_rx0 + s_rwm1;
                                 s_ry1 <= s_ry0 + s_rhm1;
-                                s_rcx(s_gi) <= s_rx0 + resize(s_rw(3 downto 1), 6);
-                                s_rcy(s_gi) <= s_ry0 + resize(s_rh(3 downto 1), 6);
+                                s_rc_we <= '1';
+                                s_rc_wa <= to_unsigned(s_gi, 3);
+                                s_rc_wd <= "0000" & std_logic_vector(s_ry0 + resize(s_rh(3 downto 1), 6))
+                                                  & std_logic_vector(s_rx0 + resize(s_rw(3 downto 1), 6));
+                                if s_gi = 0 then
+                                    s_r0x <= s_rx0 + resize(s_rw(3 downto 1), 6);
+                                    s_r0y <= s_ry0 + resize(s_rh(3 downto 1), 6);
+                                end if;
                                 s_rix0 <= s_rx0 + 2;
                                 s_riy0 <= s_ry0 + 2;
                                 s_rix1 <= s_rx0 + s_rwm3;
@@ -1482,8 +1620,15 @@ begin
                                 end if;
                             when GN_CORR =>
                                 -- latch both centres (previous room s_gp, this room s_gi)
-                                s_ax <= s_rcx(s_gp); s_ay <= s_rcy(s_gp);
-                                s_bx <= s_rcx(s_gi); s_by <= s_rcy(s_gi);
+                                -- room s_gp = s_gi - 1: room 0, or the previous
+                                -- corridor's second room; room s_gi from the RAM
+                                if s_gi = 1 then
+                                    s_ax <= s_r0x; s_ay <= s_r0y;
+                                else
+                                    s_ax <= s_bx;  s_ay <= s_by;
+                                end if;
+                                s_bx <= unsigned(s_rc_q(5 downto 0));
+                                s_by <= unsigned(s_rc_q(11 downto 6));
                                 s_gst <= GN_CORR2;
                             when GN_CORR2 =>
                                 -- horizontal run at the previous room's row, between
@@ -1553,9 +1698,9 @@ begin
                                 -- room centres coincide the item is lost, never the exit.
                                 case s_gi is
                                     when 0 =>
-                                        s_px <= s_rcx(0);
-                                        s_py <= s_rcy(0);
-                                        s_mw_addr <= s_rcy(1) & s_rcx(1);
+                                        s_px <= s_r0x;                     -- room 0
+                                        s_py <= s_r0y;
+                                        s_mw_addr <= unsigned(s_rc_q(11 downto 0));  -- room 1
                                         if s_depth(0) = '1' then
                                             s_mw_data <= std_logic_vector(to_unsigned(C_T_WEAPON, 4));
                                         else
@@ -1564,19 +1709,19 @@ begin
                                         s_mw_we   <= '1';
                                         s_gi <= 1;
                                     when 1 =>
-                                        s_mw_addr <= s_rcy(2) & s_rcx(2);
+                                        s_mw_addr <= unsigned(s_rc_q(11 downto 0));  -- room 2
                                         s_mw_data <= std_logic_vector(to_unsigned(C_T_CHEST, 4));
                                         s_mw_we   <= '1';
                                         s_gi <= 2;
                                     when others =>
-                                        s_mw_addr <= s_rcy(C_NROOM - 1) & s_rcx(C_NROOM - 1);
+                                        s_mw_addr <= unsigned(s_rc_q(11 downto 0));  -- room 7
                                         s_mw_data <= std_logic_vector(to_unsigned(C_T_STAIRS, 4));
                                         if s_depth /= 7 then s_mw_we <= '1'; end if;
                                         -- the stairs room's guard stands one cell west
                                         -- of the stairs, not on them (room width >= 5
                                         -- and that room is carved last, so the cell is
                                         -- its own interior)
-                                        s_gx_guard <= s_rcx(C_NROOM - 1) - 1;
+                                        s_gx_guard <= unsigned(s_rc_q(5 downto 0)) - 1;
                                         s_gi <= 0;
                                         s_gr <= 3;
                                         s_gst <= GN_MON;
@@ -1586,18 +1731,19 @@ begin
                                 -- 0..2 stay clear), one per room, count via the mask
                                 -- from start_gen; type from the depth table.  Slot 5
                                 -- is the dragon, on the depth-7 stairs cell.
+                                -- s_rc_q = room s_gr (and s_gr = 7 for slot 5)
                                 if s_gi = C_MONS - 1 then
                                     s_nm_t <= to_unsigned(C_BOSS, 3);
-                                    s_nm_x <= s_rcx(C_NROOM - 1);
+                                    s_nm_x <= unsigned(s_rc_q(5 downto 0));
                                 else
                                     s_nm_t <= to_unsigned(mon_pool(s_depth, s_glfsr(1 downto 0)), 3);
                                     if s_gr = C_NROOM - 1 then
                                         s_nm_x <= s_gx_guard;
                                     else
-                                        s_nm_x <= s_rcx(s_gr);
+                                        s_nm_x <= unsigned(s_rc_q(5 downto 0));
                                     end if;
                                 end if;
-                                s_nm_y <= s_rcy(s_gr);
+                                s_nm_y <= unsigned(s_rc_q(11 downto 6));
                                 -- slot select resolved here (one-hot + enable), so
                                 -- GN_MONW's table writes carry no index decode
                                 s_nm_en <= s_mon_en(s_gi);
@@ -1620,9 +1766,12 @@ begin
                                         s_mx(j)    <= s_nm_x;
                                         s_my(j)    <= s_nm_y;
                                         s_mtype(j) <= s_nm_t;
-                                        s_mhp(j)   <= s_nm_hp;
+
                                     end if;
                                 end loop;
+                                s_hpw_we   <= '1';                  -- s_nm_oh = slot s_gi
+                                s_hpw_addr <= to_unsigned(s_gi, 3);
+                                s_hpw_data <= std_logic_vector(s_nm_hp);
                                 if s_gi = C_MONS - 1 then
                                     s_gst <= GN_DONE;
                                 else
@@ -1683,7 +1832,7 @@ begin
                                         v_occ := '1';
                                         s_ctarget <= j;
                                         s_cmt  <= s_mtype(j);
-                                        s_cmhp <= s_mhp(j);
+                                        s_cmhp <= unsigned(s_hpr_q);   -- highest match
                                     end if;
                                 end loop;
                                 if v_occ = '1' then
@@ -1802,7 +1951,6 @@ begin
                                     s_sel_mx <= s_mx(s_mi);
                                     s_sel_my <= s_my(s_mi);
                                     s_sel_mt <= s_mtype(s_mi);
-                                    s_sel_mhp <= s_mhp(s_mi);
                                     s_wdir  <= s_clfsr(1 downto 0);
                                     s_wmove <= s_clfsr(2);
                                     s_ts <= TS_MCALC;
@@ -1813,6 +1961,7 @@ begin
                                 myi := to_integer(s_sel_my);
                                 pxi := to_integer(s_px); pyi := to_integer(s_py);
                                 ddx := pxi - mxi; ddy := pyi - myi;
+                                s_sel_mhp <= unsigned(s_hpr_q);   -- slot s_mi, read in TS_MREQ
                                 if ddx < 0 then s_adx <= -ddx; else s_adx <= ddx; end if;
                                 if ddy < 0 then s_ady <= -ddy; else s_ady <= ddy; end if;
                                 if ddx > 0 then s_ddxp <= '1'; else s_ddxp <= '0'; end if;
@@ -2052,11 +2201,15 @@ begin
                                     s_hitflash <= "110";           -- monster flashes white
                                     if s_mhd <= 0 then
                                         s_cmhp <= (others => '0');
-                                        s_mhp(s_ctarget) <= (others => '0');
+                                        s_hpw_we   <= '1';
+                                        s_hpw_addr <= to_unsigned(s_ctarget, 3);
+                                        s_hpw_data <= (others => '0');
                                         s_mon_dead <= '1';
                                     else
                                         s_cmhp <= to_unsigned(s_mhd, 8);
-                                        s_mhp(s_ctarget) <= to_unsigned(s_mhd, 8);
+                                        s_hpw_we   <= '1';
+                                        s_hpw_addr <= to_unsigned(s_ctarget, 3);
+                                        s_hpw_data <= std_logic_vector(to_unsigned(s_mhd, 8));
                                     end if;
                                 end if;
                                 s_cs <= CS_POUT;
@@ -2179,6 +2332,7 @@ begin
         end if;
     end process;
 
+    s_fr_rd <= s_fram(to_integer(unsigned(s_p2_g(5 downto 0))));
     p_hudmem : process(clk)
     begin
         if rising_edge(clk) then
@@ -2186,7 +2340,7 @@ begin
             if s_fw_we = '1' then
                 s_fram(to_integer(s_fw_addr)) <= s_fw_data;
             end if;
-            s_fr_q <= s_fram(to_integer(unsigned(s_p2_g(5 downto 0))));
+            s_fr_q <= s_fr_rd;
         end if;
     end process;
 
@@ -2211,13 +2365,15 @@ begin
             s_p1_n <= s_p0_n;
             s_p2_n <= s_p1_n;
             s_p3_n <= s_p2_n;
-            s_pcol(1) <= s_pcol(0);
-            s_pcol(2) <= s_pcol(1);
-            s_pcol(3) <= s_pcol(2);
             s_p2_g <= s_lr_q;
             s_p3_g <= s_p2_g;
             s_hr_we    <= s_p3_v and not s_p3_n;
-            s_hr_waddr <= s_pcol(3);
+            -- HUD RAM write address: 64 at the stream start, +1 per write
+            if s_hu_state = HU_NDRAIN then
+                s_hr_waddr <= to_unsigned(64, 7);
+            elsif s_hr_we = '1' then
+                s_hr_waddr <= s_hr_waddr + 1;
+            end if;
             if s_p3_g(6) = '1' then
                 s_hr_wdata <= s_fr_q;
             else
@@ -2227,12 +2383,11 @@ begin
             case s_hu_state is
                 when HU_IDLE =>
                     if s_ftick = '1' then
-                        s_hu_dly <= (others => '0');
                         s_hu_state <= HU_DLY;
                     end if;
                 when HU_DLY =>
-                    s_hu_dly <= s_hu_dly + 1;
-                    if s_hu_dly = 255 then
+                    -- s_ecnt restarted on the same tick: 256 clocks
+                    if s_ecnt = 255 then
                         s_hu_f <= 0;
                         case s_game is
                             when G_CREATE   => s_hu_ltop <= L_CREATE;
@@ -2339,7 +2494,6 @@ begin
                     end case;
                     s_p0_v    <= '1';
                     s_p0_n    <= '1';
-                    s_pcol(0) <= '0' & to_unsigned(C_NAME_BASE + s_hu_n, 6);
                     if s_hu_n = C_NNAME - 1 then
                         s_hu_dly <= (others => '0');
                         s_hu_state <= HU_NDRAIN;
@@ -2362,7 +2516,6 @@ begin
                         s_lr_addr <= to_unsigned(L_BAR, 5) & s_hu_col;
                     end if;
                     s_p0_v    <= '1';
-                    s_pcol(0) <= s_hu_line & s_hu_col;
                     if s_hu_col = 63 then              -- all 64 (logo: 48-56)
                         s_hu_col <= (others => '0');
                         if s_hu_line = '1' then
@@ -2385,7 +2538,8 @@ begin
             -- name mode, stage 2: the fabric copy of the ROM glyph -> field RAM
             if s_p2_v = '1' and s_p2_n = '1' then
                 s_fw_we   <= '1';
-                s_fw_addr <= s_pcol(2)(5 downto 0);
+                s_fw_addr <= s_hu_k;               -- C_NAME_BASE + n (set at HU_FDIG's end)
+                s_hu_k    <= s_hu_k + 1;
                 s_fw_data <= s_p2_g;
             end if;
         end if;
@@ -2396,13 +2550,14 @@ begin
     -- (render, addr = top-flag & column).  A block RAM, so the render-side
     -- glyph fetch is a clean registered read with no wide mux.
     --------------------------------------------------------------------------
+    s1_glyph_rd <= s_hudram(to_integer(unsigned'(s0_hud_top & s0_hud_col)));
     p_hudram : process(clk)
     begin
         if rising_edge(clk) then
             if s_hr_we = '1' then
                 s_hudram(to_integer(s_hr_waddr)) <= s_hr_wdata;
             end if;
-            s1_glyph <= unsigned(s_hudram(to_integer(s0_hud_top & s0_hud_col)));
+            s1_glyph <= unsigned(s1_glyph_rd);
         end if;
     end process;
 
@@ -2413,10 +2568,12 @@ begin
     p_sync : process(clk)
     begin
         if rising_edge(clk) then
-            s_syncp(0) <= data_in.field_n & data_in.vsync_n & data_in.hsync_n;
-            for k in 1 to C_SYNCD loop
-                s_syncp(k) <= s_syncp(k - 1);
-            end loop;
+            -- s_sdl_q = the syncs data_in carried 9 clocks ago (the old
+            -- s_syncp(0..4) -> s5..s8_sync chain, '0' before that)
+            s_sdl(to_integer(s_sdl_wa)) <= '0' & data_in.field_n & data_in.vsync_n & data_in.hsync_n;
+            s_sdl_q  <= s_sdl(to_integer(s_sdl_ra));
+            s_sdl_wa <= s_sdl_wa + 1;
+            s_sdl_ra <= s_sdl_ra + 1;
         end if;
     end process;
 
@@ -2923,7 +3080,6 @@ begin
                 s5_pa <= to_unsigned(C_PA_VOID, 7);   -- unexplored
             end if;
 
-            s5_sync <= s_syncp(C_SYNCD);
             s5_av   <= s4_render;
         end if;
     end process;
@@ -2936,7 +3092,6 @@ begin
     begin
         if rising_edge(clk) then
             s6_pal  <= s_pal(to_integer(s5_pa));
-            s6_sync <= s5_sync;
             s6_av   <= s5_av;
             s6_tint <= s5_tint;
         end if;
@@ -2951,7 +3106,6 @@ begin
             s7_y    <= unsigned(s6_pal(29 downto 20));
             s7_u    <= unsigned(s6_pal(19 downto 10));
             s7_v    <= unsigned(s6_pal(9 downto 0));
-            s7_sync <= s6_sync;
             s7_av   <= s6_av;
             s7_tint <= s6_tint;
         end if;
@@ -2989,7 +3143,6 @@ begin
                 s8_u <= s7_u;
                 s8_v <= s7_v;
             end if;
-            s8_sync <= s7_sync;
             s8_av   <= s7_av;
         end if;
     end process;
@@ -2999,13 +3152,14 @@ begin
     -- port fed by the level clear (mirrors the generator's GN_CLEAR sweep with
     -- '0') or the reveal sweep ('1').  Writes happen in vertical blank only.
     --------------------------------------------------------------------------
+    s_seen_rd <= s_seen(to_integer(s1_addr));
     p_seenram : process(clk)
     begin
         if rising_edge(clk) then
             if s_sv_we = '1' then
                 s_seen(to_integer(s_sv_addr)) <= s_sv_data;
             end if;
-            s_seen_q <= s_seen(to_integer(s1_addr));
+            s_seen_q <= s_seen_rd;
         end if;
     end process;
 
@@ -3035,12 +3189,11 @@ begin
             case s_rv_state is
                 when RV_IDLE =>
                     if s_ftick = '1' then
-                        s_rv_dly <= (others => '0');
                         s_rv_state <= RV_DLY;
                     end if;
                 when RV_DLY =>
-                    s_rv_dly <= s_rv_dly + 1;
-                    if s_rv_dly = 300 then
+                    -- s_ecnt restarted on the same tick: 301 clocks
+                    if s_ecnt = 300 then
                         if s_game = G_GEN then
                             s_rv_state <= RV_IDLE;
                         else
@@ -3073,22 +3226,26 @@ begin
     --------------------------------------------------------------------------
     -- Output registers.
     --------------------------------------------------------------------------
+    s_odl_rd <= s_odl(to_integer(s_odl_ra));
     p_io : process(clk)
     begin
         if rising_edge(clk) then
-            s_io.y       <= std_logic_vector(s8_y);
-            s_io.u       <= std_logic_vector(s8_u);
-            s_io.v       <= std_logic_vector(s8_v);
-            s_io.hsync_n <= s8_sync(0);
-            s_io.vsync_n <= s8_sync(1);
-            s_io.field_n <= s8_sync(2);
+            s_io.hsync_n <= s_sdl_q(0);
+            s_io.vsync_n <= s_sdl_q(1);
+            s_io.field_n <= s_sdl_q(2);
+            -- y/u/v: s8 -> data_out 3 clocks later (old s_io + IO pad)
+            s_odl(to_integer(s_odl_wa)) <= std_logic_vector(s8_y) & std_logic_vector(s8_u)
+                                           & std_logic_vector(s8_v) & "00";
+            s_odl_q  <= s_odl_rd;
+            s_odl_wa <= s_odl_wa + 1;
+            s_odl_ra <= s_odl_ra + 1;
             s_io.avid    <= s8_av;            -- generated avid, pixel-aligned
         end if;
     end process;
 
-    s_io_align_in.y       <= s_io.y;
-    s_io_align_in.u       <= s_io.u;
-    s_io_align_in.v       <= s_io.v;
+    s_io_align_in.y       <= (others => '0');   -- y/u/v ride s_odl
+    s_io_align_in.u       <= (others => '0');
+    s_io_align_in.v       <= (others => '0');
     s_io_align_in.hsync_n <= s_io.hsync_n;
     s_io_align_in.vsync_n <= s_io.vsync_n;
     s_io_align_in.avid    <= s_io.avid;
@@ -3106,6 +3263,12 @@ begin
         end if;
     end process p_io_align_pad;
 
-    data_out <= s_io_align_pad(1);
+    data_out.hsync_n <= s_io_align_pad(1).hsync_n;
+    data_out.vsync_n <= s_io_align_pad(1).vsync_n;
+    data_out.field_n <= s_io_align_pad(1).field_n;
+    data_out.avid    <= s_io_align_pad(1).avid;
+    data_out.y       <= s_odl_q(31 downto 22);
+    data_out.u       <= s_odl_q(21 downto 12);
+    data_out.v       <= s_odl_q(11 downto 2);
 
 end architecture oubliette;

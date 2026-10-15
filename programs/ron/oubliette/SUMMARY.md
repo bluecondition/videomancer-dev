@@ -344,3 +344,86 @@ v0.2.0 (2026-10-10), router1, all six configs pass on **seed 1**:
 
 RAMs 12/32, ~65% LC.
 v0.1.0 (2026-07-03, router2): HD 78.5–81.8, SD 82–85, ~4800 LC.
+
+## Community port — fit for the stock SDK (v1.0.2, 2026-10-15)
+- The stock LZX SDK builds 8 configs; its SD Standalone core is ~600 LC larger
+  than HD. v1.0.1 packed to 7873/7680 LC there (SD Dual 7325, HD Dual 7290).
+- v1.0.2, bit-exact changes (packed SD Standalone LC saved, measured step by step):
+  1. **Room centres in an EBR (−317).** The level generator kept the 8 room
+     centres in 96 FFs read through three 8:1 index muxes. They now live in a
+     small EBR written by GN_RSET through a registered port; its read address
+     runs one state AHEAD of the state that uses the data (RCARVE/CWR → CORR,
+     PLACE → PLACE/MON, MONW → MON), so the generator keeps its exact clock
+     schedule (the level LFSR steps every clock: same dungeons). Corridor j's
+     first end, room j−1, is the previous corridor's second end (s_bx/s_by),
+     or room 0 (a 12-bit copy) for the first corridor and the spawn.
+  2. **Monster HP in an EBR (−81).** s_mhp (48 FFs + index muxes) was only
+     used by the turn/combat FSMs. Read address = the turn FSM's slot in
+     TS_MREQ (data latched in TS_MCALC; s_sel_mhp is only read in TS_MBUMP),
+     otherwise the highest slot standing on (s_tx, s_ty), i.e. the same
+     compare s_mmatch registers, so in TS_PSCAN the data belongs to the
+     highest s_mmatch bit as before. Spawn and hit writes go through a
+     registered port.
+  3. **Delay lines in EBR (−30).** The source syncs (data_in → S8, 9 clocks)
+     and the finished y/u/v (S8 → data_out: the old s_io + 2-stage IO pad,
+     3 clocks) ride 16-deep EBR circular buffers (read 8 / 2 entries behind
+     the write) instead of FF chains. Latency unchanged (12). avid and the
+     syncs' last 3 stages stay FFs, so start-up values match too.
+  4. **No init value on EBR read registers (−40).** An init value on a
+     RAM/ROM output register makes yosys emulate it with one LUT per bit.
+     ROM outputs (palette, tile, sprite, font, BCD, HUD layout) drop the
+     init; RAM reads (tilemap, seen, HUD char, field, HP, delay) become an
+     async read + a plain FF. yosys merges that FF into the EBR, honours
+     no_rw_check and adds no emulation (0 `emulate_transparency`). Only the
+     first clock after configuration differs, and it is never shown.
+  5. **Camera, HUD stream and tick waits (−138).**
+     - Camera target px*cell + cell/2 = (2px+1) << (cl+3): a bit placement and
+       one subtract, instead of a 4-way integer multiply/add + subtract.
+     - Eased scroll = target ∓ glide as ONE adder per axis (−mgf = not mgf
+       plus a carry-in riding an extra low bit), not two adders + a 3:1 mux.
+     - The HUD stream's write addresses are counters: the line stream writes
+       HUD RAM 64..127 then 0..63 one per clock, and the name copy writes
+       field RAM slots C_NAME_BASE.. one per clock. The 4 × 7-bit s_pcol
+       carry chain is gone.
+     - The HUD's 256-clock wait and the reveal sweep's 301-clock wait after
+       the field tick read the glide counter s_ecnt (restarted on the same
+       tick) instead of their own 8- and 9-bit counters.
+- Packed LC (stock SDK): SD Standalone 7873 → 7267, SD Dual 7325 → 6723,
+  HD Dual 7290 → 6661. EBR 20 → 25 (Dual configs 21 → 26).
+- 0 `SB_CARRY I0==I1` and 0 duplicate-input LUTs (tools/dupin.py) in all 8
+  configs.
+- Proven bit-exact against v1.0.1. GHDL side-by-side compare of the syncs/avid
+  every clock and y/u/v while avid is high. With probe taps on the sim copies,
+  ~70 internal game signals are also compared every clock: player, stats,
+  monster table, map / HUD / seen / field RAM write ports, level LFSR, glide,
+  scroll in active video. All runs: 0 mismatches, 0 internal differences.
+  - Stock testbench, 403 × 201, 40 frames: 3.24 M clocks.
+  - A game-playing bot testbench. It BFS-paths to monsters, stairs or the
+    dragon and plays random actions, potions, flee, map, zoom, torch and
+    themes. It also starts new games, updates controls mid-picture and in
+    blanking, jitters avid and toggles field_n. Runs:
+    - 203 × 101, 600 frames (depths 1–6, fights, kills, level-ups, flee,
+      death);
+    - 800 frames, flee-biased (re-encounters after fleeing);
+    - 1200 frames, deep dive (depths 1–6);
+    - 403 × 201, 150 frames;
+    - 1003 × 201, 60 frames (level generation inside vertical blank);
+    - 1700 × 480, 8 frames (full HUD, HP bar, title logo).
+  - Mutation tests, all caught: room read-ahead, output delay, sync delay,
+    scroll carry-in, HUD write address, HP read, HP spawn write, and HP
+    hit write-back (with the flee-biased bot). The reveal-wait off-by-one
+    shows only internally (the picture is unchanged).
+- **Build seed (stock LZX flow): `[firmware] seed = 5`.** Builds all 8 (no
+  router stall); own HD timing (core without Sync Out) is 77.3/75.9/78.8 MHz
+  Analog/HDMI/Dual (reproduced twice). Seed 2 also passes (80.1/75.1/74.6).
+  Seeds 1, 3, 4, 6, 7 and 8 build 8/8 but miss own HD on one config. The
+  misses are routing-bound vblank-FSM enable cones (s_gst/s_ts → monster
+  table / s_sel_* clock enables) and p_ent's entity priority chain. These
+  are the same paths v1.0.1 had (dev: HD Dual passed only on seed 2), with
+  a 67–81 MHz spread by seed.
+- Not done (Ron's call): `program_type = "synthesis"` (it reads no input).
+  It would drop the remaining latency pad: the sync/avid FF stages and the
+  y/u/v delay EBRs.
+
+- **Stock build seed: 5** (`[firmware] seed = 5` in oubliette.toml). Every seed 1-8 builds all 8 configs with no router stall, but only seeds 5 and 2 close the program's own HD timing; seed 5 gives 77.3 / 75.9 / 78.8 MHz (analog / HDMI / dual).
+- **HW check wanted:** colours (the 30-bit output delay is now an EBR ring, mapped 16+14 exactly like inferno's and warpfield's HW-validated delays), dungeon generation and the HUD.
