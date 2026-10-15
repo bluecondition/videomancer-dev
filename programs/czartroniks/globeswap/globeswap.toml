@@ -24,7 +24,7 @@ name_label = "Lens"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 800
+initial_value = 444
 display_float_digits = 1
 suffix_label = "%"
 
@@ -34,7 +34,7 @@ name_label = "Size"
 control_mode = "linear"
 display_min_value = 3
 display_max_value = 146
-initial_value = 600
+initial_value = 0
 display_float_digits = 0
 suffix_label = "%"
 
@@ -42,7 +42,7 @@ suffix_label = "%"
 parameter_id = "rotary_potentiometer_3"
 name_label = "Swap"
 value_labels = ["None", "U<>V", "Y>U", "U>Y", "Y<>V", "Rotate", "-Y", "-YUV"]
-initial_value_label = "U<>V"
+initial_value_label = "Y<>V"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
@@ -50,7 +50,7 @@ name_label = "Offset"
 control_mode = "linear"
 display_min_value = -256
 display_max_value = 256
-initial_value = 640
+initial_value = 652
 display_float_digits = 0
 suffix_label = "px"
 
@@ -60,7 +60,7 @@ name_label = "Solar"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 640
+initial_value = 797
 display_float_digits = 1
 suffix_label = "%"
 
@@ -70,7 +70,7 @@ name_label = "Fold"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 0
 display_float_digits = 1
 suffix_label = "%"
 
@@ -78,7 +78,7 @@ suffix_label = "%"
 parameter_id = "toggle_switch_7"
 name_label = "Fringe"
 value_labels = ["Even", "Rim"]
-initial_value_label = "Even"
+initial_value_label = "Rim"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
@@ -96,13 +96,13 @@ initial_value_label = "Chroma"
 parameter_id = "toggle_switch_10"
 name_label = "Lens"
 value_labels = ["Row", "Disc"]
-initial_value_label = "Row"
+initial_value_label = "Disc"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
 name_label = "Fold"
 value_labels = ["Luma", "Colour"]
-initial_value_label = "Luma"
+initial_value_label = "Colour"
 
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
@@ -110,7 +110,7 @@ name_label = "Globe"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 0
+initial_value = 849
 display_float_digits = 1
 suffix_label = "%"
 
