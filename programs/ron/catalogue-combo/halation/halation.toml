@@ -20,7 +20,7 @@ name_label = "Glow"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 500
+initial_value = 343
 display_float_digits = 1
 suffix_label = "%"
 
@@ -30,7 +30,7 @@ name_label = "Threshold"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 500
+initial_value = 345
 display_float_digits = 1
 suffix_label = "%"
 
@@ -40,7 +40,7 @@ name_label = "Radius"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 663
 display_float_digits = 1
 suffix_label = "%"
 
@@ -50,7 +50,7 @@ name_label = "Wobble"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 200
+initial_value = 54
 display_float_digits = 1
 suffix_label = "%"
 
@@ -60,7 +60,7 @@ name_label = "Rate"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 640
+initial_value = 316
 display_float_digits = 1
 suffix_label = "%"
 
@@ -70,7 +70,7 @@ name_label = "Period"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 300
+initial_value = 195
 display_float_digits = 1
 suffix_label = "%"
 
@@ -110,7 +110,7 @@ name_label = "Halo"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 0
+initial_value = 1023
 display_float_digits = 1
 suffix_label = "%"
 
