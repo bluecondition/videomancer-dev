@@ -412,3 +412,8 @@ designed around FIELDS (480i / 1080i) and predated most of them.
   raster), knobs and switches changing mid-picture, 0 mismatches in 3.24 M clocks.
 - Packed LC (stock SDK): SD Standalone 7957 → 7514, HD Dual 7846 → 7395,
   HD HDMI 7778 → 7337. EBR 17 → 24 (HD Dual 25).
+- **Build seed (stock LZX flow): `[firmware] seed = 7`.** Seeds 1, 2, 4, 5 and 6 each
+  hung nextpnr's router1 in at least one config (a rip-up livelock with no end;
+  LZX's build script has no timeout). Seed 3 built all 8 but HD HDMI's own
+  timing was 69.6 MHz. Seed 7 builds all 8; own HD timing (core without the
+  Sync Out generator) is 80.2/80.3/80.9 MHz Analog/HDMI/Dual.
