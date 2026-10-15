@@ -29,7 +29,7 @@ parameter_id = "rotary_potentiometer_1"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 213
+initial_value = 632
 display_min_value = 0
 display_max_value = 100
 name_label = "Band Size"
@@ -40,7 +40,7 @@ parameter_id = "rotary_potentiometer_2"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 560
+initial_value = 899
 display_min_value = 0
 display_max_value = 100
 name_label = "Wave"
@@ -51,7 +51,7 @@ parameter_id = "rotary_potentiometer_3"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 632
+initial_value = 796
 display_min_value = -100
 display_max_value = 100
 name_label = "Drift"
@@ -61,14 +61,14 @@ suffix_label = "%"
 parameter_id = "rotary_potentiometer_4"
 name_label = "Static Size"
 value_labels = ["Fine", "Medium", "Coarse", "Chunky"]
-initial_value_label = "Fine"
+initial_value_label = "Coarse"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 1023
+initial_value = 337
 display_min_value = 0
 display_max_value = 100
 name_label = "Boil Rate"
@@ -79,7 +79,7 @@ parameter_id = "rotary_potentiometer_6"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 620
+initial_value = 408
 display_min_value = 0
 display_max_value = 100
 name_label = "Fringe"
@@ -91,13 +91,13 @@ suffix_label = "%"
 parameter_id = "toggle_switch_7"
 name_label = "Patchwork"
 value_labels = ["Off", "On"]
-initial_value_label = "On"
+initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
 name_label = "Contrast"
 value_labels = ["Normal", "Boost"]
-initial_value_label = "Boost"
+initial_value_label = "Normal"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
@@ -109,7 +109,7 @@ initial_value_label = "Thick"
 parameter_id = "toggle_switch_10"
 name_label = "Bands"
 value_labels = ["Horizontal", "Vertical"]
-initial_value_label = "Horizontal"
+initial_value_label = "Vertical"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
@@ -124,7 +124,7 @@ parameter_id = "linear_potentiometer_12"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 0
+initial_value = 364
 display_min_value = 0
 display_max_value = 100
 name_label = "Flip"
