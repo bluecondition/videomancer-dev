@@ -314,12 +314,24 @@ begin
     p_ctl : process(clk)
     begin
         if rising_edge(clk) then
-            s_pat   <= unsigned(registers_in(0)(9 downto 7));
+            -- Labelled defaults (K1 Pattern, K3 Colour): at program load the
+            -- firmware writes the initial_value_label's INDEX (0..7) into the
+            -- register, not a 0..1023 position, so a value below 8 is the
+            -- label index itself.
+            if unsigned(registers_in(0)) < 8 then
+                s_pat <= unsigned(registers_in(0)(2 downto 0));
+            else
+                s_pat <= unsigned(registers_in(0)(9 downto 7));
+            end if;
             -- K2: full travel = 0 .. 5/8 of the old range (HW: above ~60%
             -- nothing fired any more); thr = raw8/2 + raw8/8, max 158
             s_thr_r <= unsigned(registers_in(1)(9 downto 2));
             s_thr   <= shift_right(s_thr_r, 1) + shift_right(s_thr_r, 3);
-            s_col   <= unsigned(registers_in(2)(9 downto 7));
+            if unsigned(registers_in(2)) < 8 then
+                s_col <= unsigned(registers_in(2)(2 downto 0));
+            else
+                s_col <= unsigned(registers_in(2)(9 downto 7));
+            end if;
             -- K4 / P12 accumulate along a run (a 1-LSB wobble moves the far
             -- end of a long filament by half a period): deadband, glide,
             -- and latch once per field so a change never tears mid-frame
