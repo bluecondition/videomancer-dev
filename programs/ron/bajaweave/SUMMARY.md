@@ -61,3 +61,7 @@ complementary colour pair that K3 turns around the wheel.
   0 mismatches in 3.24 M clocks. A deliberately broken flag freeze was caught
   (159 k mismatches), so the test reaches this logic.
 - Packed LC (stock SDK): SD Standalone 7759 → 7455, HD Dual 7176 → 6870.
+- **Build seed (stock LZX flow): `[firmware] seed = 6`.** Seeds 1–5 each hung
+  nextpnr's router1 in at least one config (a rip-up livelock with no end; LZX's
+  build script has no timeout). Seed 6 builds all 8; own HD timing (core
+  without the Sync Out generator) is 102.0/103.4/96.4 MHz Analog/HDMI/Dual.

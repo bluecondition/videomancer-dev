@@ -177,3 +177,10 @@ toggle_switch_9 = 1
 toggle_switch_10 = 1
 toggle_switch_11 = 1
 linear_potentiometer_12 = 64
+
+[firmware]
+# nextpnr placement seed for the stock LZX build (one seed, all 8 configs):
+# seeds 1-5 each hung nextpnr's router1 (a rip-up livelock) in at least one
+# config; seed 6 builds all 8 (own HD timing 102.0/103.4/96.4 MHz
+# Analog/HDMI/Dual).
+seed = 6
