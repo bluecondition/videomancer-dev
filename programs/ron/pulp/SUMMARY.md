@@ -397,3 +397,18 @@ designed around FIELDS (480i / 1080i) and predated most of them.
 * v0.2 candidates: press drift breathing, roller streaks, per-panel screen
   re-seed, channel sampling misregistration via the spare EBR, glyph
   variety on the sprite sheets, starburst on a control gesture.
+
+## Community port — fit for the stock SDK (v1.0.2, 2026-10-14)
+- The stock LZX SDK builds 8 configs; its SD Standalone core is ~600 LC larger
+  than HD. v1.0.1 packed to 7957/7680 LC there (HD Dual 7846) and could not place.
+- v1.0.2 replaces the seven per-pixel dot-distance squarers at E4
+  (`bx3*bx3`, `by3*by3`, ~514 LUT) with seven 256 x 10 square ROMs (`C_SQ`,
+  one EBR each). Each ROM is addressed by the value that used to load `bx3`/`by3`
+  and its output register takes their place, so the squares arrive on the same
+  clock as before and are re-registered into fabric (`qa4`/`qb4`) before the E5
+  adds. Only bits 14..5 of the 15-bit square were ever used; the ROM stores
+  exactly those.
+- Proven bit-exact against v1.0.1: GHDL side-by-side, 40 frames (403 x 201
+  raster), knobs and switches changing mid-picture, 0 mismatches in 3.24 M clocks.
+- Packed LC (stock SDK): SD Standalone 7957 → 7514, HD Dual 7846 → 7395,
+  HD HDMI 7778 → 7337. EBR 17 → 24 (HD Dual 25).
