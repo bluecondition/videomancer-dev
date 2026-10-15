@@ -35,7 +35,7 @@ name_label = "Gain"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 400
+initial_value = 661
 display_float_digits = 1
 suffix_label = "%"
 
@@ -45,7 +45,7 @@ name_label = "Thresh"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 100
+initial_value = 289
 display_float_digits = 1
 suffix_label = "%"
 
@@ -55,7 +55,7 @@ name_label = "Blend"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 0
+initial_value = 61
 display_float_digits = 1
 suffix_label = "%"
 
@@ -65,7 +65,7 @@ name_label = "Block"
 control_mode = "linear"
 display_min_value = 8
 display_max_value = 64
-initial_value = 150
+initial_value = 227
 display_float_digits = 0
 suffix_label = " px"
 
@@ -75,7 +75,7 @@ name_label = "Shift"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 400
+initial_value = 496
 display_float_digits = 1
 suffix_label = "%"
 
@@ -85,7 +85,7 @@ name_label = "Rate"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 240
+initial_value = 637
 display_float_digits = 1
 suffix_label = "%"
 
@@ -111,7 +111,7 @@ initial_value_label = "Block"
 parameter_id = "toggle_switch_10"
 name_label = "Mosh"
 value_labels = ["Shift", "Hold"]
-initial_value_label = "Shift"
+initial_value_label = "Hold"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
@@ -125,7 +125,7 @@ name_label = "Density"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 300
+initial_value = 283
 display_float_digits = 1
 suffix_label = "%"
 
