@@ -352,6 +352,14 @@ architecture polka of program_top is
     signal zi_r    : std_logic_vector(10 downto 0) := (others => '0');
     signal fr_jb   : signed(10 downto 0) := (others => '0');
     signal fr_sneg  : std_logic := '0';
+    -- Per-frame palette table: the dot colour of each of the 4 palette
+    -- entries (u, v after the saturation multiply), filled in vblank through
+    -- the same pixel-path hijack the background colour uses, with the FSM's
+    -- serial multiplier.  The pixel path looks the entry up instead of
+    -- multiplying sin/cos by saturation on every pixel.
+    signal hij_e    : unsigned(1 downto 0) := "00";
+    type t_ptab is array (0 to 3) of unsigned(9 downto 0);
+    signal pt_u, pt_v : t_ptab := (others => to_unsigned(512, 10));
     signal pal_hij : std_logic := '0';
     signal acc_t   : signed(21 downto 0) := (others => '0');
     signal xr_t    : unsigned(9 downto 0) := (others => '0');
@@ -404,7 +412,56 @@ architecture polka of program_top is
     signal c2_iyb         : unsigned(6 downto 0) := (others => '0');
     signal c2_ha          : unsigned(9 downto 0) := (others => '0');
 
-    signal c3_aA, c3_aB   : unsigned(7 downto 0) := (others => '0');
+    -- 11-bit signed d times a 6-bit coverage (0..63), radix-4 Booth: 4
+    -- partials of {0, +-d, +-2d} (one's complement, +1s gathered in a
+    -- correction word) instead of 6 AND-gated rows
+    function booth_d11_c6(d : signed(10 downto 0); w : unsigned(5 downto 0)) return signed is
+        variable we   : std_logic_vector(8 downto 0);
+        variable dg   : std_logic_vector(2 downto 0);
+        variable mag  : signed(17 downto 0);
+        variable pp   : signed(17 downto 0);
+        variable d1   : signed(17 downto 0);
+        variable d2   : signed(17 downto 0);
+        variable corr : signed(17 downto 0);
+        type t_pp is array (0 to 3) of signed(17 downto 0);
+        variable p    : t_pp;
+    begin
+        we := "00" & std_logic_vector(w) & '0';
+        d1 := resize(d, 18);
+        d2 := shift_left(d1, 1);
+        corr := (others => '0');
+        for i in 0 to 3 loop
+            dg := we(2 * i + 2 downto 2 * i);
+            case dg is
+                when "001" | "010" | "101" | "110" => mag := d1;
+                when "011" | "100"                 => mag := d2;
+                when others                        => mag := (others => '0');
+            end case;
+            if dg(2) = '1' and dg /= "111" then
+                pp := not mag;
+                corr(2 * i) := '1';
+            else
+                pp := mag;
+            end if;
+            p(i) := shift_left(pp, 2 * i);
+        end loop;
+        return (p(0) + p(1)) + (p(2) + (p(3) + corr));
+    end function;
+
+    -- 8-bit squares from two 256 x 16 ROMs (one EBR each).  Each ROM is
+    -- addressed by the |dx| that used to load the c3 operand registers, so its
+    -- own address register is the c3 stage and c4_sqA/c4_sqB re-register it.
+    type t_sq8 is array (0 to 255) of std_logic_vector(15 downto 0);
+    function f_sq8 return t_sq8 is
+        variable v : t_sq8;
+    begin
+        for i in 0 to 255 loop
+            v(i) := std_logic_vector(to_unsigned(i * i, 16));
+        end loop;
+        return v;
+    end function;
+    constant C_SQ8 : t_sq8 := f_sq8;
+    signal c3_sqA, c3_sqB : std_logic_vector(15 downto 0) := (others => '0');
     signal c3_jys         : std_logic := '0';
     signal c3_ha          : unsigned(9 downto 0) := (others => '0');
     signal c3_hxb, c3_hyb : unsigned(9 downto 0) := (others => '0');
@@ -451,16 +508,14 @@ architecture polka of program_top is
     signal c11_cov : unsigned(6 downto 0) := (others => '0');
 
     signal rom_rd  : std_logic_vector(19 downto 0) := (others => '0');
-    signal c12_sat : unsigned(8 downto 0) := (others => '0');
+    signal c11_e, c12_e, c13_e, c14_e : unsigned(1 downto 0) := "00";
     signal c12_y   : unsigned(9 downto 0) := (others => '0');
     signal c12_cov : unsigned(6 downto 0) := (others => '0');
 
     signal c13_su, c13_sv : signed(9 downto 0) := (others => '0');
-    signal c13_sat : unsigned(8 downto 0) := (others => '0');
     signal c13_y   : unsigned(9 downto 0) := (others => '0');
     signal c13_cov : unsigned(6 downto 0) := (others => '0');
 
-    signal c14_mu, c14_mv : signed(19 downto 0) := (others => '0');
     signal c14_y   : unsigned(9 downto 0) := (others => '0');
     signal c14_cov : unsigned(6 downto 0) := (others => '0');
 
@@ -1130,6 +1185,7 @@ begin
                     ----------------------------------------------------------
                     when 224 =>
                         pal_hij <= '1';
+                        hij_e   <= s_ebg;
                         smae <= resize(s_hq4, 20);
                         smb  <= resize(s_reff, 11);
                         smp  <= (others => '0');
@@ -1200,7 +1256,64 @@ begin
                         end if;
                     when 269 =>
                         lf_seed <= '1';
-                        fsm_t   <= to_unsigned(300, 9);
+                        fsm_t   <= to_unsigned(373, 9);
+
+                    ----------------------------------------------------------
+                    -- Palette table: entry e at 373 + 34e.  Hijack the colour
+                    -- path to entry e, then |sin|*sat and |cos|*sat on the
+                    -- serial multiplier; u = 512 + floor(sin*sat / 512) as the
+                    -- pixel path's signed multiply and shift gave it
+                    -- (a negative product rounds down: subtract the ceiling).
+                    ----------------------------------------------------------
+                    when 373 => pal_hij <= '1'; hij_e <= "00";
+                    when 407 => pal_hij <= '1'; hij_e <= "01";
+                    when 441 => pal_hij <= '1'; hij_e <= "10";
+                    when 475 => pal_hij <= '1'; hij_e <= "11";
+                    when 379 | 413 | 447 | 481 =>
+                        if c13_su < 0 then
+                            fr_sneg <= '1';
+                            smae <= resize(unsigned(-c13_su), 20);
+                        else
+                            fr_sneg <= '0';
+                            smae <= resize(unsigned(c13_su), 20);
+                        end if;
+                        smb  <= resize(c11_sat, 11);
+                        smp  <= (others => '0');
+                        sm_cnt <= (others => '0');
+                        sm_run <= '1';
+                    when 392 | 426 | 460 | 494 =>
+                        if fr_sneg = '1' then
+                            v_u12 := to_signed(512, 12)
+                                     - signed(resize(shift_right(smp + 511, 9), 12));
+                        else
+                            v_u12 := to_signed(512, 12)
+                                     + signed(resize(shift_right(smp, 9), 12));
+                        end if;
+                        pt_u(to_integer(hij_e)) <= unsigned(v_u12(9 downto 0));
+                        if c13_sv < 0 then
+                            fr_sneg <= '1';
+                            smae <= resize(unsigned(-c13_sv), 20);
+                        else
+                            fr_sneg <= '0';
+                            smae <= resize(unsigned(c13_sv), 20);
+                        end if;
+                        smb  <= resize(c11_sat, 11);
+                        smp  <= (others => '0');
+                        sm_cnt <= (others => '0');
+                        sm_run <= '1';
+                    when 405 | 439 | 473 | 507 =>
+                        if fr_sneg = '1' then
+                            v_u12 := to_signed(512, 12)
+                                     - signed(resize(shift_right(smp + 511, 9), 12));
+                        else
+                            v_u12 := to_signed(512, 12)
+                                     + signed(resize(shift_right(smp, 9), 12));
+                        end if;
+                        pt_v(to_integer(hij_e)) <= unsigned(v_u12(9 downto 0));
+                        if fsm_t = 507 then
+                            pal_hij <= '0';
+                            fsm_t   <= to_unsigned(300, 9);
+                        end if;
 
                     ----------------------------------------------------------
                     -- Anchor microflow: drift/colour/wave accumulators
@@ -1496,12 +1609,12 @@ begin
             if v_a < 0 then
                 v_a := -v_a;
             end if;
-            c3_aA <= unsigned(v_a(7 downto 0));
+            c3_sqA <= C_SQ8(to_integer(unsigned(v_a(7 downto 0))));
             v_a := resize(c2_dxB, 12);
             if v_a < 0 then
                 v_a := -v_a;
             end if;
-            c3_aB <= unsigned(v_a(7 downto 0));
+            c3_sqB <= C_SQ8(to_integer(unsigned(v_a(7 downto 0))));
             c3_jys <= c2_jys;
             c3_ha <= c2_ha;
             c3_hxb <= shift_left(resize(c2_ixb, 10), 5) + shift_left(resize(c2_ixb, 10), 4)
@@ -1511,9 +1624,9 @@ begin
             c3_apA <= c2_ixa(0) xor iy(0);
             c3_apB <= c2_ixb(0) xor c2_iyb(0);
 
-            -- c4: squares (dedicated 8x8); hash combine
-            c4_sqA <= c3_aA * c3_aA;
-            c4_sqB <= c3_aB * c3_aB;
+            -- c4: squares (ROM data re-registered); hash combine
+            c4_sqA <= unsigned(c3_sqA);
+            c4_sqB <= unsigned(c3_sqB);
             c4_jys <= c3_jys;
             c4_hA  <= c3_ha;
             c4_h1B <= c3_hxb + c3_hyb;
@@ -1692,40 +1805,38 @@ begin
                     v_e := s_ed1;
             end case;
             if pal_hij = '1' then
-                v_e := s_ebg;
+                v_e := hij_e;
             end if;
             v_pw := C_PALV(to_integer(s_pal & v_e));
             c11_hue <= unsigned(v_pw(9 downto 0));
             c11_sat <= unsigned(v_pw(18 downto 10));
             c11_y   <= unsigned(v_pw(28 downto 19));
             c11_cov <= c10_cov;
+            c11_e   <= v_e;
 
             -- c12: sine ROM read (the FSM borrows the colour path during the
             -- vsync cone via pal_hij to fetch the background colour)
             v_a10 := c11_hue + s_hueoff;
             rom_rd  <= C_SINCOS(to_integer(v_a10(9 downto 1)));
-            c12_sat <= c11_sat;
+            c12_e   <= c11_e;
             c12_y   <= c11_y;
             c12_cov <= c11_cov;
 
             -- c13: second fabric register after the EBR ROM
             c13_su  <= signed(rom_rd(19 downto 10));
             c13_sv  <= signed(rom_rd(9 downto 0));
-            c13_sat <= c12_sat;
+            c13_e   <= c12_e;
             c13_y   <= c12_y;
             c13_cov <= c12_cov;
 
             -- c14: saturation multiplies
-            c14_mu  <= c13_su * signed(resize(c13_sat, 10));
-            c14_mv  <= c13_sv * signed(resize(c13_sat, 10));
+            c14_e   <= c13_e;
             c14_y   <= c13_y;
             c14_cov <= c13_cov;
 
             -- c15: compose dot colour; fg/bg source select
-            v_u := to_signed(512, 12) + resize(shift_right(c14_mu, 9), 12);
-            v_du10 := unsigned(v_u(9 downto 0));
-            v_u := to_signed(512, 12) + resize(shift_right(c14_mv, 9), 12);
-            v_dv10 := unsigned(v_u(9 downto 0));
+            v_du10 := pt_u(to_integer(c14_e));
+            v_dv10 := pt_v(to_integer(c14_e));
             v_dy10 := c14_y;
             if s_port = '1' then
                 c14_fgy <= unsigned(vr_rd(29 downto 20));
@@ -1767,9 +1878,9 @@ begin
             c15_cov <= c14_cov2;
 
             -- c17: blend multiplies
-            c16_my  <= c15_dy * signed(resize(c15_cov(5 downto 0), 7));
-            c16_mu2 <= c15_du * signed(resize(c15_cov(5 downto 0), 7));
-            c16_mv2 <= c15_dv * signed(resize(c15_cov(5 downto 0), 7));
+            c16_my  <= booth_d11_c6(c15_dy, c15_cov(5 downto 0));
+            c16_mu2 <= booth_d11_c6(c15_du, c15_cov(5 downto 0));
+            c16_mv2 <= booth_d11_c6(c15_dv, c15_cov(5 downto 0));
             c16_bgy <= c15_bgy;
             c16_bgu <= c15_bgu;
             c16_bgv <= c15_bgv;
