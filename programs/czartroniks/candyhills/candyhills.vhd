@@ -266,6 +266,12 @@ architecture candyhills of program_top is
     signal s_fane    : unsigned(6 downto 0) := to_unsigned(44, 7);   -- K2 fan x1.375 (0..86)
     signal s_bden    : unsigned(3 downto 0) := to_unsigned(4, 4);   -- K6 bush density (0..15)
     signal s_palsel  : integer range 0 to 7 := 0;     -- K4 palette (8)
+    -- K4 label decode, free-running (kept out of the vsync cone).
+    -- Labelled defaults: at program load the firmware writes the
+    -- initial_value_label's INDEX (0..N-1) into the register, not a 0..1023
+    -- position (HW-measured 2026-10-02), so a value below the label count is
+    -- taken as the label index itself.
+    signal s_k4_idx  : unsigned(2 downto 0) := (others => '0');
 
     signal s_lay3    : std_logic := '1';   -- S7
     signal s_haze    : std_logic := '1';   -- S8
@@ -598,6 +604,11 @@ begin
         variable v_k3d : signed(10 downto 0);
     begin
         if rising_edge(clk) then
+            if unsigned(registers_in(3)) < 8 then
+                s_k4_idx <= unsigned(registers_in(3)(2 downto 0));
+            else
+                s_k4_idx <= unsigned(registers_in(3)(9 downto 7));
+            end if;
             prev_hsync_n <= data_in.hsync_n;
             prev_vsync_n <= data_in.vsync_n;
             v_h_edge := '0'; v_v_edge := '0';
@@ -778,7 +789,7 @@ begin
                 v_k3d   := signed(resize(unsigned(registers_in(2)(9 downto 0)), 11))
                          - signed(resize(k3h, 11));
                 if v_k3d > 11 or v_k3d < -11 then k3h <= unsigned(registers_in(2)(9 downto 0)); end if;
-                s_palsel <= to_integer(unsigned(registers_in(3)(9 downto 7)));  -- K4 (8 palettes)
+                s_palsel <= to_integer(s_k4_idx);                              -- K4 (8 palettes)
                 -- K5: +-12 deadband (pot noise must not jitter F: a 1-step change
                 -- slides the world-anchored stripes by sx*dF/16), then exponential.
                 v_kd    := signed(resize(unsigned(registers_in(4)(9 downto 0)), 11))
