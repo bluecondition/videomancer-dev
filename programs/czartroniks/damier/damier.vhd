@@ -208,6 +208,12 @@ architecture damier of program_top is
     ------------------------------------------------------------------------
     signal f_layout : unsigned(3 downto 0) := (others => '0');
     signal f_scheme : unsigned(3 downto 0) := (others => '0');
+    -- K1/K6 label decodes, free-running.  Labelled defaults: at program load
+    -- the firmware writes the initial_value_label's INDEX (0..15) into the
+    -- register, not a 0..1023 position, so a value below 16 is the label
+    -- index itself.
+    signal s_k1_idx : unsigned(3 downto 0) := (others => '0');
+    signal s_k6_idx : unsigned(3 downto 0) := (others => '0');
     signal f_mir, f_flip, f_diag, f_zz, f_sq : std_logic := '0';
     signal f_fold   : std_logic := '0';
     signal f_scrl   : std_logic := '1';
@@ -548,9 +554,19 @@ begin
         variable v_h : unsigned(11 downto 0);
     begin
         if rising_edge(clk) then
+            if unsigned(registers_in(0)) < 16 then
+                s_k1_idx <= unsigned(registers_in(0)(3 downto 0));
+            else
+                s_k1_idx <= unsigned(registers_in(0)(9 downto 6));
+            end if;
+            if unsigned(registers_in(5)) < 16 then
+                s_k6_idx <= unsigned(registers_in(5)(3 downto 0));
+            else
+                s_k6_idx <= unsigned(registers_in(5)(9 downto 6));
+            end if;
             if s_vs_go = '1' then
-                f_layout <= unsigned(registers_in(0)(9 downto 6));
-                f_scheme <= unsigned(registers_in(5)(9 downto 6));
+                f_layout <= s_k1_idx;
+                f_scheme <= s_k6_idx;
                 f_mir  <= registers_in(6)(0);
                 f_flip <= registers_in(6)(1);
                 f_diag <= registers_in(6)(2);
