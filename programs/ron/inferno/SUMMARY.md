@@ -187,3 +187,21 @@ dual 6.)
 ~7590 LC (99%), 23 EBR: HD Analog seed 7 PASS, SD Analog 74.21 (s7), HD HDMI
 76.07 (s7), SD HDMI 78.15 (s7), HD Dual 74.56 (**seed 8**; 7 missed), SD Dual
 68.54 (s7).  Packed to `out/rev_b/ron/inferno.vmprog`.
+
+## Community port — fit for the stock SDK (v2.0.2, 2026-10-15)
+- The stock LZX SDK builds 8 configs; its SD Standalone core is ~600 LC larger
+  than HD. v2.0.1 packed to 8073/7680 LC there and 7935 on HD Dual, so it did
+  not fit even HD.
+- v2.0.2 replaces every per-pixel multiply (the 12 `lerp8` interpolations, the 4
+  octave-y lerps `s11a_m*`, the warp `v_dx` and the two `s13_fk` heat
+  products) with a hand-written radix-4 Booth multiplier (`bmul`; `bmul_u`
+  for unsigned products). yosys's default signed multipliers were far larger.
+- Each operand-width pair was checked exhaustively in Python against a*m.
+- One trap, caught by the GHDL proof in a first build: an unsigned product
+  run through the signed Booth must be SLICED to width, not narrowed with
+  `resize(signed)`, which drops the top magnitude bit.
+- Proven bit-exact against v2.0.1: GHDL side-by-side, 40 frames (403 x 201
+  raster), knobs and switches changing mid-picture, 0 mismatches in 3.24 M clocks.
+- Packed LC (stock SDK): SD Standalone 8073 → 7505, HD Dual 7935 → 7386.
+- Stock build: all 8 configs on seed 1; own HD timing (core without the Sync
+  Out generator) 76.8/82.1/78.4 MHz Analog/HDMI/Dual.

@@ -145,6 +145,62 @@ architecture inferno of program_top is
   end function;
 
   -- lerp: a + (b-a)*f/16, f is smoothstepped 0..16
+  -- Exact signed product a * m, radix-4 Booth on m: ceil(len(m)/2)
+  -- partials of {0, +-a, +-2a} (negatives as one's complement, the +1s
+  -- gathered in one correction word in a spare slot), balanced adds.
+  -- Checked in Python against a*m for every operand width pair used here.
+  function bmul(a : signed; m : signed) return signed is
+      constant NA  : natural := a'length;
+      constant NML : natural := m'length;
+      constant NM  : natural := NML + (NML mod 2);
+      constant NP  : natural := NA + NML;
+      constant NPP : natural := NM / 2;
+      type t_pp is array (0 to 7) of signed(NP - 1 downto 0);
+      variable va   : signed(NA - 1 downto 0);
+      variable vm   : signed(NM - 1 downto 0);
+      variable me   : std_logic_vector(NM downto 0);
+      variable a1, a2, mag, pp, corr : signed(NP - 1 downto 0);
+      variable d    : std_logic_vector(2 downto 0);
+      variable p    : t_pp;
+  begin
+      va := a;
+      vm := resize(m, NM);
+      me := std_logic_vector(vm) & '0';
+      a1 := resize(va, NP);
+      a2 := shift_left(a1, 1);
+      corr := (others => '0');
+      for i in 0 to 7 loop
+          p(i) := (others => '0');
+      end loop;
+      for i in 0 to NPP - 1 loop
+          d := me(2 * i + 2 downto 2 * i);
+          case d is
+              when "001" | "010" | "101" | "110" => mag := a1;
+              when "011" | "100"                 => mag := a2;
+              when others                        => mag := (others => '0');
+          end case;
+          if d(2) = '1' and d /= "111" then
+              pp := not mag;
+              corr(2 * i) := '1';
+          else
+              pp := mag;
+          end if;
+          p(i) := shift_left(pp, 2 * i);
+      end loop;
+      p(NPP) := corr;
+      return ((p(0) + p(1)) + (p(2) + p(3))) + ((p(4) + p(5)) + (p(6) + p(7)));
+  end function;
+
+  -- Exact unsigned product a * m (width len(a) + len(m)) on the signed Booth.
+  function bmul_u(a : unsigned; m : unsigned) return unsigned is
+      constant NP : natural := a'length + m'length;
+      variable vp : signed(NP + 1 downto 0);
+  begin
+      vp := bmul(signed('0' & a), signed('0' & m));
+      return unsigned(vp(NP - 1 downto 0));
+  end function;
+
+
   function lerp8(a, b : unsigned(7 downto 0); f : unsigned(4 downto 0))
     return unsigned is
     variable v_d : signed(9 downto 0);
@@ -152,7 +208,7 @@ architecture inferno of program_top is
     variable v_r : signed(11 downto 0);
   begin
     v_d := signed(resize(b, 10)) - signed(resize(a, 10));
-    v_m := v_d * signed('0' & f);
+    v_m := bmul(v_d, signed('0' & f));
     v_r := resize(signed(resize(a, 10)) + resize(v_m sra 4, 12), 12);
     return unsigned(v_r(7 downto 0));
   end function;
@@ -1149,7 +1205,7 @@ begin
     variable v_dx : signed(13 downto 0);
   begin
     if rising_edge(clk) then
-      v_dx := resize((signed(resize(s6_nwx, 9)) - 128) * signed('0' & s_turb4), 14);
+      v_dx := resize(bmul(signed(resize(s6_nwx, 9)) - 128, signed('0' & s_turb4)), 14);
       s7_ax  <= d_wxs(3) + unsigned(resize(v_dx sra 1, 16));
       s7_ay  <= d_wy(3);
       s7_ay3 <= d_wy(3) + s_yoffd;
@@ -1244,10 +1300,10 @@ begin
       v_d2 := signed(resize(s10_b2, 10)) - signed(resize(s10_t2, 10));
       v_d3 := signed(resize(s10_b3, 10)) - signed(resize(s10_t3, 10));
       v_d4 := signed(resize(s10_b4, 10)) - signed(resize(s10_t4, 10));
-      s11a_m1 <= resize(v_d1 * signed('0' & s10_fy1), 17);
-      s11a_m2 <= resize(v_d2 * signed('0' & s10_fy2), 14);
-      s11a_m3 <= resize(v_d3 * signed('0' & s10_fy3), 14);
-      s11a_m4 <= resize(v_d4 * signed('0' & s10_fy4), 17);
+      s11a_m1 <= resize(bmul(v_d1, signed('0' & s10_fy1)), 17);
+      s11a_m2 <= resize(bmul(v_d2, signed('0' & s10_fy2)), 14);
+      s11a_m3 <= resize(bmul(v_d3, signed('0' & s10_fy3)), 14);
+      s11a_m4 <= resize(bmul(v_d4, signed('0' & s10_fy4)), 17);
       s11a_t1 <= s10_t1;  s11a_t2 <= s10_t2;
       s11a_t3 <= s10_t3;  s11a_t4 <= s10_t4;
     end if;
@@ -1316,8 +1372,8 @@ begin
   p_s13 : process(clk)
   begin
     if rising_edge(clk) then
-      s13_fk <= s12_fbm * s_heatk;
-      s13_fk2 <= s12_fbm2 * s_heatk;
+      s13_fk <= bmul_u(s12_fbm, s_heatk);
+      s13_fk2 <= bmul_u(s12_fbm2, s_heatk);
       -- wisp gate for smoke: clip((fbm-110)*2, 0..240)
       if s12_fbm > 230 then
         s13_wisp <= to_unsigned(240, 8);
