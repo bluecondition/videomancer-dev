@@ -626,7 +626,9 @@ def open_port(port_name: str):
     port.timeout = 0.05
     port.write_timeout = 1.0
     # Avoid a baud-rate touch. 1200 baud reboots into BOOTSEL.
-    port.dtr = False
+    # DTR must be asserted: since a 2026-10 firmware update the shell sends
+    # no replies to a host that leaves DTR low (every command timed out).
+    port.dtr = True
     port.rts = False
     try:
         port.open()
