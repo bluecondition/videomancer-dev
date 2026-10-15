@@ -765,7 +765,6 @@ architecture pixelbeach of program_top is
     signal stk_len15 : signed(14 downto 0) := (others => '0');
     signal mir_on    : std_logic := '0';
     signal tri_on    : std_logic := '0';
-    signal sunw      : std_logic_vector(29 downto 0) := (others => '0');
     signal sun_y_r, sun_u_r, sun_v_r : std_logic_vector(9 downto 0) := (others => '0');
 
     signal gx0, gx1, gx2 : unsigned(7 downto 0) := to_unsigned(20, 8);
@@ -829,6 +828,12 @@ architecture pixelbeach of program_top is
     signal ph1, ph2, ph3 : unsigned(9 downto 0) := (others => '0');
     signal p_inc3   : unsigned(3 downto 0) := to_unsigned(2, 4);
     signal sin_v1, sin_v2, sin_v3 : signed(7 downto 0) := (others => '0');
+    -- sine ROM ports (registered, one read site each so yosys can use block
+    -- RAM): the FSM sequences ph1/ph2/ph3 through sin_a; the wash edge reads
+    -- dsin_a, issued two clocks before it is used
+    signal sin_a, dsin_a : unsigned(5 downto 0) := (others => '0');
+    signal sin_q, dsin_q : signed(7 downto 0) := (others => '0');
+    signal sung_q : std_logic_vector(29 downto 0) := (others => '0');
     signal swell_a  : signed(11 downto 0) := (others => '0');
     signal chop_v   : signed(11 downto 0) := (others => '0');
     signal swell    : signed(11 downto 0) := (others => '0');
@@ -1219,7 +1224,6 @@ begin
                     v_sunq := sun_q_f;
                     sun_cell <= resize(v_sunq(11 downto 6), 8);
                     sun_q15  <= signed(resize(v_sunq, 15));
-                    sunw     <= SUNG_ROM(to_integer(s_night & lp12(9 downto 6)));
                     vstep    <= vstep + 1;
                 when 4 =>
                     -- horizon = the SKY/OCEAN line (skyband_q).  The sun sets
@@ -1248,9 +1252,9 @@ begin
                     stk_len15 <= shift_left(sun_q15 + to_signed(320, 15)
                                             - skyband_q, 2);
                     slb2_q  <= shift_left(skyband_q, 1);
-                    sun_y_r <= sunw(29 downto 20);
-                    sun_u_r <= sunw(19 downto 10);
-                    sun_v_r <= sunw(9 downto 0);
+                    sun_y_r <= sung_q(29 downto 20);
+                    sun_u_r <= sung_q(19 downto 10);
+                    sun_v_r <= sung_q(9 downto 0);
 
                     -- gulls: leftward drift at three rates, wrap at 0
                     if s_gulls = '1' then
@@ -1732,17 +1736,20 @@ begin
                         wave_jit <= signed('0' & lfsr(11 downto 8)) - to_signed(8, 5);
                         wave_new <= '0';
                     end if;
-                    sin_v1 <= SIN_LUT(to_integer(ph1(9 downto 4)));
+                    sin_a  <= ph1(9 downto 4);
                     fst    <= FP4;
                 when FP4 =>
-                    sin_v2 <= SIN_LUT(to_integer(ph2(9 downto 4)));
+                    sin_v1 <= sin_q;              -- ROM(ph1), issued in FP3
+                    sin_a  <= ph2(9 downto 4);
                     ma     <= signed(resize(p_amp, 12));
                     mb     <= signed(resize(amp_mod, 10));
                     fst    <= FP5;
                 when FP5 =>
-                    sin_v3 <= SIN_LUT(to_integer(ph3(9 downto 4)));
+                    sin_v2 <= sin_q;              -- ROM(ph2), issued in FP4
+                    sin_a  <= ph3(9 downto 4);
                     fst    <= FP6;
                 when FP6 =>
+                    sin_v3 <= sin_q;              -- ROM(ph3), issued in FP5
                     -- mp = amp * amp_mod (Q8 factor)
                     v_ae := unsigned(mp(17 downto 8));
                     if v_ae > to_unsigned(511, 10) then
@@ -2258,6 +2265,20 @@ begin
     mp <= m_hi(11 downto 0) & m_lo;
 
     ----------------------------------------------------------------------------
+    -- Constant-table ROM ports, each a free-running registered read with a
+    -- single read site (every extra read site of a constant array is its own
+    -- copy of the table).
+    ----------------------------------------------------------------------------
+    p_roms : process(clk)
+    begin
+        if rising_edge(clk) then
+            sin_q  <= SIN_LUT(to_integer(sin_a));
+            dsin_q <= SIN_LUT(to_integer(dsin_a));
+            sung_q <= SUNG_ROM(to_integer(s_night & lp12(9 downto 6)));
+        end if;
+    end process p_roms;
+
+    ----------------------------------------------------------------------------
     -- State BRAMs: canonical 1W1R, read address muxed FSM/display.
     ----------------------------------------------------------------------------
     p_eta_mem : process(clk)
@@ -2510,6 +2531,8 @@ begin
                         e_ra_d  <= x_idx + 1;
                         fw_ra_d <= x_idx + 1;
                     end if;
+                elsif x_loc = to_unsigned(3, 5) then
+                    dsin_a <= x_idx(5 downto 0) + wph(9 downto 4);
                 elsif x_loc = to_unsigned(4, 5) then
                     eta_nxt  <= resize(signed(e_rd_d(11 downto 0)), 12);
                     foam_nxt <= unsigned(fw_rd_d(15 downto 8));
@@ -2530,8 +2553,7 @@ begin
                     -- wrapped the 15-bit cap (blocky triangle at the left/right
                     -- edge with Tide).  Reach + sine <= ~640, so 31 columns is
                     -- uncapped in both sizes.
-                    v_sn := resize(SIN_LUT(to_integer(x_idx(5 downto 0)
-                                                      + wph(9 downto 4))), 15);
+                    v_sn := resize(dsin_q, 15);   -- ROM(x_idx + wph), issued at x_loc 3
                     wr_n <= wreach + v_sn;
                     v_dcol := w_tail - signed(resize(x_idx, 10));
                     if v_dcol < 0 then
