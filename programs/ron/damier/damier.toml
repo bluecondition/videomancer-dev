@@ -31,7 +31,7 @@ url = "https://github.com/lzxindustries/videomancer-community-programs"
 parameter_id = "rotary_potentiometer_1"
 name_label = "Layout"
 value_labels = ["Classic", "Vega", "Albers", "Harlequin", "Pinwheel", "Chevron", "Truchet", "Weave", "Bullseye", "Fractal", "Quartered", "Mosaic", "Rings", "Zebra", "Robe", "Shimmer"]
-initial_value_label = "Classic"
+initial_value_label = "Albers"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
@@ -49,7 +49,7 @@ parameter_id = "rotary_potentiometer_3"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 380
+initial_value = 855
 display_min_value = 0
 display_max_value = 100
 name_label = "Wave"
@@ -60,7 +60,7 @@ parameter_id = "rotary_potentiometer_4"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 128
+initial_value = 392
 display_min_value = 0
 display_max_value = 360
 name_label = "Angle"
@@ -71,7 +71,7 @@ parameter_id = "rotary_potentiometer_5"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 420
+initial_value = 554
 display_min_value = 0
 display_max_value = 100
 name_label = "Speed"
@@ -81,7 +81,7 @@ suffix_label = "%"
 parameter_id = "rotary_potentiometer_6"
 name_label = "Palette"
 value_labels = ["Op", "Riley", "Vega", "Kiss", "Bauhaus", "Memphis", "Neon", "Pastel", "Seventies", "Mondrian", "Delft", "Ruby", "Lagoon", "Sunset", "Acid", "Prism"]
-initial_value_label = "Op"
+initial_value_label = "Mondrian"
 
 # --- Toggle Switches (7-11) ---
 
@@ -107,13 +107,13 @@ initial_value_label = "Off"
 parameter_id = "toggle_switch_10"
 name_label = "Shape"
 value_labels = ["Sine", "Zigzag"]
-initial_value_label = "Sine"
+initial_value_label = "Zigzag"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
 name_label = "Motion"
 value_labels = ["Bend", "Squeeze"]
-initial_value_label = "Bend"
+initial_value_label = "Squeeze"
 
 # --- Linear Potentiometer (Fader 12) ---
 
@@ -122,7 +122,7 @@ parameter_id = "linear_potentiometer_12"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 300
+initial_value = 151
 display_min_value = 0
 display_max_value = 100
 name_label = "Resonance"
