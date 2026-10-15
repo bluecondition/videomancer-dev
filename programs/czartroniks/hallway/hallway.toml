@@ -23,7 +23,7 @@ name_label = "Panes"
 control_mode = "linear"
 display_min_value = 1
 display_max_value = 4
-initial_value = 300
+initial_value = 635
 display_float_digits = 0
 suffix_label = ""
 
@@ -33,7 +33,7 @@ name_label = "Wipe"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 0
+initial_value = 395
 display_float_digits = 1
 suffix_label = "%"
 
@@ -43,7 +43,7 @@ name_label = "Barrel"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 700
+initial_value = 627
 display_float_digits = 1
 suffix_label = "%"
 
@@ -53,7 +53,7 @@ name_label = "Fringe"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 200
+initial_value = 509
 display_float_digits = 1
 suffix_label = "%"
 
@@ -63,7 +63,7 @@ name_label = "Segment"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 989
 display_float_digits = 1
 suffix_label = "%"
 
@@ -73,7 +73,7 @@ name_label = "Slide"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 650
+initial_value = 0
 display_float_digits = 1
 suffix_label = "%"
 
@@ -81,13 +81,13 @@ suffix_label = "%"
 parameter_id = "toggle_switch_7"
 name_label = "Mirror"
 value_labels = ["Off", "On"]
-initial_value_label = "Off"
+initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
 name_label = "Lens"
 value_labels = ["Screen", "Pane"]
-initial_value_label = "Screen"
+initial_value_label = "Pane"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
@@ -99,7 +99,7 @@ initial_value_label = "Mirror"
 parameter_id = "toggle_switch_10"
 name_label = "Edges"
 value_labels = ["Black", "Mirror"]
-initial_value_label = "Black"
+initial_value_label = "Mirror"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
@@ -113,7 +113,7 @@ name_label = "Depth"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 0
+initial_value = 327
 display_float_digits = 1
 suffix_label = "%"
 
