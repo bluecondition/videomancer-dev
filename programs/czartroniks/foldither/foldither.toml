@@ -30,7 +30,7 @@ name_label = "Slide"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 512
+initial_value = 237
 display_float_digits = 1
 suffix_label = "%"
 
@@ -40,7 +40,7 @@ name_label = "Skew"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 512
+initial_value = 416
 display_float_digits = 1
 suffix_label = "%"
 
@@ -56,7 +56,7 @@ name_label = "Dither"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 600
+initial_value = 981
 display_float_digits = 1
 suffix_label = "%"
 
@@ -64,25 +64,25 @@ suffix_label = "%"
 parameter_id = "rotary_potentiometer_6"
 name_label = "Matrix"
 value_labels = ["2x2", "4x4", "8x8", "Diagonal"]
-initial_value_label = "8x8"
+initial_value_label = "Diagonal"
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
 name_label = "Fold"
 value_labels = ["Mirror", "Repeat"]
-initial_value_label = "Mirror"
+initial_value_label = "Repeat"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
 name_label = "Pattern"
 value_labels = ["Source", "Screen"]
-initial_value_label = "Source"
+initial_value_label = "Screen"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
 name_label = "Chroma"
 value_labels = ["Clean", "Dithered"]
-initial_value_label = "Clean"
+initial_value_label = "Dithered"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
@@ -94,7 +94,7 @@ initial_value_label = "Off"
 parameter_id = "toggle_switch_11"
 name_label = "Alt Bits"
 value_labels = ["Off", "On"]
-initial_value_label = "Off"
+initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
