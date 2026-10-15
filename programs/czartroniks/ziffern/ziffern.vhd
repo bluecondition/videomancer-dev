@@ -267,9 +267,8 @@ architecture ziffern of program_top is
     signal s_delta   : unsigned(17 downto 0) := (others => '0');    -- stepfar - stepnear
     signal s_stepfar : unsigned(17 downto 0) := to_unsigned(6554, 18);  -- (1<<FRAC)/Gbg
     signal s_stepnear: unsigned(17 downto 0) := to_unsigned(1092, 18);  -- (1<<FRAC)/Gfg
-    signal s_stepf : t_steparr := (others => to_unsigned(6554, 18)); -- font step (zoom lerp)
     signal s_pstep : t_steparr := (others => to_unsigned(6554, 18)); -- pitch step (cells/px)
-    signal s_mh, s_mv : t_marr := (others => (others => '0'));        -- centre*step
+    signal s_nmh, s_nmv : t_pharr := (others => (others => '0'));     -- -(centre*step)
 
     -- K4 Size / K5 Spacing (per-frame constants):
     --   R    = step scale from K4 (1536-K4: 1536=0.67x font .. 513=2x, 1024=unity@512)
@@ -286,16 +285,18 @@ architecture ziffern of program_top is
                                to_unsigned(217,8));
     signal s_t8    : unsigned(7 downto 0) := to_unsigned(248, 8);
 
-    -- sequential RT multiply (R*T10, runs from vsync alongside p_zmul)
-    signal s_rt_acc : unsigned(20 downto 0) := (others => '0');
-    signal s_rt_cnt : integer range 0 to 11 := 11;
-
-    -- sequential pitch multiply (font step * RT per plane, after p_recip)
-    type t_ptarr is array (0 to NP - 1) of unsigned(29 downto 0);
-    signal s_pt_acc : t_ptarr := (others => (others => '0'));
-    signal s_pt_cnt : integer range 0 to 12 := 12;
-    signal s_pt_busy : std_logic := '0';
-    signal s_pt_done, s_pt_done_d : std_logic := '0';
+    -- per-frame geometry engine (one serial multiplier, see p_frameeng)
+    type t_eng is (E_IDLE, E_RT, E_CZ, E_SF, E_PT, E_MH, E_MV);
+    signal e_st  : t_eng := E_IDLE;
+    signal e_pl  : integer range 0 to NP - 1 := 0;
+    signal e_ez, e_tri : unsigned(16 downto 0) := (others => '0');
+    signal e_lm  : std_logic := '0';
+    signal e_a   : unsigned(17 downto 0) := (others => '0');   -- multiplicand
+    signal e_hi  : unsigned(18 downto 0) := (others => '0');   -- product high part
+    signal e_lo  : unsigned(17 downto 0) := (others => '0');   -- multiplier / product low
+    signal e_cnt : integer range 0 to 17 := 0;
+    signal e_run : std_logic := '0';
+    signal e_ps  : unsigned(17 downto 0) := (others => '0');   -- this plane's pitch step
 
     signal s_seed  : unsigned(15 downto 0) := (others => '0');
     signal s_T     : unsigned(23 downto 0) := (others => '0');
@@ -311,21 +312,6 @@ architecture ziffern of program_top is
     signal s_zoomf  : unsigned(16 downto 0) := (others => '0');
     signal s_ztgt   : unsigned(16 downto 0) := (others => '0');  -- staged knob target
 
-    -- sequential zoom multiply (cz*delta -> per-plane cell size)
-    signal s_zprod  : t_zparr := (others => (others => '0'));
-    signal s_cz     : t_czarr := (others => (others => '0'));
-    signal s_zm_acc : t_zparr := (others => (others => '0'));
-    signal s_zm_cnt : integer range 0 to 18 := 18;
-    signal s_zm_busy : std_logic := '0';
-    -- handshake: pulse when zprod lands; delayed once so p_phasemul starts only
-    -- AFTER p_recip has registered the new s_pstep (mh must use THIS frame's step)
-    signal s_zm_done, s_zm_done_d : std_logic := '0';
-
-    -- sequential centre multiply (centre*step -> phase start offset)
-    signal s_pm_ah, s_pm_av : t_marr := (others => (others => '0'));
-    signal s_pm_cnt  : integer range 0 to 19 := 19;
-    signal s_pm_busy : std_logic := '0';
-    signal s_cxr, s_cyr : unsigned(10 downto 0) := (others => '0');
 
     --------------------------------------------------------------------------
     -- Per-pixel / per-line phase accumulators
@@ -470,61 +456,88 @@ begin
     end process;
 
     --------------------------------------------------------------------------
-    -- Sequential zoom multiply: zprod(i) = cz(i) * delta, shift-add per cycle.
-    -- cz is Q10.6 (the filtered position), so the lerp resolution is 64x one
-    -- knob tick; per-plane font step = stepfar - zprod>>16 in p_recip.
+    -- Per-frame geometry engine.  ONE serial unsigned shift-add multiplier
+    -- (multiplier shifted out to the right, fixed shifts: no barrel shifter)
+    -- sequenced after the vsync pulse through: RT = (R*T10)>>10, then per plane
+    -- cz (prog + triangle bump, or the Luma Mod ladder), zprod = cz*delta, the
+    -- font step stepf = max(stepfar - zprod>>16, 64), the pitch step
+    -- pstep = clamp((stepf*RT)>>10, 64, 262143), and the line/column start
+    -- phases -(centre*pstep) mod 2^28, stored pre-negated.  Same integers as the
+    -- old four-wide per-stage multipliers (each with its own barrel), a few
+    -- hundred clocks after the pulse -- long before the first active line.
     --------------------------------------------------------------------------
-    p_zmul : process(clk)
-        variable v_ez   : unsigned(16 downto 0);   -- filtered prog, Q10.6
-        variable v_tri  : unsigned(16 downto 0);   -- triangle: 0 at ends, peak mid
-        variable v_cz   : unsigned(17 downto 0);
-        variable v_term : unsigned(31 downto 0);
+    p_frameeng : process(clk)
+        variable v_cz  : unsigned(17 downto 0);
+        variable v_st  : unsigned(17 downto 0);
+        variable v_p   : unsigned(19 downto 0);
+        variable v_sum : unsigned(18 downto 0);
+        variable v_pr  : unsigned(36 downto 0);
     begin
         if rising_edge(clk) then
-            s_zm_done <= '0';
-            if s_vsync_pulse = '1' then
-                v_ez := s_zoomf;
-                if v_ez < to_unsigned(1023 * 32, 17) then v_tri := v_ez;
-                else v_tri := to_unsigned(1023 * 64, 17) - v_ez; end if;
-                for i in 0 to NP - 1 loop
-                    if s_lumamod = '1' then
-                        -- Luma Mod: planes are a SIZE LADDER, not a zoom
-                        -- envelope.  Back plane pinned at the far wall; the
-                        -- others at 1/4, 1/2 and full of the P12-scaled
-                        -- zoom-in.  Which rung draws is luma-selected per
-                        -- cell (see the level buffers / p_hashMix).
-                        if i = NP - 1 then
-                            v_cz := (others => '0');
+            v_pr := e_hi & e_lo;                      -- product of the last multiply
+            if e_run = '1' then
+                if e_lo(0) = '1' then v_sum := e_hi + resize(e_a, 19);
+                else                  v_sum := e_hi; end if;
+                e_hi <= '0' & v_sum(18 downto 1);
+                e_lo <= v_sum(0) & e_lo(17 downto 1);
+                if e_cnt = 17 then e_run <= '0'; else e_cnt <= e_cnt + 1; end if;
+            else
+                case e_st is
+                    when E_IDLE =>
+                        if s_vsync_pulse = '1' then
+                            -- the filter updates s_zoomf on this same edge: latch
+                            -- the pre-update value, as the old p_zmul did
+                            e_ez <= s_zoomf;
+                            if s_zoomf < to_unsigned(1023 * 32, 17) then e_tri <= s_zoomf;
+                            else e_tri <= to_unsigned(1023 * 64, 17) - s_zoomf; end if;
+                            e_lm <= s_lumamod;
+                            e_pl <= 0;
+                            e_st <= E_RT;             -- s_rr/s_t10 land on this edge
+                        end if;
+                    when E_RT =>
+                        e_a <= resize(s_rr, 18); e_lo <= resize(s_t10, 18);
+                        e_hi <= (others => '0'); e_cnt <= 0; e_run <= '1';
+                        e_st <= E_CZ;
+                    when E_CZ =>
+                        if e_pl = 0 then s_rt <= v_pr(20 downto 10); end if;
+                        if e_lm = '1' then
+                            if e_pl = NP - 1 then v_cz := (others => '0');
+                            else v_cz := resize(shift_right(e_ez, e_pl), 18); end if;
                         else
-                            v_cz := resize(shift_right(v_ez, i), 18);
+                            v_cz := resize(e_ez, 18) + resize(shift_right(e_tri, C_GSHIFT(e_pl)), 18);
                         end if;
-                    else
-                        -- prog + leading bump; 0 at both ends -> all start
-                        -- together, converge
-                        v_cz := resize(v_ez, 18)
-                                + resize(shift_right(v_tri, C_GSHIFT(i)), 18);
-                    end if;
-                    s_cz(i)     <= v_cz(16 downto 0);
-                    s_zm_acc(i) <= (others => '0');
-                end loop;
-                s_zm_cnt  <= 0;
-                s_zm_busy <= '1';
-            elsif s_zm_busy = '1' then
-                if s_zm_cnt <= 16 then
-                    v_term := shift_left(resize(s_delta, 32), s_zm_cnt);
-                    for i in 0 to NP - 1 loop
-                        if s_cz(i)(s_zm_cnt) = '1' then
-                            s_zm_acc(i) <= s_zm_acc(i) + v_term;
+                        e_a <= s_delta; e_lo <= resize(v_cz(16 downto 0), 18);
+                        e_hi <= (others => '0'); e_cnt <= 0; e_run <= '1';
+                        e_st <= E_SF;
+                    when E_SF =>
+                        v_st := s_stepfar - resize(v_pr(31 downto 16), 18);
+                        if v_st < to_unsigned(64, 18) then v_st := to_unsigned(64, 18); end if;
+                        e_a <= v_st; e_lo <= resize(s_rt, 18);
+                        e_hi <= (others => '0'); e_cnt <= 0; e_run <= '1';
+                        e_st <= E_PT;
+                    when E_PT =>
+                        v_p := v_pr(29 downto 10);
+                        if v_p > to_unsigned(262143, 20) then v_p := to_unsigned(262143, 20); end if;
+                        if v_p < to_unsigned(64, 20) then v_p := to_unsigned(64, 20); end if;
+                        s_pstep(e_pl) <= v_p(17 downto 0);
+                        e_ps <= v_p(17 downto 0);
+                        e_a <= resize(shift_right(s_measured_h, 1), 18); e_lo <= v_p(17 downto 0);
+                        e_hi <= (others => '0'); e_cnt <= 0; e_run <= '1';
+                        e_st <= E_MH;
+                    when E_MH =>
+                        s_nmh(e_pl) <= -signed(v_pr(27 downto 0));
+                        e_a <= resize(shift_right(s_measured_v, 1), 18); e_lo <= e_ps;
+                        e_hi <= (others => '0'); e_cnt <= 0; e_run <= '1';
+                        e_st <= E_MV;
+                    when E_MV =>
+                        s_nmv(e_pl) <= -signed(v_pr(27 downto 0));
+                        if e_pl = NP - 1 then
+                            e_st <= E_IDLE;
+                        else
+                            e_pl <= e_pl + 1;
+                            e_st <= E_CZ;
                         end if;
-                    end loop;
-                    s_zm_cnt <= s_zm_cnt + 1;
-                else
-                    for i in 0 to NP - 1 loop
-                        s_zprod(i) <= s_zm_acc(i);
-                    end loop;
-                    s_zm_busy <= '0';
-                    s_zm_done <= '1';
-                end if;
+                end case;
             end if;
         end if;
     end process;
@@ -610,141 +623,9 @@ begin
         end if;
     end process;
 
-    -- per-plane FONT step = lerp(stepfar, stepnear, prog_i): stepf = stepfar -
-    -- zprod>>16, zprod = (prog + tri(prog)>>gshift)*(stepfar-stepnear) from
-    -- p_zmul, prog in Q10.6 (filtered) -> sub-pixel smooth zoom.  The PITCH
-    -- step (what p_acc/p_phasemul consume) is stepf*RT>>10 from p_pitchmul,
-    -- folding in K4 Size and K5 Spacing.
-    p_recip : process(clk)
-        variable v_st : unsigned(17 downto 0);
-    begin
-        if rising_edge(clk) then
-            for i in 0 to NP - 1 loop
-                v_st := s_stepfar - resize(shift_right(s_zprod(i), 16), 18);
-                if v_st < to_unsigned(64, 18) then v_st := to_unsigned(64, 18); end if;
-                s_stepf(i) <= v_st;
-            end loop;
-        end if;
-    end process;
 
-    --------------------------------------------------------------------------
-    -- Sequential RT multiply: RT = (R * T10) >> 10 (K4 size x K5 spacing as
-    -- ONE pitch factor).  Starts at vsync; done (~12 cycles) long before its
-    -- consumer p_pitchmul starts (~20 cycles).
-    --------------------------------------------------------------------------
-    p_rtmul : process(clk)
-    begin
-        if rising_edge(clk) then
-            if s_vsync_pulse = '1' then
-                s_rt_acc <= (others => '0');
-                s_rt_cnt <= 0;
-            elsif s_rt_cnt <= 9 then
-                if s_t10(s_rt_cnt) = '1' then
-                    s_rt_acc <= s_rt_acc + shift_left(resize(s_rr, 21), s_rt_cnt);
-                end if;
-                s_rt_cnt <= s_rt_cnt + 1;
-            elsif s_rt_cnt = 10 then
-                s_rt <= s_rt_acc(20 downto 10);
-                s_rt_cnt <= 11;
-            end if;
-        end if;
-    end process;
 
-    --------------------------------------------------------------------------
-    -- Sequential pitch multiply: pstep(i) = (stepf(i) * RT) >> 10.  Starts on
-    -- s_zm_done_d (one cycle after p_recip registered this frame's stepf).
-    -- NOTE: an endpoint-scaling restructure (scale stepfar/stepnear by RT once,
-    -- before the lerp -- mathematically identical, ~150 LC smaller) was tried
-    -- and REVERTED: both slimmed variants wedge the HD Dual router (permanent
-    -- overuse, all seeds) while THIS exact netlist routes.  At 94% utilisation
-    -- placement is a lottery; keep the netlist shape that holds the winning
-    -- ticket.
-    --------------------------------------------------------------------------
-    p_pitchmul : process(clk)
-        variable v_p : unsigned(19 downto 0);
-    begin
-        if rising_edge(clk) then
-            s_zm_done_d <= s_zm_done;
-            s_pt_done   <= '0';
-            if s_zm_done_d = '1' then
-                for i in 0 to NP - 1 loop
-                    s_pt_acc(i) <= (others => '0');
-                end loop;
-                s_pt_cnt  <= 0;
-                s_pt_busy <= '1';
-            elsif s_pt_busy = '1' then
-                if s_pt_cnt <= 10 then
-                    for i in 0 to NP - 1 loop
-                        if s_rt(s_pt_cnt) = '1' then
-                            s_pt_acc(i) <= s_pt_acc(i)
-                                + shift_left(resize(s_stepf(i), 30), s_pt_cnt);
-                        end if;
-                    end loop;
-                    s_pt_cnt <= s_pt_cnt + 1;
-                else
-                    for i in 0 to NP - 1 loop
-                        v_p := s_pt_acc(i)(29 downto 10);
-                        if v_p > to_unsigned(262143, 20) then
-                            v_p := to_unsigned(262143, 20);
-                        end if;
-                        if v_p < to_unsigned(64, 20) then
-                            v_p := to_unsigned(64, 20);
-                        end if;
-                        s_pstep(i) <= v_p(17 downto 0);
-                    end loop;
-                    s_pt_busy <= '0';
-                    s_pt_done <= '1';
-                end if;
-            end if;
-        end if;
-    end process;
 
-    --------------------------------------------------------------------------
-    -- Sequential centre multiply: m(i) = centre * step(i) (shift-add per cycle),
-    -- so the line/column start phase = -m(i) puts the screen centre at phase 0.
-    -- MUST start only after p_pitchmul has registered THIS frame's s_pstep
-    -- (the s_pt_done_d handshake): computing mh from a stale/mid-update step
-    -- while p_acc steps with the new one biases the grid off-centre by
-    -- centre*dstep/step -- a zoom-speed-proportional shift that POPPED at
-    -- mid-throw where the envelope changes a plane's speed (the it-17
-    -- "leftward jump at 50%").  Every stage of the vblank multiply chain
-    -- (zmul -> recip -> pitchmul -> phasemul) is handshake-sequenced.
-    --------------------------------------------------------------------------
-    p_phasemul : process(clk)
-        variable th, tv : unsigned(27 downto 0);
-    begin
-        if rising_edge(clk) then
-            s_pt_done_d <= s_pt_done;
-            if s_pt_done_d = '1' then
-                s_cxr <= resize(shift_right(s_measured_h, 1), 11);
-                s_cyr <= resize(shift_right(s_measured_v, 1), 11);
-                for i in 0 to NP - 1 loop
-                    s_pm_ah(i) <= (others => '0');
-                    s_pm_av(i) <= (others => '0');
-                end loop;
-                s_pm_cnt  <= 0;
-                s_pm_busy <= '1';
-            elsif s_pm_busy = '1' then
-                if s_pm_cnt <= 17 then
-                    th := shift_left(resize(s_cxr, 28), s_pm_cnt);
-                    tv := shift_left(resize(s_cyr, 28), s_pm_cnt);
-                    for i in 0 to NP - 1 loop
-                        if s_pstep(i)(s_pm_cnt) = '1' then
-                            s_pm_ah(i) <= s_pm_ah(i) + th;
-                            s_pm_av(i) <= s_pm_av(i) + tv;
-                        end if;
-                    end loop;
-                    s_pm_cnt <= s_pm_cnt + 1;
-                else
-                    for i in 0 to NP - 1 loop
-                        s_mh(i) <= s_pm_ah(i);
-                        s_mv(i) <= s_pm_av(i);
-                    end loop;
-                    s_pm_busy <= '0';
-                end if;
-            end if;
-        end if;
-    end process;
 
     -- Digit Y from the staged hue: idle 50%, K6 drives toward 100%.
     p_numy : process(clk)
@@ -823,14 +704,14 @@ begin
                 if s_timing.avid_start = '1' then
                     -- vertical advance (per line)
                     if s_firstline = '1' then
-                        nx_v := -signed(resize(s_mv(i), 28));
+                        nx_v := s_nmv(i);
                     else
                         nx_v := s_phv(i) + stp;
                     end if;
                     s_phv(i) <= nx_v;
                     cur_v := nx_v;
                     -- horizontal restart at line's first pixel
-                    cur_h := -signed(resize(s_mh(i), 28));
+                    cur_h := s_nmh(i);
                     s_phh(i) <= cur_h + stp;
                 elsif s_timing.avid = '1' then
                     cur_h := s_phh(i);
