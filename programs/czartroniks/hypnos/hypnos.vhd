@@ -764,7 +764,8 @@ architecture hypnos of program_top is
     signal s29_h   : unsigned(5 downto 0) := (others => '0');
     signal s29_mx  : signed(11 downto 0) := (others => '0');
     signal s30_lg  : signed(11 downto 0) := (others => '0');
-    signal s31_lg, s31_lwp : signed(11 downto 0) := (others => '0');
+    signal s31_lg  : signed(11 downto 0) := (others => '0');
+    signal s31_lwp : std_logic := '0';                                -- lg + 128 > 0
     signal s32_lw  : signed(11 downto 0) := (others => '0');
     signal s33_h   : std_logic := '0';                                -- half-octave step
     signal s33_iw  : integer range -16 to 0 := -16;
@@ -1448,10 +1449,14 @@ begin
             if vlg > 255 then vlg := to_signed(255, 12); end if;
             s30_lg <= vlg;
             -- S31
+            -- (lg + (lg + 128) is formed as 2 lg + 128: written as a sum of two
+            -- registers, yosys merges their identical low 7 bits and the adder
+            -- gets the SAME net on both carry inputs, which livelocks router1)
             s31_lg  <= s30_lg;
-            s31_lwp <= s30_lg + 128;
+            vlw := s30_lg + 128;
+            if vlw > 0 then s31_lwp <= '1'; else s31_lwp <= '0'; end if;
             -- S32
-            if s31_lwp > 0 then s32_lw <= s31_lg + s31_lwp; else s32_lw <= s31_lg; end if;
+            if s31_lwp = '1' then s32_lw <= shift_left(s31_lg, 1) + 128; else s32_lw <= s31_lg; end if;
             -- S33: clamp to 16 octaves (rings wider than 2^16 px need no edges)
             vlw := s32_lw;
             if vlw < -1023 then vlw := to_signed(-1023, 12); end if;
