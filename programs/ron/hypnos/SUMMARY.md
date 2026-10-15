@@ -88,3 +88,22 @@ glide in one state was a 52–62 MHz critical path).
   width hysteresis (CORDIC engine, B/W).
 - v0.3: Catch-Up, Invert, solid centre. v0.2: CORDIC true circles + spiral.
   v0.1: octagon metric (hypnos_square, removed 2026-09-27).
+
+## Community port — fit for the stock SDK (v1.0.2, 2026-10-15)
+- The stock LZX SDK builds 8 configs; its SD Standalone core is ~600 LC larger
+  than HD. v1.0.1 packed to 8299/7680 LC there and 7719 on HD Dual, so it did
+  not fit even HD.
+- v1.0.2, three bit-exact changes:
+  1. **Booth multipliers.** Every per-pixel multiply (`s13_gp/ap`, `vsp`,
+     `s20_sp`, `s23_ph/pl`, `s31_ph/pl`, `s43_py`) is a hand-written radix-4
+     Booth (`bmul`; `bmul_u` for the unsigned `s31` products, sliced to
+     width). Each operand-width pair was checked exhaustively in Python.
+  2. **One shift for the phase.** The S33 scale (`<< k` for k >= 0,
+     `>> -k` for k < 0) is one left shift by k+17 and a 21-bit window instead
+     of two barrel shifters and a mux; k = -17 (the clamp) still gives zero.
+  3. **Shared centre glide.** The two centre glides (x at sequencer states
+     37..35, y at 21..19) share one datapath. Snapping to the target is
+     c + (tg - c) = tg exactly, so it goes through the same adder.
+- Proven bit-exact against v1.0.1: GHDL side-by-side, 40 frames (403 x 201
+  raster), knobs and switches changing mid-picture, 0 mismatches in 3.24 M clocks.
+- Packed LC (stock SDK): SD Standalone 8299 → 7630, HD Dual 7719 → 7071.
