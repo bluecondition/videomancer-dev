@@ -16,7 +16,7 @@ description = "Scanlines fray into filaments to the right of every edge. P12 len
 parameter_id = "rotary_potentiometer_1"
 name_label = "Pattern"
 value_labels = ["Dash", "Morse", "Comet", "Beads", "Sparks", "Bits", "Stutter", "Fray"]
-initial_value_label = "Dash"
+initial_value_label = "Morse"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
@@ -24,14 +24,14 @@ name_label = "Thresh"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 205
+initial_value = 210
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
 name_label = "Colour"
 value_labels = ["Hold", "Glow", "Negative", "White", "Rainbow", "Polarity", "Heat", "Tint"]
-initial_value_label = "Hold"
+initial_value_label = "Glow"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
@@ -39,7 +39,7 @@ name_label = "Period"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 847
+initial_value = 856
 suffix_label = "%"
 
 [[parameter]]
@@ -48,7 +48,7 @@ name_label = "Bundle"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 256
+initial_value = 418
 suffix_label = "%"
 
 [[parameter]]
@@ -57,7 +57,7 @@ name_label = "Density"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 896
+initial_value = 326
 suffix_label = "%"
 
 [[parameter]]
@@ -96,7 +96,7 @@ name_label = "Length"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 277
 suffix_label = "%"
 
 [[preset]]
