@@ -26,7 +26,7 @@ name_label = "Dropout"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 300
+initial_value = 886
 display_float_digits = 1
 suffix_label = "%"
 
@@ -36,7 +36,7 @@ name_label = "Hiss"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 240
+initial_value = 755
 display_float_digits = 1
 suffix_label = "%"
 
@@ -46,7 +46,7 @@ name_label = "Drift"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 300
+initial_value = 403
 display_float_digits = 1
 suffix_label = "%"
 
@@ -56,7 +56,7 @@ name_label = "Converge"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 660
+initial_value = 0
 display_float_digits = 1
 suffix_label = "%"
 
@@ -66,7 +66,7 @@ name_label = "Glow"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 380
+initial_value = 379
 display_float_digits = 1
 suffix_label = "%"
 
@@ -76,7 +76,7 @@ name_label = "Tube"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 420
+initial_value = 307
 display_float_digits = 1
 suffix_label = "%"
 
@@ -116,7 +116,7 @@ name_label = "Skew"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 512
+initial_value = 1023
 display_float_digits = 1
 suffix_label = "%"
 
