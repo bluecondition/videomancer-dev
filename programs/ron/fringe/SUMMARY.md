@@ -216,3 +216,26 @@ pipeline stages — adding stages at 92 % fill regresses it, per the HX4K
 high-utilisation rule.  The two CORDICs (~1200 LCs together) are the only block
 big enough to matter, and cutting them below 8 iterations puts a visible wobble
 on the spoke edges (~15 px at the frame edge for 6 iterations).
+
+## Community port — fit for the stock SDK (v1.0.2, 2026-10-15)
+- The stock LZX SDK builds 8 configs; its SD Standalone core is ~600 LC larger
+  than HD. v1.0.1 packed to 8071/7680 LC there (HD Dual 7489).
+- v1.0.2, two bit-exact changes:
+  1. **CORDIC angle from a ROM.** The angle is Sum(+-atan_i) over the 8
+     iteration directions (no wrap: |z| <= 1131). So instead of accumulating
+     it stage by stage (`cordz`, 16 adders), the direction bits ride down the
+     pipe, and a 256-entry ROM per layer (`C_ZROM`, 1 EBR each) turns them
+     into z on the last stage's clock.
+  2. **Serial glide.** The five glide accumulators step on one datapath while
+     the arrays rotate (5 clocks). That happens at the end of each frame's
+     sequence, after it has read them, using the targets latched at that
+     vsync: exactly the update the next vsync used to make. There is no
+     power-up pass: the initial accumulators already equal their initial
+     targets x 64, so the original's first update was a no-op. An early build
+     did a power-up pass, which raced the first frame sequence; the GHDL proof
+     caught it.
+- Proven bit-exact against v1.0.1: GHDL side-by-side, 40 frames (403 x 201
+  raster), knobs and switches changing mid-picture, 0 mismatches in 3.24 M clocks.
+- Packed LC (stock SDK): SD Standalone 8071 → 7620, HD Dual 7489 → 7056.
+- Stock build: all 8 configs on seed 1; own HD timing (core without the Sync
+  Out generator) 83.5/90.4/84.4 MHz Analog/HDMI/Dual.

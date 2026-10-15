@@ -186,7 +186,30 @@ architecture fringe of program_top is
     type t_cang is array(0 to C_CW - 1) of signed(12 downto 0);
     type t_cb   is array(0 to C_CW - 1) of std_logic;
     signal cordx, cordy : t_cord := (others => (others => '0'));
-    signal cordz        : t_cang := (others => (others => '0'));
+    -- The angle is Sum(+-atan_i) over the 8 iteration directions (no wrap:
+    -- |z| <= 1131), so instead of accumulating it stage by stage the
+    -- direction bits ride down the pipe (bit i = iteration i went +) and a
+    -- 256-entry ROM per layer turns them into z on the last stage's clock.
+    type t_cdv is array(0 to C_CW - 1) of std_logic_vector(7 downto 0);
+    signal cdv          : t_cdv := (others => (others => '0'));
+    type t_zrom is array(0 to 255) of std_logic_vector(15 downto 0);
+    function f_zrom return t_zrom is
+        variable v : t_zrom;
+        variable z : integer;
+    begin
+        for a in 0 to 255 loop
+            z := 0;
+            for i in 0 to 7 loop
+                if (a / 2**i) mod 2 = 1 then z := z + C_ATAN(i);
+                else                         z := z - C_ATAN(i); end if;
+            end loop;
+            v(a) := std_logic_vector(to_signed(z, 16));
+        end loop;
+        return v;
+    end function;
+    constant C_ZROM : t_zrom := f_zrom;
+    type t_l16v is array(0 to 1) of std_logic_vector(15 downto 0);
+    signal zr           : t_l16v := (others => (others => '0'));
     signal cordsw, cdxs, cdys : t_cb := (others => '0');
 
     ----------------------------------------------------------------------
@@ -272,6 +295,9 @@ architecture fringe of program_top is
     ----------------------------------------------------------------------
     signal s_ph    : integer range 0 to 2 := 0;
     signal s_seq   : integer range 0 to 8 := 0;
+    -- (starts idle: the accumulators' initial values already equal their
+    -- initial targets x 64, so the first vsync's update would be a no-op)
+    signal s_grot  : integer range 0 to 5 := 0;
     signal s_midx  : integer range 0 to 7 := 0;
     signal s_mbit  : integer range 0 to 13 := 0;
     signal s_mcand : unsigned(23 downto 0) := (others => '0');
@@ -403,6 +429,25 @@ begin
         variable v_L   : integer range 0 to 1;
     begin
         if rising_edge(clk) then
+            -- One-pole slew of the five glide accumulators toward the
+            -- targets latched at this frame's vsync, done once the frame
+            -- sequence has read them: one shared
+            -- datapath on slot 0 while both arrays rotate one place per
+            -- clock (5 steps = back in place).  This is exactly the update
+            -- the next vsync used to make, a frame of lag that is nothing
+            -- against a 16-frame time constant.
+            if s_grot > 0 then
+                v_tg := shift_left(signed(resize(s_gtgt(0), 18)), 6);
+                v_ac := signed(resize(s_gacc(0), 18));
+                v_nx := v_ac + shift_right(v_tg - v_ac, C_GSH);
+                for i in 0 to 3 loop
+                    s_gacc(i) <= s_gacc(i + 1);
+                    s_gtgt(i) <= s_gtgt(i + 1);
+                end loop;
+                s_gacc(4) <= unsigned(std_logic_vector(v_nx(15 downto 0)));
+                s_gtgt(4) <= s_gtgt(0);
+                s_grot <= s_grot - 1;
+            end if;
             if s_vs_pulse = '1' then
                 -- glide targets: scale A, phase A, scale B, phase B, slider
                 s_gtgt(0) <= unsigned(registers_in(1));
@@ -410,15 +455,9 @@ begin
                 s_gtgt(2) <= unsigned(registers_in(4));
                 s_gtgt(3) <= unsigned(registers_in(5));
                 s_gtgt(4) <= not unsigned(registers_in(7));   -- reversed slider
-                -- one-pole slew toward the target latched LAST frame; a frame
-                -- of extra lag is nothing against a 16-frame time constant,
-                -- and it keeps the panel read off this cycle's adder path.
-                for i in 0 to 4 loop
-                    v_tg := shift_left(signed(resize(s_gtgt(i), 18)), 6);
-                    v_ac := signed(resize(s_gacc(i), 18));
-                    v_nx := v_ac + shift_right(v_tg - v_ac, C_GSH);
-                    s_gacc(i) <= unsigned(std_logic_vector(v_nx(15 downto 0)));
-                end loop;
+                -- (the glide accumulators were stepped toward the targets
+                -- latched LAST frame at the end of last frame's sequence --
+                -- see s_grot below -- so they hold this frame's values now)
 
                 s_ktexa   <= unsigned(registers_in(0));
                 s_ktexb   <= unsigned(registers_in(3));
@@ -557,6 +596,7 @@ begin
                         s_midx <= 0;
                         s_mbit <= 0;
                         s_ph   <= 2;
+                        s_grot <= 5;
                 end case;
                 if s_seq > 0 then s_seq <= s_seq - 1; end if;
 
@@ -747,7 +787,8 @@ begin
     ------------------------------------------------------------------------
     p_cordic : process(clk)
         variable x0, y0 : signed(16 downto 0);
-        variable z0     : signed(12 downto 0);
+        variable d0, d1 : std_logic;
+        variable v_dv   : std_logic_vector(7 downto 0);
         variable b      : integer;
     begin
         if rising_edge(clk) then
@@ -755,29 +796,36 @@ begin
                 b := L * (C_NS + 1);
                 cordx (b) <= shift_left(signed(resize(r2_hi(L), 17)), C_CG);
                 cordy (b) <= shift_left(signed(resize(r2_lo(L), 17)), C_CG);
-                cordz (b) <= (others => '0');
+                cdv   (b) <= (others => '0');
                 cordsw(b) <= r2_sw(L);
                 cdxs  (b) <= r2_xs(L);
                 cdys  (b) <= r2_ys(L);
 
                 for s in 0 to C_NS - 1 loop
                     if cordy(b + s) >= 0 then
+                        d0 := '1';
                         x0 := cordx(b + s) + shift_right(cordy(b + s), 2 * s);
                         y0 := cordy(b + s) - shift_right(cordx(b + s), 2 * s);
-                        z0 := cordz(b + s) + to_signed(C_ATAN(2 * s), 13);
                     else
+                        d0 := '0';
                         x0 := cordx(b + s) - shift_right(cordy(b + s), 2 * s);
                         y0 := cordy(b + s) + shift_right(cordx(b + s), 2 * s);
-                        z0 := cordz(b + s) - to_signed(C_ATAN(2 * s), 13);
                     end if;
                     if y0 >= 0 then
+                        d1 := '1';
                         cordx(b + s + 1) <= x0 + shift_right(y0, 2 * s + 1);
                         cordy(b + s + 1) <= y0 - shift_right(x0, 2 * s + 1);
-                        cordz(b + s + 1) <= z0 + to_signed(C_ATAN(2 * s + 1), 13);
                     else
+                        d1 := '0';
                         cordx(b + s + 1) <= x0 - shift_right(y0, 2 * s + 1);
                         cordy(b + s + 1) <= y0 + shift_right(x0, 2 * s + 1);
-                        cordz(b + s + 1) <= z0 - to_signed(C_ATAN(2 * s + 1), 13);
+                    end if;
+                    v_dv := cdv(b + s);
+                    v_dv(2 * s)     := d0;
+                    v_dv(2 * s + 1) := d1;
+                    cdv   (b + s + 1) <= v_dv;
+                    if s = C_NS - 1 then
+                        zr(L) <= C_ZROM(to_integer(unsigned(v_dv)));
                     end if;
                     cordsw(b + s + 1) <= cordsw(b + s);
                     cdxs  (b + s + 1) <= cdxs  (b + s);
@@ -802,8 +850,8 @@ begin
                 b := L * (C_NS + 1) + C_NS;
                 v_r := shift_right(cordx(b), C_CG);
                 ru_r(L) <= unsigned(std_logic_vector(v_r(12 downto 0)));
-                if cordsw(b) = '1' then v_m := to_signed(1024, 13) - cordz(b);
-                else                    v_m := cordz(b); end if;
+                if cordsw(b) = '1' then v_m := to_signed(1024, 13) - signed(zr(L)(12 downto 0));
+                else                    v_m := signed(zr(L)(12 downto 0)); end if;
                 if    cdxs(b) = '0' and cdys(b) = '0' then ru_ang(L) <= v_m;
                 elsif cdxs(b) = '1' and cdys(b) = '0' then ru_ang(L) <= to_signed(2048, 13) - v_m;
                 elsif cdxs(b) = '1' and cdys(b) = '1' then ru_ang(L) <= to_signed(2048, 13) + v_m;
