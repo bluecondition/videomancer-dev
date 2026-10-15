@@ -20,7 +20,7 @@ name_label = "Threshold"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 120
+initial_value = 388
 display_float_digits = 1
 suffix_label = "%"
 
@@ -30,7 +30,7 @@ name_label = "Ink"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 800
+initial_value = 864
 display_float_digits = 1
 suffix_label = "%"
 
@@ -40,7 +40,7 @@ name_label = "Noise"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 350
+initial_value = 424
 display_float_digits = 1
 suffix_label = "%"
 
@@ -50,7 +50,7 @@ name_label = "Speed"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 200
+initial_value = 371
 display_float_digits = 1
 suffix_label = "%"
 
@@ -60,7 +60,7 @@ name_label = "Cells"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 350
+initial_value = 452
 display_float_digits = 1
 suffix_label = "%"
 
@@ -68,7 +68,7 @@ suffix_label = "%"
 parameter_id = "rotary_potentiometer_6"
 name_label = "Rows"
 value_labels = ["Square", "Wide", "Wider", "Strip"]
-initial_value_label = "Square"
+initial_value_label = "Strip"
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
@@ -80,25 +80,25 @@ initial_value_label = "Over"
 parameter_id = "toggle_switch_8"
 name_label = "Noise Moves"
 value_labels = ["Content", "Cells"]
-initial_value_label = "Content"
+initial_value_label = "Cells"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
 name_label = "Pixelate"
 value_labels = ["All", "Luma"]
-initial_value_label = "All"
+initial_value_label = "Luma"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
 name_label = "Line Colour"
 value_labels = ["White", "Source"]
-initial_value_label = "White"
+initial_value_label = "Source"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
 name_label = "Edges From"
 value_labels = ["Smooth", "Blocks"]
-initial_value_label = "Blocks"
+initial_value_label = "Smooth"
 
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
@@ -106,7 +106,7 @@ name_label = "Flow"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 0
+initial_value = 172
 display_float_digits = 1
 suffix_label = "%"
 
