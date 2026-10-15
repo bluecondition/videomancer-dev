@@ -24,7 +24,7 @@ name_label = "Crawl"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 200
+initial_value = 1023
 display_float_digits = 1
 suffix_label = "%"
 
@@ -35,7 +35,7 @@ name_label = "Shape"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 512
+initial_value = 679
 display_float_digits = 0
 suffix_label = "%"
 
@@ -46,7 +46,7 @@ name_label = "Gain"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 766
 display_float_digits = 1
 suffix_label = "%"
 
@@ -56,7 +56,7 @@ name_label = "Width"
 control_mode = "linear"
 display_min_value = 1
 display_max_value = 8
-initial_value = 146
+initial_value = 250
 display_float_digits = 0
 suffix_label = "px"
 
@@ -67,7 +67,7 @@ name_label = "Hold"
 control_mode = "linear"
 display_min_value = 1
 display_max_value = 16
-initial_value = 0
+initial_value = 642
 display_float_digits = 0
 suffix_label = "x"
 
@@ -78,7 +78,7 @@ name_label = "Smear"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 24
+initial_value = 646
 display_float_digits = 0
 suffix_label = "%"
 
@@ -92,7 +92,7 @@ initial_value_label = "Over"
 parameter_id = "toggle_switch_8"
 name_label = "Source"
 value_labels = ["Cells", "Raw"]
-initial_value_label = "Cells"
+initial_value_label = "Raw"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
@@ -120,7 +120,7 @@ name_label = "Cell"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 240
+initial_value = 281
 display_float_digits = 1
 suffix_label = "%"
 
