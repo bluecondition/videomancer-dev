@@ -30,7 +30,7 @@ name_label = "Dot Gain"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 200
-initial_value = 512
+initial_value = 624
 display_float_digits = 0
 suffix_label = "%"
 
@@ -44,7 +44,7 @@ initial_value_label = "Dot"
 parameter_id = "rotary_potentiometer_4"
 name_label = "Height"
 value_labels = ["8 ln", "16 ln", "32 ln", "64 ln"]
-initial_value_label = "16 ln"
+initial_value_label = "64 ln"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
@@ -52,7 +52,7 @@ name_label = "Shift"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 400
+initial_value = 503
 display_float_digits = 1
 suffix_label = "%"
 
@@ -62,7 +62,7 @@ name_label = "Rate"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 700
+initial_value = 840
 display_float_digits = 1
 suffix_label = "%"
 
@@ -76,7 +76,7 @@ initial_value_label = "Dark"
 parameter_id = "toggle_switch_8"
 name_label = "Colour"
 value_labels = ["Mono", "Colour"]
-initial_value_label = "Mono"
+initial_value_label = "Colour"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
@@ -88,7 +88,7 @@ initial_value_label = "Picture"
 parameter_id = "toggle_switch_10"
 name_label = "Band FX"
 value_labels = ["Colour", "Negative"]
-initial_value_label = "Colour"
+initial_value_label = "Negative"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
@@ -102,7 +102,7 @@ name_label = "Density"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 300
+initial_value = 0
 display_float_digits = 1
 suffix_label = "%"
 
