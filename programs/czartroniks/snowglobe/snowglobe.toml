@@ -147,3 +147,9 @@ linear_potentiometer_12 = 340
 name = "Lost Channel"
 rotary_potentiometer_3 = 1023
 rotary_potentiometer_4 = 300
+
+[firmware]
+# nextpnr placement seed for the stock LZX build (one seed, all 8 configs):
+# lower seeds hung nextpnr's router1 (a rip-up livelock) in at least one
+# config; seed 3 builds all 8.
+seed = 3
