@@ -586,3 +586,149 @@ the hd_hdmi critical paths — both now pipelined across free slots. **HW-iterat
 hardware pass; if edge roughness survives these margins, report the output
 video mode). A plain rebuild may land failing HD seeds; reseed with the
 scratchpad `sweep_cfg.sh`.
+
+## Community port — fit for the stock SDK (v2.1.4, 2026-10-15)
+
+- The stock LZX SDK builds 8 configs, and its SD Standalone core is ~600 LC
+  larger than HD. v2.1.3 packed to 8047/7680 LC on SD Standalone, so it did not
+  fit (SD Dual 7609, HD Dual 7570).
+- Now 6714 / 6260 / 6268 (SD Standalone / SD Dual / HD Dual).
+  - router1 builds all 8 configs on seeds 1 and 2.
+  - Own HD timing:
+    - seed 1: 86.8 / 84.7 / 82.1 MHz;
+    - seed 2: 84.3 / 79.8 / 86.0 MHz.
+  - 19 EBR (20 on the Dual configs).
+- Every change is bit-exact against v2.1.3: same y/u/v while avid is high, same
+  syncs, same latency (8). The sequencer, chain, span engine and line seed run
+  on exactly the same clock schedule as before, except that the r_L root starts
+  one clock earlier inside E_LINE (it is read 15 clocks later).
+- Packed LC on SD Standalone after each step (stock SDK, `nextpnr --pack-only`):
+
+  | Step | Change | SD Standalone |
+  |---|---|---|
+  | 0 | v2.1.3 reference | 8047 |
+  | 1 | `no_rw_check` on all 5 RAMs | 7870 (−177) |
+  | 2 | decode tables in EBR + one shared glide datapath | 7345 (−525) |
+  | 3 | shift-form sqrt + one shared radicand adder | 7111 (−234) |
+  | 4 | adder merges and bit tests (list below) | 6742 (−369) |
+  | 5 | timing fix: pre-registered `s - 4` clamp bound | 6732 |
+  | 6 | chain start `2*s` written as a shift (router1 livelock guard) | 6714 |
+
+### What changed
+
+1. **`no_rw_check` on `ram_ex`, `ram_ey`, `lb0`, `lb1` and `s_vd`.** yosys no
+   longer emulates read-before-write (`emulate_transparency` count is 0).
+   - No consumed read can hit the address written in the same clock:
+     - **`s_vd`** reads 2..55 entries behind the write pointer.
+     - **The line buffers.** The display bank is cleared 2 px behind the read.
+       Mark writes go to the other bank. E_CLEAR runs in vertical blanking.
+     - **The chain RAM.** The scan's own write collision at phase 13 is never
+       latched. The vsync-pulse write to address 0 lands while nothing latches
+       a read.
+2. **Per-frame decode tables in EBR (+13 EBR, 19/32 in total).** The tables were
+   generated from a bit-exact model of the old arithmetic (`cascade_tools/genrom.py`).
+   - s_lf is always in [-704, -129], so `s_lf(9:0)` indexes the tables
+     directly.
+   - **`C_SPROM` holds the spacing.** It replaces the 2nd C_MANT ROM, the
+     `-lf` negate and the spacing barrel shifter.
+   - **`C_QPROM` holds Q1.** It replaces the `2^(16-sft)` decoder and the
+     slot-12 product. The slot-12 multiplier request stays as a dummy, so the
+     sequencer's cycle timing is unchanged.
+   - **`C_FNROM` holds fnum.**
+   - **`sft` is now `(not lf(9:6)) + 3`.**
+   - **`C_SLROM` maps s_eff to the octagon slack A and C.** This replaces the
+     araw/acap/clamp/min/shift-add chain. s_eff ≥ 1024 always gives
+     640/905.
+   - Checked exhaustively in GHDL against the original VHDL arithmetic
+     (`cascade_tools/romcheck`, 0 bad over all reachable lf and s_eff).
+3. **One centre-glide datapath** for x (slot 19) and y (slot 18), with operands
+   muxed by the slot parity. It behaves the same as two copies, even if a
+   serrated vsync restarts the sequencer between the two slots.
+4. **Integer sqrt in shift form.**
+   - The radicand shifts out 2 bits per step into a 15-bit remainder, so each
+     step is a 17-bit compare instead of a 27-bit in-place one.
+   - It takes the same 14 steps and gives the same root and remainder.
+     Checked in Python against the old algorithm on 300k inputs, every square
+     and all edge cases.
+   - The three sqrt loads (E_SPAN `m_p`, E_LINE `m_p + dx0'^2`, E_LINE
+     `m_p + dy'^2`) share one 27-bit adder. dy'^2 is captured at slot 17. This
+     replaces `le_r0sq` and its three 27-bit adders.
+5. **Adder merges and bit tests** (−369 LC in total):
+   - `ph1_acc ± Q1`, `sp_rq = R ± |delta|`, the chain's `qdx ± qdy` and
+     `pu ± pv`, and the E_LINE correction step (`d ± s`, `t_k ± 1`): each is now
+     one add/sub with carry-in instead of two adders and a mux.
+   - The chain's settle `d - ceil(d/4)` / `d - floor(d/4)` is now one adder:
+     `d + not(d>>2) + c`.
+   - `sp_rr` reuses its 13-bit sum (bit 12 = past C_RCL).
+   - The K1/K2 detent (`|k-512| < 14`) is a bit test on the knob, and `k-512`
+     is a bit flip.
+   - Catch-Up's `|mv| < 2`, the E_SPAN `<= 0` / `> 0` edge tests, and the
+     raster `> 16` / `> 8` thresholds are bit tests.
+   - The first-line dy seeds (`-cy (+1)`) are `not(cy) + c`, and p_acc's two
+     dyb adders share one. `2*dx0'+1` is a concatenation.
+6. **Timing fix.** `s - 4` is pre-registered at slot 14. The slot-11 clamp
+   `dabs + 4 > s` is now `dabs > s - 4`. Before this, an add and a compare fed
+   the s_dabs enable, and that was the own-HD HDMI critical path (70.3 MHz on
+   seed 1).
+
+7. **No same-net operand pairs.** The chain start `s + s` is now
+   `shift_left(s, 1)`.
+   - `tools/dupin.py` reports 0 `CARRY I0==I1` and 0 duplicate-input LUTs on
+     the synthesized netlist, in all 8 configs.
+   - The intermediate step-5 netlist was already clean on SD Standalone,
+     because yosys had turned that `x + x` into a shift itself. Writing it as a
+     shift makes this hold by construction.
+
+### Exactness caveats (reachable-state arguments, not visible to the GHDL proof)
+- **Chain settle adder.** The one-adder form differs from v2.1.3 only for
+  d in [32765, 32767], where v2.1.3's 16-bit `d+3` wraps. Here |d| is bounded by
+  twice the ring-offset range, which is well under 2^14.
+- **First-line dy seeds.** The `not(cy) + c` form differs only at cy = -8192.
+  s_cy stays within [-2560, 4606].
+- **`no_rw_check`.** This relies on real video timing: a vertical blank of at
+  least ~6k clocks HD / ~2.4k SD after vsync. The proof's GHDL model ignores the
+  attribute.
+
+### Proof (GHDL side by side against the staged v2.1.3, 0 mismatches)
+
+All runs use `cascade_tools/run_eq.sh`, which is `run_equiv2.sh` plus `EQ_CFG`
+(the core config package) and `EQ_TPLF`. They cover both ring counts:
+`sd_standalone` (C_NR 48) and `hd_hdmi` (C_NR 126).
+
+| Config | Raster (H_ACT/H_TOTAL x V_TOTAL) | Stimulus | Frames | Clocks compared |
+|---|---|---|---|---|
+| SD | 320/403 x 201 | standard | 128 | 10,368,384 |
+| HD | 320/403 x 201 (per-line pass overruns the line: l_pend, vblank work spills into active) | standard | 128 | 10,368,384 |
+| SD | 720/863 x 201 | standard | 40 | 6,938,520 |
+| HD | 1920/2203 x 201 | standard | 24 | 10,627,272 |
+| SD | 320/863 x 201 | knobs held 8 frames, all 32 switch combos, Catch-Up active | 256 | 44,406,528 |
+| SD | 320/863 x 201 | K5 alternating 0/1023 | 64 | 11,101,632 |
+| HD | 640/2203 x 201 | K5 alternating 0/1023, held 4 frames | 48 | 21,254,544 |
+| SD | 320/863 x 201 | K5 held at 0 for 120 frames, then 1023 (the band clamp binds) | 200 | 34,692,600 |
+
+- **Mutations** (one changed line each, run against the reference).
+  - Caught:
+    - Q1 table LSB flipped;
+    - glide W/H swapped;
+    - sqrt trial `01` → `10`;
+    - settle carry-in;
+    - `ph1_acc` carry-in;
+    - `sp_rr` limit bit;
+    - correction step not updating `t_k`;
+    - slack-table A bit 9;
+    - radicand adder operand;
+    - p_acc dy step;
+    - `sp_rq` carry-in;
+    - `s - 4` → `s - 3` (with K5 held at 0);
+    - chain-start `2*s` → `s`.
+  - Not caught:
+    - Swapping the correction step's ±1 is an equivalent mutant. Only the
+      parity of `t_k` reaches the picture, and +1/−1 have the same parity.
+    - The `sp_wr1 = 0` term of `wr1 <= 0` needs a right disc edge exactly at
+      x = 0. That is a pure Boolean identity.
+- **Exhaustive table check.** `cascade_tools/romcheck` compares every reachable
+  s_lf (576 values) and s_eff (0..2048) against the original VHDL arithmetic:
+  0 bad.
+
+- **Stock build:** seed 1 builds all 8 configs (seed 2 also). Own HD 86.8 / 84.7 / 82.1 MHz (analog / HDMI / dual).
+- **HW check wanted:** general look in all modes (no_rw_check on five RAMs and the new EBR tables can't be checked in sim).
