@@ -1172,8 +1172,21 @@ architecture pulp of program_top is
     signal ha_n2 : unsigned(11 downto 0) := (others => '0');
 
     -- E3: folded 8b metric inputs + region flags; sprite data lands
-    type t_u8p is array (0 to 3) of unsigned(7 downto 0);
-    signal bx3, by3 : t_u8p := (others => (others => '0'));
+    -- dot-distance squares: x*x (x 0..255) kept to 15 bits, bits 14..5 --
+    -- one 256 x 10 ROM per square (7 EBRs; they were 7 fabric multipliers)
+    type t_sq is array (0 to 255) of std_logic_vector(9 downto 0);
+    function f_sq return t_sq is
+        variable v : t_sq;
+        variable q : unsigned(15 downto 0);
+    begin
+        for i in 0 to 255 loop
+            q := to_unsigned(i * i, 16);
+            v(i) := std_logic_vector(q(14 downto 5));
+        end loop;
+        return v;
+    end function;
+    constant C_SQ : t_sq := f_sq;
+    signal sqa3, sqb3 : t_u10p := (others => (others => '0'));
     signal rg3 : std_logic_vector(0 to 3) := (others => '0');
     signal r3, g3, b3 : signed(11 downto 0) := (others => '0');
     signal edge3 : std_logic := '0';
@@ -1184,8 +1197,7 @@ architecture pulp of program_top is
     signal y3t, y4t, y5t : unsigned(9 downto 0) := (others => '0');
 
     -- E4: squares (alone)
-    type t_u15p is array (0 to 3) of unsigned(14 downto 0);
-    signal qa4, qb4 : t_u15p := (others => (others => '0'));
+    signal qa4, qb4 : t_u10p := (others => (others => '0'));
     signal rg4 : std_logic_vector(0 to 3) := (others => '0');
     signal r4, g4, b4 : unsigned(9 downto 0) := (others => '0');
     signal nz4 : signed(6 downto 0) := (others => '0');
@@ -2048,6 +2060,7 @@ begin
         variable v_um, v_vm : unsigned(11 downto 0);
         variable v_vk : unsigned(11 downto 0);
         variable v_eu, v_ev : unsigned(9 downto 0);
+        variable v_bx, v_by : unsigned(7 downto 0);
         variable v_sum  : unsigned(11 downto 0);
         variable v_mac  : signed(12 downto 0);
         variable v_nz   : signed(7 downto 0);
@@ -2247,8 +2260,7 @@ begin
                         rg3(2) <= '0';
                         v_eu := du2(2);
                     end if;
-                    bx3(2) <= v_eu(8 downto 1);
-                    by3(2) <= (others => '0');
+                    sqa3(2) <= unsigned(C_SQ(to_integer(v_eu(8 downto 1))));
                 else
                     if resize(du2(p), 11) + resize(dv2(p), 11) > 512 then
                         rg3(p) <= '1';
@@ -2261,23 +2273,25 @@ begin
                     end if;
                     case s_shp is
                         when "000" =>       -- line screen
-                            bx3(p) <= v_ev(9 downto 2);
-                            by3(p) <= (others => '0');
+                            v_bx := v_ev(9 downto 2);
+                            v_by := (others => '0');
                         when "001" =>       -- diamond
-                            bx3(p) <= resize(shift_right(
+                            v_bx := resize(shift_right(
                                 resize(v_eu, 11) + resize(v_ev, 11), 2), 8);
-                            by3(p) <= (others => '0');
+                            v_by := (others => '0');
                         when "100" =>       -- square
                             if v_eu > v_ev then
-                                bx3(p) <= v_eu(9 downto 2);
+                                v_bx := v_eu(9 downto 2);
                             else
-                                bx3(p) <= v_ev(9 downto 2);
+                                v_bx := v_ev(9 downto 2);
                             end if;
-                            by3(p) <= (others => '0');
+                            v_by := (others => '0');
                         when others =>      -- round / elliptical
-                            bx3(p) <= v_eu(9 downto 2);
-                            by3(p) <= v_ev(9 downto 2);
+                            v_bx := v_eu(9 downto 2);
+                            v_by := v_ev(9 downto 2);
                     end case;
+                    sqa3(p) <= unsigned(C_SQ(to_integer(v_bx)));
+                    sqb3(p) <= unsigned(C_SQ(to_integer(v_by)));
                 end if;
             end loop;
 
@@ -2313,12 +2327,12 @@ begin
             y5t <= y4t;
 
             --------------------------------------------------------------
-            -- E4: the squares (alone), RGB clamp, sobel magnitude,
+            -- E4: the squares (ROM data re-registered), RGB clamp, sobel magnitude,
             -- sprite decode, grain hold
             --------------------------------------------------------------
             for p in 0 to 3 loop
-                qa4(p) <= resize(bx3(p) * bx3(p), 15);
-                qb4(p) <= resize(by3(p) * by3(p), 15);
+                qa4(p) <= sqa3(p);
+                qb4(p) <= sqb3(p);
             end loop;
             rg4 <= rg3;
 
@@ -2366,23 +2380,23 @@ begin
             --------------------------------------------------------------
             for p in 0 to 3 loop
                 if p = 2 then
-                    v_sum := resize(qa4(2)(14 downto 5), 12);
+                    v_sum := resize(qa4(2)(9 downto 0), 12);
                 else
                     case s_sac is
                         when "00" =>
-                            v_sum := resize(qa4(p)(14 downto 5), 12);
+                            v_sum := resize(qa4(p)(9 downto 0), 12);
                         when "01" =>
-                            v_sum := resize(qa4(p)(14 downto 6), 12);
+                            v_sum := resize(qa4(p)(9 downto 1), 12);
                         when others =>
                             v_sum := (others => '0');
                     end case;
                     case s_sbc is
                         when "00" =>
                             v_sum := v_sum
-                                     + resize(qb4(p)(14 downto 5), 12);
+                                     + resize(qb4(p)(9 downto 0), 12);
                         when "01" =>
                             v_sum := v_sum
-                                     + resize(qb4(p)(14 downto 6), 12);
+                                     + resize(qb4(p)(9 downto 1), 12);
                         when others =>
                             null;
                     end case;
