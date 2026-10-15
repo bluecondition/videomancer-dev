@@ -107,3 +107,42 @@ glide in one state was a 52–62 MHz critical path).
 - Proven bit-exact against v1.0.1: GHDL side-by-side, 40 frames (403 x 201
   raster), knobs and switches changing mid-picture, 0 mismatches in 3.24 M clocks.
 - Packed LC (stock SDK): SD Standalone 8299 → 7630, HD Dual 7719 → 7071.
+
+## Community port — router1 livelock fix (v1.0.3, 2026-10-15)
+
+- **Cause of the stock-router1 hangs.** Not global promotion. `S32` computed
+  `s31_lg + s31_lwp` with `s31_lwp = s30_lg + 128` and `s31_lg = s30_lg`.
+  Adding 128 leaves bits 0..6 unchanged, so yosys merged the low 7 FFs of
+  `s31_lwp` into `s31_lg`. That left 7 `SB_CARRY` cells with I0 == I1 (one net
+  added to itself). nextpnr packs each into an LC whose LUT needs that net on
+  both I1 and I2.
+- **How router1 hangs on that LC.** On iCE40 one physical LUT pin feeds only
+  one logical LUT input: the permutation pips leaving `lutff_N/in_K` share a
+  single switch. Router1 routes the arc to `in_1_lut` through the physical pin
+  the same net already holds for `in_2_lut`, and that rips up its own other
+  arc. Then the other arc does the same, and so on forever.
+  - Router debug traces from 5 failing (config, seed) pairs all show this on a
+    `s31_lg[k]` LC.
+  - The remaining-arcs count freezes, and each 1000-iteration batch is 1000
+    ripups.
+  - The ripup penalty grows only ~0.16 per round trip, so router1 never
+    escapes.
+- **Fix (bit-exact).** S31 now registers the flag `s30_lg + 128 > 0`, and S32
+  forms `shift_left(s31_lg, 1) + 128`. That equals `lg + (lg + 128)` mod 2^12.
+  The netlist now has 0 duplicate-input LCs, in every config.
+- **Unchanged.** The same 8 nets are still promoted to globals (clock, the
+  141-fanout EBR init-emulation reset, the blanking-gate reset, `sm_go`, the
+  avid enables). No reset/CE restructuring was needed.
+- **Result with the stock router1 command.**
+  - Builds 8/8 on seeds 1, 2, 3, 4 and 5. The reference v1.0.2 built at best
+    7/8, on seed 4.
+  - Own HD (Sync-Out-free core) is 85–98 MHz on every seed.
+- **Packed LC** (stock SDK): SD Standalone 7630 → 7617, SD Dual 7128, HD Dual
+  7060.
+- **Proof.** Bit-exact against staged v1.0.2:
+  - GHDL side by side, 403x201 x 40 frames: 0 mismatches / 3,240,120 clocks;
+  - 1003x201 x 16 frames: 0 / 3,225,648;
+  - the rewritten S31/S32 stage, checked exhaustively in Python over all 4096
+    values of `s30_lg`: 0 mismatches;
+  - mutants caught: `+160` for `+128` gave 14 mismatches in 6 frames; a
+    threshold of `> 32` for `> 0` gave 41 in 12 frames.
