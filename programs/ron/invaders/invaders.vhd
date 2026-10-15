@@ -547,6 +547,8 @@ architecture invaders of program_top is
     signal s_boot_count    : unsigned(3 downto 0) := (others => '0');
     type t_bunker_x_arr is array (0 to C_BUNKER_COUNT - 1) of signed(11 downto 0);
     signal s_bunker_x      : t_bunker_x_arr := (others => (others => '0'));
+    signal s_bx_k          : unsigned(1 downto 0) := (others => '0');
+    signal s_bx_acc        : signed(11 downto 0) := (others => '0');
 
     signal s_ship_x_max    : unsigned(11 downto 0)
                               := to_unsigned(960 - C_SHIP_W, 12);
@@ -561,8 +563,29 @@ architecture invaders of program_top is
                               := (others => '1');
     type t_bunker_bits is array (0 to C_BUNKER_COUNT - 1)
                           of std_logic_vector(0 to C_CHUNKS_PER_BNK - 1);
-    signal s_bunkers       : t_bunker_bits := (others => (others => '1'));
-    signal s_bnk_clr       : t_bunker_bits := (others => (others => '0'));
+    -- Bunker chunk bits live in two 32 x 1 EBRs: even bunkers (0, 2) and odd
+    -- (1, 3), address = bunker(1) & chunk.  A pixel needs one chunk bit per
+    -- RAM (neighbouring bunkers can overlap only on rasters under 512 px,
+    -- and are never in the same RAM); the writes are one erosion per frame
+    -- and the 32-clock refill on a game reset, all in vertical blanking.
+    type t_bnk_ram is array (0 to 31) of std_logic_vector(0 downto 0);
+    signal s_bnk_ram_e, s_bnk_ram_o : t_bnk_ram := (others => (others => '1'));
+    attribute ram_style : string;
+    attribute ram_style of s_bnk_ram_e : signal is "block";
+    attribute ram_style of s_bnk_ram_o : signal is "block";
+    attribute no_rw_check : boolean;
+    attribute no_rw_check of s_bnk_ram_e : signal is true;
+    attribute no_rw_check of s_bnk_ram_o : signal is true;
+    signal s_bnk_qe, s_bnk_qo   : std_logic_vector(0 downto 0) := (others => '0');
+    signal s_bnk_rae, s_bnk_rao : unsigned(4 downto 0);
+    signal s_bnk_ene, s_bnk_eno : std_logic := '0';
+    signal s_bnk_we             : std_logic_vector(1 downto 0) := "00";
+    signal s_bnk_wa             : unsigned(4 downto 0) := (others => '0');
+    signal s_bnk_wd             : std_logic := '1';
+    signal s_bnk_rcnt           : unsigned(5 downto 0) := (others => '1');
+    signal s_hit_mb_v_d         : std_logic := '0';
+    signal s_hit_mb_bnk_d       : unsigned(1 downto 0) := (others => '0');
+    signal s_hit_mb_chk_d       : unsigned(3 downto 0) := (others => '0');
     signal s_bnk_rst_stb   : std_logic := '0';   -- = whole-game reset strobe
     signal s_bnk_clr_stb   : std_logic := '0';
 
@@ -959,7 +982,7 @@ architecture invaders of program_top is
                                 := (others => '0');
     signal s_stg4_in_bunker_any : std_logic := '0';
     signal s_stg4_bnk_bit    : unsigned(3 downto 0) := (others => '0');
-    signal s_stg4_chunk_alive : std_logic := '0';
+    signal s_stg4_chunk_alive : std_logic;
     signal s_stg4_in_expl    : std_logic := '0';
     signal s_stg4_expl_bit   : unsigned(3 downto 0) := (others => '0');
     signal s_stg4_in_cloud   : std_logic := '0';
@@ -1071,6 +1094,7 @@ begin
 
     p_layout : process(clk)
         variable v_h_div_8 : integer range 0 to 511;
+        variable v_bx      : signed(11 downto 0);
         variable v_v       : integer range 0 to 4095;
     begin
         if rising_edge(clk) then
@@ -1091,12 +1115,18 @@ begin
                 s_bunker_y <= to_signed(0, 12);
             end if;
 
-            -- Bunker X at fractions 1/8, 3/8, 5/8, 7/8 of h_active
+            -- Bunker X at fractions 1/8, 3/8, 5/8, 7/8 of h_active: one
+            -- accumulator walks them in turn (bunker k = bunker k-1 + h/4),
+            -- re-deriving all four every 4 clocks from the measured width
             v_h_div_8 := to_integer(s_measured_h) / 8;
-            s_bunker_x(0) <= to_signed(    v_h_div_8 - C_BUNKER_W / 2, 12);
-            s_bunker_x(1) <= to_signed(3 * v_h_div_8 - C_BUNKER_W / 2, 12);
-            s_bunker_x(2) <= to_signed(5 * v_h_div_8 - C_BUNKER_W / 2, 12);
-            s_bunker_x(3) <= to_signed(7 * v_h_div_8 - C_BUNKER_W / 2, 12);
+            s_bx_k <= s_bx_k + 1;
+            if s_bx_k = 0 then
+                v_bx := to_signed(v_h_div_8 - C_BUNKER_W / 2, 12);
+            else
+                v_bx := s_bx_acc + to_signed(2 * v_h_div_8, 12);
+            end if;
+            s_bx_acc <= v_bx;
+            s_bunker_x(to_integer(s_bx_k)) <= v_bx;
 
             if to_integer(s_measured_h) > C_SHIP_W then
                 s_ship_x_max <= s_measured_h - to_unsigned(C_SHIP_W, 12);
@@ -1933,26 +1963,54 @@ begin
     p_bunkers : process(clk)
     begin
         if rising_edge(clk) then
-            for b in 0 to C_BUNKER_COUNT - 1 loop
-                for c in 0 to C_CHUNKS_PER_BNK - 1 loop
-                    if s_hit_mb_v = '1' and to_integer(s_hit_mb_bnk) = b and
-                       to_integer(s_hit_mb_chk) = c then
-                        s_bnk_clr(b)(c) <= '1';
-                    else
-                        s_bnk_clr(b)(c) <= '0';
-                    end if;
-                end loop;
-            end loop;
-
+            -- the erosion uses the hit as it stood one clock before the
+            -- strobe (the old registered clear mask)
+            s_hit_mb_v_d   <= s_hit_mb_v;
+            s_hit_mb_bnk_d <= s_hit_mb_bnk;
+            s_hit_mb_chk_d <= s_hit_mb_chk;
+            s_bnk_we <= "00";
             if s_bnk_rst_stb = '1' then
-                s_bunkers <= (others => (others => '1'));
-            elsif s_bnk_clr_stb = '1' then
-                for b in 0 to C_BUNKER_COUNT - 1 loop
-                    s_bunkers(b) <= s_bunkers(b) and not s_bnk_clr(b);
-                end loop;
+                s_bnk_rcnt <= (others => '0');
+            elsif s_bnk_rcnt(5) = '0' then
+                -- game reset: every chunk back, both RAMs together
+                s_bnk_we   <= "11";
+                s_bnk_wa   <= s_bnk_rcnt(4 downto 0);
+                s_bnk_wd   <= '1';
+                s_bnk_rcnt <= s_bnk_rcnt + 1;
+            elsif s_bnk_clr_stb = '1' and s_hit_mb_v_d = '1' then
+                if s_hit_mb_bnk_d(0) = '0' then s_bnk_we <= "01"; else s_bnk_we <= "10"; end if;
+                s_bnk_wa <= s_hit_mb_bnk_d(1) & s_hit_mb_chk_d;
+                s_bnk_wd <= '0';
             end if;
         end if;
     end process;
+
+    p_bnk_ram_e : process(clk)
+    begin
+        if rising_edge(clk) then
+            if s_bnk_we(0) = '1' then
+                s_bnk_ram_e(to_integer(s_bnk_wa)) <= (0 => s_bnk_wd);
+            end if;
+            s_bnk_qe <= s_bnk_ram_e(to_integer(s_bnk_rae));
+        end if;
+    end process;
+
+    p_bnk_ram_o : process(clk)
+    begin
+        if rising_edge(clk) then
+            if s_bnk_we(1) = '1' then
+                s_bnk_ram_o(to_integer(s_bnk_wa)) <= (0 => s_bnk_wd);
+            end if;
+            s_bnk_qo <= s_bnk_ram_o(to_integer(s_bnk_rao));
+        end if;
+    end process;
+
+    -- read addresses from the stage-3 bunker flags (one bunker per RAM)
+    s_bnk_rae <= '0' & s_stg3_chunk_idx_b(0) when s_stg3_in_bunker(0) = '1'
+                 else '1' & s_stg3_chunk_idx_b(2);
+    s_bnk_rao <= '0' & s_stg3_chunk_idx_b(1) when s_stg3_in_bunker(1) = '1'
+                 else '1' & s_stg3_chunk_idx_b(3);
+    s_stg4_chunk_alive <= (s_bnk_qe(0) and s_bnk_ene) or (s_bnk_qo(0) and s_bnk_eno);
 
     -- ========================================================================
     -- Story: death animation and win flight
@@ -2434,10 +2492,8 @@ begin
             else
                 v_col_bits := unsigned(s_stg2_form_dx(9 downto 7));
                 v_row_bits := unsigned(s_stg2_form_dy(8 downto 7));
-                if s_stg2_form_dx >= to_signed(0, 12) and
-                   s_stg2_form_dx <  to_signed(C_FORM_W, 12) and
-                   s_stg2_form_dy >= to_signed(0, 12) and
-                   s_stg2_form_dy <  to_signed(C_FORM_H, 12) then
+                if s_stg2_form_dx(11 downto 10) = 0 and unsigned(s_stg2_form_dx(9 downto 0)) < C_FORM_W and
+                   s_stg2_form_dy(11 downto 9) = 0 and unsigned(s_stg2_form_dy(8 downto 0)) < C_FORM_H then
                     s_stg3_in_form <= '1';
                 else
                     s_stg3_in_form <= '0';
@@ -2475,8 +2531,7 @@ begin
 
             -- Ship (sprite box) and trail box (sprite box widened by
             -- C_TRAIL_EXT each side).
-            if s_stg2_ship_dx >= to_signed(0, 12) and
-               s_stg2_ship_dx <  to_signed(C_SHIP_W, 12) then
+            if s_stg2_ship_dx(11 downto 7) = 0 then
                 v_ship_in_x := '1';
             else
                 v_ship_in_x := '0';
@@ -2487,8 +2542,7 @@ begin
             else
                 v_trail_in_x := '0';
             end if;
-            if s_stg2_ship_dy >= to_signed(0, 12) and
-               s_stg2_ship_dy <  to_signed(C_SHIP_H, 12) then
+            if s_stg2_ship_dy(11 downto 7) = 0 then
                 v_ship_in_y := '1';
             else
                 v_ship_in_y := '0';
@@ -2514,14 +2568,12 @@ begin
 
             -- Bullets (each WAND_SHOT 8x16)
             for i in 0 to C_BULLETS - 1 loop
-                if s_stg2_bull_dx(i) >= to_signed(0, 12) and
-                   s_stg2_bull_dx(i) <  to_signed(C_BULLET_W, 12) then
+                if s_stg2_bull_dx(i)(11 downto 3) = 0 then
                     v_in_x := '1';
                 else
                     v_in_x := '0';
                 end if;
-                if s_stg2_bull_dy(i) >= to_signed(0, 12) and
-                   s_stg2_bull_dy(i) <  to_signed(C_BULLET_H, 12) then
+                if s_stg2_bull_dy(i)(11 downto 4) = 0 then
                     v_in_y := '1';
                 else
                     v_in_y := '0';
@@ -2531,14 +2583,12 @@ begin
 
             -- Bombs (rectangles)
             for i in 0 to C_BOMBS - 1 loop
-                if s_stg2_bomb_dx(i) >= to_signed(0, 12) and
-                   s_stg2_bomb_dx(i) <  to_signed(C_BOMB_W, 12) then
+                if s_stg2_bomb_dx(i)(11 downto 3) = 0 and unsigned(s_stg2_bomb_dx(i)(2 downto 0)) < C_BOMB_W then
                     v_in_x := '1';
                 else
                     v_in_x := '0';
                 end if;
-                if s_stg2_bomb_dy(i) >= to_signed(0, 12) and
-                   s_stg2_bomb_dy(i) <  to_signed(C_BOMB_H, 12) then
+                if s_stg2_bomb_dy(i)(11 downto 4) = 0 and unsigned(s_stg2_bomb_dy(i)(3 downto 0)) < C_BOMB_H then
                     v_in_y := '1';
                 else
                     v_in_y := '0';
@@ -2547,8 +2597,7 @@ begin
             end loop;
 
             -- Bunkers (4 in parallel, shared dy)
-            if s_stg2_bnk_dy >= to_signed(0, 12) and
-               s_stg2_bnk_dy <  to_signed(C_BUNKER_H, 12) then
+            if s_stg2_bnk_dy(11 downto 7) = 0 and unsigned(s_stg2_bnk_dy(6 downto 0)) < C_BUNKER_H then
                 v_bnk_in_y := '1';
             else
                 v_bnk_in_y := '0';
@@ -2557,8 +2606,7 @@ begin
             v_bnk_col_use := (others => '0');
             v_bnk_id      := (others => '0');
             for b in 0 to C_BUNKER_COUNT - 1 loop
-                if s_stg2_bnk_dx(b) >= to_signed(0, 12) and
-                   s_stg2_bnk_dx(b) <  to_signed(C_BUNKER_W, 12) then
+                if s_stg2_bnk_dx(b)(11 downto 7) = 0 then
                     v_in_x := '1';
                 else
                     v_in_x := '0';
@@ -2713,18 +2761,16 @@ begin
             s_stg4_dith  <= s_stg3_dith;
             s_stg4_wshow <= s_stg3_wshow;
 
-            -- Bunker chunk-alive (priority over the in_bunker flags)
-            v_chunk_hit := '0';
-            v_any_bnk   := '0';
+            -- Bunker chunk-alive: the chunk RAMs (p_bunkers) answer at this
+            -- stage; the enables say which RAM's answer counts
+            v_any_bnk := '0';
             for b in 0 to C_BUNKER_COUNT - 1 loop
                 if s_stg3_in_bunker(b) = '1' then
                     v_any_bnk := '1';
-                    if s_bunkers(b)(to_integer(s_stg3_chunk_idx_b(b))) = '1' then
-                        v_chunk_hit := '1';
-                    end if;
                 end if;
             end loop;
-            s_stg4_chunk_alive   <= v_chunk_hit;
+            s_bnk_ene <= s_stg3_in_bunker(0) or s_stg3_in_bunker(2);
+            s_bnk_eno <= s_stg3_in_bunker(1) or s_stg3_in_bunker(3);
             s_stg4_in_bunker_any <= v_any_bnk;
             s_stg4_bnk_bit       <= s_stg3_bnk_bit;
 

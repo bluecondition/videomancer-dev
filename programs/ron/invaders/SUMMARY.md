@@ -493,3 +493,23 @@ All seed 1. vmprog: `out/rev_b/ron/invaders.vmprog`.
   if left alone).
 - Hue check: the palette is U/V-swapped for hardware, so hues are only
   trustworthy on HW.
+
+## Community port — fit for the stock SDK (v0.7.5, 2026-10-15)
+- The stock LZX SDK builds 8 configs; its SD Standalone core is ~600 LC larger
+  than HD. v0.7.4 packed to 7920/7680 LC there (HD Dual 7491).
+- v0.7.5, three bit-exact changes:
+  1. **Bunker chunks in EBR.** The 64 chunk bits live in two 32 x 1 EBRs
+     (even and odd bunkers) instead of 64 FFs plus a registered clear mask and
+     per-bit update logic. A pixel needs at most one chunk bit per RAM:
+     neighbouring bunkers only overlap on rasters under 512 px, and they are
+     never in the same RAM. Erosion is one write per frame; a game reset
+     refills in 32 clocks, all in vblank.
+  2. **Serial bunker x.** The four positions (1/8, 3/8, 5/8, 7/8 of the
+     width) come from one accumulator stepping h/4.
+  3. **Bit-test range checks.** The per-pixel object tests "0 <= d < N" are
+     bit tests: d(11 downto k) = 0, plus a low-bit compare when N is not a
+     power of 2. yosys built a carry-chain comparator for each one, even
+     against a constant.
+- Proven bit-exact against v0.7.4: GHDL side-by-side, 40 frames (403 x 201
+  raster), knobs and switches changing mid-picture, 0 mismatches in 3.24 M clocks.
+- Packed LC (stock SDK): SD Standalone 7920 → 7607, HD Dual 7491 → 7212.
