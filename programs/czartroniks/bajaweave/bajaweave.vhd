@@ -110,80 +110,6 @@
 -- License: GPL-3.0
 -- Author: czartroniks
 
--- ============================================================================
--- Knob smoother (one per geometry knob).  Pot ADC noise of +/-1 count jumped
--- the picture every frame -- at K1 = 60 one count of Freq moved the bars at
--- the right edge by ~18 px.  Two parts, both stepped once per field (tick):
---   * deadband: the held value h follows the raw knob only when they differ
---     by 5 or more counts (wider than +/-2 ADC flicker peak-to-peak), so
---     steady noise never reaches the picture
---   * glide: the 10.4 output e eases toward h by 1/8 of the gap per field
---     (snapping inside half a count), so a turned knob sweeps smoothly
--- Pipelined so the tick-time update is a plain mux (per-field logic is still
--- timed at the pixel clock).  The first two ticks snap to the knob.
--- ============================================================================
-library ieee;
-use ieee.std_logic_1164.all;
-use ieee.numeric_std.all;
-
-entity bajaweave_knob_smooth is
-    port (
-        clk  : in  std_logic;
-        tick : in  std_logic;
-        raw  : in  unsigned(9 downto 0);
-        e    : out unsigned(13 downto 0)
-    );
-end entity;
-
-architecture rtl of bajaweave_knob_smooth is
-    signal r_h    : unsigned(9 downto 0)  := (others => '0');
-    signal r_e    : unsigned(13 downto 0) := (others => '0');
-    signal r_d    : signed(10 downto 0)   := (others => '0');
-    signal r_upd  : std_logic := '0';
-    signal r_ed   : signed(14 downto 0)   := (others => '0');
-    signal r_snap : std_logic := '1';
-    signal r_nxt  : unsigned(13 downto 0) := (others => '0');
-    signal r_init : unsigned(1 downto 0)  := "00";
-begin
-    e <= r_e;
-    process(clk)
-        variable v_n : signed(14 downto 0);
-    begin
-        if rising_edge(clk) then
-            r_d  <= signed('0' & raw) - signed('0' & r_h);
-            if r_d >= 5 or r_d <= -5 then
-                r_upd <= '1';
-            else
-                r_upd <= '0';
-            end if;
-            r_ed <= signed('0' & r_h & "0000") - signed('0' & r_e);
-            if r_ed > -8 and r_ed < 8 then
-                r_snap <= '1';
-            else
-                r_snap <= '0';
-            end if;
-            v_n   := signed('0' & r_e) + shift_right(r_ed, 3);
-            r_nxt <= unsigned(v_n(13 downto 0));
-            if tick = '1' then
-                if r_init /= "11" then
-                    r_init <= r_init + 1;
-                    r_h    <= raw;
-                    r_e    <= raw & "0000";
-                else
-                    if r_upd = '1' then
-                        r_h <= raw;
-                    end if;
-                    if r_snap = '1' then
-                        r_e <= r_h & "0000";
-                    else
-                        r_e <= r_nxt;
-                    end if;
-                end if;
-            end if;
-        end if;
-    end process;
-end architecture;
-
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -336,6 +262,36 @@ architecture bajaweave of program_top is
     signal r_lfo1_step, r_lfo2_step  : unsigned(13 downto 0) := to_unsigned(2160, 14);
     -- smoothed knobs (10.4): K1, K2, K4, K5, K6
     signal s_e1, s_e2, s_e4, s_e5, s_e6 : unsigned(13 downto 0);
+    -- shared knob smoother: held value h, eased output e (10.4), deadband
+    -- flag per knob; a 3-stage pipeline swept over slots 0-4 (5-7 idle)
+    type t_ks_h is array (0 to 4) of std_logic_vector(9 downto 0);
+    type t_ks_e is array (0 to 4) of std_logic_vector(13 downto 0);
+    signal ks_h      : t_ks_h := (others => (others => '0'));
+    signal ks_e      : t_ks_e := (others => (others => '0'));
+    signal ks_upd    : std_logic_vector(4 downto 0) := (others => '0');
+    -- K1/K4 (the carrier frequencies) must change on the field-start clock
+    -- itself: the carriers free-run through blanking and the first pixels
+    -- of the first line still show that history.  The sweep keeps their
+    -- next eased values ready here.
+    signal ks_en0, ks_en2 : std_logic_vector(13 downto 0) := (others => '0');
+    signal ks_slot   : unsigned(2 downto 0) := (others => '0');
+    signal ks_ap     : std_logic := '0';
+    signal ks_im     : std_logic := '0';
+    signal ks_init   : unsigned(1 downto 0) := "00";
+    signal ks1_k     : unsigned(2 downto 0) := (others => '0');
+    signal ks1_ap    : std_logic := '0';
+    signal ks1_fl    : std_logic := '0';
+    signal ks1_raw   : unsigned(9 downto 0) := (others => '0');
+    signal ks1_h     : unsigned(9 downto 0) := (others => '0');
+    signal ks1_e     : unsigned(13 downto 0) := (others => '0');
+    signal ks2_k     : unsigned(2 downto 0) := (others => '0');
+    signal ks2_ap    : std_logic := '0';
+    signal ks2_fl    : std_logic := '0';
+    signal ks2_raw   : unsigned(9 downto 0) := (others => '0');
+    signal ks2_h     : unsigned(9 downto 0) := (others => '0');
+    signal ks2_e     : unsigned(13 downto 0) := (others => '0');
+    signal ks2_d     : signed(10 downto 0) := (others => '0');
+    signal ks2_ed    : signed(14 downto 0) := (others => '0');
     signal r_lfo1_acc,  r_lfo2_acc   : unsigned(C_LFO_W-1 downto 0) := (others => '0');
 
     -- Carrier increments (frame-stable, registered for the gain sequencer)
@@ -799,16 +755,118 @@ begin
     -- K1/K4 carrier frequency, K2/K5 sway wavelength, K6 sway amount.
     -- (K3 colour and P12 speed have their own easing.)
     -- ========================================================================
-    ks1_inst : entity work.bajaweave_knob_smooth
-        port map (clk => clk, tick => s_fstart, raw => r_osc1_base, e => s_e1);
-    ks2_inst : entity work.bajaweave_knob_smooth
-        port map (clk => clk, tick => s_fstart, raw => r_osc1_lfo,  e => s_e2);
-    ks4_inst : entity work.bajaweave_knob_smooth
-        port map (clk => clk, tick => s_fstart, raw => r_osc2_base, e => s_e4);
-    ks5_inst : entity work.bajaweave_knob_smooth
-        port map (clk => clk, tick => s_fstart, raw => r_osc2_lfo,  e => s_e5);
-    ks6_inst : entity work.bajaweave_knob_smooth
-        port map (clk => clk, tick => s_fstart, raw => r_osc2_hue,  e => s_e6);
+    -- One shared datapath for all five (it was five copies).  Two parts,
+    -- both stepped once per field:
+    --   * deadband: the held value h follows the raw knob only when they
+    --     differ by 5 or more counts (wider than +/-2 ADC flicker peak-to-
+    --     peak), so steady noise never reaches the picture.  Pot ADC noise of
+    --     +/-1 count jumped the picture every frame -- at K1 = 60 one count of
+    --     Freq moved the bars at the right edge by ~18 px.
+    --   * glide: the 10.4 output e eases toward h by 1/8 of the gap per field
+    --     (snapping inside half a count), so a turned knob sweeps smoothly.
+    -- A free-running sweep keeps each knob's deadband flag current (it
+    -- compares the knob latched at the previous vsync, as the per-knob
+    -- version did) and K1/K4's next eased values ready; the guarded field
+    -- start loads K1/K4 and runs one apply pass over slots 0-4 for the rest,
+    -- done 8 clocks later -- the gain engine loads at +16.  The first three
+    -- field starts snap to the knob.
+    p_ksmooth : process(clk)
+        variable v_n  : signed(14 downto 0);
+        variable v_en : std_logic_vector(13 downto 0);
+    begin
+        if rising_edge(clk) then
+            -- stage 1: select one knob
+            if s_fstart = '1' then
+                ks_slot <= (others => '0');
+                ks_ap   <= '1';
+                if ks_init /= "11" then
+                    ks_init <= ks_init + 1;
+                    ks_im   <= '1';
+                    ks_e(0) <= std_logic_vector(r_osc1_base) & "0000";
+                    ks_e(2) <= std_logic_vector(r_osc2_base) & "0000";
+                else
+                    ks_im   <= '0';
+                    ks_e(0) <= ks_en0;
+                    ks_e(2) <= ks_en2;
+                end if;
+            else
+                ks_slot <= ks_slot + 1;
+                if ks_slot = 4 then
+                    ks_ap <= '0';
+                end if;
+            end if;
+            ks1_k  <= ks_slot;
+            ks1_ap <= ks_ap;
+            -- flags only from knobs latched BEFORE this field start
+            if ks_ap = '0' and s_fstart = '0' and ks_slot <= 4 then
+                ks1_fl <= '1';
+            else
+                ks1_fl <= '0';
+            end if;
+            case to_integer(ks_slot) is
+                when 0 =>      ks1_raw <= r_osc1_base; ks1_h <= unsigned(ks_h(0)); ks1_e <= unsigned(ks_e(0));
+                when 1 =>      ks1_raw <= r_osc1_lfo;  ks1_h <= unsigned(ks_h(1)); ks1_e <= unsigned(ks_e(1));
+                when 2 =>      ks1_raw <= r_osc2_base; ks1_h <= unsigned(ks_h(2)); ks1_e <= unsigned(ks_e(2));
+                when 3 =>      ks1_raw <= r_osc2_lfo;  ks1_h <= unsigned(ks_h(3)); ks1_e <= unsigned(ks_e(3));
+                when others => ks1_raw <= r_osc2_hue;  ks1_h <= unsigned(ks_h(4)); ks1_e <= unsigned(ks_e(4));
+            end case;
+
+            -- stage 2: knob - h, and the glide gap (h.0000 - e)
+            ks2_k   <= ks1_k;
+            ks2_ap  <= ks1_ap;
+            ks2_fl  <= ks1_fl;
+            ks2_raw <= ks1_raw;
+            ks2_h   <= ks1_h;
+            ks2_e   <= ks1_e;
+            ks2_d   <= signed('0' & ks1_raw) - signed('0' & ks1_h);
+            ks2_ed  <= signed('0' & ks1_h & "0000") - signed('0' & ks1_e);
+
+            -- stage 3: deadband flag, or the field-start update
+            v_n := signed('0' & ks2_e) + shift_right(ks2_ed, 3);
+            if ks2_ed > -8 and ks2_ed < 8 then
+                v_en := std_logic_vector(ks2_h) & "0000";
+            else
+                v_en := std_logic_vector(v_n(13 downto 0));
+            end if;
+            if ks2_fl = '1' and ks2_k = 0 then
+                ks_en0 <= v_en;
+            end if;
+            if ks2_fl = '1' and ks2_k = 2 then
+                ks_en2 <= v_en;
+            end if;
+            for i in 0 to 4 loop
+                if to_integer(ks2_k) = i then
+                    if ks2_fl = '1' then
+                        if ks2_d >= 5 or ks2_d <= -5 then
+                            ks_upd(i) <= '1';
+                        else
+                            ks_upd(i) <= '0';
+                        end if;
+                    end if;
+                    if ks2_ap = '1' then
+                        if ks_im = '1' then
+                            ks_h(i) <= std_logic_vector(ks2_raw);
+                        elsif ks_upd(i) = '1' then
+                            ks_h(i) <= std_logic_vector(ks2_raw);
+                        end if;
+                        -- (K1/K4 were loaded on the field-start clock)
+                        if i /= 0 and i /= 2 then
+                            if ks_im = '1' then
+                                ks_e(i) <= std_logic_vector(ks2_raw) & "0000";
+                            else
+                                ks_e(i) <= v_en;
+                            end if;
+                        end if;
+                    end if;
+                end if;
+            end loop;
+        end if;
+    end process;
+    s_e1 <= unsigned(ks_e(0));
+    s_e2 <= unsigned(ks_e(1));
+    s_e4 <= unsigned(ks_e(2));
+    s_e5 <= unsigned(ks_e(3));
+    s_e6 <= unsigned(ks_e(4));
 
     -- ========================================================================
     -- Video Timing Generator (fed the generated avid: carriers reset and
