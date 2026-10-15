@@ -165,7 +165,8 @@ architecture oracle of program_top is
     signal u_pc  : unsigned(8 downto 0) := (others => '0');
     signal u_st  : unsigned(1 downto 0) := (others => '0');
     signal u_gwt : unsigned(2 downto 0) := (others => '0');
-    signal u_ir, u_rom : std_logic_vector(31 downto 0) := (others => '0');
+    signal u_ir  : std_logic_vector(31 downto 0) := (others => '0');
+    signal u_rom : std_logic_vector(31 downto 0);     -- ROM port: no init
     signal u_fa  : unsigned(8 downto 0) := (others => '0');
     signal u_wlast : std_logic := '0';
     signal u_wa  : unsigned(7 downto 0) := (others => '0');
@@ -200,11 +201,12 @@ architecture oracle of program_top is
     signal xf_i, xf_i1   : unsigned(4 downto 0) := (others => '0');
     -- engine ROM ports: quarter sine (10-bit angle), eye profiles
     signal qs_ang  : unsigned(9 downto 0) := (others => '0');
-    signal qs_q    : unsigned(11 downto 0) := (others => '0');
+    signal qs_q    : unsigned(11 downto 0);
     signal qs_d    : unsigned(11 downto 0) := (others => '0');
     signal qs_n1, qs_n2 : std_logic := '0';
     signal pr_a    : unsigned(7 downto 0) := (others => '0');
-    signal pr_qv, pr_qc, pr_dv, pr_dc : unsigned(11 downto 0) := (others => '0');
+    signal pr_qv, pr_qc : unsigned(11 downto 0);
+    signal pr_dv, pr_dc : unsigned(11 downto 0) := (others => '0');
 
     -- ==== per-field constants (engine output ports) ====
     signal f_cx    : unsigned(10 downto 0) := to_unsigned(960, 11);
@@ -259,9 +261,10 @@ architecture oracle of program_top is
     signal tl      : unsigned(15 downto 0) := x"ACE1";
 
     -- ==== pixel pipeline ====
-    signal av      : std_logic_vector(1 to C_NW) := (others => '0');
-    type t_z is array(2 to 11) of unsigned(2 downto 0);
-    signal zn      : t_z := (others => Z_W);
+    signal av      : std_logic_vector(1 to 8) := (others => '0');
+    signal av12, av16 : std_logic := '0';
+    signal zn2, zn10, zn11      : unsigned(2 downto 0) := Z_W;
+    signal zA3, zA4, zA5, zA6 : std_logic := '0';
     -- s1
     signal p1_hA   : unsigned(7 downto 0) := (others => '0');
     signal p1_ma   : unsigned(15 downto 0) := (others => '0');
@@ -283,7 +286,7 @@ architecture oracle of program_top is
     signal p2_g    : unsigned(7 downto 0) := (others => '0');
     signal p2_sp, p2_rf : std_logic := '0';
     signal p2_tn   : unsigned(2 downto 0) := (others => '0');
-    signal c_q1, c_q2 : signed(7 downto 0) := (others => '0');
+    signal c_q1, c_q2 : signed(7 downto 0);
     -- s3
     signal p3_c1, p3_c2 : signed(7 downto 0) := (others => '0');
     signal p3_e    : signed(15 downto 0) := (others => '0');
@@ -292,41 +295,26 @@ architecture oracle of program_top is
     signal p3_mp   : unsigned(11 downto 0) := (others => '0');
     signal p3_mpn  : std_logic := '0';
     signal p3_scA  : unsigned(3 downto 0) := (others => '0');
-    signal p3_iA   : unsigned(7 downto 0) := (others => '0');
     signal p3_g    : unsigned(7 downto 0) := (others => '0');
-    signal p3_dlc, p3_drc : unsigned(4 downto 0) := (others => '0');
-    signal p3_sp, p3_rf : std_logic := '0';
-    signal p3_tn   : unsigned(2 downto 0) := (others => '0');
     -- s4
-    signal p4_ar   : signed(15 downto 0) := (others => '0');
+    signal p4_a5   : unsigned(4 downto 0) := (others => '0');
     signal p4_hC   : unsigned(15 downto 0) := (others => '0');
     signal p4_m    : unsigned(7 downto 0) := (others => '0');
     signal p4_D    : unsigned(4 downto 0) := (others => '0');
     signal p4_scA  : unsigned(3 downto 0) := (others => '0');
-    signal p4_iA   : unsigned(7 downto 0) := (others => '0');
-    signal p4_dlc, p4_drc : unsigned(4 downto 0) := (others => '0');
-    signal p4_sp, p4_rf : std_logic := '0';
-    signal p4_tn   : unsigned(2 downto 0) := (others => '0');
     -- s5
     signal p5_a    : unsigned(4 downto 0) := (others => '0');
     signal p5_iC   : unsigned(7 downto 0) := (others => '0');
     signal p5_mc   : unsigned(15 downto 0) := (others => '0');
     signal p5_L    : unsigned(12 downto 0) := (others => '0');
     signal p5_scA  : unsigned(3 downto 0) := (others => '0');
-    signal p5_iA   : unsigned(7 downto 0) := (others => '0');
-    signal p5_dlc, p5_drc : unsigned(4 downto 0) := (others => '0');
-    signal p5_sp, p5_rf : std_logic := '0';
-    signal p5_tn   : unsigned(2 downto 0) := (others => '0');
     -- s6
     signal p6_r2   : unsigned(13 downto 0) := (others => '0');
     signal p6_mc   : unsigned(15 downto 0) := (others => '0');
     signal p6_Ys   : unsigned(9 downto 0) := (others => '0');
     signal p6_a    : unsigned(4 downto 0) := (others => '0');
     signal p6_scA  : unsigned(3 downto 0) := (others => '0');
-    signal p6_iA, p6_iC : unsigned(7 downto 0) := (others => '0');
     signal p6_dlc, p6_drc : unsigned(4 downto 0) := (others => '0');
-    signal p6_sp, p6_rf : std_logic := '0';
-    signal p6_tn   : unsigned(2 downto 0) := (others => '0');
     -- s7
     signal p7_gd   : unsigned(13 downto 0) := (others => '0');
     signal p7_rp   : unsigned(19 downto 0) := (others => '0');
@@ -337,9 +325,6 @@ architecture oracle of program_top is
     signal p7_lift : unsigned(6 downto 0) := (others => '0');
     signal p7_Ys   : unsigned(9 downto 0) := (others => '0');
     signal p7_a    : unsigned(4 downto 0) := (others => '0');
-    signal p7_iA, p7_iC : unsigned(7 downto 0) := (others => '0');
-    signal p7_sp, p7_rf : std_logic := '0';
-    signal p7_tn   : unsigned(2 downto 0) := (others => '0');
     -- s8
     signal p8_gq   : unsigned(16 downto 0) := (others => '0');
     signal p8_ring : unsigned(7 downto 0) := (others => '0');
@@ -347,38 +332,23 @@ architecture oracle of program_top is
     signal p8_Ysh  : unsigned(9 downto 0) := (others => '0');
     signal p8_pa   : unsigned(1 downto 0) := (others => '0');
     signal p8_lift : unsigned(6 downto 0) := (others => '0');
-    signal p8_sc   : unsigned(3 downto 0) := (others => '0');
-    signal p8_a    : unsigned(4 downto 0) := (others => '0');
-    signal p8_sp, p8_rf : std_logic := '0';
-    signal p8_iA, p8_iC : unsigned(7 downto 0) := (others => '0');
-    signal p8_tn   : unsigned(2 downto 0) := (others => '0');
     -- s9
     signal p9_t6   : unsigned(5 downto 0) := (others => '0');
     signal p9_ring : unsigned(7 downto 0) := (others => '0');
     signal p9_iE   : unsigned(7 downto 0) := (others => '0');
     signal p9_Yf   : unsigned(9 downto 0) := (others => '0');
-    signal p9_pa   : unsigned(1 downto 0) := (others => '0');
-    signal p9_sc   : unsigned(3 downto 0) := (others => '0');
-    signal p9_a    : unsigned(4 downto 0) := (others => '0');
-    signal p9_sp, p9_rf : std_logic := '0';
-    signal p9_tn   : unsigned(2 downto 0) := (others => '0');
     signal rA_ad, rC_ad : unsigned(7 downto 0) := (others => '0');
-    signal rA_qy, rA_qu, rA_qv, rC_qy, rC_qu, rC_qv : unsigned(9 downto 0) := (others => '0');
+    signal rA_qy, rA_qu, rA_qv, rC_qy, rC_qu, rC_qv : unsigned(9 downto 0);
     -- s10
     signal p10_G2  : unsigned(5 downto 0) := (others => '0');
     signal p10_rt  : unsigned(7 downto 0) := (others => '0');
     signal p10_Yf  : unsigned(9 downto 0) := (others => '0');
-    signal p10_pa  : unsigned(1 downto 0) := (others => '0');
-    signal p10_sc  : unsigned(3 downto 0) := (others => '0');
-    signal p10_a   : unsigned(4 downto 0) := (others => '0');
     signal p10_sp, p10_rf : std_logic := '0';
     signal p10_tn  : unsigned(2 downto 0) := (others => '0');
     -- s11
     signal p11_Gv  : unsigned(4 downto 0) := (others => '0');
     signal p11_rl  : unsigned(7 downto 0) := (others => '0');
-    signal p11_aY, p11_aU, p11_aV, p11_cY, p11_cU, p11_cV : unsigned(9 downto 0) := (others => '0');
     signal p11_Yf  : unsigned(9 downto 0) := (others => '0');
-    signal p11_pa  : unsigned(1 downto 0) := (others => '0');
     signal p11_sc  : unsigned(3 downto 0) := (others => '0');
     signal p11_a   : unsigned(4 downto 0) := (others => '0');
     signal p11_sp, p11_rf : std_logic := '0';
@@ -386,13 +356,13 @@ architecture oracle of program_top is
     -- s12: base colour, blend targets, raw eye colour
     signal p12_by, p12_bu, p12_bv : unsigned(9 downto 0) := (others => '0');
     signal p12_ty, p12_tu, p12_tv : unsigned(9 downto 0) := (others => '0');
-    signal p12_eY, p12_eU, p12_eV : unsigned(9 downto 0) := (others => '0');
     signal p12_a1  : unsigned(3 downto 0) := (others => '0');
     signal p12_aE  : unsigned(4 downto 0) := (others => '0');
     signal p12_rim : unsigned(4 downto 0) := (others => '0');
     signal p12_pa  : unsigned(1 downto 0) := (others => '0');
     signal rE_ad   : unsigned(7 downto 0) := (others => '0');
-    signal rE_qy, rE_qu, rE_qv : unsigned(9 downto 0) := (others => '0');
+    signal rE_qy, rE_qu, rE_qv : unsigned(9 downto 0);
+    signal p9_iC, p10_iE : unsigned(7 downto 0) := (others => '0');
     -- s13..s16: ONE blend toward the stronger target (eye/corona or the
     -- moire/haze/reflection target), as |difference| x 4-bit alpha
     signal p13_ty, p13_tu, p13_tv : unsigned(9 downto 0) := (others => '0');
@@ -426,13 +396,56 @@ architecture oracle of program_top is
     attribute no_rw_check of ob_u : signal is true;
     attribute no_rw_check of ob_v : signal is true;
     attribute no_rw_check of ob_s : signal is true;
+
+    -- ==== EBR delay lines for the pure pipeline delays (one EBR each,
+    -- written every clock at dl_wa, read d clocks later; read and write
+    -- addresses never coincide) ====
+    type t_dl16 is array (0 to 15) of std_logic_vector(15 downto 0);
+    signal dl7  : t_dl16 := (others => x"0003");
+    signal dl4a, dl4b : t_dl16 := (others => (others => '0'));
+    attribute ram_style of dl7  : signal is "block";
+    attribute ram_style of dl4a : signal is "block";
+    attribute ram_style of dl4b : signal is "block";
+    attribute no_rw_check of dl7  : signal is true;
+    attribute no_rw_check of dl4a : signal is true;
+    attribute no_rw_check of dl4b : signal is true;
+    signal dl_wa  : unsigned(3 downto 0) := (others => '0');
+    signal dl_ra7 : unsigned(3 downto 0) := to_unsigned(9, 4);    -- dl_wa - 7 (8 clocks)
+    signal dl_ra4 : unsigned(3 downto 0) := to_unsigned(13, 4);   -- dl_wa - 3
+    signal dl7_q  : std_logic_vector(15 downto 0) := x"0003";
+    signal dl4a_q, dl4b_q : std_logic_vector(15 downto 0) := (others => '0');
+
+    -- ==== palettes: Y|U|V re-cut into a 16-bit (Y, U high) and a 14-bit
+    -- (U low, V) ROM, each fitting one EBR: two EBRs per port, not three ====
+    type t_palh is array (0 to 255) of std_logic_vector(15 downto 0);
+    type t_pall is array (0 to 255) of std_logic_vector(13 downto 0);
+    function palh(y, u : t_rom256x10) return t_palh is
+        variable r : t_palh;
+    begin
+        for i in 0 to 255 loop
+            r(i) := std_logic_vector(y(i)) & std_logic_vector(u(i)(9 downto 4));
+        end loop;
+        return r;
+    end function;
+    function pall(u, v : t_rom256x10) return t_pall is
+        variable r : t_pall;
+    begin
+        for i in 0 to 255 loop
+            r(i) := std_logic_vector(u(i)(3 downto 0)) & std_logic_vector(v(i));
+        end loop;
+        return r;
+    end function;
+    constant C_PA_H : t_palh := palh(C_PA_Y, C_PA_U);
+    constant C_PA_L : t_pall := pall(C_PA_U, C_PA_V);
+    constant C_PS_H : t_palh := palh(C_PS_Y, C_PS_U);
+    constant C_PS_L : t_pall := pall(C_PS_U, C_PS_V);
+    signal rA_qh, rC_qh, rE_qh : std_logic_vector(15 downto 0);
+    signal rA_ql, rC_ql, rE_ql : std_logic_vector(13 downto 0);
     signal o_wp   : unsigned(7 downto 0) := (others => '0');
     signal o_ray, o_rac, o_ras : unsigned(7 downto 0) := (others => '0');
     signal o_dY, o_dC : unsigned(7 downto 0) := to_unsigned(C_D0, 8);
     signal o_lq   : std_logic := '0';
     signal o_lcnt : unsigned(4 downto 0) := (others => '0');
-    signal o_fy, o_fu, o_fv : unsigned(9 downto 0) := (others => '0');
-    signal o_fs   : std_logic_vector(3 downto 0) := (others => '0');
     signal s_io   : t_video_stream_yuv444_30b
         := ((others => '0'), (others => '0'), (others => '0'), '0', '1', '1', '1');
 
@@ -486,9 +499,9 @@ architecture oracle of program_top is
 
     function clamp5(v : signed(12 downto 0)) return unsigned is
     begin
-        if v < 0 then
+        if v(12) = '1' then
             return to_unsigned(0, 5);
-        elsif v > 31 then
+        elsif v(11 downto 5) /= "0000000" then
             return to_unsigned(31, 5);
         else
             return unsigned(v(4 downto 0));
@@ -515,14 +528,14 @@ begin
     begin
         if rising_edge(clk) then
             if s_timing.hsync_start = '1' then
-                if s_hcnt > 0 then s_meas_h <= s_hcnt; end if;
+                if s_hcnt /= 0 then s_meas_h <= s_hcnt; end if;
                 s_hcnt <= (others => '0');
             elsif s_timing.avid = '1' then
                 s_hcnt <= s_hcnt + 1;
             end if;
 
             if s_timing.vsync_start = '1' then
-                if s_vcnt > 0 then s_meas_v <= s_vcnt; end if;
+                if s_vcnt /= 0 then s_meas_v <= s_vcnt; end if;
                 s_vcnt  <= (others => '0');
                 s_ilace <= s_timing.is_interlaced;
                 s_botf  <= not s_timing.field_n;      -- bottom field = field_n '0'
@@ -645,10 +658,12 @@ begin
         variable v_stl    : boolean;
         variable v_jmp    : boolean;
         variable v_dr     : unsigned(12 downto 0);
+        variable v_dd     : unsigned(13 downto 0);
         variable v_ms     : unsigned(16 downto 0);
         variable v_pr     : unsigned(27 downto 0);
         variable v_fa, v_fb : std_logic_vector(23 downto 0);
         variable v_sum    : signed(24 downto 0);
+        variable v_s26    : signed(25 downto 0);
         variable v_blt    : std_logic;
         variable v_bt     : signed(23 downto 0);
     begin
@@ -674,8 +689,9 @@ begin
             -- of dv_na as the quotient shifts in at the bottom
             if dv_bsy = '1' and dv_post = '0' then
                 v_dr := dv_ra(11 downto 0) & dv_na(24);
-                if v_dr >= resize(dv_da, 13) then
-                    dv_ra <= v_dr - resize(dv_da, 13);
+                v_dd := ('0' & v_dr) - ("00" & dv_da);      -- borrow = v_dr < dv_da
+                if v_dd(13) = '0' then
+                    dv_ra <= v_dd(12 downto 0);
                     dv_na <= dv_na(23 downto 0) & '1';
                 else
                     dv_ra <= v_dr;
@@ -763,8 +779,9 @@ begin
                     v_jmp := false;
                     -- the one adder: A + B (+1); its 25th bit is A < B for
                     -- the compares (B arrived inverted)
-                    v_sum := resize(u_sh, 25) + resize(u_b, 25);
-                    if u_cin = '1' then v_sum := v_sum + 1; end if;
+                    -- (one carry chain: the carry-in rides in a guard bit)
+                    v_s26 := (u_sh(23) & u_sh & '1') + (u_b(23) & u_b & u_cin);
+                    v_sum := v_s26(25 downto 1);
                     v_blt := v_sum(24);
                     v_bt  := not u_b;                    -- B again, for MIN/MAX
 
@@ -1068,26 +1085,30 @@ begin
     -- Zone / window / seam flags from the line's row (hardwired; settles
     -- in two clocks after XFER, well before the line starts)
     -- ====================================================================
+    -- (one 13-bit difference per bound; every flag is a sign / bit test on
+    -- it.  The original 12-bit "wy0 + 2" and "rc + 2" wrap above 4093, which
+    -- the all-ones guards reproduce.)
     p_zone : process(clk)
-        variable v_d : signed(12 downto 0);
+        variable v_dA, v_dC, v_dt, v_db : signed(12 downto 0);
+        variable v_t0, v_b0 : std_logic;
     begin
         if rising_edge(clk) then
-            if cu_rc < f_yA then cu_zA <= '1'; else cu_zA <= '0'; end if;
-            if cu_rc >= f_yC then cu_zC <= '1'; else cu_zC <= '0'; end if;
-            if cu_rc >= f_wy0 and cu_rc < f_wy1 then cu_win <= '1'; else cu_win <= '0'; end if;
-            if (cu_rc >= f_wy0 and cu_rc < f_wy0 + 2) or (cu_rc + 2 >= f_wy1 and cu_rc < f_wy1) then
-                cu_rr <= '1';
-            else
-                cu_rr <= '0';
-            end if;
-            cu_dt <= clamp5(signed('0' & cu_rc) - signed('0' & f_wy0));
-            cu_db <= clamp5(signed('0' & f_wy1) - signed('0' & cu_rc) - 1);
-            v_d := signed('0' & cu_rc) - signed('0' & f_yA);
-            if v_d >= -16 and v_d < 16 then cu_nA <= '1'; else cu_nA <= '0'; end if;
-            cu_sA <= resize(v_d(4 downto 0), 6);
-            v_d := signed('0' & cu_rc) - signed('0' & f_yC);
-            if v_d >= -16 and v_d < 16 then cu_nC <= '1'; else cu_nC <= '0'; end if;
-            cu_sC <= resize(v_d(4 downto 0), 6);
+            v_dA := signed('0' & cu_rc) - signed('0' & f_yA);
+            v_dC := signed('0' & cu_rc) - signed('0' & f_yC);
+            v_dt := signed('0' & cu_rc) - signed('0' & f_wy0);
+            v_db := signed('0' & f_wy1) - signed('0' & cu_rc) - 1;
+            cu_zA <= v_dA(12);
+            cu_zC <= not v_dC(12);
+            cu_win <= not v_dt(12) and not v_db(12);
+            if v_dt(12 downto 1) = 0 and f_wy0(11 downto 1) /= "11111111111" then v_t0 := '1'; else v_t0 := '0'; end if;
+            if v_db(12 downto 1) = 0 and cu_rc(11 downto 1) /= "11111111111" then v_b0 := '1'; else v_b0 := '0'; end if;
+            cu_rr <= v_t0 or v_b0;
+            cu_dt <= clamp5(v_dt);
+            cu_db <= clamp5(v_db);
+            if v_dA(12 downto 4) = "000000000" or v_dA(12 downto 4) = "111111111" then cu_nA <= '1'; else cu_nA <= '0'; end if;
+            cu_sA <= resize(v_dA(4 downto 0), 6);
+            if v_dC(12 downto 4) = "000000000" or v_dC(12 downto 4) = "111111111" then cu_nC <= '1'; else cu_nC <= '0'; end if;
+            cu_sC <= resize(v_dC(4 downto 0), 6);
         end if;
     end process p_zone;
 
@@ -1097,16 +1118,15 @@ begin
     -- ====================================================================
     p_s0 : process(clk)
         variable v : unsigned(31 downto 0);
+        variable v_fr : unsigned(25 downto 0);
     begin
         if rising_edge(clk) then
             -- chirped bars: frequency falls toward the centre, then rises
             if g_avid = '1' then
                 dA_ph <= dA_ph + dA_fr;
-                if dA_lf = '1' then
-                    dA_fr <= dA_fr - f_cA;
-                else
-                    dA_fr <= dA_fr + f_cA;
-                end if;
+                -- dA_fr -/+ f_cA on one carry chain (A + not B + 1)
+                v_fr := ('0' & dA_fr & '1') + ('0' & (f_cA xor (23 downto 0 => dA_lf)) & dA_lf);
+                dA_fr <= v_fr(24 downto 1);
                 if s_bcol < f_xhm1 then dA_lf <= '1'; else dA_lf <= '0'; end if;
                 dS1 <= dS1 + f_kS1;
                 dS2 <= dS2 - f_kS2;
@@ -1182,12 +1202,12 @@ begin
                 h_x <= h_x + 1;
                 if h_run = '1' then
                     v := signed(resize(h_q, 30)) + resize(h_d, 30);
-                    if v < 0 then
+                    if v(29) = '1' then
                         h_q <= (others => '0');
-                    elsif v > 2**28 - 1 then
+                    elsif v(28) = '1' then
                         -- 16.0 exactly: h_q(28:14) + v^2 must not wrap 15 bits
                         h_q <= to_unsigned(2**28 - 1, 29);
-                        if h_d > 0 then h_run <= '0'; h_sat <= '1'; end if;
+                        if h_d(27) = '0' and h_d /= 0 then h_run <= '0'; h_sat <= '1'; end if;
                     else
                         h_q <= unsigned(v(28 downto 0));
                     end if;
@@ -1208,15 +1228,68 @@ begin
     p_cr2 : process(clk) begin if rising_edge(clk) then c_q2 <= C_CSIN(to_integer(c_ad2)); end if; end process;
 
     -- ==== palette ports: A (bars + sparks), C (bands), E (eye + corona) ====
-    p_ray : process(clk) begin if rising_edge(clk) then rA_qy <= C_PA_Y(to_integer(rA_ad)); end if; end process;
-    p_rau : process(clk) begin if rising_edge(clk) then rA_qu <= C_PA_U(to_integer(rA_ad)); end if; end process;
-    p_rav : process(clk) begin if rising_edge(clk) then rA_qv <= C_PA_V(to_integer(rA_ad)); end if; end process;
-    p_rcy : process(clk) begin if rising_edge(clk) then rC_qy <= C_PS_Y(to_integer(rC_ad)); end if; end process;
-    p_rcu : process(clk) begin if rising_edge(clk) then rC_qu <= C_PS_U(to_integer(rC_ad)); end if; end process;
-    p_rcv : process(clk) begin if rising_edge(clk) then rC_qv <= C_PS_V(to_integer(rC_ad)); end if; end process;
-    p_rey : process(clk) begin if rising_edge(clk) then rE_qy <= C_PS_Y(to_integer(rE_ad)); end if; end process;
-    p_reu : process(clk) begin if rising_edge(clk) then rE_qu <= C_PS_U(to_integer(rE_ad)); end if; end process;
-    p_rev : process(clk) begin if rising_edge(clk) then rE_qv <= C_PS_V(to_integer(rE_ad)); end if; end process;
+    p_rah : process(clk) begin if rising_edge(clk) then rA_qh <= C_PA_H(to_integer(rA_ad)); end if; end process;
+    p_ral : process(clk) begin if rising_edge(clk) then rA_ql <= C_PA_L(to_integer(rA_ad)); end if; end process;
+    p_rch : process(clk) begin if rising_edge(clk) then rC_qh <= C_PS_H(to_integer(rC_ad)); end if; end process;
+    p_rcl : process(clk) begin if rising_edge(clk) then rC_ql <= C_PS_L(to_integer(rC_ad)); end if; end process;
+    p_reh : process(clk) begin if rising_edge(clk) then rE_qh <= C_PS_H(to_integer(rE_ad)); end if; end process;
+    p_rel : process(clk) begin if rising_edge(clk) then rE_ql <= C_PS_L(to_integer(rE_ad)); end if; end process;
+    rA_qy <= unsigned(rA_qh(15 downto 6));  rA_qu <= unsigned(rA_qh(5 downto 0)) & unsigned(rA_ql(13 downto 10));
+    rA_qv <= unsigned(rA_ql(9 downto 0));
+    rC_qy <= unsigned(rC_qh(15 downto 6));  rC_qu <= unsigned(rC_qh(5 downto 0)) & unsigned(rC_ql(13 downto 10));
+    rC_qv <= unsigned(rC_ql(9 downto 0));
+    rE_qy <= unsigned(rE_qh(15 downto 6));  rE_qu <= unsigned(rE_qh(5 downto 0)) & unsigned(rE_ql(13 downto 10));
+    rE_qv <= unsigned(rE_ql(9 downto 0));
+
+    -- ==== pipeline delay lines ====
+    --   dl7  (7 clocks): iA s2 -> rA_ad (s9), sp/tn/rf s2 -> s9, zone s2 -> s9
+    --   dl4a (4 clocks): iC s5 -> rC_ad (s9), sc s7 -> s11, pa s8 -> s12, av 12 -> 16
+    --   dl4b (4 clocks): dlc/drc s2 -> s6, a s7 -> s11, av 8 -> 12
+    p_dlp : process(clk)
+    begin
+        if rising_edge(clk) then
+            dl_wa  <= dl_wa + 1;
+            dl_ra7 <= dl_ra7 + 1;
+            dl_ra4 <= dl_ra4 + 1;
+        end if;
+    end process p_dlp;
+    p_dl7 : process(clk)
+    begin
+        if rising_edge(clk) then
+            dl7(to_integer(dl_wa)) <= std_logic_vector(p2_iA) & p2_sp & std_logic_vector(p2_tn) & p2_rf
+                                      & std_logic_vector(zn2);
+            dl7_q <= dl7(to_integer(dl_ra7));
+        end if;
+    end process p_dl7;
+    p_dl4a : process(clk)
+    begin
+        if rising_edge(clk) then
+            dl4a(to_integer(dl_wa)) <= std_logic_vector(p5_iC) & std_logic_vector(p7_sc) & std_logic_vector(p8_pa)
+                                       & av12 & '0';
+            dl4a_q <= dl4a(to_integer(dl_ra4));
+        end if;
+    end process p_dl4a;
+    p_dl4b : process(clk)
+    begin
+        if rising_edge(clk) then
+            dl4b(to_integer(dl_wa)) <= std_logic_vector(p2_dlc) & std_logic_vector(p2_drc) & std_logic_vector(p7_a)
+                                       & av(8);
+            dl4b_q <= dl4b(to_integer(dl_ra4));
+        end if;
+    end process p_dl4b;
+    rA_ad  <= unsigned(dl7_q(15 downto 8));
+    p10_sp <= dl7_q(7);
+    p10_tn <= unsigned(dl7_q(6 downto 4));
+    p10_rf <= dl7_q(3);
+    zn10   <= unsigned(dl7_q(2 downto 0));
+    p9_iC  <= unsigned(dl4a_q(15 downto 8));
+    p11_sc <= unsigned(dl4a_q(7 downto 4));
+    p12_pa <= unsigned(dl4a_q(3 downto 2));
+    av16   <= dl4a_q(1);
+    p6_dlc <= unsigned(dl4b_q(15 downto 11));
+    p6_drc <= unsigned(dl4b_q(10 downto 6));
+    p11_a  <= unsigned(dl4b_q(5 downto 1));
+    av12   <= dl4b_q(0);
 
     -- ====================================================================
     -- Pixel pipeline, stages 1..17 (one op per stage after each EBR read,
@@ -1227,7 +1300,7 @@ begin
         variable v_s6  : signed(6 downto 0);
         variable v_z   : unsigned(2 downto 0);
         variable v_ab  : signed(12 downto 0);
-        variable v_e   : signed(15 downto 0);
+        variable v_e12 : signed(11 downto 0);
         variable v_ms  : signed(9 downto 0);
         variable v_cs  : signed(9 downto 0);
         variable v_r2  : unsigned(14 downto 0);
@@ -1240,9 +1313,13 @@ begin
         variable v_df  : signed(10 downto 0);
         variable v_sw  : signed(10 downto 0);
         variable v_md  : signed(8 downto 0);
+        variable v_13  : unsigned(12 downto 0);
+        variable v_a11 : unsigned(10 downto 0);
+        variable v_py  : unsigned(13 downto 0);
+        variable v_pu, v_pv : unsigned(11 downto 0);
     begin
         if rising_edge(clk) then
-            av <= g_avid & av(1 to C_NW - 1);
+            av <= g_avid & av(1 to 7);
 
             -- ---- s1 ----
             p1_hA <= dA_ph(23 downto 16);
@@ -1277,10 +1354,10 @@ begin
             p2_ma <= p1_ma + t_M;
             p2_sw <= signed(resize(p1_t1, 11)) + signed(resize(p1_t2, 11)) - 511;
             if p1_dxs < 0 then v_ab := -p1_dxs; else v_ab := p1_dxs; end if;
-            if v_ab > 2047 then p2_dx <= (others => '1'); else p2_dx <= unsigned(v_ab(10 downto 0)); end if;
+            if v_ab(12) = '0' and v_ab(11) = '1' then p2_dx <= (others => '1'); else p2_dx <= unsigned(v_ab(10 downto 0)); end if;
             p2_dlc <= clamp5(p1_dl);
             p2_drc <= clamp5(p1_dr);
-            if p1_dl >= 0 and p1_dr >= 0 then v_inx := '1'; else v_inx := '0'; end if;
+            v_inx := not p1_dl(12) and not p1_dr(12);
             -- zone, with torn seams near the A/B and B/C cuts
             v_inA := cu_zA;
             v_inC := cu_zC;
@@ -1297,11 +1374,11 @@ begin
             elsif v_inC = '1' then
                 v_z := Z_C;
             elsif cu_win = '1' and v_inx = '1' then
-                if cu_rr = '1' or p1_dl < 2 or p1_dr < 2 then v_z := Z_R; else v_z := Z_W; end if;
+                if cu_rr = '1' or p1_dl(12) = '1' or p1_dl(11 downto 1) = 0 or p1_dr(12) = '1' or p1_dr(11 downto 1) = 0 then v_z := Z_R; else v_z := Z_W; end if;
             else
                 v_z := Z_G;
             end if;
-            zn(2) <= v_z;
+            zn2 <= v_z;
             p2_md <= signed(resize(p1_rb, 9)) - signed(resize(p1_g, 9));
             p2_g  <= p1_g;
             p2_sp <= p1_sp;
@@ -1311,129 +1388,125 @@ begin
             -- ---- s3 ----
             p3_c1  <= c_q1;
             p3_c2  <= c_q2;
-            p3_e   <= signed(resize(cu_w4, 16)) - signed(resize(p2_dx & "0000", 16));
+            p3_e   <= (signed(resize(cu_w4(13 downto 4), 12)) - signed(resize(p2_dx, 12))) & signed(cu_w4(3 downto 0));
             -- sway and static mix as |value| x factor (sign carried)
+            -- (a negative term is stored one's-complemented; s4 adds it with
+            -- the sign as carry-in: one adder instead of add, subtract, mux)
             if p2_sw < 0 then
                 p3_swn <= '1';  v_sw := -p2_sw;
             else
                 p3_swn <= '0';  v_sw := p2_sw;
             end if;
-            p3_swp <= unsigned(v_sw(9 downto 4)) * cu_swA(6 downto 1);
+            p3_swp <= (unsigned(v_sw(9 downto 4)) * cu_swA(6 downto 1)) xor (11 downto 0 => p2_sw(10));
             if p2_md < 0 then
                 p3_mpn <= '1';  v_md := -p2_md;
             else
                 p3_mpn <= '0';  v_md := p2_md;
             end if;
-            p3_mp <= unsigned(v_md(7 downto 0)) * f_as4;
+            p3_mp <= (unsigned(v_md(7 downto 0)) * f_as4) xor (11 downto 0 => p2_md(8));
             p3_scA <= screen(p2_ma(15 downto 8));
-            p3_iA  <= p2_iA;
             p3_g   <= p2_g;
-            p3_dlc <= p2_dlc;  p3_drc <= p2_drc;
-            p3_sp  <= p2_sp;   p3_tn  <= p2_tn;  p3_rf <= p2_rf;
-            zn(3)  <= zn(2);
+            if zn2 = Z_A then zA3 <= '1'; else zA3 <= '0'; end if;
 
             -- ---- s4 ----
             -- eye coverage ramp: 0.5 + e / 2^k px
             -- (the edge distance is clamped to +-127 px first: narrower barrel)
-            if p3_e > 2047 then v_e := to_signed(2047, 16);
-            elsif p3_e < -2048 then v_e := to_signed(-2048, 16);
-            else v_e := p3_e; end if;
+            -- (12-bit shift; coverage = clamp(e' + 8, 0, 16) taken straight
+            -- from the shifted bits: in range iff e' is in -8..8, and then
+            -- e' + 8 only flips bits 3 and 4.  Checked exhaustively.)
+            if p3_e(15) = '0' and p3_e(14 downto 11) /= "0000" then v_e12 := to_signed(2047, 12);
+            elsif p3_e(15) = '1' and p3_e(14 downto 11) /= "1111" then v_e12 := to_signed(-2048, 12);
+            else v_e12 := p3_e(11 downto 0); end if;
             case to_integer(cu_k) is
-                when 0      => v_e := v_e;
-                when 1      => v_e := shift_right(v_e, 1);
-                when 2      => v_e := shift_right(v_e, 2);
-                when 3      => v_e := shift_right(v_e, 3);
-                when 4      => v_e := shift_right(v_e, 4);
-                when 5      => v_e := shift_right(v_e, 5);
-                when others => v_e := shift_right(v_e, 6);
+                when 0      => v_e12 := v_e12;
+                when 1      => v_e12 := shift_right(v_e12, 1);
+                when 2      => v_e12 := shift_right(v_e12, 2);
+                when 3      => v_e12 := shift_right(v_e12, 3);
+                when 4      => v_e12 := shift_right(v_e12, 4);
+                when 5      => v_e12 := shift_right(v_e12, 5);
+                when others => v_e12 := shift_right(v_e12, 6);
             end case;
-            p4_ar <= v_e + 8;
-            if p3_swn = '1' then
-                p4_hC <= cu_phC - shift_left(resize(p3_swp, 16), 4);
+            if v_e12(11) = '0' and (v_e12(10 downto 4) /= "0000000" or (v_e12(3) = '1' and v_e12(2 downto 0) /= "000")) then
+                p4_a5 <= to_unsigned(16, 5);
+            elsif v_e12(11) = '1' and v_e12(10 downto 3) /= "11111111" then
+                p4_a5 <= (others => '0');
             else
-                p4_hC <= cu_phC + shift_left(resize(p3_swp, 16), 4);
+                p4_a5 <= unsigned(std_logic_vector'((v_e12(4) xor v_e12(3)) & (not v_e12(3)) & std_logic_vector(v_e12(2 downto 0))));
             end if;
-            if p3_mpn = '1' then
-                v_ms := resize(signed('0' & p3_g), 10) - signed(resize(p3_mp(11 downto 4), 10));
-            else
-                v_ms := resize(signed('0' & p3_g), 10) + signed(resize(p3_mp(11 downto 4), 10));
-            end if;
-            if v_ms < 0 then p4_m <= (others => '0');
-            elsif v_ms > 255 then p4_m <= (others => '1');
+            v_13  := (cu_phC(15 downto 4) & '1') + (p3_swp & p3_swn);
+            p4_hC <= v_13(12 downto 1) & cu_phC(3 downto 0);
+            v_a11 := ("00" & p3_g & '1') + (p3_mpn & p3_mpn & p3_mp(11 downto 4) & p3_mpn);
+            v_ms  := signed(v_a11(10 downto 1));
+            if v_ms(9) = '1' then p4_m <= (others => '0');
+            elsif v_ms(8) = '1' then p4_m <= (others => '1');
             else p4_m <= unsigned(v_ms(7 downto 0)); end if;
             v_cs := to_signed(96, 10) + resize(shift_right(resize(p3_c1, 10) + resize(p3_c2, 10), 1), 10)
                     + resize(shift_right(resize(p3_c1, 10) + resize(p3_c2, 10), 2), 10)
                     + signed(resize(f_boost, 10));
-            if v_cs < 0 then p4_D <= (others => '0');
-            elsif v_cs > 255 then p4_D <= (others => '1');
+            if v_cs(9) = '1' then p4_D <= (others => '0');
+            elsif v_cs(8) = '1' then p4_D <= (others => '1');
             else p4_D <= unsigned(v_cs(7 downto 3)); end if;
-            p4_scA <= p3_scA;  p4_iA <= p3_iA;
-            p4_dlc <= p3_dlc;  p4_drc <= p3_drc;
-            p4_sp  <= p3_sp;   p4_tn <= p3_tn;  p4_rf <= p3_rf;
-            zn(4)  <= zn(3);
+            p4_scA <= p3_scA;
+            zA4 <= zA3;
 
             -- ---- s5 ----
-            if cu_eye = '0' or p4_ar < 0 then
+            if cu_eye = '0' then
                 p5_a <= (others => '0');
-            elsif p4_ar > 16 then
-                p5_a <= to_unsigned(16, 5);
             else
-                p5_a <= unsigned(p4_ar(4 downto 0));
+                p5_a <= p4_a5;
             end if;
             p5_iC <= opal(p4_hC(15 downto 8), sw_opal);
             p5_mc <= p4_hC + shift_right(p4_hC, 4);
             p5_L  <= p4_m * p4_D;
-            p5_scA <= p4_scA;  p5_iA <= p4_iA;
-            p5_dlc <= p4_dlc;  p5_drc <= p4_drc;
-            p5_sp  <= p4_sp;   p5_tn <= p4_tn;  p5_rf <= p4_rf;
-            zn(5)  <= zn(4);
+            p5_scA <= p4_scA;
+            zA5 <= zA4;
 
             -- ---- s6 ----
-            if h_run = '1' or h_sat = '1' then
-                v_r2 := resize(h_q(28 downto 14), 15) + resize(cu_v2, 15);
-            else
-                v_r2 := to_unsigned(16383, 15) + resize(cu_v2, 15);
-            end if;
-            if v_r2 > 16383 then p6_r2 <= (others => '1'); else p6_r2 <= v_r2(13 downto 0); end if;
+            -- (outside the run the field reads 16383 + v2, which always clamps)
+            v_r2 := resize(h_q(28 downto 14), 15) + resize(cu_v2, 15);
+            if (h_run = '0' and h_sat = '0') or v_r2(14) = '1' then p6_r2 <= (others => '1'); else p6_r2 <= v_r2(13 downto 0); end if;
             p6_mc <= p5_mc + t_M;
             v_10  := resize(p5_L(12 downto 5), 10);
             p6_Ys <= C_BLK + shift_left(v_10, 1) + shift_right(v_10, 1);
             p6_a  <= p5_a;
-            p6_scA <= p5_scA;  p6_iA <= p5_iA;  p6_iC <= p5_iC;
-            p6_dlc <= p5_dlc;  p6_drc <= p5_drc;
-            p6_sp  <= p5_sp;   p6_tn <= p5_tn;  p6_rf <= p5_rf;
-            zn(6)  <= zn(5);
+            p6_scA <= p5_scA;
+            zA6 <= zA5;
 
             -- ---- s7 ----
-            if p6_r2 > 1024 then p7_gd <= p6_r2 - 1024; else p7_gd <= (others => '0'); end if;
+            if p6_r2(13 downto 11) /= "000" or (p6_r2(10) = '1' and p6_r2(9 downto 0) /= 0) then
+                p7_gd <= (p6_r2(13 downto 10) - 1) & p6_r2(9 downto 0);
+            else
+                p7_gd <= (others => '0');
+            end if;
             p7_rp <= resize(p6_r2(13 downto 2) * f_kR, 20);
             p7_hl <= cu_lb + shift_left(resize(p6_r2, 16), 4) + shift_left(resize(p6_r2, 16), 3);
             p7_hi <= (not t_Rg) - shift_left(resize(p6_r2, 16), 8) - shift_left(resize(p6_r2, 16), 7);
             p7_pd <= signed(resize(p6_r2, 15)) - signed(resize(f_pup2, 15));
-            if zn(6) = Z_A then
+            if zA6 = '1' then
                 p7_sc <= p6_scA;
             else
                 p7_sc <= screen(p6_mc(15 downto 8));
             end if;
             -- inset bevel: shadow on the inner top/left walls ...
             v_m := min5(p6_dlc, cu_dt);
-            if    v_m < 3  then p7_sl <= "00";
-            elsif v_m < 7  then p7_sl <= "01";
-            elsif v_m < 14 then p7_sl <= "10";
+            if    v_m(4 downto 2) = "000" and v_m(1 downto 0) /= "11" then p7_sl <= "00";
+            elsif v_m(4 downto 3) = "00" and v_m(2 downto 0) /= "111" then p7_sl <= "01";
+            elsif v_m(4) = '0' and v_m(3 downto 1) /= "111" then p7_sl <= "10";
             else                p7_sl <= "11";
             end if;
             -- ... light on the bottom/right ones
             v_m := min5(p6_drc, cu_db);
-            if v_m < 6 then
-                p7_lift <= resize((6 - v_m) * 12, 7);
-            else
-                p7_lift <= (others => '0');
-            end if;
+            case to_integer(v_m) is
+                when 0      => p7_lift <= to_unsigned(72, 7);
+                when 1      => p7_lift <= to_unsigned(60, 7);
+                when 2      => p7_lift <= to_unsigned(48, 7);
+                when 3      => p7_lift <= to_unsigned(36, 7);
+                when 4      => p7_lift <= to_unsigned(24, 7);
+                when 5      => p7_lift <= to_unsigned(12, 7);
+                when others => p7_lift <= (others => '0');
+            end case;
             p7_Ys <= p6_Ys;
             p7_a  <= p6_a;
-            p7_iA <= p6_iA;  p7_iC <= p6_iC;
-            p7_sp <= p6_sp;  p7_tn <= p6_tn;  p7_rf <= p6_rf;
-            zn(7) <= zn(6);
 
             -- ---- s8 ----
             -- corona falloff numerator gd * (4 + sm); the 2^se is in s9
@@ -1443,13 +1516,14 @@ begin
             p8_gq <= v_gp;
             -- Newton's rings expanding outward
             v_t8 := tri8(p7_rp(7 downto 0) - t_Rg(15 downto 8));
-            if v_t8 > 200 then
-                v_10 := shift_left(resize(v_t8 - 200, 10), 2);
-                if v_10 > 255 then p8_ring <= (others => '1'); else p8_ring <= v_10(7 downto 0); end if;
+            -- (v_t8 - 200) * 4 <= 220 never reaches the 255 clamp
+            if v_t8(7 downto 6) = "11" and (v_t8(5 downto 4) /= "00" or (v_t8(3) = '1' and v_t8(2 downto 0) /= "000")) then
+                v_t8 := v_t8 - 200;
+                p8_ring <= v_t8(5 downto 0) & "00";
             else
                 p8_ring <= (others => '0');
             end if;
-            if p7_a >= 8 then
+            if p7_a(4 downto 3) /= "00" then
                 if sw_iris = '1' then p8_hE <= p7_hi(15 downto 8); else p8_hE <= p7_hl(15 downto 8); end if;
             else
                 -- corona hue runs 0.6 cycle per unit of rho^2 outward
@@ -1462,17 +1536,12 @@ begin
                 when "10"   => p8_Ysh <= shift_right(v_10, 1) + shift_right(v_10, 2);
                 when others => p8_Ysh <= v_10;
             end case;
-            if sw_iris = '1' and p7_a /= 0 and p7_pd < 6 then
-                if p7_pd < 0 then p8_pa <= "10"; else p8_pa <= "01"; end if;
+            if sw_iris = '1' and p7_a /= 0 and (p7_pd(14) = '1' or (p7_pd(13 downto 3) = 0 and p7_pd(2 downto 1) /= "11")) then
+                if p7_pd(14) = '1' then p8_pa <= "10"; else p8_pa <= "01"; end if;
             else
                 p8_pa <= "00";
             end if;
-            p8_iA <= p7_iA;  p8_iC <= p7_iC;
             p8_lift <= p7_lift;
-            p8_sc <= p7_sc;
-            p8_a  <= p7_a;
-            p8_sp <= p7_sp;  p8_tn <= p7_tn;  p8_rf <= p7_rf;
-            zn(8) <= zn(7);
 
             -- ---- s9 ----
             -- t6 = 63 - (gd * sA) >> 10, with sA = (4+sm)/4 * 2^se
@@ -1486,65 +1555,118 @@ begin
                 when 6      => v_gp := shift_right(p8_gq, 6);
                 when others => v_gp := shift_right(p8_gq, 5);
             end case;
-            if v_gp >= 63 then p9_t6 <= (others => '0'); else p9_t6 <= 63 - v_gp(5 downto 0); end if;
+            if v_gp(16 downto 6) /= 0 or v_gp(5 downto 0) = "111111" then p9_t6 <= (others => '0'); else p9_t6 <= not v_gp(5 downto 0); end if;
             p9_ring <= p8_ring;
             p9_iE <= opal(p8_hE, sw_opal);
-            -- palette A/C addresses: data out of the EBR during s10,
-            -- into fabric at s11
-            rA_ad <= p8_iA;
-            rC_ad <= p8_iC;
+            -- (palette A/C addresses arrive at s10 from the delay lines; their
+            -- EBR outputs feed s12 directly)
             v_11 := resize(p8_Ysh, 11) + C_BLK + resize(p8_lift, 11);
-            if v_11 > 1023 then p9_Yf <= (others => '1'); else p9_Yf <= v_11(9 downto 0); end if;
-            p9_pa <= p8_pa;
-            p9_sc <= p8_sc;
-            p9_a  <= p8_a;
-            p9_sp <= p8_sp;  p9_tn <= p8_tn;  p9_rf <= p8_rf;
-            zn(9) <= zn(8);
+            if v_11(10) = '1' then p9_Yf <= (others => '1'); else p9_Yf <= v_11(9 downto 0); end if;
+
 
             -- ---- s10 ----
-            p10_G2 <= resize(shift_right(p9_t6 * p9_t6, 6), 6);
+            -- (t6 * t6) >> 6 as a table
+            case to_integer(p9_t6) is
+                when  0 => p10_G2 <= to_unsigned(0, 6);
+                when  1 => p10_G2 <= to_unsigned(0, 6);
+                when  2 => p10_G2 <= to_unsigned(0, 6);
+                when  3 => p10_G2 <= to_unsigned(0, 6);
+                when  4 => p10_G2 <= to_unsigned(0, 6);
+                when  5 => p10_G2 <= to_unsigned(0, 6);
+                when  6 => p10_G2 <= to_unsigned(0, 6);
+                when  7 => p10_G2 <= to_unsigned(0, 6);
+                when  8 => p10_G2 <= to_unsigned(1, 6);
+                when  9 => p10_G2 <= to_unsigned(1, 6);
+                when 10 => p10_G2 <= to_unsigned(1, 6);
+                when 11 => p10_G2 <= to_unsigned(1, 6);
+                when 12 => p10_G2 <= to_unsigned(2, 6);
+                when 13 => p10_G2 <= to_unsigned(2, 6);
+                when 14 => p10_G2 <= to_unsigned(3, 6);
+                when 15 => p10_G2 <= to_unsigned(3, 6);
+                when 16 => p10_G2 <= to_unsigned(4, 6);
+                when 17 => p10_G2 <= to_unsigned(4, 6);
+                when 18 => p10_G2 <= to_unsigned(5, 6);
+                when 19 => p10_G2 <= to_unsigned(5, 6);
+                when 20 => p10_G2 <= to_unsigned(6, 6);
+                when 21 => p10_G2 <= to_unsigned(6, 6);
+                when 22 => p10_G2 <= to_unsigned(7, 6);
+                when 23 => p10_G2 <= to_unsigned(8, 6);
+                when 24 => p10_G2 <= to_unsigned(9, 6);
+                when 25 => p10_G2 <= to_unsigned(9, 6);
+                when 26 => p10_G2 <= to_unsigned(10, 6);
+                when 27 => p10_G2 <= to_unsigned(11, 6);
+                when 28 => p10_G2 <= to_unsigned(12, 6);
+                when 29 => p10_G2 <= to_unsigned(13, 6);
+                when 30 => p10_G2 <= to_unsigned(14, 6);
+                when 31 => p10_G2 <= to_unsigned(15, 6);
+                when 32 => p10_G2 <= to_unsigned(16, 6);
+                when 33 => p10_G2 <= to_unsigned(17, 6);
+                when 34 => p10_G2 <= to_unsigned(18, 6);
+                when 35 => p10_G2 <= to_unsigned(19, 6);
+                when 36 => p10_G2 <= to_unsigned(20, 6);
+                when 37 => p10_G2 <= to_unsigned(21, 6);
+                when 38 => p10_G2 <= to_unsigned(22, 6);
+                when 39 => p10_G2 <= to_unsigned(23, 6);
+                when 40 => p10_G2 <= to_unsigned(25, 6);
+                when 41 => p10_G2 <= to_unsigned(26, 6);
+                when 42 => p10_G2 <= to_unsigned(27, 6);
+                when 43 => p10_G2 <= to_unsigned(28, 6);
+                when 44 => p10_G2 <= to_unsigned(30, 6);
+                when 45 => p10_G2 <= to_unsigned(31, 6);
+                when 46 => p10_G2 <= to_unsigned(33, 6);
+                when 47 => p10_G2 <= to_unsigned(34, 6);
+                when 48 => p10_G2 <= to_unsigned(36, 6);
+                when 49 => p10_G2 <= to_unsigned(37, 6);
+                when 50 => p10_G2 <= to_unsigned(39, 6);
+                when 51 => p10_G2 <= to_unsigned(40, 6);
+                when 52 => p10_G2 <= to_unsigned(42, 6);
+                when 53 => p10_G2 <= to_unsigned(43, 6);
+                when 54 => p10_G2 <= to_unsigned(45, 6);
+                when 55 => p10_G2 <= to_unsigned(47, 6);
+                when 56 => p10_G2 <= to_unsigned(49, 6);
+                when 57 => p10_G2 <= to_unsigned(50, 6);
+                when 58 => p10_G2 <= to_unsigned(52, 6);
+                when 59 => p10_G2 <= to_unsigned(54, 6);
+                when 60 => p10_G2 <= to_unsigned(56, 6);
+                when 61 => p10_G2 <= to_unsigned(58, 6);
+                when 62 => p10_G2 <= to_unsigned(60, 6);
+                when others => p10_G2 <= to_unsigned(62, 6);
+            end case;
             case p9_t6(5 downto 4) is
                 when "11"   => p10_rt <= resize(p9_ring, 8);
                 when "10"   => p10_rt <= resize(shift_right(p9_ring, 1), 8);
                 when "01"   => p10_rt <= resize(shift_right(p9_ring, 2), 8);
                 when others => p10_rt <= resize(shift_right(p9_ring, 4), 8);
             end case;
-            rE_ad  <= p9_iE;                       -- eye/corona colour into fabric at s12
+
             p10_Yf <= p9_Yf;
-            p10_pa <= p9_pa;
-            p10_sc <= p9_sc;
-            p10_a  <= p9_a;
-            p10_sp <= p9_sp;  p10_tn <= p9_tn;  p10_rf <= p9_rf;
-            zn(10) <= zn(9);
+            rC_ad  <= p9_iC;
+            p10_iE <= p9_iE;
 
             -- ---- s11 ----
             p11_Gv <= resize(shift_right(p10_G2 * f_g3, 5), 5);
             p11_rl <= shift_right(p10_rt, to_integer(f_rsh));
-            p11_aY <= rA_qy;  p11_aU <= rA_qu;  p11_aV <= rA_qv;
-            p11_cY <= rC_qy;  p11_cU <= rC_qu;  p11_cV <= rC_qv;
+            rE_ad  <= p10_iE;                      -- eye/corona colour out of the EBR at s12
             p11_Yf <= p10_Yf;
-            p11_pa <= p10_pa;
-            p11_sc <= p10_sc;
-            p11_a  <= p10_a;
             p11_sp <= p10_sp;  p11_tn <= p10_tn;  p11_rf <= p10_rf;
-            zn(11) <= zn(10);
+            zn11 <= zn10;
 
             -- ---- s12: base colour, blend targets, raw eye colour ----
             v_y := C_BLK; v_u := C_MID; v_v := C_MID;
             p12_ty <= C_BLK; p12_tu <= C_MID; p12_tv <= C_MID;
             p12_a1 <= (others => '0');
-            case zn(11) is
+            case zn11 is
                 when Z_A =>
-                    v_y := p11_aY; v_u := p11_aU; v_v := p11_aV;
+                    v_y := rA_qy; v_u := rA_qu; v_v := rA_qv;
                     if sw_moire = '1' then p12_a1 <= 15 - p11_sc; end if;
                 when Z_C | Z_G =>
-                    v_y := p11_cY; v_u := p11_cU; v_v := p11_cV;
-                    if zn(11) = Z_C and p11_rf = '1' then
+                    v_y := rC_qy; v_u := rC_qu; v_v := rC_qv;
+                    if zn11 = Z_C and p11_rf = '1' then
                         p12_ty <= to_unsigned(820, 10);
                         p12_tu <= to_unsigned(560, 10);
                         p12_tv <= to_unsigned(470, 10);
                         p12_a1 <= cu_aref(3 downto 0);
-                    elsif zn(11) = Z_C and cu_ah /= 0 then
+                    elsif zn11 = Z_C and cu_ah /= 0 then
                         p12_ty <= to_unsigned(640, 10);
                         p12_a1 <= cu_ah(3 downto 0);
                     elsif sw_moire = '1' then
@@ -1554,30 +1676,47 @@ begin
                     v_y := to_unsigned(720, 10);
                 when others =>
                     if p11_sp = '1' then
-                        v_y := p11_aY; v_u := p11_aU; v_v := p11_aV;
+                        v_y := rA_qy; v_u := rA_qu; v_v := rA_qv;
                     else
                         v_11 := resize(p11_Yf, 11) + resize(p11_rl, 11);
-                        if v_11 > 900 then v_y := to_unsigned(900, 10); else v_y := v_11(9 downto 0); end if;
+                        if (v_11(10) = '1' or (v_11(9 downto 7) = "111" and (v_11(6 downto 3) /= "0000" or (v_11(2) = '1' and v_11(1 downto 0) /= "00")))) then v_y := to_unsigned(900, 10); else v_y := v_11(9 downto 0); end if;
                         v_u := C_MID + resize(p11_tn & "00", 10) + resize(p11_tn, 10);
                         v_v := C_MID - resize(p11_tn & "00", 10);
                     end if;
             end case;
             p12_by <= v_y;  p12_bu <= v_u;  p12_bv <= v_v;
-            p12_eY <= rE_qy;  p12_eU <= rE_qu;  p12_eV <= rE_qv;
+
             if p11_a > resize(p11_Gv, 5) then p12_aE <= p11_a; else p12_aE <= resize(p11_Gv, 5); end if;
             -- rim: peaks at half coverage, 0 inside and out
-            p12_rim <= resize(shift_right(resize(p11_a, 10) * resize(16 - p11_a, 10), 2), 5);
-            p12_pa <= p11_pa;
+            -- (a * (16 - a)) >> 2 (5-bit wrap) as a table; it has period 16 in a
+            case to_integer(p11_a(3 downto 0)) is
+                when  0 => p12_rim <= to_unsigned(0, 5);
+                when  1 => p12_rim <= to_unsigned(3, 5);
+                when  2 => p12_rim <= to_unsigned(7, 5);
+                when  3 => p12_rim <= to_unsigned(9, 5);
+                when  4 => p12_rim <= to_unsigned(12, 5);
+                when  5 => p12_rim <= to_unsigned(13, 5);
+                when  6 => p12_rim <= to_unsigned(15, 5);
+                when  7 => p12_rim <= to_unsigned(15, 5);
+                when  8 => p12_rim <= to_unsigned(16, 5);
+                when  9 => p12_rim <= to_unsigned(15, 5);
+                when 10 => p12_rim <= to_unsigned(15, 5);
+                when 11 => p12_rim <= to_unsigned(13, 5);
+                when 12 => p12_rim <= to_unsigned(12, 5);
+                when 13 => p12_rim <= to_unsigned(9, 5);
+                when 14 => p12_rim <= to_unsigned(7, 5);
+                when others => p12_rim <= to_unsigned(3, 5);
+            end case;
 
             -- ---- s13: the stronger target wins (the iris pupil darkens the eye) ----
             if p12_aE > resize(p12_a1, 5) then
                 case p12_pa is
                     when "00" =>
-                        p13_ty <= p12_eY; p13_tu <= p12_eU; p13_tv <= p12_eV;
+                        p13_ty <= rE_qy; p13_tu <= rE_qu; p13_tv <= rE_qv;
                     when "01" =>
-                        p13_ty <= C_BLK + shift_right(p12_eY - C_BLK, 2);
-                        p13_tu <= shift_right(p12_eU, 2) + 384;
-                        p13_tv <= shift_right(p12_eV, 2) + 384;
+                        p13_ty <= C_BLK + shift_right(rE_qy - C_BLK, 2);
+                        p13_tu <= shift_right(rE_qu, 2) + 384;
+                        p13_tv <= shift_right(rE_qv, 2) + 384;
                     when others =>
                         p13_ty <= C_BLK; p13_tu <= C_MID; p13_tv <= C_MID;
                 end case;
@@ -1603,33 +1742,41 @@ begin
             p14_a <= p13_a;  p14_rim <= p13_rim;
 
             -- ---- s15: x alpha (full coverage takes the whole difference) ----
+            -- (stored one's-complemented when s16 subtracts: s16 is then one
+            -- adder with the sign as carry-in)
             if p14_a(4) = '1' then
-                p15_py <= p14_my & "0000";
-                p15_pu <= p14_mu & "0000";
-                p15_pv <= p14_mv & "0000";
+                v_py := p14_my & "0000";
+                v_pu := p14_mu & "0000";
+                v_pv := p14_mv & "0000";
             else
-                p15_py <= p14_my * p14_a(3 downto 0);
-                p15_pu <= p14_mu * p14_a(3 downto 0);
-                p15_pv <= p14_mv * p14_a(3 downto 0);
+                v_py := p14_my * p14_a(3 downto 0);
+                v_pu := p14_mu * p14_a(3 downto 0);
+                v_pv := p14_mv * p14_a(3 downto 0);
             end if;
+            p15_py <= v_py xor (13 downto 0 => p14_ny);
+            p15_pu <= v_pu xor (11 downto 0 => p14_nu);
+            p15_pv <= v_pv xor (11 downto 0 => p14_nv);
             p15_ny <= p14_ny;  p15_nu <= p14_nu;  p15_nv <= p14_nv;
             p15_by <= p14_by;  p15_bu <= p14_bu;  p15_bv <= p14_bv;
             p15_rim <= p14_rim;
 
             -- ---- s16 ----
-            if p15_ny = '1' then p16_y <= p15_by - p15_py(13 downto 4); else p16_y <= p15_by + p15_py(13 downto 4); end if;
-            if p15_nu = '1' then p16_u <= p15_bu - p15_pu(11 downto 2); else p16_u <= p15_bu + p15_pu(11 downto 2); end if;
-            if p15_nv = '1' then p16_v <= p15_bv - p15_pv(11 downto 2); else p16_v <= p15_bv + p15_pv(11 downto 2); end if;
+            v_a11 := (p15_by & '1') + (p15_py(13 downto 4) & p15_ny);
+            p16_y <= v_a11(10 downto 1);
+            v_a11 := (p15_bu & '1') + (p15_pu(11 downto 2) & p15_nu);
+            p16_u <= v_a11(10 downto 1);
+            v_a11 := (p15_bv & '1') + (p15_pv(11 downto 2) & p15_nv);
+            p16_v <= v_a11(10 downto 1);
             p16_rim <= p15_rim;
 
             -- ---- s17: white rim, blanking gate ----
-            if av(16) = '0' then
+            if av16 = '0' then
                 p17_y <= C_BLK;  p17_u <= C_MID;  p17_v <= C_MID;
             else
                 v_11 := resize(p16_y, 11) + resize(p16_rim & "0000", 11) + resize(p16_rim & "000", 11)
                         + resize(p16_rim & "00", 11);
-                if v_11 > 900 then p17_y <= to_unsigned(900, 10); else p17_y <= v_11(9 downto 0); end if;
-                if p16_rim >= 8 then
+                if (v_11(10) = '1' or (v_11(9 downto 7) = "111" and (v_11(6 downto 3) /= "0000" or (v_11(2) = '1' and v_11(1 downto 0) /= "00")))) then p17_y <= to_unsigned(900, 10); else p17_y <= v_11(9 downto 0); end if;
+                if p16_rim(4 downto 3) /= "00" then
                     p17_u <= shift_right(p16_u, 1) + 256;
                     p17_v <= shift_right(p16_v, 1) + 256;
                 else
@@ -1645,8 +1792,10 @@ begin
     -- go into 256-deep circular RAMs written at the same pointer.  Syncs are
     -- read back a fixed D0+17 later; video D0 later on normal rows, so the
     -- two line up.  Tear rows read video with their own delay (and chroma a
-    -- little further), displacing the whole composed line.  Reads never
-    -- touch the address being written (delays 2..254).
+    -- little further), displacing the whole composed line.  The EBR output
+    -- registers feed the output stage directly, so every read is one clock
+    -- older than the delay (D + 1); reads never touch the address being
+    -- written (delays 2..244 -> 3..245).
     -- ====================================================================
     p_oby : process(clk) begin if rising_edge(clk) then ob_y(to_integer(o_wp)) <= p17_y; ob_qy <= ob_y(to_integer(o_ray)); end if; end process;
     p_obu : process(clk) begin if rising_edge(clk) then ob_u(to_integer(o_wp)) <= p17_u; ob_qu <= ob_u(to_integer(o_rac)); end if; end process;
@@ -1663,9 +1812,11 @@ begin
     begin
         if rising_edge(clk) then
             o_wp  <= o_wp + 1;
-            o_ray <= o_wp - o_dY;
-            o_rac <= o_wp - o_dC;
-            o_ras <= o_wp - to_unsigned(C_D0 + C_NW, 8);
+            -- (one clock older than the line delay: the EBR output register
+            -- feeds the output stage directly)
+            o_ray <= o_wp + not o_dY;
+            o_rac <= o_wp + not o_dC;
+            o_ras <= o_wp - to_unsigned(C_D0 + C_NW + 1, 8);
 
             -- per-line read delay, latched while the line is mid-pipe
             o_lq <= g_avid;
@@ -1679,22 +1830,20 @@ begin
                 end if;
             end if;
 
-            o_fy <= ob_qy;  o_fu <= ob_qu;  o_fv <= ob_qv;
-            o_fs <= ob_qs;
 
-            if o_fs(0) = '1' then
-                s_io.y <= std_logic_vector(o_fy);
-                s_io.u <= std_logic_vector(o_fu);
-                s_io.v <= std_logic_vector(o_fv);
+            if ob_qs(0) = '1' then
+                s_io.y <= std_logic_vector(ob_qy);
+                s_io.u <= std_logic_vector(ob_qu);
+                s_io.v <= std_logic_vector(ob_qv);
             else
                 s_io.y <= std_logic_vector(C_BLK);
                 s_io.u <= std_logic_vector(C_MID);
                 s_io.v <= std_logic_vector(C_MID);
             end if;
-            s_io.hsync_n <= o_fs(3);
-            s_io.vsync_n <= o_fs(2);
-            s_io.field_n <= o_fs(1);
-            s_io.avid    <= o_fs(0);
+            s_io.hsync_n <= ob_qs(3);
+            s_io.vsync_n <= ob_qs(2);
+            s_io.field_n <= ob_qs(1);
+            s_io.avid    <= ob_qs(0);
         end if;
     end process p_out;
 
