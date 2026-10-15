@@ -430,7 +430,14 @@ begin
                 s_spd <= resize(shift_left(v_mag - 16, 2), 12);
             end if;
 
-            s_gsel   <= rk4(9 downto 8);
+            -- Labelled default: at program load the firmware writes the
+            -- initial_value_label's INDEX (0..3) into the register, not a
+            -- 0..1023 position, so a value below 4 is the label index itself.
+            if rk4 < 4 then
+                s_gsel <= rk4(1 downto 0);
+            else
+                s_gsel <= rk4(9 downto 8);
+            end if;
             -- K5 boil rate, exponential over 8 octaves from the glided
             -- k5g: step = (32 + k5g(6:2)) << k5g(9:7) into a 13-bit
             -- accumulator -> one full dissolve per 256 frames .. ~1 frame
