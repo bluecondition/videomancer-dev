@@ -490,6 +490,33 @@ architecture pixelbeach of program_top is
         to_signed(96,8), to_signed(89,8), to_signed(68,8), to_signed(37,8),
         to_signed(0,8), to_signed(-37,8), to_signed(-68,8), to_signed(-89,8),
         to_signed(-96,8), to_signed(-89,8), to_signed(-68,8), to_signed(-37,8));
+    -- Sky keyframes split per channel for the one-channel-at-a-time lerp, plus
+    -- the FSM's sine in the unused corner, so the whole sunset engine and the
+    -- wave oscillators share ONE registered ROM port (one block RAM pair).
+    -- Address = night(8) & target(7:6) [00 hi, 01 lo, 10 glow] & channel(5:4)
+    -- & keyframe(3:0); target 11 (night 0) = SIN_LUT(0..63) in the low 8 bits.
+    type t_skych is array (0 to 511) of unsigned(9 downto 0);
+    function f_skych return t_skych is
+        variable r : t_skych := (others => (others => '0'));
+        variable w : std_logic_vector(29 downto 0);
+    begin
+        for nt in 0 to 1 loop
+            for tg in 0 to 2 loop
+                for k in 0 to 15 loop
+                    w := SKYG_ROM(nt * 64 + tg * 16 + k);
+                    r(nt * 256 + tg * 64 + k)      := unsigned(w(29 downto 20));
+                    r(nt * 256 + tg * 64 + 16 + k) := unsigned(w(19 downto 10));
+                    r(nt * 256 + tg * 64 + 32 + k) := unsigned(w(9 downto 0));
+                end loop;
+            end loop;
+        end loop;
+        for i in 0 to 63 loop
+            r(192 + i) := unsigned(resize(SIN_LUT(i), 10));
+        end loop;
+        return r;
+    end function;
+    constant SKY_CH : t_skych := f_skych;
+
     -- Blocky sun: 6x6 circle in an 8x8 cell field, row-major, bit 63 = (0,0)
     constant SUN_PAT : std_logic_vector(63 downto 0) :=
         "00000000" & "00111100" & "01111110" & "01111110" &
@@ -583,7 +610,7 @@ architecture pixelbeach of program_top is
     signal fw_dsp  : t_mem16 := (others => (others => '0'));
     signal e_rd_d, fw_rd_d : std_logic_vector(15 downto 0) := (others => '0');
     type t_grad is array (0 to 7) of std_logic_vector(15 downto 0);
-    signal gradA_mem, gradB_mem : t_grad := (others => (others => '0'));
+    signal gradY_mem, gradU_mem, gradV_mem : t_grad := (others => (others => '0'));
 
     -- No read ever lands on an address while it is being written (every FSM
     -- read re-issues its address >= 2 states before use; display banks and
@@ -596,8 +623,9 @@ architecture pixelbeach of program_top is
     attribute no_rw_check of fw_mem    : signal is true;
     attribute no_rw_check of eta_dsp   : signal is true;
     attribute no_rw_check of fw_dsp    : signal is true;
-    attribute no_rw_check of gradA_mem : signal is true;
-    attribute no_rw_check of gradB_mem : signal is true;
+    attribute no_rw_check of gradY_mem : signal is true;
+    attribute no_rw_check of gradU_mem : signal is true;
+    attribute no_rw_check of gradV_mem : signal is true;
 
     -- Per-cell sand wetness: 4-bit counter for every (column, row below the
     -- sand surface) cell, address = x_idx & depth row (16 rows covers the
@@ -685,7 +713,7 @@ architecture pixelbeach of program_top is
     signal crab_cbase : unsigned(7 downto 0) := (others => '0'); -- candidate top row
     signal s8_prev   : std_logic := '0';
     signal p1_hole   : std_logic := '0';
-    signal gA_rd, gB_rd : std_logic_vector(15 downto 0) := (others => '0');
+    signal gY_rd, gU_rd, gV_rd : std_logic_vector(15 downto 0) := (others => '0');
     signal band  : unsigned(2 downto 0) := (others => '0');
     signal bacc  : unsigned(14 downto 0) := (others => '0');
     signal ed_we,  fwd_we  : std_logic := '0';
@@ -765,7 +793,6 @@ architecture pixelbeach of program_top is
     signal stk_len15 : signed(14 downto 0) := (others => '0');
     signal mir_on    : std_logic := '0';
     signal tri_on    : std_logic := '0';
-    signal sunw      : std_logic_vector(29 downto 0) := (others => '0');
     signal sun_y_r, sun_u_r, sun_v_r : std_logic_vector(9 downto 0) := (others => '0');
 
     signal gx0, gx1, gx2 : unsigned(7 downto 0) := to_unsigned(20, 8);
@@ -792,9 +819,7 @@ architecture pixelbeach of program_top is
     type t_fst is (FI, CP0, CP1, CP2,
                    FP0, FP1, FP2, FP3, FP4, FP5, FP6, FP7, FP8, FP9,
                    FP10, FP11, FP12,
-                   FD0, FD1, FD2, FD3, FD4, FD5, FD6, FD7,
-                   FD8, FD9, FD10, FD11,
-                   FDG0, FDG1, FDG2, FDG3, FDG4, FDG5, FDG6, FG0, FG1,
+                   SK0, SKA, SKB, SKC, SKD, SKG,
                    FE0, FE1, FE2,
                    FVL0, FVL1, FVL2, FV0, FV1, FV2, FV3, FV4, FV5, FV6,
                    FFL0, FFL1, FFL2, FF0, FF1, FF2, FF3, FF4, FF5, FF6, FF7, FF8,
@@ -829,6 +854,12 @@ architecture pixelbeach of program_top is
     signal ph1, ph2, ph3 : unsigned(9 downto 0) := (others => '0');
     signal p_inc3   : unsigned(3 downto 0) := to_unsigned(2, 4);
     signal sin_v1, sin_v2, sin_v3 : signed(7 downto 0) := (others => '0');
+    -- sine ROM ports (registered, one read site each so yosys can use block
+    -- RAM): the FSM sequences ph1/ph2/ph3 through sin_a; the wash edge reads
+    -- dsin_a, issued two clocks before it is used
+    signal dsin_a : unsigned(5 downto 0) := (others => '0');
+    signal dsin_q : signed(7 downto 0) := (others => '0');
+    signal sung_q : std_logic_vector(29 downto 0) := (others => '0');
     signal swell_a  : signed(11 downto 0) := (others => '0');
     signal chop_v   : signed(11 downto 0) := (others => '0');
     signal swell    : signed(11 downto 0) := (others => '0');
@@ -847,21 +878,21 @@ architecture pixelbeach of program_top is
     -- sunset colour engine (computed once per kick via the shared mult):
     -- sky hi/lo = lerp between adjacent P12 keyframes; ocean deep = base
     -- scaled toward black/neutral by dscale
-    signal skyg_addr : unsigned(6 downto 0) := (others => '0');
-    signal ga_g, gb_g : std_logic_vector(29 downto 0) := (others => '0');
-    signal glow_y, glow_u, glow_v : std_logic_vector(9 downto 0) := (others => '0');
-    signal gd_y, gd_u, gd_v : signed(10 downto 0) := (others => '0');
-    signal ay_a, au_a, av_a : signed(10 downto 0) := (others => '0');
+    signal sky_a  : unsigned(8 downto 0) := (others => '0');   -- SKY_CH port
+    signal sky_q  : unsigned(9 downto 0) := (others => '0');
+    signal sk_a   : unsigned(9 downto 0) := (others => '0');   -- keyframe k value
+    signal sk_hi  : unsigned(9 downto 0) := (others => '0');   -- this channel's sky top
+    signal sk_ch  : unsigned(1 downto 0) := (others => '0');   -- 0 Y, 1 U, 2 V
+    signal sk_tg  : unsigned(1 downto 0) := (others => '0');   -- 00 hi, 10 glow, 01 lo
+    signal g_acc, g_d : signed(10 downto 0) := (others => '0');
     signal gk : unsigned(2 downto 0) := (others => '0');
-    signal gradA_we : std_logic := '0';
-    signal grad_wa  : unsigned(2 downto 0) := (others => '0');
-    signal gradA_wd, gradB_wd : std_logic_vector(15 downto 0) := (others => '0');
-    signal sga_hi, sgb_hi, sga_lo, sgb_lo : std_logic_vector(29 downto 0) := (others => '0');
+    signal grad_we : std_logic_vector(2 downto 0) := "000";    -- one per channel
+    signal grad_wa : unsigned(2 downto 0) := (others => '0');
+    signal grad_wd : std_logic_vector(15 downto 0) := (others => '0');
     signal t_r       : unsigned(3 downto 0) := (others => '0');
     -- geometry-scaled sun position: 64 .. skyband+512 across full P12 travel,
     -- computed here (mult) and consumed by vseq next field (1-field lag)
     signal sun_q_f   : unsigned(11 downto 0) := to_unsigned(500, 12);
-    signal skyhi_y, skyhi_u, skyhi_v : std_logic_vector(9 downto 0) := (others => '0');
     signal skylo_y, skylo_u, skylo_v : std_logic_vector(9 downto 0) := (others => '0');
 
     signal ma : signed(11 downto 0) := (others => '0');
@@ -1219,7 +1250,6 @@ begin
                     v_sunq := sun_q_f;
                     sun_cell <= resize(v_sunq(11 downto 6), 8);
                     sun_q15  <= signed(resize(v_sunq, 15));
-                    sunw     <= SUNG_ROM(to_integer(s_night & lp12(9 downto 6)));
                     vstep    <= vstep + 1;
                 when 4 =>
                     -- horizon = the SKY/OCEAN line (skyband_q).  The sun sets
@@ -1248,9 +1278,9 @@ begin
                     stk_len15 <= shift_left(sun_q15 + to_signed(320, 15)
                                             - skyband_q, 2);
                     slb2_q  <= shift_left(skyband_q, 1);
-                    sun_y_r <= sunw(29 downto 20);
-                    sun_u_r <= sunw(19 downto 10);
-                    sun_v_r <= sunw(9 downto 0);
+                    sun_y_r <= sung_q(29 downto 20);
+                    sun_u_r <= sung_q(19 downto 10);
+                    sun_v_r <= sung_q(9 downto 0);
 
                     -- gulls: leftward drift at three rates, wrap at 0
                     if s_gulls = '1' then
@@ -1607,7 +1637,8 @@ begin
         variable v_fin  : signed(11 downto 0);
         variable v_fp   : unsigned(9 downto 0);
         variable v_i1   : unsigned(9 downto 0);
-        variable v_cy, v_cu, v_cv : signed(10 downto 0);
+        variable v_cy   : signed(10 downto 0);
+        variable v_lr   : unsigned(9 downto 0);
         variable v_iw   : signed(6 downto 0);
         variable v_pa   : unsigned(9 downto 0);
         variable v_ph11 : unsigned(10 downto 0);
@@ -1630,7 +1661,7 @@ begin
             fw_we  <= '0';
             ed_we  <= '0';
             fwd_we <= '0';
-            gradA_we <= '0';
+            grad_we  <= "000";
 
             case fst is
                 when FI =>
@@ -1732,17 +1763,20 @@ begin
                         wave_jit <= signed('0' & lfsr(11 downto 8)) - to_signed(8, 5);
                         wave_new <= '0';
                     end if;
-                    sin_v1 <= SIN_LUT(to_integer(ph1(9 downto 4)));
+                    sky_a  <= "011" & ph1(9 downto 4);   -- sine corner
                     fst    <= FP4;
                 when FP4 =>
-                    sin_v2 <= SIN_LUT(to_integer(ph2(9 downto 4)));
+                    sin_v1 <= signed(sky_q(7 downto 0));   -- sine(ph1), issued in FP3
+                    sky_a  <= "011" & ph2(9 downto 4);
                     ma     <= signed(resize(p_amp, 12));
                     mb     <= signed(resize(amp_mod, 10));
                     fst    <= FP5;
                 when FP5 =>
-                    sin_v3 <= SIN_LUT(to_integer(ph3(9 downto 4)));
+                    sin_v2 <= signed(sky_q(7 downto 0));   -- sine(ph2), issued in FP4
+                    sky_a  <= "011" & ph3(9 downto 4);
                     fst    <= FP6;
                 when FP6 =>
+                    sin_v3 <= signed(sky_q(7 downto 0));   -- sine(ph3), issued in FP5
                     -- mp = amp * amp_mod (Q8 factor)
                     v_ae := unsigned(mp(17 downto 8));
                     if v_ae > to_unsigned(511, 10) then
@@ -1778,155 +1812,80 @@ begin
                     fst <= FP12;
                 when FP12 =>
                     swell <= swell_a + chop_v + surge_off;
-                    fst   <= FD0;
+                    fst   <= SK0;
 
                 ----------------------------------------------------------------
-                -- Sunset colour engine.  Sky hi/lo lerp between P12 keyframes
-                -- k and k+1 with t = P12(5:2); ocean deep scaled by dscale.
-                -- Operands set in state N are harvested in state N+2.
+                -- Sunset colour engine, one channel at a time through ONE ROM
+                -- port and ONE lerp (same arithmetic as the old parallel one):
+                -- per channel, the sky top (hi) and horizon glow lerp between
+                -- P12 keyframes k and k+1 with t = P12(5:2), then the 8
+                -- gradient bands hi -> glow go to that channel's band RAM,
+                -- then the ocean-strip colour (lo).  mp is valid in the state
+                -- after ma is set (the FSM stalls on the serial multiplier).
                 ----------------------------------------------------------------
-                when FD0 =>
-                    skyg_addr <= s_night & "00" & lp12(9 downto 6);
-                    fst <= FD1;
-                when FD1 =>
-                    sga_hi <= SKYG_ROM(to_integer(skyg_addr));
+                when SK0 =>
+                    mb    <= signed(resize(t_r, 10));
+                    sk_ch <= "00";
+                    sk_tg <= "00";
+                    fst   <= SKA;
+                when SKA =>
+                    sky_a <= s_night & sk_tg & sk_ch & lp12(9 downto 6);
+                    fst   <= SKB;
+                when SKB =>
+                    sk_a <= sky_q;                                 -- keyframe k
                     if lp12(9 downto 6) = "1111" then
-                        skyg_addr <= s_night & "00" & "1111";
+                        sky_a <= s_night & sk_tg & sk_ch & "1111";
                     else
-                        skyg_addr <= s_night & "00" & (lp12(9 downto 6) + 1);
+                        sky_a <= s_night & sk_tg & sk_ch & (lp12(9 downto 6) + 1);
                     end if;
-                    fst <= FD2;
-                when FD2 =>
-                    sgb_hi    <= SKYG_ROM(to_integer(skyg_addr));
-                    skyg_addr <= s_night & "01" & lp12(9 downto 6);
-                    fst <= FD3;
-                when FD3 =>
-                    sga_lo <= SKYG_ROM(to_integer(skyg_addr));
-                    if lp12(9 downto 6) = "1111" then
-                        skyg_addr <= s_night & "01" & "1111";
-                    else
-                        skyg_addr <= s_night & "01" & (lp12(9 downto 6) + 1);
+                    fst <= SKC;
+                when SKC =>
+                    ma  <= resize(signed('0' & sky_q) - signed('0' & sk_a), 12);
+                    fst <= SKD;
+                when SKD =>
+                    v_lr := resize(unsigned(signed('0' & sk_a)
+                                            + resize(shift_right(mp, 4), 11)), 10);
+                    if sk_tg = "00" then                           -- sky top
+                        sk_hi <= v_lr;
+                        sk_tg <= "10";
+                        fst   <= SKA;
+                    elsif sk_tg = "10" then                        -- glow: bands
+                        g_d   <= shift_right(signed('0' & v_lr) - signed('0' & sk_hi), 3);
+                        g_acc <= signed('0' & sk_hi);
+                        gk    <= (others => '0');
+                        fst   <= SKG;
+                    else                                           -- ocean strip
+                        case sk_ch is
+                            when "00"   => skylo_y <= std_logic_vector(v_lr);
+                            when "01"   => skylo_u <= std_logic_vector(v_lr);
+                            when others => skylo_v <= std_logic_vector(v_lr);
+                        end case;
+                        if sk_ch = "10" then
+                            fst <= FE0;
+                        else
+                            sk_ch <= sk_ch + 1;
+                            sk_tg <= "00";
+                            fst   <= SKA;
+                        end if;
                     end if;
-                    fst <= FD4;
-                -- shared-multiplier latency is ONE fsm-state: operands set in
-                -- state N give a valid mp in state N+1 (we overwrite ma every
-                -- state, so the read must be exactly one state after the set,
-                -- NOT two -- reading two states later picks up the NEXT
-                -- channel's product, which underflowed Y to white at night).
-                when FD4 =>
-                    sgb_lo <= SKYG_ROM(to_integer(skyg_addr));
-                    ma <= resize(signed('0' & sgb_hi(29 downto 20))
-                                 - signed('0' & sga_hi(29 downto 20)), 12);
-                    mb <= signed(resize(t_r, 10));
-                    fst <= FD5;
-                when FD5 =>
-                    skyhi_y <= std_logic_vector(resize(unsigned(
-                        signed('0' & sga_hi(29 downto 20)) + resize(shift_right(mp, 4), 11)), 10));
-                    ma <= resize(signed('0' & sgb_hi(19 downto 10))
-                                 - signed('0' & sga_hi(19 downto 10)), 12);
-                    fst <= FD6;
-                when FD6 =>
-                    skyhi_u <= std_logic_vector(resize(unsigned(
-                        signed('0' & sga_hi(19 downto 10)) + resize(shift_right(mp, 4), 11)), 10));
-                    ma <= resize(signed('0' & sgb_hi(9 downto 0))
-                                 - signed('0' & sga_hi(9 downto 0)), 12);
-                    fst <= FD7;
-                when FD7 =>
-                    skyhi_v <= std_logic_vector(resize(unsigned(
-                        signed('0' & sga_hi(9 downto 0)) + resize(shift_right(mp, 4), 11)), 10));
-                    ma <= resize(signed('0' & sgb_lo(29 downto 20))
-                                 - signed('0' & sga_lo(29 downto 20)), 12);
-                    fst <= FD8;
-                when FD8 =>
-                    skylo_y <= std_logic_vector(resize(unsigned(
-                        signed('0' & sga_lo(29 downto 20)) + resize(shift_right(mp, 4), 11)), 10));
-                    ma <= resize(signed('0' & sgb_lo(19 downto 10))
-                                 - signed('0' & sga_lo(19 downto 10)), 12);
-                    fst <= FD9;
-                when FD9 =>
-                    skylo_u <= std_logic_vector(resize(unsigned(
-                        signed('0' & sga_lo(19 downto 10)) + resize(shift_right(mp, 4), 11)), 10));
-                    ma <= resize(signed('0' & sgb_lo(9 downto 0))
-                                 - signed('0' & sga_lo(9 downto 0)), 12);
-                    fst <= FD10;
-                when FD10 =>
-                    skylo_v <= std_logic_vector(resize(unsigned(
-                        signed('0' & sga_lo(9 downto 0)) + resize(shift_right(mp, 4), 11)), 10));
-                    fst <= FD11;
-                when FD11 =>
-                    skyg_addr <= s_night & "10" & lp12(9 downto 6);
-                    fst <= FDG0;
-
-                ----------------------------------------------------------------
-                -- Horizon-glow lerp, then 8 vertical sky bands from sky-top
-                -- to glow by pure incremental adds (no multiplies)
-                ----------------------------------------------------------------
-                when FDG0 =>
-                    ga_g <= SKYG_ROM(to_integer(skyg_addr));
-                    if lp12(9 downto 6) = "1111" then
-                        skyg_addr <= s_night & "10" & "1111";
-                    else
-                        skyg_addr <= s_night & "10" & (lp12(9 downto 6) + 1);
-                    end if;
-                    fst <= FDG1;
-                when FDG1 =>
-                    gb_g <= SKYG_ROM(to_integer(skyg_addr));
-                    fst  <= FDG2;
-                when FDG2 =>
-                    ma <= resize(signed('0' & gb_g(29 downto 20))
-                                 - signed('0' & ga_g(29 downto 20)), 12);
-                    fst <= FDG3;
-                when FDG3 =>
-                    glow_y <= std_logic_vector(resize(unsigned(
-                        signed('0' & ga_g(29 downto 20)) + resize(shift_right(mp, 4), 11)), 10));
-                    ma <= resize(signed('0' & gb_g(19 downto 10))
-                                 - signed('0' & ga_g(19 downto 10)), 12);
-                    fst <= FDG4;
-                when FDG4 =>
-                    glow_u <= std_logic_vector(resize(unsigned(
-                        signed('0' & ga_g(19 downto 10)) + resize(shift_right(mp, 4), 11)), 10));
-                    ma <= resize(signed('0' & gb_g(9 downto 0))
-                                 - signed('0' & ga_g(9 downto 0)), 12);
-                    fst <= FDG5;
-                when FDG5 =>
-                    glow_v <= std_logic_vector(resize(unsigned(
-                        signed('0' & ga_g(9 downto 0)) + resize(shift_right(mp, 4), 11)), 10));
-                    fst <= FG0;
-                when FDG6 =>
-                    fst <= FG0;
-                when FG0 =>
-                    gd_y <= shift_right(signed('0' & glow_y)
-                                        - signed('0' & skyhi_y), 3);
-                    gd_u <= shift_right(signed('0' & glow_u)
-                                        - signed('0' & skyhi_u), 3);
-                    gd_v <= shift_right(signed('0' & glow_v)
-                                        - signed('0' & skyhi_v), 3);
-                    ay_a <= signed('0' & skyhi_y);
-                    au_a <= signed('0' & skyhi_u);
-                    av_a <= signed('0' & skyhi_v);
-                    gk   <= (others => '0');
-                    fst  <= FG1;
-                when FG1 =>
-                    -- clamp accumulators: floor-rounded negative deltas can
-                    -- walk a near-black band below zero, and the unsigned
-                    -- slice would wrap to WHITE (night-sky bug)
-                    v_cy := ay_a; if v_cy < 0 then v_cy := (others => '0'); end if;
-                    v_cu := au_a; if v_cu < 0 then v_cu := (others => '0'); end if;
-                    v_cv := av_a; if v_cv < 0 then v_cv := (others => '0'); end if;
-                    gradA_we <= '1';
-                    grad_wa  <= gk;
-                    gradA_wd <= std_logic_vector(v_cy(9 downto 0))
-                                & std_logic_vector(v_cu(9 downto 4));
-                    gradB_wd <= std_logic_vector(v_cu(3 downto 0))
-                                & std_logic_vector(v_cv(9 downto 0)) & "00";
-                    ay_a <= ay_a + gd_y;
-                    au_a <= au_a + gd_u;
-                    av_a <= av_a + gd_v;
+                when SKG =>
+                    -- clamp: floor-rounded negative deltas can walk a near-black
+                    -- band below zero, and the unsigned slice would wrap to WHITE
+                    v_cy := g_acc;
+                    if v_cy < 0 then v_cy := (others => '0'); end if;
+                    case sk_ch is
+                        when "00"   => grad_we <= "001";
+                        when "01"   => grad_we <= "010";
+                        when others => grad_we <= "100";
+                    end case;
+                    grad_wa <= gk;
+                    grad_wd <= "000000" & std_logic_vector(v_cy(9 downto 0));
+                    g_acc   <= g_acc + g_d;
                     if gk = "111" then
-                        fst <= FE0;
+                        sk_tg <= "01";                             -- then the ocean strip
+                        fst   <= SKA;
                     else
-                        gk  <= gk + 1;
-                        fst <= FG1;
+                        gk <= gk + 1;
                     end if;
                 when FE0 =>
                     -- span/2 keeps ma inside the 12-bit mult input even in 8px
@@ -2258,6 +2217,20 @@ begin
     mp <= m_hi(11 downto 0) & m_lo;
 
     ----------------------------------------------------------------------------
+    -- Constant-table ROM ports, each a free-running registered read with a
+    -- single read site (every extra read site of a constant array is its own
+    -- copy of the table).
+    ----------------------------------------------------------------------------
+    p_roms : process(clk)
+    begin
+        if rising_edge(clk) then
+            sky_q  <= SKY_CH(to_integer(sky_a));
+            dsin_q <= SIN_LUT(to_integer(dsin_a));
+            sung_q <= SUNG_ROM(to_integer(s_night & lp12(9 downto 6)));
+        end if;
+    end process p_roms;
+
+    ----------------------------------------------------------------------------
     -- State BRAMs: canonical 1W1R, read address muxed FSM/display.
     ----------------------------------------------------------------------------
     p_eta_mem : process(clk)
@@ -2291,25 +2264,35 @@ begin
     end process p_fw_mem;
 
     -- vertical sky gradient (8 bands, written per frame by FG states)
-    p_gradA : process(clk)
+    p_gradY : process(clk)
     begin
         if rising_edge(clk) then
-            gA_rd <= gradA_mem(to_integer(band));
-            if gradA_we = '1' then
-                gradA_mem(to_integer(grad_wa)) <= gradA_wd;
+            gY_rd <= gradY_mem(to_integer(band));
+            if grad_we(0) = '1' then
+                gradY_mem(to_integer(grad_wa)) <= grad_wd;
             end if;
         end if;
-    end process p_gradA;
+    end process p_gradY;
 
-    p_gradB : process(clk)
+    p_gradU : process(clk)
     begin
         if rising_edge(clk) then
-            gB_rd <= gradB_mem(to_integer(band));
-            if gradA_we = '1' then
-                gradB_mem(to_integer(grad_wa)) <= gradB_wd;
+            gU_rd <= gradU_mem(to_integer(band));
+            if grad_we(1) = '1' then
+                gradU_mem(to_integer(grad_wa)) <= grad_wd;
             end if;
         end if;
-    end process p_gradB;
+    end process p_gradU;
+
+    p_gradV : process(clk)
+    begin
+        if rising_edge(clk) then
+            gV_rd <= gradV_mem(to_integer(band));
+            if grad_we(2) = '1' then
+                gradV_mem(to_integer(grad_wa)) <= grad_wd;
+            end if;
+        end if;
+    end process p_gradV;
 
     -- display snapshot banks (write = FSM copy pass, read = display only)
     p_eta_dsp : process(clk)
@@ -2510,6 +2493,8 @@ begin
                         e_ra_d  <= x_idx + 1;
                         fw_ra_d <= x_idx + 1;
                     end if;
+                elsif x_loc = to_unsigned(3, 5) then
+                    dsin_a <= x_idx(5 downto 0) + wph(9 downto 4);
                 elsif x_loc = to_unsigned(4, 5) then
                     eta_nxt  <= resize(signed(e_rd_d(11 downto 0)), 12);
                     foam_nxt <= unsigned(fw_rd_d(15 downto 8));
@@ -2530,8 +2515,7 @@ begin
                     -- wrapped the 15-bit cap (blocky triangle at the left/right
                     -- edge with Tide).  Reach + sine <= ~640, so 31 columns is
                     -- uncapped in both sizes.
-                    v_sn := resize(SIN_LUT(to_integer(x_idx(5 downto 0)
-                                                      + wph(9 downto 4))), 15);
+                    v_sn := resize(dsin_q, 15);   -- ROM(x_idx + wph), issued at x_loc 3
                     wr_n <= wreach + v_sn;
                     v_dcol := w_tail - signed(resize(x_idx, 10));
                     if v_dcol < 0 then
@@ -2923,9 +2907,9 @@ begin
             -- gradient, travelling sun colour (disc/mirror/streak), dimming
             -- ocean deep band
             if p3_sky = "01" then
-                p4_y <= gA_rd(15 downto 6);
-                p4_u <= gA_rd(5 downto 0) & gB_rd(15 downto 12);
-                p4_v <= gB_rd(11 downto 2);
+                p4_y <= gY_rd(9 downto 0);
+                p4_u <= gU_rd(9 downto 0);
+                p4_v <= gV_rd(9 downto 0);
             elsif p3_sky = "10" then
                 p4_y <= skylo_y; p4_u <= skylo_u; p4_v <= skylo_v;
             elsif p3_sky = "11" then
