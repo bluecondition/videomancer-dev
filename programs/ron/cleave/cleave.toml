@@ -9,7 +9,7 @@
 [program]
 processing_delay_clks = 16
 program_id = "com.czartroniks.cleave"
-program_version = "0.10.1"
+program_version = "0.10.2"
 abi_version = ">=1.0,<2.0"
 program_name = "Cleave"
 author = "czartroniks"
@@ -191,3 +191,8 @@ toggle_switch_9 = 1
 toggle_switch_10 = 1
 toggle_switch_11 = 1
 linear_potentiometer_12 = 300
+
+[firmware]
+# nextpnr placement seed for the stock LZX build: with v0.10.2 seed 1 stalls router1 on SD HDMI
+# and seed 2 stalls on HD HDMI; seed 3 builds all 8 configs.
+seed = 3
