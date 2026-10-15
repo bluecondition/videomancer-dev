@@ -171,3 +171,24 @@ chroma half) — the full palette was too bright behind the triangles.
 
 ## Presets
 None defined in the toml.
+
+## Community port — fit for the stock SDK (v1.0.2, 2026-10-15)
+- The stock LZX SDK builds 8 configs; its SD Standalone core is ~600 LC larger
+  than HD. v1.0.1 packed to 8034/7680 LC there (HD Dual 7678).
+- v1.0.2 splits the 233-bit sprite-record RAM in two:
+  - The fill engine only ever changes the three edge values (e0..e2, 72 bits)
+    when it writes a record back. So the other 161 bits, written only by
+    geometry in vblank, live in their own RAM (176-bit padded) with no write
+    mux.
+  - The edge RAM (80-bit padded) keeps the geometry/fill write mux, now
+    72 bits wide.
+  - The fill's write-back register shrinks from 233 to 72 bits.
+  - EBR 15 → 16 for the record store.
+- Proven bit-exact against v1.0.1: GHDL side-by-side, 30 frames, knobs and
+  switches changing mid-picture, 0 mismatches in 6.05 M clocks. That run used a
+  1003-clock line. On the default 403-clock testbench line, the ~5k-clock geometry
+  pass overruns the 10-line top blank and races the first fill passes; there the
+  old version's full stale write-back and the new partial one differ in 55
+  pixels. Real video has 15k+ (SD) / 90k (HD) clocks before the first active
+  line, so geometry always finishes first.
+- Packed LC (stock SDK): SD Standalone 8034 → 7633, HD Dual 7678 → 7265.
