@@ -23,7 +23,7 @@ name_label = "Ink"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 0
+initial_value = 128
 display_float_digits = 0
 suffix_label = "%"
 
@@ -33,7 +33,7 @@ name_label = "Slide"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 598
+initial_value = 108
 display_float_digits = 0
 suffix_label = "%"
 
@@ -43,7 +43,7 @@ name_label = "Weight"
 control_mode = "linear"
 display_min_value = 9
 display_max_value = 69
-initial_value = 400
+initial_value = 148
 display_float_digits = 0
 suffix_label = "%"
 
@@ -53,7 +53,7 @@ name_label = "Pitch"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 300
+initial_value = 336
 display_float_digits = 0
 suffix_label = "%"
 
@@ -63,7 +63,7 @@ name_label = "Depth"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 340
+initial_value = 610
 display_float_digits = 0
 suffix_label = "%"
 
@@ -73,7 +73,7 @@ name_label = "Soft"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 300
+initial_value = 304
 display_float_digits = 0
 suffix_label = "%"
 
@@ -113,7 +113,7 @@ name_label = "Engrave"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 410
+initial_value = 577
 display_float_digits = 0
 suffix_label = "%"
 
