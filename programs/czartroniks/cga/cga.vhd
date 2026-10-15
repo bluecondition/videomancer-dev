@@ -363,8 +363,13 @@ begin
       v_r2 := unsigned(registers_in(2));
       v_r7 := unsigned(registers_in(7));
 
+      -- Labelled defaults: at program load the firmware writes the
+      -- initial_value_label's INDEX (0..N-1) into the register, not a
+      -- 0..1023 position (HW-measured 2026-10-02), so a value below the
+      -- label count is taken as the label index itself.
       -- K1 Mode: 5 labels
-      if    v_r0 < 205 then v_mode := "000";
+      if    v_r0 < 5   then v_mode := v_r0(2 downto 0);
+      elsif v_r0 < 205 then v_mode := "000";
       elsif v_r0 < 410 then v_mode := "001";
       elsif v_r0 < 615 then v_mode := "010";
       elsif v_r0 < 820 then v_mode := "011";
@@ -377,7 +382,11 @@ begin
       s_scanlines  <= registers_in(6)(2);
       s_color_mode <= registers_in(6)(3);
       s_snow_on    <= registers_in(6)(4);
-      s_ink3       <= unsigned(registers_in(5)(9 downto 7));  -- K6: 8 labels
+      if unsigned(registers_in(5)) < 8 then                  -- K6: 8 labels
+        s_ink3     <= unsigned(registers_in(5)(2 downto 0));
+      else
+        s_ink3     <= unsigned(registers_in(5)(9 downto 7));
+      end if;
       s_contrast   <= unsigned(registers_in(3));
       s_color      <= unsigned(registers_in(4));
 
@@ -387,13 +396,15 @@ begin
 
       -- K2/K3: 5 labels  2x / 4x / CGA / 8x / 16x.  No Off: 1-px cells with
       -- dither on showed noisy colour bars on HDMI (cause not found).
-      if    v_r1 < 205 then s_hcode <= "001";
+      if    v_r1 < 5   then s_hcode <= v_r1(2 downto 0) + 1;
+      elsif v_r1 < 205 then s_hcode <= "001";
       elsif v_r1 < 410 then s_hcode <= "010";
       elsif v_r1 < 615 then s_hcode <= "011";
       elsif v_r1 < 820 then s_hcode <= "100";
       else                  s_hcode <= "101";
       end if;
-      if    v_r2 < 205 then s_vcode <= "001";
+      if    v_r2 < 5   then s_vcode <= v_r2(2 downto 0) + 1;
+      elsif v_r2 < 205 then s_vcode <= "001";
       elsif v_r2 < 410 then s_vcode <= "010";
       elsif v_r2 < 615 then s_vcode <= "011";
       elsif v_r2 < 820 then s_vcode <= "100";
