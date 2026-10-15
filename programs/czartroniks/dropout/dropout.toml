@@ -25,7 +25,7 @@ name_label = "Bars"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 300
+initial_value = 750
 display_float_digits = 1
 suffix_label = "%"
 
@@ -35,7 +35,7 @@ name_label = "Distance"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 400
+initial_value = 1023
 display_float_digits = 1
 suffix_label = "%"
 
@@ -45,7 +45,7 @@ name_label = "Hold"
 control_mode = "linear"
 display_min_value = 1
 display_max_value = 64
-initial_value = 200
+initial_value = 465
 display_float_digits = 0
 suffix_label = "fr"
 
@@ -55,7 +55,7 @@ name_label = "Band"
 control_mode = "linear"
 display_min_value = 8
 display_max_value = 256
-initial_value = 132
+initial_value = 0
 display_float_digits = 0
 suffix_label = "ln"
 
@@ -65,7 +65,7 @@ name_label = "Noise"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 500
+initial_value = 376
 display_float_digits = 1
 suffix_label = "%"
 
@@ -75,7 +75,7 @@ name_label = "Skew"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 300
+initial_value = 623
 display_float_digits = 1
 suffix_label = "%"
 
@@ -95,19 +95,19 @@ initial_value_label = "Off"
 parameter_id = "toggle_switch_9"
 name_label = "Smear"
 value_labels = ["Shift", "Smear"]
-initial_value_label = "Shift"
+initial_value_label = "Smear"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
 name_label = "Burst"
 value_labels = ["Off", "On"]
-initial_value_label = "Off"
+initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
 name_label = "Noise"
 value_labels = ["Snow", "Lines"]
-initial_value_label = "Snow"
+initial_value_label = "Lines"
 
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
@@ -115,7 +115,7 @@ name_label = "Bands"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 300
+initial_value = 554
 display_float_digits = 1
 suffix_label = "%"
 
