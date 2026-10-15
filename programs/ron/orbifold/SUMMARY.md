@@ -42,3 +42,7 @@ v0.2 sources backed up in .orbifold_work/.
 - Proven bit-exact against v0.3.1: GHDL side-by-side, 40 frames (403 x 201
   raster), knobs and switches changing mid-picture, 0 mismatches in 3.24 M clocks.
 - Packed LC (stock SDK): SD Standalone 7830 → 7250, HD Dual 7534 → 7020.
+- **Build seed (stock LZX flow): `[firmware] seed = 2`.** Seed 1 hung
+  nextpnr's router1 on SD Dual (a rip-up livelock that never ends; LZX's
+  build script has no timeout). Seed 2 builds all 8 configs; own HD timing
+  (core without the Sync Out generator) 97.7/94.4/96.4 MHz Analog/HDMI/Dual.
