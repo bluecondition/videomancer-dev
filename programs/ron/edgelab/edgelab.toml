@@ -37,7 +37,7 @@ parameter_id = "rotary_potentiometer_3"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 927
+initial_value = 293
 display_min_value = -100
 display_max_value = 100
 name_label = "Brightness"
@@ -48,7 +48,7 @@ parameter_id = "rotary_potentiometer_4"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 1013
+initial_value = 581
 display_min_value = 0
 display_max_value = 400
 name_label = "Contrast"
@@ -58,13 +58,13 @@ suffix_label = "%"
 parameter_id = "rotary_potentiometer_5"
 name_label = "Posterize"
 value_labels = ["Off", "128", "64", "32", "16", "8", "4", "2"]
-initial_value_label = "4"
+initial_value_label = "8"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
 name_label = "Color"
 value_labels = ["White", "Compass", "Source", "Heat"]
-initial_value_label = "White"
+initial_value_label = "Source"
 
 # --- Toggle Switches (7-11) ---
 
@@ -105,7 +105,7 @@ parameter_id = "linear_potentiometer_12"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 1023
+initial_value = 1022
 display_min_value = 0
 display_max_value = 100
 name_label = "Sensitivity"
