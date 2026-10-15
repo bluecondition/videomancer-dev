@@ -246,6 +246,6 @@ linear_potentiometer_12 = 1023
 
 [firmware]
 # nextpnr placement seed for the stock LZX build (one seed, all 8 configs):
-# lower seeds hung nextpnr's router1 (a rip-up livelock) in at least one
-# config; seed 2 builds all 8.
+# seed 1 hung nextpnr's router1 on SD Dual (a rip-up livelock); seed 2 builds
+# all 8 (own HD timing 97.7/94.4/96.4 MHz Analog/HDMI/Dual).
 seed = 2
