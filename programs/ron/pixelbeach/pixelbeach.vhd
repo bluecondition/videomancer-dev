@@ -1264,19 +1264,6 @@ begin
                     -- (= real 448 height minus 2 lines) against the plain
                     -- horizon is identical to 448 vs skyband+128 but adds no
                     -- extra adder -- stays inside the LC budget.
-                    if sun_q15 + to_signed(320, 15) < skyband_q then
-                        mir_on <= '1';
-                    else
-                        mir_on <= '0';
-                    end if;
-                    if sun_q15 + to_signed(320, 15) >= skyband_q
-                       and sun_q15 + to_signed(64, 15) < skyband_q then
-                        tri_on <= '1';
-                    else
-                        tri_on <= '0';
-                    end if;
-                    stk_len15 <= shift_left(sun_q15 + to_signed(320, 15)
-                                            - skyband_q, 2);
                     slb2_q  <= shift_left(skyband_q, 1);
                     sun_y_r <= sung_q(29 downto 20);
                     sun_u_r <= sung_q(19 downto 10);
@@ -1334,6 +1321,16 @@ begin
                     st_d  <= sun_q15 - skyband_q;
                     vstep <= vstep + 1;
                 when 6 =>
+                    -- (mirror / streak flags from st_d = sun - horizon, the same
+                    -- compares as sun+320 < horizon etc., one adder instead of four)
+                    if st_d < to_signed(-320, 15) then mir_on <= '1';
+                    else                               mir_on <= '0'; end if;
+                    if st_d >= to_signed(-320, 15) and st_d < to_signed(-64, 15) then
+                        tri_on <= '1';
+                    else
+                        tri_on <= '0';
+                    end if;
+                    stk_len15 <= shift_left(st_d + to_signed(320, 15), 2);
                     -- stars: first ones once the sun is 2/3 set (top 2 rows
                     -- above the horizon), full field 4 rows below it; Night
                     -- always full.  Geometry-relative, so every pixel size
@@ -2567,6 +2564,7 @@ begin
         variable v_cdy      : unsigned(7 downto 0);
         variable v_cel      : unsigned(1 downto 0);
         variable v_dsurf    : signed(14 downto 0);
+        variable v_db, v_dc2 : signed(14 downto 0);
         variable v_rq       : signed(14 downto 0);
         variable v_dqm      : signed(14 downto 0);
         variable v_shx      : unsigned(7 downto 0);
@@ -2598,7 +2596,8 @@ begin
             p1_lgap <= not FOAM_MASK(to_integer(
                            x_idx(5 downto 0) xor resize(celly_idx(1 downto 0), 6)));
             -- colour bands (DEEP/MID/AQUA/SURF) as clean horizontal stripes
-            if v_wd >= to_signed(384, 15) then p1_band <= "11";
+            if v_wd(14) = '0' and ((or std_logic_vector(v_wd(13 downto 9))) = '1'
+                                   or (v_wd(8) = '1' and v_wd(7) = '1')) then p1_band <= "11";  -- >= 384
             else p1_band <= unsigned(v_wd(8 downto 7)); end if;
             -- wet sand: this cell's own counter (15 = water just left it).
             -- On the cell row's first line the counter is rewritten this
@@ -2664,14 +2663,21 @@ begin
 
             -- all band flags off ONE row_q-surf_q subtract; the aqua/mid and
             -- mid/deep boundaries just add their independent per-column offset
+            -- the thresholds are whole rows (multiples of 64), so "x < k*64" is a
+            -- bit test (sign, or the bits above the row unit spell < k): one
+            -- subtract per boundary instead of a carry chain per threshold
             v_dsurf := row_q - surf_q;
-            p1_b0    <= not sgn15(v_dsurf);
-            p1_b64   <= sgn15(v_dsurf - to_signed(64, 15));
-            p1_b128  <= sgn15(v_dsurf - to_signed(128, 15));
-            p1_ba192 <= sgn15(v_dsurf - resize(off_b, 15) - to_signed(192, 15));
-            p1_bm448 <= sgn15(v_dsurf - resize(off_c, 15) - to_signed(448, 15));
-            p1_b256  <= sgn15(v_dsurf - resize(off_b, 15) - to_signed(256, 15));
-            p1_b512  <= sgn15(v_dsurf - resize(off_c, 15) - to_signed(512, 15));
+            v_db    := v_dsurf - resize(off_b, 15);
+            v_dc2   := v_dsurf - resize(off_c, 15);
+            p1_b0    <= not v_dsurf(14);
+            p1_b64   <= v_dsurf(14) or not (or std_logic_vector(v_dsurf(13 downto 6)));
+            p1_b128  <= v_dsurf(14) or not (or std_logic_vector(v_dsurf(13 downto 7)));
+            p1_ba192 <= v_db(14) or (not (or std_logic_vector(v_db(13 downto 8)))
+                                     and not (v_db(7) and v_db(6)));
+            p1_b256  <= v_db(14) or not (or std_logic_vector(v_db(13 downto 8)));
+            p1_bm448 <= v_dc2(14) or (not (or std_logic_vector(v_dc2(13 downto 9)))
+                                      and not (v_dc2(8) and v_dc2(7) and v_dc2(6)));
+            p1_b512  <= v_dc2(14) or not (or std_logic_vector(v_dc2(13 downto 9)));
 
             -- crest droplet: single cell at drop_cell while airborne
             if celly_idx = drop_cell and drop_on = '1' then
@@ -2732,8 +2738,9 @@ begin
             else
                 p1_stk <= '0';
             end if;
-            p1_spr   <= not sgn15(v_dsurf + to_signed(64, 15));
-            if row_q >= skyband_q then p1_sky2 <= '1'; else p1_sky2 <= '0'; end if;
+            -- v >= -64: non-negative, or bits 13..6 all ones (-64 .. -1)
+            p1_spr   <= not v_dsurf(14) or (and std_logic_vector(v_dsurf(13 downto 6)));
+            p1_sky2  <= not sgn15(row_q - skyband_q);   -- same subtract as the streak
             p1_wat <= wat_c;
             if foam_cur > to_unsigned(96, 8)  then p1_fhi <= '1'; else p1_fhi <= '0'; end if;
             if foam_cur > to_unsigned(32, 8)  then p1_fmid <= '1'; else p1_fmid <= '0'; end if;
