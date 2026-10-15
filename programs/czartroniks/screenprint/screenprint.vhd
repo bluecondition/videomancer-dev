@@ -709,8 +709,8 @@ begin
     -- pixel pipeline
     ----------------------------------------------------------------------
     p_pix : process(clk)
-        variable v_cs : unsigned(16 downto 0);
-        variable v_ds : unsigned(8 downto 0);
+        variable v_cs : unsigned(14 downto 0);
+        variable v_ds : unsigned(7 downto 0);
         variable v_ink : std_logic;
         variable v_sy, v_su, v_sv : unsigned(11 downto 0);
         variable v_d : unsigned(9 downto 0);
@@ -740,16 +740,21 @@ begin
             s_bu1 <= s_au1; s_bv1 <= s_av1; s_bu2 <= s_au2; s_bv2 <= s_av2;
             s_yg4 <= s_yg3(17 downto 7);
             -- 5: every shape's distance, normalised to 0..~1020
-            v_cs := resize(s_qu1, 17) + resize(s_qv1, 17);
-            s_dc1 <= v_cs(16 downto 7);
-            v_ds := resize(s_bu1, 9) + resize(s_bv1, 9);
-            s_dd1 <= v_ds & '0';
+            -- (the sums skip the operands' shared low bits: a square's bit 1
+            -- is always 0 and the folded distances are all odd, so yosys
+            -- merges those FFs and an adder fed the SAME net on both inputs
+            -- livelocks the stock router1.  bit 1 = 0 means the low 2 bits
+            -- never carry; two equal bit 0s add as one carry-in)
+            v_cs := resize(s_qu1(15 downto 2), 15) + resize(s_qv1(15 downto 2), 15);
+            s_dc1 <= v_cs(14 downto 5);
+            v_ds := resize(s_bu1(7 downto 1), 8) + resize(s_bv1(7 downto 1), 8) + resize(s_bu1(0 downto 0), 8);
+            s_dd1 <= v_ds & "00";
             if s_bu1 > s_bv1 then s_ds1 <= s_bu1 & "00"; else s_ds1 <= s_bv1 & "00"; end if;
             s_dl1 <= s_bv1 & "00";
-            v_cs := resize(s_qu2, 17) + resize(s_qv2, 17);
-            s_dc2 <= v_cs(16 downto 7);
-            v_ds := resize(s_bu2, 9) + resize(s_bv2, 9);
-            s_dd2 <= v_ds & '0';
+            v_cs := resize(s_qu2(15 downto 2), 15) + resize(s_qv2(15 downto 2), 15);
+            s_dc2 <= v_cs(14 downto 5);
+            v_ds := resize(s_bu2(7 downto 1), 8) + resize(s_bv2(7 downto 1), 8) + resize(s_bu2(0 downto 0), 8);
+            s_dd2 <= v_ds & "00";
             if s_bu2 > s_bv2 then s_ds2 <= s_bu2 & "00"; else s_ds2 <= s_bv2 & "00"; end if;
             s_dl2 <= s_bv2 & "00";
             s_yg5 <= s_yg4;
