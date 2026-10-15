@@ -191,6 +191,16 @@ architecture inferno of program_top is
       return ((p(0) + p(1)) + (p(2) + p(3))) + ((p(4) + p(5)) + (p(6) + p(7)));
   end function;
 
+  -- Exact unsigned product a * m (width len(a) + len(m)) on the signed Booth.
+  function bmul_u(a : unsigned; m : unsigned) return unsigned is
+      constant NP : natural := a'length + m'length;
+      variable vp : signed(NP + 1 downto 0);
+  begin
+      vp := bmul(signed('0' & a), signed('0' & m));
+      return unsigned(vp(NP - 1 downto 0));
+  end function;
+
+
   function lerp8(a, b : unsigned(7 downto 0); f : unsigned(4 downto 0))
     return unsigned is
     variable v_d : signed(9 downto 0);
@@ -1362,8 +1372,8 @@ begin
   p_s13 : process(clk)
   begin
     if rising_edge(clk) then
-      s13_fk <= unsigned(resize(bmul(signed('0' & s12_fbm), signed('0' & s_heatk)), 13));
-      s13_fk2 <= unsigned(resize(bmul(signed('0' & s12_fbm2), signed('0' & s_heatk)), 13));
+      s13_fk <= bmul_u(s12_fbm, s_heatk);
+      s13_fk2 <= bmul_u(s12_fbm2, s_heatk);
       -- wisp gate for smoke: clip((fbm-110)*2, 0..240)
       if s12_fbm > 230 then
         s13_wisp <= to_unsigned(240, 8);
