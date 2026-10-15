@@ -148,3 +148,25 @@ with `./capture_preset.sh`. Identity fixed 2026-10-11 (Ron): `program_id`
 `com.lzxindustries.starfield` → `com.ron.starfield`, `author` "ron", url →
 bluecondition/videomancer-dev (TOML-only; vmprog repacked). The chip is completely full (10 LC
 spare on SD Dual): any new feature must remove one first.
+
+## Community port — fit for the stock SDK (v3.1.2, 2026-10-14)
+- The stock LZX SDK builds 8 configs, and its SD Standalone core is ~600 LC
+  larger than HD. v3.1.1 packed to 8365/7680 LC there (HD Dual 7941).
+- v3.1.2 serializes the per-field scroll step. Before, eight parallel copies of
+  the deceleration ladder (`accum_decel_r`), `speed - ladder` (`diff_r`) and the
+  floor clamp (`scroll_delta_r`) were recomputed every clock, plus eight 24-bit
+  add/subtracts on `scroll`, all sampled once per field. Now the guarded field
+  start runs one datapath for 8 clocks:
+  - `sc_acc` builds (7 - i) * decel one add per clock, from layer 7 down to 0
+    (the same additions in the same order, so the same 16-bit wrap);
+  - then speed minus ladder, the floor clamp, and the add/subtract on
+    `scroll(7)`, while the eight scroll registers rotate one place;
+  - after 8 steps every layer is back in its own register.
+  The rotation needs no 8:1 read mux. Scroll is only read by the pixel path,
+  and the step finishes inside vertical blanking.
+- Proven bit-exact against v3.1.1: GHDL side-by-side, 40 frames (403 x 201
+  raster), knobs and switches changing mid-picture, 0 mismatches in 3.24 M clocks.
+  (The old version sampled the knobs a few clocks before the field start, the
+  new one a few clocks after, so a knob moving in exactly that window lands one
+  field earlier or later.)
+- Packed LC (stock SDK): SD Standalone 8365 → 7475, HD Dual 7941 → 7039.

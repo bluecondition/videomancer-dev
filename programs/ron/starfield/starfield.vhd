@@ -134,9 +134,17 @@ architecture starfield of program_top is
     signal speed16_r       : unsigned(15 downto 0) := (others => '0');
     signal floor_r         : unsigned(15 downto 0) := (others => '0');
     signal decel_1step_r   : unsigned(15 downto 0) := (others => '0');
-    signal accum_decel_r   : t_u16_arr := (others => (others => '0'));
-    signal diff_r          : t_u17_arr := (others => (others => '0'));
-    signal scroll_delta_r  : t_u16_arr := (others => (others => '0'));
+    -- per-field scroll step, one layer per clock through one datapath
+    -- (it was eight parallel copies computed every clock): sc_acc walks the
+    -- deceleration ladder (7 - i) * decel from layer 7 down to layer 0, then
+    -- speed - ladder, the floor clamp, and the add/subtract on scroll(7)
+    -- while the scroll registers rotate one place (8 steps = back in place)
+    signal sc_cnt   : unsigned(3 downto 0) := to_unsigned(8, 4);
+    signal sc_acc   : unsigned(15 downto 0) := (others => '0');
+    signal sc_p1    : unsigned(15 downto 0) := (others => '0');
+    signal sc_p2    : unsigned(16 downto 0) := (others => '0');
+    signal sc_p3    : unsigned(15 downto 0) := (others => '0');
+    signal sc_v1, sc_v2, sc_v3 : std_logic := '0';
     signal dir_r           : std_logic := '0';
 
     -- Stage 2
@@ -444,17 +452,11 @@ begin
                         neb_scroll <= neb_scroll - resize(speed16_r, 22);
                     end if;
 
-                    -- Scroll update: use the always-pipelined per-layer delta so
-                    -- the register->register path here is a single 24-bit add.
+                    -- Scroll update: start the serial per-layer step below.
                     -- The speed curve never reaches zero, so the field always
                     -- drifts (Direction and Depth stay live at slider 0).
-                    for layer in 0 to NUM_LYRS-1 loop
-                        if dir_r = '0' then
-                            scroll(layer) <= scroll(layer) + resize(scroll_delta_r(layer), 24);
-                        else
-                            scroll(layer) <= scroll(layer) - resize(scroll_delta_r(layer), 24);
-                        end if;
-                    end loop;
+                    sc_cnt <= (others => '0');
+                    sc_acc <= (others => '0');
                 end if;
             end if;
 
@@ -506,31 +508,44 @@ begin
                     decel_1step_r <= shift_right(speed16_r, 1) + to_unsigned(1, 16);
             end case;
 
-            -- Stage B: per-layer accum_decel as a registered shift-add cascade.
-            -- accum_decel_r(i) converges to (7 - i) * decel_1step_r after a
-            -- handful of clocks; scroll only samples it at vsync so latency is
-            -- invisible. Each DFF sees exactly one 16-bit adder.
-            accum_decel_r(7) <= (others => '0');
-            for i in 0 to 6 loop
-                accum_decel_r(i) <= accum_decel_r(i + 1) + decel_1step_r;
-            end loop;
+            -- Stage B: the deceleration ladder, (7 - i) * decel for layer i,
+            -- built one add per clock from layer 7 (0) down to layer 0
+            if sc_cnt <= 7 then
+                sc_p1  <= sc_acc;
+                sc_v1  <= '1';
+                sc_acc <= sc_acc + decel_1step_r;
+                sc_cnt <= sc_cnt + 1;
+            else
+                sc_v1  <= '0';
+            end if;
 
-            -- Stage C: per-layer speed - accum_decel, one bit wider (bit 16
-            -- = borrow, i.e. the layer would run backwards)
-            for i in 0 to NUM_LYRS-1 loop
-                diff_r(i) <= resize(speed16_r, 17) - resize(accum_decel_r(i), 17);
-            end loop;
+            -- Stage C: speed - ladder, one bit wider (bit 16 = borrow, i.e.
+            -- the layer would run backwards)
+            sc_p2 <= resize(speed16_r, 17) - resize(sc_p1, 17);
+            sc_v2 <= sc_v1;
 
             -- Stage D: floor at 1/16 of the front speed, so the far layers
             -- of a deep spread keep drifting (sub-pixel speeds: no layer is
             -- forced to a whole pixel per frame any more)
-            for i in 0 to NUM_LYRS-1 loop
-                if diff_r(i)(16) = '1' or diff_r(i)(15 downto 0) < floor_r then
-                    scroll_delta_r(i) <= floor_r;
+            if sc_p2(16) = '1' or sc_p2(15 downto 0) < floor_r then
+                sc_p3 <= floor_r;
+            else
+                sc_p3 <= sc_p2(15 downto 0);
+            end if;
+            sc_v3 <= sc_v2;
+
+            -- Stage E: step scroll(7) and rotate (layer 7 first, so after the
+            -- eighth step every layer is back in its own register)
+            if sc_v3 = '1' then
+                for i in 1 to NUM_LYRS-1 loop
+                    scroll(i) <= scroll(i - 1);
+                end loop;
+                if dir_r = '0' then
+                    scroll(0) <= scroll(NUM_LYRS-1) + resize(sc_p3, 24);
                 else
-                    scroll_delta_r(i) <= diff_r(i)(15 downto 0);
+                    scroll(0) <= scroll(NUM_LYRS-1) - resize(sc_p3, 24);
                 end if;
-            end loop;
+            end if;
 
             ----------------------------------------------------------------
             -- STAGE 2 : Scrolled X per layer (integer pixels)
