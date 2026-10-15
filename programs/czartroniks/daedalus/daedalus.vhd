@@ -286,6 +286,11 @@ architecture daedalus of program_top is
     signal s_k4_ang   : unsigned(9 downto 0) := (others => '0');        -- K4, deadbanded
     signal s_k5_tan   : unsigned(9 downto 0) := to_unsigned(1023, 10);  -- K5 Tangle
     signal s_scheme   : unsigned(9 downto 0) := (others => '0');        -- K6 Scheme
+    -- K6 with labelled-default remap, free-running (kept out of the vsync
+    -- cone).  At program load the firmware writes the initial_value_label's
+    -- INDEX (0..5) into the register, not a 0..1023 position, so a value
+    -- below 6 is replaced by the centre of that label's zone.
+    signal s_k6_fix   : unsigned(9 downto 0) := (others => '0');
     signal s_p12      : unsigned(9 downto 0) := (others => '0');        -- P12 Relief
     signal s_black    : std_logic := '0';                               -- S7  Blackout
     signal s_invert   : std_logic := '0';                               -- S8  Invert
@@ -521,6 +526,16 @@ begin
                 s_saw_act <= '1';
             end if;
 
+            case to_integer(unsigned(registers_in(5))) is
+                when 0      => s_k6_fix <= to_unsigned(51, 10);    -- Parchment
+                when 1      => s_k6_fix <= to_unsigned(204, 10);   -- Gallery
+                when 2      => s_k6_fix <= to_unsigned(409, 10);   -- Night
+                when 3      => s_k6_fix <= to_unsigned(613, 10);   -- Blueprint
+                when 4      => s_k6_fix <= to_unsigned(818, 10);   -- Cyanotype
+                when 5      => s_k6_fix <= to_unsigned(971, 10);   -- Copper
+                when others => s_k6_fix <= unsigned(registers_in(5));
+            end case;
+
             if data_in.vsync_n = '0' and s_prev_vsync_n = '1' then
                 s_vs_pulse <= '1';
 
@@ -531,7 +546,7 @@ begin
                 s_k3_raw <= unsigned(registers_in(2));
                 s_k4_raw <= unsigned(registers_in(3));
                 s_k5_tan <= unsigned(registers_in(4));
-                s_scheme <= unsigned(registers_in(5));
+                s_scheme <= s_k6_fix;
                 s_p12    <= unsigned(registers_in(7));
                 s_black  <= registers_in(6)(0);      -- S7
                 s_invert <= registers_in(6)(1);      -- S8
