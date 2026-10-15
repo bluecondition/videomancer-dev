@@ -192,3 +192,7 @@ None defined in the toml.
   pixels. Real video has 15k+ (SD) / 90k (HD) clocks before the first active
   line, so geometry always finishes first.
 - Packed LC (stock SDK): SD Standalone 8034 → 7633, HD Dual 7678 → 7265.
+- **Build seed (stock LZX flow): `[firmware] seed = 7`.** Seeds 1–6 each hung
+  nextpnr's router1 in at least one config (a rip-up livelock with no end; this
+  netlist sits at 99% LC on SD Standalone). Seed 7 builds all 8; own HD timing
+  (core without the Sync Out generator) is 89.6/83.1/82.1 MHz Analog/HDMI/Dual.
