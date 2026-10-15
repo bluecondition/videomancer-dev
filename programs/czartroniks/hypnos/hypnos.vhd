@@ -813,6 +813,63 @@ architecture hypnos of program_top is
         return resize(x, w);
     end function;
 
+    -- Exact signed product a * m, radix-4 Booth on m: ceil(len(m)/2)
+    -- partials of {0, +-a, +-2a} (negatives as one's complement, the +1s
+    -- gathered in one correction word in a spare slot), balanced adds.
+    -- Checked in Python against a*m for every operand width pair used here.
+    function bmul(a : signed; m : signed) return signed is
+        constant NA  : natural := a'length;
+        constant NML : natural := m'length;
+        constant NM  : natural := NML + (NML mod 2);
+        constant NP  : natural := NA + NML;
+        constant NPP : natural := NM / 2;
+        type t_pp is array (0 to 7) of signed(NP - 1 downto 0);
+        variable va   : signed(NA - 1 downto 0);
+        variable vm   : signed(NM - 1 downto 0);
+        variable me   : std_logic_vector(NM downto 0);
+        variable a1, a2, mag, pp, corr : signed(NP - 1 downto 0);
+        variable d    : std_logic_vector(2 downto 0);
+        variable p    : t_pp;
+    begin
+        va := a;
+        vm := resize(m, NM);
+        me := std_logic_vector(vm) & '0';
+        a1 := resize(va, NP);
+        a2 := shift_left(a1, 1);
+        corr := (others => '0');
+        for i in 0 to 7 loop
+            p(i) := (others => '0');
+        end loop;
+        for i in 0 to NPP - 1 loop
+            d := me(2 * i + 2 downto 2 * i);
+            case d is
+                when "001" | "010" | "101" | "110" => mag := a1;
+                when "011" | "100"                 => mag := a2;
+                when others                        => mag := (others => '0');
+            end case;
+            if d(2) = '1' and d /= "111" then
+                pp := not mag;
+                corr(2 * i) := '1';
+            else
+                pp := mag;
+            end if;
+            p(i) := shift_left(pp, 2 * i);
+        end loop;
+        p(NPP) := corr;
+        return ((p(0) + p(1)) + (p(2) + p(3))) + ((p(4) + p(5)) + (p(6) + p(7)));
+    end function;
+
+    -- Exact unsigned product a * m (width len(a) + len(m)) on the signed Booth.
+    function bmul_u(a : unsigned; m : unsigned) return unsigned is
+        constant NP : natural := a'length + m'length;
+        variable vp : signed(NP + 1 downto 0);
+    begin
+        vp := bmul(signed('0' & a), signed('0' & m));
+        return unsigned(vp(NP - 1 downto 0));
+    end function;
+
+
+
 begin
 
     ------------------------------------------------------------------------
@@ -899,6 +956,7 @@ begin
         variable v_pl   : unsigned(6 downto 0);
         variable v_sh   : integer;
         variable v_sp   : unsigned(24 downto 0);
+        variable v_gc, v_gdl : signed(21 downto 0);
     begin
         if rising_edge(clk) then
             s_prev_vsync <= data_in.vsync_n;
@@ -941,6 +999,7 @@ begin
             elsif s_seq /= 0 and data_in.avid = '0' then
                 s_seq <= s_seq - 1;
 
+                if s_seq(5) = '1' then v_gc := s_cxs; else v_gc := s_cys; end if;   -- 35..37 vs 19..21
                 case to_integer(s_seq) is
 
                     -- centre X: cx = W/2 + (K1-512)*W/256, glided
@@ -951,27 +1010,21 @@ begin
                     when 38 =>
                         s_tg <= shift_left(resize(signed('0' & s_W(11 downto 1)), 22), 8) + resize(sm_acc, 22);
                         sm_k <= s_cy_k; sm_w <= s_H; sm_go <= '1';
-                    when 37 => s_gd <= s_tg - s_cxs;
-                    when 36 =>
+                    -- centre glides share one datapath: x at 37..35, y at 21..19
+                    -- (snapping to the target is c + (tg - c) = tg exactly)
+                    when 37 | 21 => s_gd <= s_tg - v_gc;
+                    when 36 | 20 =>
                         if s_gd <= 256 and s_gd >= -256 then s_gs <= '1'; else s_gs <= '0'; end if;
                         if s_gd < 8192 and s_gd > -8192 then s_gm <= '1'; else s_gm <= '0'; end if;
                         s_gdd <= shift_right(s_gd, C_GL);
-                    when 35 =>
-                        if    s_gs = '1' then s_cxs <= s_tg;
+                    when 35 | 19 =>
+                        if    s_gs = '1' then v_gdl := s_gd;
                         elsif s_gm = '1' then
-                            if s_gd(21) = '0' then s_cxs <= s_cxs + 256; else s_cxs <= s_cxs - 256; end if;
-                        else  s_cxs <= s_cxs + s_gdd; end if;
+                            if s_gd(21) = '0' then v_gdl := to_signed(256, 22); else v_gdl := to_signed(-256, 22); end if;
+                        else  v_gdl := s_gdd; end if;
+                        if s_seq(5) = '1' then s_cxs <= v_gc + v_gdl;
+                        else                   s_cys <= v_gc + v_gdl; end if;
                     when 22 => s_tg <= shift_left(resize(signed('0' & s_H(11 downto 1)), 22), 8) + resize(sm_acc, 22);
-                    when 21 => s_gd <= s_tg - s_cys;
-                    when 20 =>
-                        if s_gd <= 256 and s_gd >= -256 then s_gs <= '1'; else s_gs <= '0'; end if;
-                        if s_gd < 8192 and s_gd > -8192 then s_gm <= '1'; else s_gm <= '0'; end if;
-                        s_gdd <= shift_right(s_gd, C_GL);
-                    when 19 =>
-                        if    s_gs = '1' then s_cys <= s_tg;
-                        elsif s_gm = '1' then
-                            if s_gd(21) = '0' then s_cys <= s_cys + 256; else s_cys <= s_cys - 256; end if;
-                        else  s_cys <= s_cys + s_gdd; end if;
 
                     -- PERIOD: log2 cycles/px = -11 + K3*9/1024 octaves (Q12 glide)
                     when 34 => s_lt <= to_signed(-45056, 18) + signed(resize(s_per_k * to_unsigned(36, 6), 18));
@@ -1233,8 +1286,8 @@ begin
             s12_tu <= s11_tu;
             s12_g <= ug_q; s12_gs <= ugs_q; s12_a <= ua_q; s12_as <= uas_q;
             -- S13: interpolation products (slopes are negative)
-            s13_gp <= resize(signed(s12_gs(10 downto 0)) * signed(resize(s12_tu, 8)), 22);
-            s13_ap <= resize(signed(s12_as(10 downto 0)) * signed(resize(s12_tu, 8)), 22);
+            s13_gp <= resize(bmul(signed(s12_gs(10 downto 0)), signed(resize(s12_tu, 8))), 22);
+            s13_ap <= resize(bmul(signed(s12_as(10 downto 0)), signed(resize(s12_tu, 8))), 22);
             s13_g  <= unsigned(s12_g);
             s13_a  <= unsigned(s12_a);
             -- S14
@@ -1268,7 +1321,7 @@ begin
             -- S16
             s16_t6 <= shift_left(s15_th, 2) + shift_left(s15_th, 1);          -- 6 theta mod turn
             s16_ld <= signed(resize(s15_ld, 20)) - C_LREF;
-            vsp := signed(resize(s15_th, 19)) * s_arms;
+            vsp := bmul(signed(resize(s15_th, 19)), s_arms);
             s16_sp <= unsigned(vsp(17 downto 0));                              -- arms*theta mod 1 cycle
             -- angular gradient log2(arms/(2 pi r)) = larm - log2 r  (Q6)
             s16_b <= s_larm - signed(resize(shift_right(s15_lr, 8), 12));
@@ -1283,7 +1336,7 @@ begin
             s19_st <= s18_st;
             s19_shv <= shv_q; s19_shs <= shs_q;
             -- S20
-            s20_sp <= resize(signed(s19_shs(15 downto 8)) * signed(resize(s19_st, 7)), 17);
+            s20_sp <= resize(bmul(signed(s19_shs(15 downto 8)), signed(resize(s19_st, 7))), 17);
             s20_v  <= signed(s19_shv);
             -- S21
             s21_sv <= s20_v + resize(shift_right(s20_sp, 6), 16);
@@ -1300,8 +1353,8 @@ begin
             if s_shape(1) = '1' then s22_vlu <= resize(signed(dll_q), 21) + resize(s21_sv, 21);
             else                     s22_vlu <= resize(signed(dll_q), 21); end if;
             -- S23
-            s23_ph  <= s22_vlu * signed(resize(s_p(6 downto 3), 5));
-            s23_pl  <= s22_vlu * signed(resize(s_p(2 downto 0), 4));
+            s23_ph  <= bmul(s22_vlu, signed(resize(s_p(6 downto 3), 5)));
+            s23_pl  <= bmul(s22_vlu, signed(resize(s_p(2 downto 0), 4)));
             s23_vlu <= s22_vlu;
             -- S24
             s24_pe  <= resize(shift_right(shift_left(resize(s23_ph, 28), 3) + resize(s23_pl, 28), 6), 22);
@@ -1320,6 +1373,7 @@ begin
     p_exp : process(clk)
         variable vk : integer;
         variable vp : unsigned(31 downto 0);
+        variable vw : unsigned(41 downto 0);
     begin
         if rising_edge(clk) then
             -- S26
@@ -1341,17 +1395,21 @@ begin
             s30_mt <= s29_m + resize(shift_right(s29_ep, 6), 16);
             s30_k  <= s29_k;
             -- S31: mantissa (Q14) x freq mantissa (Q8), split on the wide operand
-            s31_ph <= s30_mt(15 downto 8) * s_m;
-            s31_pl <= s30_mt(7 downto 0) * s_m;
+            s31_ph <= bmul_u(s30_mt(15 downto 8), s_m);
+            s31_pl <= bmul_u(s30_mt(7 downto 0), s_m);
             s31_k  <= s30_k;
             -- S32
             s32_pr <= shift_left(resize(s31_ph, 25), 8) + resize(s31_pl, 25);
             s32_k  <= s31_k;
             -- S33: phase (Q18, 3 integer bits) = product * 2^k
-            if s32_k >= 0 then vp := shift_left(resize(s32_pr, 32), s32_k);
-            elsif s32_k <= -17 then vp := (others => '0');
-            else vp := shift_right(resize(s32_pr, 32), -s32_k); end if;
-            s33_phr <= vp(20 downto 0);
+            -- one left shift by k+17 and a 21-bit window (= << k for k >= 0,
+            -- >> -k for k < 0); k = -17 (the clamp) still gives zero
+            vw := shift_left(resize(s32_pr, 42), s32_k + 17);
+            if s32_k <= -17 then
+                s33_phr <= (others => '0');
+            else
+                s33_phr <= vw(37 downto 17);
+            end if;
         end if;
     end process p_exp;
 
@@ -1508,7 +1566,7 @@ begin
                 s42_dy <= s_pdy; s42_ua <= s_pua; s42_va <= s_pva;
             end if;
             -- S43: luma lerp product ; chroma switches at the band edge
-            s43_py <= s42_dy * signed(resize(s42_cov, 10));
+            s43_py <= bmul(s42_dy, signed(resize(s42_cov, 10)));
             if s42_cov(8 downto 7) /= "00" then s43_u <= s42_ua; s43_v <= s42_va;
             else                                s43_u <= s_pub;  s43_v <= s_pvb; end if;
             -- S44
