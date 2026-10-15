@@ -39,3 +39,25 @@ complementary colour pair that K3 turns around the wheel.
 - Per-field logic (gain, rates, easing) is STA-timed at the pixel clock: every
   fused abs/compare/multi-term add there has at some point been the HD
   critical path. Keep them one operation per register.
+
+## Community port — fit for the stock SDK (v1.0.2, 2026-10-14)
+- The stock LZX SDK builds 8 configs, and its SD Standalone core is ~600 LC
+  larger than HD; v1.0.1 packed to 7759/7680 LC there and could not place.
+- v1.0.2 replaces the five per-knob smoother instances (K1/K2/K4/K5/K6, ~96 LUT
+  + 78 FF each) with ONE shared 3-stage datapath (`p_ksmooth`). A free-running
+  sweep keeps each knob's deadband flag current and K1/K4's next eased values
+  ready. The guarded field start loads K1/K4 on that clock and runs one apply
+  pass over the rest, done 8 clocks later; the gain engine loads at +16. The
+  deadband (5 counts), glide (1/8 per field, snap inside half a count) and the
+  three snap-to-knob field starts are unchanged.
+- Why K1/K4 must land on the field-start clock itself: the carrier
+  accumulators free-run through blanking (they reset only at each line's
+  avid start), and the first output pixels of the first active line still show
+  that history. A version that eased K1/K4 a few clocks late differed in one
+  or two pixels at the left end of the first line whenever a knob moved.
+- Proven bit-exact against v1.0.1: GHDL side-by-side, 40 frames on a 403 x 201
+  raster (a frame length that is not a multiple of 8, so the sweep meets the
+  field start at a live slot), knobs and switches changing mid-picture,
+  0 mismatches in 3.24 M clocks. A deliberately broken flag freeze was caught
+  (159 k mismatches), so the test reaches this logic.
+- Packed LC (stock SDK): SD Standalone 7759 → 7455, HD Dual 7176 → 6870.
