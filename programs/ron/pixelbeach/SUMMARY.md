@@ -142,3 +142,41 @@ once a frame).
     candidate's ground (~9% of 16px pop-ups landed off-screen).
   - The promote-first chain (−90 LC).
   - HW: "looks good".
+
+## Community port (stock LZX SDK 0a65d53), 2026-10-14
+
+LZX's stock build (router1, one seed for all 8 configs, 8 configs including HD/SD
+Standalone) overflowed: SD Standalone needed 8250 of 7680 LC, because LZX's core
+is ~600 LC bigger in that config. The program itself was the same size in every
+config. Three look-identical optimizations, each proven bit-exact in GHDL against
+v3.24 (`~/czartroniks_port/pb/eq/run_equiv.sh`: old and new side by side, 3.2M
+clocks over 40 frames with a P12 sweep, Night, Storm, 8/16 px and crab off/on;
+syncs every clock, colour while avid):
+
+1. **One read site per sine/sun ROM.** Each extra read site of a constant array
+   is its own copy of the table. (-37..-46 LC)
+2. **Serial sunset engine on one ROM port.** SKYG_ROM had six read sites, so six
+   copies (12 EBRs!) plus nine parallel lerps. Now SKY_CH (SKYG_ROM split per
+   channel at elaboration, FSM sine in its unused corner) has one port, and one
+   lerp runs a channel at a time; band RAMs are per channel. (-600 LC, EBR 25 -> 16)
+3. **Bit-test row compares.** P1 thresholds are whole rows, so they are bit tests
+   on one subtract per boundary; the sky line shares the streak's subtract; the
+   mirror/streak flags come from st_d. (-64..-126 LC)
+
+Result (packed LC): SD Standalone 8250 -> 7525 (98%), HD 7625 -> 6855-7000
+(89-91%). Split-domain timing (FSM on its own clock net, scratch core without
+the Sync Out generator): HD display paths 89.7-90.5 MHz (were 82.8-85.5), FSM
+74-81 MHz (budget ~37).
+
+Measured feature costs (scratch ablations, for future trims): crab 619, gulls 216,
+wet sand 185, sun reflection/streak 170, stars 130, droplets+spray 76; 8px-only
+saves 2, 16px-only 68.
+
+**Build seeds -- community port:** `[firmware] seed = 6` (one seed, all 8
+configs). Reason: HDMI pin skew, not timing. tools/hdmi_pin_skew.py over seeds
+1-16 on this netlist: seed 1 HD HDMI hs-clk +0.50 (the +0.48 brown-line zone);
+seed 6: HD HDMI -1.84 (data -5.36..-3.33), HD Analog HDMI +0.71 / analog -1.87,
+HD Dual HDMI -2.28 / analog +1.75. No seed in 1-16 was clear on every pin; +0.71
+on HD Analog's HDMI pin is untested on HW (known good +0.91, known bad +0.48).
+Any RTL or SDK change reshuffles this: re-screen. Processing delay: declared 0
+(synthesis); true latency 5 clocks.
