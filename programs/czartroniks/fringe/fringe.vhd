@@ -295,7 +295,9 @@ architecture fringe of program_top is
     ----------------------------------------------------------------------
     signal s_ph    : integer range 0 to 2 := 0;
     signal s_seq   : integer range 0 to 8 := 0;
-    signal s_grot  : integer range 0 to 5 := 5;
+    -- (starts idle: the accumulators' initial values already equal their
+    -- initial targets x 64, so the first vsync's update would be a no-op)
+    signal s_grot  : integer range 0 to 5 := 0;
     signal s_midx  : integer range 0 to 7 := 0;
     signal s_mbit  : integer range 0 to 13 := 0;
     signal s_mcand : unsigned(23 downto 0) := (others => '0');
@@ -429,7 +431,7 @@ begin
         if rising_edge(clk) then
             -- One-pole slew of the five glide accumulators toward the
             -- targets latched at this frame's vsync, done once the frame
-            -- sequence has read them (and once at power-up): one shared
+            -- sequence has read them: one shared
             -- datapath on slot 0 while both arrays rotate one place per
             -- clock (5 steps = back in place).  This is exactly the update
             -- the next vsync used to make, a frame of lag that is nothing
