@@ -115,3 +115,9 @@ display_min_value = 0
 display_max_value = 100
 name_label = "Scale"
 suffix_label = "%"
+
+[firmware]
+# nextpnr placement seed for the stock LZX build (one seed, all 8 configs):
+# lower seeds hung nextpnr's router1 (a rip-up livelock) in at least one
+# config; seed 7 builds all 8.
+seed = 7
