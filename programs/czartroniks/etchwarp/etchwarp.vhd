@@ -91,6 +91,10 @@ architecture etchwarp of program_top is
     signal s_rdV0, s_rdV1 : std_logic_vector(7 downto 0) := x"80";
 
     signal s_k_thr, s_k_ink, s_k_noise, s_k_speed, s_k_cells, s_k_rows : unsigned(9 downto 0);
+    -- K6 Rows label decode, registered.  Labelled defaults: at program load
+    -- the firmware writes the initial_value_label's INDEX (0..3) into the
+    -- register, not a 0..1023 position, so a value below 4 is the index.
+    signal s_rows_idx : unsigned(1 downto 0) := (others => '0');
     signal s_sw_over, s_sw_order, s_sw_lumaonly, s_sw_colour, s_sw_blocks : std_logic;
     signal s_p_flow : unsigned(9 downto 0);
     signal s_thr    : unsigned(9 downto 0) := (others => '0');
@@ -219,6 +223,11 @@ begin
         variable v_a    : unsigned(10 downto 0);
     begin
         if rising_edge(clk) then
+            if s_k_rows < 4 then
+                s_rows_idx <= s_k_rows(1 downto 0);
+            else
+                s_rows_idx <= s_k_rows(9 downto 8);
+            end if;
             s_in_y <= unsigned(data_in.y); s_in_u <= unsigned(data_in.u); s_in_v <= unsigned(data_in.v);
             s_in_avid <= data_in.avid;
             s_prev_hsync_n <= data_in.hsync_n; s_prev_vsync_n <= data_in.vsync_n; s_prev_avid <= data_in.avid;
@@ -295,7 +304,7 @@ begin
                     s_vstep <= s_vstep + 1;
                 when 2 =>
                     s_amp_eff <= s_amp_pre(19 downto 10);
-                    case to_integer(s_k_rows(9 downto 8)) is
+                    case to_integer(s_rows_idx) is
                         when 0 => s_rows <= s_pixn;
                         when 1 => s_rows <= '0' & s_pixn(6 downto 1);
                         when 2 => s_rows <= "00" & s_pixn(6 downto 2);
