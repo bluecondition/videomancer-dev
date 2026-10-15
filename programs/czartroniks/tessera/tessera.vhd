@@ -297,26 +297,44 @@ architecture tessera of program_top is
         return r;
     end function;
 
-    type t_recmem is array (0 to C_MEM_DEPTH - 1) of std_logic_vector(C_REC_W - 1 downto 0);
-    signal s_recmem : t_recmem;
+    -- The record store is split in two: the fill engine only ever changes
+    -- the three edge values (e0..e2, 72 bits) when it writes a record back,
+    -- so the other 161 bits (written by geometry alone, in vblank) live in
+    -- their own RAM with no write mux, and the fill's write-back word is 72
+    -- bits instead of 233.  Both padded to whole 16-bit EBR words.
+    -- Packed layout (pack/unpack): a0..b2 = 232..161, e0..e2 = 160..89,
+    -- xmin..front = 88..0.
+    constant C_EHI : integer := C_REC_W - 1 - 6*W_AB;     -- 160
+    constant C_ELO : integer := C_EHI - 3*C_EW + 1;       -- 89
+    constant C_RS_W : integer := 176;                      -- 161 used
+    constant C_RD_W : integer := 80;                       -- 72 used
+    type t_recmem_s is array (0 to C_MEM_DEPTH - 1) of std_logic_vector(C_RS_W - 1 downto 0);
+    type t_recmem_d is array (0 to C_MEM_DEPTH - 1) of std_logic_vector(C_RD_W - 1 downto 0);
+    signal s_recmem_s : t_recmem_s;
+    signal s_recmem_d : t_recmem_d;
     attribute ram_style : string;
-    attribute ram_style of s_recmem : signal is "block";
+    attribute ram_style of s_recmem_s : signal is "block";
+    attribute ram_style of s_recmem_d : signal is "block";
     -- No read ever needs the address being written in the same cycle (the
     -- fill writes slot n back while reading n+1; geometry pushes in vblank
-    -- with the read idle), so skip yosys's read-before-write emulation
-    -- (~500 FF on this 233-bit RAM).  Needs the init on s_rd_rec.
+    -- with the read idle), so skip yosys's read-before-write emulation.
+    -- Needs the init on the read registers.
     attribute no_rw_check : boolean;
-    attribute no_rw_check of s_recmem : signal is true;
-    signal s_rd_rec     : std_logic_vector(C_REC_W - 1 downto 0) := (others => '0');
+    attribute no_rw_check of s_recmem_s : signal is true;
+    attribute no_rw_check of s_recmem_d : signal is true;
+    signal s_rd_s       : std_logic_vector(C_RS_W - 1 downto 0) := (others => '0');
+    signal s_rd_d       : std_logic_vector(C_RD_W - 1 downto 0) := (others => '0');
+    signal s_rd_rec     : std_logic_vector(C_REC_W - 1 downto 0);
     signal s_rec_raddr  : unsigned(C_AW - 1 downto 0) := (others => '0');
     signal s_fill_we    : std_logic := '0';
     signal s_fill_waddr : unsigned(C_AW - 1 downto 0) := (others => '0');
-    signal s_fill_wdata : std_logic_vector(C_REC_W - 1 downto 0) := (others => '0');
-    -- single muxed write port (SB_RAM40 has one write port only; geometry and
-    -- fill never write in the same cycle so a priority mux is safe)
+    signal s_fill_wdata : std_logic_vector(C_EHI downto C_ELO) := (others => '0');
+    -- edge RAM: one muxed write port (geometry and fill never write in the
+    -- same cycle so a priority mux is safe)
     signal s_mem_we     : std_logic;
     signal s_mem_waddr  : unsigned(C_AW - 1 downto 0);
-    signal s_mem_wdata  : std_logic_vector(C_REC_W - 1 downto 0);
+    signal s_mem_wdata  : std_logic_vector(C_EHI downto C_ELO);
+    signal s_stage_pk   : std_logic_vector(C_REC_W - 1 downto 0);
 
     signal s_stage : t_sprite := C_SPRITE_ZERO;
     signal s_cur   : t_sprite := C_SPRITE_ZERO;
@@ -1111,19 +1129,36 @@ begin
     -- reads + writes records back during active.  Simple dual-port (independent
     -- read/write addresses); the two writers never collide in time.
     --------------------------------------------------------------------------
+    s_stage_pk  <= pack(s_stage);
     s_mem_we    <= s_push or s_fill_we;
     s_mem_waddr <= s_push_addr when s_push = '1' else s_fill_waddr;
-    s_mem_wdata <= pack(s_stage) when s_push = '1' else s_fill_wdata;
+    s_mem_wdata <= s_stage_pk(C_EHI downto C_ELO) when s_push = '1' else s_fill_wdata;
 
-    p_recmem : process(clk)
+    -- static fields: geometry only
+    p_recmem_s : process(clk)
+    begin
+        if rising_edge(clk) then
+            if s_push = '1' then
+                s_recmem_s(to_integer(s_push_addr)) <= (C_RS_W - 1 downto C_REC_W - 3*C_EW => '0')
+                    & s_stage_pk(C_REC_W - 1 downto C_EHI + 1) & s_stage_pk(C_ELO - 1 downto 0);
+            end if;
+            s_rd_s <= s_recmem_s(to_integer(s_rec_raddr));
+        end if;
+    end process;
+
+    -- edge values: geometry, or the fill engine's write-back
+    p_recmem_d : process(clk)
     begin
         if rising_edge(clk) then
             if s_mem_we = '1' then
-                s_recmem(to_integer(s_mem_waddr)) <= s_mem_wdata;
+                s_recmem_d(to_integer(s_mem_waddr)) <= (C_RD_W - 1 downto 3*C_EW => '0') & s_mem_wdata;
             end if;
-            s_rd_rec <= s_recmem(to_integer(s_rec_raddr));
+            s_rd_d <= s_recmem_d(to_integer(s_rec_raddr));
         end if;
     end process;
+
+    s_rd_rec <= s_rd_s(C_REC_W - 3*C_EW - 1 downto C_ELO) & s_rd_d(3*C_EW - 1 downto 0)
+              & s_rd_s(C_ELO - 1 downto 0);
 
     --------------------------------------------------------------------------
     -- Fill engine: each displayed line, for every live slot, read the record,
@@ -1136,6 +1171,7 @@ begin
     p_fill : process(clk)
         variable v_hd  : t_sprite;
         variable v_wr  : t_sprite;
+        variable v_pk  : std_logic_vector(C_REC_W - 1 downto 0);
         variable v_vc  : t_g;
         variable v_n0, v_n1, v_n2 : std_logic;
         variable v_out, v_in : std_logic;
@@ -1252,7 +1288,8 @@ begin
                     v_wr.e1 := s_cur.e1 + resize(s_cur.b1, C_EW);
                     v_wr.e2 := s_cur.e2 + resize(s_cur.b2, C_EW);
                     s_fill_waddr <= to_unsigned(s_fn, C_AW);
-                    s_fill_wdata <= pack(v_wr);
+                    v_pk := pack(v_wr);
+                    s_fill_wdata <= v_pk(C_EHI downto C_ELO);
                     s_fill_we    <= '1';
                     -- next slot: +4 within the layer; else the next nearer
                     -- layer's first slot; done after layer 0
