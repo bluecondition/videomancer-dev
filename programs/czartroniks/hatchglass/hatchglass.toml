@@ -168,3 +168,8 @@ rotary_potentiometer_1 = 1023
 rotary_potentiometer_3 = 460
 rotary_potentiometer_4 = 500
 linear_potentiometer_12 = 1023
+
+[firmware]
+# nextpnr placement seed for the stock LZX build (one seed, all 8 configs):
+# seed 1 crashed nextpnr's router1 (assertion) on SD Analog; seed 2 builds all 8.
+seed = 2

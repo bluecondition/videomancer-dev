@@ -144,3 +144,8 @@ rotary_potentiometer_3 = 100
 rotary_potentiometer_5 = 768
 toggle_switch_9 = 1
 linear_potentiometer_12 = 0
+
+[firmware]
+# nextpnr placement seed for the stock LZX build (one seed, all 8 configs):
+# seed 1 stalled nextpnr's router1 on SD Standalone; seed 3 builds all 8.
+seed = 3
