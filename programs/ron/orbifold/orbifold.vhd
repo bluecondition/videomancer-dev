@@ -101,14 +101,6 @@ architecture orbifold of program_top is
         to_unsigned(125, 7), to_unsigned(125, 7), to_unsigned(126, 7), to_unsigned(126, 7),
         to_unsigned(127, 7), to_unsigned(127, 7), to_unsigned(127, 7), to_unsigned(127, 7));
 
-    -- 4-bit squares (n*n for n = 0..15)
-    type t_sq4 is array (0 to 15) of unsigned(7 downto 0);
-    constant SQ4 : t_sq4 := (
-        to_unsigned(  0, 8), to_unsigned(  1, 8), to_unsigned(  4, 8), to_unsigned(  9, 8),
-        to_unsigned( 16, 8), to_unsigned( 25, 8), to_unsigned( 36, 8), to_unsigned( 49, 8),
-        to_unsigned( 64, 8), to_unsigned( 81, 8), to_unsigned(100, 8), to_unsigned(121, 8),
-        to_unsigned(144, 8), to_unsigned(169, 8), to_unsigned(196, 8), to_unsigned(225, 8));
-
     -- triangle wave 0..254 over an 8-bit phase (cheap hue wheel)
     function tri8(a : unsigned(7 downto 0)) return unsigned is
     begin
@@ -258,8 +250,20 @@ architecture orbifold of program_top is
     -- S10: squarer inputs
     signal s10_qa, s10_qb : t_q8 := (others => (others => '0'));
     -- S11/S12: squarer
-    signal s11_ca, s11_cb : t_q16 := (others => (others => '0'));
-    signal s11_ha, s11_hb : t_q8  := (others => (others => '0'));
+    -- 8-bit squares: one 256 x 16 ROM per squarer (12 EBRs; they were
+    -- 4-bit-square + h*l decompositions in fabric).  The ROM's output register is
+    -- the S11 stage; S12 re-registers it into fabric before the S13 add.
+    type t_sq8 is array (0 to 255) of std_logic_vector(15 downto 0);
+    function f_sq8 return t_sq8 is
+        variable v : t_sq8;
+    begin
+        for i in 0 to 255 loop
+            v(i) := std_logic_vector(to_unsigned(i * i, 16));
+        end loop;
+        return v;
+    end function;
+    constant C_SQ8 : t_sq8 := f_sq8;
+    signal s11_sa, s11_sb : t_q16 := (others => (others => '0'));
     signal s12_a2, s12_b2 : t_q16 := (others => (others => '0'));
     signal s12_yn         : unsigned(9 downto 0) := (others => '0');
     -- S13: r^2, video weight, gradient
@@ -816,20 +820,16 @@ begin
                 s10_qb(i) <= v_b;
             end loop;
 
-            -- S11: squarer stage A: q = 16h+l -> h^2&l^2 (concat, l^2<256) + h*l
+            -- S11: squares from ROM (exact q^2, q = 0..255)
             for i in 0 to NLEV - 1 loop
-                s11_ca(i) <= SQ4(to_integer(s10_qa(i)(7 downto 4)))
-                           & SQ4(to_integer(s10_qa(i)(3 downto 0)));
-                s11_ha(i) <= s10_qa(i)(7 downto 4) * s10_qa(i)(3 downto 0);
-                s11_cb(i) <= SQ4(to_integer(s10_qb(i)(7 downto 4)))
-                           & SQ4(to_integer(s10_qb(i)(3 downto 0)));
-                s11_hb(i) <= s10_qb(i)(7 downto 4) * s10_qb(i)(3 downto 0);
+                s11_sa(i) <= unsigned(C_SQ8(to_integer(s10_qa(i))));
+                s11_sb(i) <= unsigned(C_SQ8(to_integer(s10_qb(i))));
             end loop;
 
-            -- S12: squarer stage B: q^2 = (h^2 & l^2) + (h*l << 5); input luma
+            -- S12: squares re-registered into fabric; input luma
             for i in 0 to NLEV - 1 loop
-                s12_a2(i) <= s11_ca(i) + shift_left(resize(s11_ha(i), 16), 5);
-                s12_b2(i) <= s11_cb(i) + shift_left(resize(s11_hb(i), 16), 5);
+                s12_a2(i) <= s11_sa(i);
+                s12_b2(i) <= s11_sb(i);
             end loop;
             v_yn := signed(resize(unsigned(pipe(11).y), 11)) - to_signed(64, 11);
             if v_yn(10) = '1' then s12_yn <= (others => '0');

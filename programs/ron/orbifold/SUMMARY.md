@@ -28,3 +28,17 @@ All 6 configs seed 1, router2: HD Analog 90.6, SD Analog 89.7, HD HDMI 99.4,
 SD HDMI 94.4, HD Dual 90.0, SD Dual 83.3 MHz. ~7300/7680 LC (95%), 0 BRAM.
 Little LC headroom left -- the per-level pipeline FFs are the bulk.
 v0.2 sources backed up in .orbifold_work/.
+
+## Community port — fit for the stock SDK (v0.3.2, 2026-10-15)
+- The stock LZX SDK builds 8 configs; its SD Standalone core is ~600 LC larger
+  than HD. v0.3.1 packed to 7830/7680 LC there (HD Dual 7534) and crashed
+  router1 near the limit.
+- v0.3.2 replaces the twelve per-pixel 8-bit squarers (6 levels x 2 axes, each
+  a 4-bit-square table + h*l product + add over S11/S12, ~600 LUT + 400 FF) with
+  twelve 256 x 16 square ROMs (`C_SQ8`, 12 of the 32 EBRs, all of them idle
+  before). Each ROM is addressed by the registered `s10_qa`/`s10_qb`; its output
+  register is the S11 stage, and S12 re-registers into fabric before the S13 add,
+  so the latency is unchanged.
+- Proven bit-exact against v0.3.1: GHDL side-by-side, 40 frames (403 x 201
+  raster), knobs and switches changing mid-picture, 0 mismatches in 3.24 M clocks.
+- Packed LC (stock SDK): SD Standalone 7830 → 7250, HD Dual 7534 → 7020.
