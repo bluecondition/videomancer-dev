@@ -114,6 +114,42 @@ architecture feedback of program_top is
         end if;
     end function;
 
+    -- 9 x 10 signed product, radix-4 Booth: 5 partial products of
+    -- {0, +-b, +-2b} (negatives as one's complement, the +1s gathered into
+    -- one constant-free correction word), balanced adds
+    function booth9x10(a : signed(8 downto 0); b : signed(9 downto 0)) return signed is
+        variable ae   : std_logic_vector(10 downto 0);
+        variable d    : std_logic_vector(2 downto 0);
+        variable mag  : signed(18 downto 0);
+        variable pp   : signed(18 downto 0);
+        variable b1   : signed(18 downto 0);
+        variable b2   : signed(18 downto 0);
+        variable corr : signed(18 downto 0);
+        type t_pp is array (0 to 4) of signed(18 downto 0);
+        variable p    : t_pp;
+    begin
+        ae := std_logic_vector(resize(a, 10)) & '0';
+        b1 := resize(b, 19);
+        b2 := shift_left(b1, 1);
+        corr := (others => '0');
+        for i in 0 to 4 loop
+            d := ae(2 * i + 2 downto 2 * i);
+            case d is
+                when "001" | "010" | "101" | "110" => mag := b1;
+                when "011" | "100"                 => mag := b2;
+                when others                        => mag := (others => '0');
+            end case;
+            if d(2) = '1' and d /= "111" then
+                pp := not mag;
+                corr(2 * i) := '1';
+            else
+                pp := mag;
+            end if;
+            p(i) := shift_left(pp, 2 * i);
+        end loop;
+        return ((p(0) + p(1)) + (p(2) + p(3))) + (p(4) + corr);
+    end function;
+
     -- signed d times a 4-bit weight: AND-gated partials, balanced adds
     function smul4(d : signed; w : unsigned(3 downto 0); n : natural) return signed is
         variable dd, p0, p1, p2, p3 : signed(n - 1 downto 0);
@@ -298,7 +334,29 @@ architecture feedback of program_top is
     signal l2_vy : std_logic := '0';
     signal l2_c : unsigned(6 downto 0) := (others => '0');
     signal l2_r : unsigned(5 downto 0) := (others => '0');
-    signal l2_my : unsigned(18 downto 0) := (others => '0');
+    -- luma gain table: entry y = (y * c_g + 512) >> 10.  c_g only changes in
+    -- the vblank sequence, so the table is refilled after each commit (one
+    -- add per entry, 256 clocks) instead of a per-pixel 8x11 multiply.  It
+    -- starts as the identity, which is the power-up gain (c_g = 1024).
+    type t_gtab is array (0 to 255) of std_logic_vector(15 downto 0);
+    function f_gid return t_gtab is
+        variable v : t_gtab;
+    begin
+        for i in 0 to 255 loop
+            v(i) := std_logic_vector(to_unsigned(i, 16));
+        end loop;
+        return v;
+    end function;
+    signal g_tab : t_gtab := f_gid;
+    attribute no_rw_check : boolean;
+    attribute no_rw_check of g_tab : signal is true;
+    signal g_rd  : std_logic_vector(15 downto 0) := (others => '0');
+    signal g_we  : std_logic := '0';
+    signal g_wa  : unsigned(7 downto 0) := (others => '0');
+    signal g_wd  : unsigned(9 downto 0) := (others => '0');
+    signal g_run : std_logic := '0';
+    signal g_idx : unsigned(7 downto 0) := (others => '0');
+    signal g_acc : unsigned(19 downto 0) := (others => '0');
     signal l3_vy : std_logic := '0';
     signal l3_c : unsigned(6 downto 0) := (others => '0');
     signal l3_r : unsigned(5 downto 0) := (others => '0');
@@ -953,6 +1011,35 @@ begin
     --------------------------------------------------------------------------
     -- Store: 8 arrays, each one registered read + one write statement.
     --------------------------------------------------------------------------
+    --------------------------------------------------------------------------
+    -- Luma gain table: refilled after each commit (entry y = acc >> 10 with
+    -- acc = 512 + y * c_g, one add per clock); read by the luma chain at l2.
+    --------------------------------------------------------------------------
+    p_gtab : process(clk)
+    begin
+        if rising_edge(clk) then
+            g_we <= '0';
+            if commit = '1' then
+                g_run <= '1';
+                g_idx <= (others => '0');
+                g_acc <= to_unsigned(512, 20);
+            elsif g_run = '1' then
+                g_we  <= '1';
+                g_wa  <= g_idx;
+                g_wd  <= g_acc(19 downto 10);
+                g_acc <= g_acc + resize(c_g, 20);
+                g_idx <= g_idx + 1;
+                if g_idx = 255 then
+                    g_run <= '0';
+                end if;
+            end if;
+            if g_we = '1' then
+                g_tab(to_integer(g_wa)) <= "000000" & std_logic_vector(g_wd);
+            end if;
+            g_rd <= g_tab(to_integer(l1_y));
+        end if;
+    end process p_gtab;
+
     p_ram : process(clk)
     begin
         if rising_edge(clk) then
@@ -1223,10 +1310,10 @@ begin
             -- Luma chain: gain, crisp, fold, negative, stochastic rounding
             -----------------------------------------------------------------
             l2_vy <= l1_vy; l2_c <= l1_c; l2_r <= l1_r;
-            l2_my <= l1_y * c_g;
+            -- (gain from the table: g_rd is the l2 stage)
 
             l3_vy <= l2_vy; l3_c <= l2_c; l3_r <= l2_r;
-            l3_y <= resize(shift_right(l2_my + 512, 10), 10);
+            l3_y <= unsigned(g_rd(9 downto 0));
 
             l4_vy <= l3_vy; l4_c <= l3_c; l4_r <= l3_r;
             if sw_crisp = '1' then
@@ -1267,7 +1354,7 @@ begin
             -- on one multiplier over phases 1..6 (chroma cells are >= 10
             -- clocks apart), then bloom, clamp, negative, rounding.
             -----------------------------------------------------------------
-            cm_p <= cm_a * cm_b;
+            cm_p <= booth9x10(cm_a, cm_b);
             c8_v <= '0';
             case cs_ph is
                 when "000" =>

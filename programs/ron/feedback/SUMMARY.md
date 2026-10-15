@@ -95,3 +95,23 @@ Bipolar knobs have a 16-step centre deadband and a squared response.
   freeze/hold, strobe (update every Nth field), luma-keyed feedback mask,
   zoom centre offset, colour-cycling palettes.
 - Presets are placeholders; capture from hardware.
+
+## Community port — fit for the stock SDK (v0.1.2, 2026-10-15)
+- The stock LZX SDK builds 8 configs; its SD Standalone core is ~600 LC larger
+  than HD. v0.1.1 packed to 7838/7680 LC there (HD Dual 7410).
+- v0.1.2, two bit-exact changes:
+  1. **Luma gain table.** The per-pixel 8x11 multiply `l1_y * c_g`, then
+     (+512) >> 10, becomes a 256-entry table (`g_tab`, 1 EBR) read at the
+     same stage. c_g only changes in the vblank sequence, so `p_gtab` refills
+     the table after each `commit` with one add per entry
+     (acc = 512 + y*c_g, entry = acc >> 10, 256 clocks). The table starts
+     as the identity, which is the power-up gain c_g = 1024.
+  2. **Booth hue multiply.** The hue-rotation multiply (9 x 10 signed) is a
+     hand-written radix-4 Booth (`booth9x10`): 5 partials of {0, +-b, +-2b},
+     with the one's-complement +1s gathered into one correction word. It was
+     checked exhaustively against a*b for all 262,144 operand pairs.
+- Proven bit-exact against v0.1.1: GHDL side-by-side, 40 frames (403 x 201
+  raster), knobs and switches changing mid-picture, 0 mismatches in 3.24 M clocks.
+- Packed LC (stock SDK): SD Standalone 7838 → 7620, HD Dual 7410 → 7216.
+- Stock build: all 8 configs on seed 1; own HD timing (core without the Sync
+  Out generator) 88.5/85.4/80.2 MHz Analog/HDMI/Dual.
