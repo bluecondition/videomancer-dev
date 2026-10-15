@@ -118,6 +118,7 @@ suffix_label = "%"
 
 [firmware]
 # nextpnr placement seed for the stock LZX build (one seed, all 8 configs):
-# lower seeds hung nextpnr's router1 (a rip-up livelock) in at least one
-# config; seed 7 builds all 8.
+# seeds 1-6 each hung nextpnr's router1 (a rip-up livelock) in at least one
+# config; seed 7 builds all 8 (own HD timing 89.6/83.1/82.1 MHz
+# Analog/HDMI/Dual).
 seed = 7
