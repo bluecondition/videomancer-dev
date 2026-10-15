@@ -36,7 +36,7 @@ parameter_id = "rotary_potentiometer_1"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 220            # dot-size floor: CCW = dots vanish in black
+initial_value = 0            # dot-size floor: CCW = dots vanish in black
 display_min_value = 0
 display_max_value = 100
 name_label = "Fill"
@@ -47,7 +47,7 @@ parameter_id = "rotary_potentiometer_2"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 240            # luma -> dot-size slope
+initial_value = 369            # luma -> dot-size slope
 display_min_value = 0
 display_max_value = 100
 name_label = "Contrast"
@@ -58,7 +58,7 @@ parameter_id = "rotary_potentiometer_3"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 512            # detent = still; scroll + spin (odd bands counter-rotate)
+initial_value = 180            # detent = still; scroll + spin (odd bands counter-rotate)
 display_min_value = -100
 display_max_value = 100
 name_label = "Flow"
@@ -69,7 +69,7 @@ parameter_id = "rotary_potentiometer_4"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 600            # video-edge ink amount; bottom detent = no ink
+initial_value = 0            # video-edge ink amount; bottom detent = no ink
 display_min_value = 0
 display_max_value = 100
 name_label = "Ink"
@@ -80,7 +80,7 @@ parameter_id = "rotary_potentiometer_5"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 300            # cordonnet border weight
+initial_value = 454            # cordonnet border weight
 display_min_value = 0
 display_max_value = 100
 name_label = "Border"
@@ -91,7 +91,7 @@ parameter_id = "rotary_potentiometer_6"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 512            # detent = radial dots; CW/CCW = phyllotaxis shear
+initial_value = 0            # detent = radial dots; CW/CCW = phyllotaxis shear
 display_min_value = -100
 display_max_value = 100
 name_label = "Twist"
@@ -136,7 +136,7 @@ parameter_id = "linear_potentiometer_12"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 512            # lace scale, +-1.75 octaves (exp); up = bigger lace
+initial_value = 165            # lace scale, +-1.75 octaves (exp); up = bigger lace
 display_min_value = 0
 display_max_value = 100
 name_label = "Scale"
