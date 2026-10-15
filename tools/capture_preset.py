@@ -626,7 +626,12 @@ def open_port(port_name: str):
     port.timeout = 0.05
     port.write_timeout = 1.0
     # Avoid a baud-rate touch. 1200 baud reboots into BOOTSEL.
-    port.dtr = False
+    # TEMPORARY (2026-10-15, Ron approved): DTR asserted. Original was
+    # `port.dtr = False`, which worked for months; on 2026-10-15 the shell
+    # stopped replying with DTR low (after an interrupted capture, survived a
+    # WSL reboot; Videomancer not yet power-cycled). Revert to False once a
+    # power-cycled device answers with DTR low again. See tools/LOCAL_CHANGES.md.
+    port.dtr = True
     port.rts = False
     try:
         port.open()
