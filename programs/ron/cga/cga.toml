@@ -24,20 +24,20 @@ initial_value_label = "Cyn/Mag"
 parameter_id = "rotary_potentiometer_2"
 name_label = "H Size"
 value_labels = ["2x", "4x", "CGA", "8x", "16x"]
-initial_value_label = "4x"
+initial_value_label = "8x"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
 name_label = "V Size"
 value_labels = ["2x", "4x", "CGA", "8x", "16x"]
-initial_value_label = "4x"
+initial_value_label = "8x"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 767
+initial_value = 836
 display_min_value = 0
 display_max_value = 100
 name_label = "Contrast"
@@ -66,7 +66,7 @@ initial_value_label = "Black"
 parameter_id = "toggle_switch_7"
 name_label = "Stability"
 value_labels = ["Off", "On"]
-initial_value_label = "On"
+initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
@@ -99,7 +99,7 @@ parameter_id = "linear_potentiometer_12"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 512
+initial_value = 679
 display_min_value = 0
 display_max_value = 100
 name_label = "Dither"
