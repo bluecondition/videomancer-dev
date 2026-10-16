@@ -76,3 +76,11 @@ Earlier: v1.1.0 HD HDMI seed 2; v1.0.0 HD HDMI seed 2; build12 HD Dual seed 2.
 
 - Presets 4 -> 8, captured with `./capture_preset.sh`. Kirlian and Ink Bleed
   have none yet; also an Invert look and Rainbow over Neon.
+
+## Build seeds — community port (stock LZX SDK 0a65d53, router1, all 8 configs)
+
+v1.1.3 (2026-10-16): **seed 2**, set as `[firmware] seed = 2` in livewire.toml. LZX's stock build uses one seed for all 8 configs.
+- **Why:** v1.1.3 adds the labelled-default fix for K1 Mode. With it, seed 1 stalls router1 on HD Standalone (overuse stuck at 13322).
+- **Sweep:** seeds 2, 3 and 4 all build 8/8.
+- **Own HD timing** (scratch core without LZX's Sync Out generator): seed 2 gives 89.9 / 89.5 / 89.7 MHz (Analog / HDMI / Dual), seed 3 gives 87.5 / 87.7 / 87.5, seed 4 gives 88.8 / 93.6 / 84.1.
+- The dev flow (router2) is unchanged.

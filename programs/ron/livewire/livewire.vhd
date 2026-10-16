@@ -629,7 +629,12 @@ begin
             end if;
             s_k1zp <= f_zone5(s_k1p);
             s_k1zm <= f_zone5(s_k1m);
-            if s_k1zp = s_k1zm then
+            -- Labelled default: at program load the firmware writes the
+            -- initial_value_label's INDEX (0..4) into the register, not a
+            -- 0..1023 position, so a value below 5 is the mode itself.
+            if s_k1 < 5 then
+                s_mode <= s_k1(2 downto 0);
+            elsif s_k1zp = s_k1zm then
                 s_mode <= s_k1zp;     -- 0 NEON 1 KIRLIAN 2 SPECTRAL 3 CEL 4 INK
             end if;
 
