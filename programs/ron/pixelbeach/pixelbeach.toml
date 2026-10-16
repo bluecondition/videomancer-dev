@@ -29,7 +29,7 @@ name_label = "Tide"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 449
 suffix_label = "%"
 
 [[parameter]]
@@ -38,7 +38,7 @@ name_label = "Foam"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 500
+initial_value = 412
 suffix_label = "%"
 
 [[parameter]]
@@ -47,7 +47,7 @@ name_label = "Chop"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 300
+initial_value = 418
 suffix_label = "%"
 
 [[parameter]]
@@ -56,7 +56,7 @@ name_label = "Swell"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 600
+initial_value = 519
 suffix_label = "%"
 
 [[parameter]]
@@ -65,7 +65,7 @@ name_label = "Time"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 550
+initial_value = 758
 suffix_label = "%"
 
 # --- Toggle Switches (7-11) ---
@@ -80,13 +80,13 @@ initial_value_label = "On"
 parameter_id = "toggle_switch_8"
 name_label = "Pixels"
 value_labels = ["16px", "8px"]
-initial_value_label = "16px"
+initial_value_label = "8px"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
 name_label = "Storm"
 value_labels = ["Off", "On"]
-initial_value_label = "Off"
+initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
@@ -108,7 +108,7 @@ name_label = "Sun"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 800
+initial_value = 1023
 suffix_label = "%"
 
 [firmware]
