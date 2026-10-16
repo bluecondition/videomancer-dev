@@ -26,7 +26,7 @@ name_label = "Band W"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 444
+initial_value = 325
 suffix_label = "%"
 
 [[parameter]]
@@ -44,7 +44,7 @@ name_label = "Noise"
 control_mode = "linear"
 display_min_value = 1
 display_max_value = 16
-initial_value = 0
+initial_value = 8
 suffix_label = "px"
 
 [[parameter]]
@@ -53,7 +53,7 @@ name_label = "Poster"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 0
+initial_value = 1023
 suffix_label = "%"
 
 [[parameter]]
@@ -62,7 +62,7 @@ name_label = "Contrast"
 control_mode = "linear"
 display_min_value = 100
 display_max_value = 900
-initial_value = 0
+initial_value = 209
 suffix_label = "%"
 
 [[parameter]]
@@ -81,7 +81,7 @@ initial_value_label = "Off"
 parameter_id = "toggle_switch_8"
 name_label = "Key Pos"
 value_labels = ["Under", "Over"]
-initial_value_label = "Over"
+initial_value_label = "Under"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
