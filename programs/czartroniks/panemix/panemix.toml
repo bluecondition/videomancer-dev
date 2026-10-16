@@ -30,7 +30,7 @@ name_label = "Wipe"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 0
+initial_value = 485
 display_float_digits = 1
 suffix_label = "%"
 
@@ -38,7 +38,7 @@ suffix_label = "%"
 parameter_id = "rotary_potentiometer_3"
 name_label = "Blend"
 value_labels = ["Add", "Screen", "Multiply", "Difference", "Overlay"]
-initial_value_label = "Add"
+initial_value_label = "Screen"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
@@ -46,7 +46,7 @@ name_label = "Mix"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 1023
+initial_value = 0
 display_float_digits = 1
 suffix_label = "%"
 
@@ -54,7 +54,7 @@ suffix_label = "%"
 parameter_id = "rotary_potentiometer_5"
 name_label = "Palette"
 value_labels = ["Thermal", "Ironbow", "Plasma", "Rainbow", "Ice", "Night Vision", "White Hot", "X-Ray"]
-initial_value_label = "Thermal"
+initial_value_label = "Rainbow"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
@@ -62,7 +62,7 @@ name_label = "Range"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 200
-initial_value = 512
+initial_value = 1023
 display_float_digits = 0
 suffix_label = "%"
 
@@ -88,13 +88,13 @@ initial_value_label = "Luma"
 parameter_id = "toggle_switch_10"
 name_label = "Invert"
 value_labels = ["Off", "On"]
-initial_value_label = "Off"
+initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
 name_label = "Iso"
 value_labels = ["Off", "On"]
-initial_value_label = "Off"
+initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
@@ -102,7 +102,7 @@ name_label = "Heat"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 0
+initial_value = 504
 display_float_digits = 1
 suffix_label = "%"
 
