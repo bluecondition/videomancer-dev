@@ -8,7 +8,7 @@ Chroma held in strips or squares, bled and dot-crawling like a bad composite fee
 
 | | Control | Range | What it does |
 |---|---|---|---|
-| K1 | Block | 8–64 px | block size 8..64 px, continuous (column/row DDA counters) |
+| K1 | Block | 8–64 px | block size 8..64 px, continuous |
 | K2 | Shift | 0–100% | moshed-block displacement, ±48..±1012 px HD (±24..±506 SD), wraps inside the picture |
 | K3 | Rate | 0–100% | re-roll every ~2 s .. every field, exponential |
 | K4 | Hold | 1–64 px | chroma sampled every 1..64 px, every integer size |

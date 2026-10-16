@@ -8,13 +8,13 @@ Halftone keyed into a colour cell mosaic by luma or saturation, torn by a noisy 
 
 | | Control | Range | What it does |
 |---|---|---|---|
-| K1 | Cell | 4 px / 8 px / 16 px / 32 px | halftone cell 4 / 8 / 16 / 32 px (labelled; default 8) |
-| K2 | Screen | Dot / Line / Diamond / Square | Dot / Line / Diamond / Square (labelled) |
+| K1 | Cell | 4 px / 8 px / 16 px / 32 px | halftone cell 4 / 8 / 16 / 32 px (default 8) |
+| K2 | Screen | Dot / Line / Diamond / Square | screen shape: dot / line / diamond / square |
 | K3 | Band Size | 0–50% | head-switch band height: 4 lines at 0 .. half the frame at 100% (default ~5%: 56 lines HD, 15 SD) |
 | K4 | Noise | 0–100% | band noise, tear and break-up; 10% floor so the band never goes quiet |
-| K5 | Level | 0–100% | key threshold: luma 72..903, or saturation 8..519 |
+| K5 | Level | 0–100% | key threshold: black to near white (Luma key), or grey to strongly saturated (Sat key) |
 | K6 | Soft | 0–100% | key edge dithered by noise |
-| S7 | Key | Luma / Sat | Luma / Sat |
+| S7 | Key | Luma / Sat | key from luma / from saturation |
 | S8 | Halftone | Inside / Outside | Inside the key / Outside it; the rest is the colour cell mosaic |
 | S9 | Ink | Dark / Light | Dark: black dots on white paper. Light: white dots on black paper (both positive) |
 | S10 | Band | Bottom / Rolling | Bottom / Rolling up the frame (~8.5 s a pass in every mode, wraps round) |

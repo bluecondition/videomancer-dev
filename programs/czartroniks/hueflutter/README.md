@@ -2,15 +2,15 @@
 
 Luma-band wobble of a hue-spun, saturation-scaled picture, posterized with a 2x2 dither; hue can ride the wobble phase.
 
-**P12 (Spin):** hue spin speed, bipolar, squared. Centre (±8 codes) = still; the ends ≈ 0.55 s a turn
+**P12 (Spin):** hue spin speed, bipolar, squared. Still at the centre (small deadband); the ends ≈ 0.55 s a turn
 
 ## Controls
 
 | | Control | Range | What it does |
 |---|---|---|---|
-| K1 | Wobble | 0–255 px | displacement amplitude, 0–255 px (default 450 ≈ 112 px) |
+| K1 | Wobble | 0–255 px | displacement amplitude, 0–255 px (default ≈ 112 px) |
 | K2 | Waves | 0–100% | vertical wavelength: line-phase step. Glided |
-| K3 | Hue | 0–360° | base hue rotation, 0–360°. 0 = unrotated (it was −90° in v0.1) |
+| K3 | Hue | 0–360° | base hue rotation, 0–360°. 0 = unrotated |
 | K4 | Sat | 0–400% | saturation 0–400%, 100% = unity |
 | K5 | Luma | 1–8 b | luma levels, 1–8 bits |
 | K6 | Chroma | 1–8 b | chroma levels, 1–8 bits (1 bit = −/grey/+ per channel) |
@@ -19,7 +19,7 @@ Luma-band wobble of a hue-spun, saturation-scaled picture, posterized with a 2x2
 | S9 | Chroma | With / Quarter | With / Quarter: chroma reads a quarter wave apart (fringes) |
 | S10 | Hue | Static / Ripple | Static / Ripple: the hue follows the wobble phase (rainbow ripples) |
 | S11 | Quant | Plain / Dither | Plain / Dither: 2×2 ordered dither (cells 2 px wide) |
-| P12 | Spin | -100–100% | hue spin speed, bipolar, squared. Centre (±8 codes) = still; the ends ≈ 0.55 s a turn |
+| P12 | Spin | -100–100% | hue spin speed, bipolar, squared. Still at the centre (small deadband); the ends ≈ 0.55 s a turn |
 
 ## Presets
 

@@ -8,14 +8,14 @@ Sobel edge drawing and picture cut into hashed blocks that shift, hold, invert o
 
 | | Control | Range | What it does |
 |---|---|---|---|
-| K1 | Gain | 0–100% | edge gain (Sobel magnitude / 4, same calibration as v0.1's 2-tap) |
+| K1 | Gain | 0–100% | edge gain (Sobel edge strength) |
 | K2 | Thresh | 0–100% | edges below this are dropped |
 | K3 | Blend | 0–100% | edges on black (0) .. edges over the cut-up picture (100) |
-| K4 | Block | 8–64 px | block size 8..64 px, continuous (column/row DDA counters) |
+| K4 | Block | 8–64 px | block size 8..64 px, continuous |
 | K5 | Shift | 0–100% | moshed-block displacement, ±48..±1008 px HD (±24..±504 SD), wraps inside the picture |
 | K6 | Rate | 0–100% | re-roll every ~2 s .. every field, exponential |
-| S7 | Edges | White / Tinted | white / tinted (picture chroma at double saturation, ink luma 768) |
-| S8 | Blocks | Plain / Negative | plain / moshed blocks go negative (luma 64↔940, chroma mirrored) |
+| S7 | Edges | White / Tinted | white / tinted (the picture's colour at double saturation) |
+| S8 | Blocks | Plain / Negative | plain / moshed blocks go negative (luma and chroma inverted) |
 | S9 | Hash | Block / Band | per block / per band (whole rows of blocks share a shift) |
 | S10 | Mosh | Shift / Hold | shift / hold (block repeats its first column) |
 | S11 | Ink | Light / Dark | light edges on black / dark edges on white |

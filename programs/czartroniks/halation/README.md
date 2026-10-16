@@ -2,7 +2,7 @@
 
 Bloom meets magnetic wobble: a wide glow (7–255 px) that can wobble on its own, a real screen blend, and a red halation halo on the slider that widens, then splits into twin ghosts.
 
-**P12 (Halo):** Red halation from the un-wobbled glow read at ±d: rises as a wider glow (full gain by 25%), then splits into twin red ghosts that spread to 1/8 of the width at 100%. Works at any Wobble.
+**P12 (Halo):** Red halation from the un-wobbled glow: rises as a wider glow (full gain by 25%), then splits into twin red ghosts that spread to 1/8 of the width at 100%. Works at any Wobble.
 
 ## Controls
 

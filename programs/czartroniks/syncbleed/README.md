@@ -8,10 +8,10 @@ Chroma bleeds, lags and dot-crawls like a bad composite feed while rows collapse
 
 | | Control | Range | What it does |
 |---|---|---|---|
-| K1 | Bleed | 0–7 | chroma smear (IIR) in octave steps: off, 2 .. 128 px (as v0.1); Local and P12 can push it to 256 px |
+| K1 | Bleed | 0–7 | chroma smear (IIR) in octave steps: off, 2 .. 128 px; Local and P12 can push it to 256 px |
 | K2 | Lag | 0–63 px | chroma lags luma by 0 .. 63 source px |
 | K3 | Crawl | 0–100% | dot crawl: subcarrier dots, 188 cycles across the line (~10 px pitch at HD, 3.8 px at SD), phased by hue, strongest on colour, a faint floor on grey |
-| K4 | Collapse | 1–9x | base squeeze toward the seam, 1x .. 9x (display now shows the factor), glided |
+| K4 | Collapse | 1–9x | base squeeze toward the seam, 1x .. 9x, glided |
 | K5 | Seam | -100–100% | collapse centre, bipolar (centre = screen centre) |
 | K6 | Wave | 0–100% | the squeeze breathes down the picture (1.58 sine cycles a screen in every mode, ~3.6 s a cycle), glided |
 | S7 | Bleed | Before / After | Before the collapse (smear squeezed too) / After (screen-space smear) |

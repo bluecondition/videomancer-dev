@@ -15,7 +15,7 @@ Wiping split-screen panes (repeat or mirror) blended with the picture, false-col
 | K5 | Palette | Thermal / Ironbow / Plasma / Rainbow / Ice / Night Vision / White Hot / X-Ray | Thermal, Ironbow, Plasma, Rainbow, Ice, Night Vision, White Hot, X-Ray (eighths, hysteresis) |
 | K6 | Range | 0–200% | gain into the palette 0–200%; 100% = black..top of the blend over one ramp; above, the ramp wraps |
 | S7 | Style | Repeat / Mirror | Repeat: centre crop in every pane (filmstrip) / Mirror: odd panes mirrored in place; 1 pane: whole picture flipped |
-| S8 | Luma | Palette / Keep | palette luma / the blend's own luma (capped 940) under palette colour |
+| S8 | Luma | Palette / Keep | palette luma / the blend's own luma under palette colour |
 | S9 | Index | Luma / Diff | palette by the mixed luma / by \|A − B\| |
 | S10 | Invert | Off / On | palette reversed |
 | S11 | Iso | Off / On | true-black isotherm lines at each eighth of the ramp, width follows Range, none on flat/clipped pixels |

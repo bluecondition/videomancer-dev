@@ -11,7 +11,7 @@ Edge-keeping brush smoothing with stroke relief, warped by drifting value noise;
 | K1 | Scale | 4–512 px | noise cell size 4–512 px, octave steps |
 | K2 | Drift | 0–100% | noise field scrolls vertically |
 | K3 | Stroke | 1–8x | noise cells stretched horizontally ×1–×8 |
-| K4 | Brush | 0–100% | window 4–64 px each side, exponential (0% 4, 50% 16, 75% 33, 100% 64); the vertical brush drags ~N/2 lines |
+| K4 | Brush | 0–100% | window 4–64 px each side, exponential (0% 4, 50% 16, 75% 33, 100% 64); the vertical brush drags about half that many lines |
 | K5 | Edge | 0–100% | 0 = plain box blur of both windows … 100 = hard nearest-mean pick; also the step that stops the vertical brush |
 | K6 | Relief | 0–100% | brush-stroke relief (left mean − right mean), up to 2× |
 | S7 | Noise | Warp / Steer | Warp: noise displaces the picture / Steer: noise flips the pick |

@@ -2,24 +2,24 @@
 
 Colour-averaged mosaic cells, solarized before or after averaging; staircase threshold per row, contour lines, grid, vivid.
 
-**P12 (Fold):** **now the only threshold**: 0% folds the highlights only (threshold 748), 50% matches v0.2's default (406), 100% folds the whole picture (64)
+**P12 (Fold):** the fold threshold: 0% folds the highlights only, 100% folds the whole picture
 
 ## Controls
 
 | | Control | Range | What it does |
 |---|---|---|---|
-| K1 | Level | 15–80% | **new**: fold brightness. The bands top out at 15–80% of white (v0.2 was fixed at 58%, the default) |
-| K2 | Gain | 100–1600% | fold depth ×1 → ×16 (unchanged) |
-| K3 | Rows | 1–64ln | cell height 1–64 lines (unchanged) |
-| K4 | Cell | 4–131px | cell width 4–131 px (unchanged); cell colours are now exact means |
-| K5 | Mix | 25–100% | mosaic over the picture, 25–100% (unchanged) |
-| K6 | Offset | 0–100% | threshold step per cell row (unchanged) |
-| S7 | Chroma | Keep / Fold | Keep / Fold (unchanged) |
-| S8 | Order | Solar-Mos / Mos-Solar | Solar-Mos / Mos-Solar (unchanged) |
-| S9 | Colour | Average / Vivid | **new**: Average / Vivid (cell colours at double saturation). Replaces Sample |
-| S10 | Grid | Off / On | black cell borders (unchanged) |
-| S11 | Iso | Off / On | contour lines, now in **negative ink**: black over light, light (768) over dark, with the complementary hue |
-| P12 | Fold | 0–100% | **now the only threshold**: 0% folds the highlights only (threshold 748), 50% matches v0.2's default (406), 100% folds the whole picture (64) |
+| K1 | Level | 15–80% | fold brightness: the bands top out at 15–80% of white (default 58%) |
+| K2 | Gain | 100–1600% | fold depth ×1 → ×16 |
+| K3 | Rows | 1–64ln | cell height 1–64 lines |
+| K4 | Cell | 4–131px | cell width 4–131 px; each cell takes its exact mean colour |
+| K5 | Mix | 25–100% | mosaic over the picture, 25–100% |
+| K6 | Offset | 0–100% | threshold step per cell row (a staircase) |
+| S7 | Chroma | Keep / Fold | Keep: the fold keeps the colour / Fold: it inverts the colour too |
+| S8 | Order | Solar-Mos / Mos-Solar | Solar-Mos: solarize, then mosaic / Mos-Solar: mosaic, then solarize |
+| S9 | Colour | Average / Vivid | Average / Vivid (cell colours at double saturation) |
+| S10 | Grid | Off / On | black cell borders |
+| S11 | Iso | Off / On | contour lines in negative ink: black over light, light over dark, with the complementary hue |
+| P12 | Fold | 0–100% | the fold threshold: 0% folds the highlights only, 100% folds the whole picture |
 
 ## Presets
 

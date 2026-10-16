@@ -8,12 +8,12 @@ Rolling V-hold bar with jello; rows squeeze into tiled strips, hardest just belo
 
 | | Control | Range | What it does |
 |---|---|---|---|
-| K1 | Roll | -100–100% | roll speed, bipolar; ±16-count deadband at the centre = locked. ~5.7 s a cycle at the default, 0.55 s at the ends, the same in every mode |
-| K2 | Bar | 1–26% | bar height 0.8 .. 26% of the screen (default 2.9% = 31 lines at HD, as v0.1) |
+| K1 | Roll | -100–100% | roll speed, bipolar; a small deadband at the centre = locked. ~5.7 s a cycle at the default, 0.55 s at the ends, the same in every mode |
+| K2 | Bar | 1–26% | bar height 0.8 .. 26% of the screen (default 2.9% = 31 lines at HD) |
 | K3 | Jello | 0–100% | sine lean, up to 1/8 of the width (±240 px HD); 1.5 sine cycles a screen in every mode |
-| K4 | Collapse | 1–9x | base squeeze 1x .. 9x (display now shows the factor), glided |
-| K5 | Reach | 0–100% | how far below the bar the pull and the tear reach: 1/32 .. 8 screen heights (quadratic; default ≈ 1.9 heights, as v0.1) |
-| K6 | Beam | 0–100% | squeezed rows brighten (lift, as v0.1); stretched rows now dim |
+| K4 | Collapse | 1–9x | base squeeze 1x .. 9x, glided |
+| K5 | Reach | 0–100% | how far below the bar the pull and the tear reach: 1/32 .. 8 screen heights (quadratic; default ≈ 1.9 heights) |
+| K6 | Beam | 0–100% | squeezed rows brighten; stretched rows dim |
 | S7 | Bar | Black / Show | Black / Show (the bar's rows show the peak-pull picture) |
 | S8 | Centre | Screen / Jello | Screen: strips stay centred, jello pans the content / Jello: the collapse centre wobbles, so whole strips swing |
 | S9 | Edges | Black / Mirror | Black / Mirror |

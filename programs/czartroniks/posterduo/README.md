@@ -18,7 +18,7 @@ Dithered posterize and a two-ink duotone: banded or smooth inks, tritone midtone
 | S8 | Tritone | Off / On | midtones fade to neutral grey |
 | S9 | Luma | Keep / Flat | Keep (posterized luma) / Flat (luma = the tone ramp; posterized and dithered in Tone-Post) |
 | S10 | Bands | Same / Swap | alternate posterize bands swap the two inks |
-| S11 | Chroma | Smooth / Poster | Smooth / Poster: each chroma channel snapped to −200 / 0 / +200 (nine colours, grey included), dithered by K2. Works in both orders |
+| S11 | Chroma | Smooth / Poster | Smooth / Poster: each chroma channel snapped to three levels (nine colours, grey included), dithered by K2. Works in both orders |
 | P12 | Balance | 0–100% | the ink split sweeps through the picture: 0% high-key (mostly light ink), 50% split at mid-grey, 100% low-key (mostly shadow ink). Glided |
 
 ## Presets

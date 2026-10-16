@@ -10,9 +10,9 @@ A strip of the picture mirrored into a kaleidoscope, posterized into flat glass 
 |---|---|---|---|
 | K1 | Strip | 0–100% | width of the mirrored source strip, 1/32 .. 1/2 of the picture, square-law knob; the top is a two-pane bookmatch |
 | K2 | Axis | 0–100% | where the strip is taken from; the strip always stays inside the picture (12 px in from each edge) |
-| K3 | Thresh | 0–100% | bloom threshold, black (64) .. near white (897) |
+| K3 | Thresh | 0–100% | bloom threshold, black .. near white |
 | K4 | Radius | 0–100% | bloom box width 4 .. 128 px, exponential knob |
-| K5 | Levels | 2–16 | luma levels 2 .. 16; black (64) and white (~940) are always two of them |
+| K5 | Levels | 2–16 | luma levels 2 .. 16; black and white are always two of them |
 | K6 | Chroma | 0–100% | 0 = grey; low = a few bold glass colours (3 levels per axis, saturation boosted); high = near-original colour |
 | S7 | Wash | Colour / White | Colour: the glow is luma only; White: it also bleaches chroma toward neutral |
 | S8 | Mirror | Kaleido / Tile | Kaleido (alternate panes mirrored) / Tile (repeated) |

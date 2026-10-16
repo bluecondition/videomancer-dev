@@ -18,7 +18,7 @@
 | S8 | Chroma Sep | Off / On | On: U/V colour fringe, 3-15 px at HD (rides P12) |
 | S9 | Motion | Smooth / Glitch | Smooth drift, or adds glitch frame tears |
 | S10 | Invert | Off / On | On: strokes fill the dark; the figure becomes a black silhouette |
-| S11 | Bypass | Off / On | On: SDK passthrough of the input |
+| S11 | Bypass | Off / On | On: passes the input through unchanged |
 | P12 | Signal Decay | 0–100% | Master decay: bend, ripple, jitter, fringe, grain, bloom, glitch rate |
 
 ## Presets

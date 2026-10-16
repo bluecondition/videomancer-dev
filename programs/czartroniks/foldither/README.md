@@ -9,7 +9,7 @@ Mirror / repeat folds, Bayer-dithered and quantized in source space (the pattern
 | | Control | Range | What it does |
 |---|---|---|---|
 | K1 | Segment | 1024 px / 512 px / 256 px / 128 px / 64 px | pane width 1024 / 512 / 256 / 128 / 64 px |
-| K2 | Slide | -100–100% | the panes slide across the picture, bipolar. Squared, with a centre detent. Top ~7.75 px a frame (v0.1: 4) |
+| K2 | Slide | -100–100% | the panes slide across the picture, bipolar. Squared, with a centre detent. Top ~7.75 px a frame |
 | K3 | Skew | -100–100% | per-line lean of the panes, bipolar. Squared, with a centre detent. 45° at ~35% from centre, top ~7.75 px a line |
 | K4 | Bits | 1 bit / 2 bits / 3 bits / 4 bits / 5 bits / 6 bits | luma levels 1–6 bits. Black and white are always levels |
 | K5 | Dither | 0–100% | dither amount, 0–100% of a step |
