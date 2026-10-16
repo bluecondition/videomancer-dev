@@ -23,7 +23,7 @@ name_label = "Hue"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 360
-initial_value = 0
+initial_value = 990
 display_float_digits = 0
 suffix_label = "deg"
 
@@ -33,7 +33,7 @@ name_label = "Sat"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 400
-initial_value = 256
+initial_value = 729
 display_float_digits = 0
 suffix_label = "%"
 
@@ -43,7 +43,7 @@ name_label = "Spread"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 0
+initial_value = 651
 display_float_digits = 1
 suffix_label = "%"
 
@@ -51,7 +51,7 @@ suffix_label = "%"
 parameter_id = "rotary_potentiometer_4"
 name_label = "Plane"
 value_labels = ["Negative", "Bit 8", "Bit 7", "Bit 6", "Bit 5", "Bit 4", "Bit 3", "Bit 2"]
-initial_value_label = "Bit 7"
+initial_value_label = "Bit 6"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
@@ -59,7 +59,7 @@ name_label = "Mix"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 500
+initial_value = 492
 display_float_digits = 1
 suffix_label = "%"
 
@@ -79,7 +79,7 @@ initial_value_label = "Normal"
 parameter_id = "toggle_switch_8"
 name_label = "Chroma"
 value_labels = ["Normal", "Negative"]
-initial_value_label = "Normal"
+initial_value_label = "Negative"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
@@ -105,7 +105,7 @@ name_label = "Spin"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 512
+initial_value = 791
 display_float_digits = 1
 suffix_label = "%"
 
