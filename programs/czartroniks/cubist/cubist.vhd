@@ -173,14 +173,16 @@ architecture cubist of program_top is
     end function;
 
     -- two or more bits set
+    -- (as plain logic: a counted popcount became a carry chain on stage A's
+    -- critical path) two in one half, or one in each half
     function f_two6(v : std_logic_vector(5 downto 0)) return boolean is
-        variable c : integer range 0 to 6;
+        variable lo2, hi2, loa, hia : std_logic;
     begin
-        c := 0;
-        for k in 0 to 5 loop
-            if v(k) = '1' then c := c + 1; end if;
-        end loop;
-        return c >= 2;
+        lo2 := (v(0) and v(1)) or (v(0) and v(2)) or (v(1) and v(2));
+        hi2 := (v(3) and v(4)) or (v(3) and v(5)) or (v(4) and v(5));
+        loa := v(0) or v(1) or v(2);
+        hia := v(3) or v(4) or v(5);
+        return (lo2 or hi2 or (loa and hia)) = '1';
     end function;
 
     function f_uvsl(a : signed(26 downto 0); e : std_logic) return signed is
@@ -836,6 +838,44 @@ architecture cubist of program_top is
     signal x7_q : signed(10 downto 0) := (others => '0');
     signal x7_sl : unsigned(2 downto 0) := (others => '0');
     signal x7_on : std_logic := '0';
+    -- unlit albedo by (sticker colour, sticker coverage): stage J's
+    -- satin-to-sticker blend 173 + (dly(col) * ast) >> 4 as a block-RAM
+    -- table instead of a multiply and an add (same values, same stages)
+    type t_yrom is array (0 to 255) of unsigned(9 downto 0);
+    constant C_YROM : t_yrom := (
+        to_unsigned( 173,10), to_unsigned( 224,10), to_unsigned( 275,10), to_unsigned( 327,10), to_unsigned( 378,10), to_unsigned( 429,10), to_unsigned( 481,10), to_unsigned( 532,10),
+        to_unsigned( 584,10), to_unsigned( 635,10), to_unsigned( 686,10), to_unsigned( 738,10), to_unsigned( 789,10), to_unsigned( 840,10), to_unsigned( 892,10), to_unsigned( 943,10),
+        to_unsigned( 995,10), to_unsigned(1023,10), to_unsigned(1023,10), to_unsigned(1023,10), to_unsigned(1023,10), to_unsigned(1023,10), to_unsigned(1023,10), to_unsigned(1023,10),
+        to_unsigned(1023,10), to_unsigned(1023,10), to_unsigned(1023,10), to_unsigned(1023,10), to_unsigned(1023,10), to_unsigned(1023,10), to_unsigned(1023,10), to_unsigned(1023,10),
+        to_unsigned( 173,10), to_unsigned( 212,10), to_unsigned( 252,10), to_unsigned( 291,10), to_unsigned( 331,10), to_unsigned( 371,10), to_unsigned( 410,10), to_unsigned( 450,10),
+        to_unsigned( 490,10), to_unsigned( 529,10), to_unsigned( 569,10), to_unsigned( 608,10), to_unsigned( 648,10), to_unsigned( 688,10), to_unsigned( 727,10), to_unsigned( 767,10),
+        to_unsigned( 807,10), to_unsigned( 846,10), to_unsigned( 886,10), to_unsigned( 925,10), to_unsigned( 965,10), to_unsigned(1005,10), to_unsigned(1023,10), to_unsigned(1023,10),
+        to_unsigned(1023,10), to_unsigned(1023,10), to_unsigned(1023,10), to_unsigned(1023,10), to_unsigned(1023,10), to_unsigned(1023,10), to_unsigned(1023,10), to_unsigned(1023,10),
+        to_unsigned( 173,10), to_unsigned( 182,10), to_unsigned( 192,10), to_unsigned( 202,10), to_unsigned( 212,10), to_unsigned( 222,10), to_unsigned( 232,10), to_unsigned( 242,10),
+        to_unsigned( 252,10), to_unsigned( 262,10), to_unsigned( 272,10), to_unsigned( 282,10), to_unsigned( 292,10), to_unsigned( 302,10), to_unsigned( 312,10), to_unsigned( 322,10),
+        to_unsigned( 332,10), to_unsigned( 341,10), to_unsigned( 351,10), to_unsigned( 361,10), to_unsigned( 371,10), to_unsigned( 381,10), to_unsigned( 391,10), to_unsigned( 401,10),
+        to_unsigned( 411,10), to_unsigned( 421,10), to_unsigned( 431,10), to_unsigned( 441,10), to_unsigned( 451,10), to_unsigned( 461,10), to_unsigned( 471,10), to_unsigned( 481,10),
+        to_unsigned( 173,10), to_unsigned( 194,10), to_unsigned( 215,10), to_unsigned( 236,10), to_unsigned( 258,10), to_unsigned( 279,10), to_unsigned( 300,10), to_unsigned( 321,10),
+        to_unsigned( 343,10), to_unsigned( 364,10), to_unsigned( 385,10), to_unsigned( 406,10), to_unsigned( 428,10), to_unsigned( 449,10), to_unsigned( 470,10), to_unsigned( 491,10),
+        to_unsigned( 513,10), to_unsigned( 534,10), to_unsigned( 555,10), to_unsigned( 576,10), to_unsigned( 598,10), to_unsigned( 619,10), to_unsigned( 640,10), to_unsigned( 661,10),
+        to_unsigned( 683,10), to_unsigned( 704,10), to_unsigned( 725,10), to_unsigned( 746,10), to_unsigned( 768,10), to_unsigned( 789,10), to_unsigned( 810,10), to_unsigned( 831,10),
+        to_unsigned( 173,10), to_unsigned( 188,10), to_unsigned( 203,10), to_unsigned( 218,10), to_unsigned( 233,10), to_unsigned( 248,10), to_unsigned( 264,10), to_unsigned( 279,10),
+        to_unsigned( 294,10), to_unsigned( 309,10), to_unsigned( 324,10), to_unsigned( 340,10), to_unsigned( 355,10), to_unsigned( 370,10), to_unsigned( 385,10), to_unsigned( 400,10),
+        to_unsigned( 416,10), to_unsigned( 431,10), to_unsigned( 446,10), to_unsigned( 461,10), to_unsigned( 476,10), to_unsigned( 491,10), to_unsigned( 507,10), to_unsigned( 522,10),
+        to_unsigned( 537,10), to_unsigned( 552,10), to_unsigned( 567,10), to_unsigned( 583,10), to_unsigned( 598,10), to_unsigned( 613,10), to_unsigned( 628,10), to_unsigned( 643,10),
+        to_unsigned( 173,10), to_unsigned( 179,10), to_unsigned( 185,10), to_unsigned( 192,10), to_unsigned( 198,10), to_unsigned( 205,10), to_unsigned( 211,10), to_unsigned( 218,10),
+        to_unsigned( 224,10), to_unsigned( 230,10), to_unsigned( 237,10), to_unsigned( 243,10), to_unsigned( 250,10), to_unsigned( 256,10), to_unsigned( 263,10), to_unsigned( 269,10),
+        to_unsigned( 276,10), to_unsigned( 282,10), to_unsigned( 288,10), to_unsigned( 295,10), to_unsigned( 301,10), to_unsigned( 308,10), to_unsigned( 314,10), to_unsigned( 321,10),
+        to_unsigned( 327,10), to_unsigned( 333,10), to_unsigned( 340,10), to_unsigned( 346,10), to_unsigned( 353,10), to_unsigned( 359,10), to_unsigned( 366,10), to_unsigned( 372,10),
+        to_unsigned( 173,10), to_unsigned( 179,10), to_unsigned( 185,10), to_unsigned( 192,10), to_unsigned( 198,10), to_unsigned( 205,10), to_unsigned( 211,10), to_unsigned( 218,10),
+        to_unsigned( 224,10), to_unsigned( 230,10), to_unsigned( 237,10), to_unsigned( 243,10), to_unsigned( 250,10), to_unsigned( 256,10), to_unsigned( 263,10), to_unsigned( 269,10),
+        to_unsigned( 276,10), to_unsigned( 282,10), to_unsigned( 288,10), to_unsigned( 295,10), to_unsigned( 301,10), to_unsigned( 308,10), to_unsigned( 314,10), to_unsigned( 321,10),
+        to_unsigned( 327,10), to_unsigned( 333,10), to_unsigned( 340,10), to_unsigned( 346,10), to_unsigned( 353,10), to_unsigned( 359,10), to_unsigned( 366,10), to_unsigned( 372,10),
+        to_unsigned( 173,10), to_unsigned( 179,10), to_unsigned( 185,10), to_unsigned( 192,10), to_unsigned( 198,10), to_unsigned( 205,10), to_unsigned( 211,10), to_unsigned( 218,10),
+        to_unsigned( 224,10), to_unsigned( 230,10), to_unsigned( 237,10), to_unsigned( 243,10), to_unsigned( 250,10), to_unsigned( 256,10), to_unsigned( 263,10), to_unsigned( 269,10),
+        to_unsigned( 276,10), to_unsigned( 282,10), to_unsigned( 288,10), to_unsigned( 295,10), to_unsigned( 301,10), to_unsigned( 308,10), to_unsigned( 314,10), to_unsigned( 321,10),
+        to_unsigned( 327,10), to_unsigned( 333,10), to_unsigned( 340,10), to_unsigned( 346,10), to_unsigned( 353,10), to_unsigned( 359,10), to_unsigned( 366,10), to_unsigned( 372,10) );
+    signal y_rd : unsigned(9 downto 0) := (others => '0');
     signal x8_ams, x8_amt : signed(16 downto 0) := (others => '0');
     signal x8_dly : signed(10 downto 0) := (others => '0');
     signal x8_sl : unsigned(2 downto 0) := (others => '0');
@@ -1068,6 +1108,15 @@ architecture cubist of program_top is
     signal rf_a, rf_b : t_rf := (others => (others => '0'));
     attribute ram_style of rf_a : signal is "block";
     attribute ram_style of rf_b : signal is "block";
+    attribute no_rw_check : boolean;
+    attribute no_rw_check of rf_a : signal is true;
+    attribute no_rw_check of rf_b : signal is true;
+    attribute no_rw_check of wram : signal is true;
+    attribute no_rw_check of sd_h1 : signal is true;
+    attribute no_rw_check of sd_h2 : signal is true;
+    attribute no_rw_check of sd_lf : signal is true;
+    attribute no_rw_check of sd_fd : signal is true;
+    attribute no_rw_check of tbl : signal is true;
     signal u_pc  : unsigned(9 downto 0) := (others => '0');
     signal u_st  : unsigned(2 downto 0) := (others => '0');
     signal u_gwt : unsigned(1 downto 0) := (others => '0');
@@ -1269,6 +1318,62 @@ architecture cubist of program_top is
         x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000",
         x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000",
         x"00000000", x"00000000", x"00000000", x"00000000" );
+    -- Exact signed product a * m, radix-4 Booth on m: ceil(len(m)/2)
+    -- partials of {0, +-a, +-2a} (negatives as one's complement, the +1s
+    -- gathered in one correction word in a spare slot), balanced adds.
+    -- Checked in Python against a*m for every operand width pair used here.
+    function bmul(a : signed; m : signed) return signed is
+        constant NA  : natural := a'length;
+        constant NML : natural := m'length;
+        constant NM  : natural := NML + (NML mod 2);
+        constant NP  : natural := NA + NML;
+        constant NPP : natural := NM / 2;
+        type t_pp is array (0 to 7) of signed(NP - 1 downto 0);
+        variable va   : signed(NA - 1 downto 0);
+        variable vm   : signed(NM - 1 downto 0);
+        variable me   : std_logic_vector(NM downto 0);
+        variable a1, a2, mag, pp, corr : signed(NP - 1 downto 0);
+        variable d    : std_logic_vector(2 downto 0);
+        variable p    : t_pp;
+    begin
+        va := a;
+        vm := resize(m, NM);
+        me := std_logic_vector(vm) & '0';
+        a1 := resize(va, NP);
+        a2 := shift_left(a1, 1);
+        corr := (others => '0');
+        for i in 0 to 7 loop
+            p(i) := (others => '0');
+        end loop;
+        for i in 0 to NPP - 1 loop
+            d := me(2 * i + 2 downto 2 * i);
+            case d is
+                when "001" | "010" | "101" | "110" => mag := a1;
+                when "011" | "100"                 => mag := a2;
+                when others                        => mag := (others => '0');
+            end case;
+            if d(2) = '1' and d /= "111" then
+                pp := not mag;
+                corr(2 * i) := '1';
+            else
+                pp := mag;
+            end if;
+            p(i) := shift_left(pp, 2 * i);
+        end loop;
+        p(NPP) := corr;
+        return ((p(0) + p(1)) + (p(2) + p(3))) + ((p(4) + p(5)) + (p(6) + p(7)));
+    end function;
+
+    -- Exact unsigned product a * m (width len(a) + len(m)) on the signed Booth.
+    function bmul_u(a : unsigned; m : unsigned) return unsigned is
+        constant NP : natural := a'length + m'length;
+        variable vp : signed(NP + 1 downto 0);
+    begin
+        vp := bmul(signed('0' & a), signed('0' & m));
+        return unsigned(vp(NP - 1 downto 0));
+    end function;
+
+
 begin
 
     ------------------------------------------------------------------------
@@ -1497,7 +1602,11 @@ begin
         variable v_jmp    : boolean;
         variable v_dr     : unsigned(21 downto 0);
         variable v_ms     : signed(21 downto 0);
+        variable v_mx     : signed(21 downto 0);
+        variable v_m23    : signed(22 downto 0);
+        variable v_s1, v_s2, v_neg : std_logic;
         variable v_pr     : signed(31 downto 0);
+        variable v_c33    : signed(32 downto 0);
         variable v_fa, v_fb : std_logic_vector(31 downto 0);
     begin
         if rising_edge(clk) then
@@ -1506,13 +1615,22 @@ begin
             -- mu_pa * B for a two's-complement B, two bits a step with the
             -- digit in {0, +-A, +-2A} -- no operand or product negation.
             if mu_bsy = '1' then
-                case std_logic_vector'(mu_pl(1) & mu_pl(0) & mu_bp) is
-                    when "001" | "010" => v_ms := mu_ph + resize(mu_pa, 22);
-                    when "011"         => v_ms := mu_ph + shift_left(resize(mu_pa, 22), 1);
-                    when "100"         => v_ms := mu_ph - shift_left(resize(mu_pa, 22), 1);
-                    when "101" | "110" => v_ms := mu_ph - resize(mu_pa, 22);
-                    when others        => v_ms := mu_ph;
-                end case;
+                -- ONE adder: the digit picks 0 / A / 2A, a negative digit
+                -- inverts it and carries in the +1 (two's complement), so
+                -- ph + {0, +-A, +-2A} without four adders and a 5:1 mux
+                v_s1  := mu_pl(0) xor mu_bp;
+                v_s2  := (mu_pl(1) xor mu_pl(0)) and not (mu_pl(0) xor mu_bp);
+                v_neg := mu_pl(1) and not (mu_pl(0) and mu_bp);
+                if v_s2 = '1' then
+                    v_mx := shift_left(resize(mu_pa, 22), 1);
+                elsif v_s1 = '1' then
+                    v_mx := resize(mu_pa, 22);
+                else
+                    v_mx := (others => '0');
+                end if;
+                if v_neg = '1' then v_mx := not v_mx; end if;
+                v_m23 := (mu_ph & '1') + (v_mx & v_neg);
+                v_ms := v_m23(22 downto 1);
                 mu_ph <= shift_right(v_ms, 2);
                 mu_pl <= unsigned(v_ms(1 downto 0)) & mu_pl(15 downto 2);
                 mu_bp <= mu_pl(1);
@@ -1699,8 +1817,11 @@ begin
                         -- the value, by the pre-decoded source
                         case to_integer(u_rsel) is
                             when 0 => v_r := u_sh;          -- MOV, SHR/SHL
-                            when 1 => if u_cin = '1' then v_r := v_a + v_b + 1;
-                                      else                v_r := v_a + v_b; end if;
+                            -- one adder: SUB's +1 enters as the carry-in
+                            -- (a 33-bit add with the cin in a spare low bit)
+                            -- instead of a second, incrementing chain
+                            when 1 => v_c33 := (v_a & '1') + (v_b & u_cin);
+                                      v_r := v_c33(32 downto 1);
                             when 2 => v_r := v_a and signed(resize(unsigned(u_ir(12 downto 0)), 32));
                             when 3 => v_r := resize(v_imm, 32);
                             when 4 =>                        -- MRD: low 32 bits
@@ -2006,6 +2127,14 @@ begin
         end if;
     end process p_srom2;
 
+    -- unlit albedo table (stage J read, stage K fabric register)
+    p_yrom : process(clk)
+    begin
+        if rising_edge(clk) then
+            y_rd <= C_YROM(to_integer(x9_ca & x9_ast));
+        end if;
+    end process p_yrom;
+
     -- gamma: one port for the pixel path, one for the engine
     p_gamrom : process(clk)
     begin
@@ -2185,6 +2314,9 @@ begin
         variable v_oh   : std_logic_vector(5 downto 0);
         variable v_cr, v_cp, v_f : std_logic_vector(5 downto 0);
         variable v_nu, v_nv : unsigned(1 downto 0);
+        variable v_dl   : unsigned(11 downto 0);
+        variable v_n1   : std_logic;
+        variable v_t17  : unsigned(16 downto 0);
     begin
         if rising_edge(clk) then
 
@@ -2445,19 +2577,28 @@ begin
             -- diffuse tilt and the highlight:
             --   N.H = H.n + [ -(1-cos)*H.n + sin_u*H.U + sin_v*H.V ] / 256
             -- Three 9x10 multiplies -- the whole material rig -- each alone.
-            x6_p0 <= resize(signed('0' & x5_cm1) * x5_hn8, 15);
-            x6_p1 <= resize(signed('0' & x5_snu) * x5_hu, 15);
-            x6_p2 <= resize(signed('0' & x5_snv) * x5_hv, 15);
+            x6_p0 <= resize(bmul(x5_hn8, signed('0' & x5_cm1)), 15);
+            x6_p1 <= resize(bmul(x5_hu, signed('0' & x5_snu)), 15);
+            x6_p2 <= resize(bmul(x5_hv, signed('0' & x5_snv)), 15);
             -- Linearize the squared distance near its zero crossing: the
             -- 1/(2r) factors are shift-adds, x*25>>14 and x*24>>14.
-            if x5_stz = '1' then
-                x6_dlin <= resize(shift_right(x5_c19, 7)
-                                  + shift_right(x5_c19, 8), 12);
-            else
-                x6_dlin <= resize(shift_right(x5_c19, 6)
-                                  + shift_right(x5_c19, 8)
-                                  + shift_right(x5_c19, 11), 12);
-            end if;
+            -- Only the sticker zone's form is computed: x6_dlin is read
+            -- solely as the sticker corner arc (stage G, x6_stz = '1'), so
+            -- the bevel/gap form (c >> 6 + c >> 8 + c >> 11) was never seen.
+            -- Written without sign extension.  x5_c19 always fits 18 bits
+            -- (a 15-bit constant less two 16-bit squares), so yosys makes
+            -- bits 19..17 one net, and two sign-extended shifts of it put
+            -- that net on both inputs of an adder bit -- the router1
+            -- livelock.  With S = c(17): c >> j (18-bit signed) is
+            -- c(16..j) - S * 2^(17-j), and both -S * 2^k fold into free
+            -- high bits of the narrower field, so it stays one adder and
+            -- exact mod 2^12:
+            --   (c >> 7) + (c >> 8) = c(16..7) + (S0S & c(16..8))
+            v_n1 := x5_c19(17);
+            v_t17 := unsigned(x5_c19(16 downto 0));
+            v_dl := resize(v_t17(16 downto 7), 12)
+                    + (v_n1 & '0' & v_n1 & v_t17(16 downto 8));
+            x6_dlin <= signed(v_dl);
             -- crevice AO: x^2+y^2 - CBW^2 = (RB^2 - CBW^2) - c19 in the gaps
             if x5_silz = '1' or x5_stz = '1' or x5_c19 >= C_RB2 - C_CBW2 then
                 x6_ao <= (others => '0');
@@ -2544,15 +2685,6 @@ begin
             x8_ams <= shift_left(resize(v_ad, 17), 2);
             v_ad := shift_right(resize(x7_ds, 14), s_pxe);
             x8_amt <= shift_left(resize(v_ad, 17), 2);
-            -- sticker albedo relative to the satin plastic, by colour
-            case to_integer(x7_col) is
-                when 0 => x8_dly <= to_signed(995 - C_PLY_I, 11);
-                when 1 => x8_dly <= to_signed(807 - C_PLY_I, 11);
-                when 2 => x8_dly <= to_signed(332 - C_PLY_I, 11);
-                when 3 => x8_dly <= to_signed(513 - C_PLY_I, 11);
-                when 4 => x8_dly <= to_signed(416 - C_PLY_I, 11);
-                when others => x8_dly <= to_signed(276 - C_PLY_I, 11);
-            end case;
             x8_ca <= x7_col;
             x8_bh <= x7_bh;
             x8_sl <= x7_sl;
@@ -2573,7 +2705,6 @@ begin
             elsif v_a > 16 then v_a5 := to_unsigned(16, 5);
             else v_a5 := resize(unsigned(v_a(4 downto 0)), 5); end if;
             x9_ast <= v_a5;
-            x9_dly <= x8_dly;
             x9_sl <= x8_sl;
 
             ------------------------------------------------------ stage J
@@ -2585,7 +2716,7 @@ begin
             -- where the chroma switches (the blend's multiply went for area)
             x10_spl <= sp_d(7 downto 0);       -- plastic sheen only
             -- unlit albedo: satin plastic blended to the sticker over its AA edge
-            x10_py <= resize(x9_dly * signed(resize(x9_ast, 6)), 17);
+            -- (C_YROM is read here: p_yrom, address x9_ca & x9_ast)
             if x9_ast >= 8 then x10_ston <= '1'; else x10_ston <= '0'; end if;
             x10_ast <= x9_ast;
             x10_asil <= x9_asil;
@@ -2593,8 +2724,7 @@ begin
             x10_ca <= x9_ca;
 
             ------------------------------------------------------ stage K
-            x11_y <= f_clamp10(to_signed(C_PLY_I, 12)
-                               + resize(shift_right(x10_py, 4), 12));
+            x11_y <= y_rd;
             x11_gam <= x10_gam;
             x11_spl <= x10_spl;
             x11_asil <= x10_asil;
@@ -2604,7 +2734,7 @@ begin
 
             ------------------------------------------------------ stage L
             -- albedo * light
-            x12_pm <= x11_y * x11_gam;
+            x12_pm <= bmul_u(x11_y, x11_gam);
             -- matte stickers (sheen fixed at 0); the black plastic shines
             if x11_ston = '1' then x12_spec <= (others => '0');
             else x12_spec <= resize(shift_left(resize(x11_spl, 12), 2), 12); end if;
@@ -2630,7 +2760,7 @@ begin
             x13_ca <= x12_ca;
 
             ------------------------------------------------------ stage N
-            x14_pn <= resize(x13_dy * signed(resize(x13_asil, 6)), 17);
+            x14_pn <= resize(bmul(x13_dy, signed(resize(x13_asil, 6))), 17);
             x14_bg <= x13_bg;
             x14_asil <= x13_asil;
             x14_ston <= x13_ston;
