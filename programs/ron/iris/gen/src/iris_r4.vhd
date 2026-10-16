@@ -4,8 +4,16 @@
     p_twrite : process(clk)
     begin
         if rising_edge(clk) then
-            if tw_we = 1 then t1_ram(to_integer(tw_addr(7 downto 0))) <= tw_d16; end if;
-            if tw_we = 2 then t2_ram(to_integer(tw_addr(7 downto 0))) <= tw_d16; end if;
+            -- T1/T2 are written one clock later than the other tables.  The pixel path's last
+            -- read that reaches the picture (the line's last active pixel, P11) can fall on the
+            -- very clock of the first table write of the blanking interval; a clock later it
+            -- never can, so these two RAMs are collision-free (no_rw_check).  tw_addr/tw_d16
+            -- cannot change for three clocks after a TW, so the delayed write is the same write.
+            tw_we12 <= "00";
+            if tw_we = 1 then tw_we12(0) <= '1'; end if;
+            if tw_we = 2 then tw_we12(1) <= '1'; end if;
+            if tw_we12(0) = '1' then t1_ram(to_integer(tw_addr(7 downto 0))) <= tw_d16; end if;
+            if tw_we12(1) = '1' then t2_ram(to_integer(tw_addr(7 downto 0))) <= tw_d16; end if;
             if tw_we = 3 then tm_ram(to_integer(tw_addr(7 downto 0))) <= tw_d16; end if;
             if tw_we = 4 then tv_ram(to_integer(tw_addr(7 downto 0))) <= tw_d16; end if;
             if tw_we = 5 then ts_ram(to_integer(tw_addr(7 downto 0))) <= tw_d16; end if;
@@ -29,6 +37,9 @@
         variable v_rq   : signed(31 downto 0);
         variable v_ms   : signed(32 downto 0);
         variable v_am   : signed(32 downto 0);
+        variable v_msub : std_logic;
+        variable v_amx  : signed(32 downto 0);
+        variable v_mc   : signed(32 downto 0);
         variable v_opa, v_opb : signed(31 downto 0);
         variable v_sub  : std_logic;
         variable v_lx   : unsigned(19 downto 0);
@@ -55,10 +66,14 @@
                 m_busy <= '1';
             elsif m_busy = '1' then
                 v_ms := resize(signed(m_acc(51 downto 20)), 33);
-                v_am := resize(signed(m_am), 33);
-                if m_acc(0) = '1' then
-                    if m_cnt = 19 then v_ms := v_ms - v_am; else v_ms := v_ms + v_am; end if;
-                end if;
+                -- (the multiplicand is acc itself: the CPU stalls in the MUL instruction, and
+                -- nothing writes acc, until the multiplier is idle again)
+                v_am := resize(acc, 33);
+                -- one adder: + m_am, - m_am (last step) or + 0
+                if m_cnt = 19 then v_msub := '1'; else v_msub := '0'; end if;
+                v_amx := (v_am xor (32 downto 0 => v_msub)) and (32 downto 0 => m_acc(0));
+                v_mc  := (others => '0'); v_mc(0) := v_msub and m_acc(0);
+                v_ms := v_ms + v_amx + v_mc;
                 m_acc <= unsigned(v_ms(32 downto 0)) & m_acc(19 downto 1);
                 m_cnt <= m_cnt + 1;
                 if m_cnt = 19 then
@@ -74,8 +89,10 @@
             elsif d_busy = '1' then
                 -- the remainder is always below the 16-bit divisor, so 17 bits suffice
                 v_rem := d_rem(15 downto 0) & d_n(31);
-                if v_rem >= resize(d_d, 17) then
-                    v_rem := v_rem - resize(d_d, 17);
+                -- (the divisor is the register-file word itself: rf_q only reloads in the
+                -- register-read state, and the CPU stalls in the DIV instruction until done)
+                if v_rem >= resize(unsigned(rf_q(15 downto 0)), 17) then
+                    v_rem := v_rem - resize(unsigned(rf_q(15 downto 0)), 17);
                     d_n   <= d_n(30 downto 0) & '1';
                 else
                     d_n   <= d_n(30 downto 0) & '0';
@@ -177,7 +194,6 @@
                         end if;
                     when OP_MUL =>
                         if sh_busy = '0' then
-                            m_am  <= unsigned(acc);
                             m_acc <= x"00000000" & unsigned(v_rq(19 downto 0));
                             m_go <= '1';
                             sh_busy <= '1'; v_done := '0';
@@ -186,7 +202,7 @@
                         end if;
                     when OP_DIV =>
                         if sh_busy = '0' then
-                            d_n <= unsigned(acc); d_d <= unsigned(v_rq(15 downto 0)); d_go <= '1';
+                            d_n <= unsigned(acc); d_go <= '1';
                             sh_busy <= '1'; v_done := '0';
                         elsif busy = '1' then
                             v_done := '0';
@@ -235,5 +251,30 @@
             end if;
         end if;
     end process p_seq;
+
+    -- IO-align pad: video and syncs delayed together, so only the total
+    -- latency changes (22 -> 24).
+    p_io_align_pad : process(clk)
+        variable v_wa, v_ra : unsigned(7 downto 0);
+    begin
+        if rising_edge(clk) then
+            v_wa := (0 => dcnt(0), others => '0');
+            v_ra := (0 => not dcnt(0), others => '0');
+            opad0(to_integer(v_wa)) <= std_logic_vector(s_out_y) & std_logic_vector(s_out_u(9 downto 4));
+            opad1(to_integer(v_wa)) <= "00" & std_logic_vector(s_out_u(3 downto 0)) & std_logic_vector(s_out_v);
+            opq0 <= opad0(to_integer(v_ra));
+            opq1 <= opad1(to_integer(v_ra));
+            s_sync_pad0 <= sd_o;
+            s_sync_pad1 <= s_sync_pad0;
+        end if;
+    end process p_io_align_pad;
+
+    data_out.y       <= opq0(15 downto 6);
+    data_out.u       <= opq0(5 downto 0) & opq1(13 downto 10);
+    data_out.v       <= opq1(9 downto 0);
+    data_out.avid    <= s_sync_pad1(3);
+    data_out.hsync_n <= s_sync_pad1(2);
+    data_out.vsync_n <= s_sync_pad1(1);
+    data_out.field_n <= s_sync_pad1(0);
 
 end architecture iris;

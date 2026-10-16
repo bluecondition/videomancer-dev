@@ -389,3 +389,102 @@ timing worse, which is expected above about 90 % utilisation.
 
 If more margin is ever wanted, trimming the sequencer program below 1024
 words would free one more block RAM at no cost to the picture.
+
+## Community port — fit for the stock SDK (v1.4.2, 2026-10-15)
+- The stock LZX SDK builds 8 configs; its SD Standalone core is ~600 LC larger
+  than HD. v1.4.1 packed to 8196/7680 LC there, 7886 on SD Dual and 7800 on HD
+  Dual, so it did not fit even the dual configs.
+- Bit-exact changes. Savings are packed SD Standalone LC, each measured by
+  removing that one change from the build it was added to.
+  1. **`no_rw_check` on the collision-free RAMs** (−202).
+     - The RAMs: the sample buffer `sb0..3`, the sync delay `sd_ram` and the
+       register file `rf_mem`. yosys was emulating read-before-write on each.
+     - The pixel tables `tk_ram`, `t1_ram` and `t2_ram` have it too (−39).
+       - For these, the T1/T2 writes land one clock later (`tw_we12`).
+       - The pixel path's last read that reaches the picture can fall on the
+         first table-write clock of a blanking interval; one clock later it
+         never can.
+       - `tw_addr`/`tw_d16` cannot change for three clocks after a TW, so the
+         late write is the same write.
+     - `tm/tv/ts` keep the emulation: the engine reads them for ~35 clocks into
+       each blank, while the CPU writes them.
+  2. **Lane line starts, one adder each** (−132).
+     - `sya`, `lxb`, `lyb` were two adders, a 3:1 mux and the interlace shift
+       mux.
+     - Now they are `(ordinary line ? acc : start) + B`. B costs one 4-input LUT
+       per bit (`f_lstep`): the step, the doubled step, the bottom-field half of
+       the doubled step, or 0.
+  3. **Multiplier step, one add/sub** (−113). The serial multiplier built a
+     33-bit add and a 33-bit subtract and muxed them. Now it is one adder with an
+     XOR operand and a carry-in.
+  4. **Layer offsets, one adder each** (−50). `ul7`/`v7` take ± the split as an
+     operand mux plus a carry-in.
+  5. **CORDIC angle from a ROM** (−63, +1 EBR).
+     - The three 16-bit z accumulators are gone.
+     - Each stage shifts in its direction bits (the sign of y per iteration).
+     - A 256-entry ROM (`zrom`) sums ±atan for d0..d7 at the stage-1→2 handover.
+     - A 16-entry constant (`C_ZQ`) adds the last four terms on the final clock.
+  6. **Merged AA ramp and alpha clamp** (−72).
+     - `f_alpha(f_bar(d, rd))` is `clamp(d·2^(8−rd), −128, 127) + 128`.
+     - It is now computed at P14 in one step: d's bits from rd−1 up must agree,
+       then bit 7 flips.
+     - There are no comparators.
+  7. **Bit-test clamps** (−79). `e_u` is in range iff `e_ld`'s top `inve+1`
+     bits agree. `e_rd` and `e_at` became sign and bit-field tests.
+  8. **Constant compares as gate chains** (−80). `f_gec` is used for
+     `xcnt > 16`, `hcnt > 100`, `aline > 50` and the four `vstep_base`
+     thresholds. Each one used to be a carry-chain comparator.
+  9. **Output pad in EBR** (−53, +2 EBR).
+     - The two IO-align pad clocks for Y/U/V run through an EBR pair: write at
+       `dcnt(0)`, read the other word.
+     - The four sync bits keep their two registers.
+  10. **Sample-buffer address = `eng_k`.**
+      - The engine stores the word of sample k−3 at address `eng_k`, and the
+        beam's reads add 3.
+      - This drops the `eng_k − 3` subtract and the `< nsamp` compare.
+      - Exact for any line under 4064 px.
+      - Measured only together with items 6–9: that batch was −268 in total.
+  11. **Small rewrites** (−35).
+      - The octant unfold is one 18-bit add (±z + K, then the same 17-bit
+        narrowing).
+      - `e_vl` is replaced by a running sum formed at ph6.
+      - `e_gs` needs only a 6-bit add.
+      - 3·x is computed as 2x + x.
+  12. **CORDIC shifter as a two-level log shifter** (−82). Shift by base + j
+      is a `>>1` stage then a `>>2` stage, not a 4-way case.
+  13. **Serial units read their operand in place** (−61).
+      - The multiplicand is `acc` and the divisor is `rf_q`.
+      - The CPU stalls inside MUL/DIV until the unit is idle, and nothing writes
+        `acc`/`rf_q` in that time.
+      - So the 48 copy FFs (`m_am`, `d_d`) went.
+  14. **Chroma sums without self-added nets** (router1 livelock fix, +7 LC).
+      - B−Y and R−Y lie in −255..255, so yosys merges their bits 9 and 8 into
+        one net. The U/V sums therefore left a LUT with the same net on two
+        inputs.
+      - dupin.py finds one such cell in the v1.4.1 netlist, on U or V depending
+        on the config. That is the router1 ping-pong trigger. Without this
+        change, seed 2 livelocked router1 on HD Dual.
+      - U/V now take the sign directly. Their low 8 bits come from an adder with
+        the sign-extension folded into constants: U +112s; V +72s − (R−Y)(7:5),
+        a 16-entry table.
+      - Checked exhaustively over −255..255.
+      - dupin.py reports 0 duplicate-input LUT/CARRY cells in all 8 configs.
+- Proven bit-exact against v1.4.1: GHDL side-by-side, with knobs and switches
+  changing mid-picture. 0 mismatches in every run:
+  - 403 x 201 raster, progressive, 128 frames (all 32 switch combinations):
+    10.37 M clocks.
+  - 403 x 201 raster, field_n toggling every frame (interlace paths), 64 frames:
+    5.18 M clocks.
+  - 1003 x 201 raster, which runs one full sequencer pass per frame:
+    - progressive, 128 frames (all 32 switch combinations): 25.81 M clocks;
+    - progressive, 40 frames: 8.06 M clocks;
+    - field_n toggling, 32 frames: 6.45 M clocks.
+- Packed LC (stock SDK): SD Standalone 8196 → 7164, SD Dual 7886 → 6793,
+  HD Dual 7800 → 6755. EBR 20 → 23 (24 on the dual configs).
+- Stock build (router1): all 8 configs on seed 1 and on seed 2.
+  - Own HD timing (core without the Sync Out generator), Analog/HDMI/Dual:
+    seed 1 88.6/89.2/87.7 MHz, seed 2 89.7/90.7/79.7 MHz.
+
+- **Source:** all of this, plus the earlier port edits (GPL header, author, IO-align pad), is back-ported into `gen/` (src parts + `gen_roms.py` for the CORDIC angle ROM); `gen/assemble.sh` reproduces iris.vhd byte-for-byte (md5 ab789863...).
+- **Stock build:** seed 1 builds all 8 configs (seed 2 also). Own HD 88.6 / 89.2 / 87.7 MHz (analog / HDMI / dual).
+- **HW check wanted:** whole picture incl. interlaced sources and the video backdrop (no_rw_check on the sample buffers, sync delay and register file; tables written one clock later; EBR output pad).

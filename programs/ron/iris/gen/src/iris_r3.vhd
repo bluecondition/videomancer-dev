@@ -11,6 +11,11 @@
         variable v_u6  : signed(19 downto 0);
         variable v_v6  : unsigned(11 downto 0);
         variable v_ul  : signed(19 downto 0);
+        variable v_bu  : signed(19 downto 0);
+        variable v_bv  : unsigned(11 downto 0);
+        variable v_cu  : signed(19 downto 0);
+        variable v_cv  : unsigned(11 downto 0);
+        variable v_s1, v_s2 : signed(19 downto 0);
     begin
         if rising_edge(clk) then
             -- P7
@@ -22,17 +27,23 @@
             -- second pixel instead of every third; red and blue, which only carry the
             -- colour fringing, are refreshed every fourth -- and smoothed to a 2 px
             -- cadence in p_out.
-            case slot is
-                when "01" =>                       -- red leads
-                    ul7 <= v_ul + resize(shift_right(sep6, 1), 20);
-                    v7  <= v_v6 + unsigned(sep6(11 downto 0));
-                when "11" =>                       -- blue trails
-                    ul7 <= v_ul - resize(shift_right(sep6, 2), 20);
-                    v7  <= v_v6 - unsigned(sep6(11 downto 0));
-                when others =>                     -- green anchors (slots 0 and 2)
-                    ul7 <= v_ul;
-                    v7  <= v_v6;
-            end case;
+            -- red (slot 1) leads: + sep/2, + sep;  blue (slot 3) trails: - sep/4, - sep;
+            -- green (slots 0, 2) anchors.  One adder each: a subtraction is the
+            -- complemented operand plus a carry in.
+            v_s1 := resize(shift_right(sep6, 1), 20);
+            v_s2 := resize(shift_right(sep6, 2), 20);
+            for i in 0 to 19 loop
+                if slot(0) = '0' then v_bu(i) := '0';
+                elsif slot(1) = '0' then v_bu(i) := v_s1(i);
+                else v_bu(i) := not v_s2(i); end if;
+            end loop;
+            for i in 0 to 11 loop
+                v_bv(i) := slot(0) and (sep6(i) xor slot(1));
+            end loop;
+            v_cu := (others => '0'); v_cu(0) := slot(0) and slot(1);
+            v_cv := (others => '0'); v_cv(0) := slot(0) and slot(1);
+            ul7 <= v_ul + v_bu + v_cu;
+            v7  <= v_v6 + v_bv + v_cv;
             slot7 <= slot;
             av7   <= av_q;
             -- P8 (twist term from the per-ring table)
@@ -152,12 +163,17 @@
     ------------------------------------------------------------------------
     p_out : process(clk)
         variable v_rd : unsigned(3 downto 0);
+        variable v_bd : signed(16 downto 0);
+        variable v_bg : std_logic_vector(16 downto 0);
+        variable v_bin : std_logic;
+        variable v_bx : signed(24 downto 0);
         variable v_sl : unsigned(1 downto 0);
         variable v_ar, v_ab : unsigned(8 downto 0);
         variable v_r, v_b : unsigned(7 downto 0);
         variable v_y  : unsigned(11 downto 0);
         variable v_bmy, v_rmy : signed(9 downto 0);
-        variable v_u, v_v : signed(9 downto 0);
+        variable v_a8, v_b8, v_c8 : unsigned(7 downto 0);
+        variable v_ki : unsigned(3 downto 0);
         variable v_ax : unsigned(7 downto 0);
         variable v_k8 : unsigned(7 downto 0);
         variable v_ty : signed(12 downto 0);
@@ -168,9 +184,18 @@
         if rising_edge(clk) then
             -- P14
             v_rd := rd_h1;
-            bar14_g <= f_bar(dfg13, v_rd);
+            -- f_alpha(f_bar(d, rd)) in one step: clamp(d*2^(8-rd), -128, 127) + 128.  In range
+            -- iff d's bits from rd-1 up all agree (rd = 0: d = 0); +128 flips bit 7.
+            v_bd := dfg13;
+            v_bg(16) := '1';
+            for k in 15 downto 0 loop v_bg(k) := v_bg(k + 1) and not (v_bd(k) xor v_bd(16)); end loop;
+            if v_rd = 0 then v_bin := v_bg(0) and not v_bd(16);
+            else v_bin := v_bg(to_integer(v_rd) - 1); end if;
+            v_bx := shift_right(v_bd & x"00", to_integer(v_rd));
+            if v_bin = '1' then bar14_g <= unsigned((not v_bx(7)) & v_bx(6 downto 0));
+            else bar14_g <= (others => not v_bd(16)); end if;
             -- P15
-            v_ax := f_alpha(bar14_g, vldg_d(13), '1');
+            if vldg_d(13) = '1' then v_ax := bar14_g; else v_ax := (others => '0'); end if;
             if v_ax > att_d(14) then v_ax := v_ax - att_d(14); else v_ax := (others => '0'); end if;
             if lay_d(13)(2) = '1' and lay_d(14)(2) = '0' then    -- first active pixel of the line
                 fr_r <= '1'; fr_b <= '1';
@@ -206,10 +231,22 @@
             y18 <= yy17(11 downto 4);
             v_bmy := signed(resize(b17, 10)) - signed(resize(yy17(11 downto 4), 10));
             v_rmy := signed(resize(r17, 10)) - signed(resize(yy17(11 downto 4), 10));
-            v_u := shift_right(v_bmy, 1) + shift_right(v_bmy, 4);
-            v_v := shift_right(v_rmy, 1) + shift_right(v_rmy, 2) - shift_right(v_rmy, 5);
-            u18 <= resize(v_u, 9);
-            v18 <= resize(v_v, 9);
+            -- B-Y and R-Y lie in -255..255, so their bits 9 and 8 are one net (the sign s),
+            -- U and V fit in 9 bits and take that sign, and only the low 8 bits need an
+            -- adder.  Written with the sign-extension bits folded into constants
+            -- (U: + 112s, V: + 72s - (R-Y)(7:5)) so that no carry cell adds a net to itself:
+            --   U(7:0) = (d>>1 + d>>4) mod 256 = d(7:1) + (sss & d(7:4))
+            --   V(7:0) = (d>>1 + d>>2 - d>>5) mod 256 = d(7:1) + d(7:2) + (72s - d(7:5))
+            v_a8 := '0' & unsigned(v_bmy(7 downto 1));
+            v_b8 := (7 => '0', 6 => v_bmy(9), 5 => v_bmy(9), 4 => v_bmy(9), others => '0');
+            v_b8(3 downto 0) := unsigned(v_bmy(7 downto 4));
+            v_c8 := v_a8 + v_b8;
+            u18 <= signed(v_bmy(9) & std_logic_vector(v_c8));
+            v_a8 := '0' & unsigned(v_rmy(7 downto 1));
+            v_b8 := "00" & unsigned(v_rmy(7 downto 2));
+            v_ki(3) := v_rmy(9); v_ki(2 downto 0) := unsigned(v_rmy(7 downto 5));
+            v_c8 := v_a8 + v_b8 + C_K72(to_integer(v_ki));
+            v18 <= signed(v_rmy(9) & std_logic_vector(v_c8));
             -- S8 Video backdrop.  The video replaces the GROUND -- black in Light, white
             -- paper in Ink:  out = dots + (video - ground) * k,  k = the ground's share of
             -- the pixel, 1 between dots, 0 under a dot's core, 1/2 on its anti-aliased edge.
@@ -248,8 +285,8 @@
             end case;
             v_ty := resize(v_my, 13) + signed(resize(shift_left(resize(y18, 11), 1)
                     + resize(shift_right(y18, 1), 11) + resize(shift_right(y18, 2), 11), 13));
-            v_tu := signed(resize(v_mu, 13)) + resize(v18, 13) + resize(v18, 13) + resize(v18, 13);
-            v_tv := signed(resize(v_mv, 13)) + resize(u18, 13) + resize(u18, 13) + resize(u18, 13);
+            v_tu := signed(resize(v_mu, 13)) + shift_left(resize(v18, 13), 1) + resize(v18, 13);
+            v_tv := signed(resize(v_mv, 13)) + shift_left(resize(u18, 13), 1) + resize(u18, 13);
             sd_o <= sd_q;
             if sd_q(3) = '0' then
                 s_out_y <= to_unsigned(64, 10);
@@ -263,10 +300,3 @@
         end if;
     end process p_out;
 
-    data_out.y       <= std_logic_vector(s_out_y);
-    data_out.u       <= std_logic_vector(s_out_u);
-    data_out.v       <= std_logic_vector(s_out_v);
-    data_out.avid    <= sd_o(3);
-    data_out.hsync_n <= sd_o(2);
-    data_out.vsync_n <= sd_o(1);
-    data_out.field_n <= sd_o(0);

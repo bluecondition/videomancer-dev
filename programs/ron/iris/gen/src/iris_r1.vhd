@@ -1,3 +1,9 @@
+-- Copyright (C) 2026 czartroniks
+-- SPDX-License-Identifier: GPL-3.0-only
+--
+-- This file is part of Videomancer Community Programs.
+-- See LICENSE file in the repository root for full license text.
+--
 -- iris.vhd  (v0.4 -- IRIS: perspective dot-tunnel eye, three-layer colour split)
 --
 -- THE PICTURE: a large iris circle nearly filling the screen, a dark pupil
@@ -48,7 +54,7 @@
 -- S10 Still/Flow, S11 Framed/Full.  S7/S8 (video dots/backdrop) are inert
 -- in this build: the video halftone path did not fit the HX4K.
 --
--- Author: bluecondition
+-- Author: czartroniks
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -60,6 +66,16 @@ use work.core_pkg.all;
 use work.video_stream_pkg.all;
 
 architecture iris of program_top is
+    -- IO-align pad: 2 register stages after the program's own output so the
+    -- data_in -> data_out latency (22 + 2 = 24 clocks) is a multiple of 4,
+    -- as the SDK requires; must match processing_delay_clks in the TOML.
+    constant C_PROCESSING_DELAY_CLKS : natural := 24;
+    -- the two pad clocks for the video run through one EBR pair (write at dcnt(0),
+    -- read the other word: exactly two clocks); the syncs stay in two registers
+    type t_opad is array(0 to 255) of std_logic_vector(15 downto 0);
+    signal opad0, opad1 : t_opad := (others => (others => '0'));
+    signal opq0, opq1   : std_logic_vector(15 downto 0) := (others => '0');
+    signal s_sync_pad0, s_sync_pad1 : std_logic_vector(3 downto 0);
 
     constant C_LATENCY  : integer := 20;
     constant C_MID      : unsigned(9 downto 0) := to_unsigned(512, 10);
@@ -126,6 +142,20 @@ architecture iris of program_top is
     attribute ram_style of rom_fun : signal is "block";
     attribute ram_style of rf_mem : signal is "block";
     attribute ram_style of prog_mem : signal is "block";
+    attribute no_rw_check : boolean;
+    attribute no_rw_check of sb0 : signal is true;
+    attribute no_rw_check of sb1 : signal is true;
+    attribute no_rw_check of sb2 : signal is true;
+    attribute no_rw_check of sb3 : signal is true;
+    attribute no_rw_check of sd_ram : signal is true;
+    attribute no_rw_check of rf_mem : signal is true;
+    attribute no_rw_check of tk_ram : signal is true;
+    attribute no_rw_check of t1_ram : signal is true;
+    attribute no_rw_check of t2_ram : signal is true;
+    attribute ram_style of opad0 : signal is "block";
+    attribute ram_style of opad1 : signal is "block";
+    attribute no_rw_check of opad0 : signal is true;
+    attribute no_rw_check of opad1 : signal is true;
 
     ----------------------------------------------------------------------
     -- raster measurement / timing
@@ -201,7 +231,11 @@ architecture iris of program_top is
     -- serial CORDIC
     -- 3-stage CORDIC pipeline: stage s holds one lane and runs iterations 4s..4s+3
     signal c0x, c0y, c1x, c1y, c2x, c2y : signed(C_CW - 1 downto 0) := (others => '0');
-    signal c0z, c1z, c2z : signed(15 downto 0) := (others => '0');
+    signal zsh0, zsh1, zsh2 : std_logic_vector(2 downto 0) := (others => '0');   -- last three directions per stage
+    signal zd1  : std_logic_vector(3 downto 0) := (others => '0');                  -- d0..d3 of the lane in stage 1
+    signal zrom : t_zrom := C_ZP;
+    signal zp   : std_logic_vector(15 downto 0) := (others => '0');                  -- angle of d0..d7 (ROM out)
+    attribute ram_style of zrom : signal is "block";
     signal c0f, c1f, c2f : std_logic_vector(2 downto 0) := (others => '0');   -- sw & sx & sy
     -- one-hot iteration index, one KEPT copy per CORDIC stage: the select needs no
     -- decode and the placer can sit each copy beside its own stage
@@ -253,7 +287,7 @@ architecture iris of program_top is
     signal e_at, e_at2 : unsigned(5 downto 0) := (others => '0');   -- resolution fade, same pipeline as e_rd
     signal e_u        : signed(19 downto 0) := (others => '0');
     signal e_vh       : unsigned(15 downto 0) := (others => '0');
-    signal e_vl       : unsigned(15 downto 0) := (others => '0');
+    signal e_vs       : unsigned(15 downto 0) := (others => '0');   -- e_vh + the low half, formed at ph6
     signal e_v        : unsigned(15 downto 0) := (others => '0');   -- arm coordinate, 4 int + 12 frac
     signal vcut       : unsigned(3 downto 0) := (others => '0');    -- arms to add so v stays continuous across the cut
     signal thq_p      : unsigned(1 downto 0) := (others => '0');    -- previous sample's angle quadrant
@@ -324,7 +358,7 @@ architecture iris of program_top is
     -- P13
     signal dfg13   : signed(16 downto 0) := (others => '0');
     -- P14
-    signal bar14_g : signed(8 downto 0) := (others => '0');
+    signal bar14_g : unsigned(7 downto 0) := (others => '0');   -- the alpha ramp itself (before validity)
     -- P15 (held per layer)
     signal al15_r, al15_g, al15_b : unsigned(7 downto 0) := (others => '0');   -- latest evaluation of each layer
     signal pv_r, pv_g, pv_b : unsigned(7 downto 0) := (others => '0');         -- ...and the one before it
@@ -405,12 +439,10 @@ architecture iris of program_top is
     signal rf_wa    : unsigned(6 downto 0) := (others => '0');
     signal sh_cnt   : unsigned(5 downto 0) := (others => '0');
     signal sh_busy  : std_logic := '0';
-    signal m_am   : unsigned(31 downto 0) := (others => '0');
     signal m_acc  : unsigned(51 downto 0) := (others => '0');
     signal m_cnt  : unsigned(4 downto 0) := (others => '0');
     signal m_busy, m_go, m_neg : std_logic := '0';
     signal d_n    : unsigned(31 downto 0) := (others => '0');
-    signal d_d    : unsigned(15 downto 0) := (others => '0');
     signal d_rem  : unsigned(16 downto 0) := (others => '0');
     signal d_cnt  : unsigned(5 downto 0) := (others => '0');
     signal d_busy, d_go : std_logic := '0';
@@ -420,6 +452,7 @@ architecture iris of program_top is
     signal tw_addr : unsigned(8 downto 0) := (others => '0');
     signal tw_d16  : std_logic_vector(15 downto 0) := (others => '0');
     signal tw_we   : unsigned(2 downto 0) := (others => '0');   -- 0 none, 1 T1, 2 T2, 3 TM, 4 TV, 5 TS, 6 TK
+    signal tw_we12 : std_logic_vector(1 downto 0) := (others => '0');   -- T1/T2 write enables, one clock later
     signal alu_a, alu_b : signed(31 downto 0) := (others => '0');   -- ALU operands registered at execute, summed next clock
     signal alu_c, alu_pend, alu_and : std_logic := '0';
 
@@ -462,6 +495,41 @@ architecture iris of program_top is
         else return unsigned(v(7 downto 0)); end if;
     end function;
 
+    -- line-start lane update: k0 ? acc + B : start + B, with B per bit
+    --   i <= 18: s1 ? c(i-1) : (s2 ? c(i) : 0)     bit 19: s3 ? c(18) : (k0 ? c(19) : 0)
+    -- i.e. acc + (ilace ? c<<1 : c) on an ordinary line, start + ((c<<1)>>1) on row 0
+    -- of the bottom field, start on row 0 otherwise -- exactly the three cases.
+    function f_lstep(acc, st, c : signed(19 downto 0); k0, s1, s2, s3 : std_logic) return signed is
+        variable a, b : signed(19 downto 0);
+    begin
+        for i in 0 to 18 loop
+            if s1 = '1' then
+                if i = 0 then b(i) := '0'; else b(i) := c(i - 1); end if;
+            elsif s2 = '1' then b(i) := c(i);
+            else b(i) := '0'; end if;
+        end loop;
+        if s3 = '1' then b(19) := c(18); elsif k0 = '1' then b(19) := c(19); else b(19) := '0'; end if;
+        if k0 = '1' then a := acc; else a := st; end if;
+        return a + b;
+    end function;
+
+    -- x >= K for a constant K, as a chain of two-input gates (no carry chain)
+    function f_gec(x : unsigned; k : natural) return std_logic is
+        variable kv : unsigned(x'length - 1 downto 0);
+        variable xv : unsigned(x'length - 1 downto 0);
+        variable c  : std_logic := '1';
+    begin
+        kv := to_unsigned(k, x'length); xv := x;
+        for i in 0 to x'length - 1 loop
+            if kv(i) = '1' then c := xv(i) and c; else c := xv(i) or c; end if;
+        end loop;
+        return c;
+    end function;
+
+    -- (72 s - x) mod 256 for the V sum's sign-extension constant, index s & x(2:0)
+    type t_k72 is array(0 to 15) of unsigned(7 downto 0);
+    constant C_K72 : t_k72 := (to_unsigned(0, 8), to_unsigned(255, 8), to_unsigned(254, 8), to_unsigned(253, 8), to_unsigned(252, 8), to_unsigned(251, 8), to_unsigned(250, 8), to_unsigned(249, 8), to_unsigned(72, 8), to_unsigned(71, 8), to_unsigned(70, 8), to_unsigned(69, 8), to_unsigned(68, 8), to_unsigned(67, 8), to_unsigned(66, 8), to_unsigned(65, 8));
+
     function f_sat10(v : signed(12 downto 0)) return unsigned is
     begin
         if v(12) = '1' then return to_unsigned(0, 10);
@@ -476,28 +544,24 @@ architecture iris of program_top is
 
     -- one CORDIC vectoring iteration; the shift amount base+j (j = 0..3) is
     -- muxed at the adder inputs so each pipeline stage has one add/sub set.
-    procedure cordic_it(variable x, y : inout signed(C_CW - 1 downto 0); variable z : inout signed(15 downto 0);
+    procedure cordic_it(variable x, y : inout signed(C_CW - 1 downto 0);
                         constant base : in integer; constant j : in std_logic_vector(3 downto 0)) is
         variable d : std_logic;
         variable mp, mn, cp, cn : signed(C_CW - 1 downto 0);
-        variable zp, zc : signed(15 downto 0);
         variable tx, ty : signed(C_CW - 1 downto 0);
-        variable at : signed(15 downto 0);
     begin
-        case j is
-            when "0001" => tx := shift_right(x, base);     ty := shift_right(y, base);     at := to_signed(C_ATAN(base), 16);
-            when "0010" => tx := shift_right(x, base + 1); ty := shift_right(y, base + 1); at := to_signed(C_ATAN(base + 1), 16);
-            when "0100" => tx := shift_right(x, base + 2); ty := shift_right(y, base + 2); at := to_signed(C_ATAN(base + 2), 16);
-            when others => tx := shift_right(x, base + 3); ty := shift_right(y, base + 3); at := to_signed(C_ATAN(base + 3), 16);
-        end case;
+        -- shift by base + j as a two-level log shifter (j is one-hot: j1 j0 = 00 01 10 11)
+        tx := shift_right(x, base); ty := shift_right(y, base);
+        if (j(1) or j(3)) = '1' then tx := shift_right(tx, 1); ty := shift_right(ty, 1); end if;
+        if (j(2) or j(3)) = '1' then tx := shift_right(tx, 2); ty := shift_right(ty, 2); end if;
         d  := y(C_CW - 1);
         mp := (others => d);  mn := (others => not d);
         cp := (others => '0'); cp(0) := d;
         cn := (others => '0'); cn(0) := not d;
-        zp := (others => d);  zc := (others => '0'); zc(0) := d;
         x := x + (ty xor mp) + cp;
         y := y + (tx xor mn) + cn;
-        z := z + (at xor zp) + zc;
+        -- (the angle is not accumulated: each stage records its direction bits, the
+        -- sign of y going into each iteration, and a ROM sums the arctangents)
     end procedure;
 
 begin
