@@ -24,7 +24,7 @@ name_label = "Depth"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 400
+initial_value = 1013
 display_float_digits = 1
 suffix_label = "%"
 
@@ -34,7 +34,7 @@ name_label = "Sway"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 384
+initial_value = 641
 display_float_digits = 1
 suffix_label = "%"
 
@@ -44,7 +44,7 @@ name_label = "Focus"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 400
+initial_value = 808
 display_float_digits = 1
 suffix_label = "%"
 
@@ -52,7 +52,7 @@ suffix_label = "%"
 parameter_id = "rotary_potentiometer_4"
 name_label = "Swap"
 value_labels = ["Off", "U<>V", "Y>U", "U>Y", "Y<>V", "Rotate", "Rotate Back", "Complement"]
-initial_value_label = "Off"
+initial_value_label = "Complement"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
@@ -60,7 +60,7 @@ name_label = "Offset"
 control_mode = "linear"
 display_min_value = -128
 display_max_value = 128
-initial_value = 512
+initial_value = 933
 display_float_digits = 0
 suffix_label = " px"
 
