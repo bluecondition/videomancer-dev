@@ -23,7 +23,7 @@ name_label = "Scale"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 439
+initial_value = 0
 display_float_digits = 1
 suffix_label = "%"
 
@@ -33,7 +33,7 @@ name_label = "Amount"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 467
+initial_value = 703
 display_float_digits = 1
 suffix_label = "%"
 
@@ -43,7 +43,7 @@ name_label = "Drift"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 600
+initial_value = 197
 display_float_digits = 1
 suffix_label = "%"
 
@@ -53,7 +53,7 @@ name_label = "Curve"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 7
-initial_value = 731
+initial_value = 276
 display_float_digits = 1
 suffix_label = ""
 
@@ -63,7 +63,7 @@ name_label = "Contrast"
 control_mode = "linear"
 display_min_value = 25
 display_max_value = 425
-initial_value = 192
+initial_value = 553
 display_float_digits = 0
 suffix_label = "%"
 
@@ -73,7 +73,7 @@ name_label = "Pivot"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 502
+initial_value = 404
 display_float_digits = 1
 suffix_label = "%"
 
@@ -87,7 +87,7 @@ initial_value_label = "Flat"
 parameter_id = "toggle_switch_8"
 name_label = "Displace"
 value_labels = ["All", "Luma"]
-initial_value_label = "All"
+initial_value_label = "Luma"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
@@ -105,7 +105,7 @@ initial_value_label = "Smooth"
 parameter_id = "toggle_switch_11"
 name_label = "Chroma"
 value_labels = ["Flat", "Contrast"]
-initial_value_label = "Flat"
+initial_value_label = "Contrast"
 
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
@@ -113,7 +113,7 @@ name_label = "Storm"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 150
+initial_value = 286
 display_float_digits = 1
 suffix_label = "%"
 
