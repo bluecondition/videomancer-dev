@@ -50,7 +50,7 @@ name_label = "Amount"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 363
+initial_value = 1023
 display_float_digits = 1
 suffix_label = "%"
 
@@ -60,7 +60,7 @@ name_label = "Smooth"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 656
+initial_value = 0
 display_float_digits = 1
 suffix_label = "%"
 
@@ -70,7 +70,7 @@ name_label = "Pivot"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 350
+initial_value = 256
 display_float_digits = 1
 suffix_label = "%"
 
@@ -110,7 +110,7 @@ name_label = "Bands"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 591
+initial_value = 3
 display_float_digits = 1
 suffix_label = "%"
 
