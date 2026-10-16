@@ -20,7 +20,7 @@ name_label = "Threshold"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 310
+initial_value = 103
 display_float_digits = 1
 suffix_label = "%"
 
@@ -28,7 +28,7 @@ suffix_label = "%"
 parameter_id = "rotary_potentiometer_2"
 name_label = "Kernel"
 value_labels = ["Roberts", "Sobel", "Wide", "DoG"]
-initial_value_label = "Roberts"
+initial_value_label = "Sobel"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
@@ -36,7 +36,7 @@ name_label = "Seam"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 434
 display_float_digits = 1
 suffix_label = "%"
 
@@ -44,13 +44,13 @@ suffix_label = "%"
 parameter_id = "rotary_potentiometer_4"
 name_label = "Panes"
 value_labels = ["Split", "2 strips", "4 strips", "8 strips"]
-initial_value_label = "Split"
+initial_value_label = "8 strips"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
 name_label = "Plane"
 value_labels = ["Negative", "Bit 8", "Bit 7", "Bit 6", "Bit 5", "Bit 4", "Bit 3", "Bit 2"]
-initial_value_label = "Negative"
+initial_value_label = "Bit 4"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
@@ -58,7 +58,7 @@ name_label = "Mix"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 1023
+initial_value = 278
 display_float_digits = 1
 suffix_label = "%"
 
