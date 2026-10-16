@@ -29,7 +29,7 @@ initial_value_label = "8 px"
 parameter_id = "rotary_potentiometer_2"
 name_label = "Screen"
 value_labels = ["Dot", "Line", "Diamond", "Square"]
-initial_value_label = "Dot"
+initial_value_label = "Diamond"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
@@ -37,7 +37,7 @@ name_label = "Band Size"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 50
-initial_value = 102
+initial_value = 0
 display_float_digits = 1
 suffix_label = "%"
 
@@ -47,7 +47,7 @@ name_label = "Noise"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 400
+initial_value = 483
 display_float_digits = 1
 suffix_label = "%"
 
@@ -57,7 +57,7 @@ name_label = "Level"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 450
+initial_value = 297
 display_float_digits = 1
 suffix_label = "%"
 
@@ -67,7 +67,7 @@ name_label = "Soft"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 150
+initial_value = 519
 display_float_digits = 1
 suffix_label = "%"
 
@@ -99,7 +99,7 @@ initial_value_label = "Bottom"
 parameter_id = "toggle_switch_11"
 name_label = "Band FX"
 value_labels = ["Noise", "Break"]
-initial_value_label = "Noise"
+initial_value_label = "Break"
 
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
@@ -107,7 +107,7 @@ name_label = "Ink"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 649
 display_float_digits = 1
 suffix_label = "%"
 
