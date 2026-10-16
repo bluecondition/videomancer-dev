@@ -27,7 +27,7 @@ name_label = "Pixels"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 128
+initial_value = 0
 suffix_label = "%"
 
 [[parameter]]
@@ -36,7 +36,7 @@ name_label = "Smoke"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 419
 suffix_label = "%"
 
 [[parameter]]
@@ -45,7 +45,7 @@ name_label = "Turblnce"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 685
 suffix_label = "%"
 
 [[parameter]]
@@ -54,7 +54,7 @@ name_label = "Depth/Edge"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 691
 suffix_label = "%"
 
 [[parameter]]
@@ -63,14 +63,14 @@ name_label = "Rise"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 559
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
 name_label = "Ember"
 value_labels = ["Off", "On"]
-initial_value_label = "On"
+initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
@@ -88,7 +88,7 @@ initial_value_label = "Off"
 parameter_id = "toggle_switch_10"
 name_label = "Overlay"
 value_labels = ["Off", "On"]
-initial_value_label = "Off"
+initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
