@@ -1,4 +1,4 @@
-# CGA Emulator
+# CGA
 
 Re-renders video as a real IBM CGA screen: the three Mode 4 palettes, 640-dot mono, and composite artifact colour on a native 320×200 block grid, with dither, scanlines and snow.
 
