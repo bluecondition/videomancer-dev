@@ -487,4 +487,4 @@ words would free one more block RAM at no cost to the picture.
 
 - **Source:** all of this, plus the earlier port edits (GPL header, author, IO-align pad), is back-ported into `gen/` (src parts + `gen_roms.py` for the CORDIC angle ROM); `gen/assemble.sh` reproduces iris.vhd byte-for-byte (md5 ab789863...).
 - **Stock build:** seed 1 builds all 8 configs (seed 2 also). Own HD 88.6 / 89.2 / 87.7 MHz (analog / HDMI / dual).
-- **HW check wanted:** whole picture incl. interlaced sources and the video backdrop (no_rw_check on the sample buffers, sync delay and register file; tables written one clock later; EBR output pad).
+- **HW-validated 2026-10-15** (Ron: "looks fine"). Originally flagged for checking: whole picture incl. interlaced sources and the video backdrop (no_rw_check on the sample buffers, sync delay and register file; tables written one clock later; EBR output pad).

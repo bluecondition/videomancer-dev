@@ -731,4 +731,4 @@ All runs use `cascade_tools/run_eq.sh`, which is `run_equiv2.sh` plus `EQ_CFG`
   0 bad.
 
 - **Stock build:** seed 1 builds all 8 configs (seed 2 also). Own HD 86.8 / 84.7 / 82.1 MHz (analog / HDMI / dual).
-- **HW check wanted:** general look in all modes (no_rw_check on five RAMs and the new EBR tables can't be checked in sim).
+- **HW-validated 2026-10-15** (Ron: "looks fine"). Originally flagged for checking: general look in all modes (no_rw_check on five RAMs and the new EBR tables can't be checked in sim).
