@@ -88,6 +88,12 @@ architecture outliner of program_top is
     signal s_wide    : std_logic := '0';
     signal s_pshift  : unsigned(1 downto 0) := (others => '0');
     signal s_plane   : unsigned(2 downto 0) := (others => '0');
+    -- K2/K4/K5 label decodes, free-running.  Labelled defaults: at program
+    -- load the firmware writes the initial_value_label's INDEX (0..N-1) into
+    -- the register, not a 0..1023 position, so a value below N is the index.
+    signal s_k2_idx  : unsigned(1 downto 0) := (others => '0');
+    signal s_k4_idx  : unsigned(1 downto 0) := (others => '0');
+    signal s_k5_idx  : unsigned(2 downto 0) := (others => '0');
     signal s_mix     : unsigned(8 downto 0) := (others => '0');
     signal s_seam_px : unsigned(10 downto 0) := to_unsigned(240, 11);
     signal s_pane_m1 : unsigned(10 downto 0) := to_unsigned(479, 11);
@@ -229,6 +235,12 @@ begin
         variable v_neg : signed(9 downto 0);
     begin
         if rising_edge(clk) then
+            if unsigned(registers_in(1)) < 4 then s_k2_idx <= unsigned(registers_in(1)(1 downto 0));
+            else s_k2_idx <= unsigned(registers_in(1)(9 downto 8)); end if;
+            if unsigned(registers_in(3)) < 4 then s_k4_idx <= unsigned(registers_in(3)(1 downto 0));
+            else s_k4_idx <= unsigned(registers_in(3)(9 downto 8)); end if;
+            if unsigned(registers_in(4)) < 8 then s_k5_idx <= unsigned(registers_in(4)(2 downto 0));
+            else s_k5_idx <= unsigned(registers_in(4)(9 downto 7)); end if;
             s_prev_vsync_n <= data_in.vsync_n;
             s_prev_avid <= data_in.avid;
             if data_in.avid = '1' then s_rx <= s_rx + 1; s_saw_active <= '1'; else s_rx <= (others => '0'); end if;
@@ -325,16 +337,16 @@ begin
                     s_seam_px <= s_seam_n;
                     s_thr     <= s_thr_n;
                     s_xmax    <= s_wl - (C_MARGIN + 1);
-                    s_kern    <= unsigned(registers_in(1)(9 downto 8));
-                    if registers_in(1)(9 downto 8) = "10" then s_wide <= '1'; else s_wide <= '0'; end if;
-                    s_pshift  <= unsigned(registers_in(3)(9 downto 8));
-                    case to_integer(unsigned(registers_in(3)(9 downto 8))) is
+                    s_kern    <= s_k2_idx;
+                    if s_k2_idx = "10" then s_wide <= '1'; else s_wide <= '0'; end if;
+                    s_pshift  <= s_k4_idx;
+                    case to_integer(s_k4_idx) is
                         when 0      => s_pane_m1 <= s_wl - 1;
                         when 1      => s_pane_m1 <= ('0' & s_wl(10 downto 1)) - 1;
                         when 2      => s_pane_m1 <= ("00" & s_wl(10 downto 2)) - 1;
                         when others => s_pane_m1 <= ("000" & s_wl(10 downto 3)) - 1;
                     end case;
-                    s_plane   <= unsigned(registers_in(4)(9 downto 7));
+                    s_plane   <= s_k5_idx;
                     -- 0..255 -> 0..256 so the top of the knob is a full swap
                     s_mix     <= resize(unsigned(registers_in(5)(9 downto 2)), 9) + unsigned(registers_in(5)(9 downto 9));
                     s_sq <= (others => '1');
