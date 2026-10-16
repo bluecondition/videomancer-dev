@@ -115,4 +115,4 @@
 
 - **Stock build:** seed 1 builds all 8 configs (seeds 2-5 also). Own HD 79.1 / 81.3 / 83.5 MHz (analog / HDMI / dual).
 - **regen_ucode.py** leaves this cubist.vhd unchanged (checked), so the microcode/table regeneration still works.
-- **HW check wanted:** whole picture, all modes (no_rw_check on all 8 RAMs relies on the engine finishing inside vertical blanking; new unlit-albedo ROM).
+- **HW-validated 2026-10-15** (Ron: "it looks the same"). Originally flagged for checking: whole picture, all modes (no_rw_check on all 8 RAMs relies on the engine finishing inside vertical blanking; new unlit-albedo ROM).
