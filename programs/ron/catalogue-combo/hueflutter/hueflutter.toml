@@ -26,7 +26,7 @@ name_label = "Wobble"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 255
-initial_value = 450
+initial_value = 766
 display_float_digits = 0
 suffix_label = " px"
 
@@ -36,7 +36,7 @@ name_label = "Waves"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 300
+initial_value = 23
 display_float_digits = 1
 suffix_label = "%"
 
@@ -46,7 +46,7 @@ name_label = "Hue"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 360
-initial_value = 0
+initial_value = 348
 display_float_digits = 0
 suffix_label = "°"
 
@@ -56,7 +56,7 @@ name_label = "Sat"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 400
-initial_value = 256
+initial_value = 460
 display_float_digits = 0
 suffix_label = "%"
 
@@ -66,7 +66,7 @@ name_label = "Luma"
 control_mode = "linear"
 display_min_value = 1
 display_max_value = 8
-initial_value = 400
+initial_value = 145
 display_float_digits = 0
 suffix_label = " b"
 
@@ -76,7 +76,7 @@ name_label = "Chroma"
 control_mode = "linear"
 display_min_value = 1
 display_max_value = 8
-initial_value = 300
+initial_value = 515
 display_float_digits = 0
 suffix_label = " b"
 
@@ -84,7 +84,7 @@ suffix_label = " b"
 parameter_id = "toggle_switch_7"
 name_label = "Bands"
 value_labels = ["Phase", "Amp"]
-initial_value_label = "Amp"
+initial_value_label = "Phase"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
@@ -96,7 +96,7 @@ initial_value_label = "Dither Out"
 parameter_id = "toggle_switch_9"
 name_label = "Chroma"
 value_labels = ["With", "Quarter"]
-initial_value_label = "With"
+initial_value_label = "Quarter"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
@@ -116,7 +116,7 @@ name_label = "Spin"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 596
+initial_value = 481
 display_float_digits = 1
 suffix_label = "%"
 
