@@ -384,6 +384,7 @@ architecture panemix of program_top is
     signal s_zb : unsigned(2 downto 0) := (others => '0');  -- blend
     signal s_zp : unsigned(2 downto 0) := (others => '0');  -- palette
     signal s_n_live : std_logic := '0';
+    signal s_b_live, s_q_live : std_logic := '0';   -- K3/K5: label index honoured until moved
 
     --------------------------------------------------------------------------
     -- Per-frame (vblank sequencer)
@@ -598,9 +599,8 @@ begin
             s_we <= data_in.avid;
 
             -- K1 panes: quarters; K3 blend: fifths; K5 palette: eighths.  The
-            -- firmware loads a labelled default as the label INDEX: K1's ("2")
-            -- is honoured until the knob first reads a real position (K3 and
-            -- K5 default to label 0, which decodes the same either way).
+            -- firmware loads a labelled default as the label INDEX: K1, K3
+            -- and K5 honour it until the knob first reads a real position.
             if s_k_panes >= 10 then s_pm <= s_k_panes - 10; else s_pm <= (others => '0'); end if;
             if s_k_panes <= 1013 then s_pp <= s_k_panes + 10; else s_pp <= (others => '1'); end if;
             if s_k_panes >= 4 then s_n_live <= '1'; end if;
@@ -612,10 +612,20 @@ begin
             if s_k_blend >= 10 then s_bm <= s_k_blend - 10; else s_bm <= (others => '0'); end if;
             if s_k_blend <= 1013 then s_bp <= s_k_blend + 10; else s_bp <= (others => '1'); end if;
             s_zbm <= f_zone5(s_bm); s_zbp <= f_zone5(s_bp);
-            if s_zbm = s_zbp then s_zb <= s_zbm; end if;
+            if s_k_blend >= 5 then s_b_live <= '1'; end if;
+            if s_b_live = '0' and s_k_blend < 5 then
+                s_zb <= s_k_blend(2 downto 0);
+            elsif s_zbm = s_zbp then
+                s_zb <= s_zbm;
+            end if;
             if s_k_pal >= 10 then s_qm <= s_k_pal - 10; else s_qm <= (others => '0'); end if;
             if s_k_pal <= 1013 then s_qp <= s_k_pal + 10; else s_qp <= (others => '1'); end if;
-            if s_qm(9 downto 7) = s_qp(9 downto 7) then s_zp <= s_qm(9 downto 7); end if;
+            if s_k_pal >= 8 then s_q_live <= '1'; end if;
+            if s_q_live = '0' and s_k_pal < 8 then
+                s_zp <= s_k_pal(2 downto 0);
+            elsif s_qm(9 downto 7) = s_qp(9 downto 7) then
+                s_zp <= s_qm(9 downto 7);
+            end if;
 
             ------------------------------------------------------------------
             -- Vblank sequencer: one small op per state
