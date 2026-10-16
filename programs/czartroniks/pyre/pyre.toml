@@ -18,7 +18,7 @@ name_label = "Fuel"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 767
+initial_value = 965
 suffix_label = "%"
 
 [[parameter]]
@@ -27,7 +27,7 @@ name_label = "Width"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 340
+initial_value = 424
 suffix_label = "%"
 
 [[parameter]]
@@ -76,7 +76,7 @@ initial_value_label = "On"
 parameter_id = "toggle_switch_8"
 name_label = "Luma Mod"
 value_labels = ["Off", "On"]
-initial_value_label = "Off"
+initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
