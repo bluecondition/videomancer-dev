@@ -12,7 +12,7 @@ Cell-averaged mosaic that eats into the picture by luma or saturation: soft sten
 | K2 | Aspect | Square / Wide / Wider / Strip | cell height = width / 1, 2, 4 or 8 (Square, Wide, Wider, Strip) |
 | K3 | Grout | 0–100% | dark lines between cells, 1/16 of a cell thick (min 1 px), floored at black |
 | K4 | Tint | 0–100% | 0–3% off. Above that, mosaic cells are washed toward a hue that goes once round the colour wheel |
-| K5 | Soft | 0–100% | key edge, from hard (±16 codes) to very soft (±512), over 5 octaves |
+| K5 | Soft | 0–100% | key edge, from hard to very soft, over 5 octaves |
 | K6 | Source | 0–100% | key from luma (0) to saturation \|U\|+\|V\| (100), blended |
 | S7 | Mask | Normal / Invert | Normal: the mosaic eats the shadows first. Invert: it eats the highlights first |
 | S8 | Key From | Original / Mosaic | key from the original, or from the mosaic (cell by cell) |

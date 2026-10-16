@@ -2,7 +2,7 @@
 
 The picture cut into clean bands of lines (or vertical strips), each slid sideways as if it were a different moment of a moving shot: a simulated camera sways or drifts and every band lags it by its own delay, on top of a ramp, fold, random, wave or zigzag staircase.
 
-**P12 (Offset):** Staircase amount: how far apart the bands slide, from W/64 to a full screen width (quadratic). The simulated motion keeps rippling on top at any setting.
+**P12 (Offset):** Staircase amount: how far apart the bands slide, from 1/64 of the width to a full screen width (quadratic). The simulated motion keeps rippling on top at any setting.
 
 ## Controls
 
@@ -19,7 +19,7 @@ The picture cut into clean bands of lines (or vertical strips), each slid sidewa
 | S9 | Gaps | Off / On | Thin black lines between the blocks |
 | S10 | Motion | Sway / Drift | Sine sway, or eased random drift |
 | S11 | Flip | Off / On | Reverses the band order (staircase and lag) |
-| P12 | Offset | 0–100% | Staircase amount: W/64 up to a full screen width |
+| P12 | Offset | 0–100% | Staircase amount: 1/64 of the width up to a full screen width |
 
 ## Presets
 

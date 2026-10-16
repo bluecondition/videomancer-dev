@@ -8,7 +8,7 @@ Straight-sided keystone (top/bottom width, slide, tilt, mirror tiles) posterized
 
 | | Control | Range | What it does |
 |---|---|---|---|
-| K1 | Top | 25–225% | width of the picture at the top, 25..225% (the readout is now the real width), glided |
+| K1 | Top | 25–225% | width of the picture at the top, 25..225% (the display shows the real width), glided |
 | K2 | Bottom | 25–225% | width at the bottom, 25..225%, glided |
 | K3 | Slide | -50–50% | horizontal slide, ±½ of the measured width, in source space (wide rows move further: the trapezoid shears), glided |
 | K4 | Luma | 1–8 b | luma depth 1..8 bits; levels always include black and white |

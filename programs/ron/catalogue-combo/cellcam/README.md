@@ -8,7 +8,7 @@ Live pixelation zoom: cells outlined by the luma steps around them (or raw edges
 
 | | Control | Range | What it does |
 |---|---|---|---|
-| K1 | Crawl | 0–100% | NTSC dot crawl on the edges. Past 50% it spreads over the whole picture, ±126 at 100% (0 = clean) |
+| K1 | Crawl | 0–100% | NTSC dot crawl on the edges. Past 50% it spreads over the whole picture (0 = clean) |
 | K2 | Shape | -100–100% | cell height as a ratio of its width, exponential: 1/4 (flat) at −100, square at 0, ~4× (tall) at +100 |
 | K3 | Gain | 0–100% | edge gain, exponential: 1/8x at 0, 1/2x at 25%, 2x at 50%, 8x at 75%, 31x at 100% |
 | K4 | Width | 1–8px | outline width 1..8 px on the left side of each cell, 1..8 lines on the top. Raw: edges thickened Width px right and Width lines down |

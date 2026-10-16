@@ -2,7 +2,7 @@
 
 Re-draws video as a Commodore 64 screen: 16 Colodore colours on a native 320x200 block grid, multicolour fat pixels, checkerboard dither, a real-proportioned border with tape-loading stripes, and a READY. prompt.
 
-**P12 (Dither):** Ordered 4x4 Bayer dither per block, from flat colour to heavy checkerboard game-art (±240 codes at 100%).
+**P12 (Dither):** Ordered 4x4 Bayer dither per block, from flat colour to heavy checkerboard game-art.
 
 ## Controls
 

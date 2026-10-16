@@ -8,9 +8,9 @@ Luma is depth: the picture shifts by its own brightness and is blended with the 
 
 | | Control | Range | What it does |
 |---|---|---|---|
-| K1 | Depth | -100–100% | parallax gain, bipolar (glided, 10-bit) |
+| K1 | Depth | -100–100% | parallax gain, bipolar, glided |
 | K2 | Pivot | 0–100% | luma level that does not move |
-| K3 | Levels | 2 / 4 / 8 / 16 / 32 / 64 | **now labelled** 2 / 4 / 8 / 16 / 32 / 64 levels (sixths of the travel; default 8) |
+| K3 | Levels | 2 / 4 / 8 / 16 / 32 / 64 | posterize levels: 2 / 4 / 8 / 16 / 32 / 64 (sixths of the travel; default 8) |
 | K4 | Tint | 0–100% | chroma tint per luma band |
 | K5 | Mode | Add / Screen / Multiply / Difference / Overlay | Add / Screen / Multiply / Difference / Overlay (fifths of the travel, as the display shows) |
 | K6 | Mix | 0–100% | how far the blend replaces the displaced layer |

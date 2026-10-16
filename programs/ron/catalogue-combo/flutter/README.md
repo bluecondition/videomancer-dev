@@ -10,12 +10,12 @@ Sine wobble where each posterized luma band slides with its own phase or amplitu
 |---|---|---|---|
 | K1 | Wobble | 0–255px | displacement amplitude, 0–255 px |
 | K2 | Waves | 0–100% | vertical wavelength: line-phase step, 0 (the whole frame sways together) to 64 lines a cycle. Glided |
-| K3 | Speed | -100–100% | bipolar, squared, ±2.3% centre deadband. The v0.1 top speed (one cycle in ~4 s) is now at ~30% from centre; the top is ~15× that (~3.5 cycles a second) |
+| K3 | Speed | -100–100% | bipolar, squared, ±2.3% centre deadband. One cycle in ~4 s at ~30% from centre, ~3.5 cycles a second at the ends |
 | K4 | Luma | 1–8b | luma levels, 1–8 bits. Also the bands: each posterized level slides as one band |
 | K5 | Chroma | 1–8b | chroma levels, 1–8 bits (1 bit = −/grey/+ per channel) |
 | K6 | Spread | 0–100% | how far apart the bands are: up to (N−1)/N of a cycle (Phase), or a gain of 0.125–1.12 (Amp) |
 | S7 | Bands | Phase / Amp | Phase: band k of N is k/N of a cycle × Spread ahead / Amp: band gain 0.125 + level × Spread (dark bands calm, bright bands swing) |
-| S8 | Wave | Smooth / Snap | Smooth: sine / Snap: a flat-topped wave (255·tanh(4s)/tanh(4)), so lines jump between two offsets |
+| S8 | Wave | Smooth / Snap | Smooth: sine / Snap: a flat-topped wave, so lines jump between two offsets |
 | S9 | Chroma | Together / Quarter | Together / Quarter: chroma reads a quarter wave apart (fringes) |
 | S10 | Edges | Fill / Mirror | Fill: reads off the line take its own edge pixel / Mirror |
 | S11 | Dither | Off / On | Off / On: a 2×2 ordered dither, applied before the wobble so it travels with the picture |

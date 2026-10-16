@@ -8,7 +8,7 @@ Edge lines on one side of a seam or in strips, a negative or bit-plane on the ot
 
 | | Control | Range | What it does |
 |---|---|---|---|
-| K1 | Threshold | 0–100% | edge threshold, curved (K1/8 + K1²/4096 = 0..382; fine steps at the low end) |
+| K1 | Threshold | 0–100% | edge threshold, curved (fine steps at the low end) |
 | K2 | Kernel | Roberts / Sobel / Wide / DoG | Roberts 2×2 / Sobel 3×3 / Wide (8-px span, lines thickened 3 rows down) / DoG (5- vs 17-px boxes + vertical Laplacian) |
 | K3 | Seam | 0–100% | split position, a fraction of the measured width |
 | K4 | Panes | Split / 2 strips / 4 strips / 8 strips | Split / 2 / 4 / 8 strips alternating edge side and other side |

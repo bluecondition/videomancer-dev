@@ -10,7 +10,7 @@ Video redrawn as 8x8 ASCII or block-dither glyphs per cell, with datamosh bars a
 |---|---|---|---|
 | K1 | Bars | 0–100% | fraction of glyph bands displaced (datamosh), re-rolled every frame |
 | K2 | Distance | 0–1020px | band displacement, up to ±1020 px; wraps inside the picture |
-| K3 | Cell | 8 px / 16 px / 32 px / 64 px | glyph cell 8 / 16 / 32 / 64 px (labelled; default 8) |
+| K3 | Cell | 8 px / 16 px / 32 px / 64 px | glyph cell 8 / 16 / 32 / 64 px (default 8) |
 | K4 | Contrast | 0–400% | luma → glyph density; 100% maps white to the densest glyph, up to 400% |
 | K5 | Shear | 0–30px | per-line sideways shear, ±30 px |
 | K6 | Rate | 0–100% | Wave: wave speed. Tear: fraction of lines torn |

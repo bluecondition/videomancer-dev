@@ -2,7 +2,7 @@
 
 Dithered posterize with hue rotation, rainbow hue steps per luma band or hue sector, and sat crush/boost before or after.
 
-**P12 (Spin):** hue spin speed, bipolar, squared. Centre (±8 codes) = still; the ends ≈ 0.55 s per turn
+**P12 (Spin):** hue spin speed, bipolar, squared. Still at the centre (small deadband); the ends ≈ 0.55 s per turn
 
 ## Controls
 
@@ -19,7 +19,7 @@ Dithered posterize with hue rotation, rainbow hue steps per luma band or hue sec
 | S9 | Bands | Luma / Hue | Spread keyed by Luma band / by Hue sector (8 × 45°) |
 | S10 | Dither | Bayer / Noise | Bayer 4×4 / Noise |
 | S11 | Invert | Off / Alt | alternate luma bands go negative |
-| P12 | Spin | -100–100% | hue spin speed, bipolar, squared. Centre (±8 codes) = still; the ends ≈ 0.55 s per turn |
+| P12 | Spin | -100–100% | hue spin speed, bipolar, squared. Still at the centre (small deadband); the ends ≈ 0.55 s per turn |
 
 ## Presets
 

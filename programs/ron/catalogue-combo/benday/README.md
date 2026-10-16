@@ -8,10 +8,10 @@ Halftone print (dot, line, diamond or square screens) torn by hashed bands that 
 
 | | Control | Range | What it does |
 |---|---|---|---|
-| K1 | Cell | 4 px / 8 px / 16 px / 32 px | halftone cell 4 / 8 / 16 / 32 px (labelled; default 16) |
+| K1 | Cell | 4 px / 8 px / 16 px / 32 px | halftone cell 4 / 8 / 16 / 32 px (default 16) |
 | K2 | Dot Gain | 0–200% | dot weight; at 100% black prints solid and white prints clean paper |
-| K3 | Screen | Dot / Line / Diamond / Square | Dot / Line / Diamond / Square (labelled) |
-| K4 | Height | 8 ln / 16 ln / 32 ln / 64 ln | band height 8 / 16 / 32 / 64 lines (labelled) |
+| K3 | Screen | Dot / Line / Diamond / Square | screen shape: dot / line / diamond / square |
+| K4 | Height | 8 ln / 16 ln / 32 ln / 64 ln | band height 8 / 16 / 32 / 64 lines |
 | K5 | Shift | 0–100% | sideways tear of a moshed band: ±1020 px on HD-width lines, ±510 on SD |
 | K6 | Rate | 0–100% | re-roll rate, from every ~2 s to every frame |
 | S7 | Ink | Dark / Light | Dark: black dots on white paper. Light: white dots on black (both positive) |
