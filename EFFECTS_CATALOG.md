@@ -83,3 +83,11 @@ Companions: [CLAUDE.md](CLAUDE.md) (platform rules) and [TECHNIQUES.md](TECHNIQU
 - Masking by luma/chroma/alpha
 - Picture-in-picture with warping
 - Split-screen, quad-mirror
+
+## Experimental / Glitch
+- **Hysteresis-edge state glitches** (found 2026-10-15 on hueflutter v0.2.1). A zoned control (bit depth, cell size, palette) whose zone only changes once the knob is N counts inside a new zone remembers HOW it got there. Turned by hand from below, 515 gave 4-bit chroma; from above it would have kept 5 bits; loaded cold it gave the power-up zone, 3-bit chroma, which also triggered the HD HDMI bright bars. Ways to use it deliberately:
+  - **Path-dependent knobs:** the same knob position gives different looks depending on the direction you arrived from. Widen the hysteresis band (say ±40 counts) so it reads as an instrument, not a bug.
+  - **Schmitt-trigger posterize on the video itself:** per-pixel quantization with hysteresis along the scanline. A level holds until the input moves well past the threshold, so edges smear sideways into streaks and noise turns into stable horizontal glitch runs. Hysteresis that resets per line makes it purely horizontal; carrying state down the column smears vertically.
+  - **Modulated band:** drive the hysteresis width from an LFO or from luma, so zones stick and release in bursts.
+  - **Sticky-state switch:** "freeze zone" holds the current quantizer state until the knob crosses a far threshold.
+  - **Caution:** hard bit-depth flips on moving content can trigger the HD HDMI thick bars. Build in the [1 2 1] output smoothing from the start (see CLAUDE.md, "HD HDMI thick bright bars").
