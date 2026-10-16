@@ -23,7 +23,7 @@ name_label = "Luma"
 control_mode = "linear"
 display_min_value = 1
 display_max_value = 8
-initial_value = 300
+initial_value = 126
 display_float_digits = 0
 suffix_label = "b"
 
@@ -33,7 +33,7 @@ name_label = "Dither"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 300
+initial_value = 411
 display_float_digits = 1
 suffix_label = "%"
 
@@ -49,7 +49,7 @@ name_label = "Shadow"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 7
-initial_value = 448
+initial_value = 179
 display_float_digits = 0
 suffix_label = ""
 
@@ -59,7 +59,7 @@ name_label = "Light"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 7
-initial_value = 100
+initial_value = 240
 display_float_digits = 0
 suffix_label = ""
 
@@ -69,7 +69,7 @@ name_label = "Contrast"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 400
-initial_value = 256
+initial_value = 822
 display_float_digits = 0
 suffix_label = "%"
 
@@ -83,7 +83,7 @@ initial_value_label = "Post-Tone"
 parameter_id = "toggle_switch_8"
 name_label = "Tritone"
 value_labels = ["Off", "On"]
-initial_value_label = "Off"
+initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
@@ -101,7 +101,7 @@ initial_value_label = "Same"
 parameter_id = "toggle_switch_11"
 name_label = "Chroma"
 value_labels = ["Smooth", "Poster"]
-initial_value_label = "Smooth"
+initial_value_label = "Poster"
 
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
@@ -109,7 +109,7 @@ name_label = "Balance"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 716
 display_float_digits = 1
 suffix_label = "%"
 
