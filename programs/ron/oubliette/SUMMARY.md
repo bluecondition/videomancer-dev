@@ -426,4 +426,4 @@ v0.1.0 (2026-07-03, router2): HD 78.5–81.8, SD 82–85, ~4800 LC.
   y/u/v delay EBRs.
 
 - **Stock build seed: 5** (`[firmware] seed = 5` in oubliette.toml). Every seed 1-8 builds all 8 configs with no router stall, but only seeds 5 and 2 close the program's own HD timing; seed 5 gives 77.3 / 75.9 / 78.8 MHz (analog / HDMI / dual).
-- **HW check wanted:** colours (the 30-bit output delay is now an EBR ring, mapped 16+14 exactly like inferno's and warpfield's HW-validated delays), dungeon generation and the HUD.
+- **HW-validated 2026-10-15** (Ron: "looks great"). Originally flagged for checking: colours (the 30-bit output delay is now an EBR ring, mapped 16+14 exactly like inferno's and warpfield's HW-validated delays), dungeon generation and the HUD.
