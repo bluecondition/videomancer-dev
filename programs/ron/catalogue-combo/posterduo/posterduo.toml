@@ -23,7 +23,7 @@ name_label = "Luma"
 control_mode = "linear"
 display_min_value = 1
 display_max_value = 8
-initial_value = 126
+initial_value = 192
 display_float_digits = 0
 suffix_label = "b"
 

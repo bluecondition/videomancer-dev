@@ -93,6 +93,10 @@ architecture posterduo of program_top is
 
     -- control decodes (zones hysteretic: change only 12 counts inside a new zone)
     signal s_zl : unsigned(2 downto 0) := to_unsigned(2, 3);    -- luma bits - 1
+    -- frames since load; until it reaches 15 the K1/K4/K5 zones follow the
+    -- knob directly (no hysteresis), so a saved default near a zone edge
+    -- loads in its own zone instead of staying at the power-up zone
+    signal s_zwarm : unsigned(3 downto 0) := (others => '0');
     signal s_pz : unsigned(1 downto 0) := "00";                 -- pitch zone
     signal s_live3 : std_logic := '0';
     signal s_ks : unsigned(2 downto 0) := to_unsigned(3, 3);    -- shadow ink
@@ -210,11 +214,11 @@ begin
 
             -- K1 / K4 / K5 zones
             v_z := s_k_lbits(9 downto 7); v_lo := s_k_lbits(6 downto 0);
-            if (v_lo >= 12 or v_z = 0) and (v_lo <= 115 or v_z = 7) then s_zl <= v_z; end if;
+            if s_zwarm /= 15 or ((v_lo >= 12 or v_z = 0) and (v_lo <= 115 or v_z = 7)) then s_zl <= v_z; end if;
             v_z := s_k_shadow(9 downto 7); v_lo := s_k_shadow(6 downto 0);
-            if (v_lo >= 12 or v_z = 0) and (v_lo <= 115 or v_z = 7) then s_ks <= v_z; end if;
+            if s_zwarm /= 15 or ((v_lo >= 12 or v_z = 0) and (v_lo <= 115 or v_z = 7)) then s_ks <= v_z; end if;
             v_z := s_k_light(9 downto 7); v_lo := s_k_light(6 downto 0);
-            if (v_lo >= 12 or v_z = 0) and (v_lo <= 115 or v_z = 7) then s_kh <= v_z; end if;
+            if s_zwarm /= 15 or ((v_lo >= 12 or v_z = 0) and (v_lo <= 115 or v_z = 7)) then s_kh <= v_z; end if;
             -- K3 Pitch (labelled): the firmware loads the default as the label
             -- INDEX; honour it only until the knob first reads a real position
             if s_k_pitch >= 4 then s_live3 <= '1'; end if;
@@ -265,6 +269,7 @@ begin
             if data_in.vsync_n = '0' and s_prev_vsync_n = '1' then
                 s_line <= (others => '0');
                 if s_saw_active = '1' then
+                    if s_zwarm /= 15 then s_zwarm <= s_zwarm + 1; end if;
                     s_vs_go <= '1';
                     g_wm1 <= resize(s_wmax, 12) - 1;       -- generated-avid width
                     s_wmax <= (others => '0');
