@@ -4,11 +4,12 @@
 # + sync loss / horizontal collapse.  See vhold.vhd and SUMMARY.md.
 
 [program]
-program_id = "com.ron.vhold"
+processing_delay_clks = 16
+program_id = "com.czartroniks.vhold"
 program_name = "Vhold"
-program_version = "0.2.0"
+program_version = "0.2.1"
 abi_version = ">=1.0,<2.0"
-author = "ron"
+author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Glitch", "Retro", "Distortion"]
 program_type = "processing"

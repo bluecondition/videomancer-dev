@@ -1,3 +1,9 @@
+-- Copyright (C) 2026 czartroniks
+-- SPDX-License-Identifier: GPL-3.0-only
+--
+-- This file is part of Videomancer Community Programs.
+-- See LICENSE file in the repository root for full license text.
+--
 -- Vhold: catalogue combo #73 (seed 20260922) -- rolling shutter / sync
 -- roll + sync loss / horizontal collapse.  Three knobs each; the switches
 -- and the slider decide how they combine.
@@ -46,6 +52,9 @@ use work.core_pkg.all;
 use work.all;
 
 architecture vhold of program_top is
+    -- data_in -> data_out latency is 16 clocks, already a multiple of 4 as the
+    -- SDK requires; must match processing_delay_clks in the TOML.
+    constant C_PROCESSING_DELAY_CLKS : natural := 16;
 
     constant C_LAT : integer := 16;
 

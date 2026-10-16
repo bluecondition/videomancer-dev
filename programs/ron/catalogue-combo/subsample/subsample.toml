@@ -1,19 +1,20 @@
 # Subsample - Program Configuration
 #
 # Two catalogue effects (seed 20260918): datamosh / block displacement and
-# chroma subsampling artifacts (4:1:1, composite).  Three knobs each;
+# chroma subsampling artifacts (4:1:1, 4:2:0, composite).  Three knobs each;
 # switches and slider set the interaction.  See subsample.vhd.
 
 [program]
-program_id = "com.ron.subsample"
+processing_delay_clks = 24
+program_id = "com.czartroniks.subsample"
 program_name = "Subsample"
-program_version = "0.1.0"
+program_version = "0.2.1"
 abi_version = ">=1.0,<2.0"
-author = "ron"
+author = "czartroniks"
 license = "GPL-3.0"
-categories = ["Glitch", "Retro", "Grid"]
+categories = ["Signal", "Glitch", "Pixel"]
 program_type = "processing"
-description = "Chroma held every N pixels, bled and dot-crawling like a bad composite feed, cut into hashed blocks that shift or hold."
+description = "Chroma held in strips or squares, bled and dot-crawling like a bad composite feed, cut into hashed blocks that shift or hold."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
@@ -23,7 +24,7 @@ name_label = "Block"
 control_mode = "linear"
 display_min_value = 8
 display_max_value = 64
-initial_value = 300
+initial_value = 144
 display_float_digits = 0
 suffix_label = " px"
 
@@ -33,7 +34,7 @@ name_label = "Shift"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 400
+initial_value = 375
 display_float_digits = 1
 suffix_label = "%"
 
@@ -43,7 +44,7 @@ name_label = "Rate"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 700
+initial_value = 240
 display_float_digits = 1
 suffix_label = "%"
 
@@ -52,8 +53,8 @@ parameter_id = "rotary_potentiometer_4"
 name_label = "Hold"
 control_mode = "linear"
 display_min_value = 1
-display_max_value = 32
-initial_value = 400
+display_max_value = 64
+initial_value = 112
 display_float_digits = 0
 suffix_label = " px"
 
@@ -63,7 +64,7 @@ name_label = "Bleed"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 7
-initial_value = 300
+initial_value = 0
 display_float_digits = 0
 suffix_label = ""
 
@@ -103,9 +104,9 @@ initial_value_label = "Colour"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
-name_label = "Hold"
-value_labels = ["Boxes", "Bled"]
-initial_value_label = "Boxes"
+name_label = "Hold Shape"
+value_labels = ["Line", "Square"]
+initial_value_label = "Line"
 
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
@@ -113,7 +114,7 @@ name_label = "Density"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 200
+initial_value = 162
 display_float_digits = 1
 suffix_label = "%"
 
@@ -122,28 +123,28 @@ name = "Default"
 
 [[preset]]
 name = "VHS Dub"
-rotary_potentiometer_1 = 600
-rotary_potentiometer_2 = 200
-rotary_potentiometer_4 = 700
+rotary_potentiometer_1 = 439
+rotary_potentiometer_2 = 162
+rotary_potentiometer_4 = 240
 rotary_potentiometer_5 = 600
 rotary_potentiometer_6 = 500
-toggle_switch_11 = 1
-linear_potentiometer_12 = 150
+linear_potentiometer_12 = 107
 
 [[preset]]
 name = "Broken Codec"
-rotary_potentiometer_1 = 100
-rotary_potentiometer_2 = 700
-rotary_potentiometer_3 = 400
-rotary_potentiometer_4 = 1023
+rotary_potentiometer_1 = 0
+rotary_potentiometer_2 = 695
+rotary_potentiometer_3 = 112
+rotary_potentiometer_4 = 496
 toggle_switch_7 = 1
 toggle_switch_8 = 1
 toggle_switch_10 = 1
-linear_potentiometer_12 = 600
+toggle_switch_11 = 1
+linear_potentiometer_12 = 589
 
 [[preset]]
 name = "Dot Crawl"
-rotary_potentiometer_4 = 200
+rotary_potentiometer_4 = 16
 rotary_potentiometer_5 = 0
 rotary_potentiometer_6 = 900
 toggle_switch_9 = 1

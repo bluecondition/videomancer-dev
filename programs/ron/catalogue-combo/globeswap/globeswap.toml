@@ -1,14 +1,16 @@
 # Globeswap - Program Configuration
 #
 # Catalogue combo #134 (seed 20260927): polar warp (spherize / tunnel)
-# + colour channel swap / offset + solarization.  See globeswap.vhd.
+# + colour channel swap / offset + solarization.  See globeswap.vhd and
+# SUMMARY.md.
 
 [program]
-program_id = "com.ron.globeswap"
+processing_delay_clks = 20
+program_id = "com.czartroniks.globeswap"
 program_name = "Globeswap"
-program_version = "0.1.0"
+program_version = "0.2.1"
 abi_version = ">=1.0,<2.0"
-author = "ron"
+author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Distortion", "Colorizer", "Glitch"]
 program_type = "processing"
@@ -22,7 +24,7 @@ name_label = "Lens"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 800
+initial_value = 444
 display_float_digits = 1
 suffix_label = "%"
 
@@ -30,21 +32,17 @@ suffix_label = "%"
 parameter_id = "rotary_potentiometer_2"
 name_label = "Size"
 control_mode = "linear"
-display_min_value = 16
-display_max_value = 783
-initial_value = 600
+display_min_value = 3
+display_max_value = 146
+initial_value = 0
 display_float_digits = 0
-suffix_label = "ln"
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
 name_label = "Swap"
-control_mode = "linear"
-display_min_value = 0
-display_max_value = 7
-initial_value = 200
-display_float_digits = 0
-suffix_label = ""
+value_labels = ["None", "U<>V", "Y>U", "U>Y", "Y<>V", "Rotate", "-Y", "-YUV"]
+initial_value_label = "Y<>V"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
@@ -52,7 +50,7 @@ name_label = "Offset"
 control_mode = "linear"
 display_min_value = -256
 display_max_value = 256
-initial_value = 640
+initial_value = 652
 display_float_digits = 0
 suffix_label = "px"
 
@@ -62,7 +60,7 @@ name_label = "Solar"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 600
+initial_value = 797
 display_float_digits = 1
 suffix_label = "%"
 
@@ -72,7 +70,7 @@ name_label = "Fold"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 0
 display_float_digits = 1
 suffix_label = "%"
 
@@ -80,7 +78,7 @@ suffix_label = "%"
 parameter_id = "toggle_switch_7"
 name_label = "Fringe"
 value_labels = ["Even", "Rim"]
-initial_value_label = "Even"
+initial_value_label = "Rim"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
@@ -98,13 +96,13 @@ initial_value_label = "Chroma"
 parameter_id = "toggle_switch_10"
 name_label = "Lens"
 value_labels = ["Row", "Disc"]
-initial_value_label = "Row"
+initial_value_label = "Disc"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
 name_label = "Fold"
 value_labels = ["Luma", "Colour"]
-initial_value_label = "Luma"
+initial_value_label = "Colour"
 
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
@@ -112,7 +110,7 @@ name_label = "Globe"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 0
+initial_value = 849
 display_float_digits = 1
 suffix_label = "%"
 
@@ -125,7 +123,7 @@ rotary_potentiometer_1 = 950
 rotary_potentiometer_2 = 500
 rotary_potentiometer_3 = 0
 rotary_potentiometer_4 = 512
-rotary_potentiometer_5 = 1023
+rotary_potentiometer_5 = 0
 toggle_switch_7 = 1
 toggle_switch_10 = 1
 linear_potentiometer_12 = 700
@@ -136,8 +134,8 @@ rotary_potentiometer_1 = 150
 rotary_potentiometer_2 = 900
 rotary_potentiometer_3 = 700
 rotary_potentiometer_4 = 400
-rotary_potentiometer_5 = 400
-rotary_potentiometer_6 = 800
+rotary_potentiometer_5 = 995
+rotary_potentiometer_6 = 980
 toggle_switch_8 = 1
 toggle_switch_11 = 1
 linear_potentiometer_12 = 200
@@ -147,7 +145,7 @@ name = "Torn Channels"
 rotary_potentiometer_1 = 512
 rotary_potentiometer_3 = 400
 rotary_potentiometer_4 = 900
-rotary_potentiometer_5 = 700
-rotary_potentiometer_6 = 300
+rotary_potentiometer_5 = 462
+rotary_potentiometer_6 = 160
 toggle_switch_9 = 1
 linear_potentiometer_12 = 400

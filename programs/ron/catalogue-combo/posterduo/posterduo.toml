@@ -1,18 +1,19 @@
 # Posterduo - Program Configuration
 #
 # Catalogue combo #112 (seed 20260925): posterization + duotone / tritone.
-# See posterduo.vhd.
+# See posterduo.vhd and SUMMARY.md.
 
 [program]
-program_id = "com.ron.posterduo"
+processing_delay_clks = 20
+program_id = "com.czartroniks.posterduo"
 program_name = "Posterduo"
-program_version = "0.1.0"
+program_version = "0.2.1"
 abi_version = ">=1.0,<2.0"
-author = "ron"
+author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Colorizer", "Stylize", "Retro"]
 program_type = "processing"
-description = "Dithered posterize feeding a two-ink duotone (or inks posterized after), tritone midtones, alternate bands swapping the inks."
+description = "Dithered posterize and a two-ink duotone: banded or smooth inks, tritone midtones, band swap, inks snapped to a 9-colour set."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
@@ -32,19 +33,15 @@ name_label = "Dither"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 0
+initial_value = 300
 display_float_digits = 1
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
 name_label = "Pitch"
-control_mode = "linear"
-display_min_value = 1
-display_max_value = 8
-initial_value = 0
-display_float_digits = 0
-suffix_label = "px"
+value_labels = ["2 px", "4 px", "8 px", "16 px"]
+initial_value_label = "2 px"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
@@ -52,7 +49,7 @@ name_label = "Shadow"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 7
-initial_value = 500
+initial_value = 448
 display_float_digits = 0
 suffix_label = ""
 
@@ -112,7 +109,7 @@ name_label = "Balance"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 400
+initial_value = 512
 display_float_digits = 1
 suffix_label = "%"
 
@@ -130,7 +127,7 @@ toggle_switch_10 = 1
 name = "Dithered Inks"
 rotary_potentiometer_1 = 100
 rotary_potentiometer_2 = 1000
-rotary_potentiometer_3 = 500
+rotary_potentiometer_3 = 384
 toggle_switch_8 = 1
 
 [[preset]]

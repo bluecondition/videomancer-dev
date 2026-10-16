@@ -5,11 +5,12 @@
 # set the interaction.  See parallax.vhd.
 
 [program]
-program_id = "com.ron.parallax"
+processing_delay_clks = 16
+program_id = "com.czartroniks.parallax"
 program_name = "Parallax"
-program_version = "0.1.2"
+program_version = "0.2.1"
 abi_version = ">=1.0,<2.0"
-author = "ron"
+author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Distortion", "Colorizer", "Glitch"]
 program_type = "processing"
@@ -33,7 +34,7 @@ name_label = "Sway"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 100
+initial_value = 384
 display_float_digits = 1
 suffix_label = "%"
 
@@ -50,12 +51,8 @@ suffix_label = "%"
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
 name_label = "Swap"
-control_mode = "linear"
-display_min_value = 0
-display_max_value = 7
-initial_value = 0
-display_float_digits = 0
-suffix_label = ""
+value_labels = ["Off", "U<>V", "Y>U", "U>Y", "Y<>V", "Rotate", "Rotate Back", "Complement"]
+initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
@@ -72,10 +69,10 @@ parameter_id = "rotary_potentiometer_6"
 name_label = "Split"
 control_mode = "linear"
 display_min_value = 0
-display_max_value = 100
+display_max_value = 127
 initial_value = 0
-display_float_digits = 1
-suffix_label = "%"
+display_float_digits = 0
+suffix_label = " px"
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
@@ -98,8 +95,8 @@ initial_value_label = "Moves"
 [[parameter]]
 parameter_id = "toggle_switch_10"
 name_label = "Sway"
-value_labels = ["Sine", "Tri"]
-initial_value_label = "Sine"
+value_labels = ["Glide", "Wiggle"]
+initial_value_label = "Glide"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
@@ -132,7 +129,7 @@ linear_potentiometer_12 = 700
 name = "Colour Ghost"
 rotary_potentiometer_1 = 500
 rotary_potentiometer_5 = 800
-rotary_potentiometer_6 = 0
+rotary_potentiometer_6 = 300
 toggle_switch_9 = 1
 linear_potentiometer_12 = 300
 

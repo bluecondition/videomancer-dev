@@ -4,13 +4,14 @@
 # + invert / negative / bit-plane isolation.  See negspin.vhd.
 
 [program]
-program_id = "com.ron.negspin"
+processing_delay_clks = 24
+program_id = "com.czartroniks.negspin"
 program_name = "Negspin"
-program_version = "0.1.1"
+program_version = "0.2.1"
 abi_version = ">=1.0,<2.0"
-author = "ron"
+author = "czartroniks"
 license = "GPL-3.0"
-categories = ["Colorizer", "Stylize", "Glitch"]
+categories = ["Color", "Glitch"]
 program_type = "processing"
 description = "Spinning hue rotation with per-band spread and sat gain; a luma or sat bit-plane can flip the hue; luma and chroma negatives."
 hardware_compatibility = ["rev_b"]
@@ -49,12 +50,8 @@ suffix_label = "%"
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
 name_label = "Plane"
-control_mode = "linear"
-display_min_value = 0
-display_max_value = 7
-initial_value = 300
-display_float_digits = 0
-suffix_label = ""
+value_labels = ["Negative", "Bit 8", "Bit 7", "Bit 6", "Bit 5", "Bit 4", "Bit 3", "Bit 2"]
+initial_value_label = "Bit 7"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
@@ -69,12 +66,8 @@ suffix_label = "%"
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
 name_label = "Chroma"
-control_mode = "linear"
-display_min_value = 0
-display_max_value = 7
-initial_value = 0
-display_float_digits = 0
-suffix_label = ""
+value_labels = ["Off", "3 Levels", "5 Levels", "9 Levels", "17 Levels", "33 Levels", "65 Levels", "129 Levels"]
+initial_value_label = "9 Levels"
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
@@ -123,14 +116,16 @@ name = "Default"
 name = "Plane Flip"
 rotary_potentiometer_4 = 400
 rotary_potentiometer_5 = 0
+rotary_potentiometer_6 = 0
 toggle_switch_9 = 1
-linear_potentiometer_12 = 640
+linear_potentiometer_12 = 611
 
 [[preset]]
 name = "Solar Negative"
 rotary_potentiometer_2 = 600
 rotary_potentiometer_3 = 800
 rotary_potentiometer_5 = 1000
+rotary_potentiometer_6 = 0
 toggle_switch_7 = 1
 toggle_switch_8 = 1
 linear_potentiometer_12 = 512
@@ -141,4 +136,4 @@ rotary_potentiometer_2 = 1023
 rotary_potentiometer_6 = 300
 toggle_switch_10 = 1
 toggle_switch_11 = 1
-linear_potentiometer_12 = 400
+linear_potentiometer_12 = 418

@@ -6,22 +6,52 @@ edge fill v1 was checked on hardware on 2026-09-13 ("fill OK on tremor"),
 and v0.1.2 swapped that fill for the address clamp. v0.2.0 (2026-10-12) is
 the first finalizing pass, built from a review of v0.1.2.
 
-## Controls (v0.2.0)
+## Controls (v0.3.0)
 
 | Control | Does |
 |---|---|
-| K1 Scale | noise cell size 4–512 px, log, 64 steps per octave |
-| K2 Drift | the noise field scrolls vertically, 0–8 px a frame |
+| K1 Scale | noise cell size 4–512 px, log, 64 steps per octave; zooms about the screen centre |
+| K2 Drift | two-way: centre = still, right = the field rises, left = it sinks, up to 8 px a frame. The field boils as it drifts: each row of lattice points also slides sideways at its own random speed (up to the drift speed) |
 | K3 Skew | scanline shear slope; rows lean by (row in band − P/2) × skew, clamped ±511 px |
-| K4 Period | shear band height 2–257 lines |
+| K4 Period | shear band height 2–257 lines (always visible through S9) |
 | K5 Hue | highlight tone hue |
 | K6 Spread | hue angle from the highlight tone to the shadow tone, 0–178° |
 | S7 Noise | Warp: noise displaces the picture horizontally / Grain: noise is added to luma |
 | S8 Shear | sawtooth / triangle |
-| S9 Bands | every other shear band swaps the two tones |
+| S9 Bands | Shade: every other band's tone key is lifted by 24/255 / Flip: every other band swaps the two tones |
 | S10 Field | smooth value noise / hard cells |
 | S11 Tone | duotone keyed from luma / from the noise field |
-| P12 Amount | glided, squared curve. At 0: ±5 px warp or ±30 luma grain (always on). At 70%: about v0.1's maximum. At 100%: ±¼ of the measured width, or ±511 luma |
+| P12 Amount | glided, squared curve: ±5 px warp or ±30 luma grain at 0, ±¼ of the width / ±511 luma at 100%. Above 75% the quake comes in: slabs of lines (a new slab on 1 line in 16, random offsets, new every frame) torn sideways, up to ±⅛ of the width |
+
+## v0.3.0 changes (Tier 3, 2026-10-12)
+
+Rollback point: v0.2.0 is commit ccc8b8b, and its vmprog is in
+`.tremor_work/v0.2.0/`.
+
+- Boil, as row slides: each row of lattice points slides sideways at its
+  own speed, the signed low byte of its row key × the boil phase / 128. The
+  boil phase advances by the drift step each frame, so the fastest rows
+  slide at the drift speed and the field is still at Drift = centre. The
+  cell's top and bottom lattice rows get their own x DDAs, fractions and
+  per-line starts. Column keys wrap mod 512 (so does the cell column), and
+  the slide products are taken mod 2^32, so nothing seams as the phase wraps.
+  The first draft used a full second noise octave counter-drifting at half
+  the cell size. That overflowed the chip (8,188 of 7,680 LC; the octave
+  alone was +1,238 LUT), so it was replaced.
+- Two-way Drift: speed = |K2 − 512| / 4 (deadband ±8), so presets keep their
+  v0.1/v0.2 speeds. Right of centre rises, as the old one-way drift did.
+- Centre zoom: both lattices start each line at cell 256 − (width/2)·step,
+  and each frame at the drift phase − (height/2)·step. The height is
+  captured on active lines. Scale now zooms about the screen centre, not the
+  top-left corner. The x lattice never wraps (columns 16–496 at any scale).
+- Quake: above 75% of the glided P12, a 24-bit LFSR (8 steps a line) starts
+  a new slab on 1 line in 16 (and on the first line) with a random offset.
+  The slab's offset × gain (0 → ⅛ of the width across the top quarter; a
+  serial shift-add in the per-line sequencer) adds to the shear. Slabs
+  average ~16 lines, and every frame is different.
+- Period always shows: S9 Shade (the old "Same") lifts the tone key of
+  every other band by 24/255, so the bands read even at Skew 0.
+- Latency unchanged at 30, the same in all modes.
 
 ## v0.2.0 changes (from the v0.1.2 review)
 
@@ -78,4 +108,10 @@ HD Analog 77.6, HD HDMI 78.1, HD Dual 80.1 MHz; SD Analog 75.5, SD HDMI 85.8,
 SD Dual 88.3 MHz. About 5,680 LC (74%), 11/32 EBR (10 luma line buffer, 1
 sine ROM). yosys `emulate_transparency` count 0 (v0.1.2: 1).
 
-HW status: v0.2.0 not flashed yet.
+v0.3.0 build (2026-10-12): all 6 configs pass on seed 1. HD Analog 86.1,
+HD HDMI 80.7, HD Dual 85.3 MHz; SD Analog 76.7, SD HDMI 80.5, SD Dual
+83.8 MHz. About 6,595 LC (86%), 11/32 EBR.
+
+HW status: v0.2.0 flashed by Ron on 2026-10-12 (no issues reported); v0.3.0 not flashed yet.
+To roll back: `git checkout ccc8b8b -- programs/ron/catalogue-combo/tremor`
+and rebuild, or flash `.tremor_work/v0.2.0/tremor.vmprog` directly.

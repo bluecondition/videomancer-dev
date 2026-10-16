@@ -6,11 +6,12 @@
 # interaction.  See stratamix.vhd.
 
 [program]
-program_id = "com.ron.stratamix"
+processing_delay_clks = 32
+program_id = "com.czartroniks.stratamix"
 program_name = "Stratamix"
-program_version = "0.1.0"
+program_version = "0.2.1"
 abi_version = ">=1.0,<2.0"
-author = "ron"
+author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Distortion", "Mixer", "Stylize"]
 program_type = "processing"
@@ -41,12 +42,8 @@ suffix_label = "%"
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
 name_label = "Levels"
-control_mode = "linear"
-display_min_value = 1
-display_max_value = 6
-initial_value = 400
-display_float_digits = 0
-suffix_label = ""
+value_labels = ["2", "4", "8", "16", "32", "64"]
+initial_value_label = "8"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
@@ -145,7 +142,7 @@ linear_potentiometer_12 = 200
 name = "Relief Map"
 rotary_potentiometer_1 = 650
 rotary_potentiometer_2 = 600
-rotary_potentiometer_3 = 550
+rotary_potentiometer_3 = 430
 rotary_potentiometer_4 = 700
 rotary_potentiometer_5 = 1000
 rotary_potentiometer_6 = 900

@@ -5,15 +5,16 @@
 # switches and slider set the interaction.  See tearcut.vhd.
 
 [program]
-program_id = "com.ron.tearcut"
+processing_delay_clks = 20
+program_id = "com.czartroniks.tearcut"
 program_name = "Tearcut"
-program_version = "0.1.0"
+program_version = "0.2.1"
 abi_version = ">=1.0,<2.0"
-author = "ron"
+author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Glitch", "Stylize"]
 program_type = "processing"
-description = "Edge-detected line drawing torn per band or waved, with moshed blocks, blended over the untorn picture."
+description = "Edge-detected line drawing torn per band or waved, with moshed blocks, inked over paper or the untorn picture."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
@@ -47,8 +48,8 @@ initial_value_label = "16 px"
 parameter_id = "rotary_potentiometer_4"
 name_label = "Density"
 control_mode = "linear"
-display_min_value = 0
-display_max_value = 100
+display_min_value = 5
+display_max_value = 98
 initial_value = 300
 display_float_digits = 1
 suffix_label = "%"
@@ -57,8 +58,8 @@ suffix_label = "%"
 parameter_id = "rotary_potentiometer_5"
 name_label = "Tear"
 control_mode = "linear"
-display_min_value = 0
-display_max_value = 255
+display_min_value = 8
+display_max_value = 518
 initial_value = 400
 display_float_digits = 0
 suffix_label = " px"

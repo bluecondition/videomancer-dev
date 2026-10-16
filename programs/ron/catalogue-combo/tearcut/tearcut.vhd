@@ -1,3 +1,9 @@
+-- Copyright (C) 2026 czartroniks
+-- SPDX-License-Identifier: GPL-3.0-only
+--
+-- This file is part of Videomancer Community Programs.
+-- See LICENSE file in the repository root for full license text.
+--
 -- Tearcut: catalogue combo #115 (seed 20260926) -- datamosh / block
 -- displacement + scanline shear / horizontal tearing + edge detect.  Two
 -- knobs each; the switches and the slider decide how they combine.
@@ -5,22 +11,30 @@
 --   K1 Gain     edge gain
 --   K2 Thresh   edges below this are dropped
 --   K3 Block    block size 8 .. 64 px
---   K4 Density  fraction of blocks moshed
---   K5 Tear     tear amplitude (+-255 px)
+--   K4 Density  fraction of blocks moshed, ~5% .. ~98%
+--   K5 Tear     tear amplitude, +-8 .. +-518 px
 --   K6 Bands    tear band height 2 / 4 / 8 / 16 lines (Random) or the
---               wave period (Wave)
+--               wave period 64 / 128 / 256 / 512 lines (Wave)
 --
---   S7  Edges   white / tinted with the picture's colour
+--   S7  Edges   white / tinted (picture chroma at double saturation)
 --   S8  Tear    random per band / triangle wave down the picture
 --   S9  Blocks  plain / moshed blocks go negative
 --   S10 Mosh    shift / hold (block repeats its first column)
 --   S11 Ink     light edges on dark / dark edges on light
---   P12 Blend   edge picture (0) .. the picture with edges over it (100)
+--   P12 Blend   edges on paper (0) .. edges over the picture (100)
 --
 -- Edge = |gx| + |gy| from the input and the Y line buffer, written as an
 -- 8-bit edge line and read back one line later at the block-displaced,
 -- torn address; the picture itself (dry ring) is never torn, so the edges
--- slide over it.  Latency 18 clocks, all modes, blanking-gated.
+-- slide over it.  Background = paper .. picture (Blend), then the edge
+-- strength keys the ink over it.  No edges in the C_EDGE side columns or on
+-- a field's first line.  Latency 19 clocks, all modes, blanking-gated.
+--
+-- v0.2.0: blend keeps the edges at 100%, mosh key = block row & column with
+-- a per-roll seed after the first round (v0.1 aliased at 8 px in HD and
+-- every re-roll was a diagonal copy), wave period at 16 ln, negative
+-- 64 <-> 940 with mirrored chroma, tinted ink luma 768, Density / Tear
+-- floors, no_rw_check on every RAM.
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -33,19 +47,17 @@ use work.core_pkg.all;
 use work.all;
 
 architecture tearcut of program_top is
+    -- IO-align pad: 1 register stage after the program's own output so the
+    -- data_in -> data_out latency (19 + 1 = 20 clocks) is a multiple of 4,
+    -- as the SDK requires; must match processing_delay_clks in the TOML.
+    constant C_PROCESSING_DELAY_CLKS : natural := 20;
+    signal s_io_align_in : t_video_stream_yuv444_30b;
+    type t_io_align_pad is array (0 to 0) of t_video_stream_yuv444_30b;
+    signal s_io_align_pad : t_io_align_pad;
 
-    constant C_LAT : integer := 18;
-
-    function f_clamp10(v : signed) return unsigned is
-    begin
-        if v < 0 then
-            return to_unsigned(0, 10);
-        elsif v > 1023 then
-            return to_unsigned(1023, 10);
-        else
-            return unsigned(v(9 downto 0));
-        end if;
-    end function;
+    constant C_LAT  : integer := 19;
+    constant C_EDGE : integer := 12;
+    constant C_RATE : integer := 180;   -- re-roll every C_RATE + 1 fields (~3 s)
 
     function f_round1(k : unsigned(15 downto 0)) return unsigned is
         variable t : unsigned(15 downto 0);
@@ -73,6 +85,10 @@ architecture tearcut of program_top is
     signal lbY0, lbY1 : t_lb_y := (others => "0001000000");
     signal lbE0, lbE1 : t_lb_e := (others => x"00");
     signal ring : t_ring := (others => x"04080200");
+    -- collision-free: Y reads x while writing x - 1, E banks alternate by
+    -- line (a write-bank collision only hits the discarded read), ring w - 8
+    attribute no_rw_check : boolean;
+    attribute no_rw_check of lbY0, lbY1, lbE0, lbE1, ring : signal is true;
     signal s_rdY0, s_rdY1 : std_logic_vector(9 downto 0) := (others => '0');
     signal s_rdE0, s_rdE1 : std_logic_vector(7 downto 0) := x"00";
     signal s_ring_q : std_logic_vector(31 downto 0) := x"04080200";
@@ -82,23 +98,24 @@ architecture tearcut of program_top is
     signal s_k_gain, s_k_thr, s_k_block, s_k_dens, s_k_tear, s_k_bands : unsigned(9 downto 0);
     signal s_sw_tint, s_sw_wave, s_sw_neg, s_sw_hold, s_sw_dark : std_logic;
     signal s_p_blend : unsigned(9 downto 0);
-    signal s_sw_band : std_logic := '0';
-    signal s_k_rate : unsigned(9 downto 0) := to_unsigned(600, 10);
-    signal s_tear : unsigned(7 downto 0) := (others => '0');
+    signal s_lk_g, s_lk_d, s_lk_t : unsigned(9 downto 0) := (others => '0');
+    signal s_lw     : unsigned(10 downto 0) := to_unsigned(720, 11);
+    signal s_hi     : unsigned(10 downto 0) := to_unsigned(708, 11);
+    signal s_tear   : unsigned(8 downto 0) := (others => '0');
     signal s_bsh : unsigned(2 downto 0) := (others => '0');
-    signal s_lstep : unsigned(1 downto 0) := "11";
     signal s_tkey : unsigned(15 downto 0) := (others => '0');
     signal s_th1 : unsigned(15 downto 0) := (others => '0');
     signal s_tri : unsigned(8 downto 0) := (others => '0');
-    signal s_tp : signed(17 downto 0) := (others => '0');
-    signal s_tear_row : signed(9 downto 0) := (others => '0');
+    signal s_tp : signed(18 downto 0) := (others => '0');
+    signal s_tear_row : signed(10 downto 0) := (others => '0');
     signal s_tstep : unsigned(2 downto 0) := "111";
-    signal s_gain, s_thr, s_blend, s_shift, s_dens : unsigned(7 downto 0) := (others => '0');
+    signal s_thr, s_blend, s_shift, s_dens : unsigned(7 downto 0) := (others => '0');
+    signal s_gain   : unsigned(8 downto 0) := (others => '0');
     signal s_bs     : unsigned(2 downto 0) := to_unsigned(4, 3);       -- block shift 3..6
     signal s_bmask  : unsigned(10 downto 0) := (others => '0');
-    signal s_roll   : unsigned(15 downto 0) := (others => '0');
+    signal s_roll, s_sd, s_seed : unsigned(15 downto 0) := (others => '0');
     signal s_rate_cnt : unsigned(7 downto 0) := (others => '0');
-    signal s_vstep  : unsigned(1 downto 0) := "11";
+    signal s_vstep  : unsigned(2 downto 0) := "111";
 
     -- tracking
     signal s_rx, s_line, s_line_width : unsigned(10 downto 0) := to_unsigned(720, 11);
@@ -107,10 +124,11 @@ architecture tearcut of program_top is
     signal s_wpar, s_rbank : std_logic := '0';
     signal s_wr_x   : unsigned(10 downto 0) := (others => '0');
     signal s_in_avid : std_logic := '0';
-    signal s_rowkey : unsigned(15 downto 0) := (others => '0');
+    signal s_rowkey : unsigned(7 downto 0) := (others => '0');
+    signal s_top    : std_logic := '1';
 
     -- edge side (stages 1..8)
-    signal s_in_y, s_in_u, s_in_v : unsigned(9 downto 0) := (others => '0');
+    signal s_in_y   : unsigned(9 downto 0) := (others => '0');
     signal s_y2     : unsigned(9 downto 0) := (others => '0');
     signal s_gx2    : signed(10 downto 0) := (others => '0');
     signal s_prev2  : unsigned(9 downto 0) := (others => '0');
@@ -118,8 +136,9 @@ architecture tearcut of program_top is
     signal s_gx3, s_gy3 : signed(10 downto 0) := (others => '0');
     signal s_ax4, s_ay4 : unsigned(9 downto 0) := (others => '0');
     signal s_sum5   : unsigned(10 downto 0) := (others => '0');
-    signal s_pe6    : unsigned(17 downto 0) := (others => '0');
-    signal s_e7     : signed(12 downto 0) := (others => '0');
+    signal s_pe6    : unsigned(18 downto 0) := (others => '0');
+    signal s_e7     : signed(14 downto 0) := (others => '0');
+    signal s_side7  : std_logic := '0';
     signal s_e8     : unsigned(7 downto 0) := (others => '0');
     type t_wx is array (1 to 7) of unsigned(10 downto 0);
     signal s_wx : t_wx := (others => (others => '0'));
@@ -138,28 +157,27 @@ architecture tearcut of program_top is
     signal s_bg8    : std_logic := '0';
     type t_xd is array (2 to 6) of unsigned(10 downto 0);
     signal s_xd     : t_xd := (others => (others => '0'));
-    signal s_moshd  : std_logic_vector(7 to 15) := (others => '0');
+    signal s_moshd  : std_logic_vector(7 to 16) := (others => '0');
 
-    -- display side (stages 9..18)
+    -- display side (stages 9..19)
     signal s_a_bg, s_a_rbank : std_logic := '0';
     signal s_ed10   : unsigned(7 downto 0) := (others => '0');
     signal s_dy10, s_du10, s_dv10 : unsigned(9 downto 0) := (others => '0');
-    signal s_ye11   : unsigned(9 downto 0) := (others => '0');
-    signal s_cu11, s_cv11 : signed(10 downto 0) := (others => '0');
-    signal s_ed11   : unsigned(7 downto 0) := (others => '0');
-    signal s_dy11, s_du11, s_dv11 : unsigned(9 downto 0) := (others => '0');
-    signal s_ye12   : unsigned(9 downto 0) := (others => '0');
-    signal s_pu12, s_pv12 : signed(19 downto 0) := (others => '0');
-    signal s_dy12, s_du12, s_dv12 : unsigned(9 downto 0) := (others => '0');
-    signal s_ye13, s_ue13, s_ve13 : unsigned(9 downto 0) := (others => '0');
-    signal s_dy13, s_du13, s_dv13 : unsigned(9 downto 0) := (others => '0');
-    signal s_by14, s_bu14, s_bv14 : signed(10 downto 0) := (others => '0');
-    signal s_ye14, s_ue14, s_ve14 : unsigned(9 downto 0) := (others => '0');
-    signal s_py15, s_pu15, s_pv15 : signed(19 downto 0) := (others => '0');
-    signal s_ye15, s_ue15, s_ve15 : unsigned(9 downto 0) := (others => '0');
+    signal s_pap11, s_iny11, s_inu11, s_inv11 : unsigned(9 downto 0) := (others => '0');
+    signal s_dy11, s_du11, s_dv11 : signed(10 downto 0) := (others => '0');
+    signal s_a11, s_a12, s_a13, s_a14 : unsigned(7 downto 0) := (others => '0');
+    signal s_py12, s_pu12, s_pv12 : signed(19 downto 0) := (others => '0');
+    signal s_pap12, s_iny12, s_inu12, s_inv12 : unsigned(9 downto 0) := (others => '0');
+    signal s_by13, s_bu13, s_bv13 : unsigned(9 downto 0) := (others => '0');
+    signal s_iny13, s_inu13, s_inv13 : unsigned(9 downto 0) := (others => '0');
+    signal s_iy14, s_iu14, s_iv14 : signed(10 downto 0) := (others => '0');
+    signal s_by14, s_bu14, s_bv14 : unsigned(9 downto 0) := (others => '0');
+    signal s_qy15, s_qu15, s_qv15 : signed(19 downto 0) := (others => '0');
+    signal s_by15, s_bu15, s_bv15 : unsigned(9 downto 0) := (others => '0');
     signal s_y16, s_u16, s_v16 : unsigned(9 downto 0) := (others => '0');
     signal s_y17, s_u17, s_v17 : unsigned(9 downto 0) := (others => '0');
     signal s_y18, s_u18, s_v18 : unsigned(9 downto 0) := (others => '0');
+    signal s_y19, s_u19, s_v19 : unsigned(9 downto 0) := (others => '0');
 
     type t_bit_shift is array (0 to C_LAT - 1) of std_logic;
     signal s_hsync_sr : t_bit_shift := (others => '1');
@@ -182,12 +200,12 @@ begin
     s_sw_dark <= registers_in(6)(4);
     s_p_blend <= unsigned(registers_in(7));
 
-    -- dry ring: data_in delayed 10 (q at stage 10)
+    -- dry ring: data_in delayed 9 (q at stage 9, registered at stage 10)
     p_ring : process(clk)
     begin
         if rising_edge(clk) then
             s_ring_w <= s_ring_w + 1;
-            s_ring_q <= ring(to_integer(s_ring_w - 9));
+            s_ring_q <= ring(to_integer(s_ring_w - 8));
             ring(to_integer(s_ring_w)) <= "00" & data_in.y & data_in.u & data_in.v;
         end if;
     end process;
@@ -196,11 +214,12 @@ begin
     -- Control, tracking, edge side
     --------------------------------------------------------------------------
     p_ctrl : process(clk)
+        variable v_a : signed(10 downto 0);
     begin
         if rising_edge(clk) then
             s_prev_hsync_n <= data_in.hsync_n; s_prev_vsync_n <= data_in.vsync_n; s_prev_avid <= data_in.avid;
             if data_in.avid = '1' then s_rx <= s_rx + 1; s_saw_active <= '1'; else s_rx <= (others => '0'); end if;
-            s_in_y <= unsigned(data_in.y); s_in_u <= unsigned(data_in.u); s_in_v <= unsigned(data_in.v);
+            s_in_y <= unsigned(data_in.y);
             s_in_avid <= data_in.avid;
             if s_in_avid = '1' then s_wr_x <= s_wr_x + 1; else s_wr_x <= (others => '0'); end if;
 
@@ -212,35 +231,38 @@ begin
             -- stage 3: vertical gradient
             s_gy3 <= signed('0' & s_y2) - signed('0' & s_prev2);
             s_gx3 <= s_gx2;
-            -- stage 4: abs
-            if s_gx3 < 0 then s_ax4 <= unsigned(resize(-s_gx3, 10)); else s_ax4 <= unsigned(resize(s_gx3, 10)); end if;
-            if s_gy3 < 0 then s_ay4 <= unsigned(resize(-s_gy3, 10)); else s_ay4 <= unsigned(resize(s_gy3, 10)); end if;
+            -- stage 4: abs (negate at full width, then slice)
+            if s_gx3 < 0 then v_a := -s_gx3; else v_a := s_gx3; end if;
+            s_ax4 <= unsigned(v_a(9 downto 0));
+            if s_gy3 < 0 then v_a := -s_gy3; else v_a := s_gy3; end if;
+            s_ay4 <= unsigned(v_a(9 downto 0));
             -- stage 5: sum
             s_sum5 <= resize(s_ax4, 11) + resize(s_ay4, 11);
             -- stage 6: gain
             s_pe6 <= s_sum5(10 downto 1) * s_gain;
-            -- stage 7: threshold
-            s_e7 <= signed(resize(s_pe6(17 downto 5), 13)) - signed(resize(s_thr, 13));
+            -- stage 7: threshold; the capture's black side columns and a
+            -- field's first line draw no edge
+            s_e7 <= signed(resize(s_pe6(18 downto 5), 15)) - signed(resize(s_thr, 15));
+            if s_wx(6) < C_EDGE or s_wx(6) >= s_hi or s_top = '1' then s_side7 <= '1'; else s_side7 <= '0'; end if;
             -- stage 8: 8-bit edge
-            if s_e7 < 0 then s_e8 <= (others => '0');
+            if s_e7 < 0 or s_side7 = '1' then s_e8 <= (others => '0');
             elsif s_e7 > 255 then s_e8 <= x"FF";
             else s_e8 <= unsigned(s_e7(7 downto 0)); end if;
             s_wx(1) <= s_rx; s_wp(1) <= s_wpar; s_wc(1) <= data_in.avid;
             for i in 2 to 7 loop s_wx(i) <= s_wx(i - 1); s_wp(i) <= s_wp(i - 1); s_wc(i) <= s_wc(i - 1); end loop;
             s_wx8 <= s_wx(7); s_wp8 <= s_wp(7); s_we8 <= s_wc(7);
 
-            -- per-frame decode
+            -- per-frame decode (one small op per state)
             case to_integer(s_vstep) is
                 when 0 =>
-                    s_gain  <= s_k_gain(9 downto 2);
                     s_thr   <= s_k_thr(9 downto 2);
                     s_blend <= s_p_blend(9 downto 2);
                     s_bs    <= resize(s_k_block(9 downto 8), 3) + 3;
                     s_shift <= to_unsigned(200, 8);
-                    s_dens  <= s_k_dens(9 downto 2);
-                    s_tear  <= s_k_tear(9 downto 2);
                     s_bsh   <= resize(s_k_bands(9 downto 8), 3) + 1;
-                    if s_rate_cnt >= resize(not s_k_rate(9 downto 3), 8) then
+                    s_lk_g <= s_k_gain; s_lk_d <= s_k_dens; s_lk_t <= s_k_tear;
+                    s_lw    <= s_line_width;
+                    if s_rate_cnt >= C_RATE then
                         s_rate_cnt <= (others => '0');
                         s_roll <= s_roll + 1013;
                     else
@@ -251,7 +273,21 @@ begin
                     for i in 0 to 10 loop
                         if i < to_integer(s_bs) then s_bmask(i) <= '1'; else s_bmask(i) <= '0'; end if;
                     end loop;
-                    s_vstep <= "11";
+                    -- gain x 1.156 keeps v0.1's ink levels under the 876-step key
+                    s_gain  <= resize(s_lk_g(9 downto 2), 9) + resize(s_lk_g(9 downto 5), 9);
+                    s_dens  <= s_lk_d(9 downto 2) - resize(s_lk_d(9 downto 6), 8);
+                    s_tear  <= resize(s_lk_t(9 downto 2), 9) + 4;
+                    s_hi    <= s_lw - C_EDGE;
+                    s_sd    <= f_round1(s_roll xor x"5A3C");
+                    s_vstep <= s_vstep + 1;
+                when 2 =>
+                    s_gain  <= s_gain + resize(s_lk_g(9 downto 7), 9);
+                    s_dens  <= s_dens + 12;
+                    s_sd    <= f_round2(s_sd);
+                    s_vstep <= s_vstep + 1;
+                when 3 =>
+                    s_seed  <= f_round3(s_sd);
+                    s_vstep <= "111";
                 when others => null;
             end case;
 
@@ -263,7 +299,12 @@ begin
                 when 0 =>
                     s_tkey <= x"2C9F" + s_roll + shift_left(resize(shift_right(s_line, to_integer(s_bsh)), 16), 5);
                     -- triangle wave: period 2^(bsh+5) lines
-                    s_tri <= resize(shift_left(s_line, 4 - to_integer(s_bsh(1 downto 0)))(8 downto 0), 9);
+                    case to_integer(s_bsh) is
+                        when 1      => s_tri <= shift_left(s_line, 3)(8 downto 0);
+                        when 2      => s_tri <= shift_left(s_line, 2)(8 downto 0);
+                        when 3      => s_tri <= shift_left(s_line, 1)(8 downto 0);
+                        when others => s_tri <= s_line(8 downto 0);
+                    end case;
                     s_tstep <= s_tstep + 1;
                 when 1 =>
                     s_th1 <= f_round3(f_round1(s_tkey));
@@ -271,19 +312,20 @@ begin
                     s_tstep <= s_tstep + 1;
                 when 2 =>
                     if s_sw_wave = '1' then
-                        s_tp <= (signed(resize(s_tri, 9)) - 128) * signed(resize(s_tear, 9));
+                        s_tp <= (signed(resize(s_tri, 9)) - 128) * signed(resize(s_tear, 10));
                     else
-                        s_tp <= (signed(resize(s_th1(15 downto 8), 9)) - 128) * signed(resize(s_tear, 9));
+                        s_tp <= (signed(resize(s_th1(15 downto 8), 9)) - 128) * signed(resize(s_tear, 10));
                     end if;
                     s_tstep <= s_tstep + 1;
                 when 3 =>
-                    s_tear_row <= resize(shift_right(s_tp, 6), 10);
+                    s_tear_row <= s_tp(16 downto 6);
                     s_tstep <= "111";
                 when others => null;
             end case;
             if data_in.hsync_n = '0' and s_prev_hsync_n = '1' then
                 s_wpar <= not s_wpar; s_rbank <= s_wpar;
-                s_rowkey <= x"6B1D" + s_roll + shift_left(resize(shift_right(s_line, to_integer(s_bs)), 16), 7);
+                s_rowkey <= shift_right(s_line, to_integer(s_bs))(7 downto 0);
+                if s_line = 0 then s_top <= '1'; else s_top <= '0'; end if;
                 s_tstep <= (others => '0');
             end if;
             if data_in.vsync_n = '0' and s_prev_vsync_n = '1' then
@@ -310,17 +352,14 @@ begin
     begin
         if rising_edge(clk) then
             s_x1 <= s_rx;
-            -- stage 2: key = row key + block index (or row key only per band)
-            if s_sw_band = '1' then
-                s_key2 <= s_rowkey;
-            else
-                s_key2 <= s_rowkey + resize(shift_right(s_x1, to_integer(s_bs)), 16);
-            end if;
+            -- stage 2: key = block row & block column (no adder: v0.1's
+            -- row * 128 + column aliased at 8-px blocks in HD)
+            s_key2 <= s_rowkey & shift_right(s_x1, to_integer(s_bs))(7 downto 0);
             s_xd(2) <= s_x1;
             for i in 3 to 6 loop s_xd(i) <= s_xd(i - 1); end loop;
-            -- stages 3..5: hash
+            -- stages 3..5: hash, the roll seed enters after the first round
             s_h3 <= f_round1(s_key2);
-            s_h4 <= f_round2(s_h3);
+            s_h4 <= f_round2(s_h3 xor s_seed);
             s_h5 <= f_round3(s_h4);
             -- stage 6: mosh decision, offset product
             if s_h5(15 downto 8) < s_dens then s_mosh6 <= '1'; else s_mosh6 <= '0'; end if;
@@ -335,7 +374,7 @@ begin
                 s_u7 <= signed(resize(s_xd(6), 13)) + resize(s_tear_row, 13);
             end if;
             s_moshd(7) <= s_mosh6;
-            for i in 8 to 15 loop s_moshd(i) <= s_moshd(i - 1); end loop;
+            for i in 8 to 16 loop s_moshd(i) <= s_moshd(i - 1); end loop;
             -- stage 8: range
             if s_u7 < 0 or s_u7 >= signed(resize(s_line_width, 13)) then s_bg8 <= '1'; else s_bg8 <= '0'; end if;
             s_addr8 <= unsigned(s_u7(10 downto 0));
@@ -376,76 +415,110 @@ begin
     end process;
 
     --------------------------------------------------------------------------
-    -- Display pipeline (stages 9..18)
+    -- Display pipeline (stages 9..19)
     --------------------------------------------------------------------------
     p_pix : process(clk)
-        variable v_y : signed(12 downto 0);
+        variable v_y, v_u, v_v : signed(11 downto 0);
     begin
         if rising_edge(clk) then
-            -- stage 9 ctx / 10 fetch + dry
+            -- stage 9 ctx / 10 fetch + dry (both pixel-aligned at stage 10)
             s_a_bg <= s_bg8; s_a_rbank <= s_rbank;
             if s_a_bg = '1' then s_ed10 <= (others => '0');
             elsif s_a_rbank = '1' then s_ed10 <= unsigned(s_rdE1);
             else s_ed10 <= unsigned(s_rdE0); end if;
             s_dy10 <= unsigned(s_ring_q(29 downto 20)); s_du10 <= unsigned(s_ring_q(19 downto 10)); s_dv10 <= unsigned(s_ring_q(9 downto 0));
-            -- stage 11: edge luma, centred dry chroma
+            -- stage 11: picture - paper, ink, key
             if s_sw_dark = '1' then
-                v_y := to_signed(940, 13) - signed(resize(s_ed10 & "00", 13));
+                s_pap11 <= to_unsigned(940, 10);
+                s_dy11  <= signed('0' & s_dy10) - to_signed(940, 11);
+                if s_sw_tint = '1' then s_iny11 <= to_unsigned(192, 10); else s_iny11 <= to_unsigned(64, 10); end if;
             else
-                v_y := to_signed(64, 13) + signed(resize(s_ed10 & "00", 13));
+                s_pap11 <= to_unsigned(64, 10);
+                s_dy11  <= signed('0' & s_dy10) - to_signed(64, 11);
+                if s_sw_tint = '1' then s_iny11 <= to_unsigned(768, 10); else s_iny11 <= to_unsigned(940, 10); end if;
             end if;
-            if v_y > 940 then v_y := to_signed(940, 13); elsif v_y < 64 then v_y := to_signed(64, 13); end if;
-            s_ye11 <= f_clamp10(v_y);
-            s_cu11 <= signed('0' & s_du10) - to_signed(512, 11);
-            s_cv11 <= signed('0' & s_dv10) - to_signed(512, 11);
-            s_ed11 <= s_ed10; s_dy11 <= s_dy10; s_du11 <= s_du10; s_dv11 <= s_dv10;
-            -- stage 12: tint products
-            s_pu12 <= s_cu11 * signed('0' & s_ed11);
-            s_pv12 <= s_cv11 * signed('0' & s_ed11);
-            s_ye12 <= s_ye11; s_dy12 <= s_dy11; s_du12 <= s_du11; s_dv12 <= s_dv11;
-            -- stage 13: edge chroma
-            if s_sw_tint = '1' then
-                s_ue13 <= f_clamp10(to_signed(512, 13) + resize(shift_right(s_pu12, 7), 13));
-                s_ve13 <= f_clamp10(to_signed(512, 13) + resize(shift_right(s_pv12, 7), 13));
+            s_du11 <= signed('0' & s_du10) - to_signed(512, 11);
+            s_dv11 <= signed('0' & s_dv10) - to_signed(512, 11);
+            -- tinted ink = picture chroma at double saturation, clamped
+            if s_sw_tint = '0' then
+                s_inu11 <= to_unsigned(512, 10); s_inv11 <= to_unsigned(512, 10);
             else
-                s_ue13 <= to_unsigned(512, 10); s_ve13 <= to_unsigned(512, 10);
+                case s_du10(9 downto 8) is
+                    when "00"   => s_inu11 <= (others => '0');
+                    when "11"   => s_inu11 <= (others => '1');
+                    when others => s_inu11 <= s_du10(9) & s_du10(7 downto 0) & '0';
+                end case;
+                case s_dv10(9 downto 8) is
+                    when "00"   => s_inv11 <= (others => '0');
+                    when "11"   => s_inv11 <= (others => '1');
+                    when others => s_inv11 <= s_dv10(9) & s_dv10(7 downto 0) & '0';
+                end case;
             end if;
-            s_ye13 <= s_ye12; s_dy13 <= s_dy12; s_du13 <= s_du12; s_dv13 <= s_dv12;
-            -- stage 14: blend differences (dry - edge)
-            s_by14 <= signed('0' & s_dy13) - signed('0' & s_ye13);
-            s_bu14 <= signed('0' & s_du13) - signed('0' & s_ue13);
-            s_bv14 <= signed('0' & s_dv13) - signed('0' & s_ve13);
-            s_ye14 <= s_ye13; s_ue14 <= s_ue13; s_ve14 <= s_ve13;
-            -- stage 15: blend products
-            s_py15 <= s_by14 * signed('0' & s_blend);
-            s_pu15 <= s_bu14 * signed('0' & s_blend);
-            s_pv15 <= s_bv14 * signed('0' & s_blend);
-            s_ye15 <= s_ye14; s_ue15 <= s_ue14; s_ve15 <= s_ve14;
-            -- stage 16: apply; moshed blocks negative
-            if s_sw_neg = '1' and s_moshd(15) = '1' then
-                s_y16 <= not f_clamp10(signed(resize(s_ye15, 13)) + resize(shift_right(s_py15, 8), 13));
+            s_a11 <= s_ed10;
+            -- stage 12: background products (paper .. picture by Blend)
+            s_py12 <= s_dy11 * signed('0' & s_blend);
+            s_pu12 <= s_du11 * signed('0' & s_blend);
+            s_pv12 <= s_dv11 * signed('0' & s_blend);
+            s_pap12 <= s_pap11; s_iny12 <= s_iny11; s_inu12 <= s_inu11; s_inv12 <= s_inv11;
+            s_a12 <= s_a11;
+            -- stage 13: background (lies between paper and picture: slice)
+            v_y := signed(resize(s_pap12, 12)) + resize(shift_right(s_py12, 8), 12);
+            v_u := to_signed(512, 12) + resize(shift_right(s_pu12, 8), 12);
+            v_v := to_signed(512, 12) + resize(shift_right(s_pv12, 8), 12);
+            s_by13 <= unsigned(v_y(9 downto 0)); s_bu13 <= unsigned(v_u(9 downto 0)); s_bv13 <= unsigned(v_v(9 downto 0));
+            s_iny13 <= s_iny12; s_inu13 <= s_inu12; s_inv13 <= s_inv12; s_a13 <= s_a12;
+            -- stage 14: ink - background
+            s_iy14 <= signed('0' & s_iny13) - signed('0' & s_by13);
+            s_iu14 <= signed('0' & s_inu13) - signed('0' & s_bu13);
+            s_iv14 <= signed('0' & s_inv13) - signed('0' & s_bv13);
+            s_by14 <= s_by13; s_bu14 <= s_bu13; s_bv14 <= s_bv13; s_a14 <= s_a13;
+            -- stage 15: key products
+            s_qy15 <= s_iy14 * signed('0' & s_a14);
+            s_qu15 <= s_iu14 * signed('0' & s_a14);
+            s_qv15 <= s_iv14 * signed('0' & s_a14);
+            s_by15 <= s_by14; s_bu15 <= s_bu14; s_bv15 <= s_bv14;
+            -- stage 16: ink over background (stays between the two, no clamp)
+            v_y := signed(resize(s_by15, 12)) + resize(shift_right(s_qy15, 8), 12);
+            v_u := signed(resize(s_bu15, 12)) + resize(shift_right(s_qu15, 8), 12);
+            v_v := signed(resize(s_bv15, 12)) + resize(shift_right(s_qv15, 8), 12);
+            s_y16 <= unsigned(v_y(9 downto 0)); s_u16 <= unsigned(v_u(9 downto 0)); s_v16 <= unsigned(v_v(9 downto 0));
+            -- stage 17: moshed blocks negative (64 <-> 940, chroma mirrored about 512)
+            if s_sw_neg = '1' and s_moshd(16) = '1' then
+                if s_y16 > 1004 then s_y17 <= (others => '0');
+                else s_y17 <= to_unsigned(1004, 10) - s_y16; end if;
+                if s_u16 = 0 then s_u17 <= (others => '1'); else s_u17 <= unsigned(-signed(s_u16)); end if;
+                if s_v16 = 0 then s_v17 <= (others => '1'); else s_v17 <= unsigned(-signed(s_v16)); end if;
             else
-                s_y16 <= f_clamp10(signed(resize(s_ye15, 13)) + resize(shift_right(s_py15, 8), 13));
-            end if;
-            s_u16 <= f_clamp10(signed(resize(s_ue15, 13)) + resize(shift_right(s_pu15, 8), 13));
-            s_v16 <= f_clamp10(signed(resize(s_ve15, 13)) + resize(shift_right(s_pv15, 8), 13));
-            -- stage 17: gate
-            if s_avid_sr(15) = '1' then
                 s_y17 <= s_y16; s_u17 <= s_u16; s_v17 <= s_v16;
-            else
-                s_y17 <= to_unsigned(64, 10); s_u17 <= to_unsigned(512, 10); s_v17 <= to_unsigned(512, 10);
             end if;
-            -- stage 18: output
-            s_y18 <= s_y17; s_u18 <= s_u17; s_v18 <= s_v17;
+            -- stage 18: blanking gate
+            if s_avid_sr(16) = '1' then
+                s_y18 <= s_y17; s_u18 <= s_u17; s_v18 <= s_v17;
+            else
+                s_y18 <= to_unsigned(64, 10); s_u18 <= to_unsigned(512, 10); s_v18 <= to_unsigned(512, 10);
+            end if;
+            -- stage 19: output
+            s_y19 <= s_y18; s_u19 <= s_u18; s_v19 <= s_v18;
         end if;
     end process p_pix;
 
-    data_out.y       <= std_logic_vector(s_y18);
-    data_out.u       <= std_logic_vector(s_u18);
-    data_out.v       <= std_logic_vector(s_v18);
-    data_out.hsync_n <= s_hsync_sr(C_LAT - 1);
-    data_out.vsync_n <= s_vsync_sr(C_LAT - 1);
-    data_out.field_n <= s_field_sr(C_LAT - 1);
-    data_out.avid    <= s_avid_sr(C_LAT - 1);
+    s_io_align_in.y       <= std_logic_vector(s_y19);
+    s_io_align_in.u       <= std_logic_vector(s_u19);
+    s_io_align_in.v       <= std_logic_vector(s_v19);
+    s_io_align_in.hsync_n <= s_hsync_sr(C_LAT - 1);
+    s_io_align_in.vsync_n <= s_vsync_sr(C_LAT - 1);
+    s_io_align_in.field_n <= s_field_sr(C_LAT - 1);
+    s_io_align_in.avid    <= s_avid_sr(C_LAT - 1);
+
+    -- IO-align pad: video and syncs delayed together, so only the total
+    -- latency changes (19 -> 20).
+    p_io_align_pad : process(clk)
+    begin
+        if rising_edge(clk) then
+            s_io_align_pad(0) <= s_io_align_in;
+        end if;
+    end process p_io_align_pad;
+
+    data_out <= s_io_align_pad(0);
 
 end architecture tearcut;

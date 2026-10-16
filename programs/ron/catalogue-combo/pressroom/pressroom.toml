@@ -2,50 +2,44 @@
 #
 # Three catalogue effects (seed 20260919): ASCII / dither-art / halftone,
 # head-switch noise band, and chroma / luma / difference key.  Two knobs
-# each; switches and slider set the interaction.  See pressroom.vhd.
+# each; switches and slider set the interaction.  See pressroom.vhd and
+# SUMMARY.md (v0.2.0 = finalizing pass).
 
 [program]
-program_id = "com.ron.pressroom"
+processing_delay_clks = 20
+program_id = "com.czartroniks.pressroom"
 program_name = "Pressroom"
-program_version = "0.1.0"
+program_version = "0.2.1"
 abi_version = ">=1.0,<2.0"
-author = "ron"
+author = "czartroniks"
 license = "GPL-3.0"
-categories = ["Dither", "Keyer", "Retro"]
+categories = ["Print", "Mask", "Signal"]
 program_type = "processing"
-description = "Halftone screens keyed into the picture by luma or saturation, with a noisy head-switch band that can break the screen up."
+description = "Halftone keyed into a colour cell mosaic by luma or saturation, torn by a noisy head-switch band that can break the screen."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_1"
 name_label = "Cell"
-control_mode = "linear"
-display_min_value = 4
-display_max_value = 32
-initial_value = 300
-display_float_digits = 0
-suffix_label = " px"
+value_labels = ["4 px", "8 px", "16 px", "32 px"]
+initial_value_label = "8 px"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
 name_label = "Screen"
-control_mode = "linear"
-display_min_value = 0
-display_max_value = 3
-initial_value = 0
-display_float_digits = 0
-suffix_label = ""
+value_labels = ["Dot", "Line", "Diamond", "Square"]
+initial_value_label = "Dot"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
-name_label = "Band"
+name_label = "Band Size"
 control_mode = "linear"
 display_min_value = 0
-display_max_value = 63
-initial_value = 250
-display_float_digits = 0
-suffix_label = " ln"
+display_max_value = 50
+initial_value = 102
+display_float_digits = 1
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
@@ -103,7 +97,7 @@ initial_value_label = "Bottom"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
-name_label = "Band"
+name_label = "Band FX"
 value_labels = ["Noise", "Break"]
 initial_value_label = "Noise"
 
@@ -112,10 +106,14 @@ parameter_id = "linear_potentiometer_12"
 name_label = "Ink"
 control_mode = "linear"
 display_min_value = 0
-display_max_value = 200
+display_max_value = 100
 initial_value = 512
-display_float_digits = 0
+display_float_digits = 1
 suffix_label = "%"
+
+# Presets are hand-written for the v0.2.0 control semantics (P12 Ink now
+# rises toward MORE ink; K3 is a fraction of the frame).  Re-capture them
+# from the device with ./capture_preset.sh once the look is dialled in.
 
 [[preset]]
 name = "Default"
@@ -123,9 +121,9 @@ name = "Default"
 [[preset]]
 name = "Front Page"
 rotary_potentiometer_1 = 200
-rotary_potentiometer_5 = 0
 rotary_potentiometer_3 = 0
-linear_potentiometer_12 = 600
+rotary_potentiometer_5 = 0
+linear_potentiometer_12 = 440
 
 [[preset]]
 name = "Cut Out"
@@ -135,11 +133,11 @@ rotary_potentiometer_5 = 600
 rotary_potentiometer_6 = 400
 toggle_switch_7 = 1
 toggle_switch_8 = 1
-linear_potentiometer_12 = 700
+linear_potentiometer_12 = 400
 
 [[preset]]
 name = "Bad Tracking"
-rotary_potentiometer_3 = 700
+rotary_potentiometer_3 = 400
 rotary_potentiometer_4 = 800
 toggle_switch_9 = 1
 toggle_switch_10 = 1

@@ -2,14 +2,19 @@
 #
 # Two catalogue effects (seed 20260916): Perlin / simplex displacement and
 # oil paint / Kuwahara smoothing.  Three knobs each; switches and slider
-# set the interaction.  See impasto.vhd.
+# set the interaction.  See impasto.vhd and SUMMARY.md.
+# K4 Brush is exponential: 0% = 4 px, 50% = 16 px, 75% = 33 px, 100% = 64 px
+# each side; the vertical brush drags about half that many lines, and K5 Edge
+# sets the step that stops it.  The brush paints colour as well as luma.  P12 Amount: Warp = displacement up to +-255 px; Steer = share
+# of the picture whose pick the noise flips (up to half).
 
 [program]
-program_id = "com.ron.impasto"
+processing_delay_clks = 24
+program_id = "com.czartroniks.impasto"
 program_name = "Impasto"
-program_version = "0.1.3"
+program_version = "0.3.1"
 abi_version = ">=1.0,<2.0"
-author = "ron"
+author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Painterly", "Distortion", "Texture"]
 program_type = "processing"
@@ -51,11 +56,11 @@ suffix_label = "x"
 parameter_id = "rotary_potentiometer_4"
 name_label = "Brush"
 control_mode = "linear"
-display_min_value = 4
-display_max_value = 32
+display_min_value = 0
+display_max_value = 100
 initial_value = 512
-display_float_digits = 0
-suffix_label = " px"
+display_float_digits = 1
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"

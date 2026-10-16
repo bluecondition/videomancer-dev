@@ -5,15 +5,16 @@
 # slider set the interaction.  See vitrail.vhd.
 
 [program]
-program_id = "com.ron.vitrail"
+processing_delay_clks = 8
+program_id = "com.czartroniks.vitrail"
 program_name = "Vitrail"
-program_version = "0.1.0"
+program_version = "0.2.2"
 abi_version = ">=1.0,<2.0"
-author = "ron"
+author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Mirror", "Colorizer", "Glitch"]
 program_type = "processing"
-description = "A strip of the picture mirrored into a kaleidoscope, posterized to a few levels, with a box bloom that can wash to white."
+description = "A strip of the picture mirrored into a kaleidoscope, posterized into flat glass colours, with a bloom that can wash to white."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
@@ -21,11 +22,11 @@ core = "yuv444_30b"
 parameter_id = "rotary_potentiometer_1"
 name_label = "Strip"
 control_mode = "linear"
-display_min_value = 64
-display_max_value = 512
+display_min_value = 0
+display_max_value = 100
 initial_value = 512
-display_float_digits = 0
-suffix_label = " px"
+display_float_digits = 1
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
@@ -43,7 +44,7 @@ name_label = "Thresh"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 600
+initial_value = 660
 display_float_digits = 1
 suffix_label = "%"
 
@@ -51,11 +52,11 @@ suffix_label = "%"
 parameter_id = "rotary_potentiometer_4"
 name_label = "Radius"
 control_mode = "linear"
-display_min_value = 4
-display_max_value = 64
+display_min_value = 0
+display_max_value = 100
 initial_value = 400
-display_float_digits = 0
-suffix_label = " px"
+display_float_digits = 1
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
@@ -71,17 +72,17 @@ suffix_label = ""
 parameter_id = "rotary_potentiometer_6"
 name_label = "Chroma"
 control_mode = "linear"
-display_min_value = 1
-display_max_value = 8
-initial_value = 512
-display_float_digits = 0
-suffix_label = ""
+display_min_value = 0
+display_max_value = 100
+initial_value = 384
+display_float_digits = 1
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
-name_label = "Bloom"
-value_labels = ["Luma", "White"]
-initial_value_label = "Luma"
+name_label = "Wash"
+value_labels = ["Colour", "White"]
+initial_value_label = "Colour"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
@@ -97,7 +98,7 @@ initial_value_label = "Pal Last"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
-name_label = "Axis"
+name_label = "Motion"
 value_labels = ["Fixed", "Sweep"]
 initial_value_label = "Fixed"
 
@@ -117,15 +118,17 @@ initial_value = 250
 display_float_digits = 1
 suffix_label = "%"
 
+# Presets are hand-written (v0.2.0 control mappings); re-capture on hardware.
+
 [[preset]]
 name = "Default"
 
 [[preset]]
 name = "Rose Window"
-rotary_potentiometer_1 = 200
+rotary_potentiometer_1 = 100
 rotary_potentiometer_2 = 512
-rotary_potentiometer_5 = 300
-rotary_potentiometer_6 = 512
+rotary_potentiometer_5 = 140
+rotary_potentiometer_6 = 300
 toggle_switch_10 = 1
 linear_potentiometer_12 = 400
 
@@ -144,8 +147,17 @@ linear_potentiometer_12 = 1023
 name = "Inkwell"
 rotary_potentiometer_1 = 600
 rotary_potentiometer_3 = 500
-rotary_potentiometer_5 = 100
+rotary_potentiometer_5 = 40
 rotary_potentiometer_6 = 0
 toggle_switch_9 = 1
 toggle_switch_11 = 1
 linear_potentiometer_12 = 700
+
+[[preset]]
+name = "Bookmatch"
+rotary_potentiometer_1 = 1023
+rotary_potentiometer_2 = 300
+rotary_potentiometer_4 = 600
+rotary_potentiometer_5 = 400
+rotary_potentiometer_6 = 200
+linear_potentiometer_12 = 350

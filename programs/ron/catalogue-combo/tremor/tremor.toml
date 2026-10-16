@@ -7,13 +7,19 @@
 # v0.2.0: Scale is log (4..512 px, 64 steps per octave), Amount is glided
 # with a squared curve up to a quarter of the width.  The v0.1 defaults and
 # presets were translated to keep their cell sizes and amplitudes.
+# v0.3.0: Drift is two-way about the knob centre (right = rises, as v0.1's
+# drift did; presets translated to the same speeds); the field boils as it
+# drifts (lattice rows slide sideways at random speeds); Scale zooms about
+# the centre; S9 Shade lifts alternate bands; the top quarter of Amount adds
+# the quake.
 
 [program]
-program_id = "com.ron.tremor"
+processing_delay_clks = 32
+program_id = "com.czartroniks.tremor"
 program_name = "Tremor"
-program_version = "0.2.0"
+program_version = "0.3.1"
 abi_version = ">=1.0,<2.0"
-author = "ron"
+author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Glitch", "Colorizer", "Distortion"]
 program_type = "processing"
@@ -35,9 +41,9 @@ suffix_label = "%"
 parameter_id = "rotary_potentiometer_2"
 name_label = "Drift"
 control_mode = "linear"
-display_min_value = 0
+display_min_value = -100
 display_max_value = 100
-initial_value = 150
+initial_value = 584
 display_float_digits = 1
 suffix_label = "%"
 
@@ -96,8 +102,8 @@ initial_value_label = "Saw"
 [[parameter]]
 parameter_id = "toggle_switch_9"
 name_label = "Bands"
-value_labels = ["Same", "Flip"]
-initial_value_label = "Same"
+value_labels = ["Shade", "Flip"]
+initial_value_label = "Shade"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
@@ -127,7 +133,7 @@ name = "Default"
 [[preset]]
 name = "Heat Haze"
 rotary_potentiometer_1 = 586
-rotary_potentiometer_2 = 400
+rotary_potentiometer_2 = 712
 rotary_potentiometer_3 = 0
 rotary_potentiometer_5 = 40
 rotary_potentiometer_6 = 700
@@ -146,7 +152,7 @@ linear_potentiometer_12 = 206
 [[preset]]
 name = "Noise Print"
 rotary_potentiometer_1 = 732
-rotary_potentiometer_2 = 250
+rotary_potentiometer_2 = 636
 rotary_potentiometer_3 = 200
 rotary_potentiometer_4 = 900
 rotary_potentiometer_5 = 850

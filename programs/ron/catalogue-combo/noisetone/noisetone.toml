@@ -1,18 +1,19 @@
 # Noisetone - Program Configuration
 #
 # Catalogue combo #137 (seed 20260927): Perlin / value-noise displacement
-# + gamma curves / S-curve contrast.  See noisetone.vhd.
+# + gamma curves / S-curve contrast.  See noisetone.vhd and SUMMARY.md.
 
 [program]
-program_id = "com.ron.noisetone"
+processing_delay_clks = 32
+program_id = "com.czartroniks.noisetone"
 program_name = "Noisetone"
-program_version = "0.1.0"
+program_version = "0.2.1"
 abi_version = ">=1.0,<2.0"
-author = "ron"
+author = "czartroniks"
 license = "GPL-3.0"
-categories = ["Distortion", "Colorizer", "Glitch"]
+categories = ["Warp", "Noise", "Curve"]
 program_type = "processing"
-description = "Value-noise warp under eight tone curves: the noise can shift the exposure, move luma alone, and the storm slider boils both."
+description = "Value-noise warp over a sweep of tone curves: the noise can also shift the exposure; Storm drives warp and contrast together."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
@@ -20,11 +21,11 @@ core = "yuv444_30b"
 parameter_id = "rotary_potentiometer_1"
 name_label = "Scale"
 control_mode = "linear"
-display_min_value = 4
-display_max_value = 512
-initial_value = 384
-display_float_digits = 0
-suffix_label = " px"
+display_min_value = 0
+display_max_value = 100
+initial_value = 439
+display_float_digits = 1
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
@@ -32,7 +33,7 @@ name_label = "Amount"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 200
+initial_value = 467
 display_float_digits = 1
 suffix_label = "%"
 
@@ -52,8 +53,8 @@ name_label = "Curve"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 7
-initial_value = 512
-display_float_digits = 0
+initial_value = 731
+display_float_digits = 1
 suffix_label = ""
 
 [[parameter]]
@@ -121,19 +122,19 @@ name = "Default"
 
 [[preset]]
 name = "Heat Shimmer"
-rotary_potentiometer_1 = 300
-rotary_potentiometer_2 = 80
+rotary_potentiometer_1 = 293
+rotary_potentiometer_2 = 296
 rotary_potentiometer_3 = 700
-rotary_potentiometer_4 = 100
+rotary_potentiometer_4 = 0
 rotary_potentiometer_5 = 140
 linear_potentiometer_12 = 60
 
 [[preset]]
 name = "Patchy Print"
-rotary_potentiometer_1 = 700
-rotary_potentiometer_2 = 120
+rotary_potentiometer_1 = 732
+rotary_potentiometer_2 = 362
 rotary_potentiometer_3 = 540
-rotary_potentiometer_4 = 1000
+rotary_potentiometer_4 = 1023
 rotary_potentiometer_5 = 400
 toggle_switch_7 = 1
 toggle_switch_10 = 1
@@ -142,10 +143,10 @@ linear_potentiometer_12 = 300
 
 [[preset]]
 name = "Colour Slip"
-rotary_potentiometer_1 = 500
-rotary_potentiometer_2 = 400
+rotary_potentiometer_1 = 439
+rotary_potentiometer_2 = 661
 rotary_potentiometer_3 = 380
-rotary_potentiometer_4 = 640
+rotary_potentiometer_4 = 876
 rotary_potentiometer_5 = 260
 toggle_switch_8 = 1
 toggle_switch_9 = 1

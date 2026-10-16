@@ -5,15 +5,16 @@
 # the interaction.  See trapquant.vhd.
 
 [program]
-program_id = "com.ron.trapquant"
+processing_delay_clks = 16
+program_id = "com.czartroniks.trapquant"
 program_name = "Trapquant"
-program_version = "0.1.4"
+program_version = "0.2.2"
 abi_version = ">=1.0,<2.0"
-author = "ron"
+author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Retro", "Glitch", "Stylize"]
 program_type = "processing"
-description = "Keystoned picture (top/bottom width, slide, tilt) posterized with dither, in source or screen space; bands ride the trapezoid."
+description = "Straight-sided keystone (top/bottom width, slide, tilt, mirror tiles) posterized with centred dither; bands ride the trapezoid."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
@@ -23,7 +24,7 @@ name_label = "Top"
 control_mode = "linear"
 display_min_value = 25
 display_max_value = 225
-initial_value = 300
+initial_value = 484
 display_float_digits = 0
 suffix_label = "%"
 
@@ -33,7 +34,7 @@ name_label = "Bottom"
 control_mode = "linear"
 display_min_value = 25
 display_max_value = 225
-initial_value = 500
+initial_value = 289
 display_float_digits = 0
 suffix_label = "%"
 
@@ -41,8 +42,8 @@ suffix_label = "%"
 parameter_id = "rotary_potentiometer_3"
 name_label = "Slide"
 control_mode = "linear"
-display_min_value = -100
-display_max_value = 100
+display_min_value = -50
+display_max_value = 50
 initial_value = 512
 display_float_digits = 1
 suffix_label = "%"
@@ -53,7 +54,7 @@ name_label = "Luma"
 control_mode = "linear"
 display_min_value = 1
 display_max_value = 8
-initial_value = 400
+initial_value = 438
 display_float_digits = 0
 suffix_label = " b"
 
@@ -63,7 +64,7 @@ name_label = "Chroma"
 control_mode = "linear"
 display_min_value = 1
 display_max_value = 8
-initial_value = 300
+initial_value = 292
 display_float_digits = 0
 suffix_label = " b"
 
@@ -117,14 +118,18 @@ initial_value = 512
 display_float_digits = 1
 suffix_label = "%"
 
+# Presets translated from v0.1.4 so each keeps its picture: K1/K2 are now the
+# real widths (v0.1 knobs set the source step, i.e. 1/width), Slide is a
+# fraction of the width, and K4/K5 sit at their bit-depth zone centres.
+
 [[preset]]
 name = "Default"
 
 [[preset]]
 name = "Road Ahead"
-rotary_potentiometer_1 = 100
-rotary_potentiometer_2 = 900
-rotary_potentiometer_4 = 256
+rotary_potentiometer_1 = 690
+rotary_potentiometer_2 = 0
+rotary_potentiometer_4 = 292
 rotary_potentiometer_6 = 900
 toggle_switch_7 = 1
 toggle_switch_9 = 1
@@ -132,10 +137,10 @@ linear_potentiometer_12 = 700
 
 [[preset]]
 name = "Screen Bands"
-rotary_potentiometer_1 = 600
-rotary_potentiometer_2 = 200
-rotary_potentiometer_4 = 128
-rotary_potentiometer_5 = 128
+rotary_potentiometer_1 = 168
+rotary_potentiometer_2 = 569
+rotary_potentiometer_4 = 146
+rotary_potentiometer_5 = 146
 rotary_potentiometer_6 = 0
 toggle_switch_8 = 1
 toggle_switch_10 = 1
@@ -143,10 +148,10 @@ linear_potentiometer_12 = 300
 
 [[preset]]
 name = "Soft Lean"
-rotary_potentiometer_1 = 400
-rotary_potentiometer_2 = 400
-rotary_potentiometer_3 = 700
-rotary_potentiometer_4 = 800
+rotary_potentiometer_1 = 546
+rotary_potentiometer_2 = 1023
+rotary_potentiometer_3 = 612
+rotary_potentiometer_4 = 877
 rotary_potentiometer_6 = 300
 toggle_switch_11 = 1
 linear_potentiometer_12 = 900

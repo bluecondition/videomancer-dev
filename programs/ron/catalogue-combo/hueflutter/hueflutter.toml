@@ -2,18 +2,21 @@
 #
 # Three catalogue effects (seed 20260925, #111): hue rotation / saturation,
 # magnetic warp (wobble) and ordered dithering.  Two knobs each; switches and
-# slider set the interaction.  See hueflutter.vhd.
+# slider set the interaction.  See hueflutter.vhd and SUMMARY.md.
+# v0.2.0: Spin is squared (P12 600 -> 596, 800 -> 656, 200 -> 361 keep the
+# v0.1 speeds); preset depths moved off the zone boundaries (hysteresis).
 
 [program]
-program_id = "com.ron.hueflutter"
+processing_delay_clks = 32
+program_id = "com.czartroniks.hueflutter"
 program_name = "Hueflutter"
-program_version = "0.1.3"
+program_version = "0.2.1"
 abi_version = ">=1.0,<2.0"
-author = "ron"
+author = "czartroniks"
 license = "GPL-3.0"
-categories = ["Glitch", "Colorizer", "Retro"]
+categories = ["Color", "Warp", "Pixel"]
 program_type = "processing"
-description = "Luma-band wobble with a hue-rotated, saturation-scaled picture and a 2x2 dithered quantizer; hue can ride the wobble phase."
+description = "Luma-band wobble of a hue-spun, saturation-scaled picture, posterized with a 2x2 dither; hue can ride the wobble phase."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
@@ -21,9 +24,9 @@ core = "yuv444_30b"
 parameter_id = "rotary_potentiometer_1"
 name_label = "Wobble"
 control_mode = "linear"
-display_min_value = -255
+display_min_value = 0
 display_max_value = 255
-initial_value = 700
+initial_value = 450
 display_float_digits = 0
 suffix_label = " px"
 
@@ -80,8 +83,8 @@ suffix_label = " b"
 [[parameter]]
 parameter_id = "toggle_switch_7"
 name_label = "Bands"
-value_labels = ["Same", "Split"]
-initial_value_label = "Split"
+value_labels = ["Phase", "Amp"]
+initial_value_label = "Amp"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
@@ -113,7 +116,7 @@ name_label = "Spin"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 600
+initial_value = 596
 display_float_digits = 1
 suffix_label = "%"
 
@@ -128,14 +131,14 @@ rotary_potentiometer_4 = 400
 rotary_potentiometer_5 = 1023
 rotary_potentiometer_6 = 1023
 toggle_switch_10 = 1
-linear_potentiometer_12 = 800
+linear_potentiometer_12 = 656
 
 [[preset]]
 name = "Grey Static"
 rotary_potentiometer_1 = 200
 rotary_potentiometer_2 = 900
 rotary_potentiometer_4 = 0
-rotary_potentiometer_5 = 128
+rotary_potentiometer_5 = 192
 toggle_switch_8 = 0
 toggle_switch_11 = 1
 linear_potentiometer_12 = 512
@@ -145,8 +148,13 @@ name = "Posterwave"
 rotary_potentiometer_1 = 350
 rotary_potentiometer_3 = 512
 rotary_potentiometer_4 = 350
-rotary_potentiometer_5 = 256
-rotary_potentiometer_6 = 128
+rotary_potentiometer_5 = 320
+rotary_potentiometer_6 = 192
 toggle_switch_7 = 0
 toggle_switch_11 = 0
-linear_potentiometer_12 = 200
+linear_potentiometer_12 = 361
+
+[firmware]
+# nextpnr placement seed for the stock LZX build (one seed, all 8 configs):
+# seed 1 stalled nextpnr's router1 on SD Dual; seed 3 builds all 8.
+seed = 3

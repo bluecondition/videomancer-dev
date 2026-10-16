@@ -1,15 +1,16 @@
-# Outliner - catalogue combo #13: edge detect + split-screen + invert.  See outliner.vhd.
+# Outliner - catalogue combo #13: 2-D edge detect + split-screen + invert.  See outliner.vhd and SUMMARY.md.
 
 [program]
-program_id = "com.ron.outliner"
+processing_delay_clks = 28
+program_id = "com.czartroniks.outliner"
 program_name = "Outliner"
-program_version = "0.1.0"
+program_version = "0.2.1"
 abi_version = ">=1.0,<2.0"
-author = "ron"
+author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Edges", "Mask", "Color"]
 program_type = "processing"
-description = "Edge lines on one side of a seam or in alternating strips, negatives and bit-planes on the other, and a sweeping seam."
+description = "Edge lines on one side of a seam or in strips, a negative or bit-plane on the other; the slider sweeps the seam."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
@@ -19,14 +20,14 @@ name_label = "Threshold"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 120
+initial_value = 310
 display_float_digits = 1
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
 name_label = "Kernel"
-value_labels = ["Roberts", "Wide", "DoG", "DoG"]
+value_labels = ["Roberts", "Sobel", "Wide", "DoG"]
 initial_value_label = "Roberts"
 
 [[parameter]]
@@ -57,7 +58,7 @@ name_label = "Mix"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 0
+initial_value = 1023
 display_float_digits = 1
 suffix_label = "%"
 
@@ -106,8 +107,8 @@ name = "Default"
 
 [[preset]]
 name = "Blueprint"
-rotary_potentiometer_1 = 80
-rotary_potentiometer_2 = 300
+rotary_potentiometer_1 = 240
+rotary_potentiometer_2 = 600
 rotary_potentiometer_3 = 0
 toggle_switch_11 = 1
 

@@ -1,30 +1,31 @@
 # Hatchglass - Program Configuration
 #
 # Catalogue combo #93 (seed 20260924): kaleidoscope + crosshatch + key.
-# See hatchglass.vhd.
+# See hatchglass.vhd and SUMMARY.md.
 
 [program]
-program_id = "com.ron.hatchglass"
+processing_delay_clks = 24
+program_id = "com.czartroniks.hatchglass"
 program_name = "Hatchglass"
-program_version = "0.1.0"
+program_version = "0.3.1"
 abi_version = ">=1.0,<2.0"
-author = "ron"
+author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Geometry", "Stylize", "Keyer"]
 program_type = "processing"
-description = "Nested mirror folds of a sliding strip, redrawn as crosshatch where a luma or sat key allows (or the reverse), on paper or over"
+description = "Kaleidoscope panes redrawn as tonal crosshatch; the slider sweeps a luma or saturation key from picture to full engraving"
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_1"
-name_label = "Segment"
+name_label = "Ink"
 control_mode = "linear"
-display_min_value = 64
-display_max_value = 1024
-initial_value = 500
+display_min_value = 0
+display_max_value = 100
+initial_value = 128
 display_float_digits = 0
-suffix_label = "px"
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
@@ -32,39 +33,39 @@ name_label = "Slide"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 560
-display_float_digits = 1
+initial_value = 108
+display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
 name_label = "Weight"
 control_mode = "linear"
-display_min_value = 1
-display_max_value = 8
-initial_value = 150
+display_min_value = 9
+display_max_value = 69
+initial_value = 148
 display_float_digits = 0
-suffix_label = "px"
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
 name_label = "Pitch"
 control_mode = "linear"
-display_min_value = 4
-display_max_value = 32
-initial_value = 300
+display_min_value = 0
+display_max_value = 100
+initial_value = 336
 display_float_digits = 0
-suffix_label = "px"
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
-name_label = "Level"
+name_label = "Depth"
 control_mode = "linear"
 display_min_value = 0
-display_max_value = 1023
-initial_value = 0
+display_max_value = 100
+initial_value = 610
 display_float_digits = 0
-suffix_label = ""
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
@@ -72,8 +73,8 @@ name_label = "Soft"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 300
-display_float_digits = 1
+initial_value = 304
+display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
@@ -90,9 +91,9 @@ initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
-name_label = "Keyed"
-value_labels = ["Picture", "Hatch"]
-initial_value_label = "Hatch"
+name_label = "Space"
+value_labels = ["Screen", "Glass"]
+initial_value_label = "Screen"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
@@ -108,37 +109,67 @@ initial_value_label = "Mirror"
 
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
-name_label = "Depth"
+name_label = "Engrave"
 control_mode = "linear"
-display_min_value = 1
-display_max_value = 4
-initial_value = 300
+display_min_value = 0
+display_max_value = 100
+initial_value = 577
 display_float_digits = 0
-suffix_label = ""
+suffix_label = "%"
+
+# Presets are hand-mapped from v0.1/v0.2 (pane widths, pitch and key level
+# kept); re-capture from the hardware with ./capture_preset.sh.
 
 [[preset]]
 name = "Default"
 
 [[preset]]
 name = "Etched Mirrors"
-rotary_potentiometer_1 = 300
-rotary_potentiometer_3 = 300
+rotary_potentiometer_3 = 520
+rotary_potentiometer_5 = 666
 linear_potentiometer_12 = 1023
 
 [[preset]]
 name = "Dark Keyed"
-rotary_potentiometer_5 = 500
+rotary_potentiometer_5 = 155
 rotary_potentiometer_6 = 700
 toggle_switch_8 = 1
 toggle_switch_10 = 1
-linear_potentiometer_12 = 0
+linear_potentiometer_12 = 397
 
 [[preset]]
 name = "Sat Tiles"
-rotary_potentiometer_1 = 700
-rotary_potentiometer_4 = 1023
-rotary_potentiometer_5 = 200
+rotary_potentiometer_4 = 848
+rotary_potentiometer_5 = 666
 toggle_switch_7 = 1
-toggle_switch_9 = 0
+toggle_switch_8 = 1
 toggle_switch_11 = 1
-linear_potentiometer_12 = 600
+linear_potentiometer_12 = 607
+
+[[preset]]
+name = "Leaded Glass"
+rotary_potentiometer_3 = 620
+rotary_potentiometer_4 = 620
+rotary_potentiometer_5 = 520
+toggle_switch_9 = 1
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Reeded Glass"
+rotary_potentiometer_2 = 512
+rotary_potentiometer_5 = 1023
+toggle_switch_9 = 1
+toggle_switch_10 = 1
+linear_potentiometer_12 = 436
+
+[[preset]]
+name = "Colour Pencil"
+rotary_potentiometer_1 = 1023
+rotary_potentiometer_3 = 460
+rotary_potentiometer_4 = 500
+linear_potentiometer_12 = 1023
+
+[firmware]
+# nextpnr placement seed for the stock LZX build (one seed, all 8 configs):
+# seed 1 crashed nextpnr's router1 (assertion) on SD Analog; seed 2 builds all 8.
+seed = 2

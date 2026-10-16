@@ -2,14 +2,15 @@
 #
 # Catalogue combo #131 (seed 20260927): colour bleeding / NTSC dot crawl
 # + sync loss / horizontal collapse.  Three knobs each; switches and
-# slider set the interaction.  See syncbleed.vhd.
+# slider set the interaction.  See syncbleed.vhd and SUMMARY.md.
 
 [program]
-program_id = "com.ron.syncbleed"
+processing_delay_clks = 16
+program_id = "com.czartroniks.syncbleed"
 program_name = "Syncbleed"
-program_version = "0.1.1"
+program_version = "0.2.1"
 abi_version = ">=1.0,<2.0"
-author = "ron"
+author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Glitch", "Retro", "VHS"]
 program_type = "processing"
@@ -51,11 +52,11 @@ suffix_label = "%"
 parameter_id = "rotary_potentiometer_4"
 name_label = "Collapse"
 control_mode = "linear"
-display_min_value = 0
-display_max_value = 100
+display_min_value = 1
+display_max_value = 9
 initial_value = 150
-display_float_digits = 1
-suffix_label = "%"
+display_float_digits = 2
+suffix_label = "x"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"

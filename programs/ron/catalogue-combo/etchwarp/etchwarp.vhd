@@ -1,3 +1,9 @@
+-- Copyright (C) 2026 czartroniks
+-- SPDX-License-Identifier: GPL-3.0-only
+--
+-- This file is part of Videomancer Community Programs.
+-- See LICENSE file in the repository root for full license text.
+--
 -- Etchwarp: catalogue combo #12 (seed 20260914) -- edge detect + Perlin /
 -- value-noise displacement + pixelation.  Two knobs each; the switches and
 -- the slider decide how they combine.
@@ -34,6 +40,13 @@ use work.core_pkg.all;
 use work.all;
 
 architecture etchwarp of program_top is
+    -- IO-align pad: 2 register stages after the program's own output so the
+    -- data_in -> data_out latency (14 + 2 = 16 clocks) is a multiple of 4,
+    -- as the SDK requires; must match processing_delay_clks in the TOML.
+    constant C_PROCESSING_DELAY_CLKS : natural := 16;
+    signal s_io_align_in : t_video_stream_yuv444_30b;
+    type t_io_align_pad is array (0 to 1) of t_video_stream_yuv444_30b;
+    signal s_io_align_pad : t_io_align_pad;
 
     constant C_LAT : integer := 14;
     constant C_SEED_NOISE : unsigned(15 downto 0) := x"3C6E";
@@ -78,6 +91,10 @@ architecture etchwarp of program_top is
     signal s_rdV0, s_rdV1 : std_logic_vector(7 downto 0) := x"80";
 
     signal s_k_thr, s_k_ink, s_k_noise, s_k_speed, s_k_cells, s_k_rows : unsigned(9 downto 0);
+    -- K6 Rows label decode, registered.  Labelled defaults: at program load
+    -- the firmware writes the initial_value_label's INDEX (0..3) into the
+    -- register, not a 0..1023 position, so a value below 4 is the index.
+    signal s_rows_idx : unsigned(1 downto 0) := (others => '0');
     signal s_sw_over, s_sw_order, s_sw_lumaonly, s_sw_colour, s_sw_blocks : std_logic;
     signal s_p_flow : unsigned(9 downto 0);
     signal s_thr    : unsigned(9 downto 0) := (others => '0');
@@ -206,6 +223,11 @@ begin
         variable v_a    : unsigned(10 downto 0);
     begin
         if rising_edge(clk) then
+            if s_k_rows < 4 then
+                s_rows_idx <= s_k_rows(1 downto 0);
+            else
+                s_rows_idx <= s_k_rows(9 downto 8);
+            end if;
             s_in_y <= unsigned(data_in.y); s_in_u <= unsigned(data_in.u); s_in_v <= unsigned(data_in.v);
             s_in_avid <= data_in.avid;
             s_prev_hsync_n <= data_in.hsync_n; s_prev_vsync_n <= data_in.vsync_n; s_prev_avid <= data_in.avid;
@@ -282,7 +304,7 @@ begin
                     s_vstep <= s_vstep + 1;
                 when 2 =>
                     s_amp_eff <= s_amp_pre(19 downto 10);
-                    case to_integer(s_k_rows(9 downto 8)) is
+                    case to_integer(s_rows_idx) is
                         when 0 => s_rows <= s_pixn;
                         when 1 => s_rows <= '0' & s_pixn(6 downto 1);
                         when 2 => s_rows <= "00" & s_pixn(6 downto 2);
@@ -442,12 +464,26 @@ begin
         end if;
     end process p_pix;
 
-    data_out.y       <= std_logic_vector(s_y14);
-    data_out.u       <= std_logic_vector(s_u14);
-    data_out.v       <= std_logic_vector(s_v14);
-    data_out.hsync_n <= s_hsync_sr(C_LAT - 1);
-    data_out.vsync_n <= s_vsync_sr(C_LAT - 1);
-    data_out.field_n <= s_field_sr(C_LAT - 1);
-    data_out.avid    <= s_avid_sr(C_LAT - 1);
+    s_io_align_in.y       <= std_logic_vector(s_y14);
+    s_io_align_in.u       <= std_logic_vector(s_u14);
+    s_io_align_in.v       <= std_logic_vector(s_v14);
+    s_io_align_in.hsync_n <= s_hsync_sr(C_LAT - 1);
+    s_io_align_in.vsync_n <= s_vsync_sr(C_LAT - 1);
+    s_io_align_in.field_n <= s_field_sr(C_LAT - 1);
+    s_io_align_in.avid    <= s_avid_sr(C_LAT - 1);
+
+    -- IO-align pad: video and syncs delayed together, so only the total
+    -- latency changes (14 -> 16).
+    p_io_align_pad : process(clk)
+    begin
+        if rising_edge(clk) then
+            s_io_align_pad(0) <= s_io_align_in;
+            for i in 1 to 1 loop
+                s_io_align_pad(i) <= s_io_align_pad(i - 1);
+            end loop;
+        end if;
+    end process p_io_align_pad;
+
+    data_out <= s_io_align_pad(1);
 
 end architecture etchwarp;

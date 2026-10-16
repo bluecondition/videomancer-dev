@@ -2,18 +2,19 @@
 #
 # Two catalogue effects (seed 20260926, #117): ordered dithering (Bayer) and
 # mirror / kaleidoscope.  Three knobs each; switches and slider set the
-# interaction.  See foldither.vhd.
+# interaction.  See foldither.vhd and SUMMARY.md.
 
 [program]
-program_id = "com.ron.foldither"
+processing_delay_clks = 20
+program_id = "com.czartroniks.foldither"
 program_name = "Foldither"
-program_version = "0.1.0"
+program_version = "0.2.1"
 abi_version = ">=1.0,<2.0"
-author = "ron"
+author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Retro", "Stylize", "Glitch"]
 program_type = "processing"
-description = "Nested mirror / repeat folds, Bayer-dithered and quantized in source space (the pattern folds too) or in screen space."
+description = "Mirror / repeat folds, Bayer-dithered and quantized in source space (the pattern folds too) or in screen space."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
@@ -29,7 +30,7 @@ name_label = "Slide"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 512
+initial_value = 237
 display_float_digits = 1
 suffix_label = "%"
 
@@ -39,19 +40,15 @@ name_label = "Skew"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 512
+initial_value = 416
 display_float_digits = 1
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
 name_label = "Bits"
-control_mode = "linear"
-display_min_value = 1
-display_max_value = 6
-initial_value = 400
-display_float_digits = 0
-suffix_label = " b"
+value_labels = ["1 bit", "2 bits", "3 bits", "4 bits", "5 bits", "6 bits"]
+initial_value_label = "3 bits"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
@@ -59,32 +56,32 @@ name_label = "Dither"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 600
+initial_value = 981
 display_float_digits = 1
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
 name_label = "Matrix"
-value_labels = ["2x2", "4x4", "8x8", "Lines"]
-initial_value_label = "8x8"
+value_labels = ["2x2", "4x4", "8x8", "Diagonal"]
+initial_value_label = "Diagonal"
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
 name_label = "Fold"
 value_labels = ["Mirror", "Repeat"]
-initial_value_label = "Mirror"
+initial_value_label = "Repeat"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
-name_label = "Dither"
+name_label = "Pattern"
 value_labels = ["Source", "Screen"]
-initial_value_label = "Source"
+initial_value_label = "Screen"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
 name_label = "Chroma"
-value_labels = ["Dithered", "Clean"]
+value_labels = ["Clean", "Dithered"]
 initial_value_label = "Dithered"
 
 [[parameter]]
@@ -95,16 +92,18 @@ initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
-name_label = "Alt Drop"
+name_label = "Alt Bits"
 value_labels = ["Off", "On"]
-initial_value_label = "Off"
+initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
-name_label = "Depth"
-value_labels = ["1", "2", "3", "4"]
-initial_value_label = "2"
+name_label = "Panes"
+value_labels = ["x1", "x2", "x4", "x8"]
+initial_value_label = "x2"
 
+# Presets keep their v0.1 looks: Slide/Skew values moved for the squared
+# curves (same speeds), Skewed Mirror's Bits moved to stay at 4 bits.
 [[preset]]
 name = "Default"
 
@@ -121,9 +120,9 @@ linear_potentiometer_12 = 300
 [[preset]]
 name = "Skewed Mirror"
 rotary_potentiometer_1 = 400
-rotary_potentiometer_2 = 600
-rotary_potentiometer_3 = 800
-rotary_potentiometer_4 = 700
+rotary_potentiometer_2 = 672
+rotary_potentiometer_3 = 910
+rotary_potentiometer_4 = 600
 rotary_potentiometer_5 = 400
 toggle_switch_10 = 1
 linear_potentiometer_12 = 600

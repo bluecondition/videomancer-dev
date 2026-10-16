@@ -1,35 +1,49 @@
+-- Copyright (C) 2026 czartroniks
+-- SPDX-License-Identifier: GPL-3.0-only
+--
+-- This file is part of Videomancer Community Programs.
+-- See LICENSE file in the repository root for full license text.
+--
 -- Tremor: catalogue combo #17 (seed 20260915) -- Perlin-style displacement
 -- + scanline shear + duotone.  Two knobs each; the switches and the slider
 -- decide how the three combine.
 --
---   K1 Scale    noise cell size 4 .. 512 px, log (64 steps per octave)
---   K2 Drift    noise field scrolls vertically, 0 .. 8 px a frame
+--   K1 Scale    noise cell size 4 .. 512 px, log (64 steps per octave);
+--               the field zooms about the screen centre
+--   K2 Drift    two-way: centre = still, right = the field rises, left =
+--               it sinks, up to 8 px a frame.  The field boils as it
+--               drifts: every row of lattice points also slides sideways
+--               at its own random speed (up to the drift speed), so the
+--               noise shears and churns instead of moving as one sheet
 --   K3 Skew     scanline shear: rows lean by (row in period - P/2) * skew
---   K4 Period   shear sawtooth period 2 .. 257 lines
+--   K4 Period   shear band height 2 .. 257 lines
 --   K5 Hue      highlight tone hue
 --   K6 Spread   angle between shadow and highlight hues (0 = one tint)
 --
 --   S7  Noise   warps the picture horizontally / grains the luma instead
 --   S8  Shear   sawtooth / triangle
---   S9  Bands   every other shear band swaps the two tones
+--   S9  Bands   Shade: every other band's tone key is lifted a little (the
+--               bands always show) / Flip: every other band swaps the tones
 --   S10 Field   smooth value noise / hard cells
 --   S11 Tone    duotone keyed from luma / from the noise field itself
 --   P12 Amount  displacement (or grain), glided, squared curve: a small
---               always-on tremor at 0 (+-5 px / +-30 luma) up to +-1/4 of
---               the measured width (+-511 luma) at 100%
+--               always-on tremor at 0 up to +-1/4 width (+-511 luma) at
+--               100%.  Above 75% the quake comes in: slabs of lines (random
+--               heights, new every frame) torn sideways, up to +-1/8 width
 --
 -- Edge clamp: reads that leave the line, or land in its C_EDGE blanking
 -- columns, take the line's own edge pixel -- the fill continues the colour
 -- leading up to it, with no black seam.
--- 2-D value noise: the cell lattice is stepped by DDAs (x per pixel, y per
--- active line) at a per-frame step from a 2^(-i/64) ROM + octave shift, so
--- Scale is continuous.  Lattice key = per-row hash (two passes of the three
--- rounds, row index mod 1024) + cell column; four 16-bit add/xor-shift
--- hashes per pixel; bilinear lerp with Q7 fractions.  The row index wraps at
--- 1024 cells with the hash input wrapping with it, so Drift never tears.
--- Per-line shear and row keys from an hblank sequencer; duotone chroma
--- vectors from a sine ROM and the scale / drift / amount terms (one serial
--- shift-add multiplier) per frame.
+-- 2-D value noise: the lattice is stepped by DDAs (x per pixel, one DDA
+-- each for the cell's top and bottom lattice rows, which slide separately;
+-- y per active line) at a per-frame step from a 2^(-i/64) ROM + octave
+-- shift, from starts that put the screen centre at a fixed lattice point.
+-- Lattice key = per-row hash (row index mod 1024, the hash input wrapping
+-- with it) + cell column mod 512; four 16-bit add/xor-shift hashes per
+-- pixel; bilinear lerp with Q7 fractions.  Per-line shear, row slides,
+-- quake slab (24-bit LFSR) and row keys from an hblank sequencer; duotone
+-- vectors, scale step, drift, centring offsets and the amount / quake gains
+-- per frame (one serial shift-add multiplier).
 --
 -- HARDWARE CONTRACTS: Tremor draws all of its own chroma (the duotone
 -- replaces the source's), so it runs its own generated avid (parity-locked
@@ -49,9 +63,18 @@ use work.core_pkg.all;
 use work.all;
 
 architecture tremor of program_top is
+    -- IO-align pad: 2 register stages after the program's own output so the
+    -- data_in -> data_out latency (30 + 2 = 32 clocks) is a multiple of 4,
+    -- as the SDK requires; must match processing_delay_clks in the TOML.
+    constant C_PROCESSING_DELAY_CLKS : natural := 32;
+    signal s_io_align_in : t_video_stream_yuv444_30b;
+    type t_io_align_pad is array (0 to 1) of t_video_stream_yuv444_30b;
+    signal s_io_align_pad : t_io_align_pad;
 
-    constant C_LAT  : integer := 30;
-    constant C_SEED : unsigned(15 downto 0) := x"5A3C";
+    constant C_LAT   : integer := 30;
+    constant C_SEED1 : unsigned(15 downto 0) := x"5A3C";
+    constant C_XBIAS : unsigned(24 downto 0) := to_unsigned(16777216, 25);   -- cell 256 at the centre
+    constant C_SHADE : integer := 24;    -- S9 Shade: key lift on alternate bands
 
     function f_clamp10(v : signed) return unsigned is
     begin
@@ -158,10 +181,19 @@ architecture tremor of program_top is
     signal s_srom_addr : unsigned(5 downto 0) := (others => '0');
     signal s_srom_q, s_srom_q2 : unsigned(14 downto 0) := to_unsigned(16384, 15);
     signal s_step   : unsigned(14 downto 0) := to_unsigned(2048, 15);
+    signal s_dspd   : unsigned(6 downto 0) := (others => '0');      -- drift speed, Drift/16 px a frame
+    signal s_dup    : std_logic := '0';                             -- '1': the field rises
+    signal s_dinc   : unsigned(17 downto 0) := (others => '0');
     signal s_ydrift : unsigned(25 downto 0) := (others => '0');
+    signal s_yoff   : unsigned(25 downto 0) := (others => '0');
+    signal s_bph    : unsigned(31 downto 0) := (others => '0');     -- boil phase, Q16 cells x 128 (row slides)
+    signal s_xst    : unsigned(24 downto 0) := C_XBIAS;
+    signal s_hw, s_hh : unsigned(9 downto 0) := to_unsigned(240, 10);
     signal s_c      : unsigned(10 downto 0) := (others => '0');
     signal s_m      : unsigned(8 downto 0) := (others => '0');     -- px (warp) or luma (grain) at full noise
     signal s_grain  : std_logic := '0';
+    signal s_q8     : unsigned(7 downto 0) := (others => '0');
+    signal s_qamp   : unsigned(7 downto 0) := (others => '0');     -- quake px at full tear
     signal s_vstep  : unsigned(5 downto 0) := "111111";
     signal s_ma, s_macc : unsigned(25 downto 0) := (others => '0');
     signal s_mb     : unsigned(10 downto 0) := (others => '0');
@@ -177,6 +209,8 @@ architecture tremor of program_top is
 
     -- tracking / per-line
     signal s_rx, s_line_width : unsigned(10 downto 0) := to_unsigned(720, 11);
+    signal s_line   : unsigned(10 downto 0) := (others => '0');
+    signal s_height : unsigned(10 downto 0) := to_unsigned(480, 11);
     signal s_prev_hsync_n, s_prev_vsync_n, s_prev_avid : std_logic := '1';
     signal s_saw_active : std_logic := '0';
     signal s_wpar, s_rbank, s_we : std_logic := '0';
@@ -190,11 +224,20 @@ architecture tremor of program_top is
     signal s_lt     : signed(9 downto 0) := (others => '0');
     signal s_shph, s_shpl : signed(15 downto 0) := (others => '0');
     signal s_shp    : signed(18 downto 0) := (others => '0');
+    signal s_sh_base : signed(10 downto 0) := (others => '0');
     signal s_sh_off : signed(10 downto 0) := (others => '0');
+    signal s_lfsr   : unsigned(23 downto 0) := x"ACE1F3";
+    signal s_qhold  : unsigned(7 downto 0) := x"80";
+    signal s_qa, s_qacc : signed(16 downto 0) := (others => '0');
+    signal s_qb     : unsigned(7 downto 0) := (others => '0');
+    signal s_bpa, s_bacc_t, s_bacc_b : unsigned(31 downto 0) := (others => '0');
+    signal s_brt, s_brb : unsigned(7 downto 0) := (others => '0');
+    signal s_bi     : unsigned(2 downto 0) := (others => '0');
+    signal s_xst_t, s_xst_b : unsigned(24 downto 0) := C_XBIAS;
     signal s_yacc   : unsigned(25 downto 0) := (others => '0');
     signal s_fy     : unsigned(6 downto 0) := (others => '0');
     signal s_h0, s_h1 : unsigned(15 downto 0) := (others => '0');
-    signal s_rk0, s_rk0p, s_rk1, s_rk1p : unsigned(15 downto 0) := (others => '0');
+    signal s_rk0, s_rk1 : unsigned(15 downto 0) := (others => '0');
     signal s_band_row : std_logic := '0';
     signal s_w_edge : unsigned(10 downto 0) := to_unsigned(200, 11);   -- width - 1 - C_EDGE
 
@@ -209,12 +252,13 @@ architecture tremor of program_top is
     signal g_rsr : std_logic_vector(2 downto 0) := (others => '0');
     signal g_cnt : unsigned(10 downto 0) := (others => '0');
     signal g_wm1 : unsigned(10 downto 0) := to_unsigned(479, 11);
-    signal s_xacc : unsigned(24 downto 0) := (others => '0');   -- lattice x (Q16 cells)
+    -- lattice x (Q16 cells) along the cell's top and bottom lattice rows
+    signal s_xacc_t, s_xacc_b : unsigned(24 downto 0) := C_XBIAS;
 
     -- noise pipeline
     signal s_x1     : unsigned(10 downto 0) := (others => '0');
-    signal s_cx1    : unsigned(8 downto 0) := (others => '0');
-    signal s_fx1    : unsigned(6 downto 0) := (others => '0');
+    signal s_cxt, s_cxt1, s_cxb, s_cxb1 : unsigned(8 downto 0) := (others => '0');
+    signal s_fxt, s_fxb : unsigned(6 downto 0) := (others => '0');
     signal s_ka, s_kb, s_kc, s_kd : unsigned(15 downto 0) := (others => '0');
     signal s_ha3, s_hb3, s_hc3, s_hd3 : unsigned(15 downto 0) := (others => '0');
     signal s_ha4, s_hb4, s_hc4, s_hd4 : unsigned(15 downto 0) := (others => '0');
@@ -231,16 +275,17 @@ architecture tremor of program_top is
     signal s_ptb11  : signed(16 downto 0) := (others => '0');
     signal s_n12    : unsigned(7 downto 0) := (others => '0');
     signal s_nc13   : signed(8 downto 0) := (others => '0');
+    signal s_nd13   : unsigned(7 downto 0) := (others => '0');
     signal s_d14    : signed(18 downto 0) := (others => '0');
     signal s_off15  : signed(9 downto 0) := (others => '0');
     signal s_gr15   : signed(9 downto 0) := (others => '0');
     type t_fx is array (2 to 7) of unsigned(6 downto 0);
-    signal s_fxd    : t_fx := (others => (others => '0'));
+    signal s_fxtd, s_fxbd : t_fx := (others => (others => '0'));
     type t_xs is array (2 to 15) of signed(12 downto 0);
     signal s_xs     : t_xs := (others => (others => '0'));
-    type t_n8 is array (13 to 23) of unsigned(7 downto 0);
-    signal s_nd     : t_n8 := (others => (others => '0'));
-    type t_g10 is array (16 to 22) of signed(9 downto 0);
+    type t_n8 is array (14 to 23) of unsigned(7 downto 0);
+    signal s_nt     : t_n8 := (others => (others => '0'));          -- noise tone key (+ shade)
+    type t_g10 is array (16 to 21) of signed(9 downto 0);
     signal s_gd     : t_g10 := (others => (others => '0'));
 
     -- address / fetch / duotone
@@ -253,6 +298,7 @@ architecture tremor of program_top is
     signal s_ys21   : unsigned(11 downto 0) := (others => '0');
     signal s_yo21   : unsigned(9 downto 0) := to_unsigned(64, 10);
     signal s_y8_22  : unsigned(7 downto 0) := (others => '0');
+    signal s_gq22   : signed(8 downto 0) := (others => '0');
     signal s_yo22   : unsigned(9 downto 0) := to_unsigned(64, 10);
     signal s_y8g23  : unsigned(7 downto 0) := (others => '0');
     signal s_yo23   : unsigned(9 downto 0) := to_unsigned(64, 10);
@@ -292,6 +338,21 @@ architecture tremor of program_top is
         else
             return unsigned(v(10 downto 0));
         end if;
+    end function;
+
+    -- 24-bit Galois LFSR (x^24 + x^23 + x^22 + x^17 + 1), 8 steps
+    function f_lfsr8(v : unsigned(23 downto 0)) return unsigned is
+        variable t : unsigned(23 downto 0);
+    begin
+        t := v;
+        for i in 0 to 7 loop
+            if t(0) = '1' then
+                t := shift_right(t, 1) xor x"E10000";
+            else
+                t := shift_right(t, 1);
+            end if;
+        end loop;
+        return t;
     end function;
 
 begin
@@ -377,8 +438,11 @@ begin
         variable v_s13 : unsigned(12 downto 0);
         variable v_sd : signed(14 downto 0);
         variable v_pd : signed(15 downto 0);
+        variable v_dv, v_dn : signed(10 downto 0);
+        variable v_da : unsigned(9 downto 0);
         variable v_c  : unsigned(11 downto 0);
         variable v_g  : unsigned(9 downto 0);
+        variable v_a  : unsigned(9 downto 0);
     begin
         if rising_edge(clk) then
             s_in_y <= unsigned(data_in.y);
@@ -388,14 +452,17 @@ begin
             if s_in_avid = '1' then s_wr_x <= s_wr_x + 1; else s_wr_x <= (others => '0'); end if;
             s_we <= data_in.avid;
 
-            -- lattice x DDA, stepped over the generated avid
+            -- lattice x DDAs (top and bottom lattice rows of the cell),
+            -- stepped over the generated avid from per-line starts
             if g_avid = '1' then
-                s_xacc <= s_xacc + resize(s_step, 25);
+                s_xacc_t <= s_xacc_t + resize(s_step, 25);
+                s_xacc_b <= s_xacc_b + resize(s_step, 25);
             else
-                s_xacc <= (others => '0');
+                s_xacc_t <= s_xst_t;
+                s_xacc_b <= s_xst_b;
             end if;
 
-            -- per-line sequencer: shear offset and the two row keys
+            -- per-line sequencer: shear offset, quake slab, row keys, row slides
             case to_integer(s_lstep) is
                 when 0 =>
                     if s_sw_tri = '1' and s_dir = '1' then
@@ -406,42 +473,71 @@ begin
                     s_band_row <= s_band;
                     v_cy := s_yacc(25 downto 16);
                     s_fy <= s_yacc(15 downto 9);
-                    s_h0 <= C_SEED + resize(v_cy, 16);
-                    s_h1 <= C_SEED + resize(v_cy + 1, 16);   -- row index wraps at 1024 with the key
+                    -- row index wraps at 1024 with the key
+                    s_h0 <= C_SEED1 + resize(v_cy, 16);
+                    s_h1 <= C_SEED1 + resize(v_cy + 1, 16);
+                    s_lfsr <= f_lfsr8(s_lfsr);
                     s_lstep <= s_lstep + 1;
                 when 1 =>
                     s_lt <= signed('0' & s_lq) - signed('0' & s_period(8 downto 1));
                     s_h0 <= f_round1(s_h0); s_h1 <= f_round1(s_h1);
+                    -- quake: a new slab on 1 line in 16 (and on the first)
+                    if s_lfsr(3 downto 0) = 0 or s_line = 0 then
+                        s_qhold <= s_lfsr(15 downto 8);
+                    end if;
                     s_lstep <= s_lstep + 1;
                 when 2 =>
                     s_shph <= s_lt * signed('0' & s_skew(9 downto 5));
                     s_shpl <= s_lt * signed('0' & s_skew(4 downto 0));
                     s_h0 <= f_round2(s_h0); s_h1 <= f_round2(s_h1);
+                    s_qa <= resize(signed('0' & s_qhold) - to_signed(128, 10), 17);
+                    s_qb <= s_qamp;
+                    s_qacc <= (others => '0');
                     s_lstep <= s_lstep + 1;
                 when 3 =>
                     s_shp <= shift_left(resize(s_shph, 19), 5) + resize(s_shpl, 19);
-                    s_h0 <= f_round3(s_h0); s_h1 <= f_round3(s_h1);
+                    s_rk0 <= f_round3(s_h0); s_rk1 <= f_round3(s_h1);
                     s_lstep <= s_lstep + 1;
                 when 4 =>
                     v_t := resize(shift_right(s_shp, 7), 13);
                     if v_t > 511 then v_t := to_signed(511, 13); elsif v_t < -511 then v_t := to_signed(-511, 13); end if;
-                    s_sh_off <= resize(v_t, 11);
-                    s_h0 <= f_round1(s_h0); s_h1 <= f_round1(s_h1);
+                    s_sh_base <= resize(v_t, 11);
+                    -- row slides: (signed byte of each row's key) * boil phase / 128,
+                    -- products mod 2^32 so the slide stays seamless as the phase wraps
+                    s_bpa <= s_bph;
+                    s_brt <= s_rk0(7 downto 0);
+                    s_brb <= s_rk1(7 downto 0);
+                    s_bacc_t <= (others => '0');
+                    s_bacc_b <= (others => '0');
+                    s_bi <= (others => '0');
                     s_lstep <= s_lstep + 1;
                 when 5 =>
-                    s_h0 <= f_round2(s_h0); s_h1 <= f_round2(s_h1);
-                    s_lstep <= s_lstep + 1;
+                    -- 8 serial shift-add steps: row slides (signed, mod 2^32)
+                    -- and the quake tear (slab offset * gain)
+                    if s_brt(0) = '1' then
+                        if s_bi = 7 then s_bacc_t <= s_bacc_t - s_bpa; else s_bacc_t <= s_bacc_t + s_bpa; end if;
+                    end if;
+                    if s_brb(0) = '1' then
+                        if s_bi = 7 then s_bacc_b <= s_bacc_b - s_bpa; else s_bacc_b <= s_bacc_b + s_bpa; end if;
+                    end if;
+                    s_bpa <= shift_left(s_bpa, 1);
+                    s_brt <= shift_right(s_brt, 1);
+                    s_brb <= shift_right(s_brb, 1);
+                    if s_qb(0) = '1' then s_qacc <= s_qacc + s_qa; end if;
+                    s_qa <= shift_left(s_qa, 1);
+                    s_qb <= shift_right(s_qb, 1);
+                    s_bi <= s_bi + 1;
+                    if s_bi = 7 then s_lstep <= s_lstep + 1; end if;
                 when 6 =>
-                    s_rk0 <= f_round3(s_h0); s_rk1 <= f_round3(s_h1);
-                    s_lstep <= s_lstep + 1;
-                when 7 =>
-                    s_rk0p <= s_rk0 + 1;
-                    s_rk1p <= s_rk1 + 1;
+                    s_sh_off <= s_sh_base + resize(shift_right(s_qacc, 7), 11);
+                    s_xst_t  <= s_xst + s_bacc_t(31 downto 7);
+                    s_xst_b  <= s_xst + s_bacc_b(31 downto 7);
                     s_lstep <= (others => '1');
                 when others => null;
             end case;
 
-            -- per-frame sequencer: duotone vectors, scale step, drift, amount
+            -- per-frame sequencer: duotone vectors, scale step, drift, boil,
+            -- centring offsets, amount and quake gains
             case to_integer(s_vstep) is
                 when 0 =>
                     s_sin_addr <= s_k_hue(9 downto 2);
@@ -450,9 +546,27 @@ begin
                     s_grain  <= s_sw_grain;
                     g_wm1    <= s_line_width - 1;
                     s_w_edge <= s_line_width - (C_EDGE + 1);
+                    s_hw     <= s_line_width(10 downto 1);
+                    s_hh     <= s_height(10 downto 1);
                     -- scale index 0..447 = 7 octaves x 64
                     v_s13 := shift_left(resize(s_k_scale, 13), 3) - resize(s_k_scale, 13);
                     s_sidx <= v_s13(12 downto 4);
+                    -- two-way drift about the knob centre (deadband +-8);
+                    -- abs at full width, then slice (|-512| must stay 512)
+                    v_dv := signed(resize(s_k_drift, 11)) - to_signed(512, 11);
+                    if v_dv < 0 then v_dn := -v_dv; else v_dn := v_dv; end if;
+                    v_da := unsigned(v_dn(9 downto 0));
+                    if v_da < 8 then
+                        s_dspd <= (others => '0');
+                    elsif v_da(9) = '1' then
+                        s_dspd <= (others => '1');
+                    else
+                        s_dspd <= v_da(8 downto 2);
+                    end if;
+                    if v_dv > 0 then s_dup <= '1'; else s_dup <= '0'; end if;
+                    -- quake: the top quarter of the glided slider
+                    v_a := s_pg(13 downto 4);
+                    if v_a(9 downto 8) = "11" then s_q8 <= v_a(7 downto 0); else s_q8 <= (others => '0'); end if;
                     -- glides (ease by diff/8)
                     v_sd := signed(resize(shift_left(resize(s_k_skew, 13), 3), 15)) - signed(resize(s_skg, 15));
                     v_sd := signed(resize(s_skg, 15)) + shift_right(v_sd, 3);
@@ -492,9 +606,9 @@ begin
                 when 14 =>
                     s_du <= s_uB - s_uA;
                     s_dv <= s_vB - s_vA;
-                    -- drift per frame = (Drift/16 px) * step
+                    -- drift per frame = (speed/16 px) * step
                     s_ma <= resize(s_step, 26);
-                    s_mb <= resize(s_k_drift(9 downto 3), 11);
+                    s_mb <= resize(s_dspd, 11);
                     s_macc <= (others => '0');
                     s_mret <= to_unsigned(16, 6);
                     s_vstep <= to_unsigned(15, 6);
@@ -508,7 +622,7 @@ begin
                         s_mb <= shift_right(s_mb, 1);
                     end if;
                 when 16 =>
-                    s_ydrift <= s_ydrift + resize(s_macc(21 downto 4), 26);
+                    s_dinc <= s_macc(21 downto 4);
                     -- Amount curve: square of the glided slider
                     s_ma <= resize(s_pg(13 downto 4), 26);
                     s_mb <= resize(s_pg(13 downto 4), 11);
@@ -533,7 +647,40 @@ begin
                     else
                         if s_macc(25 downto 22) /= 0 then s_m <= (others => '1'); else s_m <= s_macc(21 downto 13); end if;
                     end if;
-                    s_yacc <= s_ydrift;
+                    -- centring: x start = cell 256 - (width/2) * step
+                    s_ma <= resize(s_step, 26);
+                    s_mb <= resize(s_hw, 11);
+                    s_macc <= (others => '0');
+                    s_mret <= to_unsigned(20, 6);
+                    s_vstep <= to_unsigned(15, 6);
+                when 20 =>
+                    s_xst <= C_XBIAS - s_macc(24 downto 0);
+                    s_ma <= resize(s_step, 26);
+                    s_mb <= resize(s_hh, 11);
+                    s_macc <= (others => '0');
+                    s_mret <= to_unsigned(21, 6);
+                    s_vstep <= to_unsigned(15, 6);
+                when 21 =>
+                    s_yoff <= s_macc;
+                    if s_dup = '1' then
+                        s_ydrift <= s_ydrift + resize(s_dinc, 26);
+                    else
+                        s_ydrift <= s_ydrift - resize(s_dinc, 26);
+                    end if;
+                    -- boil phase: the fastest row slides at the drift speed
+                    s_bph <= s_bph + resize(s_dinc, 32);
+                    s_vstep <= s_vstep + 1;
+                when 22 =>
+                    -- y start: the drift phase sits at the screen centre
+                    s_yacc <= s_ydrift - s_yoff;
+                    -- quake gain = q8 * width / 2048 (1/8 of the width at 100%)
+                    s_ma <= resize(s_line_width, 26);
+                    s_mb <= resize(s_q8, 11);
+                    s_macc <= (others => '0');
+                    s_mret <= to_unsigned(23, 6);
+                    s_vstep <= to_unsigned(15, 6);
+                when 23 =>
+                    s_qamp <= s_macc(18 downto 11);
                     s_vstep <= (others => '1');
                 when others => null;
             end case;
@@ -541,7 +688,9 @@ begin
             -- line / frame events
             if s_prev_avid = '1' and data_in.avid = '0' then
                 s_line_width <= s_rx;
-                s_yacc <= s_yacc + resize(s_step, 26);   -- lattice y, active lines only
+                s_line   <= s_line + 1;
+                s_height <= s_line + 1;      -- captured on active lines
+                s_yacc <= s_yacc + resize(s_step, 26);    -- lattice y, active lines only
                 if s_lp >= s_period - 1 then
                     s_lp <= (others => '0');
                     s_dir <= not s_dir;
@@ -554,7 +703,7 @@ begin
                 s_wpar <= not s_wpar; s_rbank <= s_wpar; s_lstep <= (others => '0');
             end if;
             if data_in.vsync_n = '0' and s_prev_vsync_n = '1' then
-                s_wpar <= '0';
+                s_wpar <= '0'; s_line <= (others => '0');
                 s_lp <= (others => '0'); s_dir <= '0'; s_band <= '0';
                 if s_saw_active = '1' then s_vstep <= (others => '0'); end if;
                 s_saw_active <= '0';
@@ -574,21 +723,31 @@ begin
     --------------------------------------------------------------------------
     p_noise : process(clk)
         variable v_t, v_b : signed(10 downto 0);
+        variable v_ns : signed(9 downto 0);
     begin
         if rising_edge(clk) then
-            -- stage 1: cell index and Q7 fraction (slices of the x DDA)
-            s_x1  <= g_cnt;
-            s_cx1 <= s_xacc(24 downto 16);
-            s_fx1 <= s_xacc(15 downto 9);
+            -- stage 1: cell columns (mod 512, and the next one) and Q7
+            -- fractions along the cell's top and bottom lattice rows
+            s_x1   <= g_cnt;
+            s_cxt  <= s_xacc_t(24 downto 16);
+            s_cxt1 <= s_xacc_t(24 downto 16) + 1;
+            s_fxt  <= s_xacc_t(15 downto 9);
+            s_cxb  <= s_xacc_b(24 downto 16);
+            s_cxb1 <= s_xacc_b(24 downto 16) + 1;
+            s_fxb  <= s_xacc_b(15 downto 9);
             -- stage 2: lattice keys; sheared x
-            s_ka <= s_rk0  + resize(s_cx1, 16);
-            s_kb <= s_rk0p + resize(s_cx1, 16);
-            s_kc <= s_rk1  + resize(s_cx1, 16);
-            s_kd <= s_rk1p + resize(s_cx1, 16);
+            s_ka <= s_rk0 + resize(s_cxt,  16);
+            s_kb <= s_rk0 + resize(s_cxt1, 16);
+            s_kc <= s_rk1 + resize(s_cxb,  16);
+            s_kd <= s_rk1 + resize(s_cxb1, 16);
             s_xs(2) <= signed(resize(s_x1, 13)) + resize(s_sh_off, 13);
             for i in 3 to 15 loop s_xs(i) <= s_xs(i - 1); end loop;
-            if s_sw_blocky = '1' then s_fxd(2) <= (others => '0'); else s_fxd(2) <= s_fx1; end if;
-            for i in 3 to 7 loop s_fxd(i) <= s_fxd(i - 1); end loop;
+            if s_sw_blocky = '1' then
+                s_fxtd(2) <= (others => '0'); s_fxbd(2) <= (others => '0');
+            else
+                s_fxtd(2) <= s_fxt; s_fxbd(2) <= s_fxb;
+            end if;
+            for i in 3 to 7 loop s_fxtd(i) <= s_fxtd(i - 1); s_fxbd(i) <= s_fxbd(i - 1); end loop;
             s_bandd(2) <= s_band_row;
             for i in 3 to 23 loop s_bandd(i) <= s_bandd(i - 1); end loop;
             -- stages 3..5: hash rounds
@@ -601,9 +760,9 @@ begin
             s_dab7 <= signed('0' & s_b6) - signed('0' & s_a6);
             s_dcd7 <= signed('0' & s_d6) - signed('0' & s_c6);
             s_a7 <= s_a6; s_c7 <= s_c6;
-            -- stage 8: x lerp products
-            s_pab8 <= s_dab7 * signed('0' & s_fxd(7));
-            s_pcd8 <= s_dcd7 * signed('0' & s_fxd(7));
+            -- stage 8: x lerp products (each row with its own fraction)
+            s_pab8 <= s_dab7 * signed('0' & s_fxtd(7));
+            s_pcd8 <= s_dcd7 * signed('0' & s_fxbd(7));
             s_a8 <= s_a7; s_c8 <= s_c7;
             -- stage 9: top / bottom row values
             v_t := signed(resize(s_a8, 10) & '0') + resize(shift_right(s_pab8, 6), 11);
@@ -625,10 +784,17 @@ begin
             s_n12 <= unsigned(v_t(8 downto 1));
             -- stage 13: centred
             s_nc13 <= signed('0' & s_n12) - to_signed(128, 9);
-            s_nd(13) <= s_n12;
-            for i in 14 to 23 loop s_nd(i) <= s_nd(i - 1); end loop;
-            -- stage 14: amount (px for the warp, luma codes for the grain)
+            s_nd13 <= s_n12;
+            -- stage 14: amount (px for the warp, luma codes for the grain);
+            -- noise tone key with the band shade
             s_d14 <= s_nc13 * signed('0' & s_m);
+            if s_bandd(13) = '1' and s_sw_flip = '0' then
+                v_ns := signed(resize(s_nd13, 10)) + to_signed(C_SHADE, 10);
+                if v_ns > 255 then s_nt(14) <= x"FF"; else s_nt(14) <= unsigned(v_ns(7 downto 0)); end if;
+            else
+                s_nt(14) <= s_nd13;
+            end if;
+            for i in 15 to 23 loop s_nt(i) <= s_nt(i - 1); end loop;
             -- stage 15: displacement / grain, +-511
             if s_grain = '1' then
                 s_off15 <= (others => '0');
@@ -640,7 +806,7 @@ begin
             -- stage 16: source x
             s_u16 <= s_xs(15) + resize(s_off15, 13);
             s_gd(16) <= s_gr15;
-            for i in 17 to 22 loop s_gd(i) <= s_gd(i - 1); end loop;
+            for i in 17 to 21 loop s_gd(i) <= s_gd(i - 1); end loop;
             -- stage 17: address / edge clamp
             s_addr17 <= f_edge_addr(s_u16, s_w_edge);
         end if;
@@ -695,17 +861,23 @@ begin
             -- stage 21: stretch x1.156
             s_ys21 <= resize(s_yc20, 12) + resize(shift_right(s_yc20, 3), 12) + resize(shift_right(s_yc20, 5), 12);
             s_yo21 <= s_yo20;
-            -- stage 22: 8-bit key
+            -- stage 22: 8-bit key; the key's grain (a quarter of the luma
+            -- grain) plus the band shade
             if s_ys21 > 1023 then s_y8_22 <= x"FF"; else s_y8_22 <= s_ys21(9 downto 2); end if;
+            if s_bandd(21) = '1' and s_sw_flip = '0' then
+                s_gq22 <= resize(shift_right(s_gd(21), 2), 9) + to_signed(C_SHADE, 9);
+            else
+                s_gq22 <= resize(shift_right(s_gd(21), 2), 9);
+            end if;
             s_yo22 <= s_yo21;
-            -- stage 23: grain into the key (a quarter of the luma grain)
-            v_g := signed(resize(s_y8_22, 11)) + resize(shift_right(s_gd(22), 2), 11);
+            -- stage 23: grain + shade into the key
+            v_g := signed(resize(s_y8_22, 11)) + resize(s_gq22, 11);
             if v_g < 0 then s_y8g23 <= (others => '0'); elsif v_g > 255 then s_y8g23 <= x"FF"; else s_y8g23 <= unsigned(v_g(7 downto 0)); end if;
             s_yo23 <= s_yo22;
             -- stage 24: tone key select + band flip
             if (s_bandd(23) and s_sw_flip) = '1' then v_m := x"FF"; else v_m := x"00"; end if;
             if s_sw_tonenoise = '1' then
-                s_t24 <= s_nd(23) xor v_m;
+                s_t24 <= s_nt(23) xor v_m;
             else
                 s_t24 <= s_y8g23 xor v_m;
             end if;
@@ -748,12 +920,26 @@ begin
         end if;
     end process p_pix;
 
-    data_out.y       <= std_logic_vector(s_y30);
-    data_out.u       <= std_logic_vector(s_u30);
-    data_out.v       <= std_logic_vector(s_v30);
-    data_out.hsync_n <= s_hsync_sr(C_LAT - 1);
-    data_out.vsync_n <= s_vsync_sr(C_LAT - 1);
-    data_out.field_n <= s_field_sr(C_LAT - 1);
-    data_out.avid    <= s_gav_sr(C_LAT - 1);
+    s_io_align_in.y       <= std_logic_vector(s_y30);
+    s_io_align_in.u       <= std_logic_vector(s_u30);
+    s_io_align_in.v       <= std_logic_vector(s_v30);
+    s_io_align_in.hsync_n <= s_hsync_sr(C_LAT - 1);
+    s_io_align_in.vsync_n <= s_vsync_sr(C_LAT - 1);
+    s_io_align_in.field_n <= s_field_sr(C_LAT - 1);
+    s_io_align_in.avid    <= s_gav_sr(C_LAT - 1);
+
+    -- IO-align pad: video and syncs delayed together, so only the total
+    -- latency changes (30 -> 32).
+    p_io_align_pad : process(clk)
+    begin
+        if rising_edge(clk) then
+            s_io_align_pad(0) <= s_io_align_in;
+            for i in 1 to 1 loop
+                s_io_align_pad(i) <= s_io_align_pad(i - 1);
+            end loop;
+        end if;
+    end process p_io_align_pad;
+
+    data_out <= s_io_align_pad(1);
 
 end architecture tremor;

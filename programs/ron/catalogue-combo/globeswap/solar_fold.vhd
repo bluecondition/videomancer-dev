@@ -1,3 +1,9 @@
+-- Copyright (C) 2026 czartroniks
+-- SPDX-License-Identifier: GPL-3.0-only
+--
+-- This file is part of Videomancer Community Programs.
+-- See LICENSE file in the repository root for full license text.
+--
 -- solar_fold: Sabattier fold used by mirage (two instances).
 --   y' = base + |((gain * (y - thr)) mod 1024) - 512| inside the region
 --   (y > thr); chroma inverted inside the region when fold_c = '1'.

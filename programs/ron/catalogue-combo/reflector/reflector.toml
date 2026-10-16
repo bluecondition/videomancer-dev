@@ -1,15 +1,16 @@
-# Reflector - catalogue combo #8: mirror/kaleidoscope + bloom.  See reflector.vhd.
+# Reflector - catalogue combo #8: two-mirror kaleidoscope + bloom.  See reflector.vhd.
 
 [program]
-program_id = "com.ron.reflector"
+processing_delay_clks = 16
+program_id = "com.czartroniks.reflector"
 program_name = "Reflector"
-program_version = "0.1.0"
+program_version = "0.2.1"
 abi_version = ">=1.0,<2.0"
-author = "ron"
+author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Mirror", "Optics", "Pattern"]
 program_type = "processing"
-description = "Nested mirror folds meet bloom: up to eight panes, sliding source, glow that follows or ignores the folds, seam glow, sweep."
+description = "Two-mirror kaleidoscope meets bloom: panes multiply as the axis moves, the source slides, glow follows or ignores the folds."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
@@ -116,14 +117,14 @@ name = "Default"
 name = "Cathedral"
 rotary_potentiometer_2 = 900
 rotary_potentiometer_4 = 700
-rotary_potentiometer_6 = 900
+rotary_potentiometer_6 = 800
 toggle_switch_9 = 1
 toggle_switch_10 = 1
 
 [[preset]]
 name = "Drifting Glass"
 rotary_potentiometer_2 = 600
-rotary_potentiometer_3 = 640
+rotary_potentiometer_3 = 784
 toggle_switch_7 = 1
 linear_potentiometer_12 = 400
 

@@ -2,14 +2,17 @@
 #
 # Three catalogue effects (seed 20260925, #106): composite luma/chroma
 # crosstalk, halftone and lens (sphere / tunnel).  Two knobs each; switches
-# and slider set the interaction.  See lenscreen.vhd.
+# and slider set the interaction.  See lenscreen.vhd and SUMMARY.md.
+# v0.2.0: Radius is % of the half-height; P12 (was "Zoom") is Squeeze,
+# same behaviour -- up squeezes the picture narrower.
 
 [program]
-program_id = "com.ron.lenscreen"
+processing_delay_clks = 20
+program_id = "com.czartroniks.lenscreen"
 program_name = "Lenscreen"
-program_version = "0.1.0"
+program_version = "0.2.1"
 abi_version = ">=1.0,<2.0"
-author = "ron"
+author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Stylize", "Glitch", "Retro"]
 program_type = "processing"
@@ -31,11 +34,11 @@ suffix_label = "%"
 parameter_id = "rotary_potentiometer_2"
 name_label = "Radius"
 control_mode = "linear"
-display_min_value = 16
-display_max_value = 783
+display_min_value = 3
+display_max_value = 140
 initial_value = 600
 display_float_digits = 0
-suffix_label = "ln"
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
@@ -101,7 +104,7 @@ initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
-name_label = "Zoom"
+name_label = "Squeeze"
 control_mode = "linear"
 display_min_value = 50
 display_max_value = 200
