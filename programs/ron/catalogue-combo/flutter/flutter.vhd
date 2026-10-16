@@ -164,6 +164,10 @@ architecture flutter of program_top is
     signal s_spd_neg, s_spd_neg2 : std_logic := '0';
     -- bit depths: zone = bits - 1, hysteretic across the zone boundaries
     signal s_zl, s_zc : unsigned(2 downto 0) := to_unsigned(2, 3);
+    -- frames since load; until it reaches 15 the K4/K5 zones follow the knob
+    -- directly (no hysteresis), so a saved default near a zone edge loads in
+    -- its own zone instead of staying at the power-up zone
+    signal s_zwarm : unsigned(3 downto 0) := (others => '0');
     signal s_lstep, s_cstep : unsigned(10 downto 0) := to_unsigned(128, 11);
     signal s_lmask, s_cmask : unsigned(9 downto 0) := (others => '1');
     signal s_ld0, s_ld1, s_ld2, s_ld3 : signed(10 downto 0) := (others => '0');    -- luma dither, (2b-3)/8 step
@@ -307,9 +311,9 @@ begin
 
             -- K4 / K5 bit-depth zones: change only 12 counts inside the new zone
             v_z := s_k_lbits(9 downto 7); v_lo := s_k_lbits(6 downto 0);
-            if (v_lo >= 12 or v_z = 0) and (v_lo <= 115 or v_z = 7) then s_zl <= v_z; end if;
+            if s_zwarm /= 15 or ((v_lo >= 12 or v_z = 0) and (v_lo <= 115 or v_z = 7)) then s_zl <= v_z; end if;
             v_z := s_k_cbits(9 downto 7); v_lo := s_k_cbits(6 downto 0);
-            if (v_lo >= 12 or v_z = 0) and (v_lo <= 115 or v_z = 7) then s_zc <= v_z; end if;
+            if s_zwarm /= 15 or ((v_lo >= 12 or v_z = 0) and (v_lo <= 115 or v_z = 7)) then s_zc <= v_z; end if;
             -- quantizer constants (step = 512 >> zone)
             s_lstep <= shift_right(to_unsigned(512, 11), to_integer(s_zl));
             s_cstep <= shift_right(to_unsigned(512, 11), to_integer(s_zc));
@@ -354,6 +358,7 @@ begin
             if data_in.vsync_n = '0' and s_prev_vsync_n = '1' then
                 s_line <= (others => '0'); s_wpar <= '0';
                 if s_saw_active = '1' then
+                    if s_zwarm /= 15 then s_zwarm <= s_zwarm + 1; end if;
                     if s_spd_neg2 = '1' then s_fphase <= s_fphase - resize(s_spd_p, 18);
                     else s_fphase <= s_fphase + resize(s_spd_p, 18); end if;
                     -- glide Waves and Twist by 1/8 of the gap per frame
