@@ -1,4 +1,4 @@
-# Hypnos Cascade
+# Cascade
 
 Concentric circles that push each other: move the centre and the rings cascade outward one by one, never overlapping, then catch up or stay dragged. Gradient shading from hard to smooth, a band-width balance, a moiré mode, and a Video mode where the rings refract the incoming picture.
 
