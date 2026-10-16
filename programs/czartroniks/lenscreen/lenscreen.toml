@@ -26,7 +26,7 @@ name_label = "Bulge"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 800
+initial_value = 697
 display_float_digits = 1
 suffix_label = "%"
 
@@ -36,7 +36,7 @@ name_label = "Radius"
 control_mode = "linear"
 display_min_value = 3
 display_max_value = 140
-initial_value = 600
+initial_value = 737
 display_float_digits = 0
 suffix_label = "%"
 
@@ -50,7 +50,7 @@ initial_value_label = "8 px"
 parameter_id = "rotary_potentiometer_4"
 name_label = "Dot"
 value_labels = ["Circle", "Diamond", "Square", "Line"]
-initial_value_label = "Circle"
+initial_value_label = "Diamond"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
@@ -58,7 +58,7 @@ name_label = "Cross-Y"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 400
+initial_value = 539
 display_float_digits = 1
 suffix_label = "%"
 
@@ -68,7 +68,7 @@ name_label = "Cross-C"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 500
+initial_value = 579
 display_float_digits = 1
 suffix_label = "%"
 
@@ -100,7 +100,7 @@ initial_value_label = "Dots"
 parameter_id = "toggle_switch_11"
 name_label = "Fringe"
 value_labels = ["Off", "On"]
-initial_value_label = "On"
+initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
@@ -108,7 +108,7 @@ name_label = "Squeeze"
 control_mode = "linear"
 display_min_value = 50
 display_max_value = 200
-initial_value = 340
+initial_value = 896
 display_float_digits = 0
 suffix_label = "%"
 
