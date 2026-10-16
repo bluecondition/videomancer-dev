@@ -20,7 +20,7 @@ name_label = "Curve"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 300
+initial_value = 285
 display_float_digits = 1
 suffix_label = "%"
 
@@ -30,7 +30,7 @@ name_label = "Zoom"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 512
+initial_value = 0
 display_float_digits = 1
 suffix_label = "%"
 
@@ -50,7 +50,7 @@ name_label = "Speed"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 200
+initial_value = 176
 display_float_digits = 1
 suffix_label = "%"
 
@@ -84,7 +84,7 @@ initial_value_label = "Original"
 parameter_id = "toggle_switch_8"
 name_label = "Noise"
 value_labels = ["Window", "Everywhere"]
-initial_value_label = "Window"
+initial_value_label = "Everywhere"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
@@ -96,7 +96,7 @@ initial_value_label = "Black"
 parameter_id = "toggle_switch_10"
 name_label = "Shape"
 value_labels = ["Rect", "Round"]
-initial_value_label = "Rect"
+initial_value_label = "Round"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
