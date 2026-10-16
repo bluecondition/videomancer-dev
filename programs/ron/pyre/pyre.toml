@@ -18,7 +18,7 @@ name_label = "Fuel"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 965
+initial_value = 808
 suffix_label = "%"
 
 [[parameter]]
@@ -27,7 +27,7 @@ name_label = "Width"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 424
+initial_value = 242
 suffix_label = "%"
 
 [[parameter]]
@@ -36,7 +36,7 @@ name_label = "Smoke"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 586
 suffix_label = "%"
 
 [[parameter]]
@@ -102,5 +102,5 @@ name_label = "Blaze"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 0
+initial_value = 575
 suffix_label = "%"
