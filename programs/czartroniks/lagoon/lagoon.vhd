@@ -40,8 +40,11 @@
 --   S10 Sea      Calm / Storm: swell 3rd harmonic + 1.5x amplitude + 2x rate
 --   S11 Prism    chromatic refraction: U and V read the line buffer at
 --                their own displaced addresses, split to either side of
---                luma (U = 2x ripple, V = no ripple, +-1/4 swell, +-4 px
---                fixed) -- colour fringes that writhe with the water.
+--                luma (+-1/2 swell, +-~1.2% of the line width fixed; both
+--                follow luma's ripple) -- broad colour fringes that sway
+--                with the waves.  Tint is halved while Prism is on so the
+--                fringes keep the source colours.  (v1.4.2: v1.4.0's
+--                ripple split + 4 px read as a faint smear on HW.)
 --                (Replaces v1.3's Bypass, which duplicated Depth = 0.)
 --   P12 Depth    master dry/wet -- the headline fader
 --
@@ -118,9 +121,6 @@ architecture lagoon of program_top is
     -- reason.
     constant C_LEDGE : integer := 6;
 
-    -- Prism: fixed U/V split (px each way) on top of the swell/ripple
-    -- dispersion, so the switch reads even with Ripple and Waves at 0.
-    constant C_PRISM : integer := 4;
 
     -- Tint targets, U/V swapped for hardware (see header).
     constant C_AQUA_U  : unsigned(C_DW - 1 downto 0) := to_unsigned(390, C_DW);
@@ -292,6 +292,11 @@ architecture lagoon of program_top is
     -- Prism: per-line U/V base offsets (= base_off when Prism is off)
     signal s_base_u   : signed(10 downto 0) := (others => '0');
     signal s_base_v   : signed(10 downto 0) := (others => '0');
+    -- Prism fixed split: (w >> 7) + (w >> 8) of the measured line width
+    -- (~22 px at 1920, ~8 px at 720), free-running register
+    signal s_psplit   : signed(10 downto 0) := (others => '0');
+    -- tint lerp factor (top 4 knob bits; halved while Prism is on)
+    signal s_tint_f   : unsigned(3 downto 0) := (others => '0');
 
     --------------------------------------------------------------------------
     -- Per-pixel pipeline (E2..E8)
@@ -378,6 +383,13 @@ begin
             s_murk_en <= registers_in(6)(2);
             s_storm   <= registers_in(6)(3);
             s_prism   <= registers_in(6)(4);
+            s_psplit  <= signed(resize(shift_right(s_line_width, 7), 11))
+                       + signed(resize(shift_right(s_line_width, 8), 11));
+            if s_prism = '1' then
+                s_tint_f <= '0' & s_tint_k(9 downto 7);
+            else
+                s_tint_f <= s_tint_k(9 downto 6);
+            end if;
             s_mix_t   <= unsigned(registers_in(7));
 
             if s_hue = '1' then
@@ -444,14 +456,14 @@ begin
                     end if;
                     s_lstep <= s_lstep + 1;
                 when 4 =>       -- caustic swell-tracking multiplies; murk;
-                                -- Prism U/V bases (+-1/4 swell, +-C_PRISM)
+                                -- Prism U/V bases (+-1/2 swell, +-s_psplit)
                     s_prod_c1 <= s_base_off * signed('0' & s_fc1);
                     s_prod_c2 <= s_base_off * signed('0' & s_fc2);
                     if s_prism = '1' then
-                        s_base_u <= s_base_off + shift_right(s_base_off, 2)
-                                  + to_signed(C_PRISM, 11);
-                        s_base_v <= s_base_off - shift_right(s_base_off, 2)
-                                  - to_signed(C_PRISM, 11);
+                        s_base_u <= s_base_off + shift_right(s_base_off, 1)
+                                  + s_psplit;
+                        s_base_v <= s_base_off - shift_right(s_base_off, 1)
+                                  - s_psplit;
                     else
                         s_base_u <= s_base_off;
                         s_base_v <= s_base_off;
@@ -709,17 +721,12 @@ begin
                                          - to_signed(8, 5), 11), 1);
             s4_g <= s3_g;
 
-            -- E5: read address add + clamp; highlight threshold. Prism
-            -- splits the ripple around luma: U reads 2x ripple, V none
-            -- (pure shifts of the one product -- no extra multiply).
+            -- E5: read address add + clamp; highlight threshold. U and V
+            -- follow luma's ripple (Prism splits them by the swell and a
+            -- fixed offset, set per line in the sequencer).
             v_q := s4_q + resize(shift_right(s4_rip, 10), 13);
-            if s_prism = '1' then
-                v_ru := resize(shift_right(s4_rip, 9), 13);
-                v_rv := (others => '0');
-            else
-                v_ru := resize(shift_right(s4_rip, 10), 13);
-                v_rv := resize(shift_right(s4_rip, 10), 13);
-            end if;
+            v_ru := resize(shift_right(s4_rip, 10), 13);
+            v_rv := resize(shift_right(s4_rip, 10), 13);
             v_qu := s4_qu + v_ru;
             v_qv := s4_qv + v_rv;
             v_w := signed(resize(s_line_width, 13));
@@ -808,8 +815,8 @@ begin
             -- knob bits (16 levels); convex combination, so no clamp needed.
             v_du := signed(resize(s_tgt_u, 11)) - signed(resize(s8_u, 11));
             v_dv := signed(resize(s_tgt_v, 11)) - signed(resize(s8_v, 11));
-            v_pu := v_du * signed('0' & s_tint_k(9 downto 6));
-            v_pv := v_dv * signed('0' & s_tint_k(9 downto 6));
+            v_pu := v_du * signed('0' & s_tint_f);
+            v_pv := v_dv * signed('0' & s_tint_f);
             v_tu := signed(resize(s8_u, 12)) + resize(shift_right(v_pu, 4), 12);
             v_tv := signed(resize(s8_v, 12)) + resize(shift_right(v_pv, 4), 12);
             s9_y <= s8_y;

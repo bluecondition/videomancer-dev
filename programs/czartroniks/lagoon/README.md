@@ -18,7 +18,7 @@ Puts the picture underwater: ripple refraction, a rolling swell, dancing caustic
 | S8 | Glitter | Off / On | On: twinkling white glitter on the light |
 | S9 | Murk | Off / On | On: picture darkens toward the bottom |
 | S10 | Sea | Calm / Storm | Calm or stormy, bigger faster waves |
-| S11 | Prism | Off / On | Chromatic refraction: colour splits to either side of the ripple |
+| S11 | Prism | Off / On | Chromatic refraction: colour fringes split to either side of the image and sway with the waves |
 | P12 | Depth | 0–100% | Depth: dry video to full underwater look |
 
 ## Presets
