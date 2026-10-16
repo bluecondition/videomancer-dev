@@ -28,7 +28,7 @@ name_label = "Scale"
 control_mode = "linear"
 display_min_value = 4
 display_max_value = 512
-initial_value = 384
+initial_value = 410
 display_float_digits = 0
 suffix_label = " px"
 
@@ -38,7 +38,7 @@ name_label = "Drift"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 120
+initial_value = 453
 display_float_digits = 1
 suffix_label = "%"
 
@@ -48,7 +48,7 @@ name_label = "Stroke"
 control_mode = "linear"
 display_min_value = 1
 display_max_value = 8
-initial_value = 300
+initial_value = 96
 display_float_digits = 0
 suffix_label = "x"
 
@@ -58,7 +58,7 @@ name_label = "Brush"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 448
 display_float_digits = 1
 suffix_label = "%"
 
@@ -68,7 +68,7 @@ name_label = "Edge"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 800
+initial_value = 805
 display_float_digits = 1
 suffix_label = "%"
 
@@ -78,7 +78,7 @@ name_label = "Relief"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 300
+initial_value = 645
 display_float_digits = 1
 suffix_label = "%"
 
@@ -110,7 +110,7 @@ initial_value_label = "Left"
 parameter_id = "toggle_switch_11"
 name_label = "Knife"
 value_labels = ["Off", "On"]
-initial_value_label = "Off"
+initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
@@ -118,7 +118,7 @@ name_label = "Amount"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 200
+initial_value = 253
 display_float_digits = 1
 suffix_label = "%"
 
