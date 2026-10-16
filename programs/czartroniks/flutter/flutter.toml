@@ -9,7 +9,7 @@
 processing_delay_clks = 20
 program_id = "com.czartroniks.flutter"
 program_name = "Flutter"
-program_version = "0.2.1"
+program_version = "0.2.2"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -55,7 +55,7 @@ name_label = "Luma"
 control_mode = "linear"
 display_min_value = 1
 display_max_value = 8
-initial_value = 502
+initial_value = 448
 display_float_digits = 0
 suffix_label = "b"
 
