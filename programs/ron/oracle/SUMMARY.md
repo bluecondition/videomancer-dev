@@ -158,5 +158,5 @@ PNGs were removed from this folder at finalization.
   (core without the Sync Out generator) Analog/HDMI/Dual 76.8/82.3/87.5 MHz
   (seed 1), 76.2/78.8/88.1 MHz (seed 2).
 
-- **HW check wanted:** palette colours on every scheme (each palette port's Y/U/V is now split across a 16-bit and a 14-bit ROM, each in its own EBR); the EBR delay lines and the output-buffer read (sims can't see EBR mapping or collisions).
+- **HW-validated 2026-10-15** (Ron: "flashed and looks great"), so the 16+14-bit palette ROM split and the EBR delay lines are fine on hardware. Originally flagged for checking: palette colours on every scheme (each palette port's Y/U/V is now split across a 16-bit and a 14-bit ROM, each in its own EBR); the EBR delay lines and the output-buffer read (sims can't see EBR mapping or collisions).
 - **Stock build:** seed 1 builds all 8 configs (seed 2 also). Own HD 76.8 / 82.3 / 87.5 MHz (analog / HDMI / dual).
