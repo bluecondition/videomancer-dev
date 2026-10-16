@@ -146,3 +146,4 @@ glide in one state was a 52–62 MHz critical path).
     values of `s30_lg`: 0 mismatches;
   - mutants caught: `+160` for `+128` gave 14 mismatches in 6 frames; a
     threshold of `> 32` for `> 0` gave 41 in 12 frames.
+- **HW-validated 2026-10-15** (Ron: "looks good"): the stock-SDK v1.0.3 build, the first time hypnos has been flashed.
