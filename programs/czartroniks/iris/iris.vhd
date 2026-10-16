@@ -70,9 +70,12 @@ architecture iris of program_top is
     -- data_in -> data_out latency (22 + 2 = 24 clocks) is a multiple of 4,
     -- as the SDK requires; must match processing_delay_clks in the TOML.
     constant C_PROCESSING_DELAY_CLKS : natural := 24;
-    signal s_io_align_in : t_video_stream_yuv444_30b;
-    type t_io_align_pad is array (0 to 1) of t_video_stream_yuv444_30b;
-    signal s_io_align_pad : t_io_align_pad;
+    -- the two pad clocks for the video run through one EBR pair (write at dcnt(0),
+    -- read the other word: exactly two clocks); the syncs stay in two registers
+    type t_opad is array(0 to 255) of std_logic_vector(15 downto 0);
+    signal opad0, opad1 : t_opad := (others => (others => '0'));
+    signal opq0, opq1   : std_logic_vector(15 downto 0) := (others => '0');
+    signal s_sync_pad0, s_sync_pad1 : std_logic_vector(3 downto 0);
 
     constant C_LATENCY  : integer := 20;
     constant C_MID      : unsigned(9 downto 0) := to_unsigned(512, 10);
@@ -84,6 +87,45 @@ architecture iris of program_top is
 
     type t_c_atan is array(0 to 15) of integer;
     constant C_ATAN : t_c_atan := (16384, 9672, 5110, 2594, 1302, 652, 326, 163, 81, 41, 20, 10, 5, 3, 1, 1);
+    -- CORDIC angle from the direction bits: z = sum over the 12 iterations of +-atan(i)
+    -- (minus where y < 0), mod 2^16.  The first eight directions address a 256-entry ROM
+    -- (one EBR), the last four a 16-entry constant added on the final clock.
+    type t_zrom is array(0 to 255) of std_logic_vector(15 downto 0);
+    constant C_ZP : t_zrom := (
+        x"8D6B", x"8C25", x"8ADF", x"8999", x"8853", x"870D", x"85C7", x"8481",
+        x"833F", x"81F9", x"80B3", x"7F6D", x"7E27", x"7CE1", x"7B9B", x"7A55",
+        x"7927", x"77E1", x"769B", x"7555", x"740F", x"72C9", x"7183", x"703D",
+        x"6EFB", x"6DB5", x"6C6F", x"6B29", x"69E3", x"689D", x"6757", x"6611",
+        x"657F", x"6439", x"62F3", x"61AD", x"6067", x"5F21", x"5DDB", x"5C95",
+        x"5B53", x"5A0D", x"58C7", x"5781", x"563B", x"54F5", x"53AF", x"5269",
+        x"513B", x"4FF5", x"4EAF", x"4D69", x"4C23", x"4ADD", x"4997", x"4851",
+        x"470F", x"45C9", x"4483", x"433D", x"41F7", x"40B1", x"3F6B", x"3E25",
+        x"41DB", x"4095", x"3F4F", x"3E09", x"3CC3", x"3B7D", x"3A37", x"38F1",
+        x"37AF", x"3669", x"3523", x"33DD", x"3297", x"3151", x"300B", x"2EC5",
+        x"2D97", x"2C51", x"2B0B", x"29C5", x"287F", x"2739", x"25F3", x"24AD",
+        x"236B", x"2225", x"20DF", x"1F99", x"1E53", x"1D0D", x"1BC7", x"1A81",
+        x"19EF", x"18A9", x"1763", x"161D", x"14D7", x"1391", x"124B", x"1105",
+        x"0FC3", x"0E7D", x"0D37", x"0BF1", x"0AAB", x"0965", x"081F", x"06D9",
+        x"05AB", x"0465", x"031F", x"01D9", x"0093", x"FF4D", x"FE07", x"FCC1",
+        x"FB7F", x"FA39", x"F8F3", x"F7AD", x"F667", x"F521", x"F3DB", x"F295",
+        x"0D6B", x"0C25", x"0ADF", x"0999", x"0853", x"070D", x"05C7", x"0481",
+        x"033F", x"01F9", x"00B3", x"FF6D", x"FE27", x"FCE1", x"FB9B", x"FA55",
+        x"F927", x"F7E1", x"F69B", x"F555", x"F40F", x"F2C9", x"F183", x"F03D",
+        x"EEFB", x"EDB5", x"EC6F", x"EB29", x"E9E3", x"E89D", x"E757", x"E611",
+        x"E57F", x"E439", x"E2F3", x"E1AD", x"E067", x"DF21", x"DDDB", x"DC95",
+        x"DB53", x"DA0D", x"D8C7", x"D781", x"D63B", x"D4F5", x"D3AF", x"D269",
+        x"D13B", x"CFF5", x"CEAF", x"CD69", x"CC23", x"CADD", x"C997", x"C851",
+        x"C70F", x"C5C9", x"C483", x"C33D", x"C1F7", x"C0B1", x"BF6B", x"BE25",
+        x"C1DB", x"C095", x"BF4F", x"BE09", x"BCC3", x"BB7D", x"BA37", x"B8F1",
+        x"B7AF", x"B669", x"B523", x"B3DD", x"B297", x"B151", x"B00B", x"AEC5",
+        x"AD97", x"AC51", x"AB0B", x"A9C5", x"A87F", x"A739", x"A5F3", x"A4AD",
+        x"A36B", x"A225", x"A0DF", x"9F99", x"9E53", x"9D0D", x"9BC7", x"9A81",
+        x"99EF", x"98A9", x"9763", x"961D", x"94D7", x"9391", x"924B", x"9105",
+        x"8FC3", x"8E7D", x"8D37", x"8BF1", x"8AAB", x"8965", x"881F", x"86D9",
+        x"85AB", x"8465", x"831F", x"81D9", x"8093", x"7F4D", x"7E07", x"7CC1",
+        x"7B7F", x"7A39", x"78F3", x"77AD", x"7667", x"7521", x"73DB", x"7295");
+    type t_zq is array(0 to 15) of integer;
+    constant C_ZQ : t_zq := (152, 132, 112, 92, 70, 50, 30, 10, -10, -30, -50, -70, -92, -112, -132, -152);
     type t_c_fun is array(0 to 511) of unsigned(15 downto 0);
     constant C_FUN : t_c_fun := (
         to_unsigned(0,16), to_unsigned(402,16), to_unsigned(804,16), to_unsigned(1206,16), to_unsigned(1608,16), to_unsigned(2009,16), to_unsigned(2411,16), to_unsigned(2811,16),
@@ -371,6 +413,20 @@ architecture iris of program_top is
     attribute ram_style of rom_fun : signal is "block";
     attribute ram_style of rf_mem : signal is "block";
     attribute ram_style of prog_mem : signal is "block";
+    attribute no_rw_check : boolean;
+    attribute no_rw_check of sb0 : signal is true;
+    attribute no_rw_check of sb1 : signal is true;
+    attribute no_rw_check of sb2 : signal is true;
+    attribute no_rw_check of sb3 : signal is true;
+    attribute no_rw_check of sd_ram : signal is true;
+    attribute no_rw_check of rf_mem : signal is true;
+    attribute no_rw_check of tk_ram : signal is true;
+    attribute no_rw_check of t1_ram : signal is true;
+    attribute no_rw_check of t2_ram : signal is true;
+    attribute ram_style of opad0 : signal is "block";
+    attribute ram_style of opad1 : signal is "block";
+    attribute no_rw_check of opad0 : signal is true;
+    attribute no_rw_check of opad1 : signal is true;
 
     ----------------------------------------------------------------------
     -- raster measurement / timing
@@ -446,7 +502,11 @@ architecture iris of program_top is
     -- serial CORDIC
     -- 3-stage CORDIC pipeline: stage s holds one lane and runs iterations 4s..4s+3
     signal c0x, c0y, c1x, c1y, c2x, c2y : signed(C_CW - 1 downto 0) := (others => '0');
-    signal c0z, c1z, c2z : signed(15 downto 0) := (others => '0');
+    signal zsh0, zsh1, zsh2 : std_logic_vector(2 downto 0) := (others => '0');   -- last three directions per stage
+    signal zd1  : std_logic_vector(3 downto 0) := (others => '0');                  -- d0..d3 of the lane in stage 1
+    signal zrom : t_zrom := C_ZP;
+    signal zp   : std_logic_vector(15 downto 0) := (others => '0');                  -- angle of d0..d7 (ROM out)
+    attribute ram_style of zrom : signal is "block";
     signal c0f, c1f, c2f : std_logic_vector(2 downto 0) := (others => '0');   -- sw & sx & sy
     -- one-hot iteration index, one KEPT copy per CORDIC stage: the select needs no
     -- decode and the placer can sit each copy beside its own stage
@@ -498,7 +558,7 @@ architecture iris of program_top is
     signal e_at, e_at2 : unsigned(5 downto 0) := (others => '0');   -- resolution fade, same pipeline as e_rd
     signal e_u        : signed(19 downto 0) := (others => '0');
     signal e_vh       : unsigned(15 downto 0) := (others => '0');
-    signal e_vl       : unsigned(15 downto 0) := (others => '0');
+    signal e_vs       : unsigned(15 downto 0) := (others => '0');   -- e_vh + the low half, formed at ph6
     signal e_v        : unsigned(15 downto 0) := (others => '0');   -- arm coordinate, 4 int + 12 frac
     signal vcut       : unsigned(3 downto 0) := (others => '0');    -- arms to add so v stays continuous across the cut
     signal thq_p      : unsigned(1 downto 0) := (others => '0');    -- previous sample's angle quadrant
@@ -569,7 +629,7 @@ architecture iris of program_top is
     -- P13
     signal dfg13   : signed(16 downto 0) := (others => '0');
     -- P14
-    signal bar14_g : signed(8 downto 0) := (others => '0');
+    signal bar14_g : unsigned(7 downto 0) := (others => '0');   -- the alpha ramp itself (before validity)
     -- P15 (held per layer)
     signal al15_r, al15_g, al15_b : unsigned(7 downto 0) := (others => '0');   -- latest evaluation of each layer
     signal pv_r, pv_g, pv_b : unsigned(7 downto 0) := (others => '0');         -- ...and the one before it
@@ -650,12 +710,10 @@ architecture iris of program_top is
     signal rf_wa    : unsigned(6 downto 0) := (others => '0');
     signal sh_cnt   : unsigned(5 downto 0) := (others => '0');
     signal sh_busy  : std_logic := '0';
-    signal m_am   : unsigned(31 downto 0) := (others => '0');
     signal m_acc  : unsigned(51 downto 0) := (others => '0');
     signal m_cnt  : unsigned(4 downto 0) := (others => '0');
     signal m_busy, m_go, m_neg : std_logic := '0';
     signal d_n    : unsigned(31 downto 0) := (others => '0');
-    signal d_d    : unsigned(15 downto 0) := (others => '0');
     signal d_rem  : unsigned(16 downto 0) := (others => '0');
     signal d_cnt  : unsigned(5 downto 0) := (others => '0');
     signal d_busy, d_go : std_logic := '0';
@@ -665,6 +723,7 @@ architecture iris of program_top is
     signal tw_addr : unsigned(8 downto 0) := (others => '0');
     signal tw_d16  : std_logic_vector(15 downto 0) := (others => '0');
     signal tw_we   : unsigned(2 downto 0) := (others => '0');   -- 0 none, 1 T1, 2 T2, 3 TM, 4 TV, 5 TS, 6 TK
+    signal tw_we12 : std_logic_vector(1 downto 0) := (others => '0');   -- T1/T2 write enables, one clock later
     signal alu_a, alu_b : signed(31 downto 0) := (others => '0');   -- ALU operands registered at execute, summed next clock
     signal alu_c, alu_pend, alu_and : std_logic := '0';
 
@@ -707,6 +766,41 @@ architecture iris of program_top is
         else return unsigned(v(7 downto 0)); end if;
     end function;
 
+    -- line-start lane update: k0 ? acc + B : start + B, with B per bit
+    --   i <= 18: s1 ? c(i-1) : (s2 ? c(i) : 0)     bit 19: s3 ? c(18) : (k0 ? c(19) : 0)
+    -- i.e. acc + (ilace ? c<<1 : c) on an ordinary line, start + ((c<<1)>>1) on row 0
+    -- of the bottom field, start on row 0 otherwise -- exactly the three cases.
+    function f_lstep(acc, st, c : signed(19 downto 0); k0, s1, s2, s3 : std_logic) return signed is
+        variable a, b : signed(19 downto 0);
+    begin
+        for i in 0 to 18 loop
+            if s1 = '1' then
+                if i = 0 then b(i) := '0'; else b(i) := c(i - 1); end if;
+            elsif s2 = '1' then b(i) := c(i);
+            else b(i) := '0'; end if;
+        end loop;
+        if s3 = '1' then b(19) := c(18); elsif k0 = '1' then b(19) := c(19); else b(19) := '0'; end if;
+        if k0 = '1' then a := acc; else a := st; end if;
+        return a + b;
+    end function;
+
+    -- x >= K for a constant K, as a chain of two-input gates (no carry chain)
+    function f_gec(x : unsigned; k : natural) return std_logic is
+        variable kv : unsigned(x'length - 1 downto 0);
+        variable xv : unsigned(x'length - 1 downto 0);
+        variable c  : std_logic := '1';
+    begin
+        kv := to_unsigned(k, x'length); xv := x;
+        for i in 0 to x'length - 1 loop
+            if kv(i) = '1' then c := xv(i) and c; else c := xv(i) or c; end if;
+        end loop;
+        return c;
+    end function;
+
+    -- (72 s - x) mod 256 for the V sum's sign-extension constant, index s & x(2:0)
+    type t_k72 is array(0 to 15) of unsigned(7 downto 0);
+    constant C_K72 : t_k72 := (to_unsigned(0, 8), to_unsigned(255, 8), to_unsigned(254, 8), to_unsigned(253, 8), to_unsigned(252, 8), to_unsigned(251, 8), to_unsigned(250, 8), to_unsigned(249, 8), to_unsigned(72, 8), to_unsigned(71, 8), to_unsigned(70, 8), to_unsigned(69, 8), to_unsigned(68, 8), to_unsigned(67, 8), to_unsigned(66, 8), to_unsigned(65, 8));
+
     function f_sat10(v : signed(12 downto 0)) return unsigned is
     begin
         if v(12) = '1' then return to_unsigned(0, 10);
@@ -721,28 +815,24 @@ architecture iris of program_top is
 
     -- one CORDIC vectoring iteration; the shift amount base+j (j = 0..3) is
     -- muxed at the adder inputs so each pipeline stage has one add/sub set.
-    procedure cordic_it(variable x, y : inout signed(C_CW - 1 downto 0); variable z : inout signed(15 downto 0);
+    procedure cordic_it(variable x, y : inout signed(C_CW - 1 downto 0);
                         constant base : in integer; constant j : in std_logic_vector(3 downto 0)) is
         variable d : std_logic;
         variable mp, mn, cp, cn : signed(C_CW - 1 downto 0);
-        variable zp, zc : signed(15 downto 0);
         variable tx, ty : signed(C_CW - 1 downto 0);
-        variable at : signed(15 downto 0);
     begin
-        case j is
-            when "0001" => tx := shift_right(x, base);     ty := shift_right(y, base);     at := to_signed(C_ATAN(base), 16);
-            when "0010" => tx := shift_right(x, base + 1); ty := shift_right(y, base + 1); at := to_signed(C_ATAN(base + 1), 16);
-            when "0100" => tx := shift_right(x, base + 2); ty := shift_right(y, base + 2); at := to_signed(C_ATAN(base + 2), 16);
-            when others => tx := shift_right(x, base + 3); ty := shift_right(y, base + 3); at := to_signed(C_ATAN(base + 3), 16);
-        end case;
+        -- shift by base + j as a two-level log shifter (j is one-hot: j1 j0 = 00 01 10 11)
+        tx := shift_right(x, base); ty := shift_right(y, base);
+        if (j(1) or j(3)) = '1' then tx := shift_right(tx, 1); ty := shift_right(ty, 1); end if;
+        if (j(2) or j(3)) = '1' then tx := shift_right(tx, 2); ty := shift_right(ty, 2); end if;
         d  := y(C_CW - 1);
         mp := (others => d);  mn := (others => not d);
         cp := (others => '0'); cp(0) := d;
         cn := (others => '0'); cn(0) := not d;
-        zp := (others => d);  zc := (others => '0'); zc(0) := d;
         x := x + (ty xor mp) + cp;
         y := y + (tx xor mn) + cn;
-        z := z + (at xor zp) + zc;
+        -- (the angle is not accumulated: each stage records its direction bits, the
+        -- sign of y going into each iteration, and a ROM sums the arctangents)
     end procedure;
 
 begin
@@ -777,7 +867,7 @@ begin
             if av_r = '1' then
                 xcnt <= xcnt + 1;
             elsif av_q = '1' then
-                if xcnt > 16 then act_w <= xcnt; end if;
+                if f_gec(xcnt, 17) = '1' then act_w <= xcnt; end if;
                 xcnt  <= (others => '0');
                 aline <= aline + 1;
             end if;
@@ -786,7 +876,7 @@ begin
             -- vblank = two hsyncs without active video
             if hs_r = '0' and hs_q = '1' then
                 hcnt <= (others => '0');
-                if hcnt > 100 then hline <= hcnt; end if;
+                if f_gec(hcnt, 101) = '1' then hline <= hcnt; end if;
                 if nb /= 3 then nb <= nb + 1; end if;
             elsif hcnt /= 4095 then
                 hcnt <= hcnt + 1;
@@ -814,19 +904,19 @@ begin
                 frame_act <= '0';
             elsif av_r = '1' and av_q = '0' and frame_act = '0' then
                 frame_act <= '1';
-                if aline > 50 then act_h <= aline; end if;
+                if f_gec(aline, 51) = '1' then act_h <= aline; end if;
                 aline <= (others => '0');
                 if fl_r /= anc_fld then ilace <= '1'; else ilace <= '0'; end if;
                 anc_fld <= fl_r;
             end if;
 
             if ilace = '1' then
-                if act_h >= 400 then    vstep_base <= to_unsigned(16, 6);
-                elsif act_h >= 270 then vstep_base <= to_unsigned(15, 6);
+                if f_gec(act_h, 400) = '1' then    vstep_base <= to_unsigned(16, 6);
+                elsif f_gec(act_h, 270) = '1' then vstep_base <= to_unsigned(15, 6);
                 else                    vstep_base <= to_unsigned(18, 6); end if;
             else
-                if act_h >= 700 then    vstep_base <= to_unsigned(16, 6);
-                elsif act_h >= 540 then vstep_base <= to_unsigned(15, 6);
+                if f_gec(act_h, 700) = '1' then    vstep_base <= to_unsigned(16, 6);
+                elsif f_gec(act_h, 540) = '1' then vstep_base <= to_unsigned(15, 6);
                 else                    vstep_base <= to_unsigned(18, 6); end if;
             end if;
         end if;
@@ -852,7 +942,8 @@ begin
         variable vx, vy : signed(C_CW - 1 downto 0);
         variable vz     : signed(15 downto 0);
         variable v0x, v0y, v1x, v1y, v2x, v2y : signed(C_CW - 1 downto 0);
-        variable v0z, v1z, v2z : signed(15 downto 0);
+        variable v_zq   : signed(15 downto 0);
+        variable v_zf   : signed(15 downto 0);
         variable ax, ay : signed(15 downto 0);
         variable hi, lo : unsigned(14 downto 0);
         variable sw     : std_logic;
@@ -860,20 +951,30 @@ begin
         variable v_m    : signed(17 downto 0);
         variable v_fold : unsigned(16 downto 0);
         variable v_th   : unsigned(16 downto 0);
-        variable v_say, v_sblx, v_sbly : signed(19 downto 0);
         variable v_n    : unsigned(C_CW - 1 downto 0);
         variable v_u    : signed(21 downto 0);
         variable v_sh   : signed(9 downto 0);
         variable v_dl   : signed(26 downto 0);
+        variable v_eg   : std_logic_vector(18 downto 12);
+        variable v_ein  : std_logic;
+        variable v_ah0  : std_logic;
         variable v_xc   : unsigned(C_CW - 1 downto 0);
         variable v_rz   : signed(15 downto 0);
+        variable v_fneg : std_logic;
+        variable v_fz, v_fk, v_fc : signed(17 downto 0);
         variable v_rsw, v_rsx, v_rsy : std_logic;
         variable v_rx   : unsigned(C_CW - 1 downto 0);
         variable v_sh0  : unsigned(4 downto 0);
         variable v_es   : unsigned(5 downto 0);
         variable v_hs   : unsigned(8 downto 0);
+        variable v_k0, v_s1, v_s2, v_s3 : std_logic;
+        variable v_ya, v_xb, v_yb : signed(19 downto 0);
     begin
         if rising_edge(clk) then
+            v_k0 := not st_kind(1);                                        -- ordinary line
+            v_s1 := v_k0 and ilace;                                        -- step doubled
+            v_s2 := v_k0 or (st_kind(1) and ilace and not fl_r);           -- step (or half the doubled one)
+            v_s3 := v_s1 or (st_kind(1) and ilace and not fl_r);           -- bit 19 takes c(18)
 
             -- requests
             if av_r = '1' and av_q = '0' then pend_line <= '1'; end if;
@@ -898,12 +999,6 @@ begin
                 end case;
             end if;
 
-            v_say  := c_say; v_sblx := c_sblx; v_sbly := c_sbly;
-            if ilace = '1' then
-                v_say  := shift_left(v_say, 1);
-                v_sblx := shift_left(v_sblx, 1);
-                v_sbly := shift_left(v_sbly, 1);
-            end if;
 
             -- free-running log lane pipeline (shared by both lanes)
             v_sh0 := to_unsigned(C_CW - 1, 5) - lg_e0;
@@ -968,17 +1063,15 @@ begin
                 cj0 <= "0001"; cj1 <= "0001"; cj2 <= "0001";   -- runs start at ph5, so the index reads 3 at ph0
                 eng_nsamp <= nsamp_r; eng_last <= last_r;
                 sxa <= c_xa0;
-                if st_kind(1) = '0' then                       -- ordinary line: advance down the frame
-                    sya <= sya + v_say;
-                    lxb <= lxb + v_sblx;  sxb <= lxb + v_sblx;
-                    lyb <= lyb + v_sbly;  syb <= lyb + v_sbly;
-                elsif ilace = '1' and fl_r = '0' then          -- row 0, bottom field: start half a line down
-                    sya <= c_ya0 + shift_right(v_say, 1);
-                    lxb <= c_xb0 + shift_right(v_sblx, 1);  sxb <= c_xb0 + shift_right(v_sblx, 1);
-                    lyb <= c_yb0 + shift_right(v_sbly, 1);  syb <= c_yb0 + shift_right(v_sbly, 1);
-                else                                           -- row 0
-                    sya <= c_ya0;  lxb <= c_xb0;  sxb <= c_xb0;  lyb <= c_yb0;  syb <= c_yb0;
-                end if;
+                -- ordinary line: advance down the frame (acc + step, step doubled when
+                -- interlaced); row 0: the line-0 start, plus half a (doubled) step on the
+                -- bottom field.  One adder per lane: A = acc or start, B = the step or 0.
+                v_ya := f_lstep(sya, c_ya0, c_say, v_k0, v_s1, v_s2, v_s3);
+                v_xb := f_lstep(lxb, c_xb0, c_sblx, v_k0, v_s1, v_s2, v_s3);
+                v_yb := f_lstep(lyb, c_yb0, c_sbly, v_k0, v_s1, v_s2, v_s3);
+                sya <= v_ya;
+                lxb <= v_xb;  sxb <= v_xb;
+                lyb <= v_yb;  syb <= v_yb;
             elsif eng_busy = '0' then
                 if pend_line = '1' then
                     pend_line <= '0'; st_go <= '1'; st_kind <= "00";
@@ -991,26 +1084,34 @@ begin
                 -- at ph0/ph4 (j = 3) the stages hand over: stage 0 loads a lane (a at
                 -- ph0, b at ph4), stage 2 delivers a lane (a at ph4, b at ph0).
                 cj0 <= cj0(2 downto 0) & cj0(3); cj1 <= cj1(2 downto 0) & cj1(3); cj2 <= cj2(2 downto 0) & cj2(3);
-                vx := c0x; vy := c0y; vz := c0z; cordic_it(vx, vy, vz, 0, cj0); v0x := vx; v0y := vy; v0z := vz;
-                vx := c1x; vy := c1y; vz := c1z; cordic_it(vx, vy, vz, 4, cj1); v1x := vx; v1y := vy; v1z := vz;
-                vx := c2x; vy := c2y; vz := c2z; cordic_it(vx, vy, vz, 8, cj2); v2x := vx; v2y := vy; v2z := vz;
-                c0x <= v0x; c0y <= v0y; c0z <= v0z;
-                c1x <= v1x; c1y <= v1y; c1z <= v1z;
-                c2x <= v2x; c2y <= v2y; c2z <= v2z;
+                vx := c0x; vy := c0y; cordic_it(vx, vy, 0, cj0); v0x := vx; v0y := vy;
+                vx := c1x; vy := c1y; cordic_it(vx, vy, 4, cj1); v1x := vx; v1y := vy;
+                vx := c2x; vy := c2y; cordic_it(vx, vy, 8, cj2); v2x := vx; v2y := vy;
+                c0x <= v0x; c0y <= v0y;
+                c1x <= v1x; c1y <= v1y;
+                c2x <= v2x; c2y <= v2y;
+                -- direction bits: every iteration shifts in the sign of y it used
+                zsh0 <= zsh0(1 downto 0) & c0y(C_CW - 1);
+                zsh1 <= zsh1(1 downto 0) & c1y(C_CW - 1);
+                zsh2 <= zsh2(1 downto 0) & c2y(C_CW - 1);
+                -- final angle of the lane leaving stage 2: ROM(d0..d7) + the last four terms
+                v_zq := to_signed(C_ZQ(to_integer(unsigned(std_logic_vector'(zsh2 & c2y(C_CW - 1))))), 16);
+                v_zf := signed(zp) + v_zq;
                 -- stage-0 load (lane a at ph0, lane b at ph4) from values prepared one clock earlier
                 if eng_oh(0) = '1' or eng_oh(4) = '1' then
                     c0x <= shift_left(signed(resize(ld_hi, C_CW)), C_CG);
                     c0y <= shift_left(signed(resize(ld_lo, C_CW)), C_CG);
-                    c0z <= (others => '0');
                     c0f <= ld_f;
-                    c1x <= v0x; c1y <= v0y; c1z <= v0z; c1f <= c0f;
-                    c2x <= v1x; c2y <= v1y; c2z <= v1z; c2f <= c1f;
+                    c1x <= v0x; c1y <= v0y; c1f <= c0f;
+                    c2x <= v1x; c2y <= v1y; c2f <= c1f;
+                    zd1 <= zsh0 & c0y(C_CW - 1);                                         -- d0..d3
+                    zp  <= zrom(to_integer(unsigned(std_logic_vector'(zd1 & zsh1 & c1y(C_CW - 1)))));   -- d0..d7
                     if v2x < 0 then v_xc := (others => '0'); else v_xc := unsigned(v2x); end if;
                     if eng_oh(0) = '1' then
-                        rb_x <= v_xc; rb_z <= v2z; rb_sw <= c2f(2); rb_sx <= c2f(1); rb_sy <= c2f(0);
+                        rb_x <= v_xc; rb_z <= v_zf; rb_sw <= c2f(2); rb_sx <= c2f(1); rb_sy <= c2f(0);
                         sxa <= sxa + c_sax;                         -- lane A's y is constant along a line
                     else
-                        ra_x <= v_xc; ra_z <= v2z; ra_sw <= c2f(2); ra_sx <= c2f(1); ra_sy <= c2f(0);
+                        ra_x <= v_xc; ra_z <= v_zf; ra_sw <= c2f(2); ra_sx <= c2f(1); ra_sy <= c2f(0);
                         sxb <= sxb + c_sbx; syb <= syb + c_sby;
                     end if;
                 end if;
@@ -1020,12 +1121,19 @@ begin
                 else
                     v_rz := ra_z; v_rsw := ra_sw; v_rsx := ra_sx; v_rsy := ra_sy; v_rx := ra_x;
                 end if;
-                if v_rsw = '1' then v_m := to_signed(32768, 18) - resize(v_rz, 18);
-                else                v_m := resize(v_rz, 18); end if;
-                if v_rsx = '0' and v_rsy = '0' then    v_fold := unsigned(v_m(16 downto 0));
-                elsif v_rsx = '1' and v_rsy = '0' then v_fold := unsigned(resize(to_signed(65536, 18) - v_m, 17));
-                elsif v_rsx = '1' and v_rsy = '1' then v_fold := unsigned(resize(to_signed(65536, 18) + v_m, 17));
-                else                                   v_fold := unsigned(resize(-v_m, 17)); end if;
+                -- octant unfold: +-z plus a multiple of 32768, in ONE 18-bit add
+                -- (sw: 32768 - z; sx/sy: 65536 -+ m, -m), then the same 17-bit narrowing
+                -- (a slice for the first quadrant, sign + low 16 bits otherwise)
+                v_fneg := v_rsw xor v_rsx xor v_rsy;
+                v_fz := resize(v_rz, 18) xor (17 downto 0 => v_fneg);
+                v_fk := (others => '0');
+                v_fk(15) := v_rsw;
+                if v_rsw = '1' then v_fk(16) := v_rsy; else v_fk(16) := v_rsx; end if;
+                v_fk(17) := v_rsw and (not v_rsx) and v_rsy;
+                v_fc := (others => '0'); v_fc(0) := v_fneg;
+                v_m := v_fz + v_fk + v_fc;
+                if v_rsx = '0' and v_rsy = '0' then v_fold := unsigned(v_m(16 downto 0));
+                else                                v_fold := unsigned(v_m(17) & v_m(15 downto 0)); end if;
                 if eng_oh(1) = '1' or eng_oh(5) = '1' then
                     lg_in <= v_rx; lg_e0 <= f_lzc(v_rx);
                     if eng_oh(1) = '1' then fb <= v_fold; else fa <= v_fold; end if;
@@ -1038,7 +1146,7 @@ begin
                 if eng_oh(0) = '1' then
                     ea <= lg_e2; ha <= lg_hi2;                                          -- lane A, sample k-2
                     lg_b <= lg_out;                                                     -- lane b, sample k-3
-                    e_v <= e_vh + e_vl + (vcut & x"000");                              -- sample k-2, cut-corrected
+                    e_v <= e_vs + (vcut & x"000");                                       -- sample k-2, cut-corrected
                 end if;
                 if eng_oh(1) = '1' then
                     e_l <= signed(resize(lg_a, 18)) - signed(resize(lg_b, 18));        -- sample k-3
@@ -1066,10 +1174,14 @@ begin
                 end if;
                 if eng_oh(3) = '1' then
                     tv_ad <= '0' & th(16 downto 10);
+                    -- (clamp to 20 bits: in range iff e_ld's top inve+1 bits agree)
                     v_dl := shift_left(resize(e_ld, 27), to_integer(c_inve));
-                    if v_dl > 524287 then e_u <= to_signed(524287, 20);
-                    elsif v_dl < -524288 then e_u <= to_signed(-524288, 20);
-                    else e_u <= v_dl(19 downto 0); end if;
+                    v_eg(18) := '1';
+                    for k in 17 downto 12 loop v_eg(k) := v_eg(k + 1) and not (e_ld(k) xor e_ld(18)); end loop;
+                    if c_inve = 0 then v_ein := '1'; else v_ein := v_eg(19 - to_integer(c_inve)); end if;
+                    if v_ein = '1' then e_u <= v_dl(19 downto 0);
+                    elsif e_ld(18) = '0' then e_u <= to_signed(524287, 20);
+                    else e_u <= to_signed(-524288, 20); end if;
                 end if;
                 if eng_oh(4) = '1' then
                     lg_a <= lg_out;                                                     -- lane a, sample k-2
@@ -1083,12 +1195,12 @@ begin
                     e_vh <= unsigned(tv_w);
                     -- the anti-alias ramp normalises d(log|w|)/d(pixel) = (1-|a|^2)/(r1 r2 R),
                     -- so it needs log2(r1 r2) from both lanes' exponents and mantissa tops
-                    v_es := resize(ea, 6) + resize(eb, 6);
                     v_hs := resize(ha, 9) + resize(hb, 9);
-                    e_gs <= (v_es & x"000") + resize(v_hs & "0000", 18);
+                    v_es := resize(ea, 6) + resize(eb, 6) + ("00000" & v_hs(8));
+                    e_gs <= v_es & v_hs(7 downto 0) & "0000";
                 end if;
                 if eng_oh(6) = '1' then
-                    e_vl <= unsigned(tv_w);
+                    e_vs <= e_vh + unsigned(tv_w);
                     e_sep <= signed(ts_w(13 downto 0));                                 -- sample k-3
                     v_u  := resize(c_cdot, 22) - signed(resize(e_gs, 22));
                     -- round to the nearest octave for the AA shift with a 10-bit
@@ -1098,8 +1210,8 @@ begin
                     e_rd2 <= e_rd;                                                      -- sample k-3
                     -- four bits: the resolution fade has emptied everything past rd 10,
                     -- so the barrel never needs a fifth shift stage
-                    if v_sh < 0 then e_rd <= (others => '0');
-                    elsif v_sh > 15 then e_rd <= to_unsigned(15, 4);
+                    if v_sh(9) = '1' then e_rd <= (others => '0');
+                    elsif v_sh(8 downto 4) /= "00000" then e_rd <= to_unsigned(15, 4);
                     else e_rd <= unsigned(v_sh(3 downto 0)); end if;
                     -- Resolution fade.  v_u is log2 of the lattice density in Q12 ring
                     -- units per pixel: f_bar's shift turns a Q12 ring distance into a
@@ -1116,9 +1228,15 @@ begin
                     -- exactly one octave and sits on a power of two, so the ramp between
                     -- them is a plain slice of the subtraction already made above.
                     e_at2 <= e_at;                                                      -- sample k-3
-                    if v_u(21 downto 12) < to_signed(9, 10) then e_at <= (others => '0');
-                    elsif v_u(21 downto 12) > to_signed(9, 10) then e_at <= (others => '1');
-                    else e_at <= unsigned(v_u(11 downto 6)); end if;
+                    -- (v_u(21:12) against 9: below -> 0, above -> 63, equal -> the fraction)
+                    if v_u(20 downto 16) = "00000" then v_ah0 := '1'; else v_ah0 := '0'; end if;
+                    if v_u(21) = '1' or (v_ah0 = '1' and (v_u(15) = '0' or v_u(14 downto 12) = "000")) then
+                        e_at <= (others => '0');
+                    elsif v_ah0 = '1' and v_u(15 downto 12) = "1001" then
+                        e_at <= unsigned(v_u(11 downto 6));
+                    else
+                        e_at <= (others => '1');
+                    end if;
                 end if;
                 if eng_oh(7) = '1' then
                     if eng_kl = '1' then
@@ -1137,29 +1255,35 @@ begin
     ------------------------------------------------------------------------
     p_sbuf : process(clk)
         variable v_ra : unsigned(8 downto 0);
-        variable v_wk : unsigned(8 downto 0);
+        variable v_k3 : std_logic;
         variable v_d0, v_d1, v_d2, v_d3 : std_logic_vector(15 downto 0);
     begin
         if rising_edge(clk) then
             -- engine write of the word of sample k-3 at ph7
-            v_wk := eng_k - 3;
+            -- the word of sample k-3 is stored at address eng_k = k (the beam reads add 3)
             v_d0 := std_logic_vector(e_u(15 downto 0));
             v_d1 := std_logic_vector(e_u(19 downto 16)) & std_logic_vector(e_v(11 downto 0));
             v_d2 := "0" & std_logic_vector(e_v(15 downto 12)) & std_logic_vector(e_sep(10 downto 0));
             v_d3 := std_logic_vector(e_sep(13 downto 11)) & "000" & std_logic_vector(e_rd2) & std_logic_vector(e_at2);
-            if eng_busy = '1' and eng_oh2(7) = '1' and eng_k >= 3 and v_wk < eng_nsamp then
-                sb0(to_integer(v_wk(7 downto 0))) <= v_d0;
-                sb1(to_integer(v_wk(7 downto 0))) <= v_d1;
-                sb2(to_integer(v_wk(7 downto 0))) <= v_d2;
-                sb3(to_integer(v_wk(7 downto 0))) <= v_d3;
+            -- (eng_k runs 511, 0 .. eng_last = nsamp + 2, so "k >= 3 and k - 3 < nsamp" is
+            --  "k >= 3 and k /= 511" for any line under 4064 px)
+            if eng_k(8 downto 2) /= "0000000" and eng_k(1 downto 0) = "11" then v_k3 := '1';
+            elsif eng_k(8 downto 2) /= "0000000" then v_k3 := '1';
+            elsif eng_k(1 downto 0) = "11" then v_k3 := '1'; else v_k3 := '0'; end if;
+            if eng_k = "111111111" then v_k3 := '0'; end if;
+            if eng_busy = '1' and eng_oh2(7) = '1' and v_k3 = '1' then
+                sb0(to_integer(eng_k(7 downto 0))) <= v_d0;
+                sb1(to_integer(eng_k(7 downto 0))) <= v_d1;
+                sb2(to_integer(eng_k(7 downto 0))) <= v_d2;
+                sb3(to_integer(eng_k(7 downto 0))) <= v_d3;
             end if;
             -- beam reads (px = pixel-1, span k = pixels 8k..8k+7 uses samples k, k+1):
             -- at px=1 mod 8 fetch sample k+1 (the pair's next member, loaded at px=2);
             -- at px=2 mod 8 fetch sample k-1, whose AA shift is captured at px=3 for
             -- stage 14 (13 clocks behind the input, i.e. span k-1)
-            if av_q = '0' then v_ra := (others => '0');
-            elsif px(2 downto 0) = "010" then v_ra := resize(px(10 downto 3), 9) - 1;
-            else v_ra := resize(px(10 downto 3), 9) + 1; end if;
+            if av_q = '0' then v_ra := to_unsigned(3, 9);
+            elsif px(2 downto 0) = "010" then v_ra := resize(px(10 downto 3), 9) + 2;
+            else v_ra := resize(px(10 downto 3), 9) + 4; end if;
             sq0 <= sb0(to_integer(v_ra(7 downto 0)));
             sq1 <= sb1(to_integer(v_ra(7 downto 0)));
             sq2 <= sb2(to_integer(v_ra(7 downto 0)));
@@ -1228,6 +1352,11 @@ begin
         variable v_u6  : signed(19 downto 0);
         variable v_v6  : unsigned(11 downto 0);
         variable v_ul  : signed(19 downto 0);
+        variable v_bu  : signed(19 downto 0);
+        variable v_bv  : unsigned(11 downto 0);
+        variable v_cu  : signed(19 downto 0);
+        variable v_cv  : unsigned(11 downto 0);
+        variable v_s1, v_s2 : signed(19 downto 0);
     begin
         if rising_edge(clk) then
             -- P7
@@ -1239,17 +1368,23 @@ begin
             -- second pixel instead of every third; red and blue, which only carry the
             -- colour fringing, are refreshed every fourth -- and smoothed to a 2 px
             -- cadence in p_out.
-            case slot is
-                when "01" =>                       -- red leads
-                    ul7 <= v_ul + resize(shift_right(sep6, 1), 20);
-                    v7  <= v_v6 + unsigned(sep6(11 downto 0));
-                when "11" =>                       -- blue trails
-                    ul7 <= v_ul - resize(shift_right(sep6, 2), 20);
-                    v7  <= v_v6 - unsigned(sep6(11 downto 0));
-                when others =>                     -- green anchors (slots 0 and 2)
-                    ul7 <= v_ul;
-                    v7  <= v_v6;
-            end case;
+            -- red (slot 1) leads: + sep/2, + sep;  blue (slot 3) trails: - sep/4, - sep;
+            -- green (slots 0, 2) anchors.  One adder each: a subtraction is the
+            -- complemented operand plus a carry in.
+            v_s1 := resize(shift_right(sep6, 1), 20);
+            v_s2 := resize(shift_right(sep6, 2), 20);
+            for i in 0 to 19 loop
+                if slot(0) = '0' then v_bu(i) := '0';
+                elsif slot(1) = '0' then v_bu(i) := v_s1(i);
+                else v_bu(i) := not v_s2(i); end if;
+            end loop;
+            for i in 0 to 11 loop
+                v_bv(i) := slot(0) and (sep6(i) xor slot(1));
+            end loop;
+            v_cu := (others => '0'); v_cu(0) := slot(0) and slot(1);
+            v_cv := (others => '0'); v_cv(0) := slot(0) and slot(1);
+            ul7 <= v_ul + v_bu + v_cu;
+            v7  <= v_v6 + v_bv + v_cv;
             slot7 <= slot;
             av7   <= av_q;
             -- P8 (twist term from the per-ring table)
@@ -1369,12 +1504,17 @@ begin
     ------------------------------------------------------------------------
     p_out : process(clk)
         variable v_rd : unsigned(3 downto 0);
+        variable v_bd : signed(16 downto 0);
+        variable v_bg : std_logic_vector(16 downto 0);
+        variable v_bin : std_logic;
+        variable v_bx : signed(24 downto 0);
         variable v_sl : unsigned(1 downto 0);
         variable v_ar, v_ab : unsigned(8 downto 0);
         variable v_r, v_b : unsigned(7 downto 0);
         variable v_y  : unsigned(11 downto 0);
         variable v_bmy, v_rmy : signed(9 downto 0);
-        variable v_u, v_v : signed(9 downto 0);
+        variable v_a8, v_b8, v_c8 : unsigned(7 downto 0);
+        variable v_ki : unsigned(3 downto 0);
         variable v_ax : unsigned(7 downto 0);
         variable v_k8 : unsigned(7 downto 0);
         variable v_ty : signed(12 downto 0);
@@ -1385,9 +1525,18 @@ begin
         if rising_edge(clk) then
             -- P14
             v_rd := rd_h1;
-            bar14_g <= f_bar(dfg13, v_rd);
+            -- f_alpha(f_bar(d, rd)) in one step: clamp(d*2^(8-rd), -128, 127) + 128.  In range
+            -- iff d's bits from rd-1 up all agree (rd = 0: d = 0); +128 flips bit 7.
+            v_bd := dfg13;
+            v_bg(16) := '1';
+            for k in 15 downto 0 loop v_bg(k) := v_bg(k + 1) and not (v_bd(k) xor v_bd(16)); end loop;
+            if v_rd = 0 then v_bin := v_bg(0) and not v_bd(16);
+            else v_bin := v_bg(to_integer(v_rd) - 1); end if;
+            v_bx := shift_right(v_bd & x"00", to_integer(v_rd));
+            if v_bin = '1' then bar14_g <= unsigned((not v_bx(7)) & v_bx(6 downto 0));
+            else bar14_g <= (others => not v_bd(16)); end if;
             -- P15
-            v_ax := f_alpha(bar14_g, vldg_d(13), '1');
+            if vldg_d(13) = '1' then v_ax := bar14_g; else v_ax := (others => '0'); end if;
             if v_ax > att_d(14) then v_ax := v_ax - att_d(14); else v_ax := (others => '0'); end if;
             if lay_d(13)(2) = '1' and lay_d(14)(2) = '0' then    -- first active pixel of the line
                 fr_r <= '1'; fr_b <= '1';
@@ -1423,10 +1572,22 @@ begin
             y18 <= yy17(11 downto 4);
             v_bmy := signed(resize(b17, 10)) - signed(resize(yy17(11 downto 4), 10));
             v_rmy := signed(resize(r17, 10)) - signed(resize(yy17(11 downto 4), 10));
-            v_u := shift_right(v_bmy, 1) + shift_right(v_bmy, 4);
-            v_v := shift_right(v_rmy, 1) + shift_right(v_rmy, 2) - shift_right(v_rmy, 5);
-            u18 <= resize(v_u, 9);
-            v18 <= resize(v_v, 9);
+            -- B-Y and R-Y lie in -255..255, so their bits 9 and 8 are one net (the sign s),
+            -- U and V fit in 9 bits and take that sign, and only the low 8 bits need an
+            -- adder.  Written with the sign-extension bits folded into constants
+            -- (U: + 112s, V: + 72s - (R-Y)(7:5)) so that no carry cell adds a net to itself:
+            --   U(7:0) = (d>>1 + d>>4) mod 256 = d(7:1) + (sss & d(7:4))
+            --   V(7:0) = (d>>1 + d>>2 - d>>5) mod 256 = d(7:1) + d(7:2) + (72s - d(7:5))
+            v_a8 := '0' & unsigned(v_bmy(7 downto 1));
+            v_b8 := (7 => '0', 6 => v_bmy(9), 5 => v_bmy(9), 4 => v_bmy(9), others => '0');
+            v_b8(3 downto 0) := unsigned(v_bmy(7 downto 4));
+            v_c8 := v_a8 + v_b8;
+            u18 <= signed(v_bmy(9) & std_logic_vector(v_c8));
+            v_a8 := '0' & unsigned(v_rmy(7 downto 1));
+            v_b8 := "00" & unsigned(v_rmy(7 downto 2));
+            v_ki(3) := v_rmy(9); v_ki(2 downto 0) := unsigned(v_rmy(7 downto 5));
+            v_c8 := v_a8 + v_b8 + C_K72(to_integer(v_ki));
+            v18 <= signed(v_rmy(9) & std_logic_vector(v_c8));
             -- S8 Video backdrop.  The video replaces the GROUND -- black in Light, white
             -- paper in Ink:  out = dots + (video - ground) * k,  k = the ground's share of
             -- the pixel, 1 between dots, 0 under a dot's core, 1/2 on its anti-aliased edge.
@@ -1465,8 +1626,8 @@ begin
             end case;
             v_ty := resize(v_my, 13) + signed(resize(shift_left(resize(y18, 11), 1)
                     + resize(shift_right(y18, 1), 11) + resize(shift_right(y18, 2), 11), 13));
-            v_tu := signed(resize(v_mu, 13)) + resize(v18, 13) + resize(v18, 13) + resize(v18, 13);
-            v_tv := signed(resize(v_mv, 13)) + resize(u18, 13) + resize(u18, 13) + resize(u18, 13);
+            v_tu := signed(resize(v_mu, 13)) + shift_left(resize(v18, 13), 1) + resize(v18, 13);
+            v_tv := signed(resize(v_mv, 13)) + shift_left(resize(u18, 13), 1) + resize(u18, 13);
             sd_o <= sd_q;
             if sd_q(3) = '0' then
                 s_out_y <= to_unsigned(64, 10);
@@ -1480,21 +1641,22 @@ begin
         end if;
     end process p_out;
 
-    s_io_align_in.y       <= std_logic_vector(s_out_y);
-    s_io_align_in.u       <= std_logic_vector(s_out_u);
-    s_io_align_in.v       <= std_logic_vector(s_out_v);
-    s_io_align_in.avid    <= sd_o(3);
-    s_io_align_in.hsync_n <= sd_o(2);
-    s_io_align_in.vsync_n <= sd_o(1);
-    s_io_align_in.field_n <= sd_o(0);
     ------------------------------------------------------------------------
     -- table write ports (one write statement per RAM)
     ------------------------------------------------------------------------
     p_twrite : process(clk)
     begin
         if rising_edge(clk) then
-            if tw_we = 1 then t1_ram(to_integer(tw_addr(7 downto 0))) <= tw_d16; end if;
-            if tw_we = 2 then t2_ram(to_integer(tw_addr(7 downto 0))) <= tw_d16; end if;
+            -- T1/T2 are written one clock later than the other tables.  The pixel path's last
+            -- read that reaches the picture (the line's last active pixel, P11) can fall on the
+            -- very clock of the first table write of the blanking interval; a clock later it
+            -- never can, so these two RAMs are collision-free (no_rw_check).  tw_addr/tw_d16
+            -- cannot change for three clocks after a TW, so the delayed write is the same write.
+            tw_we12 <= "00";
+            if tw_we = 1 then tw_we12(0) <= '1'; end if;
+            if tw_we = 2 then tw_we12(1) <= '1'; end if;
+            if tw_we12(0) = '1' then t1_ram(to_integer(tw_addr(7 downto 0))) <= tw_d16; end if;
+            if tw_we12(1) = '1' then t2_ram(to_integer(tw_addr(7 downto 0))) <= tw_d16; end if;
             if tw_we = 3 then tm_ram(to_integer(tw_addr(7 downto 0))) <= tw_d16; end if;
             if tw_we = 4 then tv_ram(to_integer(tw_addr(7 downto 0))) <= tw_d16; end if;
             if tw_we = 5 then ts_ram(to_integer(tw_addr(7 downto 0))) <= tw_d16; end if;
@@ -1518,6 +1680,9 @@ begin
         variable v_rq   : signed(31 downto 0);
         variable v_ms   : signed(32 downto 0);
         variable v_am   : signed(32 downto 0);
+        variable v_msub : std_logic;
+        variable v_amx  : signed(32 downto 0);
+        variable v_mc   : signed(32 downto 0);
         variable v_opa, v_opb : signed(31 downto 0);
         variable v_sub  : std_logic;
         variable v_lx   : unsigned(19 downto 0);
@@ -1544,10 +1709,14 @@ begin
                 m_busy <= '1';
             elsif m_busy = '1' then
                 v_ms := resize(signed(m_acc(51 downto 20)), 33);
-                v_am := resize(signed(m_am), 33);
-                if m_acc(0) = '1' then
-                    if m_cnt = 19 then v_ms := v_ms - v_am; else v_ms := v_ms + v_am; end if;
-                end if;
+                -- (the multiplicand is acc itself: the CPU stalls in the MUL instruction, and
+                -- nothing writes acc, until the multiplier is idle again)
+                v_am := resize(acc, 33);
+                -- one adder: + m_am, - m_am (last step) or + 0
+                if m_cnt = 19 then v_msub := '1'; else v_msub := '0'; end if;
+                v_amx := (v_am xor (32 downto 0 => v_msub)) and (32 downto 0 => m_acc(0));
+                v_mc  := (others => '0'); v_mc(0) := v_msub and m_acc(0);
+                v_ms := v_ms + v_amx + v_mc;
                 m_acc <= unsigned(v_ms(32 downto 0)) & m_acc(19 downto 1);
                 m_cnt <= m_cnt + 1;
                 if m_cnt = 19 then
@@ -1563,8 +1732,10 @@ begin
             elsif d_busy = '1' then
                 -- the remainder is always below the 16-bit divisor, so 17 bits suffice
                 v_rem := d_rem(15 downto 0) & d_n(31);
-                if v_rem >= resize(d_d, 17) then
-                    v_rem := v_rem - resize(d_d, 17);
+                -- (the divisor is the register-file word itself: rf_q only reloads in the
+                -- register-read state, and the CPU stalls in the DIV instruction until done)
+                if v_rem >= resize(unsigned(rf_q(15 downto 0)), 17) then
+                    v_rem := v_rem - resize(unsigned(rf_q(15 downto 0)), 17);
                     d_n   <= d_n(30 downto 0) & '1';
                 else
                     d_n   <= d_n(30 downto 0) & '0';
@@ -1666,7 +1837,6 @@ begin
                         end if;
                     when OP_MUL =>
                         if sh_busy = '0' then
-                            m_am  <= unsigned(acc);
                             m_acc <= x"00000000" & unsigned(v_rq(19 downto 0));
                             m_go <= '1';
                             sh_busy <= '1'; v_done := '0';
@@ -1675,7 +1845,7 @@ begin
                         end if;
                     when OP_DIV =>
                         if sh_busy = '0' then
-                            d_n <= unsigned(acc); d_d <= unsigned(v_rq(15 downto 0)); d_go <= '1';
+                            d_n <= unsigned(acc); d_go <= '1';
                             sh_busy <= '1'; v_done := '0';
                         elsif busy = '1' then
                             v_done := '0';
@@ -1728,15 +1898,26 @@ begin
     -- IO-align pad: video and syncs delayed together, so only the total
     -- latency changes (22 -> 24).
     p_io_align_pad : process(clk)
+        variable v_wa, v_ra : unsigned(7 downto 0);
     begin
         if rising_edge(clk) then
-            s_io_align_pad(0) <= s_io_align_in;
-            for i in 1 to 1 loop
-                s_io_align_pad(i) <= s_io_align_pad(i - 1);
-            end loop;
+            v_wa := (0 => dcnt(0), others => '0');
+            v_ra := (0 => not dcnt(0), others => '0');
+            opad0(to_integer(v_wa)) <= std_logic_vector(s_out_y) & std_logic_vector(s_out_u(9 downto 4));
+            opad1(to_integer(v_wa)) <= "00" & std_logic_vector(s_out_u(3 downto 0)) & std_logic_vector(s_out_v);
+            opq0 <= opad0(to_integer(v_ra));
+            opq1 <= opad1(to_integer(v_ra));
+            s_sync_pad0 <= sd_o;
+            s_sync_pad1 <= s_sync_pad0;
         end if;
     end process p_io_align_pad;
 
-    data_out <= s_io_align_pad(1);
+    data_out.y       <= opq0(15 downto 6);
+    data_out.u       <= opq0(5 downto 0) & opq1(13 downto 10);
+    data_out.v       <= opq1(9 downto 0);
+    data_out.avid    <= s_sync_pad1(3);
+    data_out.hsync_n <= s_sync_pad1(2);
+    data_out.vsync_n <= s_sync_pad1(1);
+    data_out.field_n <= s_sync_pad1(0);
 
 end architecture iris;
