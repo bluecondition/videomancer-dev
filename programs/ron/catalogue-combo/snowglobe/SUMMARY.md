@@ -141,5 +141,5 @@ HW status: v0.2.0 built, not yet flashed.
 **seed 3**, set as `[firmware] seed = 3` in the staged
 `programs/czartroniks/snowglobe/snowglobe.toml`. Seeds 1–2 hung router1 (a
 rip-up livelock) in at least one config; seed 3 builds all 8 (max 6831 LC),
-own HD 80.5 / 77.7 / 83.6 MHz (analog / HDMI / dual). Copy the seed into this
-TOML's `[firmware]` block when the rework here is committed.
+own HD 80.5 / 77.7 / 83.6 MHz (analog / HDMI / dual). This dev TOML carries
+the same `[firmware] seed = 3` since the rework was committed as the staged copy.
