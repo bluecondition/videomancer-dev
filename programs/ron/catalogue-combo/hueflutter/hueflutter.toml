@@ -76,7 +76,7 @@ name_label = "Chroma"
 control_mode = "linear"
 display_min_value = 1
 display_max_value = 8
-initial_value = 515
+initial_value = 448
 display_float_digits = 0
 suffix_label = " b"
 
