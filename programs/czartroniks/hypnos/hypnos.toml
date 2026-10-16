@@ -32,7 +32,7 @@ parameter_id = "rotary_potentiometer_1"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 512            # detent = frame centre; ends = 2 screens off
+initial_value = 480            # detent = frame centre; ends = 2 screens off
 display_min_value = -100
 display_max_value = 100
 name_label = "Center X"
@@ -43,7 +43,7 @@ parameter_id = "rotary_potentiometer_2"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 512
+initial_value = 527
 display_min_value = -100
 display_max_value = 100
 name_label = "Center Y"
@@ -54,7 +54,7 @@ parameter_id = "rotary_potentiometer_3"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 430            # ring density: 2048 px period -> 4 px (exponential)
+initial_value = 655            # ring density: 2048 px period -> 4 px (exponential)
 display_min_value = 0
 display_max_value = 100
 name_label = "Period"
@@ -65,7 +65,7 @@ parameter_id = "rotary_potentiometer_4"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 512            # detent = flat; CCW tunnel, CW dome
+initial_value = 612            # detent = flat; CCW tunnel, CW dome
 display_min_value = -100
 display_max_value = 100
 name_label = "Warp"
@@ -76,7 +76,7 @@ parameter_id = "rotary_potentiometer_5"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 512            # detent = plain rings; whole arms -8..+8
+initial_value = 0            # detent = plain rings; whole arms -8..+8
 display_min_value = -8
 display_max_value = 8
 name_label = "Spiral"
@@ -87,7 +87,7 @@ parameter_id = "rotary_potentiometer_6"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 512            # ink : paper band width
+initial_value = 448            # ink : paper band width
 display_min_value = 5
 display_max_value = 95
 name_label = "Duty"
@@ -99,7 +99,7 @@ suffix_label = "%"
 parameter_id = "toggle_switch_7"
 name_label = "Form"
 value_labels = ["Round", "Angular"]
-initial_value_label = "Round"
+initial_value_label = "Angular"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
@@ -111,7 +111,7 @@ initial_value_label = "Off"
 parameter_id = "toggle_switch_9"
 name_label = "Ink"
 value_labels = ["White", "Colour"]
-initial_value_label = "White"
+initial_value_label = "Colour"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
@@ -123,7 +123,7 @@ initial_value_label = "Black"
 parameter_id = "toggle_switch_11"
 name_label = "Invert"
 value_labels = ["Normal", "Invert"]
-initial_value_label = "Normal"
+initial_value_label = "Invert"
 
 # --- Linear Potentiometer (Fader 12) ---
 
@@ -132,7 +132,7 @@ parameter_id = "linear_potentiometer_12"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 512            # SPEED: centre = still, up = rings stream out, down = in
+initial_value = 945            # SPEED: centre = still, up = rings stream out, down = in
 display_min_value = -100
 display_max_value = 100
 name_label = "Speed"
