@@ -32,7 +32,7 @@ parameter_id = "rotary_potentiometer_1"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 483          # ~170 deg (green)
+initial_value = 382          # ~170 deg (green)
 display_min_value = 0
 display_max_value = 360
 name_label = "Color"
@@ -43,7 +43,7 @@ parameter_id = "rotary_potentiometer_2"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 100          # 0% = frozen (replaces the old Animate switch)
+initial_value = 329          # 0% = frozen (replaces the old Animate switch)
 display_min_value = 0
 display_max_value = 100
 name_label = "Change Rate"
@@ -54,7 +54,7 @@ parameter_id = "rotary_potentiometer_3"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 0
+initial_value = 1023
 display_min_value = 0
 display_max_value = 100
 name_label = "Number Set"
@@ -65,7 +65,7 @@ parameter_id = "rotary_potentiometer_4"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 512          # unity; 100% = 4 numbers high at full zoom
+initial_value = 215          # unity; 100% = 4 numbers high at full zoom
 display_min_value = 0
 display_max_value = 100
 name_label = "Size"
@@ -76,7 +76,7 @@ parameter_id = "rotary_potentiometer_5"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 0            # packed; up = gap grows, font size unchanged
+initial_value = 1023            # packed; up = gap grows, font size unchanged
 display_min_value = 0
 display_max_value = 100
 name_label = "Spacing"
@@ -87,7 +87,7 @@ parameter_id = "rotary_potentiometer_6"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 0
+initial_value = 582
 display_min_value = 0
 display_max_value = 100
 name_label = "Glow"
@@ -105,7 +105,7 @@ initial_value_label = "Off"
 parameter_id = "toggle_switch_8"
 name_label = "Background"
 value_labels = ["Black", "Tint"]
-initial_value_label = "Black"
+initial_value_label = "Tint"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
