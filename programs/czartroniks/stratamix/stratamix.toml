@@ -25,7 +25,7 @@ name_label = "Depth"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 720
+initial_value = 104
 display_float_digits = 1
 suffix_label = "%"
 
@@ -35,7 +35,7 @@ name_label = "Pivot"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 450
+initial_value = 516
 display_float_digits = 1
 suffix_label = "%"
 
@@ -51,7 +51,7 @@ name_label = "Tint"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 250
+initial_value = 398
 display_float_digits = 1
 suffix_label = "%"
 
@@ -59,7 +59,7 @@ suffix_label = "%"
 parameter_id = "rotary_potentiometer_5"
 name_label = "Mode"
 value_labels = ["Add", "Screen", "Multiply", "Difference", "Overlay"]
-initial_value_label = "Difference"
+initial_value_label = "Overlay"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
@@ -67,7 +67,7 @@ name_label = "Mix"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 600
+initial_value = 921
 display_float_digits = 1
 suffix_label = "%"
 
@@ -107,7 +107,7 @@ name_label = "Strata"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 0
+initial_value = 243
 display_float_digits = 1
 suffix_label = "%"
 
