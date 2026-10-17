@@ -253,7 +253,14 @@ begin
             s_gain  <= s_k_gain(9 downto 2);
             -- K5 detector zones: change only 12 counts inside the new zone
             v_z := s_k_mode(9 downto 8); v_lo := s_k_mode(7 downto 0);
-            if (v_lo >= 12 or v_z = 0) and (v_lo <= 243 or v_z = 3) then s_mode <= v_z; end if;
+            -- labelled default: at program load the firmware writes the
+            -- initial_value_label's INDEX (0..3), not a 0..1023 position, so
+            -- a value below 4 is the detector index itself
+            if s_k_mode < 4 then
+                s_mode <= s_k_mode(1 downto 0);
+            elsif (v_lo >= 12 or v_z = 0) and (v_lo <= 243 or v_z = 3) then
+                s_mode <= v_z;
+            end if;
             -- K6 ink luma 64..945; the paper is white under dark ink, black under light
             s_inky <= 64 + s_k_ink - shift_right(s_k_ink, 3) - shift_right(s_k_ink, 6);
             if s_k_ink >= 528 then s_paper_blk <= '1'; elsif s_k_ink < 496 then s_paper_blk <= '0'; end if;
