@@ -20,7 +20,7 @@ name_label = "Cells"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 400
+initial_value = 917
 display_float_digits = 1
 suffix_label = "%"
 
@@ -28,7 +28,7 @@ suffix_label = "%"
 parameter_id = "rotary_potentiometer_2"
 name_label = "Aspect"
 value_labels = ["Square", "Wide", "Wider", "Strip"]
-initial_value_label = "Square"
+initial_value_label = "Strip"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
@@ -36,7 +36,7 @@ name_label = "Grout"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 350
+initial_value = 508
 display_float_digits = 1
 suffix_label = "%"
 
@@ -56,7 +56,7 @@ name_label = "Soft"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 300
+initial_value = 786
 display_float_digits = 1
 suffix_label = "%"
 
@@ -66,7 +66,7 @@ name_label = "Source"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 0
+initial_value = 557
 display_float_digits = 1
 suffix_label = "%"
 
@@ -106,7 +106,7 @@ name_label = "Stencil"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 500
+initial_value = 372
 display_float_digits = 1
 suffix_label = "%"
 
