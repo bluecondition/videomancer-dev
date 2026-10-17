@@ -1138,8 +1138,8 @@ begin
                     case v_op is
                         when 0 =>
                             if v_k(10 downto 8) = "001" or v_k(10 downto 8) = "010"
-                               or v_k(10 downto 8) = "100" then
-                                c_st <= CS_MEM;                     -- INC DEC LDXM
+                               or v_k(10 downto 8) = "100" or v_k(10 downto 8) = "110" then
+                                c_st <= CS_MEM;                     -- INC DEC LDXM ADDM
                             else
                                 c_st <= CS_EXEC;
                             end if;
@@ -1209,6 +1209,12 @@ begin
                                 c_rwe <= '1';
                                 c_rwa <= c_ea(7 downto 0);
                                 c_rwd <= c_x;
+                            when 6 =>                               -- ADDM m
+                                c_rwe <= '1';
+                                c_rwa <= c_ea(7 downto 0);
+                                c_rwd <= v_sum(15 downto 0);
+                                c_a <= v_sum(15 downto 0); c_r <= v_sum(15 downto 0);
+                                c_c <= v_sum(16); c_zn <= '1';
                             when others =>
                             case to_integer(v_k(3 downto 0)) is
                                 when 1 =>                           -- RET
@@ -1279,8 +1285,8 @@ begin
                             c_a <= c_a xor c_b; c_r <= c_a xor c_b; c_zn <= '1';
                         when 17 =>                                  -- LXI
                             c_x <= c_b;
-                        when 18 =>                                  -- ADX
-                            c_x <= c_x + c_b;
+                        when 18 =>                                  -- BRA
+                            v_npc := c_bt;
                         when 21 =>                                  -- JMP (even)
                             v_npc := v_k & '0';
                         when 22 => if c_z = '1' then v_npc := c_bt; end if;

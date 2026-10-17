@@ -7,9 +7,10 @@ dasm.py -- the DODECA board's game CPU: ISA, macro assembler, emulator.
 The CPU is a 16-bit accumulator machine (A, X, flags Z/N/C, an 8-deep return
 stack).  One instruction = one 16-bit word: op[15:11] k[10:0].  Program ROM is
 up to 4096 words (Harvard; LDC reads it as data): JMP/CALL targets are even
-(pc = k*2), conditional branches and LOOP are pc-relative (pc+1+sext(k)),
+(pc = k*2), BRA, conditional branches and LOOP are pc-relative (pc+1+sext(k)),
 LDC reads ROM[X+k].  Work RAM is 256 x 16.  SYS k with k[10:8] != 0 is a
-memory-direct op on RAM[k[7:0]]: 1 INC, 2 DEC, 3 CLR, 4 LDXM, 5 STXM.
+memory-direct op on RAM[k[7:0]]: 1 INC, 2 DEC, 3 CLR, 4 LDXM, 5 STXM,
+6 ADDM (M += A; A = M; Z N C).
 
 This file is the ISA reference: attract.vhd's CPU must match emulate() bit for
 bit.  The emulator also models the board (tilemap, palette/row-scroll RAM,
@@ -21,7 +22,7 @@ PNG is done by tools/preview.py with PIL.
 
 # --------------------------------------------------------------------- ISA
 OPS = ['SYS', 'LDI', 'LDH', 'LD', 'ST', 'ADD', 'SUB', 'AND', 'OR', 'XOR',
-       'CMP', 'ADDI', 'ANDI', 'ORI', 'CMPI', 'LDX', 'STX', 'LXI', 'ADX',
+       'CMP', 'ADDI', 'ANDI', 'ORI', 'CMPI', 'LDX', 'STX', 'LXI', 'BRA',
        'LDC', 'XORI', 'JMP', 'JZ', 'JNZ', 'JC', 'JNC', 'JN', 'JP', 'CALL',
        'IN', 'OUT', 'LOOP']
 OPC = {n: i for i, n in enumerate(OPS)}
@@ -57,6 +58,12 @@ def lfsr_step(s):
 # --------------------------------------------------------------- assembler
 class AsmError(Exception):
     pass
+
+
+class BranchRange(AsmError):
+    def __init__(self, msg, label):
+        super().__init__(msg)
+        self.label = label
 
 
 class Asm:
@@ -130,6 +137,9 @@ class Asm:
     def stxm(self, var):
         self._memop(5, var)        # M = X
 
+    def addm(self, var):
+        self._memop(6, var)        # M += A; A = M; flags (C = carry)
+
     def __getattr__(self, name):
         u = name.upper()
         if u in OPC and u != 'SYS':
@@ -143,7 +153,7 @@ class Asm:
         if isinstance(k, int):
             return k
         if isinstance(k, str):
-            if op in ('JMP', 'JZ', 'JNZ', 'JC', 'JNC', 'JN', 'JP', 'CALL',
+            if op in ('JMP', 'BRA', 'JZ', 'JNZ', 'JC', 'JNC', 'JN', 'JP', 'CALL',
                       'LOOP', 'LDC'):
                 if k in self.addr:
                     return self.addr[k]
@@ -206,12 +216,12 @@ class Asm:
                 if v & 1 or not 0 <= v < 4096:
                     raise AsmError('%s target %d not even/in range at %d' % (op, v, i))
                 v >>= 1
-            elif op in ('JZ', 'JNZ', 'JC', 'JNC', 'JN', 'JP', 'LOOP'):
+            elif op in ('BRA', 'JZ', 'JNZ', 'JC', 'JNC', 'JN', 'JP', 'LOOP'):
                 v = v - (i + 1)
                 if not -1024 <= v <= 1023:
-                    raise AsmError('branch out of range at %d (%s %r)' % (i, op, k))
+                    raise BranchRange('branch out of range at %d (%s %r)' % (i, op, k), k)
                 v &= 2047
-            elif op in ('LDI', 'ADDI', 'CMPI', 'LXI', 'ADX'):
+            elif op in ('LDI', 'ADDI', 'CMPI', 'LXI'):
                 if not -1024 <= v <= 1023:
                     raise AsmError('immediate %d out of range at %d (%s)' % (v, i, op))
                 v &= 2047
@@ -364,6 +374,11 @@ class Board:
             elif g == 5:                   # STXM m
                 self.ram[ma] = self.x
                 cyc = 4
+            elif g == 6:                   # ADDM m
+                r = m + a
+                self.c = (r >> 16) & 1
+                self.ram[ma] = r & 0xFFFF
+                self.a = self.flags(r)
         elif op == 'SYS':
             s = SYSOPS[k & 15]
             if s == 'RET':
@@ -442,8 +457,8 @@ class Board:
             self.flags(a - b)
         elif op == 'LXI':
             self.x = sext11(k) & 0xFFFF
-        elif op == 'ADX':
-            self.x = (self.x + sext11(k)) & 0xFFFF
+        elif op == 'BRA':
+            npc = rel
         elif op == 'LDC':
             self.a = self.flags(self.rom[(self.x + k) & 4095])
             cyc = 6

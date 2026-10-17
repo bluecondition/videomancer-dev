@@ -1,5 +1,7 @@
 # ATTRACT — plan (v2, simplified)
 
+*This is the plan as approved. What was actually built, and the budget as it stands, is in [PROGRESS.md](PROGRESS.md). As of v0.4.0: seven games, the font in logic, 32/32 EBR.*
+
 Revised 2026-10-16 after Ron's review of v1:
 - reuse the same sprites, tiles and characters, arranged differently for each game style;
 - keep the games simple;

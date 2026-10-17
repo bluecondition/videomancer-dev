@@ -84,6 +84,15 @@ class Prog(dasm.Asm):
         self.ov_max = max(self.ov_max, self.nvar)
         self.nvar = self.ov_base
 
+    def actors(self):
+        """The actor arrays, first in a game's overlay (so every game that
+        uses the kernel puts them at the same addresses)."""
+        for n in ('ox', 'oy', 'ovx', 'ovy', 'oa', 'os', 'ot'):
+            self.var(n, NACT)
+        for n in ('pj', 'pb', 'pv', 'pd'):      # BLIP: jump tick, ground y, drift, facing
+            self.var(n)
+        self.nvar = max(self.nvar, self.vars['pd'] + 1)
+
     def overlay_end(self):
         self.ov_max = max(self.ov_max, self.nvar)
         self.nvar = self.ov_max
@@ -100,9 +109,8 @@ class Prog(dasm.Asm):
             self.ldi(('lo', v))
             self.ldh(('hi', v))
 
-    def ldxa(self, label):           # X = label address
-        self.lda(label)
-        self.tax()
+    def ldxa(self, label):           # X = label address (data section < 1024)
+        self.lxi(label)
 
     def inp(self, p):
         self.emit('IN', p)
@@ -128,8 +136,70 @@ class Prog(dasm.Asm):
         self.decm(var)
 
     def string(self, label, col, row, pal, text):
-        """ROM string: taddr, attr, len, chars."""
-        self.table(label, row * 32 + col, tpal(pal), len(text), *[ord(ch) for ch in text])
+        """ROM string: taddr, attr, len, then the characters (code - 32)
+        packed two per word, first in the high byte."""
+        cs = [ord(ch) - 32 for ch in text] + [0]
+        self.table(label, row * 32 + col, tpal(pal), len(text),
+                   *[(cs[i] << 8) | cs[i + 1] for i in range(0, len(text), 2)])
+
+    def runs(self, label, runs):
+        """Tile-run table for truns: [(tile address, count, tile word)]."""
+        self.table(label, len(runs), *[v for r in runs for v in r])
+
+    def paltable(self, label, ctl, cols):
+        """Palette load table for load_pals: ctl address, pairs, colours
+        packed two per word (first in the high byte)."""
+        assert len(cols) % 2 == 0, label
+        self.table(label, ctl, len(cols) // 2,
+                   *[(cols[i] << 8) | cols[i + 1] for i in range(0, len(cols), 2)])
+
+    def assemble(self):
+        """Peepholes, then JMP -> BRA (relative, no even-alignment pad at
+        the target) wherever the target is within reach; the ones that
+        turn out too far stay absolute JMPs."""
+        self.peephole()
+        base, far = list(self.code), set()
+        while True:
+            self.code = [('BRA', k) if op == 'JMP' and isinstance(k, str) and k not in far
+                         else (op, k) for (op, k) in base]
+            try:
+                return super().assemble()
+            except dasm.BranchRange as e:
+                if not isinstance(e.label, str) or e.label in far:
+                    raise
+                far.add(e.label)
+
+    def peephole(self):
+        """Shorter forms of common idioms (labels inside a match block it):
+             LD v; ADDI d; ST v      ->  LDI d; ADDM v
+             ST sp_a; CALL spr_put   ->  CALL spr_puta
+             CALL x; RET             ->  JMP x"""
+        c = self.code
+        inner = set(self.labels.values())
+        out, remap, i = [], {}, 0
+        while i < len(c):
+            remap[i] = len(out)
+            if (i + 2 < len(c) and c[i][0] == 'LD' and c[i + 1][0] == 'ADDI'
+                    and c[i + 2][0] == 'ST' and c[i][1] == c[i + 2][1]
+                    and i + 1 not in inner and i + 2 not in inner):
+                out += [('LDI', c[i + 1][1]), ('SYS', ('memop', 6, c[i][1]))]
+                i += 3
+                continue
+            if (i + 1 < len(c) and c[i] == ('ST', 'sp_a') and c[i + 1] == ('CALL', 'spr_put')
+                    and i + 1 not in inner):
+                out.append(('CALL', 'spr_puta'))
+                i += 2
+                continue
+            if (i + 1 < len(c) and c[i][0] == 'CALL' and c[i + 1] == ('SYS', dasm.SYSC['RET'])
+                    and i + 1 not in inner):
+                out.append(('JMP', c[i][1]))            # tail call
+                i += 2
+                continue
+            out.append(c[i])
+            i += 1
+        remap[len(c)] = len(out)
+        self.code = out
+        self.labels = {n: remap[k] for n, k in self.labels.items()}
 
     def frame(self):
         # finish the frame: show the sprites written this tick, wait, and
@@ -161,14 +231,19 @@ def build_lib(a):
     a.ldc(0); a.outp(P_TADDR)
     a.ldc(1); a.st('p_attr')
     a.ldc(2); a.st('p_n')
-    a.adx(3)
+    a.inx(); a.inx(); a.inx()
     a.label('puts_l')
-    a.ldc(0); a.addi(-32); a.emit('OR', 'p_attr'); a.outp(P_TDATA)
+    a.ldc(0); a.swapb(); a.andi(255); a.emit('OR', 'p_attr'); a.outp(P_TDATA)
+    a.decm('p_n'); a.jz('puts_r')
+    a.ldc(0); a.andi(255); a.emit('OR', 'p_attr'); a.outp(P_TDATA)
     a.inx()
     a.decm('p_n'); a.jnz('puts_l')
+    a.label('puts_r')
     a.ret()
 
-    # ---- spr_put: (sp_x, sp_y, sp_a) -> next sprite slot
+    # ---- spr_put: (sp_x, sp_y, sp_a) -> next sprite slot; spr_puta: sp_a = A
+    a.label('spr_puta')
+    a.st('sp_a')
     a.label('spr_put')
     a.ld('sp_y'); a.andi(255); a.swapb(); a.st('t7')
     a.ld('sp_x'); a.andi(255); a.emit('OR', 't7'); a.outp(P_SPRY)
@@ -176,12 +251,190 @@ def build_lib(a):
     a.emit('OR', 'sp_a'); a.outp(P_SPRA)
     a.ret()
 
+    # ---- actor kernel (the games after CROSSTALK).  NACT actors in the
+    # overlay's first words (Prog.actors): ox, oy = 16x16 frame origin (an
+    # 8x8 sprite is drawn centred in it), ovx/ovy = px per move, oa = sprite
+    # attribute (0 = no actor; bit 15 = two-frame walk cycle, frame 1 =
+    # pattern + 4), os/ot = the game's state and timer.  Actor 0 is BLIP;
+    # pj/pb/pv = his jump tick, ground y and jump drift, pd = HF facing left.
+    # act_draw: every live actor (BLIP first, on top), from the current slot
+    a.label('act_draw')
+    a.lxi(0)
+    a.label('ad_l')
+    a.ldx('ox'); a.st('sp_x'); a.ldx('oy'); a.st('sp_y')
+    a.ldx('oa'); a.jz('ad_n')
+    a.st('sp_a'); a.jp('ad_sz')
+    a.shl(); a.shr(); a.st('sp_a')                 # strip the walk flag
+    a.ld('tick'); a.andi(8); a.jz('ad_sz')
+    a.ldi(4); a.addm('sp_a')
+    a.label('ad_sz')
+    a.ld('sp_a'); a.shl(); a.jn('ad_put')           # 8x8: centre it
+    a.ldi(4); a.addm('sp_x'); a.ldi(4); a.addm('sp_y')
+    a.label('ad_put')
+    a.call('spr_put')
+    a.label('ad_n')
+    a.inx(); a.txa(); a.cmpi(NACT); a.jnz('ad_l')
+    a.ret()
+
+    # act_move: every live actor steps by its velocity
+    a.label('act_move')
+    a.lxi(NACT)
+    a.label('am_l')
+    a.ldx(('oa', -1)); a.jz('am_n')
+    a.ldx(('ovx', -1)); a.st('t7'); a.ldx(('ox', -1)); a.emit('ADD', 't7'); a.stx(('ox', -1))
+    a.ldx(('ovy', -1)); a.st('t7'); a.ldx(('oy', -1)); a.emit('ADD', 't7'); a.stx(('oy', -1))
+    a.label('am_n')
+    a.loop('am_l')
+    a.ret()
+
+    # act_hit: BLIP against the other live actors (origins within 9 px
+    # across, 6 down) -> A = X = the one he touches (Z clear), or A = 0
+    a.label('act_hit')
+    a.lxi(NACT - 1)
+    a.label('ah_l')
+    a.ldx('oa'); a.jz('ah_n')
+    a.ldx('ox'); a.emit('SUB', 'ox'); a.addi(9); a.cmpi(19); a.jnc('ah_n')
+    a.ldx('oy'); a.emit('SUB', 'oy'); a.addi(6); a.cmpi(13); a.jnc('ah_n')
+    a.txa(); a.ret()
+    a.label('ah_n')
+    a.loop('ah_l')
+    a.cla(); a.ret()
+
+    # act_free: a free actor from X down to 1 -> X, Z clear; Z set if none
+    a.label('act_free')
+    a.ldx('oa'); a.jz('af_got')
+    a.loop('act_free')
+    a.cla(); a.ret()
+    a.label('af_got')
+    a.ldi(1); a.ret()
+
+    # act_clear: no actors
+    a.label('act_clear')
+    a.lxi(NACT)
+    a.label('acl_l')
+    a.cla(); a.stx(('oa', -1)); a.loop('acl_l')
+    a.ret()
+
+    # act_life: a new life -- BLIP alone at (ox, ground y = A), HUD, power-on
+    a.label('act_life')
+    a.st('oy'); a.st('pb')
+    a.call('act_clear'); a.call('hud')
+    a.clr('pj'); a.clr('pv'); a.clr('pd'); a.clr('ovx'); a.clr('ovy')
+    a.call('blip_sp')
+    a.jmp('poweron')
+    # act_die: BLIP powers off where he stands -> A = lives left (Z: none)
+    a.label('act_die')
+    a.call('blip_sp'); a.call('poweroff')
+    a.decm('lives'); a.ret()
+    a.label('blip_sp')
+    a.ld('ox'); a.st('sp_x'); a.ld('oy'); a.st('sp_y')
+    a.ret()
+
+    # act_tick: end of a tick -- move, score, draw, show, wait; then what BLIP
+    # touches (act_hit)
+    a.label('act_tick')
+    a.call('act_move'); a.call('draw_score')
+    a.cla(); a.outp(P_SIDX); a.call('act_draw')
+    a.frame()
+    a.jmp('act_hit')
+
+    # walk_to: BLIP one px toward x = A, facing it.  Z set when there
+    a.label('walk_to')
+    a.st('t0'); a.ld('ox'); a.cmp('t0'); a.jz('wt_out'); a.jc('wt_r')
+    a.decm('ox'); a.lda(HF); a.st('pd'); a.ret()
+    a.label('wt_r')
+    a.incm('ox'); a.clr('pd'); a.ldi(1)
+    a.label('wt_out')
+    a.ret()
+
+    # tile_at: tile under canvas pixel (hx, hy) -> A (index), TADDR set,
+    # t7 = its address (tile_put writes there)
+    a.var('hx'); a.var('hy')
+    a.label('tile_at')
+    a.ld('hy'); a.andi(248); a.shl(); a.shl(); a.st('t7')
+    a.ld('hx'); a.shr(); a.shr(); a.shr(); a.emit('ADD', 't7'); a.st('t7')
+    a.outp(P_TADDR); a.inp(I_TDATA); a.andi(255)
+    a.ret()
+    a.label('tile_put')            # tile word A at t7
+    a.st('t6'); a.ld('t7'); a.outp(P_TADDR); a.ld('t6'); a.outp(P_TDATA)
+    a.ret()
+
+    # tfill: A = tile word, X = count, from the current TADDR
+    a.label('tfill')
+    a.outp(P_TDATA); a.loop('tfill')
+    a.ret()
+
+    # truns: X = ROM table {n, then n x (tile address, count, tile word)}
+    a.label('truns')
+    a.ldc(0); a.st('p_n'); a.inx()
+    a.label('tr_l')
+    a.ldc(0); a.outp(P_TADDR); a.ldc(1); a.st('t5'); a.ldc(2); a.st('t6')
+    a.label('tr_f')
+    a.ld('t6'); a.outp(P_TDATA); a.decm('t5'); a.jnz('tr_f')
+    a.inx(); a.inx(); a.inx()
+    a.decm('p_n'); a.jnz('tr_l')
+    a.ret()
+
+    # act_near: a live actor (1..) at y = A within 40 px of x = t2?  Z clear
+    a.label('act_near')
+    a.st('t1'); a.lxi(NACT - 1)
+    a.label('an_l')
+    a.ldx('oa'); a.jz('an_n')
+    a.ldx('oy'); a.cmp('t1'); a.jnz('an_n')
+    a.ldx('ox'); a.emit('SUB', 't2'); a.addi(40); a.cmpi(81); a.jc('an_y')
+    a.label('an_n')
+    a.loop('an_l')
+    a.cla(); a.ret()
+    a.label('an_y')
+    a.ldi(1); a.ret()
+
+    # act_feet: tile under actor X's feet (centre bottom) -> A
+    a.label('act_feet')
+    a.ldx('ox'); a.addi(8); a.st('hx'); a.ldx('oy'); a.addi(16); a.st('hy')
+    a.jmp('tile_at')
+
+    # blip_jump: BLIP mid-jump?  Advances the arc (and the drift pv); Z set
+    # when he is on the ground
+    a.table('jump_arc', 3, 6, 8, 10, 12, 13, 14, 15, 15, 16, 16, 15, 15, 14, 13, 12, 10, 8, 6, 3)
+    a.label('blip_jump')
+    a.ld('pj'); a.jz('bj_out')
+    a.ld('pv'); a.addm('ox')
+    a.ldxm('pj'); a.ldc(('jump_arc', -1)); a.neg(); a.emit('ADD', 'pb'); a.st('oy')
+    a.incm('pj'); a.cmpi(21); a.jnz('bj_out')
+    a.clr('pj'); a.ld('pb'); a.st('oy')
+    a.ldi(1)
+    a.label('bj_out')
+    a.ret()
+
+    # blip_spot: a walker (os = 0) on BLIP's floor (oy = pb) closing in,
+    # 12..22 px away?  Then jump, drifting toward it (over it): Z clear
+    a.label('blip_spot')
+    a.lxi(NACT - 1)
+    a.label('bsp_l')
+    a.ldx('oa'); a.jz('bsp_n')
+    a.ldx('os'); a.jnz('bsp_n')
+    a.ldx('oy'); a.cmp('pb'); a.jnz('bsp_n')
+    a.ldx('ox'); a.emit('SUB', 'ox'); a.st('t0')
+    a.ldx('ovx'); a.emit('XOR', 't0'); a.jp('bsp_n')          # moving away
+    a.ld('t0'); a.jp('bsp_p'); a.neg()
+    a.label('bsp_p')
+    a.addi(-12); a.cmpi(11); a.jnc('bsp_n')
+    a.ldi(1); a.st('pj'); a.st('pv')
+    a.ld('t0'); a.jp('bsp_r')
+    a.ldi(-1); a.st('pv')
+    a.label('bsp_r')
+    a.ldi(1); a.ret()
+    a.label('bsp_n')
+    a.loop('bsp_l')
+    a.cla(); a.ret()
+
     # ---- load_pals: X = ROM table {ctl addr, count, values...}
     a.label('load_pals')
     a.ldc(0); a.outp(P_CADDR)
     a.ldc(1); a.st('p_n')
-    a.adx(2)
+    a.inx(); a.inx()
     a.label('lp_l')
+    a.ldc(0); a.swapb(); a.outp(P_CDATA)
     a.ldc(0); a.outp(P_CDATA); a.inx()
     a.decm('p_n'); a.jnz('lp_l')
     a.ret()
@@ -248,42 +501,30 @@ def build_lib(a):
     a.ldxm('as_x')
     a.ret()
 
-    # ---- draw_score: score digits at row 1 cols 1..6, blank leading
-    # zeros but always the last two
+    # ---- draw_score: score at row 1 cols 1..6, high score at cols 13..18;
+    # leading zeros blank but the last two digits always show
     a.label('draw_score')
     a.lda(32 + 1); a.outp(P_TADDR)
-    a.lxi(5)
-    a.clr('t3')           # seen a non-zero digit
-    a.label('ds_l')
-    a.ldx('score'); a.st('t2')
-    a.jnz('ds_nz')
-    a.ld('t3'); a.jnz('ds_dig')
-    a.txa(); a.cmpi(2); a.jc('ds_dig')     # x < 2: always shown
-    a.lda(tpal(3)); a.outp(P_TDATA); a.jmp('ds_next')
-    a.label('ds_nz')
-    a.ldi(1); a.st('t3')
-    a.label('ds_dig')
-    a.ld('t2'); a.addi(ord('0') - 32); a.ori(tpal(3)); a.outp(P_TDATA)
-    a.label('ds_next')
-    a.dex()
-    a.txa(); a.cmpi(-1); a.jnz('ds_l')
-    # high score at cols 13..18
+    a.lxi(a.vars['score'] + 5); a.call('draw_bcd')
     a.lda(32 + 13); a.outp(P_TADDR)
-    a.lxi(5)
-    a.clr('t3')
-    a.label('dh_l')
-    a.ldx('hi'); a.st('t2')
-    a.jnz('dh_nz')
-    a.ld('t3'); a.jnz('dh_dig')
-    a.txa(); a.cmpi(2); a.jc('dh_dig')
-    a.lda(tpal(3)); a.outp(P_TDATA); a.jmp('dh_next')
-    a.label('dh_nz')
+    a.lxi(a.vars['hi'] + 5)              # (not ('hi', 5): that is the high-byte operator)
+    # X = address of the top digit; six digits downward
+    a.label('draw_bcd')
+    a.clr('t3')           # seen a non-zero digit
+    a.ldi(6); a.st('t4')
+    a.label('db_l')
+    a.ldx(0); a.st('t2')
+    a.jnz('db_nz')
+    a.ld('t3'); a.jnz('db_dig')
+    a.ld('t4'); a.cmpi(3); a.jc('db_dig')     # the last two: always shown
+    a.lda(tpal(3)); a.outp(P_TDATA); a.jmp('db_next')
+    a.label('db_nz')
     a.ldi(1); a.st('t3')
-    a.label('dh_dig')
+    a.label('db_dig')
     a.ld('t2'); a.addi(ord('0') - 32); a.ori(tpal(3)); a.outp(P_TDATA)
-    a.label('dh_next')
+    a.label('db_next')
     a.dex()
-    a.txa(); a.cmpi(-1); a.jnz('dh_l')
+    a.decm('t4'); a.jnz('db_l')
     a.ret()
 
     # ---- hi_update: if score > hi, copy
@@ -417,10 +658,8 @@ def build_lib(a):
     a.ret()
 
     # ---- palettes
-    tp = [c for p in TILE_PALS for c in p]
-    a.table('pal_default', 0, 16, *tp)
-    sp = [c for p in SPR_PALS for c in p]
-    a.table('pal_sprites', 32, 32, *sp)
+    a.paltable('pal_default', 0, [c for p in TILE_PALS for c in p])
+    a.paltable('pal_sprites', 32, [c for p in SPR_PALS for c in p])
 
     # ---- static burst + self test (the channel change between games)
     a.label('static')
@@ -454,7 +693,12 @@ def build_lib(a):
 # 8*t+4).  Screen sprite x = px + 12 (the playfield rows scroll -4 px to
 # centre the 27-tile maze), y = py + 8.
 # ======================================================================
-NGAMES = 3
+# the cabinets, in K1 / cycle order: (entry label, title)
+GAMES = [('dm_game', 'DOT MATRIX'), ('ss_game', 'SKYLINE SIEGE'),
+         ('cr_game', 'CROSSTALK'), ('sw_game', 'SWARMATRON'),
+         ('hs_game', 'HIGH STEEL'), ('tt_game', 'THUMP TOWN'), ('tg_game', 'TANGLE')]
+NGAMES = len(GAMES)
+NACT = 16                 # kernel actors (games after CROSSTALK)
 DM_N = 5                  # actors: 0 = BLIP, 1..4 = moths
 DIRX = [0, 1, 0, -1]      # up right down left
 DIRY = [-1, 0, 1, 0]
@@ -623,16 +867,18 @@ def build_dotmatrix(a):
     a.incm('dm_tx'); a.cmpi(27); a.jnz('c_col')
     a.incm('dm_ty'); a.cmpi(27); a.jnz('c_row')
     # power dots near the corners, clear BLIP's start and the moth den
-    for (mc, mr) in ((1, 3), (25, 3), (1, 23), (25, 23)):
-        a.ldi(mc); a.st('tm_c'); a.ldi(mr); a.st('tm_r')
-        a.call('mt_get'); a.cmpi(T['dot']); skip = a.uid('pw'); a.jnz(skip)
-        a.lda(T['power'] | tpal(1)); a.call('mt_set')
-        a.label(skip)
-    for (mc, mr) in ((13, 13), (13, 21)):
-        a.ldi(mc); a.st('tm_c'); a.ldi(mr); a.st('tm_r')
-        a.call('mt_get'); a.cmpi(T['dot']); skip = a.uid('cl'); a.jnz(skip)
-        a.cla(); a.call('mt_set'); a.decm('dm_dots')
-        a.label(skip)
+    PW = T['power'] | tpal(1)
+    a.table('dm_fix_c', 1, 25, 1, 25, 13, 13)
+    a.table('dm_fix_r', 3, 3, 23, 23, 13, 21)
+    a.table('dm_fix_w', PW, PW, PW, PW, 0, 0)
+    a.lxi(6)
+    a.label('fx_l')
+    a.ldc(('dm_fix_c', -1)); a.st('tm_c'); a.ldc(('dm_fix_r', -1)); a.st('tm_r')
+    a.call('mt_get'); a.cmpi(T['dot']); a.jnz('fx_n')
+    a.ldc(('dm_fix_w', -1)); a.call('mt_set'); a.jnz('fx_n')    # (mt_set: flags of the word)
+    a.decm('dm_dots')
+    a.label('fx_n')
+    a.loop('fx_l')
     a.ret()
 
     # ---- wall colours for the stage
@@ -910,7 +1156,7 @@ def build_dotmatrix(a):
     a.label('dm_draw')
     a.cla(); a.outp(P_SIDX)
     # BLIP: frame by direction, walk anim
-    a.ld('ax'); a.addi(12); a.st('sp_x'); a.ld('ay'); a.addi(8); a.st('sp_y')
+    a.call('dm_sp')
     a.ldxm('ad'); a.ldc('dm_blipfr'); a.st('t0')
     a.ld('aanim'); a.shr(); a.shr(); a.shr(); a.andi(1); a.jz('dr_b0')
     a.ldc(('dm_blipfr', 4)); a.st('t0')
@@ -960,13 +1206,16 @@ def build_dotmatrix(a):
     a.call('dm_draw')
     a.frame()
     a.decm('t5'); a.jnz('dd_freeze')
-    a.ld('ax'); a.addi(12); a.st('sp_x'); a.ld('ay'); a.addi(8); a.st('sp_y')
+    a.call('dm_sp')
     a.jmp('poweroff')
 
     # respawn: power-off in reverse
     a.label('dm_respawn')
-    a.ld('ax'); a.addi(12); a.st('sp_x'); a.ld('ay'); a.addi(8); a.st('sp_y')
+    a.call('dm_sp')
     a.jmp('poweron')
+    a.label('dm_sp')                    # BLIP's sprite position
+    a.ld('ax'); a.addi(12); a.st('sp_x'); a.ld('ay'); a.addi(8); a.st('sp_y')
+    a.ret()
 
     # ---- stage: generate + draw HUD + READY!
     a.label('dm_stage')
@@ -1127,19 +1376,25 @@ def build_skyline(a):
     for n in ('ss_fx', 'ss_fy', 'ss_fd', 'ss_n', 'ss_st', 'ss_anim', 'ss_tx',
               'ss_tgt', 'ss_bx', 'ss_by', 'ss_bon', 'ss_ex', 'ss_ey', 'ss_et',
               'ss_ux', 'ss_ud', 'ss_ut', 'ss_dead', 'ss_wave', 'ss_c', 'ss_r',
-              'ss_i', 'ss_hx', 'ss_hy', 'ss_tt'):
+              'ss_i', 'ss_hx', 'ss_hy', 'ss_tt', 'ss_mode', 'ss_hero', 'ss_nd'):
         a.var(n)
+    # bombs 0..2; SWARMATRON's divers ride in 3..5 (so the pilot dodges both)
     for n in ('ss_mx', 'ss_my', 'ss_mon'):
-        a.var(n, 3)
+        a.var(n, 6)
 
-    a.table('ss_pals', 32, 32, *[c for p in SS_SPR_PALS for c in p])
-    a.table('ss_tpal', 0, 4, *SS_TILE_PAL0)
+    a.paltable('ss_pals', 32, [c for p in SS_SPR_PALS for c in p])
+    a.paltable('ss_tpal', 0, SS_TILE_PAL0)
     a.table('ss_rowspr', S16 | T['luna0'], S16 | T['moth0'], S16 | T['moth0'], S16 | T['grub0'])
     a.table('ss_rowpts', 0x30, 0x20, 0x20, 0x10)
     a.table('ss_bldx', 4, 11, 18, 25)      # building left tile columns
 
-    # band palette for a sprite at y = A -> A = spal bits
+    # band palette for a formation sprite at ss_hy -> A = spal bits
+    # (SWARMATRON: by row ss_r)
     a.label('ss_band')
+    a.ld('ss_mode'); a.jz('sb_band')
+    a.ldxm('ss_r'); a.ldc('sw_rowpal'); a.ret()
+    a.label('sb_band')
+    a.ld('ss_hy')
     a.cmpi(88); a.jc('sb_top')
     a.cmpi(160); a.jc('sb_mid')
     a.lda(spal(3)); a.ret()
@@ -1206,8 +1461,8 @@ def build_skyline(a):
     # ---- new wave: everyone alive, formation at the top (lower each wave)
     a.label('ss_newwave')
     a.lxi(SS_N)
-    a.label('sw_l')
-    a.ldi(1); a.stx(('ss_alive', -1)); a.loop('sw_l')
+    a.label('snw_l')
+    a.ldi(1); a.stx(('ss_alive', -1)); a.loop('snw_l')
     a.ldi(SS_N); a.st('ss_n')
     a.ldi(32); a.st('ss_fx')
     a.ld('ss_wave'); a.andi(3); a.shl(); a.shl(); a.shl(); a.addi(32); a.st('ss_fy')
@@ -1227,9 +1482,11 @@ def build_skyline(a):
     a.jmp('sm_crush')
     a.label('sm_turn')
     a.ld('ss_fd'); a.neg(); a.st('ss_fd')
+    a.ld('ss_mode'); a.jnz('sm_out')              # SWARMATRON: sway only
     a.ld('ss_fy'); a.addi(8); a.st('ss_fy')
     # crush building tiles under every live moth's feet
     a.label('sm_crush')
+    a.ld('ss_mode'); a.jnz('sm_out')
     a.clr('ss_i')
     a.label('sm_cl')
     a.ldxm('ss_i'); a.ldx('ss_alive'); a.jz('sm_cn')
@@ -1278,7 +1535,7 @@ def build_skyline(a):
     # moths: which cell?
     a.clr('ss_i')
     a.label('sbo_l')
-    a.ldxm('ss_i'); a.ldx('ss_alive'); a.jz('sbo_n')
+    a.ldxm('ss_i'); a.ldx('ss_alive'); a.cmpi(1); a.jnz('sbo_n')
     a.call('ss_cellxy')
     a.ld('ss_bx'); a.addi(4 - 8); a.emit('SUB', 'ss_hx'); a.cmpi(16); a.jnc('sbo_n')
     a.ld('ss_by'); a.emit('SUB', 'ss_hy'); a.cmpi(16); a.jnc('sbo_n')
@@ -1319,7 +1576,7 @@ def build_skyline(a):
     a.inp(I_RAND); a.andi(7); a.cmpi(SS_COLS); a.jnc('sbm_n')
     a.st('ss_i'); a.addi((SS_ROWS - 1) * SS_COLS); a.st('ss_i')
     a.label('sbm_find')
-    a.ldxm('ss_i'); a.ldx('ss_alive'); a.jnz('sbm_got')
+    a.ldxm('ss_i'); a.ldx('ss_alive'); a.cmpi(1); a.jz('sbm_got')
     a.ld('ss_i'); a.addi(-SS_COLS); a.st('ss_i'); a.jn('sbm_n'); a.jmp('sbm_find')
     a.label('sbm_got')
     a.call('ss_cellxy')
@@ -1341,17 +1598,19 @@ def build_skyline(a):
     a.ld('tick'); a.andi(63); a.jnz('sp_keep')
     # new target: a random live moth's column centre
     a.inp(I_RAND); a.andi(31); a.cmpi(SS_N); a.jnc('sp_keep')
-    a.st('ss_i'); a.tax(); a.ldx('ss_alive'); a.jz('sp_keep')
+    a.st('ss_i'); a.tax(); a.ldx('ss_alive'); a.cmpi(1); a.jnz('sp_keep')
     a.call('ss_cellxy'); a.ld('ss_hx'); a.addi(8); a.st('ss_tgt')
     a.label('sp_keep')
     a.ld('ss_tgt'); a.emit('SUB', 'ss_tx'); a.st('t0')
-    # dodge: a bomb within 48 px above and 14 px across pushes away
-    a.lxi(2)
+    # dodge: a bomb (or diver) within 48 px above and 14 px across pushes away
+    a.ldxm('ss_nd')
     a.label('sp_d')
     a.ldx('ss_mon'); a.jz('sp_dn')
     a.ldx('ss_my'); a.cmpi(SS_TY - 56); a.jc('sp_dn')
     a.ldx('ss_mx'); a.emit('SUB', 'ss_tx'); a.addi(10); a.cmpi(24); a.jnc('sp_dn')
+    a.ldx('sw_dv'); a.jn('sp_dr'); a.jnz('sp_dl')               # a diver: against its heading
     a.ldx('ss_mx'); a.emit('SUB', 'ss_tx'); a.jn('sp_dr')
+    a.label('sp_dl')
     a.lda(-40); a.st('t0'); a.jmp('sp_dn')
     a.label('sp_dr')
     a.ldi(40); a.st('t0')
@@ -1370,6 +1629,7 @@ def build_skyline(a):
 
     # ---- MOTHER flyover
     a.label('ss_mother')
+    a.ld('ss_mode'); a.jnz('sw_tick')
     a.ld('ss_ut'); a.jz('smo_fly')
     a.decm('ss_ut'); a.jnz('smo_out')
     a.inp(I_RAND); a.andi(1); a.jz('smo_r')
@@ -1389,7 +1649,7 @@ def build_skyline(a):
     a.cla(); a.outp(P_SIDX)
     # turret
     a.ld('ss_tx'); a.st('sp_x'); a.ldi(SS_TY); a.st('sp_y')
-    a.lda(S16 | spal(0) | T['blip_turret']); a.st('sp_a'); a.call('spr_put')
+    a.ld('ss_hero'); a.st('sp_a'); a.call('spr_put')
     # bolt
     a.ld('ss_bon'); a.jz('sd_nb')
     a.ld('ss_bx'); a.st('sp_x'); a.ld('ss_by'); a.st('sp_y')
@@ -1424,7 +1684,7 @@ def build_skyline(a):
     # formation
     a.clr('ss_i')
     a.label('sd_f')
-    a.ldxm('ss_i'); a.ldx('ss_alive'); a.jz('sd_fn')
+    a.ldxm('ss_i'); a.ldx('ss_alive'); a.cmpi(1); a.jnz('sd_fn')
     a.call('ss_cellxy')
     a.ld('ss_hx'); a.addi(8); a.st('sp_x'); a.ld('ss_hy'); a.st('sp_y')
     a.call('ss_band'); a.st('t0')
@@ -1435,10 +1695,13 @@ def build_skyline(a):
     a.ld('t0'); a.st('sp_a'); a.call('spr_put')
     a.label('sd_fn')
     a.incm('ss_i'); a.cmpi(SS_N); a.jnz('sd_f')
+    a.ld('ss_mode'); a.jnz('sw_draw')
     a.ret()
 
     # ---- one game
     a.label('ss_game')
+    a.clr('ss_mode'); a.ldi(2); a.st('ss_nd')
+    a.lda(S16 | spal(0) | T['blip_turret']); a.st('ss_hero')
     a.ldxa('ss_pals'); a.call('load_pals')
     a.ldxa('ss_tpal'); a.call('load_pals')
     a.lda(0x100); a.outp(P_STAR)                      # starfield on
@@ -1454,7 +1717,9 @@ def build_skyline(a):
     a.lda(900); a.st('ss_ut')
     a.lxi(3)
     a.label('sg_cm')
-    a.cla(); a.stx(('ss_mon', -1)); a.loop('sg_cm')
+    a.cla(); a.stx(('ss_mon', -1)); a.stx(('sw_dv', -1)); a.loop('sg_cm')
+    a.ld('ss_mode'); a.jz('sg_tick')
+    a.call('sw_reset')
     a.label('sg_tick')
     a.incm('tick')
     a.call('ss_march')
@@ -1489,6 +1754,578 @@ def build_skyline(a):
 
 
 # ======================================================================
+# SWARMATRON -- swooping formation.  SKYLINE's formation, bolt, bombs and
+# turret pilot (ss_mode = 1: no city, the formation sways without
+# descending, colours by row) plus divers: moths peel off and swoop at
+# BLIP's fighter; one that falls off the bottom is back in its cell.
+# Divers ride in the bomb arrays' slots 3..5 (ss_mon = 1 diving) so the
+# pilot dodges them like bombs.  Shares SKYLINE's
+# variables (no overlay of its own).
+# ======================================================================
+SW_SPR_PALS = [
+    [0, c332(7, 7, 3), c332(7, 1, 0), c332(1, 3, 3)],   # 0 fighter
+    [0, c332(7, 6, 0), c332(5, 2, 0), c332(7, 7, 3)],   # 1 LUNA row: gold
+    [0, c332(7, 1, 1), c332(3, 0, 1), c332(7, 6, 3)],   # 2 red moths
+    [0, c332(5, 1, 3), c332(2, 0, 2), c332(7, 5, 3)],   # 3 violet moths
+    [0, c332(7, 3, 0), c332(7, 6, 0), c332(7, 7, 3)],   # 4 explosions
+    [0, c332(1, 5, 3), c332(0, 2, 2), c332(6, 7, 3)],   # 5 cyan row
+    [0, c332(7, 7, 3), c332(5, 5, 2), c332(7, 7, 3)],   # 6 bombs
+    [0, c332(7, 7, 0), c332(7, 7, 0), c332(7, 7, 3)],   # 7 bolt
+]
+
+
+def build_swarm(a):
+    T = a.T
+    a.var('sw_di', 6)          # diver -> its formation cell
+    a.var('sw_dv', 6)          # diver x velocity
+    a.var('ss_j')
+    a.paltable('sw_pals', 32, [c for p in SW_SPR_PALS for c in p])
+    a.table('sw_rowpal', spal(1), spal(2), spal(3), spal(5))
+
+    # per tick (from ss_mother): stars, launches, divers.  Diver loops run
+    # X = 3..1 over slots 5..3 (fields at offset +2)
+    a.label('sw_tick')
+    a.ld('tick'); a.neg(); a.andi(255); a.ori(0x300); a.outp(P_STAR)
+    # launch: a random moth in its cell, every ~half second
+    a.ld('tick'); a.andi(31); a.jnz('sw_upd')
+    a.inp(I_RAND); a.andi(31); a.cmpi(SS_N); a.jnc('sw_upd')
+    a.st('ss_i'); a.tax(); a.ldx('ss_alive'); a.cmpi(1); a.jnz('sw_upd')
+    a.lxi(3)
+    a.label('sw_f')
+    a.ldx(('ss_mon', 2)); a.jz('sw_got')
+    a.loop('sw_f')
+    a.jmp('sw_upd')
+    a.label('sw_got')
+    a.call('ss_cellxy')                          # (keeps X)
+    a.ld('ss_i'); a.stx(('sw_di', 2))
+    a.ld('ss_hx'); a.addi(8); a.stx(('ss_mx', 2))
+    a.ld('ss_hy'); a.stx(('ss_my', 2))
+    a.cla(); a.stx(('sw_dv', 2))
+    a.ldi(1); a.stx(('ss_mon', 2))
+    a.ldxm('ss_i'); a.ldi(2); a.stx('ss_alive')
+    # move the divers
+    a.label('sw_upd')
+    a.lxi(3)
+    a.label('sw_l')
+    a.ldx(('ss_mon', 2)); a.jz('sw_n')
+    a.stxm('ss_j')
+    a.ldx(('ss_my', 2)); a.addi(2); a.stx(('ss_my', 2))
+    a.cmpi(240); a.jc('sw_st')
+    a.cla(); a.stx(('ss_mon', 2))                # off the bottom: back in its cell
+    a.ldx(('sw_di', 2)); a.tax(); a.ldi(1); a.stx('ss_alive')
+    a.jmp('sw_x')
+    # diving: steer at the fighter while high, then commit
+    a.label('sw_st')
+    a.cmpi(120); a.jnc('sw_go')
+    a.ld('tick'); a.andi(3); a.jnz('sw_go')
+    a.ldx(('ss_mx', 2)); a.emit('CMP', 'ss_tx'); a.jc('sw_rt')
+    a.ldx(('sw_dv', 2)); a.cmpi(-1); a.jz('sw_go'); a.addi(-1); a.stx(('sw_dv', 2)); a.jmp('sw_go')
+    a.label('sw_rt')
+    a.ldx(('sw_dv', 2)); a.cmpi(1); a.jz('sw_go'); a.addi(1); a.stx(('sw_dv', 2))
+    a.label('sw_go')
+    a.ldx(('sw_dv', 2)); a.st('t0'); a.ldx(('ss_mx', 2)); a.emit('ADD', 't0'); a.stx(('ss_mx', 2))
+    # rams the fighter?
+    a.ldx(('ss_my', 2)); a.addi(-(SS_TY - 11)); a.cmpi(23); a.jnc('sw_bolt')
+    a.ldx(('ss_mx', 2)); a.emit('SUB', 'ss_tx'); a.addi(11); a.cmpi(23); a.jnc('sw_bolt')
+    a.ldi(1); a.st('ss_dead')
+    # shot down?
+    a.label('sw_bolt')
+    a.ld('ss_bon'); a.jz('sw_n')
+    a.ldx(('ss_mx', 2)); a.st('t0'); a.ld('ss_bx'); a.emit('SUB', 't0'); a.addi(6); a.cmpi(20); a.jnc('sw_n')
+    a.ldx(('ss_my', 2)); a.st('t0'); a.ld('ss_by'); a.emit('SUB', 't0'); a.addi(6); a.cmpi(20); a.jnc('sw_n')
+    a.ldx(('ss_mx', 2)); a.addi(8); a.st('ss_ex'); a.ldx(('ss_my', 2)); a.st('ss_ey'); a.ldi(10); a.st('ss_et')
+    a.cla(); a.stx(('ss_mon', 2)); a.clr('ss_bon')
+    a.ldx(('sw_di', 2)); a.tax(); a.cla(); a.stx('ss_alive'); a.decm('ss_n')
+    a.lda(0x80); a.call('add_score')
+    a.label('sw_x')
+    a.ldxm('ss_j')
+    a.label('sw_n')
+    a.loop('sw_l')
+    a.ret()
+
+    # divers, after the formation (from ss_draw)
+    a.label('sw_draw')
+    a.lxi(3)
+    a.label('swd_l')
+    a.ldx(('ss_mon', 2)); a.jz('swd_n')
+    a.stxm('ss_j')
+    a.ldx(('ss_mx', 2)); a.st('sp_x'); a.ldx(('ss_my', 2)); a.st('sp_y')
+    a.ldx(('sw_di', 2)); a.st('ss_i'); a.call('ss_cellxy')      # its row
+    a.call('ss_band'); a.st('t0')
+    a.ldxm('ss_r'); a.ldc('ss_rowspr'); a.emit('OR', 't0'); a.st('t0')
+    a.ld('tick'); a.andi(4); a.jz('swd_p')
+    a.ldi(4); a.addm('t0')
+    a.label('swd_p')
+    a.ld('t0'); a.call('spr_puta')
+    a.ldxm('ss_j')
+    a.label('swd_n')
+    a.loop('swd_l')
+    a.ret()
+
+    # a lost life: the divers are back in their cells
+    a.label('sw_reset')
+    a.lxi(3)
+    a.label('swr_l')
+    a.ldx(('ss_mon', 2)); a.jz('swr_n')
+    a.txa(); a.st('t1'); a.ldx(('sw_di', 2)); a.tax()
+    a.ldi(1); a.stx('ss_alive'); a.ldxm('t1')
+    a.cla(); a.stx(('ss_mon', 2))
+    a.label('swr_n')
+    a.loop('swr_l')
+    a.ret()
+
+    a.label('sw_game')
+    a.lxi(3)
+    a.label('swg_c')
+    a.cla(); a.stx(('ss_mon', 2)); a.loop('swg_c')
+    a.ldi(1); a.st('ss_mode'); a.ldi(5); a.st('ss_nd')
+    a.lda(S16 | spal(0) | T['blip_ship']); a.st('ss_hero')
+    a.ldxa('sw_pals'); a.call('load_pals')
+    a.ldi(13); a.call('new_game')
+    a.clr('ss_wave')
+    a.jmp('sg_wave')
+
+
+# ======================================================================
+# HIGH STEEL -- girder climb.  Six girder floors (the top five leave a gap
+# at alternate ends), a ladder up from each.  The boiler at the top left
+# throws spools that roll along each girder (right on odd floors, left on
+# even -- read from the row) and drop at the ends.  BLIP walks to each
+# ladder and climbs; he jumps spools rolling at him.  Actors: 0 = BLIP,
+# 1.. = spools.
+# ======================================================================
+HS_TPALS = [
+    [BLACK, c332(7, 1, 2), c332(3, 0, 1), c332(7, 5, 3)],     # 0 girders
+    [c332(0, 0, 0), c332(1, 6, 3), c332(0, 2, 2), c332(5, 7, 3)],   # 1 ladders, boiler
+]
+
+
+def build_highsteel(a):
+    T = a.T
+    a.overlay(); a.actors()
+    a.var('hs_lad', 5)                  # ladder x (BLIP's) up from floor f
+    for n in ('hs_f', 'hs_cl', 'hs_sp'):
+        a.var(n)
+    a.paltable('hs_tpal', 0, [c for p in HS_TPALS for c in p])
+    a.runs('hs_runs', [(27 * 32, 32, T['girder'])] +
+           [((27 - 4 * f) * 32 + (0 if f & 1 else 4), 28, T['girder']) for f in range(1, 6)] +
+           [(r * 32 + 1, 3, T[t] | tpal(1)) for r, t in ((4, 'pipe_h'), (5, 'block1'), (6, 'block1'))])
+
+    # ---- level: girders, a ladder up from each floor, the boiler
+    a.label('hs_level')
+    a.call('cls')
+    a.ldxa('hs_runs'); a.call('truns')
+    a.clr('t3')
+    a.label('hl_l')
+    a.inp(I_RAND); a.andi(15); a.addi(8); a.st('t0')          # ladder column 8..23
+    a.shl(); a.shl(); a.shl(); a.addi(-4); a.ldxm('t3'); a.stx('hs_lad')
+    a.ld('t3'); a.shl(); a.shl(); a.neg(); a.addi(26)          # row above floor f
+    a.shl4(); a.shl(); a.emit('ADD', 't0'); a.st('t1')
+    a.lxi(3)
+    a.label('hl_lt')
+    a.ld('t1'); a.outp(P_TADDR); a.lda(T['ladder'] | tpal(1)); a.outp(P_TDATA)
+    a.ld('t1'); a.addi(-32); a.st('t1')
+    a.loop('hl_lt')
+    a.incm('t3'); a.cmpi(5); a.jnz('hl_l')
+    a.ret()
+
+    # ---- spools: roll along the girders, fall at the ends, leave the screen
+    a.label('hs_spools')
+    a.lxi(NACT - 1)
+    a.label('hsp_l')
+    a.ldx('oa'); a.jz('hsp_n')
+    a.ldx('ox'); a.addi(16); a.cmpi(272); a.jnc('hsp_off')
+    a.call('act_feet'); a.cmpi(T['girder']); a.jnz('hsp_fall')
+    a.cla(); a.stx('ovy')
+    a.ld('hy'); a.shr4(); a.shr(); a.andi(1); a.shl(); a.addi(-1); a.stx('ovx')
+    a.jmp('hsp_n')
+    a.label('hsp_fall')
+    a.cla(); a.stx('ovx'); a.ldi(2); a.stx('ovy'); a.jmp('hsp_n')
+    a.label('hsp_off')
+    a.cla(); a.stx('oa')
+    a.label('hsp_n')
+    a.loop('hsp_l')
+    # the boiler throws one every 1-2 s
+    a.decm('hs_sp'); a.jnz('hsp_out')
+    a.inp(I_RAND); a.andi(63); a.addi(50); a.st('hs_sp')
+    a.lxi(NACT - 1); a.call('act_free'); a.jz('hsp_out')
+    a.ldi(32); a.stx('ox'); a.ldi(40); a.stx('oy')
+    a.lda(0x8000 | S16 | spal(6) | T['spool0']); a.stx('oa')
+    a.cla(); a.stx('os')
+    a.label('hsp_out')
+    a.ret()
+
+    # ---- BLIP: to the floor's ladder, climb it, jump spools
+    a.label('hs_blip')
+    a.call('blip_jump'); a.jnz('hb_air')
+    a.ld('hs_cl'); a.jz('hb_walk')
+    a.lda(0x8000 | S16 | spal(0) | T['blip_climb0']); a.st('oa')
+    a.decm('oy'); a.emit('SUB', 'pb'); a.cmpi(-32); a.jnz('hb_out')
+    a.ld('oy'); a.st('pb'); a.clr('hs_cl'); a.incm('hs_f')
+    a.lda(0x100); a.jmp('add_score')
+    a.label('hb_walk')
+    a.ldxm('hs_f'); a.ldx('hs_lad'); a.call('walk_to'); a.jnz('hb_spot')
+    # at the ladder: climb when the top is clear (watching his own floor)
+    a.ld('ox'); a.st('t2'); a.ld('pb'); a.addi(-32); a.call('act_near'); a.jnz('hb_spot')
+    a.ldi(1); a.st('hs_cl'); a.ret()
+    a.label('hb_spot')
+    a.call('blip_spot'); a.jnz('hb_air')
+    a.lda(0x8000 | S16 | spal(0) | T['blip_side0']); a.jmp('hb_put')
+    a.label('hb_air')
+    a.lda(S16 | spal(0) | T['blip_jump'])
+    a.label('hb_put')
+    a.emit('OR', 'pd'); a.st('oa')
+    a.label('hb_out')
+    a.ret()
+
+    # ---- one game
+    a.label('hs_game')
+    a.ldxa('hs_tpal'); a.call('load_pals')
+    a.ldi(5); a.call('new_game')
+    a.label('hg_stage')
+    a.call('hs_level')
+    a.label('hg_life')
+    a.clr('hs_f'); a.clr('hs_cl')
+    a.ldi(60); a.st('hs_sp')
+    a.ldi(16); a.st('ox'); a.ldi(200); a.call('act_life')
+    a.label('hg_tick')
+    a.incm('tick')
+    a.call('hs_blip')
+    a.call('hs_spools')
+    a.call('act_tick'); a.jnz('hg_died')
+    a.ld('hs_f'); a.cmpi(5); a.jnz('hg_tick')
+    a.lda(0x1000); a.call('add_score')
+    a.ldi(60); a.call('wait_ticks')
+    a.jmp('hg_stage')
+    a.label('hg_died')
+    a.call('act_die'); a.jnz('hg_life')
+    a.jmp('game_over')
+
+
+# ======================================================================
+# THUMP TOWN -- bump platformer.  Brick floors (street row 27, ledges row
+# 22, a middle span row 16, top ledges row 10) and green pipes.  Beetles
+# leave the top pipes, walk off the ledge ends floor by floor and go back
+# in through the street pipes.  BLIP works the street: he jumps under a
+# beetle on a row-22 ledge to thump it (it is knocked down to the street,
+# flipped), kicks flipped beetles, and jumps the ones walking at him.
+# Actors: 0 = BLIP, 1..5 = beetles (os 0 walking, 1 flipped, 2 knocked).
+# ======================================================================
+TT_TPALS = [
+    [BLACK, c332(7, 2, 0), c332(3, 0, 0), c332(7, 6, 2)],     # 0 bricks
+    [c332(0, 0, 0), c332(0, 5, 1), c332(0, 2, 0), c332(4, 7, 2)],   # 1 pipes
+]
+TT_STREET, TT_LEDGE = 200, 160          # BLIP / beetle ground y on rows 27, 22
+
+
+def build_thump(a):
+    T = a.T
+    a.overlay(); a.actors()
+    for n in ('tt_tgt', 'tt_tl', 'tt_fl', 'tt_kick', 'tt_sp'):
+        a.var(n)
+    a.paltable('tt_tpal', 0, [c for p in TT_TPALS for c in p])
+    BR, PH, PM = T['brick'], T['pipe_h'] | tpal(1), T['pipe_mouth'] | tpal(1)
+    a.runs('tt_runs', [
+        (27 * 32, 32, BR), (22 * 32, 10, BR), (22 * 32 + 22, 10, BR),
+        (16 * 32 + 7, 18, BR), (10 * 32, 12, BR), (10 * 32 + 20, 12, BR),
+        (8 * 32, 2, PH), (8 * 32 + 2, 1, PM), (9 * 32, 2, PH), (9 * 32 + 2, 1, PM),
+        (8 * 32 + 30, 2, PH), (8 * 32 + 29, 1, PM | 1024), (9 * 32 + 30, 2, PH), (9 * 32 + 29, 1, PM | 1024),
+        (25 * 32, 2, PH), (26 * 32, 2, PH), (25 * 32 + 30, 2, PH), (26 * 32 + 30, 2, PH)])
+
+    # ---- beetles
+    a.label('tt_beetles')
+    a.lxi(NACT - 1)
+    a.label('tb_l')
+    a.ldx('oa'); a.jz('tb_n')
+    a.ldx('os'); a.jz('tb_walk')
+    a.cmpi(1); a.jz('tb_flip')
+    # knocked: straight down to the street, then flipped
+    a.cla(); a.stx('ovx'); a.ldi(3); a.stx('ovy')
+    a.ldx('oy'); a.cmpi(TT_STREET); a.jc('tb_n')
+    a.ldi(TT_STREET); a.stx('oy'); a.cla(); a.stx('ovy')
+    a.ldi(1); a.stx('os'); a.ldi(240); a.stx('ot')
+    a.lda(S16 | spal(3) | T['beetle_flip']); a.stx('oa')
+    a.jmp('tb_n')
+    a.label('tb_flip')                           # lying flipped: wakes up
+    a.ldx('ot'); a.addi(-1); a.stx('ot'); a.jnz('tb_n')
+    a.cla(); a.stx('os')
+    a.ldi(1); a.stx('ovx')
+    a.label('tb_walk')
+    a.ldx('ovx'); a.jp('tb_r')
+    a.lda(0x8000 | S16 | spal(3) | HF | T['beetle0']); a.jmp('tb_a')
+    a.label('tb_r')
+    a.lda(0x8000 | S16 | spal(3) | T['beetle0'])
+    a.label('tb_a')
+    a.stx('oa')
+    a.ldx('ox'); a.cmpi(241); a.jc('tb_in')
+    # off an edge: the street pipes take it back to the top; up above it turns
+    a.ldx('oy'); a.cmpi(TT_STREET); a.jnz('tb_turn')
+    a.ldi(64); a.stx('oy')
+    a.ldx('ox'); a.jn('tb_tl')
+    a.ldi(224); a.stx('ox'); a.ldi(-1); a.stx('ovx'); a.jmp('tb_n')
+    a.label('tb_tl')
+    a.ldi(16); a.stx('ox'); a.ldi(1); a.stx('ovx'); a.jmp('tb_n')
+    a.label('tb_turn')
+    a.ldx('ovx'); a.neg(); a.stx('ovx'); a.st('t0')
+    a.ldx('ox'); a.emit('ADD', 't0'); a.stx('ox')
+    a.label('tb_in')
+    a.call('act_feet'); a.cmpi(T['brick']); a.jz('tb_on')
+    a.ldi(2); a.stx('ovy'); a.jmp('tb_n')
+    a.label('tb_on')
+    a.cla(); a.stx('ovy')
+    a.label('tb_n')
+    a.loop('tb_l')
+    # a new beetle from a top pipe every ~2 s, five at most
+    a.decm('tt_sp'); a.jnz('tb_out')
+    a.ldi(120); a.st('tt_sp')
+    a.lxi(5); a.call('act_free'); a.jz('tb_out')
+    a.ldi(64); a.stx('oy'); a.cla(); a.stx('os'); a.stx('ovy')
+    a.ldi(1); a.stx('oa')
+    a.inp(I_RAND); a.andi(1); a.jz('tb_sl')
+    a.ldi(224); a.stx('ox'); a.ldi(-1); a.stx('ovx'); a.ret()
+    a.label('tb_sl')
+    a.ldi(16); a.stx('ox'); a.ldi(1); a.stx('ovx')
+    a.label('tb_out')
+    a.ret()
+
+    # ---- BLIP: kick the flipped, thump the ledges, jump the walkers
+    a.label('tt_blip')
+    a.call('blip_jump'); a.jnz('tbl_air')
+    # target: the last flipped beetle on the street or walker on a row-22
+    # ledge (tt_tl = 1: thump it); else the middle.  A walker dropping
+    # toward him beats both: run out from under it.
+    a.ldi(120); a.st('tt_tgt'); a.clr('tt_tl'); a.clr('tt_fl')
+    a.lxi(NACT - 1)
+    a.label('tbl_l')
+    a.ldx('oa'); a.jz('tbl_n')
+    a.ldx('ox'); a.emit('SUB', 'ox'); a.st('t1')            # beetle - BLIP
+    a.ldx('os'); a.jnz('tbl_k')
+    a.ldx('ovy'); a.jz('tbl_w')
+    a.ld('t1'); a.addi(28); a.cmpi(57); a.jnc('tbl_n')
+    a.ld('t1'); a.ori(1); a.st('tt_fl'); a.jmp('tbl_n')
+    a.label('tbl_w')
+    a.ldx('oy'); a.cmpi(TT_LEDGE); a.jnz('tbl_n')
+    a.ldx('ox'); a.cmpi(80); a.jc('tbl_led'); a.cmpi(168); a.jc('tbl_n')
+    a.label('tbl_led')
+    a.ldi(1); a.jmp('tbl_set')
+    a.label('tbl_k')
+    a.cmpi(1); a.jnz('tbl_n')
+    a.cla()
+    a.label('tbl_set')
+    a.st('tt_tl'); a.ldx('ox'); a.st('tt_tgt')
+    a.label('tbl_n')
+    a.loop('tbl_l')
+    a.ld('tt_fl'); a.jz('tbl_go')
+    a.clr('tt_tl')
+    a.jn('tbl_fr')
+    a.ld('ox'); a.addi(-48); a.jp('tbl_ft')
+    a.label('tbl_fr')
+    a.ld('ox'); a.addi(48); a.cmpi(232); a.jc('tbl_ft')
+    a.ldi(8)
+    a.label('tbl_ft')
+    a.st('tt_tgt')
+    a.label('tbl_go')
+    a.ld('tt_tl'); a.jz('tbl_walk')
+    # a ledge beetle within 10 px: thump, drifting along under it
+    a.ld('tt_tgt'); a.emit('SUB', 'ox'); a.st('t1'); a.addi(10); a.cmpi(21); a.jnc('tbl_walk')
+    a.ldi(1); a.st('pj'); a.st('pv')
+    a.ld('t1'); a.jp('tbl_air')
+    a.ldi(-1); a.st('pv'); a.jmp('tbl_air')
+    a.label('tbl_walk')
+    a.ld('tt_tgt'); a.call('walk_to')
+    a.call('blip_spot'); a.jnz('tbl_air')
+    a.lda(0x8000 | S16 | spal(0) | T['blip_side0']); a.jmp('tbl_put')
+    a.label('tbl_air')
+    a.lda(S16 | spal(0) | T['blip_jump'])
+    a.label('tbl_put')
+    a.emit('OR', 'pd'); a.st('oa')
+    a.ld('pj'); a.cmpi(9); a.jnz('tbl_out')
+    # the top of the jump: thump every walker on the ledge overhead
+    a.lxi(NACT - 1)
+    a.label('tbt_l')
+    a.ldx('oa'); a.jz('tbt_n')
+    a.ldx('os'); a.jnz('tbt_n')
+    a.ldx('oy'); a.cmpi(TT_LEDGE); a.jnz('tbt_n')
+    a.ldx('ox'); a.emit('SUB', 'ox'); a.addi(14); a.cmpi(29); a.jnc('tbt_n')
+    a.ldi(2); a.stx('os')
+    a.ldi(0x100); a.call('add_score')
+    a.label('tbt_n')
+    a.loop('tbt_l')
+    a.label('tbl_out')
+    a.ret()
+
+    # ---- one game
+    a.label('tt_game')
+    a.ldxa('tt_tpal'); a.call('load_pals')
+    a.ldi(3); a.call('new_game')
+    a.label('tg_stage')
+    a.call('cls')
+    a.ldxa('tt_runs'); a.call('truns')
+    a.clr('tt_kick')
+    a.label('tg_life')
+    a.ldi(30); a.st('tt_sp')
+    a.ldi(120); a.st('ox'); a.ldi(TT_STREET); a.call('act_life')
+    a.label('tg_tick')
+    a.incm('tick')
+    a.call('tt_blip')
+    a.call('tt_beetles')
+    a.call('act_tick'); a.jz('tg_tick')
+    a.ldx('os'); a.cmpi(2); a.jz('tg_tick')     # (falling past: harmless)
+    a.cmpi(1); a.jnz('tg_died')
+    a.cla(); a.stx('oa')                         # kick a flipped beetle
+    a.lda(0x800); a.call('add_score')
+    a.incm('tt_kick'); a.cmpi(8); a.jnz('tg_tick')
+    a.lda(0x1000); a.call('add_score')
+    a.ldi(60); a.call('wait_ticks')
+    a.jmp('tg_stage')
+    a.label('tg_died')
+    a.call('act_die'); a.jnz('tg_life')
+    a.jmp('game_over')
+
+
+# ======================================================================
+# TANGLE -- field shooter.  The CABLE crawler is ten beads on the tile map
+# that step across a row, drop a row and turn at anything in the way (or
+# the edge), and bounce back up from the bottom.  Nodes (block tiles) wear
+# 0 -> 1 -> 2 -> gone under fire; a bead that is shot becomes a node.
+# BLIP's turret (actor 0) tracks the lowest bead and keeps firing (the
+# bolt is actor 1).  Losing a life lays a fresh field.
+# ======================================================================
+TG_TPALS = [
+    [BLACK, c332(7, 1, 3), c332(3, 0, 1), c332(7, 6, 3)],     # 0 nodes: hot pink
+    [c332(0, 0, 0), c332(2, 7, 1), c332(1, 6, 0), c332(6, 7, 2)],   # 1 cable: neon green
+]
+
+
+def build_tangle(a):
+    T = a.T
+    a.overlay(); a.actors()
+    for n in ('tg_c', 'tg_r', 'tg_d'):
+        a.var(n, 10)
+    for n in ('tg_n', 'tg_dead'):
+        a.var(n)
+    SEG, NODE = T['power'] | tpal(1), T['block0']
+    a.paltable('tg_tpal', 0, [c for p in TG_TPALS for c in p])
+
+    # bead X-1's tile address -> A, TADDR
+    a.label('tg_addr')
+    a.ldx(('tg_r', -1)); a.shl4(); a.shl(); a.st('t1')
+    a.ldx(('tg_c', -1)); a.emit('ADD', 't1'); a.outp(P_TADDR)
+    a.ret()
+
+    # ---- a fresh field: 40 nodes, the crawler along row 2 heading right
+    a.label('tg_field')
+    a.call('cls')
+    a.ldi(40); a.st('t3')
+    a.label('tf_l')
+    a.inp(I_RAND); a.andi(511); a.addi(96); a.outp(P_TADDR)
+    a.ldi(NODE); a.outp(P_TDATA)
+    a.decm('t3'); a.jnz('tf_l')
+    a.lxi(10)
+    a.label('tf_c')
+    a.txa(); a.addi(-1); a.stx(('tg_c', -1))
+    a.ldi(2); a.stx(('tg_r', -1)); a.ldi(1); a.stx(('tg_d', -1))
+    a.loop('tf_c')
+    a.ldi(10); a.st('tg_n')
+    a.ret()
+
+    # ---- the crawler steps (head first)
+    a.label('tg_step')
+    a.lxi(10)
+    a.label('ts_l')
+    a.ldx(('tg_r', -1)); a.jz('ts_n')
+    a.call('tg_addr'); a.st('t2'); a.cla(); a.outp(P_TDATA)      # lift the bead
+    a.ldx(('tg_d', -1)); a.emit('ADD', 't2'); a.outp(P_TADDR)
+    a.ldx(('tg_d', -1)); a.st('t0'); a.ldx(('tg_c', -1)); a.emit('ADD', 't0'); a.st('t0')
+    a.cmpi(32); a.jnc('ts_turn')
+    a.inp(I_TDATA); a.andi(255); a.jnz('ts_turn')
+    a.ld('t0'); a.stx(('tg_c', -1)); a.jmp('ts_put')
+    a.label('ts_turn')
+    a.ldx(('tg_d', -1)); a.neg(); a.stx(('tg_d', -1))
+    a.ldx(('tg_r', -1)); a.addi(1); a.cmpi(27); a.jc('ts_row')
+    a.ldi(20)
+    a.label('ts_row')
+    a.stx(('tg_r', -1))
+    a.label('ts_put')
+    a.call('tg_addr'); a.lda(SEG); a.outp(P_TDATA)
+    # on the turret's row and under it: a hit
+    a.ldx(('tg_r', -1)); a.cmpi(26); a.jnz('ts_n')
+    a.ldx(('tg_c', -1)); a.shl(); a.shl(); a.shl(); a.emit('SUB', 'ox'); a.addi(10); a.cmpi(24); a.jnc('ts_n')
+    a.ldi(1); a.st('tg_dead')
+    a.label('ts_n')
+    a.loop('ts_l')
+    a.ret()
+
+    # ---- the bolt: wears a node, or turns a bead into one
+    a.label('tg_shot')
+    a.ld(('oa', 1)); a.jz('tsh_out')
+    a.ld(('oy', 1)); a.cmpi(12); a.jc('tsh_off')
+    a.ld(('ox', 1)); a.addi(8); a.st('hx'); a.ld(('oy', 1)); a.addi(4); a.st('hy')
+    a.call('tile_at'); a.jz('tsh_out')
+    a.cmpi(T['power']); a.jz('tsh_bead')
+    a.cmpi(NODE + 2); a.jz('tsh_gone')
+    a.addi(1); a.jmp('tsh_put')
+    a.label('tsh_gone')
+    a.cla()
+    a.label('tsh_put')
+    a.call('tile_put'); a.ldi(1); a.call('add_score'); a.jmp('tsh_off')
+    a.label('tsh_bead')
+    a.ldi(NODE); a.call('tile_put')
+    a.lxi(10)
+    a.label('tsb_l')
+    a.call('tg_addr'); a.cmp('t7'); a.jnz('tsb_n')
+    a.cla(); a.stx(('tg_r', -1)); a.decm('tg_n')
+    a.label('tsb_n')
+    a.loop('tsb_l')
+    a.ldi(0x10); a.call('add_score')
+    a.label('tsh_off')
+    a.clr(('oa', 1))
+    a.label('tsh_out')
+    a.ret()
+
+    # ---- BLIP's turret: under the lowest bead, firing
+    a.label('tg_blip')
+    a.clr('t3'); a.ldi(120); a.st('t4')
+    a.lxi(10)
+    a.label('tb2_l')
+    a.ldx(('tg_r', -1)); a.cmp('t3'); a.jc('tb2_n')
+    a.st('t3'); a.ldx(('tg_c', -1)); a.shl(); a.shl(); a.shl(); a.addi(-4); a.st('t4')
+    a.label('tb2_n')
+    a.loop('tb2_l')
+    a.ld('t4'); a.call('walk_to')
+    a.ld(('oa', 1)); a.jnz('tb2_out')
+    a.ld('ox'); a.st(('ox', 1)); a.ldi(194); a.st(('oy', 1)); a.ldi(-4); a.st(('ovy', 1))
+    a.lda(spal(7) | T['bolt']); a.st(('oa', 1))
+    a.label('tb2_out')
+    a.ret()
+
+    # ---- one game
+    a.label('tg_game')
+    a.ldxa('tg_tpal'); a.call('load_pals')
+    a.ldi(15); a.call('new_game')
+    a.label('tgg_wave')
+    a.call('tg_field')
+    a.ldi(120); a.st('ox'); a.ldi(208); a.call('act_life')
+    a.lda(S16 | spal(0) | T['blip_turret']); a.st('oa')
+    a.clr('tg_dead')
+    a.label('tgg_tick')
+    a.incm('tick')
+    a.call('tg_blip')
+    a.call('tg_shot')
+    a.ld('tick'); a.andi(3); a.jnz('tgg_ns')
+    a.call('tg_step')
+    a.label('tgg_ns')
+    a.call('act_tick')
+    a.ld('tg_dead'); a.jnz('tgg_died')
+    a.ld('tg_n'); a.jnz('tgg_tick')
+    a.lda(0x500); a.call('add_score')
+    a.jmp('tgg_wave')
+    a.label('tgg_died')
+    a.call('act_die'); a.jnz('tgg_wave')
+    a.jmp('game_over')
+
+
+# ======================================================================
 # CROSSTALK -- lane crosser.  Lanes are tile rows slid by the per-row
 # scroll registers: lane L (0 = start strip, 1-5 road, 6 median, 7-11
 # river, 12 = docks) has its top tile row at 26 - 2L.  Cars and logs are
@@ -1510,7 +2347,7 @@ def build_crosstalk(a):
     for n in ('cr_l', 'cr_x', 'cr_hop', 'cr_wait', 'cr_tgt', 'cr_dead',
               'cr_docks', 'cr_i', 'cr_row', 'cr_t', 'cr_k'):
         a.var(n)
-    a.table('cr_tpal', 0, 12, *[c for p in CR_TPALS for c in p])
+    a.paltable('cr_tpal', 0, [c for p in CR_TPALS for c in p])
     a.table('cr_dockx', *[c * 8 for c in CR_DOCKC])
     a.table('cr_dockbit', 1, 2, 4, 8, 16)
 
@@ -1532,14 +2369,13 @@ def build_crosstalk(a):
     a.label('cr_field')
     a.ldi(2); a.st('cr_row'); a.lda(T['fill1'] | tpal(2)); a.call('cr_fillrow')
     a.ldi(3); a.st('cr_row'); a.lda(T['fill1'] | tpal(2)); a.call('cr_fillrow')
-    a.lxi(4)
+    a.lxi(5)
     a.label('cf_d')
-    a.stxm('cr_k')
-    a.ldc('cr_dockx'); a.shr(); a.shr(); a.shr(); a.addi(2 * 32); a.st('t0')
-    for r in (0, 32):
-        a.ld('t0'); a.addi(r); a.outp(P_TADDR)
-        a.lda(T['dock'] | tpal(0)); a.outp(P_TDATA); a.outp(P_TDATA)
-    a.ldxm('cr_k'); a.dex(); a.txa(); a.cmpi(-1); a.jnz('cf_d')
+    a.ldc(('cr_dockx', -1)); a.shr(); a.shr(); a.shr(); a.addi(2 * 32); a.st('t0'); a.outp(P_TADDR)
+    a.lda(T['dock'] | tpal(0)); a.outp(P_TDATA); a.outp(P_TDATA)
+    a.ld('t0'); a.addi(32); a.outp(P_TADDR)
+    a.lda(T['dock'] | tpal(0)); a.outp(P_TDATA); a.outp(P_TDATA)
+    a.loop('cf_d')
     for row in (14, 15, 26, 27):
         a.ldi(row); a.st('cr_row'); a.lda(T['curb'] | tpal(0)); a.call('cr_fillrow')
     # lanes
@@ -1617,6 +2453,13 @@ def build_crosstalk(a):
     a.outp(P_TADDR); a.inp(I_TDATA); a.andi(255)
     a.ret()
 
+    # a car under BLIP's span in lane cr_i (offsets 3, 8, 13)?  C set if so
+    a.label('cr_cars3')
+    for off in (3, 8, 13):
+        a.ldi(off); a.call('cr_tileat'); a.addi(-T['car']); a.cmpi(4); a.jc('cc_out')
+    a.label('cc_out')
+    a.ret()
+
     # danger at lane cr_i for BLIP at cr_x: Z clear (A=1) if deadly
     a.label('cr_danger')
     a.ld('cr_i'); a.cmpi(7); a.jc('cd_road')
@@ -1636,8 +2479,7 @@ def build_crosstalk(a):
     a.label('cd_road')
     a.cmpi(1); a.jc('cd_ok')
     a.cmpi(6); a.jz('cd_ok')
-    for off in (3, 8, 13):
-        a.ldi(off); a.call('cr_tileat'); a.addi(-T['car']); a.cmpi(4); a.jc('cd_bad')
+    a.call('cr_cars3'); a.jc('cd_bad')
     # upstream: the traffic covers |speed| px in the 16 ticks of a hop and
     # the next look, so check that stretch on the side the cars come from
     a.ldxm('cr_i'); a.ldx('cr_spd'); a.st('t4'); a.jn('cd_left')
@@ -1661,8 +2503,7 @@ def build_crosstalk(a):
     a.label('cr_hit')
     a.ld('cr_l'); a.st('cr_i'); a.cmpi(7); a.jnc('ch_riv')
     a.cmpi(1); a.jc('ch_ok'); a.cmpi(6); a.jz('ch_ok')
-    for off in (3, 8, 13):
-        a.ldi(off); a.call('cr_tileat'); a.addi(-T['car']); a.cmpi(4); a.jc('cd_bad')
+    a.call('cr_cars3'); a.jc('cd_bad')
     a.label('ch_ok')
     a.cla(); a.ret()
     a.label('ch_riv')
@@ -1847,13 +2688,15 @@ def build_shell(a):
     a.label('cy_endless')
     a.call('cls')
     a.label('cy_play')
-    a.ld('game'); a.jnz('cy_g1')
-    a.call('dm_game'); a.jmp('cy_next')
-    a.label('cy_g1')
-    a.cmpi(1); a.jnz('cy_g2')
-    a.call('ss_game'); a.jmp('cy_next')
-    a.label('cy_g2')
-    a.call('cr_game')
+    a.ld('game')
+    for i, (entry, _) in enumerate(GAMES[:-1]):
+        nxt = a.uid('cy')
+        if i:
+            a.cmpi(i)
+        a.jnz(nxt)
+        a.call(entry); a.jmp('cy_next')
+        a.label(nxt)
+    a.call(GAMES[-1][0])
     a.label('cy_next')
     a.call('vid_reset')
     a.incm('game'); a.cmpi(NGAMES); a.jnz('cycle')
@@ -1868,10 +2711,9 @@ def build_shell(a):
     a.ldi(8); a.call('static_burst')
     a.call('cls')
     a.jmp('cy_play')
-    a.string('s_title_dm', 11, 10, 3, 'DOT MATRIX')
-    a.string('s_title_ss', 9, 10, 3, 'SKYLINE SIEGE')
-    a.string('s_title_cr', 11, 10, 3, 'CROSSTALK')
-    a.table('titles', 's_title_dm', 's_title_ss', 's_title_cr')
+    for i, (_, title) in enumerate(GAMES):
+        a.string('s_title%d' % i, (32 - len(title)) // 2, 10, 3, title)
+    a.table('titles', *['s_title%d' % i for i in range(NGAMES)])
     a.table('k1_zones', *[(1024 * (i + 1)) // (NGAMES + 1) for i in range(NGAMES)])
 
 
@@ -1883,7 +2725,11 @@ def build(only_dm=False):
     build_dotmatrix(a)
     if not only_dm:
         build_skyline(a)
+        build_swarm(a)
         build_crosstalk(a)
+        build_highsteel(a)
+        build_thump(a)
+        build_tangle(a)
     else:
         a.label('ss_game')
         a.ret()

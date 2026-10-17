@@ -1,52 +1,99 @@
 # ATTRACT — progress log
 
-Resume here. The plan is in [ARCHITECTURE.md](ARCHITECTURE.md) (v2, simplified, which Ron approved: "get started and continue until we have a prototype to flash"). The original spec is Ron's pasted "ATTRACT — Claude Code prompt" (Oct 16 2026); it is not in the repo, and the paste stopped after cabinet 6.
+Resume here. The plan is in [ARCHITECTURE.md](ARCHITECTURE.md) (v2, simplified, which Ron approved: "get started and continue until we have a prototype to flash"). The original spec is Ron's pasted "ATTRACT — Claude Code prompt" (Oct 16 2026). It is not in the repo, and the paste stopped after cabinet 6. Its ten cabinets are:
+1. DOT MATRIX
+2. SKYLINE SIEGE
+3. SWARMATRON
+4. THUMP TOWN
+5. HIGH STEEL
+6. CROSSTALK
+7. TANGLE
+8. LOW PASS
+9. PRISM PEAK
+10. STRATA
 
-## State (2026-10-16)
+## State (2026-10-17)
 
-**v0.3.0** has three games: DOT MATRIX, SKYLINE SIEGE and CROSSTALK. **HW-validated 2026-10-17** (Ron: "It looks great on hardware").
+**v0.4.0** (2026-10-17) has **seven games**. Ron asked to "expand the number of types of games" and "push for whatever there seems to be room for".
+- New games: SWARMATRON, HIGH STEEL, THUMP TOWN and TANGLE.
+- How they fit:
+  - the font moved to logic;
+  - the code ROM grew to 16 EBR, which is 4,096 words and the ISA ceiling;
+  - two new instructions and an assembler peephole pass;
+  - a shared actor kernel.
+- Program 4,059 / 4,096 words. EBR **32 / 32** (board 8, art 8, code 16).
+- Old games: DOT MATRIX, SKYLINE and CROSSTALK hash **identically** to v0.3.2 in `tools/regress.py`, through every refactor.
+- **Build** (router1, 6/6 on seed 1, RAMs 32/32, ~5.24k LC = 68%):
 
-**v0.3.1** (2026-10-17) adds instant K1 game switching. ROM-only change; 3,065 / 3,072 words. Ron got a **solid red screen** loading it.
-- The package, bitstreams and emulator/GHDL behaviour all checked out.
-- Probable cause: `program_type` was `processing` (chosen early for the unbuilt video-in-BLIP's-face feature), so the program depended on input video. With no source plugged in there is no picture.
+  | Config | Fmax (MHz) |
+  |---|---|
+  | HD Analog | 92.3 |
+  | HD HDMI | 92.0 |
+  | HD Dual | 79.9 |
+  | SD Analog | 95.8 |
+  | SD HDMI | 99.5 |
+  | SD Dual | 83.3 |
 
-**v0.3.2** (2026-10-17): `program_type = "synthesis"`. TOML-only change; it runs with no input. **HW-validated 2026-10-17** (Ron: "It's working now"), so the processing type was the red-screen cause. The video-face feature would need `processing` again, plus a source.
-- v0.1.0 had DOT MATRIX only: all 6 configs on seed 1, HD 87.8 / 95.5 / 93.3 MHz, 4.6k LC, 27 EBR. A backup is at `~/.attract_work/attract_v010.vmprog`.
-- v0.2.0 had two games: HD 86 / 100 / 93 MHz, 4.8k LC, 29 EBR. It was superseded by v0.3.0 before being saved.
+- **GHDL** 720p dec-1 renders of DOT MATRIX and THUMP TOWN match the emulator. This covers the logic font, BRA/ADDM, packed tables and the 4,096-word ROM.
+- **Not flashed yet.**
+- **Caught before flashing:** the code-ROM chunk select `s_a < 4096` (12-bit) was false in synthesis, so the last chunk (the shell, including `reset`) was optimised away: 31 RAMs instead of 32. GHDL simulation does not show this.
+  - `attract.py` now selects chunks on their top address bits.
+  - **Check the RAM count on every build.**
 
-**Verified:**
-- All three games run in the emulator.
-- GHDL 720p60 dec-1 renders match the emulator for DOT MATRIX and SKYLINE SIEGE, and CROSSTALK after the row-scroll fix (see below).
-- Hues in the GHDL sims look U/V-swapped. That is correct (the output stage swaps for the hardware).
+**Earlier versions:**
+- **v0.3.2:** `program_type = "synthesis"`. **HW-validated 2026-10-17** (Ron: "It's working now").
+  - v0.3.1 was `processing`, which red-screened with no source plugged in.
+- **v0.3.1:** instant K1 switching.
+- **v0.3.0:** three games. HW-validated (Ron: "It looks great on hardware").
+- **v0.1.0:** DOT MATRIX only. A backup is at `~/.attract_work/attract_v010.vmprog`.
+
+**Demo-pilot death rates** (emulator, 2 min, K4 300 / 700): the deaths per minute are a tuning target, so that a game lasts.
+
+| Game | Deaths per minute |
+|---|---|
+| DOT MATRIX | 1 |
+| CROSSTALK | 2 |
+| SKYLINE | 4 |
+| SWARMATRON | 3.5–4 |
+| HIGH STEEL | 2.5–3.5 |
+| THUMP TOWN | 1–2 |
+| TANGLE | 1.5 |
 
 ## Controls (TOML)
 
 | Control | Function |
 |---|---|
-| K1 Game | Cycle / Dot Matrix / Skyline Siege / Crosstalk. Cycle advances to the next game after each GAME OVER. A labelled default may arrive as a label index; the code handles it. **v0.3.1:** turning K1 to another game switches at once. `frame_sub` (every frame) debounces the new zone for 8 ticks, then JMPs to `k1_switch`: video reset, 8 frames of static, then the new game. The circular return stack makes the jump out of any call depth safe. Turning to Cycle never interrupts. |
+| K1 Game | Cycle, then the seven games. Labels divide the knob into 8 zones of 128. A labelled default may arrive as a label index; the code handles it. Turning K1 to another game switches at once: `frame_sub` debounces 8 ticks, then `k1_switch`. Turning to Cycle never interrupts. |
 | K4 Seed | Level seed (same knob position + stage = same level). |
-| S11 Attract | Attract: static burst → RAM OK/ROM OK → title card → READY → demo → GAME OVER. Endless: straight to gameplay, no cards (also used by sims). |
+| S11 Attract | **Attract:** static burst → RAM OK/ROM OK → title card → READY → demo → GAME OVER. **Endless:** straight to gameplay (also used by sims). |
 
 ## Files
 
 | Path | What |
 |---|---|
 | `attract.vhd` | The DODECA board: timing, tile layer, sprite engine, palette, game CPU, I/O. |
-| `attract.py` | SDK build hook. Generates `attract_patrom.vhd`, `attract_coderom.vhd` and `attract_pkg.vhd`, and prints ROM fill and the EBR total. |
+| `attract.py` | SDK build hook. Generates `attract_patrom.vhd` (font logic ROM + art EBR), `attract_coderom.vhd` and `attract_pkg.vhd`, and prints ROM fill and the EBR total. |
 | `assets/*.txt` | Text-grid art (format in `assets/FORMAT.md`). `walls.txt` is generated by `tools/gen_walls.py`. |
 | `tools/dasm.py` | CPU ISA reference, macro assembler, and the emulator / board model. |
-| `tools/game.py` | Game program: library, shell, DOT MATRIX (`dm_`), SKYLINE SIEGE (`ss_`), CROSSTALK (`cr_`). |
-| `tools/assets.py` | Asset loader and pattern-ROM layout (font 0–63, tiles, then sprites; the enemies file goes first among the sprites so the car tiles stay under 256). |
-| `tools/preview.py` | `sheet` = contact sheets; `run N --every M --k1 V --sw 0 --tag T` = emulator frames to `contact/`. |
+| `tools/game.py` | The game program, in these sections: `Prog` (macros, peephole, branch relaxation); library and actor kernel; shell; `dm_`, `ss_`, `sw_`, `cr_`, `hs_`, `tt_`, `tg_`. |
+| `tools/assets.py` | Asset loader and pattern-ROM layout (font 0–63, tiles, then sprites; the enemies file goes first among the sprites so its patterns stay under 256 and work as tiles). |
+| `tools/preview.py` | `sheet` = contact sheets; `run N --every M --k1 V --sw 0 --k4 S --tag T` = emulator frames to `contact/`. K1 as a game index works: 1 = DOT MATRIX … 7 = TANGLE. |
 | `tools/regress.py` | Hashes emulator frames at fixed ticks (`k1=…`). Use it to prove a code refactor changes nothing. |
+| `tools/playstats.py` | `K1 [TICKS] [SEED]`: demo-pilot deaths per minute, games and best score for one game. |
 | `tools/synth_standalone.sh` | Quick yosys compile, LUT/EBR counts and the `emulate_transparency` check. |
 
 ## Budget
 
-- **EBR: 30/32** = board 8 + graphics 10 (320 patterns, full) + program 12 (3,045 of 3,072 words).
-- Code and art trade 1 EBR = 32 patterns = 256 words.
-- 30 is the router cliff on paper, but LC is only ~62 %, so it closes easily so far.
-- Work RAM is 117 / 256 words. Each game's variables overlay the same region (`a.overlay()`).
+**EBR: 32 / 32.**
+- **Board, 8:** tilemap 2+1, ctl 1, sprite table 1, line buffers 2, work RAM 1.
+- **Art, 8:** patterns 64–319, full.
+- **Code, 16:** 4,059 / 4,096 words.
+
+**Font in logic.** Patterns 0–63 are one colour, so they're stored 1 bit per pixel, as eight 512-bit vectors indexed by the address. That makes a mux rather than a memory, so yosys can't put it back in an EBR: `rom_style` on a constant is dropped, and `ram_style "logic"` on a signal is ignored. It costs ~355 LUTs (measured standalone) and frees 2 EBR.
+
+**Code ceiling.** 4,096 words is the ISA limit (JMP/CALL k·2, 12-bit PC). Code in logic costs ~1.6 LUT per word (measured), so it's not worth it.
+
+**Work RAM: 191 / 256.** Each game's variables overlay the same region (`a.overlay()`). SWARMATRON shares SKYLINE's variables, so it has no overlay of its own. The kernel games put the actor arrays first in their overlay (`a.actors()`).
 
 ## Key design facts
 
@@ -56,26 +103,46 @@ Resume here. The plan is in [ARCHITECTURE.md](ARCHITECTURE.md) (v2, simplified, 
   - pattern ROM: tile layer / sprite engine;
   - control RAM: palette / row scroll.
 
-  The second user may take any clock except the first clock of a new render address, and the render capture holds through a borrowed clock.
-- **Capture rule:** read data is on the EBR output the clock *after* the address cycle. The row-scroll capture was one clock late (it picked up a palette byte), which gave streaky, sheared lanes. GHDL caught it; fixed in v0.3.0.
-- **Sprite table:** draw → `OUT SWAP` → `WAIT`. The hardware swaps the banks at the frame tick, and clears the back bank before it wakes the CPU.
-- **RNG:** xorshift16 (7,9,8). A Galois LFSR's low bits only shift, which made the maze walk unable to reach some cells.
-- **CPU:** 16-bit accumulator machine.
-  - JMP/CALL targets are even (the assembler aligns them); conditional branches and LOOP are pc-relative.
-  - Tables live in a data section at the bottom of ROM (`a.table`), so the 11-bit LDC reaches them.
-  - Memory-direct SYS ops: INC, DEC, CLR, LDXM, STXM. `ldxm` keeps A **and the flags**; `clr` keeps A.
+  The second user may take any clock except the first clock of a new render address. Capture read data the clock *after* the address cycle.
+- **Sprite table:** draw → `OUT SWAP` → `WAIT`. The hardware swaps at the tick and clears the back bank before it wakes the CPU.
+- **RNG:** xorshift16 (7,9,8). A Galois LFSR's low bits only shift, which left maze cells unreachable.
+- **CPU:** 16-bit accumulator machine. JMP/CALL are absolute even addresses.
+  - **v0.4.0 changes:**
+    - **BRA** (opcode 18, formerly ADX): a pc-relative unconditional branch.
+    - **ADDM** (SYS memory group 6): M += A, A = M, Z N C.
+  - **Assembler:**
+    - **Peephole:**
+      - `LD v; ADDI d; ST v` → `LDI d; ADDM v`;
+      - `ST sp_a; CALL spr_put` → `CALL spr_puta`;
+      - `CALL x; RET` → `JMP x`.
+    - **Relaxation:** every JMP becomes a BRA unless it's out of ±1023. BRA targets need no even-alignment pad.
+  - **`ldxa`** is now one-word `LXI label`, because data tables are under 1024.
+  - **Packing:** strings pack 2 characters per word; palette tables pack 2 colours per word (`paltable`).
+  - **Trap:** `('hi', n)` is the assembler's high-byte operator, not "var `hi` + n". Use `a.vars['hi'] + n`.
+- **Actor kernel** (library). 16 actors, with `ox oy ovx ovy oa os ot` plus BLIP's `pj pb pv pd`.
+  - `oa` bit 15 is a two-frame walk cycle. 8×8 sprites are drawn centred in a 16×16 frame.
+  - **Routines:**
+    - `act_draw`, `act_move`, `act_hit` (BLIP vs the rest, ±9 x / ±6 y), `act_free` (searches down from X), `act_clear`;
+    - `act_life`, `act_die`, `act_tick` (move, score, draw, frame, hit);
+    - `walk_to`, `act_near`, `act_feet`, `tile_at` / `tile_put`, `tfill`, `truns` (run tables);
+    - `blip_jump` (shared 20-tick arc, drifting by `pv`), `blip_spot` (jumps a walker closing in, drifting over it).
+- **SWARMATRON** is `ss_mode = 1` inside SKYLINE's code:
+  - no city, no descent, no crush;
+  - colour by row;
+  - divers in the bomb slots 3–5 (`ss_nd` = how many slots the pilot dodges);
+  - a diver that falls off the bottom snaps back into its cell (no re-entry flight; space);
+  - divers reset on a lost life.
 
 ## Next
 
-1. **Ron flashes v0.3.0** on HD and SD (composite CRT) and reports.
-2. **More games** need more code space, so one of these:
-   - drop art;
-   - free an EBR elsewhere (the line buffers use 1/4 of each of their 2 EBR);
-   - write denser code. DOT MATRIX is the fat one, ~1,400 words.
-
-   Candidates: SWARMATRON (reuses the SKYLINE formation code), STRATA (tiles + grid walker), THUMP TOWN.
-3. **Polish:**
-   - DOT MATRIX bonus items and score popups;
-   - SKYLINE rank-by-rank ripple march;
-   - CROSSTALK timer bar, and lanes speeding up per stage;
-   - BLIP's face showing the input video (1 EBR, budgeted in the plan but not built).
+1. **Ron flashes v0.4.0.** Check that:
+   - the HUD text is right (the font now comes from logic);
+   - every game runs and K1 picks each of the seven.
+2. **Polish candidates**, each needing words: currently 37 free.
+   - SWARMATRON re-entry flight;
+   - THUMP TOWN floor bump animation;
+   - TANGLE spider;
+   - HIGH STEEL spools taking ladders.
+3. **More games** (LOW PASS, PRISM PEAK, STRATA) need code space beyond the ISA's 4,096 words.
+   - Options: a bank-switched code ROM; denser game code; or drop a game.
+   - LOW PASS also needs a side-view ship sprite (the art is full).

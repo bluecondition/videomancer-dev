@@ -7,7 +7,7 @@ ATTRACT - build hook (runs before synthesis; pure Python, no PIL/numpy).
   1. loads the text-grid art (assets/*.txt) into the shared pattern ROM
   2. assembles the game program (tools/game.py) for the game CPU
   3. writes the generated VHDL:
-       attract_patrom.vhd   pattern ROM entity (N x 512-word chunks, 2 EBR each)
+       attract_patrom.vhd   pattern ROM entity (font in logic, then 1 EBR per 32 patterns)
        attract_coderom.vhd  program ROM entity
        attract_pkg.vhd      3-3-2 -> YUV tables
   4. prints how full each ROM is (graphics vs code trade 1 EBR for 1 EBR)
@@ -39,14 +39,29 @@ def write(name, text):
 
 
 def gen_patrom(pats):
+    """Patterns 0-63 are the font: one colour, so it is stored 1 bit per
+    pixel as LOGIC (eight 512-bit vectors indexed by the address -- a vector
+    index is a mux, not a memory, so yosys cannot put it back in an EBR).
+    Patterns 64.. go to EBR chunks of 32 patterns."""
+    font = []
+    for p in pats[:64]:
+        for w in p:
+            row = 0
+            for i in range(8):
+                px = (w >> (14 - 2 * i)) & 3
+                assert px in (0, 1), 'font glyphs must use colour 1 only'
+                row |= px << (7 - i)
+            font.append(row)
     words = []
-    for p in pats:
+    for p in pats[64:]:
         words.extend(p)
     nchunk = (len(words) + 255) // 256
     words += [0] * (nchunk * 256 - len(words))
-    L = [HDR, """-- Shared pattern ROM: %d patterns of 8x8 2bpp (8 rows x 16 bits), in
--- %d chunks of 256 words (1 EBR each, 32 patterns).  addr = pattern(8:0) &
--- row(2:0).  q is valid 2 clocks after addr (EBR register + fabric mux).
+    L = [HDR, """-- Shared pattern ROM: %d patterns of 8x8 2bpp (8 rows x 16 bits).
+-- addr = pattern(8:0) & row(2:0).  q is valid 2 clocks after addr.
+--   patterns 0-63 (the font): 1bpp logic ROM, pixels expanded to colour 1
+--   patterns 64-%d: %d EBR chunks of 256 words (32 patterns), chunk c at
+--   addr(11:8) = c + 2
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -62,7 +77,11 @@ end entity;
 
 architecture rtl of attract_patrom is
     type t_chunk is array (0 to 255) of std_logic_vector(15 downto 0);
-""" % (len(pats), nchunk)]
+""" % (len(pats), len(pats) - 1, nchunk)]
+    for b in range(8):
+        bits = ''.join(str((r >> b) & 1) for r in font)
+        L.append('    constant C_F%d : std_logic_vector(0 to 511) :=\n' % b)
+        L.append('        ' + ' &\n        '.join('"%s"' % bits[i:i + 64] for i in range(0, 512, 64)) + ';\n')
     for c in range(nchunk):
         L.append('    constant C_P%d : t_chunk := (\n' % c)
         ch = words[c * 256:(c + 1) * 256]
@@ -72,6 +91,7 @@ architecture rtl of attract_patrom is
         L.append(',\n'.join(rows) + ');\n')
     for c in range(nchunk):
         L.append("    signal r%d : std_logic_vector(15 downto 0) := (others => '0');\n" % c)
+    L.append("    signal s_fa  : unsigned(8 downto 0) := (others => '0');\n")
     L.append("    signal s_sel : unsigned(3 downto 0) := (others => '0');\n")
     L.append("    signal s_q : std_logic_vector(15 downto 0) := (others => '0');\nbegin\n")
     for c in range(nchunk):
@@ -83,13 +103,20 @@ architecture rtl of attract_patrom is
     end process;
 """ % (c, c, c))
     L.append("""    p_mux : process(clk)
+        variable v_f : std_logic_vector(15 downto 0);
     begin
         if rising_edge(clk) then
             s_sel <= addr(11 downto 8);
-            case to_integer(s_sel) is
+            s_fa  <= addr(8 downto 0);
+            v_f := (others => '0');
+""")
+    for b in range(8):
+        L.append('            v_f(%d) := C_F%d(to_integer(s_fa));\n' % (2 * b, b))
+    L.append("""            case to_integer(s_sel) is
+                when 0 | 1 => s_q <= v_f;
 """)
     for c in range(nchunk):
-        L.append('                when %d => s_q <= r%d;\n' % (c, c))
+        L.append('                when %d => s_q <= r%d;\n' % (c + 2, c))
     L.append("""                when others => s_q <= (others => '0');
             end case;
         end if;
@@ -170,9 +197,14 @@ architecture rtl of attract_coderom is
     begin
         s_q <= (others => '0');
 """)
+    # chunks are aligned powers of two: select on the top address bits
+    # (never compare s_a with the integer end address: 4096 wraps to 0 in a
+    # 12-bit unsigned compare and the last chunk silently disappears)
     base = 0
     for i, sz in enumerate(sizes):
-        L.append('        if s_a >= %d and s_a < %d then s_q <= r%d; end if;\n' % (base, base + sz, i))
+        ab = sz.bit_length() - 1
+        L.append('        if s_a(11 downto %d) = "%s" then s_q <= r%d; end if;\n'
+                 % (ab, format(base >> ab, '0%db' % (12 - ab)), i))
         base += sz
     L.append("""    end process;
     q <= s_q;
@@ -230,8 +262,8 @@ def main():
     nchunk = gen_patrom(pats)
     depth = gen_coderom(rom)
     gen_pkg()
-    print('ATTRACT: graphics %d patterns (%d EBR, %d free patterns)'
-          % (len(pats), nchunk, nchunk * 32 - len(pats)))
+    print('ATTRACT: graphics %d patterns (font in logic + %d EBR, %d free patterns)'
+          % (len(pats), nchunk, 64 + nchunk * 32 - len(pats)))
     print('ATTRACT: program %d / %d words (%d EBR); work RAM %d / 256 words'
           % (len(rom), depth, depth // 256, info.get('ram', 0)))
     print('ATTRACT: EBR total %d (board 8 + graphics %d + program %d)'

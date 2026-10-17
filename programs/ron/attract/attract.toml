@@ -12,7 +12,7 @@
 processing_delay_clks = 20
 program_id = "com.czartroniks.attract"
 program_name = "Attract"
-program_version = "0.3.2"
+program_version = "0.4.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -25,7 +25,7 @@ core = "yuv444_30b"
 [[parameter]]
 parameter_id = "rotary_potentiometer_1"
 name_label = "Game"
-value_labels = ["Cycle", "Dot Matrix", "Skyline Siege", "Crosstalk"]
+value_labels = ["Cycle", "Dot Matrix", "Skyline Siege", "Crosstalk", "Swarmatron", "High Steel", "Thump Town", "Tangle"]
 initial_value_label = "Cycle"
 
 [[parameter]]
