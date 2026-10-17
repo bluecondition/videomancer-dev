@@ -27,7 +27,7 @@ name_label = "H Position"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 498
 display_float_digits = 0
 suffix_label = "%"
 
@@ -37,7 +37,7 @@ name_label = "V Position"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 405
 display_float_digits = 0
 suffix_label = "%"
 
@@ -51,7 +51,7 @@ value_labels = [
     "Plain", "Drop Shadow", "Black Edge", "Hollow",
     "Emboss", "Box", "Half Box", "Reverse",
 ]
-initial_value_label = "Drop Shadow"
+initial_value_label = "Black Edge"
 
 # Knob 4 is dual-purpose. With Edit Mode OFF it picks one of 8 preset text
 # colors (the latched value persists when Edit Mode is enabled). With Edit
@@ -65,7 +65,7 @@ value_labels = [
     "White", "Red", "Orange", "Yellow",
     "Green", "Cyan", "Blue", "Magenta",
 ]
-initial_value_label = "White"
+initial_value_label = "Yellow"
 
 # Knob 5 is dual-purpose too, the same way. With Edit Mode OFF it is Size:
 # screen-relative, 0% is small caption type, 100% is hero type about eight
@@ -79,7 +79,7 @@ name_label = "Size/Cursor"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 400
+initial_value = 711
 display_float_digits = 0
 suffix_label = "%"
 
@@ -89,7 +89,7 @@ name_label = "Letter"
 control_mode = "steps_64"
 display_min_value = 0
 display_max_value = 63
-initial_value = 0
+initial_value = 1023
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
@@ -128,7 +128,7 @@ initial_value_label = "Default"
 parameter_id = "toggle_switch_11"
 name_label = "Justify"
 value_labels = ["Left", "Center"]
-initial_value_label = "Center"
+initial_value_label = "Left"
 
 # Crawl is a bipolar news-ticker scroll: centre holds the text still (with a
 # small deadband), above centre it crawls left, below centre right, faster
@@ -140,7 +140,7 @@ name_label = "Crawl"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 512
+initial_value = 81
 display_float_digits = 0
 suffix_label = "%"
 
