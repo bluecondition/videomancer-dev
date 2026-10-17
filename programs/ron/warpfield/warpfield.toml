@@ -19,14 +19,14 @@ url = "https://github.com/lzxindustries/videomancer-community-programs"
 parameter_id = "rotary_potentiometer_1"
 name_label = "Layers"
 value_labels = ["1", "2", "3", "4", "5", "6"]
-initial_value_label = "6"
+initial_value_label = "5"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 400
+initial_value = 620
 display_min_value = 0
 display_max_value = 100
 name_label = "Density"
@@ -37,7 +37,7 @@ parameter_id = "rotary_potentiometer_3"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 900
+initial_value = 1023
 display_min_value = 0
 display_max_value = 100
 name_label = "Brightness"
@@ -47,14 +47,14 @@ suffix_label = "%"
 parameter_id = "rotary_potentiometer_4"
 name_label = "Palette"
 value_labels = ["Silver", "Candle", "Twilight", "Neon", "Ember", "Honey", "Rainbow", "B&W"]
-initial_value_label = "Silver"
+initial_value_label = "Twilight"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 200
+initial_value = 158
 display_min_value = 0
 display_max_value = 100
 name_label = "Size"
@@ -65,7 +65,7 @@ parameter_id = "rotary_potentiometer_6"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 0
+initial_value = 431
 display_min_value = 0
 display_max_value = 100
 name_label = "Drift"
@@ -95,13 +95,13 @@ initial_value_label = "Off"
 parameter_id = "toggle_switch_10"
 name_label = "Background"
 value_labels = ["Off", "Deep Space"]
-initial_value_label = "Off"
+initial_value_label = "Deep Space"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
 name_label = "Gate"
 value_labels = ["Off", "On"]
-initial_value_label = "Off"
+initial_value_label = "On"
 
 # --- Linear Potentiometer (Slider) ---
 
@@ -110,7 +110,7 @@ parameter_id = "linear_potentiometer_12"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 350
+initial_value = 648
 display_min_value = 0
 display_max_value = 100
 name_label = "Warp"
