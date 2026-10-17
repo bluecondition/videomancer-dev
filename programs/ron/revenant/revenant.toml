@@ -9,7 +9,7 @@
 [program]
 processing_delay_clks = 28
 program_id = "com.czartroniks.revenant"
-program_version = "1.0.1"
+program_version = "1.0.2"
 abi_version = ">=1.0,<2.0"
 program_name = "Revenant"
 author = "czartroniks"
@@ -175,3 +175,8 @@ toggle_switch_9 = 0
 toggle_switch_10 = 0
 toggle_switch_11 = 0
 linear_potentiometer_12 = 420
+
+[firmware]
+# nextpnr placement seed for the stock LZX build: with v1.0.2 seed 1 stalls router1 on HD Standalone;
+# seeds 2, 3 and 4 all build 8/8.
+seed = 2

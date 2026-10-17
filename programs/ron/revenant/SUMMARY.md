@@ -228,3 +228,11 @@ violet/cyan shows as green in sim) — judge structure, not hue, in sim.
 ## Dropped
 The Phase 2 text overlay is dropped: there is no free switch for it, and
 overlays are the rejected genre.
+
+## Build seeds — community port (stock LZX SDK 0a65d53, router1, all 8 configs)
+
+v1.0.2 (2026-10-17): **seed 2**, set as `[firmware] seed = 2` in revenant.toml. LZX's stock build uses one seed for all 8 configs.
+- **Why:** v1.0.2 adds the labelled-default fix for K4 Hue Rotate. With it, seed 1 stalls router1 on HD Standalone (overuse stuck at 2576).
+- **Sweep:** seeds 2, 3 and 4 all build 8/8.
+- **Own HD timing** (scratch core without LZX's Sync Out generator): seed 2 gives 98.7 / 97.6 / 102.0 MHz (Analog / HDMI / Dual).
+- The dev flow (router2) is unchanged.
