@@ -24,7 +24,7 @@ name_label = "Bleed"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 7
-initial_value = 400
+initial_value = 633
 display_float_digits = 0
 suffix_label = ""
 
@@ -34,7 +34,7 @@ name_label = "Lag"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 63
-initial_value = 200
+initial_value = 190
 display_float_digits = 0
 suffix_label = " px"
 
@@ -44,7 +44,7 @@ name_label = "Crawl"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 400
+initial_value = 1023
 display_float_digits = 1
 suffix_label = "%"
 
@@ -54,7 +54,7 @@ name_label = "Collapse"
 control_mode = "linear"
 display_min_value = 1
 display_max_value = 9
-initial_value = 150
+initial_value = 704
 display_float_digits = 2
 suffix_label = "x"
 
@@ -64,7 +64,7 @@ name_label = "Seam"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 512
+initial_value = 716
 display_float_digits = 1
 suffix_label = "%"
 
@@ -74,7 +74,7 @@ name_label = "Wave"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 300
+initial_value = 696
 display_float_digits = 1
 suffix_label = "%"
 
@@ -88,19 +88,19 @@ initial_value_label = "Before"
 parameter_id = "toggle_switch_8"
 name_label = "Length"
 value_labels = ["Fixed", "Local"]
-initial_value_label = "Fixed"
+initial_value_label = "Local"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
 name_label = "Chroma"
 value_labels = ["Same", "Fringe"]
-initial_value_label = "Fringe"
+initial_value_label = "Same"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
 name_label = "Crawl"
 value_labels = ["Locked", "Drift"]
-initial_value_label = "Drift"
+initial_value_label = "Locked"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
