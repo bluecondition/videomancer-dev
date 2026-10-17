@@ -21,19 +21,19 @@ core = "yuv444_30b"
 parameter_id = "rotary_potentiometer_1"
 name_label = "Cell"
 value_labels = ["1 px", "2 px", "4 px", "8 px", "16 px", "32 px", "64 px", "128 px"]
-initial_value_label = "8 px"
+initial_value_label = "4 px"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
 name_label = "Rows"
 value_labels = ["1 line", "2 lines", "4 lines", "8 lines", "16 lines", "32 lines", "64 lines", "128 lines"]
-initial_value_label = "4 lines"
+initial_value_label = "16 lines"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
 name_label = "Dither"
 value_labels = ["Off", "2 px", "4 px", "8 px", "16 px", "32 px", "64 px", "Cell"]
-initial_value_label = "2 px"
+initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
@@ -41,7 +41,7 @@ name_label = "Rate"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 543
+initial_value = 176
 display_float_digits = 1
 suffix_label = "%"
 
@@ -49,13 +49,13 @@ suffix_label = "%"
 parameter_id = "rotary_potentiometer_5"
 name_label = "Luma"
 value_labels = ["1 bit", "2 bits", "3 bits", "4 bits", "5 bits", "6 bits", "7 bits", "8 bits"]
-initial_value_label = "3 bits"
+initial_value_label = "2 bits"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
 name_label = "Chroma"
 value_labels = ["1 bit", "2 bits", "3 bits", "4 bits", "5 bits", "6 bits", "7 bits", "8 bits"]
-initial_value_label = "3 bits"
+initial_value_label = "4 bits"
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
@@ -79,13 +79,13 @@ initial_value_label = "Lean"
 parameter_id = "toggle_switch_10"
 name_label = "Edges"
 value_labels = ["Fill", "Mirror"]
-initial_value_label = "Fill"
+initial_value_label = "Mirror"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
 name_label = "Colour"
 value_labels = ["Together", "Split"]
-initial_value_label = "Together"
+initial_value_label = "Split"
 
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
