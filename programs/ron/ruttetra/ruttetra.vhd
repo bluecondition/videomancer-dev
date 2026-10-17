@@ -101,6 +101,11 @@ architecture ruttetra of program_top is
     -- thin strokes integrate less light: small shading lift at T=1..3
     signal s_bboost : unsigned(1 downto 0) := "10";
     signal s_zone   : unsigned(2 downto 0) := (others => '0');
+    -- K3 label decode, free-running (kept out of the per-frame latch).
+    -- Labelled default: at program load the firmware writes the
+    -- initial_value_label's INDEX (0..7), not a 0..1023 position, so a value
+    -- below 8 is the label index itself.
+    signal s_k3_idx : unsigned(2 downto 0) := (others => '0');
     signal s_gain8  : unsigned(7 downto 0) := to_unsigned(128, 8);
     signal s_smooth : unsigned(2 downto 0) := "010";
     -- smoothing lag compensation: read 2^s px ahead (IIR group delay
@@ -323,6 +328,11 @@ begin
         variable v_rp      : unsigned(14 downto 0);
     begin
         if rising_edge(clk) then
+            if unsigned(registers_in(2)) < 8 then
+                s_k3_idx <= unsigned(registers_in(2)(2 downto 0));
+            else
+                s_k3_idx <= unsigned(registers_in(2)(9 downto 7));
+            end if;
             prev_hsync_n <= data_in.hsync_n;
             prev_vsync_n <= data_in.vsync_n;
             v_h_edge := '0'; v_v_edge := '0';
@@ -421,7 +431,7 @@ begin
                     when "010"  => s_bboost <= "01";   -- T=3: +1
                     when others => s_bboost <= "00";
                 end case;
-                s_zone   <= unsigned(registers_in(2)(9 downto 7));
+                s_zone   <= s_k3_idx;
                 s_gain8  <= unsigned(registers_in(3)(9 downto 2));
                 s_smooth <= unsigned(registers_in(5)(9 downto 7));
                 case registers_in(5)(9 downto 7) is
