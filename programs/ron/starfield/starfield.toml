@@ -54,7 +54,7 @@ parameter_id = "rotary_potentiometer_5"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 524
+initial_value = 409
 display_min_value = 0
 display_max_value = 100
 name_label = "Glow"
@@ -64,7 +64,7 @@ suffix_label = "%"
 parameter_id = "rotary_potentiometer_6"
 name_label = "Depth"
 value_labels = ["1", "2", "3", "4", "5", "6", "7", "Max"]
-initial_value_label = "5"
+initial_value_label = "4"
 
 # --- Toggle Switches (7-11) ---
 
@@ -105,7 +105,7 @@ parameter_id = "linear_potentiometer_12"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 492
+initial_value = 469
 display_min_value = 0
 display_max_value = 100
 name_label = "Speed"
