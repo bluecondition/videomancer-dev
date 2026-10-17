@@ -32,7 +32,7 @@ parameter_id = "rotary_potentiometer_1"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 382          # ~170 deg (green)
+initial_value = 382          # hue around the wheel (483 = ~170 deg green)
 display_min_value = 0
 display_max_value = 360
 name_label = "Color"
@@ -65,7 +65,7 @@ parameter_id = "rotary_potentiometer_4"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 215          # unity; 100% = 4 numbers high at full zoom
+initial_value = 215          # 512 = unity; 100% = 4 numbers high at full zoom
 display_min_value = 0
 display_max_value = 100
 name_label = "Size"
@@ -76,7 +76,7 @@ parameter_id = "rotary_potentiometer_5"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 1023            # packed; up = gap grows, font size unchanged
+initial_value = 1023         # 0% = packed; up = gap grows, font size unchanged
 display_min_value = 0
 display_max_value = 100
 name_label = "Spacing"
