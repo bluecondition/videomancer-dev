@@ -4,7 +4,9 @@ Resume here. The plan is in [ARCHITECTURE.md](ARCHITECTURE.md) (v2, simplified, 
 
 ## State (2026-10-16)
 
-**v0.3.0** has three games: DOT MATRIX, SKYLINE SIEGE and CROSSTALK. It builds to `out/rev_b/ron/attract.vmprog`. **Not flashed yet.**
+**v0.3.0** has three games: DOT MATRIX, SKYLINE SIEGE and CROSSTALK. **HW-validated 2026-10-17** (Ron: "It looks great on hardware").
+
+**v0.3.1** (2026-10-17) adds instant K1 game switching. ROM-only change; 3,065 / 3,072 words.
 - v0.1.0 had DOT MATRIX only: all 6 configs on seed 1, HD 87.8 / 95.5 / 93.3 MHz, 4.6k LC, 27 EBR. A backup is at `~/.attract_work/attract_v010.vmprog`.
 - v0.2.0 had two games: HD 86 / 100 / 93 MHz, 4.8k LC, 29 EBR. It was superseded by v0.3.0 before being saved.
 
@@ -17,7 +19,7 @@ Resume here. The plan is in [ARCHITECTURE.md](ARCHITECTURE.md) (v2, simplified, 
 
 | Control | Function |
 |---|---|
-| K1 Game | Cycle / Dot Matrix / Skyline Siege / Crosstalk. Cycle advances to the next game after each GAME OVER. A labelled default may arrive as a label index; the code handles it. |
+| K1 Game | Cycle / Dot Matrix / Skyline Siege / Crosstalk. Cycle advances to the next game after each GAME OVER. A labelled default may arrive as a label index; the code handles it. **v0.3.1:** turning K1 to another game switches at once. `frame_sub` (every frame) debounces the new zone for 8 ticks, then JMPs to `k1_switch`: video reset, 8 frames of static, then the new game. The circular return stack makes the jump out of any call depth safe. Turning to Cycle never interrupts. |
 | K4 Seed | Level seed (same knob position + stage = same level). |
 | S11 Attract | Attract: static burst → RAM OK/ROM OK → title card → READY → demo → GAME OVER. Endless: straight to gameplay, no cards (also used by sims). |
 

@@ -10,7 +10,7 @@ Every game is drawn from **one shared sheet** of 8×8 pixel art. A brick, a gird
 
 The picture is a 256×240 canvas of big square pixels, centred on any video mode: 4×4 at 1080, 3×3 at 720p, line-doubled at SD.
 
-## Games (v0.3.0)
+## Games (v0.3.1)
 
 | Game | Genre | The same pieces, arranged as… |
 |---|---|---|
@@ -22,7 +22,7 @@ The picture is a 256×240 canvas of big square pixels, centred on any video mode
 
 | Control | Function |
 |---|---|
-| K1 Game | **Cycle** (a new game after each GAME OVER), or pin one game |
+| K1 Game | **Cycle** (a new game after each GAME OVER), or pin one game. Turning to another game switches **immediately** (~0.13 s, through a burst of channel-change static); turning to Cycle lets the current game play on |
 | K4 Seed | level seed: the same knob position and stage always give the same level |
 | S11 Attract | **Attract**: channel-change static, RAM OK / ROM OK, title card, READY!, demo, GAME OVER. **Endless**: gameplay only |
 

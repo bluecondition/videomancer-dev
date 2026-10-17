@@ -132,9 +132,9 @@ class Prog(dasm.Asm):
         self.table(label, row * 32 + col, tpal(pal), len(text), *[ord(ch) for ch in text])
 
     def frame(self):
-        # finish the frame: show the sprites written this tick, wait
-        self.emit('OUT', P_SWAP)
-        self.emit('SYS', dasm.SYSC['WAIT'])
+        # finish the frame: show the sprites written this tick, wait, and
+        # watch K1 (frame_sub may jump straight to another game)
+        self.call('frame_sub')
 
     def call_puts(self, label):
         self.ldxa(label)
@@ -370,6 +370,45 @@ def build_lib(a):
     a.label('go_ret')
     a.ret()
 
+    # ---- K1 zone -> A: 0 = Cycle, 1..NGAMES = that game.  Labels divide the
+    # knob evenly; the firmware may hand a labelled default over as the
+    # label INDEX (< NGAMES+1), so small values are taken as an index.
+    a.var('k1_v'); a.var('k1_z'); a.var('k1_t'); a.var('k1_pend'); a.var('k1_cnt')
+    a.var('game')
+    a.label('k1_zone')
+    a.inp(I_K1); a.st('k1_v')
+    a.cmpi(NGAMES + 1); a.jc('kz_idx')
+    a.clr('k1_z')
+    a.lxi(0)
+    a.label('kz_l')
+    a.ldc('k1_zones'); a.st('k1_t')
+    a.ld('k1_v'); a.cmp('k1_t'); a.jc('kz_done')
+    a.incm('k1_z'); a.inx(); a.txa(); a.cmpi(NGAMES); a.jnz('kz_l')
+    a.label('kz_done')
+    a.ld('k1_z')
+    a.ret()
+    a.label('kz_idx')
+    a.ld('k1_v')
+    a.ret()
+
+    # ---- frame_sub: show this tick's sprites, wait for the tick, then
+    # watch K1: a different game held for 8 ticks switches immediately.
+    a.label('frame_sub')
+    a.outp(P_SWAP)
+    a.emit('SYS', dasm.SYSC['WAIT'])
+    a.call('k1_zone'); a.jz('fs_clr')              # Cycle: never interrupts
+    a.addi(-1); a.cmp('game'); a.jz('fs_clr')      # already playing it
+    a.cmp('k1_pend'); a.jz('fs_cnt')
+    a.st('k1_pend'); a.clr('k1_cnt'); a.ret()
+    a.label('fs_cnt')
+    a.incm('k1_cnt'); a.cmpi(8); a.jc('fs_ret')
+    a.ld('k1_pend'); a.st('game'); a.clr('k1_cnt')
+    a.jmp('k1_switch')
+    a.label('fs_clr')
+    a.clr('k1_cnt')
+    a.label('fs_ret')
+    a.ret()
+
     a.label('hud')
     a.call_puts('s_1up')
     a.call_puts('s_hi')
@@ -385,7 +424,17 @@ def build_lib(a):
 
     # ---- static burst + self test (the channel change between games)
     a.label('static')
-    a.ldi(14); a.st('t5')
+    a.ldi(14); a.call('static_burst')
+    a.call('cls')
+    a.call_puts('s_ramok')
+    a.ldi(20); a.call('wait_ticks')
+    a.call_puts('s_romok')
+    a.ldi(30); a.call('wait_ticks')
+    a.jmp('cls')
+
+    # A frames of channel-change static: random tiles, vertical roll
+    a.label('static_burst')
+    a.st('t5')
     a.label('st_frame')
     a.cla(); a.outp(P_TADDR)
     a.lda(960); a.tax()
@@ -395,12 +444,6 @@ def build_lib(a):
     a.inp(I_RAND); a.andi(255); a.outp(P_YSCR)
     a.frame()
     a.decm('t5'); a.jnz('st_frame')
-    a.call('cls')
-    a.call_puts('s_ramok')
-    a.ldi(20); a.call('wait_ticks')
-    a.call_puts('s_romok')
-    a.ldi(30); a.call('wait_ticks')
-    a.call('cls')
     a.ret()
 
 
@@ -1776,30 +1819,19 @@ def build_crosstalk(a):
 
 # ======================================================================
 def build_shell(a):
-    a.label('reset')
-    a.ldxa('pal_default'); a.call('load_pals')
+    a.label('vid_reset')
+    a.cla(); a.outp(P_STAR); a.outp(P_YSCR)
     a.ldxa('pal_sprites'); a.call('load_pals')
+    a.ldxa('pal_default'); a.jmp('load_pals')
+
+    a.label('reset')
+    a.call('vid_reset')
     a.lxi(5)
     a.label('rs_hi')
     a.cla(); a.stx('hi'); a.dex(); a.txa(); a.cmpi(-1); a.jnz('rs_hi')
-    a.var('game'); a.var('gsel')
     a.clr('game')
     a.label('cycle')
-    # K1: Cycle / one game.  Labels divide the knob into NG+1 zones; the
-    # firmware may hand over a labelled default as the label INDEX (< NG+1).
-    a.inp(I_K1); a.st('t0')
-    a.cmpi(NGAMES + 1); a.jc('cy_idx')
-    a.clr('gsel')
-    a.lxi(0)
-    a.label('cy_z')
-    a.ld('t0'); a.emit('CMP', 't1') if False else None
-    a.ldc('k1_zones'); a.st('t1'); a.ld('t0'); a.cmp('t1'); a.jc('cy_zd')
-    a.incm('gsel'); a.inx(); a.txa(); a.cmpi(NGAMES); a.jnz('cy_z')
-    a.label('cy_zd')
-    a.ld('gsel'); a.jmp('cy_sel')
-    a.label('cy_idx')
-    a.ld('t0')
-    a.label('cy_sel')
+    a.call('k1_zone')
     a.jz('cy_auto')
     a.addi(-1); a.st('game')
     a.label('cy_auto')
@@ -1814,6 +1846,7 @@ def build_shell(a):
     a.ldi(120); a.call('wait_ticks')
     a.label('cy_endless')
     a.call('cls')
+    a.label('cy_play')
     a.ld('game'); a.jnz('cy_g1')
     a.call('dm_game'); a.jmp('cy_next')
     a.label('cy_g1')
@@ -1822,13 +1855,19 @@ def build_shell(a):
     a.label('cy_g2')
     a.call('cr_game')
     a.label('cy_next')
-    a.lda(0); a.outp(P_YSCR)
-    a.lda(0); a.outp(P_STAR)
-    a.ldxa('pal_sprites'); a.call('load_pals')
-    a.ldxa('pal_default'); a.call('load_pals')
+    a.call('vid_reset')
     a.incm('game'); a.cmpi(NGAMES); a.jnz('cycle')
     a.clr('game')
     a.jmp('cycle')
+
+    # K1 turned to another game mid-play: frame_sub jumps here (whatever the
+    # call depth -- the return stack is circular, so the leftovers are
+    # harmless).  A short burst of static, then straight into the new game.
+    a.label('k1_switch')
+    a.call('vid_reset')
+    a.ldi(8); a.call('static_burst')
+    a.call('cls')
+    a.jmp('cy_play')
     a.string('s_title_dm', 11, 10, 3, 'DOT MATRIX')
     a.string('s_title_ss', 9, 10, 3, 'SKYLINE SIEGE')
     a.string('s_title_cr', 11, 10, 3, 'CROSSTALK')

@@ -12,7 +12,7 @@
 processing_delay_clks = 20
 program_id = "com.czartroniks.attract"
 program_name = "Attract"
-program_version = "0.3.0"
+program_version = "0.3.1"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
