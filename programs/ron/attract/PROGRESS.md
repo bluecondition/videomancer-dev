@@ -10,7 +10,7 @@ Resume here. The plan is in [ARCHITECTURE.md](ARCHITECTURE.md) (v2, simplified, 
 - The package, bitstreams and emulator/GHDL behaviour all checked out.
 - Probable cause: `program_type` was `processing` (chosen early for the unbuilt video-in-BLIP's-face feature), so the program depended on input video. With no source plugged in there is no picture.
 
-**v0.3.2** (2026-10-17): `program_type = "synthesis"`. TOML-only change; it runs with no input. The video-face feature would need `processing` again, plus a source.
+**v0.3.2** (2026-10-17): `program_type = "synthesis"`. TOML-only change; it runs with no input. **HW-validated 2026-10-17** (Ron: "It's working now"), so the processing type was the red-screen cause. The video-face feature would need `processing` again, plus a source.
 - v0.1.0 had DOT MATRIX only: all 6 configs on seed 1, HD 87.8 / 95.5 / 93.3 MHz, 4.6k LC, 27 EBR. A backup is at `~/.attract_work/attract_v010.vmprog`.
 - v0.2.0 had two games: HD 86 / 100 / 93 MHz, 4.8k LC, 29 EBR. It was superseded by v0.3.0 before being saved.
 
