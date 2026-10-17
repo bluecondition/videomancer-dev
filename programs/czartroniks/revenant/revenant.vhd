@@ -216,6 +216,11 @@ architecture revenant of program_top is
     signal s_key     : unsigned(9 downto 0) := to_unsigned(300,10);-- luma key (stroke start)
     signal s_step    : unsigned(13 downto 0) := to_unsigned(4096, 14); -- phase step / px
     signal s_hue     : unsigned(1 downto 0) := (others => '0');   -- hue rotation (x90)
+    -- K4 label decode, free-running.  Labelled default: at program load the
+    -- firmware writes the initial_value_label's INDEX (0..3) into the
+    -- register, not a 0..1023 position, so a raw value below 4 is the label
+    -- index itself (the deadband would otherwise snap it to 0 = Violet).
+    signal s_k4_idx  : unsigned(1 downto 0) := (others => '0');
     signal s_eyek    : unsigned(9 downto 0) := to_unsigned(898,10);-- eye raw-luma threshold
     signal s_halok   : unsigned(9 downto 0) := to_unsigned(834,10);-- halo raw-luma threshold
     signal s_eye_en  : std_logic := '1';
@@ -350,6 +355,11 @@ begin
                 reg_q(i) <= unsigned(registers_in(i)(9 downto 0));
             end loop;
             db_k4_n <= db_upd(db_k4, reg_q(3));
+            if reg_q(3) < 4 then
+                s_k4_idx <= reg_q(3)(1 downto 0);
+            else
+                s_k4_idx <= db_k4(9 downto 8);
+            end if;
             db_k5_n <= db_upd(db_k5, reg_q(4));
 
             -----------------------------------------------------------------
@@ -468,7 +478,7 @@ begin
                         + shift_left(resize(k2_f, 14), 3)
                         + shift_left(resize(k2_f, 14), 2);
                 -- K4 Hue rotate (90-deg steps).
-                s_hue <= db_k4(9 downto 8);
+                s_hue <= s_k4_idx;
                 -- K5 Drift Speed: phase per frame on a pseudo-exponential ramp.
                 -- 65536 = one stroke pitch: ~2 min per stroke just off zero, ~7
                 -- strokes/s wide open.  0 is exact (the deadband snaps to the rail).
