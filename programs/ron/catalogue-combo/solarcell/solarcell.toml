@@ -23,7 +23,7 @@ name_label = "Level"
 control_mode = "linear"
 display_min_value = 15
 display_max_value = 80
-initial_value = 683
+initial_value = 540
 display_float_digits = 1
 suffix_label = "%"
 
@@ -33,7 +33,7 @@ name_label = "Gain"
 control_mode = "linear"
 display_min_value = 100
 display_max_value = 1600
-initial_value = 320
+initial_value = 202
 display_float_digits = 0
 suffix_label = "%"
 
@@ -43,7 +43,7 @@ name_label = "Rows"
 control_mode = "linear"
 display_min_value = 1
 display_max_value = 64
-initial_value = 56
+initial_value = 905
 display_float_digits = 0
 suffix_label = "ln"
 
@@ -53,7 +53,7 @@ name_label = "Cell"
 control_mode = "linear"
 display_min_value = 4
 display_max_value = 131
-initial_value = 36
+initial_value = 519
 display_float_digits = 0
 suffix_label = "px"
 
@@ -63,7 +63,7 @@ name_label = "Mix"
 control_mode = "linear"
 display_min_value = 25
 display_max_value = 100
-initial_value = 1023
+initial_value = 535
 display_float_digits = 1
 suffix_label = "%"
 
@@ -73,7 +73,7 @@ name_label = "Offset"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 0
+initial_value = 723
 display_float_digits = 1
 suffix_label = "%"
 
@@ -81,19 +81,19 @@ suffix_label = "%"
 parameter_id = "toggle_switch_7"
 name_label = "Chroma"
 value_labels = ["Keep", "Fold"]
-initial_value_label = "Keep"
+initial_value_label = "Fold"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
 name_label = "Order"
 value_labels = ["Solar-Mos", "Mos-Solar"]
-initial_value_label = "Solar-Mos"
+initial_value_label = "Mos-Solar"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
 name_label = "Colour"
 value_labels = ["Average", "Vivid"]
-initial_value_label = "Average"
+initial_value_label = "Vivid"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
@@ -113,7 +113,7 @@ name_label = "Fold"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 0
+initial_value = 901
 display_float_digits = 1
 suffix_label = "%"
 
