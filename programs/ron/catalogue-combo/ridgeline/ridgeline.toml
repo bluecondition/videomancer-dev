@@ -23,7 +23,7 @@ name_label = "Amount"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 385
+initial_value = 904
 display_float_digits = 1
 suffix_label = "%"
 
@@ -33,7 +33,7 @@ name_label = "Scale"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 190
+initial_value = 0
 display_float_digits = 1
 suffix_label = "%"
 
@@ -43,7 +43,7 @@ name_label = "Speed"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 200
+initial_value = 490
 display_float_digits = 1
 suffix_label = "%"
 
@@ -53,7 +53,7 @@ name_label = "Gain"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 500
+initial_value = 502
 display_float_digits = 1
 suffix_label = "%"
 
@@ -61,7 +61,7 @@ suffix_label = "%"
 parameter_id = "rotary_potentiometer_5"
 name_label = "Edges"
 value_labels = ["Roberts", "Horizontal", "Vertical", "Sobel"]
-initial_value_label = "Roberts"
+initial_value_label = "Sobel"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
@@ -69,7 +69,7 @@ name_label = "Ink"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 0
+initial_value = 66
 display_float_digits = 1
 suffix_label = "%"
 
@@ -89,7 +89,7 @@ initial_value_label = "Warp-Edge"
 parameter_id = "toggle_switch_9"
 name_label = "Chroma"
 value_labels = ["Follow", "Own"]
-initial_value_label = "Follow"
+initial_value_label = "Own"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
@@ -109,7 +109,7 @@ name_label = "Rows"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 156
+initial_value = 110
 display_float_digits = 1
 suffix_label = "%"
 
