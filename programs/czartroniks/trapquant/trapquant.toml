@@ -24,7 +24,7 @@ name_label = "Top"
 control_mode = "linear"
 display_min_value = 25
 display_max_value = 225
-initial_value = 484
+initial_value = 511
 display_float_digits = 0
 suffix_label = "%"
 
@@ -34,7 +34,7 @@ name_label = "Bottom"
 control_mode = "linear"
 display_min_value = 25
 display_max_value = 225
-initial_value = 289
+initial_value = 0
 display_float_digits = 0
 suffix_label = "%"
 
@@ -44,7 +44,7 @@ name_label = "Slide"
 control_mode = "linear"
 display_min_value = -50
 display_max_value = 50
-initial_value = 512
+initial_value = 552
 display_float_digits = 1
 suffix_label = "%"
 
@@ -54,7 +54,7 @@ name_label = "Luma"
 control_mode = "linear"
 display_min_value = 1
 display_max_value = 8
-initial_value = 438
+initial_value = 788
 display_float_digits = 0
 suffix_label = " b"
 
@@ -64,7 +64,7 @@ name_label = "Chroma"
 control_mode = "linear"
 display_min_value = 1
 display_max_value = 8
-initial_value = 292
+initial_value = 853
 display_float_digits = 0
 suffix_label = " b"
 
@@ -74,7 +74,7 @@ name_label = "Dither"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 500
+initial_value = 1023
 display_float_digits = 1
 suffix_label = "%"
 
@@ -82,7 +82,7 @@ suffix_label = "%"
 parameter_id = "toggle_switch_7"
 name_label = "Edges"
 value_labels = ["Fill", "Mirror"]
-initial_value_label = "Fill"
+initial_value_label = "Mirror"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
@@ -94,7 +94,7 @@ initial_value_label = "Source"
 parameter_id = "toggle_switch_9"
 name_label = "Ramp"
 value_labels = ["Off", "On"]
-initial_value_label = "Off"
+initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
@@ -114,7 +114,7 @@ name_label = "Tilt"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 512
+initial_value = 618
 display_float_digits = 1
 suffix_label = "%"
 
