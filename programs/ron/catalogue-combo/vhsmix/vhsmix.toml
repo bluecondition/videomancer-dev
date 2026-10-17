@@ -21,7 +21,7 @@ core = "yuv444_30b"
 parameter_id = "rotary_potentiometer_1"
 name_label = "Luma"
 value_labels = ["1 bit", "2 bits", "3 bits", "4 bits", "5 bits", "6 bits", "7 bits", "8 bits"]
-initial_value_label = "3 bits"
+initial_value_label = "1 bit"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
@@ -35,7 +35,7 @@ name_label = "Band"
 control_mode = "linear"
 display_min_value = 1
 display_max_value = 50
-initial_value = 80
+initial_value = 673
 display_float_digits = 0
 suffix_label = "%"
 
@@ -45,7 +45,7 @@ name_label = "Noise"
 control_mode = "linear"
 display_min_value = 5
 display_max_value = 100
-initial_value = 300
+initial_value = 628
 display_float_digits = 0
 suffix_label = "%"
 
@@ -61,7 +61,7 @@ name_label = "Mix"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 1023
+initial_value = 600
 display_float_digits = 0
 suffix_label = "%"
 
@@ -69,7 +69,7 @@ suffix_label = "%"
 parameter_id = "toggle_switch_7"
 name_label = "Ghost"
 value_labels = ["Off", "Ghost"]
-initial_value_label = "Off"
+initial_value_label = "Ghost"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
@@ -87,13 +87,13 @@ initial_value_label = "Fixed"
 parameter_id = "toggle_switch_10"
 name_label = "Noise"
 value_labels = ["Luma", "Colour"]
-initial_value_label = "Luma"
+initial_value_label = "Colour"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
 name_label = "Chroma"
 value_labels = ["Posterize", "Blend"]
-initial_value_label = "Posterize"
+initial_value_label = "Blend"
 
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
@@ -101,7 +101,7 @@ name_label = "Static"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 0
+initial_value = 627
 display_float_digits = 0
 suffix_label = "%"
 
