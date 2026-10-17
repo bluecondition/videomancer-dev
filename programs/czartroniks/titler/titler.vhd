@@ -191,7 +191,7 @@ architecture titler of program_top is
     signal s_h_pos       : unsigned(9 downto 0);
     signal s_v_pos       : unsigned(9 downto 0);
     signal s_crawl_raw   : unsigned(9 downto 0);
-    signal s_style       : unsigned(2 downto 0);
+    signal s_style       : unsigned(2 downto 0) := "000";
     signal s_letter      : unsigned(5 downto 0);
     signal s_edit_mode   : std_logic;
     signal s_bg_black    : std_logic;
@@ -467,7 +467,6 @@ begin
     --==========================================================================
     s_h_pos       <= unsigned(registers_in(0));
     s_v_pos       <= unsigned(registers_in(1));
-    s_style       <= unsigned(registers_in(2)(9 downto 7));
     s_cursor_5p   <= unsigned(registers_in(4)(9 downto 5));
     s_erase_5p    <= unsigned(registers_in(3)(9 downto 5));
     s_cursor_line <= r_cursor(C_CURSOR_BIT - 1 downto C_COL_BIT);
@@ -487,8 +486,19 @@ begin
         variable v_disp : unsigned(4 downto 0);
     begin
         if rising_edge(clk) then
+            -- labelled defaults: the firmware loads the label INDEX (0..7),
+            -- so a value below 8 is the label, not the bottom zone
+            if unsigned(registers_in(2)(9 downto 3)) = 0 then
+                s_style <= unsigned(registers_in(2)(2 downto 0));
+            else
+                s_style <= unsigned(registers_in(2)(9 downto 7));
+            end if;
             if s_edit_mode = '0' then
-                s_color_sel <= unsigned(registers_in(3)(9 downto 7));
+                if unsigned(registers_in(3)(9 downto 3)) = 0 then
+                    s_color_sel <= unsigned(registers_in(3)(2 downto 0));
+                else
+                    s_color_sel <= unsigned(registers_in(3)(9 downto 7));
+                end if;
             end if;
 
             -- Size pickup: Edit Mode drops the link to K5; outside Edit Mode
