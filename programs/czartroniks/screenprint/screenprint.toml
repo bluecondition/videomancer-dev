@@ -23,7 +23,7 @@ name_label = "Angle"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 90
-initial_value = 512
+initial_value = 657
 display_float_digits = 0
 suffix_label = "°"
 
@@ -33,7 +33,7 @@ name_label = "Mix"
 control_mode = "linear"
 display_min_value = 12
 display_max_value = 100
-initial_value = 1023
+initial_value = 990
 display_float_digits = 0
 suffix_label = "%"
 
@@ -47,13 +47,13 @@ initial_value_label = "Circle"
 parameter_id = "rotary_potentiometer_4"
 name_label = "Blend"
 value_labels = ["Add", "Screen", "Multiply", "Difference", "Hard Light", "Overlay"]
-initial_value_label = "Multiply"
+initial_value_label = "Add"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
 name_label = "Ink"
 value_labels = ["Black", "Red", "Orange", "Yellow", "Green", "Cyan", "Blue", "Magenta"]
-initial_value_label = "Black"
+initial_value_label = "Green"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
@@ -61,7 +61,7 @@ name_label = "Gain"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 300
+initial_value = 461
 display_float_digits = 1
 suffix_label = "%"
 
@@ -69,7 +69,7 @@ suffix_label = "%"
 parameter_id = "toggle_switch_7"
 name_label = "Register"
 value_labels = ["Tight", "Loose"]
-initial_value_label = "Tight"
+initial_value_label = "Loose"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
@@ -81,7 +81,7 @@ initial_value_label = "Off"
 parameter_id = "toggle_switch_9"
 name_label = "Spin"
 value_labels = ["Off", "On"]
-initial_value_label = "Off"
+initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
@@ -93,7 +93,7 @@ initial_value_label = "Picture"
 parameter_id = "toggle_switch_11"
 name_label = "Rosette"
 value_labels = ["Off", "On"]
-initial_value_label = "Off"
+initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
@@ -101,7 +101,7 @@ name_label = "Size"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 192
+initial_value = 220
 display_float_digits = 0
 suffix_label = "%"
 
