@@ -12,12 +12,12 @@
 processing_delay_clks = 20
 program_id = "com.czartroniks.attract"
 program_name = "Attract"
-program_version = "0.3.1"
+program_version = "0.3.2"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Game", "Pattern"]
-program_type = "processing"
+program_type = "synthesis"
 description = "An arcade that plays itself: DODECA coin-ops in attract mode, BLIP the walking TV vs the moths."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
