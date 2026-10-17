@@ -30,7 +30,7 @@ name_label = "Scan Lines"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 612
 display_float_digits = 0
 suffix_label = "%"
 
@@ -40,14 +40,14 @@ name_label = "Thickness/Glow"
 control_mode = "linear"
 display_min_value = 1
 display_max_value = 8
-initial_value = 128
+initial_value = 469
 display_float_digits = 0
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
 name_label = "Line Color"
 value_labels = ["White", "Green", "Amber", "Cyan", "Magenta", "Video", "Fire", "Terrain"]
-initial_value_label = "White"
+initial_value_label = "Video"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
@@ -55,7 +55,7 @@ name_label = "Contrast"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 200
-initial_value = 512
+initial_value = 743
 display_float_digits = 0
 suffix_label = "%"
 
@@ -65,7 +65,7 @@ name_label = "Roll"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 512
+initial_value = 722
 display_float_digits = 0
 suffix_label = "%"
 
@@ -75,7 +75,7 @@ name_label = "Smoothing"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 300
+initial_value = 257
 display_float_digits = 0
 suffix_label = "%"
 
@@ -85,7 +85,7 @@ suffix_label = "%"
 parameter_id = "toggle_switch_7"
 name_label = "Peaks"
 value_labels = ["Bright", "Dark"]
-initial_value_label = "Bright"
+initial_value_label = "Dark"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
@@ -97,7 +97,7 @@ initial_value_label = "On"
 parameter_id = "toggle_switch_9"
 name_label = "Shading"
 value_labels = ["Banded", "Luma"]
-initial_value_label = "Luma"
+initial_value_label = "Banded"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
@@ -119,7 +119,7 @@ name_label = "Relief"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 700
+initial_value = 55
 display_float_digits = 0
 suffix_label = "%"
 
