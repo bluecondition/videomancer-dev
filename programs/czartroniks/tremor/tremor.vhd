@@ -51,6 +51,13 @@
 -- output ([1 2 1] on Y/U/V + luma scaled to white ~775: the HD HDMI bar fix
 -- from damier v0.4.4).  Latency 30 clocks in all modes; outputs gated to
 -- neutral outside the generated avid.
+--
+-- v0.3.2: resolution scaling.  Lattice steps, shear band period, shear slope
+-- and quake slab heights run in virtual 1080-line units (x step per pixel
+-- and y step per field line from the video timing ID in registers_in(8));
+-- warp, shear and quake displacements are scaled by 1/x step (height-based),
+-- so cells, bands and tears keep their size relative to the screen height
+-- at SD and 720p.  1080p is unchanged.
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -175,8 +182,19 @@ architecture tremor of program_top is
     signal s_p_amount : unsigned(9 downto 0);
     signal s_skg    : unsigned(12 downto 0) := (others => '0');    -- Skew glide (Q3)
     signal s_pg     : unsigned(13 downto 0) := (others => '0');    -- Amount glide (Q4)
-    signal s_skew   : unsigned(9 downto 0) := (others => '0');
+    signal s_skew_v : unsigned(9 downto 0) := (others => '0');      -- skew, virtual px per virtual line (x128)
+    signal s_skew   : unsigned(9 downto 0) := (others => '0');      -- ... real px per virtual line
+    signal s_sk_a, s_sk_b : unsigned(9 downto 0) := (others => '0');
     signal s_period : unsigned(8 downto 0) := to_unsigned(64, 9);
+    signal s_peff   : unsigned(8 downto 0) := to_unsigned(64, 9);   -- period, at least one field line
+    -- resolution scaling (free-running from the timing ID)
+    signal s_vxs    : unsigned(2 downto 0) := to_unsigned(2, 3);        -- x step, Q.1
+    signal s_ys     : unsigned(11 downto 0) := to_unsigned(256, 12);    -- y step per field line, Q.8
+    signal s_ymin   : unsigned(8 downto 0) := to_unsigned(1, 9);        -- ceil(y step)
+    signal s_wv     : unsigned(10 downto 0) := to_unsigned(1920, 11);   -- 1080p width in real px
+    signal s_shc    : signed(12 downto 0) := to_signed(511, 13);        -- shear clamp, real px
+    signal s_qthr   : unsigned(7 downto 0) := to_unsigned(16, 8);       -- quake: new slab if r8 < this
+    signal s_xstep, s_ystep : unsigned(16 downto 0) := to_unsigned(2048, 17);  -- real lattice steps
     signal s_sidx   : unsigned(8 downto 0) := to_unsigned(192, 9);  -- scale: octave & mantissa
     signal s_srom_addr : unsigned(5 downto 0) := (others => '0');
     signal s_srom_q, s_srom_q2 : unsigned(14 downto 0) := to_unsigned(16384, 15);
@@ -218,7 +236,7 @@ architecture tremor of program_top is
     signal s_in_y   : unsigned(9 downto 0) := (others => '0');
     signal s_in_avid : std_logic := '0';
     signal s_lstep  : unsigned(3 downto 0) := "1111";
-    signal s_lp     : unsigned(8 downto 0) := (others => '0');
+    signal s_lpa    : unsigned(16 downto 0) := (others => '0');     -- line in band, Q.8 virtual
     signal s_dir, s_band : std_logic := '0';
     signal s_lq     : unsigned(8 downto 0) := (others => '0');
     signal s_lt     : signed(9 downto 0) := (others => '0');
@@ -340,6 +358,32 @@ architecture tremor of program_top is
         end if;
     end function;
 
+    -- Resolution scaling: per-mode steps from the video timing ID.
+    -- x step in half virtual units per pixel: 1080 2 (1.0), 720p 3 (1.5),
+    -- SD 4 (2.0: 720 px span 1440 units, a 4:3 window of the 1080 canvas).
+    function f_vstep_x(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0 | 4 | 8 | 12 => return to_unsigned(4, 3);
+            when 5 | 6 | 14     => return to_unsigned(3, 3);
+            when others         => return to_unsigned(2, 3);
+        end case;
+    end function;
+    -- y step in Q4.8 virtual units per FIELD line (1080 / active lines,
+    -- doubled for interlaced modes).
+    function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(1138, 12);  -- 480i: 2 x 1080/486
+            when 4          => return to_unsigned(576, 12);   -- 480p: 1080/480
+            when 8          => return to_unsigned(960, 12);   -- 576i: 2 x 1080/576
+            when 12         => return to_unsigned(480, 12);   -- 576p: 1080/576
+            when 5 | 6 | 14 => return to_unsigned(384, 12);   -- 720p: 1.5
+            when 1 | 2 | 10 => return to_unsigned(512, 12);   -- 1080i: 2.0
+            when others     => return to_unsigned(256, 12);   -- 1080p: 1.0
+        end case;
+    end function;
+
     -- 24-bit Galois LFSR (x^24 + x^23 + x^22 + x^17 + 1), 8 steps
     function f_lfsr8(v : unsigned(23 downto 0)) return unsigned is
         variable t : unsigned(23 downto 0);
@@ -443,6 +487,8 @@ begin
         variable v_c  : unsigned(11 downto 0);
         variable v_g  : unsigned(9 downto 0);
         variable v_a  : unsigned(9 downto 0);
+        variable v_ln : unsigned(16 downto 0);
+        variable v_r8 : unsigned(7 downto 0);
     begin
         if rising_edge(clk) then
             s_in_y <= unsigned(data_in.y);
@@ -452,11 +498,37 @@ begin
             if s_in_avid = '1' then s_wr_x <= s_wr_x + 1; else s_wr_x <= (others => '0'); end if;
             s_we <= data_in.avid;
 
+            -- resolution scaling: per-mode steps; the 1920-unit 1080p width
+            -- and the shear clamp in real pixels (2 / x step); skew from
+            -- virtual to real px (720p: 1/2+1/8+1/32+1/128); quake slab odds
+            -- 1 in 16 virtual lines
+            s_vxs <= f_vstep_x(registers_in(8)(3 downto 0));
+            s_ys <= f_vstep_y(registers_in(8)(3 downto 0));
+            if s_ys(7 downto 0) = 0 then
+                s_ymin <= resize(s_ys(11 downto 8), 9);
+            else
+                s_ymin <= resize(s_ys(11 downto 8), 9) + 1;
+            end if;
+            s_qthr <= s_ys(11 downto 4);
+            case to_integer(s_vxs) is
+                when 4 =>
+                    s_wv <= to_unsigned(960, 11);  s_shc <= to_signed(255, 13);
+                    s_sk_a <= shift_right(s_skew_v, 1); s_sk_b <= (others => '0');
+                when 3 =>
+                    s_wv <= to_unsigned(1280, 11); s_shc <= to_signed(340, 13);
+                    s_sk_a <= shift_right(s_skew_v, 1) + shift_right(s_skew_v, 3);
+                    s_sk_b <= shift_right(s_skew_v, 5) + shift_right(s_skew_v, 7);
+                when others =>
+                    s_wv <= to_unsigned(1920, 11); s_shc <= to_signed(511, 13);
+                    s_sk_a <= s_skew_v; s_sk_b <= (others => '0');
+            end case;
+            s_skew <= s_sk_a + s_sk_b;
+
             -- lattice x DDAs (top and bottom lattice rows of the cell),
             -- stepped over the generated avid from per-line starts
             if g_avid = '1' then
-                s_xacc_t <= s_xacc_t + resize(s_step, 25);
-                s_xacc_b <= s_xacc_b + resize(s_step, 25);
+                s_xacc_t <= s_xacc_t + resize(s_xstep, 25);
+                s_xacc_b <= s_xacc_b + resize(s_xstep, 25);
             else
                 s_xacc_t <= s_xst_t;
                 s_xacc_b <= s_xst_b;
@@ -466,9 +538,9 @@ begin
             case to_integer(s_lstep) is
                 when 0 =>
                     if s_sw_tri = '1' and s_dir = '1' then
-                        s_lq <= s_period - 1 - s_lp;
+                        s_lq <= s_peff - 1 - s_lpa(16 downto 8);
                     else
-                        s_lq <= s_lp;
+                        s_lq <= s_lpa(16 downto 8);
                     end if;
                     s_band_row <= s_band;
                     v_cy := s_yacc(25 downto 16);
@@ -479,10 +551,12 @@ begin
                     s_lfsr <= f_lfsr8(s_lfsr);
                     s_lstep <= s_lstep + 1;
                 when 1 =>
-                    s_lt <= signed('0' & s_lq) - signed('0' & s_period(8 downto 1));
+                    s_lt <= signed('0' & s_lq) - signed('0' & s_peff(8 downto 1));
                     s_h0 <= f_round1(s_h0); s_h1 <= f_round1(s_h1);
-                    -- quake: a new slab on 1 line in 16 (and on the first)
-                    if s_lfsr(3 downto 0) = 0 or s_line = 0 then
+                    -- quake: a new slab on 1 virtual line in 16 (and on the
+                    -- first); at 1080p the test is lfsr(3:0) = 0
+                    v_r8 := s_lfsr(3 downto 0) & s_lfsr(7 downto 4);
+                    if v_r8 < s_qthr or s_line = 0 then
                         s_qhold <= s_lfsr(15 downto 8);
                     end if;
                     s_lstep <= s_lstep + 1;
@@ -500,7 +574,7 @@ begin
                     s_lstep <= s_lstep + 1;
                 when 4 =>
                     v_t := resize(shift_right(s_shp, 7), 13);
-                    if v_t > 511 then v_t := to_signed(511, 13); elsif v_t < -511 then v_t := to_signed(-511, 13); end if;
+                    if v_t > s_shc then v_t := s_shc; elsif v_t < -s_shc then v_t := -s_shc; end if;
                     s_sh_base <= resize(v_t, 11);
                     -- row slides: (signed byte of each row's key) * boil phase / 128,
                     -- products mod 2^32 so the slide stays seamless as the phase wraps
@@ -542,7 +616,7 @@ begin
                 when 0 =>
                     s_sin_addr <= s_k_hue(9 downto 2);
                     s_period <= resize(s_k_period(9 downto 2), 9) + 2;
-                    s_skew   <= s_skg(12 downto 3);
+                    s_skew_v <= s_skg(12 downto 3);
                     s_grain  <= s_sw_grain;
                     g_wm1    <= s_line_width - 1;
                     s_w_edge <= s_line_width - (C_EDGE + 1);
@@ -575,7 +649,11 @@ begin
                     v_pd := signed(resize(s_pg, 16)) + shift_right(v_pd, 3);
                     s_pg <= unsigned(v_pd(13 downto 0));
                     s_vstep <= s_vstep + 1;
-                when 1 | 2 => s_vstep <= s_vstep + 1;
+                when 1 =>
+                    -- the band period never drops below one field line
+                    if s_period < s_ymin then s_peff <= s_ymin; else s_peff <= s_period; end if;
+                    s_vstep <= s_vstep + 1;
+                when 2 => s_vstep <= s_vstep + 1;
                 when 3 =>
                     s_sB <= s_sin_q2;
                     s_sin_addr <= s_k_hue(9 downto 2) + 64;
@@ -602,11 +680,27 @@ begin
                     s_vB <= to_signed(512, 12) + resize(s_cB, 12) + resize(shift_right(s_cB, 1), 12);
                     s_uA <= to_signed(512, 12) + resize(s_sA, 12) + resize(shift_right(s_sA, 1), 12);
                     s_vA <= to_signed(512, 12) + resize(s_cA, 12) + resize(shift_right(s_cA, 1), 12);
-                    s_vstep <= s_vstep + 1;
+                    -- real lattice steps: x per pixel = step x (x step / 2) ...
+                    case to_integer(s_vxs) is
+                        when 4      => s_xstep <= shift_left(resize(s_step, 17), 1);
+                        when 3      => s_xstep <= resize(s_step, 17) + resize(shift_right(s_step, 1), 17);
+                        when others => s_xstep <= resize(s_step, 17);
+                    end case;
+                    s_vstep <= to_unsigned(24, 6);
+                when 24 =>
+                    -- ... y per field line = step x (y step / 256)
+                    s_ma <= resize(s_step, 26);
+                    s_mb <= resize(s_ys, 11);
+                    s_macc <= (others => '0');
+                    s_mret <= to_unsigned(25, 6);
+                    s_vstep <= to_unsigned(15, 6);
+                when 25 =>
+                    s_ystep <= s_macc(24 downto 8);
+                    s_vstep <= to_unsigned(14, 6);
                 when 14 =>
                     s_du <= s_uB - s_uA;
                     s_dv <= s_vB - s_vA;
-                    -- drift per frame = (speed/16 px) * step
+                    -- drift per frame = (speed/16 virtual px) * virtual step
                     s_ma <= resize(s_step, 26);
                     s_mb <= resize(s_dspd, 11);
                     s_macc <= (others => '0');
@@ -634,8 +728,9 @@ begin
                     if v_c > 2047 then s_c <= (others => '1'); else s_c <= v_c(10 downto 0); end if;
                     s_vstep <= s_vstep + 1;
                 when 18 =>
-                    -- displacement = c * width / 8192 (a quarter of the width at 100%)
-                    s_ma <= resize(s_line_width, 26);
+                    -- displacement = c * width / 8192 (a quarter of the width at 100%;
+                    -- the 1080p width in real px: height-based)
+                    s_ma <= resize(s_wv, 26);
                     s_mb <= s_c;
                     s_macc <= (others => '0');
                     s_mret <= to_unsigned(19, 6);
@@ -648,14 +743,14 @@ begin
                         if s_macc(25 downto 22) /= 0 then s_m <= (others => '1'); else s_m <= s_macc(21 downto 13); end if;
                     end if;
                     -- centring: x start = cell 256 - (width/2) * step
-                    s_ma <= resize(s_step, 26);
+                    s_ma <= resize(s_xstep, 26);
                     s_mb <= resize(s_hw, 11);
                     s_macc <= (others => '0');
                     s_mret <= to_unsigned(20, 6);
                     s_vstep <= to_unsigned(15, 6);
                 when 20 =>
                     s_xst <= C_XBIAS - s_macc(24 downto 0);
-                    s_ma <= resize(s_step, 26);
+                    s_ma <= resize(s_ystep, 26);
                     s_mb <= resize(s_hh, 11);
                     s_macc <= (others => '0');
                     s_mret <= to_unsigned(21, 6);
@@ -673,8 +768,9 @@ begin
                 when 22 =>
                     -- y start: the drift phase sits at the screen centre
                     s_yacc <= s_ydrift - s_yoff;
-                    -- quake gain = q8 * width / 2048 (1/8 of the width at 100%)
-                    s_ma <= resize(s_line_width, 26);
+                    -- quake gain = q8 * width / 2048 (1/8 of the width at 100%;
+                    -- height-based like the warp)
+                    s_ma <= resize(s_wv, 26);
                     s_mb <= resize(s_q8, 11);
                     s_macc <= (others => '0');
                     s_mret <= to_unsigned(23, 6);
@@ -690,13 +786,17 @@ begin
                 s_line_width <= s_rx;
                 s_line   <= s_line + 1;
                 s_height <= s_line + 1;      -- captured on active lines
-                s_yacc <= s_yacc + resize(s_step, 26);    -- lattice y, active lines only
-                if s_lp >= s_period - 1 then
-                    s_lp <= (others => '0');
+                s_yacc <= s_yacc + resize(s_ystep, 26);   -- lattice y, active lines only
+                -- band position in virtual lines (Q.8); at 1080p the old
+                -- lp >= P - 1 wrap.  The period is >= the y step, so one
+                -- wrap per line at most.
+                v_ln := s_lpa + resize(s_ys, 17);
+                if v_ln(16 downto 8) >= s_peff then
+                    s_lpa <= (v_ln(16 downto 8) - s_peff) & v_ln(7 downto 0);
                     s_dir <= not s_dir;
                     s_band <= not s_band;
                 else
-                    s_lp <= s_lp + 1;
+                    s_lpa <= v_ln;
                 end if;
             end if;
             if data_in.hsync_n = '0' and s_prev_hsync_n = '1' then
@@ -704,7 +804,7 @@ begin
             end if;
             if data_in.vsync_n = '0' and s_prev_vsync_n = '1' then
                 s_wpar <= '0'; s_line <= (others => '0');
-                s_lp <= (others => '0'); s_dir <= '0'; s_band <= '0';
+                s_lpa <= (others => '0'); s_dir <= '0'; s_band <= '0';
                 if s_saw_active = '1' then s_vstep <= (others => '0'); end if;
                 s_saw_active <= '0';
             end if;
