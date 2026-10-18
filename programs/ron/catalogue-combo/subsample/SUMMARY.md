@@ -24,6 +24,31 @@ of v0.1.0. It is **not flashed yet**. Backup of v0.1.0 (sources + vmprog):
 | S11 Hold Shape | Line: chroma held along the line (4:1:1) / Square: the held sample also repeats down Hold lines (4:2:0 and worse: Hold × Hold colour squares) |
 | P12 Density | fraction of blocks moshed, ~5% .. ~98% |
 
+## v0.2.2 (2026-10-17): resolution scaling
+
+Blocks and held-chroma strips/squares ran in pixels / frame lines (1.5x too
+big at 720p, about 2.2x at SD), and the HD shift switch (width bit 10) gave
+720p the 1080p pixel offsets. Now:
+- Block column DDA (Q.1), block row DDA (Q.8), the Hold column counter (Q.1)
+  and the Square group counter (Q.8) count virtual 1080-line units stepped
+  from the timing ID (registers_in(8)): 1.0 at 1080p (bit-identical), 1.5 at
+  720p, 2.0 x 1080/486 at 480i (the per-field-line y step replaces the old
+  interlace +2). SD is a left-anchored 1440-unit 4:3 window; blocks and
+  squares stay square. A hold shorter than one pixel / one field line samples
+  every pixel / line (a single subtraction can't wrap a step larger than the
+  period).
+- The first line of a Square group is "the counter wrapped on the way here"
+  (vca < ys), the same as the old vc = 0 test at 1080p.
+- Shift: SD keeps its half offsets; 720p scales the amount by 2/3.
+- Pixel-scale on purpose (Ron's rule): the Bleed IIR and the dot crawl.
+
+Verified (new hardware-captured defaults in both baseline and v2): 1080p
+diff 0 px; 720p and SD blocks/squares the same fraction of the height as
+1080p. Sheets `.scaling_work/sheets/subsample{,_v2}.png`.
+Build `./build_combo.sh subsample` (router2, seed 1, all six first try):
+HD Analog 79.8, HD HDMI 86.6, HD Dual 87.6 MHz; SD Analog 81.4, SD HDMI 83.3,
+SD Dual 83.0 MHz. ~4,160 LC (54%), 18/32 EBR.
+
 ## v0.2.0 changes (from the v0.1.0 review)
 
 Bugs:
