@@ -13,6 +13,9 @@ colour bloom, crisp contrast, and negative.
   finalized and put in the report as ready"). Built 2026-10-08.
 - v0.1.3 (2026-10-17): resolution scaling for SD / 720p / interlace, 1080p
   bit-identical (see "Resolution scaling" below). Build with router1, seed 1.
+- v0.1.4 (2026-10-18): fits the stock SDK SD Standalone again (7681 -> 7322
+  packed LC), output bit-identical to v0.1.3 in every mode (see "Stock-SDK
+  fit, take 2" below). Build with router1, seed 1.
 
 ## Build (2026-10-08, builder default router2)
 
@@ -163,3 +166,68 @@ Bipolar knobs have a 16-step centre deadband and a squared response.
   | SD HDMI   | 82.34      | 7045       | 26    |
   | HD Dual   | 86.48      | 7046       | 26    |
   | SD Dual   | 94.42      | 7050       | 26    |
+
+## Stock-SDK fit, take 2 (v0.1.4, 2026-10-18)
+v0.1.3's scaling work (+55 LUT / +16 FF) pushed the stock SDK's SD Standalone to
+7681/7680 packed LC, so nextpnr stopped with "Failed to expand region". v0.1.4
+packs it to **7322/7680 (-359)** and routes it (full stock build, seed 1: 47.5 MHz
+against 27). Output is bit-identical to v0.1.3 in every mode. All changes are
+restructurings that leave the logic's function unchanged:
+1. **no_rw_check on the 8 store RAMs** (-124 LC on its own). The read bank is
+   `not par` and the write bank is `par`; par flips only at the vsync anchor, and
+   writes end ~15 clocks after each line's active video, so a read never meets a
+   write. yosys had been emulating read-before-write on all 8 (`emulate_transparency`
+   is now 0).
+2. **Sequencer accumulator on one carry chain**: load = add to a masked acc,
+   subtract = add of the one's complement with carry-in 1 (was separate load / add /
+   sub paths). Keep its control registered (`alu_ctl`). A form driven straight from
+   the step decode (load as a step-clock clear, operand inverted at `alu_op`) saved
+   another ~30 LC but dropped HD Analog to 74-81 MHz on router1 seeds 1-3.
+3. **`sq_rdy`**: the step-ready condition (no step last clock, mcnt = 0, dcnt = 0)
+   is held in a register (next = not rdy and mcnt <= 1 and dcnt <= 1), so the step
+   decode is pc + 1 bit. HD Analog router1 seeds 1-3: 90.8 / 94.5 / 89.3 MHz
+   (v0.1.3: 88.2 / 90.2 / 89.8). This removes the old "pc decode -> enables" worst path.
+4. Divider: one compare / subtract on the selected divisor (g_w or g_h).
+5. `bip_mag`: max(0, |k - 512| - 16) as one subtract, x - (16 - c) with
+   x = k(8..0) xor not k(9), c = not k(9) (34 -> 19 LUT per knob, x4).
+6. Mixer: radix-4 Booth `smul5` (3 partials, 110 -> 83 LUT each, x3). In X3,
+   floor((p + 16) / 32) = (p >> 5) + p(4) goes in as a carry-in: one adder instead of two.
+7. R9 vertical bilinear products at 13 bits instead of 15 (|dy| <= 240, w <= 15, so |p| <= 3600).
+
+Proof:
+- **Function rewrites, exhaustive (GHDL):** `bip_mag` over all 1024 inputs;
+  Booth `smul5` against the old one on all 65,536 operand pairs; 13-bit `smul4`
+  over the reachable range. Enumerating every tap/weight combination gives
+  max |dy| = 240.
+- **Side-by-side GHDL bench, v0.1.3 vs v0.1.4**
+  (`.scaling_work/feedback_fit/equiv/`): same stimulus and registers. Compared
+  every clock: data_out, the per-field sequencer results (c_u0 .. c_hs, commit),
+  the store and gain-table write ports, and the feedback pixel. Knobs and switches
+  are re-rolled every 11-97 lines (mid-field) from field 2 on, including K6
+  label-index values and P12 near / over unity. field_n is tied high, as on
+  hardware. A mutation (the subtract's carry-in dropped) was caught: 33 output
+  and 60,752 sequencer mismatches.
+
+  | Run | Timing ID | Raster (active, clk/line) | Fields | Clocks | Mismatches | Active px with lit feedback |
+  |-----|----------:|---------------------------|-------:|-------:|-----------:|------------------:|
+  | R1 1080p | 3  | 1920x1080, 2200 | 4  | 9,900,000 | 0 | 5,447,495 / 8,294,400 |
+  | R2 720p  | 14 | 1280x720, 1650  | 5  | 6,187,500 | 0 | 2,933,043 / 4,608,000 |
+  | R3 480i  | 0  | 720x240, 858    | 10 | 2,247,960 | 0 | 1,282,623 / 1,728,000 |
+  | S1       | 3  | 1100x60, 1300   | 30 | 2,730,000 | 0 | 642,880 / 1,980,000 |
+  | S2 576i  | 8  | 720x64, 864     | 30 | 1,918,080 | 0 | 1,189,516 / 1,382,400 |
+  | S3 1080i | 1  | 1920x40, 2200   | 16 | 1,689,600 | 0 | 17,223 (chroma 315,740) / 1,228,800 |
+  | S4 480p  | 4  | 720x60, 858     | 24 | 1,441,440 | 0 | 544,692 / 1,036,800 |
+  | S5 576p  | 12 | 720x64, 864     | 24 | 1,534,464 | 0 | 876,534 / 1,105,920 |
+
+- Packed LC, stock SDK: SD Standalone 7681 -> 7322, HD Dual 7282 -> 6936.
+- Build (2026-10-18): `NEXTPNR_ROUTER="--router router1" ./build_programs.sh ron feedback`,
+  all 6 configs on seed 1, 26/32 EBR.
+
+  | Config    | Fmax (MHz) | LC         | v0.1.3 LC |
+  |-----------|-----------:|-----------:|----------:|
+  | HD Analog | 90.79      | 6684 (87%) | 7050      |
+  | SD Analog | 76.24      | 6675       | 7050      |
+  | HD HDMI   | 86.24      | 6678       | 7045      |
+  | SD HDMI   | 86.76      | 6676       | 7045      |
+  | HD Dual   | 83.61      | 6674       | 7046      |
+  | SD Dual   | 85.91      | 6677       | 7050      |
