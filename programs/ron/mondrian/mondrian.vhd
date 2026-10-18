@@ -6,6 +6,15 @@
 --
 -- mondrian.vhd  (v1.0.0 — De Stijl composition generator)
 --
+-- v1.0.2 (2026-10-17): resolution scaling.  The position and cell counters
+-- run in virtual 1080-line units, stepped per pixel / per field line from the
+-- video timing ID (registers_in(8)): 1.0 at 1080p (identical to before), 1.5
+-- at 720p, and at SD 2.0 across (a 1440-wide 4:3 window) and 1080/486 per
+-- frame line, so cells, seams and the composition keep their proportions and
+-- stay square on a 4:3 screen.  Interlaced fields step two frame lines and the
+-- bottom field starts half a step down.  Horizontal seams keep a half-width
+-- of at least half a step so they can't fall between SD field lines.
+--
 -- v1.0.0 (2026-10-10): FINAL, signed off on hardware.  Same logic as v0.2.3; the
 -- defaults are captured from the hardware.
 --
@@ -237,9 +246,52 @@ architecture mondrian of program_top is
     end function;
 
     --------------------------------------------------------------------------
+    -- Resolution scaling: per-mode steps from the video timing ID.
+    --------------------------------------------------------------------------
+    -- x step in half virtual units per pixel: 1080 2 (1.0), 720p 3 (1.5),
+    -- SD 4 (2.0: 720 px span 1440 units, a 4:3 window of the 1080 canvas).
+    function f_vstep_x(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0 | 4 | 8 | 12 => return to_unsigned(4, 3);
+            when 5 | 6 | 14     => return to_unsigned(3, 3);
+            when others         => return to_unsigned(2, 3);
+        end case;
+    end function;
+    -- y step in Q4.8 virtual units per FIELD line (1080 / active lines,
+    -- doubled for interlaced modes).
+    function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(1138, 12);  -- 480i: 2 x 1080/486
+            when 4          => return to_unsigned(576, 12);   -- 480p: 1080/480
+            when 8          => return to_unsigned(960, 12);   -- 576i: 2 x 1080/576
+            when 12         => return to_unsigned(480, 12);   -- 576p: 1080/576
+            when 5 | 6 | 14 => return to_unsigned(384, 12);   -- 720p: 1.5
+            when 1 | 2 | 10 => return to_unsigned(512, 12);   -- 1080i: 2.0
+            when others     => return to_unsigned(256, 12);   -- 1080p: 1.0
+        end case;
+    end function;
+
+    --------------------------------------------------------------------------
     -- Position + per-frame parameters
     --------------------------------------------------------------------------
     signal pixel_x, pixel_y : unsigned(11 downto 0) := (others => '0');
+
+    -- Resolution scaling: the counters below run in virtual 1080-line units.
+    -- x accumulators are Q.1 (half units; steps 2/3/4 = 1.0/1.5/2.0 per
+    -- pixel), y accumulators Q.8 (per field line).  pixel_x/pixel_y and the
+    -- cell origins are the integer parts.
+    signal s_xs   : unsigned(2 downto 0)  := to_unsigned(2, 3);
+    signal s_ys   : unsigned(11 downto 0) := to_unsigned(256, 12);
+    signal pix_xa : unsigned(12 downto 0) := (others => '0');
+    signal pix_ya : unsigned(19 downto 0) := (others => '0');
+    signal cellx_la : unsigned(12 downto 0) := (others => '0');
+    signal celly_la : unsigned(19 downto 0) := (others => '0');
+    signal s_cx_new : std_logic := '1';   -- first pixel of a cell column
+    signal s_cx_ctr : std_logic := '0';   -- this pixel crossed the cell centre
+    signal s_cy_new : std_logic := '1';   -- first line of a cell row
+    signal s_lwy    : unsigned(11 downto 0) := to_unsigned(3, 12);  -- horizontal-seam half-width
     signal prev_hsync_n     : std_logic := '1';
     signal prev_vsync_n     : std_logic := '1';
 
@@ -247,17 +299,14 @@ architecture mondrian of program_top is
     -- cell sizes with no divide/multiply).  org = cell origin px, loc = position
     -- within cell, idx = cell column index.
     signal cellx_org : unsigned(11 downto 0) := (others => '0');
-    signal cellx_loc : unsigned(11 downto 0) := (others => '0');
     signal cellx_idx : unsigned(6 downto 0)  := (others => '0');
     signal celly_org : unsigned(11 downto 0) := (others => '0');
-    signal celly_loc : unsigned(11 downto 0) := (others => '0');
 
     -- Continuous grid scale: cell size is any 32..256 px.  Stored as unsigned (and
     -- pre-derived 2x / size-1 / centre) ONCE per frame so the per-pixel datapath
     -- never re-derives them with to_unsigned — keeps the netlist sparse for routing.
     signal s_csz   : unsigned(11 downto 0) := to_unsigned(64, 12);   -- cell size
     signal s_csz2  : unsigned(11 downto 0) := to_unsigned(128, 12);  -- 2x cell size
-    signal s_cszm1 : unsigned(11 downto 0) := to_unsigned(63, 12);   -- cell size - 1
     signal s_cszc  : unsigned(11 downto 0) := to_unsigned(32, 12);   -- cell centre
     signal s_density    : unsigned(7 downto 0) := to_unsigned(160, 8);
     signal s_jit_mode   : unsigned(1 downto 0) := to_unsigned(1, 2);
@@ -386,14 +435,14 @@ architecture mondrian of program_top is
     signal s10a_m1, s10a_m2 : unsigned(11 downto 0);
     signal s10a_seed        : unsigned(15 downto 0);
 
-    signal s10_seamd   : unsigned(11 downto 0);
+    signal s10_seam    : std_logic;
     signal s10_pidx    : unsigned(2 downto 0);   -- 0..4 palette index
     signal s10_iscolor : std_logic;              -- '1' = primary block (video-fill candidate)
 
     -- palette fetch
     signal s11_y, s11_u, s11_v : unsigned(9 downto 0);
     signal s11_iscolor         : std_logic;
-    signal s11_seamd           : unsigned(11 downto 0);
+    signal s11_seam            : std_logic;
 
     -- assembled colour
     signal s12_y, s12_u, s12_v : unsigned(9 downto 0);
@@ -410,6 +459,9 @@ begin
     p_position : process(clk)
         variable v_h_edge, v_v_edge : std_logic;
         variable v_k : unsigned(9 downto 0);
+        variable v_nx : unsigned(12 downto 0);
+        variable v_ny : unsigned(19 downto 0);
+        variable v_ys : unsigned(11 downto 0);
     begin
         if rising_edge(clk) then
             prev_hsync_n <= data_in.hsync_n;
@@ -445,33 +497,57 @@ begin
             -- X position + X cell counter (origin / local / column index).  Counting
             -- as we scan gives arbitrary (continuous) cell sizes with no divide.
             -- Counts the GENERATED avid, so the picture and data_out.avid agree.
+            -- (Virtual units: at 1080p the step is 1 and this is the old
+            -- integer counter; flags replace the old loc = 0 / loc = centre
+            -- tests, which a fractional step could jump over.)
             if v_h_edge = '1' then
-                pixel_x   <= (others => '0');
+                pix_xa    <= (others => '0');
                 cellx_org <= (others => '0');
-                cellx_loc <= (others => '0');
+                cellx_la  <= (others => '0');
                 cellx_idx <= (others => '0');
+                s_cx_new  <= '1';
+                s_cx_ctr  <= '0';
             elsif g_avid = '1' then
-                pixel_x <= pixel_x + 1;
-                if cellx_loc = s_cszm1 then
-                    cellx_loc <= (others => '0');
+                pix_xa <= pix_xa + s_xs;
+                v_nx   := cellx_la + s_xs;
+                if v_nx(12 downto 1) >= s_csz then
+                    cellx_la  <= v_nx - (s_csz & '0');
                     cellx_org <= cellx_org + s_csz;
                     cellx_idx <= cellx_idx + 1;
+                    s_cx_new  <= '1';
+                    s_cx_ctr  <= '0';
                 else
-                    cellx_loc <= cellx_loc + 1;
+                    cellx_la <= v_nx;
+                    s_cx_new <= '0';
+                    if v_nx(12 downto 1) >= s_cszc and cellx_la(12 downto 1) < s_cszc then
+                        s_cx_ctr <= '1';
+                    else
+                        s_cx_ctr <= '0';
+                    end if;
                 end if;
             end if;
 
             if g_avid = '1' then s_firstav <= '1'; end if;
 
             if v_v_edge = '1' then
-                pixel_y   <= (others => '0');
+                -- per-mode steps; the bottom field starts half a field step
+                -- (one frame line) down
+                v_ys := f_vstep_y(registers_in(8)(3 downto 0));
+                s_xs <= f_vstep_x(registers_in(8)(3 downto 0));
+                s_ys <= v_ys;
+                if data_in.field_n = '0' then
+                    pix_ya   <= resize(v_ys(11 downto 1), 20);
+                    celly_la <= resize(v_ys(11 downto 1), 20);
+                else
+                    pix_ya   <= (others => '0');
+                    celly_la <= (others => '0');
+                end if;
                 celly_org <= (others => '0');
-                celly_loc <= (others => '0');
+                s_cy_new  <= '1';
 
                 -- Grid Scale (K1): continuous cell size, 32..256 px.
                 s_csz   <= s_k1sz;
                 s_csz2  <= s_k1sz(10 downto 0) & '0';
-                s_cszm1 <= s_k1sz - 1;
                 s_cszc  <= '0' & s_k1sz(11 downto 1);
 
                 -- generated-avid width for this field
@@ -498,6 +574,13 @@ begin
                 -- Line Width (K6): continuous half-width 1..16 px per leaf edge,
                 -- so a shared seam is 2..32 px -- bold enough for 1080p.
                 s_line_w <= resize(unsigned(registers_in(5)(9 downto 6)), 12) + 1;
+                -- horizontal seams: at least half a field step, so a shared
+                -- seam always lands on a line (SD 480i: 3 units)
+                if resize(unsigned(registers_in(5)(9 downto 6)), 12) + 1 < shift_right(v_ys + 511, 9) then
+                    s_lwy <= shift_right(v_ys + 511, 9);
+                else
+                    s_lwy <= resize(unsigned(registers_in(5)(9 downto 6)), 12) + 1;
+                end if;
 
                 s_seam_en  <= registers_in(6)(0);
                 s_blackblk <= registers_in(6)(1);
@@ -513,17 +596,23 @@ begin
                 s_firstav <= '0';
             elsif v_h_edge = '1' then
                 if s_firstav = '1' then s_first <= '0'; end if;
-                pixel_y <= pixel_y + 1;
+                pix_ya <= pix_ya + s_ys;
                 -- Y cell counter advances per line
-                if celly_loc = s_cszm1 then
-                    celly_loc <= (others => '0');
+                v_ny := celly_la + s_ys;
+                if v_ny(19 downto 8) >= s_csz then
+                    celly_la  <= v_ny - (s_csz & x"00");
                     celly_org <= celly_org + s_csz;
+                    s_cy_new  <= '1';
                 else
-                    celly_loc <= celly_loc + 1;
+                    celly_la <= v_ny;
+                    s_cy_new <= '0';
                 end if;
             end if;
         end if;
     end process p_position;
+
+    pixel_x <= pix_xa(12 downto 1);
+    pixel_y <= pix_ya(19 downto 8);
 
     --------------------------------------------------------------------------
     -- Generated avid (see the signal declarations).  g_ph is the hsync->avid
@@ -590,7 +679,6 @@ begin
         variable lx, ly     : unsigned(11 downto 0);
         variable bb, dd     : unsigned(11 downto 0);
         variable m1, m2     : unsigned(11 downto 0);
-        variable seamd      : unsigned(11 downto 0);
         variable v_colbyte  : unsigned(7 downto 0);
         variable v_sel      : unsigned(1 downto 0);
         variable v_pidx     : integer range 0 to 4;
@@ -652,17 +740,17 @@ begin
             -- this column's bits for the current row and the row above; on the
             -- first pixel of a column the previous pixel's bits are the left
             -- column's, so the left neighbour costs no second 64:1 read
-            if cellx_loc = 0 then
+            if s_cx_new = '1' then
                 s0_hcl <= s0_hc;
                 s0_hul <= s0_hu;
             end if;
             s0_hc <= cell_hide(v_col);
             s0_hu <= cell_hide_up(v_col);
             -- sample one dark bit per cell, at the cell centre on the cell-row's
-            -- top line (active video only: cellx_loc holds its last value through
-            -- hblank and must not resample the blanking level there); the old
-            -- bit moves to the row-above array
-            if g_avid = '1' and (celly_loc = 0 or s_first = '1') and cellx_loc = s_cszc then
+            -- top line (active video only: the centre flag holds its last value
+            -- through hblank and must not resample the blanking level there);
+            -- the old bit moves to the row-above array
+            if g_avid = '1' and (s_cy_new = '1' or s_first = '1') and s_cx_ctr = '1' then
                 cell_hide_up(v_col) <= cell_hide(v_col);
                 if unsigned(data_in.y) <= s_luma_thr then
                     cell_hide(v_col) <= '1';
@@ -793,8 +881,13 @@ begin
             s10a_seed <= n.seed;
 
             -- S10b: grid-line distance + weighted Mondrian colour pick.
-            if s10a_m1 < s10a_m2 then seamd := s10a_m1; else seamd := s10a_m2; end if;
-            s10_seamd <= seamd;
+            -- (per-axis half-widths: horizontal seams keep at least half a
+            -- field step; at 1080p both are the K6 width, as before)
+            if s10a_m1 < s_line_w or s10a_m2 < s_lwy then
+                s10_seam <= '1';
+            else
+                s10_seam <= '0';
+            end if;
 
             v_colbyte := s10a_seed(7 downto 0);
             v_sel     := s10a_seed(9 downto 8);
@@ -828,10 +921,10 @@ begin
             ty := MON_Y(pidx); tu := MON_U(pidx); tv := MON_V(pidx);
             s11_y <= ty; s11_u <= tu; s11_v <= tv;
             s11_iscolor <= s10_iscolor;
-            s11_seamd   <= s10_seamd;
+            s11_seam    <= s10_seam;
 
             -- S12: assemble colour (grid line > flat block)
-            if s_seam_en = '1' and s11_seamd < s_line_w then
+            if s_seam_en = '1' and s11_seam = '1' then
                 s12_y   <= LINE_Y;
                 s12_u   <= C_MID;
                 s12_v   <= C_MID;

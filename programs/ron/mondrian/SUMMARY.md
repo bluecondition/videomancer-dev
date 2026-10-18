@@ -7,6 +7,14 @@ Black Blocks and S9 Not Square on, P12 100%. Remaining: the five presets are
 v0.1 hand-typed placeholders (K1 ran the other way then). Capture real ones
 with `./capture_preset.sh` and rebuild.
 
+**v1.0.2 (2026-10-17): resolution scaling.** Counters run in virtual
+1080-line units from the timing ID (registers_in(8)); 1080p renders
+pixel-identical to v1.0.1, 720p matches it, SD shows the same composition as
+a 4:3 window with square cells. Seam half-width clamped to half a field step
+vertically. Built router1 seed 4: HD Analog 78.84, SD Analog 77.01, HD HDMI
+78.45, SD HDMI 75.59, HD Dual 74.37 (thin), SD Dual 80.80 MHz; 4933–4946 LC
+(64%). Not yet flashed.
+
 **Build: router1, base SEED=4. All six configs pass on seed 4.**
 `SEED=4 NEXTPNR_ROUTER="--router router1" ./build_programs.sh ron mondrian`.
 Seed 1 also passes, but HD Dual lands at exactly 74.25 MHz (no margin). A
