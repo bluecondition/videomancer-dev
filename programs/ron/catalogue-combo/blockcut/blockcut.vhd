@@ -40,6 +40,16 @@
 -- write address, including the pair-rate chroma (10 = 2 mod 4).  Hold
 -- latches the block's first read instead of re-addressing.
 -- Latency 23 clocks, all modes, blanking-gated.
+--
+-- v0.3.2 (2026-10-17): resolution scaling.  The block grid counts virtual
+-- 1080-line units, stepped per pixel / per field line from the video timing
+-- ID (registers_in(8)): 1.0 at 1080p (identical to before), 1.5 at 720p, and
+-- at SD 2.0 across (a 1440-wide 4:3 window) and 1080/486 per frame line
+-- (interlaced fields step two frame lines, as the old row counter did).  A
+-- block is the same fraction of the screen height in every mode and stays
+-- square on a 4:3 screen.  The displacement is in the same units: the HD
+-- shift switch (width bit 10) used to give 720p the 1080p pixel offsets, so
+-- the 720p shift is now 2/3 of them (SD already used half).
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -95,6 +105,32 @@ architecture blockcut of program_top is
         to_unsigned(2, 7),   to_unsigned(2, 7),   to_unsigned(1, 7),  to_unsigned(1, 7),
         to_unsigned(1, 7),   to_unsigned(0, 7),   to_unsigned(0, 7),  to_unsigned(0, 7));
 
+    -- Resolution scaling: per-mode steps from the video timing ID.
+    -- x step in half virtual units per pixel: 1080 2 (1.0), 720p 3 (1.5),
+    -- SD 4 (2.0: 720 px span 1440 units, a 4:3 window of the 1080 canvas).
+    function f_vstep_x(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0 | 4 | 8 | 12 => return to_unsigned(4, 3);
+            when 5 | 6 | 14     => return to_unsigned(3, 3);
+            when others         => return to_unsigned(2, 3);
+        end case;
+    end function;
+    -- y step in Q4.8 virtual units per FIELD line (1080 / active lines,
+    -- doubled for interlaced modes).
+    function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(1138, 12);  -- 480i: 2 x 1080/486
+            when 4          => return to_unsigned(576, 12);   -- 480p: 1080/480
+            when 8          => return to_unsigned(960, 12);   -- 576i: 2 x 1080/576
+            when 12         => return to_unsigned(480, 12);   -- 576p: 1080/576
+            when 5 | 6 | 14 => return to_unsigned(384, 12);   -- 720p: 1.5
+            when 1 | 2 | 10 => return to_unsigned(512, 12);   -- 1080i: 2.0
+            when others     => return to_unsigned(256, 12);   -- 1080p: 1.0
+        end case;
+    end function;
+
     -- line buffers, one bank each
     type t_lb20 is array (0 to 2047) of std_logic_vector(19 downto 0);
     type t_lb10 is array (0 to 2047) of std_logic_vector(9 downto 0);
@@ -125,7 +161,6 @@ architecture blockcut of program_top is
     signal s_thr, s_blend, s_shift, s_dens, s_dens2 : unsigned(7 downto 0) := (others => '0');
     signal s_d2t    : unsigned(8 downto 0) := (others => '0');
     signal s_bsz    : unsigned(6 downto 0) := to_unsigned(8, 7);     -- block size 8..64
-    signal s_bszm1  : unsigned(6 downto 0) := to_unsigned(7, 7);
     signal s_period : unsigned(6 downto 0) := (others => '0');
     signal s_rate_cnt : unsigned(6 downto 0) := (others => '0');
     signal s_roll_due : std_logic := '0';
@@ -133,6 +168,10 @@ architecture blockcut of program_top is
     signal s_hi     : unsigned(10 downto 0) := to_unsigned(708, 11);  -- width - C_EDGE
     signal s_span   : unsigned(10 downto 0) := to_unsigned(696, 11);  -- wrap span, multiple of 4
     signal s_hd     : std_logic := '0';
+    signal s_sha, s_shb : unsigned(7 downto 0) := (others => '0');   -- 720p shift x 2/3 parts
+    -- resolution steps (free-running from the timing ID)
+    signal s_xs     : unsigned(2 downto 0)  := to_unsigned(2, 3);
+    signal s_ys     : unsigned(11 downto 0) := to_unsigned(256, 12);
 
     -- tracking
     signal s_rx, s_line : unsigned(10 downto 0) := (others => '0');
@@ -142,11 +181,12 @@ architecture blockcut of program_top is
     signal s_ilace, s_fld, s_fld_prev, s_fsrc, s_ftog : std_logic := '0';
     signal s_top    : std_logic := '0';
 
-    -- block grid: column DDA (stage 0), row DDA (per line)
-    signal s_cc     : unsigned(6 downto 0) := (others => '0');
+    -- block grid: column DDA (stage 0), row DDA (per line), in virtual
+    -- units: column Q.1, row Q.8
+    signal s_cca    : unsigned(7 downto 0) := (others => '0');
     signal s_bc     : unsigned(7 downto 0) := (others => '0');
     signal s_isfirst : std_logic := '1';
-    signal s_rc, s_rcn, s_rcw : unsigned(6 downto 0) := (others => '0');
+    signal s_rca, s_rcn, s_rcw : unsigned(14 downto 0) := (others => '0');
     signal s_br, s_krow : unsigned(7 downto 0) := (others => '0');
 
     -- edge side, Sobel (stages 1..10)
@@ -245,8 +285,11 @@ begin
     --------------------------------------------------------------------------
     p_ctrl : process(clk)
         variable v_ag : signed(12 downto 0);
+        variable v_nc : unsigned(7 downto 0);
     begin
         if rising_edge(clk) then
+            s_xs <= f_vstep_x(registers_in(8)(3 downto 0));
+            s_ys <= f_vstep_y(registers_in(8)(3 downto 0));
             s_prev_hsync_n <= data_in.hsync_n; s_prev_vsync_n <= data_in.vsync_n; s_prev_avid <= data_in.avid;
             if data_in.avid = '1' then s_rx <= s_rx + 1; s_saw_active <= '1'; s_fld <= data_in.field_n;
             else s_rx <= (others => '0'); end if;
@@ -256,18 +299,22 @@ begin
             if s_line < 2 then s_top <= '1'; else s_top <= '0'; end if;
 
             -- block column DDA: state for the pixel now on data_in
+            -- (virtual half units; at 1080p the step is 2 and this is the old
+            -- cc = bsz - 1 wrap)
             if data_in.avid = '1' then
-                if s_cc = s_bszm1 then
-                    s_cc <= (others => '0'); s_bc <= s_bc + 1; s_isfirst <= '1';
+                v_nc := s_cca + s_xs;
+                if v_nc(7 downto 1) >= s_bsz then
+                    s_cca <= v_nc - (s_bsz & '0'); s_bc <= s_bc + 1; s_isfirst <= '1';
                 else
-                    s_cc <= s_cc + 1; s_isfirst <= '0';
+                    s_cca <= v_nc; s_isfirst <= '0';
                 end if;
             else
-                s_cc <= (others => '0'); s_bc <= (others => '0'); s_isfirst <= '1';
+                s_cca <= (others => '0'); s_bc <= (others => '0'); s_isfirst <= '1';
             end if;
-            -- block row DDA candidates (rc changes once per line)
-            if s_ilace = '1' then s_rcn <= s_rc + 2; else s_rcn <= s_rc + 1; end if;
-            s_rcw <= s_rcn - s_bsz;
+            -- block row DDA candidates (rc changes once per line); the Q.8
+            -- field-line step already counts frame lines under interlace
+            s_rcn <= s_rca + s_ys;
+            s_rcw <= s_rcn - (s_bsz & x"00");
 
             -- Sobel, rows r0 = y[n-2], r1 = y[n-1], r2 = y[n] (stage 1)
             -- stage 2: outer-row sum and difference per column
@@ -345,9 +392,12 @@ begin
                     s_sd    <= f_round1(s_roll xor x"5A3C");
                     s_vstep <= s_vstep + 1;
                 when 3 =>
-                    s_bszm1 <= s_bsz - 1;
                     s_span  <= s_span(10 downto 2) & "00";
-                    s_hd    <= s_lw(10);
+                    -- pixel offsets: HD class (1080 and 720) shifts 1/32 of
+                    -- the product, SD 1/64; 720p scales the amount by 2/3
+                    if s_xs = 4 then s_hd <= '0'; else s_hd <= '1'; end if;
+                    s_sha   <= ('0' & s_shift(7 downto 1)) + ("000" & s_shift(7 downto 3));
+                    s_shb   <= ("00000" & s_shift(7 downto 5)) + ("0000000" & s_shift(7 downto 7));
                     s_sd    <= f_round2(s_sd);
                     s_d2t   <= resize(s_dens, 9) + resize(s_dens(7 downto 1), 9);
                     s_vstep <= s_vstep + 1;
@@ -355,6 +405,7 @@ begin
                     s_seed  <= f_round3(s_sd);
                     -- colour-only band: Density .. 1.5 Density
                     if s_d2t(8) = '1' then s_dens2 <= x"FF"; else s_dens2 <= s_d2t(7 downto 0); end if;
+                    if s_xs = 3 then s_shift <= s_sha + s_shb; end if;
                     s_vstep <= "111";
                 when others => null;
             end case;
@@ -362,7 +413,7 @@ begin
             -- line events
             if s_prev_avid = '1' and data_in.avid = '0' then
                 s_line_width <= s_rx; s_line <= s_line + 1;
-                if s_rcn > s_bszm1 then s_rc <= s_rcw; s_br <= s_br + 1; else s_rc <= s_rcn; end if;
+                if s_rcn(14 downto 8) >= s_bsz then s_rca <= s_rcw; s_br <= s_br + 1; else s_rca <= s_rcn; end if;
             end if;
             if data_in.hsync_n = '0' and s_prev_hsync_n = '1' then
                 s_krow <= s_br;
@@ -371,9 +422,13 @@ begin
             if data_in.vsync_n = '0' and s_prev_vsync_n = '1' then
                 s_line <= (others => '0');
                 s_br <= (others => '0');
-                s_rc <= (others => '0');
-                -- a bottom field (frame lines 1, 3, ..) follows a top field
-                s_rc(0) <= s_ilace and s_fsrc and s_fld;
+                -- a bottom field (frame lines 1, 3, ..) follows a top field:
+                -- it starts half a field step (one frame line) down
+                if (s_ilace and s_fsrc and s_fld) = '1' then
+                    s_rca <= resize(s_ys(11 downto 1), 15);
+                else
+                    s_rca <= (others => '0');
+                end if;
                 if s_saw_active = '1' then
                     s_vstep <= (others => '0');
                     if s_line < 600 then s_ilace <= '1'; else s_ilace <= '0'; end if;

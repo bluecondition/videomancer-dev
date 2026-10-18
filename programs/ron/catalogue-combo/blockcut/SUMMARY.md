@@ -24,6 +24,26 @@ and `.blockcut_work/v020_backup/` (sources + vmprog).
 | S11 Ink | light edges on black / dark edges on white |
 | P12 Density | fraction of blocks moshed, ~5% .. ~98%; half as many again are colour-only |
 
+## v0.3.2 (2026-10-17): resolution scaling
+
+The block grid ran in pixels / frame lines, so blocks were 1.5x too big at
+720p and about 2.2x at SD, and the HD shift switch (width bit 10) gave 720p
+the 1080p pixel offsets. Now:
+- The block column DDA (Q.1) and row DDA (Q.8) count virtual 1080-line units,
+  stepped from the timing ID (registers_in(8)): 1.0 at 1080p (bit-identical),
+  1.5 at 720p, 2.0 x 1080/486 at 480i (the y step is per field line and
+  already doubled, replacing the old interlace +2). SD is a 1440-unit 4:3
+  window (left-anchored, same hash layout as the left of HD), blocks square.
+- Shift: SD keeps its half offsets; 720p scales the amount by 2/3 in the
+  vblank sequencer, so displacements are in the same virtual units.
+- Sobel edges, the C_EDGE inset and line buffers stay in real pixels.
+
+Verified: 1080p diff 0 px; 720p r = 0.94 against 1080p (was 0.64); SD blocks
+the same height fraction as 1080p. Sheets `.scaling_work/sheets/blockcut{,_v2}.png`.
+Build `./build_combo.sh blockcut` (router2, seed 1, all six passed first try):
+HD Analog 86.3, HD HDMI 84.0, HD Dual 82.5 MHz; SD Analog 83.5, SD HDMI 75.4,
+SD Dual 79.0 MHz. ~5,090 LC (66%), 23/32 EBR.
+
 ## v0.3.0 changes (Tier 3)
 
 - 3×3 Sobel edges, (|Gx| + |Gy|) / 4, replace the 2-tap |gx| + |gy|. A step now
