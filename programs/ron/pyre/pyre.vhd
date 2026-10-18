@@ -33,6 +33,14 @@
 -- Output is gated to neutral outside active video; every per-field action
 -- fires once per field even when analog vsync serrates.
 --
+-- v1.0.4 (2026-10-18): resolution scaling.  The half-resolution modes keep
+-- the 1080p fire's proportions: their cells are wider relative to the screen
+-- height (720p 2x, SD 1.5x on its 4:3 screen), so the lattice x step per cell
+-- is scaled up by that ratio (eddies, tongues and burner pockets keep their
+-- 1080p size) and the horizontal velocity terms (curl u, entrainment, wind)
+-- are scaled down by it (same sideways motion relative to the screen).  The
+-- cell grid itself stays coarser there (display reader limit).  1080p unchanged.
+--
 -- License: GPL-3.0
 -- Author: czartroniks
 
@@ -315,6 +323,12 @@ architecture pyre of program_top is
   signal s_wk : unsigned(6 downto 0) := to_unsigned(24, 7);          -- lattice x step per cell (1/16 cell)
   signal s_wk2 : unsigned(7 downto 0) := to_unsigned(48, 8);
   signal s_kt : unsigned(7 downto 0) := to_unsigned(32, 8);
+  -- resolution scaling: horizontal-velocity gains (curl u, entrainment, wind),
+  -- = s_kt / s_ke / s_wind at 1080p; scaled by the half-mode cell-width ratio
+  signal s_ktu : unsigned(7 downto 0) := to_unsigned(32, 8);
+  signal s_keu : unsigned(4 downto 0) := to_unsigned(16, 5);
+  signal s_windu : signed(5 downto 0) := (others => '0');
+  signal s_sdid : std_logic := '0';     -- SD timing ID (0/4/8/12): 1.5x cells, else 2x
   signal s_kb : unsigned(5 downto 0) := to_unsigned(32, 6);
   signal s_ke : unsigned(4 downto 0) := to_unsigned(16, 5);
   signal s_vb16 : unsigned(6 downto 0) := to_unsigned(21, 7);
@@ -627,8 +641,16 @@ begin
     variable v_k2 : unsigned(9 downto 0);
     variable v_k1 : unsigned(9 downto 0);
     variable v_gt : signed(5 downto 0);
+    variable v_kt : unsigned(7 downto 0);
+    variable v_ke : unsigned(4 downto 0);
+    variable v_wk : unsigned(6 downto 0);
+    variable v_wx : signed(13 downto 0);
+    variable v_k13 : unsigned(12 downto 0);
+    variable v_k10 : unsigned(9 downto 0);
   begin
     if rising_edge(clk) then
+      s_sdid <= '0';
+      if registers_in(8)(1 downto 0) = "00" then s_sdid <= '1'; end if;
       case bst is
         when BI =>
           if s_vsedge = '1' then
@@ -640,16 +662,38 @@ begin
             b_op <= to_unsigned(1023, 10) - v_k1;
             -- turbulence gain (K4 512 -> 32) and base rise (K6 512 -> 21
             -- sixteenths of a cell per field) follow their knobs directly
-            s_kt <= resize(unsigned(registers_in(3)(9 downto 4)), 8);
+            v_kt := resize(unsigned(registers_in(3)(9 downto 4)), 8);
+            s_kt <= v_kt;
             s_vb16 <= resize(unsigned(registers_in(5)(9 downto 5)), 7) + 5;
             -- K2 Width: lattice x step per cell 16..47 sixteenths (1x .. 3x
             -- horizontal compression of the turbulence and burner pockets)
             v_k2 := unsigned(registers_in(1));
-            s_wk <= resize(v_k2(9 downto 5), 7) + 16;
-            s_wk2 <= (resize(v_k2(9 downto 5), 8) + 16) sll 1;
+            v_wk := resize(v_k2(9 downto 5), 7) + 16;
             -- K5 Plume: buoyancy + entrainment
             s_kb <= unsigned(registers_in(4)(9 downto 4));
-            s_ke <= unsigned(registers_in(4)(9 downto 5));
+            v_ke := unsigned(registers_in(4)(9 downto 5));
+            s_ke <= v_ke;
+            -- Resolution scaling: half-mode cells are wider relative to the
+            -- screen height (720p 2x, SD 1.5x): lattice step per cell up,
+            -- horizontal velocity gains down by the same ratio (2/3 ~ 21/32)
+            if s_half = '0' then
+              s_wk <= v_wk;
+              s_wk2 <= v_wk & '0';
+              s_ktu <= v_kt;
+              s_keu <= v_ke;
+            elsif s_sdid = '0' then
+              s_wk <= v_wk(5 downto 0) & '0';
+              s_wk2 <= v_wk(5 downto 0) & "00";
+              s_ktu <= v_kt srl 1;
+              s_keu <= v_ke srl 1;
+            else
+              s_wk <= v_wk + (v_wk srl 1);
+              s_wk2 <= (resize(v_wk, 8) + resize(v_wk srl 1, 8)) sll 1;
+              v_k13 := (resize(v_kt, 13) sll 4) + (resize(v_kt, 13) sll 2) + resize(v_kt, 13);
+              s_ktu <= v_k13(12 downto 5);
+              v_k10 := (resize(v_ke, 10) sll 4) + (resize(v_ke, 10) sll 2) + resize(v_ke, 10);
+              s_keu <= v_k10(9 downto 5);
+            end if;
             -- K3 Smoke: cool-regime decay (slow when high) and gray gain
             s_csm <= resize((to_unsigned(1023, 10) - unsigned(registers_in(2))) srl 6, 5) + 1;
             s_sgain <= unsigned(registers_in(2)(9 downto 2));
@@ -741,6 +785,16 @@ begin
           end if;
           s_wacc <= s_wacc + (((resize(s_wtgt, 10) sll 4) - s_wacc) sra 4);
           s_wind <= s_wacc(9 downto 4);
+          -- wind in the u sum: x1 / x1/2 (720p) / x21/32 (SD), rounded
+          if s_half = '0' then
+            s_windu <= s_wacc(9 downto 4);
+          elsif s_sdid = '0' then
+            v_wx := resize(s_wacc, 14) + 16;
+            s_windu <= v_wx(10 downto 5);
+          else
+            v_wx := (resize(s_wacc, 14) sll 4) + (resize(s_wacc, 14) sll 2) + resize(s_wacc, 14) + 256;
+            s_windu <= resize(v_wx(13 downto 9), 6);
+          end if;
           s_drift1 <= s_drift1 + unsigned(resize(s_wind sra 2, 12));
           s_drift2 <= s_drift2 + unsigned(resize(s_wind sra 2, 12))
                     + unsigned(resize(s_wind sra 3, 12));
@@ -901,7 +955,7 @@ begin
               lut_idx <= p2y(5 downto 0) & '0';
               c00_1 <= h_b;
               sx1 <= lut_qf(16 downto 8); dx1 <= lut_qf(7 downto 0);
-              ma_a <= resize(dpys, 11); ma_b <= signed(resize(s_kt, 10));
+              ma_a <= resize(dpys, 11); ma_b <= signed(resize(s_ktu, 10));
             when 5 =>
               h_cx <= "00" & p2x(11 downto 6); h_cy <= p2y(13 downto 6); h_seed <= x"8EEF";
               c10_1 <= h_b;
@@ -920,7 +974,7 @@ begin
               c11_1 <= h_b;
               sy2 <= lut_qf(16 downto 8); dy2 <= lut_qf(7 downto 0);
               -- spill: horizontal velocity = kt * dpsi/dy + entrainment, clamped
-              v_u := resize(ue, 13) + resize(ma_p(20 downto 8), 13) + resize(s_wind, 13);
+              v_u := resize(ue, 13) + resize(ma_p(20 downto 8), 13) + resize(s_windu, 13);
               if v_u < -127 then u16 <= to_signed(-127, 8);
               elsif v_u > 127 then u16 <= to_signed(127, 8);
               else u16 <= v_u(7 downto 0); end if;
@@ -966,7 +1020,7 @@ begin
             when 17 =>
               dpy1 <= ma_p(16 downto 7);
               ma_a <= resize(signed(resize(x17(tr), 9)) - signed(resize(x17(tl), 9)), 11);
-              ma_b <= signed(resize(s_ke, 10));
+              ma_b <= signed(resize(s_keu, 10));
             when 18 =>
               v_a := (resize(e10_2, 18) sll 8) + resize(ma_p, 18);
               a2_8 <= v_a(17 downto 8);

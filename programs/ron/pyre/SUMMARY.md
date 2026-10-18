@@ -1,5 +1,22 @@
 # Pyre — simulated fire: an advected temperature field (Inferno's successor)
 
+**v1.0.4 (2026-10-18) — resolution scaling.**  The grid always spans the
+screen (61 rows over the height, 256 or 128 cells over the width), so rows
+already scaled; the half-resolution modes (SD, 720p: 128 cells) had cells 2x
+(720p) / 1.5x (SD on its 4:3 screen) wider relative to the screen height,
+and everything measured in cells (eddies, tongues, burner pockets, sideways
+motion) grew with them.  In half mode the lattice x step per cell (K2 Width,
+`s_wk`/`s_wk2`) is now multiplied by that ratio, and the horizontal velocity
+gains (curl u `s_ktu`, entrainment `s_keu`, wind in the u sum `s_windu`) are
+divided by it (720p x1/2, SD x21/32; SD/720p told apart by the timing ID).
+The cell grid itself stays 128 wide there (display reader / 480i row
+budget), so 720p/SD fire is still blockier than 1080p.  1080p unchanged.
+SD sim note: the bright/video bar across the top of SD renders is the test
+stimulus, not the program: it puts vsync only 10 lines before active video
+(8.6k clocks) while the post-vsync job chain needs ~14k; with 18 lines
+(real 480i HDMI/NTSC timing, VIT_VB=36) the bar is gone.  Margin on real
+NTSC is small (~14k of ~15k clocks).
+
 **v1.0.2 (2026-10-07) — the "always moves right" ROOT CAUSE.** Ron (on
 v1.0.0): the fire constantly leans/moves right.  Not the wind (the gust
 generator emulated exactly is balanced), not the turbulence/entrainment (a
@@ -199,6 +216,11 @@ always too wide; wanted Inferno-style Width.  v0.2.0 addresses both; not yet
 flashed.
 
 ## Build
+### v1.0.4 (2026-10-18, resolution scaling)
+`./build_programs.sh ron pyre` (router2), 6284–6304 LC (82%), 26 EBR, all genuine post-route
+passes: HD Analog 77.79 (**seed 2**; seed 1 stalled the router), SD Analog 74.47 (s1), HD HDMI
+78.70 (s1), SD HDMI 82.37 (s1), HD Dual 81.92 (**seed 2**; seed 1 missed), SD Dual 70.31 (s1).
+
 ### v1.0.2 (2026-10-07)
 router2, ~6165 LC (80%), 26 EBR, all genuine post-route passes: HD Analog 78.19
 (s1), SD Analog 77.56 (s1), HD HDMI 77.81 (**seed 2**), SD HDMI 78.02 (**seed 2**;
