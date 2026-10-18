@@ -36,6 +36,13 @@
 -- recomputed in the hblank after each avid fall (~45 clocks) and sampled
 -- once per pixel at stage 2.
 --
+-- v1.3.2 resolution scaling: rows are VIRTUAL 1080-line units (a Q.8 row
+-- accumulator stepped per active line from the timing ID), so the split,
+-- stretch, fade, onset, sway wavelength and spread depth are the same
+-- fractions of the screen height at SD / 720p / 1080p (1080p bit-
+-- identical). The lean (Twist + Sway) depth is divided by the x step so
+-- the lean angle matches too. Pixel-scale: blur, its 27 px compensation.
+--
 -- Pixel pipeline (LATENCY = 10, identical in every mode):
 --   s1   register counters; blur IIRs on data_in
 --   s2   dx = x - centre; sample per-row values
@@ -166,10 +173,17 @@ architecture drape of program_top is
     signal prev_avid    : std_logic := '0';
     signal pixel_x      : unsigned(11 downto 0) := (others => '0');
     signal max_x_r      : unsigned(11 downto 0) := to_unsigned(1920, 12);
-    signal aline        : unsigned(10 downto 0) := (others => '0');
+    -- Rows are VIRTUAL 1080-line units (v1.3.2): aline_a / row_ya are Q.8
+    -- accumulators stepped by r_ys per active line, so the split, stretch,
+    -- fade, onset, sway wavelength and spread depth are fractions of the
+    -- screen height in every mode (1080p: step 1.0, bit-identical).
+    signal aline_a      : unsigned(19 downto 0) := (others => '0');
     signal h_cnt        : unsigned(10 downto 0) := to_unsigned(1080, 11);
     signal max_y_r      : unsigned(10 downto 0) := to_unsigned(1080, 11);
-    signal row_y        : unsigned(10 downto 0) := (others => '0');
+    signal row_ya       : unsigned(19 downto 0) := (others => '0');
+    signal r_ys         : unsigned(11 downto 0) := to_unsigned(256, 12);  -- Q4.8 per field line
+    signal r_xcl        : unsigned(1 downto 0)  := "00";  -- x step 0: 1.0, 1: 1.5 (720p), 2: 2.0 (SD)
+    signal rdep         : unsigned(10 downto 0) := (others => '0');  -- real rows below the split
     signal saw_active   : std_logic := '0';
     signal sway_ph      : unsigned(9 downto 0) := (others => '0');
     signal hpar         : std_logic := '0';  -- clock parity since hsync
@@ -208,7 +222,7 @@ architecture drape of program_top is
     ----------------------------------------------------------------------------
     -- Per-row pipeline (free-running off row_y; settles within ~45 clocks)
     ----------------------------------------------------------------------------
-    signal r1_dys        : signed(11 downto 0) := (others => '0');
+    signal r1_dysq       : signed(20 downto 0) := (others => '0');  -- Q.8 virtual rows
     signal r2_dy         : unsigned(10 downto 0) := (others => '0');
     signal r2_split      : std_logic := '0';
     signal r2_drape      : std_logic := '0';
@@ -343,10 +357,26 @@ architecture drape of program_top is
         return unsigned(r(13 downto 0));
     end function;
 
+    -- Resolution scaling: virtual rows per FIELD line, Q4.8 (1080 / active
+    -- field lines, doubled for interlace), from the timing ID.
+    function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(1138, 12);  -- 480i: 2 x 1080/486
+            when 4          => return to_unsigned(576, 12);   -- 480p: 1080/480
+            when 8          => return to_unsigned(960, 12);   -- 576i: 2 x 1080/576
+            when 12         => return to_unsigned(480, 12);   -- 576p: 1080/576
+            when 5 | 6 | 14 => return to_unsigned(384, 12);   -- 720p: 1.5
+            when 1 | 2 | 10 => return to_unsigned(512, 12);   -- 1080i: 2.0
+            when others     => return to_unsigned(256, 12);   -- 1080p: 1.0
+        end case;
+    end function;
+
 begin
 
     main_p : process(clk)
         variable v_rem     : signed(12 downto 0);
+        variable v_an      : unsigned(19 downto 0);
         variable v_dyst    : signed(11 downto 0);
         variable v_dy3     : unsigned(12 downto 0);
         variable v_rd      : signed(14 downto 0);
@@ -378,10 +408,20 @@ begin
                 k1_move <= '0';
             end if;
 
+            -- Resolution scaling: per-mode steps, decoded every clock (the
+            -- timing ID is static while a mode runs)
+            r_ys <= f_vstep_y(registers_in(8)(3 downto 0));
+            case to_integer(unsigned(registers_in(8)(3 downto 0))) is
+                when 0 | 4 | 8 | 12 => r_xcl <= "10";
+                when 5 | 6 | 14     => r_xcl <= "01";
+                when others         => r_xcl <= "00";
+            end case;
+
             -------------------------------------------------------------------
             -- Counters. Rows count ACTIVE lines: advance at avid fall, reset
             -- at vsync (idempotent, serration-safe). Height is taken from
-            -- h_cnt, which only changes on active lines.
+            -- h_cnt, which only changes on active lines.  Rows and height
+            -- are virtual 1080-line units (integer part of the Q.8 count).
             -------------------------------------------------------------------
             prev_hsync_n <= data_in.hsync_n;
             prev_vsync_n <= data_in.vsync_n;
@@ -406,14 +446,21 @@ begin
             end if;
 
             if data_in.avid = '0' and prev_avid = '1' then
-                aline <= aline + 1;
-                h_cnt <= aline + 1;
-                row_y <= aline + 1;
+                v_an    := aline_a + resize(r_ys, 20);
+                aline_a <= v_an;
+                h_cnt   <= v_an(18 downto 8);
+                row_ya  <= v_an;
+                -- real rows below the split (720p lean depth, see R7)
+                if r2_split = '1' then
+                    rdep <= to_unsigned(1, 11);
+                else
+                    rdep <= rdep + 1;
+                end if;
             end if;
 
             if data_in.vsync_n = '0' and prev_vsync_n = '1' then
-                aline <= (others => '0');
-                row_y <= (others => '0');
+                aline_a <= (others => '0');
+                row_ya  <= (others => '0');
                 if h_cnt > to_unsigned(32, 11) then
                     max_y_r <= h_cnt;
                 end if;
@@ -473,18 +520,22 @@ begin
             -------------------------------------------------------------------
             -- Per-row pipeline
             -------------------------------------------------------------------
-            -- R1: signed distance from the split
-            r1_dys <= signed(resize(row_y, 12)) - signed(resize(split_y_r, 12));
+            -- R1: signed distance from the split (Q.8 virtual rows)
+            r1_dysq <= signed(resize(row_ya, 21))
+                     - signed(shift_left(resize(split_y_r, 21), 8));
 
-            -- R2: depth + row class
-            if r1_dys > 0 then
-                r2_dy    <= unsigned(r1_dys(10 downto 0));
+            -- R2: depth + row class.  The split row is the one whose span
+            -- [row, row + step) holds the split (a fractional step can jump
+            -- over an exact value); drape rows lie a full step or more below.
+            -- At 1080p (step 1.0) these are the old dys = 0 / dys > 0 tests.
+            if r1_dysq >= signed(resize(r_ys, 21)) then
+                r2_dy    <= unsigned(r1_dysq(18 downto 8));
                 r2_drape <= '1';
             else
                 r2_dy    <= (others => '0');
                 r2_drape <= '0';
             end if;
-            if r1_dys = 0 then
+            if r1_dysq >= 0 and r1_dysq < signed(resize(r_ys, 21)) then
                 r2_split <= '1';
             else
                 r2_split <= '0';
@@ -541,7 +592,14 @@ begin
             r7_lean  <= shift_left(resize(twist_t_r, 13), 2)
                       + resize(shift_right(r6_sa, 3), 13);
             r7_dyeff <= r6_dyeff_mul(20 downto 10);
-            r7_dy    <= r6_dy;
+            -- lean depth in x pixels: lean is px per 1080p row, so the
+            -- virtual depth is divided by the x step (720p: the real row
+            -- count below the split = virtual / 1.5; SD: virtual / 2)
+            case r_xcl is
+                when "01"   => r7_dy <= rdep;
+                when "10"   => r7_dy <= shift_right(r6_dy, 1);
+                when others => r7_dy <= r6_dy;
+            end case;
 
             -- R8: lean grows with depth; e = dyeff * g split hi/lo
             r8_lean_mul <= r7_lean * signed('0' & r7_dy);

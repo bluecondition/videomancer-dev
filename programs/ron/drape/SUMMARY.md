@@ -72,3 +72,31 @@ Default, Long Drape, Short Tail, Top Clip, Horizon, Pleats, Wind (Sway), Tilt (T
   - Sway defaults to 0 with a still zone at the bottom of K6.
   - Blur is a one-pole filter on Y/U/V.
 - **v1.3 on hardware (2026-09-30):** bugs fixed, **HW-validated, finalized**. Presets are still to be tuned.
+- **v1.3.2 (2026-10-18): resolution scaling.** 720p was close but SD fanned far
+  less (near-vertical pleats): every row-indexed quantity counted FIELD rows
+  (the spread depth, fade and onset tables, sway wavelength, stretch).
+  - Rows now count virtual 1080-line units: a Q.8 row accumulator steps per
+    active line by 1080 / active field lines (720p 1.5, 480i 4.44, 576i 3.75,
+    1080i 2), so split, stretch, fade, onset, sway and the fan depth are the
+    same fractions of the height in every mode. The measured height is
+    virtual (~1080 everywhere).
+  - The split row is the one whose row span holds the split (a fractional
+    step can skip an exact value); drape rows lie a full step below it.
+  - The lean (Twist + Sway) is in pixels per 1080p row, so its depth is
+    divided by the x step: SD uses the virtual depth / 2, 720p the real rows
+    below the split (= virtual / 1.5).
+  - Pixel scale on purpose: Blur and its 27 px compensation.
+  - The capture/replay chroma path (per-row U/V parity swap) is untouched.
+  - 1080p is bit-identical (0 differing pixels in the 1080p sim); SD and
+    720p now match the 1080p drape.
+  - Build (router2, `./build_programs.sh ron drape`): HD Analog 76.55 MHz
+    (**seed 4**; seeds 1-3 missed on the pre-existing s2_dx x q multiply, a
+    4.3 ns first-hop route), HD HDMI 75.98 (**seed 10, hand-installed**),
+    HD Dual 74.50 (seed 1), SD Analog 77.55 / SD HDMI 69.89 / SD Dual 71.05
+    (seed 1); 7031-7074/7680 LC (92%), 16/32 EBR.
+  - HD HDMI placement: the builder's seed 1 put HSYNC at +0.12 ns from the
+    clock (known-bad zone, `tools/hdmi_pin_skew.py`); seeds 2-13 were screened
+    and seed 10 (HSYNC +1.36, data -2.59..-1.11) was installed and repacked
+    (`vmprog_pack.py --no-sign`). A plain rebuild re-places it -- re-install
+    seed 10 (`make ... CONFIG=hd_hdmi SEED=10 ROUTER="--router router2"`,
+    then check the skew) or A/B on hardware.
