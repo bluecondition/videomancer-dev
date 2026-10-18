@@ -92,3 +92,60 @@ complementary colour pair that K3 turns around the wheel.
   the known-good window. Still the layout lottery: A/B the new HD HDMI on
   hardware before it replaces the validated v1.0.0 build (kept as
   `.scaling_work/bajaweave_tmp/bajaweave_1.0.0_validated.vmprog`).
+
+## Stock SD Standalone fit (v1.0.4, 2026-10-18)
+- v1.0.3 packed to 7719/7680 LC on the stock SDK's SD Standalone and could
+  not place. v1.0.4 is bit-exact restructuring; the picture is unchanged.
+- **What changed:**
+  - **Keyer chroma.** The keyer carries a 1-bit "upper wave is osc2" flag
+    instead of both waves' U/V (~200 FFs), and picks the per-field colour at
+    the max stage.
+    - The hue LUT angle is now copied 5 clocks after the field start. The
+      colour then changes on the same clock as before, which matters in the
+      power-up field, where the 1920-px default avid overruns vsync.
+  - **Carrier increment.** One adder per oscillator serves r_osc*_inc and
+    the 1080 direct increment.
+  - **Divider.** It reads r_lfo*_st16 directly.
+  - **S8 rim band.** It is a registered flag.
+  - **router1 hang fixed.** No adder bit takes one net on both inputs any
+    more (sign extension in p>>9 + p>>12 and in the chroma 12c / 3c;
+    dupin.py now reports 0).
+    - Before, router1 hung on stock seed 1 (SD Standalone) and seed 6
+      (SD HDMI, SD Dual).
+    - Now seeds 1 and 6 each build all 8 stock configs.
+- **Packed LC:**
+  - Stock SD Standalone: 7719 -> 7504.
+  - Other stock configs: 6846-6969.
+  - Dev configs: 6890-6902 -> 6673-6693.
+- **Stock timing.** Own HD timing (core without Sync Out, seed 6) is
+  99.9 / 104.5 / 111.0 MHz (Analog / HDMI / Dual).
+- **Bit-exact proof.** GHDL compared v1.0.3 and v1.0.4 side by side on
+  data_out every clock, with knobs and switches re-rolled mid-picture every
+  field: 0 mismatches.
+  - Rasters: 1080p, 720p, 480i and 576i full rasters, plus a 403x201 raster
+    at timing IDs 1080p / 720p / 480i / 1080i / 576i.
+  - Negative controls are all caught: chroma select one stage early, 1080
+    increment one clock late, and hue copy at +4 clocks.
+- **Dev build** (router2), post-route Fmax:
+
+  | Config | Seed | Fmax (MHz) |
+  |---|---|---|
+  | HD Analog | 1 | 80.76 |
+  | SD Analog | 1 | 88.08 |
+  | HD HDMI | **20** (hand-installed) | 94.30 |
+  | SD HDMI | 1 | 86.37 |
+  | HD Dual | 1 | 85.37 |
+  | SD Dual | 1 | 85.35 |
+
+  All configs use 24/32 EBR.
+- **HD HDMI pin skew** (seeds 1-40).
+  - Seed 1 had HSYNC at -0.03 ns, which is bad.
+  - Seed 20 has HSYNC at **+1.17 ns** and data at <= -1.08 ns, in the
+    window. It was installed into `build/.../rev_b/bitstreams/hd_hdmi.bin`
+    and repacked with `vmprog_pack.py`; a rebuild re-places seed 1.
+  - Other in-window seeds: 18, 23, 37.
+  - For information, the HDMI encoder in the other configs (seed 1): HD
+    Analog +0.96 / data <= -0.64; HD Dual -0.94 / data -1.68..+0.77.
+  - A/B HD HDMI on hardware. Backups:
+    `.scaling_work/bajaweave_fit/bajaweave_1.0.3_shipped.vmprog` and
+    `bajaweave_tmp/bajaweave_1.0.0_validated.vmprog`.

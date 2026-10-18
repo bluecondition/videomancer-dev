@@ -43,6 +43,15 @@
 -- is the same fraction of the height, and the S9 shadow offset follows
 -- the height (12 / 8 / 6 px).  One shared serial multiplier (p_vscale).
 --
+-- v1.0.4 (fit for the stock SDK SD Standalone, bit-exact): the keyer carries
+-- a 1-bit "upper wave is osc2" flag instead of both waves' chroma (the
+-- per-field colours are picked at the max stage, and the hue LUT angle is
+-- copied 5 clocks after the field start so they change on the same clock
+-- as before), one carrier-increment adder per osc serves both widths, the
+-- divider reads the LFO step directly, the S8 rim band is a registered
+-- flag, and no adder bit takes one net on both inputs (that pattern sent
+-- nextpnr's router1 into an endless rip-up loop on some seeds).
+--
 -- Resources:
 --   1x video_timing_generator
 --   2x 20-bit per-line LFO accumulators (step at active-line end)
@@ -266,7 +275,6 @@ architecture bajaweave of program_top is
     signal r_st1_a, r_st1_b, r_st1_c : unsigned(17 downto 0) := (others => '0');
     signal r_st2_a, r_st2_b, r_st2_c : unsigned(17 downto 0) := (others => '0');
     signal r_lfo1_st16, r_lfo2_st16  : unsigned(17 downto 0) := to_unsigned(34560, 18);
-    signal r_lfo1_step, r_lfo2_step  : unsigned(13 downto 0) := to_unsigned(2160, 14);
     -- smoothed knobs (10.4): K1, K2, K4, K5, K6
     signal s_e1, s_e2, s_e4, s_e5, s_e6 : unsigned(13 downto 0);
     -- shared knob smoother: held value h, eased output e (10.4), deadband
@@ -303,11 +311,18 @@ architecture bajaweave of program_top is
 
     -- Carrier increments (frame-stable, registered for the gain sequencer)
     signal r_osc1_inc, r_osc2_inc : unsigned(15 downto 0) := to_unsigned(9648, 16);
+    -- the same sums, combinational (one adder per osc serves both widths)
+    signal s_osc1_inc, s_osc2_inc : unsigned(15 downto 0);
 
     -- Sway depth D (128 = x1 ... 512 = x4 at the slider ends)
     signal r_depth : unsigned(9 downto 0) := to_unsigned(128, 10);
     -- K3 colour: eased 10.4 hue (osc1); osc2 is always the complement
     signal r_hue14 : unsigned(13 downto 0) := (others => '0');
+    -- hue LUT angle = r_hue14's integer part, copied 5 clocks after the
+    -- field start (the colour reaches the keyer's K4 select with the same
+    -- timing as the 5-stage chroma copies it replaced)
+    signal r_hue_lut : unsigned(9 downto 0) := (others => '0');
+    signal r_fs_sr   : std_logic_vector(4 downto 0) := (others => '0');
 
     -- Per-field gain sequencer: G = inc * D / step (serial multiply, then
     -- serial restoring divide; ~55 clocks after the field start)
@@ -459,9 +474,9 @@ architecture bajaweave of program_top is
     -- up with r_luma1/2
     signal r_par1_sr, r_par2_sr   : std_logic_vector(6 downto 0) := (others => '0');
     signal r_side1_sr, r_side2_sr : std_logic_vector(5 downto 0) := (others => '0');
-    -- S9 Clean: sharpened luma (and the soft luma kept for rim detection)
+    -- S9 Clean: sharpened luma (and the soft luma's rim-band flag)
     signal r_sL1, r_sL2 : unsigned(9 downto 0) := (others => '0');   -- sharpened
-    signal r_fL1, r_fL2 : unsigned(9 downto 0) := (others => '0');   -- raw sine (rims)
+    signal r_fR1, r_fR2 : std_logic := '0';   -- raw sine in the rim band (576..831)
     -- shadow: the sharpened body's top 4 bits, C_SHADOW_PX pixels back
     -- (one flat vector, newest nibble at the bottom; an array-of-unsigned
     -- type here made every "unsigned & literal" in the design ambiguous)
@@ -470,7 +485,6 @@ architecture bajaweave of program_top is
     signal r_km0  : unsigned(5 downto 0) := (others => '0');
     signal r_kTd  : unsigned(3 downto 0) := (others => '0');
     signal r_kT1, r_kB1 : unsigned(9 downto 0) := (others => '0');
-    signal r_kuT1, r_kvT1, r_kuB1, r_kvB1 : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal r_kRT1, r_kRB1 : std_logic := '0';
     -- per-line outer-bend highlight: |lfo|/128 and the lfo sign
     signal lm_h1, lm_h2 : unsigned(8 downto 0) := (others => '0');
@@ -478,7 +492,6 @@ architecture bajaweave of program_top is
     signal r_ls1, r_ls2 : std_logic := '0';
     -- edge stage outputs (per oscillator)
     signal r_eL1, r_eL2 : unsigned(9 downto 0) := (others => '0');
-    signal r_eu1, r_ev1, r_eu2, r_ev2 : unsigned(9 downto 0) := to_unsigned(512, 10);
     -- rim flags: a darkened outline keeps FULL chroma (the luma-scaled
     -- chroma stage would otherwise grey it out); carried with the winner
     signal r_eR1, r_eR2 : std_logic := '0';
@@ -514,9 +527,14 @@ architecture bajaweave of program_top is
     signal r_v_k : unsigned(9 downto 0) := to_unsigned(512, 10);
     -- keyer stages K1..K3 (the K4 register is r_y_k/u/v)
     signal r_kT, r_kB, r_kT2, r_kT3, r_kBs : unsigned(9 downto 0) := (others => '0');
-    signal r_kuT, r_kvT, r_kuB, r_kvB : unsigned(9 downto 0) := to_unsigned(512, 10);
-    signal r_kuT2, r_kvT2, r_kuB2, r_kvB2 : unsigned(9 downto 0) := to_unsigned(512, 10);
-    signal r_kuT3, r_kvT3, r_kuB3, r_kvB3 : unsigned(9 downto 0) := to_unsigned(512, 10);
+    -- '1' = the upper wave is osc2; its chroma (and the lower one's) is
+    -- picked from the per-field r_u1/r_v1/r_u2/r_v2 at K4 instead of
+    -- carrying 4 x 10 bits through K1..K3 (they change only after the field
+    -- start, and r_hue_lut delays that by the 5 stages the copies took)
+    signal r_ksw, r_ksw1, r_ksw2, r_ksw3 : std_logic := '0';
+    -- copies of the chosen chroma's sign (= not r_u_k(9) / not r_v_k(9)), so
+    -- the chroma-scaling sums don't feed one net to both adder inputs
+    signal r_u_ks, r_v_ks : std_logic := '0';
     signal r_km  : unsigned(5 downto 0) := (others => '0');
     signal r_kh, r_kl : signed(16 downto 0) := (others => '0');
 
@@ -1027,6 +1045,12 @@ begin
                 end if;
             end if;
 
+            -- LUT angle: r_hue14 copied 5 clocks after the field start
+            r_fs_sr <= r_fs_sr(3 downto 0) & s_fstart;
+            if r_fs_sr(4) = '1' then
+                r_hue_lut <= r_hue14(13 downto 4);
+            end if;
+
             -- Register the hue LUT output (free-running; the eased hue only
             -- changes at the field start).
             r_cos1_r <= s_cos1;
@@ -1053,7 +1077,7 @@ begin
     -- ========================================================================
     sin_hue1_inst : entity work.sin_cos_full_lut_10x10
         port map (
-            angle_in => std_logic_vector(r_hue14(13 downto 4)),
+            angle_in => std_logic_vector(r_hue_lut),
             sin_out  => s_sin1,
             cos_out  => s_cos1
         );
@@ -1095,8 +1119,6 @@ begin
             end if;
             r_lfo1_st16 <= r_st1_a + r_st1_b + r_st1_c;
             r_lfo2_st16 <= r_st2_a + r_st2_b + r_st2_c;
-            r_lfo1_step <= r_lfo1_st16(17 downto 4);
-            r_lfo2_step <= r_lfo2_st16(17 downto 4);
 
             -- per-line step = step16 x f_vstep_y (p_vscale).  At 1080p the
             -- factor is 256/256, an exact copy; it settles ~80 clocks after
@@ -1185,10 +1207,8 @@ begin
         variable v_r1, v_r2 : unsigned(14 downto 0);
     begin
         if rising_edge(clk) then
-            r_osc1_inc <= shift_left(resize(s_e1, 16), C_FREQ_KNOB_SH - 4)
-                          + to_unsigned(C_FREQ_MIN, 16);
-            r_osc2_inc <= shift_left(resize(s_e4, 16), C_FREQ_KNOB_SH - 4)
-                          + to_unsigned(C_FREQ_MIN, 16);
+            r_osc1_inc <= s_osc1_inc;
+            r_osc2_inc <= s_osc2_inc;
 
 
             fg_done <= '0';
@@ -1232,15 +1252,15 @@ begin
                 when others =>                        -- G = N / step
                     v_r1 := fg_r1 & fg_n1(24);
                     v_r2 := fg_r2 & fg_n2(24);
-                    if v_r1 >= resize(r_lfo1_step, 15) then
-                        fg_r1 <= resize(v_r1 - resize(r_lfo1_step, 15), 14);
+                    if v_r1 >= resize(r_lfo1_st16(17 downto 4), 15) then
+                        fg_r1 <= resize(v_r1 - resize(r_lfo1_st16(17 downto 4), 15), 14);
                         fg_q1 <= fg_q1(14 downto 0) & '1';
                     else
                         fg_r1 <= v_r1(13 downto 0);
                         fg_q1 <= fg_q1(14 downto 0) & '0';
                     end if;
-                    if v_r2 >= resize(r_lfo2_step, 15) then
-                        fg_r2 <= resize(v_r2 - resize(r_lfo2_step, 15), 14);
+                    if v_r2 >= resize(r_lfo2_st16(17 downto 4), 15) then
+                        fg_r2 <= resize(v_r2 - resize(r_lfo2_st16(17 downto 4), 15), 14);
                         fg_q2 <= fg_q2(14 downto 0) & '1';
                     else
                         fg_r2 <= v_r2(13 downto 0);
@@ -1518,9 +1538,12 @@ begin
             r_i2_s2 <= r_i2_s;  r_i2_t2 <= r_i2_t;
             -- I3
             r_i1_a  <= shift_left(resize(r_i1_s2, 17), 6) + shift_right(r_i1_p, 8);
-            r_i1_b  <= shift_right(r_i1_p, 9) + shift_right(r_i1_p, 12);
+            -- p>>9 + p>>12, the first sign-extended from p(15): |p| < 2^15
+            -- (|cos| <= 512, frac <= 63), so p(15) = p(16), and no adder bit
+            -- sees one net on both inputs (a router1 livelock trigger)
+            r_i1_b  <= resize(r_i1_p(15 downto 9), 17) + resize(r_i1_p(16 downto 12), 17);
             r_i2_a  <= shift_left(resize(r_i2_s2, 17), 6) + shift_right(r_i2_p, 8);
-            r_i2_b  <= shift_right(r_i2_p, 9) + shift_right(r_i2_p, 12);
+            r_i2_b  <= resize(r_i2_p(15 downto 9), 17) + resize(r_i2_p(16 downto 12), 17);
             r_i1_tf <= shift_left(resize(r_i1_t2, 17), 6) + resize(r_i1_td2, 17);
             r_i2_tf <= shift_left(resize(r_i2_t2, 17), 6) + resize(r_i2_td2, 17);
             -- I4
@@ -1647,12 +1670,14 @@ begin
     -- waveforms than true FM.
     -- ========================================================================
     -- (720p / SD: the per-mode scaled increment from p_vscale)
+    -- 16-bit inc = 2e + 1456 (< 2^16); the 21-bit carrier inc at 1080 is
+    -- twice that, 4e + 2912 (C_FREQ_KNOB_SH_C / C_FREQ_MIN_C)
+    s_osc1_inc <= shift_left(resize(s_e1, 16), C_FREQ_KNOB_SH - 4) + to_unsigned(C_FREQ_MIN, 16);
+    s_osc2_inc <= shift_left(resize(s_e4, 16), C_FREQ_KNOB_SH - 4) + to_unsigned(C_FREQ_MIN, 16);
     s_osc1_inc_slv <= std_logic_vector(resize(r_inc1_sc, C_CARRIER_W)) when r_xs_on = '1' else
-                      std_logic_vector(shift_left(resize(s_e1, C_CARRIER_W), C_FREQ_KNOB_SH_C - 4)
-                                        + to_unsigned(C_FREQ_MIN_C, C_CARRIER_W));
+                      std_logic_vector(shift_left(resize(s_osc1_inc, C_CARRIER_W), 1));
     s_osc2_inc_slv <= std_logic_vector(resize(r_inc2_sc, C_CARRIER_W)) when r_xs_on = '1' else
-                      std_logic_vector(shift_left(resize(s_e4, C_CARRIER_W), C_FREQ_KNOB_SH_C - 4)
-                                        + to_unsigned(C_FREQ_MIN_C, C_CARRIER_W));
+                      std_logic_vector(shift_left(resize(s_osc2_inc, C_CARRIER_W), 1));
 
     osc1_inst : entity work.video_timing_accumulator
         generic map (G_ACCUMULATOR_WIDTH => C_CARRIER_W)
@@ -1775,8 +1800,8 @@ begin
     --   L' = clamp(8*L - 3584, 0, 1023)
     -- so each line is a solid flat band with a crisp edge (the 448..575
     -- ramp is ~4% of a carrier period, ~3 px at the default Freq).  The
-    -- raw sine rides along so S8 rims stay where they were.  Also taps the
-    -- body brightness into the S9 shadow delay line.
+    -- raw sine's rim-band flag rides along so S8 rims stay where they
+    -- were.  Also taps the body brightness into the S9 shadow delay line.
     -- ========================================================================
     p_blend : process(clk)
         function sharpen(l : unsigned(9 downto 0)) return unsigned is
@@ -1795,8 +1820,16 @@ begin
         if rising_edge(clk) then
             r_sL1 <= sharpen(r_luma1);
             r_sL2 <= sharpen(r_luma2);
-            r_fL1 <= r_luma1;
-            r_fL2 <= r_luma2;
+            if r_luma1 >= to_unsigned(576, 10) and r_luma1 < to_unsigned(832, 10) then
+                r_fR1 <= '1';
+            else
+                r_fR1 <= '0';
+            end if;
+            if r_luma2 >= to_unsigned(576, 10) and r_luma2 < to_unsigned(832, 10) then
+                r_fR2 <= '1';
+            else
+                r_fR2 <= '0';
+            end if;
             -- shadow source: each body's brightness, delayed C_SHADOW_PX
             r_dl1 <= r_dl1(4*C_SHADOW_PX-5 downto 0) & r_sL1(9 downto 6);
             r_dl2 <= r_dl2(4*C_SHADOW_PX-5 downto 0) & r_sL2(9 downto 6);
@@ -1831,12 +1864,8 @@ begin
         variable v_rim1, v_rim2 : boolean;
     begin
         if rising_edge(clk) then
-            v_rim1 := r_edges = '1' and r_fL1 >= to_unsigned(576, 10)
-                                    and r_fL1 <  to_unsigned(832, 10);
-            v_rim2 := r_edges = '1' and r_fL2 >= to_unsigned(576, 10)
-                                    and r_fL2 <  to_unsigned(832, 10);
-            r_eu1 <= r_u1;  r_ev1 <= r_v1;
-            r_eu2 <= r_u2;  r_ev2 <= r_v2;
+            v_rim1 := r_edges = '1' and r_fR1 = '1';
+            v_rim2 := r_edges = '1' and r_fR2 = '1';
             if v_rim1 then
                 r_eR1 <= '1';
                 if (r_side1_sr(5) xor r_ls1) = '0' then
@@ -1878,28 +1907,29 @@ begin
     p_keyer : process(clk)
         variable v_swap : boolean;
         variable v_lt, v_lb : unsigned(9 downto 0);
-        variable v_ut, v_ub : unsigned(9 downto 0);
-        variable v_vt, v_vb : unsigned(9 downto 0);
         variable v_sh       : unsigned(5 downto 0);
         variable v_bs       : signed(16 downto 0);
+        variable v_o2       : boolean;
     begin
         if rising_edge(clk) then
             -- K1: pick upper (T) / lower (B), the lower wave's gain m/32 and
             -- the upper body's brightness C_SHADOW_PX back (shadow source)
             v_swap := r_stacked = '0' and (r_par1_sr(6) xor r_par2_sr(6)) = '1';
             if v_swap then
-                v_lt := r_eL2; v_ut := r_eu2; v_vt := r_ev2;
-                v_lb := r_eL1; v_ub := r_eu1; v_vb := r_ev1;
+                v_lt := r_eL2;
+                v_lb := r_eL1;
+                r_ksw <= '1';
                 r_kRT <= r_eR2;  r_kRB <= r_eR1;
                 r_kTd <= r_sht2;
             else
-                v_lt := r_eL1; v_ut := r_eu1; v_vt := r_ev1;
-                v_lb := r_eL2; v_ub := r_eu2; v_vb := r_ev2;
+                v_lt := r_eL1;
+                v_lb := r_eL2;
+                r_ksw <= '0';
                 r_kRT <= r_eR1;  r_kRB <= r_eR2;
                 r_kTd <= r_sht1;
             end if;
-            r_kT <= v_lt;  r_kuT <= v_ut;  r_kvT <= v_vt;
-            r_kB <= v_lb;  r_kuB <= v_ub;  r_kvB <= v_vb;
+            r_kT <= v_lt;
+            r_kB <= v_lb;
             if v_lt(9 downto 8) = "00" then
                 r_km0 <= to_unsigned(32, 6);                 -- T < 256: full
             elsif v_lt(9 downto 8) = "11" then
@@ -1920,35 +1950,43 @@ begin
                 r_km <= (others => '0');
             end if;
             r_kT1  <= r_kT;   r_kB1  <= r_kB;
-            r_kuT1 <= r_kuT;  r_kvT1 <= r_kvT;
-            r_kuB1 <= r_kuB;  r_kvB1 <= r_kvB;
+            r_ksw1 <= r_ksw;
             r_kRT1 <= r_kRT;  r_kRB1 <= r_kRB;
 
             -- K2: partial sums of B*m
             r_kh   <= glide_hi(signed('0' & r_kB1), r_km);
             r_kl   <= glide_lo(signed('0' & r_kB1), r_km);
             r_kT2  <= r_kT1;
-            r_kuT2 <= r_kuT1;  r_kvT2 <= r_kvT1;
-            r_kuB2 <= r_kuB1;  r_kvB2 <= r_kvB1;
+            r_ksw2 <= r_ksw1;
             r_kRT2 <= r_kRT1;  r_kRB2 <= r_kRB1;
 
             -- K3: Bs = B*m/32
             v_bs   := shift_right(r_kh + r_kl, 5);
             r_kBs  <= unsigned(v_bs(9 downto 0));
             r_kT3  <= r_kT2;
-            r_kuT3 <= r_kuT2;  r_kvT3 <= r_kvT2;
-            r_kuB3 <= r_kuB2;  r_kvB3 <= r_kvB2;
+            r_ksw3 <= r_ksw2;
             r_kRT3 <= r_kRT2;  r_kRB3 <= r_kRB2;
 
             -- K4: out = max(T, Bs) -- continuous: no hard key edges and no
             -- seam where Weave's upper/lower swap (the swap happens at a
             -- wave's trough, where it is ~0 and loses the max anyway)
+            -- (the winner's chroma: osc2's when it is the upper wave and
+            -- wins, or the lower wave and wins)
             if r_kT3 >= r_kBs then
-                r_y_k <= r_kT3;  r_u_k <= r_kuT3;  r_v_k <= r_kvT3;
+                r_y_k <= r_kT3;
                 r_rim_k <= r_kRT3;
+                v_o2 := r_ksw3 = '1';
             else
-                r_y_k <= r_kBs;  r_u_k <= r_kuB3;  r_v_k <= r_kvB3;
+                r_y_k <= r_kBs;
                 r_rim_k <= r_kRB3;
+                v_o2 := r_ksw3 = '0';
+            end if;
+            if v_o2 then
+                r_u_k <= r_u2;  r_v_k <= r_v2;
+                r_u_ks <= not r_u2(9);  r_v_ks <= not r_v2(9);
+            else
+                r_u_k <= r_u1;  r_v_k <= r_v1;
+                r_u_ks <= not r_u1(9);  r_v_ks <= not r_v1(9);
             end if;
         end if;
     end process;
@@ -1964,6 +2002,7 @@ begin
     -- ========================================================================
     p_cscale : process(clk)
         variable v_cu, v_cv : signed(13 downto 0);
+        variable v_cu2, v_cv2 : signed(13 downto 0);   -- same values, sign from r_u_ks / r_v_ks
         variable v_n        : unsigned(3 downto 0);
         variable v_su, v_sv : signed(13 downto 0);
     begin
@@ -1971,14 +2010,16 @@ begin
             -- stage 1: partial products
             v_cu := resize(signed((not r_u_k(9)) & r_u_k(8 downto 0)), 14);
             v_cv := resize(signed((not r_v_k(9)) & r_v_k(8 downto 0)), 14);
+            v_cu2 := resize(signed(r_u_ks & r_u_k(8 downto 0)), 14);
+            v_cv2 := resize(signed(r_v_ks & r_v_k(8 downto 0)), 14);
             v_n  := r_y_k(8 downto 5);
             r_ua <= (others => '0');
             r_ub <= (others => '0');
             r_va <= (others => '0');
             r_vb <= (others => '0');
             if v_n(3) = '1' and v_n(2) = '1' then
-                r_ua <= shift_left(v_cu, 3) + shift_left(v_cu, 2);
-                r_va <= shift_left(v_cv, 3) + shift_left(v_cv, 2);
+                r_ua <= shift_left(v_cu, 3) + shift_left(v_cu2, 2);
+                r_va <= shift_left(v_cv, 3) + shift_left(v_cv2, 2);
             elsif v_n(3) = '1' then
                 r_ua <= shift_left(v_cu, 3);
                 r_va <= shift_left(v_cv, 3);
@@ -1987,8 +2028,8 @@ begin
                 r_va <= shift_left(v_cv, 2);
             end if;
             if v_n(1) = '1' and v_n(0) = '1' then
-                r_ub <= shift_left(v_cu, 1) + v_cu;
-                r_vb <= shift_left(v_cv, 1) + v_cv;
+                r_ub <= shift_left(v_cu, 1) + v_cu2;
+                r_vb <= shift_left(v_cv, 1) + v_cv2;
             elsif v_n(1) = '1' then
                 r_ub <= shift_left(v_cu, 1);
                 r_vb <= shift_left(v_cv, 1);
