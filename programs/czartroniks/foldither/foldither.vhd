@@ -8,7 +8,18 @@
 -- (Bayer) + mirror / kaleidoscope.  Three knobs each; the switches and the
 -- slider decide how they combine.
 --
---   K1 Segment  pane width 1024 / 512 / 256 / 128 / 64 px
+-- v0.2.2 (2026-10-17): resolution scaling.  The fold runs in virtual
+-- 1080-line units (mondrian's scheme: x step 1 / 1.5 / 2 units a pixel at
+-- 1080 / 720p / SD from the timing ID), so a Segment is the same fraction
+-- of the screen HEIGHT in every mode (SD: a 1440-unit 4:3 window) and Skew
+-- keeps its angle (lean per field line x the virtual y step).  The source
+-- column is the fold result / x step, tracked by a per-pixel counter that
+-- restarts at each fold period (no per-pixel divide); its line-start value
+-- is a pipelined /3 (720p) or shift.  1080p bit-identical.  The Bayer
+-- dither stays at pixel scale.
+--
+--   K1 Segment  pane width 1024 / 512 / 256 / 128 / 64 px (1080p pixels;
+--               the same fraction of the screen height in every mode)
 --   K2 Slide    the panes slide across the picture, bipolar, squared
 --               (centre detent; top ~7.5 px a frame)
 --   K3 Skew     per-line lean of the panes, bipolar, squared (centre
@@ -170,6 +181,31 @@ architecture foldither of program_top is
         return not r(9 downto 0);
     end function;
 
+    -- Resolution scaling (mondrian's scheme): x step in half virtual units
+    -- per pixel -- 1080 2 (1.0), 720p 3 (1.5), SD 4 (2.0: 720 px span 1440
+    -- units, a 4:3 window of the 1080 canvas).
+    function f_vstep_x(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0 | 4 | 8 | 12 => return to_unsigned(4, 3);
+            when 5 | 6 | 14     => return to_unsigned(3, 3);
+            when others         => return to_unsigned(2, 3);
+        end case;
+    end function;
+    -- floor(2^k / 3): a power-of-2 virtual length / 1.5 (720p), k = 2..11
+    function f_d3(k : unsigned(3 downto 0)) return unsigned is
+        variable r : unsigned(10 downto 0);
+    begin
+        case to_integer(k) is
+            when 2 => r := to_unsigned(1, 11);   when 3 => r := to_unsigned(2, 11);
+            when 4 => r := to_unsigned(5, 11);   when 5 => r := to_unsigned(10, 11);
+            when 6 => r := to_unsigned(21, 11);  when 7 => r := to_unsigned(42, 11);
+            when 8 => r := to_unsigned(85, 11);  when 9 => r := to_unsigned(170, 11);
+            when 10 => r := to_unsigned(341, 11); when others => r := to_unsigned(682, 11);
+        end case;
+        return r;
+    end function;
+
     type t_lb_y is array (0 to 2047) of std_logic_vector(9 downto 0);
     type t_lb_c is array (0 to 1023) of std_logic_vector(7 downto 0);
     signal lbY0, lbY1 : t_lb_y := (others => "0001000000");
@@ -204,7 +240,6 @@ architecture foldither of program_top is
     -- geometry (per frame / field)
     signal s_e      : unsigned(3 downto 0) := to_unsigned(8, 4);         -- log2 pane width, 3..10
     signal s_w      : unsigned(11 downto 0) := to_unsigned(256, 12);     -- pane width W
-    signal s_fmask  : unsigned(11 downto 0) := to_unsigned(511, 12);     -- 2W - 1
     signal s_pbit   : unsigned(11 downto 0) := to_unsigned(256, 12);     -- pane parity bit (W, or 2W for tiles)
     signal s_boff   : unsigned(10 downto 0) := to_unsigned(128, 11);     -- W/2 (mirror) or W (repeat)
     signal s_wf     : unsigned(10 downto 0) := to_unsigned(1920, 11);    -- field-latched line width
@@ -225,6 +260,30 @@ architecture foldither of program_top is
     signal s_mat : unsigned(1 downto 0) := "10";
     signal s_saw_active : std_logic := '0';
 
+    -- Resolution scaling: x step in half virtual units per pixel (1080 2,
+    -- 720p 3, SD 4), decoded every clock from the timing ID; fold geometry in
+    -- virtual units (half units for the per-pixel phase), source columns in
+    -- real pixels (virtual / x step).
+    signal s_tid    : std_logic_vector(3 downto 0) := "0011";
+    signal s_xsh    : unsigned(2 downto 0) := to_unsigned(2, 3);
+    signal s_cxv    : unsigned(11 downto 0) := to_unsigned(960, 12);    -- virtual centre
+    signal s_maskh  : unsigned(11 downto 0) := to_unsigned(1023, 12);   -- 4W - 1 (half units)
+    signal s_pbith  : unsigned(12 downto 0) := to_unsigned(512, 13);    -- 2 * pbit
+    signal s_wr     : unsigned(10 downto 0) := to_unsigned(256, 11);    -- W / x step (real px)
+    signal s_boffr  : unsigned(10 downto 0) := to_unsigned(128, 11);    -- boff / x step
+    signal s_kadd, s_kmlo : signed(12 downto 0) := (others => '0');     -- src = kadd + m / kmlo - m
+    -- next line's phase (half units) and its source counter start m / x step
+    signal s_bnh    : unsigned(12 downto 0) := (others => '0');
+    signal s_mh0    : unsigned(11 downto 0) := (others => '0');
+    signal s_n13    : unsigned(12 downto 0) := (others => '0');
+    signal s_n5     : unsigned(14 downto 0) := (others => '0');
+    signal s_n273   : unsigned(22 downto 0) := (others => '0');
+    signal s_q3     : unsigned(10 downto 0) := (others => '0');
+    signal s_mr0, s_mr0l : unsigned(10 downto 0) := (others => '0');
+    -- skew in virtual units per field line: kp * y step (two shift-add stages)
+    signal s_kpa, s_kpb : signed(18 downto 0) := (others => '0');
+    signal s_kpv    : unsigned(17 downto 0) := (others => '0');
+
     signal s_rx, s_wr_x : unsigned(10 downto 0) := (others => '0');
     signal s_in_y, s_in_u, s_in_v : unsigned(9 downto 0) := (others => '0');
     signal s_prev_hsync_n, s_prev_vsync_n, s_prev_avid : std_logic := '1';
@@ -232,7 +291,7 @@ architecture foldither of program_top is
     -- per line, latched at the avid rise
     signal s_lw : std_logic := '0';                                      -- bank this line writes
     signal s_lnum, s_lm1 : unsigned(2 downto 0) := (others => '0');     -- screen / source dither row
-    signal s_base_a : unsigned(11 downto 0) := (others => '0');          -- pane offset - cx
+    signal s_base_h : unsigned(12 downto 0) := (others => '0');          -- 2 * (pane offset - cx), virtual
     -- hsync->avid parity of this line and of each bank's capture line
     signal s_hpar, s_line_par, s_cap_par0, s_cap_par1, s_rowswap : std_logic := '0';
 
@@ -240,9 +299,10 @@ architecture foldither of program_top is
     type t_x3 is array (2 to 6) of unsigned(2 downto 0);
     signal s_xs : t_x3 := (others => (others => '0'));                  -- screen x(2:0) by stage
     signal s_par : std_logic_vector(3 to 16) := (others => '0');         -- alternate pane by stage
-    signal s_a2  : unsigned(11 downto 0) := (others => '0');
-    signal s_m3  : unsigned(11 downto 0) := (others => '0');
-    signal s_t4  : unsigned(11 downto 0) := (others => '0');
+    signal s_ah  : unsigned(12 downto 0) := (others => '0');            -- fold phase, virtual half units
+    signal s_mr3 : unsigned(10 downto 0) := (others => '0');            -- (phase mod 2W) / x step, real px
+    signal s_srca4, s_srcb4 : signed(12 downto 0) := (others => '0');
+    signal s_sel4 : std_logic := '0';
     signal s_src5 : signed(12 downto 0) := (others => '0');
     signal s_addr6 : unsigned(10 downto 0) := (others => '0');
     -- quantizer path
@@ -326,18 +386,62 @@ begin
                 end if;
             end loop;
 
-            -- geometry: W = 2^(10 - K1 - P12) = 1024 .. 8 px
+            -- geometry: W = 2^(10 - K1 - P12) = 1024 .. 8 virtual units (1080p
+            -- px); the fold runs in virtual units, sources are real px
+            s_tid <= registers_in(8)(3 downto 0);
+            s_xsh <= f_vstep_x(s_tid);
             s_e <= to_unsigned(10, 4) - resize(s_z(0), 4) - resize(s_z(3), 4);
             v_w := shift_left(to_unsigned(1, 12), to_integer(s_e));
             s_w <= v_w;
-            s_fmask <= shift_left(v_w, 1) - 1;
+            s_maskh <= shift_left(v_w, 2) - 1;
             if s_sw_repeat = '1' then
                 s_pbit <= shift_left(v_w, 1); s_boff <= v_w(10 downto 0);
             else
                 s_pbit <= v_w; s_boff <= v_w(11 downto 1);
             end if;
+            s_pbith <= shift_left(resize(s_pbit, 13), 1);
+            -- W and boff in real px: / 1 (1080), / 1.5 (720p), / 2 (SD)
+            case to_integer(s_xsh) is
+                when 3 =>
+                    s_wr <= f_d3(s_e + 1);
+                    if s_sw_repeat = '1' then s_boffr <= f_d3(s_e + 1); else s_boffr <= f_d3(s_e); end if;
+                when 4 =>
+                    s_wr <= s_w(11 downto 1);
+                    s_boffr <= '0' & s_boff(10 downto 1);
+                when others =>
+                    s_wr <= s_w(10 downto 0);
+                    s_boffr <= s_boff;
+            end case;
             s_cx <= '0' & s_wf(10 downto 1);
-            s_bsrc <= signed(resize(s_cx, 13)) - signed(resize(s_boff, 13));
+            -- virtual centre: (real width * x step) / 2
+            case to_integer(s_xsh) is
+                when 3 => s_cxv <= resize(s_wf(10 downto 1), 12) + resize(s_wf(10 downto 2), 12);
+                when 4 => s_cxv <= resize(s_wf, 12);
+                when others => s_cxv <= resize(s_wf(10 downto 1), 12);
+            end case;
+            s_bsrc <= signed(resize(s_cx, 13)) - signed(resize(s_boffr, 13));
+            -- source = kadd + m (repeat; mirror past the turn) / kmlo - m
+            if s_sw_repeat = '1' then
+                s_kadd <= s_bsrc;
+            else
+                s_kadd <= s_bsrc - signed(resize(s_wr, 13));
+            end if;
+            s_kmlo <= s_bsrc + signed(resize(s_wr, 13));
+            -- next line's fold phase (half units) and the source counter's
+            -- start (phase mod 2W) / x step: shifts, or floor((m+1)*1365/4096)
+            -- = floor(m/3) exactly for m < 4096 at 720p.  Quasi-static (shrow
+            -- moves at the avid fall), latched at the avid rise.
+            s_bnh  <= (s_shrow(22 downto 11) - s_cxv) & '0';
+            s_mh0  <= s_bnh(11 downto 0) and s_maskh;
+            s_n13  <= resize(s_mh0, 13) + 1;
+            s_n5   <= resize(s_n13, 15) + shift_left(resize(s_n13, 15), 2);
+            s_n273 <= shift_left(resize(s_n5, 23), 8) + shift_left(resize(s_n5, 23), 4);
+            s_q3   <= resize(shift_right(s_n273 + resize(s_n5, 23), 12), 11);
+            case to_integer(s_xsh) is
+                when 3 => s_mr0 <= s_q3;
+                when 4 => s_mr0 <= resize(s_mh0(11 downto 2), 11);
+                when others => s_mr0 <= s_mh0(11 downto 1);
+            end case;
             s_hi <= signed(resize(s_wf, 13)) - (C_EDGE + 1);                -- last column inside the inset
             s_hi2 <= shift_left(s_hi, 1);
             s_lo2mhi <= to_signed(2 * C_EDGE, 13) - s_hi;                   -- below: the reflection passes hi
@@ -353,9 +457,35 @@ begin
             if s_k_skew < 512 then s_kneg <= '1'; else s_kneg <= '0'; end if;
             s_sp <= s_sd * (resize(s_sd(8 downto 4), 6) + 1);
             s_kp <= s_kd * (resize(s_kd(8 downto 4), 6) + 1);
+            -- Skew in virtual units per FIELD line: kp * y step (1080 / active
+            -- lines, x2 interlaced), as two shift-add pairs
+            case to_integer(unsigned(s_tid)) is
+                when 0 =>                                                   -- 480i 4.445
+                    s_kpa <= signed(resize(shift_left(resize(s_kp, 18), 2), 19)) + signed(resize(shift_right(s_kp, 1), 19));
+                    s_kpb <= signed(resize(shift_right(s_kp, 7), 19)) - signed(resize(shift_right(s_kp, 4), 19));
+                when 8 =>                                                   -- 576i 3.75
+                    s_kpa <= signed(resize(shift_left(resize(s_kp, 18), 2), 19)) - signed(resize(shift_right(s_kp, 2), 19));
+                    s_kpb <= (others => '0');
+                when 4 =>                                                   -- 480p 2.25
+                    s_kpa <= signed(resize(shift_left(resize(s_kp, 18), 1), 19)) + signed(resize(shift_right(s_kp, 2), 19));
+                    s_kpb <= (others => '0');
+                when 12 =>                                                  -- 576p 1.875
+                    s_kpa <= signed(resize(shift_left(resize(s_kp, 18), 1), 19)) - signed(resize(shift_right(s_kp, 3), 19));
+                    s_kpb <= (others => '0');
+                when 5 | 6 | 14 =>                                          -- 720p 1.5
+                    s_kpa <= signed(resize(s_kp, 19)) + signed(resize(shift_right(s_kp, 1), 19));
+                    s_kpb <= (others => '0');
+                when 1 | 2 | 10 =>                                          -- 1080i 2
+                    s_kpa <= signed(resize(shift_left(resize(s_kp, 18), 1), 19));
+                    s_kpb <= (others => '0');
+                when others =>                                              -- 1080p 1
+                    s_kpa <= signed(resize(s_kp, 19));
+                    s_kpb <= (others => '0');
+            end case;
+            s_kpv <= unsigned(resize(s_kpa + s_kpb, 18));
             s_sneg2 <= s_sneg; s_kneg2 <= s_kneg;
             if s_sneg2 = '1' then s_sstep <= to_unsigned(0, 23) - resize(s_sp, 23); else s_sstep <= resize(s_sp, 23); end if;
-            if s_kneg2 = '1' then s_kstep <= to_unsigned(0, 23) - resize(s_kp, 23); else s_kstep <= resize(s_kp, 23); end if;
+            if s_kneg2 = '1' then s_kstep <= to_unsigned(0, 23) - resize(s_kpv, 23); else s_kstep <= resize(s_kpv, 23); end if;
 
             -- quantizer constants: L = Bits, Lb = 2 coarser (2 finer at 1-2 bits)
             s_l <= s_z(1) + 1;
@@ -373,7 +503,8 @@ begin
                 s_lw <= not s_lw;
                 s_lnum <= s_line(2 downto 0);
                 s_lm1 <= s_line(2 downto 0) - 1;
-                s_base_a <= s_shrow(22 downto 11) - resize(s_cx, 12);
+                s_base_h <= s_bnh;
+                s_mr0l   <= s_mr0;
                 s_line_par <= s_hpar;
                 if s_lw = '0' then s_cap_par1 <= s_hpar; else s_cap_par0 <= s_hpar; end if;
             end if;
@@ -413,21 +544,31 @@ begin
             s_xs(2) <= s_wr_x(2 downto 0);
             for i in 3 to 6 loop s_xs(i) <= s_xs(i - 1); end loop;
             for i in 4 to 16 loop s_par(i) <= s_par(i - 1); end loop;
-            -- 2: position relative to the centre plus slide / skew (mod 4096)
-            s_a2 <= resize(s_wr_x, 12) + s_base_a;
-            -- 3: one period of the fold; pane (or tile) parity
-            s_m3 <= s_a2 and s_fmask;
-            if (s_a2 and s_pbit) /= 0 then s_par(3) <= '1'; else s_par(3) <= '0'; end if;
-            -- 4: mirror |m - W| / repeat m
-            if s_sw_repeat = '1' then
-                s_t4 <= s_m3;
-            elsif s_m3 >= s_w then
-                s_t4 <= s_m3 and (s_w - 1);
+            -- 2: virtual position relative to the centre plus slide / skew, in
+            --    half units (mod 4096 units): x step per pixel from the line's
+            --    start phase
+            if s_avid_sr(0) = '1' and s_avid_sr(1) = '0' then
+                s_ah <= s_base_h;
             else
-                s_t4 <= s_w - s_m3;
+                s_ah <= s_ah + s_xsh;
             end if;
-            -- 5: source column
-            s_src5 <= s_bsrc + signed(resize(s_t4, 13));
+            -- 3: pane (or tile) parity; m = (phase mod 2W) / x step in real px,
+            --    a counter that restarts where the phase wraps (1080p: m = the
+            --    phase itself)
+            if (s_ah and s_pbith) /= 0 then s_par(3) <= '1'; else s_par(3) <= '0'; end if;
+            if s_avid_sr(1) = '1' and s_avid_sr(2) = '0' then
+                s_mr3 <= s_mr0l;
+            elsif (s_ah(11 downto 2) and s_maskh(11 downto 2)) = 0 and s_ah(1 downto 0) < s_xsh then
+                s_mr3 <= (others => '0');
+            else
+                s_mr3 <= s_mr3 + 1;
+            end if;
+            -- 4: source column, both arms (mirror: |m - W| about the turn;
+            --    repeat: m); 5: pick
+            s_srca4 <= s_kadd + signed(resize(s_mr3, 13));
+            s_srcb4 <= s_kmlo - signed(resize(s_mr3, 13));
+            s_sel4  <= s_sw_repeat or s_par(3);
+            if s_sel4 = '1' then s_src5 <= s_srca4; else s_src5 <= s_srcb4; end if;
             -- 6: off the line -> reflect inside the inset (clamp an overshoot);
             --    every compare is on src against a registered bound
             v_rl := to_signed(2 * C_EDGE, 13) - s_src5;
