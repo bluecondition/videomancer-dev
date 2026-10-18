@@ -10,10 +10,10 @@ Two-mirror kaleidoscope meets bloom: panes multiply as the axis moves, the sourc
 |---|---|---|---|
 | K1 | Axis | 0–100% | first mirror position, 0–100% of the width. The mirrors keep bouncing, so below 50% the panes multiply (to 16) |
 | K2 | Folds | None / One / Two / Three | None / One / Two / Three: pane width = Axis, /2, /4 |
-| K3 | Slide | -100–100% | the source scrolls under the mirrors, bipolar; squared speed curve with a centre detent (to 15 px a frame) |
+| K3 | Slide | -100–100% | the source scrolls under the mirrors, bipolar; squared speed curve with a centre detent (to 15 px a frame at 1080p, scaled with the screen height) |
 | K4 | Glow | 0–100% | bloom gain |
 | K5 | Threshold | 0–100% | luma above which the blur blooms, black to ~white |
-| K6 | Radius | 0–100% | blur width 7–255 px, exponential (127 px max in SD) |
+| K6 | Radius | 0–100% | blur width 7–255 px at 1080p, exponential (the same size relative to the screen height at 720p and SD) |
 | S7 | Glow | Mirrored / Straight | glow fetched mirrored with the picture / unmirrored (the original picture's highlights) |
 | S8 | Panes | Plain / Negative | mirrored panes shown as negative |
 | S9 | Tint | Off / Warm | warm glow |

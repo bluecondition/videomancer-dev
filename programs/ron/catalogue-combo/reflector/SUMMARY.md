@@ -107,3 +107,24 @@ Standalone synth: 0 `emulate_transparency` (no_rw_check effective).
   auto-sweep); dropping Folds None (it gates Axis, Sweep, S8 and most of
   S10); a fixed-mirror "content flows through" Slide; Screen blend.
 - Presets: capture defaults + more looks from hardware.
+
+## v0.2.2 resolution scaling (2026-10-17)
+
+The pane layout stays a fraction of the width (Axis and the Sweep depth; the
+pane count is a count). The drawn sizes are 1080-line pixels, scaled per mode
+from the timing ID (`registers_in(8)`). 1080p is bit-identical (sim pixel
+diff 0).
+- Seams: the distances are measured in virtual half units (x2 / x3 / x4 per
+  pixel at 1080 / 720p / SD, saturated beyond 63 px), so the ridge is 32
+  units wide everywhere: 32 px at 1080, 21.3 px at 720p (was 32, lumped with
+  HD by `width > 1024`), 16 px at SD (as before). The pane-width narrowing
+  works on the pane width in units too, so SD narrows at 32 / 16 px (was
+  64 / 32).
+- Radius: the table index drops 15 (720p) / 26 (SD) steps, so the box width
+  is x2/3 / x1/2 (same engine and fix as halation v1.0.2).
+- Slide speed x2/3 (720p) / x1/2 (SD). At those modes the speed is taken one
+  frame late (a free-running scale of last frame's value; invisible).
+
+Build (`./build_combo.sh reflector`, router2): 6/6 on seed 1. HD Analog 79.9,
+HD HDMI 79.8, HD Dual 80.0; SD 83.9 / 89.5 / 72.4 MHz. 5,889-5,912 LC (77%),
+24/32 EBR.

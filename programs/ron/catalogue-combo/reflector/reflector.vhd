@@ -12,10 +12,12 @@
 --                keep bouncing, so below 50% the panes multiply (to 16)
 --   K2 Folds     None / One / Two / Three: pane width = Axis, /2, /4
 --   K3 Slide     the source scrolls under the mirrors, bipolar; squared
---                speed curve with a centre detent (to 15 px a frame)
+--                speed curve with a centre detent (to 15 px a frame; 1080-
+--                line px, scaled per mode)
 --   K4 Glow      bloom gain
 --   K5 Threshold luma above which the blur blooms (black .. ~white)
---   K6 Radius    blur width 7..255 px (two cascaded boxes, exponential)
+--   K6 Radius    blur width 7..255 px (two cascaded boxes, exponential;
+--                1080-line px, scaled per mode)
 --
 --   S7  Glow     glow fetched mirrored with the picture / unmirrored
 --   S8  Panes    mirrored panes shown as negative
@@ -39,6 +41,17 @@
 -- HDMI bar fix's luma swing without dimming the mid-tones) and [1 2 1] on
 -- Y/U/V.  Latency 14 clocks, all modes, blanking-gated.  All line-buffer
 -- reads are of the previous line.
+--
+-- v0.2.2 (2026-10-17): resolution scaling.  The pane layout stays a
+-- fraction of the width (Axis, Sweep depth: the pane count is a count), but
+-- the drawn sizes are 1080-line pixels, scaled per mode from the video
+-- timing ID (registers_in(8)): seam distances are measured in virtual half
+-- units (x 2 / 3 / 4 per pixel at 1080 / 720p / SD, saturated beyond 63 px),
+-- so the seam ridge is 32 units wide at every resolution (16 px at SD as
+-- before, 21.3 px at 720p, was 32) and narrows by the pane width in units;
+-- the Radius table index drops 15 / 26 steps at 720p / SD (box width x 2/3 /
+-- x 1/2; the table runs 26 steps per octave); the Slide speed is x 2/3 /
+-- x 1/2 (taken one frame late there).  1080p is unchanged.
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -73,6 +86,33 @@ architecture reflector of program_top is
             return to_unsigned(1023, 10);
         else
             return unsigned(v(9 downto 0));
+        end if;
+    end function;
+
+    -- Resolution scaling: virtual x step from the timing ID, in half units
+    -- per pixel (1080: 2, 720p: 3, SD: 4 -- 720 px span 1440 units)
+    function f_vstep_x(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0 | 4 | 8 | 12 => return to_unsigned(4, 3);
+            when 5 | 6 | 14     => return to_unsigned(3, 3);
+            when others         => return to_unsigned(2, 3);
+        end case;
+    end function;
+    -- a seam distance (px) in half units: d * x step, or all-ones beyond 63 px
+    -- (no seam reaches that far) or when the seam is not valid
+    function f_sdist(d : unsigned(10 downto 0); ok : boolean; xs : unsigned(2 downto 0)) return unsigned is
+        variable v : unsigned(8 downto 0);
+    begin
+        case xs is
+            when "011"  => v := resize(d(5 downto 0), 9) + shift_left(resize(d(5 downto 0), 9), 1);
+            when "100"  => v := shift_left(resize(d(5 downto 0), 9), 2);
+            when others => v := shift_left(resize(d(5 downto 0), 9), 1);
+        end case;
+        if ok and d(10 downto 6) = 0 then
+            return v;
+        else
+            return to_unsigned(511, 9);
         end if;
     end function;
 
@@ -298,6 +338,12 @@ architecture reflector of program_top is
     -- blur width
     signal s_rtab   : t_rt := (others => '0');
     signal s_sd     : std_logic := '0';
+    -- resolution scaling (static per mode, decoded every clock)
+    signal s_vxs    : unsigned(2 downto 0)  := to_unsigned(2, 3);
+    signal s_ridx   : unsigned(6 downto 0)  := (others => '0');   -- Radius table index
+    signal s_Px     : unsigned(12 downto 0) := (others => '0');   -- pane width in half units
+    signal s_q168, s_q3r : unsigned(15 downto 0) := (others => '0');
+    signal s_sqx    : unsigned(7 downto 0)  := (others => '0');   -- Slide speed, 720p / SD
     signal s_n      : unsigned(7 downto 0) := to_unsigned(16, 8);
     signal s_rm     : unsigned(7 downto 0) := to_unsigned(128, 8);
     signal s_sh     : unsigned(2 downto 0) := "010";
@@ -388,7 +434,8 @@ architecture reflector of program_top is
     signal s_odd1, s_odd2, s_odd3 : std_logic := '0';
     signal s_da1, s_db1, s_xl1, s_xr1, s_tl1, s_tr1 : unsigned(10 downto 0) := (others => '1');
     signal s_xget1   : std_logic := '0';
-    signal s_ma2, s_mb2, s_mw2, s_m3, s_mw3, s_d4 : unsigned(10 downto 0) := (others => '1');
+    -- seam distances in half units (x step x px), 511 = none within reach
+    signal s_ma2, s_mb2, s_mw2, s_m3, s_mw3, s_d4 : unsigned(8 downto 0) := (others => '1');
     signal s_rb2     : std_logic := '0';
     signal s_r5      : unsigned(4 downto 0) := (others => '0');
     signal s_rr6     : unsigned(4 downto 0) := (others => '0');
@@ -459,6 +506,9 @@ begin
     p_ctrl : process(clk)
         variable v_abs : signed(10 downto 0);
         variable v_sk  : unsigned(1 downto 0);
+        variable v_ri  : unsigned(6 downto 0);
+        variable v_q   : unsigned(15 downto 0);
+        variable v_qh  : unsigned(8 downto 0);
     begin
         if rising_edge(clk) then
             s_prev_hsync_n <= data_in.hsync_n;
@@ -511,7 +561,33 @@ begin
             s_thr_b <= shift_right(s_k_thr, 4) + 64;
             s_thr   <= s_thr_a + s_thr_b;
             -- blur width: latched in vblank just ahead of the running-sum re-zero
-            s_rtab <= f_rtab(s_k_radius(9 downto 3));
+            -- resolution scaling: x step (static per mode); Radius index -15
+            -- at 720p (x 2/3), -26 at SD (x 1/2), floored at 0
+            s_vxs <= f_vstep_x(registers_in(8)(3 downto 0));
+            v_ri := s_k_radius(9 downto 3);
+            case s_vxs is
+                when "011"  => if v_ri < 15 then s_ridx <= (others => '0'); else s_ridx <= v_ri - 15; end if;
+                when "100"  => if v_ri < 26 then s_ridx <= (others => '0'); else s_ridx <= v_ri - 26; end if;
+                when others => s_ridx <= v_ri;
+            end case;
+            s_rtab <= f_rtab(s_ridx);
+            -- pane width in half units (seam narrowing)
+            case s_vxs is
+                when "011"  => s_Px <= resize(s_P, 13) + shift_left(resize(s_P, 13), 1);
+                when "100"  => s_Px <= shift_left(resize(s_P, 13), 2);
+                when others => s_Px <= shift_left(resize(s_P, 13), 1);
+            end case;
+            -- Slide speed in 1080-line px -> real px (720p x 2/3 = (q*171 +
+            -- 128) >> 8, SD x 1/2), free-running from last frame's s_sq
+            s_q168 <= shift_left(resize(s_sq(17 downto 10), 16), 7) + shift_left(resize(s_sq(17 downto 10), 16), 5) + shift_left(resize(s_sq(17 downto 10), 16), 3);
+            s_q3r  <= shift_left(resize(s_sq(17 downto 10), 16), 1) + resize(s_sq(17 downto 10), 16) + 128;
+            v_q  := s_q168 + s_q3r;
+            v_qh := resize(s_sq(17 downto 10), 9) + 1;
+            if s_vxs = "011" then
+                s_sqx <= v_q(15 downto 8);
+            else
+                s_sqx <= v_qh(8 downto 1);
+            end if;
             if s_line_width > 1024 then
                 s_sd <= '0';
             else
@@ -581,10 +657,16 @@ begin
                     s_vstep <= s_vstep + 1;
                 when 5 =>
                     s_sw <= shift_left(resize(s_swh, 21), 5) + resize(s_swl, 21);
-                    if s_sds < 0 then
-                        s_spd <= -signed(resize(s_sq(17 downto 10), 10));
+                    if s_vxs = "010" then
+                        if s_sds < 0 then
+                            s_spd <= -signed(resize(s_sq(17 downto 10), 10));
+                        else
+                            s_spd <= signed(resize(s_sq(17 downto 10), 10));
+                        end if;
+                    elsif s_sds < 0 then
+                        s_spd <= -signed(resize(s_sqx, 10));
                     else
-                        s_spd <= signed(resize(s_sq(17 downto 10), 10));
+                        s_spd <= signed(resize(s_sqx, 10));
                     end if;
                     s_vstep <= s_vstep + 1;
                 when 6 =>
@@ -653,17 +735,13 @@ begin
                         s_u0   <= s_P - unsigned(s_dd(10 downto 0));
                         s_dir0 <= '0';
                     end if;
-                    -- seam half-width 32 px (HD) / 16 (SD), halved again for
-                    -- each octave the panes fall under 64 px
-                    if s_sd = '1' then
-                        v_sk := "01";
-                    else
-                        v_sk := "00";
-                    end if;
-                    if s_P < 64 then
+                    -- seam half-width 32 units (32 px at 1080, 16 at SD), halved
+                    -- again for each octave the panes fall under 64 units
+                    v_sk := "00";
+                    if s_Px < 128 then
                         v_sk := v_sk + 1;
                     end if;
-                    if s_P < 32 then
+                    if s_Px < 64 then
                         v_sk := v_sk + 1;
                     end if;
                     s_sk <= v_sk;
@@ -898,22 +976,13 @@ begin
             -- stage 2: validity (on screen, before the wrap / after the source edge)
             s_odd2 <= s_odd1;
             s_rb2  <= s_rbank;
-            if s_none = '0' and s_da1 < s_xr1 and s_da1 <= s_tr1 then
-                s_ma2 <= s_da1;
+            -- (distances in half units, saturated: see f_sdist)
+            s_ma2 <= f_sdist(s_da1, s_none = '0' and s_da1 < s_xr1 and s_da1 <= s_tr1, s_vxs);
+            s_mb2 <= f_sdist(s_db1, s_none = '0' and s_db1 < s_xl1 and s_db1 < s_tl1, s_vxs);
+            if s_xget1 = '1' then
+                s_mw2 <= f_sdist(s_tl1, s_wrapok = '1', s_vxs);
             else
-                s_ma2 <= (others => '1');
-            end if;
-            if s_none = '0' and s_db1 < s_xl1 and s_db1 < s_tl1 then
-                s_mb2 <= s_db1;
-            else
-                s_mb2 <= (others => '1');
-            end if;
-            if s_wrapok = '0' then
-                s_mw2 <= (others => '1');
-            elsif s_xget1 = '1' then
-                s_mw2 <= s_tl1;
-            else
-                s_mw2 <= s_tr1;
+                s_mw2 <= f_sdist(s_tr1, s_wrapok = '1', s_vxs);
             end if;
 
             -- stages 3..4: nearest seam
@@ -1019,6 +1088,7 @@ begin
         variable v_u10, v_v10 : unsigned(9 downto 0);
         variable v_rr  : unsigned(9 downto 0);
         variable v_s   : unsigned(11 downto 0);
+        variable v_r7  : unsigned(6 downto 0);
     begin
         if rising_edge(clk) then
             -- stage 3: bank select
@@ -1068,32 +1138,34 @@ begin
                 s_uc(i) <= s_uc(i - 1);
                 s_vc(i) <= s_vc(i - 1);
             end loop;
-            -- seam ridge 32 - (d << k), capped at 31, zero beyond
+            -- seam ridge (64 - (d << k)) / 2 with d in half units (1080: 32 -
+            -- (px << k)), capped at 31, zero beyond
             if s_d4 = 0 then
                 s_r5 <= "11111";
             else
                 case to_integer(s_sk) is
                     when 0 =>
+                        if s_d4 < 64 then
+                            v_r7 := to_unsigned(64, 7) - ('0' & s_d4(5 downto 0));
+                            s_r5 <= v_r7(5 downto 1);
+                        else
+                            s_r5 <= (others => '0');
+                        end if;
+                    when 1 =>
                         if s_d4 < 32 then
                             s_r5 <= resize(to_unsigned(32, 6) - ('0' & s_d4(4 downto 0)), 5);
                         else
                             s_r5 <= (others => '0');
                         end if;
-                    when 1 =>
+                    when 2 =>
                         if s_d4 < 16 then
                             s_r5 <= resize(to_unsigned(32, 6) - ('0' & s_d4(3 downto 0) & '0'), 5);
                         else
                             s_r5 <= (others => '0');
                         end if;
-                    when 2 =>
+                    when others =>
                         if s_d4 < 8 then
                             s_r5 <= resize(to_unsigned(32, 6) - ('0' & s_d4(2 downto 0) & "00"), 5);
-                        else
-                            s_r5 <= (others => '0');
-                        end if;
-                    when others =>
-                        if s_d4 < 4 then
-                            s_r5 <= resize(to_unsigned(32, 6) - ('0' & s_d4(1 downto 0) & "000"), 5);
                         else
                             s_r5 <= (others => '0');
                         end if;
