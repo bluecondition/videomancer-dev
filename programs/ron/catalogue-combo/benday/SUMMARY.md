@@ -13,7 +13,7 @@ review of v0.1.0. It is **not flashed yet**.
 | K2 Dot Gain | dot weight; at 100% black prints solid and white prints clean paper |
 | K3 Screen | Dot / Line / Diamond / Square (labelled) |
 | K4 Height | band height 8 / 16 / 32 / 64 lines (labelled) |
-| K5 Shift | sideways tear of a moshed band: ±1020 px on HD-width lines, ±510 on SD |
+| K5 Shift | sideways tear of a moshed band: ±1020 virtual units (1020 px at 1080, 680 at 720p, 510 on SD) |
 | K6 Rate | re-roll rate, from every ~2 s to every frame |
 | S7 Ink | Dark: black dots on white paper. Light: white dots on black (both positive) |
 | S8 Colour | Mono / the bright side (paper, or the light ink) takes the cell colour at 2× saturation |
@@ -101,11 +101,52 @@ Tier 3, optional:
   to stop vertical aliasing and shimmer at big cells.
 - A 45° screen angle (the classic newspaper ruling), or CMY separations at
   different angles.
-- SD interlace: cells are field-line based, so they are 2× tall on 480i/576i.
+- ~~SD interlace: cells are field-line based, so they are 2× tall on 480i/576i.~~ Fixed in v0.2.2.
 - Rate at 100% re-rolls every frame (a 60 Hz strobe); cap it at every 2nd
   frame if it reads as flicker.
 - Capture defaults and presets from hardware (current presets are
   hand-written for v0.2.0 semantics).
+
+## v0.2.2 (2026-10-17): resolution scaling
+
+At 720p the cells, bands and tear were 1.5× too big relative to the screen
+(720p took the HD tear by width bit 10), and on 480i the cells were 2× too
+wide and 4.4× too tall (field-line rows). Everything generated now runs in
+virtual 1080-line units, with steps from the timing ID (registers_in(8)):
+
+- x: a half-unit accumulator (steps 2 / 3 / 4 = 1 / 1.5 / 2 units a pixel);
+  only its low 6 bits are needed, because cells and the 32-unit colour blocks
+  are powers of 2. The cell's last real pixel = torn x + floor(half units
+  left / x step); at 1080 that is exactly the old `x or mask`. The box window
+  is N px at 1080, N/2 px at SD (the whole cell) and N/2 px at 720p (3/4 of
+  the 2N/3-px cell).
+- y: band hash from the true virtual line (Q.8 per field line); cell rows
+  from a second accumulator whose SD step is snapped to 4.0 (2.0 progressive),
+  so every cell row is a whole number of lines. The exact 4.44 put 1.8 lines
+  in an 8-unit cell and the rows beat into horizontal streaks. SD cells are
+  therefore ~11% taller than exact.
+- Pixels and lines sample their left/top edge, as 1080 always did. With
+  centre samples a 2-line cell read screen rows 4 and 12, both inside the
+  dot, so mid-tones printed as solid vertical stripes.
+- On 480i/576i the 4-px cell is floored to 8 units (2 field lines). A 4-unit
+  cell is under one line, every line read the same screen row, and the
+  halftone vanished.
+- Tear: ±1020 virtual units (K5 × 171/256 at 720p; SD unchanged at ±510 px).
+
+1080p is bit-identical (diff1080 = 0 at the scaling-test settings).
+
+Build (`./build_combo.sh benday`, router2):
+
+| Config | Fmax | Seed |
+|---|---|---|
+| HD Analog | 91.4 MHz | 2 (seed 1 stalled router2 under machine load) |
+| SD Analog | 80.4 MHz | 1 |
+| HD HDMI | 90.5 MHz | 1 |
+| SD HDMI | 91.3 MHz | 1 |
+| HD Dual | 95.4 MHz | 1 |
+| SD Dual | 85.4 MHz | 1 |
+
+3,659–3,679 LC (48%, +~260), 22/32 EBR. iceunpack OK on all six.
 
 ## Build
 
