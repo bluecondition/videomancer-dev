@@ -219,3 +219,15 @@ HD Dual HDMI -2.28 / analog +1.75. No seed in 1-16 was clear on every pin; +0.71
 on HD Analog's HDMI pin is untested on HW (known good +0.91, known bad +0.48).
 Any RTL or SDK change reshuffles this: re-screen. Processing delay: declared 0
 (synthesis); true latency 5 clocks.
+
+**Re-screen for v3.24.2 (resolution scaling, 2026-10-18): `[firmware] seed = 1`.**
+The scaled netlist moved seed 6's HD HDMI HSYNC to -0.35 ns (inside the ~0.7 ns
+U/V-swap zone). Screened HD HDMI seeds 1-40 (HD Analog / HD Dual 1-16 plus the
+candidates): none lands in the known-good +1.0..+1.7 window on HD HDMI. Seed 1
+keeps every pin at least 0.96 ns from the clock: HD HDMI -0.96 (data -2.74..-1.45),
+HD Analog HDMI +1.22 / analog -1.15, HD Dual HDMI -1.24 / analog +2.06. Seed 25
+had the most HD HDMI margin (-2.23) but its own HD Analog timing missed (73.4 MHz,
+the FSM tick counter). Seed 1 builds all 8, own HD 82.2 / 81.8 / 75.6 MHz, max
+7612 LC (SD Standalone, 99%). -0.96 is on the untested negative side: check the
+community build on HD HDMI before trusting it. Screen data:
+`~/czartroniks_port/pbskew/skew*.txt`.
