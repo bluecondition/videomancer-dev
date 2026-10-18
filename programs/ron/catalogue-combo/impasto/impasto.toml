@@ -154,3 +154,9 @@ rotary_potentiometer_6 = 100
 toggle_switch_9 = 1
 toggle_switch_10 = 1
 linear_potentiometer_12 = 100
+
+[firmware]
+# nextpnr placement seed for the stock LZX build (one seed, all 8 configs):
+# v0.3.2 (resolution scaling): seed 1 stalls nextpnr's router1 (60-min limit);
+# seed 2 builds all 8 (own HD timing 106.1/99.6/92.9 MHz Analog/HDMI/Dual).
+seed = 2

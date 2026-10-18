@@ -142,3 +142,7 @@ HW status: v0.2.0 flashed, "looks good" (Ron, 2026-10-12). v0.3.0 flashed: "Look
 Presets: hand-written (Default, Wet Canvas, Palette Knife, Halo Oil). Wet Canvas
 now gets the 64 px brush (K4 1023). Palette Knife's P12 1023 is now meaningful
 (Steer at half coverage). Recapture with capture_preset.sh when the look settles.
+
+Community port (stock LZX SDK, router1, all 8 configs, 2026-10-18): `[firmware] seed = 2`.
+v0.3.2 stalls router1 on seed 1 (60-min limit); seed 2 builds all 8, own HD timing
+106.1 / 99.6 / 92.9 MHz (Analog / HDMI / Dual), max 6769 LC.
