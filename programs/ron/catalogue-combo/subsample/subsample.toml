@@ -24,7 +24,7 @@ name_label = "Block"
 control_mode = "linear"
 display_min_value = 8
 display_max_value = 64
-initial_value = 144
+initial_value = 961
 display_float_digits = 0
 suffix_label = " px"
 
@@ -34,7 +34,7 @@ name_label = "Shift"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 375
+initial_value = 1023
 display_float_digits = 1
 suffix_label = "%"
 
@@ -44,7 +44,7 @@ name_label = "Rate"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 240
+initial_value = 362
 display_float_digits = 1
 suffix_label = "%"
 
@@ -54,7 +54,7 @@ name_label = "Hold"
 control_mode = "linear"
 display_min_value = 1
 display_max_value = 64
-initial_value = 112
+initial_value = 817
 display_float_digits = 0
 suffix_label = " px"
 
@@ -64,7 +64,7 @@ name_label = "Bleed"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 7
-initial_value = 0
+initial_value = 1023
 display_float_digits = 0
 suffix_label = ""
 
@@ -74,7 +74,7 @@ name_label = "Crawl"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 250
+initial_value = 1023
 display_float_digits = 1
 suffix_label = "%"
 
@@ -94,7 +94,7 @@ initial_value_label = "After"
 parameter_id = "toggle_switch_9"
 name_label = "Crawl"
 value_labels = ["Checker", "Bars"]
-initial_value_label = "Checker"
+initial_value_label = "Bars"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
@@ -106,7 +106,7 @@ initial_value_label = "Colour"
 parameter_id = "toggle_switch_11"
 name_label = "Hold Shape"
 value_labels = ["Line", "Square"]
-initial_value_label = "Line"
+initial_value_label = "Square"
 
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
@@ -114,7 +114,7 @@ name_label = "Density"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 162
+initial_value = 67
 display_float_digits = 1
 suffix_label = "%"
 
