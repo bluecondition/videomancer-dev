@@ -160,6 +160,7 @@ architecture stencil of program_top is
     signal s_saw_active : std_logic := '0';
     signal s_k1h    : unsigned(9 downto 0) := to_unsigned(400, 10);
     signal s_k2h    : unsigned(9 downto 0) := (others => '0');
+    signal s_kwarm  : unsigned(3 downto 0) := (others => '0');   -- K2 follows directly for 15 frames after load
     signal s_k4h    : unsigned(9 downto 0) := (others => '0');
     signal s_d1, s_d2, s_d4 : signed(10 downto 0) := (others => '0');
     signal s_soft_q : std_logic_vector(9 downto 0) := C_SOFT(18);
@@ -422,13 +423,18 @@ begin
                 when 1 =>
                     -- deadband the stepped knobs (no flicker at a step edge)
                     if s_d1 > 12 or s_d1 < -12 then s_k1h <= unsigned(registers_in(0)); end if;
-                    if s_d2 > 12 or s_d2 < -12 then s_k2h <= unsigned(registers_in(1)); end if;
+                    -- (K2's labelled default arrives as its index 0..3, inside
+                    -- the deadband, so K2 follows directly for 15 frames)
+                    if s_kwarm /= 15 or s_d2 > 12 or s_d2 < -12 then s_k2h <= unsigned(registers_in(1)); end if;
+                    if s_kwarm /= 15 then s_kwarm <= s_kwarm + 1; end if;
                     if s_d4 > 12 or s_d4 < -12 then s_k4h <= unsigned(registers_in(3)); end if;
                     s_soft_q <= C_SOFT(to_integer(unsigned(registers_in(4)(9 downto 4))));
                     s_vstep <= s_vstep + 1;
                 when 2 =>
                     s_nsh <= resize(s_k1h(9 downto 7), 4) + 1;
-                    s_ash <= s_k2h(9 downto 8);
+                    -- labelled default: the firmware loads the label INDEX
+                    if s_k2h(9 downto 2) = 0 then s_ash <= s_k2h(1 downto 0);
+                    else s_ash <= s_k2h(9 downto 8); end if;
                     s_G <= unsigned(s_soft_q(9 downto 3));
                     s_S <= resize(unsigned(s_soft_q(2 downto 0)), 4) + 3;
                     s_sin_a <= s_k4h(9 downto 4) + 16;       -- cos
