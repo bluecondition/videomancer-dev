@@ -417,3 +417,29 @@ designed around FIELDS (480i / 1080i) and predated most of them.
   LZX's build script has no timeout). Seed 3 built all 8 but HD HDMI's own
   timing was 69.6 MHz. Seed 7 builds all 8; own HD timing (core without the
   Sync Out generator) is 80.2/80.3/80.9 MHz Analog/HDMI/Dual.
+
+## Resolution scaling (v1.0.3, 2026-10-18)
+- Before: the K1 screen ladder was cells per PIXEL, so 720p dots were 1.5x the
+  1080p size relative to the height and SD dots ~2x.
+- Now the base frequency is scaled per mode from the timing ID before the
+  Press macro: x1.5 at 720p, x2 at SD (720 px = 1440 units of the 1080-line
+  canvas). One adder + mux in the vblank sequencer (+~30 LC). 1080p and 1080i
+  are unchanged; the 1080p sim is bit-identical (0 differing pixels).
+- Left at pixel scale on purpose: the Press-low sweep's 2.5 px endpoint (a
+  resolution limit), paper grain, ragged edges, linework dilate.
+- Not fixed (would need a per-pixel divide by 3, ~100 LC + a new pixel-path
+  stage): the bubble sprites' shift scaler gives 720p x2 = 128 px, 0.75 of the
+  1080p size relative to the height (SD x2 is already right). SD keeps its
+  pre-existing 0.9 pixel aspect (dots ~11% tall on 4:3; x/y share one
+  frequency). Gutters (3 + h/128 lines) run a little thick at SD.
+- Build (router1, `NEXTPNR_ROUTER="--router router1" ./build_programs.sh ron
+  pulp`), seed 1 except HD HDMI: HD Analog 76.45, HD Dual 78.58, SD Analog
+  78.05, SD HDMI 77.24, SD Dual 79.39 MHz; HD HDMI 78.03 MHz on **seed 15,
+  hand-installed**; 7227-7261/7680 LC (94.5%), 24/32 EBR.
+- HD HDMI placement: the new netlist's seed 1 put HSYNC at -0.16 ns
+  (known-bad). Seeds 1-29 were screened with `tools/hdmi_pin_skew.py` (seed 16
+  hung router1); none reached the +1.0..+1.7 window. Seed 15 is the closest
+  with every data bit before the clock (HSYNC +0.89, data -2.33..-0.84); it was
+  installed and repacked. **Needs a hardware A/B** against the validated v1.0.0
+  build (seed 1, +1.36), kept as
+  `.scaling_work/pulp_tmp/pulp_1.0.0_validated.vmprog`.

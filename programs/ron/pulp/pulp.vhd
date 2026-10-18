@@ -69,6 +69,14 @@
 --   * Output: [1 2 1] smoothing on Y/U/V (HD HDMI bar fix) + blanking
 --     gate.  Latency 15 in every mode.
 --
+-- v1.0.3 resolution scaling: the K1 screen ladder is cells per 1080p
+-- pixel; the base frequency is scaled x1.5 at 720p and x2 at SD (720 px
+-- spans 1440 units of the 1080-line canvas), so a K1 setting is the same
+-- dot size relative to the screen height in every mode (1080p
+-- bit-identical).  Pixel-scale on purpose: the Press-low 2.5 px limit,
+-- grain, ragged edges, linework.  Bubbles keep their shift scaler (720p
+-- x2 = 0.75 of the 1080p size; x3 would need a per-pixel divide).
+--
 -- EBR: luma line buffer (4) + edge buffer (1) + ink LUT (2) + bubble
 -- slots (2) + dry ring (2) + 3 sprite ROMs (6) = 17 of 32.
 --------------------------------------------------------------------------------
@@ -993,6 +1001,7 @@ architecture pulp of program_top is
     -- per-frame derived parameters
     ----------------------------------------------------------------------
     signal s_f      : unsigned(10 downto 0) := to_unsigned(128, 11);
+    signal s_fsc    : unsigned(1 downto 0) := "00";  -- screen scale: 0 x1, 1 x1.5 (720p), 2 x2 (SD)
     signal s_ie     : unsigned(9 downto 0) := (others => '0');
     signal s_bias   : signed(9 downto 0) := (others => '0');
     signal s_bsign  : std_logic := '0';
@@ -1315,8 +1324,20 @@ begin
         variable v_h2, v_h3, v_h23, v_yof : unsigned(10 downto 0);
         variable v_t7   : unsigned(6 downto 0);
         variable v_trr, v_trg, v_trb : unsigned(7 downto 0);
+        variable v_f11  : unsigned(10 downto 0);
     begin
         if rising_edge(clk) then
+            -- Resolution scaling (v1.0.3): the screen ladder is cells per
+            -- 1080p pixel; 720p (x1.5) and SD (720 px wide, x2) scale the
+            -- base frequency so a K1 setting is the same fraction of the
+            -- screen height in every mode.  Decoded every clock from the
+            -- timing ID (static while a mode runs).
+            case to_integer(unsigned(registers_in(8)(3 downto 0))) is
+                when 5 | 6 | 14     => s_fsc <= "01";
+                when 0 | 4 | 8 | 12 => s_fsc <= "10";
+                when others         => s_fsc <= "00";
+            end case;
+
             -- hysteresis helper, free-running on the knob the sequencer
             -- put in s_hk (top 7 bits): the 16-zone index of k-8 and of
             -- k+8.  A held zone moves up only once k is 8 counts into the
@@ -1374,7 +1395,12 @@ begin
                                 -- (ladder runs coarse -> fine, so the
                                 -- held K1 zone is inverted: knob up =
                                 -- bigger cells, matching the px label)
-                                s_f <= C_FRQ(to_integer(not s_z1));
+                                v_f11 := C_FRQ(to_integer(not s_z1));
+                                case s_fsc is
+                                    when "01"   => s_f <= v_f11 + shift_right(v_f11, 1);
+                                    when "10"   => s_f <= shift_left(v_f11, 1);
+                                    when others => s_f <= v_f11;
+                                end case;
                                 s_wet10 <= f_sat10(resize(s_p12 & "00", 13)
                                            + resize(s_p12 & '0', 13));
                                 s_ma <= to_unsigned(2929, 13);
