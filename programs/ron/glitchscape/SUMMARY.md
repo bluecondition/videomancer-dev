@@ -39,7 +39,7 @@ complete the look.
   sky and end raggedly; drips run ~120 lines at P12=0 and ~1900 at full.
   They are substituted before the palette and saturation stages, so they
   share them.
-* **Compress (S10) = macroblocks.** 16×16 blocks at HD, 8×8 at SD. Each
+* **Compress (S10) = macroblocks.** 16×16 blocks at 1080 lines, scaled to 16×16 virtual units elsewhere (v1.0.2). Each
   block's colour is point-sampled on its first row into 256×16 (u8,v8) +
   256×8 (y8) EBR and held for the whole block. Output = block chroma, with
   luma = (posterized + block)/2. The posterize depth comes from P12 in
@@ -73,6 +73,9 @@ v1.0.0, 2026-10-09: 6/6 pass on seed 1 (router2). HD Analog 87.3, SD Analog
 86.7, HD HDMI 83.9, SD HDMI 86.7, HD Dual 79.1, SD Dual 78.6 MHz. 5460 LC
 (71 %), 12/32 EBR.
 
+v1.0.2, 2026-10-18 (resolution scaling): 6/6 pass on seed 1 (router2), see
+History. 5689-5709 LC (74 %), 12/32 EBR.
+
 ## History
 
 * **v0.1 (2026-06-28)**: streaming iso-bar fake pixel-sort, 0 BRAM; never flashed.
@@ -87,5 +90,26 @@ v1.0.0, 2026-10-09: 6/6 pass on seed 1 (router2). HD Analog 87.3, SD Analog
   every seed: `16 - P12/68` in the frame latch is a 15 ns divider; /64 fixed it.
 * **v0.3.1**: a sky colour per palette (dark skies' chroma boosted so they
   read as colour). **v1.0.0**: version bump at sign-off.
+* **v1.0.2 (2026-10-18), resolution scaling**: SD and 720p now show the
+  1080p picture scaled; 1080p output is bit-identical.
+  * Geometry runs in virtual 1080-line units from the timing ID
+    (`registers_in(8)`): `pxv` (Q.1, 1.5 per pixel at 720p, 2 at SD) and
+    `pyv` (Q.8, 4.44 per field line at 480i) move in lockstep with px/py.
+  * Bar pitch (K5) is a size. The x DDA steps 1.5x/2x phase per pixel
+    (`s_stepx`), and the Horizontal row DDA steps once per virtual line
+    (`s_stepn` = 1..5 x `s_step`). 720p was 1.5x coarser.
+  * Drip decay odds per field line = per-virtual-line odds x lines covered
+    (`s_pk2`/256; at 1080p exactly the old `xs(18 downto 12) < s_pk`). SD
+    drips ran 4.4x the screen share.
+  * Ripple waves and the torn-edge columns use pxv/pyv.
+  * Macroblocks are 16 x 16 virtual units in every mode, with block-start
+    flags formed with the counters (720p ~10.7 px, SD 8 px x 3.6 field
+    lines). They replace the `lines >= 960` switch that gave 720p and SD the
+    same 8 x 8 px blocks (2.2x tall at SD).
+  * The Channel Sep fringe scales (720p 3..5 px, SD 2..4 px).
+  * Filaments, grain and the row wander stay at pixel scale.
+  * Build `./build_programs.sh ron glitchscape` (router2), 6/6 on seed 1:
+    HD Analog 87.80, HD HDMI 94.89, HD Dual 83.30, SD Analog 85.75, SD HDMI
+    85.74, SD Dual 88.10 MHz. 5689-5709 LC (74%), 12/32 EBR. Not flashed.
 
 Backups of v0.1/v0.2/v0.3 (vhd, toml, vmprog) are in `.glitchscape_work/`.

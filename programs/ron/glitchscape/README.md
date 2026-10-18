@@ -12,9 +12,9 @@ A pixel-sort databender: bright parts of the source become a mass of vertical je
 | K2 | Contrast | 0–100% | Contrast: crushes the dark end of the source before keying |
 | K3 | Saturation | 0–400% | Colour intensity of the streaks, smooth (100% at a quarter turn) |
 | K4 | Palette | Jewel / Neon / Vaporwave / Inferno / Toxic / Glacier / Candy / Mono | Streak palette; each one brings its own sky colour |
-| K5 | Line Spacing | 0–100% | Streak bar spacing, 64 px wide to 4 px tight (smooth) |
+| K5 | Line Spacing | 0–100% | Streak bar spacing, 64 px wide to 4 px tight at 1080p, scaled to the screen height in other modes (smooth) |
 | K6 | Filaments | 0–100% | Number of white contour lines tracing the image's brightness |
-| S7 | Channel Sep | Off / On | On: colour fringing split, 4-7 px (width follows the slider) |
+| S7 | Channel Sep | Off / On | On: colour fringing split, 4-7 px at 1080p (width follows the slider) |
 | S8 | Hot Zones | Off / On | On: blown-white cores and bloom at the brightest spots |
 | S9 | Drips | Off / On | On: coloured bars pour down the frame (vertical pixel sort) |
 | S10 | Compress | Off / On | On: JPEG-style macroblocks and posterize |
