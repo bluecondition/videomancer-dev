@@ -15,7 +15,7 @@
 [program]
 processing_delay_clks = 16
 program_id = "com.czartroniks.candyhills"
-program_version = "1.1.2"
+program_version = "1.1.3"
 abi_version = ">=1.0,<2.0"
 program_name = "Candy Hills"
 author = "czartroniks"
