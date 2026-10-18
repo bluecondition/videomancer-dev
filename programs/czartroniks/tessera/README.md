@@ -2,7 +2,7 @@
 
 Up to 64 equilateral triangles rain down the screen, each tumbling end-over-end like a falling card, fluttering side to side and slowly spinning, in four depth layers (big and fast in front, a small slow swarm behind). K5 sets the count, the slider scales them, and a switch turns them into two-sided cards with video on the front.
 
-**P12 (Scale):** Scales every triangle from 0.25x to 1.5x of its count's natural size (0.75/sqrt(count) of the screen height, capped at 75%) on an even sweep: fine confetti up to big overlapping cards. SD progressive tops out at 1.1x.
+**P12 (Scale):** Scales every triangle from 0.25x to 1.5x of its count's natural size (0.75/sqrt(count) of the screen height, capped at 75%) on an even sweep: fine confetti up to big overlapping cards. SD modes top out at 1.1x (line-time budget).
 
 ## Controls
 

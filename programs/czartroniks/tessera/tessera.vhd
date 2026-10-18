@@ -6,6 +6,18 @@
 --
 -- tessera.vhd  (v17 — BRAM sprite store, 1..64 triangles, depth, scale)
 --
+-- v1.0.3 (2026-10-17) resolution scaling: triangle sizes were measured in
+-- FIELD lines and the same size was used for the x extent in pixels, so
+-- interlaced modes drew them ~2x tall (480i 2.2:1, 1080i 2:1) and SD
+-- non-square pixels were ignored.  The x extent now has its own size,
+-- from a per-mode "screen height in pixel widths": measured_v on
+-- progressive HD (1080p/720p unchanged, bit-identical), 2 x measured_v at
+-- 1080i, 540 on every SD mode (720 px = a 4:3 width).  The second size runs
+-- through the per-frame multiplier right behind the first.  The SD-scale
+-- table (0.25x .. 1.1x) is now picked by the timing ID for every SD mode
+-- (the old "400..600 lines" test also caught 1080i and missed 480i/576i,
+-- whose now-correct triangle widths cost 576p-like line time).
+--
 -- v17: count moves to K5 and the P12 fader becomes Scale: every triangle at
 -- 0.25x .. 1.5x of its count's natural size (0.75/sqrt(count) of the screen
 -- height, capped at 75%), an even exponential sweep; SD progressive tops out
@@ -130,7 +142,7 @@ architecture tessera of program_top is
     --   rows 64..127 Count row p (K5[9:4]): count(18:12), recip(11:0)
     --   rows 128..191 Scale row p (P12[9:4]): scale k(11:0), Q10
     --                (0.25 * 6^(p/63): 0.25x .. 1.5x, even steps of ~2.9%)
-    --   rows 192..255 the same for SD progressive: 0.25x .. 1.1x (less line
+    --   rows 192..255 the same for SD (all modes): 0.25x .. 1.1x (less line
     --                time per screen height), selected by one address bit
     -- count = 1 + round(p^2/63): a quadratic knob curve, so 1..4 big triangles
     -- get ~20% of the travel.  recip = round(3072/sqrt(count)) = height / H in
@@ -407,6 +419,9 @@ architecture tessera of program_top is
     signal s_count       : integer range 1 to C_MAX_TRI := 6;
     signal s_R, s_half, s_third : t_g := (others => '0');
     signal s_size_h : t_g := (others => '0');   -- latched triangle height
+    -- x-extent versions (pixels; equal to the above on progressive HD)
+    signal s_Rx, s_halfx, s_thirdx : t_g := (others => '0');
+    signal s_size_hx : t_g := (others => '0');
     -- golden-ratio y-distribution: per-frame step + per-triangle accumulator
     signal s_golden_step : t_g := (others => '0');
     signal s_gold_acc  : t_g := (others => '0');
@@ -436,7 +451,12 @@ architecture tessera of program_top is
     signal s_sq       : integer range 0 to 15 := 0;
     signal s_opa, s_opb : unsigned(11 downto 0) := (others => '0');
     signal s_recip_eff  : unsigned(11 downto 0) := (others => '0');
-    signal s_sdp      : std_logic := '0';   -- SD progressive: less line time
+    signal s_sdp      : std_logic := '0';   -- SD (any): less line time
+    signal s_i1080    : std_logic := '0';   -- 1080i: x size = 2 x field lines
+    -- x-size reference ("screen height in pixel widths"): measured_v on
+    -- progressive HD, 2 x measured_v at 1080i, 540 at SD; the x size =
+    -- this * recip_eff >> 12 (the y size uses measured_v)
+    signal s_sz_hxr   : unsigned(11 downto 0) := to_unsigned(540, 12);
 
     -- constants ROM read port: address = triangle index during the geometry
     -- pass, the Count / Scale rows while idle.  s_rom_q is the EBR output register,
@@ -668,10 +688,17 @@ begin
                 else
                     s_sz_base <= unsigned(s_row_cnt(11 downto 0));
                 end if;
-                -- P12 scale k (Q10, 0.25x .. 1.5x; SD progressive reads its
+                -- P12 scale k (Q10, 0.25x .. 1.5x; every SD mode reads its
                 -- own 0.25x .. 1.1x table -- less line time per screen height)
                 s_sz_k <= s_row_k;
                 s_sz_mv    <= s_measured_v;
+                if s_sdp = '1' then
+                    s_sz_hxr <= to_unsigned(540, 12);
+                elsif s_i1080 = '1' then
+                    s_sz_hxr <= s_measured_v(10 downto 0) & '0';
+                else
+                    s_sz_hxr <= s_measured_v;
+                end if;
                 g_wm1      <= s_measured_h - 1;   -- generated-avid width
             end if;
         end if;
@@ -685,8 +712,12 @@ begin
             s_t10_r <= registers_in(6)(3);
             s_rb1 <= resize(unsigned(s_row_cnt(11 downto 0)), 13)
                    + resize(shift_right(unsigned(s_row_cnt(11 downto 0)), 2), 13);
-            if s_measured_v >= 400 and s_measured_v < 600 then s_sdp <= '1';
-            else                                               s_sdp <= '0'; end if;
+            -- timing ID class: SD (480i/480p/576i/576p) / 1080i
+            case to_integer(unsigned(registers_in(8)(3 downto 0))) is
+                when 0 | 4 | 8 | 12 => s_sdp <= '1'; s_i1080 <= '0';
+                when 1 | 2 | 10     => s_sdp <= '0'; s_i1080 <= '1';
+                when others         => s_sdp <= '0'; s_i1080 <= '0';
+            end case;
             if s_count >= 4 then s_fslot0 <= 3; else s_fslot0 <= s_count - 1; end if;
             s_count_m4 <= s_count - 4;
             s_pdel <= s_vsync_pulse & s_pdel(0 to 22);
@@ -787,7 +818,10 @@ begin
                         s_recip_eff <= resize(shift_right(s_szmul1, 10), 12);
                     end if;
                 when 5 => s_opa <= s_sz_mv; s_opb <= s_recip_eff;
+                -- x size right behind it (pipelined: same recip operand)
+                when 6 => s_opa <= s_sz_hxr;
                 when 8 => s_size_h <= signed(resize(shift_right(s_szmul1, 12), C_GW));
+                when 9 => s_size_hx <= signed(resize(shift_right(s_szmul1, 12), C_GW));
                 when others => null;
             end case;
         end if;
@@ -803,6 +837,13 @@ begin
                      + shift_right(s_size_h, 6);                              -- 1/3 H
             s_half  <= shift_right(s_size_h, 1) + shift_right(s_size_h, 4)
                      + shift_right(s_size_h, 6);                              -- 0.577 H
+            -- the same three for the x extent (pixel widths)
+            s_Rx     <= shift_right(s_size_hx, 1) + shift_right(s_size_hx, 3)
+                      + shift_right(s_size_hx, 5) + shift_right(s_size_hx, 7);
+            s_thirdx <= shift_right(s_size_hx, 2) + shift_right(s_size_hx, 4)
+                      + shift_right(s_size_hx, 6);
+            s_halfx  <= shift_right(s_size_hx, 1) + shift_right(s_size_hx, 4)
+                      + shift_right(s_size_hx, 6);
             -- recycle range = measured_v + 2R (R = 2/3 H): a triangle re-enters
             -- the top exactly as it exits the bottom, so there is no blank gap.
             s_rangey <= signed(resize(s_measured_v, C_GW)) + s_size_h
@@ -972,10 +1013,11 @@ begin
                     case s_pcnt is
                         when 0 => v_a := signed(resize(unsigned(s_rom_r(31 downto 20)), 14));
                                   v_b := resize(signed('0' & std_logic_vector(s_measured_h)), 14);
-                        when 1 => v_a := resize(s_R, 14);     v_b := resize(s_sin_s, 14);
+                        -- x offsets (1, 3, 4, 10) use the x-extent sizes
+                        when 1 => v_a := resize(s_Rx, 14);    v_b := resize(s_sin_s, 14);
                         when 2 => v_a := resize(s_R, 14);     v_b := resize(s_cos_s, 14);
-                        when 3 => v_a := resize(s_half, 14);  v_b := resize(s_cos_s, 14);
-                        when 4 => v_a := resize(s_third, 14); v_b := resize(s_sin_s, 14);
+                        when 3 => v_a := resize(s_halfx, 14); v_b := resize(s_cos_s, 14);
+                        when 4 => v_a := resize(s_thirdx, 14); v_b := resize(s_sin_s, 14);
                         when 5 => v_a := resize(s_half, 14);  v_b := resize(s_sin_s, 14);
                         when 6 => v_a := resize(s_third, 14); v_b := resize(s_cos_s, 14);
                         when 7 => v_a := resize(-s_rcos, 14); v_b := resize(s_ftau, 14);
@@ -983,7 +1025,7 @@ begin
                         when 9 => v_py2 := s_tcos + s_hs; v_a := resize(v_py2, 14); v_b := resize(s_ftau, 14);
                         -- flutter: R * cos(tumble phase), layer-scaled (the LUT
                         -- was switched to the tumble angle after product 6)
-                        when 10 => v_a := resize(s_R, 14);    v_b := resize(s_cos_s, 14);
+                        when 10 => v_a := resize(s_Rx, 14);   v_b := resize(s_cos_s, 14);
                         when 11 => v_a := resize(s_wx0, 14); v_b := resize(s_dy0, 14);
                         when 12 => v_a := resize(s_wy0, 14); v_b := resize(s_dx0, 14);
                         when 13 => v_a := resize(s_wx1, 14); v_b := resize(s_dy1, 14);
