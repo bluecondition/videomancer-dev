@@ -13,11 +13,14 @@
 # v0.3: dot sizes read a 2-D blurred luma (rounder dots), ink sees horizontal
 # edges too, K3 Flow spins the fans as it scrolls, S9 Colour tints the dots
 # with the source colour, and Ghost works on the White ground.
+#
+# v1.0.2: the lace keeps its size relative to screen height at 720p and SD
+# (per-mode steps from the video timing ID; round on a 4:3 SD screen).
 
 [program]
 processing_delay_clks = 20
 program_id = "com.czartroniks.chantilly"
-program_version = "1.0.1"
+program_version = "1.0.2"
 abi_version = ">=1.0,<2.0"
 program_name = "Chantilly"
 author = "czartroniks"
