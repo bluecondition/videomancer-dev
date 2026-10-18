@@ -121,3 +121,24 @@ Tier 3:
   last line, as in v0.1.
 - Presets captured from the device once the look settles (4 of 8 are
   hand-written).
+
+## v0.2.3 resolution scaling (2026-10-17)
+
+(v0.2.2 is the community label-index K5 fix, already in this source.)
+The noise lives on a virtual 1080-line canvas, stepped per mode from the
+timing ID (`registers_in(8)`), so 720p and SD show the 1080p ripple at the
+same size relative to the screen height. 1080p is bit-identical (sim pixel
+diff 0). This also covers the old Tier 3 item "Scale and Rows in screen units".
+- K1 Amount (and Push's gradient offset) x2/3 at 720p, x1/2 at SD (were fixed
+  px).
+- Scale phase step per pixel x the virtual x step (1.5 / 2). SD used to show
+  3/8 of HD's horizontal cycles; 720p 2/3.
+- Rows phase step per field line x the virtual line step (1.5 at 720p, 4.44
+  per 480i field line), on a 16-clock serial multiplier.
+- Still pixel-scale (by design): the edge detectors. The Warp-Edge ridges
+  compare adjacent field lines, so SD shows denser ridge ink where the
+  displacement changes fast (each 480i field line spans 4.4 1080 lines).
+
+Build (`./build_combo.sh ridgeline`, router2): 6/6 on seed 1. HD Analog 80.2,
+HD HDMI 78.8, HD Dual 81.4; SD 82.7 / 79.9 / 69.5 MHz. 5,689-5,704 LC (74%),
+24/32 EBR.

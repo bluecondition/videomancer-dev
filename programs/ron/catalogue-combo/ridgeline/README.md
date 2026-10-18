@@ -8,8 +8,8 @@ Drifting sine-noise displacement with Roberts or gradient edges inked over the w
 
 | | Control | Range | What it does |
 |---|---|---|---|
-| K1 | Amount | 0–100% | displacement, squared: 0..±511 px (±766 with two octaves); default ≈ 75 px |
-| K2 | Scale | 0–100% | noise frequency across x, squared, glided: 0..7.5 cycles across 1920 px |
+| K1 | Amount | 0–100% | displacement, squared: 0..±511 px at 1080p (±766 with two octaves; the same size relative to the screen height at 720p and SD) |
+| K2 | Scale | 0–100% | noise frequency across x, squared, glided: 0..7.5 cycles across a 1080p width (the waves keep their size relative to the screen height in every mode) |
 | K3 | Speed | 0–100% | drift speed |
 | K4 | Gain | 0–100% | edge gain: how strongly the edges ink |
 | K5 | Edges | Roberts / Horizontal / Vertical / Sobel | edge detector: Roberts / Horizontal / Vertical / Sobel, with hysteresis at the zone edges |

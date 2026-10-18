@@ -8,7 +8,8 @@
 -- displacement + edge detect (Roberts / gradient).  Three knobs each; the
 -- switches and the slider decide how they combine.
 --
---   K1 Amount   noise displacement, squared, 0..+-511 px (+-766 with two octaves)
+--   K1 Amount   noise displacement, squared, 0..+-511 px (+-766 with two
+--               octaves; 1080-line px, scaled per mode)
 --   K2 Scale    noise frequency across x, squared (glided)
 --   K3 Speed    noise drift speed
 --   K4 Gain     edge gain
@@ -47,6 +48,16 @@
 -- thin ink lines are near-full-swing edges that move every frame);
 -- no_rw_check on every RAM (luma: the write bank is read 6 columns ahead
 -- of its write; chroma: the write bank's read data is discarded).
+--
+-- v0.2.3 (2026-10-17): resolution scaling.  The noise lives on a virtual
+-- 1080-line canvas, stepped per mode from the video timing ID
+-- (registers_in(8)): K1's amplitude (and Push's offset) is 1080-line pixels
+-- (x 2/3 at 720p, x 1/2 at SD, where 720 px span 1440 units); the Scale
+-- phase step per pixel is x the virtual x step (1.5 at 720p, 2 at SD) and
+-- the Rows phase step per field line x the virtual line step (1.5 at 720p,
+-- 1080/486 x 2 per 480i field line; a serial multiplier), so the waves keep
+-- their size and count relative to the screen height in every mode.  1080p
+-- is unchanged (every step is exactly 1.0).
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -103,6 +114,30 @@ architecture ridgeline of program_top is
     );
 
     -- luma words: luma(9 downto 2) & edge alpha (0..15)
+    -- Resolution scaling: virtual 1080-line steps from the timing ID.  x step
+    -- in half units per pixel (1080: 2, 720p: 3, SD: 4), y step Q4.8 per
+    -- FIELD line (1080 / active lines, doubled for interlace).
+    function f_vstep_x(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0 | 4 | 8 | 12 => return to_unsigned(4, 3);
+            when 5 | 6 | 14     => return to_unsigned(3, 3);
+            when others         => return to_unsigned(2, 3);
+        end case;
+    end function;
+    function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(1138, 12);  -- 480i: 2 x 1080/486
+            when 4          => return to_unsigned(576, 12);   -- 480p: 1080/480
+            when 8          => return to_unsigned(960, 12);   -- 576i: 2 x 1080/576
+            when 12         => return to_unsigned(480, 12);   -- 576p: 1080/576
+            when 5 | 6 | 14 => return to_unsigned(384, 12);   -- 720p: 1.5
+            when 1 | 2 | 10 => return to_unsigned(512, 12);   -- 1080i: 2.0
+            when others     => return to_unsigned(256, 12);   -- 1080p: 1.0
+        end case;
+    end function;
+
     type t_lb_y is array (0 to 2047) of std_logic_vector(11 downto 0);
     type t_lb_c is array (0 to 1023) of std_logic_vector(7 downto 0);
     signal lbY0, lbY1 : t_lb_y := (others => x"100");
@@ -134,6 +169,19 @@ architecture ridgeline of program_top is
     signal s_inky, s_papery : unsigned(9 downto 0) := to_unsigned(64, 10);
     signal s_paper_blk : std_logic := '0';
     signal s_fph1, s_fph2, s_lph1, s_lph2 : unsigned(23 downto 0) := (others => '0');
+    -- resolution scaling (static per mode, decoded every clock)
+    signal s_vxs    : unsigned(2 downto 0)  := to_unsigned(2, 3);
+    signal s_vys    : unsigned(11 downto 0) := to_unsigned(256, 12);
+    signal s_amp_r  : unsigned(8 downto 0) := (others => '0');        -- K1 in 1080-line px
+    signal s_a168, s_a3r : unsigned(16 downto 0) := (others => '0');
+    signal s_scx    : unsigned(16 downto 0) := (others => '0');       -- Scale step x the x step
+    -- Rows line step = (s_rw * y step) >> 8 on a free-running 16-clock serial
+    -- multiplier (s_rw changes only at vsync)
+    signal s_sm_cnt : unsigned(3 downto 0)  := (others => '0');
+    signal s_sm_a   : unsigned(15 downto 0) := (others => '0');
+    signal s_sm_b   : unsigned(11 downto 0) := (others => '0');
+    signal s_sm_p   : unsigned(27 downto 0) := (others => '0');
+    signal s_rwx    : unsigned(19 downto 0) := (others => '0');
     signal s_saw_active : std_logic := '0';
 
     signal s_rx, s_wr_x : unsigned(10 downto 0) := (others => '0');     -- s_wr_x = x of the stage-1 pixel
@@ -236,6 +284,8 @@ begin
         variable v_z  : unsigned(1 downto 0);
         variable v_lo : unsigned(7 downto 0);
         variable v_tg, v_cur, v_dg : signed(14 downto 0);
+        variable v_sm : unsigned(16 downto 0);
+        variable v_ah : unsigned(9 downto 0);
     begin
         if rising_edge(clk) then
             s_in_y <= unsigned(data_in.y); s_in_u <= unsigned(data_in.u); s_in_v <= unsigned(data_in.v);
@@ -245,7 +295,35 @@ begin
 
             -- squared curves d*(d/16+1): linear at the bottom, 64x steeper at the top
             s_amp_p <= s_k_amp * (resize(s_k_amp(9 downto 4), 7) + 1);
-            s_amp   <= s_amp_p(15 downto 7);                                -- K1: 0..511 px
+            s_amp_r <= s_amp_p(15 downto 7);                                -- K1: 0..511 px (1080p)
+            -- resolution scaling: mode steps (static per mode); K1 to real px
+            -- (720p x 2/3 = (a*171 + 128) >> 8, SD x 1/2); Scale step x the x step
+            s_vxs <= f_vstep_x(registers_in(8)(3 downto 0));
+            s_vys <= f_vstep_y(registers_in(8)(3 downto 0));
+            s_a168 <= shift_left(resize(s_amp_r, 17), 7) + shift_left(resize(s_amp_r, 17), 5) + shift_left(resize(s_amp_r, 17), 3);
+            s_a3r  <= shift_left(resize(s_amp_r, 17), 1) + resize(s_amp_r, 17) + 128;
+            v_ah := resize(s_amp_r, 10) + 1;
+            case s_vxs is
+                when "011"  => s_amp <= resize(shift_right(s_a168 + s_a3r, 8), 9);
+                               s_scx <= resize(s_sc, 17) + resize(s_sc(15 downto 1), 17);
+                when "100"  => s_amp <= v_ah(9 downto 1);
+                               s_scx <= s_sc & '0';
+                when others => s_amp <= s_amp_r;
+                               s_scx <= resize(s_sc, 17);
+            end case;
+            -- Rows line step = (s_rw * y step) >> 8 (1080p: s_rw): load at 0,
+            -- 12 shift-add steps, latch at 13
+            s_sm_cnt <= s_sm_cnt + 1;
+            if s_sm_cnt = 0 then
+                s_sm_a <= s_rw; s_sm_b <= s_vys; s_sm_p <= (others => '0');
+            elsif s_sm_cnt <= 12 then
+                if s_sm_b(0) = '1' then v_sm := ('0' & s_sm_p(27 downto 12)) + ('0' & s_sm_a);
+                else v_sm := '0' & s_sm_p(27 downto 12); end if;
+                s_sm_p <= v_sm & s_sm_p(11 downto 1);
+                s_sm_b <= '0' & s_sm_b(11 downto 1);
+            elsif s_sm_cnt = 13 then
+                s_rwx <= s_sm_p(27 downto 8);
+            end if;
             s_sc_p  <= s_gs(13 downto 4) * (resize(s_gs(13 downto 8), 7) + 1);
             s_sc    <= s_sc_p(15 downto 0);                                 -- K2: 0..7.5 cycles across 1920 px
             s_rw_p  <= s_gr(13 downto 4) * (resize(s_gr(13 downto 8), 7) + 1);
@@ -281,8 +359,8 @@ begin
             else s_rowswap <= s_line_par xor s_cap_par1; end if;
             if s_prev_avid = '1' and data_in.avid = '0' then
                 s_line_width <= s_rx;
-                s_lph1 <= s_lph1 + resize(s_rw & "000", 24);
-                s_lph2 <= s_lph2 - resize(s_rw & "0000", 24);
+                s_lph1 <= s_lph1 + resize(s_rwx & "000", 24);
+                s_lph2 <= s_lph2 - resize(s_rwx & "0000", 24);
             end if;
             if data_in.hsync_n = '0' and s_prev_hsync_n = '1' then
                 s_hpar <= '0';
@@ -378,7 +456,7 @@ begin
             for i in 3 to 9 loop s_xs(i) <= s_xs(i - 1); end loop;
             -- 2: phase DDAs, reloaded with the line phases outside avid
             if s_avid_sr(0) = '0' then s_ph1 <= s_lph1; s_ph2 <= s_lph2;
-            else s_ph1 <= s_ph1 + resize(s_sc, 24); s_ph2 <= s_ph2 + resize(s_sc & '0', 24); end if;
+            else s_ph1 <= s_ph1 + resize(s_scx, 24); s_ph2 <= s_ph2 + resize(s_scx & '0', 24); end if;
             -- 3: ROM addresses
             s_sa1 <= s_ph1(23 downto 16); s_sa2 <= s_ph2(23 downto 16);
             if s_sw_csep = '1' then s_ca1 <= s_ph1(23 downto 16) + 64; s_ca2 <= s_ph2(23 downto 16) + 96;
@@ -393,7 +471,12 @@ begin
             -- 7: amplitude
             s_pn7 <= s_n6 * signed(resize(s_amp, 10));
             s_pnc7 <= s_nc6 * signed(resize(s_amp, 10));
-            s_gxd(4) <= s_gx3;
+            -- Push offset in 1080-line px -> real px (720p ~x 0.66, SD x 1/2)
+            case s_vxs is
+                when "011"  => s_gxd(4) <= ('0' & s_gx3(9 downto 1)) + ("000" & s_gx3(9 downto 3)) + ("00000" & s_gx3(9 downto 5));
+                when "100"  => s_gxd(4) <= '0' & s_gx3(9 downto 1);
+                when others => s_gxd(4) <= s_gx3;
+            end case;
             for i in 5 to 7 loop s_gxd(i) <= s_gxd(i - 1); end loop;
             -- 8: address = x + noise (+ the input gradient)
             if s_sw_push = '1' then v_p := signed(resize(s_gxd(7)(9 downto 2), 13)); else v_p := (others => '0'); end if;
