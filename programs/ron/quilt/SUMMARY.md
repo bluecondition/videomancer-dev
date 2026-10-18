@@ -12,6 +12,62 @@ grid cell → optional off-grid overlap → 4 levels of hash-driven BSP splits �
 leaf colour + embossed texture). No per-pixel multiply. Full history in the
 Claude memory file `quilt_milestone.md`.
 
+## v1.0.3 (2026-10-18) — fit for the stock SDK SD Standalone (bit-exact; built, not flashed)
+
+v1.0.2 packed the stock SDK's SD Standalone config (whose core is ~600 LC
+larger than the HD cores) to 7716/7680 LC, so it could not place. v1.0.3 is
+the same picture bit for bit with ~430 pure-delay registers removed (the map
+RAMs already had `no_rw_check`; `emulate_transparency` was 0):
+* **Pixel position no longer carried down the pipeline.** px/py (24 bits) rode
+  every node from S0 to S10a. Each consumer now reads its own delayed copy
+  (`p_qpos`): x is a second column accumulator that replays pixel_xa's update
+  k clocks late (reset on the hsync edge seen in pipe(k-1)/pipe(k), step on
+  gv(k-1)), y is pixel_y loaded on the hsync/vsync edge seen k clocks late
+  (exact while successive sync edges are more than 17 clocks apart). Copies
+  at k = 3 (S1b), 7/10/13/16 (descend levels 0-3), 17 (S10a).
+* **Luma-map dens/hide step moved 3 clocks later** (on gv(2), s_xcol delayed
+  3, column-0 test on q_x3), so S1c reads L_* directly instead of three
+  copied stages (s1a_dh / s1a2_dh / s1b_dh). The next column's prefetch lands
+  4 clocks after the column start, so the late step reads the same values.
+* **Leaf seam/puff/texture features built in S10h**, two stages early: 22
+  bits go through S10h2/S10a2 instead of lx/ly/m1/m2 (48); S10b is just the
+  16-way texture pick by the evolved number.
+* **The three IO-align pad stages moved from after s_io (32 bits) to after
+  S10b (12 bits)**; pipe/gv grow by 3, so the total latency is still 28.
+
+Stock SDK SD Standalone (0a65d53, seed 1): **7716 → 7270/7680 LC (94%)**,
+9/32 EBR; full place and route passes (47.75 MHz post-route, target 27).
+Dev configs 6949–6962 → 6493–6512 LC.
+
+Bit-exact proof: GHDL side-by-side of v1.0.2 and v1.0.3 on the same stimulus,
+data_out (y/u/v, syncs, avid) compared every clock, knobs re-rolled in the
+middle of a field and line (bench: `.scaling_work/quilt_fit/equiv/`). The only
+differences are the first 3 clocks after configuration, where v1.0.2 outputs
+its uninitialised pad registers. A 1-unit emboss change is caught (16691
+mismatches), so the bench can see a difference.
+
+| Run | Timing ID | Fields | Clocks | Mismatches | Lit px |
+|---|---|---|---|---|---|
+| 1080p, Random evolve, Luma Mod, Not Square; knobs re-rolled in field 2 | 3 | 4 | 9.90 M | 0 | 3.62 M |
+| 720p, Snake evolve, Log Cabin, Small cells, Fine; re-rolled in field 2 | 5 | 5 | 6.19 M | 0 | 1.14 M |
+| 480i, field_n toggling, half-line vsync, knobs re-rolled every field | 0 | 14 | 3.16 M | 0 | 1.18 M |
+| 576i, as 480i, Large cells, all switches on | 8 | 10 | 2.70 M | 0 | 0.93 M |
+| 1080i, as 480i | 1 | 4 | 4.95 M | 0 | 1.71 M |
+| 1080p, knobs re-rolled every field (K4 < 256) | 3 | 3 | 7.43 M | 0 | 5.26 M |
+| 720p, knobs re-rolled every field (K4 < 256) | 6 | 4 | 4.95 M | 0 | 3.30 M |
+
+Build (router1, **seed 1 on all 6 configs**), 6493–6512/7680 LC (85%),
+9/32 EBR:
+
+| Config | Fmax (MHz) | Target |
+|---|---|---|
+| HD Analog | 79.31 | 74.25 |
+| HD HDMI | 87.31 | 74.25 |
+| HD Dual | 82.82 | 74.25 |
+| SD Analog | 87.43 | 27 |
+| SD HDMI | 87.11 | 27 |
+| SD Dual | 84.43 | 27 |
+
 ## v1.0.2 (2026-10-17) — resolution scaling (built, not flashed)
 
 Quilt was drawn in fixed pixels, so at 720p every patch was 1.5x too big
