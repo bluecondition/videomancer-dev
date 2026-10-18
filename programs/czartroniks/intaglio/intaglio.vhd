@@ -6,6 +6,22 @@
 --
 -- intaglio.vhd
 --
+-- v0.2.2 (2026-10-17): resolution scaling.  The stripe-field constants are
+-- now built in virtual 1080-line units from the video timing ID
+-- (registers_in(8)): the per-pixel (cos) taps use the pitch mantissa times
+-- the x step (1 / 1.5 / 2 at 1080 / 720p / SD) and the per-line (sin) taps
+-- the mantissa times the y step per FIELD line (1 / 1.5 / 4.44 at 1080p /
+-- 720p / 480i, interlace included), both Q.2 through the existing vblank
+-- shift-add.  The stipple lattice runs on virtual coordinates and the
+-- direction hold run is 63 virtual units, so stroke pitch, dots and fills
+-- keep their size relative to screen height (SD = 4:3 window).  For the
+-- interlaced modes the gradient's y is halved before direction bucketing
+-- (a field line is ~2x a pixel's virtual width), so strokes follow the form
+-- at true angles.  The field_n parity-toggle line doubling is gone (field_n
+-- is tied high on hardware, so SD strokes were drawn 2:1 tall).  Sobel,
+-- pits, tremor and the warm-up guard stay at pixel scale.  1080p is
+-- bit-identical; latency unchanged (16).
+--
 -- INTAGLIO -- the picture, engraved.
 --
 -- The frame is redrawn as a copperplate engraving: hatch strokes that
@@ -187,6 +203,40 @@ architecture intaglio of program_top is
         return h(9 downto 2);
     end function;
 
+    -- Resolution scaling: per-mode steps from the video timing ID.
+    -- x step in half virtual units per pixel: 1080 2 (1.0), 720p 3 (1.5),
+    -- SD 4 (2.0: 720 px span 1440 units, a 4:3 window of the 1080 canvas).
+    function f_vstep_x(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0 | 4 | 8 | 12 => return to_unsigned(4, 3);
+            when 5 | 6 | 14     => return to_unsigned(3, 3);
+            when others         => return to_unsigned(2, 3);
+        end case;
+    end function;
+    -- y step in Q4.8 virtual units per FIELD line (1080 / active lines,
+    -- doubled for interlaced modes).
+    function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(1138, 12);  -- 480i: 2 x 1080/486
+            when 4          => return to_unsigned(576, 12);   -- 480p: 1080/480
+            when 8          => return to_unsigned(960, 12);   -- 576i: 2 x 1080/576
+            when 12         => return to_unsigned(480, 12);   -- 576p: 1080/576
+            when 5 | 6 | 14 => return to_unsigned(384, 12);   -- 720p: 1.5
+            when 1 | 2 | 10 => return to_unsigned(512, 12);   -- 1080i: 2.0
+            when others     => return to_unsigned(256, 12);   -- 1080p: 1.0
+        end case;
+    end function;
+    -- interlaced modes: a field line spans ~2x a pixel's virtual width
+    function f_gyh(t : std_logic_vector(3 downto 0)) return std_logic is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0 | 8 | 1 | 2 | 10 => return '1';
+            when others             => return '0';
+        end case;
+    end function;
+
     ----------------------------------------------------------------------
     -- frame-latched controls + per-frame terms
     ----------------------------------------------------------------------
@@ -206,7 +256,7 @@ architecture intaglio of program_top is
     -- stripe-field constants (per frame): 4 families at th0 + j*45 deg,
     -- pitch-scaled; the line step is doubled when interlaced
     type t_s16arr is array (0 to 3) of signed(15 downto 0);
-    signal s_ck, s_sk, s_sk2 : t_s16arr := (others => (others => '0'));
+    signal s_ck, s_sk2 : t_s16arr := (others => (others => '0'));
     signal s_xoff  : unsigned(1 downto 0) := "10";   -- cross family offset
     signal s_toff  : unsigned(1 downto 0) := "01";   -- third family offset
 
@@ -215,11 +265,26 @@ architecture intaglio of program_top is
     signal s_pe    : unsigned(2 downto 0) := "010";
     signal s_mant  : unsigned(6 downto 0) := to_unsigned(64, 7);
     signal s_pitch_sh : natural range 0 to 3 := 1;   -- stipple lattice only
+    -- stipple half-cell and radius cap, per frame (4 << sh, (4 << sh) - 2) so
+    -- the S9 dot test starts from registers
+    signal s_hf7   : signed(6 downto 0)   := to_signed(8, 7);
+    signal s_cap7  : unsigned(6 downto 0) := to_unsigned(6, 7);
 
-    -- serial shift-add multiplier (qsin * mantissa), vblank only
+    -- serial shift-add multiplier (qsin * mantissa), vblank only.  The
+    -- mantissa is Q.2 and mode-scaled: x taps mant*xs*2 (xs = half units per
+    -- pixel), y taps mant*ys>>6 (ys = Q4.8 units per field line); 1080p = 4*mant.
     signal s_mul_a : signed(9 downto 0) := (others => '0');
-    signal s_mul_m : unsigned(6 downto 0) := (others => '0');
-    signal s_mul_p : signed(16 downto 0) := (others => '0');
+    signal s_mul_m : unsigned(10 downto 0) := (others => '0');
+    signal s_mul_p : signed(21 downto 0) := (others => '0');
+    signal s_mx4   : unsigned(10 downto 0) := to_unsigned(256, 11);
+    signal s_my4   : unsigned(10 downto 0) := to_unsigned(256, 11);
+    signal s_mya   : unsigned(18 downto 0) := (others => '0');
+    signal s_ysh   : unsigned(11 downto 0) := (others => '0');
+
+    -- Resolution scaling: virtual 1080-line steps from the timing ID
+    signal s_xs    : unsigned(2 downto 0)  := to_unsigned(2, 3);     -- half units/pixel
+    signal s_ys    : unsigned(11 downto 0) := to_unsigned(256, 12);  -- Q4.8 units/field line
+    signal s_gyh   : std_logic := '0';     -- interlaced: halve gy for direction bucketing
 
     -- tonal ladder + widths (per frame). Ladder thresholds are signed:
     -- negative = overbite (every tone exceeds them, with extra width)
@@ -268,6 +333,9 @@ architecture intaglio of program_top is
 
     signal r0_y, r0_u, r0_v : unsigned(9 downto 0) := (others => '0');
     signal s_aline   : unsigned(10 downto 0) := (others => '0');
+    -- virtual coordinates (stipple lattice): x Q.1 per pixel, y Q.8 per line
+    signal s_xva     : unsigned(11 downto 0) := (others => '0');
+    signal s_yva     : unsigned(18 downto 0) := (others => '0');
     signal s_seen    : std_logic := '0';
 
     -- per-line tremor jitter (lstep sequencer)
@@ -300,7 +368,7 @@ architecture intaglio of program_top is
     signal sgn5 : std_logic := '0';
     signal bin6 : unsigned(1 downto 0) := (others => '0');
     signal bin_hold : unsigned(1 downto 0) := (others => '0');
-    signal hold_cnt : unsigned(5 downto 0) := (others => '0');
+    signal hold_cnt : unsigned(6 downto 0) := (others => '0');   -- half virtual units
     signal mag6 : unsigned(12 downto 0) := (others => '0');
     signal x_s6 : unsigned(10 downto 0) := (others => '0');
     -- stipple lattice track
@@ -379,13 +447,18 @@ begin
     p_frame : process(clk)
         variable v_w  : unsigned(7 downto 0);
         variable v_j  : integer range 0 to 3;
-        variable v_c  : signed(16 downto 0);
+        variable v_c  : signed(21 downto 0);
         variable v_pi : integer range 0 to 7;
     begin
         if rising_edge(clk) then
             s_prev_vsync_n <= data_in.vsync_n;
             s_qs_ar <= s_qs_a;
             s_qs_r  <= f_qsin(s_qs_ar);
+            -- Resolution scaling: per-mode steps, free-running from the timing
+            -- ID (static while a mode runs).
+            s_xs  <= f_vstep_x(registers_in(8)(3 downto 0));
+            s_ys  <= f_vstep_y(registers_in(8)(3 downto 0));
+            s_gyh <= f_gyh(registers_in(8)(3 downto 0));
 
             if data_in.avid = '1' then
                 s_saw <= '1';
@@ -430,36 +503,38 @@ begin
                     case to_integer(s_seq(3 downto 0)) is
                         when 3 =>
                             s_mul_a <= s_qs_r;
-                            s_mul_m <= s_mant;
+                            -- cos taps step per pixel (x), sin taps per
+                            -- field line (y): mode-scaled Q.2 mantissas
+                            if s_seq(6) = '0' then s_mul_m <= s_mx4;
+                            else                   s_mul_m <= s_my4; end if;
                             s_mul_p <= (others => '0');
-                        when 4 to 10 =>
+                        when 4 to 14 =>
                             -- Horner, mantissa MSB first
-                            if s_mul_m(6) = '1' then
+                            if s_mul_m(10) = '1' then
                                 s_mul_p <= shift_left(s_mul_p, 1)
-                                           + resize(s_mul_a, 17);
+                                           + resize(s_mul_a, 22);
                             else
                                 s_mul_p <= shift_left(s_mul_p, 1);
                             end if;
                             s_mul_m <= shift_left(s_mul_m, 1);
-                        when 11 =>
-                            -- octave: c = qsin*mant >> (e+1); phase =
-                            -- acc(15:8), so period = 65536/|c| px
+                        when 15 =>
+                            -- octave: c = qsin*mant >> (e+1) (+2: Q.2
+                            -- mantissa); phase = acc(15:8), so period =
+                            -- 65536/|c| virtual units.  The low 16 bits are
+                            -- the step mod 2^16, all the wrapping
+                            -- accumulators need.
                             case s_pe is
-                                when "000"  => v_c := shift_right(s_mul_p, 1);
-                                when "001"  => v_c := shift_right(s_mul_p, 2);
-                                when "010"  => v_c := shift_right(s_mul_p, 3);
-                                when "011"  => v_c := shift_right(s_mul_p, 4);
-                                when others => v_c := shift_right(s_mul_p, 5);
+                                when "000"  => v_c := shift_right(s_mul_p, 3);
+                                when "001"  => v_c := shift_right(s_mul_p, 4);
+                                when "010"  => v_c := shift_right(s_mul_p, 5);
+                                when "011"  => v_c := shift_right(s_mul_p, 6);
+                                when others => v_c := shift_right(s_mul_p, 7);
                             end case;
                             if s_seq(6) = '0' then
                                 s_ck(v_j) <= v_c(15 downto 0);
                             else
-                                s_sk(v_j) <= v_c(15 downto 0);
-                                if s_ilace = '1' then
-                                    s_sk2(v_j) <= v_c(14 downto 0) & '0';
-                                else
-                                    s_sk2(v_j) <= v_c(15 downto 0);
-                                end if;
+                                -- per FIELD line (the y step carries interlace)
+                                s_sk2(v_j) <= v_c(15 downto 0);
                             end if;
                         when others =>
                             null;
@@ -578,6 +653,30 @@ begin
                             -- overbite; they boil with the live plate
                             s_pd <= resize(shift_right(s_ob, 2), 8);
                             s_pit_seed <= x"C3A5" + resize(s_dracc(11 downto 5), 16);
+                        -- Resolution scaling: Q.2 mode-scaled mantissas.
+                        -- x: mant * xs * 2 (1080p 4*mant); y: mant * ys >> 6
+                        -- by a 12-step serial shift-add (1080p 4*mant).
+                        when 19 =>
+                            case to_integer(s_xs) is
+                                when 3      => s_mx4 <= shift_left(resize(s_mant, 11), 2)
+                                                        + shift_left(resize(s_mant, 11), 1);
+                                when 4      => s_mx4 <= shift_left(resize(s_mant, 11), 3);
+                                when others => s_mx4 <= shift_left(resize(s_mant, 11), 2);
+                            end case;
+                            s_mya <= (others => '0');
+                            s_ysh <= s_ys;
+                        when 20 to 31 =>
+                            if s_ysh(11) = '1' then
+                                s_mya <= shift_left(s_mya, 1) + resize(s_mant, 19);
+                            else
+                                s_mya <= shift_left(s_mya, 1);
+                            end if;
+                            s_ysh <= shift_left(s_ysh, 1);
+                        when 32 =>
+                            s_my4 <= s_mya(16 downto 6);
+                        when 33 =>
+                            s_hf7  <= signed(resize(shift_left(to_unsigned(4, 6), s_pitch_sh), 7));
+                            s_cap7 <= resize(shift_left(to_unsigned(4, 6), s_pitch_sh), 7) - 2;
                         when others =>
                             null;
                     end case;
@@ -686,7 +785,10 @@ begin
             -- the warm-up guard blanks the window's first lines/columns.
             if av(6) = '1' then
                 v_a := ax5;
-                v_b := ay5;
+                -- interlaced modes: halve gy (a field line is ~2x a pixel's
+                -- virtual width) so the bins see true screen angles
+                if s_gyh = '1' then v_b := '0' & ay5(11 downto 1);
+                else                v_b := ay5; end if;
                 v_lo := resize(shift_right(v_a, 2), 15)
                         + resize(shift_right(v_a, 3), 15)
                         + resize(shift_right(v_a, 5), 15);
@@ -709,24 +811,26 @@ begin
                 elsif mag5 >= C_MAGFL then
                     bin6 <= v_d;
                     bin_hold <= v_d;
-                    hold_cnt <= (others => '1');
+                    hold_cnt <= to_unsigned(126, 7);   -- 63 virtual units
                 elsif hold_cnt /= 0 then
                     -- ridge/valley zones (gradient through zero) inherit
                     -- the last strong direction on this line instead of
                     -- striping with the default family
                     bin6 <= bin_hold;
-                    hold_cnt <= hold_cnt - 1;
+                    if hold_cnt > resize(s_xs, 7) then hold_cnt <= hold_cnt - s_xs;
+                    else                                hold_cnt <= (others => '0'); end if;
                 else
                     bin6 <= "00";
                 end if;
                 mag6 <= mag5;
                 x_s6 <= x_s6 + 1;
+                s_xva <= s_xva + s_xs;
 
-                -- stipple lattice coords + sub-cell diagonal coords
-                st1_8 <= resize(shift_right(x_s6 + s_aline, s_pitch_sh + 3), 8);
-                st2_8 <= resize(shift_right(x_s6 - s_aline, s_pitch_sh + 3), 8);
-                v_sub := x_s6 + s_aline;
-                v_sb2 := x_s6 - s_aline;
+                -- stipple lattice coords + sub-cell diagonal coords (virtual)
+                v_sub := s_xva(11 downto 1) + s_yva(18 downto 8);
+                v_sb2 := s_xva(11 downto 1) - s_yva(18 downto 8);
+                st1_8 <= resize(shift_right(v_sub, s_pitch_sh + 3), 8);
+                st2_8 <= resize(shift_right(v_sb2, s_pitch_sh + 3), 8);
                 case s_pitch_sh is
                     when 0 =>
                         d1_6 <= resize(v_sub(2 downto 0), 6);
@@ -875,11 +979,9 @@ begin
                     -- tone (diamond metric |d1-c| + |d2-c|, c = half cell)
                     -- with the radius CAPPED below the half-cell so dots
                     -- stay separate instead of merging into chunks
-                    v_hf := signed(resize(
-                        shift_left(to_unsigned(4, 6), s_pitch_sh), 7));
+                    v_hf := s_hf7;
                     v_rad := resize(w1_8(6 downto 2), 7) + 1;
-                    v_cap := resize(shift_left(to_unsigned(4, 6),
-                                               s_pitch_sh), 7) - 2;
+                    v_cap := s_cap7;
                     if v_rad > v_cap then
                         v_rad := v_cap;
                     end if;
@@ -1021,12 +1123,13 @@ begin
             end if;
 
             -- line bookkeeping: reload the stripe accumulators from the
-            -- row bases, step the bases (doubled per line when interlaced
-            -- so stroke angles are true in frame space)
+            -- row bases, step the bases by the per-FIELD-line step (virtual
+            -- units; the y step already carries the interlace x2)
             if data_in.hsync_n = '0' and s_prev_hsync_n = '1' then
                 lrx <= (others => '0');
                 lwx <= (others => '0');
                 x_s6 <= (others => '0');
+                s_xva <= (others => '0');
                 s_lstep <= "01";
 
                 if s_seen = '1' then
@@ -1034,21 +1137,23 @@ begin
                     if s_aline /= 2047 then
                         s_aline <= s_aline + 1;
                     end if;
+                    s_yva <= s_yva + s_ys;
                     for k in 0 to 3 loop
                         b_acc(k) <= b_acc(k) + unsigned(s_sk2(k));
                         p_acc(k) <= b_acc(k) + unsigned(s_sk2(k));
                     end loop;
                 else
                     s_aline <= (others => '0');
+                    s_yva   <= (others => '0');
                     -- field start: base = drift phase (pitch-independent,
-                    -- 2.5 phase units per field) + one frame line for the
-                    -- BOTTOM field (field_n = '0') when interlaced
+                    -- 2.5 phase units per field) + half a field step for
+                    -- the BOTTOM field (field_n = '0') when interlaced
                     for k in 0 to 3 loop
                         if s_ilace = '1' and data_in.field_n = '0' then
                             b_acc(k) <= shift_left(resize(s_dracc(8 downto 0), 16), 7)
-                                        + unsigned(s_sk(k));
+                                        + unsigned(shift_right(s_sk2(k), 1));
                             p_acc(k) <= shift_left(resize(s_dracc(8 downto 0), 16), 7)
-                                        + unsigned(s_sk(k));
+                                        + unsigned(shift_right(s_sk2(k), 1));
                         else
                             b_acc(k) <= shift_left(resize(s_dracc(8 downto 0), 16), 7);
                             p_acc(k) <= shift_left(resize(s_dracc(8 downto 0), 16), 7);
