@@ -35,6 +35,18 @@
 -- Output: luma clamp 64..940, highlight knee (600 + (y - 600)/2, whites
 -- ~770) and [1 2 1] on Y/U/V (the HD HDMI bar fix).  Latency 13 clocks, all
 -- modes, blanking-gated.
+--
+-- v0.2.2 (2026-10-17) resolution scaling: P12's band height, K4's
+-- head-switch band and the burst margin are sizes on the 1080-line canvas,
+-- converted to whole field lines from the timing ID (x 1080 / active lines,
+-- halved on interlace: 480i bands are 0.225x as many field lines), so the
+-- bars keep their height relative to the screen at 720p and SD.  Skew is a
+-- slope in canvas units (x ys * kx px per field line), and the Smear runs
+-- are 16 canvas units (16 px at 1080, ~10.7 at 720p, 8 at SD).  Distance
+-- and Roll were already fractions of the screen; snow and line noise stay
+-- at pixel scale.  Under interlace a new pattern starts only every other
+-- field (a field toggle, since field_n is tied high on hardware).
+-- 1080p unchanged.
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -117,6 +129,23 @@ architecture dropout of program_top is
     signal s_nsq_lo, s_nsq_hi : unsigned(11 downto 0) := (others => '0');
     signal s_pspk : unsigned(15 downto 0) := (others => '0');     -- snow density, Noise^2
 
+    -- Resolution scaling (v0.2.2): Q10 canvas -> field-line factor, skew
+    -- slope factor (Q8 ys * kx), burst margins, canvas x step (Q.1)
+    signal s_ky : unsigned(10 downto 0) := to_unsigned(1024, 11);
+    signal s_fsk : unsigned(9 downto 0) := to_unsigned(256, 10);
+    signal s_m31, s_m63 : unsigned(6 downto 0) := (others => '0');
+    signal s_xs : unsigned(2 downto 0) := to_unsigned(2, 3);
+    signal s_ilace, s_ftog : std_logic := '0';
+    signal s_nbp : unsigned(17 downto 0) := (others => '0');
+    signal s_bhp : unsigned(19 downto 0) := (others => '0');
+    signal s_nbl : unsigned(6 downto 0) := to_unsigned(16, 7);    -- P12 band, field lines
+    signal s_bhl : unsigned(8 downto 0) := to_unsigned(40, 9);    -- K4 band, field lines
+    signal s_skp2 : unsigned(17 downto 0) := (others => '0');
+    signal s_skw : unsigned(9 downto 0) := (others => '0');       -- skew per field line
+    signal s_vcur : unsigned(5 downto 0) := (others => '0');      -- smear run x, Q.1 mod 32 units
+    signal s_vprev5 : std_logic := '0';
+    signal s_rs : unsigned(10 downto 0) := (others => '0');       -- smear run start
+
     -- free-running noise
     signal s_rng : unsigned(31 downto 0) := x"2545F491";
     signal s_spk_tog, s_spk_hit : std_logic := '0';
@@ -165,8 +194,9 @@ architecture dropout of program_top is
     signal s_hsrow : unsigned(7 downto 0) := (others => '0');
     signal s_m : unsigned(7 downto 0) := (others => '0');
     signal s_sp_lo, s_sp_hi : unsigned(11 downto 0) := (others => '0');
-    signal s_sp : unsigned(15 downto 0) := (others => '0');
-    signal s_skp : unsigned(12 downto 0) := (others => '0');
+    signal s_sp_x : unsigned(9 downto 0) := (others => '0');
+    signal s_sp : unsigned(17 downto 0) := (others => '0');
+    signal s_skp : unsigned(14 downto 0) := (others => '0');
     signal s_lns : signed(8 downto 0) := (others => '0');
     signal s_ln_lo, s_ln_hi : signed(13 downto 0) := (others => '0');
     signal s_ln : signed(15 downto 0) := (others => '0');
@@ -174,7 +204,7 @@ architecture dropout of program_top is
     signal s_mag : unsigned(17 downto 0) := (others => '0');
     signal s_moff : signed(11 downto 0) := (others => '0');
     signal s_lnoise : signed(9 downto 0) := (others => '0');
-    signal s_vo : signed(14 downto 0) := (others => '0');
+    signal s_vo : signed(16 downto 0) := (others => '0');
     signal s_offc : signed(11 downto 0) := (others => '0');
     -- row constants, committed in hblank
     signal s_off_row : signed(11 downto 0) := (others => '0');
@@ -250,6 +280,40 @@ begin
                 when 2 => s_nbk <= resize(v_p(8 downto 3), 7);
                 when others => s_nbk <= v_p(8 downto 2);
             end case;
+            -- Resolution scaling: per-mode factors (static while a mode runs)
+            case to_integer(unsigned(registers_in(8)(3 downto 0))) is
+                when 0 =>          -- 480i
+                    s_ky <= to_unsigned(230, 11); s_fsk <= to_unsigned(569, 10); s_xs <= "100"; s_ilace <= '1';
+                    s_m31 <= to_unsigned(6, 7);  s_m63 <= to_unsigned(13, 7);
+                when 4 =>          -- 480p
+                    s_ky <= to_unsigned(455, 11); s_fsk <= to_unsigned(288, 10); s_xs <= "100"; s_ilace <= '0';
+                    s_m31 <= to_unsigned(13, 7); s_m63 <= to_unsigned(27, 7);
+                when 8 =>          -- 576i
+                    s_ky <= to_unsigned(273, 11); s_fsk <= to_unsigned(480, 10); s_xs <= "100"; s_ilace <= '1';
+                    s_m31 <= to_unsigned(8, 7);  s_m63 <= to_unsigned(17, 7);
+                when 12 =>         -- 576p
+                    s_ky <= to_unsigned(546, 11); s_fsk <= to_unsigned(240, 10); s_xs <= "100"; s_ilace <= '0';
+                    s_m31 <= to_unsigned(16, 7); s_m63 <= to_unsigned(33, 7);
+                when 5 | 6 | 14 => -- 720p
+                    s_ky <= to_unsigned(683, 11); s_fsk <= to_unsigned(256, 10); s_xs <= "011"; s_ilace <= '0';
+                    s_m31 <= to_unsigned(20, 7); s_m63 <= to_unsigned(41, 7);
+                when 1 | 2 | 10 => -- 1080i
+                    s_ky <= to_unsigned(512, 11); s_fsk <= to_unsigned(512, 10); s_xs <= "010"; s_ilace <= '1';
+                    s_m31 <= to_unsigned(15, 7); s_m63 <= to_unsigned(31, 7);
+                when others =>     -- 1080p
+                    s_ky <= to_unsigned(1024, 11); s_fsk <= to_unsigned(256, 10); s_xs <= "010"; s_ilace <= '0';
+                    s_m31 <= to_unsigned(31, 7); s_m63 <= to_unsigned(63, 7);
+            end case;
+            -- band heights in field lines (>= 1), skew slope per field line
+            s_nbp <= s_nbk * s_ky;
+            s_bhp <= s_bhk * s_ky;
+            if s_nbp(17 downto 10) + ("0000000" & s_nbp(9)) = 0 then s_nbl <= to_unsigned(1, 7);
+            else s_nbl <= s_nbp(16 downto 10) + ("000000" & s_nbp(9)); end if;
+            if s_bhp(19 downto 10) + ("000000000" & s_bhp(9)) = 0 then s_bhl <= to_unsigned(1, 9);
+            else s_bhl <= s_bhp(18 downto 10) + ("00000000" & s_bhp(9)); end if;
+            s_skp2 <= s_skew * s_fsk;
+            s_skw <= s_skp2(17 downto 8);
+
             -- snow density = Noise^2 (operand split hi/lo)
             s_nsq_lo <= s_noise * s_noise(3 downto 0);
             s_nsq_hi <= s_noise * s_noise(7 downto 4);
@@ -297,11 +361,11 @@ begin
             -- per field (one op per state)
             case to_integer(s_vstep) is
                 when 0 =>
-                    s_nf <= s_nbk; s_bhf <= s_bhk; s_hf <= s_height; s_wf <= s_line_width;
+                    s_nf <= s_nbl; s_bhf <= s_bhl; s_hf <= s_height; s_wf <= s_line_width;
                     s_dsh <= s_dist;
                     -- new pattern every Hold frames; under interlace only on
                     -- the top field, so both fields of a frame share it
-                    if s_hcount >= s_hold and (s_fld_cur = '1' or s_fld_cur = s_fld_prev) then
+                    if s_hcount >= s_hold and (s_fld_cur = '1' or s_fld_cur = s_fld_prev) and (s_ilace = '0' or s_ftog = '1') then
                         s_hcount <= (others => '0'); s_seed <= s_rng(31 downto 16);
                     elsif s_hcount /= 63 then
                         s_hcount <= s_hcount + 1;
@@ -321,7 +385,7 @@ begin
                     s_vstep <= s_vstep + 1;
                 when 3 =>
                     s_t1 <= s_t1 - signed(resize(s_rollacc(14 downto 4), 13));
-                    s_nlen <= s_nlen + 63;
+                    s_nlen <= s_nlen + resize(s_m63, 10);
                     s_vstep <= s_vstep + 1;
                 when 4 =>
                     -- band top = H - band - roll, wrapped into [0, H)
@@ -332,7 +396,7 @@ begin
                     s_t1 <= signed(resize(s_hs_top, 13)) - signed(resize(s_nf, 13));
                     s_vstep <= s_vstep + 1;
                 when 6 =>
-                    s_t1 <= s_t1 - 31;
+                    s_t1 <= s_t1 - signed(resize(s_m31, 13));
                     s_vstep <= s_vstep + 1;
                 when 7 =>
                     -- burst zone: band starts that overlap [top - 32, top + band + 32)
@@ -375,8 +439,9 @@ begin
                     s_lstep <= s_lstep + 1;
                 when 3 =>
                     s_h2 <= unsigned(s_h) xor s_seed;
-                    s_sp_lo <= s_hsrow * s_skew(3 downto 0);
-                    s_sp_hi <= s_hsrow * s_skew(7 downto 4);
+                    s_sp_lo <= s_hsrow * s_skw(3 downto 0);
+                    s_sp_hi <= s_hsrow * s_skw(7 downto 4);
+                    s_sp_x  <= s_hsrow * s_skw(9 downto 8);
                     s_lns <= signed(resize(s_rng(23 downto 16), 9)) - 128;
                     s_lstep <= s_lstep + 1;
                 when 4 =>
@@ -390,7 +455,7 @@ begin
                         if s_h2(7 downto 6) = "00" then s_m <= "01" & s_h2(5 downto 0); else s_m <= s_h2(7 downto 0); end if;
                         s_sgn <= s_h2(8);
                     end if;
-                    s_sp <= shift_left(resize(s_sp_hi, 16), 4) + resize(s_sp_lo, 16);
+                    s_sp <= shift_left(resize(s_sp_x, 18), 8) + shift_left(resize(s_sp_hi, 18), 4) + resize(s_sp_lo, 18);
                     s_lstep <= s_lstep + 1;
                 when 5 =>
                     s_pm_lo <= s_D * s_m(3 downto 0);
@@ -401,7 +466,7 @@ begin
                 when 6 =>
                     s_mag <= shift_left(resize(s_pm_hi, 18), 4) + resize(s_pm_lo, 18);
                     s_ln <= shift_left(resize(s_ln_hi, 16), 4) + resize(s_ln_lo, 16);
-                    if s_inhs = '1' then s_skp <= s_sp(15 downto 3); else s_skp <= (others => '0'); end if;
+                    if s_inhs = '1' then s_skp <= s_sp(17 downto 3); else s_skp <= (others => '0'); end if;
                     s_lstep <= s_lstep + 1;
                 when 7 =>
                     if s_moshed = '0' then
@@ -414,7 +479,7 @@ begin
                     if s_sw_lines = '1' and s_inhs = '1' then s_lnoise <= s_ln(15 downto 6); else s_lnoise <= (others => '0'); end if;
                     s_lstep <= s_lstep + 1;
                 when 8 =>
-                    s_vo <= resize(s_moff, 15) + signed(resize(s_skp, 15));
+                    s_vo <= resize(s_moff, 17) + signed(resize(s_skp, 17));
                     s_lstep <= s_lstep + 1;
                 when 9 =>
                     if s_vo > 2047 then
@@ -454,6 +519,7 @@ begin
                 if s_saw_active = '1' then
                     s_vstep <= (others => '0');
                     s_fld_prev <= s_fld_cur; s_fld_cur <= data_in.field_n;
+                    s_ftog <= not s_ftog;
                 end if;
                 s_saw_active <= '0';
             end if;
@@ -480,10 +546,20 @@ begin
     ---------------------------------------------------------------------------
     p_addr : process(clk)
         variable v_w : signed(12 downto 0);
+        variable v_rs : unsigned(10 downto 0);
     begin
         if rising_edge(clk) then
-            -- 3: smear hold
-            if s_sw_smear = '1' and s_mosh_row = '1' then s_xh2 <= s_x1(10 downto 4) & "0000"; else s_xh2 <= s_x1; end if;
+            -- 3: smear hold: runs of 16 canvas units (a run starts where the
+            -- canvas x of s_x1 crosses a multiple of 16; 16 px at 1080)
+            if s_x1 = "11111111111" then
+                s_vcur <= (others => '0');
+            else
+                s_vcur <= s_vcur + s_xs;
+            end if;
+            s_vprev5 <= s_vcur(5);
+            if s_x1 = 0 or s_vcur(5) /= s_vprev5 then v_rs := s_x1; else v_rs := s_rs; end if;
+            s_rs <= v_rs;
+            if s_sw_smear = '1' and s_mosh_row = '1' then s_xh2 <= v_rs; else s_xh2 <= s_x1; end if;
             -- 4
             s_u3 <= signed(resize(s_xh2, 13)) + resize(s_off_row, 13);
             -- 5
