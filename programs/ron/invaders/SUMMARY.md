@@ -1,4 +1,4 @@
-# INVADERS (v0.7.6 — resolution scaling; v0.7.3 = trail only while moving, fills the gaps between body parts)
+# INVADERS (v0.7.7 — stock-SDK fit, bit-exact; v0.7.6 = resolution scaling; v0.7.3 = trail only while moving, fills the gaps between body parts)
 
 **STATUS: v0.7.3 FINAL except presets — signed off by Ron 2026-10-10**
 ("OK, finalize"; v0.4.0 had been signed off 2026-10-09, and v0.5–v0.7 are his
@@ -8,6 +8,86 @@ HD Analog seed 3, every other config seed 1. The chip is full (~94 % LC):
 any future feature needs a trim first. Earlier ship builds are saved in
 .invaders_work/ (invaders_v040 … v072.vmprog);
 invaders_v073_TIMING_FAIL.vmprog must never be flashed.
+
+## v0.7.7 — fit for the stock SDK again, bit-exact (2026-10-18, not flashed)
+
+- **Why:** v0.7.6's scaling (+~100 LC) pushed the stock SDK's SD Standalone
+  core to 7681/7680 LC ("Failed to expand region"). Packing is
+  deterministic, so logic had to come out.
+- **Found:** yosys turns every `<` / `>=` into a carry chain, even against
+  a constant (one carry-only LC per bit plus chain legalisation). The
+  edge-shadow's thermometers (`g < base_g`, `g <= tap_g` for 32 groups) were
+  64 separate 7-bit chains. A coarse netlist inventory (all `$alu` cells by
+  width and source) found them; there were 302 chains in program_top.
+- **Changes (no behaviour change):**
+  1. `f_ult` / `f_slt`: compare-with-constant built from AND/OR bit logic.
+     Used for the S5 thermometers, the S4 group clamps, and every other
+     constant compare: the death/win timeline (s_dt, s_wt, s_zk), the
+     layout guards, the trail speed (s_gh_avg), the boot counter, the kill
+     count, the debris gravity cap, the form/bomb/bunker/TV-screen/trail
+     box tests, and the explosion box (its muxed limit became three
+     constant tests).
+  2. The 3-operand position adds (bomb spawn, hit explosion, debris spawn
+     row) use bit fields: `col*128 + 61` is a concatenation, so each one is
+     a single adder.
+  3. Bomb-pick and alien-alive reads use constant-index selects (no
+     reversed-index subtracts).
+  - Tried and dropped: making the 14 unused alien slots constants (-29 LC).
+    It is only equivalent on reachable states, which the formal proof
+    can't see. The margin didn't need it.
+- **Packed LC (stock SDK, nextpnr pack):** SD Standalone 7681 → **7212**
+  (the thermometers alone 7681 → 7387); HD Dual 7300 → 6827. Full stock
+  SD Standalone build (the community make, seed 1): 7212/7680 (93 %),
+  47.28 MHz post-route (27 needed).
+- **Bit-exact proof:**
+  - **Formal:** yosys `equiv_make` / `equiv_simple` / `equiv_induct -seq 4`
+    on the flattened GHDL netlists of v0.7.6 (337f117) and v0.7.7. ROMs and
+    RAMs were mapped to logic, and cell names hidden so only signals pair
+    by name. All 3074 equivalence points were proven, including every
+    register and every `data_out` bit. The proof covers any input sequence
+    and knob timing, and every timing ID (`registers_in(8)` is a free
+    input). Both versions share every register's init value, so they start
+    in sync.
+  - **Negative control:** a copy with a one-group thermometer off-by-one
+    fails exactly at s_stg5_tr_out / s_stg5_tr_gap.
+  - **Simulation:** a GHDL side-by-side ran v0.7.6 and v0.7.7 on one clock
+    and compared every `data_out` field on every clock. Inputs were random
+    video, with knobs, switches and the slider changing at random clocks
+    (vblank included). Five runs, 30.8 M clocks, **0 mismatches**:
+    - SD-class (480i ID) 400 x 243 lines, 40 fields;
+    - full NTSC field raster with field_n toggling, 16 fields;
+    - 720p-class 600 x 720, 12 frames;
+    - 1080p-class 800 x 1080, 11 frames;
+    - SD bomb scenario, 60 fields.
+
+    Covered (probed in the reference): boot and game resets, shot and
+    shield hits, debris, the trail, bombs, a landing death, and the bottom
+    field. The virtual size read 1440 x 1080 at SD, 900 x 1080 at 720p and
+    800 x 1080 at 1080p. The sim runs ~1.3k clocks/s here, so it is the
+    cross-check; the formal proof is the guarantee.
+- **Stock HD timing note:** the stock core caps HD routing near 50 MHz
+  (critical path inside `u_core_top.sync_out_gen`). v0.7.6's stock build
+  already showed HD Dual 54.04 MHz, and v0.7.7 seed 1 gives 51.73 MHz. The
+  program's own paths aren't involved.
+  - Tools: .scaling_work/invaders_fit/ (formal/formal.sh, tb/tb_cmp.vhd,
+    measure.sh, alus.py).
+
+## Build v0.7.7 (2026-10-18, router2, full clock, ~6610 LC / 86 %, 28/32 EBR)
+
+`MAKE_TIMEOUT=1200 ./build_programs.sh ron invaders` (default router2, seed
+retry from 1; the longer timeout only guards against a loaded machine).
+
+| Config | Seed | Post-route Fmax | LC |
+|---|---|---|---|
+| HD Analog | 1 | 76.98 MHz | 6618 |
+| SD Analog | 1 | 84.94 MHz | 6610 |
+| HD HDMI | 1 | 82.71 MHz | 6625 |
+| SD HDMI | 1 | 74.71 MHz | 6617 |
+| HD Dual | 1 | 87.27 MHz | 6587 |
+| SD Dual | 1 | 83.79 MHz | 6601 |
+
+Hardware checklist: identical to v0.7.6 at every resolution (formally the
+same circuit). A quick flash at 1080p and SD to confirm the build is enough.
 
 ## v0.7.6 — resolution scaling (2026-10-17, not flashed)
 

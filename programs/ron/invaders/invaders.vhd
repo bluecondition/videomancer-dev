@@ -4,7 +4,13 @@
 -- This file is part of Videomancer Community Programs.
 -- See LICENSE file in the repository root for full license text.
 --
--- Wizard Invaders (v0.7.6)
+-- Wizard Invaders (v0.7.7)
+--
+-- v0.7.7 (2026-10-18): fit for the stock SDK's SD Standalone core again,
+-- bit-exact with v0.7.6 (formally proven equivalent).  Compares against a
+-- constant are plain bit logic (f_ult / f_slt) instead of carry chains --
+-- above all the edge-shadow's 64 group thermometers -- and the 3-operand
+-- position adds use bit fields.  Nothing drawn changes.
 --
 -- v0.7.6 (2026-10-17): resolution scaling.  The whole game (render
 -- coordinates, measured width/height, layout, sprite sizes, speeds, the
@@ -528,6 +534,46 @@ architecture invaders of program_top is
         end case;
     end function;
 
+    -- ------------------------------------------------------------------
+    -- Compares against a CONSTANT, as plain bit logic (v0.7.7).  yosys maps
+    -- every "<" / ">=" to a carry chain even when one side is a constant (a
+    -- carry-only LC per bit, plus chain legalisation); these build the same
+    -- predicate from AND/OR terms, which abc packs into a few shared LUTs.
+    -- ------------------------------------------------------------------
+    -- '1' when unsigned x < c.
+    function f_ult(x : unsigned; c : integer) return std_logic is
+        constant N    : natural := x'length;
+        alias    xv   : unsigned(N - 1 downto 0) is x;
+        variable cb   : unsigned(N - 1 downto 0);
+        variable v_eq : std_logic := '1';   -- all higher bits equal to c's
+        variable v_lt : std_logic := '0';
+    begin
+        if c <= 0 then
+            return '0';
+        elsif c >= 2 ** N then
+            return '1';
+        end if;
+        cb := to_unsigned(c, N);
+        for i in N - 1 downto 0 loop
+            if cb(i) = '1' then
+                v_lt := v_lt or (v_eq and not xv(i));
+                v_eq := v_eq and xv(i);
+            else
+                v_eq := v_eq and not xv(i);
+            end if;
+        end loop;
+        return v_lt;
+    end function;
+    -- '1' when signed x < c (offset binary: flip the sign bit).
+    function f_slt(x : signed; c : integer) return std_logic is
+        constant N : natural := x'length;
+        variable u : unsigned(N - 1 downto 0);
+    begin
+        u := unsigned(x);
+        u(N - 1) := not u(N - 1);
+        return f_ult(u, c + 2 ** (N - 1));
+    end function;
+
     -- ========================================================================
     -- Parameters
     -- ========================================================================
@@ -1038,8 +1084,9 @@ architecture invaders of program_top is
     signal s_stg4_wiz_bit    : unsigned(3 downto 0) := (others => '0');
     -- Edge-shadow group indices (4-px groups), clamped to -1 .. 32: -1 =
     -- before the row, 32 = past it.  S5 prefix-ORs the group word at both.
-    signal s_stg4_gh_base_g  : integer range -1 to 32 := 0;
-    signal s_stg4_gh_tap_g   : integer range -1 to 32 := 0;
+    -- (7-bit signed, values -1 .. 32)
+    signal s_stg4_gh_base_g  : signed(6 downto 0) := (others => '0');
+    signal s_stg4_gh_tap_g   : signed(6 downto 0) := (others => '0');
     signal s_stg4_in_bullet  : std_logic_vector(0 to C_BULLETS - 1)
                                 := (others => '0');
     signal s_stg4_in_bomb    : std_logic_vector(0 to C_BOMBS - 1)
@@ -1213,14 +1260,14 @@ begin
 
             v_v := to_integer(s_measured_v);
             -- Wizard hugs the bottom
-            if v_v > C_SHIP_H then
+            if f_ult(s_measured_v, C_SHIP_H + 1) = '0' then
                 s_ship_y <= to_signed(v_v - C_SHIP_H, 12);
             else
                 s_ship_y <= to_signed(0, 12);
             end if;
             -- Bunker sits C_BUNKER_GAP px above the wizard top (closer than
             -- before so it really crowds the player).
-            if v_v > C_SHIP_H + C_BUNKER_H + C_BUNKER_GAP then
+            if f_ult(s_measured_v, C_SHIP_H + C_BUNKER_H + C_BUNKER_GAP + 1) = '0' then
                 s_bunker_y <= to_signed(v_v - C_SHIP_H - C_BUNKER_GAP
                                         - C_BUNKER_H, 12);
             else
@@ -1240,12 +1287,12 @@ begin
             s_bx_acc <= v_bx;
             s_bunker_x(to_integer(s_bx_k)) <= v_bx;
 
-            if to_integer(s_measured_h) > C_SHIP_W then
+            if f_ult(s_measured_h, C_SHIP_W + 1) = '0' then
                 s_ship_x_max <= s_measured_h - to_unsigned(C_SHIP_W, 12);
             else
                 s_ship_x_max <= (others => '0');
             end if;
-            if to_integer(s_measured_h) > C_FORM_W + C_BORDER then
+            if f_ult(s_measured_h, C_FORM_W + C_BORDER + 1) = '0' then
                 s_form_x_max <= to_signed(
                     to_integer(s_measured_h) - C_FORM_W - C_BORDER, 12);
             else
@@ -1267,7 +1314,7 @@ begin
                 s_form_y_init <= s_bunker_y - to_signed(C_FORM_H + 2, 12);
             end if;
             -- Centre formation horizontally
-            if to_integer(s_measured_h) > C_FORM_W then
+            if f_ult(s_measured_h, C_FORM_W + 1) = '0' then
                 s_form_x_init <= to_signed(
                     (to_integer(s_measured_h) - C_FORM_W) / 2, 12);
             else
@@ -1440,7 +1487,7 @@ begin
             else
                 v_abs := s_ghost_dx;
             end if;
-            if v_abs > to_signed(255, 12) then
+            if f_slt(v_abs, 256) = '0' then
                 s_ghost_spd <= to_unsigned(255, 8);
             else
                 s_ghost_spd <= unsigned(v_abs(7 downto 0));
@@ -1451,9 +1498,9 @@ begin
             -- inputs only change at vsync, so the registered decisions are
             -- settled long before the next vsync samples them).
             s_gh_avg <= resize(s_ghost_spd, 9) + resize(s_spd_prev, 9);  -- 2x avg
-            if s_gh_avg <= to_unsigned(3, 9) then              -- avg <= 1 px
+            if f_ult(s_gh_avg, 4) = '1' then              -- avg <= 1 px
                 s_gh_f <= (others => '0');
-            elsif s_gh_avg >= to_unsigned(34, 9) then          -- avg >= 17 px
+            elsif f_ult(s_gh_avg, 34) = '0' then          -- avg >= 17 px
                 s_gh_f <= to_unsigned(16, 5);
             else
                 s_gh_f <= resize(s_gh_avg(8 downto 1), 5) - 1;
@@ -1512,9 +1559,9 @@ begin
                 end if;
 
                 -- Hue phase advances one step every few frames (slow shimmer).
-                if s_ghost_pdiv >= to_unsigned(2, 3) then
+                if f_ult(s_ghost_pdiv, 2) = '0' then
                     s_ghost_pdiv <= (others => '0');
-                    if s_ghost_phase >= to_unsigned(6, 3) then
+                    if f_ult(s_ghost_phase, 6) = '0' then
                         s_ghost_phase <= (others => '0');
                     else
                         s_ghost_phase <= s_ghost_phase + 1;
@@ -1541,7 +1588,7 @@ begin
             -- s_boot_count = 8 as a single-shot init trigger (rather
             -- than the previous "boot_done=0 → reset every vsync" path
             -- which locked the player out of firing during boot).
-            if s_timing.vsync_start = '1' and s_boot_count < 9 then
+            if s_timing.vsync_start = '1' and f_ult(s_boot_count, 9) = '1' then
                 s_boot_count <= s_boot_count + 1;
             end if;
 
@@ -1598,7 +1645,7 @@ begin
 
             -- aliens_clear from the kill counter — 5-bit compare vs the
             -- old 32-bit OR-reduce.
-            if s_dead_count >= to_unsigned(C_ROWS * C_COLS, 5) then
+            if f_ult(s_dead_count, C_ROWS * C_COLS) = '0' then
                 s_aliens_clear <= '1';
             else
                 s_aliens_clear <= '0';
@@ -1643,28 +1690,38 @@ begin
     -- live alien from s_aliens — two registered steps, so phase 4 consumes
     -- flops.  A dead column simply retries next frame with fresh bits.
     p_bomb_pick : process(clk)
-        variable v_col : integer range 0 to 7;
         variable v_can : std_logic;
         variable v_row : unsigned(1 downto 0);
+        variable v_a2, v_a1, v_a0 : std_logic;
     begin
         if rising_edge(clk) then
-            if unsigned(s_rng(2 downto 0)) < C_COLS then
+            if f_ult(unsigned(s_rng(2 downto 0)), C_COLS) = '1' then
                 s_bsp_pick <= unsigned(s_rng(2 downto 0));
-            elsif unsigned(s_rng(5 downto 3)) < C_COLS then
+            elsif f_ult(unsigned(s_rng(5 downto 3)), C_COLS) = '1' then
                 s_bsp_pick <= unsigned(s_rng(5 downto 3));
             else
                 s_bsp_pick <= resize(unsigned(s_rng(7 downto 6)), 3);
             end if;
 
-            v_col := to_integer(s_bsp_pick);
             v_can := '0';
             v_row := "00";
             -- s_aliens is packed {row, col} = row*8 + col (NOT row*6).
-            if s_aliens(16 + v_col) = '1' then
+            -- (constant-index selects: no index arithmetic)
+            v_a2 := '0';
+            v_a1 := '0';
+            v_a0 := '0';
+            for c in 0 to 7 loop
+                if s_bsp_pick = c then
+                    v_a2 := s_aliens(16 + c);
+                    v_a1 := s_aliens(8 + c);
+                    v_a0 := s_aliens(c);
+                end if;
+            end loop;
+            if v_a2 = '1' then
                 v_row := "10"; v_can := '1';
-            elsif s_aliens(8 + v_col) = '1' then
+            elsif v_a1 = '1' then
                 v_row := "01"; v_can := '1';
-            elsif s_aliens(v_col) = '1' then
+            elsif v_a0 = '1' then
                 v_row := "00"; v_can := '1';
             end if;
             s_bsp_col <= s_bsp_pick;
@@ -1678,11 +1735,11 @@ begin
     -- ========================================================================
     p_physics : process(clk)
         variable v_spawned     : std_logic;
-        variable v_col         : integer range 0 to 7;
-        variable v_row         : integer range 0 to C_ROWS - 1;
         variable v_x           : signed(11 downto 0);
         variable v_y           : signed(11 downto 0);
         variable v_fi          : integer range 0 to 7;
+        variable v_rp1         : std_logic_vector(2 downto 0);
+        variable v_cx, v_cy    : std_logic_vector(11 downto 0);
     begin
         if rising_edge(clk) then
 
@@ -1779,7 +1836,7 @@ begin
                         else
                             s_step_counter <= s_step_counter + 1;
                         end if;
-                        if s_bomb_cooldown > 0 then
+                        if s_bomb_cooldown /= 0 then
                             s_bomb_cooldown <= s_bomb_cooldown - 1;
                         end if;
                     end if;
@@ -1798,7 +1855,7 @@ begin
                             s_bullet_active(to_integer(s_hit_ab_bul)) <= '0';
                             s_bullet_y(to_integer(s_hit_ab_bul)) <=
                                 to_signed(C_BULLET_PARK, 12);
-                            if s_dead_count < to_unsigned(31, 5) then
+                            if f_ult(s_dead_count, 31) = '1' then
                                 s_dead_count <= s_dead_count + 1;
                             end if;
                             -- (No small burst over a running rainbow cloud.)
@@ -1890,7 +1947,7 @@ begin
                             end if;
                             s_bullet_y(v_fi) <= s_ship_y +
                                 to_signed(C_WAND_OFFSET_Y - C_BULLET_H, 12);
-                            if v_fi >= C_BULLETS - 1 then
+                            if f_ult(s_fire_idx, C_BULLETS - 1) = '0' then
                                 s_fire_idx <= (others => '0');
                             else
                                 s_fire_idx <= s_fire_idx + 1;
@@ -1914,15 +1971,17 @@ begin
                         -- dead/out-of-range columns skip without consuming
                         -- the cooldown so the next pick retries.
                         if s_bomb_cooldown = 0 and s_aliens_clear = '0' then
-                            v_col := to_integer(s_bsp_col);
-                            v_row := to_integer(s_bsp_row);
                             if s_bsp_can = '1' then
-                                v_x := s_form_x + to_signed(
-                                    v_col * C_CELL_W + C_CELL_W / 2
-                                    - C_BOMB_W / 2, 12);
-                                v_y := s_form_y + to_signed(
-                                    v_row * C_CELL_H + C_SPRITE_OFF
-                                    + C_SPRITE_H, 12);
+                                -- col * 128 + 61 and (row + 1) * 128,
+                                -- as bit fields (one adder each)
+                                v_cx := "00" & std_logic_vector(s_bsp_col)
+                                        & "0111101";
+                                v_x := s_form_x + signed(v_cx);
+                                v_rp1(2) := s_bsp_row(1) and s_bsp_row(0);
+                                v_rp1(1) := s_bsp_row(1) xor s_bsp_row(0);
+                                v_rp1(0) := not s_bsp_row(0);
+                                v_cy := "00" & v_rp1 & "0000000";
+                                v_y := s_form_y + signed(v_cy);
                                 v_spawned := '0';
                                 for i in 0 to C_BOMBS - 1 loop
                                     if v_spawned = '0' and
@@ -1961,7 +2020,7 @@ begin
                             s_form_x   <= s_form_x_max;
                             s_form_dir <= '0';
                             s_form_y   <= s_form_y + to_signed(32, 12);
-                        elsif s_ph_new_fx <= C_FORM_X_MIN then
+                        elsif f_slt(s_ph_new_fx, C_BORDER + 1) = '1' then
                             s_form_x   <= C_FORM_X_MIN;
                             s_form_dir <= '1';
                             s_form_y   <= s_form_y + to_signed(32, 12);
@@ -1999,6 +2058,7 @@ begin
     -- bunker-chunk art, wizard silhouette).  First overlap of each kind per
     -- frame wins; vsync_start snapshots into s_hit_* for the FSM and clears.
     p_collide : process(clk)
+        variable v_ox, v_oy : std_logic_vector(11 downto 0);
     begin
         if rising_edge(clk) then
             -- Private registered vsync: keeps the ~40-register snapshot off
@@ -2018,12 +2078,13 @@ begin
                 s_hit_mb_bul    <= s_cl_mb_bul;
                 -- Explosion centred in the hit cell: cell origin =
                 -- form + {row,col} << 7, plus C_EXPL_OFF.
-                s_hit_expl_x <= s_form_x + signed(
-                    shift_left(resize(s_cl_ab_alien(2 downto 0), 12), 7)
-                    + to_unsigned(C_EXPL_OFF, 12));
-                s_hit_expl_y <= s_form_y + signed(
-                    shift_left(resize(s_cl_ab_alien(4 downto 3), 12), 7)
-                    + to_unsigned(C_EXPL_OFF, 12));
+                -- ({col} << 7) + 16 and ({row} << 7) + 16 as bit fields
+                v_ox := "00" & std_logic_vector(s_cl_ab_alien(2 downto 0))
+                        & "0010000";
+                v_oy := "000" & std_logic_vector(s_cl_ab_alien(4 downto 3))
+                        & "0010000";
+                s_hit_expl_x <= s_form_x + signed(v_ox);
+                s_hit_expl_y <= s_form_y + signed(v_oy);
                 s_cl_ab_v <= '0';
                 s_cl_mb_v <= '0';
                 s_cl_ms_v <= '0';
@@ -2183,7 +2244,7 @@ begin
             elsif s_ph_phase = to_unsigned(5, 3) and s_ph_anim = '1' then
                 if s_dying = '1' then
                     s_dt <= s_dt + 1;
-                    if s_dt < to_unsigned(C_D_CLOUD, 9) then
+                    if f_ult(s_dt, C_D_CLOUD) = '1' then
                         -- Ease to the screen centre: velocity = 1/8 of the
                         -- remaining distance (one frame late, which still
                         -- settles smoothly), while growing to C_DEATH_K.
@@ -2196,7 +2257,7 @@ begin
                         s_fvy <= resize(shift_right(v_dy, 3), 12);
                         s_fx  <= s_fx + resize(s_fvx, 16);
                         s_fy  <= s_fy + resize(s_fvy, 16);
-                        if s_zk > to_unsigned(C_DEATH_K + 8, 9) then
+                        if f_ult(s_zk, C_DEATH_K + 9) = '0' then
                             s_zk <= s_zk - 8;
                         else
                             s_zk <= to_unsigned(C_DEATH_K, 9);
@@ -2216,7 +2277,7 @@ begin
                     if s_wt /= to_unsigned(255, 8) then
                         s_wt <= s_wt + 1;
                     end if;
-                    if s_wt < to_unsigned(C_W_FLY, 8) then
+                    if f_ult(s_wt, C_W_FLY) = '1' then
                         -- accelerate sideways (3/16 px/frame^2) toward the
                         -- far side and up (6/16).  Over W_FLY frames that is
                         -- <= 947 px sideways from a start on the near half
@@ -2231,7 +2292,7 @@ begin
                         s_fx  <= s_fx + resize(s_fvx, 16);
                         s_fy  <= s_fy + resize(s_fvy, 16);
                         -- grow: k 256 → 40 (6.4x) at 3 per frame
-                        if s_zk > to_unsigned(43, 9) then
+                        if f_ult(s_zk, 44) = '0' then
                             s_zk <= s_zk - 3;
                         else
                             s_zk <= to_unsigned(40, 9);
@@ -2258,7 +2319,7 @@ begin
             -- Registered frame flags.
             -- (a landing death stays frozen until its reset)
             if s_winning = '1' or
-               (s_dying = '1' and (s_dt < to_unsigned(C_D_RESUME, 9) or
+               (s_dying = '1' and (f_ult(s_dt, C_D_RESUME) = '1' or
                                    s_end_reset = '1')) then
                 s_frozen <= '1';
             else
@@ -2268,19 +2329,19 @@ begin
             if s_dying = '0' then
                 s_world_level <= to_unsigned(16, 5);
                 s_tv_level    <= (others => '0');
-            elsif s_dt < to_unsigned(16, 9) then                  -- world out
+            elsif f_ult(s_dt, 16) = '1' then                  -- world out
                 s_world_level <= to_unsigned(16, 5) - resize(s_dt(3 downto 0), 5);
                 s_tv_level    <= (others => '0');
-            elsif s_dt < to_unsigned(C_D_TV_IN, 9) then
+            elsif f_ult(s_dt, C_D_TV_IN) = '1' then
                 s_world_level <= (others => '0');
                 s_tv_level    <= (others => '0');
-            elsif s_dt < to_unsigned(C_D_TV_IN + 16, 9) then      -- TV in
+            elsif f_ult(s_dt, C_D_TV_IN + 16) = '1' then      -- TV in
                 s_world_level <= (others => '0');
                 s_tv_level    <= resize(s_dt(3 downto 0), 5) + 1;
-            elsif s_dt < to_unsigned(C_D_TV_OUT, 9) then          -- TV up
+            elsif f_ult(s_dt, C_D_TV_OUT) = '1' then          -- TV up
                 s_world_level <= (others => '0');
                 s_tv_level    <= to_unsigned(16, 5);
-            elsif s_dt < to_unsigned(C_D_TV_OUT + 16, 9) then     -- crossfade
+            elsif f_ult(s_dt, C_D_TV_OUT + 16) = '1' then     -- crossfade
                 s_world_level <= resize(s_dt(3 downto 0), 5) + 1;
                 s_tv_level    <= to_unsigned(15, 5) - resize(s_dt(3 downto 0), 5);
             else
@@ -2289,22 +2350,22 @@ begin
             end if;
 
             -- rainbow strobe = the charge-up at the end of the rumble
-            if s_dying = '1' and s_dt >= to_unsigned(C_D_STROBE, 9) and
-               s_dt < to_unsigned(C_D_CLOUD, 9) then
+            if s_dying = '1' and f_ult(s_dt, C_D_STROBE) = '0' and
+               f_ult(s_dt, C_D_CLOUD) = '1' then
                 s_wiz_strobe <= '1';
             else
                 s_wiz_strobe <= '0';
             end if;
             if s_winning = '1' then
-                if s_wt < to_unsigned(C_W_FLY, 8) then
+                if f_ult(s_wt, C_W_FLY) = '1' then
                     s_wiz_vis <= '1';
                 else
                     s_wiz_vis <= '0';
                 end if;
             elsif s_dying = '1' then
-                if s_dt < to_unsigned(C_D_CLOUD, 9) then
+                if f_ult(s_dt, C_D_CLOUD) = '1' then
                     s_wiz_vis <= '1';                       -- fly + rumble
-                elsif s_dt < to_unsigned(C_D_RESUME, 9) then
+                elsif f_ult(s_dt, C_D_RESUME) = '1' then
                     s_wiz_vis <= '0';                       -- inside the cloud
                 else
                     s_wiz_vis <= not s_dt(2);               -- respawn blink
@@ -2321,17 +2382,17 @@ begin
             v_shy := signed(s_rng(9 downto 5));
             -- (rumble D_FLY .. D_CLOUD-1, 15 frames per level; the TV holds
             -- still once the explosion starts)
-            if s_dt < to_unsigned(C_D_FLY, 9) or
-               s_dt >= to_unsigned(C_D_CLOUD, 9) then
+            if f_ult(s_dt, C_D_FLY) = '1' or
+               f_ult(s_dt, C_D_CLOUD) = '0' then
                 v_shx := (others => '0');
                 v_shy := (others => '0');
-            elsif s_dt < to_unsigned(C_D_FLY + 15, 9) then
+            elsif f_ult(s_dt, C_D_FLY + 15) = '1' then
                 v_shx := shift_right(v_shx, 3);
                 v_shy := shift_right(v_shy, 3);
-            elsif s_dt < to_unsigned(C_D_FLY + 30, 9) then
+            elsif f_ult(s_dt, C_D_FLY + 30) = '1' then
                 v_shx := shift_right(v_shx, 2);
                 v_shy := shift_right(v_shy, 2);
-            elsif s_dt < to_unsigned(C_D_FLY + 45, 9) then
+            elsif f_ult(s_dt, C_D_FLY + 45) = '1' then
                 v_shx := shift_right(v_shx, 1);
                 v_shy := shift_right(v_shy, 1);
             end if;
@@ -2339,7 +2400,7 @@ begin
                 s_zoom_xc <= s_fx(15 downto 4);
                 s_zoom_yc <= s_fy(15 downto 4);
                 s_zoom_k  <= s_zk;
-            elsif s_dying = '1' and s_dt < to_unsigned(C_D_TV_OUT + 16, 9) then
+            elsif s_dying = '1' and f_ult(s_dt, C_D_TV_OUT + 16) = '1' then
                 -- (held until the TV has fully dissolved — the wizard
                 -- itself is hidden from D_CLOUD)
                 s_zoom_xc <= s_fx(15 downto 4) + resize(v_shx, 12);
@@ -2440,10 +2501,18 @@ begin
     p_debris : process(clk)
         variable v_slot  : integer range 0 to C_DEBRIS;
         variable v_ny    : signed(11 downto 0);
+        variable v_off   : signed(11 downto 0);
     begin
         if rising_edge(clk) then
-            s_dsp_mb_y <= s_bunker_y - to_signed(C_CHUNK_ROW_OFF, 12) +
-                          signed(shift_left(resize(s_hit_mb_chk(3 downto 2), 12), 5));
+            -- chunk top = bunker_y - 16 + chunk_row * 32: one adder, the
+            -- row offset a 4-way constant
+            case s_hit_mb_chk(3 downto 2) is
+                when "00"   => v_off := to_signed(0 * 32 - C_CHUNK_ROW_OFF, 12);
+                when "01"   => v_off := to_signed(1 * 32 - C_CHUNK_ROW_OFF, 12);
+                when "10"   => v_off := to_signed(2 * 32 - C_CHUNK_ROW_OFF, 12);
+                when others => v_off := to_signed(3 * 32 - C_CHUNK_ROW_OFF, 12);
+            end case;
+            s_dsp_mb_y <= s_bunker_y + v_off;
 
             if s_bnk_rst_stb = '1' then
                 s_deb_a <= (others => '0');
@@ -2470,7 +2539,7 @@ begin
                     if s_deb_a(i) = '1' then
                         v_ny := s_deb_y(i) + resize(s_deb_vy(i), 12);
                         s_deb_y(i) <= v_ny;
-                        if s_deb_vy(i) < to_signed(30, 6) then
+                        if f_slt(s_deb_vy(i), 30) = '1' then
                             s_deb_vy(i) <= s_deb_vy(i) + 1;
                         end if;
                         if v_ny >= signed(s_measured_v) then
@@ -2576,7 +2645,8 @@ begin
         variable v_col_bits    : unsigned(2 downto 0);
         variable v_bnk_id      : unsigned(1 downto 0);
         variable v_dx          : signed(9 downto 0);
-        variable v_ex_lim      : signed(11 downto 0);
+        variable v_lim_x       : std_logic;
+        variable v_lim_y       : std_logic;
         variable v_er          : unsigned(5 downto 0);
         variable v_ec          : unsigned(5 downto 0);
         variable v_deb_in      : std_logic;
@@ -2614,8 +2684,8 @@ begin
             else
                 v_col_bits := unsigned(s_stg2_form_dx(9 downto 7));
                 v_row_bits := unsigned(s_stg2_form_dy(8 downto 7));
-                if s_stg2_form_dx(11 downto 10) = 0 and unsigned(s_stg2_form_dx(9 downto 0)) < C_FORM_W and
-                   s_stg2_form_dy(11 downto 9) = 0 and unsigned(s_stg2_form_dy(8 downto 0)) < C_FORM_H then
+                if s_stg2_form_dx(11 downto 10) = 0 and f_ult(unsigned(s_stg2_form_dx(9 downto 0)), C_FORM_W) = '1' and
+                   s_stg2_form_dy(11 downto 9) = 0 and f_ult(unsigned(s_stg2_form_dy(8 downto 0)), C_FORM_H) = '1' then
                     s_stg3_in_form <= '1';
                 else
                     s_stg3_in_form <= '0';
@@ -2635,15 +2705,15 @@ begin
             s_stg3_alien_bit  <= not v_sc(3 downto 0);
             -- TV screen interior: drawn from the waveform animation, at this
             -- alien's own frame offset ((anim + offset) mod 5).
-            if v_sr >= C_SCR_R0 and v_sr <= C_SCR_R1 and
-               v_sc >= C_SCR_C0 and v_sc <= C_SCR_C1 then
+            if f_ult(v_sr, C_SCR_R0) = '0' and f_ult(v_sr, C_SCR_R1 + 1) = '1' and
+               f_ult(v_sc, C_SCR_C0) = '0' and f_ult(v_sc, C_SCR_C1 + 1) = '1' then
                 s_stg3_in_scr <= '1';
             else
                 s_stg3_in_scr <= '0';
             end if;
             v_sf := resize(s_scr_anim, 4) +
                     resize(C_SCR_OFF(to_integer(v_row_bits & v_col_bits)), 4);
-            if v_sf >= C_SCR_FRAMES then
+            if f_ult(v_sf, C_SCR_FRAMES) = '0' then
                 v_sf := v_sf - C_SCR_FRAMES;
             end if;
             v_sr := v_sr - C_SCR_R0;
@@ -2658,8 +2728,8 @@ begin
             else
                 v_ship_in_x := '0';
             end if;
-            if s_stg2_ship_dx >= to_signed(-C_TRAIL_EXT, 12) and
-               s_stg2_ship_dx <  to_signed(C_SHIP_W + C_TRAIL_EXT, 12) then
+            if f_slt(s_stg2_ship_dx, -C_TRAIL_EXT) = '0' and
+               f_slt(s_stg2_ship_dx, C_SHIP_W + C_TRAIL_EXT) = '1' then
                 v_trail_in_x := '1';
             else
                 v_trail_in_x := '0';
@@ -2705,12 +2775,12 @@ begin
 
             -- Bombs (rectangles)
             for i in 0 to C_BOMBS - 1 loop
-                if s_stg2_bomb_dx(i)(11 downto 3) = 0 and unsigned(s_stg2_bomb_dx(i)(2 downto 0)) < C_BOMB_W then
+                if s_stg2_bomb_dx(i)(11 downto 3) = 0 and f_ult(unsigned(s_stg2_bomb_dx(i)(2 downto 0)), C_BOMB_W) = '1' then
                     v_in_x := '1';
                 else
                     v_in_x := '0';
                 end if;
-                if s_stg2_bomb_dy(i)(11 downto 4) = 0 and unsigned(s_stg2_bomb_dy(i)(3 downto 0)) < C_BOMB_H then
+                if s_stg2_bomb_dy(i)(11 downto 4) = 0 and f_ult(unsigned(s_stg2_bomb_dy(i)(3 downto 0)), C_BOMB_H) = '1' then
                     v_in_y := '1';
                 else
                     v_in_y := '0';
@@ -2719,7 +2789,7 @@ begin
             end loop;
 
             -- Bunkers (4 in parallel, shared dy)
-            if s_stg2_bnk_dy(11 downto 7) = 0 and unsigned(s_stg2_bnk_dy(6 downto 0)) < C_BUNKER_H then
+            if s_stg2_bnk_dy(11 downto 7) = 0 and f_ult(unsigned(s_stg2_bnk_dy(6 downto 0)), C_BUNKER_H) = '1' then
                 v_bnk_in_y := '1';
             else
                 v_bnk_in_y := '0';
@@ -2762,26 +2832,27 @@ begin
             -- >> 1 (or >> 2).  The cloud also gets |src - 24| per axis for
             -- its diamond rainbow rings.
             if s_stg2_expl_huge = '1' then
-                v_ex_lim := to_signed(C_HUGE_SCR, 12);
+                v_lim_x  := f_slt(s_stg2_expl_dx, C_HUGE_SCR);
+                v_lim_y  := f_slt(s_stg2_expl_dy, C_HUGE_SCR);
                 v_er     := unsigned(s_stg2_expl_dy(8 downto 3));
                 v_ec     := unsigned(s_stg2_expl_dx(8 downto 3));
             elsif s_stg2_expl_big = '1' then
-                v_ex_lim := to_signed(C_CLOUD_SCR, 12);
+                v_lim_x  := f_slt(s_stg2_expl_dx, C_CLOUD_SCR);
+                v_lim_y  := f_slt(s_stg2_expl_dy, C_CLOUD_SCR);
                 v_er     := unsigned(s_stg2_expl_dy(7 downto 2));
                 v_ec     := unsigned(s_stg2_expl_dx(7 downto 2));
             else
-                v_ex_lim := to_signed(C_EXPL_SCR, 12);
+                v_lim_x  := f_slt(s_stg2_expl_dx, C_EXPL_SCR);
+                v_lim_y  := f_slt(s_stg2_expl_dy, C_EXPL_SCR);
                 v_er     := unsigned(s_stg2_expl_dy(6 downto 1));
                 v_ec     := unsigned(s_stg2_expl_dx(6 downto 1));
             end if;
-            if s_stg2_expl_dx >= to_signed(0, 12) and
-               s_stg2_expl_dx <  v_ex_lim then
+            if s_stg2_expl_dx(11) = '0' and v_lim_x = '1' then
                 v_in_x := '1';
             else
                 v_in_x := '0';
             end if;
-            if s_stg2_expl_dy >= to_signed(0, 12) and
-               s_stg2_expl_dy <  v_ex_lim then
+            if s_stg2_expl_dy(11) = '0' and v_lim_y = '1' then
                 v_in_y := '1';
             else
                 v_in_y := '0';
@@ -2791,12 +2862,12 @@ begin
                                 s_stg2_expl_big;
             s_stg3_expl_addr <= s_stg2_expl_fr & v_er & v_ec(5 downto 4);
             s_stg3_expl_bit  <= not v_ec(3 downto 0);
-            if v_er >= 24 then
+            if f_ult(v_er, 24) = '0' then
                 s_stg3_cl_ar <= resize(v_er - 24, 5);
             else
                 s_stg3_cl_ar <= resize(24 - v_er, 5);
             end if;
-            if v_ec >= 24 then
+            if f_ult(v_ec, 24) = '0' then
                 s_stg3_cl_ac <= resize(v_ec - 24, 5);
             else
                 s_stg3_cl_ac <= resize(24 - v_ec, 5);
@@ -2833,7 +2904,7 @@ begin
     -- Render — S4: sync ROM word reads + state lookups
     -- ========================================================================
     p_stage4 : process(clk)
-        variable v_alien_idx : integer range 0 to C_ALIEN_SLOTS - 1;
+        variable v_alv       : std_logic_vector(C_ALIEN_SLOTS - 1 downto 0);
         variable v_chunk_hit : std_logic;
         variable v_any_bnk   : std_logic;
         variable v_tap       : signed(9 downto 0);
@@ -2869,15 +2940,17 @@ begin
                 s_stg4_cidx <= s_stg3_grp_row(6 downto 4) + s_phase8;
             else
                 v_hue := resize(s_stg3_hue_col, 4) + resize(s_ghost_phase, 4);
-                if v_hue >= 7 then
+                if f_ult(v_hue, 7) = '0' then
                     v_hue := v_hue - 7;
                 end if;
                 s_stg4_cidx <= v_hue(2 downto 0);
             end if;
 
             -- Alien-alive lookup (32-to-1)
-            v_alien_idx := to_integer(s_stg3_alien_idx);
-            s_stg4_alien_alive <= s_aliens(v_alien_idx) or s_stg3_tv;
+            for a in 0 to C_ALIEN_SLOTS - 1 loop
+                v_alv(a) := s_aliens(a);
+            end loop;
+            s_stg4_alien_alive <= v_alv(to_integer(s_stg3_alien_idx)) or s_stg3_tv;
             -- Dissolve decisions made in S2 (TV pixel, or a world pixel
             -- that is showing).
             s_stg4_dith  <= s_stg3_dith;
@@ -2921,23 +2994,24 @@ begin
             -- Edge-shadow group indices: tap = base + band width; both
             -- clamped to -4 .. 128 then floor-divided by 4 → -1 .. 32 (-1 =
             -- outside the row on the trailing side, 32 = past the far end).
+            -- (bit-logic clamps: f_slt(x, 129) = '0' is x > 128)
             v_tap := s_stg3_gh_base + signed(resize(s_fringe_step, 10));
-            if s_stg3_gh_base < to_signed(-4, 10) then
+            if f_slt(s_stg3_gh_base, -4) = '1' then
                 v_base_c := to_signed(-4, 10);
-            elsif s_stg3_gh_base > to_signed(128, 10) then
+            elsif f_slt(s_stg3_gh_base, 129) = '0' then
                 v_base_c := to_signed(128, 10);
             else
                 v_base_c := s_stg3_gh_base;
             end if;
-            if v_tap < to_signed(-4, 10) then
+            if f_slt(v_tap, -4) = '1' then
                 v_tap_c := to_signed(-4, 10);
-            elsif v_tap > to_signed(128, 10) then
+            elsif f_slt(v_tap, 129) = '0' then
                 v_tap_c := to_signed(128, 10);
             else
                 v_tap_c := v_tap;
             end if;
-            s_stg4_gh_base_g <= to_integer(shift_right(v_base_c, 2));
-            s_stg4_gh_tap_g  <= to_integer(shift_right(v_tap_c, 2));
+            s_stg4_gh_base_g <= resize(shift_right(v_base_c, 2), 7);
+            s_stg4_gh_tap_g  <= resize(shift_right(v_tap_c, 2), 7);
         end if;
     end process;
 
@@ -3053,17 +3127,12 @@ begin
             -- art's linework is never a gap pixel (see WIZARD_GAP_MASK).
             -- Independent per-group terms, each reduced by ONE balanced OR (an
             -- if/elsif accumulation loop synthesised as a ~10-LUT ripple).
+            -- Thermometers as bit logic: g < base is "not base < g + 1", and
+            -- g <= tap is "not tap < g" (a 7-bit carry-chain compare per
+            -- group was 64 chains).
             for g in 0 to 31 loop
-                if g < s_stg4_gh_base_g then
-                    v_lt_b(g) := '1';
-                else
-                    v_lt_b(g) := '0';
-                end if;
-                if g <= s_stg4_gh_tap_g then
-                    v_le_t(g) := '1';
-                else
-                    v_le_t(g) := '0';
-                end if;
+                v_lt_b(g) := not f_slt(s_stg4_gh_base_g, g + 1);
+                v_le_t(g) := not f_slt(s_stg4_gh_tap_g, g);
             end loop;
             v_t_b := s_stg4_grp and v_lt_b;
             v_t_t := s_stg4_grp and v_le_t;
