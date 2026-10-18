@@ -417,6 +417,9 @@ designed around FIELDS (480i / 1080i) and predated most of them.
   LZX's build script has no timeout). Seed 3 built all 8 but HD HDMI's own
   timing was 69.6 MHz. Seed 7 builds all 8; own HD timing (core without the
   Sync Out generator) is 80.2/80.3/80.9 MHz Analog/HDMI/Dual.
+  v1.0.3 (resolution scaling, rebuilt 2026-10-18): seed 7 still builds all 8,
+  own HD 78.1/84.0/81.6 MHz. Seeds 4-6 stalled SD Standalone or a config under
+  heavy machine load, so 7 stays.
 
 ## Resolution scaling (v1.0.3, 2026-10-18)
 - Before: the K1 screen ladder was cells per PIXEL, so 720p dots were 1.5x the
