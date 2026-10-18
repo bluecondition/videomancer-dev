@@ -113,7 +113,8 @@ suffix_label = "%"
 
 [firmware]
 # nextpnr placement seed for the stock LZX build (one seed for all 8 configs).
-# Seed 1 puts HD HDMI HSYNC +0.50 ns from the forwarded clock (the brown-line
-# zone, cf. +0.48 on v3.17.1); seed 6 is -1.84 there (screened 1-16 with
-# tools/hdmi_pin_skew.py, 2026-10-14).
+# Chosen for HDMI pin skew (tools/hdmi_pin_skew.py). v3.24.2 (resolution scaling)
+# moved seed 6's HD HDMI HSYNC to -0.35 ns (the U/V-swap zone); seed 1 keeps every
+# HD pin >= 0.96 ns from the clock (HD HDMI -0.96, HD Analog HDMI +1.22, HD Dual
+# HDMI -1.24) and builds all 8 (screened 2026-10-18).
 seed = 1
