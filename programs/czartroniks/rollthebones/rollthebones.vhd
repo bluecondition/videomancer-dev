@@ -6,6 +6,17 @@
 --
 -- rollthebones.vhd  (v1.0 — video as a lit tabletop of six-sided dice)
 --
+-- v1.0.3 (2026-10-17): resolution scaling.  The cell lattice runs in virtual
+-- 1080-line units, stepped per pixel / per field line from the video timing
+-- ID (registers_in(8)): 1.0 at 1080p (identical to before), 1.5 at 720p, and
+-- at SD 2.0 across (a 1440-wide 4:3 window) and 1080/486 per frame line, so
+-- the dice keep their size relative to the screen height and stay square on
+-- a 4:3 screen (they were 1.5x too big at 720p and huge 2:1 slabs at SD).
+-- The row counter runs the integer part of each field line's step as unit
+-- steps after the h edge; the sample line is the first line at/after
+-- D - ceil(step) (the last line at 1080p).  The 8-px denoise window stays 8
+-- REAL pixels (counted), starting Dh - 7 steps into the cell.
+--
 -- The incoming picture is re-rendered as a full-screen grid of six-sided dice.
 -- Every cell holds one die: a rounded-corner square face carrying 1..6 drilled
 -- pips.  The pip count tracks the local video (luma, or chroma saturation), so
@@ -147,13 +158,56 @@ architecture rollthebones of program_top is
     end function;
 
     --------------------------------------------------------------------------
+    -- Resolution scaling: per-mode steps from the video timing ID
+    -- (registers_in(8)); 1.0 at 1080p, so 1080p is unchanged.
+    --------------------------------------------------------------------------
+    -- x step in half virtual units per pixel: 1080 2 (1.0), 720p 3 (1.5),
+    -- SD 4 (2.0: 720 px span 1440 units, a 4:3 window of the 1080 canvas).
+    function f_vstep_x(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0 | 4 | 8 | 12 => return to_unsigned(4, 3);
+            when 5 | 6 | 14     => return to_unsigned(3, 3);
+            when others         => return to_unsigned(2, 3);
+        end case;
+    end function;
+    -- y step in Q4.8 virtual units per FIELD line (1080 / active lines,
+    -- doubled for interlaced modes).
+    function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(1138, 12);  -- 480i: 2 x 1080/486
+            when 4          => return to_unsigned(576, 12);   -- 480p: 1080/480
+            when 8          => return to_unsigned(960, 12);   -- 576i: 2 x 1080/576
+            when 12         => return to_unsigned(480, 12);   -- 576p: 1080/576
+            when 5 | 6 | 14 => return to_unsigned(384, 12);   -- 720p: 1.5
+            when 1 | 2 | 10 => return to_unsigned(512, 12);   -- 1080i: 2.0
+            when others     => return to_unsigned(256, 12);   -- 1080p: 1.0
+        end case;
+    end function;
+
+    --------------------------------------------------------------------------
     -- Raster position.
     --------------------------------------------------------------------------
     signal prev_hsync_n : std_logic := '1';
     signal prev_vsync_n : std_logic := '1';
     signal r_anchor     : std_logic := '0';
 
-    signal xloc      : unsigned(7 downto 0) := (others => '0');
+    -- Resolution scaling (v1.0.3): the lattice runs in virtual 1080-line
+    -- units.  x: a Q.1 accumulator (half units; step 2/3/4 = 1.0/1.5/2.0 per
+    -- pixel), xla(8 downto 1) is the old integer xloc.  y: celly_loc still
+    -- counts whole virtual lines, but each field line advances it by the
+    -- integer part of a Q4.8 accumulator (1 at 1080p, 1-2 at 720p, 4-5 at
+    -- 480i), one unit step per clock after the h edge.
+    signal s_xs     : unsigned(2 downto 0)  := to_unsigned(2, 3);
+    signal s_ys     : unsigned(11 downto 0) := to_unsigned(256, 12);
+    signal xla      : unsigned(8 downto 0) := (others => '0');
+    signal x_ws     : std_logic := '0';                    -- this cell's sample window started
+    signal wcnt     : unsigned(3 downto 0) := (others => '0');  -- window: 8..2 add, 1 strobe
+    signal cy_frac  : unsigned(7 downto 0) := (others => '0');
+    signal cy_left  : unsigned(2 downto 0) := (others => '0');  -- unit steps still due
+    signal cy_blw   : std_logic := '1';                    -- previous line short of D - k
+    signal srow_r   : std_logic := '0';                    -- this line samples the next row
     signal xidx      : unsigned(6 downto 0) := (others => '0');
     signal celly_loc : unsigned(7 downto 0) := (others => '0');
     signal celly_par : std_logic := '0';
@@ -172,8 +226,9 @@ architecture rollthebones of program_top is
     signal s_d    : unsigned(7 downto 0) := to_unsigned(71, 8);
     signal s_dm1  : unsigned(7 downto 0) := to_unsigned(70, 8);
     signal s_dh   : unsigned(7 downto 0) := to_unsigned(35, 8);
-    signal s_dhlo : unsigned(7 downto 0) := to_unsigned(28, 8);   -- Dh-7 (denoise win)
-    signal s_dhi  : unsigned(7 downto 0) := to_unsigned(36, 8);   -- Dh+1 (denoise strobe)
+    signal s_dhlo : unsigned(8 downto 0) := to_unsigned(56, 9);   -- 8-px denoise window start (half units)
+    signal s_dlim : unsigned(8 downto 0) := to_unsigned(140, 9);  -- 2D - x step: cell wrap threshold
+    signal s_dmk  : unsigned(7 downto 0) := to_unsigned(70, 8);   -- D - ceil(y step): sample-line threshold
     signal s_r0   : unsigned(7 downto 0) := to_unsigned(31, 8);
     signal s_bw   : unsigned(7 downto 0) := to_unsigned(7, 8);
     signal s_rmax : unsigned(7 downto 0) := to_unsigned(34, 8);
@@ -434,6 +489,8 @@ begin
         variable v_su, v_sv : signed(11 downto 0);
         variable v_online : boolean;
         variable v_avy, v_avu, v_avv : unsigned(9 downto 0);
+        variable v_step   : std_logic;
+        variable v_ysum   : unsigned(11 downto 0);
     begin
         if rising_edge(clk) then
             prev_hsync_n <= data_in.hsync_n;
@@ -445,22 +502,38 @@ begin
             if v_v = '0' and data_in.avid = '1' and frame_act = '0' then v_anc := '1'; end if;
             r_anchor <= '0';
 
+            -- per-mode virtual steps (static per mode; re-latching at every
+            -- vsync edge is idempotent)
+            if v_v = '1' then
+                s_xs <= f_vstep_x(registers_in(8)(3 downto 0));
+                s_ys <= f_vstep_y(registers_in(8)(3 downto 0));
+            end if;
+
+            -- X lattice in virtual half units.  A cell wraps when the NEXT
+            -- step would reach D (xla >= 2D - step: at 1080p xla = 2(D-1),
+            -- the old xloc = D-1 test).
             if v_h = '1' then
-                xloc <= (others => '0');
+                xla  <= (others => '0');
                 xidx <= (others => '0');
             elsif data_in.avid = '1' then
-                if xloc = s_dm1 then
-                    xloc <= (others => '0');
+                if xla >= s_dlim then
+                    xla  <= xla - s_dlim;
                     xidx <= xidx + 1;
                 else
-                    xloc <= xloc + 1;
+                    xla <= xla + s_xs;
                 end if;
             end if;
 
+            -- Y row counter.  Each h edge adds the Q4.8 field-line step; its
+            -- integer part runs as that many unit steps (the first at the
+            -- edge itself, the rest on the following clocks — all long before
+            -- active video), so the row wrap and row seeds are unchanged.
+            v_step := '0';
             if v_v = '1' then
                 celly_loc <= (others => '0');
                 celly_par <= '0';
                 frame_act <= '0';
+                cy_left   <= (others => '0');
             elsif v_anc = '1' then
                 frame_act <= '1';
                 celly_loc <= (others => '0');
@@ -468,8 +541,20 @@ begin
                 line0     <= '1';
                 r_anchor  <= '1';
                 rowseed   <= C_SEED + C_SEEDSTEP;        -- seed for row 1
+                cy_frac   <= (others => '0');
+                cy_left   <= (others => '0');
             elsif v_h = '1' then
                 line0 <= '0';
+                v_ysum  := resize(cy_frac, 12) + s_ys;
+                cy_frac <= v_ysum(7 downto 0);
+                cy_left <= v_ysum(10 downto 8) - 1;
+                if celly_loc < s_dmk then cy_blw <= '1'; else cy_blw <= '0'; end if;
+                v_step  := '1';
+            elsif cy_left /= 0 then
+                cy_left <= cy_left - 1;
+                v_step  := '1';
+            end if;
+            if v_step = '1' then
                 if celly_loc = s_dm1 then
                     celly_loc <= (others => '0');
                     celly_par <= not celly_par;
@@ -479,32 +564,51 @@ begin
                 end if;
             end if;
 
-            if v_h = '1' or r_anchor = '1' then
+            -- dy of the line = the pre-step position of its LAST unit step
+            -- (at 1080p the previous line's, exactly as before)
+            if v_step = '1' or r_anchor = '1' then
                 dyc_line <= signed(resize(celly_loc, 10)) - signed(resize(s_dh, 10));
             end if;
 
-            -- 8px horizontal area-average around each cell centre on the sample
+            -- Sample line: the first line of a row at/after D - ceil(y step)
+            -- (at 1080p the last line, D-1).  It is still inside the row
+            -- above, since a line advances at most ceil(y step).
+            if celly_loc >= s_dmk and cy_blw = '1' then srow_r <= '1'; else srow_r <= '0'; end if;
+
+            -- 8-px horizontal area-average around each cell centre on the sample
             -- line (memoryless denoise).  The sample line is the LAST line of
             -- the row above (line 0 for row 0), so the dice sit half a die
-            -- lower than the picture instead of a whole die.
+            -- lower than the picture instead of a whole die.  The window is 8
+            -- REAL pixels (a filter kernel stays at pixel scale): it starts at
+            -- the first pixel past s_dhlo (Dh - 7 steps, at least the cell
+            -- start), adds 7 more and strobes on the next one (1080p: Dh-7..Dh,
+            -- strobe at Dh+1, as before).
             v_online := frame_act = '1' and data_in.avid = '1'
-                        and (line0 = '1' or celly_loc = s_dm1);
-            if v_online and xloc = s_dhlo then
+                        and (line0 = '1' or srow_r = '1');
+            v_trig := '0';
+            v_tp   := not celly_par;
+            if v_h = '1' then
+                x_ws <= '0';
+                wcnt <= (others => '0');
+            elsif v_online and x_ws = '0' and xla >= s_dhlo then
                 acc_y <= resize(unsigned(data_in.y), 13);
                 acc_u <= resize(unsigned(data_in.u), 13);
                 acc_v <= resize(unsigned(data_in.v), 13);
-            elsif v_online and xloc > s_dhlo and xloc <= s_dh then
+                x_ws  <= '1';
+                wcnt  <= to_unsigned(8, 4);
+            elsif v_online and wcnt > 1 then
                 acc_y <= acc_y + unsigned(data_in.y);
                 acc_u <= acc_u + unsigned(data_in.u);
                 acc_v <= acc_v + unsigned(data_in.v);
-            end if;
-
-            -- strobe one pixel after the 8px window closes
-            v_trig := '0';
-            v_tp   := not celly_par;
-            if v_online and xloc = s_dhi then
+                wcnt  <= wcnt - 1;
+            elsif v_online and wcnt = 1 then
+                -- strobe one pixel after the 8px window closes
                 if line0 = '1' then v_tp := '0'; end if;
                 v_trig := '1';
+                wcnt   <= (others => '0');
+            end if;
+            if data_in.avid = '1' and xla >= s_dlim then
+                x_ws <= '0';                                 -- next cell
             end if;
 
             w0_stb <= v_trig;
@@ -756,6 +860,8 @@ begin
         variable v_r0  : integer range -256 to 255;
         variable v_sp  : unsigned(7 downto 0);
         variable v_ach : boolean;
+        variable v_lo  : signed(10 downto 0);
+        variable v_k   : unsigned(3 downto 0);
     begin
         if rising_edge(clk) then
             mp <= ma * mb;
@@ -816,13 +922,26 @@ begin
                     when 3 =>
                         s_dm1 <= s_d - 1;
                         s_dh  <= '0' & s_d(7 downto 1);
+                        s_dlim <= (s_d & '0') - s_xs;                  -- 2D - x step
                         ma <= signed(resize('0' & s_d(7 downto 2), 10));   -- Dh/2 = D/4
                         mb <= signed(resize(lp12, 11));
                         s_sp2 <= shift_left(s_sp, 1);
                         s_nsp <= -s_sp;
                     when 4 =>
-                        s_dhlo <= s_dh - 7;   -- precomputed denoise window bounds
-                        s_dhi  <= s_dh + 1;   -- (keeps the arithmetic out of p_position)
+                        -- precomputed denoise window start, half units:
+                        -- Dh - 7 steps, at least the cell start (keeps the
+                        -- arithmetic out of p_position)
+                        v_lo := signed(resize(s_dh & '0', 11))
+                              - signed(resize(s_xs & "000", 11)) + signed(resize(s_xs, 11));
+                        if v_lo < 0 then
+                            s_dhlo <= (others => '0');
+                        else
+                            s_dhlo <= unsigned(v_lo(8 downto 0));
+                        end if;
+                        -- sample-line threshold D - ceil(y step)
+                        v_k := s_ys(11 downto 8);
+                        if s_ys(7 downto 0) /= 0 then v_k := v_k + 1; end if;
+                        s_dmk <= s_d - v_k;
                         s_nsp2 <= -s_sp2;
                     when 5 =>
                         v_r0 := to_integer(s_dh) - 2 - to_integer(unsigned(mp(17 downto 10)));
@@ -1001,7 +1120,7 @@ begin
             ----------------------------------------------------------------
             -- c1
             ----------------------------------------------------------------
-            c1_dx0 <= signed(resize(xloc, 10)) - signed(resize(s_dh, 10));
+            c1_dx0 <= signed(resize(xla(8 downto 1), 10)) - signed(resize(s_dh, 10));
             c1_par <= celly_par;
 
             ----------------------------------------------------------------
