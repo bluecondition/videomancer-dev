@@ -6,6 +6,17 @@
 --
 -- cleave.vhd  (v0.9 — "Cleave": dark/light split re-texturizer)
 --
+-- v0.10.3 (2026-10-17): resolution scaling.  Band, wobble, static-cell,
+-- patch and outline geometry run in virtual 1080-line units stepped from
+-- the video timing ID, so 720p and SD show the 1080p picture scaled by
+-- screen height (SD = a 1440-unit 4:3 window).  Band/wobble steps per
+-- pixel are x xs/2 and per field line x ys/256 (vblank serial multiply);
+-- Medium/Coarse/Chunky static cells and the 128-unit patches key on the
+-- virtual coordinates; the outline width is a per-mode table (1080p
+-- 2/6 px, 720p 1/4, SD 1/3; floors of one pixel and one field line).
+-- Fine static, the 1px band fuzz/dither hash, the serration and the line
+-- buffer stay at real-pixel scale.  1080p output is bit-identical.
+--
 -- Full-screen two-texture split:
 --
 --   DARK  -> thermal scan-bands through a 16-entry UNEQUAL palette: white
@@ -152,6 +163,60 @@ architecture cleave of program_top is
     constant C_JX  : unsigned(9 downto 0) := "1100101011";
 
     --------------------------------------------------------------------------
+    -- Resolution scaling: per-mode steps from the video timing ID.
+    --------------------------------------------------------------------------
+    -- x step in half virtual units per pixel: 1080 2 (1.0), 720p 3 (1.5),
+    -- SD 4 (2.0: 720 px span 1440 units, a 4:3 window of the 1080 canvas).
+    function f_vstep_x(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0 | 4 | 8 | 12 => return to_unsigned(4, 3);
+            when 5 | 6 | 14     => return to_unsigned(3, 3);
+            when others         => return to_unsigned(2, 3);
+        end case;
+    end function;
+    -- y step in Q4.8 virtual units per FIELD line (1080 / active lines,
+    -- doubled for interlaced modes).
+    function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(1138, 12);  -- 480i: 2 x 1080/486
+            when 4          => return to_unsigned(576, 12);   -- 480p: 1080/480
+            when 8          => return to_unsigned(960, 12);   -- 576i: 2 x 1080/576
+            when 12         => return to_unsigned(480, 12);   -- 576p: 1080/576
+            when 5 | 6 | 14 => return to_unsigned(384, 12);   -- 720p: 1.5
+            when 1 | 2 | 10 => return to_unsigned(512, 12);   -- 1080i: 2.0
+            when others     => return to_unsigned(256, 12);   -- 1080p: 1.0
+        end case;
+    end function;
+    -- Outline width per mode: (8:3) = horizontal history mask (width in
+    -- px), (2:0) = age reload (extra lines below the edge line).  1080p
+    -- Thin = 2 px x 2 lines, Thick = 6 x 6 (virtual units); other modes
+    -- round those to their pixel / field-line pitch, floored at 1 px and
+    -- 1 line (Thick kept wider than Thin so S9 stays visible).
+    function f_outline(t : std_logic_vector(3 downto 0); thick : std_logic)
+        return std_logic_vector is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0 | 8 =>            -- 480i / 576i: 2 units/px, 3.75-4.4/line
+                if thick = '1' then return "000111" & "001";
+                else                return "000001" & "000"; end if;
+            when 4 | 12 =>           -- 480p / 576p: 1.9-2.25 units/line
+                if thick = '1' then return "000111" & "010";
+                else                return "000001" & "000"; end if;
+            when 5 | 6 | 14 =>       -- 720p: 1.5 units/px and /line
+                if thick = '1' then return "001111" & "011";
+                else                return "000001" & "000"; end if;
+            when 1 | 2 | 10 =>       -- 1080i: 2 units per field line
+                if thick = '1' then return "111111" & "010";
+                else                return "000011" & "000"; end if;
+            when others =>           -- 1080p (the original widths)
+                if thick = '1' then return "111111" & "101";
+                else                return "000011" & "001"; end if;
+        end case;
+    end function;
+
+    --------------------------------------------------------------------------
     -- Raster position / accumulators.
     --------------------------------------------------------------------------
     signal prev_hsync_n : std_logic := '1';
@@ -174,8 +239,28 @@ architecture cleave of program_top is
     signal bph_v : unsigned(17 downto 0) := (others => '0');
     signal bph_h : unsigned(17 downto 0) := (others => '0');
     signal bph0  : unsigned(17 downto 0) := (others => '0');
-    signal wob_v : unsigned(9 downto 0) := (others => '0');
-    signal wob_h : unsigned(9 downto 0) := (others => '0');
+    -- wobble phase: wob_va Q.8 per field line, wob_ha Q.1 per pixel
+    -- (integer parts = the old 10-bit wob_v / wob_h)
+    signal wob_va : unsigned(17 downto 0) := (others => '0');
+    signal wob_ha : unsigned(10 downto 0) := (others => '0');
+
+    -- Resolution scaling (latched per field at the armed vsync): s_xs =
+    -- virtual x units per pixel (Q.1), s_ys = virtual lines per field line
+    -- (Q4.8).  vx_a / vy_a are the virtual raster position (integer parts
+    -- equal px / py at 1080p).  s_hstep / s_lstep are the K1 band step per
+    -- pixel / per field line, s_whstep (Q.1) / s_wlstep (Q.8) the wobble
+    -- step per pixel / per field line.
+    signal s_tid    : std_logic_vector(3 downto 0) := "0011";
+    signal s_xs     : unsigned(2 downto 0)  := to_unsigned(2, 3);
+    signal s_ys     : unsigned(11 downto 0) := to_unsigned(256, 12);
+    signal vx_a     : unsigned(12 downto 0) := (others => '0');
+    signal vy_a     : unsigned(18 downto 0) := (others => '0');
+    signal s_hstep  : unsigned(13 downto 0) := to_unsigned(3584, 14);
+    signal s_lstep  : unsigned(15 downto 0) := to_unsigned(3584, 16);
+    signal s_whstep : unsigned(6 downto 0)  := to_unsigned(32, 7);
+    signal s_wlstep : unsigned(16 downto 0) := to_unsigned(4096, 17);
+    signal s_hmask  : std_logic_vector(5 downto 0) := "111111";
+    signal s_age    : unsigned(2 downto 0) := "101";
 
     signal scroll_acc : unsigned(15 downto 0) := (others => '0');
     signal wobt       : unsigned(9 downto 0) := (others => '0');
@@ -183,11 +268,12 @@ architecture cleave of program_top is
     -- measured raster (active lines / pixels) for the centre-anchored zoom
     signal w_meas : unsigned(11 downto 0) := to_unsigned(1920, 12);
     signal h_meas : unsigned(10 downto 0) := to_unsigned(1080, 11);
-    -- vblank serial multiply: bph0 = scroll - vstep * (half screen)
-    signal seq_cnt : unsigned(4 downto 0) := (others => '0');
-    signal m_acc   : unsigned(17 downto 0) := (others => '0');
-    signal m_cand  : unsigned(17 downto 0) := (others => '0');
-    signal m_plr   : unsigned(10 downto 0) := (others => '0');
+    -- vblank serial multiplier, three products per field: s_lstep =
+    -- vstep*ys/256, s_wlstep = wstep*ys, bph0 = scroll - step*(half screen)
+    signal seq_cnt : unsigned(5 downto 0) := (others => '0');
+    signal m_acc   : unsigned(23 downto 0) := (others => '0');
+    signal m_cand  : unsigned(23 downto 0) := (others => '0');
+    signal m_plr   : unsigned(11 downto 0) := (others => '0');
 
     --------------------------------------------------------------------------
     -- Free-running control decode.
@@ -366,6 +452,7 @@ begin
         variable v_u   : unsigned(9 downto 0);
         variable v_man : unsigned(7 downto 0);
         variable v_bm  : unsigned(5 downto 0);
+        variable v_ol  : std_logic_vector(8 downto 0);
     begin
         if rising_edge(clk) then
             rk1  <= unsigned(registers_in(0)(9 downto 0));
@@ -417,6 +504,25 @@ begin
                 s_wstep <= to_unsigned(16, 5) - resize(k2g(8 downto 5), 5);
             end if;
             s_jbase  <= k2g(9 downto 8);
+
+            -- Per-pixel band and wobble steps scaled by the x step (xs/2;
+            -- at 1080p xs = 2 and these are the unscaled K1/K2 steps).  The
+            -- per-line steps come from the vblank multiplier (p_position).
+            case to_integer(s_xs) is
+                when 3 =>
+                    s_hstep  <= resize(s_vstep, 14) + resize(s_vstep(12 downto 1), 14);
+                    s_whstep <= resize(s_wstep, 7) + shift_left(resize(s_wstep, 7), 1);
+                when 4 =>
+                    s_hstep  <= shift_left(resize(s_vstep, 14), 1);
+                    s_whstep <= shift_left(resize(s_wstep, 7), 2);
+                when others =>
+                    s_hstep  <= resize(s_vstep, 14);
+                    s_whstep <= shift_left(resize(s_wstep, 7), 1);
+            end case;
+            -- outline width for this mode and S9
+            v_ol    := f_outline(s_tid, sw_thick);
+            s_hmask <= v_ol(8 downto 3);
+            s_age   <= unsigned(v_ol(2 downto 0));
 
             -- K3 bidirectional drift: centre = stopped (16-count deadband),
             -- right = down, left = up, speed grows toward the extremes.
@@ -495,8 +601,14 @@ begin
                 frame_armed <= '0';
                 frame_act   <= '0';
                 py          <= (others => '0');
-                seq_cnt     <= to_unsigned(1, 5);   -- bph0/bph_v via vblank mult
-                wob_v       <= wobt;
+                vy_a        <= (others => '0');
+                seq_cnt     <= to_unsigned(1, 6);   -- steps + bph0 via vblank mult
+                wob_va      <= wobt & x"00";
+                -- per-mode virtual steps for this field (field_n is tied
+                -- high on hardware: no bottom-field offset)
+                s_tid <= registers_in(8)(3 downto 0);
+                s_xs  <= f_vstep_x(registers_in(8)(3 downto 0));
+                s_ys  <= f_vstep_y(registers_in(8)(3 downto 0));
                 if s_dneg = '1' then
                     scroll_acc <= scroll_acc - resize(s_spd, 16);
                 else
@@ -565,55 +677,74 @@ begin
                     s_frac <= k5g(5 downto 0) & "0000";
                 end if;
             elsif v_h_edge = '1' then
-                px    <= (others => '0');
-                bph_h <= bph0;
-                wob_h <= wobt;
+                px     <= (others => '0');
+                vx_a   <= (others => '0');
+                bph_h  <= bph0;
+                wob_ha <= wobt & '0';
                 if line_act = '1' then
                     line_act <= '0';
                     py       <= py + 1;
+                    vy_a     <= vy_a + s_ys;
                     w_meas   <= px;          -- measured on active lines only
                     h_meas   <= py + 1;
-                    bph_v    <= bph_v + resize(s_vstep, 18);
-                    wob_v    <= wob_v + resize(s_wstep, 10);
+                    bph_v    <= bph_v + resize(s_lstep, 18);
+                    wob_va   <= wob_va + resize(s_wlstep, 18);
                 end if;
             elsif data_in.avid = '1' then
                 frame_armed <= '1';
                 line_act    <= '1';
-                px    <= px + 1;
-                bph_h <= bph_h + resize(s_vstep, 18);
-                wob_h <= wob_h + resize(s_wstep, 10);
+                px     <= px + 1;
+                vx_a   <= vx_a + s_xs;
+                bph_h  <= bph_h + resize(s_hstep, 18);
+                wob_ha <= wob_ha + resize(s_whstep, 11);
                 if frame_act = '0' then
                     frame_act <= '1';
                     py        <= (others => '0');
+                    vy_a      <= (others => '0');
                 end if;
             end if;
 
-            -- Vblank serial multiply (starts at the armed vsync, done in
-            -- ~18 clocks, long before the first active line): the band
-            -- phase is anchored at the screen CENTRE, so K1 zooms the bands
-            -- about the middle instead of racing the bottom/right edge.
-            -- bph0 = scroll - vstep * (H/2, or W/2 for vertical bands).
+            -- Vblank serial multiplier (starts at the armed vsync, done in
+            -- ~45 clocks, long before the first active line), three
+            -- products, 12 shift-add steps each:
+            --   A: s_lstep  = vstep * ys / 256  (K1 band step per field line)
+            --   B: s_wlstep = wstep * ys        (wobble step per field line, Q.8)
+            --   C: bph0 = scroll - step * (H/2, or W/2 for vertical bands):
+            --      the band phase is anchored at the screen CENTRE, so K1
+            --      zooms the bands about the middle.  (mod 2^18 phase)
+            -- At 1080p ys = 256: s_lstep = vstep and s_wlstep = wstep << 8.
             if seq_cnt /= 0 then
                 seq_cnt <= seq_cnt + 1;
                 if seq_cnt = 6 then        -- s_vstep has settled from k1g
                     m_acc  <= (others => '0');
-                    m_cand <= resize(s_vstep, 18);
+                    m_cand <= resize(s_vstep, 24);
+                    m_plr  <= s_ys;
+                elsif seq_cnt = 19 then
+                    s_lstep <= m_acc(23 downto 8);
+                    m_acc  <= (others => '0');
+                    m_cand <= resize(s_ys, 24);
+                    m_plr  <= resize(s_wstep, 12);
+                elsif seq_cnt = 32 then
+                    s_wlstep <= m_acc(16 downto 0);
+                    m_acc  <= (others => '0');
                     if sw_vert = '1' then
-                        m_plr <= w_meas(11 downto 1);
+                        m_cand <= resize(s_hstep, 24);
+                        m_plr  <= resize(w_meas(11 downto 1), 12);
                     else
-                        m_plr <= resize(h_meas(10 downto 1), 11);
+                        m_cand <= resize(s_lstep, 24);
+                        m_plr  <= resize(h_meas(10 downto 1), 12);
                     end if;
-                elsif seq_cnt >= 7 and seq_cnt <= 17 then
+                elsif seq_cnt = 45 then
+                    v_b0    := (scroll_acc(14 downto 0) & "000") - m_acc(17 downto 0);
+                    bph0    <= v_b0;
+                    bph_v   <= v_b0;
+                    seq_cnt <= (others => '0');
+                else                       -- 7..18, 20..31, 33..44
                     if m_plr(0) = '1' then
                         m_acc <= m_acc + m_cand;
                     end if;
                     m_cand <= shift_left(m_cand, 1);
                     m_plr  <= shift_right(m_plr, 1);
-                elsif seq_cnt = 18 then
-                    v_b0    := (scroll_acc(14 downto 0) & "000") - m_acc;
-                    bph0    <= v_b0;
-                    bph_v   <= v_b0;
-                    seq_cnt <= (others => '0');
                 end if;
             end if;
         end if;
@@ -646,6 +777,7 @@ begin
         variable v_fv   : signed(9 downto 0);
         variable v_sx   : unsigned(9 downto 0);
         variable v_lc   : unsigned(9 downto 0);
+        variable v_dk6  : std_logic_vector(5 downto 0);
     begin
         if rising_edge(clk) then
             -- sync/video delay line
@@ -663,37 +795,43 @@ begin
                 r1_l <= unsigned(v_lsub(9 downto 0));
             end if;
 
+            -- (serration jitter keys on the real column / field line: a
+            -- pixel-level texture)
             if sw_vert = '1' then
                 r1_bph  <= bph_h(17 downto 8);
-                r1_warg <= wob_v;
+                r1_warg <= wob_va(17 downto 8);
                 r1_jarg <= py(9 downto 0);
                 r1_jhi  <= py(10);
             else
                 r1_bph  <= bph_v(17 downto 8);
-                r1_warg <= wob_h;
+                r1_warg <= wob_ha(10 downto 1);
                 r1_jarg <= px(9 downto 0);
                 r1_jhi  <= px(10);
             end if;
 
+            -- Static cells: Fine is a 1-pixel grain at every resolution;
+            -- Medium/Coarse/Chunky are 2/4/8-unit cells on the virtual
+            -- raster (1080p px; 720p x2/3; SD 1-4 px x ~1-2 field lines).
             r1_shi <= "00";
             case to_integer(s_gsel) is
                 when 0 =>      -- 1 px static (bit 10 goes to the seed)
                     r1_cx  <= px(9 downto 0);
                     r1_cy  <= resize(py(9 downto 0), 10);
                     r1_shi <= px(10) & py(10);
-                when 1 =>      -- 2 px
-                    r1_cx <= px(10 downto 1);
-                    r1_cy <= resize(py(10 downto 1), 10);
-                when 2 =>      -- 4 px
-                    r1_cx <= px(11 downto 2);
-                    r1_cy <= resize(py(10 downto 2), 10);
-                when others => -- 8 px
-                    r1_cx <= resize(px(11 downto 3), 10);
-                    r1_cy <= resize(py(10 downto 3), 10);
+                when 1 =>      -- 2 units
+                    r1_cx <= vx_a(11 downto 2);
+                    r1_cy <= resize(vy_a(18 downto 9), 10);
+                when 2 =>      -- 4 units
+                    r1_cx <= vx_a(12 downto 3);
+                    r1_cy <= resize(vy_a(18 downto 10), 10);
+                when others => -- 8 units
+                    r1_cx <= resize(vx_a(12 downto 4), 10);
+                    r1_cy <= resize(vy_a(18 downto 11), 10);
             end case;
 
-            r1_ppx <= resize(px(11 downto 7), 10);
-            r1_ppy <= resize(py(10 downto 7), 10);
+            -- 128-unit patches on the virtual raster
+            r1_ppx <= resize(vx_a(12 downto 8), 10);
+            r1_ppy <= resize(vy_a(18 downto 15), 10);
             r1_pyl <= resize(py(9 downto 0), 10);
             r1_px  <= px;
             r1_par <= py(0);
@@ -895,20 +1033,13 @@ begin
             v_dark  := not r6_class(9);
             r7_dark <= v_dark;
             d_hist  <= d_hist(4 downto 0) & v_dark;
-            if sw_thick = '1' then
-                if (v_dark xor d_hist(0)) = '1' or (v_dark xor d_hist(1)) = '1'
-                   or (v_dark xor d_hist(2)) = '1' or (v_dark xor d_hist(3)) = '1'
-                   or (v_dark xor d_hist(4)) = '1' or (v_dark xor d_hist(5)) = '1' then
-                    r7_hedge <= r6_pok;
-                else
-                    r7_hedge <= '0';
-                end if;
+            -- horizontal outline: class differs from any of the last N
+            -- pixels, N = the per-mode / S9 width (s_hmask)
+            v_dk6 := (others => v_dark);
+            if ((v_dk6 xor d_hist) and s_hmask) /= "000000" then
+                r7_hedge <= r6_pok;
             else
-                if (v_dark xor d_hist(0)) = '1' or (v_dark xor d_hist(1)) = '1' then
-                    r7_hedge <= r6_pok;
-                else
-                    r7_hedge <= '0';
-                end if;
+                r7_hedge <= '0';
             end if;
 
             -- ink threshold: density bias + inverted luma (content term)
@@ -956,9 +1087,7 @@ begin
                 r8_ctr <= '0';
             end if;
             if v_edge = '1' then
-                if sw_thick = '1' then r8_age <= "101";
-                else                   r8_age <= "001";
-                end if;
+                r8_age <= s_age;           -- per-mode / S9 outline depth
             elsif v_agep /= 0 then
                 r8_age <= v_agep - 1;
             else
