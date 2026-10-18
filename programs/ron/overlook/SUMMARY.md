@@ -176,3 +176,20 @@ memory: for a known GRAPHIC design, ask for exact vector geometry first.
 - Luma-modulated stroke weight (needs slab tests rewritten as
   |plane - centre| <= hd + delta, ~+400 LC)
 - Generated avid (cubist, ~25 LC) if thin coloured lines show on HW
+
+## Resolution scaling (v1.3.3, 2026-10-17)
+- Baseline: texel step per pixel (tile 2048..32 px): 720p 1.5x, SD hugely
+  zoomed (and 2:1 tall: the field_n-toggle interlace test never fires on
+  hardware, where field_n is tied high).
+- Fix: virtual 1080-line units from the timing ID (`registers_in(8)`, steps
+  decoded every clock). The measured width (Q.1) and height (Q.8), the
+  perspective engine's row counter (Q.8, seeded +0.5) and its step are
+  virtual, so du / D / r / v are per virtual unit; the per-pixel u step is
+  the line's du times the x step (line-engine state 6). Tile, zoom, drift,
+  horizon and fog follow screen height; SD is a 1440-wide 4:3 window with
+  square texels. `s_ilace` / `s_fpar` and the bottom-field seed are gone.
+  Weave grain stays texture-anchored (cells ~0.5-1 px at SD).
+- 1080p bit-identical (sim diff 0).
+- Build: `MAKE_TIMEOUT=1500 SEED=1 NEXTPNR_ROUTER="--router router1" ./build_programs.sh ron overlook`,
+  all 6 seed 1: HD Analog 89.1, SD Analog 83.6, HD HDMI 79.2, SD HDMI 88.7,
+  HD Dual 81.7, SD Dual 85.1 MHz; 5766-5788 LC (75%), 0 EBR.

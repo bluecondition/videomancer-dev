@@ -6,6 +6,17 @@
 --
 -- overlook.vhd  (v1.3.1 -- the Overlook Hotel corridor carpet)
 --
+-- v1.3.3 (2026-10-17): resolution scaling.  The texture step is now per
+-- virtual 1080-line unit: the measured width/height, the row counter that
+-- drives the perspective engine, and the row step are in those units
+-- (stepped from the video timing ID, registers_in(8): 1.0 at 1080p,
+-- identical to before; 1.5 at 720p; at SD 2.0 across -- a 1440-wide 4:3
+-- window -- and 1080/486 per frame line, doubled per interlaced field
+-- line), and the per-pixel u step is the line's du times the x step.  The
+-- carpet tile, zoom, drift and corridor now follow screen height and stay
+-- square on a 4:3 SD screen.  Interlace comes from the timing ID (field_n
+-- is tied high on hardware, so the old field_n toggle test never saw it).
+--
 -- David Hicks' "Hexagon" -- the Shining carpet -- from the user's exact
 -- vector spec.  The orange figure is a set of identical horizontal
 -- SERPENTINE polylines stacked vertically at the same phase; their upward
@@ -116,6 +127,32 @@ architecture overlook of program_top is
         end case;
     end function;
 
+    -- Resolution scaling: per-mode steps from the video timing ID.
+    -- x step in half virtual units per pixel: 1080 2 (1.0), 720p 3 (1.5),
+    -- SD 4 (2.0: 720 px span 1440 units, a 4:3 window of the 1080 canvas).
+    function f_vstep_x(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0 | 4 | 8 | 12 => return to_unsigned(4, 3);
+            when 5 | 6 | 14     => return to_unsigned(3, 3);
+            when others         => return to_unsigned(2, 3);
+        end case;
+    end function;
+    -- y step in Q4.8 virtual units per FIELD line (1080 / active lines,
+    -- doubled for interlaced modes).
+    function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(1138, 12);  -- 480i: 2 x 1080/486
+            when 4          => return to_unsigned(576, 12);   -- 480p: 1080/480
+            when 8          => return to_unsigned(960, 12);   -- 576i: 2 x 1080/576
+            when 12         => return to_unsigned(480, 12);   -- 576p: 1080/576
+            when 5 | 6 | 14 => return to_unsigned(384, 12);   -- 720p: 1.5
+            when 1 | 2 | 10 => return to_unsigned(512, 12);   -- 1080i: 2.0
+            when others     => return to_unsigned(256, 12);   -- 1080p: 1.0
+        end case;
+    end function;
+
     ----------------------------------------------------------------------
     -- frame-latched controls
     ----------------------------------------------------------------------
@@ -131,13 +168,17 @@ architecture overlook of program_top is
     -- registered sync events: keep the input pins out of the decision cone
     signal s_e_vs, s_e_hs, s_e_av : std_logic := '0';
     signal s_avid_d       : std_logic := '0';
-    signal s_fpar         : std_logic := '0';
-    signal s_ilace        : std_logic := '0';
 
-    -- measured raster
-    signal s_wcnt : unsigned(11 downto 0) := (others => '0');
+    -- resolution scaling: x step per pixel in half virtual units (2/3/4 =
+    -- 1.0/1.5/2.0), y step per FIELD line in Q4.8 virtual units, from the
+    -- video timing ID (static while a mode runs; decoded every clock)
+    signal s_xs   : unsigned(2 downto 0)  := to_unsigned(2, 3);
+    signal s_ys   : unsigned(11 downto 0) := to_unsigned(256, 12);
+
+    -- measured raster, virtual units (width Q.1, height Q.8)
+    signal s_wcnt : unsigned(12 downto 0) := (others => '0');
     signal s_w2   : unsigned(10 downto 0) := to_unsigned(360, 11);
-    signal s_hcnt : unsigned(10 downto 0) := (others => '0');
+    signal s_hacc : unsigned(19 downto 0) := (others => '0');
     signal s_h2   : unsigned(10 downto 0) := to_unsigned(120, 11);
 
     ----------------------------------------------------------------------
@@ -210,7 +251,7 @@ architecture overlook of program_top is
     ----------------------------------------------------------------------
     -- per-line engine state
     ----------------------------------------------------------------------
-    signal s_snext  : signed(11 downto 0) := (others => '0');
+    signal s_snext  : signed(19 downto 0) := (others => '0');   -- virtual row, Q.8
     signal s_sabs   : unsigned(9 downto 0) := (others => '0');
     signal s_sneg   : std_logic := '0';
     signal s_dq     : signed(19 downto 0) := (others => '0');
@@ -235,6 +276,7 @@ architecture overlook of program_top is
 
     -- next-line results
     signal s_dun   : unsigned(21 downto 0) := to_unsigned(11264, 22);
+    signal s_dupn  : unsigned(21 downto 0) := to_unsigned(11264, 22);  -- du * x step
     signal s_u0n   : unsigned(21 downto 0) := (others => '0');
     signal s_vn    : unsigned(16 downto 0) := (others => '0');
     signal s_wampn : unsigned(2 downto 0) := to_unsigned(4, 3);
@@ -309,22 +351,26 @@ begin
     -- raster measurement (height updated on active lines, never at vsync)
     ------------------------------------------------------------------------
     p_meas : process(clk)
-        variable v_h : unsigned(10 downto 0);
+        variable v_h : unsigned(19 downto 0);
     begin
         if rising_edge(clk) then
+            s_xs <= f_vstep_x(registers_in(8)(3 downto 0));
+            s_ys <= f_vstep_y(registers_in(8)(3 downto 0));
+
+            -- width / height in virtual units (1080p: the pixel / line counts)
             if data_in.avid = '1' then
-                s_wcnt <= s_wcnt + 1;
+                s_wcnt <= s_wcnt + s_xs;
             elsif s_avid_p = '1' then
-                s_w2   <= s_wcnt(11 downto 1);
+                s_w2   <= s_wcnt(12 downto 2);
                 s_wcnt <= (others => '0');
             end if;
 
             if s_vs_pulse = '1' then
-                s_hcnt <= (others => '0');
+                s_hacc <= (others => '0');
             elsif data_in.avid = '1' and s_avid_p = '0' then
-                v_h    := s_hcnt + 1;
-                s_hcnt <= v_h;
-                s_h2   <= '0' & v_h(10 downto 1);
+                v_h    := s_hacc + s_ys;
+                s_hacc <= v_h;
+                s_h2   <= v_h(19 downto 9);
             end if;
         end if;
     end process p_meas;
@@ -572,11 +618,7 @@ begin
                     -- ==== line-engine frame constants ====
                     when 32 =>
                         s_kq <= s_k3(9 downto 2);
-                        if s_ilace = '1' then
-                            s_h2f <= s_h2(9 downto 0) & '0';
-                        else
-                            s_h2f <= s_h2;
-                        end if;
+                        s_h2f <= s_h2;          -- virtual: interlace is in s_ys
                     when 31 =>
                         s_s0e <= -signed(resize(s_h2f, 12));
 
@@ -602,14 +644,11 @@ begin
 
                 case to_integer(s_lseq) is
 
-                    -- s' = frame row from centre (|s| under Mirror)
+                    -- s' = frame row from centre (|s| under Mirror), virtual
+                    -- units: the integer part of a Q.8 row accumulator
                     when 63 =>
-                        v_s := s_snext;
-                        if s_ilace = '1' then
-                            s_snext <= s_snext + 2;
-                        else
-                            s_snext <= s_snext + 1;
-                        end if;
+                        v_s := s_snext(19 downto 8);
+                        s_snext <= s_snext + signed(resize(s_ys, 20));
                         if v_s < 0 and s_sw(0) = '0' then
                             s_sneg <= '1';
                         else
@@ -779,6 +818,14 @@ begin
                     when 8 => n_re_u <= s_lr;
                     when 7 => n_re_v <= s_lr;
 
+                    -- per-pixel u step = du (per virtual unit) * x step
+                    when 6 =>
+                        case s_xs is
+                            when "100"  => s_dupn <= s_dun(20 downto 0) & '0';
+                            when "011"  => s_dupn <= s_dun + ('0' & s_dun(21 downto 1));
+                            when others => s_dupn <= s_dun;
+                        end case;
+
                     when others => null;
                 end case;
             end if;
@@ -799,13 +846,6 @@ begin
                 s_sw  <= registers_in(6)(4 downto 0);
                 s_p12 <= unsigned(registers_in(7));
 
-                s_fpar <= data_in.field_n;
-                if data_in.field_n /= s_fpar then
-                    s_ilace <= '1';
-                else
-                    s_ilace <= '0';
-                end if;
-
                 s_seq <= to_unsigned(63, 6);
             end if;
 
@@ -822,13 +862,11 @@ begin
 
             -- before the first active line: (re)compute line 0 on every
             -- blanking hsync -- idempotent, the last run before avid wins.
-            -- Bottom field (field_n '0') starts one frame row down.
+            -- The row accumulator starts at -H/2 + 0.5 (rounds the virtual
+            -- row; 1080p integer rows unchanged).  field_n is tied high on
+            -- hardware, so there is no bottom-field seed.
             elsif s_e_hs = '1' and s_first = '1' and s_seq = 0 then
-                if s_ilace = '1' and data_in.field_n = '0' then
-                    s_snext <= s_s0e + 1;
-                else
-                    s_snext <= s_s0e;
-                end if;
+                s_snext <= s_s0e & "10000000";
                 s_lseq <= to_unsigned(63, 6);
             end if;
 
@@ -854,7 +892,7 @@ begin
             if data_in.avid = '1' and s_avid_p = '0' then
                 s_accu  <= s_u0n;
                 s_vline <= s_vn;
-                s_du_px <= s_dun;
+                s_du_px <= s_dupn;
             elsif data_in.avid = '1' then
                 s_accu <= s_accu + s_du_px;
             end if;
