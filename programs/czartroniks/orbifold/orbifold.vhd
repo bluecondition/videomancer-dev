@@ -6,6 +6,17 @@
 --
 -- orbifold.vhd  (v0.3 — iterated fract-ring rosette fractal)
 --
+-- v0.3.3 (2026-10-17): resolution scaling.  The pixel/line counters (and the
+-- measured width/height that centre the zoom) run in virtual 1080-line units,
+-- stepped per pixel / per field line from the video timing ID
+-- (registers_in(8)): 1.0 at 1080p (identical to before), 1.5 at 720p, and at
+-- SD 2.0 across (a 1440-wide 4:3 window) and 1080/486 per frame line
+-- (doubled per interlaced field line).  The rosette cells and the hue
+-- gradient now follow screen height and stay round on a 4:3 SD screen.  The
+-- duplicate width/height counters are folded into the accumulators.  Also
+-- (bit-identical): the S17 chroma sum no longer adds a sign-extension net to
+-- itself (SB_CARRY I0 == I1, the router1 livelock shape).
+--
 -- The whole image is two shader lines iterated:
 --     uv = fract(uv * divisions);
 --     if (t < length(uv) && length(uv) < t + w)  break;   // draw ring, stop
@@ -110,13 +121,48 @@ architecture orbifold of program_top is
     end function;
 
     --------------------------------------------------------------------------
+    -- Resolution scaling: per-mode steps from the video timing ID.
+    --------------------------------------------------------------------------
+    -- x step in half virtual units per pixel: 1080 2 (1.0), 720p 3 (1.5),
+    -- SD 4 (2.0: 720 px span 1440 units, a 4:3 window of the 1080 canvas).
+    function f_vstep_x(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0 | 4 | 8 | 12 => return to_unsigned(4, 3);
+            when 5 | 6 | 14     => return to_unsigned(3, 3);
+            when others         => return to_unsigned(2, 3);
+        end case;
+    end function;
+    -- y step in Q4.8 virtual units per FIELD line (1080 / active lines,
+    -- doubled for interlaced modes).
+    function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(1138, 12);  -- 480i: 2 x 1080/486
+            when 4          => return to_unsigned(576, 12);   -- 480p: 1080/480
+            when 8          => return to_unsigned(960, 12);   -- 576i: 2 x 1080/576
+            when 12         => return to_unsigned(480, 12);   -- 576p: 1080/576
+            when 5 | 6 | 14 => return to_unsigned(384, 12);   -- 720p: 1.5
+            when 1 | 2 | 10 => return to_unsigned(512, 12);   -- 1080i: 2.0
+            when others     => return to_unsigned(256, 12);   -- 1080p: 1.0
+        end case;
+    end function;
+
+    --------------------------------------------------------------------------
     -- Position counters + measured active area (centre of zoom)
     --------------------------------------------------------------------------
+    -- Virtual 1080-line units: pix_xa / late_xa are Q.1 (steps 2/3/4),
+    -- pix_ya Q.8 per field line; pixel_x / late_x / pixel_y are the integer
+    -- parts (at 1080p the step is 1 and these are the old integer counters).
+    -- measured_h / measured_v are the virtual width / height.
     signal pixel_x, pixel_y : unsigned(11 downto 0) := (others => '0');
     signal late_x           : unsigned(11 downto 0) := (others => '0');
+    signal s_xs             : unsigned(2 downto 0)  := to_unsigned(2, 3);
+    signal s_ys             : unsigned(11 downto 0) := to_unsigned(256, 12);
+    signal pix_xa, late_xa  : unsigned(12 downto 0) := (others => '0');
+    signal pix_ya           : unsigned(19 downto 0) := (others => '0');
     signal prev_hsync_n     : std_logic := '1';
     signal prev_vsync_n     : std_logic := '1';
-    signal h_cnt, v_cnt     : unsigned(11 downto 0) := (others => '0');
     signal line_had_avid    : std_logic := '0';
     signal measured_h       : unsigned(11 downto 0) := to_unsigned(1920, 12);
     signal measured_v       : unsigned(11 downto 0) := to_unsigned(1080, 12);
@@ -304,30 +350,29 @@ begin
             if data_in.hsync_n = '0' and prev_hsync_n = '1' then v_h_edge := '1'; end if;
             if data_in.vsync_n = '0' and prev_vsync_n = '1' then v_v_edge := '1'; end if;
 
-            -- pixel/line counters (active lines only, so the centre is right)
+            -- per-mode virtual steps (the timing ID is static while a mode
+            -- runs; decoded every clock so the first field is right too)
+            s_xs <= f_vstep_x(registers_in(8)(3 downto 0));
+            s_ys <= f_vstep_y(registers_in(8)(3 downto 0));
+
+            -- pixel/line counters (active lines only, so the centre is right);
+            -- the end-of-line / end-of-field values are the measured active
+            -- width / height (centre of the zoom), in virtual units
             if v_h_edge = '1' then
-                pixel_x <= (others => '0');
-                if line_had_avid = '1' then pixel_y <= pixel_y + 1; end if;
+                if pix_xa(12 downto 1) > 0 then measured_h <= pix_xa(12 downto 1); end if;
+                pix_xa <= (others => '0');
+                if line_had_avid = '1' then pix_ya <= pix_ya + s_ys; end if;
                 line_had_avid <= '0';
             elsif data_in.avid = '1' then
-                pixel_x <= pixel_x + 1;
+                pix_xa <= pix_xa + s_xs;
                 line_had_avid <= '1';
             end if;
 
             -- late column counter for the screen-space hue gradient
             if pipe(12).avid = '1' then
-                late_x <= late_x + 1;
+                late_xa <= late_xa + s_xs;
             else
-                late_x <= (others => '0');
-            end if;
-
-            -- measure active width/height (centre of the zoom)
-            if v_h_edge = '1' then
-                if h_cnt > 0 then measured_h <= h_cnt; end if;
-                h_cnt <= (others => '0');
-                if line_had_avid = '1' then v_cnt <= v_cnt + 1; end if;
-            elsif data_in.avid = '1' then
-                h_cnt <= h_cnt + 1;
+                late_xa <= (others => '0');
             end if;
 
             -- frame trigger: once per field (analog vsync serrates — act only
@@ -335,9 +380,8 @@ begin
             seq_go <= '0';
             if data_in.avid = '1' then saw_avid <= '1'; end if;
             if v_v_edge = '1' then
-                pixel_y <= (others => '0');
-                if v_cnt > 0 then measured_v <= v_cnt; end if;
-                v_cnt <= (others => '0');
+                if pix_ya(19 downto 8) > 0 then measured_v <= pix_ya(19 downto 8); end if;
+                pix_ya <= (others => '0');
                 s_cx <= '0' & measured_h(11 downto 1);
                 s_cy <= '0' & measured_v(11 downto 1);
                 if saw_avid = '1' then
@@ -347,6 +391,10 @@ begin
             end if;
         end if;
     end process p_position;
+
+    pixel_x <= pix_xa(12 downto 1);
+    late_x  <= late_xa(12 downto 1);
+    pixel_y <= pix_ya(19 downto 8);
 
     --------------------------------------------------------------------------
     -- Sine ROM (registered; valid one state after sin_ph is set)
@@ -699,8 +747,6 @@ begin
         variable v_par      : std_logic;
         variable v_sel      : integer range 0 to NLEV - 1;
         variable v_tu, v_tv : unsigned(7 downto 0);
-        variable v_du, v_dv : signed(10 downto 0);
-        variable v_c11      : signed(10 downto 0);
         variable v_g13      : signed(12 downto 0);
     begin
         if rising_edge(clk) then
@@ -890,8 +936,6 @@ begin
             -- S17: hue -> YUV via triangle wheel (U/V in quadrature, gain 3)
             v_tu := tri8(s16_hue);
             v_tv := tri8(s16_hue + to_unsigned(64, 8));
-            v_du := signed(resize(v_tu, 11)) - to_signed(128, 11);
-            v_dv := signed(resize(v_tv, 11)) - to_signed(128, 11);
             if s_mono = '1' then
                 -- phosphor: green, luma rides the hue gradient
                 s17_y <= to_unsigned(256, 10) + shift_left(resize(v_tu, 10), 1);
@@ -899,11 +943,12 @@ begin
                 s17_v <= to_unsigned(280, 10);
             else
                 s17_y <= s16_y;
-                -- 512 + 3*(tri-128): range 128..890, always positive -> slice
-                v_c11 := to_signed(512, 11) + v_du + shift_left(v_du, 1);
-                s17_u <= unsigned(v_c11(9 downto 0));
-                v_c11 := to_signed(512, 11) + v_dv + shift_left(v_dv, 1);
-                s17_v <= unsigned(v_c11(9 downto 0));
+                -- 512 + 3*(tri-128) = 128 + tri + 2*tri: range 128..890.
+                -- (v0.3.3: summed from the UNSIGNED tri -- the signed form
+                -- added the sign-extension net to itself, SB_CARRY I0 == I1,
+                -- which can livelock router1; bit-identical result.)
+                s17_u <= to_unsigned(128, 10) + resize(v_tu, 10) + shift_left(resize(v_tu, 10), 1);
+                s17_v <= to_unsigned(128, 10) + resize(v_tv, 10) + shift_left(resize(v_tv, 10), 1);
             end if;
             s17_hit <= s16_hit;
 
