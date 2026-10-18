@@ -6,6 +6,11 @@
 --
 -- tessera.vhd  (v17 — BRAM sprite store, 1..64 triangles, depth, scale)
 --
+-- v1.0.5 (2026-10-18) bit-exact: the sin/cos depth-layer scaling no longer
+-- has a self-add (x/2 + x/2 and its far-pair twin put one net on two pins
+-- of one LC, the router1 rip-up livelock); even layers are now z with its
+-- LSB cleared, odd layers a sign-split 9-bit add.
+--
 -- v1.0.4 (2026-10-18) fit for the stock SDK SD Standalone core, bit-exact
 -- output: the y and x sizes share one R / third / half shift-add set (each
 -- latched as it leaves the size multiplier), the recycle range reuses the
@@ -630,24 +635,33 @@ begin
         port map (angle_in => s_lut_angle, sin_out => s_lut_sin, cos_out => s_lut_cos);
 
     p_lut_reg : process(clk)
-        variable v_s1, v_s2, v_c1, v_c2 : signed(10 downto 0);
+        variable v_zs, v_zc : signed(10 downto 0);
+        variable v_ls, v_lc : unsigned(8 downto 0);
     begin
         if rising_edge(clk) then
             s_sin_r <= resize(s_lut_sin, 11);
             s_cos_r <= resize(s_lut_cos, 11);
             -- depth-layer size: scaling sin/cos scales every vertex offset
-            -- (and the flutter) of this triangle.  Each factor is a sum of
-            -- two shifts, so one adder per value: x1 = x/2 + x/2,
-            -- 3/4 = x/2 + x/4, 1/2 = x/4 + x/4, 3/8 = x/4 + x/8.
-            if s_lsel(1) = '0' then v_s1 := shift_right(s_sin_r, 1); v_c1 := shift_right(s_cos_r, 1);
-            else                    v_s1 := shift_right(s_sin_r, 2); v_c1 := shift_right(s_cos_r, 2); end if;
-            case s_lsel is
-                when "00"   => v_s2 := shift_right(s_sin_r, 1); v_c2 := shift_right(s_cos_r, 1);
-                when "11"   => v_s2 := shift_right(s_sin_r, 3); v_c2 := shift_right(s_cos_r, 3);
-                when others => v_s2 := shift_right(s_sin_r, 2); v_c2 := shift_right(s_cos_r, 2);
-            end case;
-            s_sin_s <= v_s1 + v_s2;
-            s_cos_s <= v_c1 + v_c2;
+            -- (and the flutter) of this triangle: x1, 3/4, 1/2, 3/8 =
+            -- x/2 + x/2, x/2 + x/4, x/4 + x/4, x/4 + x/8.  Written so no adder
+            -- sees the same net on both operands (a self-add puts one net on
+            -- two pins of one LC, which livelocks nextpnr's router1):
+            --   z = x (near pair) or x/2 (far pair);
+            --   even layers: z/2 + z/2 = z with its LSB cleared, no adder;
+            --   odd layers:  z/2 + z/4, z in the 10-bit range of the LUT, so
+            --   only bits 8..1 + 9..2 need adding (9-bit sum incl. carry) and
+            --   the two top bits are z's sign.
+            if s_lsel(1) = '0' then v_zs := s_sin_r;                v_zc := s_cos_r;
+            else                    v_zs := shift_right(s_sin_r, 1); v_zc := shift_right(s_cos_r, 1); end if;
+            v_ls := ('0' & unsigned(v_zs(8 downto 1))) + ('0' & unsigned(v_zs(9 downto 2)));
+            v_lc := ('0' & unsigned(v_zc(8 downto 1))) + ('0' & unsigned(v_zc(9 downto 2)));
+            if s_lsel(0) = '0' then
+                s_sin_s <= v_zs(10 downto 1) & '0';
+                s_cos_s <= v_zc(10 downto 1) & '0';
+            else
+                s_sin_s <= v_zs(9) & v_zs(9) & signed(v_ls);
+                s_cos_s <= v_zc(9) & v_zc(9) & signed(v_lc);
+            end if;
         end if;
     end process;
 

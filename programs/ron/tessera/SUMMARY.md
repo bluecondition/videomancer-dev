@@ -4,8 +4,48 @@
 HW-validated: "It looks really good").** v1.0.0 = the v17 engine (TOML version
 bump only; bitstreams identical). **Build seeds:** router1
 (`NEXTPNR_ROUTER="--router router1" ./build_programs.sh ron tessera`); seed 1 on
-all 6 configs through v1.0.3, and from v1.0.4 HD Analog needs seed 2 (seed 1
-livelocks router1).
+all 6 configs. Only v1.0.4 needed seed 2 on HD Analog: there, seed 1
+livelocked router1. v1.0.5 fixed that.
+
+## v1.0.5 — no duplicate-input cells: router1 livelock fix (2026-10-18)
+v1.0.4's stock seed hunt hit real router1 rip-up livelocks: SD Standalone
+on seeds 1, 2 and 7, SD HDMI on seed 1, SD Dual on seed 7. The dev HD Analog
+build livelocked on seed 1 too.
+- **Cause.** dupin found two LUTs with one net on two inputs. Both come from
+  the sin/cos depth-layer scaling (`p_lut_reg`): x1 = x/2 + x/2 and
+  1/2 = x/4 + x/4 are self-adds. The sign-extended tops of the other two
+  factors share nets as well. A net on two pins of one LC is the hypnos
+  router1 hang.
+- **Fix (bit-exact).** z = x for the near pair of layers, x/2 for the far pair.
+  - Even layers (x1, 1/2) are z/2 + z/2, which is z with its LSB cleared:
+    no adder.
+  - Odd layers (3/4, 3/8) are z/2 + z/4. z is in the LUT's 10-bit range, so
+    only bits 8..1 + 9..2 are added (a 9-bit sum, carry included). The two
+    top bits are z's sign, so no adder position sees one net twice.
+  - Checked exhaustively in Python: 1024 LUT values × 4 layers, 0 differences.
+- **dupin:** 2 duplicate-input LUTs → **0 cells** (no LUT or CARRY) on every
+  stock netlist (all 8 configs) and on the dev HD Analog / HDMI / Dual netlists.
+- **Stock SD Standalone packed LC:** 7479 → **7459** (97.1%), 25 EBR.
+- **Stock router1 builds, all completed:**
+  - SD Standalone seeds 1, 2 and 7, each routed in 55–58k iterations.
+  - SD HDMI seed 1 and SD Dual seed 7.
+  - Seed 7 now builds all 8 configs: LC 6896–7459.
+  - The stock-core HD Fmax (51–57 MHz) is set by the core's Sync Out
+    generator, as before.
+- **Bit-exact proof:** the v1.0.4 bench, run against v1.0.3. The same six runs
+  (R1 1080p, R2 720p, R3 480i, R4 1080i, R5 576p, S1 short lines), 43 M clocks
+  in all, gave **0 output mismatches**, with every edge-RAM write and push
+  matching. Layers mode exercises all four layer factors.
+- **Dev build** (router1), all 6 configs on seed 1:
+
+  | config | seed | Fmax (MHz) | LC / 7680 | EBR |
+  |---|---|---|---|---|
+  | HD Analog | 1 | 83.63 | 6882 | 25 |
+  | SD Analog | 1 | 85.34 | 6893 | 25 |
+  | HD HDMI | 1 | 79.63 | 6864 | 25 |
+  | SD HDMI | 1 | 86.63 | 6888 | 25 |
+  | HD Dual | 1 | 84.01 | 6889 | 25 |
+  | SD Dual | 1 | 84.93 | 6886 | 25 |
 
 ## v1.0.4 — fit for the stock SDK SD Standalone (2026-10-18)
 After v1.0.3, the stock LZX SDK's SD Standalone config packed to 7767 / 7680 LC
