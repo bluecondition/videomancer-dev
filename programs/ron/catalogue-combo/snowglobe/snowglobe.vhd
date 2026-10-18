@@ -32,6 +32,19 @@
 -- column/row are the pixel or its cell.  Output: [1 2 1] on Y/U/V + luma
 -- scaled to white ~775 (the HD HDMI bar fix), blanking-gated.  Latency 20
 -- clocks in all modes.
+--
+-- v0.2.2 (2026-10-17): resolution scaling.  Cells, rows, the lens and the
+-- tracking tears run in virtual 1080-line units stepped from the video
+-- timing ID (registers_in(8)): x 1.0 / 1.5 / 2.0 units a pixel (1080 / 720p
+-- / SD), y 1080 / active lines a field line (interlace included).  Cell
+-- and row sizes are fractions of the screen height in every mode (square
+-- cells stay square on a 4:3 SD screen; SD cells were 2:1 tall and ~4x
+-- coarser, 720p 1.5x).  Screen cells hold at virtual-x crossings; lens
+-- cells quantize the source column to the virtual grid (720p: 2C/3-px
+-- cells via two per-frame thresholds, no divide).  Fine snow and the lost
+-- lines stay at pixel / line scale.  1080p is bit-identical.  Also: the
+-- Snow amplitude is written without a self-add (router1 livelock), same
+-- value.  Build: router1, seed 3.
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -61,6 +74,37 @@ architecture snowglobe of program_top is
             return to_integer(v(9 downto 7));
         end if;
     end function;
+
+    -- Resolution scaling: per-mode steps from the video timing ID.
+    -- x step in half virtual units per pixel: 1080 2 (1.0), 720p 3 (1.5),
+    -- SD 4 (2.0: 720 px span 1440 units, a 4:3 window of the 1080 canvas).
+    function f_vstep_x(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0 | 4 | 8 | 12 => return to_unsigned(4, 3);
+            when 5 | 6 | 14     => return to_unsigned(3, 3);
+            when others         => return to_unsigned(2, 3);
+        end case;
+    end function;
+    -- y step in Q4.8 virtual units per FIELD line (1080 / active lines,
+    -- doubled for interlaced modes).
+    function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(1138, 12);  -- 480i: 2 x 1080/486
+            when 4          => return to_unsigned(576, 12);   -- 480p: 1080/480
+            when 8          => return to_unsigned(960, 12);   -- 576i: 2 x 1080/576
+            when 12         => return to_unsigned(480, 12);   -- 576p: 1080/576
+            when 5 | 6 | 14 => return to_unsigned(384, 12);   -- 720p: 1.5
+            when 1 | 2 | 10 => return to_unsigned(512, 12);   -- 1080i: 2.0
+            when others     => return to_unsigned(256, 12);   -- 1080p: 1.0
+        end case;
+    end function;
+    -- 720p lens cells: a C-unit cell is 2C/3 px.  Within each 2C-px block
+    -- (3 cells) the cells start at 0, ceil(2C/3) and ceil(4C/3).
+    type t_thr is array (0 to 7) of integer range 0 to 255;
+    constant C_T1 : t_thr := (1, 2, 3, 6, 11, 22, 43, 86);
+    constant C_T2 : t_thr := (2, 3, 6, 11, 22, 43, 86, 171);
 
     type t_mask is array (0 to 7) of unsigned(6 downto 0);
     constant C_MASK : t_mask := ("0000000", "0000001", "0000011", "0000111", "0001111", "0011111", "0111111", "1111111");
@@ -96,12 +140,16 @@ architecture snowglobe of program_top is
     signal s_gz  : unsigned(12 downto 0) := to_unsigned(2720, 13);   -- glided P12 x 8
     signal s_scr, s_csn, s_tun, s_mir, s_cols : std_logic := '0';
     signal s_cmask, s_rm1 : unsigned(6 downto 0) := (others => '0');
+    signal s_k1i    : unsigned(2 downto 0) := (others => '0');
+    -- lens cells in source px: mask, and the 720p in-block cell starts
+    -- (256 = never)
+    signal s_qm     : unsigned(7 downto 0) := (others => '0');
+    signal s_qt1, s_qt2 : unsigned(8 downto 0) := to_unsigned(256, 9);
     signal s_kb     : signed(8 downto 0) := (others => '0');
     signal s_zoom   : unsigned(8 downto 0) := to_unsigned(256, 9);
     signal s_rm     : unsigned(9 downto 0) := to_unsigned(428, 10);
     signal s_wf     : unsigned(10 downto 0) := to_unsigned(480, 11);
     signal s_hh     : unsigned(9 downto 0) := to_unsigned(135, 10);
-    signal s_hd     : std_logic := '0';
     signal s_rph, s_rpl : unsigned(14 downto 0) := (others => '0');
     signal s_rsum   : unsigned(19 downto 0) := (others => '0');
     signal s_rad    : unsigned(10 downto 0) := to_unsigned(200, 11);
@@ -140,7 +188,6 @@ architecture snowglobe of program_top is
     signal s_lost_nx, s_lost : std_logic := '0';
     signal s_lnz_nx, s_lnz   : unsigned(7 downto 0) := (others => '0');
     -- row capture
-    signal s_vcnt   : unsigned(6 downto 0) := (others => '0');
     signal s_capture, s_wpar, s_rb_nx, s_rbank : std_logic := '0';
     signal s_l0_nx, s_line0, s_hpar, s_swap : std_logic := '0';
     signal s_cpar   : std_logic_vector(1 downto 0) := "00";
@@ -152,10 +199,19 @@ architecture snowglobe of program_top is
     signal s_in_avid : std_logic := '0';
     signal s_prev_hsync_n, s_prev_vsync_n, s_prev_avid : std_logic := '1';
     signal s_line, s_height, s_line_width : unsigned(10 downto 0) := to_unsigned(270, 11);
+    -- resolution scaling: steps (free-running from the timing ID), the
+    -- line's virtual y (Q.8) and the field's virtual height
+    signal s_xs   : unsigned(2 downto 0)  := to_unsigned(2, 3);
+    signal s_ys   : unsigned(11 downto 0) := to_unsigned(256, 12);
+    signal s_vya  : unsigned(19 downto 0) := (others => '0');
+    signal s_vht  : unsigned(10 downto 0) := to_unsigned(270, 11);
 
     -- pixel path (E<n> = registered n clocks after data_in)
     type t_x is array (1 to 3) of unsigned(10 downto 0);
     signal s_x : t_x := (others => (others => '0'));
+    signal s_vx4  : unsigned(12 downto 0) := (others => '0');   -- virtual x of s_x(3), Q.1
+    signal s_cr4  : std_logic := '1';                            -- s_x(3) starts a screen cell
+    signal s_off4 : unsigned(7 downto 0) := (others => '0');     -- 720p lens-cell start in its block
     type t_b is array (1 to 4) of std_logic;
     signal s_avd : t_b := (others => '0');
     signal s_acc  : signed(23 downto 0) := (others => '0');
@@ -192,9 +248,9 @@ begin
         variable v_g   : signed(13 downto 0);
         variable v_k3  : unsigned(9 downto 0);
         variable v_t   : signed(10 downto 0);
-        variable v_vn  : unsigned(6 downto 0);
         variable v_kb  : signed(10 downto 0);
         variable v_x   : unsigned(31 downto 0);
+        variable v_ny  : unsigned(19 downto 0);
     begin
         if rising_edge(clk) then
             s_in_y <= unsigned(data_in.y); s_in_u <= unsigned(data_in.u); s_in_v <= unsigned(data_in.v);
@@ -210,12 +266,16 @@ begin
             s_rng <= v_x xor shift_left(v_x, 5);
             -- hsync->avid parity (drape): clock parity since hsync, per line
             s_hpar <= not s_hpar;
+            s_xs <= f_vstep_x(registers_in(8)(3 downto 0));
+            s_ys <= f_vstep_y(registers_in(8)(3 downto 0));
 
             -- snow: amplitude k/4, plus (k-512)/4 above half (up to +-382);
             -- above 62.5% the picture fades toward grey (to 25% at 100%)
             v_k3 := unsigned(registers_in(2));
             if v_k3(9) = '1' then
-                s_amp <= resize(v_k3(9 downto 2), 9) + resize(v_k3(8 downto 2), 9);
+                -- = k(9:2) + k(8:2) with bit 9 set, written without a self-add
+                -- (a carry with both inputs on one net livelocks router1)
+                s_amp <= to_unsigned(128, 9) + shift_left(resize(v_k3(8 downto 2), 9), 1);
             else
                 s_amp <= resize(v_k3(9 downto 2), 9);
             end if;
@@ -241,9 +301,9 @@ begin
                     s_mir  <= registers_in(6)(3);
                     s_cols <= registers_in(6)(4);
                     s_wf <= s_line_width;
-                    s_hh <= s_height(10 downto 1);
+                    s_hh <= s_vht(10 downto 1);
                     s_cx <= '0' & s_line_width(10 downto 1);
-                    s_cy <= '0' & s_height(10 downto 1);
+                    s_cy <= '0' & s_vht(10 downto 1);
                     s_seed <= s_rng;
                     s_vstep <= s_vstep + 1;
                 when 1 =>
@@ -254,10 +314,10 @@ begin
                     v_g := signed('0' & s_gb) + shift_right(s_eb, 3); s_gb <= unsigned(v_g(12 downto 0));
                     v_g := signed('0' & s_gr) + shift_right(s_er, 3); s_gr <= unsigned(v_g(12 downto 0));
                     v_g := signed('0' & s_gz) + shift_right(s_ez, 3); s_gz <= unsigned(v_g(12 downto 0));
-                    s_hd <= s_wf(10);
                     s_vstep <= s_vstep + 1;
                 when 2 =>
                     s_cmask <= C_MASK(f_oct(s_k1h));
+                    s_k1i   <= to_unsigned(f_oct(s_k1h), 3);
                     s_rm1   <= C_MASK(f_oct(s_k2h));
                     v_kb := signed(resize(s_gb(12 downto 3), 11)) - 512;
                     s_kb <= resize(shift_right(v_kb, 1), 9);
@@ -273,6 +333,19 @@ begin
                     end if;
                     s_vstep <= s_vstep + 1;
                 when 3 =>
+                    -- lens cells in source px: C (1080), C/2 (SD), 2C/3 (720p)
+                    case to_integer(s_xs) is
+                        when 3 =>
+                            s_qm  <= s_cmask & '1';
+                            s_qt1 <= to_unsigned(C_T1(to_integer(s_k1i)), 9);
+                            s_qt2 <= to_unsigned(C_T2(to_integer(s_k1i)), 9);
+                        when 4 =>
+                            s_qm  <= "00" & s_cmask(6 downto 1);
+                            s_qt1 <= to_unsigned(256, 9); s_qt2 <= to_unsigned(256, 9);
+                        when others =>
+                            s_qm  <= '0' & s_cmask;
+                            s_qt1 <= to_unsigned(256, 9); s_qt2 <= to_unsigned(256, 9);
+                    end case;
                     s_rph <= s_hh * s_rm(9 downto 5);
                     s_rpl <= s_hh * s_rm(4 downto 0);
                     s_2hi <= shift_left(s_hi_b, 1);
@@ -313,11 +386,12 @@ begin
             -- per-line lens: the row's source step and DDA start
             case to_integer(s_lstep) is
                 when 0 =>
-                    if s_line >= s_cy then s_ady <= s_line - s_cy; else s_ady <= s_cy - s_line; end if;
+                    if s_vya(18 downto 8) >= s_cy then s_ady <= s_vya(18 downto 8) - s_cy; else s_ady <= s_cy - s_vya(18 downto 8); end if;
                     if s_rng(7 downto 0) < s_track then
                         s_lost_nx <= '1';
+                        -- +-512 virtual units (scaled to px at step 1)
                         v_t := signed(resize(s_rng(17 downto 8), 11)) - 512;
-                        if s_hd = '1' then s_tear <= v_t; else s_tear <= shift_right(v_t, 1); end if;
+                        s_tear <= v_t;
                     else
                         s_lost_nx <= '0';
                         s_tear <= (others => '0');
@@ -325,6 +399,12 @@ begin
                     s_lnz_nx <= s_rng(31 downto 24);
                     s_lstep <= s_lstep + 1;
                 when 1 =>
+                    -- tear in px: x 1 (1080), ~2/3 (720p), 1/2 (SD)
+                    case to_integer(s_xs) is
+                        when 3 => s_tear <= shift_right(s_tear, 1) + shift_right(s_tear, 3) + shift_right(s_tear, 5);
+                        when 4 => s_tear <= shift_right(s_tear, 1);
+                        when others => null;
+                    end case;
                     s_tp <= s_ady * s_inv_r;
                     if s_ady >= s_rad then s_beyond <= '1'; else s_beyond <= '0'; end if;
                     s_lstep <= s_lstep + 1;
@@ -379,11 +459,14 @@ begin
             -- end of a line: the next line's row slot, capture and read bank
             if s_prev_avid = '1' and data_in.avid = '0' then
                 s_line_width <= s_rx; s_line <= s_line + 1; s_height <= s_line + 1;
-                if s_vcnt >= s_rm1 then v_vn := (others => '0'); else v_vn := s_vcnt + 1; end if;
-                s_vcnt   <= v_vn;
+                v_ny := s_vya + s_ys;
+                s_vya <= v_ny;
+                s_vht <= v_ny(18 downto 8);
                 s_rb_nx  <= s_wpar;           -- the last completed capture
                 s_rid_nx <= s_ccnt;
-                if v_vn = s_rm1 then          -- the next line starts a row: capture
+                -- the next line starts a row when its virtual y crosses a
+                -- multiple of the row height (bits 7..k: see the notes)
+                if ((v_ny(15 downto 8) xor s_vya(15 downto 8)) and not ('0' & s_rm1)) /= 0 then
                     s_capture <= '1';
                     s_wpar    <= not s_wpar;
                     s_ccnt    <= s_ccnt + 1;
@@ -413,7 +496,7 @@ begin
             -- into bank 0 and shows black
             if data_in.vsync_n = '0' and s_prev_vsync_n = '1' then
                 s_line    <= (others => '0');
-                s_vcnt    <= s_rm1;
+                s_vya     <= (others => '0');
                 s_capture <= '1';
                 s_wpar    <= '0';
                 s_rb_nx   <= '1';
@@ -436,13 +519,25 @@ begin
         variable v_s13 : signed(12 downto 0);
         variable v_c, v_ml, v_mh : signed(12 downto 0);
         variable v_col : unsigned(15 downto 0);
+        variable v_vx  : unsigned(12 downto 0);
+        variable v_r   : unsigned(8 downto 0);
     begin
         if rising_edge(clk) then
             -- E2: pixel x
             s_x(1) <= s_rx - 1; s_avd(1) <= s_in_avid;
             for i in 2 to 3 loop s_x(i) <= s_x(i - 1); end loop;
             for i in 2 to 4 loop s_avd(i) <= s_avd(i - 1); end loop;
-            -- E3: DDA (1/256 px)
+            -- E4: virtual x beside s_x(3), and whether that pixel starts a
+            -- screen cell (its virtual x crossed a cell edge; the line's
+            -- first pixel always does).  Bits 7..k decide any crossing.
+            if s_avd(3) = '1' then
+                v_vx := s_vx4 + s_xs;
+                s_vx4 <= v_vx;
+                if ((v_vx(8 downto 1) xor s_vx4(8 downto 1)) and not ('0' & s_cmask)) /= 0 then s_cr4 <= '1'; else s_cr4 <= '0'; end if;
+            else
+                s_vx4 <= (others => '0');
+                s_cr4 <= '1';
+            end if;            -- E3: DDA (1/256 px)
             if s_avd(1) = '0' then s_acc <= s_src0; else s_acc <= s_acc + resize(s_srow, 24); end if;
             -- E4: source x, saturated to +-4096 (squeezed rows never wrap
             -- back onto the line); cells in source space
@@ -456,22 +551,31 @@ begin
             if s_scr = '1' then
                 s_src4 <= v_s13;
             else
-                s_src4 <= v_s13 and not signed(resize(s_cmask, 13));
+                s_src4 <= v_s13 and not signed(resize(s_qm, 13));
             end if;
-            s_hcl <= unsigned(s_acc(23 downto 8)) and not resize(s_cmask, 16);
+            s_hcl <= unsigned(s_acc(23 downto 8)) and not resize(s_qm, 16);
+            -- 720p: the cell's start inside its 2C-px block (0 elsewhere)
+            v_r := '0' & (unsigned(s_acc(15 downto 8)) and s_qm);
+            if v_r >= s_qt2 then
+                s_off4 <= s_qt2(7 downto 0);
+            elsif v_r >= s_qt1 then
+                s_off4 <= s_qt1(7 downto 0);
+            else
+                s_off4 <= (others => '0');
+            end if;
             -- E5: cells in screen space = hold the address at cell boundaries;
             -- snow hash key = (row, column) of the pixel or of its cell
             if s_scr = '1' then
-                if (s_x(3)(6 downto 0) and s_cmask) = 0 then s_src5 <= s_src4; end if;
+                if s_cr4 = '1' then s_src5 <= s_src4; end if;
             else
-                s_src5 <= s_src4;
+                s_src5 <= s_src4 or signed(resize(s_off4, 13));
             end if;
             if s_csn = '0' then
                 v_col := resize(s_x(3), 16);
             elsif s_scr = '1' then
-                v_col := resize(s_x(3) and not resize(s_cmask, 11), 16);
+                v_col := resize(s_vx4(12 downto 1) and not resize(s_cmask, 12), 16);
             else
-                v_col := s_hcl;
+                v_col := s_hcl or resize(s_off4, 16);
             end if;
             s_hk0 <= "00000" & s_hrow & v_col;
             -- E6: edges (bounds per frame; compares run beside the subtracts)

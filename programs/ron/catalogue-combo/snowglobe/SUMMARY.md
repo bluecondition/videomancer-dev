@@ -94,6 +94,38 @@ maximum, now with a light fade). There is one new preset: Lost Channel (Snow
 100%, Tracking 30%). All are hand-written; recapture them with
 capture_preset.sh.
 
+## v0.2.2 (2026-10-17): resolution scaling
+
+Cells, rows, the lens and the tracking tears now run in virtual 1080-line
+units, stepped from the video timing ID (`registers_in(8)`): x 1.0 / 1.5 /
+2.0 units a pixel (1080 / 720p / SD), y 1080 / active lines a field line
+(interlace included).
+- **Cells / Rows** were fixed pixels and field lines: 1.5× too big at 720p,
+  and in SD ~2.7× too wide and ~4.4× too tall. Now:
+  - Rows: a row starts where the line's virtual y crosses a multiple of the
+    row height.
+  - Screen cells: the source is held where the virtual x crosses a cell edge.
+  - Lens cells: the source column is quantized to the virtual grid. That is
+    C px at 1080p and C/2 at SD (a mask). At 720p it is 2C/3 px: within each
+    2C-px block the three cells start at 0, ceil(2C/3) and ceil(4C/3), two
+    per-frame thresholds and an OR, with no divide. This was checked exactly
+    against floor(3s/2C) for every size.
+  - The Cells-snow keys follow the same virtual cells.
+  Cells and rows are the same fraction of the screen height in every mode,
+  and square cells stay square on a 4:3 SD screen. This covers the Tier 2
+  "SD interlace rows" item.
+- **Lens**: centre, radius and the 16-line minimum radius are virtual.
+- **Tracking tears** were ±512 px whenever the width had bit 10 set, so
+  720p got the HD size. They are now ±512 virtual units: ×1 / ~×0.66 / ×1/2
+  in px.
+- Fine snow (per pixel, per field line) and the lost lines stay at pixel /
+  line scale.
+- Not about scaling: `s_amp` (Snow above 50%) was `k(9:2) + k(8:2)`, a
+  self-add (a carry with both inputs on one net) that livelocks router1 on
+  some seeds. It is now `128 + 2·k(8:2)`, the same value for every input
+  (checked exhaustively).
+- 1080p is bit-identical (0 differing pixels against v0.2.1).
+
 ## Next tiers (offered 2026-10-12, not done)
 
 Tier 2 (look, Ron's call):
@@ -133,6 +165,16 @@ yosys: `emulate_transparency` = 0 (v0.1.0 had 3), so no_rw_check took
 effect. The +1,900 LC are the snow hash (7 × 32-bit stages), the six new
 snow multiplies (fade and amplitude on Y/U/V) and the bar guard. If room is
 ever needed, the fade could become a shift-add on fewer levels.
+
+v0.2.2 (2026-10-17): **router1, SEED=3** (the community port's seed):
+`SEED=3 NEXTPNR_ROUTER="--router router1" ./build_combo.sh snowglobe`. All
+6 configs pass on seed 3: HD Analog 84.1, HD HDMI 77.0, HD Dual 83.6 MHz;
+SD 89.1 / 83.3 / 83.5 MHz. About 6,700 LC (87%), 18/32 EBR. All six .bin
+files unpack. The default router2 build missed HD HDMI on all six seeds
+(best 73.5 MHz; a manual seed spread gave 70.5–75.5). Its critical paths
+were the old one-clock per-line `cx × srow` product and the per-pixel fade
+multiply off the high-fanout `s_fw`. router1 closed the same netlist at
+81–85 MHz on seeds 1–4.
 
 HW status: v0.2.0 built, not yet flashed.
 
