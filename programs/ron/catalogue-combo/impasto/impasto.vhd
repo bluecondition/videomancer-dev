@@ -49,6 +49,12 @@
 -- windows, continuous Brush, P12 live in Steer, steer aligned, no_rw_check.
 -- v0.3.0: colour brush, vertical brush, single-bank line buffer, latency
 -- 30 -> 21 (the old fetch delay was pure padding).
+-- v0.3.2: resolution scaling.  The noise lattice runs on virtual 1080-line
+-- coordinates (x step per pixel and y step per field line from the video
+-- timing ID in registers_in(8)), the warp displacement is scaled by 1/x step
+-- and the brush window / vertical drag by the x / y step (index offsets into
+-- the exponential Brush table), so cells, warp and strokes keep their size
+-- relative to the screen height at SD and 720p.  1080p is unchanged.
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -90,6 +96,55 @@ architecture impasto of program_top is
         else
             return unsigned(v(9 downto 0));
         end if;
+    end function;
+
+    -- Resolution scaling: per-mode steps from the video timing ID.
+    -- x step in half virtual units per pixel: 1080 2 (1.0), 720p 3 (1.5),
+    -- SD 4 (2.0: 720 px span 1440 units, a 4:3 window of the 1080 canvas).
+    function f_vstep_x(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0 | 4 | 8 | 12 => return to_unsigned(4, 3);
+            when 5 | 6 | 14     => return to_unsigned(3, 3);
+            when others         => return to_unsigned(2, 3);
+        end case;
+    end function;
+    -- y step in Q4.8 virtual units per FIELD line (1080 / active lines,
+    -- doubled for interlaced modes).
+    function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(1138, 12);  -- 480i: 2 x 1080/486
+            when 4          => return to_unsigned(576, 12);   -- 480p: 1080/480
+            when 8          => return to_unsigned(960, 12);   -- 576i: 2 x 1080/576
+            when 12         => return to_unsigned(480, 12);   -- 576p: 1080/576
+            when 5 | 6 | 14 => return to_unsigned(384, 12);   -- 720p: 1.5
+            when 1 | 2 | 10 => return to_unsigned(512, 12);   -- 1080i: 2.0
+            when others     => return to_unsigned(256, 12);   -- 1080p: 1.0
+        end case;
+    end function;
+    -- Brush table index offsets (the table is 16x over 63 steps, so 15.75
+    -- steps an octave): horizontal by the x step, vertical by the y step
+    -- (round(63/4 * log2(step))).
+    function f_boff_x(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0 | 4 | 8 | 12 => return to_unsigned(16, 6);  -- x2.0
+            when 5 | 6 | 14     => return to_unsigned(9, 6);   -- x1.5
+            when others         => return to_unsigned(0, 6);
+        end case;
+    end function;
+    function f_boff_y(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(34, 6);  -- 480i x4.44
+            when 4          => return to_unsigned(18, 6);  -- 480p x2.25
+            when 8          => return to_unsigned(30, 6);  -- 576i x3.75
+            when 12         => return to_unsigned(14, 6);  -- 576p x1.875
+            when 5 | 6 | 14 => return to_unsigned(9, 6);   -- 720p x1.5
+            when 1 | 2 | 10 => return to_unsigned(16, 6);  -- 1080i x2.0
+            when others     => return to_unsigned(0, 6);
+        end case;
     end function;
 
     function f_round1(k : unsigned(15 downto 0)) return unsigned is
@@ -259,10 +314,19 @@ architecture impasto of program_top is
     signal s_relief : unsigned(7 downto 0) := (others => '0');
     signal s_nphase : unsigned(15 downto 0) := (others => '0');
     signal s_vstep  : unsigned(2 downto 0) := "111";
+    -- resolution scaling (free-running from the timing ID)
+    signal s_xs     : unsigned(2 downto 0) := to_unsigned(2, 3);       -- x step, Q.1
+    signal s_ys     : unsigned(11 downto 0) := to_unsigned(256, 12);   -- y step per field line, Q.8
+    signal s_xlead  : unsigned(11 downto 0) := to_unsigned(26, 12);    -- C_NLEAD px in Q.1 virtual units
+    signal s_bih, s_biv : unsigned(5 downto 0) := (others => '0');     -- Brush table index, x / y
+    signal s_ampr   : unsigned(7 downto 0) := (others => '0');         -- warp amplitude, virtual px
+    signal s_amp_a, s_amp_b : unsigned(7 downto 0) := (others => '0');
+    signal s_vxa    : unsigned(11 downto 0) := to_unsigned(26, 12);    -- noise column, Q.1 virtual
+    signal s_lya    : unsigned(18 downto 0) := (others => '0');        -- field line, Q.8 virtual
 
     -- tracking / per-line
     signal s_rx, s_line, s_line_width : unsigned(10 downto 0) := to_unsigned(720, 11);
-    signal s_rxn    : unsigned(10 downto 0) := to_unsigned(C_NLEAD, 11); -- noise column = s_rx + C_NLEAD
+    signal s_rxn    : unsigned(10 downto 0) := to_unsigned(C_NLEAD, 11); -- noise column (virtual) = s_rx + C_NLEAD
     signal s_x15    : unsigned(10 downto 0) := (others => '0');          -- s_rx, 15 clocks late
     signal s_prev_hsync_n, s_prev_vsync_n, s_prev_avid : std_logic := '1';
     signal s_saw_active : std_logic := '0';
@@ -408,6 +472,9 @@ begin
     s_sw_right  <= registers_in(6)(3);
     s_sw_knife  <= registers_in(6)(4);
     s_p_amount <= unsigned(registers_in(7));
+    -- virtual noise coordinates: integer parts of the accumulators
+    s_rxn  <= s_vxa(11 downto 1);
+    s_line <= s_lya(18 downto 8);
 
     --------------------------------------------------------------------------
     -- Rings.  After clock t: s_acc* = S(t-1), the N-sums ending at input pixel
@@ -460,10 +527,40 @@ begin
         if rising_edge(clk) then
             s_prev_hsync_n <= data_in.hsync_n; s_prev_vsync_n <= data_in.vsync_n; s_prev_avid <= data_in.avid;
             if data_in.avid = '1' then
-                s_rx <= s_rx + 1; s_rxn <= s_rxn + 1; s_saw_active <= '1';
+                s_rx <= s_rx + 1; s_vxa <= s_vxa + s_xs; s_saw_active <= '1';
             else
-                s_rx <= (others => '0'); s_rxn <= to_unsigned(C_NLEAD, 11);
+                s_rx <= (others => '0'); s_vxa <= s_xlead;
             end if;
+            -- resolution scaling: steps, the noise lead in virtual units, the
+            -- Brush indices and the warp amplitude, all free-running
+            s_xs <= f_vstep_x(registers_in(8)(3 downto 0));
+            s_ys <= f_vstep_y(registers_in(8)(3 downto 0));
+            case to_integer(s_xs) is
+                when 4      => s_xlead <= to_unsigned(4 * C_NLEAD, 12);
+                when 3      => s_xlead <= to_unsigned(3 * C_NLEAD, 12);
+                when others => s_xlead <= to_unsigned(2 * C_NLEAD, 12);
+            end case;
+            if s_k_brush(9 downto 4) > f_boff_x(registers_in(8)(3 downto 0)) then
+                s_bih <= s_k_brush(9 downto 4) - f_boff_x(registers_in(8)(3 downto 0));
+            else
+                s_bih <= (others => '0');
+            end if;
+            if s_k_brush(9 downto 4) > f_boff_y(registers_in(8)(3 downto 0)) then
+                s_biv <= s_k_brush(9 downto 4) - f_boff_y(registers_in(8)(3 downto 0));
+            else
+                s_biv <= (others => '0');
+            end if;
+            -- warp px = virtual px x 2 / x step (720p: 1/2+1/8+1/32+1/128)
+            case to_integer(s_xs) is
+                when 4 =>
+                    s_amp_a <= shift_right(s_ampr, 1); s_amp_b <= (others => '0');
+                when 3 =>
+                    s_amp_a <= shift_right(s_ampr, 1) + shift_right(s_ampr, 3);
+                    s_amp_b <= shift_right(s_ampr, 5) + shift_right(s_ampr, 7);
+                when others =>
+                    s_amp_a <= s_ampr; s_amp_b <= (others => '0');
+            end case;
+            s_amp <= s_amp_a + s_amp_b;
             if s_avid_sr(14) = '1' then s_x15 <= s_x15 + 1; else s_x15 <= (others => '0'); end if;
             s_lfsr <= s_lfsr(14 downto 0) & (s_lfsr(15) xor s_lfsr(14) xor s_lfsr(12) xor s_lfsr(3));
 
@@ -667,13 +764,16 @@ begin
             -- per-frame decode
             case to_integer(s_vstep) is
                 when 0 =>
-                    s_amp  <= s_p_amount(9 downto 2);
+                    s_ampr <= s_p_amount(9 downto 2);
                     s_sthr <= resize(s_p_amount(9 downto 3), 8);
                     if s_k_scale(9 downto 7) = 7 then s_k <= to_unsigned(9, 4); else s_k <= resize(s_k_scale(9 downto 7), 4) + 2; end if;
-                    v_b := f_brush(s_k_brush(9 downto 4));
+                    -- window from the x-scaled index, vertical drag from the
+                    -- y-scaled one (both the plain K4 index at 1080p)
+                    v_b := f_brush(s_bih);
                     s_n   <= unsigned(v_b(21 downto 15));
                     s_rm  <= unsigned(v_b(14 downto 7));
                     s_rsh <= unsigned(v_b(6 downto 4));
+                    v_b := f_brush(s_biv);
                     s_vs  <= unsigned(v_b(3 downto 1));
                     s_vb  <= v_b(0);
                     s_edge <= s_k_edge(9 downto 2);
@@ -733,13 +833,13 @@ begin
             s_w_edge <= s_line_width - (C_EDGE + 1);
             s_rthr <= s_w_edge - resize(s_n, 11);
             if s_prev_avid = '1' and data_in.avid = '0' then
-                s_line_width <= s_rx; s_line <= s_line + 1;
+                s_line_width <= s_rx; s_lya <= s_lya + s_ys;
             end if;
             if data_in.hsync_n = '0' and s_prev_hsync_n = '1' then
                 s_lstep <= (others => '0');
             end if;
             if data_in.vsync_n = '0' and s_prev_vsync_n = '1' then
-                s_line <= (others => '0');
+                s_lya <= (others => '0');
                 if s_saw_active = '1' then s_vstep <= (others => '0'); end if;
                 s_saw_active <= '0';
             end if;
@@ -786,15 +886,17 @@ begin
             v_kx := to_integer(s_kx);
             s_cx1 <= resize(shift_right(s_rxn, v_kx), 10);
             case v_kx is
-                when 2 => s_fx1 <= s_rxn(1 downto 0) & "00000";
-                when 3 => s_fx1 <= s_rxn(2 downto 0) & "0000";
-                when 4 => s_fx1 <= s_rxn(3 downto 0) & "000";
-                when 5 => s_fx1 <= s_rxn(4 downto 0) & "00";
-                when 6 => s_fx1 <= s_rxn(5 downto 0) & "0";
-                when 7 => s_fx1 <= s_rxn(6 downto 0);
-                when 8 => s_fx1 <= s_rxn(7 downto 1);
-                when 9 => s_fx1 <= s_rxn(8 downto 2);
-                when others => s_fx1 <= s_rxn(9 downto 3);
+                -- (fractions from the Q.1 accumulator: s_vxa = 2 x s_rxn at
+                -- 1080p, so these are the old slices there)
+                when 2 => s_fx1 <= s_vxa(2 downto 0) & "0000";
+                when 3 => s_fx1 <= s_vxa(3 downto 0) & "000";
+                when 4 => s_fx1 <= s_vxa(4 downto 0) & "00";
+                when 5 => s_fx1 <= s_vxa(5 downto 0) & "0";
+                when 6 => s_fx1 <= s_vxa(6 downto 0);
+                when 7 => s_fx1 <= s_vxa(7 downto 1);
+                when 8 => s_fx1 <= s_vxa(8 downto 2);
+                when 9 => s_fx1 <= s_vxa(9 downto 3);
+                when others => s_fx1 <= s_vxa(10 downto 4);
             end case;
             s_ka <= s_rk0  + resize(s_cx1, 16);
             s_kb <= s_rk0p + resize(s_cx1, 16);

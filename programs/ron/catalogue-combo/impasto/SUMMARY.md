@@ -24,6 +24,25 @@ asked for the colour brush and the vertical brush (v0.3.0).
 | S11 Knife | luma posterized to 8 steps |
 | P12 Amount | Warp: displacement up to ±255 px. Steer: share of the picture flipped, none at 0 up to half at 100 |
 
+## v0.3.2 changes (resolution scaling, 2026-10-17)
+
+At SD and 720p the noise cells, the warp and the brush were fixed-pixel, so
+SD showed cells ~2x wide / ~4.4x tall (field lines) and a twice-as-wide
+smear. Now (1080p unchanged, pixel diff 0):
+- The noise lattice runs on virtual 1080-line coordinates: the noise column
+  is a Q.1 accumulator stepped by the per-mode x step (1.0 / 1.5 / 2.0 from
+  the timing ID in `registers_in(8)`), the noise row a Q.8 accumulator
+  stepped by the y step per field line (480i 4.44). The 13 px noise lead is
+  13 real pixels in virtual units. The cell fractions take the half-unit bit.
+  SD shows the left 1440 units of the 1080p field.
+- Warp displacement (P12) = virtual px x 2 / x step (SD half, 720p 2/3).
+- Brush (judgement call: a 4-64 px window is a stroke size, not a pixel
+  kernel): the K4 table index is offset by 63/4 x log2(step) — x step for
+  the window N (SD -16, 720p -9), y step for the vertical drag (480i -34,
+  576i -30, 720p -9, 1080i -16), clamped at the 4 px floor. So Wet Canvas's
+  64 px brush is 32 px at SD and ~43 px at 720p, same size on screen.
+- Steps and indices are free-running registers decoded from the timing ID.
+
 ## v0.3.0 changes (Ron: "do 10 and 11")
 
 - **Colour brush.** U and V get running box sums beside the luma ones. The window
@@ -112,6 +131,11 @@ v0.3.0 build (2026-10-12): all 6 configs pass on seed 1. HD Analog 81.3,
 HD HDMI 88.5, HD Dual 87.9 MHz; SD Analog 89.7, SD HDMI 91.6, SD Dual 86.0 MHz.
 6,127 LC (80%), 25/32 EBR. The v0.2.0 vmprog is kept at
 `.impasto_work/impasto_v020.vmprog`.
+
+v0.3.2 build (2026-10-17, resolution scaling, router2 default): all 6
+configs pass on seed 1. HD Analog 87.3, HD HDMI 87.6, HD Dual 89.3 MHz;
+SD Analog 93.5, SD HDMI 92.5, SD Dual 88.7 MHz. 6,307-6,338 LC (82%),
+25/32 EBR (+~200 LC over v0.3.0). Not flashed.
 
 HW status: v0.2.0 flashed, "looks good" (Ron, 2026-10-12). v0.3.0 flashed: "Looks really good on hardware" (Ron, 2026-10-12) — HW-validated.
 
