@@ -7,6 +7,23 @@ three hash octaves + pores feed one comparator,
 `out = clamp(512 + (Y - thr + N) * gain)`, and P12 DEVELOP rides the gain
 from transparent additive grain (1x) to a hard mezzotint (~72x).
 
+## v0.3.2 — resolution scaling (2026-10-17)
+
+- The K3 block octave (8..64) is structure, so it now hashes **virtual
+  1080-line coordinates** stepped from the timing ID (`registers_in(8)`):
+  x 1.0/1.5/2.0 per pixel (1080p/720p/SD, SD = a 1440-wide 4:3 window), y
+  1080/active-lines per field line (interlace included). Blocks keep their
+  size relative to the screen height and stay square at SD (they were 2x
+  wide and ~4x tall there). 1080p is bit-identical.
+- The per-pixel tooth, the 4 px mottle, the Soft 4x4 box and the pores are
+  film grain (pixel texture) and stay at pixel scale.
+- Interlace now comes from the timing ID (480i/576i/1080i). The hardware ties
+  field_n high, so the old field_n-toggle detector never fired and the 4 px
+  mottle printed 2:1 tall at SD/1080i. Animate still reseeds every second
+  field (now on the field toggle alone).
+- Build (router2, all seed 1): HD Analog 81.8 / HD HDMI 85.0 / HD Dual
+  85.7 MHz; SD 82.4 / 73.0 / 85.3 MHz; 5364–5379 LC (70%), 0 EBR.
+
 ## Build (v0.3.0, router2, all seed 1)
 
 | config | Fmax | LC |
