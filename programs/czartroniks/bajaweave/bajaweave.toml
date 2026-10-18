@@ -7,7 +7,7 @@
 processing_delay_clks = 0
 program_id = "com.czartroniks.bajaweave"
 program_name = "Bajaweave"
-program_version = "1.0.3"
+program_version = "1.0.4"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -180,7 +180,7 @@ linear_potentiometer_12 = 64
 
 [firmware]
 # nextpnr placement seed for the stock LZX build (one seed, all 8 configs):
-# seeds 1-5 each hung nextpnr's router1 (a rip-up livelock) in at least one
-# config; seed 6 builds all 8 (own HD timing 102.0/103.4/96.4 MHz
-# Analog/HDMI/Dual).
+# seeds 1-5 each hung nextpnr's router1 (a rip-up livelock) on v1.0.0-v1.0.3;
+# v1.0.4 removed the duplicate-input LUTs behind it, and seeds 1 and 6 both
+# build all 8. Seed 6: own HD timing 99.9/104.5/111.0 MHz Analog/HDMI/Dual.
 seed = 6
