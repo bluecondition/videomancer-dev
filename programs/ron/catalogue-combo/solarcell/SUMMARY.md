@@ -191,7 +191,34 @@ add logic. The build table is below.
   lines. Iso contours compare against the same field's line above.
 - Centred cell grid, so the part cells are split evenly between both edges.
 
+## v0.3.2 resolution scaling (2026-10-17)
+
+The baseline sheet showed mosaic cells 1.5× too big at 720p and bigger again
+at SD (the column DDA counted pixels and the row DDA counted field lines).
+K4 Cell and K3 Rows now keep their 1080 sizes relative to the screen height:
+
+- The read and write column DDAs step in virtual half units: 2 / 3 / 4 per
+  pixel at 1080 / 720p / SD, from the timing ID in `registers_in(8)`. SD is
+  a 1440-wide 4:3 window. A cell is 2W half units, and the wrap is a single
+  subtract (2W ≥ 8 > step). The exact mean still divides by the cell's real
+  pixel count: a separate counter, `s_wpc`, feeds the 1/n table.
+- Rows: a Q8 accumulator stepping 1080/active lines per field line (2·1080/486
+  at 480i). At the avid fall it adds the step, then subtracts the row height
+  once per clock until it fits. Rows under a line can pass several
+  boundaries, and the K6 staircase steps once for each. `capl` = position ≥
+  N − step.
+- Grid: at least 1 px / 1 line. Rows under 2 lines on screen (N ≤ 8 at 480i)
+  can't show a band, so they get every N-th screen line, which keeps the 1080
+  coverage. Iso stays at pixel scale.
+- 1080p is bit-identical (diff1080 = 0). Latency is unchanged (28).
+
 ## Build
+
+v0.3.2, 2026-10-17, resolution scaling, `./build_combo.sh solarcell` (router2).
+All six configs passed on seed 1: HD Analog 79.26, HD HDMI 86.00, HD Dual 82.23
+MHz; SD 82.04 / 81.63 / 82.41 MHz. 7,199–7,216 LC (94%, +~265 over v0.3.0),
+7/32 EBR. That is at the 94% LC target: the exact cell mean remains the first
+thing to take back out if room is needed. Not flashed.
 
 v0.3.0, 2026-10-13, `./build_combo.sh solarcell` (router2). All six configs
 passed on seed 1:
