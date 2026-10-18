@@ -184,8 +184,9 @@ accumulators, contrast, tone, warp — is shared.
 
 The per-frame angle resolve shares ONE registered 9×10 multiplier, split-operand
 across vblank cycles, so no wide combinational product lands on a vsync-latched
-register (the ziffern trap: those paths are still STA-timed). Interlace detected
-by field-parity toggle; one field starts half a line step down. Accumulators
+register (the ziffern trap: those paths are still STA-timed). (Until v1.0.2
+interlace was detected by field-parity toggle; v1.0.3 steps per field line by
+the timing ID instead -- see below.) Accumulators
 advance on **active lines only** — a blanking-hsync advance makes the phase
 field-dependent and the lattice twitters at 30 Hz.
 
@@ -264,3 +265,41 @@ presets, which are to be revisited separately. Engine, controls and schemes are
 frozen as of v0.5.1; 1.0.0 changes only text (version, TOML header/description,
 docs). Left as-is in 1.0 (never HW-reported as a problem): schemes are authored
 in unswapped BT.601, and Tint uses the scheme's ink luma.
+
+## v1.0.3 — resolution scaling (2026-10-17)
+
+Before this, cells and strokes were fixed in pixels: cells were ~1.5x larger relative to the screen
+at 720p and ~2.5x at SD. Interlaced modes also stepped the lattice by the per-pixel `dpy` on each
+FIELD line, so SD was stretched 2x vertically and K4's tilt came out steeper there.
+
+- **Virtual 1080-line canvas.** `f_vstep_x`/`f_vstep_y` (from the mondrian pilot) are decoded
+  free-running from the timing ID (`registers_in(8)`). In vblank, state 38 sets the per-pixel steps
+  to `dpx·xs`, `-(dpy·xs)/4` (shift-add) and the per-field-line steps to `dpy·ys`, `dpx·ys/4`, both
+  done by `ys` repeated additions (≤1138 clocks) that start at state 46. Rotation stays a rotation
+  on screen. The centre-pivot walk is unchanged: real pixels/field lines times virtual steps still
+  lands on the screen centre. The pivot states moved down one, to 37..33.
+- Cell size, line weight and the octave threshold were already in units of 1080p pixels through
+  `step` and `wscale`, so they now scale with screen height with no other change. The same octaves
+  appear at every resolution.
+- **Stroke floor.** Octaves 0 and 1 keep a half-width of at least half a step of the mode (in
+  quarter virtual px: 480i 9, 576i 8, 480p 5, 1080i/576p 4, 720p 3, 1080p 0), applied as a per-frame
+  sub-cell floor under the fade cap. A stroke that has zero width at 1080p stays absent. Octave 2's pen
+  is already sub-pixel at 1080p (it draws dashed there), so it gets no floor; flooring it made
+  coarse-pitch SD more than twice as dense as 1080p (0.21 vs 0.09 line coverage). It is now about
+  +40% at SD and exact at 720p.
+- Interlace: the field-parity toggle detector (dead on hardware, where field_n is tied high) is
+  gone. The bottom-field half-step is now keyed on `field_n = '0'`, which is inert on hardware.
+- 1080p is bit-identical to v1.0.2 (diff1080 0 px). Sheets are in `.scaling_work/sheets/daedalus_v2.png`.
+
+Build (`./build_programs.sh ron daedalus`, router2):
+
+| Config | Fmax | LCs | seed |
+|---|---|---|---|
+| HD Analog | 82.39 MHz | 5622 | 1 |
+| SD Analog | 85.01 MHz | 5627 | 1 |
+| HD HDMI | 79.28 MHz | 5630 | **2** (seed 1 missed) |
+| SD HDMI | 77.45 MHz | 5624 | 1 |
+| HD Dual | 79.68 MHz | 5636 | 1 |
+| SD Dual | 72.67 MHz | 5630 | 1 |
+
+73% LC (+~360 vs v1.0.2), 1 EBR. Not flashed.
