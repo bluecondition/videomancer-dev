@@ -85,9 +85,22 @@ is black or the input video; nothing else ever colours the background.
   product → S8 glyph pixel + inside, fade level → S9 glyph ROM → S10 bit/glow →
   S11 select × colour gain → S12 Y + chroma partials → S12b recombine → S13
   chroma, background, gate → output regs (16 clocks). `C_SYNCD` = 13.
-- **Not handled yet:** 480i renders glyphs 2:1 tall (rows count field lines).
+- **Resolution scaling (v1.0.2, 2026-10-18):** the glyph grid, luma map and
+  glitch bands run in virtual 1080-line units: Q.1 x accumulators (`m_xa` /
+  `m_xsa`, step 1 / 1.5 / 2 per pixel) beside the real `m_x` (which still ends
+  the generated avid), a Q.8 per-line `m_ya` (step 1080/active lines per field
+  line), the timing ID `registers_in(8)` decoded free-running.  Column count
+  uses the virtual width (`s_Wvm1`); the luma-map centre triggers became
+  "centre bit rose" flags (a 1.5 / 4.44 step jumps over the exact centre).
+  720p now matches 1080p; SD shows the left 1440 units of the 1080p layout
+  with square glyphs.  At the smallest Glyph Size (K6 < 25%, 16 units) an SD
+  glyph is only ~3.6 field lines tall, so it reads as dashes, not katakana.
 
 ## Build seeds
+
+v1.0.2 (2026-10-18, resolution scaling): `./build_programs.sh ron matrix_rain` (router2), all six
+configs pass on seed 1 — HD Analog 80.30, SD Analog 70.30, HD HDMI 80.16, SD HDMI 82.64,
+HD Dual 76.92, SD Dual 77.42 MHz; 7317–7341 LC (95.3–95.6%), 21 EBR.
 
 v0.6.0 / v1.0.0 (same bitstreams): all six configs pass on seed 1 — HD Analog 82.0, HD HDMI 82.3,
 HD Dual 76.4, SD 76.1 / 86.3 / 78.5 MHz; 7120 LC (93%), 21 EBR. Near the fit

@@ -20,6 +20,12 @@
 -- fills and lingers there); under dark parts glyphs shrink to 0.4x with normal
 -- tails.  0% = plain rain.  Background (S10) is black or the input video.
 --
+-- v1.0.2 (2026-10-18): resolution scaling.  The glyph grid, luma map and
+-- glitch bands run in virtual 1080-line units (x step 1/1.5/2 per pixel,
+-- y step per field line from the timing ID), so 720p and SD show the 1080p
+-- glyph sizes relative to screen height, square on a 4:3 SD screen (SD = a
+-- 1440-unit-wide window).  1080p is unchanged.
+--
 -- Glyph ROM: matrix_rain_glyphs_pkg.vhd (16x16 1bpp), generated at build time
 -- by matrix_rain.py from the vendored GNU Unifont subset (half-width katakana
 -- U+FF66..FF9D + digits + a few Latin/symbols).
@@ -200,6 +206,34 @@ architecture matrix_rain of program_top is
         if p >= 0 and p <= 15 then return rb(15 - p); else return '0'; end if;
     end function;
 
+    --------------------------------------------------------------------------
+    -- Resolution scaling: per-mode steps from the video timing ID.
+    --------------------------------------------------------------------------
+    -- x step in half virtual units per pixel: 1080 2 (1.0), 720p 3 (1.5),
+    -- SD 4 (2.0: 720 px span 1440 units, a 4:3 window of the 1080 canvas).
+    function f_vstep_x(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0 | 4 | 8 | 12 => return to_unsigned(4, 3);
+            when 5 | 6 | 14     => return to_unsigned(3, 3);
+            when others         => return to_unsigned(2, 3);
+        end case;
+    end function;
+    -- y step in Q4.8 virtual units per FIELD line (1080 / active lines,
+    -- doubled for interlaced modes).
+    function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(1138, 12);  -- 480i: 2 x 1080/486
+            when 4          => return to_unsigned(576, 12);   -- 480p: 1080/480
+            when 8          => return to_unsigned(960, 12);   -- 576i: 2 x 1080/576
+            when 12         => return to_unsigned(480, 12);   -- 576p: 1080/576
+            when 5 | 6 | 14 => return to_unsigned(384, 12);   -- 720p: 1.5
+            when 1 | 2 | 10 => return to_unsigned(512, 12);   -- 1080i: 2.0
+            when others     => return to_unsigned(256, 12);   -- 1080p: 1.0
+        end case;
+    end function;
+
     -- reverse a 16-bit row (horizontal mirror).
     function revb(rb : std_logic_vector(15 downto 0)) return std_logic_vector is
         variable r : std_logic_vector(15 downto 0);
@@ -242,10 +276,25 @@ architecture matrix_rain of program_top is
     signal g_rsr : std_logic_vector(2 downto 0) := (others => '0');
     -- M registers: current pixel (valid while m_avid = '1').  m_xs = m_x plus
     -- the glitch band's horizontal tear (0 outside the band).
+    -- Resolution scaling: m_x counts REAL pixels (generated-avid length);
+    -- m_xv / m_xs / m_y are the virtual-1080 integer parts of the Q.1 x
+    -- accumulators and the Q.8 per-line y accumulator (step 1.0 at 1080p, so
+    -- they equal the old counters there).
     signal m_avid : std_logic := '0';
     signal m_x    : unsigned(11 downto 0) := (others => '0');
-    signal m_xs   : unsigned(11 downto 0) := (others => '0');
-    signal m_y    : unsigned(11 downto 0) := (others => '0');
+    signal m_xa   : unsigned(12 downto 0) := (others => '0');
+    signal m_xsa  : unsigned(12 downto 0) := (others => '0');
+    signal m_ya   : unsigned(19 downto 0) := (others => '0');
+    signal m_xv   : unsigned(11 downto 0);
+    signal m_xs   : unsigned(11 downto 0);
+    signal m_y    : unsigned(11 downto 0);
+    signal s_xs   : unsigned(2 downto 0)  := to_unsigned(2, 3);
+    signal s_ys   : unsigned(11 downto 0) := to_unsigned(256, 12);
+    signal s_Wv1r : unsigned(11 downto 0) := to_unsigned(1919, 12);   -- s_W - 1
+    signal s_Wvr  : unsigned(11 downto 0) := to_unsigned(1919, 12);   -- virtual s_W - 1
+    signal s_Wvm1 : unsigned(11 downto 0) := to_unsigned(1919, 12);   -- per-field virtual width - 1
+    signal s_xbq  : std_logic_vector(2 downto 0) := (others => '0');  -- m_xv(6..4), last clock
+    signal s_ybq  : std_logic_vector(2 downto 0) := (others => '0');  -- m_y(6..4), last line
     signal m_band : std_logic := '0';                  -- in a horizontal glitch band
     signal m_vband : std_logic := '0';                 -- in a vertical glitch band
     signal s_ydy  : unsigned(11 downto 0) := (others => '0');   -- m_y + vertical tear
@@ -613,6 +662,10 @@ architecture matrix_rain of program_top is
     signal s_io : t_video_stream_yuv444_30b;
 
 begin
+    -- virtual-1080 integer parts (see the M registers)
+    m_xv <= m_xa(12 downto 1);
+    m_xs <= m_xsa(12 downto 1);
+    m_y  <= m_ya(19 downto 8);
 
     --------------------------------------------------------------------------
     -- Control reads
@@ -677,21 +730,38 @@ begin
             -- Exactly W pixels per line from the generated start, carried into
             -- the porch if the source line runs short (line-length jitter
             -- must not pile up down the screen).
+            -- (virtual accumulators step s_xs / s_ys alongside the real m_x)
             if (g_sel = '0' and g_rsr(1) = '1') or (g_sel = '1' and g_rsr(2) = '1') then
                 m_avid <= '1';
                 m_x    <= (others => '0');
-                if m_band = '1' then m_xs <= s_gl_dx;
-                else                 m_xs <= (others => '0'); end if;
+                m_xa   <= (others => '0');
+                if m_band = '1' then m_xsa <= s_gl_dx & '0';
+                else                 m_xsa <= (others => '0'); end if;
             elsif m_avid = '1' then
                 if m_x = s_Wm1 then
                     m_avid <= '0';
-                    m_y    <= m_y + 1;     -- advance on active lines only
+                    m_ya   <= m_ya + s_ys;  -- advance on active lines only
+                    s_ybq  <= std_logic_vector(m_y(6 downto 4));
                 end if;
-                m_x  <= m_x + 1;
-                m_xs <= m_xs + 1;
+                m_x   <= m_x + 1;
+                m_xa  <= m_xa + s_xs;
+                m_xsa <= m_xsa + s_xs;
             else
-                m_x <= (others => '0');
+                m_x  <= (others => '0');
+                m_xa <= (others => '0');
             end if;
+            s_xbq <= std_logic_vector(m_xv(6 downto 4));
+
+            -- per-mode steps (timing ID is static while a mode runs)
+            s_xs <= f_vstep_x(registers_in(8)(3 downto 0));
+            s_ys <= f_vstep_y(registers_in(8)(3 downto 0));
+            -- virtual width - 1 of the longest line so far (latched per field)
+            s_Wv1r <= s_W - 1;
+            case to_integer(s_xs) is
+                when 3      => s_Wvr <= s_Wv1r + shift_right(s_Wv1r, 1);
+                when 4      => s_Wvr <= shift_left(s_Wv1r, 1);
+                when others => s_Wvr <= s_Wv1r;
+            end case;
 
             -- glitch band membership: rows per line (m_y settles in blanking),
             -- columns per pixel (one pixel late -- invisible in a glitch)
@@ -700,7 +770,7 @@ begin
             else
                 m_band <= '0';
             end if;
-            if s_gl_on = '1' and s_gl_vert = '1' and m_x >= s_gl_x0 and m_x < s_gl_x1 then
+            if s_gl_on = '1' and s_gl_vert = '1' and m_xv >= s_gl_x0 and m_xv < s_gl_x1 then
                 m_vband <= '1';
             else
                 m_vband <= '0';
@@ -715,12 +785,16 @@ begin
             if s_vs_f = '1' and s_sawact = '1' then
                 s_sawact <= '0';
                 s_fstart <= '1';
-                if m_y > 16 then s_H <= m_y; end if;
+                if m_y > 16 then s_H <= m_y; end if;   -- virtual (1080)
                 -- per-field width = the LONGEST source line of the field, so a
                 -- short (dropout) line can never shear the next field
-                if s_W > 16 then s_Wm1 <= s_W - 1; end if;
+                if s_W > 16 then
+                    s_Wm1  <= s_W - 1;
+                    s_Wvm1 <= s_Wvr;
+                end if;
                 s_W   <= (others => '0');
-                m_y   <= (others => '0');
+                m_ya  <= (others => '0');
+                s_ybq <= (others => '0');
             end if;
         end if;
     end process;
@@ -753,7 +827,7 @@ begin
             s_rnd <= mix16(unsigned(s_lfsr) xor x"5A3C");
             v_gpm := s_rnd(7 downto 0) * s_H;
             s_gl_ycand <= v_gpm(19 downto 8);
-            v_gpx := s_rnd(15 downto 8) * s_Wm1;
+            v_gpx := s_rnd(15 downto 8) * s_Wvm1;
             s_gl_xcand <= v_gpx(19 downto 8);
 
             if s_fstart = '1' then
@@ -765,10 +839,10 @@ begin
                 s_fpar <= not s_fpar;
                 -- columns and rows rounded UP so partial cells still rain
                 case v_z is
-                    when 0      => v_cw := s_Wm1 + 16;  v_ch := s_H + 15;
-                    when 1      => v_cw := s_Wm1 + 32;  v_ch := s_H + 31;
-                    when 2      => v_cw := s_Wm1 + 64;  v_ch := s_H + 63;
-                    when others => v_cw := s_Wm1 + 128; v_ch := s_H + 127;
+                    when 0      => v_cw := s_Wvm1 + 16;  v_ch := s_H + 15;
+                    when 1      => v_cw := s_Wvm1 + 32;  v_ch := s_H + 31;
+                    when 2      => v_cw := s_Wvm1 + 64;  v_ch := s_H + 63;
+                    when others => v_cw := s_Wvm1 + 128; v_ch := s_H + 127;
                 end case;
                 s_ncols <= resize(shift_right(v_cw, 4 + v_z), 8);
                 v_nr    := resize(shift_right(v_ch, 4 + v_z), 8);
@@ -1096,15 +1170,17 @@ begin
             -- W1: centre pixel of a luma cell (16<<lz px square)
             v_trig := '0';
             case to_integer(s_lz) is
+                -- (virtual units: the centre bit RISING on this pixel / line,
+                -- since a fractional step can jump over the exact centre)
                 when 1 =>
-                    if m_x(4 downto 0) = "10000" and m_y(4 downto 0) = "10000" then v_trig := '1'; end if;
-                    v_a := s_fpar & m_y(10 downto 5) & m_x(10 downto 5);
+                    if m_xv(4) = '1' and s_xbq(0) = '0' and m_y(4) = '1' and s_ybq(0) = '0' then v_trig := '1'; end if;
+                    v_a := s_fpar & m_y(10 downto 5) & m_xv(10 downto 5);
                 when 2 =>
-                    if m_x(5 downto 0) = "100000" and m_y(5 downto 0) = "100000" then v_trig := '1'; end if;
-                    v_a := s_fpar & m_y(11 downto 6) & m_x(11 downto 6);
+                    if m_xv(5) = '1' and s_xbq(1) = '0' and m_y(5) = '1' and s_ybq(1) = '0' then v_trig := '1'; end if;
+                    v_a := s_fpar & m_y(11 downto 6) & m_xv(11 downto 6);
                 when others =>
-                    if m_x(6 downto 0) = "1000000" and m_y(6 downto 0) = "1000000" then v_trig := '1'; end if;
-                    v_a := s_fpar & '0' & m_y(11 downto 7) & '0' & m_x(11 downto 7);
+                    if m_xv(6) = '1' and s_xbq(2) = '0' and m_y(6) = '1' and s_ybq(2) = '0' then v_trig := '1'; end if;
+                    v_a := s_fpar & '0' & m_y(11 downto 7) & '0' & m_xv(11 downto 7);
             end case;
             w1_v <= v_trig and m_avid;
             w1_a <= v_a;
@@ -1180,9 +1256,9 @@ begin
             end if;
 
             case to_integer(s_lz) is
-                when 1      => s_lm_raddr <= (not s_fpar) & m_y(10 downto 5) & m_x(10 downto 5);
-                when 2      => s_lm_raddr <= (not s_fpar) & m_y(11 downto 6) & m_x(11 downto 6);
-                when others => s_lm_raddr <= (not s_fpar) & '0' & m_y(11 downto 7) & '0' & m_x(11 downto 7);
+                when 1      => s_lm_raddr <= (not s_fpar) & m_y(10 downto 5) & m_xv(10 downto 5);
+                when 2      => s_lm_raddr <= (not s_fpar) & m_y(11 downto 6) & m_xv(11 downto 6);
+                when others => s_lm_raddr <= (not s_fpar) & '0' & m_y(11 downto 7) & '0' & m_xv(11 downto 7);
             end case;
         end if;
     end process;
