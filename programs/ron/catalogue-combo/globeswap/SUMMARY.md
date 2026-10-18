@@ -96,6 +96,21 @@ capture_preset.sh once the look is settled.
 6. HD HDMI with motion and Fold high: no thick bright bars.
 7. On an analog source: no thin hue-flipped lines over coloured areas.
 
+## v0.2.2 (2026-10-17): resolution scaling
+
+The lens now runs in virtual 1080-line units, stepped from the video timing
+ID (`registers_in(8)`): y 1080 / active lines a field line (interlace
+included), x 1.0 / 1.5 / 2.0 units a pixel (1080 / 720p / SD).
+- **Disc** (S10): the radius was in field lines and the half-width used it
+  as pixels, so the SD disc was ~2.2× taller than wide. The radius is now
+  virtual and the half-width converts it to pixels per frame (×1, ×171/256,
+  ×1/2), so the disc is round on a 4:3 SD screen and matches 1080p at 720p.
+- **Offset** (K4/P12 split) was HD-sized at 720p (width bit 10). It is now
+  ×1 / ×171/256 / ×1/2 by timing ID; SD is unchanged.
+- Centre, radius and the 16-line minimum radius are virtual.
+- 1080p is bit-identical (0 differing pixels against v0.2.1). Tier 2 item 6
+  ("Round disc in SD") is covered by this.
+
 ## Next tiers (offered 2026-10-13, not done)
 
 Tier 2 (look, your call):
@@ -145,3 +160,8 @@ margin). The path was then `s_kabs → s_fk`, v0.1's single-step 12×11
 lens-strength multiply in the per-line sequencer. All five per-line
 multiplies are now split hi/lo over two steps (14 steps, well inside any
 hblank). That gave +15 MHz and −180 LC.
+
+v0.2.2 (2026-10-17, router2 default, built under heavy machine load): all 6
+configs pass. HD Analog 84.1 (seed 1), HD HDMI 85.9 (seed 1), HD Dual 83.5
+(seed 2; seed 1 stalled the router); SD 75.7 / 77.9 / 82.4 MHz (seed 1).
+About 5,800 LC (75%), 21/32 EBR. All six .bin files unpack.
