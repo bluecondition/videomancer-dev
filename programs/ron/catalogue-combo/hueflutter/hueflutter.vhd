@@ -8,7 +8,7 @@
 -- saturation + magnetic warp (wobble) + ordered dithering.  Two knobs each;
 -- the switches and the slider decide how they combine.
 --
---   K1 Wobble   displacement amplitude (0..255 px)
+--   K1 Wobble   displacement amplitude (0..255 px at 1080p; scaled per mode)
 --   K2 Waves    vertical wavelength (phase step per line; glided)
 --   K3 Hue      base hue rotation 0..360 degrees (0 = unrotated)
 --   K4 Sat      saturation 0..400% (100% = unity)
@@ -53,6 +53,16 @@
 -- picture); the output dither cell came from the input-side counters (it
 -- froze over the last ~22 px of each line); Amp bands used a third of K1;
 -- Spin squared with a deadband; Waves 10-bit + glided; depth hysteresis.
+--
+-- v0.2.3 (2026-10-17): resolution scaling.  The wobble lives on a virtual
+-- 1080-line canvas, stepped per mode from the video timing ID
+-- (registers_in(8)): K1's amplitude is 1080-line pixels (x 2/3 at 720p,
+-- x 1/2 at SD, where 720 px span 1440 units) and the Waves phase step per
+-- field line is scaled by the virtual line step (1.5 at 720p, 1080/486 x 2
+-- per 480i field line; a serial multiplier, once per frame), so the wobble
+-- has the same size and the same number of waves relative to the screen
+-- height in every mode.  The 2 px dither cells stay at pixel scale.  1080p
+-- is unchanged (every step is exactly 1.0).
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -132,6 +142,42 @@ architecture hueflutter of program_top is
     signal s_k_amp, s_k_waves, s_k_hue, s_k_sat, s_k_lbits, s_k_cbits : unsigned(9 downto 0);
     signal s_sw_bandamp, s_sw_wobfirst, s_sw_cquarter, s_sw_huewob, s_sw_dither : std_logic;
     signal s_p_spin : unsigned(9 downto 0);
+
+    -- Resolution scaling: virtual 1080-line steps from the timing ID.  x step
+    -- in half units per pixel (1080: 2, 720p: 3, SD: 4), y step Q4.8 per
+    -- FIELD line (1080 / active lines, doubled for interlace).
+    function f_vstep_x(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0 | 4 | 8 | 12 => return to_unsigned(4, 3);
+            when 5 | 6 | 14     => return to_unsigned(3, 3);
+            when others         => return to_unsigned(2, 3);
+        end case;
+    end function;
+    function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(1138, 12);  -- 480i: 2 x 1080/486
+            when 4          => return to_unsigned(576, 12);   -- 480p: 1080/480
+            when 8          => return to_unsigned(960, 12);   -- 576i: 2 x 1080/576
+            when 12         => return to_unsigned(480, 12);   -- 576p: 1080/576
+            when 5 | 6 | 14 => return to_unsigned(384, 12);   -- 720p: 1.5
+            when 1 | 2 | 10 => return to_unsigned(512, 12);   -- 1080i: 2.0
+            when others     => return to_unsigned(256, 12);   -- 1080p: 1.0
+        end case;
+    end function;
+    signal s_vxs : unsigned(2 downto 0)  := to_unsigned(2, 3);
+    signal s_vys : unsigned(11 downto 0) := to_unsigned(256, 12);
+    -- K1 in 1080-line px -> real px: x 2/3 at 720p ((a*171 + 128) >> 8), x 1/2 at SD
+    signal s_amp_k  : unsigned(7 downto 0) := (others => '0');
+    signal s_a168, s_a3r : unsigned(15 downto 0) := (others => '0');
+    -- Waves line step = (glided Waves * y step) >> 10, on a free-running
+    -- 16-clock serial multiplier (both operands change only at vsync)
+    signal s_sm_cnt : unsigned(3 downto 0) := (others => '0');
+    signal s_sm_a   : unsigned(13 downto 0) := (others => '0');
+    signal s_sm_b   : unsigned(11 downto 0) := (others => '0');
+    signal s_sm_p   : unsigned(25 downto 0) := (others => '0');
+    signal s_wstep  : unsigned(15 downto 0) := (others => '0');
 
     -- per-frame controls
     signal s_amp : unsigned(7 downto 0) := (others => '0');
@@ -319,6 +365,9 @@ begin
         variable v_m  : unsigned(9 downto 0);
         variable v_d  : signed(10 downto 0);
         variable v_sq : unsigned(17 downto 0);
+        variable v_am : unsigned(15 downto 0);
+        variable v_ah : unsigned(8 downto 0);
+        variable v_sm : unsigned(14 downto 0);
     begin
         if rising_edge(clk) then
             s_in_y <= unsigned(data_in.y); s_in_u <= unsigned(data_in.u); s_in_v <= unsigned(data_in.v);
@@ -329,7 +378,32 @@ begin
             if s_avid_sr(13) = '1' then s_ox <= s_ox + 1; else s_ox <= (others => '0'); end if;
             if s_avid_sr(13) = '0' and s_avid_sr(14) = '1' then s_oline <= not s_oline; end if;
 
-            s_amp <= s_k_amp(9 downto 2);
+            -- resolution scaling: mode steps (static per mode); K1 to real
+            -- px (720p x 2/3, SD x 1/2)
+            s_vxs <= f_vstep_x(registers_in(8)(3 downto 0));
+            s_vys <= f_vstep_y(registers_in(8)(3 downto 0));
+            s_amp_k <= s_k_amp(9 downto 2);
+            s_a168 <= shift_left(resize(s_amp_k, 16), 7) + shift_left(resize(s_amp_k, 16), 5) + shift_left(resize(s_amp_k, 16), 3);
+            s_a3r  <= shift_left(resize(s_amp_k, 16), 1) + resize(s_amp_k, 16) + 128;
+            v_am := s_a168 + s_a3r;
+            case s_vxs is
+                when "011"  => s_amp <= v_am(15 downto 8);
+                when "100"  => v_ah := resize(s_amp_k, 9) + 1; s_amp <= v_ah(8 downto 1);
+                when others => s_amp <= s_amp_k;
+            end case;
+            -- Waves line step = (s_gw * y step) >> 10 (1080p: s_gw >> 2 as
+            -- before): load at 0, 12 shift-add steps, latch at 13
+            s_sm_cnt <= s_sm_cnt + 1;
+            if s_sm_cnt = 0 then
+                s_sm_a <= s_gw; s_sm_b <= s_vys; s_sm_p <= (others => '0');
+            elsif s_sm_cnt <= 12 then
+                if s_sm_b(0) = '1' then v_sm := ('0' & s_sm_p(25 downto 12)) + ('0' & s_sm_a);
+                else v_sm := '0' & s_sm_p(25 downto 12); end if;
+                s_sm_p <= v_sm & s_sm_p(11 downto 1);
+                s_sm_b <= '0' & s_sm_b(11 downto 1);
+            elsif s_sm_cnt = 13 then
+                s_wstep <= s_sm_p(25 downto 10);
+            end if;
             s_hue <= s_k_hue(9 downto 2);
             s_hp  <= s_hue + s_hphase(15 downto 8);
             s_gain <= s_k_sat(9 downto 1); s_gain_a <= s_gain;
@@ -407,7 +481,7 @@ begin
             else s_rowswap <= s_line_par xor s_cap_par1; end if;
             if s_prev_avid = '1' and data_in.avid = '0' then
                 s_line_width <= s_rx; s_line <= s_line + 1;
-                s_lphase <= s_lphase + resize(s_gw(13 downto 2), 18);
+                s_lphase <= s_lphase + resize(s_wstep, 18);
             end if;
             if data_in.hsync_n = '0' and s_prev_hsync_n = '1' then
                 s_hpar <= '0';

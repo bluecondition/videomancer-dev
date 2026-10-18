@@ -176,6 +176,29 @@ Standalone synth: 2,790 LUT / 825 carry (v0.1.3: 2,533 / 672), and
 `emulate_transparency` 0 (v0.1.3: 3). All six bitstreams pass iceunpack.
 NOT FLASHED, NOT COMMITTED.
 
+v0.2.3 (2026-10-17, resolution scaling), router2, 6/6 on seed 1: HD
+81.9 / 87.3 / 89.4 MHz (Analog / HDMI / Dual); SD 87.7 / 91.6 / 95.3 MHz.
+5,675–5,686 LC (74%; v0.2.2 was 5,484 on HD Analog), 22 EBR.
+
+## v0.2.3 — resolution scaling (2026-10-17)
+
+The wobble was fixed-pixel: K1 meant 0–255 real pixels in every mode (1.5×
+too strong relative to the screen at 720p, 2× at SD), and the Waves step was
+per field line (1.5× more waves at 720p, 4.4× at 480i, where it broke into
+horizontal streaks). Now it lives on a virtual 1080-line canvas from the
+timing ID (`registers_in(8)`, as in mondrian v1.0.2):
+
+- K1 amplitude → real px: ×1 at 1080, ×2/3 at 720p (`(a·171+128)>>8`),
+  ×1/2 at SD (720 px span 1440 virtual units).
+- Waves phase step per field line = `(s_gw · ys) >> 10`, ys the Q4.8
+  virtual line step (1.5 at 720p, 2·1080/486 per 480i field line), on a
+  free-running 16-clock serial multiplier (both operands only change at
+  vsync). S10 Ripple's hue follows the same phase, so it scales too.
+
+At 1080p every step is exactly 1.0, so the picture is bit-identical. The
+2-px dither cells and the 12-px edge clamp stay in real pixels. Spin, Speed
+and the Waves glide still advance per vsync (field rate at 480i), as before.
+
 ## Build seeds — community port (stock LZX SDK 0a65d53, router1, all 8 configs)
 
 2026-10-14: **seed 3**, set as `[firmware] seed = 3` in the staged community TOML (the dev TOML is unchanged). Why: seed 1 stalled nextpnr's router1 on SD Dual. Sweep 2-6: 2, 3, 4 build 8/8; 5 and 6 hang one config. Own HD logic with seed 3 (scratch core without the Sync Out generator): 104.81 / 101.17 / 103.97 MHz (Analog / HDMI / Dual).
