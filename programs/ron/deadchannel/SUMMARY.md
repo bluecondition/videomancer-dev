@@ -33,7 +33,7 @@ Processing effect. Three cicero programs (vhstrack, chromaticab, crt) are folded
 
   White dropout comets (~1 per 1024 px, 8–71 px, fading tail) run on every band line, on top of the existing ±128 px per-line slip. Flash runs the same glitches on a bleached, colourless bar.
 - **Per-line flags:** band and scanline flags are latched at hsync, so the last pixels of a line still in the pipe keep their own line's flags.
-- **Vignette:** distance is `max(|dx|, dy') + min/2`, where dy is scaled by the raster aspect (×1.75 for 16:9, ×1.5 for SD, ×2 again for field lines), so the falloff follows the screen shape.
+- **Vignette:** distance is `max(|dx|, dy') + min/2`, where dy is scaled by the 16:9 aspect (×1.75), so the falloff follows the screen shape. Since v1.5.2, dx is screen-normalised and dy is in virtual lines, so every raster gets the 1080p vignette fitted to its own screen.
 - **Darkening desaturates:** each 128 codes of vignette or scanline dimming halves the chroma deviation (max 3 halvings, plus one for Faded).
 - **Luma:** clamped to 64..940 on the output path.
 - **Hardware contracts:**
@@ -59,6 +59,7 @@ Processing effect. Three cicero programs (vhstrack, chromaticab, crt) are folded
 Default, Dead Air, Good Tube, Head Switch (hand-typed; recapture from hardware once approved).
 
 ## Build seeds
+- v1.5.2: all six configs pass on **seed 1** (router2).
 - v1.5: **HD Analog seed 2** (seed 1 missed timing); the other five pass on seed 1.
 - v1.4: **HD Analog seed 2, HD HDMI seed 2** (seed 1 missed timing); the other four pass on seed 1.
 - v1.3: **HD Dual seed 2** (seed 1 stalled router2); the other five pass on seed 1.
@@ -98,3 +99,13 @@ Default, Dead Air, Good Tube, Head Switch (hand-typed; recapture from hardware o
   - ~5400 LC (70%), 18/32 EBR.
   - HW-validated and signed off on 2026-10-09.
   - The default K1 (29%) now gives a rare event, about 1 per 6 s.
+- **v1.5.2 (2026-10-18), resolution scaling:** SD and 720p now show the 1080p picture scaled; 1080p output is bit-identical (0 differing pixels).
+  - Geometry runs in virtual 1080-line units from the timing ID (`registers_in(8)`): `s_ys` virtual lines per field line (480i 4.44, 720p 1.5), `s_xs` virtual units per pixel.
+  - Band position, size and roll, the skew-pull decays and the drift wavelength count virtual lines (the roll was 4.4x faster per screen at SD). The decays step once per virtual line on the clocks after each line ends (1080p: one step, as before).
+  - Block pixelation (4..64 px at 1080p) is a size: SD halves the address mask; 720p holds the read address where 3 x address crosses a multiple of 2 x size, so the blocks still sit on the source and curve with the skew. Comet length and rate follow (1/2 and 2x at SD).
+  - Vignette distance uses screen-normalised x (x1.5 at 720p, x2.625 at SD) and virtual y with the 16:9 factor, so it darkens the same edges and corners in every mode (SD was about half strength).
+  - Skew pull, per-line slip and chroma-drift depth are fractions of the width: 720p x2/3, SD x3/8 (the old classes were 1/2 and 1/4).
+  - Interlace now comes from the timing ID. The field_n-toggle detector never fired on hardware (field_n is tied high), which left SD's skew decay and vignette twice as tall.
+  - A band at SD is at least 3 virtual lines of half height, so a thin event still covers a field line.
+  - Unchanged: scanlines (1 in 3 at 1080 lines), the RGB triad, hiss and the glow IIR stay at pixel scale.
+  - Build `./build_programs.sh ron deadchannel` (router2), all six on seed 1: HD Analog 83.30, HD HDMI 80.92, HD Dual 78.52, SD Analog 79.21, SD HDMI 81.91, SD Dual 77.53 MHz. 5550-5584 LC (73%), 18/32 EBR. Not flashed.

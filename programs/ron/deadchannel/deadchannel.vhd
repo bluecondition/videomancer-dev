@@ -63,6 +63,26 @@
 -- Pipeline depth (both the video data and the sync tap): 14 clocks, the same
 -- in every mode.
 --
+-- v1.5.2 (2026-10-18) resolution scaling: the geometry runs in virtual
+-- 1080-line units from the video timing ID (registers_in(8)), so SD and 720p
+-- show the 1080p picture scaled (1080p output unchanged bit for bit):
+--   * band position, size and roll, the skew decay and the drift wavelength
+--     count virtual lines (480i 4.44 per field line, 720p 1.5);
+--   * block pixelation 4..64 px is a SIZE in virtual units (720p 2/3, SD 1/2:
+--     SD shifts the address mask, 720p holds the read address where 3 x the
+--     source address crosses a multiple of 2 x size, so the blocks still sit
+--     on the source and curve with the skew); comet length and rate follow;
+--   * the vignette is measured on the screen-normalised raster (x 1.5 at
+--     720p, 2.625 at SD, y in virtual lines), so it darkens the same edges
+--     and corners at every resolution;
+--   * the horizontal displacements that wrap at the frame width (skew pull,
+--     per-line slip, chroma drift) are fractions of the width: 720p 2/3,
+--     SD 3/8 (were 1/2 and 1/4);
+--   * interlace comes from the timing ID: field_n is tied high on hardware,
+--     so the old field_n-toggle detector never fired (SD skew decay and
+--     vignette were 2x tall).
+-- Scanlines, the RGB triad, hiss and the glow IIR stay at pixel scale.
+--
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -92,7 +112,7 @@ architecture deadchannel of program_top is
     -- ========================================================================
     -- Input registers / timing
     -- ========================================================================
-    signal vs_r, hs_r, av_r, fl_r          : std_logic := '0';
+    signal vs_r, hs_r, av_r                : std_logic := '0';
     signal prev_hsync_n                    : std_logic := '1';
     signal prev_vsync_n                    : std_logic := '1';
     signal prev_avid                       : std_logic := '0';
@@ -100,11 +120,37 @@ architecture deadchannel of program_top is
     signal px        : unsigned(11 downto 0) := (others => '0');
     signal aline     : unsigned(11 downto 0) := (others => '0');
     signal act_w     : unsigned(11 downto 0) := to_unsigned(1920, 12);
-    signal act_h     : unsigned(11 downto 0) := to_unsigned(1080, 12);
     signal saw_act   : std_logic := '0';  -- active video seen since anchor
-    signal fld_seen  : std_logic := '0';  -- field_n sampled in active video
-    signal anc_fld   : std_logic := '0';
-    signal ilace     : std_logic := '0';
+
+    -- Resolution scaling (v1.5.2).  Steps decoded free-running from the
+    -- timing ID (static while a mode runs).  s_xs: Q.1 virtual units per
+    -- pixel (1080 2, 720p 3, SD 4); s_ys: Q4.8 virtual lines per FIELD line;
+    -- s_vxs: Q.3 screen-normalised x step for the vignette (1080 8, 720p 12,
+    -- SD 21 = 2.625); s_cls: 0 = 1080 lines, 1 = 720p, 2 = SD.
+    signal s_xs     : unsigned(2 downto 0)  := to_unsigned(2, 3);
+    signal s_ys     : unsigned(11 downto 0) := to_unsigned(256, 12);
+    signal s_vxs    : unsigned(4 downto 0)  := to_unsigned(8, 5);
+    signal s_cls    : unsigned(1 downto 0)  := (others => '0');
+    signal alv      : unsigned(19 downto 0) := (others => '0'); -- virtual line Q12.8
+    signal act_hv   : unsigned(11 downto 0) := to_unsigned(1080, 12);
+    signal pxv      : unsigned(14 downto 0) := (others => '0'); -- vignette x Q12.3
+    signal act_wv   : unsigned(11 downto 0) := to_unsigned(1920, 12);
+    signal cxv_r    : unsigned(11 downto 0) := to_unsigned(960, 12);
+    -- per-line decay sequencer: one exponential step per VIRTUAL line
+    signal dcnt     : unsigned(2 downto 0) := (others => '0');
+    signal d_first  : std_logic := '0';
+    signal rp_pend  : std_logic := '0';
+    signal rearm_r  : std_logic := '0';
+    signal jog_r    : signed(11 downto 0) := (others => '0');
+    signal jog_s    : signed(11 downto 0) := (others => '0');
+    signal drift_sa : unsigned(6 downto 0) := (others => '0');
+    -- 720p block pixelation: read-address hold.  A block is 2B halves of
+    -- the source address x 3 (= x 1.5 virtual units), so its edges sit on
+    -- the source like the 1080p mask's and follow the skew the same way.
+    signal wrapx_r  : unsigned(11 downto 0) := (others => '0');
+    signal hold_ln  : std_logic := '0';
+    signal bmsk_ln  : unsigned(6 downto 0) := (others => '0'); -- 2B - 1
+    signal r0_r     : unsigned(6 downto 0) := (others => '0'); -- 3 x row_eff, low bits
 
     -- ========================================================================
     -- Parameters (decoded free-running from the SPI registers every clock)
@@ -124,7 +170,7 @@ architecture deadchannel of program_top is
     signal triad_amt : unsigned(7 downto 0):= (others => '0');
     signal glow6     : unsigned(5 downto 0):= (others => '0');
     signal cx_r      : unsigned(11 downto 0) := to_unsigned(960, 12);
-    signal cy_r      : unsigned(11 downto 0) := to_unsigned(540, 12);
+    signal cyv_r     : unsigned(11 downto 0) := to_unsigned(540, 12);
 
     -- ========================================================================
     -- Tape transport state
@@ -148,13 +194,11 @@ architecture deadchannel of program_top is
     -- Decay is EXPONENTIAL (bend - bend>>k), one subtract per line.  The
     -- linear "subtract a rate, clamp at zero" form chains two compares and an
     -- add into one cone and cost 6 MHz; the exponential form also happens to
-    -- be the shape real tape flagging has.  dshift picks the rate from the
-    -- raster class and interlace so the pull spans the same fraction of the
+    -- be the shape real tape flagging has.  The step is applied once per
+    -- VIRTUAL line (v1.5.2), so the pull spans the same fraction of the
     -- frame in every mode.
-    signal dshift   : unsigned(1 downto 0) := (others => '0');
     signal bend_seed: signed(15 downto 0) := (others => '0'); -- top_amp * 16
     signal bend2_sd : signed(15 downto 0) := (others => '0'); -- top_amp * 8
-    signal wcls     : unsigned(1 downto 0) := (others => '0'); -- raster class
     signal row_pre  : signed(13 downto 0) := (others => '0'); -- offset pre-wrap
     signal bend1    : signed(15 downto 0) := (others => '0');  -- 1/16 px
     signal bend2    : signed(15 downto 0) := (others => '0');  -- 1/16 px
@@ -189,7 +233,7 @@ architecture deadchannel of program_top is
     signal hit_thr   : unsigned(15 downto 0) := (others => '0');
     signal sz8       : unsigned(7 downto 0) := (others => '0');
     signal sz_mul    : unsigned(19 downto 0) := (others => '0');
-    signal jsh       : unsigned(2 downto 0) := (others => '0');
+    signal jsh       : unsigned(1 downto 0) := (others => '0');
 
     -- Per-line glitch recipe, drawn at hsync for band lines only.  Outside
     -- the band every field is its identity value, so the pixel path applies
@@ -264,8 +308,11 @@ architecture deadchannel of program_top is
     -- ========================================================================
     signal c1_x    : unsigned(11 downto 0);
     signal c1_dx   : signed(11 downto 0);
+    signal c1_dxv  : signed(11 downto 0);   -- screen-normalised (vignette)
     signal c1_lf   : unsigned(15 downto 0);
 
+    signal c2_nb   : std_logic;             -- 720p hold: line start
+    signal c2_r    : unsigned(6 downto 0) := (others => '0'); -- 3 x address mod 2B
     signal c2_base : unsigned(12 downto 0);
     signal c2_cmul : signed(16 downto 0);
     signal c2_adx  : unsigned(11 downto 0);
@@ -304,13 +351,15 @@ architecture deadchannel of program_top is
     signal c7_x    : unsigned(11 downto 0);
     signal c7_yf   : unsigned(9 downto 0);
     signal c7_lf   : unsigned(15 downto 0);
+    signal c7_ct   : std_logic;             -- comet trigger (rate per mode)
 
     signal g_y     : unsigned(9 downto 0);
     signal g_u     : unsigned(9 downto 0);
     signal g_v     : unsigned(9 downto 0);
     signal g_vamt  : unsigned(9 downto 0);
     signal g_x     : unsigned(11 downto 0);
-    signal streak  : unsigned(6 downto 0) := (others => '0');
+    -- comet length counter, Q.1 (twice the old streak); steps s_xs per pixel
+    signal streak2 : unsigned(7 downto 0) := (others => '0');
 
     signal bleed_r : unsigned(9 downto 0) := (others => '0');
     signal c8_y    : unsigned(9 downto 0);
@@ -371,6 +420,42 @@ architecture deadchannel of program_top is
             return to_unsigned(940, 10);
         end if;
         return resize(unsigned(std_logic_vector(v)), 10);
+    end function;
+
+    -- Resolution scaling: x step in half virtual units per pixel (1080 2,
+    -- 720p 3, SD 4) and y step in Q4.8 virtual lines per FIELD line
+    -- (doubled for interlace) - the pilot's (mondrian) tables.
+    function f_vstep_x(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0 | 4 | 8 | 12 => return to_unsigned(4, 3);
+            when 5 | 6 | 14     => return to_unsigned(3, 3);
+            when others         => return to_unsigned(2, 3);
+        end case;
+    end function;
+    function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(1138, 12);  -- 480i: 2 x 1080/486
+            when 4          => return to_unsigned(576, 12);   -- 480p: 1080/480
+            when 8          => return to_unsigned(960, 12);   -- 576i: 2 x 1080/576
+            when 12         => return to_unsigned(480, 12);   -- 576p: 1080/576
+            when 5 | 6 | 14 => return to_unsigned(384, 12);   -- 720p: 1.5
+            when 1 | 2 | 10 => return to_unsigned(512, 12);   -- 1080i: 2.0
+            when others     => return to_unsigned(256, 12);   -- 1080p: 1.0
+        end case;
+    end function;
+
+    -- Fraction-of-width scale for displacements that wrap at the frame
+    -- width: 1080 x1, 720p x0.656 (~2/3), SD x0.375 (720/1920).
+    function f_fw(x : signed(11 downto 0); c : unsigned(1 downto 0)) return signed is
+    begin
+        case c is
+            when "00"   => return x;
+            when "01"   => return shift_right(x, 1) + shift_right(x, 3) +
+                                  shift_right(x, 5);
+            when others => return shift_right(x, 2) + shift_right(x, 3);
+        end case;
     end function;
 
     function quad_sin(ang : unsigned(9 downto 0)) return signed is
@@ -435,12 +520,15 @@ begin
         variable v_eff    : signed(13 downto 0);
         variable v_ang    : unsigned(9 downto 0);
         variable v_tap    : std_logic;
+        variable v_nl     : unsigned(11 downto 0);
+        variable v_m      : unsigned(6 downto 0);
+        variable v_lim    : unsigned(7 downto 0);
+        variable v_dsa    : signed(11 downto 0);
     begin
         if rising_edge(clk) then
             vs_r <= data_in.vsync_n;
             hs_r <= data_in.hsync_n;
             av_r <= data_in.avid;
-            fl_r <= data_in.field_n;
             prev_hsync_n <= hs_r;
             prev_vsync_n <= vs_r;
             prev_avid    <= av_r;
@@ -461,10 +549,27 @@ begin
             -- Free-running chroma-drift sine and its depth multiply.  Both are
             -- registered every cycle and only SAMPLED at line start, so the
             -- multiply never sits in the per-line decision cone.
-            v_ang     := unsigned(std_logic_vector(aline(9 downto 0))) +
-                         drift_ph(13 downto 4);
+            -- (virtual lines: the wobble's wavelength is a fraction of the
+            -- screen height in every mode; depth is a fraction of the width)
+            v_ang     := alv(17 downto 8) + drift_ph(13 downto 4);
             sin_r     <= quad_sin(v_ang);
-            drift_mul <= resize(sin_r * signed(resize(drift_s, 8)), 16);
+            drift_mul <= resize(sin_r * signed(resize(drift_sa, 8)), 16);
+
+            -- Resolution-scaling steps, decoded free-running from the timing
+            -- ID (static while a mode runs; 1080p = all identity).
+            s_xs <= f_vstep_x(registers_in(8)(3 downto 0));
+            s_ys <= f_vstep_y(registers_in(8)(3 downto 0));
+            case to_integer(unsigned(registers_in(8)(3 downto 0))) is
+                when 0 | 4 | 8 | 12 =>
+                    s_cls <= "10";
+                    s_vxs <= to_unsigned(21, 5);
+                when 5 | 6 | 14 =>
+                    s_cls <= "01";
+                    s_vxs <= to_unsigned(12, 5);
+                when others =>
+                    s_cls <= "00";
+                    s_vxs <= to_unsigned(8, 5);
+            end case;
 
             -- ===============================================================
             -- PARAMETER DECODE - free-running, every clock.
@@ -485,6 +590,9 @@ begin
             inv_r     <= registers_in(6)(4);
             drop_r    <= unsigned(registers_in(0));
             drift_s   <= unsigned(registers_in(2)(9 downto 3));
+            -- drift depth as a fraction of the width (rate stays drift_s)
+            v_dsa     := f_fw(signed(resize(drift_s, 12)), s_cls);
+            drift_sa  <= unsigned(std_logic_vector(v_dsa(6 downto 0)));
             glow6     <= unsigned(registers_in(4)(9 downto 4));
             tube6     <= resize(unsigned(registers_in(5)(9 downto 4)), 7) +
                          to_unsigned(4, 7);
@@ -561,18 +669,19 @@ begin
                 when 14 => sz8 <= to_unsigned(181, 8);
                 when others => sz8 <= to_unsigned(246, 8);
             end case;
-            sz_mul   <= act_h * sz8;
+            sz_mul   <= act_hv * sz8;
             band_mul <= resize(sz_mul(19 downto 11), 10);
 
-            -- Per-line slip shift: raster class (HD 0 / 720p 1 / SD 2) plus
-            -- a knob term, so the slip is +-32 px below 25%, +-64 below 50%.
+            -- Per-line slip shift: a knob term, so the slip is +-32 px below
+            -- 25%, +-64 below 50% (HD; jog_s scales it to the raster width).
             if drop_r(9 downto 8) = "00" then
-                jsh <= resize(wcls, 3) + to_unsigned(2, 3);
+                jsh <= to_unsigned(2, 2);
             elsif drop_r(9) = '0' then
-                jsh <= resize(wcls, 3) + to_unsigned(1, 3);
+                jsh <= to_unsigned(1, 2);
             else
-                jsh <= resize(wcls, 3);
+                jsh <= to_unsigned(0, 2);
             end if;
+            jog_s <= f_fw(jog_r, s_cls);
 
             -- Dropout event draws, free-running, sampled by the anchor:
             --   position  anywhere in the raster (rand8 * height / 256)
@@ -580,10 +689,17 @@ begin
             --   hit       per-frame chance from the exponential table above
             --   hold      1..2 frames below half travel, 1..4 to 3/4, 1..8 above
             --   scroll    2..32 lines per frame, direction drawn per event
-            r_pos_mul <= lfsr_r(15 downto 8) * act_h;
+            r_pos_mul <= lfsr_r(15 downto 8) * act_hv;
             r_pos     <= r_pos_mul(19 downto 8);
             r_hlf_mul <= band_mul * ('1' & glfsr(14 downto 12));
-            r_hlf     <= resize(r_hlf_mul(13 downto 4), 12) + to_unsigned(2, 12);
+            -- (virtual lines; at SD a band is at least 3 units of half
+            -- height so its 480i field-line samples, 4.44 units apart,
+            -- never step over it)
+            if s_cls = "10" and r_hlf_mul(13 downto 4) = 0 then
+                r_hlf <= to_unsigned(3, 12);
+            else
+                r_hlf <= resize(r_hlf_mul(13 downto 4), 12) + to_unsigned(2, 12);
+            end if;
             if glfsr(22 downto 7) < hit_thr then
                 r_hit <= '1';
             else
@@ -608,28 +724,15 @@ begin
             else
                 skew_z_r <= skew_d_r;
             end if;
-            case to_integer(wcls) is
-                when 0      => top_amp <= skew_z_r;
-                when 1      => top_amp <= resize(shift_right(skew_z_r, 1), 12);
-                when others => top_amp <= resize(shift_right(skew_z_r, 2), 12);
-            end case;
+            -- amplitude: a quarter of the WIDTH in every raster
+            top_amp   <= f_fw(skew_z_r, s_cls);
             bend_seed <= shift_left(resize(top_amp, 16), 4);
             bend2_sd  <= shift_left(resize(top_amp, 16), 3);
-            if wcls = "10" then
-                if ilace = '1' then
-                    dshift <= "10";
-                else
-                    dshift <= "01";
-                end if;
-            elsif ilace = '1' then
-                dshift <= "01";
-            else
-                dshift <= "00";
-            end if;
 
             -- Free-running band edges and line geometry.  Everything here is
             -- register-in / register-out and settles long before active video.
-            aline_s <= signed(resize(aline, 14));
+            -- The band lives in virtual lines (position, size and roll).
+            aline_s <= signed(resize(alv(19 downto 8), 14));
             v_hlf   := signed(resize(band_hlf, 14));
             bt1 <= band_pos - v_hlf;
             bb1 <= band_pos + v_hlf;
@@ -648,7 +751,8 @@ begin
             -- Scanline grille: at 1080 lines a 1-px on/off alternation reads
             -- as flat dimming, so the HD raster darkens one line in three
             -- (2 on / 1 off).  720p and SD keep the classic alternation.
-            if wcls = "00" then
+            -- (pixel-scale texture: stays per real line)
+            if s_cls = "00" then
                 if scan_cnt = 2 then
                     scan_par <= '1';
                 else
@@ -659,30 +763,30 @@ begin
             end if;
 
             -- Vertical distance from centre for the vignette, scaled by the
-            -- raster's width/height so the falloff follows the screen shape
-            -- (x1.75 for 16:9, x1.5 for SD, doubled again for field lines).
-            dyd_r <= signed(resize(aline, 13)) - signed(resize(cy_r, 13));
+            -- 16:9 width/height (x1.75) so the falloff follows the screen
+            -- shape.  v1.5.2: measured in virtual lines against the
+            -- screen-normalised x (pxv), so every raster - interlaced or
+            -- not - gets the 1080p vignette fitted to its own screen.
+            dyd_r <= signed(resize(alv(19 downto 8), 13)) - signed(resize(cyv_r, 13));
             if dyd_r < 0 then
                 dy_r <= unsigned(std_logic_vector(resize(-dyd_r, 12)));
             else
                 dy_r <= unsigned(std_logic_vector(resize(dyd_r, 12)));
             end if;
-            if wcls = "10" then
-                dy_h <= shift_right(dy_r, 1);
-            else
-                dy_h <= shift_right(dy_r, 1) + shift_right(dy_r, 2);
-            end if;
-            if ilace = '1' then
-                dy_a <= shift_left(dy_r + dy_h, 1);
-            else
-                dy_a <= dy_r + dy_h;
-            end if;
+            dy_h <= shift_right(dy_r, 1) + shift_right(dy_r, 2);
+            dy_a <= dy_r + dy_h;
+
+            -- 720p block hold: the skewed read address wraps to 0 at this x,
+            -- and starts the line at address row_eff (phase 3 x row_eff)
+            wrapx_r <= act_w - row_eff;
+            r0_r    <= row_eff(6 downto 0) + (row_eff(5 downto 0) & '0');
 
             -- ---------------------------------------------------------------
             -- Horizontal counter + measured active width
             -- ---------------------------------------------------------------
             if v_h_edge = '1' then
                 px      <= (others => '0');
+                pxv     <= (others => '0');
                 lb_ab   <= not lb_ab;
                 scan_ln <= scan_par;
                 band_ln <= in_band;
@@ -691,13 +795,39 @@ begin
                 -- on half, U/V swap on half, a negative line 1 in 8 and a
                 -- pure static line 1 in 8.
                 if in_band = '1' then
+                    -- Block size in virtual units (4..64 at 1080p): SD
+                    -- halves the address mask; 720p (2/3, not a power of
+                    -- two) holds the read address for 2*size halves of a
+                    -- 3-halves-per-pixel run counter instead.
                     case to_integer(glfsr(2 downto 0)) is
-                        when 3      => blkm_ln <= to_unsigned(3, 12);
-                        when 4      => blkm_ln <= to_unsigned(7, 12);
-                        when 5      => blkm_ln <= to_unsigned(15, 12);
-                        when 6      => blkm_ln <= to_unsigned(31, 12);
-                        when 7      => blkm_ln <= to_unsigned(63, 12);
-                        when others => blkm_ln <= (others => '0');
+                        when 3      => v_m := to_unsigned(3, 7);
+                                       v_lim := to_unsigned(8, 8);
+                        when 4      => v_m := to_unsigned(7, 7);
+                                       v_lim := to_unsigned(16, 8);
+                        when 5      => v_m := to_unsigned(15, 7);
+                                       v_lim := to_unsigned(32, 8);
+                        when 6      => v_m := to_unsigned(31, 7);
+                                       v_lim := to_unsigned(64, 8);
+                        when 7      => v_m := to_unsigned(63, 7);
+                                       v_lim := to_unsigned(128, 8);
+                        when others => v_m := (others => '0');
+                                       v_lim := (others => '0');
+                    end case;
+                    bmsk_ln <= resize(v_lim - 1, 7);
+                    case s_cls is
+                        when "00" =>
+                            blkm_ln <= resize(v_m, 12);
+                            hold_ln <= '0';
+                        when "01" =>
+                            blkm_ln <= (others => '0');
+                            if v_m = 0 then
+                                hold_ln <= '0';
+                            else
+                                hold_ln <= '1';
+                            end if;
+                        when others =>
+                            blkm_ln <= resize(shift_right(v_m, 1), 12);
+                            hold_ln <= '0';
                     end case;
                     case glfsr(4 downto 3) is
                         when "10"   => crush_ln <= "1110000000";
@@ -717,13 +847,15 @@ begin
                     end if;
                 else
                     blkm_ln  <= (others => '0');
+                    hold_ln  <= '0';
                     crush_ln <= (others => '1');
                     swap_ln  <= '0';
                     linv_ln  <= '0';
                     stat_ln  <= '0';
                 end if;
             elsif av_r = '1' then
-                px <= px + 1;
+                px  <= px + 1;
+                pxv <= pxv + s_vxs;
             end if;
 
             -- ---------------------------------------------------------------
@@ -732,9 +864,11 @@ begin
             -- ---------------------------------------------------------------
             if prev_avid = '1' and av_r = '0' then
                 if px > 100 then
-                    act_w <= px;
+                    act_w  <= px;
+                    act_wv <= pxv(14 downto 3);
                 end if;
                 aline   <= aline + 1;
+                alv     <= alv + s_ys;
                 if scan_cnt = 2 then
                     scan_cnt <= (others => '0');
                 else
@@ -745,19 +879,12 @@ begin
                 -- interlaced fields stay in step.
                 -- Time constants: the frame flag spans roughly the top
                 -- quarter of the picture and the head-switch tear about a
-                -- sixteenth of it, in every raster.
-                case to_integer(dshift) is
-                    when 0 =>       -- ~1080 line frame
-                        v_b1n := bend1 - shift_right(bend1, 7);
-                        v_b2n := bend2 - shift_right(bend2, 5);
-                    when 1 =>       -- ~540 line field / ~480 line frame
-                        v_b1n := bend1 - shift_right(bend1, 6);
-                        v_b2n := bend2 - shift_right(bend2, 4);
-                    when others =>  -- ~240 line field
-                        v_b1n := bend1 - shift_right(bend1, 5);
-                        v_b2n := bend2 - shift_right(bend2, 3);
-                end case;
-                bend1 <= v_b1n;
+                -- sixteenth of it, in every raster: v1.5.2 steps the decay
+                -- once per VIRTUAL line this field line covers (1080p 1,
+                -- 720p 1-2, 480i 4-5), on the clocks after the line ends.
+                v_nl  := resize(alv(7 downto 0), 12) + s_ys;
+                dcnt  <= v_nl(10 downto 8);
+                d_first <= '1';
 
                 -- Raw tear jog for the next line, from the registered flags
                 if in_band = '1' then
@@ -774,24 +901,42 @@ begin
                 -- is crossed, then decays over ~64 lines below it.
                 in_band_p <= in_band;
                 if in_band = '1' and in_band_p = '0' then
-                    v_b2n := bend2_sd;
+                    rearm_r <= '1';
+                else
+                    rearm_r <= '0';
                 end if;
-                bend2 <= v_b2n;
 
-                -- Row offset for the next line, formed here (a whole line of
-                -- slack) so hsync only has to wrap it.  The tear jog keys off
-                -- the REGISTERED band flags - one line of lag, invisible.
+                -- Row offset for the next line, formed after the decay steps
+                -- (a whole line of slack) so hsync only has to wrap it.  The
+                -- tear jog keys off the REGISTERED band flags - one line of
+                -- lag, invisible.  jog_s scales it to the raster width.
                 case to_integer(jsh) is
                     when 0      => v_jog := v_jraw;
                     when 1      => v_jog := shift_right(v_jraw, 1);
-                    when 2      => v_jog := shift_right(v_jraw, 2);
-                    when 3      => v_jog := shift_right(v_jraw, 3);
-                    when others => v_jog := shift_right(v_jraw, 4);
+                    when others => v_jog := shift_right(v_jraw, 2);
                 end case;
-                row_pre <= resize(shift_right(v_b1n + v_b2n, 4), 14) +
-                           resize(v_jog, 14);
+                jog_r <= v_jog;
 
                 drift_off <= resize(shift_right(drift_mul, 9), 8);
+            elsif dcnt /= 0 then
+                -- one exponential decay step per virtual line; the first
+                -- step re-arms the head-switch pull instead of decaying it
+                v_b1n := bend1 - shift_right(bend1, 7);
+                v_b2n := bend2 - shift_right(bend2, 5);
+                if d_first = '1' and rearm_r = '1' then
+                    v_b2n := bend2_sd;
+                end if;
+                bend1   <= v_b1n;
+                bend2   <= v_b2n;
+                d_first <= '0';
+                dcnt    <= dcnt - 1;
+                if dcnt = 1 then
+                    rp_pend <= '1';
+                end if;
+            elsif rp_pend = '1' then
+                rp_pend <= '0';
+                row_pre <= resize(shift_right(bend1 + bend2, 4), 14) +
+                           resize(jog_s, 14);
             end if;
 
             -- ---------------------------------------------------------------
@@ -829,22 +974,16 @@ begin
                ((vs_r = '0' and prev_vsync_n = '1') or aline >= 1200) then
                 saw_act <= '0';
 
+                -- heights in virtual lines (~1080 in every mode)
                 if aline > 50 then
-                    act_h <= aline;
-                    cy_r  <= shift_right(aline, 1);
+                    act_hv <= alv(19 downto 8);
+                    cyv_r  <= shift_right(alv(19 downto 8), 1);
                 end if;
                 aline    <= (others => '0');
+                alv      <= (others => '0');
                 scan_cnt <= (others => '0');
                 cx_r     <= shift_right(act_w, 1);
-
-                -- field_n is sampled during active video, not at the vsync
-                -- edge where decoders may still be changing it.
-                if fld_seen /= anc_fld then
-                    ilace <= '1';
-                else
-                    ilace <= '0';
-                end if;
-                anc_fld <= fld_seen;
+                cxv_r    <= shift_right(act_wv, 1);
 
                 -- Dropout events: a live band scrolls and counts down its
                 -- hold; an idle one waits for a random hit, then jumps in at
@@ -873,17 +1012,9 @@ begin
                 -- The frame flag re-arms at the top of every frame; the
                 -- amplitude and raster class are already resolved.
                 bend1 <= bend_seed;
-                if act_w > 1400 then
-                    wcls <= "00";
-                elsif act_w > 900 then
-                    wcls <= "01";
-                else
-                    wcls <= "10";
-                end if;
 
             elsif av_r = '1' and saw_act = '0' then
                 saw_act  <= '1';
-                fld_seen <= fl_r;
             end if;
         end if;
     end process p_position;
@@ -910,6 +1041,7 @@ begin
         variable v_gv    : unsigned(9 downto 0);
         variable v_gt    : unsigned(9 downto 0);
         variable v_cv    : signed(11 downto 0);
+        variable v_wb    : unsigned(11 downto 0);
     begin
         if rising_edge(clk) then
             pipe(0) <= data_in;
@@ -922,27 +1054,50 @@ begin
             c1_lf <= lfsr_r;
             v_dx  := signed(resize(px, 12)) - signed(resize(cx_r, 12));
             c1_dx <= v_dx;
+            -- vignette x on the screen-normalised raster (= c1_dx at 1080p)
+            c1_dxv <= signed(resize(pxv(14 downto 3), 12)) -
+                      signed(resize(cxv_r, 12));
 
             -- ---- depth 2: skew sum, misconvergence multiply, vignette dist --
             c2_base <= resize(row_eff, 13) + resize(c1_x, 13);
             c2_cmul <= resize(c1_dx(11 downto 2) * conv_s, 17);
+            -- 720p hold phase: 3 x (source address) mod 2B for this pixel
+            if c1_x = 0 then
+                c2_nb <= '1';
+                c2_r  <= r0_r and bmsk_ln;
+            elsif c1_x = wrapx_r then
+                c2_nb <= '0';
+                c2_r  <= (others => '0');
+            else
+                c2_nb <= '0';
+                c2_r  <= (c2_r + 3) and bmsk_ln;
+            end if;
             -- Vignette distance is max + min/2 (a near-circle, aspect-scaled
             -- through dy_a) instead of |dx|+|dy|, which drew a diamond.
-            if c1_dx < 0 then
-                c2_adx <= unsigned(std_logic_vector(-c1_dx));
+            if c1_dxv < 0 then
+                c2_adx <= unsigned(std_logic_vector(-c1_dxv));
             else
-                c2_adx <= unsigned(std_logic_vector(c1_dx));
+                c2_adx <= unsigned(std_logic_vector(c1_dxv));
             end if;
             c2_x  <= c1_x;
             c2_lf <= c1_lf;
 
             -- ---- depth 3: wrap the skewed X, form the chroma offset --------
             -- Wrap, then the band's block pixelation (read-address hold).
+            -- 720p band lines hold the address, taking a new one where
+            -- 3 x address crosses a multiple of 2B (c2_r < 3) and at the
+            -- line start; elsewhere blkm_ln masks it (SD: mask halved).
             if c2_base >= resize(act_w, 13) then
-                c3_base <= resize(c2_base - resize(act_w, 13), 12) and
-                           not blkm_ln;
+                v_wb := resize(c2_base - resize(act_w, 13), 12);
             else
-                c3_base <= resize(c2_base, 12) and not blkm_ln;
+                v_wb := resize(c2_base, 12);
+            end if;
+            if hold_ln = '1' then
+                if c2_nb = '1' or c2_r < 3 then
+                    c3_base <= v_wb;
+                end if;
+            else
+                c3_base <= v_wb and not blkm_ln;
             end if;
             c3_coff <= resize(shift_right(c2_cmul, 8), 9) + resize(drift_off, 9);
             if c2_adx >= dy_a then
@@ -1014,6 +1169,19 @@ begin
             c7_vamt <= c6_vamt;
             c7_x    <= c6_x;
             c7_lf   <= c6_lf;
+            -- comet trigger: ~1 per 1024 px at 1080p, 1.5/1024 at 720p and
+            -- 1/512 at SD, so the comets cover the same share of the band
+            -- with their length scaled to the raster
+            c7_ct <= '0';
+            if c6_lf(15 downto 6) = "1111111111" then
+                c7_ct <= '1';
+            end if;
+            if s_cls = "01" and c6_lf(15 downto 5) = "11111111100" then
+                c7_ct <= '1';
+            end if;
+            if s_cls = "10" and c6_lf(15 downto 7) = "111111111" then
+                c7_ct <= '1';
+            end if;
 
             -- ---- depth 8: dropout band glitches ---------------------------
             -- The band corrupts the picture instead of replacing it: the
@@ -1038,17 +1206,23 @@ begin
             if linv_ln = '1' then
                 v_gy := not v_gy;
             end if;
-            if streak /= 0 then
-                streak <= streak - 1;
-            elsif band_ln = '1' and c7_lf(15 downto 6) = "1111111111" then
-                streak <= resize(c7_lf(5 downto 0), 7) + to_unsigned(8, 7);
+            -- (streak2 = 2 x the 1080p count, stepping s_xs halves per pixel:
+            -- comets are 8..71 px at 1080p, 2/3 at 720p, 1/2 at SD)
+            if streak2(7 downto 1) /= 0 then
+                if streak2 > s_xs then
+                    streak2 <= streak2 - s_xs;
+                else
+                    streak2 <= (others => '0');
+                end if;
+            elsif band_ln = '1' and c7_ct = '1' then
+                streak2 <= (resize(c7_lf(5 downto 0), 7) + to_unsigned(8, 7)) & '0';
             end if;
             if stat_ln = '1' and bmode_r = '0' then
                 g_y <= resize(c7_lf(10 downto 2), 10) + to_unsigned(128, 10);
                 g_u <= C_MID;
                 g_v <= C_MID;
-            elsif streak /= 0 then
-                g_y <= to_unsigned(640, 10) + shift_left(resize(streak, 10), 2);
+            elsif streak2(7 downto 1) /= 0 then
+                g_y <= to_unsigned(640, 10) + shift_left(resize(streak2(7 downto 1), 10), 2);
                 g_u <= C_MID;
                 g_v <= C_MID;
             else
