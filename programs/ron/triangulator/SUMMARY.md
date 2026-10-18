@@ -122,6 +122,50 @@ hsync->avid parity may differ.
 **HW result (2026-10-11): the re-seeded build looks good.** The lines were
 placement skew; no parity fix was needed.
 
+## v1.0.2 (2026-10-17) — resolution scaling
+
+The lattice runs in virtual 1080-line units (stepped per pixel / per field
+line from the timing ID in `registers_in(8)`: 1.0 at 1080p, 1.5 at 720p, SD
+2.0 across a 1440-wide 4:3 window and 1080/486 per frame line). Triangles keep
+their size relative to screen height and stay equilateral on a 4:3 screen.
+Before, they were 1.5x too big at 720p and 2:1 tall at SD (the "Watch on first
+flash" interlace item below is now fixed).
+
+- X: a Q.1 accumulator; a cell wraps at `la >= 2Wc - step`.
+- Y: each field line's Q4.8 step runs its integer part as UNIT steps after the
+  h edge. The sample line is the first line at/after `H - ceil(step)`; at
+  1080p that is the last line, H-1.
+- Line widths are virtual units, clamped so SD/720p sampling can't skip an
+  edge:
+  - the diagonal band is at least 2;
+  - a horizontal edge whose two half-bands (wt + wb) are narrower than one
+    field-line step is drawn as each row's first line, exactly one line.
+    At 480i that is every width; at 720p, Thin only.
+- The denoise window is counted in REAL pixels: 8 at 1080, 4 at 720p/SD
+  (the smallest cell is 4-5 px wide there).
+- 1080p is bit-identical at the test settings (diff1080 = 0).
+
+Build: `./build_programs.sh ron triangulator` (router2), then the HD seeds were
+re-screened with `tools/hdmi_pin_skew.py` and hand-installed with
+`vmprog_pack.py --no-sign`.
+- Screen size: HD HDMI 31 seeds, HD Analog 47, HD Dual 12.
+- Netlist JSONs: `make` into a scratch BUILD_ROOT. Re-routing seed 1
+  reproduced the builder's .bin byte-exact.
+- HD HDMI has no positive-side seed with clean data in 1-32, so it takes the
+  negative side.
+
+| Config | Seed | Fmax | Skew (ns) |
+|---|---|---|---|
+| HD Analog | **43** | 78.65 | HDMI HSYNC −1.14, data ≤ −1.13; analog HSYNC −0.96, data ≤ −1.69 |
+| SD Analog | 1 | 80.35 | |
+| HD HDMI | **31** | 86.48 | HSYNC −1.16, data ≤ −0.62 |
+| SD HDMI | 1 | 77.25 | |
+| HD Dual | **9** | 81.27 | HDMI HSYNC −2.79, data ≤ −1.45 |
+| SD Dual | 1 | 78.11 | |
+
+4680-4740 LC (61-62%), 4 EBR. A plain rebuild reverts the HD configs to
+seed 1/2: re-screen after any rebuild. Not flashed.
+
 ## Defaults (HW-captured 2026-10-10)
 
 Captured from the device with `./capture_preset.sh --defaults`: K2 Contrast
