@@ -16,9 +16,41 @@ the midtones, foul-bite pits (2×2 hash speckle) spread over bare paper,
 contours thicken. (v0.1's ladder froze above 59% and showed nothing below
 ~12%.)
 
+## v0.2.2 (2026-10-17) — resolution scaling (built, not flashed)
+
+The stripe-field steps were per PIXEL and per FIELD LINE, so the stroke pitch
+was fixed in pixels: coarser at 720p, and at SD the strokes were 2:1 tall
+(field_n is tied high on hardware, so the parity-toggle line doubling never
+fired) and the Sobel direction was measured on a squashed grid, which broke
+strokes into fragments. Now, from the timing ID (`registers_in(8)`):
+* the cos (per-pixel) taps are built from the pitch mantissa times the x step
+  (1 / 1.5 / 2 at 1080 / 720p / SD) and the sin (per-line) taps from the
+  mantissa times the y step per FIELD line (1 / 1.5 / 4.44 at 1080p / 720p /
+  480i, interlace included), both as Q.2 mantissas through the existing
+  vblank shift-add (11 Horner steps; the y mantissa by a 12-step serial
+  multiply), so stroke pitch and angle follow screen height (SD = 4:3 window);
+* the stipple lattice runs on virtual coordinates; the direction hold run is
+  63 virtual units (counted down by the step);
+* interlaced modes halve |gy| before direction bucketing (a field line spans
+  ~2x a pixel's virtual width), so strokes follow the form at true angles;
+* Sobel, foul-bite pits, tremor and the warm-up guard stay at pixel scale;
+* the S9 stipple half-cell / radius cap are per-frame registers now (they
+  were decoded from `s_pitch_sh` at the head of the HD critical path).
+1080p render bit-identical (0 px); latency unchanged (16). The bottom-field
+offset (field_n = '0', inert on hardware) is half a field step.
+
+Build (`./build_programs.sh ron intaglio`, router2, **seed 1 on all 6
+configs**), 4906–4930/7680 LC (64%), 8/32 EBR: HD Analog 79.59, HD HDMI 82.43,
+HD Dual 89.51; SD Analog 74.65, SD HDMI 76.05, SD Dual 78.20 MHz. (Before the
+stipple-constant registers the same design needed HD Dual seed 5 under
+router2; the base v0.2.1 netlist itself missed router2 seed 1 on HD Dual at
+the time, 68.7 MHz — the S9 stipple test is the long path.) The community
+build's `[firmware] seed = 3` was chosen for v0.2.1 and needs re-checking
+after this version is synced.
+
 ## Controls
 
-K1 Pitch (continuous, exponential 5.7–89 px, 32 steps/octave) · K2 Angle
+K1 Pitch (continuous, exponential 5.7–89 px at 1080p, scaling with screen height; 32 steps/octave) · K2 Angle
 (continuous plate rotation 0–180°; 0 = strokes run along the contours) ·
 K3 Ink (stroke width gain + contour weight) · K4 Palette (8 labelled
 ink/paper pairs: Copper, Sepia, Sanguine, Prussian, Banknote, Iron Gall,
