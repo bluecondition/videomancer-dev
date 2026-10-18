@@ -41,6 +41,14 @@
 -- never leave ragged black edges.  Curve, Zoom, Size, Position and Drift
 -- are glided (ease by diff/8 a frame).
 --
+-- v0.2.3 (2026-10-17) resolution scaling: the porthole's size follows the
+-- screen HEIGHT (window width = Size x the width of a 16:9 screen this tall,
+-- 4/3 W on SD, capped at W - W/64), so it is the same size and still round
+-- on the 4:3 SD screen; its centre and Drift stay fractions of the screen.
+-- The noise lattice (64 x 32), its scroll and its displacement run in
+-- virtual 1080-line units (timing-ID steps; interlace-corrected), and the
+-- rect rim's top/bottom is halved on interlaced fields.  1080p unchanged.
+--
 -- HARDWARE CONTRACTS: one latency (12 clocks) in all modes; outputs gated to
 -- neutral outside avid; source avid passed through (the picture is the
 -- source's own; the only drawn colour is the neutral-chroma black rim).
@@ -120,6 +128,32 @@ architecture porthole of program_top is
         if v_kk < C_K_MIN then v_kk := to_signed(C_K_MIN, 23); end if;
         if v_kk > 4095 then v_kk := to_signed(4095, 23); end if;
         return unsigned(v_kk(12 downto 0));
+    end function;
+
+    -- Resolution scaling (v0.2.3): per-mode steps from the video timing ID.
+    -- x step in half virtual units per pixel: 1080 2 (1.0), 720p 3 (1.5),
+    -- SD 4 (2.0: 720 px span 1440 units, a 4:3 window of the 1080 canvas).
+    function f_vstep_x(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0 | 4 | 8 | 12 => return to_unsigned(4, 3);
+            when 5 | 6 | 14     => return to_unsigned(3, 3);
+            when others         => return to_unsigned(2, 3);
+        end case;
+    end function;
+    -- y step in Q4.8 virtual units per FIELD line (1080 / active lines,
+    -- doubled for interlaced modes).
+    function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(1138, 12);  -- 480i: 2 x 1080/486
+            when 4          => return to_unsigned(576, 12);   -- 480p: 1080/480
+            when 8          => return to_unsigned(960, 12);   -- 576i: 2 x 1080/576
+            when 12         => return to_unsigned(480, 12);   -- 576p: 1080/576
+            when 5 | 6 | 14 => return to_unsigned(384, 12);   -- 720p: 1.5
+            when 1 | 2 | 10 => return to_unsigned(512, 12);   -- 1080i: 2.0
+            when others     => return to_unsigned(256, 12);   -- 1080p: 1.0
+        end case;
     end function;
 
     -- 1024 * 2^(i/64): one octave of zoom steps
@@ -317,11 +351,30 @@ architecture porthole of program_top is
     signal s_vA, s_vB, s_vC : signed(9 downto 0) := (others => '0');
 
     --------------------------------------------------------------------------
+    -- Resolution scaling (v0.2.3): the noise lattice (64 x 32), its
+    -- displacement and the window size live on the 1080-line canvas.
+    --------------------------------------------------------------------------
+    signal s_xs    : unsigned(2 downto 0)  := to_unsigned(2, 3);     -- Q.1 x step per pixel
+    signal s_ys    : unsigned(11 downto 0) := to_unsigned(256, 12);  -- Q4.8 y step per field line
+    signal s_ilace : std_logic := '0';                               -- interlaced timing
+    signal s_nxa   : unsigned(7 downto 0) := (others => '0');        -- lattice x, Q.1 (mod 128 units)
+    signal s_nnode : std_logic := '0';                               -- this pixel crossed a lattice column
+    signal s_lya   : unsigned(21 downto 0) := (others => '0');       -- lattice y, Q.8 virtual lines
+    signal s_dcb, s_dba : signed(10 downto 0) := (others => '0');    -- vC - vB, vB - vA
+    signal s_scb, s_sba : signed(11 downto 0) := (others => '0');    -- ... per pixel (x xs/2)
+    signal s_amp_raw : unsigned(9 downto 0) := (others => '0');      -- amp in virtual units
+    signal s_amp_h, s_amp_l : unsigned(9 downto 0) := (others => '0');
+    signal s_wq1, s_wq2 : unsigned(10 downto 0) := (others => '0');
+    signal s_wref  : unsigned(10 downto 0) := to_unsigned(480, 11);  -- W of a 16:9 screen this tall
+    signal s_wmax  : unsigned(10 downto 0) := to_unsigned(472, 11);  -- widest window, W - W/64
+    signal s_rimy  : unsigned(4 downto 0) := to_unsigned(4, 5);      -- rect rim in field lines
+
+    --------------------------------------------------------------------------
     -- Pixel pipeline
     --------------------------------------------------------------------------
     signal s_accg, s_accw : signed(25 downto 0) := (others => '0');
     signal s_nacc : signed(15 downto 0) := (others => '0');
-    signal s_nstp : signed(9 downto 0) := (others => '0');
+    signal s_nstp : signed(11 downto 0) := (others => '0');
     signal s_x1   : unsigned(10 downto 0) := (others => '0');
     signal s_ug2, s_uw2 : signed(14 downto 0) := (others => '0');
     signal s_n2   : signed(9 downto 0) := (others => '0');
@@ -367,6 +420,13 @@ begin
             s_sw_round     <= registers_in(6)(3);
             s_sw_fit       <= registers_in(6)(4);
             s_p_drift <= unsigned(registers_in(7));
+            -- per-mode steps, free-running (the timing ID is static per mode)
+            s_xs <= f_vstep_x(registers_in(8)(3 downto 0));
+            s_ys <= f_vstep_y(registers_in(8)(3 downto 0));
+            case to_integer(unsigned(registers_in(8)(3 downto 0))) is
+                when 0 | 8 | 1 | 2 | 10 => s_ilace <= '1';
+                when others             => s_ilace <= '0';
+            end case;
         end if;
     end process;
 
@@ -393,6 +453,7 @@ begin
         variable v_j    : unsigned(8 downto 0);
         variable v_wc   : unsigned(10 downto 0);
         variable v_ka   : unsigned(11 downto 0);
+        variable v_nx   : unsigned(7 downto 0);
     begin
         if rising_edge(clk) then
             s_in_y <= unsigned(data_in.y); s_in_u <= unsigned(data_in.u); s_in_v <= unsigned(data_in.v);
@@ -449,6 +510,49 @@ begin
                 s_pp_kk <= v_kkq(13 downto 0);
             end if;
 
+            -- Resolution scaling: lattice steps per pixel (x 1 / 1.5 / 2 at
+            -- 1080 / 720p / SD), free-running; the lattice values change
+            -- at least a dozen clocks before they are used
+            s_dcb <= resize(s_vC, 11) - resize(s_vB, 11);
+            s_dba <= resize(s_vB, 11) - resize(s_vA, 11);
+            case s_xs is
+                when "011" =>
+                    s_scb <= resize(s_dcb, 12) + resize(shift_right(s_dcb, 1), 12);
+                    s_sba <= resize(s_dba, 12) + resize(shift_right(s_dba, 1), 12);
+                when "100" =>
+                    s_scb <= shift_left(resize(s_dcb, 12), 1);
+                    s_sba <= shift_left(resize(s_dba, 12), 1);
+                when others =>
+                    s_scb <= resize(s_dcb, 12);
+                    s_sba <= resize(s_dba, 12);
+            end case;
+            -- displacement in pixels: virtual amp x 2/xs (720p ~2/3, SD 1/2)
+            s_amp_h <= ('0' & s_amp_raw(9 downto 1)) + ("000" & s_amp_raw(9 downto 3));
+            s_amp_l <= ("00000" & s_amp_raw(9 downto 5)) + ("0000000" & s_amp_raw(9 downto 7));
+            case s_xs is
+                when "011"  => s_amp_eff <= s_amp_h + s_amp_l;
+                when "100"  => s_amp_eff <= '0' & s_amp_raw(9 downto 1);
+                when others => s_amp_eff <= s_amp_raw;
+            end case;
+            -- window width reference: W on 16:9 screens, 4/3 W on 4:3 SD
+            -- (so the porthole follows the screen height); widest = W - W/64
+            s_wq1 <= s_wf + shift_right(s_wf, 2);
+            s_wq2 <= shift_right(s_wf, 4) + shift_right(s_wf, 6);
+            if s_wf >= 1024 then s_wref <= s_wf; else s_wref <= s_wq1 + s_wq2; end if;
+            s_wmax <= s_wf - shift_right(s_wf, 6);
+            -- rect rim in field lines: half the pixel rim on interlaced fields
+            if s_ilace = '1' then s_rimy <= '0' & s_rim(4 downto 1); else s_rimy <= s_rim; end if;
+
+            -- lattice column crossings on the virtual x axis (64 units)
+            if data_in.avid = '1' then
+                v_nx    := s_nxa + s_xs;
+                s_nxa   <= v_nx;
+                s_nnode <= s_nxa(7) xor v_nx(7);
+            else
+                s_nxa   <= (others => '0');
+                s_nnode <= '0';
+            end if;
+
             -- DDAs: global map (step kz), window map (step +-kk); both start
             -- at the line start, so the window map needs no reset at its edge
             if data_in.avid = '1' then
@@ -456,9 +560,9 @@ begin
                 s_accw <= s_accw + resize(s_stepw, 26);
                 s_sq   <= s_sq + unsigned(resize(s_sqi, 22));             -- (dx+1)^2 = dx^2 + 2dx + 1
                 s_sqi  <= s_sqi + 2;
-                if s_rx(5 downto 0) = 0 and s_rx /= 0 then
+                if s_nnode = '1' then
                     s_nacc  <= shift_left(resize(s_vB, 16), 6);
-                    s_nstp  <= s_vC - s_vB;
+                    s_nstp  <= s_scb;
                     s_vA    <= s_vB;
                     s_vB    <= s_vC;
                     s_nrem  <= "01";
@@ -472,8 +576,8 @@ begin
                 s_accw <= s_initw;
                 s_sq   <= s_sqp;
                 s_sqi  <= s_sqip;
-                s_nstp <= s_vB - s_vA;
-                s_nacc <= shift_left(resize(s_vA, 16), 6) - resize(s_vB - s_vA, 16);
+                s_nstp <= s_sba;
+                s_nacc <= shift_left(resize(s_vA, 16), 6) - resize(s_sba, 16);
             end if;
 
             ------------------------------------------------------------------
@@ -525,7 +629,7 @@ begin
                     if s_line >= s_half_h then s_dy <= s_line - s_half_h; else s_dy <= s_half_h - s_line; end if;
                     if s_line >= s_cy then v_d := s_line - s_cy; else v_d := s_cy - s_line; end if;
                     s_dyw4 <= shift_left(resize(v_d, 13), 2);
-                    v_ysum := resize(s_line, 16) + s_oyf(21 downto 6);
+                    v_ysum := resize(s_lya(21 downto 8), 16) + s_oyf(21 downto 6);   -- virtual lines
                     s_ncy  <= v_ysum(13 downto 5);
                     s_ncy1 <= v_ysum(13 downto 5) + 1;
                     s_nfy  <= v_ysum(4 downto 0);
@@ -640,7 +744,7 @@ begin
                     s_qfrac <= to_unsigned(103, 11) + resize(s_g_size(12 downto 3), 11) - resize(s_g_size(12 downto 6), 11);
                     s_vstep <= s_vstep + 1;
                 when 3 =>
-                    s_amp_eff <= s_vp(19 downto 10);
+                    s_amp_raw <= s_vp(19 downto 10);
                     s_qa <= resize(s_sx, 11); s_qb <= resize(s_g_drift(12 downto 3), 11);   -- tx = |sin| * drift
                     case s_zoct is
                         when "00"   => s_zoom <= resize(s_zrom(10 downto 2), 13);
@@ -655,7 +759,7 @@ begin
                     else
                         s_sy <= resize(unsigned(s_sin_q), 8); s_syneg <= '0';
                     end if;
-                    s_qa <= s_qfrac; s_qb <= s_wf;                                  -- ww
+                    s_qa <= s_qfrac; s_qb <= s_wref;                                -- ww (follows H)
                     s_vstep <= s_vstep + 1;
                 when 5 =>
                     s_phinc <= to_unsigned(32, 10) + resize(s_vp(19 downto 11), 10);  -- 32 + drift^2/2048
@@ -666,7 +770,13 @@ begin
                     s_qa <= s_qfrac; s_qb <= s_height;                              -- whh
                     s_vstep <= s_vstep + 1;
                 when 7 =>
-                    if s_vp(20 downto 10) < 16 then s_ww <= to_unsigned(16, 11); else s_ww <= s_vp(20 downto 10); end if;
+                    if s_vp(20 downto 10) < 16 then
+                        s_ww <= to_unsigned(16, 11);
+                    elsif s_vp(20 downto 10) > s_wmax then
+                        s_ww <= s_wmax;                                             -- SD only (never at HD)
+                    else
+                        s_ww <= s_vp(20 downto 10);
+                    end if;
                     s_qa <= resize(s_g_pos(12 downto 3), 11); s_qb <= s_wf;         -- position
                     s_vstep <= s_vstep + 1;
                 when 8 =>
@@ -729,8 +839,8 @@ begin
                 when 15 =>
                     s_wy0 <= f_clip11(s_wy0s);
                     s_wy1 <= f_clip11(s_wy1s);
-                    s_by0 <= f_clip11(s_wy0s + signed(resize(s_rim, 13)));
-                    s_by1 <= f_clip11(s_wy1s - signed(resize(s_rim, 13)));
+                    s_by0 <= f_clip11(s_wy0s + signed(resize(s_rimy, 13)));
+                    s_by1 <= f_clip11(s_wy1s - signed(resize(s_rimy, 13)));
                     s_div_n <= "100000000000000000000";                             -- 2^20 / half_h
                     s_div_d <= s_half_h;
                     s_div_rem <= (others => '0'); s_div_q <= (others => '0'); s_div_i <= (others => '0');
@@ -794,6 +904,7 @@ begin
             if s_prev_avid = '1' and data_in.avid = '0' then
                 s_line_width <= s_rx;
                 s_line   <= s_line + 1;
+                s_lya    <= s_lya + s_ys;
                 s_height <= s_line + 1;
             end if;
             if data_in.hsync_n = '0' and s_prev_hsync_n = '1' then
@@ -803,6 +914,7 @@ begin
             end if;
             if data_in.vsync_n = '0' and s_prev_vsync_n = '1' then
                 s_line <= (others => '0');
+                s_lya  <= (others => '0');
                 s_wpar <= '0';
                 if s_saw_active = '1' then
                     s_vstep <= (others => '0');

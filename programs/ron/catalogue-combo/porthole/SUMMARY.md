@@ -101,6 +101,26 @@ capture_preset.sh.
   forward. Presets: Ship Window and Magnifier are Round. Funhouse's
   Mirror = On is dropped (it would now mean Round).
 
+## v0.2.3: resolution scaling (2026-10-17)
+
+- The porthole's size follows the screen HEIGHT. The window width is Size x
+  the width of a 16:9 screen of the same height: W at 720p/1080, 4/3 W on SD
+  (958 px for 720), capped at W - W/64 so a large window never overflows the
+  SD screen. On SD the porthole used to be Size x 720 px, 0.75x its HD size
+  relative to the screen height; it is now the same size (and still round:
+  the aspect factor kasp was already right). The rect window is 16:9-shaped
+  on SD too. Its centre (Position) and the Drift swing stay fractions of the
+  screen.
+- The noise lattice (64 x 32), its scroll (Speed) and its displacement run
+  in virtual 1080-line units from the timing ID: lattice columns every 64
+  canvas units (42.7 px at 720p, 32 at SD), rows every 32 canvas lines
+  (21.3 at 720p, 7.2 field lines at 480i), displacement x 2/3 at 720p and
+  x 1/2 at SD. At SD the lattice was 2x too wide and 4.4x too tall, and the
+  ripples twice too strong.
+- The rect rim's top and bottom are halved on interlaced fields (they were
+  2x thick on 480i/576i/1080i).
+- 1080p is bit-identical (pixel diff 0).
+
 ## Build
 
 `./build_combo.sh porthole` → `out/rev_b/ron/catalogue-combo/porthole.vmprog`.
@@ -117,5 +137,10 @@ v0.2.1 (2026-10-12, router2 default): all 6 configs pass on seed 1.
 HD Analog 83.3, HD HDMI 84.1, HD Dual 75.7 MHz (the thinnest margin);
 SD Analog 72.6, SD HDMI 77.9, SD Dual 79.2 MHz. About 6,200 LC (81%),
 19/32 EBR.
+
+v0.2.3 (2026-10-17, resolution scaling, router2 default): all 6 configs pass
+on seed 1. HD Analog 82.3, HD HDMI 75.5, HD Dual 74.6 MHz (the thinnest
+margin; v0.2.1 was 75.7); SD Analog 79.9, SD HDMI 83.7, SD Dual 88.1 MHz.
+6,426–6,509 LC (84–85%, +~250 over v0.2.1), 19/32 EBR.
 
 HW status: v0.2.1 not flashed yet (v0.2.0 was superseded before flashing).
