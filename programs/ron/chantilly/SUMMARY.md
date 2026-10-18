@@ -166,3 +166,27 @@ v1.0.1 (2026-10-14): **seed 6**, set as `[firmware] seed = 6` in chantilly.toml.
 build uses one seed for all 8 configs. Why: seed 1 crashes nextpnr's router1 (assertion) on SD HDMI. Sweep: seeds 2, 3, 4, 5 and 6 all build 8/8.
 With seed 6, the program's own HD logic (scratch core without LZX's Sync Out
 generator) is 86.2 / 87.4 / 87.6 MHz (Analog / HDMI / Dual). The dev flow (router2) is unchanged.
+
+## v1.0.2 — resolution scaling (2026-10-17)
+
+720p showed the lace 1.5x too big (only SD had a correction: `s<<1` when
+W < 1000), and SD rosettes were 2:1 tall ellipses: interlace was detected
+from field_n toggling, which is dead on hardware (core_top ties field_n high),
+so the v step stayed at s per field line instead of 2s.
+
+Fix (virtual 1080-line coordinates, mondrian pilot): `s` is now lace units per
+VIRTUAL unit, the same in every mode. At vsync the timing ID
+(`registers_in(8)`) latches a per-mode x step (1.0 / 1.5 / 2.0 per pixel) and
+y step per FIELD line (1080p 1.0, 1080i 2.0, 720p 1.5, 480i 4.44, 576i 3.75,
+480p 2.25, 576p 1.875); the vblank sequencer turns them into lace per pixel
+`sx = s*xstep` (shift/add) and lace per field line `sy = s*ystep>>8` (shared
+multiplier, two new slots). u steps +sx per pixel, v +sy per active field line;
+the centre uses `(W/2)*sx` and `(H_field/2)*sy` (H is no longer doubled).
+Interlace = timing ID. 1080p: every step is exactly 1.0, so the picture is
+bit-identical (pixel diff 0). SD is a 1440-unit 4:3 window of the 1080p lace
+(centred), round on a 4:3 screen; 720p matches 1080p.
+
+Build (router1): `NEXTPNR_ROUTER="--router router1" ./build_programs.sh ron chantilly`
+all six seed 1 — HD Analog 85.29, HD HDMI 85.75, HD Dual 85.39, SD Analog
+87.16, SD HDMI 87.59, SD Dual 85.54 MHz; 6437-6462 LC (84%), 8/32 EBR.
+Not HW-tested.

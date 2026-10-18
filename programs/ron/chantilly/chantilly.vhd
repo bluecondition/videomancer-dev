@@ -4,7 +4,16 @@
 -- This file is part of Videomancer Community Programs.
 -- See LICENSE file in the repository root for full license text.
 --
--- chantilly.vhd  (v0.3 -- black-lace halftone: video as cream circles on black)
+-- chantilly.vhd  (v1.0.2 -- black-lace halftone: video as cream circles on black)
+--
+-- v1.0.2 (resolution scaling): the lace DDA steps per mode from the video
+--   timing ID (registers_in(8)) in virtual 1080-line units -- x step
+--   1.0/1.5/2.0 per pixel, y step per FIELD line (1080i 2.0, 720p 1.5, 480i
+--   4.44, ...) -- so 720p and SD show the 1080p lace at the same size
+--   relative to screen height, round on a 4:3 SD screen.  Replaces the
+--   old SD-only "s<<1 if W < 1000" and the field_n-toggle interlace
+--   detection (field_n is tied high on hardware: SD rosettes were 2:1
+--   tall).  1080p is bit-identical (every step is exactly 1.0 there).
 --
 -- v0.3 (look pass):
 --   * ROUNDER DOTS: dot size reads a 2-D blurred luma -- 8-px running box,
@@ -140,6 +149,42 @@ architecture chantilly of program_top is
         to_unsigned(1961,11), to_unsigned(1983,11), to_unsigned(2004,11), to_unsigned(2026,11));
 
     ----------------------------------------------------------------------
+    -- Resolution scaling: per-mode steps from the video timing ID
+    -- (mondrian pilot).  x step in half virtual units per pixel: 1080 2
+    -- (1.0), 720p 3 (1.5), SD 4 (2.0: 720 px span 1440 units, a 4:3 window
+    -- of the 1080 canvas).  y step in Q4.8 virtual units per FIELD line
+    -- (1080 / active lines, doubled for interlaced modes).
+    ----------------------------------------------------------------------
+    function f_vstep_x(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0 | 4 | 8 | 12 => return to_unsigned(4, 3);
+            when 5 | 6 | 14     => return to_unsigned(3, 3);
+            when others         => return to_unsigned(2, 3);
+        end case;
+    end function;
+    function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(1138, 12);  -- 480i: 2 x 1080/486
+            when 4          => return to_unsigned(576, 12);   -- 480p: 1080/480
+            when 8          => return to_unsigned(960, 12);   -- 576i: 2 x 1080/576
+            when 12         => return to_unsigned(480, 12);   -- 576p: 1080/576
+            when 5 | 6 | 14 => return to_unsigned(384, 12);   -- 720p: 1.5
+            when 1 | 2 | 10 => return to_unsigned(512, 12);   -- 1080i: 2.0
+            when others     => return to_unsigned(256, 12);   -- 1080p: 1.0
+        end case;
+    end function;
+    -- interlaced from the timing ID only (field_n is tied high on hardware)
+    function f_ilace(t : std_logic_vector(3 downto 0)) return std_logic is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0 | 8 | 1 | 2 | 10 => return '1';
+            when others             => return '0';
+        end case;
+    end function;
+
+    ----------------------------------------------------------------------
     -- frame-latched controls
     ----------------------------------------------------------------------
     signal s_k_fill  : unsigned(9 downto 0) := to_unsigned(220, 10);
@@ -164,7 +209,6 @@ architecture chantilly of program_top is
     signal s_W     : unsigned(11 downto 0) := to_unsigned(720, 12);
     signal s_H     : unsigned(11 downto 0) := to_unsigned(480, 12);
     signal s_ilace : std_logic := '0';
-    signal s_fpar  : std_logic := '0';
     signal s_avid_q : std_logic := '0';
     signal s_xl, s_hl : unsigned(11 downto 0) := (others => '0');
     signal s_xl_go, s_hl_go : std_logic := '0';
@@ -185,6 +229,12 @@ architecture chantilly of program_top is
     -- per-frame resolved terms
     ----------------------------------------------------------------------
     signal s_scl   : unsigned(10 downto 0) := to_unsigned(256, 11); -- scale s, Q8
+                                         -- (lace units per VIRTUAL unit)
+    -- per-mode virtual steps (latched at vsync) and the lace steps they give
+    signal s_xs    : unsigned(2 downto 0)  := to_unsigned(2, 3);    -- Q.1 / pixel
+    signal s_ysq   : unsigned(11 downto 0) := to_unsigned(256, 12); -- Q8 / field line
+    signal s_sx    : unsigned(10 downto 0) := to_unsigned(256, 11); -- lace/pixel, Q8
+    signal s_sy    : unsigned(11 downto 0) := to_unsigned(256, 12); -- lace/field line, Q8
     signal s_spin  : unsigned(15 downto 0) := (others => '0');      -- spin angle, Q4
     signal s_spinp, s_spinn : unsigned(11 downto 0) := (others => '0'); -- +-spin
     signal s_u0    : unsigned(19 downto 0) := (others => '0');      -- line-start u
@@ -210,8 +260,8 @@ architecture chantilly of program_top is
     signal s_lgt8, s_vtrig : std_logic := '0';  -- registered vsync trigger
     signal s_vs_pulse   : std_logic := '0';
     signal s_ma    : signed(12 downto 0) := (others => '0');
-    signal s_mb    : signed(11 downto 0) := (others => '0');
-    signal s_mp    : signed(24 downto 0) := (others => '0');
+    signal s_mb    : signed(12 downto 0) := (others => '0');
+    signal s_mp    : signed(25 downto 0) := (others => '0');
 
     ----------------------------------------------------------------------
     -- lace-space DDA accumulators (Q8)
@@ -401,9 +451,10 @@ begin
             end if;
 
             s_hl_go <= '0';
+            -- H in FIELD lines: the per-mode y step (s_sy) already carries
+            -- the interlace x2, so (H/2)*s_sy is half the virtual 1080
             if s_vs_pulse = '1' then
-                if s_ilace = '1' then s_hl <= shift_left(s_lcnt, 1);
-                else                  s_hl <= s_lcnt; end if;
+                s_hl <= s_lcnt;
                 s_hl_go <= '1';
                 s_lcnt <= (others => '0');
             end if;
@@ -499,41 +550,56 @@ begin
                 s_weave   <= registers_in(6)(3);
                 s_ghost   <= registers_in(6)(4);
 
-                s_fpar <= data_in.field_n;
-                if data_in.field_n /= s_fpar then s_ilace <= '1';
-                else                              s_ilace <= '0'; end if;
+                -- resolution scaling: per-mode virtual steps + interlace,
+                -- all from the timing ID (field_n is tied high on hardware)
+                s_xs    <= f_vstep_x(registers_in(8)(3 downto 0));
+                s_ysq   <= f_vstep_y(registers_in(8)(3 downto 0));
+                s_ilace <= f_ilace(registers_in(8)(3 downto 0));
 
-                s_seq <= to_unsigned(22, 5);
+                s_seq <= to_unsigned(24, 5);
 
             elsif s_seq /= 0 and data_in.avid = '0' then
                 s_seq <= s_seq - 1;
 
                 case to_integer(s_seq) is
 
-                    -- SCALE: s = lace units per pixel (Q8), so BIGGER s =
-                    -- SMALLER lace.  s = 2^(1.75*(511-P12)/512): P12 up =
-                    -- bigger lace, +-1.75 octaves (HD s = 861..76; exponent
-                    -- Q6 = e/4 - e/32).  SD sources get s<<1 (bands 128 px,
-                    -- not 256): s <= 1722, hence the 11-bit s.
-                    when 22 =>
+                    -- SCALE: s = lace units per VIRTUAL unit (Q8), so
+                    -- BIGGER s = SMALLER lace.  s = 2^(1.75*(511-P12)/512):
+                    -- P12 up = bigger lace, +-1.75 octaves (s = 861..76;
+                    -- exponent Q6 = e/4 - e/32).  Same s in every mode; the
+                    -- per-mode steps below turn it into lace per pixel/line.
+                    when 24 =>
                         v_e  := to_signed(511, 11) - signed('0' & s_zoom_k);
                         v_q6 := shift_right(v_e, 2) - shift_right(v_e, 5);
                         s_svi <= to_integer(shift_right(v_q6, 6));
                         s_svf <= unsigned(v_q6(5 downto 0));
-                    when 21 =>
+                    when 23 =>
                         v_sh := 2 - s_svi;
-                        if s_W < 1000 then v_sh := v_sh - 1; end if;
                         v_s := shift_right(C_MANT(to_integer(s_svf)), v_sh);
                         s_scl <= v_s;
 
-                    -- u0 = UOFF - (W/2)*s   (shared multiplier)
+                    -- lace per pixel sx = s*xstep (1, 1.5, 2: <= 1722, 11
+                    -- bits); lace per field line sy = s*ystep>>8 on the
+                    -- shared multiplier (480i 4.44: <= 3827, 12 bits).
+                    -- 1080p: both are exactly s.
+                    when 22 =>
+                        case to_integer(s_xs) is
+                            when 4      => s_sx <= shift_left(s_scl, 1);
+                            when 3      => s_sx <= s_scl + shift_right(s_scl, 1);
+                            when others => s_sx <= s_scl;
+                        end case;
+                        s_ma <= signed(resize(s_ysq, 13));
+                        s_mb <= signed(resize(s_scl, 13));
+                    when 20 => s_sy <= unsigned(s_mp(19 downto 8));
+
+                    -- u0 = UOFF - (W/2)*sx   (shared multiplier)
                     when 19 => s_ma <= signed(resize(s_W(11 downto 1), 13));
-                               s_mb <= signed('0' & s_scl);
+                               s_mb <= signed(resize(s_sx, 13));
                     when 17 => s_u0 <= C_UOFF - unsigned(s_mp(19 downto 0));
 
-                    -- v0 = VOFF + scroll - (H/2)*s
+                    -- v0 = VOFF + scroll - (H/2)*sy  (H in field lines)
                     when 16 => s_ma <= signed(resize(s_H(11 downto 1), 13));
-                               s_mb <= signed('0' & s_scl);
+                               s_mb <= signed(resize(s_sy, 13));
                     when 14 => s_v0 <= C_VOFF + s_scroll - unsigned(s_mp(19 downto 0));
 
                     -- DRIFT: scroll += (K3-512), deadbanded (Q8 lace/frame)
@@ -599,9 +665,9 @@ begin
     end process p_frame;
 
     ------------------------------------------------------------------------
-    -- lace-space DDA.  u loads u0 at each active-line start and steps +s per
-    -- pixel; v loads v0 at the frame's first active line (+s on the bottom
-    -- field when interlaced) and steps +s per line (+2s interlaced).
+    -- lace-space DDA.  u loads u0 at each active-line start and steps +sx per
+    -- pixel; v loads v0 at the frame's first active line (+sy/2 on the bottom
+    -- field when interlaced) and steps +sy per field line (per-mode steps).
     -- Advances on ACTIVE lines only (interlace screen-phase rule).
     ------------------------------------------------------------------------
     p_acc : process(clk)
@@ -614,12 +680,14 @@ begin
             if s_vs_pulse = '1' then
                 s_newframe <= '1';
             elsif data_in.avid = '1' and s_avid_p = '0' then      -- active-line start
-                if s_ilace = '1' then v_st := shift_left(resize(s_scl, 20), 1);
-                else                  v_st := resize(s_scl, 20); end if;
+                -- per-field-line lace step (interlace x2 already inside)
+                v_st := resize(s_sy, 20);
                 if s_newframe = '1' then
-                    -- bottom field (odd frame rows) = field_n '0'
+                    -- bottom field (odd frame rows) = field_n '0' starts
+                    -- one frame line (half a field step) down.  Inert on
+                    -- hardware (field_n tied high), kept for the sim/1080i.
                     if s_ilace = '1' and data_in.field_n = '0' then
-                        v_v0 := s_v0 + resize(s_scl, 20);
+                        v_v0 := s_v0 + resize(s_sy(11 downto 1), 20);
                     else
                         v_v0 := s_v0;
                     end if;
@@ -632,7 +700,7 @@ begin
                 end if;
                 s_u <= s_u0;
             elsif data_in.avid = '1' then
-                s_u <= s_u + resize(s_scl, 20);
+                s_u <= s_u + resize(s_sx, 20);
             end if;
         end if;
     end process p_acc;
