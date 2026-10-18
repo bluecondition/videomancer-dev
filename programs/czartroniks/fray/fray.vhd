@@ -6,6 +6,18 @@
 --
 -- FRAY v0.4.2 -- every scanline frays to the right of its edges.
 --
+-- v0.4.5 (2026-10-17): resolution scaling.  Geometry runs in virtual
+-- 1080-line units stepped from the video timing ID (registers_in(8)):
+-- 1.0 at 1080p (identical to before), 1.5 at 720p, 2.0 across / 1080/486
+-- per frame line at SD (a 1440-wide 4:3 window).  The K4 dash period
+-- (phase step x the x step), the 16-unit hash column clumps, the K5 bundle
+-- bands and the Fray weave phase (virtual frame line), and the run length
+-- and tail taper (counted down in virtual units) keep their proportions at
+-- every resolution (the period floors at 2 px, so K4's bottom ~30% sits
+-- at that floor at SD).  Interlace now comes from the timing ID (field_n is
+-- tied high on hardware, so the old field_n-toggle detector never fired).
+-- The Sobel kernel, hold-colour tap and Sparks specks stay pixel-scale.
+--
 -- Where prism grows one even rainbow band off every edge, FRAY launches an
 -- individual FILAMENT: a 1-px-tall run whose length, firing decision and
 -- internal seed all come from a spatial hash of (line group, column group,
@@ -165,12 +177,40 @@ architecture fray of program_top is
         return v_t;
     end function;
 
+    -- Resolution scaling: per-mode steps from the video timing ID.
+    -- x step in half virtual units per pixel: 1080 2 (1.0), 720p 3 (1.5),
+    -- SD 4 (2.0: 720 px span 1440 units, a 4:3 window of the 1080 canvas).
+    function f_vstep_x(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0 | 4 | 8 | 12 => return to_unsigned(4, 3);
+            when 5 | 6 | 14     => return to_unsigned(3, 3);
+            when others         => return to_unsigned(2, 3);
+        end case;
+    end function;
+    -- y step in Q4.8 virtual units per FIELD line (1080 / active lines,
+    -- doubled for interlaced modes).
+    function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(1138, 12);  -- 480i: 2 x 1080/486
+            when 4          => return to_unsigned(576, 12);   -- 480p: 1080/480
+            when 8          => return to_unsigned(960, 12);   -- 576i: 2 x 1080/576
+            when 12         => return to_unsigned(480, 12);   -- 576p: 1080/576
+            when 5 | 6 | 14 => return to_unsigned(384, 12);   -- 720p: 1.5
+            when 1 | 2 | 10 => return to_unsigned(512, 12);   -- 1080i: 2.0
+            when others     => return to_unsigned(256, 12);   -- 1080p: 1.0
+        end case;
+    end function;
+
     -- Controls (registered, quasi-static)
     signal s_pat     : unsigned(2 downto 0) := (others => '0');  -- K1 pattern
     signal s_thr     : unsigned(7 downto 0) := (others => '0');  -- K2 threshold
     signal s_thr_r   : unsigned(7 downto 0) := (others => '0');  -- K2 raw, registered
     signal s_col     : unsigned(2 downto 0) := (others => '0');  -- K3 colour
     signal s_step    : unsigned(15 downto 0) := (others => '0'); -- K4 phase step
+    signal s_step_x  : unsigned(16 downto 0) := (others => '0'); -- step x x step
+    signal s_step_v  : unsigned(15 downto 0) := (others => '0'); -- per pixel, 2-px floor
     signal s_csh     : unsigned(2 downto 0) := (others => '0');  -- K5 bundle shift
     signal s_dens    : unsigned(7 downto 0) := (others => '0');  -- K6 density
     signal s_gnd_vid : std_logic := '0';   -- S7  ground = video
@@ -201,11 +241,15 @@ architecture fray of program_top is
     signal s_nav      : unsigned(11 downto 0) := (others => '0'); -- clocks without avid
     signal s_nav11_d  : std_logic := '0';
     signal s_fev      : std_logic := '0';   -- once-per-field event pulse
-    signal s_saw_f0   : std_logic := '0';   -- field_n '0' seen this window
-    signal s_ilace    : std_logic := '0';   -- source is interlaced
+    -- Resolution scaling (virtual 1080-line units, latched per field)
+    signal s_tid      : std_logic_vector(3 downto 0) := (others => '0');
+    signal s_xs       : unsigned(2 downto 0)  := to_unsigned(2, 3);    -- Q.1 per pixel
+    signal s_ys       : unsigned(11 downto 0) := to_unsigned(256, 12); -- Q4.8 per field line
+    signal s_ya       : unsigned(18 downto 0) := (others => '0');      -- virtual line, Q.8
+    signal s_wv       : unsigned(10 downto 0) := to_unsigned(720, 11); -- virtual width
     signal s_lg       : unsigned(11 downto 0) := (others => '0'); -- line group
     signal cx0        : unsigned(10 downto 0) := (others => '0'); -- column of data_in
-    signal cx1        : unsigned(10 downto 0) := to_unsigned(1, 11); -- cx0 + 1 (hash look-ahead)
+    signal xa1        : unsigned(11 downto 0) := to_unsigned(2, 12); -- virtual x of cx0 + 1, Q.1 (hash look-ahead)
     signal s_width    : unsigned(10 downto 0) := to_unsigned(720, 11);
     signal s_fcnt     : unsigned(1 downto 0) := (others => '0');
     signal s_seed     : unsigned(15 downto 0) := C_SEED;
@@ -253,7 +297,7 @@ architecture fray of program_top is
 
     -- Run state (stage 8)
     signal r_act  : std_logic := '0';
-    signal r_rem  : unsigned(11 downto 0) := (others => '0');
+    signal r_rem  : unsigned(12 downto 0) := (others => '0');  -- virtual units, Q.1
     signal r_ph   : unsigned(15 downto 0) := (others => '0');
     signal r_seg  : unsigned(2 downto 0) := (others => '0');
     signal r_sl   : unsigned(15 downto 0) := (others => '0');
@@ -353,8 +397,29 @@ begin
             s_fall    <= registers_in(6)(2);
             s_hold    <= registers_in(6)(3);
             s_neg     <= registers_in(6)(4);
-            -- max filament length = slider fraction of the measured width + 8
-            s_lm_prod <= s_p12_g(12 downto 3) * s_width;
+            -- max filament length = slider fraction of the measured width + 8,
+            -- in virtual units (SD 1440, 720p/1080p 1920 wide)
+            s_tid <= registers_in(8)(3 downto 0);
+            case to_integer(s_xs) is
+                when 4      => s_wv <= s_width(9 downto 0) & '0';
+                when 3      => s_wv <= s_width + shift_right(s_width, 1);
+                when others => s_wv <= s_width;
+            end case;
+            s_lm_prod <= s_p12_g(12 downto 3) * s_wv;
+            -- phase step per pixel = per virtual unit x the x step, so the
+            -- pattern period is the same fraction of the screen in every mode;
+            -- floored at a 2-px period (Nyquist: K4's 2.8-px bottom end would
+            -- be 1.4 px at SD and alias backwards).  Never reached at 1080p.
+            case to_integer(s_xs) is
+                when 4      => s_step_x <= s_step & '0';
+                when 3      => s_step_x <= ('0' & s_step) + shift_right(s_step, 1);
+                when others => s_step_x <= '0' & s_step;
+            end case;
+            if s_step_x(16 downto 15) /= "00" then
+                s_step_v <= x"7FFF";
+            else
+                s_step_v <= s_step_x(15 downto 0);
+            end if;
             -- K4 travel = the old 30..100% (HW: below ~30% the 2-px dash
             -- pitch is all aliasing): step = 23200 - g*2.797, built as two
             -- registered partial sums (2 + 1/2) and (1/4 + 1/32 + 1/64)
@@ -393,16 +458,11 @@ begin
                 av(i) <= av(i - 1);
             end loop;
 
-            -- Frame-line key.  Interlaced: true frame line (bottom field,
-            -- field_n = '0', holds the odd lines).  Progressive: the core
-            -- holds field_n at '1', so use the active line itself -- the
-            -- appended constant bit would waste K5's first notch, halve the
-            -- Fray phase steps, and push 1080p lines 1024+ off the hash.
-            if s_ilace = '1' then
-                s_fl <= s_aline & (not data_in.field_n);
-            else
-                s_fl <= '0' & s_aline;
-            end if;
+            -- Frame-line key = the virtual 1080-line row (the active line
+            -- itself at 1080p; f_vstep_y already doubles interlaced fields).
+            -- field_n is tied high on hardware, so interlace is known only
+            -- from the timing ID.
+            s_fl <= '0' & s_ya(18 downto 8);
             -- line group for the hash (barrel by K5, quasi-static)
             s_lg <= shift_right(s_fl, to_integer(s_csh));
 
@@ -411,7 +471,7 @@ begin
                 y8  <= unsigned(data_in.y(9 downto 2));
                 lrx <= lrx + 1;
                 cx0 <= cx0 + 1;
-                cx1 <= cx1 + 1;
+                xa1 <= xa1 + s_xs;
                 s_seen <= '1';
                 s_lfsr_act <= s_lfsr;
             end if;
@@ -480,9 +540,10 @@ begin
                 lwx <= (others => '0');
                 cbx <= (others => '0');
                 cx0 <= (others => '0');
-                cx1 <= to_unsigned(1, 11);
+                xa1 <= resize(s_xs, 12);
                 if s_seen = '1' then
                     s_seen <= '0';
+                    s_ya   <= s_ya + s_ys;
                     if s_aline /= 2047 then
                         s_aline <= s_aline + 1;
                     end if;
@@ -502,18 +563,13 @@ begin
             s_fev     <= s_nav(11) and not s_nav11_d;
             if s_fev = '1' then
                 s_aline <= (others => '0');
+                s_ya    <= (others => '0');
+                s_xs    <= f_vstep_x(s_tid);
+                s_ys    <= f_vstep_y(s_tid);
                 s_fcnt  <= s_fcnt + 1;
                 if s_boil = '1' and s_fcnt = 0 then
                     s_seed <= unsigned(s_lfsr_act);
                 end if;
-                -- interlace = a bottom field seen within the last two fields
-                if s_fcnt(0) = '1' then
-                    s_ilace  <= s_saw_f0;
-                    s_saw_f0 <= '0';
-                end if;
-            end if;
-            if data_in.field_n = '0' then
-                s_saw_f0 <= '1';
             end if;
             if s_boil = '0' then
                 s_seed <= C_SEED;
@@ -579,9 +635,10 @@ begin
         variable v_d : unsigned(23 downto 0);
     begin
         if rising_edge(clk) then
-            -- H1 (stage 0): computed one column AHEAD from cx1 = cx0 + 1,
+            -- H1 (stage 0): computed one column AHEAD from xa1 (cx0 + 1),
             -- every clock, so the chain gains a stage for the multiply
-            h1_a <= (s_lg(10 downto 0) & cx1(10 downto 4)) + resize(s_seed, 18);
+            -- columns grouped by 16 virtual units (16 px at 1080p, 8 at SD)
+            h1_a <= (s_lg(10 downto 0) & xa1(11 downto 5)) + resize(s_seed, 18);
             -- H2 (stage 1)
             if data_in.avid = '1' then
                 v_b   := h1_a xor shift_right(h1_a, 5);
@@ -648,7 +705,7 @@ begin
                 r_wrap <= '0';
             elsif av(7) = '1' then
                 v_launch := e7 and fire7 and (s_hold nand r_act);
-                v_sum    := ('0' & r_ph) + ('0' & s_step);
+                v_sum    := ('0' & r_ph) + ('0' & s_step_v);
                 v_len    := lp7(19 downto 8);
                 if v_len < 2 then
                     v_len := to_unsigned(2, 12);
@@ -668,7 +725,7 @@ begin
 
                 if v_launch = '1' then
                     r_act  <= '1';
-                    r_rem  <= v_len;
+                    r_rem  <= v_len & '0';
                     r_seg  <= (others => '0');
                     r_sl   <= rhash7;
                     -- Hold colour: over video, the object side (left, so a
@@ -690,11 +747,12 @@ begin
                         r_ph <= (others => '0');
                     end if;
                 elsif r_act = '1' then
-                    if r_rem <= 1 then
+                    -- count down in virtual units (one x step per pixel)
+                    if r_rem(12 downto 3) = 0 and r_rem(2 downto 0) <= s_xs then
                         r_act <= '0';
                         r_rem <= (others => '0');
                     else
-                        r_rem <= r_rem - 1;
+                        r_rem <= r_rem - s_xs;
                     end if;
                     r_ph   <= v_sum(15 downto 0);
                     r_wrap <= v_sum(16);
@@ -783,7 +841,7 @@ begin
 
             p_ink <= v_ink;
             p_int <= v_int;
-            p_tap <= f_taper(r_rem, r_tk);
+            p_tap <= f_taper(r_rem(12 downto 1), r_tk);
             hold9 <= r_hold;
 
             -- Glow: luma +192 (cap 768: full-scale luma kills chroma on
