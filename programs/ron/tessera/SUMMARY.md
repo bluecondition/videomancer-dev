@@ -5,6 +5,31 @@ HW-validated: "It looks really good").** v1.0.0 = the v17 engine (TOML version
 bump only; bitstreams identical). **Build seeds:** all 6 configs seed 1, router1
 (`NEXTPNR_ROUTER="--router router1" ./build_programs.sh ron tessera`).
 
+## v1.0.3 — resolution scaling (2026-10-17)
+Triangle sizes were `measured_v × factor` in FIELD lines, and the same size
+was used for the x extent in pixels, so interlaced modes drew them ~2× tall
+(480i 2.2:1, 1080i 2:1) and SD's non-square pixels were ignored. The x extent
+now has its own size, from a per-mode "screen height in pixel widths":
+`measured_v` on progressive HD (1080p/720p: same as before), `2 × measured_v`
+at 1080i, 540 on every SD mode (720 px = a 4:3 width). It runs through the
+per-frame size multiplier right behind the y size (products R·sin, half·cos,
+third·sin and the flutter use it). Triangles are now equilateral on a 4:3 SD
+screen and at 1080i; 1080p is bit-identical (sim diff 0 px) and 720p is
+unchanged.
+
+The "SD progressive" flag (`measured_v` in 400..600) also caught 1080i (540
+field lines) and missed 480i/576i; it is now the timing ID, and selects the
+0.25×–1.1× scale table on **every** SD mode. Correct-width triangles cost
+480i the same line time as 576p always did (Monte Carlo, busiest line p99.7,
+worst count: 480i at 1.1× ≈ 576p-old at 1.1×, 55–100%; at 1.5× it would be
+~130%, i.e. overruns), so at P12 above ~1.1× SD triangles stop growing while
+HD reaches 1.5× (the SD 4:3 sheet shows them ~73% of the HD size at P12
+100%). Outline thickness stays at pixel/line scale.
+
+Build (router1, all 6 seed 1): HD Analog 86.74, SD Analog 85.23, HD HDMI
+78.24, SD HDMI 82.10, HD Dual 88.35, SD Dual 88.63 MHz; 7193–7223 / 7680 LC
+(94.0% max), 25/32 EBR.
+
 ## What it does
 1–64 independent equilateral-triangle **outlines** rain down the screen. Each
 has a **random in-plane orientation** (so every triangle looks unique), a random
@@ -24,8 +49,9 @@ curve (`count = 1 + round(p²/63)`, p = K5[9:4]) so 1–4 big triangles get ~20%
 the travel. Each count has a natural size `0.75/√count · screenH` (1 → 75%, 4 →
 37%, 16 → 19%, 64 → 9.4%) that keeps the per-line fill cost roughly flat; the
 P12 fader scales it **0.25×–1.5×** on an even exponential sweep (Q10 table in the
-ROM; ~1.0× at P12 ≈ 790), capped at the 75% giant. SD progressive (480p/576p)
-reads a 0.25×–1.1× table instead — less line time per screen height. Both
+ROM; ~1.0× at P12 ≈ 790), capped at the 75% giant. Every SD mode (since
+v1.0.3; before, only 480p/576p) reads a 0.25×–1.1× table instead — less line
+time per screen height. Both
 controls have a ±6-code deadband (ADC noise at a table-row boundary would flip
 the count, or every size, each frame). The two size products (base × k, then ×
 screen height) run in turn through the one per-frame multiplier. Up to v16, P12
@@ -167,7 +193,7 @@ chroma half) — the full palette was too bright behind the triangles.
 - **T10 Depth** — Flat (one size, one speed) / Layers (4 depth layers; default)
 - **T11 Video** — Off (outline only) / On (front = video, back = solid)
 - **Fader P12 Scale** — every triangle 0.25×–1.5× of its count's natural size
-  (SD progressive 0.25×–1.1×), shown as 0–100%.
+  (SD 0.25×–1.1×), shown as 0–100%.
 
 ## Presets
 None defined in the toml.
