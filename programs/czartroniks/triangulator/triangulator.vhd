@@ -6,6 +6,20 @@
 --
 -- triangulator.vhd  (v0.2 — triangle pixelation)
 --
+-- v1.0.2 (2026-10-17): resolution scaling.  The cell lattice runs in virtual
+-- 1080-line units, stepped per pixel / per field line from the video timing
+-- ID (registers_in(8)): 1.0 at 1080p (identical to before), 1.5 at 720p, and
+-- at SD 2.0 across (a 1440-wide 4:3 window) and 1080/486 per frame line, so
+-- the triangles keep their size relative to the screen height and stay
+-- equilateral on a 4:3 screen (they were 1.5x too big at 720p and 2:1 tall
+-- at SD).  The row counter runs the integer part of each field line's step
+-- as unit steps after the h edge; the sample line is the first line at/after
+-- H - ceil(step) (the last line at 1080p).  Line widths are virtual, clamped
+-- so no edge can fall between SD/720p samples (diagonal band >= 2; a
+-- horizontal edge thinner than a field-line step is drawn as the row's first
+-- line).  The denoise window stays in real pixels: 8 at 1080, 4 at 720p/SD
+-- (the smallest cell is 4 px wide there).
+--
 -- A pixelation effect that tiles the screen with a triangular lattice instead of
 -- square blocks.  Each cell is Wc wide x H = Wc*7/4 tall (~equilateral; the edge
 -- slope is lx*7/4 ~= lx*sqrt(3), giving a ~59.4-degree apex) and is split by ONE
@@ -152,13 +166,57 @@ architecture triangulator of program_top is
     end function;
 
     --------------------------------------------------------------------------
+    -- Resolution scaling: per-mode steps from the video timing ID
+    -- (registers_in(8)); 1.0 at 1080p, so 1080p is unchanged.
+    --------------------------------------------------------------------------
+    -- x step in half virtual units per pixel: 1080 2 (1.0), 720p 3 (1.5),
+    -- SD 4 (2.0: 720 px span 1440 units, a 4:3 window of the 1080 canvas).
+    function f_vstep_x(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0 | 4 | 8 | 12 => return to_unsigned(4, 3);
+            when 5 | 6 | 14     => return to_unsigned(3, 3);
+            when others         => return to_unsigned(2, 3);
+        end case;
+    end function;
+    -- y step in Q4.8 virtual units per FIELD line (1080 / active lines,
+    -- doubled for interlaced modes).
+    function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(1138, 12);  -- 480i: 2 x 1080/486
+            when 4          => return to_unsigned(576, 12);   -- 480p: 1080/480
+            when 8          => return to_unsigned(960, 12);   -- 576i: 2 x 1080/576
+            when 12         => return to_unsigned(480, 12);   -- 576p: 1080/576
+            when 5 | 6 | 14 => return to_unsigned(384, 12);   -- 720p: 1.5
+            when 1 | 2 | 10 => return to_unsigned(512, 12);   -- 1080i: 2.0
+            when others     => return to_unsigned(256, 12);   -- 1080p: 1.0
+        end case;
+    end function;
+
+    --------------------------------------------------------------------------
     -- Position (continuous-scale cell counters: advance as the raster scans ->
     -- arbitrary cell sizes with no divide/multiply).
     --------------------------------------------------------------------------
     signal prev_hsync_n : std_logic := '1';
     signal prev_vsync_n : std_logic := '1';
 
-    signal cellx_loc  : unsigned(11 downto 0) := (others => '0');   -- lx within cell
+    -- Resolution scaling (v1.0.2): the lattice runs in virtual 1080-line
+    -- units.  x: a Q.1 accumulator (half units; step 2/3/4 = 1.0/1.5/2.0 per
+    -- pixel), cellx_la(12 downto 1) is the old integer lx.  y: celly_loc still
+    -- counts whole virtual lines, but each field line advances it by the
+    -- integer part of a Q4.8 accumulator (1 at 1080p, 1-2 at 720p, 4-5 at
+    -- 480i), one unit step per clock after the h edge.
+    signal s_xs     : unsigned(2 downto 0)  := to_unsigned(2, 3);
+    signal s_ys     : unsigned(11 downto 0) := to_unsigned(256, 12);
+    signal cellx_la : unsigned(12 downto 0) := (others => '0');   -- lx within cell, Q.1
+    signal x_first  : std_logic := '1';                           -- this pixel starts a cell
+    signal x_ws     : std_logic := '0';                           -- this cell's window started
+    signal wcnt     : unsigned(2 downto 0) := (others => '0');    -- window pixels still due
+    signal cy_frac  : unsigned(7 downto 0) := (others => '0');
+    signal cy_left  : unsigned(2 downto 0) := (others => '0');    -- unit steps still due
+    signal cy_blw   : std_logic := '1';                           -- previous line short of H - k
+    signal cy_rf    : std_logic := '0';                           -- a row started on this line
     signal cellx_idx  : unsigned(7 downto 0)  := (others => '0');   -- cell column index
     signal celly_loc  : unsigned(11 downto 0) := (others => '0');   -- ly within cell
     signal celly_par  : std_logic := '0';                           -- cell-row parity (half-offset + bank)
@@ -172,21 +230,29 @@ architecture triangulator of program_top is
     --------------------------------------------------------------------------
     signal k_held  : unsigned(9 downto 0)  := to_unsigned(160, 10); -- P12 after hysteresis
     signal n_csz   : unsigned(11 downto 0) := to_unsigned(47, 12);  -- cell width Wc
-    signal n_cszm1 : unsigned(11 downto 0) := to_unsigned(46, 12);
+    signal n_wlim  : unsigned(12 downto 0) := to_unsigned(92, 13);  -- 2Wc - x step (wrap)
+    signal n_cshmk : unsigned(11 downto 0) := to_unsigned(81, 12);  -- H - ceil(y step)
+    signal n_k     : unsigned(3 downto 0)  := to_unsigned(1, 4);    -- ceil(y step)
+    signal n_wspan : unsigned(4 downto 0)  := to_unsigned(16, 5);   -- window span, half units
+    signal n_lw2   : unsigned(11 downto 0) := to_unsigned(1, 12);   -- line widths after the
+    signal n_wt2   : unsigned(11 downto 0) := to_unsigned(1, 12);   -- per-mode visibility clamps
+    signal n_wb2   : unsigned(11 downto 0) := to_unsigned(0, 12);
+    signal n_hf    : std_logic := '0';
     signal n_csh   : unsigned(11 downto 0) := to_unsigned(82, 12);  -- row height H = Wc*7/4
     signal n_cshm1 : unsigned(11 downto 0) := to_unsigned(81, 12);
-    signal n_wst   : unsigned(11 downto 0) := to_unsigned(19, 12);  -- sample window start (lx)
-    signal n_wend  : unsigned(11 downto 0) := to_unsigned(26, 12);  -- sample window end (lx)
+    signal n_wst   : unsigned(12 downto 0) := to_unsigned(38, 13);  -- sample window start (half units)
     signal n_line_w  : unsigned(11 downto 0) := to_unsigned(1, 12);
     signal n_line_wt : unsigned(11 downto 0) := to_unsigned(1, 12);
     signal n_line_wb : unsigned(11 downto 0) := to_unsigned(0, 12);
 
     -- per-frame latched geometry / switches (copied at vsync)
-    signal s_cszm1   : unsigned(11 downto 0) := to_unsigned(46, 12);
+    signal s_wlim    : unsigned(12 downto 0) := to_unsigned(92, 13);
+    signal s_csz_hmk : unsigned(11 downto 0) := to_unsigned(81, 12);
+    signal s_hforce  : std_logic := '0';                             -- horiz edge = row's first line
+    signal s_w4      : std_logic := '0';                             -- 4-px window (720p / SD)
     signal s_csz_h   : unsigned(11 downto 0) := to_unsigned(82, 12);
     signal s_csz_hm1 : unsigned(11 downto 0) := to_unsigned(81, 12);
-    signal s_wst     : unsigned(11 downto 0) := to_unsigned(19, 12);
-    signal s_wend    : unsigned(11 downto 0) := to_unsigned(26, 12);
+    signal s_wst     : unsigned(12 downto 0) := to_unsigned(38, 13);
     signal s_line_w  : unsigned(11 downto 0) := to_unsigned(1, 12);  -- grid line width
     signal s_line_wt : unsigned(11 downto 0) := to_unsigned(1, 12);  -- horiz band, top of row
     signal s_line_wb : unsigned(11 downto 0) := to_unsigned(0, 12);  -- horiz band, bottom of row
@@ -254,6 +320,7 @@ architecture triangulator of program_top is
     signal g0_even : std_logic := '0';                         -- '1' = "/" column
     signal g0_bank : std_logic := '0';                         -- buffer bank this row reads
     signal g0_top  : std_logic := '0';                         -- frame's first active line
+    signal g0_rf   : std_logic := '0';                         -- a row started on this line
 
     -- combinational geometry outputs
     signal c_raddr : unsigned(7 downto 0) := (others => '0');
@@ -322,16 +389,30 @@ begin
             n_csz <= to_unsigned(8, 12) + v_x - shift_right(v_x, 5);
             -- Equilateral row height H = Wc*7/4 (~Wc*sqrt(3); apex ~59.4 deg).
             n_csh   <= n_csz + shift_right(n_csz, 1) + shift_right(n_csz, 2);
-            n_cszm1 <= n_csz - 1;
             n_cshm1 <= n_csh - 1;
-            -- Sample window (8 px).  Flat: both triangles that read a cell have their
-            -- axis on its RIGHT edge, so the window ends there.  Faceted: cell centre.
-            if registers_in(6)(2) = '1' then
-                n_wst  <= n_csz - 8;
-                n_wend <= n_csz - 1;
+            -- (virtual units) cell wrap threshold 2Wc - x step; sample-line
+            -- threshold H - ceil(y step)
+            n_wlim  <= (n_csz & '0') - s_xs;
+            if s_ys(7 downto 0) /= 0 then
+                n_k <= s_ys(11 downto 8) + 1;
             else
-                n_wst  <= shift_right(n_csz, 1) - 4;
-                n_wend <= shift_right(n_csz, 1) + 3;
+                n_k <= s_ys(11 downto 8);
+            end if;
+            n_cshmk <= n_csh - n_k;
+            -- Sample window: 8 REAL px at 1080 (a filter kernel stays at pixel
+            -- scale), 4 px at 720p / SD where the smallest cell (8 units) is
+            -- only 5.3 / 4 px wide.  n_wspan = its span in half units.
+            -- Flat: both triangles that read a cell have their axis on its
+            -- RIGHT edge, so the window ends there.  Faceted: cell centre.
+            if s_xs = 2 then
+                n_wspan <= to_unsigned(16, 5);
+            else
+                n_wspan <= s_xs & "00";
+            end if;
+            if registers_in(6)(2) = '1' then
+                n_wst  <= (n_csz & '0') - n_wspan;
+            else
+                n_wst  <= (shift_right(n_csz, 1) & '0') - n_wspan(4 downto 1);
             end if;
 
             -- K6 Line Width (top 2 bits) -> 1/2/3/4 px.  Horizontal edges are
@@ -360,6 +441,26 @@ begin
                                n_line_wt <= to_unsigned(2, 12);
                                n_line_wb <= to_unsigned(2, 12);
             end case;
+
+            -- Line widths are virtual units, clamped so SD/720p sampling can't
+            -- skip an edge: the diagonal band [-W, W) moves up to 4 per pixel
+            -- at 720p/SD (W >= 2); the two horizontal bands of a shared edge
+            -- (wt + wb) must span a whole field-line step, else the edge is
+            -- drawn as the row's first line instead (exactly one line).
+            if s_xs /= 2 and n_line_w < 2 then
+                n_lw2 <= to_unsigned(2, 12);
+            else
+                n_lw2 <= n_line_w;
+            end if;
+            if n_line_wt + n_line_wb < n_k then
+                n_wt2 <= (others => '0');
+                n_wb2 <= (others => '0');
+                n_hf  <= '1';
+            else
+                n_wt2 <= n_line_wt;
+                n_wb2 <= n_line_wb;
+                n_hf  <= '0';
+            end if;
 
             -- K2 Contrast, always on (512 -> gain 128 = unity).
             s_lgain <= unsigned(registers_in(1)(9 downto 2));
@@ -430,6 +531,11 @@ begin
         variable v_h_edge, v_v_edge : std_logic;
         variable v_sline : boolean;
         variable v_sbank : std_logic;
+        variable v_start : boolean;
+        variable v_wend  : boolean;
+        variable v_wrap  : boolean;
+        variable v_step  : std_logic;
+        variable v_ysum  : unsigned(11 downto 0);
     begin
         if rising_edge(clk) then
             prev_hsync_n <= data_in.hsync_n;
@@ -439,16 +545,22 @@ begin
             if data_in.hsync_n = '0' and prev_hsync_n = '1' then v_h_edge := '1'; end if;
             if data_in.vsync_n = '0' and prev_vsync_n = '1' then v_v_edge := '1'; end if;
 
-            -- X cell counter (origin/local/index) -> continuous cell size, no divide.
+            -- X cell counter in virtual half units -> continuous cell size, no
+            -- divide.  A cell wraps when the NEXT step would reach Wc
+            -- (la >= 2Wc - step: at 1080p la = 2(Wc-1), the old lx = Wc-1 test).
+            v_wrap := data_in.avid = '1' and cellx_la >= s_wlim;
             if v_h_edge = '1' then
-                cellx_loc <= (others => '0');
+                cellx_la  <= (others => '0');
                 cellx_idx <= (others => '0');
+                x_first   <= '1';
             elsif data_in.avid = '1' then
-                if cellx_loc = s_cszm1 then
-                    cellx_loc <= (others => '0');
+                if v_wrap then
+                    cellx_la  <= cellx_la - s_wlim;
                     cellx_idx <= cellx_idx + 1;
+                    x_first   <= '1';
                 else
-                    cellx_loc <= cellx_loc + 1;
+                    cellx_la  <= cellx_la + s_xs;
+                    x_first   <= '0';
                 end if;
             end if;
 
@@ -460,9 +572,13 @@ begin
             v_sline := line0 = '1' or celly_last = '1';
             if line0 = '1' then v_sbank := '0'; else v_sbank := not celly_par; end if;
 
-            -- 8-px horizontal average ending at s_wend (memoryless denoise: a single
-            -- point sample per triangle flickers with analog noise).
-            if cellx_loc = s_wst then
+            -- 8-px horizontal average (4 px at 720p / SD) ending at the window end
+            -- (memoryless denoise: a single point sample per triangle flickers with
+            -- analog noise).  The window starts at the first pixel past s_wst and
+            -- is counted in real pixels (1080p: s_wst .. s_wst+7, as before).
+            v_start := data_in.avid = '1' and x_ws = '0' and cellx_la >= s_wst;
+            v_wend  := data_in.avid = '1' and wcnt = 1;
+            if v_start then
                 acc_y <= resize(unsigned(data_in.y), 13);
                 acc_u <= resize(unsigned(data_in.u), 13);
                 acc_v <= resize(unsigned(data_in.v), 13);
@@ -471,18 +587,28 @@ begin
                 acc_u <= acc_u + unsigned(data_in.u);
                 acc_v <= acc_v + unsigned(data_in.v);
             end if;
+            if v_h_edge = '1' then
+                x_ws <= '0';
+                wcnt <= (others => '0');
+            elsif v_start then
+                x_ws <= '1';
+                if s_w4 = '1' then wcnt <= to_unsigned(3, 3); else wcnt <= to_unsigned(7, 3); end if;
+            elsif data_in.avid = '1' and wcnt /= 0 then
+                wcnt <= wcnt - 1;
+            end if;
+            if v_wrap then x_ws <= '0'; end if;              -- next cell
 
             -- Window closes on this pixel: write the average next cycle.
             w_pend <= '0';
-            if data_in.avid = '1' and v_sline and cellx_loc = s_wend then
+            if v_sline and v_wend then
                 w_pend  <= '1';
                 w_paddr <= v_sbank & cellx_idx;
             end if;
-            -- Has the current cell's sample been taken?  (s_wend is never 0.)
+            -- Has the current cell's sample been taken?
             if data_in.avid = '1' then
-                if cellx_loc = s_wend then
+                if v_wend then
                     w_done <= '1';
-                elsif cellx_loc = 0 then
+                elsif x_first = '1' then
                     w_done <= '0';
                 end if;
             end if;
@@ -492,9 +618,15 @@ begin
             if w_pend = '1' then
                 s_we    <= '1';
                 s_waddr <= w_paddr;
-                s_wdata <= "00" & std_logic_vector(acc_y(12 downto 3))
-                                & std_logic_vector(acc_u(12 downto 3))
-                                & std_logic_vector(acc_v(12 downto 3));
+                if s_w4 = '1' then
+                    s_wdata <= "00" & std_logic_vector(acc_y(11 downto 2))
+                                    & std_logic_vector(acc_u(11 downto 2))
+                                    & std_logic_vector(acc_v(11 downto 2));
+                else
+                    s_wdata <= "00" & std_logic_vector(acc_y(12 downto 3))
+                                    & std_logic_vector(acc_u(12 downto 3))
+                                    & std_logic_vector(acc_v(12 downto 3));
+                end if;
             elsif v_sline and data_in.avid = '0' and pipe(0).avid = '1' and w_done = '0' then
                 -- The line ended inside a partial last cell before its window
                 -- closed: point-sample the last active pixel so the right-edge
@@ -504,23 +636,37 @@ begin
                 s_wdata <= "00" & pipe(0).y & pipe(0).u & pipe(0).v;
             end if;
 
-            if celly_loc = s_csz_hm1 then celly_last <= '1'; else celly_last <= '0'; end if;
+            -- Sample line = the first line of a row at/after H - ceil(y step)
+            -- (at 1080p the last line, H-1); still inside the row, since a
+            -- line advances at most ceil(y step).
+            if celly_loc >= s_csz_hmk and cy_blw = '1' then celly_last <= '1'; else celly_last <= '0'; end if;
 
+            -- Y row counter: each h edge adds the Q4.8 field-line step; its
+            -- integer part runs as that many unit steps (the first at the edge
+            -- itself, the rest on the following clocks, long before active video).
+            v_step := '0';
             if v_v_edge = '1' then
                 celly_loc <= (others => '0');
                 celly_par <= '0';
                 frame_act <= '0';
                 line0     <= '1';
+                cy_left   <= (others => '0');
+
+                -- per-mode virtual steps (static per mode)
+                s_xs <= f_vstep_x(registers_in(8)(3 downto 0));
+                s_ys <= f_vstep_y(registers_in(8)(3 downto 0));
 
                 -- Per-frame geometry + switches (pre-computed in p_params).
-                s_cszm1   <= n_cszm1;
+                s_wlim    <= n_wlim;
                 s_csz_h   <= n_csh;
                 s_csz_hm1 <= n_cshm1;
+                s_csz_hmk <= n_cshmk;
                 s_wst     <= n_wst;
-                s_wend    <= n_wend;
-                s_line_w  <= n_line_w;
-                s_line_wt <= n_line_wt;
-                s_line_wb <= n_line_wb;
+                if s_xs = 2 then s_w4 <= '0'; else s_w4 <= '1'; end if;
+                s_line_w  <= n_lw2;
+                s_line_wt <= n_wt2;
+                s_line_wb <= n_wb2;
+                s_hforce  <= n_hf;
 
                 s_grid   <= registers_in(6)(0);   -- S7 Grid Lines
                 s_gate   <= registers_in(6)(1);   -- S8 Luma Gate
@@ -533,11 +679,25 @@ begin
                 frame_act <= '1';
                 celly_loc <= (others => '0');
                 celly_par <= '0';
+                cy_frac   <= (others => '0');
+                cy_left   <= (others => '0');
             elsif v_h_edge = '1' then
                 if frame_act = '1' then line0 <= '0'; end if;
+                v_ysum  := resize(cy_frac, 12) + s_ys;
+                cy_frac <= v_ysum(7 downto 0);
+                cy_left <= v_ysum(10 downto 8) - 1;
+                if celly_loc < s_csz_hmk then cy_blw <= '1'; else cy_blw <= '0'; end if;
+                cy_rf   <= '0';
+                v_step  := '1';
+            elsif cy_left /= 0 then
+                cy_left <= cy_left - 1;
+                v_step  := '1';
+            end if;
+            if v_step = '1' then
                 if celly_loc = s_csz_hm1 then
                     celly_loc <= (others => '0');
                     celly_par <= not celly_par;   -- flip per row: half-offsets the lattice
+                    cy_rf     <= '1';
                 else
                     celly_loc <= celly_loc + 1;
                 end if;
@@ -549,7 +709,7 @@ begin
     -- Combinational geometry: triangle classification, read address, grid flag.
     --------------------------------------------------------------------------
     p_comb : process(g0_lxs, g0_ly, g0_cx, g0_even, s_csz_h, s_csz_hm1,
-                     s_line_w, s_line_wt, s_line_wb, s_fill)
+                     s_line_w, s_line_wt, s_line_wb, s_fill, s_hforce, g0_rf)
         variable v_d     : signed(12 downto 0);
         variable v_side  : std_logic;
     begin
@@ -585,7 +745,8 @@ begin
         -- Vertical cell edges are NOT triangle edges.
         if (v_d >= -signed(resize(s_line_w, 13)) and v_d < signed(resize(s_line_w, 13)))
            or (g0_ly < s_line_wt)
-           or (g0_ly > s_csz_hm1 - s_line_wb) then
+           or (g0_ly > s_csz_hm1 - s_line_wb)
+           or (s_hforce = '1' and g0_rf = '1') then
             c_grid <= '1';
         else
             c_grid <= '0';
@@ -634,8 +795,8 @@ begin
 
             -- geo0: pre-register lx*7/4 with ly/cx/parity aligned, so the diagonal
             -- + grid arithmetic in p_comb is a short combinational chain.
-            g0_lxs  <= resize(cellx_loc, 11) + resize(shift_right(cellx_loc, 1), 11)
-                     + resize(shift_right(cellx_loc, 2), 11);
+            g0_lxs  <= resize(cellx_la(12 downto 1), 11) + resize(shift_right(cellx_la(12 downto 1), 1), 11)
+                     + resize(shift_right(cellx_la(12 downto 1), 2), 11);
             g0_ly   <= celly_loc;
             g0_cx   <= cellx_idx;
             -- orientation alternates per column AND per row, so every other row is
@@ -643,6 +804,7 @@ begin
             g0_even <= not (cellx_idx(0) xor celly_par);
             g0_bank <= celly_par;
             g0_top  <= line0;
+            g0_rf   <= cy_rf;
 
             -- St1: capture the sampled cell colour into fabric (EBR output -> FF).
             samp_y <= unsigned(s_rd(29 downto 20));
