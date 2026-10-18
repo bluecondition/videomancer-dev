@@ -10,6 +10,43 @@ emulator MRD-model bug, all fixed in the tooling). Remaining: capture real
 presets with `./capture_preset.sh` (the five in the TOML are placeholders).
 Deliverable: `out/rev_b/ron/oracle.vmprog`.
 
+**v2.0.4 (2026-10-18) — resolution scaling (VHDL only, microcode untouched).**
+- Interlace now comes from the timing ID (`p_tid`: 0 / 8 / 1 / 2 / 10 =
+  interlaced), not `s_timing.is_interlaced`. The SDK field detector keys on
+  a half-line vsync offset; when it reports progressive (the sims, and
+  hardware whenever the decoder's vsync has no offset) SD was laid out in
+  243 FIELD rows, so the eye came out half as wide (the SD x-aspect term
+  `hh + hh/8` was applied to field rows) and the seam teeth reached into the
+  window rule ("dashed artifacts along the window frame"). `s_botf` still
+  comes from the detector (inert when field_n is tied high: line-doubled).
+- Torn-seam teeth (S7) follow the screen: tooth height through `f_tooth`
+  (timing-ID class: 1080 x1, 720p x2/3, 480-line x0.45, 576-line x0.53,
+  a 16-entry case per class) and one LFSR step per 8 VIRTUAL columns
+  (`tx_acc` += 2 / 3 / 4 per pixel, step on the carry; at 1080 this is
+  exactly `s_bcol(2:0) = "111"`).
+- Tear-burst shifts (S7) in virtual columns: `p_tsc` scales each line's
+  shift `d - D0` by 2/xs (x1 1080, x21/32 720p, x1/2 SD) where the output
+  stage latches the line delay (`cu_ds`/`cu_dcs` -> `o_dY`/`o_dC`); the
+  chroma offset `dc - d` (1..4 px) stays at pixel scale.
+- 1080p bit-identical (diff1080). Not changed, because they live in the
+  microcode (ROM 511/512 words): tear-burst band rows -- start `rand & 2047`
+  and height 2..33 rows (the microcode comment says 2..129, but `rand` is
+  the 16-bit LFSR, so `rand >> 11` has 5 bits) are decided inside LINE and
+  the VHDL only sees the per-line delay; and the eye's SD x-aspect
+  (`wmax = hh + hh/8` when mh < 1000: 1.125 for every SD mode; exact is
+  1.111 NTSC, 0.9375 PAL, so PAL eyes are ~20 % too wide) feeds the eye
+  width, the rho^2 DDA and the corona. The hh >= 32 floor only matters at
+  the smallest K1.
+- Build with the tear-shift scaling (router1, seed 1 on all 6): HD Analog
+  80.5 / HD HDMI 77.4 / HD Dual 80.0, SD 76.5 / 81.8 / 75.6 MHz;
+  6586-6605/7680 LC (86 %; `p_tsc` ~ +100 LC), 26/32 EBR. (The build
+  without it needed SEED 2 on HD Dual.) Not flashed.
+- Check: a sim-only copy (.scaling_work/oracle_tmp/burst: every re-roll a
+  burst, start rows < 256, LFSR stepped per field) puts the same burst at
+  SD / 720p / 1080p (sheet oracle_fb); its shift measures 40-44 / 43.5 /
+  44 virtual columns (20-22 / 29 / 44 px). The band rows (78..82) stay in
+  frame rows, as noted above.
+
 ## Build
 **Build with router1:** `NEXTPNR_ROUTER="--router router1" MAKE_TIMEOUT=2400
 ./build_programs.sh ron oracle`. Router2 missed every HD config on all 6
