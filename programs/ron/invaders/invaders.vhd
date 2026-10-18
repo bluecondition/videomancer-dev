@@ -4,7 +4,22 @@
 -- This file is part of Videomancer Community Programs.
 -- See LICENSE file in the repository root for full license text.
 --
--- Wizard Invaders (v0.7.3)
+-- Wizard Invaders (v0.7.6)
+--
+-- v0.7.6 (2026-10-17): resolution scaling.  The whole game (render
+-- coordinates, measured width/height, layout, sprite sizes, speeds, the
+-- wizard's zoom DDA) runs in virtual 1080-line units, stepped per pixel /
+-- per field line from the video timing ID (registers_in(8)): 1.0 at 1080p
+-- (identical to before), 1.5 at 720p, and at SD 2.0 across (a 1440-wide 4:3
+-- window) and 1080/486 per frame line.  So 720p is the 1080p game at 2/3
+-- scale, and SD is the same game in a 4:3 window: sprites, formation,
+-- bunkers, shots, death TV and trail keep their size relative to the screen
+-- height and stay square.  Interlaced fields step two frame lines and the
+-- bottom field starts half a step down.  The 4x4 Bayer dissolve stays at
+-- real-pixel scale; the floor line is 5 units tall at 480i so it can't fall
+-- between field lines.  Before: fixed pixel sizes on a per-field measured
+-- height (SD: formation wider than the screen, shields clamped to the top,
+-- sprites 2x tall), and 720p lumped with 1080p for speeds.
 --
 -- Videomancer-themed Space Invaders clone using the wizard_invaders_sprites
 -- package (WIZARD player, CRT_TV alien with 2-frame walk cycle, VIDEOMANCER
@@ -40,8 +55,9 @@
 --     green); K3 Hue rotates the sprite colour / overlay palette
 --   * Switch 11 force-resets the wave
 --
--- Designed for HD (1920x1080 at the full 74.25 MHz clock).  Layout, march
--- step and projectile speeds scale from the auto-measured raster.
+-- Designed for HD (1920x1080 at the full 74.25 MHz clock); every other mode
+-- draws the same game in virtual 1080-line units (see v0.7.6).  Layout
+-- scales from the auto-measured (virtual) raster.
 --
 -- Collisions are detected PIXEL-ACCURATELY in the render pipeline (like the
 -- arcade's hardware sprite-collision registers): wherever a lit bullet pixel
@@ -173,8 +189,8 @@ architecture invaders of program_top is
     constant C_CHUNK_ROW_OFF  : integer := C_CHUNK_H
                                            - (C_BUNKER_H mod C_CHUNK_H);  -- 16
 
-    -- March step per alien tick; doubled on HD rasters (s_hd) so the sweep
-    -- across 1920 px takes as long as across 960.
+    -- March step per alien tick, x2 (= 12 virtual units; it used to be
+    -- doubled on HD rasters only, and every raster is virtual-HD now).
     constant C_FORM_STEP_X  : integer := 6;
     constant C_BORDER       : integer := 8;
     -- Vertical gap (px) between bunker bottom and wizard top.  Bumped from
@@ -484,6 +500,34 @@ architecture invaders of program_top is
         to_unsigned( 1, 6), to_unsigned( 1, 6)
     );
 
+    -- ------------------------------------------------------------------
+    -- Resolution scaling: per-mode steps from the video timing ID.
+    -- ------------------------------------------------------------------
+    -- x step in half virtual units per pixel: 1080 2 (1.0), 720p 3 (1.5),
+    -- SD 4 (2.0: 720 px span 1440 units, a 4:3 window of the 1080 canvas).
+    function f_vstep_x(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0 | 4 | 8 | 12 => return to_unsigned(4, 3);
+            when 5 | 6 | 14     => return to_unsigned(3, 3);
+            when others         => return to_unsigned(2, 3);
+        end case;
+    end function;
+    -- y step in Q4.8 virtual units per FIELD line (1080 / active lines,
+    -- doubled for interlaced modes).
+    function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(1138, 12);  -- 480i: 2 x 1080/486
+            when 4          => return to_unsigned(576, 12);   -- 480p: 1080/480
+            when 8          => return to_unsigned(960, 12);   -- 576i: 2 x 1080/576
+            when 12         => return to_unsigned(480, 12);   -- 576p: 1080/576
+            when 5 | 6 | 14 => return to_unsigned(384, 12);   -- 720p: 1.5
+            when 1 | 2 | 10 => return to_unsigned(512, 12);   -- 1080i: 2.0
+            when others     => return to_unsigned(256, 12);   -- 1080p: 1.0
+        end case;
+    end function;
+
     -- ========================================================================
     -- Parameters
     -- ========================================================================
@@ -513,9 +557,6 @@ architecture invaders of program_top is
     signal s_step_period   : unsigned(5 downto 0) := to_unsigned(16, 6);
     signal s_bullet_speed  : unsigned(4 downto 0) := to_unsigned(12, 5);
     signal s_bomb_cd_reset : unsigned(7 downto 0) := to_unsigned(60, 8);
-    -- HD raster flag (measured width >= 1280): doubles march step and
-    -- projectile speeds so pace is resolution-relative.
-    signal s_hd            : std_logic := '1';
     signal s_form_step     : signed(11 downto 0) := to_signed(12, 12);
     -- K2 Trail: edge-shadow rest width and max stretch.
     signal s_fr_max        : unsigned(6 downto 0) := to_unsigned(46, 7);
@@ -524,8 +565,31 @@ architecture invaders of program_top is
     -- Timing + auto-measured resolution
     -- ========================================================================
     signal s_timing        : t_video_timing_port;
+    -- Real pixel / line counts: only the 4x4 Bayer dissolve uses them (a
+    -- pixel-scale texture); everything else uses the virtual coordinates.
     signal s_h_count       : unsigned(11 downto 0);
     signal s_v_count       : unsigned(11 downto 0);
+
+    -- Virtual 1080-line coordinates (p_vcoord), advanced on exactly the same
+    -- events as pixel_counter: x is Q.1 (steps 2/3/4 = 1.0/1.5/2.0 per
+    -- pixel), y is Q.8 per field line.  s_vx / s_vy are the integer parts;
+    -- at 1080p they equal h_count / v_count.
+    signal s_xs            : unsigned(2 downto 0)  := to_unsigned(2, 3);
+    signal s_ys            : unsigned(11 downto 0) := to_unsigned(256, 12);
+    signal s_xa            : unsigned(12 downto 0) := (others => '0');
+    signal s_ya            : unsigned(19 downto 0) := (others => '0');
+    signal s_ya_nx         : unsigned(19 downto 0);
+    signal s_vx            : unsigned(11 downto 0);
+    signal s_vy            : unsigned(11 downto 0);
+    -- '1' during an interlaced bottom field (starts half a step down; its
+    -- end-of-field height is not measured).
+    signal s_bot           : std_logic := '0';
+    -- (integer y step - 1) for this field; extra DDA adds per line.
+    signal s_ysm1          : unsigned(2 downto 0) := (others => '0');
+    signal s_vrep_ld       : unsigned(2 downto 0);
+    signal s_vrep          : unsigned(2 downto 0) := (others => '0');
+    -- Floor line height: 4, or 5 at 480i (> the 4.44-unit field step).
+    signal s_floor_t       : unsigned(2 downto 0) := to_unsigned(4, 3);
 
     signal s_measured_h      : unsigned(11 downto 0) := to_unsigned(960, 12);
     signal s_measured_v      : unsigned(11 downto 0) := to_unsigned(540, 12);
@@ -1079,18 +1143,66 @@ begin
     p_measure : process(clk)
     begin
         if rising_edge(clk) then
-            -- pixel_counter's h/v counts use exactly the reset/advance this
-            -- needs (zeroed on hsync_start / vsync_start, counting active
-            -- pixels / lines), so latch them as they reset — no private
-            -- duplicate counters.
-            if s_timing.hsync_start = '1' and s_h_count > 0 then
-                s_measured_h <= s_h_count;
+            -- The virtual counters use exactly the reset/advance this needs
+            -- (zeroed on hsync_start / vsync_start, counting active pixels /
+            -- lines), so latch them as they reset — no private duplicate
+            -- counters.  Virtual: 1920 x 1080 at HD, 1440 x 1080 at SD.  A
+            -- bottom field ends half a step lower, so only other fields are
+            -- measured (HD inputs and progressive sources: every field).
+            if s_timing.hsync_start = '1' and s_vx > 0 then
+                s_measured_h <= s_vx;
             end if;
-            if s_timing.vsync_start = '1' and s_v_count > 0 then
-                s_measured_v <= s_v_count;
+            if s_timing.vsync_start = '1' and s_vy > 0 and s_bot = '0' then
+                s_measured_v <= s_vy;
             end if;
         end if;
     end process;
+
+    -- ========================================================================
+    -- Virtual 1080-line coordinates (resolution scaling)
+    -- ========================================================================
+    -- Same events as pixel_counter (x: zero at hsync_start, advance on avid;
+    -- y: zero at vsync_start, advance at avid_start), with per-mode steps
+    -- latched at vsync_start.  At 1080p the steps are 1.0 and the integer
+    -- parts are h_count / v_count exactly.
+    p_vcoord : process(clk)
+        variable v_ys : unsigned(11 downto 0);
+    begin
+        if rising_edge(clk) then
+            if s_timing.hsync_start = '1' then
+                s_xa <= (others => '0');
+            elsif s_timing.avid = '1' then
+                s_xa <= s_xa + s_xs;
+            end if;
+
+            if s_timing.vsync_start = '1' then
+                v_ys  := f_vstep_y(registers_in(8)(3 downto 0));
+                s_xs  <= f_vstep_x(registers_in(8)(3 downto 0));
+                s_ys  <= v_ys;
+                s_ysm1 <= v_ys(10 downto 8) - 1;
+                if v_ys(10 downto 8) = "100" then
+                    s_floor_t <= to_unsigned(5, 3);
+                else
+                    s_floor_t <= to_unsigned(4, 3);
+                end if;
+                s_bot <= not data_in.field_n;
+                if data_in.field_n = '0' then
+                    s_ya <= resize(v_ys(11 downto 1), 20);
+                else
+                    s_ya <= (others => '0');
+                end if;
+            elsif s_timing.avid_start = '1' then
+                s_ya <= s_ya_nx;
+            end if;
+        end if;
+    end process;
+
+    s_vx <= s_xa(12 downto 1);
+    s_vy <= s_ya(19 downto 8);
+    -- Extra wizard-DDA adds for the NEXT line's step: (integer y step - 1),
+    -- plus the carry out of the fraction (the y adder's bit-8 carry-in).
+    s_ya_nx   <= s_ya + resize(s_ys, 20);
+    s_vrep_ld <= s_ysm1 + ("00" & (s_ya(8) xor s_ys(8) xor s_ya_nx(8)));
 
     p_layout : process(clk)
         variable v_h_div_8 : integer range 0 to 511;
@@ -1143,12 +1255,6 @@ begin
             -- Cellophane top (red) band = the top 1/8 of the raster, the
             -- arcade overlay's saucer strip.
             s_band_top_y <= to_signed(v_v / 8, 12);
-            -- HD raster: doubles march step + projectile speeds.
-            if to_integer(s_measured_h) >= 1280 then
-                s_hd <= '1';
-            else
-                s_hd <= '0';
-            end if;
 
             -- Dynamic formation init derived from the auto-measured
             -- layout.  If C_FORM_H fits above the bunker below the red band,
@@ -1169,8 +1275,9 @@ begin
             end if;
 
             -- Floor line just under the wizard (at the very bottom of
-            -- the sprite cell), full screen width.
-            s_floor_y     <= to_signed(v_v - C_FLOOR_H, 12);
+            -- the sprite cell), full screen width.  C_FLOOR_H (4) units
+            -- tall; 5 at 480i, whose field lines are 4.44 units apart.
+            s_floor_y     <= signed(s_measured_v) - signed(resize(s_floor_t, 12));
             s_bunker_bot  <= s_bunker_y + to_signed(C_BUNKER_H, 12);
             s_huge_x      <= signed('0' & s_measured_h(11 downto 1))
                              - to_signed(C_HUGE_SCR / 2, 12);
@@ -1214,20 +1321,15 @@ begin
             else
                 s_step_period <= v_period_raw - v_boost;
             end if;
-            -- Speeds are SD-scale, doubled on HD rasters (resolution-relative
-            -- pace).  Shot 6..13 px/frame (HD 12..26), bomb 2..9 (HD 4..18) —
-            -- all < 32 so render-time collisions can't skip a chunk row.
+            -- Speeds in virtual units per frame (the old HD-raster doubling
+            -- of SD-scale speeds; every raster is virtual-HD now).  Shot
+            -- 12..26 units/frame, bomb 4..18 — all < 32 so render-time
+            -- collisions can't skip a chunk row.
             v_bul  := resize(s_bullet_spd_pot(9 downto 7), 5) + to_unsigned(6, 5);
             v_bomb := resize(s_bomb_spd_pot(9 downto 7), 5) + to_unsigned(2, 5);
-            if s_hd = '1' then
-                s_bullet_speed <= shift_left(v_bul, 1);
-                s_bomb_speed   <= shift_left(v_bomb, 1);
-                s_form_step    <= to_signed(2 * C_FORM_STEP_X, 12);
-            else
-                s_bullet_speed <= v_bul;
-                s_bomb_speed   <= v_bomb;
-                s_form_step    <= to_signed(C_FORM_STEP_X, 12);
-            end if;
+            s_bullet_speed <= shift_left(v_bul, 1);
+            s_bomb_speed   <= shift_left(v_bomb, 1);
+            s_form_step    <= to_signed(2 * C_FORM_STEP_X, 12);
             -- K1 Bomb Rate: frames between drop attempts, 71 (pot 0, ~1.2 s)
             -- down to 8 (pot max, ~7/s — all 4 bomb slots stay busy).
             s_bomb_cd_reset <= to_unsigned(71, 8) -
@@ -2292,21 +2394,39 @@ begin
         end if;
     end process;
 
-    -- Sprite-space DDA, mirroring pixel_counter exactly: u = u_start +
-    -- h_count*k, v = v_start + v_count*k.  (u restarts every line, so analog
-    -- line-length wobble can't accumulate.)
+    -- Sprite-space DDA, mirroring the virtual counters exactly: u = u_start +
+    -- vx*k, v = v_start + vy*k.  (u restarts every line, so analog
+    -- line-length wobble can't accumulate.)  vx steps by 1 or 2 per pixel
+    -- (2 at SD, alternating at 720p: when the half bit is set), so u adds k
+    -- or 2k.  vy steps by 1..5 per line: one k is added at avid_start as
+    -- before, and the extra (step - 1) k's are added AHEAD, on the clocks
+    -- after the previous line's avid_end (s_vrep, at most 4 at 480i), so
+    -- every pixel of a line sees the finished v.  The first line's extras and
+    -- a bottom field's start (vy 0..2 units down) are added the same way
+    -- after the vblank load.  At 1080p every step is 1 and this is the old
+    -- DDA.
     p_dda : process(clk)
     begin
         if rising_edge(clk) then
             if s_timing.hsync_start = '1' then
                 s_u_acc <= s_u_start;
             elsif s_timing.avid = '1' then
-                s_u_acc <= s_u_acc + signed(resize(s_k_frame, 20));
+                if (s_xs(2) or s_xa(0)) = '1' then
+                    s_u_acc <= s_u_acc + signed(shift_left(resize(s_k_frame, 20), 1));
+                else
+                    s_u_acc <= s_u_acc + signed(resize(s_k_frame, 20));
+                end if;
             end if;
             if s_v_load = '1' then
                 s_v_acc <= s_v_start;
+                s_vrep  <= s_vrep_ld + s_ya(9 downto 8);
             elsif s_timing.avid_start = '1' then
                 s_v_acc <= s_v_acc + signed(resize(s_k_frame, 20));
+            elsif s_timing.avid_end = '1' then
+                s_vrep  <= s_vrep_ld;
+            elsif s_vrep /= 0 then
+                s_v_acc <= s_v_acc + signed(resize(s_k_frame, 20));
+                s_vrep  <= s_vrep - 1;
             end if;
         end if;
     end process;
@@ -2368,8 +2488,9 @@ begin
     p_stage1 : process(clk)
     begin
         if rising_edge(clk) then
-            s_stg1_hx <= signed(resize(s_h_count, 12));
-            s_stg1_vy <= signed(resize(s_v_count, 12));
+            -- virtual coordinates (= h_count / v_count at 1080p)
+            s_stg1_hx <= signed(s_vx);
+            s_stg1_vy <= signed(s_vy);
             -- integer sprite px of the DDA (|u|,|v| < 2048 by construction)
             s_stg1_u  <= s_u_acc(19 downto 8);
             s_stg1_v  <= s_v_acc(19 downto 8);
@@ -2393,7 +2514,8 @@ begin
             s_stg2_tv_u    <= s_stg1_u + to_signed(44, 12);
             s_stg2_tv_v    <= s_stg1_v + to_signed(72, 12);
             -- per-pixel dissolve / crossfade decisions (any fixed pixel
-            -- phase of the 4x4 Bayer cell is fine)
+            -- phase of the 4x4 Bayer cell is fine; REAL pixels, so the
+            -- dither stays at pixel scale in every mode)
             v_b := C_BAYER4(to_integer(s_v_count(1 downto 0) & s_h_count(1 downto 0)));
             if v_b < s_tv_level then
                 s_stg2_use_tv <= '1';

@@ -1,4 +1,4 @@
-# INVADERS (v0.7.3 — trail only while moving; fills the gaps between body parts)
+# INVADERS (v0.7.6 — resolution scaling; v0.7.3 = trail only while moving, fills the gaps between body parts)
 
 **STATUS: v0.7.3 FINAL except presets — signed off by Ron 2026-10-10**
 ("OK, finalize"; v0.4.0 had been signed off 2026-10-09, and v0.5–v0.7 are his
@@ -8,6 +8,65 @@ HD Analog seed 3, every other config seed 1. The chip is full (~94 % LC):
 any future feature needs a trim first. Earlier ship builds are saved in
 .invaders_work/ (invaders_v040 … v072.vmprog);
 invaders_v073_TIMING_FAIL.vmprog must never be flashed.
+
+## v0.7.6 — resolution scaling (2026-10-17, not flashed)
+
+- **Before:** sizes were fixed pixels (cells 128, formation 768 x 384, wizard
+  128, bunkers 128 x 112, death cloud 384) on a height measured per FIELD.
+  At SD 480i (243 lines a field) the shields clamped to the top of the
+  screen, the formation started off-screen and was wider than 720 px, and
+  every sprite was 2x tall. 720p drew the 1080p sizes on a 720-line screen
+  (the "HD" switch W >= 1280 lumped it with 1080p).
+- **Now:** the whole game runs in virtual 1080-line units (the
+  .scaling_work/RECIPE.md technique). p_vcoord keeps a Q.1 x and a Q.8 y
+  accumulator on the same events as pixel_counter, stepped from the timing
+  ID (1080p 1.0; 720p 1.5; SD 2.0 across = a 1440-wide 4:3 window, 1080/486
+  per frame line; interlaced fields step 2 frame lines, the bottom field
+  starts half a step down). Render coordinates, measured W/H, layout,
+  speeds and the wizard's zoom DDA all use them, so at 1080p every step is
+  1 and the picture is unchanged, 720p is the 1080p game at 2/3 scale, and
+  SD is the same game in a 4:3 window (shields at W/8 fractions, formation
+  centred, sizes keyed to the height).
+  - Wizard DDA: u adds k or 2k per pixel (2k at SD; alternating at 720p,
+    from the x half bit). v adds k at avid_start as before, plus the extra
+    (y step − 1) k's on the clocks after the previous line's avid_end, so no
+    pixel ever sees a half-stepped v (s_vrep; also adds a bottom field's
+    0–2 unit start after the vblank load).
+  - The 4x4 Bayer dissolve still uses REAL pixel counts (pixel-scale
+    texture). The floor line is 5 units tall at 480i (4 elsewhere), so it
+    can't fall between that mode's 4.44-unit field lines.
+  - The s_hd speed doubling is gone (every raster is virtual-HD; speeds are
+    the old HD values in units/frame). Height is measured on top fields only
+    (the bottom field ends half a step lower).
+  - The march step is the same 12 units at every resolution, so on the
+    narrower 4:3 SD window the formation reaches the edge (and drops) in
+    fewer steps than at HD — the look per step is identical.
+  - On hardware the core ties field_n high on every input, so SD fields are
+    line-doubled (both fields draw the same rows), as in mondrian.
+- Renders (.scaling_work, "Video Raid"): 720p matches 1080p (r720 0.99,
+  edges 0.98); SD shields measure 0.101 of the height at 0.753 down (1080p:
+  0.102 at 0.755), centred on the W/8 fractions; wizard, formation and floor
+  all whole on the 4:3 screen. (The SD sim runs 14 fields, so it shows the
+  post-boot-reset board; the 7-frame HD sims show the pre-reset one.)
+- Cost: +82 LUT4 / +15 carry / +26 FF standalone (≈ +100 packed LC).
+
+## Build v0.7.6 (2026-10-17, router2, full clock, ~7080 LC / 92 %, 28/32 EBR)
+
+`./build_programs.sh ron invaders` (default router2, seed retry from 1).
+
+| Config | Seed | Post-route Fmax | LC |
+|---|---|---|---|
+| HD Analog | 1 | 82.68 MHz | 7079 |
+| SD Analog | 1 | 78.44 MHz | 7080 |
+| HD HDMI | 1 | 81.35 MHz | 7048 |
+| SD HDMI | 1 | 76.88 MHz | 7051 |
+| HD Dual | **2** (seed 1 missed) | 75.57 MHz | 7069 |
+| SD Dual | 1 | 78.73 MHz | 7059 |
+
+Hardware checklist for v0.7.6: 1080p looks exactly like v0.7.5; at 720p
+and SD the game is the same picture scaled (4:3 at SD) — shields above the
+wizard, formation centred under the top band, nothing 2x tall; the death
+TV and win flight centred and proportional; the floor line steady at 480i.
 
 ## v0.7.3 changes (2026-10-10)
 
