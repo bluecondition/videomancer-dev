@@ -127,6 +127,34 @@ Tier 3: polish:
 - Defaults and presets captured from hardware (capture_preset.sh).
 - After sign-off: v1.0.0, shelf card refresh, commit.
 
+## v0.2.2 resolution scaling (2026-10-17)
+
+The baseline sheet showed cells 1.5× too big at 720p and much bigger at SD
+(cells were fixed pixels, and rows counted field lines, so SD cells were also
+twice as tall). Cell sizes now follow the screen height:
+
+- The read-address chain (screen x, sync jumps, Square hold, collapse line,
+  Squeeze hold, edges) runs in virtual 1080-line units: 1.0 / 1.5 / 2.0 units
+  per pixel at 1080 / 720p / SD, from the timing ID in `registers_in(8)`. SD
+  is a 1440-wide 4:3 window. At the end, the virtual address becomes a
+  line-buffer pixel: 720p `floor((2V+1)/3)` = `((V+1)·5·17·257) >> 15` (three
+  shift-adds), SD `V/2`, 1080 `V`. This adds 4 clocks of latency, now 24 in
+  all modes.
+- The box average spans 2^(n−1) pixels at 720p and SD. That is the whole cell
+  at SD, and 3/4 of it at 720p (a 2N/3-pixel cell). It is never under 2.
+- Rows count virtual lines: a Q8 accumulator stepping 2·1080/486 per 480i
+  field line. The wrap is a mask, because rows are 2^rr units. The
+  next-line-ends-its-row check runs one clock after the avid fall. S9 Rows
+  bands count 8 virtual lines.
+- Grout: horizontal grout stays 1/8 of the screen cell, at least 1 px (720p
+  1/1/1/3/5 px, SD 1/1/1/2/4 px). The row band is at least one line. Rows
+  under 2 screen lines can't show a band, so their grout falls on every R-th
+  screen line, which keeps the 1080 coverage.
+- Sync jumps are a size, so at SD they are sized from 1920 units, not the
+  1440-unit window. Line position (K1) and Roll stay fractions of the
+  virtual width.
+- 1080p is bit-identical (diff1080 = 0).
+
 ## Build
 
 `./build_combo.sh crush` → `out/rev_b/ron/catalogue-combo/crush.vmprog`.
@@ -140,3 +168,7 @@ About 5,440–5,500 LC (71%), 20/32 EBR (10 luma line buffer, 8 chroma, 2 box
 ring). In a standalone synth, `emulate_transparency` = 0.
 
 HW status: v0.2.0 built, not yet flashed.
+
+v0.2.2 (2026-10-17, resolution scaling): all 6 configs pass on seed 1 (router2
+default). HD Analog 81.4, HD HDMI 79.0, HD Dual 78.2 MHz; SD 80.8 / 73.4 / 82.2
+MHz (SD Fmin is 27). About 5,780–5,820 LC (76%), 20/32 EBR. Not flashed.

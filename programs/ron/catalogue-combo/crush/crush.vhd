@@ -8,6 +8,20 @@
 -- collapse + mosaic with per-cell colour averaging.  Three knobs each; the
 -- switches and the slider decide how the two combine.
 --
+-- v0.2.2 (2026-10-17): resolution scaling.  The read-address chain (screen x,
+-- sync jumps, Square hold, collapse, Squeeze hold, the line, the edges) runs
+-- in virtual 1080-line units: x steps 1.0 / 1.5 / 2.0 per pixel at 1080 /
+-- 720p / SD (SD = a 1440-wide 4:3 window), from the video timing ID.  The
+-- virtual address is turned back into a line-buffer pixel at the end (720p:
+-- floor((2V+1)/3), SD: V/2), 4 clocks, so cells keep their 1080 size
+-- relative to the screen height.  The box average spans 2^(n-1) pixels at
+-- 720p / SD (the whole cell at SD, 3/4 of it at 720p).  Rows count virtual
+-- lines (Q8 accumulator, 2 x 1080/486 per 480i field line), so SD cells
+-- are no longer twice as tall.  Grout follows: vertical bands are at least
+-- one line; rows under 2 lines on screen get every R-th line instead (the
+-- 1080 coverage); horizontal grout is 1/8 of the cell, at least 1 px.  Sync jumps are sized from a 1920-unit width at SD
+-- (sizes follow the screen height).  1080p is bit-identical; latency 20 -> 24.
+--
 --   K1 Line     where the picture collapses to (0 .. 100 % of the width)
 --   K2 Sync     sync loss: random per-line jumps, up to +-1/4 of the width,
 --               the same size on screen at any Collapse
@@ -39,7 +53,7 @@
 -- the line = black or the first / last cell.  Grout = the read address
 -- changed within the last t pixels, or the row's first t lines.  Output:
 -- [1 2 1] on Y/U/V + luma scaled to white ~775 (the HD HDMI bar fix),
--- blanking-gated.  Latency 19 clocks in all modes.
+-- blanking-gated.  Latency 23 clocks in all modes.
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -53,14 +67,14 @@ use work.all;
 
 architecture crush of program_top is
     -- IO-align pad: 1 register stage after the program's own output so the
-    -- data_in -> data_out latency (19 + 1 = 20 clocks) is a multiple of 4,
+    -- data_in -> data_out latency (23 + 1 = 24 clocks) is a multiple of 4,
     -- as the SDK requires; must match processing_delay_clks in the TOML.
-    constant C_PROCESSING_DELAY_CLKS : natural := 20;
+    constant C_PROCESSING_DELAY_CLKS : natural := 24;
     signal s_io_align_in : t_video_stream_yuv444_30b;
     type t_io_align_pad is array (0 to 0) of t_video_stream_yuv444_30b;
     signal s_io_align_pad : t_io_align_pad;
 
-    constant C_LAT   : integer := 19;
+    constant C_LAT   : integer := 23;
     constant C_BLANK : std_logic_vector(31 downto 0) := "00" & "0001000000" & "1000000000" & "1000000000";
 
     function f_clamp10(v : signed) return unsigned is
@@ -124,6 +138,32 @@ architecture crush of program_top is
         return r;
     end function;
 
+    -- Resolution scaling (mondrian v1.0.2): per-mode steps from the timing ID.
+    -- x step in half virtual units per pixel: 1080 2 (1.0), 720p 3 (1.5),
+    -- SD 4 (2.0: 720 px span 1440 units, a 4:3 window of the 1080 canvas).
+    function f_vstep_x(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0 | 4 | 8 | 12 => return to_unsigned(4, 3);
+            when 5 | 6 | 14     => return to_unsigned(3, 3);
+            when others         => return to_unsigned(2, 3);
+        end case;
+    end function;
+    -- y step in Q4.8 virtual units per FIELD line (1080 / active lines,
+    -- doubled for interlaced modes).
+    function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(1138, 12);  -- 480i: 2 x 1080/486
+            when 4          => return to_unsigned(576, 12);   -- 480p: 1080/480
+            when 8          => return to_unsigned(960, 12);   -- 576i: 2 x 1080/576
+            when 12         => return to_unsigned(480, 12);   -- 576p: 1080/576
+            when 5 | 6 | 14 => return to_unsigned(384, 12);   -- 720p: 1.5
+            when 1 | 2 | 10 => return to_unsigned(512, 12);   -- 1080i: 2.0
+            when others     => return to_unsigned(256, 12);   -- 1080p: 1.0
+        end case;
+    end function;
+
     --------------------------------------------------------------------------
     -- Memories (no_rw_check: the ring never reads its write address; a line
     -- buffer's read data is discarded whenever its bank is being written)
@@ -164,7 +204,6 @@ architecture crush of program_top is
     signal s_rr, s_ll : signed(5 downto 0) := to_signed(4, 6);   -- log2 rows, log2 screen cell width
     signal s_rm1    : unsigned(7 downto 0) := x"0F";
     signal s_tmask  : unsigned(7 downto 0) := x"03";
-    signal s_ghm    : unsigned(7 downto 0) := x"01";
     signal s_gh_en  : std_logic := '1';
     signal s_sgp    : unsigned(18 downto 0) := (others => '0');
     signal s_sg     : unsigned(10 downto 0) := (others => '0');
@@ -172,9 +211,24 @@ architecture crush of program_top is
     signal s_vstep  : unsigned(3 downto 0) := (others => '1');
     signal s_lfsr   : unsigned(15 downto 0) := x"6E27";
 
+    -- resolution scaling: steps decoded free-running from the timing ID
+    -- (static while a mode runs); box octave, row grout band, sizing width
+    signal s_stx    : unsigned(2 downto 0) := to_unsigned(2, 3);      -- Q.1 per pixel
+    signal s_sty    : unsigned(11 downto 0) := to_unsigned(256, 12);  -- Q4.8 per field line
+    signal s_msd, s_m720 : std_logic := '0';
+    signal s_vxa    : unsigned(12 downto 0) := (others => '0');       -- virtual screen x, Q.1
+    signal s_nb     : unsigned(3 downto 0) := to_unsigned(4, 4);      -- box: 2^nb pixels
+    signal s_maskb  : unsigned(7 downto 0) := x"0F";
+    signal s_nmaskb : unsigned(10 downto 0) := "11111110000";
+    signal s_wsz    : unsigned(10 downto 0) := to_unsigned(1920, 11); -- width that sizes the jumps
+    signal s_gth    : unsigned(11 downto 0) := to_unsigned(256, 12);  -- row grout band, Q4.8
+    signal s_tv     : unsigned(3 downto 0) := to_unsigned(1, 4);
+    signal s_r2ok   : std_logic := '1';                               -- rows are 2+ lines on screen
+    signal s_lcnt   : unsigned(2 downto 0) := (others => '0');        -- screen lines since vsync, mod 8
+
     -- per-line sync offset
     signal s_lstep  : unsigned(2 downto 0) := "111";
-    signal s_bandc  : unsigned(2 downto 0) := "111";
+    signal s_bandv  : unsigned(11 downto 0) := to_unsigned(1792, 12); -- lines since a re-roll, Q4.8, sat. 7.0
     signal s_hl     : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal s_hs     : signed(10 downto 0) := (others => '0');
     signal s_plo    : signed(17 downto 0) := (others => '0');
@@ -186,7 +240,9 @@ architecture crush of program_top is
     signal s_rx, s_line_width : unsigned(10 downto 0) := (others => '0');
     signal s_prev_hsync_n, s_prev_vsync_n : std_logic := '1';
     signal s_prev_avid, s_saw_active : std_logic := '0';
-    signal s_vcnt   : unsigned(7 downto 0) := (others => '0');
+    signal s_ya     : unsigned(16 downto 0) := (others => '1');       -- line position in its row, Q9.8 virtual
+    signal s_rowst  : std_logic := '0';                               -- the line starts a cell row
+    signal s_capchk : std_logic := '0';
     signal s_capture, s_wpar, s_rb_nx, s_rbank : std_logic := '0';
     signal s_l0_nx, s_line0 : std_logic := '0';
     signal s_hpar, s_swap : std_logic := '0';
@@ -226,6 +282,15 @@ architecture crush of program_top is
     signal s_addr10, s_addrp : unsigned(10 downto 0) := (others => '0');
     signal s_bg10, s_bg11, s_bg12 : std_logic := '0';
     signal s_chg11  : std_logic := '0';
+    -- virtual address -> line-buffer pixel (k11..k14): 720p floor((2V+1)/3)
+    -- = ((V+1) x 5 x 17 x 257) >> 15, SD V/2, 1080 V
+    signal s_cv11, s_cv12, s_cv13 : unsigned(10 downto 0) := (others => '0');
+    signal s_cp11   : unsigned(11 downto 0) := (others => '0');
+    signal s_ct12   : unsigned(13 downto 0) := (others => '0');
+    signal s_ct13   : unsigned(17 downto 0) := (others => '0');
+    signal s_ra14   : unsigned(10 downto 0) := (others => '0');
+    signal s_chg12, s_chg13, s_chg14, s_chg15 : std_logic := '0';
+    signal s_bgd12, s_bgd13, s_bgd14, s_bg15 : std_logic := '0';
     signal s_gh     : unsigned(6 downto 0) := (others => '0');
     signal s_gvt12  : std_logic := '0';
 
@@ -257,7 +322,7 @@ begin
     begin
         if rising_edge(clk) then
             s_rw <= s_rw + 1;
-            s_bq <= bring(to_integer(s_rw - s_mask));
+            s_bq <= bring(to_integer(s_rw - s_maskb));
             bring(to_integer(s_rw)) <= "00" & data_in.y & data_in.u & data_in.v;
         end if;
     end process;
@@ -266,31 +331,45 @@ begin
     -- Tracking, rows, per-line sync offset, per-frame decode, box sums
     --------------------------------------------------------------------------
     p_ctrl : process(clk)
-        variable v_vn : unsigned(7 downto 0);
+        variable v_ys : unsigned(16 downto 0);
         variable v_n  : unsigned(3 downto 0);
     begin
         if rising_edge(clk) then
             s_prev_hsync_n <= data_in.hsync_n;
             s_prev_vsync_n <= data_in.vsync_n;
             s_prev_avid    <= data_in.avid;
+            -- resolution scaling: per-mode steps, free-running
+            s_stx <= f_vstep_x(registers_in(8)(3 downto 0));
+            s_sty <= f_vstep_y(registers_in(8)(3 downto 0));
+            case to_integer(unsigned(registers_in(8)(3 downto 0))) is
+                when 0 | 4 | 8 | 12 => s_msd <= '1'; s_m720 <= '0';
+                when 5 | 6 | 14     => s_msd <= '0'; s_m720 <= '1';
+                when others         => s_msd <= '0'; s_m720 <= '0';
+            end case;
             if data_in.avid = '1' then
-                s_rx <= s_rx + 1;
+                s_rx  <= s_rx + 1;
+                s_vxa <= s_vxa + s_stx;
                 s_saw_active <= '1';
             else
-                s_rx <= (others => '0');
+                s_rx  <= (others => '0');
+                s_vxa <= (others => '0');
             end if;
             s_lfsr <= s_lfsr(14 downto 0) & (s_lfsr(15) xor s_lfsr(13) xor s_lfsr(12) xor s_lfsr(10));
 
             -- per-line sync offset, one small op per step: (rand - 512) x the
             -- per-frame gain, split hi/lo; Rows mode re-rolls on a row's first
-            -- line once 8+ lines have passed
+            -- line once 8+ (virtual) lines have passed
             case to_integer(s_lstep) is
                 when 0 =>
-                    if s_bands = '0' or (s_vcnt = 0 and s_bandc = 7) then
+                    if s_bands = '0' or (s_rowst = '1' and s_bandv >= 1792) then
                         s_hl <= s_lfsr(9 downto 0);
-                        s_bandc <= (others => '0');
-                    elsif s_bandc /= 7 then
-                        s_bandc <= s_bandc + 1;
+                        s_bandv <= (others => '0');
+                    elsif s_bandv < 1792 then
+                        if s_bandv + s_sty >= 1792 then
+                            s_bandv <= to_unsigned(1792, 12);
+                        else
+                            s_bandv <= s_bandv + s_sty;
+                        end if;
                     end if;
                     s_lstep <= s_lstep + 1;
                 when 1 =>
@@ -316,23 +395,37 @@ begin
                 s_lstep <= (others => '0');
             end if;
 
-            -- end of a line: decide the next line's row index and capture
-            if s_prev_avid = '1' and data_in.avid = '0' then
-                s_line_width <= s_rx;
-                if s_line0 = '1' or s_vcnt >= s_rm1 then
-                    v_vn := (others => '0');
-                else
-                    v_vn := s_vcnt + 1;
-                end if;
-                s_vcnt  <= v_vn;
-                s_rb_nx <= s_wpar;            -- the last completed capture
-                if v_vn = s_rm1 then          -- next line ends its row: capture
+            -- end of a line: the next line's position in its row (virtual
+            -- lines, Q8; rows are 2^rr units, so the wrap is a mask) and,
+            -- one clock later, whether it ends its row (then it captures)
+            s_capchk <= '0';
+            if s_capchk = '1' then
+                v_ys := s_ya + s_sty;
+                if (v_ys(16 downto 8) and not resize(s_rm1, 9)) /= 0 then
                     s_capture <= '1';
                     s_wpar    <= not s_wpar;
                 else
                     s_capture <= '0';
                 end if;
-                s_l0_nx <= '0';
+            end if;
+            if s_prev_avid = '1' and data_in.avid = '0' then
+                s_line_width <= s_vxa(11 downto 1);   -- virtual width
+                v_ys := s_ya + s_sty;
+                if s_line0 = '1' then
+                    s_ya <= (others => '0');
+                    s_rowst <= '1';
+                else
+                    s_ya <= (v_ys(16 downto 8) and resize(s_rm1, 9)) & v_ys(7 downto 0);
+                    if (v_ys(16 downto 8) and not resize(s_rm1, 9)) /= 0 then
+                        s_rowst <= '1';
+                    else
+                        s_rowst <= '0';
+                    end if;
+                end if;
+                s_rb_nx  <= s_wpar;           -- the last completed capture
+                s_capchk <= '1';
+                s_l0_nx  <= '0';
+                s_lcnt   <= s_lcnt + 1;
             end if;
             -- start of a line: the read side switches here (in-flight pixels
             -- of the previous line are long gone)
@@ -347,7 +440,10 @@ begin
                     if s_wpar = '1' then s_cpar(1) <= s_hpar; else s_cpar(0) <= s_hpar; end if;
                 end if;
                 s_line0 <= s_l0_nx;
-                if s_gh_en = '1' and (s_vcnt and not s_ghm) = 0 then
+                -- rows under 2 screen lines can't show a band: their grout
+                -- becomes every R-th screen line (the same coverage)
+                if s_gh_en = '1' and ((s_r2ok = '1' and s_ya < s_gth) or
+                                      (s_r2ok = '0' and (s_lcnt and s_rm1(2 downto 0)) = 0)) then
                     s_growl <= '1';
                 else
                     s_growl <= '0';
@@ -377,6 +473,8 @@ begin
                     s_cdrift <= s_cdrift + resize(s_k3(9 downto 4), 15);
                     s_clp <= s_k1 * s_wf;
                     s_wm1 <= s_wf - 1;
+                    -- jumps are a size: sized from 1920 units on the 4:3 SD window
+                    if s_msd = '1' then s_wsz <= to_unsigned(1920, 11); else s_wsz <= s_wf; end if;
                     s_vstep <= s_vstep + 1;
                 when 2 =>
                     -- deadband the stepped knobs (no flicker at a step edge)
@@ -406,6 +504,13 @@ begin
                 when 4 =>
                     s_mask <= f_therm(to_integer(s_n), 8);
                     s_rr   <= signed(resize(s_n, 6)) - signed(resize(s_a, 6));
+                    -- box average: the cell's pixels at SD (N/2), 3/4 of them at
+                    -- 720p (N/2 of 2N/3); at least 2
+                    if (s_msd = '1' or s_m720 = '1') and s_n > 1 then
+                        s_nb <= s_n - 1;
+                    else
+                        s_nb <= s_n;
+                    end if;
                     -- screen cell width: N, or N / squeeze with Squeeze tiles
                     if s_sq = '1' then
                         s_ll <= signed(resize(s_n, 6)) - signed(resize(s_oct, 6)) - signed(resize(s_frac(7 downto 7), 6));
@@ -426,25 +531,46 @@ begin
                     else
                         s_rm1 <= f_therm(to_integer(s_rr), 8);
                     end if;
-                    -- grout 1/8 of a cell (1..8 px), none on cells under 4 px
+                    s_maskb  <= f_therm(to_integer(s_nb), 8);
+                    -- grout 1/8 of a cell (1..8 virtual units, at least 1 px on
+                    -- screen: 720p 1/1/1/3/5 px, SD 1/1/1/2/4 px), none on cells
+                    -- under 4 units
                     if s_ll < 2 then s_tmask <= x"00";
                     elsif s_ll < 4 then s_tmask <= x"01";
-                    elsif s_ll = 4 then s_tmask <= x"03";
-                    elsif s_ll = 5 then s_tmask <= x"0F";
-                    else s_tmask <= x"FF"; end if;
-                    if s_rr < 2 then s_gh_en <= '0'; s_ghm <= x"00";
-                    elsif s_rr < 4 then s_gh_en <= '1'; s_ghm <= x"00";
-                    elsif s_rr = 4 then s_gh_en <= '1'; s_ghm <= x"01";
-                    elsif s_rr = 5 then s_gh_en <= '1'; s_ghm <= x"03";
-                    else s_gh_en <= '1'; s_ghm <= x"07"; end if;
+                    elsif s_ll = 4 then
+                        if s_msd = '1' or s_m720 = '1' then s_tmask <= x"01"; else s_tmask <= x"03"; end if;
+                    elsif s_ll = 5 then
+                        if s_msd = '1' then s_tmask <= x"03"; elsif s_m720 = '1' then s_tmask <= x"07"; else s_tmask <= x"0F"; end if;
+                    else
+                        if s_msd = '1' then s_tmask <= x"0F"; elsif s_m720 = '1' then s_tmask <= x"1F"; else s_tmask <= x"FF"; end if;
+                    end if;
+                    -- row grout: the row's first 1/1/2/4/8 virtual lines
+                    if s_rr < 2 then s_gh_en <= '0'; s_tv <= to_unsigned(1, 4);
+                    elsif s_rr < 4 then s_gh_en <= '1'; s_tv <= to_unsigned(1, 4);
+                    elsif s_rr = 4 then s_gh_en <= '1'; s_tv <= to_unsigned(2, 4);
+                    elsif s_rr = 5 then s_gh_en <= '1'; s_tv <= to_unsigned(4, 4);
+                    else s_gh_en <= '1'; s_tv <= to_unsigned(8, 4); end if;
                     s_vstep <= s_vstep + 1;
                 when 6 =>
                     -- sync gain: K2 x width (full knob ~ +-1/4 of the width)
-                    s_sgp <= s_k2(9 downto 2) * s_wf;
+                    s_sgp <= s_k2(9 downto 2) * s_wsz;
                     s_grout <= s_k6(9 downto 2);
+                    s_nmaskb <= not resize(s_maskb, 11);
+                    -- rows of under 2 screen lines get line grout instead of a band
+                    if shift_left(resize(s_rm1, 17) + 1, 8) >= shift_left(resize(s_sty, 17), 1) then
+                        s_r2ok <= '1';
+                    else
+                        s_r2ok <= '0';
+                    end if;
                     s_vstep <= s_vstep + 1;
                 when 7 =>
                     s_sg <= s_sgp(18 downto 8);
+                    -- the band is at least one line (half a field step each side)
+                    if shift_left(resize(s_tv, 12), 8) >= s_sty then
+                        s_gth <= shift_left(resize(s_tv, 12), 8);
+                    else
+                        s_gth <= s_sty;
+                    end if;
                     s_vstep <= (others => '1');
                 when others => null;
             end case;
@@ -452,12 +578,15 @@ begin
             -- frame start (idempotent: vsync may serrate): the first line
             -- captures into bank 0 and is shown black
             if data_in.vsync_n = '0' and s_prev_vsync_n = '1' then
-                s_vcnt    <= (others => '1');
+                s_ya      <= (others => '1');
+                s_lcnt    <= (others => '0');
+                s_rowst   <= '0';
+                s_capchk  <= '0';
                 s_capture <= '1';
                 s_wpar    <= '0';
                 s_rb_nx   <= '1';
                 s_l0_nx   <= '1';
-                s_bandc   <= (others => '1');
+                s_bandv   <= to_unsigned(1792, 12);
                 if s_saw_active = '1' then
                     s_vstep <= (others => '0');
                 end if;
@@ -467,7 +596,7 @@ begin
             -- box path k0: raw sample, ring sample N back, first-pixel latch
             s_xdy <= unsigned(data_in.y); s_xdu <= unsigned(data_in.u); s_xdv <= unsigned(data_in.v);
             s_q2  <= s_bq(29 downto 0);
-            if (s_rx and s_nmask) /= 0 then s_cond <= '1'; else s_cond <= '0'; end if;
+            if (s_rx and s_nmaskb) /= 0 then s_cond <= '1'; else s_cond <= '0'; end if;
             if data_in.avid = '1' and s_prev_avid = '0' then
                 s_x0y <= unsigned(data_in.y); s_x0u <= unsigned(data_in.u); s_x0v <= unsigned(data_in.v);
             end if;
@@ -481,7 +610,7 @@ begin
                 s_du <= signed('0' & s_xdu) - signed('0' & s_x0u);
                 s_dv <= signed('0' & s_xdv) - signed('0' & s_x0v);
             end if;
-            s_xny <= f_mul(s_xdy, s_n); s_xnu <= f_mul(s_xdu, s_n); s_xnv <= f_mul(s_xdv, s_n);
+            s_xny <= f_mul(s_xdy, s_nb); s_xnu <= f_mul(s_xdu, s_nb); s_xnv <= f_mul(s_xdv, s_nb);
             s_first <= s_avid_sr(0) and not s_avid_sr(1);
             -- k2: running sums = exact N-sample window ending at this pixel
             if s_first = '1' then
@@ -492,7 +621,7 @@ begin
                 s_accv <= unsigned(signed(s_accv) + s_dv);
             end if;
             -- k3: average
-            s_avy <= f_avg(s_accy, s_n); s_avu <= f_avg(s_accu, s_n); s_avv <= f_avg(s_accv, s_n);
+            s_avy <= f_avg(s_accy, s_nb); s_avu <= f_avg(s_accu, s_nb); s_avv <= f_avg(s_accv, s_nb);
             -- write port: pixel index / bank / enable, 4 clocks behind
             s_wx(1) <= s_rx; s_wp(1) <= s_wpar; s_wc(1) <= data_in.avid and s_capture;
             for i in 2 to 4 loop
@@ -512,10 +641,11 @@ begin
     -- Read address (k0..k10): sync shift, Square hold, collapse, Squeeze hold
     --------------------------------------------------------------------------
     p_addr : process(clk)
+        variable v_c : unsigned(18 downto 0);
     begin
         if rising_edge(clk) then
-            -- k0: screen x
-            s_ax0 <= s_rx;
+            -- k0: screen x (virtual units)
+            s_ax0 <= s_vxa(11 downto 1);
             -- k1: sync loss shifts the screen
             s_xs1 <= signed(resize(s_ax0, 13)) - resize(s_off_row, 13);
             -- k2: Square tiles hold at the screen cell's last pixel
@@ -588,57 +718,77 @@ begin
             s_addrp <= s_addr10;
             if s_addr10 /= s_addrp then s_chg11 <= '1'; else s_chg11 <= '0'; end if;
             s_bg11 <= s_bg10;
+            -- k11..k14: virtual address -> line-buffer pixel (the last pixel
+            -- whose span starts inside virtual unit V): 1080 V, SD V/2, 720p
+            -- floor((2V+1)/3) = ((V+1) x 21845) >> 15, as x5, x17, x257
+            s_cv11 <= s_addr10;
+            s_cp11 <= resize(s_addr10, 12) + 1;
+            s_cv12 <= s_cv11;
+            s_ct12 <= resize(s_cp11, 14) + shift_left(resize(s_cp11, 14), 2);
+            s_cv13 <= s_cv12;
+            s_ct13 <= resize(s_ct12, 18) + shift_left(resize(s_ct12, 18), 4);
+            if s_m720 = '1' then
+                v_c := resize(s_ct13, 19) + resize(s_ct13(17 downto 8), 19);
+                s_ra14 <= v_c(17 downto 7);
+            elsif s_msd = '1' then
+                s_ra14 <= '0' & s_cv13(10 downto 1);
+            else
+                s_ra14 <= s_cv13;
+            end if;
+            s_chg12 <= s_chg11; s_chg13 <= s_chg12; s_chg14 <= s_chg13; s_chg15 <= s_chg14;
+            s_bgd12 <= s_bg11;  s_bgd13 <= s_bgd12; s_bgd14 <= s_bgd13; s_bg15  <= s_bgd14;
         end if;
     end process p_addr;
 
     --------------------------------------------------------------------------
-    -- Line buffers (averages written k4, read at k10 -> data k11)
+    -- Line buffers (averages written k4, read at k14 -> data k15)
     --------------------------------------------------------------------------
     p_lbY0 : process(clk)
     begin
         if rising_edge(clk) then
-            s_rdY0 <= lbY0(to_integer(s_addr10));
+            s_rdY0 <= lbY0(to_integer(s_ra14));
             if s_wc(4) = '1' and s_wp(4) = '0' then lbY0(to_integer(s_wx(4))) <= std_logic_vector(s_avy); end if;
         end if;
     end process;
     p_lbY1 : process(clk)
     begin
         if rising_edge(clk) then
-            s_rdY1 <= lbY1(to_integer(s_addr10));
+            s_rdY1 <= lbY1(to_integer(s_ra14));
             if s_wc(4) = '1' and s_wp(4) = '1' then lbY1(to_integer(s_wx(4))) <= std_logic_vector(s_avy); end if;
         end if;
     end process;
     p_lbU0 : process(clk)
     begin
         if rising_edge(clk) then
-            s_rdU0 <= lbU0(to_integer(s_addr10(10 downto 1)));
+            s_rdU0 <= lbU0(to_integer(s_ra14(10 downto 1)));
             if s_wc(4) = '1' and s_wp(4) = '0' then lbU0(to_integer(s_wx(4)(10 downto 1))) <= std_logic_vector(s_avu(9 downto 2)); end if;
         end if;
     end process;
     p_lbU1 : process(clk)
     begin
         if rising_edge(clk) then
-            s_rdU1 <= lbU1(to_integer(s_addr10(10 downto 1)));
+            s_rdU1 <= lbU1(to_integer(s_ra14(10 downto 1)));
             if s_wc(4) = '1' and s_wp(4) = '1' then lbU1(to_integer(s_wx(4)(10 downto 1))) <= std_logic_vector(s_avu(9 downto 2)); end if;
         end if;
     end process;
     p_lbV0 : process(clk)
     begin
         if rising_edge(clk) then
-            s_rdV0 <= lbV0(to_integer(s_addr10(10 downto 1)));
+            s_rdV0 <= lbV0(to_integer(s_ra14(10 downto 1)));
             if s_wc(4) = '1' and s_wp(4) = '0' then lbV0(to_integer(s_wx(4)(10 downto 1))) <= std_logic_vector(s_avv(9 downto 2)); end if;
         end if;
     end process;
     p_lbV1 : process(clk)
     begin
         if rising_edge(clk) then
-            s_rdV1 <= lbV1(to_integer(s_addr10(10 downto 1)));
+            s_rdV1 <= lbV1(to_integer(s_ra14(10 downto 1)));
             if s_wc(4) = '1' and s_wp(4) = '1' then lbV1(to_integer(s_wx(4)(10 downto 1))) <= std_logic_vector(s_avv(9 downto 2)); end if;
         end if;
     end process;
 
     --------------------------------------------------------------------------
-    -- Pixel path (k12..k18): bank, grout, output conditioning, gate
+    -- Pixel path (k16..k22; the names keep their pre-v0.2.2 stage numbers,
+    -- 4 lower): bank, grout, output conditioning, gate
     --------------------------------------------------------------------------
     p_pix : process(clk)
         variable v_h  : unsigned(7 downto 0);
@@ -654,7 +804,7 @@ begin
             else
                 v_c1 := s_rdU0; v_c2 := s_rdV0;
             end if;
-            if s_bg11 = '1' or s_line0 = '1' then
+            if s_bg15 = '1' or s_line0 = '1' then
                 s_y12 <= to_unsigned(64, 10); s_u12 <= to_unsigned(512, 10); s_v12 <= to_unsigned(512, 10);
             else
                 if s_rbank = '1' then s_y12 <= unsigned(s_rdY1); else s_y12 <= unsigned(s_rdY0); end if;
@@ -664,10 +814,10 @@ begin
                     s_u12 <= unsigned(v_c1) & "00"; s_v12 <= unsigned(v_c2) & "00";
                 end if;
             end if;
-            v_h := s_gh & s_chg11;
+            v_h := s_gh & s_chg15;
             s_gh <= v_h(6 downto 0);
             if (v_h and s_tmask) /= 0 then s_gvt12 <= '1'; else s_gvt12 <= '0'; end if;
-            s_bg12 <= s_bg11 or s_line0;
+            s_bg12 <= s_bg15 or s_line0;
             -- k13: grout differences
             if s_white = '1' then
                 s_ey13 <= to_signed(940, 11) - signed('0' & s_y12);
@@ -688,7 +838,7 @@ begin
             s_pv14 <= s_ev13 * signed('0' & s_gc13);
             s_y14 <= s_y13; s_u14 <= s_u13; s_v14 <= s_v13;
             -- k15: apply; neutral outside the avid (the smoothing's edges)
-            if s_avid_sr(14) = '0' then
+            if s_avid_sr(18) = '0' then
                 s_y15 <= to_unsigned(64, 10); s_u15 <= to_unsigned(512, 10); s_v15 <= to_unsigned(512, 10);
             else
                 s_y15 <= f_clampy(signed(resize(s_y14, 13)) + resize(shift_right(s_py14, 8), 13));
@@ -708,7 +858,7 @@ begin
             -- k18: luma toward black, 64 + 13/16 (y - 64) (white ~775); gate
             v_d  := s_ys - 64;
             v_yo := s_ys - shift_right(v_d, 3) - shift_right(v_d, 4);
-            if s_avid_sr(17) = '1' then
+            if s_avid_sr(21) = '1' then
                 s_yo <= v_yo; s_uo <= s_us; s_vo <= s_vs;
             else
                 s_yo <= to_unsigned(64, 10); s_uo <= to_unsigned(512, 10); s_vo <= to_unsigned(512, 10);
@@ -725,7 +875,7 @@ begin
     s_io_align_in.avid    <= s_avid_sr(C_LAT - 1);
 
     -- IO-align pad: video and syncs delayed together, so only the total
-    -- latency changes (19 -> 20).
+    -- latency changes (23 -> 24).
     p_io_align_pad : process(clk)
     begin
         if rising_edge(clk) then

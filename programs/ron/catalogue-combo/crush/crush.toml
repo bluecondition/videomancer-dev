@@ -5,10 +5,10 @@
 # and slider set the interaction.  See crush.vhd.
 
 [program]
-processing_delay_clks = 20
+processing_delay_clks = 24
 program_id = "com.czartroniks.crush"
 program_name = "Crush"
-program_version = "0.2.1"
+program_version = "0.2.2"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
