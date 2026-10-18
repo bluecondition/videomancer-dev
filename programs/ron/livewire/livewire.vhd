@@ -63,6 +63,18 @@
 -- BRAM: 2 luma line buffers (8) + field (8) + field aux (1) + coarse luma (1)
 -- + dry-video ring (2) + sine ROM (1) + hue-wheel ROM (2) ~ 23 EBR.  Latency
 -- C_LATENCY = 19, identical in every mode.
+--
+-- v1.1.4 (2026-10-18): resolution scaling.  The field's cells were 16 px wide
+-- at 720p AND 1080p (a measured-width switch), so 720p halos and trails were
+-- 1.5x wider relative to the picture.  The cell clock now counts 16 VIRTUAL
+-- units (timing-ID x step), giving 10.67-px cells at 720p, and the horizontal
+-- interpolation steps the same units (this also fixes SD, whose 8-px cells
+-- only ramped half way and then jumped at every cell edge).  720p's 12-line
+-- cell rows overflowed the vertical lerp weight (bands on the last three
+-- lines of every row); fixed.  Kirlian/Ink filaments are projected in
+-- virtual units, so their pitch follows the screen height and the diagonals
+-- stay at 45 degrees at SD.  1080p is bit-identical.  Edge kernels, the
+-- coarse pyramid box, grain and the dither stay at pixel scale.
 --------------------------------------------------------------------------------
 
 library ieee;
@@ -145,6 +157,32 @@ architecture livewire of program_top is
             return to_unsigned(255, 8);
         end if;
         return shift_left(resize(unsigned(d(7 downto 0)), 8), sh);
+    end function;
+
+    -- Resolution scaling (v1.1.4, mondrian pilot): virtual 1080-line units.
+    -- x step in half virtual units per pixel: 1080 2 (1.0), 720p 3 (1.5),
+    -- SD 4 (2.0: 720 px span 1440 units, a 4:3 window of the 1080 canvas).
+    function f_vstep_x(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0 | 4 | 8 | 12 => return to_unsigned(4, 3);
+            when 5 | 6 | 14     => return to_unsigned(3, 3);
+            when others         => return to_unsigned(2, 3);
+        end case;
+    end function;
+    -- y step in Q4.8 virtual units per FIELD line (1080 / active lines,
+    -- doubled for interlaced modes).
+    function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(1138, 12);  -- 480i: 2 x 1080/486
+            when 4          => return to_unsigned(576, 12);   -- 480p: 1080/480
+            when 8          => return to_unsigned(960, 12);   -- 576i: 2 x 1080/576
+            when 12         => return to_unsigned(480, 12);   -- 576p: 1080/576
+            when 5 | 6 | 14 => return to_unsigned(384, 12);   -- 720p: 1.5
+            when 1 | 2 | 10 => return to_unsigned(512, 12);   -- 1080i: 2.0
+            when others     => return to_unsigned(256, 12);   -- 1080p: 1.0
+        end case;
     end function;
 
     -- quarter-wave folded sine, 64-entry logic ROM (intaglio lineage)
@@ -510,7 +548,23 @@ architecture livewire of program_top is
     -- sees settled values -- reading mid-cell would stripe each cell boundary)
     signal fa_p2, fa_p1, fa_c, fa_n, fa_pf : unsigned(3 downto 0) := (others => '0');
     signal fb_p1, fb_c, fb_n, fb_pf : unsigned(3 downto 0) := (others => '0');
-    signal s_xf   : unsigned(11 downto 0) := (others => '0');
+    -- v1.1.4: the field's cell clock.  A cell is 16 VIRTUAL units wide:
+    -- s_fva is the Q.1 position inside the cell (step 2/3/4 per pixel from
+    -- the timing ID), s_fsub the clock count since the cell started (the
+    -- engine's state), s_fcol the cell column.  At 1080p (16 px) and SD
+    -- (8 px) they equal the old s_xf(3:0)/(2:0) and s_xf >> 4/3; 720p gets
+    -- 10.67-px cells (11/11/10 clocks), so the halo is no longer 1.5x wider.
+    signal s_fva  : unsigned(5 downto 0) := (others => '0');
+    signal s_fsub : unsigned(3 downto 0) := (others => '0');
+    signal s_fcol : unsigned(6 downto 0) := (others => '0');
+    signal s_xs   : unsigned(2 downto 0) := to_unsigned(2, 3);
+    signal s_ys   : unsigned(11 downto 0) := to_unsigned(256, 12);
+    -- virtual x (Q.1) and active-line y (Q.8) for the filament projection
+    signal s_vxa  : unsigned(12 downto 0) := (others => '0');
+    signal s_vya  : unsigned(19 downto 0) := (others => '0');
+    -- 720p corner steps (1.5 x the difference), precomputed per cell
+    signal s_dt4, s_db4, s_dth, s_dbh : signed(5 downto 0) := (others => '0');
+    signal s_d15t, s_d15b : signed(5 downto 0) := (others => '0');
     signal fsub_r : unsigned(4 downto 0) := (others => '0');
     signal f_injd : unsigned(3 downto 0) := (others => '0');
     signal f_inja : unsigned(3 downto 0) := (others => '0');
@@ -1125,6 +1179,7 @@ begin
         variable v_mg  : unsigned(7 downto 0);
         variable v_lim : unsigned(9 downto 0);
         variable v_pj  : unsigned(12 downto 0);
+        variable v_fv  : unsigned(6 downto 0);
 
         variable v_d   : signed(9 downto 0);
     begin
@@ -1147,7 +1202,11 @@ begin
                 r0_u <= unsigned(data_in.v);
                 r0_v <= unsigned(data_in.u);
                 s_x  <= s_x + 1;
+                s_vxa <= s_vxa + s_xs;
             end if;
+            -- virtual steps, free-running from the timing ID (static per mode)
+            s_xs <= f_vstep_x(registers_in(8)(3 downto 0));
+            s_ys <= f_vstep_y(registers_in(8)(3 downto 0));
 
             s_w2p <= s_w2;
 
@@ -1583,8 +1642,10 @@ begin
             s_dith <= C_BAYER(to_integer(s_x(1 downto 0) & s_aline(1 downto 0)));
             -- Kirlian crackle's per-frame jitter, pre-added off the S10 path
             -- (a clock of lag on a free-running coordinate is invisible)
-            s_xj  <= s_x + resize(s_jx, 12);
-            s_alj <= s_aline + resize(s_jy, 11);
+            -- v1.1.4: in virtual units, so the filament pitch follows the
+            -- screen height and the diagonals stay 45 degrees at SD
+            s_xj  <= s_vxa(12 downto 1) + resize(s_jx, 12);
+            s_alj <= s_vya(18 downto 8) + resize(s_jy, 11);
             -- one gate for the whole material, alphas AND field halo: the
             -- field keeps decaying for a few frames after EMERGE drops, and
             -- an ungated halo still tinted chroma at 0
@@ -1597,7 +1658,15 @@ begin
             -- the field engine is keyed to the pixel at stage 10, so its
             -- injection and its display value are the same pixel
             if av(10) = '1' then
-                s_xf <= s_xf + 1;
+                v_fv := resize(s_fva, 7) + resize(s_xs, 7);
+                if v_fv >= 32 then
+                    s_fva  <= resize(v_fv - 32, 6);
+                    s_fsub <= (others => '0');
+                    s_fcol <= s_fcol + 1;
+                else
+                    s_fva  <= v_fv(5 downto 0);
+                    s_fsub <= s_fsub + 1;
+                end if;
             end if;
 
             -- video delay: the dry path rides an EBR ring, never swapped
@@ -1606,13 +1675,17 @@ begin
             -- line bookkeeping
             if data_in.hsync_n = '0' and s_prev_hsync_n = '1' then
                 s_x   <= (others => '0');
-                s_xf  <= (others => '0');
+                s_vxa <= (others => '0');
+                s_fva  <= (others => '0');
+                s_fsub <= (others => '0');
+                s_fcol <= (others => '0');
                 lrx   <= (others => '0');
                 lwx   <= (others => '0');
                 if s_seen = '1' then
                     s_seen <= '0';
                     if s_aline < 2000 then
                         s_aline <= s_aline + 1;
+                        s_vya   <= s_vya + s_ys;
                     end if;
                     -- cell-row bookkeeping: the field updates on the last
                     -- line of each cell row, when its injection is complete
@@ -1633,6 +1706,7 @@ begin
                     end if;
                 else
                     s_aline <= (others => '0');
+                    s_vya   <= (others => '0');
                     s_inrow <= (others => '0');
                     s_crow  <= (others => '0');
                     s_lastl <= '0';
@@ -1821,6 +1895,7 @@ begin
         variable v_new : unsigned(3 downto 0);
         variable v_sp, v_pe : unsigned(3 downto 0);
         variable v_t, v_b : unsigned(8 downto 0);
+        variable v_dt, v_db : signed(5 downto 0);
     begin
         if rising_edge(clk) then
             f_we  <= '0';
@@ -1846,22 +1921,22 @@ begin
                 s_rowf <= '0';
             end if;
 
-            if s_cwsh = 4 then
-                v_sub := resize(s_xf(3 downto 0), 5);
-                v_col := resize(shift_right(s_xf, 4), 7);
-                f_wx  <= resize(s_xf(3 downto 0), 5);
-            else
-                v_sub := resize(s_xf(2 downto 0), 5);
-                v_col := resize(shift_right(s_xf, 3), 7);
-                f_wx  <= resize(s_xf(2 downto 0) & '0', 5);
-            end if;
+            -- v1.1.4: the cell clock runs in virtual units (16 per cell)
+            v_sub := resize(s_fsub, 5);
+            v_col := s_fcol;
             fcol   <= v_col;
             fsub_r <= v_sub;
 
             -- vertical lerp weight: the line index inside the cell row,
-            -- scaled to 0..15 by a shift chosen from the cell height
-            if s_ch >= 16 then
+            -- scaled to 0..8 by a shift chosen from the cell height.
+            -- v1.1.4: 720p's 12-line rows took the unscaled index (0..11),
+            -- so 8 - w wrapped on the last three lines of every row and
+            -- striped the halo; 10..12-line rows now take 3/4 of it.
+            if s_ch >= 13 then
                 f_wy3 <= resize(shift_right(s_inrow, 1), 4);
+            elsif s_ch >= 10 then
+                f_wy3 <= resize(shift_right(resize(s_inrow, 8)
+                                 + shift_left(resize(s_inrow, 8), 1), 2), 4);
             elsif s_ch >= 8 then
                 f_wy3 <= resize(s_inrow, 4);
             else
@@ -1921,6 +1996,13 @@ begin
                         end if;
 
                     when 4 =>
+                        -- the next reload's corner differences (fa_pf landed
+                        -- at state 2, fb_pf at 3; neither moves again until
+                        -- the next cell's state 0 consumes them)
+                        s_dt4 <= resize(signed('0' & fa_pf), 6)
+                                 - resize(signed('0' & fa_n), 6);
+                        s_db4 <= resize(signed('0' & fb_pf), 6)
+                                 - resize(signed('0' & fb_n), 6);
                         -- the recursion is spread over four of the cell's
                         -- spare clocks; fused into one state it was a
                         -- 36-level path and the whole design's ceiling
@@ -1938,8 +2020,26 @@ begin
                     when 5 =>
                         f_spv <= resize(shift_right(f_nbr * s_spread, 4), 4);
                         f_pev <= resize(shift_right(fa_p1 * s_perst, 4), 4);
+                        -- half rounded toward zero: a floored -1/2 made
+                        -- the step overshoot a falling ramp below 0 within
+                        -- an 11-px cell, which wrapped to a bright pixel
+                        if s_dt4(5) = '1' then
+                            s_dth <= shift_right(s_dt4 + 1, 1);
+                        else
+                            s_dth <= shift_right(s_dt4, 1);
+                        end if;
+                        if s_db4(5) = '1' then
+                            s_dbh <= shift_right(s_db4 + 1, 1);
+                        else
+                            s_dbh <= shift_right(s_db4, 1);
+                        end if;
 
                     when 6 =>
+                        -- 720p's 1.5x corner step, built in the cell's spare
+                        -- states from two registers (x + x/2 on ONE signal
+                        -- gives a LUT one net on two pins: router1 hangs)
+                        s_d15t <= s_dt4 + s_dth;
+                        s_d15b <= s_db4 + s_dbh;
                         v_new := f_injm;
                         if f_spv > v_new then v_new := f_spv; end if;
                         if f_pev > v_new then v_new := f_pev; end if;
@@ -1977,13 +2077,28 @@ begin
                 -- edge from the values the chain is about to shift in, then
                 -- one add per pixel.  Exact, not an approximation -- after 16
                 -- adds the accumulator IS the next cell's value.
+                -- v1.1.4: a cell spans 16 virtual units, so the per-pixel
+                -- step is the corner difference times the x step (1x 1080p,
+                -- 1.5x 720p, 2x SD).  SD used to take 1x over its 8-px
+                -- cells: half a ramp, then a jump at every cell edge.
                 if v_sub = 0 then
                     acc_t <= shift_left(resize(signed('0' & fa_n), 14), 4);
                     acc_b <= shift_left(resize(signed('0' & fb_n), 14), 4);
-                    stp_t <= resize(signed('0' & fa_pf), 6)
-                             - resize(signed('0' & fa_n), 6);
-                    stp_b <= resize(signed('0' & fb_pf), 6)
-                             - resize(signed('0' & fb_n), 6);
+                    v_dt := resize(signed('0' & fa_pf), 6)
+                            - resize(signed('0' & fa_n), 6);
+                    v_db := resize(signed('0' & fb_pf), 6)
+                            - resize(signed('0' & fb_n), 6);
+                    case to_integer(s_xs) is
+                        when 4 =>
+                            stp_t <= shift_left(v_dt, 1);
+                            stp_b <= shift_left(v_db, 1);
+                        when 3 =>
+                            stp_t <= s_d15t;
+                            stp_b <= s_d15b;
+                        when others =>
+                            stp_t <= v_dt;
+                            stp_b <= v_db;
+                    end case;
                 else
                     acc_t <= acc_t + resize(stp_t, 14);
                     acc_b <= acc_b + resize(stp_b, 14);
@@ -2004,6 +2119,8 @@ begin
                 fb_c  <= (others => '0');
                 fb_n  <= (others => '0');
                 f_inja <= (others => '0');
+                s_d15t <= (others => '0');
+                s_d15b <= (others => '0');
             end if;
         end if;
     end process p_field;

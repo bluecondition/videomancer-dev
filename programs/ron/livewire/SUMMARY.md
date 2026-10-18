@@ -29,6 +29,47 @@ don't rerun the builder: rebuild a single config with `make ... SEED=<seed
 above> "ROUTER=--router router2"` and repack with `vmprog_pack.py --no-sign`.
 Earlier: v1.1.0 HD HDMI seed 2; v1.0.0 HD HDMI seed 2; build12 HD Dual seed 2.
 
+## v1.1.4 (2026-10-18): resolution scaling
+
+The halo/trail field is a grid of cells, and its cell width came from a
+measured-width switch (`s_meas_w > 1024`): 16 px at 720p AND 1080p, 8 px at
+SD. 720p halos and trails were therefore 1.5x wider relative to the picture.
+Three more resolution bugs showed up in debug renders of the field alone:
+
+- **Cells in virtual units.** The field engine's cell clock counts 16 virtual
+  units, using the timing ID's x step (Q.1: 2 / 3 / 4 per pixel). 1080p keeps
+  16-px cells and SD keeps 8-px cells. 720p gets 10.67-px cells (11/11/10
+  clocks), so it has 120 columns, the same as 1080p. Cell rows were already
+  height-based (17 / 12 / 4 lines).
+- **Horizontal interpolation, 720p and SD.** The DDA stepped one corner
+  difference per pixel, which assumes 16-px cells. SD's 8-px cells ramped
+  only half way and then jumped at every cell edge, a sawtooth halo. The step
+  is now the difference times the x step: x2 at SD, x1.5 at 720p. The 720p
+  step is precomputed in the cell's spare engine states from two registers,
+  because x + x/2 on one signal is a router1 self-add. Its half rounds toward
+  zero: a floored −1/2 overshot falling ramps below 0, which drew bright 1-px
+  columns at the halo edge.
+- **720p vertical lerp overflow.** 720p cell rows are 12 lines, and the weight
+  took the raw line index (0..11), so `8 − w` wrapped on the last three lines
+  of every row. That drew horizontal bands through the halo. Rows of 10..12
+  lines now take 3/4 of the index.
+- **Kirlian/Ink filaments** are projected in virtual x/y (Q.1 / Q.8
+  accumulators). Their pitch follows the screen height, and the diagonal
+  filaments stay at 45° at SD. Before, SD's vertical pitch was in field lines
+  (4.4x too coarse).
+- Unchanged, at pixel scale: the Sobel window, the K2 pyramid (its coarse box
+  is still 16 px at 720p), grain, the EMERGE dither and the 28-px / 3-line
+  edge guard.
+- 1080p is bit-identical (pixel diff 0, Neon and Kirlian). Standalone +118
+  LUT4. dupin 0. `emulate_transparency` 5, the same as before.
+
+Build (v1.1.4, dev flow router2): HD Analog 80.10 MHz (**seed 2**: seed 1
+missed timing under machine load), HD HDMI 83.62 (seed 1), HD Dual 76.28
+(seed 1); SD Analog 81.58 (**seed 2**: seed 1 stalled the router), SD HDMI 85.80,
+SD Dual 73.10 MHz (seed 1). ~7,030 / 7,680 LC (91.5%, was 89%), 23/32 EBR.
+HD Dual's margin is thinner than v1.1.1's (85.85). The community port
+(router1, `[firmware] seed = 2`) needs re-checking when this is synced.
+
 ## v1.1.x changes
 
 - **Kirlian crackle:** on random frames the filaments re-deal their lengths
