@@ -38,7 +38,7 @@
 --   K6 Mix      dry/wet
 --   S7 Shape    Triangle / Sine (sine table is -cos so shapes stay aligned)
 --   S8 Swell    slow automatic triangle LFO on Amount (~6 s)
---   S9 Steps    quantize the offset to 16 px -> staircase band shred
+--   S9 Steps    quantize the offset to 16 px (16 virtual units) -> staircase
 --   S10 Edge    Mirror / Wrap, both over the inset columns [12, W-13] so
 --               the source's black blanking columns never reach the picture
 --   S11 Bypass  mix forced dry (same latency)
@@ -69,6 +69,15 @@
 --   E1     bank select -> s_wet_*
 --   E2     blanking gate: dry and wet forced to 64/512/512 outside avid
 --   E3-E6  dry/wet mix (split-multiply lerp, 4 clocks) -> data_out
+--
+-- v1.1.2 (2026-10-18) resolution scaling: the wave runs in virtual
+-- 1080-line units from the video timing ID (registers_in(8)), 1080p output
+-- unchanged bit for bit.  The line sequencer's phase/freq advance (step 0)
+-- repeats once per VIRTUAL line the field line covers (720p 1-2, 480i 4-5),
+-- so Period (a vertical wavelength) and Twist give the same bends per
+-- screen height at every resolution, and the Twist pivot is the virtual
+-- centre row.  S9 Steps quantizes to 16 virtual units (720p ~10.5 px,
+-- SD 8 px).  Amount and Ripple were already fractions of the width.
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -158,6 +167,21 @@ architecture sidewinder of program_top is
     );
 
     -- Triangle fold of a 16-bit phase to -256..255 (min at phase 0).
+    -- Resolution scaling: Q4.8 virtual lines per FIELD line (the pilot's,
+    -- mondrian, table; doubled for interlace).
+    function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(1138, 12);  -- 480i: 2 x 1080/486
+            when 4          => return to_unsigned(576, 12);   -- 480p: 1080/480
+            when 8          => return to_unsigned(960, 12);   -- 576i: 2 x 1080/576
+            when 12         => return to_unsigned(480, 12);   -- 576p: 1080/576
+            when 5 | 6 | 14 => return to_unsigned(384, 12);   -- 720p: 1.5
+            when 1 | 2 | 10 => return to_unsigned(512, 12);   -- 1080i: 2.0
+            when others     => return to_unsigned(256, 12);   -- 1080p: 1.0
+        end case;
+    end function;
+
     function f_tri(phase : unsigned(15 downto 0)) return signed is
         variable v_ramp : signed(9 downto 0);
     begin
@@ -253,7 +277,19 @@ architecture sidewinder of program_top is
     signal s_prev_vsync_n : std_logic := '1';
     signal s_saw_active   : std_logic := '0';
     signal s_aline        : unsigned(10 downto 0) := (others => '0');
-    signal s_height_m     : unsigned(10 downto 0) := to_unsigned(1080, 11);
+    signal s_height_m     : unsigned(10 downto 0) := to_unsigned(1080, 11);  -- virtual lines
+
+    -- Resolution scaling (v1.1.2): s_ys = Q4.8 virtual lines per FIELD line
+    -- (1080p 1.0, 720p 1.5, 480i 4.44 ...), s_cls 0 = 1080 lines, 1 = 720p,
+    -- 2 = SD; both decoded free-running from the timing ID.  s_yfr carries
+    -- the virtual-line fraction down the field, s_rep = virtual lines the
+    -- next line advances (step-0 repeats), s_alv the virtual line count.
+    signal s_ys           : unsigned(11 downto 0) := to_unsigned(256, 12);
+    signal s_cls          : unsigned(1 downto 0)  := (others => '0');
+    signal s_yfr          : unsigned(7 downto 0)  := (others => '0');
+    signal s_rep          : unsigned(2 downto 0)  := to_unsigned(1, 3);
+    signal s_alv          : unsigned(19 downto 0) := (others => '0');
+    signal s_q3, s_qk, s_q21 : signed(13 downto 0) := (others => '0');  -- 720p Steps
     signal s_width_m      : unsigned(C_AW - 1 downto 0) := to_unsigned(1920, C_AW);
 
     --------------------------------------------------------------------------
@@ -447,6 +483,9 @@ begin
         variable v_g      : signed(16 downto 0);
         variable v_mag    : unsigned(13 downto 0);
         variable v_rate24 : signed(23 downto 0);
+        variable v_yn     : unsigned(11 downto 0);
+        variable v_av     : unsigned(19 downto 0);
+        variable v_k      : signed(13 downto 0);
     begin
         if rising_edge(clk) then
             s_in_y    <= data_in.y;
@@ -460,6 +499,14 @@ begin
             end if;
 
             s_mix_w <= not s_mix_k;
+
+            -- resolution-scaling steps (timing ID static while a mode runs)
+            s_ys <= f_vstep_y(registers_in(8)(3 downto 0));
+            case to_integer(unsigned(registers_in(8)(3 downto 0))) is
+                when 0 | 4 | 8 | 12 => s_cls <= "10";
+                when 5 | 6 | 14     => s_cls <= "01";
+                when others         => s_cls <= "00";
+            end case;
 
             -- Write column: pixel k of the line lands at address k.
             if s_in_avid = '1' then
@@ -514,9 +561,14 @@ begin
             end if;
 
             case to_integer(s_lstep) is
-                when 0 =>       -- advance to this line
+                when 0 =>       -- advance to this line: once per VIRTUAL
+                                -- line it covers (s_rep, 1 at 1080p)
                     s_phase <= s_phase + s_freq;
                     s_freq  <= s_freq + s_twist;
+                    if s_rep > 1 then
+                        s_rep   <= s_rep - 1;
+                        s_lstep <= (others => '0');
+                    end if;
                 when 1 =>       -- main lookup address, 3x phase, triangle
                     v_ph       := s_phase(23 downto 8);
                     s_rom_addr <= v_ph(15 downto 8);
@@ -561,10 +613,16 @@ begin
                     else
                         s_off_r <= v_hi8;
                     end if;
-                when 10 =>      -- combine, optional 16 px quantize
+                when 10 =>      -- combine, optional quantize to 16 virtual
+                                -- units: 1080p 16 px, SD 8 px; 720p (10.67
+                                -- px, not a power of two) in steps 11-13
                     v_off := s_off_m + s_off_r;
                     if s_steps = '1' then
-                        v_off(3 downto 0) := (others => '0');
+                        case s_cls is
+                            when "00"   => v_off(3 downto 0) := (others => '0');
+                            when "10"   => v_off(2 downto 0) := (others => '0');
+                            when others => null;
+                        end case;
                     end if;
                     s_off <= v_off;
                 when 11 =>      -- split product: |offset| * split
@@ -572,6 +630,16 @@ begin
                     s_lm_a    <= unsigned(v_abs13(10 downto 0));
                     s_lm_b    <= resize(s_split_q, 11);
                     s_neg_off <= s_off(12);
+                    s_q3      <= resize(s_off, 14) + shift_left(resize(s_off, 14), 1);
+                when 12 =>      -- 720p Steps: k = floor(off * 3 / 32)
+                    v_k   := shift_right(s_q3, 5);
+                    s_qk  <= v_k;
+                    s_q21 <= shift_left(v_k, 4) + shift_left(v_k, 2);
+                when 13 =>      -- 720p Steps: off = k * 10.5 (split keeps the
+                                -- unquantized |offset|: a sub-step difference)
+                    if s_steps = '1' and s_cls = "01" then
+                        s_off <= resize(shift_right(s_q21 + s_qk, 1), 13);
+                    end if;
                 when 14 =>
                     if s_neg_off = '1' then
                         s_dsplit <= -v_hi10;
@@ -622,7 +690,7 @@ begin
                         s_dir_v <= '0';
                     end if;
                     s_lstep <= C_L_IDLE;
-                when others =>  -- 7, 12, 13 (multiplier waits) and idle
+                when others =>  -- 7 (multiplier wait) and idle
                     null;
             end case;
 
@@ -640,7 +708,7 @@ begin
                     s_d_rate      <= signed('0' & s_rate_k) - to_signed(512, 11);
                     s_swell_phase <= s_swell_phase + to_unsigned(C_SWELL_RATE, 16);
                     s_W           <= s_width_m;
-                    s_H           <= s_height_m;
+                    s_H           <= s_height_m;   -- virtual lines (~1080)
                     s_mirror_f    <= not s_wrap;
                     s_gdiff       <= signed('0' & s_period_k & "000000") - signed('0' & s_g_per);
                 when 1 =>
@@ -755,7 +823,14 @@ begin
             if s_in_avid = '1' and data_in.avid = '0' then
                 s_par      <= not s_par;
                 s_aline    <= s_aline + 1;
-                s_height_m <= s_aline + 1;
+                -- virtual lines: the count (height for the Twist pivot) and
+                -- the step-0 repeats for the next line (1 at 1080p)
+                v_av       := s_alv + s_ys;
+                s_alv      <= v_av;
+                s_height_m <= v_av(18 downto 8);
+                v_yn       := resize(s_yfr, 12) + s_ys;
+                s_rep      <= v_yn(10 downto 8);
+                s_yfr      <= v_yn(7 downto 0);
                 if s_aline = to_unsigned(C_WIDTH_LINE, 11) then
                     s_width_m <= s_wr_x + 1;
                 end if;
@@ -767,6 +842,8 @@ begin
             if data_in.vsync_n = '0' and s_prev_vsync_n = '1' and s_saw_active = '1' then
                 s_saw_active <= '0';
                 s_aline      <= (others => '0');
+                s_alv        <= (others => '0');
+                s_yfr        <= (others => '0');
                 s_vstep      <= (others => '0');
             end if;
 

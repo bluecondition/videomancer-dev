@@ -16,7 +16,7 @@ The picture snakes left and right down the screen as a rolling triangle or sine 
 | K6 | Mix | 0–100% | Dry/wet between the straight and the warped picture |
 | S7 | Shape | Triangle / Sine | Zigzag or smooth bends |
 | S8 | Swell | Off / On | Slow automatic breathing of Amount (~6 s) |
-| S9 | Steps | Smooth / Stepped | Offsets snap to 16 px: staircase band shred |
+| S9 | Steps | Smooth / Stepped | Offsets snap to 16 px (at 1080p; scaled in other modes): staircase band shred |
 | S10 | Edge | Mirror / Wrap | Off-edge reads reflect, or the screen becomes a tube |
 | S11 | Bypass | Off / On | Straight picture at the same latency |
 | P12 | Amount | 0–100% | Bend amplitude: a gentle 3% sway up to half the width |
