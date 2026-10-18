@@ -167,6 +167,9 @@ build uses one seed for all 8 configs. Why: seed 1 crashes nextpnr's router1 (as
 With seed 6, the program's own HD logic (scratch core without LZX's Sync Out
 generator) is 86.2 / 87.4 / 87.6 MHz (Analog / HDMI / Dual). The dev flow (router2) is unchanged.
 
+v1.0.2 (2026-10-18): **seed 1**. The resolution-scaled netlist crashes nextpnr's router on
+seed 6; seed 1 builds all 8, with own HD logic at 84.8 / 85.8 / 87.6 MHz (Analog / HDMI / Dual).
+
 ## v1.0.2 — resolution scaling (2026-10-17)
 
 720p showed the lace 1.5x too big (only SD had a correction: `s<<1` when

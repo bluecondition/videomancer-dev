@@ -110,8 +110,10 @@ field) and the Map view was cropped.
   5 miss HD Analog (73.35 / 73.62). Its critical path is the existing vblank
   reveal sweep (s_r2 -> s_rva_v carry -> seen-RAM write enable, 3.6 ns logic +
   9.9 ns routing), routing-bound and outside the new S0 logic. The stock-SDK
-  community build (`[firmware] seed = 5`, 8 configs) has not been re-run for
-  v1.0.3.
+  community build was re-run for v1.0.3 on 2026-10-18: seed 1 misses the
+  program's own HD timing (73.4 MHz Analog / HDMI), so it now uses
+  `[firmware] seed = 2`, which builds all 8 configs at own HD 78.5 / 74.5 /
+  74.9 MHz (Analog / HDMI / Dual; thin on HDMI and Dual).
 
 ## v0.5.0 (2026-10-10) — Tier 3 batch B (look) + colour fix
 
