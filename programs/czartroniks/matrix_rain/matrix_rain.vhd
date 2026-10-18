@@ -26,6 +26,10 @@
 -- glyph sizes relative to screen height, square on a 4:3 SD screen (SD = a
 -- 1440-unit-wide window).  1080p is unchanged.
 --
+-- v1.0.3 (2026-10-18): fit (stock SDK SD Standalone 7821 -> 7175 LC), same
+-- picture bit for bit: no_rw_check on the collision-free RAMs, and the
+-- respawn draws share s_rnd (mix16 is linear) and one multiplier.
+--
 -- Glyph ROM: matrix_rain_glyphs_pkg.vhd (16x16 1bpp), generated at build time
 -- by matrix_rain.py from the vendored GNU Unifont subset (half-width katakana
 -- U+FF66..FF9D + digits + a few Latin/symbols).
@@ -232,6 +236,16 @@ architecture matrix_rain of program_top is
             when 1 | 2 | 10 => return to_unsigned(512, 12);   -- 1080i: 2.0
             when others     => return to_unsigned(256, 12);   -- 1080p: 1.0
         end case;
+    end function;
+
+    -- respawn-draw constants mix16(5A3C xor K) (see u_um)
+    function f_uk1(d : integer) return unsigned is
+    begin
+        return mix16(x"5A3C" xor to_unsigned(16#3A71# + d * 16#1D3#, 16));
+    end function;
+    function f_uk2(d : integer) return unsigned is
+    begin
+        return mix16(x"5A3C" xor to_unsigned(16#C4B5# + d * 16#2E9#, 16));
     end function;
 
     -- reverse a 16-bit row (horizontal mirror).
@@ -498,6 +512,19 @@ architecture matrix_rain of program_top is
     type t_vring is array (0 to 255) of std_logic_vector(31 downto 0);
     signal s_vring : t_vring := (others => (others => '0'));
     attribute ram_style of s_vring : signal is "block";
+    -- Collision-free RAMs (see CLAUDE.md "no_rw_check"): skip yosys's
+    -- read-before-write emulation.  vring: read pointer trails the write
+    -- pointer by C_VDLY.  Drop RAMs: the one colliding read (update walk
+    -- write-back) lands in vblank and is never used.  Luma map: write and
+    -- read banks differ while video is active.  Param RAM: written in vblank.
+    attribute no_rw_check : boolean;
+    attribute no_rw_check of s_vring : signal is true;
+    attribute no_rw_check of s_hm0   : signal is true;
+    attribute no_rw_check of s_hm1   : signal is true;
+    attribute no_rw_check of s_hm2   : signal is true;
+    attribute no_rw_check of s_im    : signal is true;
+    attribute no_rw_check of s_lmap  : signal is true;
+    attribute no_rw_check of s_prm   : signal is true;
     signal s_vwa   : unsigned(7 downto 0) := (others => '0');
     signal s_vra   : unsigned(7 downto 0) := to_unsigned(256 - C_VDLY, 8);
     signal s_vq    : std_logic_vector(31 downto 0) := (others => '0');
@@ -545,10 +572,14 @@ architecture matrix_rain of program_top is
     signal u_gap   : t_u10 := (others => (others => '0'));   -- respawn gap (rows)
     signal u_ninfo : t_u4  := (others => (others => '0'));   -- respawn alive/j
     signal u_nfrac : t_u4  := (others => (others => '0'));   -- respawn fraction bits
-    type t_r16 is array (0 to C_ND - 1) of unsigned(15 downto 0);
-    signal u_rnd   : t_r16 := (others => (others => '0'));   -- gap / alive randoms
-    signal u_rnd2  : t_r16 := (others => (others => '0'));   -- speed / frac randoms
-    signal u_prod  : t_r16 := (others => (others => '0'));   -- rnd8 * sparse
+    -- Respawn randoms.  mix16 is linear over GF(2), so the per-drop draws
+    -- mix16(lfsr xor K) equal mix16(lfsr xor 5A3C) xor mix16(5A3C xor K):
+    -- one held copy of s_rnd (taken the clock after U_W1, when it carries
+    -- the U_W1 lfsr) xor a per-drop constant.  One shared rnd8 * sparse
+    -- multiplier serves the three drops on consecutive clocks.
+    signal u_um    : unsigned(15 downto 0) := (others => '0');   -- s_rnd held at U_W2
+    signal u_op    : unsigned(7 downto 0)  := (others => '0');   -- multiplier operand
+    signal u_p     : unsigned(15 downto 0) := (others => '0');   -- shared rnd8 * sparse
 
     --------------------------------------------------------------------------
     -- Pipeline registers
@@ -965,7 +996,8 @@ begin
     --------------------------------------------------------------------------
     p_headupd : process(clk)
         variable v_r     : unsigned(15 downto 0);
-        variable v_prod  : unsigned(15 downto 0);
+        variable v_r1    : unsigned(15 downto 0);
+        variable v_gap   : unsigned(9 downto 0);
         variable v_b     : unsigned(8 downto 0);
         variable v_j     : std_logic_vector(2 downto 0);
         variable v_new   : signed(15 downto 0);
@@ -973,6 +1005,22 @@ begin
         variable v_info  : std_logic_vector(15 downto 0);
     begin
         if rising_edge(clk) then
+            -- shared respawn multiplier: drop 0 / 1 / 2 operand registered in
+            -- U_W2 / U_LAT / U_SPD1, product in U_LAT / U_SPD1 / U_SPD2, the
+            -- gap slice lands in U_SPD1 / U_SPD2 / U_ADD
+            case s_ustate is
+                when U_W2   => u_op <= s_rnd(7 downto 0) xor f_uk1(0)(7 downto 0);
+                when U_LAT  => u_op <= u_um(7 downto 0)  xor f_uk1(1)(7 downto 0);
+                when others => u_op <= u_um(7 downto 0)  xor f_uk1(2)(7 downto 0);
+            end case;
+            u_p <= u_op * s_sparse;
+            case to_integer(s_zoom) is
+                when 0      => v_gap := u_p(15 downto 6);
+                when 1      => v_gap := resize(u_p(15 downto 7), 10);
+                when 2      => v_gap := resize(u_p(15 downto 8), 10);
+                when others => v_gap := resize(u_p(15 downto 9), 10);
+            end case;
+
             s_hw_we <= '0';
             case s_ustate is
                 when U_IDLE =>
@@ -985,16 +1033,10 @@ begin
                     s_upd_raddr <= s_ucnt(6 downto 0);
                     s_ustate    <= U_W1;
                 when U_W1 =>
-                    -- the read wait states draw the respawn randoms
-                    for d in 0 to C_ND - 1 loop
-                        u_rnd(d)  <= mix16(unsigned(s_lfsr) xor to_unsigned(16#3A71# + d * 16#1D3#, 16));
-                        u_rnd2(d) <= mix16(unsigned(s_lfsr) xor to_unsigned(16#C4B5# + d * 16#2E9#, 16));
-                    end loop;
+                    -- (s_rnd takes this clock's lfsr: the respawn draw)
                     s_ustate <= U_W2;
                 when U_W2 =>
-                    for d in 0 to C_ND - 1 loop
-                        u_prod(d) <= u_rnd(d)(7 downto 0) * s_sparse;
-                    end loop;
+                    u_um     <= s_rnd;
                     s_ustate <= U_LAT;
                 when U_LAT =>
                     -- register the BRAM words before any arithmetic; finish the
@@ -1002,15 +1044,9 @@ begin
                     for d in 0 to C_ND - 1 loop
                         u_pos(d)  <= signed(s_hq(d));
                         u_info(d) <= s_iq(4 * d + 3 downto 4 * d);
-                        v_prod := u_prod(d);
-                        case to_integer(s_zoom) is
-                            when 0      => u_gap(d) <= v_prod(15 downto 6);
-                            when 1      => u_gap(d) <= resize(v_prod(15 downto 7), 10);
-                            when 2      => u_gap(d) <= resize(v_prod(15 downto 8), 10);
-                            when others => u_gap(d) <= resize(v_prod(15 downto 9), 10);
-                        end case;
-                        v_r := u_rnd2(d);
-                        if resize(u_rnd(d)(15 downto 8), 9) < s_athr then
+                        v_r1 := u_um xor f_uk1(d);
+                        v_r  := u_um xor f_uk2(d);
+                        if resize(v_r1(15 downto 8), 9) < s_athr then
                             u_ninfo(d) <= '1' & std_logic_vector(v_r(2 downto 0));
                         else
                             u_ninfo(d) <= '0' & std_logic_vector(v_r(2 downto 0));
@@ -1019,6 +1055,7 @@ begin
                     end loop;
                     s_ustate <= U_SPD1;
                 when U_SPD1 =>
+                    u_gap(0) <= v_gap;
                     -- speed = base + j0*base/8 + j1*base/4 (+ j2*base/2 next)
                     for d in 0 to C_ND - 1 loop
                         v_b := resize(s_basespd, 9);
@@ -1035,6 +1072,7 @@ begin
                     end loop;
                     s_ustate <= U_SPD2;
                 when U_SPD2 =>
+                    u_gap(1) <= v_gap;
                     for d in 0 to C_ND - 1 loop
                         if u_info(d)(2) = '1' then
                             u_spd(d) <= u_spd(d) + shift_right(resize(s_basespd, 9), 1);
@@ -1042,6 +1080,7 @@ begin
                     end loop;
                     s_ustate <= U_ADD;
                 when U_ADD =>
+                    u_gap(2) <= v_gap;
                     for d in 0 to C_ND - 1 loop
                         u_pos(d) <= u_pos(d) + signed(resize(u_spd(d), 16));
                     end loop;
