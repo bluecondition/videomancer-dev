@@ -4,11 +4,11 @@
 -- This file is part of Videomancer Community Programs.
 -- See LICENSE file in the repository root for full license text.
 --
--- Videomancer C64  v2.0
+-- Videomancer C64  v2.0.2
 -- Commodore 64 display re-render
 --
 -- Re-draws the picture on a block grid in the C64's 16 colours (Colodore),
--- with the native 320x200 grid sized from the measured raster, multicolour
+-- with the native 320x200 grid of the 1080-line raster, multicolour
 -- (double-wide) pixels, per-block ordered dither on P12, a C64 border sized
 -- as a fraction of the screen, tape-loading border stripes, a READY. prompt
 -- and block-row scanlines.
@@ -30,6 +30,18 @@
 --     undithered luma snaps to it within +-20 codes and the dither is added
 --     after the snap (cga v2.0, HW-validated).
 -- Any decision-side control change re-seeds the grids (two plain fields).
+--
+-- Resolution scaling (v2.0.2): block sizes are virtual 1080-line units.
+-- The cell counters step per pixel / per field line from the video timing
+-- ID (registers_in(8)): 1.0 at 1080p (identical to before), 1.5 at 720p,
+-- and at SD 2.0 across (a 1440-wide 4:3 window) and 1080/486 per frame
+-- line, so every K1 detent -- the native C64 6x5 one too -- keeps its size
+-- relative to the screen height and stays square on a 4:3 screen
+-- (non-integer sizes alternate pixel widths); the READY. glyphs (one block
+-- per glyph pixel) scale with them.  A field line can cross several block
+-- rows at SD; the row wrap runs one row per blanking clock.  Stability
+-- tiles are 32x16 virtual units, Loading stripes change ~1 virtual line in
+-- 16, and the border stays a fraction of the measured raster.
 --
 -- Pipeline: match/decision path T1..T3b (writes land 11 clocks after the
 -- pixel, for later lines); display path buf -> 2 fabric regs -> palette
@@ -149,6 +161,32 @@ architecture c64 of program_top is
                                   3, 11,  1,  9,
                                  15,  7, 13,  5);
 
+  -- Resolution scaling: per-mode steps from the video timing ID
+  -- (registers_in(8)).  x in half virtual units per pixel: 1080 2 (1.0),
+  -- 720p 3 (1.5), SD 4 (2.0: 720 px span 1440 units, a 4:3 window of the
+  -- 1080-line canvas).  y in Q4.8 virtual units per FIELD line (1080 /
+  -- active lines, doubled for interlaced modes).
+  function f_vstep_x(t : std_logic_vector(3 downto 0)) return unsigned is
+  begin
+    case to_integer(unsigned(t)) is
+      when 0 | 4 | 8 | 12 => return to_unsigned(4, 3);
+      when 5 | 6 | 14     => return to_unsigned(3, 3);
+      when others         => return to_unsigned(2, 3);
+    end case;
+  end function;
+  function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
+  begin
+    case to_integer(unsigned(t)) is
+      when 0          => return to_unsigned(1138, 12);  -- 480i: 2 x 1080/486
+      when 4          => return to_unsigned(576, 12);   -- 480p: 1080/480
+      when 8          => return to_unsigned(960, 12);   -- 576i: 2 x 1080/576
+      when 12         => return to_unsigned(480, 12);   -- 576p: 1080/576
+      when 5 | 6 | 14 => return to_unsigned(384, 12);   -- 720p: 1.5
+      when 1 | 2 | 10 => return to_unsigned(512, 12);   -- 1080i: 2.0
+      when others     => return to_unsigned(256, 12);   -- 1080p: 1.0
+    end case;
+  end function;
+
   -- READY. prompt glyphs from the C64 character ROM: R E A D Y . cursor blank
   type t_glyph_rows is array(0 to 63) of std_logic_vector(7 downto 0);
   constant C_FONT : t_glyph_rows := (
@@ -204,8 +242,6 @@ architecture c64 of program_top is
   signal s_width   : unsigned(10 downto 0) := to_unsigned(1920, 11);  -- per line
   signal s_width_f : unsigned(10 downto 0) := to_unsigned(1920, 11);  -- per field
   signal s_height  : unsigned(10 downto 0) := to_unsigned(1080, 11);
-  signal s_nat_h   : unsigned(2 downto 0) := to_unsigned(6, 3);
-  signal s_nat_v   : unsigned(2 downto 0) := to_unsigned(5, 3);
   signal s_k8      : unsigned(7 downto 0) := (others => '0');
   signal s_k13     : unsigned(8 downto 0) := (others => '0');
   signal s_bx_p    : unsigned(15 downto 0) := (others => '0');
@@ -223,8 +259,22 @@ architecture c64 of program_top is
   signal s_acc_lim : unsigned(5 downto 0) := to_unsigned(4, 6);
 
   -- Cell tracking
-  signal s_cell_x   : unsigned(5 downto 0)  := (others => '0');
-  signal s_cell_y   : unsigned(4 downto 0)  := (others => '0');
+  signal s_cell_x   : unsigned(5 downto 0)  := (others => '0');  -- pixel # in cell
+  -- Resolution scaling (v2.0.2): block sizes are in virtual 1080-line
+  -- units, stepped per pixel (x, half units: 2/3/4 = 1.0/1.5/2.0) and per
+  -- field line (y, Q4.8) from the video timing ID.  1.0 / 1.0 at 1080p.
+  signal s_xs       : unsigned(2 downto 0)  := to_unsigned(2, 3);
+  signal s_ys       : unsigned(11 downto 0) := to_unsigned(256, 12);
+  signal s_ys3      : unsigned(13 downto 0) := (others => '0');
+  signal s_hgrain   : std_logic := '0';  -- blocks < 1.5 px wide
+  signal s_vgrain   : std_logic := '0';  -- block rows < 1.5 lines tall
+  signal s_vhalf    : std_logic := '0';  -- block rows < 2 lines tall
+  signal s_cell_xh  : unsigned(6 downto 0)  := (others => '0');  -- virtual x in cell, half units
+  signal s_hth      : unsigned(6 downto 0)  := to_unsigned(10, 7); -- 2 * h_size - x step
+  signal s_cell_orgv : unsigned(10 downto 0) := (others => '0'); -- cell origin, virtual units
+  signal s_vy       : unsigned(19 downto 0) := (others => '0');  -- virtual y, Q.8
+  signal s_vyl      : unsigned(13 downto 0) := (others => '0');  -- virtual y in cell row, Q.8
+  signal s_row_new  : std_logic := '1';                          -- first line of a cell row
   signal s_cell_col : unsigned(10 downto 0) := (others => '0');
   signal s_cell_row : unsigned(7 downto 0)  := (others => '0');
   signal s_line_act : std_logic := '0';
@@ -383,37 +433,51 @@ begin
       s_damp <= v_r7(9 downto 2);
       if v_r7 >= 32 then s_dith_on <= '1'; else s_dith_on <= '0'; end if;
 
-      -- Native C64 block from the measured raster: 320 columns x 200 rows,
-      -- rounded to whole pixels.
-      if    s_width >= 1600 then s_nat_h <= "110";   -- 1920 -> 6
-      elsif s_width >= 1100 then s_nat_h <= "100";   -- 1280 -> 4
-      else                       s_nat_h <= "010";   -- 720  -> 2
-      end if;
-      if    s_height >= 1000 then s_nat_v <= "101";  -- 1080 -> 5
-      elsif s_height >=  650 then s_nat_v <= "100";  -- 720  -> 4
-      elsif s_height >=  500 then s_nat_v <= "011";  -- 540/576 -> 3
-      elsif s_height >=  400 then s_nat_v <= "010";  -- 480  -> 2
-      else                        s_nat_v <= "001";  -- SD fields
-      end if;
+      -- Resolution scaling: per-mode steps (constant within a mode).
+      s_xs  <= f_vstep_x(registers_in(8)(3 downto 0));
+      s_ys  <= f_vstep_y(registers_in(8)(3 downto 0));
+      s_ys3 <= resize(s_ys, 14) + shift_left(resize(s_ys, 14), 1);
 
-      -- Block size.  Multicolour doubles the width (160x200 fat pixels).
+      -- Block size in virtual units; the native C64 block is 320x200 of
+      -- the 1080p raster (6x5), the same size relative to the screen
+      -- height in every mode.  Multicolour doubles the width (160x200 fat
+      -- pixels).
       case s_scode is
         when "000"  => s_h_base <= to_unsigned(2, 6);  v_v := to_unsigned(2, 5);
         when "001"  => s_h_base <= to_unsigned(4, 6);  v_v := to_unsigned(4, 5);
         when "011"  => s_h_base <= to_unsigned(8, 6);  v_v := to_unsigned(8, 5);
         when "100"  => s_h_base <= to_unsigned(16, 6); v_v := to_unsigned(16, 5);
-        when others => s_h_base <= resize(s_nat_h, 6); v_v := resize(s_nat_v, 5);
+        when others => s_h_base <= to_unsigned(6, 6);  v_v := to_unsigned(5, 5);
       end case;
       s_v_size <= v_v;
       if s_multi = '1' then s_h_size <= s_h_base(4 downto 0) & '0';
       else                  s_h_size <= s_h_base;
       end if;
-      -- Average the largest power of 2 <= width (max 16)
-      if    s_h_size >= 16 then s_acc_lim <= to_unsigned(16, 6); s_h_shift <= "100";
-      elsif s_h_size >= 8  then s_acc_lim <= to_unsigned(8, 6);  s_h_shift <= "011";
-      elsif s_h_size >= 4  then s_acc_lim <= to_unsigned(4, 6);  s_h_shift <= "010";
-      else                      s_acc_lim <= to_unsigned(2, 6);  s_h_shift <= "001";
+      -- Average the largest power of 2 (max 16) that fits in the narrowest
+      -- cell of this mode: n pixels fit when 2*size >= n * x step (cells
+      -- alternate widths when the size isn't a whole number of pixels).
+      if    (s_h_size & '0') >= shift_left(resize(s_xs, 7), 4) then
+        s_acc_lim <= to_unsigned(16, 6); s_h_shift <= "100";
+      elsif (s_h_size & '0') >= shift_left(resize(s_xs, 7), 3) then
+        s_acc_lim <= to_unsigned(8, 6);  s_h_shift <= "011";
+      elsif (s_h_size & '0') >= shift_left(resize(s_xs, 7), 2) then
+        s_acc_lim <= to_unsigned(4, 6);  s_h_shift <= "010";
+      elsif (s_h_size & '0') >= shift_left(resize(s_xs, 7), 1) then
+        s_acc_lim <= to_unsigned(2, 6);  s_h_shift <= "001";
+      else
+        s_acc_lim <= to_unsigned(1, 6);  s_h_shift <= "000";
       end if;
+      s_hth <= (s_h_size & '0') - s_xs;
+      -- Thin-block classes (real size = virtual size / step): Bayer grain
+      -- and scanline style follow the block's size in pixels / lines.
+      -- Never at 1080p (blocks >= 2 px), so 1080p is unchanged.
+      if resize(s_h_size & "00", 9) < resize(s_xs, 9) + shift_left(resize(s_xs, 9), 1) then
+        s_hgrain <= '1';
+      else
+        s_hgrain <= '0';
+      end if;
+      if (s_v_size & "000000000") < s_ys3 then s_vgrain <= '1'; else s_vgrain <= '0'; end if;
+      if (s_v_size & "0000000") < s_ys then s_vhalf <= '1'; else s_vhalf <= '0'; end if;
 
       -- Contrast pivots at mid-grey 502; 50% = unity.  ycon =
       -- (y*c7 + 502*(64-c7)) >> 6, bias built one add per stage.
@@ -482,7 +546,6 @@ begin
   -- ==========================================================================
   p_t1 : process(clk)
     variable v_at_cell_end : boolean;
-    variable v_origin : unsigned(10 downto 0);
     variable v_bc, v_br : unsigned(1 downto 0);
     variable v_lk : unsigned(23 downto 0);
   begin
@@ -508,21 +571,27 @@ begin
         s_line_act <= '1';
         s_saw_act  <= '1';
         s_px       <= s_px + 1;
-        if s_cell_x >= s_h_size - 1 then
-          s_cell_x <= (others => '0');
+        -- Virtual x within the cell (half units): this pixel ends its cell
+        -- when the next one starts at or past the cell size.  At 1080p the
+        -- step is 1 unit and this is the old "cell_x = size - 1" test.
+        if s_cell_xh >= s_hth then              -- xh + step >= 2 * size
+          s_cell_x    <= (others => '0');
+          s_cell_xh   <= s_cell_xh - s_hth;
           v_at_cell_end := true;
-          s_cell_col <= s_cell_col + 1;
+          s_cell_col  <= s_cell_col + 1;
+          s_cell_orgv <= s_cell_orgv + s_h_size;
           -- READY. columns count whole cells that start inside the border
           if s_col_inner = '1' and s_icol(6) = '0' then
             s_icol <= s_icol + 1;
           end if;
           if s_px + 1 >= s_bx then s_col_inner <= '1'; else s_col_inner <= '0'; end if;
         else
-          s_cell_x <= s_cell_x + 1;
+          s_cell_x  <= s_cell_x + 1;
+          s_cell_xh <= s_cell_xh + s_xs;
         end if;
 
         -- Average the first acc_lim (power of 2) pixels of the cell
-        if s_cell_y = 0 then
+        if s_row_new = '1' then
           if s_cell_x = 0 then
             s_acc_y <= resize(unsigned(data_in.y), 14);
             s_acc_u <= resize(unsigned(data_in.u), 14);
@@ -536,42 +605,64 @@ begin
       end if;
 
       if data_in.hsync_n = '0' and s_prev_hsync_n = '1' then
-        s_cell_x   <= (others => '0');
-        s_cell_col <= (others => '0');
-        s_px       <= (others => '0');
-        s_icol     <= (others => '0');
+        s_cell_x    <= (others => '0');
+        s_cell_xh   <= (others => '0');
+        s_cell_orgv <= (others => '0');
+        s_cell_col  <= (others => '0');
+        s_px        <= (others => '0');
+        s_icol      <= (others => '0');
         if s_bx = 0 then s_col_inner <= '1'; else s_col_inner <= '0'; end if;
-        -- Active lines only advance the row phase (interlace-safe)
+        -- Active lines only advance the row phase (interlace-safe), by one
+        -- virtual y step; the cell-row wrap follows in the blanking below.
         if s_line_act = '1' then
           s_width   <= s_px;
           s_act_row <= s_act_row + 1;
-          if s_cell_y >= s_v_size - 1 then
-            s_cell_y   <= (others => '0');
-            s_cell_row <= s_cell_row + 1;
-            if s_row_inner = '1' and s_irow(4) = '0' then
-              s_irow <= s_irow + 1;
-            end if;
-            if s_act_row + 1 >= s_by then s_row_inner <= '1'; else s_row_inner <= '0'; end if;
-          else
-            s_cell_y <= s_cell_y + 1;
-          end if;
-          -- Loading stripes: a new random colour on ~1 line in 16
-          if s_lh3(23 downto 20) = "0000" then
+          s_vy      <= s_vy + s_ys;
+          s_vyl     <= s_vyl + s_ys;
+          s_row_new <= '0';
+          -- Loading stripes: a new random colour on ~1 virtual line in 16
+          -- (hit chance scaled by the y step: 16/256 at 1080p, as before)
+          if s_lh3(23 downto 16) < s_ys(11 downto 4) then
             s_load_idx <= s_lh3(11 downto 8);
           end if;
         end if;
         s_line_act <= '0';
+      elsif s_line_act = '0' and data_in.avid = '0'
+            and s_vyl >= (s_v_size & "00000000") then
+        -- Cell-row wrap, one row per blanking clock: a field line can
+        -- cross several block rows at SD (2x is under half a field line).
+        -- At 1080p this is the old "cell_y = size - 1" wrap, one clock
+        -- later and still in the blanking (act_row is already the next
+        -- line's).
+        s_vyl      <= s_vyl - (s_v_size & "00000000");
+        s_cell_row <= s_cell_row + 1;
+        s_row_new  <= '1';
+        if s_row_inner = '1' and s_irow(4) = '0' then
+          s_irow <= s_irow + 1;
+        end if;
+        if s_act_row >= s_by then s_row_inner <= '1'; else s_row_inner <= '0'; end if;
       end if;
 
       if data_in.vsync_n = '0' and s_prev_vsync_n = '1' then
-        s_cell_x   <= (others => '0');
-        s_cell_y   <= (others => '0');
-        s_cell_col <= (others => '0');
-        s_cell_row <= (others => '0');
-        s_px       <= (others => '0');
-        s_act_row  <= (others => '0');
-        s_line_act <= '0';
-        s_irow     <= (others => '0');
+        s_cell_x    <= (others => '0');
+        s_cell_xh   <= (others => '0');
+        s_cell_orgv <= (others => '0');
+        s_cell_col  <= (others => '0');
+        s_cell_row  <= (others => '0');
+        s_px        <= (others => '0');
+        s_act_row   <= (others => '0');
+        s_line_act  <= '0';
+        s_irow      <= (others => '0');
+        s_row_new   <= '1';
+        -- the bottom field starts half a field step (one frame line) down
+        -- (inert on hardware, whose core ties field_n high)
+        if data_in.field_n = '0' then
+          s_vy  <= resize(s_ys(11 downto 1), 20);
+          s_vyl <= resize(s_ys(11 downto 1), 14);
+        else
+          s_vy  <= (others => '0');
+          s_vyl <= (others => '0');
+        end if;
         if s_by = 0 then s_row_inner <= '1'; else s_row_inner <= '0'; end if;
         -- Once per field, on the first vsync edge after active video
         -- (analog vsync is serrated): bank swap, raster, boot and re-seed.
@@ -601,17 +692,22 @@ begin
       s_lh2 <= (s_lh1 xor rotate_left(s_lh1, 13)) + to_unsigned(16#5A3C95#, 24);
       s_lh3 <= s_lh2 + shift_left(s_lh2, 3);
 
-      if v_at_cell_end and s_cell_y = 0 and data_in.avid = '1' then
+      if v_at_cell_end and s_row_new = '1' and data_in.avid = '1' then
         s_use_avg <= '1';
         s_we1     <= '1';
         s_wcol1   <= s_cell_col(9 downto 0);
-        v_origin  := s_px - resize(s_h_size, 11) + 1;
-        s_trow_d1 <= s_act_row(10 downto 4);
-        s_tcol_d1 <= v_origin(10 downto 5);
-        if s_v_size = 1 then v_br := s_cell_row(2 downto 1);
-        else                 v_br := s_cell_row(1 downto 0);
+        -- 32x16 stability tiles in virtual units (same cells per tile in
+        -- every mode; at 1080p the old pixel / active-line tiles)
+        s_trow_d1 <= s_vy(18 downto 12);
+        s_tcol_d1 <= s_cell_orgv(10 downto 5);
+        -- Bayer grain never finer than ~2 px / lines (blocks under 1.5 px
+        -- or lines: 2x at 720p, the small sizes at SD; never at 1080p)
+        if s_vgrain = '1' then v_br := s_cell_row(2 downto 1);
+        else                   v_br := s_cell_row(1 downto 0);
         end if;
-        v_bc := s_cell_col(1 downto 0);
+        if s_hgrain = '1' then v_bc := s_cell_col(2 downto 1);
+        else                   v_bc := s_cell_col(1 downto 0);
+        end if;
         s_bay_d1  <= to_unsigned(C_BAYER(to_integer(v_br & v_bc)), 4);
       else
         s_use_avg <= '0';
@@ -944,15 +1040,22 @@ begin
       s_disp_v <= C_PAL(to_integer(v_idx)).v;
 
       -- Scanlines on the block grid: the bottom line of every block row
-      -- (cell_y = 0 is the displayed block's last line -- see header), or
-      -- alternate lines for 1-line blocks.  Factor 16 = unchanged.
-      if s_v_size = 1 then
+      -- (a row's first line is the displayed block's last line -- see
+      -- header), or alternate lines where block rows are under 1.5 lines.
+      -- The 1-line dim is pixel scale, so where rows are under 2 lines
+      -- (small sizes at SD / 720p, never 1080p) it dims half as deep:
+      -- light lines instead of dark gaps.  Factor 16 = unchanged.
+      if s_vgrain = '1' then
         v_dim := s_act_row(0) = '1';
       else
-        v_dim := s_cell_y = 0;
+        v_dim := s_row_new = '1';
       end if;
-      if v_dim then s_sf4 <= to_unsigned(16, 5) - resize(s_scan4, 5);
-      else          s_sf4 <= to_unsigned(16, 5);
+      if not v_dim then
+        s_sf4 <= to_unsigned(16, 5);
+      elsif s_vhalf = '1' then
+        s_sf4 <= to_unsigned(16, 5) - resize(s_scan4(3 downto 1), 5);
+      else
+        s_sf4 <= to_unsigned(16, 5) - resize(s_scan4, 5);
       end if;
 
       -- stage 5: scanline multiply, pivoting on black (64) / neutral chroma

@@ -7,7 +7,8 @@ Dither 84). Presets are hand-written placeholders.
 
 ## What it does
 Redraws incoming video as a Commodore 64 screen: chunky blocks in the 16
-Colodore colours on a native 320×200 grid sized from the measured raster,
+Colodore colours on a native 320×200 grid (of the 1080p raster; every size
+scales with the screen since v2.0.2),
 optional multicolour (double-wide) pixels, a C64 border sized like the real
 machine's, per-block ordered dither on the slider, tape-loading stripes in
 the border, a READY. prompt with blinking cursor, and block-row scanlines.
@@ -36,7 +37,8 @@ the border, a READY. prompt with blinking cursor, and block-row scanlines.
 - K1 Size — 2x / 4x / C64 (native 320×200) / 8x / 16x
 - K2 Border — border size; 0 = none, default = authentic C64 proportions
 - K3 Border Col — 16 C64 colours; also the READY. text colour
-- K4 Scanlines — dims the last line of every block row (0 = off, 100% ≈ black)
+- K4 Scanlines — dims the last line of every block row (0 = off, 100% ≈ black;
+  half depth for rows under 2 lines, alternate lines for rows under 1.5)
 - K5 Color — chroma gain before matching: 0 → greys only, 50% = unchanged,
   100% → 5×
 - K6 Contrast — around mid-grey, 50% = unchanged
@@ -63,7 +65,27 @@ Boot Screen · Game Art · Tape Loading · Demo Ramp · Big Pixels · Hi-Res
   native size, Multicolor, Ramp, Loading, Ready, P12 Dither, labelled-
   default index fix on K1/K3.
 
+## Resolution scaling (v2.0.2, 2026-10-17)
+Block sizes are virtual 1080-line units: the cell counters step per pixel /
+per field line from the video timing ID (1.0 at 1080p, 1.5 at 720p, SD 2.0
+across × 1080/486 per frame line), so 8x is 8 px at 1080p, 5.3 px at 720p
+and 4 px × 3.6 lines at SD (4:3); the native C64 detent is 6×5 units
+everywhere and the READY. glyphs (one block per glyph pixel) scale with the
+blocks. Non-integer sizes alternate pixel widths / line counts. The row
+wrap runs in the blanking (a field line can cross several rows at SD),
+stability tiles are 32×16 virtual units, averaging uses the largest power
+of 2 that fits the narrowest cell, Loading stripes change on ~1 virtual
+line in 16, and the Bayer grain / scanline style follow the real block
+size. The border was already a fraction of the measured raster (unchanged).
+1080p output is bit-identical to v2.0.1; palette unchanged.
+
 ## Build
+v2.0.2 (2026-10-17), router2, seed 1 except HD Analog seed 2 (seed 1
+missed, core sync-generator path) and HD Dual seed 2 (seed 1 router2
+stall), post-route: HD Analog 77.5 · HD HDMI 87.8 · HD Dual 80.2 ·
+SD Analog 81.6 · SD HDMI 84.0 · SD Dual 85.4 MHz. 5876/7680 LC (77%),
+17/32 EBR.
+
 v2.0.0 (2026-10-07), router2, all 6 configs seed 1 (post-route):
 HD Analog 84.8 · HD HDMI 82.0 · HD Dual 83.0 · SD Analog 82.6 · SD HDMI 79.1 ·
 SD Dual 81.0 MHz. ~5770/7680 LC (75%), 17/32 EBR (1 column buffer + 2×8 grid).
