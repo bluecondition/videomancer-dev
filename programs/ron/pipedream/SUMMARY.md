@@ -4,6 +4,33 @@
 Image on S11/P12.  v3.0 HW-seen by Ron ("very interesting now"); v3.1 not flashed.
 v2.3 and v3.0 source + vmprog kept in `.pipedream_work/`.
 
+## v3.3.2 (2026-10-17) — resolution scaling (built, not flashed)
+Cells were sized in pixels (and in field lines at SD, where the old
+field_n-toggle interlace path never fired because field_n is tied high on
+hardware), so pipes were 1.5x too big at 720p and at SD huge and 2:1 tall.
+The raster counters now run in **virtual 1080-line units** stepped from the
+timing ID (`registers_in(8)`): each pixel advances the cell counters by the
+INTEGER part of its virtual step (1 at 1080p, 1/2 alternating at 720p, 2 at
+SD) and each line by 1..5 unit steps (1080p 1, 720p 1/2, 480i 4/5), run one
+every other clock after hsync through the old one-line update, so the exact
+incremental corner squares (and the sqrt table, light, flow, rainbow, swell)
+are untouched — every pixel is a nearest-neighbour sample of the 1080p
+picture. Cells, pipes and elbows keep their size relative to screen height;
+720p is the 1080p network, SD the left 1440 units of it (4:3, round elbows
+stay round).
+* The cell-end flag is registered one pixel ahead (`2wh - x_loc <= s_xs`,
+  since a pixel and the next always advance exactly s_xs half-units) and
+  `2wh - x_loc` is its own stepped register, so the per-pixel qxE update is a
+  single carry chain (the first cut ran HD Analog at 74.4 MHz).
+* The old field_n interlace branches (half-height rows, odd-field reset) are
+  gone; the y step carries the interlace x2.
+* 1080p render bit-identical (0 px); latency unchanged (16).
+
+Build (`NEXTPNR_ROUTER="--router router1" ./build_programs.sh ron pipedream`),
+6774–6789/7680 LC (88%), 9/32 EBR: HD Analog 83.15 (**seed 2**; seed 1 misses),
+HD HDMI 77.43, HD Dual 84.38; SD Analog 83.87, SD HDMI 87.90, SD Dual 78.71 MHz
+(all other configs seed 1).
+
 ## v3.3 (2026-10-11)
 Ron (near-final, all pipe behaviour liked): Image/luma "a little stronger, or
 on a knob".  Kept it on S11/P12 (no free knob) and made it stronger:
@@ -129,7 +156,7 @@ video input.
   chroma factor 6 bits; light vector 8 bits; corner select moved into c1.
 
 ## Controls
-- **K1 Scale** — cell size 32..158 px (always even)
+- **K1 Scale** — cell size 32..158 px at 1080p (always even; scales with screen height)
 - **K2 Weave** — pure loops → all crossings (over/under)
 - **K3 Fatness** — tube radius 0.12..0.40 of the half-cell (elbow pairs kiss
   at the cell centre at 0.41)
