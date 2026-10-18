@@ -6,6 +6,19 @@
 --
 -- Taffy: slider-scanned horizontal stretch bands.
 --
+-- v0.4.2 (2026-10-17): resolution scaling.  Band height, feather and the
+-- centre dead zone are measured in virtual 1080-line units, stepped from the
+-- video timing ID (registers_in(8)): 1.0 at 1080p (identical to before), 1.5
+-- at 720p, and at SD 2.0 across (a 1440-wide 4:3 window) and 1080/486 per
+-- frame line.  Each line's distance to the band is scaled from field lines to
+-- virtual units in the line sequencer (one blanking-time multiply), and the
+-- dead-zone half-width is converted to real pixels once per frame, so a band
+-- and dead zone keep the same share of the screen at SD, 720p and 1080p.
+-- Interlaced fields share the per-line envelope, so both fields use the same
+-- field-line distance (no half-line offset -> no field-to-field flicker in
+-- the feather).  The stretch itself is a ratio and already scaled; the 12-px
+-- edge clamp stays in real pixels (it hides the source's blanking columns).
+--
 -- P12 selects a scanline (100% = top, 0% = bottom). Lines inside the selected
 -- band grow an envelope toward full effect at the Pull rate; every other line
 -- relaxes back toward zero at the Relax rate. Dragging the slider therefore
@@ -38,10 +51,12 @@
 --   K1 Pull    how fast a line grows to full stretch (quadratic: 1..255 env
 --              steps per frame, so the low end crawls for seconds)
 --   K2 Relax   how fast it recedes again (same curve)
---   K3 Height  band thickness, 1..255 lines
+--   K3 Height  band thickness, 1..255 lines (1080-line units)
 --   K4 Centre  half-width of the untouched centre dead zone, 0..511 px
+--              (1080p pixels; a 1440-wide virtual window at SD)
 --   K5 Depth   magnification at full envelope (up to 64x at the top end)
---   K6 Soft    feathers the band edges over 1..128 lines. In Sustain that is a
+--   K6 Soft    feathers the band edges over 1..128 lines (1080-line units). In
+--              Sustain that is a
 --              lens-like bulge instead of a rectangular slab; in One Shot the
 --              feather is the trigger's reach, so lines fire before the band
 --              proper arrives and the wake runs ahead of the slider
@@ -116,6 +131,35 @@ architecture taffy of program_top is
     -- reveal is the line's own edge colour and the blanking columns never
     -- show (12 = the catalogue-combo value, wide enough for capture sources).
     constant C_EDGE          : integer := 12;
+
+    --------------------------------------------------------------------------
+    -- Resolution scaling: per-mode steps from the video timing ID (the
+    -- mondrian pilot's tables).
+    --------------------------------------------------------------------------
+    -- x step in half virtual units per pixel: 1080 2 (1.0), 720p 3 (1.5),
+    -- SD 4 (2.0: 720 px span 1440 units, a 4:3 window of the 1080 canvas).
+    function f_vstep_x(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0 | 4 | 8 | 12 => return to_unsigned(4, 3);
+            when 5 | 6 | 14     => return to_unsigned(3, 3);
+            when others         => return to_unsigned(2, 3);
+        end case;
+    end function;
+    -- y step in Q4.8 virtual units per FIELD line (1080 / active lines,
+    -- doubled for interlaced modes).
+    function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(1138, 12);  -- 480i: 2 x 1080/486
+            when 4          => return to_unsigned(576, 12);   -- 480p: 1080/480
+            when 8          => return to_unsigned(960, 12);   -- 576i: 2 x 1080/576
+            when 12         => return to_unsigned(480, 12);   -- 576p: 1080/576
+            when 5 | 6 | 14 => return to_unsigned(384, 12);   -- 720p: 1.5
+            when 1 | 2 | 10 => return to_unsigned(512, 12);   -- 1080i: 2.0
+            when others     => return to_unsigned(256, 12);   -- 1080p: 1.0
+        end case;
+    end function;
 
     --------------------------------------------------------------------------
     -- Inlined dual-bank line buffers
@@ -206,12 +250,21 @@ architecture taffy of program_top is
     signal s_hi       : unsigned(10 downto 0) := (others => '0');
     signal s_lo_m1    : signed(11 downto 0) := (others => '0');   -- lo - 1
 
+    -- Resolution scaling (latched per field at vsync): s_xs = virtual x units
+    -- per pixel (Q.1), s_ys = virtual lines per field line (Q4.8). s_cz is
+    -- the K4 dead-zone half-width converted from virtual units to real px.
+    signal s_xs       : unsigned(2 downto 0)  := to_unsigned(2, 3);
+    signal s_ys       : unsigned(11 downto 0) := to_unsigned(256, 12);
+    signal s_cz       : unsigned(8 downto 0)  := (others => '0');
+
     --------------------------------------------------------------------------
     -- Per-line step sequencer (horizontal blanking)
     --------------------------------------------------------------------------
     signal s_lstep    : unsigned(3 downto 0) := "1111";
     signal s_seq_y    : unsigned(10 downto 0) := (others => '0');
     signal s_dist     : unsigned(10 downto 0) := (others => '0');
+    signal s_dist8    : unsigned(7 downto 0)  := (others => '0');  -- field lines, sat 255
+    signal s_dist_v   : unsigned(11 downto 0) := (others => '0');  -- virtual lines
     signal s_over     : signed(12 downto 0) := (others => '0');
     signal s_env_r2   : unsigned(7 downto 0) := (others => '0');
     signal s_st_r2    : unsigned(1 downto 0) := C_ST_ARMED;
@@ -339,6 +392,8 @@ begin
         variable v_prod  : signed(21 downto 0);
         variable v_atk   : unsigned(7 downto 0);
         variable v_rel   : unsigned(7 downto 0);
+        variable v_dp    : unsigned(19 downto 0);
+        variable v_czm   : unsigned(16 downto 0);
     begin
         if rising_edge(clk) then
             s_in_y    <= unsigned(data_in.y);
@@ -389,11 +444,25 @@ begin
                                 - signed(resize(s_target, 12));
                     s_dist     <= unsigned(resize(abs(v_diff), 11));
                     s_lstep    <= s_lstep + 1;
-                when 1 =>       -- how far outside the flat top of the band
-                    s_over  <= signed(resize(s_dist, 13))
+                when 1 =>       -- saturate: Height <= 127 + Soft <= 128 means
+                    -- any distance >= 255 is off the band at every setting
+                    -- (and virtual distance >= field distance in every mode)
+                    if s_dist(10 downto 8) /= "000" then
+                        s_dist8 <= to_unsigned(255, 8);
+                    else
+                        s_dist8 <= s_dist(7 downto 0);
+                    end if;
+                    s_lstep <= s_lstep + 1;
+                when 2 =>       -- field lines -> virtual 1080-line units
+                    -- (x1 at 1080p, so the band there is unchanged)
+                    v_dp     := s_dist8 * s_ys;
+                    s_dist_v <= v_dp(19 downto 8);
+                    s_lstep  <= s_lstep + 1;
+                when 3 =>       -- how far outside the flat top of the band
+                    s_over  <= signed(resize(s_dist_v, 13))
                              - signed(resize(s_half, 13));
                     s_lstep <= s_lstep + 1;
-                when 2 =>       -- envelope read lands; shape the band target
+                when 4 =>       -- envelope read lands; shape the band target
                     s_env_r2 <= unsigned(s_env_rd(7 downto 0));
                     s_st_r2  <= unsigned(s_env_rd(9 downto 8));
                     if s_over <= 0 then
@@ -410,7 +479,7 @@ begin
                         end if;
                     end if;
                     s_lstep <= s_lstep + 1;
-                when 3 =>       -- advance this line's envelope
+                when 5 =>       -- advance this line's envelope
                     v_a := ('0' & s_env_r2) + ('0' & s_atk);   -- Pull  step up
                     v_b := ('0' & s_env_r2) - ('0' & s_rel);   -- Relax step down
                     if s_mode = '0' then
@@ -496,7 +565,7 @@ begin
                         end case;
                     end if;
                     s_lstep <= s_lstep + 1;
-                when 4 =>       -- write back (Hold freezes it) + quantize
+                when 6 =>       -- write back (Hold freezes it) + quantize
                     s_env_wd <= std_logic_vector(s_st_new)
                               & std_logic_vector(s_env_new);
                     s_env_we <= not s_hold;
@@ -508,10 +577,10 @@ begin
                         s_env_q <= s_env_new;
                     end if;
                     s_lstep <= s_lstep + 1;
-                when 5 =>       -- envelope -> effect amount
+                when 7 =>       -- envelope -> effect amount
                     s_eff_prod <= s_env_q * s_depth;
                     s_lstep    <= s_lstep + 1;
-                when 6 =>       -- effect amount -> source step
+                when 8 =>       -- effect amount -> source step
                     v_eff := s_eff_prod(15 downto 8);
                     if s_squeeze = '1' then
                         s_inv <= to_unsigned(256, 12)
@@ -522,10 +591,10 @@ begin
                         s_inv <= to_unsigned(256, 12) - resize(v_eff, 12);
                     end if;
                     s_lstep <= s_lstep + 1;
-                when 7 =>       -- seed term for x = 0
+                when 9 =>       -- seed term for x = 0
                     s_lo_prod <= s_lo * s_inv;
                     s_lstep   <= s_lstep + 1;
-                when 8 =>       -- load the DDA: acc(0) = (lo - lo*inv/256 - 1) << 8
+                when 10 =>      -- load the DDA: acc(0) = (lo - lo*inv/256 - 1) << 8
                     -- The -1 is because the accumulator steps on the first
                     -- pixel before its address is read, so output pixel x
                     -- samples src(x+1) - 1: with inv = 256 that is exactly x.
@@ -576,16 +645,26 @@ begin
                     s_half    <= s_height_k(9 downto 3);
                     s_soft_sh <= s_soft_k(9 downto 7);
                     s_depth   <= s_depth_k(9 downto 2);
+                    -- dead zone: K4 in virtual units -> real px (x 2/xs)
+                    case to_integer(s_xs) is
+                        when 4 =>       -- SD: 2 units per pixel
+                            s_cz <= '0' & s_centre_k(9 downto 2);
+                        when 3 =>       -- 720p: 1.5 units per pixel
+                            v_czm := s_centre_k(9 downto 1) * to_unsigned(171, 8);
+                            s_cz  <= v_czm(16 downto 8);
+                        when others =>  -- 1080: 1:1
+                            s_cz <= s_centre_k(9 downto 1);
+                    end case;
                     s_vstep   <= s_vstep + 1;
                 when 3 =>
                     -- keep the dead zone strictly inside the half-width, else
                     -- lo hits 0 and the whole line goes 1:1
                     if s_c = 0 then
                         s_cwc <= (others => '0');
-                    elsif resize(s_centre_k(9 downto 1), 11) >= s_c then
+                    elsif resize(s_cz, 11) >= s_c then
                         s_cwc <= s_c - 1;
                     else
-                        s_cwc <= resize(s_centre_k(9 downto 1), 11);
+                        s_cwc <= resize(s_cz, 11);
                     end if;
                     s_vstep <= s_vstep + 1;
                 when 4 =>
@@ -634,6 +713,9 @@ begin
                 s_line_y   <= (others => '0');
                 s_par      <= '0';
                 s_vstep    <= (others => '0');
+                -- per-mode scaling steps (idempotent: safe on serrated vsync)
+                s_xs       <= f_vstep_x(registers_in(8)(3 downto 0));
+                s_ys       <= f_vstep_y(registers_in(8)(3 downto 0));
                 s_acc      <= to_signed(-256, 22);   -- identity seed
                 s_inv_step <= to_signed(256, 13);
                 s_inz      <= '0';
