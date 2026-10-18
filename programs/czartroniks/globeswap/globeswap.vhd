@@ -43,6 +43,16 @@
 -- parity differs from the stored line's swap U/V (addresses and values,
 -- drape v1.3).  Output: luma 64..940, [1 2 1] on Y/U/V + luma scaled to white
 -- ~775 (the HD HDMI bar fix), blanking-gated.  Latency 20 clocks, all modes.
+--
+-- v0.2.2 (2026-10-17): resolution scaling.  The lens runs in virtual
+-- 1080-line units stepped from the video timing ID (registers_in(8)): y
+-- 1080 / active lines a field line (interlace included), x 1.0 / 1.5 / 2.0
+-- units a pixel (1080 / 720p / SD).  The radius is a fraction of the
+-- virtual height and the Disc half-width converts it back to pixels
+-- (x 1 / 2/3 / 1/2), so the disc is round on a 4:3 SD screen (it was 2.2x
+-- taller than wide) and at 720p.  The channel Offset is x 2/3 at 720p (it
+-- was the HD size there) and x 1/2 in SD as before.  1080p is
+-- bit-identical.
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -60,6 +70,32 @@ architecture globeswap of program_top is
     constant C_PROCESSING_DELAY_CLKS : natural := 20;
 
     constant C_LAT : integer := 20;
+
+    -- Resolution scaling: per-mode steps from the video timing ID.
+    -- x step in half virtual units per pixel: 1080 2 (1.0), 720p 3 (1.5),
+    -- SD 4 (2.0: 720 px span 1440 units, a 4:3 window of the 1080 canvas).
+    function f_vstep_x(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0 | 4 | 8 | 12 => return to_unsigned(4, 3);
+            when 5 | 6 | 14     => return to_unsigned(3, 3);
+            when others         => return to_unsigned(2, 3);
+        end case;
+    end function;
+    -- y step in Q4.8 virtual units per FIELD line (1080 / active lines,
+    -- doubled for interlaced modes).
+    function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(1138, 12);  -- 480i: 2 x 1080/486
+            when 4          => return to_unsigned(576, 12);   -- 480p: 1080/480
+            when 8          => return to_unsigned(960, 12);   -- 576i: 2 x 1080/576
+            when 12         => return to_unsigned(480, 12);   -- 576p: 1080/576
+            when 5 | 6 | 14 => return to_unsigned(384, 12);   -- 720p: 1.5
+            when 1 | 2 | 10 => return to_unsigned(512, 12);   -- 1080i: 2.0
+            when others     => return to_unsigned(256, 12);   -- 1080p: 1.0
+        end case;
+    end function;
 
     type t_tab is array (0 to 63) of integer range 0 to 2047;
     constant C_SPH : t_tab := (256, 256, 256, 256, 257, 257, 257, 258, 258, 259, 259, 260, 261, 261, 262, 263, 264, 266, 267, 268, 269, 271, 273, 274, 276, 278, 280, 282, 285, 287, 290, 293, 296, 299, 302, 306, 310, 314, 318, 323, 328, 333, 339, 346, 353, 360, 368, 377, 387, 398, 410, 424, 439, 457, 477, 501, 529, 563, 606, 661, 736, 846, 1032, 1454);
@@ -137,7 +173,18 @@ architecture globeswap of program_top is
     signal s_radw   : unsigned(20 downto 0) := (others => '0');
     signal s_rad_l  : unsigned(10 downto 0) := to_unsigned(200, 11);
     signal s_hh     : unsigned(9 downto 0) := to_unsigned(135, 10);
-    signal s_wide   : std_logic := '1';
+    -- resolution scaling: steps (free-running from the timing ID), the
+    -- line's virtual y (Q.8), the field's virtual height, and the radius
+    -- in pixels for the disc half-width
+    signal s_vxs    : unsigned(2 downto 0)  := to_unsigned(2, 3);
+    signal s_vys    : unsigned(11 downto 0) := to_unsigned(256, 12);
+    signal s_vya    : unsigned(19 downto 0) := (others => '0');
+    signal s_vht    : unsigned(10 downto 0) := to_unsigned(270, 11);
+    signal s_rx1    : unsigned(18 downto 0) := (others => '0');
+    signal s_rx2    : unsigned(14 downto 0) := (others => '0');
+    signal s_rad_x  : unsigned(10 downto 0) := to_unsigned(200, 11);
+    signal s_of1    : signed(18 downto 0) := (others => '0');
+    signal s_of2    : signed(14 downto 0) := (others => '0');
     signal s_mode   : unsigned(2 downto 0) := "001";
     signal s_off    : signed(9 downto 0) := (others => '0');
     signal s_offe   : signed(10 downto 0) := (others => '0');
@@ -281,6 +328,8 @@ begin
             s_we <= data_in.avid;
             -- hsync->avid parity (drape): clock parity since hsync, per line
             s_hpar <= not s_hpar;
+            s_vxs <= f_vstep_x(registers_in(8)(3 downto 0));
+            s_vys <= f_vstep_y(registers_in(8)(3 downto 0));
 
             -- per-frame sequencer, one small op per state, in vblank
             case to_integer(s_vstep) is
@@ -302,10 +351,9 @@ begin
                         s_mode <= v_k3(9 downto 7);
                     end if;
                     if v_k3 >= 8 then s_k3seen <= '1'; end if;
-                    s_hh <= s_height(10 downto 1);
+                    s_hh <= s_vht(10 downto 1);
                     s_cx <= '0' & s_line_width(10 downto 1);
-                    s_cy <= '0' & s_height(10 downto 1);
-                    s_wide <= s_line_width(10);
+                    s_cy <= '0' & s_vht(10 downto 1);
                     s_vstep <= s_vstep + 1;
                 when 1 =>
                     -- glides: ease by diff/8 a frame
@@ -340,12 +388,20 @@ begin
                     if s_kbe >= 0 then s_ksph <= '1'; s_kabs <= unsigned(s_kbe(9 downto 0));
                     else s_ksph <= '0'; s_kabs <= unsigned(resize(-s_kbe, 10)); end if;
                     s_rm <= s_rmk + s_rmp;
-                    -- SD: half the split (the line is ~0.4 of an HD line)
-                    if s_wide = '1' then s_offs <= s_offe; else s_offs <= shift_right(s_offe, 1); end if;
+                    -- the split in px (x 171/256 at 720p, below): offe x 160, x 11
+                    s_of1 <= shift_left(resize(s_offe, 19), 7) + shift_left(resize(s_offe, 19), 5);
+                    s_of2 <= shift_left(resize(s_offe, 15), 3) + shift_left(resize(s_offe, 15), 1) + resize(s_offe, 15);
                     s_base <= signed(resize(s_thr, 12)) - 512;
                     s_gain <= s_gain_q;
                     s_vstep <= s_vstep + 1;
                 when 5 =>
+                    -- split x 1 (1080), x 2/3 (720p), x 1/2 (SD; the line is
+                    -- 1440 virtual units)
+                    case to_integer(s_vxs) is
+                        when 3 => s_offs <= resize(shift_right(s_of1 + resize(s_of2, 19), 8), 11);
+                        when 4 => s_offs <= shift_right(s_offe, 1);
+                        when others => s_offs <= s_offe;
+                    end case;
                     s_rph <= s_hh * s_rm(10 downto 6);
                     s_rpl <= s_hh * s_rm(5 downto 0);
                     s_vstep <= s_vstep + 1;
@@ -370,6 +426,19 @@ begin
                         s_dq <= s_dq(15 downto 0) & '0';
                     end if;
                     s_dbit <= s_dbit - 1;
+                    -- beside the divide: the radius in px for the disc
+                    -- half-width (x 1 / 171/256 / 1/2): rad x 160, x 11
+                    if s_vstep = 8 then
+                        s_rx1 <= shift_left(resize(s_rad_l, 19), 7) + shift_left(resize(s_rad_l, 19), 5);
+                        s_rx2 <= shift_left(resize(s_rad_l, 15), 3) + shift_left(resize(s_rad_l, 15), 1) + resize(s_rad_l, 15);
+                    end if;
+                    if s_vstep = 9 then
+                        case to_integer(s_vxs) is
+                            when 3 => s_rad_x <= resize(shift_right(s_rx1 + resize(s_rx2, 19), 8), 11);
+                            when 4 => s_rad_x <= shift_right(s_rad_l, 1);
+                            when others => s_rad_x <= s_rad_l;
+                        end case;
+                    end if;
                     s_vstep <= s_vstep + 1;
                 when 25 =>
                     if s_dq(16 downto 12) /= 0 then s_inv_r <= (others => '1'); else s_inv_r <= s_dq(11 downto 0); end if;
@@ -381,7 +450,7 @@ begin
             -- steps (the line has 100+ blanking clocks to spare)
             case to_integer(s_lstep) is
                 when 0 =>
-                    if s_line >= s_cy then s_ady <= s_line - s_cy; else s_ady <= s_cy - s_line; end if;
+                    if s_vya(18 downto 8) >= s_cy then s_ady <= s_vya(18 downto 8) - s_cy; else s_ady <= s_cy - s_vya(18 downto 8); end if;
                     s_lstep <= s_lstep + 1;
                 when 1 =>
                     s_tph <= s_ady * s_inv_r(11 downto 6);
@@ -401,8 +470,8 @@ begin
                     s_lstep <= s_lstep + 1;
                 when 5 =>
                     if s_beyond = '1' then s_fm1 <= (others => '0'); else s_fm1 <= signed(resize(s_f, 12)) - 256; end if;
-                    s_hwph <= s_rad_l * s_circ(8 downto 5);
-                    s_hwpl <= s_rad_l * s_circ(4 downto 0);
+                    s_hwph <= s_rad_x * s_circ(8 downto 5);
+                    s_hwpl <= s_rad_x * s_circ(4 downto 0);
                     s_lstep <= s_lstep + 1;
                 when 6 =>
                     s_fkh <= s_fm1 * signed('0' & s_kabs(9 downto 5));
@@ -453,6 +522,8 @@ begin
             s_w_edge <= s_line_width - (C_EDGE + 1);
             if s_prev_avid = '1' and data_in.avid = '0' then
                 s_line_width <= s_rx; s_line <= s_line + 1; s_height <= s_line + 1;
+                s_vya <= s_vya + s_vys;
+                s_vht <= resize(shift_right(s_vya + s_vys, 8), 11);
             end if;
             -- start of a line: U/V swapped (addresses and values) when this
             -- line's parity differs from the stored line's
@@ -468,7 +539,7 @@ begin
                 s_wpar <= not s_wpar; s_rbank <= s_wpar;
             end if;
             if data_in.vsync_n = '0' and s_prev_vsync_n = '1' then
-                s_line <= (others => '0'); s_wpar <= '0';
+                s_line <= (others => '0'); s_vya <= (others => '0'); s_wpar <= '0';
                 if s_saw_active = '1' then s_vstep <= (others => '0'); end if;
                 s_saw_active <= '0';
             end if;
