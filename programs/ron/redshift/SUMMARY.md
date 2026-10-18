@@ -90,6 +90,38 @@ fire once per field; before, each serration edge advanced them again), and
 the blanking contract (output neutral 64/512/512 outside avid; it used to
 hold the line's last pixel through blanking).
 
+## Resolution scaling (v2.2.2, 2026-10-18)
+
+720p used 32-px cells (1.5x coarse lenses), and SD's deflection was a fixed
++/-255 px (2.2x stronger relative to the screen) with a 128-px turbulence
+wavelength. Now the geometry is on a virtual 1080-line canvas (timing ID):
+- mass cells are 32 x 32 virtual units everywhere: a half-unit span
+  accumulator (`s_cxh/s_cpx/s_ccol`, prefetch events still count pixels
+  within the span, `fx5` = virtual position) and a Q.8 row accumulator
+  (`s_cyacc`, `fy5`, `s_rowfirst`) replace the 2^xsh / 2^ysh bit slices;
+  60 cols x 34 rows at HD (720p too), 45 x 34 on SD's 1440-unit window;
+  the span average is per mode (1080 /32, 720p x3/64, SD /16) and the vacc
+  write moved one clock later (now a true one-clock pulse -- it used to stay
+  high through hblank, so on SD/1080i row-end lines the updater read the
+  last column while it was being written: undefined on iCE40 EBR);
+  `s_lastrow` is latched from the row count at the field end;
+- lens / spin / turbulence gains x 1/xstep in sequencer states 6-5 (720p
+  1/2 + 1/8 + 1/32), deflection clamp 255 units (+/-255 / 170 / 127 px),
+  Doppler gain x xstep (follows the virtual deflection), turbulence
+  wavelength 128 units (`s_xvt`);
+- debris rows are half virtual lines (`s_dla`, the 540-row design at every
+  mode), `s_nrows` latched at the field end, and the per-column density is
+  x xstep to make up for the 8-px columns (pixel scale kept: the prefetch
+  needs 8 clocks per column).
+1080p bit-identical (sim pixel diff 0). Sims: 720p r 1.00 / edges 0.98 vs
+1080p (was 0.89 / 0.83); SD r 0.95 / 0.89 (was 0.93 / 0.85). Cost ~+200
+LUT / +110 FF standalone.
+
+Build `./build_programs.sh ron redshift` (router2): 6/6 on seed 1 -- HD
+Analog 77.44, HD HDMI 78.92, HD Dual 79.49, SD 73.48 / 82.53 / 73.59 MHz;
+7236-7259 LC (**94.5%**, at the congestion ceiling -- no headroom left for
+features), 22/32 EBR.
+
 ## Status
 
 v2.1.0 — all 6 configs routed-closed at full clock (five seed 1, one seed
