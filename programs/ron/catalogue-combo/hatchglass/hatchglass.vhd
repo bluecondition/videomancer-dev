@@ -43,6 +43,16 @@
 -- [1 2 1] on Y/U/V (the HD HDMI bar conditioning).  U/V swapped on rows whose
 -- hsync->avid parity differs from the row above (each row replays the row
 -- above).  Latency 23 clocks, all modes, blanking-gated.
+--
+-- v0.3.2 (2026-10-17) resolution scaling: the hatch pitch is a size on the
+-- 1080-line canvas: K4's 4..48 px at 1080 becomes round(2/3 x) at 720p and
+-- round(1/2 x) at SD (at least 3 px), so the strokes keep their spacing
+-- relative to the screen height; the stroke weight follows the pitch (a
+-- 1-px stroke stays 1 px).  Interlace (line phase +2 per field line) now
+-- comes from the timing ID: field_n is tied high on hardware, so the old
+-- field_n test never fired and SD strokes were 2:1 stretched.  The Slide
+-- speed is in canvas units (x 2/3 at 720p, 1/2 at SD).  The panes stay a
+-- count (fractions of the width).  1080p unchanged.
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -220,6 +230,84 @@ architecture hatchglass of program_top is
         end case;
     end function;
 
+    -- Resolution scaling: Pitch at 720p, round(2/3 x f_pitch), at least 3 px
+    function f_pitch_720(i : unsigned(4 downto 0)) return unsigned is
+    begin
+        case to_integer(i) is
+            when  0 => return to_unsigned( 3, 6);
+            when  1 => return to_unsigned( 3, 6);
+            when  2 => return to_unsigned( 3, 6);
+            when  3 => return to_unsigned( 3, 6);
+            when  4 => return to_unsigned( 4, 6);
+            when  5 => return to_unsigned( 4, 6);
+            when  6 => return to_unsigned( 4, 6);
+            when  7 => return to_unsigned( 5, 6);
+            when  8 => return to_unsigned( 5, 6);
+            when  9 => return to_unsigned( 5, 6);
+            when 10 => return to_unsigned( 6, 6);
+            when 11 => return to_unsigned( 7, 6);
+            when 12 => return to_unsigned( 7, 6);
+            when 13 => return to_unsigned( 7, 6);
+            when 14 => return to_unsigned( 8, 6);
+            when 15 => return to_unsigned( 9, 6);
+            when 16 => return to_unsigned( 9, 6);
+            when 17 => return to_unsigned(11, 6);
+            when 18 => return to_unsigned(11, 6);
+            when 19 => return to_unsigned(12, 6);
+            when 20 => return to_unsigned(13, 6);
+            when 21 => return to_unsigned(15, 6);
+            when 22 => return to_unsigned(15, 6);
+            when 23 => return to_unsigned(17, 6);
+            when 24 => return to_unsigned(18, 6);
+            when 25 => return to_unsigned(20, 6);
+            when 26 => return to_unsigned(21, 6);
+            when 27 => return to_unsigned(23, 6);
+            when 28 => return to_unsigned(25, 6);
+            when 29 => return to_unsigned(27, 6);
+            when 30 => return to_unsigned(29, 6);
+            when others => return to_unsigned(32, 6);
+        end case;
+    end function;
+
+    -- Resolution scaling: Pitch at SD, round(1/2 x f_pitch), at least 3 px
+    function f_pitch_sd(i : unsigned(4 downto 0)) return unsigned is
+    begin
+        case to_integer(i) is
+            when  0 => return to_unsigned( 3, 6);
+            when  1 => return to_unsigned( 3, 6);
+            when  2 => return to_unsigned( 3, 6);
+            when  3 => return to_unsigned( 3, 6);
+            when  4 => return to_unsigned( 3, 6);
+            when  5 => return to_unsigned( 3, 6);
+            when  6 => return to_unsigned( 3, 6);
+            when  7 => return to_unsigned( 4, 6);
+            when  8 => return to_unsigned( 4, 6);
+            when  9 => return to_unsigned( 4, 6);
+            when 10 => return to_unsigned( 5, 6);
+            when 11 => return to_unsigned( 5, 6);
+            when 12 => return to_unsigned( 5, 6);
+            when 13 => return to_unsigned( 6, 6);
+            when 14 => return to_unsigned( 6, 6);
+            when 15 => return to_unsigned( 7, 6);
+            when 16 => return to_unsigned( 7, 6);
+            when 17 => return to_unsigned( 8, 6);
+            when 18 => return to_unsigned( 9, 6);
+            when 19 => return to_unsigned( 9, 6);
+            when 20 => return to_unsigned(10, 6);
+            when 21 => return to_unsigned(11, 6);
+            when 22 => return to_unsigned(12, 6);
+            when 23 => return to_unsigned(13, 6);
+            when 24 => return to_unsigned(14, 6);
+            when 25 => return to_unsigned(15, 6);
+            when 26 => return to_unsigned(16, 6);
+            when 27 => return to_unsigned(18, 6);
+            when 28 => return to_unsigned(19, 6);
+            when 29 => return to_unsigned(21, 6);
+            when 30 => return to_unsigned(22, 6);
+            when others => return to_unsigned(24, 6);
+        end case;
+    end function;
+
     -- key ramp width 256 / gain for each Soft step (8 * 2^(i/2); odd = x4/3)
     function f_ramp(i : unsigned(3 downto 0)) return unsigned is
     begin
@@ -314,7 +402,6 @@ architecture hatchglass of program_top is
     signal s_L16    : unsigned(14 downto 0) := to_unsigned(7680, 15);
     signal s_sds    : signed(10 downto 0) := (others => '0');
     signal s_asd    : unsigned(8 downto 0) := (others => '0');
-    signal s_spd    : signed(9 downto 0) := (others => '0');
     signal s_s16, s_t16 : signed(16 downto 0) := (others => '0');       -- slide, 1/16 px, mod L
     signal s_v      : signed(12 downto 0) := (others => '0');
     signal s_u0     : unsigned(9 downto 0) := to_unsigned(240, 10);
@@ -336,6 +423,10 @@ architecture hatchglass of program_top is
     signal s_first, s_row0 : std_logic := '0';
     signal s_fld_prev : std_logic := '1';
     signal s_ilace, s_bot : std_logic := '0';
+    -- Resolution scaling (v0.3.2): mode class from the timing ID
+    signal s_c720, s_csd, s_cil : std_logic := '0';
+    signal s_spdm : unsigned(7 downto 0) := (others => '0');            -- slide speed magnitude
+    signal s_spdn : std_logic := '0';
     signal s_lc      : unsigned(5 downto 0) := (others => '0');          -- field line mod pitch (x2 interlaced)
     signal s_plf     : unsigned(5 downto 0) := (others => '0');          -- frame line mod pitch
     signal s_wy1     : unsigned(9 downto 0) := to_unsigned(64, 10);
@@ -460,6 +551,14 @@ begin
             s_sw_glass <= registers_in(6)(2);
             s_sw_over  <= registers_in(6)(3);
             s_sw_rep   <= registers_in(6)(4);
+            -- Resolution scaling: mode class (static while a mode runs)
+            case to_integer(unsigned(registers_in(8)(3 downto 0))) is
+                when 0 | 8      => s_csd <= '1'; s_c720 <= '0'; s_cil <= '1';   -- 480i, 576i
+                when 4 | 12     => s_csd <= '1'; s_c720 <= '0'; s_cil <= '0';   -- 480p, 576p
+                when 5 | 6 | 14 => s_csd <= '0'; s_c720 <= '1'; s_cil <= '0';   -- 720p
+                when 1 | 2 | 10 => s_csd <= '0'; s_c720 <= '0'; s_cil <= '1';   -- 1080i
+                when others     => s_csd <= '0'; s_c720 <= '0'; s_cil <= '0';   -- 1080p
+            end case;
 
             s_prev_hsync_n <= data_in.hsync_n;
             s_prev_avid    <= data_in.avid;
@@ -529,7 +628,13 @@ begin
                     s_vstep <= s_vstep + 1;
                 when 3 =>
                     s_gd   <= f_glide(s_gd, s_kh(3));
-                    s_pit  <= f_pitch(s_kh(2)(9 downto 5));
+                    if s_csd = '1' then
+                        s_pit <= f_pitch_sd(s_kh(2)(9 downto 5));
+                    elsif s_c720 = '1' then
+                        s_pit <= f_pitch_720(s_kh(2)(9 downto 5));
+                    else
+                        s_pit <= f_pitch(s_kh(2)(9 downto 5));
+                    end if;
                     s_f64  <= to_unsigned(6, 6) + s_kh(1)(9 downto 5) + s_kh(1)(9 downto 7);
                     s_sidx <= s_kh(4)(9 downto 6);
                     s_t64  <= resize(s_kh(0)(9 downto 4), 7) + resize(s_kh(0)(9 downto 9), 7);
@@ -617,11 +722,16 @@ begin
                     s_ret <= to_unsigned(9, 5);
                     s_vstep <= to_unsigned(6, 5);
                 when 9 =>
-                    if s_sds < 0 then
-                        s_spd <= -signed(resize(s_acc(17 downto 10), 10));
+                    -- slide speed in canvas units: x 1/2 at SD, ~2/3 at 720p
+                    if s_csd = '1' then
+                        s_spdm <= shift_right(s_acc(17 downto 10), 1);
+                    elsif s_c720 = '1' then
+                        s_spdm <= shift_right(s_acc(17 downto 10), 1) + shift_right(s_acc(17 downto 10), 3)
+                                  + shift_right(s_acc(17 downto 10), 5);
                     else
-                        s_spd <= signed(resize(s_acc(17 downto 10), 10));
+                        s_spdm <= s_acc(17 downto 10);
                     end if;
+                    if s_sds < 0 then s_spdn <= '1'; else s_spdn <= '0'; end if;
                     s_L16 <= s_L & "0000";
                     -- full stroke weight in quarter px: pitch * f64 / 16
                     s_ma  <= resize(s_pit, 23);
@@ -631,7 +741,11 @@ begin
                     s_vstep <= to_unsigned(6, 5);
                 when 10 =>
                     s_W4  <= s_acc(11 downto 4);
-                    s_s16 <= s_s16 + resize(s_spd, 17);
+                    if s_spdn = '1' then
+                        s_s16 <= s_s16 - signed(resize(s_spdm, 17));
+                    else
+                        s_s16 <= s_s16 + signed(resize(s_spdm, 17));
+                    end if;
                     s_vstep <= s_vstep + 1;
                 when 11 =>
                     if s_s16 < 0 then
@@ -699,14 +813,15 @@ begin
                 else
                     s_cap_par0 <= s_hpar;
                 end if;
-                -- the field's first row has no row above; field_n toggling
-                -- between fields = interlaced (HD inputs tie it high)
+                -- the field's first row has no row above.  Interlace from the
+                -- timing ID (field_n is tied high on hardware, so a field_n
+                -- toggle test never fired); bottom field = field_n '0'
                 s_row0 <= s_first;
                 if s_first = '1' then
                     s_first    <= '0';
                     s_fld_prev <= data_in.field_n;
-                    s_ilace    <= data_in.field_n xor s_fld_prev;
-                    s_bot      <= (data_in.field_n xor s_fld_prev) and not data_in.field_n;
+                    s_ilace    <= s_cil;
+                    s_bot      <= s_cil and not data_in.field_n;
                 end if;
             end if;
             if s_lw = '1' then

@@ -117,9 +117,30 @@ Keyed=Picture preset became Invert. Two new presets: Leaded Glass (Glass
 strokes, everything engraved) and Reeded Glass (128 panes, strokes over the
 picture).
 
+## v0.3.2: resolution scaling (2026-10-17)
+
+- K4 Pitch is a size on the 1080-line canvas: 4..48 px at 1080, round(2/3 x)
+  at 720p and round(1/2 x) at SD, at least 3 px (two small per-mode copies
+  of the pitch table). The hatch was 1.5x too coarse at 720p and 2x at SD
+  (relative to the screen height). The stroke weight is a fraction of the
+  pitch, so it follows; a 1-px stroke stays 1 px.
+- Interlace now comes from the timing ID. v0.3.0 detected it from field_n
+  toggling, but the hardware ties field_n high on every input, so on SD
+  the line phase stepped 1 per field line: diagonals at 2:1 and horizontal
+  strokes twice as thick. Lines now step 2 per field line on 480i/576i/1080i.
+- K2 Slide speed is in canvas units (x 1/2 at SD, ~2/3 at 720p).
+- Unchanged: K5 Depth panes (a count, so fractions of the width), the
+  12-px edge inset (pixel scale).
+- 1080p is bit-identical (pixel diff 0).
+
 ## Build
 
 Build with `./build_combo.sh hatchglass` (router2 default).
+
+v0.3.2 (2026-10-17, resolution scaling): all 6 configs pass. HD Analog /
+HD HDMI / HD Dual 89.1 / 84.8 / 81.1 MHz (seed 1); SD 83.8 (**seed 2**, seed
+1 stalled router2 under machine load) / 76.1 / 86.2. 6,528–6,540 LC (85%,
++~145), 18/32 EBR.
 
 v0.3.0 (2026-10-13): all 6 configs pass on seed 1. HD Analog / HD HDMI / HD Dual
 82.8 / 85.5 / 81.2 MHz; SD 83.2 / 79.3 / 85.4. ~6,390 LC (83%), 18/32 EBR.
