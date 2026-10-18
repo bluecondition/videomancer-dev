@@ -116,4 +116,4 @@ suffix_label = "%"
 # Seed 1 puts HD HDMI HSYNC +0.50 ns from the forwarded clock (the brown-line
 # zone, cf. +0.48 on v3.17.1); seed 6 is -1.84 there (screened 1-16 with
 # tools/hdmi_pin_skew.py, 2026-10-14).
-seed = 6
+seed = 1
