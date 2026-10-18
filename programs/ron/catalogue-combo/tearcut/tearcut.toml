@@ -8,7 +8,7 @@
 processing_delay_clks = 20
 program_id = "com.czartroniks.tearcut"
 program_name = "Tearcut"
-program_version = "0.2.1"
+program_version = "0.2.2"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -24,7 +24,7 @@ name_label = "Gain"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 600
+initial_value = 1023
 display_float_digits = 1
 suffix_label = "%"
 
@@ -34,7 +34,7 @@ name_label = "Thresh"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 200
+initial_value = 101
 display_float_digits = 1
 suffix_label = "%"
 
@@ -42,7 +42,7 @@ suffix_label = "%"
 parameter_id = "rotary_potentiometer_3"
 name_label = "Block"
 value_labels = ["8 px", "16 px", "32 px", "64 px"]
-initial_value_label = "16 px"
+initial_value_label = "8 px"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
@@ -50,7 +50,7 @@ name_label = "Density"
 control_mode = "linear"
 display_min_value = 5
 display_max_value = 98
-initial_value = 300
+initial_value = 0
 display_float_digits = 1
 suffix_label = "%"
 
@@ -60,7 +60,7 @@ name_label = "Tear"
 control_mode = "linear"
 display_min_value = 8
 display_max_value = 518
-initial_value = 400
+initial_value = 288
 display_float_digits = 0
 suffix_label = " px"
 
@@ -68,7 +68,7 @@ suffix_label = " px"
 parameter_id = "rotary_potentiometer_6"
 name_label = "Bands"
 value_labels = ["2 ln", "4 ln", "8 ln", "16 ln"]
-initial_value_label = "4 ln"
+initial_value_label = "8 ln"
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
@@ -106,7 +106,7 @@ name_label = "Blend"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 0
+initial_value = 158
 display_float_digits = 1
 suffix_label = "%"
 

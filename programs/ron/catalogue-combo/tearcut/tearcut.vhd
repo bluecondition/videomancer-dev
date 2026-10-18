@@ -257,9 +257,12 @@ begin
                 when 0 =>
                     s_thr   <= s_k_thr(9 downto 2);
                     s_blend <= s_p_blend(9 downto 2);
-                    s_bs    <= resize(s_k_block(9 downto 8), 3) + 3;
+                    -- labelled defaults: the firmware loads the label INDEX
+                    if s_k_block(9 downto 2) = 0 then s_bs <= resize(s_k_block(1 downto 0), 3) + 3;
+                    else s_bs <= resize(s_k_block(9 downto 8), 3) + 3; end if;
                     s_shift <= to_unsigned(200, 8);
-                    s_bsh   <= resize(s_k_bands(9 downto 8), 3) + 1;
+                    if s_k_bands(9 downto 2) = 0 then s_bsh <= resize(s_k_bands(1 downto 0), 3) + 1;
+                    else s_bsh <= resize(s_k_bands(9 downto 8), 3) + 1; end if;
                     s_lk_g <= s_k_gain; s_lk_d <= s_k_dens; s_lk_t <= s_k_tear;
                     s_lw    <= s_line_width;
                     if s_rate_cnt >= C_RATE then
