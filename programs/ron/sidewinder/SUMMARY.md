@@ -1,4 +1,4 @@
-# Sidewinder — per-scanline wave displacement (v1.1.0)
+# Sidewinder — per-scanline wave displacement (v1.1.2)
 
 **STATUS: FINAL except presets — signed off by Ron 2026-10-10** ("I think it
 looks good") and marked completed in the release audit. v1.1.0 is the
@@ -22,7 +22,7 @@ address, the shift being a rolling triangle/sine wave of the line number.
 | K6 Mix | Dry/wet. |
 | S7 Shape | Triangle / Sine. |
 | S8 Swell | ~6 s LFO on Amount. |
-| S9 Steps | 16 px offset quantize. |
+| S9 Steps | 16 px offset quantize (at 1080p; 16 virtual units in every mode). |
 | S10 Edge | Mirror / Wrap, both over the inset columns [12, W−13]. |
 | S11 Bypass | Mix forced dry (same latency). |
 
@@ -86,6 +86,31 @@ Not simulated (build-first rule); not flashed.
 - K5 Split: prism fringes on bends, then colour detaching at high values.
 - Thin coloured lines on analog sources would be the Drape U/V-parity case
   (each row replays the row above) — not fixed pre-emptively.
+
+## v1.1.2 resolution scaling (2026-10-18)
+SD and 720p now show the 1080p picture scaled; 1080p output is bit-identical.
+- The wave runs in virtual 1080-line units from the timing ID
+  (`registers_in(8)`): `s_ys` = virtual lines per field line (720p 1.5, 480i
+  4.44, 576i 3.75, 1080i 2).
+- The line sequencer's step 0 (phase += freq, freq += twist) repeats once per
+  virtual line the field line covers (`s_rep`, 1 at 1080p; at most 5, so the
+  sequence ends by clock 38 of SD's 138-clock blanking). Period and Twist
+  therefore give the same bends per screen height everywhere: 720p had 2/3
+  of the bends and SD about 1/4.
+- The Twist pivot is the virtual centre row (`s_height_m` now counts virtual
+  lines).
+- S9 Steps quantizes to 16 virtual units: 1080p 16 px, SD 8 px, and 720p
+  10.5 px via k = floor(3·off/32), off = 10.5·k (steps 11-13, which were
+  multiplier waits). At 720p the Split product uses the unquantized offset,
+  a sub-step difference.
+- Amount and Ripple were already fractions of the width (unchanged). C_EDGE
+  (12 px) is a property of the source's blanking columns, so it stays in
+  pixels.
+- Build `./build_programs.sh ron sidewinder` (router2), 6/6 on **seed 1**:
+  HD Analog 88.00, HD HDMI 80.60, HD Dual 84.10, SD Analog 84.10, SD HDMI
+  82.17, SD Dual 78.34 MHz. 5081–5100 LC (66%), 23/32 EBR. Not flashed.
+- The community port's `[firmware] seed = 4` line is untouched; it needs
+  re-checking when this version is synced (stock router1, 8 configs).
 
 ## Build seeds — community port (stock LZX SDK 0a65d53, router1, all 8 configs)
 
