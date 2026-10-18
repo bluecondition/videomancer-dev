@@ -50,6 +50,17 @@
 -- where the 2-bit level (vy(9:8)) matches its rung -- dark areas stay a far
 -- dense wall, bright areas pop individual numbers forward proportionally.
 --
+-- Resolution scaling (v1.0.2): the planes' phase accumulators run in virtual
+-- 1080-line units, stepped per pixel and per FIELD line by the per-mode steps
+-- from the video timing ID (1080p 1.0/1.0, 1080i 1.0/2.0, 720p 1.5/1.5, SD
+-- 2.0/~4.44 at 480i -- SD is a 1440-unit-wide 4:3 window).  Cell sizes are
+-- the 1080p ones in virtual units everywhere (far 45, near 176), the zoom
+-- centre is half the virtual width/height (core_top ties field_n high, so
+-- interlaced fields render alike: SD comes out line-doubled).  Before, one step served both axes and the near
+-- cell came from FIELD lines, so 480i/1080i digits were ~2x tall (and 1080i
+-- near cells half size); the far cell came from the width (SD smaller).
+-- 1080p is bit-identical (both steps are exactly the old step there).
+--
 -- Author: czartroniks
 
 library ieee;
@@ -185,6 +196,8 @@ architecture ziffern of program_top is
     type t_zparr  is array (0 to NP - 1) of unsigned(31 downto 0);
     type t_czarr  is array (0 to NP - 1) of unsigned(16 downto 0);   -- Q10.6 progress
     type t_steparr is array (0 to NP - 1) of unsigned(17 downto 0);  -- step (cells/px)
+    type t_stepharr is array (0 to NP - 1) of unsigned(18 downto 0); -- x step (cells/pixel)
+    type t_stepvarr is array (0 to NP - 1) of unsigned(20 downto 0); -- y step (cells/field line)
     type t_marr   is array (0 to NP - 1) of unsigned(27 downto 0);   -- centre*step
     type t_pharr  is array (0 to NP - 1) of signed(27 downto 0);     -- phase Q10.18
     type t_frarr  is array (0 to NP - 1) of unsigned(17 downto 0);   -- cell fraction
@@ -267,7 +280,19 @@ architecture ziffern of program_top is
     signal s_delta   : unsigned(17 downto 0) := (others => '0');    -- stepfar - stepnear
     signal s_stepfar : unsigned(17 downto 0) := to_unsigned(6554, 18);  -- (1<<FRAC)/Gbg
     signal s_stepnear: unsigned(17 downto 0) := to_unsigned(1092, 18);  -- (1<<FRAC)/Gfg
-    signal s_pstep : t_steparr := (others => to_unsigned(6554, 18)); -- pitch step (cells/px)
+    -- pitch step per pixel / per field line: the per-virtual-unit pitch step
+    -- times the mode's x / y step (both = the pitch step at 1080p)
+    signal s_pstep_h : t_stepharr := (others => to_unsigned(6554, 19));
+    signal s_pstep_v : t_stepvarr := (others => to_unsigned(6554, 21));
+
+    -- Resolution scaling: timing-ID class (registered, free-running)
+    --   s_tx   x step: 0 = 1.0 (1080), 1 = 1.5 (720p), 2 = 2.0 (SD)
+    --   s_ys   y step per FIELD line, Q8
+    signal s_tx      : unsigned(1 downto 0) := "00";
+    signal s_t1080p  : std_logic := '1';
+    signal s_ys      : unsigned(10 downto 0) := to_unsigned(256, 11);
+    signal s_wv2     : unsigned(11 downto 0) := to_unsigned(960, 12);  -- virtual W/2
+    signal s_hc      : unsigned(11 downto 0) := to_unsigned(540, 12);  -- virtual H/2
     signal s_nmh, s_nmv : t_pharr := (others => (others => '0'));     -- -(centre*step)
 
     -- K4 Size / K5 Spacing (per-frame constants):
@@ -286,7 +311,7 @@ architecture ziffern of program_top is
     signal s_t8    : unsigned(7 downto 0) := to_unsigned(248, 8);
 
     -- per-frame geometry engine (one serial multiplier, see p_frameeng)
-    type t_eng is (E_IDLE, E_RT, E_CZ, E_SF, E_PT, E_MH, E_MV);
+    type t_eng is (E_IDLE, E_RT, E_CZ, E_SF, E_PT, E_MH, E_MV, E_VS);
     signal e_st  : t_eng := E_IDLE;
     signal e_pl  : integer range 0 to NP - 1 := 0;
     signal e_ez, e_tri : unsigned(16 downto 0) := (others => '0');
@@ -519,18 +544,31 @@ begin
                         v_p := v_pr(29 downto 10);
                         if v_p > to_unsigned(262143, 20) then v_p := to_unsigned(262143, 20); end if;
                         if v_p < to_unsigned(64, 20) then v_p := to_unsigned(64, 20); end if;
-                        s_pstep(e_pl) <= v_p(17 downto 0);
                         e_ps <= v_p(17 downto 0);
-                        e_a <= resize(shift_right(s_measured_h, 1), 18); e_lo <= v_p(17 downto 0);
+                        -- start phases from the VIRTUAL centre (W/2, H/2)
+                        e_a <= resize(s_wv2, 18); e_lo <= v_p(17 downto 0);
                         e_hi <= (others => '0'); e_cnt <= 0; e_run <= '1';
                         e_st <= E_MH;
                     when E_MH =>
                         s_nmh(e_pl) <= -signed(v_pr(27 downto 0));
-                        e_a <= resize(shift_right(s_measured_v, 1), 18); e_lo <= e_ps;
+                        -- x step per pixel = pitch step * 1 / 1.5 / 2
+                        case s_tx is
+                            when "00"   => s_pstep_h(e_pl) <= resize(e_ps, 19);
+                            when "01"   => s_pstep_h(e_pl) <= resize(e_ps, 19)
+                                                              + resize(shift_right(e_ps, 1), 19);
+                            when others => s_pstep_h(e_pl) <= e_ps & '0';
+                        end case;
+                        e_a <= resize(s_hc, 18); e_lo <= e_ps;
                         e_hi <= (others => '0'); e_cnt <= 0; e_run <= '1';
                         e_st <= E_MV;
                     when E_MV =>
                         s_nmv(e_pl) <= -signed(v_pr(27 downto 0));
+                        -- y step per field line = pitch step * ys (Q8)
+                        e_a <= e_ps; e_lo <= resize(s_ys, 18);
+                        e_hi <= (others => '0'); e_cnt <= 0; e_run <= '1';
+                        e_st <= E_VS;
+                    when E_VS =>
+                        s_pstep_v(e_pl) <= v_pr(28 downto 8);
                         if e_pl = NP - 1 then
                             e_st <= E_IDLE;
                         else
@@ -555,12 +593,18 @@ begin
     begin
         if rising_edge(clk) then
             -- far cell 25% smaller than measured>>5 -> zoom starts deeper (~42 across)
-            v_Gbg := shift_right(s_measured_h, 5) - shift_right(s_measured_h, 7);
             -- near cell anchored to picture HEIGHT: ~0.164*V (~6 rows at K4
-            -- unity), so K4 max (x1.49) lands at the 4-numbers-high ceiling
-            -- on any aspect ratio.
-            v_Gfg := shift_right(s_measured_v, 3) + shift_right(s_measured_v, 5)
-                     + shift_right(s_measured_v, 7);
+            -- unity), so K4 max (x1.49) lands at the 4-numbers-high ceiling.
+            -- Cell sizes are in virtual units: the 1080p values (45 / 176)
+            -- in every other mode, measured at 1080p (bit-identical).
+            if s_t1080p = '1' then
+                v_Gbg := shift_right(s_measured_h, 5) - shift_right(s_measured_h, 7);
+                v_Gfg := shift_right(s_measured_v, 3) + shift_right(s_measured_v, 5)
+                         + shift_right(s_measured_v, 7);
+            else
+                v_Gbg := to_unsigned(45, 12);
+                v_Gfg := to_unsigned(176, 12);
+            end if;
             -- step endpoints (cells/pixel) = (1<<FRAC)/cellsize, via the recip LUT.
             v_sf := C_RECIP(to_integer(v_Gbg(7 downto 0)));   -- far  (bigger step)
             v_sn := C_RECIP(to_integer(v_Gfg(7 downto 0)));   -- near (smaller step)
@@ -660,6 +704,37 @@ begin
         end if;
     end process;
 
+    --------------------------------------------------------------------------
+    -- Resolution scaling: timing-ID class, virtual centre.
+    --------------------------------------------------------------------------
+    p_tclass : process(clk)
+    begin
+        if rising_edge(clk) then
+            s_t1080p <= '0';
+            case to_integer(unsigned(registers_in(8)(3 downto 0))) is
+                when 0          => s_tx <= "10"; s_ys <= to_unsigned(1138, 11);                  -- 480i
+                when 4          => s_tx <= "10"; s_ys <= to_unsigned(576, 11);                   -- 480p
+                when 8          => s_tx <= "10"; s_ys <= to_unsigned(960, 11);                   -- 576i
+                when 12         => s_tx <= "10"; s_ys <= to_unsigned(480, 11);                   -- 576p
+                when 5 | 6 | 14 => s_tx <= "01"; s_ys <= to_unsigned(384, 11);                   -- 720p
+                when 1 | 2 | 10 => s_tx <= "00"; s_ys <= to_unsigned(512, 11);                   -- 1080i
+                when others     => s_tx <= "00"; s_t1080p <= '1'; s_ys <= to_unsigned(256, 11);  -- 1080p
+            end case;
+            -- virtual W/2: measured_h/2 * x step
+            case s_tx is
+                when "00"   => s_wv2 <= shift_right(s_measured_h, 1);
+                when "01"   => s_wv2 <= shift_right(s_measured_h, 1) + shift_right(s_measured_h, 2);
+                when others => s_wv2 <= s_measured_h;
+            end case;
+            -- virtual H/2 (measured at 1080p)
+            if s_t1080p = '1' then
+                s_hc <= shift_right(s_measured_v, 1);
+            else
+                s_hc <= to_unsigned(540, 12);
+            end if;
+        end if;
+    end process;
+
     p_firstline : process(clk)
     begin
         if rising_edge(clk) then
@@ -694,19 +769,20 @@ begin
     --   integer part, glyph col/row = top 3 fraction bits.  Smooth = no modulo.
     --------------------------------------------------------------------------
     p_acc : process(clk)
-        variable stp : signed(27 downto 0);
+        variable stp, stv : signed(27 downto 0);
         variable cur_h, cur_v, nx_v : signed(27 downto 0);
     begin
         if rising_edge(clk) then
             for i in 0 to NP - 1 loop
-                stp := signed(resize(s_pstep(i), 28));
+                stp := signed(resize(s_pstep_h(i), 28));   -- x step
+                stv := signed(resize(s_pstep_v(i), 28));   -- y step
 
                 if s_timing.avid_start = '1' then
                     -- vertical advance (per line)
                     if s_firstline = '1' then
                         nx_v := s_nmv(i);
                     else
-                        nx_v := s_phv(i) + stp;
+                        nx_v := s_phv(i) + stv;
                     end if;
                     s_phv(i) <= nx_v;
                     cur_v := nx_v;
