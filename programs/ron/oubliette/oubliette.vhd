@@ -17,6 +17,25 @@
 --   monster glide + space reclaim                                        <-- v0.4.1
 --   Tier 3 batch B (look) + colour parity fix                            <-- v0.5.0
 --
+-- v1.0.3 (2026-10-17): resolution scaling.  The screen coordinates run in
+--   virtual 1080-line units, stepped per pixel / per field line from the
+--   video timing ID (registers_in(8)): 1.0 at 1080p (bit-identical to
+--   v1.0.2), 1.5 at 720p, and at SD 2.0 across (a 1440-wide 4:3 window) and
+--   1080/486 per frame line (interlaced fields step two frame lines; the
+--   hardware ties field_n high, so both fields sample alike and the
+--   field_n = '0' half-step offset is inert there).  Cells, sprites, HUD, logo,
+--   HP bar, hurt border and Map view keep their 1080p proportions and stay
+--   square on a 4:3 screen.  The HUD line is a 1920-unit layout band at
+--   every resolution (its own x step: at SD the glyphs are 3/4 wide), so all
+--   48 columns and the HP bar fit the SD screen.  The band flags are
+--   magnitude windows (a step can jump an equality); the y bands are
+--   computed a line ahead.  Layout uses the screen in virtual units; the
+--   generated avid keeps the real measured width.  At 480i a field line
+--   (4.44 units) is longer than a HUD font row (4), so the HUD lines run one
+--   font row per field line (8 lines, ~11% taller than proportional) rather
+--   than skip a row of every glyph.  The reticle outline is at least one
+--   field step wide on each axis.
+--
 -- v0.5.0 (2026-10-10): output avid moved to aurora's hsync distance (the
 --   colours had been U/V-swapped since v0.2.0: yellow reticle showed cyan);
 --   P12 top = N; room furniture (pillars, pools, lava, rubble) + doors; HP
@@ -127,15 +146,18 @@ architecture oubliette of program_top is
     constant C_BLK : unsigned(9 downto 0) := to_unsigned(64, 10);
 
     -- HUD: a 48-column context line at the top and a status bar at the
-    -- bottom (8x8 font scaled to 2**C_HUD_LOG2 px).  All text comes from the
+    -- bottom (8x8 font scaled to 2**C_HUD_LOG2 units).  All text comes from the
     -- generated layout ROM (oubliette_hud_pkg: C_HUDN, layouts, fields, names).
-    constant C_HUD_LOG2 : integer := 5;         -- 32 px glyph cell (8x8 font at 4x)
-    constant C_HUD_H    : integer := 2 ** C_HUD_LOG2;  -- bar height (px)
-    constant C_HUD_MARG : integer := 4;         -- top/bottom margin (px)
+    -- Sizes and positions are virtual 1080-line units (= px at 1080p; see
+    -- f_vstep_x / f_vstep_y): they scale with the screen height.
+    constant C_HUD_LOG2 : integer := 5;         -- 32-unit glyph cell (8x8 font at 4x)
+    constant C_HUD_H    : integer := 2 ** C_HUD_LOG2;  -- bar height (units)
+    constant C_HUD_MARG : integer := 4;         -- top/bottom margin (units)
     -- hit feedback: monster hit flash, screen-edge border when hurt and
     -- pulsing at low HP (colours in the palette ROM)
-    constant C_EDGE    : integer := 24;            -- border width (px)
-    -- HP bar: right part of the bottom HUD line, 3 px per HP point (no divide);
+    constant C_EDGE    : integer := 24;            -- border width (units)
+    -- HP bar: right part of the bottom HUD line (HUD x: a 1920-unit line at
+    -- every resolution), 3 units per HP point (no divide);
     -- green above half, amber above a quarter, red below
     constant C_BAR_X0 : integer := 1552;
     -- K6 palette themes: luma quantised to 4 levels, each mapped to a 4-colour
@@ -175,6 +197,84 @@ architecture oubliette of program_top is
     -- squares 0..15 for the torch distance test (a LUT ROM, no multiplier)
     type t_sq is array (0 to 15) of integer range 0 to 225;
     constant C_SQ : t_sq := (0, 1, 4, 9, 16, 25, 36, 49, 64, 81, 100, 121, 144, 169, 196, 225);
+
+    --------------------------------------------------------------------------
+    -- Resolution scaling (v1.0.3): the screen coordinates run in virtual
+    -- 1080-line units, stepped per pixel / per field line from the video
+    -- timing ID (registers_in(8)).  1080p steps 1.0 (the old pixel counters).
+    --------------------------------------------------------------------------
+    -- x step in half units per pixel: 1080 2 (1.0), 720p 3 (1.5), SD 4 (2.0:
+    -- 720 px span 1440 units, a 4:3 window of the 1080 canvas).
+    function f_vstep_x(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0 | 4 | 8 | 12 => return to_unsigned(4, 3);
+            when 5 | 6 | 14     => return to_unsigned(3, 3);
+            when others         => return to_unsigned(2, 3);
+        end case;
+    end function;
+    -- HUD x step in 1/16 units per pixel: the HUD line is a 1920-unit layout
+    -- band at every resolution (SD 43/16: 720 px span 1935 units), so all 48
+    -- columns and the HP bar stay on the narrower SD screen (glyphs 3/4 wide).
+    function f_hstep_x(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0 | 4 | 8 | 12 => return to_unsigned(43, 6);
+            when 5 | 6 | 14     => return to_unsigned(24, 6);
+            when others         => return to_unsigned(16, 6);
+        end case;
+    end function;
+    -- y step in Q4.8 units per FIELD line (1080 / active lines, doubled for
+    -- interlaced modes).
+    function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(1138, 12);  -- 480i: 2 x 1080/486
+            when 4          => return to_unsigned(576, 12);   -- 480p: 1080/480
+            when 8          => return to_unsigned(960, 12);   -- 576i: 2 x 1080/576
+            when 12         => return to_unsigned(480, 12);   -- 576p: 1080/576
+            when 5 | 6 | 14 => return to_unsigned(384, 12);   -- 720p: 1.5
+            when 1 | 2 | 10 => return to_unsigned(512, 12);   -- 1080i: 2.0
+            when others     => return to_unsigned(256, 12);   -- 1080p: 1.0
+        end case;
+    end function;
+    -- reticle outline width in art pixels (cell = 16 << cl units, art pixel
+    -- 1 << cl): at least one step on each axis, so a fractional step can't
+    -- skip the 1-art-pixel rim (1080p: always 1, the old outline).
+    function f_rim_x(t : std_logic_vector(3 downto 0); cl : unsigned(1 downto 0)) return unsigned is
+    begin
+        if cl = "00" then
+            case to_integer(unsigned(t)) is
+                when 0 | 4 | 8 | 12 | 5 | 6 | 14 => return to_unsigned(2, 3);
+                when others                      => return to_unsigned(1, 3);
+            end case;
+        end if;
+        return to_unsigned(1, 3);
+    end function;
+    function f_rim_y(t : std_logic_vector(3 downto 0); cl : unsigned(1 downto 0)) return unsigned is
+    begin
+        case cl is
+            when "00" =>
+                case to_integer(unsigned(t)) is
+                    when 0                     => return to_unsigned(5, 3);  -- 4.44
+                    when 8                     => return to_unsigned(4, 3);  -- 3.75
+                    when 4                     => return to_unsigned(3, 3);  -- 2.25
+                    when 5 | 6 | 14 | 1 | 2 | 10 | 12 => return to_unsigned(2, 3);
+                    when others                => return to_unsigned(1, 3);
+                end case;
+            when "01" =>
+                case to_integer(unsigned(t)) is
+                    when 0          => return to_unsigned(3, 3);
+                    when 4 | 8      => return to_unsigned(2, 3);
+                    when others     => return to_unsigned(1, 3);
+                end case;
+            when "10" =>
+                if to_integer(unsigned(t)) = 0 then return to_unsigned(2, 3); end if;
+                return to_unsigned(1, 3);
+            when others =>
+                return to_unsigned(1, 3);
+        end case;
+    end function;
 
     -- cell decode at zoom cl (cell = 16 << cl px): map column/row, art pixel
     -- (16 per cell, nearest-neighbour) and in-bounds.  Bit slices only.
@@ -295,8 +395,32 @@ architecture oubliette of program_top is
     signal g_cnt : unsigned(11 downto 0) := (others => '0');
     signal g_wm1 : unsigned(11 downto 0) := to_unsigned(1919, 12);
     signal s_gav_start : std_logic;
-    signal s_x : unsigned(11 downto 0) := (others => '0');
-    signal s_y : unsigned(11 downto 0) := (others => '0');
+    -- Resolution scaling: virtual screen coordinates (1080-line canvas).
+    -- s_xa Q.1 (world, logo, border), s_hxa Q.4 (HUD line: 1920 units wide
+    -- at every resolution), s_ya Q.8 per field line; s_yn = the next line's
+    -- y, so the per-line band flags are ready before the line starts.
+    -- s_vw / s_vh = the screen in virtual units (layout only; the generated
+    -- avid keeps the real measured width).
+    signal s_xs  : unsigned(2 downto 0)  := to_unsigned(2, 3);
+    signal s_hxs : unsigned(5 downto 0)  := to_unsigned(16, 6);
+    signal s_ys  : unsigned(11 downto 0) := to_unsigned(256, 12);
+    signal s_xa  : unsigned(12 downto 0) := (others => '0');
+    signal s_hxa : unsigned(15 downto 0) := (others => '0');
+    signal s_ya  : unsigned(19 downto 0) := (others => '0');
+    signal s_yn  : unsigned(19 downto 0) := (others => '0');
+    signal s_fbot : std_logic := '0';      -- bottom field (field_n = '0', SD only)
+    signal s_fbcur : std_logic := '0';     -- this field started half a step down
+    signal s_tid  : std_logic_vector(3 downto 0) := x"D";   -- timing ID, per field
+    signal s_rx, s_ry : unsigned(2 downto 0) := to_unsigned(1, 3);  -- reticle rim (art px)
+    signal s_vw  : unsigned(11 downto 0) := to_unsigned(1920, 12);
+    signal s_vh  : unsigned(11 downto 0) := to_unsigned(1080, 12);
+    -- next line's band flags / glyph rows (from s_yn)
+    signal s_n_ht, s_n_hb, s_n_ye, s_n_ly : std_logic := '0';
+    signal s_n_hc  : unsigned(4 downto 0) := (others => '0');
+    signal s_n_lcy : unsigned(5 downto 0) := (others => '0');
+    -- field step longer than a HUD font row (4 units: 480i only): the HUD
+    -- lines take one font row per field line instead (see p_acc)
+    signal s_hsnap : std_logic := '0';
 
     --------------------------------------------------------------------------
     -- Player / camera state
@@ -339,28 +463,24 @@ architecture oubliette of program_top is
     signal s_rv_r      : integer range 0 to 9 := 5;          -- reveal radius
     signal s_fcnt      : unsigned(7 downto 0) := (others => '0');  -- field counter
     signal s_edge_r, s_edge_b : unsigned(11 downto 0) := (others => '0');
-    signal s_xedge, s_yedge : std_logic := '0';   -- border band flags (p_acc)
-    -- HUD bands: per-line flags flipped at fixed lines + a line counter for
-    -- the glyph row (full width: no x limit)
+    signal s_yedge : std_logic := '0';            -- border band y flag (p_acc)
+    -- HUD bands: per-line flags + the glyph row (y - band start), taken from
+    -- the next-line flags at each line start (full width: no x limit)
     signal s_htop, s_hbot : std_logic := '0';
     signal s_hcnt : unsigned(4 downto 0) := (others => '0');
-    signal s_hud_y1 : unsigned(11 downto 0) := (others => '0');   -- bottom band end
     -- title screen (class select): the class sprite at the Close zoom on a
     -- black screen, under a 2x "OUBLIETTE" logo band (HUD RAM top line, cols
     -- 48-56; centred on the measured screen)
     signal s_title : std_logic := '0';
-    signal s_logo_y0, s_logo_y1 : unsigned(11 downto 0) := (others => '0');
-    signal s_logo_x0, s_logo_x1 : unsigned(11 downto 0) := (others => '0');
-    signal s_lgy, s_lgx : std_logic := '0';
+    signal s_logo_y0, s_logo_x0 : unsigned(11 downto 0) := (others => '0');
+    signal s_lgy : std_logic := '0';
     signal s_lcy : unsigned(5 downto 0) := (others => '0');
-    signal s_lcx : unsigned(9 downto 0) := (others => '0');
     signal s0_logo, s1_logo, s2_logo, s3_logo, s4_logo : std_logic := '0';
     -- hit feedback + facing (see p_game / p_mmob)
     signal s_hitflash, s_hurtflash : unsigned(2 downto 0) := (others => '0');
     -- HP bar ends and colour (from hp / maxhp, refreshed continuously)
     signal s_bar_hpx, s_bar_mxx : unsigned(11 downto 0) := (others => '0');
     signal s_bar_col : integer range 0 to 2 := 0;
-    signal s_barx, s_barfx : std_logic := '0';   -- x within the frame / the fill
     -- K6 theme and the per-depth tint of the tiles (Colour theme)
     signal s_theme_sel, s_theme : integer range 0 to 4 := 0;
     signal s_theme_m1 : unsigned(1 downto 0) := "00";            -- theme - 1
@@ -813,6 +933,7 @@ architecture oubliette of program_top is
     signal s4_gx, s4_gy, s4_sgx : unsigned(3 downto 0) := (others => '0');
     signal s4_smir, s4_isp, s4_etgt, s4_seen, s4_core, s4_ring : std_logic := '0';
     signal s4_inb, s4_intgt, s4_render, s4_edge : std_logic := '0';
+    signal s4_rim : std_logic := '0';   -- art pixel on the reticle's rim
     -- S5 (select: layer decided, palette index carried)
     signal s5_pa   : unsigned(6 downto 0) := to_unsigned(C_PA_BLANK, 7);  -- palette address
     signal s5_sync : std_logic_vector(2 downto 0) := (others => '0');
@@ -1059,16 +1180,14 @@ begin
                         when others => v_mx(12 downto 6) := signed(s_px & '1'); v_my(12 downto 6) := signed(s_py & '1');
                     end case;
                 end if;
-                s_pscroll_x <= v_mx - signed(resize(s_measured_h(11 downto 1), 14));
-                s_pscroll_y <= v_my - signed(resize(s_measured_v(11 downto 1), 14));
-                s_hud_y0 <= s_measured_v - (C_HUD_H + C_HUD_MARG);
-                s_hud_y1 <= s_measured_v - C_HUD_MARG;
-                s_logo_y0 <= ('0' & s_measured_v(11 downto 1)) - 220;
-                s_logo_y1 <= ('0' & s_measured_v(11 downto 1)) - 156;
-                s_logo_x0 <= ('0' & s_measured_h(11 downto 1)) - 288;
-                s_logo_x1 <= ('0' & s_measured_h(11 downto 1)) + 288;
-                s_edge_r <= s_measured_h - C_EDGE;
-                s_edge_b <= s_measured_v - C_EDGE;
+                -- layout in virtual units (s_vw x s_vh: 1920x1080, SD 1440x1080)
+                s_pscroll_x <= v_mx - signed(resize(s_vw(11 downto 1), 14));
+                s_pscroll_y <= v_my - signed(resize(s_vh(11 downto 1), 14));
+                s_hud_y0 <= s_vh - (C_HUD_H + C_HUD_MARG);
+                s_logo_y0 <= ('0' & s_vh(11 downto 1)) - 220;
+                s_logo_x0 <= ('0' & s_vw(11 downto 1)) - 288;
+                s_edge_r <= s_vw - C_EDGE;
+                s_edge_b <= s_vh - C_EDGE;
             end if;
 
             -- Glide distance s_mgf: zeroed when a turn is about to run on this
@@ -2630,92 +2749,142 @@ begin
     s_gav_start <= g_avid and not g_avd;
 
     --------------------------------------------------------------------------
-    -- S0: screen pixel -> world coords (eased camera scroll) and player coords
-    -- (the camera's target scroll), HUD strips, screen-edge border band.
+    -- S0: screen pixel -> world coords (eased camera scroll), HUD strips,
+    -- title logo, HP bar, screen-edge border band.
+    -- Resolution scaling (v1.0.3): cur_x / cur_y are virtual 1080-line units
+    -- (f_vstep_x / f_vstep_y; SD is a 1440-wide 4:3 window), cur_hx the HUD
+    -- line's 1920-unit x (f_hstep_x).  A fractional step can jump over a
+    -- value, so the bands are magnitude windows on the coordinates (at
+    -- 1080p's step 1 they flip on exactly the pixels / lines the old equality
+    -- flags did).  The y bands are computed a line ahead from s_yn.
     --------------------------------------------------------------------------
     p_acc : process(clk)
-        variable cur_x, cur_y : unsigned(11 downto 0);
+        variable cur_x, cur_y, cur_hx : unsigned(11 downto 0);
         variable v_xe, v_ye, v_ht, v_hb, v_bx, v_bf, v_ly, v_lx : std_logic;
         variable v_lcy : unsigned(5 downto 0);
-        variable v_lcx : unsigned(9 downto 0);
         variable v_hc : unsigned(4 downto 0);
+        variable v_ny, v_xi, v_hxi : unsigned(11 downto 0);
+        variable v_d, v_lcx : unsigned(12 downto 0);
     begin
         if rising_edge(clk) then
+            -- per-field steps (the field tick is in vblank, guarded); the
+            -- screen in virtual units = the last line's end x / next line's y
+            if s_ftick = '1' then
+                s_xs  <= f_vstep_x(registers_in(8)(3 downto 0));
+                s_hxs <= f_hstep_x(registers_in(8)(3 downto 0));
+                s_ys  <= f_vstep_y(registers_in(8)(3 downto 0));
+                s_tid <= registers_in(8)(3 downto 0);
+                s_vw  <= s_xa(12 downto 1);
+                -- (from fields starting at 0 only: a bottom field's half-step
+                -- start would move every band down with it)
+                if s_fbcur = '0' then
+                    s_vh <= s_yn(19 downto 8);
+                end if;
+            end if;
+            s_fbot <= not data_in.field_n;
+            s_rx <= f_rim_x(s_tid, s_cl);
+            s_ry <= f_rim_y(s_tid, s_cl);
+            s_hsnap <= s_ys(11) or s_ys(10);       -- step >= 4.0 units
+
+            -- x: this pixel's virtual position (0 at the generated avid start)
             if s_gav_start = '1' then
-                cur_x := (others => '0');
-                if s_firstline = '1' then cur_y := (others => '0');
-                else                      cur_y := s_y + 1; end if;
-                s_x <= to_unsigned(1, 12);
-                s_y <= cur_y;
+                cur_x := (others => '0'); cur_hx := (others => '0');
+                s_xa  <= resize(s_xs, 13);
+                s_hxa <= resize(s_hxs, 16);
             elsif g_avid = '1' then
-                cur_x := s_x; cur_y := s_y;
-                s_x <= s_x + 1;
+                cur_x := s_xa(12 downto 1); cur_hx := s_hxa(15 downto 4);
+                s_xa  <= s_xa + s_xs;
+                s_hxa <= s_hxa + s_hxs;
             else
-                cur_x := s_x; cur_y := s_y;
+                cur_x := s_xa(12 downto 1); cur_hx := s_hxa(15 downto 4);
+            end if;
+            -- y: per line; the bottom field starts half a field step down
+            s_yn <= s_ya + s_ys;
+            if s_gav_start = '1' then
+                if s_firstline = '1' then
+                    s_fbcur <= s_fbot;
+                    if s_fbot = '1' then
+                        s_ya  <= resize(s_ys(11 downto 1), 20);
+                        cur_y := resize(s_ys(11 downto 9), 12);
+                    else
+                        s_ya  <= (others => '0');
+                        cur_y := (others => '0');
+                    end if;
+                else
+                    s_ya  <= s_yn;
+                    cur_y := s_yn(19 downto 8);
+                end if;
+            else
+                cur_y := s_ya(19 downto 8);
             end if;
 
             s0_wx  <= signed(resize(cur_x, 14)) + s_scroll_x;
             s0_wy  <= signed(resize(cur_y, 14)) + s_scroll_y;
             s0_render <= g_avid;
-            -- border band: on/off flags flipped at fixed positions (equality
-            -- tests only, no magnitude compares): x on at each line start,
-            -- off at C_EDGE, on again at width-C_EDGE; y likewise per line
-            v_xe := s_xedge;
-            v_ye := s_yedge;
-            if s_gav_start = '1' then
-                v_xe := '1';
-                if s_firstline = '1' then        v_ye := '1';
-                elsif cur_y = C_EDGE then        v_ye := '0';
-                elsif cur_y = s_edge_b then      v_ye := '1';
-                end if;
-            elsif s_x = C_EDGE then          -- (not line start: cur_x = s_x)
-                v_xe := '0';
-            elsif s_x = s_edge_r then
-                v_xe := '1';
-            end if;
-            s_xedge <= v_xe;
-            s_yedge <= v_ye;
-            s0_edge <= v_xe or v_ye;
 
-            -- HUD strips (screen space, 32 px glyph cells, full width): the top
-            -- context line at the top margin, the status bar at the bottom.
-            -- Band flags flip at fixed lines (equality tests); s_hcnt counts
-            -- lines within the band for the glyph row.
+            -- next line's bands (y is constant over a line): HUD top line
+            -- [4, 36), bottom line [H-36, H-4) with the glyph row = y - start,
+            -- logo [H/2-220, +64), border y < 24 or >= H-24
+            v_ny := s_yn(19 downto 8);
+            v_d := ('0' & v_ny) - C_HUD_MARG;
+            if v_d(12 downto C_HUD_LOG2) = 0 then s_n_ht <= '1'; else s_n_ht <= '0'; end if;
+            v_d := ('0' & v_ny) - ('0' & s_hud_y0);
+            if v_d(12 downto C_HUD_LOG2) = 0 then
+                s_n_hb <= '1'; s_n_hc <= v_d(4 downto 0);
+            else
+                s_n_hb <= '0'; s_n_hc <= v_ny(4 downto 0) - C_HUD_MARG;
+            end if;
+            v_d := ('0' & v_ny) - ('0' & s_logo_y0);
+            if v_d(12 downto 6) = 0 then s_n_ly <= '1'; else s_n_ly <= '0'; end if;
+            s_n_lcy <= v_d(5 downto 0);
+            if v_ny < C_EDGE or v_ny >= s_edge_b then s_n_ye <= '1'; else s_n_ye <= '0'; end if;
+
+            -- per-line flags, taken at the line start (the first line: y 0)
             v_ht := s_htop; v_hb := s_hbot; v_hc := s_hcnt;
+            v_ly := s_lgy; v_lcy := s_lcy; v_ye := s_yedge;
             if s_gav_start = '1' then
-                v_hc := s_hcnt + 1;
                 if s_firstline = '1' then
-                    v_ht := '0'; v_hb := '0';
-                end if;
-                if cur_y = C_HUD_MARG then
-                    v_ht := '1'; v_hc := (others => '0');
-                elsif cur_y = C_HUD_MARG + C_HUD_H then
-                    v_ht := '0';
-                end if;
-                if cur_y = s_hud_y0 then
-                    v_hb := '1'; v_hc := (others => '0');
-                elsif cur_y = s_hud_y1 then
-                    v_hb := '0';
+                    v_ht := '0'; v_hb := '0'; v_ly := '0'; v_ye := '1';
+                else
+                    v_ly := s_n_ly; v_lcy := s_n_lcy; v_ye := s_n_ye;
+                    if s_hsnap = '0' then
+                        v_ht := s_n_ht; v_hb := s_n_hb; v_hc := s_n_hc;
+                    -- 480i: a field line (4.44 units) is longer than a font
+                    -- row (4), so sampling by y would skip one row in eight
+                    -- (the hardware sends both fields alike: field_n is tied
+                    -- high).  Each HUD line instead runs 8 field lines from its
+                    -- first line, one font row per line (glyphs 8 field lines
+                    -- tall, ~11% over the proportional 7.2).
+                    elsif (s_htop = '1' or s_hbot = '1') and s_hcnt(4 downto 2) /= "111" then
+                        v_hc := s_hcnt + 4;
+                    elsif s_htop = '0' and s_hbot = '0' and (s_n_ht = '1' or s_n_hb = '1') then
+                        v_ht := s_n_ht; v_hb := s_n_hb; v_hc := (others => '0');
+                    else
+                        v_ht := '0'; v_hb := '0';
+                    end if;
                 end if;
             end if;
             s_htop <= v_ht; s_hbot <= v_hb; s_hcnt <= v_hc;
-            -- title logo band: flags flip on equality, counters give the glyph
-            v_ly := s_lgy; v_lcy := s_lcy;
-            if s_gav_start = '1' then
-                v_lcy := s_lcy + 1;
-                if s_firstline = '1' then v_ly := '0'; end if;
-                if cur_y = s_logo_y0 then    v_ly := '1'; v_lcy := (others => '0');
-                elsif cur_y = s_logo_y1 then v_ly := '0'; end if;
+            s_lgy <= v_ly; s_lcy <= v_lcy; s_yedge <= v_ye;
+
+            -- x bands off the registered counters (cur_x = s_xa off the line
+            -- start; at the line start every x band is in its x = 0 state)
+            v_xi  := s_xa(12 downto 1);
+            v_hxi := s_hxa(15 downto 4);
+            -- border band: x < 24 or x >= W-24
+            if s_gav_start = '1' or v_xi < C_EDGE or v_xi >= s_edge_r then
+                v_xe := '1';
+            else
+                v_xe := '0';
             end if;
-            v_lx := s_lgx; v_lcx := s_lcx + 1;
-            if s_gav_start = '1' then
-                v_lx := '0';
-            elsif s_x = s_logo_x0 then
-                v_lx := '1'; v_lcx := (others => '0');
-            elsif s_x = s_logo_x1 then
+            s0_edge <= v_xe or v_ye;
+            -- title logo columns [W/2-288, +576): 9 glyphs of 64 units
+            v_lcx := ('0' & v_xi) - ('0' & s_logo_x0);
+            if s_gav_start = '0' and v_lcx(12) = '0' and v_lcx(11 downto 0) < 576 then
+                v_lx := '1';
+            else
                 v_lx := '0';
             end if;
-            s_lgy <= v_ly; s_lcy <= v_lcy; s_lgx <= v_lx; s_lcx <= v_lcx;
 
             if s_title = '1' and v_ly = '1' and v_lx = '1' then
                 -- logo: 64 px glyphs from HUD RAM top-line columns 48..56
@@ -2727,32 +2896,27 @@ begin
                 s0_hud_top    <= v_ht;
                 s0_logo       <= '0';
             end if;
-            -- HP bar: band rows 8-23 of the bottom line, right of the text.
-            -- x flags flip on equality: frame + fill on at x0, fill off at
-            -- x0 + 3*hp, frame off at x0 + 3*maxhp (fill first if equal)
-            v_bx := s_barx; v_bf := s_barfx;
-            if s_gav_start = '1' then
-                v_bx := '0'; v_bf := '0';
-            else                             -- cur_x = s_x off line start
-                if s_x = C_BAR_X0 then v_bx := '1'; v_bf := '1'; end if;
-                if s_x = s_bar_hpx then v_bf := '0'; end if;
-                if s_x = s_bar_mxx then v_bx := '0'; v_bf := '0'; end if;
+            -- HP bar: band rows 8-23 of the bottom line, right of the text
+            -- (HUD x): frame [x0, x0 + 3*maxhp), fill [x0, x0 + 3*hp)
+            v_bx := '0'; v_bf := '0';
+            if s_gav_start = '0' and v_hxi >= C_BAR_X0 and v_hxi < s_bar_mxx then
+                v_bx := '1';
+                if v_hxi < s_bar_hpx then v_bf := '1'; end if;
             end if;
-            s_barx <= v_bx; s_barfx <= v_bf;
             s0_barf <= '0'; s0_bare <= '0';
             if v_hb = '1' and (v_hc(4 downto 3) = "01" or v_hc(4 downto 3) = "10")
                and v_bx = '1' then
                 if v_bf = '1' then s0_barf <= '1'; else s0_bare <= '1'; end if;
             end if;
-            -- cell = 2**C_HUD_LOG2 px; 8x8 glyph scaled by 2**(C_HUD_LOG2-3).
+            -- cell = 2**C_HUD_LOG2 units; 8x8 glyph scaled by 2**(C_HUD_LOG2-3).
             if s_title = '1' and v_ly = '1' and v_lx = '1' then
                 s0_hud_col <= "11" & v_lcx(9 downto 6);     -- 48 + glyph
                 s0_frow    <= v_lcy(5 downto 3);
                 s0_fcol    <= v_lcx(5 downto 3);
             else
-                s0_hud_col <= cur_x(C_HUD_LOG2 + 5 downto C_HUD_LOG2);
+                s0_hud_col <= cur_hx(C_HUD_LOG2 + 5 downto C_HUD_LOG2);
                 s0_frow <= v_hc(C_HUD_LOG2 - 1 downto C_HUD_LOG2 - 3);
-                s0_fcol <= cur_x(C_HUD_LOG2 - 1 downto C_HUD_LOG2 - 3);
+                s0_fcol <= cur_hx(C_HUD_LOG2 - 1 downto C_HUD_LOG2 - 3);
             end if;
         end if;
     end process;
@@ -3001,6 +3165,14 @@ begin
             s4_etgt   <= s3_etgt;
             s4_seen   <= s3_seen;
             s4_inb    <= s3_inb; s4_intgt <= s3_intgt; s4_render <= s3_render;
+            -- reticle rim: within s_rx / s_ry art pixels of the cell edge
+            -- (15 - g = not g)
+            if s3_gx < s_rx or (not s3_gx) < s_rx or
+               s3_gy < s_ry or (not s3_gy) < s_ry then
+                s4_rim <= '1';
+            else
+                s4_rim <= '0';
+            end if;
             s4_edge   <= s3_edge;
 
             v_d2 := C_SQ(to_integer(s3_adx)) + C_SQ(to_integer(s3_ady));
@@ -3035,9 +3207,9 @@ begin
             if s4_smir = '1' then v_sbit := s4_sprrow(sp);
             else                  v_sbit := s4_sprrow(15 - sp); end if;
             v_text := s4_fontrow(7 - to_integer(s4_fcol));
-            -- reticle ring = the target cell's outline (1 art-pixel border)
-            if s4_intgt = '1' and (s4_gx = 0 or s4_gx = 15 or
-                                   s4_gy = 0 or s4_gy = 15) then
+            -- reticle ring = the target cell's outline (1 art-pixel border,
+            -- wider where a fractional step would skip it: s4_rim)
+            if s4_intgt = '1' and s4_rim = '1' then
                 v_ring := '1';
             else
                 v_ring := '0';

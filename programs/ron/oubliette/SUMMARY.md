@@ -16,7 +16,7 @@ device with `./capture_preset.sh` if wanted.
 | K1 Class | Warrior / Mage / Rogue / Cleric (labelled; read at game start, the HUD previews its stats) |
 | K2 Seed | dungeon seed (with depth) |
 | K3 Action | combat action (labelled): Attack / Defend / Cast / Item / Flee |
-| K4 Zoom | Far / Wide / Normal / Close = 16 / 32 / 64 / 128 px cells (labelled) |
+| K4 Zoom | Far / Wide / Normal / Close = 16 / 32 / 64 / 128 px cells at 1080p (labelled; the same fraction of the screen height at 720p / SD since v1.0.3) |
 | K5 Torch | light radius 2-8 cells; the top of the travel = full light (no fog) |
 | K6 Palette | Colour / Game Boy / Amber / CGA / C64 (labelled) |
 | S7 Step/Act | each flip = one turn (step, attack, confirm), acted on at the next field |
@@ -49,6 +49,69 @@ All twelve controls are in use.
 - **Depth 7** has no stairs: the dragon (HP 60, ATK 16, DEF 7 with the
   depth bonus) guards the last room and never moves. Killing it wins; gold
   is the score.
+
+## v1.0.3 (2026-10-17) — resolution scaling
+
+Before: everything was sized in pixels / field lines. At 720p the HUD showed
+40 of 48 columns and the HP bar (x 1552) was off-screen; at SD (480i) only 22
+columns showed, cells / sprites / HUD glyphs were 2:1 tall (field lines), the
+title logo never appeared (`measured_v/2 - 220` underflowed on a 243-line
+field) and the Map view was cropped.
+
+- **Virtual 1080-line coordinates** (the mondrian pilot technique): S0's
+  pixel / line counters step per pixel / per field line from the timing ID in
+  `registers_in(8)`: 1.0 at 1080p (the old counters, bit-identical), 1.5 at
+  720p, SD 2.0 across (a 1440-wide 4:3 window) and 2 x 1080/486 per field
+  line (field_n is tied high on hardware, so both fields sample alike; the
+  field_n = '0' half-step offset is kept but inert). World coords, cell decode,
+  camera, border, logo and Map view are unchanged in those units, so every
+  element keeps its 1080p fraction of the screen height and stays square on a
+  4:3 screen.
+- **HUD line = a 1920-unit layout band at every resolution** (own x
+  accumulator, Q.4 step 16 / 24 / 43): at SD all 48 columns and the HP bar fit,
+  the glyphs are 3/4 wide (same height fraction as 1080p).
+- Layout uses the screen in virtual units (`s_vw` = the last line's end x,
+  `s_vh` = the next-line y at the field tick, taken from fields that start at
+  0 only: a bottom field's half-step start would drag every band down with it
+  and both fields would sample the same font rows). The generated avid keeps
+  the real measured width.
+- The equality-flipped band flags (a fractional step can jump an exact value)
+  are magnitude windows: x (border, logo, HP bar) off the registered counters,
+  y (HUD bands + glyph row, logo, border) computed a line ahead from `s_yn`.
+- **480i HUD rows**: a 480i field line is 4.44 units, longer than a HUD font
+  row (4 units), so sampling by y skipped one font row of every glyph ("HP"
+  read "IIΓ"). When the field step is >= 4 units (480i only), each HUD line
+  runs 8 field lines from its first line, one font row per line: glyphs 8
+  field lines tall, ~11% over the proportional 7.2. Other modes (incl. 1080p)
+  are unaffected.
+- Reticle outline: at least one field step wide per axis (`f_rim_x/y`), so
+  it shows in every field instead of falling between samples: 1 art pixel at
+  1080p (unchanged); 2 rows at 480i Normal zoom (top/bottom edge 8 units vs the
+  4.44-unit field step); Far zoom / Map view up to 2 columns (SD, 720p) and
+  5 rows (480i).
+- 1080p: 0 differing pixels against v1.0.2 (title screen and gameplay view,
+  full 1080p GHDL renders; .scaling_work diff1080.py). The 480i HUD snap is
+  gated off at 1080p (field step < 4 units).
+- **Build with router1, base seed 3** (dev SDK, 6 configs; router1 is
+  deterministic): `SEED=3 NEXTPNR_ROUTER="--router router1"
+  ./build_programs.sh ron oubliette`. All six pass on seed 3:
+
+| Config | Seed | Fmax (MHz) | LC |
+|---|---|---|---|
+| HD Analog | 3 | 77.20 | 6537 |
+| SD Analog | 3 | 77.19 | 6565 |
+| HD HDMI | 3 | 76.82 | 6526 |
+| SD HDMI | 3 | 73.09 | 6530 |
+| HD Dual | 3 | 76.25 | 6535 |
+| SD Dual | 3 | 80.86 | 6526 |
+
+  ~85% LC, RAMs 25/32. With the default base seed 1 the retry lands the HD
+  configs on seed 2 and HD Analog passes by only 0.01 MHz (74.26); seeds 4 and
+  5 miss HD Analog (73.35 / 73.62). Its critical path is the existing vblank
+  reveal sweep (s_r2 -> s_rva_v carry -> seen-RAM write enable, 3.6 ns logic +
+  9.9 ns routing), routing-bound and outside the new S0 logic. The stock-SDK
+  community build (`[firmware] seed = 5`, 8 configs) has not been re-run for
+  v1.0.3.
 
 ## v0.5.0 (2026-10-10) — Tier 3 batch B (look) + colour fix
 
@@ -246,8 +309,8 @@ Glide (v0.4.1):
 
 ## Build
 
-**Build with router1:**
-`NEXTPNR_ROUTER="--router router1" ./build_programs.sh ron oubliette`.
+**Build with router1** (since v1.0.3 with base seed 3, see v1.0.3 above):
+`SEED=3 NEXTPNR_ROUTER="--router router1" ./build_programs.sh ron oubliette`.
 With router2 (the builder default) the routing-bound vblank FSM spreads
 65–80 MHz across seeds, and HD HDMI missed all 6 seeds even after the
 spawn fix.
