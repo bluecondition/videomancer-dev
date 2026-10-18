@@ -6,6 +6,14 @@
 --
 -- polka.vhd  (v2.0 — retro polka dots: palettes, layouts, and a swell fader)
 --
+-- v2.2.3 (2026-10-17, resolution scaling): interlace and the pixel aspect
+-- come from the video timing ID (registers_in(8)) -- the core ties field_n
+-- high, so 480i/576i were drawn at half the vertical step (2:1 tall dots).
+-- Dot size, pitch, their floors and the sway speed follow the screen HEIGHT:
+-- they are fractions of a 16:9 reference width (act_w on HD, 4/3 act_w on
+-- SD), so a 4:3 SD screen shows the 1080p picture's centre with round dots
+-- of the same size, and 720p is the 1080p picture at 2/3.  1080p unchanged.
+--
 -- POLKA renders a full-screen field of PERFECT CIRCLES over a configurable
 -- background.  v2 reframes the program around two zoned selectors:
 --
@@ -241,7 +249,12 @@ architecture polka of program_top is
     signal act_w    : unsigned(11 downto 0) := to_unsigned(1920, 12);
     signal act_h    : unsigned(10 downto 0) := to_unsigned(1080, 11);
     signal ilace    : std_logic := '0';
-    signal anc_fld  : std_logic := '0';
+    -- Resolution scaling (v2.2.3): mode class from the video timing ID
+    -- (registers_in(8)), latched once per frame.  s_sd = SD (480/576, shown
+    -- 4:3), s_720 = 720p.  field_n is tied high on hardware, so interlace
+    -- comes from the timing ID too, never from field_n toggling.
+    signal s_sd, s_720 : std_logic := '0';
+    signal s_pfl    : unsigned(4 downto 0) := to_unsigned(20, 5);  -- pitch floor
     signal field_lat : std_logic := '0';
     signal anchor_seen : std_logic := '1';
 
@@ -638,12 +651,6 @@ begin
                     act_h <= aline;
                 end if;
                 aline <= (others => '0');
-                if fl_r /= anc_fld then
-                    ilace <= '1';
-                else
-                    ilace <= '0';
-                end if;
-                anc_fld <= fl_r;
             elsif av_r = '1' and prev_avid = '0' then
                 r_arise <= '1';
             elsif v_h_edge = '1' and frame_act = '1' then
@@ -762,28 +769,35 @@ begin
                         s_soft  <= registers_in(6)(3);
                         s_sway  <= registers_in(6)(4);
                         field_lat <= fl_r;
+                        case to_integer(unsigned(registers_in(8)(3 downto 0))) is
+                            when 0 | 8      => ilace <= '1'; s_sd <= '1'; s_720 <= '0';
+                            when 4 | 12     => ilace <= '0'; s_sd <= '1'; s_720 <= '0';
+                            when 1 | 2 | 10 => ilace <= '1'; s_sd <= '0'; s_720 <= '0';
+                            when 5 | 6 | 14 => ilace <= '0'; s_sd <= '0'; s_720 <= '1';
+                            when others     => ilace <= '0'; s_sd <= '0'; s_720 <= '0';
+                        end case;
                     when 1 =>
                         -- (zone ROM indexes K6 this state -> m_mode in 3)
-                        -- aspect-corrected vertical step (Q4 hpx per line)
-                        if ilace = '1' then
-                            if act_h >= 400 then
-                                vstep_base <= to_unsigned(16, 6);
-                            elsif act_h >= 270 then
-                                vstep_base <= to_unsigned(15, 6);
-                            else
-                                vstep_base <= to_unsigned(18, 6);
-                            end if;
+                        -- aspect-corrected vertical step (Q4 hpx per frame
+                        -- line; doubled in state 3 when interlaced): 480-line
+                        -- SD 18, 576-line SD 15, HD square pixels 16
+                        case to_integer(unsigned(registers_in(8)(3 downto 0))) is
+                            when 0 | 4  => vstep_base <= to_unsigned(18, 6);
+                            when 8 | 12 => vstep_base <= to_unsigned(15, 6);
+                            when others => vstep_base <= to_unsigned(16, 6);
+                        end case;
+                        -- sizes follow screen HEIGHT: the reference width is
+                        -- a 16:9 frame at this height (SD: 4/3 act_w, so SD
+                        -- shows the 1080p picture's 4:3 centre); the floors
+                        -- scale with it (1080: 20, 720p: 13, SD: 10 px)
+                        if s_sd = '1' then
+                            s_pfl <= to_unsigned(10, 5);
+                        elsif s_720 = '1' then
+                            s_pfl <= to_unsigned(13, 5);
                         else
-                            if act_h >= 700 then
-                                vstep_base <= to_unsigned(16, 6);
-                            elsif act_h >= 540 then
-                                vstep_base <= to_unsigned(15, 6);
-                            else
-                                vstep_base <= to_unsigned(18, 6);
-                            end if;
+                            s_pfl <= to_unsigned(20, 5);
                         end if;
                         s_xc <= act_w(11 downto 1);
-                        s_rmax <= act_w(11 downto 4);
                     when 2 =>
                         null;
                     when 3 =>
@@ -793,7 +807,11 @@ begin
                         else
                             vstep_eff <= resize(vstep_base, 7);
                         end if;
-                        smae <= to_unsigned(43, 20);
+                        if s_sd = '1' then
+                            smae <= to_unsigned(57, 20);               -- (4/3 act_w)/6
+                        else
+                            smae <= to_unsigned(43, 20);               -- act_w/6
+                        end if;
                         smb  <= resize(act_w, 11);
                         smp  <= (others => '0');
                         sm_cnt <= (others => '0');
@@ -820,10 +838,17 @@ begin
                         smp  <= (others => '0');
                         sm_cnt <= (others => '0');
                         sm_run <= '1';
+                    when 16 =>
+                        -- dot rmax = Wref/16: act_w/16 (HD), wmax*3/8 (SD)
+                        if s_sd = '1' then
+                            s_rmax <= resize(s_wmax(9 downto 2), 8) + resize(s_wmax(9 downto 3), 8);
+                        else
+                            s_rmax <= act_w(11 downto 4);
+                        end if;
                     when 28 =>
                         s_ycq4 <= smp(15 downto 1);                    -- (act_h*vstep)/2
                         s_vspan <= smp(15 downto 0);
-                        v_span := signed(resize(s_wmax, 11)) - to_signed(20, 11);
+                        v_span := signed(resize(s_wmax, 11)) - signed(resize(s_pfl, 11));
                         if v_span < 0 then
                             v_span := (others => '0');
                         end if;
@@ -833,7 +858,7 @@ begin
                         sm_cnt <= (others => '0');
                         sm_run <= '1';
                     when 41 =>
-                        v_w := to_unsigned(20, 10) + smp(19 downto 10);
+                        v_w := resize(s_pfl, 10) + smp(19 downto 10);
                         s_w <= v_w;
                         smae <= resize(v_w, 20);
                         smb  <= to_unsigned(887, 11);
@@ -882,7 +907,11 @@ begin
                         sm_cnt <= (others => '0');
                         sm_run <= '1';
                     when 73 =>
-                        s_rbase <= to_unsigned(2, 9) + smp(17 downto 10);
+                        if s_sd = '1' or s_720 = '1' then
+                            s_rbase <= to_unsigned(1, 9) + smp(17 downto 10);
+                        else
+                            s_rbase <= to_unsigned(2, 9) + smp(17 downto 10);
+                        end if;
                     when 74 =>
                         -- Swell always owns kiss -> merge -> invert: the Size
                         -- radius stops at the kiss (W/2), so it can never eat
@@ -981,7 +1010,14 @@ begin
                             s_hueoff <= slk5;
                             s_crate  <= (others => '0');
                         end if;
-                        s_vel <= to_unsigned(20, 8);                   -- sway speed
+                        -- sway speed (Q4 px/frame), scaled like the sizes
+                        if s_sd = '1' then
+                            s_vel <= to_unsigned(10, 8);
+                        elsif s_720 = '1' then
+                            s_vel <= to_unsigned(13, 8);
+                        else
+                            s_vel <= to_unsigned(20, 8);
+                        end if;
                     -- hole-radius ramp at R_eff (single-writer chain)
                     when 93 =>
                         if m_lay = 1 or m_lay = 2 or m_lay = 3 then
