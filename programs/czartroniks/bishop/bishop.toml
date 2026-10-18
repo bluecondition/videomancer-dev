@@ -241,4 +241,4 @@ linear_potentiometer_12  = 384
 [firmware]
 # nextpnr placement seed for the stock LZX build: with v1.0.2 seed 1 stalls router1 on HD Analog
 # (overuse stuck for 10+ min) and seed 2 stalls too; seed 3 builds all 8 configs.
-seed = 3
+seed = 1
