@@ -1,4 +1,7 @@
 # CASCADE -- concentric circles that push each other.
+# v2.1.5 (2026-10-17): resolution scaling -- ring spacing, SD pixel aspect,
+# interlace field order and the Video wave depth follow the screen height
+# (1080p bit-identical); 720p caps the modelled rings at 100 (line budget).
 # v2.1.2 (2026-10-10, finalized; developed + HW-verified as cascade_diag).
 # BUILD: ROUTER1; shipped seeds HD Analog 1 / HD HDMI 5 / HD Dual 1 / SD 1
 # (HD HDMI video is placement-sensitive -- A/B on hardware after any change).
@@ -30,7 +33,7 @@
 [program]
 processing_delay_clks = 8
 program_id = "com.czartroniks.cascade"
-program_version = "2.1.4"
+program_version = "2.1.5"
 abi_version = ">=1.0,<2.0"
 program_name = "Cascade"
 author = "czartroniks"

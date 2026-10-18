@@ -4,6 +4,57 @@
 HW-captured defaults.** Developed in `programs/ron/cascade_diag/` (separate-program_id
 fork used for every hardware A/B; its SUMMARY.md has the full v1.8–v2.1 log).
 
+## v2.1.5 — resolution scaling (2026-10-17, built, not flashed)
+
+The rings now keep their size relative to the screen HEIGHT at 1080p, 720p and SD
+(the baseline used fixed-pixel spacing: 1.5x wider at 720p, 2x at SD). 1080p is
+**bit-identical** (GHDL render diff: 0 pixels of 2,073,600).
+- **Spacing** follows 1/x-step of the virtual 1080-line canvas: the log-spacing
+  floor is per mode (`s_lfmin` -704 / -667 / -640 = x1 / x0.67 / x0.5) and the knob
+  part is clamped (`s_k3max`) so spacing stays >= 4 px. At 720p and SD the top
+  ~6% / ~11% of K3 (with P12 at 0) sit on that 4-px floor.
+- **y in x-pixel units**: the dy accumulator is Q8, stepped per FIELD line by the
+  virtual y step / x step (480i 569, 480p 288, 576i 480, 576p 240, 1080i 512,
+  1080p/720p 256 in Q8). The measured height uses the same units. This includes
+  interlace and the SD 4:3 pixel aspect, so SD rings are round on a 4:3 screen
+  (they were ~10% narrow). It replaces the field_n-toggle interlace detect, which
+  HD inputs never trip (field_n is tied high), so 1080i on hardware no longer
+  draws the rings 2x tall.
+- **Field order fix**: the BOTTOM field (field_n = '0') now starts half a field
+  step down. The old code offset field_n = '1', so SD fields were swapped (comb on
+  every ring edge; static-SD row-difference correlation -0.86 before, +0.51 after).
+- **720p ring cap**: 720p's 1650-clk line fits the span pass + E_LINE only for
+  <= 100 modelled rings (15*(n+2) + 99). At fine spacings 126 rings overran it, a
+  pre-existing 720p bug. Scaling made it easier to reach. 1080p is not affected.
+  - Checked in sim at 720p, K3 900, P12 0, uniform rings. v2.1.4 tears every line
+    (8-px spacing, 126 rings); v2.1.5 is clean (5 px, capped at 100).
+- **Known, pre-existing (not fixed): left-edge strip at very fine spacings.**
+  - E_LINE estimates the line-start ring index as r0*fnum, where fnum is the
+    FRACTIONAL spacing. The rings use the floored integer spacing, and only 6
+    correction steps follow.
+  - So at small spacings and large r0, the first few dozen pixels of a line are
+    one solid colour (until su_m wraps), and then the rings are exact.
+    - Seen at 720p with 5-px spacing in hard mode.
+    - At 1080p with K3 ~966 the same estimate is ~22 rings off at the left
+      edge.
+  - Because spacings are finer in pixels at SD and 720p, it starts a little
+    lower on the K3 travel there.
+  - A fix would build C_FNROM from the integer spacing.
+- **S11 Video wave depth** scales too: Q1 depth, 4 shifted key terms (1080 L,
+  720p ~2L/3, SD L/2).
+- **SD ring budget (unchanged, a throughput limit)**: SD models at most 48 rings
+  (858-clk line), 1080p up to 126. The outer field still draws rings to the
+  screen edge in every mode. But at fine spacings the cascade wave at SD stops at
+  48 rings: it reaches the corners only for a 1080p-equivalent spacing >= ~19 px
+  (1080p: >= ~9 px). With P12 at 0 that is about K3 > ~770, or > ~970 at the
+  default P12. Beyond ring 47 the rings move as one body.
+
+**Build (router1, seed 1, all 6 configs first try):** HD Analog 83.10 MHz,
+HD HDMI 84.38, HD Dual 82.34, SD Analog 81.91, SD HDMI 85.16, SD Dual 84.88.
+6060-6099 LC (79%), 19 EBR. That is +83 LC on HD Analog: v2.1.4 built the
+same way gives 6016 LC at 84.76 MHz. HD HDMI video is placement-sensitive (see below):
+A/B Video mode on hardware before shipping.
+
 ## v2.1.2 — what changed since v1.7
 
 - **Lean engine (~93–95 % LC, was 96.5–98.5 %).** Ablations showed that two LUT array
