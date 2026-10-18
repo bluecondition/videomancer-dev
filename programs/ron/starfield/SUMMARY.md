@@ -170,3 +170,25 @@ spare on SD Dual): any new feature must remove one first.
   new one a few clocks after, so a knob moving in exactly that window lands one
   field earlier or later.)
 - Packed LC (stock SDK): SD Standalone 8365 → 7475, HD Dual 7941 → 7039.
+
+## v3.1.3 (2026-10-17) — resolution scaling
+- The pixel and line counters run in virtual 1080-line units, stepped from the
+  video timing ID (`registers_in(8)`): x 1.0 / 1.5 / 2.0 per pixel at 1080 /
+  720p / SD (`pix_xa`, Q.1), y per FIELD line 1.0 / 1.5 / 2.0 (1080i) / 4.4375
+  (480i) / 3.75 (576i) (`pix_ya`, Q.4). Cells, star kernels, the nebula tile,
+  the gradient and the scroll speed all follow, so 720p is the 1080p picture
+  at 2/3 scale and SD is a 1440-unit (4:3) window of it with round stars and
+  no 2:1 interlace stretch. At 1080p both steps are exactly 1 (bit-identical).
+- Paid for by dropping the line-position delay chain (`s2_y`, and the 5-bit
+  `sub_y` copies at 3a/3/3p/4a1): `pixel_y` only changes at the hsync edge, so
+  every stage reads it directly (-32 FF). Standalone: LUT4 3696 -> 3706,
+  DFF 2333 -> 2315.
+- SD shows the layout ~22 virtual units higher than 1080p (the line counter
+  counts from vsync through the blanking lines, which are a larger share of
+  an SD field); accepted, as in the mondrian pilot.
+- Build (router1, `NEXTPNR_ROUTER="--router router1"`), 6/6 seed 1:
+  HD Analog 96.79 MHz / 6860 LC, HD HDMI 103.59 / 6847, HD Dual 99.69 / 6854;
+  SD Analog 95.30 / 6852, SD HDMI 101.61 / 6861, SD Dual 97.91 / 6863.
+  22/32 EBR. (v3.1.2 in this SDK, same router/seed: 94.98 / 6858, 99.00 /
+  6871, 92.52 / 6871; 101.38 / 6863, 93.13 / 6865, 94.54 / 6876 -- 89% LC,
+  so since the v3.1.2 serial scroll step the chip is no longer full.)

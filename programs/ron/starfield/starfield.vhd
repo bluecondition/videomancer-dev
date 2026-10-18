@@ -23,6 +23,15 @@
 -- (alpha 'over': opaque cores, transparent glow edges -- warpfield's
 -- HW-approved composite).
 --
+-- v3.1.3 (2026-10-17): resolution scaling. The pixel and line counters run
+-- in virtual 1080-line units, stepped per pixel / per field line from the
+-- video timing ID (registers_in(8)): 1.0 at 1080p (identical to before),
+-- 1.5 at 720p, and at SD 2.0 across (a 1440-wide 4:3 window) and ~4.44 per
+-- 480i field line, so cells, stars, nebula and scroll keep their size
+-- relative to the screen height and stars stay round on a 4:3 screen. The
+-- cost is paid by dropping the line-position delay chain (pixel_y is
+-- constant across every active line, so the stages read it directly).
+--
 -- Optimised for iCE40 HX4K: kernels live in otherwise-unused EBR; the
 -- only wide multiplier besides the 8 hash multipliers (canonical
 -- signed-digit shift-adds) is one shared 10x10 brightness multiply after
@@ -114,9 +123,16 @@ architecture starfield of program_top is
     signal vdly_q   : std_logic_vector(31 downto 0) := (others => '0');
     signal vdly_q2  : std_logic_vector(31 downto 0) := (others => '0');
 
-    -- Position
-    signal pixel_x      : unsigned(11 downto 0) := (others => '0');
-    signal pixel_y      : unsigned(11 downto 0) := (others => '0');
+    -- Position, in virtual 1080-line units (resolution scaling, v3.1.3):
+    -- pix_xa is Q.1 (half units; steps 2/3/4 = 1.0/1.5/2.0 per pixel),
+    -- pix_ya Q.4 per FIELD line; pixel_x / pixel_y are the integer parts.
+    -- At 1080p both steps are exactly 1.0, so they equal the old counters.
+    signal s_xs         : unsigned(2 downto 0) := to_unsigned(2, 3);
+    signal s_ys         : unsigned(6 downto 0) := to_unsigned(16, 7);
+    signal pix_xa       : unsigned(12 downto 0) := (others => '0');
+    signal pix_ya       : unsigned(15 downto 0) := (others => '0');
+    signal pixel_x      : unsigned(11 downto 0);
+    signal pixel_y      : unsigned(11 downto 0);
     signal prev_hsync_n : std_logic := '1';
     signal prev_vsync_n : std_logic := '1';
     -- active video seen since the last frame start: analog vsync serrates
@@ -147,9 +163,10 @@ architecture starfield of program_top is
     signal sc_v1, sc_v2, sc_v3 : std_logic := '0';
     signal dir_r           : std_logic := '0';
 
-    -- Stage 2
+    -- Stage 2. (No line-position pipeline: pixel_y only changes at the
+    -- hsync edge, in blanking, so every stage reads it directly -- the
+    -- same value its pixel would have carried down, minus 32 FFs.)
     signal s2_sx : t_u18_arr;
-    signal s2_y  : unsigned(11 downto 0);
 
     -- Density threshold = base * gain / 2, two registered stages from
     -- pipe(0).y, so it aligns with the pixel stage 3p sees.
@@ -206,12 +223,10 @@ architecture starfield of program_top is
     -- Stage 3a: hash pre-multiply (XOR part)
     signal s3a_h     : t_u16_arr;
     signal s3a_sub_x : t_u5_arr;
-    signal s3a_sub_y : unsigned(4 downto 0);
 
     -- Stage 3: hash finalised (after multiply + xor-shift)
     signal s3_hash  : t_u16_arr;
     signal s3_sub_x : t_u5_arr;
-    signal s3_sub_y : unsigned(4 downto 0);
 
     -- Stage 3p: per-layer star properties straight off the hash (offsets,
     -- shape, colour, dither verdict, magnitude penalty, threshold check).
@@ -220,7 +235,6 @@ architecture starfield of program_top is
     signal s3p_offset_x   : t_u5_arr;
     signal s3p_offset_y   : t_u5_arr;
     signal s3p_sub_x      : t_u5_arr;
-    signal s3p_sub_y      : unsigned(4 downto 0);
     signal s3p_shape      : t_u2_arr;
     signal s3p_color_idx  : t_u2_arr;
     signal s3p_mag        : t_u2_arr;
@@ -237,7 +251,6 @@ architecture starfield of program_top is
     signal s4a1_offset_x   : t_u5_arr;
     signal s4a1_offset_y   : t_u5_arr;
     signal s4a1_sub_x      : t_u5_arr;
-    signal s4a1_sub_y      : unsigned(4 downto 0);
     signal s4a1_shape      : t_u2_arr;
     signal s4a1_lvl        : t_u2_arr;
     signal s4a1_color_idx  : t_u2_arr;
@@ -336,7 +349,37 @@ architecture starfield of program_top is
         return unsigned(t(9 downto 0));
     end function;
 
+    -- Resolution scaling: per-mode steps from the video timing ID
+    -- (registers_in(8)). x in half units per pixel: 1080 2 (1.0), 720p 3
+    -- (1.5), SD 4 (2.0: 720 px span 1440 units, a 4:3 window of the 1080
+    -- canvas, so stars stay round on a 4:3 screen).
+    function f_vstep_x(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0 | 4 | 8 | 12 => return to_unsigned(4, 3);
+            when 5 | 6 | 14     => return to_unsigned(3, 3);
+            when others         => return to_unsigned(2, 3);
+        end case;
+    end function;
+    -- y in Q.4 units per FIELD line (1080 / active lines, doubled for
+    -- interlace; 480i 71/16 = 4.4375 ~ 2 x 1080/486).
+    function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(71, 7);   -- 480i
+            when 4          => return to_unsigned(36, 7);   -- 480p: 2.25
+            when 8          => return to_unsigned(60, 7);   -- 576i: 3.75
+            when 12         => return to_unsigned(30, 7);   -- 576p: 1.875
+            when 5 | 6 | 14 => return to_unsigned(24, 7);   -- 720p: 1.5
+            when 1 | 2 | 10 => return to_unsigned(32, 7);   -- 1080i: 2.0
+            when others     => return to_unsigned(16, 7);   -- 1080p: 1.0
+        end case;
+    end function;
+
 begin
+
+    pixel_x <= pix_xa(12 downto 1);
+    pixel_y <= pix_ya(15 downto 4);
 
     process(clk)
         -- Scroll
@@ -421,19 +464,24 @@ begin
             prev_hsync_n <= data_in.hsync_n;
             prev_vsync_n <= data_in.vsync_n;
 
+            -- virtual-unit steps, free-running (the timing ID is static
+            -- while a mode runs)
+            s_xs <= f_vstep_x(registers_in(8)(3 downto 0));
+            s_ys <= f_vstep_y(registers_in(8)(3 downto 0));
+
             if data_in.avid = '1' then
-                pixel_x  <= pixel_x + 1;
+                pix_xa   <= pix_xa + s_xs;
                 s_sawact <= '1';
             end if;
 
             if data_in.hsync_n = '0' and prev_hsync_n = '1' then
-                pixel_x <= (others => '0');
-                pixel_y <= pixel_y + 1;
+                pix_xa <= (others => '0');
+                pix_ya <= pix_ya + s_ys;
             end if;
 
             if data_in.vsync_n = '0' and prev_vsync_n = '1' then
                 -- line reset is idempotent: safe on every serration edge
-                pixel_y <= (others => '0');
+                pix_ya <= (others => '0');
 
                 -- Frame start = the FIRST vsync edge after active video:
                 -- every increment below must happen exactly once per field
@@ -553,7 +601,6 @@ begin
             for i in 0 to NUM_LYRS-1 loop
                 s2_sx(i) <= resize(pixel_x, 18) + scroll(i)(23 downto 6);
             end loop;
-            s2_y <= pixel_y;
 
             ----------------------------------------------------------------
             -- STAGE 3a : hash pre-multiply (XOR of cell_x, rotated cell_y, seed)
@@ -561,18 +608,16 @@ begin
             for i in 0 to NUM_LYRS-1 loop
                 if i >= FIRST_BIG then         -- near pair: 32 px cells
                     cx16      := resize(s2_sx(i)(17 downto 5), 16);
-                    cell_y_16 := resize(s2_y(11 downto 5), 16);
+                    cell_y_16 := resize(pixel_y(11 downto 5), 16);
                     s3a_sub_x(i) <= s2_sx(i)(4 downto 0);
                 else                           -- far layers: 16 px cells
                     cx16      := resize(s2_sx(i)(17 downto 4), 16);
-                    cell_y_16 := resize(s2_y(11 downto 4), 16);
+                    cell_y_16 := resize(pixel_y(11 downto 4), 16);
                     s3a_sub_x(i) <= '0' & s2_sx(i)(3 downto 0);
                 end if;
                 cy_rot := cell_y_16(8 downto 0) & cell_y_16(15 downto 9);
                 s3a_h(i)     <= cx16 xor cy_rot xor SEEDS(i);
             end loop;
-            -- 5-bit line position: far layers use bits 3:0, the near pair 4:0
-            s3a_sub_y <= s2_y(4 downto 0);
 
             ----------------------------------------------------------------
             -- STAGE 3 : hash multiply + finalise (consumes registered 3a)
@@ -589,7 +634,6 @@ begin
                 s3_hash(i)  <= hash_tmp;
                 s3_sub_x(i) <= s3a_sub_x(i);
             end loop;
-            s3_sub_y <= s3a_sub_y;
 
             ----------------------------------------------------------------
             -- Registered knob helpers (quasi-static, one cycle stale)
@@ -758,7 +802,6 @@ begin
                     s3p_perm(i) <= '0';
                 end if;
             end loop;
-            s3p_sub_y <= s3_sub_y;
 
             ----------------------------------------------------------------
             -- STAGE 4a1 : glow-level combine + envelope.
@@ -834,7 +877,6 @@ begin
                 s4a1_active_hit(i) <= s3p_active_hit(i);
                 s4a1_env(i)       <= env_v;
             end loop;
-            s4a1_sub_y <= s3p_sub_y;
 
             ----------------------------------------------------------------
             -- STAGE 4ax : absolute differences |sub - offset| per axis with
@@ -851,10 +893,10 @@ begin
                     end if;
                     inr_x := d5(4 downto 3) = "00";
                     s4ax_adx(i) <= d5(2 downto 0);
-                    if s4a1_sub_y >= s4a1_offset_y(i) then
-                        d5 := s4a1_sub_y - s4a1_offset_y(i);
+                    if pixel_y(4 downto 0) >= s4a1_offset_y(i) then
+                        d5 := pixel_y(4 downto 0) - s4a1_offset_y(i);
                     else
-                        d5 := s4a1_offset_y(i) - s4a1_sub_y;
+                        d5 := s4a1_offset_y(i) - pixel_y(4 downto 0);
                     end if;
                     inr_y := d5(4 downto 3) = "00";
                     s4ax_ady(i) <= d5(2 downto 0);
@@ -868,10 +910,10 @@ begin
                     end if;
                     inr_x := d4(3 downto 2) = "00";
                     s4ax_adx(i) <= '0' & d4(1 downto 0);
-                    if s4a1_sub_y(3 downto 0) >= s4a1_offset_y(i)(3 downto 0) then
-                        d4 := s4a1_sub_y(3 downto 0) - s4a1_offset_y(i)(3 downto 0);
+                    if pixel_y(3 downto 0) >= s4a1_offset_y(i)(3 downto 0) then
+                        d4 := pixel_y(3 downto 0) - s4a1_offset_y(i)(3 downto 0);
                     else
-                        d4 := s4a1_offset_y(i)(3 downto 0) - s4a1_sub_y(3 downto 0);
+                        d4 := s4a1_offset_y(i)(3 downto 0) - pixel_y(3 downto 0);
                     end if;
                     inr_y := d4(3 downto 2) = "00";
                     s4ax_ady(i) <= '0' & d4(1 downto 0);
