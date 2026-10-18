@@ -73,7 +73,46 @@ wash leaves a cell and dries over about 3 s.
 
 Resources: 7458–7496 / 7680 LC (97.2%), 25/32 EBR.
 
+## Resolution scaling (v3.24.2, 2026-10-18)
+
+- Before: cells were a fixed 16/8 PIXELS and rows 16/8 field LINES (halved
+  only when field_n toggled, which never happens on hardware), so 720p cells
+  and sun were 1.5x too big and SD 2x wide / 4x tall (2:1), with only ~16 rows.
+- Now the lattice steps through virtual 1080-line units: `x_a` (Q.1, step
+  1 / 1.5 / 2 per pixel) decides the cell boundary while `x_loc` still counts
+  CLOCKS into the cell for the prefetch sequence; `y_a` (Q.8 per field line)
+  decides the row boundary; `pr_cell` = "next pixel is the cell's last"
+  (precomputed thresholds `s_cl1 = csz - xs`, `s_cl2 = csz - 2xs`).  Every
+  cell-based layout (n_rows, sun, gulls, beach, crab) follows.
+- 16 px mode: exact at every resolution (720p cells 10-11 px, SD 8 px x
+  3.6 field lines, square on 4:3).
+- 8 px mode: the display prefetch needs >= 8 clocks per cell, so it is
+  clamped to 8 px: 720p 12 units (1.5x the 1080p 8 px look), SD 16 units
+  (= the 16 px look; S8 then only changes the beach slope / wash tail at SD).
+- field_n interlace detect removed (the interlaced y steps replace it; 1080i
+  rows were 2x tall on hardware before).  1080p bit-identical (0 px).
+
 ## Build
+
+### v3.24.2 (2026-10-18, resolution scaling) — packed, not flashed
+
+6833–6866 LC (89%), 16 EBR (dev SDK).  SD from the builder
+(`NO_TIMING_RETRY=1`, router2 seed 1): SD Analog 67.52, SD HDMI 65.96, SD Dual
+70.37 MHz (Fmin 27).  HD hand-picked from router2 screens (`--detailed-timing-report`,
+`tools/hdmi_pin_skew.py`, `icetime -c 37.125`; hd_hdmi 1–14, hd_analog 1–32, hd_dual
+1–14), copied into `build/programs/ron/pixelbeach/rev_b/bitstreams/` and repacked:
+
+| Config | Router / seed | Fmax (MHz) | HDMI hs-clk / data (ns) | analog hs-clk / data | icetime @37.125 |
+|---|---|---|---|---|---|
+| HD HDMI | router2 **seed 13** | 63.08 | +1.49 / −1.99..−0.62 | +0.23 / −0.98..+0.63 | PASS 15.19 ns |
+| HD Analog | router2 **seed 28** | 62.67 | +1.50 / −2.13..−0.74 | −1.57 / −2.94..−1.05 | PASS 15.10 ns |
+| HD Dual | router2 **seed 12** | 70.72 | −2.28 / −2.96..−1.21 | +3.01 / +0.00..+1.13 | PASS 14.08 ns |
+
+All three worst paths are FSM (2-clock) paths.  Rejected on the way: hd_hdmi s1/s5
+(worst path a 1-clock DISPLAY path x_idx -> surf_q at 70.8/66.4 MHz), hd_analog
+1–23 (no seed had HSYNC in +1.0..+2.0 with every data bit <= -0.6).  The screens ran
+6 in parallel on a loaded machine, so a re-route may not reproduce byte-exact: the
+picked .asc/.bin/reports are kept in `.scaling_work/pixelbeach_tmp/picked/`.
 
 **Do not trust a plain `./build_programs.sh ron pixelbeach` for HD.** It
 installs seed-1 HD bitstreams, which here are slow and unscreened. The
