@@ -95,6 +95,26 @@ Presets: the four v0.1 presets are unchanged (Radius values give nearly the
 same radius at HD under the new mapping). All are hand-written; recapture
 them with capture_preset.sh once the look is settled.
 
+## v0.2.2 (2026-10-17): resolution scaling
+
+The halftone and the lens now run in virtual 1080-line units, stepped from
+the video timing ID (`registers_in(8)`): x 1.0 / 1.5 / 2.0 units a pixel
+(1080 / 720p / SD), y 1080 / active lines a field line (interlace included).
+- **Halftone cells** were fixed 4–32 px and field lines: 1.5× too coarse at
+  720p, and in SD ~4× too coarse and 2:1 tall. The flat screen now takes its
+  cell-local x from a virtual x counter, the Lensed screen scales the source
+  column to virtual units (×1 / ×1.5 / ×2 on its low 7 bits), and the rows
+  come from the virtual y. A cell is the same fraction of the screen height
+  in every mode and square on a 4:3 SD screen. (SD 480i has only 243 lines
+  a field, so an 8-unit cell is under 2 lines tall: small cells alias there.)
+- **Lens**: centre, radius and the 16-line minimum radius are virtual too
+  (the band was already a fraction of the field height; the minimum now
+  scales instead of being 4× bigger in SD).
+- Unchanged at pixel / line scale: the dot-crawl carrier (8 px HD, 4 px SD,
+  720p counts as HD), the Fringe comb, the 12-px mirror inset.
+- 1080p is bit-identical (0 differing pixels against v0.2.1). Tier 2's "SD
+  interlace" item is covered by this.
+
 ## Next tiers (offered 2026-10-13, not done)
 
 Tier 2 (look, Ron's call):
@@ -142,5 +162,11 @@ hblank sequencer at the pixel clock). Splitting it and `ady × inv_r` into
 hi/lo halves over two sequencer states moved HD HDMI to 77.5–82.7 MHz on
 all six seeds and saved 165 LUT. The next path is the 11×6 half of
 `ady × inv_r` at 77.5 MHz.
+
+v0.2.2 (2026-10-17, router2 default, built under heavy machine load): all 6
+configs pass. HD Analog 81.5 (seed 1), HD HDMI 85.2 (seed 2; seed 1
+missed), HD Dual 78.5 (seed 1); SD Analog 83.8, SD HDMI 73.4, SD Dual
+79.5 MHz (seed 1, Fmin 27). About 5,650 LC (74%), 18/32 EBR. All six .bin
+files unpack.
 
 HW status: v0.2.0 built, not yet flashed.
