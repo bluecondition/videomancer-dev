@@ -141,3 +141,35 @@ same cell-edge kernel fix in its v3.1.0 pass.
 - Tried and dropped (no gain): one shared write port for `sy_acc` (+90 LC: the
   per-shell adders already absorb the seed mux), and `sy_acc` in EBR with a
   per-line snapshot (-30 LC only: FF-only snapshot registers each take an LC).
+
+## v1.1.3 (2026-10-17) — K1/K4 labelled defaults (community fix, folded in)
+The firmware loads a labelled default as its label INDEX: Layers "5" loaded
+as 4 (below 171 = 1 shell) and Palette "Twilight" as 2 (bits 9:7 = 0 =
+Silver). K1 below 6 and K4 with bits 9:3 = 0 are now taken as the label.
+
+## v1.1.4 (2026-10-17) — resolution scaling
+- The shell coordinates run in virtual 1080-line units, stepped from the video
+  timing ID (`registers_in(8)`). Two more ticks in each shell's sequencer slot
+  run the shared serial multiplier: `ky = k * y step` (tick 22 -> 26, Q.4 per
+  FIELD line: 1.0 / 1.5 / 2.0 (1080i) / 4.4375 (480i) / 3.75 (576i)) and
+  `k16 = k * x step` (tick 26 -> 30, 1.0 / 1.5 / 2.0 per pixel at 1080 / 720p
+  / SD). The width and height measurements (centre, drift) count the same
+  units (`s_xcnt` Q.1, `s_lcnt` Q.4), and so does the nebula raster
+  (`s_xcnt` replaces the duplicate `pixel_x`, `pix_ya` Q.4). At 1080p every
+  step is exactly 1 (bit-identical); at 720p and SD the cells, stars and
+  nebula keep their size relative to the screen height, stars stay round on
+  4:3 and SD is a 1440-unit window of the 1080 canvas.
+- Cost: six 15-bit `ky` registers + a 14th `k16` bit; standalone LUT4
+  3694 -> 3733, DFF 2605 -> 2711 (incl. the v1.1.3 label fix).
+- The width counter `s_xcnt` also replaces the duplicate `pixel_x` for the
+  nebula, so it resets at hsync (not at avid fall): the nebula path runs ~7
+  pixels early and samples the frozen end-of-line count at the right edge.
+- Build (router1, `NEXTPNR_ROUTER="--router router1"`): **HD HDMI seed 2**
+  (seed 1 = 70.66 MHz: the vblank sequencer's tick decode -> `s_mb` enable,
+  10.6 of 14.2 ns routing; an earlier build of the same logic, before the
+  `s_xcnt` reset moved, got 77.84 on seed 1 -- placement noise), all others
+  seed 1: HD Analog 78.97 MHz / 7133 LC, HD HDMI 78.00 / 7126, HD Dual
+  87.06 / 7125; SD Analog 83.81 / 7126, SD HDMI 86.94 / 7128, SD Dual
+  84.35 / 7130. 26/32 EBR, 93% LC. (v1.1.2 in this SDK, same router/seed: 75.87 / 6979, 82.30 /
+  6987, 78.78 / 6985; 79.11 / 6999, 79.59 / 6991, 84.09 / 7002 -- 91%; the
+  chip is no longer full since the v1.1.2 serial multiplier.)

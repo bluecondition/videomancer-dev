@@ -34,6 +34,21 @@
 -- fit budget: the render path scales linearly in shells and 8 was 115%
 -- of the HX4K.
 --
+-- v1.1.3 (2026-10-17): K1/K4 labelled defaults (community fix, folded in):
+-- the firmware loads a labelled default as its label INDEX, so K1 below 6
+-- and K4 below 8 are taken as the label, not a knob position.
+--
+-- v1.1.4 (2026-10-17): resolution scaling. The shell coordinates run in
+-- virtual 1080-line units, stepped from the video timing ID
+-- (registers_in(8)): the per-pixel shell step is k * (1.0 / 1.5 / 2.0 at
+-- 1080 / 720p / SD) and the per-line step k * (1080 / active lines, doubled
+-- for interlace), both made by the vblank sequencer's shared multiplier; the
+-- measured width/height (centre, drift) and the nebula raster count in the
+-- same units. At 1080p every step is exactly 1.0 (identical to before); at
+-- 720p and SD the cells, stars and nebula keep their size relative to the
+-- screen height, and stars stay round on a 4:3 screen (SD = a 1440-wide
+-- window of the 1080 canvas).
+--
 -- Register map (t_spi_ram, each std_logic_vector(9 downto 0)):
 --   registers_in(0) = Layers     (6 zones: 1..6 shells)
 --   registers_in(1) = Density    (0-1023, manual density / luma gain)
@@ -77,7 +92,8 @@ architecture warpfield of program_top is
     type t_pipe    is array (natural range <>) of t_video_stream_yuv444_30b;
     type t_u24_arr is array(0 to NUM_LYRS-1) of unsigned(23 downto 0);
     type t_u16_arr is array(0 to NUM_LYRS-1) of unsigned(15 downto 0);
-    type t_u13_arr is array(0 to NUM_LYRS-1) of unsigned(12 downto 0);
+    type t_u15_arr is array(0 to NUM_LYRS-1) of unsigned(14 downto 0);
+    type t_u14_arr is array(0 to NUM_LYRS-1) of unsigned(13 downto 0);
     type t_u8_arr  is array(0 to NUM_LYRS-1) of unsigned(7 downto 0);
     type t_u5_arr  is array(0 to NUM_LYRS-1) of unsigned(4 downto 0);
     type t_u4_arr  is array(0 to NUM_LYRS-1) of unsigned(3 downto 0);
@@ -121,15 +137,23 @@ architecture warpfield of program_top is
     signal vdly_q2  : std_logic_vector(31 downto 0) := (others => '0');
 
     -- Raster tracking / measurement (width from the avid run, height from
-    -- active-line count -- cascade's pattern; both halved for the centre)
-    signal pixel_x      : unsigned(11 downto 0) := (others => '0');
-    signal pixel_y      : unsigned(11 downto 0) := (others => '0');
+    -- active-line count -- cascade's pattern; both halved for the centre).
+    -- Resolution scaling: all of it counts virtual 1080-line units. s_xs is
+    -- the x step in half units per pixel (2/3/4 = 1.0/1.5/2.0), s_ys the y
+    -- step in 1/16 units per FIELD line. s_xcnt (Q.1) also serves as the
+    -- nebula's pixel position (it replaces the old pixel_x): reset at hsync,
+    -- so it holds the line's final count from avid fall to hsync, which the
+    -- ~7-pixel-early nebula path samples at the right edge.
+    signal s_xs         : unsigned(2 downto 0) := to_unsigned(2, 3);
+    signal s_ys         : unsigned(6 downto 0) := to_unsigned(16, 7);
+    signal pix_ya       : unsigned(15 downto 0) := (others => '0');
+    signal pixel_y      : unsigned(11 downto 0);
     signal prev_hsync_n : std_logic := '1';
     signal prev_vsync_n : std_logic := '1';
     signal s_sawact     : std_logic := '0';   -- active video seen since last frame start
     signal s_avid_q     : std_logic := '0';
-    signal s_xcnt       : unsigned(11 downto 0) := (others => '0');
-    signal s_lcnt       : unsigned(11 downto 0) := (others => '0');
+    signal s_xcnt       : unsigned(12 downto 0) := (others => '0');
+    signal s_lcnt       : unsigned(15 downto 0) := (others => '0');
     signal halfw_r      : unsigned(10 downto 0) := to_unsigned(640, 11);
     signal cyh_r        : unsigned(10 downto 0) := to_unsigned(240, 11);
 
@@ -138,8 +162,11 @@ architecture warpfield of program_top is
     -- sum are its re-seed epoch (changes exactly when the shell wraps).
     signal ph24  : unsigned(23 downto 0) := (others => '0');
 
-    -- Per-shell frame constants published by the vblank sequencer
-    signal k16     : t_u13_arr := (others => to_unsigned(4096, 13));
+    -- Per-shell frame constants published by the vblank sequencer: the
+    -- per-pixel shell step k16 = k * x step and the per-line step ky = k *
+    -- y step (both exactly k at 1080p)
+    signal k16     : t_u14_arr := (others => to_unsigned(4096, 14));
+    signal ky      : t_u15_arr := (others => to_unsigned(4096, 15));
     -- line origins x0 live in one EBR (8 x 32, shells 0-5): written by the
     -- vblank sequencer, read back one shell per clock after each hsync to
     -- reload the horizontal accumulators (x0_walk 0..5, 6 = idle), long
@@ -347,7 +374,35 @@ architecture warpfield of program_top is
         return unsigned(t(9 downto 0));
     end function;
 
+    -- Resolution scaling: per-mode steps from the video timing ID.
+    -- x in half units per pixel: 1080 2 (1.0), 720p 3 (1.5), SD 4 (2.0:
+    -- 720 px span 1440 units, a 4:3 window of the 1080 canvas).
+    function f_vstep_x(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0 | 4 | 8 | 12 => return to_unsigned(4, 3);
+            when 5 | 6 | 14     => return to_unsigned(3, 3);
+            when others         => return to_unsigned(2, 3);
+        end case;
+    end function;
+    -- y in 1/16 units per FIELD line (1080 / active lines, doubled for
+    -- interlace; 480i 71/16 = 4.4375 ~ 2 x 1080/486).
+    function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(71, 7);   -- 480i
+            when 4          => return to_unsigned(36, 7);   -- 480p: 2.25
+            when 8          => return to_unsigned(60, 7);   -- 576i: 3.75
+            when 12         => return to_unsigned(30, 7);   -- 576p: 1.875
+            when 5 | 6 | 14 => return to_unsigned(24, 7);   -- 720p: 1.5
+            when 1 | 2 | 10 => return to_unsigned(32, 7);   -- 1080i: 2.0
+            when others     => return to_unsigned(16, 7);   -- 1080p: 1.0
+        end case;
+    end function;
+
 begin
+
+    pixel_y <= pix_ya(15 downto 4);
 
     -- line-origin RAM: one write port, one registered read
     p_x0ram : process(clk)
@@ -440,28 +495,31 @@ begin
             prev_vsync_n <= data_in.vsync_n;
             s_avid_q     <= data_in.avid;
 
+            -- virtual-unit steps, free-running (the timing ID is static
+            -- while a mode runs)
+            s_xs <= f_vstep_x(registers_in(8)(3 downto 0));
+            s_ys <= f_vstep_y(registers_in(8)(3 downto 0));
+
             if data_in.avid = '1' then
-                pixel_x <= pixel_x + 1;
-                s_xcnt  <= s_xcnt + 1;
+                s_xcnt  <= s_xcnt + s_xs;
                 for i in 0 to NUM_LYRS-1 loop
                     sx_acc(i) <= sx_acc(i) + resize(k16(i), 24);
                 end loop;
             elsif s_avid_q = '1' then
                 -- avid just fell: close the line measurement, step the
                 -- vertical shell coordinates (ACTIVE lines only)
-                if s_xcnt > to_unsigned(16, 12) then
-                    halfw_r <= s_xcnt(11 downto 1);
+                if s_xcnt(12 downto 1) > to_unsigned(16, 12) then
+                    halfw_r <= s_xcnt(12 downto 2);
                 end if;
-                s_xcnt <= (others => '0');
-                s_lcnt <= s_lcnt + 1;
+                s_lcnt <= s_lcnt + s_ys;
                 for i in 0 to NUM_LYRS-1 loop
-                    sy_acc(i) <= sy_acc(i) + resize(k16(i), 24);
+                    sy_acc(i) <= sy_acc(i) + resize(ky(i), 24);
                 end loop;
             end if;
 
             if data_in.hsync_n = '0' and prev_hsync_n = '1' then
-                pixel_x <= (others => '0');
-                pixel_y <= pixel_y + 1;
+                s_xcnt  <= (others => '0');
+                pix_ya  <= pix_ya + s_ys;
                 x0_walk <= (others => '0');
             end if;
 
@@ -538,11 +596,11 @@ begin
                 neb_scroll <= neb_scroll + to_unsigned(8, 16);
 
                 -- height measurement (counted lines per field; halved)
-                if s_lcnt > to_unsigned(8, 12) then
-                    cyh_r <= s_lcnt(11 downto 1);
+                if s_lcnt(15 downto 4) > to_unsigned(8, 12) then
+                    cyh_r <= s_lcnt(15 downto 5);
                 end if;
                 s_lcnt  <= (others => '0');
-                pixel_y <= (others => '0');
+                pix_ya  <= (others => '0');
             elsif s_run = '1' and s_ce = 3 then
                 s_seq <= s_seq + 1;
                 if s_seq < to_unsigned(48, 9) then
@@ -664,7 +722,6 @@ begin
                             s_mgo <= '1';
                         when 14 =>
                             v_k := t0_r - resize(s_mprod(12 downto 8), 13);
-                            k16(v_li) <= v_k;
                             s_ma <= resize(cx_r, 13);
                             s_mb <= v_k;
                             s_mgo <= '1';
@@ -672,11 +729,21 @@ begin
                             x0_wd <= C_BIAS - resize(s_mprod(22 downto 0), 24);
                             x0_wa <= to_unsigned(v_li, 3);
                             x0_we <= '1';
-                            -- s_mb still holds k16(v_li) from tick 14
+                            -- s_mb holds this shell's k from tick 14 to 26
                             s_ma <= resize(cy_r, 13);
                             s_mgo <= '1';
                         when 22 =>
                             sy_acc(v_li) <= C_BIAS - resize(s_mprod(22 downto 0), 24);
+                            -- per-line step: k * y step (Q.4)
+                            s_ma <= resize(s_ys, 13);
+                            s_mgo <= '1';
+                        when 26 =>
+                            ky(v_li) <= s_mprod(18 downto 4);
+                            -- per-pixel step: k * x step (Q.1)
+                            s_ma <= resize(s_xs, 13);
+                            s_mgo <= '1';
+                        when 30 =>
+                            k16(v_li) <= s_mprod(14 downto 1);
                         when others => null;
                     end case;
                 else
@@ -716,11 +783,18 @@ begin
             -- Registered knob helpers (quasi-static, one cycle stale)
             ----------------------------------------------------------------
             density      := unsigned(registers_in(1));
-            palette_sel  := unsigned(registers_in(3)(9 downto 7));
+            -- labelled defaults (K1, K4): the firmware loads the label INDEX,
+            -- so a value below the label count is the label, not a position
+            if unsigned(registers_in(3)(9 downto 3)) = 0 then
+                palette_sel := unsigned(registers_in(3)(2 downto 0));
+            else
+                palette_sel := unsigned(registers_in(3)(9 downto 7));
+            end if;
 
             -- K1 Layers: 6 zones -> first active shell index 5..0
             v_k1 := unsigned(registers_in(0));
-            if    v_k1 < to_unsigned(171, 10) then first_act_r <= to_unsigned(5, 3);
+            if    v_k1 < to_unsigned(6, 10) then first_act_r <= to_unsigned(5, 3) - v_k1(2 downto 0);
+            elsif v_k1 < to_unsigned(171, 10) then first_act_r <= to_unsigned(5, 3);
             elsif v_k1 < to_unsigned(342, 10) then first_act_r <= to_unsigned(4, 3);
             elsif v_k1 < to_unsigned(512, 10) then first_act_r <= to_unsigned(3, 3);
             elsif v_k1 < to_unsigned(683, 10) then first_act_r <= to_unsigned(2, 3);
@@ -1016,7 +1090,7 @@ begin
             ----------------------------------------------------------------
             -- BACKGROUND path: drifting nebula + vertical gradient (S10)
             ----------------------------------------------------------------
-            sum12 := resize(pixel_x, 12) + neb_scroll(15 downto 4);
+            sum12 := s_xcnt(12 downto 1) + neb_scroll(15 downto 4);
             bg1_addr <= pixel_y(7 downto 2) & sum12(7 downto 2);
 
             bg2_neb <= C_NEBULA(to_integer(bg1_addr));
