@@ -44,6 +44,14 @@
 -- luma 64 + 13/16 (y - 64) (the HD HDMI bar fix, damier v0.4.4; crush and
 -- hard S at high contrast make full-swing edges in motion).  Latency 30
 -- clocks, all modes, blanking-gated.
+--
+-- v0.2.2: resolution scaling.  The lattice steps are virtual (1080-line)
+-- units scaled per real pixel / field line by the x / y step of the video
+-- timing ID (registers_in(8)), so cells keep their size relative to the
+-- screen height at SD and 720p (still centred on the screen); drift stays in
+-- virtual lines; the displacement amplitude is 1/8 of the 1080p width scaled
+-- by 1/x step (height-based, so SD 4:3 warps like the HD picture).  1080p is
+-- unchanged.
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -89,6 +97,32 @@ architecture noisetone of program_top is
         else
             return resize(v, 11);
         end if;
+    end function;
+
+    -- Resolution scaling: per-mode steps from the video timing ID.
+    -- x step in half virtual units per pixel: 1080 2 (1.0), 720p 3 (1.5),
+    -- SD 4 (2.0: 720 px span 1440 units, a 4:3 window of the 1080 canvas).
+    function f_vstep_x(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0 | 4 | 8 | 12 => return to_unsigned(4, 3);
+            when 5 | 6 | 14     => return to_unsigned(3, 3);
+            when others         => return to_unsigned(2, 3);
+        end case;
+    end function;
+    -- y step in Q4.8 virtual units per FIELD line (1080 / active lines,
+    -- doubled for interlaced modes).
+    function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(1138, 12);  -- 480i: 2 x 1080/486
+            when 4          => return to_unsigned(576, 12);   -- 480p: 1080/480
+            when 8          => return to_unsigned(960, 12);   -- 576i: 2 x 1080/576
+            when 12         => return to_unsigned(480, 12);   -- 576p: 1080/576
+            when 5 | 6 | 14 => return to_unsigned(384, 12);   -- 720p: 1.5
+            when 1 | 2 | 10 => return to_unsigned(512, 12);   -- 1080i: 2.0
+            when others     => return to_unsigned(256, 12);   -- 1080p: 1.0
+        end case;
     end function;
 
     function f_round1(k : unsigned(15 downto 0)) return unsigned is
@@ -247,7 +281,14 @@ architecture noisetone of program_top is
     signal s_sidx   : unsigned(8 downto 0) := to_unsigned(192, 9);      -- scale: octave & mantissa
     signal s_srom_addr : unsigned(5 downto 0) := (others => '0');
     signal s_srom_q, s_srom_q2 : unsigned(14 downto 0) := to_unsigned(16384, 15);
-    signal s_step, s_xstep, s_ystep : unsigned(14 downto 0) := to_unsigned(2048, 15);
+    signal s_step   : unsigned(14 downto 0) := to_unsigned(2048, 15);
+    -- lattice steps: virtual (per 1080-line unit) and real (per pixel / field line)
+    signal s_xstep_v, s_ystep_v : unsigned(14 downto 0) := to_unsigned(2048, 15);
+    signal s_xstep, s_ystep : unsigned(16 downto 0) := to_unsigned(2048, 17);
+    -- resolution scaling (free-running from the timing ID)
+    signal s_xs     : unsigned(2 downto 0) := to_unsigned(2, 3);        -- x step, Q.1
+    signal s_ys     : unsigned(11 downto 0) := to_unsigned(256, 12);    -- y step per field line, Q.8
+    signal s_wv     : unsigned(10 downto 0) := to_unsigned(1920, 11);   -- 1080p width in real px
     signal s_dspd   : unsigned(9 downto 0) := (others => '0');
     signal s_dup    : std_logic := '0';
     signal s_dinc   : unsigned(20 downto 0) := (others => '0');
@@ -424,6 +465,15 @@ begin
             if data_in.avid = '1' then s_rx <= s_rx + 1; s_saw_active <= '1'; else s_rx <= (others => '0'); end if;
             if s_in_avid = '1' then s_wr_x <= s_wr_x + 1; else s_wr_x <= (others => '0'); end if;
             s_we <= data_in.avid;
+            -- resolution scaling: per-mode steps; the 1920-unit 1080p width
+            -- in real pixels (2 / x step), the displacement reference
+            s_xs <= f_vstep_x(registers_in(8)(3 downto 0));
+            s_ys <= f_vstep_y(registers_in(8)(3 downto 0));
+            case to_integer(s_xs) is
+                when 4      => s_wv <= to_unsigned(960, 11);
+                when 3      => s_wv <= to_unsigned(1280, 11);
+                when others => s_wv <= to_unsigned(1920, 11);
+            end case;
             -- lattice x DDA: the line starts at the per-frame centred start
             if data_in.avid = '1' then
                 s_xacc <= s_xacc + resize(s_xstep, 25);
@@ -495,16 +545,32 @@ begin
                     s_con_a <= s_con; s_con_b <= s_con; s_con_c <= s_con;
                     s_vstep <= s_vstep + 1;
                 when 5 =>
-                    -- the long axis of a cell is 4x the short one
+                    -- the long axis of a cell is 4x the short one (virtual steps)
                     if s_sw_wide = '1' then
-                        s_xstep <= shift_right(s_step, 2); s_ystep <= s_step;
+                        s_xstep_v <= shift_right(s_step, 2); s_ystep_v <= s_step;
                     else
-                        s_xstep <= s_step; s_ystep <= shift_right(s_step, 2);
+                        s_xstep_v <= s_step; s_ystep_v <= shift_right(s_step, 2);
                     end if;
-                    s_vstep <= s_vstep + 1;
+                    s_vstep <= to_unsigned(14, 5);
+                when 14 =>
+                    -- real steps: x per pixel = virtual x (x step / 2) ...
+                    case to_integer(s_xs) is
+                        when 4      => s_xstep <= shift_left(resize(s_xstep_v, 17), 1);
+                        when 3      => s_xstep <= resize(s_xstep_v, 17) + resize(shift_right(s_xstep_v, 1), 17);
+                        when others => s_xstep <= resize(s_xstep_v, 17);
+                    end case;
+                    -- ... y per field line = virtual y x (y step / 256)
+                    s_ma <= resize(s_ystep_v, 26);
+                    s_mb <= s_ys;
+                    s_macc <= (others => '0');
+                    s_mret <= to_unsigned(15, 5);
+                    s_vstep <= to_unsigned(30, 5);
+                when 15 =>
+                    s_ystep <= s_macc(24 downto 8);
+                    s_vstep <= to_unsigned(6, 5);
                 when 6 =>
-                    -- drift per frame = (speed / 32 lines) * y step
-                    s_ma <= resize(s_ystep, 26);
+                    -- drift per frame = (speed / 32 virtual lines) * virtual y step
+                    s_ma <= resize(s_ystep_v, 26);
                     s_mb <= resize(s_dspd, 12);
                     s_macc <= (others => '0');
                     s_mret <= to_unsigned(7, 5);
@@ -523,8 +589,8 @@ begin
                     s_vstep <= s_vstep + 1;
                 when 9 =>
                     -- displacement = c * width / 8192: 1/8 of the width each from
-                    -- Amount and Storm
-                    s_ma <= resize(s_line_width, 26);
+                    -- Amount and Storm (the 1080p width in real px: height-based)
+                    s_ma <= resize(s_wv, 26);
                     s_mb <= s_c;
                     s_macc <= (others => '0');
                     s_mret <= to_unsigned(10, 5);
