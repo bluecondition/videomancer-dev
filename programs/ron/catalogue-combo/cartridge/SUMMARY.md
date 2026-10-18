@@ -90,6 +90,29 @@ Look / controls:
   6 of the 8 palettes, so that reading would make the switch dead.
 - S11 Invert maps 16 ↔ 235 (v0.1's bitwise NOT sent black to super-white).
 
+## v0.2.2 (2026-10-18): resolution scaling
+
+- **K3 Width follows the screen height.** The ink weight was in pixels and
+  field lines, so at 720p the ink was 1.5x heavier relative to the picture.
+  At SD it was worse: the downward extension counted 16 FIELD lines (~7% of
+  the height), which made long drips under every edge, and horizontal ink was
+  ~2x thicker than vertical. The taps and the extension now come from
+  per-mode tables (timing ID). At 720p they are 2/3 of 1080p's: lines 2 / 2 /
+  6 / 10 px. At SD, vertical edges mark one field line and the lines are
+  1 / 1 / 2 / 4 field lines by 2 / 2 / 4 / 8 px. The thinnest weight is the
+  edge kernel's 2-px floor everywhere, so at 720p and SD "1 px" and "2 px"
+  look the same. The labels are px at 1080p.
+- **SD dither used only 2 of the 4 Bayer rows.** The rows were keyed on
+  field_n, which the hardware ties high. They now step every field line, so
+  SD gets all 16 dither levels.
+- 1080p is bit-identical (pixel diff 0). The six tap spacings are picked a
+  clock early (the same samples, one tap upstream), so the subtract keeps its
+  stage. +~60 LUT standalone.
+
+Build (v0.2.2, router2, all seed 1): HD Analog 96.51, HD HDMI 88.64, HD Dual
+88.10 MHz; SD Analog 90.93, SD HDMI 83.36, SD Dual 83.37 MHz. 4,384–4,393 LC
+(57%), 22/32 EBR.
+
 ## Build
 
 `./build_combo.sh cartridge` → `out/rev_b/ron/catalogue-combo/cartridge.vmprog`.
