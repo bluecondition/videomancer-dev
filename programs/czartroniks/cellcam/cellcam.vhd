@@ -38,6 +38,16 @@
 -- centres it: start phases from (width/2) mod W and (height/2) mod R.
 -- Output: luma 64..940, highlight knee (white -> 770), [1 2 1] on Y/U/V
 -- (HD HDMI bars).  Latency 23 clocks, all modes, blanking-gated.
+--
+-- v0.3.2 (2026-10-17) resolution scaling: P12's cell size, the Shape
+-- height, K4's outline/raw widths and K6's lag are sizes on the 1080-line
+-- canvas, converted to pixels (x 2/3 at 720p, 1/2 at SD) and field lines
+-- (1080 / active lines, halved on interlace) from the timing ID, so cells
+-- keep their size relative to the screen height and stay square on 4:3 SD
+-- (cells >= 2 px, outlines >= 1 px / 1 line).  The bleed's HD doubling is
+-- now 1080-only (720p takes the SD lengths, the nearer power of 2), and
+-- interlace comes from the timing ID instead of the field height.  The
+-- grid centring is unchanged (real pixels / field lines).  1080p unchanged.
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -131,11 +141,33 @@ architecture cellcam of program_top is
     signal s_sksq : unsigned(15 downto 0) := (others => '0');
     signal s_se : unsigned(1 downto 0) := (others => '0');
     signal s_sm : unsigned(4 downto 0) := to_unsigned(16, 5);
-    signal s_wd, s_ht, s_w716, s_m : unsigned(10 downto 0) := (others => '0');
+    signal s_wd, s_ht, s_m : unsigned(10 downto 0) := (others => '0');
     signal s_fw, s_fwm1, s_fr, s_c0n, s_r0n : unsigned(7 downto 0) := (others => '0');
     signal s_rprod : unsigned(12 downto 0) := (others => '0');
     signal s_rr : unsigned(9 downto 0) := (others => '0');
-    signal s_il, s_x0z : std_logic := '0';
+    signal s_x0z : std_logic := '0';
+
+    -- Resolution scaling (v0.3.2): Q10 virtual-unit -> pixel (kx) and
+    -- -> field-line (ky) factors from the timing ID; sizes below in px/lines
+    signal s_kx, s_ky : unsigned(10 downto 0) := to_unsigned(1024, 11);
+    signal s_x1080 : std_logic := '1';                           -- 1080p/1080i class
+    signal s_fwv : unsigned(7 downto 0) := (others => '0');     -- cell width, virtual units
+    signal s_pw : unsigned(18 downto 0) := (others => '0');     -- W_v * kx
+    signal s_pr : unsigned(20 downto 0) := (others => '0');     -- R_v * ky
+    -- products split on the factor (low 6 / high 5 bits), recombined a clock later
+    signal s_pwl : unsigned(13 downto 0) := (others => '0');
+    signal s_pwh : unsigned(12 downto 0) := (others => '0');
+    signal s_prl : unsigned(15 downto 0) := (others => '0');
+    signal s_prh : unsigned(14 downto 0) := (others => '0');
+    signal s_wpl, s_wll : unsigned(9 downto 0) := (others => '0');
+    signal s_wph, s_wlh : unsigned(8 downto 0) := (others => '0');
+    signal s_lagl : unsigned(12 downto 0) := (others => '0');
+    signal s_lagh : unsigned(11 downto 0) := (others => '0');
+    signal s_wpp, s_wlp : unsigned(14 downto 0) := (others => '0');
+    signal s_wpx, s_wln : unsigned(3 downto 0) := to_unsigned(1, 4);   -- outline width px / lines
+    signal s_wqx, s_wqy : unsigned(2 downto 0) := (others => '0');     -- ... minus 1
+    signal s_lagp : unsigned(17 downto 0) := (others => '0');
+    signal s_lagx : unsigned(6 downto 0) := (others => '0');    -- lag in px
     signal s_qm, s_qm1, s_h0n, s_hm1n : unsigned(3 downto 0) := (others => '0');
 
     -- input side
@@ -238,7 +270,32 @@ begin
                 when 2 => s_bk0 <= "100";
                 when others => s_bk0 <= "101";
             end case;
-            if s_hd = '1' and s_bk0 /= 0 then s_bk <= s_bk0 + 1; else s_bk <= s_bk0; end if;
+            if s_x1080 = '1' and s_bk0 /= 0 then s_bk <= s_bk0 + 1; else s_bk <= s_bk0; end if;
+            -- Resolution scaling: per-mode factors (the timing ID is static
+            -- while a mode runs), then the widths and lag in px / lines
+            case to_integer(unsigned(registers_in(8)(3 downto 0))) is
+                when 0          => s_kx <= to_unsigned(512, 11); s_ky <= to_unsigned(230, 11);   -- 480i
+                when 4          => s_kx <= to_unsigned(512, 11); s_ky <= to_unsigned(455, 11);   -- 480p
+                when 8          => s_kx <= to_unsigned(512, 11); s_ky <= to_unsigned(273, 11);   -- 576i
+                when 12         => s_kx <= to_unsigned(512, 11); s_ky <= to_unsigned(546, 11);   -- 576p
+                when 5 | 6 | 14 => s_kx <= to_unsigned(683, 11); s_ky <= to_unsigned(683, 11);   -- 720p
+                when 1 | 2 | 10 => s_kx <= to_unsigned(1024, 11); s_ky <= to_unsigned(512, 11);  -- 1080i
+                when others     => s_kx <= to_unsigned(1024, 11); s_ky <= to_unsigned(1024, 11); -- 1080p
+            end case;
+            s_x1080 <= s_kx(10);
+            s_wpl <= s_w * s_kx(5 downto 0);  s_wph <= s_w * s_kx(10 downto 6);
+            s_wll <= s_w * s_ky(5 downto 0);  s_wlh <= s_w * s_ky(10 downto 6);
+            s_wpp <= shift_left(resize(s_wph, 15), 6) + resize(s_wpl, 15);
+            s_wlp <= shift_left(resize(s_wlh, 15), 6) + resize(s_wll, 15);
+            if s_wpp(14 downto 10) + ("0000" & s_wpp(9)) = 0 then s_wpx <= to_unsigned(1, 4);
+            else s_wpx <= s_wpp(13 downto 10) + ("000" & s_wpp(9)); end if;
+            if s_wlp(14 downto 10) + ("0000" & s_wlp(9)) = 0 then s_wln <= to_unsigned(1, 4);
+            else s_wln <= s_wlp(13 downto 10) + ("000" & s_wlp(9)); end if;
+            s_wqx <= resize(s_wpx - 1, 3);
+            s_wqy <= resize(s_wln - 1, 3);
+            s_lagl <= s_lag * s_kx(5 downto 0);  s_lagh <= s_lag * s_kx(10 downto 6);
+            s_lagp <= shift_left(resize(s_lagh, 18), 6) + resize(s_lagl, 18);
+            s_lagx <= s_lagp(16 downto 10) + ("000000" & s_lagp(9));
             -- grid knobs: +-4 LSB deadband, so pot noise never jitters the grid
             s_p12r <= unsigned(registers_in(7)); s_k2r <= unsigned(registers_in(1)); s_k5r <= unsigned(registers_in(4));
             if resize(s_p12r, 11) > resize(s_p12h, 11) + 4 or resize(s_p12r, 11) + 4 < resize(s_p12h, 11) then s_p12h <= s_p12r; end if;
@@ -284,7 +341,7 @@ begin
             -- line start: freeze the row state for this line's pixels
             if data_in.avid = '1' and s_prev_avid = '0' then
                 s_r_bank <= s_wbank; s_r_top <= s_top; s_r_first <= s_first; s_r_lph <= s_lph;
-                if s_rc < s_w then s_r_band <= '1'; else s_r_band <= '0'; end if;
+                if s_rc < s_wln then s_r_band <= '1'; else s_r_band <= '0'; end if;
                 if s_blk0 = '1' then
                     s_bpar <= s_hpar; s_r_swap <= '0';
                 else
@@ -299,17 +356,14 @@ begin
             case to_integer(s_sq) is
                 when 1 =>
                     s_sksq <= s_sk * s_sk;
-                    s_w716 <= shift_right(s_wd, 1) - shift_right(s_wd, 4);
                     s_sq <= s_sq + 1;
                 when 2 =>
-                    s_fwm1 <= resize(s_sksq(15 downto 9), 8) + 1;              -- 1..128
-                    s_fw <= resize(s_sksq(15 downto 9), 8) + 2;                -- 2..129
-                    -- interlaced if the field is shorter than 7/16 of the
-                    -- width (480i/576i/1080i); rows then count field lines
-                    if s_ht < s_w716 then s_il <= '1'; else s_il <= '0'; end if;
+                    s_fwv <= resize(s_sksq(15 downto 9), 8) + 2;               -- 2..129 virtual units
                     s_sq <= s_sq + 1;
                 when 3 =>
-                    s_rprod <= s_fw * s_sm;
+                    s_rprod <= s_fwv * s_sm;
+                    s_pwl <= s_fwv * s_kx(5 downto 0);                         -- width in px, Q10,
+                    s_pwh <= s_fwv * s_kx(10 downto 6);                        -- split on kx
                     s_sq <= s_sq + 1;
                 when 4 =>
                     case to_integer(s_se) is                                   -- R = W * (16+m) * 2^e / 64
@@ -318,26 +372,37 @@ begin
                         when 2 => s_rr <= resize(s_rprod(12 downto 4), 10);
                         when others => s_rr <= resize(s_rprod(12 downto 3), 10);
                     end case;
+                    s_pw <= shift_left(resize(s_pwh, 19), 6) + resize(s_pwl, 19);
                     s_sq <= s_sq + 1;
                 when 5 =>
-                    if s_il = '1' then s_rr <= shift_right(s_rr, 1); end if;
+                    if s_pw(18 downto 10) + ("00000000" & s_pw(9)) < 2 then
+                        s_fw <= to_unsigned(2, 8);                             -- cells >= 2 px
+                    else
+                        s_fw <= s_pw(17 downto 10) + ("0000000" & s_pw(9));
+                    end if;
+                    s_prl <= s_rr * s_ky(5 downto 0);                          -- rows in field lines,
+                    s_prh <= s_rr * s_ky(10 downto 6);                         -- Q10, split on ky
                     s_sq <= s_sq + 1;
                 when 6 =>
-                    if s_rr = 0 then s_fr <= to_unsigned(1, 8);
-                    elsif s_rr > 255 then s_fr <= to_unsigned(255, 8);
-                    else s_fr <= s_rr(7 downto 0); end if;
+                    s_fwm1 <= s_fw - 1;
+                    s_pr <= shift_left(resize(s_prh, 21), 6) + resize(s_prl, 21);
                     s_sq <= s_sq + 1;
                 when 7 =>
+                    if s_pr(20 downto 10) + ("0000000000" & s_pr(9)) = 0 then s_fr <= to_unsigned(1, 8);
+                    elsif s_pr(20 downto 10) + ("0000000000" & s_pr(9)) > 255 then s_fr <= to_unsigned(255, 8);
+                    else s_fr <= s_pr(17 downto 10) + ("0000000" & s_pr(9)); end if;
+                    s_sq <= s_sq + 1;
+                when 8 =>
                     s_m <= shift_right(s_wd, 1); s_qm <= (others => '0');
                     s_sq <= s_sq + 1;
-                when 8 =>                                                      -- (width/2) mod W, cells mod H
+                when 9 =>                                                      -- (width/2) mod W, cells mod H
                     if s_m >= s_fw then
                         s_m <= s_m - s_fw;
                         if s_qm >= s_hm1n then s_qm <= (others => '0'); else s_qm <= s_qm + 1; end if;
                     else
                         s_sq <= s_sq + 1;
                     end if;
-                when 9 =>
+                when 10 =>
                     if s_m = 0 then
                         s_c0n <= (others => '0'); s_x0z <= '1';
                     else
@@ -345,19 +410,19 @@ begin
                     end if;
                     if s_qm >= s_hm1n then s_qm1 <= (others => '0'); else s_qm1 <= s_qm + 1; end if;
                     s_sq <= s_sq + 1;
-                when 10 =>
+                when 11 =>
                     if s_x0z = '1' then v_q := s_qm; else v_q := s_qm1; end if;
                     if v_q = 0 then s_h0n <= (others => '0'); else s_h0n <= s_hm1n + 1 - v_q; end if;
                     s_sq <= s_sq + 1;
-                when 11 =>
+                when 12 =>
                     s_m <= shift_right(s_ht, 1);
                     s_sq <= s_sq + 1;
-                when 12 =>                                                     -- (height/2) mod R
+                when 13 =>                                                     -- (height/2) mod R
                     if s_m >= s_fr then s_m <= s_m - s_fr; else s_sq <= s_sq + 1; end if;
-                when 13 =>
+                when 14 =>
                     if s_m = 0 then s_r0n <= (others => '0'); else s_r0n <= s_fr - s_m(7 downto 0); end if;
                     s_sq <= s_sq + 1;
-                when 14 =>
+                when 15 =>
                     s_wm1 <= s_fwm1; s_c0 <= s_c0n; s_hm1 <= s_hm1n; s_h0 <= s_h0n; s_rm1 <= s_fr - 1;
                     s_rc <= s_r0n; s_blk0 <= '1'; s_wbank <= '0'; s_top <= '1'; s_first <= '1'; s_lph <= '0';
                     s_sq <= (others => '0');
@@ -444,7 +509,7 @@ begin
     begin
         if rising_edge(clk) then
             s_wp <= s_wp + 1;
-            s_rp <= s_wp - resize(s_lag, 8);
+            s_rp <= s_wp - resize(s_lagx, 8);
             s_rdC <= ringC(to_integer(s_rp));
             ringC(to_integer(s_wp)) <= std_logic_vector(s_u16(9 downto 2)) & std_logic_vector(s_v16(9 downto 2));
         end if;
@@ -469,7 +534,7 @@ begin
             if (s_cc = 0 and s_hc = 0) or v_f1 = '1' then
                 s_hx2 <= s_wr_x; s_lu2 <= s_in_u(9 downto 2); s_lv2 <= s_in_v(9 downto 2);
             end if;
-            if s_cc < s_w then s_nb2 <= '1'; else s_nb2 <= '0'; end if;
+            if s_cc < s_wpx then s_nb2 <= '1'; else s_nb2 <= '0'; end if;
             s_fc2 <= s_fc; s_avd2 <= s_in_avid; s_fp2 <= v_f1;
             s_yr2 <= s_in_y(9 downto 2); s_yrm <= s_yr2;
             s_lp2 <= unsigned(s_rdP);
@@ -512,7 +577,7 @@ begin
             if s_avd4 = '0' then
                 s_pk5 <= (others => '0'); s_pc5 <= (others => '0');
             elsif s_gs4 >= s_pk5 then
-                s_pk5 <= s_gs4; s_pc5 <= s_wq;
+                s_pk5 <= s_gs4; s_pc5 <= s_wqx;
             elsif s_pc5 /= 0 then
                 s_pc5 <= s_pc5 - 1;
             else
@@ -594,7 +659,7 @@ begin
             s_ev11 <= v_m;
             if v_m(9) = '1' then s_wt11 <= to_unsigned(16, 5); else s_wt11 <= resize(v_m(8 downto 5), 5); end if;
             if v_ln = 0 or s_r_first = '1' or s_ev10(9 downto 5) >= v_lv then
-                s_vs11 <= std_logic_vector(s_ev10(9 downto 5)) & std_logic_vector(s_wq);
+                s_vs11 <= std_logic_vector(s_ev10(9 downto 5)) & std_logic_vector(s_wqy);
             else
                 s_vs11 <= std_logic_vector(v_lv) & std_logic_vector(v_ln - 1);
             end if;
