@@ -16,6 +16,25 @@ Forked from the triangulator engine. **Streaming pixel pipeline, no frame buffer
 and no BRAM** — every effect is computed per pixel in the coordinate + luma
 domain.
 
+## v1.0.3 (2026-10-17) — resolution scaling
+- **Stroke pitch follows the screen height.** The x phase DDA step is
+  scaled by the virtual x step from the timing ID (`registers_in(8)`):
+  x1 at 1080p, x1.5 at 720p, x2 at SD (a 1440-wide 4:3 window), so K2's
+  48..4.9 px is the 1080p pitch and 720p/SD show the same stroke count per
+  screen height (they were 1.5x / 2x coarser).
+- **Wobble and row jitter run on virtual rows** (`py` = integer part of a
+  Q.8 row accumulator, 1080/active lines per field line, interlace
+  included). The 1024/512/256-row wobble periods were 2-4x too tall at SD.
+- **S8 Chroma Sep** is 2..10 px at 720p (x11/16; it used the HD 3..15 there).
+- 1080p is bit-identical. Everything else (bend, ripple, drift, walk) is in
+  phase units and scales with the pitch. The per-row jitter and the glitch
+  walk stay per scan line (a row texture); at SD the rows are just taller.
+- At SD the top of K2 gets thin: the 4.9 px 1080p pitch is 2.5 px at SD
+  (strokes ~1 px), so the last ~20% of K2 aliases into a fine weave there.
+- **Build (router2): HD HDMI seed 2** (seed 1 missed timing); all other
+  configs seed 1. HD Analog 82.3 / HD HDMI 83.7 / HD Dual 82.3 MHz; SD 80.2 /
+  74.2 / 88.3 MHz; 4958–4974 LC (65%), 0 EBR.
+
 ## v0.6 (2026-10-10) — Tier 3: signal quality
 v0.5 was HW-checked by Ron ("all things check out good"); v0.6 is the look-polish tier.
 - **Thin-stroke hue (4:2:2 pair averaging).** The core's packer point-samples U
@@ -191,7 +210,7 @@ of s1 (no latency change) and pair-averages the chroma lines at s11.
 v1.0.0 FINAL except presets (signed off 2026-10-10). Bitstreams built as v0.6,
 **6/6 seed 1 (router2), full clock, no divisor**: HD Analog 87.9 · HD HDMI 87.5 ·
 HD Dual 87.7 · SD Analog 79.3 · SD HDMI 79.1 · SD Dual 87.4 MHz.
-LC 4885–4904/7680 (64%), 0 BRAM, 0 DSP. **Build seeds:** all configs seed 1.
+LC 4885–4904/7680 (64%), 0 BRAM, 0 DSP. **Build seeds:** all configs seed 1 (v1.0.3 dev build: HD HDMI seed 2, see above).
 HW history: v0.1 flashed (jumpy); v0.2–v0.4 never flashed; v0.5 HW-checked OK;
 v0.6 signed off.
 

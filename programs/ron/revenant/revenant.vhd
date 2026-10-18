@@ -6,6 +6,14 @@
 --
 -- revenant.vhd  (v1.0.0 — "Ghost in the Signal": analog luma-contour glitch)
 --
+-- v1.0.3 (2026-10-17): resolution scaling.  The stroke pitch and the wobble
+-- follow the screen height in every mode: the x phase DDA step is scaled by
+-- the virtual x step from the video timing ID (registers_in(8): 1.0 at 1080p,
+-- 1.5 at 720p, 2.0 at SD, a 1440-wide 4:3 window), and the line index that
+-- drives the wobble and row jitter is a virtual 1080-line row (1080/486 per
+-- SD frame line, already doubled for interlace).  S8's fringe is 2/3 of the
+-- HD width at 720p (it used the HD width there).  1080p is bit-identical.
+--
 -- Re-draws a live source (a portrait on near-black ground) as a degrading analog
 -- signal: the BRIGHT parts of the figure are redrawn by swarms of electric contour
 -- strokes that hug the volume, the DARK parts fall into true black, the very
@@ -36,7 +44,8 @@
 --
 -- Controls:
 --   K1 Luma Key     (crushed luma above which strokes appear; high = sparse)
---   K2 Line Density (CONTINUOUS stroke pitch, 48 px .. 4.9 px, phase-DDA)
+--   K2 Line Density (CONTINUOUS stroke pitch, 48 px .. 4.9 px at 1080p --
+--                    follows the screen height in every mode -- phase-DDA)
 --   K3 Contrast     (black-point crush, fixed x1.5 gain; high = more falls to black)
 --   K4 Hue Rotate   (spin the violet/cyan/white tritone in 90-deg steps)
 --   K5 Drift Speed  (0 = frozen; up = a constant ONE-WAY scroll of the contour
@@ -45,7 +54,8 @@
 --                    solid icy fill -- raw-luma threshold 960 -> 642 -- with a
 --                    halo of icy strokes in the 64 codes below it)
 --   S7 Warp         (Off = gentle base bend; On = 3x deeper bend, P12 adds more)
---   S8 Chroma Sep   (U/V fringe, 3..15 px at HD (2..8 SD); amount rides P12)
+--   S8 Chroma Sep   (U/V fringe, 3..15 px at 1080 (2..10 720p, 2..8 SD);
+--                    amount rides P12)
 --   S9 Motion       (Smooth = continuous drift; Glitch = frame-tear walk)
 --   S10 Invert      (strokes fill the DARK, the figure becomes a black silhouette)
 --   S11 Bypass      (SDK passthrough of the raw input)
@@ -153,6 +163,30 @@ architecture revenant of program_top is
     end function;
 
     --------------------------------------------------------------------------
+    -- Resolution scaling: per-mode steps from the video timing ID.
+    --------------------------------------------------------------------------
+    function f_vstep_x(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0 | 4 | 8 | 12 => return to_unsigned(4, 3);
+            when 5 | 6 | 14     => return to_unsigned(3, 3);
+            when others         => return to_unsigned(2, 3);
+        end case;
+    end function;
+    function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(1138, 12);  -- 480i: 2 x 1080/486
+            when 4          => return to_unsigned(576, 12);   -- 480p: 1080/480
+            when 8          => return to_unsigned(960, 12);   -- 576i: 2 x 1080/576
+            when 12         => return to_unsigned(480, 12);   -- 576p: 1080/576
+            when 5 | 6 | 14 => return to_unsigned(384, 12);   -- 720p: 1.5
+            when 1 | 2 | 10 => return to_unsigned(512, 12);   -- 1080i: 2.0
+            when others     => return to_unsigned(256, 12);   -- 1080p: 1.0
+        end case;
+    end function;
+
+    --------------------------------------------------------------------------
     -- Raster position / animation.
     --------------------------------------------------------------------------
     signal prev_hsync_n : std_logic := '1';
@@ -162,7 +196,13 @@ architecture revenant of program_top is
     signal py        : unsigned(10 downto 0) := (others => '0');  -- line index
     signal frame_act : std_logic := '0';
     signal max_px    : unsigned(11 downto 0) := (others => '0');  -- widest line this field
-    signal s_hd      : std_logic := '1';                         -- HD-width raster
+    -- Resolution scaling: per-mode virtual steps from the timing ID
+    -- (registers_in(8)), free-running.  x is Q.1 (2/3/4 = 1.0/1.5/2.0 per
+    -- pixel), y Q4.8 per FIELD line.  py is the integer part of the virtual
+    -- row accumulator pya (= the old line count at 1080p).
+    signal s_xs      : unsigned(2 downto 0)  := to_unsigned(2, 3);
+    signal s_ys      : unsigned(11 downto 0) := to_unsigned(256, 12);
+    signal pya       : unsigned(18 downto 0) := (others => '0');
 
     -- xorshift32 noise (period 2^32-1).  Disjoint bit fields per use: grain 7..2,
     -- glitch walk 18..12, glitch lottery 31..22.  (The old 1-bit-per-clock LFSR
@@ -214,7 +254,8 @@ architecture revenant of program_top is
     --------------------------------------------------------------------------
     signal s_blk     : unsigned(9 downto 0) := (others => '0');   -- black point (crush)
     signal s_key     : unsigned(9 downto 0) := to_unsigned(300,10);-- luma key (stroke start)
-    signal s_step    : unsigned(13 downto 0) := to_unsigned(4096, 14); -- phase step / px
+    signal s_step_b  : unsigned(13 downto 0) := to_unsigned(4096, 14); -- step at 1080p
+    signal s_step    : unsigned(14 downto 0) := to_unsigned(4096, 15); -- phase step / px
     signal s_hue     : unsigned(1 downto 0) := (others => '0');   -- hue rotation (x90)
     -- K4 label decode, free-running.  Labelled default: at program load the
     -- firmware writes the initial_value_label's INDEX (0..3) into the
@@ -337,6 +378,7 @@ begin
         variable v_pw    : unsigned(13 downto 0);
         variable v_p7, v_p3, v_p5, v_p13 : unsigned(13 downto 0);
         variable v_cs    : unsigned(4 downto 0);
+        variable v_c11   : unsigned(8 downto 0);
         variable v_x1, v_x2 : unsigned(31 downto 0);
     begin
         if rising_edge(clk) then
@@ -345,6 +387,18 @@ begin
             v_h_edge := '0'; v_v_edge := '0';
             if data_in.hsync_n = '0' and prev_hsync_n = '1' then v_h_edge := '1'; end if;
             if data_in.vsync_n = '0' and prev_vsync_n = '1' then v_v_edge := '1'; end if;
+
+            -- per-mode virtual steps (the timing ID is static while a mode
+            -- runs, so free-running registers are enough)
+            s_xs <= f_vstep_x(registers_in(8)(3 downto 0));
+            s_ys <= f_vstep_y(registers_in(8)(3 downto 0));
+            -- stroke pitch follows the screen height: the per-pixel phase step
+            -- grows with the virtual x step (1080p: unchanged)
+            case s_xs is
+                when "011"  => s_step <= resize(s_step_b, 15) + resize(s_step_b(13 downto 1), 15);
+                when "100"  => s_step <= s_step_b & '0';
+                when others => s_step <= resize(s_step_b, 15);
+            end case;
 
             -- xorshift32 (13, 17, 5)
             v_x1 := xs xor shift_left(xs, 13);
@@ -423,7 +477,13 @@ begin
 
             -- Y counter (anchored to first active line)
             if v_v_edge = '1' then
-                py        <= (others => '0');
+                -- virtual row origin; the bottom field starts half a field
+                -- step down (inert on hardware, which ties field_n high)
+                if data_in.field_n = '0' then
+                    pya <= resize(s_ys(11 downto 1), 19);
+                else
+                    pya <= (others => '0');
+                end if;
                 frame_act <= '0';
                 if vs_armed = '1' then
                     vs_armed  <= '0';
@@ -443,7 +503,6 @@ begin
                     end if;
                     -- measured width -> generated-avid end + HD flag
                     if max_px > 64 then g_wm1 <= max_px - 1; end if;
-                    if max_px > 1000 then s_hd <= '1'; else s_hd <= '0'; end if;
                     max_px <= (others => '0');
 
                     -- SMOOTH drift: one constant-velocity scroll of the whole contour
@@ -473,8 +532,9 @@ begin
                 s_blk <= resize(reg_q(2)(9 downto 2), 10);                 -- 0..255
                 -- K1 Luma Key.
                 s_key <= reg_q(0);
-                -- K2 Line Density: step = 1365 + 12*k2 -> pitch 48.0 .. 4.9 px.
-                s_step <= to_unsigned(1365, 14)
+                -- K2 Line Density: step = 1365 + 12*k2 -> pitch 48.0 .. 4.9 px
+                -- at 1080p (scaled per mode into s_step, see above).
+                s_step_b <= to_unsigned(1365, 14)
                         + shift_left(resize(k2_f, 14), 3)
                         + shift_left(resize(k2_f, 14), 2);
                 -- K4 Hue rotate (90-deg steps).
@@ -516,15 +576,20 @@ begin
                 s_ck <= to_unsigned(8, 7) + resize(v_p7(13 downto 7), 7);    -- 8..63
                 v_p3 := shift_left(v_pw, 1) + v_pw;                         -- x3
                 s_jk <= to_unsigned(16, 7) + resize(v_p3(13 downto 6), 7);   -- 16..63
-                -- S8 Chroma Sep: 3..15 px at HD, halved (2..8) at SD.
+                -- S8 Chroma Sep: 3..15 px at 1080, x11/16 (2..10) at 720p,
+                -- halved (2..8) at SD -- the same width in virtual units.
                 v_p13 := shift_left(v_pw, 3) + shift_left(v_pw, 2) + v_pw;  -- x13
                 v_cs  := to_unsigned(3, 5) + resize(v_p13(13 downto 10), 5);
+                v_c11 := shift_left(resize(v_cs, 9), 3) + shift_left(resize(v_cs, 9), 1)
+                         + resize(v_cs, 9);
                 if reg_q(6)(1) = '0' then
                     s_chroff <= 0;
-                elsif s_hd = '1' then
-                    s_chroff <= to_integer(v_cs);
-                else
+                elsif s_xs = "011" then
+                    s_chroff <= to_integer(v_c11(8 downto 4));
+                elsif s_xs = "100" then
                     s_chroff <= to_integer(shift_right(v_cs + 1, 1));
+                else
+                    s_chroff <= to_integer(v_cs);
                 end if;
                 s_noisem  <= resize(p12_f(9 downto 5), 6);                  -- grain 0..31
                 s_glitchp <= 32 + to_integer(p12_f(9 downto 2));            -- 32..287 /1024
@@ -532,12 +597,18 @@ begin
 
             elsif data_in.avid = '1' and frame_act = '0' then
                 frame_act <= '1';
-                py        <= (others => '0');
+                if data_in.field_n = '0' then
+                    pya <= resize(s_ys(11 downto 1), 19);
+                else
+                    pya <= (others => '0');
+                end if;
             elsif v_h_edge = '1' then
-                py <= py + 1;
+                pya <= pya + s_ys;
             end if;
         end if;
     end process p_position;
+
+    py <= pya(18 downto 8);
 
     --------------------------------------------------------------------------
     -- Clean avid (cubist/aurora/glitchscape recipe).  The encoders get no
