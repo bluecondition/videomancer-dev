@@ -128,6 +128,21 @@ Tier 3, optional:
   resolution). Probably invisible.
 - Width-exact SD reach (3/8 of HD rather than 1/2).
 
+## v0.2.2 (2026-10-18): resolution scaling
+
+- **The depth shift follows the screen height.** The offsets are pixels, and
+  v0.2.0 only halved the gain at SD (a measured-width switch), so 720p shifted
+  1.5x as far as 1080p relative to the picture. The gain now follows the
+  timing ID's x step: x1 at 1080, x2/3 at 720p ((1/2 + 1/8) x 17/16 = 0.664,
+  over vblank states 5..8), x1/2 at SD. The reach clamp scales the same way:
+  511 / 341 / 255 px. SD looked the same as before at normal settings; only
+  the clamp is new there. This also settles the "width-exact SD reach"
+  backlog item: in height units, half is right.
+- The 720p adds take one operand from a copy register (`s_ga`). x + (x >> k)
+  on one signed register puts the sign bit on both carry inputs, which is the
+  router1 self-add hang. dupin: 0.
+- 1080p is bit-identical.
+
 ## Build
 
 `./build_combo.sh stratamix` → `out/rev_b/ron/catalogue-combo/stratamix.vmprog`.
@@ -136,6 +151,12 @@ v0.2.0 (2026-10-13): all 6 configs pass on seed 1 (router2 default).
 HD Analog 84.9, HD HDMI 85.5, HD Dual 83.3 MHz; SD Analog 77.2, SD HDMI
 79.4, SD Dual 82.5 MHz. 5,003–5,045 LC (65–66%), 21/32 EBR. vmprog copy:
 `.stratamix_work/stratamix_v020.vmprog`.
+
+v0.2.2 (2026-10-18, router2): HD Analog 77.81 (seed 1), HD HDMI 79.76
+(seed 1), HD Dual 77.93 MHz (seed 2: seed 1 stalled the router, a timeout and
+not a timing miss); SD Analog 81.25, SD HDMI 83.83, SD Dual 81.58 MHz (seed 1).
+5,204–5,224 LC (68%), 21/32 EBR. Standalone: 2,299 LUT4, `emulate_transparency`
+0, dupin 0.
 
 Standalone yosys (synth_ice40): v0.1.0 1,835 LUT4 / 1,427 FF / 20 EBR
 (3 `emulate_transparency`); v0.2.0 2,242 LUT4 / 1,561 FF / 21 EBR

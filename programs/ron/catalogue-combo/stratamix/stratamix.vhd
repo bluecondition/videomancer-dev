@@ -33,6 +33,12 @@
 -- row's, and the tint swaps on rows whose parity is not the usual one
 -- (drape v1.3).  Output: highlight knee (940 -> 770) + [1 2 1] on Y/U/V
 -- (HD HDMI bar guard).  Latency 29 clocks, all modes, blanking-gated.
+--
+-- v0.2.2 (2026-10-18): resolution scaling.  The depth offset is in pixels, so
+-- the gain follows the timing ID's x step (1080 x1, 720p x2/3, SD x1/2) and
+-- so does the reach clamp (511 / 341 / 255 px): the same shift relative to
+-- the screen height in every mode.  v0.2.0 grouped 720p with 1080p (1.5x
+-- the shift).  1080p is bit-identical.
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -166,7 +172,14 @@ architecture stratamix of program_top is
     signal s_ddep, s_dp12 : signed(12 downto 0) := (others => '0');
 
     signal s_gk, s_g_e : signed(10 downto 0) := (others => '0');
+    -- v0.2.2 resolution scaling: the offsets are pixels, so the gain and the
+    -- reach follow the timing ID's x step (1080: 1.0 virtual unit a pixel,
+    -- 720p 1.5, SD 2.0): the same shift relative to the screen height
     signal s_sd     : std_logic := '0';
+    signal s_720    : std_logic := '0';
+    signal s_ga     : signed(10 downto 0) := (others => '0');
+    signal s_limp : signed(12 downto 0) := to_signed(511, 13);
+    signal s_limn : signed(12 downto 0) := to_signed(-511, 13);
     signal s_pivot  : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal s_mask   : unsigned(9 downto 0) := "1110000000";
     signal s_half   : unsigned(9 downto 0) := "0001000000";
@@ -178,7 +191,7 @@ architecture stratamix of program_top is
     signal s_mix, s_mix_e : unsigned(7 downto 0) := (others => '0');
     signal s_p      : unsigned(9 downto 0) := (others => '0');
     signal s_mpx    : unsigned(17 downto 0) := (others => '0');
-    signal s_vstep  : unsigned(2 downto 0) := "111";
+    signal s_vstep  : unsigned(3 downto 0) := "1111";
 
     --------------------------------------------------------------------------
     -- Tracking / write path
@@ -330,6 +343,20 @@ begin
                 s_levels <= s_zlv_m;
             end if;
 
+            -- timing-ID class (static while a mode runs) and the reach clamp
+            -- in this mode's pixels: 511 at 1080, 341 at 720p, 255 at SD
+            case to_integer(unsigned(registers_in(8)(3 downto 0))) is
+                when 0 | 4 | 8 | 12 =>
+                    s_sd <= '1'; s_720 <= '0';
+                    s_limp <= to_signed(255, 13); s_limn <= to_signed(-255, 13);
+                when 5 | 6 | 14 =>
+                    s_sd <= '0'; s_720 <= '1';
+                    s_limp <= to_signed(341, 13); s_limn <= to_signed(-341, 13);
+                when others =>
+                    s_sd <= '0'; s_720 <= '0';
+                    s_limp <= to_signed(511, 13); s_limn <= to_signed(-511, 13);
+            end case;
+
             -- chroma phase (drape v1.3): parity of the hsync->avid offset
             s_hpar <= not s_hpar;
             if data_in.avid = '1' and s_prev_avid = '0' then
@@ -349,7 +376,6 @@ begin
                     s_pivot <= s_k_pivot;
                     s_tint  <= s_k_tint(9 downto 2);
                     s_mix   <= s_k_mix(9 downto 2);
-                    s_sd    <= not s_line_width(10);
                     case to_integer(s_levels) is
                         when 0 => v_kl := 9;
                         when 1 => v_kl := 8;
@@ -394,9 +420,25 @@ begin
                     s_vstep <= s_vstep + 1;
                 when 5 =>
                     s_mix_e <= s_mix + s_mpx(17 downto 10);
-                    -- SD: half the HD pixel reach (720 px is ~3/8 of 1920)
-                    if s_sd = '1' then s_g_e <= shift_right(s_g_e, 1); end if;
-                    s_vstep <= "111";
+                    -- pixels per virtual unit: SD half the 1080 gain, 720p
+                    -- two thirds: (1/2 + 1/8) x 17/16 = 0.664 over states
+                    -- 5..8.  Each add takes one operand from the s_ga copy:
+                    -- x + (x >> k) on one signed register feeds the sign bit
+                    -- to both carry inputs (the router1 self-add hang)
+                    if s_sd = '1' then
+                        s_g_e <= shift_right(s_g_e, 1);
+                    end if;
+                    s_ga <= shift_right(s_g_e, 1);
+                    s_vstep <= s_vstep + 1;
+                when 6 =>
+                    if s_720 = '1' then s_g_e <= s_ga + shift_right(s_g_e, 3); end if;
+                    s_vstep <= s_vstep + 1;
+                when 7 =>
+                    s_ga <= shift_right(s_g_e, 4);
+                    s_vstep <= s_vstep + 1;
+                when 8 =>
+                    if s_720 = '1' then s_g_e <= s_g_e + s_ga; end if;
+                    s_vstep <= "1111";
                 when others => null;
             end case;
 
@@ -449,9 +491,9 @@ begin
             s_d4 <= s_d3;
             -- 5: displacement product (11 x 11)
             s_pd5 <= s_d4 * s_g4;
-            -- 6: offset (+-511 px)
+            -- 6: offset (+-511 px at 1080, the same reach scaled at 720p / SD)
             v_w := resize(shift_right(s_pd5, 9), 13);
-            if v_w > 511 then v_w := to_signed(511, 13); elsif v_w < -511 then v_w := to_signed(-511, 13); end if;
+            if v_w > s_limp then v_w := s_limp; elsif v_w < s_limn then v_w := s_limn; end if;
             s_off6 <= resize(v_w, 11);
             -- 7: source column
             s_u7 <= signed(resize(s_x(6), 13)) + resize(s_off6, 13);
