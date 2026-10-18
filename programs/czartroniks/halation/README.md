@@ -10,7 +10,7 @@ Bloom meets magnetic wobble: a wide glow (7–255 px) that can wobble on its own
 |---|---|---|---|
 | K1 | Glow | 0–100% | Brightness of the glow |
 | K2 | Threshold | 0–100% | Only areas brighter than this glow (black to ~white) |
-| K3 | Radius | 0–100% | Glow blur width, 7 to 255 px (127 px max in SD) |
+| K3 | Radius | 0–100% | Glow blur width, 7 to 255 px at 1080p (the same size relative to the screen height at 720p and SD) |
 | K4 | Wobble | 0–100% | How far lines wobble sideways |
 | K5 | Rate | -100–100% | Wobble roll speed and direction (centre = still) |
 | K6 | Period | 0–100% | Vertical size of the wobble waves |
