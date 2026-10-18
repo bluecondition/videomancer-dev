@@ -196,6 +196,12 @@ vmprog + its six bitstreams are kept in
 `validated_bitstreams/`). Hardware A/B the new HD HDMI before it replaces
 the validated one.
 
+Community port (stock LZX SDK, router1, all 8 configs, 2026-10-18):
+`[firmware] seed = 3`. Seed 1 crashes nextpnr's router (assertion) and seed
+2 stalls HD HDMI; seed 3 builds all 8, own HD timing 82.8 / 85.4 / 84.5 MHz
+(Analog / HDMI / Dual), SD Standalone 7586 LC (98.8%, the tightest config).
+Its HD HDMI pin skew is not screened.
+
 ## v1.0.0 — FINAL except presets (Ron signed off 2026-10-09)
 
 Same six bitstreams as v0.3.3 (only the config binary was regenerated for the

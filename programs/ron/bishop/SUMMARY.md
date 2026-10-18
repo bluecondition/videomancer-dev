@@ -176,3 +176,7 @@ v1.0.2 (2026-10-15): **seed 3**, set as `[firmware] seed = 3` in bishop.toml. LZ
 - **Sweep:** seed 2 built 7/8 (HD Analog stalled); seed 3 built 8/8.
 - **Own HD timing** on seed 3 (scratch core without LZX's Sync Out generator): 79.7 / 81.1 / 75.1 MHz (Analog / HDMI / Dual). Max 7057 LC (SD Standalone).
 - The dev flow (router2) is unchanged.
+
+v1.0.3 (resolution scaling, 2026-10-18): **seed 1**. The scaled netlist crashes nextpnr's router on
+seed 3; seed 1 builds all 8, own HD 82.7 / 86.3 / 76.6 MHz (Analog / HDMI / Dual), max 7425 LC
+(SD Standalone).
