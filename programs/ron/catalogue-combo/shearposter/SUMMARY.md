@@ -135,6 +135,32 @@ Tier 3 (bigger, ask first):
 - Per-cell random displacement (mosh-like), on top of the per-line shear.
 - Presets captured from hardware; v1.0.0 sign-off; commit.
 
+## v0.2.2 resolution scaling (2026-10-17)
+
+The baseline sheet showed pixel cells 1.5× too big at 720p and much bigger at
+SD (cells were fixed pixels, and rows and the zigzag counted field lines).
+Now cells keep their 1080 size relative to the screen height:
+
+- The read-address chain runs in virtual 1080-line units: x, shear, edge
+  fill/mirror, the cell centre and the inset. That is 1.0 / 1.5 / 2.0 units
+  per pixel at 1080 / 720p / SD, from the timing ID; SD is a 1440-wide 4:3
+  window. The cell centre becomes a line-buffer pixel at the end: 720p
+  `floor((2V+1)/3)` = `((V+1)·5·17·257) >> 15` (three shift-adds, for Y and
+  for C), SD `V/2`. This adds 4 clocks of latency, now 24 in all modes; the
+  IO pad stays 2.
+- K2 Rows count virtual lines: a Q8 accumulator with a mask wrap, and the
+  row-start flag sets at the avid fall.
+- The zigzag steps `step × (1080/active lines)` per field line. That is a
+  4th phase on the free-running frame multiplier, so the waves keep their
+  height on screen.
+- P12 Shear amount: still width/64..width/2, but the width that sizes it is
+  1920 units at SD (sizes follow the screen height), and the virtual width
+  at 720p/1080.
+- The 12-px edge inset stays 12 real pixels (18 / 24 virtual units). The
+  ordered dither stays at pixel scale (Ron's texture rule). Its Cell mode
+  follows the cells.
+- 1080p is bit-identical (diff1080 = 0).
+
 ## Build
 
 `./build_combo.sh shearposter` → `out/rev_b/ron/catalogue-combo/shearposter.vmprog`.
@@ -145,3 +171,8 @@ v0.2.0 (2026-10-12, router2 default): all 6 configs on seed 1. HD Analog 83.9 /
 HD HDMI 90.1 / HD Dual 86.2 MHz; SD 88.3 / 88.8 / 93.1 MHz. ~3,905–3,952 LC
 (51%), 18/32 EBR. Standalone yosys: `emulate_transparency` = 0. TOML converted
 fresh (labels checked in program_config.bin). NOT FLASHED, NOT COMMITTED.
+
+v0.2.2 (2026-10-17, resolution scaling, router2 default): all 6 configs pass.
+HD Analog 78.49 MHz (seed 2), HD HDMI 81.19 (seed 1), HD Dual 83.64 (seed 1); SD
+Analog 88.68 (seed 1), SD HDMI 84.43 (seed 2), SD Dual 75.77 (seed 4; the
+earlier seeds stalled). 4,426–4,466 LC (58%), 18/32 EBR. Not flashed.

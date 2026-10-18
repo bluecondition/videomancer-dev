@@ -28,6 +28,19 @@
 --   S11 Colour  Together / Split (chroma shears the opposite way)
 --   P12 Shear   amount, glided, squared: width/64 at 0 .. width/2 at 100%
 --
+-- v0.2.2 (2026-10-17): resolution scaling.  The read-address chain (x, the
+-- shear, the edges, the cell grid) runs in virtual 1080-line units: x steps
+-- 1.0 / 1.5 / 2.0 per pixel at 1080 / 720p / SD (SD = a 1440-wide 4:3
+-- window), from the video timing ID; the cell centre is turned back into a
+-- line-buffer pixel at the end (720p floor((2V+1)/3), SD V/2; 4 clocks), so
+-- K1 cells keep their 1080 size relative to the screen height.  K2 Rows
+-- count virtual lines (Q8 accumulator, 2 x 1080/486 per 480i field line)
+-- and the zigzag steps step x (1080/active lines) per line, so SD cells and
+-- waves are no longer twice as tall.  The shear amount is sized from 1920
+-- units on the 4:3 SD window (sizes follow the screen height); the 12-px
+-- edge inset stays 12 pixels.  The ordered dither stays at pixel scale.
+-- 1080p is bit-identical; latency 20 -> 24.
+--
 -- Rows: the first line of each cell row captures into one bank of a 2-bank
 -- line buffer; the row is shown from its next line on, so the picture moves
 -- down 1 line at every Rows setting.  Each output line reads the captured
@@ -41,7 +54,7 @@
 -- shift-add multiply (wave x amplitude); the amplitude, the zigzag step and
 -- the tear share by a free-running serial multiplier from the glided P12/K4.
 --
--- HARDWARE CONTRACTS: blanking gate; one latency (18) in all modes; banks,
+-- HARDWARE CONTRACTS: blanking gate; one latency (22) in all modes; banks,
 -- offsets and dither row latched per line at the avid rise; U/V swapped on
 -- rows whose hsync->avid parity differs from their capture row's (every
 -- row replays a stored line -- drape v1.3); output conditioning ([1 2 1] on
@@ -62,14 +75,14 @@ use work.all;
 
 architecture shearposter of program_top is
     -- IO-align pad: 2 register stages after the program's own output so the
-    -- data_in -> data_out latency (18 + 2 = 20 clocks) is a multiple of 4,
+    -- data_in -> data_out latency (22 + 2 = 24 clocks) is a multiple of 4,
     -- as the SDK requires; must match processing_delay_clks in the TOML.
-    constant C_PROCESSING_DELAY_CLKS : natural := 20;
+    constant C_PROCESSING_DELAY_CLKS : natural := 24;
     signal s_io_align_in : t_video_stream_yuv444_30b;
     type t_io_align_pad is array (0 to 1) of t_video_stream_yuv444_30b;
     signal s_io_align_pad : t_io_align_pad;
 
-    constant C_LAT   : integer := 18;
+    constant C_LAT   : integer := 22;
     constant C_EDGE  : integer := 12;     -- capture blanking columns kept out of every read
     constant C_SPEED : integer := 768;    -- zigzag roll per field (16-bit phase): ~1.4 s a cycle at 60 Hz
 
@@ -89,6 +102,32 @@ architecture shearposter of program_top is
     attribute no_rw_check of lbU1 : signal is true;
     attribute no_rw_check of lbV0 : signal is true;
     attribute no_rw_check of lbV1 : signal is true;
+
+    -- Resolution scaling (mondrian v1.0.2): per-mode steps from the timing ID.
+    -- x step in half virtual units per pixel: 1080 2 (1.0), 720p 3 (1.5),
+    -- SD 4 (2.0: 720 px span 1440 units, a 4:3 window of the 1080 canvas).
+    function f_vstep_x(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0 | 4 | 8 | 12 => return to_unsigned(4, 3);
+            when 5 | 6 | 14     => return to_unsigned(3, 3);
+            when others         => return to_unsigned(2, 3);
+        end case;
+    end function;
+    -- y step in Q4.8 virtual units per FIELD line (1080 / active lines,
+    -- doubled for interlaced modes).
+    function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(1138, 12);  -- 480i: 2 x 1080/486
+            when 4          => return to_unsigned(576, 12);   -- 480p: 1080/480
+            when 8          => return to_unsigned(960, 12);   -- 576i: 2 x 1080/576
+            when 12         => return to_unsigned(480, 12);   -- 576p: 1080/576
+            when 5 | 6 | 14 => return to_unsigned(384, 12);   -- 720p: 1.5
+            when 1 | 2 | 10 => return to_unsigned(512, 12);   -- 1080i: 2.0
+            when others     => return to_unsigned(256, 12);   -- 1080p: 1.0
+        end case;
+    end function;
 
     type t_m7 is array (0 to 7) of unsigned(6 downto 0);
     constant C_MASK : t_m7 := ("0000000", "0000001", "0000011", "0000111", "0001111", "0011111", "0111111", "1111111");
@@ -189,7 +228,19 @@ architecture shearposter of program_top is
     signal s_in_y, s_in_u, s_in_v : unsigned(9 downto 0) := (others => '0');
     signal s_prev_hsync_n, s_prev_vsync_n, s_prev_avid : std_logic := '1';
     signal s_line : unsigned(10 downto 0) := (others => '0');
-    signal s_line_width : unsigned(10 downto 0) := to_unsigned(720, 11);
+    signal s_line_width : unsigned(10 downto 0) := to_unsigned(720, 11);   -- virtual units
+    -- resolution scaling: steps (free-running from the timing ID), virtual x
+    -- counters, the edge inset in virtual units, the width that sizes the shear
+    signal s_stx  : unsigned(2 downto 0) := to_unsigned(2, 3);        -- Q.1 per pixel
+    signal s_sty  : unsigned(11 downto 0) := to_unsigned(256, 12);    -- Q4.8 per field line
+    signal s_msd, s_m720 : std_logic := '0';
+    signal s_vrx, s_vwx : unsigned(12 downto 0) := (others => '0');   -- Q.1
+    signal s_cedge : unsigned(10 downto 0) := to_unsigned(C_EDGE, 11);
+    signal s_ce13, s_nce13 : signed(12 downto 0) := to_signed(C_EDGE, 13);
+    signal s_wsz  : unsigned(10 downto 0) := to_unsigned(1920, 11);
+    signal s_ya   : unsigned(15 downto 0) := (others => '0');         -- line position in its cell row, Q8.8
+    signal s_rowst : std_logic := '1';                                -- the line starts a cell row
+    signal s_stepv : unsigned(15 downto 0) := (others => '0');        -- zigzag step per field line
     signal s_saw_active : std_logic := '0';
     -- rows: capture flag and banks of this line, bank of the last capture
     signal s_cap, s_wbank, s_rbank, s_lastcap, s_prevcap : std_logic := '0';
@@ -203,12 +254,17 @@ architecture shearposter of program_top is
     signal s_w2m1, s_we13, s_wl13, s_nwe13, s_rce13, s_rwe13 : signed(12 downto 0) := (others => '0');
 
     -- x by stage (s_xs(k) = x of the stage-k pixel; stage 1 is s_wr_x)
-    type t_x is array (2 to 6) of unsigned(10 downto 0);
+    type t_x is array (2 to 10) of unsigned(10 downto 0);
     signal s_xs : t_x := (others => (others => '0'));
     signal s_a2, s_c2 : signed(12 downto 0) := (others => '0');
     signal s_e3, s_ec3, s_h4, s_hc4 : unsigned(10 downto 0) := (others => '0');
+    signal s_vY5, s_vC5, s_vY6, s_vC6, s_vY7, s_vC7, s_vY8, s_vC8 : unsigned(10 downto 0) := (others => '0');
+    signal s_pY6, s_pC6 : unsigned(11 downto 0) := (others => '0');   -- V + 1
+    signal s_tY7, s_tC7 : unsigned(13 downto 0) := (others => '0');   -- x 5
+    signal s_tY8, s_tC8 : unsigned(17 downto 0) := (others => '0');   -- x 17
     signal s_addrY, s_addrC : unsigned(10 downto 0) := (others => '0');
-    signal s_cb5, s_cb6 : std_logic := '0';
+    type t_cb is array (5 to 10) of std_logic;
+    signal s_cb : t_cb := (others => '0');
     -- fetch + posterize
     signal s_y7 : unsigned(9 downto 0) := to_unsigned(64, 10);
     signal s_u7, s_v7 : unsigned(9 downto 0) := to_unsigned(512, 10);
@@ -259,12 +315,32 @@ begin
         variable v_cap : std_logic;
         variable v_r  : unsigned(31 downto 0);
         variable v_nw : signed(10 downto 0);
+        variable v_ya : unsigned(16 downto 0);
     begin
         if rising_edge(clk) then
             s_in_y <= unsigned(data_in.y); s_in_u <= unsigned(data_in.u); s_in_v <= unsigned(data_in.v);
             s_prev_hsync_n <= data_in.hsync_n; s_prev_vsync_n <= data_in.vsync_n; s_prev_avid <= data_in.avid;
-            if data_in.avid = '1' then s_rx <= s_rx + 1; s_saw_active <= '1'; else s_rx <= (others => '0'); end if;
-            if s_avid_sr(0) = '1' then s_wr_x <= s_wr_x + 1; else s_wr_x <= (others => '0'); end if;
+            -- resolution scaling: per-mode steps, free-running
+            s_stx <= f_vstep_x(registers_in(8)(3 downto 0));
+            s_sty <= f_vstep_y(registers_in(8)(3 downto 0));
+            case to_integer(unsigned(registers_in(8)(3 downto 0))) is
+                when 0 | 4 | 8 | 12 => s_msd <= '1'; s_m720 <= '0'; s_cedge <= to_unsigned(2 * C_EDGE, 11);
+                when 5 | 6 | 14     => s_msd <= '0'; s_m720 <= '1'; s_cedge <= to_unsigned(C_EDGE + C_EDGE / 2, 11);
+                when others         => s_msd <= '0'; s_m720 <= '0'; s_cedge <= to_unsigned(C_EDGE, 11);
+            end case;
+            s_ce13  <= signed(resize(s_cedge, 13));
+            s_nce13 <= -signed(resize(s_cedge, 13));
+            if s_msd = '1' then s_wsz <= to_unsigned(1920, 11); else s_wsz <= s_line_width; end if;
+            if data_in.avid = '1' then
+                s_rx <= s_rx + 1; s_vrx <= s_vrx + s_stx; s_saw_active <= '1';
+            else
+                s_rx <= (others => '0'); s_vrx <= (others => '0');
+            end if;
+            if s_avid_sr(0) = '1' then
+                s_wr_x <= s_wr_x + 1; s_vwx <= s_vwx + s_stx;
+            else
+                s_wr_x <= (others => '0'); s_vwx <= (others => '0');
+            end if;
             v_r := s_rnd xor shift_left(s_rnd, 13);     -- xorshift32: all bits new every clock
             v_r := v_r xor shift_right(v_r, 17);
             s_rnd <= v_r xor shift_left(v_r, 5);
@@ -295,17 +371,17 @@ begin
             s_cd2 <= resize(shift_right(s_cstep, 1) + v_s8, 10);
             s_cd3 <= resize(s_cstep - v_s8, 10);
             s_cqh <= resize(shift_right(s_cstep, 1), 10);
-            -- shear range: width/64 .. width/2
-            s_floor <= resize(s_line_width(10 downto 6), 11);
-            s_range <= resize(s_line_width(10 downto 1), 11) - resize(s_line_width(10 downto 6), 11);
+            -- shear range: width/64 .. width/2 (of 1920 units on the 4:3 SD window)
+            s_floor <= resize(s_wsz(10 downto 6), 11);
+            s_range <= resize(s_wsz(10 downto 1), 11) - resize(s_wsz(10 downto 6), 11);
             -- edge bounds
             s_w2m1 <= signed(resize(s_line_width & '0', 13)) - 1;
-            s_w_edge <= s_line_width - (C_EDGE + 1);
+            s_w_edge <= s_line_width - s_cedge - 1;
             s_we13  <= signed(resize(s_w_edge, 13));
             s_wl13  <= signed(resize(s_line_width, 13));
             s_nwe13 <= -signed(resize(s_w_edge, 13));
-            s_rce13 <= s_w2m1 - C_EDGE;
-            s_rwe13 <= signed(resize(s_line_width, 13)) + C_EDGE;
+            s_rce13 <= s_w2m1 - s_ce13;
+            s_rwe13 <= signed(resize(s_line_width, 13)) + s_ce13;
 
             -- per-line shear: wave (or tear) x amplitude, one op per state
             case to_integer(s_ls) is
@@ -357,7 +433,7 @@ begin
             -- line start: banks, capture, parity swap, offsets, dither row
             s_hpar <= not s_hpar;
             if s_prev_avid = '0' and data_in.avid = '1' then
-                if (s_line(6 downto 0) and s_rmask) = 0 then v_cap := '1'; else v_cap := '0'; end if;
+                v_cap := s_rowst;                     -- the line starts a cell row
                 s_cap   <= v_cap;
                 s_rbank <= s_lastcap;                 -- the last completed capture
                 s_wbank <= not s_lastcap;
@@ -373,10 +449,14 @@ begin
             end if;
             -- line end: next line's phase, start its shear
             if s_prev_avid = '1' and data_in.avid = '0' then
-                s_line_width <= s_rx; s_line <= s_line + 1;
+                s_line_width <= s_vrx(11 downto 1); s_line <= s_line + 1;
+                -- cell rows in virtual lines (Q8; 2^rows units, so the wrap is a mask)
+                v_ya := resize(s_ya, 17) + s_sty;
+                s_ya <= (v_ya(15 downto 8) and ('0' & s_rmask)) & v_ya(7 downto 0);
+                if (v_ya(16 downto 8) and not ("00" & s_rmask)) /= 0 then s_rowst <= '1'; else s_rowst <= '0'; end if;
                 if s_cap = '1' then s_lastcap <= s_wbank; end if;
                 s_prevcap <= s_cap;
-                s_tph <= s_tph + resize(s_step, 16);
+                s_tph <= s_tph + s_stepv;
                 s_ls <= (others => '0');
             end if;
             if data_in.hsync_n = '0' and s_prev_hsync_n = '1' then
@@ -386,6 +466,7 @@ begin
             -- into bank 0 and starts a cell row; the field's own phase
             if data_in.vsync_n = '0' and s_prev_vsync_n = '1' then
                 s_line <= (others => '0');
+                s_ya <= (others => '0'); s_rowst <= '1';
                 s_lastcap <= '1'; s_prevcap <= '1';
                 v_f := s_fph;
                 if s_saw_active = '1' then
@@ -424,7 +505,8 @@ begin
                 case to_integer(s_mph) is
                     when 0 => s_mA <= resize(s_gp(13 downto 2), 24); s_mB <= s_gp(13 downto 2);
                     when 1 => s_mA <= resize(s_range, 24);           s_mB <= s_sq;
-                    when others => s_mA <= resize(s_gk(13 downto 2), 24); s_mB <= s_gk(13 downto 2);
+                    when 2 => s_mA <= resize(s_gk(13 downto 2), 24); s_mB <= s_gk(13 downto 2);
+                    when others => s_mA <= resize(s_step, 24);       s_mB <= s_sty;
                 end case;
                 s_mP <= (others => '0');
                 s_mit <= s_mit + 1;
@@ -437,44 +519,48 @@ begin
                 case to_integer(s_mph) is
                     when 0 => s_sq <= s_mP(23 downto 12); s_mph <= "01";
                     when 1 => s_amp <= s_floor + s_mP(22 downto 12); s_mph <= "10";
-                    when others => s_step <= s_mP(23 downto 11); s_prob <= s_mP(23 downto 16); s_mph <= "00";
+                    when 2 => s_step <= s_mP(23 downto 11); s_prob <= s_mP(23 downto 16); s_mph <= "11";
+                    -- zigzag step per field line: step x (1080 / active lines)
+                    when others => s_stepv <= s_mP(23 downto 8); s_mph <= "00";
                 end case;
                 s_mit <= (others => '0');
             end if;
         end if;
     end process p_fmul;
 
-    -- read address: 2 x + shear, 3 edge fill / mirror, 4 cell centre, 5 inset clamp
+    -- read address: 2 x + shear, 3 edge fill / mirror, 4 cell centre, 5 inset
+    -- clamp (all virtual), 6..9 to a pixel
     p_addr : process(clk)
+        variable v_cy, v_cc : unsigned(18 downto 0);
         procedure edge(signal src : in signed(12 downto 0); signal addr : out unsigned(10 downto 0)) is
             variable n, r : signed(12 downto 0);
         begin
             n := -src; r := s_w2m1 - src;
             if s_sw_mirror = '1' and src < 0 then
-                if src > -C_EDGE then addr <= to_unsigned(C_EDGE, 11);
+                if src > s_nce13 then addr <= s_cedge;
                 elsif src < s_nwe13 then addr <= s_w_edge;
                 else addr <= unsigned(n(10 downto 0)); end if;
             elsif s_sw_mirror = '1' and src >= s_wl13 then
-                if src > s_rce13 then addr <= to_unsigned(C_EDGE, 11);
+                if src > s_rce13 then addr <= s_cedge;
                 elsif src < s_rwe13 then addr <= s_w_edge;
                 else addr <= unsigned(r(10 downto 0)); end if;
-            elsif src < C_EDGE then addr <= to_unsigned(C_EDGE, 11);
+            elsif src < s_ce13 then addr <= s_cedge;
             elsif src > s_we13 then addr <= s_w_edge;
             else addr <= unsigned(src(10 downto 0)); end if;
         end procedure;
         procedure inset(signal h : in unsigned(10 downto 0); signal addr : out unsigned(10 downto 0)) is
         begin
-            if h < C_EDGE then addr <= to_unsigned(C_EDGE, 11);
+            if h < s_cedge then addr <= s_cedge;
             elsif h > s_w_edge then addr <= s_w_edge;
             else addr <= h; end if;
         end procedure;
     begin
         if rising_edge(clk) then
             s_xs(2) <= s_wr_x;
-            for i in 3 to 6 loop s_xs(i) <= s_xs(i - 1); end loop;
-            -- 2
-            s_a2 <= signed(resize(s_wr_x, 13)) + resize(s_offl, 13);
-            s_c2 <= signed(resize(s_wr_x, 13)) + resize(s_offcl, 13);
+            for i in 3 to 10 loop s_xs(i) <= s_xs(i - 1); end loop;
+            -- 2 (virtual x)
+            s_a2 <= signed(resize(s_vwx(11 downto 1), 13)) + resize(s_offl, 13);
+            s_c2 <= signed(resize(s_vwx(11 downto 1), 13)) + resize(s_offcl, 13);
             -- 3
             edge(s_a2, s_e3);
             edge(s_c2, s_ec3);
@@ -482,14 +568,34 @@ begin
             s_h4  <= (s_e3 and not s_mask11) or s_half11;
             s_hc4 <= (s_ec3 and not s_mask11) or s_half11;
             -- 5
-            inset(s_h4, s_addrY);
-            inset(s_hc4, s_addrC);
-            s_cb5 <= s_h4(to_integer(s_fcell));       -- cell-index parity (Cell dither)
-            s_cb6 <= s_cb5;
+            inset(s_h4, s_vY5);
+            inset(s_hc4, s_vC5);
+            s_cb(5) <= s_h4(to_integer(s_fcell));     -- cell-index parity (Cell dither)
+            for i in 6 to 10 loop s_cb(i) <= s_cb(i - 1); end loop;
+            -- 6..9: virtual x -> line-buffer pixel (the one under the unit's
+            -- centre): 1080 V, SD V/2, 720p floor((2V+1)/3) =
+            -- ((V+1) x 21845) >> 15, as x5, x17, x257
+            s_pY6 <= resize(s_vY5, 12) + 1;                 s_pC6 <= resize(s_vC5, 12) + 1;
+            s_vY6 <= s_vY5;                                 s_vC6 <= s_vC5;
+            s_tY7 <= resize(s_pY6, 14) + shift_left(resize(s_pY6, 14), 2);
+            s_tC7 <= resize(s_pC6, 14) + shift_left(resize(s_pC6, 14), 2);
+            s_vY7 <= s_vY6;                                 s_vC7 <= s_vC6;
+            s_tY8 <= resize(s_tY7, 18) + shift_left(resize(s_tY7, 18), 4);
+            s_tC8 <= resize(s_tC7, 18) + shift_left(resize(s_tC7, 18), 4);
+            s_vY8 <= s_vY7;                                 s_vC8 <= s_vC7;
+            if s_m720 = '1' then
+                v_cy := resize(s_tY8, 19) + resize(s_tY8(17 downto 8), 19);
+                v_cc := resize(s_tC8, 19) + resize(s_tC8(17 downto 8), 19);
+                s_addrY <= v_cy(17 downto 7); s_addrC <= v_cc(17 downto 7);
+            elsif s_msd = '1' then
+                s_addrY <= '0' & s_vY8(10 downto 1); s_addrC <= '0' & s_vC8(10 downto 1);
+            else
+                s_addrY <= s_vY8; s_addrC <= s_vC8;
+            end if;
         end if;
     end process p_addr;
 
-    -- line buffers: written on capture lines at stage 1, read at 6
+    -- line buffers: written on capture lines at stage 1, read at 10
     p_lbY0 : process(clk)
     begin
         if rising_edge(clk) then
@@ -556,9 +662,9 @@ begin
             if s_swap = '1' then s_u7 <= v_v; s_v7 <= v_u; else s_u7 <= v_u; s_v7 <= v_v; end if;
             v_j := to_integer(s_fdith);
             if v_j = 7 then
-                v_xb := s_cb6; v_yb := s_rbank;          -- Cell: cell column / cell row parity
+                v_xb := s_cb(10); v_yb := s_rbank;       -- Cell: cell column / cell row parity
             else
-                v_xb := s_xs(6)(v_j); v_yb := s_dline(v_j);
+                v_xb := s_xs(10)(v_j); v_yb := s_dline(v_j);
             end if;
             s_db7 <= (v_xb xor v_yb) & v_yb;            -- 2x2 Bayer index
             if v_j = 0 then s_don7 <= '0'; else s_don7 <= '1'; end if;
@@ -610,7 +716,7 @@ begin
             s_d213 <= resize(shift_right(s_rep12, 6), 5) + resize(shift_right(s_rep12, 8), 5);
             s_yq14 <= 64 + s_d113 - resize(s_d213, 10);
             -- 15: neutral outside avid (so the smoothing's edge taps read black)
-            if s_avid_sr(13) = '1' then
+            if s_avid_sr(17) = '1' then
                 s_y15 <= s_yq14; s_u15 <= s_ucd(14); s_v15 <= s_vcd(14);
             else
                 s_y15 <= to_unsigned(64, 10); s_u15 <= to_unsigned(512, 10); s_v15 <= to_unsigned(512, 10);
@@ -625,7 +731,7 @@ begin
             s_y17 <= v_sy(11 downto 2); s_u17 <= v_su(11 downto 2); s_v17 <= v_sv(11 downto 2);
             -- 18: luma toward black, 64 + 13/16 (y - 64) (white 940 -> 777); gate
             v_d := s_y17 - 64;
-            if s_avid_sr(16) = '1' then
+            if s_avid_sr(20) = '1' then
                 s_y18 <= s_y17 - shift_right(v_d, 3) - shift_right(v_d, 4);
                 s_u18 <= s_u17; s_v18 <= s_v17;
             else
@@ -643,7 +749,7 @@ begin
     s_io_align_in.avid    <= s_avid_sr(C_LAT - 1);
 
     -- IO-align pad: video and syncs delayed together, so only the total
-    -- latency changes (18 -> 20).
+    -- latency changes (22 -> 24).
     p_io_align_pad : process(clk)
     begin
         if rising_edge(clk) then
