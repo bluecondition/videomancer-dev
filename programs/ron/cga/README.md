@@ -9,8 +9,8 @@ Re-renders video as a real IBM CGA screen: the three Mode 4 palettes, 640-dot mo
 | | Control | Range | What it does |
 |---|---|---|---|
 | K1 | Mode | Grn/Red / Cyn/Mag / Cyn/Red / Mono 640 / Composite | Picks the CGA mode: three 4-colour palettes, 640-dot mono, or composite artifact colour |
-| K2 | H Size | 2x / 4x / CGA / 8x / 16x | Horizontal block size, 2x up to 16x (CGA = native 320-wide grid) |
-| K3 | V Size | 2x / 4x / CGA / 8x / 16x | Vertical block size, 2x up to 16x (CGA = native 200-line grid) |
+| K2 | H Size | 2x / 4x / CGA / 8x / 16x | Horizontal block size, 2x up to 16x (CGA = native 320-wide grid at 1080p); sizes scale with the screen resolution |
+| K3 | V Size | 2x / 4x / CGA / 8x / 16x | Vertical block size, 2x up to 16x (CGA = native 200-line grid at 1080p); sizes scale with the screen resolution |
 | K4 | Contrast | 0–100% | Picture contrast before colour matching; 50% leaves it unchanged |
 | K5 | Color | 0–100% | Nearest: source colour strength before matching; Luma/Composite: palette saturation, grey to true CGA colours |
 | K6 | Ink | Black / Blue / Green / Cyan / Red / Magenta / Brown / Gray | Background / colour-0 ink (the real CGA background register); mono foreground |

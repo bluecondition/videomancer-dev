@@ -5,8 +5,8 @@ Redraws incoming video in the CGA's own display modes on a block grid:
 mode-4 four-colour palettes (with the real selectable background colour),
 mode-6 640-dot mono, and composite artifact colour (mono dots read four at a
 time as the NTSC colour nibble → the 16 composite colours). The "CGA" block
-size gives a native 320×200 (640×200 for mono/composite) grid measured from
-the incoming raster. P12 adds per-block ordered dither, the classic CGA
+size gives a native 320×200 (640×200 for mono/composite) grid of the 1080p
+raster (6×5 / 3×5 px); like every size it scales with the screen (v2.0.9). P12 adds per-block ordered dither, the classic CGA
 game-art checkerboard.
 
 ## How it works
@@ -37,10 +37,29 @@ game-art checkerboard.
   palette modes and Composite, foreground in Mono (Black → white)
 - T7 Stability — anti-flicker on/off
 - T8 Intensity — low/high palette (and the Ink's intensity bit)
-- T9 Scanlines — dim the last line of every block row (V≤2: alternate lines, 25%)
+- T9 Scanlines — dim the last line of every block row, 50% (25% for rows
+  under 2.5 lines; alternate lines at 25% for rows under 1.5 lines)
 - T10 Color Mode — Nearest / Luma; in Composite: colour-burst phase flip
 - T11 Snow — CGA snow: random character-wide dashes each field
 - P12 Dither — ordered 4×4 Bayer per block, 0 → flat, 100% → ±240 codes
 
 ## Presets
 Mode 4 Hi · Blue Screen · Composite · Green Mono · Snowstorm
+
+## Resolution scaling (v2.0.9, 2026-10-17)
+Block sizes are virtual 1080-line units: the cell counters step per pixel /
+per field line from the video timing ID (1.0 at 1080p, 1.5 at 720p, SD 2.0
+across × 1080/486 per frame line), so 8x is 8 px at 1080p, 5.3 px at 720p
+and 4 px × 3.6 lines at SD (4:3), and the native CGA detent is 6×5 units
+everywhere. Non-integer sizes alternate pixel widths / line counts. The
+row wrap runs in the blanking (a field line can cross several rows at SD),
+stability tiles are 16×16 virtual units, averaging uses the largest power
+of 2 that fits the narrowest cell, and the Bayer grain / scanline style
+follow the real block size. 1080p output is bit-identical to v2.0.8
+(diff 0 px); palettes unchanged.
+
+## Build
+v2.0.9 (2026-10-17), router2, seed 1 (HD Analog seed 2 after a seed-1
+router2 stall), post-route: HD Analog 80.8 · HD HDMI 77.9 · HD Dual 83.2 ·
+SD Analog 80.6 · SD HDMI 83.8 · SD Dual 78.6 MHz. 5412/7680 LC (70%),
+18/32 EBR.
