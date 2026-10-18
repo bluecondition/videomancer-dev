@@ -20,6 +20,22 @@
 -- were hard-coded to a 4092-pixel span, which crammed all of SD's placement
 -- into the bottom 20% of the knob).
 --
+-- v2.2.3: K3 Style / K4 Color label-index fix folded in from community
+-- v2.2.2 (a value below 8 is the label index the firmware loads).
+--
+-- Resolution scaling (v2.2.3): sizes and layout are worked out in virtual
+-- 1080-line units (the video timing ID gives the per-mode steps), so the
+-- text is the same size relative to the screen HEIGHT in every mode and
+-- glyphs keep their shape: SD is a 1440-unit-wide (4:3) window, 720p steps
+-- 1.5 units per pixel and line, interlaced modes 2x per field line.  The
+-- Size range is the 1080p one (glyph pixel 3..29 units) everywhere, the
+-- positions and the crawl are fractions of the virtual width/height, and
+-- the accumulators step size_step * x-step per pixel and size_step *
+-- y-step per field line.  Before,
+-- the size came from meas_w and one step served both axes, so 480i glyphs
+-- were ~2x tall and 720p/SD got their own width-based size ranges.  1080p
+-- is bit-identical (every step is exactly 1.0 there).
+--
 -- Pipeline (7 cycles from data_in to data_out):
 --   S1: active-region counters (h_act / v_act) and Bresenham position
 --       accumulators (hpos_acc / vpos_acc) mapping physical pixels/lines to
@@ -271,6 +287,27 @@ architecture titler of program_top is
     signal hpos_init     : unsigned(C_POS_BITS - 1 downto 0) := (others => '1');
     signal vpos_init     : unsigned(C_POS_BITS - 1 downto 0) := (others => '1');
 
+    -- Resolution scaling: per-mode constants from the timing ID (registered,
+    -- free-running), the per-axis accumulator steps, and the virtual raster.
+    --   s_tx     x step class: 0 = 1.0 (1080), 1 = 1.5 (720p), 2 = 2.0 (SD)
+    --   s_ys2    y step per FIELD line / 2, Q.7 (= Q.8 y step / 2)
+    --   s_inv_ys field lines per virtual unit, Q12
+    --   s_inv_xs pixels per virtual unit, Q12
+    signal s_tx          : unsigned(1 downto 0) := "00";
+    signal s_t1080p      : std_logic := '1';
+    signal s_ys2         : unsigned(9 downto 0) := to_unsigned(128, 10);
+    signal s_inv_ys      : unsigned(12 downto 0) := to_unsigned(4096, 13);
+    signal s_inv_xs      : unsigned(12 downto 0) := to_unsigned(4096, 13);
+    signal s_hstep       : unsigned(C_STEP_BITS - 1 downto 0) := C_STEP_LUT(8);
+    -- (no bottom-field offset: core_top ties field_n high on every input,
+    -- so both interlaced fields render alike -- SD comes out line-doubled)
+    signal s_vstep       : unsigned(C_STEP_BITS - 1 downto 0) := C_STEP_LUT(8);
+    signal sq_wv         : unsigned(11 downto 0) := to_unsigned(1920, 12);  -- virtual width
+    signal sq_hv         : unsigned(11 downto 0) := to_unsigned(1080, 12);  -- virtual height
+    signal sq_lv         : unsigned(11 downto 0) := (others => '0');  -- left edge (>= 0), virtual
+    signal sq_hpos       : std_logic := '0';
+    signal sq_ov         : unsigned(11 downto 0) := (others => '0');  -- top edge (>= 0), virtual
+
     -- Centring offsets, one per line (0 when Justify = Left).
     signal s_off0        : unsigned(3 downto 0) := (others => '0');
     signal s_off1        : unsigned(3 downto 0) := (others => '0');
@@ -295,7 +332,8 @@ architecture titler of program_top is
                         SM_MUL_CX, SM_CX, SM_MUL_CY, SM_CY,
                         SM_MUL_V, SM_V, SM_PERIOD, SM_CRAWL, SM_WRAP,
                         SM_LEFT, SM_LEFT2, SM_LWRAP, SM_ORIGIN,
-                        SM_MUL_H, SM_H, SM_V_DIV, SM_SCAN, SM_JUST);
+                        SM_MUL_H, SM_H, SM_MUL_LX, SM_LX, SM_MUL_OY, SM_OY,
+                        SM_MUL_VS, SM_VS, SM_V_DIV, SM_SCAN, SM_JUST);
     signal sm_state    : t_sm_state := SM_IDLE;
 
     -- shared serial multiplier: acc = a * b, one partial product per cycle
@@ -642,7 +680,7 @@ begin
                 elsif v_h_next = s_h_origin then
                     hpos_acc <= (others => '0');
                 elsif hpos_acc(C_POS_BITS - 1) = '0' then
-                    hpos_acc <= hpos_acc + resize(s_size_step, C_POS_BITS);
+                    hpos_acc <= hpos_acc + resize(s_hstep, C_POS_BITS);
                 end if;
             end if;
 
@@ -656,24 +694,69 @@ begin
                 if v_act = s_v_origin then
                     vpos_acc <= (others => '0');
                 elsif vpos_acc(C_POS_BITS - 1) = '0' then
-                    vpos_acc <= vpos_acc + resize(s_size_step, C_POS_BITS);
+                    vpos_acc <= vpos_acc + resize(s_vstep, C_POS_BITS);
                 end if;
             end if;
         end if;
     end process p_pipeline_s1;
 
     --==========================================================================
+    -- Timing-ID class (free-running, registered: kept out of the sequencer's
+    -- cones).  Virtual raster 1920x1080 (HD) / 1440x1080 (SD, a 4:3 window).
+    --==========================================================================
+    p_tclass : process(clk)
+    begin
+        if rising_edge(clk) then
+            s_t1080p <= '0';
+            case to_integer(unsigned(registers_in(8)(3 downto 0))) is
+                when 0 =>            -- 480i: 2 x 1080/486 per field line
+                    s_tx <= "10";
+                    s_ys2 <= to_unsigned(569, 10);  s_inv_ys <= to_unsigned(921, 13);
+                when 4 =>            -- 480p
+                    s_tx <= "10";
+                    s_ys2 <= to_unsigned(288, 10);  s_inv_ys <= to_unsigned(1820, 13);
+                when 8 =>            -- 576i
+                    s_tx <= "10";
+                    s_ys2 <= to_unsigned(480, 10);  s_inv_ys <= to_unsigned(1092, 13);
+                when 12 =>           -- 576p
+                    s_tx <= "10";
+                    s_ys2 <= to_unsigned(240, 10);  s_inv_ys <= to_unsigned(2185, 13);
+                when 5 | 6 | 14 =>   -- 720p: 1.5
+                    s_tx <= "01";
+                    s_ys2 <= to_unsigned(192, 10);  s_inv_ys <= to_unsigned(2731, 13);
+                when 1 | 2 | 10 =>   -- 1080i: 2.0 per field line
+                    s_tx <= "00";
+                    s_ys2 <= to_unsigned(256, 10);  s_inv_ys <= to_unsigned(2048, 13);
+                when others =>       -- 1080p: 1.0
+                    s_tx <= "00"; s_t1080p <= '1';
+                    s_ys2 <= to_unsigned(128, 10);  s_inv_ys <= to_unsigned(4096, 13);
+            end case;
+            case s_tx is
+                when "00"   => s_inv_xs <= to_unsigned(4096, 13);
+                when "01"   => s_inv_xs <= to_unsigned(2731, 13);
+                when others => s_inv_xs <= to_unsigned(2048, 13);
+            end case;
+        end if;
+    end process p_tclass;
+
+    --==========================================================================
     -- Vblank sequencer: derives every per-frame geometry term from the
     -- measured raster and the knobs.
     --
-    --   chars   = meas_w >> 7          glyph scale at which one 16-char line
-    --                                  exactly fills the active width
-    --   smin    = max(1, chars >> 2)   Size at 0%   (small caption type)
-    --   smax    = min(32, chars * 2)   Size at 100% (hero type, ~8 chars
+    -- All in VIRTUAL units (v2.2.3): W = meas_w * x-step (1920 HD, 1440 SD),
+    -- H = 1080 (meas_h at 1080p).  The scale range is the 1080p one in every
+    -- mode (chars = 1920 >> 7 = 15), so the Size knob is height-relative.
+    --   chars   = 15                   glyph scale at which one 16-char line
+    --                                  exactly fills a 1920-unit width
+    --   smin    = chars >> 2 = 3       Size at 0%   (small caption type)
+    --   smax    = chars * 2 = 30       Size at 100% (hero type, ~8 chars
     --                                  across the screen - the climax)
     --   scale   = smin + (Size * (smax - smin)) >> 10
-    --   cx      = (H Pos * meas_w) >> 10       text centre, active coords
-    --   cy      = (V Pos * meas_h) >> 10
+    --   cx      = (H Pos * W) >> 10    text centre
+    --   cy      = (V Pos * H) >> 10
+    -- The left/top edges are converted to real pixels / field lines at the
+    -- end (x inv_xs, x inv_ys, Q12 -- exact at 1080p); the accumulators step
+    -- size_step * x-step per pixel and size_step * y-step per field line.
     --
     -- Crawl (P12, bipolar):
     --   d       = max(0, |P12 - 512| - 24)     +-24 deadband holds it still
@@ -705,9 +788,6 @@ begin
     --==========================================================================
     p_sequencer : process(clk)
         variable v_vs_falling : std_logic;
-        variable v_chars      : unsigned(5 downto 0);
-        variable v_smax       : unsigned(6 downto 0);
-        variable v_smin       : unsigned(5 downto 0);
         variable v_half_h     : unsigned(12 downto 0);
         variable v_cy         : unsigned(12 downto 0);
         variable v_dev        : unsigned(8 downto 0);
@@ -744,22 +824,21 @@ begin
                     end if;
 
                 when SM_RANGE =>
-                    -- Scale range from the measured active width.
-                    v_chars := resize(shift_right(meas_w, 7), 6);
-                    if v_chars < 4 then
-                        v_smin := to_unsigned(1, 6);
+                    -- Scale range: the 1080p one (chars = 15) in every mode,
+                    -- so Size is relative to the screen height.  Virtual
+                    -- width / height for the layout terms.
+                    sq_smin   <= to_unsigned(3, 6);
+                    sq_srange <= to_unsigned(27, 6);
+                    case s_tx is
+                        when "00"   => sq_wv <= meas_w;
+                        when "01"   => sq_wv <= meas_w + shift_right(meas_w, 1);
+                        when others => sq_wv <= shift_left(meas_w, 1);
+                    end case;
+                    if s_t1080p = '1' then
+                        sq_hv <= meas_h;
                     else
-                        v_smin := resize(shift_right(v_chars, 2), 6);
+                        sq_hv <= to_unsigned(1080, 12);
                     end if;
-                    v_smax := shift_left(resize(v_chars, 7), 1);
-                    if v_smax > to_unsigned(C_SCALE_MAX, 7) then
-                        v_smax := to_unsigned(C_SCALE_MAX, 7);
-                    end if;
-                    if v_smax <= resize(v_smin, 7) then
-                        v_smax := resize(v_smin, 7) + 1;
-                    end if;
-                    sq_smin   <= v_smin;
-                    sq_srange <= resize(v_smax - resize(v_smin, 7), 6);
                     sm_state  <= SM_MUL_S;
 
                 when SM_MUL_S =>
@@ -779,20 +858,26 @@ begin
                 when SM_MUL_CX =>
                     -- sq_scale is valid now; latch the step and the extents.
                     s_size_step <= C_STEP_LUT(to_integer(sq_scale));
-                    mul_a    <= resize(meas_w, 24);
+                    mul_a    <= resize(sq_wv, 24);
                     mul_b    <= resize(s_h_pos, 13);
                     mul_acc  <= (others => '0');
                     mul_cnt  <= to_unsigned(10, 4);
                     sm_state <= SM_CX;
 
                 when SM_CX =>
+                    -- x accumulator step = size_step * x-step
+                    case s_tx is
+                        when "00"   => s_hstep <= s_size_step;
+                        when "01"   => s_hstep <= s_size_step + shift_right(s_size_step, 1);
+                        when others => s_hstep <= shift_left(s_size_step, 1);
+                    end case;
                     if mul_cnt = 0 then
                         sq_cx    <= resize(shift_right(mul_acc, 10), 12);
                         sm_state <= SM_MUL_CY;
                     end if;
 
                 when SM_MUL_CY =>
-                    mul_a    <= resize(meas_h, 24);
+                    mul_a    <= resize(sq_hv, 24);
                     mul_b    <= resize(s_v_pos, 13);
                     mul_acc  <= (others => '0');
                     mul_cnt  <= to_unsigned(10, 4);
@@ -831,8 +916,8 @@ begin
                     end if;
 
                 when SM_PERIOD =>
-                    -- P = meas_w + 2*half_w = meas_w + scale*128.
-                    sq_period <= resize(meas_w, 14)
+                    -- P = W + 2*half_w = W + scale*128.
+                    sq_period <= resize(sq_wv, 14)
                                  + shift_left(resize(sq_scale, 14), 7);
                     sm_state  <= SM_CRAWL;
 
@@ -875,7 +960,7 @@ begin
                     sm_state <= SM_LWRAP;
 
                 when SM_LWRAP =>
-                    if sq_l >= signed(resize(meas_w, 15)) then
+                    if sq_l >= signed(resize(sq_wv, 15)) then
                         sq_l <= sq_l - signed(resize(sq_period, 15));
                     end if;
                     sm_state <= SM_ORIGIN;
@@ -884,12 +969,16 @@ begin
                     -- Horizontal: the left edge from the crawl.  L >= meas_w
                     -- can only happen while crawl_q is still converging after
                     -- a Size change - hide the text rather than wrap it.
-                    if sq_l >= signed(resize(meas_w, 15)) then
+                    -- (virtual units; a visible left edge is converted to
+                    -- pixels in SM_LX)
+                    sq_hpos <= '0';
+                    if sq_l >= signed(resize(sq_wv, 15)) then
                         s_h_origin <= (others => '1');   -- unreachable by h_act
                         hpos_init  <= (others => '1');   -- past-text sentinel
                         sq_hneg    <= '0';
                     elsif sq_l(14) = '0' then
-                        s_h_origin <= unsigned(sq_l(11 downto 0));
+                        sq_lv      <= unsigned(sq_l(11 downto 0));
+                        sq_hpos    <= '1';
                         hpos_init  <= (others => '1');
                         sq_hneg    <= '0';
                     else
@@ -903,7 +992,7 @@ begin
                                 + resize(sq_scale, 13);
                     v_cy     := resize(sq_cy, 13);
                     if v_cy >= v_half_h then
-                        s_v_origin <= resize(v_cy - v_half_h, 12);
+                        sq_ov      <= resize(v_cy - v_half_h, 12);  -- -> SM_OY
                         sq_vneg    <= '0';
                         sq_residue <= (others => '0');   -- divide exits at once
                     else
@@ -915,6 +1004,7 @@ begin
                     sm_state    <= SM_MUL_H;
 
                 when SM_MUL_H =>
+                    -- (|L| virtual units * size_step = |L| px * x step)
                     if sq_hneg = '1' then
                         v_neg    := -sq_l;               -- 1 .. 2*half_w
                         mul_a    <= resize(s_size_step, 24);
@@ -923,13 +1013,63 @@ begin
                         mul_cnt  <= to_unsigned(13, 4);
                         sm_state <= SM_H;
                     else
-                        sm_state <= SM_V_DIV;
+                        sm_state <= SM_MUL_LX;
                     end if;
 
                 when SM_H =>
                     if mul_cnt = 0 then
                         hpos_init <= mul_acc;
-                        sm_state  <= SM_V_DIV;
+                        sm_state  <= SM_MUL_LX;
+                    end if;
+
+                when SM_MUL_LX =>
+                    -- visible left edge: virtual -> pixels (x inv_xs, Q12)
+                    if sq_hpos = '1' then
+                        mul_a    <= resize(sq_lv, 24);
+                        mul_b    <= s_inv_xs;
+                        mul_acc  <= (others => '0');
+                        mul_cnt  <= to_unsigned(13, 4);
+                        sm_state <= SM_LX;
+                    else
+                        sm_state <= SM_MUL_OY;
+                    end if;
+
+                when SM_LX =>
+                    if mul_cnt = 0 then
+                        s_h_origin <= mul_acc(23 downto 12);
+                        sm_state   <= SM_MUL_OY;
+                    end if;
+
+                when SM_MUL_OY =>
+                    -- visible top edge: virtual -> field lines (x inv_ys, Q12)
+                    if sq_vneg = '0' then
+                        mul_a    <= resize(sq_ov, 24);
+                        mul_b    <= s_inv_ys;
+                        mul_acc  <= (others => '0');
+                        mul_cnt  <= to_unsigned(13, 4);
+                        sm_state <= SM_OY;
+                    else
+                        sm_state <= SM_MUL_VS;
+                    end if;
+
+                when SM_OY =>
+                    if mul_cnt = 0 then
+                        s_v_origin <= mul_acc(23 downto 12);
+                        sm_state   <= SM_MUL_VS;
+                    end if;
+
+                when SM_MUL_VS =>
+                    -- y accumulator step = size_step * y-step (Q.7 half step)
+                    mul_a    <= resize(s_size_step, 24);
+                    mul_b    <= resize(s_ys2, 13);
+                    mul_acc  <= (others => '0');
+                    mul_cnt  <= to_unsigned(10, 4);
+                    sm_state <= SM_VS;
+
+                when SM_VS =>
+                    if mul_cnt = 0 then
+                        s_vstep  <= mul_acc(C_STEP_BITS + 6 downto 7);
+                        sm_state <= SM_V_DIV;
                     end if;
 
                 when SM_V_DIV =>

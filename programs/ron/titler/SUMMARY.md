@@ -1,4 +1,4 @@
-# Titler — lo-res video character generator (v2.2.0)
+# Titler — lo-res video character generator (v2.2.3)
 
 ## What it does
 A 1980s/90s hardware character generator: two lines of 16 characters over
@@ -111,6 +111,43 @@ vblank.
 
 Presets (all load stopped except Ticker): Lower Third, News Bar, Hero Card,
 Video Fill, Sci-Fi Emboss, Ticker.
+
+## v2.2.3 — resolution scaling + label-index fix (2026-10-17)
+
+Also folds in community v2.2.2's K3 Style / K4 Color label-index fix: the
+firmware loads a labelled default as the label INDEX (0..7), so a register
+value below 8 selects that label instead of the bottom zone ("Black Edge" /
+"Yellow" opened as style/colour 0). Style is now registered in p_color_latch.
+Defaults hardware-captured by the community defaults pass.
+Build (v2.2.3, router2): HD Analog 81.31, SD Analog 77.59, HD HDMI 84.75
+(seed 2; seed 1 missed), SD HDMI 80.76, HD Dual 82.24, SD Dual 77.78 MHz;
+4010–4039 LC, 3 EBR. The v2.2.2 build numbers below are the scaling-only build.
+
+Size and layout now run in virtual 1080-line units from the video timing ID
+(`registers_in(8)`), so the text is the same size relative to the screen
+HEIGHT in every mode and glyphs keep their shape. Before, the Size range came
+from the measured width (`chars = meas_w >> 7`: 1..10 at SD, 2..20 at 720p)
+and one Bresenham step served both axes, so 480i glyphs were ~2x tall and
+narrow. Now:
+- the Size range is the 1080p one everywhere (glyph pixel 3..29 virtual
+  units); positions and the crawl are fractions of the virtual width
+  (1920 HD, 1440 SD = a 4:3 window) and height (1080);
+- the horizontal accumulator steps `size_step * x-step` per pixel (1, 1.5,
+  2), the vertical one `size_step * y-step` per field line (one serial
+  multiply per field); the left/top edges are converted to pixels / field
+  lines with one Q12 multiply each (exact at 1080p);
+- no bottom-field offset: core_top ties `field_n` high on every input, so
+  both interlaced fields render alike (SD is line-doubled); interlace is
+  taken from the timing ID only.
+
+1080p is bit-identical (sim diff 0 px); 720p matches 1080p (r 1.00), SD
+matches the 1080p 4:3 crop (r 1.00, field_n tied high as on hardware).
+Build (router2): HD Analog 79.61, SD Analog 82.38, HD HDMI 80.66, SD HDMI
+78.00, HD Dual 77.03 (all seed 1), **SD Dual 88.79 on seed 2** (seed 1
+stalled the router, timeout); 3996–4016/7680 LC, 3 EBR. HD Dual is the
+marginal config: an earlier build of the same logic needed seed 2 there
+(seed 1 73.98 MHz; a routing-bound data_in.avid -> hpos_acc enable path that
+predates this change).
 
 ## v2.2.0
 P12 became a real performance control: a bipolar news-ticker Crawl. Size

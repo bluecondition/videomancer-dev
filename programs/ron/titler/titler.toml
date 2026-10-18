@@ -8,7 +8,7 @@
 processing_delay_clks = 8
 program_id = "com.czartroniks.titler"
 program_name = "Titler"
-program_version = "2.2.2"
+program_version = "2.2.3"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
