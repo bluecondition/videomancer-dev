@@ -6,6 +6,20 @@
 --
 -- clacker.vhd  (v0.3 — video as a mechanical flip-disc wall)
 --
+-- v0.3.2 (2026-10-17): resolution scaling.  The cell lattice runs in virtual
+-- 1080-line units, stepped per pixel / per field line from the video timing
+-- ID (registers_in(8)): 1.0 at 1080p (identical to before), 1.5 at 720p, and
+-- at SD 2.0 across (a 1440-wide 4:3 window) and 1080/486 per frame line, so
+-- the discs keep the same size relative to the screen height and stay round
+-- on a 4:3 screen.  Interlace now comes from the timing ID: the old
+-- field_n-toggle detect never fired on hardware (core_top ties field_n high),
+-- so SD and 1080i discs came out 2:1 tall.  dx/dy, the disc radius and the
+-- shape test are all in virtual units; dy^2 is now one registered square per
+-- line (dy steps by a fractional amount, so the incremental form is gone).
+-- Cell-centre / first / last tests are crossing flags set by the counters.
+-- The 1-px bezel stays one pixel / one line.  Output is gated to neutral
+-- outside the latency-aligned avid (blanking contract).
+--
 -- v0.3: Fill tops out with the discs just touching (never overlapping); the
 -- rim bevel scales with face brightness so black discs no longer leave gray
 -- rings; K5 is now TILT — every disc rests leaned back (thinner and dimmer),
@@ -168,24 +182,73 @@ architecture clacker of program_top is
     constant C_AMB  : unsigned(7 downto 0) := to_unsigned( 47, 8);
 
     ----------------------------------------------------------------------------
+    -- Resolution scaling: per-mode steps from the video timing ID.
+    ----------------------------------------------------------------------------
+    -- x step in half virtual units per pixel: 1080 2 (1.0), 720p 3 (1.5),
+    -- SD 4 (2.0: 720 px span 1440 units, a 4:3 window of the 1080 canvas).
+    function f_vstep_x(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0 | 4 | 8 | 12 => return to_unsigned(4, 3);
+            when 5 | 6 | 14     => return to_unsigned(3, 3);
+            when others         => return to_unsigned(2, 3);
+        end case;
+    end function;
+    -- y step in Q4.8 virtual units per FIELD line (1080 / active lines,
+    -- doubled for interlaced modes).
+    function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(1138, 12);  -- 480i: 2 x 1080/486
+            when 4          => return to_unsigned(576, 12);   -- 480p: 1080/480
+            when 8          => return to_unsigned(960, 12);   -- 576i: 2 x 1080/576
+            when 12         => return to_unsigned(480, 12);   -- 576p: 1080/576
+            when 5 | 6 | 14 => return to_unsigned(384, 12);   -- 720p: 1.5
+            when 1 | 2 | 10 => return to_unsigned(512, 12);   -- 1080i: 2.0
+            when others     => return to_unsigned(256, 12);   -- 1080p: 1.0
+        end case;
+    end function;
+    -- interlaced timing (480i, 576i, 1080i)
+    function f_ilace(t : std_logic_vector(3 downto 0)) return std_logic is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0 | 8 | 1 | 2 | 10 => return '1';
+            when others             => return '0';
+        end case;
+    end function;
+
+    ----------------------------------------------------------------------------
     -- Raster position.
     ----------------------------------------------------------------------------
     signal prev_hsync_n : std_logic := '1';
     signal prev_vsync_n : std_logic := '1';
     signal r_hedge      : std_logic := '0';
 
-    signal x_loc     : unsigned(7 downto 0) := (others => '0');
+    -- Resolution scaling: the lattice counters run in virtual 1080-line
+    -- units.  x_la is Q.1 (half units; steps 2/3/4 = 1.0/1.5/2.0 per pixel),
+    -- cy_la Q.8 per FIELD line (interlace already folded into the step).  At
+    -- 1080p the integer parts are exactly the old x_loc / celly_loc.  The
+    -- flags replace the old equality tests, which a fractional step could
+    -- jump over: *_new = first pixel/line of a cell, *_last = last one,
+    -- *_ctr = first pixel/line at or past the cell centre (the sample point).
+    signal s_xs   : unsigned(2 downto 0)  := to_unsigned(2, 3);
+    signal s_ys   : unsigned(11 downto 0) := to_unsigned(256, 12);
+    signal s_ilm  : std_logic := '0';                  -- interlaced timing
+    signal s_wlx  : unsigned(8 downto 0)  := to_unsigned(160, 9);    -- 2W - xs
+    signal s_wly  : unsigned(15 downto 0) := to_unsigned(20480, 16); -- 256W - ys
+
+    signal x_la      : unsigned(8 downto 0) := (others => '0');
+    signal x_new     : std_logic := '1';
+    signal x_last    : std_logic := '0';
+    signal x_ctr     : std_logic := '0';
     signal x_idx     : unsigned(5 downto 0) := (others => '0');
-    signal celly_loc : unsigned(7 downto 0) := (others => '0');
+    signal cy_la     : unsigned(15 downto 0) := (others => '0');
+    signal cy_new    : std_logic := '1';
+    signal cy_last   : std_logic := '0';
+    signal cy_ctr    : std_logic := '0';
     signal celly_idx : unsigned(4 downto 0) := (others => '0');
     signal frame_act : std_logic := '0';
     signal fcnt      : unsigned(5 downto 0) := (others => '0');
-
-    -- Interlace detect (videosky pattern): field_n toggling across vsyncs =
-    -- interlaced.  Recomputed every vsync, so it self-clears on a mode change.
-    signal s_fprev : std_logic := '0';
-    signal s_ilace : std_logic := '0';
-    signal s_fodd  : std_logic := '0';
 
     -- Refresh wave: a single front sweeping top-down.  Its position is a
     -- FRACTION of the wall (wv_ph, Q16, wrapping for free), advanced by s_rate
@@ -208,16 +271,11 @@ architecture clacker of program_top is
     ----------------------------------------------------------------------------
     signal lk1, lk2, lk3, lk4, lk5, lk6, lp12 : unsigned(9 downto 0) := (others => '0');
 
-    signal s_w     : unsigned(7 downto 0) := to_unsigned(81, 8);    -- cell pitch (px)
-    signal s_wm1   : unsigned(7 downto 0) := to_unsigned(80, 8);
+    -- Cell pitch in virtual units (= px at 1080p).  Rows and columns share
+    -- it: the virtual canvas has square units at every mode, so the discs
+    -- stay round (the interlace halving lives in the y step).
+    signal s_w     : unsigned(7 downto 0) := to_unsigned(81, 8);    -- cell pitch
     signal s_wh    : unsigned(7 downto 0) := to_unsigned(40, 8);    -- W/2
-    signal s_hh    : unsigned(7 downto 0) := to_unsigned(40, 8);    -- half-height, SCREEN lines
-    -- Row pitch in FIELD lines: W progressive, W/2 interlaced (a 1080i field
-    -- carries every other screen line, so W/2 field lines = W screen lines and
-    -- the discs stay round instead of stretching 2:1).
-    signal s_rp    : unsigned(7 downto 0) := to_unsigned(81, 8);
-    signal s_rpm1  : unsigned(7 downto 0) := to_unsigned(80, 8);
-    signal s_rc    : unsigned(7 downto 0) := to_unsigned(40, 8);    -- centre (sample) line
     signal s_rfrac : unsigned(10 downto 0) := to_unsigned(1000, 11);
     signal s_r     : unsigned(7 downto 0) := to_unsigned(36, 8);    -- disc radius
     signal s_r2    : unsigned(13 downto 0) := to_unsigned(1296, 14);
@@ -261,16 +319,15 @@ architecture clacker of program_top is
     signal lg_d2    : unsigned(8 downto 0) := (others => '0');
 
     ----------------------------------------------------------------------------
-    -- Per-line dy and dy^2.  dy advances by exactly +1 per line, so the square
-    -- is updated incrementally at each h edge: (d+1)^2 = d^2 + 2(d+1) - 1.
-    -- The band-wrap reset value (H/2)^2 is precomputed per frame.  dy^2 is a
-    -- line constant, so the pixel path reads it directly — it settles during the
-    -- back porch, long before the first active pixel.
+    -- Per-line dy and dy^2 (virtual units).  dy = row position - W/2 is taken
+    -- after each h edge and squared by one registered 7x7 multiply (|dy| <=
+    -- 81); dy^2 is a line constant, so the pixel path reads it directly — it
+    -- settles a few clocks into the h-blank, long before the first active
+    -- pixel.
     ----------------------------------------------------------------------------
-    signal lm_dy : signed(8 downto 0) := (others => '0');
-    signal dyq_r : unsigned(15 downto 0) := (others => '0');
-    signal hh2q  : unsigned(15 downto 0) := (others => '0');     -- (H/2)^2
-    signal hh2qo : unsigned(15 downto 0) := (others => '0');     -- (H/2 - 1)^2, odd field
+    signal lm_dy  : signed(8 downto 0) := (others => '0');
+    signal lm_ady : unsigned(6 downto 0) := (others => '0');
+    signal dyq_r  : unsigned(15 downto 0) := (others => '0');
 
     ----------------------------------------------------------------------------
     -- Cell grid (canonical 1W1R, registered read, pre-muxed write word) and the
@@ -416,6 +473,9 @@ begin
     p_position : process(clk)
         variable v_h_edge, v_v_edge : std_logic;
         variable v_trig : std_logic;
+        variable v_nx   : unsigned(8 downto 0);
+        variable v_ny   : unsigned(15 downto 0);
+        variable v_yoff : unsigned(15 downto 0);
     begin
         if rising_edge(clk) then
             prev_hsync_n <= data_in.hsync_n;
@@ -432,55 +492,111 @@ begin
             -- only the first edge after active video still sees set.
             if v_v_edge = '1' and frame_act = '1' then
                 fcnt    <= fcnt + 1;
-                s_fprev <= data_in.field_n;
-                s_ilace <= data_in.field_n xor s_fprev;
-                s_fodd  <= data_in.field_n;
                 -- advance the refresh wave (h0/h1 follow in the frame FSM)
                 wv_ph0  <= wv_ph;
                 wv_ph   <= wv_ph + s_rate(15 downto 0);
                 s_nrows <= nrows_meas;
             end if;
 
+            -- Per-mode lattice steps (idempotent: safe under serration).
+            -- Interlace comes from the timing ID only — core_top ties
+            -- field_n high, so a field_n toggle never shows on hardware.
+            if v_v_edge = '1' then
+                s_xs  <= f_vstep_x(registers_in(8)(3 downto 0));
+                s_ys  <= f_vstep_y(registers_in(8)(3 downto 0));
+                s_ilm <= f_ilace(registers_in(8)(3 downto 0));
+            end if;
+
             -- row count = rows whose centre line (the sample line) is on
             -- screen; captured on active lines, never at vsync
-            if data_in.avid = '1' and frame_act = '1' and celly_loc = s_rc then
+            if data_in.avid = '1' and frame_act = '1' and cy_ctr = '1' then
                 nrows_meas <= resize(celly_idx, 6) + 1;
             end if;
 
-            -- X lattice
+            -- X lattice (virtual units, Q.1)
             if v_h_edge = '1' then
-                x_loc <= (others => '0');
-                x_idx <= (others => '0');
+                x_la   <= (others => '0');
+                x_idx  <= (others => '0');
+                x_new  <= '1';
+                x_last <= '0';
+                x_ctr  <= '0';
             elsif data_in.avid = '1' then
-                if x_loc = s_wm1 then
-                    x_loc <= (others => '0');
+                v_nx := x_la + s_xs;
+                if v_nx(8 downto 1) >= s_w then
+                    x_la   <= v_nx - (s_w & '0');
+                    x_new  <= '1';
+                    x_last <= '0';
+                    x_ctr  <= '0';
                     if x_idx /= C_MAXCOL - 1 then
                         x_idx <= x_idx + 1;
                     end if;
                 else
-                    x_loc <= x_loc + 1;
+                    x_la  <= v_nx;
+                    x_new <= '0';
+                    if v_nx >= s_wlx then
+                        x_last <= '1';
+                    else
+                        x_last <= '0';
+                    end if;
+                    if v_nx(8 downto 1) >= s_wh and x_la(8 downto 1) < s_wh then
+                        x_ctr <= '1';
+                    else
+                        x_ctr <= '0';
+                    end if;
                 end if;
             end if;
 
-            -- Y row counter, anchored to the first active line of the field.
-            -- Cells are square on SCREEN; the row pitch in field lines (s_rp)
-            -- is halved when the source is interlaced.
+            -- Y row counter (virtual units, Q.8 per field line), anchored to
+            -- the first active line of the field.  The bottom field of an
+            -- interlaced mode starts half a field step (one frame line) down
+            -- — inert on hardware, where field_n is tied high.
+            if s_ilm = '1' and data_in.field_n = '0' then
+                v_yoff := resize(s_ys(11 downto 1), 16);
+            else
+                v_yoff := (others => '0');
+            end if;
             if v_v_edge = '1' then
-                celly_loc <= (others => '0');
+                cy_la     <= v_yoff;
+                cy_new    <= '1';
+                cy_last   <= '0';
+                cy_ctr    <= '0';
                 celly_idx <= (others => '0');
                 frame_act <= '0';
             elsif data_in.avid = '1' and frame_act = '0' then
                 frame_act <= '1';
-                celly_loc <= (others => '0');
+                cy_la     <= v_yoff;
+                cy_new    <= '1';
+                cy_last   <= '0';
+                cy_ctr    <= '0';
                 celly_idx <= (others => '0');
-            elsif v_h_edge = '1' and frame_act = '1' then
-                if celly_loc = s_rpm1 then
-                    celly_loc <= (others => '0');
-                    if celly_idx /= C_MAXROW - 1 then
-                        celly_idx <= celly_idx + 1;
+            elsif v_h_edge = '1' then
+                if frame_act = '1' then
+                    v_ny := cy_la + s_ys;
+                    if v_ny(15 downto 8) >= s_w then
+                        cy_la   <= v_ny - (s_w & x"00");
+                        cy_new  <= '1';
+                        cy_last <= '0';
+                        cy_ctr  <= '0';
+                        if celly_idx /= C_MAXROW - 1 then
+                            celly_idx <= celly_idx + 1;
+                        end if;
+                    else
+                        cy_la  <= v_ny;
+                        cy_new <= '0';
+                        if v_ny >= s_wly then
+                            cy_last <= '1';
+                        else
+                            cy_last <= '0';
+                        end if;
+                        if v_ny(15 downto 8) >= s_wh and cy_la(15 downto 8) < s_wh then
+                            cy_ctr <= '1';
+                        else
+                            cy_ctr <= '0';
+                        end if;
                     end if;
                 else
-                    celly_loc <= celly_loc + 1;
+                    -- v-blank: hold at this field's start offset
+                    cy_la <= v_yoff;
                 end if;
             end if;
 
@@ -515,7 +631,7 @@ begin
             -- slow the wave, no settled disc's age can wrap into a re-flip.
             v_trig := '0';
             if data_in.avid = '1' and frame_act = '1'
-               and celly_loc = s_rc and x_loc = s_wh then
+               and cy_ctr = '1' and x_ctr = '1' then
                 v_trig := '1';
             end if;
 
@@ -669,7 +785,7 @@ begin
                 bst_d2 <= '0';
                 gw_en  <= '0';
                 if r_hedge = '1' and pend = '1'
-                   and (celly_loc = 0 or data_in.vsync_n = '0') then
+                   and (cy_new = '1' or data_in.vsync_n = '0') then
                     bst_run <= '1';
                     bst_cnt <= (others => '0');
                     bst_row <= pend_row;
@@ -770,47 +886,20 @@ begin
     end process p_grid;
 
     ----------------------------------------------------------------------------
-    -- Per-line dy^2, updated incrementally (adds only) after each h edge.
+    -- Per-line dy^2 (virtual units): dy after each h edge (the row counter has
+    -- already moved to the new line), |dy|, then one registered square.  All
+    -- three settle within 3 clocks of the h edge, deep inside the h-blank.
     ----------------------------------------------------------------------------
     p_line : process(clk)
-        -- sq(d+1) = sq(d) + 2*dnew - 1
-        function upd1(sq : unsigned(15 downto 0); dn : signed(8 downto 0))
-            return unsigned is
-            variable v : signed(17 downto 0);
-        begin
-            v := signed(resize(sq, 18)) + resize(dn & '0', 18) - 1;
-            return unsigned(v(15 downto 0));
-        end function;
-        -- sq(d+2) = sq(d) + 4*dnew - 4  (interlaced: dy steps 2 screen lines
-        -- per field line — still adds only, no multiplier for STA to time)
-        function upd2(sq : unsigned(15 downto 0); dn : signed(8 downto 0))
-            return unsigned is
-            variable v : signed(17 downto 0);
-        begin
-            v := signed(resize(sq, 18)) + resize(dn & "00", 18) - 4;
-            return unsigned(v(15 downto 0));
-        end function;
+        variable v_ad : signed(8 downto 0);
     begin
         if rising_edge(clk) then
             if r_hedge = '1' then
-                if celly_loc = 0 then
-                    -- band wrap.  Odd interlaced fields start one SCREEN line
-                    -- down, so the two fields interleave into one round disc.
-                    if s_ilace = '1' and s_fodd = '1' then
-                        lm_dy <= -signed(resize(s_hh, 9)) + 1;
-                        dyq_r <= hh2qo;
-                    else
-                        lm_dy <= -signed(resize(s_hh, 9));
-                        dyq_r <= hh2q;
-                    end if;
-                elsif s_ilace = '1' then
-                    lm_dy <= lm_dy + 2;
-                    dyq_r <= upd2(dyq_r, lm_dy + 2);
-                else
-                    lm_dy <= lm_dy + 1;
-                    dyq_r <= upd1(dyq_r, lm_dy + 1);
-                end if;
+                lm_dy <= signed('0' & cy_la(15 downto 8)) - signed('0' & s_wh);
             end if;
+            v_ad   := abs(lm_dy);
+            lm_ady <= unsigned(v_ad(6 downto 0));
+            dyq_r  <= resize(lm_ady * lm_ady, 16);
         end if;
     end process p_line;
 
@@ -887,9 +976,12 @@ begin
                             s_perp <= '0';
                         end if;
                     when 1 =>
-                        s_wm1 <= s_w - 1;
                         s_wh  <= '0' & s_w(7 downto 1);
                         s_r15 <= R15_ROM(to_integer(s_nlev) - 2);
+                        -- last-pixel / last-line thresholds: the NEXT step
+                        -- would wrap (1080p: W-1, as before)
+                        s_wlx <= (s_w & '0') - resize(s_xs, 9);
+                        s_wly <= (s_w & x"00") - resize(s_ys, 16);
 
                         -- 17 * (64 + f); 64 + f is just f with bit 6 set
                         v_m := resize('1' & s_rv(9 downto 4), 13);
@@ -897,13 +989,6 @@ begin
 
                         ma <= signed(resize(s_w, 12));
                         mb <= signed(resize(s_rfrac, 12));
-
-                        -- row pitch in field lines: W/2 when interlaced
-                        if s_ilace = '1' then
-                            s_rp <= '0' & s_w(7 downto 1);
-                        else
-                            s_rp <= s_w;
-                        end if;
 
                         -- s_spd settled at t=0; rebuild the swing-curve table
                         lg_start <= '1';
@@ -916,9 +1001,6 @@ begin
                             when 4      => s_rate <= shift_left(resize(s_rb, 17), 4);
                             when others => s_rate <= shift_left(resize(s_rb, 17), 5);
                         end case;
-                        s_hh   <= s_wh;
-                        s_rpm1 <= s_rp - 1;
-                        s_rc   <= '0' & s_rp(7 downto 1);
                     when 3 =>
                         -- a wall or more per frame, or the top band = every
                         -- row every frame
@@ -934,15 +1016,9 @@ begin
                         else
                             s_r <= unsigned(mp(18 downto 11));
                         end if;
-                        ma <= signed(resize(s_hh, 12));
-                        mb <= signed(resize(s_hh, 12));
                     when 7 =>
-                        hh2q <= unsigned(mp(15 downto 0));
                         ma <= signed(resize(s_r, 12));
                         mb <= signed(resize(s_r, 12));
-                    when 8 =>
-                        -- (H/2 - 1)^2 = (H/2)^2 - H + 1, adds only
-                        hh2qo <= hh2q - resize(s_hh & '0', 16) + 1;
                     when 10 =>
                         s_r2 <= unsigned(mp(13 downto 0));
                         -- wave rows: h = floor(phase * nrows)
@@ -987,13 +1063,12 @@ begin
             ------------------------------------------------------------------
             -- c1: local dx, grid address, bezel flag.
             ------------------------------------------------------------------
-            g0_dx   <= signed(resize(x_loc, 8)) - signed(resize(s_wh, 8));
+            -- (dx wraps mod 256 like before; the true value is in -81..80)
+            g0_dx   <= signed(x_la(8 downto 1)) - signed(s_wh);
             g0_addr <= celly_idx & x_idx;
-            if x_loc = 0 or x_loc = s_wm1 or celly_loc = 0 or celly_loc = s_rpm1 then
-                g0_bez <= '1';
-            else
-                g0_bez <= '0';
-            end if;
+            -- bezel: first/last pixel and first/last line of the cell (a
+            -- 1-px rule, so it stays one pixel / one line at every mode)
+            g0_bez  <= x_new or x_last or cy_new or cy_last;
 
             -- c2: dx^2  (the grid read of g0_addr lands in rd_w this cycle)
             p2_dxq <= resize(unsigned(g0_dx * g0_dx), 16);
@@ -1211,7 +1286,12 @@ begin
             ------------------------------------------------------------------
             -- output: bypass mux + sync attach
             ------------------------------------------------------------------
-            if s_bypass = '1' then
+            if pipe(LATENCY - 1).avid = '0' then
+                -- blanking contract: neutral outside the aligned avid
+                s_io.y <= std_logic_vector(to_unsigned(64, 10));
+                s_io.u <= std_logic_vector(C_MID);
+                s_io.v <= std_logic_vector(C_MID);
+            elsif s_bypass = '1' then
                 s_io.y <= pipe(LATENCY - 1).y;
                 s_io.u <= pipe(LATENCY - 1).u;
                 s_io.v <= pipe(LATENCY - 1).v;

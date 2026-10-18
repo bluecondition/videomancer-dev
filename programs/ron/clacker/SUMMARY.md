@@ -1,4 +1,32 @@
-# Clacker — video as a mechanical flip-disc wall (v0.3.0)
+# Clacker — video as a mechanical flip-disc wall (v0.3.2)
+
+**v0.3.2 (resolution scaling, 2026-10-17):** the cell pitch was fixed pixels,
+so discs were 1.5x bigger relative to the screen at 720p and 2x at SD. And
+the interlace correction keyed on field_n toggling, which never happens on
+hardware (core_top ties field_n high), so SD and 1080i discs came out 2:1
+tall on hardware (the old sims toggled field_n and hid it).
+- The lattice now runs in virtual 1080-line units, stepped per pixel / per
+  field line from the timing ID (`registers_in(8)`, mondrian's
+  `f_vstep_x/f_vstep_y`): x_la Q.1, cy_la Q.8. Interlace comes from the timing
+  ID only (folded into the y step). dx, dy, r and the shape test are all
+  virtual, so discs keep their size relative to screen height and stay round
+  on a 4:3 SD screen. The grid spans the same 32 rows at every mode, 56
+  columns at 1080p/720p and 42 at SD (the left 1440-unit window). The column
+  and row limits (64 x 32) don't grow.
+- The `loc = 0 / W-1 / centre` equality tests became crossing flags set by
+  the counters (`x_new/x_last/x_ctr`, `cy_new/cy_last/cy_ctr`). These drive
+  the sample point, the commit burst and the 1-px bezel. The bezel stays one
+  pixel / one line.
+- dy^2: the incremental adds-only update needs a fixed +1/+2 step. It is now
+  `|dy|` -> one registered 7x7 square per line, settled 3 clocks after the h
+  edge. The `(H/2)^2` frame-FSM products and the field_n detect are gone.
+- Blanking contract fix: y/u/v are gated to 64/512/512 outside the
+  latency-aligned avid. Before this, the h/v-blank carried whatever disc or
+  panel pixel the frozen counters pointed at.
+- 1080p is bit-identical to v0.3.1 (diff1080: 0 differing pixels).
+- Build `./build_programs.sh ron clacker` (router2, base seed 1). Routed:
+  HD Analog 79.70 (seed 1), HD HDMI 77.39 (seed 2), HD Dual 76.16 (seed 2),
+  SD 79.07/83.61/78.55 (seed 1). 5894-5904 LC (76%, -76 vs v0.3.0), 10 EBR.
 
 **v0.3.0 (finalizing pass, 2026-09-27, from HW feedback):**
 - **K3 Fill** now reads disc DIAMETER as % of the cell, 50..100% — 100% = just
