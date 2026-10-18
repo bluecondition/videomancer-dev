@@ -6,6 +6,21 @@
 --
 -- hypnos.vhd  (v1.0 -- razor-sharp op-art rings: circle / square / hexagon / flower)
 --
+-- v1.0.4 (2026-10-17): resolution scaling.  The engine keeps working in real
+-- pixels across a line (so the 1-px box-filter AA stays exactly one pixel),
+-- and the per-mode scale is folded into per-mode constants from the video
+-- timing ID (registers_in(8)): the line step dy is in those same x-pixel
+-- units (720p 1.0, 480i 2.22 per field line, 1080i 2.0, ...; Q.8, rounded),
+-- the measured height follows it, and the log distance becomes the 1080-line
+-- one by an additive log2(s) (s = x step: 1.5 at 720p, 2 at SD), folded into
+-- the LREF subtract (Q14, exact), plus log2(s) on the radial AA gradient
+-- (now per pixel again).  Ring period, warp and centre follow screen height,
+-- rings stay round on a 4:3 SD screen, and interlace is taken from the
+-- timing ID (field_n is tied high on hardware, so the old field_n toggle
+-- test never saw it and SD rendered 2:1 tall).  1080p is unchanged (apart
+-- from the first frame after power-up, which the old toggle test briefly
+-- took for an interlaced field).
+--
 -- 1960s op-art target: Vasarely / Bridget Riley / the Vertigo spiral.  No input
 -- video.  Everything happens in the LOG domain -- no CORDIC:
 --
@@ -644,12 +659,20 @@ architecture hypnos of program_top is
     -- raster measurement + generated avid
     ----------------------------------------------------------------------
     signal s_xcnt  : unsigned(11 downto 0) := (others => '0');
-    signal s_lcnt  : unsigned(11 downto 0) := (others => '0');
     signal s_W     : unsigned(11 downto 0) := to_unsigned(720, 12);
     signal s_Wl    : unsigned(11 downto 0) := to_unsigned(720, 12);
     signal s_H     : unsigned(11 downto 0) := to_unsigned(480, 12);
-    signal s_ilace : std_logic := '0';
-    signal s_fpar  : std_logic := '0';
+    -- resolution scaling: field-line step in x-pixel units (Q.8) and the
+    -- mode class (00 1080 / 01 720p / 10 SD), decoded from the timing ID;
+    -- s_lacc counts field lines in those units (its integer part = s_H)
+    signal s_ystp  : unsigned(9 downto 0) := to_unsigned(256, 10);
+    signal s_mcls  : std_logic_vector(1 downto 0) := "00";
+    signal s_lacc  : unsigned(19 downto 0) := (others => '0');
+    -- log2(s) per mode: s_lref = LREF - log2(s) (Q14) turns the pixel log
+    -- distance into the 1080-line one; s_ls6 = log2(s) (Q6) converts the
+    -- radial gradient back to cycles per pixel
+    signal s_lref  : signed(19 downto 0) := to_signed(C_LREF, 20);
+    signal s_ls6   : unsigned(6 downto 0) := (others => '0');
     signal s_avid_q, s_avid_r : std_logic := '0';
     signal s_hs_q, s_hs_r     : std_logic := '0';
     signal g_ph, g_arm, g_par, g_sel, g_avid : std_logic := '0';
@@ -658,7 +681,8 @@ architecture hypnos of program_top is
     signal g_cnt   : unsigned(11 downto 0) := (others => '0');
 
     -- coordinate accumulators
-    signal s_dx, s_dyb, s_dyc : signed(14 downto 0) := (others => '0');
+    signal s_dx, s_dyc : signed(14 downto 0) := (others => '0');
+    signal s_dyb      : signed(22 downto 0) := (others => '0');   -- next line's dy, Q.8
     signal s_gav_p    : std_logic := '0';
     signal s_newframe : std_logic := '1';
 
@@ -890,6 +914,25 @@ begin
             s_hs_q   <= data_in.hsync_n;
             s_hs_r   <= s_hs_q and not data_in.hsync_n;
 
+            -- per-mode steps (the timing ID is static while a mode runs).
+            -- s_ystp = virtual 1080-line step per FIELD line / x step, i.e.
+            -- the line pitch in x-pixel units (interlace doubles it).
+            case to_integer(unsigned(registers_in(8)(3 downto 0))) is
+                when 0          => s_ystp <= to_unsigned(569, 10); s_mcls <= "10";  -- 480i
+                when 4          => s_ystp <= to_unsigned(288, 10); s_mcls <= "10";  -- 480p
+                when 8          => s_ystp <= to_unsigned(480, 10); s_mcls <= "10";  -- 576i
+                when 12         => s_ystp <= to_unsigned(240, 10); s_mcls <= "10";  -- 576p
+                when 5 | 6 | 14 => s_ystp <= to_unsigned(256, 10); s_mcls <= "01";  -- 720p
+                when 1 | 2 | 10 => s_ystp <= to_unsigned(512, 10); s_mcls <= "00";  -- 1080i
+                when others     => s_ystp <= to_unsigned(256, 10); s_mcls <= "00";  -- 1080p
+            end case;
+            -- log2(s): SD 1 octave, 720p log2(1.5) = 0.585 (Q14 9585, Q6 37)
+            case s_mcls is
+                when "10"   => s_lref <= to_signed(C_LREF - 16384, 20); s_ls6 <= to_unsigned(64, 7);
+                when "01"   => s_lref <= to_signed(C_LREF - 9585, 20);  s_ls6 <= to_unsigned(37, 7);
+                when others => s_lref <= to_signed(C_LREF, 20);         s_ls6 <= (others => '0');
+            end case;
+
             if data_in.avid = '1' then
                 s_xcnt <= s_xcnt + 1;
             elsif s_avid_q = '1' then                 -- avid just fell
@@ -898,14 +941,14 @@ begin
                     s_W <= s_xcnt;
                 end if;
                 s_xcnt <= (others => '0');
-                s_lcnt <= s_lcnt + 1;
+                s_lacc <= s_lacc + s_ystp;
             end if;
             if s_vs_pulse = '1' then
-                if s_lcnt > 8 then
-                    if s_ilace = '1' then s_H <= shift_left(s_lcnt, 1);
-                    else                  s_H <= s_lcnt; end if;
+                -- field height in x-pixel units (1080p: the line count)
+                if s_lacc(19 downto 8) > 8 then
+                    s_H <= s_lacc(19 downto 8);
                 end if;
-                s_lcnt <= (others => '0');
+                s_lacc <= (others => '0');
             end if;
 
             if s_hs_r = '1' then
@@ -988,10 +1031,6 @@ begin
                 s_inv    <= registers_in(6)(4);            -- S11 Invert
                 s_Wl     <= s_W;
 
-                s_fpar <= data_in.field_n;
-                if data_in.field_n /= s_fpar then s_ilace <= '1';
-                else                              s_ilace <= '0'; end if;
-
                 s_seq <= to_unsigned(52, 6);
 
             elsif s_ssh /= 0 then                     -- speed = mantissa << octave, 1 bit per clock
@@ -1069,6 +1108,9 @@ begin
                         s_vneg <= v_v(10);
                         s_av <= unsigned(resize(abs(v_v), 10));
                     when 8 =>
+                        -- RESOLUTION: radial gradient per pixel = per 1080-line
+                        -- unit + log2(s)
+                        s_a0 <= s_a0 + signed(resize(s_ls6, 12));
                         if s_av < 24 then s_vzero <= '1'; s_u <= (others => '0');
                         else              s_vzero <= '0'; s_u <= s_av - 24; end if;
                     when 7 =>
@@ -1132,10 +1174,12 @@ begin
     ------------------------------------------------------------------------
     -- coordinate accumulators on the GENERATED avid.  dx loads -cx at each
     -- line start and steps per pixel; dy seeds at the first line of the frame
-    -- and steps per line (by 2 interlaced; bottom field = field_n '0' = +1).
+    -- and steps per line by s_ystp (Q.8 x-pixel units: 1080p exactly 1, so
+    -- the integer part is the old counter; others rounded by the +0.5 seed).
+    -- (field_n is tied high on hardware, so there is no bottom-field seed.)
     ------------------------------------------------------------------------
     p_acc : process(clk)
-        variable v_dy0 : signed(14 downto 0);
+        variable v_dy0 : signed(22 downto 0);
     begin
         if rising_edge(clk) then
             s_gav_p <= g_avid;
@@ -1143,14 +1187,14 @@ begin
                 s_newframe <= '1';
             elsif g_avid = '1' and s_gav_p = '0' then
                 if s_newframe = '1' then
-                    if s_ilace = '1' and data_in.field_n = '0' then v_dy0 := resize(-s_cy, 15) + 1;
-                    else                                            v_dy0 := resize(-s_cy, 15); end if;
-                    s_dyc <= v_dy0;
-                    if s_ilace = '1' then s_dyb <= v_dy0 + 2; else s_dyb <= v_dy0 + 1; end if;
+                    v_dy0 := shift_left(resize(-s_cy, 23), 8);
+                    v_dy0(7) := '1';                                   -- +0.5
+                    s_dyc <= v_dy0(22 downto 8);
+                    s_dyb <= v_dy0 + signed(resize(s_ystp, 23));
                     s_newframe <= '0';
                 else
-                    s_dyc <= s_dyb;
-                    if s_ilace = '1' then s_dyb <= s_dyb + 2; else s_dyb <= s_dyb + 1; end if;
+                    s_dyc <= s_dyb(22 downto 8);
+                    s_dyb <= s_dyb + signed(resize(s_ystp, 23));
                 end if;
                 s_dx <= resize(-s_cx, 15);
             elsif g_avid = '1' then
@@ -1321,7 +1365,8 @@ begin
         if rising_edge(clk) then
             -- S16
             s16_t6 <= shift_left(s15_th, 2) + shift_left(s15_th, 1);          -- 6 theta mod turn
-            s16_ld <= signed(resize(s15_ld, 20)) - C_LREF;
+            -- log2 d - LREF in 1080-line units: s_lref = LREF - log2(s)
+            s16_ld <= signed(resize(s15_ld, 20)) - s_lref;
             vsp := bmul(signed(resize(s15_th, 19)), s_arms);
             s16_sp <= unsigned(vsp(17 downto 0));                              -- arms*theta mod 1 cycle
             -- angular gradient log2(arms/(2 pi r)) = larm - log2 r  (Q6)
