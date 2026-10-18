@@ -6,6 +6,17 @@
 --
 -- videosky.vhd  (v1.0 -- the picture cut into a copper line-screen)
 --
+-- v1.0.2 (2026-10-17): resolution scaling.  The screen phase now advances in
+-- virtual 1080-line units: the per-pixel steps are scaled by the timing ID's
+-- x step (1 / 1.5 / 2 at 1080 / 720p / SD) and the per-line steps by its y
+-- step per FIELD line (1 / 1.5 / 4.44 at 1080p / 720p / 480i), resolved in
+-- vblank with a serial shift-add multiply, so the rule pitch, waver and cross
+-- keep their size relative to screen height at every resolution.  Thin rules:
+-- off 1080p, a rule that is whole at 1080p (weight >= the 1080p per-sample
+-- phase advance) is floored at this mode's per-sample advance (capped at half
+-- a period), so it cannot vanish between SD/720p samples.  1080p is
+-- bit-identical; latency unchanged (8).
+--
 -- Lifted out of PENROSE, whose "Video Sky" switch engraved the incoming video
 -- into the sky behind the impossible staircase.  That was eight lines of code:
 -- horizontal rules at a fixed 8-pixel pitch, each rule's thickness set by the
@@ -122,6 +133,57 @@ architecture videosky of program_top is
         end if;
     end function;
 
+    -- Resolution scaling: per-mode steps from the video timing ID.
+    -- x step in half virtual units per pixel: 1080 2 (1.0), 720p 3 (1.5),
+    -- SD 4 (2.0: 720 px span 1440 units, a 4:3 window of the 1080 canvas).
+    function f_vstep_x(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0 | 4 | 8 | 12 => return to_unsigned(4, 3);
+            when 5 | 6 | 14     => return to_unsigned(3, 3);
+            when others         => return to_unsigned(2, 3);
+        end case;
+    end function;
+    -- y step in Q4.8 virtual units per FIELD line (1080 / active lines,
+    -- doubled for interlaced modes).
+    function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(1138, 12);  -- 480i: 2 x 1080/486
+            when 4          => return to_unsigned(576, 12);   -- 480p: 1080/480
+            when 8          => return to_unsigned(960, 12);   -- 576i: 2 x 1080/576
+            when 12         => return to_unsigned(480, 12);   -- 576p: 1080/576
+            when 5 | 6 | 14 => return to_unsigned(384, 12);   -- 720p: 1.5
+            when 1 | 2 | 10 => return to_unsigned(512, 12);   -- 1080i: 2.0
+            when others     => return to_unsigned(256, 12);   -- 1080p: 1.0
+        end case;
+    end function;
+
+    -- x-step scaling of a per-pixel term: x1 / x1.5 / x2
+    function f_sx(v : signed(17 downto 0); xs : unsigned(2 downto 0)) return signed is
+    begin
+        case to_integer(xs) is
+            when 3      => return v + shift_right(v, 1);
+            when 4      => return shift_left(v, 1);
+            when others => return v;
+        end case;
+    end function;
+
+    function f_abs20(v : signed) return unsigned is
+        variable r : signed(19 downto 0);
+    begin
+        r := resize(v, 20);
+        if r < 0 then r := -r; end if;
+        return unsigned(r);
+    end function;
+
+    -- phase advance (8.8) -> whole phase units, capped at half a period
+    function f_fl(v : unsigned(19 downto 0)) return unsigned is
+    begin
+        if v(19 downto 15) /= 0 then return to_unsigned(128, 8);
+        else                         return resize(v(14 downto 8), 8); end if;
+    end function;
+
     ----------------------------------------------------------------------
     -- frame-latched controls
     ----------------------------------------------------------------------
@@ -145,6 +207,23 @@ architecture videosky of program_top is
     signal s_step   : unsigned(14 downto 0) := to_unsigned(8192, 15);
     signal s_dpx, s_dpy : signed(17 downto 0) := (others => '0');
     signal s_dqx, s_dqy : signed(17 downto 0) := (others => '0');
+
+    -- Resolution scaling: virtual 1080-line steps from the timing ID.  The
+    -- accumulators step by these mode-scaled terms: per pixel dpx*sx / -dpy*sx,
+    -- per FIELD line dpy*sy / dpx*sy (sy via a serial shift-add in vblank).
+    signal s_xs     : unsigned(2 downto 0)  := to_unsigned(2, 3);     -- half units/pixel
+    signal s_ys     : unsigned(11 downto 0) := to_unsigned(256, 12);  -- Q4.8 units/field line
+    signal s_dpxv, s_dqxv : signed(17 downto 0) := (others => '0');
+    signal s_dpyv, s_dqyv : signed(19 downto 0) := (others => '0');
+    signal s_mlp, s_mlq   : signed(31 downto 0) := (others => '0');  -- serial products
+    signal s_ysh    : unsigned(11 downto 0) := (others => '0');
+    -- thin-rule floor (0 at 1080p): per-sample phase advance at this mode,
+    -- applied to rules at least as heavy as the 1080p advance (s_athr)
+    signal s_a1, s_a2, s_a3, s_a4, s_a5, s_a6 : unsigned(19 downto 0) := (others => '0');
+    signal s_fp, s_fq, s_fa : unsigned(19 downto 0) := (others => '0');
+    signal s_floorp, s_floorq : unsigned(7 downto 0) := (others => '0');
+    signal s_athr   : unsigned(7 downto 0) := to_unsigned(1, 8);
+    signal s_tq     : unsigned(8 downto 0) := to_unsigned(129, 9);
     signal s_bias   : signed(9 downto 0)  := (others => '0');   -- Ink, +/-256
     signal s_gain   : unsigned(6 downto 0) := to_unsigned(16, 7);
     signal s_depth6 : unsigned(5 downto 0) := (others => '0');
@@ -157,7 +236,7 @@ architecture videosky of program_top is
     ----------------------------------------------------------------------
     -- vblank sequencer: one shared, fully registered 9x8 multiplier
     ----------------------------------------------------------------------
-    signal s_seq   : unsigned(4 downto 0) := (others => '0');
+    signal s_seq   : unsigned(5 downto 0) := (others => '0');
     signal s_qs_a  : unsigned(9 downto 0) := (others => '0');
     signal s_qs_ar : unsigned(9 downto 0) := (others => '0');
     signal s_qs_r  : signed(9 downto 0)  := (others => '0');
@@ -231,7 +310,7 @@ begin
     -- shared qsin port: the sequencer takes the cos and sin taps two cycles
     -- after presenting each angle.  Address and ROM output both registered.
     ------------------------------------------------------------------------
-    s_qs_a <= s_k4_ang + to_unsigned(256, 10) when s_seq = 31 else s_k4_ang;
+    s_qs_a <= s_k4_ang + to_unsigned(256, 10) when s_seq = 63 else s_k4_ang;
 
     ------------------------------------------------------------------------
     -- per-frame control latch + vblank sequencer.
@@ -241,6 +320,10 @@ begin
     begin
         if rising_edge(clk) then
             s_prev_vsync_n <= data_in.vsync_n;
+            -- Resolution scaling: per-mode steps, free-running from the timing
+            -- ID (static while a mode runs).
+            s_xs <= f_vstep_x(registers_in(8)(3 downto 0));
+            s_ys <= f_vstep_y(registers_in(8)(3 downto 0));
             s_qs_ar <= s_qs_a;
             s_qs_r  <= f_qsin(s_qs_ar);
             s_mp    <= s_ma * s_mb;
@@ -282,42 +365,42 @@ begin
                     s_dracc <= s_dracc + 8;     -- one period per 32 frames
                 end if;
 
-                s_seq <= to_unsigned(31, 5);
+                s_seq <= to_unsigned(63, 6);
 
             elsif s_seq /= 0 and data_in.avid = '0' then
                 s_seq <= s_seq - 1;
 
                 case to_integer(s_seq) is
 
-                    -- 31/30 present the cos and sin angles into the qsin port.
-                    when 30 =>
+                    -- 63/62 present the cos and sin angles into the qsin port.
+                    when 62 =>
                         -- Pitch is linear in FREQUENCY: 512 (period 128 px) up to
                         -- 16880 (period ~4 px).  Phase unit 256 = one line period,
                         -- 8 fractional bits.
                         s_step <= to_unsigned(512, 15)
                                   + shift_left(resize(s_k3_pit, 15), 4);
 
-                    when 29 => s_cos8 <= resize(shift_right(s_qs_r, 2), 8);
-                    when 28 => s_sin8 <= resize(shift_right(s_qs_r, 2), 8);
+                    when 61 => s_cos8 <= resize(shift_right(s_qs_r, 2), 8);
+                    when 60 => s_sin8 <= resize(shift_right(s_qs_r, 2), 8);
 
                     -- step*cos and step*sin, split-operand through the one
                     -- registered multiplier: step = sh*256 + sl.
-                    when 27 => s_ma <= signed('0' & s_step(14 downto 8) & '0');
+                    when 59 => s_ma <= signed('0' & s_step(14 downto 8) & '0');
                                s_mb <= s_cos8;
-                    when 26 => s_ma <= signed('0' & s_step(7 downto 0));
+                    when 58 => s_ma <= signed('0' & s_step(7 downto 0));
                                s_mb <= s_cos8;
-                    when 25 => s_pah_c <= s_mp;
-                    when 24 => s_pal_c <= s_mp;
-                    when 23 => s_ma <= signed('0' & s_step(14 downto 8) & '0');
+                    when 57 => s_pah_c <= s_mp;
+                    when 56 => s_pal_c <= s_mp;
+                    when 55 => s_ma <= signed('0' & s_step(14 downto 8) & '0');
                                s_mb <= s_sin8;
-                    when 22 => s_ma <= signed('0' & s_step(7 downto 0));
+                    when 54 => s_ma <= signed('0' & s_step(7 downto 0));
                                s_mb <= s_sin8;
-                    when 21 => s_pah_s <= s_mp;
-                    when 20 => s_pal_s <= s_mp;
+                    when 53 => s_pah_s <= s_mp;
+                    when 52 => s_pal_s <= s_mp;
 
                     -- sh was pre-shifted left by 1 above, so its partial lands
                     -- at <<7 not <<8; the two halves then recombine.
-                    when 19 =>
+                    when 51 =>
                         s_prod_c <= shift_left(resize(s_pah_c, 25), 7)
                                     + resize(s_pal_c, 25);
                         s_prod_s <= shift_left(resize(s_pah_s, 25), 7)
@@ -325,24 +408,24 @@ begin
 
                     -- Angle 0 must give Penrose's HORIZONTAL rules, so cos drives
                     -- the per-LINE step and sin the per-pixel one.
-                    when 18 =>
+                    when 50 =>
                         s_dpy <= resize(shift_right(s_prod_c, 7), 18);
                         s_dpx <= resize(shift_right(s_prod_s, 7), 18);
 
                     -- Q is P rotated 90 degrees.
-                    when 17 =>
+                    when 49 =>
                         s_dqx <= -s_dpy;
                         s_dqy <=  s_dpx;
 
-                    when 16 =>      -- Ink: a bias on the whole tone ramp
+                    when 48 =>      -- Ink: a bias on the whole tone ramp
                         s_bias <= signed(resize(shift_right(s_k1_ink, 1), 10))
                                   - to_signed(256, 10);
 
-                    when 15 =>      -- Contrast: 1.0x .. 4.9x about mid-grey
+                    when 47 =>      -- Contrast: 1.0x .. 4.9x about mid-grey
                         s_gain <= to_unsigned(16, 7) + resize(s_k2_con(9 downto 4), 7);
 
-                    when 14 => s_depth6 <= s_p12(9 downto 4);
-                    when 13 =>
+                    when 46 => s_depth6 <= s_p12(9 downto 4);
+                    when 45 =>
                         s_wav4 <= s_k5_wav(9 downto 6);
                         -- K6 Scheme: the firmware loads a labelled default as
                         -- its raw label INDEX (0..5), a knob/preset as 0..1023.
@@ -355,13 +438,13 @@ begin
                         else                      s_sch3 <= "101";   -- Copper
                         end if;
 
-                    when 12 =>      -- constant rule weight when Width is Fixed
+                    when 44 =>      -- constant rule weight when Width is Fixed
                         -- floored at 8 so Ink can never blank the plate
                         v_t := to_signed(64, 12) + resize(shift_right(s_bias, 2), 12);
                         if v_t < 8 then v_t := to_signed(8, 12); end if;
                         s_fixedw <= f_ct(v_t);
 
-                    when 11 =>      -- print scheme (K6), authored standard
+                    when 43 =>      -- print scheme (K6), authored standard
                                     -- BT.601 and U/V-swapped at the compose
                         if s_sch3 = 0 then                      -- Parchment
                             s_pap_y <= to_unsigned(740, 10);
@@ -395,6 +478,50 @@ begin
                             s_ink_u <= to_unsigned(430, 10); s_ink_v <= to_unsigned(600, 10);
                         end if;
 
+                    -- Resolution scaling.  Per-pixel terms scale by the x step
+                    -- (shift/add); per-line terms by the Q4.8 y step, through a
+                    -- 12-state serial shift-add (MSB first), one add per state.
+                    when 40 =>
+                        s_dpxv <= f_sx(s_dpx, s_xs);
+                        s_dqxv <= -f_sx(s_dpy, s_xs);
+                        s_mlp  <= (others => '0');
+                        s_mlq  <= (others => '0');
+                        s_ysh  <= s_ys;
+                    when 39 | 38 | 37 | 36 | 35 | 34 | 33 | 32 | 31 | 30 | 29 | 28 =>
+                        if s_ysh(11) = '1' then
+                            s_mlp <= shift_left(s_mlp, 1) + resize(s_dpy, 32);
+                            s_mlq <= shift_left(s_mlq, 1) + resize(s_dpx, 32);
+                        else
+                            s_mlp <= shift_left(s_mlp, 1);
+                            s_mlq <= shift_left(s_mlq, 1);
+                        end if;
+                        s_ysh <= shift_left(s_ysh, 1);
+                    when 27 =>
+                        s_dpyv <= resize(shift_right(s_mlp, 8), 20);   -- dpy * sy
+                        s_dqyv <= resize(shift_right(s_mlq, 8), 20);   -- dqy * sy (dqy = dpx)
+                    -- thin-rule floor: per-sample phase advance, this mode vs 1080p
+                    when 26 =>
+                        s_a1 <= f_abs20(s_dpxv); s_a2 <= f_abs20(s_dpyv);
+                        s_a3 <= f_abs20(s_dqxv); s_a4 <= f_abs20(s_dqyv);
+                        s_a5 <= f_abs20(s_dpx);  s_a6 <= f_abs20(s_dpy);
+                    when 25 =>
+                        if s_a1 > s_a2 then s_fp <= s_a1; else s_fp <= s_a2; end if;
+                        if s_a3 > s_a4 then s_fq <= s_a3; else s_fq <= s_a4; end if;
+                        if s_a5 > s_a6 then s_fa <= s_a5; else s_fa <= s_a6; end if;
+                    when 24 =>
+                        if s_xs = 2 and s_ys = 256 then             -- 1080p: no floor
+                            s_floorp <= (others => '0');
+                            s_floorq <= (others => '0');
+                        else
+                            s_floorp <= f_fl(s_fp);
+                            s_floorq <= f_fl(s_fq);
+                        end if;
+                        if f_fl(s_fa) = 0 then s_athr <= to_unsigned(1, 8);
+                        else                   s_athr <= f_fl(s_fa); end if;
+                    when 23 =>
+                        -- Cross weight 2(t-128) >= athr  <=>  t >= 128 + ceil(athr/2)
+                        s_tq <= to_unsigned(128, 9) + resize(shift_right(resize(s_athr, 9) + 1, 1), 9);
+
                     when others => null;
                 end case;
             end if;
@@ -412,11 +539,14 @@ begin
         if rising_edge(clk) then
             s_avid_p <= data_in.avid;
 
+            -- (virtual units: the steps are the mode-scaled s_d*v; the bottom
+            -- field's offset is half a FIELD step, which already includes the
+            -- interlace x2)
             if s_vs_pulse = '1' then
                 if s_ilace = '1' and data_in.field_n = '0' then
                     s_linp <= shift_left(resize(signed('0' & s_dracc), 24), 8)
-                              + shift_right(resize(s_dpy, 24), 1);
-                    s_linq <= shift_right(resize(s_dqy, 24), 1);
+                              + shift_right(resize(s_dpyv, 24), 1);
+                    s_linq <= shift_right(resize(s_dqyv, 24), 1);
                 else
                     s_linp <= shift_left(resize(signed('0' & s_dracc), 24), 8);
                     s_linq <= (others => '0');
@@ -424,11 +554,11 @@ begin
             elsif data_in.avid = '1' and s_avid_p = '0' then
                 s_accp <= s_linp;
                 s_accq <= s_linq;
-                s_linp <= s_linp + resize(s_dpy, 24);
-                s_linq <= s_linq + resize(s_dqy, 24);
+                s_linp <= s_linp + resize(s_dpyv, 24);
+                s_linq <= s_linq + resize(s_dqyv, 24);
             elsif data_in.avid = '1' then
-                s_accp <= s_accp + resize(s_dpx, 24);
-                s_accq <= s_accq + resize(s_dqx, 24);
+                s_accp <= s_accp + resize(s_dpxv, 24);
+                s_accq <= s_accq + resize(s_dqxv, 24);
             end if;
         end if;
     end process p_acc;
@@ -542,8 +672,16 @@ begin
                 v_w2 := shift_left(r5_t - 128, 1);
             end if;
 
-            if r5_ph1 < v_w1 then v_i1 := '1'; else v_i1 := '0'; end if;
-            if r5_ph2 < v_w2 and s_cross = '1' then v_i2 := '1'; else v_i2 := '0'; end if;
+            -- (off 1080p, a rule at least as heavy as the 1080p per-sample
+            -- advance is floored at this mode's advance so SD/720p samples
+            -- cannot step over it; floors are 0 at 1080p)
+            if r5_ph1 < v_w1 or (v_w1 >= s_athr and r5_ph1 < s_floorp) then v_i1 := '1';
+            else v_i1 := '0'; end if;
+            if (r5_ph2 < v_w2 or (resize(r5_t, 9) >= s_tq and r5_ph2 < s_floorq)) and s_cross = '1' then
+                v_i2 := '1';
+            else
+                v_i2 := '0';
+            end if;
 
             r6_ink <= v_i1 or v_i2;
         end if;

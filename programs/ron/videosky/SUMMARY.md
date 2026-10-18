@@ -20,11 +20,37 @@ and the field becomes pure topography. Pair with **S10 Width = Fixed** and
 Relief is the *only* thing shaping the picture — constant-weight rules, all
 form carried by displacement.
 
+## v1.0.2 (2026-10-17) — resolution scaling (built, not flashed)
+
+The screen phase stepped per PIXEL and per FIELD LINE, so the rule pitch was
+fixed in pixels: 1.5x too coarse at 720p (relative to screen height) and at
+SD both coarser and 2:1 tall (field lines, field_n is tied high on hardware so
+the interlace detect never fired). Now the per-frame resolve scales the steps
+to **virtual 1080-line units** from the timing ID (`registers_in(8)`): per
+pixel `dpx*sx`, `-dpy*sx` (sx = 1 / 1.5 / 2 at 1080 / 720p / SD, shift-add),
+per field line `dpy*sy`, `dpx*sy` (sy = 1 / 1.5 / 4.44 at 1080p / 720p /
+480i, a 12-state serial shift-add in vblank; the sequencer is now 64 states).
+Pitch, waver, cross and relief keep their size relative to screen height;
+SD is a 4:3 window of the same plate.
+* **Thin rules**: off 1080p, a rule at least as heavy as the 1080p per-sample
+  phase advance (so whole at 1080p) is floored at this mode's per-sample
+  advance (max of the per-pixel and per-line steps, capped at half a period),
+  so SD/720p samples cannot step over it. At SD a rule is therefore at least
+  one field line; bright areas read a little darker than at 1080p. Floors are
+  0 at 1080p.
+* 1080p render bit-identical (0 px); latency unchanged (8). The bottom-field
+  half step (field_n = '0', inert on hardware) is now half a virtual field step.
+
+Build (`./build_programs.sh ron videosky`, router2, **seed 1 on all 6
+configs**), 3920–3939/7680 LC (51%, +~800: the serial multiply, the floor
+terms), 0 EBR: HD Analog 85.30, HD HDMI 84.37, HD Dual 84.20; SD Analog 86.04,
+SD HDMI 77.68, SD Dual 80.01 MHz.
+
 ## Controls
 
 K1 Ink (bias on the whole tone ramp, ±256) · K2 Contrast (1.0×–4.9× about
 mid-grey) · K3 Pitch (continuous, linear in *frequency*: period ~128 px →
-~4 px) · K4 Angle (continuous 0–360°) · K5 Waver (the burin wandering in the
+~4 px at 1080p; scales with screen height) · K4 Angle (continuous 0–360°) · K5 Waver (the burin wandering in the
 hand: sine-of-Q wobble along the rule, ~4 line-spacings per period) ·
 K6 Scheme (Parchment / Gallery / Night / Blueprint / Cyanotype / Copper) ·
 S7 Cross (second field down the Q axis, biting **only** into the dark half of
