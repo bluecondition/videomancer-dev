@@ -63,6 +63,16 @@
 -- Latency: 15 clocks, identical in every mode.  Interlace: the terrain is
 -- rebuilt per field (banks invalidated at vsync, idempotent under
 -- serration); ages advance on active lines only.
+--
+-- Resolution scaling (v0.2.4): all vertical geometry -- line spacing (8..71),
+-- bank ages, displacement (<= 255), stroke thickness and roll -- is counted in
+-- VIRTUAL 1080-line rows.  Each active field row advances the ages by the
+-- virtual rows it spans (y step Q4.8 from the timing ID, x2 for interlace:
+-- 1 at 1080p, 1-2 at 720p, 4-5 at 480i), so SD/720p show the same number of
+-- scan lines and the same relief as 1080p.  The stroke window is at least
+-- ceil(y step) rows thick so a thin line still lands on a field row.  1080p
+-- is bit-identical to v0.2.3.  Horizontal work stays pixel scale (the
+-- picture itself sets the profile; smoothing is a filter kernel).
 --------------------------------------------------------------------------------
 
 library ieee;
@@ -98,6 +108,9 @@ architecture ruttetra of program_top is
     -- relief normaliser: min(spacing, 32) (32 = unity; window = 8 x spacing)
     signal s_rmul   : unsigned(5 downto 0) := to_unsigned(32, 6);
     signal s_thick  : unsigned(3 downto 0) := to_unsigned(2, 4);   -- 1..8
+    -- stroke-window thickness: max(T, ceil(y step)) so a 1-unit stroke still
+    -- lands on a field row when rows are several virtual rows apart (SD)
+    signal s_thkw   : unsigned(3 downto 0) := to_unsigned(2, 4);
     -- thin strokes integrate less light: small shading lift at T=1..3
     signal s_bboost : unsigned(1 downto 0) := "10";
     signal s_zone   : unsigned(2 downto 0) := (others => '0');
@@ -146,7 +159,22 @@ architecture ruttetra of program_top is
     signal s_wlast      : unsigned(9 downto 0) := to_unsigned(959, 10);
     signal s_row_armed  : std_logic := '1';
     signal s_saw_frame  : std_logic := '0';
-    signal s_spacing    : unsigned(6 downto 0) := (others => '0');
+    -- Resolution scaling (v0.2.4): rows are counted in virtual 1080-line
+    -- units.  s_ys = y step per FIELD row (Q4.8, x2 for interlace, from the
+    -- timing ID); s_yf its fractional accumulator over active rows; s_ka the
+    -- virtual rows the NEXT active row advances (1 at 1080p); s_kc =
+    -- ceil(y step).  s_spacing = virtual rows to the next sampled row,
+    -- biased +1 (first test after subtracting this row's advance).
+    signal s_ys         : unsigned(11 downto 0) := to_unsigned(256, 12);
+    signal s_yf         : unsigned(7 downto 0) := (others => '0');
+    signal s_ka         : unsigned(2 downto 0) := to_unsigned(1, 3);
+    signal s_kc         : unsigned(3 downto 0) := to_unsigned(1, 4);
+    signal s_spacing    : signed(8 downto 0) := (others => '0');
+    -- the row-start decision, precomputed every clock (s_spacing and s_ka
+    -- only change at a row start / vsync, rows are >= 858 clocks apart):
+    -- keeps the subtract off the row-start -> age-enable path
+    signal s_samp_nx    : std_logic := '0';
+    signal s_sp_nx      : signed(8 downto 0) := (others => '0');
     signal s_sampled    : std_logic := '0';
     signal s_head       : unsigned(2 downto 0) := (others => '0');
 
@@ -326,6 +354,9 @@ begin
         variable v_ro      : unsigned(8 downto 0);
         variable v_se      : unsigned(14 downto 0);
         variable v_rp      : unsigned(14 downto 0);
+        variable v_sp      : signed(8 downto 0);
+        variable v_ag      : unsigned(10 downto 0);
+        variable v_tw      : unsigned(3 downto 0);
     begin
         if rising_edge(clk) then
             if unsigned(registers_in(2)) < 8 then
@@ -335,6 +366,28 @@ begin
             end if;
             prev_hsync_n <= data_in.hsync_n;
             prev_vsync_n <= data_in.vsync_n;
+            -- y step (free-running from the timing ID) and the next active
+            -- row's virtual-row advance (registered ahead: rows are >= 858
+            -- clocks apart, so it is always settled at row start)
+            case to_integer(unsigned(registers_in(8)(3 downto 0))) is
+                when 0          => s_ys <= to_unsigned(1138, 12); s_kc <= to_unsigned(5, 4); -- 480i
+                when 4          => s_ys <= to_unsigned(576, 12);  s_kc <= to_unsigned(3, 4); -- 480p
+                when 8          => s_ys <= to_unsigned(960, 12);  s_kc <= to_unsigned(4, 4); -- 576i
+                when 12         => s_ys <= to_unsigned(480, 12);  s_kc <= to_unsigned(2, 4); -- 576p
+                when 5 | 6 | 14 => s_ys <= to_unsigned(384, 12);  s_kc <= to_unsigned(2, 4); -- 720p
+                when 1 | 2 | 10 => s_ys <= to_unsigned(512, 12);  s_kc <= to_unsigned(2, 4); -- 1080i
+                when others     => s_ys <= to_unsigned(256, 12);  s_kc <= to_unsigned(1, 4); -- 1080p
+            end case;
+            v_ag := resize(s_yf, 11) + resize(s_ys, 11);
+            s_ka <= v_ag(10 downto 8);
+            v_sp := s_spacing - signed(resize(s_ka, 9));
+            if v_sp <= 0 then
+                s_samp_nx <= '1';
+                s_sp_nx   <= v_sp + signed(resize(s_dspace, 9));
+            else
+                s_samp_nx <= '0';
+                s_sp_nx   <= v_sp;
+            end if;
             v_h_edge := '0'; v_v_edge := '0';
             if data_in.hsync_n = '0' and prev_hsync_n = '1' then v_h_edge := '1'; end if;
             if data_in.vsync_n = '0' and prev_vsync_n = '1' then v_v_edge := '1'; end if;
@@ -365,13 +418,12 @@ begin
             -- stages later, so the one-cycle registration lag is safe.
             if data_in.avid = '1' and s_row_armed = '1' then
                 s_row_armed <= '0';
-                if s_spacing = 0 then
-                    v_samp := '1';
-                    s_spacing <= s_dspace - 1;
-                else
-                    v_samp := '0';
-                    s_spacing <= s_spacing - 1;
-                end if;
+                -- virtual rows: this row advanced s_ka units (1 at 1080p,
+                -- where this is the old 'spacing = 0' test and reload D - 1)
+                v_ag := resize(s_yf, 11) + resize(s_ys, 11);
+                s_yf <= v_ag(7 downto 0);
+                v_samp    := s_samp_nx;
+                s_spacing <= s_sp_nx;
                 s_sampled <= v_samp;
                 if v_samp = '1' then
                     v_newhead := s_head + 1;
@@ -387,8 +439,11 @@ begin
                         s_valid(k) <= '1';
                         s_live(k)  <= '0';
                     elsif s_valid(k) = '1' then
-                        if s_age(k) /= 1023 then
-                            s_age(k) <= s_age(k) + 1;
+                        v_ag := resize(s_age(k), 11) + resize(s_ka, 11);
+                        if v_ag(10) = '1' then
+                            s_age(k) <= to_unsigned(1023, 10);
+                        else
+                            s_age(k) <= v_ag(9 downto 0);
                         end if;
                         s_live(k) <= '1';
                     end if;
@@ -403,7 +458,9 @@ begin
                 s_live     <= (others => '0');
                 -- roll: first sampled row = phase x spacing; the field's top
                 -- line fades in with the phase so lines never pop in
-                s_spacing  <= s_roff;
+                -- (+ the first row's advance: the row-start test subtracts it)
+                s_spacing  <= signed(resize(s_roff, 9)) + signed(resize(s_ys(11 downto 8), 9));
+                s_yf       <= (others => '0');
                 s_fade4    <= s_rphase(15 downto 12);
                 s_firstrow <= '1';
                 s_wlast    <= s_wline;
@@ -424,7 +481,13 @@ begin
                     s_rmul <= resize(v_d7, 6);
                 end if;
 
-                s_thick  <= to_unsigned(1, 4) + resize(unsigned(registers_in(1)(9 downto 7)), 4);
+                v_tw := to_unsigned(1, 4) + resize(unsigned(registers_in(1)(9 downto 7)), 4);
+                s_thick  <= v_tw;
+                if v_tw < s_kc then
+                    v_tw := s_kc;
+                end if;
+                s_thkw <= v_tw;
+                s_half <= shift_right(v_tw + 1, 1);   -- ceil(Tw / 2)
                 case registers_in(1)(9 downto 7) is
                     when "000"  => s_bboost <= "11";   -- T=1: +3
                     when "001"  => s_bboost <= "10";   -- T=2: +2
@@ -468,7 +531,6 @@ begin
                     when others =>
                         s_glow <= '1'; s_gsh <= "001";
                 end case;
-                s_half <= to_unsigned(1, 4) + resize(unsigned(registers_in(1)(9 downto 8)), 4);
                 s_neg      <= registers_in(6)(4);
 
                 -- P12 Relief -> displacement scale, glided (ease by diff/4
@@ -742,8 +804,8 @@ begin
             end loop;
 
             -- A4: classify each candidate against the stroke window
-            v_t  := signed(resize(s_thick, 11));
-            v_2t := signed(resize(shift_left(resize(s_thick, 5), 1), 11));
+            v_t  := signed(resize(s_thkw, 11));
+            v_2t := signed(resize(shift_left(resize(s_thkw, 5), 1), 11));
             v_nt := -v_t;
             v_nh := -signed(resize(s_half, 11));
             v_th := v_t + signed(resize(s_half, 11));
