@@ -10,9 +10,10 @@
 --
 --   K1 Threshold edge threshold
 --   K2 Ink       edge line strength (mixed over the picture)
---   K3 Noise     value-noise displacement amount (64x32 lattice, scrolling)
+--   K3 Noise     value-noise displacement amount (64x32 lattice, scrolling;
+--                1080-line px, scaled per mode)
 --   K4 Speed     lattice scroll speed
---   K5 Cells     pixel cell width 1 .. 64 px
+--   K5 Cells     pixel cell width 1 .. 64 px (1080-line px, scaled per mode)
 --   K6 Rows      cell height = width / 1, 2, 4, 8
 --
 --   S7  Lines    edges drawn over the picture / edges only on black
@@ -28,6 +29,19 @@
 -- Line buffer read a line late; noise lattice engine (roulette) drives the
 -- read address, cells hold it; edges from the fetched luma.  Latency 14
 -- clocks, all modes, blanking-gated.
+--
+-- v0.1.6 (2026-10-17): resolution scaling.  The lattice, the cells and the
+-- displacement live on a virtual 1080-line canvas, stepped per mode from the
+-- video timing ID (registers_in(8)): x in half units per pixel (1080: 2,
+-- 720p: 3, SD: 4 -- 720 px span 1440 units), y in Q.8 units per FIELD line
+-- (1.5 at 720p, 1080/486 x 2 per 480i field line).  The noise lattice is
+-- 64 x 32 virtual units (the DDA runs in Q7 with the step x the x step, and
+-- a 720p lattice crossing between pixels reloads with its fractional part);
+-- cell width / height count virtual units (wrap by subtracting the size);
+-- the displacement amplitude is x 2/3 at 720p and x 1/2 at SD.  So the warp
+-- and the blocks keep their size relative to the screen height, and SD's
+-- cells stay square on the 4:3 screen.  1080p is unchanged (every step is
+-- exactly 1.0).
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -70,6 +84,39 @@ architecture etchwarp of program_top is
         t := t xor shift_right(t, 5);
         return t xor shift_left(t, 8);
     end function;
+    -- Resolution scaling: virtual 1080-line steps from the timing ID.  x step
+    -- in half units per pixel (1080: 2, 720p: 3, SD: 4), y step Q4.8 per
+    -- FIELD line (1080 / active lines, doubled for interlace).
+    function f_vstep_x(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0 | 4 | 8 | 12 => return to_unsigned(4, 3);
+            when 5 | 6 | 14     => return to_unsigned(3, 3);
+            when others         => return to_unsigned(2, 3);
+        end case;
+    end function;
+    function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(1138, 12);  -- 480i: 2 x 1080/486
+            when 4          => return to_unsigned(576, 12);   -- 480p: 1080/480
+            when 8          => return to_unsigned(960, 12);   -- 576i: 2 x 1080/576
+            when 12         => return to_unsigned(480, 12);   -- 576p: 1080/576
+            when 5 | 6 | 14 => return to_unsigned(384, 12);   -- 720p: 1.5
+            when 1 | 2 | 10 => return to_unsigned(512, 12);   -- 1080i: 2.0
+            when others     => return to_unsigned(256, 12);   -- 1080p: 1.0
+        end case;
+    end function;
+    -- (x step) * d for x steps 2 / 3 / 4
+    function f_xmul(d : signed(10 downto 0); xs : unsigned(2 downto 0)) return signed is
+    begin
+        case xs is
+            when "011"  => return resize(d, 13) + shift_left(resize(d, 13), 1);
+            when "100"  => return shift_left(resize(d, 13), 2);
+            when others => return shift_left(resize(d, 13), 1);
+        end case;
+    end function;
+
     function f_clamp10(v : signed) return unsigned is
     begin
         if v < 0 then
@@ -105,16 +152,37 @@ architecture etchwarp of program_top is
     signal s_pixn   : unsigned(6 downto 0) := to_unsigned(1, 7);
     signal s_rows   : unsigned(6 downto 0) := to_unsigned(1, 7);
     signal s_n_pre  : unsigned(19 downto 0) := (others => '0');
-    signal s_vstep  : unsigned(1 downto 0) := "11";
+    signal s_vstep  : unsigned(2 downto 0) := "111";
+    -- resolution scaling (static per mode, decoded every clock)
+    signal s_vxs    : unsigned(2 downto 0)  := to_unsigned(2, 3);
+    signal s_vys    : unsigned(11 downto 0) := to_unsigned(256, 12);
+    signal s_amp_raw : unsigned(9 downto 0) := (others => '0');
+    signal s_a168, s_a3r : unsigned(17 downto 0) := (others => '0');
+    -- virtual x (Q.1) for the lattice: crossing flag + fractional remainder
+    -- of the next pixel (720p crossings land between pixels)
+    signal s_xa     : unsigned(12 downto 0) := (others => '0');
+    signal s_xc     : std_logic := '0';
+    signal s_xr     : unsigned(1 downto 0) := (others => '0');
+    -- lattice differences and x-step scaled DDA steps (Q7)
+    signal s_dCB, s_dBA   : signed(10 downto 0) := (others => '0');
+    signal s_dCBx, s_dBAx : signed(12 downto 0) := (others => '0');
+    -- virtual line (Q.8) for the lattice rows
+    signal s_lya    : unsigned(19 downto 0) := (others => '0');
+    -- cell counters in virtual units: x Q.1, y Q.8; lim = size - step (>= 0)
+    signal s_hloc   : unsigned(7 downto 0) := (others => '0');
+    signal s_hlim   : unsigned(7 downto 0) := (others => '0');
+    signal s_hnew   : std_logic := '1';
+    signal s_vloc   : unsigned(15 downto 0) := (others => '0');
+    signal s_vlim   : unsigned(15 downto 0) := (others => '0');
+    signal s_vnew   : std_logic := '1';
 
     signal s_in_y, s_in_u, s_in_v : unsigned(9 downto 0) := (others => '0');
     signal s_in_avid : std_logic := '0';
     signal s_rx, s_wr_x : unsigned(10 downto 0) := (others => '0');
     signal s_prev_hsync_n, s_prev_vsync_n, s_prev_avid : std_logic := '1';
     signal s_saw_active : std_logic := '0';
-    signal s_line, s_line_width : unsigned(10 downto 0) := to_unsigned(480, 11);
+    signal s_line_width : unsigned(10 downto 0) := to_unsigned(480, 11);
     signal s_oy     : unsigned(15 downto 0) := (others => '0');
-    signal s_vcnt   : unsigned(6 downto 0) := (others => '0');
     signal s_capture : std_logic := '1';
     signal s_wpar, s_rbank, s_we : std_logic := '0';
 
@@ -134,13 +202,12 @@ architecture etchwarp of program_top is
     signal s_hlc    : signed(8 downto 0) := (others => '0');
     signal s_hq     : signed(19 downto 0) := (others => '0');
     signal s_vA, s_vB, s_vC : signed(9 downto 0) := (others => '0');
-    signal s_nacc   : signed(15 downto 0) := (others => '0');
-    signal s_nstp   : signed(9 downto 0) := (others => '0');
+    signal s_nacc   : signed(16 downto 0) := (others => '0');   -- Q7
+    signal s_nstp   : signed(12 downto 0) := (others => '0');   -- per pixel, Q7
 
     signal s_x1     : unsigned(10 downto 0) := (others => '0');
     signal s_n2     : signed(9 downto 0) := (others => '0');
     signal s_x2     : unsigned(10 downto 0) := (others => '0');
-    signal s_hcnt   : unsigned(6 downto 0) := (others => '0');
     signal s_xh3    : unsigned(10 downto 0) := (others => '0');
     signal s_u3     : signed(13 downto 0) := (others => '0');
     signal s_n3     : signed(9 downto 0) := (others => '0');
@@ -221,6 +288,10 @@ begin
         variable v_ysum : unsigned(15 downto 0);
         variable v_v    : signed(9 downto 0);
         variable v_a    : unsigned(10 downto 0);
+        variable v_xl   : unsigned(7 downto 0);
+        variable v_rm   : signed(12 downto 0);
+        variable v_hl   : signed(9 downto 0);
+        variable v_vl   : signed(16 downto 0);
     begin
         if rising_edge(clk) then
             if s_k_rows < 4 then
@@ -238,19 +309,49 @@ begin
             s_thr <= s_k_thr;
             s_ink <= s_k_ink(9 downto 2);
 
-            -- noise DDA (roulette)
+            -- resolution scaling: mode steps (static per mode)
+            s_vxs <= f_vstep_x(registers_in(8)(3 downto 0));
+            s_vys <= f_vstep_y(registers_in(8)(3 downto 0));
+            -- cell limits (size - step, floored at 0: a cell no wider than a
+            -- step makes every pixel / line its own cell)
+            v_hl := signed(resize(s_pixn & '0', 10)) - signed(resize(s_vxs, 10));
+            if v_hl(9) = '1' then s_hlim <= (others => '0'); else s_hlim <= unsigned(v_hl(7 downto 0)); end if;
+            v_vl := signed(resize(s_rows & x"00", 17)) - signed(resize(s_vys, 17));
+            if v_vl(16) = '1' then s_vlim <= (others => '0'); else s_vlim <= unsigned(v_vl(15 downto 0)); end if;
+            -- lattice differences, scaled by the x step (settle in 2 clocks;
+            -- the lattice values change >= 10 clocks before they are used)
+            s_dCB  <= resize(s_vC, 11) - resize(s_vB, 11);
+            s_dBA  <= resize(s_vB, 11) - resize(s_vA, 11);
+            s_dCBx <= f_xmul(s_dCB, s_vxs);
+            s_dBAx <= f_xmul(s_dBA, s_vxs);
+            -- virtual x of the next pixel: a lattice column every 64 units
             if data_in.avid = '1' then
-                if s_rx(5 downto 0) = 0 and s_rx /= 0 then
-                    s_nacc <= shift_left(resize(s_vB, 16), 6);
-                    s_nstp <= s_vC - s_vB;
+                v_xl := resize(s_xa(6 downto 0), 8) + resize(s_vxs, 8);
+                s_xa <= s_xa + resize(s_vxs, 13);
+                s_xc <= v_xl(7);
+                s_xr <= v_xl(1 downto 0);
+            else
+                s_xa <= (others => '0'); s_xc <= '0'; s_xr <= "00";
+            end if;
+            -- noise DDA (roulette), Q7 per virtual unit; a crossing between
+            -- pixels (720p) reloads with its remainder (0..1 unit) of the step
+            case s_xr is
+                when "01"   => v_rm := resize(s_dCB, 13);
+                when "10"   => v_rm := shift_left(resize(s_dCB, 13), 1);
+                when others => v_rm := (others => '0');
+            end case;
+            if data_in.avid = '1' then
+                if s_xc = '1' then
+                    s_nacc <= shift_left(resize(s_vB, 17), 7) + resize(v_rm, 17);
+                    s_nstp <= s_dCBx;
                     s_vA <= s_vB; s_vB <= s_vC;
                     s_nrem <= "01"; s_nshift <= '0'; s_nstep <= (others => '0');
                 else
-                    s_nacc <= s_nacc + resize(s_nstp, 16);
+                    s_nacc <= s_nacc + resize(s_nstp, 17);
                 end if;
             else
-                s_nstp <= s_vB - s_vA;
-                s_nacc <= shift_left(resize(s_vA, 16), 6) - resize(s_vB - s_vA, 16);
+                s_nstp <= s_dBAx;
+                s_nacc <= shift_left(resize(s_vA, 17), 7) - resize(s_dBAx, 17);
             end if;
 
             case to_integer(s_nstep) is
@@ -281,7 +382,7 @@ begin
 
             case to_integer(s_lstep) is
                 when 0 =>
-                    v_ysum := resize(s_line, 16) + s_oy;
+                    v_ysum := resize(s_lya(19 downto 8), 16) + s_oy;
                     s_ncy  <= v_ysum(13 downto 5);
                     s_ncy1 <= v_ysum(13 downto 5) + 1;
                     s_nfy  <= v_ysum(4 downto 0);
@@ -303,30 +404,46 @@ begin
                     s_pixn <= to_unsigned(1, 7) + resize(s_n_pre(19 downto 14), 7);
                     s_vstep <= s_vstep + 1;
                 when 2 =>
-                    s_amp_eff <= s_amp_pre(19 downto 10);
+                    s_amp_raw <= s_amp_pre(19 downto 10);
                     case to_integer(s_rows_idx) is
                         when 0 => s_rows <= s_pixn;
                         when 1 => s_rows <= '0' & s_pixn(6 downto 1);
                         when 2 => s_rows <= "00" & s_pixn(6 downto 2);
                         when others => s_rows <= "000" & s_pixn(6 downto 3);
                     end case;
-                    s_vstep <= "11";
+                    s_vstep <= s_vstep + 1;
+                when 3 =>
+                    -- displacement in 1080-line px -> real px: 720p x 2/3
+                    -- ((a*171 + 128) >> 8), SD x 1/2
+                    s_a168 <= shift_left(resize(s_amp_raw, 18), 7) + shift_left(resize(s_amp_raw, 18), 5) + shift_left(resize(s_amp_raw, 18), 3);
+                    s_a3r  <= shift_left(resize(s_amp_raw, 18), 1) + resize(s_amp_raw, 18) + 128;
+                    s_vstep <= s_vstep + 1;
+                when 4 =>
+                    v_a := resize(s_amp_raw, 11) + 1;
+                    case s_vxs is
+                        when "011"  => s_amp_eff <= resize(shift_right(s_a168 + s_a3r, 8), 10);
+                        when "100"  => s_amp_eff <= v_a(10 downto 1);
+                        when others => s_amp_eff <= s_amp_raw;
+                    end case;
+                    s_vstep <= "111";
                 when others =>
                     if s_rows = 0 then s_rows <= to_unsigned(1, 7); end if;
             end case;
 
             s_w_edge <= s_line_width - (C_EDGE + 1);
             if s_prev_avid = '1' and data_in.avid = '0' then
-                s_line_width <= s_rx; s_line <= s_line + 1;
-                if s_vcnt >= s_rows - 1 then s_vcnt <= (others => '0'); else s_vcnt <= s_vcnt + 1; end if;
+                s_line_width <= s_rx; s_lya <= s_lya + resize(s_vys, 20);
+                -- cell rows in virtual lines (Q.8)
+                if s_vloc >= s_vlim then s_vloc <= s_vloc - s_vlim; s_vnew <= '1';
+                else s_vloc <= s_vloc + resize(s_vys, 16); s_vnew <= '0'; end if;
             end if;
             if data_in.hsync_n = '0' and s_prev_hsync_n = '1' then
-                if s_vcnt = 0 then s_capture <= '1'; s_wpar <= not s_wpar; s_rbank <= s_wpar;
+                if s_vnew = '1' then s_capture <= '1'; s_wpar <= not s_wpar; s_rbank <= s_wpar;
                 else s_capture <= '0'; s_rbank <= s_wpar; end if;
                 s_lstep <= (others => '0');
             end if;
             if data_in.vsync_n = '0' and s_prev_vsync_n = '1' then
-                s_line <= (others => '0'); s_vcnt <= (others => '0'); s_wpar <= '0';
+                s_lya <= (others => '0'); s_vloc <= (others => '0'); s_vnew <= '1'; s_wpar <= '0';
                 if s_saw_active = '1' then
                     s_vstep <= (others => '0');
                 end if;
@@ -347,21 +464,22 @@ begin
     begin
         if rising_edge(clk) then
             -- stage 2: noise value, column
-            s_n2 <= s_nacc(15 downto 6);
+            s_n2 <= s_nacc(16 downto 7);
             s_x2 <= s_x1;
             -- stage 3: cell counter and the two orders: grid moved by noise, or content
-            if s_avid_sr(1) = '0' then s_hcnt <= (others => '0');
-            elsif s_hcnt >= s_pixn - 1 then s_hcnt <= (others => '0');
-            else s_hcnt <= s_hcnt + 1; end if;
+            -- (cell width in virtual units, Q.1: wrap by subtracting size - step)
+            if s_avid_sr(1) = '0' then s_hloc <= (others => '0'); s_hnew <= '1';
+            elsif s_hloc >= s_hlim then s_hloc <= s_hloc - s_hlim; s_hnew <= '1';
+            else s_hloc <= s_hloc + resize(s_vxs, 8); s_hnew <= '0'; end if;
             s_u3 <= signed(resize(s_x2, 14)) + resize(s_n2, 14);
             s_n3 <= s_n2;
             s_xh3 <= s_x2;
             -- stage 4: hold (order 0: hold the displaced address -> grid steady, content moves;
             --                 order 1: hold the column, add noise after -> cells move)
             if s_sw_order = '0' then
-                if s_hcnt = 0 then s_u4 <= s_u3; s_uh <= s_u3; else s_u4 <= s_uh; end if;
+                if s_hnew = '1' then s_u4 <= s_u3; s_uh <= s_u3; else s_u4 <= s_uh; end if;
             else
-                if s_hcnt = 0 then s_uh <= signed(resize(s_xh3, 14)); s_u4 <= signed(resize(s_xh3, 14)) + resize(s_n3, 14);
+                if s_hnew = '1' then s_uh <= signed(resize(s_xh3, 14)); s_u4 <= signed(resize(s_xh3, 14)) + resize(s_n3, 14);
                 else s_u4 <= s_uh + resize(s_n3, 14); end if;
             end if;
             s_uc4 <= s_u3;                      -- unpixelated address for chroma when luma-only
