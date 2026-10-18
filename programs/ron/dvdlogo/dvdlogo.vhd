@@ -6,6 +6,21 @@
 --
 -- DVD Logo Bouncer (multi-logo) v1.0
 --
+-- v1.0.2 (2026-10-17): resolution scaling.  Positions, walls, speed, logo
+-- size and the corner tolerance are in virtual 1080-line units: the beam
+-- accumulators step per pixel / per field line by the video-timing-ID steps
+-- (registers_in(8)) times the logo step -- 1.0 at 1080p (identical to
+-- before), 1.5 at 720p, and at SD 2.0 across (a 1440-wide 4:3 window) and
+-- 1080/486 per frame line (interlaced fields step two frame lines; the
+-- bottom-field half-step offset keys on field_n, which the cores tie high,
+-- so on hardware it is inert and SD fields are line-doubled).  So the logo
+-- is the same size relative to screen height in every mode and unstretched
+-- at SD, and the measured walls are in the same units (SD 1440 x 1080).  The SD 1.25x size
+-- cap is gone: 3x (1152 x 522) fits the 1440 x 1080 SD window.  Away from
+-- 1080p a logo can step up to 4 logo px per screen px (SD 0.5x), so the ROM
+-- prefetch leads by 6 px there instead of 8 (8 only holds to 2.29).
+-- Parked logos 1/3 enter 480 units left of the right wall (1440 at HD).
+--
 -- Up to 4 instances of a 384 x 174 1-bit "DVD VIDEO" bitmap drift across the
 -- screen, bouncing off the active-area edges and off each other.  Each wall
 -- hit and each new logo-on-logo collision advances that logo's color index
@@ -42,8 +57,8 @@
 -- on an exponential curve (0.125 .. 32 px/frame); K1 Angle splits it between
 -- X and Y (weights 25..100%, always summing to 125%).
 --
--- Size (K2, 0.5x .. 3x; SD capped at 1.25x so the logo fits a 240-line
--- field): the renderer works in LOGO space.  One shared accumulator per axis
+-- Size (K2, 0.5x .. 3x of 384 x 174 virtual 1080-line units, every mode):
+-- the renderer works in LOGO space.  One shared accumulator per axis
 -- holds h_count * step and v_count * step (step = 1/scale, Q12, from a
 -- serial divider); each logo adds a per-frame offset C_i = -x_i * step
 -- (serial multiplier), so the per-pixel cost is one add per logo per axis —
@@ -51,7 +66,9 @@
 -- H accumulator preloaded with 8 * step (its 8-px lead).  Scale and step
 -- are latched together once per field; the knob is deadbanded and glided.
 -- Prefetch stays correct down to 0.5x: a word then spans 8 screen px, so the
--- 8-px lead never reaches the word two ahead (same buffer parity).
+-- 8-px lead never reaches the word two ahead (same buffer parity).  (720p
+-- and SD step up to 3 / 4 logo px per screen px; their 6-px lead keeps the
+-- newest available fetch within 4 px, i.e. at most one word ahead.)
 --
 -- Physics (4-phase FSM, runs once per field on a vsync that follows active
 -- video — analog vsync serrates, so a bare vsync_start can fire repeatedly).
@@ -133,7 +150,7 @@ architecture dvdlogo of program_top is
     -- integer part = (19 downto 6); word bit = int(3:0); parity = int(4).
     constant C_QF         : integer := 6;
 
-    constant C_CORNER_TOL : integer := 16;      -- px from the far wall = corner
+    constant C_CORNER_TOL : integer := 16;      -- virtual units from the far wall = corner
     constant C_Y_OFF_MAX  : integer := 704;     -- drawn luma cap: 64 + 704 = 768
     constant C_C_OFF_MAX  : integer := 448;     -- legal chroma: 512 +/- 448
 
@@ -200,7 +217,6 @@ architecture dvdlogo of program_top is
     signal s_sz_raw, s_sz_raw_d   : unsigned(9 downto 0) := (others => '0');
     signal s_sz_dif     : signed(10 downto 0) := (others => '0');
     signal s_sz_t1, s_sz_t2, s_sz_t3 : unsigned(9 downto 0) := to_unsigned(256, 10);
-    signal s_sz_sd      : std_logic := '0';
     signal s_gl_diff    : signed(10 downto 0) := (others => '0');
     signal s_gl_step    : unsigned(9 downto 0) := (others => '0');
     signal s_gl_up, s_gl_dn : std_logic := '0';
@@ -229,6 +245,19 @@ architecture dvdlogo of program_top is
     signal s_hsl : unsigned(24 downto 0) := (others => '0');
     signal s_vs  : unsigned(24 downto 0) := (others => '0');
 
+    -- Resolution scaling: virtual 1080-line steps from the timing ID.  x step
+    -- Q.1 per pixel (2/3/4 = 1.0/1.5/2.0), y step Q4.8 per FIELD line.  The
+    -- beam accumulators step by these times the logo step (Q12): s_hstep per
+    -- pixel, s_vstep (serial multiplier) per line; s_hsl_pre is the prefetch
+    -- lead preload (8 px at 1080p as before, 6 px elsewhere); s_voff starts
+    -- the bottom field half a field step down.
+    signal s_xs      : unsigned(2 downto 0)  := to_unsigned(2, 3);
+    signal s_ys      : unsigned(11 downto 0) := to_unsigned(256, 12);
+    signal s_hstep   : unsigned(14 downto 0) := to_unsigned(4096, 15);
+    signal s_hsl_pre : unsigned(17 downto 0) := to_unsigned(32768, 18);
+    signal s_vstep   : unsigned(15 downto 0) := to_unsigned(4096, 16);
+    signal s_voff    : unsigned(15 downto 0) := (others => '0');
+
     -- Per-logo logo-space offsets (Q6): -x_i * step, -y_i * step.
     type t_off_arr is array (0 to N_LOGOS - 1) of signed(19 downto 0);
     signal s_cx : t_off_arr := (others => (others => '0'));
@@ -241,8 +270,9 @@ architecture dvdlogo of program_top is
     signal s_h_count : unsigned(11 downto 0);
     signal s_v_count : unsigned(11 downto 0);
 
-    signal s_h_pixel_counter : unsigned(11 downto 0) := (others => '0');
-    signal s_v_line_counter  : unsigned(11 downto 0) := (others => '0');
+    -- Virtual-unit measure accumulators: Q.1 per pixel, Q.8 per field line.
+    signal s_h_pixel_counter : unsigned(12 downto 0) := (others => '0');
+    signal s_v_line_counter  : unsigned(19 downto 0) := (others => '0');
     signal s_measured_h      : unsigned(11 downto 0) := to_unsigned(960, 12);
     signal s_measured_v      : unsigned(11 downto 0) := to_unsigned(1080, 12);
 
@@ -252,12 +282,15 @@ architecture dvdlogo of program_top is
     signal s_max_pos_y : signed(12 downto 0) := to_signed(0, 13);
     signal s_max_tol_x : signed(12 downto 0) := to_signed(0, 13);
     signal s_max_tol_y : signed(12 downto 0) := to_signed(0, 13);
+    -- Park x of logos 1/3: 480 units left of the right wall (1440 at HD,
+    -- 960 in the 1440-wide SD window).
+    signal s_park_x    : signed(11 downto 0) := to_signed(1440, 12);
 
     -- ========================================================================
     -- Initial state — laid out as a 2x2 grid that's well-separated at HD
-    -- (1920x1080).  At lower resolutions the clamp brings them in but they
-    -- still occupy distinct quadrants.  Inactive logos hold these values so
-    -- that turning Count up always introduces a new logo at a clean spot.
+    -- (1920x1080 virtual units; every mode is 1080 units tall).  Inactive
+    -- logos hold these values (logos 1/3 at s_park_x, which is 1440 at HD)
+    -- so that turning Count up always introduces a new logo at a clean spot.
     -- ========================================================================
     constant C_INIT_X : t_pos_arr := (
         to_signed(  96, 12),
@@ -360,7 +393,8 @@ architecture dvdlogo of program_top is
     --   slot = grp(4) & logo(3:2) & chan(1:0)
     --   grp 0: chan 0/1/2 = palette Y/U/V x gain; chan 3 = speed x X weight
     --          (logo 0), speed x Y weight (1), scale x 384 (2), x 174 (3)
-    --   grp 1: chan 0 = x_i x step, chan 1 = y_i x step
+    --   grp 1: chan 0 = x_i x step, chan 1 = y_i x step, chan 2 = step x
+    --          virtual y step (the V beam step; every logo stores the same)
     -- ========================================================================
     signal s_mslot : unsigned(4 downto 0) := (others => '0');
     signal s_mcyc  : unsigned(3 downto 0) := (others => '0');
@@ -547,30 +581,63 @@ architecture dvdlogo of program_top is
         end if;
     end function;
 
+    -- ========================================================================
+    -- Resolution scaling: per-mode steps from the video timing ID.
+    -- ========================================================================
+    -- x step in half virtual units per pixel: 1080 2 (1.0), 720p 3 (1.5),
+    -- SD 4 (2.0: 720 px span 1440 units, a 4:3 window of the 1080 canvas).
+    function f_vstep_x(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0 | 4 | 8 | 12 => return to_unsigned(4, 3);
+            when 5 | 6 | 14     => return to_unsigned(3, 3);
+            when others         => return to_unsigned(2, 3);
+        end case;
+    end function;
+    -- y step in Q4.8 virtual units per FIELD line (1080 / active lines,
+    -- doubled for interlaced modes).
+    function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(1138, 12);  -- 480i: 2 x 1080/486
+            when 4          => return to_unsigned(576, 12);   -- 480p: 1080/480
+            when 8          => return to_unsigned(960, 12);   -- 576i: 2 x 1080/576
+            when 12         => return to_unsigned(480, 12);   -- 576p: 1080/576
+            when 5 | 6 | 14 => return to_unsigned(384, 12);   -- 720p: 1.5
+            when 1 | 2 | 10 => return to_unsigned(512, 12);   -- 1080i: 2.0
+            when others     => return to_unsigned(256, 12);   -- 1080p: 1.0
+        end case;
+    end function;
+
 begin
 
     -- ========================================================================
     -- Auto-Measure Active Resolution
     -- ========================================================================
+    -- (in virtual units: SD 1440 x 1080, 720p and 1080 1920 x 1080; the
+    -- steps are static per mode, so they are registered free-running)
     p_measure : process(clk)
     begin
         if rising_edge(clk) then
+            s_xs <= f_vstep_x(registers_in(8)(3 downto 0));
+            s_ys <= f_vstep_y(registers_in(8)(3 downto 0));
+
             if s_timing.hsync_start = '1' then
                 if s_h_pixel_counter > 0 then
-                    s_measured_h <= s_h_pixel_counter;
+                    s_measured_h <= s_h_pixel_counter(12 downto 1);
                 end if;
                 s_h_pixel_counter <= (others => '0');
             elsif s_timing.avid = '1' then
-                s_h_pixel_counter <= s_h_pixel_counter + 1;
+                s_h_pixel_counter <= s_h_pixel_counter + s_xs;
             end if;
 
             if s_timing.vsync_start = '1' then
                 if s_v_line_counter > 0 then
-                    s_measured_v <= s_v_line_counter;
+                    s_measured_v <= s_v_line_counter(19 downto 8);
                 end if;
                 s_v_line_counter <= (others => '0');
             elsif s_timing.avid_start = '1' then
-                s_v_line_counter <= s_v_line_counter + 1;
+                s_v_line_counter <= s_v_line_counter + s_ys;
             end if;
         end if;
     end process;
@@ -578,15 +645,19 @@ begin
     p_resolution : process(clk)
     begin
         if rising_edge(clk) then
-            -- Continuously refresh max-position bounds.  The size cap keeps
-            -- the logo inside every supported raster (3x = 1152x522 in
-            -- 1280x720; SD 1.25x = 480x217 in 720x240), so no clamp-to-zero
-            -- is needed.
+            -- Continuously refresh max-position bounds.  Every raster is at
+            -- least 1440 x 1080 virtual units (SD), so even 3x (1152 x 522)
+            -- fits and no clamp-to-zero is needed.
             s_max_pos_x <= signed(resize(s_measured_h, 13)) - s_lw;
             s_max_pos_y <= signed(resize(s_measured_v, 13)) - s_lh;
             s_max_tol_x <= s_max_pos_x - to_signed(C_CORNER_TOL, 13);
             s_max_tol_y <= s_max_pos_y - to_signed(C_CORNER_TOL, 13);
             s_lwh_diff  <= resize(s_lw, 14) - resize(s_lh, 14);
+            if s_xs = 4 then
+                s_park_x <= to_signed(960, 12);
+            else
+                s_park_x <= to_signed(1440, 12);
+            end if;
         end if;
     end process;
 
@@ -688,7 +759,7 @@ begin
         );
 
     -- ========================================================================
-    -- Size control.  Deadband → map (128 + k*5/8, capped 1.25x on SD) →
+    -- Size control.  Deadband → map (128 + k*5/8) →
     -- per-field glide (diff/8, at least 1) → serial divider → field latch.
     -- Runs on its own saw-active vsync guard so it stays live under Pause.
     -- ========================================================================
@@ -710,19 +781,11 @@ begin
                 s_size_held <= s_sz_raw_d;
             end if;
 
-            -- Map 128 + k/2 + k/8, then cap (1.25x on SD fields).
+            -- Map 128 + k/2 + k/8 (no SD cap: in virtual units 3x fits SD).
             s_sz_t1 <= to_unsigned(128, 10) + shift_right(s_size_held, 1);
             s_sz_t2 <= shift_right(s_size_held, 3);
             s_sz_t3 <= s_sz_t1 + s_sz_t2;
-            s_sz_sd <= '0';
-            if s_measured_v < 400 then
-                s_sz_sd <= '1';
-            end if;
-            if s_sz_sd = '1' and s_sz_t3 > 320 then
-                s_size_tgt <= to_unsigned(320, 10);
-            else
-                s_size_tgt <= s_sz_t3;
-            end if;
+            s_size_tgt <= s_sz_t3;
 
             -- Glide step = |target - glide| / 8, at least 1, precomputed.
             s_gl_diff <= signed(resize(s_size_tgt, 11))
@@ -788,21 +851,41 @@ begin
     -- Logo-space beam accumulators — same reset/advance conditions as
     -- pixel_counter, so s_hs = h_count * step exactly, on the same clock.
     -- ========================================================================
+    -- (Scaled per pixel / per line by the virtual steps; quasi-static terms
+    -- are precomputed one op per stage.  At 1080p s_hstep = s_vstep = step.)
     p_accum : process(clk)
     begin
         if rising_edge(clk) then
+            case s_xs is
+                when "011"  => s_hstep <= resize(s_step_f, 15)
+                                          + resize(s_step_f(13 downto 1), 15);
+                when "100"  => s_hstep <= shift_left(resize(s_step_f, 15), 1);
+                when others => s_hstep <= resize(s_step_f, 15);
+            end case;
+            if s_xs = 2 then
+                s_hsl_pre <= shift_left(resize(s_hstep, 18), 3);
+            else
+                s_hsl_pre <= shift_left(resize(s_hstep, 18), 2)
+                             + shift_left(resize(s_hstep, 18), 1);
+            end if;
+            if data_in.field_n = '0' then
+                s_voff <= shift_right(s_vstep, 1);
+            else
+                s_voff <= (others => '0');
+            end if;
+
             if s_timing.hsync_start = '1' then
                 s_hs  <= (others => '0');
-                s_hsl <= shift_left(resize(s_step_f, 25), 3);
+                s_hsl <= resize(s_hsl_pre, 25);
             elsif s_timing.avid = '1' then
-                s_hs  <= s_hs  + s_step_f;
-                s_hsl <= s_hsl + s_step_f;
+                s_hs  <= s_hs  + s_hstep;
+                s_hsl <= s_hsl + s_hstep;
             end if;
 
             if s_timing.vsync_start = '1' then
-                s_vs <= (others => '0');
+                s_vs <= resize(s_voff, 25);
             elsif s_timing.avid_start = '1' then
-                s_vs <= s_vs + s_step_f;
+                s_vs <= s_vs + s_vstep;
             end if;
         end if;
     end process;
@@ -829,6 +912,8 @@ begin
                     s_ma <= resize(s_step_f, 26);
                     if v_ch = "00" then
                         s_mb <= resize(unsigned(s_logo_x(v_i)(10 downto 0)), 12);
+                    elsif v_ch = "10" then
+                        s_mb <= s_ys;
                     else
                         s_mb <= resize(unsigned(s_logo_y(v_i)(10 downto 0)), 12);
                     end if;
@@ -871,6 +956,8 @@ begin
                         s_cx(v_i) <= -signed(resize(v_off, 20));
                     elsif v_ch = "01" then
                         s_dy(v_i) <= -signed(resize(v_off, 20));
+                    elsif v_ch = "10" then
+                        s_vstep <= s_macc(23 downto 8);   -- step x ys (Q12)
                     end if;
                 else
                     case v_ch is
@@ -1074,7 +1161,11 @@ begin
                             -- Inactive: park at initial state.  When the
                             -- user raises Count, this logo enters the
                             -- screen at a known non-overlapping spot.
-                            s_logo_x(i)    <= C_INIT_X(i);
+                            if i = 1 or i = 3 then
+                                s_logo_x(i) <= s_park_x;
+                            else
+                                s_logo_x(i) <= C_INIT_X(i);
+                            end if;
                             s_logo_y(i)    <= C_INIT_Y(i);
                             s_logo_xf(i)   <= (others => '0');
                             s_logo_yf(i)   <= (others => '0');
