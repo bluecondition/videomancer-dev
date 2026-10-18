@@ -147,3 +147,37 @@ glide in one state was a 52–62 MHz critical path).
   - mutants caught: `+160` for `+128` gave 14 mismatches in 6 frames; a
     threshold of `> 32` for `> 0` gave 41 in 12 frames.
 - **HW-validated 2026-10-15** (Ron: "looks good"): the stock-SDK v1.0.3 build, the first time hypnos has been flashed.
+
+## Resolution scaling (v1.0.4, 2026-10-17)
+- Baseline: ring period/centre in pixels (720p rings 1.5x, SD much larger and
+  2:1 tall -- field_n is tied high on hardware, so the field_n-toggle
+  interlace test never fired and every SD field line stepped dy by 1).
+- Fix, all per-mode constants (the engine keeps real x pixels, so the 1-px
+  box-filter AA is unchanged):
+  - steps from the timing ID (`registers_in(8)`): `s_ystp` = field line pitch
+    in x-pixel units, Q.8 (1080p/720p 256, 1080i 512, 480i 569, 480p 288,
+    576i 480, 576p 240), and a mode class (1080 / 720p / SD);
+  - dy accumulates `s_ystp` (Q.8, seeded +0.5 so 1080p integer rows are
+    unchanged); the measured height accumulates it too (`s_lacc`), so the
+    centre and K2 travel are in the same units;
+  - the log distance is made the 1080-line one by `+ log2(s)` (s = x step:
+    2 at SD, 1.5 at 720p), folded into the LREF subtract at S16
+    (`s15_ld - s_lref`, `s_lref = LREF - log2(s)`, Q14, exact). Ring period,
+    tunnel/dome warp (its reference radius included) and spiral follow
+    screen height. The radial AA gradient gets `+ log2(s)` (Q6, sequencer
+    state 8) so it stays per pixel; the angular one is already per pixel.
+  - A first try put `p * log2(s)` on the Q6 frequency log instead: the Q6
+    rounding, amplified by 1/p in the warp, left 720p rings ~2.7% large at
+    p = 0.28. The Q14 LREF fold is exact (720p/SD radii within 0.5%).
+  - `s_ilace` / `s_fpar` and the bottom-field +1 seed are gone (inert on
+    hardware; interlace now comes from the timing ID).
+- 1080p: 0 differing pixels against the baseline with `s_fpar` initialised
+  to '1'. Against the untouched baseline the first frames differ (594k px in
+  the 4-frame sim): with `s_fpar := '0'` the old toggle test took the FIRST
+  field after power-up for interlace (H doubled, dy step 2), which bends the
+  centre-glide start; the steady state is identical.
+- Verified with a glide-bypassed sim copy (`.scaling_work/hypnos_tmp/gb_*`,
+  sheet `sheets/hypnos_gbv2.png`): 720p and SD @4:3 match 1080p, rings round.
+- Build: `MAKE_TIMEOUT=1500 SEED=1 NEXTPNR_ROUTER="--router router1" ./build_programs.sh ron hypnos`,
+  all 6 seed 1: HD Analog 83.4, SD Analog 86.0, HD HDMI 92.7, SD HDMI 94.5,
+  HD Dual 89.5, SD Dual 94.3 MHz; 6782-6822 LC (~89%), 23/32 EBR.
