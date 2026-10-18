@@ -6,6 +6,21 @@
 --
 -- sugarcoat.vhd
 --
+-- v1.2.2 (2026-10-17): resolution scaling.  Every screen-space coordinate --
+-- the centred projections (stripes, bands, grooves, scallops), the cell
+-- engine (K3 cells, chips, beans, dots, checks, waffle grid) and the garnish
+-- cells -- runs in virtual 1080-line units, stepped per pixel / per field
+-- line from the video timing ID (registers_in(8)): 1.0 at 1080p
+-- (bit-identical), 1.5 at 720p, and at SD 2.0 across (a 1440-wide 4:3
+-- window) and 1080/486 per frame line.  Stripes and cells keep their size
+-- relative to the screen height and stay square on a 4:3 screen (at SD they
+-- were 2x wide and, on field lines, 4.4x tall).  The centre is measured in
+-- virtual units.  Thin features keep at least one sample per step: the
+-- chocolate grooves widen to 2 units when the x step exceeds one unit at
+-- the 8 px scale, and the garnish rows widen to 5 units where a field line
+-- spans more than 2.  The gloss / outline gradient and the Clean run length
+-- are pixel-scale filters and stay in pixels.
+--
 -- SUGARCOAT -- video re-rendered as candy: a 1:1 COLOUR -> CANDY-TEXTURE map.
 --
 -- Each pixel is classified into one of 16 CLASSES: 0-7 = luma band (Luma
@@ -142,6 +157,30 @@ architecture sugarcoat of program_top is
     );
 
     ----------------------------------------------------------------------
+    -- Resolution scaling: per-mode steps from the video timing ID.
+    ----------------------------------------------------------------------
+    function f_vstep_x(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0 | 4 | 8 | 12 => return to_unsigned(4, 3);
+            when 5 | 6 | 14     => return to_unsigned(3, 3);
+            when others         => return to_unsigned(2, 3);
+        end case;
+    end function;
+    function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(1138, 12);  -- 480i: 2 x 1080/486
+            when 4          => return to_unsigned(576, 12);   -- 480p: 1080/480
+            when 8          => return to_unsigned(960, 12);   -- 576i: 2 x 1080/576
+            when 12         => return to_unsigned(480, 12);   -- 576p: 1080/576
+            when 5 | 6 | 14 => return to_unsigned(384, 12);   -- 720p: 1.5
+            when 1 | 2 | 10 => return to_unsigned(512, 12);   -- 1080i: 2.0
+            when others     => return to_unsigned(256, 12);   -- 1080p: 1.0
+        end case;
+    end function;
+
+    ----------------------------------------------------------------------
     -- frame-latched controls + per-frame terms
     ----------------------------------------------------------------------
     signal s_p12 : unsigned(9 downto 0) := to_unsigned(768, 10);
@@ -187,10 +226,18 @@ architecture sugarcoat of program_top is
     signal s_avid_q     : std_logic := '0';
     signal s_xcnt       : unsigned(11 downto 0) := (others => '0');
     signal s_lcnt       : unsigned(11 downto 0) := (others => '0');
-    signal s_W          : unsigned(11 downto 0) := to_unsigned(720, 12);
-    signal s_H          : unsigned(11 downto 0) := to_unsigned(480, 12);
-    signal s_ilace      : std_logic := '0';
-    signal s_fpar       : std_logic := '0';
+    -- Resolution scaling: virtual 1080-line units.  x accumulators are Q.1
+    -- (steps 2/3/4 = 1.0/1.5/2.0 per pixel), y accumulators Q.8 per FIELD
+    -- line (already doubled for interlace).  s_Wv / s_Hv are the measured
+    -- raster in virtual units (1080p: the pixel / line counts).
+    signal s_xs         : unsigned(2 downto 0)  := to_unsigned(2, 3);
+    signal s_ys         : unsigned(11 downto 0) := to_unsigned(256, 12);
+    signal s_xva        : unsigned(12 downto 0) := (others => '0');
+    signal s_lva        : unsigned(19 downto 0) := (others => '0');
+    signal s_Wv         : unsigned(11 downto 0) := to_unsigned(720, 12);
+    signal s_Hv         : unsigned(11 downto 0) := to_unsigned(480, 12);
+    signal s_thy        : std_logic := '0';   -- a field line spans > 2 units
+    signal s_gw2        : std_logic := '0';   -- grooves 2 units wide
     signal s_cx, s_cy   : signed(13 downto 0) := (others => '0');
     signal s_seq        : unsigned(4 downto 0) := (others => '0');
 
@@ -200,9 +247,10 @@ architecture sugarcoat of program_top is
     ----------------------------------------------------------------------
     signal s_avid_p   : std_logic := '0';
     signal s_newframe : std_logic := '1';
-    signal s_dx       : signed(13 downto 0) := (others => '0');
-    signal s_dyc      : signed(13 downto 0) := (others => '0');
-    signal s_dyb      : signed(13 downto 0) := (others => '0');
+    signal s_dxa      : signed(14 downto 0) := (others => '0');   -- Q.1
+    signal s_dyca     : signed(21 downto 0) := (others => '0');   -- Q.8
+    signal s_dyba     : signed(21 downto 0) := (others => '0');   -- Q.8
+    signal s_xruna    : unsigned(12 downto 0) := (others => '0');  -- Q.1
     signal s_xrun     : unsigned(11 downto 0) := (others => '0');
     signal s_lrun     : unsigned(11 downto 0) := (others => '0');
 
@@ -327,26 +375,34 @@ begin
                 s_vs_pulse <= '1';
             end if;
 
+            -- per-mode virtual steps (the timing ID is static while a mode
+            -- runs, so free-running registers are enough)
+            s_xs <= f_vstep_x(registers_in(8)(3 downto 0));
+            s_ys <= f_vstep_y(registers_in(8)(3 downto 0));
+            if s_ys > 512 then s_thy <= '1'; else s_thy <= '0'; end if;
+
             s_avid_q <= data_in.avid;
             if data_in.avid = '1' then
                 s_xcnt <= s_xcnt + 1;
+                s_xva  <= s_xva + s_xs;
             elsif s_avid_q = '1' then
-                if s_xcnt > 16 then s_W <= s_xcnt; end if;
+                if s_xcnt > 16 then s_Wv <= s_xva(12 downto 1); end if;
                 s_xcnt <= (others => '0');
+                s_xva  <= (others => '0');
                 s_lcnt <= s_lcnt + 1;
+                s_lva  <= s_lva + s_ys;
             end if;
 
             if s_vs_pulse = '1' then
+                -- height in virtual rows (the interlace factor is in s_ys;
+                -- detecting it from field_n is dead on hardware, which ties
+                -- field_n high).  Only on a vsync that followed real active
+                -- lines (analog vsync serrates).
                 if s_lcnt > 8 then
-                    if s_ilace = '1' then s_H <= shift_left(s_lcnt, 1);
-                    else                  s_H <= s_lcnt; end if;
-                    -- field parity / interlace detect only on a vsync that
-                    -- followed real active lines (analog vsync serrates).
-                    s_fpar <= data_in.field_n;
-                    if data_in.field_n /= s_fpar then s_ilace <= '1';
-                    else                              s_ilace <= '0'; end if;
+                    s_Hv <= s_lva(19 downto 8);
                 end if;
                 s_lcnt <= (others => '0');
+                s_lva  <= (others => '0');
             end if;
         end if;
     end process p_measure;
@@ -373,8 +429,8 @@ begin
                 s_bank    <= registers_in(6)(2);          -- S9
                 s_sprk_on <= registers_in(6)(3);          -- S10
                 s_lumamap <= registers_in(6)(4);          -- S11
-                s_cx <= signed(resize(s_W(11 downto 1), 14));
-                s_cy <= signed(resize(s_H(11 downto 1), 14));
+                s_cx <= signed(resize(s_Wv(11 downto 1), 14));
+                s_cy <= signed(resize(s_Hv(11 downto 1), 14));
                 s_seq <= to_unsigned(7, 5);
             elsif s_seq /= 0 and data_in.avid = '0' then
                 case to_integer(s_seq) is
@@ -418,6 +474,11 @@ begin
                         else
                             s_scl <= to_integer(s_k3(9 downto 8));
                         end if;
+                    when 1 =>
+                        -- grooves: 2 units wide where a pixel steps more
+                        -- than one unit at the 8 px scale (720p / SD)
+                        if s_scl = 0 and s_xs /= 2 then s_gw2 <= '1';
+                        else                            s_gw2 <= '0'; end if;
                         -- STRENGTH (P12): chroma saturation floor 263 -> 8;
                         -- luma ramp quantiser 2 / 4 / 8 varieties.
                         s_sthr <= to_unsigned(8 + 255 - to_integer(s_p12(9 downto 2)), 10);
@@ -438,38 +499,43 @@ begin
     -- blanking), dy = y - cy (per active line, interlace-safe); xrun/lrun are
     -- the free-running pixel / latched line counters for the cell engine.
     ------------------------------------------------------------------------
+    -- (All in virtual units: dx Q.1 per pixel, dy Q.8 per active field line;
+    -- at 1080p the integer parts are the old pixel / line counts.)
     p_acc : process(clk)
-        variable v_dy0 : signed(13 downto 0);
+        variable v_dy0 : signed(21 downto 0);
     begin
         if rising_edge(clk) then
             s_avid_p <= data_in.avid;
             if s_vs_pulse = '1' then
                 s_newframe <= '1';
-                s_dx <= s_dx + 1;
+                s_dxa <= s_dxa + signed(resize(s_xs, 15));
             elsif data_in.avid = '1' and s_avid_p = '0' then
                 if s_newframe = '1' then
-                    if s_ilace = '1' and data_in.field_n = '1' then
-                        v_dy0 := resize(-s_cy, 14) + 1;
-                    else
-                        v_dy0 := resize(-s_cy, 14);
+                    -- the bottom field starts half a field step down (inert
+                    -- on hardware, which ties field_n high)
+                    v_dy0 := shift_left(resize(-s_cy, 22), 8);
+                    if data_in.field_n = '0' then
+                        v_dy0 := v_dy0 + signed(resize(s_ys(11 downto 1), 22));
                     end if;
-                    s_dyc <= v_dy0;
-                    if s_ilace = '1' then s_dyb <= v_dy0 + 2; else s_dyb <= v_dy0 + 1; end if;
+                    s_dyca <= v_dy0;
+                    s_dyba <= v_dy0 + signed(resize(s_ys, 22));
                     s_newframe <= '0';
                 else
-                    s_dyc <= s_dyb;
-                    if s_ilace = '1' then s_dyb <= s_dyb + 2; else s_dyb <= s_dyb + 1; end if;
+                    s_dyca <= s_dyba;
+                    s_dyba <= s_dyba + signed(resize(s_ys, 22));
                 end if;
-                s_dx   <= resize(-s_cx, 14);
-                s_lrun <= s_lcnt;
+                s_dxa  <= shift_left(resize(-s_cx, 15), 1);
+                s_lrun <= s_lva(19 downto 8);
             else
-                s_dx <= s_dx + 1;
+                s_dxa <= s_dxa + signed(resize(s_xs, 15));
             end if;
             -- xrun = xcnt - 1 during the line, keeps counting after it ends
-            if data_in.avid = '1' then s_xrun <= s_xcnt;
-            else                       s_xrun <= s_xrun + 1; end if;
+            if data_in.avid = '1' then s_xruna <= s_xva;
+            else                       s_xruna <= s_xruna + s_xs; end if;
         end if;
     end process p_acc;
+
+    s_xrun <= s_xruna(12 downto 1);
 
     ------------------------------------------------------------------------
     -- COLOUR PATH: proc-amp -> classify -> clean -> map -> texture -> out
@@ -489,6 +555,7 @@ begin
         variable v_hc : unsigned(15 downto 0);
         variable v_sx3, v_sy3 : unsigned(2 downto 0);
         variable v_indot : boolean;
+        variable v_hrow, v_grow : boolean;
     begin
         if rising_edge(clk) then
             -- source-luma delay line (Shade tap)
@@ -504,8 +571,8 @@ begin
             e1_y  <= unsigned(data_in.y);
             e1_u  <= unsigned(data_in.v);
             e1_v  <= unsigned(data_in.u);
-            e1_dx <= s_dx;
-            e1_dy <= s_dyc;
+            e1_dx <= s_dxa(14 downto 1);
+            e1_dy <= s_dyca(21 downto 8);
 
             -- G1 (2): CONTRAST gain as two shifted terms of the centred value
             -- (0.375 0.5 0.625 0.75 1 1.5 2 3; step 4 = unity).
@@ -677,13 +744,24 @@ begin
             -- cream / nonpareil dot: regular grid, one dot per cell
             if (v_ax4 + v_ay4) < 5 then dot1 <= '1'; else dot1 <= '0'; end if;
 
-            -- GARNISH decision (8 px cells, fixed physical size)
+            -- GARNISH decision (8 px cells, fixed physical size -- K3 does
+            -- not scale it; virtual units like everything else).  Where a
+            -- field line spans more than 2 units (SD) the horizontal-jimmie
+            -- and glint rows widen to 5 units so every cell still lands one
+            -- line on them.
             v_hc := f_hash(resize(s_xrun(9 downto 3), 10),
                            s_lrun(8 downto 3) & "0000", x"5A3C");
             v_sx3 := s_xrun(2 downto 0);
             v_sy3 := s_lrun(2 downto 0);
+            if s_thy = '1' then
+                v_hrow := (v_sy3 >= 2 and v_sy3 <= 6);
+                v_grow := (v_sy3 >= 3);
+            else
+                v_hrow := (v_sy3 >= 3 and v_sy3 <= 4);
+                v_grow := (v_sy3 = 3);
+            end if;
             if v_hc(12) = '0' then
-                v_indot := (v_sy3 >= 3 and v_sy3 <= 4 and v_sx3 >= 1 and v_sx3 <= 6);
+                v_indot := (v_hrow and v_sx3 >= 1 and v_sx3 <= 6);
             else
                 v_indot := (v_sx3 >= 3 and v_sx3 <= 4 and v_sy3 >= 1 and v_sy3 <= 6);
             end if;
@@ -692,7 +770,7 @@ begin
                 g_type <= "01";                -- jimmie
             elsif s_sprk /= 0 and v_hc(15 downto 9) < ('0' & s_sprk(7 downto 2))
                   and v_hc(3 downto 0) > 13
-                  and v_sx3(2 downto 1) = "01" and v_sy3 = "011" then
+                  and v_sx3(2 downto 1) = "01" and v_grow then
                 g_type <= "10";                -- sugar-dust glint (2x1 px)
             else
                 g_type <= "00";
@@ -876,7 +954,9 @@ begin
             w_projh <= shift_right(unsigned(std_logic_vector(e1_dy(13 downto 0))), s_scl);
 
             -- chocolate-bar grooves: thin lines on both diagonals
-            if w_proj(4 downto 0) = "00000" or w_proj2(4 downto 0) = "00000" then
+            -- (2 units wide when a pixel steps more than one, see s_gw2)
+            if (w_proj(4 downto 1) = "0000" and (w_proj(0) = '0' or s_gw2 = '1'))
+               or (w_proj2(4 downto 1) = "0000" and (w_proj2(0) = '0' or s_gw2 = '1')) then
                 grv_f <= '1';
             else grv_f <= '0'; end if;
             -- scallop piping: thin wavy bands
