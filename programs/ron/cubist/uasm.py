@@ -61,7 +61,7 @@ SLOTW = {
 CTLR = {
     'k1': 0, 'k2': 1, 'k3': 2, 'W': 3, 'H': 4, 'hf': 5,
     'cx': 6, 'cy': 7, 'ilace': 8, 'field': 9, 'zfirst': 10,
-    'sw': 11, 'slider': 12, 'rand': 13, 'k6': 14,
+    'sw': 11, 'slider': 12, 'rand': 13, 'k6': 14, 'xa': 15,
 }
 
 

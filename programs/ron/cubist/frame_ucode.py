@@ -478,13 +478,19 @@ a.emit('MIN', dst=Y0, a=T0, b=T2)
 # BLOCK (box 1) straight off the basis: projected axes (Q6 px per cubie,
 # screen y down), axis z (visibility), and H / key / fill dotted with each
 # axis, so every face's value is just +/- one of these.
+# SD pixel aspect (v0.5.6): x px per cubie = Z * (1 + xa/4096), xa from the
+# timing ID (0 at HD, so 1080p/720p are unchanged; +455 on 480-line SD,
+# -256 on 576-line), so the cube stays square on a 4:3 SD screen
+a.emit('CTL', dst=T11, imm=CTLR['xa'])
+a.emit('MUL', a=Z, b=T11); a.emit('MRD', dst=T11, imm=12)
+a.emit('ADD', dst=T11, a=T11, b=Z)
 a.emit('LDI', dst=T7, imm=0)                      # 3i
 a.emit('LDI', dst=T6, imm=BOX1)                   # BOX1 + i
 a.label('bx1')
 a.emit('LDX', dst=T8, a=T7, imm=B)
 a.emit('LDX', dst=T9, a=T7, imm=B + 1)
 a.emit('LDX', dst=T10, a=T7, imm=B + 2)
-a.emit('MUL', a=T8, b=Z); a.emit('MRD', dst=T0, imm=0)
+a.emit('MUL', a=T8, b=T11); a.emit('MRD', dst=T0, imm=0)
 a.emit('SHR', dst=T0, a=T0, imm=10)
 a.emit('STX', a=T6, b=T0, imm=PX)
 a.emit('MUL', a=T9, b=Z); a.emit('MRD', dst=T0, imm=0)

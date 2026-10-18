@@ -1,5 +1,39 @@
 # Cubist — dev notes
 
+## Resolution scaling (v0.5.6, 2026-10-18)
+- Interlace came from `data_in.field_n` toggling, which core_top ties high:
+  on hardware (and in the field_n-high sims) SD was drawn in 243 field
+  lines, so the cube was twice as tall as wide. Now `s_ilace` comes from the
+  timing ID (`p_tid`: 0 / 8 / 1 / 2 / 10). `s_field` still latches field_n
+  (always '1' on hardware, so every field starts on frame line 1: a one-row
+  shift, harmless).
+- SD pixel aspect: microcode CTL 15 (`s_xa`, Q12 offset from 1.0: 0 on HD,
+  +455 = x1.111 on 480 lines, +512 on 480p, -256 = x0.9375 on 576) scales
+  the zoom for the projected x axes only (`T11 = Z + Z*xa>>12`, used by the
+  box-1 PX multiply; box 0 and all gradients derive from it). 4 words
+  (934/1024), inserted after the layer-turn section, so the `CTL rand` draws
+  keep their engine timing. Regenerate with `python3 regen_ucode.py`.
+- 720p "turn phase differs from 1080p" is not geometry: the turn picker
+  reads a free-running LFSR (`s_lfsr`, stepped every clock) at a point in
+  the vblank engine, so the drawn face/direction depend on the clocks per
+  field of each mode. Orientation glide, auto-spin and turn speed are per
+  field. The sims also start the zoom glide from `s_hf`'s power-up 480, so
+  after a few frames 1080p is further from its target than 720p/SD (a
+  startup transient). A sim-only copy with the LFSR stepped once per engine
+  start and the zoom glide bypassed (.scaling_work/cubist_tmp/detzb, sheet
+  cubist_dz) renders the same cube at 1080p / 720p / SD (r720 0.99,
+  rSD 0.96).
+- 1080p: the steady-state picture is bit-identical; the 7-frame sim differs
+  from the old render only through a STARTUP glitch the old detector had:
+  `s_fpar` powered up '0' against field_n '1', so the first field after load
+  was taken as interlaced (hf = 2160), which the zoom glide carried for ~2 s.
+  A sim-only copy of the old source with `s_fpar := '1'` renders 0
+  differing pixels against v0.5.6 at 1080p (7 frames).
+- Build (router1, seed 1 on all 6): HD Analog 77.3 / HD HDMI 79.7 /
+  HD Dual 81.6, SD 80.1 / 79.4 / 79.3 MHz; 6533-6566/7680 LC (85 %),
+  27/32 EBR. Not flashed. (A first build had `s_xa` 10 bits wide, so
+  `to_signed(512, 10)` wrapped the 480p entry to -512; widened to 11.)
+
 ## Community port — fit for the stock SDK (v0.5.5, 2026-10-15)
 
 - The stock LZX SDK builds 8 configs; its SD Standalone core is ~600 LC larger
