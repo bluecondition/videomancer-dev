@@ -10,8 +10,10 @@
 --
 --   K1 Glow      bloom gain
 --   K2 Threshold luma above which the blur blooms (black .. ~white)
---   K3 Radius    blur width 7..255 px (two cascaded boxes, exponential knob)
---   K4 Wobble    per-line sine displacement amplitude, 0..+-255 px
+--   K3 Radius    blur width 7..255 px (two cascaded boxes, exponential knob;
+--                1080-line px, scaled per mode)
+--   K4 Wobble    per-line sine displacement amplitude, 0..+-255 px (1080-
+--                line px, scaled per mode)
 --   K5 Rate      wobble roll speed, bipolar, centre = frozen
 --   K6 Period    vertical wavelength of the wobble
 --
@@ -22,7 +24,7 @@
 --   S11 Soft     the base picture is replaced by its blur (soft focus)
 --   P12 Halo     red halation: the un-warped glow read at +-d and added on
 --                top -- a wider glow that splits into twin ghosts as d grows
---                (d to 1/8 of the width)
+--                (d to 1/8 of the 1080p width, scaled with the height)
 --
 -- Blur: 8-bit luma through two cascaded running boxes of width n (4..128,
 -- 64 max in SD) that share one 256x16 EBR ring ({luma, box-1 mean} written
@@ -38,6 +40,18 @@
 -- columns, take the line's own edge pixel -- the fill continues the colour
 -- leading up to it, with no black seam.
 -- Latency 14 clocks, all modes, blanking-gated.
+--
+-- v1.0.2 (2026-10-17): resolution scaling.  Sizes are 1080-line pixels,
+-- scaled per mode from the video timing ID (registers_in(8)): the Radius
+-- table index drops 15 / 26 steps at 720p / SD (the table runs 26 steps per
+-- octave, so the box width is x 2/3 / x 1/2); the Wobble amplitude is x 2/3
+-- at 720p and x 1/2 at SD (Energy: the row mean is normalised per mode, so
+-- the same factors hold); the Period phase step per field line is scaled by
+-- the virtual line step (1.5 at 720p, 1080/486 x 2 per 480i field line; a
+-- serial multiplier); the halo spread uses a per-mode 1080-line width
+-- (1920 / 1280 / 960 px) instead of the measured width, so the ghosts sit
+-- the same distance from a highlight relative to the screen height.  1080p
+-- is unchanged (every step is exactly 1.0).
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -71,6 +85,30 @@ architecture halation of program_top is
         else
             return unsigned(v(9 downto 0));
         end if;
+    end function;
+
+    -- Resolution scaling: virtual 1080-line steps from the timing ID.  x step
+    -- in half units per pixel (1080: 2, 720p: 3, SD: 4), y step Q4.8 per
+    -- FIELD line (1080 / active lines, doubled for interlace).
+    function f_vstep_x(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0 | 4 | 8 | 12 => return to_unsigned(4, 3);
+            when 5 | 6 | 14     => return to_unsigned(3, 3);
+            when others         => return to_unsigned(2, 3);
+        end case;
+    end function;
+    function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(1138, 12);  -- 480i: 2 x 1080/486
+            when 4          => return to_unsigned(576, 12);   -- 480p: 1080/480
+            when 8          => return to_unsigned(960, 12);   -- 576i: 2 x 1080/576
+            when 12         => return to_unsigned(480, 12);   -- 576p: 1080/576
+            when 5 | 6 | 14 => return to_unsigned(384, 12);   -- 720p: 1.5
+            when 1 | 2 | 10 => return to_unsigned(512, 12);   -- 1080i: 2.0
+            when others     => return to_unsigned(256, 12);   -- 1080p: 1.0
+        end case;
     end function;
 
     -- Radius (K3 top 7 bits) -> box width n (exponential 4..128) and 1/n ~ rm / 2^(9 + sh)
@@ -329,6 +367,22 @@ architecture halation of program_top is
     signal s_hd     : unsigned(7 downto 0) := (others => '0');
     signal s_hg     : unsigned(7 downto 0) := (others => '0');
     signal s_hoff_l, s_hoff_r : signed(13 downto 0) := (others => '0');
+    -- resolution scaling (static per mode, decoded every clock)
+    signal s_vxs    : unsigned(2 downto 0)  := to_unsigned(2, 3);
+    signal s_vys    : unsigned(11 downto 0) := to_unsigned(256, 12);
+    signal s_ridx   : unsigned(6 downto 0)  := (others => '0');   -- Radius table index
+    signal s_eoff   : unsigned(9 downto 0)  := to_unsigned(683, 10); -- Energy-off amplitude factor (720p / SD)
+    signal s_esel   : unsigned(9 downto 0)  := (others => '0');   -- amplitude factor fed to the line multiply
+    signal s_hw     : unsigned(10 downto 0) := to_unsigned(1920, 11); -- 1080-line width in real px (halo)
+    signal s_esd    : unsigned(9 downto 0)  := (others => '0');   -- SD row sum / 256
+    signal s_esd_t  : unsigned(9 downto 0)  := (others => '0');
+    -- Period line step = (s_freq * y step) >> 8 on a free-running 16-clock
+    -- serial multiplier (both operands change only at vsync)
+    signal s_sm_cnt : unsigned(3 downto 0)  := (others => '0');
+    signal s_sm_a   : unsigned(13 downto 0) := (others => '0');
+    signal s_sm_b   : unsigned(11 downto 0) := (others => '0');
+    signal s_sm_p   : unsigned(25 downto 0) := (others => '0');
+    signal s_fstep  : unsigned(15 downto 0) := (others => '0');
 
     --------------------------------------------------------------------------
     -- Input / tracking
@@ -456,6 +510,8 @@ begin
         variable v_fp  : unsigned(15 downto 0);
         variable v_abs : signed(10 downto 0);
         variable v_mag : unsigned(13 downto 0);
+        variable v_ri  : unsigned(6 downto 0);
+        variable v_sm  : unsigned(14 downto 0);
     begin
         if rising_edge(clk) then
             s_prev_hsync_n <= data_in.hsync_n;
@@ -488,7 +544,52 @@ begin
             s_thr_b <= shift_right(s_k_thr, 4) + 64;
             s_thr   <= s_thr_a + s_thr_b;
             -- blur width: latched in vblank just ahead of the running-sum re-zero
-            s_rtab <= f_rtab(s_k_radius(9 downto 3));
+            -- resolution scaling: mode steps (static per mode)
+            s_vxs <= f_vstep_x(registers_in(8)(3 downto 0));
+            s_vys <= f_vstep_y(registers_in(8)(3 downto 0));
+            -- Radius index: -15 at 720p (x 2/3), -26 at SD (x 1/2), floored at 0
+            v_ri := s_k_radius(9 downto 3);
+            case s_vxs is
+                when "011" =>
+                    if v_ri < 15 then s_ridx <= (others => '0'); else s_ridx <= v_ri - 15; end if;
+                    s_eoff <= to_unsigned(683, 10);
+                    s_hw   <= to_unsigned(1280, 11);
+                when "100" =>
+                    if v_ri < 26 then s_ridx <= (others => '0'); else s_ridx <= v_ri - 26; end if;
+                    s_eoff <= to_unsigned(512, 10);
+                    s_hw   <= to_unsigned(960, 11);
+                when others =>
+                    s_ridx <= v_ri;
+                    s_eoff <= to_unsigned(683, 10);
+                    s_hw   <= to_unsigned(1920, 11);
+            end case;
+            s_rtab <= f_rtab(s_ridx);
+            -- Wobble amplitude factor: the row energy, or (Energy off) 1024 at
+            -- 1080 (state 1's plain shift), 683 at 720p, 512 at SD
+            if s_sw_energy = '1' then
+                s_esel <= s_erow;
+            else
+                s_esel <= s_eoff;
+            end if;
+            -- SD row energy: (sum / 256) x 0.664 = sum / 385, half the 1080 mean
+            -- scale (720p's sum / 512 over 1280 px is already 2/3 of it)
+            s_esd_t <= ('0' & s_esd(9 downto 1)) + ("000" & s_esd(9 downto 3));
+            if s_vxs = "100" then
+                s_erow <= s_esd_t + resize(s_esd_t(9 downto 4), 10);
+            end if;
+            -- Period line step = (s_freq * y step) >> 8 (1080p: s_freq): load at
+            -- 0, 12 shift-add steps, latch at 13
+            s_sm_cnt <= s_sm_cnt + 1;
+            if s_sm_cnt = 0 then
+                s_sm_a <= resize(s_freq, 14); s_sm_b <= s_vys; s_sm_p <= (others => '0');
+            elsif s_sm_cnt <= 12 then
+                if s_sm_b(0) = '1' then v_sm := ('0' & s_sm_p(25 downto 12)) + ('0' & s_sm_a);
+                else v_sm := '0' & s_sm_p(25 downto 12); end if;
+                s_sm_p <= v_sm & s_sm_p(11 downto 1);
+                s_sm_b <= '0' & s_sm_b(11 downto 1);
+            elsif s_sm_cnt = 13 then
+                s_fstep <= s_sm_p(23 downto 8);
+            end if;
             if s_line_width > 1024 then
                 s_sd <= '0';
             else
@@ -519,11 +620,11 @@ begin
             case to_integer(s_lstep) is
                 when 0 =>
                     s_sin_addr <= s_line_phase(15 downto 8);
-                    s_ampe_h <= s_kwob * s_erow(9 downto 5);
-                    s_ampe_l <= s_kwob * s_erow(4 downto 0);
+                    s_ampe_h <= s_kwob * s_esel(9 downto 5);
+                    s_ampe_l <= s_kwob * s_esel(4 downto 0);
                     s_lstep <= s_lstep + 1;
                 when 1 =>
-                    if s_sw_energy = '1' then
+                    if s_sw_energy = '1' or s_vxs /= "010" then
                         s_ampe <= shift_left(resize(s_ampe_h, 20), 5) + resize(s_ampe_l, 20);
                     else
                         s_ampe <= s_kwob & "0000000000";
@@ -599,7 +700,7 @@ begin
                     s_pp <= s_p_halo(9 downto 2) * s_p_halo(9 downto 2);
                     s_vstep <= s_vstep + 1;
                 when 6 =>
-                    s_dp <= s_pp(15 downto 8) * s_line_width;
+                    s_dp <= s_pp(15 downto 8) * s_hw;
                     s_vstep <= s_vstep + 1;
                 when 7 =>
                     s_hd <= s_dp(18 downto 11);
@@ -619,17 +720,18 @@ begin
             s_w_edge <= s_line_width - (C_EDGE + 1);
             if s_prev_avid = '1' and data_in.avid = '0' then
                 s_line_width <= s_rx;
-                -- row energy = mean luma, scaled to ~10 bits (sum / 512 HD, / 256 SD)
-                if s_line_width > 1024 then
-                    s_erow <= s_esum(18 downto 9);
+                -- row energy = mean luma, scaled to ~10 bits (sum / 512 HD and
+                -- 720p; SD: sum / 256, then x 0.664 above)
+                if s_vxs = "100" then
+                    s_esd <= s_esum(17 downto 8);
                 else
-                    s_erow <= s_esum(17 downto 8);
+                    s_erow <= s_esum(18 downto 9);
                 end if;
             end if;
             if data_in.hsync_n = '0' and s_prev_hsync_n = '1' then
                 s_wpar  <= not s_wpar;
                 s_rbank <= s_wpar;
-                s_line_phase <= s_line_phase + resize(s_freq, 16);
+                s_line_phase <= s_line_phase + s_fstep;
                 s_lstep <= (others => '0');
             end if;
             if data_in.vsync_n = '0' and s_prev_vsync_n = '1' then

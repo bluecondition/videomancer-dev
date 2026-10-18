@@ -71,3 +71,27 @@ Structure / timing:
 HD Analog 84.3, HD HDMI 80.6, HD Dual 80.1, SD 81.8 / 76.5 / 84.0 MHz;
 5,520–5,540 LC (72%), 26/32 EBR. TOML-only edits: repack the cached bitstreams
 (regenerate program_config.bin, then vmprog_pack.py) rather than rebuilding.
+
+## v1.0.2 resolution scaling (2026-10-17)
+
+Sizes are 1080-line pixels, scaled per mode from the timing ID
+(`registers_in(8)`), so 720p and SD show the 1080p look at the same size
+relative to the screen height. 1080p is bit-identical (sim pixel diff 0).
+- Radius: the table index drops 15 (720p) / 26 (SD) steps. The table runs
+  26 steps per octave, so the box width is x2/3 / x1/2 (SD never reaches the
+  old n = 64 cap now). Before, 720p used the full 1080 widths (1.5x too wide)
+  and SD used them too up to the n = 64 cap (up to 2x too long relative to
+  the height).
+- Wobble amplitude x2/3 (720p) / x1/2 (SD); was fixed px. Energy on: the row
+  mean is normalised per mode (720p's sum/512 over 1280 px already carries
+  the 2/3; SD is now sum/385, was sum/256).
+- Period: the per-line phase step is x the virtual line step (1.5 at 720p,
+  4.44 per 480i field line), on a 16-clock serial multiplier. It was per
+  field line, so SD waves were 4.4x too long relative to the height.
+- Halo spread: d uses a per-mode 1080-line width (1920 / 1280 / 960 px)
+  instead of the measured width (SD 720 gave 3/4 of the height-scaled
+  spread).
+
+Build (`./build_combo.sh halation`, router2): 6/6 on seed 1. HD Analog 85.4,
+HD HDMI 87.8, HD Dual 93.9; SD 83.3 / 89.5 / 88.3 MHz. 5,633-5,654 LC (74%),
+26/32 EBR.
