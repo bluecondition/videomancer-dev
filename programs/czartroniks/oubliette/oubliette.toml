@@ -131,4 +131,4 @@ rotary_potentiometer_2 = 900
 # nextpnr placement seed for the stock LZX build (one seed, all 8 configs):
 # every seed 1-8 builds all 8, but seeds 1, 3, 4, 6, 7, 8 miss 74.25 MHz on
 # the program's own HD paths; seed 5 closes all three HD configs.
-seed = 5
+seed = 2
