@@ -12,8 +12,9 @@
 --   K2 Wipe     pane boundaries slide across the screen (glided)
 --   K3 Barrel   lens strength, bipolar (pincushion .. barrel), glided
 --   K4 Fringe   chromatic spread, 3 .. 50% of the lens scale
---   K5 Segment  mirror segment width, 64 .. 1024 px at HD (continuous,
---               exponential, a fraction of the width in every mode)
+--   K5 Segment  mirror segment width, 64 .. 1024 px at 1080p (continuous,
+--               exponential; the same fraction of the screen HEIGHT in
+--               every mode)
 --   K6 Slide    slide speed of the mirrored strip, bipolar, squared, detent
 --
 --   S7  Mirror  odd panes mirrored
@@ -21,7 +22,18 @@
 --   S9  Fold    mirror (triangle) / repeat (sawtooth), same segment width
 --   S10 Edges   outside the line: black / mirrored
 --   S11 Fringe  U wide / V wide
---   P12 Depth   segments narrow continuously, up to 16x (8 px floor)
+--   P12 Depth   segments narrow continuously, up to 16x (8 px floor at
+--               1080p, scaled with the segment)
+--
+-- v0.2.2 (2026-10-17): resolution scaling.  The segment exponent used
+-- log2(measured width / 1920), so segments were a fraction of the WIDTH
+-- (0.72x the 1080p size on SD's 4:3 screen).  It now takes -log2(x step)
+-- from the timing ID (1080 0, 720p -0.585, SD -1 octave): a segment is the
+-- same fraction of the screen height in every mode, like a 1440-unit 4:3
+-- window of the 1080p picture.  The 8 px floor and the slide speed scale
+-- the same way (SD floor 4 px: fold exponent 3 added).  Panes, Wipe and the
+-- lens profile were already fractions of the width / field height.  1080p
+-- bit-identical.
 --
 -- v0.2.0.  Each pane folds its own coordinate (v0.1's Screen lens folded
 -- the whole line, so Panes did nothing with Mirror off).  The four nested
@@ -96,6 +108,13 @@ architecture hallway of program_top is
 
     -- per field
     signal s_vstep : unsigned(5 downto 0) := (others => '1');
+    -- resolution scaling: per-mode constants decoded every clock from the
+    -- timing ID -- log2 of the 1080p-equivalent width (1920 / x step, 1/256
+    -- octave), the segment floor, and that width for the slide speed
+    signal s_tid : std_logic_vector(3 downto 0) := "0011";
+    signal s_lwm : unsigned(11 downto 0) := to_unsigned(2784, 12);
+    signal s_lfl : signed(13 downto 0) := to_signed(768, 14);
+    signal s_wsp : unsigned(10 downto 0) := to_unsigned(1920, 11);
     signal s_wf : unsigned(10 downto 0) := to_unsigned(1920, 11);
     signal s_hf : unsigned(10 downto 0) := to_unsigned(1080, 11);
     signal s_nw : unsigned(10 downto 0) := (others => '1');
@@ -223,6 +242,18 @@ begin
             if s_in_avid = '1' then s_wr_x <= s_wr_x + 1; else s_wr_x <= (others => '0'); end if;
             s_we <= data_in.avid;
 
+            -- resolution scaling: 1080 (x step 1): Mitchell log2(1920) = 2784,
+            -- floor 2^3 px; 720p (1.5): -150 (log2 1.5); SD (2): -256
+            s_tid <= registers_in(8)(3 downto 0);
+            case to_integer(unsigned(s_tid)) is
+                when 0 | 4 | 8 | 12 =>
+                    s_lwm <= to_unsigned(2528, 12); s_lfl <= to_signed(512, 14); s_wsp <= to_unsigned(960, 11);
+                when 5 | 6 | 14 =>
+                    s_lwm <= to_unsigned(2634, 12); s_lfl <= to_signed(618, 14); s_wsp <= to_unsigned(1280, 11);
+                when others =>
+                    s_lwm <= to_unsigned(2784, 12); s_lfl <= to_signed(768, 14); s_wsp <= to_unsigned(1920, 11);
+            end case;
+
             -- chroma phase: hsync->avid parity of this line vs the stored line
             s_hpar <= not s_hpar;
             if data_in.avid = '1' and s_prev_avid = '0' then s_line_par <= s_hpar; end if;
@@ -290,9 +321,10 @@ begin
                     if s_bulge_g >= 512 then s_kbm <= resize(s_bulge_g(9 downto 1) - 256, 9); s_kbs <= '0';
                     else s_kbm <= resize(256 - s_bulge_g(9 downto 1), 9); s_kbs <= '1'; end if;
                 when 2 =>
-                    -- log2(width) in 1/256 octave (Mitchell); segment exponent
-                    -- L = 6 + K5 (4 octaves) - P12 (4 octaves) + log2(w / 1920)
-                    s_lw <= s_ne & s_nw(9 downto 2);
+                    -- segment exponent L = 6 + K5 (4 octaves) - P12 (4 octaves)
+                    -- - log2(x step): a fraction of the screen height (was
+                    -- + log2(measured width / 1920), Mitchell)
+                    s_lw <= s_lwm;
                     s_lt <= signed(resize(s_k_seg, 14)) - signed(resize(s_p_depth, 14)) - 1248;
                     s_fm_a <= resize(s_wf, 14); s_fm_b <= resize(s_wipe_g, 12); s_fm_acc <= (others => '0'); s_fm_n <= to_unsigned(12, 4);
                     s_vstep <= s_vstep + 1;
@@ -310,7 +342,7 @@ begin
                 when 5 =>
                     if s_fm_n = 0 then
                         s_pw3 <= resize(s_fm_acc(20 downto 11), 11);
-                        if s_lg < 768 then s_lc <= to_unsigned(768, 12);
+                        if s_lg < s_lfl then s_lc <= unsigned(s_lfl(11 downto 0));
                         elsif s_lg > 2559 then s_lc <= to_unsigned(2559, 12);
                         else s_lc <= unsigned(s_lg(11 downto 0)); end if;
                         s_vstep <= s_vstep + 1;
@@ -360,10 +392,11 @@ begin
                     v_t := s_t1 + s_t2;
                     s_mi <= 256 + resize(v_t(17 downto 8), 10);
                     s_vstep <= s_vstep + 1;
-                -- slide: (d^2 >> 11) 1/16 px a field, x width / 2048, x g
+                -- slide: (d^2 >> 11) 1/16 px a field, x (1920 / x step) / 2048,
+                -- x g (was x measured width: SD slid 0.75x its segments)
                 when 15 =>
                     if s_fm_n = 0 then
-                        s_fm_a <= resize(s_fm_acc(17 downto 11), 14); s_fm_b <= resize(s_wf, 12); s_fm_acc <= (others => '0'); s_fm_n <= to_unsigned(12, 4);
+                        s_fm_a <= resize(s_fm_acc(17 downto 11), 14); s_fm_b <= resize(s_wsp, 12); s_fm_acc <= (others => '0'); s_fm_n <= to_unsigned(12, 4);
                         s_vstep <= s_vstep + 1;
                     end if;
                 when 16 =>
@@ -380,6 +413,7 @@ begin
                 when 18 =>
                     -- phase step (1/65536 of a fold period of 2^(ks+1))
                     case to_integer(s_ks) is
+                        when 3 => s_dphi <= shift_left(resize(s_spdu, 16), 8);
                         when 4 => s_dphi <= shift_left(resize(s_spdu, 16), 7);
                         when 5 => s_dphi <= shift_left(resize(s_spdu, 16), 6);
                         when 6 => s_dphi <= shift_left(resize(s_spdu, 16), 5);
@@ -394,6 +428,7 @@ begin
                     s_vstep <= s_vstep + 1;
                 when 20 =>
                     case to_integer(s_ks) is
+                        when 3 => s_slide_u <= resize(s_phi(15 downto 12), 11);
                         when 4 => s_slide_u <= resize(s_phi(15 downto 11), 11);
                         when 5 => s_slide_u <= resize(s_phi(15 downto 10), 11);
                         when 6 => s_slide_u <= resize(s_phi(15 downto 9), 11);
