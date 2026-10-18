@@ -6,6 +6,18 @@
 --
 -- candyhills.vhd  (v1.1 — "Candy Hills")
 --
+-- v1.1.3 (2026-10-17): resolution scaling.  The raster counters run in
+-- virtual 1080-line units, stepped per pixel / per field line from the video
+-- timing ID (registers_in(8)): 1.0 at 1080p (identical to before), 1.5 at
+-- 720p, and at SD 2.0 across (a 1440-wide 4:3 window) and 1080/486 per frame
+-- line.  Hill amplitude and wavelengths, stripe width and the 45-degree angle,
+-- bushes (round on a 4:3 screen), crest line, lit band, shade fades and the sky
+-- gradient therefore keep their proportions.  Interlaced fields step two frame
+-- lines and the bottom field starts half a step down; the 45-degree diagonal
+-- accumulator advances one 1080-line step per virtual line crossed.  The
+-- pre/post-roll is 64 virtual px (fewer clocks at SD/720p), and the bush
+-- anchor write fires when x crosses the slot centre (a step can skip it).
+--
 -- A real-time, side-scrolling 2D generative landscape: large, long, sweeping
 -- rolling candy hills filled with bold 45-degree stripes, dotted with round
 -- bushes, under a graded pastel sky, with sunlit crests fading to shaded
@@ -167,6 +179,13 @@ architecture candyhills of program_top is
     type t_int3 is array(0 to 2) of integer;
     constant BR2   : t_int3 := (2304, 576, 144);   -- 48^2 / 24^2 / 12^2
     constant BRIN2 : t_int3 := (1849, 441, 100);   -- 43^2 / 21^2 / 10^2
+    -- Resolution scaling: the outline must be at least one field step thick
+    -- or an SD field can fall past the dome's top cap (no dark cap, shimmer).
+    -- mid T=3 / bg T=2 are widened to max(T, y step) per mode: 480i
+    -- (4.44): 19.56^2 / 7.56^2, 576i (3.75): 20.25^2 / 8.25^2, 480p (2.25):
+    -- bg 9.75^2; fg (T=5) and every HD mode keep the constants above.
+    type t_brin is array(0 to 2) of unsigned(10 downto 0);
+    signal s_brin2 : t_brin := (to_unsigned(1849, 11), to_unsigned(441, 11), to_unsigned(100, 11));
 
     constant HAZE_Y  : integer := 820;   -- pale desaturated distance tint
     constant HAZE_U  : integer := 500;
@@ -208,6 +227,34 @@ architecture candyhills of program_top is
     end function;
 
     --------------------------------------------------------------------------
+    -- Resolution scaling: per-mode steps from the video timing ID.
+    --------------------------------------------------------------------------
+    -- x step in half virtual units per pixel: 1080 2 (1.0), 720p 3 (1.5),
+    -- SD 4 (2.0: 720 px span 1440 units, a 4:3 window of the 1080 canvas).
+    function f_vstep_x(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0 | 4 | 8 | 12 => return to_unsigned(4, 3);
+            when 5 | 6 | 14     => return to_unsigned(3, 3);
+            when others         => return to_unsigned(2, 3);
+        end case;
+    end function;
+    -- y step in Q4.8 virtual units per FIELD line (1080 / active lines,
+    -- doubled for interlaced modes).
+    function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(1138, 12);  -- 480i: 2 x 1080/486
+            when 4          => return to_unsigned(576, 12);   -- 480p: 1080/480
+            when 8          => return to_unsigned(960, 12);   -- 576i: 2 x 1080/576
+            when 12         => return to_unsigned(480, 12);   -- 576p: 1080/576
+            when 5 | 6 | 14 => return to_unsigned(384, 12);   -- 720p: 1.5
+            when 1 | 2 | 10 => return to_unsigned(512, 12);   -- 1080i: 2.0
+            when others     => return to_unsigned(256, 12);   -- 1080p: 1.0
+        end case;
+    end function;
+
+    --------------------------------------------------------------------------
     -- Array types.
     --------------------------------------------------------------------------
     type t_l3u10  is array(0 to 2) of unsigned(9 downto 0);
@@ -234,23 +281,44 @@ architecture candyhills of program_top is
     -- and a POST-ROLL 64 px past its right edge (in hblank; 128 of SD's 138
     -- blank clocks), so every bush slot centre touching the screen is
     -- evaluated on every line — see the bush anchor store.
+    -- Resolution scaling: x and y run in VIRTUAL 1080-line units (see
+    -- f_vstep_x/y).  xa is Q.1 (half units; steps 2/3/4 per pixel), pya Q.8
+    -- per field line; xv / py are their integer parts.  ROLL is 64 virtual
+    -- px, i.e. s_roll = 64/43/32 clocks at 1080/720p/SD.  At 720p the
+    -- pre-roll from -64.0 in 1.5 steps ends on +0.5 (int 0); the crest phase
+    -- follows the same fractional x, so everything stays locked.
     constant ROLL    : integer := 64;       -- = fg half-slot (largest centre offset)
-    signal xv        : signed(12 downto 0) := to_signed(-ROLL, 13);
+    signal xa        : signed(13 downto 0) := to_signed(-2 * ROLL, 14);
+    signal xv        : signed(12 downto 0);
+    signal s_xs      : unsigned(2 downto 0) := to_unsigned(2, 3);     -- x step, Q.1
+    signal s_ys      : unsigned(11 downto 0) := to_unsigned(256, 12); -- y step, Q4.8 / field line
+    signal s_roll    : unsigned(6 downto 0) := to_unsigned(ROLL, 7);  -- post-roll clocks
     signal post_cnt  : unsigned(6 downto 0) := (others => '0');
     signal prev_avid : std_logic := '0';
     signal scan_par  : std_logic := '0';    -- anchor-store bank written by this scan
-    signal py        : unsigned(10 downto 0) := (others => '0');
+    signal pya       : unsigned(18 downto 0) := (others => '0');
+    signal py        : unsigned(10 downto 0);
+    signal yk        : unsigned(2 downto 0) := (others => '0');   -- pending virtual-line diagonal steps
+    signal fld_bot   : std_logic := '0';    -- this field started half a step down (bottom)
     signal frame_act : std_logic := '0';
 
     signal act_h     : unsigned(10 downto 0) := to_unsigned(720, 11);
     signal max_py    : unsigned(10 downto 0) := (others => '0');
 
-    -- Per-pixel crest phase accumulators (reset to per-frame offset at line start).
+    -- Per-pixel crest phase accumulators (reset to per-frame offset at line
+    -- start).  21 bits = 2x the old 20-bit phase (angle = bits 20:11), so the
+    -- per-pixel step STEP*s_xs is exact at 1.5x; at 1080p it is 2*STEP and the
+    -- angle bits are identical to before.
     type t_l3u21s is array(0 to 2) of unsigned(20 downto 0);
-    signal phA       : t_l3u20 := (others => (others => '0'));
-    signal phB       : t_l3u20 := (others => (others => '0'));
-    signal offA      : t_l3u20 := (others => (others => '0'));  -- = floor(world-x)*STEP_A
-    signal offB      : t_l3u20 := (others => (others => '0'));
+    type t_l3u12 is array(0 to 2) of unsigned(11 downto 0);
+    signal phA       : t_l3u21s := (others => (others => '0'));
+    signal phB       : t_l3u21s := (others => (others => '0'));
+    signal offA      : t_l3u21s := (others => (others => '0'));  -- = floor(world-x)*2*STEP_A
+    signal offB      : t_l3u21s := (others => (others => '0'));
+    signal s_stA     : t_l3u12 := (to_unsigned(2 * 210, 12), to_unsigned(2 * 154, 12),
+                                   to_unsigned(2 * 110, 12));     -- STEP_A * s_xs
+    signal s_stB     : t_l3u12 := (to_unsigned(2 * 699, 12), to_unsigned(2 * 524, 12),
+                                   to_unsigned(2 * 374, 12));     -- STEP_B * s_xs
     signal scrollPx  : t_l3u21s := (others => (others => '0')); -- 1/128-px units
     signal sub_cnt   : unsigned(6 downto 0) := (others => '0'); -- scroll sub-steps left
 
@@ -324,7 +392,6 @@ architecture candyhills of program_top is
     signal sky_u, sky_v : unsigned(9 downto 0) := C_MID;
     -- Sky gradient: luma per LINE (py changes only at hsync, and the 13-clock
     -- pipeline never straddles a line in the active region).
-    signal s_skysh : integer range 0 to 2 := 0;   -- per-frame py scaling (by act_h)
     signal sky_ly  : unsigned(9 downto 0) := to_unsigned(SKY_YT, 10);
 
     --------------------------------------------------------------------------
@@ -516,9 +583,12 @@ begin
     --------------------------------------------------------------------------
     -- Crest sine LUTs.
     --------------------------------------------------------------------------
+    xv <= xa(13 downto 1);              -- virtual x, integer part
+    py <= pya(18 downto 8);             -- virtual y, integer part
+
     gen_crest_lut : for l in 0 to 2 generate
-        angA(l) <= std_logic_vector(phA(l)(19 downto 10));
-        angB(l) <= std_logic_vector(phB(l)(19 downto 10));
+        angA(l) <= std_logic_vector(phA(l)(20 downto 11));
+        angB(l) <= std_logic_vector(phB(l)(20 downto 11));
         uA : entity work.sin_cos_full_lut_10x10
             port map (angle_in => angA(l), sin_out => sinA(l), cos_out => open);
         uB : entity work.sin_cos_full_lut_10x10
@@ -568,9 +638,12 @@ begin
         -- emulation (a delayed write port + bypass mux per RAM).
         attribute no_rw_check of mem : signal is true;
     begin
-        anc_we(L)    <= '1' when r4_sx(L)(BSLOTLOG - 1 - L downto 0)
-                                 = to_unsigned(2 ** (BSLOTLOG - 1 - L), BSLOTLOG - L)
-                        else '0';
+        -- Write when x CROSSES the slot centre (the centre bit rises from
+        -- the previous pixel, r5a_sx): a virtual step of 1.5/2 can skip the
+        -- exact centre value.  At 1080p (step 1) this is the old centre
+        -- pixel; the only other firing is a scan-restart jump, which lands
+        -- in a slot whose centre is <= -64 (dome off-screen).
+        anc_we(L)    <= r4_sx(L)(BSLOTLOG - 1 - L) and not r5a_sx(L)(BSLOTLOG - 1 - L);
         anc_waddr(L) <= r4_par & r4_sx(L)(BSLOTLOG + 6 - L downto BSLOTLOG - L);
         anc_raddr(L) <= (not r2_par) & r2_sx(L)(BSLOTLOG + 6 - L downto BSLOTLOG - L);
         p_anc : process(clk)
@@ -593,7 +666,7 @@ begin
         variable v_ki  : unsigned(5 downto 0);
         variable v_fn  : unsigned(5 downto 0);
         variable v_ns  : unsigned(20 downto 0);
-        variable v_sa, v_sb : unsigned(19 downto 0);
+        variable v_sa, v_sb : unsigned(20 downto 0);
         variable v_kv  : unsigned(20 downto 0);
         variable v_gd  : signed(10 downto 0);
         variable v_g   : unsigned(10 downto 0);
@@ -602,8 +675,38 @@ begin
         variable v_hd : signed(10 downto 0);
         variable v_step : std_logic;
         variable v_k3d : signed(10 downto 0);
+        variable v_fy  : unsigned(11 downto 0);
     begin
         if rising_edge(clk) then
+            -- Resolution scaling: per-mode steps, decoded free-running from the
+            -- (static) timing ID, registered so nothing downstream sees the
+            -- decode.  Phase steps = STEP * x step (Q.1) for the 21-bit
+            -- accumulators.
+            s_xs <= f_vstep_x(registers_in(8)(3 downto 0));
+            s_ys <= f_vstep_y(registers_in(8)(3 downto 0));
+            for l in 0 to 2 loop
+                case to_integer(s_xs) is
+                    when 3 =>      s_stA(l) <= to_unsigned(3 * STEP_A(l), 12);
+                                   s_stB(l) <= to_unsigned(3 * STEP_B(l), 12);
+                    when 4 =>      s_stA(l) <= to_unsigned(4 * STEP_A(l), 12);
+                                   s_stB(l) <= to_unsigned(4 * STEP_B(l), 12);
+                    when others => s_stA(l) <= to_unsigned(2 * STEP_A(l), 12);
+                                   s_stB(l) <= to_unsigned(2 * STEP_B(l), 12);
+                end case;
+            end loop;
+            case to_integer(unsigned(registers_in(8)(3 downto 0))) is
+                when 0      => s_brin2(1) <= to_unsigned(382, 11); s_brin2(2) <= to_unsigned(57, 11);  -- 480i
+                when 8      => s_brin2(1) <= to_unsigned(410, 11); s_brin2(2) <= to_unsigned(68, 11);  -- 576i
+                when 4      => s_brin2(1) <= to_unsigned(441, 11); s_brin2(2) <= to_unsigned(95, 11);  -- 480p
+                when others => s_brin2(1) <= to_unsigned(BRIN2(1), 11); s_brin2(2) <= to_unsigned(BRIN2(2), 11);
+            end case;
+            s_brin2(0) <= to_unsigned(BRIN2(0), 11);
+            case to_integer(s_xs) is
+                when 3 =>      s_roll <= to_unsigned(43, 7);   -- 43 x 1.5 = 64.5
+                when 4 =>      s_roll <= to_unsigned(32, 7);
+                when others => s_roll <= to_unsigned(ROLL, 7);
+            end case;
+
             if unsigned(registers_in(3)) < 8 then
                 s_k4_idx <= unsigned(registers_in(3)(2 downto 0));
             else
@@ -682,16 +785,17 @@ begin
             -- x = -ROLL (a constant world offset — crest, stripes and bushes
             -- all key off the same virtual x, so they stay locked).  Lines
             -- before the frame's first active line re-seed on hsync so line 0
-            -- picks up this frame's scroll.
+            -- picks up this frame's scroll.  (Virtual units: xa steps s_xs
+            -- half units per clock; ROLL = 64 virtual px = s_roll clocks.)
             prev_avid <= data_in.avid;
             v_step := '0';
             if prev_avid = '1' and data_in.avid = '0' and xv >= 128 then
-                post_cnt <= to_unsigned(ROLL, 7);             -- line end: post-roll
+                post_cnt <= s_roll;                           -- line end: post-roll
                 v_step := '1';
             elsif post_cnt /= 0 then
                 post_cnt <= post_cnt - 1;
                 if post_cnt = 1 then                          -- post-roll done: next scan
-                    xv <= to_signed(-ROLL, 13);
+                    xa <= to_signed(-2 * ROLL, 14);
                     scan_par <= not scan_par;
                     for l in 0 to 2 loop
                         phA(l) <= offA(l);
@@ -701,19 +805,19 @@ begin
                     v_step := '1';
                 end if;
             elsif v_h_edge = '1' and frame_act = '0' then     -- pre-frame re-seed
-                xv <= to_signed(-ROLL, 13);
+                xa <= to_signed(-2 * ROLL, 14);
                 for l in 0 to 2 loop
                     phA(l) <= offA(l);
                     phB(l) <= offB(l);
                 end loop;
-            elsif data_in.avid = '1' or xv < 0 then           -- active, or pre-roll
+            elsif data_in.avid = '1' or xa < 0 then           -- active, or pre-roll
                 v_step := '1';
             end if;
             if v_step = '1' then
-                xv <= xv + 1;
+                xa <= xa + signed(resize(s_xs, 14));
                 for l in 0 to 2 loop
-                    phA(l) <= phA(l) + to_unsigned(STEP_A(l), 20);
-                    phB(l) <= phB(l) + to_unsigned(STEP_B(l), 20);
+                    phA(l) <= phA(l) + resize(s_stA(l), 21);
+                    phB(l) <= phB(l) + resize(s_stB(l), 21);
                 end loop;
             end if;
 
@@ -730,12 +834,13 @@ begin
                     else                v_kv := to_unsigned(VEL16(l), 21); end if;
                     v_ns := scrollPx(l) + v_kv;
                     scrollPx(l) <= v_ns;
+                    -- (2x phase units: one virtual px = 2*STEP)
                     if s_rev = '1' then
-                        v_sa := to_unsigned(2 ** 20 - STEP_A(l), 20);
-                        v_sb := to_unsigned(2 ** 20 - STEP_B(l), 20);
+                        v_sa := to_unsigned(2 ** 21 - 2 * STEP_A(l), 21);
+                        v_sb := to_unsigned(2 ** 21 - 2 * STEP_B(l), 21);
                     else
-                        v_sa := to_unsigned(STEP_A(l), 20);
-                        v_sb := to_unsigned(STEP_B(l), 20);
+                        v_sa := to_unsigned(2 * STEP_A(l), 21);
+                        v_sb := to_unsigned(2 * STEP_B(l), 21);
                     end if;
                     if v_ns(7) /= scrollPx(l)(7) then
                         offA(l) <= offA(l) + v_sa;
@@ -744,23 +849,37 @@ begin
                 end loop;
             end if;
 
-            -- Sky gradient luma for the current line: py scaled so the frame
-            -- height spans ~+120..145 luma at any resolution.
-            case s_skysh is
-                when 0      => v_g := shift_right(resize(py, 11), 3);                    -- >= 896 lines
-                when 1      => v_g := shift_right(resize(py, 11), 3) + shift_right(py, 4); -- >= 640
-                when others => v_g := shift_right(resize(py, 11), 2);                    -- SD
-            end case;
+            -- Sky gradient luma for the current line: py/8 (+~135 by the
+            -- bottom).  py is in virtual 1080-line units at every resolution,
+            -- so the old per-height-class scaling is no longer needed.
+            v_g := shift_right(resize(py, 11), 3);
             if v_g > 200 then v_g := to_unsigned(200, 11); end if;
             sky_ly <= to_unsigned(SKY_YT, 10) + v_g(9 downto 0);
+
+            -- 45-degree diagonal accumulators: one add per VIRTUAL line per
+            -- layer; slope = (F/16) << layer, exactly the stripes' base x
+            -- gradient (in 1/2^FANPOST units) -> constant 45 degrees.  A field
+            -- line crosses yk = 1 (1080p) .. 5 (480i) virtual lines; the adds
+            -- run on the clocks after the hsync (in hblank), so ydacc =
+            -- py * slope at every resolution.  21 bits = 10-bit phase +
+            -- FANPOST fraction; wraps mod-1024.  (The branches below override.)
+            if yk /= 0 then
+                yk <= yk - 1;
+                for l in 0 to 2 loop
+                    ydacc(l) <= ydacc(l) + shift_left(resize(s_F, 21), FANPOST - 4 + l);
+                end loop;
+            end if;
 
             -- Y counter + per-frame work.  Act only on the FIRST vsync edge of
             -- a field (frame_act = saw active video): analog vsync serrates, and
             -- a repeat edge would re-scroll and latch act_h = ~0.
             if v_v_edge = '1' and frame_act = '1' then
-                py        <= (others => '0');
+                pya       <= (others => '0');
                 frame_act <= '0';
-                act_h  <= py;                          -- py at vsync = active height
+                -- py at vsync = active height (virtual).  Latched from top /
+                -- progressive fields only: a bottom field starts half a step
+                -- down and would make the baselines twitter between fields.
+                if fld_bot = '0' then act_h <= py; end if;
                 max_py <= (others => '0');
 
                 -- Advance scroll: run this frame's sub-steps; re-haze the palette.
@@ -801,9 +920,6 @@ begin
 
                 -- Crest-lit band depth ~ 15% of frame height.
                 s_litd <= shift_right(act_h, 3) + shift_right(act_h, 5);
-                if act_h >= 896 then    s_skysh <= 0;
-                elsif act_h >= 640 then s_skysh <= 1;
-                else                    s_skysh <= 2; end if;
                 s_bden <= unsigned(registers_in(5)(9 downto 6));                -- K6 0..15
 
                 s_lay3    <= registers_in(6)(0);   -- S7
@@ -827,17 +943,22 @@ begin
 
             elsif data_in.avid = '1' and frame_act = '0' then
                 frame_act <= '1';
-                py        <= (others => '0');
                 ydacc     <= (others => (others => '0'));
+                -- the bottom field (field_n = '0', SD only: HD inputs tie it
+                -- high) starts half a field step = one frame line down
+                if data_in.field_n = '0' then
+                    pya     <= resize(s_ys(11 downto 1), 19);
+                    yk      <= s_ys(11 downto 9);          -- int(ys/2) diagonal steps
+                    fld_bot <= '1';
+                else
+                    pya     <= (others => '0');
+                    yk      <= (others => '0');
+                    fld_bot <= '0';
+                end if;
             elsif v_h_edge = '1' then
-                py <= py + 1;
-                -- 45-degree diagonal accumulators: one add per LINE per layer;
-                -- slope = (F/16) << layer, exactly the stripes' base x gradient
-                -- (in 1/2^FANPOST units) -> constant 45 degrees.
-                -- 21 bits = 10-bit phase + FANPOST fraction; wraps mod-1024.
-                for l in 0 to 2 loop
-                    ydacc(l) <= ydacc(l) + shift_left(resize(s_F, 21), FANPOST - 4 + l);
-                end loop;
+                pya  <= pya + s_ys;
+                v_fy := resize(pya(7 downto 0), 12) + s_ys;
+                yk   <= v_fy(10 downto 8);                 -- virtual lines crossed
             end if;
         end if;
     end process p_position;
@@ -1044,7 +1165,7 @@ begin
             --   even dark outline; else none.
             for L in 0 to 2 loop
                 if r6_bok(L) = '1' and to_integer(r6_d2(L)) <= BR2(L) then
-                    if to_integer(r6_d2(L)) <= BRIN2(L) then r6b_bcode(L) <= "01";
+                    if r6_d2(L) <= resize(s_brin2(L), 13) then r6b_bcode(L) <= "01";
                     else                                     r6b_bcode(L) <= "10"; end if;
                 else
                     r6b_bcode(L) <= "00";

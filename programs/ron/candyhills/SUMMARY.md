@@ -6,6 +6,43 @@ seed 1**. HD Analog 82.5, HD HDMI 87.8, HD Dual 87.6, SD 82.7–84.0 MHz.
 6725–6759 LC (88%, down from 98%), 26/32 EBR. vmprog 468837 B. Rebuild with
 `NEXTPNR_ROUTER="--router router1" MAKE_TIMEOUT=600
 ./build_programs.sh ron candyhills`.
+
+**v1.1.3 (2026-10-17): resolution scaling** (not yet flashed). The raster
+counters run in virtual 1080-line units, stepped per pixel / per field line
+from the video timing ID (`registers_in(8)`): 1.0 at 1080p, 1.5 at 720p, and
+at SD 2.0 across (a 1440-wide 4:3 window of the landscape) and 1080/486 per
+frame line. Hill amplitude and wavelengths, stripe width and the 45° angle,
+round bushes, crest line, lit band, shade fades and the sky gradient now keep
+their proportions at 720p and SD (before, SD hills ran off-screen, bushes were
+2:1 ellipses and stripes lost their 45°). 1080p output is bit-identical to
+v1.1.2 (image-tester pixel diff = 0). Details:
+- x: Q.1 accumulator `xa`; crest phase accumulators widened to 21 bits
+  (2x units) so the per-pixel step `STEP*xs` is exact at 1.5x. Pre/post-roll
+  = 64 virtual px (64/43/32 clocks at 1080/720p/SD; SD now needs 64 blanking
+  clocks, not 128).
+- y: Q.8 accumulator `pya`; the bottom field starts half a step down. The
+  45° diagonal accumulator adds one 1080-line step per virtual line crossed
+  (1..5 adds in hblank after each hsync). `act_h` is latched from top fields
+  only, so the baselines don't twitter between fields. The old per-height
+  sky-gradient classes are gone (py is always 1080-line units).
+- Bush anchor write fires when x CROSSES the slot centre (a 1.5/2 step can
+  skip the exact value).
+- Bush outline: mid/bg rings are widened to at least one field step at 480i
+  / 576i / 480p (inner radius² per mode), so an SD field can't skip a dome's
+  dark cap. HD modes keep the old constants.
+- Build (router1, all seed 1): HD Analog 81.8, HD HDMI 85.4, HD Dual 85.4,
+  SD Analog 90.4, SD HDMI 88.1, SD Dual 85.2 MHz. 6832–6875 LC (89.0–89.5%,
+  +~110), 26/32 EBR. vmprog 471306 B. Same build line as above.
+- Verified with full-raster renders (.scaling_work, real blanking): 1080p 0
+  differing pixels vs v1.1.2; 720p = 1080p scaled (r 1.00); SD = the left
+  4:3 window of the 1080p frame (r 0.97 at a matched vsync count).
+- Sim-only artifact (pre-existing, not changed): the P12 glide's
+  `resize(signed(...), 10)` folds 512 to 0 in GHDL simulation (synthesis
+  truncates, so hardware holds 512), so every sim restarts the amplitude
+  from 0 and climbs about 1/8 per vsync. A 480i capture has had twice the vsyncs
+  of a 1080p one at the same warmup and shows taller hills. Compare SD at
+  half the warmup.
+
 v1.0.x was iterated on hardware through 2026-09-29 (bush shiver fixed by the
 integer world grid, defaults set). v1.1.0 confirmed on hardware, including
 S10 Video Sky through its new EBR-ring input path. Defaults come from Ron's
@@ -130,7 +167,8 @@ It streams with no frame buffer, and only the input sync drives the raster
   white, scale the lift by (1023 − y).
 - **Colour lines:** thin coloured lines over coloured areas on an analog source
   would mean U/V line pairing. The fix is cubist's program-generated avid.
-- **Sim caveat:** the pre-roll and post-roll need 128 blanking clocks, but the
-  image tester's fake hblank is 64, so sims shift x. Real SD has 138 and HD 280.
-- **SD only:** interlaced modes draw the stripe diagonal per field line, so it
-  looks steeper than 45°.
+- **Sim caveat:** the pre-roll and post-roll need 128 blanking clocks at HD
+  (86 at 720p, 64 at SD since v1.1.3), but the image tester's fake hblank is
+  64, so default sims shift x. Real SD has 138 and HD 280.
+- **SD (fixed in v1.1.3):** interlaced modes used to draw the stripe diagonal
+  per field line, so it looked steeper than 45°.
