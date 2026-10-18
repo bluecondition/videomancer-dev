@@ -83,6 +83,12 @@
 --
 -- Latency: 8 clocks, constant across all modes.  EBR: 20.  No DSP.
 --
+-- v3.0.5 (2026-10-18): resolution scaling.  The band's edge feather was a
+--   fixed 31 quarter-rows (~8 rows), so it read 1.5x softer at 720p and
+--   2-4x softer at SD.  It now spans the same fraction of the screen height
+--   everywhere: the feather depth is multiplied by 1080/fh (a second divide
+--   in the vblank sequencer; x1 at 1080 rows, so 1080p is unchanged).
+--
 -- Author: czartroniks
 
 library ieee;
@@ -475,6 +481,10 @@ architecture aurora of program_top is
     -- once the design's critical path; nextpnr times vblank logic at the
     -- pixel clock)
     signal s_dvsr : unsigned(14 downto 0) := to_unsigned(1, 15);
+    -- feather scale (v3.0.5): 1080 / fh in Q.8 (256 at 1080 rows), so the
+    -- edge feather spans the same fraction of the screen height on every
+    -- raster (31 q2 at 1080p; fewer real rows at 720p / SD)
+    signal s_vs   : unsigned(11 downto 0) := to_unsigned(256, 12);
 
     -- ==== scanner (monotone left-to-right, one column per clock) ====
     signal s_run     : std_logic := '0';
@@ -535,11 +545,12 @@ architecture aurora of program_top is
     signal m6b_po : signed(15 downto 0) := (others => '0');
     signal m6b_h  : unsigned(12 downto 0) := (others => '0');
     -- m6c: saturated signed offset
-    signal m6c_dp : unsigned(12 downto 0) := (others => '0');
     signal m6c_po : signed(13 downto 0) := (others => '0');
-    signal m6c_h  : unsigned(12 downto 0) := (others => '0');
-    -- m9: alpha + hue partials, m10: recombined hue
-    signal m9_a   : unsigned(5 downto 0) := (others => '0');
+    signal m6c_u  : unsigned(4 downto 0) := (others => '0');  -- feather depth
+    signal m6c_in : std_logic := '0';                         -- inside the core
+    -- m9: scaled feather depth + hue partials, m10: alpha, recombined hue
+    signal m9_t   : unsigned(16 downto 0) := (others => '0');
+    signal m9_in  : std_logic := '0';
     signal m9_hhi, m9_hlo : signed(20 downto 0) := (others => '0');
     signal m10_a  : unsigned(5 downto 0) := (others => '0');
     signal m10_hp : unsigned(15 downto 0) := (others => '0');
@@ -840,7 +851,7 @@ begin
                         s_dq  <= (others => '0');
                         s_bit <= 0;
                         s_op  <= 22;
-                    when 22 =>
+                    when 22 | 25 =>
                         v_dr := s_dr(13 downto 0) & s_dn(23);
                         s_dn <= s_dn(22 downto 0) & '0';
                         if v_dr >= s_dvsr then
@@ -852,7 +863,8 @@ begin
                         end if;
                         if s_bit = 23 then
                             s_bit <= 0;
-                            s_op  <= 23;
+                            if s_op = 22 then s_op <= 23;
+                            else              s_op <= 26; end if;
                         else
                             s_bit <= s_bit + 1;
                         end if;
@@ -861,6 +873,23 @@ begin
                             s_hscale <= to_unsigned(4095, 12);
                         else
                             s_hscale <= resize(s_dq, 12);
+                        end if;
+                        s_op <= 24;
+                    -- feather scale: vs = 1080*256 / fh (same divider)
+                    when 24 =>
+                        s_dn   <= to_unsigned(276480, 24);
+                        s_dvsr <= resize(s_fh, 15);
+                        s_dr   <= (others => '0');
+                        s_dq   <= (others => '0');
+                        s_bit  <= 0;
+                        s_op   <= 25;
+                    when 26 =>
+                        if s_dq > to_unsigned(4095, 24) then
+                            s_vs <= to_unsigned(4095, 12);
+                        elsif s_dq < to_unsigned(256, 24) then
+                            s_vs <= to_unsigned(256, 12);
+                        else
+                            s_vs <= resize(s_dq, 12);
                         end if;
                         s_op <= 31;
                     when others =>
@@ -1080,25 +1109,37 @@ begin
                 else
                     m6c_po <= m6b_po(13 downto 0);
                 end if;
-                m6c_dp <= m6b_dp;
-                m6c_h  <= m6b_h;
-
-                -- m9: alpha from the breathed half-thickness; hue partials
-                v_al := signed('0' & m6c_h) - signed('0' & m6c_dp);
+                -- feather depth from the breathed half-thickness: u = how
+                -- far outside the solid core (0 = on its edge, 31 = past
+                -- the 1080p feather), in = inside the core
+                v_al := signed('0' & m6b_h) - signed('0' & m6b_dp);
+                if v_al > 31 then m6c_in <= '1';
+                else              m6c_in <= '0'; end if;
                 if v_al <= 0 then
-                    m9_a <= (others => '0');
-                elsif v_al > 31 then
-                    m9_a <= to_unsigned(63, 6);
+                    m6c_u <= to_unsigned(31, 5);
                 else
-                    m9_a <= unsigned(v_al(4 downto 0)) & '0';
+                    m6c_u <= to_unsigned(31, 5) - unsigned(v_al(4 downto 0));
                 end if;
+
+                -- m9: depth x (1080 / fh), so the feather is the same
+                -- fraction of the screen height on every raster (x1 at
+                -- 1080 rows: alpha = H31 - |d| exactly as before); hue
+                -- partials
+                m9_t  <= m6c_u * s_vs;
+                m9_in <= m6c_in;
                 m9_hhi <= m6c_po * signed('0' & s_hscale(11 downto 6));
                 m9_hlo <= m6c_po * signed('0' & s_hscale(5 downto 0));
 
                 -- m10: recombine the hue product
                 v_hpp := shift_left(resize(m9_hhi, 27), 6) + resize(m9_hlo, 27);
                 m10_hp <= unsigned(v_hpp(15 downto 0));
-                m10_a  <= m9_a;
+                if m9_in = '1' then
+                    m10_a <= to_unsigned(63, 6);
+                elsif m9_t(16 downto 8) >= 31 then
+                    m10_a <= (others => '0');
+                else
+                    m10_a <= (to_unsigned(31, 5) - m9_t(12 downto 8)) & '0';
+                end if;
             end if;
 
             -- ---- writer: one write per column, in order ----

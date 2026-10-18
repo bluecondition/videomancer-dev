@@ -9,6 +9,22 @@ hand-typed placeholders — capture real ones from the device with
 HD Dual seed 2; see Status).
 
 
+**v3.0.5 (2026-10-18) — resolution scaling (feather follows screen height).**
+The wave itself was already resolution-independent (centre, amplitude,
+thickness all fractions of the measured height; wave count across the
+width). Only the band's edge feather was fixed: 31 quarter-rows (~8 rows),
+so 1.5x softer at 720p and 2-4x softer at SD. The vblank sequencer now runs
+a second divide on its divider, `s_vs = 1080*256 / fh` (Q.8, 256 at 1080
+rows), and the alpha stage multiplies the feather depth by it
+(`m6c_u` = 31 - (H31 - |d|) clamped, `m9_t = m6c_u * s_vs`, alpha =
+31 - (m9_t >> 8)): x1 at 1080 rows, so 1080p is bit-identical. Divide by
+the measured `fh`, not a timing-ID table, so it is right whether the SDK
+field detector reports interlace (fh = 486 frame rows) or not (243 field
+rows). Generated avid / parity logic untouched. Build (router1, seed 1 on
+all 6): HD Analog 84.2 / HD HDMI 85.7 / HD Dual 88.8, SD 87.9 / 89.7 /
+91.0 MHz, 6923-6951/7680 LC (90-91%), 20/32 EBR. Not flashed.
+
+
 **v3.0.3 (2026-10-08) — Mirror is a true reflection.** v3.0.2 was
 HW-confirmed by Ron ("both problems are fixed… almost finalized"), who then
 asked why the mirrored halves don't meet where their gradients line up. The
