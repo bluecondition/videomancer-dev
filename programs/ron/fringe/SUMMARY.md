@@ -239,3 +239,35 @@ on the spoke edges (~15 px at the frame edge for 6 iterations).
 - Packed LC (stock SDK): SD Standalone 8071 → 7620, HD Dual 7489 → 7056.
 - Stock build: all 8 configs on seed 1; own HD timing (core without the Sync
   Out generator) 83.5/90.4/84.4 MHz Analog/HDMI/Dual.
+
+## Resolution scaling (v1.0.3, 2026-10-17)
+- **Before:** ring/spoke pitch, phase offsets and the centre were all counted
+  in raw pixels and field lines. 720p came out 1.5x coarser than 1080p. SD was
+  coarser still, and its circles were 2:1 vertical ellipses: interlace was
+  detected from field_n toggling, and the core ties field_n high, so every
+  field line counted as one line.
+- **Now:** every coordinate runs in virtual 1080-line units, stepped from the
+  timing ID (`registers_in(8)`, `f_vstep_x`/`f_vstep_y` as in mondrian). The
+  steps are 1.0 at 1080p, 1.5 at 720p, and at SD 2.0 across (a 1440-wide 4:3
+  window) by 1080/486 per frame line.
+  - The CORDIC dx is a Q.1 accumulator. dy is the line's integer virtual row
+    from one shared Q.8 accumulator.
+  - The measured W/H that place the centre are counted the same way: SD reads
+    1440 x 1080, 720p 1920 x 1080.
+  - The vblank shift-add engine gains four products (12 in all). 8/9 give the
+    per-line DDA step `step x ystep >> 8`. 10/11 overwrite `s_step` with the
+    per-pixel step `step x xstep >> 1`, after its last plain-step use. Both
+    are exactly `step` at 1080p.
+  - The field_n interlace logic (`s_ilace`, `s_fpar`, the 2x DDA step, the
+    odd-field +1) is gone. The timing ID's y step already spans two frame
+    lines.
+  - No bottom-field half-step offset: field_n never reads '0' on hardware.
+- 1080p is bit-identical (diff1080: 0 px). The DDA/step changes reduce to the
+  old values exactly at 1080p.
+- At the finest Scale (4 px at 1080p) SD now aliases (~2 px horizontal,
+  <1 line vertical periods). That is inherent; the defaults are clean.
+- Build: `./build_programs.sh ron fringe` (router2). HD Analog seed 2 at
+  78.60 MHz, HD HDMI 78.70, HD Dual 76.31. SD Analog 73.70, SD HDMI 75.30,
+  SD Dual 71.28 (Fmin 27). All others on seed 1. 6591-6611 / 7680 LC (86 %),
+  2 EBR. In standalone yosys it is smaller than v1.0.2 (LUT 4318 -> 4068),
+  because the dead interlace muxes went.

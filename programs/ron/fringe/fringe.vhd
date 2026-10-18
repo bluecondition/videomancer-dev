@@ -6,6 +6,18 @@
 --
 -- fringe.vhd
 --
+-- v1.0.3 (2026-10-17): resolution scaling.  Every coordinate -- the CORDIC's
+-- dx/dy, the phase DDAs and the measured width/height that place the centre
+-- -- runs in virtual 1080-line units, stepped per pixel / per field line from
+-- the video timing ID (registers_in(8)): 1.0 at 1080p (bit-identical to
+-- before), 1.5 at 720p, and at SD 2.0 across (a 1440-wide 4:3 window) and
+-- 1080/486 per frame line.  Pitch, phase offsets and ring spacing therefore
+-- keep their size relative to screen height, and circles stay round on a 4:3
+-- screen.  Interlace comes from the timing ID's y step, not field_n (which
+-- the core ties high), so SD rings are no longer 2:1 vertical ellipses.  The
+-- per-frame engine gains four products: the per-line DDA step (step x ystep)
+-- and the per-pixel step (step x xstep) for each layer.
+--
 -- FRINGE -- a moire interference instrument.  Two layers of transparent
 -- black-and-white line-work are composited over a solid field; when their
 -- pitches, forms or phases approach one another, large-scale interference
@@ -14,8 +26,9 @@
 --
 -- Controls
 --   K1 TEXTURE A   10 zoned textures, snap select (deadbanded, no glide)
---   K2 SCALE A     pattern pitch, 1024 px .. 4 px, continuous + glided
---   K3 PHASE A     X phase, +/-1024 px of translation (rotation for spokes)
+--   K2 SCALE A     pattern pitch, 1024 .. 4 px (1080p px; scaled with the
+--                  screen height in other modes), continuous + glided
+--   K3 PHASE A     X phase, +/-1024 (1080p) px of translation (rotation for spokes)
 --   K4 TEXTURE B / K5 SCALE B / K6 PHASE B  -- same for the second layer
 --   P12 SWEEP      Y phase of layer B (reversed) -- the primary gesture: rakes one
 --                  pattern across the other.  Only the RELATIVE phase makes
@@ -169,6 +182,34 @@ architecture fringe of program_top is
     end function;
 
     ----------------------------------------------------------------------
+    -- Resolution scaling: per-mode steps from the video timing ID.
+    ----------------------------------------------------------------------
+    -- x step in half virtual units per pixel: 1080 2 (1.0), 720p 3 (1.5),
+    -- SD 4 (2.0: 720 px span 1440 units, a 4:3 window of the 1080 canvas).
+    function f_vstep_x(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0 | 4 | 8 | 12 => return to_unsigned(4, 3);
+            when 5 | 6 | 14     => return to_unsigned(3, 3);
+            when others         => return to_unsigned(2, 3);
+        end case;
+    end function;
+    -- y step in Q4.8 virtual units per FIELD line (1080 / active lines,
+    -- doubled for interlaced modes).
+    function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(1138, 12);  -- 480i: 2 x 1080/486
+            when 4          => return to_unsigned(576, 12);   -- 480p: 1080/480
+            when 8          => return to_unsigned(960, 12);   -- 576i: 2 x 1080/576
+            when 12         => return to_unsigned(480, 12);   -- 576p: 1080/576
+            when 5 | 6 | 14 => return to_unsigned(384, 12);   -- 720p: 1.5
+            when 1 | 2 | 10 => return to_unsigned(512, 12);   -- 1080i: 2.0
+            when others     => return to_unsigned(256, 12);   -- 1080p: 1.0
+        end case;
+    end function;
+
+    ----------------------------------------------------------------------
     -- CORDIC: 4 stages x 2 vectoring iterations, 3 guard bits, 4096 = turn.
     -- Worst case is a centre driven a full 1024 px off screen: hypot <=
     -- 2526, K*hypot <= 4160, <<3 guard <= 33280, and the iteration overshoot
@@ -229,17 +270,19 @@ architecture fringe of program_top is
     type t_l1   is array(0 to 1) of std_logic;
 
     ----------------------------------------------------------------------
-    -- raster measurement
+    -- raster measurement, in VIRTUAL 1080-line units: the width and height
+    -- that place the centre are counted with the per-mode steps (x Q.1, y
+    -- Q.8 per field line), so SD measures 1440 x 1080 and 720p 1920 x 1080.
     ----------------------------------------------------------------------
     signal s_prev_vsync : std_logic := '1';
     signal s_vs_pulse   : std_logic := '0';
     signal s_avid_q     : std_logic := '0';
-    signal s_xcnt       : unsigned(11 downto 0) := (others => '0');
-    signal s_lcnt       : unsigned(11 downto 0) := (others => '0');
-    signal s_W          : unsigned(11 downto 0) := to_unsigned(720, 12);
-    signal s_H          : unsigned(11 downto 0) := to_unsigned(480, 12);
-    signal s_ilace      : std_logic := '0';
-    signal s_fpar       : std_logic := '0';
+    signal s_xs         : unsigned(2 downto 0)  := to_unsigned(2, 3);    -- Q.1 per pixel
+    signal s_ys         : unsigned(11 downto 0) := to_unsigned(256, 12); -- Q.8 per field line
+    signal s_xva        : unsigned(12 downto 0) := (others => '0');      -- Q.1 width count
+    signal s_lva        : unsigned(19 downto 0) := (others => '0');      -- Q.8 height count
+    signal s_W          : unsigned(11 downto 0) := to_unsigned(1920, 12);
+    signal s_H          : unsigned(11 downto 0) := to_unsigned(1080, 12);
     signal s_cx, s_cy   : unsigned(11 downto 0) := (others => '0');
 
     ----------------------------------------------------------------------
@@ -279,7 +322,10 @@ architecture fringe of program_top is
     signal s_kq   : t_l10 := (others => (others => '0'));   -- deadbanded knob
     signal s_tex  : t_l4  := (others => 0);
     signal s_sb   : t_l16 := (others => to_unsigned(4096, 16));  -- base step Q8
-    signal s_step : t_l16 := (others => to_unsigned(4096, 16));  -- final step Q8
+    -- final step Q8 per virtual unit; the sequence's last two products
+    -- turn it into the per-PIXEL step (x the virtual x step) for the DDA
+    signal s_step : t_l17 := (others => to_unsigned(4096, 17));
+    signal s_stepy : t_l20 := (others => to_unsigned(4096, 20)); -- per field line
     signal s_mulb : t_l16 := (others => (others => '0'));   -- multiplier operand
     signal s_n64  : t_l16 := (others => (others => '0'));   -- blades * 64
     signal s_rot  : t_l12 := (others => (others => '0'));   -- spoke rotation
@@ -291,28 +337,32 @@ architecture fringe of program_top is
     ----------------------------------------------------------------------
     -- vblank sequencer + the one shift-add engine that computes every
     -- per-frame product: 0/1 the 0.7071 diagonal fold, 2/3 the 0.6094
-    -- CORDIC-gain fold, 4..7 the four DDA start values.
+    -- CORDIC-gain fold, 4..7 the four DDA start values, 8/9 the per-line
+    -- DDA steps (step x ystep), 10/11 the per-pixel steps (step x xstep).
     ----------------------------------------------------------------------
     signal s_ph    : integer range 0 to 2 := 0;
     signal s_seq   : integer range 0 to 8 := 0;
     -- (starts idle: the accumulators' initial values already equal their
     -- initial targets x 64, so the first vsync's update would be a no-op)
     signal s_grot  : integer range 0 to 5 := 0;
-    signal s_midx  : integer range 0 to 7 := 0;
+    signal s_midx  : integer range 0 to 11 := 0;
     signal s_mbit  : integer range 0 to 13 := 0;
-    signal s_mcand : unsigned(23 downto 0) := (others => '0');
+    -- 28 bits: step (<= 65280) x ystep (<= 1138) reaches 2^27
+    signal s_mcand : unsigned(27 downto 0) := (others => '0');
     signal s_mplr  : unsigned(11 downto 0) := (others => '0');
-    signal s_macc  : unsigned(23 downto 0) := (others => '0');
+    signal s_macc  : unsigned(27 downto 0) := (others => '0');
     signal s_mneg  : std_logic := '0';
 
     ----------------------------------------------------------------------
     -- pixel-domain coordinate accumulators (CORDIC feed)
     ----------------------------------------------------------------------
+    -- (virtual units: dx is Q.1, stepped by the x step per pixel; dy is the
+    -- line's integer virtual row from the shared Q.8 accumulator s_vy)
+    type t_l14s is array(0 to 1) of signed(13 downto 0);
     signal s_avid_p   : std_logic := '0';
-    signal s_newframe : std_logic := '1';
-    signal s_dx       : t_l13s := (others => (others => '0'));
+    signal s_dxa      : t_l14s := (others => (others => '0'));
     signal s_dyc      : t_l13s := (others => (others => '0'));
-    signal s_dyb      : t_l13s := (others => (others => '0'));
+    signal s_vy       : unsigned(19 downto 0) := (others => '0');
 
     ----------------------------------------------------------------------
     -- phase-domain DDAs (cartesian textures), clocked at C_DDA_TAP
@@ -376,7 +426,9 @@ architecture fringe of program_top is
 begin
 
     ------------------------------------------------------------------------
-    -- raster measurement (interlace-aware)
+    -- raster measurement, in virtual units.  Interlace is NOT detected from
+    -- field_n (the core ties it high on every input): the timing ID's y step
+    -- already covers two frame lines per field line.
     ------------------------------------------------------------------------
     p_measure : process(clk)
     begin
@@ -389,22 +441,18 @@ begin
 
             s_avid_q <= data_in.avid;
             if data_in.avid = '1' then
-                s_xcnt <= s_xcnt + 1;
+                s_xva <= s_xva + s_xs;
             elsif s_avid_q = '1' then
-                if s_xcnt > 16 then s_W <= s_xcnt; end if;
-                s_xcnt <= (others => '0');
-                s_lcnt <= s_lcnt + 1;
+                if s_xva(12 downto 1) > 16 then s_W <= s_xva(12 downto 1); end if;
+                s_xva <= (others => '0');
+                s_lva <= s_lva + s_ys;
             end if;
 
             if s_vs_pulse = '1' then
-                if s_lcnt > 8 then
-                    if s_ilace = '1' then s_H <= shift_left(s_lcnt, 1);
-                    else                  s_H <= s_lcnt; end if;
-                end if;
-                s_lcnt <= (others => '0');
-                s_fpar <= data_in.field_n;
-                if data_in.field_n /= s_fpar then s_ilace <= '1';
-                else                              s_ilace <= '0'; end if;
+                if s_lva(19 downto 8) > 8 then s_H <= s_lva(19 downto 8); end if;
+                s_lva <= (others => '0');
+                s_xs  <= f_vstep_x(registers_in(8)(3 downto 0));
+                s_ys  <= f_vstep_y(registers_in(8)(3 downto 0));
             end if;
         end if;
     end process p_measure;
@@ -424,8 +472,8 @@ begin
         variable v_sl  : signed(12 downto 0);
         variable v_r2  : signed(12 downto 0);
         variable v_mv  : signed(12 downto 0);
-        variable v_mc  : unsigned(15 downto 0);
-        variable v_ng  : unsigned(23 downto 0);
+        variable v_mc  : unsigned(16 downto 0);
+        variable v_ng  : unsigned(27 downto 0);
         variable v_L   : integer range 0 to 1;
     begin
         if rising_edge(clk) then
@@ -603,18 +651,28 @@ begin
             elsif s_ph = 2 and data_in.avid = '0' then
                 if s_midx < 2 then v_L := s_midx;
                 elsif s_midx < 4 then v_L := s_midx - 2;
-                else                  v_L := (s_midx - 4) / 2; end if;
+                elsif s_midx < 8 then v_L := (s_midx - 4) / 2;
+                elsif s_midx < 10 then v_L := s_midx - 8;
+                else                  v_L := s_midx - 10; end if;
 
                 if s_mbit = 0 then
                     -- load the multiplier / multiplicand for this product
                     case s_midx is
                         when 0 | 1 =>              -- step * 181 / 256  (1/sqrt2)
                             s_mplr <= to_unsigned(181, 12);
-                            s_mcand <= resize(s_sb(v_L), 24);
+                            s_mcand <= resize(s_sb(v_L), 28);
                             s_mneg <= '0';
                         when 2 | 3 =>              -- step * 39 / 64  (1/1.6468)
                             s_mplr <= to_unsigned(39, 12);
-                            s_mcand <= resize(s_step(v_L), 24);
+                            s_mcand <= resize(s_step(v_L), 28);
+                            s_mneg <= '0';
+                        when 8 | 9 =>              -- step * ystep / 256 (per line)
+                            s_mplr <= s_ys;
+                            s_mcand <= resize(s_step(v_L), 28);
+                            s_mneg <= '0';
+                        when 10 | 11 =>            -- step * xstep / 2 (per pixel)
+                            s_mplr <= resize(s_xs, 12);
+                            s_mcand <= resize(s_step(v_L), 28);
                             s_mneg <= '0';
                         when others =>             -- -(centre + offset) * step
                             if (s_midx mod 2) = 0 then v_mv := s_mx(v_L);
@@ -627,7 +685,7 @@ begin
                                 s_mplr <= unsigned(std_logic_vector(resize(v_mv, 12)));
                                 s_mneg <= '0';
                             end if;
-                            s_mcand <= resize(v_mc, 24);
+                            s_mcand <= resize(v_mc, 28);
                     end case;
                     s_macc <= (others => '0');
                     s_mbit <= 1;
@@ -644,9 +702,9 @@ begin
                             -- 45-degree textures run both axes at 1/sqrt(2) so
                             -- the pitch ACROSS the stripes matches the menu
                             if s_tex(v_L) = T_DIAG or s_tex(v_L) = T_ANTI then
-                                s_step(v_L) <= resize(shift_right(s_macc, 8), 16);
+                                s_step(v_L) <= resize(shift_right(s_macc, 8), 17);
                             else
-                                s_step(v_L) <= s_sb(v_L);
+                                s_step(v_L) <= resize(s_sb(v_L), 17);
                             end if;
                         when 2 | 3 =>
                             if s_tex(v_L) = T_CIRCLE then
@@ -654,6 +712,14 @@ begin
                             else
                                 s_mulb(v_L) <= s_n64(v_L);
                             end if;
+                        when 8 | 9 =>
+                            -- DDA step per field line (1080p: exactly step)
+                            s_stepy(v_L) <= s_macc(27 downto 8);
+                        when 10 | 11 =>
+                            -- DDA step per pixel (1080p: exactly step).  Last
+                            -- use of the plain step this frame, so it is
+                            -- overwritten in place.
+                            s_step(v_L) <= s_macc(17 downto 1);
                         when others =>
                             -- start = -(centre + offset) * step, mod 2^20
                             if s_mneg = '0' then v_ng := unsigned(-signed(s_macc));
@@ -665,7 +731,7 @@ begin
                             end if;
                     end case;
                     s_mbit <= 0;
-                    if s_midx = 7 then s_ph <= 0;
+                    if s_midx = 11 then s_ph <= 0;
                     else               s_midx <= s_midx + 1; end if;
                 end if;
             end if;
@@ -673,39 +739,26 @@ begin
     end process p_frame;
 
     ------------------------------------------------------------------------
-    -- pixel-domain coordinates for the CORDIC: dx = x - cx - offx per pixel,
-    -- dy = y - cy - offy per active line (+2 per line on interlaced sources,
-    -- with the odd field offset by one).
+    -- pixel-domain coordinates for the CORDIC, in virtual units: dx = x -
+    -- cx - offx (Q.1, + the x step per pixel), dy = y - cy - offy with y the
+    -- line's virtual row (+ the y step per field line, which already spans
+    -- two frame lines on interlaced timings).  At 1080p both steps are 1.
     ------------------------------------------------------------------------
     p_acc : process(clk)
-        variable v_dy0 : signed(12 downto 0);
     begin
         if rising_edge(clk) then
             s_avid_p <= data_in.avid;
             if s_vs_pulse = '1' then
-                s_newframe <= '1';
+                s_vy <= (others => '0');
             elsif data_in.avid = '1' and s_avid_p = '0' then
                 for L in 0 to 1 loop
-                    if s_newframe = '1' then
-                        if s_ilace = '1' and data_in.field_n = '1' then
-                            v_dy0 := s_ndy(L) + 1;
-                        else
-                            v_dy0 := s_ndy(L);
-                        end if;
-                        s_dyc(L) <= v_dy0;
-                        if s_ilace = '1' then s_dyb(L) <= v_dy0 + 2;
-                        else                  s_dyb(L) <= v_dy0 + 1; end if;
-                    else
-                        s_dyc(L) <= s_dyb(L);
-                        if s_ilace = '1' then s_dyb(L) <= s_dyb(L) + 2;
-                        else                  s_dyb(L) <= s_dyb(L) + 1; end if;
-                    end if;
-                    s_dx(L) <= s_ndx(L);
+                    s_dyc(L) <= s_ndy(L) + signed(resize(s_vy(19 downto 8), 13));
+                    s_dxa(L) <= shift_left(resize(s_ndx(L), 14), 1);
                 end loop;
-                s_newframe <= '0';
+                s_vy <= s_vy + s_ys;
             elsif data_in.avid = '1' then
                 for L in 0 to 1 loop
-                    s_dx(L) <= s_dx(L) + 1;
+                    s_dxa(L) <= s_dxa(L) + signed(resize(s_xs, 14));
                 end loop;
             end if;
         end if;
@@ -717,27 +770,21 @@ begin
     -- delay registers of their own.
     ------------------------------------------------------------------------
     p_dda : process(clk)
-        variable v_st : unsigned(19 downto 0);
     begin
         if rising_edge(clk) then
             s_atap <= s_avid_sr(C_DDA_TAP);
             if s_vs_pulse = '1' then
                 s_nf_dda <= '1';
             end if;
+            -- virtual units: s_step is the per-pixel step (step x x step) and
+            -- s_stepy the per-field-line one (step x y step)
             if s_avid_sr(C_DDA_TAP) = '1' and s_atap = '0' then
                 for L in 0 to 1 loop
-                    v_st := resize(s_step(L), 20);
                     s_px(L) <= s_startx(L);
                     if s_nf_dda = '1' then
-                        if s_ilace = '1' and s_fpar = '1' then
-                            s_py(L) <= s_starty(L) + v_st;
-                        else
-                            s_py(L) <= s_starty(L);
-                        end if;
-                    elsif s_ilace = '1' then
-                        s_py(L) <= s_py(L) + shift_left(v_st, 1);
+                        s_py(L) <= s_starty(L);
                     else
-                        s_py(L) <= s_py(L) + v_st;
+                        s_py(L) <= s_py(L) + s_stepy(L);
                     end if;
                 end loop;
                 s_nf_dda <= '0';
@@ -753,20 +800,22 @@ begin
     -- c1 absolute values, c2 max / min + octant flags
     ------------------------------------------------------------------------
     p_cord_in : process(clk)
+        variable v_dx : signed(12 downto 0);
     begin
         if rising_edge(clk) then
             for L in 0 to 1 loop
-                if s_dx(L)(12) = '1' then
-                    r1_a(L) <= unsigned(std_logic_vector(resize(-s_dx(L), 12)));
+                v_dx := s_dxa(L)(13 downto 1);   -- integer part of the Q.1 dx
+                if v_dx(12) = '1' then
+                    r1_a(L) <= unsigned(std_logic_vector(resize(-v_dx, 12)));
                 else
-                    r1_a(L) <= unsigned(std_logic_vector(resize(s_dx(L), 12)));
+                    r1_a(L) <= unsigned(std_logic_vector(resize(v_dx, 12)));
                 end if;
                 if s_dyc(L)(12) = '1' then
                     r1_b(L) <= unsigned(std_logic_vector(resize(-s_dyc(L), 12)));
                 else
                     r1_b(L) <= unsigned(std_logic_vector(resize(s_dyc(L), 12)));
                 end if;
-                r1_xs(L) <= s_dx(L)(12);
+                r1_xs(L) <= v_dx(12);
                 r1_ys(L) <= s_dyc(L)(12);
 
                 if r1_a(L) >= r1_b(L) then
