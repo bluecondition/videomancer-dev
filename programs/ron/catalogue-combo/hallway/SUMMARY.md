@@ -24,7 +24,7 @@ v0.2 keeps all of this.
 | K2 Wipe | pane boundaries slide across the screen, wrapping; glided |
 | K3 Barrel | lens strength, bipolar: pincushion (top/bottom rows magnified to 8x) .. barrel (minified to 1/8); glided |
 | K4 Fringe | chromatic spread, 3 .. 50% of the lens scale (U wider, V narrower) |
-| K5 Segment | mirror segment width, 64 .. 1024 px at HD, continuous and exponential (knob up = wider); a fraction of the width in every mode |
+| K5 Segment | mirror segment width, 64 .. 1024 px at 1080p, continuous and exponential (knob up = wider); the same fraction of the screen height in every mode (v0.2.2) |
 | K6 Slide | strip slide speed, bipolar, squared, ±16-code stop at the centre, up to ~7 px a field |
 | S7 Mirror | odd panes mirrored |
 | S8 Lens | Screen: every pane looks at the screen centre (copies) / Pane: each pane looks at its own centre |
@@ -116,6 +116,30 @@ Presets were re-derived to keep their v0.1 segment widths: Four Lenses
 K5 768 (512 px); Deep Prism K5 255 + P12 100% (8 px); Tiled Pinch K5 768
 (512 px repeat tiles, now centred). The default is K5 512 + P12 0 (256 px,
 as v0.1's default) and Slide 650 (~0.37 px a field, as v0.1's 560).
+
+## v0.2.2 (2026-10-17): resolution scaling
+
+K5 Segment and P12 Depth set a size, so the segment now follows the screen
+HEIGHT. The exponent used to add log2(measured width / 1920), which made a
+segment a fraction of the WIDTH: on SD's 4:3 screen it was 0.72x the 1080p
+size relative to the picture height (720p was right to within Mitchell's
+log error, 2.7%). It now adds -log2(x step) from the timing ID: 0 at 1080,
+-0.585 octave at 720p, -1 on SD (a 1440-unit 4:3 window of the 1080p
+picture, mondrian's virtual-coordinate scheme).
+
+- The 8 px floor scales with it (720p 5.3 px, SD 4 px), which needed fold
+  exponent 3 in the slide-step and slide-phase tables.
+- Slide speed used the measured width; it now uses 1920 / x step, so the
+  strips slide the same number of segment periods a field in every mode.
+- Already proportional, unchanged: Panes and Wipe (fractions of the width),
+  the lens profile (rows / measured field half-height; interlace needs no
+  timing ID here because both fields measure the same height and the
+  profile is a fraction of it), the fringe (a fraction of the lens scale).
+- 1080p bit-identical: 2784 is Mitchell's log2(1920), and 1920 the width.
+
+Build (router2 default): HD Analog / HD HDMI / HD Dual 77.6 (seed 2; seed 1
+missed) / 85.3 / 81.1 MHz; SD 78.5 / 81.7 / 75.0 MHz (seed 1). ~5,620 LC
+(73%), 18/32 EBR.
 
 ## Build
 

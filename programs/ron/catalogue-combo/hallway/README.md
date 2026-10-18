@@ -12,7 +12,7 @@ One to four panes of mirror folds around a sliding strip, each seen through a ba
 | K2 | Wipe | 0–100% | pane boundaries slide across the screen, wrapping; glided |
 | K3 | Barrel | -100–100% | lens strength, bipolar: pincushion (top/bottom rows magnified to 8x) .. barrel (minified to 1/8); glided |
 | K4 | Fringe | 0–100% | chromatic spread, 3 .. 50% of the lens scale (U wider, V narrower) |
-| K5 | Segment | 0–100% | mirror segment width, 64 .. 1024 px at HD, continuous and exponential (knob up = wider); a fraction of the width in every mode |
+| K5 | Segment | 0–100% | mirror segment width, 64 .. 1024 px at 1080p, continuous and exponential (knob up = wider); the same fraction of the screen height in every mode |
 | K6 | Slide | -100–100% | strip slide speed, bipolar, squared, with a stop at the centre, up to ~7 px a field |
 | S7 | Mirror | Off / On | odd panes mirrored |
 | S8 | Lens | Screen / Pane | Screen: every pane looks at the screen centre (copies) / Pane: each pane looks at its own centre |
