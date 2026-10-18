@@ -113,6 +113,29 @@ warm/olive in sim — correct on hardware.
 - **Waterline mode** (top of screen dry, effect ramps in below a K-set
   line) — murk accumulator already gives the vertical ramp hook.
 
+## v1.4.3 — resolution scaling (2026-10-18)
+
+SD and 720p drew the water in pixels: 720p ripple/caustics/swell were 1.5x
+coarse, and at SD the per-FIELD-line swell/ripple advance made the streaks
+steeper and the caustics coarser. Now everything is on a virtual 1080-line
+canvas (timing ID from `registers_in(8)`):
+- per-pixel frequencies (ripple fx1/fx2, caustic fc1/fc2) x xstep (1 /
+  1.5 / 2) -- `s_fx1x..s_fc2x`, scaled in new vblank states 7-9;
+- per-line phases advance once per VIRTUAL line crossed: the hsync edge does
+  the first advance, `s_yrep` repeats the rest in hblank (Q4.8 y step, x2
+  for interlace; 1080p never repeats); the line sequencer waits for them;
+- pixel amplitudes / xstep: ripple `s_ripa` and swell `s_swa` (720p uses
+  1/2 + 1/8 + 1/32 ~ 2/3), storm chop (`s_chop`, per line), Prism split
+  = 22 virtual units (22 / 15 / 11 px).
+1080p is bit-identical (step 1; sim pixel diff 0). Left-fill, dither and murk stay pixel /
+line based. Sims: 720p matches 1080p (r 1.00, edges 0.99); SD shows the
+same streak angle and pattern size (left 1440-unit window). ~+380 LC over
+v1.4.0 (6352).
+
+Build `SEED=9 ./build_programs.sh ron lagoon` (router2): HD Analog 76.55
+(seed 10), HD HDMI 75.57 (seed 12), HD Dual 75.49 (seed 10), SD Analog
+73.17 / SD HDMI 70.40 / SD Dual 72.84 (seed 9). 6727-6750 LC (88%), 23 EBR.
+
 ## Timing / build (v1.4.0, 2026-09-27)
 
 Prism added ~270 LCs: 6352 LCs (83%), 23 EBR. `SEED=9 ./build_programs.sh
