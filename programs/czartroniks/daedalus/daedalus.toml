@@ -235,3 +235,9 @@ toggle_switch_9 = 0
 toggle_switch_10 = 0          # fixed width
 toggle_switch_11 = 1          # drift
 linear_potentiometer_12 = 1023
+
+[firmware]
+# nextpnr placement seed for the stock LZX build (one seed, all 8 configs):
+# lower seeds hung nextpnr's router1 (a rip-up livelock) in at least one
+# config; seed 2 builds all 8.
+seed = 2
