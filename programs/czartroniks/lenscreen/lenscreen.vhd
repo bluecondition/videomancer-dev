@@ -33,6 +33,16 @@
 -- on every pixel, paper and ink.  Output: ink 64, paper 768, [1 2 1] on
 -- Y/U/V (the HD HDMI bar guard), blanking-gated.  Latency 20 clocks in all
 -- modes.
+--
+-- v0.2.2 (2026-10-17): resolution scaling.  The halftone cells and the lens
+-- run in virtual 1080-line units stepped from the video timing ID
+-- (registers_in(8)): x 1.0 / 1.5 / 2.0 units a pixel (1080 / 720p / SD),
+-- y 1080 / active lines a field line (interlace included).  A cell is the
+-- same fraction of the screen height in every mode and square on a 4:3 SD
+-- screen (it was 2:1 tall and ~4x coarser in SD, 1.5x at 720p); the lens
+-- band's centre, radius and minimum radius are virtual too.  The dot-crawl
+-- carrier and the Fringe comb stay at pixel / line scale.  1080p is
+-- bit-identical (every step is 1.0 there).
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -65,6 +75,32 @@ architecture lenscreen of program_top is
         else
             return unsigned(v(9 downto 0));
         end if;
+    end function;
+
+    -- Resolution scaling: per-mode steps from the video timing ID.
+    -- x step in half virtual units per pixel: 1080 2 (1.0), 720p 3 (1.5),
+    -- SD 4 (2.0: 720 px span 1440 units, a 4:3 window of the 1080 canvas).
+    function f_vstep_x(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0 | 4 | 8 | 12 => return to_unsigned(4, 3);
+            when 5 | 6 | 14     => return to_unsigned(3, 3);
+            when others         => return to_unsigned(2, 3);
+        end case;
+    end function;
+    -- y step in Q4.8 virtual units per FIELD line (1080 / active lines,
+    -- doubled for interlaced modes).
+    function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(1138, 12);  -- 480i: 2 x 1080/486
+            when 4          => return to_unsigned(576, 12);   -- 480p: 1080/480
+            when 8          => return to_unsigned(960, 12);   -- 576i: 2 x 1080/576
+            when 12         => return to_unsigned(480, 12);   -- 576p: 1080/576
+            when 5 | 6 | 14 => return to_unsigned(384, 12);   -- 720p: 1.5
+            when 1 | 2 | 10 => return to_unsigned(512, 12);   -- 1080i: 2.0
+            when others     => return to_unsigned(256, 12);   -- 1080p: 1.0
+        end case;
     end function;
 
     type t_tab is array (0 to 63) of integer range 0 to 2047;
@@ -155,10 +191,17 @@ architecture lenscreen of program_top is
     signal s_prev_hsync_n, s_prev_vsync_n, s_prev_avid : std_logic := '1';
     signal s_line, s_height, s_line_width : unsigned(10 downto 0) := to_unsigned(270, 11);
     signal s_we : std_logic := '0';
+    -- resolution scaling: steps (free-running from the timing ID), the
+    -- line's virtual y (Q.8) and the field's virtual height
+    signal s_xs   : unsigned(2 downto 0)  := to_unsigned(2, 3);
+    signal s_ys   : unsigned(11 downto 0) := to_unsigned(256, 12);
+    signal s_vya  : unsigned(19 downto 0) := (others => '0');
+    signal s_vht  : unsigned(10 downto 0) := to_unsigned(270, 11);
 
     -- pixel path (E<n> = registered n clocks after data_in)
     type t_x is array (1 to 7) of unsigned(10 downto 0);
     signal s_x : t_x := (others => (others => '0'));
+    signal s_vx7 : unsigned(6 downto 0) := (others => '0');   -- virtual x of s_x(7), Q.1 mod 64
     type t_b is array (1 to 9) of std_logic;
     signal s_avd : t_b := (others => '0');
     signal s_acc  : signed(23 downto 0) := (others => '0');
@@ -221,6 +264,8 @@ begin
             if s_in_avid = '1' then s_wr_x <= s_wr_x + 1; else s_wr_x <= (others => '0'); end if;
             s_we <= data_in.avid;
             s_wb <= s_wpar;
+            s_xs <= f_vstep_x(registers_in(8)(3 downto 0));
+            s_ys <= f_vstep_y(registers_in(8)(3 downto 0));
             -- hsync->avid parity (drape): clock parity since hsync, per line
             s_hpar <= not s_hpar;
             -- this row's cell-local y: squared and absolute (set at the avid
@@ -246,9 +291,9 @@ begin
                     s_kcy <= unsigned(registers_in(4)(9 downto 2));
                     s_kcc <= unsigned(registers_in(5)(9 downto 2));
                     s_wf <= s_line_width;
-                    s_hh <= s_height(10 downto 1);
+                    s_hh <= s_vht(10 downto 1);
                     s_cx <= '0' & s_line_width(10 downto 1);
-                    s_cy <= '0' & s_height(10 downto 1);
+                    s_cy <= '0' & s_vht(10 downto 1);
                     s_vstep <= s_vstep + 1;
                 when 1 =>
                     -- deadband the stepped knobs (no flicker at a step edge)
@@ -337,7 +382,7 @@ begin
             -- these at the pixel clock, so the wide products are split hi/lo)
             case to_integer(s_lstep) is
                 when 0 =>
-                    if s_line >= s_cy then s_ady <= s_line - s_cy; else s_ady <= s_cy - s_line; end if;
+                    if s_vya(18 downto 8) >= s_cy then s_ady <= s_vya(18 downto 8) - s_cy; else s_ady <= s_cy - s_vya(18 downto 8); end if;
                     s_lstep <= s_lstep + 1;
                 when 1 =>
                     s_tph <= s_ady * s_inv_r(11 downto 6);
@@ -403,6 +448,8 @@ begin
             -- this one
             if s_prev_avid = '1' and data_in.avid = '0' then
                 s_line_width <= s_rx; s_line <= s_line + 1; s_height <= s_line + 1;
+                s_vya <= s_vya + s_ys;
+                s_vht <= resize(shift_right(s_vya + s_ys, 8), 11);
                 s_rb_nx <= s_wpar;
                 s_wpar  <= not s_wpar;
                 s_l0_nx <= '0';
@@ -416,7 +463,7 @@ begin
                 s_line0 <= s_l0_nx;
                 s_prow  <= s_line;
                 s_qb    <= s_line(1 downto 0) + s_fcnt;
-                s_cyl   <= signed(resize(s_line(5 downto 0) and s_cmask, 7)) - signed(resize(s_half, 7));
+                s_cyl   <= signed(resize(s_vya(13 downto 8) and s_cmask, 7)) - signed(resize(s_half, 7));
             end if;
             if data_in.hsync_n = '0' and s_prev_hsync_n = '1' then
                 s_lstep <= (others => '0');
@@ -426,6 +473,7 @@ begin
             -- bank 0 and shows black
             if data_in.vsync_n = '0' and s_prev_vsync_n = '1' then
                 s_line  <= (others => '0');
+                s_vya   <= (others => '0');
                 s_wpar  <= '0';
                 s_rb_nx <= '1';
                 s_l0_nx <= '1';
@@ -447,6 +495,7 @@ begin
 
     p_addr : process(clk)
         variable v_s13 : signed(12 downto 0);
+        variable v_s7  : unsigned(6 downto 0);
         variable v_c, v_ml, v_mh : signed(12 downto 0);
     begin
         if rising_edge(clk) then
@@ -454,6 +503,9 @@ begin
             s_x(1) <= s_rx - 1; s_avd(1) <= s_in_avid;
             for i in 2 to 7 loop s_x(i) <= s_x(i - 1); end loop;
             for i in 2 to 9 loop s_avd(i) <= s_avd(i - 1); end loop;
+            -- virtual x beside s_x(7) (Q.1, kept mod 64 units: the cells
+            -- use the low 6 bits)
+            if s_avd(7) = '1' then s_vx7 <= s_vx7 + s_xs; else s_vx7 <= (others => '0'); end if;
             -- E3: DDA (1/256 px)
             if s_avd(1) = '0' then s_acc <= s_src0; else s_acc <= s_acc + resize(s_srow, 24); end if;
             -- E4: source x, saturated to +-4096 (squeezed rows never wrap
@@ -468,7 +520,16 @@ begin
             s_src4 <= v_s13;
             -- E5
             s_src5 <= s_src4;
-            s_srcd(5) <= unsigned(s_src4(5 downto 0));
+            -- source x in virtual units, mod 64 (x 1 / 1.5 / 2)
+            case to_integer(s_xs) is
+                when 3 =>
+                    v_s7 := unsigned(s_src4(6 downto 0)) + (unsigned(s_src4(5 downto 0)) & '0');
+                    s_srcd(5) <= v_s7(6 downto 1);
+                when 4 =>
+                    s_srcd(5) <= unsigned(s_src4(4 downto 0)) & '0';
+                when others =>
+                    s_srcd(5) <= unsigned(s_src4(5 downto 0));
+            end case;
             for i in 6 to 8 loop s_srcd(i) <= s_srcd(i - 1); end loop;
             -- E6: edges, mirrored once about the inset (bounds per frame;
             -- compares run beside the subtracts), black beyond
@@ -563,7 +624,7 @@ begin
             if s_lensed = '1' then
                 s_cx9 <= signed(resize(s_srcd(8) and s_cmask, 7)) - signed(resize(s_half, 7));
             else
-                s_cx9 <= signed(resize(s_x(7)(5 downto 0) and s_cmask, 7)) - signed(resize(s_half, 7));
+                s_cx9 <= signed(resize(s_vx7(6 downto 1) and s_cmask, 7)) - signed(resize(s_half, 7));
             end if;
             if s_q8(0) = '1' then
                 s_cc9 <= signed(resize(s_wet_v, 11)) - 512;
