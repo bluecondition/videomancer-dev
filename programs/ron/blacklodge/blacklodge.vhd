@@ -12,6 +12,17 @@
 -- (reciprocal-LUT wavelength DDA, Rays or Rows chevrons, K5 Walk flow).
 -- S10 Flicker = random Lynch light bursts; S11 Key = input video floor.
 --
+-- v1.0.2 (2026-10-17): resolution scaling.  The x/line counters run in
+-- virtual 1080-line units, stepped per pixel / per field line from the video
+-- timing ID (registers_in(8)): 1.0 at 1080p (identical to before), 1.5 at
+-- 720p, and at SD 2.0 across (a 1440-wide 4:3 window) and 1080/486 per frame
+-- line.  Fold pitch, sway waves, hem bulge + shadow, horizon, apex, chevron
+-- width, the floor's per-row perspective growth and the vignette ramp all
+-- follow, so 720p and SD look like the 1080p room scaled (SD no longer has
+-- wide folds or a vignette that darkens the whole field).  The floor's per-row
+-- increments (row phase, wavelength growth) are scaled by the y step on the
+-- hblank serial multiplier; the sway amplitude always grows as line/32.
+--
 -- v1.0.0 (2026-10-07, merged from the blacklodge_diag test-bed):
 --   * processing program_type + blanking gate
 --   * active-line counter; frame height captured from active lines,
@@ -23,7 +34,7 @@
 -- Register map:
 --   registers_in(0) = Folds    (fold density, continuous)
 --   registers_in(1) = Depth    (fold shadow level)
---   registers_in(2) = Width    (stripe width at the horizon, 4..36 px)
+--   registers_in(2) = Width    (stripe width at the horizon, 4..36 units)
 --   registers_in(3) = Apex     (vanishing-point x)
 --   registers_in(4) = Walk     (bipolar floor flow speed, centre = still)
 --   registers_in(5) = ViewHt   (perspective growth rate)
@@ -155,10 +166,56 @@ architecture blacklodge of program_top is
     constant C_WAVE2_DT : unsigned(15 downto 0) := to_unsigned(131, 16);
 
     ----------------------------------------------------------------------
-    -- Position / timing
+    -- Resolution scaling: per-mode steps from the video timing ID.
     ----------------------------------------------------------------------
-    signal pixel_x      : unsigned(11 downto 0) := (others => '0');
-    signal aline        : unsigned(11 downto 0) := (others => '0');
+    -- x step in half virtual units per pixel: 1080 2 (1.0), 720p 3 (1.5),
+    -- SD 4 (2.0: 720 px span 1440 units, a 4:3 window of the 1080 canvas).
+    function f_vstep_x(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0 | 4 | 8 | 12 => return to_unsigned(4, 3);
+            when 5 | 6 | 14     => return to_unsigned(3, 3);
+            when others         => return to_unsigned(2, 3);
+        end case;
+    end function;
+    -- y step in Q4.8 virtual units per FIELD line (1080 / active lines,
+    -- doubled for interlaced modes).
+    function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(1138, 12);  -- 480i: 2 x 1080/486
+            when 4          => return to_unsigned(576, 12);   -- 480p: 1080/480
+            when 8          => return to_unsigned(960, 12);   -- 576i: 2 x 1080/576
+            when 12         => return to_unsigned(480, 12);   -- 576p: 1080/576
+            when 5 | 6 | 14 => return to_unsigned(384, 12);   -- 720p: 1.5
+            when 1 | 2 | 10 => return to_unsigned(512, 12);   -- 1080i: 2.0
+            when others     => return to_unsigned(256, 12);   -- 1080p: 1.0
+        end case;
+    end function;
+
+    ----------------------------------------------------------------------
+    -- Position / timing.  pixel_x and aline are the integer parts of
+    -- virtual-unit accumulators (x Q.1 per pixel, y Q.8 per active field
+    -- line); at 1080p they are the plain pixel / active-line counters.
+    -- max_x_r / max_y_r are therefore the VIRTUAL width / height (SD 1440
+    -- wide, every mode ~1080 high); nothing here addresses memory or
+    -- generates avid, so no real-pixel width is needed.
+    ----------------------------------------------------------------------
+    signal s_xs         : unsigned(2 downto 0)  := to_unsigned(2, 3);
+    signal s_ys         : unsigned(11 downto 0) := to_unsigned(256, 12);
+    signal vxa          : unsigned(12 downto 0) := (others => '0');
+    signal vya          : unsigned(19 downto 0) := (others => '0');
+    signal vy_nx_r      : unsigned(11 downto 0) := to_unsigned(1, 12);
+    signal pixel_x      : unsigned(11 downto 0);
+    signal aline        : unsigned(11 downto 0);
+    -- per-pixel steps scaled by the x step
+    signal fold_step_r  : unsigned(12 downto 0) := to_unsigned(1484, 13);
+    signal wav1_k_r     : unsigned(15 downto 0) := C_WAVE1_K;
+    signal wav2_k_r     : unsigned(15 downto 0) := C_WAVE2_K;
+    signal freq_px_r    : unsigned(17 downto 0) := to_unsigned(3744, 18);
+    -- per-row steps scaled by the y step (serial multiplier products)
+    signal yinc_r       : unsigned(19 downto 0) := to_unsigned(3744, 20);
+    signal stepv_r      : unsigned(12 downto 0) := to_unsigned(640, 13);
     signal prev_hsync_n : std_logic := '1';
     signal prev_vsync_n : std_logic := '1';
     signal prev_avid    : std_logic := '0';
@@ -195,7 +252,6 @@ architecture blacklodge of program_top is
     signal chev_min_frac_r : unsigned(12 downto 0) := (others => '0');
     -- Perspective step in 1/8192 px of wavelen growth per row.
     signal step_r          : unsigned(12 downto 0) := to_unsigned(640, 13);
-    signal amp_shift_r     : unsigned(2 downto 0)  := to_unsigned(5, 3);
     signal sway_en_r       : std_logic := '1';
     signal chev_dir_r      : std_logic := '0';
     signal flick_en_r      : std_logic := '0';
@@ -239,9 +295,10 @@ architecture blacklodge of program_top is
     signal freq_row_r      : unsigned(16 downto 0) := to_unsigned(3744, 17);
 
     -- Row sequencer (counts hblank clocks from avid fall / vsync) and the
-    -- serial shift-add multiplier for apex_x * freq_row (mod 2^20).
-    signal row_seq_r : unsigned(4 downto 0)  := (others => '1');
-    signal mul_acc_r : unsigned(19 downto 0) := (others => '0');
+    -- serial shift-add multiplier: apex_x * freq_row (mod 2^20), then
+    -- freq_row * ys and step * ys (Q.8, per-row increments in virtual units).
+    signal row_seq_r : unsigned(5 downto 0)  := (others => '1');
+    signal mul_acc_r : unsigned(27 downto 0) := (others => '0');
     signal mul_a_r   : unsigned(16 downto 0) := (others => '0');
     signal mul_b_r   : unsigned(11 downto 0) := (others => '0');
     signal dx_init_r : unsigned(19 downto 0) := (others => '0');
@@ -338,6 +395,7 @@ begin
         variable v_flr_yr      : unsigned(9 downto 0);
         variable v_bf          : integer range 0 to 63;
         variable v_c11         : signed(10 downto 0);
+        variable v_vya_nx      : unsigned(19 downto 0);
     begin
         if rising_edge(clk) then
 
@@ -361,20 +419,51 @@ begin
             -- fall); frame height is captured from it at the guarded
             -- frame tick, never from a vsync-edge line count.
             ------------------------------------------------------------
+            -- (Virtual units: pixel_x = vxa / 2, aline = vya / 256.)
+            -- Per-mode steps from the timing ID, free-running (a static
+            -- register; latching it at the frame tick left the first field
+            -- after load counting at the 1080p step, and its wrong height
+            -- set the next field's horizon).
+            s_xs <= f_vstep_x(registers_in(8)(3 downto 0));
+            s_ys <= f_vstep_y(registers_in(8)(3 downto 0));
             if data_in.avid = '1' then
-                pixel_x <= pixel_x + 1;
+                vxa <= vxa + s_xs;
             end if;
             if v_hs_edge then
                 if pixel_x > to_unsigned(0, 12) then
                     max_x_r <= pixel_x;
                 end if;
-                pixel_x <= (others => '0');
+                vxa <= (others => '0');
             end if;
             if v_avid_fall then
-                aline <= aline + 1;
+                vya <= vya + s_ys;
             end if;
+            -- virtual line of the NEXT active line (was aline + 1)
+            v_vya_nx := vya + s_ys;
+            vy_nx_r  <= v_vya_nx(19 downto 8);
             xm1_r <= max_x_r - 1;
             ym1_r <= max_y_r - 1;
+
+            -- Per-pixel steps x the x step (1.0 / 1.5 / 2.0).
+            case to_integer(s_xs) is
+                when 3 =>
+                    fold_step_r <= resize(fold_freq_r, 13)
+                                 + resize(fold_freq_r(11 downto 1), 13);
+                    wav1_k_r  <= to_unsigned(153, 16);
+                    wav2_k_r  <= to_unsigned(92, 16);
+                    freq_px_r <= resize(freq_row_r, 18)
+                               + resize(freq_row_r(16 downto 1), 18);
+                when 4 =>
+                    fold_step_r <= fold_freq_r & '0';
+                    wav1_k_r  <= to_unsigned(204, 16);
+                    wav2_k_r  <= to_unsigned(122, 16);
+                    freq_px_r <= freq_row_r & '0';
+                when others =>
+                    fold_step_r <= resize(fold_freq_r, 13);
+                    wav1_k_r  <= C_WAVE1_K;
+                    wav2_k_r  <= C_WAVE2_K;
+                    freq_px_r <= resize(freq_row_r, 18);
+            end case;
 
             ------------------------------------------------------------
             -- Free-running parameter precompute
@@ -407,7 +496,7 @@ begin
             end if;
             k5_sq_r <= k5_mag_r * k5_mag_r;
 
-            if aline + 1 >= horizon_r then
+            if vy_nx_r >= horizon_r then
                 next_floor_r <= '1';
             else
                 next_floor_r <= '0';
@@ -415,11 +504,9 @@ begin
 
             -- Sway amplitude for the next line: 16 at the top (pinned),
             -- growing with depth down the screen (~49 at the bottom).
-            case to_integer(amp_shift_r) is
-                when 3      => v_amp_src := shift_right(aline + 1, 3);
-                when 4      => v_amp_src := shift_right(aline + 1, 4);
-                when others => v_amp_src := shift_right(aline + 1, 5);
-            end case;
+            -- Virtual line / 32 in every mode (was a per-height-class
+            -- shift that gave 720p a ~25% larger sway).
+            v_amp_src := shift_right(vy_nx_r, 5);
             if v_amp_src > to_unsigned(47, 12) then
                 amp_next_r <= to_unsigned(63, 7);
             else
@@ -435,7 +522,13 @@ begin
                 saw_active <= '1';
             end if;
             if v_vs_edge then
-                aline <= (others => '0');
+                -- bottom field (SD only; HD ties field_n high) starts half
+                -- a field step down
+                if data_in.field_n = '0' then
+                    vya <= resize(s_ys(11 downto 1), 20);
+                else
+                    vya <= (others => '0');
+                end if;
             end if;
             if v_vs_edge and saw_active = '1' then
                 saw_active <= '0';
@@ -446,7 +539,7 @@ begin
                 horizon_r       <= hz_full_r(21 downto 10);
                 eff_horizon_x_r <= ap_full_r(21 downto 10);
 
-                -- K3 Width: 4.0 .. 35.97 px at the horizon, continuous
+                -- K3 Width: 4.0 .. 35.97 (1080-line units) at the horizon, continuous
                 -- (top 5 bits -> integer px, low 5 bits -> fraction).
                 chev_min_int_r  <= resize(unsigned(registers_in(2)(9 downto 5)), 7)
                                  + to_unsigned(4, 7);
@@ -484,14 +577,6 @@ begin
                     dk_yr_r <= C_FLR_DK_YR;
                     dk_us_r <= C_FLR_DK_US;
                     dk_vs_r <= C_FLR_DK_VS;
-                end if;
-
-                if max_y_r >= to_unsigned(768, 12) then
-                    amp_shift_r <= to_unsigned(5, 3);
-                elsif max_y_r >= to_unsigned(384, 12) then
-                    amp_shift_r <= to_unsigned(4, 3);
-                else
-                    amp_shift_r <= to_unsigned(3, 3);
                 end if;
 
                 -- Walk: K5 right = bands flow toward the viewer.
@@ -544,9 +629,9 @@ begin
                 wph1_r       <= sway_t1_r;
                 wph2_r       <= sway_t2_r;
             elsif data_in.avid = '1' then
-                fold_phase_r <= fold_phase_r + resize(fold_freq_r, 16);
-                wph1_r       <= wph1_r + C_WAVE1_K;
-                wph2_r       <= wph2_r - C_WAVE2_K;
+                fold_phase_r <= fold_phase_r + resize(fold_step_r, 16);
+                wph1_r       <= wph1_r + wav1_k_r;
+                wph2_r       <= wph2_r - wav2_k_r;
             end if;
 
             -- Two travelling triangle waves summed (signed, +/-511),
@@ -572,7 +657,10 @@ begin
             -- Floor per-row update: at avid fall (active lines only) and
             -- reset at vsync (idempotent, safe under serration).
             ------------------------------------------------------------
-            if resize(wavelen_frac_r, 14) + resize(step_r, 14)
+            -- (stepv / yinc = per-row step and row phase x the y step, so
+            -- the perspective spans the same virtual depth in every mode;
+            -- stepv <= 1152 x 4.45 < 8192, so at most one carry per row.)
+            if resize(wavelen_frac_r, 14) + resize(stepv_r, 14)
                     >= to_unsigned(8192, 14) then
                 wavelen_carry_r <= '1';
             else
@@ -589,18 +677,18 @@ begin
                 row_seq_r <= (others => '0');
                 amp_r     <= amp_next_r;
                 if next_floor_r = '1' then
-                    wavelen_frac_r <= wavelen_frac_r + step_r;
+                    wavelen_frac_r <= wavelen_frac_r + stepv_r;
                     if wavelen_carry_r = '1'
                             and wavelen_int_r < to_unsigned(127, 7) then
                         wavelen_int_r <= wavelen_int_r + 1;
                     end if;
-                    y_acc_r <= y_acc_r + resize(freq_row_r, 20);
+                    y_acc_r <= y_acc_r + yinc_r;
                 else
                     wavelen_int_r  <= chev_min_int_r;
                     wavelen_frac_r <= chev_min_frac_r;
                     y_acc_r        <= walk_phase_r;
                 end if;
-            elsif row_seq_r /= to_unsigned(31, 5) then
+            elsif row_seq_r /= to_unsigned(63, 6) then
                 row_seq_r <= row_seq_r + 1;
             end if;
 
@@ -623,32 +711,47 @@ begin
                            + resize(freq_ip_lo_r, 25);
             freq_row_r    <= freq_a_d3_r - freq_interp_r(24 downto 8);
 
-            -- Serial multiply in hblank: dx_init = -(apex_x * freq_row)
-            -- mod 2^20, MSB-first over 12 clocks, done ~24 clocks after
-            -- avid fall (SD hblank 138, sim stimulus 64).
+            -- Serial multiply in hblank, MSB-first, 12 clocks per job:
+            --   10..23  dx_init = -(apex_x * freq_row) mod 2^20, done ~24
+            --           clocks after avid fall (SD hblank 138, sim 64)
+            --   23..36  yinc  = freq_row * ys >> 8  (row phase step)
+            --   36..49  stepv = step * ys >> 8      (wavelength growth)
+            -- yinc / stepv are used at the NEXT avid fall; at 1080p
+            -- (ys = 256) they equal freq_row / step exactly.
             case to_integer(row_seq_r) is
                 when 10 =>
                     mul_acc_r <= (others => '0');
                     mul_a_r   <= freq_row_r;
                     mul_b_r   <= eff_horizon_x_r;
-                when 11 to 22 =>
+                when 11 to 22 | 24 to 35 | 37 to 48 =>
                     if mul_b_r(11) = '1' then
-                        mul_acc_r <= shift_left(mul_acc_r, 1) + resize(mul_a_r, 20);
+                        mul_acc_r <= shift_left(mul_acc_r, 1) + resize(mul_a_r, 28);
                     else
                         mul_acc_r <= shift_left(mul_acc_r, 1);
                     end if;
                     mul_b_r <= shift_left(mul_b_r, 1);
                 when 23 =>
-                    dx_init_r <= to_unsigned(0, 20) - mul_acc_r;
+                    dx_init_r <= to_unsigned(0, 20) - mul_acc_r(19 downto 0);
+                    mul_acc_r <= (others => '0');
+                    mul_a_r   <= freq_row_r;
+                    mul_b_r   <= s_ys;
+                when 36 =>
+                    yinc_r    <= mul_acc_r(27 downto 8);
+                    mul_acc_r <= (others => '0');
+                    mul_a_r   <= resize(step_r, 17);
+                    mul_b_r   <= s_ys;
+                when 49 =>
+                    stepv_r   <= mul_acc_r(20 downto 8);
                 when others =>
                     null;
             end case;
 
-            -- Per-pixel dx phase: zero at the vanishing point.
+            -- Per-pixel dx phase: zero at the vanishing point (freq_px =
+            -- freq_row x the x step, so the phase is in virtual units).
             if data_in.avid = '0' then
                 dx_phase_r <= dx_init_r;
             else
-                dx_phase_r <= dx_phase_r + resize(freq_row_r, 20);
+                dx_phase_r <= dx_phase_r + resize(freq_px_r, 20);
             end if;
 
             -- Rays: stripe = dx_phase + tri(y_acc).  Rows: stripe =
@@ -843,6 +946,9 @@ begin
 
         end if;
     end process;
+
+    pixel_x <= vxa(12 downto 1);
+    aline   <= vya(19 downto 8);
 
     data_out.hsync_n <= pipe(LATENCY - 1).hsync_n;
     data_out.vsync_n <= pipe(LATENCY - 1).vsync_n;

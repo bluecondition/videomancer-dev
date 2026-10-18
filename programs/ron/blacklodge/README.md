@@ -10,7 +10,7 @@ The Twin Peaks Red Room: a crimson velvet curtain with rounded folds billowing o
 |---|---|---|---|
 | K1 | Folds | 0–100% | Curtain fold density |
 | K2 | Depth | 0–100% | How dark the shadows between folds are |
-| K3 | Width | 0–100% | Chevron stripe width at the horizon (4-36 px, smooth) |
+| K3 | Width | 0–100% | Chevron stripe width at the horizon (4-36 px at 1080p, scaled with the screen; smooth) |
 | K4 | Apex | 0–100% | Horizontal position of the vanishing point |
 | K5 | Walk | -100–100% | Floor flow speed; centre still, right = toward the viewer |
 | K6 | ViewHt | 0–100% | Perspective growth of the floor (smooth) |
