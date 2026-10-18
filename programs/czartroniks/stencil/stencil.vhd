@@ -8,6 +8,26 @@
 -- mosaic keyed against the original by luma / saturation.  P12 is the
 -- stencil: the mosaic eats into the picture as the slider rises.
 --
+-- v0.2.2 (community, 2026-10-17): the labelled K2 Aspect default loads as
+-- its label INDEX (firmware): K2 follows directly for 15 frames past the
+-- deadband, and values below 4 decode as the index.
+--
+-- v0.2.3 (2026-10-17): resolution scaling.  Cells and rows are measured in
+-- virtual 1080-line units: x steps 1.0 / 1.5 / 2.0 per pixel at 1080 / 720p
+-- / SD (SD = a 1440-wide 4:3 window) and y steps 1080 / active lines per
+-- field line (2 x 1080/486 at 480i), from the video timing ID, so cells keep
+-- their 1080 size relative to the screen height and stay square on 4:3.
+-- The line buffers are indexed by CELL: every capture pixel writes its
+-- cell's entry, so the entry ends up holding the average that ends at the
+-- cell's last pixel (the line's last, for the part cell), exactly what
+-- x | mask read before; any cell width in pixels needs no divide.  The box
+-- average spans 2^(n-1) pixels at 720p / SD (the whole cell at SD, 3/4 of
+-- it at 720p).  Rows count virtual lines (Q8 accumulator).  Grout stays
+-- 1/16 of the cell but is at least 1 px / 1 line on screen; cells / rows
+-- under 2 px / 2 lines on screen (which can't show a grid) get every other
+-- pixel / every (R/band)-th line instead, the 1080 coverage at pixel scale.
+-- 1080p bit-identical.
+--
 --   K1 Cells    cell width 2 .. 256 px, eight octave steps (deadbanded)
 --   K2 Aspect   cell height = width / 1, 2, 4, 8
 --   K3 Grout    dark lines between cells, 1/16 of a cell thick (min 1 px)
@@ -81,6 +101,48 @@ architecture stencil of program_top is
         -141, -127, -111,  -94,  -77,  -58,  -39,  -20
     );
 
+    -- Resolution scaling (mondrian v1.0.2): per-mode steps from the timing ID.
+    -- x step in half virtual units per pixel: 1080 2 (1.0), 720p 3 (1.5),
+    -- SD 4 (2.0: 720 px span 1440 units, a 4:3 window of the 1080 canvas).
+    function f_vstep_x(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0 | 4 | 8 | 12 => return to_unsigned(4, 3);
+            when 5 | 6 | 14     => return to_unsigned(3, 3);
+            when others         => return to_unsigned(2, 3);
+        end case;
+    end function;
+    -- y step in Q4.8 virtual units per FIELD line (1080 / active lines,
+    -- doubled for interlaced modes).
+    function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(1138, 12);  -- 480i: 2 x 1080/486
+            when 4          => return to_unsigned(576, 12);   -- 480p: 1080/480
+            when 8          => return to_unsigned(960, 12);   -- 576i: 2 x 1080/576
+            when 12         => return to_unsigned(480, 12);   -- 576p: 1080/576
+            when 5 | 6 | 14 => return to_unsigned(384, 12);   -- 720p: 1.5
+            when 1 | 2 | 10 => return to_unsigned(512, 12);   -- 1080i: 2.0
+            when others     => return to_unsigned(256, 12);   -- 1080p: 1.0
+        end case;
+    end function;
+    -- cell index: virtual x >> n, n = 1..8 (fixed slices)
+    function f_shr(x : unsigned(10 downto 0); n : unsigned(3 downto 0)) return unsigned is
+        variable r : unsigned(9 downto 0);
+    begin
+        case to_integer(n) is
+            when 1 => r := x(10 downto 1);
+            when 2 => r := resize(x(10 downto 2), 10);
+            when 3 => r := resize(x(10 downto 3), 10);
+            when 4 => r := resize(x(10 downto 4), 10);
+            when 5 => r := resize(x(10 downto 5), 10);
+            when 6 => r := resize(x(10 downto 6), 10);
+            when 7 => r := resize(x(10 downto 7), 10);
+            when others => r := resize(x(10 downto 8), 10);
+        end case;
+        return r;
+    end function;
+
     -- x * 2^n and a / 2^n for n = 1..8 (fixed slices, no barrel)
     function f_mul(x : unsigned(9 downto 0); n : unsigned(3 downto 0)) return unsigned is
         variable r : unsigned(17 downto 0);
@@ -138,7 +200,7 @@ architecture stencil of program_top is
     --------------------------------------------------------------------------
     type t_bring is array (0 to 255) of std_logic_vector(31 downto 0);
     type t_ring is array (0 to 31) of std_logic_vector(31 downto 0);
-    type t_lb_y is array (0 to 2047) of std_logic_vector(9 downto 0);
+    type t_lb_y is array (0 to 1023) of std_logic_vector(9 downto 0);   -- by cell
     type t_lb_c is array (0 to 1023) of std_logic_vector(7 downto 0);
     signal bring : t_bring := (others => C_BLANK);
     signal ringk, ringb : t_ring := (others => C_BLANK);
@@ -169,11 +231,29 @@ architecture stencil of program_top is
     signal s_nsh    : unsigned(3 downto 0) := to_unsigned(4, 4);   -- cell = 2^nsh, 1..8
     signal s_ash    : unsigned(1 downto 0) := (others => '0');
     signal s_msh    : unsigned(3 downto 0) := to_unsigned(4, 4);   -- rows = 2^msh
-    signal s_mask   : unsigned(10 downto 0) := to_unsigned(15, 11);
+    signal s_mask   : unsigned(10 downto 0) := to_unsigned(15, 11);       -- box window - 1
     signal s_nmask  : unsigned(10 downto 0) := not to_unsigned(15, 11);
-    signal s_gmaskc : unsigned(10 downto 0) := to_unsigned(15, 11);
+    signal s_cmaskh : unsigned(8 downto 0) := to_unsigned(31, 9);         -- cell, virtual half units - 1
+    signal s_cm     : unsigned(8 downto 0) := to_unsigned(15, 9);         -- cell, virtual units - 1
+    signal s_gtx    : unsigned(8 downto 0) := to_unsigned(2, 9);          -- grout columns, half units
+    signal s_gty    : unsigned(12 downto 0) := to_unsigned(256, 13);      -- grout lines, Q.8
+    signal s_nb     : unsigned(3 downto 0) := to_unsigned(4, 4);          -- box = 2^nb pixels
+    signal s_r2ok   : std_logic := '1';                                   -- rows are 2+ lines on screen
+    signal s_cfine  : std_logic := '0';                                   -- cells are under 2 px on screen
+    signal s_pm     : unsigned(3 downto 0) := (others => '0');            -- line-grout period - 1
+    signal s_lcnt   : unsigned(3 downto 0) := (others => '0');            -- screen lines since vsync, mod 16
+    signal s_xpar   : std_logic := '0';                                   -- read-side pixel parity
+    -- resolution scaling: steps decoded free-running from the timing ID
+    signal s_stx    : unsigned(2 downto 0) := to_unsigned(2, 3);          -- Q.1 per pixel
+    signal s_sty    : unsigned(11 downto 0) := to_unsigned(256, 12);      -- Q4.8 per field line
+    signal s_msd, s_m720 : std_logic := '0';
+    signal s_vxw    : unsigned(12 downto 0) := (others => '0');           -- write-side virtual x, Q.1
+    signal s_vx4    : unsigned(12 downto 0) := (others => '0');           -- read-side virtual x, Q.1
+    signal s_lwv    : unsigned(10 downto 0) := to_unsigned(479, 11);      -- last pixel's virtual x
+    signal s_lastci : unsigned(9 downto 0) := (others => '1');            -- its cell
+    signal s_ya     : unsigned(16 downto 0) := (others => '1');           -- line position in its row, Q9.8
+    signal s_capchk : std_logic := '0';
     signal s_rm1    : unsigned(8 downto 0) := to_unsigned(15, 9);
-    signal s_gmaskr : unsigned(8 downto 0) := to_unsigned(15, 9);
     signal s_grow_en : std_logic := '1';
     signal s_G      : unsigned(6 downto 0) := to_unsigned(64, 7);
     signal s_S      : unsigned(3 downto 0) := to_unsigned(5, 4);
@@ -193,9 +273,6 @@ architecture stencil of program_top is
     --------------------------------------------------------------------------
     signal s_prev_hsync_n, s_prev_vsync_n, s_prev_avid : std_logic := '1';
     signal s_rx       : unsigned(10 downto 0) := (others => '0');
-    signal s_line_width : unsigned(10 downto 0) := to_unsigned(480, 11);
-    signal s_lw_m1    : unsigned(10 downto 0) := to_unsigned(479, 11);
-    signal s_vcnt     : unsigned(8 downto 0) := (others => '0');
     signal s_capture  : std_logic := '0';
     signal s_wpar     : std_logic := '0';
     signal s_rb_nx, s_rbank : std_logic := '0';
@@ -213,15 +290,14 @@ architecture stencil of program_top is
     signal s_first    : std_logic := '0';
     signal s_accy, s_accu, s_accv : unsigned(17 downto 0) := (others => '0');
     signal s_avy, s_avu, s_avv : unsigned(9 downto 0) := (others => '0');
-    type t_x is array (1 to 4) of unsigned(10 downto 0);
+    type t_x is array (1 to 4) of unsigned(9 downto 0);
     signal s_wx : t_x := (others => (others => '0'));
     signal s_wp, s_wc : std_logic_vector(1 to 4) := (others => '0');
 
     --------------------------------------------------------------------------
     -- Display / key / blend pipeline (names carry the stage they hold)
     --------------------------------------------------------------------------
-    signal s_x4       : unsigned(10 downto 0) := (others => '0');
-    signal s_addr     : unsigned(10 downto 0) := (others => '0');
+    signal s_addr     : unsigned(9 downto 0) := (others => '0');
     signal s_gf4      : std_logic := '0';
     type t_b is array (5 to 17) of std_logic;
     signal s_gf       : t_b := (others => '0');
@@ -299,19 +375,31 @@ begin
     -- Tracking, row capture, box sums, per-frame sequencer
     --------------------------------------------------------------------------
     p_ctrl : process(clk)
-        variable v_vn : unsigned(8 downto 0);
+        variable v_ys : unsigned(16 downto 0);
         variable v_pg : signed(14 downto 0);
+        variable v_t  : unsigned(12 downto 0);
     begin
         if rising_edge(clk) then
             s_prev_hsync_n <= data_in.hsync_n;
             s_prev_vsync_n <= data_in.vsync_n;
             s_prev_avid    <= data_in.avid;
+            -- resolution scaling: per-mode steps, free-running
+            s_stx <= f_vstep_x(registers_in(8)(3 downto 0));
+            s_sty <= f_vstep_y(registers_in(8)(3 downto 0));
+            case to_integer(unsigned(registers_in(8)(3 downto 0))) is
+                when 0 | 4 | 8 | 12 => s_msd <= '1'; s_m720 <= '0';
+                when 5 | 6 | 14     => s_msd <= '0'; s_m720 <= '1';
+                when others         => s_msd <= '0'; s_m720 <= '0';
+            end case;
             if data_in.avid = '1' then
-                s_rx <= s_rx + 1;
+                s_rx  <= s_rx + 1;
+                s_vxw <= s_vxw + s_stx;
                 s_saw_active <= '1';
             else
-                s_rx <= (others => '0');
+                s_rx  <= (others => '0');
+                s_vxw <= (others => '0');
             end if;
+            s_lastci <= f_shr(s_lwv, s_nsh);
 
             -- hsync->avid parity (drape): clock parity since hsync, per line
             s_hpar <= not s_hpar;
@@ -319,24 +407,32 @@ begin
                 s_hpar <= '0';
             end if;
 
-            -- end of a line: decide the next line's row index and capture
-            if s_prev_avid = '1' and data_in.avid = '0' then
-                s_line_width <= s_rx;
-                s_lw_m1 <= s_rx - 1;
-                if s_vcnt >= s_rm1 then
-                    v_vn := (others => '0');
-                else
-                    v_vn := s_vcnt + 1;
-                end if;
-                s_vcnt  <= v_vn;
-                s_rb_nx <= s_wpar;            -- the last completed capture
-                if v_vn = s_rm1 then          -- next line ends its row: capture
+            -- end of a line: the next line's position in its row (virtual
+            -- lines, Q8; rows are 2^msh units, so the wrap is a mask) and, one
+            -- clock later, whether it ends its row (then it captures)
+            s_capchk <= '0';
+            if s_capchk = '1' then
+                v_ys := s_ya + s_sty;
+                if (v_ys(16 downto 8) and not s_rm1) /= 0 then
                     s_capture <= '1';
                     s_wpar    <= not s_wpar;
                 else
                     s_capture <= '0';
                 end if;
-                s_l0_nx <= '0';
+            end if;
+            if s_prev_avid = '1' and data_in.avid = '0' then
+                v_t := s_vxw - s_stx;
+                s_lwv <= v_t(11 downto 1);    -- the last pixel, virtual
+                v_ys := s_ya + s_sty;
+                if s_line0 = '1' then
+                    s_ya <= (others => '0');
+                else
+                    s_ya <= (v_ys(16 downto 8) and s_rm1) & v_ys(7 downto 0);
+                end if;
+                s_rb_nx  <= s_wpar;           -- the last completed capture
+                s_capchk <= '1';
+                s_l0_nx  <= '0';
+                s_lcnt   <= s_lcnt + 1;
             end if;
             -- start of a line: the read side switches here (in-flight pixels
             -- of the previous line are long gone)
@@ -351,7 +447,10 @@ begin
                     if s_wpar = '1' then s_cpar(1) <= s_hpar; else s_cpar(0) <= s_hpar; end if;
                 end if;
                 s_line0 <= s_l0_nx;
-                if s_grow_en = '1' and (s_vcnt and s_gmaskr) = 0 then
+                -- rows under 2 screen lines can't show a band: their grout
+                -- becomes every (R/band)-th screen line (the same coverage)
+                if s_grow_en = '1' and ((s_r2ok = '1' and s_ya < resize(s_gty, 17)) or
+                                        (s_r2ok = '0' and (s_lcnt and s_pm) = 0)) then
                     s_grow <= '1';
                 else
                     s_grow <= '0';
@@ -360,7 +459,9 @@ begin
             -- frame start (idempotent: vsync may serrate): the first line
             -- captures into bank 0 and shows the original
             if data_in.vsync_n = '0' and s_prev_vsync_n = '1' then
-                s_vcnt    <= s_rm1;
+                s_ya      <= (others => '1');
+                s_lcnt    <= (others => '0');
+                s_capchk  <= '0';
                 s_capture <= '1';
                 s_wpar    <= '0';
                 s_rb_nx   <= '1';
@@ -375,7 +476,7 @@ begin
             -- pixel (edge extension), first-pixel latch
             s_xdy <= unsigned(data_in.y); s_xdu <= unsigned(data_in.u); s_xdv <= unsigned(data_in.v);
             s_q2  <= s_bq(29 downto 0);
-            if (s_rx and s_nmask) /= 0 then s_cond <= '1'; else s_cond <= '0'; end if;
+            if (s_rx and s_nmask) /= 0 then s_cond <= '1'; else s_cond <= '0'; end if;   -- box window (pixels)
             if data_in.avid = '1' and s_prev_avid = '0' then
                 s_x0y <= unsigned(data_in.y); s_x0u <= unsigned(data_in.u); s_x0v <= unsigned(data_in.v);
             end if;
@@ -389,7 +490,7 @@ begin
                 s_du <= signed('0' & s_xdu) - signed('0' & s_x0u);
                 s_dv <= signed('0' & s_xdv) - signed('0' & s_x0v);
             end if;
-            s_xny <= f_mul(s_xdy, s_nsh); s_xnu <= f_mul(s_xdu, s_nsh); s_xnv <= f_mul(s_xdv, s_nsh);
+            s_xny <= f_mul(s_xdy, s_nb); s_xnu <= f_mul(s_xdu, s_nb); s_xnv <= f_mul(s_xdv, s_nb);
             s_first <= s_avid_sr(0) and not s_avid_sr(1);
             -- E2: running sums = exact N-sample window ending at this pixel
             if s_first = '1' then
@@ -400,9 +501,10 @@ begin
                 s_accv <= unsigned(signed(s_accv) + s_dv);
             end if;
             -- E3: average
-            s_avy <= f_avg(s_accy, s_nsh); s_avu <= f_avg(s_accu, s_nsh); s_avv <= f_avg(s_accv, s_nsh);
-            -- write port: pixel index / bank / enable, 4 clocks behind
-            s_wx(1) <= s_rx; s_wp(1) <= s_wpar; s_wc(1) <= data_in.avid and s_capture;
+            s_avy <= f_avg(s_accy, s_nb); s_avu <= f_avg(s_accu, s_nb); s_avv <= f_avg(s_accv, s_nb);
+            -- write port: cell index / bank / enable, 4 clocks behind; every
+            -- pixel writes, so a cell's entry ends on its last pixel's average
+            s_wx(1) <= f_shr(s_vxw(11 downto 1), s_nsh); s_wp(1) <= s_wpar; s_wc(1) <= data_in.avid and s_capture;
             for i in 2 to 4 loop
                 s_wx(i) <= s_wx(i - 1); s_wp(i) <= s_wp(i - 1); s_wc(i) <= s_wc(i - 1);
             end loop;
@@ -446,28 +548,70 @@ begin
                     else
                         s_msh <= (others => '0');
                     end if;
+                    -- box average: the cell's pixels at SD (N/2), 3/4 of them
+                    -- at 720p (N/2 of 2N/3); at least 2
+                    if (s_msd = '1' or s_m720 = '1') and s_nsh > 1 then
+                        s_nb <= s_nsh - 1;
+                    else
+                        s_nb <= s_nsh;
+                    end if;
                     s_sin_a <= s_k4h(9 downto 4);             -- sin
                     s_vstep <= s_vstep + 1;
                 when 4 =>
                     -- tint target, halved: u' = u/2 + (512 + 400 cos)/2
                     s_cu <= unsigned(to_signed(256, 10) + resize(s_sin_q, 10));
-                    s_mask   <= f_therm(s_nsh, 11, 0);
-                    s_gmaskc <= f_therm(s_nsh, 11, 0) and not f_therm(s_nsh, 11, 4);
+                    s_mask   <= f_therm(s_nb, 11, 0);
+                    s_cm     <= f_therm(s_nsh, 9, 0);
                     s_vstep <= s_vstep + 1;
                 when 5 =>
                     s_cv <= unsigned(to_signed(256, 10) + resize(s_sin_q, 10));
                     s_nmask  <= not s_mask;
                     s_rm1    <= f_therm(s_msh, 9, 0);
-                    s_gmaskr <= f_therm(s_msh, 9, 0) and not f_therm(s_msh, 9, 4);
-                    if s_msh /= 0 then s_grow_en <= '1'; else s_grow_en <= '0'; end if;
+                    s_cmaskh <= s_cm(7 downto 0) & '1';
+                    -- grout columns: 1/16 of the cell (min 1 unit), in half
+                    -- units, at least one pixel on screen; none on cells
+                    -- narrower than 2 px on screen
+                    if s_nsh >= 4 then
+                        v_t := shift_right(resize(s_cm, 13) + 1, 3);
+                    else
+                        v_t := to_unsigned(2, 13);
+                    end if;
+                    if resize(s_cm, 13) + 1 < resize(s_stx, 13) then
+                        s_gtx <= (others => '0');             -- every other pixel instead
+                    elsif v_t < resize(s_stx, 13) then
+                        s_gtx <= resize(s_stx, 9);
+                    else
+                        s_gtx <= v_t(8 downto 0);
+                    end if;
                     s_vstep <= s_vstep + 1;
                 when 6 =>
                     s_wl0 <= to_unsigned(255, 8) - unsigned(registers_in(5)(9 downto 2));
                     s_ws  <= resize(unsigned(registers_in(5)(9 downto 2)), 9)
                              + resize(unsigned(registers_in(5)(9 downto 3)), 9);   -- sat x1.5
+                    -- grout lines: 1/16 of the row (min 1 unit), at least one
+                    -- line on screen; none on rows under 2 lines on screen
+                    if s_msh >= 4 then
+                        v_t := shift_left(resize(s_rm1, 13) + 1, 4);
+                    else
+                        v_t := to_unsigned(256, 13);
+                    end if;
+                    if v_t < resize(s_sty, 13) then
+                        s_gty <= resize(s_sty, 13);
+                    else
+                        s_gty <= v_t;
+                    end if;
+                    if shift_left(resize(s_rm1, 17) + 1, 8) >= shift_left(resize(s_sty, 17), 1) then
+                        s_r2ok <= '1';
+                    else
+                        s_r2ok <= '0';
+                    end if;
+                    if resize(s_cm, 13) + 1 < resize(s_stx, 13) then s_cfine <= '1'; else s_cfine <= '0'; end if;
+                    -- line grout period R / band = min(R, 16) lines
+                    if s_rm1 > 15 then s_pm <= (others => '1'); else s_pm <= s_rm1(3 downto 0); end if;
                     s_vstep <= s_vstep + 1;
                 when 7 =>
                     s_wl <= resize(s_wl0, 9) + resize(s_wl0(7 downto 3), 9);         -- luma x1.125
+                    if s_msh /= 0 then s_grow_en <= '1'; else s_grow_en <= '0'; end if;
                     s_pd <= signed(shift_left(resize(unsigned(registers_in(7)), 15), 4)) - signed(resize(s_pg, 15));
                     s_vstep <= s_vstep + 1;
                 when 8 =>
@@ -482,7 +626,6 @@ begin
                     -- threshold 48 .. 1007 in key units
                     s_T <= s_t0 - resize(s_pg(13 downto 8), 11);
                     s_grout <= unsigned(registers_in(2));
-                    s_vcnt  <= s_rm1;            -- re-preset with this frame's rows
                     s_vstep <= (others => '1');
                 when others => null;
             end case;
@@ -501,24 +644,26 @@ begin
     end process p_ctrl;
 
     --------------------------------------------------------------------------
-    -- Address chain 3..4: hold the cell's last pixel; grout flag
+    -- Address chain 3..4: the pixel's cell; grout flag
     --------------------------------------------------------------------------
     p_addr : process(clk)
-        variable v_a : unsigned(10 downto 0);
+        variable v_a : unsigned(9 downto 0);
     begin
         if rising_edge(clk) then
             if s_avid_sr(2) = '0' then
-                s_x4 <= (others => '0');
+                s_vx4 <= (others => '0'); s_xpar <= '0';
             else
-                s_x4 <= s_x4 + 1;
+                s_vx4 <= s_vx4 + s_stx;   s_xpar <= not s_xpar;
             end if;
-            v_a := s_x4 or s_mask;
-            if v_a >= s_line_width then
-                s_addr <= s_lw_m1;
+            -- the pixel's cell (never past the last line's last cell)
+            v_a := f_shr(s_vx4(11 downto 1), s_nsh);
+            if v_a > s_lastci then
+                s_addr <= s_lastci;
             else
                 s_addr <= v_a;
             end if;
-            if (s_x4 and s_gmaskc) = 0 or s_grow = '1' then
+            -- grout: the cell's first columns (virtual half units)
+            if (s_vx4(8 downto 0) and s_cmaskh) < s_gtx or (s_cfine = '1' and s_xpar = '0') or s_grow = '1' then
                 s_gf4 <= '1';
             else
                 s_gf4 <= '0';
@@ -546,29 +691,29 @@ begin
     p_lbU0 : process(clk)
     begin
         if rising_edge(clk) then
-            s_rdU0 <= lbU0(to_integer(s_addr(10 downto 1)));
-            if s_wc(4) = '1' and s_wp(4) = '0' then lbU0(to_integer(s_wx(4)(10 downto 1))) <= std_logic_vector(s_avu(9 downto 2)); end if;
+            s_rdU0 <= lbU0(to_integer(s_addr));
+            if s_wc(4) = '1' and s_wp(4) = '0' then lbU0(to_integer(s_wx(4))) <= std_logic_vector(s_avu(9 downto 2)); end if;
         end if;
     end process;
     p_lbU1 : process(clk)
     begin
         if rising_edge(clk) then
-            s_rdU1 <= lbU1(to_integer(s_addr(10 downto 1)));
-            if s_wc(4) = '1' and s_wp(4) = '1' then lbU1(to_integer(s_wx(4)(10 downto 1))) <= std_logic_vector(s_avu(9 downto 2)); end if;
+            s_rdU1 <= lbU1(to_integer(s_addr));
+            if s_wc(4) = '1' and s_wp(4) = '1' then lbU1(to_integer(s_wx(4))) <= std_logic_vector(s_avu(9 downto 2)); end if;
         end if;
     end process;
     p_lbV0 : process(clk)
     begin
         if rising_edge(clk) then
-            s_rdV0 <= lbV0(to_integer(s_addr(10 downto 1)));
-            if s_wc(4) = '1' and s_wp(4) = '0' then lbV0(to_integer(s_wx(4)(10 downto 1))) <= std_logic_vector(s_avv(9 downto 2)); end if;
+            s_rdV0 <= lbV0(to_integer(s_addr));
+            if s_wc(4) = '1' and s_wp(4) = '0' then lbV0(to_integer(s_wx(4))) <= std_logic_vector(s_avv(9 downto 2)); end if;
         end if;
     end process;
     p_lbV1 : process(clk)
     begin
         if rising_edge(clk) then
-            s_rdV1 <= lbV1(to_integer(s_addr(10 downto 1)));
-            if s_wc(4) = '1' and s_wp(4) = '1' then lbV1(to_integer(s_wx(4)(10 downto 1))) <= std_logic_vector(s_avv(9 downto 2)); end if;
+            s_rdV1 <= lbV1(to_integer(s_addr));
+            if s_wc(4) = '1' and s_wp(4) = '1' then lbV1(to_integer(s_wx(4))) <= std_logic_vector(s_avv(9 downto 2)); end if;
         end if;
     end process;
 
