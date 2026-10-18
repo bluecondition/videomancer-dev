@@ -24,6 +24,18 @@
 --   P12 Fold     the threshold: from the highlights (0%) down to black
 --                (100%, the whole picture folds)
 --
+-- v0.3.2 (2026-10-17): resolution scaling.  The column and row DDAs run in
+-- virtual 1080-line units: x steps 1.0 / 1.5 / 2.0 per pixel at 1080 / 720p
+-- / SD (SD = a 1440-wide 4:3 window), y steps 1080 / active lines per field
+-- line (2 x 1080/486 at 480i), from the video timing ID, so K4 Cell and K3
+-- Rows keep their 1080 sizes relative to the screen height (no 2x tall SD
+-- cells).  The cell mean still divides by the cell's real pixel count.
+-- Rows smaller than a line are stepped over (the K6 staircase still steps
+-- once per row).  The Grid is at least 1 px / 1 line; rows under 2 lines on
+-- screen (no room for a band) get every N-th line instead, the 1080
+-- coverage.  Iso stays at pixel scale.
+-- 1080p is bit-identical.
+--
 -- v0.3.0 (Tier 2).  One cell RAM: each cell row is captured on the line
 -- before it (line 0 captures its own row and shows the plain picture), so
 -- the mosaic sits on the picture.  Cells are any width (column DDA); a
@@ -118,6 +130,32 @@ architecture solarcell of program_top is
         end case;
     end function;
 
+    -- Resolution scaling (mondrian v1.0.2): per-mode steps from the timing ID.
+    -- x step in half virtual units per pixel: 1080 2 (1.0), 720p 3 (1.5),
+    -- SD 4 (2.0: 720 px span 1440 units, a 4:3 window of the 1080 canvas).
+    function f_vstep_x(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0 | 4 | 8 | 12 => return to_unsigned(4, 3);
+            when 5 | 6 | 14     => return to_unsigned(3, 3);
+            when others         => return to_unsigned(2, 3);
+        end case;
+    end function;
+    -- y step in Q4.8 virtual units per FIELD line (1080 / active lines,
+    -- doubled for interlaced modes).
+    function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(1138, 12);  -- 480i: 2 x 1080/486
+            when 4          => return to_unsigned(576, 12);   -- 480p: 1080/480
+            when 8          => return to_unsigned(960, 12);   -- 576i: 2 x 1080/576
+            when 12         => return to_unsigned(480, 12);   -- 576p: 1080/576
+            when 5 | 6 | 14 => return to_unsigned(384, 12);   -- 720p: 1.5
+            when 1 | 2 | 10 => return to_unsigned(512, 12);   -- 1080i: 2.0
+            when others     => return to_unsigned(256, 12);   -- 1080p: 1.0
+        end case;
+    end function;
+
     -- cell RAM, one bank: {Y, U, V, capture-line chroma parity, 0}
     type t_cell is array (0 to 511) of std_logic_vector(31 downto 0);
     signal s_cell : t_cell := (others => C_NEUTRAL);
@@ -157,11 +195,24 @@ architecture solarcell of program_top is
     signal s_mix  : unsigned(8 downto 0) := to_unsigned(256, 9);      -- /256
     signal s_offr : unsigned(7 downto 0) := (others => '0');
     signal s_base : signed(11 downto 0) := to_signed(64, 12);
+    -- resolution scaling: steps (free-running from the timing ID) and the
+    -- per-frame virtual geometry
+    signal s_stx  : unsigned(2 downto 0) := to_unsigned(2, 3);        -- Q.1 per pixel
+    signal s_sty  : unsigned(11 downto 0) := to_unsigned(256, 12);    -- Q4.8 per field line
+    signal s_w2   : unsigned(8 downto 0) := to_unsigned(16, 9);       -- cell width, half units
+    signal s_w2ms : unsigned(8 downto 0) := to_unsigned(14, 9);       -- ... minus a pixel step
+    signal s_gtx  : unsigned(3 downto 0) := to_unsigned(2, 4);        -- grid columns, half units
+    signal s_n256 : unsigned(14 downto 0) := to_unsigned(1024, 15);   -- row height, Q.8
+    signal s_nlast : unsigned(14 downto 0) := to_unsigned(768, 15);   -- a row's last line starts here
+    signal s_gty  : unsigned(14 downto 0) := to_unsigned(256, 15);    -- grid lines, Q.8 (0 = none)
+    signal s_gfine : std_logic := '0';                                -- rows under 2 lines: grid every N-th line
+    signal s_lmod : unsigned(5 downto 0) := (others => '0');          -- screen line mod N
 
     -- per line
     signal s_prev_hsync_n, s_prev_vsync_n, s_prev_avid : std_logic := '1';
     signal s_line  : unsigned(10 downto 0) := (others => '0');
-    signal s_rc    : unsigned(5 downto 0) := (others => '0');         -- line within the cell row
+    signal s_rcy   : unsigned(14 downto 0) := (others => '0');        -- line position in its row, Q.8 virtual
+    signal s_rwrap : std_logic := '0';
     signal s_stair : unsigned(14 downto 0) := (others => '0');        -- K6 staircase, 11.4 phase
     signal s_lstep : unsigned(2 downto 0) := "111";
     signal s_ss    : signed(12 downto 0) := (others => '0');
@@ -179,7 +230,8 @@ architecture solarcell of program_top is
 
     -- write side: column DDA (d8), flags (d9), sums (d10), 1/n (d11, d12),
     -- products (d13, d14), cell word (d15)
-    signal s_wcc : unsigned(7 downto 0) := (others => '0');
+    signal s_wcc : unsigned(8 downto 0) := (others => '0');           -- position in the cell, half units
+    signal s_wpc : unsigned(7 downto 0) := (others => '0');           -- pixels before this one in the cell
     signal s_wci : unsigned(8 downto 0) := (others => '0');
     signal s_wx  : unsigned(10 downto 0) := (others => '0');
     signal s_wst9, s_wlast9 : std_logic := '0';
@@ -201,7 +253,7 @@ architecture solarcell of program_top is
     signal s_wd15 : std_logic_vector(31 downto 0) := C_NEUTRAL;
 
     -- read side: column DDA (d7), RAM (d8), fabric (d9), select (d10), mix (d11..d14)
-    signal s_rcc : unsigned(7 downto 0) := (others => '0');
+    signal s_rcc : unsigned(8 downto 0) := (others => '0');           -- position in the cell, half units
     signal s_rci : unsigned(8 downto 0) := (others => '0');
     signal s_my9, s_mu9, s_mv9 : unsigned(9 downto 0) := (others => '0');
     signal s_mp9 : std_logic := '0';
@@ -249,6 +301,8 @@ begin
         variable v_t : signed(14 downto 0);
     begin
         if rising_edge(clk) then
+            s_stx <= f_vstep_x(registers_in(8)(3 downto 0));
+            s_sty <= f_vstep_y(registers_in(8)(3 downto 0));
             s_k1 <= unsigned(registers_in(0)); s_k2 <= unsigned(registers_in(1));
             s_k3 <= unsigned(registers_in(2)); s_k4 <= unsigned(registers_in(3));
             s_k5 <= unsigned(registers_in(4)); s_k6 <= unsigned(registers_in(5));
@@ -297,6 +351,34 @@ begin
                 when 4 =>
                     s_pph <= to_unsigned(800, 10) - s_pa(14 downto 5);             -- 800 - 25 P / 32: 800 .. 1
                     s_mix <= resize(s_mb(10 downto 2), 9) + 64;                    -- 64 .. 256
+                    -- virtual geometry: cell width in half units, row height Q.8
+                    s_w2   <= shift_left(resize(s_wm1, 9) + 1, 1);
+                    s_n256 <= shift_left(resize(s_nm1, 15) + 1, 8);
+                    if shift_left(resize(s_tx, 4), 1) < resize(s_stx, 4) then
+                        s_gtx <= resize(s_stx, 4);                                 -- at least 1 px
+                    else
+                        s_gtx <= shift_left(resize(s_tx, 4), 1);
+                    end if;
+                when 5 =>
+                    s_w2ms <= s_w2 - s_stx;
+                    if s_n256 > resize(s_sty, 15) then
+                        s_nlast <= s_n256 - s_sty;
+                    else
+                        s_nlast <= (others => '0');                                 -- rows under a line
+                    end if;
+                    -- grid lines: at least 1 line; rows under 2 lines on screen
+                    -- can't show a band, so every N-th screen line (the same
+                    -- coverage, ty = 1 there)
+                    s_gfine <= '0';
+                    if s_ty = 0 then
+                        s_gty <= (others => '0');
+                    elsif s_n256 < shift_left(resize(s_sty, 15), 1) then
+                        s_gty <= (others => '0'); s_gfine <= '1';
+                    elsif shift_left(resize(s_ty, 15), 8) < resize(s_sty, 15) then
+                        s_gty <= resize(s_sty, 15);
+                    else
+                        s_gty <= shift_left(resize(s_ty, 15), 8);
+                    end if;
                 when others => null;
             end case;
             if s_fstep /= 7 then s_fstep <= s_fstep + 1; end if;
@@ -318,14 +400,21 @@ begin
             end case;
             if s_lstep /= 7 then s_lstep <= s_lstep + 1; end if;
 
-            -- end of an active line: advance the cell-row DDA
+            -- end of an active line: advance the cell-row DDA (virtual lines,
+            -- Q8); then, a clock at a time, step over every row boundary it
+            -- passed (rows under a line can pass several) with the staircase
+            if s_rwrap = '1' then
+                if s_rcy >= s_n256 then
+                    s_rcy <= s_rcy - s_n256; s_stair <= s_stair + s_offr;
+                else
+                    s_rwrap <= '0';
+                end if;
+            end if;
             if s_prev_avid = '1' and data_in.avid = '0' then
                 s_line <= s_line + 1;
-                if s_rc >= s_nm1 then
-                    s_rc <= (others => '0'); s_stair <= s_stair + s_offr;
-                else
-                    s_rc <= s_rc + 1;
-                end if;
+                s_rcy <= s_rcy + s_sty;
+                if s_lmod >= s_nm1 then s_lmod <= (others => '0'); else s_lmod <= s_lmod + 1; end if;
+                s_rwrap <= '1';
             end if;
             -- start of an active line: latch the line's threshold and flags
             if s_prev_avid = '0' and data_in.avid = '1' then
@@ -334,8 +423,8 @@ begin
                 s_lpar <= s_hpar;
                 if s_line = 0 then s_l0 <= '1'; else s_l0 <= '0'; end if;
                 -- capture the next cell row on its row's last line (line 0: its own)
-                if s_rc >= s_nm1 or s_line = 0 then s_capl <= '1'; else s_capl <= '0'; end if;
-                if s_rc < resize(s_ty, 6) then s_rgrid <= '1'; else s_rgrid <= '0'; end if;
+                if s_rcy >= s_nlast or s_line = 0 then s_capl <= '1'; else s_capl <= '0'; end if;
+                if s_rcy < s_gty or (s_gfine = '1' and s_lmod = 0) then s_rgrid <= '1'; else s_rgrid <= '0'; end if;
             end if;
             if data_in.hsync_n = '0' and s_prev_hsync_n = '1' then
                 s_lstep <= (others => '0'); s_hpar <= '0';
@@ -343,7 +432,8 @@ begin
             -- resets are idempotent (serrated vsync); the frame sequencer
             -- start is guarded by saw-active
             if data_in.vsync_n = '0' and s_prev_vsync_n = '1' then
-                s_line <= (others => '0'); s_rc <= (others => '0'); s_stair <= (others => '0');
+                s_line <= (others => '0'); s_rcy <= (others => '0'); s_rwrap <= '0'; s_stair <= (others => '0');
+                s_lmod <= (others => '0');
                 if s_saw = '1' then s_fstep <= (others => '0'); s_saw <= '0'; end if;
             end if;
 
@@ -370,21 +460,22 @@ begin
         variable v_y, v_u, v_v : unsigned(9 downto 0);
     begin
         if rising_edge(clk) then
-            -- d8: column DDA (driven by the d8 avid)
+            -- d8: column DDA (driven by the d8 avid), virtual half units
             if s_avid_sr(7) = '1' then
-                if s_wcc >= s_wm1 then
-                    s_wcc <= (others => '0'); s_wci <= s_wci + 1;
+                if s_wcc >= s_w2ms then
+                    s_wcc <= s_wcc + s_stx - s_w2; s_wci <= s_wci + 1; s_wpc <= (others => '0');
                 else
-                    s_wcc <= s_wcc + 1;
+                    s_wcc <= s_wcc + s_stx; s_wpc <= s_wpc + 1;
                 end if;
                 s_wx <= s_wx + 1;
             else
                 s_wcc <= (others => '0'); s_wci <= (others => '0'); s_wx <= (others => '0');
+                s_wpc <= (others => '0');
             end if;
             -- d9: cell start / last flags, pixel count
-            if s_wcc = 0 then s_wst9 <= '1'; else s_wst9 <= '0'; end if;
-            if s_wcc >= s_wm1 then s_wlast9 <= '1'; else s_wlast9 <= '0'; end if;
-            s_wn9 <= s_wcc + 1;
+            if s_wcc < s_stx then s_wst9 <= '1'; else s_wst9 <= '0'; end if;
+            if s_wcc >= s_w2ms then s_wlast9 <= '1'; else s_wlast9 <= '0'; end if;
+            s_wn9 <= s_wpc + 1;
             s_wci9 <= s_wci; s_wx9 <= s_wx;
             -- d10: running cell sums
             if s_wst9 = '1' then
@@ -453,16 +544,16 @@ begin
         if rising_edge(clk) then
             -- d7: column DDA (driven by the d7 avid) = read address
             if s_avid_sr(6) = '1' then
-                if s_rcc >= s_wm1 then
-                    s_rcc <= (others => '0'); s_rci <= s_rci + 1;
+                if s_rcc >= s_w2ms then
+                    s_rcc <= s_rcc + s_stx - s_w2; s_rci <= s_rci + 1;
                 else
-                    s_rcc <= s_rcc + 1;
+                    s_rcc <= s_rcc + s_stx;
                 end if;
             else
                 s_rcc <= (others => '0'); s_rci <= (others => '0');
             end if;
-            -- d8: grid column (the cell's first tx px)
-            if s_rcc < resize(s_tx, 8) then s_gx(8) <= '1'; else s_gx(8) <= '0'; end if;
+            -- d8: grid column (the cell's first tx units, at least 1 px)
+            if s_rcc < resize(s_gtx, 9) then s_gx(8) <= '1'; else s_gx(8) <= '0'; end if;
             for i in 9 to 22 loop s_gx(i) <= s_gx(i - 1); end loop;
             -- d9: RAM out -> fabric
             s_my9 <= unsigned(s_crd(31 downto 22)); s_mu9 <= unsigned(s_crd(21 downto 12));
