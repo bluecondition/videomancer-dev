@@ -4,7 +4,7 @@
 -- This file is part of Videomancer Community Programs.
 -- See LICENSE file in the repository root for full license text.
 --
--- glitchscape.vhd  (v1.0.0 — "Pixel-Sort Landscape")
+-- glitchscape.vhd  (v1.0.2 — "Pixel-Sort Landscape")
 --
 -- Databends a live source into the glitch-landscape look: a dense rectangular
 -- mass of vertically-streaked, hyper-saturated jewel-tone color floating on a
@@ -49,6 +49,18 @@
 --   S11 Sort Axis    (Vertical streaks / Horizontal streaks)
 --   P12 Glitch Intensity (HERO fader: bend, ripple, row wander, edge tear,
 --        fringe, bloom, hot-zone reach, drip length and grain, all continuous.)
+--
+-- v1.0.2 (2026-10-18) resolution scaling: the geometry runs in virtual
+-- 1080-line units from the video timing ID (registers_in(8)) -- 1080p output
+-- unchanged bit for bit.  The bar pitch (K5) is a size: the x DDA steps
+-- 1.5x at 720p and 2x at SD, the Horizontal row DDA once per virtual line.
+-- Drip decay odds scale with the virtual lines per field line, so drips
+-- run the same share of the screen.  Ripple waves, the torn-edge columns
+-- and the macroblocks (16 x 16 virtual units: 720p ~10.7 px, SD 8 px x 3.6
+-- field lines) use virtual coordinates, replacing the lines >= 960 switch
+-- that gave 720p and SD the same 8-px blocks.  The channel-separation
+-- fringe scales too (720p 3..5 px, SD 2..4 px).  Filaments, grain and the
+-- row wander stay at pixel scale.
 --
 -- Author: czartroniks
 
@@ -144,6 +156,28 @@ architecture glitchscape of program_top is
         return cur;
     end function;
 
+    -- Resolution scaling: the pilot's (mondrian) per-mode steps.
+    function f_vstep_x(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0 | 4 | 8 | 12 => return to_unsigned(4, 3);
+            when 5 | 6 | 14     => return to_unsigned(3, 3);
+            when others         => return to_unsigned(2, 3);
+        end case;
+    end function;
+    function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(1138, 12);  -- 480i: 2 x 1080/486
+            when 4          => return to_unsigned(576, 12);   -- 480p: 1080/480
+            when 8          => return to_unsigned(960, 12);   -- 576i: 2 x 1080/576
+            when 12         => return to_unsigned(480, 12);   -- 576p: 1080/576
+            when 5 | 6 | 14 => return to_unsigned(384, 12);   -- 720p: 1.5
+            when 1 | 2 | 10 => return to_unsigned(512, 12);   -- 1080i: 2.0
+            when others     => return to_unsigned(256, 12);   -- 1080p: 1.0
+        end case;
+    end function;
+
     --------------------------------------------------------------------------
     -- Line-buffer RAMs (full power-of-2 depth for inference).
     --------------------------------------------------------------------------
@@ -175,7 +209,25 @@ architecture glitchscape of program_top is
     signal line_av   : std_logic := '0';   -- current line carried active video
 
     signal max_px    : unsigned(11 downto 0) := (others => '0');
-    signal max_py    : unsigned(10 downto 0) := (others => '0');
+
+    -- Resolution scaling (v1.0.2): virtual 1080-line coordinates.  Steps are
+    -- decoded free-running from the timing ID (static while a mode runs):
+    -- s_vx Q.1 units per pixel (1080 2, 720p 3, SD 4), s_vy Q4.8 virtual lines
+    -- per FIELD line, s_cls 0 = 1080 lines, 1 = 720p, 2 = SD.  pxv / pyv move
+    -- in lockstep with px / py; at 1080p their integer parts ARE px / py.
+    signal s_vx      : unsigned(2 downto 0)  := to_unsigned(2, 3);
+    signal s_vy      : unsigned(11 downto 0) := to_unsigned(256, 12);
+    signal s_cls     : unsigned(1 downto 0)  := (others => '0');
+    signal pxv       : unsigned(12 downto 0) := (others => '0');   -- Q12.1
+    signal pyv       : unsigned(19 downto 0) := (others => '0');   -- Q12.8
+    signal bx0_r     : std_logic := '1';   -- this pixel starts a 16-unit block column
+    signal by0_r     : std_logic := '1';   -- this row starts a 16-unit block row
+    signal s_stepx   : unsigned(15 downto 0) := to_unsigned(4096, 16); -- x DDA phase / px
+    signal yfr       : unsigned(7 downto 0)  := (others => '0');   -- row DDA virtual fraction
+    signal yn_r      : unsigned(2 downto 0)  := to_unsigned(1, 3); -- virtual lines next row
+    signal s_stepn   : unsigned(17 downto 0) := to_unsigned(4096, 18); -- yn_r x s_step
+    signal s_pkm     : unsigned(16 downto 0) := (others => '0');
+    signal s_pk2     : unsigned(7 downto 0)  := to_unsigned(16, 8);  -- drip odds /256 per field line
 
     -- xorshift32 noise (period 2^32-1; disjoint bit fields per use:
     -- grain 7..2, drip decay 18..12, row wander 27..22)
@@ -212,7 +264,6 @@ architecture glitchscape of program_top is
     signal s_drip    : std_logic := '0';
     signal s_comp    : std_logic := '0';
     signal s_horiz   : std_logic := '0';
-    signal s_hd      : std_logic := '1';   -- 1080-line raster: 16-px macroblocks
 
     -- P12-derived (continuous)
     signal s_bk      : unsigned(7 downto 0) := to_unsigned(80, 8);   -- luma bend gain
@@ -381,6 +432,9 @@ begin
         variable v_pi, v_dz : integer;
         variable v_k5raw : unsigned(9 downto 0);
         variable v_m9    : unsigned(8 downto 0);
+        variable v_yn    : unsigned(11 downto 0);
+        variable v_pxv   : unsigned(12 downto 0);
+        variable v_pyv   : unsigned(19 downto 0);
     begin
         if rising_edge(clk) then
             prev_hsync_n <= data_in.hsync_n;
@@ -398,6 +452,42 @@ begin
             for i in 0 to 7 loop
                 reg_q(i) <= unsigned(registers_in(i)(9 downto 0));
             end loop;
+
+            -- Resolution-scaling steps from the timing ID, free-running, and
+            -- the scaled per-frame steps (register-in / register-out, they
+            -- settle in the blanking after the frame latch; 1080p = identity).
+            s_vx <= f_vstep_x(registers_in(8)(3 downto 0));
+            s_vy <= f_vstep_y(registers_in(8)(3 downto 0));
+            case to_integer(unsigned(registers_in(8)(3 downto 0))) is
+                when 0 | 4 | 8 | 12 => s_cls <= "10";
+                when 5 | 6 | 14     => s_cls <= "01";
+                when others         => s_cls <= "00";
+            end case;
+            -- x DDA: pitch is a size -> 1.5x / 2x phase per pixel
+            case s_cls is
+                when "00"   => s_stepx <= resize(s_step, 16);
+                when "01"   => s_stepx <= resize(s_step, 16) + resize(shift_right(s_step, 1), 16);
+                when others => s_stepx <= shift_left(resize(s_step, 16), 1);
+            end case;
+            -- row DDA (Horizontal): one s_step per VIRTUAL line; yn_r = the
+            -- virtual lines the next active field line covers (1..5)
+            v_yn := resize(yfr, 12) + s_vy;
+            yn_r <= v_yn(10 downto 8);
+            case yn_r is
+                when "001"  => s_stepn <= resize(s_step, 18);
+                when "010"  => s_stepn <= shift_left(resize(s_step, 18), 1);
+                when "011"  => s_stepn <= resize(s_step, 18) + shift_left(resize(s_step, 18), 1);
+                when "100"  => s_stepn <= shift_left(resize(s_step, 18), 2);
+                when others => s_stepn <= resize(s_step, 18) + shift_left(resize(s_step, 18), 2);
+            end case;
+            -- drip decay odds per FIELD line = odds per virtual line x lines
+            -- covered (/256; 1080p = 2 x s_pk, the old /128 test exactly)
+            s_pkm <= s_pk(4 downto 0) * s_vy;
+            if s_pkm(16 downto 15) /= "00" then
+                s_pk2 <= (others => '1');
+            else
+                s_pk2 <= s_pkm(14 downto 7);
+            end if;
 
             -- free-running per-line helpers (registered so the per-line update
             -- below is a single add)
@@ -421,16 +511,24 @@ begin
                 line_av <= '0';
                 if line_av = '1' then
                     if px > max_px then max_px <= px; end if;
-                    max_py <= py;                  -- last active line wins
                 end if;
-                px   <= (others => '0');
-                xacc <= (others => '0');
+                px    <= (others => '0');
+                pxv   <= (others => '0');
+                bx0_r <= '1';
+                xacc  <= (others => '0');
                 -- leaky random walk -> smooth organic row wander (brown noise)
                 rwalk <= rwalk - shift_right(rwalk, 2) + rw_step;
             elsif data_in.avid = '1' then
                 line_av <= '1';
                 px   <= px + 1;
-                xacc <= xacc + s_step;
+                xacc <= xacc + s_stepx;
+                v_pxv := pxv + s_vx;
+                pxv   <= v_pxv;
+                if v_pxv(12 downto 5) /= pxv(12 downto 5) then
+                    bx0_r <= '1';
+                else
+                    bx0_r <= '0';
+                end if;
             end if;
 
             -- row DDA for Horizontal sort: advances on ACTIVE lines only; the
@@ -441,13 +539,17 @@ begin
                 else
                     yacc <= (others => '0');
                 end if;
+                yfr <= (others => '0');
             elsif v_h_edge = '1' and line_av = '1' then
-                yacc <= yacc + s_step;
+                yacc <= yacc + s_stepn;
+                yfr  <= v_yn(7 downto 0);
             end if;
 
             -- Y counter (anchored to first active line)
             if v_v_edge = '1' then
                 py        <= (others => '0');
+                pyv       <= (others => '0');
+                by0_r     <= '1';
                 frame_act <= '0';
 
                 -- once per field (serrated vsync fires many edges)
@@ -456,10 +558,8 @@ begin
                     frame_cnt <= frame_cnt + 1;
 
                     -- measured active size (captured on active lines above)
-                    if max_py >= 959 then s_hd <= '1'; else s_hd <= '0'; end if;
                     if max_px > 64 then g_wm1 <= max_px - 1; end if;
                     max_px <= (others => '0');
-                    max_py <= (others => '0');
 
                     -- K5 glide: a DDA step must not jitter (1 LSB = visible
                     -- phase error at the right edge); ease, never snap.
@@ -511,7 +611,23 @@ begin
                     -- stepped effects use the deadbanded fader
                     v_dz := to_integer(db_p12) / 256;                  -- 0..3
                     if reg_q(6)(0) = '1' then                          -- S7
-                        s_chroff <= 4 + v_dz;                          -- 4..7 px
+                        -- 4..7 px at 1080p, x2/3 at 720p, x1/2 at SD (rounded)
+                        case s_cls is
+                            when "00" =>
+                                s_chroff <= 4 + v_dz;                  -- 4..7 px
+                            when "01" =>
+                                case v_dz is
+                                    when 0 | 1  => s_chroff <= 3;
+                                    when 2      => s_chroff <= 4;
+                                    when others => s_chroff <= 5;
+                                end case;
+                            when others =>
+                                case v_dz is
+                                    when 0      => s_chroff <= 2;
+                                    when 1 | 2  => s_chroff <= 3;
+                                    when others => s_chroff <= 4;
+                                end case;
+                        end case;
                     else
                         s_chroff <= 0;
                     end if;
@@ -521,8 +637,17 @@ begin
             elsif data_in.avid = '1' and frame_act = '0' then
                 frame_act <= '1';
                 py        <= (others => '0');
+                pyv       <= (others => '0');
+                by0_r     <= '1';
             elsif v_h_edge = '1' then
                 py <= py + 1;
+                v_pyv := pyv + s_vy;
+                pyv   <= v_pyv;
+                if v_pyv(19 downto 12) /= pyv(19 downto 12) then
+                    by0_r <= '1';
+                else
+                    by0_r <= '0';
+                end if;
             end if;
         end if;
     end process p_position;
@@ -641,6 +766,7 @@ begin
         variable v_hold     : unsigned(23 downto 0);
         variable v_hy       : unsigned(9 downto 0);
         variable v_c        : t_carry;
+        variable v_r8       : unsigned(7 downto 0);
     begin
         if rising_edge(clk) then
             -- sync delay line (the output avid is the generated one)
@@ -659,15 +785,12 @@ begin
             v_c.px  := px(10 downto 0);
             v_c.py0 := py(0);
             if py = 0 then v_c.top := '1'; else v_c.top := '0'; end if;
-            if s_hd = '1' then
-                v_c.bcol := px(11 downto 4);
-                if px(3 downto 0) = "0000" then v_c.bx0 := '1'; else v_c.bx0 := '0'; end if;
-                if py(3 downto 0) = "0000" then v_c.by0 := '1'; else v_c.by0 := '0'; end if;
-            else
-                v_c.bcol := px(10 downto 3);
-                if px(2 downto 0) = "000" then v_c.bx0 := '1'; else v_c.bx0 := '0'; end if;
-                if py(2 downto 0) = "000" then v_c.by0 := '1'; else v_c.by0 := '0'; end if;
-            end if;
+            -- macroblocks: 16 x 16 VIRTUAL units in every mode (block-start
+            -- flags formed with the counters: a fractional step can skip a
+            -- "low bits = 0" value)
+            v_c.bcol := pxv(12 downto 5);
+            v_c.bx0  := bx0_r;
+            v_c.by0  := by0_r;
             cr(1) <= v_c;
             for i in 2 to NSTG loop cr(i) <= cr(i - 1); end loop;
 
@@ -679,19 +802,20 @@ begin
             if s_horiz = '1' then r1_base <= yacc; else r1_base <= xacc; end if;
             -- organic bend: two diagonal triangle waves mixing px & py at
             -- different angles/periods (rounded, column-varying curves).
-            v_a := resize(py(8 downto 1), 8) + resize(px(9 downto 5), 8)
+            -- (virtual coordinates: the same waves at every resolution)
+            v_a := resize(pyv(16 downto 9), 8) + resize(pxv(10 downto 6), 8)
                  + resize(frame_cnt(6 downto 0), 8);
             if v_a(7) = '1' then v_a := not v_a; end if;          -- fold -> 0..127
-            v_b := resize(py(7 downto 0), 8) - resize(px(8 downto 4), 8)
+            v_b := resize(pyv(15 downto 8), 8) - resize(pxv(9 downto 5), 8)
                  + resize(frame_cnt(5 downto 0), 8);
             if v_b(7) = '1' then v_b := not v_b; end if;
             v_ta := signed(resize(v_a(6 downto 0), 9)) - 64;      -- -64..63
             v_tb := signed(resize(v_b(6 downto 0), 9)) - 64;
             r1_curve <= resize(v_ta, 10) + resize(shift_right(v_tb, 1), 10);
-            -- torn-edge column hash (4-px columns), spread over s1..s4:
+            -- torn-edge column hash (4-unit virtual columns), spread over s1..s4:
             -- x*0x6D+0x3B; ^>>4; *0x35; ^>>5; top 6 bits.  Spot-checked: lag
             -- correlations <= 0.12, no linear runs.
-            r1_tx <= resize(px(10 downto 2) * to_unsigned(16#6D#, 7), 9) + to_unsigned(16#3B#, 9);
+            r1_tx <= resize(pxv(11 downto 3) * to_unsigned(16#6D#, 7), 9) + to_unsigned(16#3B#, 9);
 
             -----------------------------------------------------------------
             -- s2: contrast crush x1.5; ripple gain; hot key (RAW luma: the
@@ -779,7 +903,10 @@ begin
             if cr(7).py0 = '0' then v_lb := r7_db; else v_lb := r7_da; end if;
             v_ea := v_lb(3 downto 0);
             if s_drip = '0' or cr(7).top = '1' then v_ea := (others => '0'); end if;
-            if v_ea /= 0 and xs(18 downto 12) < s_pk then
+            -- odds per field line s_pk2/256 (1080p: exactly the old
+            -- xs(18 downto 12) < s_pk test; bit 11 is otherwise unused)
+            v_r8 := xs(18 downto 11);
+            if v_ea /= 0 and v_r8 < s_pk2 then
                 v_ea2 := v_ea - 1;
             else
                 v_ea2 := v_ea;
