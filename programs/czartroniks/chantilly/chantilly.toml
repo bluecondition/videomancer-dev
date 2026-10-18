@@ -225,4 +225,4 @@ linear_potentiometer_12 = 600
 [firmware]
 # nextpnr placement seed for the stock LZX build: seed 1 crashes nextpnr's router on SD HDMI;
 # seed 6 builds all 8 configs.
-seed = 6
+seed = 1
