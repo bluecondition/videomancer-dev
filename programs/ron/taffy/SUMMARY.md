@@ -2,6 +2,23 @@
 
 **v0.4.0 (2026-09-28): FINAL — signed off by Ron on hardware ("I like the way this looks").**
 
+**v0.4.2 (2026-10-17): resolution scaling** (built, not flashed). Band height
+(K3), feather (K6) and the centre dead zone (K4) were fixed field lines / pixels,
+so at 480i a K3=700 band covered ~72% of the picture instead of 16%, and the
+dead zone took 2.7x more of the width. Now they are in virtual 1080-line units
+(the mondrian-pilot timing-ID tables): the line sequencer scales each line's
+field-line distance to the band by `ys` (one 8x12 blanking-time multiply, two
+new steps — distance saturated at 255 first, which can't change any target), and
+the frame sequencer converts K4 to real pixels (x1 / x171/256 / >>1 for
+1080 / 720p / SD). Both interlaced fields use the same field-line distance
+because they share the per-line envelope (a half-line offset would make the
+feather chase two targets and flicker). The stretch is a ratio (already
+scale-free); the 12-px edge clamp stays in real pixels (source blanking columns).
+1080p render bit-identical to v0.4.1 (0 px differ); 720p and SD match the 1080p
+band/dead-zone proportions. Build (default router2): HD Analog 78.4 (seed 1),
+HD HDMI 79.0 (seed 1), HD Dual 78.0 (seed 2), SD 83.4–85.5 MHz; 3921–3954/7680
+LC (51%, +~240 LUT standalone), 27/32 EBR.
+
 ## What it does
 P12 scans a scanline down the picture (100% = top, 0% = bottom). The lines it
 touches stretch horizontally outward from the centre column, and snap back
@@ -56,8 +73,9 @@ leave the line — only Squeeze runs off the ends, into the edge clamp below.
 - **K1 Pull** — how fast a line grows to full stretch (quadratic: 1–255 env
   steps/frame, so the low end crawls for seconds).
 - **K2 Relax** — how fast it recedes again (same curve).
-- **K3 Height** — band thickness, 1–255 lines.
-- **K4 Centre** — half-width of the untouched centre dead zone, 0–511 px.
+- **K3 Height** — band thickness, 1–255 lines (1080-line units since v0.4.2).
+- **K4 Centre** — half-width of the untouched centre dead zone, 0–511 px
+  (1080p pixels; scaled at 720p/SD since v0.4.2).
 - **K5 Depth** — magnification at full envelope, up to 64×.
 - **K6 Soft** — feathers the band edges over 1–128 lines. In Sustain that's a
   lens-like bulge instead of a rectangular slab; in One Shot the feather is the
