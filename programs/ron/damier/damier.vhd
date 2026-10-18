@@ -4,7 +4,14 @@
 -- This file is part of Videomancer Community Programs.
 -- See LICENSE file in the repository root for full license text.
 --
--- damier.vhd  (v0.4.5) -- op-art checkerboard engine
+-- damier.vhd  (v0.4.8) -- op-art checkerboard engine
+--
+-- v0.4.8: resolution scaling.  Sizes are set on a virtual 1080-line canvas:
+-- the engine scales the lattice step per pixel by the pixel's width in
+-- virtual units (x1.5 at 720p, x2 at SD), and Y runs in the same
+-- pixel-width units (Q.8, from the video timing ID), so squares, rings and
+-- waves keep their size against the screen height, folds stay isotropic on
+-- SD's 4:3 screen, and 1080 is bit-identical.
 --
 -- DAMIER (French: checkerboard; Vasarely's word for his grids).  A clean
 -- checkerboard, re-drawn per square from a small vocabulary of shapes,
@@ -14,7 +21,8 @@
 --
 -- PICTURE PIPELINE
 --
---  1. FOLDED SCREEN COORDINATES.  X = x - W/2, Y = y - H/2 (frame lines).
+--  1. FOLDED SCREEN COORDINATES.  X = x - W/2, Y = y - H/2 (frame lines,
+--     in pixel-width units: x 1.111 at 480 lines, 0.9375 at 576).
 --     Mirror folds X -> |X|, Flip folds Y -> |Y|, Kaleido folds the
 --     diagonal (P,Q) = (max, min).  Everything later works on (P,Q), so the
 --     whole picture obeys the symmetry.  With any mirror on, the lattice
@@ -25,7 +33,7 @@
 --     ONE of P,Q by +-1, so each accumulator adds one of {a,-a,b,-b} per
 --     pixel (registered one pixel ahead).  The line seeds (U, V at the left
 --     edge) come from a LINE SEEDER: one serial shift-add multiplier forms
---     them exactly during the line before (~60 clocks).
+--     them exactly during the line before (~80 clocks).
 --
 --  3. WAVES (every 4th pixel).  Two waves run along the lattice axes (A
 --     along U, B along V) from 128-entry interpolated tables, evaluated once
@@ -42,7 +50,8 @@
 --     layout's own shape metric m (square rings on the plain checker,
 --     circles, diamonds, Truchet arcs ...), XORed over the cell: ring bit =
 --     bit 7 of (m F - Q).  The ring period is set in pixels (so the look is
---     the same at any Scale) and tightens from none at 0 to ~17 px at 100%.
+--     the same at any Scale) and tightens from none at 0 to ~17 px at 100%
+--     (1080 pixels; the period scales with the picture at 720p / SD).
 --     The rings stand still: they change only with the slider.
 --
 --  6. ENGINE.  A small microcoded processor (cubist's design at 16 bits:
@@ -54,7 +63,8 @@
 --
 -- CONTROLS
 --   K1 Layout   16 arrangements (Classic .. Shimmer)
---   K2 Scale    square size, 8 .. 256 px, exponential
+--   K2 Scale    square size, 8 .. 256 px at 1080 (same share of the
+--               screen height at 720p / SD), exponential
 --   K3 Wave     amplitude; a second wave crosses past 50%
 --   K4 Angle    lattice rotation (the waves ride the lattice axes)
 --   K5 Speed    everything that moves: waves, drift, spin, pulses
@@ -220,6 +230,18 @@ architecture damier of program_top is
 
     -- per-mode
     signal m_W2, m_H2 : signed(11 downto 0) := (others => '0');
+    -- Resolution scaling (v0.4.8): the picture is drawn on a virtual
+    -- 1080-line canvas.  X stays in pixels and Y is kept in the same
+    -- pixel-width units (so the folds stay isotropic); the engine scales
+    -- the lattice step per pixel by the pixel's width in virtual units.
+    --   f_cls  0: 1080 (x1)  1: 720p (x1.5)  2: SD (x2, a 1440-wide 4:3 window)
+    --   f_r9   Y units per frame line, Q.9 (512 = 1 at 1080 and 720p)
+    --   f_ys   Y step per field line, Q.8 (doubled when interlaced)
+    --   f_y0   the field's top Y, Q.4 (from the engine: -H2 f_r9)
+    signal f_cls : unsigned(1 downto 0) := (others => '0');
+    signal f_r9  : unsigned(9 downto 0) := to_unsigned(512, 10);
+    signal f_ys  : unsigned(9 downto 0) := to_unsigned(256, 10);
+    signal f_y0  : signed(15 downto 0) := (others => '0');
 
     -- generic per-layout size datapath: s = clamp(k0 + (w >> gw) [- rr terms], lo, hi)
     signal g_k0   : signed(9 downto 0) := to_signed(128, 10);
@@ -297,18 +319,22 @@ architecture damier of program_top is
     -- line seeder: the left-edge seeds of the next line, by a serial
     -- multiplier
     ------------------------------------------------------------------------
+    -- Y and the folded target are Q.8 (pixel-width units); the multiplier
+    -- takes them at Q.4 (16-bit operand), the pixel path's diagonal-fold
+    -- threshold is Q0 rounded
     signal wl_U, wl_V : signed(26 downto 0) := (others => '0');
-    signal wl_tP, wl_tQ : signed(11 downto 0) := (others => '0');
-    signal wl_Y, wl_Q0, wl_Q0n : signed(11 downto 0) := (others => '0');
-    signal wl_pl, wl_ql : signed(11 downto 0) := (others => '0');
+    signal wl_tP, wl_tQ : signed(15 downto 0) := (others => '0');
+    signal wl_Y, wl_Q0n : signed(19 downto 0) := (others => '0');
+    signal wl_Q0 : signed(11 downto 0) := (others => '0');
+    signal wl_pl, wl_ql : signed(19 downto 0) := (others => '0');
     signal wl_tgo : unsigned(1 downto 0) := (others => '0');
     signal ls_run : std_logic := '0';
     signal ls_p   : unsigned(2 downto 0) := (others => '0');
-    signal ls_k   : unsigned(3 downto 0) := (others => '0');
+    signal ls_k   : unsigned(4 downto 0) := (others => '0');
     signal ls_M   : signed(15 downto 0) := (others => '0');
     signal ls_H   : signed(16 downto 0) := (others => '0');
-    signal ls_L   : std_logic_vector(11 downto 0) := (others => '0');
-    signal ls_S   : signed(27 downto 0) := (others => '0');
+    signal ls_L   : std_logic_vector(15 downto 0) := (others => '0');
+    signal ls_S   : signed(31 downto 0) := (others => '0');
 
     ------------------------------------------------------------------------
     -- pixel accumulators (stage 0)
@@ -475,7 +501,12 @@ begin
             if s_timing.vsync_start = '1' then
                 if s_vcnt > 0 then s_meas_h <= s_vcnt; end if;
                 s_vcnt  <= (others => '0');
-                s_ilace <= s_timing.is_interlaced;
+                -- interlaced = the timing ID says so (480i, 576i, 1080i);
+                -- the sync-phase detector is not trusted for this (v0.4.8)
+                case to_integer(unsigned(registers_in(8)(3 downto 0))) is
+                    when 0 | 8 | 1 | 2 | 10 => s_ilace <= '1';
+                    when others             => s_ilace <= '0';
+                end case;
             elsif s_timing.avid_start = '1' then
                 s_vcnt <= s_vcnt + 1;
             end if;
@@ -552,6 +583,7 @@ begin
     -- ====================================================================
     p_knobs : process(clk)
         variable v_h : unsigned(11 downto 0);
+        variable v_r9 : unsigned(9 downto 0);
     begin
         if rising_edge(clk) then
             if unsigned(registers_in(0)) < 16 then
@@ -578,6 +610,18 @@ begin
                 if s_ilace = '1' then v_h := v_h(10 downto 0) & '0'; end if;
                 m_H2 <= signed('0' & v_h(11 downto 1));
                 m_W2 <= signed('0' & s_meas_w(11 downto 1));
+
+                -- resolution class and Y units from the video timing ID
+                case to_integer(unsigned(registers_in(8)(3 downto 0))) is
+                    when 0      => f_cls <= "10"; v_r9 := to_unsigned(569, 10);  -- 480i: 1080/486/2
+                    when 4      => f_cls <= "10"; v_r9 := to_unsigned(576, 10);  -- 480p: 1080/480/2
+                    when 8 | 12 => f_cls <= "10"; v_r9 := to_unsigned(480, 10);  -- 576: 1080/576/2
+                    when 5 | 6 | 14 => f_cls <= "01"; v_r9 := to_unsigned(512, 10);  -- 720p
+                    when others => f_cls <= "00"; v_r9 := to_unsigned(512, 10);  -- 1080p/i
+                end case;
+                f_r9 <= v_r9;
+                if s_ilace = '1' then f_ys <= v_r9;
+                else                  f_ys <= '0' & v_r9(9 downto 1); end if;
             end if;
 
             f_fold <= f_mir or f_flip or f_diag;
@@ -661,9 +705,10 @@ begin
         signed(resize(unsigned(registers_in(3)), 16)) when 2,
         signed(resize(unsigned(registers_in(7)), 16)) when 3,
         signed(resize(unsigned(registers_in(4)), 16)) when 4,
-        signed(resize(unsigned'(f_scrl & f_sq & f_zz & f_fold), 16)) when 5,
+        signed(resize(unsigned'(f_cls & f_scrl & f_sq & f_zz & f_fold), 16)) when 5,
         resize(m_W2, 16)         when 6,
         resize(m_H2, 16)         when 7,
+        signed(resize(f_r9, 16)) when 8,
         (others => '0')          when others;
 
     p_ueng : process(clk)
@@ -929,6 +974,7 @@ begin
                     when 17 => bld_done <= '1';
                     when 19 => f_na   <= v;
                     when 20 => f_nb   <= v;
+                    when 21 => f_y0   <= v;
                     when others => null;
                 end case;
             end if;
@@ -960,21 +1006,22 @@ begin
     -- ====================================================================
     -- LINE SEEDER.  The seeds of a line's left edge are exact functions of
     -- its folded position (tP, tQ): U = a tP - b tQ, V = b tP + a tQ.  At
-    -- each line start the target moves one (two, interlaced) line down;
-    -- three clocks later a serial signed multiplier (radix 2, 14 clocks a
-    -- product) forms the four products and two sums for the NEXT line: ~60
-    -- clocks of the line's 858+.  After the frame sequencer (FDONE) it seeds
-    -- the field's first line the same way.
+    -- each line start the target moves one field line down (f_ys, Q.8
+    -- pixel-width units: 1 at 1080p / 720p, 2 at 1080i, 2.22 at 480i);
+    -- three clocks later a serial signed multiplier (radix 2, 18 clocks a
+    -- product, the target at Q.4) forms the four products and two sums for
+    -- the NEXT line: ~80 clocks of the line's 858+.  After the frame
+    -- sequencer (FDONE) it seeds the field's first line (f_y0) the same way.
     -- ====================================================================
     p_walk : process(clk)
-        variable v_q0, v_al, v_pl, v_ql : signed(11 downto 0);
+        variable v_q0, v_al, v_pl, v_ql : signed(19 downto 0);
         variable v_h : signed(16 downto 0);
-        variable v_s : signed(27 downto 0);
+        variable v_s : signed(31 downto 0);
     begin
         if rising_edge(clk) then
-            -- target: the left edge of line wl_Y, folded (two clocks)
+            -- target: the left edge of line wl_Y, folded (two clocks); Q.8
             if f_flip = '1' and wl_Y < 0 then v_q0 := -wl_Y; else v_q0 := wl_Y; end if;
-            v_al := f_al;
+            v_al := shift_left(resize(f_al, 20), 8);
             if f_diag = '1' then
                 if v_al >= v_q0 then v_pl := v_al; v_ql := v_q0;
                 else v_pl := v_q0; v_ql := v_al; end if;
@@ -984,9 +1031,11 @@ begin
             wl_Q0n <= v_q0;
             wl_pl  <= v_pl;
             wl_ql  <= v_ql;
-            wl_Q0  <= wl_Q0n;
-            wl_tP  <= wl_pl;
-            wl_tQ  <= wl_ql;
+            -- the pixel path's diagonal threshold: Q0 rounded (a fractional
+            -- SD row crosses the diagonal mid-pixel; exact at 1080 / 720p)
+            wl_Q0  <= wl_Q0n(19 downto 8) + signed'("00000000000" & wl_Q0n(7));
+            wl_tP  <= wl_pl(19 downto 4);
+            wl_tQ  <= wl_ql(19 downto 4);
 
             if s_fseq_done = '1' or g_go = '1' then
                 wl_tgo <= "00";
@@ -994,14 +1043,13 @@ begin
                 if s_fseq_done = '1' then
                     -- bottom field (field_n = '0') starts one frame line down
                     if s_ilace = '1' and s_timing.field_n = '0' then
-                        wl_Y <= to_signed(1, 12) - m_H2;
+                        wl_Y <= shift_left(resize(f_y0, 20), 4) + signed(resize(f_r9(9 downto 1), 20));
                     else
-                        wl_Y <= -m_H2;
+                        wl_Y <= shift_left(resize(f_y0, 20), 4);
                     end if;
-                elsif s_ilace = '1' then
-                    wl_Y <= wl_Y + 2;
                 else
-                    wl_Y <= wl_Y + 1;
+                    -- one field line down (two frame lines when interlaced)
+                    wl_Y <= wl_Y + signed(resize(f_ys, 20));
                 end if;
             elsif wl_tgo /= "11" then
                 -- let the folded target settle after Y moves, then start
@@ -1023,19 +1071,20 @@ begin
                     else                  ls_L <= std_logic_vector(wl_tQ); end if;
                     ls_H <= (others => '0');
                     ls_k <= ls_k + 1;
-                elsif ls_k /= 13 then
+                elsif ls_k /= 17 then
                     -- one multiplier bit: add M (subtract on the sign bit),
                     -- shift {H, L} right
                     v_h := ls_H;
                     if ls_L(0) = '1' then
-                        if ls_k = 12 then v_h := ls_H - resize(ls_M, 17);
+                        if ls_k = 16 then v_h := ls_H - resize(ls_M, 17);
                         else              v_h := ls_H + resize(ls_M, 17); end if;
                     end if;
                     ls_H <= v_h(16) & v_h(16 downto 1);
-                    ls_L <= v_h(0) & ls_L(11 downto 1);
+                    ls_L <= v_h(0) & ls_L(15 downto 1);
                     ls_k <= ls_k + 1;
                 else
-                    -- product {H, L}: start or finish a sum
+                    -- product {H, L} (x16: the target is Q.4): start or
+                    -- finish a sum
                     if ls_p(0) = '0' then
                         v_s := (others => '0');
                     else
@@ -1044,8 +1093,8 @@ begin
                     v_s := v_s + signed(std_logic_vector'(std_logic_vector(ls_H(15 downto 0)) & ls_L));
                     ls_S <= v_s;
                     case to_integer(ls_p) is
-                        when 1      => wl_U <= v_s(26 downto 0);
-                        when 3      => wl_V <= v_s(26 downto 0);
+                        when 1      => wl_U <= v_s(30 downto 4);
+                        when 3      => wl_V <= v_s(30 downto 4);
                                        ls_run <= '0';
                         when others => null;
                     end case;

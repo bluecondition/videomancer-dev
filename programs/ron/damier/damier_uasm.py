@@ -45,16 +45,16 @@ PORTS = {
     'FA': 0, 'FB': 1, 'CU': 2, 'CV': 3, 'RF': 4, 'RQ': 5,
     'T8': 7, 'CWA': 8, 'CWB': 9, 'TW': 10,
     'TSEL': 13, 'WTAB': 14, 'FDONE': 16, 'BDONE': 17,
-    'NA': 19, 'NB': 20,
+    'NA': 19, 'NB': 20, 'Y0': 21,
 }
 
 CTLS = {
     'k2': 0, 'k3': 1, 'k4': 2, 'vt': 3, 'k5': 4, 'flags': 5,
-    'W2': 6, 'H2': 7,
+    'W2': 6, 'H2': 7, 'R9': 8,
 }
 
-# flags input bits
-FL_FOLD, FL_ZZ, FL_SQ, FL_SCRL = 1, 2, 4, 8
+# flags input bits (FL_720 / FL_SD: the resolution class, v0.4.8)
+FL_FOLD, FL_ZZ, FL_SQ, FL_SCRL, FL_720, FL_SD = 1, 2, 4, 8, 16, 32
 
 
 class Asm:

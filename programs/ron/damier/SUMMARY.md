@@ -1,4 +1,4 @@
-# DAMIER (v0.4.5 — op-art checkerboard engine)
+# DAMIER (v0.4.8 — op-art checkerboard engine)
 
 **STATUS: FINAL except presets (signed off by Ron on hardware, 2026-10-11:
 "OK I think we can mark damier as completed in the report").** Marked
@@ -6,6 +6,11 @@ Completed in the Program Shelf report. Remaining: capture real presets with
 `./capture_preset.sh`. The HD seeds are hand-installed, so for a
 preset-only TOML change, regenerate `program_config.bin` and repack; never
 run a full rebuild.
+
+**v0.4.8 (2026-10-17): resolution scaling, not yet flashed.** The RTL
+changed, so the v0.4.5 HD picks are void; the new HD placements were
+pin-skew screened again and hand-installed (see Build). Needs a hardware
+look at 1080 (should be unchanged), 720p and SD.
 
 DAMIER (French for checkerboard; Vasarely's word for his grids) is a
 synthesis program loosely descended from GILT's Kiss robe. A clean
@@ -18,7 +23,7 @@ rings in each square's own shape that tighten until they alias into moiré.
 | Control | What it does |
 |---|---|
 | K1 Layout | 16 arrangements: Classic, Vega, Albers, Harlequin, Pinwheel, Chevron, Truchet, Weave, Bullseye, Fractal, Quartered, Mosaic, Rings, Zebra, Robe, Shimmer |
-| K2 Scale | square size 8 to 256 px, exponential |
+| K2 Scale | square size 8 to 256 px at 1080 (the same share of the screen height at 720p and SD), exponential |
 | K3 Wave | wave amplitude; a second wave crosses in past 50% |
 | K4 Angle | lattice rotation 0 to 360°; the waves ride the lattice axes |
 | K5 Speed | everything that moves: waves, drift, spin, size pulses (square law) |
@@ -59,6 +64,31 @@ per-field work on the first vsync edge after active video; interlace bottom
 field starts one frame line down.
 
 ## Build
+
+**v0.4.8 (2026-10-17).** `./build_programs.sh ron damier` (router2, base
+seed 1): 6/6 closed, HD HDMI on seed 2 (seed 1 stalled the router). The
+three HD configs were then re-screened with `tools/hdmi_pin_skew.py`
+(router2 seeds, json re-synthesised into a scratch BUILD_ROOT, which
+reproduces the builder's bins byte-exact), the picks icepacked into
+`build/programs/ron/damier/rev_b/bitstreams/` and repacked with
+`vmprog_pack.py` (all 6 iceunpack OK). Builder bins:
+`.scaling_work/damier_tmp/v048_builder/`, installed set:
+`.scaling_work/damier_tmp/v048_installed/`.
+
+| Config | Router / seed | Fmax (MHz) | HDMI hs-clk / data (ns) |
+|---|---|---|---|
+| HD HDMI | router2 **s33** (of 36) | 88.27 | +1.19 / −3.89..−0.78 |
+| HD Analog | router2 **s3** (of 12) | 86.59 | +1.05 / −2.17..−0.78 |
+| HD Dual | router2 s1 (builder) | 85.51 | −2.13 / −2.49..−0.85 |
+| SD Analog | router2 s1 | 90.05 | |
+| SD HDMI | router2 s1 | 90.05 | |
+| SD Dual | router2 s1 | 91.55 | |
+
+~5,905–5,933 LC (77%), 15/32 EBR (+~100 LC over v0.4.5). The builder's
+HD HDMI s2 had HSYNC at +0.22 ns (danger zone), so do not ship builder HD
+bins for this program.
+
+Earlier builds:
 
 v0.4.1 (2026-10-11; identical placement to v0.4.0, since only the microcode ROM contents changed): `./build_programs.sh ron damier` (6/6 on seed 1),
 then all three HD configs re-picked by pin-skew screening
@@ -109,6 +139,34 @@ twice the data margin. The builder bins are in `.damier_work/v045_builder/`.
 A rebuild does not reproduce the picks: re-route the solo seeds and repack.
 
 ## History
+
+- **v0.4.8** (2026-10-17). Resolution scaling (the virtual 1080-line
+  canvas of `.scaling_work/RECIPE.md`).
+  - **Was:** everything was set in pixels (squares 8–256 px, the ~17 px
+    ring period, the waves ride the lattice), so 720p drew 1.5× bigger and
+    SD 2.2× bigger against the screen height.
+  - **Fix:** the microcode scales the lattice step per pixel by the
+    pixel's width in virtual units (s ×1.5 at 720p, ×2 at SD; the ring
+    frequency is per cell, so the ring period follows). Y runs in the same
+    pixel-width units, Q.8: 1 per line at 1080p and 720p, 2.22 per field
+    line at 480i, 1.875 at 576i; the engine computes the field's top Y as
+    −H2·R9 (new CTL R9, port Y0). The line seeder's target is Q.4 into a
+    16-bit serial multiplier (18 clocks a product). The pixel path's
+    diagonal (Kaleido) threshold is the rounded Y, which is exact at 1080
+    and 720p and within half a pixel at SD. Interlace now comes from the
+    video timing ID (480i, 576i, 1080i), not the sync-phase detector.
+  - **Result:** 1080 is bit-identical: full-res 1080p sims of v0.4.7 and
+    v0.4.8 differ in 0 pixels at warmup 5 (steady state), and at warmup 3
+    with the old interlace source; 720p is the 1080
+    picture scaled by 2/3; SD is the centre 1440-unit 4:3 window at the
+    same scale, round things round.
+  - **Sim note:** the old `is_interlaced` source (the SDK sync-phase field
+    detector) reports interlaced for one field after start-up. In a
+    4-frame sim that field is the captured one, so the old baselines at
+    1080p/720p render 2:1 squashed (the "hexagonal" kaleidoscope). With
+    warmup 6 the old code renders square; hardware steady state is
+    unaffected. The knob glides also need ~12 fields to settle, so compare
+    modes with a glide-snapped sim copy.
 
 - **v0.4.5** (2026-10-11). Ron: "The bars stop with guard." The guard is
   now permanent (the on/off mux removed) and S10 Zigzag is restored. The
