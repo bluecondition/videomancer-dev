@@ -4,7 +4,7 @@
 -- This file is part of Videomancer Community Programs.
 -- See LICENSE file in the repository root for full license text.
 --
--- feedback.vhd  (v0.1.3 -- "Feedback": a digital camera-at-the-monitor loop)
+-- feedback.vhd  (v0.1.4 -- "Feedback": a digital camera-at-the-monitor loop)
 --
 -- A video feedback exploration.  Videomancer has no frame buffer, so the
 -- loop runs through a coarse store: last frame's OUTPUT, averaged into a
@@ -62,6 +62,17 @@
 --     1080p value on 2/3-size cells, so echoes softened faster), with its
 --     own group-delay trims.
 --
+-- v0.1.4 (2026-10-18) fit for the stock SDK SD Standalone; output bit-identical
+-- to v0.1.3 in every mode:
+--   * no_rw_check on the 8 store RAMs (read bank = not par, write bank = par:
+--     they never meet), so yosys drops its read-before-write emulation.
+--   * One-adder forms: the sequencer accumulator (load = add to a masked acc,
+--     sub = add of not op + 1), the divider (one compare on the selected divisor),
+--     bip_mag (one subtract), the mixer rounding ((p >> 5) + p(4) carry-in).
+--   * Booth mixer products (3 partials); 13-bit vertical bilinear products.
+--   * Sequencer step-ready flag kept as a register (sq_rdy), so the step
+--     decode is pc + 1 bit instead of pc + two 5-bit zero tests (HD timing).
+--
 -- Author: czartroniks
 
 library ieee;
@@ -113,17 +124,22 @@ architecture feedback of program_top is
         16305, 16315, 16324, 16332, 16340, 16347, 16353, 16359, 16364, 16369, 16373, 16376, 16379, 16381, 16383, 16384
     );
 
-    -- bipolar knob: |k - 512| minus a 16-step centre deadband (0..496)
+    -- bipolar knob: |k - 512| minus a 16-step centre deadband (0..496).
+    -- |k - 512| = x + c with x = k(8..0) (k >= 512) or not k(8..0) (= 511 - k)
+    -- and c = not k(9), so the result is max(0, x - (16 - c)): one subtract
+    -- (16 - c = 16 or 15), floored on its sign.
     function bip_mag(k : unsigned(9 downto 0)) return unsigned is
-        variable d : signed(10 downto 0);
-        variable a : signed(10 downto 0);
+        variable x   : unsigned(8 downto 0);
+        variable sub : unsigned(10 downto 0);
+        variable t   : unsigned(10 downto 0);
     begin
-        d := signed('0' & k) - to_signed(512, 11);
-        if d < 0 then a := -d; else a := d; end if;
-        if a > 16 then
-            return resize(unsigned(a(9 downto 0)) - 16, 9);
-        else
+        x := k(8 downto 0) xor (8 downto 0 => not k(9));
+        sub := "000000" & k(9) & (not k(9)) & (not k(9)) & (not k(9)) & (not k(9));
+        t := ("00" & x) - sub;
+        if t(10) = '1' then
             return to_unsigned(0, 9);
+        else
+            return t(8 downto 0);
         end if;
     end function;
 
@@ -177,19 +193,40 @@ architecture feedback of program_top is
         return (p0 + p1) + (p2 + p3);
     end function;
 
-    -- signed d times a 5-bit coefficient (0..31)
-    function smul5(d : signed; w : unsigned(4 downto 0); n : natural) return signed is
-        variable dd, p0, p1, p2, p3, p4 : signed(n - 1 downto 0);
+    -- signed d (11 bit) times a 5-bit coefficient (0..31), 17-bit result:
+    -- radix-4 Booth on 0 & w & 0, 3 partials of {0, +-d, +-2d} (negatives as
+    -- one's complement, the +1s gathered into one correction word)
+    function smul5(d : signed(10 downto 0); w : unsigned(4 downto 0)) return signed is
+        variable we   : std_logic_vector(6 downto 0);
+        variable dg   : std_logic_vector(2 downto 0);
+        variable mag  : signed(16 downto 0);
+        variable pp   : signed(16 downto 0);
+        variable b1   : signed(16 downto 0);
+        variable b2   : signed(16 downto 0);
+        variable corr : signed(16 downto 0);
+        type t_pp is array (0 to 2) of signed(16 downto 0);
+        variable p    : t_pp;
     begin
-        dd := resize(d, n);
-        p0 := (others => '0'); p1 := (others => '0'); p2 := (others => '0');
-        p3 := (others => '0'); p4 := (others => '0');
-        if w(0) = '1' then p0 := dd; end if;
-        if w(1) = '1' then p1 := shift_left(dd, 1); end if;
-        if w(2) = '1' then p2 := shift_left(dd, 2); end if;
-        if w(3) = '1' then p3 := shift_left(dd, 3); end if;
-        if w(4) = '1' then p4 := shift_left(dd, 4); end if;
-        return ((p0 + p1) + (p2 + p3)) + p4;
+        we := '0' & std_logic_vector(w) & '0';
+        b1 := resize(d, 17);
+        b2 := shift_left(b1, 1);
+        corr := (others => '0');
+        for i in 0 to 2 loop
+            dg := we(2 * i + 2 downto 2 * i);
+            case dg is
+                when "001" | "010" | "101" | "110" => mag := b1;
+                when "011" | "100"                 => mag := b2;
+                when others                        => mag := (others => '0');
+            end case;
+            if dg(2) = '1' and dg /= "111" then
+                pp := not mag;
+                corr(2 * i) := '1';
+            else
+                pp := mag;
+            end if;
+            p(i) := shift_left(pp, 2 * i);
+        end loop;
+        return (p(0) + p(1)) + (p(2) + corr);
     end function;
 
     --------------------------------------------------------------------------
@@ -248,7 +285,10 @@ architecture feedback of program_top is
     signal acc     : signed(29 downto 0) := (others => '0');
     signal alu_op  : signed(29 downto 0) := (others => '0');   -- registered operand
     signal alu_ctl : unsigned(1 downto 0) := (others => '0');
-    signal sq_ph, sq_go : std_logic := '0';
+    signal sq_go   : std_logic := '0';
+    -- step-ready flag, = (no step last clock) and mcnt = 0 and dcnt = 0,
+    -- kept as a register so the step decode is pc + 1 bit
+    signal sq_rdy  : std_logic := '1';
 
     signal s_s    : unsigned(14 downto 0) := to_unsigned(16384, 15);
     signal th, ph : unsigned(7 downto 0) := (others => '0');
@@ -284,6 +324,13 @@ architecture feedback of program_top is
     signal cr00, cr10, cr01, cr11 : t_cram := (others => (others => '0'));
     signal q00, q10, q01, q11 : std_logic_vector(3 downto 0) := (others => '0');
     signal e00, e10, e01, e11 : std_logic_vector(7 downto 0) := (others => '0');
+    -- Read bank (not par) and write bank (par) differ whenever a write can
+    -- happen (par flips at the vsync anchor, writes end ~15 clocks after each
+    -- line's active video), so read and write never meet on one address:
+    -- no read-before-write emulation needed.
+    attribute no_rw_check : boolean;
+    attribute no_rw_check of yr00, yr10, yr01, yr11 : signal is true;
+    attribute no_rw_check of cr00, cr10, cr01, cr11 : signal is true;
 
     -- R6 reordered taps (Y unsigned 0..15 in 5-bit signed, chroma -8..7)
     signal r6_ytl, r6_ytr, r6_ybl, r6_ybr : signed(4 downto 0) := (others => '0');
@@ -370,7 +417,6 @@ architecture feedback of program_top is
         return v;
     end function;
     signal g_tab : t_gtab := f_gid;
-    attribute no_rw_check : boolean;
     attribute no_rw_check of g_tab : signal is true;
     signal g_rd  : std_logic_vector(15 downto 0) := (others => '0');
     signal g_we  : std_logic := '0';
@@ -572,6 +618,7 @@ begin
     --------------------------------------------------------------------------
     p_seq : process(clk)
         variable v_rem : unsigned(12 downto 0);
+        variable v_dv  : unsigned(12 downto 0);
         variable v_qb  : std_logic;
         variable v_nb  : std_logic;
         variable v_aop : unsigned(1 downto 0);   -- 01 load, 10 add, 11 sub
@@ -580,6 +627,7 @@ begin
         variable v_ma, v_mb : unsigned(17 downto 0);
         variable v_div : std_logic;
         variable v_ds  : std_logic;
+        variable v_acc, v_opx : signed(29 downto 0);
     begin
         if rising_edge(clk) then
             commit <= '0';
@@ -604,18 +652,11 @@ begin
                     v_nb := '0';
                 end if;
                 v_rem := drem(11 downto 0) & v_nb;
-                if dsel = '0' then
-                    if v_rem >= resize(g_w, 13) then
-                        drem <= v_rem - resize(g_w, 13); v_qb := '1';
-                    else
-                        drem <= v_rem; v_qb := '0';
-                    end if;
+                if dsel = '0' then v_dv := resize(g_w, 13); else v_dv := resize(g_h, 13); end if;
+                if v_rem >= v_dv then
+                    drem <= v_rem - v_dv; v_qb := '1';
                 else
-                    if v_rem >= resize(g_h, 13) then
-                        drem <= v_rem - resize(g_h, 13); v_qb := '1';
-                    else
-                        drem <= v_rem; v_qb := '0';
-                    end if;
+                    drem <= v_rem; v_qb := '0';
                 end if;
                 if dsel = '0' then kx <= kx(16 downto 0) & v_qb;
                 else               ky <= ky(16 downto 0) & v_qb; end if;
@@ -632,10 +673,12 @@ begin
 
             if anchor = '1' then sq_go <= '1'; end if;
 
-            if sq_ph = '1' then
-                sq_ph <= '0';                 -- idle clock: the ALU applies the step's op
-            elsif mcnt = 0 and dcnt = 0 then
-                sq_ph <= '1';
+            -- sq_rdy: a step runs every other clock at most (the clock after a
+            -- step is the ALU's idle clock), once the multiplier and divider
+            -- are done.  Next value = no step now and both counters reach 0.
+            sq_rdy <= (not sq_rdy) and (not (mcnt(4) or mcnt(3) or mcnt(2) or mcnt(1)))
+                                   and (not (dcnt(4) or dcnt(3) or dcnt(2) or dcnt(1)));
+            if sq_rdy = '1' then
                 pc <= pc + 1;
                 case to_integer(pc) is
                     when 0 =>
@@ -791,12 +834,13 @@ begin
                 if v_ds = '0' then kx <= (others => '0'); else ky <= (others => '0'); end if;
                 dcnt <= to_unsigned(26, 5);
             end if;
-            case alu_ctl is
-                when "01"   => acc <= alu_op;
-                when "10"   => acc <= acc + alu_op;
-                when "11"   => acc <= acc - alu_op;
-                when others => null;
-            end case;
+            -- ALU on one carry chain: load = add to a masked accumulator,
+            -- subtract = add of the one's complement with carry-in 1
+            if alu_ctl /= "00" then
+                if alu_ctl = "01" then v_acc := (others => '0'); else v_acc := acc; end if;
+                if alu_ctl = "11" then v_opx := not alu_op; else v_opx := alu_op; end if;
+                acc <= v_acc + v_opx + signed'("0" & (alu_ctl(1) and alu_ctl(0)));
+            end if;
             alu_ctl <= v_aop;
             alu_op  <= v_op;
         end if;
@@ -1036,9 +1080,11 @@ begin
             -- R9: y weight products
             ---------------------------------------------------------------
             r11_yt <= r10_yt; r11_ut <= r10_ut; r11_vt <= r10_vt;
-            r11_py <= smul4(r10_dy, r10_wy, 15);
-            r11_pu <= smul4(r10_du, r10_wyc, 15);
-            r11_pv <= smul4(r10_dv, r10_wyc, 15);
+            -- |dy| <= 240 (rows are convex blends of 0..240 / -128..112), w <= 15:
+            -- the products fit 13 bits
+            r11_py <= resize(smul4(r10_dy, r10_wy, 13), 15);
+            r11_pu <= resize(smul4(r10_du, r10_wyc, 13), 15);
+            r11_pv <= resize(smul4(r10_dv, r10_wyc, 13), 15);
 
             ---------------------------------------------------------------
             -- R10: interpolated value x256
@@ -1134,7 +1180,8 @@ begin
     --------------------------------------------------------------------------
     p_mix : process(clk)
         variable v_d : signed(11 downto 0);
-        variable v_p : signed(16 downto 0);
+        variable v_q : signed(12 downto 0);
+        variable v_c : std_logic;
         variable v_ay, v_au, v_av : signed(12 downto 0);
         variable v_lb : std_logic;
         variable v_lz : std_logic;
@@ -1170,28 +1217,29 @@ begin
             x1_fy <= fb_y; x1_fu <= fb_u; x1_fv <= fb_v;
 
             -- X2 (k=5): products
-            x2_py <= smul5(x1_dy, x1_c, 17);
-            x2_pu <= smul5(x1_du, x1_c, 17);
-            x2_pv <= smul5(x1_dv, x1_c, 17);
+            x2_py <= smul5(x1_dy, x1_c);
+            x2_pu <= smul5(x1_du, x1_c);
+            x2_pv <= smul5(x1_dv, x1_c);
             x2_fy <= x1_fy; x2_fu <= x1_fu; x2_fv <= x1_fv;
             x2_lt <= x1_lt;
 
             -- X3 (k=6): base + rounded addend (the mixer is inside the loop:
-            -- a floor here would pump a drift every generation)
+            -- a floor here would pump a drift every generation).
+            -- floor((p + 16) / 32) = (p >> 5) + p(4): one adder, carry-in.
             if k_mode = "11" and x2_lt = '1' then v_lb := '1'; else v_lb := '0'; end if;
             if k_mode = "11" and x2_lt = '0' then v_lz := '1'; else v_lz := '0'; end if;
-            v_p := shift_right(x2_py + 16, 5);
-            if v_lz = '1' then v_p := (others => '0'); end if;
-            if v_lb = '1' then x3_ay <= to_signed(64, 13) + resize(v_p, 13);
-            else               x3_ay <= signed(resize(x2_fy, 13)) + resize(v_p, 13); end if;
-            v_p := shift_right(x2_pu + 16, 5);
-            if v_lz = '1' then v_p := (others => '0'); end if;
-            if v_lb = '1' then x3_au <= to_signed(512, 13) + resize(v_p, 13);
-            else               x3_au <= signed(resize(x2_fu, 13)) + resize(v_p, 13); end if;
-            v_p := shift_right(x2_pv + 16, 5);
-            if v_lz = '1' then v_p := (others => '0'); end if;
-            if v_lb = '1' then x3_av <= to_signed(512, 13) + resize(v_p, 13);
-            else               x3_av <= signed(resize(x2_fv, 13)) + resize(v_p, 13); end if;
+            v_q := resize(shift_right(x2_py, 5), 13); v_c := x2_py(4);
+            if v_lz = '1' then v_q := (others => '0'); v_c := '0'; end if;
+            if v_lb = '1' then x3_ay <= to_signed(64, 13) + v_q + signed'("0" & v_c);
+            else               x3_ay <= signed(resize(x2_fy, 13)) + v_q + signed'("0" & v_c); end if;
+            v_q := resize(shift_right(x2_pu, 5), 13); v_c := x2_pu(4);
+            if v_lz = '1' then v_q := (others => '0'); v_c := '0'; end if;
+            if v_lb = '1' then x3_au <= to_signed(512, 13) + v_q + signed'("0" & v_c);
+            else               x3_au <= signed(resize(x2_fu, 13)) + v_q + signed'("0" & v_c); end if;
+            v_q := resize(shift_right(x2_pv, 5), 13); v_c := x2_pv(4);
+            if v_lz = '1' then v_q := (others => '0'); v_c := '0'; end if;
+            if v_lb = '1' then x3_av <= to_signed(512, 13) + v_q + signed'("0" & v_c);
+            else               x3_av <= signed(resize(x2_fv, 13)) + v_q + signed'("0" & v_c); end if;
 
             -- X4 (k=7): clamp
             v_ay := x3_ay; v_au := x3_au; v_av := x3_av;
