@@ -4,12 +4,14 @@
 # + posterization.  See flutter.vhd and SUMMARY.md.
 # v0.2.0: Speed is squared (K3 600 -> 584 and 700 -> 611 keep the v0.1
 # speeds); S8 Order (dead without dither) is now Wave Smooth / Snap.
+# v0.2.3: resolution scaling -- wobble amplitude and wavelength follow the
+# screen height at 720p and SD (1080p unchanged).
 
 [program]
 processing_delay_clks = 20
 program_id = "com.czartroniks.flutter"
 program_name = "Flutter"
-program_version = "0.2.2"
+program_version = "0.2.3"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"

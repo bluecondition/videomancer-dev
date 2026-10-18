@@ -79,14 +79,44 @@ v0.2.0 (2026-10-12): 6/6 on seed 1 with router2. HD 79.4 / 81.6 / 81.1 MHz
 count 0). v0.1.2 was 3,304 LC, and its HD HDMI barely passed at 74.3 MHz.
 NOT FLASHED, NOT COMMITTED.
 
+v0.2.3 (2026-10-17, resolution scaling): 6/6 on seed 1 with router2. HD
+74.4 / 81.0 / 75.3 MHz (Analog / HDMI / Dual); SD 81.1 / 73.3 / 84.5 MHz.
+4,390–4,404 LC (57%; +~225), 22 EBR. HD Analog is seed-marginal before and
+after the change (critical paths are the stage-12 sine × amplitude multiply
+and the edge clamp → line-buffer address, both pre-existing): seeds 1–4 gave
+76.9 / 72.7 FAIL / 79.2 / 81.2 MHz on v0.2.2 (before) and 74.4 / 78.5 / 76.3 /
+67.9 FAIL on v0.2.3. The builder's seed retry covers it.
+
+## v0.2.3 — resolution scaling (2026-10-17)
+
+The wobble was fixed-pixel: K1 meant ±255 real pixels in every mode (1.5×
+too strong relative to the screen at 720p, 2× at SD), and the Waves step was
+per field line (1.5× more waves at 720p, 4.4× at 480i, where it became
+fine horizontal streaks). Now everything is on a virtual 1080-line canvas
+from the timing ID (`registers_in(8)`, as in mondrian v1.0.2):
+
+- K1 amplitude → real px: ×1 at 1080, ×2/3 at 720p (`(a·171+128)>>8`),
+  ×1/2 at SD (720 px span 1440 virtual units).
+- Waves phase step per field line = `(s_gw · ys) >> 10`, ys the Q4.8
+  virtual line step (1.5 at 720p, 2·1080/486 per 480i field line). A
+  free-running 16-clock serial multiplier, since both operands only change
+  at vsync.
+- Twist phase step per pixel = `(s_gt · xs) >> 5`, xs the Q.1 x step.
+
+At 1080p every step is exactly 1.0, so the picture is bit-identical. At SD
+the ripple is the left 1440-unit window of the 1080 pattern (Twist's phase
+starts at x = 0). The 12-px edge clamp stays in real pixels (it covers the
+capture's blanking columns). Glides and Speed still advance per vsync, so
+at 480i they run at the field rate, as before.
+
 ## Open / next (Tier 3, not built)
 
 - K1 range: 255 px is only 13% of an HD line. A squared curve to ±511 px
   would keep fine control low and give a bigger top.
 - Amp mode bipolar: alternate bands swing opposite ways, so the bands shear
   apart.
-- Twist / Waves in screen units (cycles per width / height), so SD and HD
-  show the same ripple count.
+- ~~Twist / Waves in screen units, so SD and HD show the same ripple
+  count.~~ Done in v0.2.3 (virtual 1080-line steps).
 - The top row shows the previous frame's bottom row. The first active line
   reads a bank last written in the previous frame. It's 1 line, and v0.1
   did the same.
