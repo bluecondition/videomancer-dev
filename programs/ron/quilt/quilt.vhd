@@ -6,6 +6,17 @@
 --
 -- quilt.vhd  (v1.0 — per-pixel recursive-subdivision improv quilt)
 --
+-- v1.0.2 (2026-10-17): resolution scaling.  The picture column/row counters
+-- (and the luma map's source column) run in virtual 1080-line units stepped
+-- from the video timing ID (registers_in(8)): 1.0 per pixel/line at 1080p,
+-- 1.5 at 720p, x 2.0 / y 4.44 per field line at 480i — so cells, pieces,
+-- textures, seams and puff keep their size relative to screen height (SD
+-- shows the left 1440 units of the 1080p layout, 4:3, square cells stay
+-- square).  Equality tests on the counters became crossing flags; the luma
+-- map blocks are 32 virtual units (box sum weighted by the step).  Seam and
+-- thin texture lines keep at least one SD field line.  1080p is bit-identical;
+-- latency unchanged (28).
+--
 -- Fills the whole screen with a loosely grid-based field of randomly coloured
 -- and textured rectangular patches.  Each coarse grid cell is recursively split
 -- (horizontally or vertically) into varied sub-rectangles, log-cabin fashion, so
@@ -285,9 +296,66 @@ architecture quilt of program_top is
     end function;
 
     --------------------------------------------------------------------------
+    -- Resolution scaling: per-mode steps from the video timing ID.
+    --------------------------------------------------------------------------
+    -- x step in half virtual units per pixel: 1080 2 (1.0), 720p 3 (1.5),
+    -- SD 4 (2.0: 720 px span 1440 units, a 4:3 window of the 1080 canvas).
+    function f_vstep_x(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0 | 4 | 8 | 12 => return to_unsigned(4, 3);
+            when 5 | 6 | 14     => return to_unsigned(3, 3);
+            when others         => return to_unsigned(2, 3);
+        end case;
+    end function;
+    -- y step in Q4.8 virtual units per FIELD line (1080 / active lines,
+    -- doubled for interlaced modes).
+    function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(1138, 12);  -- 480i: 2 x 1080/486
+            when 4          => return to_unsigned(576, 12);   -- 480p: 1080/480
+            when 8          => return to_unsigned(960, 12);   -- 576i: 2 x 1080/576
+            when 12         => return to_unsigned(480, 12);   -- 576p: 1080/576
+            when 5 | 6 | 14 => return to_unsigned(384, 12);   -- 720p: 1.5
+            when 1 | 2 | 10 => return to_unsigned(512, 12);   -- 1080i: 2.0
+            when others     => return to_unsigned(256, 12);   -- 1080p: 1.0
+        end case;
+    end function;
+    -- Thin horizontal features (y): seam half-width and texture-line width in
+    -- virtual units, at least about one field-line step so SD never skips them.
+    function f_seam_y(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        if to_integer(unsigned(t)) = 0 then return to_unsigned(3, 3);   -- 480i
+        else                                return to_unsigned(2, 3); end if;
+    end function;
+    function f_thin_y(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0      => return to_unsigned(5, 3);   -- 480i step 4.44
+            when 8      => return to_unsigned(4, 3);   -- 576i step 3.75
+            when 4      => return to_unsigned(3, 3);   -- 480p step 2.25
+            when others => return to_unsigned(2, 3);
+        end case;
+    end function;
+
+    --------------------------------------------------------------------------
     -- Position + per-frame parameters
     --------------------------------------------------------------------------
     signal pixel_x, pixel_y : unsigned(11 downto 0) := (others => '0');
+    -- Resolution scaling: pixel_x/pixel_y are the integer parts of virtual
+    -- 1080-line accumulators (x Q.1, y Q.8 per field line).  At 1080p every
+    -- step is exactly 1.0, so they equal the old pixel/line counters.
+    signal s_xs     : unsigned(2 downto 0)  := to_unsigned(2, 3);
+    signal s_ys     : unsigned(11 downto 0) := to_unsigned(256, 12);
+    signal s_seamy  : unsigned(2 downto 0)  := to_unsigned(2, 3);
+    signal s_thy    : unsigned(2 downto 0)  := to_unsigned(2, 3);
+    signal s_thyt   : unsigned(2 downto 0)  := to_unsigned(2, 3);   -- s_thy capped at period/4
+    signal pixel_xa : unsigned(12 downto 0) := (others => '0');
+    signal pixel_ya : unsigned(19 downto 0) := (others => '0');
+    signal s_cmaskh : unsigned(8 downto 0)  := to_unsigned(127, 9);  -- cell mask, half units
+    signal s_xcol   : std_logic := '1';     -- this pixel is the first of a cell column
+    signal s_yfst   : std_logic := '1';     -- this line is the first of a 32-unit block row
     signal prev_hsync_n     : std_logic := '1';
     signal prev_vsync_n     : std_logic := '1';
 
@@ -324,6 +392,7 @@ architecture quilt of program_top is
     -- Raster measurement (source side)
     --------------------------------------------------------------------------
     signal s_vx         : unsigned(11 downto 0) := (others => '0');  -- source pixel index
+    signal s_vxa        : unsigned(12 downto 0) := (others => '0');  -- source virtual x (Q.1, luma map)
     signal s_wline      : unsigned(11 downto 0) := to_unsigned(1920, 12);  -- last line width
     signal s_ylast      : unsigned(11 downto 0) := to_unsigned(1079, 12);  -- running last active row
     signal s_hlast      : unsigned(11 downto 0) := to_unsigned(1079, 12);  -- previous frame's last row
@@ -439,7 +508,7 @@ architecture quilt of program_top is
     attribute no_rw_check of est_ram : signal is true;
 
     -- write side: block box sums and the RMW pipeline E0..E4
-    signal s_hsum   : unsigned(12 downto 0) := (others => '0');
+    signal s_hsum   : unsigned(14 downto 0) := (others => '0');   -- step-weighted box sum
     signal e0_go, e1_go, e2_go, e3_go, e4_go : std_logic := '0';
     signal e0_first, e1_first, e2_first     : std_logic := '0';
     signal e0_col, e1_col, e2_col, e3_col, e4_col : unsigned(5 downto 0) := (others => '0');
@@ -596,10 +665,28 @@ begin
         variable v_mlo  : unsigned(6 downto 0);
         variable v_off  : boolean;
         variable v_p0, v_p1, v_p2 : unsigned(7 downto 0);   -- pass, pass+1, pass+2
+        variable v_nx : unsigned(12 downto 0);
+        variable v_ny : unsigned(19 downto 0);
     begin
         if rising_edge(clk) then
             prev_hsync_n <= data_in.hsync_n;
             prev_vsync_n <= data_in.vsync_n;
+
+            -- Resolution scaling: per-mode steps, free-running from the timing
+            -- ID (static while a mode runs).
+            s_xs    <= f_vstep_x(registers_in(8)(3 downto 0));
+            s_ys    <= f_vstep_y(registers_in(8)(3 downto 0));
+            s_seamy <= f_seam_y(registers_in(8)(3 downto 0));
+            s_thy   <= f_thin_y(registers_in(8)(3 downto 0));
+            -- texture lines keep ~1/4 of their period (Fine 8: 2, Small 16: <= 4)
+            -- so a fine texture's density does not change at SD
+            if s_tex_shift = 3 then
+                s_thyt <= to_unsigned(2, 3);
+            elsif s_tex_shift = 4 and s_thy > 4 then
+                s_thyt <= to_unsigned(4, 3);
+            else
+                s_thyt <= s_thy;
+            end if;
 
             v_h_edge := '0'; v_v_edge := '0';
             if data_in.hsync_n = '0' and prev_hsync_n = '1' then v_h_edge := '1'; end if;
@@ -607,16 +694,27 @@ begin
             s_line_go <= v_h_edge;
 
             -- picture column: counts the GENERATED avid, so the quilt lines up
-            -- with the avid that actually leaves the program
-            if v_h_edge = '1' then     pixel_x <= (others => '0');
-            elsif g_avid = '1' then    pixel_x <= pixel_x + 1; end if;
+            -- with the avid that actually leaves the program.  Virtual units;
+            -- s_xcol flags the first pixel of each cell column (its offset in
+            -- the cell is below one step — the old "(x and mask) = 0").
+            if v_h_edge = '1' then
+                pixel_xa <= (others => '0');
+                s_xcol   <= '1';
+            elsif g_avid = '1' then
+                v_nx     := pixel_xa + s_xs;
+                pixel_xa <= v_nx;
+                if (v_nx(8 downto 0) and s_cmaskh) < resize(s_xs, 9) then s_xcol <= '1';
+                else                                                     s_xcol <= '0'; end if;
+            end if;
 
             -- source column (luma map) + per-line width (generated avid length)
             if v_h_edge = '1' then
                 if s_vx /= 0 then s_wline <= s_vx; end if;
-                s_vx <= (others => '0');
+                s_vx  <= (others => '0');
+                s_vxa <= (others => '0');
             elsif data_in.avid = '1' then
-                s_vx <= s_vx + 1;
+                s_vx  <= s_vx + 1;
+                s_vxa <= s_vxa + s_xs;
             end if;
 
             if data_in.avid = '1' then
@@ -627,11 +725,16 @@ begin
 
             -- rows: held at 0 from vsync until the first active line, then one
             -- per hsync, so row 0 is the top line of the picture
+            -- (virtual units; s_yfst flags the first line of each 32-unit block
+            -- row — the old "pixel_y(4:0) = 0" — from a toggle of bit 13)
             if v_v_edge = '1' then
-                pixel_y <= (others => '0');
-                s_yarm  <= '1';
+                pixel_ya <= (others => '0');
+                s_yfst   <= '1';
+                s_yarm   <= '1';
             elsif v_h_edge = '1' and s_yarm = '0' then
-                pixel_y <= pixel_y + 1;
+                v_ny     := pixel_ya + s_ys;
+                pixel_ya <= v_ny;
+                s_yfst   <= v_ny(13) xor pixel_ya(13);
             end if;
 
             -- Once per field — guarded, because analog vsync serrates into
@@ -675,19 +778,19 @@ begin
                 -- block constants put each cell's luma sample in the 32x32 block
                 -- at its centre (up-left of centre for the even block counts).
                 case to_integer(unsigned(registers_in(0)(9 downto 8))) is
-                    when 0      => s_g <= 8; s_cellmask <= to_unsigned(255, 12);
+                    when 0      => s_g <= 8; s_cellmask <= to_unsigned(255, 12); s_cmaskh <= to_unsigned(511, 9);
                                    s_csz1 <= to_signed(256, 14); s_csz2 <= to_signed(512, 14);
                                    s_ctbmask <= "111000"; s_boff <= to_unsigned(3, 6);
                                    s_bstep <= to_unsigned(8, 6); s_bcadd <= to_unsigned(11, 7);
-                    when 1      => s_g <= 7; s_cellmask <= to_unsigned(127, 12);
+                    when 1      => s_g <= 7; s_cellmask <= to_unsigned(127, 12); s_cmaskh <= to_unsigned(255, 9);
                                    s_csz1 <= to_signed(128, 14); s_csz2 <= to_signed(256, 14);
                                    s_ctbmask <= "111100"; s_boff <= to_unsigned(1, 6);
                                    s_bstep <= to_unsigned(4, 6); s_bcadd <= to_unsigned(5, 7);
-                    when 2      => s_g <= 6; s_cellmask <= to_unsigned(63, 12);
+                    when 2      => s_g <= 6; s_cellmask <= to_unsigned(63, 12); s_cmaskh <= to_unsigned(127, 9);
                                    s_csz1 <= to_signed(64, 14); s_csz2 <= to_signed(128, 14);
                                    s_ctbmask <= "111110"; s_boff <= to_unsigned(0, 6);
                                    s_bstep <= to_unsigned(2, 6); s_bcadd <= to_unsigned(2, 7);
-                    when others => s_g <= 5; s_cellmask <= to_unsigned(31, 12);
+                    when others => s_g <= 5; s_cellmask <= to_unsigned(31, 12); s_cmaskh <= to_unsigned(63, 9);
                                    s_csz1 <= to_signed(32, 14); s_csz2 <= to_signed(64, 14);
                                    s_ctbmask <= "111111"; s_boff <= to_unsigned(0, 6);
                                    s_bstep <= to_unsigned(1, 6); s_bcadd <= to_unsigned(1, 7);
@@ -762,6 +865,9 @@ begin
         end if;
     end process p_position;
 
+    pixel_x <= pixel_xa(12 downto 1);
+    pixel_y <= pixel_ya(19 downto 8);
+
     --------------------------------------------------------------------------
     -- Generated avid (see the declarations).  g_ph is this line's hsync->avid
     -- rise parity, g_par the voted usual parity; a line whose avid lands off
@@ -815,23 +921,35 @@ begin
     -- line), and the result goes to the est RAM and to this frame's map bank.
     -- One event per 32 clocks, so the pipeline never overlaps itself.
     --------------------------------------------------------------------------
+    -- Resolution scaling: blocks are 32 VIRTUAL units (64 half units of s_vxa);
+    -- each pixel's luma is weighted by its step (2/3/4 half units), so a block
+    -- sums to ~64x its mean at every resolution (1080p: exactly 2x the old
+    -- 32-pixel sum, so the average is bit-identical).
     p_lmap_w : process(clk)
         variable v_y8  : unsigned(7 downto 0);
-        variable v_sum : unsigned(12 downto 0);
+        variable v_yw  : unsigned(14 downto 0);
+        variable v_sum : unsigned(14 downto 0);
+        variable v_end : unsigned(6 downto 0);
     begin
         if rising_edge(clk) then
             v_y8  := unsigned(data_in.y(9 downto 2));
+            case to_integer(s_xs) is
+                when 3      => v_yw := shift_left(resize(v_y8, 15), 1) + resize(v_y8, 15);
+                when 4      => v_yw := shift_left(resize(v_y8, 15), 2);
+                when others => v_yw := shift_left(resize(v_y8, 15), 1);
+            end case;
+            v_end := resize(s_vxa(5 downto 0), 7) + resize(s_xs, 7);   -- bit 6: last pixel of the block
             e0_go <= '0';
             if data_in.avid = '1' then
-                if s_vx(4 downto 0) = 0 then v_sum := resize(v_y8, 13);
-                else                         v_sum := s_hsum + resize(v_y8, 13); end if;
+                if s_vxa(5 downto 0) < resize(s_xs, 6) then v_sum := v_yw;
+                else                                         v_sum := s_hsum + v_yw; end if;
                 s_hsum <= v_sum;
-                if s_vx(4 downto 0) = 31 then
+                if v_end(6) = '1' then
                     e0_go  <= '1';
-                    e0_avg <= v_sum(12 downto 5);
-                    e0_col <= s_vx(10 downto 5);
-                    if pixel_y(4 downto 0) = 0 then e0_first <= '1';
-                    else                            e0_first <= '0'; end if;
+                    if v_sum(14) = '1' then e0_avg <= (others => '1');   -- 720p 22-px block
+                    else                    e0_avg <= v_sum(13 downto 6); end if;
+                    e0_col <= s_vxa(11 downto 6);
+                    e0_first <= s_yfst;
                 end if;
             end if;
 
@@ -941,7 +1059,7 @@ begin
             end case;
             if s_line_go = '1' then r_st <= to_unsigned(1, 3); end if;
 
-            if g_avid = '1' and (pixel_x and s_cellmask) = 0 then
+            if g_avid = '1' and s_xcol = '1' then           -- first pixel of a cell column
                 L_own <= N_own;
                 L_up  <= N_up;
                 if pixel_x = 0 then        -- left of column 0: reuse column 0
@@ -1374,7 +1492,13 @@ begin
             -- Texture -> 2-bit shade: stripe/diagonal types ramp across the period
             -- (rounded "thread" -> depth); the rest are deep binary.  Shift/AND/add.
             if s10a2_m1 < s10a2_m2 then seamd := s10a2_m1; else seamd := s10a2_m2; end if;
-            if seamd < to_unsigned(SEAM_W, 12) then s10_seam <= '1'; else s10_seam <= '0'; end if;
+            -- (min(m1,m2) < SEAM_W, with the horizontal seam widened to one
+            -- field line at 480i so SD never skips it)
+            if s10a2_m1 < to_unsigned(SEAM_W, 12) or s10a2_m2 < resize(s_seamy, 12) then
+                s10_seam <= '1';
+            else
+                s10_seam <= '0';
+            end if;
             -- Puff ramp: 15 at the patch edge falling to 0 at a radius that
             -- follows the grid scale (8 / 16 / 16 / 32 px), read as fixed slices
             -- of the edge distance.  Puffed mode only.
@@ -1433,7 +1557,7 @@ begin
             bidx := to_integer(v_drow & v_dcol);
             v_bv := C_BAYER(bidx);
             v_nv := (s10a2_lx and v_pm) < 2;    -- near a vertical cell line
-            v_nh := (s10a2_ly and v_pm) < 2;    -- near a horizontal cell line
+            v_nh := (s10a2_ly and v_pm) < resize(s_thyt, 12);   -- near a horizontal cell line (>= 1 SD field line)
             v_t2 := "01";
             case to_integer(s10a2_tidx) is
                 when 0  => v_t2 := "01";                                       -- solid

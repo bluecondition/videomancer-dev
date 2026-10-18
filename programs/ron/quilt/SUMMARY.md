@@ -12,16 +12,41 @@ grid cell → optional off-grid overlap → 4 levels of hash-driven BSP splits �
 leaf colour + embossed texture). No per-pixel multiply. Full history in the
 Claude memory file `quilt_milestone.md`.
 
+## v1.0.2 (2026-10-17) — resolution scaling (built, not flashed)
+
+Quilt was drawn in fixed pixels, so at 720p every patch was 1.5x too big
+(relative to screen height) and at SD each piece was huge and 2:1 tall
+(field lines). Now the picture column/row counters (and the luma map's source
+column) run in **virtual 1080-line units** stepped from the timing ID
+(`registers_in(8)`): x 1 / 1.5 / 2 units per pixel at 1080 / 720p / SD, y
+1 / 1.5 / 4.44 units per field line at 1080p / 720p / 480i. Cells, pieces,
+textures, seams, puff and the Snake path keep their size relative to screen
+height; 720p is the 1080p quilt, and SD is the left 1440 units of it (4:3,
+square cells stay square). Details:
+* `(x and cellmask) = 0` and `y(4:0) = 0` became crossing flags (`s_xcol`,
+  `s_yfst`); luma map blocks are 32 virtual units, box sum weighted by the
+  step (1080p average bit-identical; a 22-px 720p block saturates at 255).
+* Horizontal seam half-width is 3 units at 480i (one field line); thin texture
+  lines (pinstripe / cross-hatch / woven) keep at least one field line but
+  never more than 1/4 of their period (Fine stays 2).
+* 1080p render bit-identical (0 px); latency unchanged (28).
+* Known limit: the Fine texture (8–16-unit periods) is ~2–4 SD field lines, so
+  at SD it aliases into horizontal ridges; the coarser settings resolve.
+
+Build (router1, **seed 1 on all 6 configs**), 6949–6962/7680 LC (90.6%,
++~220), 9/32 EBR: HD Analog 77.88, HD HDMI 81.63, HD Dual 83.59; SD Analog
+82.20, SD HDMI 82.77, SD Dual 83.40 MHz.
+
 ## Controls
 
 | | Control | Notes |
 |---|---|---|
-| K1 | Grid Scale | Large / Big / Medium / Small (256 / 128 / 64 / 32 px cells) |
+| K1 | Grid Scale | Large / Big / Medium / Small (256 / 128 / 64 / 32 px cells at 1080p; scale with screen height) |
 | K2 | Seed | re-randomises the whole layout |
 | K3 | Evolve | bipolar: centre freezes the quilt as it stands; right = one random piece at a time changes colour OR texture; left = the change snakes from piece to touching piece along a Hilbert path (new path each lap) |
 | K4 | Threshold | Luma Mod: 0 = off; above, input luma drives piecing density and cells darker than the threshold go black. Needs a video input |
 | K5 | Palette Tint | xor-permutes the palette (0–15) |
-| K6 | Texture Scale | Fine / Small / Medium / Coarse (16–128 px periods) |
+| K6 | Texture Scale | Fine / Small / Medium / Coarse (16–128 px periods at 1080p) |
 | S7 | Seams | black seam lines on / off |
 | S8 | Relief | Flat (soft emboss) / Puffed (deep emboss + patches shaded darker toward their seams) |
 | S9 | Grid | Square / Not Square (jittered, overlapping, 1–2 cell rectangles) |
