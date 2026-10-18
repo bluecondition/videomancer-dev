@@ -13,7 +13,7 @@ OPS = dict(LINE0=0, LD=1, ST=2, ADD=3, SUB=4, LDI=5, ADDI=6, SHR=7, SHL=8, MUL=9
            LDX=27, STX=28, AND=29, CALL=30, RET=31)
 
 # special inputs (LDX)
-X = dict(K0=0, K1=1, K2=2, K3=3, K4=4, K5=5, SLIDER=6, ACTW=7, ACTH=8, VSTEP=9, FLAGS=10)
+X = dict(K0=0, K1=1, K2=2, K3=3, K4=4, K5=5, SLIDER=6, ACTW=7, ACTH=8, VSTEP=9, FLAGS=10, CXV=11)
 # special outputs (STX)
 Y = dict(XA0=0, YA0=1, XB0=2, YB0=3, XASTEP=4, YASTEP=5, XBSTEP=6, YBSTEP=7,
          XBLSTEP=8, YBLSTEP=9, LP=10, CDOT=11, UP=12, INVN=13, INVE=14, N=15,
@@ -153,7 +153,11 @@ def build():
     a.LDX('ACTW'); a.SHL(3); a.ST('cx')                                              # centre, Q4 square-pixel units
     a.LD('hq'); a.SHR(1); a.ST('cy')
     a.LD('hq'); a.SHL(8); a.MUL('C120'); a.LDP(16); a.ST('rfr')                      # framed: 94% of half height
-    a.LD('cx'); a.MUL('cx'); a.LDP(0); a.ST('t0')
+    # (v1.4.3) corner on the 16:9 frame at this height: CXV is cx on HD, 16/9 cx on SD (RTL,
+    # from act_w), so CXV*cx = (4/3 cx)^2 there and a 4:3 SD screen shows the 1080p picture's
+    # centre at the same scale.  LDX costs the same 4 clocks as the LD it replaces, so the HD
+    # instruction stream -- and every write time -- is exactly as before.
+    a.LDX('CXV'); a.MUL('cx'); a.LDP(0); a.ST('t0')
     a.LD('cy'); a.MUL('cy'); a.LDP(0); a.ADD('t0'); a.CALL('sqrt'); a.ST('rfb')      # full bleed: out to the corners
     # R = rfr * 2^(g_fb/4096 * log2(rfb/rfr)): equal ratios per frame, so the bleed
     # transition is a steady dolly rather than a fast lunge followed by a crawl.

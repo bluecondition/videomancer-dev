@@ -3,6 +3,22 @@
         if rising_edge(clk) then
             for i in 0 to 7 loop reg_q(i) <= unsigned(registers_in(i)); end loop;
             ilace_q <= ilace; fld_q <= fl_r;
+            -- video timing ID: interlaced 480i/576i/1080i, SD 480/576 (field_n is tied
+            -- high by the core, so it cannot tell the fields apart)
+            case to_integer(unsigned(registers_in(8)(3 downto 0))) is
+                when 0 | 8      => tid_il <= '1'; tid_sd <= '1';
+                when 4 | 12     => tid_il <= '0'; tid_sd <= '1';
+                when 1 | 2 | 10 => tid_il <= '1'; tid_sd <= '0';
+                when others     => tid_il <= '0'; tid_sd <= '0';
+            end case;
+            -- corner operand for the sequencer: CXV * cx = (half-width of the 16:9 frame at
+            -- this height)^2.  HD: cx = 8 act_w.  SD: 14.25 act_w = 16/9 cx (4:3 -> 16:9).
+            cx14 <= shift_left(resize(act_w, 16), 4) - shift_left(resize(act_w, 16), 1);
+            if tid_sd = '1' then
+                cxv_r <= cx14 + resize(act_w(11 downto 2), 16);
+            else
+                cxv_r <= shift_left(resize(act_w, 16), 3);
+            end if;
             sw_ink  <= registers_in(6)(2);
             sw_flow <= registers_in(6)(3);
             sw_full <= registers_in(6)(4);
@@ -68,7 +84,10 @@
                 frame_act <= '1';
                 if f_gec(aline, 51) = '1' then act_h <= aline; end if;
                 aline <= (others => '0');
-                if fl_r /= anc_fld then ilace <= '1'; else ilace <= '0'; end if;
+                -- interlace from the timing ID.  The old field_n detector is kept in the
+                -- OR: with field_n tied high it fires only at the first anchor after power-up
+                -- (anc_fld starts '0'), exactly as before, so 1080p stays bit-identical.
+                ilace <= tid_il or (fl_r xor anc_fld);
                 anc_fld <= fl_r;
             end if;
 

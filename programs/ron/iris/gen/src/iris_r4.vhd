@@ -55,7 +55,11 @@
             m_go <= '0'; d_go <= '0'; stx_en <= '0';
             tw_we <= (others => '0');
             rf_we <= '0'; row0_req <= '0';
-            if in_vblank = '1' and in_vblank_q = '0' then seq_req <= '1'; end if;
+            -- a pass request expires with its vblank: where the pass is longer than a frame
+            -- (720p, SD) the next pass waits for the next vblank instead of starting
+            -- mid-picture, so its frame-varying writes land in blanking
+            if in_vblank = '1' and in_vblank_q = '0' then seq_req <= '1';
+            elsif in_vblank = '0' then seq_req <= '0'; end if;
             if rf_we = '1' then
                 rf_mem(to_integer(rf_wa)) <= std_logic_vector(acc);
             end if;
@@ -165,6 +169,7 @@
                                 when 7  => v_lx := resize(act_w, 20);
                                 when 8  => v_lx := resize(act_h, 20);
                                 when 9  => v_lx := resize(vstep_base, 20);
+                                when 11 => v_lx := resize(cxv_r, 20);
                                 when 10 => v_lx := (0 => sw_flow, 1 => sw_full, 2 => ilace_q, 3 => fld_q, 4 => sw_mesh, others => '0');
                                 when others => v_lx := (others => '0');
                             end case;

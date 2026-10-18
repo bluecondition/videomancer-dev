@@ -6,6 +6,17 @@
 --
 -- iris.vhd  (v0.4 -- IRIS: perspective dot-tunnel eye, three-layer colour split)
 --
+-- v1.4.3 (2026-10-17, resolution scaling): interlace comes from the video
+-- timing ID (registers_in(8)), not from field_n toggling -- the core ties
+-- field_n high on every input, so 480i/576i were drawn at half the vertical
+-- step (a 2x tall iris).  Full bleed measures its corner on the 16:9 frame
+-- at the screen's height (SD: 4/3 of the active width, LDX CXV), so a 4:3 SD
+-- screen shows the 1080p picture's centre at the same scale.  A per-frame
+-- pass request now expires when its vblank ends: at 720p (and SD) the pass
+-- is longer than a frame and used to restart mid-picture on the stale
+-- request, writing the flow phase / twist table there (a horizontal tear).
+-- 1080p unchanged (bit-identical, including the old detector's first frame).
+--
 -- THE PICTURE: a large iris circle nearly filling the screen, a dark pupil
 -- anywhere inside it, and hundreds of round dots on spiral arms sweeping
 -- from the pupil to the rim, growing geometrically as they go.  Drawn three
@@ -211,7 +222,7 @@ architecture iris of program_top is
         to_unsigned(2059,16), to_unsigned(12416,16), to_unsigned(14344,16), to_unsigned(4106,16), to_unsigned(55305,16), to_unsigned(4213,16), to_unsigned(55304,16), to_unsigned(18549,16),
         to_unsigned(20480,16), to_unsigned(4112,16), to_unsigned(55306,16), to_unsigned(59468,16), to_unsigned(32896,16), to_unsigned(2064,16), to_unsigned(16385,16), to_unsigned(4112,16),
         to_unsigned(55303,16), to_unsigned(16387,16), to_unsigned(4114,16), to_unsigned(2064,16), to_unsigned(14337,16), to_unsigned(4115,16), to_unsigned(2064,16), to_unsigned(16392,16),
-        to_unsigned(18500,16), to_unsigned(20496,16), to_unsigned(4116,16), to_unsigned(2066,16), to_unsigned(18450,16), to_unsigned(20480,16), to_unsigned(4108,16), to_unsigned(2067,16),
+        to_unsigned(18500,16), to_unsigned(20496,16), to_unsigned(4116,16), to_unsigned(55307,16), to_unsigned(18450,16), to_unsigned(20480,16), to_unsigned(4108,16), to_unsigned(2067,16),
         to_unsigned(18451,16), to_unsigned(20480,16), to_unsigned(6156,16), to_unsigned(62512,16), to_unsigned(4117,16), to_unsigned(2069,16), to_unsigned(16396,16), to_unsigned(22548,16),
         to_unsigned(49152,16), to_unsigned(62460,16), to_unsigned(8279,16), to_unsigned(4108,16), to_unsigned(2060,16), to_unsigned(18439,16), to_unsigned(20480,16), to_unsigned(14348,16),
         to_unsigned(4108,16), to_unsigned(2060,16), to_unsigned(59471,16), to_unsigned(16388,16), to_unsigned(62550,16), to_unsigned(6237,16), to_unsigned(4109,16), to_unsigned(2068,16),
@@ -439,6 +450,9 @@ architecture iris of program_top is
     signal frame_act : std_logic := '0';
     signal ilace  : std_logic := '0';
     signal anc_fld : std_logic := '0';
+    signal tid_il, tid_sd : std_logic := '0';                      -- timing ID: interlaced, SD
+    signal cx14   : unsigned(15 downto 0) := (others => '0');
+    signal cxv_r  : unsigned(15 downto 0) := to_unsigned(15360, 16); -- LDX CXV (corner half-width)
     signal vstep_base : unsigned(5 downto 0) := to_unsigned(16, 6);
     signal blank_cnt : unsigned(9 downto 0) := (others => '0');
     signal hbl_len   : unsigned(9 downto 0) := to_unsigned(100, 10);
@@ -841,6 +855,22 @@ begin
         if rising_edge(clk) then
             for i in 0 to 7 loop reg_q(i) <= unsigned(registers_in(i)); end loop;
             ilace_q <= ilace; fld_q <= fl_r;
+            -- video timing ID: interlaced 480i/576i/1080i, SD 480/576 (field_n is tied
+            -- high by the core, so it cannot tell the fields apart)
+            case to_integer(unsigned(registers_in(8)(3 downto 0))) is
+                when 0 | 8      => tid_il <= '1'; tid_sd <= '1';
+                when 4 | 12     => tid_il <= '0'; tid_sd <= '1';
+                when 1 | 2 | 10 => tid_il <= '1'; tid_sd <= '0';
+                when others     => tid_il <= '0'; tid_sd <= '0';
+            end case;
+            -- corner operand for the sequencer: CXV * cx = (half-width of the 16:9 frame at
+            -- this height)^2.  HD: cx = 8 act_w.  SD: 14.25 act_w = 16/9 cx (4:3 -> 16:9).
+            cx14 <= shift_left(resize(act_w, 16), 4) - shift_left(resize(act_w, 16), 1);
+            if tid_sd = '1' then
+                cxv_r <= cx14 + resize(act_w(11 downto 2), 16);
+            else
+                cxv_r <= shift_left(resize(act_w, 16), 3);
+            end if;
             sw_ink  <= registers_in(6)(2);
             sw_flow <= registers_in(6)(3);
             sw_full <= registers_in(6)(4);
@@ -906,7 +936,10 @@ begin
                 frame_act <= '1';
                 if f_gec(aline, 51) = '1' then act_h <= aline; end if;
                 aline <= (others => '0');
-                if fl_r /= anc_fld then ilace <= '1'; else ilace <= '0'; end if;
+                -- interlace from the timing ID.  The old field_n detector is kept in the
+                -- OR: with field_n tied high it fires only at the first anchor after power-up
+                -- (anc_fld starts '0'), exactly as before, so 1080p stays bit-identical.
+                ilace <= tid_il or (fl_r xor anc_fld);
                 anc_fld <= fl_r;
             end if;
 
@@ -1698,7 +1731,11 @@ begin
             m_go <= '0'; d_go <= '0'; stx_en <= '0';
             tw_we <= (others => '0');
             rf_we <= '0'; row0_req <= '0';
-            if in_vblank = '1' and in_vblank_q = '0' then seq_req <= '1'; end if;
+            -- a pass request expires with its vblank: where the pass is longer than a frame
+            -- (720p, SD) the next pass waits for the next vblank instead of starting
+            -- mid-picture, so its frame-varying writes land in blanking
+            if in_vblank = '1' and in_vblank_q = '0' then seq_req <= '1';
+            elsif in_vblank = '0' then seq_req <= '0'; end if;
             if rf_we = '1' then
                 rf_mem(to_integer(rf_wa)) <= std_logic_vector(acc);
             end if;
@@ -1808,6 +1845,7 @@ begin
                                 when 7  => v_lx := resize(act_w, 20);
                                 when 8  => v_lx := resize(act_h, 20);
                                 when 9  => v_lx := resize(vstep_base, 20);
+                                when 11 => v_lx := resize(cxv_r, 20);
                                 when 10 => v_lx := (0 => sw_flow, 1 => sw_full, 2 => ilace_q, 3 => fld_q, 4 => sw_mesh, others => '0');
                                 when others => v_lx := (others => '0');
                             end case;

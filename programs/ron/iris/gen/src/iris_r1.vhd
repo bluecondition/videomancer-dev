@@ -6,6 +6,17 @@
 --
 -- iris.vhd  (v0.4 -- IRIS: perspective dot-tunnel eye, three-layer colour split)
 --
+-- v1.4.3 (2026-10-17, resolution scaling): interlace comes from the video
+-- timing ID (registers_in(8)), not from field_n toggling -- the core ties
+-- field_n high on every input, so 480i/576i were drawn at half the vertical
+-- step (a 2x tall iris).  Full bleed measures its corner on the 16:9 frame
+-- at the screen's height (SD: 4/3 of the active width, LDX CXV), so a 4:3 SD
+-- screen shows the 1080p picture's centre at the same scale.  A per-frame
+-- pass request now expires when its vblank ends: at 720p (and SD) the pass
+-- is longer than a frame and used to restart mid-picture on the stale
+-- request, writing the flow phase / twist table there (a horizontal tear).
+-- 1080p unchanged (bit-identical, including the old detector's first frame).
+--
 -- THE PICTURE: a large iris circle nearly filling the screen, a dark pupil
 -- anywhere inside it, and hundreds of round dots on spiral arms sweeping
 -- from the pupil to the rim, growing geometrically as they go.  Drawn three
@@ -168,6 +179,9 @@ architecture iris of program_top is
     signal frame_act : std_logic := '0';
     signal ilace  : std_logic := '0';
     signal anc_fld : std_logic := '0';
+    signal tid_il, tid_sd : std_logic := '0';                      -- timing ID: interlaced, SD
+    signal cx14   : unsigned(15 downto 0) := (others => '0');
+    signal cxv_r  : unsigned(15 downto 0) := to_unsigned(15360, 16); -- LDX CXV (corner half-width)
     signal vstep_base : unsigned(5 downto 0) := to_unsigned(16, 6);
     signal blank_cnt : unsigned(9 downto 0) := (others => '0');
     signal hbl_len   : unsigned(9 downto 0) := to_unsigned(100, 10);

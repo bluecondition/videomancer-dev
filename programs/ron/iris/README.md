@@ -488,3 +488,35 @@ words would free one more block RAM at no cost to the picture.
 - **Source:** all of this, plus the earlier port edits (GPL header, author, IO-align pad), is back-ported into `gen/` (src parts + `gen_roms.py` for the CORDIC angle ROM); `gen/assemble.sh` reproduces iris.vhd byte-for-byte (md5 ab789863...).
 - **Stock build:** seed 1 builds all 8 configs (seed 2 also). Own HD 88.6 / 89.2 / 87.7 MHz (analog / HDMI / dual).
 - **HW-validated 2026-10-15** (Ron: "looks fine"). Originally flagged for checking: whole picture incl. interlaced sources and the video backdrop (no_rw_check on the sample buffers, sync delay and register file; tables written one clock later; EBR output pad).
+
+## Resolution scaling (v1.4.3, 2026-10-17)
+- **Interlace from the timing ID.** The core ties field_n high on every input,
+  so the field_n-toggle detector never fired after the first frame: 480i/576i
+  ran the engine at half the vertical step and the iris was twice as tall as
+  wide. `ilace` now comes from `registers_in(8)` (0/8/1/2/10, decoded in
+  `p_relay`). The old detector stays OR'd in: with field_n tied high it only
+  fires at the first anchor after power-up (`anc_fld` starts at '0'), as it
+  always did, which keeps 1080p bit-identical from the first frame.
+- **Full bleed on SD measures the 16:9 corner.** The corner sum now reads
+  `LDX CXV` in place of `LD cx`. CXV is `cx` (8 act_w) on HD and 16/9 of it
+  (14.25 act_w) on SD, so CXV*cx is the squared half-width of the 16:9 frame
+  at that height and a 4:3 SD screen shows the 1080p picture's centre at the
+  same scale. LDX takes the same four clocks as LD, so the HD instruction
+  stream, and every write time, is unchanged (the program differs in that one
+  word).
+- **720p tear.** The per-frame pass is ~340k CPU clocks. That fits the
+  ~349k clocks of 1080p blanking but not 720p's ~281k, so a 720p pass ended
+  mid-picture, found the request raised during it still pending and restarted
+  at once, writing the flow phase and the twist table there (a horizontal
+  tear that moved every frame; a debug sim showed passes starting at lines
+  113, 282, 452). A request now expires when its vblank ends. A pass that
+  ends in active video waits for the next vblank, so the frame-varying writes
+  land in blanking. 720p60 updates every second frame, the same real-time
+  rate as 1080p30; SD every ~10 fields (it was ~9). Behaviour where the
+  pass ends inside a vblank (1080p) is unchanged.
+- 1080p bit-identical (diff1080 0 px). `gen/assemble.sh` reproduces iris.vhd.
+- Build (this repo, 6 configs):
+  `NEXTPNR_ROUTER="--router router1" SEED=1 SEED_MAX_RETRIES=10 MAKE_TIMEOUT=300 ./build_programs.sh ron iris`
+  -- all six on seed 1: HD Analog 90.65, HD HDMI 77.81, HD Dual 86.48 MHz;
+  SD Analog 80.59, SD HDMI 80.45, SD Dual 85.68 MHz; 6585-6616 LC (86 %),
+  23 EBR.
