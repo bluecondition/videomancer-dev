@@ -6,6 +6,20 @@
 --
 -- grist.vhd
 --
+-- v0.3.2 (2026-10-17): resolution scaling.  The K3 block octave (8..64) is
+-- structure, so it is now hashed on virtual 1080-line coordinates stepped
+-- per pixel / per field line from the video timing ID (registers_in(8)):
+-- 1.0 at 1080p (bit-identical), 1.5 at 720p, and at SD 2.0 across (a
+-- 1440-wide 4:3 window) and 1080/486 per frame line, so blocks keep their
+-- size relative to the screen height and stay square on a 4:3 screen (they
+-- were 2x tall at SD, where field lines counted as rows).  The per-pixel
+-- tooth, the 4 px mottle, the Soft 4x4 box and the pores are film grain --
+-- a pixel-level texture -- and stay at pixel scale.  Interlace is now read
+-- from the timing ID (the hardware ties field_n high, so the field_n
+-- detector never fired): the pixel grain hashes frame rows at 480i / 576i /
+-- 1080i and the 4 px mottle is square there instead of 2:1 tall.  Animate
+-- still reseeds every second field.
+--
 -- GRIST -- the grain from MORSEL's cookie dough, promoted to the whole
 -- instrument.  Nothing else survived the fork: no cells, no chips, no dough.
 --
@@ -35,7 +49,8 @@
 -- Panel:
 --   K1 FINE     per-pixel tooth amount (climax: share of fine spray)
 --   K2 COARSE   block-mottle amount (4 px mid octave + K3-sized octave)
---   K3 BLOCK    coarse octave cell size, 8/16/32/64 px
+--   K3 BLOCK    coarse octave cell size, 8/16/32/64 px at 1080p (follows
+--               the screen height in every mode)
 --   K4 RESPONSE 0 = uniform grain, up = film-stock mid-tone weighting
 --               (shadows and highlights print clean)
 --   K5 PITS     bipolar: left = dark pits, centre = none, right = bright
@@ -89,10 +104,13 @@
 -- latency-aligned avid is low; per-field work (frame counter, interlace
 -- detection) is guarded by a saw-active flag because analog vsync serrates.
 --
--- Interlace: the hash row is the FRAME row -- (line << 1) | field, with the
--- offset on field_n = '0' (bottom field carries the odd rows; seeding the
--- opposite way was ribbon's crawling-comb hardware bug).  Progressive modes
--- use the line counter directly so block sizes stay true.
+-- Interlace: the pixel-grain hash row is the FRAME row -- (line << 1) |
+-- field, with the offset on field_n = '0' (bottom field carries the odd rows;
+-- seeding the opposite way was ribbon's crawling-comb hardware bug).
+-- Progressive modes use the line counter directly.  (v0.3.2: interlace is
+-- read from the timing ID -- the hardware ties field_n high, so the old
+-- field_n detector never fired and the 4 px mottle printed 2:1 tall at SD /
+-- 1080i.  The K3 block octave uses virtual rows instead.)
 --
 -- Chroma is passthrough (or 512 in MONO), so the hardware U/V swap is
 -- irrelevant here -- both channels are treated identically.
@@ -177,9 +195,37 @@ architecture grist of program_top is
     signal s_vs_pulse    : std_logic := '0';
     signal s_saw_act     : std_logic := '0';
     signal s_fodd        : std_logic := '0';
-    signal s_fpar        : std_logic := '0';
     signal s_ilace       : std_logic := '0';
     signal s_aframe : unsigned(15 downto 0) := (others => '0');
+
+    -- Resolution scaling: virtual 1080-line coordinates for the K3 block
+    -- octave.  x is Q.1 (steps 2/3/4 = 1.0/1.5/2.0 per pixel), y Q.8 per
+    -- FIELD line (already doubled for interlace).  At 1080p the integer
+    -- parts equal s_xcnt / s_lcnt.
+    function f_vstep_x(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0 | 4 | 8 | 12 => return to_unsigned(4, 3);
+            when 5 | 6 | 14     => return to_unsigned(3, 3);
+            when others         => return to_unsigned(2, 3);
+        end case;
+    end function;
+    function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(1138, 12);  -- 480i: 2 x 1080/486
+            when 4          => return to_unsigned(576, 12);   -- 480p: 1080/480
+            when 8          => return to_unsigned(960, 12);   -- 576i: 2 x 1080/576
+            when 12         => return to_unsigned(480, 12);   -- 576p: 1080/576
+            when 5 | 6 | 14 => return to_unsigned(384, 12);   -- 720p: 1.5
+            when 1 | 2 | 10 => return to_unsigned(512, 12);   -- 1080i: 2.0
+            when others     => return to_unsigned(256, 12);   -- 1080p: 1.0
+        end case;
+    end function;
+    signal s_xs  : unsigned(2 downto 0)  := to_unsigned(2, 3);
+    signal s_ys  : unsigned(11 downto 0) := to_unsigned(256, 12);
+    signal s_xva : unsigned(12 downto 0) := (others => '0');
+    signal s_yva : unsigned(19 downto 0) := (others => '0');
 
     ----------------------------------------------------------------------
     -- frame-latched controls + per-frame terms
@@ -322,31 +368,49 @@ begin
                 s_saw_act <= '1';
             end if;
 
+            -- per-mode virtual steps (the timing ID is static while a mode
+            -- runs, so a free-running register is enough)
+            s_xs <= f_vstep_x(registers_in(8)(3 downto 0));
+            s_ys <= f_vstep_y(registers_in(8)(3 downto 0));
+            -- interlace from the timing ID (480i, 576i, 1080i): field_n
+            -- alternation never reaches a program on hardware
+            case to_integer(unsigned(registers_in(8)(3 downto 0))) is
+                when 0 | 8 | 1 | 2 | 10 => s_ilace <= '1';
+                when others             => s_ilace <= '0';
+            end case;
+
             s_avid_q <= data_in.avid;
             if data_in.avid = '1' then
                 s_xcnt <= s_xcnt + 1;
+                s_xva  <= s_xva + s_xs;
             elsif s_avid_q = '1' then
                 s_xcnt <= (others => '0');
+                s_xva  <= (others => '0');
                 s_lcnt <= s_lcnt + 1;
+                s_yva  <= s_yva + s_ys;
             end if;
 
             if s_vs_pulse = '1' then
                 -- reset is idempotent: safe on every serration edge
                 s_lcnt <= (others => '0');
+                -- virtual row: the bottom field starts half a field step
+                -- down (inert on hardware, which ties field_n high)
+                if data_in.field_n = '0' then
+                    s_yva <= resize(s_ys(11 downto 1), 20);
+                else
+                    s_yva <= (others => '0');
+                end if;
                 -- everything that counts or compares field-to-field runs
                 -- once per field: analog vsync serrates (several edges)
                 if s_saw_act = '1' then
                     s_saw_act <= '0';
                     s_fodd    <= not s_fodd;
-                    -- interlace = field_n alternates between fields
-                    s_fpar <= data_in.field_n;
-                    if data_in.field_n /= s_fpar then s_ilace <= '1';
-                    else                              s_ilace <= '0'; end if;
-                    -- grain reseeds every second field/frame; under
-                    -- interlace on one field only, so both fields of a
-                    -- frame print the same texture
-                    if (s_ilace = '1' and data_in.field_n = '1')
-                       or (s_ilace = '0' and s_fodd = '1') then
+                    -- grain reseeds every second field (~30/25 Hz), so
+                    -- under interlace both fields of a frame print the same
+                    -- texture.  (v0.3.2: on the field toggle alone -- the
+                    -- hardware ties field_n high, so a field_n-keyed reseed
+                    -- would fire every field.)
+                    if s_fodd = '1' then
                         s_aframe <= s_aframe + 1;
                     end if;
                 end if;
@@ -559,6 +623,7 @@ begin
     ------------------------------------------------------------------------
     p_noise : process(clk)
         variable v_y12 : unsigned(11 downto 0);
+        variable v_xv, v_yv : unsigned(11 downto 0);
         variable v_fx, v_fy : unsigned(3 downto 0);
         variable v_t   : signed(8 downto 0);
         variable v_b   : signed(15 downto 0);
@@ -584,22 +649,26 @@ begin
             c0_y3 <= v_y12 + 3;
             c0_xb <= shift_right(s_xcnt, 2);
             c0_yb <= shift_right(v_y12, 2);
-            c0_xc <= shift_right(s_xcnt, s_msc);
-            c0_yc <= shift_right(v_y12, s_msc);
+            -- K3 block octave on VIRTUAL 1080-line coordinates (structure,
+            -- not grain): at 1080p v_xv = s_xcnt and v_yv = the line count
+            v_xv := s_xva(12 downto 1);
+            v_yv := s_yva(19 downto 8);
+            c0_xc <= shift_right(v_xv, s_msc);
+            c0_yc <= shift_right(v_yv, s_msc);
             -- block fraction as a 4-bit weight (8 px cells: 3 bits << 1)
             case s_msc is
                 when 3 =>
-                    v_fx := s_xcnt(2 downto 0) & '0';
-                    v_fy := v_y12(2 downto 0) & '0';
+                    v_fx := v_xv(2 downto 0) & '0';
+                    v_fy := v_yv(2 downto 0) & '0';
                 when 4 =>
-                    v_fx := s_xcnt(3 downto 0);
-                    v_fy := v_y12(3 downto 0);
+                    v_fx := v_xv(3 downto 0);
+                    v_fy := v_yv(3 downto 0);
                 when 5 =>
-                    v_fx := s_xcnt(4 downto 1);
-                    v_fy := v_y12(4 downto 1);
+                    v_fx := v_xv(4 downto 1);
+                    v_fy := v_yv(4 downto 1);
                 when others =>
-                    v_fx := s_xcnt(5 downto 2);
-                    v_fy := v_y12(5 downto 2);
+                    v_fx := v_xv(5 downto 2);
+                    v_fy := v_yv(5 downto 2);
             end case;
             c0_fx <= v_fx;
             c0_fy <= v_fy;
