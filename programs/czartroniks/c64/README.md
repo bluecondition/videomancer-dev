@@ -8,7 +8,7 @@ Re-draws video as a Commodore 64 screen: 16 Colodore colours on a native 320x200
 
 | | Control | Range | What it does |
 |---|---|---|---|
-| K1 | Size | 2x / 4x / C64 / 8x / 16x | Block size; C64 = native 320x200 grid from the measured raster |
+| K1 | Size | 2x / 4x / C64 / 8x / 16x | Block size; C64 = native 320x200 grid at 1080p; sizes scale with the screen resolution |
 | K2 | Border | 0–100% | Border size as a fraction of the screen; 0 = none |
 | K3 | Border Col | Black / White / Red / Cyan / Purple / Green / Blue / Yellow / Orange / Brown / Lt Red / Dk Grey / Md Grey / Lt Green / Lt Blue / Lt Grey | Border colour, also the READY. text colour |
 | K4 | Scanlines | 0–100% | Dims the last line of every block row; 0 = off |
