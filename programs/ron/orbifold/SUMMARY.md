@@ -46,3 +46,21 @@ v0.2 sources backed up in .orbifold_work/.
   nextpnr's router1 on SD Dual (a rip-up livelock that never ends; LZX's
   build script has no timeout). Seed 2 builds all 8 configs; own HD timing
   (core without the Sync Out generator) 97.7/94.4/96.4 MHz Analog/HDMI/Dual.
+
+## Resolution scaling (v0.3.3, 2026-10-17)
+- The pixel/line counters, the late hue-gradient column counter and the
+  measured width/height (zoom centre) run in virtual 1080-line units, stepped
+  from the timing ID (`registers_in(8)`): x 1.0/1.5/2.0 per pixel (Q.1),
+  y per field line Q.8 (480i 4.44, 720p 1.5, 1080i 2.0). Cells (32..512),
+  rings and the hue gradient follow screen height; SD is a 1440-wide 4:3
+  window with round rings; 720p matches 1080p. The duplicate h_cnt/v_cnt
+  counters were folded into the accumulators. 1080p bit-identical (sim diff 0).
+- No bottom-field half-step (field_n is tied high on hardware; inert).
+- Also bit-identical: S17 chroma `512 + 3*(tri-128)` is now summed from the
+  unsigned tri (`128 + tri + 2*tri`) -- the signed form added the
+  sign-extension net to itself (2 SB_CARRY I0 == I1, the router1 livelock
+  shape; likely what hung SD Dual seed 1 in the stock build). dupin: 0.
+- Build: `SEED=2 NEXTPNR_ROUTER="--router router1" ./build_programs.sh ron orbifold`
+  (MAKE_TIMEOUT=1500 under machine load), all 6 on seed 2 first try:
+  HD Analog 104.3, SD Analog 98.5, HD HDMI 97.5, SD HDMI 101.1, HD Dual 103.6,
+  SD Dual 109.5 MHz; 6772-6792 LC (88%), 12/32 EBR.
