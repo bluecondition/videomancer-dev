@@ -6,6 +6,18 @@
 --
 -- daedalus.vhd  (v1.0 -- the picture drawn as a labyrinth)
 --
+-- v1.0.3 (2026-10-17): resolution scaling.  The lattice lives on a virtual
+-- 1080-line canvas: the per-pixel DDA steps are scaled by the mode's x step
+-- (1.0 / 1.5 at 720p / 2.0 at SD, a 1440-wide 4:3 window) and the per-FIELD-
+-- line steps by its y step (1080/active lines, doubled when interlaced; done
+-- as ys repeated additions in vblank), both from the timing ID in
+-- registers_in(8).  Cells, line weight and the octave threshold were already
+-- in per-1080p-pixel units of `step`, so they now scale with screen height;
+-- Angle stays a rotation on screen; the interlaced 2x vertical stretch is
+-- gone.  Strokes of octaves 0 and 1 keep a half-width of at least half a
+-- step of the mode (0 at 1080p) so SD/720p can't drop them between lines.
+-- 1080p is bit-identical.
+--
 -- Forked from VIDEOSKY, which cut the incoming video into a copper line-screen:
 -- an accumulator pair P/Q gives a rotatable, scalable coordinate frame, and the
 -- rules are the LEVEL SETS of P (`phase < thickness`).  Level sets can never
@@ -269,6 +281,63 @@ architecture daedalus of program_top is
     end function;
 
     ----------------------------------------------------------------------
+    -- Resolution scaling (v1.0.3): per-mode steps from the video timing ID.
+    -- The lattice is laid on a virtual 1080-line canvas: the DDA steps are
+    -- scaled per pixel by xs and per FIELD line by ys, so a cell is the same
+    -- fraction of the screen height in every mode, stays square on a 4:3 SD
+    -- screen, and Angle stays a rotation on screen.  1080p: both 1.0, so the
+    -- steps (and the picture) are exactly the old ones.
+    ----------------------------------------------------------------------
+    -- x step in half virtual units per pixel: 1080 2 (1.0), 720p 3 (1.5),
+    -- SD 4 (2.0: 720 px span 1440 units, a 4:3 window of the 1080 canvas).
+    function f_vstep_x(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0 | 4 | 8 | 12 => return to_unsigned(4, 3);
+            when 5 | 6 | 14     => return to_unsigned(3, 3);
+            when others         => return to_unsigned(2, 3);
+        end case;
+    end function;
+    -- y step in Q4.8 virtual units per FIELD line (1080 / active lines,
+    -- doubled for interlaced modes).
+    function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(1138, 12);  -- 480i: 2 x 1080/486
+            when 4          => return to_unsigned(576, 12);   -- 480p: 1080/480
+            when 8          => return to_unsigned(960, 12);   -- 576i: 2 x 1080/576
+            when 12         => return to_unsigned(480, 12);   -- 576p: 1080/576
+            when 5 | 6 | 14 => return to_unsigned(384, 12);   -- 720p: 1.5
+            when 1 | 2 | 10 => return to_unsigned(512, 12);   -- 1080i: 2.0
+            when others     => return to_unsigned(256, 12);   -- 1080p: 1.0
+        end case;
+    end function;
+    -- Thinnest stroke that a mode can still sample: half-width of at least
+    -- half a step on the coarser axis, in quarter virtual pixels.  0 at
+    -- 1080p (no clamp -- the picture is unchanged there).
+    function f_wmin(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(9, 4);   -- 480i: 4.44/2
+            when 4          => return to_unsigned(5, 4);   -- 480p: 2.25/2
+            when 8          => return to_unsigned(8, 4);   -- 576i: 3.75/2
+            when 12         => return to_unsigned(4, 4);   -- 576p: x 2.0/2
+            when 5 | 6 | 14 => return to_unsigned(3, 4);   -- 720p: 1.5/2
+            when 1 | 2 | 10 => return to_unsigned(4, 4);   -- 1080i: 2.0/2
+            when others     => return to_unsigned(0, 4);   -- 1080p
+        end case;
+    end function;
+    -- v * xs/2 for xs = 2/3/4 (1.0/1.5/2.0).
+    function f_xsc(v : signed(17 downto 0); xs : unsigned(2 downto 0)) return signed is
+    begin
+        case to_integer(xs) is
+            when 3      => return v + shift_right(v, 1);
+            when 4      => return shift_left(v, 1);
+            when others => return v;
+        end case;
+    end function;
+
+    ----------------------------------------------------------------------
     -- per-octave signal bundles
     ----------------------------------------------------------------------
     type t_u8a  is array(0 to C_NOCT - 1) of unsigned(7 downto 0);
@@ -342,9 +411,19 @@ architecture daedalus of program_top is
     signal s_prev_vsync_n : std_logic := '1';
     signal s_vs_pulse : std_logic := '0';
     signal s_saw_act  : std_logic := '0';
-    signal s_fpar  : std_logic := '0';
-    signal s_ilace : std_logic := '0';
+    signal s_fbot  : std_logic := '0';
     signal s_dracc : unsigned(15 downto 0) := (others => '0');
+
+    -- Resolution scaling: per-mode steps (free-running decode of the timing
+    -- ID), the per-line scale done as ys repeated additions in vblank, and
+    -- the thin-stroke floor (octave-0 sub-cell units, then per octave).
+    signal s_xs    : unsigned(2 downto 0)  := to_unsigned(2, 3);
+    signal s_ys    : unsigned(11 downto 0) := to_unsigned(256, 12);
+    signal s_wminq : unsigned(3 downto 0)  := (others => '0');
+    signal s_ycnt  : unsigned(11 downto 0) := (others => '0');
+    signal s_yap, s_yaq : signed(23 downto 0) := (others => '0');
+    signal s_wmin  : unsigned(7 downto 0) := (others => '0');
+    signal s_wlo   : t_u5a := (others => (others => '0'));
 
     -- screen measurement, for the centre pivot
     signal s_xcnt, s_wmeas : unsigned(10 downto 0) := (others => '0');
@@ -514,6 +593,8 @@ begin
         variable v_t  : signed(11 downto 0);
         variable v_sk : unsigned(17 downto 0);
         variable v_c  : unsigned(11 downto 0);
+        variable v_r13 : unsigned(12 downto 0);
+        variable v_wl : unsigned(9 downto 0);
     begin
         if rising_edge(clk) then
             s_prev_vsync_n <= data_in.vsync_n;
@@ -524,6 +605,21 @@ begin
 
             if data_in.avid = '1' then
                 s_saw_act <= '1';
+            end if;
+
+            -- Resolution scaling: the timing ID is static, so decode it
+            -- free-running (kept out of the vsync cone); it is only read in
+            -- vblank.
+            s_xs    <= f_vstep_x(registers_in(8)(3 downto 0));
+            s_ys    <= f_vstep_y(registers_in(8)(3 downto 0));
+            s_wminq <= f_wmin(registers_in(8)(3 downto 0));
+
+            -- dpy*ys and dpx*ys by repeated addition, ys clocks (<= 1138)
+            -- from state 46; state 38 waits for it.
+            if s_ycnt /= 0 then
+                s_yap  <= s_yap + resize(s_dpy, 24);
+                s_yaq  <= s_yaq + resize(s_dpx, 24);
+                s_ycnt <= s_ycnt - 1;
             end if;
 
             case to_integer(unsigned(registers_in(5))) is
@@ -560,13 +656,9 @@ begin
                 if s_saw_act = '1' then
                     s_saw_act <= '0';
 
-                    -- interlace detect: did field parity toggle since last field?
-                    s_fpar <= data_in.field_n;
-                    if data_in.field_n /= s_fpar then
-                        s_ilace <= '1';
-                    else
-                        s_ilace <= '0';
-                    end if;
+                    -- Bottom field (field_n '0') starts half a field step
+                    -- down.  Inert on hardware (core_top ties field_n high).
+                    s_fbot <= not data_in.field_n;
 
                     -- 16 bits so the wrap lands on the accumulator's own
                     -- 2^24 wrap -- a narrower counter jumps the cell ids and
@@ -636,16 +728,20 @@ begin
                         s_dpy <= resize(shift_right(s_prod_c, 9), 18);
                         s_dpx <= resize(shift_right(s_prod_s, 9), 18);
 
-                    -- Q is P rotated 90 degrees, at a QUARTER of the rate: the
-                    -- cells come out 4x wider than tall, which is what turns
-                    -- the staircases into long runs with short jogs.
+                    -- Resolution scaling: start dpy*ys and dpx*ys (the
+                    -- per-field-line steps), finished by state 38.
                     when 46 =>
-                        s_dqx <= -resize(shift_right(s_dpy, 2), 18);
-                        s_dqy <=  resize(shift_right(s_dpx, 2), 18);
+                        s_ycnt <= s_ys;
+                        s_yap  <= (others => '0');
+                        s_yaq  <= (others => '0');
 
                     when 45 =>      -- Ink: a bias on the whole tone ramp
                         s_bias <= signed(resize(shift_right(s_k1_ink, 1), 10))
                                   - to_signed(256, 10);
+                        -- thin-stroke floor in sub-cell units: wmin_q*step/1024
+                        -- through the shared multiplier, read in state 43
+                        s_ma <= signed(resize(s_wminq, 9));
+                        s_mb <= signed(resize(s_step(12 downto 5), 10));
 
                     when 44 =>      -- Contrast: 1.0x .. 4.9x about mid-grey
                         s_gain <= to_unsigned(16, 7) + resize(s_k2_con(9 downto 4), 7);
@@ -657,6 +753,8 @@ begin
                     when 43 =>
                         s_tang6 <= resize(s_k5_tan(9 downto 5), 6);
                         s_crs6  <= resize(s_k5_tan(9 downto 6), 6);
+                        v_r13   := unsigned(s_mp(12 downto 0)) + 31;    -- ceil
+                        s_wmin  <= v_r13(12 downto 5);
 
                     when 42 =>      -- line weight when Width is Fixed, 1/4 px
                         v_t := to_signed(9, 12) + resize(shift_right(s_bias, 5), 12);
@@ -717,17 +815,48 @@ begin
                             end if;
                         end loop;
 
+                    -- RESOLUTION SCALING.  Wait for the ys loop, then lay the
+                    -- steps on the virtual canvas: per pixel x xs, per field
+                    -- line x ys.  Q is P rotated 90 degrees, at a QUARTER of
+                    -- the rate: the cells come out 4x wider than tall, which
+                    -- is what turns the staircases into long runs with short
+                    -- jogs.  At 1080p this is exactly dqx = -dpy/4, dqy =
+                    -- dpx/4 as before.  Also the stroke floor of octaves 0
+                    -- and 1, held under the fade-in cap.  Octave 2's pen is
+                    -- sub-pixel even at 1080p (it draws dashed there), so it
+                    -- keeps no floor: flooring it made SD's coarse pitches
+                    -- half again as dense as 1080p.
+                    when 38 =>
+                        if s_ycnt /= 0 then
+                            s_seq <= s_seq;
+                        else
+                            s_dpx <= f_xsc(s_dpx, s_xs);
+                            s_dqx <= -resize(shift_right(f_xsc(s_dpy, s_xs), 2), 18);
+                            s_dpy <= resize(shift_right(s_yap, 8), 18);
+                            s_dqy <= resize(shift_right(s_yaq, 10), 18);
+                        end if;
+                        for k in 0 to 1 loop
+                            v_wl := shift_left(resize(s_wmin, 10), k);
+                            if v_wl > resize(s_wcap(k), 10) then
+                                s_wlo(k) <= s_wcap(k);
+                            else
+                                s_wlo(k) <= v_wl(4 downto 0);
+                            end if;
+                        end loop;
+
                     -- CENTRE PIVOT.  The screen centre sits at the drift
                     -- offset; walk the origin back from it by half a width of
                     -- dpx/dqx and half a height of dpy/dqy, one step per clock
-                    -- (~1500 clocks of a ~99k-clock HD vblank).
-                    when 38 =>
+                    -- (~1500 clocks of a ~99k-clock HD vblank).  Real pixels
+                    -- and field lines times the virtual-canvas steps, so the
+                    -- pivot is the screen centre in every mode.
+                    when 37 =>
                         s_org_p <= shift_left(resize(signed('0' & s_dracc), 24), 8);
                         s_org_q <= (others => '0');
                         s_pcx   <= s_wmeas(10 downto 1);
                         s_pcy   <= s_hmeas(10 downto 1);
 
-                    when 37 =>
+                    when 36 =>
                         if s_pcx /= 0 then
                             s_org_p <= s_org_p - resize(s_dpx, 24);
                             s_org_q <= s_org_q - resize(s_dqx, 24);
@@ -735,7 +864,7 @@ begin
                             s_seq   <= s_seq;
                         end if;
 
-                    when 36 =>
+                    when 35 =>
                         if s_pcy /= 0 then
                             s_org_p <= s_org_p - resize(s_dpy, 24);
                             s_org_q <= s_org_q - resize(s_dqy, 24);
@@ -743,10 +872,11 @@ begin
                             s_seq   <= s_seq;
                         end if;
 
-                    -- On an interlaced source one field starts half a line
-                    -- step down so the two fields interleave.
-                    when 35 =>
-                        if s_ilace = '1' and s_fpar = '1' then
+                    -- The bottom field starts half a field step down so the
+                    -- two fields interleave (inert on hardware: field_n is
+                    -- tied high there).
+                    when 34 =>
+                        if s_fbot = '1' then
                             s_lin0p <= s_org_p + shift_right(resize(s_dpy, 24), 1);
                             s_lin0q <= s_org_q + shift_right(resize(s_dqy, 24), 1);
                         else
@@ -754,7 +884,7 @@ begin
                             s_lin0q <= s_org_q;
                         end if;
 
-                    when 34 => s_load <= '1';
+                    when 33 => s_load <= '1';
 
                     when others => null;
                 end case;
@@ -978,8 +1108,13 @@ begin
                     r9_cross(k) <= '0';
                 end if;
 
+                -- Resolution scaling: a stroke that exists is held at least
+                -- as thick as the mode can sample (s_wlo is 0 at 1080p and
+                -- for octave 2, and never above the cap).
                 if r8_wu > resize(s_wcap(k), 8) then
                     v_w := s_wcap(k);
+                elsif r8_wu < resize(s_wlo(k), 8) and r8_wu /= 0 then
+                    v_w := s_wlo(k);
                 else
                     v_w := resize(r8_wu, 5);
                 end if;
