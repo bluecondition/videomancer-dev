@@ -12,7 +12,7 @@ Edge lines over a noise-warped, pixelated picture; the noise can move the cells 
 | K2 | Ink | 0–100% | Strength of the edge lines |
 | K3 | Noise | 0–100% | How much the wobbly noise pushes the picture |
 | K4 | Speed | 0–100% | How fast the noise pattern drifts |
-| K5 | Cells | 0–100% | Pixel block width (1 to 64 px) |
+| K5 | Cells | 0–100% | Pixel block width (1 to 64 px at 1080p; the same size relative to the screen height at 720p and SD) |
 | K6 | Rows | Square / Wide / Wider / Strip | Pixel block shape: square to wide strips |
 | S7 | Lines | Only / Over | Off: edges only on black; On: edges over the picture |
 | S8 | Noise Moves | Content / Cells | Off: noise moves the content; On: noise moves the block grid |
