@@ -79,6 +79,31 @@ the pixel path.
   all the balls changing color") and reverted — v1.0.1 is current. Source
   kept in .gumball_work/gumball_v1.1_averaging.vhd.
 
+## v1.0.3 (2026-10-17) — resolution scaling
+
+The lattices and the row counter run in virtual 1080-line units (stepped per
+pixel / per field line from the timing ID in `registers_in(8)`: 1.0 at 1080p,
+1.5 at 720p, SD 2.0 across a 1440-wide 4:3 window and 1080/486 per frame
+line). Balls keep their size relative to screen height and stay round on a
+4:3 screen. Before, they were 1.5x too big at 720p and huge 2:1 eggs at SD.
+
+- X: Q.1 accumulators per lattice. The wrap test is `la >= 2W - step`. The
+  centre sample is a crossing of W/2 (`xa_lt`/`xb_lt` register "short of the
+  centre"), and the right-edge partial-cell rule uses the same flag.
+- Y: each field line's Q4.8 step runs its integer part as UNIT steps (1-5
+  clocks after the h edge). So the row wrap, the mid-row jump and the
+  incremental per-line squares are unchanged. The sample line is the first
+  line at/after the row centre (`cy_hit`).
+- The AA ring stays ~0.9 real px (rim term x1.5 at 720p, x2 at SD).
+- Fixed a 1080p bug. With Ball Size below ~15 px there were >128 columns, and
+  the 7-bit cell index wrapped: the left fifth of the screen showed the
+  right-hand balls' colours. The cell index is now 8 bits, the rsq buffers are
+  256 deep and the colour buffer is 512x32, so EBR goes 10 -> 12.
+- 1080p is bit-identical at the test settings (diff1080 = 0).
+
+Build (router2, all seed 1): HDA 76.79, SDA 77.30, HDH 80.27, SDH 82.14,
+HDD 78.78, SDD 74.91 MHz. 7321-7351 LC (95.3-95.7%, +~200 over v1.0.1), 12 EBR.
+
 ## Timing v1.0.1 (routed, all seed 1)
 
 | Config | Fmax |

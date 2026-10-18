@@ -10,7 +10,7 @@
 [program]
 processing_delay_clks = 20
 program_id = "com.czartroniks.gumball"
-program_version = "1.0.2"
+program_version = "1.0.3"
 abi_version = ">=1.0,<2.0"
 program_name = "Gumball"
 author = "czartroniks"

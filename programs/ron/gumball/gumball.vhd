@@ -6,6 +6,20 @@
 --
 -- gumball.vhd  (v1.0.1 — video as a wall of glossy spheres)
 --
+-- v1.0.3 (2026-10-17): resolution scaling.  The two X lattices and the row
+-- counter run in virtual 1080-line units, stepped per pixel / per field line
+-- from the video timing ID (registers_in(8)): 1.0 at 1080p (identical to
+-- before), 1.5 at 720p, and at SD 2.0 across (a 1440-wide 4:3 window) and
+-- 1080/486 per frame line, so the balls keep their size relative to the
+-- screen height and stay round on a 4:3 screen (they were 1.5x too big at
+-- 720p and huge 2:1 eggs at SD).  The row counter keeps its unit steps (and
+-- the incremental per-line squares) by running the integer part of each
+-- field line's step as that many unit steps after the h edge; centre tests
+-- became crossings.  The AA ring stays ~0.9 real px.  Also fixes a 1080p
+-- column-index wrap: Ball Size below ~15 px gave >128 columns and the 7-bit
+-- cell index aliased the right-hand balls' colours onto the left fifth of
+-- the screen (cell index now 8 bits, buffers 256 / 512 deep).
+--
 -- Replaces the incoming video with a hex-packed field of shaded spheres, one
 -- per cell, coloured by the live video (a pixelation, but every "pixel" is a
 -- lit 3D ball).  Rows are offset by half a cell (hex packing) and the sphere
@@ -91,7 +105,7 @@ architecture gumball of program_top is
     signal s_io_align_pad : t_io_align_pad;
 
     constant LATENCY  : natural := 16;                 -- video pipe 0..15, out at c17
-    constant C_MAXCOL : natural := 128;                -- max cell columns (W >= 12 -> <= 107 + guard)
+    constant C_MAXCOL : natural := 256;                -- max cell columns (W >= 12 virtual -> <= 161)
 
     constant C_MID : unsigned(9 downto 0) := to_unsigned(512, 10);
 
@@ -107,6 +121,35 @@ architecture gumball of program_top is
     end function;
 
     --------------------------------------------------------------------------
+    -- Resolution scaling: per-mode steps from the video timing ID
+    -- (registers_in(8)); 1.0 at 1080p, so 1080p is unchanged.
+    --------------------------------------------------------------------------
+    -- x step in half virtual units per pixel: 1080 2 (1.0), 720p 3 (1.5),
+    -- SD 4 (2.0: 720 px span 1440 units, a 4:3 window of the 1080 canvas).
+    function f_vstep_x(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0 | 4 | 8 | 12 => return to_unsigned(4, 3);
+            when 5 | 6 | 14     => return to_unsigned(3, 3);
+            when others         => return to_unsigned(2, 3);
+        end case;
+    end function;
+    -- y step in Q4.8 virtual units per FIELD line (1080 / active lines,
+    -- doubled for interlaced modes).
+    function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(1138, 12);  -- 480i: 2 x 1080/486
+            when 4          => return to_unsigned(576, 12);   -- 480p: 1080/480
+            when 8          => return to_unsigned(960, 12);   -- 576i: 2 x 1080/576
+            when 12         => return to_unsigned(480, 12);   -- 576p: 1080/576
+            when 5 | 6 | 14 => return to_unsigned(384, 12);   -- 720p: 1.5
+            when 1 | 2 | 10 => return to_unsigned(512, 12);   -- 1080i: 2.0
+            when others     => return to_unsigned(256, 12);   -- 1080p: 1.0
+        end case;
+    end function;
+
+    --------------------------------------------------------------------------
     -- Raster position: two half-offset X lattices + row counter.
     --------------------------------------------------------------------------
     signal prev_hsync_n : std_logic := '1';
@@ -118,11 +161,25 @@ architecture gumball of program_top is
     signal line_par     : std_logic := '0';            -- hsync->avid parity, this line
     signal srow_r       : std_logic := '0';            -- this line is a sample line
     signal tp_r         : std_logic := '0';            -- its target row parity
-    signal r_hedge      : std_logic := '0';            -- registered h edge (line maths kick)
+    signal r_step       : std_logic := '0';            -- registered row unit step (line maths kick)
     signal r_anchor     : std_logic := '0';            -- first-active-line event
 
-    signal xa_loc, xb_loc : unsigned(7 downto 0) := (others => '0');
-    signal xa_idx, xb_idx : unsigned(6 downto 0) := (others => '0');
+    -- Resolution scaling (v1.0.3): the lattices run in virtual 1080-line
+    -- units.  x: Q.1 accumulators (half units; step 2/3/4 = 1.0/1.5/2.0 per
+    -- pixel), xa_la(8 downto 1) is the old integer xa_loc.  y: celly_loc
+    -- still counts whole virtual lines, but each field line advances it by
+    -- the integer part of a Q4.8 accumulator (1 at 1080p, 1-2 at 720p, 4-5
+    -- at 480i), one unit step per clock after the h edge, so every row
+    -- rule below (wrap, mid-row jump, incremental squares) is unchanged.
+    signal s_xs   : unsigned(2 downto 0)  := to_unsigned(2, 3);
+    signal s_ys   : unsigned(11 downto 0) := to_unsigned(256, 12);
+    signal xa_la, xb_la   : unsigned(8 downto 0) := (others => '0');
+    signal xa_lt, xb_lt   : std_logic := '1';          -- previous pixel short of the centre
+    signal s_wlim   : unsigned(8 downto 0) := to_unsigned(94, 9);   -- 2W - step: wrap threshold
+    signal cy_frac  : unsigned(7 downto 0) := (others => '0');
+    signal cy_left  : unsigned(2 downto 0) := (others => '0');      -- unit steps still due
+    signal cy_hit   : std_logic := '0';                -- this line reached the row centre
+    signal xa_idx, xb_idx : unsigned(7 downto 0) := (others => '0');
     signal celly_loc      : unsigned(7 downto 0) := (others => '0');
     signal celly_par      : std_logic := '0';
     signal frame_act      : std_logic := '0';
@@ -136,7 +193,6 @@ architecture gumball of program_top is
     signal k1_mv, k4_mv, k5_mv : std_logic := '0';     -- knob left its deadband
 
     signal s_w      : unsigned(7 downto 0) := to_unsigned(48, 8);   -- cell width W
-    signal s_wm1    : unsigned(7 downto 0) := to_unsigned(47, 8);
     signal s_wh     : unsigned(7 downto 0) := to_unsigned(24, 8);   -- W/2
     signal s_h      : unsigned(7 downto 0) := to_unsigned(42, 8);   -- row height H
     signal s_hm1    : unsigned(7 downto 0) := to_unsigned(41, 8);
@@ -144,7 +200,7 @@ architecture gumball of program_top is
     signal s_rfrac  : unsigned(10 downto 0) := to_unsigned(1000, 11);
     signal s_kshine : unsigned(10 downto 0) := to_unsigned(576, 11);
     signal s_r      : unsigned(7 downto 0) := to_unsigned(25, 8);   -- sphere radius
-    signal s_rim2   : unsigned(7 downto 0) := to_unsigned(75, 8);   -- ~3r: 1.5 px AA band
+    signal s_rim2   : unsigned(9 downto 0) := to_unsigned(75, 10);  -- 1.75r (x step/2): ~0.9 px AA band
     signal s_ls     : unsigned(7 downto 0) := to_unsigned(15, 8);   -- light offset 5r/8
     signal s_es     : unsigned(7 downto 0) := to_unsigned(12, 8);   -- specular radius
     signal s_ox, s_oy : signed(7 downto 0) := (others => '0');      -- light offset vector
@@ -220,23 +276,23 @@ architecture gumball of program_top is
     -- sample/write pipe (W0..W3 -> write)
     signal w0_stb : std_logic := '0';
     signal w0_par : std_logic := '0';
-    signal w0_idx : unsigned(6 downto 0) := (others => '0');
+    signal w0_idx : unsigned(7 downto 0) := (others => '0');
     signal w0_y, w0_u, w0_v : unsigned(9 downto 0) := C_MID;
     signal w1_stb : std_logic := '0';
     signal w1_par : std_logic := '0';
-    signal w1_idx : unsigned(6 downto 0) := (others => '0');
+    signal w1_idx : unsigned(7 downto 0) := (others => '0');
     signal w1_y   : unsigned(9 downto 0) := (others => '0');   -- Y - 64
     signal w1_pu, w1_pv : signed(19 downto 0) := (others => '0');
     signal w1_pl  : signed(19 downto 0) := (others => '0');
     signal w2_stb : std_logic := '0';
     signal w2_par : std_logic := '0';
-    signal w2_idx : unsigned(6 downto 0) := (others => '0');
+    signal w2_idx : unsigned(7 downto 0) := (others => '0');
     signal w2_y   : unsigned(9 downto 0) := (others => '0');
     signal w2_u, w2_v : signed(10 downto 0) := (others => '0');
     signal w2_rr  : unsigned(7 downto 0) := (others => '0');
     signal w3_stb : std_logic := '0';
     signal w3_par : std_logic := '0';
-    signal w3_idx : unsigned(6 downto 0) := (others => '0');
+    signal w3_idx : unsigned(7 downto 0) := (others => '0');
     signal w3_y   : unsigned(9 downto 0) := (others => '0');
     signal w3_u, w3_v : signed(10 downto 0) := (others => '0');
     signal w3_rsq : unsigned(15 downto 0) := (others => '0');
@@ -245,20 +301,20 @@ architecture gumball of program_top is
     -- Pixel pipeline (c1..c16).
     --------------------------------------------------------------------------
     signal g0_dx1, g0_dx2 : signed(7 downto 0) := (others => '0');
-    signal g0_a0, g0_a1   : unsigned(6 downto 0) := (others => '0');
+    signal g0_a0, g0_a1   : unsigned(7 downto 0) := (others => '0');
     signal g0_noadj       : std_logic := '0';
     signal g0_blank       : std_logic := '0';
 
     signal p2_dx1, p2_dx2 : signed(7 downto 0) := (others => '0');
     signal p2_noadj       : std_logic := '0';
     signal p2_blank       : std_logic := '0';
-    signal p2_a0, p2_a1   : unsigned(6 downto 0) := (others => '0');
+    signal p2_a0, p2_a1   : unsigned(7 downto 0) := (others => '0');
     signal q1, q2         : unsigned(13 downto 0) := (others => '0');
 
     signal p3_dx1, p3_dx2 : signed(7 downto 0) := (others => '0');
     signal p3_rd0, p3_rd1 : t_rword := (others => '0');
     signal p3_blank       : std_logic := '0';
-    signal p3_a0, p3_a1   : unsigned(6 downto 0) := (others => '0');
+    signal p3_a0, p3_a1   : unsigned(7 downto 0) := (others => '0');
     signal d1, d2         : unsigned(15 downto 0) := (others => '0');
 
     signal p4_dsq  : unsigned(15 downto 0) := (others => '0');
@@ -266,7 +322,7 @@ architecture gumball of program_top is
     signal p4_eys  : unsigned(15 downto 0) := (others => '0');
     signal p4_word : t_rword := (others => '0');
     signal p4_blank : std_logic := '0';
-    signal p4_ca   : unsigned(7 downto 0) := (others => '0');  -- winner {parity, cell}
+    signal p4_ca   : unsigned(8 downto 0) := (others => '0');  -- winner {parity, cell}
 
     signal p5_ex   : signed(7 downto 0) := (others => '0');
     signal p5_in   : std_logic := '0';
@@ -296,7 +352,7 @@ architecture gumball of program_top is
     signal p16_y, p16_u, p16_v : unsigned(9 downto 0) := C_MID;
 
     -- winner colour re-read: address pipe c5..c10, data c12, swapped c13
-    type t_ca_p is array (natural range <>) of unsigned(7 downto 0);
+    type t_ca_p is array (natural range <>) of unsigned(8 downto 0);
     signal ca_p   : t_ca_p(5 to 10) := (others => (others => '0'));
     signal wpar_p : std_logic_vector(5 to 12) := (others => '0');
     signal c12_y  : unsigned(9 downto 0) := (others => '0');
@@ -332,6 +388,11 @@ begin
         variable v_tp     : std_logic;
         variable v_trig   : std_logic;
         variable v_loc    : unsigned(7 downto 0);
+        variable v_ge     : std_logic;
+        variable v_lt     : std_logic;
+        variable v_bwrap  : std_logic;
+        variable v_step   : std_logic;
+        variable v_ysum   : unsigned(11 downto 0);
     begin
         if rising_edge(clk) then
             prev_hsync_n <= data_in.hsync_n;
@@ -341,8 +402,14 @@ begin
             v_h_edge := '0';
             if data_in.hsync_n = '0' and prev_hsync_n = '1' then v_h_edge := '1'; end if;
 
-            r_hedge  <= v_h_edge;
             r_anchor <= '0';
+
+            -- per-mode virtual steps (static per mode; re-latching at every
+            -- vsync edge is idempotent)
+            if prev_vsync_n = '1' and data_in.vsync_n = '0' then
+                s_xs <= f_vstep_x(registers_in(8)(3 downto 0));
+                s_ys <= f_vstep_y(registers_in(8)(3 downto 0));
+            end if;
 
             -- hsync->avid offset parity of this line (encoder Cb/Cr pairing)
             hpar <= not hpar;
@@ -361,32 +428,45 @@ begin
                 end if;
             end if;
 
-            -- X lattices: A aligned, B half-offset (or aligned too in square mode).
+            -- X lattices: A aligned, B half-offset (or aligned too in square
+            -- mode), in virtual half units.  A cell wraps when the NEXT step
+            -- would reach W (la >= 2W - step: at 1080p la = 2(W-1), the old
+            -- loc = W-1 test); xa_lt/xb_lt register "short of the centre" so
+            -- the centre test is a crossing a fractional step can't jump.
+            v_bwrap := '0';
+            if xa_la < (s_wh & '0') then xa_lt <= '1'; else xa_lt <= '0'; end if;
+            if xb_la < (s_wh & '0') then xb_lt <= '1'; else xb_lt <= '0'; end if;
             if v_h_edge = '1' then
-                xa_loc <= (others => '0');
+                xa_la  <= (others => '0');
                 xa_idx <= (others => '0');
                 if s_square = '1' then
-                    xb_loc <= (others => '0');
+                    xb_la <= (others => '0');
                 else
-                    xb_loc <= s_wh;
+                    xb_la <= s_wh & '0';
                 end if;
                 xb_idx <= (others => '0');
             elsif data_in.avid = '1' then
-                if xa_loc = s_wm1 then
-                    xa_loc <= (others => '0');
+                if xa_la >= s_wlim then
+                    xa_la  <= xa_la - s_wlim;
                     xa_idx <= xa_idx + 1;
                 else
-                    xa_loc <= xa_loc + 1;
+                    xa_la <= xa_la + s_xs;
                 end if;
-                if xb_loc = s_wm1 then
-                    xb_loc <= (others => '0');
+                if xb_la >= s_wlim then
+                    xb_la  <= xb_la - s_wlim;
                     xb_idx <= xb_idx + 1;
+                    v_bwrap := '1';
                 else
-                    xb_loc <= xb_loc + 1;
+                    xb_la <= xb_la + s_xs;
                 end if;
             end if;
 
             -- Y row counter, anchored to the first active line of the frame.
+            -- Each h edge adds the Q4.8 field-line step; its integer part is
+            -- run as that many unit steps (the first at the edge itself, the
+            -- rest on the following clocks — all long before active video).
+            if celly_loc = s_hh then cy_hit <= '1'; end if;
+            v_step := '0';
             if data_in.avid = '1' and frame_act = '0' then
                 frame_act <= '1';
                 celly_loc <= (others => '0');
@@ -394,11 +474,23 @@ begin
                 band0     <= '1';
                 line0     <= '1';
                 r_anchor  <= '1';
+                cy_frac   <= (others => '0');
+                cy_left   <= (others => '0');
             elsif v_h_edge = '1' then
                 line0 <= '0';
                 if idle_ln(1) = '1' then
                     frame_act <= '0';
                 end if;
+                v_ysum  := resize(cy_frac, 12) + s_ys;
+                cy_frac <= v_ysum(7 downto 0);
+                cy_left <= v_ysum(10 downto 8) - 1;
+                cy_hit  <= '0';
+                v_step  := '1';
+            elsif cy_left /= 0 then
+                cy_left <= cy_left - 1;
+                v_step  := '1';
+            end if;
+            if v_step = '1' then
                 if celly_loc = s_hm1 then
                     celly_loc <= (others => '0');
                     celly_par <= not celly_par;
@@ -407,6 +499,7 @@ begin
                     celly_loc <= celly_loc + 1;
                 end if;
             end if;
+            r_step <= v_step;
 
             -- Sample trigger: row R's colours are grabbed on the centre line of
             -- row R-1 (target parity = not current), at the target lattice's
@@ -425,23 +518,32 @@ begin
             v_tp := not celly_par;
             if line0 = '1' then v_tp := '0'; end if;
             tp_r <= v_tp;
-            if frame_act = '1' and (line0 = '1' or celly_loc = s_hh) then
+            -- (virtual units: the centre line is the first line at/after the
+            -- row centre, cy_hit; the centre pixel is the crossing of W/2 —
+            -- at 1080p exactly the old loc = H/2 / loc = W/2 tests)
+            if frame_act = '1' and (line0 = '1' or cy_hit = '1') then
                 srow_r <= '1';
             else
                 srow_r <= '0';
             end if;
 
-            if tp_r = '0' then v_loc := xa_loc; else v_loc := xb_loc; end if;
+            if tp_r = '0' then
+                v_loc := xa_la(8 downto 1);  v_lt := xa_lt;
+            else
+                v_loc := xb_la(8 downto 1);  v_lt := xb_lt;
+            end if;
+            if v_loc >= s_wh then v_ge := '1'; else v_ge := '0'; end if;
             v_trig := '0';
             if srow_r = '1' then
                 if data_in.avid = '1' then
                     if tp_r = '1' and xb_idx = 0 and s_square = '0' then
-                        if xb_loc = s_wm1 then v_trig := '1'; end if;
-                    elsif v_loc = s_wh then
+                        if v_bwrap = '1' then v_trig := '1'; end if;
+                    elsif v_ge = '1' and v_lt = '1' then
                         v_trig := '1';
                     end if;
                 elsif prev_avid = '1' then
-                    if v_loc /= 0 and v_loc <= s_wh then
+                    -- the line ended before this cell's centre
+                    if v_lt = '1' then
                         v_trig := '1';
                     end if;
                 end if;
@@ -573,7 +675,7 @@ begin
         variable v_hh, v_h : signed(8 downto 0);
     begin
         if rising_edge(clk) then
-            if r_hedge = '1' or r_anchor = '1' then
+            if r_step = '1' or r_anchor = '1' then
                 v_hh := signed(resize(s_hh, 9));
                 v_h  := signed(resize(s_h, 9));
                 if celly_loc = 0 then
@@ -696,8 +798,8 @@ begin
                         s_kshine <= to_unsigned(1088, 11) - resize(lk4, 11);
                     when 1 =>
                         s_amb <= 255 - s_sp;
-                        s_wm1 <= s_w - 1;
                         s_wh  <= '0' & s_w(7 downto 1);
+                        s_wlim <= (s_w & '0') - s_xs;                  -- 2W - x step
                         if s_square = '1' then
                             s_h   <= s_w;
                         else
@@ -717,12 +819,19 @@ begin
                         end if;
                     when 5 =>
                         s_ls   <= ('0' & s_r(7 downto 1)) + ("000" & s_r(7 downto 3));
-                        s_rim2 <= resize(s_r + ('0' & s_r(7 downto 1)), 8)
-                                + ("00" & s_r(7 downto 2));               -- 1.75r: ~0.9px AA ring
+                        s_rim2 <= resize(s_r + ('0' & s_r(7 downto 1)), 10)
+                                + ("0000" & s_r(7 downto 2));             -- 1.75r: ~0.9px AA ring
                         ma <= signed(resize(s_r, 12));
                         mb <= signed(resize(s_kshine, 12));
                         sinv <= lut_sin;
                         cosv <= lut_cos;
+                    when 6 =>
+                        -- AA ring stays ~0.9 REAL px: x1.5 at 720p, x2 at SD
+                        if s_xs(2) = '1' then
+                            s_rim2 <= s_rim2(8 downto 0) & '0';
+                        elsif s_xs(0) = '1' then
+                            s_rim2 <= s_rim2 + ('0' & s_rim2(9 downto 1));
+                        end if;
                     when 8 =>
                         -- Es = 3 + r*(1088-K4)/1024
                         s_es <= resize(to_unsigned(3, 8) + unsigned(mp(17 downto 10)), 8);
@@ -834,11 +943,11 @@ begin
             -- Own row = parity's lattice; adjacent row = the other one.
             ------------------------------------------------------------------
             if celly_par = '0' then
-                g0_dx1 <= signed(resize(xa_loc, 8)) - signed(resize(s_wh, 8));
-                g0_dx2 <= signed(resize(xb_loc, 8)) - signed(resize(s_wh, 8));
+                g0_dx1 <= signed(xa_la(8 downto 1)) - signed(s_wh);
+                g0_dx2 <= signed(xb_la(8 downto 1)) - signed(s_wh);
             else
-                g0_dx1 <= signed(resize(xb_loc, 8)) - signed(resize(s_wh, 8));
-                g0_dx2 <= signed(resize(xa_loc, 8)) - signed(resize(s_wh, 8));
+                g0_dx1 <= signed(xb_la(8 downto 1)) - signed(s_wh);
+                g0_dx2 <= signed(xa_la(8 downto 1)) - signed(s_wh);
             end if;
             g0_a0 <= xa_idx;
             g0_a1 <= xb_idx;
