@@ -123,9 +123,47 @@ Tier 3, optional:
   vertical aliasing at big cells.
 - 45° screen angle / analytic screens (smooth dot edges at any cell size,
   frees the 2-EBR ROM).
-- SD interlace: cells are field-line based (2× tall on 480i/576i).
+- ~~SD interlace: cells are field-line based (2× tall on 480i/576i).~~ Fixed in v0.2.2.
 - Capture defaults and presets from hardware. The current presets are
   hand-written for v0.2.0 semantics.
+
+## v0.2.2 (2026-10-17): resolution scaling
+
+At 720p the cells and the band tear were 1.5× too big relative to the screen
+(720p took the HD tear by width bit 10), and on 480i the cells were 2× too
+wide and 4.4× too tall (field-line rows). The band height already followed
+the measured height. Cells and tear now run in virtual 1080-line units, with
+steps from the timing ID (registers_in(8)), using the same engine change as
+Benday v0.2.2:
+
+- x: a half-unit accumulator (low 6 bits only). The cell's last real pixel
+  = torn x + floor(half units left / x step); at 1080 that is exactly the old
+  `x or mask`. Box window N px at 1080, N/2 px at SD and 720p.
+- y: cell rows from a Q.8 accumulator whose SD step is snapped to 4.0 (2.0
+  progressive), so cell rows are whole lines and the dots stay regular. SD
+  cells are ~11% taller than exact.
+- Pixels and lines sample their left/top edge, as 1080 always did.
+- On 480i/576i the 4-px cell (the Front Page preset's) is floored to 8 units
+  (2 field lines). At 4 units it is under one line, every line read the
+  screen's edge row, and the halftone vanished into flat paper.
+- Tear: ±512 virtual units (tear gain × 171/256 at 720p, which is 341 px; SD
+  is unchanged at 256 px). The band's 4-line floor is 4 / y step in field
+  lines (1080 4, 720p 3, 1080i/480p/576p 2, 480i/576i 1).
+
+1080p is bit-identical (diff1080 = 0 at the scaling-test settings).
+
+Build (`./build_combo.sh pressroom`, router2):
+
+| Config | Fmax | Seed |
+|---|---|---|
+| HD Analog | 83.9 MHz | 1 |
+| SD Analog | 83.5 MHz | 1 |
+| HD HDMI | 82.1 MHz | 2 (seed 1 stalled router2 under machine load) |
+| SD HDMI | 81.7 MHz | 1 |
+| HD Dual | 87.6 MHz | 2 (seed 1 stalled router2 under machine load) |
+| SD Dual | 85.3 MHz | 1 |
+
+4,761–4,788 LC (62%, +~300), 22/32 EBR. iceunpack OK on all six.
 
 ## Build
 
