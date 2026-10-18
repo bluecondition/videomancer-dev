@@ -122,6 +122,36 @@ Optimizations:
 - The dither scale is a shift (the step is a power of 2), so the vblank
   multiply sequencer is gone.
 
+## v0.2.2 (2026-10-17): resolution scaling
+
+K1 Segment is a size (its labels are pixels), so it now follows the screen
+HEIGHT: a 1024 px segment at 1080p is 683 px at 720p and 512 px on SD (a
+1440-unit 4:3 window of the 1080p canvas, mondrian's virtual-coordinate
+scheme). Before, the pane width was fixed pixels: 1.5x at 720p and ~2.7x
+(relative to the picture height) on the 4:3 SD screen.
+
+- The fold runs in virtual units: a half-unit phase accumulator steps
+  1 / 1.5 / 2 units a pixel (timing ID, decoded every clock), so pane and
+  tile parity, Alt Neg / Alt Bits and the fold period are the 1080p ones.
+- The source column is the fold result / x step in real pixels. A per-pixel
+  counter restarts where the phase wraps (no per-pixel divide); its
+  line-start value is (phase mod 2W) / x step, a shift or an exact
+  floor((m + 1) * 1365 / 4096) = floor(m / 3) for 720p, computed in hblank.
+  The per-frame constants (W, the centre offset) are converted the same way
+  (a floor(2^k / 3) table for 720p).
+- Skew is in virtual units per field line: the lean x the virtual y step
+  (480i 4.44, 576i 3.75, 720p 1.5, 1080i 2, ...), so 45° stays 45°.
+- Slide is in virtual units a field (its speed follows the field rate).
+- Pixel-scale on purpose: the Bayer / diagonal dither, the 12-column edge
+  inset, the 2-px chroma store.
+- 1080p is bit-identical (the counter equals the old masked phase there).
+- The Segment labels still read "1024 px" .. "64 px": 1080p pixels.
+
+Build (router2 default): HD Analog / HD HDMI / HD Dual 79.3 / 95.0 /
+86.8 MHz (seed 1); SD Analog 93.0 (seed 3: router2 stalled on seeds 1 and 2,
+no CARRY I0==I1 in the netlist), SD HDMI 99.9, SD Dual 85.3 (seed 1).
+~4,460 LC (58%, +500), 18/32 EBR.
+
 ## Build
 
 `./build_combo.sh foldither` → `out/rev_b/ron/catalogue-combo/foldither.vmprog`.
