@@ -33,7 +33,7 @@ name_label = "Scale"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 439
+initial_value = 4
 display_float_digits = 1
 suffix_label = "%"
 
@@ -43,7 +43,7 @@ name_label = "Drift"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 584
+initial_value = 407
 display_float_digits = 1
 suffix_label = "%"
 
@@ -53,7 +53,7 @@ name_label = "Skew"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 120
+initial_value = 0
 display_float_digits = 1
 suffix_label = "%"
 
@@ -63,7 +63,7 @@ name_label = "Period"
 control_mode = "linear"
 display_min_value = 2
 display_max_value = 257
-initial_value = 250
+initial_value = 773
 display_float_digits = 0
 suffix_label = " ln"
 
@@ -73,7 +73,7 @@ name_label = "Hue"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 360
-initial_value = 100
+initial_value = 187
 display_float_digits = 0
 suffix_label = "°"
 
@@ -83,7 +83,7 @@ name_label = "Spread"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 180
-initial_value = 1023
+initial_value = 795
 display_float_digits = 0
 suffix_label = "°"
 
@@ -103,7 +103,7 @@ initial_value_label = "Saw"
 parameter_id = "toggle_switch_9"
 name_label = "Bands"
 value_labels = ["Shade", "Flip"]
-initial_value_label = "Shade"
+initial_value_label = "Flip"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
@@ -123,7 +123,7 @@ name_label = "Amount"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 389
+initial_value = 467
 display_float_digits = 1
 suffix_label = "%"
 
