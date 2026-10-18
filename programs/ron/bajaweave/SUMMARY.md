@@ -65,3 +65,30 @@ complementary colour pair that K3 turns around the wheel.
   nextpnr's router1 in at least one config (a rip-up livelock with no end; LZX's
   build script has no timeout). Seed 6 builds all 8; own HD timing (core
   without the Sync Out generator) is 102.0/103.4/96.4 MHz Analog/HDMI/Dual.
+
+## Resolution scaling (v1.0.3, 2026-10-18)
+- Before: the carrier cycle (K1/K4) was fixed pixels, the sway wavelength was
+  counted in FIELD lines and the shadow was 12 px, so 720p showed 2/3 of the
+  bars at 1.5x the size and SD (480i) showed ~3/8 of the bars with a sway
+  wavelength ~2x the screen fraction.
+- Now (1080p bit-identical, 0 differing pixels in the 1080p sim):
+  - K1/K4 are bar COUNTS across the screen, so the carrier increment is scaled
+    x1.5 at 720p and x8/3 at SD (720 px) -- the same number of bars in every
+    mode (SD bars are 3/4 as wide relative to the height, filling 4:3).
+  - The per-line LFO step is scaled by the 1080-line step per field line
+    (720p 1.5, 1080i 2, 480i 4.44, 576i 3.75, ...), so the sway wavelength and
+    the flow speed are fractions of the screen height.
+  - The sway gain G and the drift rates keep the 1080p values: the swing stays
+    the same fraction of the bar spacing (the weave's crossings are the same).
+  - The S9 shadow offset follows the height: 12 / 8 / 6 px (1080 / 720p / SD).
+  - One shared free-running serial multiplier (`p_vscale`, 4 slots of 13
+    clocks) computes the four scaled values; 1080p keeps the direct carrier
+    increment (it must change on the field-start clock itself).
+- Build (router2, default `./build_programs.sh ron bajaweave`), all seed 1:
+  HD Analog 87.50, HD HDMI 94.45, HD Dual 75.17 (critical path is the core's
+  SPI peripheral, 11 ns routing), SD Analog 98.42, SD HDMI 88.98, SD Dual
+  81.93 MHz; 6890-6902/7680 LC (90%), 24/32 EBR.
+- HD HDMI placement screen (`tools/hdmi_pin_skew.py`): HSYNC +1.30 ns, inside
+  the known-good window. Still the layout lottery: A/B the new HD HDMI on
+  hardware before it replaces the validated v1.0.0 build (kept as
+  `.scaling_work/bajaweave_tmp/bajaweave_1.0.0_validated.vmprog`).

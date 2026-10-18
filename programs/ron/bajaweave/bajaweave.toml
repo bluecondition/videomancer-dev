@@ -7,7 +7,7 @@
 processing_delay_clks = 0
 program_id = "com.czartroniks.bajaweave"
 program_name = "Bajaweave"
-program_version = "1.0.2"
+program_version = "1.0.3"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"

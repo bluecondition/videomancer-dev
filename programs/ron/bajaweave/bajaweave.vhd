@@ -36,6 +36,13 @@
 -- S11 selects the waveshape: sine or triangle (carriers and LFOs both),
 -- gliding between them over ~0.5 s.
 --
+-- v1.0.3 resolution scaling: 1080p is unchanged (bit-identical).  At 720p
+-- and SD the carrier increment is scaled so K1/K4 keep their bar COUNT
+-- across the screen (x1.5 / x8/3), the per-line LFO step is scaled to
+-- 1080-line units (x f_vstep_y, incl. interlace), so the sway wavelength
+-- is the same fraction of the height, and the S9 shadow offset follows
+-- the height (12 / 8 / 6 px).  One shared serial multiplier (p_vscale).
+--
 -- Resources:
 --   1x video_timing_generator
 --   2x 20-bit per-line LFO accumulators (step at active-line end)
@@ -534,6 +541,50 @@ architecture bajaweave of program_top is
     signal s_hsync_n_sr : std_logic_vector(0 to C_DELAY_CLKS-1) := (others => '1');
     signal s_vsync_n_sr : std_logic_vector(0 to C_DELAY_CLKS-1) := (others => '1');
     signal s_field_n_sr : std_logic_vector(0 to C_DELAY_CLKS-1) := (others => '1');
+
+    -- ========================================================================
+    -- Resolution scaling (v1.0.3).  1080p is the reference and is bypassed
+    -- bit-exactly; other modes scale two per-field quantities from the
+    -- video timing ID (registers_in(8)):
+    --   * carrier increment x Mx (Q4.8): K1/K4 are bar COUNTS across the
+    --     screen, so 720p (1280 px) steps 1.5x and SD (720 px) 8/3x;
+    --   * per-line LFO step x f_vstep_y (Q4.8, 1080 / active field lines,
+    --     doubled for interlace), so the sway wavelength is a fraction of
+    --     the screen height (it was per FIELD line: 1.5x at 720p, ~4.4x
+    --     at 480i).
+    -- The sway gain G and the drift rates keep the 1080p (virtual) values,
+    -- so the PM swing stays the same fraction of the bar spacing and the
+    -- flow speed is in 1080-line units.  The S9 shadow offset is a size:
+    -- 12 / 8 / 6 px at 1080 / 720p / SD (same fraction of screen height).
+    -- ========================================================================
+    function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(1138, 12);  -- 480i: 2 x 1080/486
+            when 4          => return to_unsigned(576, 12);   -- 480p: 1080/480
+            when 8          => return to_unsigned(960, 12);   -- 576i: 2 x 1080/576
+            when 12         => return to_unsigned(480, 12);   -- 576p: 1080/576
+            when 5 | 6 | 14 => return to_unsigned(384, 12);   -- 720p: 1.5
+            when 1 | 2 | 10 => return to_unsigned(512, 12);   -- 1080i: 2.0
+            when others     => return to_unsigned(256, 12);   -- 1080p: 1.0
+        end case;
+    end function;
+    signal r_tid    : std_logic_vector(3 downto 0) := (others => '0');
+    signal r_mx     : unsigned(11 downto 0) := to_unsigned(256, 12);
+    signal r_my     : unsigned(11 downto 0) := to_unsigned(256, 12);
+    signal r_xs_on  : std_logic := '0';   -- 720p / SD: scaled carrier inc
+    signal r_shc    : unsigned(1 downto 0) := "00";  -- shadow: 0 12px, 1 8px, 2 6px
+    -- one shared serial shift-add multiplier, free-running over 4 slots
+    -- (osc1 inc, osc2 inc, osc1 step, osc2 step), 13 clocks a slot
+    signal vs_slot  : unsigned(1 downto 0) := (others => '0');
+    signal vs_cnt   : unsigned(3 downto 0) := (others => '0');
+    signal vs_a     : unsigned(17 downto 0) := (others => '0');
+    signal vs_b     : unsigned(10 downto 0) := (others => '0');
+    signal vs_acc   : unsigned(28 downto 0) := (others => '0');
+    signal r_inc1_sc, r_inc2_sc : unsigned(17 downto 0) := (others => '0');
+    signal r_st1_sc,  r_st2_sc  : unsigned(20 downto 0) := (others => '0');
+    -- shadow taps, registered one pixel early (= C_SHADOW_PX / 8 / 6 back)
+    signal r_sht1, r_sht2 : unsigned(3 downto 0) := (others => '0');
 
     -- ========================================================================
     -- Triangle wave from 10-bit phase, range matches sine LUT (-510..+510).
@@ -1047,12 +1098,73 @@ begin
             r_lfo1_step <= r_lfo1_st16(17 downto 4);
             r_lfo2_step <= r_lfo2_st16(17 downto 4);
 
+            -- per-line step = step16 x f_vstep_y (p_vscale).  At 1080p the
+            -- factor is 256/256, an exact copy; it settles ~80 clocks after
+            -- the field start (the knobs ease there), long before the first
+            -- active line ends.
             if s_fstart = '1' then
                 r_lfo1_acc <= (others => '0');
                 r_lfo2_acc <= (others => '0');
             elsif s_timing.avid_end = '1' then
-                r_lfo1_acc <= r_lfo1_acc + resize(r_lfo1_st16, C_LFO_W);
-                r_lfo2_acc <= r_lfo2_acc + resize(r_lfo2_st16, C_LFO_W);
+                r_lfo1_acc <= r_lfo1_acc + resize(r_st1_sc, C_LFO_W);
+                r_lfo2_acc <= r_lfo2_acc + resize(r_st2_sc, C_LFO_W);
+            end if;
+        end if;
+    end process;
+
+    -- ========================================================================
+    -- Resolution scaling: per-mode factors (decoded every clock; the timing
+    -- ID is static while a mode runs) and one free-running serial multiply
+    --   slot 0/1: carrier inc (16-bit units) x Mx >> 7 -> 21-bit carrier inc
+    --             (used at 720p / SD only; 1080 keeps the direct increment,
+    --             which must change on the field-start clock itself)
+    --   slot 2/3: LFO step16 x My >> 8 (all modes; exact copy at 1080p)
+    -- Each slot: load, 11 MSB-first shift-add steps, store (13 clocks).  A
+    -- knob change reaches the scaled values within ~55 clocks (vblank).
+    -- ========================================================================
+    p_vscale : process(clk)
+    begin
+        if rising_edge(clk) then
+            r_tid <= registers_in(8)(3 downto 0);
+            r_my  <= f_vstep_y(r_tid);
+            case to_integer(unsigned(r_tid)) is
+                when 0 | 4 | 8 | 12 =>        -- SD, 720 px: 8/3
+                    r_mx <= to_unsigned(683, 12);
+                    r_xs_on <= '1';  r_shc <= "10";
+                when 5 | 6 | 14 =>            -- 720p, 1280 px: 1.5
+                    r_mx <= to_unsigned(384, 12);
+                    r_xs_on <= '1';  r_shc <= "01";
+                when others =>                -- 1080p / 1080i: direct inc
+                    r_mx <= to_unsigned(256, 12);
+                    r_xs_on <= '0';  r_shc <= "00";
+            end case;
+
+            if vs_cnt = 0 then
+                case vs_slot is
+                    when "00"   => vs_a <= resize(r_osc1_inc, 18);  vs_b <= r_mx(10 downto 0);
+                    when "01"   => vs_a <= resize(r_osc2_inc, 18);  vs_b <= r_mx(10 downto 0);
+                    when "10"   => vs_a <= r_lfo1_st16;             vs_b <= r_my(10 downto 0);
+                    when others => vs_a <= r_lfo2_st16;             vs_b <= r_my(10 downto 0);
+                end case;
+                vs_acc <= (others => '0');
+                vs_cnt <= vs_cnt + 1;
+            elsif vs_cnt = 12 then
+                case vs_slot is
+                    when "00"   => r_inc1_sc <= vs_acc(24 downto 7);
+                    when "01"   => r_inc2_sc <= vs_acc(24 downto 7);
+                    when "10"   => r_st1_sc  <= vs_acc(28 downto 8);
+                    when others => r_st2_sc  <= vs_acc(28 downto 8);
+                end case;
+                vs_slot <= vs_slot + 1;
+                vs_cnt  <= (others => '0');
+            else
+                if vs_b(10) = '1' then
+                    vs_acc <= shift_left(vs_acc, 1) + resize(vs_a, 29);
+                else
+                    vs_acc <= shift_left(vs_acc, 1);
+                end if;
+                vs_b   <= vs_b(9 downto 0) & '0';
+                vs_cnt <= vs_cnt + 1;
             end if;
         end if;
     end process;
@@ -1534,9 +1646,12 @@ begin
     -- modulation is applied as a PHASE OFFSET below, which gives smoother
     -- waveforms than true FM.
     -- ========================================================================
-    s_osc1_inc_slv <= std_logic_vector(shift_left(resize(s_e1, C_CARRIER_W), C_FREQ_KNOB_SH_C - 4)
+    -- (720p / SD: the per-mode scaled increment from p_vscale)
+    s_osc1_inc_slv <= std_logic_vector(resize(r_inc1_sc, C_CARRIER_W)) when r_xs_on = '1' else
+                      std_logic_vector(shift_left(resize(s_e1, C_CARRIER_W), C_FREQ_KNOB_SH_C - 4)
                                         + to_unsigned(C_FREQ_MIN_C, C_CARRIER_W));
-    s_osc2_inc_slv <= std_logic_vector(shift_left(resize(s_e4, C_CARRIER_W), C_FREQ_KNOB_SH_C - 4)
+    s_osc2_inc_slv <= std_logic_vector(resize(r_inc2_sc, C_CARRIER_W)) when r_xs_on = '1' else
+                      std_logic_vector(shift_left(resize(s_e4, C_CARRIER_W), C_FREQ_KNOB_SH_C - 4)
                                         + to_unsigned(C_FREQ_MIN_C, C_CARRIER_W));
 
     osc1_inst : entity work.video_timing_accumulator
@@ -1685,6 +1800,19 @@ begin
             -- shadow source: each body's brightness, delayed C_SHADOW_PX
             r_dl1 <= r_dl1(4*C_SHADOW_PX-5 downto 0) & r_sL1(9 downto 6);
             r_dl2 <= r_dl2(4*C_SHADOW_PX-5 downto 0) & r_sL2(9 downto 6);
+            -- per-mode tap, registered from one nibble earlier so it lines
+            -- up with the old fixed tap (12 / 8 / 6 px back)
+            case r_shc is
+                when "01" =>
+                    r_sht1 <= r_dl1(4*7-1 downto 4*6);
+                    r_sht2 <= r_dl2(4*7-1 downto 4*6);
+                when "10" =>
+                    r_sht1 <= r_dl1(4*5-1 downto 4*4);
+                    r_sht2 <= r_dl2(4*5-1 downto 4*4);
+                when others =>
+                    r_sht1 <= r_dl1(4*(C_SHADOW_PX-1)-1 downto 4*(C_SHADOW_PX-2));
+                    r_sht2 <= r_dl2(4*(C_SHADOW_PX-1)-1 downto 4*(C_SHADOW_PX-2));
+            end case;
         end if;
     end process;
 
@@ -1763,12 +1891,12 @@ begin
                 v_lt := r_eL2; v_ut := r_eu2; v_vt := r_ev2;
                 v_lb := r_eL1; v_ub := r_eu1; v_vb := r_ev1;
                 r_kRT <= r_eR2;  r_kRB <= r_eR1;
-                r_kTd <= r_dl2(4*C_SHADOW_PX-1 downto 4*C_SHADOW_PX-4);
+                r_kTd <= r_sht2;
             else
                 v_lt := r_eL1; v_ut := r_eu1; v_vt := r_ev1;
                 v_lb := r_eL2; v_ub := r_eu2; v_vb := r_ev2;
                 r_kRT <= r_eR1;  r_kRB <= r_eR2;
-                r_kTd <= r_dl1(4*C_SHADOW_PX-1 downto 4*C_SHADOW_PX-4);
+                r_kTd <= r_sht1;
             end if;
             r_kT <= v_lt;  r_kuT <= v_ut;  r_kvT <= v_vt;
             r_kB <= v_lb;  r_kuB <= v_ub;  r_kvB <= v_vb;
