@@ -4,7 +4,7 @@
 -- This file is part of Videomancer Community Programs.
 -- See LICENSE file in the repository root for full license text.
 --
--- oracle.vhd  (v2.0.1)
+-- oracle.vhd  (v2.0.4)
 --
 -- ORACLE: a divinatory eye opening in a wall of static, with ordered spectra
 -- above and below.  The v1 triptych, redrawn at full resolution:
@@ -35,9 +35,10 @@
 --           per-line delay, so every layer tears together.
 --
 -- ENGINE
---   Raster: measured active width/height (frame rows on interlace, bottom
---   field = field_n '0'), generated parity-locked avid (aurora/cubist recipe,
---   the HW fix for U/V-swap lines on saturated colour), output gated to
+--   Raster: measured active width/height (frame rows on interlace, from the
+--   timing ID; bottom field = field_n '0'), generated parity-locked avid
+--   (aurora/cubist recipe, the HW fix for U/V-swap lines on saturated
+--   colour), output gated to
 --   64/512/512 outside it, one latency for all modes.
 --   Control is a MICROCODED ENGINE (port of cubist's, HW-validated): one
 --   32-bit ALU, a 256-word block-RAM register file (two copies, dual read),
@@ -70,6 +71,16 @@
 --
 -- Palette: oracle_tables_pkg (gen/gen_tables.py), hardware convention (the
 -- u register carries Cr), so the sim shows mirrored hues.
+--
+-- v2.0.4 (2026-10-18): resolution scaling.  Interlace now comes from the
+--   timing ID (480i / 576i / 1080i), not the SDK field detector: when the
+--   detector reports progressive (it keys on a half-line vsync offset) the
+--   SD raster was laid out in field rows, so the eye came out half as wide
+--   and the seam teeth twice as tall.  The torn-seam teeth now follow the
+--   screen: height x(fh/1080) by a timing-ID class table, one step per 8
+--   virtual columns.  Tear-burst shifts (S7) are applied in virtual columns
+--   (p_tsc: d - D0 scaled by 2/xs where the line delay is latched).
+--   1080p is unchanged (class 1080, x step 1).
 --
 -- Author: czartroniks
 
@@ -116,6 +127,13 @@ architecture oracle of program_top is
     signal s_ilace   : std_logic := '0';
     signal s_botf    : std_logic := '0';
     signal s_fh      : unsigned(11 downto 0) := to_unsigned(1080, 12);
+    -- resolution scaling (v2.0.4), decoded from the timing ID every clock:
+    -- interlace (480i / 576i / 1080i: core_top ties field_n high, so the
+    -- field detector cannot be trusted), seam-tooth height class, and the
+    -- virtual x step per pixel (Q.1: 2 / 3 / 4 = 1080p / 720p / SD)
+    signal s_tid_il  : std_logic := '0';
+    signal s_tcls    : unsigned(1 downto 0) := "00";
+    signal s_xs      : unsigned(2 downto 0) := to_unsigned(2, 3);
 
     -- ==== generated avid (aurora / cubist) ====
     signal g_hsq, g_hsr, g_avq, g_avr : std_logic := '0';
@@ -259,6 +277,7 @@ architecture oracle of program_top is
     signal rn_sp   : std_logic := '0';
     signal rn_tn   : unsigned(2 downto 0) := (others => '0');
     signal tl      : unsigned(15 downto 0) := x"ACE1";
+    signal tx_acc  : unsigned(3 downto 0) := (others => '0');  -- virtual x mod 8, Q.1
 
     -- ==== pixel pipeline ====
     signal av      : std_logic_vector(1 to 8) := (others => '0');
@@ -444,6 +463,11 @@ architecture oracle of program_top is
     signal o_wp   : unsigned(7 downto 0) := (others => '0');
     signal o_ray, o_rac, o_ras : unsigned(7 downto 0) := (others => '0');
     signal o_dY, o_dC : unsigned(7 downto 0) := to_unsigned(C_D0, 8);
+    -- tear shift in virtual columns (v2.0.4): the line's shift d - D0 is
+    -- scaled by 2/xs (x1 at 1080, x21/32 at 720p, x1/2 at SD); the chroma
+    -- offset dc - d stays at pixel scale.  Per line, settles in 3 clocks.
+    signal ts_s, ts_o, ts_sc, ts_o2 : signed(9 downto 0) := (others => '0');
+    signal cu_ds, cu_dcs : unsigned(7 downto 0) := to_unsigned(C_D0, 8);
     signal o_lq   : std_logic := '0';
     signal o_lcnt : unsigned(4 downto 0) := (others => '0');
     signal s_io   : t_video_stream_yuv444_30b
@@ -513,6 +537,54 @@ architecture oracle of program_top is
         if a < b then return a; else return b; end if;
     end function;
 
+    -- seam tooth height scaled to the raster (v2.0.4): the 1080p tooth
+    -- is -8..7 rows; 720p x2/3, 480-line SD x0.45, 576-line SD x0.53
+    -- (class from the timing ID), so the torn seam stays the same
+    -- fraction of the screen height and inside the gutter
+    function f_tooth(t : signed(3 downto 0); c : unsigned(1 downto 0)) return signed is
+    begin
+        case c is
+            when "01" =>
+                case to_integer(t) is
+                    when -8 | -7        => return to_signed(-5, 4);
+                    when -6             => return to_signed(-4, 4);
+                    when -5 | -4        => return to_signed(-3, 4);
+                    when -3             => return to_signed(-2, 4);
+                    when -2 | -1        => return to_signed(-1, 4);
+                    when 1 | 2          => return to_signed( 1, 4);
+                    when 3              => return to_signed( 2, 4);
+                    when 4 | 5          => return to_signed( 3, 4);
+                    when 6              => return to_signed( 4, 4);
+                    when 7              => return to_signed( 5, 4);
+                    when others => return to_signed(0, 4);
+                end case;
+            when "10" =>
+                case to_integer(t) is
+                    when -8             => return to_signed(-4, 4);
+                    when -7 | -6        => return to_signed(-3, 4);
+                    when -5 | -4        => return to_signed(-2, 4);
+                    when -3 | -2        => return to_signed(-1, 4);
+                    when 2 | 3          => return to_signed( 1, 4);
+                    when 4 | 5          => return to_signed( 2, 4);
+                    when 6 | 7          => return to_signed( 3, 4);
+                    when others => return to_signed(0, 4);
+                end case;
+            when "11" =>
+                case to_integer(t) is
+                    when -8 | -7        => return to_signed(-4, 4);
+                    when -6 | -5        => return to_signed(-3, 4);
+                    when -4 | -3        => return to_signed(-2, 4);
+                    when -2 | -1        => return to_signed(-1, 4);
+                    when 1 | 2          => return to_signed( 1, 4);
+                    when 3 | 4          => return to_signed( 2, 4);
+                    when 5 | 6          => return to_signed( 3, 4);
+                    when 7              => return to_signed( 4, 4);
+                    when others => return to_signed(0, 4);
+                end case;
+            when others => return t;
+        end case;
+    end function;
+
 begin
 
     timing_gen_inst : entity work.video_timing_generator
@@ -537,9 +609,9 @@ begin
             if s_timing.vsync_start = '1' then
                 if s_vcnt /= 0 then s_meas_v <= s_vcnt; end if;
                 s_vcnt  <= (others => '0');
-                s_ilace <= s_timing.is_interlaced;
+                s_ilace <= s_tid_il;
                 s_botf  <= not s_timing.field_n;      -- bottom field = field_n '0'
-                if s_timing.is_interlaced = '1' then
+                if s_tid_il = '1' then
                     s_fh <= s_meas_v(10 downto 0) & '0';
                 else
                     s_fh <= s_meas_v;
@@ -549,6 +621,23 @@ begin
             end if;
         end if;
     end process p_measure;
+
+    -- timing-ID classes (static while a mode runs)
+    p_tid : process(clk)
+    begin
+        if rising_edge(clk) then
+            case to_integer(unsigned(registers_in(8)(3 downto 0))) is
+                when 0 | 8 | 1 | 2 | 10 => s_tid_il <= '1';
+                when others             => s_tid_il <= '0';
+            end case;
+            case to_integer(unsigned(registers_in(8)(3 downto 0))) is
+                when 5 | 6 | 14 => s_tcls <= "01"; s_xs <= to_unsigned(3, 3);   -- 720p
+                when 0 | 4      => s_tcls <= "10"; s_xs <= to_unsigned(4, 3);   -- 480 lines
+                when 8 | 12     => s_tcls <= "11"; s_xs <= to_unsigned(4, 3);   -- 576 lines
+                when others     => s_tcls <= "00"; s_xs <= to_unsigned(2, 3);   -- 1080
+            end case;
+        end if;
+    end process p_tid;
 
     -- ====================================================================
     -- Generated avid (aurora v3.0.2, HW-confirmed): start 2-3 clocks after
@@ -1119,6 +1208,7 @@ begin
     p_s0 : process(clk)
         variable v : unsigned(31 downto 0);
         variable v_fr : unsigned(25 downto 0);
+        variable v5   : unsigned(4 downto 0);
     begin
         if rising_edge(clk) then
             -- chirped bars: frequency falls toward the centre, then rises
@@ -1169,10 +1259,16 @@ begin
                 rn_rem <= rn_rem - 1;
             end if;
 
-            -- seam teeth: one random step per 8 columns, same on every row
+            -- seam teeth: one random step per 8 VIRTUAL columns (8 px at
+            -- 1080p, 5.3 at 720p, 4 at SD), same on every row
+            v5 := ('0' & tx_acc) + resize(s_xs, 5);
             if g_avid = '0' then
                 tl <= f_tseed;
-            elsif s_bcol(2 downto 0) = "111" then
+                tx_acc <= (others => '0');
+            else
+                tx_acc <= v5(3 downto 0);
+            end if;
+            if g_avid = '1' and v5(4) = '1' then
                 if tl(0) = '1' then
                     tl <= ('0' & tl(15 downto 1)) xor x"B400";
                 else
@@ -1346,8 +1442,8 @@ begin
                 p1_tn <= rn_tn;
             end if;
             p1_g  <= rng(7 downto 0);
-            p1_tA <= signed(std_logic_vector'(tl(15) & tl(11) & tl(7) & tl(3)));
-            p1_tC <= signed(std_logic_vector'(tl(13) & tl(9) & tl(5) & tl(1)));
+            p1_tA <= f_tooth(signed(std_logic_vector'(tl(15) & tl(11) & tl(7) & tl(3))), s_tcls);
+            p1_tC <= f_tooth(signed(std_logic_vector'(tl(13) & tl(9) & tl(5) & tl(1))), s_tcls);
 
             -- ---- s2 ----
             p2_iA <= opal(p1_hA, sw_opal);
@@ -1808,6 +1904,30 @@ begin
         end if;
     end process;
 
+    p_tsc : process(clk)
+        variable v_m : signed(14 downto 0);
+        variable v_d : signed(9 downto 0);
+    begin
+        if rising_edge(clk) then
+            ts_s <= signed(resize(cu_d, 10)) - to_signed(C_D0, 10);
+            ts_o <= signed(resize(cu_dc, 10)) - signed(resize(cu_d, 10));
+            case s_xs is
+                when "011" =>                       -- 720p: x21/32, rounded
+                    v_m := shift_left(resize(ts_s, 15), 4) + shift_left(resize(ts_s, 15), 2)
+                           + resize(ts_s, 15) + 16;
+                    ts_sc <= resize(shift_right(v_m, 5), 10);
+                when "100" =>                       -- SD: x1/2
+                    ts_sc <= shift_right(ts_s, 1);
+                when others =>
+                    ts_sc <= ts_s;
+            end case;
+            ts_o2 <= ts_o;
+            v_d := ts_sc + to_signed(C_D0, 10);
+            cu_ds  <= unsigned(v_d(7 downto 0));
+            cu_dcs <= unsigned(v_d(7 downto 0)) + unsigned(ts_o2(7 downto 0));
+        end if;
+    end process p_tsc;
+
     p_out : process(clk)
     begin
         if rising_edge(clk) then
@@ -1825,8 +1945,8 @@ begin
             elsif o_lcnt /= 0 then
                 o_lcnt <= o_lcnt - 1;
                 if o_lcnt = 1 then
-                    o_dY <= cu_d;
-                    o_dC <= cu_dc;
+                    o_dY <= cu_ds;
+                    o_dC <= cu_dcs;
                 end if;
             end if;
 
