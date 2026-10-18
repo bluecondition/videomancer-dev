@@ -303,3 +303,7 @@ Build (`./build_programs.sh ron daedalus`, router2):
 | SD Dual | 72.67 MHz | 5630 | 1 |
 
 73% LC (+~360 vs v1.0.2), 1 EBR. Not flashed.
+
+Community port (stock LZX SDK, router1, all 8 configs, 2026-10-18): `[firmware] seed = 2`.
+v1.0.3 stalls router1 on seed 1 (60-min limit); seed 2 builds all 8, own HD timing
+88.3 / 91.1 / 86.4 MHz (Analog / HDMI / Dual), max 5902 LC.
