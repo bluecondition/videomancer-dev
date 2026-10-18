@@ -6,7 +6,8 @@
 --
 -- Inferno: Procedural flame — domain-warped multi-octave value noise,
 -- PIXELATED: every screen coordinate feeding the engine is quantized to a
--- block grid (K2 Pixels, 8..70 px at HD, 4..35 at SD), the palette is
+-- block grid (K2 Pixels, 8..70 px at 1080p, same share of the screen height in
+-- every mode), the palette is
 -- posterized to 32 steps and smoke to 16, embers are per-block hashes and
 -- all per-pixel dither is gone — a deliberately retro, fake-looking fire
 -- (Pyre is the realistic one).
@@ -32,6 +33,14 @@
 --   Output is gated to neutral black outside active video; per-field state
 --   updates fire once per field even when analog vsync serrates.
 --
+-- v2.0.3 (2026-10-18): resolution scaling.  Block grid, world coordinates,
+-- gradient (heat per line), Luma-Mod roots and the zoom centre run in
+-- virtual 1080-line units (x step 1/1.5/2 per pixel, y step per field line
+-- from the timing ID): 720p and SD show the 1080p blocks and flame heights
+-- relative to screen height, square blocks on a 4:3 SD screen (SD = the
+-- centre 1440 units).  The Canny detector stays at pixel scale.  1080p is
+-- unchanged.
+--
 -- License: GPL-3.0
 -- Author: czartroniks
 
@@ -54,6 +63,32 @@ architecture inferno of program_top is
     signal s_io_align_pad : t_io_align_pad;
 
   constant C_LATENCY : integer := 21;
+
+  -- Resolution scaling: per-mode steps from the video timing ID.
+  -- x step in half virtual units per pixel: 1080 2 (1.0), 720p 3 (1.5),
+  -- SD 4 (2.0: 720 px span 1440 units, a 4:3 window of the 1080 canvas).
+  function f_vstep_x(t : std_logic_vector(3 downto 0)) return unsigned is
+  begin
+    case to_integer(unsigned(t)) is
+      when 0 | 4 | 8 | 12 => return to_unsigned(4, 3);
+      when 5 | 6 | 14     => return to_unsigned(3, 3);
+      when others         => return to_unsigned(2, 3);
+    end case;
+  end function;
+  -- y step in Q4.8 virtual units per FIELD line (1080 / active lines,
+  -- doubled for interlaced modes).
+  function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
+  begin
+    case to_integer(unsigned(t)) is
+      when 0          => return to_unsigned(1138, 12);  -- 480i: 2 x 1080/486
+      when 4          => return to_unsigned(576, 12);   -- 480p: 1080/480
+      when 8          => return to_unsigned(960, 12);   -- 576i: 2 x 1080/576
+      when 12         => return to_unsigned(480, 12);   -- 576p: 1080/576
+      when 5 | 6 | 14 => return to_unsigned(384, 12);   -- 720p: 1.5
+      when 1 | 2 | 10 => return to_unsigned(512, 12);   -- 1080i: 2.0
+      when others     => return to_unsigned(256, 12);   -- 1080p: 1.0
+    end case;
+  end function;
 
   -- 64-entry sin LUT (drift velocity only — evaluated once per frame)
   type t_sin_lut is array(0 to 63) of signed(7 downto 0);
@@ -364,7 +399,16 @@ architecture inferno of program_top is
   signal sync_avid : std_logic_vector(C_LATENCY - 1 downto 0) := (others => '0');
 
   signal s_pixel_x : unsigned(11 downto 0) := (others => '0');
-  signal s_pixel_y : unsigned(11 downto 0) := (others => '0');
+  -- Resolution scaling: per-mode steps from the timing ID (x Q.1, y Q.8
+  -- per field line), the virtual line accumulator (reset at every vsync
+  -- edge), this line's integer y step (precomputed), the previous line's
+  -- virtual y (Canny edge row) and the virtual line width.
+  signal s_xs   : unsigned(2 downto 0)  := to_unsigned(2, 3);
+  signal s_ys   : unsigned(11 downto 0) := to_unsigned(256, 12);
+  signal s_vya  : unsigned(19 downto 0) := (others => '0');
+  signal s_dy   : unsigned(3 downto 0)  := to_unsigned(1, 4);
+  signal s_vyp  : unsigned(11 downto 0) := (others => '0');
+  signal s_wmv  : unsigned(11 downto 0) := to_unsigned(1920, 12);
   signal s_prev_hsync_n : std_logic := '1';
   signal s_prev_vsync_n : std_logic := '1';
   -- analog vsync can serrate (several falling edges per field): every
@@ -397,8 +441,14 @@ architecture inferno of program_top is
   -- knobs (latched at vsync)
   -- pixelation: block size, position-in-block counters, block-origin coords
   signal s_bsz : unsigned(6 downto 0) := to_unsigned(16, 7);
-  signal s_bxc, s_byc : unsigned(6 downto 0) := (others => '0');
+  -- (virtual units: s_bxca is the Q.1 position in the block, s_qx/s_qy the
+  -- virtual block origin, s_qxr the REAL pixel where the block started --
+  -- the Canny slot maps are addressed in real 4-px columns)
+  signal s_bxca : unsigned(7 downto 0) := (others => '0');
+  signal s_byc : unsigned(6 downto 0) := (others => '0');
   signal s_qx, s_qy : unsigned(11 downto 0) := (others => '0');
+  signal s_qxr : unsigned(11 downto 0) := (others => '0');
+  signal s_bnew : std_logic := '0';
   type t_qxd is array(0 to 6) of unsigned(8 downto 0);
   signal s_qxd : t_qxd := (others => (others => '0'));
   signal s_efr : unsigned(7 downto 0) := (others => '0');       -- ember hash seed (per field)
@@ -606,8 +656,23 @@ begin
     variable v_newstart : signed(12 downto 0);
     variable v_w : unsigned(11 downto 0);
     variable v_b : unsigned(6 downto 0);
+    variable v_bx : unsigned(8 downto 0);
+    variable v_by : unsigned(6 downto 0);
+    variable v_yf : unsigned(8 downto 0);
   begin
     if rising_edge(clk) then
+      -- per-mode steps (the timing ID is static while a mode runs); this
+      -- line's integer y step; virtual line width
+      s_xs <= f_vstep_x(registers_in(8)(3 downto 0));
+      s_ys <= f_vstep_y(registers_in(8)(3 downto 0));
+      v_yf := ('0' & s_vya(7 downto 0)) + ('0' & s_ys(7 downto 0));
+      s_dy <= s_ys(11 downto 8) + ("000" & v_yf(8));
+      case to_integer(s_xs) is
+        when 3      => s_wmv <= s_wmeas + shift_right(s_wmeas, 1);
+        when 4      => s_wmv <= shift_left(s_wmeas, 1);
+        when others => s_wmv <= s_wmeas;
+      end case;
+
       s_prev_hsync_n <= data_in.hsync_n;
       s_prev_vsync_n <= data_in.vsync_n;
 
@@ -622,18 +687,24 @@ begin
       sync_vs   <= sync_vs(C_LATENCY - 2 downto 0) & data_in.vsync_n;
       sync_avid <= sync_avid(C_LATENCY - 2 downto 0) & data_in.avid;
 
+      s_bnew <= '0';
       if data_in.avid = '1' then
         s_pixel_x <= s_pixel_x + 1;
-        if s_bxc + 1 >= s_bsz then
-          s_bxc <= (others => '0');
+        v_bx := ('0' & s_bxca) + s_xs;
+        if v_bx(8 downto 1) >= s_bsz then
+          s_bxca <= resize(v_bx - (s_bsz & '0'), 8);
           s_qx <= s_qx + resize(s_bsz, 12);
+          s_bnew <= '1';
         else
-          s_bxc <= s_bxc + 1;
+          s_bxca <= v_bx(7 downto 0);
         end if;
       end if;
+      -- real block start = the pixel after the wrap (one clock later than
+      -- s_qx, so it enters the delay line one stage further on)
+      if s_bnew = '1' then s_qxr <= s_pixel_x; end if;
       -- quantized column, 7 px behind the raster (luma-mod slot read)
-      s_qxd(0) <= s_qx(10 downto 2);
-      for i in 1 to 6 loop s_qxd(i) <= s_qxd(i-1); end loop;
+      s_qxd(1) <= s_qxr(10 downto 2);
+      for i in 2 to 6 loop s_qxd(i) <= s_qxd(i-1); end loop;
       if data_in.avid = '1' then
         s_saw_act <= '1';
       elsif s_vsedge = '1' then
@@ -642,35 +713,37 @@ begin
       if data_in.hsync_n = '0' and s_prev_hsync_n = '1' then
         if s_pixel_x /= 0 then s_wmeas <= s_pixel_x; end if;
         s_pixel_x <= (others => '0');
-        s_bxc <= (others => '0');
+        s_bxca <= (others => '0');
         s_qx <= (others => '0');
-        s_pixel_y <= s_pixel_y + 1;
-        if s_byc + 1 >= s_bsz then
-          s_byc <= (others => '0');
+        s_qxr <= (others => '0');
+        -- virtual lines: every line-based quantity advances s_dy units
+        s_vya <= s_vya + s_ys;
+        s_vyp <= s_vya(19 downto 8);
+        v_by := s_byc + s_dy;
+        if v_by >= s_bsz then
+          s_byc <= v_by - s_bsz;
           s_qy <= s_qy + resize(s_bsz, 12);
         else
-          s_byc <= s_byc + 1;
+          s_byc <= v_by;
         end if;
-        s_gline <= s_gline + 1;
-        s_gc <= (s_gline + 1) - signed(resize(s_c255k3, 13));
+        s_gline <= s_gline + signed(resize(s_dy, 13));
+        s_gc <= (s_gline + signed(resize(s_dy, 13))) - signed(resize(s_c255k3, 13));
       end if;
 
       if data_in.vsync_n = '0' and s_prev_vsync_n = '1' then
-        s_pixel_y <= (others => '0');
+        s_vya <= (others => '0');
+        s_vyp <= (others => '0');
         s_byc <= (others => '0');
         s_qy <= (others => '0');
         s_efr <= s_efr + 1;
 
         -- knobs (fuel/rise/turb/smoke + derived values are boosted and
         -- latched by the p_boost FSM shortly after this edge)
-        -- K2 Pixels: block size 4 + K2/32 (4..35 px), doubled on HD-width
-        -- streams (8..70 px) -- never finer than 8 px at 1080p
+        -- K2 Pixels: block size 4 + K2/32, doubled: 8..70 virtual units
+        -- (8..70 px at 1080p -- never finer than 8 px there; the same share
+        -- of the screen height in every mode)
         v_b := resize(unsigned(registers_in(1)(9 downto 5)), 7) + 4;
-        if s_wmeas >= 1280 then
-          s_bsz <= v_b(5 downto 0) & '0';
-        else
-          s_bsz <= v_b;
-        end if;
+        s_bsz <= v_b(5 downto 0) & '0';
         s_thi <= resize((to_unsigned(1023, 10) - unsigned(registers_in(4))) srl 3, 8) + 24;
         s_tlo <= resize(((to_unsigned(1023, 10) - unsigned(registers_in(4))) srl 3) srl 1, 8) + 12;
         s_ember   <= registers_in(6)(0);
@@ -688,8 +761,8 @@ begin
 
         s_lmframe <= s_lmframe + 1;
 
-        -- zoom centre = measured width / 2, rounded to 4 px
-        v_w := (s_wmeas + 4) srl 3;
+        -- zoom centre = measured (virtual) width / 2, rounded to 4 units
+        v_w := (s_wmv + 4) srl 3;
         s_wc <= v_w(8 downto 0) & "00";
 
         -- gradient servo: whatever g reached at vsync should equal gbot.
@@ -933,8 +1006,8 @@ begin
         if c_warm < 2 then v_acc := '0'; end if;
         c_left <= v_acc;
 
-        if s_pixel_y = 0 then v_yw := (others => '0');
-        else v_yw := resize(s_pixel_y - 1, 11); end if;
+        -- edge row = the previous line's virtual y (0 on the first line)
+        v_yw := resize(s_vyp, 11);
         v_y2 := v_yw(10 downto 1);
 
         -- slot policy: first two distinct edges + ALWAYS the lowest edge

@@ -1,5 +1,20 @@
 # Inferno — PIXELATED procedural flame (domain-warped multi-octave noise fire)
 
+**v2.0.3 (2026-10-18): resolution scaling.**  Before, everything was in
+pixels / lines: blocks 4+K2/32 px doubled only on W >= 1280 (720p blocks 1.5x
+too big), the noise cells and rise in px, and the gradient at 1 heat unit
+per LINE (720p flames 1.5x taller; at 480i 243 field lines the fire filled
+the screen, blocks 2:1 tall).  Now the block grid, world coordinates, the
+gradient servo, the Luma-Mod roots/skirt and the zoom centre run in virtual
+1080-line units: Q.1 block position `s_bxca` stepping 1/1.5/2 per pixel,
+one Q.8 line accumulator `s_vya` (reset at every vsync edge) whose integer
+step `s_dy` advances `s_gline`, `s_byc` and `s_qy` together (so g - byc stays
+constant per block row), the Canny edge row = previous line's virtual y.
+Blocks are 8..70 virtual units in every mode.  The Canny detector stays at
+pixel scale (4-px real columns); the block's REAL start pixel (`s_qxr`)
+addresses its slot maps.  SD = the centre 1440 units of the 1080p picture.
+1080p unchanged.
+
 **v2.0.0 (2026-10-04): pixelated only.** Ron keeps Pyre as the realistic
 simulator and Inferno as the deliberately fake, pixelated video fire (the two
 programs stay completely separate).  Every screen coordinate feeding the
@@ -143,7 +158,7 @@ of bright objects (Canny edge detection), with everything else black.
 
 ## Controls
 - **K1 Fuel** — flame height AND raggedness (former Heat knob folded in)
-- **K2 Pixels** — block size 4 + K2/32 px (x2 on HD-width streams): 8..70 px at 1080p; default 16
+- **K2 Pixels** — block size (4 + K2/32) x 2 virtual units: 8..70 px at 1080p, the same share of the screen height in every mode; default 16
 - **K3 Smoke** — smoke amount / fadeout height above the flames
 - **K4 Turblnce** — domain-warp amount
 - **K5 Depth/Edge** — S8 off: Depth, how tall the deep-red background layer burns (hidden → level with the front fire); S8 on: Canny edge sensitivity (up = more edges)
@@ -187,6 +202,12 @@ dual 6.)
 ~7590 LC (99%), 23 EBR: HD Analog seed 7 PASS, SD Analog 74.21 (s7), HD HDMI
 76.07 (s7), SD HDMI 78.15 (s7), HD Dual 74.56 (**seed 8**; 7 missed), SD Dual
 68.54 (s7).  Packed to `out/rev_b/ron/inferno.vmprog`.
+
+### v2.0.3 (2026-10-18, resolution scaling)
+`NEXTPNR_ROUTER="--router router1" SEED=7 ./build_programs.sh ron inferno`, 7192–7202 LC
+(93.7%), 23 EBR, all six on seed 7: HD Analog 79.99, SD Analog 76.11, HD HDMI 80.76,
+SD HDMI 79.81, HD Dual 75.59, SD Dual 78.44 MHz.  (First dev build of the v2.0.2 Booth
+netlist: ~400 LC below v2.0.0's 7590.)
 
 ## Community port — fit for the stock SDK (v2.0.2, 2026-10-15)
 - The stock LZX SDK builds 8 configs; its SD Standalone core is ~600 LC larger
