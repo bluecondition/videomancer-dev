@@ -9,6 +9,29 @@ line-reversal buffer — see prism notes).
 Status: **v0.4.2 FINAL except presets** (Ron signed off 2026-10-03). The cross-program colour bars are
 not a Fray bug (downstream of FPGA logic) and are tracked separately.
 
+## v0.4.5 (2026-10-17) — resolution scaling (not flashed)
+
+Geometry now runs in virtual 1080-line units from the timing ID (registers_in(8);
+x step 1.0 / 1.5 / 2.0 per pixel at 1080p / 720p / SD, y step 1080/active lines per
+field line, doubled for interlace), so at 720p and SD the filament field keeps its
+1080p proportions (SD = a 1440-wide 4:3 window, left-anchored like the hash layout):
+- K4 period: the per-pixel phase step is the K4 step times the x step, floored at a 2-px
+  period (Nyquist). K4's 2.8-px bottom end would be 1.4 px at SD, aliasing backwards, so
+  K4's bottom ~30% sits at that floor at SD. 1080p never reaches the floor.
+- Hash column clumps: 16 virtual units (xa1 accumulator replaces the cx1 look-ahead).
+- K5 bundles and the Fray weave phase: keyed on the virtual frame line. This replaces the
+  field_n-toggle interlace detector, which never fired on hardware because field_n is
+  tied high.
+- Length and tail taper: len_max = P12 x virtual width (SD 1440, else 1920) + 8, counted
+  down in Q.1 virtual units (r_rem 13 bits, minus the x step per pixel).
+- The Sobel kernel, the hold-colour tap and the Sparks specks stay pixel-scale. Because
+  the SD/720p source has fewer pixels, more edges pass the threshold, so there are a few
+  more comet heads.
+
+1080p sim is bit-identical to v0.4.4. **Build (v0.4.5):** router2, all 6 configs seed 1:
+HD Analog 80.2, HD HDMI 83.5, HD Dual 85.7, SD 85.2-87.0 MHz; 5221-5255 LC (68%),
+10 EBR.
+
 ## v0.4.1 / v0.4.2 (2026-10-03) — control ranges from HW
 
 - K2 Thresh: above ~60% nothing fired. Full travel now = old 0..62.5%
