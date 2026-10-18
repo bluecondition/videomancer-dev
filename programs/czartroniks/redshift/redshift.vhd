@@ -48,6 +48,15 @@
 -- line's sampled average colour instead (lagoon's left-fill, both edges,
 -- gated on nonzero deflection so Collapse = 0 stays exactly dry).
 --
+-- Resolution scaling (v2.2.2): geometry on a virtual 1080-line canvas (x
+-- step 1.0/1.5/2.0 per pixel, y step Q4.8 per field line, from the timing
+-- ID). Mass cells are 32x32 virtual units everywhere (720p used 32-px cells
+-- = 1.5x coarse), deflection/spin/turbulence are virtual units shown in
+-- pixels (gains x 1/xstep, clamp 255 units: SD +/-127 px, 720p +/-170),
+-- Doppler follows the virtual deflection, turbulence wavelength is 128
+-- units, debris rows are half virtual lines and the debris column density
+-- is compensated for the 8-px columns. 1080p is bit-identical to v2.2.1.
+--
 -- Mass field: mercurial's coarse-grid machinery -- per-column vacc IIR
 -- (K1's threshold-gain curve + S7 polarity applied at the accumulator),
 -- one cell row updated per hblank ({mb,gx} packed in one 2048x16 RAM,
@@ -123,6 +132,31 @@ architecture redshift of program_top is
             return to_signed(-255, 9);
         else
             return resize(v, 9);
+        end if;
+    end function;
+
+    -- deflection clamp to +/-lim (255 virtual units in pixels: 255/170/127)
+    function f_csl(v : signed; lim : unsigned(8 downto 0)) return signed is
+    begin
+        if v > signed('0' & lim) then
+            return signed(resize(lim, 9));
+        elsif v < -signed('0' & lim) then
+            return -signed(resize(lim, 9));
+        else
+            return resize(v, 9);
+        end if;
+    end function;
+
+    -- per-frame gain x 1/xstep, first step: SD 1/2, 720p 1/2 + 1/8 (the
+    -- second step adds 1/32: ~2/3), 1080 1
+    function f_rx1(v : signed; sd, h7 : std_logic) return signed is
+    begin
+        if sd = '1' then
+            return shift_right(v, 1);
+        elsif h7 = '1' then
+            return shift_right(v, 1) + shift_right(v, 3);
+        else
+            return v;
         end if;
     end function;
 
@@ -241,6 +275,44 @@ architecture redshift of program_top is
     signal s_pgate8    : unsigned(7 downto 0) := (others => '0');
     signal s_pspd4     : unsigned(3 downto 0) := "0010";
 
+    ----------------------------------------------------------------------
+    -- Resolution scaling (v2.2.2): geometry on a virtual 1080-line canvas.
+    -- x step Q.1 per pixel (1080 1.0, 720p 1.5, SD 2.0: a 1440-unit 4:3
+    -- window), y step Q4.8 per FIELD line (x2 for interlace), both from the
+    -- timing ID.  Mass cells are 32x32 virtual units at every resolution
+    -- (60 x 34 at HD, 45 x 34 at SD), deflection / spin / turbulence gains
+    -- are virtual units converted to pixels (x 1/xstep, clamp 255 units),
+    -- Doppler follows the virtual deflection (x xstep), the turbulence
+    -- wavelength is 128 units, and debris rows are half virtual lines (the
+    -- 540-row design).  At 1080p every step is 1: bit-identical to v2.2.1.
+    ----------------------------------------------------------------------
+    signal s_sd, s_h7 : std_logic := '0';
+    signal s_xs     : unsigned(2 downto 0) := to_unsigned(2, 3);
+    signal s_ys     : unsigned(11 downto 0) := to_unsigned(256, 12);
+    signal s_dlim   : unsigned(8 downto 0) := to_unsigned(255, 9);
+    signal s_geffx  : signed(8 downto 0) := (others => '0');
+    signal s_spinx  : signed(7 downto 0) := (others => '0');
+    signal s_hazex  : unsigned(7 downto 0) := (others => '0');
+    signal s_dopx   : unsigned(8 downto 0) := (others => '0');
+    signal s_pgx    : unsigned(7 downto 0) := (others => '0');
+    -- cell-span tracking: half units within the cell (0..63), pixel
+    -- within the span, cell column
+    signal s_cxh    : unsigned(6 downto 0) := (others => '0');
+    signal s_cpx    : unsigned(4 downto 0) := (others => '0');
+    signal s_ccol   : unsigned(7 downto 0) := (others => '0');
+    -- cell-row tracking (Q.8 position of the next line within its row)
+    signal s_cyacc  : unsigned(12 downto 0) := (others => '0');
+    signal s_rowfirst : std_logic := '1';
+    -- debris rows: Q.8 half virtual lines
+    signal s_dla    : unsigned(17 downto 0) := (others => '0');
+    -- turbulence phase position (half units, wraps every 128 units)
+    signal s_xvt    : unsigned(7 downto 0) := (others => '0');
+    -- vacc write, one clock after the span end (per-mode average)
+    signal e_go     : std_logic := '0';
+    signal e_first  : std_logic := '0';
+    signal e_sum    : unsigned(12 downto 0) := (others => '0');
+    signal e_col    : unsigned(7 downto 0) := (others => '0');
+
     -- fringe decode (K4 zones)
     signal s_fr_on    : std_logic := '0';
     signal s_fr_sh    : natural range 2 to 4 := 3;
@@ -279,7 +351,6 @@ architecture redshift of program_top is
     signal s_aline   : unsigned(10 downto 0) := (others => '0');
     signal s_dline   : unsigned(9 downto 0) := (others => '0');
     signal s_fheight : unsigned(10 downto 0) := to_unsigned(1080, 11);
-    signal s_tall    : std_logic := '1';
     signal s_seen    : std_logic := '0';
     signal s_lwidth  : unsigned(10 downto 0) := to_unsigned(1920, 11);
     signal s_wmax    : unsigned(10 downto 0) := to_unsigned(1919, 11);
@@ -305,11 +376,10 @@ architecture redshift of program_top is
     ----------------------------------------------------------------------
     -- MASS FIELD (v0.2)
     --
-    -- Mercurial's coarse-grid machinery: cells 2^xsh px x 2^ysh field
-    -- lines from the MEASURED line width + field height (1080p: 32x32 ->
-    -- 60 cols x 34 rows, stride 60; 1080i: 32x16; 720p: 32x32, 40 cols;
-    -- SD: 16x8 (16x16 progressive) -> 45 cols, stride 48; max address
-    -- 2039 < 2048). Per-column vacc accumulates the area-averaged luma
+    -- Mercurial's coarse-grid machinery: cells 32 x 32 VIRTUAL units
+    -- (v2.2.2; 1080p 32 px x 32 lines -> 60 cols x 34 rows, stride 60;
+    -- 1080i 32 x 16 field lines; 720p ~21 px x ~21 lines, 60 cols; SD 16 px
+    -- x ~7 field lines -> 45 cols, stride 48; max address 2039 < 2048). Per-column vacc accumulates the area-averaged luma
     -- (polarity applied here -- Dark Mass inverts the whole universe with
     -- one mux); the updater walks one cell row per hblank (delayed 8
     -- clocks so the corner prefetch owns the read port first): temporal
@@ -321,8 +391,6 @@ architecture redshift of program_top is
     -- we want. Display side: rolling corner prefetch + hblank prefetch of
     -- cols 0..1, then dual bilinear (m for the horizon, gx for the lens).
     ----------------------------------------------------------------------
-    signal s_xsh    : natural range 4 to 5 := 5;
-    signal s_ysh    : natural range 3 to 5 := 4;
     signal s_cols   : unsigned(5 downto 0) := to_unsigned(60, 6);
     signal s_stride : unsigned(5 downto 0) := to_unsigned(60, 6);
     -- bottom-edge replicate: the last cell row's lower bilinear corners
@@ -506,7 +574,7 @@ architecture redshift of program_top is
     -- S10..S13: grade/doppler mults, apply + gates, lanes, priority mux
     ----------------------------------------------------------------------
     signal pgy  : unsigned(15 downto 0) := (others => '0');       -- MG1 darken
-    signal pdop : signed(17 downto 0) := (others => '0');         -- MG2 doppler
+    signal pdop : signed(18 downto 0) := (others => '0');         -- MG2 doppler
     signal wy10, wu10, wv10 : unsigned(9 downto 0) := (others => '0');
 
     signal y11, u11, v11 : unsigned(9 downto 0) := (others => '0');
@@ -561,6 +629,27 @@ begin
     begin
         if rising_edge(clk) then
             s_prev_vsync_n <= data_in.vsync_n;
+            -- timing class + steps, free-running from the timing ID
+            case to_integer(unsigned(registers_in(8)(3 downto 0))) is
+                when 0 | 4 | 8 | 12 =>
+                    s_sd <= '1'; s_h7 <= '0';
+                    s_xs <= to_unsigned(4, 3); s_dlim <= to_unsigned(127, 9);
+                when 5 | 6 | 14 =>
+                    s_sd <= '0'; s_h7 <= '1';
+                    s_xs <= to_unsigned(3, 3); s_dlim <= to_unsigned(170, 9);
+                when others =>
+                    s_sd <= '0'; s_h7 <= '0';
+                    s_xs <= to_unsigned(2, 3); s_dlim <= to_unsigned(255, 9);
+            end case;
+            case to_integer(unsigned(registers_in(8)(3 downto 0))) is
+                when 0          => s_ys <= to_unsigned(1138, 12);  -- 480i
+                when 4          => s_ys <= to_unsigned(576, 12);   -- 480p
+                when 8          => s_ys <= to_unsigned(960, 12);   -- 576i
+                when 12         => s_ys <= to_unsigned(480, 12);   -- 576p
+                when 5 | 6 | 14 => s_ys <= to_unsigned(384, 12);   -- 720p
+                when 1 | 2 | 10 => s_ys <= to_unsigned(512, 12);   -- 1080i
+                when others     => s_ys <= to_unsigned(256, 12);   -- 1080p
+            end case;
             s_qs_ar <= s_qs_a;
             s_qs_r  <= f_qsin(s_qs_ar);
 
@@ -614,37 +703,13 @@ begin
                 end if;
                 s_dop8 <= unsigned(registers_in(3)(9 downto 2));
 
-                -- grid geometry from the measured line width AND field
-                -- height: 1080p needs 32-line cell rows (34 rows x 60 =
-                -- 2040 < 2048; 16-line rows overflowed the mass RAM and
-                -- aliased the bottom half onto the top); 1080i fields keep
-                -- 16. Debris runs in half-rows on tall rasters.
-                if s_fheight > 600 then
-                    s_tall  <= '1';
-                    s_nrows <= s_fheight(10 downto 1);
-                else
-                    s_tall  <= '0';
-                    s_nrows <= s_fheight(9 downto 0);
-                end if;
-                if s_lwidth >= 1600 then
-                    s_xsh <= 5;
-                    if s_fheight > 600 then
-                        s_ysh <= 5;
-                    else
-                        s_ysh <= 4;
-                    end if;
-                    s_cols <= to_unsigned(60, 6); s_stride <= to_unsigned(60, 6);
-                elsif s_lwidth >= 1000 then
-                    s_xsh <= 5; s_ysh <= 5;
-                    s_cols <= to_unsigned(40, 6); s_stride <= to_unsigned(60, 6);
-                else
-                    s_xsh <= 4;
-                    if s_fheight > 300 then
-                        s_ysh <= 4;
-                    else
-                        s_ysh <= 3;
-                    end if;
+                -- grid geometry: 32 x 32 virtual-unit cells at every
+                -- resolution (34 rows; 60 x 60-stride columns at HD = 2040
+                -- < 2048 entries, 45 x 48-stride on the 1440-unit SD window)
+                if s_sd = '1' then
                     s_cols <= to_unsigned(45, 6); s_stride <= to_unsigned(48, 6);
+                else
+                    s_cols <= to_unsigned(60, 6); s_stride <= to_unsigned(60, 6);
                 end if;
 
                 -- animation phases
@@ -666,13 +731,7 @@ begin
                         s_dk8    <= '0' & s_p12(9 downto 3);    -- darken
                         s_hazeg8 <= '0' & s_p12(9 downto 3);    -- turbulence
                         s_pspd4  <= "0010" + resize(s_p12(9 downto 8) & '0', 4);
-                        -- last cell row index = (height-1) >> ysh
-                        v_h := s_fheight - 1;
-                        case s_ysh is
-                            when 3      => s_lastrow <= v_h(8 downto 3);
-                            when 4      => s_lastrow <= v_h(9 downto 4);
-                            when others => s_lastrow <= v_h(10 downto 5);
-                        end case;
+                        -- (last cell row index: latched at the field end)
                     when 8 =>
                         -- horizon: fully engaged only at P12 max
                         s_thr10 <= to_unsigned(255, 10)
@@ -714,12 +773,41 @@ begin
                         -- shell centers, stepped below the horizon
                         s_c1 <= s_thr10 - 40;
                     when 6 =>
+                        -- resolution scaling of the per-frame gains:
+                        -- deflection terms / xstep, Doppler and debris
+                        -- column density x xstep
+                        s_geffx <= f_rx1(s_geff9, s_sd, s_h7);
+                        s_spinx <= f_rx1(s_spin8, s_sd, s_h7);
+                        s_hazex <= unsigned(f_rx1(signed(s_hazeg8), s_sd, s_h7));
+                        if s_sd = '1' then
+                            s_dopx <= resize(s_dop8 & '0', 9);
+                            if s_pgate8(7) = '1' then
+                                s_pgx <= (others => '1');
+                            else
+                                s_pgx <= s_pgate8(6 downto 0) & '0';
+                            end if;
+                        elsif s_h7 = '1' then
+                            s_dopx <= resize(s_dop8, 9) + resize(s_dop8(7 downto 1), 9);
+                            if s_pgate8 > 170 then
+                                s_pgx <= (others => '1');
+                            else
+                                s_pgx <= s_pgate8 + ('0' & s_pgate8(7 downto 1));
+                            end if;
+                        else
+                            s_dopx <= resize(s_dop8, 9);
+                            s_pgx  <= s_pgate8;
+                        end if;
                         s_h1u <= f_cu10(to_signed(512, 11)
                                         + resize(shift_right(s_qs_r, 1), 11));
                         s_c2 <= s_c1 - 56;
                         s_c1l <= s_c1 - resize(s_w5, 10);
                         s_c1h <= s_c1 + resize(s_w5, 10);
                     when 5 =>
+                        if s_h7 = '1' then          -- 720p: + 1/32 (~2/3)
+                            s_geffx <= s_geffx + shift_right(s_geff9, 5);
+                            s_spinx <= s_spinx + shift_right(s_spin8, 5);
+                            s_hazex <= s_hazex + shift_right(s_hazeg8, 5);
+                        end if;
                         s_h1v <= f_cu10(to_signed(512, 11)
                                         + resize(shift_right(s_qs_r, 1), 11));
                         s_c3 <= s_c2 - 56;
@@ -776,6 +864,10 @@ begin
         variable v_nal : unsigned(10 downto 0);
         variable v_pd  : unsigned(9 downto 0);
         variable v_fx3 : unsigned(2 downto 0);
+        variable v_cx  : unsigned(7 downto 0);
+        variable v_a3  : unsigned(14 downto 0);
+        variable v_ncy : unsigned(13 downto 0);
+        variable v_dl  : unsigned(17 downto 0);
     begin
         if rising_edge(clk) then
             s_prev_hsync_n <= data_in.hsync_n;
@@ -790,6 +882,7 @@ begin
 
             -- S0: input register + mass-grid display tracking
             sw_we <= '0';
+            e_go  <= '0';      -- one-clock pulse (set at a span end below)
             if data_in.avid = '1' then
                 r0_y <= unsigned(data_in.y);
                 r0_u <= unsigned(data_in.u);
@@ -828,22 +921,25 @@ begin
                         null;
                 end case;
 
-                -- span position within the current cell
-                if s_xsh = 4 then
-                    v_pos := '0' & s_x_count(3 downto 0);
+                -- span position within the current cell: cells are 32
+                -- virtual units (64 half units); the pixel count within the
+                -- span drives the prefetch events, the virtual position the
+                -- bilinear fraction (1080p: x(4:0), x >> 5 -- unchanged)
+                v_pos := s_cpx;
+                v_col := s_ccol;
+                v_cx  := resize(s_cxh, 8) + resize(s_xs, 8);
+                v_end := v_cx(6) = '1';
+                if v_cx(6) = '1' then
+                    s_cxh  <= '0' & v_cx(5 downto 0);
+                    s_cpx  <= (others => '0');
+                    s_ccol <= s_ccol + 1;
                 else
-                    v_pos := s_x_count(4 downto 0);
+                    s_cxh <= v_cx(6 downto 0);
+                    s_cpx <= s_cpx + 1;
                 end if;
-                v_end := (s_xsh = 5 and v_pos = 31)
-                         or (s_xsh = 4 and v_pos = 15);
-                v_col := resize(shift_right(s_x_count, s_xsh), 8);
 
                 -- bilinear x-fraction for THIS pixel
-                if s_xsh = 4 then
-                    fx5 <= s_x_count(3 downto 0) & '0';
-                else
-                    fx5 <= s_x_count(4 downto 0);
-                end if;
+                fx5 <= s_cxh(5 downto 1);
 
                 -- per-column target accumulator + IIR. Polarity and K1's
                 -- mass-formation curve both apply here: what accumulates
@@ -877,20 +973,13 @@ begin
                 if v_pos = 12 then
                     acc_pre_col <= v_col;      -- vacc read for the IIR
                 end if;
-                vacc_we <= '0';
+                -- span end: the vacc write lands one clock later (below),
+                -- after the per-mode span average
                 if v_end then
-                    v_avg := resize(shift_right(v_sum, s_xsh), 8);
-                    vacc_waddr <= v_col;
-                    if fy5 = 0 then            -- first line of the cell row
-                        vacc_wdata <= resize(v_avg & "0000", 16);
-                    else
-                        vacc_wdata <= resize(
-                            unsigned(signed(resize(vq_disp, 14))
-                                     + shift_right(signed(resize(v_avg & "0000", 14))
-                                                   - signed(resize(vq_disp, 14)), 2)),
-                            16);
-                    end if;
-                    vacc_we <= s_vsamp;
+                    e_go    <= s_vsamp;
+                    e_sum   <= v_sum;
+                    e_col   <= v_col;
+                    e_first <= s_rowfirst;     -- first line of the cell row
                 end if;
                 if v_pos = 14 then
                     vq_disp <= unsigned(vacc_q(11 downto 0));
@@ -941,6 +1030,36 @@ begin
                 end if;
             end if;
 
+            -- vacc write (one clock after the span end; e_go is a one-clock
+            -- pulse).  Span average: 1080 sum/32, 720p sum*3/64 (21-22 px
+            -- spans), SD sum/16.
+            vacc_we <= '0';
+            if e_go = '1' then
+                if s_sd = '1' then
+                    v_avg := e_sum(11 downto 4);
+                elsif s_h7 = '1' then
+                    v_a3 := resize(e_sum, 15) + shift_left(resize(e_sum, 15), 1);
+                    if v_a3(14) = '1' then
+                        v_avg := (others => '1');
+                    else
+                        v_avg := v_a3(13 downto 6);
+                    end if;
+                else
+                    v_avg := e_sum(12 downto 5);
+                end if;
+                vacc_waddr <= e_col;
+                if e_first = '1' then
+                    vacc_wdata <= resize(v_avg & "0000", 16);
+                else
+                    vacc_wdata <= resize(
+                        unsigned(signed(resize(vq_disp, 14))
+                                 + shift_right(signed(resize(v_avg & "0000", 14))
+                                               - signed(resize(vq_disp, 14)), 2)),
+                        16);
+                end if;
+                vacc_we <= '1';
+            end if;
+
             -- hblank prefetch of the coming line's first two columns (and
             -- particle column 0)
             if pf_seq /= 0 then
@@ -983,7 +1102,7 @@ begin
             -- stage (see p_lb*)
             if av(1) = '1' then
                 if s_turb = '1' then
-                    amp1 <= shift_right(s_hazeg8,
+                    amp1 <= shift_right(s_hazex,
                                         3 - to_integer(r0_y(9 downto 8)));
                 else
                     amp1 <= (others => '0');
@@ -1003,7 +1122,7 @@ begin
                 -- for 8-px columns). 1x3 streak; x wanders as it falls.
                 v_pd  := s_dline - pc_pos(11 downto 2);
                 v_fx3 := pc_h8(4 downto 2) + pc_pos(4 downto 2);
-                if pc_h8 < s_pgate8
+                if pc_h8 < s_pgx
                    and v_pd(9 downto 2) = 0 and v_pd(1 downto 0) /= "11"
                    and r0_ph3 = v_fx3 then
                     fl_sr(2) <= '1';
@@ -1026,10 +1145,13 @@ begin
                 dv2g  <= resize(v_rbg, 10) - resize(v_rtg, 10);
 
                 amp2 <= amp1;
-                ph2  <= shift_left(resize(x_s2, 10), 3)
+                -- (turbulence wavelength 128 virtual units: s_xvt counts
+                -- half units, so x 4 = the old x_s2 x 8 at 1080p)
+                ph2  <= shift_left(resize(s_xvt, 10), 2)
                         + s_ljit10
                         + shift_left(resize(s_fph, 10), 1);
                 x_s2 <= x_s2 + 1;
+                s_xvt <= s_xvt + s_xs;
             end if;
 
             -- S3: bilinear vertical mults M3/M6 + the spin mult M10
@@ -1039,7 +1161,7 @@ begin
             if av(3) = '1' then
                 pv3m <= dv2m * signed('0' & fy5);
                 pv3g <= dv2g * signed('0' & fy5);
-                spp  <= dv2m * s_spin8;
+                spp  <= dv2m * s_spinx;
                 rt3m <= rt2m;
                 rt3g <= rt2g;
                 amp3 <= amp2;
@@ -1072,7 +1194,7 @@ begin
             -- M7 lens = gx_bil * gain (gain carries the Repel sign),
             -- M9 turbulence = qsin * amp
             if av(5) = '1' then
-                lp <= gx_bil4 * s_geff9;
+                lp <= gx_bil4 * s_geffx;
                 hp <= s_qs_r * signed('0' & amp4);
                 sp5  <= sp4;
                 m_d5 <= m_bil4;
@@ -1081,9 +1203,9 @@ begin
             -- S6: total displacement = lens + spin shear + turbulence,
             -- clamped s9
             if av(6) = '1' then
-                dx6 <= f_cs9(resize(shift_right(lp, 4), 14)
+                dx6 <= f_csl(resize(shift_right(lp, 4), 14)
                              + resize(shift_right(hp, 12), 14)
-                             + resize(sp5, 14));
+                             + resize(sp5, 14), s_dlim);
                 m_d6 <= m_d5;
             end if;
 
@@ -1175,7 +1297,7 @@ begin
             -- Doppler mult MG2 (signed deflection x gain); shell gates
             if av(10) = '1' then
                 pgy  <= wy9(9 downto 2) * s_dk8;
-                pdop <= dx9 * signed('0' & s_dop8);
+                pdop <= dx9 * signed('0' & s_dopx);
                 wy10 <= wy9;
                 wu10 <= wu9;
                 wv10 <= wv9;
@@ -1329,14 +1451,21 @@ begin
                 s_sum_v   <= (others => '0');
                 s_avg_cnt <= (others => '0');
                 s_x_count <= (others => '0');
+                s_cxh  <= (others => '0');
+                s_cpx  <= (others => '0');
+                s_ccol <= (others => '0');
+                s_xvt  <= (others => '0');
                 wx    <= (others => '0');
                 x_s2  <= (others => '0');
                 rd_x  <= (others => '0');
                 s_lstep <= "01";
 
-                v_rowend := (s_ysh = 3 and s_aline(2 downto 0) = "111")
-                         or (s_ysh = 4 and s_aline(3 downto 0) = "1111")
-                         or (s_ysh = 5 and s_aline(4 downto 0) = "11111");
+                -- cell rows are 32 virtual lines: the next line's position
+                -- within its row (Q.8); a wrap ends this row (1080p: line
+                -- 31 of 32, unchanged)
+                v_ncy    := resize(s_cyacc, 14) + resize(s_ys, 14);
+                v_rowend := v_ncy(13) = '1';
+                v_dl     := s_dla + resize(s_ys(11 downto 1), 18);
 
                 if s_seen = '1' then
                     s_seen <= '0';
@@ -1369,6 +1498,14 @@ begin
                     end if;
                     if s_aline /= 0 then
                         s_fheight <= s_aline;   -- measured field height
+                        -- last cell row index, and the debris rows (the
+                        -- row of the line after the last: 540 at 1080p)
+                        if s_pend_row = '1' then
+                            s_lastrow <= s_row;
+                        else
+                            s_lastrow <= s_row - 1;
+                        end if;
+                        s_nrows <= s_dline;
                     end if;
                     s_aline <= (others => '0');
                     v_nal   := (others => '0');
@@ -1377,23 +1514,32 @@ begin
                     dsp_rb1 <= resize(s_stride, 11);
                 end if;
 
-                if s_tall = '1' then
-                    s_dline <= v_nal(10 downto 1);
+                -- y fraction / first-line flag / debris row for the
+                -- coming line, from the virtual-line accumulators
+                if s_seen = '1' then
+                    s_cyacc    <= v_ncy(12 downto 0);
+                    fy5        <= v_ncy(12 downto 8);
+                    if v_rowend then
+                        s_rowfirst <= '1';
+                    else
+                        s_rowfirst <= '0';
+                    end if;
+                    s_dla   <= v_dl;
+                    s_dline <= v_dl(17 downto 8);
                 else
-                    s_dline <= v_nal(9 downto 0);
+                    s_cyacc    <= (others => '0');
+                    fy5        <= (others => '0');
+                    s_rowfirst <= '1';
+                    s_dla      <= (others => '0');
+                    s_dline    <= (others => '0');
                 end if;
-                -- 32-line cell rows: accumulate even lines only
-                if s_ysh = 5 then
+                -- 1080p (32 lines per cell row): accumulate even lines only;
+                -- every line where rows are fewer field lines
+                if s_ys = 256 then
                     s_vsamp <= not v_nal(0);
                 else
                     s_vsamp <= '1';
                 end if;
-
-                case s_ysh is
-                    when 3      => fy5 <= v_nal(2 downto 0) & "00";
-                    when 4      => fy5 <= v_nal(3 downto 0) & '0';
-                    when others => fy5 <= v_nal(4 downto 0);
-                end case;
 
                 pf_seq <= "001";   -- prefetch the coming line's cols 0..1
             end if;
