@@ -23,6 +23,27 @@ the first finalizing pass, built from a review of v0.1.2.
 | S11 Tone | duotone keyed from luma / from the noise field |
 | P12 Amount | glided, squared curve: ±5 px warp or ±30 luma grain at 0, ±¼ of the width / ±511 luma at 100%. Above 75% the quake comes in: slabs of lines (a new slab on 1 line in 16, random offsets, new every frame) torn sideways, up to ±⅛ of the width |
 
+## v0.3.2 changes (resolution scaling, 2026-10-17)
+
+At SD and 720p the noise cells, the shear bands, the warp and the quake were
+fixed-pixel / per field line: at SD the Venetian bands were ~4.4x thicker
+and the cells ~2x wide. Now (1080p unchanged, pixel diff 0):
+- Lattice: the per-frame step is virtual (per 1080-line unit); the x DDAs
+  step it x (x step / 2) per pixel and the y DDA x (y step / 256) per field
+  line (one extra pass of the serial multiplier). The centring multiplies
+  use those real steps with the measured W/2, H/2, so the field still zooms
+  about the screen centre. Drift and the boil phase stay virtual.
+- Shear bands: the line-in-band counter is a Q.8 accumulator stepped by the
+  y step and wrapped at the period (virtual lines; the period is held at
+  >= ceil(y step) so a line never crosses two band edges). The skew is
+  converted to real px per virtual line (x 2 / x step; 720p by 1/2 + 1/8 +
+  1/32 + 1/128) and the +-511 clamp scales with it (511 / 340 / 255).
+- Warp (P12) and quake gains use the 1080p width in real px (1920 / 1280 /
+  960) instead of the measured width: height-based (SD warp was 3/4 size).
+- Quake slabs: a new slab with odds 1 in 16 VIRTUAL lines (an 8-bit LFSR
+  compare against y step x 16; at 1080p exactly the old lfsr(3:0) = 0 test).
+- Steps are free-running registers decoded from the timing ID.
+
 ## v0.3.0 changes (Tier 3, 2026-10-12)
 
 Rollback point: v0.2.0 is commit ccc8b8b, and its vmprog is in
@@ -111,6 +132,11 @@ sine ROM). yosys `emulate_transparency` count 0 (v0.1.2: 1).
 v0.3.0 build (2026-10-12): all 6 configs pass on seed 1. HD Analog 86.1,
 HD HDMI 80.7, HD Dual 85.3 MHz; SD Analog 76.7, SD HDMI 80.5, SD Dual
 83.8 MHz. About 6,595 LC (86%), 11/32 EBR.
+
+v0.3.2 build (2026-10-17, resolution scaling, router2 default): all 6
+configs pass on seed 1. HD Analog 78.9, HD HDMI 75.8, HD Dual 82.0 MHz;
+SD Analog 77.1, SD HDMI 80.9, SD Dual 74.4 MHz. 6,846-6,864 LC (89%),
+11/32 EBR (+~255 LC over v0.3.0). Not flashed.
 
 HW status: v0.2.0 flashed by Ron on 2026-10-12 (no issues reported); v0.3.0 not flashed yet.
 To roll back: `git checkout ccc8b8b -- programs/ron/catalogue-combo/tremor`
