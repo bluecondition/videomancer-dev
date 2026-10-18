@@ -4,7 +4,7 @@
 -- This file is part of Videomancer Community Programs.
 -- See LICENSE file in the repository root for full license text.
 --
--- feedback.vhd  (v0.1.0 -- "Feedback": a digital camera-at-the-monitor loop)
+-- feedback.vhd  (v0.1.3 -- "Feedback": a digital camera-at-the-monitor loop)
 --
 -- A video feedback exploration.  Videomancer has no frame buffer, so the
 -- loop runs through a coarse store: last frame's OUTPUT, averaged into a
@@ -49,6 +49,19 @@
 -- 25 EBR (24 store + 1 sine ROM).  Per-frame math in vblank on one serial
 -- multiplier, one serial divider and one accumulator.
 --
+-- v0.1.3 (2026-10-17) resolution scaling; 1080p output bit-identical:
+--   * Rotation stays a rotation on non-square field lines: the cross terms
+--     carry rho = field-line height / pixel width from the timing ID
+--     (480i 2.22, 576i 1.875, 1080i 2, 480p 1.125, 576p 0.94; 1 at
+--     1080p / 720p): dudy = -b kx rho, dvdx = b ky / rho (two more serial
+--     multiplies in the vblank sequence).
+--   * SD: 720 / 128 = 5.625 px cells, so the cell-end captures land 7/16 px
+--     (luma) / 3/8 px (chroma) late on average; the read offsets trim it,
+--     otherwise the echoes creep left ~0.44 px every field.
+--   * 720p: the write IIR alternates shift 3 / 2 per pixel (was 3, the
+--     1080p value on 2/3-size cells, so echoes softened faster), with its
+--     own group-delay trims.
+--
 -- Author: czartroniks
 
 library ieee;
@@ -72,7 +85,7 @@ architecture feedback of program_top is
 
     constant C_PIPE : natural := 9;     -- sync taps pipe(0..8); output latency 10
     constant C_LOOK : natural := 8;     -- read DDA lookahead (11 read stages - 3);
-                                        -- p_seq steps 17-19 / 26-28 hard-code 8.5
+                                        -- p_seq steps 18-20 / 28-30 hard-code 8.5
 
     constant C_MID  : unsigned(9 downto 0) := to_unsigned(512, 10);
     constant C_BLKY : unsigned(9 downto 0) := to_unsigned(64, 10);
@@ -191,6 +204,13 @@ architecture feedback of program_top is
     signal k_thr  : signed(11 downto 0) := to_signed(512, 12);
     signal k_mode : unsigned(1 downto 0) := (others => '0');
     signal sw_wrap, sw_mir, sw_blk, sw_neg, sw_crisp : std_logic := '0';
+    -- Rotation aspect (v0.1.3): rho = height of one field line / width of
+    -- one pixel on the screen (virtual y step / x step from the timing ID),
+    -- Q14.  1.0 at 1080p and 720p (square pixels), so 1080p is unchanged.
+    signal c_rx : unsigned(17 downto 0) := to_unsigned(16384, 18);   -- rho
+    signal c_ry : unsigned(17 downto 0) := to_unsigned(16384, 18);   -- 1 / rho
+    signal c_sd : std_logic := '0';   -- SD timing (720 wide): capture-phase trim
+    signal c_720 : std_logic := '0';  -- 720p timing: alternating IIR shift
 
     --------------------------------------------------------------------------
     -- Input raster, measurement, frame anchor.
@@ -208,6 +228,7 @@ architecture feedback of program_top is
     signal g_w    : unsigned(11 downto 0) := to_unsigned(1920, 12);
     signal g_h    : unsigned(11 downto 0) := to_unsigned(1080, 12);
     signal g_k3   : std_logic := '1';       -- IIR shift 3 (wide) / 2 (narrow)
+    signal g_alt  : std_logic := '0';       -- 720p: IIR shift alternates 3 / 2
     signal par    : std_logic := '0';
     signal anchor : std_logic := '0';
     signal hpar, line_par : std_logic := '0';
@@ -315,6 +336,7 @@ architecture feedback of program_top is
     -- Write side: cell DDA + IIR on the composite (k=8), pulse pipelines.
     --------------------------------------------------------------------------
     signal w_prev : std_logic := '0';
+    signal w_ks   : std_logic := '1';     -- IIR shift select for this pixel
     signal w_x    : unsigned(12 downto 0) := (others => '0');
     signal w_c    : unsigned(6 downto 0) := (others => '0');
     signal w_yi, w_ui, w_vi : unsigned(13 downto 0) := (others => '0');
@@ -451,6 +473,23 @@ begin
             sw_blk   <= rsw(2);   -- S9  Pixels Smooth / Blocks
             sw_neg   <= rsw(3);   -- S10 Negative
             sw_crisp <= rsw(4);   -- S11 Crisp
+
+            -- rho = (virtual y step per field line) / (x step per pixel):
+            -- SD is a 4:3 screen 1440 virtual units wide, interlaced field
+            -- lines are two frame lines tall
+            c_sd <= not (registers_in(8)(1) or registers_in(8)(0));   -- ids 0/4/8/12
+            case to_integer(unsigned(registers_in(8)(3 downto 0))) is
+                when 5 | 6 | 14 => c_720 <= '1';
+                when others     => c_720 <= '0';
+            end case;
+            case to_integer(unsigned(registers_in(8)(3 downto 0))) is
+                when 0      => c_rx <= to_unsigned(36409, 18); c_ry <= to_unsigned(7373, 18);    -- 480i 2.222
+                when 4      => c_rx <= to_unsigned(18432, 18); c_ry <= to_unsigned(14564, 18);   -- 480p 1.125
+                when 8      => c_rx <= to_unsigned(30720, 18); c_ry <= to_unsigned(8738, 18);    -- 576i 1.875
+                when 12     => c_rx <= to_unsigned(15360, 18); c_ry <= to_unsigned(17476, 18);   -- 576p 0.9375
+                when 1 | 2 | 10 => c_rx <= to_unsigned(32768, 18); c_ry <= to_unsigned(8192, 18); -- 1080i 2.0
+                when others => c_rx <= to_unsigned(16384, 18); c_ry <= to_unsigned(16384, 18);   -- 1080p, 720p
+            end case;
         end if;
     end process p_ctrl;
 
@@ -509,6 +548,7 @@ begin
                 g_w <= w_meas;
                 g_h <= h_meas;
                 if w_meas >= 1024 then g_k3 <= '1'; else g_k3 <= '0'; end if;
+                g_alt <= c_720;
             end if;
         end if;
     end process p_input;
@@ -519,7 +559,8 @@ begin
     -- Products chain straight from macc into the next operand or the
     -- accumulator, so almost nothing is held between steps.
     --   s  = 1 -/+ zoom^2       a = s cos(th)   b = s sin(th)
-    --   dudx = a kx  dudy = -b kx  dvdx = b ky  dvdy = a ky   (square px)
+    --   dudx = a kx  dudy = -b kx rho  dvdx = b ky / rho  dvdy = a ky
+    --   (rho = field-line height / pixel width on screen: 1 at 1080p/720p)
     --   u0 = 64 - 64a - dudy H/2 + dudy/2 + (C_LOOK + 1/2) dudx      (Q18)
     --   v0 = 32 - 32a - dvdx W/2 + dvdy/2 + (C_LOOK + 1/2) dvdx + drift
     -- (u0, v0 = pixel C_LOOK's centre on line 0's centre.)  The sine ROM
@@ -649,68 +690,88 @@ begin
                         v_aop := "01"; v_op := (others => '0');
                         v_mul := '1'; v_ma := b_q; v_mb := kx;
                     when 13 =>
-                        -- dudy = -b kx (b >= 0 when K2 is right of centre)
+                        -- b kx times rho (Q14): non-square field lines (v0.1.3)
+                        v_mul := '1'; v_ma := macc(31 downto 14); v_mb := c_rx;
+                    when 14 =>
+                        -- dudy = -b kx rho (b >= 0 when K2 is right of centre)
                         v_aop := '1' & (not k_neg2); v_op := signed(resize(macc(31 downto 14), 30));
                         v_mul := '1'; v_ma := macc(31 downto 14); v_mb := resize(g_h(11 downto 1), 18);
-                    when 14 =>
+                    when 15 =>
                         c_dudy <= acc(19 downto 0);
                         v_aop := "01"; v_op := to_signed(2**24, 30);
                     -- u0
-                    when 15 => v_aop := "11"; v_op := signed(shift_left(resize(a_q, 30), 10));
-                    when 16 => v_aop := '1' & k_neg2; v_op := signed(resize(macc(27 downto 0), 30));
-                    -- (C_LOOK + 1/2) dudx = 8.5 dudx (steps 17-19 encode C_LOOK = 8)
-                    when 17 => v_aop := "10"; v_op := shift_left(resize(c_dudx, 30), 3);
-                    when 18 => null;
-                    when 19 => v_aop := "10"; v_op := shift_right(resize(c_dudx, 30), 1);
-                    when 20 => v_aop := "10"; v_op := shift_right(resize(c_dudy, 30), 1);
-                    when 21 =>
+                    when 16 => v_aop := "11"; v_op := signed(shift_left(resize(a_q, 30), 10));
+                    when 17 => v_aop := '1' & k_neg2; v_op := signed(resize(macc(27 downto 0), 30));
+                    -- (C_LOOK + 1/2) dudx = 8.5 dudx (steps 18-20 encode C_LOOK = 8)
+                    when 18 => v_aop := "10"; v_op := shift_left(resize(c_dudx, 30), 3);
+                    when 19 => null;
+                    when 20 => v_aop := "10"; v_op := shift_right(resize(c_dudx, 30), 1);
+                    when 21 => v_aop := "10"; v_op := shift_right(resize(c_dudy, 30), 1);
+                    when 22 =>
                         c_u0 <= acc(27 downto 0);
                         v_aop := "01"; v_op := (others => '0');
                         v_mul := '1'; v_ma := b_q; v_mb := ky;
-                    when 22 =>
-                        -- dvdx = b ky
+                    when 23 =>
+                        -- b ky over rho (Q14)
+                        v_mul := '1'; v_ma := macc(31 downto 14); v_mb := c_ry;
+                    when 24 =>
+                        -- dvdx = b ky / rho
                         v_aop := '1' & k_neg2; v_op := signed(resize(macc(31 downto 14), 30));
                         v_mul := '1'; v_ma := macc(31 downto 14); v_mb := resize(g_w(11 downto 1), 18);
-                    when 23 =>
+                    when 25 =>
                         c_dvdx <= acc(19 downto 0);
                         v_aop := "01"; v_op := to_signed(2**23, 30);
                     -- v0
-                    when 24 => v_aop := "11"; v_op := signed(shift_left(resize(a_q, 30), 9));
-                    when 25 => v_aop := '1' & (not k_neg2); v_op := signed(resize(macc(27 downto 0), 30));
+                    when 26 => v_aop := "11"; v_op := signed(shift_left(resize(a_q, 30), 9));
+                    when 27 => v_aop := '1' & (not k_neg2); v_op := signed(resize(macc(27 downto 0), 30));
                     -- (C_LOOK + 1/2) dvdx = 8.5 dvdx
-                    when 26 => v_aop := "10"; v_op := shift_left(resize(c_dvdx, 30), 3);
-                    when 27 => null;
-                    when 28 =>
+                    when 28 => v_aop := "10"; v_op := shift_left(resize(c_dvdx, 30), 3);
+                    when 29 => null;
+                    when 30 =>
                         v_aop := "10"; v_op := shift_right(resize(c_dvdx, 30), 1);
                         v_mul := '1'; v_ma := a_q; v_mb := ky;
-                    when 29 =>
+                    when 31 =>
                         c_dvdy <= signed(resize(macc(31 downto 14), 20));
                         v_aop := "10"; v_op := signed(resize(macc(31 downto 15), 30));   -- + dvdy/2
                         v_mul := '1'; v_ma := resize(k_mag4, 18); v_mb := resize(k_mag4, 18);
-                    when 30 =>
+                    when 32 =>
                         -- drift (Q18 cells, <= 0.94/gen); K4 right = rise
                         v_aop := '1' & k_neg4; v_op := signed(resize(macc(17 downto 0), 30));
-                    when 31 =>
+                    when 33 =>
                         c_v0 <= acc(27 downto 0);
                         -- luma read offset: -0.5 cell + IIR trim (2^k - 0.5) kx - 2^17,
-                        -- +1/32 cell weight rounding, +2^7 for the Q18 -> Q10 slice
-                        v_aop := "01"; v_op := to_signed(-2**18 + 2**13 + 2**7, 30);
-                    when 32 =>
-                        v_aop := "10";
-                        if g_k3 = '1' then v_op := signed(shift_left(resize(kx, 30), 3));
-                        else               v_op := signed(shift_left(resize(kx, 30), 2)); end if;
-                    when 33 => v_aop := "11"; v_op := signed(resize(kx(17 downto 1), 30));
+                        -- +1/32 cell weight rounding, +2^7 for the Q18 -> Q10 slice.
+                        -- SD (v0.1.3): 720 / 128 = 5.625 px cells, so the cell-end
+                        -- capture lands on average 7/16 px late (0 at 1920 / 1280):
+                        -- -7/16 px = -7/16 kx (2^25/720) or echoes creep left
+                        -- 720p (v0.1.3): the IIR alternates shift 3 / 2 per pixel
+                        -- (a 1080p pixel's decay over 1.5 px); its group delay at
+                        -- the (even) capture pixels is 4.73 px = 3.5 kx + 32269
+                        v_aop := "01";
+                        if c_sd = '1' then    v_op := to_signed(-2**18 + 2**13 + 2**7 - 20389, 30);
+                        elsif g_alt = '1' then v_op := to_signed(-2**18 + 2**13 + 2**7 + 32269, 30);
+                        else                  v_op := to_signed(-2**18 + 2**13 + 2**7, 30); end if;
                     when 34 =>
-                        c_cy <= acc(27 downto 8);
-                    when 35 =>
-                        -- chroma: -1 Y cell + IIR trim (2^(k+1) - 0.5) kx - 2^18, +1/16
-                        v_aop := "01"; v_op := to_signed(-2**19 + 2**14 + 2**7, 30);
-                    when 36 =>
                         v_aop := "10";
-                        if g_k3 = '1' then v_op := signed(shift_left(resize(kx, 30), 4));
-                        else               v_op := signed(shift_left(resize(kx, 30), 3)); end if;
-                    when 37 => v_aop := "11"; v_op := signed(resize(kx(17 downto 1), 30));
+                        if g_k3 = '1' and g_alt = '0' then v_op := signed(shift_left(resize(kx, 30), 3));
+                        else               v_op := signed(shift_left(resize(kx, 30), 2)); end if;
+                    when 35 => v_aop := "11"; v_op := signed(resize(kx(17 downto 1), 30));
+                    when 36 =>
+                        c_cy <= acc(27 downto 8);
+                    when 37 =>
+                        -- chroma: -1 Y cell + IIR trim (2^(k+1) - 0.5) kx - 2^18, +1/16;
+                        -- SD: chroma captures (even cells) are 3/8 px late on average
+                        -- 720p: chroma alternates shift 4 / 3, delay 10.07 px = 7.5 kx + 67239
+                        v_aop := "01";
+                        if c_sd = '1' then    v_op := to_signed(-2**19 + 2**14 + 2**7 - 17476, 30);
+                        elsif g_alt = '1' then v_op := to_signed(-2**19 + 2**14 + 2**7 + 67239, 30);
+                        else                  v_op := to_signed(-2**19 + 2**14 + 2**7, 30); end if;
                     when 38 =>
+                        v_aop := "10";
+                        if g_k3 = '1' and g_alt = '0' then v_op := signed(shift_left(resize(kx, 30), 4));
+                        else               v_op := signed(shift_left(resize(kx, 30), 3)); end if;
+                    when 39 => v_aop := "11"; v_op := signed(resize(kx(17 downto 1), 30));
+                    when 40 =>
                         c_cc <= acc(27 downto 8);
                         if k_mag3 /= 0 then c_hue <= '1'; else c_hue <= '0'; end if;
                         commit <= '1';
@@ -1205,8 +1266,10 @@ begin
             -- = acc' = acc + a x[n-1] - a acc[n-1] (a = 2^-k): same DC gain and
             -- the same DC group delay (8 px from the capture edge, = the plain
             -- one-pole read before the pixel), real stable poles for k = 2..4.
-            -- Luma k, chroma k+1.
-            if g_k3 = '1' then
+            -- Luma k, chroma k+1.  720p (g_alt): k alternates 3 / 2 per pixel
+            -- from 3 on pixel 1, so its decay per pixel is close to 1080p's
+            -- over 1.5 px (the store cells are 10 px instead of 15).
+            if w_ks = '1' then
                 v_ty := signed(resize(shift_left(resize(x5_y, 14), 1), 15)) - signed(resize(shift_right(w_yi, 3), 15));
                 v_tu := signed(resize(x5_u, 15)) - signed(resize(shift_right(w_ui, 4), 15));
                 v_tv := signed(resize(x5_v, 15)) - signed(resize(shift_right(w_vi, 4), 15));
@@ -1229,6 +1292,7 @@ begin
                 w_ey <= (others => '0'); w_eu <= (others => '0'); w_ev <= (others => '0');
                 w_lsl <= w_lsn;
                 w_csl <= w_csn;
+                w_ks  <= g_k3;
                 w_rl  <= w_r;
                 w_par <= line_par;
             elsif v_av = '1' then
@@ -1246,6 +1310,7 @@ begin
                 w_ui <= unsigned(v_nu(13 downto 0));
                 w_vi <= unsigned(v_nv(13 downto 0));
                 w_ey <= v_ty; w_eu <= v_tu; w_ev <= v_tv;
+                if g_alt = '1' then w_ks <= not w_ks; else w_ks <= g_k3; end if;
             elsif w_prev = '1' then
                 -- line end: last cell, row DDA
                 v_pulse := '1';

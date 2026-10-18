@@ -11,6 +11,8 @@ colour bloom, crisp contrast, and negative.
 
 - v0.1.0 FINAL except presets: signed off by Ron 2026-10-11 ("mark feedback as
   finalized and put in the report as ready"). Built 2026-10-08.
+- v0.1.3 (2026-10-17): resolution scaling for SD / 720p / interlace, 1080p
+  bit-identical (see "Resolution scaling" below). Build with router1, seed 1.
 
 ## Build (2026-10-08, builder default router2)
 
@@ -115,3 +117,49 @@ Bipolar knobs have a 16-step centre deadband and a squared response.
 - Packed LC (stock SDK): SD Standalone 7838 → 7620, HD Dual 7410 → 7216.
 - Stock build: all 8 configs on seed 1; own HD timing (core without the Sync
   Out generator) 88.5/85.4/80.2 MHz Analog/HDMI/Dual.
+
+## Resolution scaling (v0.1.3, 2026-10-17)
+1080p is bit-identical to v0.1.2 (scaling-work GHDL render: 0 differing pixels).
+- **Hue at 720p / SD in the scaling sims was a sim artifact, not a program bug.**
+  The store is kept in a "canonical" chroma frame (U/V swapped at capture and
+  at display on odd hsync->avid parity rows, drape pattern). On hardware the
+  decoder and encoder both pair Cb/Cr by hsync parity, so the frame the hue
+  rotation runs in is the same in every mode. The scaling-work stimulus feeds
+  a fixed-swapped 4:4:4 picture with hsync->avid offsets of 140 (1080p), 185
+  (720p) and 69 (SD) clocks: the odd 720p/SD offsets flip the canonical frame,
+  so K3's rotation ran backwards there (pink instead of purple) and the bloom
+  landed on the other channel. With even offsets (VIT_HB 372 / 136) both modes
+  render the 1080p purple. (Standard timings are even: 192 / 260 / 122.)
+  The suspected hue-chain overrun is not real: chroma captures are 2 luma cells
+  apart (>= 11 px at SD) and the chain needs 8 clocks. No colour change made.
+- **Rotation on non-square field lines.** The cross terms now carry
+  rho = field-line height / pixel width (timing ID: 480i 2.22, 576i 1.875,
+  1080i 2, 480p 1.125, 576p 0.9375, else 1): dudy = -b kx rho,
+  dvdx = b ky / rho, two extra serial multiplies in the vblank sequencer
+  (steps 13 and 23; later steps renumbered +1/+2). Before, a 480i rotation
+  sheared the echoes into a vertical streak.
+- **SD capture-phase creep.** 720/128 = 5.625 px cells, so the cell-end
+  capture lands on average 7/16 px late (luma) / 3/8 px (chroma, even cells);
+  1920 and 1280 have integer cells, so 0. The read offsets now subtract it at
+  SD (timing IDs 0/4/8/12); without it the echoes slid left ~0.44 px a field.
+- **720p IIR.** g_k3 (W >= 1024) gave 720p the 1080p shift 3 on 2/3-size
+  cells, so echoes softened faster. At 720p the write IIR now alternates shift
+  3 / 2 per pixel (decay of a 1080p pixel over 1.5 px), with its own trims
+  (luma 3.5 kx + 32269, chroma 7.5 kx + 67239, Q18, W = 1280), sized with an
+  RTL-faithful 1-D model (.scaling_work/feedback_tmp/mtf3.py).
+- Not changed (judgement): the store stays 128 x 64 cells over the whole screen
+  in every mode, so Blocks cells are 1/128 of the width at 4:3 too (narrower
+  relative to height than at 16:9); interlaced SD shows consecutive generations
+  on alternate fields (comb on motion), as a real 60-field loop would.
+- Build (2026-10-17): `NEXTPNR_ROUTER="--router router1" ./build_programs.sh ron feedback`,
+  all 6 configs on seed 1 (router2 missed HD Analog on seeds 3-8, best 65.8 MHz).
+  Standalone yosys vs v0.1.2: +55 LUT, +16 FF.
+
+  | Config    | Fmax (MHz) | LC         | EBR   |
+  |-----------|-----------:|-----------:|------:|
+  | HD Analog | 88.22      | 7050 (92%) | 26/32 |
+  | SD Analog | 89.73      | 7050       | 26    |
+  | HD HDMI   | 84.70      | 7045       | 26    |
+  | SD HDMI   | 82.34      | 7045       | 26    |
+  | HD Dual   | 86.48      | 7046       | 26    |
+  | SD Dual   | 94.42      | 7050       | 26    |
