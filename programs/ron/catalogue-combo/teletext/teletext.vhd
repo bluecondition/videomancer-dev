@@ -45,6 +45,27 @@
 -- label-INDEX default until the knob first reads a position; no_rw_check on
 -- every RAM (the cell RAM's discarded bank read is the only collision).
 -- Latency 59 clocks, all modes, blanking-gated.
+--
+-- v0.2.2 (2026-10-17): resolution scaling.  The glyph grid counts virtual
+-- 1080-line units, stepped per pixel / per field line from the video timing
+-- ID (registers_in(8)): 1.0 at 1080p (identical to before), 1.5 at 720p, and
+-- at SD 2.0 across (a 1440-wide 4:3 window) and 1080/486 per frame line
+-- (v0.2 counted field lines, so SD cells were twice as tall as wide).  Cells
+-- are the same fraction of the screen height in every mode and stay square
+-- on a 4:3 screen; the glyph row / column come from the virtual position
+-- (nearest-neighbour pixel art, so the 8 / 16 px cells lose glyph rows at
+-- SD).  Band sample lines and new bands are virtual-band crossings; a cell's
+-- luma mean is taken over its first 2^n px (all of them at 1080p and SD).
+-- The mosh distance and the shear are in the same units (2/3 of the pixel
+-- offsets at 720p, half at SD) and the shear wave's period follows the
+-- height.  The ring, line buffers and edge inset stay in real pixels.
+-- Where a field line spans >= 1.5 glyph rows (720p 8 px, SD 8 / 16 px, 1080i
+-- 8 px) the ink is the average of the sampled row and its neighbour (half
+-- ink = the mean of the ink and paper levels): the decimated rows otherwise
+-- picked even rows in one band and odd rows in the next, and the dither set
+-- striped bright/dark band by band.
+-- Timing: the U and V Reveal products take their own copies of the mix
+-- (loaded per line), as the shared register's fan-out set the HD path.
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -80,40 +101,81 @@ architecture teletext of program_top is
         end if;
     end function;
 
-    type t_glyph is array (0 to 255) of std_logic_vector(7 downto 0);
+    -- Resolution scaling: per-mode steps from the video timing ID.
+    -- x step in half virtual units per pixel: 1080 2 (1.0), 720p 3 (1.5),
+    -- SD 4 (2.0: 720 px span 1440 units, a 4:3 window of the 1080 canvas).
+    function f_vstep_x(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0 | 4 | 8 | 12 => return to_unsigned(4, 3);
+            when 5 | 6 | 14     => return to_unsigned(3, 3);
+            when others         => return to_unsigned(2, 3);
+        end case;
+    end function;
+    -- y step in Q4.8 virtual units per FIELD line (1080 / active lines,
+    -- doubled for interlaced modes).
+    function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(1138, 12);  -- 480i: 2 x 1080/486
+            when 4          => return to_unsigned(576, 12);   -- 480p: 1080/480
+            when 8          => return to_unsigned(960, 12);   -- 576i: 2 x 1080/576
+            when 12         => return to_unsigned(480, 12);   -- 576p: 1080/576
+            when 5 | 6 | 14 => return to_unsigned(384, 12);   -- 720p: 1.5
+            when 1 | 2 | 10 => return to_unsigned(512, 12);   -- 1080i: 2.0
+            when others     => return to_unsigned(256, 12);   -- 1080p: 1.0
+        end case;
+    end function;
+    -- a real pixel count times the x step: Q.1 virtual units
+    function f_xv(x : unsigned; xs : unsigned(2 downto 0); w : natural) return unsigned is
+        variable v : unsigned(w - 1 downto 0);
+    begin
+        v := resize(x, w);
+        case to_integer(xs) is
+            when 4      => return shift_left(v, 2);
+            when 3      => return shift_left(v, 1) + v;
+            when others => return shift_left(v, 1);
+        end case;
+    end function;
+
+    -- ROM word: the glyph row (high byte) and its neighbour row (low byte:
+    -- row + 1, row 6 for row 7).  Where a field line spans >= 1.5 glyph rows
+    -- (720p / SD small cells, 1080i 8 px) the ink is the 2-row average, so
+    -- decimated glyphs keep their density instead of aliasing into stripes.
+    type t_glyph is array (0 to 255) of std_logic_vector(15 downto 0);
     constant C_GLYPH : t_glyph := (
-        x"00", x"00", x"00", x"00", x"00", x"00", x"00", x"00",
-        x"00", x"00", x"00", x"00", x"00", x"18", x"18", x"00",
-        x"00", x"00", x"00", x"00", x"00", x"18", x"18", x"30",
-        x"00", x"18", x"18", x"00", x"00", x"18", x"18", x"00",
-        x"00", x"18", x"18", x"00", x"00", x"18", x"18", x"30",
-        x"00", x"00", x"00", x"7e", x"00", x"00", x"00", x"00",
-        x"00", x"00", x"32", x"4c", x"00", x"00", x"00", x"00",
-        x"00", x"00", x"7e", x"00", x"7e", x"00", x"00", x"00",
-        x"00", x"18", x"18", x"7e", x"7e", x"18", x"18", x"00",
-        x"00", x"66", x"3c", x"ff", x"3c", x"66", x"00", x"00",
-        x"00", x"00", x"3c", x"66", x"66", x"66", x"3c", x"00",
-        x"00", x"00", x"66", x"3c", x"18", x"3c", x"66", x"00",
-        x"24", x"24", x"ff", x"24", x"24", x"ff", x"24", x"24",
-        x"62", x"66", x"0c", x"18", x"30", x"66", x"46", x"00",
-        x"3c", x"66", x"66", x"3c", x"66", x"66", x"3c", x"00",
-        x"3c", x"66", x"6e", x"6e", x"6e", x"60", x"3c", x"00",
-        x"00", x"00", x"00", x"00", x"00", x"00", x"00", x"00",
-        x"88", x"00", x"00", x"00", x"88", x"00", x"00", x"00",
-        x"88", x"00", x"22", x"00", x"88", x"00", x"22", x"00",
-        x"aa", x"00", x"22", x"00", x"aa", x"00", x"22", x"00",
-        x"aa", x"00", x"aa", x"00", x"aa", x"00", x"aa", x"00",
-        x"aa", x"44", x"aa", x"00", x"aa", x"44", x"aa", x"00",
-        x"aa", x"44", x"aa", x"11", x"aa", x"44", x"aa", x"11",
-        x"aa", x"55", x"aa", x"11", x"aa", x"55", x"aa", x"11",
-        x"aa", x"55", x"aa", x"55", x"aa", x"55", x"aa", x"55",
-        x"ee", x"55", x"aa", x"55", x"ee", x"55", x"aa", x"55",
-        x"ee", x"55", x"bb", x"55", x"ee", x"55", x"bb", x"55",
-        x"ff", x"55", x"bb", x"55", x"ff", x"55", x"bb", x"55",
-        x"ff", x"55", x"ff", x"55", x"ff", x"55", x"ff", x"55",
-        x"ff", x"dd", x"ff", x"55", x"ff", x"dd", x"ff", x"55",
-        x"ff", x"dd", x"ff", x"77", x"ff", x"dd", x"ff", x"77",
-        x"ff", x"ff", x"ff", x"ff", x"ff", x"ff", x"ff", x"ff"
+        x"0000", x"0000", x"0000", x"0000", x"0000", x"0000", x"0000", x"0000",
+        x"0000", x"0000", x"0000", x"0000", x"0018", x"1818", x"1800", x"0018",
+        x"0000", x"0000", x"0000", x"0000", x"0018", x"1818", x"1830", x"3018",
+        x"0018", x"1818", x"1800", x"0000", x"0018", x"1818", x"1800", x"0018",
+        x"0018", x"1818", x"1800", x"0000", x"0018", x"1818", x"1830", x"3018",
+        x"0000", x"0000", x"007e", x"7e00", x"0000", x"0000", x"0000", x"0000",
+        x"0000", x"0032", x"324c", x"4c00", x"0000", x"0000", x"0000", x"0000",
+        x"0000", x"007e", x"7e00", x"007e", x"7e00", x"0000", x"0000", x"0000",
+        x"0018", x"1818", x"187e", x"7e7e", x"7e18", x"1818", x"1800", x"0018",
+        x"0066", x"663c", x"3cff", x"ff3c", x"3c66", x"6600", x"0000", x"0000",
+        x"0000", x"003c", x"3c66", x"6666", x"6666", x"663c", x"3c00", x"003c",
+        x"0000", x"0066", x"663c", x"3c18", x"183c", x"3c66", x"6600", x"0066",
+        x"2424", x"24ff", x"ff24", x"2424", x"24ff", x"ff24", x"2424", x"2424",
+        x"6266", x"660c", x"0c18", x"1830", x"3066", x"6646", x"4600", x"0046",
+        x"3c66", x"6666", x"663c", x"3c66", x"6666", x"663c", x"3c00", x"003c",
+        x"3c66", x"666e", x"6e6e", x"6e6e", x"6e60", x"603c", x"3c00", x"003c",
+        x"0000", x"0000", x"0000", x"0000", x"0000", x"0000", x"0000", x"0000",
+        x"8800", x"0000", x"0000", x"0088", x"8800", x"0000", x"0000", x"0000",
+        x"8800", x"0022", x"2200", x"0088", x"8800", x"0022", x"2200", x"0022",
+        x"aa00", x"0022", x"2200", x"00aa", x"aa00", x"0022", x"2200", x"0022",
+        x"aa00", x"00aa", x"aa00", x"00aa", x"aa00", x"00aa", x"aa00", x"00aa",
+        x"aa44", x"44aa", x"aa00", x"00aa", x"aa44", x"44aa", x"aa00", x"00aa",
+        x"aa44", x"44aa", x"aa11", x"11aa", x"aa44", x"44aa", x"aa11", x"11aa",
+        x"aa55", x"55aa", x"aa11", x"11aa", x"aa55", x"55aa", x"aa11", x"11aa",
+        x"aa55", x"55aa", x"aa55", x"55aa", x"aa55", x"55aa", x"aa55", x"55aa",
+        x"ee55", x"55aa", x"aa55", x"55ee", x"ee55", x"55aa", x"aa55", x"55aa",
+        x"ee55", x"55bb", x"bb55", x"55ee", x"ee55", x"55bb", x"bb55", x"55bb",
+        x"ff55", x"55bb", x"bb55", x"55ff", x"ff55", x"55bb", x"bb55", x"55bb",
+        x"ff55", x"55ff", x"ff55", x"55ff", x"ff55", x"55ff", x"ff55", x"55ff",
+        x"ffdd", x"ddff", x"ff55", x"55ff", x"ffdd", x"ddff", x"ff55", x"55ff",
+        x"ffdd", x"ddff", x"ff77", x"77ff", x"ffdd", x"ddff", x"ff77", x"77ff",
+        x"ffff", x"ffff", x"ffff", x"ffff", x"ffff", x"ffff", x"ffff", x"ffff"
     );
 
     type t_lb_y is array (0 to 2047) of std_logic_vector(9 downto 0);
@@ -147,10 +209,40 @@ architecture teletext of program_top is
     signal s_ss     : unsigned(1 downto 0) := "00";       -- per frame: 8/16/32/64 px
     signal s_cmask  : unsigned(5 downto 0) := "000111";   -- cell px - 1
     signal s_mix    : unsigned(7 downto 0) := (others => '0');
+    -- Reveal copies for the U and V products: s_mix fanned out to all three
+    -- multipliers and its first hop was half of the HD critical path.  Each
+    -- copy loads on a different enable, so yosys cannot merge them.
+    signal s_mixu, s_mixv : unsigned(7 downto 0) := (others => '0');
+    attribute keep : boolean;
+    attribute keep of s_mix, s_mixu, s_mixv : signal is true;
     signal s_lfsr   : unsigned(15 downto 0) := x"ACE1";
     signal s_saw_active : std_logic := '0';
     signal s_wp     : unsigned(5 downto 0) := (others => '0');
     signal s_tph, s_fph : unsigned(7 downto 0) := (others => '0');
+
+    -- resolution scaling (free-running steps from the timing ID; per-frame
+    -- masks; virtual glyph line Q.8; Q.1 virtual x on the input chain)
+    signal s_xs     : unsigned(2 downto 0)  := to_unsigned(2, 3);
+    signal s_ys     : unsigned(11 downto 0) := to_unsigned(256, 12);
+    signal s_half   : std_logic := '0';                          -- 720p / SD: cell mean over 2^(2+ss) px
+    signal s_ka, s_kb, s_da, s_db : unsigned(9 downto 0) := (others => '0');   -- x 2/3 parts
+    signal s_k23, s_d23 : unsigned(9 downto 0) := (others => '0');
+    signal s_tpa, s_tpb : unsigned(16 downto 0) := (others => '0');
+    signal s_tinc   : unsigned(16 downto 0) := to_unsigned(0, 17);   -- wave phase per field line, Q.8
+    signal s_tphf   : unsigned(7 downto 0) := (others => '0');       -- wave phase fraction
+    signal s_gva, s_gvn : signed(19 downto 0) := to_signed(-512, 20);   -- virtual glyph line, Q.8
+    signal s_gv0    : signed(19 downto 0) := to_signed(-512, 20);
+    signal s_bandm  : signed(11 downto 0) := to_signed(-8, 12);      -- glyph-line bits >= 3 + ss
+    signal s_chm    : unsigned(12 downto 0) := (others => '0');      -- Q.1 x bits >= 4 + ss
+    signal s_msh    : unsigned(2 downto 0) := to_unsigned(3, 3);     -- cell mean shift 2..6
+    signal s_nsum   : unsigned(6 downto 0) := to_unsigned(8, 7);     -- px summed per cell
+    signal s_pcnt   : unsigned(6 downto 0) := (others => '0');
+    signal s_xv6, s_xv7, s_xv8 : unsigned(12 downto 0) := (others => '0');
+    signal s_bnd78  : std_logic := '0';     -- the S7 pixel starts a cell (the S8 pixel ends one)
+    signal s_lwv    : unsigned(11 downto 0) := to_unsigned(480, 12);
+    signal s_dposv  : unsigned(11 downto 0) := (others => '0');
+    signal s_off_nxv, s_off_rowv : unsigned(8 downto 0) := to_unsigned(2 * C_D, 9);
+    signal s_vxo7   : signed(13 downto 0) := (others => '0');
 
     -- positions: s_rx counts from each avid rise and keeps counting through
     -- blanking (saturates), so glyph positions past the line end stay true
@@ -165,7 +257,7 @@ architecture teletext of program_top is
     signal s_wpar, s_rbank : std_logic := '0';
 
     -- per-line sequencer
-    signal s_lstep  : unsigned(3 downto 0) := x"8";
+    signal s_lstep  : unsigned(3 downto 0) := x"F";
     signal s_lw     : unsigned(10 downto 0) := to_unsigned(480, 11);
     signal s_hi1    : unsigned(10 downto 0) := to_unsigned(467, 11);   -- lw - 1 - C_EDGE
     signal s_hi0    : signed(12 downto 0) := to_signed(468, 13);       -- lw - C_EDGE
@@ -218,7 +310,8 @@ architecture teletext of program_top is
     signal s_dk13  : unsigned(10 downto 0) := (others => '0');
     signal s_p14   : unsigned(18 downto 0) := (others => '0');
     signal s_romaddr15 : unsigned(7 downto 0) := (others => '0');
-    signal s_pat16, s_pat17 : std_logic_vector(7 downto 0) := (others => '0');
+    signal s_pat16, s_pat17 : std_logic_vector(15 downto 0) := (others => '0');
+    signal s_avg    : std_logic := '0';   -- field line spans >= 1.5 glyph rows: 2-row ink average
     signal s_inky18, s_inku18, s_inkv18 : unsigned(9 downto 0) := (others => '0');
     signal s_dy19, s_du19, s_dv19 : signed(10 downto 0) := (others => '0');
     signal s_py20, s_pu20, s_pv20 : signed(19 downto 0) := (others => '0');
@@ -269,9 +362,27 @@ begin
         variable v_t : unsigned(6 downto 0);
         variable v_s, v_o : signed(7 downto 0);
         variable v_w : signed(11 downto 0);
-        variable v_lo : unsigned(5 downto 0);
+        variable v_g, v_gn : signed(11 downto 0);
+        variable v_p : unsigned(15 downto 0);
+        variable v_y2 : signed(19 downto 0);
     begin
         if rising_edge(clk) then
+            s_xs <= f_vstep_x(registers_in(8)(3 downto 0));
+            s_ys <= f_vstep_y(registers_in(8)(3 downto 0));
+            if s_xs = 2 then s_half <= '0'; else s_half <= '1'; end if;
+            -- next line's virtual glyph line; the field's start (two lines up,
+            -- a bottom field half a step further down)
+            s_gvn <= s_gva + signed(resize(s_ys, 20));
+            v_y2 := signed(shift_left(resize(s_ys, 20), 1));
+            if data_in.field_n = '0' then
+                s_gv0 <= signed(resize(s_ys(11 downto 1), 20)) - v_y2;
+            else
+                s_gv0 <= -v_y2;
+            end if;
+            -- wave phase per field line: (Rate / 32) x ys (Q.8; 1080p: Rate / 32)
+            s_tpa <= resize(s_ys, 14) * s_rate(5 downto 3);
+            s_tpb <= shift_left(resize(s_ys, 15) * s_rate(7 downto 6), 3);
+            s_tinc <= s_tpa + s_tpb;
             s_in_y <= unsigned(data_in.y); s_in_u <= unsigned(data_in.u); s_in_v <= unsigned(data_in.v);
             s_in_avid <= data_in.avid;
             s_prev_hsync_n <= data_in.hsync_n; s_prev_vsync_n <= data_in.vsync_n; s_prev_avid <= data_in.avid;
@@ -293,6 +404,10 @@ begin
             s_lfsr <= s_lfsr(14 downto 0) & (s_lfsr(15) xor s_lfsr(13) xor s_lfsr(12) xor s_lfsr(10));
             s_x(2) <= s_rx - 1; s_avd(2) <= s_in_avid;
             for i in 3 to 9 loop s_x(i) <= s_x(i - 1); s_avd(i) <= s_avd(i - 1); end loop;
+            -- virtual x (Q.1) beside x(6..8); cell boundary between x(8) and x(7)
+            s_xv6 <= f_xv(s_x(5), s_xs, 13);
+            s_xv7 <= s_xv6; s_xv8 <= s_xv7;
+            if ((s_xv6 xor s_xv7) and s_chm) /= 0 then s_bnd78 <= '1'; else s_bnd78 <= '0'; end if;
             -- read column: the pixel itself; in blanking the last column is
             -- held (right fill) until 64 clocks after the line, then the first
             -- (left fill for the next line); the inset clamp follows
@@ -303,41 +418,67 @@ begin
             end if;
 
             s_bars <= s_k_bars(9 downto 2);
-            s_dist <= s_k_dist(9 downto 2);
+            -- Distance and Shear in virtual units: 2/3 of the pixels at 720p,
+            -- half at SD
+            s_da <= ('0' & s_k_dist(9 downto 1)) + ("000" & s_k_dist(9 downto 3));
+            s_db <= ("00000" & s_k_dist(9 downto 5)) + ("0000000" & s_k_dist(9 downto 7));
+            s_d23 <= s_da + s_db;
+            s_ka <= ('0' & s_k_shear(9 downto 1)) + ("000" & s_k_shear(9 downto 3));
+            s_kb <= ("00000" & s_k_shear(9 downto 5)) + ("0000000" & s_k_shear(9 downto 7));
+            s_k23 <= s_ka + s_kb;
+            case to_integer(s_xs) is
+                when 4 =>
+                    s_dist <= '0' & s_k_dist(9 downto 3);
+                    s_amt  <= '0' & s_k_shear(9 downto 6);
+                when 3 =>
+                    s_dist <= s_d23(9 downto 2);
+                    s_amt  <= s_k23(9 downto 5);
+                when others =>
+                    s_dist <= s_k_dist(9 downto 2);
+                    s_amt  <= s_k_shear(9 downto 5);
+            end case;
             -- the firmware loads a labelled default as the label INDEX;
             -- honour 0..3 as an index only until the knob first reads a position
             if s_k_cell >= 4 then s_live3 <= '1'; end if;
             if s_live3 = '0' and s_k_cell < 4 then s_ssk <= s_k_cell(1 downto 0); else s_ssk <= s_k_cell(9 downto 8); end if;
             s_con <= s_k_con(9 downto 2);
-            s_amt <= s_k_shear(9 downto 5);
             s_rate <= s_k_rate(9 downto 2);
             s_mix <= s_p_reveal(9 downto 2);
+            if data_in.hsync_n = '0' and s_prev_hsync_n = '1' then s_mixu <= s_p_reveal(9 downto 2); end if;
+            if s_prev_avid = '1' and data_in.avid = '0' then s_mixv <= s_p_reveal(9 downto 2); end if;
 
             -- a new line's shear takes effect as its first pixel enters the
             -- ring (the previous line has left it by then: blank > 63)
             if s_avd(7) = '1' and s_avd(8) = '0' then
-                s_off_row <= s_off_nx;
+                s_off_row <= s_off_nx; s_off_rowv <= s_off_nxv;
             end if;
 
             -- per-line sequencer (one small op per state), starts at hsync
             case to_integer(s_lstep) is
                 when 0 =>
                     s_lw <= s_line_width;
-                    v_lo := unsigned(s_gl(5 downto 0)) and s_cmask;
-                    if v_lo = s_cmask then s_samp <= '1'; else s_samp <= '0'; end if;
-                    if v_lo = 0 then s_newband <= '1'; else s_newband <= '0'; end if;
+                    s_lwv <= f_xv(s_line_width, s_xs, 13)(12 downto 1);
+                    -- virtual glyph line G (this line) and Gn (the next): the
+                    -- band ends on this line when the next one is in another
+                    -- band; a band starts where the previous line ended one
+                    -- (1080p: G and cmask = cmask / = 0)
+                    v_g := s_gva(19 downto 8); v_gn := s_gvn(19 downto 8);
+                    if ((v_g xor v_gn) and s_bandm) /= 0 then s_samp <= '1'; else s_samp <= '0'; end if;
+                    s_newband <= s_samp;
                     if s_gl = -2 then s_first <= '1'; else s_first <= '0'; end if;
-                    s_valid_l <= not s_gl(11);
+                    s_valid_l <= not v_g(11);
                     case to_integer(s_ss) is
-                        when 0 => s_row_l <= unsigned(s_gl(2 downto 0)); s_dbank_l <= s_gl(3); s_wbank <= not s_gl(3);
-                        when 1 => s_row_l <= unsigned(s_gl(3 downto 1)); s_dbank_l <= s_gl(4); s_wbank <= not s_gl(4);
-                        when 2 => s_row_l <= unsigned(s_gl(4 downto 2)); s_dbank_l <= s_gl(5); s_wbank <= not s_gl(5);
-                        when others => s_row_l <= unsigned(s_gl(5 downto 3)); s_dbank_l <= s_gl(6); s_wbank <= not s_gl(6);
+                        when 0 => s_row_l <= unsigned(v_g(2 downto 0)); s_dbank_l <= v_g(3); s_wbank <= not v_g(3);
+                        when 1 => s_row_l <= unsigned(v_g(3 downto 1)); s_dbank_l <= v_g(4); s_wbank <= not v_g(4);
+                        when 2 => s_row_l <= unsigned(v_g(4 downto 2)); s_dbank_l <= v_g(5); s_wbank <= not v_g(5);
+                        when others => s_row_l <= unsigned(v_g(5 downto 3)); s_dbank_l <= v_g(6); s_wbank <= not v_g(6);
                     end case;
                     if s_tph(7) = '1' then v_t := not s_tph(6 downto 0); else v_t := s_tph(6 downto 0); end if;
                     s_tri <= signed(resize(v_t, 8)) - 64;
                     if s_lfsr(15 downto 8) < s_rate then s_tear <= signed(resize(s_lfsr(6 downto 0), 8)) - 64; else s_tear <= (others => '0'); end if;
-                    s_tph <= s_tph + resize(s_rate(7 downto 3), 8);
+                    -- wave phase: Q8.8, steps follow the field-line height
+                    v_p := shift_left(resize(s_tph, 16), 8) + resize(s_tphf, 16) + s_tinc(15 downto 0);
+                    s_tph <= v_p(15 downto 8); s_tphf <= v_p(7 downto 0);
                     s_lstep <= s_lstep + 1;
                 when 1 =>
                     if s_sw_tear = '1' then s_shp <= s_tear * signed(resize(s_amt, 6)); else s_shp <= s_tri * signed(resize(s_amt, 6)); end if;
@@ -345,7 +486,7 @@ begin
                     s_hi1  <= s_lw - (C_EDGE + 1);
                     s_hi0  <= signed(resize(s_lw, 13)) - C_EDGE;
                     s_span <= signed(resize(s_lw, 12)) - 2 * C_EDGE;
-                    s_wcm  <= resize(s_lw, 12) + resize(s_cmask, 12);
+                    s_wcm  <= s_lwv + resize(s_cmask, 12);   -- virtual width: cell count
                     s_lstep <= s_lstep + 1;
                 when 2 =>
                     v_s := resize(shift_right(s_shp, 6), 8);
@@ -365,6 +506,7 @@ begin
                     end case;
                     s_lstep <= s_lstep + 1;
                 when 3 =>
+                    s_off_nxv <= f_xv(s_off_nx, s_xs, 9);
                     if s_mraw >= s_span then s_mhi <= '1'; else s_mhi <= '0'; end if;
                     if s_mraw <= -s_span then s_mlo <= '1'; else s_mlo <= '0'; end if;
                     s_lstep <= s_lstep + 1;
@@ -387,21 +529,25 @@ begin
                     s_dvm <= resize(s_dv, 13) - resize(s_span, 13);
                     s_elo <= to_signed(C_EDGE, 13) - resize(s_dv, 13);
                     s_ehi <= s_hi0 - resize(s_dv, 13);
-                    case to_integer(s_ss) is
-                        when 0 => s_dc <= resize(s_dpos(10 downto 3), 9);
-                        when 1 => s_dc <= resize(s_dpos(10 downto 4), 9);
-                        when 2 => s_dc <= resize(s_dpos(10 downto 5), 9);
-                        when others => s_dc <= resize(s_dpos(10 downto 6), 9);
-                    end case;
+                    -- Cells displacement in virtual columns
+                    s_dposv <= f_xv(s_dpos, s_xs, 13)(12 downto 1);
                     s_lstep <= s_lstep + 1;
                 when 7 =>
+                    case to_integer(s_ss) is
+                        when 0 => s_dc <= resize(s_dposv(11 downto 3), 9);
+                        when 1 => s_dc <= resize(s_dposv(11 downto 4), 9);
+                        when 2 => s_dc <= resize(s_dposv(11 downto 5), 9);
+                        when others => s_dc <= resize(s_dposv(11 downto 6), 9);
+                    end case;
+                    s_lstep <= s_lstep + 1;
+                when 8 =>
                     s_dcm <= signed(resize(s_dc, 10)) - signed(resize(s_ncells, 10));
                     s_lstep <= s_lstep + 1;
                 when others => null;
             end case;
 
             if s_prev_avid = '1' and data_in.avid = '0' then
-                s_line_width <= s_rx; s_gl <= s_gl + 1;
+                s_line_width <= s_rx; s_gl <= s_gl + 1; s_gva <= s_gvn;
             end if;
             if data_in.hsync_n = '0' and s_prev_hsync_n = '1' then
                 s_wpar <= not s_wpar; s_rbank <= s_wpar; s_lstep <= (others => '0');
@@ -409,16 +555,28 @@ begin
             -- frame events: resets are idempotent; toggles need the saw-active guard
             if data_in.vsync_n = '0' and s_prev_vsync_n = '1' then
                 s_gl <= to_signed(-2, 12); s_wpar <= '0';
+                s_gva <= s_gv0;
                 s_mraw <= (others => '0');
                 s_ss <= s_ssk;
                 case to_integer(s_ssk) is
-                    when 0 => s_cmask <= "000111";
-                    when 1 => s_cmask <= "001111";
-                    when 2 => s_cmask <= "011111";
-                    when others => s_cmask <= "111111";
+                    when 0 => s_cmask <= "000111"; s_bandm <= to_signed(-8, 12);  s_chm <= to_unsigned(8176, 13);
+                    when 1 => s_cmask <= "001111"; s_bandm <= to_signed(-16, 12); s_chm <= to_unsigned(8160, 13);
+                    when 2 => s_cmask <= "011111"; s_bandm <= to_signed(-32, 12); s_chm <= to_unsigned(8128, 13);
+                    when others => s_cmask <= "111111"; s_bandm <= to_signed(-64, 12); s_chm <= to_unsigned(8064, 13);
                 end case;
+                -- 2-row glyph average where a field line spans >= 1.5 rows
+                if s_ys >= shift_left(to_unsigned(384, 12), to_integer(s_ssk)) then s_avg <= '1'; else s_avg <= '0'; end if;
+                -- cell mean: all 8 x 2^ss px at 1080p; at 720p / SD the first
+                -- 4 x 2^ss (every px of an SD cell, the 720p cells' common part)
+                if s_half = '1' then
+                    s_msh <= resize(s_ssk, 3) + 2;
+                    s_nsum <= shift_left(to_unsigned(4, 7), to_integer(s_ssk));
+                else
+                    s_msh <= resize(s_ssk, 3) + 3;
+                    s_nsum <= shift_left(to_unsigned(8, 7), to_integer(s_ssk));
+                end if;
                 if s_saw_active = '1' then s_fph <= s_fph + 3; end if;
-                s_tph <= s_fph;
+                s_tph <= s_fph; s_tphf <= (others => '0');
                 s_saw_active <= '0';
             end if;
 
@@ -504,8 +662,8 @@ begin
     end process;
 
     p_pix : process(clk)
-        variable v_lo : unsigned(5 downto 0);
-        variable v_ink : std_logic;
+        variable v_cm : unsigned(9 downto 0);
+        variable v_ink, v_half, v_b0, v_b1 : std_logic;
         variable v_g : unsigned(6 downto 0);
         variable v_ci : unsigned(7 downto 0);
         variable v_sy, v_su, v_sv : unsigned(11 downto 0);
@@ -541,36 +699,44 @@ begin
             else
                 s_wet_y <= unsigned(s_rdY0); s_wet_u <= unsigned(s_rdU0) & "00"; s_wet_v <= unsigned(s_rdV0) & "00";
             end if;
-            -- S8: cell sum of the S7 pixel, sampled chroma
-            v_lo := s_x(7)(5 downto 0) and s_cmask;
-            if v_lo = 0 then s_csum <= resize(s_wet_y, 16); else s_csum <= s_csum + resize(s_wet_y, 16); end if;
+            -- S8: cell sum of the S7 pixel (its first nsum px), sampled chroma
+            if s_bnd78 = '1' then
+                s_csum <= resize(s_wet_y, 16); s_pcnt <= to_unsigned(1, 7);
+            elsif s_pcnt < s_nsum then
+                s_csum <= s_csum + resize(s_wet_y, 16); s_pcnt <= s_pcnt + 1;
+            end if;
             s_u8 <= s_wet_u; s_v8 <= s_wet_v;
             -- S9: cell write on sample lines (the S8 pixel ends its cell, or the line)
-            v_lo := s_x(8)(5 downto 0) and s_cmask;
-            if s_samp = '1' and s_avd(8) = '1' and (v_lo = s_cmask or s_avd(7) = '0') then s_dwe9 <= '1'; else s_dwe9 <= '0'; end if;
+            if s_samp = '1' and s_avd(8) = '1' and (s_bnd78 = '1' or s_avd(7) = '0') then s_dwe9 <= '1'; else s_dwe9 <= '0'; end if;
             case to_integer(s_ss) is
-                when 0 => s_da9 <= s_x(8)(10 downto 3);
-                          s_dd9 <= std_logic_vector(s_csum(12 downto 3)) & std_logic_vector(s_u8(9 downto 2)) & std_logic_vector(s_v8(9 downto 2)) & "000000";
-                when 1 => s_da9 <= resize(s_x(8)(10 downto 4), 8);
-                          s_dd9 <= std_logic_vector(s_csum(13 downto 4)) & std_logic_vector(s_u8(9 downto 2)) & std_logic_vector(s_v8(9 downto 2)) & "000000";
-                when 2 => s_da9 <= resize(s_x(8)(10 downto 5), 8);
-                          s_dd9 <= std_logic_vector(s_csum(14 downto 5)) & std_logic_vector(s_u8(9 downto 2)) & std_logic_vector(s_v8(9 downto 2)) & "000000";
-                when others => s_da9 <= resize(s_x(8)(10 downto 6), 8);
-                          s_dd9 <= std_logic_vector(s_csum(15 downto 6)) & std_logic_vector(s_u8(9 downto 2)) & std_logic_vector(s_v8(9 downto 2)) & "000000";
+                when 0 => s_da9 <= s_xv8(11 downto 4);
+                when 1 => s_da9 <= s_xv8(12 downto 5);
+                when 2 => s_da9 <= resize(s_xv8(12 downto 6), 8);
+                when others => s_da9 <= resize(s_xv8(12 downto 7), 8);
             end case;
+            case to_integer(s_msh) is
+                when 2 => v_cm := s_csum(11 downto 2);
+                when 3 => v_cm := s_csum(12 downto 3);
+                when 4 => v_cm := s_csum(13 downto 4);
+                when 5 => v_cm := s_csum(14 downto 5);
+                when others => v_cm := s_csum(15 downto 6);
+            end case;
+            s_dd9 <= std_logic_vector(v_cm) & std_logic_vector(s_u8(9 downto 2)) & std_logic_vector(s_v8(9 downto 2)) & "000000";
 
             ------------------------------------------------------------------
             -- output side: the pixel leaving the ring and its glyph
             ------------------------------------------------------------------
             -- O7: its position (x keeps counting through blanking) and ring address
             s_xo7 <= signed(resize(s_x(7), 12)) - signed(resize(s_off_row, 12));
+            s_vxo7 <= signed(resize(s_xv7, 14)) - signed(resize(s_off_rowv, 14));
             s_ra7 <= s_wp - s_off_row;
-            -- O8: cell index (+ Cells displacement, two wrap candidates), glyph column
+            -- O8: cell index (+ Cells displacement, two wrap candidates), glyph
+            -- column -- from the virtual position (Q.1)
             case to_integer(s_ss) is
-                when 0 => v_ci := unsigned(s_xo7(10 downto 3)); s_gcol(8) <= unsigned(s_xo7(2 downto 0));
-                when 1 => v_ci := resize(unsigned(s_xo7(10 downto 4)), 8); s_gcol(8) <= unsigned(s_xo7(3 downto 1));
-                when 2 => v_ci := resize(unsigned(s_xo7(10 downto 5)), 8); s_gcol(8) <= unsigned(s_xo7(4 downto 2));
-                when others => v_ci := resize(unsigned(s_xo7(10 downto 6)), 8); s_gcol(8) <= unsigned(s_xo7(5 downto 3));
+                when 0 => v_ci := unsigned(s_vxo7(11 downto 4)); s_gcol(8) <= unsigned(s_vxo7(3 downto 1));
+                when 1 => v_ci := unsigned(s_vxo7(12 downto 5)); s_gcol(8) <= unsigned(s_vxo7(4 downto 2));
+                when 2 => v_ci := unsigned(s_vxo7(13 downto 6)); s_gcol(8) <= unsigned(s_vxo7(5 downto 3));
+                when others => v_ci := resize(unsigned(s_vxo7(13 downto 7)), 8); s_gcol(8) <= unsigned(s_vxo7(6 downto 4));
             end case;
             s_cia8 <= resize(v_ci, 9) + s_dc;
             s_cib8 <= signed(resize(v_ci, 10)) + s_dcm;
@@ -597,11 +763,28 @@ begin
             if v_g > 15 then v_g := to_unsigned(15, 7); end if;
             s_romaddr15 <= s_sw_blocks & v_g(3 downto 0) & s_row(14);
             -- O18: ink (O16 ROM, O17 fabric)
-            v_ink := s_pat17(7 - to_integer(s_gcol(17)));
-            if s_bgo(17) = '1' or s_val(17) = '0' then v_ink := '0'; end if;
+            v_b0 := s_pat17(15 - to_integer(s_gcol(17)));
+            v_b1 := s_pat17(7 - to_integer(s_gcol(17)));
+            if s_avg = '1' then
+                v_ink := v_b0 and v_b1; v_half := v_b0 xor v_b1;
+            else
+                v_ink := v_b0; v_half := '0';
+            end if;
+            if s_bgo(17) = '1' or s_val(17) = '0' then v_ink := '0'; v_half := '0'; end if;
             -- glyph levels pre-scaled 64 + 13/16 (y - 64): white 776 (the bar
-            -- fix's luma cut, on the glyphs only, so the video keeps its level)
-            if v_ink = '1' and s_sw_colour = '1' then
+            -- fix's luma cut, on the glyphs only, so the video keeps its level);
+            -- half ink is the mean of the ink and paper levels
+            if v_half = '1' then
+                if s_sw_colour = '1' then
+                    if s_sw_black = '1' then s_inky18 <= to_unsigned(472, 10); else s_inky18 <= to_unsigned(420, 10); end if;
+                    -- (c x 4 + 512) / 2 = (c + 128) x 2
+                    s_inku18 <= s_cu(17)(7) & (not s_cu(17)(7)) & s_cu(17)(6 downto 0) & '0';
+                    s_inkv18 <= s_cv(17)(7) & (not s_cv(17)(7)) & s_cv(17)(6 downto 0) & '0';
+                else
+                    s_inky18 <= to_unsigned(420, 10);
+                    s_inku18 <= to_unsigned(512, 10); s_inkv18 <= to_unsigned(512, 10);
+                end if;
+            elsif v_ink = '1' and s_sw_colour = '1' then
                 if s_sw_black = '1' then s_inky18 <= to_unsigned(168, 10); else s_inky18 <= to_unsigned(776, 10); end if;
                 s_inku18 <= s_cu(17) & "00"; s_inkv18 <= s_cv(17) & "00";
             else
@@ -614,8 +797,8 @@ begin
             s_dv19 <= signed(resize(s_inkv18, 11)) - signed(resize(s_wv(18), 11));
             -- O20
             s_py20 <= s_dy19 * signed(resize(s_mix, 9));
-            s_pu20 <= s_du19 * signed(resize(s_mix, 9));
-            s_pv20 <= s_dv19 * signed(resize(s_mix, 9));
+            s_pu20 <= s_du19 * signed(resize(s_mixu, 9));
+            s_pv20 <= s_dv19 * signed(resize(s_mixv, 9));
             -- O21
             s_y21 <= f_clamp10(signed(resize(s_wy(20), 13)) + resize(shift_right(s_py20, 8), 13));
             s_u21 <= f_clamp10(signed(resize(s_wu(20), 13)) + resize(shift_right(s_pu20, 8), 13));

@@ -24,6 +24,54 @@ is **not flashed yet**. Backup of v0.1.0: `.teletext_work/v010_backup/`
 | S11 Glyphs | ASCII ramp / block-dither set |
 | P12 Reveal | crossfade from the moshed, sheared video to the glyph rendering |
 
+## v0.2.2 (2026-10-17): resolution scaling
+
+Glyph cells counted pixels and FIELD lines, so they were 1.5x too big at
+720p and at SD 2.2x too big and twice as tall as wide (no interlace
+compensation). Now:
+- The glyph grid runs in virtual 1080-line units from the timing ID
+  (registers_in(8)): x is the real position times the step (Q.1: x1 at
+  1080p, x1.5 at 720p, x2 at SD), the glyph line is a Q.8 accumulator stepped
+  per field line (1080/486 x 2 at 480i). 1080p is bit-identical. SD is a
+  left-anchored 1440-unit 4:3 window; cells stay square on 4:3.
+- Glyph row / column = nearest-neighbour from the virtual position. Band
+  sample lines are "the next line is in another band", new bands are the
+  line after a sample line (the old `gl and cmask = cmask / = 0` at 1080p).
+- Cell luma mean: over the first 2^n px of a cell -- every px at 1080p and
+  SD (exact power-of-2 cell widths), the first 2/3 of a 720p cell (its cells
+  are 5.33 x 2^ss px, so a fixed shift can't average all of them).
+- Distance (Bars / Cells mosh) and Shear are in virtual units: 2/3 of the
+  pixel offsets at 720p, half at SD (Shear +-15 px at SD). The Cells
+  displacement and the line's cell count use the virtual width. The shear
+  wave period follows the height (phase step = Rate x the field-line step).
+- Pixel-scale: the ring delay, line buffers, C_EDGE inset, per-line Tear.
+- K3's index-until-live decode (labelled default) is unchanged.
+- Timing: the Reveal mix register fed all three output multipliers and its
+  first hop was half of the HD HDMI path (74.5 MHz after the scaling logic
+  went in). U and V now take their own copies, loaded per line (different
+  enables, so yosys keeps them): HD HDMI 83.7 MHz.
+
+- 2-row glyph average: where a field line spans >= 1.5 glyph rows (720p
+  8 px, SD 8 / 16 px, 1080i 8 px) the ink is the mean of the sampled row and
+  its neighbour (the glyph ROM is now 256 x 16: row + neighbour row, still
+  one EBR; half ink = the mean of the ink and paper levels). Without it the
+  sampled rows were even in one band and odd in the next, and the dither set
+  striped bright / dark band by band at SD (row means 150 vs 190).
+
+Judgement call: at SD an 8 or 16 px cell is only 1.8 / 3.6 field lines tall,
+so the 8-row glyphs can't be legible at the 1080p size; they render as a
+softened (half-tone) downscale of the 1080p glyphs. 32 px (Ron's hardware
+default) is 7.2 field lines, nearly one per glyph row, and 64 px is fully
+legible. At 720p 8 / 16 px cells are 5.3 / 10.7 px.
+
+Verified (new hardware-captured defaults in both baseline and v2): 1080p
+diff 0 px; 720p r = 0.98 against 1080p (was 0.97 by luma, but cells 1.5x);
+SD against the 1080p 4:3 crop r = 0.95 (was 0.84). Sheets
+`.scaling_work/sheets/teletext{,_v2}.png`.
+Build `./build_combo.sh teletext` (router2, seed 1, all six first try):
+HD Analog 81.1, HD HDMI 80.2, HD Dual 85.7 MHz; SD Analog 82.8, SD HDMI 83.4,
+SD Dual 74.9 MHz. ~5,410 LC (70%, was ~4,840), 25/32 EBR. iceunpack OK.
+
 ## v0.2.0 changes (Tier 1)
 
 Bugs:
