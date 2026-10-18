@@ -35,6 +35,20 @@
 -- every re-roll was a diagonal copy), wave period at 16 ln, negative
 -- 64 <-> 940 with mirrored chroma, tinted ink luma 768, Density / Tear
 -- floors, no_rw_check on every RAM.
+--
+-- v0.2.3 (2026-10-17): K3 Block / K6 Bands honour the firmware's labelled
+-- default, which arrives as the label INDEX (K6 "8 ln" loaded as 2 and gave
+-- 2 ln): a value below 4 is the label itself.
+-- Resolution scaling: block columns/rows, tear bands and the tear wave
+-- count virtual 1080-line units, stepped per pixel / per field line from
+-- the video timing ID (registers_in(8)): 1.0 at 1080p
+-- (identical to before), 1.5 at 720p, and at SD 2.0 across (a 1440-wide 4:3
+-- window) and 1080/486 per frame line (interlaced fields step two frame
+-- lines; v0.2 counted field lines, so SD blocks and bands were twice as
+-- tall).  Blocks, bands and the wave are the same fraction of the screen
+-- height in every mode and blocks stay square on a 4:3 screen.  The mosh
+-- and tear displacements are in the same units (2/3 of the pixel offsets
+-- at 720p, half at SD); Hold reads the first pixel of the virtual block.
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -79,6 +93,32 @@ architecture tearcut of program_top is
         return t xor shift_left(t, 8);
     end function;
 
+    -- Resolution scaling: per-mode steps from the video timing ID.
+    -- x step in half virtual units per pixel: 1080 2 (1.0), 720p 3 (1.5),
+    -- SD 4 (2.0: 720 px span 1440 units, a 4:3 window of the 1080 canvas).
+    function f_vstep_x(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0 | 4 | 8 | 12 => return to_unsigned(4, 3);
+            when 5 | 6 | 14     => return to_unsigned(3, 3);
+            when others         => return to_unsigned(2, 3);
+        end case;
+    end function;
+    -- y step in Q4.8 virtual units per FIELD line (1080 / active lines,
+    -- doubled for interlaced modes).
+    function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(1138, 12);  -- 480i: 2 x 1080/486
+            when 4          => return to_unsigned(576, 12);   -- 480p: 1080/480
+            when 8          => return to_unsigned(960, 12);   -- 576i: 2 x 1080/576
+            when 12         => return to_unsigned(480, 12);   -- 576p: 1080/576
+            when 5 | 6 | 14 => return to_unsigned(384, 12);   -- 720p: 1.5
+            when 1 | 2 | 10 => return to_unsigned(512, 12);   -- 1080i: 2.0
+            when others     => return to_unsigned(256, 12);   -- 1080p: 1.0
+        end case;
+    end function;
+
     type t_lb_y is array (0 to 2047) of std_logic_vector(9 downto 0);
     type t_lb_e is array (0 to 2047) of std_logic_vector(7 downto 0);
     type t_ring is array (0 to 31) of std_logic_vector(31 downto 0);
@@ -116,6 +156,16 @@ architecture tearcut of program_top is
     signal s_roll, s_sd, s_seed : unsigned(15 downto 0) := (others => '0');
     signal s_rate_cnt : unsigned(7 downto 0) := (others => '0');
     signal s_vstep  : unsigned(2 downto 0) := "111";
+    -- resolution scaling: steps (free-running from the timing ID), virtual
+    -- x (Q.1, pixel on data_in) and field-line y (Q.8), per-mode mosh
+    -- amount / clamp and tear-amount parts
+    signal s_xs     : unsigned(2 downto 0)  := to_unsigned(2, 3);
+    signal s_ys     : unsigned(11 downto 0) := to_unsigned(256, 12);
+    signal s_vxa    : unsigned(11 downto 0) := (others => '0');
+    signal s_vya    : unsigned(19 downto 0) := (others => '0');
+    signal s_isfirst : std_logic := '1';     -- pixel on data_in starts a block
+    signal s_omax, s_omaxn : signed(12 downto 0) := to_signed(511, 13);
+    signal s_tsa, s_tsb : unsigned(8 downto 0) := (others => '0');
 
     -- tracking
     signal s_rx, s_line, s_line_width : unsigned(10 downto 0) := to_unsigned(720, 11);
@@ -148,6 +198,10 @@ architecture tearcut of program_top is
 
     -- address / hash chain (stages 1..8)
     signal s_x1     : unsigned(10 downto 0) := (others => '0');
+    signal s_vx1    : unsigned(10 downto 0) := (others => '0');
+    signal s_fd     : std_logic_vector(1 to 5) := (others => '1');
+    signal s_bx6    : unsigned(10 downto 0) := (others => '0');   -- block's first pixel
+    signal s_chi6, s_clo6 : std_logic := '0';                    -- offset clamps
     signal s_key2   : unsigned(15 downto 0) := (others => '0');
     signal s_h3, s_h4, s_h5 : unsigned(15 downto 0) := (others => '0');
     signal s_mosh6  : std_logic := '0';
@@ -215,10 +269,27 @@ begin
     --------------------------------------------------------------------------
     p_ctrl : process(clk)
         variable v_a : signed(10 downto 0);
+        variable v_nx : unsigned(11 downto 0);
     begin
         if rising_edge(clk) then
+            s_xs <= f_vstep_x(registers_in(8)(3 downto 0));
+            s_ys <= f_vstep_y(registers_in(8)(3 downto 0));
             s_prev_hsync_n <= data_in.hsync_n; s_prev_vsync_n <= data_in.vsync_n; s_prev_avid <= data_in.avid;
             if data_in.avid = '1' then s_rx <= s_rx + 1; s_saw_active <= '1'; else s_rx <= (others => '0'); end if;
+            -- virtual x of the pixel on data_in, and whether it starts a block
+            -- (its block index differs from the previous pixel's; at 1080p:
+            -- x is a multiple of the block size)
+            if data_in.avid = '1' then
+                v_nx := s_vxa + s_xs;
+                s_vxa <= v_nx;
+                if ((v_nx(11 downto 1) xor s_vxa(11 downto 1)) and not s_bmask) /= 0 then
+                    s_isfirst <= '1';
+                else
+                    s_isfirst <= '0';
+                end if;
+            else
+                s_vxa <= (others => '0'); s_isfirst <= '1';
+            end if;
             s_in_y <= unsigned(data_in.y);
             s_in_avid <= data_in.avid;
             if s_in_avid = '1' then s_wr_x <= s_wr_x + 1; else s_wr_x <= (others => '0'); end if;
@@ -260,7 +331,14 @@ begin
                     -- labelled defaults: the firmware loads the label INDEX
                     if s_k_block(9 downto 2) = 0 then s_bs <= resize(s_k_block(1 downto 0), 3) + 3;
                     else s_bs <= resize(s_k_block(9 downto 8), 3) + 3; end if;
-                    s_shift <= to_unsigned(200, 8);
+                    -- mosh amount and clamp per mode (+-511 px at 1080p)
+                    if s_xs = 4 then
+                        s_shift <= to_unsigned(100, 8); s_omax <= to_signed(255, 13); s_omaxn <= to_signed(-255, 13);
+                    elsif s_xs = 3 then
+                        s_shift <= to_unsigned(133, 8); s_omax <= to_signed(340, 13); s_omaxn <= to_signed(-340, 13);
+                    else
+                        s_shift <= to_unsigned(200, 8); s_omax <= to_signed(511, 13); s_omaxn <= to_signed(-511, 13);
+                    end if;
                     if s_k_bands(9 downto 2) = 0 then s_bsh <= resize(s_k_bands(1 downto 0), 3) + 1;
                     else s_bsh <= resize(s_k_bands(9 downto 8), 3) + 1; end if;
                     s_lk_g <= s_k_gain; s_lk_d <= s_k_dens; s_lk_t <= s_k_tear;
@@ -287,9 +365,15 @@ begin
                     s_gain  <= s_gain + resize(s_lk_g(9 downto 7), 9);
                     s_dens  <= s_dens + 12;
                     s_sd    <= f_round2(s_sd);
+                    -- tear amount x 2/3 (720p) parts
+                    s_tsa   <= ('0' & s_tear(8 downto 1)) + ("000" & s_tear(8 downto 3));
+                    s_tsb   <= ("00000" & s_tear(8 downto 5)) + ("0000000" & s_tear(8 downto 7));
                     s_vstep <= s_vstep + 1;
                 when 3 =>
                     s_seed  <= f_round3(s_sd);
+                    -- tear amount in pixels: 2/3 at 720p, half at SD
+                    if s_xs = 3 then s_tear <= s_tsa + s_tsb;
+                    elsif s_xs = 4 then s_tear <= '0' & s_tear(8 downto 1); end if;
                     s_vstep <= "111";
                 when others => null;
             end case;
@@ -297,16 +381,18 @@ begin
             -- line / frame events
             if s_prev_avid = '1' and data_in.avid = '0' then
                 s_line_width <= s_rx; s_line <= s_line + 1;
+                s_vya <= s_vya + s_ys;
             end if;
+            -- bands, wave and block rows key on the virtual line
             case to_integer(s_tstep) is
                 when 0 =>
-                    s_tkey <= x"2C9F" + s_roll + shift_left(resize(shift_right(s_line, to_integer(s_bsh)), 16), 5);
+                    s_tkey <= x"2C9F" + s_roll + shift_left(resize(shift_right(s_vya(18 downto 8), to_integer(s_bsh)), 16), 5);
                     -- triangle wave: period 2^(bsh+5) lines
                     case to_integer(s_bsh) is
-                        when 1      => s_tri <= shift_left(s_line, 3)(8 downto 0);
-                        when 2      => s_tri <= shift_left(s_line, 2)(8 downto 0);
-                        when 3      => s_tri <= shift_left(s_line, 1)(8 downto 0);
-                        when others => s_tri <= s_line(8 downto 0);
+                        when 1      => s_tri <= shift_left(s_vya(18 downto 8), 3)(8 downto 0);
+                        when 2      => s_tri <= shift_left(s_vya(18 downto 8), 2)(8 downto 0);
+                        when 3      => s_tri <= shift_left(s_vya(18 downto 8), 1)(8 downto 0);
+                        when others => s_tri <= s_vya(16 downto 8);
                     end case;
                     s_tstep <= s_tstep + 1;
                 when 1 =>
@@ -327,12 +413,18 @@ begin
             end case;
             if data_in.hsync_n = '0' and s_prev_hsync_n = '1' then
                 s_wpar <= not s_wpar; s_rbank <= s_wpar;
-                s_rowkey <= shift_right(s_line, to_integer(s_bs))(7 downto 0);
+                s_rowkey <= shift_right(s_vya(18 downto 8), to_integer(s_bs))(7 downto 0);
                 if s_line = 0 then s_top <= '1'; else s_top <= '0'; end if;
                 s_tstep <= (others => '0');
             end if;
             if data_in.vsync_n = '0' and s_prev_vsync_n = '1' then
                 s_line <= (others => '0'); s_wpar <= '0';
+                -- a bottom field starts half a field step (one frame line) down
+                if data_in.field_n = '0' then
+                    s_vya <= resize(s_ys(11 downto 1), 20);
+                else
+                    s_vya <= (others => '0');
+                end if;
                 if s_saw_active = '1' then s_vstep <= (others => '0'); end if;
                 s_saw_active <= '0';
             end if;
@@ -354,12 +446,16 @@ begin
         variable v_o : signed(12 downto 0);
     begin
         if rising_edge(clk) then
-            s_x1 <= s_rx;
+            s_x1 <= s_rx; s_vx1 <= s_vxa(11 downto 1);
+            s_fd(1) <= s_isfirst;
+            for i in 2 to 5 loop s_fd(i) <= s_fd(i - 1); end loop;
             -- stage 2: key = block row & block column (no adder: v0.1's
-            -- row * 128 + column aliased at 8-px blocks in HD)
-            s_key2 <= s_rowkey & shift_right(s_x1, to_integer(s_bs))(7 downto 0);
+            -- row * 128 + column aliased at 8-px blocks in HD), virtual units
+            s_key2 <= s_rowkey & shift_right(s_vx1, to_integer(s_bs))(7 downto 0);
             s_xd(2) <= s_x1;
             for i in 3 to 6 loop s_xd(i) <= s_xd(i - 1); end loop;
+            -- stage 6: the block's first pixel (Hold); at 1080p x and not bmask
+            if s_fd(5) = '1' then s_bx6 <= s_xd(5); end if;
             -- stages 3..5: hash, the roll seed enters after the first round
             s_h3 <= f_round1(s_key2);
             s_h4 <= f_round2(s_h3 xor s_seed);
@@ -367,11 +463,16 @@ begin
             -- stage 6: mosh decision, offset product
             if s_h5(15 downto 8) < s_dens then s_mosh6 <= '1'; else s_mosh6 <= '0'; end if;
             s_po6 <= (signed('0' & s_h5(7 downto 0)) - to_signed(128, 9)) * signed('0' & s_shift);
+            -- the offset clamps (|h - 128| >= 82: exactly where (h - 128) * 200 / 32
+            -- leaves +-511 at 1080p), with a per-mode limit
+            if s_h5(7 downto 0) >= 210 then s_chi6 <= '1'; else s_chi6 <= '0'; end if;
+            if s_h5(7 downto 0) <= 46 then s_clo6 <= '1'; else s_clo6 <= '0'; end if;
             -- stage 7: displaced x (hold = block start)
             if s_mosh6 = '1' then
-                v_o := resize(shift_right(s_po6, 5), 13);
-                if v_o > 511 then v_o := to_signed(511, 13); elsif v_o < -511 then v_o := to_signed(-511, 13); end if;
-                if s_sw_hold = '1' then v_x := s_xd(6) and not s_bmask; else v_x := s_xd(6); end if;
+                if s_chi6 = '1' then v_o := s_omax;
+                elsif s_clo6 = '1' then v_o := s_omaxn;
+                else v_o := resize(shift_right(s_po6, 5), 13); end if;
+                if s_sw_hold = '1' then v_x := s_bx6; else v_x := s_xd(6); end if;
                 s_u7 <= signed(resize(v_x, 13)) + v_o + resize(s_tear_row, 13);
             else
                 s_u7 <= signed(resize(s_xd(6), 13)) + resize(s_tear_row, 13);

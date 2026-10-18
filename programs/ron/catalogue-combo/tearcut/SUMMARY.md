@@ -73,7 +73,40 @@ Controls:
   range now shows the real swing, 8 .. 518 px; v0.1 showed 0 .. 255 while
   the tear actually went to ±510.
 
+## v0.2.3 (2026-10-17): label-index fix + resolution scaling
+
+- K3 Block / K6 Bands: the firmware loads a labelled default as the label
+  INDEX (K6 "8 ln" arrived as 2 and gave 2 ln). A value with bits 9..2 = 0
+  is now read as the index (folded in from the community v0.2.2 fix).
+- Resolution scaling. Blocks (power-of-2 sizes keyed by bit slices), tear
+  bands and the tear wave counted pixels and FIELD lines: 1.5x too big at
+  720p, and at SD 2.2x too big with bands/blocks twice as tall (no interlace
+  compensation). Now a Q.1 virtual x and a Q.8 virtual line (stepped from
+  the timing ID, registers_in(8); the field-line step is doubled for
+  interlace) feed the block key, the row key, the band key and the wave.
+  1080p is unchanged. SD is a left-anchored 1440-unit 4:3 window.
+  - Hold reads the first pixel of the virtual block (a latch on the
+    block-index change), which is `x and not bmask` at 1080p.
+  - The mosh offset (+-511 px at 1080p) and the Tear amount are in virtual
+    units: 2/3 at 720p, half at SD. The +-511 clamp became a hash-range test
+    (|h - 128| >= 82, exactly the old cut-off) with a per-mode limit.
+  - Edges, the C_EDGE inset and the line buffers stay in real pixels.
+
 ## Build
+
+v0.2.3, 2026-10-17, `./build_combo.sh tearcut` (router2). All six pass; HD
+Analog and HD HDMI missed on seed 1 under heavy machine load and closed on
+seed 2 (the builder's retry lands them automatically; v0.2.2 without the
+label fix had closed all six on seed 1):
+
+| Config | Fmax (seed) |
+|---|---|
+| HD Analog | 83.3 MHz (2) |
+| HD HDMI | 77.8 MHz (2) |
+| HD Dual | 81.2 MHz (1) |
+| SD Analog / HDMI / Dual | 84.7 / 82.4 / 82.1 MHz (1) |
+
+~5,240 LC (68%), 20/32 EBR. iceunpack OK on all six.
 
 v0.2.0, 2026-10-13, `./build_combo.sh tearcut` (router2). All six configs
 passed on seed 1:
