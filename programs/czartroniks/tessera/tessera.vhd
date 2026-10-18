@@ -6,6 +6,13 @@
 --
 -- tessera.vhd  (v17 — BRAM sprite store, 1..64 triangles, depth, scale)
 --
+-- v1.0.4 (2026-10-18) fit for the stock SDK SD Standalone core, bit-exact
+-- output: the y and x sizes share one R / third / half shift-add set (each
+-- latched as it leaves the size multiplier), the recycle range reuses the
+-- latched third, and the three per-edge outline thresholds come from one
+-- unit fed by the multiplier's B operand pipeline during products 12/14/16
+-- (they were three parallel units in the store state).
+--
 -- v1.0.3 (2026-10-17) resolution scaling: triangle sizes were measured in
 -- FIELD lines and the same size was used for the x extent in pixels, so
 -- interlaced modes drew them ~2x tall (480i 2.2:1, 1080i 2:1) and SD
@@ -421,7 +428,6 @@ architecture tessera of program_top is
     signal s_size_h : t_g := (others => '0');   -- latched triangle height
     -- x-extent versions (pixels; equal to the above on progressive HD)
     signal s_Rx, s_halfx, s_thirdx : t_g := (others => '0');
-    signal s_size_hx : t_g := (others => '0');
     -- golden-ratio y-distribution: per-frame step + per-triangle accumulator
     signal s_golden_step : t_g := (others => '0');
     signal s_gold_acc  : t_g := (others => '0');
@@ -820,35 +826,36 @@ begin
                 when 5 => s_opa <= s_sz_mv; s_opb <= s_recip_eff;
                 -- x size right behind it (pipelined: same recip operand)
                 when 6 => s_opa <= s_sz_hxr;
-                when 8 => s_size_h <= signed(resize(shift_right(s_szmul1, 12), C_GW));
-                when 9 => s_size_hx <= signed(resize(shift_right(s_szmul1, 12), C_GW));
                 when others => null;
             end case;
         end if;
     end process;
 
-    -- Derive R / half / third / recycle-range from the latched height.
+    -- Derive R / half / third from each size as it leaves the multiplier:
+    -- one shift-add set serves both, latched into the y set at step 8 (the
+    -- height) and the x set at step 9 (the x extent).  third and half share
+    -- their (1/16 + 1/64) term; the recycle range reuses the latched third.
     p_size : process(clk)
+        variable v_s, v_t, v_R, v_third, v_half : t_g;
     begin
         if rising_edge(clk) then
-            s_R     <= shift_right(s_size_h, 1) + shift_right(s_size_h, 3)
-                     + shift_right(s_size_h, 5) + shift_right(s_size_h, 7);   -- 2/3 H
-            s_third <= shift_right(s_size_h, 2) + shift_right(s_size_h, 4)
-                     + shift_right(s_size_h, 6);                              -- 1/3 H
-            s_half  <= shift_right(s_size_h, 1) + shift_right(s_size_h, 4)
-                     + shift_right(s_size_h, 6);                              -- 0.577 H
-            -- the same three for the x extent (pixel widths)
-            s_Rx     <= shift_right(s_size_hx, 1) + shift_right(s_size_hx, 3)
-                      + shift_right(s_size_hx, 5) + shift_right(s_size_hx, 7);
-            s_thirdx <= shift_right(s_size_hx, 2) + shift_right(s_size_hx, 4)
-                      + shift_right(s_size_hx, 6);
-            s_halfx  <= shift_right(s_size_hx, 1) + shift_right(s_size_hx, 4)
-                      + shift_right(s_size_hx, 6);
-            -- recycle range = measured_v + 2R (R = 2/3 H): a triangle re-enters
-            -- the top exactly as it exits the bottom, so there is no blank gap.
-            s_rangey <= signed(resize(s_measured_v, C_GW)) + s_size_h
-                      + shift_right(s_size_h, 2) + shift_right(s_size_h, 4)
-                      + shift_right(s_size_h, 6);
+            v_s     := signed(resize(shift_right(s_szmul1, 12), C_GW));
+            v_t     := shift_right(v_s, 4) + shift_right(v_s, 6);
+            v_R     := shift_right(v_s, 1) + shift_right(v_s, 3)
+                     + shift_right(v_s, 5) + shift_right(v_s, 7);        -- 2/3 H
+            v_third := shift_right(v_s, 2) + v_t;                         -- 1/3 H
+            v_half  := shift_right(v_s, 1) + v_t;                         -- 0.577 H
+            if s_sq = 8 then
+                s_size_h <= v_s;
+                s_R <= v_R; s_third <= v_third; s_half <= v_half;
+            end if;
+            if s_sq = 9 then
+                s_Rx <= v_R; s_thirdx <= v_third; s_halfx <= v_half;
+            end if;
+            -- recycle range = measured_v + 2R (R = 2/3 H) = mv + H + H/3: a
+            -- triangle re-enters the top exactly as it exits the bottom, so
+            -- there is no blank gap.
+            s_rangey <= signed(resize(s_measured_v, C_GW)) + s_size_h + s_third;
         end if;
     end process;
 
@@ -1047,6 +1054,29 @@ begin
                     if s_pcnt = 6 then
                         s_lut_angle <= std_logic_vector(s_tau_acc);
                     end if;
+                    -- per-edge threshold = (Manhattan length) * outline width,
+                    -- so the outline stays a constant pixel width as edges
+                    -- foreshorten differently while tumbling.  One unit for all
+                    -- three edges: on the first wait cycle of products 12 / 14
+                    -- / 16 the multiplier's B operand holds dx_e and its
+                    -- registered copy dy_e (products 11..16 feed dy0, dx0, ..).
+                    if s_pwait = 0 and (s_pcnt = 12 or s_pcnt = 14 or s_pcnt = 16) then
+                        v_adx := unsigned(abs(s_mul_b));
+                        v_ady := unsigned(abs(s_mul_b_r));
+                        if v_adx > v_ady then v_len := v_adx + shift_right(v_ady, 1);
+                        else                  v_len := v_ady + shift_right(v_adx, 1); end if;
+                        -- (len << C_OUTLINE_SHIFT: the low bits are never
+                        -- written and keep their '0' init, so yosys sees them
+                        -- as constants and the static record RAM stays 10 EBR)
+                        case s_pcnt is
+                            when 12 => s_stage.thr0(W_TH - 1 downto C_OUTLINE_SHIFT)
+                                           <= signed(resize(v_len, W_TH - C_OUTLINE_SHIFT));
+                            when 14 => s_stage.thr1(W_TH - 1 downto C_OUTLINE_SHIFT)
+                                           <= signed(resize(v_len, W_TH - C_OUTLINE_SHIFT));
+                            when others => s_stage.thr2(W_TH - 1 downto C_OUTLINE_SHIFT)
+                                           <= signed(resize(v_len, W_TH - C_OUTLINE_SHIFT));
+                        end case;
+                    end if;
                     if s_pwait >= 3 then
                         case s_pcnt is
                             when 0 => s_cx   <= resize(shift_right(s_mul_p, 12), C_GW);
@@ -1129,24 +1159,7 @@ begin
                     s_stage.b0 <= resize(-s_dx0, W_AB); s_stage.b1 <= resize(-s_dx1, W_AB); s_stage.b2 <= resize(-s_dx2, W_AB);
                     s_stage.xmin <= resize(s_xmin, W_XY); s_stage.xmax <= resize(s_xmax, W_XY);
                     s_stage.ymin <= resize(s_ymin, W_XY); s_stage.ymax <= resize(s_ymax, W_XY);
-                    -- per-edge threshold = (Manhattan length) * outline width, so
-                    -- the outline stays a constant pixel width as edges
-                    -- foreshorten differently while tumbling.
-                    v_adx := unsigned(abs(resize(s_dx0, 14)));
-                    v_ady := unsigned(abs(resize(s_dy0, 14)));
-                    if v_adx > v_ady then v_len := v_adx + shift_right(v_ady, 1);
-                    else                  v_len := v_ady + shift_right(v_adx, 1); end if;
-                    s_stage.thr0 <= signed(resize(shift_left(v_len, C_OUTLINE_SHIFT), W_TH));
-                    v_adx := unsigned(abs(resize(s_dx1, 14)));
-                    v_ady := unsigned(abs(resize(s_dy1, 14)));
-                    if v_adx > v_ady then v_len := v_adx + shift_right(v_ady, 1);
-                    else                  v_len := v_ady + shift_right(v_adx, 1); end if;
-                    s_stage.thr1 <= signed(resize(shift_left(v_len, C_OUTLINE_SHIFT), W_TH));
-                    v_adx := unsigned(abs(resize(s_dx2, 14)));
-                    v_ady := unsigned(abs(resize(s_dy2, 14)));
-                    if v_adx > v_ady then v_len := v_adx + shift_right(v_ady, 1);
-                    else                  v_len := v_ady + shift_right(v_adx, 1); end if;
-                    s_stage.thr2 <= signed(resize(shift_left(v_len, C_OUTLINE_SHIFT), W_TH));
+                    -- (thresholds thr0..thr2 were latched during products 12..16)
                     if s_gtri < s_count then s_stage.valid <= '1'; else s_stage.valid <= '0'; end if;
                     -- front face toward viewer while the tumble factor is >= 0
                     if s_ftau >= 0 then s_stage.front <= '1'; else s_stage.front <= '0'; end if;
