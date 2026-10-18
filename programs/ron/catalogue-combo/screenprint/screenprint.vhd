@@ -8,6 +8,14 @@
 -- multi-source mixing (add, screen, multiply, difference, hard light,
 -- overlay).  v0.2.0 = finalizing pass (see SUMMARY.md for the review and
 -- what changed from v0.1.1).
+-- v0.2.4 (2026-10-17) = resolution scaling: the screen cell is in virtual
+-- 1080-line units (per-pixel steps x 1 / 1.5 / 2, per-line steps x the
+-- field-line step from the timing ID), so 720p and SD show the 1080p screen
+-- scaled to the screen height with the same angles (SD = a 1440-wide 4:3
+-- window); the Register offset is 60 virtual units at SD too.  On SD the
+-- cell is floored at 2 field lines (P12's bottom ~20% at 480i), where a
+-- smaller lattice only beats against the line pitch.  1080p is
+-- bit-identical.
 --
 --   K1 Angle    screen angle 0..90 degrees, glided (Spin on: spin speed)
 --   K2 Mix      12..100% of the blend
@@ -18,14 +26,16 @@
 --               (the ink's own luma goes into the blend)
 --   K6 Gain     halftone contrast: how far the dots open with brightness
 --
---   S7  Register  Tight / Loose: the colour layer printed W/32 px right
+--   S7  Register  Tight / Loose: the colour layer printed 60 virtual units
+--                 right (W/32 px on 16:9; ~W/24 on SD)
 --                 (the left edge holds the line's own edge colour, no seam)
 --   S8  Invert    the halftone inverted (ink where the paper was)
 --   S9  Spin      the screen turns about the centre; K1 sets the speed
 --   S10 Colour    Picture: picture colour, coloured ink tints its dots /
 --                 Ink: a one-colour print (ink colour on neutral paper)
 --   S11 Rosette   a second screen 30 degrees round (ink where either inks)
---   P12 Size      screen cell 4..160 px, exponential, zoomed about the
+--   P12 Size      screen cell 4..160 px at 1080 (virtual units: it scales
+--                 with the screen height), exponential, zoomed about the
 --                 picture centre; glided
 --
 -- Screen = accumulator-pair projection per screen: u += cos/cell per pixel,
@@ -304,6 +314,55 @@ architecture screenprint of program_top is
         return unsigned(s(13 downto 0));
     end function;
 
+    -- Resolution scaling: per-mode steps from the video timing ID.
+    -- x step in half virtual units per pixel: 1080 2 (1.0), 720p 3 (1.5),
+    -- SD 4 (2.0: 720 px span 1440 units, a 4:3 window of the 1080 canvas).
+    function f_vstep_x(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0 | 4 | 8 | 12 => return to_unsigned(4, 3);
+            when 5 | 6 | 14     => return to_unsigned(3, 3);
+            when others         => return to_unsigned(2, 3);
+        end case;
+    end function;
+    -- y step in Q4.8 virtual units per FIELD line (1080 / active lines,
+    -- doubled for interlaced modes).
+    function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(1138, 12);  -- 480i: 2 x 1080/486
+            when 4          => return to_unsigned(576, 12);   -- 480p: 1080/480
+            when 8          => return to_unsigned(960, 12);   -- 576i: 2 x 1080/576
+            when 12         => return to_unsigned(480, 12);   -- 576p: 1080/576
+            when 5 | 6 | 14 => return to_unsigned(384, 12);   -- 720p: 1.5
+            when 1 | 2 | 10 => return to_unsigned(512, 12);   -- 1080i: 2.0
+            when others     => return to_unsigned(256, 12);   -- 1080p: 1.0
+        end case;
+    end function;
+    -- smallest P12 Size index (C_INV) per mode: a cell at least 2 field
+    -- lines tall (480i 8.9, 576i 7.5, 480p 4.5 virtual units).  Below
+    -- that the lattice beats against the line pitch (an honest 4.5-unit
+    -- cell is one 480i line: horizontal ink / paper bands); 1080p and 720p
+    -- never reach the floor.
+    function f_sizfloor(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0      => return to_unsigned(222, 10);
+            when 8      => return to_unsigned(175, 10);
+            when 4      => return to_unsigned(33, 10);
+            when others => return to_unsigned(0, 10);
+        end case;
+    end function;
+    -- a step magnitude x the x step (half units: 2 = x1, 3 = x1.5, 4 = x2)
+    function f_xscale(v : unsigned(19 downto 0); xs : unsigned(2 downto 0)) return unsigned is
+    begin
+        case to_integer(xs) is
+            when 3 => return v + shift_right(v, 1);
+            when 4 => return shift_left(v, 1);
+            when others => return v;
+        end case;
+    end function;
+
     -- |a - b| > 2 (pot-noise hysteresis)
     function f_moved(a, b : unsigned(9 downto 0)) return boolean is
         variable d : signed(10 downto 0);
@@ -326,6 +385,11 @@ architecture screenprint of program_top is
     signal s_w_h : unsigned(11 downto 0) := to_unsigned(1920, 12);
     signal s_h_h : unsigned(10 downto 0) := to_unsigned(1080, 11);
     signal s_saw : std_logic := '0';
+    -- Resolution scaling steps (decoded every clock from the timing ID)
+    signal s_xs : unsigned(2 downto 0) := to_unsigned(2, 3);
+    signal s_ys : unsigned(11 downto 0) := to_unsigned(256, 12);
+    signal s_xsd : std_logic := '0';
+    signal s_sfl, s_sizi : unsigned(9 downto 0) := (others => '0');   -- size floor, floored size index
 
     -- per-field control state
     signal s_ang_h, s_siz_h, s_gain_h : unsigned(9 downto 0) := (others => '0');
@@ -359,12 +423,15 @@ architecture screenprint of program_top is
     signal s_smag : unsigned(14 downto 0) := (others => '0');
     signal s_sng : std_logic := '0';
     signal s_ct, s_st, s_u0t, s_v0t : unsigned(19 downto 0) := (others => '0');
+    signal s_cy, s_sy : unsigned(19 downto 0) := (others => '0');       -- per-line steps
+    signal s_invx, s_invy : unsigned(19 downto 0) := (others => '0');   -- 1/cell x the x / y step
     signal s_ma, s_mb : unsigned(19 downto 0) := (others => '0');
     signal s_macc : unsigned(39 downto 0) := (others => '0');
     signal s_mcnt : unsigned(4 downto 0) := (others => '0');
 
     -- screen DDAs (mod one cell, 20 bits)
     signal s_c1, s_s1, s_c2, s_s2 : unsigned(19 downto 0) := (others => '0');
+    signal s_c1y, s_s1y, s_c2y, s_s2y : unsigned(19 downto 0) := (others => '0');
     signal s_ur1, s_vr1, s_ur2, s_vr2 : unsigned(19 downto 0) := (others => '0');
     signal s_u1, s_v1, s_u2, s_v2 : unsigned(19 downto 0) := (others => '0');
 
@@ -514,8 +581,18 @@ begin
             s_k6 <= shift_left(resize(s_k_blend, 13), 2) + shift_left(resize(s_k_blend, 13), 1);
             s_gain <= s_gain_h(9 downto 2);
             s_mix <= to_unsigned(32, 9) + resize(s_k_mix(9 downto 2), 9) - resize(s_k_mix(9 downto 5), 9);
+            s_xs <= f_vstep_x(registers_in(8)(3 downto 0));
+            s_ys <= f_vstep_y(registers_in(8)(3 downto 0));
+            if s_xs = 4 then s_xsd <= '1'; else s_xsd <= '0'; end if;
+            s_sfl <= f_sizfloor(registers_in(8)(3 downto 0));
+            -- Register offset W/32 (60 px at 1080, 40 at 720p); SD's 720 px
+            -- span 1440 virtual units, so W x 11/256 (~W/24, 29 px = 58)
             if s_sw_reg = '1' then
-                s_delta <= resize(s_w_h(11 downto 5), 8);
+                if s_xsd = '1' then
+                    s_delta <= resize(s_w_h(11 downto 5), 8) + resize(s_w_h(11 downto 7), 8) + resize(s_w_h(11 downto 8), 8);
+                else
+                    s_delta <= resize(s_w_h(11 downto 5), 8);
+                end if;
             else
                 s_delta <= (others => '0');
             end if;
@@ -548,15 +625,18 @@ begin
     ----------------------------------------------------------------------
     p_seq : process(clk)
         variable v_sum : unsigned(20 downto 0);
-        variable v_p : unsigned(19 downto 0);
+        variable v_p, v_pn : unsigned(19 downto 0);
         variable v_go : boolean;
     begin
         if rising_edge(clk) then
             -- ROMs: registered read (absorbed into the EBR), then a fabric copy
             s_sin_q <= C_SIN(to_integer(s_sa));
             s_sin_r <= s_sin_q;
-            s_inv_q <= C_INV(to_integer(s_siz_g(13 downto 4)));
+            -- (the size index floored at 2 field lines a cell: SD only)
+            if s_siz_g(13 downto 4) < s_sfl then s_sizi <= s_sfl; else s_sizi <= s_siz_g(13 downto 4); end if;
+            s_inv_q <= C_INV(to_integer(s_sizi));
             s_inv_r <= s_inv_q;
+            s_invx <= f_xscale(resize(unsigned'(s_inv_r & "000"), 20), s_xs);
             s_sneg <= s_sneg_a;
 
             -- serial multiplier: macc = ma * mb after 20 steps
@@ -573,6 +653,7 @@ begin
 
             v_go := s_mcnt = 0;
             v_p := s_macc(33 downto 14);
+            v_pn := 0 - v_p;     -- one shared negator for the four steps
             case to_integer(s_sq) is
                 when 0 => null;
                 when 1 =>
@@ -592,7 +673,7 @@ begin
                     if s_tc(10) = '1' then s_sa <= not s_tc(9 downto 0); else s_sa <= s_tc(9 downto 0); end if;
                     s_sneg_a <= s_tc(11);
                     s_sq <= to_unsigned(4, 5);
-                when 4 | 5 | 6 | 9 | 10 =>
+                when 4 | 5 | 6 | 9 =>
                     s_sq <= s_sq + 1;
                 when 7 =>
                     s_smag <= s_sin_r(14 downto 0);
@@ -602,57 +683,86 @@ begin
                     if s_tc(10) = '0' then s_sa <= not s_tc(9 downto 0); else s_sa <= s_tc(9 downto 0); end if;
                     s_sneg_a <= s_tc(11) xor s_tc(10);
                     s_sq <= to_unsigned(9, 5);
-                when 11 =>                             -- |cos| * inv
+                -- Resolution scaling: the cell is in virtual units, so the
+                -- per-pixel steps are |c|, |s| = |cos|, |sin| x inv_x (1/cell
+                -- x the x step 1 / 1.5 / 2) and the per-line steps |cos|,
+                -- |sin| x inv_y (1/cell x the y step per field line, Q.8).
+                -- At 1080p inv_x = inv_y = 1/cell: the old single pair.
+                when 10 =>                             -- inv_y = inv * ys
                     s_ma <= resize(unsigned'(s_inv_r & "000"), 20);
-                    s_mb <= resize(s_sin_r(14 downto 0), 20);
+                    s_mb <= resize(s_ys, 20);
                     s_macc <= (others => '0'); s_mcnt <= to_unsigned(20, 5);
-                    s_sq <= to_unsigned(12, 5);
+                    s_sq <= to_unsigned(11, 5);
+                when 11 =>
+                    if v_go then
+                        s_invy <= s_macc(27 downto 8);
+                        s_ma <= s_invx;                              -- |cos| * inv_x
+                        s_mb <= resize(s_sin_r(14 downto 0), 20);
+                        s_macc <= (others => '0'); s_mcnt <= to_unsigned(20, 5);
+                        s_sq <= to_unsigned(12, 5);
+                    end if;
                 when 12 =>
                     if v_go then
-                        if s_sneg = '1' then s_ct <= 0 - v_p; else s_ct <= v_p; end if;
-                        s_ma <= resize(unsigned'(s_inv_r & "000"), 20);       -- |sin| * inv
+                        if s_sneg = '1' then s_ct <= v_pn; else s_ct <= v_p; end if;
+                        s_ma <= s_invx;                              -- |sin| * inv_x
                         s_mb <= resize(s_smag, 20);
                         s_macc <= (others => '0'); s_mcnt <= to_unsigned(20, 5);
                         s_sq <= to_unsigned(13, 5);
                     end if;
                 when 13 =>
                     if v_go then
-                        if s_sng = '1' then s_st <= 0 - v_p; else s_st <= v_p; end if;
-                        s_ma <= s_ct;                                -- wc * c
-                        s_mb <= resize(s_wc, 20);
+                        if s_sng = '1' then s_st <= v_pn; else s_st <= v_p; end if;
+                        s_ma <= s_invy;                              -- |cos| * inv_y
+                        s_mb <= resize(s_sin_r(14 downto 0), 20);
                         s_macc <= (others => '0'); s_mcnt <= to_unsigned(20, 5);
                         s_sq <= to_unsigned(14, 5);
                     end if;
                 when 14 =>
                     if v_go then
-                        s_u0t <= x"80000" - s_macc(19 downto 0);
-                        s_ma <= s_st;                                -- hc * s
-                        s_mb <= resize(s_hc, 20);
+                        if s_sneg = '1' then s_cy <= v_pn; else s_cy <= v_p; end if;
+                        s_ma <= s_invy;                              -- |sin| * inv_y
+                        s_mb <= resize(s_smag, 20);
                         s_macc <= (others => '0'); s_mcnt <= to_unsigned(20, 5);
                         s_sq <= to_unsigned(15, 5);
                     end if;
                 when 15 =>
                     if v_go then
-                        s_u0t <= s_u0t - s_macc(19 downto 0);
-                        s_ma <= s_st;                                -- wc * s
+                        if s_sng = '1' then s_sy <= v_pn; else s_sy <= v_p; end if;
+                        s_ma <= s_ct;                                -- wc * c (x)
                         s_mb <= resize(s_wc, 20);
                         s_macc <= (others => '0'); s_mcnt <= to_unsigned(20, 5);
                         s_sq <= to_unsigned(16, 5);
                     end if;
                 when 16 =>
                     if v_go then
-                        s_v0t <= x"80000" + s_macc(19 downto 0);
-                        s_ma <= s_ct;                                -- hc * c
+                        s_u0t <= x"80000" - s_macc(19 downto 0);
+                        s_ma <= s_sy;                                -- hc * s (y)
                         s_mb <= resize(s_hc, 20);
                         s_macc <= (others => '0'); s_mcnt <= to_unsigned(20, 5);
                         s_sq <= to_unsigned(17, 5);
                     end if;
                 when 17 =>
                     if v_go then
-                        s_v0t <= s_v0t - s_macc(19 downto 0);
+                        s_u0t <= s_u0t - s_macc(19 downto 0);
+                        s_ma <= s_st;                                -- wc * s (x)
+                        s_mb <= resize(s_wc, 20);
+                        s_macc <= (others => '0'); s_mcnt <= to_unsigned(20, 5);
                         s_sq <= to_unsigned(18, 5);
                     end if;
-                when 18 =>                             -- next screen, or spin rate
+                when 18 =>
+                    if v_go then
+                        s_v0t <= x"80000" + s_macc(19 downto 0);
+                        s_ma <= s_cy;                                -- hc * c (y)
+                        s_mb <= resize(s_hc, 20);
+                        s_macc <= (others => '0'); s_mcnt <= to_unsigned(20, 5);
+                        s_sq <= to_unsigned(19, 5);
+                    end if;
+                when 19 =>
+                    if v_go then
+                        s_v0t <= s_v0t - s_macc(19 downto 0);
+                        s_sq <= to_unsigned(20, 5);
+                    end if;
+                when 20 =>                             -- next screen, or spin rate
                     if s_scr = '0' then
                         s_scr <= '1';
                         s_sq <= to_unsigned(2, 5);
@@ -660,9 +770,9 @@ begin
                         s_ma <= resize(s_ang_g(13 downto 4), 20);
                         s_mb <= resize(s_ang_g(13 downto 4), 20);
                         s_macc <= (others => '0'); s_mcnt <= to_unsigned(20, 5);
-                        s_sq <= to_unsigned(19, 5);
+                        s_sq <= to_unsigned(21, 5);
                     end if;
-                when 19 =>
+                when 21 =>
                     if v_go then
                         s_rate <= to_unsigned(64, 13) + resize(s_macc(19 downto 8), 13);
                         s_sq <= (others => '0');
@@ -684,15 +794,18 @@ begin
     begin
         if rising_edge(clk) then
             -- results land in vblank: steps and row starts per screen
-            if s_sq = 18 and s_scr = '0' then
-                s_c1 <= s_ct; s_s1 <= s_st; s_ur1 <= s_u0t; s_vr1 <= s_v0t;
+            -- (per-pixel steps c/s, per-line steps cy/sy: virtual units)
+            if s_sq = 20 and s_scr = '0' then
+                s_c1 <= s_ct; s_s1 <= s_st; s_c1y <= s_cy; s_s1y <= s_sy;
+                s_ur1 <= s_u0t; s_vr1 <= s_v0t;
             elsif s_prev_avid = '1' and data_in.avid = '0' then
-                s_ur1 <= s_ur1 + s_s1; s_vr1 <= s_vr1 + s_c1;
+                s_ur1 <= s_ur1 + s_s1y; s_vr1 <= s_vr1 + s_c1y;
             end if;
-            if s_sq = 18 and s_scr = '1' then
-                s_c2 <= s_ct; s_s2 <= s_st; s_ur2 <= s_u0t; s_vr2 <= s_v0t;
+            if s_sq = 20 and s_scr = '1' then
+                s_c2 <= s_ct; s_s2 <= s_st; s_c2y <= s_cy; s_s2y <= s_sy;
+                s_ur2 <= s_u0t; s_vr2 <= s_v0t;
             elsif s_prev_avid = '1' and data_in.avid = '0' then
-                s_ur2 <= s_ur2 + s_s2; s_vr2 <= s_vr2 + s_c2;
+                s_ur2 <= s_ur2 + s_s2y; s_vr2 <= s_vr2 + s_c2y;
             end if;
             if data_in.avid = '1' then
                 if s_prev_avid = '0' then

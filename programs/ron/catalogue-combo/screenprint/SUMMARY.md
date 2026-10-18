@@ -124,12 +124,7 @@ Headline:
 
 ### Tier 3: optional
 
-- SD scaling: the cell is in pixels, so SD shows the same pixel size, which
-  is about 2.7× bigger relative to the picture. It could follow the
-  measured width instead.
-- Interlace: screens are drawn per field (unchanged from v0.1), so on
-  480i/1080i sources the cells are 2× tall. Keying on the frame line would
-  square them but adds 30 Hz twitter on fine screens.
+- ~~SD scaling~~ and ~~interlace 2× tall cells~~: fixed in v0.2.4 (below).
 - Bipolar Spin (direction), and a paper-stock colour (cream/kraft).
 - Raw chroma is still carried ~14 FFs deep, as in v0.1 (the rollthebones
   HD HDMI green/noise lesson). Watch for it; the fix would be an EBR delay.
@@ -209,3 +204,51 @@ Results:
 
 This dev copy now matches the staged v0.2.3, including the community edits: GPL header, IO-align pad (latency 24), czartroniks program_id and author.
 - **HW-validated 2026-10-15** (Ron: "looks good"): the staged v0.2.3 stock-SDK build.
+
+## v0.2.4 (2026-10-17): resolution scaling
+
+The cell was in pixels per pixel and per FIELD line: 1.5× too big at 720p,
+and on 480i 2× too wide and 4.4× too tall (dots drawn as tall ellipses).
+The cell is now in virtual 1080-line units:
+
+- The sequencer computes two step pairs per screen:
+  - per pixel: |cos|, |sin| × inv_x, where inv_x = 1/cell × the x step
+    (1 / 1.5 / 2, a shift-add on the ROM value);
+  - per field line: |cos|, |sin| × inv_y, where inv_y = 1/cell × the y step
+    from the timing ID (Q.8, one serial multiply).
+  The steps are signed through one shared negator and wrap mod one cell. The
+  centring products use the pixel steps with W/2 and the line steps with
+  H/2, so the lattice stays centred. That costs 2 more states and 3 more
+  serial multiplies per screen (the sequencer still finishes in vblank, about
+  500 clocks).
+- At 1080p both pairs equal the old single pair. 1080p is bit-identical: 0
+  differing pixels against the v0.2.3 VHDL rendered with the same TOML. The
+  `.scaling_work/base_progs/combo` snapshot carries the pre-capture TOML
+  defaults, so it renders different knobs.
+- On SD the cell is floored at 2 field lines (P12 index 222 at 480i, 175 at
+  576i, 33 at 480p). At the low end an honest cell is one 480i line, and the
+  lattice beats against the line pitch: horizontal ink and paper bands, with
+  the picture colour showing through. 1080p and 720p never reach the floor.
+- S7 Register: 60 virtual units at SD too (W × 11/256 = 29 px of 720; was
+  W/32 = 22). W/32 is unchanged on 16:9.
+
+Checked with a sim-only, glide-bypassed copy (`.scaling_work/screenprint_tmp/`,
+P12 600, K1 300, Spin off): 720p and SD show the same round dots at the same
+angle and the same size relative to the screen height as 1080p. The v0.2.3 SD
+dots were tall ellipses.
+
+Build (`./build_combo.sh screenprint`, router2):
+
+| Config | Fmax | Seed |
+|---|---|---|
+| HD Analog | 76.4 MHz | 1 |
+| SD Analog | 79.2 MHz | 1 |
+| HD HDMI | 79.0 MHz | 1 |
+| SD HDMI | 81.9 MHz | 1 |
+| HD Dual | 75.6 MHz | 1 |
+| SD Dual | 78.8 MHz | 1 |
+
+6,970–6,993 LC (91%), 10/32 EBR. iceunpack OK on all six. HD margins are thin,
+as they were before (v0.2.1 HD HDMI 74.9 at seed 2). A first cut, which scaled
+and negated each step separately, was +150 LC (93%) and needed seed 3 on HD
+Dual (74.7 MHz).
