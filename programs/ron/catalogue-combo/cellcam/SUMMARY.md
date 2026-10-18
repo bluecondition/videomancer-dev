@@ -183,9 +183,42 @@ Tier 3:
 - Capture defaults and presets from hardware. The current 6 are
   hand-written for the v0.3 layout.
 
+## v0.3.2: resolution scaling (2026-10-17)
+
+The cell grid was fixed in pixels (2..129 px wide, rows in field lines), so
+at large P12 settings the cells were 1.5x too big (relative to the screen
+height) at 720p and 2x at SD. Now every size is set on the 1080-line canvas
+and converted per mode from the timing ID (Q10 factors: kx = 1, 2/3, 1/2 px
+per canvas unit; ky = 1080p 1, 1080i 1/2, 720p 2/3, 480i 0.225, 576i 0.267
+field lines per canvas line):
+
+- P12 Cell: width = round(W_v x kx), at least 2 px; Shape height =
+  round(W_v x shape x ky) field lines, 1..255. Cells keep their size
+  relative to the screen height and stay square on 4:3 SD. Centring is
+  unchanged (it already works in real pixels and field lines).
+- K4 Width: outline width round(w x kx) px and round(w x ky) lines, at least
+  1 each; the Raw thickening uses the same two values.
+- K6 Smear: lag round(lag x kx) px.
+- The bleed's "x2 at HD" was keyed on the measured width (720p took the
+  1080 lengths, 1.5x too long). It is now 1080-only; 720p takes the SD
+  lengths, the nearer power of 2 (0.75x). The dot crawl stays at pixel
+  scale (8 px at HD widths, 4 at SD), as before.
+- Interlace detection moved from "field height < 7/16 width" to the
+  timing ID (folded into ky).
+- 1080p is bit-identical (pixel diff 0).
+
 ## Build
 
 `./build_combo.sh cellcam` → `out/rev_b/ron/catalogue-combo/cellcam.vmprog`.
+
+v0.3.2 (2026-10-17, resolution scaling): all 6 configs pass (router2
+default). HD Analog 81.8, HD HDMI 84.8, HD Dual 82.8 MHz (all seed 1); SD
+Analog 91.6 (**seed 4**: seeds 1-3 stalled router2 under heavy machine load;
+the first v0.3.2 build routed it on seed 1), SD HDMI 83.1, SD Dual 83.7 MHz.
+5,342–5,359 LC (70%; +~650 for the per-mode products: the per-field cell
+width/height products run in the sequencer, the Width/lag ones
+free-running, all split on the factor's low 6 / high 5 bits, since one
+10x11 product per clock was the critical path at 76 MHz), 25/32 EBR.
 
 v0.3.0 (2026-10-13): all 6 configs pass (router2 default). HD Analog 90.0,
 HD HDMI 82.4 (**seed 2**, after seed 1 stalled the router), HD Dual 87.0
