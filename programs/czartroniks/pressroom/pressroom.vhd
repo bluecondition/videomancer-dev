@@ -9,6 +9,13 @@
 -- knobs each; the switches and the slider decide how the three combine.
 -- v0.2.0 = finalizing pass (see SUMMARY.md for the review and what changed
 -- from v0.1.0).
+-- v0.2.2 (2026-10-17) = resolution scaling: cells and the band tear run in
+-- virtual 1080-line units (x steps 1 / 1.5 / 2 per pixel, y steps per field
+-- line from the timing ID), so 720p and SD show the 1080p print scaled to
+-- the screen height (SD = a 1440-wide 4:3 window; cell rows there are
+-- whole lines, 4 units a field line, so the dots stay regular and ~11%
+-- tall; on 480i/576i the 4-px cell is floored to 8, as it is under one
+-- field line); the band's 4-line floor scales too.  1080p is bit-identical.
 --
 --   K1 Cell      halftone cell 4 / 8 / 16 / 32 px
 --   K2 Screen    Dot / Line / Diamond / Square
@@ -65,6 +72,56 @@ architecture pressroom of program_top is
     signal s_io_align_pad : t_io_align_pad;
 
     constant C_LAT : integer := 17;
+
+    -- Resolution scaling: per-mode steps from the video timing ID.
+    -- x step in half virtual units per pixel: 1080 2 (1.0), 720p 3 (1.5),
+    -- SD 4 (2.0: 720 px span 1440 units, a 4:3 window of the 1080 canvas).
+    function f_vstep_x(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0 | 4 | 8 | 12 => return to_unsigned(4, 3);
+            when 5 | 6 | 14     => return to_unsigned(3, 3);
+            when others         => return to_unsigned(2, 3);
+        end case;
+    end function;
+    -- cell-row y step in Q4.8 virtual units per FIELD line: 1080 / active
+    -- lines (doubled for interlaced modes), except that SD is snapped to a
+    -- power of 2 (4.0 interlaced, 2.0 progressive; exact 4.44 / 3.75 /
+    -- 2.25 / 1.875), so every cell row is a whole number of lines and the
+    -- dots stay regular (4.44 put 1.8 lines in an 8-unit cell and the rows
+    -- beat into streaks); SD cells are ~11% taller than exact
+    function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0 | 8      => return to_unsigned(1024, 12);  -- 480i / 576i: 4.0
+            when 4 | 12     => return to_unsigned(512, 12);   -- 480p / 576p: 2.0
+            when 5 | 6 | 14 => return to_unsigned(384, 12);   -- 720p: 1.5
+            when 1 | 2 | 10 => return to_unsigned(512, 12);   -- 1080i: 2.0
+            when others     => return to_unsigned(256, 12);   -- 1080p: 1.0
+        end case;
+    end function;
+    -- the band's 4-line floor in field lines (4 / y step, at least 1)
+    function f_bfloor(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0 | 8           => return to_unsigned(1, 3);
+            when 1 | 2 | 10 | 4 | 12 => return to_unsigned(2, 3);
+            when 5 | 6 | 14      => return to_unsigned(3, 3);
+            when others          => return to_unsigned(4, 3);
+        end case;
+    end function;
+    -- floor(r / 3), r = 0..63 (720p: real pixels left in a cell from the
+    -- half units left)
+    type t_div3 is array (0 to 63) of unsigned(4 downto 0);
+    function f_mk_div3 return t_div3 is
+        variable t : t_div3;
+    begin
+        for i in 0 to 63 loop
+            t(i) := to_unsigned(i / 3, 5);
+        end loop;
+        return t;
+    end function;
+    constant C_DIV3 : t_div3 := f_mk_div3;
 
     type t_screen is array (0 to 1023) of integer range 0 to 255;
     constant C_SCREEN : t_screen := (
@@ -158,10 +215,24 @@ architecture pressroom of program_top is
     signal s_sw_sat, s_sw_outside, s_sw_light, s_sw_roll, s_sw_break : std_logic;
     signal s_p_ink  : unsigned(9 downto 0);
     signal s_live1, s_live2 : std_logic := '0';
-    signal s_nsh    : unsigned(2 downto 0) := to_unsigned(3, 3);       -- cell shift 2..5
-    signal s_mask   : unsigned(10 downto 0) := to_unsigned(7, 11);     -- N - 1
-    signal s_ndel   : unsigned(5 downto 0) := to_unsigned(7, 6);       -- N - 1
-    signal s_rowsm1 : unsigned(6 downto 0) := to_unsigned(7, 7);       -- N - 1
+    signal s_nsh    : unsigned(2 downto 0) := to_unsigned(3, 3);       -- cell shift 2..5 (virtual)
+    signal s_nshr   : unsigned(2 downto 0) := to_unsigned(3, 3);       -- box-window shift (real px)
+    signal s_mask   : unsigned(10 downto 0) := to_unsigned(7, 11);     -- N - 1 (virtual)
+    signal s_maskh  : unsigned(5 downto 0) := to_unsigned(15, 6);      -- 2N - 1 (half units)
+    signal s_ndel   : unsigned(5 downto 0) := to_unsigned(7, 6);       -- window - 1 (real px)
+
+    -- Resolution scaling: x in half virtual units (only the low 6 bits are
+    -- ever needed: cells are powers of 2), y in Q.8 virtual units per field
+    -- line (at 1080p the integer parts equal the old counters)
+    signal s_xs     : unsigned(2 downto 0) := to_unsigned(2, 3);
+    signal s_ys     : unsigned(11 downto 0) := to_unsigned(256, 12);
+    signal s_bfl    : unsigned(2 downto 0) := to_unsigned(4, 3);
+    signal s_x720, s_xsd, s_sdi : std_logic := '0';   -- 720p, SD, interlaced SD
+    signal s_xa, s_xa0 : unsigned(5 downto 0) := (others => '0');
+    signal s_ya, s_yan : unsigned(19 downto 0) := (others => '0');
+    signal s_rowend : std_logic := '0';
+    signal s_ngt, s_ngh : unsigned(7 downto 0) := to_unsigned(24, 8);  -- tear gain (x 2/3 at 720p)
+    signal s_off_h  : unsigned(5 downto 0) := (others => '0');        -- tear in half units, mod 64
     signal s_shape  : unsigned(1 downto 0) := (others => '0');
     signal s_ksat, s_outside, s_light : std_logic := '0';
     signal s_ng     : unsigned(7 downto 0) := to_unsigned(24, 8);      -- band noise 24..248
@@ -193,7 +264,6 @@ architecture pressroom of program_top is
     signal s_wm1    : unsigned(10 downto 0) := to_unsigned(719, 11);
     signal s_prev_hsync_n, s_prev_vsync_n, s_prev_avid : std_logic := '1';
     signal s_saw_active : std_logic := '0';
-    signal s_vcnt   : unsigned(6 downto 0) := (others => '0');
     signal s_capture, s_wpar, s_rbank : std_logic := '0';
     signal s_lstep  : unsigned(2 downto 0) := "111";
     signal s_band_row, s_brk_row, s_nz_row : std_logic := '0';
@@ -211,14 +281,16 @@ architecture pressroom of program_top is
     signal s_wx1, s_wx3 : unsigned(10 downto 0) := (others => '0');
     signal s_wp1, s_wc1, s_wp3, s_we3 : std_logic := '0';
 
-    -- read side; the suffix is the offset (pixel p's x is in s_x0 at 0,
-    -- its output at 16)
-    signal s_x0     : unsigned(10 downto 0) := (others => '0');
+    -- read side; the suffix is the offset (pixel p's x is in s_rx at -1,
+    -- s_xt0 at 0, its output at 16)
     signal s_in_y   : unsigned(9 downto 0) := to_unsigned(64, 10);
     signal s_in_u, s_in_v : unsigned(9 downto 0) := to_unsigned(512, 10);
-    signal s_xs1    : signed(12 downto 0) := (others => '0');
-    signal s_bg1, s_bg2 : std_logic := '0';
-    signal s_xn1    : unsigned(4 downto 0) := (others => '0');
+    signal s_xt0    : signed(12 downto 0) := (others => '0');   -- torn real x
+    signal s_ta0    : unsigned(5 downto 0) := (others => '0');
+    signal s_xt1, s_rem1 : unsigned(10 downto 0) := (others => '0');
+    signal s_d1     : unsigned(4 downto 0) := (others => '0');
+    signal s_bg0, s_bg1, s_bg2 : std_logic := '0';
+    signal s_xn1    : unsigned(5 downto 0) := (others => '0');
     signal s_dy1, s_dy2 : unsigned(9 downto 0) := (others => '0');
     signal s_au1, s_av1 : unsigned(9 downto 0) := (others => '0');
     signal s_addr2  : unsigned(10 downto 0) := (others => '0');
@@ -339,9 +411,39 @@ begin
                 s_accv <= s_accv + resize(unsigned(data_in.v), 16) - resize(v_ov, 16);
             end if;
             -- averages; written at the pixel the window ends on
-            s_ay3 <= resize(shift_right(s_accy, to_integer(s_nsh)), 10);
-            s_au3 <= resize(shift_right(s_accu, to_integer(s_nsh)), 10);
-            s_av3 <= resize(shift_right(s_accv, to_integer(s_nsh)), 10);
+            s_ay3 <= resize(shift_right(s_accy, to_integer(s_nshr)), 10);
+            s_au3 <= resize(shift_right(s_accu, to_integer(s_nshr)), 10);
+            s_av3 <= resize(shift_right(s_accv, to_integer(s_nshr)), 10);
+
+            -- Resolution scaling: steps decoded every clock (the timing ID
+            -- is static while a mode runs); x in half units (only mod 64 is
+            -- needed).  Pixels and lines sample their left / top edge, as
+            -- 1080p always did: a 2-sample cell reads screen rows 0 and 8
+            -- (a gap line and the dot), where centre samples (4, 12) both
+            -- hit the dot and printed solid stripes.
+            s_xs  <= f_vstep_x(registers_in(8)(3 downto 0));
+            s_ys  <= f_vstep_y(registers_in(8)(3 downto 0));
+            s_bfl <= f_bfloor(registers_in(8)(3 downto 0));
+            if s_xs = 3 then s_x720 <= '1'; else s_x720 <= '0'; end if;
+            if s_xs = 4 then s_xsd <= '1'; else s_xsd <= '0'; end if;
+            if registers_in(8)(3 downto 0) = "0000" or registers_in(8)(3 downto 0) = "1000" then
+                s_sdi <= '1';
+            else
+                s_sdi <= '0';
+            end if;
+            if data_in.avid = '1' then
+                s_xa <= s_xa + s_xs;
+            else
+                s_xa <= (others => '0');
+            end if;
+            s_yan <= s_ya + s_ys;
+            -- this line is the last of its cell row: the next line's cell
+            -- row differs (always so when a cell is shorter than a line)
+            if ((s_yan(18 downto 8) xor s_ya(18 downto 8)) and not s_mask) /= 0 then
+                s_rowend <= '1';
+            else
+                s_rowend <= '0';
+            end if;
             s_wx1 <= s_rx; s_wp1 <= s_wpar; s_wc1 <= data_in.avid and s_capture;
             s_wx3 <= s_wx1; s_wp3 <= s_wp1; s_we3 <= s_wc1;
 
@@ -353,22 +455,23 @@ begin
                     else
                         s_band_row <= '0';
                     end if;
+                    -- screen row from the virtual line
                     case to_integer(s_nsh) is
-                        when 2 => s_ny <= s_line(1 downto 0) & "00";
-                        when 3 => s_ny <= s_line(2 downto 0) & "0";
-                        when 4 => s_ny <= s_line(3 downto 0);
-                        when others => s_ny <= s_line(4 downto 1);
+                        when 2 => s_ny <= s_ya(9 downto 8) & "00";
+                        when 3 => s_ny <= s_ya(10 downto 8) & "0";
+                        when 4 => s_ny <= s_ya(11 downto 8);
+                        when others => s_ny <= s_ya(12 downto 9);
                     end case;
                     s_lstep <= s_lstep + 1;
                 when 1 =>
-                    s_jp <= signed(s_rnd(31 downto 22)) * signed('0' & s_ng);
+                    s_jp <= signed(s_rnd(31 downto 22)) * signed('0' & s_ngt);
                     s_lstep <= s_lstep + 1;
                 when 2 =>
-                    -- tear: up to +-ng/256 x 512 px on HD-width lines, half
-                    -- that on SD-width lines
+                    -- tear: up to +-ng/256 x 512 virtual units (1080: 512
+                    -- px; 720p: gain x 2/3, 341 px; SD: / 512, 256 px)
                     if s_band_row = '0' then
                         v_o := (others => '0');
-                    elsif s_line_width(10) = '1' then
+                    elsif s_xsd = '0' then
                         v_o := resize(shift_right(s_jp, 8), 11);
                     else
                         v_o := resize(shift_right(s_jp, 9), 11);
@@ -381,6 +484,13 @@ begin
                     -- the torn read stays on the line for x in [lo, hi)
                     s_lo_row <= -resize(s_off_row, 13);
                     s_hi_row <= signed(resize(s_line_width, 13)) - resize(s_off_row, 13);
+                    -- the tear in half virtual units (x step x offset), mod
+                    -- 64: all the cell maths needs
+                    case to_integer(s_xs) is
+                        when 3 => s_off_h <= unsigned(s_off_row(5 downto 0)) + unsigned(s_off_row(4 downto 0) & '0');
+                        when 4 => s_off_h <= unsigned(s_off_row(3 downto 0) & "00");
+                        when others => s_off_h <= unsigned(s_off_row(4 downto 0) & '0');
+                    end case;
                     s_lstep <= "111";
                 when others => null;
             end case;
@@ -393,7 +503,14 @@ begin
                     -- first reads a real position
                     if s_k_cell >= 4 then s_live1 <= '1'; end if;
                     if s_live1 = '0' and s_k_cell < 4 then v_i := s_k_cell(1 downto 0); else v_i := s_k_cell(9 downto 8); end if;
+                    -- interlaced SD: cells at least 8 units (2 field lines);
+                    -- a 4-unit cell is under one line and every line read
+                    -- the same screen row (the halftone vanished)
+                    if s_sdi = '1' and v_i = 0 then v_i := "01"; end if;
                     s_nsh <= resize(v_i, 3) + 2;
+                    -- box window: the whole cell at 1080 and SD (N/2 px),
+                    -- 3/4 of it at 720p (N/2 px of 2N/3)
+                    if s_xs = 2 then s_nshr <= resize(v_i, 3) + 2; else s_nshr <= resize(v_i, 3) + 1; end if;
                     if s_k_screen >= 4 then s_live2 <= '1'; end if;
                     if s_live2 = '0' and s_k_screen < 4 then v_i := s_k_screen(1 downto 0); else v_i := s_k_screen(9 downto 8); end if;
                     s_shape <= v_i;
@@ -414,8 +531,13 @@ begin
                         if i < to_integer(s_nsh) then v_m(i) := '1'; else v_m(i) := '0'; end if;
                     end loop;
                     s_mask   <= v_m;
-                    s_ndel   <= v_m(5 downto 0);
-                    s_rowsm1 <= v_m(6 downto 0);
+                    s_maskh  <= v_m(4 downto 0) & '1';
+                    for i in 0 to 5 loop
+                        if i < to_integer(s_nshr) then s_ndel(i) <= '1'; else s_ndel(i) <= '0'; end if;
+                    end loop;
+                    -- tear gain x 171/256 (~2/3) at 720p, so the tear spans
+                    -- the same virtual width as at 1080p
+                    s_ngh <= shift_right(s_ng, 1) + shift_right(s_ng, 3);
                     s_lvt <= s_lv0 - resize(s_lv0(9 downto 3), 10);
                     -- P12 glide, 1/8 per frame
                     v_pg := signed('0' & s_pg) + shift_right(s_pd, 3);
@@ -441,6 +563,11 @@ begin
                     s_slevel <= to_unsigned(8, 10) + resize(s_lv0(9 downto 1), 10);
                     s_pe  <= resize(s_pg(13 downto 4), 11) + 44;
                     s_bpl <= s_height * s_bk8(3 downto 0);
+                    if s_x720 = '1' then
+                        s_ngt <= s_ngh + shift_right(s_ng, 5) + shift_right(s_ng, 7);
+                    else
+                        s_ngt <= s_ng;
+                    end if;
                     s_vstep <= s_vstep + 1;
                 when 3 =>
                     if s_ksat = '1' then s_klev <= s_slevel; else s_klev <= s_level; end if;
@@ -452,7 +579,8 @@ begin
                     s_vstep <= s_vstep + 1;
                 when 4 =>
                     -- band 4 + height x K3/2048 lines (4 .. half the frame)
-                    s_bandh <= resize(s_bs(18 downto 9), 11) + 4;
+                    -- (the 4-line floor is 4 lines at 1080: s_bfl field lines)
+                    s_bandh <= resize(s_bs(18 downto 9), 11) + s_bfl;
                     s_vstep <= s_vstep + 1;
                 when 5 =>
                     if s_sw_roll = '1' then s_btop <= s_bpos(14 downto 4); else s_btop <= s_height - s_bandh; end if;
@@ -474,7 +602,7 @@ begin
             -- line / frame events
             if s_prev_avid = '1' and data_in.avid = '0' then
                 s_line_width <= s_rx; s_wm1 <= s_rx - 1; s_line <= s_line + 1; s_height <= s_line + 1;
-                if s_vcnt >= s_rowsm1 then s_vcnt <= (others => '0'); else s_vcnt <= s_vcnt + 1; end if;
+                s_ya <= s_yan;
             end if;
             s_hpar <= not s_hpar;
             if s_prev_avid = '0' and data_in.avid = '1' then
@@ -492,7 +620,7 @@ begin
                 s_hpar <= '0';
                 -- capture the last line of each cell row (shown on the
                 -- next row) and line 0 (shown on the rest of the top row)
-                if s_vcnt = s_rowsm1 or s_line = 0 then
+                if s_rowend = '1' or s_line = 0 then
                     s_capture <= '1'; s_wpar <= not s_wpar; s_rbank <= s_wpar;
                 else
                     s_capture <= '0'; s_rbank <= s_wpar;
@@ -500,7 +628,8 @@ begin
                 s_lstep <= (others => '0');
             end if;
             if data_in.vsync_n = '0' and s_prev_vsync_n = '1' then
-                s_line <= (others => '0'); s_vcnt <= (others => '0'); s_wpar <= '0';
+                s_line <= (others => '0'); s_wpar <= '0';
+                s_ya <= (others => '0');
                 if s_saw_active = '1' then s_vstep <= (others => '0'); end if;
                 s_saw_active <= '0';
             end if;
@@ -518,38 +647,54 @@ begin
     -- Read address, screen index and key (offsets 0..4)
     --------------------------------------------------------------------------
     p_addr : process(clk)
-        variable v_x, v_a : unsigned(10 downto 0);
+        variable v_r : unsigned(5 downto 0);
         variable v_k : std_logic;
     begin
         if rising_edge(clk) then
-            -- 0: x, and the dry pixel the key is taken from (two FFs deep)
-            s_x0 <= s_rx;
-            s_in_y <= unsigned(data_in.y); s_in_u <= unsigned(data_in.u); s_in_v <= unsigned(data_in.v);
-            -- 1: band tear; off-line test against the per-line range
-            -- (parallel to the add); dry luma and |chroma|
-            s_xs1 <= signed(resize(s_x0, 13)) + resize(s_off_row, 13);
-            if signed(resize(s_x0, 13)) < s_lo_row or signed(resize(s_x0, 13)) >= s_hi_row then
-                s_bg1 <= '1';
+            -- 0: band tear (real px) and the torn pixel's position in half
+            -- virtual units; off-line test against the per-line range
+            -- (parallel to the add); the dry pixel the key is taken from
+            -- (two FFs deep)
+            s_xt0 <= signed(resize(s_rx, 13)) + resize(s_off_row, 13);
+            s_ta0 <= s_xa + s_off_h;
+            if signed(resize(s_rx, 13)) < s_lo_row or signed(resize(s_rx, 13)) >= s_hi_row then
+                s_bg0 <= '1';
             else
-                s_bg1 <= '0';
+                s_bg0 <= '0';
             end if;
-            s_xn1 <= s_x0(4 downto 0);
+            s_xa0 <= s_xa;
+            s_in_y <= unsigned(data_in.y); s_in_u <= unsigned(data_in.u); s_in_v <= unsigned(data_in.v);
+            -- 1: real pixels left in the torn pixel's cell (half units
+            -- left / x step; 1080: (not x) and mask, so x + d = x or mask);
+            -- room left on the line; dry luma and |chroma|
+            v_r := (not s_ta0) and s_maskh;
+            if s_xsd = '1' then
+                s_d1 <= resize(v_r(5 downto 2), 5);
+            elsif s_x720 = '1' then
+                s_d1 <= C_DIV3(to_integer(v_r));
+            else
+                s_d1 <= v_r(5 downto 1);
+            end if;
+            s_xt1 <= unsigned(s_xt0(10 downto 0));
+            s_rem1 <= s_wm1 - unsigned(s_xt0(10 downto 0));
+            s_bg1 <= s_bg0;
+            s_xn1 <= s_xa0;
             s_dy1 <= s_in_y;
             if s_in_u(9) = '1' then s_au1 <= '0' & s_in_u(8 downto 0); else s_au1 <= to_unsigned(512, 10) - s_in_u; end if;
             if s_in_v(9) = '1' then s_av1 <= '0' & s_in_v(8 downto 0); else s_av1 <= to_unsigned(512, 10) - s_in_v; end if;
             s_bfd(1) <= s_brk_row; for i in 2 to 10 loop s_bfd(i) <= s_bfd(i - 1); end loop;
             s_nfd(1) <= s_nz_row;  for i in 2 to 11 loop s_nfd(i) <= s_nfd(i - 1); end loop;
-            -- 2: the cell's last pixel (its window is exactly the cell); a
-            -- partial last cell reads the line's last N pixels
-            if s_bg1 = '1' then v_x := (others => '0'); else v_x := unsigned(s_xs1(10 downto 0)); end if;
-            v_a := v_x or s_mask;
-            if v_a > s_wm1 then s_addr2 <= s_wm1; else s_addr2 <= v_a; end if;
+            -- 2: the cell's last pixel (its window ends there); a partial
+            -- last cell reads the line's last pixel.  Off-line reads are
+            -- discarded at the fetch (s_a_bg3).  Screen column from the
+            -- virtual x.
+            if s_d1 > s_rem1 then s_addr2 <= s_wm1; else s_addr2 <= s_xt1 + s_d1; end if;
             s_bg2 <= s_bg1;
             case to_integer(s_nsh) is
-                when 2 => s_nx2 <= s_xn1(1 downto 0) & "00";
-                when 3 => s_nx2 <= s_xn1(2 downto 0) & "0";
-                when 4 => s_nx2 <= s_xn1(3 downto 0);
-                when others => s_nx2 <= s_xn1(4 downto 1);
+                when 2 => s_nx2 <= s_xn1(2 downto 1) & "00";
+                when 3 => s_nx2 <= s_xn1(3 downto 1) & "0";
+                when 4 => s_nx2 <= s_xn1(4 downto 1);
+                when others => s_nx2 <= s_xn1(5 downto 2);
             end case;
             s_sat2 <= resize(s_au1, 11) + resize(s_av1, 11);
             s_dy2  <= s_dy1;
