@@ -239,6 +239,7 @@ toggle_switch_11         = 1     # Background = Video
 linear_potentiometer_12  = 384
 
 [firmware]
-# nextpnr placement seed for the stock LZX build: with v1.0.2 seed 1 stalls router1 on HD Analog
-# (overuse stuck for 10+ min) and seed 2 stalls too; seed 3 builds all 8 configs.
+# nextpnr placement seed for the stock LZX build (one seed, all 8 configs):
+# v1.0.3 (resolution scaling): seed 3 crashes nextpnr's router; seed 1 builds
+# all 8 (own HD timing 82.7/86.3/76.6 MHz Analog/HDMI/Dual).
 seed = 1
