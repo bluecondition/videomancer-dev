@@ -4,16 +4,18 @@
 -- This file is part of Videomancer Community Programs.
 -- See LICENSE file in the repository root for full license text.
 --
--- Cartridge v0.2.0: catalogue combo #15 (seed 20260914) -- cartoon / cel
+-- Cartridge v0.2.2: catalogue combo #15 (seed 20260914) -- cartoon / cel
 -- (ink outlines + flat luma bands) + retro palette quantization.  Three knobs
 -- each; the switches and the slider decide how they combine.
 --
 --   K1 Edge      ink threshold (lower = more ink)
 --   K2 Levels    luma bands: Off / 10 / 8 / 6 / 5 / 4 / 3 / 2
---   K3 Width     ink weight 1 / 2 / 4 / 8 px (lines 2..16 px, both directions)
+--   K3 Width     ink weight 1 / 2 / 4 / 8 px (lines 2..16 px, both directions;
+--                px at 1080p -- 720p and SD follow the screen height)
 --   K4 Palette   Gameboy / Virtual Boy / CGA / ZX Spectrum / Apple II / C64 /
 --                EGA / Pico-8
---   K5 Dither    4x4 Bayer dither before the quantizer (2-px cells in HD)
+--   K5 Dither    4x4 Bayer dither before the quantizer (2-px cells in HD,
+--                1 px x 1 field line in SD)
 --   K6 Range     luma gain into the bands and palette, 0..400% (100% = unity)
 --
 --   S7  Ink      black / tinted (darkest palette luma carrying the fill's hue)
@@ -40,6 +42,14 @@
 -- damier v0.4.4 HD HDMI bar fix) because ink and dither are full-swing pixel
 -- edges in motion; controls latched in vertical blanking (avid absent for
 -- 2048 clocks), never on vsync edges.
+--
+-- v0.2.2 (2026-10-18): resolution scaling.  The ink weight was in pixels and
+-- field lines, so 720p ink was 1.5x heavier relative to the picture and SD's
+-- downward extension ran 16 FIELD lines (~7% of the height, long drips).
+-- Taps and extension now come from per-class tables (timing ID), with SD
+-- vertical edges marking one field line.  SD's Bayer rows were keyed on
+-- field_n, which the hardware ties high (only 2 of 4 rows); they now step
+-- per line.  1080p is bit-identical.
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -176,6 +186,19 @@ architecture cartridge of program_top is
     -- downward ink extension (rows) per weight: lines 2 / 4 / 8 / 16 rows
     type t_ext is array (0 to 3) of unsigned(3 downto 0);
     constant C_EXT : t_ext := (to_unsigned(0, 4), to_unsigned(2, 4), to_unsigned(6, 4), to_unsigned(14, 4));
+    -- v0.2.2 resolution scaling: ink weight follows the screen height.  The
+    -- horizontal tap code selects a spacing of 1/2/3/4/5/8 px; per weight:
+    --   1080   taps 1 2 4 8  ext 0 2 6 14  (lines 2/4/8/16 px, 2/4/8/16 rows)
+    --   720p   taps 1 1 3 5  ext 0 0 4 8   (2/3 of that: lines 2/2/6/10)
+    --   SD     taps 1 1 2 4  ext 0 0 1 3   (half the pixels; vertical edges
+    --          mark ONE field line, so rows 1/1/2/4 = 2/2/4/8 frame lines)
+    -- The thinnest weight is the edge kernel's floor (2 px) everywhere.
+    type t_tap is array (0 to 3) of unsigned(2 downto 0);
+    constant C_TAP_HD : t_tap := ("000", "001", "011", "101");
+    constant C_TAP_7  : t_tap := ("000", "000", "010", "100");
+    constant C_TAP_SD : t_tap := ("000", "000", "001", "011");
+    constant C_EXT_7  : t_ext := (to_unsigned(0, 4), to_unsigned(0, 4), to_unsigned(4, 4), to_unsigned(8, 4));
+    constant C_EXT_SD : t_ext := (to_unsigned(0, 4), to_unsigned(0, 4), to_unsigned(1, 4), to_unsigned(3, 4));
 
     --------------------------------------------------------------------------
     -- Memories
@@ -206,7 +229,8 @@ architecture cartridge of program_top is
     signal s_wsel_c : unsigned(1 downto 0) := (others => '0');
     -- latched
     signal s_thrp, s_thrn : signed(9 downto 0) := to_signed(30, 10);
-    signal s_wsel   : unsigned(1 downto 0) := (others => '0');
+    signal s_wsel   : unsigned(2 downto 0) := (others => '0');   -- tap code
+    signal s_cls_sd, s_cls_7 : std_logic := '0';                     -- timing-ID class
     signal s_ext    : unsigned(3 downto 0) := (others => '0');
     signal s_lev    : unsigned(2 downto 0) := to_unsigned(5, 3);
     signal s_zone   : unsigned(2 downto 0) := to_unsigned(6, 3);
@@ -225,7 +249,6 @@ architecture cartridge of program_top is
     signal s_lidx   : unsigned(1 downto 0) := (others => '0');
     signal s_row0, s_vok : std_logic := '0';
     signal s_lcnt   : unsigned(2 downto 0) := (others => '0');
-    signal s_fld    : std_logic := '0';
     signal s_bx     : unsigned(2 downto 0) := (others => '0');
 
     --------------------------------------------------------------------------
@@ -290,6 +313,8 @@ architecture cartridge of program_top is
     type t_iv is array (7 to 13) of std_logic;
     signal s_iv     : t_iv := (others => '0');
     signal s_d13    : signed(9 downto 0) := (others => '0');
+    signal s_tl12, s_tr12 : unsigned(7 downto 0) := (others => '0');
+    signal s_tokl12, s_tokr12 : std_logic := '0';
     signal s_ok13   : std_logic := '0';
     signal s_y13    : unsigned(7 downto 0) := (others => '0');
     signal s_yi14   : unsigned(7 downto 0) := (others => '0');
@@ -517,6 +542,13 @@ begin
                 s_wsel_c <= v_ws(1 downto 0);
             end if;
 
+            -- timing-ID class, free-running (static while a mode runs)
+            case to_integer(unsigned(registers_in(8)(3 downto 0))) is
+                when 0 | 4 | 8 | 12 => s_cls_sd <= '1'; s_cls_7 <= '0';
+                when 5 | 6 | 14     => s_cls_sd <= '0'; s_cls_7 <= '1';
+                when others         => s_cls_sd <= '0'; s_cls_7 <= '0';
+            end case;
+
             -- line timing on the live input
             s_prev_avid <= data_in.avid;
             if data_in.avid = '1' then
@@ -532,7 +564,6 @@ begin
                 s_lw <= s_rx;
             end if;
             if s_prev_avid = '0' and data_in.avid = '1' then
-                s_fld <= not data_in.field_n;
                 if s_gap(11) = '1' then
                     s_lidx <= (others => '0');
                     s_lcnt <= (others => '0');
@@ -548,8 +579,16 @@ begin
             if s_gap(11) = '1' then
                 s_thrp   <= signed(resize(s_thr_c, 10));
                 s_thrn   <= -signed(resize(s_thr_c, 10));
-                s_wsel   <= s_wsel_c;
-                s_ext    <= C_EXT(to_integer(s_wsel_c));
+                if s_cls_sd = '1' then
+                    s_wsel <= C_TAP_SD(to_integer(s_wsel_c));
+                    s_ext  <= C_EXT_SD(to_integer(s_wsel_c));
+                elsif s_cls_7 = '1' then
+                    s_wsel <= C_TAP_7(to_integer(s_wsel_c));
+                    s_ext  <= C_EXT_7(to_integer(s_wsel_c));
+                else
+                    s_wsel <= C_TAP_HD(to_integer(s_wsel_c));
+                    s_ext  <= C_EXT(to_integer(s_wsel_c));
+                end if;
                 s_lev    <= s_lev_c;
                 s_zone   <= s_zone_c;
                 s_range  <= s_k_range(9 downto 2);
@@ -590,7 +629,13 @@ begin
             -- @3: fabric copy of the RAM word
             s_rd3 <= s_rd;
             -- @4: vertical gradient, row y (live) - row y-2
-            s_dv4  <= signed(resize(unsigned(s_lw20(3)(19 downto 12)), 10)) - signed(resize(unsigned(s_rd3(11 downto 4)), 10));
+            -- (SD: row y-1 - row y-2, so an edge marks one field line, not
+            -- the two straddling it -- one field line is already ~2 px tall)
+            if s_cls_sd = '1' then
+                s_dv4 <= signed(resize(unsigned(s_rd3(31 downto 24)), 10)) - signed(resize(unsigned(s_rd3(11 downto 4)), 10));
+            else
+                s_dv4 <= signed(resize(unsigned(s_lw20(3)(19 downto 12)), 10)) - signed(resize(unsigned(s_rd3(11 downto 4)), 10));
+            end if;
             s_y1_4 <= s_rd3(31 downto 24);
             s_c4   <= unsigned(s_rd3(3 downto 0));
             -- @5: vertical edge (rows above the frame masked)
@@ -652,14 +697,21 @@ begin
             end loop;
             -- @13: horizontal gradient across the selected spacing; both taps
             -- must lie inside the line (no ink bars at the frame sides)
+            -- (v0.2.2: six spacings now, so the taps are picked a clock
+            -- early from one tap upstream -- the same samples, s_t(i) is
+            -- s_t(i-1) a clock later -- and the subtract stays alone)
             case to_integer(s_wsel) is
-                when 0 =>      v_l := s_t(9);  v_r := s_t(7); v_okl := s_ta(9);  v_okr := s_ta(7);
-                when 1 =>      v_l := s_t(10); v_r := s_t(6); v_okl := s_ta(10); v_okr := s_ta(6);
-                when 2 =>      v_l := s_t(12); v_r := s_t(4); v_okl := s_ta(12); v_okr := s_ta(4);
-                when others => v_l := s_t(16); v_r := s_t(0); v_okl := s_ta(16); v_okr := s_ta(0);
+                when 0 =>      v_l := s_t(8);  v_r := s_t(6); v_okl := s_ta(8);  v_okr := s_ta(6);
+                when 1 =>      v_l := s_t(9);  v_r := s_t(5); v_okl := s_ta(9);  v_okr := s_ta(5);
+                when 2 =>      v_l := s_t(10); v_r := s_t(4); v_okl := s_ta(10); v_okr := s_ta(4);
+                when 3 =>      v_l := s_t(11); v_r := s_t(3); v_okl := s_ta(11); v_okr := s_ta(3);
+                when 4 =>      v_l := s_t(12); v_r := s_t(2); v_okl := s_ta(12); v_okr := s_ta(2);
+                when others => v_l := s_t(15); v_r := unsigned(s_rd3(31 downto 24));
+                               v_okl := s_ta(15); v_okr := s_lav(3);
             end case;
-            s_d13  <= signed(resize(v_r, 10)) - signed(resize(v_l, 10));
-            s_ok13 <= v_okl and v_okr;
+            s_tl12 <= v_l; s_tr12 <= v_r; s_tokl12 <= v_okl; s_tokr12 <= v_okr;
+            s_d13  <= signed(resize(s_tr12, 10)) - signed(resize(s_tl12, 10));
+            s_ok13 <= s_tokl12 and s_tokr12;
             s_y13  <= s_t(8);
             -- @14: ink flag; invert (16 <-> 235); original pixel for S9
             if ((s_d13 > s_thrp or s_d13 < s_thrn) and s_ok13 = '1') or s_iv(13) = '1' then
@@ -698,14 +750,17 @@ begin
                     s_ylut20 <= s_yr19;
                 end if;
             end if;
-            -- Bayer cell: 2 px x 2 rows in HD, 1 x 1 (frame rows) in SD
+            -- Bayer cell: 2 px x 2 rows in HD, 1 px x 1 field line in SD.
+            -- v0.2.2: SD keyed its rows on {line, field}, but field_n is tied
+            -- high on the hardware, so SD only ever dithered on Bayer rows 0
+            -- and 2 (8 of the 16 levels); it now steps all four per line.
             if s_avid_sr(17) = '1' then s_bx <= s_bx + 1; else s_bx <= (others => '0'); end if;
             if s_hd = '1' then
                 v_bx := s_bx(2 downto 1);
                 v_by := s_lcnt(2 downto 1);
             else
                 v_bx := s_bx(1 downto 0);
-                v_by := s_lcnt(0) & s_fld;
+                v_by := s_lcnt(1 downto 0);
             end if;
             s_bay20 <= to_signed(C_BAYER(to_integer(v_by & v_bx)), 5) - 8;
             -- @21: dither offset

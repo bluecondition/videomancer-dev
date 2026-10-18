@@ -1,10 +1,12 @@
 # Cartridge v0.2.0 - catalogue combo #15: cel shading + palette quantization.  See cartridge.vhd.
+# v0.2.2: resolution scaling -- K3 Width ink weight follows the screen height at 720p
+# and SD (labels are px at 1080p; 1080p unchanged); SD dithers on all 4 Bayer rows.
 
 [program]
 processing_delay_clks = 36
 program_id = "com.czartroniks.cartridge"
 program_name = "Cartridge"
-program_version = "0.2.1"
+program_version = "0.2.2"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
