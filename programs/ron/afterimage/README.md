@@ -9,7 +9,7 @@ Video frozen into a coarse 1-bit dithered frame store that feeds back on itself:
 | | Control | Range | What it does |
 |---|---|---|---|
 | K1 | Feedback | Hold / Zoom In / Zoom Out / Left / Right / Up / Down / Spin | Feedback motion: hold, zoom in/out, drift L/R/U/D, or spin |
-| K2 | Grid | 256x128 / 128x64 / 64x32 / 32x16 | Block grid size, from fine 256x128 to chunky 32x16 |
+| K2 | Grid | 256x128 / 128x64 / 64x32 / 32x16 | Block grid size, from fine 256x128 to chunky 32x16 (4:3 SD uses 3/4 of the columns, 480i's finest is 180x120, so blocks keep their shape) |
 | K3 | Exposure | -100–100% | Exposure: brightens or darkens the image before 1-bit conversion |
 | K4 | Dither | Bayer 8x8 / Bayer 4x4 / Threshold / Noise | Dither style: Bayer 8x8, Bayer 4x4, hard threshold, or boiling noise |
 | K5 | Palette | Mono / Paper / Game Boy / Phosphor / Amber / Blueprint / Ember / Neon | Picks one of 8 ink/paper colour pairs |

@@ -9,7 +9,26 @@ Architecture notes: TECHNIQUES.md "Coarse frame store in EBR".
 
 - **v1.0.0 FINAL except presets** — HW-validated, Ron signed off 2026-10-07
   ("afterimage can be finalized"). Defaults captured from hardware.
+- v1.0.2 (2026-10-17): SD/480i grid scaling; built, not flashed.
 - v0.1.0 (2026-09-04): first build, timing-closed, never flashed.
+
+## v1.0.2 resolution scaling (2026-10-17)
+
+- SD cells were 2x too big relative to the screen: grid 256x128 was capped to
+  128x64 whenever W < 1280 (the cell pipeline wrote the cell index taken 3 px
+  back, so cells under ~3 px wrote the wrong address). Now 4:3 SD (timing ID
+  0/4/8/12) uses 3/4 of the columns (192x128 / 96x64 / 48x32 / 24x16), so
+  cells keep the 1080p shape and size relative to screen height. 480i's
+  finest grid is 180x120 (exact 4 px x 2 field-line cells, 6.7% larger):
+  128 rows on ~243 field lines mixed 1- and 2-line rows (thin stripes).
+- Write address = ended cell latched with the write pulse (wc0) instead of
+  the F-chain copy; 1-line rows (short-field sources) get sampled on their
+  only line (lookahead, never fires in standard modes). Sub-640 widths still
+  cap at 64x32 (decimated sims only).
+- 1080p bit-identical to v1.0.1; 720p unchanged (256x128 at 5 px).
+- Build: builder default router2, all seed 1 -- HD Analog 89.02, SD Analog
+  94.32, HD HDMI 91.95, SD HDMI 90.38, HD Dual 76.90, SD Dual 82.86 MHz;
+  4122-4145 LC (54%), 16/32 EBR.
 
 ## v1.0.0 changes
 

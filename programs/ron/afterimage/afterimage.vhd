@@ -4,8 +4,18 @@
 -- This file is part of Videomancer Community Programs.
 -- See LICENSE file in the repository root for full license text.
 --
--- afterimage.vhd  (v1.0.0 -- "Afterimage": 1-bit frame-store feedback)
+-- afterimage.vhd  (v1.0.2 -- "Afterimage": 1-bit frame-store feedback)
 --
+-- v1.0.2: resolution scaling.  Cells stay the 1080p size relative to screen
+--         height and keep their shape: SD (4:3, timing ID 0/4/8/12) uses 3/4
+--         of the column count (192x128 .. 24x16) instead of the old W<1280
+--         halving to 128x64.  Write address = the ended cell index latched
+--         with the write pulse (was the F-chain cell 3 px back), so 3-4 px SD
+--         cells write the right cell even when a line runs a pixel short.
+--         480i finest grid is 180x120 (exact 4 px x 2 field-line cells, same
+--         shape, 6.7% larger) since 128 rows on ~243 field lines would mix
+--         1- and 2-line rows; a row only one line tall (short-field
+--         sources) is still sampled on that line.  1080p/720p unchanged.
 -- v1.0.0: Persist grain compare fixed to the labelled 25..100% (was 12.5..50%);
 --         horizontal [1 2 1]/4 luma low-pass at the output (latency 6 -> 8),
 --         re-gated on blanking, against the 1-px full-swing-step HDMI bars.
@@ -24,8 +34,9 @@
 --
 -- Controls:
 --   K1 Feedback: Hold / Zoom In / Zoom Out / Left / Right / Up / Down / Spin
---   K2 Grid: 256x128 / 128x64 / 64x32 / 32x16 cells (capped by input width
---      so a cell is never narrower than 5 px)
+--   K2 Grid: 256x128 / 128x64 / 64x32 / 32x16 cells on 16:9 (SD 4:3:
+--      192x128 / 96x64 / 48x32 / 24x16, 480i 180x120 first; same cell shape
+--      and size relative to screen height)
 --   K3 Exposure (luma bias before dithering)
 --   K4 Dither: Bayer 8x8 / Bayer 4x4 / Threshold / Noise (boils per frame)
 --   K5 Palette: 8 ink/paper pairs
@@ -138,6 +149,8 @@ architecture afterimage of program_top is
     signal s_p9   : unsigned(8 downto 0) := to_unsigned(64, 9);
     signal sw_inv, sw_ord, sw_mir, sw_vid, sw_frz : std_logic := '0';
     signal m_zoom, m_spin : std_logic := '0';
+    signal s_sd : std_logic := '0';   -- 4:3 SD timing (480i/p, 576i/p)
+    signal s_480i : std_logic := '0'; -- 480i (~243 field lines)
 
     --------------------------------------------------------------------------
     -- Raster / geometry (k=0).
@@ -160,6 +173,7 @@ architecture afterimage of program_top is
     signal g_ry   : unsigned(6 downto 0) := to_unsigned(64, 7);
     signal g_lpk  : unsigned(1 downto 0) := "10";     -- IIR shift 2..4
     signal g_cm1  : signed(9 downto 0) := to_signed(255, 10);  -- cols-1
+    signal g_t1   : unsigned(13 downto 0) := (others => '1');  -- 2H - 2*rows
     signal par    : std_logic := '0';
     signal fcnt   : unsigned(5 downto 0) := (others => '0');
     signal seed1 : unsigned(15 downto 0) := x"1234";
@@ -175,6 +189,7 @@ architecture afterimage of program_top is
     signal af   : std_logic := '0';
     signal lp0, lp1, lp2 : unsigned(9 downto 0) := C_BLKY;
     signal wp0  : std_logic := '0';
+    signal wc0  : unsigned(7 downto 0) := (others => '0');  -- ended cell
 
     --------------------------------------------------------------------------
     -- F-chain: free-running per-cell values (k=1..4).
@@ -184,27 +199,23 @@ architecture afterimage of program_top is
     signal f1_t8 : unsigned(5 downto 0) := (others => '0');
     signal f1_t4 : unsigned(3 downto 0) := (others => '0');
     signal f1_h1, f1_h2, f1_h3 : unsigned(15 downto 0) := (others => '0');
-    signal f1_c  : unsigned(7 downto 0) := (others => '0');
     signal f1_r  : unsigned(6 downto 0) := (others => '0');
 
     signal f2_sx, f2_sy : signed(9 downto 0) := (others => '0');
     signal f2_t6, f2_t8 : unsigned(5 downto 0) := (others => '0');
     signal f2_h1, f2_h2, f2_h3 : unsigned(15 downto 0) := (others => '0');
-    signal f2_c  : unsigned(7 downto 0) := (others => '0');
     signal f2_r  : unsigned(6 downto 0) := (others => '0');
 
     signal f3_qx, f3_qy : signed(3 downto 0) := (others => '0');
     signal f3_fx, f3_fy : unsigned(5 downto 0) := (others => '0');
     signal f3_t6, f3_t8 : unsigned(5 downto 0) := (others => '0');
     signal f3_h1, f3_h2, f3_h3 : unsigned(15 downto 0) := (others => '0');
-    signal f3_c  : unsigned(7 downto 0) := (others => '0');
     signal f3_r  : unsigned(6 downto 0) := (others => '0');
 
     signal f4_qx, f4_qy : signed(3 downto 0) := (others => '0');
     signal f4_fx, f4_fy : unsigned(5 downto 0) := (others => '0');
     signal f4_t6, f4_t8 : unsigned(5 downto 0) := (others => '0');
     signal f4_h1, f4_h2, f4_h3 : unsigned(15 downto 0) := (others => '0');
-    signal f4_c  : unsigned(7 downto 0) := (others => '0');
     signal f4_r  : unsigned(6 downto 0) := (others => '0');
 
     --------------------------------------------------------------------------
@@ -320,6 +331,12 @@ begin
 
             if rk1(9 downto 7) = 1 or rk1(9 downto 7) = 2 then m_zoom <= '1'; else m_zoom <= '0'; end if;
             if rk1(9 downto 7) = 7 then m_spin <= '1'; else m_spin <= '0'; end if;
+            -- 4:3 SD timings (480i, 480p, 576i, 576p)
+            case to_integer(unsigned(registers_in(8)(3 downto 0))) is
+                when 0 | 4 | 8 | 12 => s_sd <= '1';
+                when others         => s_sd <= '0';
+            end case;
+            if registers_in(8)(3 downto 0) = "0000" then s_480i <= '1'; else s_480i <= '0'; end if;
         end if;
     end process p_ctrl;
 
@@ -368,7 +385,17 @@ begin
                         yacc        <= resize(v_y - ('0' & g_h), 12);
                         r           <= r + 1;
                         mid_done    <= '0';
-                        sample_line <= '0';
+                        -- a row only ONE line tall (rows > H/2: next line
+                        -- also ends its row, i.e. yacc + 2*rows >= 2H) has
+                        -- no line past its middle: sample its only line.
+                        -- Safety net for short-field sources; never true in
+                        -- the standard modes (all have 2+ lines/row).  Row
+                        -- 128 would alias row 0.
+                        if resize(yacc, 14) >= g_t1 and r /= 127 then
+                            sample_line <= '1';
+                        else
+                            sample_line <= '0';
+                        end if;
                     else
                         yacc <= v_y(11 downto 0);
                         if mid_done = '0' and v_y >= ("00" & g_h(11 downto 1)) then
@@ -432,32 +459,63 @@ begin
                 seed3 <= rotl16(lfsr, 11) xor x"C3A5";
                 g_w <= w_meas;
                 g_h <= h_meas;
-                -- grid: cap so a cell is never narrower than 5 px
+                -- grid: rows are a fraction of the field height; columns
+                -- span the width, 3/4 as many on 4:3 SD so a cell keeps
+                -- the 16:9 shape and size relative to screen height
+                -- (SD 192 cols = 3.75 px cells; >= 3 px is all the cell
+                -- pipeline needs).  Sub-640 widths (decimated sims) cap at
+                -- the 64x32 grid as before.
                 v_gs := s_gsel;
-                if w_meas < 1280 and v_gs = 0 then v_gs := "01"; end if;
-                if w_meas < 640 and v_gs = 1 then v_gs := "10"; end if;
+                if w_meas < 640 and v_gs(1) = '0' then v_gs := "10"; end if;
                 case v_gs is
-                    when "00" => g_cols <= to_unsigned(256, 9); g_rows <= to_unsigned(128, 8);
-                                 g_cx <= to_unsigned(128, 8); g_ry <= to_unsigned(64, 7);
-                                 g_lpk <= "10"; g_cm1 <= to_signed(255, 10);
-                    when "01" => g_cols <= to_unsigned(128, 9); g_rows <= to_unsigned(64, 8);
-                                 g_cx <= to_unsigned(64, 8); g_ry <= to_unsigned(32, 7);
-                                 g_lpk <= "11"; g_cm1 <= to_signed(127, 10);
-                    when "10" => g_cols <= to_unsigned(64, 9); g_rows <= to_unsigned(32, 8);
-                                 g_cx <= to_unsigned(32, 8); g_ry <= to_unsigned(16, 7);
-                                 g_lpk <= "00"; g_cm1 <= to_signed(63, 10);
-                    when others => g_cols <= to_unsigned(32, 9); g_rows <= to_unsigned(16, 8);
-                                 g_cx <= to_unsigned(16, 8); g_ry <= to_unsigned(8, 7);
-                                 g_lpk <= "00"; g_cm1 <= to_signed(31, 10);
+                    when "00" => g_rows <= to_unsigned(128, 8); g_ry <= to_unsigned(64, 7); g_lpk <= "10";
+                    when "01" => g_rows <= to_unsigned(64, 8);  g_ry <= to_unsigned(32, 7); g_lpk <= "11";
+                    when "10" => g_rows <= to_unsigned(32, 8);  g_ry <= to_unsigned(16, 7); g_lpk <= "00";
+                    when others => g_rows <= to_unsigned(16, 8); g_ry <= to_unsigned(8, 7); g_lpk <= "00";
                 end case;
+                if s_sd = '0' then
+                    case v_gs is
+                        when "00" => g_cols <= to_unsigned(256, 9); g_cx <= to_unsigned(128, 8); g_cm1 <= to_signed(255, 10);
+                        when "01" => g_cols <= to_unsigned(128, 9); g_cx <= to_unsigned(64, 8);  g_cm1 <= to_signed(127, 10);
+                        when "10" => g_cols <= to_unsigned(64, 9);  g_cx <= to_unsigned(32, 8);  g_cm1 <= to_signed(63, 10);
+                        when others => g_cols <= to_unsigned(32, 9); g_cx <= to_unsigned(16, 8); g_cm1 <= to_signed(31, 10);
+                    end case;
+                else
+                    case v_gs is
+                        when "00" =>
+                            if s_480i = '1' then
+                                -- 480i: 128 rows on ~243 field lines would mix
+                                -- 1- and 2-line rows (thin stripes); 180x120 =
+                                -- exact 4 px x 2 field-line cells, same shape,
+                                -- 6.7% larger
+                                g_cols <= to_unsigned(180, 9); g_cx <= to_unsigned(90, 8);  g_cm1 <= to_signed(179, 10);
+                                g_rows <= to_unsigned(120, 8); g_ry <= to_unsigned(60, 7);
+                            else
+                                g_cols <= to_unsigned(192, 9); g_cx <= to_unsigned(96, 8);  g_cm1 <= to_signed(191, 10);
+                            end if;
+                        when "01" => g_cols <= to_unsigned(96, 9);  g_cx <= to_unsigned(48, 8);  g_cm1 <= to_signed(95, 10);
+                        when "10" => g_cols <= to_unsigned(48, 9);  g_cx <= to_unsigned(24, 8);  g_cm1 <= to_signed(47, 10);
+                        when others => g_cols <= to_unsigned(24, 9); g_cx <= to_unsigned(12, 8); g_cm1 <= to_signed(23, 10);
+                    end case;
+                end if;
             end if;
 
-            -- write pulse: a cell just ended on the row's sample line
+            -- write pulse: a cell just ended on the row's sample line;
+            -- wc0 = the ended cell (c - 1 after a cell start, c at the
+            -- active-video fall)
             if sample_line = '1' and (cs = '1' or af = '1') then
                 wp0 <= '1';
             else
                 wp0 <= '0';
             end if;
+            if cs = '1' then
+                wc0 <= c(7 downto 0) - 1;
+            else
+                wc0 <= c(7 downto 0);
+            end if;
+
+            -- single-line-row threshold, free-running from the frame latch
+            g_t1 <= shift_left(resize(g_h, 14), 1) - shift_left(resize(g_rows, 14), 1);
         end if;
     end process p_position;
 
@@ -498,7 +556,6 @@ begin
             v_x3 := v_a15 xor rotl16(seed3, 3);
             v_y3 := rotl16(v_a15, 5) xor seed3;
             f1_h3 <= v_x3 + rotl16(v_y3, 7);
-            f1_c <= c(7 downto 0);
             f1_r <= r(6 downto 0);
 
             -----------------------------------------------------------------
@@ -520,7 +577,7 @@ begin
             f2_h1 <= hround(f1_h1, 5, 3);
             f2_h2 <= hround(f1_h2, 5, 3);
             f2_h3 <= hround(f1_h3, 5, 3);
-            f2_c <= f1_c; f2_r <= f1_r;
+            f2_r <= f1_r;
 
             -----------------------------------------------------------------
             -- F3: quotient/fraction of the 1/64 displacement, hash round 2
@@ -531,7 +588,7 @@ begin
             f3_h1 <= hround(f2_h1, 11, 5);
             f3_h2 <= hround(f2_h2, 11, 5);
             f3_h3 <= hround(f2_h3, 11, 5);
-            f3_c <= f2_c; f3_r <= f2_r;
+            f3_r <= f2_r;
 
             -----------------------------------------------------------------
             -- F4: hash round 3 (k=4)
@@ -541,19 +598,21 @@ begin
             f4_h1 <= hround(f3_h1, 7, 3);
             f4_h2 <= hround(f3_h2, 7, 3);
             f4_h3 <= hround(f3_h3, 7, 3);
-            f4_c <= f3_c; f4_r <= f3_r;
+            f4_r <= f3_r;
 
             -----------------------------------------------------------------
             -- P0: pulse capture of the ended cell.  wp0 is k=1, so F4 here
-            -- is pixel p-3 (inside the ended cell for any width >= 4) and
-            -- lp2 is the IIR after the cell's last pixel.
+            -- is pixel p-3 (inside the ended cell for any width >= 3) and
+            -- lp2 is the IIR after the cell's last pixel.  The cell index
+            -- itself comes from wc0 (latched with the pulse), so even a
+            -- truncated 2-px last cell writes its own address.
             -----------------------------------------------------------------
             p0_v  <= wp0;
             p0_qx <= f4_qx; p0_fx <= f4_fx; p0_qy <= f4_qy; p0_fy <= f4_fy;
             if s_dsel = "11" then p0_t6 <= f4_h2(13 downto 8); else p0_t6 <= f4_t6; end if;
             p0_t8 <= f4_t8;
             p0_h1 <= f4_h1; p0_h2 <= f4_h2; p0_h3 <= f4_h3;
-            p0_c  <= f4_c;  p0_r  <= f4_r;
+            p0_c  <= wc0;   p0_r  <= f4_r;
             p0_l  <= lp2;
 
             -----------------------------------------------------------------
