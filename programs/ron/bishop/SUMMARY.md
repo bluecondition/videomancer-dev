@@ -21,17 +21,17 @@ stays in EBR). The per-pixel path is one buffer read and an output mux.
 
 ## Controls
 - K1 Mouth — 0% closed .. 100% open
-- K2 Line Weight — 1 / 3 / 5 / 7 px
+- K2 Line Weight — 1 / 3 / 5 / 7 px (at 1080; scaled per mode, never under 1 px — see v1.0.3)
 - K3 Palette — Green, Amber, Cyan, Red, White, Magenta, Yellow, Blue
 - K4 Expression — blends Neutral → Happy → Sad → Angry → Surprised
 - K5 Noise — vertex wobble amplitude; the wobble speed rises with it (one knob, never gated)
-- K6 Position — horizontal pan, -100..100% = -512..+511 px about the measured centre
+- K6 Position — horizontal pan, -100..100% = -512..+511 px about the measured centre (1080; scaled per mode)
 - S7 Fill — Outline / Solid (eyes and mouth filled)
 - S8 Eyes — Closed / Open
 - S9 Noise — Smooth / Streaks
 - S10 Invert — Off / On: black lines (and fills) on a palette-colour field; over Video it is black ink
 - S11 Background — Black / Video
-- P12 Head Size — natural size .. ~95% of screen height
+- P12 Head Size — natural size .. ~95% of screen height (same range in every mode since v1.0.3)
 
 ## Presets
 Neutral, Happy, Angry, Surprised, Solid Fill (magenta, filled, half size),
@@ -41,7 +41,7 @@ re-capturing from the hardware once the look is dialled in. (The old presets
 had S8 Eyes = Closed; they are Open now.)
 
 ## Status
-**v1.0.0 FINAL, HW-validated, signed off 2026-10-09.** Open ideas (not planned): S8 Open/Blink animation, K6 Tilt rotation, SD shrink so SD stops overrunning.
+**v1.0.0 FINAL, HW-validated, signed off 2026-10-09.** v1.0.3 (2026-10-17) adds resolution scaling — built, not flashed. Open ideas (not planned): S8 Open/Blink animation, K6 Tilt rotation.
 
 - 2026-05-31: expressions milestone HW-validated ("looks very good").
 - 2026-06-01: horizontal thickness fix HW-approved; slope-scaled diagonal
@@ -88,11 +88,46 @@ had S8 Eyes = Closed; they are Open now.)
 - 2026-10-09 **v1.0.0 FINAL** — Ron signed off ("we can finalize bishop for
   now"). HW-validated: contracts, colours, pan, invert, wipe. Presets are
   hand-written and could still be re-captured from hardware.
+- 2026-10-17 **v1.0.3 resolution scaling** (scaling-work pass; 1080p output
+  bit-identical to v1.0.2 in the GHDL sim, 0 differing pixels). Before, the
+  mesh was fixed pixels (~516 x 777 rows): 720p cropped the chin, SD showed a
+  ~4x-zoomed fragment. Now every mode draws the 1080p head scaled to the
+  screen height (virtual 1080-line units; SD is a 1440-unit 4:3 window, so
+  the head keeps its shape on a 4:3 screen):
+  - the per-mode factor k (x: 1, 2/3, 1/2; y: 1080 / field lines) is folded
+    into the copy engine's P12 scale product — sc_mx_r / sc_my_r =
+    256*(k*(1+m/256) - 1), a signed 9-bit factor per axis from a serial
+    shift-add in size_proc (the shared multiplier is now 11x9). y gets a
+    per-mode row offset (the head centre lands at HEAD_Y_MID*k) and the bottom
+    field of interlaced SD half a field line lower;
+  - P12's ceiling is the 1080p 83 in every mode (was 0 below 820 lines);
+  - stroke half-widths per axis (padx px, pady field lines): the 1080 stroke
+    scaled and rounded to the nearest odd width, min 1 px — 720p 1/3/3/5 px;
+    SD x 1/1/3/3 px, 480i/576i rows 1 line (576i 7 px: 3); 1080p unchanged;
+  - K6 pan, the head clear window hw, and the noise span floor scale too;
+  - SD wipes 8 entries/line (was 32); R_CLEAR never ends before the 256-edge
+    walk (N + 12 cycles);
+  - overrun guard: an hsync arriving while the raster is still stamping ends
+    the pass (remaining stamps on that row dropped) instead of being missed
+    (a missed hsync skipped the next row's R_CLEAR walk: DDA step lost, edges
+    starting there loaded stale x — a kinked/displaced head).
+  Sheet: .scaling_work/sheets/bishop_v2.png (r720 0.98, rSD 0.92; was
+  0.22 / 0.09).
 
 ## Known limits
-- SD (858 clk/line) cannot hold the mesh at natural size; the rasteriser
-  overruns and SD shows a cropped, degraded face. HD is the target.
-- Worst-case HD line budget ≈ 1950 of 2200 cycles (7 px lines, full size, incl. the 32-cycle wipe).
+- Line budget (cycle model, .scaling_work/bishop_tmp/budget2.py, K4 swept):
+  SD 480i, eyes/mouth open: 82-97% at P12 0, up to ~105% at P12 50%,
+  ~114% at P12 max — one or two rows per field (the forehead band) overrun
+  for some expressions and lose a few stamps (guarded). Eyes/mouth closed
+  with 3-7 px lines: 103-120%. 576i similar; 576i 7 px (3-line strokes)
+  up to ~140-170%. 720p: open <= 87%, closed 7 px up to ~127%. The fixed
+  cost (R_CLEAR's 268-cycle edge walk / clear window + ~7 cycles per active
+  edge) is ~55% of an SD line, so SD has little room for stamps.
+- 1080p already overruns with eyes/mouth closed at 5-7 px (model: up to
+  ~126% at P12 max, the near-flat lid edges sweep 170-191 stamps per row,
+  mostly clamped away). Pre-existing; since v1.0.3 those rows lose stamps
+  instead of skipping a row.
+- Worst-case HD line budget, eyes open ≈ 1960 of 2200 cycles (7 px lines, full size, incl. the 32-cycle wipe).
 - Mesh ceilings: 256 edges, max |x| ≤ 255 at scale 1, stamp ≤ 127.
 
 ## Build notes
@@ -100,6 +135,20 @@ had S8 Eyes = Closed; they are Open now.)
   router2 left HD configs 0.5–1.9 MHz over target and seed-fragile
   (HD Analog needed seed 4 on the Aug 30 build).
 - Seeds / Fmax for the current build:
+
+2026-10-17 v1.0.3 (resolution scaling), `NEXTPNR_ROUTER="--router router1" ./build_programs.sh ron bishop`,
+**all 6 configs seed 1**, 6850/7680 LC (89%, was ~6320), 22/32 EBR.
+
+| Config | Seed | Fmax (MHz) |
+|--------|------|------------|
+| HD Analog | 1 | 79.92 |
+| HD HDMI | 1 | 87.61 |
+| HD Dual | 1 | 80.87 |
+| SD Analog | 1 | 78.43 |
+| SD HDMI | 1 | 81.61 |
+| SD Dual | 1 | 75.96 |
+
+Previous build:
 
 2026-10-09 v1.0.0 (= v0.4.3 bitstreams, version bump only), router1,
 ~6320 LC (82%), 22/32 EBR. **HD Dual needs SEED=2** (seed 1 stalled router1 and timed out; the builder retried).

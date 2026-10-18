@@ -6,6 +6,21 @@
 --
 -- Bishop v2 — line-buffer wireframe head.
 --
+-- v1.0.3 (2026-10-17): resolution scaling.  The head is sized in virtual
+-- 1080-line units: at 720p and SD it is the 1080p head scaled to the screen
+-- height (SD shows a 1440-unit-wide 4:3 window, so the head keeps its shape on
+-- a 4:3 screen).  The per-mode factor is folded into the copy engine's P12
+-- scale product (one signed 9-bit factor per axis, about HEAD_Y_MID, plus a
+-- per-mode row offset and a half-row bias on the bottom field of interlaced
+-- SD), so the raster still works in real pixels and field lines.  P12 has
+-- the 1080p range in every mode; K6 pan, the stroke half-widths (per axis,
+-- rounded, never under 1 px), the noise span floor and the head clear window
+-- scale with it.  SD also wipes 8 entries per line instead of 32, and a
+-- raster pass that is still stamping when the next hsync arrives now aborts
+-- its remaining stamps instead of missing that hsync (a missed hsync skipped
+-- a row's DDA step and kinked every edge crossing it).  At 1080p every
+-- factor is the identity and the picture is bit-identical to v1.0.2.
+--
 -- Architecture:
 --   v1 instantiated one DDA + per-pixel hit-tester per edge, in parallel.
 --   At ~80 LCs/edge × 50 edges that filled most of HX4K just on edge logic.
@@ -30,9 +45,11 @@
 --
 -- Worst-case HD budget (256 edges, K2 = 7 px, P12 = full size):
 --   CLEAR 696 + WIPE 32 + STAMP ~1220  ≈ 1950 of the 2200 cycles in an HD line.
--- SD (858 cycles/line) cannot hold the full-size mesh; the head is drawn
--- at mesh scale there and the rasterizer runs past the line, so SD shows a
--- cropped, degraded face.  HD is the design target.
+-- (v1.0.3) SD (858 cycles/line) now draws the head scaled to 243 field
+-- lines; R_CLEAR's 268-cycle edge walk plus ~7 cycles per active edge is a
+-- larger share of the short line, so the heaviest settings (eyes or mouth
+-- closed with thick lines) can still overrun a few rows -- they now lose
+-- stamps on those rows instead of a whole row.
 --
 -- Register map:
 --   registers_in(0) = K1 Mouth      (analog close amount)
@@ -40,7 +57,8 @@
 --   registers_in(2) = K3 Palette    (top 3 bits = palette index)
 --   registers_in(3) = K4 Expression (blend across Neutral..Surprised)
 --   registers_in(4) = K5 Noise       (top 5 bits = spread; speed rises with it)
---   registers_in(5) = K6 Position    (bipolar horizontal pan, +-511 px)
+--   registers_in(5) = K6 Position    (bipolar horizontal pan, +-511 px at 1080)
+--   registers_in(8) = video timing ID (resolution scaling, v1.0.3)
 --   registers_in(6) = Switches      (bit0 = T7 Fill, bit1 = T8 Eyes open,
 --                                    bit2 = T9 noise streaks, bit3 = T10 Invert,
 --                                    bit4 = T11 BG-Video)
@@ -172,7 +190,14 @@ architecture bishop of program_top is
     signal h_orig_r   : unsigned(11 downto 0) := to_unsigned(960, 12);
     -- K2 Thickness — half-width of the stroke in px.  Rendered perpendicular
     -- thickness is 2*pad+1 (1 / 3 / 5 / 7 px) for EVERY edge orientation.
-    signal pad_r      : unsigned(1 downto 0) := "01";
+    -- (v1.0.3) One half-width per axis: padx_r in pixels (across), pady_r in
+    -- field lines (down).  Both equal the K2 index at 1080p; other modes take
+    -- the 1080p stroke scaled to the mode and rounded to the nearest odd
+    -- width (min 1 px) -- see padx_pre_r / pady_pre_r.
+    signal padx_r     : unsigned(1 downto 0) := "01";
+    signal pady_r     : unsigned(1 downto 0) := "01";
+    signal padx_pre_r : unsigned(1 downto 0) := "01";
+    signal pady_pre_r : unsigned(1 downto 0) := "01";
     -- Free-running label decodes for K2/K3 (kept out of the vsync cone).
     -- Labelled defaults: at program load the firmware writes the
     -- initial_value_label's INDEX (0..N-1) into the register, not a 0..1023
@@ -209,7 +234,64 @@ architecture bishop of program_top is
     -- +-hw_r pre-formed as signed clamp limits for CP_XEXT2.
     signal hw_lo_r    : signed(12 downto 0) := to_signed(-HEAD_HW_BASE, 13);
     signal hw_hi_r    : signed(12 downto 0) := to_signed(HEAD_HW_BASE - 1, 13);
-    signal sz_step    : integer range 0 to 4 := 4;
+    signal sz_step    : integer range 0 to 14 := 14;
+
+    -- ---------------------------------------------------------------
+    -- RESOLUTION SCALING (v1.0.3).  Mode class from the video timing ID:
+    --   0 1080p  1 1080i  2 720p  3 480i  4 480p  5 576i  6 576p
+    -- Each mode shows the 1080p head at the same fraction of the screen
+    -- height (virtual 1080-line units; SD x steps 2.0, i.e. a 1440-wide
+    -- 4:3 window).  The copy engine already scales the mesh by
+    -- (1 + m/256) for P12; that factor becomes k*(1 + m/256) per axis, with
+    -- k = 1 at 1080p (bit-identical), so the raster keeps working in real
+    -- pixels / field lines.  sc_mx_r / sc_my_r are 256*(S - 1) for the two
+    -- axes (signed, -199..127), formed once per frame in size_proc by a
+    -- serial shift-add multiply of (256 + m) by the mode's k in Q8
+    -- (md_kxq_r / md_kyq_r).
+    -- ---------------------------------------------------------------
+    signal md_cls_r   : unsigned(2 downto 0) := "000";
+    signal md_ident_r : std_logic := '1';   -- 1080p: every factor is 1
+    signal md_sd_r    : std_logic := '0';   -- SD: short wipe
+    signal md_kxq_r   : unsigned(8 downto 0) := to_unsigned(256, 9);
+    signal md_kyq_r   : unsigned(8 downto 0) := to_unsigned(256, 9);
+    -- y offset in Q8 rows, added inside the y scale product's floor:
+    -- 256*HEAD_Y_MID*(ky - 1) (the head scales about HEAD_Y_MID, but its
+    -- centre must land at HEAD_Y_MID*ky below the screen centre) + 128 (round).
+    -- The bottom field of an interlaced mode sits half a field line lower
+    -- (md_yoffb_r = md_yoff_r - 128).  Both 0 at 1080p.
+    signal md_yoff_r  : signed(13 downto 0) := (others => '0');
+    signal md_yoffb_r : signed(13 downto 0) := (others => '0');
+    signal yoff_r     : signed(13 downto 0) := (others => '0');
+    signal field_bot_r: std_logic := '0';
+    -- NOISE_SPAN_FLOOR (8 rows at 1080) in this mode's rows.
+    signal md_nfl_r   : unsigned(3 downto 0) := to_unsigned(8, 4);
+    -- K6 pan scaled to the mode (free-running), latched into pan_r at vsync.
+    signal pan_pre_r  : signed(9 downto 0) := (others => '0');
+    -- size_proc's serial multiply: (256 + m) * kq, MSB-first.
+    signal sz_a_r     : unsigned(9 downto 0) := (others => '0');
+    signal sz_kx_r    : unsigned(8 downto 0) := (others => '0');
+    signal sz_ky_r    : unsigned(8 downto 0) := (others => '0');
+    signal sz_accx_r  : unsigned(17 downto 0) := (others => '0');
+    signal sz_accy_r  : unsigned(17 downto 0) := (others => '0');
+    signal sz_cls_r   : unsigned(2 downto 0) := "000";  -- class hw_r was formed for
+    signal sc_mx_r    : signed(8 downto 0) := (others => '0');
+    signal sc_my_r    : signed(8 downto 0) := (others => '0');
+    -- Raster overrun guard: an hsync that arrives while the pass is still
+    -- stamping is remembered here and ends the pass (see R_STAMP_SCAN).
+    signal hs_pend_r  : std_logic := '0';
+
+    -- R_CLEAR length: the clear window 2*hw, but never shorter than the
+    -- edge walk (C_NUM_EDGES issues + the 5-stage update pipe; same N + 12
+    -- rule as build_svg_mesh.py).  Only small (SD) heads reach the floor.
+    function f_clear_m1(h : unsigned(9 downto 0)) return unsigned is
+        variable v : unsigned(10 downto 0);
+    begin
+        v := shift_left(resize(h, 11), 1) - to_unsigned(1, 11);
+        if v < to_unsigned(C_NUM_EDGES + 11, 11) then
+            v := to_unsigned(C_NUM_EDGES + 11, 11);
+        end if;
+        return v;
+    end function;
 
     -- ---------------------------------------------------------------
     -- Mutable edge state.  current_x lives in a small BRAM (1R1W,
@@ -660,11 +742,13 @@ architecture bishop of program_top is
     -- 0..3 noise, 4..7 expr, 8..11 mouth, 12..15 P12 head scale.
     signal m_cnt   : integer range 0 to 15 := 0;
     signal mul_a_r : signed(10 downto 0) := (others => '0');
-    signal mul_b_r : signed(7 downto 0)  := (others => '0');
+    -- 9 bits since v1.0.3: the per-mode scale factors (sc_mx_r / sc_my_r)
+    -- reach -199.
+    signal mul_b_r : signed(8 downto 0)  := (others => '0');
     -- The product gets a cycle of its own (CP_MDO) before anything consumes
     -- it (CP_MACC).  Folding multiply + shift + accumulate into one state made
     -- the 11x8 array feed a 20-bit carry chain and was the HD critical path.
-    signal prod_r  : signed(18 downto 0) := (others => '0');
+    signal prod_r  : signed(19 downto 0) := (others => '0');
     -- ONE-HOT destination for prod_r, latched in CP_MSEL alongside the
     -- operands.  Decoding the destination from m_cnt inside CP_MACC put an
     -- 8-LUT chain (shared with cp_state's own next-state cone) in front of
@@ -789,6 +873,7 @@ begin
     -- Input pipe + timing tracking
     -- ---------------------------------------------------------------
     timing_proc : process(clk)
+        variable v_pk : signed(9 downto 0);
     begin
         if rising_edge(clk) then
             pipe(0) <= data_in;
@@ -809,6 +894,81 @@ begin
             else
                 k3_idx_r <= unsigned(registers_in(2)(9 downto 7));
             end if;
+
+            -- ---- Resolution scaling: per-mode constants (free-running,
+            -- quasi-static, kept out of the vsync cone) ----
+            case to_integer(unsigned(registers_in(8)(3 downto 0))) is
+                when 1 | 2 | 10 => md_cls_r <= "001";   -- 1080i
+                when 5 | 6 | 14 => md_cls_r <= "010";   -- 720p
+                when 0          => md_cls_r <= "011";   -- 480i
+                when 4          => md_cls_r <= "100";   -- 480p
+                when 8          => md_cls_r <= "101";   -- 576i
+                when 12         => md_cls_r <= "110";   -- 576p
+                when others     => md_cls_r <= "000";   -- 1080p
+            end case;
+            -- k in Q8 per axis (x: 1080 lines 1.0, 720p 2/3, SD 1/2; y: 1080
+            -- over this mode's FIELD lines), the y offset (see md_yoff_r) and
+            -- the noise span floor (8 rows at 1080, scaled, min 2).
+            case md_cls_r is
+                when "001" =>   -- 1080i: y 1/2
+                    md_kxq_r <= to_unsigned(256, 9); md_kyq_r <= to_unsigned(128, 9);
+                    md_yoff_r <= to_signed(-3200, 14); md_nfl_r <= to_unsigned(4, 4);
+                when "010" =>   -- 720p: 2/3
+                    md_kxq_r <= to_unsigned(171, 9); md_kyq_r <= to_unsigned(171, 9);
+                    md_yoff_r <= to_signed(-2091, 14); md_nfl_r <= to_unsigned(5, 4);
+                when "011" =>   -- 480i: 486 / 2160 per field line
+                    md_kxq_r <= to_unsigned(128, 9); md_kyq_r <= to_unsigned(58, 9);
+                    md_yoff_r <= to_signed(-5030, 14); md_nfl_r <= to_unsigned(2, 4);
+                when "100" =>   -- 480p: 480 / 1080
+                    md_kxq_r <= to_unsigned(128, 9); md_kyq_r <= to_unsigned(114, 9);
+                    md_yoff_r <= to_signed(-3570, 14); md_nfl_r <= to_unsigned(4, 4);
+                when "101" =>   -- 576i: 576 / 2160 per field line
+                    md_kxq_r <= to_unsigned(128, 9); md_kyq_r <= to_unsigned(68, 9);
+                    md_yoff_r <= to_signed(-4753, 14); md_nfl_r <= to_unsigned(2, 4);
+                when "110" =>   -- 576p: 576 / 1080
+                    md_kxq_r <= to_unsigned(128, 9); md_kyq_r <= to_unsigned(137, 9);
+                    md_yoff_r <= to_signed(-2978, 14); md_nfl_r <= to_unsigned(4, 4);
+                when others =>  -- 1080p: identity
+                    md_kxq_r <= to_unsigned(256, 9); md_kyq_r <= to_unsigned(256, 9);
+                    md_yoff_r <= to_signed(0, 14);     md_nfl_r <= to_unsigned(8, 4);
+            end case;
+            md_yoffb_r <= md_yoff_r - to_signed(128, 14);
+            if md_cls_r = "000" then md_ident_r <= '1'; else md_ident_r <= '0'; end if;
+            if md_cls_r(2) = '1' or md_cls_r = "011" then md_sd_r <= '1';
+            else md_sd_r <= '0'; end if;
+
+            -- K2 stroke half-widths per axis.  The 1080p stroke 2w+1 scaled to
+            -- the mode and rounded to the nearest odd width (min 1 px):
+            --   x: 1080 lines w; 720p 0,1,1,2; SD 0,0,1,1
+            --   y: 1080p w; 1080i 0,0,1,1; 720p 0,1,1,2; 480i 0,0,0,0;
+            --      480p/576p 0,0,1,1; 576i 0,0,0,1
+            case md_cls_r is
+                when "000" =>
+                    padx_pre_r <= k2_idx_r;  pady_pre_r <= k2_idx_r;
+                when "001" =>
+                    padx_pre_r <= k2_idx_r;  pady_pre_r <= '0' & k2_idx_r(1);
+                when "010" =>
+                    padx_pre_r <= (k2_idx_r(1) and k2_idx_r(0)) & (k2_idx_r(1) xor k2_idx_r(0));
+                    pady_pre_r <= (k2_idx_r(1) and k2_idx_r(0)) & (k2_idx_r(1) xor k2_idx_r(0));
+                when "011" =>
+                    padx_pre_r <= '0' & k2_idx_r(1);  pady_pre_r <= "00";
+                when "101" =>
+                    padx_pre_r <= '0' & k2_idx_r(1);
+                    pady_pre_r <= '0' & (k2_idx_r(1) and k2_idx_r(0));
+                when others =>
+                    padx_pre_r <= '0' & k2_idx_r(1);  pady_pre_r <= '0' & k2_idx_r(1);
+            end case;
+
+            -- K6 = POSITION: offset-binary knob -> two's complement pan (flip
+            -- the MSB), -512..+511 px at 1080, scaled by the mode's x step.
+            v_pk := signed(registers_in(5)(9 downto 0) xor "1000000000");
+            case md_cls_r is
+                when "000" | "001" => pan_pre_r <= v_pk;
+                when "010"         => pan_pre_r <= shift_right(v_pk, 1)
+                                                 + shift_right(v_pk, 3)
+                                                 + shift_right(v_pk, 5);
+                when others        => pan_pre_r <= shift_right(v_pk, 1);
+            end case;
 
             if data_in.hsync_n = '0' and prev_hsync_n = '1' then
                 hsync_falling_r <= '1';
@@ -868,7 +1028,12 @@ begin
                 fill_on_r <= registers_in(6)(0);  -- T7: 1 = solid-fill features
                 open_eyes_r  <= registers_in(6)(1);  -- T8: eyes  open(1)/closed(0)
                 -- K2 Thickness: top 2 bits → pad 0..3 → stroke 1/3/5/7 px
-                pad_r      <= k2_idx_r;
+                -- (per axis, scaled to the mode; = k2_idx_r at 1080p)
+                padx_r     <= padx_pre_r;
+                pady_r     <= pady_pre_r;
+                -- bottom field of an interlaced mode (SD only: HD inputs tie
+                -- field_n high) is drawn half a field line lower
+                field_bot_r <= not data_in.field_n;
                 -- ---- P12 head size ----
                 -- Only the raw knob is latched here; the height-derived
                 -- ceiling and the scale factor itself are formed in the copy
@@ -892,9 +1057,9 @@ begin
                 noise_spread_r <= unsigned(registers_in(4)(9 downto 5));
                 noise_speed_r  <= to_unsigned(8, 5) + ('0' & unsigned(registers_in(4)(9 downto 6)));
                 noise_t_r      <= noise_t_r + resize(noise_speed_r, 16);
-                -- K6 = POSITION: offset-binary knob -> two's complement pan
-                -- (flip the MSB), -512..+511 px about the measured centre.
-                pan_r <= signed(registers_in(5)(9 downto 0) xor "1000000000");
+                -- K6 = POSITION: -512..+511 px about the measured centre at
+                -- 1080, scaled to the mode (pan_pre_r).
+                pan_r <= pan_pre_r;
             end if;
         end if;
     end process;
@@ -1014,18 +1179,23 @@ begin
         -- behind that read was the HD critical path.
         procedure compute_counts_a2 is
             variable ext : unsigned(10 downto 0);
+            variable v_2a : unsigned(10 downto 0);
         begin
+            -- (v1.0.3) Per-axis form: ext = pady*a + padx/2 (sloped) or padx
+            -- (a = 0 / flat).  With padx = pady = pad (1080p) it is exactly
+            -- the old pad*a + pad/2.  padx/2 is 0 or 1, OR-ed into the LSB of
+            -- the doubled slope so no extra adder sits on this path.
+            v_2a := shift_left(resize(abs_s_held, 11), 1);
+            v_2a(0) := padx_r(1);
             if abs_s_held = 0 or flat_held = '1' then
-                ext := resize(pad_r, 11);
+                ext := resize(padx_r, 11);
             else
-                case pad_r is
-                    when "00"   => ext := (others => '0');
-                    when "01"   => ext := resize(abs_s_held, 11);
-                    when "10"   => ext := shift_left(resize(abs_s_held, 11), 1)
-                                        + to_unsigned(1, 11);
-                    when others => ext := shift_left(resize(abs_s_held, 11), 1)
-                                        + resize(abs_s_held, 11)
-                                        + to_unsigned(1, 11);
+                case pady_r is
+                    when "00"   => ext := resize(padx_r(1 downto 1), 11);
+                    when "01"   => ext := resize(abs_s_held, 11)
+                                        + resize(padx_r(1 downto 1), 11);
+                    when "10"   => ext := v_2a;
+                    when others => ext := v_2a + resize(abs_s_held, 11);
                 end case;
             end if;
             if ext > to_unsigned(MAX_EXT, 11) then
@@ -1121,9 +1291,9 @@ begin
             -- add here (a stage with nothing else in it) keeps the r->r2
             -- window test down to two plain register compares.
             upd_ymin_r   <= signed(act_ymin_rd(12 downto 0))
-                          - signed(resize(pad_r, 13));
+                          - signed(resize(pady_r, 13));
             upd_ymax_r   <= signed(act_ymax_rd(12 downto 0))
-                          + signed(resize(pad_r, 13));
+                          + signed(resize(pady_r, 13));
             if act_ymin_rd(12 downto 0) = act_ymax_rd(12 downto 0) then
                 upd_horiz_r <= '1';
             else
@@ -1166,6 +1336,18 @@ begin
             upd_is_horiz_r3 <= upd_is_horiz_r2;
             upd_is_ymin_r3  <= upd_is_ymin_r2;
             upd_active_r3   <= upd_active_r2;
+
+            -- Overrun guard (v1.0.3): an hsync that lands while a pass is
+            -- still running is remembered; R_STAMP_SCAN then drops the rest of
+            -- the active list and R_STAMP_DRAIN starts the next pass.  Before
+            -- this the hsync was simply missed: the bank swap slipped a line
+            -- and the next row's R_CLEAR walk (its DDA step and the ymin
+            -- reload of edges starting there) never ran, kinking every edge
+            -- through that row.  A pass that ends in time never sets it.
+            if hsync_falling_r = '1' and raster_state /= R_IDLE
+               and raster_state /= R_STAMP_DRAIN then
+                hs_pend_r <= '1';
+            end if;
 
             case raster_state is
 
@@ -1227,7 +1409,11 @@ begin
                         wipe_ptr_b_r  <= wipe_ptr_b_r + 1;
                     end if;
                     upd_valid_pre   <= '0';
-                    if raster_cycle = to_unsigned(C_WIPE_LEN - 1, 11) then
+                    -- (v1.0.3) 8 entries per line at SD, whose 858-cycle line
+                    -- has no room for 32 (each bank is still fully wiped every
+                    -- 512 lines, under two fields); 32 elsewhere, as before.
+                    if raster_cycle(2 downto 0) = "111"
+                       and (md_sd_r = '1' or raster_cycle(4 downto 3) = "11") then
                         -- Active list is fully built; iterate it.  al_count
                         -- snapshots the build pointer; al_rd_addr starts the
                         -- read so al_rd_data = list[0] arrives in SCAN2.
@@ -1242,8 +1428,9 @@ begin
 
                 when R_STAMP_SCAN =>
                     -- Issue the list read for al_rd_addr (al_rd_data lands
-                    -- next cycle); drain when the list is exhausted.
-                    if al_rd_addr >= al_count then
+                    -- next cycle); drain when the list is exhausted, or when
+                    -- the next line's hsync has already come (overrun).
+                    if al_rd_addr >= al_count or hs_pend_r = '1' then
                         raster_state <= R_STAMP_DRAIN;
                     else
                         raster_state <= R_STAMP_SCAN2;
@@ -1361,7 +1548,8 @@ begin
 
                     -- If hsync hits before STAMP completes, restart anyway —
                     -- a partial bank is worse than a fresh one.
-                    if hsync_falling_r = '1' then
+                    if hsync_falling_r = '1' or hs_pend_r = '1' then
+                        hs_pend_r     <= '0';
                         lb_ab_r       <= not lb_ab_r;
                         raster_state  <= R_CLEAR;
                         raster_cycle  <= (others => '0');
@@ -1419,7 +1607,8 @@ begin
 
     -- P12 head size active (disables the bit-exact static-slope bypass, since
     -- a horizontal edge's "slope" field is a WIDTH and does scale).
-    scale_on <= '1' when size_m_r /= "0000000" else '0';
+    -- (v1.0.3) any non-identity scale: P12, or a non-1080p mode.
+    scale_on <= '1' when sc_mx_r /= 0 or sc_my_r /= 0 or yoff_r /= 0 else '0';
 
     -- Morph active when the mouth is not fully open, eyes are closed, or an
     -- expression other than pure neutral is selected.  Frame-constant; used to
@@ -1540,30 +1729,40 @@ begin
     end process;
 
     -- ---------------------------------------------------------------
-    -- P12 head size — its own 4-step sequencer, deliberately NOT folded into
+    -- P12 head size — its own sequencer, deliberately NOT folded into
     -- the copy engine's state machine.  Sharing cp_state pulled size_k_r and
     -- hw_r into the same next-state cone as the multiply accumulators, and
-    -- nextpnr's HD critical path ran straight through the tangle.  Four
-    -- cycles after vsync is far ahead of the first edge that needs size_m_r
-    -- (~45 cycles) or hw_r (~70).
+    -- nextpnr's HD critical path ran straight through the tangle.  Fourteen
+    -- cycles after vsync is still far ahead of the first edge that needs
+    -- sc_mx_r (~47 cycles) or hw_r (~85).
     --
     -- Full slider must put the 777-row mesh at ~95% of the ACTIVE picture, so
     -- the ceiling keys off act_h_r (lines that carried avid), NOT max_y_r
     -- (which includes vertical blanking and differs by mode).  1080 -> 83;
     -- the knob's top step is 63/64 of that = 81 -> 1.316x -> 1023 rows =
-    -- 94.7%.  Modes too short to hold the mesh at 1x fall under the
-    -- threshold and get 0.
+    -- 94.7%.  (v1.0.3) Every other mode is drawn in virtual 1080-line units,
+    -- so it takes the same 83 and the same 1.0..1.316x range.
+    --
+    -- The scale factors: S = k*(1 + m/256) per axis, carried as
+    -- 256*(S - 1) = (256 + m)*kq/256 - 256, kq = 256*k.  At 1080p kq = 256,
+    -- so sc_mx_r = sc_my_r = m and hw = 258 + m, exactly as before.  The
+    -- head half-width hw = 258 + m at 1080 becomes (256 + m)*kx + 2 (the
+    -- mesh reaches |x| ~253, so the spare still covers padx + 1 px of DDA
+    -- slack in every mode).
     -- ---------------------------------------------------------------
     size_proc : process(clk)
+        variable v_px : unsigned(9 downto 0);
     begin
         if rising_edge(clk) then
             if vsync_falling_r = '1' then
                 sz_step <= 0;
-            elsif sz_step < 4 then
+            elsif sz_step < 14 then
                 sz_step <= sz_step + 1;
                 case sz_step is
                     when 0 =>
-                        if act_h_r > to_unsigned(819, 12) then
+                        if md_ident_r = '0' then
+                            size_mmax_r <= to_unsigned(83, 7);
+                        elsif act_h_r > to_unsigned(819, 12) then
                             size_mmax_r <= resize(shift_right(act_h_r, 2)
                                                 + shift_right(act_h_r, 4)
                                                 + shift_right(act_h_r, 9)
@@ -1571,30 +1770,55 @@ begin
                         else
                             size_mmax_r <= (others => '0');
                         end if;
+                        if field_bot_r = '1' then yoff_r <= md_yoffb_r;
+                        else                      yoff_r <= md_yoff_r; end if;
                     when 1 =>
                         size_m_r <= resize(shift_right(size_k_r * size_mmax_r, 6), 7);
                     when 2 =>
-                        -- HEAD_HW_BASE * (1 + m/256): 258*m>>8 is exactly
-                        -- m + m/128, so no multiply is needed.
-                        hw_tgt_r <= to_unsigned(HEAD_HW_BASE, 10)
-                                  + resize(size_m_r, 10)
-                                  + resize(shift_right(size_m_r, 7), 10);
+                        -- arm the serial multiply: (256 + m) * kq, MSB first
+                        sz_a_r    <= to_unsigned(256, 10) + resize(size_m_r, 10);
+                        sz_kx_r   <= md_kxq_r;
+                        sz_ky_r   <= md_kyq_r;
+                        sz_accx_r <= (others => '0');
+                        sz_accy_r <= (others => '0');
+                    when 3 to 11 =>
+                        -- one bit of kq per step (shift-add; never a multiplier)
+                        if sz_kx_r(8) = '1' then
+                            sz_accx_r <= shift_left(sz_accx_r, 1) + resize(sz_a_r, 18);
+                        else
+                            sz_accx_r <= shift_left(sz_accx_r, 1);
+                        end if;
+                        if sz_ky_r(8) = '1' then
+                            sz_accy_r <= shift_left(sz_accy_r, 1) + resize(sz_a_r, 18);
+                        else
+                            sz_accy_r <= shift_left(sz_accy_r, 1);
+                        end if;
+                        sz_kx_r <= shift_left(sz_kx_r, 1);
+                        sz_ky_r <= shift_left(sz_ky_r, 1);
+                    when 12 =>
+                        -- 256*(S - 1) per axis, and the head half-width
+                        v_px    := sz_accx_r(17 downto 8);
+                        sc_mx_r <= resize(signed('0' & v_px) - to_signed(256, 11), 9);
+                        sc_my_r <= resize(signed('0' & sz_accy_r(17 downto 8))
+                                          - to_signed(256, 11), 9);
+                        hw_tgt_r <= v_px + to_unsigned(2, 10);
                     when others =>
                         -- hw_r rises instantly but DECAYS on the way down
                         -- (2 px/frame): the clear window must never shrink
                         -- below a region that still holds set pixels from a
-                        -- wider frame, or they are stranded on screen.
-                        if hw_tgt_r >= hw_r then
+                        -- wider frame, or they are stranded on screen.  A
+                        -- video-mode change snaps it (the old geometry is
+                        -- meaningless there, and the wipe clears the rest).
+                        sz_cls_r <= md_cls_r;
+                        if hw_tgt_r >= hw_r or md_cls_r /= sz_cls_r then
                             hw_r       <= hw_tgt_r;
-                            clear_m1_r <= shift_left(resize(hw_tgt_r, 11), 1)
-                                          - to_unsigned(1, 11);
+                            clear_m1_r <= f_clear_m1(hw_tgt_r);
                             hw_lo_r    <= -signed(resize(hw_tgt_r, 13));
                             hw_hi_r    <= signed(resize(hw_tgt_r, 13))
                                           - to_signed(1, 13);
                         else
                             hw_r       <= hw_r - 2;
-                            clear_m1_r <= shift_left(resize(hw_r - 2, 11), 1)
-                                          - to_unsigned(1, 11);
+                            clear_m1_r <= f_clear_m1(hw_r - 2);
                             hw_lo_r    <= -signed(resize(hw_r - 2, 13));
                             hw_hi_r    <= signed(resize(hw_r - 2, 13))
                                           - to_signed(1, 13);
@@ -1626,6 +1850,7 @@ begin
         variable v_xa_i, v_xb_i, v_lo, v_hi : signed(12 downto 0);
         -- morph
         variable va_t, va_b, vb_t, vb_b : std_logic_vector(15 downto 0);
+        variable v_py : signed(19 downto 0);
     begin
         if rising_edge(clk) then
             act_wr_en <= '0';   -- default: no write this cycle
@@ -1771,10 +1996,13 @@ begin
                         when 14 => mul_a_r <= resize(w_nyt, 11) - to_signed(HEAD_Y_MID, 11);
                         when others => mul_a_r <= resize(w_nyb, 11) - to_signed(HEAD_Y_MID, 11);
                     end case;
-                    if    m_cnt <= 3  then mul_b_r <= signed(resize(noise_spread_r, 8));
-                    elsif m_cnt <= 7  then mul_b_r <= signed(resize(expr_frac_r, 8));
-                    elsif m_cnt <= 11 then mul_b_r <= signed(resize(mouth_frac_r, 8));
-                    else                   mul_b_r <= signed(resize(size_m_r, 8));
+                    -- (v1.0.3) 12/13 take the x scale, 14/15 the y scale
+                    -- (both = size_m_r at 1080p).
+                    if    m_cnt <= 3  then mul_b_r <= signed(resize(noise_spread_r, 9));
+                    elsif m_cnt <= 7  then mul_b_r <= signed(resize(expr_frac_r, 9));
+                    elsif m_cnt <= 11 then mul_b_r <= signed(resize(mouth_frac_r, 9));
+                    elsif m_cnt <= 13 then mul_b_r <= sc_mx_r;
+                    else                   mul_b_r <= sc_my_r;
                     end if;
                     -- expr (4..7) and mouth (8..11) share the mt_* accumulator.
                     mdst_r <= (others => '0');
@@ -1797,6 +2025,9 @@ begin
                 -- running total mt_*; scale (12..15) -> the sc_* deltas, which
                 -- CP_SCALE adds back to the endpoint.
                 when CP_MACC =>
+                    -- y scale: the per-mode row offset (and the bottom-field
+                    -- half row) goes in BEFORE the floor (0 at 1080p).
+                    v_py := prod_r + resize(yoff_r, 20);
                     if mdst_r(0)  = '1' then o_dxt <= resize(shift_right(prod_r, 1), 18); end if;
                     if mdst_r(1)  = '1' then o_dyt <= resize(shift_right(prod_r, 8), 14); end if;
                     if mdst_r(2)  = '1' then o_dxb <= resize(shift_right(prod_r, 1), 18); end if;
@@ -1808,8 +2039,8 @@ begin
                     -- x: (hi*m)<<7 >>8 == (hi*m)>>1.  y: (dy*m)>>8.
                     if mdst_r(8)  = '1' then sc_xt <= resize(shift_right(prod_r, 1), 19); end if;
                     if mdst_r(9)  = '1' then sc_xb <= resize(shift_right(prod_r, 1), 19); end if;
-                    if mdst_r(10) = '1' then sc_yt <= resize(shift_right(prod_r, 8), 14); end if;
-                    if mdst_r(11) = '1' then sc_yb <= resize(shift_right(prod_r, 8), 14); end if;
+                    if mdst_r(10) = '1' then sc_yt <= resize(shift_right(v_py, 8), 14); end if;
+                    if mdst_r(11) = '1' then sc_yb <= resize(shift_right(v_py, 8), 14); end if;
                     if m_at11_r = '1' then
                         m_cnt <= 12;  m_at11_r <= '0';  cp_state <= CP_OFF;
                     elsif m_at15_r = '1' then
@@ -1869,8 +2100,10 @@ begin
                         v_mid := resize(shift_right(resize(w_ya, 15) + resize(w_yb, 15), 1), 14);
                         w_ya <= v_mid;  w_yb <= v_mid;
                     elsif noise_on = '1' and noise_streaks_r = '0'
-                            and (w_yb - w_ya) < NOISE_SPAN_FLOOR then
-                        w_yb <= w_ya + to_signed(NOISE_SPAN_FLOOR, 14);
+                            and (w_yb - w_ya) < signed(resize(md_nfl_r, 14)) then
+                        -- (v1.0.3) the floor is NOISE_SPAN_FLOOR rows at
+                        -- 1080, in this mode's rows (md_nfl_r)
+                        w_yb <= w_ya + signed(resize(md_nfl_r, 14));
                     end if;
                     cp_state <= CP_SPAN;
 
@@ -1956,9 +2189,9 @@ begin
                 -- the stroke's cap, then clip to the +-hw_r window R_CLEAR
                 -- wipes, so the raster needs no separate bbox test.
                 when CP_XEXT2 =>
-                    v_lo := signed(act_xlo_wr) - signed(resize(pad_r, 13))
+                    v_lo := signed(act_xlo_wr) - signed(resize(padx_r, 13))
                             - to_signed(1, 13);
-                    v_hi := signed(act_xhi_wr) + signed(resize(pad_r, 13))
+                    v_hi := signed(act_xhi_wr) + signed(resize(padx_r, 13))
                             + to_signed(1, 13);
                     if v_lo < hw_lo_r then v_lo := hw_lo_r; end if;
                     if v_hi > hw_hi_r then v_hi := hw_hi_r; end if;
@@ -1981,7 +2214,7 @@ begin
                        or slope_sel_r < to_signed(-4096, 16) then
                         xtop_ext_r <= xa18;
                     else
-                        case pad_r is
+                        case pady_r is
                             when "00"   => xtop_ext_r <= xa18;
                             when "01"   => xtop_ext_r <= xa18
                                        - resize(slope_sel_r, 18);
