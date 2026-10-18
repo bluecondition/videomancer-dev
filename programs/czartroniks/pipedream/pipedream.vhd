@@ -6,6 +6,19 @@
 --
 -- pipedream.vhd  (v3.0 -- a woven Truchet network of glossy 3D pipes)
 --
+-- v3.3.2 (2026-10-17): resolution scaling.  The raster counters run in
+-- virtual 1080-line units stepped from the video timing ID (registers_in(8)):
+-- x 1 / 1.5 / 2 units per pixel (1080 / 720p / SD), y 1 / 1.5 / 4.44 per
+-- field line (1080p / 720p / 480i).  Each pixel and line advances the cell
+-- counters by the INTEGER part of its step (1 or 2 per pixel; 1..5 unit steps
+-- per line, run one every other clock after hsync), so the exact incremental
+-- corner squares are kept and every pixel is a nearest-neighbour sample of the
+-- 1080p picture: cells, pipes, the rainbow and the swell keep their size
+-- relative to screen height (SD = the left 1440 units, 4:3, round elbows
+-- stay round).  The old field_n interlace path is gone (field_n is tied high
+-- on hardware, so SD was drawn 2:1 tall); the y step carries the interlace.
+-- 1080p is bit-identical; latency unchanged (16).
+--
 -- The screen is tiled by an invisible cell grid and every cell holds one of
 -- three Truchet tiles: two quarter-circle elbows (either diagonal pairing) or
 -- a straight over/under CROSSING.  Every tile uses each of its four edge
@@ -240,6 +253,32 @@ architecture pipedream of program_top is
         return v xor shift_right(v, s2);
     end function;
 
+    -- Resolution scaling: per-mode steps from the video timing ID.
+    -- x step in half virtual units per pixel: 1080 2 (1.0), 720p 3 (1.5),
+    -- SD 4 (2.0: 720 px span 1440 units, a 4:3 window of the 1080 canvas).
+    function f_vstep_x(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0 | 4 | 8 | 12 => return to_unsigned(4, 3);
+            when 5 | 6 | 14     => return to_unsigned(3, 3);
+            when others         => return to_unsigned(2, 3);
+        end case;
+    end function;
+    -- y step in Q4.8 virtual units per FIELD line (1080 / active lines,
+    -- doubled for interlaced modes).
+    function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(1138, 12);  -- 480i: 2 x 1080/486
+            when 4          => return to_unsigned(576, 12);   -- 480p: 1080/480
+            when 8          => return to_unsigned(960, 12);   -- 576i: 2 x 1080/576
+            when 12         => return to_unsigned(480, 12);   -- 576p: 1080/576
+            when 5 | 6 | 14 => return to_unsigned(384, 12);   -- 720p: 1.5
+            when 1 | 2 | 10 => return to_unsigned(512, 12);   -- 1080i: 2.0
+            when others     => return to_unsigned(256, 12);   -- 1080p: 1.0
+        end case;
+    end function;
+
     ----------------------------------------------------------------------------
     -- Raster position + animation phases.
     ----------------------------------------------------------------------------
@@ -257,9 +296,24 @@ architecture pipedream of program_top is
     signal y_ln : unsigned(10 downto 0) := (others => '0');
     signal y_f  : unsigned(11 downto 0) := (others => '0');
 
-    signal s_fprev : std_logic := '0';
-    signal s_ilace : std_logic := '0';
-    signal s_fodd  : std_logic := '0';
+    -- Resolution scaling (virtual 1080-line units).  s_xs: x step in half
+    -- units (2/3/4); x_fr: the half-unit phase, so a pixel's integer step is
+    -- 1 or 2.  y: Q.8 fraction accumulator per field line; the integer part
+    -- of each line's advance becomes 1..5 unit steps (y_pend), one every other
+    -- clock after the hsync, each the old one-line update.
+    signal s_xs    : unsigned(2 downto 0)  := to_unsigned(2, 3);
+    signal s_ys    : unsigned(11 downto 0) := to_unsigned(256, 12);
+    signal x_fr    : std_logic := '0';
+    signal s_d2    : std_logic := '0';     -- this pixel's step to the next is 2
+    signal s_xlast : std_logic := '0';     -- this pixel is the last of its cell
+    -- 2wh - x_loc, stepped alongside x_loc so the qxE update is one carry chain
+    signal x_e     : unsigned(8 downto 0) := to_unsigned(96, 9);
+    signal s_twm1  : unsigned(8 downto 0) := to_unsigned(95, 9);      -- 2wh - 1
+    signal y_fr    : unsigned(7 downto 0) := (others => '0');
+    signal y_pend  : unsigned(3 downto 0) := (others => '0');
+    signal y_pph   : std_logic := '0';
+    signal r_ustep : std_logic := '0';     -- a unit y step happened last clock
+    signal s_yfirst : std_logic := '1';    -- this line is the first of its cell row
 
     signal s_phase   : unsigned(15 downto 0) := (others => '0');  -- flow
     signal s_huep    : unsigned(15 downto 0) := (others => '0');  -- hue drift
@@ -296,6 +350,7 @@ architecture pipedream of program_top is
 
     signal s_w     : unsigned(7 downto 0) := to_unsigned(96, 8);    -- always EVEN (2*wh)
     signal s_wm1   : unsigned(7 downto 0) := to_unsigned(95, 8);
+    signal s_wm2   : unsigned(7 downto 0) := to_unsigned(94, 8);
     signal s_wh    : unsigned(7 downto 0) := to_unsigned(48, 8);
     signal s_wh3   : unsigned(9 downto 0) := to_unsigned(144, 10);   -- 3*wh
     signal s_wh4   : signed(10 downto 0) := to_signed(192, 11);      -- 4*wh
@@ -333,7 +388,7 @@ architecture pipedream of program_top is
     signal s_krec  : unsigned(6 downto 0)  := to_unsigned(43, 7);      -- round(4096/(2wh))
     signal s_twh   : unsigned(8 downto 0)  := to_unsigned(96, 9);      -- 2*wh
     signal s_w2    : unsigned(16 downto 0) := to_unsigned(9216, 17);   -- (2wh)^2  (qxE/qyS reset)
-    signal s_w2o   : unsigned(16 downto 0) := to_unsigned(9025, 17);   -- (2wh-1)^2 (interlace-odd reset)
+    signal s_w2o   : unsigned(16 downto 0) := to_unsigned(9025, 17);   -- (2wh-1)^2 (x wrap onto loc 1)
     signal s_sqs   : unsigned(1 downto 0)  := to_unsigned(1, 2);       -- sqrt-table rho^2 shift
 
     signal s_flowspd : unsigned(9 downto 0) := (others => '0');
@@ -478,6 +533,7 @@ begin
     ----------------------------------------------------------------------------
     p_position : process(clk)
         variable v_h_edge, v_v_edge : std_logic;
+        variable v_yn  : unsigned(11 downto 0);
     begin
         if rising_edge(clk) then
             prev_hsync_n <= data_in.hsync_n;
@@ -487,11 +543,14 @@ begin
             if data_in.vsync_n = '0' and prev_vsync_n = '1' then v_v_edge := '1'; end if;
             r_hedge  <= v_h_edge;
             r_anchor <= '0';
+            r_ustep  <= '0';
+
+            -- Resolution scaling: per-mode steps, free-running from the timing
+            -- ID (static while a mode runs).
+            s_xs <= f_vstep_x(registers_in(8)(3 downto 0));
+            s_ys <= f_vstep_y(registers_in(8)(3 downto 0));
 
             if v_v_edge = '1' then
-                s_fprev <= data_in.field_n;
-                s_ilace <= data_in.field_n xor s_fprev;
-                s_fodd  <= data_in.field_n;
                 s_phase  <= s_phase + s_flowspd;
                 s_huep   <= s_huep + s_huespd;
                 if s_morph = '1' then s_morphp <= s_morphp + 1; end if;
@@ -499,45 +558,87 @@ begin
                 s_swp    <= s_swp + 1;
             end if;
 
+            -- x: each pixel advances the cell counters by its integer step,
+            -- 1 or 2 (s_d2); the corner squares follow exactly.  A cell wraps
+            -- onto loc 0 or 1.
             if v_h_edge = '1' then
                 x_loc <= (others => '0'); x_idx <= (others => '0'); x_f <= (others => '0');
+                x_fr  <= '0';
+                x_e   <= s_twh;
+                s_xlast <= '0';
                 qxW <= (others => '0'); qxE <= s_w2(15 downto 0);   -- x_loc^2 / (2wh-x_loc)^2 at x_loc=0
             elsif data_in.avid = '1' then
-                x_f <= x_f + 1;
-                if x_loc = s_wm1 then
-                    x_loc <= (others => '0');
+                -- s_xlast is registered one pixel ahead: a pixel and the next
+                -- together always advance exactly s_xs units (Q.1 steps), so
+                -- the NEXT pixel is the cell's last iff 2wh - x_loc <= s_xs.
+                -- After a wrap the next pixel is near the cell start (never last).
+                if s_xlast = '0' and x_e <= resize(s_xs, 9) then s_xlast <= '1';
+                else                                              s_xlast <= '0'; end if;
+                x_fr <= s_xs(0) xor x_fr;
+                if s_d2 = '1' then x_f <= x_f + 2; else x_f <= x_f + 1; end if;
+                if s_xlast = '1' then
                     if x_idx /= C_MAXCOL - 1 then x_idx <= x_idx + 1; end if;
-                    qxW <= (others => '0'); qxE <= s_w2(15 downto 0);
+                    if s_d2 = '1' and x_e(0) = '1' then              -- x_loc = 2wh-1: lands on loc 1
+                        x_loc <= to_unsigned(1, 8);
+                        x_e   <= s_twm1;
+                        qxW <= to_unsigned(1, 16); qxE <= s_w2o(15 downto 0);
+                    else
+                        x_loc <= (others => '0');
+                        x_e   <= s_twh;
+                        qxW <= (others => '0'); qxE <= s_w2(15 downto 0);
+                    end if;
+                elsif s_d2 = '1' then
+                    x_loc <= x_loc + 2;
+                    x_e   <= x_e - 2;
+                    qxW <= qxW + (resize(x_loc, 16) sll 2) + 4;                       -- (x_loc+2)^2
+                    qxE <= qxE - (resize(x_e, 16) sll 2) + 4;                         -- (2wh-x_loc-2)^2
                 else
                     x_loc <= x_loc + 1;
+                    x_e   <= x_e - 1;
                     qxW <= qxW + (resize(x_loc, 16) sll 1) + 1;                       -- (x_loc+1)^2
-                    qxE <= qxE - (resize(s_twh - x_loc, 16) sll 1) + 1;               -- (2wh-x_loc-1)^2
+                    qxE <= qxE - (resize(x_e, 16) sll 1) + 1;                         -- (2wh-x_loc-1)^2
                 end if;
             end if;
 
+            -- y: each line's advance (integer part of the Q.8 step) becomes
+            -- unit steps, one every other clock (p_line needs a clock between
+            -- updates), all done long before the line's active video.
             if v_v_edge = '1' then
                 celly_loc <= (others => '0'); celly_idx <= (others => '0');
                 frame_act <= '0'; y_ln <= (others => '0');
+                y_fr <= (others => '0'); y_pend <= (others => '0'); s_yfirst <= '1';
             elsif data_in.avid = '1' and frame_act = '0' then
                 frame_act <= '1'; r_anchor <= '1';
                 celly_loc <= (others => '0'); celly_idx <= (others => '0'); y_ln <= (others => '0');
+                y_fr <= (others => '0'); y_pend <= (others => '0'); s_yfirst <= '1';
             elsif v_h_edge = '1' and frame_act = '1' then
-                y_ln <= y_ln + 1;
-                if celly_loc = s_rpm1 then
-                    celly_loc <= (others => '0');
-                    if celly_idx /= 127 then celly_idx <= celly_idx + 1; end if;
-                else
-                    celly_loc <= celly_loc + 1;
+                v_yn := resize(y_fr, 12) + s_ys;
+                y_fr   <= v_yn(7 downto 0);
+                y_pend <= v_yn(11 downto 8);
+                y_pph  <= '0';
+                s_yfirst <= '0';
+            elsif y_pend /= 0 then
+                y_pph <= not y_pph;
+                if y_pph = '0' then
+                    y_pend  <= y_pend - 1;
+                    r_ustep <= '1';
+                    y_ln <= y_ln + 1;
+                    if celly_loc = s_rpm1 then
+                        celly_loc <= (others => '0');
+                        s_yfirst  <= '1';
+                        if celly_idx /= 127 then celly_idx <= celly_idx + 1; end if;
+                    else
+                        celly_loc <= celly_loc + 1;
+                    end if;
                 end if;
             end if;
 
-            if s_ilace = '1' then
-                y_f <= (y_ln & '0') + ("0000000000" & s_fodd);
-            else
-                y_f <= '0' & y_ln;
-            end if;
+            y_f <= '0' & y_ln;
         end if;
     end process p_position;
+
+    -- this pixel's integer step to the next is 2 (SD always, 720p every other)
+    s_d2    <= '1' when s_xs(2) = '1' or (s_xs(0) = '1' and x_fr = '1') else '0';
 
     ----------------------------------------------------------------------------
     -- Cell hash pipe: hashes the cell that comes NEXT (x_idx+1 during active
@@ -586,7 +687,7 @@ begin
             rt_rd  <= rt_mem(to_integer(rt_ra));
             rt_rd2 <= rt_rd;
 
-            v_first := celly_loc = 0;
+            v_first := s_yfirst = '1';                                 -- first line of a cell row
             v_ring  := s_rings = '0' and celly_idx /= 0 and data_in.avid = '1'
                        and hs_xc = '0' and hs_or = '1'                  -- this cell: NW/SE elbows
                        and s_cxc = '0' and s_cor = '0'                  -- left:  NE/SW elbows
@@ -601,7 +702,7 @@ begin
             end if;
 
             rt_we1 <= '0';
-            if data_in.avid = '0' or x_loc = s_wm1 then
+            if data_in.avid = '0' or s_xlast = '1' then
                 s_cxc <= v_fin(1); s_cor <= v_fin(0);
                 if v_first then
                     s_pab <= rt_rd2(1 downto 0);
@@ -627,35 +728,25 @@ begin
         function upd1(sq : unsigned(15 downto 0); dn : signed(10 downto 0)) return unsigned is
             variable v : signed(18 downto 0);
         begin v := signed(resize(sq, 19)) + resize(dn & '0', 19) - 1; return unsigned(v(15 downto 0)); end function;
-        function upd2(sq : unsigned(15 downto 0); dn : signed(10 downto 0)) return unsigned is
-            variable v : signed(18 downto 0);
-        begin v := signed(resize(sq, 19)) + resize(dn & "00", 19) - 4; return unsigned(v(15 downto 0)); end function;
         variable v_hh  : signed(9 downto 0);
     begin
         if rising_edge(clk) then
-            if r_hedge = '1' or r_anchor = '1' then
+            -- one update per unit y step (r_ustep, >= 2 clocks apart) or at the
+            -- frame anchor
+            if r_ustep = '1' or r_anchor = '1' then
                 v_hh := signed(resize(s_whl, 10));
                 if celly_loc = 0 then
-                    if s_ilace = '1' and s_fodd = '1' then
-                        lm_dy <= -v_hh + 1;
-                        qyN <= to_unsigned(1, 16); qyS <= s_w2o(15 downto 0);   -- (1)^2 / (2wh-1)^2
-                    else
-                        lm_dy <= -v_hh;
-                        qyN <= (others => '0'); qyS <= s_w2(15 downto 0);        -- (0)^2 / (2wh)^2
-                    end if;
-                elsif s_ilace = '1' then
-                    lm_dy <= lm_dy + 2;
-                    qyN <= upd2(qyN, ln_n); qyS <= upd2(qyS, ln_s);
+                    lm_dy <= -v_hh;
+                    qyN <= (others => '0'); qyS <= s_w2(15 downto 0);        -- (0)^2 / (2wh)^2
                 else
                     lm_dy <= lm_dy + 1;
                     qyN <= upd1(qyN, ln_n); qyS <= upd1(qyS, ln_s);
                 end if;
             end if;
-            -- lm_dy only moves at an h edge (>= 858 clocks apart), so the next
-            -- line's corner offsets are precomputed here, off the update path
-            if s_ilace = '1' then v_hh := to_signed(2, 10); else v_hh := to_signed(1, 10); end if;
-            ln_n <= resize(lm_dy + v_hh, 11) + signed(resize(s_whl, 11));
-            ln_s <= resize(lm_dy + v_hh, 11) - signed(resize(s_whl, 11));
+            -- lm_dy moves at most every other clock, so the next unit step's
+            -- corner offsets are precomputed here, off the update path
+            ln_n <= resize(lm_dy + 1, 11) + signed(resize(s_whl, 11));
+            ln_s <= resize(lm_dy + 1, 11) - signed(resize(s_whl, 11));
         end if;
     end process p_line;
 
@@ -723,14 +814,16 @@ begin
                         else                 s_lx <= f_qsin(to_unsigned(672, 10)); s_ly <= f_qsin(to_unsigned(672, 10)); end if;  -- upper-left
                     when 1 =>
                         s_wm1 <= s_w - 1;
+                        s_wm2 <= s_w - 2;
                         s_twh <= s_wh & '0';                 -- 2*wh
-                        if s_ilace = '1' then s_rp <= s_wh; else s_rp <= s_w; end if;
+                        s_rp <= s_w;                         -- cell height (virtual units; the y step carries interlace)
                         s_whp <= s_wh; s_whq <= s_wh; s_whr <= s_wh; s_whl <= s_wh;
                         s_lx6 <= resize(shift_right(s_lx, 3), 7);
                         s_ly6 <= resize(shift_right(s_ly, 3), 7);
                         ma <= signed(resize(s_w, 13)); mb <= signed(resize(s_rfrac, 13));
                     when 2 =>
                         s_rpm1 <= s_rp - 1;
+                        s_twm1 <= s_twh - 1;
                         s_wh3  <= resize(s_twh, 10) + resize(s_wh, 10);
                         s_wh4  <= signed(resize(s_twh & '0', 11));
                         -- s_krec = round(4096 / 2wh): normalises the light and the
@@ -746,7 +839,7 @@ begin
                         ma <= signed(resize(s_w, 13)); mb <= to_signed(406, 13);                     -- max radius
                     when 8 =>
                         s_w2  <= resize(s_wh2 & "00", 17);                                            -- (2wh)^2
-                        s_w2o <= resize(s_wh2 & "00", 17) - resize(s_wh & "00", 17) + 1;              -- (2wh-1)^2
+                        s_w2o <= resize(s_wh2 & "00", 17) - resize(s_wh & "00", 17) + 1;              -- (2wh-1)^2 (x wrap)
                         -- sqrt table covers rho^2 up to 2048 << sqs >= 2.55 wh^2: the
                         -- 0.6 wh band Image can swell to (worst error 0.20 px)
                         if    s_wh2 <= 803  then s_sqs <= "00";
