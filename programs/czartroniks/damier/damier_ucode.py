@@ -18,7 +18,7 @@ Formats: angles 65536 per turn; sines Q15; lattice offsets 1/256 square.
 Persistent registers (never re-initialised): the four glides and their
 deadband holds, T, th, sdr, sfr.  The register file powers up at zero.
 """
-from damier_uasm import Asm, FL_FOLD, FL_ZZ, FL_SQ, FL_SCRL
+from damier_uasm import Asm, FL_FOLD, FL_ZZ, FL_SQ, FL_SCRL, FL_720, FL_SD
 
 K_LA = 630      # 16 * 256 / 6.5 squares
 K_LB = 390      # 16 * 256 / 10.5 squares
@@ -131,6 +131,24 @@ def build():
     e('SUB', 'cnt', 'cnt', 'one')
     e('JMP', imm='zl')
     A.label('zd')                               # s = 256 .. 8192
+    # Resolution scaling (v0.4.8): sizes are set on a virtual 1080-line
+    # canvas, so s (the lattice step per PIXEL) grows by the pixel's width
+    # in virtual units: x1.5 at 720p, x2 at SD (720 px = a 1440-unit 4:3
+    # window).  Squares keep their size against the screen height.  mant
+    # and n stay unscaled: the ring frequency below is per cell, so the
+    # ring period scales with the cells.
+    e('AND', 't0', 'fl', imm=FL_SD)
+    e('JNZ', a='t0', imm='zsd')
+    e('AND', 't0', 'fl', imm=FL_720)
+    e('JNZ', a='t0', imm='z72')
+    e('JMP', imm='zsc')
+    A.label('z72')
+    e('SHR', 't0', 's', imm=1)
+    e('ADD', 's', 's', 't0')                    # 384 .. 12288
+    e('JMP', imm='zsc')
+    A.label('zsd')
+    e('SHL', 's', 's', imm=1)                   # 512 .. 16384
+    A.label('zsc')
 
     # ---------------- lattice rotation: K4 angle + spin ----------------
     e('SHL', 'al', 'g4', imm=2)                 # 10.4 glide: 1/16384 turn steps
@@ -251,6 +269,13 @@ def build():
     e('PRT', a='sdr', imm='CV')
     e('SUB', 't0', 'sdr', 'twb')
     e('PRT', a='t0', imm='CWB')
+    # the field's top line, Q.4 Y units: -H2 (frame lines) x R9 (Q.9 units
+    # per frame line); -16 H2 at 1080 and 720p
+    e('CTL', 't0', imm='H2')
+    e('CTL', 't1', imm='R9')
+    mulr('t0', 't0', 't1', 5)
+    e('NEG', 't0', 't0')
+    e('PRT', a='t0', imm='Y0')
     e('PRT', imm='FDONE')
 
     # ---------------- wave tables ----------------
