@@ -26,7 +26,7 @@
 -- Controls:
 --   K1 Ripple    fine refraction amplitude (two incommensurate triangle
 --                waves at ~1.6x frequency ratio -> netting interference)
---   K2 Waves     per-line sine swell amplitude, 0..255 px
+--   K2 Waves     per-line sine swell amplitude, 0..255 px (at 1080p)
 --   K3 Speed     bidirectional, centre detent = frozen; quadratic curve
 --   K4 Scale     spatial frequency of ripple/caustics/swell (quadratic)
 --   K5 Tint      chroma lerp amount toward the S7 target colour
@@ -47,6 +47,15 @@
 --                ripple split + 4 px read as a faint smear on HW.)
 --                (Replaces v1.3's Bypass, which duplicated Depth = 0.)
 --   P12 Depth    master dry/wet -- the headline fader
+--
+-- Resolution scaling (v1.4.3): ripple, caustics and swell are drawn on a
+-- virtual 1080-line canvas, so SD (a 1440-unit 4:3 window) and 720p show
+-- the 1080p water at the same size relative to screen height: per-pixel
+-- frequencies x xstep (timing ID: 1.0 / 1.5 / 2.0), per-line phases advance
+-- once per virtual line crossed (Q4.8 y step per field line, x2 for
+-- interlace), ripple/swell/storm/prism amplitudes in pixels / xstep.  1080p
+-- is bit-identical to v1.4.2.  Dither, left-fill and murk stay pixel/line
+-- based.
 --
 -- Colour convention: tint targets are stored U/V (Cb/Cr) SWAPPED to match the
 -- Videomancer output convention (matching the HW-verified mondrian/prism/CGA
@@ -168,6 +177,43 @@ architecture lagoon of program_top is
         -250, -251, -252, -253, -254, -254, -255, -255
     );
 
+    --------------------------------------------------------------------------
+    -- Resolution scaling (v1.4.3): the water is designed on a virtual
+    -- 1080-line canvas.  Per-pixel wave frequencies are scaled by the x step
+    -- (virtual units per pixel: 1080 1.0, 720p 1.5, SD 2.0 -- SD shows a
+    -- 1440-unit 4:3 window), per-line frequencies by the y step (units per
+    -- FIELD line, Q4.8, doubled for interlace: the line phases advance once
+    -- per virtual line crossed), and pixel amplitudes (ripple, swell, storm
+    -- chop, prism split) by 1/xstep.  At 1080p every step is exactly 1 and
+    -- the picture is bit-identical to v1.4.2.
+    --------------------------------------------------------------------------
+    function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(1138, 12);  -- 480i: 2 x 1080/486
+            when 4          => return to_unsigned(576, 12);   -- 480p: 1080/480
+            when 8          => return to_unsigned(960, 12);   -- 576i: 2 x 1080/576
+            when 12         => return to_unsigned(480, 12);   -- 576p: 1080/576
+            when 5 | 6 | 14 => return to_unsigned(384, 12);   -- 720p: 1.5
+            when 1 | 2 | 10 => return to_unsigned(512, 12);   -- 1080i: 2.0
+            when others     => return to_unsigned(256, 12);   -- 1080p: 1.0
+        end case;
+    end function;
+
+    -- Per-pixel frequency x xstep: + v (SD, x2), + v/2 (720p, x1.5), + 0.
+    function f_xsc(v : unsigned; sd, h7 : std_logic) return unsigned is
+        variable r : unsigned(15 downto 0);
+    begin
+        r := resize(v, 16);
+        if sd = '1' then
+            return r + r;
+        elsif h7 = '1' then
+            return r + shift_right(r, 1);
+        else
+            return r;
+        end if;
+    end function;
+
     -- Triangle fold of a 16-bit phase to -256..255 (min at phase 0).
     function f_tri(phase : unsigned(15 downto 0)) return signed is
         variable v_ramp : signed(9 downto 0);
@@ -231,7 +277,7 @@ architecture lagoon of program_top is
     --------------------------------------------------------------------------
     -- Per-frame step sequencer (vertical blanking)
     --------------------------------------------------------------------------
-    signal s_vstep       : unsigned(2 downto 0) := "111";
+    signal s_vstep       : unsigned(3 downto 0) := "1111";
     signal s_d           : signed(10 downto 0) := (others => '0');
     signal s_absd        : unsigned(9 downto 0) := (others => '0');
     signal s_rate_mag    : unsigned(12 downto 0) := (others => '0');
@@ -297,6 +343,22 @@ architecture lagoon of program_top is
     signal s_psplit   : signed(10 downto 0) := (others => '0');
     -- tint lerp factor (top 4 knob bits; halved while Prism is on)
     signal s_tint_f   : unsigned(3 downto 0) := (others => '0');
+
+    -- Resolution scaling (see f_vstep_y): timing class, y step, the per-line
+    -- virtual-line repeat counter, x-scaled per-pixel frequencies and the
+    -- 1/xstep pixel amplitudes.
+    signal s_sd       : std_logic := '0';                 -- SD: x step 2.0
+    signal s_h7       : std_logic := '0';                 -- 720p: x step 1.5
+    signal s_ys       : unsigned(11 downto 0) := to_unsigned(256, 12);
+    signal s_yfrac    : unsigned(7 downto 0) := (others => '0');
+    signal s_yrep     : unsigned(2 downto 0) := (others => '0');
+    signal s_fx1x     : unsigned(15 downto 0) := to_unsigned(700, 16);
+    signal s_fx2x     : unsigned(15 downto 0) := to_unsigned(1138, 16);
+    signal s_fc1x     : unsigned(15 downto 0) := to_unsigned(300, 16);
+    signal s_fc2x     : unsigned(15 downto 0) := to_unsigned(404, 16);
+    signal s_ripa     : unsigned(9 downto 0) := (others => '0');
+    signal s_swa      : unsigned(9 downto 0) := (others => '0');
+    signal s_chop     : signed(9 downto 0) := (others => '0');
 
     --------------------------------------------------------------------------
     -- Per-pixel pipeline (E2..E8)
@@ -369,6 +431,7 @@ begin
         variable v_mag : unsigned(13 downto 0);
         variable v_sw  : unsigned(11 downto 0);
         variable v_r   : signed(15 downto 0);
+        variable v_yf  : unsigned(11 downto 0);
     begin
         if rising_edge(clk) then
             -- SPI registers pre-registered before any arithmetic sees them
@@ -383,8 +446,22 @@ begin
             s_murk_en <= registers_in(6)(2);
             s_storm   <= registers_in(6)(3);
             s_prism   <= registers_in(6)(4);
-            s_psplit  <= signed(resize(shift_right(s_line_width, 7), 11))
-                       + signed(resize(shift_right(s_line_width, 8), 11));
+            -- Prism split: 22 virtual units (= (1920 >> 7) + (1920 >> 8), the
+            -- v1.4.2 1080p value) in real pixels: 22 / 15 / 11.
+            if s_sd = '1' then
+                s_psplit <= to_signed(11, 11);
+            elsif s_h7 = '1' then
+                s_psplit <= to_signed(15, 11);
+            else
+                s_psplit <= to_signed(22, 11);
+            end if;
+            -- timing class + y step, free-running from the timing ID
+            case to_integer(unsigned(registers_in(8)(3 downto 0))) is
+                when 0 | 4 | 8 | 12 => s_sd <= '1'; s_h7 <= '0';
+                when 5 | 6 | 14     => s_sd <= '0'; s_h7 <= '1';
+                when others         => s_sd <= '0'; s_h7 <= '0';
+            end case;
+            s_ys <= f_vstep_y(registers_in(8)(3 downto 0));
             if s_prism = '1' then
                 s_tint_f <= '0' & s_tint_k(9 downto 7);
             else
@@ -412,10 +489,10 @@ begin
             -- accumulators run along together.
             if data_in.avid = '1' then
                 s_pixel_x <= s_pixel_x + 1;
-                s_acc_r1  <= s_acc_r1 + resize(s_fx1, 16);
-                s_acc_r2  <= s_acc_r2 + resize(s_fx2, 16);
-                s_acc_c1  <= s_acc_c1 + resize(s_fc1, 16);
-                s_acc_c2  <= s_acc_c2 + resize(s_fc2, 16);
+                s_acc_r1  <= s_acc_r1 + s_fx1x;
+                s_acc_r2  <= s_acc_r2 + s_fx2x;
+                s_acc_c1  <= s_acc_c1 + s_fc1x;
+                s_acc_c2  <= s_acc_c2 + s_fc2x;
             end if;
 
             -- Left-fill average: 64 registered pixels, starting past the
@@ -433,9 +510,12 @@ begin
             ------------------------------------------------------------------
             case to_integer(s_lstep) is
                 when 0 =>       -- 3x harmonic phase; main swell sine
+                                -- (waits for the virtual-line repeats)
                     s_sw_ph3 <= shift_left(s_sw_l, 1) + s_sw_l;
                     s_sw_sin <= to_signed(C_SINE(to_integer(s_sw_l(15 downto 8))), 10);
-                    s_lstep  <= s_lstep + 1;
+                    if s_yrep = 0 then
+                        s_lstep <= s_lstep + 1;
+                    end if;
                 when 1 =>       -- re-register the ROM read data in fabric: the
                                 -- BRAM output register absorbs s_sw_sin, so a
                                 -- direct multiply would time from RAM.RDATA
@@ -443,22 +523,30 @@ begin
                     s_sw_sin_r <= s_sw_sin;
                     s_swh_tri  <= f_tri(s_sw_ph3);
                     s_lstep    <= s_lstep + 1;
-                when 2 =>       -- main swell multiply (8-bit amp: 4-px steps)
-                    s_prod_sw <= s_sw_sin_r * signed('0' & s_swamp(9 downto 2));
+                when 2 =>       -- main swell multiply (8-bit amp: 4-px steps);
+                                -- storm chop +-64 virtual units in pixels
+                    s_prod_sw <= s_sw_sin_r * signed('0' & s_swa(9 downto 2));
+                    if s_sd = '1' then
+                        s_chop <= shift_right(s_swh_tri, 3);
+                    elsif s_h7 = '1' then
+                        s_chop <= shift_right(s_swh_tri, 3) + shift_right(s_swh_tri, 5);
+                    else
+                        s_chop <= shift_right(s_swh_tri, 2);
+                    end if;
                     s_lstep   <= s_lstep + 1;
                 when 3 =>       -- base read offset; storm adds a fixed +-63 px
                                 -- 3rd harmonic chop (pure shift, no multiply)
                     if s_storm = '1' then
                         s_base_off <= resize(shift_right(s_prod_sw, 8), 11)
-                                    + resize(shift_right(s_swh_tri, 2), 11);
+                                    + resize(s_chop, 11);
                     else
                         s_base_off <= resize(shift_right(s_prod_sw, 8), 11);
                     end if;
                     s_lstep <= s_lstep + 1;
                 when 4 =>       -- caustic swell-tracking multiplies; murk;
                                 -- Prism U/V bases (+-1/2 swell, +-s_psplit)
-                    s_prod_c1 <= s_base_off * signed('0' & s_fc1);
-                    s_prod_c2 <= s_base_off * signed('0' & s_fc2);
+                    s_prod_c1 <= s_base_off * signed('0' & s_fc1x(11 downto 0));
+                    s_prod_c2 <= s_base_off * signed('0' & s_fc2x(12 downto 0));
                     if s_prism = '1' then
                         s_base_u <= s_base_off + shift_right(s_base_off, 1)
                                   + s_psplit;
@@ -489,6 +577,19 @@ begin
                 when others =>
                     null;
             end case;
+
+            -- Virtual-line repeats: the line phases advance once per virtual
+            -- line crossed; the hsync edge below does the first advance, these
+            -- clocks the rest (SD up to 4 more; never at 1080p).  Placed
+            -- before the frame sequencer so its line-phase copy wins.
+            if s_yrep /= 0 then
+                s_rip_l1  <= s_rip_l1 + resize(s_fy1, 16);
+                s_rip_l2  <= s_rip_l2 + resize(s_fy2, 16);
+                s_caus_l1 <= s_caus_l1 + resize(s_fyc1, 16);
+                s_caus_l2 <= s_caus_l2 + resize(s_fyc2, 16);
+                s_sw_l    <= s_sw_l + resize(s_fsw, 16);
+                s_yrep    <= s_yrep - 1;
+            end if;
 
             ------------------------------------------------------------------
             -- Per-frame sequencer (vertical blanking): control curves,
@@ -593,9 +694,37 @@ begin
                         s_murk_step <= to_unsigned(76, 7);
                     end if;
                     s_vstep <= s_vstep + 1;
+                when 7 =>       -- resolution scaling: per-pixel frequencies
+                                -- x xstep; amplitudes / xstep (SD 1/2, 720p
+                                -- 1/2 + 1/8 + 1/32 ~ 2/3, 1080 1)
+                    s_fx1x <= f_xsc(s_fx1, s_sd, s_h7);
+                    s_fx2x <= f_xsc(s_fx2, s_sd, s_h7);
+                    s_fc1x <= f_xsc(s_fc1, s_sd, s_h7);
+                    s_fc2x <= f_xsc(s_fc2, s_sd, s_h7);
+                    if s_sd = '1' or s_h7 = '1' then
+                        s_ripa <= shift_right(s_rip_k, 1);
+                        s_swa  <= shift_right(s_swamp, 1);
+                    else
+                        s_ripa <= s_rip_k;
+                        s_swa  <= s_swamp;
+                    end if;
+                    s_vstep <= s_vstep + 1;
+                when 8 =>
+                    if s_h7 = '1' then
+                        s_ripa <= s_ripa + shift_right(s_rip_k, 3);
+                        s_swa  <= s_swa + shift_right(s_swamp, 3);
+                    end if;
+                    s_vstep <= s_vstep + 1;
+                when 9 =>
+                    if s_h7 = '1' then
+                        s_ripa <= s_ripa + shift_right(s_rip_k, 5);
+                        s_swa  <= s_swa + shift_right(s_swamp, 5);
+                    end if;
+                    s_vstep <= (others => '1');
                 when others =>
                     null;
             end case;
+
 
             -- hsync falling edge = new line: latch width, reset counters,
             -- flip parity, advance the per-line phases, kick the sequencer.
@@ -610,6 +739,9 @@ begin
                 s_caus_l1  <= s_caus_l1 + resize(s_fyc1, 16);
                 s_caus_l2  <= s_caus_l2 + resize(s_fyc2, 16);
                 s_sw_l     <= s_sw_l + resize(s_fsw, 16);
+                v_yf       := resize(s_yfrac, 12) + s_ys;
+                s_yfrac    <= v_yf(7 downto 0);
+                s_yrep     <= v_yf(10 downto 8) - 1;
                 s_murk_acc <= s_murk_acc + resize(s_murk_step, 16);
                 s_line_cnt <= s_line_cnt + 1;
                 if s_lfsr_ln(0) = '1' then
@@ -643,6 +775,7 @@ begin
                 s_vstep       <= (others => '0');
                 s_lines_total <= s_line_cnt;
                 s_line_cnt    <= (others => '0');
+                s_yfrac       <= (others => '0');
                 s_murk_acc    <= (others => '0');
             end if;
 
@@ -710,7 +843,7 @@ begin
             -- E4: ripple multiply (8-bit amp: same 0..95 px range, 4-px
             -- amplitude steps), base position, caustic sum + hash dither
             -- (+-32, reseeded per frame) to roughen the contour edges
-            s4_rip <= s3_fine * signed('0' & s_rip_k(9 downto 2));
+            s4_rip <= s3_fine * signed('0' & s_ripa(9 downto 2));
             s4_q   <= signed(resize(s3_x, 13)) + resize(s_base_off, 13);
             s4_qu  <= signed(resize(s3_x, 13)) + resize(s_base_u, 13);
             s4_qv  <= signed(resize(s3_x, 13)) + resize(s_base_v, 13);
