@@ -38,6 +38,15 @@
 -- each frame), so Scale never changes the bend and the octave seam is
 -- invisible.
 --
+-- Resolution scaling (v1.0.2): the field is drawn on a virtual 1080-line
+-- canvas -- per-pixel steps x xstep (1080 1.0, 720p 1.5, SD 2.0, SD being a
+-- 1440-unit 4:3 window), per-line steps once per virtual line crossed (Q4.8
+-- y step per field line from the timing ID, x2 for interlace).  Stripe
+-- pitch, warp depth and ripple wavelength are the same fraction of screen
+-- height at SD, 720p and 1080p; 1080p is bit-identical to v1.0.1.  This
+-- replaces the field_n-toggle interlace detect, which never fires on
+-- hardware (core_top ties field_n high), so 480i drew 2:1 stretched stripes.
+--
 -- Hardware contracts: own generated avid (parity-locked start, fixed
 -- per-field length -- the U/V-swap line fix from CUBIST), outputs gated to
 -- neutral outside it, frame work keyed to "avid absent for 2 line widths"
@@ -207,6 +216,40 @@ architecture ribbon of program_top is
     end function;
 
     ----------------------------------------------------------------------
+    -- Resolution scaling (v1.0.2): the field is drawn on a virtual 1080-line
+    -- canvas.  Per-pixel steps x xstep (1080 1.0, 720p 1.5, SD 2.0 -- SD is a
+    -- 1440-unit 4:3 window), per-line steps advance once per virtual line
+    -- crossed (Q4.8 y step per FIELD line from the timing ID, x2 for
+    -- interlace).  At 1080p both are 1 and the picture is unchanged.
+    ----------------------------------------------------------------------
+    function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(1138, 12);  -- 480i: 2 x 1080/486
+            when 4          => return to_unsigned(576, 12);   -- 480p: 1080/480
+            when 8          => return to_unsigned(960, 12);   -- 576i: 2 x 1080/576
+            when 12         => return to_unsigned(480, 12);   -- 576p: 1080/576
+            when 5 | 6 | 14 => return to_unsigned(384, 12);   -- 720p: 1.5
+            when 1 | 2 | 10 => return to_unsigned(512, 12);   -- 1080i: 2.0
+            when others     => return to_unsigned(256, 12);   -- 1080p: 1.0
+        end case;
+    end function;
+
+    -- signed step x xstep: + v (SD), + v/2 (720p), + 0 (1080)
+    function f_xss(v : signed; sd, h7 : std_logic) return signed is
+        variable r : signed(v'length downto 0);
+    begin
+        r := resize(v, v'length + 1);
+        if sd = '1' then
+            return r + r;
+        elsif h7 = '1' then
+            return r + shift_right(r, 1);
+        else
+            return r;
+        end if;
+    end function;
+
+    ----------------------------------------------------------------------
     -- quarter cosine table: C_COS(k) = round(362 * cos(k * 90/64 deg)).
     -- 362 = 256*sqrt(2), so at 45 deg ca = sa = 256 exactly -- i.e. the
     -- accumulator matches a plain (dx+dy) diagonal at unity zoom.
@@ -299,9 +342,17 @@ architecture ribbon of program_top is
     signal s_wvs   : unsigned(13 downto 0) := (others => '0');
     signal s_aoff  : signed(22 downto 0) := (others => '0');    -- stripe march
     signal s_woff  : unsigned(19 downto 0) := (others => '0');  -- ripple travel
-    -- bottom-field (interlace) seeds, pre-added so the line start is a mux
-    signal s_sda1, s_sdb1 : signed(22 downto 0) := (others => '0');
-    signal s_sdw1  : unsigned(19 downto 0) := (others => '0');
+    -- Resolution scaling: timing class, y step, the per-line virtual-line
+    -- repeat counter, and the x-scaled per-pixel steps.  (Replaces v1.0.1's
+    -- field_n-toggle interlace detect: core_top ties field_n high, so it
+    -- never fired on hardware and 480i stripes were stretched 2:1.)
+    signal s_sd, s_h7 : std_logic := '0';
+    signal s_ys    : unsigned(11 downto 0) := to_unsigned(256, 12);
+    signal s_yf    : unsigned(7 downto 0) := (others => '0');
+    signal s_yrep  : unsigned(2 downto 0) := (others => '0');
+    signal s_cax   : signed(11 downto 0) := to_signed(256, 12);
+    signal s_sax   : signed(11 downto 0) := to_signed(256, 12);
+    signal s_wsx   : unsigned(15 downto 0) := to_unsigned(4128, 16);
 
     -- blended palette register file (K4 crossfade result), read by the pixel
     -- path as a plain 8:1 mux -- no ROM, no multiply, no ramp maths per pixel.
@@ -342,9 +393,6 @@ architecture ribbon of program_top is
     signal s_idle       : unsigned(12 downto 0) := (others => '0');
     signal s_earm       : std_logic := '0';
     signal s_fstart     : std_logic := '0';
-    signal s_ilace      : std_logic := '0';
-    signal s_fpar       : std_logic := '0';
-    signal s_ilc        : unsigned(1 downto 0) := (others => '0');
     -- generated avid: parity-locked start, ends after the field-latched width
     signal g_ph, g_arm, g_par, g_sel, g_avid, g_avid_q : std_logic := '0';
     signal g_rsr : std_logic_vector(2 downto 0) := (others => '0');
@@ -528,6 +576,7 @@ begin
         variable v_i   : integer range 0 to 7;
         variable v_c   : integer;
         variable v_zs  : signed(14 downto 0);
+        variable v_wx  : signed(16 downto 0);
     begin
         if rising_edge(clk) then
             m_p <= m_a * m_b;
@@ -545,16 +594,6 @@ begin
                 s_rope   <= registers_in(6)(3);        -- S10
                 s_outl   <= registers_in(6)(4);        -- S11
                 s_Wl  <= s_W;
-                -- interlace: field_n sampled at the same raster point every
-                -- field alternates iff the source is interlaced.  Believe it
-                -- only after 4 alternations in a row, so a wobbling field flag
-                -- on a progressive source can't flash a frame at 2x line step.
-                s_fpar <= data_in.field_n;
-                if data_in.field_n /= s_fpar then
-                    if s_ilc /= 3 then s_ilc <= s_ilc + 1; end if;
-                else
-                    s_ilc <= (others => '0');
-                end if;
                 s_bi    <= (others => '0');
                 s_bph   <= (others => '0');
                 s_bdone <= '0';
@@ -678,10 +717,11 @@ begin
                                 s_woff <= s_woff + resize(s_wvs, 20);
                             end if;
                         when 3 =>
-                            -- bottom-field seeds (one line down)
-                            s_sda1 <= s_aoff + resize(s_sa, 23);
-                            s_sdb1 <= s_aoff + resize(s_ca, 23);
-                            s_sdw1 <= s_woff + resize(s_wstep, 20);
+                            -- resolution scaling: per-pixel steps x xstep
+                            s_cax <= f_xss(s_ca, s_sd, s_h7);
+                            s_sax <= f_xss(s_sa, s_sd, s_h7);
+                            v_wx  := f_xss(signed('0' & s_wstep), s_sd, s_h7);
+                            s_wsx <= unsigned(v_wx(15 downto 0));   -- <= 33022: slice
                         when 2 =>
                             -- PALETTE (K4): position through the 7 ramps, and
                             -- the crossfade weight to the NEXT one (wraps 6->0
@@ -762,41 +802,43 @@ begin
     -- (interlace-safe -- see the DDA/field phase trap), driven by the
     -- generated avid, and mirrored past screen centre when CHEVRON is on.
     ------------------------------------------------------------------------
-    s_ilace <= '1' when s_ilc = 3 else '0';
-
     p_acc : process(clk)
         variable v_ar, v_br : signed(22 downto 0);
         variable v_wr : unsigned(19 downto 0);
+        variable v_yt : unsigned(11 downto 0);
     begin
         if rising_edge(clk) then
+            -- timing class + y step, free-running from the timing ID
+            case to_integer(unsigned(registers_in(8)(3 downto 0))) is
+                when 0 | 4 | 8 | 12 => s_sd <= '1'; s_h7 <= '0';
+                when 5 | 6 | 14     => s_sd <= '0'; s_h7 <= '1';
+                when others         => s_sd <= '0'; s_h7 <= '0';
+            end case;
+            s_ys <= f_vstep_y(registers_in(8)(3 downto 0));
+
             if s_fstart = '1' then
                 s_newframe <= '1';
+                s_yrep     <= (others => '0');
             elsif g_avid = '1' and g_avid_q = '0' then
+                -- (core_top ties field_n high, so there is no bottom-field
+                -- phase to apply: both 480i fields draw the same rows)
                 if s_newframe = '1' then
-                    -- FIELD PHASE: the BOTTOM field (field_n = '0', odd frame
-                    -- rows 1,3,5..) starts one line down.  This is the SDK
-                    -- testbench's polarity (top field = field_n '1' = even
-                    -- rows) and fixed a hardware field-weave comb -- every
-                    -- diagonal edge grew ~2 px teeth crawling at field rate.
-                    if s_ilace = '1' and data_in.field_n = '0' then
-                        v_ar := s_sda1;
-                        v_br := s_sdb1;
-                        v_wr := s_sdw1;
-                    else
-                        v_ar := s_aoff;
-                        v_br := s_aoff;
-                        v_wr := s_woff;
-                    end if;
+                    v_ar := s_aoff;
+                    v_br := s_aoff;
+                    v_wr := s_woff;
+                    v_yt := s_ys;
                     s_newframe <= '0';
-                elsif s_ilace = '1' then
-                    v_ar := s_arow + s_sa + s_sa;
-                    v_br := s_brow + s_ca + s_ca;
-                    v_wr := s_wphx + s_wstep + s_wstep;
                 else
                     v_ar := s_arow + s_sa;
                     v_br := s_brow + s_ca;
                     v_wr := s_wphx + s_wstep;
+                    v_yt := resize(s_yf, 12) + s_ys;
                 end if;
+                -- virtual lines the NEXT row advances: this row start does
+                -- one step, the blanking after it does the rest (never at
+                -- 1080p, where the step is exactly one line)
+                s_yf   <= v_yt(7 downto 0);
+                s_yrep <= v_yt(10 downto 8) - 1;
                 s_row0 <= s_newframe;
                 s_arow <= v_ar;  s_apx <= v_ar;
                 s_brow <= v_br;  s_bpx <= v_br;
@@ -804,14 +846,20 @@ begin
                 s_wphy <= s_woff;
             elsif g_avid = '1' then
                 if s_chev = '1' and g_x >= s_cxu then
-                    s_apx  <= s_apx - s_ca;      -- mirror about screen centre
-                    s_bpx  <= s_bpx + s_sa;
-                    s_wphy <= s_wphy - s_wstep;
+                    s_apx  <= s_apx - s_cax;     -- mirror about screen centre
+                    s_bpx  <= s_bpx + s_sax;
+                    s_wphy <= s_wphy - s_wsx;
                 else
-                    s_apx  <= s_apx + s_ca;
-                    s_bpx  <= s_bpx - s_sa;
-                    s_wphy <= s_wphy + s_wstep;
+                    s_apx  <= s_apx + s_cax;
+                    s_bpx  <= s_bpx - s_sax;
+                    s_wphy <= s_wphy + s_wsx;
                 end if;
+            elsif s_yrep /= 0 then
+                -- blanking: the extra virtual-line steps (same adders)
+                s_arow <= s_arow + s_sa;
+                s_brow <= s_brow + s_ca;
+                s_wphx <= s_wphx + s_wstep;
+                s_yrep <= s_yrep - 1;
             end if;
         end if;
     end process p_acc;

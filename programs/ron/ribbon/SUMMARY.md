@@ -166,6 +166,36 @@ v0.3.2 build: HD Analog **76.44**, HD HDMI **77.75** (seed 1), HD Dual
 HD margins are ~3 % — the 10x13 warp multiply cost ~4 MHz; split its operand
 hi/lo if a later change squeezes it.
 
+## v1.0.2 — resolution scaling (2026-10-18), NEEDS a hardware A/B
+
+The accumulators stepped once per PIXEL and once per FIELD line, so 720p
+drew 1.5x stripes and 480i huge, 2:1-stretched ones at a steeper angle: the
+interlace doubling keyed on field_n toggling, and core_top ties field_n
+high on every input, so it never fired on hardware. Now the field is drawn
+on a virtual 1080-line canvas (timing ID `registers_in(8)`):
+- per-pixel steps x xstep (1 / 1.5 / 2): `s_cax s_sax s_wsx`, sequencer
+  state 3 (where the dead bottom-field seeds were);
+- per-line steps once per VIRTUAL line crossed: the row start does one
+  step, `s_yrep` adds the rest in the blanking after the row (same adders;
+  Q4.8 y step per field line, x2 for interlace; never at 1080p);
+- the field_n interlace detect + bottom-field seeds are removed (inert).
+Stripe pitch, angle, warp depth (already accumulator units) and ripple
+wavelength are now the same fraction of screen height everywhere; SD is the
+left 1440-unit window (Chevron still mirrors about the real centre).
+1080p is bit-identical. Sims: 720p r 0.96 / edges 0.91 vs 1080p (was 0.15 /
+0.05); SD matches the 1080p geometry (narrow stops alias to 1-px stairs at
+SD, as any 720-px raster would).
+
+Build `MAKE_TIMEOUT=900 ./build_programs.sh ron ribbon` (router2): HD
+Analog 77.43 (seed 1), HD HDMI 77.60 (**seed 2**), HD Dual 81.12 (**seed
+3**), SD 76.11 / 78.44 / 75.34 (seed 1). 6863-6919 LC (89-90%), 8 EBR.
+**Every HD config re-routed** -- the HD HDMI placement Ron validated (the
+bars lottery below) is gone from this build. The v1.0.1-era validated
+vmprog + its six bitstreams are kept in
+`.scaling_work/ribbon_tmp/` (`ribbon_v1.0.1_validated.vmprog`,
+`validated_bitstreams/`). Hardware A/B the new HD HDMI before it replaces
+the validated one.
+
 ## v1.0.0 — FINAL except presets (Ron signed off 2026-10-09)
 
 Same six bitstreams as v0.3.3 (only the config binary was regenerated for the
