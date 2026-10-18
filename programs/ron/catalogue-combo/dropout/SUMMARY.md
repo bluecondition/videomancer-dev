@@ -124,9 +124,37 @@ Tier 3, optional:
 - A real flagging curve (bend strongest at the band's top, quadratic)
   instead of a linear skew ramp.
 
+## v0.2.2: resolution scaling (2026-10-17)
+
+The bars were sized in field lines and pixels, so they were 1.5x too tall at
+720p and ~4.4x too tall on 480i (field lines, no interlace correction), and
+the smear runs 2x too wide on SD. Now the sizes live on the 1080-line canvas
+and are converted per mode from the timing ID:
+
+- P12 Bands and K4 Band: round(lines x ky) whole field lines, at least 1
+  (ky = 1080p 1, 1080i 1/2, 720p 2/3, 480i 0.225, 576i 0.267). The burst
+  zone's 32-line margin scales the same way (a per-mode constant).
+- K6 Skew is a slope: px per field line x (ys x kx) (480i 2.22, 1080i 2,
+  720p 1), so the flagging leans the same on every screen. The skew
+  product is widened to a 10-bit slope (hi/lo split plus a 2-bit part).
+- S9 Smear runs are 16 canvas units: a run starts where the canvas x
+  crosses a multiple of 16 (16 px at 1080, 10-11 at 720p, 8 at SD).
+- Unchanged: Distance and Roll (already fractions of the screen), snow and
+  line noise (pixel scale).
+- Bug fix: under interlace a new pattern was meant to start only on the top
+  field, keyed on field_n, which the hardware ties high, so the guard was
+  dead. It now uses a per-field toggle when the timing ID is interlaced.
+- 1080p is bit-identical (pixel diff 0).
+
 ## Build
 
 `./build_combo.sh dropout` → `out/rev_b/ron/catalogue-combo/dropout.vmprog`.
+
+v0.2.2 (2026-10-17, resolution scaling): all 6 configs pass on seed 1
+(router2 default). HD Analog 82.6, HD HDMI 87.9, HD Dual 85.8 MHz; SD Analog
+85.3, SD HDMI 80.8, SD Dual 86.4 MHz. 4,377–4,385 LC (57%; +~835 for the
+three free-running per-mode products, which could move onto the per-field
+serial multiplier if LC is ever needed), 19/32 EBR.
 
 v0.2.0 (2026-10-12): all 6 configs pass on seed 1 (router2 default).
 HD Analog 106.4, HD HDMI 102.1, HD Dual 96.2 MHz; SD Analog 99.5, SD HDMI
