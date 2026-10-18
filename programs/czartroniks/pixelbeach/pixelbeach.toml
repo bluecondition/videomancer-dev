@@ -1,7 +1,7 @@
 [program]
 processing_delay_clks = 0
 program_id = "com.czartroniks.pixelbeach"
-program_version = "3.24.1"
+program_version = "3.24.2"
 abi_version = ">=1.0,<2.0"
 program_name = "Pixel Beach"
 author = "czartroniks"

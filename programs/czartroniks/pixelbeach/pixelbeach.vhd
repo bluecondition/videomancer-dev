@@ -76,6 +76,17 @@
 -- State BRAMs (256 x 16 each, canonical 1W1R, FSM writes in vblank only, read
 -- address muxed FSM/display by fsm_run): eta, u, foam & wet packed.
 -- One shared 13x10 multiplier (registered in/out) serves flux and swell.
+--
+-- v3.24.2 (2026-10-18): resolution scaling.  The cell lattice runs in virtual
+-- 1080-line units (x step 1/1.5/2 per pixel, y step per field line from the
+-- timing ID), so a 16 px cell is 16/1080 of the screen height in every mode:
+-- 720p cells are 10-11 px, SD cells 8 px x 3-4 field lines (square on 4:3),
+-- and every cell-based layout (sun, gulls, rows, beach) scales with them.
+-- The display prefetch needs >= 8 clocks per cell, so the 8 px mode is
+-- clamped to 8 px at 720p (12 units, 1.5x) and SD (16 units: the 16 px
+-- mode's size there; S8 then only changes the beach slope and wash tail).
+-- The old field_n interlace detect (dead on hardware) is replaced by the
+-- interlaced y steps.  1080p is unchanged.
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -527,6 +538,32 @@ architecture pixelbeach of program_top is
     -- conservative flux/diffusion pairs exact.
     ----------------------------------------------------------------------------
     -- sign bit of a 15-bit difference (true when the value is negative)
+    -- Resolution scaling: per-mode steps from the video timing ID.
+    -- x step in half virtual units per pixel: 1080 2 (1.0), 720p 3 (1.5),
+    -- SD 4 (2.0: 720 px span 1440 units, a 4:3 window of the 1080 canvas).
+    function f_vstep_x(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0 | 4 | 8 | 12 => return to_unsigned(4, 3);
+            when 5 | 6 | 14     => return to_unsigned(3, 3);
+            when others         => return to_unsigned(2, 3);
+        end case;
+    end function;
+    -- y step in Q4.8 virtual units per FIELD line (1080 / active lines,
+    -- doubled for interlaced modes).
+    function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(1138, 12);  -- 480i: 2 x 1080/486
+            when 4          => return to_unsigned(576, 12);   -- 480p: 1080/480
+            when 8          => return to_unsigned(960, 12);   -- 576i: 2 x 1080/576
+            when 12         => return to_unsigned(480, 12);   -- 576p: 1080/576
+            when 5 | 6 | 14 => return to_unsigned(384, 12);   -- 720p: 1.5
+            when 1 | 2 | 10 => return to_unsigned(512, 12);   -- 1080i: 2.0
+            when others     => return to_unsigned(256, 12);   -- 1080p: 1.0
+        end case;
+    end function;
+
     function sgn15(x : signed(14 downto 0)) return std_logic is
     begin
         return x(14);
@@ -738,8 +775,6 @@ architecture pixelbeach of program_top is
     signal r_hedge      : std_logic := '0';
     signal fcnt         : unsigned(9 downto 0) := (others => '0');
     signal field_tgl    : std_logic := '0';
-    signal s_fprev      : std_logic := '0';
-    signal s_ilace      : std_logic := '0';
 
     signal x_loc     : unsigned(4 downto 0) := (others => '0');
     signal x_idx     : unsigned(7 downto 0) := (others => '0');
@@ -759,8 +794,20 @@ architecture pixelbeach of program_top is
     signal s_storm  : std_logic := '0';
     signal s_night  : std_logic := '0';
 
-    signal cellw_m1 : unsigned(4 downto 0) := to_unsigned(15, 5);
-    signal rowp_m1  : unsigned(4 downto 0) := to_unsigned(15, 5);
+    -- Resolution scaling: the lattice steps through virtual 1080-line units.
+    -- x_a = Q.1 position in the cell (x_loc still counts CLOCKS into the
+    -- cell for the prefetch sequence), y_a = Q.8 position in the row.
+    -- csz / rsz = cell width (Q.1) / row height (Q.8): 16 or 8 units, the
+    -- 8 px mode clamped to >= 8 clocks per cell at 720p / SD.
+    signal s_xs  : unsigned(2 downto 0)  := to_unsigned(2, 3);
+    signal s_ys  : unsigned(11 downto 0) := to_unsigned(256, 12);
+    signal s_csz : unsigned(5 downto 0)  := to_unsigned(32, 6);
+    signal s_rsz : unsigned(12 downto 0) := to_unsigned(4096, 13);
+    signal s_cl1 : unsigned(5 downto 0)  := to_unsigned(30, 6);     -- csz - xs
+    signal s_cl2 : unsigned(5 downto 0)  := to_unsigned(28, 6);     -- csz - 2 xs
+    signal s_rl1 : unsigned(12 downto 0) := to_unsigned(3840, 13);  -- rsz - ys
+    signal x_a   : unsigned(5 downto 0)  := (others => '0');
+    signal y_a   : unsigned(12 downto 0) := (others => '0');
 
     ----------------------------------------------------------------------------
     -- Per-frame render parameters (p_vseq)
@@ -1052,14 +1099,19 @@ begin
                 end if;
                 x_loc <= (others => '0');
                 x_idx <= (others => '0');
+                x_a   <= (others => '0');
             elsif data_in.avid = '1' then
-                if x_loc = cellw_m1 then
+                -- last pixel of the cell when the next one crosses csz
+                -- (x_a + xs >= csz  <=>  x_a >= csz - xs)
+                if x_a >= s_cl1 then
                     x_loc <= (others => '0');
+                    x_a   <= x_a - s_cl1;
                     if x_idx /= to_unsigned(255, 8) then
                         x_idx <= x_idx + 1;
                     end if;
                 else
                     x_loc <= x_loc + 1;
+                    x_a   <= x_a + s_xs;
                 end if;
             end if;
 
@@ -1072,12 +1124,11 @@ begin
                 end if;
                 celly_loc <= (others => '0');
                 celly_idx <= (others => '0');
+                y_a       <= (others => '0');
                 frame_act <= '0';
                 band      <= (others => '0');
                 bacc      <= resize(skystep_q, 15);
                 fcnt      <= fcnt + 1;
-                s_fprev   <= data_in.field_n;
-                s_ilace   <= data_in.field_n xor s_fprev;
 
                 -- latch controls once per field
                 lk1  <= unsigned(registers_in(0));
@@ -1096,9 +1147,11 @@ begin
                 frame_act <= '1';
                 celly_loc <= (others => '0');
                 celly_idx <= (others => '0');
+                y_a       <= (others => '0');
             elsif v_h_edge = '1' and frame_act = '1' then
-                if celly_loc = rowp_m1 then
+                if y_a >= s_rl1 then
                     celly_loc <= (others => '0');
+                    y_a       <= y_a - s_rl1;
                     if celly_idx /= to_unsigned(255, 8) then
                         celly_idx <= celly_idx + 1;
                         -- vertical sky band advance (skyband/8 per band)
@@ -1110,19 +1163,25 @@ begin
                     end if;
                 else
                     celly_loc <= celly_loc + 1;
+                    y_a       <= y_a + s_ys;
                 end if;
             end if;
 
-            -- cell pitch 16/8 px (S8); rows halved when interlaced
-            if s_size8 = '1' then
-                cellw_m1 <= to_unsigned(7, 5);
-                if s_ilace = '1' then rowp_m1 <= to_unsigned(3, 5);
-                else                  rowp_m1 <= to_unsigned(7, 5); end if;
+            -- per-mode steps (the timing ID is static while a mode runs) and
+            -- cell pitch 16/8 virtual units (S8); the 8 px mode keeps >= 8
+            -- clocks per cell: 12 units at 720p, 16 at SD
+            s_xs  <= f_vstep_x(registers_in(8)(3 downto 0));
+            s_ys  <= f_vstep_y(registers_in(8)(3 downto 0));
+            if s_size8 = '0' or s_xs = 4 then
+                s_csz <= to_unsigned(32, 6);  s_rsz <= to_unsigned(4096, 13);
+            elsif s_xs = 3 then
+                s_csz <= to_unsigned(24, 6);  s_rsz <= to_unsigned(3072, 13);
             else
-                cellw_m1 <= to_unsigned(15, 5);
-                if s_ilace = '1' then rowp_m1 <= to_unsigned(7, 5);
-                else                  rowp_m1 <= to_unsigned(15, 5); end if;
+                s_csz <= to_unsigned(16, 6);  s_rsz <= to_unsigned(2048, 13);
             end if;
+            s_cl1 <= s_csz - s_xs;
+            s_cl2 <= s_csz - shift_left(resize(s_xs, 6), 1);
+            s_rl1 <= s_rsz - s_ys;
         end if;
     end process p_position;
 
@@ -2412,7 +2471,8 @@ begin
             -- promote strobe, registered one pixel early: the promote fans out
             -- to ~200 register muxes, and decoding x_loc = cellw_m1 in front
             -- of that fan-out was a 19 ns path at 98% LC
-            if data_in.avid = '1' and x_loc + 1 = cellw_m1 then
+            -- (virtual lattice: the NEXT pixel is the cell's last one)
+            if data_in.avid = '1' and x_a < s_cl1 and x_a >= s_cl2 then
                 pr_cell <= '1';
             else
                 pr_cell <= '0';
@@ -2421,7 +2481,8 @@ begin
             -- the promote first, on its registered strobe alone: as the last
             -- arm of the x_loc chain its 200-way fan-out still waited on the
             -- x_loc = 1/4/5/6 compares (22-28 ns x_loc -> wreach_q/bot_q/surf_q).
-            -- pr_cell implies x_loc = cellw_m1 (>= 7), so the arms never overlap.
+            -- pr_cell implies the cell's last clock (x_loc >= 7), so the arms
+            -- never overlap.
             if pr_cell = '1' then
                     -- entering the next cell: promote staged state, derive
                     eta_cur  <= eta_nxt;
