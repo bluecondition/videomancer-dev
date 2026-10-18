@@ -9,6 +9,27 @@
 -- cascade.vhd  (v2.1.2 -- 126/48 coupled discs, line-buffer mark render;
 --   finalized 2026-10-10; developed + HW-verified in a diagnostic copy)
 --
+-- v2.1.5 (2026-10-17): RESOLUTION SCALING.  The rings keep their size relative
+--   to the screen HEIGHT in every mode (virtual 1080-line canvas; SD is a
+--   1440-wide 4:3 window of it).  The engine stays in REAL pixels on x; per
+--   mode (timing id, latched at vsync):
+--     * spacing scales by 1/x-step: log-spacing floor s_lfmin = -704 + 64*log2
+--       (x-step): 1080 -704 (x1), 720p -667 (x0.67), SD -640 (x0.5), and the
+--       4-px minimum clamps the knob part (s_k3max);
+--     * y runs in x-pixel units: a Q8 dy accumulator steps 1/x-step of the
+--       virtual y step per FIELD line (480i 2.22, 576i 1.875, 1080i 2.0,
+--       480p 1.125, 576p 0.9375, 720p/1080p 1.0) -- interlace and the SD
+--       pixel aspect are both in that step (replaces the field_n-toggle
+--       interlace detect, which HD inputs never trip: field_n is tied high);
+--       the measured height is accumulated in the same units;
+--     * the BOTTOM field (field_n = '0') starts half a field step down (the
+--       old code offset field_n = '1' -- the fields were swapped at SD);
+--     * 720p caps the modelled ring count at 100 (1650-clk line: the span
+--       pass 15*(n+2) + E_LINE 99 must end before the next active rise;
+--       126 rings overran it at fine spacings, a pre-existing 720p bug);
+--     * S11 Video wave depth scales too (Q1 depth, 4 shifted key terms).
+--   1080p is bit-identical (every per-mode term is the old constant there).
+--
 -- HYPNOS CASCADE: concentric black/white discs that PUSH each other.  Move the
 -- centre (K1/K2) and the innermost disc leads; each outer ring holds still until
 -- the one inside closes its slack, then is shoved -- a wave of motion travelling
@@ -635,12 +656,40 @@ architecture cascade of program_top is
     -- runtime raster measurement
     ----------------------------------------------------------------------
     signal s_xcnt  : unsigned(11 downto 0) := (others => '0');
-    signal s_lcnt  : unsigned(11 downto 0) := (others => '0');
     signal s_W     : unsigned(11 downto 0) := to_unsigned(720, 12);
-    signal s_H     : unsigned(11 downto 0) := to_unsigned(480, 12);
-    signal s_ilace : std_logic := '0';
-    signal s_fpar  : std_logic := '0';
+    signal s_H     : unsigned(11 downto 0) := to_unsigned(480, 12);   -- x-pixel units (v2.1.5)
     signal s_avid_q : std_logic := '0';
+
+    ----------------------------------------------------------------------
+    -- v2.1.5 RESOLUTION SCALING: per-mode constants from the timing id
+    -- (registers_in(8)), latched at vsync.  The engine's unit is the REAL
+    -- x pixel; y is stepped in the same unit (virtual y step / virtual x
+    -- step per FIELD line, Q4.8), so rings stay round on the 4:3 SD screen
+    -- and interlace needs no separate detect.  At 1080p every value below
+    -- is the old constant.  y steps (p_frame vsync latch): 480i 569
+    -- ((2 x 1080/486) / 2), 480p 288, 576i 480, 576p 240, 1080i 512,
+    -- 1080p / 720p 256.
+    ----------------------------------------------------------------------
+    -- mode class: "00" 1080 (x-step 1), "01" 720p (1.5), "10" SD (2.0)
+    function f_cls(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0 | 4 | 8 | 12 => return "10";
+            when 5 | 6 | 14     => return "01";
+            when others         => return "00";
+        end case;
+    end function;
+    signal s_ys    : unsigned(11 downto 0) := to_unsigned(256, 12);  -- y step / field line, Q4.8 px
+    signal s_cft   : unsigned(11 downto 0) := to_unsigned(257, 12);  -- first-line step 1 + ys (top field)
+    signal s_cfb   : unsigned(11 downto 0) := to_unsigned(385, 12);  -- 1 + ys + ys/2 (bottom field)
+    signal s_dyh   : std_logic := '0';                               -- (ys/2) >= 1 px: bottom line 0 is +1
+    signal s_cls   : unsigned(1 downto 0) := "00";                   -- mode class (above)
+    signal s_lfmin : signed(15 downto 0) := to_signed(-704, 16);     -- log-spacing floor, mode offset
+    signal s_k3max : unsigned(9 downto 0) := to_unsigned(575, 10);   -- knob part max (spacing >= 4 px)
+    signal s_k3l   : unsigned(9 downto 0) := to_unsigned(242, 10);   -- K3 * 9/16, clamped
+    signal s_hacc  : unsigned(19 downto 0) := (others => '0');      -- field height, Q8 px units
+    signal s_dq    : unsigned(3 downto 0) := (others => '0');        -- Video wave depth, Q1, per mode
+    signal s_ncok  : std_logic := '1';                               -- ring count below the 720p cap
 
     ----------------------------------------------------------------------
     -- per-frame resolved terms
@@ -873,7 +922,8 @@ architecture cascade of program_top is
     -- pixel-coordinate accumulators.  dx per pixel, dy per active line.
     ----------------------------------------------------------------------
     signal s_dx    : signed(14 downto 0) := (others => '0');
-    signal s_dyb   : signed(14 downto 0) := (others => '0');
+    signal s_dya   : signed(22 downto 0) := (others => '0');   -- v2.1.5: Q8 dy accumulator
+    signal s_dyb   : signed(14 downto 0);                      -- its integer part (next line's dy)
     signal s_dyc   : signed(14 downto 0) := (others => '0');
     signal s_avid_p : std_logic := '0';
     signal s_avid_p2 : std_logic := '0';
@@ -1020,15 +1070,14 @@ begin
                     s_W <= s_xcnt;                    -- > 16
                 end if;
                 s_xcnt <= (others => '0');
-                s_lcnt <= s_lcnt + 1;
+                s_hacc <= s_hacc + s_ys;              -- v2.1.5: height in x-pixel units
             end if;
 
             if s_vs_pulse = '1' then
-                if s_lcnt(11 downto 4) /= 0 or (s_lcnt(3) = '1' and s_lcnt(2 downto 0) /= 0) then  -- > 8
-                    if s_ilace = '1' then s_H <= shift_left(s_lcnt, 1);
-                    else                  s_H <= s_lcnt; end if;
+                if s_hacc(19 downto 12) /= 0 or (s_hacc(11) = '1' and s_hacc(10 downto 8) /= 0) then  -- > 8
+                    s_H <= s_hacc(19 downto 8);
                 end if;
-                s_lcnt <= (others => '0');
+                s_hacc <= (others => '0');
             end if;
         end if;
     end process p_measure;
@@ -1090,9 +1139,36 @@ begin
                 s_vsat<= registers_in(6)(4);   -- S11 Output: Rings / Video (refraction)
                 s_p12 <= unsigned(registers_in(7));            -- P12 Zoom (Rings) / Wave depth (Video)
 
-                s_fpar <= data_in.field_n;
-                if data_in.field_n /= s_fpar then s_ilace <= '1';
-                else                              s_ilace <= '0'; end if;
+                -- v2.1.5 per-mode scaling constants (timing id).  Per y step
+                -- ys: first-line steps 1 + ys (top) / 1 + ys + ys/2 (bottom
+                -- field), and whether the bottom field's line 0 sits a whole
+                -- unit lower (ys/2 >= 256), as constants (no adders).
+                case to_integer(unsigned(registers_in(8)(3 downto 0))) is
+                    when 0 =>          -- 480i
+                        s_ys <= to_unsigned(569, 12); s_cft <= to_unsigned(570, 12);
+                        s_cfb <= to_unsigned(854, 12); s_dyh <= '1';
+                    when 4 =>          -- 480p
+                        s_ys <= to_unsigned(288, 12); s_cft <= to_unsigned(289, 12);
+                        s_cfb <= to_unsigned(433, 12); s_dyh <= '0';
+                    when 8 =>          -- 576i
+                        s_ys <= to_unsigned(480, 12); s_cft <= to_unsigned(481, 12);
+                        s_cfb <= to_unsigned(721, 12); s_dyh <= '0';
+                    when 12 =>         -- 576p
+                        s_ys <= to_unsigned(240, 12); s_cft <= to_unsigned(241, 12);
+                        s_cfb <= to_unsigned(361, 12); s_dyh <= '0';
+                    when 1 | 2 | 10 => -- 1080i
+                        s_ys <= to_unsigned(512, 12); s_cft <= to_unsigned(513, 12);
+                        s_cfb <= to_unsigned(769, 12); s_dyh <= '1';
+                    when others =>     -- 1080p, 720p
+                        s_ys <= to_unsigned(256, 12); s_cft <= to_unsigned(257, 12);
+                        s_cfb <= to_unsigned(385, 12); s_dyh <= '0';
+                end case;
+                s_cls <= f_cls(registers_in(8)(3 downto 0));
+                case f_cls(registers_in(8)(3 downto 0)) is
+                    when "10"   => s_lfmin <= to_signed(-640, 16); s_k3max <= to_unsigned(511, 10);
+                    when "01"   => s_lfmin <= to_signed(-667, 16); s_k3max <= to_unsigned(538, 10);
+                    when others => s_lfmin <= to_signed(-704, 16); s_k3max <= to_unsigned(575, 10);
+                end case;
 
                 s_seq <= to_unsigned(21, 5);
 
@@ -1108,10 +1184,13 @@ begin
                     -- octaves from K3's log-spacing -> rings expand up to x8
                     -- from the centre (clamped at the 2048 px maximum).  Off
                     -- in Video mode, where P12 is the wave depth.
+                    -- v2.1.5: the knob part K3*9/16 (0..575) is kept on its
+                    -- own (s_k3l), clamped at slot 20 so the spacing stays
+                    -- >= 4 px after the mode offset, and added to the mode's
+                    -- floor s_lfmin at slot 19 (1080p: -704, never clamps).
                     when 21 =>
-                        s_lfb <= to_signed(-704, 16)
-                                 + signed(resize(shift_right(resize(s_k3_per, 14)        -- K3 * 9/16
-                                   + shift_left(resize(s_k3_per, 14), 3), 4), 16));
+                        s_k3l <= resize(shift_right(resize(s_k3_per, 14)                -- K3 * 9/16
+                                   + shift_left(resize(s_k3_per, 14), 3), 4), 10);
                         if s_vsat = '1' then
                             s_zm <= (others => '0');
                         else                                -- P12 * 3/16 -> 0..191
@@ -1122,6 +1201,7 @@ begin
                     -- centre: cx = W/2 + (K1-512)*1.25W/1024 (+-0.625 W: the
                     -- centre goes ~12% past each edge at most)
                     when 20 =>
+                        if s_k3l > s_k3max then s_k3l <= s_k3max; end if;
                         s_ma <= resize(s_cx_k, 14);
                         s_mb <= signed(resize(resize(s_W, 13) + shift_right(resize(s_W, 13), 2), 14));
                         s_mreq <= '1';  v_req := '1';
@@ -1140,14 +1220,17 @@ begin
                         else                v_acc := v_targ; end if;
                       if s_seq(0) = '1' then
                         s_cxs <= v_acc;
+                        s_lfb <= s_lfmin + signed(resize(s_k3l, 16));    -- v2.1.5
                         s_ma <= resize(s_cy_k, 14);                       -- centre Y
                         s_mb <= signed(resize(resize(s_H, 13) + shift_right(resize(s_H, 13), 2), 14));
                         s_mreq <= '1';  v_req := '1';
                       else
                         s_cys <= v_acc;
                         -- FREQUENCY: Lf(Q6) = -704 + Period*9/16 - zoom
+                        -- (v2.1.5: lfb - zm < lfmin <=> k3l < zm -- a short
+                        -- 10-bit compare beside the subtract; 1080p: -704)
                         v_lz := s_lfb - signed(resize(s_zm, 16));
-                        if v_lz < -704 then v_lz := to_signed(-704, 16); end if;   -- spacing <= 2048
+                        if s_k3l < resize(s_zm, 10) then v_lz := s_lfmin; end if;  -- spacing <= 2048 (1080p)
                         s_lf <= v_lz;
                         -- K5 ease (pot noise would shimmer the ring edges)
                         v_pe   := signed(resize(s_k5f, 14)) + shift_right(
@@ -1217,6 +1300,23 @@ begin
                         s_shalf_p <= resize(shift_right(s_spac, 1), 12);
                         -- K4 GRADIENT: four quarters of the knob
                         s_gn <= s_k4_gr(9 downto 8);
+                        -- v2.1.5: Video wave depth L = P12 top 3 bits, in Q1
+                        -- and scaled per mode: 1080 L, SD L/2, 720p ~2L/3
+                        case s_cls is
+                            when "10" => s_dq <= '0' & s_p12(9 downto 7);
+                            when "01" =>
+                                case to_integer(s_p12(9 downto 7)) is
+                                    when 0 => s_dq <= to_unsigned(0, 4);
+                                    when 1 => s_dq <= to_unsigned(1, 4);
+                                    when 2 => s_dq <= to_unsigned(3, 4);
+                                    when 3 => s_dq <= to_unsigned(4, 4);
+                                    when 4 => s_dq <= to_unsigned(5, 4);
+                                    when 5 => s_dq <= to_unsigned(7, 4);
+                                    when 6 => s_dq <= to_unsigned(8, 4);
+                                    when others => s_dq <= to_unsigned(9, 4);
+                                end case;
+                            when others => s_dq <= s_p12(9 downto 7) & '0';
+                        end case;
                     -- port: A and C from the s_eff table (s_seff changed at
                     -- slot 10; valid from slot 8 on)
                     when 7 =>
@@ -1259,8 +1359,11 @@ begin
                         -- first active line's dy (p_acc hasn't primed it yet)
                         -- -cy (+1 on interlaced field 1) = not(cy) + 1 (+1); exact
                         -- for cy /= -8192 (s_cy is within [-2560, 4606])
+                        -- v2.1.5: the BOTTOM field (field_n = '0') sits ys/2
+                        -- lower; its line 0 is a whole unit lower when ys/2
+                        -- >= 1 px (480i, 1080i)
                         v_dyc := "01";
-                        if s_ilace = '1' and data_in.field_n = '1' then v_dyc := "10"; end if;
+                        if s_dyh = '1' and data_in.field_n = '0' then v_dyc := "10"; end if;
                         s_dy0 <= resize(not s_cy, 15) + signed(resize(v_dyc, 15));
                         s_cv_done <= '1';
                         s_tlrun <= '0';
@@ -1280,11 +1383,16 @@ begin
     ------------------------------------------------------------------------
     -- coordinate accumulators.  dx loads -cx at each active-line start and
     -- steps +1 per pixel; dy loads -cy at the FIRST active line of the frame
-    -- and steps per line -- by 2 on interlaced sources, half-step on field 2.
+    -- and steps per line.  v2.1.5: dy is a Q8 accumulator stepped s_ys per
+    -- FIELD line (x-pixel units: interlace + SD pixel aspect included; 1.0
+    -- at 1080p/720p), the bottom field starting ys/2 lower.  s_dyb, its
+    -- integer part, is what the engine reads (unchanged at 1080p).
     ------------------------------------------------------------------------
+    s_dyb <= s_dya(22 downto 8);
+
     p_acc : process(clk)
-        variable v_yb : signed(14 downto 0);
-        variable v_ys : unsigned(2 downto 0);
+        variable v_yb : signed(22 downto 0);
+        variable v_ys : unsigned(11 downto 0);
     begin
         if rising_edge(clk) then
             s_avid_p <= data_in.avid;
@@ -1292,18 +1400,18 @@ begin
             if s_vs_pulse = '1' then
                 s_newframe <= '1';
             elsif data_in.avid = '1' and s_avid_p = '0' then      -- active-line start
-                -- port: one adder.  First line: -cy (+1 on interlaced field 1)
-                -- + step = not(cy) + 1 (+1) + step; later lines: dyb + step.
-                if s_ilace = '1' then v_ys := "010"; else v_ys := "001"; end if;
+                -- port: one adder.  First line: (-cy)*256 (+ ys/2 bottom field)
+                -- + step = (not(cy) & FF) + 1 + ys (+ ys/2); later: dya + ys.
+                v_ys := s_ys;
                 if s_newframe = '1' then
-                    v_yb := resize(not s_cy, 15);
-                    v_ys := v_ys + 1;
-                    if s_ilace = '1' and data_in.field_n = '1' then v_ys := v_ys + 1; end if;
+                    v_yb := resize(not s_cy, 15) & "11111111";
+                    if data_in.field_n = '0' then v_ys := s_cfb;
+                    else                          v_ys := s_cft; end if;
                     s_newframe <= '0';
                 else
-                    v_yb := s_dyb;
+                    v_yb := s_dya;
                 end if;
-                s_dyb <= v_yb + signed(resize(v_ys, 15));
+                s_dya <= v_yb + signed(resize(v_ys, 23));
                 s_dx <= resize(-s_cx, 15);
             elsif data_in.avid = '1' then
                 s_dx <= s_dx + 1;
@@ -1331,6 +1439,12 @@ begin
         if rising_edge(clk) then
             ch_blank <= not data_in.avid;
             if s_seq = 4 then ch_go4 <= '1'; else ch_go4 <= '0'; end if;
+            -- v2.1.5: 720p ring cap.  The 1650-clk line holds the span pass
+            -- 15*(n+2) + E_LINE 99 only for n <= 100, so ring s_chain_cnt
+            -- may close the count (cnt+1) only while cnt <= 99.  Registered:
+            -- s_chain_cnt is >= 13 clocks old when phase 13 reads this.
+            if s_cls = "01" and s_chain_cnt >= 100 then s_ncok <= '0';
+            else                                         s_ncok <= '1'; end if;
             ew_wex <= '0';                              -- default: no write
             ew_wey <= '0';
             s_ocap <= '0';                              -- default: 1-cycle pulse
@@ -1465,7 +1579,7 @@ begin
                         -- 2048-px spacing still has an anchor.
                         s_codd <= not s_codd;
                         if s_codd = '1'
-                           and (s_racc <= C_RCL or s_chain_cnt = 1) then
+                           and ((s_racc <= C_RCL and s_ncok = '1') or s_chain_cnt = 1) then
                             s_nrw  <= to_unsigned(s_chain_cnt + 1, 7);
                             s_ocap <= '1';
                         end if;
@@ -2197,10 +2311,12 @@ begin
             -- one-sided displacement from the field key (v1.8): du =
             -- L*key/32, L = P12 top 3 bits (8 levels) as three gated
             -- shifted terms -> 0..53 px (v1.7: 4 zones, 0..18)
+            -- v2.1.5: depth s_dq is Q1 and mode-scaled (1080: P12 bits & 0)
             v_du := (others => '0');
-            if s_p12(9) = '1' then v_du := v_du + resize(r12_key(7 downto 3), 6); end if;
-            if s_p12(8) = '1' then v_du := v_du + resize(r12_key(7 downto 4), 6); end if;
-            if s_p12(7) = '1' then v_du := v_du + resize(r12_key(7 downto 5), 6); end if;
+            if s_dq(3) = '1' then v_du := v_du + resize(r12_key(7 downto 3), 6); end if;
+            if s_dq(2) = '1' then v_du := v_du + resize(r12_key(7 downto 4), 6); end if;
+            if s_dq(1) = '1' then v_du := v_du + resize(r12_key(7 downto 5), 6); end if;
+            if s_dq(0) = '1' then v_du := v_du + resize(r12_key(7 downto 6), 6); end if;
             -- LEFT-EDGE CLEANUP: never read across the line start.  The
             -- displacement is clamped to the pixels this line has actually
             -- produced, so the wave fades in over the first columns
