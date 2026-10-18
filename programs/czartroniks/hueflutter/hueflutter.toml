@@ -5,12 +5,14 @@
 # slider set the interaction.  See hueflutter.vhd and SUMMARY.md.
 # v0.2.0: Spin is squared (P12 600 -> 596, 800 -> 656, 200 -> 361 keep the
 # v0.1 speeds); preset depths moved off the zone boundaries (hysteresis).
+# v0.2.3: resolution scaling -- wobble amplitude and wavelength follow the
+# screen height at 720p and SD (1080p unchanged).
 
 [program]
 processing_delay_clks = 32
 program_id = "com.czartroniks.hueflutter"
 program_name = "Hueflutter"
-program_version = "0.2.2"
+program_version = "0.2.3"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
