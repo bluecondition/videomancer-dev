@@ -5,6 +5,30 @@ can be finalized for now").  Presets are placeholders — capture on hardware
 with `./capture_preset.sh` when looks are dialled in, then rebuild (HD HDMI
 needs SEED 2).**
 
+**v1.2.2 (2026-10-17) — resolution scaling.** Every screen-space
+coordinate (centred projections: stripes, bands, grooves, scallops; the K3
+cell engine: chips, beans, dots, checks, waffle; the garnish cells) runs in
+**virtual 1080-line units** stepped from the timing ID (`registers_in(8)`):
+x 1.0/1.5/2.0 per pixel at 1080p/720p/SD (SD = a 1440-wide 4:3 window), y
+1080/active lines per field line (interlace included); the centre is measured
+in virtual units. Stripes and cells keep their size relative to the screen
+height and stay square at SD (they were 2x wide and, on field lines, ~4x
+tall). 1080p is bit-identical. Thin features: the chocolate grooves widen to
+2 units at the 8 px scale on 720p/SD, and the garnish (jimmie / glint) rows
+widen to 5 units where a field line spans more than 2 (SD), so they still
+land on a line. The gloss / outline gradient and the K2 Clean run length are
+pixel-scale filters and stay in pixels. The field_n interlace detector (dead
+on hardware, which ties field_n high) is gone. It also caused a start-up
+transient: on the first field_n='1' it flagged interlace once, so for about
+two frames after load the height read 2x and the pattern centre sat 540
+lines low (the 3-warmup sim captured that frame). v1.2.2 has no transient;
+its 1080p output equals the old code's steady state bit for bit (0 pixels).
+K3's labels are the 1080p sizes. Build (router2): **all 6 configs seed 1** this time (HD HDMI closed at
+seed 1) — HD Analog 82.1 / HD HDMI 77.6 / HD Dual 77.5 MHz; SD 80.6 / 84.0 /
+79.9 MHz; 4508–4531 LC (59%), 7 EBR.
+
+---
+
 **v1.2.0 (2026-10-07) — logical THEME maps replace the arithmetic K1
 permutations (Ron: v1.1 "feels like a regression in other ways"; wanted the
 64 maps separated by density / colour / style so dark dense textures land in
