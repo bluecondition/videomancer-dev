@@ -147,6 +147,21 @@ edges in both directions instead of only horizontal ones.
 7. P12 sweep: speed should ramp gently, then race at the top.
 8. HD HDMI: any thick bars? Analog colour source: any thin coloured lines?
 
+## Resolution scaling check (2026-10-17, no change)
+
+The audit flagged SD as showing "about 2 panes vs ~4 at HD" for the Quad
+Plasma preset (K1 = 4 panes). Measured on the hardware-faithful renders,
+SD has 4 panes too: boundaries at x = 149 / 329 / 509 / 689 (720 wide;
+180 px = W/4), 720p at 264 / 584 / 904 / 1224 (320), 1080p at 397 / 877 /
+1357 / 1837 (480), with the Wipe offset the same 0.17 of a pane in all three.
+Panes is a count and Wipe a fraction of the width, so on SD's 4:3 screen
+the panes are narrower (360 of 1440 virtual units vs 480 of 1920) and each
+holds a narrower slice of the picture (probably what read as "2 panes"). W/3 (shift-add
+series: 240 / 427 / 640 at 720 / 1280 / 1920) and the wipe product are
+correct at every width; the labelled-default
+guard does not depend on the mode. Nothing else is geometric (C_EDGE inset,
+[1 2 1], isotherms are pixel / luma scale). No code change.
+
 ## Build
 
 `./build_combo.sh panemix` → `out/rev_b/ron/catalogue-combo/panemix.vmprog`.
