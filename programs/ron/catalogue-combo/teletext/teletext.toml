@@ -23,7 +23,7 @@ name_label = "Bars"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 250
+initial_value = 825
 display_float_digits = 1
 suffix_label = "%"
 
@@ -33,7 +33,7 @@ name_label = "Distance"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 1020
-initial_value = 300
+initial_value = 0
 display_float_digits = 0
 suffix_label = "px"
 
@@ -41,7 +41,7 @@ suffix_label = "px"
 parameter_id = "rotary_potentiometer_3"
 name_label = "Cell"
 value_labels = ["8 px", "16 px", "32 px", "64 px"]
-initial_value_label = "8 px"
+initial_value_label = "32 px"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
@@ -49,7 +49,7 @@ name_label = "Contrast"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 400
-initial_value = 300
+initial_value = 302
 display_float_digits = 0
 suffix_label = "%"
 
@@ -59,7 +59,7 @@ name_label = "Shear"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 30
-initial_value = 300
+initial_value = 54
 display_float_digits = 0
 suffix_label = "px"
 
@@ -69,7 +69,7 @@ name_label = "Rate"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 300
+initial_value = 225
 display_float_digits = 1
 suffix_label = "%"
 
@@ -83,7 +83,7 @@ initial_value_label = "White"
 parameter_id = "toggle_switch_8"
 name_label = "Colour"
 value_labels = ["Mono", "Cell"]
-initial_value_label = "Mono"
+initial_value_label = "Cell"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
