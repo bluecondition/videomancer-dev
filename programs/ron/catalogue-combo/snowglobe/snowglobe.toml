@@ -21,13 +21,13 @@ core = "yuv444_30b"
 parameter_id = "rotary_potentiometer_1"
 name_label = "Cell"
 value_labels = ["1 px", "2 px", "4 px", "8 px", "16 px", "32 px", "64 px", "128 px"]
-initial_value_label = "8 px"
+initial_value_label = "4 px"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
 name_label = "Rows"
 value_labels = ["1 line", "2 lines", "4 lines", "8 lines", "16 lines", "32 lines", "64 lines", "128 lines"]
-initial_value_label = "4 lines"
+initial_value_label = "128 lines"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
@@ -35,7 +35,7 @@ name_label = "Snow"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 300
+initial_value = 509
 display_float_digits = 1
 suffix_label = "%"
 
@@ -45,7 +45,7 @@ name_label = "Tracking"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 100
+initial_value = 70
 display_float_digits = 1
 suffix_label = "%"
 
@@ -55,7 +55,7 @@ name_label = "Bulge"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 800
+initial_value = 699
 display_float_digits = 1
 suffix_label = "%"
 
@@ -65,7 +65,7 @@ name_label = "Radius"
 control_mode = "linear"
 display_min_value = 3
 display_max_value = 140
-initial_value = 600
+initial_value = 586
 display_float_digits = 0
 suffix_label = "%"
 
@@ -105,7 +105,7 @@ name_label = "Squeeze"
 control_mode = "linear"
 display_min_value = 50
 display_max_value = 200
-initial_value = 340
+initial_value = 1023
 display_float_digits = 0
 suffix_label = "%"
 
