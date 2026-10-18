@@ -96,7 +96,51 @@ is black or the input video; nothing else ever colours the background.
   with square glyphs.  At the smallest Glyph Size (K6 < 25%, 16 units) an SD
   glyph is only ~3.6 field lines tall, so it reads as dashes, not katakana.
 
+## v1.0.3 (2026-10-18): fit, same picture
+
+v1.0.2's scaling pushed the stock LZX SDK's SD Standalone config (its core is
+~500 LC bigger than the HD ones) to 7821/7680 LC, so nextpnr could not place
+it. v1.0.3 removes logic only. The picture is unchanged bit for bit:
+- **`no_rw_check` on the 7 written RAMs** (3 head RAMs, drop info, luma map,
+  param RAM, video ring). None of them ever needs a read and a write to the
+  same address. The vring read trails its write by `C_VDLY`. The update
+  walk's one same-address read falls in vblank and is never used. The luma
+  map writes one bank and reads the other while video is active. The param
+  RAM is written in vblank. This drops yosys's read-before-write emulation
+  (−285 LC).
+- **Respawn draws share one hash and one multiplier.** `mix16` is linear over
+  GF(2), so the six per-drop `mix16(lfsr xor K)` draws equal `s_rnd xor
+  mix16(5A3C xor K)`. `s_rnd` is held in `u_um` the clock after `U_W1`, so it
+  sees the same lfsr value. The three `rnd8 * sparse` products now run through
+  one multiplier on consecutive walk clocks (`U_LAT`/`U_SPD1`/`U_SPD2`). The
+  gap slices land by `U_ADD`, so the column period and lfsr timing are
+  unchanged (−361 LC).
+
+| | before (v1.0.2) | after (v1.0.3) |
+|---|---|---|
+| stock SDK SD Standalone (packed) | 7821 / 7680, does not place | **7175 (93%)**, routed, 49.3 MHz (Fmin 27) |
+| dev 6 configs | 7317–7341 (95.5%) | 6619–6636 (86.3%) |
+
+Bit-exact proof: a GHDL side-by-side (`.scaling_work/matrix_rain_fit/equiv/`).
+It runs v1.0.2 and v1.0.3 on the same stimulus and compares the full
+`data_out` record every clock. It also compares every drop-RAM write (address,
+head words, info word). Runs: 1080p, 720p and 480i at real rasters and
+blanking, plus knob-sweep runs (all 8 controls re-rolled every field) at
+1080p, 720p and 480i timing IDs. That is ~36 M clocks and 3.7 k drop-RAM writes, with 0 mismatches. A deliberately
+wrong constant was caught by the write check.
+
 ## Build seeds
+
+v1.0.3 (2026-10-18, fit): `./build_programs.sh ron matrix_rain` (router2), 21 EBR, machine heavily loaded:
+
+| Config | Seed | Fmax (MHz) | LC |
+|---|---|---|---|
+| HD Analog | 1 | 82.15 | 6623 |
+| SD Analog | 1 | 86.96 | 6636 |
+| HD HDMI | 1 | 77.94 | 6619 |
+| SD HDMI | 1 | 82.20 | 6636 |
+| HD Dual | **3** (seed 1 missed, seed 2 stalled the router) | 88.35 | 6631 |
+| SD Dual | 1 | 86.11 | 6624 |
 
 v1.0.2 (2026-10-18, resolution scaling): `./build_programs.sh ron matrix_rain` (router2), all six
 configs pass on seed 1 — HD Analog 80.30, SD Analog 70.30, HD HDMI 80.16, SD HDMI 82.64,
