@@ -89,6 +89,24 @@ S). Heat Shimmer K1 293 / K2 296 / K4 0; Patchy Print 732 / 362 / 1023;
 Colour Slip 439 / 661 / 876. P12 values are unchanged (Storm's reach is now
 ⅛ of the width, 240 px in HD vs v0.1's 255).
 
+## v0.2.2 changes (resolution scaling, 2026-10-17)
+
+At SD and 720p the lattice cells were fixed-pixel (SD cells ~2x wide and
+~4.4x tall in field lines) and the displacement was 1/8 of the real width.
+Now (1080p unchanged, pixel diff 0):
+- The per-frame lattice steps are virtual (per 1080-line unit); the real
+  steps are x step / 2 times that per pixel (SD x2, 720p x1.5) and y step /
+  256 times that per field line (480i x4.44, one shift-add multiply on the
+  existing serial multiplier). The centring multiplies use the real steps
+  with the measured W/2, H/2, so the field still zooms about the screen
+  centre; SD shows the centre 1440 units of the 1080p field.
+- Drift stays in virtual lines (unscaled step).
+- Displacement = c x (1080p width in real px: 1920 / 1280 / 960) / 8192
+  instead of the measured width: height-based, so the 4:3 SD warp has the
+  same size relative to the cells as at 1080p (was 3/4 of it). 720p is the
+  same as before.
+- Steps are free-running registers decoded from the timing ID.
+
 ## Hardware checks for v0.2.0
 
 - Turn on Drift and watch for ~30 s: no horizontal tear line should cross
@@ -148,3 +166,9 @@ line buffer, 3 curve ROM, 2 LUT); all `.bin` files unpack. Standalone yosys:
 `emulate_transparency` 0 (v0.1: 3). The +1,500 LC is mostly ~600 more FFs
 (lattice DDAs, sequencers, smoothing window) plus the LUT builder. A copy of
 the vmprog is in `.noisetone_work/v020/`.
+
+v0.2.2 (2026-10-17, resolution scaling, router2 default): all six configs
+pass; HD Dual needed seed 4 (seed 1 stalled the router, 2 and 3 missed),
+the rest seed 1. HD Analog 80.6, HD HDMI 75.8, HD Dual 77.3 MHz (seed 4);
+SD Analog 74.5, SD HDMI 76.7, SD Dual 75.4 MHz. 6,518-6,541 LC (85%),
+23/32 EBR (+~160 LC). Not flashed.
