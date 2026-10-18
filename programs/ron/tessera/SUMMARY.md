@@ -2,8 +2,74 @@
 
 **Status: v1.0.0 FINAL except presets (signed off by Ron 2026-10-11,
 HW-validated: "It looks really good").** v1.0.0 = the v17 engine (TOML version
-bump only; bitstreams identical). **Build seeds:** all 6 configs seed 1, router1
-(`NEXTPNR_ROUTER="--router router1" ./build_programs.sh ron tessera`).
+bump only; bitstreams identical). **Build seeds:** router1
+(`NEXTPNR_ROUTER="--router router1" ./build_programs.sh ron tessera`); seed 1 on
+all 6 configs through v1.0.3, and from v1.0.4 HD Analog needs seed 2 (seed 1
+livelocks router1).
+
+## v1.0.4 — fit for the stock SDK SD Standalone (2026-10-18)
+After v1.0.3, the stock LZX SDK's SD Standalone config packed to 7767 / 7680 LC
+and could not place on any seed. v1.0.4 removes 288 LC with bit-exact
+restructuring only. The output is identical at every resolution.
+- **One size shift-add set (−92 LC).** v1.0.3 derived R / third / half twice:
+  once from the y height and once from the x extent (14 adders).
+  - Now one set reads each size as it leaves the per-frame multiplier. It is
+    latched into the y set at step 8 and the x set at step 9.
+  - third and half share their 1/16 + 1/64 term.
+  - The recycle range reuses the latched third (`mv + H + third`).
+  - R / third / half now settle one clock earlier, about 15 clocks before
+    geometry starts.
+- **One outline-threshold unit (−172 LC).** The three per-edge thresholds
+  (Manhattan length × 2) were three parallel units in G_STORE. Now one unit
+  computes them in turn, on the first wait cycle of products 12 / 14 / 16. At
+  that point the multiplier's B operand holds dx_e and its registered copy holds
+  dy_e, so the unit needs no input mux. This also removes v17's old HD critical
+  path (the G_STORE threshold calc).
+- **Threshold LSB left unwritten (−24 LC, −1 EBR).** The thresholds' ×2 LSB
+  keeps its '0' init, so yosys still sees a constant lane. Writing that 0 from
+  the new unit had cost the static record RAM an 11th EBR. EBR is back to 25.
+- **Stock-SDK packed LC:** SD Standalone 7767 → **7479** (97.4%), HD Dual
+  7430 → 7145. EBR is unchanged (25 / 26). `emulate_transparency` = 0 on every
+  program RAM; HD Dual's one hit is the core's dual sync delay.
+- **Bit-exact proof:** GHDL side-by-side against the committed v1.0.3, on the
+  same stimulus. Every clock the bench compares data_out and every sprite-store
+  write (edge-RAM port, geometry push). Knobs and switches are re-rolled at
+  every field start and again mid-picture. Real line and blanking lengths.
+  Result: 0 mismatches:
+
+  | run | timing ID | raster | fields | clocks | mismatches |
+  |---|---|---|---|---|---|
+  | R1 | 13 (1080p) | 1920×1080 in 2200×1125 | 4 | 9.90 M | 0 |
+  | R2 | 14 (720p) | 1280×720 in 1650×750 | 6 | 7.43 M | 0 |
+  | R3 | 0 (480i) | 720×240 in 858×262 | 30 | 6.74 M | 0 |
+  | R4 | 10 (1080i), 64 triangles at start | 1920×540 in 2200×562 | 6 | 7.42 M | 0 |
+  | R5 | 12 (576p), P12 max at start | 720×576 in 864×625 | 8 | 4.32 M | 0 |
+  | S1 | 3 (1080p), short lines (fill overruns) | 480×270 in 600×300 | 40 | 7.20 M | 0 |
+
+  That is 43 M clocks in total, with every edge-RAM write and push matching.
+  The output is never blank: each run draws 21k–65k luma transitions in total, after an
+  empty field 0. A +1 threshold perturbation, as a negative control, gave 46
+  mismatches and failed every push. Bench:
+  `.scaling_work/tessera_fit/equiv/`.
+
+- **Dev build** (router1, `NEXTPNR_ROUTER="--router router1" ./build_programs.sh
+  ron tessera`). On HD Analog, seed 1 livelocks router1: 2891 arcs stayed
+  stuck for 20 min in a re-check. The builder's retry loop moved on and built
+  seed 2. The netlist has no `CARRY I0==I1` cells (dupin). Its only two
+  duplicate-input LUTs are the old ones in the sin/cos layer scaling, which
+  v1.0.3 also had.
+
+  | config | seed | Fmax (MHz) | LC / 7680 | EBR |
+  |---|---|---|---|---|
+  | HD Analog | 2 | 83.58 | 6916 | 25 |
+  | SD Analog | 1 | 83.19 | 6916 | 25 |
+  | HD HDMI | 1 | 79.40 | 6922 | 25 |
+  | SD HDMI | 1 | 82.52 | 6908 | 25 |
+  | HD Dual | 1 | 83.65 | 6898 | 25 |
+  | SD Dual | 1 | 78.39 | 6927 | 25 |
+
+  Dev LC went from 7193–7223 to 6898–6927 (90.2% max). Not flashed. The output
+  is bit-exact to the HW-validated v1.0.3.
 
 ## v1.0.3 — resolution scaling (2026-10-17)
 Triangle sizes were `measured_v × factor` in FIELD lines, and the same size
