@@ -290,6 +290,29 @@ HDD 82.39, SDD 81.54. (Supersedes the v1.0.0 seed/hand-install notes above.)
 The fade itself is in `.rollthebones_work/rollthebones_v100.vhd` if wanted
 later (it fit at 92% but needed seeds 2/3 + solo routes).
 
+## v1.0.3 (2026-10-17) — resolution scaling
+
+The cell lattice runs in virtual 1080-line units (stepped per pixel / per
+field line from the timing ID in `registers_in(8)`: 1.0 at 1080p, 1.5 at 720p,
+SD 2.0 across a 1440-wide 4:3 window and 1080/486 per frame line). Dice keep
+their size relative to screen height and stay square on a 4:3 screen. Before,
+they were 1.5x too big at 720p and huge 2:1 slabs at SD.
+
+- X: a Q.1 accumulator; a cell wraps at `xla >= 2D - step`.
+- Y: each field line's Q4.8 step runs its integer part as UNIT steps right
+  after the h edge, so the row wrap and per-row seeds are unchanged. The die's
+  dy is the pre-step position of the line's last unit step, which at 1080p is
+  the previous line's value, as before.
+- Sample line: the first line of a row at/after `D - ceil(step)`. At 1080p
+  that is the last line, D-1. At SD it is still inside the row above.
+- The 8-px denoise window stays 8 REAL pixels. It is counted: it starts at the
+  first pixel past Dh - 7 steps (at least the cell start) and strobes 8 pixels
+  later. At 1080p this is Dh-7..Dh with the strobe at Dh+1, exactly as before.
+- 1080p is bit-identical at the test settings (diff1080 = 0).
+
+Build (router2, all seed 1): HDA 79.36, SDA 70.58, HDH 77.32, SDH 67.96,
+HDD 76.68, SDD 78.29 MHz (SD target 27). 6960-6975 LC (91%), 14 EBR.
+
 ## Status
 
 **v1.0.1 FINAL except presets — signed off by Ron 2026-10-07** ("We can
