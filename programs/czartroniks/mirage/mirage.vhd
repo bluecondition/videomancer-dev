@@ -11,7 +11,8 @@
 --   K1 Threshold  solar threshold
 --   K2 Gain       fold gain 0.125x .. 16x (log); >1x repeats into bands
 --   K3 Lift       level of the folded zone
---   K4 Amount     displacement, bipolar (+-256 px at full map swing)
+--   K4 Amount     displacement, bipolar (+-256 px at 1080p at full map
+--                 swing; follows the screen height in other modes)
 --   K5 Smooth     horizontal low-pass on the map
 --   K6 Pivot      luma level of zero displacement
 --
@@ -30,6 +31,17 @@
 -- Two solar_fold instances: A on the input (writes the line buffer through
 -- a 7-stage-delayed write port, feeds the map), B on the fetched pixel.
 -- Latency 25 clocks, all modes, blanking-gated.
+--
+-- v0.1.5 (2026-10-19): resolution scaling.  The displacement is in pixels,
+-- so it now follows the timing ID's x step (1080: 1.0 virtual unit a pixel,
+-- 720p 1.5, SD 2.0): Amount and the Bands drive are scaled x1 / x2/3 / x1/2
+-- (720p: (1/2 + 1/8) x 17/16 = 0.664, unsigned adds, no shared sign bit),
+-- and the effective-amount and displacement clamps scale with them
+-- (1023 / 682 / 511 and 511 / 341 / 255 px).  The same warp relative to the
+-- screen height in every mode.  Smooth's IIR length follows at SD (one
+-- shift less, exact x1/2); 720p keeps the 1080p shift (x2/3 is not a power
+-- of 2).  The edge clamp and Wrap stay on the real measured line.  1080p is
+-- bit-identical.
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -52,12 +64,23 @@ architecture mirage of program_top is
 
     constant C_LAT : integer := 25;
 
-    function f_sclamp(v : signed; lim : integer; w : integer) return signed is
+    -- symmetric clamp; the limit is picked by the timing class (SD / 720p /
+    -- 1080) from three constants, so the compares stay constant compares
+    function f_sclamp3(v : signed; sd, c720 : std_logic;
+                       l_hd, l_720, l_sd : integer; w : integer) return signed is
+        variable v_lim : integer;
     begin
-        if v > lim then
-            return to_signed(lim, w);
-        elsif v < -lim then
-            return to_signed(-lim, w);
+        if sd = '1' then
+            v_lim := l_sd;
+        elsif c720 = '1' then
+            v_lim := l_720;
+        else
+            v_lim := l_hd;
+        end if;
+        if v > v_lim then
+            return to_signed(v_lim, w);
+        elsif v < -v_lim then
+            return to_signed(-v_lim, w);
         else
             return resize(v, w);
         end if;
@@ -102,6 +125,10 @@ architecture mirage of program_top is
     signal s_pivot   : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal s_drive   : unsigned(7 downto 0) := (others => '0');
     signal s_en_a, s_en_b : std_logic := '1';
+    -- v0.1.5 resolution scaling: timing class and the x2/3 (720p) products
+    signal s_sd, s_720 : std_logic := '0';
+    signal s_am_h, s_am_t : unsigned(9 downto 0) := (others => '0');
+    signal s_dr_h, s_dr_t : unsigned(7 downto 0) := (others => '0');
 
     --------------------------------------------------------------------------
     -- Input / tracking
@@ -222,10 +249,38 @@ begin
         if rising_edge(clk) then
             s_gain   <= C_GAIN_ROM(to_integer(s_k_gain(9 downto 4)));
             s_base   <= signed(resize(s_k_thr, 12)) + signed(resize(s_k_lift, 12)) - to_signed(1024, 12);
-            s_amount <= signed(resize(s_k_amount, 11)) - to_signed(512, 11);
-            s_bn     <= s_k_smooth(9 downto 7);
             s_pivot  <= s_k_pivot;
-            s_drive  <= s_p_bands(9 downto 2);
+            -- resolution scaling: the displacement follows the screen height.
+            -- Timing class (static while a mode runs): SD x1/2, 720p x2/3.
+            case to_integer(unsigned(registers_in(8)(3 downto 0))) is
+                when 0 | 4 | 8 | 12 => s_sd <= '1'; s_720 <= '0';
+                when 5 | 6 | 14     => s_sd <= '0'; s_720 <= '1';
+                when others         => s_sd <= '0'; s_720 <= '0';
+            end case;
+            -- 720p: (x/2 + x/8) x 17/16 = 0.664 x, unsigned (the two operands
+            -- of each add are different bits: no router1 self-add)
+            s_am_h <= shift_right(s_k_amount, 1) + shift_right(s_k_amount, 3);
+            s_am_t <= s_am_h + shift_right(s_am_h, 4);
+            s_dr_h <= shift_right(s_p_bands(9 downto 2), 1) + shift_right(s_p_bands(9 downto 2), 3);
+            s_dr_t <= s_dr_h + shift_right(s_dr_h, 4);
+            if s_sd = '1' then
+                -- Amount and drive halved; Smooth one shift shorter (exact x1/2)
+                s_amount <= signed(resize(shift_right(s_k_amount, 1), 11)) - to_signed(256, 11);
+                s_drive  <= shift_right(s_p_bands(9 downto 2), 1);
+                if s_k_smooth(9 downto 7) = "000" then
+                    s_bn <= "000";
+                else
+                    s_bn <= s_k_smooth(9 downto 7) - 1;
+                end if;
+            elsif s_720 = '1' then
+                s_amount <= signed(resize(s_am_t, 11)) - to_signed(340, 11);   -- 512 -> 340
+                s_drive  <= s_dr_t;
+                s_bn     <= s_k_smooth(9 downto 7);
+            else
+                s_amount <= signed(resize(s_k_amount, 11)) - to_signed(512, 11);
+                s_drive  <= s_p_bands(9 downto 2);
+                s_bn     <= s_k_smooth(9 downto 7);
+            end if;
             s_en_a   <= not s_sw_after;
             s_en_b   <= s_sw_after;
 
@@ -323,7 +378,7 @@ begin
             s_m10  <= s_m9;
             -- stage 11: effective amount
             v_a := resize(s_amount, 13) + signed(resize(s_dp10(17 downto 8), 13));
-            s_aeff11 <= f_sclamp(v_a, 1023, 12);
+            s_aeff11 <= f_sclamp3(v_a, s_sd, s_720, 1023, 682, 511, 12);
             s_m11 <= s_m10;
             -- stage 12: displacement products (aeff hi 7b signed / lo 5b)
             s_ph12 <= s_m11 * s_aeff11(11 downto 5);
@@ -333,7 +388,7 @@ begin
             if s_sw_region = '1' and s_reg(12) = '0' then
                 s_d13 <= (others => '0');
             else
-                s_d13 <= f_sclamp(v_a, 511, 10);
+                s_d13 <= f_sclamp3(v_a, s_sd, s_720, 511, 341, 255, 10);
             end if;
             -- stage 14: source column
             if s_avid_sr(12) = '0' then

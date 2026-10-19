@@ -30,6 +30,7 @@ Default, Heat Haze, Torn Contours, Bands Only.
 - Program type: processing; core `yuv444_30b`.
 - Input-to-output latency: 28 clocks (`processing_delay_clks`).
 - Built and timed at the full 74.25 MHz HD pixel clock.
+- The sideways push follows the screen height, so the warp looks the same at SD, 720p and 1080p.
 
 ## License
 
