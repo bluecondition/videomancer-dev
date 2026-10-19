@@ -16,8 +16,9 @@
 --   K3 Focus    luma level that does not move (spans black .. white)
 --   K4 Swap     channel mode (labelled): Off, U<>V, Y>U, U>Y, Y<>V, Rotate,
 --               Rotate Back, Complement
---   K5 Offset   chroma read offset, both channels together (+-128 px)
---   K6 Split    U and V pulled apart, opposite ways (0 .. 127 px)
+--   K5 Offset   chroma read offset, both channels together (+-128 px at
+--               1080p)
+--   K6 Split    U and V pulled apart, opposite ways (0 .. 127 px at 1080p)
 --
 --   S7  Depth   from luma / from saturation
 --   S8  Near    bright is near / dark is near
@@ -38,6 +39,15 @@
 -- luma scaled to white ~777) is the HD HDMI bar fix from damier v0.4.4 --
 -- the depth tears are full-swing pixel edges and the sway moves them.
 -- Latency 15 clocks, all modes, blanking-gated.
+--
+-- v0.2.2 (2026-10-19): resolution scaling.  Every displacement is in
+-- pixels, so it now follows the timing ID's x step (1080: 1.0 virtual unit
+-- a pixel, 720p 1.5, SD 2.0): the depth gain (Depth x Position/Sway), the
+-- Offset and the Split are scaled x1 / x2/3 / x1/2 (720p: (1/2 + 1/8) x
+-- 17/16 = 0.664, unsigned adds, no shared sign bit), and the gain and
+-- displacement clamps scale with them (511 / 341 / 255).  The same parallax
+-- relative to the screen height in every mode.  The edge clamp and Wrap
+-- stay on the real measured line.  1080p is bit-identical.
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -105,6 +115,11 @@ architecture parallax of program_top is
     signal s_gc     : signed(9 downto 0) := (others => '0');
     signal s_g      : signed(9 downto 0) := (others => '0');
     signal s_vstep  : unsigned(3 downto 0) := "1111";
+    -- v0.2.2 resolution scaling: timing class and the x2/3 (720p) products
+    signal s_sd, s_720 : std_logic := '0';
+    signal s_dg_h, s_dg_t, s_dgk : unsigned(8 downto 0) := to_unsigned(128, 9);
+    signal s_ko_h, s_ko_t : unsigned(7 downto 0) := (others => '0');
+    signal s_sp_h, s_sp_t : unsigned(6 downto 0) := (others => '0');
 
     -- tracking
     signal s_rx, s_line_width : unsigned(10 downto 0) := to_unsigned(720, 11);
@@ -156,6 +171,28 @@ architecture parallax of program_top is
     -- source value in parallel with the wrap add / subtract
     signal s_we13, s_wl13, s_wlo13, s_rwe13, s_rhi13 : signed(12 downto 0) := (others => '0');
 
+    -- symmetric clamp; the limit is picked by the timing class (SD / 720p /
+    -- 1080) from three constants, so the compares stay constant compares
+    function f_sclamp3(v : signed; sd, c720 : std_logic;
+                       l_hd, l_720, l_sd : integer; w : integer) return signed is
+        variable v_lim : integer;
+    begin
+        if sd = '1' then
+            v_lim := l_sd;
+        elsif c720 = '1' then
+            v_lim := l_720;
+        else
+            v_lim := l_hd;
+        end if;
+        if v > v_lim then
+            return to_signed(v_lim, w);
+        elsif v < -v_lim then
+            return to_signed(-v_lim, w);
+        else
+            return resize(v, w);
+        end if;
+    end function;
+
 begin
 
     s_k_depth  <= unsigned(registers_in(0));
@@ -188,6 +225,25 @@ begin
             if s_in_avid = '1' then s_wr_x <= s_wr_x + 1; else s_wr_x <= (others => '0'); end if;
             s_we <= data_in.avid;
 
+            -- resolution scaling: the displacements follow the screen height.
+            -- Timing class (static while a mode runs): SD x1/2, 720p x2/3.
+            case to_integer(unsigned(registers_in(8)(3 downto 0))) is
+                when 0 | 4 | 8 | 12 => s_sd <= '1'; s_720 <= '0';
+                when 5 | 6 | 14     => s_sd <= '0'; s_720 <= '1';
+                when others         => s_sd <= '0'; s_720 <= '0';
+            end case;
+            -- 720p: (x/2 + x/8) x 17/16 = 0.664 x, unsigned (the two operands
+            -- of each add are different bits: no router1 self-add)
+            s_dg_h <= shift_right(s_dg, 1) + shift_right(s_dg, 3);
+            s_dg_t <= s_dg_h + shift_right(s_dg_h, 4);
+            if s_sd = '1' then s_dgk <= shift_right(s_dg, 1);
+            elsif s_720 = '1' then s_dgk <= s_dg_t;
+            else s_dgk <= s_dg; end if;
+            s_ko_h <= shift_right(s_k_offset(9 downto 2), 1) + shift_right(s_k_offset(9 downto 2), 3);
+            s_ko_t <= s_ko_h + shift_right(s_ko_h, 4);
+            s_sp_h <= shift_right(s_k_split(9 downto 3), 1) + shift_right(s_k_split(9 downto 3), 3);
+            s_sp_t <= s_sp_h + shift_right(s_sp_h, 4);
+
             -- per-frame decode: one small op per state
             case to_integer(s_vstep) is
                 when 0 =>
@@ -199,9 +255,20 @@ begin
                     s_f1  <= s_k_focus - shift_right(s_k_focus, 3);
                     s_dg1 <= s_k_depth(9 downto 2) - s_k_depth(9 downto 5);
                     s_pos <= signed('0' & s_p_pos) - to_signed(512, 11);
-                    v_c := signed(resize(s_k_offset(9 downto 2), 10));
-                    s_coff  <= v_c - to_signed(128, 10);
-                    s_split <= signed(resize(s_k_split(9 downto 3), 10));
+                    -- Offset and Split in this mode's pixels (centre 128 -> 64 / 85)
+                    if s_sd = '1' then
+                        v_c := signed(resize(shift_right(s_k_offset(9 downto 2), 1), 10));
+                        s_coff  <= v_c - to_signed(64, 10);
+                        s_split <= signed(resize(shift_right(s_k_split(9 downto 3), 1), 10));
+                    elsif s_720 = '1' then
+                        v_c := signed(resize(s_ko_t, 10));
+                        s_coff  <= v_c - to_signed(85, 10);
+                        s_split <= signed(resize(s_sp_t, 10));
+                    else
+                        v_c := signed(resize(s_k_offset(9 downto 2), 10));
+                        s_coff  <= v_c - to_signed(128, 10);
+                        s_split <= signed(resize(s_k_split(9 downto 3), 10));
+                    end if;
                     if s_k_swap >= 8 then s_live4 <= '1'; end if;
                     if s_live4 = '0' and s_k_swap < 8 then s_mode <= s_k_swap(2 downto 0);
                     else s_mode <= s_k_swap(9 downto 7); end if;
@@ -245,20 +312,19 @@ begin
                     s_tot <= s_pos + resize(shift_right(s_swa, 8), 11);
                     s_vstep <= s_vstep + 1;
                 when 10 =>
-                    s_gph <= s_tot * signed('0' & s_dg(8 downto 4));
+                    s_gph <= s_tot * signed('0' & s_dgk(8 downto 4));
                     s_vstep <= s_vstep + 1;
                 when 11 =>
-                    s_gpl <= resize(s_tot * signed('0' & s_dg(3 downto 0)), 17);
+                    s_gpl <= resize(s_tot * signed('0' & s_dgk(3 downto 0)), 17);
                     s_vstep <= s_vstep + 1;
                 when 12 =>
                     s_gp <= shift_left(resize(s_gph, 21), 4) + resize(s_gpl, 21);
                     s_vstep <= s_vstep + 1;
                 when 13 =>
-                    -- gain = (position + sway) * depth (Q8), clamped (it used to wrap)
+                    -- gain = (position + sway) * depth (Q8), clamped (it used to wrap);
+                    -- the clamp follows the mode's scale: 511 / 341 / 255
                     v_g := s_gp(20 downto 8);
-                    if v_g > 511 then s_gc <= to_signed(511, 10);
-                    elsif v_g < -511 then s_gc <= to_signed(-511, 10);
-                    else s_gc <= v_g(9 downto 0); end if;
+                    s_gc <= f_sclamp3(v_g, s_sd, s_720, 511, 341, 255, 10);
                     s_vstep <= s_vstep + 1;
                 when 14 =>
                     if s_sw_darknear = '1' then s_g <= -s_gc; else s_g <= s_gc; end if;
@@ -350,11 +416,10 @@ begin
             -- stage 4b: recombine
             s_x4b <= s_x4;
             s_pd4 <= shift_left(resize(s_ph4, 22), 5) + resize(s_pl4, 22);
-            -- stage 5: offset (+-511 px)
+            -- stage 5: offset (+-511 px at 1080p, 341 at 720p, 255 at SD)
             s_x5 <= s_x4b;
             v_w := resize(shift_right(s_pd4, 8), 13);
-            if v_w > 511 then v_w := to_signed(511, 13); elsif v_w < -511 then v_w := to_signed(-511, 13); end if;
-            s_off5 <= resize(v_w, 11);
+            s_off5 <= f_sclamp3(v_w, s_sd, s_720, 511, 341, 255, 11);
             -- stage 6: per-channel source x
             s_uy6 <= signed(resize(s_x5, 13)) + resize(s_off5, 13);
             if s_sw_cstay = '1' then
