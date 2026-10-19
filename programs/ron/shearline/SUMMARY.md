@@ -84,3 +84,33 @@ Watch on hardware:
   U/V swap issue).
 - HD HDMI green/noise: raw video now runs ~14 FFs deep to the output (the
   depth at which cascade/rollthebones went green). Same depth for bypass.
+
+## v1.1.2 (2026-10-19): resolution scaling
+
+The trails are a per-LINE recursion, so at 720p (each line 1.5 virtual
+1080-line units tall) and above all at 480i (each field line ~4.44 units tall,
+each pixel 2 units wide) the old per-line constants drew trails that were too
+long and too steep: at SD the comets became near-vertical streaks over most of
+the picture. Every per-line quantity is now defined per 1080p line and
+converted per FIELD line from the timing ID (`registers_in(8)`; steps
+free-running, as in mondrian):
+
+- Shear and Slope Mod x ys/xs (px per field line: 720p 1.0, 1080i 2.0,
+  480i 2.22, 576i 1.875). The Bresenham phase widens to 8 fraction bits.
+- Trail: (1024 - t) x ys, Q.8; the fraction is carried line to line (reset at
+  vsync, latched into t at hsync), so the mean decay per screen height is
+  exact even where it is 1-2 codes/line (720p at long trails). Clamped at
+  t = 0 (a 1080p 4-line trail is under one SD field line).
+- Fan k and Spectrum a x ys (zoom / hue rotation per field line); the
+  Spectrum seed octave follows the scaled a. The Minsky multiplies widen to a
+  12-bit a (a reaches ~1.1 rad/field line at 480i Spectrum 100%).
+- One serial shift-add multiplier (11 steps, round-robin over the 5 products)
+  forms all of them; at 1080p every product equals the old value.
+
+1080p is bit-identical to v1.1.1 (diff1080 = 0). SD now matches the 1080p
+4:3 centre crop (trail angle and length); 720p matches 1080p.
+
+Build (router2, `./build_programs.sh ron shearline`): HD Analog 86.50 (seed 1),
+SD Analog 82.17 (seed 2; seed 1 stalled the router under machine load),
+HD HDMI 87.84, SD HDMI 80.16, HD Dual 80.48, SD Dual 77.22 MHz (seed 1).
+~5772 LC (75%, +530), 22/32 EBR.
