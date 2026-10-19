@@ -8,7 +8,7 @@ Video redrawn as edge lines in two styles, Fine (thin connected Canny tracing) o
 
 | | Control | Range | What it does |
 |---|---|---|---|
-| K1 | Thickness | 1 px / 2 px / 3 px / 4 px / 5 px | Edge line thickness, 1–5 px |
+| K1 | Thickness | 1 px / 2 px / 3 px / 4 px / 5 px | Edge line thickness, 1–5 px at 1080p (scaled to the same screen proportion at 720p and SD) |
 | K2 | Mix | 0–100% | Crossfade between the original picture and the edge drawing |
 | K3 | Brightness | -100–100% | Brightens or darkens the picture before edges are found |
 | K4 | Contrast | 0–400% | Contrast before edge detection; 25% = unchanged |

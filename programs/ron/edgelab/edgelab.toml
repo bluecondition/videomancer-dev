@@ -1,7 +1,7 @@
 [program]
 processing_delay_clks = 24
 program_id = "com.czartroniks.edgelab"
-program_version = "1.3.1"
+program_version = "1.3.2"
 abi_version = ">=1.0,<2.0"
 program_name = "Edge Lab"
 author = "czartroniks"
