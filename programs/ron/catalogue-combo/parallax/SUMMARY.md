@@ -141,6 +141,20 @@ Tier 3, optional (rework):
   Colour Ghost now uses Split 300 to keep its two colours apart; Split 0
   used to mean V = −U.
 
+## v0.2.2 (2026-10-19): resolution scaling
+
+- **The displacements follow the screen height.** They are pixels, so at
+  720p the parallax moved 1.5x as far relative to the picture and at SD 2x.
+  The depth gain (Depth x Position/Sway), K5 Offset and K6 Split now follow
+  the timing ID's x step: x1 at 1080, x2/3 at 720p ((1/2 + 1/8) x 17/16 =
+  0.664, unsigned adds, so no router1 self-add; dupin 0), x1/2 at SD. The
+  gain and per-pixel clamps scale the same way: 511 / 341 / 255. This settles
+  the "SD: +-511 px is 71% of an SD line" backlog item.
+- The edge clamp and Wrap stay on the real measured line width.
+- The K5/K6 TOML ranges still read in px: they are 1080p pixels.
+- 1080p is bit-identical. Sims (Relief Map settings) match 1080p at 720p
+  (r 0.998) and SD (r 0.966); before: 0.79 / 0.58.
+
 ## Build
 
 `./build_combo.sh parallax` → `out/rev_b/ron/catalogue-combo/parallax.vmprog`.
@@ -150,6 +164,12 @@ HD Analog 88.9, HD HDMI 83.2, HD Dual 84.3 MHz; SD Analog 90.0, SD HDMI
 87.2, SD Dual 85.9 MHz. 4,008–4,031 LC (52%), 18/32 EBR (was 20).
 Standalone yosys: `emulate_transparency` count is 0. The first v0.2.0
 build, before the multiply split, closed HD Analog at only 74.6 MHz.
+
+v0.2.2 (2026-10-19, router2): HD Analog 87.51, HD HDMI 89.20 MHz (seed 1),
+HD Dual 81.12 MHz (seed 2: seed 1 stalled the router, a timeout and not a
+timing miss); SD Analog 92.63, SD HDMI 92.22, SD Dual 84.99 MHz (seed 1).
+4,146–4,166 LC (54%), 18/32 EBR. Standalone: 1,960 LUT4 (v0.2.1 1,842),
+`emulate_transparency` 0, dupin 0.
 
 v0.1.2 (2026-09-13): min HD 77.5 MHz, seed 1.
 
