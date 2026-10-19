@@ -13,7 +13,8 @@
 --
 -- At each detected edge the output resets to RED; subsequent pixels on the
 -- same scanline step through ORANGE, YELLOW, GREEN, BLUE, INDIGO, VIOLET,
--- then black, each band occupying `band_width` pixels (P12 slider).
+-- then black, each band occupying `band_width` pixels (P12 slider; 1080-line
+-- pixels, scaled to the mode -- see Scaling).
 -- Pipeline resets at hsync so trails never cross lines.
 --
 -- Edge detect : 3x3 Sobel on preprocessed luma (the Edge Lab detector).
@@ -36,6 +37,11 @@
 --               + black), built by a background engine from K6 scheme / K1
 --               phase-or-fade / S11 reverse. Output gated to neutral black
 --               outside active video (blanking contract).
+-- Scaling     : (v1.1.2) band widths are in 1080-line pixels: 720p and SD
+--               draw 2/3 and 1/2 as many real pixels per band (1-px
+--               floor), so a trail is the same fraction of screen height in
+--               every mode. The detector (Sobel, solidify, K3 min-run)
+--               stays at pixel scale. 1080 output unchanged.
 --------------------------------------------------------------------------------
 
 library ieee;
@@ -272,6 +278,29 @@ architecture prism of program_top is
     signal s_ccnt_d2 : unsigned(2 downto 0) := (others => '0');
     signal s_coef    : unsigned(8 downto 0) := (others => '0');
     signal s_cprod   : unsigned(16 downto 0) := (others => '0');
+    signal s_cprod_r : unsigned(16 downto 0) := (others => '0');
+    signal s_ccnt_d3 : unsigned(2 downto 0) := (others => '0');
+
+    -- Resolution scaling (v1.1.2): P12 sets the band width in 1080-line
+    -- pixels; 720p and SD draw it at 2/3 and 1/2 as many real pixels
+    -- (x step 1.5 / 2.0 virtual units per pixel), so a trail is the same
+    -- fraction of screen height in every mode. The scale is folded into
+    -- the curve engine's coefficient (plain width = coefficient 256 at
+    -- 1080, 171 at 720p, 128 at SD) and rounded outside 1080; the 1-px
+    -- floor is the engine's existing clamp. 1080 is unchanged (coefficient
+    -- 256, no rounding term). Class from the timing ID, free-running:
+    -- 0 = 1080 (p and i), 1 = 720p, 2 = SD.
+    signal s_xcls    : unsigned(1 downto 0) := (others => '0');
+    type t_cscale is array (0 to 7) of unsigned(8 downto 0);
+    -- (i+1)/7 * 256 * 2/3 and * 1/2, rounded; index 7 = plain width
+    constant C_CURVE720 : t_cscale := (
+        to_unsigned( 24, 9), to_unsigned( 49, 9), to_unsigned( 73, 9),
+        to_unsigned( 98, 9), to_unsigned(122, 9), to_unsigned(146, 9),
+        to_unsigned(171, 9), to_unsigned(171, 9));
+    constant C_CURVESD : t_cscale := (
+        to_unsigned( 18, 9), to_unsigned( 37, 9), to_unsigned( 55, 9),
+        to_unsigned( 73, 9), to_unsigned( 91, 9), to_unsigned(110, 9),
+        to_unsigned(128, 9), to_unsigned(128, 9));
 
     -- Delayed incoming Y/U/V for video key-through (needs full SYNC_DELAY alignment)
     type t_yuv_delay is array (0 to C_SYNC_DELAY - 1) of std_logic_vector(9 downto 0);
@@ -667,17 +696,33 @@ begin
         variable v_w : unsigned(8 downto 0);
     begin
         if rising_edge(clk) then
+            -- resolution class from the timing ID (static while a mode runs)
+            case to_integer(unsigned(registers_in(8)(3 downto 0))) is
+                when 0 | 4 | 8 | 12 => s_xcls <= "10";  -- SD: x step 2.0
+                when 5 | 6 | 14     => s_xcls <= "01";  -- 720p: x step 1.5
+                when others         => s_xcls <= "00";  -- 1080p/i: 1.0
+            end case;
+
             -- band width: register knob, square alone, scale + 1
             r_k   <= s_knob_width;
             r_ksq <= r_k * r_k;
             r_bw  <= resize(r_ksq(19 downto 13), 8) + to_unsigned(1, 8);
 
             -- stage 0: fetch the coefficient (ROM mux gets its own register
-            -- -- sharing a stage with the multiply cost ~20 MHz)
-            if s_ccnt = 7 then
-                s_coef <= (others => '0');  -- unused, band 7 stored plain
+            -- -- sharing a stage with the multiply cost ~20 MHz). Curve off
+            -- and band 7 take the plain width (coefficient = mode scale).
+            if s_sw_curve_en = '0' or s_ccnt = 7 then
+                case s_xcls is
+                    when "01"   => s_coef <= C_CURVE720(7);
+                    when "10"   => s_coef <= C_CURVESD(7);
+                    when others => s_coef <= to_unsigned(256, 9);
+                end case;
             else
-                s_coef <= C_CURVE(to_integer(s_ccnt));
+                case s_xcls is
+                    when "01"   => s_coef <= C_CURVE720(to_integer(s_ccnt));
+                    when "10"   => s_coef <= C_CURVESD(to_integer(s_ccnt));
+                    when others => s_coef <= C_CURVE(to_integer(s_ccnt));
+                end case;
             end if;
             s_ccnt_d1 <= s_ccnt;
             s_ccnt    <= s_ccnt + 1;
@@ -686,16 +731,21 @@ begin
             s_cprod   <= r_bw * s_coef;
             s_ccnt_d2 <= s_ccnt_d1;
 
-            -- stage 2: normalize, clamp to >= 1, store minus one
-            if s_sw_curve_en = '1' and s_ccnt_d2 /= 7 then
-                v_w := resize(shift_right(s_cprod, 8), 9);
-                if v_w = 0 then
-                    v_w := to_unsigned(1, 9);
-                end if;
-                s_sizes_m1(to_integer(s_ccnt_d2)) <= resize(v_w - 1, 8);
+            -- stage 2: round to nearest outside 1080 (1080 truncates, as
+            -- before)
+            if s_xcls = "00" then
+                s_cprod_r <= s_cprod;
             else
-                s_sizes_m1(to_integer(s_ccnt_d2)) <= r_bw - 1;
+                s_cprod_r <= s_cprod + to_unsigned(128, 17);
             end if;
+            s_ccnt_d3 <= s_ccnt_d2;
+
+            -- stage 3: normalize, clamp to >= 1, store minus one
+            v_w := resize(shift_right(s_cprod_r, 8), 9);
+            if v_w = 0 then
+                v_w := to_unsigned(1, 9);
+            end if;
+            s_sizes_m1(to_integer(s_ccnt_d3)) <= resize(v_w - 1, 8);
         end if;
     end process p_curve;
 

@@ -2,7 +2,7 @@
 
 Rainbow edge trails: every edge in the video becomes a dispersion point spraying ROYGBIV bands to the right. It adds blowout contrast, mono colour schemes with fades, and a luma key to lay the video over or under the rainbows.
 
-**P12 (Band W):** Width of each colour band in the trails, 1–128 px, with fine control at the narrow end (squared response).
+**P12 (Band W):** Width of each colour band in the trails, 1–128 px at 1080p (scaled to the same fraction of screen height at 720p and SD), with fine control at the narrow end (squared response).
 
 ## Controls
 

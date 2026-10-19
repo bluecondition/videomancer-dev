@@ -1,6 +1,6 @@
 # Prism — Rainbow edge-trails
 
-**Status: v1.1.0 FINAL except presets — HW-approved, signed off 2026-10-04.**
+**Status: v1.1.2 (scaling fix 2026-10-19); v1.1.0 FINAL except presets — HW-approved, signed off 2026-10-04.**
 
 ## What it does
 An edge-detection processor that treats every edge in the image as a dispersion point: at each detected edge the output snaps to red, then steps through orange/yellow/green/blue/indigo/violet/black over the following pixels with a configurable band width — white light split into an ordered spectrum streaming off the contours of the source video. The pipeline resets at hsync so trails never cross scanlines. (Formerly named "Phosphor", after the CRT-phosphor edge simulator it grew out of.)
@@ -9,7 +9,7 @@ An edge-detection processor that treats every edge in the image as a dispersion 
 Processing path. Input luma is contrast-boosted around mid-grey (up to a ~9× "blowout" that clips the image toward a binary black/white mask for the cleanest possible edges), optionally posterized (128..2 levels, Edge Lab mapping), then fed through a 3x3 Sobel detector pulled from Edge Lab: four chained BRAM line buffers give a 5-row window whose three center rows — raw, or 3x3 Gaussian-blurred when Smooth (T9) is enabled — feed per-column `[1 2 1]` sums and column histories forming gx/gy; the magnitude `|gx| + |gy|` (normalized to 0..255) is compared against a threshold. The thresholded edge bit is then vertically solidified: OR'd with the same column of the previous two lines (two 1-bit line buffers), so a scanline whose magnitude dips just under threshold still triggers where its neighbours detected the contour — no gaps in the rainbow sheet. The qualified trigger is held for the entire solid run, pinning the band machine at red: the outline renders as a solid red region exactly as thick as the detected edge, with the rainbow starting at its trailing side. Luma-only and 2-D — much cleaner than the old 1-D horizontal Y+U+V difference. A per-pixel 3-bit band index selects from an 8-entry rainbow LUT (7 colours + black) in 10-bit YUV with U/V swapped for Videomancer hardware convention. A minimum-run filter rejects edge noise; the curve mode grows the band widths linearly across the trail (thin red first, each colour wider toward violet) via a per-band size table indexed by band index. The display palette itself is built by a background engine: Rainbow scheme (K1 = phase rotation), or a single-colour scheme (K6) whose trail K1 lerps toward black or white. Optional video-key passes the source through under (or, with T8 Over, on top of) the trails.
 
 ## Controls
-- **P12 Band W** — pixel width of each colour band in the trail, 1–128 px with a squared response (1 + k²/8192): 1–16 px on the first ~35% of travel, 25 px (default) at 43%, 64 px at 71%; on the slider as the primary performance control. Displayed as 0–100%.
+- **P12 Band W** — width of each colour band in the trail, 1–128 px (1080p pixels; 720p/SD scale it to the same fraction of screen height) with a squared response (1 + k²/8192): 1–16 px on the first ~35% of travel, 25 px (default) at 43%, 64 px at 71%; on the slider as the primary performance control. Displayed as 0–100%.
 - **K1 Col/Fade** — in Rainbow scheme: cycle phase (7 steps/turn) that rotates the colours through the bands, animating the trail. In mono schemes: fade depth/direction — centre (50) is a flat solid colour, turning down fades the trail smoothly to black, turning up bleaches it toward white. Geometry (band widths, curve, key) is unaffected.
 - **K2 Edge Thr** — Sobel magnitude required to trigger a new trail.
 - **K3 Noise** — minimum run length, suppresses spurious short edges.
@@ -23,10 +23,14 @@ Processing path. Input luma is contrast-boosted around mid-grey (up to a ~9× "b
 - **T10 Curve En** — enable the linear band-width curve.
 
 ## Version history
+- **1.1.2** (2026-10-19) — resolution scaling: P12 band widths are 1080-line pixels; 720p and SD draw 2/3 and 1/2 as many real pixels per band (rounded, 1-px floor), folded into the curve engine's coefficient (plain width = coefficient 256/171/128 by timing-ID class, extra rounding stage outside 1080). Trails are now the same fraction of screen height in every mode; the detector (Sobel, solidify, K3 min-run) stays pixel scale. 1080p bit-identical (0 px diff).
+- **1.1.1** — community-repo compliance (czartroniks ID, GPL header, latency 13 -> 16).
 - **1.1.0** (2026-10-04) — hardware video-contract pass: output gated to neutral black (Y 64, U=V 512) outside active video (the last band colour / keyed video used to run through hblank); black band is now Y 64, not super-black 0; mono-scheme fades target 64 (black) / 960 (white) instead of 0 / 1023. P12 Band W squared response (fine thin-trail control; was linear, 1–8 px squeezed into the first 6%); display changed px → %.
 - **1.0.0** (2026-07-08) — HW-validated through round 17 (field-latched detector parameters).
 
 ## Build
+v1.1.2 (2026-10-19, router2): 6/6 seed 1 — HD Analog 82.58, HD HDMI 80.83, HD Dual 76.66, SD Analog 76.18, SD HDMI 79.06, SD Dual 81.25 MHz; 5298–5314 LC (69%), 18/32 EBR.
+
 v1.1.0 (2026-10-04, router2): 6/6 timing-closed, 76.6–81.6 MHz, ~5150 LC (67%), 18/32 EBR. Non-1 seeds: **HD Analog seed 2** (80.06), **HD HDMI seed 2** (79.33; seed 1 stalled the router). All other configs seed 1.
 
 ## Presets
