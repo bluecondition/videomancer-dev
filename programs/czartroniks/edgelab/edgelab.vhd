@@ -25,7 +25,10 @@
 -- keeps the two distinct looks and gives K6 to colour.)
 --
 -- Controls:
---   K1 Thickness  dilate the edge map: 1 / 2 / 3 / 4 / 5 px squares
+--   K1 Thickness  dilate the edge map: 1 / 2 / 3 / 4 / 5 px squares (1080p
+--                 pixels; v1.3.2 scales the square per mode so the stroke
+--                 is about the same fraction of screen height: 720p
+--                 1/2/2/3/4, SD 1/1/2/2/3 wide x 1 field line)
 --   K2 Mix        dry/wet crossfade
 --   K3 Brightness pre-offset, +-512
 --   K4 Contrast   pre-gain 0..4x around mid-grey (unity at 25%)
@@ -59,7 +62,8 @@
 --   S16-S17 magnitude line buffers -> 3x3 mag window, NMS (Fine only,
 --           passthrough for Chalk so both styles share one latency)
 --   S18     threshold + hysteresis (accept-bit line buffer)
---   S19     thickness dilate (4-line packed bit buffer, 5x5 window)
+--   S19     thickness dilate (4-line packed bit buffer, 5x5 window,
+--           separable: per-mode width x height)
 --   S20     compose views; then interpolator_u dry/wet mix (4 clocks)
 --
 -- Compass hue and Heat strength run on their own small Sobel over window
@@ -333,8 +337,13 @@ architecture edgelab of program_top is
     signal aw1, aw2 : std_logic := '0';
 
     signal ddqr : std_logic_vector(3 downto 0) := (others => '0');
-    signal hb : std_logic_vector(0 to 3) := (others => '0');
-    signal v1, v2, v3, v4 : std_logic_vector(0 to 4) := (others => '0');
+    signal v1, v2, v3, v4 : std_logic := '0';  -- lines -1..-4, column 0
+    -- Separable dilate (v1.3.2): vcr(c) = column c of the window ORed over
+    -- the enabled rows; s_cen / s_ren = enabled columns / rows (col 2 and
+    -- row 1 = line-1 are the 1-px centre and always on).
+    signal vcr : std_logic_vector(1 to 4) := (others => '0');
+    signal s_cen : std_logic_vector(0 to 4) := "00100";
+    signal s_ren : std_logic_vector(0 to 4) := "01000";
     signal a19_bit : std_logic := '0';
     signal mg_0, mg_1 : unsigned(7 downto 0) := (others => '0');
 
@@ -390,6 +399,8 @@ begin
         variable v_keep  : std_logic;
         variable v_str, v_wk, v_acc : std_logic;
         variable v_bit   : std_logic;
+        variable v_vc0   : std_logic;
+        variable v_dw, v_dh : integer range 1 to 5;
         variable v_g6    : unsigned(5 downto 0);
         variable v_k1    : unsigned(9 downto 0);
         variable v_p3    : unsigned(2 downto 0);
@@ -817,48 +828,32 @@ begin
 
             ------------------------------------------------------------------
             -- S19: thickness dilate over a 5x5 bit window
-            -- rows: current (a18_bit + hb), v1 = line-1 (1 px center),
-            -- v2..v4 = lines -2..-4; hb(k) sits in column k+1 of the v rows
+            -- rows: 0 = current line (a18_bit), 1 = line-1 (1 px center),
+            -- 2..4 = lines -2..-4; column c = c pixels back (2 = center).
+            -- Separable: each column is ORed over the enabled rows as it
+            -- enters (v_vc0), then shifted along vcr, and the enabled columns
+            -- are ORed -- the same row x column squares as v1.3.1's per-size
+            -- trees (1080p bit-identical), with independent width / height
+            -- so the stroke can follow the mode (see s_cen / s_ren).
             ------------------------------------------------------------------
             if av(17) = '1' then
                 ddqr <= ddq;
             end if;
             if av(18) = '1' then
-                hb(0) <= a18_bit;
-                for i in 1 to 3 loop
-                    hb(i) <= hb(i - 1);
+                v1 <= ddqr(3);
+                v2 <= ddqr(2);
+                v3 <= ddqr(1);
+                v4 <= ddqr(0);
+                v_vc0 := (a18_bit and s_ren(0)) or v1
+                         or (v2 and s_ren(2)) or (v3 and s_ren(3))
+                         or (v4 and s_ren(4));
+                vcr(1) <= v_vc0;
+                for i in 2 to 4 loop
+                    vcr(i) <= vcr(i - 1);
                 end loop;
-                v1(0) <= ddqr(3);
-                v2(0) <= ddqr(2);
-                v3(0) <= ddqr(1);
-                v4(0) <= ddqr(0);
-                for i in 1 to 4 loop
-                    v1(i) <= v1(i - 1);
-                    v2(i) <= v2(i - 1);
-                    v3(i) <= v3(i - 1);
-                    v4(i) <= v4(i - 1);
-                end loop;
-                case to_integer(s_thick) is
-                    when 0 =>
-                        v_bit := v1(2);
-                    when 1 =>
-                        v_bit := v1(2) or v1(1) or hb(1) or hb(0);
-                    when 2 =>
-                        v_bit := hb(0) or hb(1) or hb(2)
-                              or v1(1) or v1(2) or v1(3)
-                              or v2(1) or v2(2) or v2(3);
-                    when 3 =>      -- 4x4
-                        v_bit := a18_bit or hb(0) or hb(1) or hb(2)
-                              or v1(0) or v1(1) or v1(2) or v1(3)
-                              or v2(0) or v2(1) or v2(2) or v2(3)
-                              or v3(0) or v3(1) or v3(2) or v3(3);
-                    when others => -- 5x5
-                        v_bit := a18_bit or hb(0) or hb(1) or hb(2) or hb(3)
-                              or v1(0) or v1(1) or v1(2) or v1(3) or v1(4)
-                              or v2(0) or v2(1) or v2(2) or v2(3) or v2(4)
-                              or v3(0) or v3(1) or v3(2) or v3(3) or v3(4)
-                              or v4(0) or v4(1) or v4(2) or v4(3) or v4(4);
-                end case;
+                v_bit := (v_vc0 and s_cen(0)) or (vcr(1) and s_cen(1))
+                         or vcr(2) or (vcr(3) and s_cen(3))
+                         or (vcr(4) and s_cen(4));
                 -- left guard, and a top guard: the edge layer trails the
                 -- input by up to 7 rows (window + NMS + 5x5 dilate), so the
                 -- first lines would show the previous frame's bottom rows
@@ -1095,6 +1090,91 @@ begin
                 s_gview  <= registers_in(6)(4);
             end if;
 
+            ------------------------------------------------------------------
+            -- Resolution scaling (v1.3.2): K1 Thickness is a line weight in
+            -- 1080-line pixels t = 1..5.  The dilate square's width / height
+            -- in real pixels / field lines follow the mode's x / y step s so
+            -- the stroke is about the same fraction of screen height
+            -- everywhere: n = floor(t/s + 0.75), i.e. rounded with a bold
+            -- bias (up from a quarter), 1-px floor.  The bias is deliberate:
+            -- the pixel-scale detector finds fewer edges in a lower-res
+            -- picture, and plain rounding left 720p at half the 1080p line
+            -- coverage (2 px -> 1 px).  Steps: 720p 1.5, SD x 2.0, field-line
+            -- y 1080i 2.0, 576p 1.875, 480p 2.25, 576i 3.75, 480i 4.44.
+            -- 1080p keeps t x t.  Free-running decode of the timing ID
+            -- (static while a mode runs) and the frame-latched s_thick.
+            ------------------------------------------------------------------
+            case to_integer(unsigned(registers_in(8)(3 downto 0))) is
+                when 0 | 4 | 8 | 12 =>          -- SD: x step 2.0 -> 1 1 2 2 3
+                    case to_integer(s_thick) is
+                        when 0 | 1  => v_dw := 1;
+                        when 2 | 3  => v_dw := 2;
+                        when others => v_dw := 3;
+                    end case;
+                when 5 | 6 | 14 =>              -- 720p: 1.5      -> 1 2 2 3 4
+                    case to_integer(s_thick) is
+                        when 0      => v_dw := 1;
+                        when 1 | 2  => v_dw := 2;
+                        when 3      => v_dw := 3;
+                        when others => v_dw := 4;
+                    end case;
+                when others =>                  -- 1080p / 1080i: 1.0
+                    case to_integer(s_thick) is
+                        when 0      => v_dw := 1;
+                        when 1      => v_dw := 2;
+                        when 2      => v_dw := 3;
+                        when 3      => v_dw := 4;
+                        when others => v_dw := 5;
+                    end case;
+            end case;
+            case to_integer(unsigned(registers_in(8)(3 downto 0))) is
+                when 0 =>                       -- 480i: 4.44     -> 1 1 1 1 1
+                    v_dh := 1;
+                when 8 =>                       -- 576i: 3.75     -> 1 1 1 1 2
+                    case to_integer(s_thick) is
+                        when 0 | 1 | 2 | 3 => v_dh := 1;
+                        when others        => v_dh := 2;
+                    end case;
+                when 4 =>                       -- 480p: 2.25     -> 1 1 2 2 2
+                    case to_integer(s_thick) is
+                        when 0 | 1  => v_dh := 1;
+                        when others => v_dh := 2;
+                    end case;
+                when 1 | 2 | 10 | 12 =>         -- 1080i 2.0, 576p 1.875
+                    case to_integer(s_thick) is  --              -> 1 1 2 2 3
+                        when 0 | 1  => v_dh := 1;
+                        when 2 | 3  => v_dh := 2;
+                        when others => v_dh := 3;
+                    end case;
+                when 5 | 6 | 14 =>              -- 720p: 1.5      -> 1 2 2 3 4
+                    case to_integer(s_thick) is
+                        when 0      => v_dh := 1;
+                        when 1 | 2  => v_dh := 2;
+                        when 3      => v_dh := 3;
+                        when others => v_dh := 4;
+                    end case;
+                when others =>                  -- 1080p: 1.0
+                    case to_integer(s_thick) is
+                        when 0      => v_dh := 1;
+                        when 1      => v_dh := 2;
+                        when 2      => v_dh := 3;
+                        when 3      => v_dh := 4;
+                        when others => v_dh := 5;
+                    end case;
+            end case;
+            -- columns: 1 px {2}, 2 {1,2}, 3 {1..3}, 4 {0..3}, 5 {0..4};
+            -- rows:    1 px {1}, 2 {0,1}, 3 {0..2}, 4 {0..3}, 5 {0..4}
+            s_cen <= "00100";
+            s_ren <= "01000";
+            if v_dw >= 4 then s_cen(0) <= '1'; end if;
+            if v_dw >= 2 then s_cen(1) <= '1'; end if;
+            if v_dw >= 3 then s_cen(3) <= '1'; end if;
+            if v_dw >= 5 then s_cen(4) <= '1'; end if;
+            if v_dh >= 2 then s_ren(0) <= '1'; end if;
+            if v_dh >= 3 then s_ren(2) <= '1'; end if;
+            if v_dh >= 4 then s_ren(3) <= '1'; end if;
+            if v_dh >= 5 then s_ren(4) <= '1'; end if;
+
             -- any colour mode but White (free-running, out of the vsync cone)
             if s_cmode /= 0 then
                 s_col <= '1';
@@ -1231,7 +1311,7 @@ begin
         if rising_edge(clk) then
             ddq <= dd1(to_integer(drx));
             if av(18) = '1' then
-                dd1(to_integer(dwx)) <= a18_bit & v1(0) & v2(0) & v3(0);
+                dd1(to_integer(dwx)) <= a18_bit & v1 & v2 & v3;
             end if;
         end if;
     end process p_dd1;
