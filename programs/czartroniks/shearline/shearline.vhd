@@ -21,8 +21,9 @@
 --   buffer[x] = rotate(wet);   out = mix(live, wet, Mix)
 --
 -- Shear (P12): S_n is the integer carry of a per-line Bresenham accumulator
---   of a 4.4 fixed-point slope, so fractional slopes (1/16 px/line) draw
---   steep trails as regular staircases. Slope Mod adds per-line random jitter.
+--   of a 4.4 fixed-point slope (px per 1080p line; 4.8 per field line after
+--   resolution scaling), so fractional slopes (1/16 px/line) draw steep
+--   trails as regular staircases. Slope Mod adds per-line random jitter.
 -- Fan (K1): D(x) = k*(x - c), a per-pixel 7.14 fixed-point DDA about c = half
 --   the measured width: each line re-draws the one above zoomed about the
 --   centre, + sprays trails outward, - converges them. c*k comes free from a
@@ -47,6 +48,17 @@
 -- Field start: the first active line of every field is seeded from live
 --   video, so trails never wrap from the bottom of the frame to the top.
 -- Off-line reads (rd < 0 or rd >= measured width) pass live video.
+--
+-- Resolution scaling (v1.1.2): every per-line quantity is defined per 1080p
+--   line and converted to per FIELD line from the timing ID (virtual
+--   1080-line units; ys = 1080p lines per field line, xs = units per pixel),
+--   so trail angle, length, fan spray and hue cycling match 1080p as
+--   fractions of the screen height at 720p and SD:
+--     Shear and Slope Mod  x ys/xs  (px per field line; 720p 1.0, 480i 2.22)
+--     Trail (1024 - t)     x ys     (Q.8, fraction carried line to line)
+--     Fan k, Spectrum a    x ys     (zoom / rotation per field line)
+--   One serial shift-add multiplier forms the five products. At 1080p both
+--   steps are 1.0 and the output is bit-identical to v1.1.1.
 --
 -- Pipeline (data_in -> data_out = 14 clocks in every mode):
 --   E1  input regs, counters, line/field bookkeeping
@@ -141,6 +153,35 @@ architecture shearline of program_top is
         end if;
     end function;
 
+    -- Resolution scaling: virtual 1080-line units per FIELD line, Q4.8
+    -- (1080 / active lines, doubled for interlaced modes).
+    function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(1138, 12);  -- 480i: 2 x 1080/486
+            when 4          => return to_unsigned(576, 12);   -- 480p: 1080/480
+            when 8          => return to_unsigned(960, 12);   -- 576i: 2 x 1080/576
+            when 12         => return to_unsigned(480, 12);   -- 576p: 1080/576
+            when 5 | 6 | 14 => return to_unsigned(384, 12);   -- 720p: 1.5
+            when 1 | 2 | 10 => return to_unsigned(512, 12);   -- 1080i: 2.0
+            when others     => return to_unsigned(256, 12);   -- 1080p: 1.0
+        end case;
+    end function;
+    -- Slope conversion, Q.8: y step / x step (virtual units per pixel: 1.0
+    -- at 1080, 1.5 at 720p, 2.0 at SD). A slope of S px per 1080p line is
+    -- S * r px per field line.
+    function f_rstep(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(569, 10);   -- 480i: 4.445 / 2
+            when 4          => return to_unsigned(288, 10);   -- 480p: 2.25 / 2
+            when 8          => return to_unsigned(480, 10);   -- 576i: 3.75 / 2
+            when 12         => return to_unsigned(240, 10);   -- 576p: 1.875 / 2
+            when 1 | 2 | 10 => return to_unsigned(512, 10);   -- 1080i: 2 / 1
+            when others     => return to_unsigned(256, 10);   -- 1080p, 720p
+        end case;
+    end function;
+
     -- Clamp to signed 10-bit chroma (-512..511).
     function f_clamp_c(x : signed) return signed is
     begin
@@ -180,14 +221,32 @@ architecture shearline of program_top is
     -- Control (registered decode; quasi-static)
     --------------------------------------------------------------------------
     signal s_kq       : signed(9 downto 0)          := (others => '0');  -- Fan, 2^-14 px/px
-    signal s_g        : unsigned(7 downto 0)        := (others => '0');
-    signal s_t_trail  : unsigned(C_DW - 1 downto 0) := (others => '0');
+    signal s_g        : unsigned(7 downto 0)        := (others => '0');  -- 1024 - t (1080p)
     signal s_sh_off   : unsigned(7 downto 0)        := (others => '0');
     signal s_sh_inc   : unsigned(7 downto 0)        := (others => '0');
     signal s_shear    : unsigned(7 downto 0)        := (others => '0');  -- 4.4 px/line
     signal s_slope    : unsigned(C_DW - 1 downto 0) := (others => '0');
-    signal s_spec_a   : signed(8 downto 0)          := (others => '0');  -- 2^-10 rad/line
-    signal s_seed_sel : unsigned(2 downto 0)        := (others => '0');
+    signal s_a_raw    : unsigned(7 downto 0)        := (others => '0');  -- Spectrum knob
+    signal s_spec_a   : signed(11 downto 0)         := (others => '0');  -- 2^-10 rad/line
+    signal s_seed_sel : unsigned(3 downto 0)        := (others => '0');
+
+    -- Resolution scaling: every per-line quantity is defined per 1080p line
+    -- and converted to per FIELD line by one serial shift-add multiplier
+    -- (quasi-static, round-robin over five products). At 1080p both steps
+    -- are 1.0 and every product equals its old value bit for bit.
+    signal s_rq       : unsigned(9 downto 0)  := to_unsigned(256, 10);   -- Q.8 ys/xs
+    signal s_ysq      : unsigned(11 downto 0) := to_unsigned(256, 12);   -- Q.8 ys
+    signal s_mstep    : unsigned(3 downto 0)  := (others => '0');
+    signal s_mslot    : unsigned(2 downto 0)  := (others => '0');
+    signal s_ma       : unsigned(9 downto 0)  := (others => '0');
+    signal s_mb       : unsigned(10 downto 0) := (others => '0');
+    signal s_macc     : unsigned(20 downto 0) := (others => '0');
+    signal s_mneg     : std_logic := '0';
+    signal s_shear_e  : unsigned(13 downto 0) := (others => '0');  -- 4.8 px / field line
+    signal s_slope_e  : unsigned(11 downto 0) := (others => '0');  -- Slope Mod * r
+    signal s_g_e      : unsigned(18 downto 0) := (others => '0');  -- (1024 - t) * ys, Q.8
+    signal s_k_e      : signed(12 downto 0)   := (others => '0');  -- Fan * ys
+    signal s_a_e      : unsigned(10 downto 0) := (others => '0');  -- Spectrum * ys
     signal s_dir      : std_logic := '0';
     signal s_comet    : std_logic := '0';
     signal s_mix_w    : unsigned(C_DW - 1 downto 0) := (others => '0');  -- 1023 - Mix
@@ -217,17 +276,23 @@ architecture shearline of program_top is
     signal s_width    : unsigned(C_Y_AW - 1 downto 0) := to_unsigned(1920, C_Y_AW);
     signal s_half     : unsigned(C_Y_AW - 1 downto 0);
 
-    signal s_phi      : unsigned(3 downto 0)  := (others => '0');  -- shear phase
+    signal s_phi      : unsigned(7 downto 0)  := (others => '0');  -- shear phase
     signal s_gold     : unsigned(13 downto 0) := (others => '0');  -- fan dither
     signal s_cbit     : std_logic := '0';                          -- chroma rounding toggle
-    signal s_shcur    : unsigned(5 downto 0)  := (others => '0');  -- S for the next line
+    signal s_shcur    : unsigned(6 downto 0)  := (others => '0');  -- S for the next line
+    signal s_tacc     : unsigned(7 downto 0)  := (others => '0');  -- trail-decay phase
+    signal s_gcur     : unsigned(11 downto 0) := (others => '0');  -- 1024 - t, next line
+    signal s_tline    : unsigned(C_DW - 1 downto 0) := (others => '0');  -- t, this line
 
     -- line-rate precompute (settles within the front porch)
     signal s_lfsr_q    : std_logic_vector(15 downto 0);
     signal s_line_rand : unsigned(4 downto 0)        := (others => '0');
-    signal s_jit_p     : unsigned(14 downto 0)       := (others => '0');
-    signal s_sum       : unsigned(8 downto 0)        := (others => '0');
-    signal s_shnext    : unsigned(5 downto 0)        := (others => '0');
+    signal s_jit_p     : unsigned(16 downto 0)       := (others => '0');
+    signal s_sum       : unsigned(14 downto 0)       := (others => '0');
+    signal s_shnext    : unsigned(6 downto 0)        := (others => '0');
+    signal s_gsum      : unsigned(8 downto 0)        := (others => '0');
+    signal s_gnext     : unsigned(11 downto 0)       := (others => '0');
+    signal s_tnext     : unsigned(C_DW - 1 downto 0) := (others => '0');
     signal s_rp_load   : signed(C_RW - 1 downto 0)   := (others => '0');
     signal s_rpu_load  : signed(C_RW - 1 downto 0)   := (others => '0');
     signal s_dload     : signed(C_FW - 1 downto 0)   := (others => '0');
@@ -264,12 +329,12 @@ architecture shearline of program_top is
     --------------------------------------------------------------------------
     -- Spectrum write-back pipeline (E10-E15)
     --------------------------------------------------------------------------
-    signal s_p1_10 : signed(16 downto 0)         := (others => '0');
+    signal s_p1_10 : signed(19 downto 0)         := (others => '0');
     signal s_yb10  : unsigned(C_DW - 1 downto 0) := (others => '0');
     signal s_cu10, s_cv10 : signed(C_DW - 1 downto 0) := (others => '0');
     signal s_y10   : unsigned(C_DW - 1 downto 0) := (others => '0');
 
-    signal s_p1r11 : signed(8 downto 0)          := (others => '0');
+    signal s_p1r11 : signed(11 downto 0)         := (others => '0');
     signal s_cus11 : signed(C_DW downto 0)       := (others => '0');
     signal s_cv11  : signed(C_DW - 1 downto 0)   := (others => '0');
     signal s_y11   : unsigned(C_DW - 1 downto 0) := (others => '0');
@@ -277,11 +342,11 @@ architecture shearline of program_top is
     signal s_u12, s_cv12  : signed(C_DW - 1 downto 0) := (others => '0');
     signal s_y12   : unsigned(C_DW - 1 downto 0) := (others => '0');
 
-    signal s_p2_13 : signed(16 downto 0)         := (others => '0');
+    signal s_p2_13 : signed(19 downto 0)         := (others => '0');
     signal s_u13, s_cv13  : signed(C_DW - 1 downto 0) := (others => '0');
     signal s_y13   : unsigned(C_DW - 1 downto 0) := (others => '0');
 
-    signal s_p2r14 : signed(8 downto 0)          := (others => '0');
+    signal s_p2r14 : signed(11 downto 0)         := (others => '0');
     signal s_u14, s_cv14  : signed(C_DW - 1 downto 0) := (others => '0');
     signal s_y14   : unsigned(C_DW - 1 downto 0) := (others => '0');
 
@@ -322,7 +387,7 @@ begin
     p_ctrl : process(clk)
         variable v_k : signed(10 downto 0);
         variable v_p : unsigned(9 downto 0);
-        variable v_a : unsigned(7 downto 0);
+        variable v_e : unsigned(10 downto 0);
     begin
         if rising_edge(clk) then
             -- K1 Fan: bipolar about noon with a +/-16 deadband, so the knob's
@@ -336,9 +401,9 @@ begin
 
             -- K2 Trail: exponential. t = 1024 - (('1' & ~m) >> e), e = top 3
             -- bits: trail length doubles every 1/8 turn, 4 lines -> 1000+.
+            -- (t itself is formed per line from s_g * ys, below.)
             s_g <= shift_right('1' & not unsigned(registers_in(1)(6 downto 0)),
                                to_integer(unsigned(registers_in(1)(9 downto 7))));
-            s_t_trail <= resize(to_unsigned(1024, 11) - resize(s_g, 11), C_DW);
 
             -- P12 Shear: piecewise slope (4.4 px/line), half the travel below
             -- 3 px/line where the steep angles live.
@@ -351,16 +416,21 @@ begin
             end case;
             s_shear <= s_sh_off + s_sh_inc;
 
-            -- K4 Spectrum: rotation step a (0..0.25 rad/line) and a luma seed
-            -- of ~a/4096 per line (shift by a's octave) so grey trails tint.
-            v_a := unsigned(registers_in(3)(9 downto 2));
-            s_spec_a <= signed(resize(v_a, 9));
-            if v_a(7) = '1' then    s_seed_sel <= "101";
-            elsif v_a(6) = '1' then s_seed_sel <= "100";
-            elsif v_a(5) = '1' then s_seed_sel <= "011";
-            elsif v_a(4) = '1' then s_seed_sel <= "010";
-            elsif v_a(3) = '1' then s_seed_sel <= "001";
-            else                    s_seed_sel <= "000";
+            -- K4 Spectrum: rotation step a (0..0.25 rad per 1080p line; times
+            -- ys per field line) and a luma seed of ~a/4096 per line (shift
+            -- by a's octave) so grey trails tint.
+            s_a_raw  <= unsigned(registers_in(3)(9 downto 2));
+            v_e      := s_a_e;
+            s_spec_a <= signed(resize(v_e, 12));
+            if v_e(10) = '1' then   s_seed_sel <= to_unsigned(8, 4);
+            elsif v_e(9) = '1' then s_seed_sel <= to_unsigned(7, 4);
+            elsif v_e(8) = '1' then s_seed_sel <= to_unsigned(6, 4);
+            elsif v_e(7) = '1' then s_seed_sel <= to_unsigned(5, 4);
+            elsif v_e(6) = '1' then s_seed_sel <= to_unsigned(4, 4);
+            elsif v_e(5) = '1' then s_seed_sel <= to_unsigned(3, 4);
+            elsif v_e(4) = '1' then s_seed_sel <= to_unsigned(2, 4);
+            elsif v_e(3) = '1' then s_seed_sel <= to_unsigned(1, 4);
+            else                    s_seed_sel <= to_unsigned(0, 4);
             end if;
 
             s_slope <= unsigned(registers_in(2));
@@ -370,6 +440,74 @@ begin
             s_mix_w  <= not unsigned(registers_in(4));
         end if;
     end process p_ctrl;
+
+    --------------------------------------------------------------------------
+    -- Resolution scaling. The steps decode free-running from the timing ID
+    -- (static while a mode runs). One serial shift-add multiplier (MSB
+    -- first, 11 steps) cycles through the five per-line products:
+    --   0 Shear * r -> 4.8 px/field line   1 Slope Mod * r
+    --   2 (1024 - t) * ys, Q.8 (the fraction is dithered per line)
+    --   3 |Fan| * ys (sign re-applied)     4 Spectrum * ys
+    -- r = ys / xs converts a slope in px per 1080p line to px per field line;
+    -- ys alone converts a per-line rate (decay, zoom, rotation).
+    --------------------------------------------------------------------------
+    p_scale : process(clk)
+        variable v_km : signed(10 downto 0);
+    begin
+        if rising_edge(clk) then
+            s_rq  <= f_rstep(registers_in(8)(3 downto 0));
+            s_ysq <= f_vstep_y(registers_in(8)(3 downto 0));
+
+            s_mstep <= s_mstep + 1;
+            if s_mstep = 0 then
+                s_macc <= (others => '0');
+                v_km   := abs(resize(s_kq, 11));
+                case s_mslot is
+                    when "000" =>
+                        s_ma <= resize(s_shear, 10);
+                        s_mb <= resize(s_rq, 11);
+                    when "001" =>
+                        s_ma <= s_slope;
+                        s_mb <= resize(s_rq, 11);
+                    when "010" =>
+                        s_ma <= resize(s_g, 10);
+                        s_mb <= s_ysq(10 downto 0);
+                    when "011" =>
+                        s_ma   <= unsigned(v_km(9 downto 0));
+                        s_mb   <= s_ysq(10 downto 0);
+                        s_mneg <= s_kq(9);
+                    when others =>
+                        s_ma <= resize(s_a_raw, 10);
+                        s_mb <= s_ysq(10 downto 0);
+                end case;
+            elsif s_mstep <= 11 then
+                if s_mb(10) = '1' then
+                    s_macc <= shift_left(s_macc, 1) + resize(s_ma, 21);
+                else
+                    s_macc <= shift_left(s_macc, 1);
+                end if;
+                s_mb <= shift_left(s_mb, 1);
+            elsif s_mstep = 12 then
+                case s_mslot is
+                    when "000" => s_shear_e <= s_macc(17 downto 4);
+                    when "001" => s_slope_e <= s_macc(19 downto 8);
+                    when "010" => s_g_e     <= s_macc(18 downto 0);
+                    when "011" =>
+                        if s_mneg = '1' then
+                            s_k_e <= -signed('0' & s_macc(19 downto 8));
+                        else
+                            s_k_e <= signed('0' & s_macc(19 downto 8));
+                        end if;
+                    when others => s_a_e <= s_macc(18 downto 8);
+                end case;
+                if s_mslot = 4 then
+                    s_mslot <= (others => '0');
+                else
+                    s_mslot <= s_mslot + 1;
+                end if;
+            end if;
+        end if;
+    end process p_scale;
 
     s_half <= '0' & s_width(C_Y_AW - 1 downto 1);
 
@@ -405,12 +543,13 @@ begin
                 s_kacc      <= (others => '0');
                 s_par       <= not s_par;
                 s_line_rand <= unsigned(s_lfsr_q(4 downto 0));
+                s_tline     <= s_tnext;
             elsif s_in_avid = '1' then
                 s_px   <= s_px + 1;
                 s_rp   <= s_rp + 1;
                 s_rpu  <= s_rpu + 1;
-                s_dacc <= s_dacc + resize(s_kq, C_FW);
-                s_kacc <= s_kacc + resize(s_kq, C_FW);
+                s_dacc <= s_dacc + resize(s_k_e, C_FW);
+                s_kacc <= s_kacc + resize(s_k_e, C_FW);
                 if s_px = s_half then
                     s_kc <= s_kacc;                  -- k*c for the next line
                 end if;
@@ -428,12 +567,14 @@ begin
                 if s_seedline = '1' then
                     s_first <= '0';
                 end if;
-                s_phi   <= s_sum(3 downto 0);
+                s_phi   <= s_sum(7 downto 0);
                 s_shcur <= s_shnext;
                 if s_shnext(0) = '1' then
                     s_cbit <= not s_cbit;
                 end if;
                 s_gold  <= s_gold + C_GOLDEN;
+                s_tacc  <= s_gsum(7 downto 0);
+                s_gcur  <= s_gnext;
             end if;
 
             -- Line width: field maximum, one clock after the fall (s_px = W).
@@ -451,6 +592,7 @@ begin
                 s_first <= '1';
                 s_phi   <= (others => '0');
                 s_gold  <= (others => '0');
+                s_tacc  <= (others => '0');
                 if s_saw_act = '1' then
                     s_width   <= s_wmax;
                     s_wmax    <= (others => '0');
@@ -460,9 +602,21 @@ begin
 
             -- Line-rate precompute for the next line's loads. Each term is one
             -- op from registers; all settle long before the next hsync.
-            s_sum    <= resize(s_shear, 9) + resize(s_phi, 9);
-            s_jit_p  <= s_slope * s_line_rand;
-            s_shnext <= resize(s_sum(8 downto 4), 6) + resize(s_jit_p(14 downto 10), 6);
+            -- Shear: 4.8 Bresenham (the 1080p slope's fraction has 4 bits, so
+            -- at 1080p the low 4 phase bits stay 0 and S_n is unchanged).
+            s_sum    <= resize(s_shear_e, 15) + resize(s_phi, 15);
+            s_jit_p  <= s_slope_e * s_line_rand;
+            s_shnext <= resize(s_sum(14 downto 8), 7) + resize(s_jit_p(16 downto 10), 7);
+            -- Trail: g = (1024 - t) * ys per field line; its Q.8 fraction
+            -- is carried line to line so the mean decay is exact (1080p: the
+            -- fraction is 0 and t = 1024 - g). Latched into s_tline at hsync.
+            s_gsum  <= resize(s_g_e(7 downto 0), 9) + resize(s_tacc, 9);
+            s_gnext <= resize(s_g_e(18 downto 8), 12) + resize(s_gsum(8 downto 8), 12);
+            if s_gcur(11 downto 10) /= "00" then
+                s_tnext <= (others => '0');          -- shorter than one line
+            else
+                s_tnext <= resize(to_unsigned(1024, 11) - resize(s_gcur, 11), C_DW);
+            end if;
             if s_dir = '0' then
                 s_rp_load <= -signed(resize(s_shcur, C_RW));  -- Right: read from the left
             else
@@ -577,7 +731,7 @@ begin
             if s_tz4 = '1' then
                 s_t5 <= (others => '0');
             else
-                s_t5 <= s_t_trail;
+                s_t5 <= s_tline;
             end if;
         end if;
     end process p_e5;
@@ -658,17 +812,20 @@ begin
 
     p_w2 : process(clk)
         variable v_rb   : signed(1 downto 0);
-        variable v_seed : unsigned(4 downto 0);
+        variable v_seed : unsigned(7 downto 0);
     begin
         if rising_edge(clk) then
             v_rb    := '0' & s_p1_10(7);
-            s_p1r11 <= s_p1_10(16 downto 8) + v_rb;
-            case s_seed_sel is
-                when "101"  => v_seed := s_yb10(9 downto 5);
-                when "100"  => v_seed := resize(s_yb10(9 downto 6), 5);
-                when "011"  => v_seed := resize(s_yb10(9 downto 7), 5);
-                when "010"  => v_seed := resize(s_yb10(9 downto 8), 5);
-                when "001"  => v_seed := resize(s_yb10(9 downto 9), 5);
+            s_p1r11 <= s_p1_10(19 downto 8) + v_rb;
+            case to_integer(s_seed_sel) is
+                when 8      => v_seed := s_yb10(9 downto 2);
+                when 7      => v_seed := resize(s_yb10(9 downto 3), 8);
+                when 6      => v_seed := resize(s_yb10(9 downto 4), 8);
+                when 5      => v_seed := resize(s_yb10(9 downto 5), 8);
+                when 4      => v_seed := resize(s_yb10(9 downto 6), 8);
+                when 3      => v_seed := resize(s_yb10(9 downto 7), 8);
+                when 2      => v_seed := resize(s_yb10(9 downto 8), 8);
+                when 1      => v_seed := resize(s_yb10(9 downto 9), 8);
                 when others => v_seed := (others => '0');
             end case;
             s_cus11 <= resize(s_cu10, C_DW + 1) + signed(resize(v_seed, C_DW + 1));
@@ -701,7 +858,7 @@ begin
     begin
         if rising_edge(clk) then
             v_rb    := '0' & s_p2_13(7);
-            s_p2r14 <= s_p2_13(16 downto 8) + v_rb;
+            s_p2r14 <= s_p2_13(19 downto 8) + v_rb;
             s_u14   <= s_u13;
             s_cv14  <= s_cv13;
             s_y14   <= s_y13;
@@ -712,7 +869,7 @@ begin
     begin
         if rising_edge(clk) then
             s_wv15 <= std_logic_vector(unsigned(
-                          f_clamp_c(resize(s_cv14, C_DW + 1) + resize(s_p2r14, C_DW + 1)))
+                          f_clamp_c(resize(s_cv14, C_DW + 2) + resize(s_p2r14, C_DW + 2)))
                       xor C_NEUT);
             s_wu15 <= std_logic_vector(unsigned(s_u14) xor C_NEUT);
             s_wy15 <= std_logic_vector(s_y14);
