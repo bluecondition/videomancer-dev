@@ -7,7 +7,7 @@ import os
 import sw_tables as T
 import sw_ucode2 as uc
 
-UCODE_DEPTH = 1280
+UCODE_DEPTH = 1536
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, '..', 'starwipe_pkg.vhd')
 

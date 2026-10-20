@@ -61,10 +61,18 @@ RECIPES = {
     'DOUBLE FAN':    ('WEDGE', 3, 0, 'dfan'),
     'SUNBURST':      ('SUNB', 1, 0),
     'SPOTLIGHT':     ('CIRC', 2, 0),
+    'X DOORS':       ('XDOOR', 1, 1),
+    'EYE':           ('EYE', 2, 0),
+    'CROSS':         ('VPOLY', 1, 0, 'vt_cross'),
+    'VEE':           ('VEE', 1, 1, 0),
+    'BARN VEE':      ('VEE', 1, 1, 1),
+    'TRIANGLE':      ('VPOLY', 1, 0, 'vt_tri'),
+    'APERTURE':      ('REG', 1, 0, 'aper'),
 }
-CLASSIC = ['MIX', 'BAR >', 'BAR v', 'DIAGONAL', 'BARN DOOR <>', 'BARN DOOR ^v', 'BARN DOOR diag',
-           'BOX', 'DIAMOND', 'CIRCLE', 'POLYGON', 'CLOCK', 'PINWHEEL', 'DOUBLE FAN', 'DOUBLE SWEEP']
-CHEESE = ['STAR WIPE', 'SUNBURST', 'SPOTLIGHT']
+CLASSIC = ['MIX', 'BAR >', 'BAR v', 'DIAGONAL', 'BARN DOOR <>', 'BARN DOOR ^v', 'BARN DOOR diag', 'X DOORS',
+           'BOX', 'DIAMOND', 'CIRCLE', 'EYE', 'CROSS', 'VEE', 'BARN VEE', 'TRIANGLE',
+           'POLYGON', 'CLOCK', 'PINWHEEL', 'DOUBLE FAN', 'DOUBLE SWEEP']
+CHEESE = ['STAR WIPE', 'SUNBURST', 'APERTURE', 'SPOTLIGHT']
 
 STAR_RHO = {3: .36, 4: .4, 5: .382, 6: .5, 7: .47, 8: .5, 9: .5, 10: .52, 11: .53, 12: .55}
 
@@ -91,11 +99,15 @@ def build():
     e = A.emit
     # window banks: 0 = control phase, 1 = handlers, 2 = bound + list building, 3 = mkrec
     A.wreg(0, 'tq', 'clo', 'chi', 'cmid', 'NS', 'rb', 'seg', 'oi', 'of', 'pk', 'q0', 'q1',
-           'th', 'hs', 'hc', 'hy', 'hlink', 'hh', 'cy', 'cuv', 'rec', 'cls', 'HF', 'LwK', 'LbK', 'mw', 'DK', 'bw8')
+           'th', 'hs', 'hc', 'hy', 'hlink', 'hh', 'cy', 'cuv', 'rec', 'cls', 'HF', 'LwK', 'LbK', 'mw', 'DK', 'bw8',
+           'auto', 'aph')
     A.wreg(1, 'cnt', 'elink', 'n', 'S', 'Sh', 'rho', 'al', 'cref', 'ptyp', 'pw3', 'pw4', 'pw5', 'k', 'tip',
            'clink', 'cmlo', 'cmhi', 'nn', 'nlo', 'nhi', 'nf', 'kx', 'absf', 'ang', 'nw', 'wst', 'span', 'a0', 'a1', 'ra', 'spp')
     A.alias(ha='absf', hb='ang', hx8='nw', hy8='wst', mhx='span', mhy='a0', L8='a1', nxu='rho', nyu='al', cd='cref',
             sxn='cmlo', syn='cmhi')
+    # vertex-polygon handler (CROSS, TRIANGLE): table, count, index, vertex pair, edge, normal, scales
+    A.alias(vtab='span', vcnt='n', vi='k', vx0='a0', vy0='a1', vxo='cmlo', vyo='cmhi', vex='nlo', vey='nhi',
+            vL='nf', nxv='kx', nyv='absf', AX='rho', AY='nw', BX='al', BY='wst', vlink='tip')
     A.wreg(2, 'fb', 'blink', 'lup', 'ldn', 'ayl', 'v0up', 'v0dn', 'cnt2', 'j', 'lbase',
            'k0', 'i', 'kk', 'rx1', 'bk', 'bptyp', 'bw3', 'bw4', 'bw5', 'fA', 'fB', 'f1', 'acc',
            'fb0', 'pmax', 'pmin', 'rsec', 'csec', 'cr1', 'cr2', 'tt', 'tin')
@@ -224,6 +236,27 @@ def build():
     ldc('b', 68198)
     mulr('x', 'x', 'b', 16)
     clamp('T', 'x', 'zero', 'c65536')
+    # AUTO (switch 11): T sweeps there and back on its own; the T-bar sets the
+    # rate, ~34 s a cycle at 0 % to ~0.5 s at 100 % (2^(5.3 p12) steps per
+    # field); the triangle overshoots both ends by 4096 so each end dwells
+    # bit-exact for ~6 % of the cycle
+    bit('auto', 'sw', 4)
+    lna, lnw, lnt = A.lbl(), A.lbl(), A.lbl()
+    e('JZ', a='auto', imm=lna)
+    e('LDI', 't', imm=21730); mulr('e2', 'tq', 't', 16)
+    call('pow2')
+    e('LDI', 't', imm=110); mulr('t', 'pw', 't', 8)
+    e('ADD', 'aph', 'aph', 't')
+    e('LDI', 'x', imm=147456)
+    e('SUB', 'y', 'aph', 'x'); jlt('y', 'zero', lnw); e('MOV', 'aph', 'y')
+    A.label(lnw)
+    e('LDI', 'x', imm=73728)
+    e('MOV', 'y', 'aph'); jlt('aph', 'x', lnt)
+    e('LDI', 'x', imm=147456); e('SUB', 'y', 'x', 'aph')
+    A.label(lnt)
+    e('ADDI', 'y', 'y', imm=-4096)
+    clamp('T', 'y', 'zero', 'c65536')
+    A.label(lna)
     # u = T or 1 - T under REVERSE (the sweep variable)
     e('MOV', 'u', 'T')
     lnr = A.lbl()
@@ -545,9 +578,13 @@ def build():
     A.label('h_reg')
     e('LDI', 'cnt', imm=0)
     e('MOV', 'elink', 'link')
-    lstar = A.lbl()
+    lstar, lnap = A.lbl(), A.lbl()
     e('LDI', 'nn', imm=6)                         # polygon noon
     e('LDI', 'nlo', imm=3); e('LDI', 'nhi', imm=12)
+    e('ADDI', 't', 'harg', imm=-2); e('JNZ', a='t', imm=lnap)
+    e('LDI', 'nn', imm=7); e('LDI', 'nlo', imm=5); e('LDI', 'nhi', imm=9)   # aperture
+    e('JMP', imm=lstar)
+    A.label(lnap)
     e('JZ', a='harg', imm=lstar)
     e('LDI', 'nn', imm=5)
     A.label(lstar)
@@ -558,7 +595,7 @@ def build():
     # rho16 (Q.16) and the edge angle alpha16 from ROM tables indexed by n
     lpoly = A.lbl()
     e('MOV', 'al', 'Sh')                          # polygon: a star whose inner vertex lies on the edge: alpha = pi/n
-    e('JZ', a='harg', imm=lpoly)
+    e('ADDI', 't', 'harg', imm=-1); e('JNZ', a='t', imm=lpoly)
     e('ADDI', 't', 'n', imm='altab'); e('ADDI', 't', 't', imm=-3); e('LDM', 'al', 't')
     A.label(lpoly)
     # c_ref (key Q.8) = -(S_ref * cos(alpha)) * G : cos(alpha) Q.15
@@ -569,8 +606,11 @@ def build():
     e('LDI', 'ptyp', imm=0)
     e('MOV', 'pw5', 'zero')
     e('LDI', 'k', imm=0)
-    e('LDI', 'tip', imm=49152)                    # up
-    e('ADD', 'tip', 'tip', 'psi')
+    e('LDI', 'tip', imm=49152)                    # up (SPIN is applied once, in emit)
+    lapt = A.lbl()
+    e('ADDI', 't', 'harg', imm=-2); e('JNZ', a='t', imm=lapt)
+    e('ADD', 'tip', 'tip', 'Sh')                  # aperture: a FACE up
+    A.label(lapt)
     lreg = A.lbl()
     A.label(lreg)
     # sector 1: ray at tip - S/2, normal at tip - alpha (mirrored edge)
@@ -641,7 +681,6 @@ def build():
     e('ANDI', 'ang', 'harg', imm=-2)              # angle (harg holds angle | abs in bit 0)
     e('SHL', 't', 'm', imm=4)                     # tilt +-45 deg = +-8192 over +-512
     e('ADD', 'ang', 'ang', 't')
-    e('ADD', 'ang', 'ang', 'psi')
     e('SHL', 'cref', 'G8', imm=10)                # c_ref = -S_ref * G
     e('SUB', 'cref', 'zero', 'cref')
     e('LDI', 'ptyp', imm=0)
@@ -718,7 +757,6 @@ def build():
     A.label(lws + 'c')
     e('SHL', 't', 'm', imm=6); e('ADD', 'wst', 'wst', 't')                # clock
     A.label(lwd)
-    e('ADD', 'wst', 'wst', 'psi')
     e('LDI', 'k', imm=0)
     lwl = A.lbl()
     A.label(lwl)
@@ -745,7 +783,7 @@ def build():
     e('DIV', 'S', 'one', 'n'); e('SHR', 'Sh', 'S', imm=1)
     e('LDI', 'ptyp', imm=0)
     e('SHL', 'cref', 'G8', imm=10); e('SUB', 'cref', 'zero', 'cref')
-    e('MOV', 'ang', 'psi')
+    e('LDI', 'ang', imm=0)
     e('LDI', 'k', imm=0)
     lsb = A.lbl()
     A.label(lsb)
@@ -832,6 +870,124 @@ def build():
     e('ADDI', 'k', 'k', imm=1)
     jlt('k', 'c4', lbx)
     hset(0, 'cnt'); e('JMP', imm='hret')
+
+    # X DOORS: the union of two bars (|n.p| < T) with normals at +-a,
+    # a = 45 + 22.5 m deg.  Eight 45-degree sectors; in each the piece is the
+    # bar whose normal is most nearly perpendicular to the sector's bisector,
+    # signed so n.p > 0 there: base angles 8192 x {7, 3, 1, 5, 3, 7, 5, 1}
+    # with -delta for sectors 0, 1, 4, 5 and +delta for 2, 3, 6, 7
+    # (delta = a - 45 deg = 8 m units).
+    A.label('h_xdoor')
+    e('LDI', 'cnt', imm=0); e('LDI', 'ptyp', imm=0)
+    e('SHL', 'cref', 'G8', imm=10); e('SUB', 'cref', 'zero', 'cref')
+    e('SHL', 'ang', 'm', imm=3)                   # delta
+    ldc('wst', sum(b << 3 * i for i, b in enumerate((7, 3, 1, 5, 3, 7, 5, 1))))
+    e('LDI', 'k', imm=0)
+    lxd, lxo, lxn = A.lbl(), A.lbl(), A.lbl()
+    A.label(lxd)
+    e('SHL', 'sa', 'k', imm=13); call('dirvec')
+    e('ADD', 't', 'k', 'k'); e('ADD', 't', 't', 'k'); e('SHRV', 'a', 'wst', 't'); e('ANDI', 'a', 'a', imm=7)
+    e('SHL', 'sa', 'a', imm=13)
+    e('ANDI', 't', 'k', imm=2); e('JNZ', a='t', imm=lxo)
+    e('SUB', 'sa', 'sa', 'ang'); e('JMP', imm=lxn)
+    A.label(lxo); e('ADD', 'sa', 'sa', 'ang')
+    A.label(lxn)
+    call('normvec'); e('MOV', 'pw5', 'cref'); call('emit')
+    e('ADDI', 'k', 'k', imm=1); e('LDI', 't', imm=8); jlt('k', 't', lxd)
+    hset(0, 'cnt'); e('JMP', imm='hret')
+
+    # VEE (harg 0): v + k|u| = T, a chevron front; BARN VEE (harg 1): |v| - k|u|
+    # = T.  The modifier sets the arm angle theta = atan k, 17..50 deg.  Piece
+    # normals: 90 +- theta (lower pieces), 270 -+ theta (upper, barn only).
+    A.label('h_vee')
+    e('LDI', 'cnt', imm=0); e('LDI', 'ptyp', imm=0)
+    e('ADDI', 't', 'm', imm=512); e('LDI', 'a', imm=6); mulr('al', 't', 'a', 0); e('ADDI', 'al', 'al', imm=3040)
+    e('ADD', 'sa', 'al', 'c16384'); call('sinf')
+    e('SHL', 't', 'sv', imm=10); mulr('cref', 't', 'G8', 15); e('SUB', 'cref', 'zero', 'cref')   # -S_ref cos(theta) G
+    e('LDI', 'nw', imm=2); e('LDI', 'wst', imm=32768); e('LDI', 'a0', imm=16384)
+    lvb, lvl, lvo, lvn = A.lbl(), A.lbl(), A.lbl(), A.lbl()
+    e('JZ', a='harg', imm=lvb)
+    e('LDI', 'nw', imm=4); e('LDI', 'wst', imm=16384); e('LDI', 'a0', imm=0)
+    A.label(lvb)
+    e('LDI', 'k', imm=0)
+    A.label(lvl)
+    e('MOV', 'sa', 'a0'); call('dirvec')
+    e('SHR', 'b', 'k', imm=1); e('SHL', 'sa', 'b', imm=15); e('ADD', 'sa', 'sa', 'c16384')
+    e('ADD', 't', 'k', 'b'); e('ANDI', 't', 't', imm=1); e('JNZ', a='t', imm=lvo)
+    e('ADD', 'sa', 'sa', 'al'); e('JMP', imm=lvn)
+    A.label(lvo); e('SUB', 'sa', 'sa', 'al')
+    A.label(lvn)
+    call('normvec'); e('MOV', 'pw5', 'cref'); call('emit')
+    e('ADD', 'a0', 'a0', 'wst')
+    e('ADDI', 'k', 'k', imm=1); jlt('k', 'nw', lvl)
+    hset(0, 'cnt'); e('JMP', imm='hret')
+
+    # EYE: the lens between two circles of radius R = (1 + wd) S_ref centred
+    # wd S_ref above / below; wd = 0.55 + 0.35 m.  Rays 0 / 180: the lower
+    # half is bounded by the upper circle and vice versa.
+    A.label('h_eye')
+    e('LDI', 'cnt', imm=0); e('LDI', 'ptyp', imm=1)
+    e('LDI', 'a', imm=45); mulr('al', 'm', 'a', 0); e('LDI', 't', imm=36045); e('ADD', 'al', 'al', 't')   # wd Q.16
+    e('SHL', 'a0', 'al', imm=2)                   # d (px Q.8 at S_ref = 2^18)
+    e('LDI', 'pw5', imm=S_REF * 256); e('ADD', 'pw5', 'pw5', 'a0')
+    e('LDI', 'sa', imm=0); call('dirvec'); e('LDI', 'pw3', imm=0); e('SUB', 'pw4', 'zero', 'a0'); call('emit')
+    ldc('sa', 32768); call('dirvec'); e('LDI', 'pw3', imm=0); e('MOV', 'pw4', 'a0'); call('emit')
+    hset(0, 'cnt'); hset(11, 'one')
+    e('JMP', imm='hret')
+
+    # VPOLY: star-shaped polygon from a ROM vertex table at harg: word 0 =
+    # count | kind << 8, then one word per vertex, four signed Q.4 bytes
+    # (ax, bx, ay, by): vertex = (ax AX + bx BX, ay AY + by BY) / 16 with the
+    # scales from the kind: 0 CROSS (AX = AY = S_ref, BX = BY = k S_ref,
+    # k = 0.35 + 0.3 m), 1 TRIANGLE (BY = notch, 0.8 max(0, m) S_ref).
+    # Vertices in increasing angle; the piece after vertex i is its edge to
+    # vertex i + 1, oriented so the centre is inside.
+    A.label('h_vpoly')
+    e('LDI', 'cnt', imm=0); e('LDI', 'ptyp', imm=0)
+    e('MOV', 'vtab', 'harg')
+    e('LDM', 't', 'vtab'); e('ANDI', 'vcnt', 't', imm=255); e('SHR', 'a', 't', imm=8)
+    e('LDI', 'AX', imm=S_REF * 256); e('MOV', 'AY', 'AX'); e('LDI', 'BX', imm=0); e('LDI', 'BY', imm=0)
+    lvk1, lvks, lvpl, lvnw, lvok = A.lbl(), A.lbl(), A.lbl(), A.lbl(), A.lbl()
+    e('JNZ', a='a', imm=lvk1)
+    e('LDI', 'b', imm=38); mulr('BX', 'm', 'b', 0); e('LDI', 't', imm=22938); e('ADD', 'BX', 'BX', 't'); e('SHL', 'BX', 'BX', imm=2)
+    e('MOV', 'BY', 'BX'); e('JMP', imm=lvks)
+    A.label(lvk1)
+    e('LDI', 'b', imm=410); e('MAX', 't', 'm', 'zero'); mulr('BY', 't', 'b', 0)
+    A.label(lvks)
+    e('LDI', 'vi', imm=0)
+    A.label(lvpl)
+    e('ADDI', 't', 'vtab', imm=1); e('ADD', 't', 't', 'vi'); e('LDM', 't', 't'); call('vtx')
+    e('MOV', 'vx0', 'vxo'); e('MOV', 'vy0', 'vyo')
+    e('ADDI', 'b', 'vi', imm=1); jlt('b', 'vcnt', lvnw); e('LDI', 'b', imm=0)
+    A.label(lvnw)
+    e('ADDI', 't', 'vtab', imm=1); e('ADD', 't', 't', 'b'); e('LDM', 't', 't'); call('vtx')
+    e('SUB', 'vex', 'vxo', 'vx0'); e('SUB', 'vey', 'vyo', 'vy0')
+    mulr('a', 'vex', 'vex', 16); mulr('b', 'vey', 'vey', 16); e('ADD', 'a', 'a', 'b'); e('SQRT', 'vL', 'a')
+    # unit normal (-vey, vex) / L, Q.16 (unsigned DIV + sign; 'ra' is a window name here)
+    lvs1, lvs2 = A.lbl(), A.lbl()
+    e('SUB', 't', 'zero', 'vey'); e('MAX', 'a', 'vey', 't'); e('DIV', 'a', 'a', 'vL')
+    jlt('vey', 'one', lvs1); e('SUB', 'a', 'zero', 'a')
+    A.label(lvs1); e('MOV', 'nxv', 'a')
+    e('SUB', 't', 'zero', 'vex'); e('MAX', 'b', 'vex', 't'); e('DIV', 'b', 'b', 'vL')
+    jge('vex', 'zero', lvs2); e('SUB', 'b', 'zero', 'b')
+    A.label(lvs2); e('MOV', 'nyv', 'b')
+    mulr('a', 'nxv', 'vx0', 16); mulr('b', 'nyv', 'vy0', 16); e('ADD', 'a', 'a', 'b'); e('SUB', 'pw5', 'zero', 'a')
+    jlt('pw5', 'one', lvok)
+    e('SUB', 'nxv', 'zero', 'nxv'); e('SUB', 'nyv', 'zero', 'nyv'); e('SUB', 'pw5', 'zero', 'pw5')
+    A.label(lvok)
+    e('MOV', 'pw3', 'nxv'); e('MOV', 'pw4', 'nyv'); mulr('pw5', 'pw5', 'G8', 8)
+    mulr('rdx', 'vx0', 'one', 4); mulr('rdy', 'vy0', 'one', 4)
+    call('emit')
+    e('ADDI', 'vi', 'vi', imm=1); jlt('vi', 'vcnt', lvpl)
+    hset(0, 'cnt'); e('JMP', imm='hret')
+    # vtx: packed vertex word in t -> vxo, vyo (px Q.8)
+    A.label('vtx')
+    e('MOV', 'vlink', 'link')
+    e('SHR', 'a', 't', imm=24); mulr('vxo', 'a', 'AX', 4)
+    e('SHL', 'b', 't', imm=8); e('SHR', 'b', 'b', imm=24); mulr('b', 'b', 'BX', 4); e('ADD', 'vxo', 'vxo', 'b')
+    e('SHL', 'b', 't', imm=16); e('SHR', 'b', 'b', imm=24); mulr('vyo', 'b', 'AY', 4)
+    e('SHL', 'b', 't', imm=24); e('SHR', 'b', 'b', imm=24); mulr('b', 'b', 'BY', 4); e('ADD', 'vyo', 'vyo', 'b')
+    e('JR', a='vlink')
 
     A.inbank(2)
     # ---------------- bound_acc: acc -> fb (Q.16 scale at which the field is
@@ -1252,8 +1408,23 @@ def build():
     for c in (0, 1, 2):
         A.data(round(math.log2(0.3 * CLASS_FH[c]) * 4096 * 65536 / 496))
         A.data(round(math.log2(0.08 * CLASS_FH[c]) * 4096 * 65536 / 495))
-    HND = {'MIX': 0, 'BAR': 1, 'CIRC': 2, 'REG': 3, 'WEDGE': 4, 'SUNB': 5, 'BOX': 6, 'DIA': 7}
-    HLBL = {1: 'h_bar', 2: 'h_circ', 3: 'h_reg', 4: 'h_wedge', 5: 'h_sunb', 6: 'h_box', 7: 'h_box'}
+    def vword(ax, bx, ay, by):
+        return (ax & 255) << 24 | (bx & 255) << 16 | (ay & 255) << 8 | (by & 255)
+    A.label('vt_cross')                           # plus sign, arms (AX, AY), half-thickness (BX, BY); from 20 deg
+    VT_CROSS = [(16, 0, 0, 16), (0, 16, 0, 16), (0, 16, 16, 0), (0, -16, 16, 0), (0, -16, 0, 16), (-16, 0, 0, 16),
+                (-16, 0, 0, -16), (0, -16, 0, -16), (0, -16, -16, 0), (0, 16, -16, 0), (0, 16, 0, -16), (16, 0, 0, -16)]
+    A.data(len(VT_CROSS) | 0 << 8)
+    for v in VT_CROSS:
+        A.data(vword(*v))
+    A.label('vt_tri')                             # isoceles, apex up (0, -0.875), base 0.625 with the notch on BY
+    VT_TRI = [(16, 0, 10, 0), (0, 0, 10, -16), (-16, 0, 10, 0), (0, 0, -14, 0)]
+    A.data(len(VT_TRI) | 1 << 8)
+    for v in VT_TRI:
+        A.data(vword(*v))
+    HND = {'MIX': 0, 'BAR': 1, 'CIRC': 2, 'REG': 3, 'WEDGE': 4, 'SUNB': 5, 'BOX': 6, 'DIA': 7,
+           'XDOOR': 8, 'VEE': 9, 'EYE': 10, 'VPOLY': 11}
+    HLBL = {1: 'h_bar', 2: 'h_circ', 3: 'h_reg', 4: 'h_wedge', 5: 'h_sunb', 6: 'h_box', 7: 'h_box',
+            8: 'h_xdoor', 9: 'h_vee', 10: 'h_eye', 11: 'h_vpoly'}
     def rword(p):
         r = RECIPES[p]
         hnd, btyp, ctr = HND[r[0]], r[1], r[2]
@@ -1261,7 +1432,11 @@ def build():
         if r[0] == 'BAR':
             arg = (r[3] >> 1) << 1 | r[4]
         elif r[0] == 'REG':
-            arg = 1 if r[3] == 'star' else 0
+            arg = {'poly': 0, 'star': 1, 'aper': 2}[r[3]]
+        elif r[0] == 'VEE':
+            arg = r[3]
+        elif r[0] == 'VPOLY':
+            arg = A.labels[r[3]]
         elif r[0] == 'WEDGE':
             arg = {'clock': 0, 'pin': 1, 'dsweep': 2, 'dfan': 3}[r[3]]
         elif r[0] == 'CIRC':
@@ -1277,7 +1452,7 @@ def build():
         A.data(rword(p))
     A.label('htab')
     A.data(0)
-    for h in range(1, 8):
+    for h in range(1, 12):
         A.data(A.labels[HLBL[h]])
     A.label('rngtab')
     A.data((2047 << 11) | (1 << 22) | (1 << 23))  # START: always active, left on both sides

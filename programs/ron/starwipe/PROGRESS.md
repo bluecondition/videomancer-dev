@@ -207,3 +207,33 @@ Preview catalogue of all 68: `.starwipe_work/preview/` + `starwipe_menu.html`.
 
 `./capture_preset.sh --defaults` with Ron's v0.2.2 settings: Pattern 328, Modifier 497, Edge 512,
 T-Bar 168 (others unchanged). Same bitstreams as v0.2.2 (identical netlist, router1 seeds 2/1/2/1/2/1).
+
+## v0.3.0 (2026-10-20) — AUTO, seven more patterns, ROM 1536
+
+- **AUTO (S11)** now works: T sweeps there and back on its own (triangle with a 4096 overshoot at each end,
+  so each end dwells bit-exact ~6 % of the cycle); the T-bar sets the rate, 2^(5.3·p12) steps a field:
+  ~22 s a cycle at 0 %, 3.5 s at 50 %, 0.6 s at 100 %. REVERSE / SPIN apply as before. REPEAT (S10) is
+  still unimplemented.
+- **Patterns 18 → 25.** CLASSIC + X DOORS (8-sector union of two bars; the sw_frame2 four-sector form draws
+  a diamond, not an X), EYE (lens of two offset circles, one accumulator), CROSS and TRIANGLE (a generic
+  vertex-table polygon handler `h_vpoly`: packed Q.4 (ax, bx, ay, by) bytes against two scales per axis,
+  edges normalised with SQRT + unsigned DIV, oriented so the centre is inside), VEE and BARN VEE (chevron
+  fronts, arm angle 17–50° on the modifier); CHEESE + APERTURE (REG polygon 5–9 with a face up). Modifiers
+  are all live (PATTERNS.md has the table).
+- **SPIN was rotating twice**: `emit` rotates every ray/normal by psi AND the handlers added psi to their
+  base angles (2.5 turns over the travel instead of 1.25). The handler-side adds are gone.
+- Microcode 1506 words: ROM grown 1280 → 1536 (+2 EBR, 29/32). A bank-1 trap found on the way: `ra` is a
+  window name in the handler bank, so a handler reading sdiv_ab's global `ra` gets the window slot (zeros)
+  — handlers divide inline. ADDI/ANDI immediates are 13-bit (use LDI + ADD above 4095).
+- Ends grid `.starwipe_work/v030/ends_v030.txt`: **105 600 checks, 0 failures** (25 patterns × 480i/1080p).
+  Emulator sheet `.starwipe_work/v030/sheet_1080p.png`. Engine clocks per frame: ≤ 85 k (APERTURE 9).
+- Build (router1, `.starwipe_work/build_v030_r1.log`), all six post-route PASS, iceunpack OK:
+
+  | config | seed | Fmax (MHz) | LC |
+  |---|---|---|---|
+  | hd_analog | 4 | 76.77 | 7037 |
+  | hd_hdmi | 3 | 75.67 | 7035 |
+  | hd_dual | 2 | 74.43 | 7075 |
+  | sd_analog / sd_hdmi / sd_dual | 1 | 67.02 / 69.23 / 69.30 (SD clock) | ~7055 |
+
+  LC fell ~70 (91.6 %) with the ROM in EBR; 29 EBR. Not yet flashed.
