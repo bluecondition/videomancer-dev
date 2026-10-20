@@ -6,9 +6,10 @@
 -- DICEFALL -- many small dice tumbling down the screen, each a random
 -- colour, numbered, with every outline and crease exactly anti-aliased.
 --
--- v0.2.0.  K1 count, K2 tumble rate, K3 light, K4 size, P12 fall speed,
+-- v0.3.0.  K1 count, K2 tumble rate, K3 light, K4 size, P12 fall speed,
 -- S7 a random mix of d4..d20 (else all d20s), S8 a black backdrop (else
--- a gray gradient).
+-- a gray gradient), S9 the input video shaded onto the dice (else random
+-- colours).
 --
 -- ARCHITECTURE (NAT20's scanline vector renderer, many dice):
 --   GEOMETRY ENGINE (dicefall_ucode / df_ucode.py): NAT20's microcoded
@@ -50,7 +51,7 @@ use work.video_stream_pkg.all;
 architecture dicefall of program_top is
 
     constant C_LATENCY : integer := 12;
-    constant C_XSHIFT  : integer := 3;           -- display path 9 clocks, sync tap 12
+    constant C_XSHIFT  : integer := 2;           -- display path 10 clocks, sync tap 12
     constant C_BGT     : integer := 660;         -- backdrop luma at the top
     constant C_BGU8    : integer := 128;         -- backdrop chroma, 8-bit: neutral
     constant C_BGV8    : integer := 128;
@@ -58,6 +59,8 @@ architecture dicefall of program_top is
 
     -- @@BEGIN GENERATED (df_regen.py)
     -- 1023 microcode words; table 506/512 words
+    constant C_COLB     : integer := 40;    -- palette: 12 x (Y, U, V)
+    constant C_ROM_INKM : integer := 122;   -- ink mask: black ink per colour
     type t_ucode is array (0 to 1023) of std_logic_vector(31 downto 0);
     constant C_UCODE : t_ucode := (
         x"9000004E", x"20708008", x"D870E03F", x"2080800E", x"D8810001", x"9801000A",
@@ -209,7 +212,7 @@ architecture dicefall of program_top is
         x"1E0C0100", x"66EE0240", x"604E4280", x"16EDC100", x"26EDC007", x"78400800",
         x"1EEDC100", x"18482040", x"98008376", x"90000378", x"171E3C40", x"172E5C80",
         x"084DA000", x"78B0037B", x"90000027", x"2060C007", x"78400010", x"3860C100",
-        x"784000FF", x"36D0C100", x"7840000B", x"109B6100", x"D84ECFFF", x"2840800C",
+        x"7840003F", x"36D0C100", x"7840000B", x"109B6100", x"D84ECFFF", x"2840800C",
         x"D85EAFFF", x"10408140", x"285C800F", x"2850A009", x"10408140", x"285CA00F",
         x"2850A00D", x"10408140", x"88008248", x"284E8009", x"10409CC0", x"285DA00F",
         x"2850A002", x"10408140", x"88008249", x"084E0000", x"085DE000", x"78B00397",
@@ -575,9 +578,9 @@ architecture dicefall of program_top is
     signal t_sk  : unsigned(7 downto 0) := (others => '0');
     signal t_srd : std_logic_vector(15 downto 0) := (others => '0');
     signal tbl   : t_tbl := C_TABLE;
-    signal tb_era, tb_wa : unsigned(8 downto 0) := (others => '0');
-    signal tb_wd, tb_rd : std_logic_vector(15 downto 0) := (others => '0');
-    signal tb_we : std_logic := '0';
+    signal tb_era : unsigned(8 downto 0) := (others => '0');
+    signal tb_rd  : std_logic_vector(15 downto 0) := (others => '0');
+    signal pal_y, pal_uv, t_inkm : std_logic := '0';   -- video mode: palette / ink-mask read
 
     ----------------------------------------------------------------------
     -- the ring of die records (4 entries x 192 words: edges at 4 e,
@@ -665,7 +668,8 @@ architecture dicefall of program_top is
     signal r_s11 : unsigned(4 downto 0) := (others => '0');
     signal rs_ly0, rs_ly1 : signed(11 downto 0) := (others => '0');
     signal rs_ga, rs_gb, pa_ga, pa_gb : unsigned(3 downto 0) := (others => '0');
-    signal rs_sx0, rs_sw, rs_k, pa_k, pa_sx0, r_n : unsigned(7 downto 0) := (others => '0');
+    signal rs_sx0, rs_sw, pa_sx0, r_n : unsigned(7 downto 0) := (others => '0');
+    signal rs_k, pa_k : unsigned(5 downto 0) := (others => '0');   -- AA scale, <= 63
     signal rs_dux, rs_dvx, rs_duy, rs_dvy : signed(15 downto 0) := (others => '0');
     signal pa_ba, pa_bb : unsigned(9 downto 0) := (others => '0');
     signal pa_na, pa_nb, pa_sl, pa_dr, s_semit, g_fresh : std_logic := '0';
@@ -694,7 +698,7 @@ architecture dicefall of program_top is
     signal g5_top, g5_bot : signed(10 downto 0) := (others => '0');
     signal g6_d  : signed(13 downto 0) := (others => '0');
     signal g7_hi, g7_lo : std_logic := '0';
-    signal g7_m  : signed(19 downto 0) := (others => '0');
+    signal g7_m  : signed(17 downto 0) := (others => '0');
     signal g8_al : unsigned(4 downto 0) := (others => '0');
 
     -- deposit pipe (4 channels: DY FY DU DV; c = 0..2 for Y U V, F only Y)
@@ -778,9 +782,18 @@ architecture dicefall of program_top is
     signal g1_y, g1_u, g1_v, g2_y, g2_u, g2_v : unsigned(9 downto 0) := (others => '0');
     signal p9_y, p9_u, p9_v : unsigned(9 downto 0) := (others => '0');
     signal o_y, o_u, o_v : unsigned(9 downto 0) := (others => '0');
+    -- video mode: the input luma over black; the input x light, as partial
+    -- sums (luma) and products (chroma); off the dice
+    signal vy0   : unsigned(9 downto 0) := (others => '0');
+    signal m_t0  : unsigned(11 downto 0) := (others => '0');
+    signal m_t1  : unsigned(13 downto 0) := (others => '0');
+    signal m_u, m_v : signed(9 downto 0) := (others => '0');
     signal bg_acc : signed(27 downto 0) := (others => '0');
     signal bg_y   : unsigned(9 downto 0) := to_unsigned(600, 10);
+    signal bg_g   : unsigned(9 downto 0) := to_unsigned(600, 10);  -- S8's backdrop
+    signal bg_d   : unsigned(9 downto 0) := (others => '0');        -- its luma over black
     signal s_blk  : std_logic := '1';            -- S8: black backdrop (per field)
+    signal s_vid  : std_logic := '0';            -- S9: video-coloured dice (per field)
 
     signal s_avid_sr    : std_logic_vector(0 to C_LATENCY - 1) := (others => '0');
     signal s_hsync_n_sr : std_logic_vector(0 to C_LATENCY - 1) := (others => '1');
@@ -1055,7 +1068,6 @@ begin
 
             u_we   <= '0';
             u_slw  <= '0';
-            tb_we  <= '0';
 
             if s_ue_rst = '1' then
                 u_done <= '0';
@@ -1151,9 +1163,6 @@ begin
                             when 16 | 23 =>                -- SRD address
                                 tb_era <= unsigned(v_fa(8 downto 0))
                                           + resize(unsigned(u_ir(6 downto 0)), 9);
-                            when 22 =>                     -- SWR
-                                tb_wa <= unsigned(v_fa(8 downto 0));
-                                tb_wd <= v_fb(15 downto 0);
                             when 30 =>                     -- LDX address
                                 u_ra <= unsigned(v_fa(6 downto 0))
                                         + unsigned(u_ir(6 downto 0));
@@ -1226,10 +1235,15 @@ begin
                                     v_stl := true;
                                 elsif u_gwt = 1 then
                                     case v_op is
-                                        when 14     => u_romr <= signed('0' & t_srd);
+                                        when 14     =>
+                                            if t_inkm = '1' then u_romr <= to_signed(65535, 17);
+                                            else u_romr <= signed('0' & t_srd); end if;
                                         when 28     => u_romr <= signed(t_srd(15) & t_srd);
                                         when 23     => u_romr <= signed(tb_rd(15) & tb_rd);
-                                        when others => u_romr <= signed('0' & tb_rd);
+                                        when others =>
+                                            if pal_y = '1' then     u_romr <= to_signed(484, 17);
+                                            elsif pal_uv = '1' then u_romr <= to_signed(512, 17);
+                                            else u_romr <= signed('0' & tb_rd); end if;
                                     end case;
                                     u_gwt <= "10";
                                     v_stl := true;
@@ -1237,7 +1251,6 @@ begin
                                     u_gwt <= (others => '0');
                                 end if;
                             when 17 => u_slw <= '1';       -- SLW (operands latched)
-                            when 22 => tb_we <= '1';       -- SWR (operands latched)
                             when 18 => v_jmp := true;
                                        u_pc <= unsigned(u_ir(9 downto 0));
                             when 19 => if u_bnz = '1' then
@@ -1334,10 +1347,30 @@ begin
     p_tbl : process(clk)
     begin
         if rising_edge(clk) then
-            if tb_we = '1' then tbl(to_integer(tb_wa)) <= tb_wd; end if;
             tb_rd <= tbl(to_integer(tb_era));
         end if;
     end process p_tbl;
+
+    -- video mode (S9): the reads the engine's colours come from, flagged in
+    -- step with the data.  The palette (offsets 40..42: no other table read
+    -- uses them) reads Y 484, U = V 512 for every die: neutral, its full
+    -- light 420 over black (13/16 of 512, as the output scales luma), so
+    -- the dice draw their light alone.  The ink mask gives every numeral
+    -- black ink.
+    p_vflags : process(clk)
+    begin
+        if rising_edge(clk) then
+            pal_y  <= '0';
+            pal_uv <= '0';
+            t_inkm <= '0';
+            if s_vid = '1' then
+                if unsigned(u_ir(6 downto 0)) = C_COLB then pal_y <= '1'; end if;
+                if unsigned(u_ir(6 downto 0)) = C_COLB + 1
+                   or unsigned(u_ir(6 downto 0)) = C_COLB + 2 then pal_uv <= '1'; end if;
+                if t_sk = C_ROM_INKM then t_inkm <= '1'; end if;
+            end if;
+        end if;
+    end process p_vflags;
 
     ------------------------------------------------------------------------
     p_wport : process(clk)
@@ -1728,7 +1761,7 @@ begin
                                         w_ra <= c_ent & r_s11 & "011";
                                         rs_sx0 <= unsigned(w_rdm(7 downto 0));
                                         rs_sw  <= unsigned(w_rdm(16 downto 9));
-                                        rs_k   <= unsigned(w_rdm(24 downto 17));
+                                        rs_k   <= unsigned(w_rdm(22 downto 17));
                                         s_on   <= '0';
                                         if r_line >= rs_ly0 and r_line < rs_ly1 then
                                             s_on <= '1';
@@ -2221,7 +2254,9 @@ begin
 
     ------------------------------------------------------------------------
     -- backdrop: black (S8, latched at the field start), or a vertical gray
-    -- gradient, one accumulator stepped per line
+    -- gradient, one accumulator stepped per line (bg_g).  Video mode (S9)
+    -- draws and displays the dice over black (bg_y), so the luma is their
+    -- light alone; the output puts bg_g back round them (bg_d).
     ------------------------------------------------------------------------
     p_bg : process(clk)
     begin
@@ -2229,12 +2264,16 @@ begin
             if r_fsr(0) = '1' then
                 bg_acc <= to_signed(C_BGT, 12) & to_signed(0, 16);
                 s_blk  <= registers_in(6)(1);
+                s_vid  <= registers_in(6)(2);
             elsif g_avid = '0' and g_avid_q = '1' then
                 bg_acc <= bg_acc + resize(n_bgs, 28);
             end if;
-            if s_blk = '1' then bg_y <= to_unsigned(64, 10);
-            elsif bg_acc(27) = '1' then bg_y <= (others => '0');
-            else bg_y <= unsigned(bg_acc(25 downto 16)); end if;
+            if s_blk = '1' then bg_g <= to_unsigned(64, 10);
+            elsif bg_acc(27) = '1' then bg_g <= (others => '0');
+            else bg_g <= unsigned(bg_acc(25 downto 16)); end if;
+            if s_vid = '1' then bg_y <= to_unsigned(64, 10);
+            else bg_y <= bg_g; end if;
+            bg_d <= bg_g - 64;
         end if;
     end process p_bg;
 
@@ -2246,8 +2285,15 @@ begin
     ------------------------------------------------------------------------
     p_disp : process(clk)
         variable v_y, v_u, v_v : signed(13 downto 0);
+        variable v_cu, v_cv : signed(9 downto 0);
+        variable v_a : unsigned(9 downto 0);
+        variable v_b : unsigned(3 downto 0);
+        variable v_g0, v_g1, v_g2, v_g3 : unsigned(9 downto 0);
+        variable v_p0, v_p1 : unsigned(11 downto 0);
+        variable v_p2, v_p3 : unsigned(13 downto 0);
         variable v_sy, v_su, v_sv : unsigned(11 downto 0);
-        variable v_d, v_yo : unsigned(9 downto 0);
+        variable v_d : unsigned(9 downto 0);
+        variable v_o : unsigned(13 downto 0);
     begin
         if rising_edge(clk) then
             dp2_w <= dp1_w;  dp2_f <= dp1_f;
@@ -2269,19 +2315,25 @@ begin
 
             ------------------------------------------------------ stage 5
             -- Y: backdrop + sum / 16; U/V (8-bit deposits): 4 x backdrop +
-            -- sum / 4, both rounded
+            -- sum / 4, both rounded.  (Video mode: the dice neutral over a
+            -- black backdrop, so Y is 64 + their light L: face shade x
+            -- coverage, 0..420, near 0 on a numeral.)
             v_y := resize(shift_right(dp5_v(0) + 8, 4), 14) + signed(resize(bg_y, 14));
             v_u := resize(shift_right(dp5_v(1) + 2, 2), 14) + to_signed(4 * C_BGU8, 14);
             v_v := resize(shift_right(dp5_v(2) + 2, 2), 14) + to_signed(4 * C_BGV8, 14);
             if dp5_w = '1' then
                 n_y <= f_clamp10(v_y);
-                n_u <= f_clamp10(v_u);
-                n_v <= f_clamp10(v_v);
+                n_u <= unsigned(v_u(9 downto 0));   -- the palette's chroma
+                n_v <= unsigned(v_v(9 downto 0));   -- stays in 190 .. 830
             else
                 n_y <= bg_y;
                 n_u <= to_unsigned(4 * C_BGU8, 10);
                 n_v <= to_unsigned(4 * C_BGV8, 10);
             end if;
+            -- the input's luma over black (its chroma is taken as it comes,
+            -- a clock later: a pixel apart is invisible in 4:2:2)
+            if unsigned(data_in.y) < 64 then vy0 <= (others => '0');
+            else vy0 <= unsigned(data_in.y) - 64; end if;
 
             ------------------------------------------------------ stage 6
             -- output conditioning (HD HDMI thick-bar fix, damier v0.4.4):
@@ -2297,14 +2349,58 @@ begin
             p9_v <= v_sv(11 downto 2);
 
             ------------------------------------------------------ stage 7
-            -- luma scaled toward black, 64 + 13/16 (y - 64); neutral outside
-            -- the (latency-aligned) generated avid; U/V swapped for hardware
-            v_d  := p9_y - 64;
-            v_yo := p9_y - shift_right(v_d, 3) - shift_right(v_d, 4);
+            -- one shift-add product, 64 + a x b / 16 (b 4 bits), as two
+            -- partial sums:
+            --   colour mode: luma scaled toward black, a = y - 64, b = 13;
+            --   video mode:  the input x the dice's light, a = the input's
+            --     luma over black, b = L / 32; off the dice (L = 0) the
+            --     backdrop, scaled as colour mode scales it.
+            -- Chroma: colour mode's, U/V swapped for hardware; video mode's
+            -- the input (already in hardware order) x 1, 1/2 or 0 by L.
+            v_d := p9_y - 64;
+            if s_vid = '0' then
+                v_a := v_d;           v_b := to_unsigned(13, 4);
+            elsif v_d = 0 then
+                v_a := bg_d;          v_b := to_unsigned(13, 4);
+            else
+                v_a := vy0;           v_b := v_d(8 downto 5);
+            end if;
+            -- each partial sum ONE add of gated operands (a case of adders
+            -- trips abc9's box order); 64 x 16 rides in as bit 10 of the
+            -- first operand (a <= 959)
+            v_g0 := (others => '0');  v_g1 := (others => '0');
+            v_g2 := (others => '0');  v_g3 := (others => '0');
+            if v_b(0) = '1' then v_g0 := v_a; end if;
+            if v_b(1) = '1' then v_g1 := v_a; end if;
+            if v_b(2) = '1' then v_g2 := v_a; end if;
+            if v_b(3) = '1' then v_g3 := v_a; end if;
+            v_p0 := "01" & v_g0;         v_p1 := '0' & v_g1 & '0';
+            v_p2 := "00" & v_g2 & "00";  v_p3 := '0' & v_g3 & "000";
+            m_t0 <= v_p0 + v_p1;
+            m_t1 <= v_p2 + v_p3;
+            v_cu := signed(not data_in.u(9) & data_in.u(8 downto 0));
+            v_cv := signed(not data_in.v(9) & data_in.v(8 downto 0));
+            if s_vid = '0' then
+                m_u <= signed(not p9_v(9) & p9_v(8 downto 0));
+                m_v <= signed(not p9_u(9) & p9_u(8 downto 0));
+            elsif v_d(8) = '1' then
+                m_u <= v_cu;
+                m_v <= v_cv;
+            elsif v_d(7) = '1' then
+                m_u <= shift_right(v_cu, 1);
+                m_v <= shift_right(v_cv, 1);
+            else
+                m_u <= (others => '0');
+                m_v <= (others => '0');
+            end if;
+
+            ------------------------------------------------------ stage 8
+            -- neutral outside the (latency-aligned) generated avid
+            v_o := resize(m_t0, 14) + m_t1;
             if s_avid_sr(C_LATENCY - 2) = '1' then
-                o_y <= v_yo;
-                o_u <= p9_v;
-                o_v <= p9_u;
+                o_y <= v_o(13 downto 4);
+                o_u <= unsigned(not m_u(9) & std_logic_vector(m_u(8 downto 0)));
+                o_v <= unsigned(not m_v(9) & std_logic_vector(m_v(8 downto 0)));
             else
                 o_y <= to_unsigned(64, 10);
                 o_u <= to_unsigned(512, 10);

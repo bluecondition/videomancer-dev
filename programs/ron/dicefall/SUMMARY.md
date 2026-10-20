@@ -104,3 +104,38 @@ Verification: 720p GHDL sims, mix on black and d20s on gray (tumble 0).
 - d20s show 7–9 numerals.
 - The d20 frame equals the model below row 124 (`.dicefall_work/simdiff2.py`: fields 4, row shift 12). The top dice are clipped by the image tester's short vertical blank, as before.
 - Worst dry pre-roll (model, `.dicefall_work/prestats.py`): 51k clocks at 1080p (budget ~95k), 33k at 720p (~46k).
+- **HW-validated 2026-10-20** (Ron, HD HDMI): "Looks good, no bars and all looks clear."
+
+## v0.3.0 (2026-10-20): S9 video-coloured dice
+
+Ron: "Another switch to implement - instead of the dice being colored, bring in the incoming video to color them, but keep the numbers".
+
+S9 Colour: Dice (default) / Video. In video mode each die is a window onto the input, shaded by its faces' light, with black numerals. S8 still puts black or gray round the dice.
+
+How, with no new microcode (1023/1024 words):
+- **Engine, VHDL-side overrides.** In video mode the palette reads (SRD offsets 40..42, which only the palette uses) return Y 484, U = V 512 for every die. Full light is then 420 over black, 13/16 of 512 as the output scales luma. The ink-mask ROM read returns all ones, so every numeral gets black ink.
+- **The display backdrop is black in video mode**, so the composed luma is 64 + L: face shade × coverage, near 0 on a numeral. It still passes through the [1 2 1] smoothing, so the HD HDMI bar protection holds.
+- **One shift-add product, 64 + a·b/16, serves both modes** (stage 7: two partial sums; stage 8: their sum).
+  - Colour mode: a = y − 64, b = 13. This is the old luma scaling toward black, ±1 code.
+  - Video mode: a = input luma over black, b = L/32 (4 bits, 16 levels).
+  - Off the dice (smoothed L = 0): a = the S8 backdrop over black, b = 13.
+- **Video chroma:** the input × 1, ½ or 0 by L (L ≥ 256, ≥ 128, else). Numerals and the outer edge pixels stay neutral.
+- The display path is a clock longer in both modes (C_XSHIFT 3 → 2; sync tap still 12).
+- The input is taken at the compose stage, so the video sits ~10 px left of its true position, which is invisible inside a die. It's in hardware U/V order, so no swap.
+
+Fitting it (v0.2.0 was 7,245–7,269 LC):
+- A first cut with three real multipliers (10×6, 2 × 10×5) placed at 7,867 LC: overflow. yosys builds them ~500 LUT wide.
+- Shift-add partial sums brought it to 7,557 (98%): no legal placement.
+- Then the shared colour/video product, plus invisible trims, gave 7,303 at HD Analog (95%). The final single-add form gave 7,282–7,293:
+  - the die table made a ROM (SWR is never used);
+  - the numeral AA scale k narrowed to 6 bits (capped at 63 in the microcode; the model's k is 16–31 in every mode and size), so its multiply loses two rows;
+  - the stage-5 chroma clamps dropped (the palette's chroma stays in ~190..830).
+- **abc9 "Boxes are not in a topological order"** killed SD Analog's synth twice; seeds and moving TMPDIR don't help. The partial sums were a case whose arms each held an adder (0 / a / 2a / a + 2a). Fix: one add of gated operands per partial sum, with 64 × 16 riding in free as bit 10 of the first operand (a ≤ 959). That was also ~70 LUT smaller.
+- **Fit lesson:** at 94%+, a per-pixel multiply in a new display mode only fits by sharing the existing per-pixel arithmetic, here the output luma scaling, which is the same "a × b / 16" shape.
+
+Sims (720p, rainbow input): video mode on gray and colour mode on gray. Video dice take the input's hue at their place, shaded, with black numerals; colour mode is unchanged.
+
+Build (router1): HD Analog 75.99 (seed 1), SD Analog 72.38 (1), HD HDMI 74.80 (1), SD HDMI 78.47 (1), HD Dual **82.15 (seed 2)**, SD Dual 74.96 (1) MHz.
+- 7,282–7,293 LC (95%), 31/32 EBR. All six `.bin` pass iceunpack; program_config.bin carries "Colour" / "Video".
+- vmprog 528,231 B.
+- HD HDMI's margin is thin (+0.55 MHz). If HD HDMI misbehaves while other modes are fine, suspect timing first.

@@ -45,10 +45,14 @@ At 10% size, HD's 20 is the two-a-scanline limit (N ≤ 2 × cycle / window), no
 - **Renderer:** the 720p GHDL frame equals the model (`df_rtlmodel.py`) to within 1 code below the top dice. The sim shows everything 4 lines low and the top die clipped. That is the image tester's fake 8-line vertical blank: the dry pre-roll (~12k clocks at 720p, ~20k at 1080p, ~4k at SD) overruns it, so the first lines' starts arrive mid-pre-roll. Hardware gives the pre-roll ~47k clocks at 720p, ~95k at 1080p and ~17k at SD (from two line-widths after the last active line to the next field's first).
 - **Pre-roll worst case** (model, `.dicefall_work/prestats.py`, 40 fields at full fall, 11% d20s): 51k clocks at 1080p, 33k at 720p (v0.1: 44k / 31k). With the held start (v0.1.1) the 720p sim shows the picture 12 lines low, not 4 (`.dicefall_work/simdiff2.py`, fields 4, dy 12: equal to the model below row 124).
 
+## Video mode (S9, v0.3.0)
+
+The dice are drawn neutral over a black backdrop (VHDL overrides of the palette and ink-mask reads), so the display's luma is their light alone. The output multiplies the input by it: one shift-add product shared with colour mode's luma scaling. See SUMMARY.md.
+
 ## Block RAM
 
 31/32: microcode 8, register file 2, engine ROM 1, die table 2, ring 4 + sprite extension 2, line buffers 8, glyphs 4.
 
 ## Build
 
-v0.2.0: 6/6 closed at the full clock (router1, seed 1), 72.3–77.3 MHz, 7,245–7,269 LC (94.6%), 31/32 EBR. Details, the timing fixes, the start-up fix and the numeral cap in SUMMARY.md.
+v0.3.0: 6/6 closed at the full clock (router1; HD Dual seed 2, the rest seed 1), 72.4–82.2 MHz, 7,282–7,293 LC (95%), 31/32 EBR. Details, the timing fixes, the start-up fix, the numeral cap and video mode in SUMMARY.md.

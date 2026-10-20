@@ -978,8 +978,8 @@ with a.scope():
     e('SHR', T2, T2, imm=7)
     e('LDI', T0, imm=16)                # at least 1 px a texel: the field only
     e('MAX', T2, T2, T0)                # reaches +0.875 texel outside the ink
-    e('LDI', T0, imm=255)
-    e('MIN', DET, T2, T0)
+    e('LDI', T0, imm=63)                # <= 31 at every size (6 bits in the
+    e('MIN', DET, T2, T0)               # record: a narrower AA multiply)
     # ---- the record (index = sprite + 11)
     e('LDI', T0, imm=11)
     e('ADD', T5, NSO, T0)

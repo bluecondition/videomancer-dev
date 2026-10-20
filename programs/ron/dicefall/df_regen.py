@@ -8,6 +8,8 @@
             (df_ucode.py)
   C_GLY0..3 numeral distance fields, the four 2 x 2-interleaved banks
             (df_glyphs.py)
+  C_COLB, C_ROM_INKM  the palette's table address and the ink-mask ROM
+            address, which video mode (S9) overrides
 """
 import os
 import re
@@ -18,7 +20,7 @@ sys.path.insert(0, HERE)
 import df_tables as T  # noqa: E402
 import df_ucode as U   # noqa: E402
 import df_glyphs as GL  # noqa: E402
-from df_uasm import vhdl_ucode, vhdl_rom16  # noqa: E402
+from df_uasm import vhdl_ucode, vhdl_rom16, ROM_INKM  # noqa: E402
 
 
 def vhdl_rom4(name, words):
@@ -37,6 +39,8 @@ def main():
     depth = 1024 if len(words) > 512 else 512
     body = '\n'.join([
         f'    -- {len(words)} microcode words; table {meta["used"]}/512 words',
+        f'    constant C_COLB     : integer := {T.COLB};    -- palette: 12 x (Y, U, V)',
+        f'    constant C_ROM_INKM : integer := {ROM_INKM};   -- ink mask: black ink per colour',
         vhdl_ucode(words, depth),
         '    type t_tbl is array (0 to 511) of std_logic_vector(15 downto 0);',
         vhdl_rom16('C_TABLE', table, 't_tbl'),

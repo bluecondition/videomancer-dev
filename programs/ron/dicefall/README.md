@@ -16,11 +16,12 @@ Built on NAT20's renderer (`programs/ron/nat20`), with many dice instead of one.
 | K4 | Size | 4–11% | Die diameter as a share of the frame height; smaller dice fit more of them |
 | S7 | Dice | d20 / Mix | All d20s, or a random mix of d4, d6, d8, d10 and d20 |
 | S8 | Backdrop | Gray / Black | Black, or a soft gray gradient behind the dice |
+| S9 | Colour | Dice / Video | Random colours, or the incoming video on the dice, shaded by their light, with black numbers |
 | P12 | Fall | 0–100% | Fall speed |
 
 ## Technical notes
 
-- Program type: processing; core `yuv444_30b`; input-to-output latency 12 clocks.
+- Program type: processing; core `yuv444_30b`; input-to-output latency 12 clocks. The input video is used only with S9 on Video.
 - Sizes follow the frame height, so the picture is the same shape at SD, 720p and 1080p. SD shows fewer dice: it has about a fifth of HD's clocks a field to compute them.
 - No more than two dice share a scanline: the dice fall at one speed with evenly staggered starts, alternating between the left and right halves.
 - Built and timed at the full 74.25 MHz HD pixel clock.
