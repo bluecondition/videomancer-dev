@@ -53,5 +53,23 @@ After the fixes, HD HDMI passed 4 of 8 swept seeds.
 | SD Dual | 1 | 76.64 | 7,248 |
 
 - 94.5% LC, 29/32 EBR. All six `.bin` pass iceunpack.
-- `out/rev_b/ron/dicefall.vmprog` (526,348 B). Not flashed yet.
+- `out/rev_b/ron/dicefall.vmprog` (526,348 B). Flashed on HD HDMI: solid gray, no dice (see v0.1.1).
 - HD Analog's margin is thin (74.39). If it needs a rebuild, sweep seeds first; router1 seeds 1, 4, 5 and 7 passed HD HDMI.
+
+## v0.1.1 (2026-10-20): the engine waits for the first field
+
+Ron flashed v0.1.0 on HD HDMI (progressive): solid gray, no dice.
+- Solid gray means even the backdrop gradient was missing. Its per-line step is the engine's first write each field, so the engine never ran a field.
+- Sims at 720p, 1080p and 1080i (field_n tied high, as on hardware) all draw the dice, so the RTL logic is sound in every mode.
+- v0.1.0's engine was the first in the library to run free from configuration (`u_done` initial '0'). Every hardware-validated engine (NAT20, CUBIST, Oracle, ATTRACT) is started per field.
+- The suspect is the moment after configuration: block RAM (the program ROM) isn't reliably readable yet, and FFs leave the global reset unevenly against the clock. One garbage instruction can reach END or a dead loop, and nothing ever restarted it.
+
+Fix:
+- The engine is held (`u_done` initial '1') until the first field start.
+- A watchdog (`p_wdog`) restarts it from the top: PC 0, multiplier and divider idle. It fires at a field start once three field starts have passed with no "field begun" write (the backdrop-step SLW).
+- The picture is unchanged once running.
+
+Build (router1, seed 1, all 6): HD Analog 77.17, SD Analog 74.16, HD HDMI 74.32, SD HDMI 83.17, HD Dual 81.61, SD Dual 80.26 MHz.
+- 7,243–7,261 LC (94.5%), 29/32 EBR; all six `.bin` pass iceunpack.
+- vmprog 525,809 B.
+- HD HDMI's margin is thin. If HD HDMI misbehaves on hardware while other modes are fine, suspect timing first.

@@ -554,7 +554,12 @@ architecture dicefall of program_top is
     signal u_rbop : std_logic := '0';
     signal u_slv, u_ctlv : signed(31 downto 0) := (others => '0');
     signal u_we, u_slw : std_logic := '0';
-    signal u_done : std_logic := '0';            -- runs from power-up, never ends
+    -- held until the first field start: block RAM (the program) isn't
+    -- readable straight after configuration; then it never ends, unless
+    -- the watchdog restarts it
+    signal u_done : std_logic := '1';
+    signal s_ue_rst : std_logic := '0';
+    signal wd_cnt : unsigned(1 downto 0) := "11";     -- fields with no start
     signal u_slp : unsigned(4 downto 0) := (others => '0');
     signal u_sls : unsigned(4 downto 0) := (others => '0');
     signal u_sh  : signed(31 downto 0) := (others => '0');
@@ -949,6 +954,26 @@ begin
         end if;
     end process p_slotw;
 
+    -- engine watchdog: it begins every field (the backdrop step is its first
+    -- write); at a field start with three fields gone and no begin, restart
+    -- it from the top.  wd_cnt starts at 3: the first field start starts it.
+    p_wdog : process(clk)
+    begin
+        if rising_edge(clk) then
+            s_ue_rst <= '0';
+            if u_slw = '1' and u_slp = 20 then
+                wd_cnt <= (others => '0');
+            elsif r_fsr(3) = '1' then
+                if wd_cnt = 3 then
+                    s_ue_rst <= '1';
+                    wd_cnt   <= (others => '0');
+                else
+                    wd_cnt <= wd_cnt + 1;
+                end if;
+            end if;
+        end if;
+    end process p_wdog;
+
     ------------------------------------------------------------------------
     -- MICROCODED GEOMETRY ENGINE (CUBIST's, without the divider)
     --
@@ -1022,7 +1047,15 @@ begin
             u_slw  <= '0';
             tb_we  <= '0';
 
-            if u_done = '0' then
+            if s_ue_rst = '1' then
+                u_done <= '0';
+                u_pc   <= (others => '0');
+                u_st   <= "000";
+                u_gwt  <= (others => '0');
+                u_rbop <= '0';
+                mu_bsy <= '0';
+                dv_bsy <= '0';
+            elsif u_done = '0' then
                 case to_integer(u_st) is
 
                     -- FETCH (after a jump only): the ROM answers next cycle

@@ -25,6 +25,7 @@ NAT20 stores every die's crossing records twice, so the engine can compute the n
   - a hardware divider (26 clocks; the slope and numeral-frame divides were a third of NAT20's engine time);
   - ONE register-file copy, with B read a clock after A (2 block RAMs saved, ~15% slower);
   - 1023/1024 words, 128/128 registers.
+  - held from configuration until the first field start, with a watchdog that restarts it if three field starts pass without it beginning a field (v0.1.1).
 
 ## Capacity (model, `df_rtlmodel.py`)
 
@@ -49,4 +50,4 @@ At 10% size, HD's 20 is the two-a-scanline limit (N ≤ 2 × cycle / window), no
 
 ## Build
 
-v0.1.0: 6/6 closed at the full clock (router1; HD Dual seed 2, the rest seed 1), 74.4–80.4 MHz, 7,245–7,260 LC (94.5%). Details and the timing fixes in SUMMARY.md.
+v0.1.1: 6/6 closed at the full clock (router1, seed 1), 74.2–83.2 MHz, 7,243–7,261 LC (94.5%). Details, the timing fixes and the start-up fix in SUMMARY.md.
