@@ -202,3 +202,8 @@ Preview catalogue of all 68: `.starwipe_work/preview/` + `starwipe_menu.html`.
 - WHITE (B and border) is Y 765, not 940: full-scale luma clips on this hardware (house rule).
 - MATTE / border hue wheel is a YUV chroma circle (amplitude 242, luma 393 ± 166), in gamut for every hue.
 - Pattern knob carries only the built patterns.
+
+## v0.2.3 (2026-10-20) — defaults captured from hardware
+
+`./capture_preset.sh --defaults` with Ron's v0.2.2 settings: Pattern 328, Modifier 497, Edge 512,
+T-Bar 168 (others unchanged). Same bitstreams as v0.2.2 (identical netlist, router1 seeds 2/1/2/1/2/1).
