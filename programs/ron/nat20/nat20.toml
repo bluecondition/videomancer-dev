@@ -1,0 +1,89 @@
+# NAT20 — a polyhedral die (d4, d6, d8, d10, d20) as a clean product shot.
+#
+# v0.3.0: numerals.  The die is small (K5 Size, 5-22 % of the frame height,
+# default ~10 %) and drawn as a vector shape: every outline and crease is
+# anti-aliased exactly (16 sub-lines a line, exact coverage across).  Every
+# visible face carries its number in Lato Bold, inked and lit with the face
+# (white ink; black on Bone, Frost and Sunflower), 6 and 9 underlined on the
+# d10 and d20.  K1 picks the die, K2/K3 turn it (centre = the die's hero pose
+# with its top number to the viewer), K4 the body colour, P12 swings the key
+# light.  Rounded edges, highlights, finishes and the AUTO showcase come next
+# (programs/ron/nat20/DESIGN.md).
+#
+# Author: czartroniks
+
+[program]
+processing_delay_clks = 12
+program_id = "com.czartroniks.nat20"
+program_version = "0.3.0"
+abi_version = ">=1.0,<2.0"
+program_name = "NAT20"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Render", "Shape"]
+program_type = "processing"
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+description = "A miniature numbered die (d4-d20) with crisp vector edges. Knobs pick the die, turn it, set colour and size; slider: light."
+url = "https://github.com/lzxindustries/videomancer-community-programs"
+
+# --- Rotary Potentiometers (Knobs 1-6) ---
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Die"
+value_labels = ["d4", "d6", "d8", "d10", "d20"]
+initial_value_label = "d20"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 512
+display_min_value = -180
+display_max_value = 180
+name_label = "Yaw"
+suffix_label = "deg"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 512
+display_min_value = -180
+display_max_value = 180
+name_label = "Pitch"
+suffix_label = "deg"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Colour"
+value_labels = ["Crimson", "Midnight", "Obsidian", "Bone", "Emerald", "Amethyst",
+                "Frost", "Ember", "Lagoon", "Bubblegum", "Smoke", "Sunflower"]
+initial_value_label = "Crimson"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 325
+display_min_value = 5
+display_max_value = 22
+name_label = "Size"
+suffix_label = "%"
+
+# --- Linear Potentiometer (Slider) ---
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 340
+display_min_value = 0
+display_max_value = 100
+name_label = "Light"
+suffix_label = "%"
