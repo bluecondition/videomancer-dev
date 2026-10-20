@@ -169,6 +169,26 @@ places on STAR WIPE where the lines don't meet.
   soft (k4 = 0) on CIRCLE / DOUBLE SWEEP / PINWHEEL / SPOTLIGHT — the per-frame coverage bound is
   short for the 30 %-FH ramp on those shapes. Open.
 
+## v0.2.2 (2026-10-20) — A black floor for downstream keying
+
+Ron reported v0.2.1 good on hardware (committed f8ce53e). Lars's suggestion: clamp the incoming
+video's black at one or two 8-bit codes above black so the generated BLACK B (and BLACK border) is
+the only Y 64 in the picture — a downstream mixer can then luma-key the wipe shape cleanly.
+Implemented as an always-on clamp of A's luma to >= 72 (10-bit) in `p_ring` on the EBR -> `ra_q2`
+re-register hop (a 10-bit compare + mux where there was no logic; chroma and syncs untouched);
+`sw_scan.compose` mirrors it (`A_BLACK_FLOOR`). Codes 64..71 of A are crushed to 72 — invisible.
+The lerp across the AA edge still passes through 64..72, so a downstream threshold near 68 is sharp
+at the edge width, which is inherent.
+
+Build (router1, `.starwipe_work/build_v022_r1.log`), all six post-route PASS, iceunpack OK:
+
+  | config | seed | Fmax (MHz) | LC |
+  |---|---|---|---|
+  | hd_analog | 2 | 75.49 | 7126 |
+  | hd_hdmi | 2 | 77.46 | 7096 |
+  | hd_dual | 2 | 74.40 | 7139 |
+  | sd_analog / sd_hdmi / sd_dual | 1 | 71.29 / 68.06 / 77.48 (SD clock) | ~7120 |
+
 ## Patterns built (18)
 
 CLASSIC: MIX, BAR >, BAR v, DIAGONAL, BARN DOOR <> / ^v / diag, BOX, DIAMOND, CIRCLE, POLYGON, CLOCK,

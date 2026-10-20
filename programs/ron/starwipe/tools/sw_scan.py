@@ -187,9 +187,14 @@ def combine(DA, DB, op):
     raise ValueError(op)
 
 
+A_BLACK_FLOOR = 64 + 8        # A luma clamp: generated BLACK (64) stays below any A pixel
+
+
 def compose(A, D, DK, BC, RC, rev=False):
     """A: (lines, W, 3) int YUV hardware order; D Q.8 field; DK border in key
     units; chroma co-sited per 4:2:2 pair; rev = REVERSE (key inverted)"""
+    A = A.copy()
+    A[..., 0] = np.maximum(A[..., 0], A_BLACK_FLOOR)
     kx = D >> 8                                 # (the rounding half is in the field constant)
     kr = 128 + kx if rev else 128 - kx          # unclipped raw key
     ki = np.clip(kr, 0, 256)

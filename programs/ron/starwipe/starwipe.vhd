@@ -61,6 +61,7 @@ architecture starwipe of program_top is
     constant G_K    : natural := 8;
     constant C_PREF  : natural := 6;
     constant RA_OFS : natural := 13;     -- A ring read offset: aligned with stage 4
+    constant C_ABLK : unsigned(9 downto 0) := to_unsigned(64 + 8, 10);   -- A luma floor (B black = 64)
     constant REC0   : natural := 256;    -- record set 0 in the DATA memory; set 1 at REC0 + 320
 
     ------------------------------------------------------------------------
@@ -924,7 +925,14 @@ begin
             r_wa <= r_wa + 1;
             ra_mem(to_integer(r_wa)) <= data_in.y & data_in.u & data_in.v & data_in.hsync_n & data_in.vsync_n;
             ra_q  <= ra_mem(to_integer(r_wa - RA_OFS));
+            -- A's black floor is clamped to 64 + 8 (two 8-bit codes above
+            -- black) so a generated BLACK B / border (Y 64) sits strictly
+            -- below anything in A: downstream mixers can luma-key the wipe
+            -- cleanly (Lars).  The compare rides the EBR -> FF hop for free.
             ra_q2 <= ra_q;
+            if unsigned(ra_q(31 downto 22)) < C_ABLK then
+                ra_q2(31 downto 22) <= std_logic_vector(C_ABLK);
+            end if;
             fn_d(0) <= data_in.field_n;
             for i in 1 to RA_OFS + 1 loop fn_d(i) <= fn_d(i - 1); end loop;
         end if;
