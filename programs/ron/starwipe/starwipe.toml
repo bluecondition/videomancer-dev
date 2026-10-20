@@ -1,0 +1,141 @@
+# STARWIPE -- the wipe / pattern section of a production switcher.
+#
+# The input video (A) wipes to a generated B source; the P12 slider is the
+# T-bar.  Every pattern is an analytic distance field (no bitmaps), anti-
+# aliased to at least one pixel in every mode, with clean A at the bottom 2 %
+# of travel and clean B at the top 2 % under any setting.
+#
+# v0.2.0 = the SCANLINE engine: every pattern is a per-field table of rays
+# stepped by a line builder; the pixel path is two accumulators.  CLASSIC:
+# MIX, BAR >, BAR v, DIAGONAL, BARN DOOR x3, BOX, DIAMOND, CIRCLE, POLYGON,
+# CLOCK, PINWHEEL, DOUBLE FAN, DOUBLE SWEEP.  CHEESE: STAR WIPE, SUNBURST,
+# SPOTLIGHT.  EDGE soft / hard / border; B = black, matte, white.  The
+# pattern knob carries only the patterns built so far.
+
+[program]
+processing_delay_clks = 20
+program_id = "com.czartroniks.starwipe"
+program_version = "0.2.1"
+abi_version = ">=1.0,<2.0"
+program_name = "Starwipe"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Transition", "Vision", "Shape"]
+program_type = "processing"
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+description = "Switcher wipes: A wipes to a generated B on the T-bar slider; anti-aliased star, iris, box and bar wipes with borders"
+url = "https://github.com/lzxindustries/videomancer-community-programs"
+
+# --- Rotary Potentiometers (Knobs 1-6) ---
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 0
+display_min_value = 0
+display_max_value = 100
+name_label = "Pattern"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 512
+display_min_value = -100
+display_max_value = 100
+name_label = "Modifier"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 0
+display_min_value = 0
+display_max_value = 100
+name_label = "Origin"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 640
+display_min_value = -100
+display_max_value = 100
+name_label = "Edge"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 800
+display_min_value = 0
+display_max_value = 100
+name_label = "Border Color"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 0
+display_min_value = 0
+display_max_value = 100
+name_label = "B Source"
+suffix_label = "%"
+
+# --- Toggle Switches (7-11) ---
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Bank"
+value_labels = ["Classic", "Cheese"]
+initial_value_label = "Cheese"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Reverse"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Spin"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Repeat"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Auto"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+# --- Linear Potentiometer (Fader 12) ---
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 0
+display_min_value = 0
+display_max_value = 100
+name_label = "T-Bar"
+suffix_label = "%"
