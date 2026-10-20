@@ -1,0 +1,92 @@
+# DICEFALL — many small dice tumbling down the screen.
+#
+# v0.1.0.  NAT20's scanline vector dice, many at once: each die a random
+# colour, numbered, every outline and crease exactly anti-aliased, falling
+# and tumbling about its own random spin.  K1 sets how many, K2 how fast
+# they tumble, K3 the light, K4 their size; P12 is the fall speed.  S7 picks
+# all d20s or a random mix of d4..d20.  HD shows up to 20 dice, SD 4 (d20s)
+# or 6 (a mix): SD has a fifth of HD's clocks a field to compute them.
+#
+# Author: czartroniks
+
+[program]
+processing_delay_clks = 12
+program_id = "com.czartroniks.dicefall"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+program_name = "Dicefall"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Render", "Shape"]
+program_type = "processing"
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+description = "Many small numbered dice tumbling down the screen in random colours. Knobs: count, tumble, light, size; slider: fall."
+url = "https://github.com/lzxindustries/videomancer-community-programs"
+
+# --- Rotary Potentiometers (Knobs 1-6) ---
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 1023
+display_min_value = 0
+display_max_value = 100
+name_label = "Count"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 300
+display_min_value = 0
+display_max_value = 100
+name_label = "Tumble"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 340
+display_min_value = 0
+display_max_value = 100
+name_label = "Light"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 878
+display_min_value = 4
+display_max_value = 11
+name_label = "Size"
+suffix_label = "%"
+
+# --- Toggle Switches ---
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Dice"
+value_labels = ["d20", "Mix"]
+initial_value_label = "Mix"
+
+# --- Linear Potentiometer (Slider) ---
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 200
+display_min_value = 0
+display_max_value = 100
+name_label = "Fall"
+suffix_label = "%"
