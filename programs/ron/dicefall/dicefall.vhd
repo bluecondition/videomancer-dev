@@ -6,8 +6,9 @@
 -- DICEFALL -- many small dice tumbling down the screen, each a random
 -- colour, numbered, with every outline and crease exactly anti-aliased.
 --
--- v0.1.0.  K1 count, K2 tumble rate, K3 light, K4 size, P12 fall speed,
--- S7 a random mix of d4..d20 (else all d20s).
+-- v0.2.0.  K1 count, K2 tumble rate, K3 light, K4 size, P12 fall speed,
+-- S7 a random mix of d4..d20 (else all d20s), S8 a black backdrop (else
+-- a gray gradient).
 --
 -- ARCHITECTURE (NAT20's scanline vector renderer, many dice):
 --   GEOMETRY ENGINE (dicefall_ucode / df_ucode.py): NAT20's microcoded
@@ -51,8 +52,8 @@ architecture dicefall of program_top is
     constant C_LATENCY : integer := 12;
     constant C_XSHIFT  : integer := 3;           -- display path 9 clocks, sync tap 12
     constant C_BGT     : integer := 660;         -- backdrop luma at the top
-    constant C_BGU8    : integer := 130;         -- backdrop chroma, 8-bit (BT.601)
-    constant C_BGV8    : integer := 127;
+    constant C_BGU8    : integer := 128;         -- backdrop chroma, 8-bit: neutral
+    constant C_BGV8    : integer := 128;
     constant C_PRE     : integer := 128;         -- dry lines before line 0
 
     -- @@BEGIN GENERATED (df_regen.py)
@@ -222,7 +223,7 @@ architecture dicefall of program_top is
         x"1050A040", x"7050A000", x"78400200", x"1850A100", x"6050A280", x"2050A008",
         x"1050A100", x"784003FF", x"3850A000", x"3050A100", x"2050A002", x"204BC00F",
         x"20408003", x"D84080FF", x"1850A100", x"D850A1FF", x"2850A00F", x"2850A005",
-        x"164C8140", x"880C824C", x"15BB6040", x"78400005", x"A8FB611B", x"161C2040",
+        x"164C8140", x"880C824C", x"15BB6040", x"7840000D", x"A8FB611B", x"161C2040",
         x"A0AC3882", x"15CB8040", x"A09B9774", x"089B6000", x"1FEA9080", x"27EFC004",
         x"18482040", x"980083E1", x"900003E2", x"27EFC001", x"1FFA9080", x"17FFF480",
         x"27FFE004", x"18482040", x"980083E8", x"900003E9", x"27FFE001", x"17FFE040",
@@ -579,21 +580,26 @@ architecture dicefall of program_top is
     signal tb_we : std_logic := '0';
 
     ----------------------------------------------------------------------
-    -- the ring of die records (4 entries x 128 words: edges at 4 e,
-    -- header at 80, numeral sprites at 8 (s + 11)) and its state
+    -- the ring of die records (4 entries x 192 words: edges at 4 e,
+    -- header at 80, numeral sprites at 8 (s + 11)) and its state.  An
+    -- address is entry | offset (8 bits); offsets 0..127 are in wram,
+    -- 128..191 (sprites 5..12) in the extension xram, so every front face
+    -- of a d20 gets its numeral (v0.2.0)
     ----------------------------------------------------------------------
     type t_wram is array (0 to 511) of std_logic_vector(31 downto 0);
     signal wram : t_wram := (others => (others => '0'));
-    signal w_wa, w_ra : unsigned(8 downto 0) := (others => '0');
-    signal w_wd, w_rd : std_logic_vector(31 downto 0) := (others => '0');
-    signal w_we : std_logic := '0';
+    type t_xram is array (0 to 255) of std_logic_vector(31 downto 0);
+    signal xram : t_xram := (others => (others => '0'));
+    signal w_wa, w_ra : unsigned(9 downto 0) := (others => '0');
+    signal w_wd, w_rd, x_rd, w_rdm : std_logic_vector(31 downto 0) := (others => '0');
+    signal w_we, w_rx : std_logic := '0';
     signal e_we, e_pend : std_logic := '0';            -- engine write request
-    signal e_wa, e_pa : unsigned(8 downto 0) := (others => '0');
+    signal e_wa, e_pa : unsigned(9 downto 0) := (others => '0');
     signal e_wd, e_pd : std_logic_vector(31 downto 0) := (others => '0');
     signal e_done : std_logic := '0';                  -- engine: entry complete
     signal e_tag  : unsigned(7 downto 0) := (others => '0');
     signal r_wwe : std_logic := '0';                   -- renderer write-back
-    signal r_wwa : unsigned(8 downto 0) := (others => '0');
+    signal r_wwa : unsigned(9 downto 0) := (others => '0');
     signal r_wwd : std_logic_vector(31 downto 0) := (others => '0');
     type t_st4 is array (0 to 3) of unsigned(1 downto 0);   -- 0 free 1 ready 2 active
     type t_tag4 is array (0 to 3) of unsigned(7 downto 0);
@@ -642,20 +648,21 @@ architecture dicefall of program_top is
     type t_u12x2 is array (0 to 1) of unsigned(11 downto 0);
     type t_u2x2  is array (0 to 1) of unsigned(1 downto 0);
     type t_u5x2  is array (0 to 1) of unsigned(4 downto 0);
-    type t_u3x2  is array (0 to 1) of unsigned(2 downto 0);
+    type t_u4x2  is array (0 to 1) of unsigned(3 downto 0);
     signal sl_on, nx_on, dl_on : std_logic_vector(1 downto 0) := (others => '0');
     signal sl_ent : t_u2x2 := (others => (others => '0'));
     signal sl_bot : t_s12x2 := (others => (others => '0'));
     signal sl_x0, nx_x0, dl_x0 : t_u12x2 := (others => (others => '0'));
     signal sl_ne : t_u5x2 := (others => (others => '0'));
-    signal sl_ns : t_u3x2 := (others => (others => '0'));
+    signal sl_ns : t_u4x2 := (others => (others => '0'));
     signal c_ent : unsigned(1 downto 0) := (others => '0');    -- the drawn slot's
     signal c_ne  : unsigned(4 downto 0) := (others => '0');
-    signal c_ns  : unsigned(2 downto 0) := (others => '0');
+    signal c_ns  : unsigned(3 downto 0) := (others => '0');
 
     -- numeral sprites: the record being walked (rs_), the span (r_s*), the
     -- glyph pipe's constants for the span in it (pa_)
-    signal r_si, r_s11 : unsigned(3 downto 0) := (others => '0');
+    signal r_si  : unsigned(3 downto 0) := (others => '0');
+    signal r_s11 : unsigned(4 downto 0) := (others => '0');
     signal rs_ly0, rs_ly1 : signed(11 downto 0) := (others => '0');
     signal rs_ga, rs_gb, pa_ga, pa_gb : unsigned(3 downto 0) := (others => '0');
     signal rs_sx0, rs_sw, rs_k, pa_k, pa_sx0, r_n : unsigned(7 downto 0) := (others => '0');
@@ -735,6 +742,7 @@ architecture dicefall of program_top is
     attribute ram_style of rf   : signal is "block";
     attribute ram_style of tbl  : signal is "block";
     attribute ram_style of wram : signal is "block";
+    attribute ram_style of xram : signal is "block";
     attribute ram_style of la_dy : signal is "block";
     attribute ram_style of la_fy : signal is "block";
     attribute ram_style of la_du : signal is "block";
@@ -747,6 +755,7 @@ architecture dicefall of program_top is
     attribute no_rw_check of rf   : signal is true;
     attribute no_rw_check of tbl  : signal is true;
     attribute no_rw_check of wram : signal is true;
+    attribute no_rw_check of xram : signal is true;
     attribute no_rw_check of la_dy : signal is true;
     attribute no_rw_check of la_fy : signal is true;
     attribute no_rw_check of la_du : signal is true;
@@ -771,6 +780,7 @@ architecture dicefall of program_top is
     signal o_y, o_u, o_v : unsigned(9 downto 0) := (others => '0');
     signal bg_acc : signed(27 downto 0) := (others => '0');
     signal bg_y   : unsigned(9 downto 0) := to_unsigned(600, 10);
+    signal s_blk  : std_logic := '1';            -- S8: black backdrop (per field)
 
     signal s_avid_sr    : std_logic_vector(0 to C_LATENCY - 1) := (others => '0');
     signal s_hsync_n_sr : std_logic_vector(0 to C_LATENCY - 1) := (others => '1');
@@ -933,13 +943,13 @@ begin
             if u_slw = '1' then
                 case to_integer(u_slp) is
                     when 0 | 1 | 2 | 3 =>
-                        e_wa <= rg_wp & u_sls & u_slp(1 downto 0);
+                        e_wa <= rg_wp & '0' & u_sls & u_slp(1 downto 0);
                         e_we <= '1';
                     when 4 | 5 | 6 =>
-                        e_wa <= rg_wp & "10100" & u_slp(1 downto 0);
+                        e_wa <= rg_wp & "010100" & u_slp(1 downto 0);
                         e_we <= '1';
                     when 8 | 9 | 10 | 11 | 12 | 13 | 14 =>
-                        e_wa <= rg_wp & u_sls(3 downto 0) & u_slp(2 downto 0);
+                        e_wa <= rg_wp & u_sls & u_slp(2 downto 0);
                         e_we <= '1';
                     when 17 =>
                         e_done <= '1';
@@ -1361,16 +1371,38 @@ begin
     p_wram_w : process(clk)
     begin
         if rising_edge(clk) then
-            if w_we = '1' then wram(to_integer(w_wa)) <= w_wd; end if;
+            if w_we = '1' and w_wa(7) = '0' then
+                wram(to_integer(w_wa(9 downto 8) & w_wa(6 downto 0))) <= w_wd;
+            end if;
         end if;
     end process p_wram_w;
 
     p_wram_r : process(clk)
     begin
         if rising_edge(clk) then
-            w_rd <= wram(to_integer(w_ra));
+            w_rd <= wram(to_integer(w_ra(9 downto 8) & w_ra(6 downto 0)));
         end if;
     end process p_wram_r;
+
+    p_xram_w : process(clk)
+    begin
+        if rising_edge(clk) then
+            if w_we = '1' and w_wa(7) = '1' then
+                xram(to_integer(w_wa(9 downto 8) & w_wa(5 downto 0))) <= w_wd;
+            end if;
+        end if;
+    end process p_xram_w;
+
+    -- both read every clock; the sprite states take whichever the address
+    -- named (w_rdm)
+    p_xram_r : process(clk)
+    begin
+        if rising_edge(clk) then
+            x_rd <= xram(to_integer(w_ra(9 downto 8) & w_ra(5 downto 0)));
+            w_rx <= w_ra(7);
+        end if;
+    end process p_xram_r;
+    w_rdm <= x_rd when w_rx = '1' else w_rd;
 
     -- the crossing's pixel in its slot (clamped) and its 1/16 px fraction
     s_rp  <= (others => '0') when r_x(25) = '1' else
@@ -1385,7 +1417,7 @@ begin
     s_semit <= '1' when r_fsr(3) = '0' and r_clr = '0' and r_go = '0' and r_st = 5
                         and r_ph = '1' and r_lp = '1' else '0';
     s_rbank <= r_line(0);
-    r_s11   <= r_si + 11;
+    r_s11   <= resize(r_si, 5) + 11;
 
     ------------------------------------------------------------------------
     -- RING STATE and RENDER SEQUENCER.  At each displayed line's start
@@ -1482,7 +1514,7 @@ begin
                                 if f_rdy(to_integer(rg_ap)) = '0' then
                                     r_st <= to_unsigned(4, 3);      -- none waiting
                                 elsif f_cur(to_integer(rg_ap)) = '1' then
-                                    w_ra <= rg_ap & "1010000";      -- header h0
+                                    w_ra <= rg_ap & "01010000";      -- header h0
                                     r_t  <= to_unsigned(1, 4);
                                 elsif f_nxt(to_integer(rg_ap)) = '1' then
                                     r_st <= to_unsigned(4, 3);      -- next field's
@@ -1491,10 +1523,10 @@ begin
                                     rg_ap <= rg_ap + 1;
                                 end if;
                             when 1 =>
-                                w_ra <= rg_ap & "1010001";          -- h1
+                                w_ra <= rg_ap & "01010001";          -- h1
                                 r_t  <= to_unsigned(2, 4);
                             when 2 =>                               -- h0 arrives
-                                w_ra  <= rg_ap & "1010010";         -- h2
+                                w_ra  <= rg_ap & "01010010";         -- h2
                                 h_top <= signed(w_rd(11 downto 0));
                                 h_bot <= signed(w_rd(23 downto 12));
                                 r_t   <= to_unsigned(3, 4);
@@ -1511,14 +1543,14 @@ begin
                                         sl_bot(0) <= h_bot;
                                         sl_x0(0)  <= h_x0;
                                         sl_ne(0)  <= unsigned(w_rd(4 downto 0));
-                                        sl_ns(0)  <= unsigned(w_rd(7 downto 5));
+                                        sl_ns(0)  <= unsigned(w_rd(8 downto 5));
                                     else
                                         sl_on(1)  <= '1';
                                         sl_ent(1) <= rg_ap;
                                         sl_bot(1) <= h_bot;
                                         sl_x0(1)  <= h_x0;
                                         sl_ne(1)  <= unsigned(w_rd(4 downto 0));
-                                        sl_ns(1)  <= unsigned(w_rd(7 downto 5));
+                                        sl_ns(1)  <= unsigned(w_rd(8 downto 5));
                                     end if;
                                     rg_st(to_integer(rg_ap)) <= "10";
                                     rg_ap <= rg_ap + 1;
@@ -1573,7 +1605,7 @@ begin
                                 -- end of the record: close its run, keep its x
                                 r_em  <= '1';
                                 r_wwe <= '1';
-                                r_wwa <= c_ent & r_e(4 downto 0) & "01";
+                                r_wwa <= c_ent & '0' & r_e(4 downto 0) & "01";
                                 r_wwd <= std_logic_vector(resize(r_x, 32));
                                 r_wb  <= '0';
                                 r_e   <= r_e + 1;
@@ -1584,19 +1616,19 @@ begin
                                         if r_e >= c_ne then
                                             r_ph <= '1';    -- on to the numerals
                                         else
-                                            w_ra <= c_ent & r_e(4 downto 0) & "00";
+                                            w_ra <= c_ent & '0' & r_e(4 downto 0) & "00";
                                             r_t  <= to_unsigned(1, 4);
                                         end if;
                                     when 1 =>
-                                        w_ra <= c_ent & r_e(4 downto 0) & "01";
+                                        w_ra <= c_ent & '0' & r_e(4 downto 0) & "01";
                                         r_t  <= to_unsigned(2, 4);
                                     when 2 =>               -- w0 arrives
-                                        w_ra <= c_ent & r_e(4 downto 0) & "10";
+                                        w_ra <= c_ent & '0' & r_e(4 downto 0) & "10";
                                         r_y0 <= signed(w_rd(15 downto 0));
                                         r_y1 <= signed(w_rd(31 downto 16));
                                         r_t  <= to_unsigned(3, 4);
                                     when 3 =>               -- w1 (x) arrives
-                                        w_ra <= c_ent & r_e(4 downto 0) & "11";
+                                        w_ra <= c_ent & '0' & r_e(4 downto 0) & "11";
                                         r_w1 <= signed(w_rd(25 downto 0));
                                         r_d0 <= r_y0 - r_jb;
                                         r_d1 <= r_y1 - r_jb;
@@ -1687,16 +1719,16 @@ begin
                                         r_t  <= to_unsigned(2, 4);
                                     when 2 =>               -- w0: lines, glyphs
                                         w_ra <= c_ent & r_s11 & "010";
-                                        rs_ly0 <= signed(w_rd(11 downto 0));
-                                        rs_ly1 <= signed(w_rd(23 downto 12));
-                                        rs_ga  <= unsigned(w_rd(27 downto 24));
-                                        rs_gb  <= unsigned(w_rd(31 downto 28));
+                                        rs_ly0 <= signed(w_rdm(11 downto 0));
+                                        rs_ly1 <= signed(w_rdm(23 downto 12));
+                                        rs_ga  <= unsigned(w_rdm(27 downto 24));
+                                        rs_gb  <= unsigned(w_rdm(31 downto 28));
                                         r_t    <= to_unsigned(3, 4);
                                     when 3 =>               -- w1: span, AA scale
                                         w_ra <= c_ent & r_s11 & "011";
-                                        rs_sx0 <= unsigned(w_rd(7 downto 0));
-                                        rs_sw  <= unsigned(w_rd(16 downto 9));
-                                        rs_k   <= unsigned(w_rd(24 downto 17));
+                                        rs_sx0 <= unsigned(w_rdm(7 downto 0));
+                                        rs_sw  <= unsigned(w_rdm(16 downto 9));
+                                        rs_k   <= unsigned(w_rdm(24 downto 17));
                                         s_on   <= '0';
                                         if r_line >= rs_ly0 and r_line < rs_ly1 then
                                             s_on <= '1';
@@ -1704,8 +1736,8 @@ begin
                                         r_t <= to_unsigned(4, 4);
                                     when 4 =>               -- w2: steps across
                                         w_ra <= c_ent & r_s11 & "100";
-                                        rs_dux <= signed(w_rd(15 downto 0));
-                                        rs_dvx <= signed(w_rd(31 downto 16));
+                                        rs_dux <= signed(w_rdm(15 downto 0));
+                                        rs_dvx <= signed(w_rdm(31 downto 16));
                                         if s_on = '1' then
                                             r_t  <= to_unsigned(5, 4);
                                         else
@@ -1714,18 +1746,18 @@ begin
                                         end if;
                                     when 5 =>               -- w3: steps down
                                         w_ra <= c_ent & r_s11 & "101";
-                                        rs_duy <= signed(w_rd(15 downto 0));
-                                        rs_dvy <= signed(w_rd(31 downto 16));
+                                        rs_duy <= signed(w_rdm(15 downto 0));
+                                        rs_dvy <= signed(w_rdm(31 downto 16));
                                         r_t  <= to_unsigned(6, 4);
                                     when 6 =>               -- w4: ink step
                                         w_ra <= c_ent & r_s11 & "110";
-                                        rs_w4 <= w_rd(28 downto 0);
+                                        rs_w4 <= w_rdm(28 downto 0);
                                         r_t   <= to_unsigned(7, 4);
                                     when 7 =>               -- w5: u at this line
-                                        r_su <= signed(w_rd(19 downto 0));
+                                        r_su <= signed(w_rdm(19 downto 0));
                                         r_t  <= to_unsigned(8, 4);
                                     when 8 =>               -- w6: v at this line
-                                        r_sv <= signed(w_rd(19 downto 0));
+                                        r_sv <= signed(w_rdm(19 downto 0));
                                         r_t  <= to_unsigned(9, 4);
                                     when others =>
                                         -- the span starts, with the glyph
@@ -2188,17 +2220,20 @@ begin
     end process p_lb_dv;
 
     ------------------------------------------------------------------------
-    -- backdrop: a vertical luma gradient, one accumulator stepped per line
+    -- backdrop: black (S8, latched at the field start), or a vertical gray
+    -- gradient, one accumulator stepped per line
     ------------------------------------------------------------------------
     p_bg : process(clk)
     begin
         if rising_edge(clk) then
             if r_fsr(0) = '1' then
                 bg_acc <= to_signed(C_BGT, 12) & to_signed(0, 16);
+                s_blk  <= registers_in(6)(1);
             elsif g_avid = '0' and g_avid_q = '1' then
                 bg_acc <= bg_acc + resize(n_bgs, 28);
             end if;
-            if bg_acc(27) = '1' then bg_y <= (others => '0');
+            if s_blk = '1' then bg_y <= to_unsigned(64, 10);
+            elsif bg_acc(27) = '1' then bg_y <= (others => '0');
             else bg_y <= unsigned(bg_acc(25 downto 16)); end if;
         end if;
     end process p_bg;

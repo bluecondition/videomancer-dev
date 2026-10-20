@@ -11,7 +11,7 @@ NAT20 stores every die's crossing records twice, so the engine can compute the n
 
 ## What Dicefall does
 
-- **Just-in-time engine.** The engine never stops. Field after field, it computes every die in screen order (top first) into the next free entry of a 4-entry ring (512 words: edges at 4e, header at 80, sprites at 8(s + 11)).
+- **Just-in-time engine.** The engine never stops. Field after field, it computes every die in screen order (top first) into the next free entry of a 4-entry ring (192 words an entry: edges at 4e, header at 80, sprites at 8(s + 11)). Offsets 0..127 are the 512-word ring RAM; 128..191, sprites 5..12, a 256-word extension RAM (v0.2.0). So up to 13 numerals a die: every front face of a d20 (up to 10) and every corner of a d4's front faces (up to 9).
   - The renderer takes an entry when the beam reaches its die's top, and frees it once the beam has passed the bottom.
   - Only the dice near the beam are ever stored.
   - Entries carry a field tag. The renderer frees an old field's, waits on the next field's, and the engine stays one field ahead at most (skipping ahead when it falls behind).
@@ -31,11 +31,11 @@ NAT20 stores every die's crossing records twice, so the engine can compute the n
 
 | Mode | Dice | Engine clocks a field (budget) | Worst line (budget) |
 |---|---|---|---|
-| 1080p | 20 d20s / 20 mix | 830k / 565k (1.24M) | 604 (2,200) |
-| 720p | 20 d20s / 20 mix | 854k / 563k (1.24M) | 573 (1,650) |
+| 1080p | 20 d20s / 20 mix | 1,008k / 598k (1.24M) | 694 (2,200) |
+| 720p | 20 d20s / 20 mix | 979k / 580k (1.24M) | 635 (1,650) |
 | 480i | 4 d20s / 6 mix | 180k / 177k (225k) | 304 (858) |
 
-At 10% size, HD's 20 is the two-a-scanline limit (N ≤ 2 × cycle / window), not the engine's: it has ~30% to spare. More dice at that size would need a third line-buffer slot (8 more block RAMs).
+At 10% size, HD's 20 is the two-a-scanline limit (N ≤ 2 × cycle / window), not the engine's: it has ~20% to spare (v0.2.0, every numeral drawn; v0.1 capped them at 5 a die). More dice at that size would need a third line-buffer slot (8 more block RAMs).
 
 **SD warning:** the same picture shape, but fewer dice. At SD a field has about a fifth of HD's clocks.
 
@@ -43,11 +43,12 @@ At 10% size, HD's 20 is the two-a-scanline limit (N ≤ 2 × cycle / window), no
 
 - **Engine:** GHDL register-write trace of a whole 720p field (79k writes) is identical to the microcode emulator (`df_uasm.py`).
 - **Renderer:** the 720p GHDL frame equals the model (`df_rtlmodel.py`) to within 1 code below the top dice. The sim shows everything 4 lines low and the top die clipped. That is the image tester's fake 8-line vertical blank: the dry pre-roll (~12k clocks at 720p, ~20k at 1080p, ~4k at SD) overruns it, so the first lines' starts arrive mid-pre-roll. Hardware gives the pre-roll ~47k clocks at 720p, ~95k at 1080p and ~17k at SD (from two line-widths after the last active line to the next field's first).
+- **Pre-roll worst case** (model, `.dicefall_work/prestats.py`, 40 fields at full fall, 11% d20s): 51k clocks at 1080p, 33k at 720p (v0.1: 44k / 31k). With the held start (v0.1.1) the 720p sim shows the picture 12 lines low, not 4 (`.dicefall_work/simdiff2.py`, fields 4, dy 12: equal to the model below row 124).
 
 ## Block RAM
 
-29/32: microcode 8, register file 2, engine ROM 1, die table 2, ring 4, line buffers 8, glyphs 4.
+31/32: microcode 8, register file 2, engine ROM 1, die table 2, ring 4 + sprite extension 2, line buffers 8, glyphs 4.
 
 ## Build
 
-v0.1.1: 6/6 closed at the full clock (router1, seed 1), 74.2–83.2 MHz, 7,243–7,261 LC (94.5%). Details, the timing fixes and the start-up fix in SUMMARY.md.
+v0.2.0: 6/6 closed at the full clock (router1, seed 1), 72.3–77.3 MHz, 7,245–7,269 LC (94.6%), 31/32 EBR. Details, the timing fixes, the start-up fix and the numeral cap in SUMMARY.md.

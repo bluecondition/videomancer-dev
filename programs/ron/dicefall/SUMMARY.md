@@ -73,3 +73,34 @@ Build (router1, seed 1, all 6): HD Analog 77.17, SD Analog 74.16, HD HDMI 74.32,
 - 7,243–7,261 LC (94.5%), 29/32 EBR; all six `.bin` pass iceunpack.
 - vmprog 525,809 B.
 - HD HDMI's margin is thin. If HD HDMI misbehaves on hardware while other modes are fine, suspect timing first.
+- **HW-confirmed 2026-10-20** (Ron, HD HDMI): "this is working now". The dice draw.
+
+## v0.2.0 (2026-10-20): a numeral on every face; black backdrop
+
+Ron on v0.1.1: "frequently a number will disappear from a face as the dice tumbles down. Also, I'd like the background to be black, or at least on a switch between black and gray textured".
+
+**Vanishing numerals.**
+- Cause: a die's ring entry held 5 numeral sprites, given to its front faces in face-index order. A d20 shows about 10 faces.
+- So when the die turned, a lower-numbered face coming round took the slot of a face still in plain view, and that face's number vanished.
+- Model count over 24 fields: at 1080p every d20 had hit the cap of 5. Uncapped, a d20 shows 5–9 numerals (mostly 7–8), 720p 5–8, the mix up to 8. SD never exceeds 5, since small faces fail the readability test.
+- Fix: sprites 5..12 go in a 256 × 32 extension RAM (`xram`, 2 block RAMs).
+  - The ring address is now entry | offset (8 bits). Offsets 128..191 are xram; the sprite states read through a 2:1 mux (`w_rdm`) on a registered address bit.
+  - The microcode only changes its cap, `MAX_SPR` 5 → 13 (still 1023 words).
+  - The header's sprite count widens to 4 bits.
+- Cost (model): HD engine 838k → 1,008k clocks a field at 1080p (d20s, of 1.24M); 862k → 979k at 720p. Worst render line 670 of 2,200 (1080p), 635 of 1,650 (720p).
+
+**Backdrop.**
+- S8 Backdrop: Black (default) or Gray, latched at the field start. Black is luma 64.
+- The gray gradient is unchanged except its chroma: exactly neutral now (128/128, was 130/127), so one constant serves both.
+- Watch: obsidian dice (Y ≈ 120) are dark on black. Their faces still shade and their numbers are white.
+
+Build (router1, seed 1, all 6): HD Analog 74.95, SD Analog 73.24, HD HDMI 77.30, SD HDMI 72.30, HD Dual 74.98, SD Dual 73.34 MHz.
+- 7,245–7,269 LC (94.6%), 31/32 EBR. The read mux and the wider fields cost almost nothing.
+- All six `.bin` pass iceunpack; program_config.bin carries "Backdrop".
+- vmprog 530,507 B.
+- HD HDMI went from 74.32 to 77.30; HD Analog and HD Dual are now the thin ones (~75).
+
+Verification: 720p GHDL sims, mix on black and d20s on gray (tumble 0).
+- d20s show 7–9 numerals.
+- The d20 frame equals the model below row 124 (`.dicefall_work/simdiff2.py`: fields 4, row shift 12). The top dice are clipped by the image tester's short vertical blank, as before.
+- Worst dry pre-roll (model, `.dicefall_work/prestats.py`): 51k clocks at 1080p (budget ~95k), 33k at 720p (~46k).

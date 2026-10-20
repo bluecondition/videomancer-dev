@@ -26,7 +26,7 @@ from df_uasm import Emu, Pause, PORT, CTLR
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 X_BITS = 26
-BGU8, BGV8 = 130, 127
+BGU8, BGV8 = 128, 128
 XSHIFT = 3
 SLOTW = 128
 PRE = 128                                # dry lines before line 0
@@ -91,7 +91,7 @@ class Engine:
                 cur['h'][n] = val
             elif n == 'done':
                 h0, h2 = cur['h']['h0'], cur['h']['h2']
-                ne, ns = h2 & 31, (h2 >> 5) & 7
+                ne, ns = h2 & 31, (h2 >> 5) & 15
                 dice.append(dict(top=sfield(h0, 0, 12), bot=sfield(h0, 12, 12),
                                  tag=(h0 >> 24) & 255, x0=cur['h']['h1'] & 4095,
                                  edges=[cur['e'][i] for i in range(ne)],
@@ -178,7 +178,7 @@ def render_sprites(die, line, buf):
         ly0, ly1 = sfield(w0, 0, 12), sfield(w0, 12, 12)
         ga, gb = (w0 >> 24) & 15, (w0 >> 28) & 15
         if not (ly0 <= line < ly1):
-            clocks += 4
+            clocks += 5
             continue
         sx0, sw, k = w1 & 255, (w1 >> 9) & 255, (w1 >> 17) & 255
         dux, dvx = sfield(w2, 0, 16), sfield(w2, 16, 16)

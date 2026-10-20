@@ -15,6 +15,7 @@ Built on NAT20's renderer (`programs/ron/nat20`), with many dice instead of one.
 | K3 | Light | 0–100% | Key light position, raking-left to raking-right |
 | K4 | Size | 4–11% | Die diameter as a share of the frame height; smaller dice fit more of them |
 | S7 | Dice | d20 / Mix | All d20s, or a random mix of d4, d6, d8, d10 and d20 |
+| S8 | Backdrop | Gray / Black | Black, or a soft gray gradient behind the dice |
 | P12 | Fall | 0–100% | Fall speed |
 
 ## Technical notes

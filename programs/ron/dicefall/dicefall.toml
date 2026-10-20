@@ -1,18 +1,19 @@
 # DICEFALL — many small dice tumbling down the screen.
 #
-# v0.1.1.  NAT20's scanline vector dice, many at once: each die a random
+# v0.2.0.  NAT20's scanline vector dice, many at once: each die a random
 # colour, numbered, every outline and crease exactly anti-aliased, falling
 # and tumbling about its own random spin.  K1 sets how many, K2 how fast
 # they tumble, K3 the light, K4 their size; P12 is the fall speed.  S7 picks
-# all d20s or a random mix of d4..d20.  HD shows up to 20 dice, SD 4 (d20s)
-# or 6 (a mix): SD has a fifth of HD's clocks a field to compute them.
+# all d20s or a random mix of d4..d20, S8 a black or gray backdrop.  HD
+# shows up to 20 dice, SD 4 (d20s) or 6 (a mix): SD has a fifth of HD's
+# clocks a field to compute them.
 #
 # Author: czartroniks
 
 [program]
 processing_delay_clks = 12
 program_id = "com.czartroniks.dicefall"
-program_version = "0.1.1"
+program_version = "0.2.0"
 abi_version = ">=1.0,<2.0"
 program_name = "Dicefall"
 author = "czartroniks"
@@ -77,6 +78,12 @@ parameter_id = "toggle_switch_7"
 name_label = "Dice"
 value_labels = ["d20", "Mix"]
 initial_value_label = "Mix"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Backdrop"
+value_labels = ["Gray", "Black"]
+initial_value_label = "Black"
 
 # --- Linear Potentiometer (Slider) ---
 

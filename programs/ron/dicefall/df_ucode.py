@@ -28,7 +28,8 @@ Records (32-bit words, ring entry offsets): edge e at 4 e (w0 y0 | y1 << 16,
 signed sub-lines; w1 x at y0, Q16 px from the slot's left; w2 slope; w3
 colour step), header at 80 (h0 top line | bottom line << 12 | tag << 24,
 signed field lines; h1 slot x0 | edges << 12 | sprites << 17), sprite s at
-8 (s + 11) (as NAT20, but w5 / w6 = u / v at the first line, Q12).
+8 (s + 11) (as NAT20, but w5 / w6 = u / v at the first line, Q12; offsets
+128+ are the renderer's sprite extension RAM).
 """
 import math
 import sys
@@ -42,7 +43,8 @@ r = a.r
 
 YTOP, YBOT = 660, 430            # backdrop luma, top (C_BGT in the VHDL) and bottom
 MAX_EDGES = 20                   # crossing records a die (a d20 shows <= 20 edges)
-MAX_SPR = 5                      # numeral sprites a die
+MAX_SPR = 13                     # numeral sprites a die (5 in the ring entry, 8 in the
+                                 # sprite extension RAM): every front face
 SLOT = 128                       # slot width, px
 SIZE_LO, SIZE_SPAN = 1311, 2293  # K4: diameter 4 % .. 11 % of the height (radius x 16 x 4096)
 
