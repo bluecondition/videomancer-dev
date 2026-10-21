@@ -1,96 +1,101 @@
-# Terrace - Heirloom #11 (2026-10-20), from WIN_20230305_23_38_39.
-# Diagonal staircases of coloured cells, the picture mixed into the cells.
-# See terrace.vhd and SUMMARY.md.
+# Terrace - Heirloom #11, v0.5.0 (2026-10-21): rebuilt from the photo WIN_20230305_23_38_39.
+# A strict grid of flat blocks, 2.72 tiles of 6 columns x 25 rows: yellow, magenta, cyan, white and
+# three greys and black, each column dropped one row, so the colours stair-step down to the right,
+# with flyback fringes at the tile seams.  See terrace.vhd and SUMMARY.md.
 
 [program]
-processing_delay_clks = 16
+processing_delay_clks = 28
 program_id = "com.czartroniks.terrace"
 program_name = "Terrace"
-program_version = "0.1.0"
+program_version = "0.5.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
-categories = ["Grid", "Pattern", "Pixel"]
+categories = ["Grid", "Pattern", "Color"]
 program_type = "processing"
-description = "A cell grid whose colour sequence drops one cell per column: diagonal staircases in CMYK and grays, the picture mixed in."
+description = "Colour-bar staircase: CMY, white and greys stepping down 6-column tiles, flyback seam fringes, rows rolling."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_1"
-name_label = "Width"
+name_label = "Tiles"
 control_mode = "linear"
-display_min_value = 16
-display_max_value = 271
-initial_value = 260
-display_float_digits = 0
-suffix_label = "px"
+display_min_value = 1
+display_max_value = 8
+initial_value = 251
+display_float_digits = 1
+suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
-name_label = "Height"
+name_label = "Rows"
 control_mode = "linear"
-display_min_value = 8
-display_max_value = 263
-initial_value = 160
+display_min_value = 4
+display_max_value = 64
+initial_value = 360
 display_float_digits = 0
 suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
-name_label = "Palette"
-value_labels = ["CMYK", "Warm", "Cool", "Neon"]
-initial_value_label = "CMYK"
+name_label = "Bend"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 458
+display_float_digits = 0
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
-name_label = "Scroll"
+name_label = "Speed"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 540
+initial_value = 710
 display_float_digits = 0
 suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
-name_label = "Panels"
-value_labels = ["1", "2", "4"]
-initial_value_label = "2"
-
-[[parameter]]
-parameter_id = "rotary_potentiometer_6"
-name_label = "Mix"
+name_label = "Seam"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 300
+initial_value = 386
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Palette"
+value_labels = ["Photo", "Primary", "Ember", "Ocean", "Neon", "Pastel", "Inverse", "Mono"]
+initial_value_label = "Photo"
+
+[[parameter]]
 parameter_id = "toggle_switch_7"
-name_label = "Swap"
+name_label = "Climb"
 value_labels = ["Off", "On"]
 initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
-name_label = "Grid"
+name_label = "Ramp"
 value_labels = ["Off", "On"]
 initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
-name_label = "Direction"
-value_labels = ["Right", "Left"]
-initial_value_label = "Right"
+name_label = "Lean"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
-name_label = "Tint"
-value_labels = ["Colour", "Luma"]
-initial_value_label = "Colour"
+name_label = "Fill"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
@@ -100,7 +105,7 @@ initial_value_label = "Video"
 
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
-name_label = "Slope"
+name_label = "Steps"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
@@ -109,24 +114,24 @@ display_float_digits = 0
 suffix_label = "%"
 
 [[preset]]
-name = "Default"
+name = "Photo"
 
 [[preset]]
-name = "Flat Bands"
-rotary_potentiometer_6 = 600
+name = "Colour Bars"
 linear_potentiometer_12 = 0
 
 [[preset]]
-name = "Neon Steps"
-rotary_potentiometer_3 = 768
-rotary_potentiometer_1 = 100
-rotary_potentiometer_2 = 100
-toggle_switch_8 = 1
-linear_potentiometer_12 = 800
+name = "Chevrons"
+rotary_potentiometer_5 = 1023
+rotary_potentiometer_6 = 576
 
 [[preset]]
-name = "Warm Mosaic"
-rotary_potentiometer_3 = 256
-rotary_potentiometer_6 = 1000
+name = "Cascade"
+linear_potentiometer_12 = 1023
+rotary_potentiometer_3 = 700
+toggle_switch_9 = 1
+
+[[preset]]
+name = "Camera Steps"
 toggle_switch_10 = 1
-linear_potentiometer_12 = 300
+rotary_potentiometer_3 = 700
