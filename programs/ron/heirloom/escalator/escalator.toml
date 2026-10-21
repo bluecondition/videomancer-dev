@@ -1,0 +1,138 @@
+# Escalator - Heirloom #1 (2026-10-20), from WIN_20220629_23_49_20.
+# Tiled picture, pastel rows with a vivid pink band, marching green staircases.
+# See escalator.vhd and SUMMARY.md.
+
+[program]
+processing_delay_clks = 16
+program_id = "com.czartroniks.escalator"
+program_name = "Escalator"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Pattern", "Grid", "Color"]
+program_type = "processing"
+description = "The picture tiled across the screen in pastel rows with a vivid pink band, green staircases marching down the grid."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Band"
+control_mode = "linear"
+display_min_value = 12
+display_max_value = 88
+initial_value = 220
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Wash"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 620
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Vivid"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 400
+initial_value = 600
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Stairs"
+control_mode = "linear"
+display_min_value = 6
+display_max_value = 100
+initial_value = 460
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Slope"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 740
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Speed"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 560
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Brick"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Flip"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Twin"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Stairs"
+value_labels = ["Solid", "Tinted"]
+initial_value_label = "Solid"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Comb"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Tiles"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 880
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Default"
+
+[[preset]]
+name = "Plain Stairs"
+rotary_potentiometer_2 = 200
+linear_potentiometer_12 = 0
+
+[[preset]]
+name = "Brick Wall"
+toggle_switch_7 = 1
+toggle_switch_8 = 1
+linear_potentiometer_12 = 600
+
+[[preset]]
+name = "Twin Lattice"
+rotary_potentiometer_4 = 300
+toggle_switch_9 = 1
+toggle_switch_10 = 1
+linear_potentiometer_12 = 700
