@@ -1,18 +1,19 @@
-# Streak - Heirloom #7 (2026-10-20), from WIN_20230129_00_40_34.
-# Horizontal smear, per-band hue rotation, barcode blocks under a diagonal.
+# Streak - Heirloom #7, v0.5.0 (2026-10-21): rebuilt from the photo WIN_20230129_00_40_34.
+# Smeared colour streaks cut into bands that thin down the frame (a swept band clock), a red
+# 8-step sequence per band, and below a diagonal the picture frozen into a mosaic of held blocks.
 # See streak.vhd and SUMMARY.md.
 
 [program]
-processing_delay_clks = 20
+processing_delay_clks = 44
 program_id = "com.czartroniks.streak"
 program_name = "Streak"
-program_version = "0.1.0"
+program_version = "0.5.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Glitch", "Color", "Signal"]
 program_type = "processing"
-description = "The picture smeared into rainbow streaks, the hue turning band by band, barcode blocks below a diagonal. Smear on the slider."
+description = "Smeared colour streaks in bands that thin down the frame; below a diagonal the picture freezes into held mosaic blocks."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
@@ -20,107 +21,121 @@ core = "yuv444_30b"
 parameter_id = "rotary_potentiometer_1"
 name_label = "Bands"
 control_mode = "linear"
-display_min_value = 0
-display_max_value = 100
-initial_value = 240
+display_min_value = 4
+display_max_value = 64
+initial_value = 340
 display_float_digits = 0
-suffix_label = "%"
+suffix_label = ""
+
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
-name_label = "Hue"
+name_label = "Taper"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 320
+initial_value = 526
 display_float_digits = 0
 suffix_label = "%"
+
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
-name_label = "Slope"
+name_label = "Blocks"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 605
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Speed"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
 initial_value = 640
 display_float_digits = 0
 suffix_label = ""
-[[parameter]]
-parameter_id = "rotary_potentiometer_4"
-name_label = "Blocks"
-control_mode = "linear"
-display_min_value = 0
-display_max_value = 100
-initial_value = 240
-display_float_digits = 0
-suffix_label = "%"
+
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
-name_label = "Spin"
-control_mode = "linear"
-display_min_value = -100
-display_max_value = 100
-initial_value = 560
-display_float_digits = 0
-suffix_label = ""
-[[parameter]]
-parameter_id = "rotary_potentiometer_6"
-name_label = "Contrast"
+name_label = "Edge"
 control_mode = "linear"
 display_min_value = 0
-display_max_value = 200
-initial_value = 560
+display_max_value = 100
+initial_value = 293
 display_float_digits = 0
 suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Hue"
+control_mode = "linear"
+display_min_value = -180
+display_max_value = 180
+initial_value = 512
+display_float_digits = 0
+suffix_label = ""
+
 [[parameter]]
 parameter_id = "toggle_switch_7"
-name_label = "Smear"
-value_labels = ["Colour", "Luma"]
-initial_value_label = "Colour"
+name_label = "Mosaic"
+value_labels = ["Blocks", "Lines"]
+initial_value_label = "Blocks"
+
 [[parameter]]
 parameter_id = "toggle_switch_8"
-name_label = "Barcode"
-value_labels = ["Below", "Above"]
-initial_value_label = "Below"
+name_label = "Strips"
+value_labels = ["Sparse", "Dense"]
+initial_value_label = "Sparse"
+
 [[parameter]]
 parameter_id = "toggle_switch_9"
-name_label = "Luma"
-value_labels = ["Keep", "Ramp"]
-initial_value_label = "Keep"
+name_label = "Flip"
+value_labels = ["Left", "Right"]
+initial_value_label = "Left"
+
 [[parameter]]
 parameter_id = "toggle_switch_10"
-name_label = "Bands"
-value_labels = ["Still", "Scroll"]
-initial_value_label = "Still"
+name_label = "Smear"
+value_labels = ["Short", "Long"]
+initial_value_label = "Short"
+
 [[parameter]]
 parameter_id = "toggle_switch_11"
 name_label = "Source"
 value_labels = ["Video", "Osc"]
 initial_value_label = "Video"
+
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
-name_label = "Smear"
+name_label = "Streak"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 600
+initial_value = 445
 display_float_digits = 0
 suffix_label = "%"
-[[preset]]
-name = "Default"
 
 [[preset]]
-name = "Clean Bands"
+name = "Photo"
+
+[[preset]]
+name = "Photo Osc"
+toggle_switch_11 = 1
+
+[[preset]]
+name = "Calm Bands"
 linear_potentiometer_12 = 0
-rotary_potentiometer_2 = 600
+rotary_potentiometer_5 = 150
 
 [[preset]]
-name = "Barcode Ramp"
-toggle_switch_9 = 1
-rotary_potentiometer_4 = 100
-linear_potentiometer_12 = 900
+name = "Frozen"
+rotary_potentiometer_5 = 1023
+rotary_potentiometer_3 = 760
 
 [[preset]]
-name = "Scrolling"
+name = "Storm"
+linear_potentiometer_12 = 1023
 toggle_switch_10 = 1
-rotary_potentiometer_5 = 700
-linear_potentiometer_12 = 500
-
+rotary_potentiometer_4 = 820
