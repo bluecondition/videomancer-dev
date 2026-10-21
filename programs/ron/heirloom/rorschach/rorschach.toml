@@ -1,125 +1,183 @@
-# Rorschach - Heirloom #4 (2026-10-20), from WIN_20221124_22_54_05.
-# Posterized pastel mirror with wavy stripes and row tears.
+# Rorschach - Heirloom #4, v0.5.0 (2026-10-21): rebuilt from the photo WIN_20221124_22_54_05.
+# Camera video folded top to bottom (a frame-store mirror) through an 8-colour cyclic colourizer:
+# cream / peach / pink / orchid / lavender / pale cyan bands, and a dark band in blue or red
+# sample-and-held in 42-px cells; busy fragments and frame-store tears either side of the fold.
 # See rorschach.vhd and SUMMARY.md.
 
 [program]
-processing_delay_clks = 20
+processing_delay_clks = 24
 program_id = "com.czartroniks.rorschach"
 program_name = "Rorschach"
-program_version = "0.1.0"
+program_version = "0.5.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Mirror", "Color", "Glitch"]
 program_type = "processing"
-description = "The picture posterized to pastels over wavy stripes, mirrored left and right, torn sideways in bands. Tear on the slider."
+description = "Camera folded into a pastel colourizer inkblot: red/blue stair-steps, busy fragments, frame-store tears."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
+# --- Rotary Potentiometers (1-6) ---
+
 [[parameter]]
 parameter_id = "rotary_potentiometer_1"
-name_label = "Key"
+name_label = "Bands"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 480
+initial_value = 387
 display_float_digits = 0
 suffix_label = "%"
+
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
-name_label = "Stripes"
+name_label = "Level"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 300
+initial_value = 0
 display_float_digits = 0
 suffix_label = "%"
+
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
-name_label = "Wave"
+name_label = "Detail"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 500
+initial_value = 614
 display_float_digits = 0
 suffix_label = "%"
+
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
-name_label = "Rate"
+name_label = "Speed"
 control_mode = "linear"
-display_min_value = 0
+display_min_value = -100
 display_max_value = 100
-initial_value = 300
+initial_value = 600
 display_float_digits = 0
 suffix_label = "%"
+
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
-name_label = "Tint"
+name_label = "Fold"
 control_mode = "linear"
-display_min_value = 0
-display_max_value = 200
-initial_value = 512
+display_min_value = 25
+display_max_value = 100
+initial_value = 323
 display_float_digits = 0
 suffix_label = "%"
+
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
-name_label = "Axis"
-control_mode = "linear"
-display_min_value = 0
-display_max_value = 100
-initial_value = 512
-display_float_digits = 0
-suffix_label = "%"
+name_label = "Palette"
+value_labels = ["Rorschach", "Ink", "Swap", "Comp", "Turn", "Twist", "Night", "Vivid"]
+initial_value_label = "Rorschach"
+
+# --- Toggle Switches (7-11) ---
+
 [[parameter]]
 parameter_id = "toggle_switch_7"
 name_label = "Mirror"
-value_labels = ["Off", "On"]
-initial_value_label = "On"
+value_labels = ["Mirror", "Repeat"]
+initial_value_label = "Mirror"
+
 [[parameter]]
 parameter_id = "toggle_switch_8"
-name_label = "Stripes"
+name_label = "Stairs"
 value_labels = ["Off", "On"]
-initial_value_label = "On"
+initial_value_label = "Off"
+
 [[parameter]]
 parameter_id = "toggle_switch_9"
-name_label = "Palette"
-value_labels = ["Pastel", "Bold"]
-initial_value_label = "Pastel"
+name_label = "Split"
+value_labels = ["Hue", "Blue"]
+initial_value_label = "Hue"
+
 [[parameter]]
 parameter_id = "toggle_switch_10"
-name_label = "Key"
-value_labels = ["Bright", "Dark"]
-initial_value_label = "Bright"
+name_label = "Negative"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
 [[parameter]]
 parameter_id = "toggle_switch_11"
 name_label = "Source"
 value_labels = ["Video", "Osc"]
 initial_value_label = "Video"
+
+# --- Linear Potentiometer (12) ---
+
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
 name_label = "Tear"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 350
+initial_value = 358
 display_float_digits = 0
 suffix_label = "%"
-[[preset]]
-name = "Default"
+
+# --- Presets (hand-written placeholders) ---
 
 [[preset]]
-name = "Clean Mirror"
+name = "Photo"
+rotary_potentiometer_1 = 387
+rotary_potentiometer_2 = 0
+rotary_potentiometer_3 = 614
+rotary_potentiometer_4 = 600
+rotary_potentiometer_5 = 323
+rotary_potentiometer_6 = 0
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 1
+linear_potentiometer_12 = 358
+
+[[preset]]
+name = "Ink Card"
+rotary_potentiometer_1 = 200
+rotary_potentiometer_2 = 0
+rotary_potentiometer_3 = 300
+rotary_potentiometer_4 = 512
+rotary_potentiometer_5 = 323
+rotary_potentiometer_6 = 128
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 1
+toggle_switch_10 = 0
+toggle_switch_11 = 0
 linear_potentiometer_12 = 0
 
 [[preset]]
-name = "Bold Shreds"
-toggle_switch_9 = 1
-rotary_potentiometer_5 = 800
-linear_potentiometer_12 = 900
+name = "Kaleido"
+rotary_potentiometer_1 = 640
+rotary_potentiometer_2 = 300
+rotary_potentiometer_3 = 614
+rotary_potentiometer_4 = 760
+rotary_potentiometer_5 = 0
+rotary_potentiometer_6 = 384
+toggle_switch_7 = 0
+toggle_switch_8 = 1
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 1
+linear_potentiometer_12 = 200
 
 [[preset]]
-name = "Dark Inkblot"
-toggle_switch_10 = 1
-rotary_potentiometer_1 = 300
-linear_potentiometer_12 = 400
-
+name = "Shredded"
+rotary_potentiometer_1 = 500
+rotary_potentiometer_2 = 0
+rotary_potentiometer_3 = 800
+rotary_potentiometer_4 = 700
+rotary_potentiometer_5 = 323
+rotary_potentiometer_6 = 0
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 1
+linear_potentiometer_12 = 1023
