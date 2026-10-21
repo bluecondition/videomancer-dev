@@ -1,103 +1,101 @@
-# Crenel - Heirloom #10 (2026-10-20), from WIN_20230223_01_46_41.
-# Pink crenellation combs over a navy field of blue relief-shaded video, torn in bands.
+# Crenel - Heirloom #10, v0.5.0 (2026-10-21): rebuilt from the photo WIN_20230223_01_46_41.
+# A picture tiled twice across the line by a bent horizontal oscillator: a row of hot-pink "+"
+# crenels with feedback echoes over a navy ground, a blue camera dome, pink V's, rows of camera
+# blocks / arcs / dashes, a pink arch ring and pink blocks below.  See crenel.vhd and SUMMARY.md.
 
 [program]
-processing_delay_clks = 20
+processing_delay_clks = 24
 program_id = "com.czartroniks.crenel"
 program_name = "Crenel"
-program_version = "0.1.0"
+program_version = "0.5.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
-categories = ["Glitch", "Edges", "Pattern"]
+categories = ["Pattern", "Glitch", "Color"]
 program_type = "processing"
-description = "Hot-pink crenellation combs over a navy field where the picture becomes blue chrome relief, torn sideways in bands."
+description = "Hot-pink crenels, camera domes, V's and arcs tiled twice by a bent oscillator; torn, echoing, rolling."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_1"
-name_label = "Pitch"
+name_label = "Crenels"
 control_mode = "linear"
-display_min_value = 0
-display_max_value = 100
-initial_value = 420
+display_min_value = 1
+display_max_value = 6
+initial_value = 410
 display_float_digits = 0
-suffix_label = "%"
+suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
-name_label = "Height"
+name_label = "Tiles"
 control_mode = "linear"
-display_min_value = 0
-display_max_value = 100
-initial_value = 300
-display_float_digits = 0
-suffix_label = "%"
+display_min_value = 1
+display_max_value = 4
+initial_value = 341
+display_float_digits = 1
+suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
-name_label = "Rows"
+name_label = "Echo"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 400
+initial_value = 460
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
-name_label = "Tear"
+name_label = "Drift"
 control_mode = "linear"
-display_min_value = 0
+display_min_value = -100
 display_max_value = 100
-initial_value = 260
+initial_value = 600
 display_float_digits = 0
-suffix_label = "%"
+suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
-name_label = "Hue"
+name_label = "Ripples"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 200
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
-name_label = "Threshold"
-control_mode = "linear"
-display_min_value = 0
-display_max_value = 100
-initial_value = 260
-display_float_digits = 0
-suffix_label = "%"
+name_label = "Palette"
+value_labels = ["Photo", "Ember", "Jade", "Rust"]
+initial_value_label = "Photo"
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
-name_label = "Combs"
-value_labels = ["Top", "Both"]
-initial_value_label = "Top"
-
-[[parameter]]
-parameter_id = "toggle_switch_8"
-name_label = "Relief"
-value_labels = ["Left", "Right"]
-initial_value_label = "Left"
-
-[[parameter]]
-parameter_id = "toggle_switch_9"
-name_label = "Vees"
+name_label = "Tear"
 value_labels = ["Off", "On"]
 initial_value_label = "On"
 
 [[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Outline"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Mirror"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
 parameter_id = "toggle_switch_10"
-name_label = "Tears"
-value_labels = ["Still", "Moving"]
-initial_value_label = "Moving"
+name_label = "Roll"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
@@ -107,32 +105,41 @@ initial_value_label = "Video"
 
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
-name_label = "Emboss"
+name_label = "Bend"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 500
+initial_value = 410
 display_float_digits = 0
 suffix_label = "%"
 
 [[preset]]
-name = "Default"
+name = "Photo"
+toggle_switch_11 = 1
 
 [[preset]]
 name = "Battlements"
-rotary_potentiometer_2 = 600
-rotary_potentiometer_3 = 700
-toggle_switch_7 = 1
-linear_potentiometer_12 = 300
-
-[[preset]]
-name = "Deep Chrome"
-rotary_potentiometer_4 = 0
-rotary_potentiometer_6 = 100
-linear_potentiometer_12 = 1023
-
-[[preset]]
-name = "Osc Violet"
-rotary_potentiometer_5 = 900
+linear_potentiometer_12 = 0
+toggle_switch_7 = 0
 toggle_switch_11 = 1
-linear_potentiometer_12 = 700
+
+[[preset]]
+name = "Torn Slashes"
+linear_potentiometer_12 = 1023
+rotary_potentiometer_3 = 800
+
+[[preset]]
+name = "Outline Echo"
+toggle_switch_8 = 1
+rotary_potentiometer_3 = 1023
+
+[[preset]]
+name = "Ember Roll"
+rotary_potentiometer_6 = 1
+toggle_switch_10 = 1
+
+[[preset]]
+name = "Jade Mirror"
+rotary_potentiometer_6 = 2
+toggle_switch_9 = 1
+rotary_potentiometer_1 = 600
