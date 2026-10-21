@@ -1,100 +1,105 @@
-# Ticker - Heirloom #20 (2026-10-20), from WIN_20230319_01_27_56.
-# Monochrome bars scrambled per row band with cyan dashes: a readout gone wrong.
+# Ticker - Heirloom #20 (rebuilt 2026-10-21), from WIN_20230319_01_27_56.
+# Camera video through a sample-and-hold mosaic: H-locked half cells, a line hold on two
+# free-running clocks with tall held bands, a cyan/white luma window key, soft edges.
 # See ticker.vhd and SUMMARY.md.
 
 [program]
-processing_delay_clks = 16
+processing_delay_clks = 36
 program_id = "com.czartroniks.ticker"
 program_name = "Ticker"
-program_version = "0.1.0"
+program_version = "0.5.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
-categories = ["Glitch", "Text", "Signal"]
+categories = ["Pixel", "Glitch", "Signal"]
 program_type = "processing"
-description = "Gray and white bars scrambled sideways per row band with cyan dashes, the picture in quantized grays beneath."
+description = "Sample-and-hold mosaic: half cells, rows on two drifting clocks, tall held bars, a cyan key, soft analog edges."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_1"
-name_label = "Bars"
-value_labels = ["16 px", "32 px", "64 px", "128 px"]
-initial_value_label = "32 px"
-
-[[parameter]]
-parameter_id = "rotary_potentiometer_2"
-name_label = "Bands"
+name_label = "Cells"
 control_mode = "linear"
-display_min_value = 16
-display_max_value = 271
-initial_value = 200
+display_min_value = 12
+display_max_value = 100
+initial_value = 346
 display_float_digits = 0
 suffix_label = ""
 
 [[parameter]]
-parameter_id = "rotary_potentiometer_3"
-name_label = "Dashes"
+parameter_id = "rotary_potentiometer_2"
+name_label = "Rows"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 300
+initial_value = 437
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Cyan"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
-name_label = "Levels"
+name_label = "Speed"
 control_mode = "linear"
-display_min_value = 2
-display_max_value = 64
-initial_value = 400
+display_min_value = -100
+display_max_value = 100
+initial_value = 640
 display_float_digits = 0
-suffix_label = ""
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
-name_label = "Reshuffle"
+name_label = "Gaps"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 200
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
-name_label = "Bars"
+name_label = "Shadow"
 control_mode = "linear"
 display_min_value = 0
-display_max_value = 100
-initial_value = 650
+display_max_value = 200
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
-name_label = "Dashes"
-value_labels = ["Cyan", "White"]
+name_label = "Picks"
+value_labels = ["Cyan", "Magenta"]
 initial_value_label = "Cyan"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
-name_label = "Bands"
-value_labels = ["Slide", "Static"]
-initial_value_label = "Slide"
+name_label = "Rows"
+value_labels = ["Roll", "Lock"]
+initial_value_label = "Roll"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
-name_label = "Invert"
-value_labels = ["Off", "On"]
-initial_value_label = "Off"
+name_label = "Edges"
+value_labels = ["Soft", "Hard"]
+initial_value_label = "Soft"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
-name_label = "Bars"
-value_labels = ["Blocks", "Columns"]
-initial_value_label = "Blocks"
+name_label = "Clocks"
+value_labels = ["Two", "One"]
+initial_value_label = "Two"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
@@ -104,11 +109,11 @@ initial_value_label = "Video"
 
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
-name_label = "Scramble"
+name_label = "Hold"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 500
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
@@ -117,20 +122,22 @@ name = "Default"
 
 [[preset]]
 name = "Readout"
-rotary_potentiometer_6 = 1023
-rotary_potentiometer_4 = 300
-toggle_switch_10 = 1
-linear_potentiometer_12 = 700
+toggle_switch_11 = 1
 
 [[preset]]
-name = "Gray Picture"
-rotary_potentiometer_6 = 100
-rotary_potentiometer_3 = 100
-linear_potentiometer_12 = 250
+name = "Meltdown"
+toggle_switch_11 = 1
+linear_potentiometer_12 = 1000
+rotary_potentiometer_4 = 820
 
 [[preset]]
-name = "Negative"
+name = "Fine Grain"
+rotary_potentiometer_1 = 900
+rotary_potentiometer_2 = 760
+linear_potentiometer_12 = 200
+
+[[preset]]
+name = "Magenta Hard"
 toggle_switch_7 = 1
 toggle_switch_9 = 1
-rotary_potentiometer_1 = 800
-linear_potentiometer_12 = 900
+rotary_potentiometer_3 = 300

@@ -48,8 +48,10 @@ rounded-diamond with an orange core and a 3-px yellow fringe.
   between the two. Store generated colours exactly as `rgb_to_hw10` returns them.
 - `.heirloom_work/tools/cmp.py OUT.png "label=img" "label=img" ...`: labelled vertical stack.
 - `.heirloom_work/tools/sim.sh <name> OUT.png [--video IMG] [run.py options]`: GHDL image sim.
-  Writes `OUT.png` in **hardware hues** (the tester renders u as Cb, so raw sims show generated
-  colours U/V-swapped) and `OUT_raw.png`. `--video IMG` feeds IMG as the source, pre-swapped, so video
+  Writes `OUT.png` in **exact hardware hues**, converted straight from the tester's raw 10-bit
+  `output.txt` (u = Cr, v = Cb) by `tools/raw2hw.py`, and `OUT_raw.png` (the tester's own render, which
+  shows generated colours U/V-swapped and clips near-gamut colours before any swap — never judge hue from
+  it). `--video IMG` feeds IMG as the source, pre-swapped, so video
   and generated colours both preview as on hardware. Example:
   `tools/sim.sh escalator rb_escalator/rtl.png --set toggle_switch_11=1 --decimation 2 --warmup-frames 3`.
   If it fails with "obsoleted by package", delete `.heirloom_work/simbuild/<name>` and rerun.
