@@ -1,0 +1,137 @@
+# Bunting - Heirloom #35 (2026-10-20), from WIN_20230521_23_37_25.
+# Yellow and cyan wedges fanning from the centre, rows of stepped glyph blocks carrying the picture.
+# See bunting.vhd and SUMMARY.md.
+
+[program]
+processing_delay_clks = 16
+program_id = "com.czartroniks.bunting"
+program_name = "Bunting"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Shape", "Grid", "Pattern"]
+program_type = "processing"
+description = "Yellow and cyan wedges fan from the centre over white; rows of stepped red and blue glyph blocks carry the picture."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Cell"
+control_mode = "linear"
+display_min_value = 8
+display_max_value = 135
+initial_value = 300
+display_float_digits = 0
+suffix_label = "px"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Columns"
+control_mode = "linear"
+display_min_value = 5
+display_max_value = 12
+initial_value = 450
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Wedges"
+control_mode = "linear"
+display_min_value = 1
+display_max_value = 15
+initial_value = 560
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Pair"
+value_labels = ["Yellow Cyan", "Magenta Green", "Red Blue", "Orange Violet"]
+initial_value_label = "Yellow Cyan"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Rows"
+control_mode = "linear"
+display_min_value = 5
+display_max_value = 20
+initial_value = 300
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Picture"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 350
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Mirror"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Glyphs"
+value_labels = ["On", "Off"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Drift"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Rows"
+value_labels = ["Red Blue", "Blue Red"]
+initial_value_label = "Red Blue"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Fan"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 400
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Default"
+
+[[preset]]
+name = "Flags Only"
+toggle_switch_8 = 1
+rotary_potentiometer_3 = 1023
+linear_potentiometer_12 = 700
+
+[[preset]]
+name = "Picture Blocks"
+rotary_potentiometer_6 = 1023
+rotary_potentiometer_1 = 100
+rotary_potentiometer_2 = 0
+rotary_potentiometer_5 = 0
+linear_potentiometer_12 = 200
+
+[[preset]]
+name = "Drifting Red"
+rotary_potentiometer_4 = 512
+toggle_switch_9 = 1
+toggle_switch_7 = 0
+linear_potentiometer_12 = 900

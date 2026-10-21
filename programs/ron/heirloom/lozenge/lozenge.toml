@@ -1,0 +1,134 @@
+# Lozenge - Heirloom #24 (2026-10-20), from WIN_20230410_01_10_37.
+# Nested diamonds in black / pink / olive cut by stripes, highlight lines on one side.
+# See lozenge.vhd and SUMMARY.md.
+
+[program]
+processing_delay_clks = 20
+program_id = "com.czartroniks.lozenge"
+program_name = "Lozenge"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Pattern", "Shape", "Illusion"]
+program_type = "processing"
+description = "Nested black, pink and olive diamonds cut by colour-swapping stripes, highlight lines on one side; the video pushes the rings."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Aspect"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 380
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Stripes"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 300
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Palette"
+value_labels = ["Pink Olive", "Cyan Navy", "Red Gold"]
+initial_value_label = "Pink Olive"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Highlight"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 120
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Drift"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 540
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Etch"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 300
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Stripes"
+value_labels = ["On", "Off"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Side"
+value_labels = ["Left", "Right"]
+initial_value_label = "Left"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Swap"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Twin"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Rings"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 260
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Default"
+
+[[preset]]
+name = "Fine Rings"
+rotary_potentiometer_4 = 40
+linear_potentiometer_12 = 900
+
+[[preset]]
+name = "Twin Cyan"
+rotary_potentiometer_3 = 512
+toggle_switch_10 = 1
+linear_potentiometer_12 = 400
+
+[[preset]]
+name = "Gold Etch"
+rotary_potentiometer_3 = 1000
+rotary_potentiometer_6 = 900
+toggle_switch_7 = 1
+linear_potentiometer_12 = 500

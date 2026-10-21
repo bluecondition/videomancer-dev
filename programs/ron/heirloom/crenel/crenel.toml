@@ -1,0 +1,138 @@
+# Crenel - Heirloom #10 (2026-10-20), from WIN_20230223_01_46_41.
+# Pink crenellation combs over a navy field of blue relief-shaded video, torn in bands.
+
+[program]
+processing_delay_clks = 20
+program_id = "com.czartroniks.crenel"
+program_name = "Crenel"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Glitch", "Edges", "Pattern"]
+program_type = "processing"
+description = "Hot-pink crenellation combs over a navy field where the picture becomes blue chrome relief, torn sideways in bands."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Pitch"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 420
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Height"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 300
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Rows"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 400
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Tear"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 260
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Hue"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 200
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Threshold"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 260
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Combs"
+value_labels = ["Top", "Both"]
+initial_value_label = "Top"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Relief"
+value_labels = ["Left", "Right"]
+initial_value_label = "Left"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Vees"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Tears"
+value_labels = ["Still", "Moving"]
+initial_value_label = "Moving"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Emboss"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 500
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Default"
+
+[[preset]]
+name = "Battlements"
+rotary_potentiometer_2 = 600
+rotary_potentiometer_3 = 700
+toggle_switch_7 = 1
+linear_potentiometer_12 = 300
+
+[[preset]]
+name = "Deep Chrome"
+rotary_potentiometer_4 = 0
+rotary_potentiometer_6 = 100
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Osc Violet"
+rotary_potentiometer_5 = 900
+toggle_switch_11 = 1
+linear_potentiometer_12 = 700

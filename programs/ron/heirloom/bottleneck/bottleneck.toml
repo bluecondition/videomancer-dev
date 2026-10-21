@@ -1,0 +1,135 @@
+# Bottleneck - Heirloom #28 (2026-10-20), from WIN_20230429_22_57_43.
+# Two pink bottles against smeared blue/green/black bands.
+
+[program]
+processing_delay_clks = 20
+program_id = "com.czartroniks.bottleneck"
+program_name = "Bottleneck"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Shape", "Signal", "Mask"]
+program_type = "processing"
+description = "Two pink bottle silhouettes with lime rims against blue, green and black bands smeared sideways. Smear on the slider."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Bands"
+control_mode = "linear"
+display_min_value = 2
+display_max_value = 33
+initial_value = 200
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Width"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 400
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Rim"
+control_mode = "linear"
+display_min_value = 2
+display_max_value = 33
+initial_value = 250
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Hue"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 360
+initial_value = 0
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Spacing"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 600
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Drift"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 540
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Bottles"
+value_labels = ["One", "Two"]
+initial_value_label = "Two"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Rim"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Colours"
+value_labels = ["Pink", "Lime"]
+initial_value_label = "Pink"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Bands"
+value_labels = ["Still", "Rolling"]
+initial_value_label = "Still"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Smear"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 500
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Default"
+
+[[preset]]
+name = "Clean Bottles"
+linear_potentiometer_12 = 0
+
+[[preset]]
+name = "Lime Rolling"
+toggle_switch_9 = 1
+toggle_switch_10 = 1
+linear_potentiometer_12 = 700
+
+[[preset]]
+name = "One Wide"
+toggle_switch_7 = 0
+rotary_potentiometer_2 = 900
+linear_potentiometer_12 = 300

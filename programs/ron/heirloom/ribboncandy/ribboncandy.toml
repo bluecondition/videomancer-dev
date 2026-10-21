@@ -1,0 +1,135 @@
+# Ribboncandy - Heirloom #39 (2026-10-20), from WIN_20230530_22_27.
+# S-curved gradient ribbons over a glyph-block field.
+# See ribboncandy.vhd and SUMMARY.md.
+
+[program]
+processing_delay_clks = 20
+program_id = "com.czartroniks.ribboncandy"
+program_name = "Ribboncandy"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Curve", "Pattern", "Grid"]
+program_type = "processing"
+description = "Vertical S-curved two-colour ribbons wobbling over a black-and-white block field with CMY dashes. Wobble on the slider."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Ribbons"
+control_mode = "linear"
+display_min_value = 1
+display_max_value = 8
+initial_value = 448
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Width"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 300
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Pitch"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 400
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Blocks"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 300
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Hue"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 7
+initial_value = 0
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Drift"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 580
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Ribbons"
+value_labels = ["Flat", "Gradient"]
+initial_value_label = "Gradient"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Ground"
+value_labels = ["Blocks", "Source"]
+initial_value_label = "Blocks"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Dashes"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Mirror"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Wobble"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 400
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Default"
+
+[[preset]]
+name = "Picture Ground"
+toggle_switch_8 = 1
+rotary_potentiometer_4 = 600
+
+[[preset]]
+name = "Wild Mirror"
+toggle_switch_10 = 1
+linear_potentiometer_12 = 900
+
+[[preset]]
+name = "Straight Bars"
+linear_potentiometer_12 = 0
+rotary_potentiometer_1 = 1000

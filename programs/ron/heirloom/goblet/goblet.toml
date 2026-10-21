@@ -1,0 +1,136 @@
+# Goblet - Heirloom #49 (2026-10-20), from WIN_20230916_01_08_00.
+# A cyan glass goblet outline over rainbow stripes or the picture.
+
+[program]
+processing_delay_clks = 20
+program_id = "com.czartroniks.goblet"
+program_name = "Goblet"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Shape", "Pattern", "Render"]
+program_type = "processing"
+description = "A cyan glass goblet with chrome highlights drawn over rainbow stripes or the picture. Goblet size on the slider."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Stripes"
+control_mode = "linear"
+display_min_value = 1
+display_max_value = 64
+initial_value = 240
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Width"
+control_mode = "linear"
+display_min_value = 4
+display_max_value = 67
+initial_value = 300
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Hue"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 360
+initial_value = 0
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Wobble"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 150
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Drift"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 540
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Highlight"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 500
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Mirror"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Fill"
+value_labels = ["Stripes", "Picture"]
+initial_value_label = "Stripes"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Goblet"
+value_labels = ["Outline", "Filled"]
+initial_value_label = "Outline"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Palette"
+value_labels = ["Rainbow", "Warm"]
+initial_value_label = "Rainbow"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Goblet"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 230
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Default"
+
+[[preset]]
+name = "Big Glass"
+rotary_potentiometer_2 = 600
+linear_potentiometer_12 = 700
+
+[[preset]]
+name = "Filled Picture"
+toggle_switch_8 = 1
+toggle_switch_9 = 1
+linear_potentiometer_12 = 400
+
+[[preset]]
+name = "Warm Wobble"
+rotary_potentiometer_4 = 800
+toggle_switch_10 = 1
+linear_potentiometer_12 = 300

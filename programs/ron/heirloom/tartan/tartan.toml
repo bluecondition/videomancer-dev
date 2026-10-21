@@ -1,0 +1,133 @@
+# Tartan - Heirloom #25 (2026-10-20), from WIN_20230410_01_13_24.
+# Diagonal stripes sliced into offset, recoloured bands, keyed black by the picture.
+# See tartan.vhd and SUMMARY.md.
+
+[program]
+processing_delay_clks = 16
+program_id = "com.czartroniks.tartan"
+program_name = "Tartan"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Pattern", "Glitch", "Mask"]
+program_type = "processing"
+description = "A diagonal stripe field sliced into bands that slide sideways and recolour, black bars across, the picture keying it to black."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Pitch"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 220
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Angle"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 700
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Band"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 180
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Palette"
+value_labels = ["Tartan", "Neon", "Earth", "Mono"]
+initial_value_label = "Tartan"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Black"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 300
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Speed"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 540
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Offsets"
+value_labels = ["Random", "Stepped"]
+initial_value_label = "Random"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Rotate"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Bars"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Flip"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Slice"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 500
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Default"
+
+[[preset]]
+name = "Unbroken"
+toggle_switch_9 = 0
+linear_potentiometer_12 = 0
+
+[[preset]]
+name = "Staircase"
+toggle_switch_7 = 1
+rotary_potentiometer_3 = 60
+linear_potentiometer_12 = 400
+
+[[preset]]
+name = "Neon Shreds"
+rotary_potentiometer_4 = 320
+rotary_potentiometer_5 = 600
+linear_potentiometer_12 = 1023

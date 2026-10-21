@@ -1,0 +1,135 @@
+# Tangram - Heirloom #9 (2026-10-20), from WIN_20230222_00_06_47.
+# Three stripe fields keyed into each other by the picture, seams torn sideways.
+# See tangram.vhd and SUMMARY.md.
+
+[program]
+processing_delay_clks = 16
+program_id = "com.czartroniks.tangram"
+program_name = "Tangram"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Pattern", "Vision", "Glitch"]
+program_type = "processing"
+description = "Three stripe fields - diagonals, verticals, counter-diagonals - keyed into each other by the picture, seams torn sideways."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Pitch 1"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 160
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Pitch 2"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 240
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Angle"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 300
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Shear"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 260
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Rate"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 120
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Hue"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 360
+initial_value = 0
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Field 3"
+value_labels = ["Solid", "Rainbow"]
+initial_value_label = "Rainbow"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Shear"
+value_labels = ["Right", "Left"]
+initial_value_label = "Right"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Key"
+value_labels = ["Hard", "Soft"]
+initial_value_label = "Hard"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Move"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Key"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 500
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Default"
+
+[[preset]]
+name = "Field One"
+linear_potentiometer_12 = 0
+
+[[preset]]
+name = "Fine Weave"
+rotary_potentiometer_4 = 600
+toggle_switch_9 = 1
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Osc Tangram"
+toggle_switch_11 = 1
+linear_potentiometer_12 = 650

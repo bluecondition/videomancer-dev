@@ -1,0 +1,136 @@
+# Spearhead - Heirloom #5 (2026-10-20), from WIN_20230103_01_29_30.
+# Nested-outline spearheads plunging over a pastel mosaic of the picture.
+# See spearhead.vhd and SUMMARY.md.
+
+[program]
+processing_delay_clks = 16
+program_id = "com.czartroniks.spearhead"
+program_name = "Spearhead"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Shape", "Pixel", "Pattern"]
+program_type = "processing"
+description = "Spearheads of nested black / magenta / yellow / blue outlines plunge over a pastel mosaic of the picture. Plunge on the slider."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Cells"
+value_labels = ["1", "2", "4"]
+initial_value_label = "2"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Width"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 520
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Rings"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 300
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Mosaic"
+control_mode = "linear"
+display_min_value = 8
+display_max_value = 263
+initial_value = 180
+display_float_digits = 0
+suffix_label = "px"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Wash"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 480
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Bob"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 200
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Point"
+value_labels = ["Down", "Up"]
+initial_value_label = "Down"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Mosaic"
+value_labels = ["On", "Off"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Palette"
+value_labels = ["A", "B"]
+initial_value_label = "A"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Bands"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Plunge"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 520
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Default"
+
+[[preset]]
+name = "Four Tips"
+rotary_potentiometer_1 = 1000
+rotary_potentiometer_2 = 300
+linear_potentiometer_12 = 350
+
+[[preset]]
+name = "Giant Rings"
+rotary_potentiometer_1 = 0
+rotary_potentiometer_2 = 1023
+rotary_potentiometer_3 = 700
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Cool Up"
+toggle_switch_7 = 1
+toggle_switch_9 = 1
+rotary_potentiometer_4 = 60
+linear_potentiometer_12 = 600

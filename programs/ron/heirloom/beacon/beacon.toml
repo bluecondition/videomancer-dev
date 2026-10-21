@@ -1,0 +1,134 @@
+# Beacon - Heirloom #26 (2026-10-20), from WIN_20230424_23_53_49.
+# A white flame over blue/black blocks with dashed tears.
+
+[program]
+processing_delay_clks = 20
+program_id = "com.czartroniks.beacon"
+program_name = "Beacon"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Shape", "Render", "Glitch"]
+program_type = "processing"
+description = "A glowing white flame over blue and black blocks torn into dashes, the picture lighting the blocks. Flame height on the slider."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Blue"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 350
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Blocks"
+value_labels = ["16", "32", "64", "128"]
+initial_value_label = "64"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Dashes"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 300
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Cone"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 300
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Glow"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 400
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Flicker"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 200
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Blocks"
+value_labels = ["On", "Off"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Dashes"
+value_labels = ["On", "Off"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Flame"
+value_labels = ["White", "Warm"]
+initial_value_label = "White"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Cone"
+value_labels = ["Solid", "Filled"]
+initial_value_label = "Solid"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Flame"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 500
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Default"
+
+[[preset]]
+name = "Spire"
+rotary_potentiometer_4 = 120
+rotary_potentiometer_5 = 700
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Warm Pyre"
+toggle_switch_9 = 1
+toggle_switch_10 = 1
+rotary_potentiometer_6 = 700
+linear_potentiometer_12 = 400
+
+[[preset]]
+name = "Flame Alone"
+toggle_switch_7 = 1
+toggle_switch_8 = 1
+linear_potentiometer_12 = 700

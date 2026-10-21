@@ -1,0 +1,136 @@
+# Shield - Heirloom #38 (2026-10-20), from WIN_20230529_22_56_41.
+# Heraldic shields: striped arches over V chevrons, N across, mirrored.
+
+[program]
+processing_delay_clks = 20
+program_id = "com.czartroniks.shield"
+program_name = "Shield"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Shape", "Pattern", "Mirror"]
+program_type = "processing"
+description = "Heraldic shields across the screen: orange striped arches over blue, red and black chevrons, the picture inside."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Cells"
+control_mode = "linear"
+display_min_value = 1
+display_max_value = 4
+initial_value = 384
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Stripes"
+control_mode = "linear"
+display_min_value = 2
+display_max_value = 33
+initial_value = 300
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Chevrons"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 300
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Slope"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 500
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Drift"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 540
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Edge"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 500
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Mirror"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Palette"
+value_labels = ["Heraldic", "Cool"]
+initial_value_label = "Heraldic"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Fill"
+value_labels = ["Stripes", "Picture"]
+initial_value_label = "Stripes"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Chevrons"
+value_labels = ["Down", "Up"]
+initial_value_label = "Down"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Arch"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 600
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Default"
+
+[[preset]]
+name = "Four Shields"
+rotary_potentiometer_1 = 900
+linear_potentiometer_12 = 700
+
+[[preset]]
+name = "Cool Picture"
+toggle_switch_8 = 1
+toggle_switch_9 = 1
+linear_potentiometer_12 = 900
+
+[[preset]]
+name = "Chevrons Only"
+rotary_potentiometer_3 = 600
+toggle_switch_10 = 1
+linear_potentiometer_12 = 0

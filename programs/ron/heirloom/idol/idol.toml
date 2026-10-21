@@ -1,0 +1,132 @@
+# Idol - Heirloom #31 (2026-10-20), from WIN_20230515_23_14_37.
+# A mirrored relief-shaded column of the picture on flat yellow.
+
+[program]
+processing_delay_clks = 20
+program_id = "com.czartroniks.idol"
+program_name = "Idol"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Mirror", "Edges", "Color"]
+program_type = "processing"
+description = "A mirrored column of the picture in blue and orange chrome relief, smeared sideways, standing on flat yellow."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Smear"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 300
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Relief"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 500
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Palette"
+value_labels = ["Blue Orange", "Green Magenta", "Cyan Red", "Violet Yellow"]
+initial_value_label = "Blue Orange"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Poster"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 400
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Centre"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Sway"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 200
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Mirror"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Shading"
+value_labels = ["Relief", "Flat"]
+initial_value_label = "Relief"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Lit"
+value_labels = ["Left", "Right"]
+initial_value_label = "Left"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Sides"
+value_labels = ["Yellow", "Picture"]
+initial_value_label = "Yellow"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Column"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 520
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Default"
+
+[[preset]]
+name = "Full Chrome"
+rotary_potentiometer_2 = 800
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Flat Mask"
+rotary_potentiometer_4 = 700
+toggle_switch_8 = 1
+linear_potentiometer_12 = 400
+
+[[preset]]
+name = "Osc Pillar"
+rotary_potentiometer_6 = 700
+toggle_switch_11 = 1
+linear_potentiometer_12 = 250

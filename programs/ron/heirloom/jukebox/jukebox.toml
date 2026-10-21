@@ -1,0 +1,133 @@
+# Jukebox - Heirloom #16 (2026-10-20), from WIN_20230315_00_28_42.
+# Tall panels of rainbow rounded-square rings. See jukebox.vhd and SUMMARY.md.
+
+[program]
+processing_delay_clks = 20
+program_id = "com.czartroniks.jukebox"
+program_name = "Jukebox"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Pattern", "Grid", "Demo"]
+program_type = "processing"
+description = "Tall panels lit by rainbow rounded-square rings mirrored top to bottom, the picture etched into the rings. Zoom on the slider."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Panels"
+control_mode = "linear"
+display_min_value = 1
+display_max_value = 16
+initial_value = 600
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Round"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 400
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Hue"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 540
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Palette"
+value_labels = ["Rainbow", "Warm", "Cool", "Neon"]
+initial_value_label = "Rainbow"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Centre"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Etch"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 250
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Mirror"
+value_labels = ["On", "Off"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Rings"
+value_labels = ["Smooth", "Hard"]
+initial_value_label = "Smooth"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Rows"
+value_labels = ["One", "Two"]
+initial_value_label = "Two"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Invert"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Zoom"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 300
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Default"
+
+[[preset]]
+name = "Wide Rings"
+rotary_potentiometer_1 = 200
+toggle_switch_9 = 0
+linear_potentiometer_12 = 100
+
+[[preset]]
+name = "Neon Bars"
+rotary_potentiometer_4 = 960
+toggle_switch_8 = 1
+linear_potentiometer_12 = 700
+
+[[preset]]
+name = "Cool Scroll"
+rotary_potentiometer_3 = 760
+rotary_potentiometer_4 = 640
+linear_potentiometer_12 = 450

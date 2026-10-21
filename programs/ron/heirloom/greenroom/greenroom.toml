@@ -1,0 +1,140 @@
+# Greenroom - Heirloom #54 (2026-10-20), from television.jpg (painted collage).
+# A green painterly field with a television window showing the video.
+# See greenroom.vhd and SUMMARY.md.
+
+[program]
+processing_delay_clks = 20
+program_id = "com.czartroniks.greenroom"
+program_name = "Greenroom"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Material", "Mask", "Craft"]
+program_type = "processing"
+description = "A painted collage: green and teal washes with orange splatters, a television set in the middle showing the video."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Splatter"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 180
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Scale"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 300
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Contrast"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 520
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Bezel"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 127
+initial_value = 240
+display_float_digits = 0
+suffix_label = "px"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Drift"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 560
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Position"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Window"
+value_labels = ["TV", "Full"]
+initial_value_label = "TV"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Splatter"
+value_labels = ["Orange", "Palette"]
+initial_value_label = "Orange"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Palette"
+value_labels = ["Green", "Blue"]
+initial_value_label = "Green"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Wash"
+value_labels = ["Green", "Clean"]
+initial_value_label = "Green"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Tune"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 380
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Default"
+
+[[preset]]
+name = "Big Screen"
+rotary_potentiometer_4 = 500
+toggle_switch_10 = 1
+linear_potentiometer_12 = 900
+
+[[preset]]
+name = "Paint Over"
+rotary_potentiometer_1 = 600
+rotary_potentiometer_2 = 700
+toggle_switch_7 = 1
+linear_potentiometer_12 = 500
+
+[[preset]]
+name = "Blue Room"
+rotary_potentiometer_1 = 350
+toggle_switch_8 = 1
+toggle_switch_9 = 1
+linear_potentiometer_12 = 250

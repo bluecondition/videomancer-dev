@@ -1,0 +1,139 @@
+# Cutout - Heirloom #55 (2026-10-20), from tezcatlipoca.jpg (paper collage).
+# A head cut out of a yellow ground, filled with the video torn into pieces.
+# See cutout.vhd and SUMMARY.md.
+
+[program]
+processing_delay_clks = 20
+program_id = "com.czartroniks.cutout"
+program_name = "Cutout"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Mask", "Shape", "Craft"]
+program_type = "processing"
+description = "A collage head cut out of a flat yellow ground, filled with the video torn into blue and teal paper pieces."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Tear"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 250
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Levels"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 400
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Centre"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Cream"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 100
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Pieces"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 400
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Sway"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Profile"
+value_labels = ["Head", "Oval"]
+initial_value_label = "Head"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Pieces"
+value_labels = ["Torn", "Plain"]
+initial_value_label = "Torn"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Palette"
+value_labels = ["Blue", "Warm"]
+initial_value_label = "Blue"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Outline"
+value_labels = ["On", "Off"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Head"
+control_mode = "linear"
+display_min_value = 25
+display_max_value = 125
+initial_value = 700
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Default"
+
+[[preset]]
+name = "Plain Oval"
+toggle_switch_7 = 1
+toggle_switch_8 = 1
+linear_potentiometer_12 = 800
+
+[[preset]]
+name = "Warm Pieces"
+rotary_potentiometer_1 = 600
+rotary_potentiometer_4 = 700
+toggle_switch_9 = 1
+linear_potentiometer_12 = 600
+
+[[preset]]
+name = "Giant Head"
+rotary_potentiometer_5 = 900
+toggle_switch_10 = 1
+linear_potentiometer_12 = 1023

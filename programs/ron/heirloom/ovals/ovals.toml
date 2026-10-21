@@ -1,0 +1,137 @@
+# Ovals - Heirloom #50 (2026-10-20), from WIN_20231003_23_01_50.
+# A lattice of rimmed lenses on a hot-pink ground. See ovals.vhd and SUMMARY.md.
+
+[program]
+processing_delay_clks = 16
+program_id = "com.czartroniks.ovals"
+program_name = "Ovals"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Pattern", "Grid", "Optics"]
+program_type = "processing"
+description = "A lattice of lenses with white and orange cores and green-blue rims on a streaked hot-pink ground, the picture in the cores."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Cells"
+control_mode = "linear"
+display_min_value = 2
+display_max_value = 17
+initial_value = 320
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Rows"
+control_mode = "linear"
+display_min_value = 1
+display_max_value = 8
+initial_value = 200
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Core"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 260
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Smear"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 7
+initial_value = 500
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Drift"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 540
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Aspect"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 300
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Offset"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Palette"
+value_labels = ["Warm", "Cool"]
+initial_value_label = "Warm"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Rim"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Ground"
+value_labels = ["Pink", "Picture"]
+initial_value_label = "Pink"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Lens"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 600
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Default"
+
+[[preset]]
+name = "Small Beads"
+rotary_potentiometer_1 = 900
+rotary_potentiometer_2 = 600
+linear_potentiometer_12 = 250
+
+[[preset]]
+name = "Cool Lattice"
+toggle_switch_8 = 1
+toggle_switch_10 = 1
+linear_potentiometer_12 = 950
+
+[[preset]]
+name = "Orange Suns"
+rotary_potentiometer_3 = 700
+toggle_switch_9 = 0
+linear_potentiometer_12 = 700

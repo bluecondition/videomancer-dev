@@ -1,0 +1,137 @@
+# Abacus - Heirloom #42 (2026-10-20), from WIN_20230605_01_03_50.
+# Rows of glossy beads lit from above. See abacus.vhd and SUMMARY.md.
+
+[program]
+processing_delay_clks = 16
+program_id = "com.czartroniks.abacus"
+program_name = "Abacus"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Shape", "Grid", "Render"]
+program_type = "processing"
+description = "Rows of glossy beads in red, blue and green, lit from above with a chrome rim, the picture glowing inside them."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Cells"
+control_mode = "linear"
+display_min_value = 1
+display_max_value = 16
+initial_value = 480
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Rows"
+control_mode = "linear"
+display_min_value = 1
+display_max_value = 8
+initial_value = 320
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Shade"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 500
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Hue"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 7
+initial_value = 0
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Drift"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 540
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Rim"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 300
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Mirror"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Palette"
+value_labels = ["RGB", "Warm"]
+initial_value_label = "RGB"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Rim"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Shape"
+value_labels = ["Beads", "Tubes"]
+initial_value_label = "Beads"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Beads"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 700
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Default"
+
+[[preset]]
+name = "Tiny Dots"
+rotary_potentiometer_1 = 1023
+rotary_potentiometer_2 = 900
+linear_potentiometer_12 = 350
+
+[[preset]]
+name = "Warm Tubes"
+toggle_switch_8 = 1
+toggle_switch_10 = 1
+linear_potentiometer_12 = 800
+
+[[preset]]
+name = "Sliding Rows"
+rotary_potentiometer_5 = 760
+toggle_switch_7 = 1
+linear_potentiometer_12 = 900

@@ -1,0 +1,131 @@
+# Marmalade - Heirloom #14 (2026-10-20), from WIN_20230307_23_36_05.
+# Orange / magenta / yellow block bands slid sideways, the picture block-torn under them.
+# See marmalade.vhd and SUMMARY.md.
+
+[program]
+processing_delay_clks = 16
+program_id = "com.czartroniks.marmalade"
+program_name = "Marmalade"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Glitch", "Grid", "Color"]
+program_type = "processing"
+description = "Mondrian blocks of orange, magenta and yellow in row bands slid sideways, the picture block-torn and painted beneath."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Blocks"
+value_labels = ["16 px", "32 px", "64 px", "128 px"]
+initial_value_label = "64 px"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Bands"
+control_mode = "linear"
+display_min_value = 16
+display_max_value = 271
+initial_value = 300
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Palette"
+value_labels = ["Marmalade", "Mint", "Berry", "Ash"]
+initial_value_label = "Marmalade"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Reshuffle"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 160
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Levels"
+control_mode = "linear"
+display_min_value = 2
+display_max_value = 64
+initial_value = 400
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Paint"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 700
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Slide"
+value_labels = ["Alternate", "Same"]
+initial_value_label = "Alternate"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Bands"
+value_labels = ["Random", "Even"]
+initial_value_label = "Random"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Outlines"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Luma"
+value_labels = ["Posterized", "Smooth"]
+initial_value_label = "Posterized"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Slide"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 450
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Default"
+
+[[preset]]
+name = "Pure Blocks"
+rotary_potentiometer_6 = 1023
+toggle_switch_9 = 1
+linear_potentiometer_12 = 600
+
+[[preset]]
+name = "Torn Picture"
+rotary_potentiometer_6 = 150
+toggle_switch_10 = 1
+linear_potentiometer_12 = 900
+
+[[preset]]
+name = "Berry Jam"
+rotary_potentiometer_3 = 576
+rotary_potentiometer_1 = 1000
+rotary_potentiometer_2 = 120
+linear_potentiometer_12 = 300
