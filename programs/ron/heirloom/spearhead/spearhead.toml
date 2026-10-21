@@ -1,30 +1,34 @@
-# Spearhead - Heirloom #5 (2026-10-20), from WIN_20230103_01_29_30.
-# Nested-outline spearheads plunging over a pastel mosaic of the picture.
-# See spearhead.vhd and SUMMARY.md.
+# Spearhead - Heirloom #5 rebuild (2026-10-21), from WIN_20230103_01_29_30.
+# Two spearheads of XOR-coloured outline bands, re-coloured row by row, a mosaic shadow
+# thrown to the right, over pastel rows with V chevrons.  See spearhead.vhd and SUMMARY.md.
 
 [program]
 processing_delay_clks = 16
 program_id = "com.czartroniks.spearhead"
 program_name = "Spearhead"
-program_version = "0.1.0"
+program_version = "0.5.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Shape", "Pixel", "Pattern"]
 program_type = "processing"
-description = "Spearheads of nested black / magenta / yellow / blue outlines plunge over a pastel mosaic of the picture. Plunge on the slider."
+description = "Spearheads of XOR-coloured outline bands, re-coloured row by row, a mosaic shadow at their side. Thrust on the slider."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_1"
-name_label = "Cells"
-value_labels = ["1", "2", "4"]
-initial_value_label = "2"
+name_label = "Spears"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 456
+display_float_digits = 0
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
-name_label = "Width"
+name_label = "Taper"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
@@ -34,67 +38,67 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
-name_label = "Rings"
+name_label = "Bands"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 300
+initial_value = 472
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
-name_label = "Mosaic"
+name_label = "Speed"
 control_mode = "linear"
-display_min_value = 8
-display_max_value = 263
-initial_value = 180
+display_min_value = -100
+display_max_value = 100
+initial_value = 640
 display_float_digits = 0
-suffix_label = "px"
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
-name_label = "Wash"
+name_label = "Mosaic"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 480
+initial_value = 488
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
-name_label = "Bob"
+name_label = "Bend"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 200
+initial_value = 64
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
-name_label = "Point"
-value_labels = ["Down", "Up"]
-initial_value_label = "Down"
+name_label = "Shadow"
+value_labels = ["On", "Off"]
+initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
-name_label = "Mosaic"
+name_label = "Rows"
 value_labels = ["On", "Off"]
 initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
 name_label = "Palette"
-value_labels = ["A", "B"]
-initial_value_label = "A"
+value_labels = ["Photo", "Alt"]
+initial_value_label = "Photo"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
-name_label = "Bands"
-value_labels = ["Off", "On"]
-initial_value_label = "On"
+name_label = "Point"
+value_labels = ["Down", "Up"]
+initial_value_label = "Down"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
@@ -104,33 +108,34 @@ initial_value_label = "Video"
 
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
-name_label = "Plunge"
+name_label = "Thrust"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 520
+initial_value = 424
 display_float_digits = 0
 suffix_label = "%"
 
 [[preset]]
-name = "Default"
+name = "Photo"
 
 [[preset]]
-name = "Four Tips"
-rotary_potentiometer_1 = 1000
-rotary_potentiometer_2 = 300
-linear_potentiometer_12 = 350
+name = "Needles"
+rotary_potentiometer_1 = 640
+linear_potentiometer_12 = 180
 
 [[preset]]
-name = "Giant Rings"
-rotary_potentiometer_1 = 0
-rotary_potentiometer_2 = 1023
-rotary_potentiometer_3 = 700
-linear_potentiometer_12 = 1023
+name = "Interlock"
+rotary_potentiometer_3 = 600
+linear_potentiometer_12 = 1000
 
 [[preset]]
-name = "Cool Up"
+name = "Plain Bands"
 toggle_switch_7 = 1
-toggle_switch_9 = 1
-rotary_potentiometer_4 = 60
-linear_potentiometer_12 = 600
+toggle_switch_8 = 1
+rotary_potentiometer_4 = 512
+
+[[preset]]
+name = "Big Blocks"
+rotary_potentiometer_5 = 900
+rotary_potentiometer_4 = 760
