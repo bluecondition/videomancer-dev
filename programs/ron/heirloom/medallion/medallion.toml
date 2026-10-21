@@ -1,100 +1,104 @@
-# Medallion - Heirloom #12 (2026-10-20), from WIN_20230305_23_51_38.
-# Warm chevron-folded stripes with a central circle showing the video as a hard plaid.
-# See medallion.vhd and SUMMARY.md.
+# Medallion - Heirloom #12, rebuilt 2026-10-21 (v0.5.0) from WIN_20230305_23_51_38.
+# Two diamonds of stepped fire rings cut by MSB-flipping stripes; an oval medallion keys in a CMY plaid.
+# See medallion.vhd, medallion.py (fitted constants) and SUMMARY.md.
 
 [program]
-processing_delay_clks = 20
+processing_delay_clks = 24
 program_id = "com.czartroniks.medallion"
 program_name = "Medallion"
-program_version = "0.1.0"
+program_version = "0.5.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Pattern", "Mask", "Color"]
 program_type = "processing"
-description = "Warm stripes folded into two chevron systems, a round medallion in the middle showing the video as a hard plaid."
+description = "Two diamonds of stepped fire rings, flipped by horizontal stripes; a medallion in the middle shows a CMY plaid."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_1"
-name_label = "Pitch"
+name_label = "Diamonds"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 300
+initial_value = 468
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
-name_label = "Slope"
+name_label = "Rings"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 480
+initial_value = 521
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
-name_label = "Spread"
+name_label = "Reach"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 200
+initial_value = 420
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
-name_label = "Palette"
-value_labels = ["Warm", "Cool", "Rainbow"]
-initial_value_label = "Warm"
+name_label = "Stripes"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 534
+display_float_digits = 0
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
-name_label = "Offset"
+name_label = "Speed"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 512
+initial_value = 680
 display_float_digits = 0
 suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
-name_label = "Speed"
+name_label = "Etch"
 control_mode = "linear"
-display_min_value = -100
+display_min_value = 0
 display_max_value = 100
-initial_value = 540
+initial_value = 396
 display_float_digits = 0
-suffix_label = ""
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
-name_label = "Plaid"
-value_labels = ["Hard", "Soft"]
-initial_value_label = "Hard"
+name_label = "Flip"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
-name_label = "Bands"
-value_labels = ["8", "4"]
-initial_value_label = "8"
+name_label = "Steps"
+value_labels = ["Posterize", "Smooth"]
+initial_value_label = "Posterize"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
-name_label = "Point"
-value_labels = ["Outward", "Inward"]
-initial_value_label = "Outward"
+name_label = "Swap"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
-name_label = "Ring"
-value_labels = ["Off", "On"]
-initial_value_label = "Off"
+name_label = "Wave"
+value_labels = ["Tri", "Saw"]
+initial_value_label = "Tri"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
@@ -108,27 +112,33 @@ name_label = "Medallion"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 420
+initial_value = 487
 display_float_digits = 0
 suffix_label = "%"
 
 [[preset]]
-name = "Default"
+name = "Photo"
 
 [[preset]]
-name = "Cool Coin"
-rotary_potentiometer_4 = 512
-toggle_switch_10 = 1
-linear_potentiometer_12 = 200
+name = "Open Field"
+linear_potentiometer_12 = 0
 
 [[preset]]
-name = "Rainbow Hole"
-rotary_potentiometer_2 = 800
-rotary_potentiometer_4 = 1000
-toggle_switch_7 = 1
-linear_potentiometer_12 = 700
-
-[[preset]]
-name = "Plaid Screen"
-toggle_switch_11 = 1
+name = "Test Card"
 linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Swapped"
+toggle_switch_9 = 1
+linear_potentiometer_12 = 400
+
+[[preset]]
+name = "Saw Smooth"
+toggle_switch_8 = 1
+toggle_switch_10 = 1
+
+[[preset]]
+name = "Dense Rings"
+rotary_potentiometer_2 = 900
+rotary_potentiometer_3 = 1023
+rotary_potentiometer_4 = 760
