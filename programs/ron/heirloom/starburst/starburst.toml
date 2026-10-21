@@ -1,18 +1,19 @@
-# Starburst - Heirloom #3 (2026-10-20), from WIN_20221122_23_37_36.
-# Mirror-cell kaleidoscope of saddle contour bands, the video etched into them.
+# Starburst - Heirloom #3, rebuilt 2026-10-21 from WIN_20221122_23_37_36.
+# A four-fold mirror kaleidoscope of a fitted source pattern: white and grey bowties,
+# CMYK chevrons, diamond rings, sawtooth teeth, a feathered grey X and a yellow starburst.
 # See starburst.vhd and SUMMARY.md.
 
 [program]
-processing_delay_clks = 20
+processing_delay_clks = 36
 program_id = "com.czartroniks.starburst"
 program_name = "Starburst"
-program_version = "0.2.0"
+program_version = "0.5.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Mirror", "Pattern", "Illusion"]
 program_type = "processing"
-description = "A mirror-cell kaleidoscope of X's and chevron bands in CMYK with serrated edges, the picture etched into the bands."
+description = "Mirror kaleidoscope of grey bowties and CMYK chevrons with sawtooth teeth and a yellow starburst; the picture bends the bands."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
@@ -20,69 +21,69 @@ core = "yuv444_30b"
 parameter_id = "rotary_potentiometer_1"
 name_label = "Cells"
 control_mode = "linear"
-display_min_value = 1
+display_min_value = 2
 display_max_value = 8
-initial_value = 448
-display_float_digits = 0
+initial_value = 356
+display_float_digits = 1
 suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
-name_label = "Spread"
+name_label = "Bands"
 control_mode = "linear"
-display_min_value = 0
-display_max_value = 100
-initial_value = 300
+display_min_value = 50
+display_max_value = 300
+initial_value = 205
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
-name_label = "Spikes"
+name_label = "Teeth"
 control_mode = "linear"
-display_min_value = 0
-display_max_value = 100
-initial_value = 260
+display_min_value = 50
+display_max_value = 200
+initial_value = 341
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
-name_label = "Tilt"
-control_mode = "linear"
-display_min_value = 0
-display_max_value = 100
-initial_value = 560
-display_float_digits = 0
-suffix_label = "%"
-
-[[parameter]]
-parameter_id = "rotary_potentiometer_5"
-name_label = "Drift"
+name_label = "Speed"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 560
+initial_value = 640
 display_float_digits = 0
 suffix_label = ""
 
 [[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Etch"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 245
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
 parameter_id = "rotary_potentiometer_6"
 name_label = "Palette"
-value_labels = ["CMYK", "RGB", "Warm", "Cool", "Mono", "Neon", "Pastel", "Ember"]
+value_labels = ["CMYK", "Ember", "Ice", "Acid", "Rose", "Mono", "Neon", "Gold"]
 initial_value_label = "CMYK"
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
-name_label = "Lattice"
-value_labels = ["Mirror", "Tile"]
-initial_value_label = "Mirror"
+name_label = "Centre"
+value_labels = ["Grey X", "White X"]
+initial_value_label = "Grey X"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
-name_label = "Field"
-value_labels = ["Saddle", "Diamond"]
-initial_value_label = "Saddle"
+name_label = "Greys"
+value_labels = ["Grey", "Colour"]
+initial_value_label = "Grey"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
@@ -92,43 +93,46 @@ initial_value_label = "Video"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
-name_label = "Negative"
+name_label = "Drift"
 value_labels = ["Off", "On"]
 initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
-name_label = "Chroma"
-value_labels = ["Palette", "Video"]
-initial_value_label = "Palette"
+name_label = "Mirror"
+value_labels = ["Fold", "Tile"]
+initial_value_label = "Fold"
 
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
-name_label = "Etch"
+name_label = "Burst"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 350
+initial_value = 430
 display_float_digits = 0
 suffix_label = "%"
 
 [[preset]]
-name = "Default"
+name = "Photo"
 
 [[preset]]
-name = "Pure Burst"
-rotary_potentiometer_3 = 400
+name = "Calm Bands"
 linear_potentiometer_12 = 0
+rotary_potentiometer_4 = 560
+
+[[preset]]
+name = "Full Burst"
+linear_potentiometer_12 = 1023
+rotary_potentiometer_4 = 760
+
+[[preset]]
+name = "Drifting Glass"
+toggle_switch_10 = 1
+rotary_potentiometer_1 = 200
+rotary_potentiometer_6 = 384
 
 [[preset]]
 name = "Carved Face"
-rotary_potentiometer_1 = 64
-rotary_potentiometer_2 = 500
-toggle_switch_11 = 1
-linear_potentiometer_12 = 900
-
-[[preset]]
-name = "Neon Diamonds"
-rotary_potentiometer_6 = 704
-toggle_switch_8 = 1
-linear_potentiometer_12 = 500
+rotary_potentiometer_5 = 900
+rotary_potentiometer_2 = 330
