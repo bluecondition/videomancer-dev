@@ -1,103 +1,104 @@
-# Mandala - Heirloom #6 (2026-10-20), from WIN_20230128_01_06_08.
-# Nested rainbow lobes from three orbiting centres. See mandala.vhd and SUMMARY.md.
+# Mandala - Heirloom #6, v0.5.0 (2026-10-21): rebuilt from the photo WIN_20230128_01_06_08.
+# A mirrored psychedelic mask: one smooth field drives three channels -- fine contour stripes (G),
+# a blue glow ramp (B) and a red key (R).  See mandala.vhd and SUMMARY.md.
 
 [program]
-processing_delay_clks = 20
+processing_delay_clks = 28
 program_id = "com.czartroniks.mandala"
 program_name = "Mandala"
-program_version = "0.1.0"
+program_version = "0.5.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
-categories = ["Pattern", "Illusion", "Render"]
+categories = ["Mirror", "Color", "Render"]
 program_type = "processing"
-description = "Nested rainbow rings from three orbiting centres meeting in soft lobes, the picture etched into the rings."
+description = "Mirrored psychedelic mask: fine contour stripes, blue glow and red lobes from one field; video bends the rings."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_1"
-name_label = "Rings"
+name_label = "Flow"
 control_mode = "linear"
-display_min_value = 0
+display_min_value = -100
 display_max_value = 100
-initial_value = 260
-display_float_digits = 0
-suffix_label = "%"
-
-[[parameter]]
-parameter_id = "rotary_potentiometer_2"
-name_label = "Hue"
-control_mode = "linear"
-display_min_value = 0
-display_max_value = 360
-initial_value = 0
+initial_value = 640
 display_float_digits = 0
 suffix_label = ""
 
 [[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Width"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 576
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
 parameter_id = "rotary_potentiometer_3"
-name_label = "Orbit"
+name_label = "Blue"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 560
+initial_value = 512
 display_float_digits = 0
 suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
-name_label = "Aspect"
+name_label = "Red"
 control_mode = "linear"
-display_min_value = 0
+display_min_value = -100
 display_max_value = 100
-initial_value = 300
+initial_value = 512
 display_float_digits = 0
-suffix_label = "%"
+suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
-name_label = "Etch"
+name_label = "Melt"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 300
+initial_value = 400
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
-name_label = "Weight"
+name_label = "Breathe"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 200
+initial_value = 384
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
-name_label = "Mirror"
-value_labels = ["Off", "On"]
-initial_value_label = "On"
+name_label = "Stripes"
+value_labels = ["Green", "Blue"]
+initial_value_label = "Green"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
-name_label = "Centres"
-value_labels = ["Three", "Two"]
-initial_value_label = "Three"
+name_label = "Lobes"
+value_labels = ["Red", "Green"]
+initial_value_label = "Red"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
-name_label = "Palette"
-value_labels = ["Rainbow", "Magenta"]
-initial_value_label = "Rainbow"
+name_label = "Edge"
+value_labels = ["Soft", "Hard"]
+initial_value_label = "Soft"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
-name_label = "Rings"
-value_labels = ["Smooth", "Hard"]
-initial_value_label = "Smooth"
+name_label = "Faces"
+value_labels = ["One", "Two"]
+initial_value_label = "One"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
@@ -107,30 +108,34 @@ initial_value_label = "Video"
 
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
-name_label = "Centres"
+name_label = "Rings"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 500
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
 [[preset]]
-name = "Default"
+name = "Mandala"
 
 [[preset]]
-name = "One Onion"
+name = "Broad Bands"
 linear_potentiometer_12 = 0
+rotary_potentiometer_2 = 300
 
 [[preset]]
-name = "Hard Lobes"
-rotary_potentiometer_1 = 500
-toggle_switch_10 = 1
-linear_potentiometer_12 = 800
+name = "Moire Climax"
+linear_potentiometer_12 = 1023
+rotary_potentiometer_1 = 760
+rotary_potentiometer_2 = 900
 
 [[preset]]
-name = "Magenta Drift"
-rotary_potentiometer_3 = 700
+name = "Gold Mask"
 toggle_switch_7 = 1
-toggle_switch_9 = 1
-linear_potentiometer_12 = 650
+rotary_potentiometer_6 = 700
+
+[[preset]]
+name = "Twin Masks"
+toggle_switch_10 = 1
+toggle_switch_8 = 1
