@@ -1,104 +1,105 @@
-# Facet - Heirloom #40 (2026-10-20), from WIN_20230602_01_26.
-# Flat-shaded geometric facets, mirrored, with a circle.
-# See facet.vhd and SUMMARY.md.
+# Facet - Heirloom #40, rebuilt 2026-10-21 from WIN_20230602_01_26_17.
+# A mirrored row of green eyes (red cone / caps where the purple wedge and
+# floor cut them) on a blue-green gradient, x-order white edge lines.
+# See facet.vhd, facet.py and SUMMARY.md.
 
 [program]
-processing_delay_clks = 20
+processing_delay_clks = 32
 program_id = "com.czartroniks.facet"
 program_name = "Facet"
-program_version = "0.1.0"
+program_version = "0.5.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Shape", "Mirror", "Render"]
 program_type = "processing"
-description = "Flat-shaded facets cut by three rotating wedge fields and a circle, mirrored, the picture as relief. Tilt on the slider."
+description = "Mirrored green eyes with a red cone on a blue-green gradient, white-edged purple wedge and floor. Open the eyes on the slider."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_1"
-name_label = "Spread"
+name_label = "Eyes"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 400
+initial_value = 491
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
-name_label = "Circle"
+name_label = "Wedge"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 450
+initial_value = 489
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
-name_label = "Hue"
-control_mode = "linear"
-display_min_value = 0
-display_max_value = 3
-initial_value = 0
-display_float_digits = 0
-suffix_label = ""
-
-[[parameter]]
-parameter_id = "rotary_potentiometer_4"
-name_label = "Shading"
+name_label = "Floor"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 500
+initial_value = 341
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Speed"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 410
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
-name_label = "Spin"
+name_label = "Halo"
 control_mode = "linear"
-display_min_value = -100
+display_min_value = 0
 display_max_value = 100
-initial_value = 530
+initial_value = 371
 display_float_digits = 0
-suffix_label = ""
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
-name_label = "Split"
+name_label = "Picture"
 control_mode = "linear"
-display_min_value = -100
+display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 307
 display_float_digits = 0
-suffix_label = ""
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
-name_label = "Mirror"
+name_label = "Lines"
 value_labels = ["Off", "On"]
 initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
-name_label = "Palette"
-value_labels = ["Jewel", "Earth"]
-initial_value_label = "Jewel"
+name_label = "Glow"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
-name_label = "Relief"
+name_label = "Twin"
 value_labels = ["Off", "On"]
-initial_value_label = "On"
+initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
-name_label = "Circle"
-value_labels = ["Off", "On"]
-initial_value_label = "On"
+name_label = "Palette"
+value_labels = ["Jewel", "Ember"]
+initial_value_label = "Jewel"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
@@ -108,29 +109,32 @@ initial_value_label = "Video"
 
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
-name_label = "Tilt"
+name_label = "Open"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 200
+initial_value = 482
 display_float_digits = 0
 suffix_label = "%"
 
 [[preset]]
-name = "Default"
+name = "Photo"
 
 [[preset]]
-name = "Earth Spin"
-toggle_switch_8 = 1
-rotary_potentiometer_5 = 640
-
-[[preset]]
-name = "Flat Wedges"
-toggle_switch_9 = 0
-rotary_potentiometer_4 = 0
-toggle_switch_10 = 0
-
-[[preset]]
-name = "Quarter Turn"
+name = "Wide Open"
 linear_potentiometer_12 = 1023
-rotary_potentiometer_1 = 700
+
+[[preset]]
+name = "Six Eyes"
+rotary_potentiometer_1 = 1023
+linear_potentiometer_12 = 600
+
+[[preset]]
+name = "Ember Fan"
+toggle_switch_10 = 1
+rotary_potentiometer_2 = 900
+
+[[preset]]
+name = "Twin Eyes"
+toggle_switch_9 = 1
+rotary_potentiometer_5 = 600
