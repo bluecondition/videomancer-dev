@@ -1,78 +1,78 @@
-# Triplicate - Heirloom #53 (2026-10-20), from selfie.jpg (paper collage).
-# Three tinted copies of the keyed picture cascade over a gray tiled wall.
+# Triplicate - Heirloom #53 (2026-10-21), rebuilt from selfie.jpg (a paper collage).
+# The picture cut out as a bear, photocopied in red, green and blue and cascaded over a wall of prints.
 # See triplicate.vhd and SUMMARY.md.
 
 [program]
-processing_delay_clks = 20
+processing_delay_clks = 21
 program_id = "com.czartroniks.triplicate"
 program_name = "Triplicate"
-program_version = "0.1.0"
+program_version = "0.5.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Mask", "Color", "Craft"]
 program_type = "processing"
-description = "A collage cascade: the keyed picture in front of three red, green and blue copies over a gray tiled wall of itself."
+description = "Collage: the picture cut out as a bear, photocopied in red, green and blue, cascading over a wall of prints."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_1"
-name_label = "Key"
+name_label = "Recede"
 control_mode = "linear"
 display_min_value = 0
-display_max_value = 100
-initial_value = 420
+display_max_value = 150
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
-name_label = "Tiles"
+name_label = "Size"
 control_mode = "linear"
-display_min_value = 2
-display_max_value = 8
-initial_value = 576
+display_min_value = 60
+display_max_value = 130
+initial_value = 512
 display_float_digits = 0
-suffix_label = ""
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
-name_label = "Tint"
+name_label = "Ink"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 1000
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
-name_label = "Wall"
+name_label = "Tiles"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 500
+initial_value = 467
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
-name_label = "Detail"
+name_label = "Wall"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 600
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
-name_label = "Wobble"
+name_label = "Speed"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 512
+initial_value = 640
 display_float_digits = 0
 suffix_label = ""
 
@@ -84,21 +84,21 @@ initial_value_label = "RGB"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
-name_label = "Backdrop"
-value_labels = ["Tiled", "Plain"]
-initial_value_label = "Tiled"
-
-[[parameter]]
-parameter_id = "toggle_switch_9"
-name_label = "Tints"
+name_label = "Inks"
 value_labels = ["RGB", "CMY"]
 initial_value_label = "RGB"
 
 [[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Front"
+value_labels = ["Colour", "Ink"]
+initial_value_label = "Colour"
+
+[[parameter]]
 parameter_id = "toggle_switch_10"
-name_label = "Key"
-value_labels = ["Bright", "Dark"]
-initial_value_label = "Bright"
+name_label = "Flip"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
@@ -108,32 +108,35 @@ initial_value_label = "Video"
 
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
-name_label = "Spread"
+name_label = "Cascade"
 control_mode = "linear"
-display_min_value = 1
-display_max_value = 32
-initial_value = 500
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
 display_float_digits = 0
-suffix_label = "px"
+suffix_label = "%"
 
 [[preset]]
-name = "Default"
+name = "Selfie"
 
 [[preset]]
-name = "Wide Cascade"
-rotary_potentiometer_5 = 1000
+name = "Nested Dolls"
+linear_potentiometer_12 = 0
+rotary_potentiometer_1 = 700
+
+[[preset]]
+name = "Fanned"
 linear_potentiometer_12 = 1023
+rotary_potentiometer_2 = 400
 
 [[preset]]
-name = "CMY Ghosts"
-rotary_potentiometer_3 = 700
-toggle_switch_9 = 1
-toggle_switch_10 = 1
-linear_potentiometer_12 = 700
-
-[[preset]]
-name = "Plain Wall"
-rotary_potentiometer_4 = 900
-toggle_switch_7 = 1
+name = "CMYK Plates"
 toggle_switch_8 = 1
-linear_potentiometer_12 = 300
+toggle_switch_9 = 1
+rotary_potentiometer_3 = 640
+
+[[preset]]
+name = "Silhouettes"
+rotary_potentiometer_3 = 1023
+rotary_potentiometer_5 = 300
+toggle_switch_10 = 1
