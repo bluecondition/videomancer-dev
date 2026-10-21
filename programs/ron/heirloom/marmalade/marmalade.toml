@@ -1,96 +1,105 @@
-# Marmalade - Heirloom #14 (2026-10-20), from WIN_20230307_23_36_05.
-# Orange / magenta / yellow block bands slid sideways, the picture block-torn under them.
+# Marmalade - Heirloom #14, rebuilt 2026-10-21 from WIN_20230307_23_36_05.
+# A sample-and-hold mosaic through a nine-zone orange/magenta colourizer, crossed by
+# quantized stage stripes (cyan / white / grey / dark), half the rows stepped sideways.
 # See marmalade.vhd and SUMMARY.md.
 
 [program]
-processing_delay_clks = 16
+processing_delay_clks = 28
 program_id = "com.czartroniks.marmalade"
 program_name = "Marmalade"
-program_version = "0.1.0"
+program_version = "0.5.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
-categories = ["Glitch", "Grid", "Color"]
+categories = ["Pixel", "Color", "Pattern"]
 program_type = "processing"
-description = "Mondrian blocks of orange, magenta and yellow in row bands slid sideways, the picture block-torn and painted beneath."
+description = "Sample-and-hold blocks in marmalade orange, magenta and yellow, crossed by cyan and white stripe bands the picture bends."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_1"
-name_label = "Blocks"
-value_labels = ["16 px", "32 px", "64 px", "128 px"]
-initial_value_label = "64 px"
-
-[[parameter]]
-parameter_id = "rotary_potentiometer_2"
-name_label = "Bands"
-control_mode = "linear"
-display_min_value = 16
-display_max_value = 271
-initial_value = 300
-display_float_digits = 0
-suffix_label = ""
-
-[[parameter]]
-parameter_id = "rotary_potentiometer_3"
-name_label = "Palette"
-value_labels = ["Marmalade", "Mint", "Berry", "Ash"]
-initial_value_label = "Marmalade"
-
-[[parameter]]
-parameter_id = "rotary_potentiometer_4"
-name_label = "Reshuffle"
+name_label = "Cells"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 160
+initial_value = 589
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Rows"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 458
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Picture"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 256
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Speed"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 640
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
-name_label = "Levels"
-control_mode = "linear"
-display_min_value = 2
-display_max_value = 64
-initial_value = 400
-display_float_digits = 0
-suffix_label = ""
-
-[[parameter]]
-parameter_id = "rotary_potentiometer_6"
-name_label = "Paint"
+name_label = "Slew"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 700
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Orange"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
-name_label = "Slide"
-value_labels = ["Alternate", "Same"]
-initial_value_label = "Alternate"
+name_label = "Shift"
+value_labels = ["Stepped", "Straight"]
+initial_value_label = "Stepped"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
-name_label = "Bands"
-value_labels = ["Random", "Even"]
-initial_value_label = "Random"
+name_label = "Keys"
+value_labels = ["Warm", "Cool"]
+initial_value_label = "Warm"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
-name_label = "Outlines"
-value_labels = ["Off", "On"]
-initial_value_label = "Off"
+name_label = "Spacing"
+value_labels = ["Bunched", "Even"]
+initial_value_label = "Bunched"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
-name_label = "Luma"
-value_labels = ["Posterized", "Smooth"]
-initial_value_label = "Posterized"
+name_label = "Clocks"
+value_labels = ["One", "Two"]
+initial_value_label = "One"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
@@ -100,11 +109,11 @@ initial_value_label = "Video"
 
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
-name_label = "Slide"
+name_label = "Stripes"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 450
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
@@ -112,20 +121,24 @@ suffix_label = "%"
 name = "Default"
 
 [[preset]]
-name = "Pure Blocks"
-rotary_potentiometer_6 = 1023
-toggle_switch_9 = 1
-linear_potentiometer_12 = 600
+name = "Photo Osc"
+toggle_switch_11 = 1
 
 [[preset]]
-name = "Torn Picture"
-rotary_potentiometer_6 = 150
-toggle_switch_10 = 1
-linear_potentiometer_12 = 900
+name = "Candy Stripe"
+toggle_switch_11 = 1
+linear_potentiometer_12 = 1000
+rotary_potentiometer_4 = 700
 
 [[preset]]
-name = "Berry Jam"
-rotary_potentiometer_3 = 576
-rotary_potentiometer_1 = 1000
-rotary_potentiometer_2 = 120
+name = "Unripe"
+toggle_switch_11 = 1
+rotary_potentiometer_6 = 90
+toggle_switch_8 = 1
+
+[[preset]]
+name = "Big Blocks"
+rotary_potentiometer_1 = 260
+rotary_potentiometer_2 = 200
+rotary_potentiometer_5 = 800
 linear_potentiometer_12 = 300
