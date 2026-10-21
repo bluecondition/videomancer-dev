@@ -23,7 +23,6 @@
 | Posterized bands | band = s >> 14, palette[\|band\| mod 16] from 8 ROM palettes (K6) |
 | Serrations | (line mod 8) × K3 added to the field per line |
 | Band drift | phase added per field (K5) |
-| Interlace comb / fringing | S9 Noise: LFSR grain added to the field |
 | The picture | video mirrored horizontally in every cell (line-buffer read = cell start + min(u, cw−1−u)); its luma × P12 pushes the field, so the picture appears as warped contour bands; S11 takes the band chroma from the video |
 
 Cell widths come from two serial divides per frame (w/N real px for the buffer, vw/N virtual for the field);
@@ -42,7 +41,7 @@ Latency 20 clocks. Colours in the hardware convention (u = Cr, v = Cb).
 | K6 Palette | CMYK / RGB / Warm / Cool / Mono / Neon / Pastel / Ember |
 | S7 Lattice | Mirror / Tile |
 | S8 Field | Saddle (X's and chevrons) / Diamond rings |
-| S9 Noise | grain on the field |
+| S9 Source | Video / Osc (internal oscillator texture replaces the video; fully generative) |
 | S10 Negative | palette inverted |
 | S11 Chroma | Palette / Video |
 | **P12 Etch** | video depth: 0 = the pure pattern → the picture carved in bands |
@@ -51,4 +50,5 @@ Resolution: the cell count is a COUNT (cells narrow on 4:3 SD); cell heights are
 
 ## Status
 
-- v0.1.0 (2026-10-20): built, 6/6 seed 1, HD 78.8–84.1 MHz (SD HDMI 61 MHz vs its 27 MHz Fmin), 4.45k LC (58 %), 17 EBR. **Not yet flashed.**
+- v0.1.0 (2026-10-20): built, 6/6 seed 1, HD 78.8–84.1 MHz, 4.45k LC (58 %), 17 EBR. Ron: interesting.
+- v0.2.0 (2026-10-20): S9 Noise replaced by Source Video/Osc. Built 6/6 seed 1: HD 79.1 / 79.9 / 79.9 MHz, 4.6k LC, 17 EBR.

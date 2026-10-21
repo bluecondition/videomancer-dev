@@ -6,7 +6,7 @@
 processing_delay_clks = 16
 program_id = "com.czartroniks.escalator"
 program_name = "Escalator"
-program_version = "0.1.0"
+program_version = "0.2.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -102,9 +102,9 @@ initial_value_label = "Solid"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
-name_label = "Comb"
-value_labels = ["Off", "On"]
-initial_value_label = "Off"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
 
 [[parameter]]
 parameter_id = "linear_potentiometer_12"

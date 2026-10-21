@@ -46,11 +46,12 @@ hardware convention (u = Cr, v = Cb). Generated avid (cubist/aurora recipe); out
 | S8 Flip | odd tiles mirrored |
 | S9 Twin | second staircase family, opposite slope |
 | S10 Stairs | Solid green / Tinted (picture luma, green chroma) |
-| S11 Comb | stair steps comb on alternate lines |
+| S11 Source | Video / Osc (internal oscillator texture replaces the video; fully generative) |
 | **P12 Tiles** | 1 tile (the plain picture) → 8 tiles across, continuous |
 
 Resolution: tile count is a COUNT (tiles narrow on 4:3 SD); rows are square in virtual units everywhere.
 
 ## Status
 
-- v0.1.0 (2026-10-20): built, 6/6 seed 1, HD 75.1–79.4 MHz, 4.9k LC (64 %), 15 EBR. **Not yet flashed.**
+- v0.1.0 (2026-10-20): built, 6/6 seed 1, HD 75.1–79.4 MHz, 4.9k LC (64 %), 15 EBR. Ron: interesting.
+- v0.2.0 (2026-10-20): S11 Comb replaced by Source Video/Osc (Ron: video always on a switch); steps now always comb on alternate lines. Built 6/6: HD 80.1 / 81.3 / 86.8 MHz (HD Dual seed 2), 5.0k LC, 15 EBR.

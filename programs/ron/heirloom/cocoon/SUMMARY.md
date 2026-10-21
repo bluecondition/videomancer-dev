@@ -42,7 +42,7 @@ Colours in the hardware convention (u = Cr, v = Cb).
 | S7 Shape | Hexagon / Ellipse |
 | S8 Palette | Fire / Ice (complement hues) |
 | S9 Poster | video posterized / full colour |
-| S10 Key | Bright parts show / Dark parts |
+| S10 Source | Video / Osc (internal oscillator texture replaces the video; fully generative) |
 | S11 Weave | Chevron rows / Diagonal stripes |
 | **P12 Cocoon** | size: small core → fills the screen with the weave |
 
@@ -50,4 +50,5 @@ Resolution: all geometry in virtual 1080-line units (round at every mode); the t
 
 ## Status
 
-- v0.1.0 (2026-10-20): built, 6/6 seed 1, HD 77.6–81.3 MHz, 4.3k LC (56 %), 19 EBR. **Not yet flashed.**
+- v0.1.0 (2026-10-20): built, 6/6 seed 1, HD 77.6–81.3 MHz, 4.3k LC (56 %), 19 EBR. Ron: interesting.
+- v0.2.0 (2026-10-20): S10 Key polarity replaced by Source Video/Osc (key is always Bright). Built 6/6 (SD HDMI + HD Dual seed 2): HD 75.4 / 80.3 / 80.2 MHz, 4.45k LC, 19 EBR.

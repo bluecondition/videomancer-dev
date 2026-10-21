@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Starburst v0.1.0 -- Heirloom #3 (2026-10-20), from WIN_20221122_23_37_36.
+-- Starburst v0.2.0 -- Heirloom #3 (2026-10-20), from WIN_20221122_23_37_36.
 --
 -- The photo: a four-fold mirror kaleidoscope of saddle-shaped contour bands:
 -- where |x| - |y| is near zero the bands make gray nested X's, further out
@@ -23,7 +23,7 @@
 --   K6  Palette  CMYK / RGB / Warm / Cool / Mono / Neon / Pastel / Ember
 --   S7  Lattice  Mirror (each cell folded about its centre) / Tile (sawtooth)
 --   S8  Field    Saddle (a|x| - b|y|: X's and chevrons) / Diamond (a|x| + b|y|)
---   S9  Noise    grain added to the field (fringed, sparkling edges)
+--   S9  Source   Video / Osc (an internal triangle-wave oscillator replaces the video)
 --   S10 Negative palette inverted
 --   S11 Chroma   from the palette / from the mirrored video (palette luma)
 --   P12 ETCH     video depth: 0 = the pure pattern .. the picture carved in bands
@@ -117,6 +117,10 @@ architecture starburst of program_top is
     signal s_pal_ra : unsigned(6 downto 0) := (others => '0');
     signal s_pal_q : std_logic_vector(31 downto 0) := (others => '0');
 
+    function f_tri8(v : unsigned(7 downto 0)) return unsigned is
+    begin
+        if v(7) = '1' then return not v(6 downto 0); else return v(6 downto 0); end if;
+    end function;
     -- line buffer {y, u, v, 00}
     type t_lb is array (0 to 2047) of std_logic_vector(31 downto 0);
     signal lb : t_lb := (others => "0001000000" & "1000000000" & "1000000000" & "00");
@@ -125,6 +129,12 @@ architecture starburst of program_top is
     signal s_lb_we : std_logic := '0';
     signal s_lb_q  : std_logic_vector(31 downto 0) := "0001000000" & "1000000000" & "1000000000" & "00";
 
+    -- internal oscillator source (Source = Osc): triangle waves of x and y
+    signal s_src : std_logic := '0';
+    signal s_ox : unsigned(9 downto 0) := (others => '0');
+    signal s_oy : unsigned(9 downto 0) := (others => '0');
+    signal s_ot : unsigned(7 downto 0) := (others => '0');
+    signal s_oty, s_otu, s_otv : unsigned(9 downto 0) := to_unsigned(512, 10);
     -- timing / controls
     signal s_xs : unsigned(2 downto 0) := to_unsigned(2, 3);
     signal s_ys : unsigned(11 downto 0) := to_unsigned(256, 12);
@@ -159,7 +169,7 @@ architecture starburst of program_top is
     signal s_ph : unsigned(23 downto 0) := (others => '0');
     signal s_etch : unsigned(9 downto 0) := (others => '0');
     signal s_pali : unsigned(2 downto 0) := (others => '0');
-    signal s_tile, s_diam, s_noise, s_neg, s_vchr : std_logic := '0';
+    signal s_tile, s_diam, s_neg, s_vchr : std_logic := '0';
     -- serial unit (multiply / divide)
     signal s_ma : unsigned(23 downto 0) := (others => '0');
     signal s_mb : unsigned(11 downto 0) := (others => '0');
@@ -170,7 +180,6 @@ architecture starburst of program_top is
     signal s_dnum : unsigned(11 downto 0) := (others => '0');
     signal s_drem : unsigned(12 downto 0) := (others => '0');
     signal s_dquo : unsigned(11 downto 0) := (others => '0');
-    signal s_lfsr : unsigned(15 downto 0) := x"BEEF";
 
     -- generated avid
     signal g_hsq, g_hsr, g_avq, g_avr : std_logic := '0';
@@ -313,7 +322,7 @@ begin
                 s_spk <= s_k3;
                 s_tile  <= registers_in(6)(0);
                 s_diam  <= registers_in(6)(1);
-                s_noise <= registers_in(6)(2);
+                s_src   <= registers_in(6)(2);
                 s_neg   <= registers_in(6)(3);
                 s_vchr  <= registers_in(6)(4);
                 v_ph := signed(resize(s_ph, 25)) + shift_left(resize(s_k5r, 25), 6);
@@ -442,9 +451,21 @@ begin
         variable v_sp : unsigned(12 downto 0);
     begin
         if rising_edge(clk) then
+            -- oscillator source: x ramp per source pixel, y ramp per line, phase per field
+            if data_in.avid = '1' then s_ox <= s_ox + 3; elsif s_avq = '1' then s_ox <= (others => '0'); s_oy <= s_oy + 5; end if;
+            if s_zone = '1' then s_oy <= (others => '0'); end if;
+            if s_zgo = '1' then s_ot <= s_ot + 3; end if;
+            s_oty <= to_unsigned(64, 10) + resize(f_tri8(s_ox(9 downto 2) + s_ot) & '0', 10) + resize(f_tri8(s_oy(9 downto 2) - s_ot) & '0', 10)
+                     + resize(f_tri8(s_ox(9 downto 2) + s_ot), 10) + resize(f_tri8(s_oy(9 downto 2) - s_ot), 10);
+            s_otu <= to_unsigned(320, 10) + resize(f_tri8(s_ox(9 downto 2) + s_ot + s_ot) & '0', 10) + resize(f_tri8(s_ox(9 downto 2) + s_ot + s_ot), 10);
+            s_otv <= to_unsigned(320, 10) + resize(f_tri8(s_oy(9 downto 2) + s_ot) & '0', 10) + resize(f_tri8(s_oy(9 downto 2) + s_ot), 10);
             s_lb_we <= data_in.avid;
             s_lb_wa <= s_wcol;
-            s_lb_wd <= data_in.y & data_in.u & data_in.v & "00";
+            if s_src = '1' then
+                s_lb_wd <= std_logic_vector(s_oty) & std_logic_vector(s_otu) & std_logic_vector(s_otv) & "00";
+            else
+                s_lb_wd <= data_in.y & data_in.u & data_in.v & "00";
+            end if;
             if data_in.avid = '1' then s_wcol <= s_wcol + 1; else s_wcol <= (others => '0'); end if;
 
             s_fall1 <= '0';
@@ -512,7 +533,6 @@ begin
         variable v_f : signed(13 downto 0);
         variable v_q : signed(12 downto 0);
         variable v_aq : unsigned(12 downto 0);
-        variable v_nz : signed(26 downto 0);
         variable v_sy : unsigned(11 downto 0);
         variable v_sc : unsigned(14 downto 0);
         variable v_dl : unsigned(9 downto 0);
@@ -552,10 +572,7 @@ begin
             s_s5 <= s_s4 + signed(resize(s_spl, 27)) + signed(resize(s_ph, 27));
 
             -- 6: noise; video (fabric copy)
-            s_lfsr <= s_lfsr(14 downto 0) & (s_lfsr(15) xor s_lfsr(13) xor s_lfsr(12) xor s_lfsr(10));
-            v_nz := (others => '0');
-            if s_noise = '1' then v_nz := signed(resize(s_lfsr(6 downto 0) & "0000000", 27)); end if;
-            s_s6 <= s_s5 + v_nz;
+            s_s6 <= s_s5;
             s_y6 <= unsigned(s_lb_q(31 downto 22));
             s_ud(6) <= unsigned(s_lb_q(21 downto 12));
             s_vd(6) <= unsigned(s_lb_q(11 downto 2));

@@ -6,7 +6,7 @@
 processing_delay_clks = 20
 program_id = "com.czartroniks.starburst"
 program_name = "Starburst"
-program_version = "0.1.0"
+program_version = "0.2.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -86,9 +86,9 @@ initial_value_label = "Saddle"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
-name_label = "Noise"
-value_labels = ["Off", "On"]
-initial_value_label = "Off"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
@@ -131,5 +131,4 @@ linear_potentiometer_12 = 900
 name = "Neon Diamonds"
 rotary_potentiometer_6 = 704
 toggle_switch_8 = 1
-toggle_switch_9 = 1
 linear_potentiometer_12 = 500

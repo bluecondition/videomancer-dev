@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Cocoon v0.1.0 -- Heirloom #2 (2026-10-20), from WIN_20220829_23_30_37.
+-- Cocoon v0.2.0 -- Heirloom #2 (2026-10-20), from WIN_20220829_23_30_37.
 --
 -- The photo: a horizontally stretched hexagonal window in the middle of the
 -- screen filled with a dense woven chevron (zigzag) texture, lit by a radial
@@ -23,7 +23,7 @@
 --   S7  Shape   Hexagon / Ellipse
 --   S8  Palette Fire (red, yellow, blue) / Ice (the complement hues)
 --   S9  Poster  video posterized (8 luma x 4 x 4 chroma) / full colour
---   S10 Key     Bright parts of the video show / Dark parts
+--   S10 Source  Video / Osc (an internal triangle-wave oscillator replaces the video)
 --   S11 Weave   Chevron rows / Diagonal stripes
 --   P12 COCOON  size: a small core .. fills the screen with the weave
 --
@@ -117,6 +117,10 @@ architecture cocoon of program_top is
         if v(7) = '1' then return not v(6 downto 0); else return v(6 downto 0); end if;
     end function;
 
+    function f_tri8(v : unsigned(7 downto 0)) return unsigned is
+    begin
+        if v(7) = '1' then return not v(6 downto 0); else return v(6 downto 0); end if;
+    end function;
     -- line buffer {y, u, v, 00}
     type t_lb is array (0 to 2047) of std_logic_vector(31 downto 0);
     signal lb : t_lb := (others => "0001000000" & "1000000000" & "1000000000" & "00");
@@ -125,6 +129,12 @@ architecture cocoon of program_top is
     signal s_lb_we : std_logic := '0';
     signal s_lb_q  : std_logic_vector(31 downto 0) := "0001000000" & "1000000000" & "1000000000" & "00";
 
+    -- internal oscillator source (Source = Osc): triangle waves of x and y
+    signal s_src : std_logic := '0';
+    signal s_ox : unsigned(9 downto 0) := (others => '0');
+    signal s_oy : unsigned(9 downto 0) := (others => '0');
+    signal s_ot : unsigned(7 downto 0) := (others => '0');
+    signal s_oty, s_otu, s_otv : unsigned(9 downto 0) := to_unsigned(512, 10);
     -- timing / controls
     signal s_xs : unsigned(2 downto 0) := to_unsigned(2, 3);
     signal s_ys : unsigned(11 downto 0) := to_unsigned(256, 12);
@@ -153,7 +163,7 @@ architecture cocoon of program_top is
     signal s_fxs : unsigned(9 downto 0) := to_unsigned(16, 10);      -- fx * xs
     signal s_fys : unsigned(9 downto 0) := to_unsigned(16, 10);      -- fy * ys / 256
     signal s_ph : unsigned(7 downto 0) := (others => '0');
-    signal s_shape, s_ice, s_poster, s_dark, s_diag : std_logic := '0';
+    signal s_shape, s_ice, s_poster, s_diag : std_logic := '0';
     -- serial multiplier
     signal s_ma : unsigned(23 downto 0) := (others => '0');
     signal s_mb : unsigned(11 downto 0) := (others => '0');
@@ -312,7 +322,7 @@ begin
                 s_shape  <= registers_in(6)(0);
                 s_ice    <= registers_in(6)(1);
                 s_poster <= registers_in(6)(2);
-                s_dark   <= registers_in(6)(3);
+                s_src    <= registers_in(6)(3);
                 s_diag   <= registers_in(6)(4);
                 s_ph <= s_ph + unsigned(resize(s_spd, 8));
             end if;
@@ -430,9 +440,21 @@ begin
         variable v_a : unsigned(7 downto 0);
     begin
         if rising_edge(clk) then
+            -- oscillator source: x ramp per source pixel, y ramp per line, phase per field
+            if data_in.avid = '1' then s_ox <= s_ox + 3; elsif s_avq = '1' then s_ox <= (others => '0'); s_oy <= s_oy + 5; end if;
+            if s_zone = '1' then s_oy <= (others => '0'); end if;
+            if s_zgo = '1' then s_ot <= s_ot + 3; end if;
+            s_oty <= to_unsigned(64, 10) + resize(f_tri8(s_ox(9 downto 2) + s_ot) & '0', 10) + resize(f_tri8(s_oy(9 downto 2) - s_ot) & '0', 10)
+                     + resize(f_tri8(s_ox(9 downto 2) + s_ot), 10) + resize(f_tri8(s_oy(9 downto 2) - s_ot), 10);
+            s_otu <= to_unsigned(320, 10) + resize(f_tri8(s_ox(9 downto 2) + s_ot + s_ot) & '0', 10) + resize(f_tri8(s_ox(9 downto 2) + s_ot + s_ot), 10);
+            s_otv <= to_unsigned(320, 10) + resize(f_tri8(s_oy(9 downto 2) + s_ot) & '0', 10) + resize(f_tri8(s_oy(9 downto 2) + s_ot), 10);
             s_lb_we <= data_in.avid;
             s_lb_wa <= s_wcol;
-            s_lb_wd <= data_in.y & data_in.u & data_in.v & "00";
+            if s_src = '1' then
+                s_lb_wd <= std_logic_vector(s_oty) & std_logic_vector(s_otu) & std_logic_vector(s_otv) & "00";
+            else
+                s_lb_wd <= data_in.y & data_in.u & data_in.v & "00";
+            end if;
             if data_in.avid = '1' then s_wcol <= s_wcol + 1; else s_wcol <= (others => '0'); end if;
 
             s_fall1 <= '0';
@@ -572,9 +594,9 @@ begin
 
             -- 11: key; palette hue complement (Ice); posterized or live video
             if s_in(10) = '1' then
-                if s_y10 >= s_thrin then s_key11 <= not s_dark; else s_key11 <= s_dark; end if;
+                if s_y10 >= s_thrin then s_key11 <= '1'; else s_key11 <= '0'; end if;
             else
-                if s_y10 >= s_thr then s_key11 <= not s_dark; else s_key11 <= s_dark; end if;
+                if s_y10 >= s_thr then s_key11 <= '1'; else s_key11 <= '0'; end if;
             end if;
             s_py11 <= s_py10;
             if s_ice = '1' then

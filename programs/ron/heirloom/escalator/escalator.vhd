@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Escalator v0.1.0 -- Heirloom #1 (2026-10-20), from WIN_20220629_23_49_20.
+-- Escalator v0.2.0 -- Heirloom #1 (2026-10-20), from WIN_20220629_23_49_20.
 --
 -- The photo: the picture replicated into a grid of ~7 tiles across, every
 -- tile a pastel lavender wash of the source except for a pink band across
@@ -28,7 +28,7 @@
 --   S8  Flip    odd tiles mirrored
 --   S9  Twin    a second staircase family with the opposite slope
 --   S10 Stairs  Solid green / Tinted (the picture's luma, green chroma)
---   S11 Comb    stair steps comb on alternate lines
+--   S11 Source  Video / Osc (an internal triangle-wave oscillator replaces the video)
 --   P12 TILES   1 tile (the plain picture) .. 8 tiles across, continuous
 --
 -- Geometry runs in virtual 1080-line units (timing ID steps); tile widths
@@ -87,6 +87,10 @@ architecture escalator of program_top is
         else return unsigned(v(9 downto 0)); end if;
     end function;
 
+    function f_tri8(v : unsigned(7 downto 0)) return unsigned is
+    begin
+        if v(7) = '1' then return not v(6 downto 0); else return v(6 downto 0); end if;
+    end function;
     -- line buffer {y, u, v, 00}
     type t_lb is array (0 to 2047) of std_logic_vector(31 downto 0);
     signal lb : t_lb := (others => "0001000000" & "1000000000" & "1000000000" & "00");
@@ -95,6 +99,12 @@ architecture escalator of program_top is
     signal s_lb_we : std_logic := '0';
     signal s_lb_q  : std_logic_vector(31 downto 0) := "0001000000" & "1000000000" & "1000000000" & "00";
 
+    -- internal oscillator source (Source = Osc): triangle waves of x and y
+    signal s_src : std_logic := '0';
+    signal s_ox : unsigned(9 downto 0) := (others => '0');
+    signal s_oy : unsigned(9 downto 0) := (others => '0');
+    signal s_ot : unsigned(7 downto 0) := (others => '0');
+    signal s_oty, s_otu, s_otv : unsigned(9 downto 0) := to_unsigned(512, 10);
     -- timing / controls
     signal s_xs : unsigned(2 downto 0) := to_unsigned(2, 3);
     signal s_ys : unsigned(11 downto 0) := to_unsigned(256, 12);
@@ -125,7 +135,7 @@ architecture escalator of program_top is
     signal s_wash, s_vivid : unsigned(7 downto 0) := (others => '0');
     signal s_rise : signed(9 downto 0) := (others => '0');
     signal s_speed : signed(9 downto 0) := (others => '0');
-    signal s_brick, s_flip, s_twin, s_tint, s_comb : std_logic := '0';
+    signal s_brick, s_flip, s_twin, s_tint : std_logic := '0';
     signal s_ph : unsigned(15 downto 0) := (others => '0');         -- march phase
     -- serial multiplier (zone)
     signal s_ma : unsigned(21 downto 0) := (others => '0');
@@ -272,7 +282,7 @@ begin
                 s_flip  <= registers_in(6)(1);
                 s_twin  <= registers_in(6)(2);
                 s_tint  <= registers_in(6)(3);
-                s_comb  <= registers_in(6)(4);
+                s_src   <= registers_in(6)(4);
                 -- march
                 v_ph := signed(resize(s_ph, 18)) + resize(s_speed, 18);
                 if v_ph < 0 then v_ph := v_ph + signed(resize(s_p, 18));
@@ -378,6 +388,14 @@ begin
         variable v_d : unsigned(16 downto 0);
     begin
         if rising_edge(clk) then
+            -- oscillator source: x ramp per source pixel, y ramp per line, phase per field
+            if data_in.avid = '1' then s_ox <= s_ox + 3; elsif s_avq = '1' then s_ox <= (others => '0'); s_oy <= s_oy + 5; end if;
+            if s_zone = '1' then s_oy <= (others => '0'); end if;
+            if s_zgo = '1' then s_ot <= s_ot + 3; end if;
+            s_oty <= to_unsigned(64, 10) + resize(f_tri8(s_ox(9 downto 2) + s_ot) & '0', 10) + resize(f_tri8(s_oy(9 downto 2) - s_ot) & '0', 10)
+                     + resize(f_tri8(s_ox(9 downto 2) + s_ot), 10) + resize(f_tri8(s_oy(9 downto 2) - s_ot), 10);
+            s_otu <= to_unsigned(320, 10) + resize(f_tri8(s_ox(9 downto 2) + s_ot + s_ot) & '0', 10) + resize(f_tri8(s_ox(9 downto 2) + s_ot + s_ot), 10);
+            s_otv <= to_unsigned(320, 10) + resize(f_tri8(s_oy(9 downto 2) + s_ot) & '0', 10) + resize(f_tri8(s_oy(9 downto 2) + s_ot), 10);
             s_lb_we <= '0';
             if data_in.avid = '1' then
                 v_a := resize(s_wacc, 12) + resize(s_f, 12);
@@ -385,7 +403,11 @@ begin
                     s_wacc <= resize(v_a - 1024, 11);
                     s_lb_we <= '1';
                     s_lb_wa <= s_wcnt;
-                    s_lb_wd <= data_in.y & data_in.u & data_in.v & "00";
+                    if s_src = '1' then
+                        s_lb_wd <= std_logic_vector(s_oty) & std_logic_vector(s_otu) & std_logic_vector(s_otv) & "00";
+                    else
+                        s_lb_wd <= data_in.y & data_in.u & data_in.v & "00";
+                    end if;
                     s_wcnt <= s_wcnt + 1;
                 else
                     s_wacc <= v_a(10 downto 0);
@@ -447,7 +469,7 @@ begin
                     s_rd <= s_wtm1;
                 end if;
                 s_k <= (others => '0');
-                if s_comb = '1' and s_lpar = '1' then s_sa <= '0' & s_steph; else s_sa <= (others => '0'); end if;
+                if s_lpar = '1' then s_sa <= '0' & s_steph; else s_sa <= (others => '0'); end if;
                 s_d <= s_dl; s_d2 <= s_dl;
             elsif g_avid = '1' then
                 if s_r = s_wtm1 then

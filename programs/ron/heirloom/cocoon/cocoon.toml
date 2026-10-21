@@ -6,7 +6,7 @@
 processing_delay_clks = 20
 program_id = "com.czartroniks.cocoon"
 program_name = "Cocoon"
-program_version = "0.1.0"
+program_version = "0.2.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -96,9 +96,9 @@ initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
-name_label = "Key"
-value_labels = ["Bright", "Dark"]
-initial_value_label = "Bright"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
@@ -132,7 +132,7 @@ rotary_potentiometer_3 = 800
 linear_potentiometer_12 = 1023
 
 [[preset]]
-name = "Dark Flanks"
+name = "Osc Flanks"
 rotary_potentiometer_1 = 300
 rotary_potentiometer_5 = 800
 toggle_switch_10 = 1

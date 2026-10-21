@@ -50,6 +50,6 @@ Windows path to the drop zone: `\\wsl$\Ubuntu\home\ron\videomancer-dev\programs\
 
 | Photo | Program | What it shows | Status |
 |-------|---------|---------------|--------|
-| WIN_20220629_23_49_20 | [escalator](escalator/) | picture tiled ~7 across, pastel rows with a vivid pink band, green stepped diagonals marching down the grid | v0.1.0 built 2026-10-20, 6/6 seed 1 (HD 75–79 MHz, 4.9k LC, 15 EBR); not flashed |
-| WIN_20220829_23_30_37 | [cocoon](cocoon/) | stretched hexagon of woven chevrons in a red→blue radial glow, posterized video keyed in and torn at the flanks | v0.1.0 built 2026-10-20, 6/6 seed 1 (HD 78–81 MHz, 4.3k LC, 19 EBR); not flashed |
-| WIN_20221122_23_37_36 | [starburst](starburst/) | 4-fold mirror kaleidoscope of saddle contour bands (gray X's, CMY chevrons), serrated edges | v0.1.0 built 2026-10-20, 6/6 seed 1 (HD 79–84 MHz, 4.45k LC, 17 EBR); not flashed |
+| WIN_20220629_23_49_20 | [escalator](escalator/) | picture tiled ~7 across, pastel rows with a vivid pink band, green stepped diagonals marching down the grid | v0.2.0 (Source switch) built 2026-10-20, 6/6 (HD Dual seed 2), HD 80–87 MHz, 5.0k LC, 15 EBR; v0.1.0 previewed |
+| WIN_20220829_23_30_37 | [cocoon](cocoon/) | stretched hexagon of woven chevrons in a red→blue radial glow, posterized video keyed in and torn at the flanks | v0.2.0 (Source switch) built 2026-10-20, 6/6 (HD Dual seed 2), HD 75–80 MHz, 4.45k LC, 19 EBR; v0.1.0 previewed |
+| WIN_20221122_23_37_36 | [starburst](starburst/) | 4-fold mirror kaleidoscope of saddle contour bands (gray X's, CMY chevrons), serrated edges | v0.2.0 (Source switch) built 2026-10-20, 6/6 seed 1, HD 79–80 MHz, 4.6k LC, 17 EBR; v0.1.0 previewed |
