@@ -1,48 +1,49 @@
-# Cocoon - Heirloom #2 (2026-10-20), from WIN_20220829_23_30_37.
-# A woven chevron cocoon in a red-to-blue glow, the video keyed in around it.
+# Cocoon - Heirloom #2, rebuilt 2026-10-21 from WIN_20220829_23_30_37.
+# A woven cocoon (crimson dashes, orange arcs, a crimson ring) over a red-to-navy
+# diamond glow, posterized camera video at the flanks and torn across a band.
 # See cocoon.vhd and SUMMARY.md.
 
 [program]
-processing_delay_clks = 20
+processing_delay_clks = 24
 program_id = "com.czartroniks.cocoon"
 program_name = "Cocoon"
-program_version = "0.2.0"
+program_version = "0.5.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Render", "Mask", "Glitch"]
 program_type = "processing"
-description = "A hexagonal cocoon of woven chevrons glowing red to blue, the posterized video keyed in and torn around it."
+description = "A woven cocoon of crimson dashes and orange arcs in a red-to-navy diamond glow, torn camera video banded across it."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_1"
-name_label = "Key"
+name_label = "Weave"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 560
+initial_value = 576
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
-name_label = "Weave"
-control_mode = "linear"
-display_min_value = 1
-display_max_value = 64
-initial_value = 500
-display_float_digits = 0
-suffix_label = ""
-
-[[parameter]]
-parameter_id = "rotary_potentiometer_3"
 name_label = "Rows"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 420
+initial_value = 571
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Arcs"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 568
 display_float_digits = 0
 suffix_label = "%"
 
@@ -52,7 +53,7 @@ name_label = "Glow"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 380
+initial_value = 682
 display_float_digits = 0
 suffix_label = "%"
 
@@ -62,7 +63,7 @@ name_label = "Tear"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 300
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
@@ -72,15 +73,15 @@ name_label = "Speed"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 560
+initial_value = 680
 display_float_digits = 0
 suffix_label = ""
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
-name_label = "Shape"
-value_labels = ["Hexagon", "Ellipse"]
-initial_value_label = "Hexagon"
+name_label = "Mirror"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
@@ -90,7 +91,7 @@ initial_value_label = "Fire"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
-name_label = "Poster"
+name_label = "Band"
 value_labels = ["Off", "On"]
 initial_value_label = "On"
 
@@ -102,9 +103,9 @@ initial_value_label = "Video"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
-name_label = "Weave"
-value_labels = ["Chevron", "Diagonal"]
-initial_value_label = "Chevron"
+name_label = "Bend"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
@@ -112,7 +113,7 @@ name_label = "Cocoon"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 450
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
@@ -120,20 +121,27 @@ suffix_label = "%"
 name = "Default"
 
 [[preset]]
-name = "Ice Egg"
+name = "Seed"
+linear_potentiometer_12 = 0
+
+[[preset]]
+name = "Hatch"
+linear_potentiometer_12 = 1023
+rotary_potentiometer_5 = 760
+
+[[preset]]
+name = "Ice Mirror"
 toggle_switch_7 = 1
 toggle_switch_8 = 1
-linear_potentiometer_12 = 300
 
 [[preset]]
-name = "Full Weave"
-rotary_potentiometer_2 = 900
-rotary_potentiometer_3 = 800
-linear_potentiometer_12 = 1023
-
-[[preset]]
-name = "Osc Flanks"
-rotary_potentiometer_1 = 300
-rotary_potentiometer_5 = 800
+name = "Osc Weave"
 toggle_switch_10 = 1
-linear_potentiometer_12 = 500
+rotary_potentiometer_1 = 820
+rotary_potentiometer_2 = 400
+
+[[preset]]
+name = "Bent Video"
+toggle_switch_11 = 1
+rotary_potentiometer_5 = 760
+rotary_potentiometer_3 = 760
