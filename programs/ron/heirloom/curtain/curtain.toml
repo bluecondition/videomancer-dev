@@ -1,80 +1,85 @@
-# Curtain - Heirloom #34 (2026-10-20), from WIN_20230521_01_34_12.
-# Magenta rippled drapes on red, blue pools, lime piping on the crests, torn rows.
+# Curtain - Heirloom #34 (rebuilt 2026-10-27), from WIN_20230521_01_34_12.
+# Two line-locked oscillators into a keyed colourizer: folds (green arcs, cyan pools, magenta
+# striation) cut by pleats (red flames, grey domes, red drapes below the seam).
 # See curtain.vhd and SUMMARY.md.
 
 [program]
-processing_delay_clks = 20
+processing_delay_clks = 24
 program_id = "com.czartroniks.curtain"
 program_name = "Curtain"
-program_version = "0.1.0"
+program_version = "0.5.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Material", "Warp", "Organic"]
 program_type = "processing"
-description = "Magenta drapes wrung into S-curves by the video, blue pools where they part, lime piping on the crests. Wring on the slider."
+description = "Red drapes and magenta striation: swept folds with green piping and cyan pools, cut by pleats. Drape on the slider."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_1"
-name_label = "Pitch"
+name_label = "Folds"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 180
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
-name_label = "Pools"
+name_label = "Pleats"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 280
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
-name_label = "Piping"
+name_label = "Stripes"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 160
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
-name_label = "Hue"
-value_labels = ["Red Magenta", "Blue Cyan", "Green Yellow", "Violet Pink"]
-initial_value_label = "Red Magenta"
-
-[[parameter]]
-parameter_id = "rotary_potentiometer_5"
-name_label = "Drift"
+name_label = "Speed"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 560
+initial_value = 600
 display_float_digits = 0
 suffix_label = ""
 
 [[parameter]]
-parameter_id = "rotary_potentiometer_6"
-name_label = "Tear"
+parameter_id = "rotary_potentiometer_5"
+name_label = "Pools"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 180
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Melt"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 384
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
-name_label = "Pools"
+name_label = "Tear"
 value_labels = ["On", "Off"]
 initial_value_label = "On"
 
@@ -86,15 +91,15 @@ initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
-name_label = "Mirror"
-value_labels = ["Off", "On"]
-initial_value_label = "Off"
+name_label = "Flames"
+value_labels = ["On", "Off"]
+initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
-name_label = "Shade"
-value_labels = ["Dark", "Light"]
-initial_value_label = "Dark"
+name_label = "Velvet"
+value_labels = ["Red", "Blue"]
+initial_value_label = "Red"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
@@ -108,7 +113,7 @@ name_label = "Drape"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 500
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
@@ -116,18 +121,21 @@ suffix_label = "%"
 name = "Default"
 
 [[preset]]
-name = "Blue Velvet"
-rotary_potentiometer_4 = 256
-toggle_switch_9 = 1
-linear_potentiometer_12 = 800
-
-[[preset]]
-name = "Straight Folds"
-rotary_potentiometer_2 = 0
+name = "Hanging"
 linear_potentiometer_12 = 0
 
 [[preset]]
-name = "Osc Drapes"
-rotary_potentiometer_4 = 768
-toggle_switch_11 = 1
+name = "Whipped"
+rotary_potentiometer_4 = 760
 linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Blue Velvet"
+toggle_switch_10 = 1
+rotary_potentiometer_5 = 700
+
+[[preset]]
+name = "Many Folds"
+rotary_potentiometer_1 = 820
+rotary_potentiometer_2 = 760
+rotary_potentiometer_3 = 700
