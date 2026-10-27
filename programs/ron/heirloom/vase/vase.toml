@@ -1,103 +1,105 @@
-# Vase - Heirloom #27 (2026-10-20), from WIN_20230424_23_59_47.
-# A tall silhouette on black filled with shaded rainbow stripes or the squeezed picture.
+# Vase - Heirloom #27, v0.5.0 (2026-10-27): rebuilt from the photo WIN_20230424_23_59_47.
+# A glossy lathe vase on black (the camera's picture of a reflective object), keyed and colourised
+# by one slow vertical cycle: yellow/green/blue body, fast red bars, red and magenta blocks, a red key
+# window with a no-red channel.  See vase.vhd and SUMMARY.md.
 
 [program]
-processing_delay_clks = 20
+processing_delay_clks = 32
 program_id = "com.czartroniks.vase"
 program_name = "Vase"
-program_version = "0.1.0"
+program_version = "0.5.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Shape", "Mask", "Render"]
 program_type = "processing"
-description = "A tall vase silhouette on black, filled with glossy rainbow stripes or the picture squeezed into it. Waist on the slider."
+description = "A glossy vase on black, striped by red bars and rolling colour bands; the camera wraps round it and it spins."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_1"
-name_label = "Stripes"
-control_mode = "linear"
-display_min_value = 1
-display_max_value = 64
-initial_value = 300
-display_float_digits = 0
-suffix_label = ""
-
-[[parameter]]
-parameter_id = "rotary_potentiometer_2"
-name_label = "Shading"
+name_label = "Bars"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 700
+initial_value = 314
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Bands"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 497
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
-name_label = "Hue"
+name_label = "Roll"
 control_mode = "linear"
-display_min_value = 0
-display_max_value = 360
-initial_value = 0
+display_min_value = -100
+display_max_value = 100
+initial_value = 640
 display_float_digits = 0
 suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
-name_label = "Period"
+name_label = "Spin"
 control_mode = "linear"
-display_min_value = 1
-display_max_value = 16
-initial_value = 160
+display_min_value = -100
+display_max_value = 100
+initial_value = 620
 display_float_digits = 0
 suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
-name_label = "Drift"
+name_label = "Key"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 540
+initial_value = 614
 display_float_digits = 0
 suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
-name_label = "Tear"
+name_label = "Gloss"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 200
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
-name_label = "Fill"
-value_labels = ["Stripes", "Picture"]
-initial_value_label = "Stripes"
+name_label = "Swap"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
-name_label = "Shading"
+name_label = "Tear"
 value_labels = ["Off", "On"]
 initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
-name_label = "Vases"
-value_labels = ["One", "Two"]
-initial_value_label = "One"
+name_label = "Blocks"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
 name_label = "Palette"
-value_labels = ["Rainbow", "Warm"]
-initial_value_label = "Rainbow"
+value_labels = ["Photo", "Rotate"]
+initial_value_label = "Photo"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
@@ -107,30 +109,30 @@ initial_value_label = "Video"
 
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
-name_label = "Waist"
+name_label = "Bulge"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 300
+initial_value = 410
 display_float_digits = 0
 suffix_label = "%"
 
 [[preset]]
-name = "Default"
+name = "Photo"
 
 [[preset]]
-name = "Two Figures"
-toggle_switch_9 = 1
-linear_potentiometer_12 = 200
+name = "Hourglass"
+linear_potentiometer_12 = 1000
+rotary_potentiometer_4 = 760
 
 [[preset]]
-name = "Squeezed Face"
+name = "Column"
+linear_potentiometer_12 = 0
+rotary_potentiometer_1 = 820
+toggle_switch_9 = 0
+
+[[preset]]
+name = "Swap Glaze"
 toggle_switch_7 = 1
-rotary_potentiometer_2 = 400
-linear_potentiometer_12 = 500
-
-[[preset]]
-name = "Warm Column"
 toggle_switch_10 = 1
-rotary_potentiometer_1 = 800
-linear_potentiometer_12 = 80
+rotary_potentiometer_6 = 760
