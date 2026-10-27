@@ -1,24 +1,74 @@
-# Cusp - Heirloom #17 (2026-10-20), from WIN_20230315_00_30_57.
-# Rainbow stripes bent into cusps by a triangle of x or by the picture.
-# See cusp.vhd and SUMMARY.md.
+# Cusp - Heirloom #17, v0.5.0 (2026-10-21): rebuilt from the photo WIN_20230315_00_30_57.
+# Rows of fine stripes cut by right-pointing arrowheads: black cores with blue X tips, cyan fish that
+# grow across the frame, broad rainbow bands, red X's in the orange rows.  See cusp.vhd and SUMMARY.md.
 
 [program]
-processing_delay_clks = 20
+processing_delay_clks = 32
 program_id = "com.czartroniks.cusp"
 program_name = "Cusp"
-program_version = "0.1.0"
+program_version = "0.5.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Pattern", "Warp", "Analysis"]
 program_type = "processing"
-description = "Horizontal rainbow stripes bent into pointed cusps by a triangle wave or by the picture itself, navy inside the deep cusps."
+description = "Fine rainbow stripes cut by arrowheads: black cores, cyan fish growing left to right; video bends the cusps."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_1"
-name_label = "Pitch"
+name_label = "Cusps"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Rows"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Fish"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 200
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Speed"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 640
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Stripes"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Bend"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
@@ -27,78 +77,28 @@ display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
-parameter_id = "rotary_potentiometer_2"
-name_label = "Cusps"
-control_mode = "linear"
-display_min_value = 0
-display_max_value = 100
-initial_value = 180
-display_float_digits = 0
-suffix_label = "%"
-
-[[parameter]]
-parameter_id = "rotary_potentiometer_3"
-name_label = "Rows"
-control_mode = "linear"
-display_min_value = 0
-display_max_value = 100
-initial_value = 500
-display_float_digits = 0
-suffix_label = "%"
-
-[[parameter]]
-parameter_id = "rotary_potentiometer_4"
-name_label = "Hue"
-control_mode = "linear"
-display_min_value = 0
-display_max_value = 100
-initial_value = 80
-display_float_digits = 0
-suffix_label = "%"
-
-[[parameter]]
-parameter_id = "rotary_potentiometer_5"
-name_label = "Dark"
-control_mode = "linear"
-display_min_value = 0
-display_max_value = 100
-initial_value = 280
-display_float_digits = 0
-suffix_label = "%"
-
-[[parameter]]
-parameter_id = "rotary_potentiometer_6"
-name_label = "Speed"
-control_mode = "linear"
-display_min_value = -100
-display_max_value = 100
-initial_value = 560
-display_float_digits = 0
-suffix_label = ""
-
-[[parameter]]
 parameter_id = "toggle_switch_7"
-name_label = "Cusps"
+name_label = "Flip"
 value_labels = ["Right", "Left"]
 initial_value_label = "Right"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
-name_label = "Palette"
-value_labels = ["Rainbow", "Duo"]
-initial_value_label = "Rainbow"
+name_label = "Rows"
+value_labels = ["Alternate", "Same"]
+initial_value_label = "Alternate"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
-name_label = "Bend"
-value_labels = ["Tri", "Picture"]
-initial_value_label = "Tri"
+name_label = "Glow"
+value_labels = ["Soft", "Hard"]
+initial_value_label = "Soft"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
-name_label = "Comb"
-value_labels = ["Off", "On"]
-initial_value_label = "Off"
+name_label = "Palette"
+value_labels = ["Photo", "Swap"]
+initial_value_label = "Photo"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
@@ -108,29 +108,33 @@ initial_value_label = "Video"
 
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
-name_label = "Bend"
+name_label = "Point"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 420
+initial_value = 481
 display_float_digits = 0
 suffix_label = "%"
 
 [[preset]]
-name = "Default"
+name = "Photo"
 
 [[preset]]
-name = "Scope"
-toggle_switch_9 = 1
-linear_potentiometer_12 = 700
-
-[[preset]]
-name = "Flat Rainbow"
-rotary_potentiometer_5 = 0
+name = "Flat Bars"
 linear_potentiometer_12 = 0
 
 [[preset]]
-name = "Duo Comb"
-toggle_switch_8 = 1
+name = "Needles"
+linear_potentiometer_12 = 1000
+rotary_potentiometer_3 = 760
+
+[[preset]]
+name = "Amber Swarm"
 toggle_switch_10 = 1
-linear_potentiometer_12 = 900
+rotary_potentiometer_1 = 800
+rotary_potentiometer_4 = 820
+
+[[preset]]
+name = "Hard Left"
+toggle_switch_7 = 1
+toggle_switch_9 = 1
