@@ -1,103 +1,103 @@
-# Vesica - Heirloom #13 (2026-10-20), from WIN_20230307_01_04_17.
-# Pastel diamond lattice on pale green, an orange ringed vesica eye with crescents.
-# See vesica.vhd and SUMMARY.md.
+# Vesica - Heirloom #13, v0.5.0 (2026-10-21): rebuilt from the photo WIN_20230307_01_04_17.
+# An orange vesica eye, flame-torn on its right edge, with crescents above and below, a brown plate
+# joining its side copies, on a pastel X lattice.  See vesica.vhd and SUMMARY.md.
 
 [program]
-processing_delay_clks = 20
+processing_delay_clks = 24
 program_id = "com.czartroniks.vesica"
 program_name = "Vesica"
-program_version = "0.1.0"
+program_version = "0.5.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
-categories = ["Shape", "Pattern", "Mask"]
+categories = ["Shape", "Pattern", "Glitch"]
 program_type = "processing"
-description = "An orange vesica eye of nested rings with crescents above and below, on a pastel diamond lattice; the video etches the rings."
+description = "Orange vesica eye with flame-torn edges and crescents on a pastel X lattice; the camera bends the bands."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_1"
-name_label = "Pitch"
+name_label = "Lattice"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 260
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
-name_label = "Width"
+name_label = "Bands"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 300
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
-name_label = "Rings"
+name_label = "Stripes"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 420
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
-name_label = "Aspect"
+name_label = "Crescents"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 560
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
-name_label = "Drift"
+name_label = "Speed"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 560
+initial_value = 640
 display_float_digits = 0
 suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
-name_label = "Tear"
+name_label = "Etch"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 200
+initial_value = 400
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
-name_label = "Lattice"
+name_label = "Tear"
 value_labels = ["On", "Off"]
 initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
-name_label = "Eye"
-value_labels = ["Rings", "Solid"]
-initial_value_label = "Rings"
+name_label = "Twins"
+value_labels = ["Clear", "Filled"]
+initial_value_label = "Clear"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
-name_label = "Crescents"
+name_label = "Texture"
 value_labels = ["On", "Off"]
 initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
-name_label = "Tint"
-value_labels = ["Pastel", "Video"]
+name_label = "Palette"
+value_labels = ["Pastel", "Azure"]
 initial_value_label = "Pastel"
 
 [[parameter]]
@@ -112,26 +112,38 @@ name_label = "Eye"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 500
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
 [[preset]]
-name = "Default"
+name = "Photo"
 
 [[preset]]
-name = "Wide Open"
-rotary_potentiometer_4 = 200
+name = "Wide Eye"
 linear_potentiometer_12 = 1023
+rotary_potentiometer_5 = 720
 
 [[preset]]
 name = "Slit"
-rotary_potentiometer_4 = 1000
-rotary_potentiometer_3 = 900
-linear_potentiometer_12 = 100
+linear_potentiometer_12 = 0
+rotary_potentiometer_3 = 220
+rotary_potentiometer_4 = 820
 
 [[preset]]
-name = "Osc Lattice"
+name = "Azure Osc"
 toggle_switch_10 = 1
 toggle_switch_11 = 1
 rotary_potentiometer_6 = 700
+
+[[preset]]
+name = "Storm"
+rotary_potentiometer_5 = 1000
+rotary_potentiometer_2 = 820
+rotary_potentiometer_6 = 800
+
+[[preset]]
+name = "Twins"
+toggle_switch_8 = 1
+rotary_potentiometer_1 = 300
+rotary_potentiometer_3 = 700
