@@ -1,0 +1,206 @@
+# MOOD -- a circuit-level reimplementation of the 1976 music visualizer
+# codenamed "Project Mood" (US patent 4,081,829).
+#
+# Each stereo channel's audio sets the size of a stair-stepped diamond (an
+# integrated ENERGY compared against summed V-shaped H and V ramps) and,
+# through an alternating zero-crossing counter and the patent's Table I, its
+# colour (a tap on a phase-delay colour modulator).  SOLID / HOLE / RING
+# object logic, the RS colour flip-flop ("last channel to turn on wins"),
+# H x1/2/3/5 and V x1/2/4/8 arrays and AUTO mode follow the circuit.  A
+# built-in phantom stereo record plays with nothing patched; EXTERNAL
+# rebuilds audio from K1/K2 modulated by the audio inputs.
+#
+# VINTAGE render (virtual-clock-snapped ramps, one-shot rings, chroma
+# smear).  The CLEAN render is the sister program MOOD HD.
+
+[program]
+processing_delay_clks = 12
+program_id = "com.czartroniks.mood"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+program_name = "Mood"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Shape", "Pattern", "Computer"]
+program_type = "synthesis"
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+description = "1976 music visualizer, rebuilt from the circuit: stereo diamonds, contour fringes, zero-crossing colour, phantom stereo"
+url = "https://github.com/lzxindustries/videomancer-community-programs"
+
+# --- Rotary Potentiometers (Knobs 1-6) ---
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 614
+display_min_value = 0
+display_max_value = 100
+name_label = "L Gain"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 614
+display_min_value = 0
+display_max_value = 100
+name_label = "R Gain"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 358
+display_min_value = 0
+display_max_value = 100
+name_label = "L Contour"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 358
+display_min_value = 0
+display_max_value = 100
+name_label = "R Contour"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 512
+display_min_value = 6
+display_max_value = 30
+name_label = "Color"
+suffix_label = "deg"
+
+# Enum knob: the firmware loads a labelled default as the label INDEX, so the
+# default is the first label (index 0 decodes as Solid either way).
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Shape"
+value_labels = ["Solid", "Hole", "Ring", "Auto"]
+initial_value_label = "Solid"
+
+# --- Toggle Switches (7-11) ---
+# Switch pairs are Gray-coded: (Off,Off) first, (On,Off) second,
+# (On,On) third, (Off,On) fourth.
+#   Horiz A + B: H array x1 / x2 / x3 / x5   (AUTO: update rate)
+#   Vert A + B:  V array x1 / x2 / x4 / x8   (AUTO: Solid / Hole / Ring lock, Auto All)
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Horiz A"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Horiz B"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Vert A"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Vert B"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Internal", "External"]
+initial_value_label = "Internal"
+
+# --- Linear Potentiometer (Fader 12) ---
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 767
+display_min_value = 0
+display_max_value = 100
+name_label = "Volume"
+suffix_label = "%"
+
+# --- Presets (labelled Shape knob takes raw 0..1023: Solid 0, Hole 341,
+# Ring 682, Auto 1023) ---
+
+[[preset]]
+name = "Breathing"
+rotary_potentiometer_1 = 614
+rotary_potentiometer_2 = 614
+rotary_potentiometer_3 = 358
+rotary_potentiometer_4 = 358
+rotary_potentiometer_5 = 512
+rotary_potentiometer_6 = 0      # Solid
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 767
+
+[[preset]]
+name = "Ring Grid"
+rotary_potentiometer_1 = 650
+rotary_potentiometer_2 = 560
+rotary_potentiometer_3 = 700
+rotary_potentiometer_4 = 420
+rotary_potentiometer_5 = 640
+rotary_potentiometer_6 = 682    # Ring
+toggle_switch_7 = 1             # H x3
+toggle_switch_8 = 1
+toggle_switch_9 = 1             # V x2
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 800
+
+[[preset]]
+name = "Fringe"
+rotary_potentiometer_1 = 700
+rotary_potentiometer_2 = 520
+rotary_potentiometer_3 = 40
+rotary_potentiometer_4 = 120
+rotary_potentiometer_5 = 400
+rotary_potentiometer_6 = 341    # Hole
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 800
+
+[[preset]]
+name = "Auto All"
+rotary_potentiometer_1 = 614
+rotary_potentiometer_2 = 614
+rotary_potentiometer_3 = 450
+rotary_potentiometer_4 = 450
+rotary_potentiometer_5 = 560
+rotary_potentiometer_6 = 1023   # Auto
+toggle_switch_7 = 1             # lively
+toggle_switch_8 = 0
+toggle_switch_9 = 0             # Auto All
+toggle_switch_10 = 1
+toggle_switch_11 = 0
+linear_potentiometer_12 = 767
