@@ -1,125 +1,158 @@
-# Kiln - Heirloom #32 (2026-10-20), from WIN_20230515_23_17_11.
-# Fire palette by luma with vertical band glow and horizontal smear.
-# See kiln.vhd and SUMMARY.md.
+# Kiln - Heirloom #32, v0.5.0 (2026-10-27): rebuilt from the photo WIN_20230515_23_17_11.
+# Camera video in a frame store zoomed to a quadrant, repeated across (1.94 copies) with the bottom
+# row mirrored, through a fire colouriser (blue / violet / purple / magenta / red / orange / yellow)
+# and torn into rising horizontal fibres with an interlace comb.  See kiln.vhd and SUMMARY.md.
 
 [program]
-processing_delay_clks = 20
+processing_delay_clks = 32
 program_id = "com.czartroniks.kiln"
 program_name = "Kiln"
-program_version = "0.1.0"
+program_version = "0.5.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
-categories = ["Color", "Film", "Render"]
+categories = ["Mirror", "Color", "Glitch"]
 program_type = "processing"
-description = "The picture fired in a kiln: violet shadows, red mids, yellow highs, glowing vertical bands, streaked. Heat on the slider."
+description = "Camera tiled and mirrored in a frame store, fired through a yellow-red-blue colourizer, torn into rising fibres."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
+# --- Rotary Potentiometers (1-6) ---
+
 [[parameter]]
 parameter_id = "rotary_potentiometer_1"
-name_label = "Bands"
+name_label = "Tiles"
 control_mode = "linear"
-display_min_value = 0
-display_max_value = 100
-initial_value = 200
-display_float_digits = 0
-suffix_label = "%"
+display_min_value = 1
+display_max_value = 4
+initial_value = 319
+display_float_digits = 2
+suffix_label = ""
+
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
-name_label = "Smear"
+name_label = "Fibres"
 control_mode = "linear"
 display_min_value = 0
-display_max_value = 100
-initial_value = 400
+display_max_value = 200
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
+
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
-name_label = "Contrast"
+name_label = "Blocks"
 control_mode = "linear"
-display_min_value = 25
-display_max_value = 225
-initial_value = 400
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
+
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
-name_label = "Hue"
-control_mode = "linear"
-display_min_value = 0
-display_max_value = 100
-initial_value = 0
-display_float_digits = 0
-suffix_label = "%"
-[[parameter]]
-parameter_id = "rotary_potentiometer_5"
-name_label = "Depth"
-control_mode = "linear"
-display_min_value = 0
-display_max_value = 100
-initial_value = 500
-display_float_digits = 0
-suffix_label = "%"
-[[parameter]]
-parameter_id = "rotary_potentiometer_6"
 name_label = "Drift"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 560
+initial_value = 640
 display_float_digits = 0
 suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Rims"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 200
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Glaze"
+value_labels = ["Fire", "Ice", "Ember", "Toxic", "Violet", "Mono", "Neon", "Rust"]
+initial_value_label = "Fire"
+
+# --- Toggle Switches (7-11) ---
+
 [[parameter]]
 parameter_id = "toggle_switch_7"
-name_label = "Bands"
-value_labels = ["Off", "On"]
-initial_value_label = "On"
+name_label = "Mirror"
+value_labels = ["Mirror", "Repeat"]
+initial_value_label = "Mirror"
+
 [[parameter]]
 parameter_id = "toggle_switch_8"
-name_label = "Palette"
-value_labels = ["Fire", "Ice"]
-initial_value_label = "Fire"
+name_label = "Kaleido"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
 [[parameter]]
 parameter_id = "toggle_switch_9"
-name_label = "Mirror"
-value_labels = ["Off", "On"]
-initial_value_label = "Off"
+name_label = "Weave"
+value_labels = ["Comb", "Smear"]
+initial_value_label = "Comb"
+
 [[parameter]]
 parameter_id = "toggle_switch_10"
-name_label = "Poster"
+name_label = "Quench"
 value_labels = ["Off", "On"]
 initial_value_label = "Off"
+
 [[parameter]]
 parameter_id = "toggle_switch_11"
 name_label = "Source"
 value_labels = ["Video", "Osc"]
 initial_value_label = "Video"
+
+# --- Linear Potentiometer (12) ---
+
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
 name_label = "Heat"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 300
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
+
+# --- Presets (hand-written placeholders) ---
+
 [[preset]]
-name = "Default"
+name = "Photo"
+rotary_potentiometer_1 = 319
+rotary_potentiometer_2 = 512
+rotary_potentiometer_3 = 512
+rotary_potentiometer_4 = 640
+rotary_potentiometer_5 = 512
+rotary_potentiometer_6 = 0
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 1
+linear_potentiometer_12 = 512
 
 [[preset]]
 name = "Cold Kiln"
-toggle_switch_8 = 1
-linear_potentiometer_12 = 200
+linear_potentiometer_12 = 150
+rotary_potentiometer_2 = 700
 
 [[preset]]
 name = "White Hot"
 linear_potentiometer_12 = 1000
-rotary_potentiometer_5 = 900
+rotary_potentiometer_3 = 760
 
 [[preset]]
-name = "Glazed"
-toggle_switch_10 = 1
-toggle_switch_9 = 1
-linear_potentiometer_12 = 450
+name = "Kaleidoscope"
+rotary_potentiometer_1 = 700
+toggle_switch_8 = 1
+rotary_potentiometer_4 = 760
 
+[[preset]]
+name = "Smear"
+toggle_switch_9 = 1
+rotary_potentiometer_2 = 900
