@@ -1,125 +1,142 @@
-# Riptide - Heirloom #15 (2026-10-20), from WIN_20230309_00_28_35.
-# Saturated smear band between speckle-streak fields.
+# Riptide - Heirloom #15, rebuilt 2026-10-21 from WIN_20230309_00_28_35.
+# A psychedelic swirl band mirrored about the centre line, torn into strips, between blue
+# fingerprint textures with crimson-beaded columns; one hue/value colourizer over all of it.
 # See riptide.vhd and SUMMARY.md.
 
 [program]
-processing_delay_clks = 20
+processing_delay_clks = 28
 program_id = "com.czartroniks.riptide"
 program_name = "Riptide"
-program_version = "0.1.0"
+program_version = "0.5.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
-categories = ["Noise", "Color", "Signal"]
+categories = ["Mirror", "Glitch", "Color"]
 program_type = "processing"
-description = "A band of saturated rainbow flow across the middle, dithered blue and red speckle streaks above and below. Band on the slider."
+description = "Mirrored psychedelic swirl band torn into sliding strips between blue fingerprint textures; Rip on the slider."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_1"
-name_label = "Smear"
+name_label = "Band"
 control_mode = "linear"
-display_min_value = 0
+display_min_value = 4
 display_max_value = 100
-initial_value = 600
+initial_value = 585
 display_float_digits = 0
 suffix_label = "%"
+
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
-name_label = "Saturate"
-control_mode = "linear"
-display_min_value = 50
-display_max_value = 850
-initial_value = 400
-display_float_digits = 0
-suffix_label = "%"
-[[parameter]]
-parameter_id = "rotary_potentiometer_3"
-name_label = "Density"
+name_label = "Etch"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 500
+initial_value = 300
 display_float_digits = 0
 suffix_label = "%"
+
 [[parameter]]
-parameter_id = "rotary_potentiometer_4"
+parameter_id = "rotary_potentiometer_3"
 name_label = "Hue"
 control_mode = "linear"
 display_min_value = 0
-display_max_value = 100
+display_max_value = 360
 initial_value = 0
 display_float_digits = 0
+suffix_label = "deg"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Speed"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 640
+display_float_digits = 0
 suffix_label = "%"
+
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
-name_label = "Position"
+name_label = "Gain"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 547
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Ridges"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
 initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
-[[parameter]]
-parameter_id = "rotary_potentiometer_6"
-name_label = "Crawl"
-control_mode = "linear"
-display_min_value = -100
-display_max_value = 100
-initial_value = 560
-display_float_digits = 0
-suffix_label = ""
+
 [[parameter]]
 parameter_id = "toggle_switch_7"
-name_label = "Smear"
-value_labels = ["Colour", "Luma"]
-initial_value_label = "Colour"
+name_label = "Mirror"
+value_labels = ["Fold", "Repeat"]
+initial_value_label = "Fold"
+
 [[parameter]]
 parameter_id = "toggle_switch_8"
-name_label = "Speckles"
-value_labels = ["Opposite", "Near"]
-initial_value_label = "Opposite"
+name_label = "Quad"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
 [[parameter]]
 parameter_id = "toggle_switch_9"
-name_label = "Band"
-value_labels = ["Single", "Twin"]
-initial_value_label = "Single"
+name_label = "Palette"
+value_labels = ["Photo", "Opposite"]
+initial_value_label = "Photo"
+
 [[parameter]]
 parameter_id = "toggle_switch_10"
-name_label = "Poster"
+name_label = "Twin"
 value_labels = ["Off", "On"]
-initial_value_label = "On"
+initial_value_label = "Off"
+
 [[parameter]]
 parameter_id = "toggle_switch_11"
 name_label = "Source"
 value_labels = ["Video", "Osc"]
 initial_value_label = "Video"
+
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
-name_label = "Band"
+name_label = "Rip"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 400
+initial_value = 310
 display_float_digits = 0
 suffix_label = "%"
-[[preset]]
-name = "Default"
 
 [[preset]]
-name = "Slit"
-linear_potentiometer_12 = 60
-rotary_potentiometer_3 = 700
+name = "Riptide"
+
+[[preset]]
+name = "Calm Water"
+linear_potentiometer_12 = 0
+rotary_potentiometer_4 = 560
+
+[[preset]]
+name = "Kaleidoscope"
+toggle_switch_8 = 1
+rotary_potentiometer_1 = 1023
+
+[[preset]]
+name = "Shredded"
+linear_potentiometer_12 = 1023
+rotary_potentiometer_4 = 900
 
 [[preset]]
 name = "Twin Rivers"
-toggle_switch_9 = 1
-linear_potentiometer_12 = 250
-rotary_potentiometer_4 = 300
-
-[[preset]]
-name = "Full Flood"
-linear_potentiometer_12 = 1023
-rotary_potentiometer_2 = 700
-
+toggle_switch_10 = 1
+rotary_potentiometer_1 = 420
+rotary_potentiometer_3 = 340
