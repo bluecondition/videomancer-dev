@@ -1,0 +1,127 @@
+# Lamella — the picture re-rendered as a wall of glossy metal tiles.  The
+# frame is averaged into a coarse store and redrawn as leaning columns of
+# rounded tiles, each a small convex lens (magnified middle, crushed rim)
+# with a rim highlight and a dark groove, staggered column to column so the
+# image steps diagonally across the wall; tone goes through a metal palette.
+
+[program]
+program_id = "com.bluecondition.lamella"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+program_name = "Lamella"
+author = "bluecondition"
+license = "GPL-3.0"
+categories = ["Warp", "Material", "Pixel"]
+program_type = "processing"
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+description = "Picture redrawn as a wall of glossy metal tiles: lensed, rimmed, stair-stepped columns; metal palettes, brushed grain."
+url = "https://github.com/lzxindustries/videomancer-sdk"
+
+# --- Rotary Potentiometers (Knobs 1-6) ---
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 316
+display_min_value = 3
+display_max_value = 16
+name_label = "Columns"
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 205
+display_min_value = 2
+display_max_value = 12
+name_label = "Rows"
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 712
+display_min_value = -100
+display_max_value = 100
+name_label = "Stair"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 256
+display_min_value = -100
+display_max_value = 100
+name_label = "Lean"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 560
+display_min_value = 0
+display_max_value = 200
+name_label = "Gloss"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Palette"
+value_labels = ["Copper", "Ice", "Brass", "Chrome"]
+initial_value_label = "Copper"
+
+# --- Toggle Switches (7-11) ---
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Colour"
+value_labels = ["Palette", "Source"]
+initial_value_label = "Palette"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Shape"
+value_labels = ["Convex", "Concave"]
+initial_value_label = "Convex"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Shuffle"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Brushed"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Negative"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+# --- Linear Potentiometer (Fader 12) ---
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 512
+display_min_value = 0
+display_max_value = 200
+name_label = "Depth"
+suffix_label = "%"

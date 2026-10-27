@@ -1,0 +1,83 @@
+# WOODGRAIN — an Atari 2600 inside the Videomancer.
+#
+# v0.1.0.  A cycle-exact 6507 CPU, TIA video chip and RIOT run a real 4K
+# Atari 2600 cartridge, one game frame per field, scaled to a TV-shaped
+# picture on every raster.  The bundled cartridge is a CC0 room explorer
+# (8bitworkshop's procgen1): walk off any edge into the next random room.
+# Drop your own 2K / 4K ROM in as cartridge.bin and rebuild.  K1 / K2 are
+# the joystick (outer thirds push), S7 the fire button, S8 / S9 press Game
+# Reset / Select on every flip, S10 is the difficulty switch and S11 lets a
+# wandering joystick play while the knobs rest in the middle.
+#
+# Author: czartroniks
+
+[program]
+processing_delay_clks = 8
+program_id = "com.czartroniks.woodgrain"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+program_name = "Woodgrain"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Game", "Computer"]
+program_type = "synthesis"
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+description = "An Atari 2600 (6507 + TIA + RIOT) running a 4K cartridge. K1/K2 joystick, S7 fire, S8/S9 Reset/Select."
+url = "https://github.com/lzxindustries/videomancer-community-programs"
+
+# --- Rotary Potentiometers (Knobs 1-6) ---
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 512
+display_min_value = -100
+display_max_value = 100
+name_label = "Stick X"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 512
+display_min_value = -100
+display_max_value = 100
+name_label = "Stick Y"
+suffix_label = "%"
+
+# --- Toggle Switches ---
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Fire"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Reset"
+value_labels = ["Flip", "Flop"]
+initial_value_label = "Flip"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Select"
+value_labels = ["Flip", "Flop"]
+initial_value_label = "Flip"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Difficulty"
+value_labels = ["B", "A"]
+initial_value_label = "B"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Auto"
+value_labels = ["Off", "On"]
+initial_value_label = "On"

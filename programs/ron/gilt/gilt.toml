@@ -1,125 +1,209 @@
 [program]
 program_id = "com.ron.gilt"
-program_version = "2.1.0"
+program_version = "3.1.2"
 abi_version = ">=1.0,<2.0"
 program_name = "Gilt"
 author = "ron"
 license = "GPL-3.0"
-categories = ["Material", "Pattern", "Color"]
+categories = ["Color", "Render", "Pattern"]
 program_type = "processing"
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
-description = "Video as a Klimt Golden Phase painting: gold-brown painted picture, porcelain faces, ornament placed by its light and colour."
+description = "Klimt gold paint swimming in oil: luma or chroma picks 16 ornament textures - dots, rings, spirals, squares, eyes, mosaic."
 
 # --- Rotary Potentiometers (Knobs 1-6) ---
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_1"
-name_label = "Figure"
-control_mode = "linear"
-min_value = 0
-max_value = 1023
-initial_value = 460
-display_min_value = 0
-display_max_value = 100
-suffix_label = "%"
+name_label = "Theme"
+value_labels = ["Adele", "Kiss", "Tree of Life", "Danae", "Stoclet", "Frieze", "Mosaic", "Oil", "Spirals", "Eyes", "Dots", "Squares", "Garden", "Byzantine", "Jewels", "All"]
+initial_value_label = "Adele"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
-name_label = "Ornament"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 512
+initial_value = 300
 display_min_value = 0
 display_max_value = 100
+name_label = "Poster"
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
 name_label = "Scale"
-control_mode = "linear"
-min_value = 0
-max_value = 1023
-initial_value = 410
-display_min_value = 0
-display_max_value = 100
-suffix_label = "%"
+value_labels = ["16 px", "32 px", "64 px", "128 px"]
+initial_value_label = "64 px"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
-name_label = "Intricacy"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
 initial_value = 512
 display_min_value = 0
 display_max_value = 100
+name_label = "Contrast"
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
-name_label = "Jewel"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 307
+initial_value = 640
 display_min_value = 0
 display_max_value = 100
+name_label = "Ink"
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
-name_label = "Leaf"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 563
+initial_value = 640
 display_min_value = 0
 display_max_value = 100
+name_label = "Density"
 suffix_label = "%"
 
 # --- Toggle Switches (7-11) ---
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
-name_label = "Bank"
-value_labels = ["Kiss", "Adele"]
-initial_value_label = "Kiss"
+name_label = "Map"
+value_labels = ["Luma", "Chroma"]
+initial_value_label = "Luma"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
-name_label = "Figure Key"
-value_labels = ["Skin", "Cameo"]
-initial_value_label = "Cameo"
+name_label = "Flow"
+value_labels = ["Luma X", "Luma Y"]
+initial_value_label = "Luma X"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
-name_label = "Field"
-value_labels = ["Nebula", "Leaf"]
-initial_value_label = "Nebula"
-
-[[parameter]]
-parameter_id = "toggle_switch_10"
-name_label = "Meadow"
+name_label = "Invert"
 value_labels = ["Off", "On"]
 initial_value_label = "Off"
 
 [[parameter]]
-parameter_id = "toggle_switch_11"
-name_label = "Relief"
+parameter_id = "toggle_switch_10"
+name_label = "Outline"
 value_labels = ["Off", "On"]
 initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "UV Test"
+value_labels = ["Standard", "Swapped"]
+initial_value_label = "Standard"
 
 # --- Linear Potentiometer (Slider) ---
 
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
-name_label = "Gild"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 1023
+initial_value = 640
 display_min_value = 0
 display_max_value = 100
+name_label = "Swirl"
 suffix_label = "%"
+
+# --- Presets ---
+# Starting points written by hand; replace with ./capture_preset.sh captures
+# once the looks are dialled in on the hardware.
+
+[[preset]]
+name = "Adele"
+rotary_potentiometer_1 = 32
+rotary_potentiometer_2 = 300
+rotary_potentiometer_3 = 640
+rotary_potentiometer_4 = 512
+rotary_potentiometer_5 = 640
+rotary_potentiometer_6 = 640
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 1
+toggle_switch_11 = 0
+linear_potentiometer_12 = 640
+
+[[preset]]
+name = "The Kiss"
+rotary_potentiometer_1 = 96
+rotary_potentiometer_2 = 380
+rotary_potentiometer_3 = 384
+rotary_potentiometer_4 = 600
+rotary_potentiometer_5 = 720
+rotary_potentiometer_6 = 720
+toggle_switch_7 = 1
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 1
+toggle_switch_11 = 0
+linear_potentiometer_12 = 520
+
+[[preset]]
+name = "Tree of Life"
+rotary_potentiometer_1 = 160
+rotary_potentiometer_2 = 300
+rotary_potentiometer_3 = 640
+rotary_potentiometer_4 = 560
+rotary_potentiometer_5 = 700
+rotary_potentiometer_6 = 800
+toggle_switch_7 = 0
+toggle_switch_8 = 1
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 760
+
+[[preset]]
+name = "Oil Slick"
+rotary_potentiometer_1 = 480
+rotary_potentiometer_2 = 200
+rotary_potentiometer_3 = 640
+rotary_potentiometer_4 = 640
+rotary_potentiometer_5 = 820
+rotary_potentiometer_6 = 700
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Gold Negative"
+rotary_potentiometer_1 = 864
+rotary_potentiometer_2 = 420
+rotary_potentiometer_3 = 640
+rotary_potentiometer_4 = 512
+rotary_potentiometer_5 = 760
+rotary_potentiometer_6 = 600
+toggle_switch_7 = 1
+toggle_switch_8 = 1
+toggle_switch_9 = 1
+toggle_switch_10 = 1
+toggle_switch_11 = 0
+linear_potentiometer_12 = 600
+
+[[preset]]
+name = "Poster"
+rotary_potentiometer_1 = 992
+rotary_potentiometer_2 = 1023
+rotary_potentiometer_3 = 896
+rotary_potentiometer_4 = 700
+rotary_potentiometer_5 = 1023
+rotary_potentiometer_6 = 900
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 1
+toggle_switch_11 = 0
+linear_potentiometer_12 = 300

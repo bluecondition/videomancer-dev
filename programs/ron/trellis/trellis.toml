@@ -1,0 +1,200 @@
+# SPDX-License-Identifier: GPL-3.0-only
+#
+# TRELLIS -- a three-oscillator colour synth (no input video).
+#
+# Three 2-D wave fields are drawn straight into the red, green and blue guns
+# and summed, the way a patched analog video synth would do it: FM-bent
+# horizontal bands (red), tapered vertical columns (green) and a lens lattice
+# whose eye-shaped holes are filled with a fine vertical grating (blue).
+# Every overlap makes a new colour.  Warp (P12) bends, pinches and tapers all
+# three at once; Width sets the shape threshold; Speed is bipolar (centre =
+# still).  Knobs glide; nothing snaps.
+
+[program]
+processing_delay_clks = 0
+program_id = "com.czartroniks.trellis"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+program_name = "Trellis"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Demo", "Pattern", "Illusion"]
+program_type = "synthesis"
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+description = "Three-oscillator RGB synth: FM-bent bands, tapered columns, a lens lattice with grating-filled holes. Warp folds it all."
+
+# --- Rotary Potentiometers (Knobs 1-6) ---
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 290
+display_min_value = 1
+display_max_value = 8
+name_label = "Bands"
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 146
+display_min_value = 1
+display_max_value = 8
+name_label = "Columns"
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 512
+display_min_value = 8
+display_max_value = 72
+name_label = "Stripes"
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 100
+display_min_value = 0
+display_max_value = 100
+name_label = "Width"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 640
+display_min_value = -100
+display_max_value = 100
+name_label = "Speed"
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 0
+display_min_value = 0
+display_max_value = 360
+name_label = "Hue"
+suffix_label = "deg"
+
+# --- Toggle Switches (7-11) ---
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Mirror"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Negative"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Grating"
+value_labels = ["Holes", "Screen"]
+initial_value_label = "Holes"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Edges"
+value_labels = ["Soft", "Hard"]
+initial_value_label = "Soft"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Stripes"
+value_labels = ["Vertical", "Diagonal"]
+initial_value_label = "Vertical"
+
+# --- Linear Potentiometer (Slider) ---
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 400
+display_min_value = 0
+display_max_value = 100
+name_label = "Warp"
+suffix_label = "%"
+
+# --- Presets (placeholders until captured from the hardware) ---
+
+[[preset]]
+name = "Reference"
+rotary_potentiometer_1 = 290
+rotary_potentiometer_2 = 146
+rotary_potentiometer_3 = 512
+rotary_potentiometer_4 = 100
+rotary_potentiometer_5 = 640
+rotary_potentiometer_6 = 0
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 400
+
+[[preset]]
+name = "Test Card"
+rotary_potentiometer_1 = 440
+rotary_potentiometer_2 = 440
+rotary_potentiometer_3 = 300
+rotary_potentiometer_4 = 400
+rotary_potentiometer_5 = 512
+rotary_potentiometer_6 = 0
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 1
+toggle_switch_11 = 0
+linear_potentiometer_12 = 0
+
+[[preset]]
+name = "Deep Fold"
+rotary_potentiometer_1 = 200
+rotary_potentiometer_2 = 146
+rotary_potentiometer_3 = 700
+rotary_potentiometer_4 = 300
+rotary_potentiometer_5 = 640
+rotary_potentiometer_6 = 700
+toggle_switch_7 = 1
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 1
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Line Screen"
+rotary_potentiometer_1 = 290
+rotary_potentiometer_2 = 146
+rotary_potentiometer_3 = 800
+rotary_potentiometer_4 = 500
+rotary_potentiometer_5 = 560
+rotary_potentiometer_6 = 0
+toggle_switch_7 = 0
+toggle_switch_8 = 1
+toggle_switch_9 = 1
+toggle_switch_10 = 1
+toggle_switch_11 = 0
+linear_potentiometer_12 = 400

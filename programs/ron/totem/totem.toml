@@ -1,0 +1,204 @@
+[program]
+program_id = "com.ron.totem"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+program_name = "Totem"
+author = "bluecondition"
+license = "GPL-3.0"
+categories = ["Color", "Warp", "Shape", "Mirror"]
+program_type = "synthesis"
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+description = "Rippling rainbow curtains behind a stepped, tapering totem of slats: one line-synced colourizer seen through a lens"
+url = "https://github.com/bluecondition/videomancer-dev"
+
+# --- Rotary Potentiometers (Knobs 1-6) ---
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 520
+display_min_value = 0
+display_max_value = 100
+name_label = "Bands"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 420
+display_min_value = 0
+display_max_value = 100
+name_label = "Width"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 720
+display_min_value = -100
+display_max_value = 100
+name_label = "Taper"
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 560
+display_min_value = 0
+display_max_value = 100
+name_label = "Slats"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 680
+display_min_value = -100
+display_max_value = 100
+name_label = "Speed"
+suffix_label = ""
+
+# Enum knob: the config binary stores the LABEL INDEX and the firmware loads
+# it raw at program load, so the default is the FIRST label (the RTL also
+# reads 0..3 as an index).  Knob turns and presets give 0..1023.
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Palette"
+value_labels = ["Signal", "Ember", "Neon", "Dusk"]
+initial_value_label = "Signal"
+
+# --- Toggle Switches (7-11) ---
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Sheet"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Mirror"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Edges"
+value_labels = ["Stepped", "Smooth"]
+initial_value_label = "Stepped"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Swell"
+value_labels = ["Long", "Short"]
+initial_value_label = "Long"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Tear"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+# --- Linear Potentiometer (Slider) ---
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 480
+display_min_value = 0
+display_max_value = 100
+name_label = "Ripple"
+suffix_label = "%"
+
+# --- Presets ---
+# Placeholders until captured from the hardware with capture_preset.sh.
+# Ripple (P12) is the performance gesture: straight curtains with a gentle
+# sway at the bottom at 0, the lower half folding into swirls at 100%.
+
+[[preset]]
+name = "Signal"
+rotary_potentiometer_1 = 520
+rotary_potentiometer_2 = 420
+rotary_potentiometer_3 = 720
+rotary_potentiometer_4 = 560
+rotary_potentiometer_5 = 680
+rotary_potentiometer_6 = 0
+toggle_switch_7 = 1
+toggle_switch_8 = 1
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 1
+linear_potentiometer_12 = 480
+
+[[preset]]
+name = "Funnel Storm"
+rotary_potentiometer_1 = 700
+rotary_potentiometer_2 = 520
+rotary_potentiometer_3 = 900
+rotary_potentiometer_4 = 800
+rotary_potentiometer_5 = 760
+rotary_potentiometer_6 = 0
+toggle_switch_7 = 1
+toggle_switch_8 = 1
+toggle_switch_9 = 0
+toggle_switch_10 = 1
+toggle_switch_11 = 1
+linear_potentiometer_12 = 900
+
+[[preset]]
+name = "Ember Vase"
+rotary_potentiometer_1 = 400
+rotary_potentiometer_2 = 300
+rotary_potentiometer_3 = 150
+rotary_potentiometer_4 = 300
+rotary_potentiometer_5 = 620
+rotary_potentiometer_6 = 300
+toggle_switch_7 = 1
+toggle_switch_8 = 1
+toggle_switch_9 = 1
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 350
+
+[[preset]]
+name = "Neon Pillar"
+rotary_potentiometer_1 = 880
+rotary_potentiometer_2 = 220
+rotary_potentiometer_3 = 512
+rotary_potentiometer_4 = 960
+rotary_potentiometer_5 = 820
+rotary_potentiometer_6 = 600
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 1
+toggle_switch_11 = 1
+linear_potentiometer_12 = 620
+
+[[preset]]
+name = "Dusk Totem"
+rotary_potentiometer_1 = 300
+rotary_potentiometer_2 = 640
+rotary_potentiometer_3 = 640
+rotary_potentiometer_4 = 420
+rotary_potentiometer_5 = 580
+rotary_potentiometer_6 = 900
+toggle_switch_7 = 1
+toggle_switch_8 = 1
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 200

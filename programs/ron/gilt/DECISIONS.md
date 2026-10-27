@@ -1,4 +1,4 @@
-# GILT v2: decisions
+# GILT: decisions (v2 and v3)
 
 Newest last. Each entry: what was decided, why, and who decided.
 
@@ -94,3 +94,52 @@ shape. This supersedes D1 for these elements. v2.1.0:
 4. Cameo (S8) now means: flesh only inside blocks whose average colour is skin-like.
 5. GILD lays the cells in hashed order, plain areas before busy ones.
 Fit improved to ~89% LC.
+
+**D14 (2026-10-11, Ron, new brief: "one final try").** Go back to one of the old
+versions that looked "very warpy and oily and swirly", and draw the blobs of colour,
+symbols, squares, dots, spirals etc. as a texture chroma/luma thing like Sugarcoat: a
+procedural texture generator chosen by luma or chroma on a switch, with degrees of
+contrast and posterization. v3.0.0, built on that:
+1. Base = v0.10.0 (HW-approved 2026-10-09 "I like the organic look now"), the most
+   warped version Ron approved: its blurred content field drags the ornament space
+   (luma sideways, chroma up/down, S8 Flow swaps), its two parabolic-sine waves and its
+   large per-line sway bend it, and its 32-step gold/brown ramp paints the picture. Its
+   Worley cells, motif engine, Luma overlay, flesh key, halo, meadow and Gild mixer
+   are gone. v0.11's large generated zone wave stays rejected.
+2. Drawing = Sugarcoat's mechanism: classify (luma band, or hue octant with grey
+   falling back to luma) from the blurred field, then a 16 x 16 theme ROM picks one of
+   16 Klimt textures, all evaluated in the warped space. K1 Theme (16 labelled), K2
+   Poster (bands 8..2, paint 32..2 tones, hues 8/4/2), K4 Contrast (Sugarcoat's
+   proc-amp, also on the paint), S7 Map.
+3. P12 = SWIRL (drag up to 2x v0.10, waves and sway up to 3/4 cell, drift rate): the
+   oil is the headline. K5 Ink (paint -> ink 4/16..16/16), K6 Density (cells drawn),
+   S9 Invert (gold negative), S10 Outline (texture-boundary contour), S11 Jewels.
+4. Ground = gold-painted picture everywhere (D13 kept); no raw video reaches the output.
+5. Hardware contracts added that v0.10 lacked: blanking gate, generated avid, HD HDMI
+   bar conditioning ([1 2 1] + luma scale), serration-safe field event.
+
+**D15 (2026-10-11, Ron, after flashing v3.0.0).** "This is ok but where's the brown and
+gold tones?" Cause: the textures covered the gold paint with flat warm blacks, bone and
+jewels at 75% (v0.10 looked gold because its ornament was sparse). v3.1.0: dark and light
+inks become steps along the same gold/brown ramp, relative to the paint underneath (dark
+= paint − Ink − 0..3 per cell, light = paint + Ink + 0..3), so the ornament is
+tone-on-tone gold and brown that keeps the picture's shading. The black and bone
+palettes are gone. Jewels are the only non-gold colour, mixed over the gold at Ink.
+
+
+**D16 (2026-10-12, Ron, HW).** "It all still looks blue." v3.0/3.1 output the usual
+hardware U/V swap (internal Cr on the u wire), exactly like v0.10, cubist and v2.1, and
+the headless sim showed the same blue (the sim decodes standard order). So on Ron's
+setup this program needs STANDARD order out. v3.1.1 drops the output swap. The input
+swap (used only for the Chroma-map hue classes and the drag axes) is unchanged. If the
+Chroma map's hue assignments look wrong (skin should stay plain gold), flip that too.
+Open question: why the usual swap is wrong here. Candidates: the generated avid's
+parity (on paper it keeps the source's), or a setup change (HDMI vs analog out).
+UPDATE: v3.1.1 (standard order out, sim-verified gold) was still blue on hardware, so
+both orders gave blue, which a fixed swap cannot do. The builder's HD placements had
+HSYNC in the encoder-skew danger zone (v3.1.1 HD HDMI +0.74; v3.1.2 HD HDMI −0.06, HD
+Analog +0.36 with data straddling the clock). An HSYNC on the wrong side of the
+encoder's sampling edge shifts its Cb/Cr count by one pixel, which swaps the whole frame.
+v3.1.2-diag: S11 = live U/V order test (Jewels forced on), HD Analog s33 / HD HDMI s6 /
+HD Dual s1 screened clean. Ron's A/B decides the order; then S11 goes back to Jewels.
+

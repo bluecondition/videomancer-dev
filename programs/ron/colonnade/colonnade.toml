@@ -1,0 +1,204 @@
+[program]
+program_id = "com.ron.colonnade"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+program_name = "Colonnade"
+author = "bluecondition"
+license = "GPL-3.0"
+categories = ["Color", "Mirror", "Demo", "Pattern"]
+program_type = "synthesis"
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+description = "Chrome contour sheets hung before a fluted colonnade: a mirrored, melting egg-crate field keyed over lit pillars"
+url = "https://github.com/bluecondition/videomancer-dev"
+
+# --- Rotary Potentiometers (Knobs 1-6) ---
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 574
+display_min_value = 0
+display_max_value = 100
+name_label = "Tiles"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 307
+display_min_value = 0
+display_max_value = 100
+name_label = "Flutes"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 640
+display_min_value = 0
+display_max_value = 100
+name_label = "Sheet"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 400
+display_min_value = 0
+display_max_value = 100
+name_label = "Melt"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 600
+display_min_value = -100
+display_max_value = 100
+name_label = "Speed"
+suffix_label = ""
+
+# Enum knob: the config binary stores the LABEL INDEX and the firmware loads
+# it raw at program load, so the RTL reads 0..3 as an index.  Knob turns and
+# presets give 0..1023 (quarters: Chrome 0, Oil 256, Candy 512, Thermal 768).
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Palette"
+value_labels = ["Chrome", "Oil", "Candy", "Thermal"]
+initial_value_label = "Chrome"
+
+# --- Toggle Switches (7-11) ---
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Mirror"
+value_labels = ["Mirror", "Repeat"]
+initial_value_label = "Mirror"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Lattice"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Flutes"
+value_labels = ["Lit", "Glass"]
+initial_value_label = "Lit"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Tear"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Flow"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+# --- Linear Potentiometer (Slider) ---
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 300
+display_min_value = 0
+display_max_value = 100
+name_label = "Contours"
+suffix_label = "%"
+
+# --- Presets ---
+# Placeholders until captured from the hardware with capture_preset.sh.
+# Contours (P12) is the performance gesture: broad smooth chrome at 0,
+# dense rainbow rings at 100%.
+
+[[preset]]
+name = "Reference"
+rotary_potentiometer_1 = 574
+rotary_potentiometer_2 = 307
+rotary_potentiometer_3 = 640
+rotary_potentiometer_4 = 400
+rotary_potentiometer_5 = 600
+rotary_potentiometer_6 = 0
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 1
+toggle_switch_11 = 0
+linear_potentiometer_12 = 300
+
+[[preset]]
+name = "Glass Hall"
+rotary_potentiometer_1 = 480
+rotary_potentiometer_2 = 420
+rotary_potentiometer_3 = 520
+rotary_potentiometer_4 = 650
+rotary_potentiometer_5 = 640
+rotary_potentiometer_6 = 0
+toggle_switch_7 = 0
+toggle_switch_8 = 1
+toggle_switch_9 = 1
+toggle_switch_10 = 1
+toggle_switch_11 = 0
+linear_potentiometer_12 = 480
+
+[[preset]]
+name = "Oil Slick"
+rotary_potentiometer_1 = 300
+rotary_potentiometer_2 = 250
+rotary_potentiometer_3 = 700
+rotary_potentiometer_4 = 900
+rotary_potentiometer_5 = 420
+rotary_potentiometer_6 = 256
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 1
+linear_potentiometer_12 = 700
+
+[[preset]]
+name = "Heat Rings"
+rotary_potentiometer_1 = 650
+rotary_potentiometer_2 = 500
+rotary_potentiometer_3 = 560
+rotary_potentiometer_4 = 1000
+rotary_potentiometer_5 = 700
+rotary_potentiometer_6 = 768
+toggle_switch_7 = 1
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 1
+toggle_switch_11 = 1
+linear_potentiometer_12 = 1000
+
+[[preset]]
+name = "Sugar Lattice"
+rotary_potentiometer_1 = 520
+rotary_potentiometer_2 = 600
+rotary_potentiometer_3 = 600
+rotary_potentiometer_4 = 300
+rotary_potentiometer_5 = 560
+rotary_potentiometer_6 = 512
+toggle_switch_7 = 0
+toggle_switch_8 = 1
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 400

@@ -1,54 +1,75 @@
-# Cathedral - Heirloom #41 (2026-10-20), from WIN_20230602_01_30.
-# Gothic parabola arches over a rainbow ground with a pink diamond.
-# See cathedral.vhd and SUMMARY.md.
+# Cathedral - Heirloom #41, rebuilt 2026-10-27 from WIN_20230602_01_30_58.
+# Mirrored stained glass: teal egg-crate arches and X crossings around a pink
+# diamond, pink triangles and wedges, warm stripes on a green-to-black ramp.
+# See cathedral.vhd, cathedral.py and SUMMARY.md.
 
 [program]
-processing_delay_clks = 20
+processing_delay_clks = 56
 program_id = "com.czartroniks.cathedral"
 program_name = "Cathedral"
-program_version = "0.1.0"
+program_version = "0.5.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Shape", "Mirror", "Color"]
 program_type = "processing"
-description = "Teal gothic arches, mirrored, standing on a rainbow-banded ground with a pink diamond. Arch height on the slider."
+description = "Teal arches and X crossings around a pink diamond, wedges and warm stripes on a green ramp. Tracery on the slider."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_1"
-name_label = "Width"
+name_label = "Vaults"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 400
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
-name_label = "Arches"
+name_label = "Arch"
 control_mode = "linear"
-display_min_value = 1
-display_max_value = 3
-initial_value = 600
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
 display_float_digits = 0
-suffix_label = ""
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
-name_label = "Hue"
+name_label = "Diamond"
 control_mode = "linear"
 display_min_value = 0
-display_max_value = 63
-initial_value = 0
+display_max_value = 100
+initial_value = 505
 display_float_digits = 0
-suffix_label = ""
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
-name_label = "Diamond"
+name_label = "Speed"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 640
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Spill"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Picture"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
@@ -57,48 +78,28 @@ display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
-parameter_id = "rotary_potentiometer_5"
-name_label = "Drift"
-control_mode = "linear"
-display_min_value = -100
-display_max_value = 100
-initial_value = 560
-display_float_digits = 0
-suffix_label = ""
-
-[[parameter]]
-parameter_id = "rotary_potentiometer_6"
-name_label = "Bands"
-control_mode = "linear"
-display_min_value = 0
-display_max_value = 100
-initial_value = 250
-display_float_digits = 0
-suffix_label = "%"
-
-[[parameter]]
 parameter_id = "toggle_switch_7"
-name_label = "Mirror"
+name_label = "Wedges"
 value_labels = ["Off", "On"]
 initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
-name_label = "Diamond"
-value_labels = ["Off", "On"]
-initial_value_label = "On"
+name_label = "Shade"
+value_labels = ["Flat", "Soft"]
+initial_value_label = "Soft"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
-name_label = "Ground"
-value_labels = ["Rainbow", "Source"]
-initial_value_label = "Rainbow"
+name_label = "Invert"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
-name_label = "Arches"
-value_labels = ["Teal", "White"]
-initial_value_label = "Teal"
+name_label = "Palette"
+value_labels = ["Jewel", "Night"]
+initial_value_label = "Jewel"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
@@ -108,29 +109,32 @@ initial_value_label = "Video"
 
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
-name_label = "Arch"
+name_label = "Tracery"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 500
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
 [[preset]]
-name = "Default"
+name = "Photo"
 
 [[preset]]
-name = "Picture Ground"
-toggle_switch_9 = 1
-rotary_potentiometer_6 = 500
+name = "Filigree"
+linear_potentiometer_12 = 1023
 
 [[preset]]
-name = "White Spires"
-toggle_switch_10 = 1
-linear_potentiometer_12 = 50
+name = "One Vault"
+linear_potentiometer_12 = 0
 rotary_potentiometer_1 = 200
 
 [[preset]]
-name = "Squat Arcs"
-linear_potentiometer_12 = 1023
-rotary_potentiometer_2 = 1023
+name = "Night Nave"
+toggle_switch_10 = 1
+rotary_potentiometer_1 = 760
+
+[[preset]]
+name = "Lead Glass"
+toggle_switch_9 = 1
+linear_potentiometer_12 = 700

@@ -1,0 +1,160 @@
+# Morphogen - Program Configuration
+#
+# Catalogue combo (2026-10-21): reaction-diffusion driven by the input (never
+# used by a combo) + cartoon / cel (used once).  A Gray-Scott reaction grows
+# down the screen out of the picture's edges, fed by its light, redrawing it
+# as beads, strands and coats over a cel-flattened ground.  See morphogen.vhd
+# and SUMMARY.md.
+
+[program]
+processing_delay_clks = 24
+program_id = "com.czartroniks.morphogen"
+program_name = "Morphogen"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Organic", "Material", "Pattern"]
+program_type = "processing"
+description = "Reaction-diffusion grows out of the picture's edges, redrawing it as glossy beads, strands and coats on a cel ground."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Species"
+value_labels = ["Beads", "Seeds", "Pearls", "Streaks", "Strands", "Arches", "Fronds", "Waves"]
+initial_value_label = "Beads"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Grain"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 32
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Drift"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Bands"
+control_mode = "linear"
+display_min_value = 2
+display_max_value = 9
+initial_value = 288
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Ink"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 300
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Skin"
+value_labels = ["Pearl", "Toon", "Coat", "Ink"]
+initial_value_label = "Pearl"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Drive"
+value_labels = ["Light", "Dark"]
+initial_value_label = "Light"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Rain"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Flip"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Shine"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Ground"
+value_labels = ["Picture", "Black"]
+initial_value_label = "Picture"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Bloom"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 410
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Default"
+
+[[preset]]
+name = "Pearl Rain"
+toggle_switch_8 = 1
+linear_potentiometer_12 = 720
+
+[[preset]]
+name = "Leopard"
+rotary_potentiometer_2 = 160
+rotary_potentiometer_6 = 640
+linear_potentiometer_12 = 620
+
+[[preset]]
+name = "Ink Blots"
+rotary_potentiometer_1 = 672
+rotary_potentiometer_2 = 288
+rotary_potentiometer_6 = 896
+linear_potentiometer_12 = 560
+
+[[preset]]
+name = "Toon Drips"
+rotary_potentiometer_1 = 416
+rotary_potentiometer_5 = 560
+rotary_potentiometer_6 = 384
+linear_potentiometer_12 = 500
+
+[[preset]]
+name = "Chalk"
+rotary_potentiometer_6 = 896
+toggle_switch_11 = 1
+linear_potentiometer_12 = 640
+
+[[preset]]
+name = "Pearl Net"
+toggle_switch_9 = 1
+toggle_switch_11 = 1
+linear_potentiometer_12 = 480
+
+[[preset]]
+name = "Waves"
+rotary_potentiometer_1 = 928
+rotary_potentiometer_3 = 760
+toggle_switch_8 = 1
+linear_potentiometer_12 = 600

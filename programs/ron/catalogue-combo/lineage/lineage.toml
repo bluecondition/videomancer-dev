@@ -1,0 +1,156 @@
+# Lineage - Program Configuration
+#
+# Catalogue combo (2026-10-20): Schmitt-trigger posterize (hysteresis-edge
+# state glitch) + a 1-D cellular automaton seeded by the video -- the first
+# combo drawn only from catalogue effects no earlier combo used.
+# See lineage.vhd and SUMMARY.md.
+
+[program]
+processing_delay_clks = 20
+program_id = "com.czartroniks.lineage"
+program_name = "Lineage"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Organic", "Glitch", "Fractal"]
+program_type = "processing"
+description = "Schmitt-trigger posterize streaks seed a cellular automaton: Wolfram rules grow down the screen in the picture's colours."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Levels"
+control_mode = "linear"
+display_min_value = 2
+display_max_value = 16
+initial_value = 296
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Hysteresis"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 380
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Burst"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 307
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Rule"
+value_labels = ["Rule 90", "Rule 18", "Rule 146", "Rule 60", "Rule 102", "Rule 150", "Rule 182", "Rule 126", "Rule 22", "Rule 54", "Rule 110", "Rule 124", "Rule 106", "Rule 30", "Rule 250", "Rule 254"]
+initial_value_label = "Rule 90"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Cells"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 344
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Ink"
+value_labels = ["Carry", "Invert", "Lit", "Shadow"]
+initial_value_label = "Carry"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Smear"
+value_labels = ["Across", "Down"]
+initial_value_label = "Across"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Chroma"
+value_labels = ["Held", "Live"]
+initial_value_label = "Held"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Seeds"
+value_labels = ["Edges", "Bands"]
+initial_value_label = "Edges"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Grout"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Mask"
+value_labels = ["Free", "Lit"]
+initial_value_label = "Free"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Reach"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 400
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Default"
+
+[[preset]]
+name = "Sierpinski Rain"
+rotary_potentiometer_4 = 32
+rotary_potentiometer_5 = 200
+linear_potentiometer_12 = 700
+
+[[preset]]
+name = "Chaos Flood"
+rotary_potentiometer_4 = 864
+rotary_potentiometer_6 = 640
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Glider Chart"
+rotary_potentiometer_4 = 672
+rotary_potentiometer_5 = 680
+toggle_switch_10 = 1
+linear_potentiometer_12 = 600
+
+[[preset]]
+name = "Frozen Lines"
+rotary_potentiometer_1 = 152
+rotary_potentiometer_2 = 1000
+rotary_potentiometer_3 = 0
+linear_potentiometer_12 = 0
+
+[[preset]]
+name = "Down Drips"
+rotary_potentiometer_4 = 992
+rotary_potentiometer_6 = 896
+toggle_switch_7 = 1
+linear_potentiometer_12 = 500
+
+[[preset]]
+name = "Negative Lace"
+rotary_potentiometer_4 = 352
+rotary_potentiometer_6 = 384
+toggle_switch_9 = 1
+toggle_switch_11 = 1
+linear_potentiometer_12 = 800

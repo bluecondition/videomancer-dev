@@ -1,0 +1,175 @@
+# Fissure - Program Configuration
+#
+# Catalogue combo (2026-10-20): kintsugi-style crack overlays + mycelium /
+# growth patterns -- two catalogue entries no earlier combo used.  The
+# picture's edges start cracks that grow down the screen, kink, fork and
+# merge, filled with bevelled gold.  See fissure.vhd and SUMMARY.md.
+
+[program]
+processing_delay_clks = 32
+program_id = "com.czartroniks.fissure"
+program_name = "Fissure"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Organic", "Craft", "Edges"]
+program_type = "processing"
+description = "Kintsugi cracks grow from the picture's edges: gold fractures kink, fork and join down the screen."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Spawn"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 410
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Branch"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Wander"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 410
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Seam"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 224
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Ground"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 0
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Metal"
+value_labels = ["Gold", "Silver", "Copper", "Prism"]
+initial_value_label = "Gold"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Seek"
+value_labels = ["Dark", "Light"]
+initial_value_label = "Dark"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Seeds"
+value_labels = ["Edges", "Scatter"]
+initial_value_label = "Edges"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Mask"
+value_labels = ["Free", "Lit"]
+initial_value_label = "Free"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Shadow"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Glint"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Reach"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 614
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Default"
+
+[[preset]]
+name = "Gold Drawing"
+rotary_potentiometer_1 = 620
+rotary_potentiometer_4 = 96
+rotary_potentiometer_5 = 1023
+linear_potentiometer_12 = 820
+
+[[preset]]
+name = "Shattered"
+rotary_potentiometer_1 = 820
+rotary_potentiometer_2 = 760
+rotary_potentiometer_3 = 700
+toggle_switch_10 = 1
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Silver Roots"
+rotary_potentiometer_2 = 900
+rotary_potentiometer_3 = 160
+rotary_potentiometer_6 = 384
+toggle_switch_7 = 1
+linear_potentiometer_12 = 760
+
+[[preset]]
+name = "Copper Veins"
+rotary_potentiometer_1 = 700
+rotary_potentiometer_6 = 640
+toggle_switch_9 = 1
+linear_potentiometer_12 = 900
+
+[[preset]]
+name = "Prism Hyphae"
+rotary_potentiometer_1 = 760
+rotary_potentiometer_2 = 820
+rotary_potentiometer_4 = 0
+rotary_potentiometer_5 = 1023
+rotary_potentiometer_6 = 896
+linear_potentiometer_12 = 900
+
+[[preset]]
+name = "Molten"
+rotary_potentiometer_4 = 1023
+rotary_potentiometer_5 = 512
+toggle_switch_11 = 1
+linear_potentiometer_12 = 700
+
+[[preset]]
+name = "Lightning"
+rotary_potentiometer_1 = 300
+rotary_potentiometer_2 = 300
+rotary_potentiometer_3 = 1023
+rotary_potentiometer_5 = 760
+rotary_potentiometer_6 = 384
+toggle_switch_11 = 1
+linear_potentiometer_12 = 1023

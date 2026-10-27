@@ -1,0 +1,154 @@
+# Haywire - Program Configuration
+#
+# Analog glitch-box emulation (Tachyons+ DreamWeapon / Psychenizer class):
+# thick echo lines that radiate from every contour in its own colour (a
+# hard-synced, luma-FM'd scanline oscillator with a Chaos random walk),
+# overdriven peaks that break into snow, and a P12 instability fader
+# (jitter, snaking, hum bar, torn bands, sync loss).
+
+[program]
+program_id = "com.ron.haywire"
+program_name = "Haywire"
+program_version = "0.3.0"
+abi_version = ">=1.0,<2.0"
+author = "ron"
+license = "GPL-3.0"
+categories = ["Glitch", "Signal", "Edges"]
+program_type = "processing"
+description = "Analog glitch box: echo lines radiate from edges, peaks blow out into snow, P12 instability tears it apart."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Drive"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 560
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Trigger"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 700
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Spacing"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 450
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Ring"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 720
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Bend"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 420
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Chaos"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 380
+display_float_digits = 1
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Colour"
+value_labels = ["Natural", "Psyche"]
+initial_value_label = "Natural"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Picture"
+value_labels = ["Full", "Dim"]
+initial_value_label = "Full"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Sync"
+value_labels = ["Hard", "Soft"]
+initial_value_label = "Hard"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Smear"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Invert"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Instability"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 300
+display_float_digits = 1
+suffix_label = "%"
+
+[[preset]]
+name = "Default"
+
+[[preset]]
+name = "Rainbow Melt"
+rotary_potentiometer_1 = 700
+rotary_potentiometer_2 = 760
+rotary_potentiometer_3 = 300
+rotary_potentiometer_4 = 760
+rotary_potentiometer_5 = 600
+rotary_potentiometer_6 = 500
+toggle_switch_7 = 1
+linear_potentiometer_12 = 420
+
+[[preset]]
+name = "Snake Charmer"
+rotary_potentiometer_1 = 420
+rotary_potentiometer_3 = 520
+rotary_potentiometer_4 = 1000
+rotary_potentiometer_5 = 900
+rotary_potentiometer_6 = 650
+toggle_switch_8 = 1
+toggle_switch_9 = 1
+linear_potentiometer_12 = 380
+
+[[preset]]
+name = "Meltdown"
+rotary_potentiometer_1 = 900
+rotary_potentiometer_2 = 820
+rotary_potentiometer_4 = 820
+rotary_potentiometer_6 = 900
+toggle_switch_10 = 1
+linear_potentiometer_12 = 1000

@@ -1,0 +1,190 @@
+[program]
+program_id = "com.ron.loupe"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+program_name = "Loupe"
+author = "bluecondition"
+license = "GPL-3.0"
+categories = ["Glitch", "Color", "Mirror", "Signal"]
+program_type = "synthesis"
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+description = "A glass loupe over torn scallops: distance-field contours, line tears and lightning, a chevron facet or clean window lens"
+url = "https://github.com/bluecondition/videomancer-dev"
+
+# --- Rotary Potentiometers (Knobs 1-6) ---
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 476
+display_min_value = 0
+display_max_value = 100
+name_label = "Scallops"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 522
+display_min_value = 0
+display_max_value = 100
+name_label = "Stretch"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 341
+display_min_value = 0
+display_max_value = 100
+name_label = "Contours"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 610
+display_min_value = -100
+display_max_value = 100
+name_label = "Speed"
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 587
+display_min_value = 0
+display_max_value = 100
+name_label = "Lens"
+suffix_label = "%"
+
+# Enum knob: the config binary stores the LABEL INDEX and the firmware loads
+# it raw at program load, so the RTL reads 0..7 as an index.  Knob turns and
+# presets give 0..1023 (eighths: Loupe 0, Ember 128, Abyss 256, Toxic 384,
+# Candy 512, Mono 640, Neon 768, Rust 896).
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Palette"
+value_labels = ["Loupe", "Ember", "Abyss", "Toxic", "Candy", "Mono", "Neon", "Rust"]
+initial_value_label = "Loupe"
+
+# --- Toggle Switches (7-11) ---
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Lens"
+value_labels = ["Facet", "Window"]
+initial_value_label = "Facet"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Twin"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Drift"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Glass"
+value_labels = ["Clear", "Smoke"]
+initial_value_label = "Clear"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Ghost"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+# --- Linear Potentiometer (Slider) ---
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 460
+display_min_value = 0
+display_max_value = 100
+name_label = "Tear"
+suffix_label = "%"
+
+# --- Presets ---
+# Placeholders until captured from the hardware with capture_preset.sh.
+# Tear (P12) is the performance gesture: pristine scallops at 0, everything
+# shredded into streaks and lightning at 100%.
+
+[[preset]]
+name = "Loupe"
+rotary_potentiometer_1 = 476
+rotary_potentiometer_2 = 522
+rotary_potentiometer_3 = 341
+rotary_potentiometer_4 = 610
+rotary_potentiometer_5 = 587
+rotary_potentiometer_6 = 0
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 1
+linear_potentiometer_12 = 460
+
+[[preset]]
+name = "Twin Window"
+rotary_potentiometer_1 = 560
+rotary_potentiometer_2 = 600
+rotary_potentiometer_3 = 520
+rotary_potentiometer_4 = 700
+rotary_potentiometer_5 = 640
+rotary_potentiometer_6 = 256
+toggle_switch_7 = 1
+toggle_switch_8 = 1
+toggle_switch_9 = 1
+toggle_switch_10 = 0
+toggle_switch_11 = 1
+linear_potentiometer_12 = 300
+
+[[preset]]
+name = "Ember Storm"
+rotary_potentiometer_1 = 420
+rotary_potentiometer_2 = 700
+rotary_potentiometer_3 = 640
+rotary_potentiometer_4 = 760
+rotary_potentiometer_5 = 480
+rotary_potentiometer_6 = 128
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 1
+toggle_switch_10 = 1
+toggle_switch_11 = 0
+linear_potentiometer_12 = 820
+
+[[preset]]
+name = "Neon Glass"
+rotary_potentiometer_1 = 700
+rotary_potentiometer_2 = 380
+rotary_potentiometer_3 = 800
+rotary_potentiometer_4 = 400
+rotary_potentiometer_5 = 720
+rotary_potentiometer_6 = 768
+toggle_switch_7 = 0
+toggle_switch_8 = 1
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 1
+linear_potentiometer_12 = 560

@@ -1,0 +1,218 @@
+# Time Strip (ex slitscan v2) -- a true time-strip slit-scan.  A slit (one column, or one
+# row) is sampled every frame into a history canvas in EBR and the history
+# flows away from the slit, so one axis of the picture is TIME: still
+# scenery becomes streaks, anything crossing the slit is drawn as a
+# time-warped shape.  Live video stays full-resolution on the far side.
+
+[program]
+program_id = "com.ron.timestrip"
+program_version = "1.0.0"
+abi_version = ">=1.0,<2.0"
+program_name = "Time Strip"
+author = "ron"
+license = "GPL-3.0"
+categories = ["Temporal", "Film", "Warp"]
+program_type = "processing"
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+description = "True time-strip slit-scan: a slit sampled every frame flows across the screen; motion becomes time-warped shapes."
+
+# --- Rotary Potentiometers (Knobs 1-6) ---
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 512
+display_min_value = 0
+display_max_value = 100
+name_label = "Slit"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 512
+display_min_value = -100
+display_max_value = 100
+name_label = "Time Key"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 300
+display_min_value = 0
+display_max_value = 100
+name_label = "Exposure"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 0
+display_min_value = 0
+display_max_value = 100
+name_label = "Fade"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 512
+display_min_value = -100
+display_max_value = 100
+name_label = "Rainbow"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Layout"
+value_labels = ["Right/Down", "Left/Up", "Mirror", "Full"]
+initial_value_label = "Right/Down"
+
+# --- Toggle Switches (7-11) ---
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Axis"
+value_labels = ["Vertical", "Horizontal"]
+initial_value_label = "Vertical"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Flow"
+value_labels = ["Out", "In"]
+initial_value_label = "Out"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Pixels"
+value_labels = ["Smooth", "Blocks"]
+initial_value_label = "Smooth"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Ghost"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Wave"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+# --- Linear Potentiometer (Slider) ---
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 640
+display_min_value = 0
+display_max_value = 100
+name_label = "Speed"
+suffix_label = "%"
+
+# --- Presets (hand-written starting points; capture real ones on HW) ---
+
+[[preset]]
+name = "Time Strip"
+rotary_potentiometer_1 = 512
+rotary_potentiometer_2 = 512
+rotary_potentiometer_3 = 300
+rotary_potentiometer_4 = 0
+rotary_potentiometer_5 = 512
+rotary_potentiometer_6 = 896
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 900
+
+[[preset]]
+name = "Waterfall"
+rotary_potentiometer_1 = 300
+rotary_potentiometer_2 = 512
+rotary_potentiometer_3 = 450
+rotary_potentiometer_4 = 300
+rotary_potentiometer_5 = 512
+rotary_potentiometer_6 = 128
+toggle_switch_7 = 1
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 640
+
+[[preset]]
+name = "Mirror Wave"
+rotary_potentiometer_1 = 512
+rotary_potentiometer_2 = 512
+rotary_potentiometer_3 = 300
+rotary_potentiometer_4 = 0
+rotary_potentiometer_5 = 512
+rotary_potentiometer_6 = 640
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 1
+linear_potentiometer_12 = 760
+
+[[preset]]
+name = "Ghost Trail"
+rotary_potentiometer_1 = 400
+rotary_potentiometer_2 = 512
+rotary_potentiometer_3 = 600
+rotary_potentiometer_4 = 500
+rotary_potentiometer_5 = 512
+rotary_potentiometer_6 = 640
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 1
+toggle_switch_11 = 0
+linear_potentiometer_12 = 800
+
+[[preset]]
+name = "Rainbow Smear"
+rotary_potentiometer_1 = 200
+rotary_potentiometer_2 = 512
+rotary_potentiometer_3 = 750
+rotary_potentiometer_4 = 0
+rotary_potentiometer_5 = 900
+rotary_potentiometer_6 = 128
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Time Key"
+rotary_potentiometer_1 = 512
+rotary_potentiometer_2 = 1000
+rotary_potentiometer_3 = 300
+rotary_potentiometer_4 = 0
+rotary_potentiometer_5 = 512
+rotary_potentiometer_6 = 896
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 700

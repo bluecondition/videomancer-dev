@@ -1,79 +1,88 @@
-# Archway - Heirloom #36 (2026-10-20), from WIN_20230523_01_26_43.
-# A tall arch of cyan/blue parabola rays, stepped colour blocks on its flanks.
+# Archway - Heirloom #36, rebuilt 2026-10-27 (v0.5.0) from WIN_20230523_01_26_43.
+# A pointed arch drawn three ways: a stepped colour mosaic on its flanks cut by black arcs, a fan of cyan
+# arch lines in its middle, a pink chevron at its foot.  See archway.vhd, archway.py and SUMMARY.md.
 
 [program]
-processing_delay_clks = 20
+processing_delay_clks = 24
 program_id = "com.czartroniks.archway"
 program_name = "Archway"
-program_version = "0.1.0"
+program_version = "0.5.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Curve", "Shape", "Pattern"]
 program_type = "processing"
-description = "A tall arch of thin cyan and blue parabola rays over the darkened picture, pink and yellow blocks on the flanks."
+description = "A pointed arch: stepped mosaic flanks cut by black arcs, a fan of cyan lines, a pink chevron at its foot."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_1"
-name_label = "Rays"
-value_labels = ["4", "8", "16", "32", "64", "128", "256", "512"]
-initial_value_label = "16"
-
-[[parameter]]
-parameter_id = "rotary_potentiometer_2"
-name_label = "Width"
+name_label = "Steps"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 200
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Lines"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
-name_label = "Blocks"
-value_labels = ["32", "64", "128", "256"]
-initial_value_label = "64"
+name_label = "Etch"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 400
+display_float_digits = 0
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
-name_label = "Hue"
-value_labels = ["Cyan", "Yellow", "Magenta", "Green"]
-initial_value_label = "Cyan"
-
-[[parameter]]
-parameter_id = "rotary_potentiometer_5"
-name_label = "Drift"
+name_label = "Speed"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 560
+initial_value = 640
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Chevron"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 512
 display_float_digits = 0
 suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
-name_label = "Reach"
-control_mode = "linear"
-display_min_value = 0
-display_max_value = 100
-initial_value = 500
-display_float_digits = 0
-suffix_label = "%"
+name_label = "Palette"
+value_labels = ["Archway", "Lagoon", "Orchard", "Jade", "Ultra", "Citrus", "Ember", "Frost"]
+initial_value_label = "Archway"
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
-name_label = "Rays"
+name_label = "Split"
 value_labels = ["On", "Off"]
 initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
-name_label = "Flanks"
-value_labels = ["Blocks", "Picture"]
-initial_value_label = "Blocks"
+name_label = "Arcs"
+value_labels = ["On", "Off"]
+initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
@@ -83,9 +92,9 @@ initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
-name_label = "Mirror"
-value_labels = ["Off", "On"]
-initial_value_label = "Off"
+name_label = "Mosaic"
+value_labels = ["Stepped", "Smooth"]
+initial_value_label = "Stepped"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
@@ -99,27 +108,30 @@ name_label = "Arch"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 150
+initial_value = 575
 display_float_digits = 0
 suffix_label = "%"
 
 [[preset]]
-name = "Default"
+name = "Photo"
 
 [[preset]]
-name = "Needle"
-rotary_potentiometer_1 = 400
-linear_potentiometer_12 = 900
+name = "Colonnade"
+linear_potentiometer_12 = 0
+rotary_potentiometer_1 = 300
 
 [[preset]]
-name = "Wide Gate"
-rotary_potentiometer_6 = 900
-toggle_switch_8 = 1
-linear_potentiometer_12 = 40
+name = "Dome"
+linear_potentiometer_12 = 1000
+rotary_potentiometer_5 = 380
 
 [[preset]]
-name = "Magenta Flow"
-rotary_potentiometer_4 = 640
-rotary_potentiometer_5 = 800
-toggle_switch_9 = 1
-linear_potentiometer_12 = 300
+name = "Smooth Ember"
+toggle_switch_10 = 1
+rotary_potentiometer_6 = 800
+rotary_potentiometer_4 = 760
+
+[[preset]]
+name = "Big Blocks"
+rotary_potentiometer_1 = 950
+rotary_potentiometer_2 = 300

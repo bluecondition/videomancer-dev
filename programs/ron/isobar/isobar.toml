@@ -1,0 +1,189 @@
+[program]
+program_id = "com.ron.isobar"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+program_name = "Isobar"
+author = "bluecondition"
+license = "GPL-3.0"
+categories = ["Mirror", "Color", "Curve", "Illusion"]
+program_type = "synthesis"
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+description = "Kaleidoscope contour colourizer: soft chroma stripes ring a glowing heart pool, folded into mirrored panes"
+url = "https://github.com/bluecondition/videomancer-dev"
+
+# --- Rotary Potentiometers (Knobs 1-6) ---
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 682
+display_min_value = 0
+display_max_value = 100
+name_label = "Shape"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 419
+display_min_value = 0
+display_max_value = 100
+name_label = "Panes"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 506
+display_min_value = 0
+display_max_value = 100
+name_label = "Pools"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 245
+display_min_value = 0
+display_max_value = 100
+name_label = "Warp"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 620
+display_min_value = -100
+display_max_value = 100
+name_label = "Speed"
+suffix_label = ""
+
+# Enum knob: the config binary stores the LABEL INDEX and the firmware loads
+# it raw at program load, so the default is the FIRST label (the RTL also
+# reads 0..3 as an index).  Knob turns and presets give 0..1023.
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Palette"
+value_labels = ["Psyche", "Ember", "Ice", "Acid"]
+initial_value_label = "Psyche"
+
+# --- Toggle Switches (7-11) ---
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Crease"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Mirror"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Pulse"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Glow"
+value_labels = ["Flat", "Spot"]
+initial_value_label = "Spot"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Etch"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+# --- Linear Potentiometer (Slider) ---
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 326
+display_min_value = 0
+display_max_value = 100
+name_label = "Density"
+suffix_label = "%"
+
+# --- Presets ---
+# Placeholders until captured from the hardware with capture_preset.sh.
+# Density (P12) is the performance gesture: one calm pool at 0, dense
+# vibrating contour rings everywhere at 100%.
+
+[[preset]]
+name = "Psyche"
+rotary_potentiometer_1 = 682
+rotary_potentiometer_2 = 419
+rotary_potentiometer_3 = 506
+rotary_potentiometer_4 = 245
+rotary_potentiometer_5 = 620
+rotary_potentiometer_6 = 0
+toggle_switch_7 = 1
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 1
+toggle_switch_11 = 0
+linear_potentiometer_12 = 326
+
+[[preset]]
+name = "Heartbeat"
+rotary_potentiometer_1 = 760
+rotary_potentiometer_2 = 260
+rotary_potentiometer_3 = 620
+rotary_potentiometer_4 = 120
+rotary_potentiometer_5 = 560
+rotary_potentiometer_6 = 300
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 1
+toggle_switch_10 = 1
+toggle_switch_11 = 0
+linear_potentiometer_12 = 260
+
+[[preset]]
+name = "Ice Lozenge"
+rotary_potentiometer_1 = 420
+rotary_potentiometer_2 = 560
+rotary_potentiometer_3 = 380
+rotary_potentiometer_4 = 400
+rotary_potentiometer_5 = 380
+rotary_potentiometer_6 = 600
+toggle_switch_7 = 1
+toggle_switch_8 = 1
+toggle_switch_9 = 0
+toggle_switch_10 = 1
+toggle_switch_11 = 0
+linear_potentiometer_12 = 480
+
+[[preset]]
+name = "Acid Etch"
+rotary_potentiometer_1 = 880
+rotary_potentiometer_2 = 700
+rotary_potentiometer_3 = 220
+rotary_potentiometer_4 = 600
+rotary_potentiometer_5 = 760
+rotary_potentiometer_6 = 900
+toggle_switch_7 = 1
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 1
+linear_potentiometer_12 = 700

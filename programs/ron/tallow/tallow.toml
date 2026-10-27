@@ -1,0 +1,191 @@
+[program]
+program_id = "com.ron.tallow"
+program_version = "0.3.0"
+abi_version = ">=1.0,<2.0"
+program_name = "Tallow"
+author = "bluecondition"
+license = "GPL-3.0"
+categories = ["Color", "Curve", "Signal", "Organic"]
+program_type = "synthesis"
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+description = "Melting rainbow columns: a line-synced oscillator, bent by a vertical LFO and smeared by a lag, keys two colour ramps"
+url = "https://github.com/bluecondition/videomancer-dev"
+
+# --- Rotary Potentiometers (Knobs 1-6) ---
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 410
+display_min_value = 0
+display_max_value = 100
+name_label = "Columns"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 600
+display_min_value = 0
+display_max_value = 100
+name_label = "Width"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 500
+display_min_value = 0
+display_max_value = 100
+name_label = "Smear"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 600
+display_min_value = -100
+display_max_value = 100
+name_label = "Speed"
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 430
+display_min_value = 0
+display_max_value = 100
+name_label = "Bends"
+suffix_label = "%"
+
+# Enum knob: the config binary stores the LABEL INDEX and the firmware loads
+# it raw at program load, so the default is the FIRST label (the RTL also
+# reads 0..7 as an index).  Knob turns and presets give 0..1023 (eighths:
+# Signal 0, Signal x3 192, Ember 320, Ember x3 448, Glacier 576,
+# Glacier x3 704, Acid 832, Acid x3 960).  x3 = the ramp folded up-down-up.
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Palette"
+value_labels = ["Signal", "Signal x3", "Ember", "Ember x3", "Glacier", "Glacier x3", "Acid", "Acid x3"]
+initial_value_label = "Signal"
+
+# --- Toggle Switches (7-11) ---
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Wave"
+value_labels = ["Drip", "Sine"]
+initial_value_label = "Drip"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Twin"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Jitter"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Anchor"
+value_labels = ["Left", "Centre"]
+initial_value_label = "Left"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Noise"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+# --- Linear Potentiometer (Slider) ---
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 330
+display_min_value = 0
+display_max_value = 100
+name_label = "Bend"
+suffix_label = "%"
+
+# --- Presets ---
+# Placeholders until captured from the hardware with capture_preset.sh.
+# Bend (P12) is the performance gesture: a gentle sway at 0, giant zigzag fans
+# and folds at 100%.
+
+[[preset]]
+name = "Signal"
+rotary_potentiometer_1 = 410
+rotary_potentiometer_2 = 600
+rotary_potentiometer_3 = 500
+rotary_potentiometer_4 = 600
+rotary_potentiometer_5 = 430
+rotary_potentiometer_6 = 0
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 1
+toggle_switch_10 = 0
+toggle_switch_11 = 1
+linear_potentiometer_12 = 330
+
+[[preset]]
+name = "Candle Fan"
+rotary_potentiometer_1 = 520
+rotary_potentiometer_2 = 520
+rotary_potentiometer_3 = 620
+rotary_potentiometer_4 = 640
+rotary_potentiometer_5 = 380
+rotary_potentiometer_6 = 320
+toggle_switch_7 = 1
+toggle_switch_8 = 1
+toggle_switch_9 = 0
+toggle_switch_10 = 1
+toggle_switch_11 = 1
+linear_potentiometer_12 = 760
+
+[[preset]]
+name = "Ice Drip"
+rotary_potentiometer_1 = 300
+rotary_potentiometer_2 = 700
+rotary_potentiometer_3 = 700
+rotary_potentiometer_4 = 420
+rotary_potentiometer_5 = 560
+rotary_potentiometer_6 = 704
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 450
+
+[[preset]]
+name = "Acid Zebra"
+rotary_potentiometer_1 = 640
+rotary_potentiometer_2 = 480
+rotary_potentiometer_3 = 380
+rotary_potentiometer_4 = 700
+rotary_potentiometer_5 = 640
+rotary_potentiometer_6 = 832
+toggle_switch_7 = 0
+toggle_switch_8 = 1
+toggle_switch_9 = 1
+toggle_switch_10 = 0
+toggle_switch_11 = 1
+linear_potentiometer_12 = 1000

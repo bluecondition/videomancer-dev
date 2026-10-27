@@ -1,104 +1,104 @@
-# Crossbeam - Heirloom #37 (2026-10-20), from WIN_20230527_01_43.
-# A soft cyan X over torn Mondrian blocks with red ripples in the dark ones.
-# See crossbeam.vhd and SUMMARY.md.
+# Crossbeam - Heirloom #37, v0.5.0 (2026-10-27): rebuilt from the photo WIN_20230527_01_43_26.
+# A glowing cyan cross beam luma-keyed over torn colour bars, with mirrored red/black zebra contours
+# in the corners and along the bottom.  See crossbeam.vhd and SUMMARY.md.
 
 [program]
-processing_delay_clks = 20
+processing_delay_clks = 24
 program_id = "com.czartroniks.crossbeam"
 program_name = "Crossbeam"
-program_version = "0.1.0"
+program_version = "0.5.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Grid", "Glitch", "Color"]
 program_type = "processing"
-description = "A soft cyan X crossing a field of torn Mondrian colour blocks, red ripples in the dark ones. X width on the slider."
+description = "A glowing cyan cross beam keyed over torn colour bars, red zebra contours in the corners; the beam on the slider."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_1"
-name_label = "Blocks"
+name_label = "Angle"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 300
+initial_value = 372
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
-name_label = "Tear"
+name_label = "Rows"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 250
+initial_value = 359
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
-name_label = "Ripple"
+name_label = "Contours"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 400
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
-name_label = "Hue"
+name_label = "Flow"
 control_mode = "linear"
-display_min_value = 0
-display_max_value = 7
-initial_value = 0
+display_min_value = -100
+display_max_value = 100
+initial_value = 680
 display_float_digits = 0
 suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
-name_label = "Angle"
-control_mode = "linear"
-display_min_value = 0
-display_max_value = 100
-initial_value = 420
-display_float_digits = 0
-suffix_label = "%"
-
-[[parameter]]
-parameter_id = "rotary_potentiometer_6"
-name_label = "Drift"
+name_label = "Roll"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 560
+initial_value = 600
 display_float_digits = 0
 suffix_label = ""
 
 [[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Columns"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 258
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
 parameter_id = "toggle_switch_7"
-name_label = "Cross"
+name_label = "Bars"
 value_labels = ["Off", "On"]
 initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
-name_label = "Ripple"
+name_label = "Tear"
 value_labels = ["Off", "On"]
 initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
-name_label = "Palette"
-value_labels = ["Mondrian", "Candy"]
-initial_value_label = "Mondrian"
+name_label = "Stack"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
-name_label = "Fill"
-value_labels = ["Source", "Flat"]
-initial_value_label = "Flat"
+name_label = "Palette"
+value_labels = ["Photo", "Swap"]
+initial_value_label = "Photo"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
@@ -108,29 +108,37 @@ initial_value_label = "Video"
 
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
-name_label = "Cross"
+name_label = "Beam"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 350
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
 [[preset]]
-name = "Default"
+name = "Photo"
 
 [[preset]]
-name = "Picture Blocks"
-toggle_switch_10 = 0
-rotary_potentiometer_1 = 500
+name = "Blaze"
+linear_potentiometer_12 = 1000
+rotary_potentiometer_4 = 760
 
 [[preset]]
-name = "Candy Wide X"
+name = "Bare Bars"
+linear_potentiometer_12 = 0
+rotary_potentiometer_5 = 700
+
+[[preset]]
+name = "Stacked"
 toggle_switch_9 = 1
-linear_potentiometer_12 = 800
+rotary_potentiometer_1 = 600
 
 [[preset]]
-name = "Quiet Grid"
-rotary_potentiometer_2 = 0
-toggle_switch_8 = 0
-linear_potentiometer_12 = 100
+name = "Contour Field"
+toggle_switch_7 = 0
+rotary_potentiometer_3 = 700
+
+[[preset]]
+name = "Amber Swap"
+toggle_switch_10 = 1

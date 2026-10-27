@@ -1,103 +1,104 @@
-# Shield - Heirloom #38 (2026-10-20), from WIN_20230529_22_56_41.
-# Heraldic shields: striped arches over V chevrons, N across, mirrored.
+# Shield - Heirloom #38, rebuilt 2026-10-27 (v0.5.0) from WIN_20230529_22_56_41.
+# Two shields of nested U bands cut by orange / red stripes into a plaid, dark-red and blue outline ramps,
+# a red M body, blue pillars and seam stripes.  See shield.vhd, shield.py and SUMMARY.md.
 
 [program]
-processing_delay_clks = 20
+processing_delay_clks = 32
 program_id = "com.czartroniks.shield"
 program_name = "Shield"
-program_version = "0.1.0"
+program_version = "0.5.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
-categories = ["Shape", "Pattern", "Mirror"]
+categories = ["Pattern", "Shape", "Mirror"]
 program_type = "processing"
-description = "Heraldic shields across the screen: orange striped arches over blue, red and black chevrons, the picture inside."
+description = "Twin striped shields in orange-red plaid, ringed by dark red and blue ramps, over a red M and blue pillars."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_1"
-name_label = "Cells"
-control_mode = "linear"
-display_min_value = 1
-display_max_value = 4
-initial_value = 384
-display_float_digits = 0
-suffix_label = ""
-
-[[parameter]]
-parameter_id = "rotary_potentiometer_2"
-name_label = "Stripes"
-control_mode = "linear"
-display_min_value = 2
-display_max_value = 33
-initial_value = 300
-display_float_digits = 0
-suffix_label = ""
-
-[[parameter]]
-parameter_id = "rotary_potentiometer_3"
-name_label = "Chevrons"
+name_label = "Shields"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 300
+initial_value = 213
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Bands"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Stripes"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
-name_label = "Slope"
-control_mode = "linear"
-display_min_value = 0
-display_max_value = 100
-initial_value = 500
-display_float_digits = 0
-suffix_label = "%"
-
-[[parameter]]
-parameter_id = "rotary_potentiometer_5"
-name_label = "Drift"
+name_label = "Speed"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 540
+initial_value = 700
 display_float_digits = 0
 suffix_label = ""
 
 [[parameter]]
-parameter_id = "rotary_potentiometer_6"
-name_label = "Edge"
+parameter_id = "rotary_potentiometer_5"
+name_label = "Pillars"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 500
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Etch"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 320
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
-name_label = "Mirror"
-value_labels = ["Off", "On"]
+name_label = "Line"
+value_labels = ["On", "Off"]
 initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
-name_label = "Palette"
-value_labels = ["Heraldic", "Cool"]
-initial_value_label = "Heraldic"
+name_label = "Tincture"
+value_labels = ["Gules", "Azure"]
+initial_value_label = "Gules"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
-name_label = "Fill"
-value_labels = ["Stripes", "Picture"]
-initial_value_label = "Stripes"
+name_label = "Flip"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
-name_label = "Chevrons"
-value_labels = ["Down", "Up"]
-initial_value_label = "Down"
+name_label = "Stripes"
+value_labels = ["On", "Off"]
+initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
@@ -107,30 +108,35 @@ initial_value_label = "Video"
 
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
-name_label = "Arch"
+name_label = "Depth"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 600
+initial_value = 365
 display_float_digits = 0
 suffix_label = "%"
 
 [[preset]]
-name = "Default"
+name = "Photo"
 
 [[preset]]
-name = "Four Shields"
-rotary_potentiometer_1 = 900
-linear_potentiometer_12 = 700
+name = "Banners"
+rotary_potentiometer_2 = 300
+linear_potentiometer_12 = 0
 
 [[preset]]
-name = "Cool Picture"
+name = "Cascade"
+rotary_potentiometer_4 = 760
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Six Shields"
+rotary_potentiometer_1 = 1023
+rotary_potentiometer_5 = 700
+linear_potentiometer_12 = 520
+
+[[preset]]
+name = "Azure Crown"
 toggle_switch_8 = 1
 toggle_switch_9 = 1
-linear_potentiometer_12 = 900
-
-[[preset]]
-name = "Chevrons Only"
-rotary_potentiometer_3 = 600
-toggle_switch_10 = 1
-linear_potentiometer_12 = 0
+rotary_potentiometer_2 = 700

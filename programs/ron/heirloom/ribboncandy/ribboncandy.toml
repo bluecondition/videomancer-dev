@@ -1,18 +1,19 @@
-# Ribboncandy - Heirloom #39 (2026-10-20), from WIN_20230530_22_27.
-# S-curved gradient ribbons over a glyph-block field.
-# See ribboncandy.vhd and SUMMARY.md.
+# Ribboncandy - Heirloom #39 (rebuilt 2026-10-27), from WIN_20230530_22_27_05.
+# Two hsync-reset oscillators, each frequency-modulated per line: the ribbon oscillator draws four
+# S-curving twisted ribbons (green / blue faces, magenta / red thin ribbon), the face oscillator
+# picks the faces and clocks a sample-and-hold cell mosaic behind them.  See ribboncandy.vhd and SUMMARY.md.
 
 [program]
-processing_delay_clks = 20
+processing_delay_clks = 16
 program_id = "com.czartroniks.ribboncandy"
 program_name = "Ribboncandy"
-program_version = "0.1.0"
+program_version = "0.5.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
-categories = ["Curve", "Pattern", "Grid"]
+categories = ["Curve", "Pattern", "Pixel"]
 program_type = "processing"
-description = "Vertical S-curved two-colour ribbons wobbling over a black-and-white block field with CMY dashes. Wobble on the slider."
+description = "Twisted green/blue ribbons S-curving down a sample-and-hold cell mosaic, with magenta/red thin ribbons. Wave on the slider."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
@@ -20,85 +21,81 @@ core = "yuv444_30b"
 parameter_id = "rotary_potentiometer_1"
 name_label = "Ribbons"
 control_mode = "linear"
-display_min_value = 1
-display_max_value = 8
-initial_value = 448
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
 display_float_digits = 0
-suffix_label = ""
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
-name_label = "Width"
+name_label = "Bends"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 300
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
-name_label = "Pitch"
+name_label = "Twist"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 400
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
-name_label = "Blocks"
+name_label = "Speed"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 640
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Cells"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 300
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
-parameter_id = "rotary_potentiometer_5"
-name_label = "Hue"
-control_mode = "linear"
-display_min_value = 0
-display_max_value = 7
-initial_value = 0
-display_float_digits = 0
-suffix_label = ""
-
-[[parameter]]
 parameter_id = "rotary_potentiometer_6"
-name_label = "Drift"
-control_mode = "linear"
-display_min_value = -100
-display_max_value = 100
-initial_value = 580
-display_float_digits = 0
-suffix_label = ""
+name_label = "Patch"
+value_labels = ["RGB", "RBG", "GRB", "GBR", "BRG", "BGR"]
+initial_value_label = "RGB"
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
-name_label = "Ribbons"
-value_labels = ["Flat", "Gradient"]
-initial_value_label = "Gradient"
+name_label = "Faces"
+value_labels = ["Twist", "Solid"]
+initial_value_label = "Twist"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
 name_label = "Ground"
-value_labels = ["Blocks", "Source"]
-initial_value_label = "Blocks"
+value_labels = ["Cells", "Black"]
+initial_value_label = "Cells"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
-name_label = "Dashes"
-value_labels = ["Off", "On"]
+name_label = "Kinks"
+value_labels = ["On", "Off"]
 initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
-name_label = "Mirror"
-value_labels = ["Off", "On"]
-initial_value_label = "Off"
+name_label = "Flip"
+value_labels = ["Down", "Up"]
+initial_value_label = "Down"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
@@ -108,11 +105,11 @@ initial_value_label = "Video"
 
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
-name_label = "Wobble"
+name_label = "Wave"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 400
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
@@ -120,16 +117,16 @@ suffix_label = "%"
 name = "Default"
 
 [[preset]]
-name = "Picture Ground"
-toggle_switch_8 = 1
-rotary_potentiometer_4 = 600
-
-[[preset]]
-name = "Wild Mirror"
-toggle_switch_10 = 1
-linear_potentiometer_12 = 900
-
-[[preset]]
-name = "Straight Bars"
+name = "Straight"
 linear_potentiometer_12 = 0
-rotary_potentiometer_1 = 1000
+
+[[preset]]
+name = "Whiplash"
+linear_potentiometer_12 = 1023
+rotary_potentiometer_4 = 800
+
+[[preset]]
+name = "Candy Shop"
+rotary_potentiometer_1 = 760
+rotary_potentiometer_5 = 300
+toggle_switch_11 = 1

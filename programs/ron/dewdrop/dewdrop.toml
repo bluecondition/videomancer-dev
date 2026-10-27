@@ -1,0 +1,134 @@
+# Dewdrop — glossy lens-drops drifting over a waving rainbow band field.
+#
+# v0.1.0: first build.  Ten drops (five big, five small) magnify the band
+# field inside them; dark top-left-lit rims with a spectral fringe; pastel
+# ground.  P12 Swell sets the radius.
+#
+# Author: czartroniks
+
+[program]
+processing_delay_clks = 28
+program_id = "com.czartroniks.dewdrop"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+program_name = "Dewdrop"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Optics", "Organic", "Render"]
+program_type = "processing"
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+description = "Glossy lens-drops drift over a waving rainbow field, magnifying it inside dark spectral rims. Swell fills the screen."
+
+# --- Rotary Potentiometers (Knobs 1-6) ---
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 300
+display_min_value = 0
+display_max_value = 100
+name_label = "Bands"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 400
+display_min_value = 0
+display_max_value = 100
+name_label = "Wave"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 560
+display_min_value = 0
+display_max_value = 100
+name_label = "Refract"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 300
+display_min_value = 0
+display_max_value = 100
+name_label = "Rim"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 160
+display_min_value = 0
+display_max_value = 100
+name_label = "Drift"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 600
+display_min_value = -100
+display_max_value = 100
+name_label = "Flow"
+suffix_label = ""
+
+# --- Toggle Switches (7-11) ---
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Ground"
+value_labels = ["Pastel", "Dark"]
+initial_value_label = "Pastel"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Drops"
+value_labels = ["Pairs", "Solo"]
+initial_value_label = "Pairs"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Bands"
+value_labels = ["Vertical", "Horizontal"]
+initial_value_label = "Vertical"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Backdrop"
+value_labels = ["Field", "Mint"]
+initial_value_label = "Field"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Colour"
+value_labels = ["Rainbow", "Chrome"]
+initial_value_label = "Rainbow"
+
+# --- Linear Potentiometer (Slider) ---
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 400
+display_min_value = 0
+display_max_value = 100
+name_label = "Swell"
+suffix_label = "%"

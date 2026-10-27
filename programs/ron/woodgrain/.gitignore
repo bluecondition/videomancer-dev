@@ -1,0 +1,4 @@
+# personal cartridge dumps never get committed; the hook regenerates the package
+cartridge.bin
+woodgrain_cart_pkg.vhd
+tools/__pycache__/

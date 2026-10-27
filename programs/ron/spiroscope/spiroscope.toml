@@ -1,15 +1,15 @@
 [program]
 program_id = "com.ron.spiroscope"
-program_version = "2.1.0"
+program_version = "6.3.0"
 abi_version = ">=1.0,<2.0"
 program_name = "Spiroscope"
 author = "ron"
 license = "GPL-3.0"
 categories = ["Curve", "Render", "Shape"]
-program_type = "synthesis"
+program_type = "processing"
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
-description = "Full-resolution vector spirograph: crisp precessing gear figures, paint or animate."
+description = "Spirograph + harmonograph drawing machine: live gears, glowing gradient trails, kaleido pens, video ground, engraving."
 
 # --- Rotary Potentiometers (Knobs 1-6) ---
 
@@ -17,77 +17,82 @@ description = "Full-resolution vector spirograph: crisp precessing gear figures,
 parameter_id = "rotary_potentiometer_1"
 name_label = "Gear A"
 value_labels = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16"]
-initial_value_label = "5"
+initial_value_label = "16"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 436
+display_min_value = -16
+display_max_value = 16
 name_label = "Gear B"
-value_labels = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16"]
-initial_value_label = "8"
+suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 512
+initial_value = 216
 display_min_value = 0
-display_max_value = 31
+display_max_value = 100
 name_label = "Arm"
-suffix_label = ""
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 0
+initial_value = 680
 display_min_value = 0
 display_max_value = 360
-name_label = "Phase"
+name_label = "Twist"
 suffix_label = "deg"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
-name_label = "Color"
-value_labels = ["Red", "Orange", "Yellow", "Green", "Blue", "Indigo", "Violet", "White"]
-initial_value_label = "Green"
+name_label = "Colour"
+value_labels = ["Neon", "Ember", "Ice", "Rainbow", "Gold", "Aurora", "Phosphor", "White"]
+initial_value_label = "Neon"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
-name_label = "Thickness"
-value_labels = ["1", "2", "3", "4", "5", "6", "7", "8"]
-initial_value_label = "3"
+name_label = "Weight"
+value_labels = ["1px", "2px", "3px", "4px", "5px", "6px", "7px", "8px"]
+initial_value_label = "2px"
 
 # --- Toggle Switches (7-11) ---
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
-name_label = "Paint"
-value_labels = ["Off", "On"]
-initial_value_label = "Off"
+name_label = "Machine"
+value_labels = ["Spiro", "Harmonograph"]
+initial_value_label = "Spiro"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
-name_label = "Harmonic"
+name_label = "Engrave"
 value_labels = ["Off", "On"]
-initial_value_label = "Off"
+initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
-name_label = "Kaleidoscope"
+name_label = "Kaleido"
 value_labels = ["Off", "On"]
 initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
-name_label = "Rainbow"
+name_label = "Glow"
 value_labels = ["Off", "On"]
 initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
-name_label = "Background"
+name_label = "Ground"
 value_labels = ["Black", "Video"]
 initial_value_label = "Black"
 
@@ -98,73 +103,102 @@ parameter_id = "linear_potentiometer_12"
 control_mode = "linear"
 min_value = 0
 max_value = 1023
-initial_value = 600
+initial_value = 1023
 display_min_value = 0
 display_max_value = 100
-name_label = "Trail"
+name_label = "Trace"
 suffix_label = "%"
 
 # --- Presets ---
-# (Gears lock figures near ratio A:B with slow precession. Trail = how much
-#  of the curve is visible behind the pen; slam full = erase. Paint = ink
-#  accumulates; turning gears in Paint layers figures.)
+# Starting points only -- recapture from the hardware with capture_preset.sh.
+# Trace: comet -> whole figure; its top ~12% blooms and drifts the Twist.
 
 [[preset]]
-name = "Rosette 3:2"
-rotary_potentiometer_1 = 160
-rotary_potentiometer_2 = 96
+name = "Star 5:-8"
+rotary_potentiometer_1 = 288
+rotary_potentiometer_2 = 264
 rotary_potentiometer_3 = 400
 rotary_potentiometer_4 = 0
-rotary_potentiometer_5 = 448
-rotary_potentiometer_6 = 160
+rotary_potentiometer_5 = 64
+rotary_potentiometer_6 = 320
 toggle_switch_7 = 0
 toggle_switch_8 = 0
 toggle_switch_9 = 0
 toggle_switch_10 = 0
 toggle_switch_11 = 0
-linear_potentiometer_12 = 500
+linear_potentiometer_12 = 760
 
 [[preset]]
-name = "Rainbow Mandala"
-rotary_potentiometer_1 = 288
-rotary_potentiometer_2 = 480
-rotary_potentiometer_3 = 600
-rotary_potentiometer_4 = 256
-rotary_potentiometer_5 = 512
-rotary_potentiometer_6 = 288
+name = "Harmonograph"
+rotary_potentiometer_1 = 96
+rotary_potentiometer_2 = 605
+rotary_potentiometer_3 = 300
+rotary_potentiometer_4 = 200
+rotary_potentiometer_5 = 192
+rotary_potentiometer_6 = 192
+toggle_switch_7 = 1
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 1
+toggle_switch_11 = 0
+linear_potentiometer_12 = 880
+
+[[preset]]
+name = "Neon Mandala"
+rotary_potentiometer_1 = 416
+rotary_potentiometer_2 = 139
+rotary_potentiometer_3 = 450
+rotary_potentiometer_4 = 0
+rotary_potentiometer_5 = 448
+rotary_potentiometer_6 = 320
 toggle_switch_7 = 0
 toggle_switch_8 = 0
 toggle_switch_9 = 1
 toggle_switch_10 = 1
 toggle_switch_11 = 0
-linear_potentiometer_12 = 800
+linear_potentiometer_12 = 880
 
 [[preset]]
-name = "Comet"
-rotary_potentiometer_1 = 420
-rotary_potentiometer_2 = 736
-rotary_potentiometer_3 = 700
-rotary_potentiometer_4 = 128
-rotary_potentiometer_5 = 192
-rotary_potentiometer_6 = 160
-toggle_switch_7 = 0
-toggle_switch_8 = 1
-toggle_switch_9 = 0
-toggle_switch_10 = 1
-toggle_switch_11 = 0
-linear_potentiometer_12 = 100
-
-[[preset]]
-name = "Ink Painter"
+name = "Video Rose"
 rotary_potentiometer_1 = 160
-rotary_potentiometer_2 = 480
-rotary_potentiometer_3 = 300
-rotary_potentiometer_4 = 0
+rotary_potentiometer_2 = 729
+rotary_potentiometer_3 = 450
+rotary_potentiometer_4 = 512
 rotary_potentiometer_5 = 960
-rotary_potentiometer_6 = 448
-toggle_switch_7 = 1
+rotary_potentiometer_6 = 192
+toggle_switch_7 = 0
 toggle_switch_8 = 0
 toggle_switch_9 = 0
 toggle_switch_10 = 0
+toggle_switch_11 = 1
+linear_potentiometer_12 = 880
+
+[[preset]]
+name = "Engraving"
+rotary_potentiometer_1 = 928
+rotary_potentiometer_2 = 15
+rotary_potentiometer_3 = 500
+rotary_potentiometer_4 = 0
+rotary_potentiometer_5 = 960
+rotary_potentiometer_6 = 960
+toggle_switch_7 = 0
+toggle_switch_8 = 1
+toggle_switch_9 = 0
+toggle_switch_10 = 0
 toggle_switch_11 = 0
-linear_potentiometer_12 = 300
+linear_potentiometer_12 = 880
+
+[[preset]]
+name = "Comet"
+rotary_potentiometer_1 = 416
+rotary_potentiometer_2 = 139
+rotary_potentiometer_3 = 600
+rotary_potentiometer_4 = 0
+rotary_potentiometer_5 = 320
+rotary_potentiometer_6 = 448
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 1
+toggle_switch_11 = 0
+linear_potentiometer_12 = 200

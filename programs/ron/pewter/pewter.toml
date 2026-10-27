@@ -1,0 +1,223 @@
+[program]
+program_id = "com.ron.pewter"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+program_name = "Pewter"
+author = "bluecondition"
+license = "GPL-3.0"
+categories = ["Material", "Pattern", "Signal", "Grid"]
+program_type = "synthesis"
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+description = "Brushed-metal weave: 8 measured row waveforms swept along each line, anchored scratches, centred zoom, metal tints"
+url = "https://github.com/bluecondition/videomancer-dev"
+
+# --- Rotary Potentiometers (Knobs 1-6) ---
+
+# Rows per horizontal period, 1 .. 16 (square law); the reference is 4.15.
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 469
+display_min_value = 0
+display_max_value = 100
+name_label = "Rows"
+suffix_label = "%"
+
+# Contrast about mid-grey: x0.4 matte .. x2.6 chrome, unity at 27 %.
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 278
+display_min_value = 0
+display_max_value = 100
+name_label = "Sheen"
+suffix_label = "%"
+
+# Scratch noise, 0 .. 3x the reference (1x at 33 %).
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 336
+display_min_value = 0
+display_max_value = 100
+name_label = "Brush"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 620
+display_min_value = -100
+display_max_value = 100
+name_label = "Drift"
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 512
+display_min_value = -100
+display_max_value = 100
+name_label = "Roll"
+suffix_label = ""
+
+# Enum knob: the config binary stores the LABEL INDEX and the firmware loads
+# it raw at program load, so the RTL reads 0..7 as an index.  Knob turns and
+# presets give 0..1023 (eighths: Pewter 0, Steel 192, Silver 320, Gold 448,
+# Brass 576, Copper 704, Bronze 832, Verdigris 960).
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Metal"
+value_labels = ["Pewter", "Steel", "Silver", "Gold", "Brass", "Copper", "Bronze", "Verdigris"]
+initial_value_label = "Pewter"
+
+# --- Toggle Switches (7-11) ---
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Shuttle"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Mirror"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Shuffle"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Twill"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Negative"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+# --- Linear Potentiometer (Slider) ---
+
+# Zoom about the screen centre: 16 periods across (fine mesh) at 0, the
+# reference at 37 %, 1.3 periods (two huge brushed plates) at 100 %.
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 378
+display_min_value = 0
+display_max_value = 100
+name_label = "Zoom"
+suffix_label = "%"
+
+# --- Presets ---
+# Placeholders until captured from the hardware with capture_preset.sh.
+
+[[preset]]
+name = "Reference"
+rotary_potentiometer_1 = 469
+rotary_potentiometer_2 = 278
+rotary_potentiometer_3 = 336
+rotary_potentiometer_4 = 620
+rotary_potentiometer_5 = 512
+rotary_potentiometer_6 = 0
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 378
+
+[[preset]]
+name = "Gold Mesh"
+rotary_potentiometer_1 = 600
+rotary_potentiometer_2 = 420
+rotary_potentiometer_3 = 300
+rotary_potentiometer_4 = 560
+rotary_potentiometer_5 = 470
+rotary_potentiometer_6 = 448
+toggle_switch_7 = 1
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 60
+
+[[preset]]
+name = "Copper Plates"
+rotary_potentiometer_1 = 400
+rotary_potentiometer_2 = 340
+rotary_potentiometer_3 = 620
+rotary_potentiometer_4 = 590
+rotary_potentiometer_5 = 512
+rotary_potentiometer_6 = 704
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 1
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 880
+
+[[preset]]
+name = "Verdigris Twill"
+rotary_potentiometer_1 = 520
+rotary_potentiometer_2 = 300
+rotary_potentiometer_3 = 450
+rotary_potentiometer_4 = 512
+rotary_potentiometer_5 = 580
+rotary_potentiometer_6 = 960
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 1
+toggle_switch_11 = 0
+linear_potentiometer_12 = 300
+
+[[preset]]
+name = "Steel Loom"
+rotary_potentiometer_1 = 700
+rotary_potentiometer_2 = 360
+rotary_potentiometer_3 = 336
+rotary_potentiometer_4 = 760
+rotary_potentiometer_5 = 512
+rotary_potentiometer_6 = 192
+toggle_switch_7 = 1
+toggle_switch_8 = 1
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 450
+
+[[preset]]
+name = "Black Chrome"
+rotary_potentiometer_1 = 469
+rotary_potentiometer_2 = 820
+rotary_potentiometer_3 = 500
+rotary_potentiometer_4 = 470
+rotary_potentiometer_5 = 512
+rotary_potentiometer_6 = 320
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 1
+linear_potentiometer_12 = 600

@@ -1,0 +1,205 @@
+[program]
+program_id = "com.ron.wraith"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+program_name = "Wraith"
+author = "bluecondition"
+license = "GPL-3.0"
+categories = ["Organic", "Color", "Signal", "Pattern"]
+program_type = "synthesis"
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+description = "Neon wraiths: hard-synced flame lobes on an azure ramp, tiled across the frame, finned, torn and crossed by tracking lines"
+url = "https://github.com/bluecondition/videomancer-dev"
+
+# --- Rotary Potentiometers (Knobs 1-6) ---
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 333
+display_min_value = 0
+display_max_value = 100
+name_label = "Tiles"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 256
+display_min_value = 0
+display_max_value = 100
+name_label = "Lobes"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 307
+display_min_value = 0
+display_max_value = 100
+name_label = "Flare"
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 640
+display_min_value = -100
+display_max_value = 100
+name_label = "Speed"
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 461
+display_min_value = 0
+display_max_value = 100
+name_label = "Glow"
+suffix_label = "%"
+
+# Enum knob: the config binary stores the LABEL INDEX and the firmware loads
+# it raw at program load, so the RTL reads 0..7 as an index.  Knob turns and
+# presets give 0..1023 (eighths: Silk 0, Ember 128, Venom 256, Frost 384,
+# Orchid 512, Aurora 640, Spectrum 768, Mono 896).
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Palette"
+value_labels = ["Silk", "Ember", "Venom", "Frost", "Orchid", "Aurora", "Spectrum", "Mono"]
+initial_value_label = "Silk"
+
+# --- Toggle Switches (7-11) ---
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Mirror"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Tear"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Lines"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Rings"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Flip"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+# --- Linear Potentiometer (Slider) ---
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+control_mode = "linear"
+min_value = 0
+max_value = 1023
+initial_value = 306
+display_min_value = 0
+display_max_value = 100
+name_label = "Lash"
+suffix_label = "%"
+
+# --- Presets ---
+# Placeholders until captured from the hardware with capture_preset.sh.
+# Lash (P12) is the performance gesture: calm flowing flames at 0, shredded
+# lashing fins at 100%.
+
+[[preset]]
+name = "Wraith"
+rotary_potentiometer_1 = 333
+rotary_potentiometer_2 = 256
+rotary_potentiometer_3 = 307
+rotary_potentiometer_4 = 640
+rotary_potentiometer_5 = 461
+rotary_potentiometer_6 = 0
+toggle_switch_7 = 0
+toggle_switch_8 = 1
+toggle_switch_9 = 1
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 306
+
+[[preset]]
+name = "Mirror Ghost"
+rotary_potentiometer_1 = 250
+rotary_potentiometer_2 = 200
+rotary_potentiometer_3 = 420
+rotary_potentiometer_4 = 600
+rotary_potentiometer_5 = 560
+rotary_potentiometer_6 = 512
+toggle_switch_7 = 1
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 200
+
+[[preset]]
+name = "Ember Lash"
+rotary_potentiometer_1 = 333
+rotary_potentiometer_2 = 330
+rotary_potentiometer_3 = 500
+rotary_potentiometer_4 = 700
+rotary_potentiometer_5 = 420
+rotary_potentiometer_6 = 128
+toggle_switch_7 = 0
+toggle_switch_8 = 1
+toggle_switch_9 = 1
+toggle_switch_10 = 0
+toggle_switch_11 = 1
+linear_potentiometer_12 = 820
+
+[[preset]]
+name = "Frost Rings"
+rotary_potentiometer_1 = 200
+rotary_potentiometer_2 = 180
+rotary_potentiometer_3 = 250
+rotary_potentiometer_4 = 580
+rotary_potentiometer_5 = 600
+rotary_potentiometer_6 = 384
+toggle_switch_7 = 1
+toggle_switch_8 = 0
+toggle_switch_9 = 0
+toggle_switch_10 = 1
+toggle_switch_11 = 0
+linear_potentiometer_12 = 420
+
+[[preset]]
+name = "Venom Ribbon"
+rotary_potentiometer_1 = 420
+rotary_potentiometer_2 = 700
+rotary_potentiometer_3 = 600
+rotary_potentiometer_4 = 660
+rotary_potentiometer_5 = 380
+rotary_potentiometer_6 = 256
+toggle_switch_7 = 0
+toggle_switch_8 = 1
+toggle_switch_9 = 0
+toggle_switch_10 = 0
+toggle_switch_11 = 0
+linear_potentiometer_12 = 520
