@@ -1,98 +1,102 @@
-# Lotus - Heirloom #33 (2026-10-20), from WIN_20230515_23_23_36.
-# Orange/green nested diamonds above a seam, pink-white lobes on acid green below.
-# See lotus.vhd and SUMMARY.md.
+# Lotus - Heirloom #33, v0.5.0 (2026-10-27): rebuilt from the photo WIN_20230515_23_23_36.
+# Two orange/green contour eyes over a zigzag band and pink-white cushions on green, a stuttering
+# sync staircase at the left edge.  See lotus.vhd and SUMMARY.md.
 
 [program]
 processing_delay_clks = 20
 program_id = "com.czartroniks.lotus"
 program_name = "Lotus"
-program_version = "0.1.0"
+program_version = "0.5.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
-categories = ["Pattern", "Shape", "Organic"]
+categories = ["Pattern", "Glitch", "Color"]
 program_type = "processing"
-description = "Nested orange and green diamonds above a seam, pink-white lobes on acid green below; the video etches both."
+description = "Twin orange-green contour eyes over pink-white cushions on green, torn by a stuttering sync staircase."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_1"
-name_label = "Tiles"
-control_mode = "linear"
-display_min_value = 1
-display_max_value = 4
-initial_value = 384
-display_float_digits = 0
-suffix_label = ""
-
-[[parameter]]
-parameter_id = "rotary_potentiometer_2"
-name_label = "Rings"
+name_label = "Lobes"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 240
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Stutter"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
-name_label = "Lobes"
+name_label = "Bloom"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 520
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
-name_label = "Hue"
-value_labels = ["Orange Green", "Blue Pink", "Red Cyan", "Mono"]
-initial_value_label = "Orange Green"
-
-[[parameter]]
-parameter_id = "rotary_potentiometer_5"
-name_label = "Drift"
+name_label = "Speed"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 540
+initial_value = 600
 display_float_digits = 0
 suffix_label = ""
 
 [[parameter]]
-parameter_id = "rotary_potentiometer_6"
-name_label = "Tear"
+parameter_id = "rotary_potentiometer_5"
+name_label = "Ripple"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 200
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Etch"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 300
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
-name_label = "Zones"
-value_labels = ["Diamonds Up", "Lobes Up"]
-initial_value_label = "Diamonds Up"
+name_label = "Palette"
+value_labels = ["Photo", "Night"]
+initial_value_label = "Photo"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
-name_label = "Invert"
+name_label = "Mirror"
 value_labels = ["Off", "On"]
 initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
-name_label = "Rings"
-value_labels = ["Hard", "Soft"]
-initial_value_label = "Hard"
+name_label = "Contour"
+value_labels = ["Soft", "Hard"]
+initial_value_label = "Soft"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
-name_label = "Grid"
+name_label = "Fold"
 value_labels = ["Off", "On"]
 initial_value_label = "Off"
 
@@ -104,31 +108,33 @@ initial_value_label = "Video"
 
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
-name_label = "Seam"
+name_label = "Rings"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 540
+initial_value = 534
 display_float_digits = 0
 suffix_label = "%"
 
 [[preset]]
-name = "Default"
+name = "Lotus"
 
 [[preset]]
-name = "All Lobes"
-rotary_potentiometer_3 = 800
-linear_potentiometer_12 = 0
+name = "Broad Petals"
+linear_potentiometer_12 = 120
 
 [[preset]]
-name = "All Diamonds"
-rotary_potentiometer_2 = 600
-toggle_switch_9 = 1
-linear_potentiometer_12 = 1023
+name = "Moire Bloom"
+rotary_potentiometer_3 = 760
+linear_potentiometer_12 = 1000
 
 [[preset]]
-name = "Blue Quilt"
-rotary_potentiometer_1 = 1000
-rotary_potentiometer_4 = 256
+name = "Clean Sync"
+rotary_potentiometer_2 = 0
+rotary_potentiometer_4 = 700
+
+[[preset]]
+name = "Night Eyes"
+rotary_potentiometer_1 = 760
+toggle_switch_7 = 1
 toggle_switch_10 = 1
-linear_potentiometer_12 = 500
