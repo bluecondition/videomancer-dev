@@ -1,104 +1,104 @@
-# Sinew - Heirloom #18 (2026-10-20), from WIN_20230315_00_53_56.
-# The picture wrung into S-curves by a vertical sine, with row ripple.
-# See sinew.vhd and SUMMARY.md.
+# Sinew - Heirloom #18, v0.5.0 (2026-10-21): rebuilt from the photo WIN_20230315_00_53_56.
+# Seven orange ropes S-curving down the frame, crossed by thin sinew lines that bulge and fan into
+# green shingles, between a yellow/green and a pink/navy bar band.  See sinew.vhd and SUMMARY.md.
 
 [program]
-processing_delay_clks = 16
+processing_delay_clks = 24
 program_id = "com.czartroniks.sinew"
 program_name = "Sinew"
-program_version = "0.1.0"
+program_version = "0.5.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
-categories = ["Warp", "Color", "Signal"]
+categories = ["Pattern", "Color", "Signal"]
 program_type = "processing"
-description = "The picture wrung into S-curves by a vertical sine inside a band, row ripple on top, hue-rotated and tinted warm."
+description = "S-curved orange ropes crossed by bulging sinew lines between two bar bands; video bends the sinews."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_1"
-name_label = "Period"
+name_label = "Ropes"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 360
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
-name_label = "Band"
+name_label = "Sinews"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 620
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
-name_label = "Ripple"
+name_label = "Twist"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 240
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
-name_label = "Hue"
+name_label = "Speed"
 control_mode = "linear"
-display_min_value = 0
-display_max_value = 360
-initial_value = 0
+display_min_value = -100
+display_max_value = 100
+initial_value = 640
 display_float_digits = 0
 suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
-name_label = "Speed"
+name_label = "Melt"
 control_mode = "linear"
-display_min_value = -100
+display_min_value = 0
 display_max_value = 100
-initial_value = 580
-display_float_digits = 0
-suffix_label = ""
-
-[[parameter]]
-parameter_id = "rotary_potentiometer_6"
-name_label = "Contrast"
-control_mode = "linear"
-display_min_value = 25
-display_max_value = 325
-initial_value = 380
+initial_value = 420
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Palette"
+control_mode = "linear"
+display_min_value = 1
+display_max_value = 8
+initial_value = 0
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
 parameter_id = "toggle_switch_7"
-name_label = "Band"
-value_labels = ["Band", "All"]
-initial_value_label = "Band"
+name_label = "Tear"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
-name_label = "Ripple"
+name_label = "Grain"
 value_labels = ["Off", "On"]
 initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
-name_label = "Tint"
-value_labels = ["Off", "On"]
-initial_value_label = "Off"
+name_label = "Wave"
+value_labels = ["Triangle", "Saw"]
+initial_value_label = "Triangle"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
-name_label = "Fold"
+name_label = "Bands"
 value_labels = ["Off", "On"]
-initial_value_label = "Off"
+initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
@@ -108,11 +108,11 @@ initial_value_label = "Video"
 
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
-name_label = "Wring"
+name_label = "Pinch"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 450
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
@@ -120,18 +120,23 @@ suffix_label = "%"
 name = "Default"
 
 [[preset]]
-name = "Warm Bars"
-toggle_switch_9 = 1
-toggle_switch_11 = 1
-linear_potentiometer_12 = 600
-
-[[preset]]
-name = "Whole Wring"
-toggle_switch_7 = 1
-toggle_switch_10 = 1
-linear_potentiometer_12 = 1023
-
-[[preset]]
-name = "Still Ripple"
-rotary_potentiometer_3 = 700
+name = "Combed"
 linear_potentiometer_12 = 0
+rotary_potentiometer_3 = 300
+
+[[preset]]
+name = "Knotted"
+linear_potentiometer_12 = 1023
+rotary_potentiometer_2 = 700
+rotary_potentiometer_4 = 760
+
+[[preset]]
+name = "Saw Fan"
+toggle_switch_9 = 1
+rotary_potentiometer_6 = 384
+
+[[preset]]
+name = "Full Patch"
+toggle_switch_10 = 0
+toggle_switch_11 = 1
+rotary_potentiometer_5 = 700
