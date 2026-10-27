@@ -1,100 +1,100 @@
-# Cathode - Heirloom #23 (2026-10-20), from WIN_20230407_23_48_05.
-# A torn magenta / green / yellow mosaic with two purple tubes sweeping through it.
-# See cathode.vhd and SUMMARY.md.
+# Cathode - Heirloom #23 (rebuilt 2026-10-27), from WIN_20230407_23_48_05.
+# A sample-and-hold colour mosaic (cyclic green / pink / yellow / mint colourizer, phase ramping down
+# every column) with two purple three-tube flames keyed over it.  See cathode.vhd and SUMMARY.md.
 
 [program]
-processing_delay_clks = 16
+processing_delay_clks = 24
 program_id = "com.czartroniks.cathode"
 program_name = "Cathode"
-program_version = "0.1.0"
+program_version = "0.5.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Pixel", "Glitch", "Shape"]
 program_type = "processing"
-description = "The picture as a torn magenta, green and yellow mosaic with two purple parabolic tubes sweeping down through it."
+description = "S&H colour mosaic cycling green, pink, yellow and mint down its columns, with two purple tube flames keyed over it."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_1"
-name_label = "Blocks"
+name_label = "Cells"
 control_mode = "linear"
-display_min_value = 8
-display_max_value = 263
-initial_value = 120
+display_min_value = 12
+display_max_value = 160
+initial_value = 487
 display_float_digits = 0
-suffix_label = "px"
+suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
-name_label = "Curve"
+name_label = "Rows"
 control_mode = "linear"
-display_min_value = 0
-display_max_value = 100
-initial_value = 450
+display_min_value = 17
+display_max_value = 270
+initial_value = 502
 display_float_digits = 0
-suffix_label = "%"
+suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
-name_label = "Tear"
+name_label = "Cycle"
 control_mode = "linear"
 display_min_value = 0
-display_max_value = 100
-initial_value = 250
+display_max_value = 300
+initial_value = 342
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
-name_label = "Spacing"
-control_mode = "linear"
-display_min_value = 0
-display_max_value = 100
-initial_value = 560
-display_float_digits = 0
-suffix_label = "%"
-
-[[parameter]]
-parameter_id = "rotary_potentiometer_5"
-name_label = "Palette"
-value_labels = ["Cathode", "Phosphor", "Amber", "Ice"]
-initial_value_label = "Cathode"
-
-[[parameter]]
-parameter_id = "rotary_potentiometer_6"
-name_label = "Sweep"
+name_label = "Speed"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 560
+initial_value = 600
 display_float_digits = 0
 suffix_label = ""
 
 [[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Flames"
+control_mode = "linear"
+display_min_value = 1
+display_max_value = 4
+initial_value = 351
+display_float_digits = 1
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Patch"
+value_labels = ["RGB", "RBG", "GRB", "GBR", "BRG", "BGR"]
+initial_value_label = "RGB"
+
+[[parameter]]
 parameter_id = "toggle_switch_7"
-name_label = "Tubes"
-value_labels = ["On", "Off"]
-initial_value_label = "On"
+name_label = "Fringe"
+value_labels = ["Blue", "Off"]
+initial_value_label = "Blue"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
-name_label = "Mosaic"
+name_label = "Glow"
 value_labels = ["On", "Off"]
 initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
-name_label = "Tube"
-value_labels = ["Purple", "Cyan"]
-initial_value_label = "Purple"
+name_label = "Core"
+value_labels = ["On", "Off"]
+initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
-name_label = "Poster"
-value_labels = ["On", "Off"]
-initial_value_label = "On"
+name_label = "Flip"
+value_labels = ["Down", "Up"]
+initial_value_label = "Down"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
@@ -104,11 +104,11 @@ initial_value_label = "Video"
 
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
-name_label = "Tubes"
+name_label = "Flames"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 300
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
@@ -116,18 +116,23 @@ suffix_label = "%"
 name = "Default"
 
 [[preset]]
-name = "Hairlines"
-rotary_potentiometer_6 = 620
-linear_potentiometer_12 = 0
+name = "Generator"
+toggle_switch_11 = 1
 
 [[preset]]
-name = "Purple Flood"
-rotary_potentiometer_2 = 900
+name = "Pillars"
+toggle_switch_11 = 1
 linear_potentiometer_12 = 1023
+rotary_potentiometer_5 = 180
 
 [[preset]]
-name = "Ice Picture"
-rotary_potentiometer_5 = 768
-rotary_potentiometer_1 = 20
-toggle_switch_9 = 1
-linear_potentiometer_12 = 200
+name = "Embers"
+rotary_potentiometer_6 = 900
+linear_potentiometer_12 = 300
+rotary_potentiometer_1 = 700
+
+[[preset]]
+name = "Rising"
+toggle_switch_10 = 1
+rotary_potentiometer_3 = 700
+rotary_potentiometer_4 = 760
