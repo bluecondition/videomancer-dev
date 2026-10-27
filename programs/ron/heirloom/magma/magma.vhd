@@ -1,34 +1,41 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Magma v0.1.0 -- Heirloom #29 (2026-10-20), from WIN_20230515_00_46_28.
+-- Magma v0.5.0 -- Heirloom #29, rebuilt from the photo WIN_20230515_00_46_28.
 --
--- The photo: a cyan / magenta / blue field streaked sideways, with red and
--- yellow blobs, flat red regions where the field saturates, mirrored about a
--- line.
+-- The photo: fanned cyan/pink streaks sweeping down-right in the top half and blue/magenta ")"
+-- bands below, red pockets stacked in the bands, and big lava blobs -- yellow with red rims at
+-- the top, red at the bottom -- in a lattice with a row of pointed red lenses across the middle
+-- and a red band along the bottom edge.  It is a three-channel colourizer on one band field:
+--   * the bands are ONE line-locked sawtooth oscillator (phase 0 at 247 virtual px left of the
+--     picture) whose frequency is swept per line by a vertical curve: 134 px period at the top,
+--     198 px at y ~ 700, 181 px at the bottom, so the stripes fan out from the left edge;
+--   * R and B are keys of that field (blue/cyan < magenta < red), G falls with it and with the
+--     height (cyan sky at the top, deep blue below);
+--   * the lava is a separate key whose shape was fitted to the photo, with its own green
+--     channel (yellow cores, red rims).
+-- The program: the band oscillator, a static band level BG, the lava key FR and its green GB
+-- (quadratic B-splines on a 36-virtual-px grid, magma.py), red pockets riding the bands (a
+-- per-band, per-slot table, rising like bubbles), a fine contour ripple and a per-line comb
+-- jitter; the colourizer, the lava mix, RGB -> YUV.
 --
--- The program: a smooth field (three triangle waves: x, y and x+y; or the
--- video luma on Source), mirrored left / right (S7, axis K4), smeared
--- horizontally (K1), mapped through a cyan / magenta / blue / yellow palette
--- (K2 hue, K5 cycling); wherever the field rises above the lava threshold
--- (P12) the colour is flat red.
+--   K1  Stripes  how many bands (0.5x .. 2x; centre = the photo)
+--   K2  Fan      how far the stripes fan out (0 = straight vertical bands; centre = the photo)
+--   K3  Flow     band drift, bipolar (centre +-8 = still): + streams the stripes right
+--   K4  Pockets  the red pockets in the bands (0 = none, centre = the photo, max = every slot)
+--   K5  Melt     how far the video (or Osc) bends the bands and swells the lava
+--   K6  Sky      the cyan/blue horizon: low = night blue/red, high = cyan/yellow
+--   S7  Cores    Hot (yellow cores, the photo) / Flat (red lava)
+--   S8  Ripple   Fine (the photo's fingerprint contours) / Coarse (wide topographic rings)
+--   S9  Mirror   Off / On: the stripes mirrored about the centre (chevrons)
+--   S10 Palette  Magma / Ice
+--   S11 Source   Video / Osc
+--   P12 LAVA     0 = no lava (a calm striped flow), 50 % = the photo, 100 % = the lava floods
 --
---   K1  Streak   horizontal smear of the field
---   K2  Hue      palette offset
---   K3  Blobs    field scale (big blobs .. fine ripples)
---   K4  Axis     mirror axis position
---   K5  Speed    field drift / palette cycling, bipolar
---   K6  Contrast field contrast 0.25 .. 2.25 x
---   S7  Mirror   Off / On
---   S8  Palette  Cyan-magenta / Green-orange-violet
---   S9  Red      Flats / Outlines (red only at the threshold edge)
---   S10 Poster   palette posterized Off / On
---   S11 Source   Video / Osc (the three-wave field)
---   P12 LAVA     red threshold: a few islands .. a red sea
---
--- Generated avid; output conditioning before the blanking gate.  Latency 20
--- clocks.  16 EBR line buffer + 4 EBR palette.  Colours in the hardware
--- convention (u = Cr, v = Cb).
+-- Virtual 1080-line geometry (the same picture at SD, 720p and 1080; SD shows the central 4:3).
+-- Generated avid; output conditioning (luma [1 2 1], chroma box pair [1 2 .. 2 1], luma to
+-- ~777) before the blanking gate.  Latency 28 clocks in every mode.
+-- Generated colours in the hardware convention (U carries Cr, V carries Cb).
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -38,221 +45,448 @@ library work;
 use work.video_timing_pkg.all;
 use work.video_stream_pkg.all;
 use work.core_pkg.all;
+use work.magma_pkg.all;
 use work.all;
 
 architecture magma of program_top is
-    constant C_LAT : integer := 20;
+    constant C_LAT : integer := 28;   -- matches processing_delay_clks
 
-    function f_vstep_x(t : std_logic_vector(3 downto 0)) return unsigned is
+    -- per-timing-ID constants
+    -- kx: spline cells (36 virtual px) per pixel, Q16; c0: cell coordinate of pixel 0, Q16
+    function f_kx(t : std_logic_vector(3 downto 0)) return unsigned is
     begin
         case to_integer(unsigned(t)) is
-            when 0 | 4 | 8 | 12 => return to_unsigned(4, 3);
-            when 5 | 6 | 14     => return to_unsigned(3, 3);
-            when others         => return to_unsigned(2, 3);
+            when 0 | 4 | 8 | 12 => return to_unsigned(3641, 12);
+            when 5 | 6 | 14     => return to_unsigned(2731, 12);
+            when others         => return to_unsigned(1820, 12);
         end case;
     end function;
-    function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
+    function f_c0(t : std_logic_vector(3 downto 0)) return unsigned is
     begin
         case to_integer(unsigned(t)) is
-            when 0          => return to_unsigned(1138, 12);
-            when 4          => return to_unsigned(576, 12);
-            when 8          => return to_unsigned(960, 12);
-            when 12         => return to_unsigned(480, 12);
-            when 5 | 6 | 14 => return to_unsigned(384, 12);
-            when 1 | 2 | 10 => return to_unsigned(512, 12);
-            when others     => return to_unsigned(256, 12);
+            when 0 | 4 | 8 | 12 => return to_unsigned(469675, 23);
+            when others         => return to_unsigned(32768, 23);
         end case;
     end function;
-    -- triangle of an 8-bit phase -> 7 bits
-    function f_tri8(v : unsigned(7 downto 0)) return unsigned is
+    -- ky: cells per line, Q16
+    function f_ky(t : std_logic_vector(3 downto 0)) return unsigned is
     begin
-        if v(7) = '1' then return not v(6 downto 0); else return v(6 downto 0); end if;
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(8091, 14);
+            when 4          => return to_unsigned(4096, 14);
+            when 8          => return to_unsigned(6827, 14);
+            when 12         => return to_unsigned(3413, 14);
+            when 5 | 6 | 14 => return to_unsigned(2731, 14);
+            when 1 | 2 | 10 => return to_unsigned(3641, 14);
+            when others     => return to_unsigned(1820, 14);
+        end case;
     end function;
-    -- clamp a 13-bit signed value into the 64 .. 960 video range
-    function f_clamp(v : signed(12 downto 0)) return unsigned is
+    -- vq: virtual lines per line, Q8
+    function f_vq(t : std_logic_vector(3 downto 0)) return unsigned is
     begin
-        if v < 64 then return to_unsigned(64, 10);
-        elsif v > 960 then return to_unsigned(960, 10);
-        else return unsigned(v(9 downto 0)); end if;
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(1138, 11);
+            when 4          => return to_unsigned(576, 11);
+            when 8          => return to_unsigned(960, 11);
+            when 12         => return to_unsigned(480, 11);
+            when 5 | 6 | 14 => return to_unsigned(384, 11);
+            when 1 | 2 | 10 => return to_unsigned(512, 11);
+            when others     => return to_unsigned(256, 11);
+        end case;
     end function;
-    -- saturate a 9-bit unsigned to 8 bits
-    function f_sat8(v : unsigned(8 downto 0)) return unsigned is
+    -- ksl: pocket slots (44 virtual lines) per line, Q16
+    function f_ksl(t : std_logic_vector(3 downto 0)) return unsigned is
     begin
-        if v(8) = '1' then return x"FF"; else return v(7 downto 0); end if;
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(6620, 13);
+            when 4          => return to_unsigned(3351, 13);
+            when 8          => return to_unsigned(5585, 13);
+            when 12         => return to_unsigned(2793, 13);
+            when 5 | 6 | 14 => return to_unsigned(2234, 13);
+            when 1 | 2 | 10 => return to_unsigned(2979, 13);
+            when others     => return to_unsigned(1489, 13);
+        end case;
+    end function;
+    -- mode class: 0 = 1080, 1 = 720p, 2 = SD
+    function f_cls(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0 | 4 | 8 | 12 => return to_unsigned(2, 2);
+            when 5 | 6 | 14     => return to_unsigned(1, 2);
+            when others         => return to_unsigned(0, 2);
+        end case;
+    end function;
+    -- Osc spatial steps (Q16 cycles per pixel / per line)
+    function f_kax(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0 | 4 | 8 | 12 => return to_unsigned(89, 9);
+            when 5 | 6 | 14     => return to_unsigned(67, 9);
+            when others         => return to_unsigned(44, 9);
+        end case;
+    end function;
+    function f_kay(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(270, 9);
+            when 4          => return to_unsigned(137, 9);
+            when 8          => return to_unsigned(228, 9);
+            when 12         => return to_unsigned(114, 9);
+            when 5 | 6 | 14 => return to_unsigned(91, 9);
+            when 1 | 2 | 10 => return to_unsigned(121, 9);
+            when others     => return to_unsigned(61, 9);
+        end case;
+    end function;
+    -- triangle of a 16-bit phase -> signed -127..127
+    function f_tri(p : unsigned(15 downto 0)) return signed is
+        variable v : unsigned(15 downto 0);
+    begin
+        if p(15) = '1' then v := p - 32768; else v := 32768 - p; end if;
+        return to_signed(127, 9) - signed(resize(v(15 downto 7), 9));
+    end function;
+    -- 16-bit Galois LFSR step (taps 0xB400)
+    function f_lstep(s : unsigned(15 downto 0)) return unsigned is
+    begin
+        if s(0) = '1' then return ('0' & s(15 downto 1)) xor x"B400";
+        else return '0' & s(15 downto 1); end if;
     end function;
 
-    -- line buffer {y, u, v, 00} (read/write can collide: read-before-write kept)
-    type t_lb is array (0 to 2047) of std_logic_vector(31 downto 0);
-    signal lb : t_lb := (others => "0001000000" & "1000000000" & "1000000000" & "00");
-    signal s_lb_wa, s_lb_ra : unsigned(10 downto 0) := (others => '0');
-    signal s_lb_wd : std_logic_vector(31 downto 0) := (others => '0');
-    signal s_lb_we : std_logic := '0';
-    signal s_lb_q  : std_logic_vector(31 downto 0) := "0001000000" & "1000000000" & "1000000000" & "00";
+    -- timing
+    signal t_kx   : unsigned(11 downto 0) := to_unsigned(1820, 12);
+    signal t_c0   : unsigned(22 downto 0) := to_unsigned(32768, 23);
+    signal t_ky   : unsigned(13 downto 0) := to_unsigned(1820, 14);
+    signal t_vq   : unsigned(10 downto 0) := to_unsigned(256, 11);
+    signal t_ksl  : unsigned(12 downto 0) := to_unsigned(1489, 13);
+    signal t_cls  : unsigned(1 downto 0) := (others => '0');
+    signal t_i0   : unsigned(5 downto 0) := (others => '0');
+    signal t_kay : unsigned(8 downto 0) := (others => '0');
+    signal t_b8   : std_logic := '0';   -- 720p / SD: the short chroma box
 
-    -- internal oscillator source (Source = Osc)
-    signal s_src : std_logic := '0';
-    signal s_ox : unsigned(11 downto 0) := (others => '0');
-    signal s_oy : unsigned(11 downto 0) := (others => '0');
-    signal s_ot : unsigned(7 downto 0) := (others => '0');
-    signal s_oty, s_otu, s_otv : unsigned(9 downto 0) := to_unsigned(512, 10);
-
-    -- timing / controls
-    signal s_xs : unsigned(2 downto 0) := to_unsigned(2, 3);
-    signal s_ys : unsigned(11 downto 0) := to_unsigned(256, 12);
+    -- zone / width
     signal s_idle : unsigned(9 downto 0) := (others => '0');
     signal s_zone, s_zone_d, s_zgo : std_logic := '0';
-    signal s_zc : unsigned(6 downto 0) := (others => '0');
+    signal s_zc : unsigned(9 downto 0) := (others => '0');
     signal s_avq : std_logic := '0';
-    signal s_hcnt, s_wmax, s_w, s_wm1 : unsigned(11 downto 0) := to_unsigned(1920, 12);
-    signal s_vw : unsigned(11 downto 0) := to_unsigned(1920, 12);
-    signal s_p12 : unsigned(9 downto 0) := (others => '0');
-    signal s_gdiff : signed(12 downto 0) := (others => '0');
-    signal s_g : unsigned(11 downto 0) := (others => '0');
-    -- serial multiplier (12 steps)
-    signal s_ma : unsigned(23 downto 0) := (others => '0');
-    signal s_mb : unsigned(11 downto 0) := (others => '0');
-    signal s_macc : unsigned(23 downto 0) := (others => '0');
-    signal s_mi : unsigned(3 downto 0) := (others => '0');
-    signal s_mrun : std_logic := '0';
-    signal s_mjob : unsigned(2 downto 0) := (others => '0');
-    signal s_lfsr : unsigned(15 downto 0) := x"ACE1";
+    signal s_hcnt, s_wmax, s_w : unsigned(11 downto 0) := to_unsigned(1920, 12);
+    signal s_half : unsigned(10 downto 0) := to_unsigned(959, 11);
+
+    -- glides: K1, K2, P12 (Q.3), power up at the defaults; K4..K6 are field-latched raw
+    type t_g is array(0 to 2) of unsigned(12 downto 0);
+    signal s_g : t_g := (to_unsigned(512 * 8, 13), to_unsigned(512 * 8, 13), to_unsigned(512 * 8, 13));
+    signal gl_k, gl_o, gl_n : unsigned(12 downto 0) := (others => '0');
+    signal gl_d : signed(13 downto 0) := (others => '0');
+    signal gl_w : std_logic := '0';
+    signal q_gon : std_logic := '0';
+    signal q_gi : unsigned(2 downto 0) := (others => '0');
+    signal q_gph : unsigned(1 downto 0) := (others => '0');
+
+    -- per-field serial products
+    signal q_p : unsigned(4 downto 0) := (others => '0');
+    signal q_ld, q_st : std_logic := '0';
+    signal q_wr : std_logic_vector(2 to 5) := (others => '0');
+    signal m_a  : unsigned(19 downto 0) := (others => '0');
+    signal m_b  : unsigned(9 downto 0) := (others => '0');
+    signal m_h  : unsigned(19 downto 0) := (others => '0');
+    signal m_l  : unsigned(9 downto 0) := (others => '0');
+
+    -- per-field values
+    signal f_ks9   : unsigned(9 downto 0) := to_unsigned(512, 10);
+    signal f_fan9  : unsigned(9 downto 0) := to_unsigned(512, 10);
+    signal f_spm   : unsigned(8 downto 0) := (others => '0');     -- |K3 - 512| - 8
+    signal f_sneg  : std_logic := '0';
+    signal f_spd   : unsigned(10 downto 0) := (others => '0');    -- Q16 cycles per field
+    signal f_drift : unsigned(15 downto 0) := (others => '0');
+    signal f_k4    : unsigned(9 downto 0) := to_unsigned(512, 10);
+    signal f_po    : signed(8 downto 0) := (others => '0');            -- pocket offset, Q7
+    signal f_m5    : unsigned(4 downto 0) := to_unsigned(12, 5);
+    signal f_b9    : unsigned(10 downto 0) := to_unsigned(512, 11);  -- band slope ks * fan, Q9
+    signal f_qq    : unsigned(9 downto 0) := (others => '0');
+    signal f_al    : signed(18 downto 0) := (others => '0');          -- band offset, Q24
+    signal f_fpos  : std_logic := '0';
+    signal f_ssh   : signed(10 downto 0) := (others => '0');
+    signal f_off5  : signed(7 downto 0) := (others => '0');
+    signal f_hc8   : unsigned(6 downto 0) := (others => '0');
+    signal f_lph   : unsigned(15 downto 0) := (others => '0');
+    signal f_lfo5  : signed(3 downto 0) := (others => '0');
+    signal f_sl0   : unsigned(23 downto 0) := (others => '0');
+    signal f_sd    : unsigned(15 downto 0) := x"ACE1";
+    signal f_ep    : unsigned(2 downto 0) := (others => '0');
+    signal f_tb : unsigned(15 downto 0) := (others => '0');
+    signal f_flat, f_norip, f_mir, f_ice, f_osc : std_logic := '0';
 
     -- generated avid
     signal g_hsq, g_hsr, g_avq, g_avr : std_logic := '0';
-    signal g_ph, g_arm, g_par, g_sel, g_avid, g_start : std_logic := '0';
+    signal g_ph, g_arm, g_par, g_sel, g_avid : std_logic := '0';
     signal g_pc  : unsigned(3 downto 0) := to_unsigned(8, 4);
     signal g_rsr : std_logic_vector(2 downto 0) := (others => '0');
     signal g_cnt : unsigned(11 downto 0) := (others => '0');
     signal g_wm1 : unsigned(11 downto 0) := to_unsigned(1919, 12);
+    signal g_start : std_logic := '0';
 
-    -- source side / per line
-    signal s_wcol : unsigned(10 downto 0) := (others => '0');
-    signal s_fall1, s_fall2 : std_logic := '0';
-    signal s_vy_n : unsigned(19 downto 0) := (others => '0');
+    -- per-line engine: one MAC lane, the three fields in turn; writes cell-boundary values
+    -- B[i] = (D[i] + D[i+1]) / 2 of the line's knot row (FR Q7, BG Q8, GB Q7)
+    signal e_V    : unsigned(21 downto 0) := (others => '0');     -- Q16 cells
+    signal e_vl   : unsigned(18 downto 0) := (others => '0');     -- Q8 virtual lines
+    signal e_sl   : unsigned(23 downto 0) := (others => '0');     -- Q16 slots
+    signal e_ln   : unsigned(10 downto 0) := (others => '0');
+    signal e_seed : unsigned(15 downto 0) := x"ACE1";
+    signal e_k5   : unsigned(2 downto 0) := (others => '0');
+    signal e_wbk  : std_logic := '0';
+    signal e_st   : unsigned(3 downto 0) := (others => '0');
+    signal e_oi   : unsigned(5 downto 0) := (others => '0');
+    signal e_iss  : std_logic := '0';
+    signal e_i    : unsigned(5 downto 0) := (others => '0');
+    signal e_r, e_f : unsigned(1 downto 0) := (others => '0');
+    signal e_j    : unsigned(5 downto 0) := (others => '0');
+    signal e_t8   : unsigned(7 downto 0) := (others => '0');
+    signal e_t2   : unsigned(15 downto 0) := (others => '0');
+    signal e_tq   : unsigned(7 downto 0) := (others => '0');
+    signal e_tm   : unsigned(15 downto 0) := (others => '0');
+    signal e_base : unsigned(10 downto 0) := (others => '0');
+    signal e_abi  : unsigned(10 downto 0) := (others => '0');
+    signal e_w0, e_w1, e_w2 : unsigned(8 downto 0) := (others => '0');
+    signal r_ca   : unsigned(10 downto 0) := (others => '0');
+    signal cs_q, cs_q2 : std_logic_vector(19 downto 0) := (others => '0');
+    type t_u2a is array (natural range <>) of unsigned(1 downto 0);
+    type t_u6a is array (natural range <>) of unsigned(5 downto 0);
+    signal e_tv : std_logic_vector(0 to 5) := (others => '0');
+    signal e_tr, e_tf : t_u2a(0 to 5) := (others => (others => '0'));
+    signal e_cv : signed(7 downto 0) := (others => '0');
+    signal e_wc : unsigned(8 downto 0) := (others => '0');
+    signal e_ph, e_pl : signed(13 downto 0) := (others => '0');
+    signal e_p  : signed(17 downto 0) := (others => '0');
+    signal e_aa, e_ab, e_ac : signed(17 downto 0) := (others => '0');
+    signal e_dv : std_logic := '0';
+    signal e_df : unsigned(1 downto 0) := (others => '0');
+    signal e_d  : signed(10 downto 0) := (others => '0');
+    signal e_da, e_db : signed(10 downto 0) := (others => '0');   -- this knot's FR, BG
+    signal e_pa, e_pb, e_pc : signed(10 downto 0) := (others => '0');   -- previous knot's D
 
-    -- pixel path
-    type t_u10 is array (natural range <>) of unsigned(9 downto 0);
-    type t_u11 is array (natural range <>) of unsigned(10 downto 0);
-    type t_u8 is array (natural range <>) of unsigned(7 downto 0);
-    type t_sl is array (natural range <>) of std_logic;
-    signal s_bcol : unsigned(10 downto 0) := (others => '0');
-    signal s_y12, s_u12, s_v12 : unsigned(9 downto 0) := to_unsigned(64, 10);
+    -- per-line scalars: fl = alpha + beta * T(v); ph0 = fl * (247 + u0) (one serial multiplier)
+    signal p_st  : unsigned(5 downto 0) := (others => '0');
+    signal p_idx : unsigned(8 downto 0) := (others => '0');
+    signal p_ids : unsigned(7 downto 0) := (others => '0');
+    signal r_fy  : unsigned(8 downto 0) := (others => '0');
+    signal r_fa  : unsigned(7 downto 0) := (others => '0');
+    signal fy_q, fy_q2 : std_logic_vector(16 downto 0) := (others => '0');
+    signal fp_q, fp_q2 : std_logic_vector(25 downto 0) := (others => '0');
+    signal p_fl  : unsigned(17 downto 0) := (others => '0');     -- Q24 cycles / virtual px
+    signal u_a  : signed(18 downto 0) := (others => '0');
+    signal u_b  : unsigned(10 downto 0) := (others => '0');
+    signal u_h  : signed(19 downto 0) := (others => '0');
+    signal u_l  : unsigned(10 downto 0) := (others => '0');
+    -- next-line values, handed to the line registers at hsync
+    signal n_dph : unsigned(14 downto 0) := (others => '0');
+    signal n_ph0 : unsigned(23 downto 0) := (others => '0');
+    signal n_po  : signed(8 downto 0) := (others => '0');
+    signal n_gc, n_kg : unsigned(7 downto 0) := (others => '0');
+    signal n_f07 : signed(7 downto 0) := (others => '0');
+    signal n_sl  : unsigned(12 downto 0) := (others => '0');
+    signal n_bank : std_logic := '0';
+    signal l_dph : unsigned(14 downto 0) := (others => '0');
+    signal l_ph0 : unsigned(23 downto 0) := (others => '0');
+    signal l_po  : signed(8 downto 0) := (others => '0');
+    signal l_gc, l_kg, l_bm : unsigned(7 downto 0) := (others => '0');
+    signal l_f07 : signed(7 downto 0) := (others => '0');
+    signal l_off : unsigned(3 downto 0) := (others => '0');
+    signal l_sl  : unsigned(12 downto 0) := (others => '0');
+    signal l_bank : std_logic := '0';
+    signal l_pb  : unsigned(15 downto 0) := (others => '0');
+
+    -- cell-boundary RAM (ping-pong by line): {FR Q7 11 | BG Q8 10 | GB Q7 9}
+    type t_kr is array (0 to 127) of std_logic_vector(29 downto 0);
+    signal kr_ram : t_kr := (others => (others => '0'));
+    signal t_we : std_logic := '0';
+    signal t_wa : unsigned(6 downto 0) := (others => '0');
+    signal t_wd : std_logic_vector(29 downto 0) := (others => '0');
+    signal kr_ra : unsigned(6 downto 0) := (others => '0');
+    signal kr_q, kr_q2 : std_logic_vector(29 downto 0) := (others => '0');
+    attribute no_rw_check : boolean;
+    attribute no_rw_check of kr_ram : signal is true;
+    signal s_pl : unsigned(2 downto 0) := (others => '0');
+
+    -- ROM ports
+    signal r_wa : unsigned(7 downto 0) := (others => '0');
+    signal wv_q, wv_q2 : std_logic_vector(7 downto 0) := (others => '0');
+    signal r_pa : unsigned(9 downto 0) := (others => '0');
+    signal pk_q, pk_q2 : std_logic_vector(7 downto 0) := (others => '0');
+
+    -- beam
+    signal b_c  : unsigned(22 downto 0) := (others => '0');       -- Q16 cells
+    signal b_ph : unsigned(23 downto 0) := (others => '0');       -- Q19 band phase
+
+    -- video tap
+    type t_u8v is array (natural range <>) of unsigned(7 downto 0);
+    signal s_vy : t_u8v(1 to 2) := (others => to_unsigned(128, 8));
+    signal s_vs : signed(9 downto 0) := (others => '0');
+
+    -- window (stage 2): cell-boundary values B[ci], B[ci + 1]
+    signal w0, w1 : std_logic_vector(29 downto 0) := (others => '0');
+
+    -- pixel path (stage N = N registers after the beam)
+    signal q1_ci : unsigned(6 downto 0) := (others => '0');
+    signal q1_x  : std_logic := '0';
+    signal q1_sf, q2_sf : unsigned(7 downto 0) := (others => '0');
+    signal q1_ph : unsigned(23 downto 0) := (others => '0');
+    signal q1_osc, q2_src, q3_src : signed(9 downto 0) := (others => '0');
+    signal q2_phj : unsigned(7 downto 0) := (others => '0');
+    signal q2_n5 : unsigned(4 downto 0) := (others => '0');
+    signal q2_fq : unsigned(7 downto 0) := (others => '0');
+    signal q3_a0, q3_a1 : signed(10 downto 0) := (others => '0');   -- FR B0, B1 - B0 (Q7)
+    signal q3_b0, q3_b1 : signed(9 downto 0) := (others => '0');    -- BG (Q8)
+    signal q3_c0, q3_c1 : signed(8 downto 0) := (others => '0');    -- GB (Q7)
+    signal q3_s5 : unsigned(4 downto 0) := (others => '0');
+    signal q3_s4 : unsigned(3 downto 0) := (others => '0');
+    signal q3_n5 : unsigned(4 downto 0) := (others => '0');
+    signal q3_ro, q3_d : unsigned(7 downto 0) := (others => '0');
+    signal q4_ap : signed(16 downto 0) := (others => '0');
+    signal q4_bp : signed(14 downto 0) := (others => '0');
+    signal q4_cp : signed(13 downto 0) := (others => '0');
+    signal q4_a0 : signed(10 downto 0) := (others => '0');
+    signal q4_b0 : signed(9 downto 0) := (others => '0');
+    signal q4_c0 : signed(8 downto 0) := (others => '0');
+    signal q4_fy, q4_hx : unsigned(7 downto 0) := (others => '0');
+    signal q4_m  : signed(15 downto 0) := (others => '0');
+    signal q5_fr : signed(10 downto 0) := (others => '0');
+    signal q5_bg : signed(9 downto 0) := (others => '0');
+    signal q5_gb : signed(8 downto 0) := (others => '0');
+    signal q5_hx, q5_vy, q6_sh : unsigned(7 downto 0) := (others => '0');
+    signal q5_mt : signed(9 downto 0) := (others => '0');
+    signal q6_s, q7_s, q8_s, q9_s : signed(11 downto 0) := (others => '0');
+    signal q7_a : signed(7 downto 0) := (others => '0');
+    signal q6_frt : signed(9 downto 0) := (others => '0');
+    signal q6_gb, q7_gb : signed(8 downto 0) := (others => '0');
+    signal q7_sh : unsigned(7 downto 0) := (others => '0');
+    signal q7_kb : unsigned(3 downto 0) := (others => '0');
+    signal q7_h : unsigned(6 downto 0) := (others => '0');
+    signal q8_hcp : unsigned(13 downto 0) := (others => '0');
+    signal q8_gb : signed(8 downto 0) := (others => '0');
+    signal q9_gk : unsigned(7 downto 0) := (others => '0');
+    type t_u5a is array (natural range <>) of unsigned(4 downto 0);
+    type t_u4a is array (natural range <>) of unsigned(3 downto 0);
+    signal s_kbd : t_u4a(1 to 7) := (others => (others => '0'));
+    signal q8_ta : signed(8 downto 0) := (others => '0');
+    signal q9_pk : signed(12 downto 0) := (others => '0');
+    signal q10_f, q11_f, q12_f, q13_f : signed(12 downto 0) := (others => '0');
+    signal q11_tr : unsigned(7 downto 0) := (others => '0');
+    signal q11_g, q11_c : std_logic := '0';
+    signal q12_rp : signed(8 downto 0) := (others => '0');
+    signal q14_xr : signed(13 downto 0) := (others => '0');
+    signal q14_bp : signed(13 downto 0) := (others => '0');
+    signal q14_dg : unsigned(6 downto 0) := (others => '0');
+    signal q15_r, q15_b, q16_r, q16_b, q16_g : unsigned(7 downto 0) := (others => '0');
+    signal q15_gp : unsigned(14 downto 0) := (others => '0');
+    type t_u8a is array (natural range <>) of unsigned(7 downto 0);
+    signal s_gk : t_u8a(10 to 16) := (others => (others => '0'));
+    signal s_kr : t_u4a(9 to 16) := (others => (others => '0'));
+    signal s_kbl : t_u4a(8 to 16) := (others => (others => '0'));
+    signal q17_rm, q17_bm : unsigned(11 downto 0) := (others => '0');
+    signal q17_gm : signed(12 downto 0) := (others => '0');
+    signal q17_r, q17_g, q17_b : unsigned(7 downto 0) := (others => '0');
+    signal q18_r, q18_g, q18_b : unsigned(7 downto 0) := (others => '0');
+    signal q19_yrg, q19_ugb, q19_vrg : unsigned(16 downto 0) := (others => '0');
+    signal q19_yb, q19_ur, q19_vb : unsigned(15 downto 0) := (others => '0');
+    signal q20_y : unsigned(16 downto 0) := (others => '0');
+    signal q20_u, q20_v : signed(17 downto 0) := (others => '0');
+    signal q21_y : unsigned(9 downto 0) := to_unsigned(64, 10);
+    signal q21_u, q21_v : unsigned(9 downto 0) := to_unsigned(512, 10);
     -- output conditioning
-    signal s_csu, s_csv : t_u10(0 to 8) := (others => to_unsigned(512, 10));
-    signal s_boxu, s_boxv, s_boxud, s_boxvd : unsigned(13 downto 0) := to_unsigned(4096, 14);
-    signal s_y13, s_y14, s_y15, s_y16, s_y17, s_y18x, s_yf18 : unsigned(9 downto 0) := to_unsigned(64, 10);
-    signal s_u18, s_v18 : unsigned(9 downto 0) := to_unsigned(512, 10);
-    signal s_y19, s_y20 : unsigned(9 downto 0) := to_unsigned(64, 10);
-    signal s_u19, s_v19, s_u20, s_v20 : unsigned(9 downto 0) := to_unsigned(512, 10);
+    type t_u10a is array (natural range <>) of unsigned(9 downto 0);
+    type t_ring is array (0 to 255) of std_logic_vector(19 downto 0);
+    signal rb_ram : t_ring := (others => "1000000000" & "1000000000");
+    attribute no_rw_check of rb_ram : signal is true;
+    signal rb_ra : unsigned(7 downto 0) := (others => '0');
+    signal rb_wd : std_logic_vector(19 downto 0) := "1000000000" & "1000000000";
+    signal rb_q, rb_q2 : std_logic_vector(19 downto 0) := "1000000000" & "1000000000";
+    signal s_u8, s_v8, s_u8p, s_v8p : unsigned(12 downto 0) := to_unsigned(4096, 13);
+    signal s_y1, s_y2 : unsigned(9 downto 0) := to_unsigned(64, 10);
+    signal s_yf : t_u10a(23 to 27) := (others => to_unsigned(64, 10));
+    signal q28_y : unsigned(9 downto 0) := to_unsigned(64, 10);
+    signal q28_u, q28_v : unsigned(9 downto 0) := to_unsigned(512, 10);
+    -- sync ring
+    type t_sring is array (0 to 255) of std_logic_vector(2 downto 0);
+    signal rs_ram : t_sring := (others => "111");
+    attribute no_rw_check of rs_ram : signal is true;
+    signal s_wp, rs_ra : unsigned(7 downto 0) := (others => '0');
+    signal rs_q, rs_q2 : std_logic_vector(2 downto 0) := "111";
 
     type t_bit_shift is array (0 to C_LAT - 1) of std_logic;
-    signal s_hsync_sr : t_bit_shift := (others => '1');
-    signal s_vsync_sr : t_bit_shift := (others => '1');
-    signal s_field_sr : t_bit_shift := (others => '1');
-    signal s_gav_sr   : t_bit_shift := (others => '0');
-
-    -- horizontal IIR smear state (the smeared pixel)
-    signal s_z : unsigned(2 downto 0) := (others => '0');
-    signal s_lumonly : std_logic := '0';
-    signal s_sy : unsigned(9 downto 0) := to_unsigned(64, 10);
-    signal s_su, s_sv : unsigned(9 downto 0) := to_unsigned(512, 10);
-    type t_key is record
-        i, y, u, v : integer;
-    end record;
-    type t_keys is array (natural range <>) of t_key;
-    constant C_KA : t_keys := ((0, 678, 64, 663), (64, 164, 440, 960), (128, 426, 887, 808), (192, 840, 584, 64), (255, 678, 64, 663));
-    constant C_KB : t_keys := ((0, 580, 136, 216), (85, 584, 772, 212), (170, 349, 756, 852), (255, 580, 136, 216));
-    type t_pal is array (0 to 511) of std_logic_vector(31 downto 0);
-    function f_lerp(a, b, t, n : integer) return integer is
-    begin
-        return a + ((b - a) * t) / n;
-    end function;
-    function f_seg(k : t_keys; i : integer; c : integer) return integer is
-        variable r : integer := 0;
-        variable a, b : integer;
-    begin
-        for s in 0 to k'length - 2 loop
-            if i >= k(s).i and i <= k(s + 1).i then
-                if c = 0 then a := k(s).y; b := k(s + 1).y;
-                elsif c = 1 then a := k(s).u; b := k(s + 1).u;
-                else a := k(s).v; b := k(s + 1).v; end if;
-                r := f_lerp(a, b, i - k(s).i, k(s + 1).i - k(s).i);
-            end if;
-        end loop;
-        return r;
-    end function;
-    function f_pal return t_pal is
-        variable r : t_pal;
-    begin
-        for i in 0 to 255 loop
-            r(i) := std_logic_vector(to_unsigned(f_seg(C_KA, i, 0), 10)) & std_logic_vector(to_unsigned(f_seg(C_KA, i, 1), 10))
-                    & std_logic_vector(to_unsigned(f_seg(C_KA, i, 2), 10)) & "00";
-            r(256 + i) := std_logic_vector(to_unsigned(f_seg(C_KB, i, 0), 10)) & std_logic_vector(to_unsigned(f_seg(C_KB, i, 1), 10))
-                    & std_logic_vector(to_unsigned(f_seg(C_KB, i, 2), 10)) & "00";
-        end loop;
-        return r;
-    end function;
-    signal pal : t_pal := f_pal;
-    signal s_pal_ra : unsigned(8 downto 0) := (others => '0');
-    signal s_pal_q : std_logic_vector(31 downto 0) := (others => '0');
-    signal s_hue : unsigned(7 downto 0) := (others => '0');
-    signal s_fo : unsigned(5 downto 0) := to_unsigned(4, 6);
-    signal s_k4 : unsigned(9 downto 0) := to_unsigned(512, 10);
-    signal s_ax : unsigned(10 downto 0) := to_unsigned(960, 11);
-    signal s_ax2 : unsigned(11 downto 0) := to_unsigned(1920, 12);
-    signal s_spd : signed(6 downto 0) := (others => '0');
-    signal s_cg : unsigned(8 downto 0) := to_unsigned(128, 9);
-    signal s_thr : unsigned(7 downto 0) := to_unsigned(200, 8);
-    signal s_ph : unsigned(7 downto 0) := (others => '0');
-    signal s_mir, s_pal, s_outl, s_post : std_logic := '0';
-    signal s_foy : unsigned(9 downto 0) := to_unsigned(4, 10);
-    -- per line
-    signal s_rsd_n, s_rsd : unsigned(10 downto 0) := (others => '0');
-    -- beam
-    signal s_ru, s_rd : unsigned(10 downto 0) := (others => '0');
-    -- pixel stages
-    signal s_y3, s_u3, s_v3 : unsigned(9 downto 0) := to_unsigned(64, 10);
-    signal s_lvl5 : unsigned(9 downto 0) := (others => '0');
-    signal s_p6 : unsigned(18 downto 0) := (others => '0');
-    signal s_l8 : t_u8(5 to 7) := (others => (others => '0'));
-    signal s_idx7 : unsigned(7 downto 0) := (others => '0');
-    signal s_red : t_sl(7 to 10) := (others => '0');
-    signal s_py10, s_pu10, s_pv10 : unsigned(9 downto 0) := to_unsigned(64, 10);
-    signal s_y11, s_u11, s_v11 : unsigned(9 downto 0) := to_unsigned(64, 10);
+    signal s_gav_sr : t_bit_shift := (others => '0');   -- s_gav_sr(k) = generated avid of the stage-(k+1) pixel
 
 begin
 
     ---------------------------------------------------------------------------
-    -- Line buffer
+    -- ROMs, the knot RAM, the sync ring
     ---------------------------------------------------------------------------
-    p_lb : process(clk)
+    p_crom : process(clk)
     begin
         if rising_edge(clk) then
-            s_lb_q <= lb(to_integer(s_lb_ra));
-            if s_lb_we = '1' then lb(to_integer(s_lb_wa)) <= s_lb_wd; end if;
+            cs_q <= C_CS(to_integer(r_ca));
+            fp_q <= C_FP(to_integer(r_fa));
+            fy_q <= C_FY(to_integer(r_fy));
         end if;
-    end process p_lb;
+    end process p_crom;
 
-    p_pal : process(clk)
+    p_prom : process(clk)
     begin
         if rising_edge(clk) then
-            s_pal_q <= pal(to_integer(s_pal_ra));
+            wv_q <= C_WV(to_integer(r_wa));
+            pk_q <= C_PK(to_integer(r_pa));
         end if;
-    end process p_pal;
+    end process p_prom;
+
+    p_kr : process(clk)
+    begin
+        if rising_edge(clk) then
+            if t_we = '1' then kr_ram(to_integer(t_wa)) <= t_wd; end if;
+            kr_q <= kr_ram(to_integer(kr_ra));
+        end if;
+    end process p_kr;
+
+    p_ring : process(clk)
+    begin
+        if rising_edge(clk) then
+            rb_ram(to_integer(s_wp)) <= rb_wd;
+            rb_q <= rb_ram(to_integer(rb_ra));
+            rb_q2 <= rb_q;
+        end if;
+    end process p_ring;
+
+    p_sring : process(clk)
+    begin
+        if rising_edge(clk) then
+            rs_ram(to_integer(s_wp)) <= data_in.hsync_n & data_in.vsync_n & data_in.field_n;
+            rs_q <= rs_ram(to_integer(rs_ra));
+            rs_q2 <= rs_q;
+        end if;
+    end process p_sring;
 
     ---------------------------------------------------------------------------
-    -- Controls, vblank zone, per-field latches, serial products
+    -- Controls, vblank zone, glides, per-field values
     ---------------------------------------------------------------------------
     p_ctrl : process(clk)
-        variable v_k : unsigned(9 downto 0);
-        variable v_s : signed(10 downto 0);
-        variable v_g : signed(12 downto 0);
-        variable v_vw : unsigned(13 downto 0);
-
+        variable v_x  : signed(10 downto 0);
+        variable v_u  : unsigned(10 downto 0);
+        variable v_ng : signed(13 downto 0);
+        variable v_p  : integer range 0 to 31;
+        variable v_ph : integer range 0 to 31;
+        variable v_s  : unsigned(20 downto 0);
+        variable v_pr : unsigned(29 downto 0);
+        variable v_k  : unsigned(9 downto 0);
+        variable v_t  : unsigned(15 downto 0);
+        variable v_tr : signed(10 downto 0);
+        variable v_q  : unsigned(22 downto 0);
     begin
         if rising_edge(clk) then
-            s_xs <= f_vstep_x(registers_in(8)(3 downto 0));
-            s_ys <= f_vstep_y(registers_in(8)(3 downto 0));
+            t_kx  <= f_kx(registers_in(8)(3 downto 0));
+            t_c0  <= f_c0(registers_in(8)(3 downto 0));
+            t_ky  <= f_ky(registers_in(8)(3 downto 0));
+            t_vq  <= f_vq(registers_in(8)(3 downto 0));
+            t_ksl <= f_ksl(registers_in(8)(3 downto 0));
+            t_cls <= f_cls(registers_in(8)(3 downto 0));
+            t_kay <= f_kay(registers_in(8)(3 downto 0));
+            if t_cls = 0 then t_b8 <= '0'; else t_b8 <= '1'; end if;
+            t_i0 <= t_c0(21 downto 16);
 
             -- vblank zone: no avid for 1024 clocks
             if data_in.avid = '1' then
@@ -265,7 +499,7 @@ begin
             s_zgo <= s_zone and not s_zone_d;
             if s_zone = '0' then
                 s_zc <= (others => '0');
-            elsif s_zc /= 127 then
+            elsif s_zc /= 1023 then
                 s_zc <= s_zc + 1;
             end if;
 
@@ -277,78 +511,132 @@ begin
                 if s_hcnt > s_wmax then s_wmax <= s_hcnt; end if;
                 s_hcnt <= (others => '0');
             end if;
+            g_wm1 <= s_w - 1;
+            s_half <= s_w(11 downto 1) - 1;
 
-            -- knobs (free-running decode)
-            s_z <= unsigned(registers_in(0)(9 downto 7));                                -- K1 Streak
-            s_hue <= unsigned(registers_in(1)(9 downto 2));                              -- K2 Hue
-            s_fo <= resize(unsigned(registers_in(2)(9 downto 5)), 6) + 1;                -- K3 Blobs 1 .. 32
-            s_k4 <= unsigned(registers_in(3));                                           -- K4 Axis
-            v_s := signed(resize(unsigned(registers_in(4)), 11)) - 512;                  -- K5 Speed
-            v_s := shift_right(v_s, 3);
-            if v_s > -1 and v_s < 1 then s_spd <= (others => '0'); else s_spd <= v_s(6 downto 0); end if;
-            s_cg <= to_unsigned(32, 9) + resize(unsigned(registers_in(5)(9 downto 2)), 9);   -- K6 Contrast /128
-
-            s_p12 <= unsigned(registers_in(7));
-            s_gdiff <= signed(resize(s_p12 & "00", 13)) - signed(resize(s_g, 13));
-
-            -- per field
             if s_zgo = '1' then
-                v_g := signed(resize(s_g, 13)) + shift_right(s_gdiff, 3);
-                s_g <= unsigned(v_g(11 downto 0));
                 s_w <= s_wmax; s_wmax <= (others => '0');
-                s_mir  <= registers_in(6)(0);
-                s_pal  <= registers_in(6)(1);
-                s_outl <= registers_in(6)(2);
-                s_post <= registers_in(6)(3);
-                s_src  <= registers_in(6)(4);
-                s_lumonly <= '1';
-                s_thr <= not s_g(11 downto 4);
-                s_ph <= s_ph + unsigned(resize(s_spd, 8));
-
+                -- K3 Flow: bipolar, deadband 8 (raw: the speed shows no ADC noise)
+                v_x := signed(resize(unsigned(registers_in(2)), 11)) - 512;
+                if v_x > 8 then f_sneg <= '0'; v_u := unsigned(v_x) - 8; f_spm <= v_u(8 downto 0);
+                elsif v_x < -8 then f_sneg <= '1'; v_u := unsigned(-v_x) - 8; f_spm <= v_u(8 downto 0);
+                else f_sneg <= '0'; f_spm <= (others => '0'); end if;
+                f_k4  <= unsigned(registers_in(3));
+                f_m5  <= unsigned(registers_in(4)(9 downto 5));                   -- K5 Melt
+                f_ssh <= signed(resize(unsigned(registers_in(5)), 11)) - 512;    -- K6 Sky
+                f_flat  <= registers_in(6)(0);
+                f_norip <= registers_in(6)(1);
+                f_mir   <= registers_in(6)(2);
+                f_ice   <= registers_in(6)(3);
+                f_osc   <= registers_in(6)(4);
+                -- + flow streams the stripes right (phase down)
+                if f_sneg = '1' then f_drift <= f_drift + resize(f_spd, 16);
+                else f_drift <= f_drift - resize(f_spd, 16); end if;
+                f_lph <= f_lph + 121;
+                f_sl0 <= f_sl0 + 447;
+                f_ep <= f_ep + 1;
+                if f_ep = 7 then f_sd <= f_lstep(f_lstep(f_lstep(f_sd))); end if;
+                f_tb <= f_tb - 113;
             end if;
 
-            -- derived (free-running from the latched values)
-            s_wm1 <= s_w - 1;
-            g_wm1 <= s_w - 1;
-            case to_integer(s_xs) is
-                when 4      => v_vw := shift_left(resize(s_w, 14), 1);
-                when 3      => v_vw := resize(s_w, 14) + resize(s_w(11 downto 1), 14);
-                when others => v_vw := resize(s_w, 14);
-            end case;
-            s_vw <= v_vw(11 downto 0);
-            s_ax2 <= shift_left(resize(s_ax, 12), 1);
-
-            -- serial unit (12 shift-add steps per job)
-            if s_zc = 4 then
-                s_ma <= resize(s_w(11 downto 1), 24); s_mb <= resize(s_k4, 12); s_mjob <= "000";
-                s_mrun <= '1'; s_mi <= (others => '0'); s_macc <= (others => '0');
-            elsif s_zc = 24 then
-                s_ma <= resize(s_fo, 24); s_mb <= s_ys; s_mjob <= "001";
-                s_mrun <= '1'; s_mi <= (others => '0'); s_macc <= (others => '0');
-            elsif s_mrun = '1' then
-                if s_mb(0) = '1' then s_macc <= s_macc + s_ma; end if;
-                s_ma <= s_ma(22 downto 0) & '0';
-                s_mb <= '0' & s_mb(11 downto 1);
-                if s_mi = 11 then s_mrun <= '0'; else s_mi <= s_mi + 1; end if;
-            elsif s_mi = 11 then
-                s_mi <= (others => '0');
-                case s_mjob is
-                    when "000"  => s_ax <= resize(s_w(11 downto 2), 11) + resize(s_macc(21 downto 10), 11);
-                    when others => s_foy <= s_macc(17 downto 8);
+            -- glides: ease 1/8 of the gap per field (deadband 4); one channel per four zone clocks (4..27)
+            if s_zone = '1' and s_zc >= 4 and s_zc < 16 then q_gon <= '1'; else q_gon <= '0'; end if;
+            q_gi <= s_zc(4 downto 2) - 1; q_gph <= s_zc(1 downto 0);
+            if q_gon = '1' then
+                case to_integer(q_gph) is
+                    when 0 =>
+                        case to_integer(q_gi) is
+                            when 0 => gl_k <= unsigned(registers_in(0)) & "000"; gl_o <= s_g(0);
+                            when 1 => gl_k <= unsigned(registers_in(1)) & "000"; gl_o <= s_g(1);
+                            when others => gl_k <= unsigned(registers_in(7)) & "000"; gl_o <= s_g(2);
+                        end case;
+                    when 1 =>
+                        gl_d <= signed(resize(gl_k, 14)) - signed(resize(gl_o, 14));
+                    when 2 =>
+                        v_ng := signed(resize(gl_o, 14)) + shift_right(gl_d, 3);
+                        gl_n <= unsigned(v_ng(12 downto 0));
+                        if gl_d > 31 or gl_d < -31 then gl_w <= '1'; else gl_w <= '0'; end if;
+                    when others =>
+                        if gl_w = '1' then
+                            case to_integer(q_gi) is
+                                when 0 => s_g(0) <= gl_n;
+                                when 1 => s_g(1) <= gl_n;
+                                when others => s_g(2) <= gl_n;
+                            end case;
+                        end if;
                 end case;
             end if;
 
-            s_hsync_sr(0) <= data_in.hsync_n; s_vsync_sr(0) <= data_in.vsync_n;
-            s_field_sr(0) <= data_in.field_n; s_gav_sr(0) <= g_avid;
-            for i in 1 to C_LAT - 1 loop
-                s_hsync_sr(i) <= s_hsync_sr(i - 1); s_vsync_sr(i) <= s_vsync_sr(i - 1);
-                s_field_sr(i) <= s_field_sr(i - 1); s_gav_sr(i) <= s_gav_sr(i - 1);
+            -- knob curves (settle long before the sequencers read them)
+            v_k := s_g(0)(12 downto 3);                                   -- K1 Stripes
+            if v_k(9) = '0' then f_ks9 <= to_unsigned(256, 10) + resize(v_k(9 downto 1), 10);
+            else f_ks9 <= v_k; end if;
+            f_fan9 <= s_g(1)(12 downto 3);                                -- K2 Fan
+            f_fpos <= s_g(1)(12);
+            v_k := s_g(2)(12 downto 3);                                   -- P12 Lava
+            -- pocket offset: (K4 - 512) / 4 + (P12 - 512) / 8 (Q7)
+            f_po <= resize(signed(resize(f_k4(9 downto 2), 10)) - 128, 9) + resize(signed(resize(v_k(9 downto 3), 9)) - 64, 9);
+            if v_k(9) = '0' then
+                -- -((512 - p) * 7) >> 5
+                v_u := to_unsigned(512, 11) - resize(v_k, 11);
+                f_off5 <= -signed(resize(shift_right(shift_left(resize(v_u, 14), 3) - resize(v_u, 14), 5), 8));
+                f_hc8 <= (others => '0');
+            else
+                -- ((p - 512) * 9) >> 6
+                v_u := resize(v_k, 11) - 512;
+                f_off5 <= signed(resize(shift_right(shift_left(resize(v_u, 14), 3) + resize(v_u, 14), 6), 8));
+                f_hc8 <= v_u(8 downto 2);
+            end if;
+            -- breathe LFO: triangle of the phase, +-4 Q5 key units
+            if f_lph(15) = '1' then v_t := f_lph - 32768; else v_t := 32768 - f_lph; end if;
+            v_tr := signed(resize(v_t(15 downto 6), 11)) - 256;
+            f_lfo5 <= resize(shift_right(v_tr, 6), 4);
+
+            -- serial products: slot p = zc/32 (2..5), phase 0 load, 1..10 step, 12 store
+            --   2 spd = sp^2 >> 9   3 beta = (ks fan) >> 9
+            --   4 qq = (ks |512 - fan|) >> 9   5 alpha = +-(f0 qq) >> 9
+            v_p  := to_integer(s_zc(9 downto 5));
+            v_ph := to_integer(s_zc(4 downto 0));
+            q_p <= s_zc(9 downto 5);
+            if s_zone = '1' and v_p >= 2 and v_p <= 5 and v_ph = 0 then q_ld <= '1'; else q_ld <= '0'; end if;
+            if s_zone = '1' and v_p >= 2 and v_p <= 5 and v_ph >= 1 and v_ph <= 10 then q_st <= '1'; else q_st <= '0'; end if;
+            for k in 2 to 5 loop
+                if s_zone = '1' and v_p = k and v_ph = 12 then q_wr(k) <= '1'; else q_wr(k) <= '0'; end if;
             end loop;
+            if q_ld = '1' then
+                m_h <= (others => '0'); m_l <= (others => '0');
+                case to_integer(q_p) is
+                    when 2 => m_a <= resize(f_spm, 20); m_b <= resize(f_spm, 10);
+                    when 3 => m_a <= resize(f_ks9, 20); m_b <= f_fan9;
+                    when 4 =>
+                        m_a <= resize(f_ks9, 20);
+                        if f_fpos = '1' then m_b <= f_fan9 - 512; else m_b <= 512 - f_fan9; end if;
+                    when others => m_a <= to_unsigned(96483, 20); m_b <= f_qq;
+                end case;
+            end if;
+            if q_st = '1' then
+                if m_b(0) = '1' then v_s := resize(m_h, 21) + resize(m_a, 21); else v_s := resize(m_h, 21); end if;
+                m_h <= v_s(20 downto 1);
+                m_l <= v_s(0) & m_l(9 downto 1);
+                m_b <= '0' & m_b(9 downto 1);
+            end if;
+            v_pr := m_h & m_l;
+            if q_wr(2) = '1' then f_spd <= resize(v_pr(17 downto 9), 11); end if;      -- sp^2 >> 9
+            if q_wr(3) = '1' then f_b9 <= v_pr(19 downto 9); end if;
+            if q_wr(4) = '1' then f_qq <= v_pr(18 downto 9); end if;
+            if q_wr(5) = '1' then
+                if f_fpos = '1' then f_al <= -signed(resize(v_pr(27 downto 9), 19));
+                else f_al <= signed(resize(v_pr(27 downto 9), 19)); end if;
+            end if;
+
+            s_gav_sr(0) <= g_avid;
+            for i in 1 to C_LAT - 1 loop s_gav_sr(i) <= s_gav_sr(i - 1); end loop;
         end if;
     end process p_ctrl;
 
     ---------------------------------------------------------------------------
-    -- Generated avid (parity-locked start, field-latched width)
+    -- Generated avid (parity-locked start 3/4 clocks after the source's avid
+    -- rise, field-latched width)
     ---------------------------------------------------------------------------
     p_gavid : process(clk)
     begin
@@ -357,6 +645,7 @@ begin
             g_hsr <= g_hsq and not data_in.hsync_n;
             g_avq <= data_in.avid;
             g_avr <= data_in.avid and not g_avq;
+
             if g_hsr = '1' then
                 g_ph  <= '0';
                 g_arm <= '1';
@@ -376,6 +665,7 @@ begin
             end if;
             if g_pc = 15 then g_par <= '1';
             elsif g_pc = 0 then g_par <= '0'; end if;
+
             if g_start = '1' then
                 g_avid <= '1';
                 g_cnt  <= (others => '0');
@@ -390,204 +680,562 @@ begin
     g_start <= '1' when (g_sel = '0' and g_rsr(1) = '1') or (g_sel = '1' and g_rsr(2) = '1') else '0';
 
     ---------------------------------------------------------------------------
-    -- Source side: oscillator, line-buffer write (Video / Osc), per-line
-    -- values (computed after the source avid fall, committed at its rise)
+    -- Per-line engine: at the source avid rise of line n, blend control rows
+    -- j..j+2 of line n+1 into the 56 knots D[i] of FR, BG and GB (one MAC
+    -- lane, the three fields in turn: 504 clocks) and write the 55 cell-
+    -- boundary values B[i] = (D[i] + D[i+1]) / 2 into the bank line n+1 reads.
+    -- Line 0 is computed in the vblank zone.
     ---------------------------------------------------------------------------
-    p_src : process(clk)
-        variable v_m : unsigned(12 downto 0);
-
+    p_eng : process(clk)
+        variable v_jr : unsigned(5 downto 0);
+        variable v_w  : unsigned(9 downto 0);
+        variable v_s  : signed(18 downto 0);
+        variable v_d  : signed(10 downto 0);
+        variable v_d12 : signed(11 downto 0);
     begin
         if rising_edge(clk) then
-            -- oscillator: x ramp per source pixel, y ramp per line, phase per field
-            if data_in.avid = '1' then s_ox <= s_ox + s_fo; elsif s_avq = '1' then s_ox <= (others => '0'); s_oy <= s_oy + s_foy; end if;
-            if s_zone = '1' then s_oy <= (others => '0'); end if;
-            if s_zgo = '1' then s_ot <= s_ot + unsigned(resize(s_spd, 8)); end if;
-            -- the three-wave field as the oscillator source (luma only)
-            s_oty <= to_unsigned(64, 10) + shift_left(resize(f_tri8(s_ox(11 downto 4) + s_ot), 10), 1)
-                     + shift_left(resize(f_tri8(s_oy(11 downto 4) - s_ot), 10), 1)
-                     + shift_left(resize(f_tri8(s_ox(11 downto 4) + s_oy(11 downto 4) + s_ot), 10), 1);
-            s_otu <= to_unsigned(512, 10);
-            s_otv <= to_unsigned(512, 10);
-
-            s_lb_we <= data_in.avid;
-            s_lb_wa <= s_wcol;
-            if s_src = '1' then
-                s_lb_wd <= std_logic_vector(s_oty) & std_logic_vector(s_otu) & std_logic_vector(s_otv) & "00";
+            -- kick
+            if s_zone = '1' and s_zc = 200 then
+                e_V <= to_unsigned(32768, 22); e_vl <= (others => '0'); e_sl <= f_sl0;
+                e_ln <= (others => '0'); e_seed <= f_sd; e_k5 <= (others => '0');
+                e_wbk <= not l_bank; e_st <= to_unsigned(1, 4);
+            elsif data_in.avid = '1' and s_avq = '0' then
+                e_V <= e_V + resize(t_ky, 22); e_vl <= e_vl + resize(t_vq, 19); e_sl <= e_sl + resize(t_ksl, 24);
+                e_ln <= e_ln + 1;
+                if e_ln(0) = '1' then e_k5 <= to_unsigned(5, 3); else e_k5 <= (others => '0'); end if;
+                e_wbk <= not l_bank; e_st <= to_unsigned(1, 4);
             else
-                s_lb_wd <= data_in.y & data_in.u & data_in.v & "00";
+                if e_st /= 0 then
+                    if e_st = 12 then e_st <= (others => '0'); else e_st <= e_st + 1; end if;
+                end if;
+                -- line seed: 5 LFSR steps on every even line
+                if e_k5 /= 0 then e_seed <= f_lstep(e_seed); e_k5 <= e_k5 - 1; end if;
             end if;
-            if data_in.avid = '1' then s_wcol <= s_wcol + 1; else s_wcol <= (others => '0'); end if;
 
-            s_fall1 <= '0';
-            if data_in.avid = '0' and s_avq = '1' then s_fall1 <= '1'; end if;
-            s_fall2 <= s_fall1;
+            -- setup: row, fraction, weights (w0 + w1 + w2 = 256)
+            case to_integer(e_st) is
+                when 1 =>
+                    v_jr := e_V(21 downto 16);
+                    if v_jr > 30 then e_j <= to_unsigned(30, 6); e_t8 <= (others => '1');
+                    else e_j <= v_jr; e_t8 <= e_V(15 downto 8); end if;
+                when 2 =>
+                    e_t2 <= to_unsigned(256, 16); e_tq <= e_t8; e_tm <= resize(e_t8, 16);
+                    e_base <= shift_left(resize(e_j, 11), 5) + shift_left(resize(e_j, 11), 4)
+                              + shift_left(resize(e_j, 11), 3);                       -- j * 56
+                when 3 to 10 =>
+                    -- t8^2 + 256, one multiplier bit per clock
+                    if e_tq(0) = '1' then e_t2 <= e_t2 + e_tm; end if;
+                    e_tq <= '0' & e_tq(7 downto 1); e_tm <= shift_left(e_tm, 1);
+                when 11 =>
+                    e_w2 <= resize(e_t2(15 downto 9), 9);
+                    e_w0 <= to_unsigned(128, 9) - resize(e_t8, 9) + resize(e_t2(15 downto 9), 9);
+                when 12 =>
+                    e_w1 <= to_unsigned(256, 9) - e_w0 - e_w2;
+                    e_iss <= '1'; e_i <= (others => '0'); e_r <= (others => '0'); e_f <= (others => '0');
+                    e_abi <= e_base; e_oi <= (others => '0');
+                when others => null;
+            end case;
 
-            if s_zone = '1' then
-                s_vy_n <= (others => '0');
-                s_lfsr <= s_lfsr(14 downto 0) & (s_lfsr(15) xor s_lfsr(13) xor s_lfsr(12) xor s_lfsr(10));
-
-            elsif s_fall1 = '1' then
-                s_vy_n <= s_vy_n + s_ys;
-                s_lfsr <= s_lfsr(14 downto 0) & (s_lfsr(15) xor s_lfsr(13) xor s_lfsr(12) xor s_lfsr(10));
-
-            elsif s_fall2 = '1' then
-
+            -- issue: 56 knots x 3 rows x 3 fields; one ROM read per (knot, row)
+            e_tv(0) <= e_iss; e_tr(0) <= e_r; e_tf(0) <= e_f;
+            if e_iss = '1' then
+                if e_f = 0 then
+                    case to_integer(e_r) is
+                        when 0 => r_ca <= e_abi;
+                        when 1 => r_ca <= e_abi + 56;
+                        when others => r_ca <= e_abi + 112;
+                    end case;
+                end if;
+                if e_f = 2 then
+                    e_f <= (others => '0');
+                    if e_r = 2 then
+                        e_r <= (others => '0');
+                        e_abi <= e_abi + 1;
+                        if e_i = 55 then e_iss <= '0'; else e_i <= e_i + 1; end if;
+                    else
+                        e_r <= e_r + 1;
+                    end if;
+                else
+                    e_f <= e_f + 1;
+                end if;
             end if;
-            v_m := resize(s_ax2, 13);
-            if v_m >= resize(s_w, 13) then v_m := v_m - resize(s_w, 13); end if;
-            s_rsd_n <= v_m(10 downto 0);
-
-            if data_in.avid = '1' and s_avq = '0' then
-                s_rsd <= s_rsd_n;
-
+            -- tags: 0 = address, 1 = ROM out, 2 = fabric copy, 3 = field / weight select,
+            --       4 = products, 5 = product sum, then accumulate
+            for k in 1 to 5 loop
+                e_tv(k) <= e_tv(k - 1); e_tr(k) <= e_tr(k - 1); e_tf(k) <= e_tf(k - 1);
+            end loop;
+            if e_tf(1) = 0 then cs_q2 <= cs_q; end if;
+            case to_integer(e_tf(2)) is
+                when 0 => e_cv <= signed(cs_q2(19 downto 12));
+                when 1 => e_cv <= resize(signed(cs_q2(11 downto 5)), 8);
+                when others => e_cv <= signed(resize(unsigned(cs_q2(4 downto 0)), 8));
+            end case;
+            case to_integer(e_tr(2)) is
+                when 0 => e_wc <= e_w0;
+                when 1 => e_wc <= e_w1;
+                when others => e_wc <= e_w2;
+            end case;
+            e_ph <= e_cv * signed('0' & e_wc(8 downto 4));
+            e_pl <= resize(e_cv * signed('0' & e_wc(3 downto 0)), 14);
+            e_p <= shift_left(resize(e_ph, 18), 4) + resize(e_pl, 18);
+            -- accumulate over the 3 rows per field; D = (sum + 32) >> 6
+            e_dv <= '0';
+            if e_tv(5) = '1' then
+                if e_tr(5) = 0 then
+                    case to_integer(e_tf(5)) is
+                        when 0 => e_aa <= e_p;
+                        when 1 => e_ab <= e_p;
+                        when others => e_ac <= e_p;
+                    end case;
+                else
+                    case to_integer(e_tf(5)) is
+                        when 0 => v_s := resize(e_aa, 19) + resize(e_p, 19);
+                        when 1 => v_s := resize(e_ab, 19) + resize(e_p, 19);
+                        when others => v_s := resize(e_ac, 19) + resize(e_p, 19);
+                    end case;
+                    case to_integer(e_tf(5)) is
+                        when 0 => e_aa <= v_s(17 downto 0);
+                        when 1 => e_ab <= v_s(17 downto 0);
+                        when others => e_ac <= v_s(17 downto 0);
+                    end case;
+                    if e_tr(5) = 2 then
+                        e_dv <= '1'; e_df <= e_tf(5);
+                        e_d <= resize(shift_right(v_s + 32, 6), 11);
+                    end if;
+                end if;
+            end if;
+            -- collect D per knot; write B[i-1] = (D[i-1] + D[i]) / 2 when the knot's GB is done
+            t_we <= '0';
+            if e_dv = '1' then
+                case to_integer(e_df) is
+                    when 0 => e_da <= e_d;
+                    when 1 => e_db <= e_d;
+                    when others =>
+                        e_pa <= e_da; e_pb <= e_db; e_pc <= e_d;
+                        e_oi <= e_oi + 1;
+                        if e_oi /= 0 then
+                            t_we <= '1';
+                            t_wa <= e_wbk & (e_oi - 1);
+                            v_d12 := shift_right(resize(e_pa, 12) + resize(e_da, 12), 1);
+                            t_wd(29 downto 19) <= std_logic_vector(v_d12(10 downto 0));
+                            v_d := shift_right(e_pb + e_db, 1);
+                            t_wd(18 downto 9) <= std_logic_vector(v_d(9 downto 0));
+                            v_d := shift_right(e_pc + e_d, 1);
+                            t_wd(8 downto 0) <= std_logic_vector(v_d(8 downto 0));
+                        end if;
+                end case;
             end if;
         end if;
-    end process p_src;
+    end process p_eng;
 
     ---------------------------------------------------------------------------
-    -- Beam state (initialised on the g_start edge so stage 1 sees pixel 0)
+    -- Per-line scalars (one serial multiplier, 11 steps per product):
+    --   fl  = alpha + (beta * T[v/2]) >> 9          (band frequency: Stripes x Fan, Q24)
+    --   ph0 = (fl * (247 + u0)) >> 5 + drift + jitter  (phase at the left edge, Q19)
+    --   dph = (fl * su / 2) >> 5                       (per pixel, Q19)
+    --   colour row {Gc, F0, kG, pocket gate} at the Sky-shifted line
     ---------------------------------------------------------------------------
-    p_beam : process(clk)
-
+    p_line : process(clk)
+        variable v_i   : unsigned(10 downto 0);
+        variable v_ls  : signed(12 downto 0);
+        variable v_sh  : signed(12 downto 0);
+        variable v_s   : signed(19 downto 0);
+        variable v_r   : signed(30 downto 0);
+        variable v_cat : std_logic_vector(30 downto 0);
+        variable v_fl  : signed(19 downto 0);
+        variable v_d   : unsigned(18 downto 0);
+        variable v_p0  : unsigned(25 downto 0);
     begin
         if rising_edge(clk) then
-            if g_start = '1' then
-                s_bcol <= (others => '0');
-                s_ru <= (others => '0');
-                s_rd <= s_rsd;
-
-            elsif g_avid = '1' then
-                s_bcol <= s_bcol + 1;
-                if s_ru = s_wm1(10 downto 0) then s_ru <= (others => '0'); else s_ru <= s_ru + 1; end if;
-                if s_rd = 0 then s_rd <= s_wm1(10 downto 0); else s_rd <= s_rd - 1; end if;
-
+            fp_q2 <= fp_q; fy_q2 <= fy_q;
+            if e_st = 1 then
+                p_st <= to_unsigned(1, 6);
+            elsif p_st /= 0 then
+                if p_st = 40 then p_st <= (others => '0'); else p_st <= p_st + 1; end if;
             end if;
+            -- serial multiplier: steps while p_st in 7..17 and 22..32
+            if (p_st >= 7 and p_st <= 17) or (p_st >= 22 and p_st <= 32) then
+                if u_b(0) = '1' then v_s := u_h + resize(u_a, 20); else v_s := u_h; end if;
+                u_h <= shift_right(v_s, 1);
+                u_l <= v_s(0) & u_l(10 downto 1);
+                u_b <= '0' & u_b(10 downto 1);
+            end if;
+            v_cat := std_logic_vector(u_h(19 downto 0)) & std_logic_vector(u_l);
+            v_r := signed(v_cat);
+            case to_integer(p_st) is
+                when 1 =>
+                    v_i := e_vl(18 downto 8);                         -- virtual line
+                    if v_i(10 downto 1) > 511 then p_idx <= to_unsigned(511, 9); else p_idx <= v_i(9 downto 1); end if;
+                    v_ls := signed(resize(v_i, 13)) - resize(f_ssh, 13);
+                    v_sh := shift_right(v_ls, 3);
+                    if v_sh < 0 then p_ids <= (others => '0');
+                    elsif v_sh > 135 then p_ids <= to_unsigned(135, 8);
+                    else p_ids <= unsigned(v_sh(7 downto 0)); end if;
+                when 2 => r_fy <= p_idx; r_fa <= p_ids;
+                when 5 =>
+                    -- beta * T
+                    u_a <= signed(resize(unsigned(fy_q2), 19)); u_b <= f_b9; u_h <= (others => '0'); u_l <= (others => '0');
+                    n_gc <= unsigned(fp_q2(25 downto 18)); n_f07 <= signed(fp_q2(17 downto 10)); n_kg <= unsigned(fp_q2(9 downto 2));
+                    case fp_q2(1 downto 0) is
+                        when "01" => n_po <= f_po - 16;
+                        when "10" => n_po <= f_po - 32;
+                        when others => n_po <= f_po;
+                    end case;
+                when 19 =>
+                    v_fl := resize(shift_right(v_r, 9), 20) + resize(f_al, 20);
+                    p_fl <= unsigned(v_fl(17 downto 0));
+                when 20 =>
+                    -- fl * (247 + u0)
+                    u_a <= signed(resize(p_fl, 19)); u_h <= (others => '0'); u_l <= (others => '0');
+                    if t_cls = 2 then u_b <= to_unsigned(487, 11); else u_b <= to_unsigned(247, 11); end if;
+                    -- dph = (fl * su / 2) >> 5
+                    case to_integer(t_cls) is
+                        when 0 => v_d := resize(p_fl, 19);
+                        when 1 => v_d := resize(p_fl, 19) + resize(p_fl(17 downto 1), 19);
+                        when others => v_d := shift_left(resize(p_fl, 19), 1);
+                    end case;
+                    n_dph <= resize(v_d(18 downto 5), 15);
+                when 34 =>
+                    v_p0 := unsigned(std_logic_vector(v_r(30 downto 5)));
+                    n_ph0 <= v_p0(23 downto 0) + shift_left(resize(f_drift, 24), 3)
+                             + unsigned(resize(shift_left(resize(signed(not e_seed(7) & e_seed(6 downto 0)), 17), 8), 24));
+                    n_sl <= e_sl(20 downto 8); n_bank <= e_wbk;
+                when others => null;
+            end case;
+        end if;
+    end process p_line;
 
+    ---------------------------------------------------------------------------
+    -- Line hand-over at hsync; window preload; beam
+    ---------------------------------------------------------------------------
+    p_beam : process(clk)
+    begin
+        if rising_edge(clk) then
+            if g_hsr = '1' then
+                l_dph <= n_dph; l_ph0 <= n_ph0; l_po <= n_po; l_gc <= n_gc; l_kg <= n_kg;
+                l_bm <= to_unsigned(255, 8) - resize(n_gc(7 downto 4), 8) - resize(n_gc(7 downto 5), 8);
+                l_f07 <= n_f07; l_off <= n_gc(7 downto 4); l_sl <= n_sl; l_bank <= n_bank;
+                s_pl <= to_unsigned(1, 3);
+            elsif s_pl /= 0 then
+                s_pl <= s_pl + 1;
+            end if;
+            -- RAM read address: preload B[i0], B[i0 + 1], then prefetch B[ci + 2]
+            case to_integer(s_pl) is
+                when 1 => kr_ra <= l_bank & t_i0;
+                when 2 => kr_ra <= l_bank & (t_i0 + 1);
+                when others => kr_ra <= l_bank & (q1_ci(5 downto 0) + 2);
+            end case;
+            kr_q2 <= kr_q;
+
+            -- Osc phases
+            if s_zgo = '1' then
+                l_pb <= f_tb;
+            elsif data_in.avid = '1' and s_avq = '0' then
+                l_pb <= l_pb + resize(t_kay, 16);
+            end if;
+            if g_start = '1' then
+                b_c  <= t_c0;
+                b_ph <= l_ph0;
+            elsif g_avid = '1' then
+                b_c <= b_c + resize(t_kx, 23);
+                if f_mir = '1' and g_cnt(10 downto 0) >= s_half then
+                    if g_cnt(10 downto 0) /= s_half then b_ph <= b_ph - resize(l_dph, 24); end if;
+                else
+                    b_ph <= b_ph + resize(l_dph, 24);
+                end if;
+            end if;
         end if;
     end process p_beam;
 
     ---------------------------------------------------------------------------
-    -- Pixel path (stage 1 = read address; compose at stage 12)
+    -- Pixel path
     ---------------------------------------------------------------------------
     p_pix : process(clk)
-        variable v_sy : unsigned(11 downto 0);
-        variable v_sc : unsigned(14 downto 0);
-        variable v_dl : unsigned(9 downto 0);
-        variable v_d, v_e, v_n : signed(11 downto 0);
-        variable v_zc : integer range 0 to 7;
-        variable v_i : unsigned(11 downto 0);
-        variable v_ed : signed(9 downto 0);
-        variable v_a : unsigned(7 downto 0);
-
+        variable v_ci  : unsigned(6 downto 0);
+        variable v_q   : unsigned(12 downto 0);
+        variable v_a0, v_a1 : signed(11 downto 0);
+        variable v_b0, v_b1 : signed(10 downto 0);
+        variable v_c0, v_c1 : signed(9 downto 0);
+        variable v_dd  : signed(8 downto 0);
+        variable v_hx  : signed(11 downto 0);
+        variable v_ys  : unsigned(12 downto 0);
+        variable v_pa  : signed(9 downto 0);
+        variable v_fr  : signed(11 downto 0);
+        variable v_kb  : signed(13 downto 0);
+        variable v_h   : signed(10 downto 0);
+        variable v_gk  : signed(11 downto 0);
+        variable v_ta  : signed(16 downto 0);
+        variable v_pk  : signed(16 downto 0);
+        variable v_f   : signed(13 downto 0);
+        variable v_r7  : unsigned(6 downto 0);
+        variable v_tr  : signed(8 downto 0);
+        variable v_rr  : signed(15 downto 0);
+        variable v_x   : signed(13 downto 0);
+        variable v_dg  : signed(13 downto 0);
+        variable v_gp  : signed(18 downto 0);
+        variable v_m   : signed(14 downto 0);
+        variable v_r, v_gg, v_b : unsigned(15 downto 0);
+        variable v_y   : unsigned(16 downto 0);
+        variable v_cs  : signed(17 downto 0);
+        variable v_sy  : unsigned(11 downto 0);
+        variable v_dl  : unsigned(9 downto 0);
     begin
         if rising_edge(clk) then
-            -- 1: mirrored read address
-            if s_mir = '1' and s_bcol >= s_ax then s_lb_ra <= s_rd; else s_lb_ra <= s_ru; end if;
-            -- 3: field (fabric copy)
-            s_y3 <= unsigned(s_lb_q(31 downto 22));
-            s_u3 <= unsigned(s_lb_q(21 downto 12));
-            s_v3 <= unsigned(s_lb_q(11 downto 2));
-            -- 4: IIR smear (luma only)
-            v_d := signed(resize(s_y3, 12)) - signed(resize(s_sy, 12));
-            case to_integer(s_z) is
-                when 0 => v_d := v_d;
-                when 1 => v_d := shift_right(v_d, 1);
-                when 2 => v_d := shift_right(v_d, 2);
-                when 3 => v_d := shift_right(v_d, 3);
-                when 4 => v_d := shift_right(v_d, 4);
-                when 5 => v_d := shift_right(v_d, 5);
-                when 6 => v_d := shift_right(v_d, 6);
-                when others => v_d := shift_right(v_d, 7);
-            end case;
-            v_n := signed(resize(s_sy, 12)) + v_d;
-            s_sy <= unsigned(v_n(9 downto 0));
-            v_d := signed(resize(s_u3, 12)) - signed(resize(s_su, 12));
-            v_e := signed(resize(s_v3, 12)) - signed(resize(s_sv, 12));
-            if s_lumonly = '1' then
-                v_zc := 0;
-            else
-                v_zc := to_integer(s_z);
-            end if;
-            case v_zc is
-                when 0 => v_d := v_d; v_e := v_e;
-                when 1 => v_d := shift_right(v_d, 1); v_e := shift_right(v_e, 1);
-                when 2 => v_d := shift_right(v_d, 2); v_e := shift_right(v_e, 2);
-                when 3 => v_d := shift_right(v_d, 3); v_e := shift_right(v_e, 3);
-                when 4 => v_d := shift_right(v_d, 4); v_e := shift_right(v_e, 4);
-                when 5 => v_d := shift_right(v_d, 5); v_e := shift_right(v_e, 5);
-                when 6 => v_d := shift_right(v_d, 6); v_e := shift_right(v_e, 6);
-                when others => v_d := shift_right(v_d, 7); v_e := shift_right(v_e, 7);
-            end case;
-            v_n := signed(resize(s_su, 12)) + v_d;
-            s_su <= unsigned(v_n(9 downto 0));
-            v_n := signed(resize(s_sv, 12)) + v_e;
-            s_sv <= unsigned(v_n(9 downto 0));
-            -- 5: level above black
-            if s_sy > 64 then s_lvl5 <= s_sy - 64; else s_lvl5 <= (others => '0'); end if;
-            s_l8(5) <= s_sy(9 downto 2);
-            -- 6: contrast product
-            s_p6 <= s_lvl5 * s_cg;
-            -- 7: palette index; red flags
-            v_i := s_p6(18 downto 7);
-            if v_i > 255 then s_idx7 <= x"FF"; else s_idx7 <= v_i(7 downto 0); end if;
-            v_ed := signed(resize(s_l8(6), 10)) - signed(resize(s_thr, 10));
-            if s_outl = '1' then
-                if v_ed > -12 and v_ed < 12 then s_red(7) <= '1'; else s_red(7) <= '0'; end if;
-            else
-                if v_ed >= 0 then s_red(7) <= '1'; else s_red(7) <= '0'; end if;
-            end if;
-            -- 8: palette address
-            v_a := s_idx7 + s_hue + s_ph;
-            if s_post = '1' then v_a(4 downto 0) := (others => '0'); end if;
-            s_pal_ra <= s_pal & v_a;
-            -- 10: palette fabric copy
-            s_py10 <= unsigned(s_pal_q(31 downto 22));
-            s_pu10 <= unsigned(s_pal_q(21 downto 12));
-            s_pv10 <= unsigned(s_pal_q(11 downto 2));
-            -- 11: compose
-            if s_red(10) = '1' then
-                s_y11 <= to_unsigned(328, 10); s_u11 <= to_unsigned(960, 10); s_v11 <= to_unsigned(360, 10);
-            else
-                s_y11 <= s_py10; s_u11 <= s_pu10; s_v11 <= s_pv10;
-            end if;
-            -- 12
-            s_y12 <= s_y11; s_u12 <= s_u11; s_v12 <= s_v11;
+            -- video tap: 2-px luma average -> signed (Y - 512) / 2 (a few px early: invisible in a bend)
+            s_vy(1) <= unsigned(data_in.y(9 downto 2)); s_vy(2) <= s_vy(1);
+            s_vs <= signed(resize(resize(s_vy(1), 9) + resize(s_vy(2), 9), 10)) - 256;
 
-            -- 13..18: output conditioning (chroma [1 2 2 2 2 2 2 2 1]/16 as two
-            -- adjacent 8-sums, luma [1 2 1]; centre at stage 17 -> 18)
-            s_csu(0) <= s_u12; s_csv(0) <= s_v12;
-            for i in 1 to 8 loop s_csu(i) <= s_csu(i - 1); s_csv(i) <= s_csv(i - 1); end loop;
-            s_boxu <= s_boxu + s_u12 - s_csu(7);
-            s_boxv <= s_boxv + s_v12 - s_csv(7);
-            s_boxud <= s_boxu; s_boxvd <= s_boxv;
-            v_sc := resize(s_boxu, 15) + s_boxud; s_u18 <= v_sc(13 downto 4);
-            v_sc := resize(s_boxv, 15) + s_boxvd; s_v18 <= v_sc(13 downto 4);
-            s_y13 <= s_y12; s_y14 <= s_y13; s_y15 <= s_y14; s_y16 <= s_y15;
-            s_y17 <= s_y16; s_y18x <= s_y17;
-            v_sy := resize(s_y16, 12) + shift_left(resize(s_y17, 12), 1) + resize(s_y18x, 12);
-            s_yf18 <= v_sy(11 downto 2);
-            -- 19: luma toward black (white 940 -> 777); blanking gate
-            if s_yf18 > 64 then v_dl := s_yf18 - 64; else v_dl := (others => '0'); end if;
-            if s_gav_sr(17) = '1' then
-                s_y19 <= s_yf18 - shift_right(v_dl, 3) - shift_right(v_dl, 4);
-                s_u19 <= s_u18; s_v19 <= s_v18;
+            -- 1: cell index / fraction; cell crossing; jitter product; Osc
+            v_ci := b_c(22 downto 16);
+            if g_avid = '1' then
+                if v_ci /= q1_ci then q1_x <= '1'; else q1_x <= '0'; end if;
+                q1_ci <= v_ci;
             else
-                s_y19 <= to_unsigned(64, 10); s_u19 <= to_unsigned(512, 10); s_v19 <= to_unsigned(512, 10);
+                q1_x <= '0';
+                q1_ci <= '0' & t_i0;
             end if;
-            -- 20
-            s_y20 <= s_y19; s_u20 <= s_u19; s_v20 <= s_v19;
-            for i in 6 to 7 loop s_l8(i) <= s_l8(i - 1); end loop;
-            for i in 8 to 10 loop s_red(i) <= s_red(i - 1); end loop;
+            q1_sf <= b_c(15 downto 8);
+            q1_ph <= b_ph;
+            q1_osc <= resize(f_tri(b_c(18 downto 3)), 10) + resize(f_tri(l_pb), 10);
 
+            -- 2: window (preload / shift); band phase; pocket band / phase; source select
+            if s_pl = 4 then w0 <= kr_q2;
+            elsif s_pl = 5 then w1 <= kr_q2;
+            elsif q1_x = '1' then
+                w0 <= w1; w1 <= kr_q2;
+            end if;
+            q2_sf <= q1_sf;
+            q2_phj <= q1_ph(18 downto 11);
+            v_q := q1_ph(23 downto 11) - 141;
+            q2_n5 <= v_q(12 downto 8); q2_fq <= v_q(7 downto 0);
+            if f_osc = '1' then q2_src <= q1_osc; else q2_src <= s_vs; end if;
+
+            -- 3: linear cell terms (B0, B1 - B0); wave ROM address; pocket slot offset and distance
+            v_a0 := resize(signed(w0(29 downto 19)), 12); v_a1 := resize(signed(w1(29 downto 19)), 12);
+            q3_a0 <= signed(w0(29 downto 19));
+            q3_a1 <= resize(v_a1 - v_a0, 11);
+            v_b0 := resize(signed(w0(18 downto 9)), 11); v_b1 := resize(signed(w1(18 downto 9)), 11);
+            q3_b0 <= signed(w0(18 downto 9));
+            q3_b1 <= resize(v_b1 - v_b0, 10);
+            v_c0 := resize(signed(w0(8 downto 0)), 10); v_c1 := resize(signed(w1(8 downto 0)), 10);
+            q3_c0 <= signed(w0(8 downto 0));
+            q3_c1 <= resize(v_c1 - v_c0, 9);
+            q3_s5 <= q2_sf(7 downto 3);
+            q3_s4 <= q2_sf(7 downto 4);
+            r_wa <= q2_phj;
+            q3_ro <= unsigned(C_RO(to_integer(q2_n5)));
+            q3_n5 <= q2_n5;
+            v_dd := signed('0' & q2_fq) - 141;
+            if v_dd < 0 then q3_d <= unsigned(resize(-v_dd, 8)); else q3_d <= unsigned(v_dd(7 downto 0)); end if;
+            q3_src <= q2_src;
+
+            -- 4: cell products; melt product; pocket slot -> ROM address; hx
+            q4_ap <= resize(q3_a1 * signed('0' & q3_s5), 17);
+            q4_bp <= resize(q3_b1 * signed('0' & q3_s4), 15);
+            q4_cp <= resize(q3_c1 * signed('0' & q3_s4), 14);
+            q4_a0 <= q3_a0; q4_b0 <= q3_b0; q4_c0 <= q3_c0;
+            q4_m <= q3_src * signed('0' & f_m5);
+            v_ys := l_sl + resize(q3_ro, 13);
+            q4_fy <= v_ys(7 downto 0);
+            r_pa <= q3_n5 & v_ys(12 downto 8);
+            v_hx := shift_left(to_signed(72, 12) - signed(resize(q3_d, 12)), 3) - (to_signed(72, 12) - signed(resize(q3_d, 12)));
+            if v_hx < 0 then q4_hx <= (others => '0'); elsif v_hx > 255 then q4_hx <= (others => '1');
+            else q4_hx <= unsigned(v_hx(7 downto 0)); end if;
+
+            -- 5: FR, BG, GB; vy; wave (fabric copy); melt
+            q5_fr <= q4_a0 + resize(shift_right(q4_ap, 5), 11);
+            q5_bg <= q4_b0 + resize(shift_right(q4_bp, 4), 10);
+            q5_gb <= q4_c0 + resize(shift_right(q4_cp, 4), 9);
+            if q4_fy(7) = '0' then q5_vy <= q4_fy(6 downto 0) & '0';
+            else q5_vy <= (not q4_fy(6 downto 0)) & '0'; end if;
+            q5_hx <= q4_hx;
+            wv_q2 <= wv_q;
+            q5_mt <= resize(shift_right(q4_m, 6), 10);
+
+            -- 6: pocket ROM (fabric copy); shape = min(hx, vy); lava key field; band partial sum
+            pk_q2 <= pk_q;
+            if q5_hx < q5_vy then q6_sh <= q5_hx; else q6_sh <= q5_vy; end if;
+            v_fr := resize(shift_right(q5_fr, 2), 12) + resize(f_off5, 12) + resize(f_lfo5, 12) + resize(shift_right(q5_mt, 3), 12);
+            q6_frt <= resize(v_fr, 10);
+            q6_s <= signed(resize(unsigned(wv_q2), 12)) + resize(shift_right(q5_bg, 1), 12) + resize(q5_mt, 12);
+            q6_gb <= q5_gb;
+
+            -- 7: pocket amplitude + offset (positive entries only); lava key (blanked outside the picture);
+            --    hot-core product
+            v_pa := resize(signed(pk_q2), 10) + resize(l_po, 10);
+            if signed(pk_q2) <= 0 then q7_a <= signed(pk_q2);
+            elsif v_pa < 0 then q7_a <= (others => '0');
+            elsif v_pa > 127 then q7_a <= to_signed(127, 8);
+            else q7_a <= v_pa(7 downto 0); end if;
+            q7_sh <= q6_sh;
+            v_kb := resize(shift_right(resize(q6_frt, 14) * 13, 4), 14) + 4;
+            if s_gav_sr(5) = '0' or v_kb < 0 then q7_kb <= (others => '0');
+            elsif v_kb > 8 then q7_kb <= to_unsigned(8, 4);
+            else q7_kb <= unsigned(v_kb(3 downto 0)); end if;
+            v_h := resize(q6_frt, 11) - 10;
+            if v_h < 0 then q7_h <= (others => '0'); elsif v_h > 96 then q7_h <= to_unsigned(96, 7);
+            else q7_h <= unsigned(v_h(6 downto 0)); end if;
+            q7_s <= q6_s; q7_gb <= q6_gb;
+
+            -- 8: ta = a * shape >> 8; hot-core product
+            v_ta := q7_a * signed('0' & q7_sh);
+            q8_ta <= resize(shift_right(v_ta, 8), 9);
+            q8_hcp <= resize(q7_h * f_hc8, 14);
+            q8_s <= q7_s; q8_gb <= q7_gb;
+
+            -- 9: pocket = 2.5 ta; lava green
+            q9_pk <= shift_left(resize(q8_ta, 13), 1) + resize(shift_right(q8_ta, 1), 13);
+            q9_s <= q8_s;
+            if f_flat = '1' then
+                q9_gk <= to_unsigned(10, 8);
+            else
+                v_gk := shift_left(resize(q8_gb, 12), 1) + signed(resize(shift_right(q8_hcp, 6), 12));
+                if v_gk < 0 then q9_gk <= (others => '0'); elsif v_gk > 255 then q9_gk <= (others => '1');
+                else q9_gk <= unsigned(v_gk(7 downto 0)); end if;
+            end if;
+
+            -- 10: the band field F (Q7)
+            q10_f <= resize(q9_s, 13) + q9_pk;
+
+            -- 11: ripple phase (F * 12 mod 1) -> triangle; gate F > 20
+            v_f := resize(q10_f, 14);
+            if f_norip = '1' then v_r7 := unsigned(std_logic_vector(resize(shift_left(v_f, 1) + v_f, 7)));      -- Coarse: F * 3
+            else v_r7 := unsigned(std_logic_vector(resize(shift_left(v_f, 3) + shift_left(v_f, 2), 7))); end if; -- Fine: F * 12
+            v_tr := signed('0' & v_r7 & '0') - 128;
+            if v_tr < 0 then q11_tr <= unsigned(resize(-v_tr, 8)); else q11_tr <= unsigned(v_tr(7 downto 0)); end if;
+            if q10_f > 20 then q11_g <= '1'; else q11_g <= '0'; end if;
+            q11_c <= f_norip;
+            q11_f <= q10_f;
+
+            -- 12: ripple = (tri - 64) / 4 where F > 20 (S8 Coarse: / 2)
+            if q11_g = '0' then q12_rp <= (others => '0');
+            elsif q11_c = '1' then q12_rp <= shift_right(signed(resize(q11_tr, 9)) - 64, 1);
+            else q12_rp <= shift_right(signed(resize(q11_tr, 9)) - 64, 2); end if;
+            q12_f <= q11_f;
+
+            -- 13: F + ripple
+            q13_f <= q12_f + resize(q12_rp, 13);
+
+            -- 14: colourizer terms
+            v_x := resize(q13_f, 14) - signed(resize(l_off, 14)) - 64;
+            q14_xr <= v_x;
+            q14_bp <= 243 - resize(q13_f, 14);
+            v_dg := resize(q13_f, 14) - resize(l_f07, 14);
+            if v_dg < 0 then q14_dg <= (others => '0'); elsif v_dg > 127 then q14_dg <= (others => '1');
+            else q14_dg <= unsigned(v_dg(6 downto 0)); end if;
+
+            -- 15: R, B clamps; G product
+            v_rr := resize(q14_xr, 16) + shift_left(resize(q14_xr, 16), 1) + 121;
+            if v_rr < 0 then q15_r <= (others => '0'); elsif v_rr > 242 then q15_r <= to_unsigned(242, 8);
+            else q15_r <= unsigned(v_rr(7 downto 0)); end if;
+            v_rr := shift_left(resize(q14_bp, 16), 3);
+            if v_rr < 0 then q15_b <= (others => '0'); elsif v_rr > signed(resize(l_bm, 16)) then q15_b <= l_bm;
+            else q15_b <= unsigned(v_rr(7 downto 0)); end if;
+            q15_gp <= q14_dg * l_kg;
+
+            -- 16: G
+            v_gp := signed(resize(l_gc, 19)) - signed(resize(shift_right(q15_gp, 7), 19));
+            if v_gp < 0 then q16_g <= (others => '0'); elsif v_gp > 255 then q16_g <= (others => '1');
+            else q16_g <= unsigned(v_gp(7 downto 0)); end if;
+            q16_r <= q15_r; q16_b <= q15_b;
+
+            -- lava key / green pipes: kB from stage 7, kR = kB of the pixel dR to the left
+            s_kbd(1) <= q7_kb;
+            for k in 2 to 7 loop s_kbd(k) <= s_kbd(k - 1); end loop;
+            s_kbl(8) <= q7_kb;
+            for k in 9 to 16 loop s_kbl(k) <= s_kbl(k - 1); end loop;
+            case to_integer(t_cls) is
+                when 0 => s_kr(9) <= s_kbd(7);
+                when 1 => s_kr(9) <= s_kbd(5);
+                when others => s_kr(9) <= s_kbd(4);
+            end case;
+            for k in 10 to 16 loop s_kr(k) <= s_kr(k - 1); end loop;
+            s_gk(10) <= q9_gk;
+            for k in 11 to 16 loop s_gk(k) <= s_gk(k - 1); end loop;
+
+            -- 17: lava mix products
+            q17_rm <= s_kr(16) * (255 - q16_r);
+            q17_bm <= s_kbl(16) * q16_b;
+            v_m := signed(resize(s_gk(16), 15)) - signed(resize(q16_g, 15));
+            q17_gm <= resize(v_m * signed('0' & s_kbl(16)), 13);
+            q17_r <= q16_r; q17_g <= q16_g; q17_b <= q16_b;
+
+            -- 18: mix sums; S10 Ice palette (R, G, B) <- (G, B, R)
+            v_r := resize(q17_r, 16) + resize(shift_right(q17_rm, 3), 16);
+            v_b := resize(q17_b, 16) - resize(shift_right(q17_bm, 3), 16);
+            v_gg := unsigned(resize(signed(resize(q17_g, 16)) + resize(shift_right(q17_gm, 3), 16), 16));
+            if f_ice = '1' then
+                q18_r <= v_gg(7 downto 0); q18_g <= v_b(7 downto 0); q18_b <= v_r(7 downto 0);
+            else
+                q18_r <= v_r(7 downto 0); q18_g <= v_gg(7 downto 0); q18_b <= v_b(7 downto 0);
+            end if;
+
+            -- 19: RGB -> YUV terms, Q6 (hardware convention: U = Cr, V = Cb)
+            --     Y = 66 R + 129 G + 25 B;  U = 112 R - (96 G + 16 B);  V = 112 B - (40 R + 72 G)
+            v_r := resize(q18_r, 16); v_gg := resize(q18_g, 16); v_b := resize(q18_b, 16);
+            q19_yrg <= resize(shift_left(v_r, 6), 17) + resize(shift_left(v_r, 1), 17)
+                       + resize(shift_left(v_gg, 7), 17) + resize(v_gg, 17);
+            q19_yb  <= shift_left(v_b, 4) + shift_left(v_b, 3) + v_b;
+            q19_ur  <= shift_left(v_r, 7) - shift_left(v_r, 4);
+            q19_ugb <= resize(shift_left(v_gg, 6), 17) + resize(shift_left(v_gg, 5), 17) + resize(shift_left(v_b, 4), 17);
+            q19_vb  <= shift_left(v_b, 7) - shift_left(v_b, 4);
+            q19_vrg <= resize(shift_left(v_r, 5), 17) + resize(shift_left(v_r, 3), 17)
+                       + resize(shift_left(v_gg, 6), 17) + resize(shift_left(v_gg, 3), 17);
+            -- 20: sums
+            q20_y <= q19_yrg + resize(q19_yb, 17);
+            q20_u <= signed(resize(q19_ur, 18)) - signed(resize(q19_ugb, 18));
+            q20_v <= signed(resize(q19_vb, 18)) - signed(resize(q19_vrg, 18));
+            -- 21: Y, U, V (10 bit)
+            v_y := shift_right(q20_y, 6);
+            q21_y <= to_unsigned(64, 10) + v_y(9 downto 0);
+            v_cs := shift_right(q20_u, 6) + 512;
+            if v_cs < 0 then q21_u <= (others => '0'); elsif v_cs > 1023 then q21_u <= (others => '1');
+            else q21_u <= unsigned(v_cs(9 downto 0)); end if;
+            v_cs := shift_right(q20_v, 6) + 512;
+            if v_cs < 0 then q21_v <= (others => '0'); elsif v_cs > 1023 then q21_v <= (others => '1');
+            else q21_v <= unsigned(v_cs(9 downto 0)); end if;
+
+            -- 22..28: output conditioning.  Chroma: box-8 pair [1 2 2 2 2 2 2 2 1]/16 in every mode over a
+            -- block-RAM ring (the sums see samples 1..8 back), re-seeded neutral in the vblank zone, its
+            -- centre at stage 28 -- summed straight into the output register.  Luma [1 2 1] (stage 23),
+            -- delayed 4 to stage 27, then scaled toward black (white 940 -> 777) into stage 28.
+            if s_zone = '1' then rb_wd <= std_logic_vector(to_unsigned(512, 10)) & std_logic_vector(to_unsigned(512, 10));
+            else rb_wd <= std_logic_vector(q21_u) & std_logic_vector(q21_v); end if;
+            rb_ra <= s_wp - 5;
+            if s_zone = '1' and s_zc = 40 then
+                s_u8 <= to_unsigned(4096, 13); s_v8 <= to_unsigned(4096, 13);
+            else
+                s_u8 <= s_u8 + unsigned(rb_wd(19 downto 10)) - unsigned(rb_q2(19 downto 10));
+                s_v8 <= s_v8 + unsigned(rb_wd(9 downto 0)) - unsigned(rb_q2(9 downto 0));
+            end if;
+            s_u8p <= s_u8; s_v8p <= s_v8;
+            s_y1 <= q21_y; s_y2 <= s_y1;
+            v_sy := resize(q21_y, 12) + shift_left(resize(s_y1, 12), 1) + resize(s_y2, 12);
+            s_yf(23) <= v_sy(11 downto 2);
+            for k in 24 to 27 loop s_yf(k) <= s_yf(k - 1); end loop;
+
+            -- 28: blanking gate
+            if s_yf(27) > 64 then v_dl := s_yf(27) - 64; else v_dl := (others => '0'); end if;
+            if s_gav_sr(26) = '1' then
+                q28_y <= s_yf(27) - shift_right(v_dl, 3) - shift_right(v_dl, 4);
+                v_y := resize(s_u8, 17) + resize(s_u8p, 17); q28_u <= v_y(13 downto 4);
+                v_y := resize(s_v8, 17) + resize(s_v8p, 17); q28_v <= v_y(13 downto 4);
+            else
+                q28_y <= to_unsigned(64, 10); q28_u <= to_unsigned(512, 10); q28_v <= to_unsigned(512, 10);
+            end if;
+
+            -- sync ring read pointer
+            s_wp <= s_wp + 1;
+            rs_ra <= s_wp - (C_LAT - 3);
         end if;
     end process p_pix;
 
-    data_out.y       <= std_logic_vector(s_y20);
-    data_out.u       <= std_logic_vector(s_u20);
-    data_out.v       <= std_logic_vector(s_v20);
-    data_out.hsync_n <= s_hsync_sr(C_LAT - 1);
-    data_out.vsync_n <= s_vsync_sr(C_LAT - 1);
-    data_out.field_n <= s_field_sr(C_LAT - 1);
+    data_out.y       <= std_logic_vector(q28_y);
+    data_out.u       <= std_logic_vector(q28_u);
+    data_out.v       <= std_logic_vector(q28_v);
+    data_out.hsync_n <= rs_q2(2);
+    data_out.vsync_n <= rs_q2(1);
+    data_out.field_n <= rs_q2(0);
     data_out.avid    <= s_gav_sr(C_LAT - 1);
 
 end architecture magma;

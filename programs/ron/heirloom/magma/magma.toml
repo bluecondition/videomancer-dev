@@ -1,125 +1,141 @@
-# Magma - Heirloom #29 (2026-10-20), from WIN_20230515_00_46_28.
-# Three-wave field (or video) streaked, palette-mapped, red above the lava threshold.
+# Magma - Heirloom #29, v0.5.0 (2026-10-27): rebuilt from the photo WIN_20230515_00_46_28.
+# Fanned cyan/pink streaks and blue/magenta bands from one line-locked sawtooth oscillator swept per
+# line, red pockets riding the bands, and fitted lava blobs (yellow cores, red rims) with a lens row.
 # See magma.vhd and SUMMARY.md.
 
 [program]
-processing_delay_clks = 20
+processing_delay_clks = 28
 program_id = "com.czartroniks.magma"
 program_name = "Magma"
-program_version = "0.1.0"
+program_version = "0.5.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
-categories = ["Render", "Organic", "Mirror"]
+categories = ["Render", "Organic", "Color"]
 program_type = "processing"
-description = "A streaked cyan, magenta and blue field with yellow cores, flat red wherever it saturates, mirrored. Lava level on the slider."
+description = "Fanned cyan and blue stripe flow with red pockets and yellow-red lava blobs; video bends the bands. Lava on the slider."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_1"
-name_label = "Streak"
-control_mode = "linear"
-display_min_value = 0
-display_max_value = 100
-initial_value = 500
-display_float_digits = 0
-suffix_label = "%"
-[[parameter]]
-parameter_id = "rotary_potentiometer_2"
-name_label = "Hue"
-control_mode = "linear"
-display_min_value = 0
-display_max_value = 100
-initial_value = 0
-display_float_digits = 0
-suffix_label = "%"
-[[parameter]]
-parameter_id = "rotary_potentiometer_3"
-name_label = "Blobs"
-control_mode = "linear"
-display_min_value = 0
-display_max_value = 100
-initial_value = 200
-display_float_digits = 0
-suffix_label = "%"
-[[parameter]]
-parameter_id = "rotary_potentiometer_4"
-name_label = "Axis"
+name_label = "Stripes"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
 initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
+
 [[parameter]]
-parameter_id = "rotary_potentiometer_5"
-name_label = "Speed"
+parameter_id = "rotary_potentiometer_2"
+name_label = "Fan"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Flow"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 560
+initial_value = 800
 display_float_digits = 0
 suffix_label = ""
+
 [[parameter]]
-parameter_id = "rotary_potentiometer_6"
-name_label = "Contrast"
+parameter_id = "rotary_potentiometer_4"
+name_label = "Pockets"
 control_mode = "linear"
-display_min_value = 25
-display_max_value = 225
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Melt"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
 initial_value = 400
 display_float_digits = 0
 suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Sky"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = ""
+
 [[parameter]]
 parameter_id = "toggle_switch_7"
-name_label = "Mirror"
-value_labels = ["Off", "On"]
-initial_value_label = "On"
+name_label = "Cores"
+value_labels = ["Hot", "Flat"]
+initial_value_label = "Hot"
+
 [[parameter]]
 parameter_id = "toggle_switch_8"
-name_label = "Palette"
-value_labels = ["Cyan", "Green"]
-initial_value_label = "Cyan"
+name_label = "Ripple"
+value_labels = ["Fine", "Coarse"]
+initial_value_label = "Fine"
+
 [[parameter]]
 parameter_id = "toggle_switch_9"
-name_label = "Red"
-value_labels = ["Flats", "Outlines"]
-initial_value_label = "Flats"
-[[parameter]]
-parameter_id = "toggle_switch_10"
-name_label = "Poster"
+name_label = "Mirror"
 value_labels = ["Off", "On"]
 initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Palette"
+value_labels = ["Magma", "Ice"]
+initial_value_label = "Magma"
+
 [[parameter]]
 parameter_id = "toggle_switch_11"
 name_label = "Source"
 value_labels = ["Video", "Osc"]
 initial_value_label = "Video"
+
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
 name_label = "Lava"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 350
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
-[[preset]]
-name = "Default"
 
 [[preset]]
-name = "Osc Field"
-toggle_switch_11 = 1
-linear_potentiometer_12 = 400
+name = "Magma"
 
 [[preset]]
-name = "Red Sea"
-linear_potentiometer_12 = 900
-rotary_potentiometer_1 = 800
+name = "Calm Stripes"
+linear_potentiometer_12 = 0
+rotary_potentiometer_3 = 680
 
 [[preset]]
-name = "Outlined"
+name = "Lava Flood"
+linear_potentiometer_12 = 1023
+rotary_potentiometer_4 = 800
+
+[[preset]]
+name = "Chevrons"
 toggle_switch_9 = 1
-toggle_switch_10 = 1
-linear_potentiometer_12 = 500
+rotary_potentiometer_2 = 800
 
+[[preset]]
+name = "Ice Night"
+toggle_switch_10 = 1
+rotary_potentiometer_6 = 200
