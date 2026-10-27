@@ -215,7 +215,8 @@ rebuild with router1 before restructuring. Record any seed other than 1. **Never
 ### 9. Deliver
 
 - `programs/ron/heirloom/<name>/`: `<name>.vhd`, `<name>.toml`, the optional `<name>.py` and
-  `<name>_pkg.vhd`. Delete files of the old version that are no longer used.
+  `<name>_pkg.vhd`. Delete files of the old version that are no longer used. The shipped sources must
+  be exactly the ones the `.vmprog` was built from: do any cleanup BEFORE the final build, never after.
 - `SUMMARY.md` (rewritten): subagents can't write `.md` files, so put its full text at the END of
   your final message in one fenced block; the orchestrator writes it. It follows the shape of
   wraith/loupe:

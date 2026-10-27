@@ -1,103 +1,104 @@
-# Bottleneck - Heirloom #28 (2026-10-20), from WIN_20230429_22_57_43.
-# Two pink bottles against smeared blue/green/black bands.
+# Bottleneck - Heirloom #28, rebuilt 2026-10-27 (v0.5.0) from WIN_20230429_22_57_43.
+# Two lathe bottles (lime necks, pink bodies, glass rims) on halo'd horizontal stripes, cut by sliding
+# glitch blocks and a staircase.  See bottleneck.vhd, bottleneck.py and SUMMARY.md.
 
 [program]
 processing_delay_clks = 20
 program_id = "com.czartroniks.bottleneck"
 program_name = "Bottleneck"
-program_version = "0.1.0"
+program_version = "0.5.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
-categories = ["Shape", "Signal", "Mask"]
+categories = ["Shape", "Glitch", "Mask"]
 program_type = "processing"
-description = "Two pink bottle silhouettes with lime rims against blue, green and black bands smeared sideways. Smear on the slider."
+description = "Two glass bottles, lime necks and pink bodies, on glowing stripes, torn by sliding glitch blocks. Shatter on the slider."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_1"
-name_label = "Bands"
+name_label = "Width"
 control_mode = "linear"
-display_min_value = 2
-display_max_value = 33
-initial_value = 200
+display_min_value = -128
+display_max_value = 128
+initial_value = 512
 display_float_digits = 0
-suffix_label = ""
+suffix_label = "px"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
-name_label = "Width"
+name_label = "Spread"
+control_mode = "linear"
+display_min_value = -128
+display_max_value = 128
+initial_value = 512
+display_float_digits = 0
+suffix_label = "px"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Level"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 400
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
-parameter_id = "rotary_potentiometer_3"
-name_label = "Rim"
-control_mode = "linear"
-display_min_value = 2
-display_max_value = 33
-initial_value = 250
-display_float_digits = 0
-suffix_label = ""
-
-[[parameter]]
 parameter_id = "rotary_potentiometer_4"
-name_label = "Hue"
+name_label = "Speed"
 control_mode = "linear"
-display_min_value = 0
-display_max_value = 360
-initial_value = 0
+display_min_value = -100
+display_max_value = 100
+initial_value = 640
 display_float_digits = 0
 suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
-name_label = "Spacing"
+name_label = "Melt"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 600
+initial_value = 256
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
-name_label = "Drift"
+name_label = "Stripes"
 control_mode = "linear"
-display_min_value = -100
-display_max_value = 100
-initial_value = 540
+display_min_value = -256
+display_max_value = 256
+initial_value = 512
 display_float_digits = 0
 suffix_label = ""
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
 name_label = "Bottles"
-value_labels = ["One", "Two"]
+value_labels = ["Two", "One"]
 initial_value_label = "Two"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
-name_label = "Rim"
-value_labels = ["Off", "On"]
+name_label = "Hold"
+value_labels = ["On", "Off"]
 initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
-name_label = "Colours"
-value_labels = ["Pink", "Lime"]
-initial_value_label = "Pink"
+name_label = "Rims"
+value_labels = ["On", "Off"]
+initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
-name_label = "Bands"
-value_labels = ["Still", "Rolling"]
-initial_value_label = "Still"
+name_label = "Colours"
+value_labels = ["Photo", "Negative"]
+initial_value_label = "Photo"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
@@ -107,11 +108,11 @@ initial_value_label = "Video"
 
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
-name_label = "Smear"
+name_label = "Shatter"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 500
+initial_value = 460
 display_float_digits = 0
 suffix_label = "%"
 
@@ -119,17 +120,21 @@ suffix_label = "%"
 name = "Default"
 
 [[preset]]
-name = "Clean Bottles"
+name = "Clean Glass"
 linear_potentiometer_12 = 0
+rotary_potentiometer_4 = 600
 
 [[preset]]
-name = "Lime Rolling"
+name = "Shattered"
+linear_potentiometer_12 = 1023
+rotary_potentiometer_4 = 760
+
+[[preset]]
+name = "Full Bottles"
+rotary_potentiometer_3 = 900
+rotary_potentiometer_1 = 700
+
+[[preset]]
+name = "Bare Lilac"
 toggle_switch_9 = 1
 toggle_switch_10 = 1
-linear_potentiometer_12 = 700
-
-[[preset]]
-name = "One Wide"
-toggle_switch_7 = 0
-rotary_potentiometer_2 = 900
-linear_potentiometer_12 = 300
