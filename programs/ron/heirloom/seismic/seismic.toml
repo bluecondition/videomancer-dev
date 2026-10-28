@@ -1,17 +1,18 @@
-# Seismic - Heirloom #44 (2026-10-20), from WIN_20230610_00_10_54.
-# Rainbow smear rows alternating with rows of glowing lenses. See seismic.vhd and SUMMARY.md.
+# Seismic - Heirloom #44 (2026-10-27 rebuild, v0.5.0), from WIN_20230610_00_10_54.
+# An FM chirp against five clipped vertical ribbons, keyed per channel, in 24 staircase strips.
+# See seismic.vhd and SUMMARY.md.
 
 [program]
-processing_delay_clks = 16
+processing_delay_clks = 24
 program_id = "com.czartroniks.seismic"
 program_name = "Seismic"
-program_version = "0.1.0"
+program_version = "0.5.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Pattern", "Signal", "Render"]
 program_type = "processing"
-description = "Rows of the picture smeared under a rainbow alternate with rows of glowing lenses on black. Lens size on the slider."
+description = "A chirped oscillator across five ribbons with lobed gaps, torn into 24 staircase strips. Quake on the slider."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
@@ -19,85 +20,85 @@ core = "yuv444_30b"
 parameter_id = "rotary_potentiometer_1"
 name_label = "Rows"
 control_mode = "linear"
-display_min_value = 0
-display_max_value = 100
-initial_value = 340
+display_min_value = 50
+display_max_value = 200
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
-name_label = "Lenses"
+name_label = "Sweep"
 control_mode = "linear"
-display_min_value = 2
-display_max_value = 33
-initial_value = 420
+display_min_value = 42
+display_max_value = 234
+initial_value = 512
 display_float_digits = 0
-suffix_label = ""
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
-name_label = "Hue"
+name_label = "Lobes"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 200
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
-name_label = "Smear"
+name_label = "Speed"
 control_mode = "linear"
-display_min_value = 0
-display_max_value = 7
-initial_value = 400
+display_min_value = -100
+display_max_value = 100
+initial_value = 600
 display_float_digits = 0
 suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
-name_label = "Glow"
+name_label = "Width"
 control_mode = "linear"
-display_min_value = 0
-display_max_value = 100
-initial_value = 300
+display_min_value = 55
+display_max_value = 145
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
-name_label = "Drift"
+name_label = "Melt"
 control_mode = "linear"
-display_min_value = -100
+display_min_value = 0
 display_max_value = 100
-initial_value = 560
+initial_value = 384
 display_float_digits = 0
-suffix_label = ""
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
-name_label = "Rows"
-value_labels = ["Smear First", "Lenses First"]
-initial_value_label = "Smear First"
+name_label = "Blocks"
+value_labels = ["On", "Off"]
+initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
-name_label = "Lenses"
-value_labels = ["Round", "Bars"]
-initial_value_label = "Round"
+name_label = "Sweep Shape"
+value_labels = ["Fold", "Ramp"]
+initial_value_label = "Fold"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
 name_label = "Palette"
-value_labels = ["Rainbow", "CMY"]
-initial_value_label = "Rainbow"
+value_labels = ["Photo", "Swap"]
+initial_value_label = "Photo"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
-name_label = "Ground"
-value_labels = ["Black", "White"]
-initial_value_label = "Black"
+name_label = "Steps"
+value_labels = ["Staircase", "Shuffle"]
+initial_value_label = "Staircase"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
@@ -107,11 +108,11 @@ initial_value_label = "Video"
 
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
-name_label = "Blobs"
+name_label = "Quake"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 650
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
@@ -119,19 +120,18 @@ suffix_label = "%"
 name = "Default"
 
 [[preset]]
-name = "Big Smear"
-rotary_potentiometer_4 = 900
-rotary_potentiometer_1 = 700
-linear_potentiometer_12 = 900
+name = "Calm"
+linear_potentiometer_12 = 0
+rotary_potentiometer_4 = 560
 
 [[preset]]
-name = "CMY Bars"
-toggle_switch_8 = 1
+name = "Aftershock"
+linear_potentiometer_12 = 1023
+rotary_potentiometer_4 = 800
+rotary_potentiometer_2 = 760
+
+[[preset]]
+name = "Blue Ribbons"
 toggle_switch_9 = 1
-linear_potentiometer_12 = 500
-
-[[preset]]
-name = "White Dots"
-rotary_potentiometer_2 = 1000
-toggle_switch_10 = 1
-linear_potentiometer_12 = 300
+rotary_potentiometer_1 = 700
+rotary_potentiometer_3 = 800
