@@ -73,7 +73,7 @@ name_label = "Picture"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 300
+initial_value = 205
 display_float_digits = 0
 suffix_label = "%"
 
