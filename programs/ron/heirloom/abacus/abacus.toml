@@ -1,77 +1,78 @@
-# Abacus - Heirloom #42 (2026-10-20), from WIN_20230605_01_03_50.
-# Rows of glossy beads lit from above. See abacus.vhd and SUMMARY.md.
+# Abacus - Heirloom #42, rebuilt 2026-10-27 (v0.5.0) from WIN_20230605_01_03_50.
+# Rows of glossy red beads between wavy blue/green bands: one measured scalar field (a knot grid) through
+# one measured palette, plus a measured gloss layer (glints, lenses, eyes).  See abacus.vhd, abacus.py and SUMMARY.md.
 
 [program]
-processing_delay_clks = 16
+processing_delay_clks = 24
 program_id = "com.czartroniks.abacus"
 program_name = "Abacus"
-program_version = "0.1.0"
+program_version = "0.5.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
-categories = ["Shape", "Grid", "Render"]
+categories = ["Pattern", "Grid", "Shape"]
 program_type = "processing"
-description = "Rows of glossy beads in red, blue and green, lit from above with a chrome rim, the picture glowing inside them."
+description = "Rows of glossy red beads between wavy blue and green bands, sliding along their rods; the picture etches the contours."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_1"
-name_label = "Cells"
+name_label = "Beads"
 control_mode = "linear"
-display_min_value = 1
-display_max_value = 16
-initial_value = 480
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
 display_float_digits = 0
-suffix_label = ""
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
 name_label = "Rows"
 control_mode = "linear"
-display_min_value = 1
-display_max_value = 8
-initial_value = 320
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
 display_float_digits = 0
-suffix_label = ""
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
-name_label = "Shade"
+name_label = "Rims"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 500
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
-name_label = "Hue"
+name_label = "Slide"
 control_mode = "linear"
-display_min_value = 0
-display_max_value = 7
-initial_value = 0
+display_min_value = -100
+display_max_value = 100
+initial_value = 640
 display_float_digits = 0
 suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
-name_label = "Drift"
+name_label = "Roll"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 540
+initial_value = 512
 display_float_digits = 0
 suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
-name_label = "Rim"
+name_label = "Etch"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 300
+initial_value = 160
 display_float_digits = 0
 suffix_label = "%"
 
@@ -84,20 +85,20 @@ initial_value_label = "Off"
 [[parameter]]
 parameter_id = "toggle_switch_8"
 name_label = "Palette"
-value_labels = ["RGB", "Warm"]
-initial_value_label = "RGB"
+value_labels = ["Photo", "Swap"]
+initial_value_label = "Photo"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
-name_label = "Rim"
-value_labels = ["Off", "On"]
-initial_value_label = "On"
+name_label = "Stack"
+value_labels = ["Mirror", "Saw"]
+initial_value_label = "Mirror"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
-name_label = "Shape"
-value_labels = ["Beads", "Tubes"]
-initial_value_label = "Beads"
+name_label = "Flip"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
@@ -107,31 +108,33 @@ initial_value_label = "Video"
 
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
-name_label = "Beads"
+name_label = "Swell"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 700
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
 [[preset]]
-name = "Default"
+name = "Photo"
 
 [[preset]]
-name = "Tiny Dots"
-rotary_potentiometer_1 = 1023
-rotary_potentiometer_2 = 900
-linear_potentiometer_12 = 350
-
-[[preset]]
-name = "Warm Tubes"
-toggle_switch_8 = 1
-toggle_switch_10 = 1
-linear_potentiometer_12 = 800
-
-[[preset]]
-name = "Sliding Rows"
-rotary_potentiometer_5 = 760
+name = "Twin Rods"
 toggle_switch_7 = 1
+rotary_potentiometer_4 = 512
+
+[[preset]]
+name = "Red Bars"
 linear_potentiometer_12 = 900
+rotary_potentiometer_3 = 760
+
+[[preset]]
+name = "Pips"
+linear_potentiometer_12 = 120
+rotary_potentiometer_1 = 700
+
+[[preset]]
+name = "Blue Beads"
+toggle_switch_8 = 1
+rotary_potentiometer_5 = 600
