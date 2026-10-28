@@ -1,100 +1,105 @@
-# Radiant - Heirloom #52 (2026-10-20), from duci.jpg (paper collage).
-# A sunburst of pink/white rays round a dark halo with the video cut in.
-# See radiant.vhd and SUMMARY.md.
+# Radiant - Heirloom #52, v0.5.0 (2026-10-27): rebuilt from duci.jpg (one of Ron's portrait paper collages).
+# Pink and white paper rays burst from a dark halo behind a bust with a flag lens and a cup of coffee on his
+# head; a woman in a cream gown, a soldier in camouflage, hands holding coal with a DUCI label, on a maroon
+# ground of paint and torn tissue.  The camera is printed through the cut-outs.  See radiant.vhd and SUMMARY.md.
 
 [program]
-processing_delay_clks = 20
+processing_delay_clks = 16
 program_id = "com.czartroniks.radiant"
 program_name = "Radiant"
-program_version = "0.1.0"
+program_version = "0.5.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Mask", "Shape", "Craft"]
 program_type = "processing"
-description = "A collage sunburst: pink and white rays round a dark halo on a maroon ground, the video cut in at the centre."
+description = "Collage: pink rays burst from a halo behind a bust with a flag lens; the camera printed through cut-out figures."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_1"
-name_label = "Rays"
+name_label = "Halo"
 control_mode = "linear"
-display_min_value = 1
-display_max_value = 8
-initial_value = 704
+display_min_value = 50
+display_max_value = 150
+initial_value = 512
 display_float_digits = 0
-suffix_label = ""
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
-name_label = "Halo"
+name_label = "Lift"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 400
+initial_value = 0
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
-name_label = "Ring"
+name_label = "Stripe"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 250
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
-name_label = "Ground"
-value_labels = ["Maroon", "Navy", "Forest", "Ochre", "Plum", "Teal", "Rust", "Slate"]
-initial_value_label = "Maroon"
-
-[[parameter]]
-parameter_id = "rotary_potentiometer_5"
-name_label = "Spin"
+name_label = "Tissue"
 control_mode = "linear"
-display_min_value = -100
+display_min_value = 0
 display_max_value = 100
 initial_value = 512
 display_float_digits = 0
-suffix_label = ""
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Flank"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 0
+display_float_digits = 0
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
-name_label = "Centre"
+name_label = "Pulse"
 control_mode = "linear"
-display_min_value = 25
-display_max_value = 75
-initial_value = 560
+display_min_value = 0
+display_max_value = 100
+initial_value = 256
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
-name_label = "Rays"
+name_label = "Lens"
+value_labels = ["Flag", "Clear"]
+initial_value_label = "Flag"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Cup"
 value_labels = ["On", "Off"]
 initial_value_label = "On"
 
 [[parameter]]
-parameter_id = "toggle_switch_8"
+parameter_id = "toggle_switch_9"
 name_label = "Halo"
-value_labels = ["Dark", "Glow"]
+value_labels = ["Dark", "Gold"]
 initial_value_label = "Dark"
 
 [[parameter]]
-parameter_id = "toggle_switch_9"
-name_label = "Cutout"
-value_labels = ["Inside", "Outside"]
-initial_value_label = "Inside"
-
-[[parameter]]
 parameter_id = "toggle_switch_10"
-name_label = "Palette"
-value_labels = ["Pink", "Cyan"]
-initial_value_label = "Pink"
+name_label = "Label"
+value_labels = ["DUCI", "Coal"]
+initial_value_label = "DUCI"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
@@ -104,31 +109,36 @@ initial_value_label = "Video"
 
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
-name_label = "Rays"
+name_label = "Radiant"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 300
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
 [[preset]]
-name = "Default"
+name = "Duci"
 
 [[preset]]
-name = "Full Disc"
-rotary_potentiometer_1 = 1000
+name = "Bare Halo"
+linear_potentiometer_12 = 0
+rotary_potentiometer_6 = 0
+
+[[preset]]
+name = "Blaze"
 linear_potentiometer_12 = 1023
+rotary_potentiometer_6 = 700
+rotary_potentiometer_3 = 800
 
 [[preset]]
-name = "Cyan Glow"
-rotary_potentiometer_4 = 640
-toggle_switch_8 = 1
-toggle_switch_10 = 1
-linear_potentiometer_12 = 450
-
-[[preset]]
-name = "Outside In"
-rotary_potentiometer_2 = 700
+name = "Gold Icon"
 toggle_switch_9 = 1
-linear_potentiometer_12 = 200
+rotary_potentiometer_1 = 720
+rotary_potentiometer_2 = 700
+rotary_potentiometer_4 = 300
+
+[[preset]]
+name = "Wide Stage"
+rotary_potentiometer_5 = 1023
+linear_potentiometer_12 = 800
