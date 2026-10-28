@@ -1,103 +1,103 @@
-# Fern - Heirloom #46 (2026-10-20), from WIN_20230713_00_17_11.
-# Nested parabola fronds in flame colours over a teal ripple field.
+# Fern - Heirloom #46, v0.5.0 (2026-10-27): rebuilt from WIN_20230713_00_17_11.
+# Nested pink frond arms on vertical stems over a green maze, a blue scanline ground and a small dart.
 # See fern.vhd and SUMMARY.md.
 
 [program]
-processing_delay_clks = 20
+processing_delay_clks = 32
 program_id = "com.czartroniks.fern"
 program_name = "Fern"
-program_version = "0.1.0"
+program_version = "0.5.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Curve", "Mirror", "Organic"]
 program_type = "processing"
-description = "Nested pink, orange and yellow parabola fronds, mirrored, over a teal ripple field with a blue zone. Curvature on the slider."
+description = "Nested pink fronds on stems over a green maze, a blue scanline ground and a small dart. Arrow sets the chevron depth."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_1"
-name_label = "Pitch"
+name_label = "Fronds"
 control_mode = "linear"
-display_min_value = 0
-display_max_value = 100
-initial_value = 300
+display_min_value = 50
+display_max_value = 200
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
-name_label = "Duty"
+name_label = "Stems"
 control_mode = "linear"
-display_min_value = 0
-display_max_value = 100
-initial_value = 380
+display_min_value = 50
+display_max_value = 200
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
-name_label = "Ripple"
+name_label = "Speed"
 control_mode = "linear"
-display_min_value = 0
+display_min_value = -100
 display_max_value = 100
-initial_value = 400
-display_float_digits = 0
-suffix_label = "%"
-
-[[parameter]]
-parameter_id = "rotary_potentiometer_4"
-name_label = "Hue"
-control_mode = "linear"
-display_min_value = 0
-display_max_value = 7
-initial_value = 0
+initial_value = 600
 display_float_digits = 0
 suffix_label = ""
 
 [[parameter]]
-parameter_id = "rotary_potentiometer_5"
-name_label = "Edge"
+parameter_id = "rotary_potentiometer_4"
+name_label = "Flesh"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 150
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Maze"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 280
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
-name_label = "Drift"
+name_label = "Bend"
 control_mode = "linear"
-display_min_value = -100
+display_min_value = 0
 display_max_value = 100
-initial_value = 560
+initial_value = 256
 display_float_digits = 0
-suffix_label = ""
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
 name_label = "Mirror"
-value_labels = ["Top", "Centre"]
-initial_value_label = "Centre"
+value_labels = ["Photo", "Sweep"]
+initial_value_label = "Photo"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
 name_label = "Palette"
-value_labels = ["Flame", "Ice"]
-initial_value_label = "Flame"
+value_labels = ["Pink", "Green"]
+initial_value_label = "Pink"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
-name_label = "Field"
-value_labels = ["Ripple", "Source"]
-initial_value_label = "Ripple"
+name_label = "Dart"
+value_labels = ["On", "Off"]
+initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
-name_label = "Blue"
-value_labels = ["Off", "On"]
+name_label = "Stems"
+value_labels = ["On", "Off"]
 initial_value_label = "On"
 
 [[parameter]]
@@ -108,29 +108,38 @@ initial_value_label = "Video"
 
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
-name_label = "Reach"
+name_label = "Arrow"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 400
+initial_value = 438
 display_float_digits = 0
 suffix_label = "%"
 
 [[preset]]
-name = "Default"
+name = "Photo"
 
 [[preset]]
-name = "Picture Fronds"
-toggle_switch_9 = 1
-rotary_potentiometer_2 = 200
+name = "Wireframe"
+rotary_potentiometer_4 = 120
+rotary_potentiometer_5 = 200
 
 [[preset]]
-name = "Ice Bars"
+name = "Deep Arrow"
+linear_potentiometer_12 = 1000
+rotary_potentiometer_3 = 760
+
+[[preset]]
+name = "Green Fern"
 toggle_switch_8 = 1
-linear_potentiometer_12 = 40
+rotary_potentiometer_1 = 640
 
 [[preset]]
-name = "Tight Curl"
-linear_potentiometer_12 = 1023
-rotary_potentiometer_1 = 150
-toggle_switch_10 = 0
+name = "Sweep"
+toggle_switch_7 = 1
+toggle_switch_9 = 1
+
+[[preset]]
+name = "Chevrons"
+toggle_switch_10 = 1
+rotary_potentiometer_1 = 760
