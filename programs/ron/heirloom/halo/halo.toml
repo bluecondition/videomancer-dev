@@ -1,100 +1,105 @@
-# Halo - Heirloom #47 (2026-10-20), from WIN_20230801_00_19_00.
-# Glowing yellow-green rings on dark olive, blue / violet chevrons between, mirrored cells.
+# Halo - Heirloom #47 v0.5.0 (2026-10-27), rebuilt from the photo WIN_20230801_00_19_00.
+# Glowing yellow ellipses in red-crescent cells between blue hourglass contour columns with
+# concave diamonds; a white noise band right of every seam; torn line starts near the cusps.
 # See halo.vhd and SUMMARY.md.
 
 [program]
-processing_delay_clks = 20
+processing_delay_clks = 32
 program_id = "com.czartroniks.halo"
 program_name = "Halo"
-program_version = "0.1.0"
+program_version = "0.5.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Render", "Pattern", "Mirror"]
 program_type = "processing"
-description = "Glowing yellow-green rings on dark olive with blue and violet chevrons between, mirrored cells; the video lights the glow."
+description = "Glowing ellipses in red-crescent cells between blue hourglass contour columns and diamonds; torn line starts."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_1"
-name_label = "Cells"
+name_label = "Rings"
 control_mode = "linear"
-display_min_value = 1
-display_max_value = 4
-initial_value = 384
-display_float_digits = 0
-suffix_label = ""
-
-[[parameter]]
-parameter_id = "rotary_potentiometer_2"
-name_label = "Width"
-control_mode = "linear"
-display_min_value = 0
-display_max_value = 100
-initial_value = 240
+display_min_value = 45
+display_max_value = 150
+initial_value = 550
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Cells"
+control_mode = "linear"
+display_min_value = 1
+display_max_value = 4
+initial_value = 349
+display_float_digits = 2
+suffix_label = ""
+
+[[parameter]]
 parameter_id = "rotary_potentiometer_3"
-name_label = "Chevrons"
+name_label = "Pinch"
 control_mode = "linear"
 display_min_value = 0
-display_max_value = 100
-initial_value = 260
+display_max_value = 160
+initial_value = 639
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
-name_label = "Hue"
-value_labels = ["Lime", "Gold", "Cyan", "Magenta"]
-initial_value_label = "Lime"
-
-[[parameter]]
-parameter_id = "rotary_potentiometer_5"
-name_label = "Drift"
+name_label = "Speed"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 540
+initial_value = 600
 display_float_digits = 0
 suffix_label = ""
 
 [[parameter]]
-parameter_id = "rotary_potentiometer_6"
+parameter_id = "rotary_potentiometer_5"
 name_label = "Tear"
 control_mode = "linear"
 display_min_value = 0
+display_max_value = 200
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Warp"
+control_mode = "linear"
+display_min_value = 0
 display_max_value = 100
-initial_value = 160
+initial_value = 153
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
-name_label = "Rings"
-value_labels = ["Glow", "Hard"]
-initial_value_label = "Glow"
+name_label = "Seam"
+value_labels = ["Cut", "Mirror"]
+initial_value_label = "Cut"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
-name_label = "Chevrons"
+name_label = "Noise"
 value_labels = ["On", "Off"]
 initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
-name_label = "Mirror"
-value_labels = ["On", "Off"]
-initial_value_label = "On"
+name_label = "Ember"
+value_labels = ["Short", "Long"]
+initial_value_label = "Short"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
-name_label = "Rows"
-value_labels = ["One", "Grid"]
-initial_value_label = "One"
+name_label = "Flip"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
@@ -104,33 +109,35 @@ initial_value_label = "Video"
 
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
-name_label = "Ring"
+name_label = "Halo"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 380
+initial_value = 472
 display_float_digits = 0
 suffix_label = "%"
 
 [[preset]]
-name = "Default"
+name = "Photo"
 
 [[preset]]
-name = "Gold Grid"
-rotary_potentiometer_1 = 1000
-rotary_potentiometer_4 = 256
-toggle_switch_10 = 1
-linear_potentiometer_12 = 300
+name = "Bare Rings"
+linear_potentiometer_12 = 0
+rotary_potentiometer_5 = 0
 
 [[preset]]
-name = "Hard Cyan"
-rotary_potentiometer_4 = 512
+name = "Suns"
+linear_potentiometer_12 = 1023
+toggle_switch_9 = 1
+
+[[preset]]
+name = "Lattice"
+rotary_potentiometer_2 = 900
+rotary_potentiometer_1 = 300
+rotary_potentiometer_3 = 900
+
+[[preset]]
+name = "Straight"
+rotary_potentiometer_3 = 0
 toggle_switch_7 = 1
 toggle_switch_8 = 1
-linear_potentiometer_12 = 600
-
-[[preset]]
-name = "Big Halo"
-rotary_potentiometer_1 = 0
-rotary_potentiometer_2 = 60
-linear_potentiometer_12 = 1023
