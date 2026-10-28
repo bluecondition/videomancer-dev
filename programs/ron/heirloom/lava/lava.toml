@@ -1,53 +1,75 @@
-# Lava - Heirloom #43 (2026-10-20), from WIN_20230605_01_14_56.
-# Flame lobes dripping down into blue-violet pods, a striped curtain at the left.
+# Lava - Heirloom #43, v0.5.0 (2026-10-27): rebuilt from the photo WIN_20230605_01_14_56.
+# A glossy red lava sheet - worms, a zigzag rim, olive diamonds, a white web, rimmed blobs - hangs over violet
+# stripes and bends up into stepped drapes on the left.  One fitted oscillator period through a fitted warp.
+# See lava.vhd, lava.py (fitted data) and SUMMARY.md.
 
 [program]
-processing_delay_clks = 20
+processing_delay_clks = 36
 program_id = "com.czartroniks.lava"
 program_name = "Lava"
-program_version = "0.1.0"
+program_version = "0.5.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Render", "Organic", "Pattern"]
 program_type = "processing"
-description = "Red and orange flame lobes drip down into blue-violet pods past a striped magenta curtain; the picture glows inside the lobes."
+description = "A glossy red lava sheet of worms, diamonds and webs bends into drapes over violet stripes; Flow pours it."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_1"
-name_label = "Lobes"
+name_label = "Columns"
 control_mode = "linear"
-display_min_value = 0
-display_max_value = 100
-initial_value = 200
+display_min_value = 50
+display_max_value = 200
+initial_value = 341
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
-name_label = "Pods"
+name_label = "Bend"
 control_mode = "linear"
 display_min_value = 0
-display_max_value = 100
-initial_value = 300
+display_max_value = 160
+initial_value = 650
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
-name_label = "Curtain"
+name_label = "Rows"
 control_mode = "linear"
-display_min_value = 0
-display_max_value = 100
-initial_value = 260
+display_min_value = 60
+display_max_value = 160
+initial_value = 409
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
-name_label = "Glow"
+name_label = "Speed"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 600
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Ripple"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 320
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Melt"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
@@ -56,48 +78,28 @@ display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
-parameter_id = "rotary_potentiometer_5"
-name_label = "Smear"
-control_mode = "linear"
-display_min_value = 0
-display_max_value = 100
-initial_value = 350
-display_float_digits = 0
-suffix_label = "%"
-
-[[parameter]]
-parameter_id = "rotary_potentiometer_6"
-name_label = "Drift"
-control_mode = "linear"
-display_min_value = -100
-display_max_value = 100
-initial_value = 540
-display_float_digits = 0
-suffix_label = ""
-
-[[parameter]]
 parameter_id = "toggle_switch_7"
-name_label = "Curtain"
-value_labels = ["Off", "On"]
-initial_value_label = "On"
-
-[[parameter]]
-parameter_id = "toggle_switch_8"
-name_label = "Pods"
-value_labels = ["Off", "On"]
-initial_value_label = "On"
-
-[[parameter]]
-parameter_id = "toggle_switch_9"
-name_label = "Palette"
-value_labels = ["Lava", "Ice"]
-initial_value_label = "Lava"
-
-[[parameter]]
-parameter_id = "toggle_switch_10"
 name_label = "Mirror"
 value_labels = ["Off", "On"]
 initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Ground"
+value_labels = ["Stripes", "Black"]
+initial_value_label = "Stripes"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Flip"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Palette"
+value_labels = ["Lava", "Ice"]
+initial_value_label = "Lava"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
@@ -107,29 +109,37 @@ initial_value_label = "Video"
 
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
-name_label = "Melt"
+name_label = "Flow"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 600
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
 [[preset]]
-name = "Default"
+name = "Lava"
 
 [[preset]]
-name = "Short Drips"
-linear_potentiometer_12 = 250
+name = "Receding"
+linear_potentiometer_12 = 120
 
 [[preset]]
-name = "Ice Mirror"
-toggle_switch_9 = 1
+name = "Flood"
+linear_potentiometer_12 = 980
+rotary_potentiometer_3 = 700
+
+[[preset]]
+name = "Twin Curtain"
+toggle_switch_7 = 1
+rotary_potentiometer_2 = 820
+
+[[preset]]
+name = "Ice Sheet"
 toggle_switch_10 = 1
-linear_potentiometer_12 = 800
+toggle_switch_8 = 1
 
 [[preset]]
-name = "Osc Flood"
-rotary_potentiometer_4 = 600
-toggle_switch_11 = 1
-linear_potentiometer_12 = 1023
+name = "Rising"
+toggle_switch_9 = 1
+rotary_potentiometer_4 = 420
