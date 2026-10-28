@@ -7,7 +7,7 @@
 processing_delay_clks = 24
 program_id = "com.czartroniks.chartreuse"
 program_name = "Chartreuse"
-program_version = "0.5.0"
+program_version = "0.5.2"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"

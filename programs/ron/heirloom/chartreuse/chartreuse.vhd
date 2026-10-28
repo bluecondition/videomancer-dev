@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Chartreuse v0.5.0 -- Heirloom #51, rebuilt from the photo WIN_20231211_00_38_58.
+-- Chartreuse v0.5.2 -- Heirloom #51, rebuilt from the photo WIN_20231211_00_38_58.
 --
 -- The photo: a glossy lime surface mirrored about a horizontal axis 460 lines down.  A big soft
 -- sphere on the left, then nested ")" crescents (the hourglass, the white C) sweeping right, their
@@ -411,6 +411,7 @@ begin
         variable v_k  : unsigned(9 downto 0);
         variable v_gn : unsigned(12 downto 0);
         variable v_t  : signed(16 downto 0);
+        variable v_pq : unsigned(15 downto 0);
         variable v_kg : signed(13 downto 0);
         variable v_hh : signed(12 downto 0);
     begin
@@ -533,8 +534,10 @@ begin
                 when others => f_dx <= resize(f_zx, 11);
             end case;
             -- breathing: +-256 (Q.12) triangle of the speed phase
-            if f_phi(15) = '1' then v_t := signed(resize(f_phi - 32768, 17)) - 16384;
-            else v_t := signed(resize(32768 - f_phi, 17)) - 16384; end if;
+            -- (phase + 1/4 so the offset is 0 at phase 0: still at the K4 centre = the photo)
+            v_pq := f_phi + 16384;
+            if v_pq(15) = '1' then v_t := signed(resize(v_pq - 32768, 17)) - 16384;
+            else v_t := signed(resize(32768 - v_pq, 17)) - 16384; end if;
             f_off <= v_t(15 downto 6);
 
             -- field slots on the serial multiplier: slot p = zc/32 (1..3), 0 load, 24 store
