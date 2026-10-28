@@ -1,44 +1,35 @@
-# Cutout - Heirloom #55 (2026-10-20), from tezcatlipoca.jpg (paper collage).
-# A head cut out of a yellow ground, filled with the video torn into pieces.
+# Cutout - Heirloom #55, v0.5.0 (2026-10-27), rebuilt from tezcatlipoca.jpg (a paper collage).
+# A skull-like head in profile cut out of a yellow ground, filled with torn magazine scraps that print
+# the camera picture; a soup-cup eye, a plate of pastries, stone teeth, a "Love." label, a black jaw.
 # See cutout.vhd and SUMMARY.md.
 
 [program]
-processing_delay_clks = 20
+processing_delay_clks = 32
 program_id = "com.czartroniks.cutout"
 program_name = "Cutout"
-program_version = "0.1.0"
+program_version = "0.5.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Mask", "Shape", "Craft"]
 program_type = "processing"
-description = "A collage head cut out of a flat yellow ground, filled with the video torn into blue and teal paper pieces."
+description = "A collage head cut from a yellow ground, its torn scraps printing the camera: soup-cup eye, plate, stone teeth."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_1"
-name_label = "Tear"
+name_label = "Rag"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 250
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
-name_label = "Levels"
-control_mode = "linear"
-display_min_value = 0
-display_max_value = 100
-initial_value = 400
-display_float_digits = 0
-suffix_label = "%"
-
-[[parameter]]
-parameter_id = "rotary_potentiometer_3"
-name_label = "Centre"
+name_label = "Zoom"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
@@ -47,58 +38,68 @@ display_float_digits = 0
 suffix_label = ""
 
 [[parameter]]
-parameter_id = "rotary_potentiometer_4"
-name_label = "Cream"
+parameter_id = "rotary_potentiometer_3"
+name_label = "Ink"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Jaw"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 0
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
-name_label = "Pieces"
+name_label = "Paint"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 400
+initial_value = 0
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
-name_label = "Sway"
+name_label = "Speed"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 512
+initial_value = 640
 display_float_digits = 0
 suffix_label = ""
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
-name_label = "Profile"
-value_labels = ["Head", "Oval"]
-initial_value_label = "Head"
+name_label = "Facing"
+value_labels = ["Left", "Right"]
+initial_value_label = "Left"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
-name_label = "Pieces"
-value_labels = ["Torn", "Plain"]
-initial_value_label = "Torn"
+name_label = "Fringe"
+value_labels = ["On", "Off"]
+initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
-name_label = "Palette"
-value_labels = ["Blue", "Warm"]
-initial_value_label = "Blue"
+name_label = "Chatter"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
-name_label = "Outline"
-value_labels = ["On", "Off"]
-initial_value_label = "On"
+name_label = "Eye"
+value_labels = ["Soup", "Mirror"]
+initial_value_label = "Soup"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
@@ -108,32 +109,35 @@ initial_value_label = "Video"
 
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
-name_label = "Head"
+name_label = "Tear"
 control_mode = "linear"
-display_min_value = 25
-display_max_value = 125
-initial_value = 700
+display_min_value = 0
+display_max_value = 100
+initial_value = 0
 display_float_digits = 0
 suffix_label = "%"
 
 [[preset]]
-name = "Default"
+name = "Collage"
 
 [[preset]]
-name = "Plain Oval"
-toggle_switch_7 = 1
-toggle_switch_8 = 1
-linear_potentiometer_12 = 800
+name = "Torn Strips"
+linear_potentiometer_12 = 620
+rotary_potentiometer_1 = 700
 
 [[preset]]
-name = "Warm Pieces"
-rotary_potentiometer_1 = 600
-rotary_potentiometer_4 = 700
+name = "Chatterbox"
+rotary_potentiometer_4 = 420
 toggle_switch_9 = 1
-linear_potentiometer_12 = 600
 
 [[preset]]
-name = "Giant Head"
-rotary_potentiometer_5 = 900
+name = "Smoking Mirror"
 toggle_switch_10 = 1
+rotary_potentiometer_5 = 380
+rotary_potentiometer_2 = 300
+
+[[preset]]
+name = "Shredded"
 linear_potentiometer_12 = 1023
+rotary_potentiometer_1 = 1023
+rotary_potentiometer_3 = 900
