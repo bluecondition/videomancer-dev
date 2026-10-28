@@ -1,44 +1,141 @@
-# Chartreuse — Heirloom #51
+# Chartreuse — a glossy lime surface folded into a sphere and crescents
 
-**Source photo**: `photos/WIN_20231211_00_38_58_Pro.jpg` (1920×1080 capture, 2023-12-11)
+**v0.5.0 (2026-10-28): built, NOT flashed.** Heirloom #51, rebuilt from the photo
+`photos/WIN_20231211_00_38_58_Pro.jpg`. A monochrome lime surface (dark green -> lime -> white),
+mirrored about a horizontal axis 460 lines down. A big soft sphere sits on the left, then nested ")"
+crescents sweep right (an hourglass neck, a white C). Their arms bend into zig-zag fins at
+the top and bottom. Every band is shaded like chrome and outlined by thin white lines. The presets
+are hand-written placeholders.
 
-## Breakdown of the photo
+## Reading of the photo (measured)
+Working files are in `.heirloom_work/rb_chartreuse/` (notes.md has the full log).
+- **One colour ramp.** Every pixel lies on one 1-D curve:
+  - G 76 -> 140 with R = B = 0;
+  - then R rises at 1.6x G until G saturates at 245 (167, 244, 50);
+  - then R and B rise to (245, 246, 236).
 
-- **Field**: a single-hue (lime / green / white) field of smooth glossy folds — vertical ribbons bent into S-curves,
-  shaded like chrome with thin bright highlight lines along the folds.
-- **Orb**: a soft bright orb at the left.
-- **Palette**: monochrome green with white highlights.
+  The curve is measured channel by channel and carried as a 256-entry palette (arc length t).
+- **Mirror.** Flip correlation 0.91 overall (0.98 at the left). The axis that best overlays the line
+  network is y = 460.
+- **Lines.** FWHM 7..24 px. The median line profile in scan order has a dark notch (G -30) ~7 px
+  before the peak, a sharp rise over 5 px and a slow ~10 px tail after it. Horizontal lines get
+  the notch too, so it is a level feature, not an x-delay.
+- **No oscillator field explains the frame.** These were tried, and each fails somewhere:
+  - a low-rank separable fold (rms 0.12) and egg-crate hypotheses;
+  - FM row scaling (good only for |Y| < 130);
+  - an affine row warp (outer rows r ~0.9);
+  - chirped per-row phase tracking (fails beyond |Y| ~120).
 
-## Design
+  The surface is therefore carried as measured fields over the folded half plane:
+  - **F**, the shading: a weighted LSQ fit with the line pixels masked;
+  - **S**, the signed distance to the photo's line skeleton, fitted as its own spline. A level set
+    of F alone gave wobbly lines (|grad F| ~0.009/px) and spurious lines along steep soft edges.
+    S is within 3.3 px median of the skeleton;
+  - **P**, line presence: it gates out the closures that S must make at soft edges.
 
-| Photo element | Program |
-|---|---|
-| Fold field | tri(x·K1 + bend·tri(y)) + a slower second fold, written to the line buffer as the Osc source; Source = Video uses the video luma |
-| Bend | P12 = the bend depth |
-| Chrome shading | luma = 64 + 3·level; thin white lines where the level's low bits fall under K2 (S7) |
-| Orb | r² falloff from a point at the left (dx² by second differences, dy² per line), K4 size (S8) |
-| Hue | K3 picks one of 8 hues; chroma scaled by the level; S9 Duo alternates with the field |
-| Mirror | S10 left / right about the centre |
+  F, S and P are quadratic B-splines on 16 px x 24 line knots (28 x 122 knots, 8 + 7 + 1 bits).
+  The float proto's 4x4 region-mean error against the photo is 9.2 max / 4.3 mean.
 
-Generated avid; output conditioning before the blanking gate. Latency 20 clocks.
+## What it does
+1. **Per field** (one serial multiplier, 3 slots): the K1 zoom zx, the field X of pixel 0 (x0,
+   centred on the virtual width), and the knot-row step zk = zy / 24. K1, K2, K3, K5 and P12
+   glide (1/8 of the gap per field).
+2. **Per line** (kicked at the source avid rise, computes the NEXT line, ~490 clocks, which fits
+   SD's 858):
+   - Y = |y - 460| (Twin: | |y - 460| - 270 |), then Yk = Y zk (knot row + 8-bit fraction),
+     reflected at the bottom of the grid;
+   - the B-spline weights b0 = (1 - v)^2 / 2, b2 = v^2 / 2, b1 = 1 - b0 - b2 (two products);
+   - the Sway offset q (128 - q) of the row phase (one product);
+   - the MAC: 123 knot columns x 3 rows, F, S and P in parallel. It writes 121 **sample words**
+     into the next line's RAM bank. Word j holds F, S and P at X = 16 j and 16 j + 8, made from
+     three consecutive columns by shift-adds ((c0 + c1) / 2 and (c0 + 6 c1 + c2) / 8);
+   - in the blanking, the first three words are preloaded into the pixel window.
+3. **Pixel path** (24 stages):
+   - 0: field X DDA, segment-change flag;
+   - 1: 3-word window (shift + refill), the 4-bit fraction, |dX|;
+   - 2: the two samples around the pixel; octagonal distance to the sphere centre; the source
+     value (camera luma - 512, or the Osc 2-D triangle);
+   - 3-4: linear interpolation of F, S and P (one small product each); the dome (cone) and source
+     products;
+   - 5-6: F in Q.12 + dome + source + the breathing offset. S gets the same offset x 25/64, so the
+     lines ride the shading;
+   - 7-8: P12 gain (mantissa x octave shift) about the line level F = 0.30, and |S|;
+   - 9: triangle fold (|G| mod 2) -> palette address t; the line level from (half-width - |S|);
+     the notch flag (|S| shrinking just outside the line);
+   - 10-12: presence and fold lines (P12 > 50 %), palette read, smoothstep;
+   - 13: tail (fast attack, x0.78 decay per pixel), Neon;
+   - 14-16: white blend (luma 5-bit, chroma 4 levels), notch (-1/32 or -1/16 luma);
+   - 17-23: output conditioning ([1 2 1] luma, [1 2 2 2 2 2 2 2 1]/16 chroma, luma 13/16), then
+     the blanking gate on the generated avid. Stage 24 is the output register.
+4. **Memories** (23 EBR):
+   - C_FSA 2048x16 (8), C_FSB 1024x16 (4), C_FSC 512x16 (2): the knot words;
+   - C_PY / C_PU / C_PV 512x8 (3): two palettes, Chartreuse and Ember;
+   - the sample-word RAM, 2 banks x 128 x 56 bits (4);
+   - two 256x16 delay rings (2): chroma for the 8-tap box, and the syncs.
 
-## Controls
+   All written RAMs carry no_rw_check. Tables are generated by `chartreuse.py` into
+   `chartreuse_pkg.vhd`, in hardware convention (u = Cr, v = Cb). Luma is pre-boosted 16/13 with
+   a knee above 848.
 
-| Control | Function |
-|---|---|
-| K1 Folds | fold pitch |
-| K2 Shine | highlight width |
-| K3 Hue | hue |
-| K4 Orb | orb size |
-| K5 Drift | fold drift, bipolar |
-| K6 Contrast | field contrast |
-| S7 Shine | highlights Off / On |
-| S8 Orb | Off / On |
-| S9 Hue | Mono / Duo |
-| S10 Mirror | Off / On |
-| S11 Source | Video / Osc |
-| **P12 Fold** | bend depth: straight ribbons → deep S-folds |
+| Control | Photo element | Function |
+|---|---|---|
+| P12 Fold | the chrome banding | colourizer gain about the line level: x0.25 (a soft glow) .. x1 at 50 % (the photo) .. x4 (dense chrome folds, with white lines at every new crossing) |
+| K1 Crescents | the crescent spacing | horizontal zoom about the sphere: x0.55 (wide) .. x1.8 (dense; the mirrored continuation shows at the right) |
+| K2 Arms | the fins and arms | vertical scale of the fold: x0.5 (tall, straight) .. x2 (squashed, many fins) |
+| K3 Sphere | the orb | bipolar dome: sunk .. the photo .. a bright swollen sphere with a ring |
+| K4 Speed | motion | bipolar, still in the centre +-24: the bands and lines breathe (a level LFO), Sway travels, the Osc drifts |
+| K5 Lines | the white outlines | line half-width 0 (no lines) .. 9.5 px at 50 % (the photo) .. 19 px |
+| K6 Picture | | how far the source bends the surface (default 200: the composition holds) |
+| S7 Twin | the mirror | Off / On: a second fold, two spheres stacked |
+| S8 Sway | the bend | Off / On: a per-line sine offset (+-40 virtual px, 384-line period) |
+| S9 Shade | the gloss | Gloss / Neon (dark surface, glowing lines) |
+| S10 Palette | the hue | Chartreuse / Ember |
+| S11 Source | | Video / Osc (default Video) |
+
+## Video
+The camera's luma, minus mid-grey, is added to the surface level F (and, scaled, to the line
+field S). The bands and their outlines bend around the picture: bright areas push the folds one
+way and dark areas the other. The composition stays readable at the default Picture. Osc mode
+feeds a slow 2-D triangle plaid through the same path.
+
+## Engine notes
+- **Contracts:** damier's generated avid; one 24-clock latency in every mode
+  (processing_delay_clks 24); virtual 1080-line coordinates from the timing ID.
+- **Fit history:**
+  - v1 (quadratic evaluation per pixel, r^2 dome DDA, look-ahead notch) was 8,964 LC (116 %) and
+    failed to place.
+  - v2 (sample words + linear interpolation) was 5,544 LUT standalone and still too big.
+  - v3 has a one-product engine, a cone dome, a local notch, a 4-level chroma blend and binary
+    fold lines. It moves the syncs and the chroma box into EBR rings and cuts the latency from 32
+    to 24. It packs to 6,959-6,980 LC.
+- router2 stalled (overused = 2) on HD Analog; router1 closes it. Rebuild with router1.
 
 ## Status
+- **v0.5.0 built 2026-10-28 with ROUTER1** (`NEXTPNR_ROUTER="--router router1" ./build_heirloom.sh
+  chartreuse`). All six configs closed on seed 1:
+  - HD Analog 79.32, HD HDMI 83.79, HD Dual 80.80 MHz;
+  - SD Analog 76.97, SD HDMI 79.54, SD Dual 79.94 MHz.
+- 6,959-6,980 LC (91 %), 23/32 EBR, iceunpack OK on all six.
+- `out/rev_b/ron/heirloom/chartreuse.vmprog` (496,514 B). NOT flashed.
+- Verified in GHDL (720p60, decimation 1, hardware hues):
+  - An integer model (`.heirloom_work/rb_chartreuse/imodel.py`) mirrors the RTL arithmetic. The
+    Osc-default render matches it exactly on 99.98 % of pixels; the rest are line-start edge
+    pixels.
+  - The diff caught one RTL bug: the chroma blend's shift_left kept the 10-bit width, so the lines
+    came out light green.
+  - Against the photo: 4x4 region-mean error 19.3 max / 7.1 mean, local-contrast ratio 0.97.
+  - Video with selfie.jpg at the default Picture: 21.3 max / 8.2 mean; the composition holds
+    while the face bends the bands and lines.
+  - Motion (model, K4 max): 6 % of pixels change per field and 73 % between fields 3 and 9.
 
-- v0.1.0 (2026-10-20): built, 6/6 (HD Dual seed 2, others seed 1), HD 77.8–84.1 MHz, 3.9k LC (51 %), 4 EBR (luma-only line buffer). **Not yet flashed.**
+## Deviations from the photo, and why
+- The whites are greyer: the HDMI-bar luma ceiling (drawn white ~777 after the 13/16 scale) caps
+  the photo's near-full white.
+- The sharp Z-corners of the zig-zag fins are rounded at knot scale (16 x 24 px), and the fin zone
+  (top and bottom right) is simplified.
+- The lines wobble a few pixels about the photo's (S is within 3.3 px median of the skeleton).
+  Some short line fragments are missing or extra where the presence gate is coarse.
+- The notch before each line comes from |S| shrinking, not from a look-ahead of the line itself.
+  It is thinner than the photo's.
+- Resolution: the same picture at SD, 720p and 1080p (virtual coordinates). SD (4:3) shows the
+  central 1440 virtual px, so the left part of the sphere and the right-most crescent are cropped.

@@ -1,125 +1,138 @@
-# Chartreuse - Heirloom #51 (2026-10-20), from WIN_20231211_00_38_58.
-# Fold field (or video luma) chrome-shaded in one hue.
-# See chartreuse.vhd and SUMMARY.md.
+# Chartreuse - Heirloom #51, rebuilt 2026-10-27 from WIN_20231211_00_38_58.
+# A glossy lime surface mirrored about a horizontal axis: a soft sphere, nested crescents,
+# zig-zag fins, white outline lines.  Fold on the slider.
+# See chartreuse.vhd, chartreuse.py and SUMMARY.md.
 
 [program]
-processing_delay_clks = 20
+processing_delay_clks = 24
 program_id = "com.czartroniks.chartreuse"
 program_name = "Chartreuse"
-program_version = "0.1.0"
+program_version = "0.5.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Render", "Material", "Curve"]
 program_type = "processing"
-description = "Glossy lime-green folds with chrome highlight lines and a soft orb, or the picture shaded the same way. Fold on the slider."
+description = "Glossy lime sphere and crescents with white outlines, folded from one surface; the picture bends it. Fold on the slider."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_1"
-name_label = "Folds"
+name_label = "Crescents"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Arms"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Sphere"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Speed"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 640
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Lines"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Picture"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
 initial_value = 200
 display_float_digits = 0
 suffix_label = "%"
-[[parameter]]
-parameter_id = "rotary_potentiometer_2"
-name_label = "Shine"
-control_mode = "linear"
-display_min_value = 0
-display_max_value = 100
-initial_value = 250
-display_float_digits = 0
-suffix_label = "%"
-[[parameter]]
-parameter_id = "rotary_potentiometer_3"
-name_label = "Hue"
-control_mode = "linear"
-display_min_value = 0
-display_max_value = 100
-initial_value = 320
-display_float_digits = 0
-suffix_label = "%"
-[[parameter]]
-parameter_id = "rotary_potentiometer_4"
-name_label = "Orb"
-control_mode = "linear"
-display_min_value = 0
-display_max_value = 100
-initial_value = 500
-display_float_digits = 0
-suffix_label = "%"
-[[parameter]]
-parameter_id = "rotary_potentiometer_5"
-name_label = "Drift"
-control_mode = "linear"
-display_min_value = -100
-display_max_value = 100
-initial_value = 560
-display_float_digits = 0
-suffix_label = ""
-[[parameter]]
-parameter_id = "rotary_potentiometer_6"
-name_label = "Contrast"
-control_mode = "linear"
-display_min_value = 25
-display_max_value = 225
-initial_value = 400
-display_float_digits = 0
-suffix_label = "%"
+
 [[parameter]]
 parameter_id = "toggle_switch_7"
-name_label = "Shine"
-value_labels = ["Off", "On"]
-initial_value_label = "On"
-[[parameter]]
-parameter_id = "toggle_switch_8"
-name_label = "Orb"
-value_labels = ["Off", "On"]
-initial_value_label = "On"
-[[parameter]]
-parameter_id = "toggle_switch_9"
-name_label = "Hue"
-value_labels = ["Mono", "Duo"]
-initial_value_label = "Mono"
-[[parameter]]
-parameter_id = "toggle_switch_10"
-name_label = "Mirror"
+name_label = "Twin"
 value_labels = ["Off", "On"]
 initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Sway"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Shade"
+value_labels = ["Gloss", "Neon"]
+initial_value_label = "Gloss"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Palette"
+value_labels = ["Chartreuse", "Ember"]
+initial_value_label = "Chartreuse"
+
 [[parameter]]
 parameter_id = "toggle_switch_11"
 name_label = "Source"
 value_labels = ["Video", "Osc"]
-initial_value_label = "Osc"
+initial_value_label = "Video"
+
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
 name_label = "Fold"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 500
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
-[[preset]]
-name = "Default"
 
 [[preset]]
-name = "Chrome Face"
-toggle_switch_11 = 0
-linear_potentiometer_12 = 300
+name = "Photo"
 
 [[preset]]
-name = "Deep Folds"
-linear_potentiometer_12 = 1000
-rotary_potentiometer_1 = 400
+name = "Chrome Storm"
+linear_potentiometer_12 = 900
+rotary_potentiometer_4 = 820
+toggle_switch_8 = 1
 
 [[preset]]
-name = "Duo Mirror"
+name = "Twin Spheres"
+toggle_switch_7 = 1
+rotary_potentiometer_3 = 700
+
+[[preset]]
+name = "Neon Ember"
 toggle_switch_9 = 1
 toggle_switch_10 = 1
-linear_potentiometer_12 = 600
-
+rotary_potentiometer_5 = 800
