@@ -23,7 +23,7 @@
 --   S8  Tear      the torn rows (zebra tears + the 376 px row shifts + jitter)
 --   S9  Stack     the cross repeats at half the vertical period
 --   S10 Palette   Photo / Swap (Cr and Cb exchanged: amber beam, blue zebra, cyan bars)
---   S11 Source    Video / Osc (Video: the camera's luma bends the zebra contours and blooms the beam)
+--   S11 Source    Video / Osc (Video: the camera's slewed luma bends the zebra contours and blooms the beam)
 --   P12 BEAM      the cross beam's brightness 0 .. 2 x: 0 = the bars and zebra alone, 50 % = the
 --                 photo, 100 % = the beam swallows everything but white, yellow and the zebra.
 --
@@ -164,6 +164,7 @@ architecture crossbeam of program_top is
     signal f_gm   : unsigned(4 downto 0) := to_unsigned(16, 5);
     signal f_ge   : unsigned(1 downto 0) := "10";
     signal f_lb   : signed(11 downto 0) := (others => '0');
+    signal f_lbm  : signed(12 downto 0) := to_signed(-1024, 13);
     signal f_pvq, f_pvh : signed(18 downto 0) := to_signed(250317, 19);
     signal f_dy0  : signed(18 downto 0) := to_signed(90491, 19);
     signal f_fl   : unsigned(15 downto 0) := (others => '0');     -- zebra flow phase, Q.16 of a stripe
@@ -226,11 +227,12 @@ architecture crossbeam of program_top is
     signal b_sdx : signed(21 downto 0) := (others => '0');
     signal b_bx  : unsigned(16 downto 0) := (others => '0');
     signal b_pcf : unsigned(10 downto 0) := (others => '0');   -- free-running pixel clock: stage-k pixel x = pcf - k
-    signal b_e   : unsigned(23 downto 0) := (others => '0');   -- SDX^2 / 2^12 (2nd-order DDA)
+    signal b_e   : signed(24 downto 0) := (others => '0');     -- SDX^2 / 2^12 (2nd-order DDA; dips below 0 near the centre)
     signal b_f   : signed(31 downto 0) := (others => '0');
 
     -- video luma above black (0..255), Osc = none
     signal v_y1 : unsigned(7 downto 0) := (others => '0');
+    signal v_ys : unsigned(10 downto 0) := (others => '0');
 
     -- pixel path
     type t_u4 is array (natural range <>) of unsigned(3 downto 0);
@@ -240,13 +242,13 @@ architecture crossbeam of program_top is
     type t_u9 is array (natural range <>) of unsigned(8 downto 0);
     type t_sl is array (natural range <>) of std_logic;
     signal p1_adx : unsigned(9 downto 0) := (others => '0');
-    signal p1_dif : signed(24 downto 0) := (others => '0');
+    signal p1_dif : signed(25 downto 0) := (others => '0');
     signal p1_asdx : unsigned(20 downto 0) := (others => '0');
     signal p1_bp : unsigned(1 downto 0) := (others => '0');
     signal p1_xi : unsigned(16 downto 0) := (others => '0');
     signal p2_u  : unsigned(9 downto 0) := (others => '0');
     signal p2_j  : unsigned(3 downto 0) := (others => '0');
-    signal p2_ad : unsigned(23 downto 0) := (others => '0');
+    signal p2_ad : unsigned(24 downto 0) := (others => '0');
     signal p2_in : std_logic := '0';
     signal p2_darm : unsigned(11 downto 0) := (others => '0');
     signal p3_t  : unsigned(7 downto 0) := (others => '0');
@@ -272,6 +274,7 @@ architecture crossbeam of program_top is
     signal p7_pl : signed(14 downto 0) := (others => '0');
     signal p7_ag : unsigned(5 downto 0) := (others => '0');
     signal p7_lv : unsigned(6 downto 0) := (others => '0');
+    signal p7_rl : unsigned(3 downto 0) := (others => '0');
     signal p_rrc, p_grc : t_u5(7 to 13) := (others => (others => '0'));
     signal p8_s2 : signed(12 downto 0) := (others => '0');
     signal p8_val : std_logic := '0';
@@ -292,13 +295,18 @@ architecture crossbeam of program_top is
     signal p14_qu, p14_qv : unsigned(8 downto 0) := (others => '0');
     signal p14_py, p14_pu, p14_pv : unsigned(9 downto 0) := (others => '0');
     signal p15_y, p15_u, p15_v : signed(11 downto 0) := (others => '0');
+    signal p11_rkey : unsigned(9 downto 0) := (others => '0');
     signal p16_y : unsigned(10 downto 0) := (others => '0');
     signal p16_u, p16_v : signed(11 downto 0) := (others => '0');
-    signal p17_y : unsigned(9 downto 0) := to_unsigned(64, 10);
+    signal p16_dy, p16_du, p16_dv : signed(11 downto 0) := (others => '0');
+    signal p16_ed : std_logic := '0';
+    signal p17_y : unsigned(10 downto 0) := to_unsigned(64, 11);
+    signal s_h18 : signed(11 downto 0) := (others => '0');
     signal p17_u8, p17_v8 : unsigned(7 downto 0) := to_unsigned(128, 8);
     -- output conditioning
     signal s_boxu, s_boxv, s_boxud, s_boxvd : unsigned(10 downto 0) := to_unsigned(1024, 11);
-    signal s_y18, s_y19, s_y20, s_y21, s_y22, s_y22x : unsigned(9 downto 0) := to_unsigned(64, 10);
+    signal s_y18 : unsigned(10 downto 0) := to_unsigned(64, 11);
+    signal s_y19, s_y20, s_y21, s_y22, s_y22x : unsigned(9 downto 0) := to_unsigned(64, 10);
     signal s_yf23, s_y24 : unsigned(9 downto 0) := to_unsigned(64, 10);
     signal s_u23, s_v23, s_u24, s_v24 : unsigned(9 downto 0) := to_unsigned(512, 10);
     type t_bit_shift is array (0 to C_LAT - 1) of std_logic;
@@ -505,6 +513,7 @@ begin
             v_k := s_g(4)(12 downto 3);
             if v_k(9) = '0' then f_lb <= shift_left(signed(resize(v_k, 12)) - 512, 1);
             else f_lb <= shift_right(signed(resize(v_k, 12)) - 512, 2); end if;
+            f_lbm <= resize(f_lb, 13) - 1024;
             -- knob curves (shift-add) and switch constants
             v_k := s_g(0)(12 downto 3);
             f_s <= to_unsigned(205, 12) + resize(v_k & '0', 12) + resize(v_k(9 downto 9), 12);     -- 0.05 + 0.5 k (Q.12)
@@ -727,13 +736,13 @@ begin
                     when 3 => e_pa <= e_pd; e_aa <= e_ad;
                     when 4 =>
                         v_tP := signed(resize(e_pd, 11)) - signed(resize(e_pa, 11));
-                        e_dP <= v_tP; e_dP3 <= v_tP + shift_left(v_tP, 1);
+                        e_dP <= v_tP; e_dP3 <= shift_left(v_tP, 2) - v_tP;
                         v_tA := signed(resize(unsigned(e_ad(15 downto 10)), 9)) - signed(resize(unsigned(e_aa(15 downto 10)), 9));
-                        e_dA <= v_tA; e_dA3 <= v_tA + shift_left(v_tA, 1);
+                        e_dA <= v_tA; e_dA3 <= shift_left(v_tA, 2) - v_tA;
                         v_tR := signed(resize(unsigned(e_ad(9 downto 5)), 8)) - signed(resize(unsigned(e_aa(9 downto 5)), 8));
-                        e_dR <= v_tR; e_dR3 <= v_tR + shift_left(v_tR, 1);
+                        e_dR <= v_tR; e_dR3 <= shift_left(v_tR, 2) - v_tR;
                         v_tG := signed(resize(unsigned(e_ad(4 downto 0)), 8)) - signed(resize(unsigned(e_aa(4 downto 0)), 8));
-                        e_dG <= v_tG; e_dG3 <= v_tG + shift_left(v_tG, 1);
+                        e_dG <= v_tG; e_dG3 <= shift_left(v_tG, 2) - v_tG;
                         e_xP <= (others => '0'); e_xA <= (others => '0'); e_xR <= (others => '0'); e_xG <= (others => '0');
                     when 5 | 6 | 7 =>
                         if e_k = 5 then v_fb := e_f(5 downto 4); elsif e_k = 6 then v_fb := e_f(3 downto 2); else v_fb := e_f(1 downto 0); end if;
@@ -789,13 +798,13 @@ begin
         if rising_edge(clk) then
             if g_start = '1' then
                 b_xv <= (others => '0'); b_sdx <= f_sdx0; b_bx <= l_bx0; b_pcf <= (others => '0');
-                b_e <= f_e0; b_f <= f_f0;
+                b_e <= signed(resize(f_e0, 25)); b_f <= f_f0;
             else
                 b_pcf <= b_pcf + 1;
                 if g_avid = '1' then
                     b_xv <= b_xv + resize(t_xs, 20);
                     b_sdx <= b_sdx + signed(resize(f_ks, 22));
-                    b_e <= unsigned(signed(b_e) + resize(shift_right(b_f, 12), 24));
+                    b_e <= b_e + resize(shift_right(b_f, 12), 25);
                     b_f <= b_f + signed(resize(f_k2, 32));
                     v_bx := resize(b_bx, 18) + resize(f_incb, 18);
                     if v_bx >= C_SUPER then b_bx <= v_bx(16 downto 0) - to_unsigned(C_SUPER, 17); else b_bx <= v_bx(16 downto 0); end if;
@@ -851,12 +860,14 @@ begin
                 v_vy := (unsigned(data_in.y) - 64) * to_unsigned(75, 7);
                 if v_vy(16) = '1' then v_y1 <= to_unsigned(255, 8); else v_y1 <= v_vy(15 downto 8); end if;
             end if;
+            -- horizontal slew of the camera luma (an analog low-pass, ~8 px): s += y - s/8
+            v_ys <= v_ys + resize(v_y1, 11) - resize(v_ys(10 downto 3), 11);
 
             -- 1: |dx|; dy^2 - (s dx)^2 (Q.16 of c / 256 units); |s dx|; block period and offset
             v_dx := signed('0' & b_xv) - C_XC;
             if v_dx < 0 then v_ad := unsigned(-v_dx); else v_ad := unsigned(v_dx); end if;
             p1_adx <= v_ad(17 downto 8);
-            p1_dif <= signed(resize(l_dy2, 25)) - signed(resize(b_e, 25));
+            p1_dif <= signed(resize(l_dy2, 26)) - resize(b_e, 26);
             p1_asdx <= resize(unsigned(abs(b_sdx)), 21);
             if b_bx >= 78336 then p1_bp <= "10"; p1_xi <= b_bx - 78336;
             elsif b_bx >= 39168 then p1_bp <= "01"; p1_xi <= b_bx - 39168;
@@ -869,15 +880,15 @@ begin
             else p2_u <= unsigned(v_u(9 downto 0)); end if;
             if p1_xi >= 34240 then v_c := "10"; elsif p1_xi >= 19520 then v_c := "01"; else v_c := "00"; end if;
             p2_j <= resize(p1_bp & '0', 4) + resize(p1_bp, 4) + resize(v_c, 4);
-            if p1_dif < 0 then p2_ad <= resize(unsigned(-p1_dif), 24); p2_in <= '1';
-            else p2_ad <= resize(unsigned(p1_dif), 24); p2_in <= '0'; end if;
+            if p1_dif < 0 then p2_ad <= resize(unsigned(-p1_dif), 25); p2_in <= '1';
+            else p2_ad <= resize(unsigned(p1_dif), 25); p2_in <= '0'; end if;
             v_dd := signed(resize(l_ady, 22)) - signed(resize(p1_asdx, 22));
             v_ud := unsigned(abs(v_dd));
             p2_darm <= resize(v_ud(21 downto 8), 12);
             if p1_adx(9 downto 2) = 255 then r_axa <= to_unsigned(255, 8); else r_axa <= p1_adx(9 downto 2); end if;
 
             -- 3: t = |dy^2 - (s dx)^2| / 2^24 (clamped), inside flag; ridge; line RAM and cell ROM addresses
-            if p2_ad(23 downto 20) /= 0 then p3_t <= (others => '1'); else p3_t <= p2_ad(19 downto 12); end if;
+            if p2_ad(24 downto 20) /= 0 then p3_t <= (others => '1'); else p3_t <= p2_ad(19 downto 12); end if;
             p3_in <= p2_in;
             if p2_darm < 60 then p3_rr <= resize(to_unsigned(60, 12) - p2_darm, 6); else p3_rr <= (others => '0'); end if;
             pl_ra <= l_bank & p2_u(9 downto 4);
@@ -908,20 +919,19 @@ begin
             p6_gr <= unsigned(v_l(4 downto 0));
             p_cell(6) <= unsigned(p5_cell); p_rr(6) <= p_rr(5);
 
-            -- 7: log beam = log falloff + log profile; zebra + camera (2 stripes full scale); amplitude
+            -- 7: log beam = log falloff + log profile; zebra + slewed camera (1 stripe full scale); amplitude
             -- gamma; ramp key sum; camera bloom log
             p7_s1 <= resize(unsigned(p6_lax(9 downto 0)), 11) + resize(unsigned(p6_lf(9 downto 0)), 11);
             p7_val <= p6_lax(10) and p6_lf(10);
-            p7_pl <= resize(p6_pp, 15) + signed(resize(v_y1 & '0', 15));
+            p7_pl <= resize(p6_pp, 15) + signed(resize(v_ys(10 downto 3), 15));
             p7_ag <= unsigned(C_AG6(to_integer(p6_ai)));
-            p7_lv <= unsigned(C_LV(to_integer(v_y1(7 downto 3))));
+            p7_lv <= unsigned(C_LV(to_integer(v_ys(10 downto 6))));
+            p7_rl <= resize(p_rr(6)(5 downto 3), 4) + resize(p_rr(6)(5 downto 4), 4);
             p_rrc(7) <= p6_rr; p_grc(7) <= p6_gr;
             p_cell(7) <= p_cell(6); p_rr(7) <= p_rr(6);
 
             -- 8: log beam - 8 octaves + P12 gain + ridge + bloom; stripe gain mantissa product
-            p8_s2 <= signed(resize(p7_s1, 13)) - 1024 + resize(f_lb, 13)
-                     + signed(resize(p_rr(7)(5 downto 3), 13)) + signed(resize(p_rr(7)(5 downto 4), 13))
-                     + signed(resize(p7_lv, 13));
+            p8_s2 <= (signed(resize(p7_s1, 13)) + f_lbm) + (signed(resize(p7_rl, 13)) + signed(resize(p7_lv, 13)));
             p8_val <= p7_val;
             p8_pm <= p7_pl * signed('0' & f_gm);
             p_ag(8) <= p7_ag;
@@ -953,6 +963,8 @@ begin
             else p11_g3 <= unsigned(r_exq); end if;
             v_sr := p10_st * p_ag(10);
             p11_sr <= v_sr(13 downto 6);
+            v_rs := resize(p_rrc(10) & "000", 9) + resize(p_grc(10) & "000", 9);
+            p11_rkey <= resize(v_rs, 10) + resize(v_rs(8 downto 3), 10);
 
             -- 12: zebra red; layer decode; key compare; beam colour ROM address
             v_o := p11_sr;
@@ -962,8 +974,7 @@ begin
             if f_bars = '0' or v_code = 10 then v_isz := '1';
             elsif v_code = 9 or (v_code = 11 and l_fyh = '0') then v_isr := '1';
             elsif v_code = 11 then v_isw := '1'; end if;
-            v_rs := resize(p_rrc(11) & "000", 9) + resize(p_grc(11) & "000", 9);
-            if v_isr = '1' then v_key := resize(v_rs, 10) + resize(v_rs(8 downto 3), 10);
+            if v_isr = '1' then v_key := p11_rkey;
             elsif v_isw = '1' or v_kc = 15 then v_key := (others => '1');
             else v_key := resize(v_kc & "1000", 10); end if;
             if v_isz = '0' and resize(p11_g3, 10) > v_key then v_win := '1'; else v_win := '0'; end if;
@@ -976,13 +987,14 @@ begin
             -- 14: beam colour copy; red part (zebra red or ramp red) and ramp green part; palette
             p14_gy <= unsigned(r_gyq(29 downto 20)); p14_gu <= unsigned(r_gyq(19 downto 10)); p14_gv <= unsigned(r_gyq(9 downto 0));
             if p_isz(13) = '1' then v_ri := p13_zr; else v_ri := p_rrc(13) & "000"; end if;
-            v_r18 := shift_left(resize(v_ri, 18), 8) + shift_left(resize(v_ri, 18), 3) - resize(v_ri, 18);    -- 263 v
+            v_r18 := shift_left(resize(v_ri, 18), 8) + shift_left(resize(v_ri, 18), 6) + shift_left(resize(v_ri, 18), 2);   -- 324 v (263 x 16/13)
             p14_ry <= v_r18(16 downto 8);
             v_r18 := shift_left(resize(v_ri, 18), 9) - shift_left(resize(v_ri, 18), 6) + shift_left(resize(v_ri, 18), 1);   -- 450 v
             p14_ru <= v_r18(16 downto 8);
             v_r18 := shift_left(resize(v_ri, 18), 7) + shift_left(resize(v_ri, 18), 4) + shift_left(resize(v_ri, 18), 3);   -- 152 v
             p14_rv <= v_r18(15 downto 8);
-            p14_qy <= resize(p_grc(13) & "0000", 10) + resize(p_grc(13)(4 downto 3), 10);                  -- 516 * 8 g / 256
+            v_r18 := resize(p_grc(13) * to_unsigned(5079, 13), 18);                                        -- 516 x 8 x 16/13
+            p14_qy <= v_r18(17 downto 8);
             v_r18 := resize(p_grc(13) * to_unsigned(3016, 12), 18);
             p14_qu <= v_r18(16 downto 8);
             v_r18 := resize(p_grc(13) * to_unsigned(2384, 12), 18);
@@ -1010,31 +1022,25 @@ begin
             wb_ra <= b_pcf - 13;
             wb_wa <= b_pcf - 17; wb_wd(0) <= p_win(17);
 
-            -- 16: outline (the key flag differs within +-2 px or from the line above): x 7/16 toward
-            -- black / neutral; palette swap exchanges Cr and Cb
+            -- 16: outline flag (the key flag differs within +-2 px or from the line above); offsets
             v_ed := '0';
             if p_win(15) /= p_win(13) or p_win(15) /= p_win(14) or p_win(15) /= p_win(16) or p_win(15) /= p_win(17)
                or p_win(15) /= wb_q(0) then v_ed := '1'; end if;
-            v_y := p15_y; v_cu := p15_u; v_cv := p15_v;
-            if v_ed = '1' and p_isz(15) = '0' then
-                v_t15 := shift_left(resize(v_y - 64, 15), 3) - resize(v_y - 64, 15); v_y := 64 + resize(shift_right(v_t15, 4), 12);
-                v_t15 := shift_left(resize(v_cu - 512, 15), 3) - resize(v_cu - 512, 15); v_cu := 512 + resize(shift_right(v_t15, 4), 12);
-                v_t15 := shift_left(resize(v_cv - 512, 15), 3) - resize(v_cv - 512, 15); v_cv := 512 + resize(shift_right(v_t15, 4), 12);
-            end if;
-            if v_y < 64 then p16_y <= to_unsigned(64, 11); else p16_y <= unsigned(v_y(10 downto 0)); end if;
-            if f_alt = '1' then p16_u <= v_cv; p16_v <= v_cu; else p16_u <= v_cu; p16_v <= v_cv; end if;
+            p16_ed <= v_ed and not p_isz(15);
+            p16_y <= unsigned(resize(p15_y, 11)); p16_u <= p15_u; p16_v <= p15_v;
+            p16_dy <= p15_y - 64; p16_du <= p15_u - 512; p16_dv <= p15_v - 512;
 
-            -- 17: luma curve (top compressed above 600, pre-boosted 16/13 for the output's 13/16), 8-bit chroma
-            v_yc := p16_y;
-            if v_yc > 600 then
-                v_yh := v_yc - 600;
-                v_yp := resize(v_yh * to_unsigned(133, 8), 20);
-                v_yc := to_unsigned(600, 11) + resize(v_yp(18 downto 8), 11);
+            -- 17: outline x 7/16 toward black / neutral; palette swap exchanges Cr and Cb; 8-bit chroma
+            if p16_ed = '1' then
+                p17_y <= unsigned(resize(signed(resize(p16_y, 12)) - shift_right(p16_dy, 1) - shift_right(p16_dy, 4), 11));
+                v_cu := p16_u - shift_right(p16_du, 1) - shift_right(p16_du, 4);
+                v_cv := p16_v - shift_right(p16_dv, 1) - shift_right(p16_dv, 4);
+            else
+                p17_y <= p16_y; v_cu := p16_u; v_cv := p16_v;
             end if;
-            v_yp := resize((v_yc - 64) * to_unsigned(315, 9), 20);
-            if v_yp(19 downto 8) > 876 then p17_y <= to_unsigned(940, 10); else p17_y <= to_unsigned(64, 10) + resize(v_yp(17 downto 8), 10); end if;
-            if p16_u < 0 then p17_u8 <= (others => '0'); elsif p16_u > 1023 then p17_u8 <= (others => '1'); else p17_u8 <= unsigned(p16_u(9 downto 2)); end if;
-            if p16_v < 0 then p17_v8 <= (others => '0'); elsif p16_v > 1023 then p17_v8 <= (others => '1'); else p17_v8 <= unsigned(p16_v(9 downto 2)); end if;
+            if f_alt = '1' then v_y := v_cv; v_cv := v_cu; v_cu := v_y; end if;
+            if v_cu < 0 then p17_u8 <= (others => '0'); elsif v_cu > 1023 then p17_u8 <= (others => '1'); else p17_u8 <= unsigned(v_cu(9 downto 2)); end if;
+            if v_cv < 0 then p17_v8 <= (others => '0'); elsif v_cv > 1023 then p17_v8 <= (others => '1'); else p17_v8 <= unsigned(v_cv(9 downto 2)); end if;
             for i in 13 to 17 loop p_win(i) <= p_win(i - 1); p_isz(i) <= p_isz(i - 1); p_isr(i) <= p_isr(i - 1); end loop;
             p_isw(13) <= p_isw(12);
             for i in 9 to 10 loop p_ag(i) <= p_ag(i - 1); end loop;
@@ -1057,7 +1063,16 @@ begin
             end if;
             v_sc := resize(s_boxu, 12) + s_boxud; s_u23 <= v_sc(11 downto 2);
             v_sc := resize(s_boxv, 12) + s_boxvd; s_v23 <= v_sc(11 downto 2);
-            s_y18 <= p17_y; s_y19 <= s_y18; s_y20 <= s_y19; s_y21 <= s_y20; s_y22 <= s_y21; s_y22x <= s_y22;
+            -- luma knee over two of the delay stages (sources carry the 16/13 pre-boost for the output's
+            -- 13/16; compressed above 724 so drawn white lands near 777)
+            s_y18 <= p17_y; s_h18 <= signed(resize(p17_y, 12)) - 724;
+            if s_h18 > 0 then
+                v_yc := to_unsigned(724, 11) + resize(unsigned(s_h18(10 downto 1)), 11) + resize(unsigned(s_h18(10 downto 6)), 11);
+            else
+                v_yc := s_y18;
+            end if;
+            s_y19 <= v_yc(9 downto 0);
+            s_y20 <= s_y19; s_y21 <= s_y20; s_y22 <= s_y21; s_y22x <= s_y22;
             v_sy := resize(s_y21, 12) + shift_left(resize(s_y22, 12), 1) + resize(s_y22x, 12);
             s_yf23 <= v_sy(11 downto 2);
             -- 24: luma toward black (white 940 -> 777); blanking gate on the latency-aligned generated avid
