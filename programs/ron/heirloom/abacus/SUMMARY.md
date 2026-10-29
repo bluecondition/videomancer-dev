@@ -1,6 +1,6 @@
 # Abacus — rows of glossy beads on their rods
 
-**v0.6.1 (2026-10-28, phase 2 round 2): built, NOT flashed.** Phase 2 removes the X/Y zooms and resizes every bead
+**v0.6.1 (2026-10-28, phase 2 round 2): flashed 2026-10-28, Ron: "looks OK".** Presets are still placeholders. Phase 2 removes the X/Y zooms and resizes every bead
 inside its own slot instead (Width, Height). Slide and Roll make each bead and each row swell and shrink on
 its own, in X and Y alike; see "Phase 2" below.
 Rebuilt in v0.5.0 from the photo WIN_20230605_01_03_50 (Heirloom #42):
@@ -203,7 +203,7 @@ and shrink separately, with the scale offset along the line so one bead differs 
   computes the bead warp table, and writes abacus_pkg.vhd.
 
 ## Status
-- **v0.6.1 (phase 2 round 2) built 2026-10-28, router2, NOT flashed.**
+- **v0.6.1 (phase 2 round 2) built 2026-10-28, router2; flashed 2026-10-28, looks OK (Ron).**
   - **Seeds:** HD HDMI = seed 2, SD Analog = seed 2 (its seed 1 timed out); the rest seed 1.
   - **Fmax (post-route):** HD Analog 79.10, HD HDMI 75.69, HD Dual 77.21, SD Analog 80.87, SD HDMI 77.09,
     SD Dual 75.23 MHz.

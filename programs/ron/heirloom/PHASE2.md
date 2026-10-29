@@ -163,7 +163,7 @@ Commit the row along with the program's own files.
 
 | Program | Status | Phase-2 version | Notes |
 |---|---|---|---|
-| abacus | built v0.6.1, awaiting HW | v0.6.1 | Ron 10-28: no X/Y zoom (resize individual beads instead); widen Rims; Slide + Roll also wave individual bead sizes; Etch a bit stronger on video; Flip glides; Swell deeper at 0 %. v0.6.0: K1 Width / K2 Height per-bead warps, all six asks in. Round 2 (sheet): Slide / Roll waves scale beads in X and Y, prominent even slow, each bead distinct -> v0.6.1 per-bead / per-row swell pulses; 95 % LC, 24 EBR, router2 (HD HDMI + SD Analog seed 2) |
+| abacus | done v0.6.1 (flashed 10-28: looks OK) | v0.6.1 | Ron 10-28: no X/Y zoom (resize individual beads instead); widen Rims; Slide + Roll also wave individual bead sizes; Etch a bit stronger on video; Flip glides; Swell deeper at 0 %. v0.6.0: K1 Width / K2 Height per-bead warps, all six asks in. Round 2 (sheet): Slide / Roll waves scale beads in X and Y, prominent even slow, each bead distinct -> v0.6.1 per-bead / per-row swell pulses; 95 % LC, 24 EBR, router2 (HD HDMI + SD Analog seed 2) |
 | archway | not started | | |
 | argus | not started | | |
 | argyle | not started | | |
