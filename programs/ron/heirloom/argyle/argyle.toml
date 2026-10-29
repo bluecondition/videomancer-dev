@@ -1,40 +1,41 @@
-# Argyle - Heirloom #8, v0.5.0 (2026-10-21): rebuilt from the photo WIN_20230207_23_50_54.
+# Argyle - Heirloom #8, v0.6.0 (2026-10-29): rebuilt from the photo WIN_20230207_23_50_54.
+# Phase 2: K1 Bloom / K2 Scatter size every diamond individually (v0.5's Columns / Rows zoom is gone).
 # A lattice of nested diamonds: magenta lens-shaped cores, fine pink/white -> lavender -> blue -> cyan/green
 # rings, green and cyan junctions, big/small cores alternating.  See argyle.vhd and SUMMARY.md.
 
 [program]
-processing_delay_clks = 24
+processing_delay_clks = 27
 program_id = "com.czartroniks.argyle"
 program_name = "Argyle"
-program_version = "0.5.0"
+program_version = "0.6.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Pattern", "Grid", "Illusion"]
 program_type = "processing"
-description = "Nested-diamond lattice: magenta cores in fine neon rings, green and cyan junctions; video bends the field."
+description = "Nested-diamond lattice of magenta cores in fine neon rings; every diamond swells or shrinks on its own; video bends it."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_1"
-name_label = "Columns"
+name_label = "Bloom"
 control_mode = "linear"
-display_min_value = 2
-display_max_value = 16
-initial_value = 389
-display_float_digits = 1
+display_min_value = -100
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
 suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
-name_label = "Rows"
+name_label = "Scatter"
 control_mode = "linear"
-display_min_value = 1
-display_max_value = 10
-initial_value = 357
-display_float_digits = 1
-suffix_label = ""
+display_min_value = 0
+display_max_value = 100
+initial_value = 0
+display_float_digits = 0
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
@@ -131,7 +132,7 @@ rotary_potentiometer_4 = 760
 [[preset]]
 name = "Chevrons"
 toggle_switch_7 = 1
-rotary_potentiometer_2 = 160
+rotary_potentiometer_1 = 820
 
 [[preset]]
 name = "Amber Quilt"
@@ -140,7 +141,14 @@ toggle_switch_9 = 1
 linear_potentiometer_12 = 700
 
 [[preset]]
-name = "Big Diamonds"
-rotary_potentiometer_1 = 150
-rotary_potentiometer_2 = 130
+name = "Bloom"
+rotary_potentiometer_1 = 1023
+
+[[preset]]
+name = "Tunnel"
+rotary_potentiometer_1 = 0
+
+[[preset]]
+name = "Scatter"
+rotary_potentiometer_2 = 1023
 rotary_potentiometer_3 = 600

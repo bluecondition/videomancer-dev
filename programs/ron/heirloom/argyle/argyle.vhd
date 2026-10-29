@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Argyle v0.5.0 -- Heirloom #8, rebuilt from the photo WIN_20230207_23_50_54.
+-- Argyle v0.6.0 -- Heirloom #8, rebuilt from the photo WIN_20230207_23_50_54.
 --
 -- The photo: a lattice of nested diamonds, 7.32 across and 4.14 down (2-cell
 -- period 524.8 px, row period 261.0 lines), every other diamond a row lower.
@@ -19,8 +19,11 @@
 -- right, the capture's chroma offset.  All of it fitted to the photo
 -- (.heirloom_work/rb_argyle; tables in argyle.py).
 --
---   K1  Columns  diamonds across 16:9, 2 .. 16 (7.32 = the photo)
---   K2  Rows     diamond rows down the frame, 1 .. 10 (4.14)
+--   K1  Bloom    every diamond swells or shrinks in its own cell by its distance from the screen
+--                centre: + = the centre diamonds swell flat, the outer ones shrink to ringed pips;
+--                - = a tunnel (small centre, swollen edges); 0 = the photo
+--   K2  Scatter  every diamond its own random size (riding with the lattice, breathing with
+--                Drift's speed); 0 = the photo
 --   K3  Pairs    the big / small core alternation, 0 (all equal) .. 4x (photo 1x)
 --   K4  Drift    the lattice slides along its diagonal, bipolar, still in the centre
 --   K5  Bend     how far the source (camera luma / Osc) bends the field
@@ -33,10 +36,18 @@
 --   P12 CORES    oscillator gain: 0 = no cores, soft rings; 50 % = the photo;
 --                100 % = cores and junctions clip flat, a solid argyle
 --
+-- The lattice is fixed at the photo's 7.32 x 4.14 diamonds (v0.5's K1 / K2
+-- zoom is gone).  Per-diamond size (v0.6): a per-field builder fills a table of
+-- k - 1 for every diamond (A and B type per cell); the pixel path picks k by the
+-- sign of s and adds sgn(s) * e * (k - 1) to the ring index and the colour column,
+-- e = max(|s| - 0.125 - W, 0).  W is a window that rises near a diamond's own
+-- cell edges, where it touches a same-type neighbour through a saddle, so the
+-- size never steps across a cell boundary.
+--
 -- Virtual 1080-line coordinates (diamonds keep their shape at SD / 720p /
 -- 1080; 4:3 SD shows 5.5 across).  Generated avid; output conditioning (luma
 -- [1 2 1], chroma [1 2 2 2 2 2 2 2 1]/16, luma to ~777) before the blanking
--- gate.  Latency 24 clocks in every mode.
+-- gate.  Latency 27 clocks in every mode.
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -50,10 +61,15 @@ use work.argyle_pkg.all;
 use work.all;
 
 architecture argyle of program_top is
-    constant C_LAT : integer := 24;   -- matches processing_delay_clks
+    constant C_LAT : integer := 27;   -- matches processing_delay_clks
 
-    constant C_P0 : unsigned(23 downto 0) := to_unsigned(6665510, 24);   -- phase at the screen centre (0.3973)
-    constant C_Q0 : unsigned(23 downto 0) := to_unsigned(8504327, 24);   -- row phase at the centre line (0.5069)
+    -- phases carry extra top bits for the diamond index: 2 bits over the 2-cell period (8 columns),
+    -- 3 bits over the row period (8 rows)
+    constant C_P0 : unsigned(25 downto 0) := to_unsigned(6665510, 26);   -- phase at the screen centre (0.3973)
+    constant C_Q0 : unsigned(26 downto 0) := to_unsigned(8504327, 27);   -- row phase at the centre line (0.5069)
+    constant C_COLS : unsigned(11 downto 0) := to_unsigned(1873, 12);    -- Q.8 diamonds across 1920 virtual (photo)
+    constant C_ROWS : unsigned(11 downto 0) := to_unsigned(1059, 12);    -- Q.8 rows per 1080 (photo)
+    constant C_QTOP : unsigned(26 downto 0) := to_unsigned(108020743, 27);   -- C_Q0 - C_ROWS * 2^15, mod 2^27
 
     -- virtual px per pixel (Q.8 phase scale): 4369 = 1080 lines, 6554 = 720p, 8738 = SD (4:3)
     function f_kx(t : std_logic_vector(3 downto 0)) return unsigned is
@@ -97,7 +113,7 @@ architecture argyle of program_top is
 
     -- controls: glides K1 K2 K3 K5 P12 (Q.3)
     type t_g is array(0 to 4) of unsigned(12 downto 0);
-    signal s_g : t_g := (to_unsigned(389 * 8, 13), to_unsigned(357 * 8, 13), to_unsigned(256 * 8, 13),
+    signal s_g : t_g := (to_unsigned(512 * 8, 13), to_unsigned(0, 13), to_unsigned(256 * 8, 13),
                          to_unsigned(394 * 8, 13), to_unsigned(512 * 8, 13));
     signal gl_k, gl_o, gl_n : unsigned(12 downto 0) := (others => '0');
     signal gl_d : signed(13 downto 0) := (others => '0');
@@ -113,8 +129,8 @@ architecture argyle of program_top is
     signal s_k6 : unsigned(9 downto 0) := to_unsigned(240, 10);
 
     -- knob curves
-    signal k_cols : unsigned(11 downto 0) := to_unsigned(1872, 12);   -- Q.8 diamonds across 1920 virtual
-    signal k_rows : unsigned(11 downto 0) := to_unsigned(1059, 12);   -- Q.8 rows per 1080
+    signal k_d1   : signed(9 downto 0) := (others => '0');            -- Q.8 Bloom depth, -252 .. 252
+    signal k_d2   : unsigned(7 downto 0) := (others => '0');          -- Q.8 Scatter depth, 0 .. 255
     signal k_eps  : unsigned(9 downto 0) := to_unsigned(256, 10);     -- Q.8 pairs
     signal k_bend : unsigned(8 downto 0) := to_unsigned(154, 9);
     signal k_a    : unsigned(9 downto 0) := to_unsigned(256, 10);     -- Q.8 gain
@@ -131,7 +147,7 @@ architecture argyle of program_top is
     -- per-field values
     signal f_inc  : unsigned(19 downto 0) := to_unsigned(31947, 20);
     signal f_ck   : unsigned(12 downto 0) := to_unsigned(1996, 13);
-    signal f_p0   : unsigned(23 downto 0) := (others => '0');
+    signal f_p0   : unsigned(25 downto 0) := (others => '0');
     signal f_dp   : unsigned(23 downto 0) := to_unsigned(479040, 24);
     signal f_yinc : unsigned(19 downto 0) := to_unsigned(64336, 20);
     signal f_msq  : unsigned(17 downto 0) := (others => '0');
@@ -139,9 +155,12 @@ architecture argyle of program_top is
     signal f_rq   : unsigned(12 downto 0) := (others => '0');
     signal f_dqy  : unsigned(19 downto 0) := (others => '0');
     signal f_ae   : unsigned(11 downto 0) := to_unsigned(256, 12);
-    signal f_px, f_qy : unsigned(23 downto 0) := (others => '0');
+    signal f_px, f_ps : unsigned(25 downto 0) := (others => '0');
+    signal f_qy, f_qtop : unsigned(26 downto 0) := (others => '0');
+    signal f_pc8, f_qc8 : unsigned(7 downto 0) := (others => '0');       -- screen centre, Q.4 half-cells
     signal f_neg  : std_logic := '0';
-    signal f_ps, f_pds, f_qtop : unsigned(23 downto 0) := (others => '0');
+    signal f_pds  : unsigned(23 downto 0) := (others => '0');
+    signal f_tau  : unsigned(11 downto 0) := (others => '0');             -- Scatter breathing phase
     signal f_saw, f_hard, f_dia, f_warm, f_osc : std_logic := '0';
     signal f_ot : unsigned(15 downto 0) := (others => '0');
 
@@ -159,7 +178,13 @@ architecture argyle of program_top is
     signal le_k   : unsigned(4 downto 0) := (others => '0');
     signal le_j   : unsigned(1 downto 0) := (others => '0');
     signal le_i   : unsigned(3 downto 0) := (others => '0');
-    signal n_q    : unsigned(23 downto 0) := (others => '0');
+    signal n_q    : unsigned(26 downto 0) := (others => '0');
+    -- the line's diamond rows (A row (r+1)/2 and B row r/2 of half-row r, mod 8) and the swell
+    -- thresholds: A 0.125 + its row window, B -(0.125 + its row window)
+    signal n_my   : unsigned(6 downto 0) := (others => '0');
+    signal n_twa, n_twb : unsigned(5 downto 0) := (others => '0');
+    signal n_ra, n_rb, l_ra, l_rb : unsigned(2 downto 0) := (others => '0');
+    signal l_twa, l_twb : unsigned(5 downto 0) := to_unsigned(8, 6);
     signal n_oy   : unsigned(15 downto 0) := (others => '0');
     signal n_fr   : unsigned(7 downto 0) := (others => '0');
     signal n_saw  : signed(12 downto 0) := (others => '0');
@@ -195,8 +220,32 @@ architecture argyle of program_top is
     attribute no_rw_check : boolean;
     attribute no_rw_check of lr : signal is true;
 
+    -- per-diamond size tables, (row(3) & column(3)) -> k - 1 in Q.6: A diamonds, and B diamonds stored
+    -- negated (so the product carries the sign of s); rebuilt every field, read by the pixel path
+    type t_kt is array(0 to 63) of std_logic_vector(7 downto 0);
+    signal kta, ktb : t_kt := (others => (others => '0'));
+    attribute no_rw_check of kta : signal is true;
+    attribute no_rw_check of ktb : signal is true;
+    signal kt_wa, kta_ra, ktb_ra : unsigned(5 downto 0) := (others => '0');
+    signal kt_wd : std_logic_vector(7 downto 0) := (others => '0');
+    signal kta_we, ktb_we : std_logic := '0';
+    signal kta_q, ktb_q : std_logic_vector(7 downto 0) := (others => '0');
+    -- size-table builder: one diamond per 16 clocks
+    signal kb_on : std_logic := '0';
+    signal kb_id : unsigned(6 downto 0) := (others => '0');   -- B & row & column
+    signal kb_st : unsigned(3 downto 0) := (others => '0');
+    signal kb_lf : std_logic_vector(15 downto 0) := x"ACE1";
+    signal kb_p  : unsigned(7 downto 0) := (others => '0');
+    signal kb_x, kb_y : signed(11 downto 0) := (others => '0');
+    signal kb_z, kb_t : signed(9 downto 0) := (others => '0');
+    signal kb_hi : signed(11 downto 0) := (others => '0');
+    signal kb_n  : unsigned(8 downto 0) := (others => '0');
+    signal kb_sg : std_logic := '0';
+    signal kb_m  : unsigned(7 downto 0) := (others => '0');
+
     -- beam
-    signal b_p, b_pd : unsigned(23 downto 0) := (others => '0');
+    signal b_p  : unsigned(25 downto 0) := (others => '0');
+    signal b_pd : unsigned(23 downto 0) := (others => '0');
     signal b_ox, b_oy : unsigned(15 downto 0) := (others => '0');
 
     -- oscillator RAMs: G'(phase) = (gain*GE + gain*pairs*GO) >> 8, 1024 phases, rebuilt every field
@@ -235,7 +284,21 @@ architecture argyle of program_top is
     signal p4_vb : signed(15 downto 0) := (others => '0');
     signal p5_g0, p5_gd : signed(13 downto 0) := (others => '0');
     signal p6_s0 : signed(15 downto 0) := (others => '0');
-    signal p6_li : unsigned(5 downto 0) := (others => '0');
+    -- per-diamond swell: half-column and column window alongside stages 1..6, then 6a..6c
+    type t_u4a is array (natural range <>) of unsigned(3 downto 0);
+    type t_u6a is array (natural range <>) of unsigned(5 downto 0);
+    signal p_h  : t_u4a(1 to 4) := (others => (others => '0'));
+    signal p1_m : unsigned(6 downto 0) := (others => '0');
+    signal p_wc : t_u6a(2 to 5) := (others => (others => '0'));
+    signal p_ca : std_logic_vector(2 to 5) := (others => '0');
+    signal p6_gd : signed(13 downto 0) := (others => '0');
+    signal p6_ta, p6_tb : unsigned(6 downto 0) := (others => '0');   -- swell thresholds / 16
+    signal qa_e  : unsigned(7 downto 0) := (others => '0');
+    signal qa_k  : signed(7 downto 0) := (others => '0');
+    signal qa_s, qb_s, qc_s : signed(13 downto 0) := (others => '0');      -- s + 2048
+    signal qa_gd, qb_gd, qc_gd : signed(13 downto 0) := (others => '0');   -- colour column + 1024
+    signal qb_pl, qb_ph : signed(12 downto 0) := (others => '0');
+    signal qc_d  : signed(13 downto 0) := (others => '0');
     signal r_ra : unsigned(8 downto 0) := (others => '0');
     signal r_rv, r_rv2 : std_logic_vector(7 downto 0) := (others => '0');
     signal p9_c : std_logic_vector(31 downto 0) := (others => '0');
@@ -250,6 +313,7 @@ architecture argyle of program_top is
     type t_sl is array (natural range <>) of std_logic;
     signal p_hard : t_sl(8 to 9) := (others => '0');
     signal p_warm : t_sl(8 to 10) := (others => '0');
+    signal p_core : t_sl(8 to 11) := (others => '0');   -- with r_ra, then to p10's pixel
 
     -- output conditioning
     type t_u10 is array (natural range <>) of unsigned(9 downto 0);
@@ -370,6 +434,108 @@ begin
         end if;
     end process p_lrr;
 
+    p_ktw : process(clk)
+    begin
+        if rising_edge(clk) then
+            if kta_we = '1' then
+                kta(to_integer(kt_wa)) <= kt_wd;
+            end if;
+        end if;
+    end process p_ktw;
+    p_ktwb : process(clk)
+    begin
+        if rising_edge(clk) then
+            if ktb_we = '1' then
+                ktb(to_integer(kt_wa)) <= kt_wd;
+            end if;
+        end if;
+    end process p_ktwb;
+    p_ktr : process(clk)
+    begin
+        if rising_edge(clk) then
+            kta_q <= kta(to_integer(kta_ra));
+            ktb_q <= ktb(to_integer(ktb_ra));
+        end if;
+    end process p_ktr;
+
+    ---------------------------------------------------------------------------
+    -- Size-table builder (vblank zone, from zone clock 64): 128 diamonds (A and
+    -- B, 8 rows x 8 columns), 16 clocks each:
+    --   Bloom   z = clamp(1 - (|dx| + 2 |dy|) / 64, -1, 1), dx / dy in Q.4 half-cells
+    --           from the screen centre (z = 0 two columns / one row out)
+    --   Scatter tri(rnd + tau): rnd from an LFSR restarted every field, so every
+    --           diamond keeps its own value; tau advances with Drift's speed
+    --   e = clamp((|d1| * (+-z) + d2 * tri) / 256, -1, 1), one shift-add MAC
+    --   k - 1 = 3/8 e (e > 0, k up to 2.5) or 5/32 e (e < 0, k down to 0.38), Q.6
+    ---------------------------------------------------------------------------
+    p_kbuild : process(clk)
+        variable v_i  : integer range 0 to 7;
+        variable v_d  : unsigned(7 downto 0);
+        variable v_a  : signed(11 downto 0);
+        variable v_t  : unsigned(6 downto 0);
+        variable v_m  : unsigned(8 downto 0);
+    begin
+        if rising_edge(clk) then
+            kta_we <= '0'; ktb_we <= '0';
+            if s_zone = '1' and s_zc = 64 then
+                kb_on <= '1'; kb_id <= (others => '0'); kb_st <= (others => '0'); kb_lf <= x"ACE1";
+            elsif kb_on = '1' then
+                kb_lf <= kb_lf(14 downto 0) & (kb_lf(15) xor kb_lf(13) xor kb_lf(12) xor kb_lf(10));
+                kb_st <= kb_st + 1;
+                if kb_st = 15 then
+                    kb_id <= kb_id + 1;
+                    if kb_id = 127 then kb_on <= '0'; end if;
+                end if;
+                case to_integer(kb_st) is
+                    when 0 =>
+                        -- |offset| from the centre (ones' complement), Q.4 half-cells (A even, B odd), wrapped
+                        v_d := (kb_id(2 downto 0) & kb_id(6) & "0000") - f_pc8;
+                        if v_d(7) = '1' then v_d := not v_d; end if;
+                        kb_x <= signed(resize(v_d, 12));
+                        v_d := (kb_id(5 downto 3) & kb_id(6) & "0000") - f_qc8;
+                        if v_d(7) = '1' then v_d := not v_d; end if;
+                        kb_y <= signed(resize(v_d, 12));
+                        kb_p <= unsigned(kb_lf(7 downto 0)) + f_tau(11 downto 4);
+                        if k_d1 < 0 then v_a := not resize(k_d1, 12); else v_a := resize(k_d1, 12); end if;
+                        kb_m <= unsigned(v_a(7 downto 0));                           -- |d1| <= 252
+                    when 1 =>
+                        kb_x <= kb_x + shift_left(kb_y, 1);
+                        if kb_p(7) = '0' then v_t := kb_p(6 downto 0); else v_t := not kb_p(6 downto 0); end if;
+                        kb_t <= signed(shift_left(resize(v_t, 10), 2)) - 256;
+                    when 2 =>
+                        v_a := to_signed(256, 12) - shift_left(kb_x, 2);
+                        if v_a < -256 then kb_z <= to_signed(-256, 10); else kb_z <= resize(v_a, 10); end if;
+                    when 3 =>
+                        if k_d1 < 0 then kb_z <= -kb_z; end if;
+                        kb_hi <= (others => '0');
+                    when 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 =>
+                        -- hi = (hi + |d1|(i) z + d2(i) tri) / 2, i = 0 .. 7
+                        v_i := to_integer(kb_st(2 downto 0) + 4);
+                        v_a := kb_hi;
+                        if kb_m(v_i) = '1' then v_a := v_a + kb_z; end if;
+                        if k_d2(v_i) = '1' then v_a := v_a + kb_t; end if;
+                        kb_hi <= shift_right(v_a, 1);
+                    when 12 =>
+                        -- |e| and the stored sign: negative for a shrinking A or a swelling B
+                        if kb_hi < 0 then v_a := -kb_hi; kb_sg <= not kb_id(6); else v_a := kb_hi; kb_sg <= kb_id(6); end if;
+                        if v_a > 256 then kb_n <= to_unsigned(256, 9); else kb_n <= unsigned(v_a(8 downto 0)); end if;
+                    when 13 =>
+                        -- |k - 1|: swell (1/4 + 1/8) |e|, shrink (1/8 + 1/32) |e|
+                        if kb_sg = kb_id(6) then v_m := shift_right(kb_n, 2) + shift_right(kb_n, 3);
+                        else v_m := shift_right(kb_n, 3) + shift_right(kb_n, 5); end if;
+                        kb_x <= signed(resize(v_m, 12));
+                    when 14 =>
+                        if kb_sg = '1' then kt_wd <= std_logic_vector(-kb_x(7 downto 0));
+                        else kt_wd <= std_logic_vector(kb_x(7 downto 0)); end if;
+                        kt_wa <= kb_id(5 downto 0);
+                        if kb_id(6) = '0' then kta_we <= '1'; else ktb_we <= '1'; end if;
+                    when others =>
+                        null;
+                end case;
+            end if;
+        end if;
+    end process p_kbuild;
+
     ---------------------------------------------------------------------------
     -- Controls, vblank zone, per-field sequencer (one serial multiplier)
     ---------------------------------------------------------------------------
@@ -429,12 +595,14 @@ begin
                 f_osc  <= registers_in(6)(4);
                 -- drift accumulators (last field's products)
                 if f_neg = '1' then
-                    f_px <= f_px - resize(f_dpx, 24); f_qy <= f_qy - resize(f_dqy, 24);
+                    f_px <= f_px - resize(f_dpx, 26); f_qy <= f_qy - resize(f_dqy, 27);
                 else
-                    f_px <= f_px + resize(f_dpx, 24); f_qy <= f_qy + resize(f_dqy, 24);
+                    f_px <= f_px + resize(f_dpx, 26); f_qy <= f_qy + resize(f_dqy, 27);
                 end if;
                 f_neg <= s_s4;
                 f_ot <= f_ot + 197;
+                -- Scatter breathes with Drift's speed (default ~4 s a cycle, still when Drift is still)
+                f_tau <= f_tau + resize(s_m4(8 downto 3), 12);
             end if;
 
             -- glides: K1, K2, K3, K5, P12 ease 1/8 of the gap per field (deadband 4); one channel per
@@ -471,12 +639,11 @@ begin
             end if;
 
             -- knob curves (settle long before the sequencer reads them)
-            v_g := s_g(0)(12 downto 3);                          -- cols = 2 + 14 g/1023 (Q.8: 512 + g*7/2)
-            v_t := resize(v_g & "00", 15) + resize(v_g & '0', 15) + resize(v_g, 15);
-            k_cols <= to_unsigned(512, 12) + resize(v_t(14 downto 1), 12);
-            v_g := s_g(1)(12 downto 3);                          -- rows = 1 + 9 g/1023 (Q.8: 256 + g*9/4)
-            v_t := resize(v_g & "000", 15) + resize(v_g, 15);
-            k_rows <= to_unsigned(256, 12) + resize(v_t(14 downto 2), 12);
+            v_x := signed(resize(s_g(0)(12 downto 3), 11)) - 512;   -- Bloom: bipolar, deadband 8 -> +-252
+            if v_x > 8 then v_x := v_x - 8; k_d1 <= resize(shift_right(v_x, 1), 10);
+            elsif v_x < -8 then v_x := v_x + 8; k_d1 <= resize(shift_right(v_x, 1), 10);
+            else k_d1 <= (others => '0'); end if;
+            k_d2 <= s_g(1)(12 downto 5);                            -- Scatter 0 .. 255
             k_eps <= s_g(2)(12 downto 3);
             v_g := s_g(3)(12 downto 3);                          -- bend = g*25/64
             v_t := resize(v_g & "0000", 15) + resize(v_g & "000", 15) + resize(v_g, 15);
@@ -505,14 +672,14 @@ begin
             if q_ld = '1' then
                 m_h <= (others => '0'); m_l <= (others => '0');
                 case to_integer(q_p) is
-                    when 1  => m_a <= resize(k_cols, 20);  m_b <= resize(t_kx, 18);
-                    when 2  => m_a <= resize(k_cols, 20);  m_b <= to_unsigned(273, 18);
+                    when 1  => m_a <= resize(C_COLS, 20);  m_b <= resize(t_kx, 18);
+                    when 2  => m_a <= resize(C_COLS, 20);  m_b <= to_unsigned(273, 18);
                     when 3  => m_a <= f_inc;               m_b <= resize(s_w(11 downto 1), 18);
                     when 4  => m_a <= resize(f_ck, 20);    m_b <= resize(s_k6, 18);
-                    when 5  => m_a <= resize(k_rows, 20);  m_b <= resize(t_ys, 18);
+                    when 5  => m_a <= resize(C_ROWS, 20);  m_b <= resize(t_ys, 18);
                     when 6  => m_a <= resize(s_m4, 20);    m_b <= resize(s_m4, 18);
                     when 7  => m_a <= resize(f_ck, 20);    m_b <= resize(f_msq(17 downto 11), 18);
-                    when 8  => m_a <= resize(k_rows, 20);  m_b <= to_unsigned(485, 18);
+                    when 8  => m_a <= resize(C_ROWS, 20);  m_b <= to_unsigned(485, 18);
                     when 9  => m_a <= resize(f_rq, 20);    m_b <= resize(f_msq(17 downto 11), 18);
                     when others => m_a <= resize(k_a, 20); m_b <= resize(k_eps, 18);
                 end case;
@@ -526,7 +693,7 @@ begin
             v_pr := m_h & m_l;
             if q_wr(1)  = '1' then f_inc  <= v_pr(27 downto 8); end if;
             if q_wr(2)  = '1' then f_ck   <= v_pr(20 downto 8); end if;
-            if q_wr(3)  = '1' then f_p0   <= C_P0 - v_pr(23 downto 0); end if;
+            if q_wr(3)  = '1' then f_p0   <= C_P0 - v_pr(25 downto 0); end if;
             if q_wr(4)  = '1' then f_dp   <= v_pr(23 downto 0); end if;
             if q_wr(5)  = '1' then f_yinc <= v_pr(21 downto 2); end if;
             if q_wr(6)  = '1' then f_msq  <= v_pr(17 downto 0); end if;
@@ -537,8 +704,10 @@ begin
 
             -- line-start and frame-top phases
             f_ps   <= f_p0 + f_px;
-            f_pds  <= f_ps + f_dp;
-            f_qtop <= C_Q0 - (k_rows(8 downto 0) & "000000000000000") + f_qy;
+            f_pds  <= f_ps(23 downto 0) + f_dp;
+            f_qtop <= C_QTOP + f_qy;
+            f_pc8  <= C_P0(25 downto 18) + f_px(25 downto 18);   -- (the low bits' carry ignored)
+            f_qc8  <= C_Q0(26 downto 19) + f_qy(26 downto 19);
 
             s_hsync_sr(0) <= data_in.hsync_n; s_vsync_sr(0) <= data_in.vsync_n;
             s_field_sr(0) <= data_in.field_n; s_gav_sr(0) <= g_avid;
@@ -606,6 +775,7 @@ begin
         variable v_w  : std_logic_vector(31 downto 0);
         variable v_q  : unsigned(23 downto 0);
         variable v_e  : signed(10 downto 0);
+        variable v_r4 : unsigned(3 downto 0);
     begin
         if rising_edge(clk) then
             r_hq2 <= r_hq;
@@ -621,21 +791,30 @@ begin
             elsif data_in.avid = '1' and s_avq = '0' then
                 -- commit this line's values, then compute the next line
                 l_hp <= n_hp; l_bank <= n_bank; l_oy <= n_oy;
+                l_ra <= n_ra; l_rb <= n_rb; l_twa <= n_twa; l_twb <= n_twb;
                 n_bank <= not n_bank;
                 le_st <= to_unsigned(1, 5);
             else
                 case to_integer(le_st) is
                     when 1 =>
-                        n_q <= n_q + resize(f_yinc, 24);
+                        n_q <= n_q + resize(f_yinc, 27);
                         n_oy <= n_oy + resize(f_yinc(19 downto 10), 16);
                         le_st <= le_st + 1;
                     when 2 =>
                         r_ha <= n_q(23 downto 16); n_fr <= n_q(15 downto 8);
-                        v_q := n_q + to_unsigned(4194304, 24);
+                        v_q := n_q(23 downto 0) + to_unsigned(4194304, 24);
                         n_saw <= signed(resize(v_q(23 downto 13), 13)) - 1024;
+                        -- diamond rows, and the distance from the middle of the half-row (~|frac - .5|)
+                        v_r4 := n_q(26 downto 23) + 1;
+                        n_ra <= v_r4(3 downto 1); n_rb <= n_q(26 downto 24);
+                        if n_q(23) = '1' then n_my <= n_q(22 downto 16); else n_my <= not n_q(22 downto 16); end if;
                         le_st <= le_st + 1;
                     when 3 =>
                         r_ha <= n_q(23 downto 16) + 1;
+                        -- row windows (A cell edge at frac .5, B at 0), reach 48/256 of a row
+                        --    (plus 8: the 0.125 threshold, in units of 16)
+                        if n_my < 48 then n_twa <= resize(56 - n_my, 6); else n_twa <= to_unsigned(8, 6); end if;
+                        if n_my > 79 then n_twb <= resize(n_my - 71, 6); else n_twb <= to_unsigned(8, 6); end if;
                         le_st <= le_st + 1;
                     when 4 =>
                         le_st <= le_st + 1;
@@ -750,7 +929,7 @@ begin
                 b_p <= f_ps; b_pd <= f_pds;
                 b_ox <= f_ot; b_oy <= l_oy;
             elsif g_avid = '1' then
-                b_p <= b_p + resize(f_inc, 24);
+                b_p <= b_p + resize(f_inc, 26);
                 b_pd <= b_pd + resize(f_inc, 24);
                 b_ox <= b_ox + resize(f_inc(19 downto 10), 16);
             end if;
@@ -765,7 +944,11 @@ begin
         variable v_t   : signed(12 downto 0);
         variable v_g   : signed(14 downto 0);
         variable v_s   : signed(16 downto 0);
-        variable v_li  : signed(15 downto 0);
+        variable v_li  : signed(16 downto 0);
+        variable v_ev  : signed(16 downto 0);
+        variable v_dd  : signed(16 downto 0);
+        variable v_c3  : unsigned(2 downto 0);
+        variable v_c6  : unsigned(5 downto 0);
         variable v_ri  : signed(16 downto 0);
         variable v_rv  : signed(7 downto 0);
         variable v_gg  : signed(11 downto 0);
@@ -782,6 +965,20 @@ begin
             gr0_ra <= b_p(23 downto 14); grd_ra <= b_pd(23 downto 14);
             p1_tx <= f_tri8(b_ox); p1_ty <= f_tri8(b_oy);
             v_y1 <= unsigned(data_in.y);
+            --    the diamond half-column, and the distance from the middle of the column (~|frac - .5|)
+            p_h(1) <= b_p(25 downto 22);
+            if b_p(22) = '1' then p1_m <= b_p(21 downto 15); else p1_m <= not b_p(21 downto 15); end if;
+            -- 2..5 alongside: the column window (reach 48/256 of a column) at an A diamond's cell edge
+            --    (the middle of a B column, m ~ 0) or a B diamond's (m ~ 127); at 5 the size tables are
+            --    addressed with the line's diamond rows (A column (h+1)/2, B column h/2)
+            for i in 2 to 4 loop p_h(i) <= p_h(i - 1); end loop;
+            p_ca(2) <= not p1_m(6);
+            if p1_m < 48 then p_wc(2) <= resize(48 - p1_m, 6);
+            elsif p1_m > 79 then p_wc(2) <= resize(p1_m - 79, 6);
+            else p_wc(2) <= (others => '0'); end if;
+            for i in 3 to 5 loop p_wc(i) <= p_wc(i - 1); p_ca(i) <= p_ca(i - 1); end loop;
+            if p_h(4)(0) = '1' then v_c3 := p_h(4)(3 downto 1) + 1; else v_c3 := p_h(4)(3 downto 1); end if;
+            kta_ra <= l_ra & v_c3; ktb_ra <= l_rb & p_h(4)(3 downto 1);
 
             -- 2: RAM out; source value centred (Osc: 1.25 tx + 0.75 ty)
             if f_osc = '1' then
@@ -802,19 +999,50 @@ begin
             p5_g0 <= resize(p4_g0, 14) + resize(shift_right(p4_vb, 4), 14);
             p5_gd <= resize(p4_gd, 14) + resize(shift_right(p4_vb, 4), 14);
 
-            -- 6: field s = G + H'; colour-table column (1/32 in G)
+            -- 6: field s = G + H'; the swell thresholds (the line's row window plus this column's)
             p6_s0 <= resize(p5_g0, 16) + resize(l_hp, 16);
-            v_li := resize(p5_gd, 16) + 1024;
-            if v_li < 0 then p6_li <= (others => '0');
-            elsif v_li(15 downto 11) /= 0 then p6_li <= (others => '1');
-            else p6_li <= unsigned(v_li(10 downto 5)); end if;
+            p6_gd <= p5_gd;
+            --    T / 16 = 8 + row window + column window, the column window going to A or B
+            if p_ca(5) = '1' then p6_ta <= resize(l_twa, 7) + p_wc(5); p6_tb <= resize(l_twb, 7);
+            else p6_ta <= resize(l_twa, 7); p6_tb <= resize(l_twb, 7) + p_wc(5); end if;
 
-            -- 7: ring and line-table addresses
-            v_ri := resize(p6_s0, 17) + 2048;
-            if v_ri < 0 then r_ra <= (others => '0');
-            elsif v_ri(16 downto 12) /= 0 then r_ra <= (others => '1');
+            -- 6a: the diamond's type is the sign of s: e = max(|s| - T, 0) / 16 (8 bits), s - T_A for
+            --     an A diamond, -T_B - s for a B one; its k - 1 (B stored negated, so the product
+            --     carries the sign of s)
+            if p6_s0 >= 0 then
+                v_ev := resize(p6_s0, 17) - signed(resize(shift_left(resize(p6_ta, 11), 4), 17)); qa_k <= signed(kta_q);
+            else   -- -s - T = (not s) - (T - 1)
+                v_ev := resize(not p6_s0, 17) - signed(resize(shift_left(resize(p6_tb, 11), 4) - 1, 17)); qa_k <= signed(ktb_q);
+            end if;
+            if v_ev < 0 then qa_e <= (others => '0');
+            elsif v_ev(16 downto 12) /= 0 then qa_e <= (others => '1');
+            else qa_e <= unsigned(v_ev(11 downto 4)); end if;
+            qa_s <= resize(p6_s0, 14) + 2048; qa_gd <= resize(p6_gd, 14) + 1024;
+
+            -- 6b: e * (k - 1), operand split 4 / 4
+            qb_pl <= signed(resize(qa_e(3 downto 0), 5)) * qa_k;
+            qb_ph <= signed(resize(qa_e(7 downto 4), 5)) * qa_k;
+            qb_s <= qa_s; qb_gd <= qa_gd;
+
+            -- 6c: delta = 16 e * (k - 1) / 64
+            v_dd := resize(qb_pl, 17) + shift_left(resize(qb_ph, 17), 4);
+            qc_d <= resize(shift_right(v_dd, 2), 14);
+            qc_s <= qb_s; qc_gd <= qb_gd;
+
+            -- 7 (6d): ring and line-table addresses of the swollen field and colour column (stages
+            --    7 .. 24 below keep their v0.5 numbers and names; each runs 3 clocks later: 24 -> 27)
+            --    (a swollen diamond whose ring index runs off the table is a flat core: no green, so the
+            --    colour table's noisy edge column can't stripe it; never when delta = 0)
+            v_ri := resize(qc_s, 17) + resize(qc_d, 17);
+            p_core(8) <= '0';
+            if v_ri < 0 then r_ra <= (others => '0'); if qc_d /= 0 then p_core(8) <= '1'; end if;
+            elsif v_ri(16 downto 12) /= 0 then r_ra <= (others => '1'); if qc_d /= 0 then p_core(8) <= '1'; end if;
             else r_ra <= unsigned(v_ri(11 downto 3)); end if;
-            lr_ra <= l_bank & '0' & p6_li;
+            v_li := resize(qc_gd, 17) + resize(qc_d, 17);
+            if v_li < 0 then v_c6 := (others => '0');
+            elsif v_li(16 downto 11) /= 0 then v_c6 := (others => '1');
+            else v_c6 := unsigned(v_li(10 downto 5)); end if;
+            lr_ra <= l_bank & '0' & v_c6;
             p_hard(8) <= f_hard; p_warm(8) <= f_warm;
 
             -- 8: ROM / RAM out (p_rom, p_lrr); 9: fabric copies
@@ -831,7 +1059,7 @@ begin
 
             -- 11: green = base + amp*ring/64, clipped; Warm swaps red and blue
             v_gg := signed(resize(p10_ba, 12)) + resize(shift_right(p10_pm, 6), 12);
-            if v_gg < 0 then p11_g <= (others => '0');
+            if v_gg < 0 or p_core(11) = '1' then p11_g <= (others => '0');
             elsif v_gg > 255 then p11_g <= (others => '1');
             else p11_g <= unsigned(v_gg(7 downto 0)); end if;
             if p_warm(10) = '1' then p11_r <= p10_b; p11_b <= p10_r; else p11_r <= p10_r; p11_b <= p10_b; end if;
@@ -864,8 +1092,8 @@ begin
             if p14_v < 0 then p15_v <= (others => '0'); elsif p14_v > 1023 then p15_v <= (others => '1'); else p15_v <= unsigned(p14_v(9 downto 0)); end if;
             p16_y <= p15_y; p16_u <= p15_u; p16_v <= p15_v;
 
-            -- 17..22: output conditioning (chroma [1 2 2 2 2 2 2 2 1]/16 as two
-            -- adjacent 8-sums, luma [1 2 1]; centre at stage 21 -> 22)
+            -- 17..22 (20..25): output conditioning (chroma [1 2 2 2 2 2 2 2 1]/16 as two
+            -- adjacent 8-sums, luma [1 2 1]; centre at stage 24 -> 25)
             s_csu(0) <= p16_u; s_csv(0) <= p16_v;
             for i in 1 to 8 loop s_csu(i) <= s_csu(i - 1); s_csv(i) <= s_csv(i - 1); end loop;
             s_boxu <= s_boxu + p16_u - s_csu(7);
@@ -877,20 +1105,21 @@ begin
             s_y21 <= s_y20; s_y22x <= s_y21;
             v_sy := resize(s_y20, 12) + shift_left(resize(s_y21, 12), 1) + resize(s_y22x, 12);
             s_yf22 <= v_sy(11 downto 2);
-            -- 23: luma toward black (white 940 -> 777); blanking gate
+            -- 23 (26): luma toward black (white 940 -> 777); blanking gate
             if s_yf22 > 64 then v_dl := s_yf22 - 64; else v_dl := (others => '0'); end if;
-            if s_gav_sr(21) = '1' then
+            if s_gav_sr(24) = '1' then
                 s_y23 <= s_yf22 - shift_right(v_dl, 3) - shift_right(v_dl, 4);
                 s_u23 <= s_u22; s_v23 <= s_v22;
             else
                 s_y23 <= to_unsigned(64, 10); s_u23 <= to_unsigned(512, 10); s_v23 <= to_unsigned(512, 10);
             end if;
-            -- 24: pad to the 24-clock latency
+            -- 24 (27): pad to the 27-clock latency
             s_y24 <= s_y23; s_u24 <= s_u23; s_v24 <= s_v23;
 
             -- delays
             p_hard(9) <= p_hard(8);
             p_warm(9) <= p_warm(8); p_warm(10) <= p_warm(9);
+            p_core(9) <= p_core(8); p_core(10) <= p_core(9); p_core(11) <= p_core(10);
         end if;
     end process p_pix;
 
