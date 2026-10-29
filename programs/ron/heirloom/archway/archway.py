@@ -2,7 +2,7 @@
 # Copyright (C) 2026 czartroniks
 # SPDX-License-Identifier: GPL-3.0-only
 """
-ARCHWAY v0.5.0 - build hook.  Writes archway_pkg.vhd next to this file (pure python: the builder
+ARCHWAY v0.6.0 - build hook.  Writes archway_pkg.vhd next to this file (pure python: the builder
 runs it with the system python3).
 
 Fitted to the photo WIN_20230523_01_26_43 (see .heirloom_work/rb_archway/notes.md):
@@ -19,7 +19,8 @@ Fitted to the photo WIN_20230523_01_26_43 (see .heirloom_work/rb_archway/notes.m
 
 Package contents:
   C_AW_EXP2  256 x 16   round(32768 * 2^(i/256))
-  C_AW_PAL   512 x 32   {Y, U, V, 00}: index = palette * 64 + entry (entries listed in ENTRIES)
+  C_AW_PAL   512 x 64   {Y, U, V of palette p; Y, U, V of palette p + 1; 0000}: index = p * 64 + entry
+                        (entries listed in ENTRIES).  K6 morphs A -> B (the last palette's B is itself)
   C_AW_FFL / C_AW_FRL / C_AW_FSL  2048 x 8 / 4 / 4   region flags of F, F - d, Fs - d (flag_roms)
 Colours are in the hardware convention (U register = Cr, V register = Cb); luma pre-scaled 16/13 for the shell's
 13/16 output scale, capped at 940 (drawn whites ~777).
@@ -73,17 +74,14 @@ def prescale(yuv):
     return (y2, min(1000, max(24, int(u))), min(1000, max(24, int(v))))
 
 
-def word(yuv):
-    y, u, v = prescale(yuv)
-    return (y << 22) | (u << 12) | (v << 2)
-
-
 def pal_rom():
     out = []
     for p in range(8):
-        pal = palette(p)
+        pa, pb = palette(p), palette(min(p + 1, 7))
         for e in ENTRIES:
-            out.append(word(rgb_to_hw10(pal[e])))
+            a = prescale(rgb_to_hw10(pa[e]))
+            b = prescale(rgb_to_hw10(pb[e]))
+            out.append((a[0] << 54) | (a[1] << 44) | (a[2] << 34) | (b[0] << 24) | (b[1] << 14) | (b[2] << 4))
     return out
 
 
@@ -122,7 +120,7 @@ def main():
              "library ieee;", "use ieee.std_logic_1164.all;", "use ieee.numeric_std.all;", "",
              "package archway_pkg is",
              vhd_table("C_AW_EXP2", 256, 16, exp2_rom()),
-             vhd_table("C_AW_PAL", 512, 32, pal_rom()),
+             vhd_table("C_AW_PAL", 512, 64, pal_rom()),
              vhd_table("C_AW_FFL", 2048, 8, flag_roms()[0]),
              vhd_table("C_AW_FRL", 2048, 4, flag_roms()[1]),
              vhd_table("C_AW_FSL", 2048, 4, flag_roms()[2]),

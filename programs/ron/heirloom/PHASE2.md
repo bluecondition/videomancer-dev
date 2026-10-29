@@ -164,7 +164,7 @@ Commit the row along with the program's own files.
 | Program | Status | Phase-2 version | Notes |
 |---|---|---|---|
 | abacus | built v0.6.3, awaiting HW (v0.6.1 flashed 10-28: looks OK) | v0.6.3 | Ron 10-28: no X/Y zoom (resize individual beads instead); widen Rims; Slide + Roll also wave individual bead sizes; Etch a bit stronger on video; Flip glides; Swell deeper at 0 %. v0.6.0: K1 Width / K2 Height per-bead warps, all six asks in. Round 2 (sheet): Slide / Roll waves scale beads in X and Y, prominent even slow, each bead distinct -> v0.6.1 per-bead / per-row swell pulses; 95 % LC, 24 EBR, router2 (HD HDMI + SD Analog seed 2). Round 3: S11 Source -> Theme Photo / Gold (Ron: K6 = 0 already turns the video off; exception to "S11 stays Source"). Round 4: S9 Stack -> V Mirror (rows always mirrored) |
-| archway | in progress | | Ron 10-28: K1 Steps wider (esp. low end); K3 Etch more top range; K4 Speed: lines and blocks move opposite ways on each side; K5 Chevron 0 = gone .. 1023 = out to the arch edge; K6 smooth palette morph; S9 -> Y flip (K5 now hides the chevron) |
+| archway | built v0.6.0, awaiting HW | v0.6.0 | Ron 10-28 (on v0.5.0): K1 Steps wider (esp. low end); K3 Etch more top range; K4 Speed: left = lines fast / blocks slow, right = the reverse; K5 Chevron 0 = gone .. 1023 = out to the arch edge; K6 smooth palette morph; S9 -> Y flip (K5 now hides the chevron). v0.6.0: all seven in (K6 = box-mixed dither, 32 steps); 96 % LC, 20 EBR, router2 (HD seeds 2, SD Analog 3) |
 | argus | not started | | |
 | argyle | not started | | |
 | beacon | not started | | |
@@ -235,7 +235,7 @@ Commit the row along with the program's own files.
 | Program | Version | LC | EBR / 32 | Router | Seeds (non-1 noted) | Type |
 |---|---|---|---|---|---|---|
 | [abacus](abacus/SUMMARY.md) | v0.5.0 | 83 % (room) | 22 | router2 | HD Analog seed 5, HD HDMI seed 2, HD Dual seed 6 | measured field |
-| [archway](archway/SUMMARY.md) | v0.5.0 | 89 % (room) | 16 | router2 | SD Dual seed 2 | oscillator/field |
+| [archway](archway/SUMMARY.md) | v0.6.0 | 96 % (**FULL**) | 20 | router2 | HD Analog / HDMI / Dual seed 2, SD Analog seed 3 | oscillator/field |
 | [argus](argus/SUMMARY.md) | v0.5.0 | 94 % (tight) | 22 | router2 | 6/6 seed 1 | oscillator/field |
 | [argyle](argyle/SUMMARY.md) | v0.5.0 | 83 % (room) | 23 | router2 | HD Dual seed 2 | oscillator/field |
 | [beacon](beacon/SUMMARY.md) | v0.5.0 | 92 % (tight) | 25 | router2 | SD Dual seed 2 | oscillator/field |

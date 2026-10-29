@@ -1,4 +1,4 @@
-# Archway - Heirloom #36, rebuilt 2026-10-27 (v0.5.0) from WIN_20230523_01_26_43.
+# Archway - Heirloom #36, rebuilt 2026-10-27 (v0.5.0) from WIN_20230523_01_26_43; phase 2 v0.6.0 2026-10-28.
 # A pointed arch drawn three ways: a stepped colour mosaic on its flanks cut by black arcs, a fan of cyan
 # arch lines in its middle, a pink chevron at its foot.  See archway.vhd, archway.py and SUMMARY.md.
 
@@ -6,7 +6,7 @@
 processing_delay_clks = 24
 program_id = "com.czartroniks.archway"
 program_name = "Archway"
-program_version = "0.5.0"
+program_version = "0.6.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -60,17 +60,21 @@ suffix_label = ""
 parameter_id = "rotary_potentiometer_5"
 name_label = "Chevron"
 control_mode = "linear"
-display_min_value = -100
+display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 381
 display_float_digits = 0
-suffix_label = ""
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
 name_label = "Palette"
-value_labels = ["Archway", "Lagoon", "Orchard", "Jade", "Ultra", "Citrus", "Ember", "Frost"]
-initial_value_label = "Archway"
+control_mode = "linear"
+display_min_value = 1
+display_max_value = 8
+initial_value = 0
+display_float_digits = 1
+suffix_label = ""
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
@@ -86,9 +90,9 @@ initial_value_label = "On"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
-name_label = "Chevron"
-value_labels = ["On", "Off"]
-initial_value_label = "On"
+name_label = "Flip"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
@@ -123,15 +127,21 @@ rotary_potentiometer_1 = 300
 [[preset]]
 name = "Dome"
 linear_potentiometer_12 = 1000
-rotary_potentiometer_5 = 380
+rotary_potentiometer_5 = 450
 
 [[preset]]
 name = "Smooth Ember"
 toggle_switch_10 = 1
-rotary_potentiometer_6 = 800
+rotary_potentiometer_6 = 877
 rotary_potentiometer_4 = 760
 
 [[preset]]
 name = "Big Blocks"
 rotary_potentiometer_1 = 950
 rotary_potentiometer_2 = 300
+
+[[preset]]
+name = "Upside Down"
+toggle_switch_9 = 1
+rotary_potentiometer_5 = 1023
+rotary_potentiometer_6 = 220

@@ -1,6 +1,7 @@
 # Archway — a pointed arch of stepped mosaic, black arcs and cyan lines
 
-**v0.5.0 (2026-10-27): built, NOT flashed.** Heirloom #36, rebuilt from the photo
+**v0.6.0 (2026-10-28, phase 2 round 1): built, NOT flashed.** v0.5.0 flashed by Ron 10-28; his notes are under
+[Phase 2](#phase-2). Heirloom #36, rebuilt from the photo
 `photos/WIN_20230523_01_26_43_Pro.jpg`. The photo shows a tall pointed arch drawn three ways at once:
 its flanks are a staircase mosaic of square colour cells (yellow, olive, hot pink, maroon, blue, navy
 going outward) cut by four smooth black arcs; its middle is a fan of cyan arch lines, thin over the
@@ -55,29 +56,33 @@ Working files are in `.heirloom_work/rb_archway/` (`notes.md` has every step).
 1. The field F = |x' − xc| − s(y) + Etch·luma, in half-pixel units. x' is held near the line start; s(y) is
    computed per line from (vy + 16.5)² × K, where K comes from P12.
 2. **Sample-and-hold.** F is latched at every column edge, and s is replaced by the row top: Fs. The grid is
-   locked to the centre and crawls with Speed. The step is n = ((Fs − 40) >> 3)·79 >> 10.
+   locked to the centre and crawls with Speed. The step is n = ((Fs − 40) >> 3)·79 >> 10. With Flip the line
+   engine runs y from the bottom up and the row tops step down as well as up.
 3. **Regions.** Three region-flag ROMs (2048 bins of 4 half-px) on F, F − d and Fs − d give the arcs, the line
    region, the window, the right half's gap, the chevron bands, the inside and the ring band. d is the chevron
    offset (K5 plus the breathing).
 4. **Line oscillator.** φ = (F + tear − 73)·rate − drift. V = tri(φ) + 0.636·tri(9φ/64 + c), compared with
    three thresholds per half.
 5. **Colour.** A 64-entry palette per palette choice: 15 steps, black, the right step 6, pink, pale, cyan, rim,
-   teal, green, navy and the 30 streak colours.
+   teal, green, navy and the 30 streak colours. Each ROM word holds palette p (A) and palette p + 1 (B). K6's
+   morph is a dither: in every 8 pixels, nb show B and (when the count is odd in half-pixels) one shows
+   (A + B)/2, spread by a bit-reversed pixel phase, alternating on line pairs. The output box sums exactly
+   8 pixels, so the mix comes out flat at A + (B − A)·f/32 with no visible pattern.
 6. **Motion at the default Speed.** The lines stream out of the arch (~0.85 lines/s), the sample-and-hold grid
-   crawls sideways (~13 px/s) and the chevron breathes ±10 px over ~8 s.
+   crawls sideways (~13 px/s) and the chevron breathes ±10 px over ~8 s. Away from 640 the two separate: see K4.
 
 ## Controls
 | Control | Photo element it drives |
 |---|---|
-| K1 Steps | the mosaic cells: 17–156 px (exponential; 512 = the photo's 52 px). The colour levels stay put, so small cells give fine staircases and large cells give big blocks |
+| K1 Steps | the mosaic cells: 5.5–194 px (exponential, −3.25 / +1.9 octaves; 512 = the photo's 52 px). The colour levels stay put, so small cells give fine staircases (nearly the Smooth look) and large cells give big blocks |
 | K2 Lines | the cyan fan's line density: period ×2.3 (fat bands) .. ×0.44 (fine hatching); 512 = the photo |
-| K3 Etch | how far the camera (or the Osc) bends every contour, cell and line: 0–319 px at full luma (square law); 400 = 49 px |
-| K4 Speed | bipolar, still within ±8 of the centre, square law: the lines stream out of (+) or into (−) the arch, the S&H grid crawls, the chevron breathes; 640 = the default drift |
-| K5 Chevron | the pink chevron's size: 0 = a huge chevron filling the arch, 512 = the photo, 1023 = a small one at the foot |
-| K6 Palette | Archway (the photo) / Lagoon / Orchard / Jade / Ultra / Citrus (RGB permutations of the photo palette) / Ember / Frost (luma ramps) |
+| K3 Etch | how far the camera (or the Osc) bends every contour, cell and line: cube law, 0–~750 px at full luma; 400 = 49 px (as v0.5), 700 ≈ 240 px |
+| K4 Speed | bipolar, still within ±8 of the centre. **Left:** the lines stream into the arch fast (square law, to 0.25 periods a field) while the S&H grid creeps (linear, to 0.02 cells a field). **Right:** the grid races (cube law, to 0.32 cells a field) while the lines drift out slowly (linear, to 0.06 periods a field). 640 = the v0.5 motion exactly. The chevron breathes with speed² on both sides |
+| K5 Chevron | 0 = gone (its apex sits below the bottom line at any Arch); rising, the chevron climbs from the foot; 381 = the photo (at the default Arch); past ~475 its apex leaves the top and the band moves outward until, at 1023, the pink band lies on the outermost arc with the nested lines and black cells filling the arch |
+| K6 Palette | a continuous morph (display 1.0–8.0): 1 Archway (the photo) → 2 Lagoon → 3 Orchard → 4 Jade → 5 Ultra → 6 Citrus (RGB permutations of the photo palette) → 7 Ember → 8 Frost (luma ramps), 32 steps between neighbours (16 per line, line pairs alternate), glided |
 | S7 Split | On (the photo: thin lines over the mosaic on the left, fat cyan with a black gap on the right) / Off (both halves like the left) |
 | S8 Arcs | the four black arcs On / Off |
-| S9 Chevron | the pink chevron On / Off |
+| S9 Flip | Off / On: the arch upside down, the chevron at the top. The generated field only: the camera's etch stays upright (flipping it would need a frame store) |
 | S10 Mosaic | Stepped (the photo) / Smooth: the S&H bypassed, smooth arch bands |
 | S11 Source | Video / Osc |
 | P12 Arch | the arch's curvature, ×0.2 .. ×3.5 (exponential, glided): 0 % straight pillars (a colonnade of vertical bands), 575 = the photo, 100 % a squat dome flaring over a pool of nested lines |
@@ -99,13 +104,17 @@ Working files are in `.heirloom_work/rb_archway/` (`notes.md` has every step).
     - the line rate, the curvature K, the etch gain;
     - speed²: the drift, crawl and breathing steps;
     - the tear wobble step and phase.
-  - A shared glide for K1, K2, K3, K5 and P12 (1/8 per field, ±2 deadband).
-  - The chevron offset, and the S&H grid origin (a stepping loop to the first column edge right of the line
-    start).
-  - The labelled Palette default is taken as its index (v < 8).
+    - v0.6 adds: etch³ and its gain; speed³; the lines / grid speeds per side; the crawl in Q4 h
+      (cells-per-field × cell); s at the bottom line (from the curvature); the chevron's K5 product. Slots
+      9–21 chain through one temporary register.
+  - A shared glide for K1, K2, K3, K5, K6 and P12 (1/8 per field, ±2 deadband).
+  - The chevron offset d = 150 − s(1080) + (s(1080) + 1170)·K5/1024 − breathing (h), and the S&H grid origin
+    (a stepping loop to the first column edge right of the line start, up to 299 cells).
+  - The palette position (K6 + 1)·7/32: palette index and morph fraction.
 - **Per-line engine.** Kicked at each line start, it computes the NEXT line in ~85 clocks (fits SD's 858):
-  - s(y) on two serial products;
-  - the S&H row tops (normal and lagged) and the row position scaled to the streak index;
+  - s(y) on two serial products (under Flip the squarer takes 1079 − y);
+  - the S&H row tops (normal and lagged), stepped one row per clock either way until they hold s (line 0 of a
+    flipped field takes up to ~300 clocks, in the zone), and the row position scaled to the streak index;
   - the chevron gates;
   - the tear triangle.
 - **Pixel path (24 stages).**
@@ -114,16 +123,64 @@ Working files are in `.heirloom_work/rb_archway/` (`notes.md` has every step).
   - Stages 8–10: the colouriser step and the line phase; the ROM flags merged.
   - Stage 11: the base entry (mosaic / chevron / streak / gap).
   - Stages 11–13: the slow triangle and V. Stage 15: the line class. Stage 16: the palette address.
-  - Stage 17: the palette ROM. Stage 18: a fabric copy. Stage 19: compose.
-  - Stages 20–21: one [1 2 2 2 2 2 2 2 1]/16 box on Y, U and V (the photo's softness and the HD HDMI bar fix;
-    the beam starts 4 px early for its delay).
+  - Stage 16: the palette address (the black entry outside the generated avid). Stage 17: the palette ROM
+    {A, B}. Stage 18: a fabric copy and the dither choice. Stage 19: compose A, B or (A + B)/2.
+  - Stages 20–21: one [1 2 2 2 2 2 2 2 1]/16 box on Y, U and V (the photo's softness, the HD HDMI bar fix
+    and the morph's mixer; the beam starts 4 px early for its delay).
   - Stage 24: luma 13/16 and the blanking gate on the generated avid.
-- **ROMs.** Line buffer 2048 × 8, exp2 256 × 16, palette 512 × 32, flags 2048 × 8 + 2 × 2048 × 4. Palettes are
-  in the hardware convention (U = Cr), luma pre-scaled 16/13 (`archway.py`).
+- **ROMs.** Line buffer 2048 × 8, exp2 256 × 16, palette 512 × 64, flags 2048 × 8 + 2 × 2048 × 4. Palettes are
+  in the hardware convention (U = Cr), luma pre-scaled 16/13 (`archway.py`). The F − d and Fs − d flag ROM
+  addresses clamp at ±4096 h (the K5 extremes reach −4600 / +6700).
 - **Contracts.** Generated avid (parity-locked); one latency (24) in every mode; virtual-1080 steps.
 
+## Phase 2
+**Ron's notes on v0.5.0 (flashed 2026-10-28):**
+- K1 Steps: the range could be wider, especially on the 0 % side.
+- K2 Lines: seems OK (suggestions welcome).
+- K3 Etch: more upper range, squish.
+- K4 Speed: centred still; on the left the lines move faster and the blocks slower; on the right the lines
+  slower and the blocks faster.
+- K5 Chevron: at the bottom the chevron completely gone; at the top it expands to line up with the outside of
+  the overall shape (further than now).
+- K6 Palette: can it be a smooth transition?
+- S9 Chevron On / Off: K5 now removes the chevron, so repurpose it, maybe a Y flip of the whole screen.
+
+**v0.6.0 (round 1) answers:**
+- **K1:** cells 5.5–194 px (was 17–156): 3.25 octaves below the photo's 52 px, 1.9 above. The column-origin
+  loop runs up to 299 cells and the ring scale is 15 bits for the small cells.
+- **K3:** cube law. The default 400 is unchanged (49 px at full luma); 700 ≈ 240 px (was 137); 1023 ≈ 750 px
+  (was 292). The low end is squished (200 ≈ 6 px).
+- **K4:** each side has its own laws, meeting v0.5's motion at 640. Left: lines m² (to 0.25 periods a
+  field), grid m (to 0.02 cells a field). Right: grid m³ (to 0.32 cells a field), lines m (to 0.06 periods a
+  field). The crawl is now in cells per field, so small cells don't alias. Direction kept: the left side
+  still runs the lines into the arch and the grid backwards.
+- **K5:** d = 150 − s(1080) + (s(1080) + 1170)·K5/1024. 0 puts the apex below the bottom line at any Arch;
+  381 = the photo (new default); 1023 lays the pink band on the outermost arc (F 884–1200 h), with nested
+  lines and black stepped cells filling the arch. The direction is reversed from v0.5 (0 was the huge
+  chevron), and Arch now moves the chevron too.
+- **K6:** a continuous morph across the eight palettes, 32 steps between neighbours, glided. A real
+  per-pixel lerp cost 312 LUT and put the build at 99 % LC, so it is a dither mixed exactly by the output box
+  (see What it does, 5).
+- **S9 Flip:** the generated arch upside down (chevron at the top, streaks at the foot of each row: a true
+  mirror). The camera's etch stays upright.
+- **K2 suggestions (not built):** see Notes.
+
 ## Status
-- **v0.5.0 built 2026-10-27, router2, NOT flashed.** Build seeds: **SD Dual = seed 2**; the other five are seed 1.
+- **v0.6.0 built 2026-10-28, router2, NOT flashed.** Build seeds: **HD Analog 2, SD Analog 3, HD HDMI 2,
+  HD Dual 2**; SD HDMI and SD Dual seed 1. SD Analog seeds 1–2 and HD Dual seed 1 stalled router2 (timeout);
+  HD Analog and HD HDMI seed 1 missed timing.
+- Fmax (post-route): HD Analog 79.70, HD HDMI 77.18, HD Dual 76.09, SD Analog 72.03, SD HDMI 70.93,
+  SD Dual 80.77 MHz (SD needs 27).
+- 7327–7357 / 7680 LC (**96 %**), 20/32 EBR. Every bitstream passed iceunpack. Standalone yosys: LUT 3718 → 4167,
+  carry 1599 → 1744, FF 2637 → 2690 against v0.5. Little headroom is left for round 2: trade, don't add.
+- **Fit history (v0.6).** The first v0.6 cut was 7618 LC (99 %). Ablations put the cost at +312 LUT for the
+  per-pixel lerp, +166 for the new sequencer slots and +102 for the two-way row stepping. Replacing the lerp
+  with the box-mixed dither and chaining slots 9–21 through one temporary got to 7357.
+- **Verification.** A 720p GHDL render of the default frame (Speed centred, black input) matches v0.5's
+  `rtl3_still.png`: the mosaic, arcs, chevron and colours are identical; only the line edges differ, by the
+  tear wobble's phase (mean |diff| 0.69 / 255). The new ranges were not simulated (hardware check).
+
+- **v0.5.0 built 2026-10-27, router2.** Build seeds: **SD Dual = seed 2**; the other five are seed 1.
 - Fmax (post-route): HD Analog 82.14, HD HDMI 80.78, HD Dual 79.36, SD Analog 86.20, SD HDMI 73.08,
   SD Dual 81.25 MHz.
 - 6825–6839 / 7680 LC (89 %), 16/32 EBR. Every bitstream passed iceunpack.
@@ -158,4 +215,11 @@ Working files are in `.heirloom_work/rb_archway/` (`notes.md` has every step).
 - `rtl3_still.png`, `rtl_osc.png`, `rtl_vid.png`: the GHDL 720p renders.
 
 ## Notes
-- Only the VHDL header comments changed after the final build; the logic is unchanged.
+- v0.5: only the VHDL header comments changed after the final build; the logic is unchanged.
+- v0.6: `imodel.py` still models v0.5. It imports `archway.py`, whose palette ROM is now {A, B} 64-bit words.
+- **K2 ideas for a later round** (Ron: K2 "seems OK"):
+  - spread the two halves' line rates apart (left denser, right fatter), turning S7 Split into a continuous
+    control;
+  - the depth or ratio of the slow triangle (0.636·tri(9φ/64)): from even hatching to lines clumped in
+    bundles that beat;
+  - a line-width offset on the three thresholds: hairlines to solid cyan bands, separate from density.
