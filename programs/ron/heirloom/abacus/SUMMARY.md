@@ -1,6 +1,8 @@
 # Abacus — rows of glossy beads on their rods
 
-**v0.5.0 (2026-10-27): built, NOT flashed.** Rebuilt from the photo WIN_20230605_01_03_50 (Heirloom #42):
+**v0.6.0 (2026-10-28, phase 2): built, NOT flashed.** Phase 2 removes the X/Y zooms and resizes every bead
+inside its own slot instead (Width, Height, and size waves riding Slide and Roll); see "Phase 2" below.
+Rebuilt in v0.5.0 from the photo WIN_20230605_01_03_50 (Heirloom #42):
 rows of red beads between wavy blue/green bands, one bead every 188 px, the rows mirrored about the bead
 rows. The beads change across the frame: dark maroon with green lenses and navy "eyes" on the left, bright
 red ovals in the middle, pink-cored hourglass beads on the right. The band pinches shut into a red dot and a
@@ -60,23 +62,70 @@ Measured on the frame and on a tile averaged over its 4 half-period copies (they
      sea has no glints.
 4. **Output.** Palette Swap after the blend, then output conditioning and the blanking gate.
 
-## Controls
+## Controls (v0.6)
 | Control | Photo element it drives |
 |---|---|
-| K1 Beads | beads across: horizontal zoom 0.5–2.5× (centre = the photo's 10.2); past the measured picture it continues mirrored |
-| K2 Rows | bead rows per frame height: vertical zoom 0.5–2.5× (centre = the photo's 2.18 periods) |
-| K3 Rims | the dark rims round the beads and the band-edge lines: field gain 0.5–2.5× about the rim level; low = fat soft rims and grey bands, high = thin hard rims, flat red beads and flat blue bands |
-| K4 Slide | the beads slide along their rods: bipolar pan, still within ±8 of centre; default 640 ≈ 0.8 px/field (≈ 49 px/s) leftward; maximum 14.5 virtual px/field |
-| K5 Roll | the rows roll up/down: bipolar vertical drift, still at the default centre |
-| K6 Etch | the picture's luma pushed into the field: bright areas push the contours towards the band colours, dark areas swell the beads (160 = default) |
+| K1 Width | every bead's width inside its own 188 px slot, spacing kept: −100 = slim slivers (×0.57) in wide gaps, 0 = the photo, +100 = flat-topped blocks filling the slot (×1.46, the flat core over 3/4 of it). The band diamonds at the gaps narrow as the beads widen. |
+| K2 Height | every bead row's height inside its 495-line period: −100 = thin bead rows (×0.5) in tall striped bands, 0 = the photo, +100 = tall flat-centred beads (×1.33) with the bands at half height |
+| K3 Rims | the dark rims round the beads and the band-edge lines: field gain 0.31–5× about the rim level (v0.5: 0.5–2.5×). 0 = faded salmon beads and a navy band, 100 % = posterized flat red beads and flat blue bands with thin rims |
+| K4 Slide | the beads slide along their rods: bipolar pan, still within ±8 of centre; default 640 ≈ 0.8 px/field (≈ 49 px/s) leftward; maximum 14.5 virtual px/field. **New:** the beads pass a screen-fixed size wave (512 virtual px, ≈ 2.7 beads), so each one grows and shrinks as it slides. Its depth follows the speed: a size factor of ±0.07 at the default, ±0.27 at full speed, none when still. |
+| K5 Roll | the rows roll up/down: bipolar vertical drift, still at the default centre. **New:** a screen-fixed row-height wave (1024 virtual lines ≈ 2 rows), depth following the speed (±0.37 at full), so each row grows and shrinks as it rolls |
+| K6 Etch | the picture's luma pushed into the field: bright areas push the contours towards the band colours, dark areas swell the beads (160 = default). **v0.6:** 1.5× stronger on Video (the Osc source unchanged, so the photo still matches) |
 | S7 Mirror | left/right mirror about the centre: the left half (lenses, eyes, dark beads into bright beads) on both sides |
 | S8 Palette | Photo / Swap (U and V exchanged: blue beads in red/magenta bands) |
 | S9 Stack | Mirror (the photo's mirrored rows) / Saw (rows repeat and are cut flat at each band centre) |
-| S10 Flip | beads and bands exchange places (s → 1 − s): red bands, blue beads |
+| S10 Flip | beads and bands exchange places (s → 1 − s): red bands, blue beads. **v0.6:** it glides in ≈ 0.7 s (43 fields). The flip spreads from the bead cores outward through the contours (cores turn blue, then the rims, then the bands turn red), and switching back retracts it the same way. |
 | S11 Source | Video / Osc |
-| **P12 Swell** | bead size (palette offset ±0.25): 0 % = small pips in a blue/green sea, 50 % = the photo, 100 % = the beads merge into red bars |
+| **P12 Swell** | bead size (palette offset): 0 % = dark pips with green rings in a blue sea (+0.375, deeper than v0.5's +0.25), 50 % = the photo, 100 % = the beads merge into red bars (−0.25) |
 
 Glides (1/8 of the gap per field) act on K1, K2, K3, K6 and P12.
+
+## Phase 2 (v0.6.0)
+Ron's notes (2026-10-28): this program is one that prompted "don't prefer X/Y scaling": the individual
+beads should be resizable dynamically; widen Rims; Slide should still scroll but also wave the individual
+beads' sizes as they move, so they grow and shrink a little individually, and the same for Roll; Etch a
+slight boost on the video side; Flip should glide as it flips; Swell deeper towards 0 %.
+- **Elements and their drivers.**
+  - Bead rows: Width, Height, Swell, Rims, Slide (with the size wave), Roll (with the row wave), Stack,
+    Flip.
+  - Bands, band diamonds and red band-edge lines: Height (band height), Width (diamond width, inverse),
+    Swell, Rims.
+  - Glints, lenses and eyes: they ride both warps (the gloss table is read at the warped position and d).
+  - Camera: Etch.
+- **Removed:** K1 Beads and K2 Rows (horizontal / vertical zoom). Bead count and row count are now fixed at
+  the photo's 10.2 across and 2.18 down.
+- **Bead warp (horizontal, pixel path).**
+  - The bead phase of the folded table position is (position × 4) × 327 / 1024 mod 256: 256 = one bead
+    slot, 0 = a bead centre. It is computed from the unfolded position, and the fold bit picks the
+    mirrored half of the warp ROM C_AB_WT, so it costs no fold stage.
+  - The table position moves by −f·T(phase) (in bead-slot units), f the bead-size factor (−0.75 .. 0.75).
+    T rises with slope 1 from the bead centre and falls back to 0 at the gap centre. For growing beads it
+    peaks at 3/8 of the slot (slope −3 into the gap); for shrinking ones it peaks at 1/4 (slope −1).
+  - T is zero at both the bead and the gap centre, so beads of different sizes still join, and the mapping
+    stays monotonic over the whole range.
+  - f = 0.75 × (Width + depth × the Slide wave) / 512, saturated. The ROM holds T × 0.5875, so the pixel
+    path's one product is a (10 bits) × T (7 bits) / 128.
+  - A position pushed past a table end is reflected (the fold's own mirror image), so the warp stays
+    continuous across the mirrored continuation.
+- **Bead warp (vertical, line engine).**
+  - The line's d moves by −b·T(d), in 1/8 lines. T is the slope-1 profile only (peak at 1/4 of the
+    half-period), for both signs; the steeper grow profile cost an adder, a compare and a mux input for a
+    look Height already reaches.
+  - b = Height + depth × the Roll wave, Q10, saturated to −1 .. 1023/1024.
+  - Both products (depth × |wave| and |b| × T) share one 11-clock serial shift-add in the line setup.
+  - b is Q10 so that the Roll wave changes it smoothly line to line. A Q7 b stepped every ~6 lines, which
+    would have jumped the contours by up to 1.4 lines.
+- **Fit.** The first v0.6 build packed at 99 % LC. Standalone-yosys ablations priced it at 535 LUT
+  (horizontal warp), 375 (vertical) and 343 (the gloss blend's three multipliers). Three cuts brought it
+  down 364 LUT:
+  - the gloss blend became gated shift-adds over 9 alpha levels (0.14 % of pixels move by more than 4
+    levels; glint edges span 2 scanlines);
+  - the vertical warp went to 1/8-line units with one profile and the shared serial unit;
+  - the horizontal scaling moved into the warp ROM, with overflow saturation.
+- **Flip glide.** The flip level τ steps ±24 per field (0 .. 1024); pixels with s' < τ are flipped.
+- The photo stays reachable. With Width, Height and Slide still, the integer model's frame is bit-exact
+  to v0.5's. At the default Slide 640, the slight size wave moves the frame by a mean 2.4 RGB levels from
+  v0.5.
 
 ## Video
 - **How the camera enters.** Its luma (line buffer, (y >> 2) − 16, clipped) minus 110, scaled by Etch, is
@@ -88,21 +137,24 @@ Glides (1/8 of the gap per field) act on K1, K2, K3, K6 and P12.
 
 ## Engine
 - **Per-field sequencer** (vblank zone: no avid for 1024 clocks). It has one serial multiplier with fixed
-  slots and one shared glide. It sets the zoom steps, the start phases, the pan / roll accumulators, the Rims
-  gain, the Swell offset and the Etch gain.
+  slots and one shared glide. It sets the start phases, the pan / roll accumulators, the Width factor, the
+  Slide / Roll wave depths, the Height factor, the Rims gain, the Swell offset, the Etch gain and the Flip
+  glide level.
 - **Per-line engine.** Kicked at each line start, it computes the NEXT line's 129-entry field row: two knot
   rows blended by the line's fraction, written into the other bank of a 2 × 128 row RAM. d is the |triangle|
-  of a 495-line oscillator, or a saw for Stack.
-- **Pixel path** (latency 24 clocks in every mode).
-  - Triangle fold of the horizontal phase gives the knot column and fraction (6 bits), plus the gloss column
-    (8 units = 7.5 virtual px) and its fraction.
+  of a 495-line oscillator, or a saw for Stack, then warped by the row's Height + Roll-wave factor.
+- **Pixel path** (latency 28 clocks in every mode).
+  - Triangle fold of the horizontal phase. In parallel: the bead phase (two shift-adds and one add), the
+    warp ROM (512 × 16), the Width + Slide-wave factor (one 8 × 8 product), a × T. Five stages in all.
+  - The warped position gives the knot column and fraction (6 bits), plus the gloss column (8 units =
+    7.5 virtual px) and its fraction.
   - Row RAM, fabric copy, R1 − R0, lerp product, s − 512, Rims product, + Swell, + Etch, clip, Flip, palette
     ROM (512 × 32), fabric copy.
   - In parallel: gloss ROM (256 × 64: 2 slots × 2 columns), decode, the centre/amplitude fraction products,
     d − centre, the soft edge, alpha, slot select, the s' gate, (gloss − base) × alpha / 16.
   - Blend, Palette Swap, padding, output conditioning.
-- **EBR (22).** Knot ROM 4096 × 8 (8), palette 512 × 32 (4), gloss table 256 × 64 (4), line buffer 2048 × 8
-  (4), row RAM 256 × 32 (2).
+- **EBR (24).** Knot ROM 4096 × 8 (8), palette 512 × 32 (4), gloss table 256 × 64 (4), line buffer 2048 × 8
+  (4), row RAM 256 × 32 (2), bead warp ROM 512 × 16 (2).
 - **Contracts.**
   - damier's generated avid (parity-locked).
   - Output conditioning before the blanking gate: chroma [1 2 2 2 2 2 2 2 1]/16 as two 8-sums, luma [1 2 1],
@@ -111,18 +163,31 @@ Glides (1/8 of the gap per field) act on K1, K2, K3, K6 and P12.
 - **Resolution.** Geometry is in virtual 1080-line units from the timing ID, so 720p shows the same picture.
   **SD (4:3) shows the central 1440 virtual px: 7.7 beads of the photo's 10.2, the same round shapes.**
   Interlaced modes get no field offset (field_n is tied high on hardware).
-- **Build hook.** abacus.py holds the measured tables as integers (knots, palette, gloss runs, gloss colours)
-  and writes abacus_pkg.vhd.
+- **Build hook.** abacus.py holds the measured tables as integers (knots, palette, gloss runs, gloss colours),
+  computes the bead warp table, and writes abacus_pkg.vhd.
 
 ## Status
-- **v0.5.0 (gloss) built 2026-10-27, router2 (the builder default), NOT flashed.**
-- **Seeds:** HD Analog = seed 5, HD HDMI = seed 2, HD Dual = seed 6; the three SD configs are seed 1.
-- **Fmax (post-route, last line):** HD Analog 75.93, HD HDMI 74.54 (thin), HD Dual 75.85, SD Analog 74.39,
-  SD HDMI 73.92, SD Dual 72.17 MHz (SD Fmin 27).
-- **Resources:** 6369–6406 / 7680 LC (83 %), 22 / 32 EBR. Every bitstream passed iceunpack.
-  out/rev_b/ron/heirloom/abacus.vmprog (454 301 B).
-- **If HD timing regresses:** rebuild with `NEXTPNR_ROUTER="--router router1"` before restructuring.
-- **Verification** (GHDL 720p, decimation 1):
+- **v0.6.0 (phase 2) built 2026-10-28, router2 (the builder default), all 6 configs seed 1, NOT flashed.**
+  - **Fmax (post-route):** HD Analog 74.57 (thin), HD HDMI 81.00, HD Dual 82.10, SD Analog 76.48, SD HDMI
+    78.44, SD Dual 76.09 MHz (SD Fmin 27).
+  - **Resources:** 7084–7103 / 7680 LC (92 %, tight), 24 / 32 EBR. Every bitstream passed iceunpack.
+    out/rev_b/ron/heirloom/abacus.vmprog (498 953 B).
+  - **Latency** 28 clocks (TOML processing_delay_clks = 28).
+  - **Verification** (GHDL 720p, decimation 1, Osc, K4 = K5 = 1023 so both size waves run at full depth):
+    two netlists on the way to the build each matched the bit-exact model exactly (mean |ΔRGB| 0.000,
+    100 % within ±2) at a constant 3-px beam offset, with the pan one field behind the roll (x0 is set
+    from the pan before that field's update). The build adds, on top of the second, the rescaled warp
+    ROM, the overflow saturations and the single vertical profile, checked line by line against the
+    model im9.py but not simulated.
+  - **The photo stays reachable:** with Width, Height and Slide still the model is bit-exact to v0.5; at
+    the default Slide 640 the slight size wave moves it by a mean 2.7 RGB levels
+    (.heirloom_work/rb_abacus/p2/cmp_v060_default.png).
+  - **First flash, things to look at:** Width / Height at both extremes, the size waves while sliding and
+    rolling (fast K4 / K5), the Flip glide both ways, and whether the HD Analog bitstream's 0.3 MHz margin
+    holds (if it glitches, rebuild with `NEXTPNR_ROUTER="--router router1"`).
+- **v0.5.0 (gloss) built 2026-10-27, router2, NOT flashed.** Seeds HD Analog 5, HD HDMI 2, HD Dual 6;
+  Fmax HD Analog 75.93, HD HDMI 74.54, HD Dual 75.85, SD 72–74 MHz; 6369–6406 LC (83 %), 22 EBR.
+- **v0.5 verification** (GHDL 720p, decimation 1):
   - The default render matches the integer model imodel.py at mean |ΔRGB| 0.46, 86 % of pixels within ±1,
     at a constant 2-px beam offset.
   - K4 = 1023, fields 3 → 6: pure translation, 29 px (720p) to the left, residual 1.8; the gloss moves with
@@ -153,7 +218,8 @@ Glides (1/8 of the gap per field) act on K1, K2, K3, K6 and P12.
 - **Capture borders.** The capture's dark top/bottom rows and left edge are not drawn.
 
 ## Working files
-`.heirloom_work/rb_abacus/`:
+`.heirloom_work/rb_abacus/` (phase 2 in `p2/`: im9.py = the v0.6 integer model, sheet6.sh, abl/ ablation
+harness, sheet_v050.png / sheet_v060.png, cmp_v060_default.png; sheet.png is now the v0.6 sheet):
 - `notes.md`: measurement log, including every fit that failed.
 - `T.npy`: the averaged tile.
 - `kalt8.py`, `ka_K_h15.npy`, `ka_P_h15.npy`: knot-grid field and palette.

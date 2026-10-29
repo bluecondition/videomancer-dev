@@ -394,6 +394,40 @@ package abacus_pkg is
         x"909C16C4909C0984", x"918416DC909C16C4", x"2C2416C4918416DC", x"2D2417C42C2416C4",
         x"1A6430842D2417C4", x"1A7430841A643084", x"1ADC30841A743084", x"1AC430841ADC3084",
         x"1AC430841AC43084", x"1AC430841AC43084", x"1AC430841AC43084", x"1AC430841AC43084");
+    type t_ab_wt is array (0 to 511) of std_logic_vector(15 downto 0);
+    constant C_AB_WT : t_ab_wt := (
+        x"CBEA", x"CCE9", x"CCE8", x"CDE8", x"CDE7", x"CEE7", x"CFE6", x"CFE6", x"D0E5", x"D0E4", x"D1E4", x"D2E3", x"D2E3", x"D3E2", x"D3E1", x"D4E1",
+        x"D5E0", x"D5E0", x"D6DF", x"D6DF", x"D7DE", x"D7DD", x"D8DD", x"D9DC", x"D9DC", x"DADB", x"DADA", x"DBDB", x"DCDC", x"DCDC", x"DDDD", x"DDDD",
+        x"DEDE", x"DFDF", x"DFDF", x"E0E0", x"E0E0", x"E1E1", x"E1E1", x"E2E2", x"E3E3", x"E3E3", x"E4E4", x"E4E4", x"E5E5", x"E6E6", x"E6E6", x"E7E7",
+        x"E7E7", x"E8E8", x"E8E8", x"E9E9", x"EAEA", x"EAEA", x"EBEB", x"EBEB", x"ECEC", x"EDED", x"EDED", x"EEEE", x"EEEE", x"EFEF", x"F0F0", x"F0F0",
+        x"F1F1", x"F1F1", x"F2F2", x"F2F2", x"F3F3", x"F4F4", x"F4F4", x"F5F5", x"F5F5", x"F6F6", x"F7F7", x"F7F7", x"F8F8", x"F8F8", x"F9F9", x"FAFA",
+        x"FAFA", x"FBFB", x"FBFB", x"FCFC", x"FCFC", x"FDFD", x"FEFE", x"FEFE", x"FFFF", x"FFFF", x"0000", x"0101", x"0101", x"0202", x"0202", x"0303",
+        x"0404", x"0404", x"0505", x"0505", x"0606", x"0606", x"0707", x"0808", x"0808", x"0909", x"0909", x"0A0A", x"0B0B", x"0B0B", x"0C0C", x"0C0C",
+        x"0D0D", x"0E0E", x"0E0E", x"0F0F", x"0F0F", x"1010", x"1010", x"1111", x"1212", x"1212", x"1313", x"1313", x"1414", x"1515", x"1515", x"1616",
+        x"1616", x"1717", x"1818", x"1818", x"1919", x"1919", x"1A1A", x"1A1A", x"1B1B", x"1C1C", x"1C1C", x"1D1D", x"1D1D", x"1E1E", x"1F1F", x"1F1F",
+        x"2020", x"2020", x"2121", x"2121", x"2222", x"2323", x"2323", x"2424", x"2424", x"2525", x"2626", x"2625", x"2724", x"2724", x"2823", x"2923",
+        x"2922", x"2A21", x"2A21", x"2B20", x"2B20", x"2C1F", x"2D1F", x"2D1E", x"2E1D", x"2E1D", x"2F1C", x"301C", x"301B", x"311A", x"311A", x"3219",
+        x"3319", x"3318", x"3418", x"3417", x"3516", x"3516", x"3615", x"3715", x"3714", x"3813", x"3813", x"3712", x"3512", x"3311", x"3110", x"3010",
+        x"2E0F", x"2C0F", x"2A0E", x"290E", x"270D", x"250C", x"230C", x"210B", x"200B", x"1E0A", x"1C09", x"1A09", x"1908", x"1708", x"1507", x"1306",
+        x"1206", x"1005", x"0E05", x"0C04", x"0B04", x"0903", x"0702", x"0502", x"0401", x"0201", x"0000", x"FEFF", x"FCFF", x"FBFE", x"F9FE", x"F7FD",
+        x"F5FC", x"F4FC", x"F2FB", x"F0FB", x"EEFA", x"EDFA", x"EBF9", x"E9F8", x"E7F8", x"E6F7", x"E4F7", x"E2F6", x"E0F5", x"DFF5", x"DDF4", x"DBF4",
+        x"D9F3", x"D7F2", x"D6F2", x"D4F1", x"D2F1", x"D0F0", x"CFF0", x"CDEF", x"CBEE", x"C9EE", x"C8ED", x"C8ED", x"C9EC", x"C9EB", x"CAEB", x"CBEA",
+        x"0C0C", x"0C0C", x"0B0B", x"0B0B", x"0A0A", x"0909", x"0909", x"0808", x"0808", x"0707", x"0606", x"0606", x"0505", x"0505", x"0404", x"0404",
+        x"0303", x"0202", x"0202", x"0101", x"0101", x"0000", x"FFFF", x"FFFF", x"FEFE", x"FEFE", x"FDFD", x"FCFC", x"FCFC", x"FBFB", x"FBFB", x"FAFA",
+        x"FAFA", x"F9F9", x"F8F8", x"F8F8", x"F7F7", x"F7F7", x"F6F6", x"F5F5", x"F5F5", x"F4F4", x"F4F4", x"F3F3", x"F2F2", x"F2F2", x"F1F1", x"F1F1",
+        x"F0F0", x"F0F0", x"EFEF", x"EEEE", x"EEEE", x"EDED", x"EDED", x"ECEC", x"EBEB", x"EBEB", x"EAEA", x"EAEA", x"E9E9", x"E8E8", x"E8E8", x"E7E7",
+        x"E7E7", x"E6E6", x"E6E6", x"E5E5", x"E4E4", x"E4E4", x"E3E3", x"E3E3", x"E2E2", x"E1E1", x"E1E1", x"E0E0", x"E0E0", x"DFDF", x"DFDF", x"DEDE",
+        x"DDDD", x"DDDD", x"DCDC", x"DCDC", x"DBDB", x"DADA", x"DADB", x"D9DC", x"D9DC", x"D8DD", x"D7DD", x"D7DE", x"D6DF", x"D6DF", x"D5E0", x"D5E0",
+        x"D4E1", x"D3E1", x"D3E2", x"D2E3", x"D2E3", x"D1E4", x"D0E4", x"D0E5", x"CFE6", x"CFE6", x"CEE7", x"CDE7", x"CDE8", x"CCE8", x"CCE9", x"CBEA",
+        x"CBEA", x"CAEB", x"C9EB", x"C9EC", x"C8ED", x"C8ED", x"C9EE", x"CBEE", x"CDEF", x"CFF0", x"D0F0", x"D2F1", x"D4F1", x"D6F2", x"D7F2", x"D9F3",
+        x"DBF4", x"DDF4", x"DFF5", x"E0F5", x"E2F6", x"E4F7", x"E6F7", x"E7F8", x"E9F8", x"EBF9", x"EDFA", x"EEFA", x"F0FB", x"F2FB", x"F4FC", x"F5FC",
+        x"F7FD", x"F9FE", x"FBFE", x"FCFF", x"FEFF", x"0000", x"0201", x"0401", x"0502", x"0702", x"0903", x"0B04", x"0C04", x"0E05", x"1005", x"1206",
+        x"1306", x"1507", x"1708", x"1908", x"1A09", x"1C09", x"1E0A", x"200B", x"210B", x"230C", x"250C", x"270D", x"290E", x"2A0E", x"2C0F", x"2E0F",
+        x"3010", x"3110", x"3311", x"3512", x"3712", x"3813", x"3813", x"3714", x"3715", x"3615", x"3516", x"3516", x"3417", x"3418", x"3318", x"3319",
+        x"3219", x"311A", x"311A", x"301B", x"301C", x"2F1C", x"2E1D", x"2E1D", x"2D1E", x"2D1F", x"2C1F", x"2B20", x"2B20", x"2A21", x"2A21", x"2922",
+        x"2923", x"2823", x"2724", x"2724", x"2625", x"2626", x"2525", x"2424", x"2424", x"2323", x"2323", x"2222", x"2121", x"2121", x"2020", x"2020",
+        x"1F1F", x"1F1F", x"1E1E", x"1D1D", x"1D1D", x"1C1C", x"1C1C", x"1B1B", x"1A1A", x"1A1A", x"1919", x"1919", x"1818", x"1818", x"1717", x"1616",
+        x"1616", x"1515", x"1515", x"1414", x"1313", x"1313", x"1212", x"1212", x"1111", x"1010", x"1010", x"0F0F", x"0F0F", x"0E0E", x"0E0E", x"0D0D");
     function f_ab_gc(c : unsigned(2 downto 0)) return std_logic_vector;
 end package abacus_pkg;
 
