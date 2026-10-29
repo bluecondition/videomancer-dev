@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Abacus v0.6.2 -- Heirloom #42, rebuilt from the photo WIN_20230605_01_03_50.
+-- Abacus v0.6.3 -- Heirloom #42, rebuilt from the photo WIN_20230605_01_03_50.
 --
 -- The photo: rows of glossy red beads between wavy blue/green bands, one bead
 -- every 188 px (10.2 across), the rows mirrored about the bead-row centres
@@ -17,7 +17,7 @@
 --   lines) x 128 columns (every 15 virtual px), bilinear -- and the palette is
 --   the 512-entry colour sequence along s (bright red .. maroon .. pink/cream
 --   glint .. olive .. navy .. red line .. violet .. green .. blue).
---   Vertical: d = |triangle| of a 495-line oscillator (Stack: a saw).
+--   Vertical: d = |triangle| of a 495-line oscillator.
 --   Horizontal: the knot column comes from a triangle of the horizontal
 --   oscillator: the photo, then its mirror image, repeating.
 --   Per pixel: s' = 512 + Rims (s - 512) + Swell + Etch (luma - 110); index s'/2.
@@ -27,7 +27,7 @@
 --   column by column (abacus.py C_AB_GL: 2 runs per 7.5 px column, centre /
 --   half-width / amplitude / colour), drawn as soft-edged lines over the
 --   field's colour.  They ride the same coordinates (bead warps, Slide, Roll,
---   Mirror, Stack); glints are drawn only on beads and rims (s' < 768).
+--   Mirror, V Mirror); glints are drawn only on beads and rims (s' < 768).
 --
 --   Bead warps (v0.6): every bead is resized inside its own slot, the spacing
 --   kept.  Horizontally the table position moves by -a T(phase) within each
@@ -52,7 +52,9 @@
 --   K6  Etch     the picture's luma pushed into the field (1.5x on Video)
 --   S7  Mirror   left/right mirror about the centre
 --   S8  Palette  Photo / Swap (U and V exchanged: blue beads, red bands)
---   S9  Stack    Mirror (the photo) / Saw (rows repeat, cut flat)
+--   S9  V Mirror top/bottom mirror about the screen's centre line: the vertical phase runs
+--                back after the middle line, the rows moved so the axis falls halfway between a
+--                bead row and a band (v0.6.3; was Stack Mirror / Saw, now always Mirror)
 --   S10 Flip     beads and bands exchange places (s -> 1 - s), gliding in
 --                ~0.7 s outward from the bead cores through the contours
 --   S11 Theme    Photo / Gold (every colour's hue turned +40 degrees: gold beads, violet and teal
@@ -161,7 +163,12 @@ architecture abacus of program_top is
     signal s_k4, s_k5 : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal s_m4, s_m5 : unsigned(9 downto 0) := (others => '0');            -- |speed| - 8
     signal s_n4, s_n5, s_st4, s_st5 : std_logic := '1';
-    signal s_mirror, s_swap, s_saw, s_flip, s_theme : std_logic := '0';
+    signal s_mirror, s_swap, s_vmir, s_flip, s_theme : std_logic := '0';
+    -- V Mirror: active lines per field (counted on line starts, latched in the vblank zone), half of it,
+    -- one period minus a line's step (the backward step, kept positive)
+    signal s_lcnt, s_hgt : unsigned(10 downto 0) := to_unsigned(1080, 11);
+    signal s_hv   : unsigned(10 downto 0) := to_unsigned(539, 11);          -- half the lines, less one
+    signal s_vstn : unsigned(16 downto 0) := to_unsigned(126464, 17);
 
     -- per-field constants
     signal s_st   : unsigned(10 downto 0) := to_unsigned(273, 11);           -- units x 256 per pixel
@@ -217,6 +224,9 @@ architecture abacus of program_top is
     -- vertical bead warp (in 1/8 lines): d0 unwarped, b = Height + Roll wave (Q10),
     -- T(d), one serial shift-add shared by depth x |wave| and |b| x T
     signal e_d0   : unsigned(15 downto 0) := (others => '0');
+    signal e_ln   : unsigned(10 downto 0) := (others => '0');               -- the line being computed
+    signal e_back, e_nback : std_logic := '0';
+    signal e_step : unsigned(16 downto 0) := to_unsigned(256, 17);         -- the next line's phase step
     signal e_dc   : unsigned(10 downto 0) := (others => '0');
     signal e_bn   : std_logic := '0';
     -- bead pulses: row 3r mod 8, the row's term XB (B_r faded to 0 at the band centre), the
@@ -457,10 +467,17 @@ begin
             s_m5 <= v_m;
 
             if s_zgo = '1' then
+                s_hgt <= s_lcnt; s_lcnt <= (others => '0');
+            elsif g_start = '1' then
+                s_lcnt <= s_lcnt + 1;
+            end if;
+            s_hv   <= ('0' & s_hgt(10 downto 1)) - 1;
+            s_vstn <= to_unsigned(C_VPER, 17) - resize(s_vst, 17);
+            if s_zgo = '1' then
                 s_w <= s_wmax; s_wmax <= (others => '0');
                 s_mirror <= registers_in(6)(0);
                 s_swap   <= registers_in(6)(1);
-                s_saw    <= registers_in(6)(2);
+                s_vmir   <= registers_in(6)(2);
                 s_flip   <= registers_in(6)(3);
                 s_theme  <= registers_in(6)(4);
             end if;
@@ -547,8 +564,12 @@ begin
                 when 195 =>
                     if s_k3n = '0' then s_g <= to_unsigned(64, 9) + resize(f_acc(18 downto 10), 9);
                     else s_g <= to_unsigned(64, 9) - resize(s_gt(9 downto 4), 9); end if;
-                -- vp0 = (59776 - 540 x 256 + roll) mod 126720 (+ 3 x 126720 = 301696)
-                when 218 => s_v0a <= to_unsigned(301696, 19);
+                -- vp0 = (59776 - 540 x 256 + roll) mod 126720 (+ 3 x 126720 = 301696): the screen's centre
+                -- line 14 lines off a bead row, where the rows are already mirrored.  V Mirror moves the
+                -- rows so the centre line sits halfway between a bead row and a band (d = 124 lines):
+                -- + 98560 - 126720 (keeps the modulo loop at 3 steps)
+                when 218 =>
+                    if s_vmir = '1' then s_v0a <= to_unsigned(273536, 19); else s_v0a <= to_unsigned(301696, 19); end if;
                 when 219 => s_v0a <= s_v0a + resize(s_roll, 19);
                 when 220 | 221 | 222 | 223 =>
                     if s_zc = 220 then s_vn <= (others => '0'); end if;
@@ -715,31 +736,45 @@ begin
             if e_sn = '1' then v_res := -signed(resize(e_macc(12 downto 5), 9));
             else v_res := signed(resize(e_macc(12 downto 5), 9)); end if;
 
+            -- the next line's vertical step, registered well ahead of its line start: forward one
+            -- line, or with V Mirror held at the middle line and stepped back after it (a period less
+            -- one step keeps the phase positive)
+            if s_vmir = '1' and e_ln > s_hv then
+                e_step <= s_vstn; e_nback <= '1';
+            elsif s_vmir = '1' and e_ln = s_hv then
+                e_step <= (others => '0'); e_nback <= '0';
+            else
+                e_step <= resize(s_vst, 17); e_nback <= '0';
+            end if;
+
             -- setup
             if e_zk = '1' then
-                e_vpa <= resize(s_vp0, 18);
-                e_r3  <= s_r3t;
-                e_lc  <= to_unsigned(1, 4);
+                e_vpa  <= resize(s_vp0, 18);
+                e_r3   <= s_r3t;
+                e_ln   <= (others => '0');
+                e_back <= '0';
+                e_lc   <= to_unsigned(1, 4);
             elsif g_start = '1' then
-                e_vpa <= resize(e_vp, 18) + resize(s_vst, 18);
-                e_lc  <= to_unsigned(1, 4);
+                e_ln   <= e_ln + 1;
+                e_vpa  <= resize(e_vp, 18) + resize(e_step, 18);
+                e_back <= e_nback;
+                e_lc   <= to_unsigned(1, 4);
             else
                 case to_integer(e_lc) is
                     when 1 =>
                         if e_vpa >= C_VPER then
                             e_vp <= resize(e_vpa - C_VPER, 17);
-                            e_r3 <= e_r3 + 3;                     -- into the next row
+                            if e_back = '0' then e_r3 <= e_r3 + 3; end if;   -- into the next row
                         else
                             e_vp <= e_vpa(16 downto 0);
+                            if e_back = '1' then e_r3 <= e_r3 - 3; end if;   -- back into the previous row
                         end if;
                         e_lc <= to_unsigned(2, 4);
                     when 2 =>
                         e_dd <= signed(resize(e_vp, 18)) - C_VMID;
                         e_lc <= to_unsigned(3, 4);
                     when 3 =>
-                        if s_saw = '1' then
-                            e_d0 <= e_vp(16 downto 1);
-                        elsif e_dd(17) = '1' then
+                        if e_dd(17) = '1' then
                             v_nd := -e_dd;
                             e_d0 <= unsigned(v_nd(15 downto 0));
                         else

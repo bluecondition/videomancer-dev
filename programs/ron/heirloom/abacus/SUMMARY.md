@@ -1,7 +1,7 @@
 # Abacus — rows of glossy beads on their rods
 
-**v0.6.2 (2026-10-28, phase 2 round 3): built, NOT flashed.** (v0.6.1 flashed 2026-10-28, Ron: "looks OK".) Presets
-are still placeholders. Phase 2 removes the X/Y zooms and resizes every bead inside its own slot instead
+**v0.6.3 (2026-10-28, phase 2 round 4): built, NOT flashed.** (v0.6.1 flashed 2026-10-28, Ron: "looks OK".) Presets
+are still placeholders. S9 is a vertical mirror instead of Stack. Phase 2 removes the X/Y zooms and resizes every bead inside its own slot instead
 (Width, Height). Slide and Roll make each bead and each row swell and shrink on its own, in X and Y alike.
 S11 is a palette Theme (Photo / Gold) instead of the Video / Osc source; see "Phase 2" below.
 Rebuilt in v0.5.0 from the photo WIN_20230605_01_03_50 (Heirloom #42):
@@ -75,7 +75,7 @@ Measured on the frame and on a tile averaged over its 4 half-period copies (they
 | K6 Etch | the picture's luma pushed into the field: bright areas push the contours towards the band colours, dark areas swell the beads (160 = default). **v0.6:** 1.5× stronger than v0.5. **v0.6.2:** always the camera (Etch 0 turns it off; the Osc source is gone) |
 | S7 Mirror | left/right mirror about the centre: the left half (lenses, eyes, dark beads into bright beads) on both sides |
 | S8 Palette | Photo / Swap (U and V exchanged: blue beads in red/magenta bands) |
-| S9 Stack | Mirror (the photo's mirrored rows) / Saw (rows repeat and are cut flat at each band centre) |
+| S9 V Mirror | **v0.6.3:** Off / On. The bottom half of the screen mirrors the top half about the centre line: rows, bead pulses and glints, with the camera's Etch unmirrored, as with S7. The photo is already mirrored about its bead rows, and one sits 14 lines from the centre, so a plain reflection would barely show. V Mirror therefore also moves the rows so the axis falls halfway between a bead row and a band: two bands meet across a dark seam mid-screen. With Roll the seam keeps changing, and with S7 it gives a four-way kaleidoscope. (Was Stack: Mirror / Saw. The rows are now always mirrored, as in the photo.) |
 | S10 Flip | beads and bands exchange places (s → 1 − s): red bands, blue beads. **v0.6:** it glides in ≈ 0.7 s (43 fields). The flip spreads from the bead cores outward through the contours (cores turn blue, then the rims, then the bands turn red), and switching back retracts it the same way. |
 | S11 Theme | **v0.6.2:** Photo / Gold. Gold turns every colour's hue +40° in HSV with its brightness kept: gold beads, bronze rims, violet and teal bands, the glints recoloured too. S8 Swap still applies, so with Gold it gives cyan beads in crimson and olive bands: four colour schemes in all. (Was Source: Video / Osc.) |
 | **P12 Swell** | bead size (palette offset): 0 % = dark pips with green rings in a blue sea (+0.375, deeper than v0.5's +0.25), 50 % = the photo, 100 % = the beads merge into red bars (−0.25) |
@@ -176,6 +176,19 @@ other than the red/green/blue theme.
   - The Osc source is removed (its accumulators and triangles).
   - EBR goes 24 → 27.
 
+### Round 4 (v0.6.3)
+Ron: drop S9 Stack (keep the mirrored rows) and use S9 for something else, like mirroring the screen
+vertically.
+- **S9 V Mirror.** The line engine counts the line it computes. With V Mirror on it holds the vertical
+  phase at the middle line (half the measured active-line count) and then steps it back by one line per
+  line (adding a period less one step keeps it positive), so line H − 1 − n repeats line n. The row
+  index steps back across wraps, so the mirrored rows keep their partners' Roll-pulse sizes.
+- **The offset.** The model showed a plain centre mirror is nearly invisible at rest, because the screen's
+  centre line is 14 lines from a bead row, where the photo is already mirrored. Axis depths of 60, 124 and
+  185 lines were rendered (p2/vmirror2.png). 124, halfway between a bead row and a band, was taken: a
+  dark seam with the two bands meeting. It is a constant vertical phase offset while V Mirror is on.
+- **Saw removed:** d is always the |triangle| fold.
+
 ## Video
 - **How the camera enters.** Its luma (line buffer, (y >> 2) − 16, clipped) minus 110, scaled by Etch, is
   added to the field before the palette. The contours (bead outlines, band edges, glint gating) bend around
@@ -192,7 +205,9 @@ other than the red/green/blue theme.
   glide level.
 - **Per-line engine.** Kicked at each line start, it computes the NEXT line's 129-entry field row: two knot
   rows blended by the line's fraction, written into the other bank of a 2 × 128 row RAM. d is the |triangle|
-  of a 495-line oscillator, or a saw for Stack, then warped by Height. Each knot column then gets its bead's
+  of a 495-line oscillator, then warped by Height. With V Mirror the line engine steps the vertical
+  phase back after the middle line (the active-line count is measured per field: line starts counted,
+  latched in the vblank zone), and the row index steps back with it. Each knot column then gets its bead's
   pulse δ (with the row's term) added before the row is written. One 11-clock serial shift-add does every
   product: the Roll pulse, its band fade, Height × T(d), and each bead's Slide pulse, just in time
   along the line.
@@ -220,6 +235,20 @@ other than the red/green/blue theme.
   computes the bead warp table, and writes abacus_pkg.vhd.
 
 ## Status
+- **v0.6.3 (phase 2 round 4: S9 V Mirror) built 2026-10-28, router2, NOT flashed.**
+  - **Seeds:** HD Analog = 2, SD HDMI = 2 (its seed 1 timed out), HD Dual = 2; the rest seed 1.
+  - **Fmax (post-route):** HD Analog 78.36, HD HDMI 75.58, HD Dual 74.77 (thin), SD Analog 81.77, SD HDMI
+    78.34, SD Dual 77.32 MHz.
+  - **Resources:** 7322–7343 / 7680 LC (95.6 %, FULL), 27 / 32 EBR. Every bitstream passed iceunpack.
+    out/rev_b/ron/heirloom/abacus.vmprog (519 986 B).
+  - **Timing fix:** the first build missed HD Analog on all 6 seeds (70 MHz). Its critical path was the
+    line index's increment → two 11-bit compares → a 3-way mux of two 18-bit sums into the vertical phase
+    at the line start (14.3 ns). The per-line step (+1 line / 0 / −1 line) is now chosen and registered
+    ahead of the line start, from the index compared with half − 1, so the line start does one add.
+  - **Not simulated:** checked line by line against the model's V Mirror (p2/im14o.py, which rendered the
+    sheet).
+  - **Headroom:** at 95.6 % LC, HD Dual has 0.7 % margin. Any further feature needs something removed;
+    if HD misbehaves, rebuild with router1 first.
 - **v0.6.2 (phase 2 round 3: S11 Theme) built 2026-10-28, router2, all 6 configs seed 1, NOT flashed.**
   - **Fmax (post-route):** HD Analog 83.70, HD HDMI 77.39, HD Dual 75.93, SD Analog 75.73, SD HDMI 81.35,
     SD Dual 73.38 MHz.

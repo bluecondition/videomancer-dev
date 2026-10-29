@@ -2,13 +2,14 @@
 # Rows of glossy red beads between wavy blue/green bands: one measured scalar field (a knot grid) through
 # one measured palette, plus a measured gloss layer (glints, lenses, eyes).  v0.6: every bead resized in its
 # own slot (Width / Height); v0.6.1: Slide / Roll pulse each bead's / row's size on its own;
-# v0.6.2: S11 Theme (Photo / Gold) replaces Source (the camera Etch is always on; K6 = 0 turns it off).  See abacus.vhd, abacus.py and SUMMARY.md.
+# v0.6.2: S11 Theme (Photo / Gold) replaces Source (the camera Etch is always on; K6 = 0 turns it off);
+# v0.6.3: S9 V Mirror (top / bottom about the screen centre) replaces Stack (the rows are always mirrored).  See abacus.vhd, abacus.py and SUMMARY.md.
 
 [program]
 processing_delay_clks = 28
 program_id = "com.czartroniks.abacus"
 program_name = "Abacus"
-program_version = "0.6.2"
+program_version = "0.6.3"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -92,9 +93,9 @@ initial_value_label = "Photo"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
-name_label = "Stack"
-value_labels = ["Mirror", "Saw"]
-initial_value_label = "Mirror"
+name_label = "V Mirror"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
