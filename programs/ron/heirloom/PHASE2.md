@@ -163,10 +163,10 @@ Commit the row along with the program's own files.
 
 | Program | Status | Phase-2 version | Notes |
 |---|---|---|---|
-| abacus | built v0.6.3, awaiting HW (v0.6.1 flashed 10-28: looks OK) | v0.6.3 | Ron 10-28: no X/Y zoom (resize individual beads instead); widen Rims; Slide + Roll also wave individual bead sizes; Etch a bit stronger on video; Flip glides; Swell deeper at 0 %. v0.6.0: K1 Width / K2 Height per-bead warps, all six asks in. Round 2 (sheet): Slide / Roll waves scale beads in X and Y, prominent even slow, each bead distinct -> v0.6.1 per-bead / per-row swell pulses; 95 % LC, 24 EBR, router2 (HD HDMI + SD Analog seed 2). Round 3: S11 Source -> Theme Photo / Gold (Ron: K6 = 0 already turns the video off; exception to "S11 stays Source"). Round 4: S9 Stack -> V Mirror (rows always mirrored) |
+| abacus | v0.6.3 HD seeds re-picked after HD HDMI lines (pin skew), awaiting HW | v0.6.3 | Ron 10-28: no X/Y zoom (resize individual beads instead); widen Rims; Slide + Roll also wave individual bead sizes; Etch a bit stronger on video; Flip glides; Swell deeper at 0 %. v0.6.0: K1 Width / K2 Height per-bead warps, all six asks in. Round 2 (sheet): Slide / Roll waves scale beads in X and Y, prominent even slow, each bead distinct -> v0.6.1 per-bead / per-row swell pulses; 95 % LC, 24 EBR, router2 (HD HDMI + SD Analog seed 2). Round 3: S11 Source -> Theme Photo / Gold (Ron: K6 = 0 already turns the video off; exception to "S11 stays Source"). Round 4: S9 Stack -> V Mirror (rows always mirrored) |
 | archway | built v0.6.0, awaiting HW | v0.6.0 | Ron 10-28 (on v0.5.0): K1 Steps wider (esp. low end); K3 Etch more top range; K4 Speed: left = lines fast / blocks slow, right = the reverse; K5 Chevron 0 = gone .. 1023 = out to the arch edge; K6 smooth palette morph; S9 -> Y flip (K5 now hides the chevron). v0.6.0: all seven in (K6 = box-mixed dither, 32 steps); 96 % LC, 20 EBR, router2 (HD seeds 2, SD Analog 3) |
 | argus | built v0.6.0, awaiting HW | v0.6.0 | Ron 10-29 (on v0.5.0): only note: dislikes S7 Mirror's Repeat option. v0.6.0: S7 = Fold / Off (Off: the silhouettes run unmirrored down the frame, colour field still folded); 94 % LC, 22 EBR, router2, 6/6 seed 1 |
-| argyle | not started | | |
+| argyle | in progress | | Ron 10-29 (on v0.5.0): likes almost everything; K1/K2 should change individual diamonds (patterns, per-diamond sizes) rather than scale the whole screen |
 | beacon | not started | | |
 | blossom | not started | | |
 | bottleneck | not started | | |

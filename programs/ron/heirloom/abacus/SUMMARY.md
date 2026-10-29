@@ -235,12 +235,27 @@ vertically.
   computes the bead warp table, and writes abacus_pkg.vhd.
 
 ## Status
-- **v0.6.3 (phase 2 round 4: S9 V Mirror) built 2026-10-28, router2, NOT flashed.**
-  - **Seeds:** HD Analog = 2, SD HDMI = 2 (its seed 1 timed out), HD Dual = 2; the rest seed 1.
-  - **Fmax (post-route):** HD Analog 78.36, HD HDMI 75.58, HD Dual 74.77 (thin), SD Analog 81.77, SD HDMI
-    78.34, SD Dual 77.32 MHz.
+- **v0.6.3 (phase 2 round 4: S9 V Mirror) built 2026-10-28, router2.**
+  - **First flash, HD HDMI: "horizontal red and blue lines all over it".** These are per-line U/V swaps
+    from the HDMI TX pin placement (memory hdmi_tx_placement_skew), not the RTL. The shipped HD HDMI
+    seed 1 measured HSYNC −1.45 ns vs the forwarded clock (tools/hdmi_pin_skew.py). v0.6.1's HD HDMI
+    seed 2, which Ron called OK, measured +2.13.
+  - **Re-seeded and hand-installed (repacked, not via the builder):**
+    - HD HDMI = **seed 15**: 77.17 MHz, HSYNC +1.42, data ≤ −0.96. 23 seeds screened; only 15 and 9 sit
+      in the window.
+    - HD Analog = **seed 8**: 75.86 MHz, HSYNC −1.78, data ≤ −0.83.
+    - HD Dual = **seed 3**: 75.17 MHz, HSYNC −2.75, data ≤ −2.00.
+
+    HD Analog and HD Dual never place HSYNC on the positive side, so they are best-available by the data
+    rule. The shipped seed-2 placements (data −0.52 / −0.30) did not meet it.
+  - **A plain rebuild will NOT reproduce these seeds.** To rebuild, route each HD config at its seed and
+    repack (p2/skew/route1.sh, then vmprog_pack.py). The line-showing build is kept as
+    p2/skew/shipped_v063/.
+  - **SD seeds:** SD HDMI = 2 (its seed 1 timed out), the rest 1.
+  - **Fmax (post-route):** HD Analog 75.86, HD HDMI 77.17, HD Dual 75.17, SD Analog 81.77, SD HDMI 78.34,
+    SD Dual 77.32 MHz.
   - **Resources:** 7322–7343 / 7680 LC (95.6 %, FULL), 27 / 32 EBR. Every bitstream passed iceunpack.
-    out/rev_b/ron/heirloom/abacus.vmprog (519 986 B).
+    out/rev_b/ron/heirloom/abacus.vmprog (520 186 B, repacked with the re-seeded HD bitstreams).
   - **Timing fix:** the first build missed HD Analog on all 6 seeds (70 MHz). Its critical path was the
     line index's increment → two 11-bit compares → a 3-way mux of two 18-bit sums into the vertical phase
     at the line start (14.3 ns). The per-line step (+1 line / 0 / −1 line) is now chosen and registered
