@@ -114,7 +114,7 @@ In Ron's words (2026-10-28):
 
 ## How to work a program (per tab)
 
-1. **Read** `<name>/SUMMARY.md`, then `.heirloom_work/rb_<name>/notes.md`, and view `cmp_final.png` and `sheet.png`.
+1. **Claim the program** in [Phase 2 progress](#phase-2-progress) (Status `in progress`). Then **read** `<name>/SUMMARY.md`, then `.heirloom_work/rb_<name>/notes.md`, and view `cmp_final.png` and `sheet.png`.
    The prototype (`proto*.py`) and the integer model (`imodel.py`) are there to reuse for quick looks at new
    parameter ranges.
 2. **List the elements and their current drivers.** Write down each shape, sub-shape and repeated group from the
@@ -146,9 +146,78 @@ In Ron's words (2026-10-28):
 7. **Finish each round:**
    - bump the version (phase 2 starts at v0.6.0);
    - update SUMMARY.md: controls, status, seeds, and what changed;
-   - update the program's row in [README.md](README.md);
+   - update the program's row in [README.md](README.md) and in [Phase 2 progress](#phase-2-progress);
    - commit only that program's files.
    - When Ron settles on a look, capture it with `./capture_preset.sh`.
+
+## Phase 2 progress
+
+Each phase-2 tab works the first program not yet started, unless Ron names one.
+- **When you start:** set its Status to `in progress`.
+- **After each build:** set it to `built vX.Y.Z, awaiting HW`.
+- **When Ron is happy with it:** set it to `done vX.Y.Z`.
+- **Ron's notes:** record his notes (controls to widen, narrow or reassign; looks he wants) in the Notes column, briefly,
+  with the detail in the program's SUMMARY.md.
+
+Commit the row along with the program's own files.
+
+| Program | Status | Phase-2 version | Notes |
+|---|---|---|---|
+| abacus | not started | | |
+| archway | not started | | |
+| argus | not started | | |
+| argyle | not started | | |
+| beacon | not started | | |
+| blossom | not started | | |
+| bottleneck | not started | | |
+| bunting | not started | | |
+| cathedral | not started | | |
+| cathode | not started | | |
+| chartreuse | not started | | |
+| cocoon | not started | | |
+| crenel | not started | | |
+| crossbeam | not started | | |
+| curtain | not started | | |
+| cusp | not started | | |
+| cutout | not started | | |
+| escalator | not started | | |
+| facet | not started | | |
+| fern | not started | | |
+| goblet | not started | | |
+| greenroom | not started | | |
+| halo | not started | | |
+| idol | not started | | |
+| jukebox | not started | | |
+| kiln | not started | | |
+| lava | not started | | |
+| lotus | not started | | |
+| lozenge | not started | | |
+| magma | not started | | |
+| mandala | not started | | |
+| marmalade | not started | | |
+| medallion | not started | | |
+| ovals | not started | | |
+| plume | not started | | |
+| radiant | not started | | |
+| ribboncandy | not started | | |
+| ricochet | not started | | |
+| riptide | not started | | |
+| rorschach | not started | | |
+| seismic | not started | | |
+| shield | not started | | |
+| sinew | not started | | |
+| spearhead | not started | | |
+| starburst | not started | | |
+| streak | not started | | |
+| tangram | not started | | |
+| tartan | not started | | |
+| terrace | not started | | |
+| ticker | not started | | |
+| triplicate | not started | | |
+| vase | not started | | |
+| vesica | not started | | |
+| warp | not started | | |
+| waterfall | not started | | |
 
 ## Per-program reference
 
