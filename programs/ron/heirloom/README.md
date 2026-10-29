@@ -6,6 +6,15 @@ program is designed from that breakdown and named after what the picture shows.
 
 Flash from `out/rev_b/ron/heirloom/<name>.vmprog`; rebuild one with `./build_heirloom.sh <name>`.
 
+## Status
+
+- **Phase 1 is complete (2026-10-28).** All 55 programs are rebuilt to v0.5.x from their photos with the method in
+  [REBUILD.md](REBUILD.md), built in all 6 configs and committed. None has been flashed yet.
+- **Phase 2 is next:** one program per tab, turning each replica into a playable modular patch with broader ranges,
+  per-element parameters and bolder switches, while the defaults still give the photo. Ron's intentions, the
+  per-tab workflow, the known issues and each program's LC/EBR headroom and rebuild command are in
+  [PHASE2.md](PHASE2.md). Read it before starting any program.
+
 ## Layout
 
 ```
@@ -21,6 +30,9 @@ programs/ron/heirloom/
 Windows path to the drop zone: `\\wsl$\Ubuntu\home\ron\videomancer-dev\programs\ron\heirloom\photos`
 
 ## Per-photo workflow
+
+(The original v0.1 workflow, kept for the record. The v0.5 method is [REBUILD.md](REBUILD.md), and phase-2 work
+follows [PHASE2.md](PHASE2.md).)
 
 1. **Breakdown**: view the photo and write down what it shows (composition, dominant shapes and how they repeat,
    palette, edge character, implied motion, which classic modular-video process made it, such as a colouriser,
