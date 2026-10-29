@@ -1,19 +1,19 @@
 # Abacus - Heirloom #42, rebuilt 2026-10-27 (v0.5.0) from WIN_20230605_01_03_50; phase 2 v0.6.0 2026-10-28.
 # Rows of glossy red beads between wavy blue/green bands: one measured scalar field (a knot grid) through
 # one measured palette, plus a measured gloss layer (glints, lenses, eyes).  v0.6: every bead resized in its
-# own slot (Width / Height, and the Slide / Roll size waves).  See abacus.vhd, abacus.py and SUMMARY.md.
+# own slot (Width / Height); v0.6.1: Slide / Roll pulse each bead's / row's size on its own.  See abacus.vhd, abacus.py and SUMMARY.md.
 
 [program]
 processing_delay_clks = 28
 program_id = "com.czartroniks.abacus"
 program_name = "Abacus"
-program_version = "0.6.0"
+program_version = "0.6.1"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Pattern", "Grid", "Shape"]
 program_type = "processing"
-description = "Rows of glossy red beads between wavy blue and green bands; each bead grows and shrinks as it slides and rolls."
+description = "Rows of glossy red beads between wavy blue and green bands; each bead swells and shrinks on its own as it slides and rolls."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
@@ -119,6 +119,8 @@ suffix_label = "%"
 
 [[preset]]
 name = "Photo"
+rotary_potentiometer_4 = 512
+rotary_potentiometer_5 = 512
 
 [[preset]]
 name = "Twin Rods"

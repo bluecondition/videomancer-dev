@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Abacus v0.6.0 -- Heirloom #42, rebuilt from the photo WIN_20230605_01_03_50.
+-- Abacus v0.6.1 -- Heirloom #42, rebuilt from the photo WIN_20230605_01_03_50.
 --
 -- The photo: rows of glossy red beads between wavy blue/green bands, one bead
 -- every 188 px (10.2 across), the rows mirrored about the bead-row centres
@@ -34,16 +34,21 @@
 --   188 px bead slot (C_AB_WT: zero at the bead centre and at the gap centre,
 --   so neighbouring beads of different sizes still join); vertically the
 --   line's d moves by -b T(d) within each 495-line row the same way.
---   a = Width + the Slide wave, b = Height + the Roll wave: screen-fixed
---   triangle waves (512 virtual px, 1024 virtual lines) whose depth follows
---   the speed, so each bead grows and shrinks as it slides / rolls through.
+--   a = Width, b = Height.
+--   Bead pulses (v0.6.1): each bead k gets its own size offset
+--   S_k = depth x tri(3k/8 - phase) (Slide) and each row r its own
+--   B_r = depth x tri(3r/8 - phase) (Roll), added to the field of the knot
+--   row before the Rims gain, so a bead swells or shrinks in X and Y alike
+--   and neighbours differ distinctly.  B_r fades to 0 at the band centre,
+--   the sum to 0 at the gap centres; the depth is full from 64 knob steps
+--   off the still zone and the phase advances with the speed.
 --
 --   K1  Width    every bead narrower .. wider in its slot (centre = the photo)
 --   K2  Height   every bead row shorter .. taller, the bands taking up the rest
 --   K3  Rims     field gain 0.31 .. 5x: faded fat rims .. posterized thin rims
 --   K4  Slide    bipolar: the beads slide along the rows (centre +-8 still) and
---                grow / shrink one by one as they pass the Slide wave
---   K5  Roll     bipolar: the rows roll up / down and grow / shrink by row
+--                each bead swells / shrinks on its own (a pulse travelling along the row)
+--   K5  Roll     bipolar: the rows roll up / down and each row swells / shrinks
 --   K6  Etch     the picture's luma pushed into the field (1.5x on Video)
 --   S7  Mirror   left/right mirror about the centre
 --   S8  Palette  Photo / Swap (U and V exchanged: blue beads, red bands)
@@ -104,12 +109,16 @@ architecture abacus of program_top is
     begin
         if v(7) = '1' then return not v(6 downto 0); else return v(6 downto 0); end if;
     end function;
-    -- 16-bit wave phase -> triangle -128 .. 127
-    function f_tri8s(p : unsigned(15 downto 0)) return signed is
-        variable v_t : unsigned(7 downto 0);
+    -- 8-bit pulse phase -> triangle -32 .. 31, and its magnitude
+    function f_tri6(p : unsigned(7 downto 0)) return signed is
+        variable v_t : unsigned(6 downto 0);
     begin
-        if p(15) = '1' then v_t := not p(14 downto 7); else v_t := p(14 downto 7); end if;
-        return signed((not v_t(7)) & v_t(6 downto 0));
+        if p(7) = '1' then v_t := not p(6 downto 0); else v_t := p(6 downto 0); end if;
+        return signed((not v_t(6)) & v_t(5 downto 1));
+    end function;
+    function f_abs6(w : signed(5 downto 0)) return unsigned is
+    begin
+        if w(5) = '1' then return unsigned(-w); else return unsigned(w); end if;   -- -32 -> 32
     end function;
 
     -- video line buffer: (luma >> 2) - 16, clipped at 0, of the line being drawn
@@ -176,16 +185,17 @@ architecture abacus of program_top is
     signal s_c0   : unsigned(10 downto 0) := to_unsigned(512, 11);           -- 512 + Swell
     signal s_sv, s_sw : signed(10 downto 0) := (others => '0');
     signal s_e    : unsigned(8 downto 0) := to_unsigned(40, 9);              -- Etch gain (Q6)
-    -- bead warps: Width a0 and the Slide wave depth (1/512 of a 0.75 bead-size factor),
-    -- Height b0 and the Roll wave depth (Q10), wave steps, Flip glide level
+    -- bead warps: Width a0 (1/512 of a 0.75 bead-size factor), Height b0 (Q10);
+    -- bead pulses: Slide / Roll depth (s' levels), phase (16 bits, 3/8 cycle per
+    -- bead / row), the top row's 3r mod 8; Flip glide level
     signal s_k3m  : unsigned(9 downto 0) := (others => '0');                -- |glided Rims - 512|
     signal s_k3n  : std_logic := '0';
     signal s_a0s  : signed(9 downto 0) := (others => '0');
-    signal s_a4   : unsigned(7 downto 0) := (others => '0');
     signal s_b0   : signed(10 downto 0) := (others => '0');
-    signal s_b5   : unsigned(8 downto 0) := (others => '0');
-    signal s_wstep : unsigned(8 downto 0) := to_unsigned(128, 9);
-    signal s_vwstep : unsigned(9 downto 0) := to_unsigned(64, 10);
+    signal s_ds, s_dr : unsigned(7 downto 0) := (others => '0');
+    signal s_ths, s_thr : unsigned(15 downto 0) := (others => '0');
+    signal s_r3w, s_r3t : unsigned(2 downto 0) := (others => '0');            -- 3 x (roll wraps), 3 x top row
+    signal s_vn   : unsigned(1 downto 0) := (others => '0');                -- vp0's modulo steps
     signal s_tau  : unsigned(10 downto 0) := (others => '0');
 
     -- field serial multiplier
@@ -212,12 +222,21 @@ architecture abacus of program_top is
     -- vertical bead warp (in 1/8 lines): d0 unwarped, b = Height + Roll wave (Q10),
     -- T(d), one serial shift-add shared by depth x |wave| and |b| x T
     signal e_d0   : unsigned(15 downto 0) := (others => '0');
-    signal e_wv   : unsigned(15 downto 0) := (others => '0');
-    signal e_wn   : std_logic := '0';
     signal e_dc   : unsigned(10 downto 0) := (others => '0');
-    signal e_b1   : signed(11 downto 0) := (others => '0');
-    signal e_b    : signed(10 downto 0) := (others => '0');
     signal e_bn   : std_logic := '0';
+    -- bead pulses: row 3r mod 8, the row's term XB (B_r faded to 0 at the band centre), the
+    -- current / next bead's S, column bead phase, bead 3k mod 8, column-side pipeline
+    signal e_r3, e_k3 : unsigned(2 downto 0) := (others => '0');
+    signal e_xb, e_scur, e_snext : signed(8 downto 0) := (others => '0');
+    signal e_sn, e_spend : std_logic := '0';
+    signal e_cph  : unsigned(15 downto 0) := (others => '0');
+    signal e_cx   : signed(9 downto 0) := (others => '0');
+    signal e_ce   : unsigned(2 downto 0) := (others => '0');
+    type t_dl is array (2 to 6) of signed(9 downto 0);
+    signal e_dl   : t_dl := (others => (others => '0'));
+    signal e_v6, e_s6 : std_logic := '0';
+    signal e_Rw   : unsigned(9 downto 0) := (others => '0');
+    signal e_dc6, e_dcp : signed(5 downto 0) := (others => '0');
     signal e_mt, e_macc : unsigned(20 downto 0) := (others => '0');
     signal e_bm   : unsigned(10 downto 0) := (others => '0');
     signal e_mc   : unsigned(3 downto 0) := (others => '0');
@@ -231,7 +250,7 @@ architecture abacus of program_top is
     signal e_kr, e_kh : unsigned(7 downto 0) := (others => '0');
     signal e_v0, e_v1, e_v2, e_v3, e_v4, e_v5 : std_logic := '0';           -- sample valid
     signal e_s0, e_s1, e_s2, e_s3, e_s4, e_s5 : std_logic := '0';           -- sample = row i+1
-    type t_j is array (0 to 5) of unsigned(6 downto 0);
+    type t_j is array (0 to 6) of unsigned(6 downto 0);
     signal e_j    : t_j := (others => (others => '0'));
     signal e_df   : signed(8 downto 0) := (others => '0');
     signal e_a5, e_a5d : unsigned(12 downto 0) := (others => '0');
@@ -247,17 +266,13 @@ architecture abacus of program_top is
     signal b_hp  : unsigned(19 downto 0) := (others => '0');
     signal b_px  : unsigned(10 downto 0) := (others => '0');
     signal b_dir : std_logic := '0';
-    signal b_wp  : unsigned(15 downto 0) := (others => '0');               -- Slide-wave phase
 
     -- horizontal bead warp (wN = warp stage N; stage w6 = p1)
     signal w1_mu, w2_mu, w3_mu, w4_mu, w5_mu : unsigned(12 downto 0) := (others => '0');
     signal w1_hi  : std_logic := '0';
     signal w1_u1, w1_u2 : unsigned(17 downto 0) := (others => '0');
-    signal w1_w   : signed(5 downto 0) := (others => '0');
     signal w2_wa  : unsigned(8 downto 0) := (others => '0');
-    signal w2_aw  : signed(14 downto 0) := (others => '0');
     signal w3_wt  : std_logic_vector(15 downto 0) := (others => '0');
-    signal w3_as  : signed(10 downto 0) := (others => '0');
     signal w4_t   : signed(6 downto 0) := (others => '0');
     signal w4_ac  : signed(9 downto 0) := (others => '0');
     signal w5_pr  : signed(16 downto 0) := (others => '0');
@@ -270,6 +285,7 @@ architecture abacus of program_top is
     signal p4_r0, p5_r0 : unsigned(9 downto 0) := (others => '0');
     signal p4_df  : signed(10 downto 0) := (others => '0');
     signal p4_ld  : signed(8 downto 0) := (others => '0');
+    signal p4_pc, p5_pc, p6_pc, p7_pc, p8_pc : signed(5 downto 0) := (others => '0');
     signal p5_pr  : signed(17 downto 0) := (others => '0');
     signal p5_lp  : signed(18 downto 0) := (others => '0');
     signal p6_sc  : signed(9 downto 0) := (others => '0');
@@ -297,6 +313,7 @@ architecture abacus of program_top is
     type t_u8x  is array (0 to 1) of unsigned(7 downto 0);
     type t_u9x  is array (0 to 1) of unsigned(8 downto 0);
     type t_u12x is array (0 to 1) of unsigned(11 downto 0);
+    type t_u13x is array (0 to 1) of unsigned(12 downto 0);
     type t_s6x  is array (0 to 1) of signed(5 downto 0);
     type t_s8x  is array (0 to 1) of signed(7 downto 0);
     type t_s9x  is array (0 to 1) of signed(8 downto 0);
@@ -318,7 +335,8 @@ architecture abacus of program_top is
     signal q6_dc : t_u12x := (others => (others => '0'));
     signal q6_an, q7_an, q8_an, q9_an : t_u8x := (others => (others => '0'));   -- amplitude 0..128
     signal q7_e  : t_s13x := (others => (others => '0'));
-    signal q8_r1, q8_r2 : t_s14x := (others => (others => '0'));
+    signal q8_ae  : t_u13x := (others => (others => '0'));
+    signal q8_w   : t_u9x := (others => (others => '0'));
     signal q9_r  : t_u5x := (others => (others => '0'));
     signal q10_al : t_u5x := (others => (others => '0'));
     signal p11_al, p12_al : unsigned(4 downto 0) := (others => '0');
@@ -398,9 +416,6 @@ begin
             -- no zoom in v0.6: one table width per screen width, one row period per 495 virtual lines
             s_st  <= resize(s_hb, 11);
             s_vst <= s_ys;
-            -- wave steps: 512 virtual px per Slide wave, 1024 virtual lines per Roll wave
-            s_wstep  <= resize(s_hb(9 downto 1), 9) - resize(s_hb(9 downto 5), 9);
-            s_vwstep <= s_ys(11 downto 2);
             -- Width a0 = glided K1 - 512; |glided Rims - 512| for its product
             s_a0s <= signed((not s_g1(12)) & s_g1(11 downto 3));
             if s_g3(12) = '1' then s_k3m <= '0' & s_g3(11 downto 3); s_k3n <= '0';
@@ -520,8 +535,10 @@ begin
                 when 172 =>
                     if s_rla < 0 then
                         v_r := s_rla + C_VPER;
+                        s_r3w <= s_r3w - 3;
                     elsif s_rla >= C_VPER then
                         v_r := s_rla - C_VPER;
+                        s_r3w <= s_r3w + 3;
                     else
                         v_r := s_rla;
                     end if;
@@ -537,7 +554,11 @@ begin
                 when 218 => s_v0a <= to_unsigned(301696, 19);
                 when 219 => s_v0a <= s_v0a + resize(s_roll, 19);
                 when 220 | 221 | 222 | 223 =>
-                    if s_v0a >= C_VPER then s_v0a <= s_v0a - C_VPER; end if;
+                    if s_zc = 220 then s_vn <= (others => '0'); end if;
+                    if s_v0a >= C_VPER then
+                        s_v0a <= s_v0a - C_VPER;
+                        if s_zc = 220 then s_vn <= "01"; else s_vn <= s_vn + 1; end if;
+                    end if;
                 when 224 => s_vp0 <= s_v0a(16 downto 0);
                 -- Swell: 512 + 3/4 (512 - p12) below the centre (0 % = +384), 512 - (p12 - 512) / 2 above
                 when 225 => s_sv <= to_signed(512, 11) - signed(resize(s_gp(12 downto 3), 11));
@@ -549,16 +570,26 @@ begin
                 when 228 =>
                     if s_src = '0' then s_e <= resize(s_g6(12 downto 5), 9) + resize(s_g6(12 downto 6), 9);
                     else s_e <= resize(s_g6(12 downto 5), 9); end if;
-                -- Slide-wave depth 3/8 |speed| (a bead-size swing of +-0.28 at full speed),
-                -- Roll-wave depth 3/4 |speed| (Q10: +-0.37), Height b0 = 2 (k2 - 512) (Q10)
+                -- bead pulses: depth 4 |speed| up to 255 s' levels (full from 64 knob steps off the
+                -- still zone), phase += 3 |speed| per field in the direction of travel; Height b0 = 2 (k2 - 512)
                 when 230 =>
-                    if s_st4 = '1' then s_a4 <= (others => '0');
-                    else s_a4 <= resize(s_m4(9 downto 2), 8) + resize(s_m4(9 downto 3), 8); end if;
+                    if s_st4 = '1' then s_ds <= (others => '0');
+                    elsif s_m4 >= 64 then s_ds <= (others => '1');
+                    else s_ds <= s_m4(5 downto 0) & "00"; end if;
                 when 231 =>
-                    if s_st5 = '1' then s_b5 <= (others => '0');
-                    else s_b5 <= resize(s_m5(9 downto 1), 9) + resize(s_m5(9 downto 2), 9); end if;
+                    if s_st5 = '1' then s_dr <= (others => '0');
+                    elsif s_m5 >= 64 then s_dr <= (others => '1');
+                    else s_dr <= s_m5(5 downto 0) & "00"; end if;
                 when 232 => s_b0 <= signed((not s_g2(12)) & s_g2(11 downto 2));
                 -- Flip glide: the flip level sweeps 0 .. 1024 in 43 fields
+                -- pulse phases: + 4 |speed| per field (a cycle in ~2.3 s at the default Slide)
+                when 234 =>
+                    if s_st4 = '0' then s_ths <= s_ths + shift_left(resize(s_m4, 16), 2); end if;
+                when 235 =>
+                    if s_st5 = '0' then s_thr <= s_thr + shift_left(resize(s_m5, 16), 2); end if;
+                -- the top row keeps its identity as the rows roll: its index is vp0's modulo
+                -- steps plus the roll accumulator's wraps (kept as 3r mod 8)
+                when 236 => s_r3t <= s_r3w + resize(s_vn, 3) + shift_left(resize(s_vn, 3), 1);
                 when 233 =>
                     if s_flip = '1' then
                         if s_tau > 1000 then s_tau <= to_unsigned(1024, 11); else s_tau <= s_tau + 24; end if;
@@ -659,7 +690,15 @@ begin
         variable v_sel : unsigned(4 downto 0);
         variable v_rs  : signed(14 downto 0);
         variable v_bn  : signed(11 downto 0);
-        variable v_w   : signed(7 downto 0);
+        variable v_w6  : signed(5 downto 0);
+        variable v_kk  : unsigned(2 downto 0);
+        variable v_th  : unsigned(7 downto 0);
+        variable v_res : signed(8 downto 0);
+        variable v_cp  : unsigned(15 downto 0);
+        variable v_p8  : signed(7 downto 0);
+        variable v_h, v_t : unsigned(8 downto 0);
+        variable v_g1, v_g2, v_g3, v_gs : signed(11 downto 0);
+        variable v_rp  : signed(11 downto 0);
     begin
         if rising_edge(clk) then
             e_zk <= '0';
@@ -671,7 +710,7 @@ begin
                 l_d8 <= e_d(15 downto 5);              -- this line's d (computed during the last one)
             end if;
 
-            -- serial shift-add (11 clocks), shared by the two warp products
+            -- serial shift-add (11 clocks), shared by every product of the line engine
             if e_ser = '1' then
                 if e_bm(0) = '1' then e_macc <= e_macc + e_mt; end if;
                 e_mt <= e_mt(19 downto 0) & '0';
@@ -680,19 +719,33 @@ begin
                 if e_mc = 10 then e_ser <= '0'; end if;
             end if;
 
+            -- the one pulse triangle: the row's (state 4) or a bead's -- bead 0 (state 8), bead 1
+            -- (state 9), the bead after the next (in the loop); and the one signed serial result
+            if e_lc = 4 then v_kk := e_r3; v_th := s_thr(15 downto 8);
+            elsif e_lc = 8 then v_kk := "000"; v_th := s_ths(15 downto 8);
+            elsif e_lc = 9 then v_kk := "011"; v_th := s_ths(15 downto 8);
+            else v_kk := e_k3 + 6; v_th := s_ths(15 downto 8); end if;
+            v_w6 := f_tri6(shift_left(resize(v_kk, 8), 5) - v_th);
+            if e_sn = '1' then v_res := -signed(resize(e_macc(12 downto 5), 9));
+            else v_res := signed(resize(e_macc(12 downto 5), 9)); end if;
+
             -- setup
             if e_zk = '1' then
                 e_vpa <= resize(s_vp0, 18);
-                e_wv  <= (others => '0');
+                e_r3  <= s_r3t;
                 e_lc  <= to_unsigned(1, 4);
             elsif g_start = '1' then
                 e_vpa <= resize(e_vp, 18) + resize(s_vst, 18);
-                e_wv  <= e_wv + resize(s_vwstep, 16);
                 e_lc  <= to_unsigned(1, 4);
             else
                 case to_integer(e_lc) is
                     when 1 =>
-                        if e_vpa >= C_VPER then e_vp <= resize(e_vpa - C_VPER, 17); else e_vp <= e_vpa(16 downto 0); end if;
+                        if e_vpa >= C_VPER then
+                            e_vp <= resize(e_vpa - C_VPER, 17);
+                            e_r3 <= e_r3 + 3;                     -- into the next row
+                        else
+                            e_vp <= e_vpa(16 downto 0);
+                        end if;
                         e_lc <= to_unsigned(2, 4);
                     when 2 =>
                         e_dd <= signed(resize(e_vp, 18)) - C_VMID;
@@ -707,59 +760,95 @@ begin
                             e_d0 <= unsigned(e_dd(15 downto 0));
                         end if;
                         e_lc <= to_unsigned(4, 4);
-                    when 4 =>                            -- depth x |Roll wave| (serial); 247.5 lines - d
-                        v_w := f_tri8s(e_wv);
-                        e_wn <= v_w(7);
-                        if v_w(7) = '1' then v_w := -v_w; end if;   -- -128 stays 128 as unsigned below
-                        e_mt   <= resize(s_b5, 21);
-                        e_bm   <= resize(unsigned(v_w), 11);
+                    when 4 =>                            -- Roll pulse: depth x |tri(3r/8 - phase)|; 247.5 lines - d
+                        e_sn   <= v_w6(5);
+                        e_mt   <= resize(s_dr, 21);
+                        e_bm   <= resize(f_abs6(v_w6), 11);
                         e_macc <= (others => '0');
                         e_mc   <= (others => '0');
                         e_ser  <= '1';
                         e_dc   <= to_unsigned(1980, 11) - e_d0(15 downto 5);
                         e_lc   <= to_unsigned(5, 4);
-                    when 5 =>
+                    when 5 =>                            -- |B_r| x E_y (32 up to 183 lines, 0 at the band centre)
                         if e_ser = '0' then
-                            if e_wn = '1' then e_b1 <= resize(s_b0, 12) - signed(resize(e_macc(16 downto 7), 12));
-                            else e_b1 <= resize(s_b0, 12) + signed(resize(e_macc(16 downto 7), 12)); end if;
-                            e_lc <= to_unsigned(6, 4);
+                            e_mt <= resize(e_macc(12 downto 5), 21);
+                            if e_dc(10 downto 4) >= 32 then e_bm <= to_unsigned(32, 11);
+                            else e_bm <= resize(e_dc(10 downto 4), 11); end if;
+                            e_macc <= (others => '0');
+                            e_mc   <= (others => '0');
+                            e_ser  <= '1';
+                            e_lc   <= to_unsigned(6, 4);
                         end if;
-                    when 6 =>                            -- b saturated to -1 .. 1023/1024
-                        if e_b1(11) /= e_b1(10) then
-                            if e_b1(11) = '1' then e_b <= to_signed(-1024, 11); else e_b <= to_signed(1023, 11); end if;
-                        else
-                            e_b <= e_b1(10 downto 0);
+                    when 6 =>                            -- XB; Height: T(d) = d up to 1/4 of the period, then 247.5 - d; |b| x T
+                        if e_ser = '0' then
+                            e_xb <= v_res;
+                            if e_d0(15 downto 5) <= 990 then e_mt <= resize(e_d0(15 downto 5), 21); else e_mt <= resize(e_dc, 21); end if;
+                            v_bn := -resize(s_b0, 12);
+                            if s_b0(10) = '0' then e_bm <= '0' & unsigned(s_b0(9 downto 0));
+                            else e_bm <= unsigned(v_bn(10 downto 0)); end if;
+                            e_bn   <= s_b0(10);
+                            e_macc <= (others => '0');
+                            e_mc   <= (others => '0');
+                            e_ser  <= '1';
+                            e_lc   <= to_unsigned(7, 4);
                         end if;
-                        e_lc <= to_unsigned(7, 4);
-                    when 7 =>                            -- T(d) = d up to 1/4 of the period, then 247.5 - d; |b| x T (serial)
-                        if e_d0(15 downto 5) <= 990 then e_mt <= resize(e_d0(15 downto 5), 21); else e_mt <= resize(e_dc, 21); end if;
-                        if e_b(10) = '0' then
-                            e_bm <= '0' & unsigned(e_b(9 downto 0));
-                        else
-                            v_bn := -resize(e_b, 12);
-                            e_bm <= unsigned(v_bn(10 downto 0));
+                    when 7 =>                            -- d -/+ |b| T / 1024 (1/8 lines)
+                        if e_ser = '0' then
+                            if e_bn = '1' then e_d <= (e_d0(15 downto 5) + e_macc(20 downto 10)) & e_d0(4 downto 0);
+                            else e_d <= (e_d0(15 downto 5) - e_macc(20 downto 10)) & e_d0(4 downto 0); end if;
+                            e_lc <= to_unsigned(8, 4);
                         end if;
-                        e_bn   <= e_b(10);
+                    when 8 =>                            -- i, fy; the first bead's pulse (k = 0)
+                        e_i  <= e_d(15 downto 11);
+                        e_fy <= e_d(10 downto 6);
+                        e_cph <= to_unsigned(42527, 16);       -- column 0: 0.65 of a bead left of bead 0's centre
+                        e_k3  <= (others => '0');
+                        e_sn   <= v_w6(5);
+                        e_mt   <= resize(s_ds, 21);
+                        e_bm   <= resize(f_abs6(v_w6), 11);
                         e_macc <= (others => '0');
                         e_mc   <= (others => '0');
                         e_ser  <= '1';
-                        e_lc   <= to_unsigned(8, 4);
-                    when 8 =>
-                        if e_ser = '0' then e_lc <= to_unsigned(9, 4); end if;
-                    when 9 =>                            -- d -/+ |b| T / 1024 (1/8 lines)
-                        if e_bn = '1' then e_d <= (e_d0(15 downto 5) + e_macc(20 downto 10)) & e_d0(4 downto 0);
-                        else e_d <= (e_d0(15 downto 5) - e_macc(20 downto 10)) & e_d0(4 downto 0); end if;
-                        e_lc <= to_unsigned(10, 4);
-                    when 10 =>
-                        e_i  <= e_d(15 downto 11);
-                        e_fy <= e_d(10 downto 6);
-                        e_lc <= to_unsigned(11, 4);
-                    when 11 =>
-                        e_run <= '1';
-                        e_cnt <= (others => '0');
-                        e_lc  <= to_unsigned(0, 4);
+                        e_lc   <= to_unsigned(9, 4);
+                    when 9 =>                            -- S_0; bead 1's pulse runs during bead 0; the column loop
+                        if e_ser = '0' then
+                            e_scur  <= v_res;
+                            e_sn    <= v_w6(5);
+                            e_mt    <= resize(s_ds, 21);
+                            e_bm    <= resize(f_abs6(v_w6), 11);
+                            e_macc  <= (others => '0');
+                            e_mc    <= (others => '0');
+                            e_ser   <= '1';
+                            e_spend <= '1';
+                            e_run   <= '1';
+                            e_cnt   <= (others => '0');
+                            e_lc    <= to_unsigned(0, 4);
+                        end if;
                     when others => null;
                 end case;
+            end if;
+
+            -- bead tracking along the knot columns: the column phase advances 15 / 188 of a bead per
+            -- column; crossing a gap centre (bit 15 rising) starts the next bead, whose S was computed
+            -- during this one, and starts the pulse of the bead after it
+            if e_spend = '1' and e_ser = '0' then
+                e_snext <= v_res;
+                e_spend <= '0';
+            end if;
+            if e_run = '1' and e_cnt(0) = '1' then
+                v_cp := e_cph + 5229;
+                if e_cph(15) = '0' and v_cp(15) = '1' then
+                    e_scur <= e_snext;
+                    e_k3   <= e_k3 + 3;
+                    e_sn    <= v_w6(5);
+                    e_mt    <= resize(s_ds, 21);
+                    e_bm    <= resize(f_abs6(v_w6), 11);
+                    e_macc  <= (others => '0');
+                    e_mc    <= (others => '0');
+                    e_ser   <= '1';
+                    e_spend <= '1';
+                end if;
+                e_cph <= v_cp;
             end if;
 
             -- column loop: 256 knot reads (row i, row i+1) per line
@@ -771,38 +860,61 @@ begin
                 if e_cnt = 255 then e_run <= '0'; end if;
                 e_cnt <= e_cnt + 1;
             end if;
-            -- 1: ROM (p_rom); 2: fabric copy
+            -- 1: ROM (p_rom); column side (registered with stage 0: e_dl(k) travels with stage k - 1,
+            -- so stage 6 reads e_dl(6)): x = S + XB of the column's bead and row, envelope E (0..4):
+            -- 4 up to 0.28 of the slot from the bead centre, falling to 0 at the gap centre
             e_v1 <= e_v0; e_s1 <= e_s0; e_j(1) <= e_j(0);
+            e_cx <= resize(e_scur, 10) + resize(e_xb, 10);
+            v_p8 := signed(e_cph(15 downto 8));
+            v_h  := unsigned(abs(resize(v_p8, 9)));
+            v_t  := to_unsigned(136, 9) - v_h;
+            if v_t(8 downto 4) >= 4 then e_ce <= "100"; else e_ce <= v_t(6 downto 4); end if;
+            -- 2: fabric copy; the column's pulse x E / 4 (one add of gated operands)
             e_kr <= unsigned(e_kq);
             e_v2 <= e_v1; e_s2 <= e_s1; e_j(2) <= e_j(1);
+            v_g1 := (others => '0'); v_g2 := (others => '0'); v_g3 := (others => '0');
+            if e_ce(2) = '1' then v_g1 := shift_left(resize(e_cx, 12), 2); end if;
+            if e_ce(1) = '1' then v_g2 := shift_left(resize(e_cx, 12), 1); end if;
+            if e_ce(0) = '1' then v_g3 := resize(e_cx, 12); end if;
+            v_gs := v_g1 + v_g2 + v_g3;
+            e_dl(2) <= v_gs(11 downto 2);
             -- 3: hold row i's knot; difference
             if e_v2 = '1' and e_s2 = '0' then e_kh <= e_kr; end if;
             e_df <= signed(resize(e_kr, 9)) - signed(resize(e_kh, 9));
             e_a5 <= e_kh & "00000";
-            e_v3 <= e_v2; e_s3 <= e_s2; e_j(3) <= e_j(2);
+            e_v3 <= e_v2; e_s3 <= e_s2; e_j(3) <= e_j(2); e_dl(3) <= e_dl(2);
             -- 4: (b - a) fy
             e_pr  <= e_df * signed(resize(e_fy, 6));
             e_a5d <= e_a5;
-            e_v4 <= e_v3; e_s4 <= e_s3; e_j(4) <= e_j(3);
+            e_v4 <= e_v3; e_s4 <= e_s3; e_j(4) <= e_j(3); e_dl(4) <= e_dl(3);
             -- 5: R
             v_rs := signed(resize(e_a5d, 15)) + e_pr;
             e_R <= unsigned(v_rs(12 downto 3));
-            e_v5 <= e_v4; e_s5 <= e_s4; e_j(5) <= e_j(4);
-            -- 6: write the pair (R[j-1], R[j]); after column 127 also (R[127], R[127])
+            e_v5 <= e_v4; e_s5 <= e_s4; e_j(5) <= e_j(4); e_dl(5) <= e_dl(4); e_dl(6) <= e_dl(5);
+            -- 6: R + the bead pulse, clamped (it enters before the Rims gain, so the size change
+            -- is the same in pixels at any Rims); its coarse value for the glint gate
+            v_rp := signed(resize(e_R, 12)) + resize(e_dl(6), 12);
+            if v_rp < 0 then e_Rw <= (others => '0');
+            elsif v_rp > 1023 then e_Rw <= (others => '1');
+            else e_Rw <= unsigned(v_rp(9 downto 0)); end if;
+            e_dc6 <= e_dl(6)(9 downto 4);
+            e_v6 <= e_v5; e_s6 <= e_s5; e_j(6) <= e_j(5);
+            -- 7: write the pair {pulse(j-1), R[j-1], R[j]}; after column 127 also (R[127], R[127])
             e_we <= '0';
-            if e_v5 = '1' and e_s5 = '1' then
-                e_Rp <= e_R;
-                if e_j(5) /= 0 then
+            if e_v6 = '1' and e_s6 = '1' then
+                e_Rp  <= e_Rw;
+                e_dcp <= e_dc6;
+                if e_j(6) /= 0 then
                     e_we <= '1';
-                    e_wa <= e_wb & (e_j(5) - 1);
-                    e_wd <= "000000" & std_logic_vector(e_Rp) & "000000" & std_logic_vector(e_R);
+                    e_wa <= e_wb & (e_j(6) - 1);
+                    e_wd <= std_logic_vector(e_dcp) & std_logic_vector(e_Rp) & "000000" & std_logic_vector(e_Rw);
                 end if;
-                if e_j(5) = 127 then e_last <= '1'; end if;
+                if e_j(6) = 127 then e_last <= '1'; end if;
             elsif e_last = '1' then
                 e_last <= '0';
                 e_we <= '1';
                 e_wa <= e_wb & "1111111";
-                e_wd <= "000000" & std_logic_vector(e_Rp) & "000000" & std_logic_vector(e_Rp);
+                e_wd <= std_logic_vector(e_dcp) & std_logic_vector(e_Rp) & "000000" & std_logic_vector(e_Rp);
             end if;
         end if;
     end process p_line;
@@ -815,16 +927,13 @@ begin
         if rising_edge(clk) then
             if g_start = '1' then
                 b_hp  <= s_x0;
-                b_wp  <= (others => '0');
                 b_px  <= (others => '0');
                 b_dir <= '0';
             elsif g_avid = '1' then
                 if b_dir = '1' then
                     b_hp <= b_hp - resize(s_st, 20);
-                    b_wp <= b_wp - resize(s_wstep, 16);
                 else
                     b_hp <= b_hp + resize(s_st, 20);
-                    b_wp <= b_wp + resize(s_wstep, 16);
                 end if;
                 if s_mirror = '1' and b_px = s_hm1 then b_dir <= '1'; end if;
             end if;
@@ -848,37 +957,29 @@ begin
         variable v_m  : signed(14 downto 0);
         variable v_mw : unsigned(12 downto 0);
         variable v_ph : unsigned(17 downto 0);
-        variable v_w8 : signed(7 downto 0);
+        variable v_g  : unsigned(10 downto 0);
     begin
         if rising_edge(clk) then
             -- w1: triangle fold of the horizontal phase (table position x 4, 0..8191);
             -- the bead phase of the folded position starts from the unfolded one,
-            -- U x 327 (mod 2^18), as two shift-adds; the Slide wave
+            -- U x 327 (mod 2^18), as two shift-adds
             v_u := b_hp(19 downto 6);
             if b_hp(19) = '1' then w1_mu <= not v_u(12 downto 0); else w1_mu <= v_u(12 downto 0); end if;
             w1_hi <= b_hp(19);
             w1_u1 <= shift_left(resize(v_u, 18), 8) + shift_left(resize(v_u, 18), 6);
             w1_u2 <= shift_left(resize(v_u, 18), 3) - resize(v_u, 18);
-            v_w8  := f_tri8s(b_wp);
-            w1_w  <= v_w8(7 downto 2);
 
-            -- w2: bead phase -> warp ROM address; wave x depth
+            -- w2: bead phase -> warp ROM address
             v_ph  := w1_u1 + w1_u2;
             w2_wa <= w1_hi & v_ph(17 downto 10);
-            w2_aw <= signed('0' & s_a4) * w1_w;
             w2_mu <= w1_mu;
 
-            -- w3: warp ROM (p_rom); a = Width + the wave
-            w3_as <= resize(s_a0s, 11) + resize(shift_right(w2_aw, 5), 11);
+            -- w3: warp ROM (p_rom)
             w3_mu <= w2_mu;
 
-            -- w4: fabric copy, the profile for the sign of a; a saturated to -512 .. 511
-            if w3_as(10) = '1' then w4_t <= signed(w3_wt(6 downto 0)); else w4_t <= signed(w3_wt(14 downto 8)); end if;
-            if w3_as(10) /= w3_as(9) then
-                if w3_as(10) = '1' then w4_ac <= to_signed(-512, 10); else w4_ac <= to_signed(511, 10); end if;
-            else
-                w4_ac <= w3_as(9 downto 0);
-            end if;
+            -- w4: fabric copy, the profile for the sign of a = Width
+            if s_a0s(9) = '1' then w4_t <= signed(w3_wt(6 downto 0)); else w4_t <= signed(w3_wt(14 downto 8)); end if;
+            w4_ac <= s_a0s;
             w4_mu <= w3_mu;
 
             -- w5: a T
@@ -900,6 +1001,7 @@ begin
 
             -- 3: fabric copy; luma (read 5 pixels behind the beam, p_beam)
             p3_q  <= r_q;
+            p4_pc <= signed(p3_q(31 downto 26)); p5_pc <= p4_pc; p6_pc <= p5_pc; p7_pc <= p6_pc; p8_pc <= p7_pc;
             p3_fx <= p2_fx;
             p3_y8 <= unsigned(s_lb_q);
 
@@ -933,8 +1035,11 @@ begin
             if v_t < 0 then v_y := (others => '0');
             elsif v_t > 1023 then v_y := (others => '1');
             else v_y := unsigned(v_t(9 downto 0)); end if;
-            if v_y < 768 then p9_gg <= '1'; else p9_gg <= '0'; end if;
-            if v_y < 960 then p9_gf <= '1'; else p9_gf <= '0'; end if;
+            -- glint gate: a shrinking bead (pulse > 0) loses its glints twice as fast as its outline
+            if p8_pc(5) = '0' then v_g := resize(v_y, 11) + shift_left(resize(unsigned(p8_pc(4 downto 0)), 11), 5);
+            else v_g := resize(v_y, 11); end if;
+            if v_g < 768 then p9_gg <= '1'; else p9_gg <= '0'; end if;
+            if v_g < 960 then p9_gf <= '1'; else p9_gf <= '0'; end if;
             if resize(v_y, 11) < s_tau then v_y := not v_y; end if;   -- Flip, gliding up the contours
             p9_ix <= v_y(9 downto 1);
 
@@ -1069,13 +1174,13 @@ begin
                 q7_e(n) <= signed(resize(l_d8, 13)) - signed(resize(q6_dc(n), 13));
                 q7_w(n) <= q6_w(n); q7_an(n) <= q6_an(n); q7_c(n) <= q6_c(n); q7_wd(n) <= q6_wd(n);
 
-                -- 8: w - (d - centre), w + (d - centre)
-                q8_r1(n) <= signed(resize(q7_w(n), 14)) - resize(q7_e(n), 14);
-                q8_r2(n) <= signed(resize(q7_w(n), 14)) + resize(q7_e(n), 14);
+                -- 8: |d - centre|
+                q8_ae(n) <= unsigned(abs(q7_e(n)));
+                q8_w(n)  <= q7_w(n);
                 q8_an(n) <= q7_an(n); q8_c(n) <= q7_c(n); q8_wd(n) <= q7_wd(n);
 
                 -- 9: w - |d - centre|, clamped to 0..16 (a 2-line soft edge)
-                if q8_r1(n) < q8_r2(n) then v_r := q8_r1(n); else v_r := q8_r2(n); end if;
+                v_r := signed(resize(q8_w(n), 14)) - signed(resize(q8_ae(n), 14));
                 if v_r < 0 then q9_r(n) <= (others => '0');
                 elsif v_r > 16 then q9_r(n) <= to_unsigned(16, 5);
                 else q9_r(n) <= unsigned(v_r(4 downto 0)); end if;

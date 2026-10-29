@@ -1,7 +1,8 @@
 # Abacus — rows of glossy beads on their rods
 
-**v0.6.0 (2026-10-28, phase 2): built, NOT flashed.** Phase 2 removes the X/Y zooms and resizes every bead
-inside its own slot instead (Width, Height, and size waves riding Slide and Roll); see "Phase 2" below.
+**v0.6.1 (2026-10-28, phase 2 round 2): built, NOT flashed.** Phase 2 removes the X/Y zooms and resizes every bead
+inside its own slot instead (Width, Height). Slide and Roll make each bead and each row swell and shrink on
+its own, in X and Y alike; see "Phase 2" below.
 Rebuilt in v0.5.0 from the photo WIN_20230605_01_03_50 (Heirloom #42):
 rows of red beads between wavy blue/green bands, one bead every 188 px, the rows mirrored about the bead
 rows. The beads change across the frame: dark maroon with green lenses and navy "eyes" on the left, bright
@@ -68,8 +69,8 @@ Measured on the frame and on a tile averaged over its 4 half-period copies (they
 | K1 Width | every bead's width inside its own 188 px slot, spacing kept: −100 = slim slivers (×0.57) in wide gaps, 0 = the photo, +100 = flat-topped blocks filling the slot (×1.46, the flat core over 3/4 of it). The band diamonds at the gaps narrow as the beads widen. |
 | K2 Height | every bead row's height inside its 495-line period: −100 = thin bead rows (×0.5) in tall striped bands, 0 = the photo, +100 = tall flat-centred beads (×1.33) with the bands at half height |
 | K3 Rims | the dark rims round the beads and the band-edge lines: field gain 0.31–5× about the rim level (v0.5: 0.5–2.5×). 0 = faded salmon beads and a navy band, 100 % = posterized flat red beads and flat blue bands with thin rims |
-| K4 Slide | the beads slide along their rods: bipolar pan, still within ±8 of centre; default 640 ≈ 0.8 px/field (≈ 49 px/s) leftward; maximum 14.5 virtual px/field. **New:** the beads pass a screen-fixed size wave (512 virtual px, ≈ 2.7 beads), so each one grows and shrinks as it slides. Its depth follows the speed: a size factor of ±0.07 at the default, ±0.27 at full speed, none when still. |
-| K5 Roll | the rows roll up/down: bipolar vertical drift, still at the default centre. **New:** a screen-fixed row-height wave (1024 virtual lines ≈ 2 rows), depth following the speed (±0.37 at full), so each row grows and shrinks as it rolls |
+| K4 Slide | the beads slide along their rods: bipolar pan, still within ±8 of centre; default 640 ≈ 0.8 px/field (≈ 49 px/s) leftward; maximum 14.5 virtual px/field. **v0.6.1:** every bead swells and shrinks on its own, in X and Y alike. Bead k's size offset is depth × triangle(3k/8 − phase), so neighbours sit 3/8 of a cycle apart and differ distinctly. The phase advances with the speed (a cycle in ~2.3 s at the default, ~0.5 s at full). The depth is full (±255 s' levels, pip to swollen) from 64 knob steps off the still zone. |
+| K5 Roll | the rows roll up/down: bipolar vertical drift, still at the default centre. **v0.6.1:** every row swells and shrinks on its own the same way (row r: depth × triangle(3r/8 − phase)); the gaps between beads keep their level, so a swollen row stays a row of beads |
 | K6 Etch | the picture's luma pushed into the field: bright areas push the contours towards the band colours, dark areas swell the beads (160 = default). **v0.6:** 1.5× stronger on Video (the Osc source unchanged, so the photo still matches) |
 | S7 Mirror | left/right mirror about the centre: the left half (lenses, eyes, dark beads into bright beads) on both sides |
 | S8 Palette | Photo / Swap (U and V exchanged: blue beads in red/magenta bands) |
@@ -124,8 +125,40 @@ slight boost on the video side; Flip should glide as it flips; Swell deeper towa
   - the horizontal scaling moved into the warp ROM, with overflow saturation.
 - **Flip glide.** The flip level τ steps ±24 per field (0 .. 1024); pixels with s' < τ are flipped.
 - The photo stays reachable. With Width, Height and Slide still, the integer model's frame is bit-exact
-  to v0.5's. At the default Slide 640, the slight size wave moves the frame by a mean 2.4 RGB levels from
+  to v0.5's. At the default Slide 640, the slight size wave moves the frame by a mean 2.7 RGB levels from
   v0.5.
+
+### Round 2 (v0.6.1)
+Ron's notes (2026-10-28, after the v0.6.0 control sheet): the Slide and Roll waves should scale the beads in
+both X and Y. They should be more prominent, with more scaling even at slow settings. The beads should grow
+and shrink separately, with the scale offset along the line so one bead differs distinctly from the next.
+- **The size waves are per bead now, not screen-fixed.**
+  - Bead k (in the table, so it keeps its identity as it slides) gets S_k = depth × tri(3k/8 − θ_s), and
+    row r gets B_r = depth × tri(3r/8 − θ_r).
+  - The row index survives rolling: it is vp0's modulo steps plus the roll accumulator's wraps.
+  - The phases θ advance 4 × |speed| per field.
+  - The depth is 4 × |speed|, capped at 255, so it is full from 64 knob steps off the still zone.
+  - Still (±8) means no pulse, which is the photo; the "Photo" preset sets Slide and Roll still. The
+    default Slide 640 now pulses at full depth.
+- **The mechanism is a per-bead Swell.** The line engine adds δ = (S_k + B_r · E_y(d)) · E_x(column) / 4
+  to each knot column's field value R[j], clamped, before the Rims gain.
+  - A bead's outline therefore moves outward or inward in X and Y alike, by the same number of pixels at
+    any Rims setting.
+  - E_y is 1 out to 183 lines from the bead row and falls to 0 at the band centre, where rows meet.
+  - E_x is a 5-step fade (1 out to 0.28 of the slot from the bead centre, 0 at the gap centre), where
+    beads meet. With it, a swelling row keeps its gaps (without it, rows merged into red bars).
+  - The line engine tracks beads along the knot columns with a bead-phase accumulator (15/188 of a bead per
+    column) and computes the next bead's S_k on the shared serial unit while it fills the current one.
+  - It writes the column's δ / 16 into the row RAM's spare bits. The glint gate adds 2δ for shrinking
+    beads, so their glints fade with the outline instead of floating in the gap.
+  - A true geometric 2-D zoom per bead (a per-bead vertical warp) was priced at ~+380 LC, about 97 % of the
+    chip, and not taken.
+- **Removed:** the v0.6.0 screen-fixed Slide width wave (and its per-pixel multiply) and Roll height wave.
+  Width and Height stay geometric and static.
+- **Fit:** the first version added 207 LUT. Sharing one pulse triangle and one result negator across the
+  line engine, and counting row wraps instead of comparing vp0 jumps, brought it back to 4109 LUT
+  standalone (v0.6.0: 4101). The gloss soft-edge min(w − e, w + e) also became w − |e| (identical result,
+  one adder fewer per slot).
 
 ## Video
 - **How the camera enters.** Its luma (line buffer, (y >> 2) − 16, clipped) minus 110, scaled by Etch, is
@@ -142,10 +175,13 @@ slight boost on the video side; Flip should glide as it flips; Swell deeper towa
   glide level.
 - **Per-line engine.** Kicked at each line start, it computes the NEXT line's 129-entry field row: two knot
   rows blended by the line's fraction, written into the other bank of a 2 × 128 row RAM. d is the |triangle|
-  of a 495-line oscillator, or a saw for Stack, then warped by the row's Height + Roll-wave factor.
+  of a 495-line oscillator, or a saw for Stack, then warped by Height. Each knot column then gets its bead's
+  pulse δ (with the row's term) added before the row is written. One 11-clock serial shift-add does every
+  product: the Roll pulse, its band fade, Height × T(d), and each bead's Slide pulse, just in time
+  along the line.
 - **Pixel path** (latency 28 clocks in every mode).
   - Triangle fold of the horizontal phase. In parallel: the bead phase (two shift-adds and one add), the
-    warp ROM (512 × 16), the Width + Slide-wave factor (one 8 × 8 product), a × T. Five stages in all.
+    warp ROM (512 × 16), Width × T. Five stages in all.
   - The warped position gives the knot column and fraction (6 bits), plus the gloss column (8 units =
     7.5 virtual px) and its fraction.
   - Row RAM, fabric copy, R1 − R0, lerp product, s − 512, Rims product, + Swell, + Etch, clip, Flip, palette
@@ -167,6 +203,24 @@ slight boost on the video side; Flip should glide as it flips; Swell deeper towa
   computes the bead warp table, and writes abacus_pkg.vhd.
 
 ## Status
+- **v0.6.1 (phase 2 round 2) built 2026-10-28, router2, NOT flashed.**
+  - **Seeds:** HD HDMI = seed 2, SD Analog = seed 2 (its seed 1 timed out); the rest seed 1.
+  - **Fmax (post-route):** HD Analog 79.10, HD HDMI 75.69, HD Dual 77.21, SD Analog 80.87, SD HDMI 77.09,
+    SD Dual 75.23 MHz.
+  - **Resources:** 7284–7310 / 7680 LC (95 %, FULL band), 24 / 32 EBR. Every bitstream passed iceunpack.
+    out/rev_b/ron/heirloom/abacus.vmprog (505 993 B).
+  - **Verification** (GHDL 720p, decimation 1, Osc, K4 = K5 = 1023):
+    - The first pulse netlist was one knot column off: the column-side registers travel with stage 0,
+      not stage 1, so column j got column j+1's pulse (a 15-px lead on every bead's swell). The model
+      matched only with the pulse shifted.
+    - Fixed with one more delay stage. The built netlist then matches the bit-exact model
+      (p2/im12.py) exactly: mean |ΔRGB| 0.000, 100 % within ±2. The fit took 4 pulse-phase fields, the
+      pan one field behind, and a row-numbering offset of 2 (rows count from vp0's modulo steps), at
+      the usual 3-px beam offset.
+  - **Photo:** with Slide and Roll still (preset 0 "Photo") the model is v0.5's frame (0.14 % of pixels
+    move by more than 4 levels, from the 9-level glint blend). At the default Slide 640 the beads pulse
+    at full depth.
+  - **Headroom:** at 95 % LC any further feature needs something removed. Ablate first.
 - **v0.6.0 (phase 2) built 2026-10-28, router2 (the builder default), all 6 configs seed 1, NOT flashed.**
   - **Fmax (post-route):** HD Analog 74.57 (thin), HD HDMI 81.00, HD Dual 82.10, SD Analog 76.48, SD HDMI
     78.44, SD Dual 76.09 MHz (SD Fmin 27).
@@ -218,8 +272,9 @@ slight boost on the video side; Flip should glide as it flips; Swell deeper towa
 - **Capture borders.** The capture's dark top/bottom rows and left edge are not drawn.
 
 ## Working files
-`.heirloom_work/rb_abacus/` (phase 2 in `p2/`: im9.py = the v0.6 integer model, sheet6.sh, abl/ ablation
-harness, sheet_v050.png / sheet_v060.png, cmp_v060_default.png; sheet.png is now the v0.6 sheet):
+`.heirloom_work/rb_abacus/` (phase 2 in `p2/`: im12.py = the v0.6.1 integer model (im9.py = v0.6.0),
+sheet6.sh, abl/ ablation harness, sheet_v050.png / sheet_v060.png / sheet_v061.png, cmp_v060_default.png;
+sheet.png is now the v0.6.1 sheet):
 - `notes.md`: measurement log, including every fit that failed.
 - `T.npy`: the averaged tile.
 - `kalt8.py`, `ka_K_h15.npy`, `ka_P_h15.npy`: knot-grid field and palette.
