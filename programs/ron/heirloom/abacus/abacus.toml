@@ -1,13 +1,14 @@
 # Abacus - Heirloom #42, rebuilt 2026-10-27 (v0.5.0) from WIN_20230605_01_03_50; phase 2 v0.6.0 2026-10-28.
 # Rows of glossy red beads between wavy blue/green bands: one measured scalar field (a knot grid) through
 # one measured palette, plus a measured gloss layer (glints, lenses, eyes).  v0.6: every bead resized in its
-# own slot (Width / Height); v0.6.1: Slide / Roll pulse each bead's / row's size on its own.  See abacus.vhd, abacus.py and SUMMARY.md.
+# own slot (Width / Height); v0.6.1: Slide / Roll pulse each bead's / row's size on its own;
+# v0.6.2: S11 Theme (Photo / Gold) replaces Source (the camera Etch is always on; K6 = 0 turns it off).  See abacus.vhd, abacus.py and SUMMARY.md.
 
 [program]
 processing_delay_clks = 28
 program_id = "com.czartroniks.abacus"
 program_name = "Abacus"
-program_version = "0.6.1"
+program_version = "0.6.2"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -103,9 +104,9 @@ initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
-name_label = "Source"
-value_labels = ["Video", "Osc"]
-initial_value_label = "Video"
+name_label = "Theme"
+value_labels = ["Photo", "Gold"]
+initial_value_label = "Photo"
 
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
@@ -121,6 +122,7 @@ suffix_label = "%"
 name = "Photo"
 rotary_potentiometer_4 = 512
 rotary_potentiometer_5 = 512
+rotary_potentiometer_6 = 0
 
 [[preset]]
 name = "Twin Rods"
@@ -152,3 +154,8 @@ name = "Pillars"
 rotary_potentiometer_1 = 820
 rotary_potentiometer_2 = 900
 rotary_potentiometer_3 = 820
+
+[[preset]]
+name = "Gold"
+toggle_switch_11 = 1
+rotary_potentiometer_5 = 700

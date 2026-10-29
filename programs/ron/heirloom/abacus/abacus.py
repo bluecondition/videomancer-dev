@@ -2,7 +2,7 @@
 # Copyright (C) 2026 czartroniks
 # SPDX-License-Identifier: GPL-3.0-only
 """
-ABACUS v0.6.0 - build hook.  Writes abacus_pkg.vhd next to this file.  Pure python (the builder runs it
+ABACUS v0.6.2 - build hook.  Writes abacus_pkg.vhd next to this file.  Pure python (the builder runs it
 with the system interpreter).
 
 The look is measured from the photo (WIN_20230605_01_03_50): rows of glossy red beads between blue/green
@@ -30,7 +30,11 @@ Package contents:
                          entry is {D centre in 2-line steps (7), J jump to the next column (1), W half-width
                          class (3), A amplitude (2), C colour class (3)}; slot k of column c sits in bits
                          16k+15..16k, of column c + 1 in 16(k+2)+15..16(k+2).
-  f_ab_gc     the 8 gloss colour classes {Y, U, V} (same convention as the palette), as a case (logic).
+  C_AB_PAL2   512 x 24   the Gold theme (S11): the palette with every colour's hue turned +40 degrees in HSV
+                         (brightness kept: red -> gold, maroon -> bronze, navy -> violet, green -> teal,
+                         blue -> violet), {Y, U, V} at 8 bits each (x 4 = the 10-bit codes).
+  f_ab_gc     the gloss colour classes {Y, U, V} (same convention as the palette), as a case (logic):
+              entries 0..7 the photo's, 8..15 the same classes in the Gold theme.
   C_AB_WT     512 x 16   bead warp ROM (Width / the Slide size wave), address = {fold bit, bits 17..10 of
                          (unfolded horizontal position x 4) x 327}: the bead phase of the folded position
                          (256 = one bead every 188 virtual px, 0 = a bead centre).  Each word is
@@ -71,6 +75,18 @@ def warp_table():
 WARP = warp_table()
 
 
+def theme_gold(rgb):
+    """The Gold theme: hue +40 degrees in HSV, saturation and brightness kept."""
+    import colorsys
+    h, s, v = colorsys.rgb_to_hsv(*[x / 255.0 for x in rgb])
+    r, g, b = colorsys.hsv_to_rgb((h + 40.0 / 360.0) % 1.0, s, v)
+    return [int(round(255 * x)) for x in (r, g, b)]
+
+
+PAL_GOLD = [theme_gold(c) for c in PAL]
+GCOL_GOLD = [theme_gold(c) for c in GCOL]
+
+
 def hw10(r, g, b):
     """rgb 0..255 -> hardware 10-bit (Y with the 16/13 pre-scale, U = Cr, V = Cb)."""
     y = (0.299 * r + 0.587 * g + 0.114 * b) / 255.0
@@ -98,6 +114,13 @@ def write_pkg():
         Y, U, V = hw10(r, g, b)
         words.append((Y << 22) | (U << 12) | (V << 2))
     L.append(",\n".join("        " + ", ".join('x"%08X"' % v for v in words[j:j + 8]) for j in range(0, 512, 8)) + ");")
+    L.append("    type t_ab_pal2 is array (0 to 511) of std_logic_vector(23 downto 0);")
+    L.append("    constant C_AB_PAL2 : t_ab_pal2 := (")
+    words = []
+    for r, g, b in PAL_GOLD:
+        Y, U, V = [min(255, (x + 2) >> 2) for x in hw10(r, g, b)]
+        words.append((Y << 16) | (U << 8) | V)
+    L.append(",\n".join("        " + ", ".join('x"%06X"' % v for v in words[j:j + 8]) for j in range(0, 512, 8)) + ");")
     L.append("    type t_ab_gl is array (0 to 255) of std_logic_vector(63 downto 0);")
     L.append("    constant C_AB_GL : t_ab_gl := (")
     words = []
@@ -114,17 +137,17 @@ def write_pkg():
     words = [((tp & 255) << 8) | (tm & 255) for tp, tm in WARP]
     L.append(",\n".join("        " + ", ".join('x"%04X"' % v for v in words[j:j + 16]) for j in range(0, 512, 16)) + ");")
     gw = []
-    for r, g, b in GCOL:
+    for r, g, b in GCOL + GCOL_GOLD:
         Y, U, V = hw10(r, g, b)
         gw.append((Y << 20) | (U << 10) | V)
-    L.append("    function f_ab_gc(c : unsigned(2 downto 0)) return std_logic_vector;")
+    L.append("    function f_ab_gc(c : unsigned(3 downto 0)) return std_logic_vector;")
     L.append("end package abacus_pkg;\n")
     L.append("package body abacus_pkg is")
-    L.append("    function f_ab_gc(c : unsigned(2 downto 0)) return std_logic_vector is")
+    L.append("    function f_ab_gc(c : unsigned(3 downto 0)) return std_logic_vector is")
     L.append("    begin")
     L.append("        case to_integer(c) is")
     for k, v in enumerate(gw):
-        L.append('            when %d => return "%s";' % (k, format(v, '030b')) if k < 7 else '            when others => return "%s";' % format(v, '030b'))
+        L.append('            when %d => return "%s";' % (k, format(v, '030b')) if k < 15 else '            when others => return "%s";' % format(v, '030b'))
     L.append("        end case;")
     L.append("    end function;")
     L.append("end package body abacus_pkg;")

@@ -1,8 +1,9 @@
 # Abacus — rows of glossy beads on their rods
 
-**v0.6.1 (2026-10-28, phase 2 round 2): flashed 2026-10-28, Ron: "looks OK".** Presets are still placeholders. Phase 2 removes the X/Y zooms and resizes every bead
-inside its own slot instead (Width, Height). Slide and Roll make each bead and each row swell and shrink on
-its own, in X and Y alike; see "Phase 2" below.
+**v0.6.2 (2026-10-28, phase 2 round 3): built, NOT flashed.** (v0.6.1 flashed 2026-10-28, Ron: "looks OK".) Presets
+are still placeholders. Phase 2 removes the X/Y zooms and resizes every bead inside its own slot instead
+(Width, Height). Slide and Roll make each bead and each row swell and shrink on its own, in X and Y alike.
+S11 is a palette Theme (Photo / Gold) instead of the Video / Osc source; see "Phase 2" below.
 Rebuilt in v0.5.0 from the photo WIN_20230605_01_03_50 (Heirloom #42):
 rows of red beads between wavy blue/green bands, one bead every 188 px, the rows mirrored about the bead
 rows. The beads change across the frame: dark maroon with green lenses and navy "eyes" on the left, bright
@@ -71,12 +72,12 @@ Measured on the frame and on a tile averaged over its 4 half-period copies (they
 | K3 Rims | the dark rims round the beads and the band-edge lines: field gain 0.31–5× about the rim level (v0.5: 0.5–2.5×). 0 = faded salmon beads and a navy band, 100 % = posterized flat red beads and flat blue bands with thin rims |
 | K4 Slide | the beads slide along their rods: bipolar pan, still within ±8 of centre; default 640 ≈ 0.8 px/field (≈ 49 px/s) leftward; maximum 14.5 virtual px/field. **v0.6.1:** every bead swells and shrinks on its own, in X and Y alike. Bead k's size offset is depth × triangle(3k/8 − phase), so neighbours sit 3/8 of a cycle apart and differ distinctly. The phase advances with the speed (a cycle in ~2.3 s at the default, ~0.5 s at full). The depth is full (±255 s' levels, pip to swollen) from 64 knob steps off the still zone. |
 | K5 Roll | the rows roll up/down: bipolar vertical drift, still at the default centre. **v0.6.1:** every row swells and shrinks on its own the same way (row r: depth × triangle(3r/8 − phase)); the gaps between beads keep their level, so a swollen row stays a row of beads |
-| K6 Etch | the picture's luma pushed into the field: bright areas push the contours towards the band colours, dark areas swell the beads (160 = default). **v0.6:** 1.5× stronger on Video (the Osc source unchanged, so the photo still matches) |
+| K6 Etch | the picture's luma pushed into the field: bright areas push the contours towards the band colours, dark areas swell the beads (160 = default). **v0.6:** 1.5× stronger than v0.5. **v0.6.2:** always the camera (Etch 0 turns it off; the Osc source is gone) |
 | S7 Mirror | left/right mirror about the centre: the left half (lenses, eyes, dark beads into bright beads) on both sides |
 | S8 Palette | Photo / Swap (U and V exchanged: blue beads in red/magenta bands) |
 | S9 Stack | Mirror (the photo's mirrored rows) / Saw (rows repeat and are cut flat at each band centre) |
 | S10 Flip | beads and bands exchange places (s → 1 − s): red bands, blue beads. **v0.6:** it glides in ≈ 0.7 s (43 fields). The flip spreads from the bead cores outward through the contours (cores turn blue, then the rims, then the bands turn red), and switching back retracts it the same way. |
-| S11 Source | Video / Osc |
+| S11 Theme | **v0.6.2:** Photo / Gold. Gold turns every colour's hue +40° in HSV with its brightness kept: gold beads, bronze rims, violet and teal bands, the glints recoloured too. S8 Swap still applies, so with Gold it gives cyan beads in crimson and olive bands: four colour schemes in all. (Was Source: Video / Osc.) |
 | **P12 Swell** | bead size (palette offset): 0 % = dark pips with green rings in a blue sea (+0.375, deeper than v0.5's +0.25), 50 % = the photo, 100 % = the beads merge into red bars (−0.25) |
 
 Glides (1/8 of the gap per field) act on K1, K2, K3, K6 and P12.
@@ -160,13 +161,29 @@ and shrink separately, with the scale offset along the line so one bead differs 
   standalone (v0.6.0: 4101). The gloss soft-edge min(w − e, w + e) also became w − |e| (identical result,
   one adder fewer per slot).
 
+### Round 3 (v0.6.2)
+Ron (after flashing v0.6.1): since K6 can turn the video off, repurpose S11 as a palette switch for something
+other than the red/green/blue theme.
+- **S11 Theme: Photo / Gold.** This is an exception, by Ron's request, to PHASE2.md's "S11 stays Source".
+- **Candidates were rendered in the model** (.heirloom_work/rb_abacus/p2/themes1.png, themes2.png). They were
+  HSV hue +40 (Gold), −40 (magenta / cyan / lime), +60 (yellow / violet / cyan) and +180 (cyan / orange /
+  magenta), and negating U/V at the output, which kept luma and came out muddy brown.
+- **Gold was chosen.** Magenta or Yellow is the one-line `theme_gold` angle in the hook.
+- **Implementation.**
+  - The hook writes C_AB_PAL2: the photo palette through HSV +40°, at 8 bits per channel. It is read
+    alongside the photo palette, and the fabric copy picks one.
+  - f_ab_gc has 16 entries, {theme, class}.
+  - The Osc source is removed (its accumulators and triangles).
+  - EBR goes 24 → 27.
+
 ## Video
 - **How the camera enters.** Its luma (line buffer, (y >> 2) − 16, clipped) minus 110, scaled by Etch, is
   added to the field before the palette. The contours (bead outlines, band edges, glint gating) bend around
   the picture while the rows, beads and palette stay. At the default Etch the selfie reads in the band and on
   the beads, and the composition holds (cmp_final.png, bottom).
-- **Osc** substitutes the shell oscillator, slow diagonal triangles drifting per field, through the same
-  path. Every control stays live.
+- **v0.6.2:** the Osc source (slow diagonal triangles through the same path) is gone; the camera is always
+  the Etch input and K6 = 0 turns it off. Preset 0 "Photo" sets K6 = 0 (and Slide / Roll still), so it
+  gives the photo with or without a camera.
 
 ## Engine
 - **Per-field sequencer** (vblank zone: no avid for 1024 clocks). It has one serial multiplier with fixed
@@ -189,8 +206,8 @@ and shrink separately, with the scale offset along the line so one bead differs 
   - In parallel: gloss ROM (256 × 64: 2 slots × 2 columns), decode, the centre/amplitude fraction products,
     d − centre, the soft edge, alpha, slot select, the s' gate, (gloss − base) × alpha / 16.
   - Blend, Palette Swap, padding, output conditioning.
-- **EBR (24).** Knot ROM 4096 × 8 (8), palette 512 × 32 (4), gloss table 256 × 64 (4), line buffer 2048 × 8
-  (4), row RAM 256 × 32 (2), bead warp ROM 512 × 16 (2).
+- **EBR (27).** Knot ROM 4096 × 8 (8), palette 512 × 32 (4), Gold palette 512 × 24 (3), gloss table 256 × 64
+  (4), line buffer 2048 × 8 (4), row RAM 256 × 32 (2), bead warp ROM 512 × 16 (2).
 - **Contracts.**
   - damier's generated avid (parity-locked).
   - Output conditioning before the blanking gate: chroma [1 2 2 2 2 2 2 2 1]/16 as two 8-sums, luma [1 2 1],
@@ -203,6 +220,13 @@ and shrink separately, with the scale offset along the line so one bead differs 
   computes the bead warp table, and writes abacus_pkg.vhd.
 
 ## Status
+- **v0.6.2 (phase 2 round 3: S11 Theme) built 2026-10-28, router2, all 6 configs seed 1, NOT flashed.**
+  - **Fmax (post-route):** HD Analog 83.70, HD HDMI 77.39, HD Dual 75.93, SD Analog 75.73, SD HDMI 81.35,
+    SD Dual 73.38 MHz.
+  - **Resources:** 7197–7219 / 7680 LC (94 %; the Osc source's removal paid for the theme), 27 / 32 EBR.
+    Every bitstream passed iceunpack. out/rev_b/ron/heirloom/abacus.vmprog (513 121 B).
+  - **Not simulated:** the change is a ROM read and a 2:1 pick in the palette's fabric copy, plus a
+    16-entry glint colour case; with Theme = Photo the path is v0.6.1's.
 - **v0.6.1 (phase 2 round 2) built 2026-10-28, router2; flashed 2026-10-28, looks OK (Ron).**
   - **Seeds:** HD HDMI = seed 2, SD Analog = seed 2 (its seed 1 timed out); the rest seed 1.
   - **Fmax (post-route):** HD Analog 79.10, HD HDMI 75.69, HD Dual 77.21, SD Analog 80.87, SD HDMI 77.09,

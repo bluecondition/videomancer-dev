@@ -328,6 +328,72 @@ package abacus_pkg is
         x"5B55AD44", x"5C558D4C", x"5D156D54", x"5DD54D58", x"5E550D64", x"5F14FD64", x"5FD4DD68", x"6154AD64",
         x"62148D68", x"62D46D6C", x"63545D68", x"64540D68", x"6513ED60", x"6593DD5C", x"66D3AD54", x"67137D50",
         x"67D35D4C", x"69132D44", x"69931D40", x"6AD2ED34", x"6BD29D30", x"6C528D28", x"6C528D28", x"6C528D28");
+    type t_ab_pal2 is array (0 to 511) of std_logic_vector(23 downto 0);
+    constant C_AB_PAL2 : t_ab_pal2 := (
+        x"CBB028", x"CBB028", x"CAB029", x"C9AF2A", x"C7AF2A", x"C6AF2B", x"C4AF2C", x"C3AF2C",
+        x"C1AE2D", x"C0AE2D", x"BFAD2E", x"BDAD2F", x"BDAD2F", x"BCAD2F", x"BBAD30", x"BBAC30",
+        x"BBAC30", x"BAAC31", x"BAAC31", x"B9AB31", x"B8AB31", x"B8AB31", x"B7AB32", x"B7AB32",
+        x"B7AB32", x"B6AB32", x"B6AB32", x"B5AB33", x"B5AA33", x"B5AA33", x"B4AA33", x"B4AA33",
+        x"B3AA34", x"B3AA34", x"B3AA34", x"B2AA34", x"B2AA34", x"B1A935", x"B1A935", x"B1A935",
+        x"B1A935", x"B0A935", x"B0A935", x"AFA835", x"AFA835", x"AFA836", x"AFA836", x"AEA836",
+        x"AEA836", x"ADA837", x"ADA837", x"ADA737", x"ADA737", x"ACA737", x"ACA737", x"ACA737",
+        x"ABA738", x"ABA738", x"ABA738", x"ABA738", x"ABA738", x"ABA738", x"ABA738", x"ABA738",
+        x"AAA738", x"AAA738", x"AAA738", x"A9A739", x"A9A739", x"A9A739", x"A9A739", x"A8A739",
+        x"A8A739", x"A8A739", x"A7A739", x"A6A73A", x"A6A73A", x"A6A63A", x"A6A63A", x"A5A63B",
+        x"A5A63B", x"A5A63B", x"A4A63B", x"A4A63B", x"A4A63B", x"A4A63B", x"A4A63B", x"A3A63C",
+        x"A3A63C", x"A3A63C", x"A2A63C", x"A2A63C", x"A2A53C", x"A2A53C", x"A2A53C", x"A1A53D",
+        x"A0A53D", x"A0A53D", x"9FA53D", x"9FA53D", x"9EA53E", x"9FA53E", x"9EA53E", x"9EA53E",
+        x"9DA43E", x"9DA43E", x"9DA43F", x"9DA43F", x"9CA43F", x"9CA43F", x"9CA33F", x"9BA33F",
+        x"9AA340", x"9AA240", x"99A240", x"99A240", x"98A241", x"98A241", x"97A241", x"97A241",
+        x"96A242", x"96A242", x"96A242", x"96A142", x"96A142", x"96A142", x"96A142", x"96A142",
+        x"96A142", x"97A142", x"97A142", x"96A143", x"96A143", x"97A144", x"97A144", x"96A145",
+        x"97A145", x"97A146", x"97A147", x"98A147", x"99A048", x"9BA048", x"9BA048", x"9C9F49",
+        x"9D9F49", x"9E9F49", x"A09E49", x"A19E4A", x"A29D49", x"A59D49", x"A69D4A", x"A99D49",
+        x"AA9D4A", x"AC9D4A", x"AD9D4A", x"AF9C4A", x"AF9C4B", x"B09C4C", x"B09B4C", x"B19B4E",
+        x"B29A4E", x"B3994F", x"B3984F", x"B39750", x"B29651", x"B09651", x"AE9552", x"AE9451",
+        x"AA9452", x"A89452", x"A69352", x"A39352", x"A19352", x"A09252", x"9F9252", x"9E9252",
+        x"9C9152", x"9B9152", x"9A9052", x"999053", x"988F53", x"958F54", x"948F55", x"928E56",
+        x"908E56", x"8E8E57", x"8C8E57", x"8A8E57", x"888E58", x"868E58", x"848E59", x"838D59",
+        x"828D59", x"808D59", x"7E8D59", x"7D8C5A", x"7B8C5A", x"7A8C5A", x"798C5A", x"788B59",
+        x"778B59", x"768B59", x"758B59", x"738B5A", x"728B5A", x"718B5A", x"708B5A", x"6F8B5A",
+        x"6E8B5A", x"6D8A5A", x"6C8A5A", x"6A8B5B", x"698B5B", x"678B5B", x"668B5C", x"658C5B",
+        x"638C5C", x"618D5C", x"5F8E5D", x"5D8E5E", x"5C8E5E", x"5A8E5E", x"598D5F", x"578E60",
+        x"568D61", x"558D61", x"538C62", x"538C62", x"518C63", x"508B64", x"4F8B64", x"4D8B65",
+        x"4C8B65", x"4C8A66", x"4B8A66", x"4A8967", x"498968", x"478968", x"468869", x"458869",
+        x"44886A", x"43876A", x"41876B", x"3F876C", x"3E866D", x"3D866E", x"3C866E", x"3B856F",
+        x"3A856F", x"398570", x"378470", x"378471", x"368471", x"358471", x"368371", x"358371",
+        x"368371", x"368371", x"368371", x"368271", x"358272", x"348172", x"338173", x"338073",
+        x"318074", x"2F7F74", x"2D7F75", x"2B7E77", x"297D78", x"277C78", x"257C7A", x"267B7A",
+        x"267A7A", x"26797A", x"27797A", x"28797B", x"2A797C", x"2B797D", x"2B7B7E", x"2C7B7F",
+        x"2D7C80", x"2D7D80", x"2D7D81", x"2A7E82", x"297F83", x"287F85", x"288085", x"298086",
+        x"2A8186", x"2B8287", x"2D8387", x"2D8388", x"2E8389", x"2F8489", x"2F848A", x"2F848B",
+        x"30858B", x"32858B", x"32858C", x"32868D", x"32868E", x"32868E", x"33868F", x"33868F",
+        x"348790", x"348791", x"368791", x"368892", x"368892", x"378893", x"378894", x"388894",
+        x"398895", x"3A8995", x"3A8996", x"3C8996", x"3C8A97", x"3D8A97", x"3F8B97", x"408B97",
+        x"418B97", x"438B96", x"458B96", x"468B95", x"488B95", x"4A8B94", x"4B8B94", x"4D8B94",
+        x"4E8B94", x"4F8B93", x"508B93", x"518B93", x"528B93", x"538B93", x"548B93", x"558B93",
+        x"568A94", x"578A94", x"598A94", x"5A8A94", x"5B8A94", x"5A8994", x"5C8994", x"5C8995",
+        x"5C8994", x"5C8994", x"5C8895", x"5B8995", x"5B8895", x"5B8896", x"5A8897", x"5A8897",
+        x"5A8798", x"5A8798", x"5A8798", x"5A8798", x"5A8799", x"5A8699", x"598699", x"5A869A",
+        x"59869A", x"59869A", x"59859B", x"58859B", x"57849B", x"57849B", x"55839B", x"53829B",
+        x"51819B", x"4E809A", x"4C7E9A", x"487C9A", x"487B98", x"497A97", x"497996", x"4A7894",
+        x"4A7792", x"4B7491", x"4E7291", x"526F90", x"556C8F", x"58688E", x"5A658D", x"5D628C",
+        x"605F8B", x"605E89", x"605D89", x"5F5B88", x"615A87", x"645787", x"675485", x"6B5185",
+        x"6E4F84", x"724C83", x"764982", x"7A4781", x"7E4481", x"814180", x"843E7F", x"883C7F",
+        x"8A397E", x"8D377E", x"8F367E", x"91357E", x"93337E", x"94327E", x"96327E", x"97317F",
+        x"97317F", x"97317F", x"97317F", x"963381", x"933482", x"913584", x"8E3787", x"8A398B",
+        x"863B8F", x"813F92", x"794496", x"684E98", x"5E549A", x"59579C", x"535A9E", x"4F5EA0",
+        x"4A61A2", x"4563A3", x"4165A5", x"3D68A6", x"396AA8", x"376BAB", x"356DAE", x"346DB1",
+        x"326FB4", x"306FB6", x"2E71B9", x"2C72BB", x"2B73BD", x"2974C0", x"2874C1", x"2775C3",
+        x"2876C4", x"2977C5", x"2A78C6", x"2B79C6", x"2C7AC7", x"2D7BC8", x"2E7BC8", x"2F7CC9",
+        x"307DC9", x"317ECA", x"327ECB", x"337FCB", x"3480CC", x"3581CD", x"3682CD", x"3783CE",
+        x"3884CE", x"3884CE", x"3985CF", x"3A86CF", x"3A86D0", x"3C87D0", x"3C87D1", x"3E88D1",
+        x"3F89D1", x"3F8AD2", x"408AD2", x"418BD2", x"418CD3", x"428CD3", x"438DD3", x"438DD4",
+        x"448ED4", x"458FD4", x"468FD5", x"4690D5", x"4891D4", x"4891D5", x"4A93D5", x"4A93D5",
+        x"4B94D5", x"4B95D5", x"4C95D6", x"4D96D6", x"4D96D7", x"4D96D8", x"4D97D9", x"4E97DA",
+        x"4E97DA", x"4F97DB", x"4F97DC", x"4F97DC", x"4F97DE", x"4E96DE", x"4E96DF", x"4E96DF",
+        x"4E95E0", x"4E95E0", x"4E95E1", x"4C94E2", x"4C93E2", x"4C93E2", x"4B92E2", x"4A91E3",
+        x"4A91E3", x"4990E3", x"4990E4", x"488FE4", x"468EE5", x"468DE5", x"468DE5", x"468DE5");
     type t_ab_gl is array (0 to 255) of std_logic_vector(63 downto 0);
     constant C_AB_GL : t_ab_gl := (
         x"C25DA87DC09DA865", x"C27DA65DC25DA87D", x"C265A745C27DA65D", x"B83DD27EC265A745",
@@ -428,11 +494,11 @@ package abacus_pkg is
         x"2923", x"2823", x"2724", x"2724", x"2625", x"2626", x"2525", x"2424", x"2424", x"2323", x"2323", x"2222", x"2121", x"2121", x"2020", x"2020",
         x"1F1F", x"1F1F", x"1E1E", x"1D1D", x"1D1D", x"1C1C", x"1C1C", x"1B1B", x"1A1A", x"1A1A", x"1919", x"1919", x"1818", x"1818", x"1717", x"1616",
         x"1616", x"1515", x"1515", x"1414", x"1313", x"1313", x"1212", x"1212", x"1111", x"1010", x"1010", x"0F0F", x"0F0F", x"0E0E", x"0E0E", x"0D0D");
-    function f_ab_gc(c : unsigned(2 downto 0)) return std_logic_vector;
+    function f_ab_gc(c : unsigned(3 downto 0)) return std_logic_vector;
 end package abacus_pkg;
 
 package body abacus_pkg is
-    function f_ab_gc(c : unsigned(2 downto 0)) return std_logic_vector is
+    function f_ab_gc(c : unsigned(3 downto 0)) return std_logic_vector is
     begin
         case to_integer(c) is
             when 0 => return "111000001110010100100110100010";
@@ -442,7 +508,15 @@ package body abacus_pkg is
             when 4 => return "100111000010000100111000000111";
             when 5 => return "001101010101111001001001110000";
             when 6 => return "011001010001100110110110010000";
-            when others => return "011001010110011010000101101100";
+            when 7 => return "011001010110011010000101101100";
+            when 8 => return "111010110010000000000101111011";
+            when 9 => return "111010000110010001010101011000";
+            when 10 => return "110111100110000001000010111100";
+            when 11 => return "110111110101101010110100011010";
+            when 12 => return "100110110010000101010111111001";
+            when 13 => return "001111100010001100011001100000";
+            when 14 => return "011001010101011100100111100101";
+            when others => return "011110011101111011100101000101";
         end case;
     end function;
 end package body abacus_pkg;

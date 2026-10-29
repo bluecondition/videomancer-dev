@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Abacus v0.6.1 -- Heirloom #42, rebuilt from the photo WIN_20230605_01_03_50.
+-- Abacus v0.6.2 -- Heirloom #42, rebuilt from the photo WIN_20230605_01_03_50.
 --
 -- The photo: rows of glossy red beads between wavy blue/green bands, one bead
 -- every 188 px (10.2 across), the rows mirrored about the bead-row centres
@@ -55,7 +55,9 @@
 --   S9  Stack    Mirror (the photo) / Saw (rows repeat, cut flat)
 --   S10 Flip     beads and bands exchange places (s -> 1 - s), gliding in
 --                ~0.7 s outward from the bead cores through the contours
---   S11 Source   Video / Osc
+--   S11 Theme    Photo / Gold (every colour's hue turned +40 degrees: gold beads, violet and teal
+--                bands; the glints too); S8 Swap applies to both (v0.6.2: was Source Video / Osc,
+--                the camera's Etch is always on now and K6 = 0 turns it off)
 --   P12 SWELL    bead size: 0 = dark pips in a blue sea, 100 % = beads merge into red bars
 --
 -- Engine: a vblank-zone sequencer (one serial multiplier, fixed slots, a
@@ -105,10 +107,6 @@ architecture abacus of program_top is
             when others         => return to_unsigned(273, 10);
         end case;
     end function;
-    function f_tri8(v : unsigned(7 downto 0)) return unsigned is
-    begin
-        if v(7) = '1' then return not v(6 downto 0); else return v(6 downto 0); end if;
-    end function;
     -- 8-bit pulse phase -> triangle -32 .. 31, and its magnitude
     function f_tri6(p : unsigned(7 downto 0)) return signed is
         variable v_t : unsigned(6 downto 0);
@@ -138,9 +136,6 @@ architecture abacus of program_top is
     attribute no_rw_check of r_ram : signal is true;
 
     -- oscillator source (Source = Osc)
-    signal s_ox : unsigned(9 downto 0) := (others => '0');
-    signal s_oy : unsigned(9 downto 0) := (others => '0');
-    signal s_ot : unsigned(7 downto 0) := (others => '0');
 
     -- timing / zone / width
     signal s_tid  : std_logic_vector(3 downto 0) := (others => '0');
@@ -166,7 +161,7 @@ architecture abacus of program_top is
     signal s_k4, s_k5 : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal s_m4, s_m5 : unsigned(9 downto 0) := (others => '0');            -- |speed| - 8
     signal s_n4, s_n5, s_st4, s_st5 : std_logic := '1';
-    signal s_mirror, s_swap, s_saw, s_flip, s_src : std_logic := '0';
+    signal s_mirror, s_swap, s_saw, s_flip, s_theme : std_logic := '0';
 
     -- per-field constants
     signal s_st   : unsigned(10 downto 0) := to_unsigned(273, 11);           -- units x 256 per pixel
@@ -294,6 +289,7 @@ architecture abacus of program_top is
     signal p8_a   : signed(13 downto 0) := (others => '0');
     signal p9_ix, p10_ad : unsigned(8 downto 0) := (others => '0');
     signal p11_q, p12_q : std_logic_vector(31 downto 0) := (others => '0');
+    signal p11_g  : std_logic_vector(23 downto 0) := (others => '0');       -- the Gold theme
     signal p9_gg, p10_gg, p11_gg : std_logic := '0';                     -- gloss gate: glint classes
     signal p9_gf, p10_gf, p11_gf : std_logic := '0';                     -- gloss gate: fill classes
     signal b13_y, b14_y : unsigned(9 downto 0) := to_unsigned(64, 10);
@@ -394,6 +390,7 @@ begin
         if rising_edge(clk) then
             e_kq  <= C_AB_KNOT(to_integer(e_ka));
             p11_q <= C_AB_PAL(to_integer(p10_ad));
+            p11_g <= C_AB_PAL2(to_integer(p10_ad));
             g2_q  <= C_AB_GL(to_integer(p1_ga));
             w3_wt <= C_AB_WT(to_integer(w2_wa));
         end if;
@@ -465,7 +462,7 @@ begin
                 s_swap   <= registers_in(6)(1);
                 s_saw    <= registers_in(6)(2);
                 s_flip   <= registers_in(6)(3);
-                s_src    <= registers_in(6)(4);
+                s_theme  <= registers_in(6)(4);
             end if;
             s_half <= s_w(11 downto 1);
             s_hm1  <= s_half - 1;
@@ -566,12 +563,10 @@ begin
                     if s_sv > 0 then s_sw <= s_sv - shift_right(s_sv, 2);
                     else s_sw <= shift_right(s_sv, 1); end if;
                 when 227 => s_c0 <= unsigned(to_signed(512, 11) + s_sw);
-                -- Etch: k6 / 4 (Q6), 1.5x on the camera
-                when 228 =>
-                    if s_src = '0' then s_e <= resize(s_g6(12 downto 5), 9) + resize(s_g6(12 downto 6), 9);
-                    else s_e <= resize(s_g6(12 downto 5), 9); end if;
+                -- Etch: 1.5 k6 / 4 (Q6)
+                when 228 => s_e <= resize(s_g6(12 downto 5), 9) + resize(s_g6(12 downto 6), 9);
                 -- bead pulses: depth 4 |speed| up to 255 s' levels (full from 64 knob steps off the
-                -- still zone), phase += 3 |speed| per field in the direction of travel; Height b0 = 2 (k2 - 512)
+                -- still zone); Height b0 = 2 (k2 - 512)
                 when 230 =>
                     if s_st4 = '1' then s_ds <= (others => '0');
                     elsif s_m4 >= 64 then s_ds <= (others => '1');
@@ -654,25 +649,16 @@ begin
     g_start <= '1' when (g_sel = '0' and g_rsr(1) = '1') or (g_sel = '1' and g_rsr(2) = '1') else '0';
 
     ---------------------------------------------------------------------------
-    -- Source side: oscillator, line-buffer write of (luma >> 2) - 16
+    -- Source side: line-buffer write of the camera's (luma >> 2) - 16
     ---------------------------------------------------------------------------
     p_src : process(clk)
         variable v_l : unsigned(7 downto 0);
-        variable v_t : unsigned(7 downto 0);
     begin
         if rising_edge(clk) then
-            if data_in.avid = '1' then s_ox <= s_ox + 3; elsif s_avq = '1' then s_ox <= (others => '0'); s_oy <= s_oy + 5; end if;
-            if s_zone = '1' then s_oy <= (others => '0'); end if;
-            if s_zgo = '1' then s_ot <= s_ot + 3; end if;
             s_lb_we <= data_in.avid;
             s_lb_wa <= s_wcol;
-            if s_src = '1' then
-                v_t := resize(f_tri8(s_ox(9 downto 2) + s_ot), 8) + resize(f_tri8(s_oy(9 downto 2) - s_ot), 8);
-                s_lb_wd <= std_logic_vector(to_unsigned(46, 8) + resize(v_t(7 downto 1), 8));
-            else
-                v_l := unsigned(data_in.y(9 downto 2));
-                if v_l > 16 then s_lb_wd <= std_logic_vector(v_l - 16); else s_lb_wd <= (others => '0'); end if;
-            end if;
+            v_l := unsigned(data_in.y(9 downto 2));
+            if v_l > 16 then s_lb_wd <= std_logic_vector(v_l - 16); else s_lb_wd <= (others => '0'); end if;
             if data_in.avid = '1' then s_wcol <= s_wcol + 1; else s_wcol <= (others => '0'); end if;
         end if;
     end process p_src;
@@ -1045,7 +1031,11 @@ begin
 
             -- 10: palette address; 11: ROM (p_rom); 12: fabric copy
             p10_ad <= p9_ix;
-            p12_q <= p11_q;
+            if s_theme = '1' then
+                p12_q <= p11_g(23 downto 16) & "00" & p11_g(15 downto 8) & "00" & p11_g(7 downto 0) & "0000";
+            else
+                p12_q <= p11_q;
+            end if;
 
             p10_gg <= p9_gg; p11_gg <= p10_gg;
             p10_gf <= p9_gf; p11_gf <= p10_gf;
@@ -1208,7 +1198,7 @@ begin
             p12_c <= p11_c;
 
             -- 13: gloss colour - base, alpha to 9 levels; 14: x alpha / 16 (stage 15 adds it, p_pix)
-            v_gc := f_ab_gc(p12_c);
+            v_gc := f_ab_gc(s_theme & p12_c);
             p13_dy <= signed(resize(unsigned(v_gc(29 downto 20)), 11)) - signed(resize(unsigned(p12_q(31 downto 22)), 11));
             p13_du <= signed(resize(unsigned(v_gc(19 downto 10)), 11)) - signed(resize(unsigned(p12_q(21 downto 12)), 11));
             p13_dv <= signed(resize(unsigned(v_gc(9 downto 0)), 11)) - signed(resize(unsigned(p12_q(11 downto 2)), 11));
