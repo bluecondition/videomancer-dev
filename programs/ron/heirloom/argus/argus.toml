@@ -1,4 +1,5 @@
-# Argus - Heirloom #21, v0.5.0 (2026-10-27): rebuilt from the photo WIN_20230325_11_04_55.
+# Argus - Heirloom #21, v0.6.0 (2026-10-29): phase 2, S7 Mirror Fold / Off (Off replaces Repeat).
+# v0.5.0 (2026-10-27): rebuilt from the photo WIN_20230325_11_04_55.
 # Camera silhouettes folded top to bottom into olive keys; a horizontal ramp reset by the silhouettes and
 # sped up by their low-passed darkness echoes every trailing edge in bunching sawtooth ribs, coloured by an
 # RGB colourizer (G = |H-V + V-triangle|, R = |x| x vertical ramp, B = the saw).  See argus.vhd and SUMMARY.md.
@@ -7,7 +8,7 @@
 processing_delay_clks = 28
 program_id = "com.czartroniks.argus"
 program_name = "Argus"
-program_version = "0.5.0"
+program_version = "0.6.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -80,7 +81,7 @@ suffix_label = "%"
 [[parameter]]
 parameter_id = "toggle_switch_7"
 name_label = "Mirror"
-value_labels = ["Fold", "Repeat"]
+value_labels = ["Fold", "Off"]
 initial_value_label = "Fold"
 
 [[parameter]]

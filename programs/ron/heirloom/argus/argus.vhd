@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Argus v0.5.0 -- Heirloom #21, rebuilt from the photo WIN_20230325_11_04_55.
+-- Argus v0.6.0 -- Heirloom #21, rebuilt from the photo WIN_20230325_11_04_55.
 --
 -- The photo: camera silhouettes (a dark left block, arms, blobs and a ">" band) folded top to bottom
 -- about row 522, keyed into olive / brown / green with dark contour lines, and around them a sawtooth
@@ -11,8 +11,8 @@
 -- ends), R = |x| V mixed with a vertical ramp, B = the saw; inside the silhouettes B is cut and an
 -- olive fill follows the background hue; short B dropouts speckle the pastels.
 --
--- The patch: darkness store (Osc: fitted to the photo; Video: the camera's top half, written live)
--- -> fold -> bilinear darkness D -> key (D > 0) -> RC charge E -> ramp f += inc (1 + m E), reset in
+-- The patch: darkness store (Osc: fitted to the photo; Video: the camera's top half, written live;
+-- with Mirror Off, the whole frame at half the row rate) -> fold -> bilinear darkness D -> key (D > 0) -> RC charge E -> ramp f += inc (1 + m E), reset in
 -- the key -> RGB laws -> RGB -> YUV.
 --
 --   K1  Echo    FM depth: how hard the stripes bunch up behind each silhouette (0 = even ribs)
@@ -21,7 +21,7 @@
 --   K4  Speed   stripes stream out of the silhouettes, bipolar, still in the centre +-8
 --   K5  Spread  width of the cyan centre field
 --   K6  Grain   silhouette texture: flat olive .. dark contour lines, dashes, mottling
---   S7  Mirror  Fold (the photo) / Repeat
+--   S7  Mirror  Fold (the photo) / Off: the silhouettes span the frame unmirrored, colour field still folded
 --   S8  Specks  On (the photo) / Off
 --   S9  Swap    R <-> B laws
 --   S10 Kaleido left/right mirror of the silhouettes and colour field
@@ -131,7 +131,7 @@ architecture argus of program_top is
     signal f_off  : unsigned(5 downto 0) := to_unsigned(19, 6);
     signal f_flat : std_logic := '0';
     signal f_mot  : unsigned(1 downto 0) := "10";
-    signal f_rep, f_nosp, f_swap, f_kal, f_osc : std_logic := '0';
+    signal f_nmir, f_nosp, f_swap, f_kal, f_osc : std_logic := '0';
     signal f_k4 : unsigned(9 downto 0) := (others => '0');
     signal f_k6 : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal f_k3 : unsigned(9 downto 0) := to_unsigned(512, 10);
@@ -413,7 +413,7 @@ begin
                 f_k3 <= unsigned(registers_in(2));
                 f_k4 <= unsigned(registers_in(3));
                 f_k6 <= unsigned(registers_in(5));
-                f_rep  <= registers_in(6)(0);
+                f_nmir <= registers_in(6)(0);
                 f_nosp <= registers_in(6)(1);
                 f_swap <= registers_in(6)(2);
                 f_kal  <= registers_in(6)(3);
@@ -670,20 +670,21 @@ begin
                             if le_first = '1' then n_vy <= (others => '0');
                             else n_vy <= n_vy + resize(f_dyq, 19); end if;
                         when 2 =>
-                            -- Fold: mirror about the fold line; Repeat: wrap
+                            -- the colour field always folds about the fold line; the store rows fold too,
+                            -- or with Mirror Off run down the whole frame at vy / 2 (product 0), the
+                            -- writer capturing the top half's rows over the frame
                             if n_vy >= C_AX8 then
-                                n_top <= '0';
-                                if f_rep = '1' then n_t <= signed(resize(n_vy, 20)) - C_AX8;
-                                else n_t <= to_signed(2 * C_AX8, 20) - signed(resize(n_vy, 20)); end if;
+                                n_t <= to_signed(2 * C_AX8, 20) - signed(resize(n_vy, 20));
                             else
-                                n_top <= '1';
                                 n_t <= signed(resize(n_vy, 20));
                             end if;
+                            if f_nmir = '1' then
+                                if n_vy >= 2 * C_AX8 then n_top <= '0'; else n_top <= '1'; end if;
+                            elsif n_vy >= C_AX8 then n_top <= '0';
+                            else n_top <= '1'; end if;
                         when 3 =>
                             if n_t < 0 then v_t := -n_t; else v_t := n_t; end if;
-                            if v_t >= C_AX8 then
-                                if f_rep = '1' then v_t := v_t - C_AX8; else v_t := to_signed(C_AX8 - 1, 20); end if;
-                            end if;
+                            if v_t >= C_AX8 then v_t := to_signed(C_AX8 - 1, 20); end if;
                             n_vyf <= unsigned(v_t(17 downto 0));
                         when 4 =>
                             v_t := to_signed(66816, 20) - signed(resize(n_vyf, 20));
@@ -708,7 +709,9 @@ begin
             if le_ld = '1' then
                 mu_ldl <= '1';
                 case to_integer(le_k) is
-                    when 0  => mu_al <= n_vyf;                       mu_bl <= to_unsigned(7909, 13); le_sg <= '0';
+                    when 0  =>
+                        if f_nmir = '1' then mu_al <= n_vy(18 downto 1); else mu_al <= n_vyf; end if;
+                        mu_bl <= to_unsigned(7909, 13); le_sg <= '0';
                     when 1  => mu_al <= n_vyf;                       mu_bl <= to_unsigned(2009, 13); le_sg <= '0';
                     when 2  => mu_al <= unsigned(n_t(17 downto 0));  mu_bl <= to_unsigned(4017, 13); le_sg <= '0';
                     when 3  => mu_al <= resize(f_kvl, 18);           mu_bl <= resize(n_vyf(17 downto 6), 13); le_sg <= '0';
@@ -906,8 +909,8 @@ begin
             if v_w > 255 then w_y8 <= to_unsigned(255, 8); else w_y8 <= v_w(7 downto 0); end if;
             w_a1 <= data_in.avid; w_a2 <= w_a1; w_a3 <= w_a2;
 
-            -- node rows: in the top half, the first line of each store row (the line engine's row of this
-            -- line, n_r); row 63 on the first line past the fold
+            -- node rows: in the top half (Mirror Off: the whole frame), the first line of each store row
+            -- (the line engine's row of this line, n_r); row 63 on the first line past the fold (Off: line 1044)
             v_cap := w_capl;
             if s_zgo = '1' then
                 w_pr <= (others => '1'); w_ptop <= '1';

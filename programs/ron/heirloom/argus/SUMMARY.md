@@ -1,6 +1,8 @@
-# Argus — Heirloom #21 (v0.5.0)
+# Argus — Heirloom #21 (v0.6.0)
 
-**v0.5.0 (2026-10-27): rebuilt from the photo WIN_20230325_11_04_55, built, NOT flashed.** Processing,
+**v0.6.0 (2026-10-29), phase 2 round 1: S7 Mirror is Fold / Off (Off replaces Repeat).** Ron flashed v0.5.0
+and liked everything except the Repeat option. v0.5.0 (2026-10-27) was rebuilt from the photo
+WIN_20230325_11_04_55. Processing,
 latency 28. v0.1.0 was judged too abstract; this version is measured from the photo. Presets: Photo, Zip,
 Broad Bands, Kaleido, Camera Echo (hand-written placeholders). Work files: `.heirloom_work/rb_argus/`
 (`notes.md`, `imodel10.py`, `cmp_final.png`).
@@ -65,7 +67,7 @@ drop B over the pastels. RGB -> YUV -> output conditioning (chroma [1 2 2 2 2 2 
 | K4 Speed | -100..100, 640 | the ribs stream out of the silhouettes (bipolar, still at the centre +-8, square law) |
 | K5 Spread | 0..100 %, 50 % | width of the cyan centre field (G's horizontal V slope, 0.36..2.8x) |
 | K6 Grain | 0..100 %, 50 % | key texture: flat olive below 12 %, then dark contour rings (line width), mottling, dark dashes |
-| S7 Mirror | Fold / Repeat | Fold = the photo's top/bottom mirror about row 522; Repeat tiles the top half |
+| S7 Mirror | Fold / Off | Fold = the photo's top/bottom mirror about row 522. Off = the silhouettes run unmirrored down the whole frame (Video: the full camera picture; Osc: the photo's top half stretched to full height); the colour field stays folded behind them |
 | S8 Specks | On / Off | the B dropouts over the pastels |
 | S9 Swap | Off / On | exchanges the R and B laws (pink <-> blue ribs) |
 | S10 Kaleido | Off / On | left/right mirror of the silhouettes and the colour field |
@@ -78,6 +80,11 @@ The camera enters as darkness. Luma is scaled to 8 bits, smoothed along the line
 the 61 node columns on the first line of each of the 64 node rows in the top half of the frame (row 63 on the
 first line past the fold). It is written straight into the store banks during active video as
 clip(128 + 1.25 (89 - Y8)), so anything darker than ~35 % luma becomes a silhouette.
+
+With Mirror Off, the store's 64 rows span the whole frame (row = vy / 2, ~17 lines per row): the writer
+captures rows over the full camera picture and the read runs straight down without folding. The colour field
+(G fold, R ramp, V triangle, line-start slant) still folds, so the camera's real silhouettes are keyed over
+the photo's symmetric background.
 
 From there the processing is the same as the photo's: fold, key, charge, echoing ribs, colourizer, olive fill.
 Osc substitutes the photo-fitted darkness store (a ROM). Video is the default.
@@ -110,13 +117,27 @@ Osc substitutes the photo-fitted darkness store (a ROM). Video is the default.
 
 ## Status
 
-- v0.5.0, built 2026-10-27, all six configs on seed 1 (router2).
+- **v0.6.0, built 2026-10-29, all six configs on seed 1 (router2). Not flashed.**
+  - **Fmax:** HD Analog 82.49, HD HDMI 80.89, HD Dual 77.66 MHz; SD Analog 80.53, SD HDMI 79.53, SD Dual
+    82.09 MHz.
+  - **Size:** 7,198-7,237 LC (HD HDMI 7,206, 93.8 %; the highest is SD Analog at 94.2 %), 22/32 EBR. All six
+    bitstreams pass iceunpack.
+- v0.5.0, built 2026-10-27, all six configs on seed 1 (router2). Flashed by Ron: everything OK except S7's
+  Repeat option.
 - **Fmax:** HD Analog 83.44, HD HDMI 79.38, HD Dual 77.41 MHz; SD Analog 74.65, SD HDMI 83.92, SD Dual 86.59 MHz
   (SD minimum 27).
 - **Size:** 7,186-7,212 LC (HD HDMI 7,189, 93.6 %), 22/32 EBR. All six bitstreams pass iceunpack.
 - **Verification:** GHDL renders match the integer model (Osc mean |dRGB| 4.6 at matched field count; 4x4 region
   means within 1 level). Motion is verified (ribs stream away from the silhouettes).
 - **Not flashed.**
+
+## Phase 2
+
+- **Round 1 (v0.6.0), Ron 2026-10-29 on v0.5.0:** the only note was that he dislikes S7's Repeat option. Repeat
+  tiled the top half, which left a hard seam across mid-frame where the fold row jumped back to row 0, colour
+  field included. It is replaced by **Off**: no mirror for the silhouettes. Only the store-row operand of the
+  line engine's product 0 changes (vy / 2 instead of the folded vy). The writer's top-half gate extends to line
+  1044, and the colour laws keep the folded vy. Fold is unchanged, so the photo and the defaults are untouched.
 
 ## Deviations from the photo, and why
 
