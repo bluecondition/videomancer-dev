@@ -1,4 +1,4 @@
-# Blossom - Heirloom #22, v0.5.0 (2026-10-27): rebuilt from the photo WIN_20230406_23_49_00.
+# Blossom - Heirloom #22, v0.6.0 (2026-10-30, phase 2): rebuilt from the photo WIN_20230406_23_49_00.
 # Magenta hearts and lobes in rows mirrored top/bottom, wrapped in red, pink, green and violet bands,
 # running into a flat magenta flood: one fitted field through a two-palette colourizer.
 # See blossom.vhd, blossom.py (fitted data) and SUMMARY.md.
@@ -7,13 +7,13 @@
 processing_delay_clks = 28
 program_id = "com.czartroniks.blossom"
 program_name = "Blossom"
-program_version = "0.5.0"
+program_version = "0.6.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Pattern", "Mirror", "Color"]
 program_type = "processing"
-description = "Rows of magenta hearts wrapped in red, green and violet bands run into a magenta flood; Bloom opens them."
+description = "Rows of magenta hearts in red, green and violet bands cascade, sway, twist and beat; Bloom floods them magenta."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
@@ -21,11 +21,11 @@ core = "yuv444_30b"
 parameter_id = "rotary_potentiometer_1"
 name_label = "Rows"
 control_mode = "linear"
-display_min_value = 0
+display_min_value = -100
 display_max_value = 100
-initial_value = 528
+initial_value = 512
 display_float_digits = 0
-suffix_label = "%"
+suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
@@ -49,11 +49,11 @@ suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
-name_label = "Speed"
+name_label = "Sway"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 684
+initial_value = 512
 display_float_digits = 0
 suffix_label = ""
 
@@ -73,7 +73,7 @@ name_label = "Breathe"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 384
+initial_value = 256
 display_float_digits = 0
 suffix_label = "%"
 
@@ -98,7 +98,7 @@ initial_value_label = "Soft"
 [[parameter]]
 parameter_id = "toggle_switch_10"
 name_label = "Wave"
-value_labels = ["Fold", "Saw"]
+value_labels = ["Fold", "Twist"]
 initial_value_label = "Fold"
 
 [[parameter]]
@@ -133,10 +133,22 @@ rotary_potentiometer_6 = 700
 [[preset]]
 name = "Twin Hearts"
 toggle_switch_7 = 1
-rotary_potentiometer_1 = 300
+rotary_potentiometer_1 = 260
 
 [[preset]]
 name = "Indigo Garden"
 toggle_switch_8 = 1
 rotary_potentiometer_2 = 820
 rotary_potentiometer_3 = 760
+
+[[preset]]
+name = "Tower"
+toggle_switch_7 = 1
+rotary_potentiometer_1 = 1023
+rotary_potentiometer_6 = 600
+
+[[preset]]
+name = "Ribbon"
+toggle_switch_10 = 1
+rotary_potentiometer_4 = 760
+rotary_potentiometer_6 = 500

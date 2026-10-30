@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Blossom v0.5.0 -- Heirloom #22, rebuilt from the photo WIN_20230406_23_49_00.
+-- Blossom v0.6.0 -- Heirloom #22, rebuilt from the photo WIN_20230406_23_49_00 (phase 2: the patch).
 --
 -- The photo: a field of blossoms mirrored top/bottom with a 524-line repeat (2.06 per frame).  On
 -- the heart rows (y = 0, 522, 1046) magenta hearts with a cleft, wrapped in red, pink, green and
@@ -14,23 +14,31 @@
 -- The program: the field is the fitted surface itself -- a quadratic B-spline on the folded domain
 -- (x = 0..1920 virtual px, Y = 0..262 = the distance to the nearest heart row), 82 x 46 control
 -- points (24 virtual px x 1/44 of the fold apart, blossom.py).  A per-line engine folds the line's
--- vertical phase (the V oscillator: triangle, or saw), blends three control rows into one row of
--- 82 knots (3 MACs per knot) and writes the 80 cells' {P0, P1, P2} into a ping-pong table for the
--- NEXT line; the pixel path evaluates F = P0 + s P1 + s^2 P2, applies the controls, indexes two
--- 256-entry palettes (heart-row / lobe-row) and blends them by the line's fold position.
+-- vertical phase (the V oscillator), warps it, blends three control rows into one row of 82 knots
+-- (3 MACs per knot) and writes the 80 cells' {P0, P1, P2} into a ping-pong table for the NEXT line.
+-- The same engine sets the line's X map -- U = 40 cells + sway + (x - W/2) * step, where the step
+-- follows the row's size, the heartbeat swell and the Twist -- and the line's bloom.  The pixel path
+-- evaluates F = P0 + s P1 + s^2 P2, applies the controls, indexes two 256-entry palettes (heart-row /
+-- lobe-row) and blends them by the line's fold position.
 --
---   K1  Rows     petal rows per frame, 1 .. 5 (2.06 = the photo)
+--   K1  Rows     bipolar, centre = the photo.  Left: fewer rows, the hearts swell tall and wide while
+--                the lobe rows squeeze; right: more rows, cascading from small at the top to large at
+--                the bottom (each row's hearts sized with the row)
 --   K2  Bands    contour density (field gain 0.62 .. 1.62 about the flood edge)
 --   K3  Garden   the tangle's colour: violet / teal lines .. the photo .. yellow-green
---   K4  Speed    bipolar (centre +-8 still): the rows roll through the frame
+--   K4  Sway     bipolar (centre +-8 still): the rows sway sideways in a wave travelling down (+) or
+--                up (-); amplitude (to ~240 virtual px) and rate rise away from the centre
 --   K5  Melt     how far the video (or Osc) bends the bands
---   K6  Breathe  depth of a slow LFO on the bloom: the hearts swell and shrink
---   S7  Mirror   Off / On: the left half mirrored, twin hearts point at each other
+--   K6  Breathe  depth of a heartbeat that travels down the rows: each row grows (height and width)
+--                and blooms in turn; the video (or Osc) scales the bloom per pixel
+--   S7  Mirror   Off / On: the left half mirrored on screen, twin hearts point at each other
 --   S8  Palette  Photo / Indigo (U and V exchanged)
 --   S9  Edge     Soft / Hard (16-entry poster bands)
---   S10 Rows     Fold / Saw (the V oscillator's waveform)
+--   S10 Wave     Fold / Twist: each line's X scale = cos of its row phase -- the rows turn about the
+--                vertical centre line, mirrored on the lobe rows
 --   S11 Source   Video / Osc
---   P12 BLOOM    0 % = closed buds on a green garden, 50 % = the photo, 100 % = magenta floods all
+--   P12 BLOOM    0 % = deep buds (violet garden, dark-red flood), 50 % = the photo, 100 % = magenta
+--                floods all but the reddest bands (+-3 palette units, square-law ends)
 --
 -- Virtual 1080-line geometry (the same picture at SD, 720p and 1080; 4:3 SD shows the central 1440
 -- virtual px).  Generated avid; output conditioning (luma [1 2 1], chroma box pair [1 2 .. 2 1],
@@ -52,7 +60,7 @@ architecture blossom of program_top is
     constant C_LAT : integer := 28;   -- matches processing_delay_clks
     constant C_PIV : integer := 1638; -- the flood edge, (3.4 + 3) * 256 (Q3 control-point units)
 
-    -- per-timing-ID constants: kx = cells (24 virtual px) per pixel, Q16; vs = virtual lines per line, Q8
+    -- per-timing-ID constants: kx = cells (24 virtual px) per pixel, Q16
     function f_kx(t : std_logic_vector(3 downto 0)) return unsigned is
     begin
         case to_integer(unsigned(t)) is
@@ -61,16 +69,42 @@ architecture blossom of program_top is
             when others         => return to_unsigned(2731, 14);
         end case;
     end function;
-    function f_vs(t : std_logic_vector(3 downto 0)) return unsigned is
+    -- the photo's V step (2.06 periods per 1080 virtual lines, Q24 periods per line)
+    function f_incp(t : std_logic_vector(3 downto 0)) return unsigned is
     begin
         case to_integer(unsigned(t)) is
-            when 0          => return to_unsigned(1138, 11);
-            when 4          => return to_unsigned(576, 11);
-            when 8          => return to_unsigned(960, 11);
-            when 12         => return to_unsigned(480, 11);
-            when 5 | 6 | 14 => return to_unsigned(384, 11);
-            when 1 | 2 | 10 => return to_unsigned(512, 11);
-            when others     => return to_unsigned(256, 11);
+            when 0          => return to_unsigned(142490, 18);
+            when 4          => return to_unsigned(72122, 18);
+            when 8          => return to_unsigned(120202, 18);
+            when 12         => return to_unsigned(60101, 18);
+            when 5 | 6 | 14 => return to_unsigned(48081, 18);
+            when 1 | 2 | 10 => return to_unsigned(64108, 18);
+            when others     => return to_unsigned(32054, 18);
+        end case;
+    end function;
+    -- the V and X step slopes per line for a unit Rows cascade: step * 512 / (lines per field)
+    function f_cinc(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(300284, 19);
+            when 4          => return to_unsigned(76930, 19);
+            when 8          => return to_unsigned(213692, 19);
+            when 12         => return to_unsigned(53423, 19);
+            when 5 | 6 | 14 => return to_unsigned(34191, 19);
+            when 1 | 2 | 10 => return to_unsigned(60784, 19);
+            when others     => return to_unsigned(15196, 19);
+        end case;
+    end function;
+    function f_ckx(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(11509, 14);
+            when 4          => return to_unsigned(5825, 14);
+            when 8          => return to_unsigned(9708, 14);
+            when 12         => return to_unsigned(4854, 14);
+            when 5 | 6 | 14 => return to_unsigned(2913, 14);
+            when 1 | 2 | 10 => return to_unsigned(2589, 14);
+            when others     => return to_unsigned(1295, 14);
         end case;
     end function;
     -- Osc spatial steps (Q16 cycles per pixel / per line)
@@ -110,8 +144,6 @@ architecture blossom of program_top is
     end function;
 
     -- timing
-    signal t_kx : unsigned(13 downto 0) := to_unsigned(2731, 14);
-    signal t_vs : unsigned(10 downto 0) := to_unsigned(256, 11);
     signal t_kax, t_kay : unsigned(8 downto 0) := (others => '0');
     signal t_short : std_logic := '0';   -- 720p / SD: the short chroma box
 
@@ -121,11 +153,12 @@ architecture blossom of program_top is
     signal s_zc : unsigned(9 downto 0) := (others => '0');
     signal s_avq : std_logic := '0';
     signal s_hcnt, s_wmax, s_w : unsigned(11 downto 0) := to_unsigned(1920, 12);
+    signal g_hw : unsigned(11 downto 0) := to_unsigned(958, 12);    -- one before the last pixel of the left half
 
     -- glides: K1, K2, K3, K5, K6, P12 (Q.3), power up at the defaults
     type t_g is array(0 to 5) of unsigned(12 downto 0);
-    signal s_g : t_g := (to_unsigned(528 * 8, 13), to_unsigned(512 * 8, 13), to_unsigned(512 * 8, 13),
-                         to_unsigned(460 * 8, 13), to_unsigned(384 * 8, 13), to_unsigned(512 * 8, 13));
+    signal s_g : t_g := (to_unsigned(512 * 8, 13), to_unsigned(512 * 8, 13), to_unsigned(512 * 8, 13),
+                         to_unsigned(460 * 8, 13), to_unsigned(256 * 8, 13), to_unsigned(512 * 8, 13));
     signal gl_k, gl_o, gl_n : unsigned(12 downto 0) := (others => '0');
     signal gl_d : signed(13 downto 0) := (others => '0');
     signal gl_w : std_logic := '0';
@@ -136,34 +169,38 @@ architecture blossom of program_top is
     -- serial multiplier (per-field products)
     signal q_p : unsigned(4 downto 0) := (others => '0');
     signal q_ld, q_st : std_logic := '0';
-    signal q_wr : std_logic_vector(1 to 7) := (others => '0');
+    signal q_wr : std_logic_vector(1 to 4) := (others => '0');
     signal m_a  : unsigned(19 downto 0) := (others => '0');
     signal m_b  : unsigned(17 downto 0) := (others => '0');
     signal m_h  : unsigned(19 downto 0) := (others => '0');
     signal m_l  : unsigned(17 downto 0) := (others => '0');
 
     -- per-field values
-    signal f_k1    : unsigned(9 downto 0) := to_unsigned(528, 10);
-    signal f_kk    : unsigned(19 downto 0) := to_unsigned(278784, 20);
-    signal f_base  : unsigned(16 downto 0) := to_unsigned(32054, 17);
-    signal f_pinc  : unsigned(18 downto 0) := to_unsigned(32054, 19);   -- Q24 period per line
+    signal f_k1    : unsigned(9 downto 0) := to_unsigned(512, 10);
+    signal r_ra    : unsigned(7 downto 0) := to_unsigned(128, 8);
+    signal r_rq    : std_logic_vector(31 downto 0) := (others => '0');
+    signal f_sx    : unsigned(14 downto 0) := to_unsigned(4096, 15);     -- top-row X scale, Q12
+    signal f_w     : unsigned(9 downto 0) := (others => '0');            -- Y warp weight (hearts tall), /512
+    signal f_dinc  : unsigned(19 downto 0) := (others => '0');                -- V step change per line, Q32
+    signal f_dkx   : unsigned(15 downto 0) := (others => '0');                -- X step change per line, Q24
     signal f_gain  : unsigned(7 downto 0) := to_unsigned(128, 8);       -- Q7
     signal f_goff  : signed(9 downto 0) := (others => '0');
-    signal f_bloom : signed(10 downto 0) := (others => '0');
+    signal f_bloom : signed(11 downto 0) := (others => '0');             -- Q3
+    signal b_v     : signed(10 downto 0) := (others => '0');             -- Bloom - centre
+    signal b_3v    : signed(12 downto 0) := (others => '0');             -- 3 v
+    signal b_3d    : signed(11 downto 0) := (others => '0');             -- 3 (v -+ 256) beyond half travel
     signal f_melt  : unsigned(7 downto 0) := to_unsigned(115, 8);
-    signal f_depth : unsigned(7 downto 0) := to_unsigned(96, 8);
-    signal f_sm    : unsigned(8 downto 0) := (others => '0');            -- speed magnitude
-    signal f_sneg  : std_logic := '0';
-    signal f_spd   : unsigned(18 downto 0) := (others => '0');           -- Q24 period per field
-    signal f_roll  : unsigned(23 downto 0) := (others => '0');
-    signal f_lph   : unsigned(15 downto 0) := (others => '0');           -- breathe LFO phase
-    signal f_la    : unsigned(15 downto 0) := (others => '0');
-    signal f_lneg  : std_logic := '0';
-    signal f_s9    : unsigned(8 downto 0) := (others => '0');            -- |sin| 0..256
-    signal f_off   : signed(11 downto 0) := (others => '0');             -- bloom + breathe, Q3
-    signal f_u0    : signed(24 downto 0) := (others => '0');             -- Q16 cells
+    signal f_bd    : unsigned(6 downto 0) := to_unsigned(28, 7);         -- heartbeat swell depth, Q8
+    signal f_cbd   : unsigned(9 downto 0) := to_unsigned(147, 10);       -- depth x the beat's mean (1/3), Q12
+    signal k_sw    : unsigned(12 downto 0) := to_unsigned(4243, 13);     -- 1 + depth / 3: swell = k_sw - depth e^2
+    signal k_off   : signed(12 downto 0) := to_signed(-73, 13);          -- bloom - depth / 6
+    signal k_m     : signed(10 downto 0) := to_signed(78, 11);           -- melt - depth / 12
+    signal k_uc    : signed(22 downto 0) := to_signed(2621440, 23);      -- 40 cells - sway amplitude
+    signal f_hb    : unsigned(15 downto 0) := (others => '0');           -- heartbeat phase
+    signal f_ts    : unsigned(15 downto 0) := (others => '0');           -- sway phase
+    signal f_asw   : unsigned(11 downto 0) := (others => '0');           -- sway amplitude, Q8 cells
     signal f_ta, f_tb : unsigned(15 downto 0) := (others => '0');
-    signal f_mir, f_pal, f_hard, f_saw, f_osc : std_logic := '0';
+    signal f_mir, f_pal, f_hard, f_tw, f_osc : std_logic := '0';
 
     -- generated avid
     signal g_hsq, g_hsr, g_avq, g_avr : std_logic := '0';
@@ -175,11 +212,14 @@ architecture blossom of program_top is
     signal g_start : std_logic := '0';
 
     -- per-line engine
-    signal e_ph   : unsigned(23 downto 0) := (others => '0');            -- the V oscillator, Q24 of a period
+    signal e_ph   : unsigned(24 downto 0) := (others => '0');            -- the V oscillator, Q24 of a period
+    signal e_inca : unsigned(27 downto 0) := to_unsigned(32054 * 256, 28);    -- the line's V step, Q32
+    signal e_kxa  : unsigned(22 downto 0) := to_unsigned(2731 * 256, 23);     -- the line's X step, Q24
     signal e_wb   : std_logic := '0';
     signal r_bank : std_logic := '0';
     signal e_st   : unsigned(3 downto 0) := (others => '0');
     signal e_u16  : unsigned(15 downto 0) := (others => '0');            -- fold position, Q16 of a period (0..32768)
+    signal e_ywd  : std_logic := '0';
     signal e_y8   : unsigned(18 downto 0) := (others => '0');
     signal e_yc   : unsigned(13 downto 0) := (others => '0');            -- Q8 rows
     signal e_wr   : signed(10 downto 0) := (others => '0');
@@ -209,6 +249,25 @@ architecture blossom of program_top is
     signal e_di : unsigned(6 downto 0) := (others => '0');
     signal e_d, e_d1, e_d2 : unsigned(10 downto 0) := (others => '0');  -- knots, Q3
 
+    -- per-line X map / heartbeat: the job machine (serial 24 x 16 multiplier, B operands from the trig ROM)
+    signal r_ta : unsigned(9 downto 0) := (others => '0');
+    signal r_tq, r_tq2 : std_logic_vector(15 downto 0) := (others => '0');
+    signal e_job : unsigned(2 downto 0) := (others => '0');
+    signal e_jph : unsigned(4 downto 0) := (others => '0');
+    signal m2_a : unsigned(19 downto 0) := (others => '0');
+    signal m2_b : unsigned(15 downto 0) := (others => '0');
+    signal m2_h : unsigned(20 downto 0) := (others => '0');
+    signal m2_l : unsigned(15 downto 0) := (others => '0');
+    signal e_sw  : unsigned(12 downto 0) := to_unsigned(4096, 13);      -- heartbeat swell factor, Q12
+    signal e_tws : std_logic := '0';                                     -- twist negative: the line runs mirrored
+    -- next line's values (latched for the screen at its avid rise / the beam's run-back)
+    signal n_kx, l_kx : unsigned(15 downto 0) := to_unsigned(2731, 16);
+    signal n_kn, l_kn : std_logic := '0';
+    signal n_uc : signed(22 downto 0) := to_signed(2621440, 23);
+    signal n_g : unsigned(10 downto 0) := (others => '0');             -- depth x heartbeat, Q12
+    signal l_off : signed(12 downto 0) := (others => '0');
+    signal l_m : unsigned(9 downto 0) := to_unsigned(115, 10);
+
     -- cell table (ping-pong by line): {P0 11 | P1 12 | P2 13}
     type t_tf is array (0 to 255) of std_logic_vector(35 downto 0);
     signal tf_ram : t_tf := (others => (others => '0'));
@@ -221,7 +280,10 @@ architecture blossom of program_top is
     attribute no_rw_check of tf_ram : signal is true;
 
     -- beam
-    signal b_u  : signed(24 downto 0) := (others => '0');
+    signal b_u  : signed(26 downto 0) := (others => '0');
+    signal b_rev, b_gq : std_logic := '0';
+    signal b_dc : unsigned(10 downto 0) := (others => '0');             -- run-back steps left
+    signal b_run, b_x16, b_hold, b_z600 : std_logic := '0';            -- beam controls, one clock ahead
     signal b_pa : unsigned(15 downto 0) := (others => '0');
     signal l_pb : unsigned(15 downto 0) := (others => '0');
 
@@ -231,7 +293,8 @@ architecture blossom of program_top is
     signal s_vs : signed(9 downto 0) := (others => '0');
 
     -- pixel path (stage N = N registers after the beam)
-    signal q1_u, q2_u : unsigned(22 downto 0) := (others => '0');
+    signal q1_a : unsigned(25 downto 0) := (others => '0');
+    signal q2_u : unsigned(22 downto 0) := (others => '0');
     signal q1_osc : signed(9 downto 0) := (others => '0');
     signal q3_s, q4_s, q5_s : unsigned(7 downto 0) := (others => '0');
     signal q4_s2, q5_s2 : unsigned(7 downto 0) := (others => '0');
@@ -244,7 +307,7 @@ architecture blossom of program_top is
     signal q7_fb : signed(22 downto 0) := (others => '0');
     signal q7_src : signed(9 downto 0) := (others => '0');
     signal q8_f  : signed(14 downto 0) := (others => '0');
-    signal q8_m  : signed(18 downto 0) := (others => '0');
+    signal q8_m  : signed(20 downto 0) := (others => '0');
     signal q9_d  : signed(14 downto 0) := (others => '0');
     signal q9_om, q10_om, q11_om : signed(12 downto 0) := (others => '0');
     signal q10_gh, q10_gl : signed(20 downto 0) := (others => '0');
@@ -259,12 +322,8 @@ architecture blossom of program_top is
     type t_u10a3 is array (0 to 2) of unsigned(9 downto 0);
     signal q17_a, q18_a : t_u10a3 := (others => (others => '0'));
     signal q17_d : t_s11a := (others => (others => '0'));
-    type t_s17a is array (0 to 2) of signed(16 downto 0);
-    type t_s16a is array (0 to 2) of signed(15 downto 0);
-    signal q18_h : t_s17a := (others => (others => '0'));
-    signal q18_l : t_s16a := (others => (others => '0'));
-    type t_s19a is array (0 to 2) of signed(18 downto 0);
-    signal q19_bl : t_s19a := (others => (others => '0'));
+    type t_s18a is array (0 to 2) of signed(17 downto 0);
+    signal q18_h, q19_bl : t_s18a := (others => (others => '0'));
     signal q19_a, q20_px : t_u10a3 := (others => (others => '0'));
     signal q21_y : unsigned(9 downto 0) := to_unsigned(64, 10);
     signal q21_u, q21_v : unsigned(9 downto 0) := to_unsigned(512, 10);
@@ -303,6 +362,20 @@ begin
         end if;
     end process p_crom;
 
+    p_trom : process(clk)
+    begin
+        if rising_edge(clk) then
+            r_tq <= C_BL_TRIG(to_integer(r_ta));
+        end if;
+    end process p_trom;
+
+    p_rrom : process(clk)
+    begin
+        if rising_edge(clk) then
+            r_rq <= C_BL_ROWS(to_integer(r_ra));
+        end if;
+    end process p_rrom;
+
     p_tf : process(clk)
     begin
         if rising_edge(clk) then
@@ -324,19 +397,18 @@ begin
     p_ctrl : process(clk)
         variable v_x  : signed(10 downto 0);
         variable v_u  : unsigned(10 downto 0);
+        variable v_r  : unsigned(9 downto 0);
         variable v_ng : signed(13 downto 0);
         variable v_p  : integer range 0 to 31;
         variable v_ph : integer range 0 to 31;
         variable v_s  : unsigned(20 downto 0);
-        variable v_pr : unsigned(37 downto 0);
         variable v_k  : signed(10 downto 0);
         variable v_k3 : signed(12 downto 0);
         variable v_k5 : signed(13 downto 0);
-        variable v_o  : signed(11 downto 0);
+        variable v_d  : signed(10 downto 0);
+        variable v_bm : unsigned(11 downto 0);
     begin
         if rising_edge(clk) then
-            t_kx    <= f_kx(registers_in(8)(3 downto 0));
-            t_vs    <= f_vs(registers_in(8)(3 downto 0));
             t_kax   <= f_kax(registers_in(8)(3 downto 0));
             t_kay   <= f_kay(registers_in(8)(3 downto 0));
             t_short <= f_isshort(registers_in(8)(3 downto 0));
@@ -365,23 +437,26 @@ begin
                 s_hcnt <= (others => '0');
             end if;
             g_wm1 <= s_w - 1;
+            g_hw  <= ('0' & s_w(11 downto 1)) - 2;
 
             if s_zgo = '1' then
                 s_w <= s_wmax; s_wmax <= (others => '0');
-                -- K4 Speed: bipolar, deadband 8
+                -- K4 Sway: bipolar, deadband 8; amplitude 5/256 cell and phase rate 1.5 per count
                 v_x := signed(resize(unsigned(registers_in(3)), 11)) - 512;
-                if v_x > 8 then f_sneg <= '0'; v_u := unsigned(v_x) - 8; f_sm <= v_u(8 downto 0);
-                elsif v_x < -8 then f_sneg <= '1'; v_u := unsigned(-v_x) - 8; f_sm <= v_u(8 downto 0);
-                else f_sneg <= '0'; f_sm <= (others => '0'); end if;
+                if v_x > 8 then v_u := unsigned(v_x) - 8;
+                elsif v_x < -8 then v_u := unsigned(-v_x) - 8;
+                else v_u := (others => '0'); end if;
+                f_asw <= shift_left(resize(v_u(8 downto 0), 12), 2) + resize(v_u(8 downto 0), 12);
+                v_r := resize(v_u(8 downto 0), 10) + resize(v_u(8 downto 1), 10);
+                if v_x < -8 then f_ts <= f_ts + resize(v_r, 16);      -- the wave travels up
+                else f_ts <= f_ts - resize(v_r, 16); end if;          -- ... down
                 f_mir  <= registers_in(6)(0);
                 f_pal  <= registers_in(6)(1);
                 f_hard <= registers_in(6)(2);
-                f_saw  <= registers_in(6)(3);
+                f_tw   <= registers_in(6)(3);
                 f_osc  <= registers_in(6)(4);
-                -- the rows roll (+ = up the screen), the breathe LFO and the Osc drift
-                if f_sneg = '1' then f_roll <= f_roll - resize(f_spd, 24);
-                else f_roll <= f_roll + resize(f_spd, 24); end if;
-                f_lph <= f_lph + 91;
+                -- the heartbeat (one beat per 144 fields, ~2.4 s at 60 Hz) and the Osc drift
+                f_hb <= f_hb + 455;
                 f_ta <= f_ta + 151; f_tb <= f_tb - 113;
             end if;
 
@@ -421,6 +496,15 @@ begin
 
             -- knob curves (settle long before the sequencer and the pixel path read them)
             f_k1 <= s_g(0)(12 downto 3);
+            -- K1 Rows (C_BL_ROWS by knob / 4).  Right of centre: the cascade (X follows V).  Left: fewer
+            -- rows, the hearts half as much wider, and the Y warp w = 512 - k (hearts tall, lobes squeezed).
+            r_ra <= f_k1(9 downto 2);
+            if f_k1(9) = '1' then
+                f_sx <= unsigned(r_rq(14 downto 0)); f_w <= (others => '0');
+            else
+                v_bm := resize(unsigned(r_rq(14 downto 4)), 12) + 256;                     -- (1 + V scale) / 2
+                f_sx <= v_bm & "000"; f_w <= '0' & not f_k1(8 downto 0);                   -- 511 - k
+            end if;
             v_k := signed(resize(s_g(1)(12 downto 3), 11)) - 512;                 -- K2 Bands
             if v_k >= 0 then
                 v_k5 := shift_left(resize(v_k, 14), 2) + resize(v_k, 14);         -- 5 v
@@ -432,33 +516,44 @@ begin
             v_k := signed(resize(s_g(2)(12 downto 3), 11)) - 512;                 -- K3 Garden: +-192
             v_k3 := shift_left(resize(v_k, 13), 1) + resize(v_k, 13);
             f_goff <= resize(shift_right(v_k3, 3), 10);
-            v_k := signed(resize(s_g(5)(12 downto 3), 11)) - 512;                 -- P12 Bloom: +-384 (1.5 units)
-            v_k3 := shift_left(resize(v_k, 13), 1) + resize(v_k, 13);
-            f_bloom <= resize(shift_right(v_k3, 2), 11);
-            f_melt  <= s_g(3)(12 downto 5);
-            f_depth <= s_g(4)(12 downto 5);
-            f_la <= f_lph;
-            if f_lph(15) = '1' then f_la <= (not f_lph) + 1; f_lneg <= '1'; else f_lneg <= '0'; end if;
+            -- P12 Bloom: 0.75 v, plus 1.5 (v -+ 256) beyond half travel (+-768 = +-3 palette units).  For
+            -- |v| > 256, v -+ 256 is v with bit 8 flipped (no carry).  One adder per stage (per field).
+            b_v <= signed(resize(s_g(5)(12 downto 3), 11)) - 512;
+            b_3v <= shift_left(resize(b_v, 13), 1) + resize(b_v, 13);
+            if b_v(10 downto 8) = "001" or b_v(10 downto 8) = "110" then
+                v_d := b_v(10 downto 9) & not b_v(8) & b_v(7 downto 0);
+            else
+                v_d := (others => '0');
+            end if;
+            b_3d <= shift_left(resize(v_d, 12), 1) + resize(v_d, 12);
+            f_bloom <= resize(shift_right(b_3v, 2), 12) + resize(shift_right(b_3d, 1), 12);
+            f_melt <= s_g(3)(12 downto 5);
+            -- K6 Breathe: swell depth 0 .. 0.44 (Q8); the heartbeat e^2 has mean 1/3, folded into the
+            -- per-field constants so the per-line products stay unsigned
+            f_bd <= resize(s_g(4)(12 downto 6), 7) - resize(s_g(4)(12 downto 9), 7);
+            f_cbd <= resize(shift_right(shift_left(resize(f_bd, 12), 4) + shift_left(resize(f_bd, 12), 2)
+                     + resize(f_bd, 12), 2), 10);                                        -- 21/4 depth
+            k_sw  <= to_unsigned(4096, 13) + resize(f_cbd, 13);
+            k_off <= resize(f_bloom, 13) - signed(resize(f_cbd(9 downto 1), 13));
+            k_m   <= signed(resize(f_melt, 11)) - signed(resize(f_cbd(9 downto 2), 11));
+            k_uc  <= to_signed(2621440, 23) - signed(resize(f_asw & x"00", 23));
 
-            -- serial products: slot p = zc/32 (1..7), phase 0 load, 1..18 step, 20 store
+            -- serial products: slot p = zc/32 (1..4), phase 0 load, 1..18 step, 20 store
             v_p  := to_integer(s_zc(9 downto 5));
             v_ph := to_integer(s_zc(4 downto 0));
             q_p <= s_zc(9 downto 5);
-            if s_zone = '1' and v_p >= 1 and v_p <= 7 and v_ph = 0 then q_ld <= '1'; else q_ld <= '0'; end if;
-            if s_zone = '1' and v_p >= 1 and v_p <= 7 and v_ph >= 1 and v_ph <= 18 then q_st <= '1'; else q_st <= '0'; end if;
-            for k in 1 to 7 loop
+            if s_zone = '1' and v_p >= 1 and v_p <= 4 and v_ph = 0 then q_ld <= '1'; else q_ld <= '0'; end if;
+            if s_zone = '1' and v_p >= 1 and v_p <= 4 and v_ph >= 1 and v_ph <= 18 then q_st <= '1'; else q_st <= '0'; end if;
+            for k in 1 to 4 loop
                 if s_zone = '1' and v_p = k and v_ph = 20 then q_wr(k) <= '1'; else q_wr(k) <= '0'; end if;
             end loop;
             if q_ld = '1' then
                 m_h <= (others => '0'); m_l <= (others => '0');
                 case to_integer(q_p) is
-                    when 1 => m_a <= resize(f_k1, 20);                m_b <= resize(f_k1, 18);
-                    when 2 => m_a <= to_unsigned(62137, 20);          m_b <= resize(f_kk(19 downto 8), 18);
-                    when 3 => m_a <= resize(f_base, 20);              m_b <= resize(t_vs, 18);
-                    when 4 => m_a <= resize(f_sm, 20);                m_b <= resize(f_sm, 18);
-                    when 5 => m_a <= resize(f_la, 20);                m_b <= resize(to_unsigned(32768, 17) - resize(f_la, 17), 18);
-                    when 6 => m_a <= resize(f_depth, 20);             m_b <= resize(f_s9, 18);
-                    when others => m_a <= resize(s_w(11 downto 1), 20); m_b <= resize(t_kx, 18);
+                    when 1 => m_a <= resize(f_incp(registers_in(8)(3 downto 0)), 20); m_b <= resize(unsigned(r_rq(14 downto 0)), 18);
+                    when 2 => m_a <= resize(f_cinc(registers_in(8)(3 downto 0)), 20); m_b <= resize(unsigned(r_rq(30 downto 16)), 18);
+                    when 3 => m_a <= resize(f_kx(registers_in(8)(3 downto 0)), 20);   m_b <= resize(f_sx, 18);
+                    when others => m_a <= resize(f_ckx(registers_in(8)(3 downto 0)), 20); m_b <= resize(unsigned(r_rq(30 downto 16)), 18);
                 end case;
             end if;
             if q_st = '1' then
@@ -467,20 +562,7 @@ begin
                 m_l <= v_s(0) & m_l(17 downto 1);
                 m_b <= '0' & m_b(17 downto 1);
             end if;
-            v_pr := m_h & m_l;
-            if q_wr(1) = '1' then f_kk <= v_pr(19 downto 0); end if;                                  -- k1^2
-            if q_wr(2) = '1' then f_base <= to_unsigned(15534, 17) + resize(v_pr(27 downto 12), 17); end if;   -- rows * 2^24 / 1080
-            if q_wr(3) = '1' then f_pinc <= v_pr(26 downto 8); end if;                                -- x lines per line
-            if q_wr(4) = '1' then f_spd <= resize(v_pr(17 downto 0), 19) + resize(v_pr(17 downto 2), 19); end if;
-            if q_wr(5) = '1' then
-                if v_pr(29 downto 20) > 256 then f_s9 <= to_unsigned(256, 9); else f_s9 <= v_pr(28 downto 20); end if;
-            end if;
-            if q_wr(6) = '1' then
-                if f_lneg = '1' then v_o := resize(f_bloom, 12) - signed(resize(v_pr(16 downto 8), 12));
-                else v_o := resize(f_bloom, 12) + signed(resize(v_pr(16 downto 8), 12)); end if;
-                f_off <= v_o;
-            end if;
-            if q_wr(7) = '1' then f_u0 <= to_signed(2621440, 25) - signed(resize(v_pr(24 downto 0), 25)); end if;
+            -- (stores: p_eng -- the top-row V / X steps go straight into the line accumulators)
 
             s_gav_sr(0) <= g_avid;
             for i in 1 to C_LAT - 1 loop s_gav_sr(i) <= s_gav_sr(i - 1); end loop;
@@ -533,10 +615,12 @@ begin
     g_start <= '1' when (g_sel = '0' and g_rsr(1) = '1') or (g_sel = '1' and g_rsr(2) = '1') else '0';
 
     ---------------------------------------------------------------------------
-    -- Per-line engine: at the source avid rise of line n, fold line n+1's
-    -- vertical phase, blend control rows j..j+2 into 82 knots D[i] (3 MACs
-    -- each) and write the 80 cells' {P0, P1, P2} into the bank line n+1 will
-    -- read.  Line 0 is computed late in the vblank zone.
+    -- Per-line engine: at the source avid rise of line n, step the V oscillator
+    -- and the cascade to line n+1, fold and warp its phase, blend control rows
+    -- j..j+2 into 82 knots D[i] (3 MACs each) and write the 80 cells' {P0, P1,
+    -- P2} into the bank line n+1 will read.  Alongside, the job machine sets
+    -- line n+1's X map, V step and bloom.  Line 0 is computed late in the
+    -- vblank zone.
     ---------------------------------------------------------------------------
     p_eng : process(clk)
         variable v_v  : unsigned(23 downto 0);
@@ -547,48 +631,132 @@ begin
         variable v_p0 : unsigned(11 downto 0);
         variable v_p1 : signed(11 downto 0);
         variable v_p2 : signed(12 downto 0);
+        variable v_x  : unsigned(15 downto 0);
+        variable v_ms : unsigned(20 downto 0);
+        variable v_mp : unsigned(35 downto 0);
+        variable v_m  : signed(10 downto 0);
+        variable v_fp : unsigned(37 downto 0);
     begin
         if rising_edge(clk) then
+            -- per-field products (p_ctrl's multiplier): top-row steps, their change per line
+            v_fp := m_h & m_l;
+            if q_wr(1) = '1' then e_inca <= v_fp(31 downto 4); end if;      -- photo V step x top-row scale, Q32
+            if q_wr(2) = '1' then f_dinc <= v_fp(32 downto 13); end if;
+            if q_wr(3) = '1' then e_kxa <= v_fp(26 downto 4); end if;       -- X step x top-row scale, Q24
+            if q_wr(4) = '1' then f_dkx <= v_fp(28 downto 13); end if;
+
             -- kick
             if s_zone = '1' and s_zc = 300 then
-                e_ph <= f_roll; e_wb <= '0'; e_st <= to_unsigned(1, 4);
+                e_ph <= (others => '0');
+                e_wb <= '0'; e_st <= to_unsigned(1, 4);
             elsif data_in.avid = '1' and s_avq = '0' then
                 r_bank <= e_wb; e_wb <= not e_wb; l_wb <= e_wbv;
-                e_ph <= e_ph + resize(f_pinc, 24); e_st <= to_unsigned(1, 4);
+                l_off <= k_off + signed(resize(n_g(10 downto 1), 13));        -- bloom + beat / 2
+                v_m := k_m + signed(resize(n_g(10 downto 2), 11));             -- melt + beat / 4
+                if v_m < 0 then l_m <= (others => '0'); else l_m <= unsigned(v_m(9 downto 0)); end if;
+                if e_inca(27 downto 20) /= 0 then e_inca <= e_inca - resize(f_dinc, 28); end if;   -- never below 0
+                if e_kxa(22 downto 16) /= 0 then e_kxa <= e_kxa - resize(f_dkx, 23); end if;
+                e_st <= to_unsigned(1, 4);
+            elsif e_st = 6 then
+                if e_ywd = '1' then e_st <= to_unsigned(7, 4); end if;
             elsif e_st /= 0 then
-                if e_st = 8 then e_st <= (others => '0'); else e_st <= e_st + 1; end if;
+                if e_st = 13 then e_st <= (others => '0'); else e_st <= e_st + 1; end if;
             end if;
 
-            -- setup: fold, rows, weights (w0 + w1 + w2 = 256)
+            -- job machine: 6 jobs of 18 clocks (load, 16 shift-add steps, store).  A job's B operand is
+            -- the trig ROM word read three clocks before it (issued at the previous job's step 14).
+            --   1  w (u - 2 u^2)        -> the Y-warped fold
+            --   2  depth e^2            -> swell (V and X), the line's bloom and melt
+            --   3  swell |cos 2 pi u|   -> X factor (Twist), its sign
+            --   4  X step x X factor    -> the line's X step
+            --   5  V step x swell       -> advances the V oscillator to the next line
+            --   6  amplitude (1 + sin)  -> the line's centre (40 cells + sway)
+            v_mp := m2_h(19 downto 0) & m2_l;
+            if e_job /= 0 then
+                if e_jph = 17 then
+                    e_jph <= (others => '0');
+                    if e_job = 6 then e_job <= (others => '0'); else e_job <= e_job + 1; end if;
+                else
+                    e_jph <= e_jph + 1;
+                end if;
+                if e_jph = 0 then
+                    m2_h <= (others => '0'); m2_l <= (others => '0');
+                    case to_integer(e_job) is
+                        when 1 => m2_a <= resize(unsigned(r_tq2), 20); m2_b <= resize(f_w, 16);      -- (u - 2 u^2) w
+                        when 2 => m2_a <= resize(f_bd, 20);  m2_b <= unsigned(r_tq2);
+                        when 3 =>
+                            m2_a <= resize(e_sw, 20);
+                            if f_tw = '1' then m2_b <= '0' & unsigned(r_tq2(14 downto 0)); else m2_b <= to_unsigned(16384, 16); end if;
+                            e_tws <= f_tw and r_tq2(15);
+                        when 4 => m2_a <= resize(e_kxa(22 downto 8), 20); m2_b <= resize(v_mp(26 downto 14), 16);   -- job 3's product
+                        when 5 => m2_a <= e_inca(27 downto 8); m2_b <= resize(e_sw, 16);
+                        when others => m2_a <= resize(f_asw, 20); m2_b <= unsigned(r_tq2);
+                    end case;
+                elsif e_jph <= 16 then
+                    if m2_b(0) = '1' then v_ms := m2_h + resize(m2_a, 21); else v_ms := m2_h; end if;
+                    m2_h <= '0' & v_ms(20 downto 1);
+                    m2_l <= v_ms(0) & m2_l(15 downto 1);
+                    m2_b <= '0' & m2_b(15 downto 1);
+                else
+                    case to_integer(e_job) is
+                        when 1 => e_u16 <= e_u16 - v_mp(24 downto 9); e_ywd <= '1';
+                        when 2 =>   -- g = depth e^2 (Q12): swell k_sw - g (bloom and melt follow at the line switch)
+                            n_g <= v_mp(18 downto 8);
+                            e_sw <= k_sw - resize(v_mp(18 downto 8), 13);
+                        when 3 => null;
+                        when 4 => n_kx <= v_mp(27 downto 12); n_kn <= e_tws;
+                        when 5 => e_ph <= e_ph + resize(v_mp(31 downto 12), 25);
+                        when others => n_uc <= k_uc + signed(resize(v_mp(25 downto 6), 23));
+                    end case;
+                end if;
+                -- the next job's ROM read
+                if e_jph = 14 then
+                    case to_integer(e_job) is
+                        when 1 =>   -- the heartbeat at phase hb - ph / 2
+                            r_ta <= "01" & (f_hb(15 downto 8) - e_ph(24 downto 17));
+                        when 2 =>   -- cos 2 pi u of the warped fold
+                            if e_u16(15) = '1' then r_ta <= "00" & x"FF"; else r_ta <= "00" & e_u16(14 downto 7); end if;
+                        when 5 =>   -- 1 + sin 2 pi (ts + ph)
+                            r_ta <= "11" & (f_ts(15 downto 8) + e_ph(23 downto 16));
+                        when others => null;
+                    end case;
+                end if;
+            end if;
+            r_tq2 <= r_tq;
+
+            -- setup: fold, (Y warp), rows, weights (w0 + w1 + w2 = 256)
             case to_integer(e_st) is
-                when 1 =>
-                    if f_saw = '1' then v_v := '0' & e_ph(22 downto 0);
-                    elsif e_ph(23) = '0' then v_v := e_ph;
-                    else v_v := (not e_ph) + 1; end if;                        -- 2^24 - ph
+                when 1 =>   -- fold
+                    if e_ph(23) = '0' then v_v := e_ph(23 downto 0);
+                    else v_v := (not e_ph(23 downto 0)) + 1; end if;                -- 2^24 - ph
                     e_u16 <= v_v(23 downto 8);
-                when 2 =>
+                when 2 =>   -- read u - 2 u^2 for job 1
+                    if e_u16(15) = '1' then r_ta <= "10" & x"FF"; else r_ta <= "10" & e_u16(14 downto 7); end if;
+                when 5 =>   -- start the jobs
+                    e_job <= to_unsigned(1, 3); e_jph <= (others => '0'); e_ywd <= '0';
+                when 7 =>
                     e_y8 <= shift_left(resize(e_u16, 19), 3) + shift_left(resize(e_u16, 19), 1);
                     e_wr <= signed(resize(e_u16(15 downto 7), 11)) + resize(f_goff, 11);
-                when 3 =>
+                when 8 =>
                     v_yc := e_y8 + resize(e_u16, 19);
                     e_yc <= v_yc(18 downto 5);
                     if e_wr < 0 then e_wbv <= (others => '0');
                     elsif e_wr > 256 then e_wbv <= to_unsigned(256, 9);
                     else e_wbv <= unsigned(e_wr(8 downto 0)); end if;
-                when 4 =>
+                when 9 =>
                     if e_yc(13 downto 8) > 43 then e_j <= to_unsigned(43, 6); e_t8 <= (others => '1');
                     else e_j <= e_yc(13 downto 8); e_t8 <= e_yc(7 downto 0); end if;
-                when 5 =>
+                when 10 =>
                     e_t2 <= e_t8 * e_t8;
                     e_base <= shift_left(resize(e_j, 12), 6) + shift_left(resize(e_j, 12), 4)
                               + shift_left(resize(e_j, 12), 1);                     -- j * 82
-                when 6 =>
+                when 11 =>
                     v_t := resize(e_t2, 17) + 256;
                     e_w2 <= v_t(16 downto 9);
-                when 7 =>
+                when 12 =>
                     v_w := to_unsigned(128, 10) - resize(e_t8, 10) + resize(e_w2, 10);
                     e_w0 <= v_w(7 downto 0);
-                when 8 =>
+                when 13 =>
                     v_w := to_unsigned(256, 10) - resize(e_w0, 10) - resize(e_w2, 10);
                     e_w1 <= v_w(7 downto 0);
                     e_iss <= '1'; e_i <= (others => '0'); e_r <= (others => '0'); e_abi <= e_base;
@@ -654,10 +822,14 @@ begin
     end process p_eng;
 
     ---------------------------------------------------------------------------
-    -- Beam: the field's column coordinate U (Q16 cells, 0 at the left edge of
-    -- the 1920-px virtual frame), Osc phases
+    -- Beam: the field's column coordinate U (Q16 cells) from the line's X map;
+    -- Mirror runs it back from the centre.  Osc phases.
     ---------------------------------------------------------------------------
     p_beam : process(clk)
+        variable v_op : unsigned(19 downto 0);
+        variable v_ad : signed(26 downto 0);
+        variable v_en, v_ng : std_logic;
+        variable v_dn : unsigned(10 downto 0);
     begin
         if rising_edge(clk) then
             if s_zgo = '1' then
@@ -665,11 +837,38 @@ begin
             elsif data_in.avid = '1' and s_avq = '0' then
                 l_pb <= l_pb + resize(t_kay, 16);
             end if;
+            -- after each line (and once in the vblank zone) the beam takes the next line's centre and
+            -- runs back W/2 steps (16 at a time) to its left edge; then it steps across the line, back
+            -- from the centre under Mirror.  A negative X step (Twist past a quarter turn) runs it the
+            -- other way.  Ones' complement for the backward steps: 1/65536 cell per step, invisible.
+            b_gq <= g_avid;
+            if s_zone = '1' and s_zc = 599 then b_z600 <= '1'; else b_z600 <= '0'; end if;
+            if g_avid = '1' and g_cnt = g_hw and f_mir = '1' then b_hold <= '1'; else b_hold <= '0'; end if;
+            v_en := '0'; v_ng := '0';
+            if b_x16 = '1' then v_op := l_kx & "0000"; else v_op := "0000" & l_kx; end if;
+            if (b_gq = '1' and g_avid = '0') or b_z600 = '1' then
+                b_u <= resize(n_uc, 27); b_dc <= s_w(11 downto 1); l_kx <= n_kx; l_kn <= n_kn; b_rev <= '0';
+                b_run <= '1'; if s_w(11 downto 5) /= 0 then b_x16 <= '1'; else b_x16 <= '0'; end if;
+            elsif b_run = '1' then
+                v_en := '1'; v_ng := not l_kn;
+                if b_x16 = '1' then v_dn := b_dc - 16; else v_dn := b_dc - 1; end if;
+                b_dc <= v_dn;
+                if v_dn = 0 then b_run <= '0'; end if;
+                if v_dn(10 downto 4) /= 0 then b_x16 <= '1'; else b_x16 <= '0'; end if;
+            elsif g_start = '1' then
+                b_rev <= '0';
+            elsif g_avid = '1' then
+                if b_hold = '1' then
+                    b_rev <= '1';                                   -- hold the centre pixel, then run back
+                else
+                    v_en := '1'; v_ng := b_rev xor l_kn;
+                end if;
+            end if;
+            if v_ng = '1' then v_ad := not signed(resize(v_op, 27)); else v_ad := signed(resize(v_op, 27)); end if;
+            if v_en = '1' then b_u <= b_u + v_ad; end if;
             if g_start = '1' then
-                b_u <= f_u0;
                 b_pa <= f_ta;
             elsif g_avid = '1' then
-                b_u <= b_u + signed(resize(t_kx, 25));
                 b_pa <= b_pa + resize(t_kax, 16);
             end if;
         end if;
@@ -700,7 +899,7 @@ begin
     -- Pixel path
     ---------------------------------------------------------------------------
     p_pix : process(clk)
-        variable v_u   : signed(24 downto 0);
+        variable v_bu  : signed(26 downto 0);
         variable v_s2  : unsigned(15 downto 0);
         variable v_f   : signed(22 downto 0);
         variable v_m   : signed(12 downto 0);
@@ -720,14 +919,13 @@ begin
             s_vy(1) <= unsigned(data_in.y(9 downto 2)); s_vy(2) <= s_vy(1);
             s_vs <= signed(resize(resize(s_vy(1), 9) + resize(s_vy(2), 9), 10)) - 256;
 
-            -- 1: U clamped to the frame (0 .. 80 cells); Osc (two slow drifting triangles, half the video's swing)
-            if b_u < 0 then q1_u <= (others => '0');
-            elsif b_u > 5242879 then q1_u <= to_unsigned(5242879, 23);
-            else q1_u <= unsigned(b_u(22 downto 0)); end if;
+            -- 1: |U| (the field reflects at its left edge); Osc (two slow drifting triangles, half the video's swing)
+            v_bu := b_u xor (26 downto 0 => b_u(26));                -- ones' complement: 1/65536 cell off
+            q1_a <= unsigned(v_bu(25 downto 0));
             q1_osc <= shift_right(resize(f_tri(b_pa), 10) + resize(f_tri(l_pb), 10), 1);   -- +-127: a gentle wobble
-            -- 2: Mirror: the right half shows the left half reflected (twin hearts)
-            if f_mir = '1' and q1_u >= 2621440 then q2_u <= to_unsigned(5242880, 23) - q1_u;
-            else q2_u <= q1_u; end if;
+            -- 2: clamped to the frame (0 .. 80 cells; beyond the right edge = the flood)
+            if q1_a(25 downto 16) > 79 then q2_u <= to_unsigned(5242879, 23);
+            else q2_u <= q1_a(22 downto 0); end if;
             -- 3: cell address, fraction
             if q2_u(22 downto 16) > 79 then
                 tf_ra <= r_bank & to_unsigned(79, 7); q3_s <= (others => '1');
@@ -751,13 +949,13 @@ begin
             q7_fb <= shift_left(resize(q6_bh, 23), 4) + resize(q6_bl, 23);
             q7_p0 <= q6_p0;
             if f_osc = '1' then q7_src <= q1_osc; else q7_src <= s_vs; end if;
-            -- 8: F = P0 + s P1 + s^2 P2 (Q3 control-point units); the melt product
+            -- 8: F = P0 + s P1 + s^2 P2 (Q3 control-point units); source x (melt + the line's beat bloom / 2)
             v_f := signed(resize(q7_p0, 23)) + shift_right(resize(q7_fa, 23), 8) + shift_right(q7_fb, 9);
             q8_f <= resize(v_f, 15);
-            q8_m <= q7_src * signed('0' & f_melt);
-            -- 9: F - flood edge; offset = bloom + breathe + melt
+            q8_m <= q7_src * signed('0' & l_m);
+            -- 9: F - flood edge; offset = bloom + beat bloom + source term
             q9_d <= q8_f - C_PIV;
-            v_m := resize(f_off, 13) + resize(shift_right(q8_m, 7), 13);
+            v_m := l_off + resize(shift_right(q8_m, 7), 13);
             q9_om <= v_m;
             -- 10: x Bands gain (split 4 | 4 bits)
             q10_gh <= resize(q9_d * signed('0' & f_gain(7 downto 4)), 21);
@@ -795,20 +993,19 @@ begin
                 q17_d(c) <= signed(resize(unsigned(q16_pal(29 - 10 * c downto 20 - 10 * c)), 11))
                             - signed(resize(unsigned(q16_pal(59 - 10 * c downto 50 - 10 * c)), 11));
             end loop;
-            -- 18: w (B - A), w split 5 | 4 bits (w = the line's fold position + Garden)
+            -- 18: w (B - A), w = the line's fold position + Garden in 32nds (steps of a few codes)
             for c in 0 to 2 loop
-                q18_h(c) <= resize(q17_d(c) * signed('0' & l_wb(8 downto 4)), 17);
-                q18_l(c) <= resize(q17_d(c) * signed('0' & l_wb(3 downto 0)), 16);
+                q18_h(c) <= resize(q17_d(c) * signed('0' & l_wb(8 downto 3)), 18);
                 q18_a(c) <= q17_a(c);
             end loop;
-            -- 19: w (B - A)
+            -- 19
             for c in 0 to 2 loop
-                q19_bl(c) <= shift_left(resize(q18_h(c), 19), 4) + resize(q18_l(c), 19);   -- |w (B - A)| < 2^18
+                q19_bl(c) <= q18_h(c);
                 q19_a(c) <= q18_a(c);
             end loop;
-            -- 20: A + w (B - A) / 256
+            -- 20: A + w (B - A) / 32
             for c in 0 to 2 loop
-                v_px := signed(resize(q19_a(c), 12)) + resize(shift_right(q19_bl(c), 8), 12);
+                v_px := signed(resize(q19_a(c), 12)) + resize(shift_right(q19_bl(c), 5), 12);
                 if v_px < 0 then q20_px(c) <= (others => '0');
                 elsif v_px > 1023 then q20_px(c) <= (others => '1');
                 else q20_px(c) <= unsigned(v_px(9 downto 0)); end if;
