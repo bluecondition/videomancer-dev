@@ -18,8 +18,8 @@ All shapes and colours were fitted to the photo (WIN_20230602_01_30_58_Pro.jpg) 
   C_CE  256 x 16: trailing / post curves vs e + 32 (signed distance to the band's
         true end, -32 .. 31): shG | shB inside (e <= 0), postG | postR after (e > 0).
   C_KT 1024 x 16: knob curves, 4 x 256 (index = knob / 4): lens-phase increment per
-        Q.1 unit (K1), h-index scale KJ (K2), spill Q.8 (K5), band-phase gain M Q.3
-        (P12).
+        Q.1 unit (K1), h-index scale KJ Q.15 (K2, x0.5 .. x4), spill Q.8 (K5),
+        band-phase gain M Q.3 (P12).
   C_MR/C_MG/C_MB 256 x 32: RGB -> YUV contributions per 8-bit channel value:
         Y (Q.1, pre-boosted 16/13 for the output conditioning) | Cr | Cb (signed
         10-bit), hardware convention (U register = Cr, V register = Cb).
@@ -135,8 +135,8 @@ def rom_kt():
     for k in range(256):
         lens = 2.0 ** (2.6 * (k - 128) / 255.0)
         t0.append(int(round(2 ** 24 / 1880.0 * lens)))                   # phase inc per Q.1 unit
-        ky = 2.0 ** (2.0 * (k - 128) / 255.0)
-        t1.append(min(65535, int(round(ky * 65536 / 2.2))))
+        ky = 2.0 ** (3.0 * k / 255.0 - 1.0)                              # x0.5 .. x4, x1 at k 85
+        t1.append(min(65535, int(ky * 32768 / 2.2)))                      # floor: x1 = v0.5 bit-exact
         t2.append(int(round(256 * 2.0 ** (3.0 * (k - 128) / 255.0))))    # spill Q.8
         t3.append(int(round(256 / 0.4735 * 2.0 ** (4.0 * (k - 128) / 255.0))))  # M Q.3 = 8*32/P
     return t0 + t1 + t2 + t3

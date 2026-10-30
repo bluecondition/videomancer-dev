@@ -1,5 +1,5 @@
 # Cathedral — teal egg-crate arches around a pink diamond
-**v0.5.0 (rebuilt 2026-10-27): built, NOT flashed.** Heirloom #41, from `photos/WIN_20230602_01_30_58_Pro.jpg`
+**v0.6.0 (phase 2, 2026-10-30): K2 Arch and K3 Diamond ranges widened; built, NOT flashed.** Heirloom #41, from `photos/WIN_20230602_01_30_58_Pro.jpg`
 (the same patch session as facet, four minutes later). v0.1.0 drew parabola arches over a rainbow and Ron judged it
 too abstract. This version is rebuilt from a numeric reading of the photo: a float prototype iterated to a
 near-replica, then an integer model, then the RTL. Work files are in `.heirloom_work/rb_cathedral/`.
@@ -68,8 +68,8 @@ near-replica, then an integer model, then the RTL. Work files are in `.heirloom_
 | Control | Photo element | Function |
 |---|---|---|
 | K1 Vaults | lenses / saddles | lens period: ×0.41 … ×2.46 lenses (the photo at 50 %) |
-| K2 Arch | V's, teardrops, arch height | vertical scale of h, ×0.5 … ×2 |
-| K3 Diamond | pink diamond | radius 0 … 460 lines (226 = the photo) |
+| K2 Arch | V's, teardrops, arch height | vertical scale of h, ×0.5 … ×4, exponential (×1 = the photo at 33 %, the old ×2 maximum at 67 %) |
+| K3 Diamond | pink diamond | radius 10 … 569 lines, quadratic (226 = the photo at 50 %); the diamond's warm halo scales by min(RD, 226) / 226 |
 | K4 Speed | motion | bipolar, ±24 deadband. Bands stream out of (or into) the lenses at 1 band period per 5.4 s at the default; the stripes roll; the diamond (±6 %) and the wedges (±15 %) breathe; one master phase |
 | K5 Spill | warm stripes and spikes | reach of the keyed ramps around the pink shapes, ×0.35 … ×2.8 |
 | K6 Picture | the whole field | source depth into F and the pink distances (default 20 %) |
@@ -82,6 +82,23 @@ near-replica, then an integer model, then the RTL. Work files are in `.heirloom_
 
 K1, K2, K3, K5 and P12 glide 1/8 of the gap per field and snap on the first fields.
 
+## Phase 2 (v0.6.0, 2026-10-30)
+Ron's notes on v0.5.0: he loves the colours, shapes and blending and asked only for range tweaks.
+- **K2 Arch: keep going ~50 % past the old 100 %.** The KJ curve is now one exponential over 3 octaves, ×0.5 … ×4
+  (was 2 octaves, ×0.5 … ×2). The old maximum sits at 67 %, and the last third carries on: the X crossings
+  narrow into a thin band and the arches stretch into tall U columns. KJ moved to Q.15 (×4 overflowed the 16-bit
+  KT entry), and job 16 takes `v_r(22 downto 15)`. The table is floored, so ×1 is bit-exact with v0.5. The photo
+  moved to 33 % (default 341).
+- **K3 Diamond: 0–70 % didn't change the size.** The pink diamond did grow, but its warm striped halo always
+  filled the central lens out to the band ring. The outline (pink plus orange) only moved once the pink overran the
+  bands, at about 70 %. Two changes:
+  - **Radius** `RD = 10 + K3 (19456 + 16 K3) / 2^16`: 10 lines at 0 % (a speck), 102 at 25 %, 226 (the photo) at 50 %,
+    347 at 70 %, 569 at 100 % (+24 % over the old 460). Job 3 now multiplies by a registered `19456 + 16 K3`.
+  - **Halo:** the diamond's warm reach (TD) uses `spill × min(RD, 226) / 226`, computed in the job-9 slot, which
+    was free. The halo shrinks with the diamond below the photo size and is unchanged above it. The triangles' and
+    wedges' halos (TE, TW) are untouched.
+- The default frame is bit-identical to v0.5 in the integer model (720p, Osc and Video).
+
 ## Video
 The camera's luma is added to the egg-crate field and to the pink and warm distances. The band contours bend around
 the picture, and the keyed ramps (stripes, spikes, wedge and diamond edges) swell on bright areas. At the default
@@ -91,7 +108,7 @@ path, so every video-path control stays live in Osc.
 ## Engine
 - **Serial multiplier** (27 × 16, 16 steps).
   - **Per field (zone):** 11 jobs in 24-clock slots: pixels left of the axis; the phase increment × xs; the start
-    phase; RD; flow, stripe roll and LFO phases; diamond breathing; the stripe-phase increment; the wedge offset.
+    phase; RD; flow, stripe roll and LFO phases; diamond breathing; the stripe-phase increment; the diamond-halo spill (v0.6); the wedge offset.
     The knob curves come from a 1024 × 16 KT ROM (lens increment, h-index scale, spill, band gain M).
   - **Per line:** kicked at each g_start, it computes the next line: |Y|, the stripe triangle and threshold,
     j = |Y|·KJ → h ROM, TD / TE / TW = spill × threshold × (250, 300, 80), the ROM colours, the pink-line terms and
@@ -109,23 +126,34 @@ path, so every video-path control stays live in Osc.
   (C_LAT 56), colours in hardware convention.
 
 ## Status
-v0.5.0 built 2026-10-27, router2, **seed 1 on every config**. The rebuild was deterministic.
+**v0.6.0** built 2026-10-30 with router2. NOT flashed. The three HD seeds were screened for HDMI TX pin skew
+(memory hdmi_tx_placement_skew, `tools/hdmi_pin_skew.py`), and two are hand-installed.
 
-| Config | Fmax (MHz) |
-|---|---|
-| HD Analog | 81.12 |
-| HD HDMI | 77.85 |
-| HD Dual | 75.10 |
-| SD Analog | 74.52 |
-| SD HDMI | 71.54 |
-| SD Dual | 75.30 |
+**The vmprog is repacked, so a plain rebuild will NOT reproduce it.**
 
-SD Fmin is 27 MHz. 6851–6864 / 7680 LC (89 %), 20 / 32 EBR. All bitstreams pass iceunpack. NOT flashed. HD Dual
-has the thinnest margin: if a later edit regresses it, try `NEXTPNR_ROUTER="--router router1"` first.
+| Config | Seed | Fmax (MHz) | HDMI HSYNC / closest data (ns) | Note |
+|---|---|---|---|---|
+| HD Analog | **3** (hand-installed) | 80.71 | −1.51 / ≤ −1.73 | builder's s1: +0.45, data −1.14 … +1.79 (both sides) |
+| HD HDMI | **61** (hand-installed) | 85.03 | +2.21 / ≤ −0.69 | builder's s1: +0.90 / ≤ −0.43; the most positive passing seed of 1–61 |
+| HD Dual | 1 | 80.30 | −2.27 / ≤ −1.56 | |
+| SD Analog | 3 | 82.24 | | builder retry: seeds 1–2 stalled the router |
+| SD HDMI | 1 | 77.77 | | |
+| SD Dual | 1 | 67.87 | | |
 
-Verification:
-- GHDL 720p vs the integer model: median |d| 0, mean 1.1–1.2 codes.
-- SD field-to-field: every contour, wedge edge and the diamond edge move.
+- SD Fmin is 27 MHz. 6956–6994 / 7680 LC (91 %), 20 / 32 EBR. iceunpack OK on all six.
+- **Screens and re-routing:**
+  - The screens are in `.heirloom_work/rb_cathedral/skew/`: `screen1.txt`, `screen2.txt` and `ship.txt`. The
+    seed-1 vmprog is kept there as `cathedral_v060_s1.vmprog`.
+  - To re-route, regenerate the HD jsons with
+    `make -C videomancer-sdk/fpga PROGRAM=cathedral PROJECT_ROOT=<abs>/programs/ron/heirloom/cathedral/
+    BUILD_ROOT=<skew>/<config> CONFIG=<config> HARDWARE=rev_b <skew>/<config>/bitstreams/<config>.json`.
+  - Then run `skew/route1.sh hd_hdmi 61` (or `hd_analog 3`), copy the `.bin` into
+    `build/programs/ron/cathedral/rev_b/bitstreams/` and repack with `vmprog_pack.py`.
+  - Re-routes are byte-exact: all three seed-1 HD builds re-routed identical to the builder's.
+- **Model check:** the default frame (K2 341, K3 512) is bit-identical to v0.5's default in the integer model, at
+  720p in both Osc and Video.
+
+v0.5.0 (2026-10-27): router2, seed 1 on every config, 6851–6864 LC, HD 81.12 / 77.85 / 75.10 MHz.
 
 ## Deviations from the photo
 - **Luma cap.** Whites and yellows (top triangle, top wedges, yellow stripes) sit 50–85 codes below the photo, to

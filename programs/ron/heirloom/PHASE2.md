@@ -171,7 +171,7 @@ Commit the row along with the program's own files.
 | blossom | not started | | |
 | bottleneck | not started | | |
 | bunting | not started | | |
-| cathedral | not started | | |
+| cathedral | built v0.6.0, awaiting HW | v0.6.0 | Ron 10-30 (on v0.5.0): loves the colours, shapes and blending; only range tweaks. K2 Arch: keep going ~50 % past the current 100 %; K3 Diamond: 0-70 % barely changes the size -> 0 % = almost gone, 100 % = ~25 % bigger than the current max. v0.6.0: K2 x0.5..x4 exponential (photo at 33 %, old max at 67 %); K3 radius 10..569 lines quadratic (photo at 50 %), and the diamond's warm halo now shrinks with it (it was filling the lens, hiding the size change); default bit-exact with v0.5; 91 % LC, 20 EBR, router2; HD HDMI s61 + HD Analog s3 hand-installed after the pin-skew screen |
 | cathode | not started | | |
 | chartreuse | not started | | |
 | cocoon | not started | | |
@@ -242,7 +242,7 @@ Commit the row along with the program's own files.
 | [blossom](blossom/SUMMARY.md) | v0.5.0 | 88 % (room) | 18 | router2 | SD Dual seed 2 | oscillator/field |
 | [bottleneck](bottleneck/SUMMARY.md) | v0.5.0 | 96 % (**FULL**) | 17 | router1 | SD HDMI seed 2 | oscillator/field |
 | [bunting](bunting/SUMMARY.md) | v0.5.0 | 83 % (room) | 4 | router1 | 6/6 seed 1 | oscillator/field |
-| [cathedral](cathedral/SUMMARY.md) | v0.5.0 | 89 % (room) | 20 | router2 | 6/6 seed 1 | oscillator/field |
+| [cathedral](cathedral/SUMMARY.md) | v0.6.0 | 91 % (room) | 20 | router2 | SD Analog seed 3; HD HDMI s61 + HD Analog s3 hand-installed | oscillator/field |
 | [cathode](cathode/SUMMARY.md) | v0.5.0 | 92 % (tight) | 2 | router2 | 6/6 seed 1 | oscillator/field |
 | [chartreuse](chartreuse/SUMMARY.md) | v0.5.2 | 91 % (room) | 23 | router1 | 6/6 seed 1 | measured field |
 | [cocoon](cocoon/SUMMARY.md) | v0.5.0 | 94 % (tight) | 19 | router2 | HD HDMI seed 4, SD Dual seed 2 | oscillator/field |

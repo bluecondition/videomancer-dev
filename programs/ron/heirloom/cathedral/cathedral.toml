@@ -7,7 +7,7 @@
 processing_delay_clks = 56
 program_id = "com.czartroniks.cathedral"
 program_name = "Cathedral"
-program_version = "0.5.0"
+program_version = "0.6.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -33,7 +33,7 @@ name_label = "Arch"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 341
 display_float_digits = 0
 suffix_label = "%"
 
@@ -43,7 +43,7 @@ name_label = "Diamond"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 505
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 

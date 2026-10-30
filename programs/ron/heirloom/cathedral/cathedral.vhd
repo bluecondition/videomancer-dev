@@ -1,7 +1,8 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Cathedral v0.5.0 -- Heirloom #41 (rebuilt 2026-10-27), from WIN_20230602_01_30_58.
+-- Cathedral v0.6.0 -- Heirloom #41 (rebuilt 2026-10-27, phase 2 2026-10-30), from
+-- WIN_20230602_01_30_58.
 --
 -- The photo is an RGB colourizer patch, mirrored left / right and top / bottom:
 --   G   a vertical ramp (bright green at the top -> black at the bottom)
@@ -23,8 +24,9 @@
 --   colour RGB 8-bit, then RGB -> YUV by three contribution ROMs
 --
 --   K1  Vaults   lenses across (x0.41 .. x2.46; the photo at 50 %)
---   K2  Arch     vertical scale of the arches (x0.5 .. x2)
---   K3  Diamond  pink diamond size (0 .. 460 lines)
+--   K2  Arch     vertical scale of the arches (x0.5 .. x4; the photo at 33 %)
+--   K3  Diamond  pink diamond size (10 .. 569 lines, 226 = the photo at 50 %); its
+--                warm halo shrinks with it below the photo size
 --   K4  Speed    bipolar: bands stream out of (or into) the lenses, stripes roll,
 --                diamond and wedges breathe; still in the centre
 --   K5  Spill    reach of the warm stripes around the pink shapes
@@ -188,6 +190,10 @@ architecture cathedral of program_top is
     signal f_ph0 : unsigned(23 downto 0) := (others => '0');
     signal f_rd : unsigned(9 downto 0) := to_unsigned(226, 10);
     signal f_rdf : signed(11 downto 0) := to_signed(226, 12);
+    signal f_rdb : unsigned(15 downto 0) := to_unsigned(27648, 16);
+    signal f_rdc : unsigned(7 downto 0) := to_unsigned(226, 8);
+    signal f_hq : unsigned(15 downto 0) := to_unsigned(32770, 16);
+    signal f_spilld : unsigned(15 downto 0) := (others => '0');
     signal f_flow : unsigned(15 downto 0) := (others => '0');
     signal f_sroll : unsigned(15 downto 0) := (others => '0');
     signal f_lm : unsigned(15 downto 0) := (others => '0');
@@ -472,6 +478,11 @@ begin
             if zf_q1 = '1' then f_kj <= unsigned(q_kt); end if;
             if zf_q2 = '1' then f_spill <= unsigned(q_kt); end if;
             if zf_q3 = '1' then f_m <= unsigned(q_kt); end if;
+            -- diamond radius RD = 10 + K3 (19456 + 16 K3) / 2^16 (10 .. 569, 226 at 512);
+            -- its warm halo scales by min(RD, 226) / 226 (Q.15, exactly 1 at the photo)
+            f_rdb <= to_unsigned(19456, 16) + shift_left(resize(g_k3(12 downto 3), 16), 4);
+            if f_rd < 226 then f_rdc <= f_rd(7 downto 0); else f_rdc <= to_unsigned(226, 8); end if;
+            f_hq <= shift_left(resize(f_rdc, 16), 7) + shift_left(resize(f_rdc, 16), 4) + resize(f_rdc, 16);
             if zf_q0 = '1' then
                 f_vw74 <= resize(s_vw, 13) + 74;
                 case to_integer(s_xs) is
@@ -568,18 +579,18 @@ begin
                         end case;
                     when 1  => m_a <= signed(resize(f_inc, 27));             m_b <= resize(s_xs, 16);
                     when 2  => m_a <= signed(resize(f_incp, 27));            m_b <= resize(f_npre, 16);
-                    when 3  => m_a <= signed(resize(g_k3(12 downto 3), 27)); m_b <= to_unsigned(29440, 16);
+                    when 3  => m_a <= signed(resize(g_k3(12 downto 3), 27)); m_b <= f_rdb;
                     when 4  => m_a <= resize(s_sp, 27);                      m_b <= to_unsigned(102, 16);
                     when 5  => m_a <= resize(s_sp, 27);                      m_b <= to_unsigned(580, 16);
                     when 6  => m_a <= resize(s_sp, 27);                      m_b <= to_unsigned(72, 16);
                     when 7  => m_a <= resize(f_sval, 27);                    m_b <= resize(f_rd, 16);
                     when 8  => m_a <= signed(resize(s_ys, 27));              m_b <= to_unsigned(241, 16);
-                    when 9  => m_a <= (others => '0');                       m_b <= (others => '0');
+                    when 9  => m_a <= signed(resize(f_spill, 27));           m_b <= f_hq;
                     when 10 => m_a <= signed(resize(f_wk, 27));              m_b <= to_unsigned(122, 16);
                     when 16 => m_a <= signed(resize(l_ay, 27));              m_b <= f_kj;
                     when 17 => m_a <= signed(resize(shift_left(resize(l_thr, 16), 8) - shift_left(resize(l_thr, 16), 2)
                                                     - shift_left(resize(l_thr, 16), 1), 27));
-                               m_b <= f_spill;
+                               m_b <= f_spilld;
                     when 18 => m_a <= signed(resize(shift_left(resize(l_thr, 18), 8) + shift_left(resize(l_thr, 18), 5)
                                                     + shift_left(resize(l_thr, 18), 3) + shift_left(resize(l_thr, 18), 2), 27));
                                m_b <= f_spill;
@@ -602,7 +613,7 @@ begin
                     when 0  => f_npre <= unsigned(v_r(26 downto 16));
                     when 1  => f_incp <= unsigned(v_r(17 downto 0));
                     when 2  => f_ph0 <= unsigned(v_r(23 downto 0));
-                    when 3  => f_rd <= unsigned(v_r(25 downto 16));
+                    when 3  => f_rd <= unsigned(v_r(25 downto 16)) + 10;
                     when 4  => f_flow <= f_flow + unsigned(v_r(21 downto 6));
                     when 5  => f_sroll <= f_sroll - unsigned(v_r(23 downto 8));
                     when 6  => f_lm <= f_lm + unsigned(v_r(21 downto 6));
@@ -610,9 +621,10 @@ begin
                                f_wk <= to_unsigned(23, 6) + unsigned(resize(shift_right(resize(f_sval2, 12) * 7, 8), 6));
                     when 8  => f_sinc <= unsigned(v_r(21 downto 6));
                     when 9  => f_sph0 <= f_sroll - 17352;
+                               f_spilld <= unsigned(v_r(30 downto 15));
                     when 10 => f_wk122 <= unsigned(v_r(13 downto 8));
                     when 16 =>
-                        if v_r(43 downto 24) /= 0 then s_h_ra <= (others => '1'); else s_h_ra <= unsigned(v_r(23 downto 16)); end if;
+                        if v_r(43 downto 23) /= 0 then s_h_ra <= (others => '1'); else s_h_ra <= unsigned(v_r(22 downto 15)); end if;
                         m_ld <= '1'; m_jid <= to_unsigned(17, 5);
                     when 17 =>
                         n_td <= unsigned(v_r(25 downto 16));
