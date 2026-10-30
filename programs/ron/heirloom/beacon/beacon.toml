@@ -1,4 +1,4 @@
-# Beacon - Heirloom #26, rebuilt 2026-10-27 from WIN_20230424_23_53_49.
+# Beacon - Heirloom #26, rebuilt 2026-10-27 from WIN_20230424_23_53_49; phase 2 v0.6.0 2026-10-29.
 # A candle flame over a hyperbolic bell and cone, keyed into blue/black bars that fade
 # around the light. See beacon.vhd and SUMMARY.md.
 
@@ -6,13 +6,13 @@
 processing_delay_clks = 28
 program_id = "com.czartroniks.beacon"
 program_name = "Beacon"
-program_version = "0.5.0"
+program_version = "0.6.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Shape", "Pattern", "Glitch"]
 program_type = "processing"
-description = "A candle flame and bell-shaped beam keyed into blue bars that fade around the light; the camera fills the beam."
+description = "A candle flame on a bell-shaped tower keyed into rolling, swelling blue bars; the camera fills the beam and the dark."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
@@ -139,3 +139,13 @@ name = "Red Night"
 toggle_switch_9 = 1
 rotary_potentiometer_3 = 700
 rotary_potentiometer_6 = 800
+
+[[preset]]
+name = "Night Falls"
+rotary_potentiometer_3 = 0
+rotary_potentiometer_6 = 900
+
+[[preset]]
+name = "Swell"
+rotary_potentiometer_4 = 1000
+rotary_potentiometer_1 = 700

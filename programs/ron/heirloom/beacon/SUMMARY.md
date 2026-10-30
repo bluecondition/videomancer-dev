@@ -1,10 +1,27 @@
 # Beacon — a candle flame and a hyperbolic bell keyed into blue bars
 
-**v0.5.0 (2026-10-27): rebuilt from the photo, built, NOT flashed.** Heirloom #26, from
+**v0.6.0 (2026-10-29): phase 2 round 1 from Ron's notes on v0.5.0, built, NOT flashed.** See
+[Phase 2](#phase-2-v060). Heirloom #26, from
 `photos/WIN_20230424_23_53_49_Pro.jpg`. The v0.1.0 version (a hashed blue/black block grid with a
 cone and a radial glow) was replaced. The photo is two layers KEYED together, not added: a white
 layer (flame, bell, cone, side glows) crossfaded under a blue key (columns × bands, faded around the
 light). Presets are hand-written placeholders.
+
+## Phase 2 (v0.6.0)
+Ron's notes on v0.5.0 (2026-10-29), and what v0.6.0 does about each:
+
+| Note | v0.6.0 |
+|---|---|
+| Bars and Columns: 50–100 % more range both ways | K1 Bars x0.5..x2 → **x0.25..x4** (two octaves each way); K2 Columns 657..233 px → **1106..138 px** |
+| Dusk: more range at the lower end, squeezing in closer to the tower | below 50 % the blue now closes in on the tower's silhouette: a lift of up to full blue (was +0.6) applied only outside a **squeeze radius** = the tower's half-width on that line (the bell's outer edge, or 40 + gain/2 px on flame lines) + a margin that shrinks from ~630 px at 50 % to 10 px at 0 %. Outside the radius the A-row window opens across the stage and the lift ramps in over D3/4 px (≤ 64 px). The tower itself stays clear. The upper half is unchanged (the dark deepens) |
+| Beam: 50 % more range both ways | K5 x0.5..x2 → **x0.35..x2.83**; the bell is now drawn past the right window edge (it was cut at x 1646), and the left wing cone follows the beam (on where the half-width ≥ 176 px, which is y ≈ 790 at the photo's beam, instead of a fixed y 790) |
+| Halo at 100 % much closer to the beacon | K6 reach −300..+300 → **−300..+723 px**; above 50 % the ramps' centre also slides from x 930 onto the tower axis (1030), and the glow is no longer confined to the wings, so at 100 % the white ramps in the black rows close to ~100 px from the tower |
+| The flame should be centred on the tower (it was offset left) | the flame axis moved from the photo's x 995 onto the bell axis (1030), and the tent is symmetric (both flanks 0.55 · slope gain; the photo's were 0.6 / 0.5) |
+| Make incoming video more prominent | Video: the beam interior carries the camera at full contrast (was 31 + 0.88 Y), and the camera at 3/4 shows through the white layer everywhere outside the bell, so the blue bars key over the camera picture. Osc is unchanged (the photo) |
+| Speed should also make the bands grow, in sequence, like a sine whose amplitude rises with speed | K4 now also **swells the bands**: the band-table step per line is modulated by a travelling wave (triangle, wavelength 600 lines), so each band in turn grows and shrinks. Depth 0 → 0.9 of the step with \|speed\| (0.22 at the default speed), travel 2 phase units per speed unit per field (~2 lines/field at the default, ~9 at full), direction follows the roll |
+
+Defaults still give the photo in Osc (preset Photo), apart from the centred, symmetric flame. The
+default frame in Video now shows the camera in the dark areas.
 
 ## Reading of the photo (measured)
 The work is in `.heirloom_work/rb_beacon/` (notes.md):
@@ -80,27 +97,30 @@ draw ")" arcs.
 ## Controls
 | Control | Photo element | Function |
 |---|---|---|
-| K1 Bars | the vertical band cycle | band-cycle frequency ×0.5 → ×2, exponential (the photo's 742 lines at 50 %) |
-| K2 Columns | the 391-px blue/black columns | column period 657 → 233 px, exponential (391 at 50 %) |
-| K3 Dusk | the fade of the blue around the light | 0 % lifts the blue (+0.6), 100 % deepens the dark (−0.6) |
-| K4 Speed | motion | bipolar, still in the centre ±8: the bars roll down (up below centre), 1.4 lines/field at the default; the flicker and sway rates rise with \|speed\| |
-| K5 Beam | the bell and cone | hyperbola spread ×0.5 → ×2 |
-| K6 Halo | the white ramps at the screen sides | reach −300 → +300 px |
+| K1 Bars | the vertical band cycle | band-cycle frequency ×0.25 → ×4, exponential (the photo's 742 lines at 50 %) |
+| K2 Columns | the 391-px blue/black columns | column period 1106 → 138 px, exponential (391 at 50 %) |
+| K3 Dusk | the fade of the blue around the light | 50 % → 0 %: the blue closes in on the tower (full lift outside a squeeze radius that shrinks onto the tower outline); 50 % → 100 %: the dark deepens (−0.6) |
+| K4 Speed | motion | bipolar, still in the centre ±8: the bars roll down (up below centre), 1.4 lines/field at the default, and swell in a travelling wave whose depth rises with \|speed\| (0 → 0.9); the flicker and sway rates rise with \|speed\| |
+| K5 Beam | the bell and cone | hyperbola spread ×0.35 → ×2.83; the left wing cone follows it |
+| K6 Halo | the white ramps at the screen sides | reach −300 → +723 px; above 50 % the ramps re-centre on the tower and close in on it |
 | S7 Bands | the stripe zone | Stripes (photo) / Solid (the zone becomes one blue band) |
 | S8 Bell | the bell interior | Solid (photo) / Outline (only the outline, the neck and the flame) |
 | S9 Palette | the colours | Blue (photo) / Ember (the blue key turns red, the white layer warms) |
 | S10 Tear | ragged fade edges, tracking lines, line noise | On (photo) / Off (clean) |
-| S11 Source | the beam interior | Video (default: the camera fills the bell and cone) / Osc (the photo's shading) |
+| S11 Source | the beam interior | Video (default: the camera fills the bell and cone at full contrast, and shows at 3/4 through the dark outside the bell) / Osc (the photo's shading) |
 | P12 Flame | the flame (headline) | 0 % = a small ember (gain .15, height .55); 40 % = the photo; 100 % = a towering flame (gain 2.4, height 1.8, wider glow) burning through the bars |
 
 Defaults: K1–K3, K5, K6 at 512; K4 at 635; P12 at 410; all switches at label 0.
-Presets: Photo (Source = Osc), Small Flame, Blaze, Wire Beam (Bell Outline, wide beam), Red Night.
+Presets: Photo (Source = Osc), Small Flame, Blaze, Wire Beam (Bell Outline, wide beam), Red Night,
+Night Falls (Dusk 0, Halo 88 %), Swell (Speed 98 %, Bars 68 %).
 
 ## Video
 The photo's beam is an oscillator shading (the D valley), so the camera replaces that shading. The
-interior of the bell and cone is ramp × level × camera luma (re-mapped 31 + 0.88·Y). The bars,
-flame and outlines stay generated, and every other control acts the same in both modes. Osc
-substitutes the photo's D(x) shading.
+interior of the bell and cone is ramp × level × camera luma (full range since v0.6.0). Outside the
+bell the camera at 3/4 is max'ed into the white layer, so it shows wherever the blue key is low (the
+black rows, the stage around the tower) and the blue crossfades over it. The bars, flame and outlines
+stay generated, and every other control acts the same in both modes. Osc substitutes the photo's
+D(x) shading and has no camera background.
 
 ## Engine
 - **Micro engine.** It does the per-field and per-line maths.
@@ -139,6 +159,20 @@ substitutes the photo's D(x) shading.
   - 15–20: colour ROMs, Ember, the keyed mix;
   - 21–28: the shell's chroma [1 2 2 2 2 2 2 2 1]/16 (two 8-box sums), luma [1 2 1] and 13/16,
     and the blanking gate.
+- **v0.6.0 changes.**
+  - Microcode (483 / 512 words; the line program ≤ 651 clocks, still inside SD's 720-clock active line):
+    - field: the swell depth AMPD = 0.9 · \|speed\| / 512 · DVL and its phase SWP += 2 · speed; Dusk's
+      squeeze margin MSQ = 10 + 1.2 · K3, its lift D3P (0..255, ·3/4 below 50 %) and darkening D3N;
+      Halo's reach (two slopes) and the ramps' centre XEC; the flame-line radius FSQ = MSQ + 40 + G64 / 2;
+    - line: the band step DVL + AMPD · tri(SWP + 109 y) (TRI subroutine shared with the LFOs); the
+      squeeze radius RSQ (port 33, MSQ + HWW on bell lines, FSQ above); HW clamped at 900; one flame
+      slope; the wing-cone flag and VR ramp from HW instead of y.
+    - The A-row spike windows (WA3 / WA6) moved out of the microcode into the zone constants.
+  - Pixel path, same 28-clock latency: shape x is now measured from the tower axis (xv0 −16480 HD /
+    −12356 SD, bell offset 0, D valley 146 / 109); stage 4 `adb − RSQ`; 5 the lift ramp and the window
+    flag; 6 min(ramp, D3P), the edge glow max'ed everywhere, the outside-bell flag; 7 lift + D3N;
+    8 the camera background; 9 it is max'ed into the flame / glow value; 11 no A-row pre-shoot where
+    the window opened. The right wing no longer replaces the bell.
 - **Contracts.**
   - damier's generated avid.
   - Virtual 1080-line coordinates from the timing ID: shapes are sized to the height and the column
@@ -155,6 +189,36 @@ substitutes the photo's D(x) shading.
     7098 LC.
 
 ## Status
+- **v0.6.0** built 2026-10-29 with router2, **seed 1 on all six configs** (first attempt, no retries).
+  - **HD HDMI is a hand-installed seed 2** (vmprog repacked; a plain rebuild will NOT reproduce it).
+    - The builder's seed 1 put HSYNC in the pin-skew danger zone: +0.18 ns (data ≤ −0.60).
+    - Seeds 1–10 were screened with `tools/hdmi_pin_skew.py` (`.heirloom_work/rb_beacon/skew/screen_hdmi.txt`).
+      Seed 2 is centred: HSYNC +1.29, data ≤ −1.24, 76.75 MHz. (Seed 6, +1.08, misses timing at 73.5;
+      seed 7 stalled.)
+    - Shipped HD Analog s1: HDMI HSYNC +0.80, data ≤ +0.08 (analog encoder +1.39). HD Dual s1: HDMI
+      −2.75, data ≤ −1.73.
+    - To re-route: the HD jsons are in `.heirloom_work/rb_beacon/skew/<config>/` (regenerate with make
+      if the RTL changes), then `.heirloom_work/rb_beacon/skew/route1.sh hd_hdmi 2`. Seed 1 re-routed
+      byte-exact with the builder's bin. The seed-1 vmprog is kept as `skew/beacon_v060_hdhdmi_s1.vmprog`.
+  - Fmax, post-route (MHz; SD needs 27):
+
+    | Config | Fmax |
+    |---|---|
+    | HD Analog | 76.97 |
+    | SD Analog | 65.07 |
+    | HD HDMI | 76.75 (s2) |
+    | SD HDMI | 77.86 |
+    | HD Dual | 75.93 |
+    | SD Dual | 72.72 |
+  - 7100–7152 / 7680 LC (93 %; +54 over v0.5.0 after the savings), 25 / 32 EBR, iceunpack OK × 6, no
+    `emulate_transparency`, no CARRY I0==I1.
+  - `out/rev_b/ron/heirloom/beacon.vmprog` (498,753 bytes, unsigned). **NOT flashed.**
+  - Verified: GHDL analysis / elaboration / synthesis front-end; the micro program in the ISS (483
+    words, line program ≤ 651 clocks); the integer model updated to v0.6 (`imodel.py`) for a control
+    sheet (`.heirloom_work/rb_beacon/p2/sheet_v060.png`) and a band-class kymograph of the swell
+    (`p2/kymo.png`). The v0.6 RTL was **not** simulated and not re-diffed against the model.
+  - v0.5.0 sources are kept in `.heirloom_work/rb_beacon/*_050*` (`beacon_v10_050.vhd`, `masm_v5_050.py`,
+    `imodel_050.py`, `beacon_050.py`).
 - **v0.5.0** built 2026-10-27 with router2, seed 1 on five configs.
 - **SD Dual is on SEED 2**: seed 1 stalled router2 into the 900-s make timeout.
 - Fmax (MHz):
@@ -185,6 +249,8 @@ substitutes the photo's D(x) shading.
 - **Tracking lines.** 1 line in 32 with Tear on (the photo has about 1 in 70), forced to blue ≥ 140
   over a random 150–660 px span.
 - **Edge glow.** One slope (2.1) on both sides; the photo's left ramps are 1.7.
+- **Flame (v0.6.0).** Centred on the bell axis (x 1030) with a symmetric tent, at Ron's request; the
+  photo's flame sits at x 995 with a steeper left flank.
 - **Top end.** Whites peak at about 777 output luma (the HD HDMI bar conditioning, 13/16) where the
   photo's flame core is full white. Edges are softer in chroma (the 9-tap box).
 - **S8.** Bell Outline replaces the planned Mirror switch, which did not fit.

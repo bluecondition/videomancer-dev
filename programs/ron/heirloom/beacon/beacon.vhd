@@ -1,7 +1,8 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Beacon v0.5.0 -- Heirloom #26, rebuilt from WIN_20230424_23_53_49.
+-- Beacon v0.6.0 -- Heirloom #26, rebuilt from WIN_20230424_23_53_49 (phase 2: wider
+-- ranges, the flame centred on the tower, Dusk squeeze, Speed swell, more video).
 --
 -- The photo is two layers keyed together:
 --   * a white layer (grey-green in the mid tones): a candle flame (an
@@ -33,17 +34,21 @@
 --     key logic with its x-order RC lag, the bell profile (Gaussian line,
 --     ramp interior), the colour ROMs and the keyed mix.
 --
---   K1  Bars     vertical band-cycle frequency (stripe density)
---   K2  Columns  horizontal column period (the blue/black checker columns)
---   K3  Dusk     how far the blue fades around the beacon
---   K4  Speed    bipolar: the bars roll; the flame flickers faster
---   K5  Beam     the bell / cone spread
---   K6  Halo     reach of the white ramps at the screen sides
+--   K1  Bars     vertical band-cycle frequency (stripe density), x0.25 .. x4
+--   K2  Columns  horizontal column period (the blue/black checker columns), 1106 .. 138 px
+--   K3  Dusk     below the centre the blue closes in on the tower (a lift outside a
+--                squeeze radius that shrinks onto the tower outline); above it the dark deepens
+--   K4  Speed    bipolar: the bars roll and swell in a travelling wave whose depth
+--                follows |speed|; the flame flickers faster
+--   K5  Beam     the bell / cone spread, x0.35 .. x2.83 (the wing cone follows it)
+--   K6  Halo     reach of the white ramps at the screen sides; at 100 % they close
+--                in on the tower
 --   S7  Bands    Stripes (the photo) / Solid bands
 --   S8  Bell     Solid / Outline (the bell drawn as its outline only)
 --   S9  Palette  Blue (the photo) / Ember
 --   S10 Tear     ragged fade edges and tracking lines on / clean
---   S11 Source   Video (the camera fills the beam) / Osc (the photo's shading)
+--   S11 Source   Video (the camera fills the beam and shows through the dark
+--                outside the tower) / Osc (the photo's shading)
 --   P12 Flame    0 = a small ember .. 40 % = the photo .. 100 % a towering
 --                flame that burns through the bars
 --
@@ -143,14 +148,15 @@ architecture beacon of program_top is
     signal s_stripes, s_outline, s_ember, s_tear, s_osc : std_logic := '0';
     signal s_sx, s_sv : unsigned(5 downto 0) := to_unsigned(16, 6);
     signal s_af : unsigned(8 downto 0) := to_unsigned(256, 9);
-    signal s_xv0 : signed(16 downto 0) := to_signed(-15920, 17);
-    signal s_xbp : unsigned(5 downto 0) := to_unsigned(35, 6);
-    signal s_xdp : unsigned(7 downto 0) := to_unsigned(181, 8);
+    signal s_xv0 : signed(16 downto 0) := to_signed(-16480, 17);   -- shape x origin: the tower (flame and bell) axis
+    signal s_xdp : unsigned(7 downto 0) := to_unsigned(146, 8);
     signal s_wa3, s_wa6 : unsigned(10 downto 0) := to_unsigned(870, 11);
     signal s_hinc : unsigned(23 downto 0) := to_unsigned(42912, 24);
     signal s_ph0 : unsigned(23 downto 0) := (others => '0');
     signal s_ts1, s_ts2 : unsigned(9 downto 0) := (others => '1');
-    signal s_d3 : signed(8 downto 0) := (others => '0');
+    signal s_d3n : signed(8 downto 0) := (others => '0');           -- Dusk: darkening (<= 0)
+    signal s_d3p : unsigned(7 downto 0) := (others => '0');         -- Dusk: lift outside the squeeze radius
+    signal s_xec : unsigned(10 downto 0) := to_unsigned(930, 11);   -- Halo: the ramps' centre
     signal s_tl : unsigned(5 downto 0) := to_unsigned(36, 6);
 
     ---------------------------------------------------------------------------
@@ -214,7 +220,8 @@ architecture beacon of program_top is
     signal l_tx0, l_tx1 : unsigned(11 downto 0) := (others => '0');
     signal l_j : signed(7 downto 0) := (others => '0');
     signal l_nl : signed(3 downto 0) := (others => '0');
-    signal l_sli, l_sri : unsigned(11 downto 0) := (others => '0');
+    signal l_sli : unsigned(11 downto 0) := (others => '0');
+    signal l_rsq : unsigned(11 downto 0) := (others => '1');        -- Dusk squeeze radius (tower half-width + margin)
     signal l_swl : signed(8 downto 0) := (others => '0');
     signal l_lf0 : signed(22 downto 0) := (others => '0');
     signal l_hw, l_hww : unsigned(9 downto 0) := (others => '0');
@@ -257,15 +264,14 @@ architecture beacon of program_top is
     signal p2_brn : unsigned(2 downto 0) := (others => '0');
     signal p3_kf : unsigned(5 downto 0) := (others => '0');
     signal p3_adb, p3_adx, p3_ae : unsigned(11 downto 0) := (others => '0');
-    signal p3_aep : std_logic := '0';
     signal p3_flm : unsigned(7 downto 0) := (others => '0');
     signal p4_k0, p4_k1 : unsigned(7 downto 0) := (others => '0');
     signal p4_kf : unsigned(5 downto 0) := (others => '0');
     signal p4_tt, p4_dw, p4_hcl, p4_c5 : signed(12 downto 0) := (others => '0');
     signal s_hw5 : signed(12 downto 0) := (others => '0');          -- HW + 5 (static over the line)
     signal p4_d8 : unsigned(7 downto 0) := (others => '0');
+    signal p4_dr : signed(12 downto 0) := (others => '0');          -- |x - axis| - squeeze radius
     signal p4_egm : unsigned(11 downto 0) := (others => '0');
-    signal p4_aep : std_logic := '0';
     signal p4_flm : unsigned(7 downto 0) := (others => '0');
     signal p5_k0 : unsigned(7 downto 0) := (others => '0');
     signal p5_df : signed(8 downto 0) := (others => '0');
@@ -274,16 +280,17 @@ architecture beacon of program_top is
     signal p5_ttp : std_logic := '0';
     signal p5_r8a : signed(12 downto 0) := (others => '0');
     signal p5_cc : unsigned(7 downto 0) := (others => '0');
-    signal p5_wm, p5_eg, p5_flm, p5_hc : unsigned(7 downto 0) := (others => '0');
+    signal p5_wm, p5_eg, p5_flm, p5_hc, p5_dr8 : unsigned(7 downto 0) := (others => '0');
     signal p6_k0 : unsigned(7 downto 0) := (others => '0');
     signal p6_pr : signed(15 downto 0) := (others => '0');
     signal p6_gi : unsigned(5 downto 0) := (others => '0');
-    signal p6_r, p6_ka, p6_wa, p6_lx : unsigned(7 downto 0) := (others => '0');
+    signal p6_r, p6_ka, p6_wa, p6_lx, p6_lift : unsigned(7 downto 0) := (others => '0');
     signal p7_f8 : signed(9 downto 0) := (others => '0');
     signal p7_gau, p7_ka, p7_wa : unsigned(7 downto 0) := (others => '0');
     signal p7_iyr : unsigned(15 downto 0) := (others => '0');
     signal p7_ycam : unsigned(7 downto 0) := x"10";
-    signal p8_fd, p8_line, p8_s8, p8_int1, p8_ka, p8_wa : unsigned(7 downto 0) := (others => '0');
+    signal p7_dl : signed(9 downto 0) := (others => '0');           -- the Dusk offset of the pixel
+    signal p8_fd, p8_line, p8_s8, p8_int1, p8_ka, p8_wa, p8_bg : unsigned(7 downto 0) := (others => '0');
     signal p9_kraw, p9_int, p9_line, p9_wing : unsigned(7 downto 0) := (others => '0');
     signal p10_kk : unsigned(11 downto 0) := (others => '0');
     signal p10_bw : unsigned(7 downto 0) := (others => '0');
@@ -294,6 +301,7 @@ architecture beacon of program_top is
     signal p13_l : unsigned(7 downto 0) := (others => '0');
     -- late flags out of the chroma ring's spare bits (k -> k + 7, then one fabric register)
     signal r10_sp : std_logic_vector(1 downto 0) := (others => '0');
+    signal r10_op : std_logic := '0';
     signal r11_lc, r11_tk : std_logic := '0';
     signal r12_brn : unsigned(2 downto 0) := (others => '0');
     signal p14_km, p14_l, p15_km, p15_l, p16_km, p16_l, p17_l : unsigned(7 downto 0) := (others => '0');
@@ -306,7 +314,7 @@ architecture beacon of program_top is
     signal p19_pu, p19_pv : signed(13 downto 0) := (others => '0');
     signal p19_by, p19_bu, p19_bv : signed(10 downto 0) := (others => '0');
     -- per-pixel values riding the pipe (index = stage)
-    type t_flags is array (natural range <>) of std_logic_vector(9 downto 0);
+    type t_flags is array (natural range <>) of std_logic_vector(11 downto 0);
     signal p_fl : t_flags(2 to 9) := (others => (others => '0'));
     type t_u8a is array (natural range <>) of std_logic_vector(7 downto 0);
     signal p_lx : t_u8a(7 to 10) := (others => (others => '0'));
@@ -429,15 +437,20 @@ begin
                 s_tear    <= not registers_in(6)(3);
                 s_osc     <= registers_in(6)(4);
                 case to_integer(s_vx) is
+                    -- shape x is measured from the tower axis (the flame sits on the bell's axis);
+                    -- the A-row spike windows end 3 / 6 pixels before x 880
                     when 4 =>
                         s_sx <= to_unsigned(43, 6); s_sv <= to_unsigned(32, 6); s_af <= to_unsigned(192, 9);
-                        s_xv0 <= to_signed(-11940, 17); s_xbp <= to_unsigned(26, 6); s_xdp <= to_unsigned(135, 8);
+                        s_xv0 <= to_signed(-12356, 17); s_xdp <= to_unsigned(109, 8);
+                        s_wa3 <= to_unsigned(872, 11); s_wa6 <= to_unsigned(864, 11);
                     when 3 =>
                         s_sx <= to_unsigned(24, 6); s_sv <= to_unsigned(24, 6); s_af <= to_unsigned(256, 9);
-                        s_xv0 <= to_signed(-15920, 17); s_xbp <= to_unsigned(35, 6); s_xdp <= to_unsigned(181, 8);
+                        s_xv0 <= to_signed(-16480, 17); s_xdp <= to_unsigned(146, 8);
+                        s_wa3 <= to_unsigned(876, 11); s_wa6 <= to_unsigned(871, 11);
                     when others =>
                         s_sx <= to_unsigned(16, 6); s_sv <= to_unsigned(16, 6); s_af <= to_unsigned(256, 9);
-                        s_xv0 <= to_signed(-15920, 17); s_xbp <= to_unsigned(35, 6); s_xdp <= to_unsigned(181, 8);
+                        s_xv0 <= to_signed(-16480, 17); s_xdp <= to_unsigned(146, 8);
+                        s_wa3 <= to_unsigned(877, 11); s_wa6 <= to_unsigned(874, 11);
                 end case;
             end if;
             s_hs0 <= data_in.hsync_n; s_vs0 <= data_in.vsync_n; s_fd0 <= data_in.field_n;
@@ -526,7 +539,7 @@ begin
     begin
         if rising_edge(clk) then
             s_st_q <= ram_st(to_integer(cp_i));
-            -- OUT writes the staging RAM at its port number (the copier reads ports 12 .. 32)
+            -- OUT writes the staging RAM at its port number (the copier reads ports 12 .. 33)
             if o_v = '1' then
                 ram_st(to_integer(o_p)) <= std_logic_vector(resize(o_d, 32));
             end if;
@@ -562,11 +575,11 @@ begin
             end if;
 
             -- copier: once the program has halted and the pixel pipe is idle (31 clocks after the line),
-            -- move the staged values of ports 12 .. 32 into the l_ registers (one per clock)
+            -- move the staged values of ports 12 .. 33 into the l_ registers (one per clock)
             if g_avid = '1' then cp_idle <= (others => '0'); elsif cp_idle /= 31 then cp_idle <= cp_idle + 1; end if;
             cp_v <= cp_run; cp_k <= cp_i;
             if cp_run = '1' then
-                if cp_i = 32 then cp_run <= '0'; end if;
+                if cp_i = 33 then cp_run <= '0'; end if;
                 cp_i <= cp_i + 1;
             elsif e_pend = '1' and cp_idle = 31 then
                 cp_run <= '1'; cp_i <= to_unsigned(12, 6); e_pend <= '0';
@@ -577,7 +590,6 @@ begin
                     when 13 => l_j <= signed(s_st_q(7 downto 0));
                     when 14 => l_nl <= signed(s_st_q(3 downto 0));
                     when 15 => l_sli <= unsigned(s_st_q(11 downto 0));
-                    when 16 => l_sri <= unsigned(s_st_q(11 downto 0));
                     when 17 => l_swl <= signed(s_st_q(8 downto 0));
                     when 18 => l_lf0 <= signed(s_st_q(22 downto 0));
                     when 19 => l_bell <= s_st_q(0);
@@ -594,6 +606,7 @@ begin
                     when 30 => l_tev <= s_st_q(0);
                     when 31 => l_tx0 <= unsigned(s_st_q(11 downto 0));
                     when 32 => l_tx1 <= unsigned(s_st_q(11 downto 0));
+                    when 33 => l_rsq <= unsigned(s_st_q(11 downto 0));
                     when others => null;
                 end case;
             end if;
@@ -609,11 +622,11 @@ begin
                     when 5  => s_ph0 <= unsigned(o_d);
                     when 6  => s_ts1 <= unsigned(o_d(9 downto 0));
                     when 7  => s_ts2 <= unsigned(o_d(9 downto 0));
-                    when 8  => s_wa3 <= unsigned(o_d(10 downto 0));
-                    when 9  => s_wa6 <= unsigned(o_d(10 downto 0));
-                    when 10 => s_d3 <= o_d(8 downto 0);
+                    when 8  => s_xec <= unsigned(o_d(10 downto 0));
+                    when 9  => s_d3n <= o_d(8 downto 0);
+                    when 10 => s_d3p <= unsigned(o_d(7 downto 0));
                     when 11 => s_tl <= unsigned(o_d(5 downto 0));
-                    when 12 => n_a <= o_d(0);       -- (ports 12 .. 32 also go to the staging RAM)
+                    when 12 => n_a <= o_d(0);       -- (ports 12 .. 33 also go to the staging RAM)
                     when 41 => u_ix <= unsigned(o_d(7 downto 0));
                     when 40 =>
                         -- KNOT: start the knot loop for row ACC(12:8), weight ACC(7:0), class n_a
@@ -879,7 +892,7 @@ begin
         variable v_l : signed(9 downto 0);
         variable v_r : unsigned(12 downto 0);
         variable v_sp : unsigned(6 downto 0);
-        variable v_f : std_logic_vector(9 downto 0);
+        variable v_f, v_f5 : std_logic_vector(11 downto 0);
         variable v_c : unsigned(7 downto 0);
         variable v_g : unsigned(4 downto 0);
         variable v_d11 : signed(10 downto 0);
@@ -887,7 +900,7 @@ begin
         if rising_edge(clk) then
             -- 0: DDAs (layout x, shape x, column phase, flame)
             s_xd0 <= s_xv0 - resize(l_swl, 17);          -- static over the line
-            s_nsri <= -signed(resize(l_sri, 13));
+            s_nsri <= -signed(resize(l_sli, 13));                -- the flame is symmetric: one slope
             if g_start = '1' then
                 s_xs <= (others => '0');
                 s_xv <= s_xv0;
@@ -919,19 +932,19 @@ begin
             else v_s := resize(p1_xj, 14); end if;
             s_kr_a <= s_rbank & unsigned(v_s(10 downto 6));
             p2_kf <= unsigned(v_s(5 downto 0));
-            p2_xb <= p1_xv - signed(resize(s_xbp, 13));
+            p2_xb <= p1_xv;                                -- shape x from the tower axis
             p2_xd <= p1_xv - signed(resize(s_xdp, 13));
-            p2_ae <= signed('0' & p1_xs) - 930;
+            p2_ae <= signed('0' & p1_xs) - signed(resize(s_xec, 13));
             v_f := (others => '0');
             if p1_xs < 880 or p1_xs >= 1648 then v_f(0) := '1'; end if;                       -- w1a
             v_f(1) := p1_hl;                                                                   -- hlow
-            if (l_a = '1' and p1_xs < 880) or (l_a = '0' and p1_xs < 862) or p1_xs >= 1646 then
-                v_f(2) := '1'; end if;                                                         -- wing region
+            if (l_a = '1' and p1_xs < 880) or (l_a = '0' and p1_xs < 862) then
+                v_f(2) := '1'; end if;                                                         -- left wing
             if p1_xs < 81 then v_f(3) := '1'; end if;                                          -- left column
             if l_tev = '1' and p1_xs >= l_tx0 and p1_xs < l_tx1 then v_f(4) := '1'; end if;    -- tracking line
-            if p1_xv < signed(resize(s_xbp, 13)) then v_f(5) := '1'; end if;                   -- xb < 0
-            if p1_xv > signed(resize(s_xbp, 13)) then v_f(6) := '1'; end if;                   -- xb > 0
-            if l_wingy = '1' and p1_xs < 900 and p1_xv < signed(resize(s_xbp, 13)) then v_f(7) := '1'; end if;
+            if p1_xv < 0 then v_f(5) := '1'; end if;                                           -- xb < 0
+            if p1_xv > 0 then v_f(6) := '1'; end if;                                           -- xb > 0
+            if l_wingy = '1' and p1_xs < 900 and p1_xv < 0 then v_f(7) := '1'; end if;
             if l_a = '1' then
                 if p1_xs < 880 and p1_xs >= s_wa3 then v_f(9 downto 8) := "10";
                 elsif p1_xs < s_wa3 and p1_xs >= s_wa6 then v_f(9 downto 8) := "01"; end if;
@@ -956,7 +969,6 @@ begin
             if p2_xb < 0 then p3_adb <= unsigned(resize(-p2_xb, 12)); else p3_adb <= unsigned(resize(p2_xb, 12)); end if;
             if p2_xd < 0 then p3_adx <= unsigned(resize(-p2_xd, 12)); else p3_adx <= unsigned(resize(p2_xd, 12)); end if;
             if p2_ae < 0 then p3_ae <= unsigned(resize(-p2_ae, 12)); else p3_ae <= unsigned(resize(p2_ae, 12)); end if;
-            if p2_ae > 0 then p3_aep <= '1'; else p3_aep <= '0'; end if;
             p3_flm <= p2_flm;
             p_brn(3) <= std_logic_vector(p2_brn); p_fl(3) <= p_fl(2);
 
@@ -974,7 +986,8 @@ begin
             if v_u(17 downto 2) > 227 then p4_d8 <= to_unsigned(255, 8); else p4_d8 <= resize(28 + v_u(9 downto 2), 8); end if;
             v_u := shift_left(resize(p3_ae, 18), 6) + shift_left(resize(p3_ae, 18), 1) + resize(p3_ae, 18);
             p4_egm <= resize(v_u(17 downto 5), 12);
-            p4_aep <= p3_aep; p4_flm <= p3_flm;
+            p4_flm <= p3_flm;
+            p4_dr <= signed(resize(p3_adb, 13)) - signed(resize(l_rsq, 13));
             p_fl(4) <= p_fl(3); p_brn(4) <= p_brn(3);
 
             -- 5: knot difference, clipped masks, glow, toe
@@ -998,7 +1011,11 @@ begin
             end if;
             p5_flm <= p4_flm;
             p5_hc <= f_clip8(shift_left(resize(p4_hcl, 18), 4) + shift_left(resize(p4_hcl, 18), 3) + resize(p4_hcl, 18));
-            p_fl(5) <= p_fl(4); p_d8(5) <= std_logic_vector(p4_d8);
+            -- Dusk squeeze: outside the radius the A-row window opens; the lift ramps in over D3P / 4 px
+            p5_dr8 <= f_clip8(shift_left(resize(p4_dr, 16), 2));
+            v_f5 := p_fl(4);
+            if p4_dr(12) = '0' then v_f5(0) := '1'; v_f5(11) := '1'; end if;
+            p_fl(5) <= v_f5; p_d8(5) <= std_logic_vector(p4_d8);
 
             -- 6: knot product, Gaussian indexes, the bell ramp, the key candidates in the cones
             p6_pr <= resize(p5_df * signed('0' & p5_kf), 16);
@@ -1019,27 +1036,35 @@ begin
             p6_ka <= v_w(15 downto 8);
             v_w := shift_left(resize(p5_wm, 16), 7) - shift_left(resize(p5_wm, 16), 5) - resize(p5_wm, 16);
             p6_wa <= v_w(15 downto 8);
-            -- the flame with the edge glow in the wings (one value rides to stage 12)
-            if p_fl(5)(2) = '1' then p6_lx <= f_umax(p5_flm, p5_eg); else p6_lx <= p5_flm; end if;
-            p_fl(6) <= p_fl(5); p_d8(6) <= p_d8(5);
+            -- the flame with the edge glow (one value rides to stage 12)
+            p6_lx <= f_umax(p5_flm, p5_eg);
+            if p5_dr8 < s_d3p then p6_lift <= p5_dr8; else p6_lift <= s_d3p; end if;
+            v_f5 := p_fl(5); v_f5(10) := p5_ttp;                                           -- outside the bell
+            p_fl(6) <= v_f5; p_d8(6) <= p_d8(5);
 
             -- 7: fade value, Gaussian lookups, interior level, camera luma
             p7_f8 <= signed(resize(p6_k0, 10)) + resize(shift_right(p6_pr, 6), 10);
             p7_gau <= to_unsigned(C_GAUSS(to_integer(p6_gi)), 8);
             p7_iyr <= resize(l_iy * p6_r, 16);
             p7_ycam <= unsigned(s_lu_q);
+            p7_dl <= signed(resize(p6_lift, 10)) + resize(s_d3n, 10);
             p7_ka <= p6_ka; p7_wa <= p6_wa;
             p_lx(7) <= std_logic_vector(p6_lx);
 
             -- 8: dusk offset, line products, the beam source
-            p8_fd <= f_clip8(resize(p7_f8, 12) + resize(s_d3, 12));
+            p8_fd <= f_clip8(resize(p7_f8, 12) + resize(p7_dl, 12));
             v_w := resize(l_lp * p7_gau, 16); p8_line <= v_w(13 downto 6);
             p8_int1 <= p7_iyr(13 downto 6);
             if s_osc = '1' then
                 p8_s8 <= unsigned(p_d8(7));
             else
-                v_w := shift_left(resize(p7_ycam, 16), 8) - shift_left(resize(p7_ycam, 16), 5) + resize(p7_ycam, 16);
-                p8_s8 <= 31 + v_w(15 downto 8);
+                p8_s8 <= p7_ycam;
+            end if;
+            -- Video: the camera at 3/4 shows through the white layer outside the bell
+            if s_osc = '0' and p_fl(7)(10) = '1' then
+                p8_bg <= p7_ycam - shift_right(p7_ycam, 2);
+            else
+                p8_bg <= (others => '0');
             end if;
             p8_ka <= p7_ka; p8_wa <= p7_wa;
 
@@ -1066,7 +1091,7 @@ begin
             else
                 p10_kk <= v_k(11 downto 0) + shift_right(v_r(11 downto 0) - v_k(11 downto 0), 3);
             end if;
-            -- the white layer's region value: the wing cone in the wings, the bell elsewhere
+            -- the white layer's region value: the wing cone in the left wing, the bell elsewhere
             if p_fl(9)(2) = '1' then p10_bw <= p9_wing;
             elsif l_bell = '1' then p10_bw <= f_umax(p9_line, p9_int);
             else p10_bw <= (others => '0'); end if;
@@ -1078,6 +1103,7 @@ begin
                 when "01"   => if l_a = '1' then v_sp := to_unsigned(32, 7); else v_sp := to_unsigned(28, 7); end if;
                 when others => v_sp := (others => '0');
             end case;
+            if r10_op = '1' and l_a = '1' then v_sp := (others => '0'); end if;   -- no A-row cut where Dusk opened the window
             if v_x > 13 then p11_k9 <= resize(v_x, 9) + resize(v_sp, 9); else p11_k9 <= resize(v_x, 9); end if;
             p11_l <= f_umax(unsigned(p_lx(10)), p10_bw);
 
@@ -1150,7 +1176,10 @@ begin
 
             -- pipes
             for k in 7 to 9 loop p_fl(k) <= p_fl(k - 1); end loop;
-            for k in 8 to 10 loop p_lx(k) <= p_lx(k - 1); end loop;
+            p_lx(8) <= p_lx(7);
+            p_lx(9) <= std_logic_vector(f_umax(unsigned(p_lx(8)), p8_bg));
+            p_lx(10) <= p_lx(9);
+            r10_op <= p_fl(9)(11);
             for k in 7 to 8 loop p_d8(k) <= p_d8(k - 1); end loop;
 
             -- camera luma ring read address (arrives at stage 7)
