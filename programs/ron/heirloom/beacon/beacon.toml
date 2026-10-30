@@ -6,13 +6,13 @@
 processing_delay_clks = 28
 program_id = "com.czartroniks.beacon"
 program_name = "Beacon"
-program_version = "0.6.0"
+program_version = "0.6.1"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Shape", "Pattern", "Glitch"]
 program_type = "processing"
-description = "A candle flame on a bell-shaped tower keyed into rolling, swelling blue bars; the camera fills the beam and the dark."
+description = "A blue candle flame on a bell-shaped tower keyed into rolling, swelling bars; the camera is warped into the flame."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 

@@ -1,8 +1,9 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Beacon v0.6.0 -- Heirloom #26, rebuilt from WIN_20230424_23_53_49 (phase 2: wider
--- ranges, the flame centred on the tower, Dusk squeeze, Speed swell, more video).
+-- Beacon v0.6.1 -- Heirloom #26, rebuilt from WIN_20230424_23_53_49 (phase 2: wider
+-- ranges, the flame centred on the tower, Dusk squeeze, Speed swell, more video; v0.6.1:
+-- a blue flame and beam against amber bars, the camera warped into the flame).
 --
 -- The photo is two layers keyed together:
 --   * a white layer (grey-green in the mid tones): a candle flame (an
@@ -45,10 +46,10 @@
 --                in on the tower
 --   S7  Bands    Stripes (the photo) / Solid bands
 --   S8  Bell     Solid / Outline (the bell drawn as its outline only)
---   S9  Palette  Blue (the photo) / Ember
+--   S9  Palette  Blue (a blue flame, beam and halo against amber bars) / Ember (red bars, warm white)
 --   S10 Tear     ragged fade edges and tracking lines on / clean
---   S11 Source   Video (the camera fills the beam and shows through the dark
---                outside the tower) / Osc (the photo's shading)
+--   S11 Source   Video (the camera fills the beam, shows through the dark outside the
+--                tower, and a 64 x 64 thumbnail of it is warped into the flame) / Osc
 --   P12 Flame    0 = a small ember .. 40 % = the photo .. 100 % a towering
 --                flame that burns through the bars
 --
@@ -90,6 +91,19 @@ architecture beacon of program_top is
             when 5 | 6 | 14 => return to_unsigned(384, 12);
             when 1 | 2 | 10 => return to_unsigned(512, 12);
             when others     => return to_unsigned(256, 12);
+        end case;
+    end function;
+    -- flame texture capture: rows advance 65536 / (active lines per field) per line
+    function f_trow(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(269, 9);
+            when 4          => return to_unsigned(136, 9);
+            when 8          => return to_unsigned(227, 9);
+            when 12         => return to_unsigned(113, 9);
+            when 5 | 6 | 14 => return to_unsigned(91, 9);
+            when 1 | 2 | 10 => return to_unsigned(121, 9);
+            when others     => return to_unsigned(60, 9);
         end case;
     end function;
     function f_clip8(v : signed) return unsigned is
@@ -134,6 +148,25 @@ architecture beacon of program_top is
     signal s_lu_we : std_logic := '0';
     signal s_lu_q : std_logic_vector(7 downto 0) := x"10";
     signal s_wcol, s_rx : unsigned(7 downto 0) := (others => '0');
+    -- flame texture: a 64 x 64 x 4-bit thumbnail of the camera ({row, column}), written by the capture,
+    -- read through the flame's warp (rows never written and read at once except at the very top)
+    type t_tex is array (0 to 4095) of std_logic_vector(3 downto 0);
+    signal ram_tx : t_tex := (others => "0000");
+    attribute no_rw_check of ram_tx : signal is true;
+    signal s_tx_a : unsigned(11 downto 0) := (others => '0');
+    signal s_tw_a : unsigned(11 downto 0);
+    signal s_tw_d : std_logic_vector(3 downto 0);
+    signal s_tw_e : std_logic;
+    signal s_tx_q : std_logic_vector(3 downto 0) := (others => '0');
+    signal s_tcc : unsigned(15 downto 0) := (others => '0');       -- capture column accumulator
+    signal s_tcs : unsigned(6 downto 0) := to_unsigned(34, 7);     -- its step: 65536 / line width
+    signal s_tcd : unsigned(5 downto 0) := (others => '1');        -- the previous pixel's column
+    signal s_tbs : unsigned(7 downto 0) := (others => '0');        -- 4-pixel sum (6-bit samples)
+    signal s_tsum : unsigned(7 downto 0);
+    signal s_tbc : unsigned(1 downto 0) := (others => '0');
+    signal s_trc : unsigned(16 downto 0) := (others => '0');       -- capture row accumulator
+    signal s_trs : unsigned(8 downto 0) := to_unsigned(60, 9);
+    signal s_tav : std_logic := '0';
 
     ---------------------------------------------------------------------------
     -- timing, controls, per-field constants
@@ -147,10 +180,8 @@ architecture beacon of program_top is
     signal s_hcnt, s_wmax, s_w : unsigned(11 downto 0) := to_unsigned(1920, 12);
     signal s_stripes, s_outline, s_ember, s_tear, s_osc : std_logic := '0';
     signal s_sx, s_sv : unsigned(5 downto 0) := to_unsigned(16, 6);
-    signal s_af : unsigned(8 downto 0) := to_unsigned(256, 9);
     signal s_xv0 : signed(16 downto 0) := to_signed(-16480, 17);   -- shape x origin: the tower (flame and bell) axis
     signal s_xdp : unsigned(7 downto 0) := to_unsigned(146, 8);
-    signal s_wa3, s_wa6 : unsigned(10 downto 0) := to_unsigned(870, 11);
     signal s_hinc : unsigned(23 downto 0) := to_unsigned(42912, 24);
     signal s_ph0 : unsigned(23 downto 0) := (others => '0');
     signal s_ts1, s_ts2 : unsigned(9 downto 0) := (others => '1');
@@ -186,9 +217,8 @@ architecture beacon of program_top is
     signal u_ix : unsigned(7 downto 0) := (others => '0');
     attribute no_rw_check of ram_rf : signal is true;
     signal u_ra : unsigned(7 downto 0);                                   -- combinational (from the uROM word)
-    signal u_rq : std_logic_vector(31 downto 0) := (others => '0');       -- RF block RAM out (read in D)
-    signal u_rqf : std_logic_vector(23 downto 0) := (others => '0');      -- its fabric register (R)
-    signal u_inr : signed(23 downto 0) := (others => '0');
+    signal u_rq : std_logic_vector(31 downto 0) := (others => '0');       -- RF block RAM out (read in D, into u_b in R)
+    signal u_b : signed(23 downto 0) := (others => '0');                  -- the B operand, selected in R
     signal u_acc : signed(23 downto 0) := (others => '0');
     -- multiply / shift unit: mode 0 idle, 1 multiply steps, 2 barrel, 3 sign
     signal u_mode : unsigned(1 downto 0) := (others => '0');
@@ -217,7 +247,10 @@ architecture beacon of program_top is
     signal cp_i, cp_k : unsigned(5 downto 0) := (others => '0');
     signal cp_idle : unsigned(4 downto 0) := (others => '0');
     signal n_a, l_a, l_bell, l_wingy, l_cap, l_tev : std_logic := '0';
-    signal l_tx0, l_tx1 : unsigned(11 downto 0) := (others => '0');
+    signal l_tx0 : unsigned(11 downto 0) := (others => '0');
+    signal l_tu0 : unsigned(15 downto 0) := (others => '0');         -- flame texture: u at the line start (mod 2^16)
+    signal l_tdu : unsigned(13 downto 0) := (others => '0');         -- its step per pixel
+    signal l_tv : unsigned(5 downto 0) := (others => '0');           -- the line's texel row
     signal l_j : signed(7 downto 0) := (others => '0');
     signal l_nl : signed(3 downto 0) := (others => '0');
     signal l_sli : unsigned(11 downto 0) := (others => '0');
@@ -251,6 +284,9 @@ architecture beacon of program_top is
     signal s_xv : signed(16 downto 0) := (others => '0');
     signal s_ph : unsigned(23 downto 0) := (others => '0');
     signal s_lf : signed(22 downto 0) := (others => '0');
+    signal s_tu : unsigned(15 downto 0) := (others => '0');          -- flame texture u (256 per texel, 8192 at the axis)
+    signal p1_tc : unsigned(5 downto 0) := (others => '0');
+    signal p4_tex : unsigned(3 downto 0) := (others => '0');
     signal s_xd, s_xd0 : signed(16 downto 0) := (others => '0');    -- xv - SWL (its sign picks the flame slope)
     signal s_nsri : signed(12 downto 0) := (others => '0');
     signal p1_xs : unsigned(11 downto 0) := (others => '0');
@@ -309,7 +345,7 @@ architecture beacon of program_top is
     signal p17_ly, p18_ly : unsigned(9 downto 0) := (others => '0');
     signal p17_lu, p17_lv, p17_by, p17_bu, p17_bv : signed(10 downto 0) := (others => '0');
     signal p18_by, p18_bu, p18_bv : signed(10 downto 0) := (others => '0');
-    signal p18_lu, p18_lv : signed(7 downto 0) := (others => '0');
+    signal p18_lu, p18_lv : signed(7 downto 0) := (others => '0');       -- white-layer chroma / 2
     signal p19_py : unsigned(18 downto 0) := (others => '0');
     signal p19_pu, p19_pv : signed(13 downto 0) := (others => '0');
     signal p19_by, p19_bu, p19_bv : signed(10 downto 0) := (others => '0');
@@ -380,6 +416,14 @@ begin
         end if;
     end process p_knot;
 
+    p_tex : process(clk)
+    begin
+        if rising_edge(clk) then
+            s_tx_q <= ram_tx(to_integer(s_tx_a));
+            if s_tw_e = '1' then ram_tx(to_integer(s_tw_a)) <= s_tw_d; end if;
+        end if;
+    end process p_tex;
+
     p_ring : process(clk)
     begin
         if rising_edge(clk) then
@@ -407,6 +451,7 @@ begin
         if rising_edge(clk) then
             s_vx <= f_vstep_x(registers_in(8)(3 downto 0));
             s_sy <= f_vstep_y(registers_in(8)(3 downto 0));
+            s_trs <= f_trow(registers_in(8)(3 downto 0));
 
             if data_in.avid = '1' then
                 s_idle <= (others => '0');
@@ -438,19 +483,15 @@ begin
                 s_osc     <= registers_in(6)(4);
                 case to_integer(s_vx) is
                     -- shape x is measured from the tower axis (the flame sits on the bell's axis);
-                    -- the A-row spike windows end 3 / 6 pixels before x 880
                     when 4 =>
-                        s_sx <= to_unsigned(43, 6); s_sv <= to_unsigned(32, 6); s_af <= to_unsigned(192, 9);
-                        s_xv0 <= to_signed(-12356, 17); s_xdp <= to_unsigned(109, 8);
-                        s_wa3 <= to_unsigned(872, 11); s_wa6 <= to_unsigned(864, 11);
+                        s_sx <= to_unsigned(43, 6); s_sv <= to_unsigned(32, 6);
+                        s_xv0 <= to_signed(-12356, 17); s_xdp <= to_unsigned(109, 8); s_tcs <= to_unsigned(91, 7);
                     when 3 =>
-                        s_sx <= to_unsigned(24, 6); s_sv <= to_unsigned(24, 6); s_af <= to_unsigned(256, 9);
-                        s_xv0 <= to_signed(-16480, 17); s_xdp <= to_unsigned(146, 8);
-                        s_wa3 <= to_unsigned(876, 11); s_wa6 <= to_unsigned(871, 11);
+                        s_sx <= to_unsigned(24, 6); s_sv <= to_unsigned(24, 6);
+                        s_xv0 <= to_signed(-16480, 17); s_xdp <= to_unsigned(146, 8); s_tcs <= to_unsigned(51, 7);
                     when others =>
-                        s_sx <= to_unsigned(16, 6); s_sv <= to_unsigned(16, 6); s_af <= to_unsigned(256, 9);
-                        s_xv0 <= to_signed(-16480, 17); s_xdp <= to_unsigned(146, 8);
-                        s_wa3 <= to_unsigned(877, 11); s_wa6 <= to_unsigned(874, 11);
+                        s_sx <= to_unsigned(16, 6); s_sv <= to_unsigned(16, 6);
+                        s_xv0 <= to_signed(-16480, 17); s_xdp <= to_unsigned(146, 8); s_tcs <= to_unsigned(34, 7);
                 end case;
             end if;
             s_hs0 <= data_in.hsync_n; s_vs0 <= data_in.vsync_n; s_fd0 <= data_in.field_n;
@@ -511,8 +552,30 @@ begin
             s_lu_wa <= s_wcol;
             s_lu_wd <= data_in.y(9 downto 2);
             if data_in.avid = '1' then s_wcol <= s_wcol + 1; else s_wcol <= (others => '0'); end if;
+
+            -- flame texture capture: each texel is the mean of the first 4 pixels of its 1/64 of the
+            -- line; one row per 1/64 of the field (every line of the band rewrites it, the last wins)
+            s_tav <= data_in.avid;
+            if data_in.avid = '1' then
+                s_tcc <= s_tcc + s_tcs;
+                s_tcd <= s_tcc(15 downto 10);
+                if s_tcc(15 downto 10) /= s_tcd then
+                    s_tbs <= resize(unsigned(data_in.y(9 downto 4)), 8); s_tbc <= "01";
+                elsif s_tbc /= "00" then
+                    s_tbs <= s_tsum; s_tbc <= s_tbc + 1;
+                end if;
+            else
+                s_tcc <= (others => '0'); s_tcd <= (others => '1'); s_tbc <= "00";
+                if s_tav = '1' then s_trc <= s_trc + s_trs; end if;
+            end if;
+            if s_zone = '1' then s_trc <= (others => '0'); end if;
         end if;
     end process p_src;
+    -- the 4th sample of a texel column completes it: write {row, column} straight from the sum
+    s_tsum <= s_tbs + unsigned(data_in.y(9 downto 4));
+    s_tw_e <= '1' when data_in.avid = '1' and s_tcc(15 downto 10) = s_tcd and s_tbc = "11" and s_trc(16) = '0' else '0';
+    s_tw_a <= s_trc(15 downto 10) & s_tcd;
+    s_tw_d <= std_logic_vector(s_tsum(7 downto 4));
     ---------------------------------------------------------------------------
     -- Micro engine: the per-field constants and the next line's values (program in C_UROM,
     -- assembled by masm.py); and the knot loop that writes the line's fade knots
@@ -539,7 +602,7 @@ begin
     begin
         if rising_edge(clk) then
             s_st_q <= ram_st(to_integer(cp_i));
-            -- OUT writes the staging RAM at its port number (the copier reads ports 12 .. 33)
+            -- OUT writes the staging RAM at its port number (the copier reads ports 12 .. 36)
             if o_v = '1' then
                 ram_st(to_integer(o_p)) <= std_logic_vector(resize(o_d, 32));
             end if;
@@ -564,6 +627,7 @@ begin
         variable v_c10 : signed(9 downto 0);
         variable v_e : unsigned(15 downto 0);
         variable v_m : signed(23 downto 0);
+        variable v_in : signed(23 downto 0);
     begin
         if rising_edge(clk) then
             -- kicks: the field program in the zone (it ends with line 0), then one line program per line start
@@ -575,11 +639,11 @@ begin
             end if;
 
             -- copier: once the program has halted and the pixel pipe is idle (31 clocks after the line),
-            -- move the staged values of ports 12 .. 33 into the l_ registers (one per clock)
+            -- move the staged values of ports 12 .. 36 into the l_ registers (one per clock)
             if g_avid = '1' then cp_idle <= (others => '0'); elsif cp_idle /= 31 then cp_idle <= cp_idle + 1; end if;
             cp_v <= cp_run; cp_k <= cp_i;
             if cp_run = '1' then
-                if cp_i = 33 then cp_run <= '0'; end if;
+                if cp_i = 36 then cp_run <= '0'; end if;
                 cp_i <= cp_i + 1;
             elsif e_pend = '1' and cp_idle = 31 then
                 cp_run <= '1'; cp_i <= to_unsigned(12, 6); e_pend <= '0';
@@ -605,8 +669,10 @@ begin
                     when 29 => l_e0 <= signed(s_st_q(12 downto 0));
                     when 30 => l_tev <= s_st_q(0);
                     when 31 => l_tx0 <= unsigned(s_st_q(11 downto 0));
-                    when 32 => l_tx1 <= unsigned(s_st_q(11 downto 0));
                     when 33 => l_rsq <= unsigned(s_st_q(11 downto 0));
+                    when 34 => l_tdu <= unsigned(s_st_q(13 downto 0));
+                    when 35 => l_tu0 <= unsigned(s_st_q(15 downto 0));
+                    when 36 => l_tv <= unsigned(s_st_q(5 downto 0));
                     when others => null;
                 end case;
             end if;
@@ -626,7 +692,7 @@ begin
                     when 9  => s_d3n <= o_d(8 downto 0);
                     when 10 => s_d3p <= unsigned(o_d(7 downto 0));
                     when 11 => s_tl <= unsigned(o_d(5 downto 0));
-                    when 12 => n_a <= o_d(0);       -- (ports 12 .. 33 also go to the staging RAM)
+                    when 12 => n_a <= o_d(0);       -- (ports 12 .. 36 also go to the staging RAM)
                     when 41 => u_ix <= unsigned(o_d(7 downto 0));
                     when 40 =>
                         -- KNOT: start the knot loop for row ACC(12:8), weight ACC(7:0), class n_a
@@ -663,42 +729,43 @@ begin
                 u_fvq <= u_fva;
                 -- D: instruction word, RF address
                 u_ir <= u_q; u_irv <= u_fvq;
-                -- R: the IN port, the RF word into fabric, the instruction moves to E
+                -- R: the B operand (the RF word, an IN port or the immediate) into one register, the
+                -- instruction moves to E
                 u_ir2 <= u_ir; u_irv2 <= u_irv;
-                u_rqf <= u_rq(23 downto 0);
                 case to_integer(unsigned(u_ir(14 downto 10))) is
-                    when 0  => u_inr <= signed(resize(unsigned(registers_in(0)), 24));
-                    when 1  => u_inr <= signed(resize(unsigned(registers_in(1)), 24));
-                    when 2  => u_inr <= signed(resize(unsigned(registers_in(2)), 24));
-                    when 3  => u_inr <= signed(resize(unsigned(registers_in(4)), 24));
-                    when 4  => u_inr <= signed(resize(unsigned(registers_in(5)), 24));
-                    when 5  => u_inr <= signed(resize(unsigned(registers_in(7)), 24));
-                    when 6  => u_inr <= signed(resize(s_sy, 24));
-                    when 7  => u_inr <= signed(resize(s_sx, 24));
-                    when 8  => u_inr <= signed(resize(s_sv, 24));
-                    when 9  => u_inr <= signed(resize(s_af, 24));
-                    when 10 => u_inr <= resize(s_xv0, 24);
-                    when 11 => u_inr <= signed(resize(unsigned(registers_in(3)), 24));
-                    when 12 => u_inr <= signed(resize(unsigned(s_vt_q), 24));
-                    when 13 => u_inr <= signed(resize(unsigned(s_pk_q(8 downto 0)), 24));
-                    when 14 => u_inr <= signed(resize(unsigned(s_y2_q(26 downto 16)), 24));
-                    when 15 => u_inr <= signed(resize(unsigned(s_y2_q(15 downto 8)), 24));
-                    when 16 => u_inr <= signed(resize(unsigned(s_y2_q(7 downto 0)), 24));
-                    when 17 => u_inr <= resize(signed(e_lfsr(7 downto 0)), 24);
-                    when 18 => u_inr <= resize(signed(e_lfsr(11 downto 8)), 24);
-                    when 19 => if s_tear = '1' then u_inr <= to_signed(1, 24); else u_inr <= (others => '0'); end if;
-                    when 20 => if s_stripes = '1' then u_inr <= (others => '0'); else u_inr <= to_signed(1, 24); end if;
-                    when 21 => u_inr <= signed(resize(e_lfsr, 24));
-                    when others => u_inr <= (others => '0');
+                    when 0  => v_in := signed(resize(unsigned(registers_in(0)), 24));
+                    when 1  => v_in := signed(resize(unsigned(registers_in(1)), 24));
+                    when 2  => v_in := signed(resize(unsigned(registers_in(2)), 24));
+                    when 3  => v_in := signed(resize(unsigned(registers_in(4)), 24));
+                    when 4  => v_in := signed(resize(unsigned(registers_in(5)), 24));
+                    when 5  => v_in := signed(resize(unsigned(registers_in(7)), 24));
+                    when 6  => v_in := signed(resize(s_sy, 24));
+                    when 7  => v_in := signed(resize(s_sx, 24));
+                    when 8  => v_in := signed(resize(s_sv, 24));
+                    when 10 => v_in := resize(s_xv0, 24);
+                    when 11 => v_in := signed(resize(unsigned(registers_in(3)), 24));
+                    when 12 => v_in := signed(resize(unsigned(s_vt_q), 24));
+                    when 13 => v_in := signed(resize(unsigned(s_pk_q(8 downto 0)), 24));
+                    when 14 => v_in := signed(resize(unsigned(s_y2_q(26 downto 16)), 24));
+                    when 15 => v_in := signed(resize(unsigned(s_y2_q(15 downto 8)), 24));
+                    when 16 => v_in := signed(resize(unsigned(s_y2_q(7 downto 0)), 24));
+                    when 17 => v_in := resize(signed(e_lfsr(7 downto 0)), 24);
+                    when 18 => v_in := resize(signed(e_lfsr(11 downto 8)), 24);
+                    when 19 => if s_tear = '1' then v_in := to_signed(1, 24); else v_in := (others => '0'); end if;
+                    when 20 => if s_stripes = '1' then v_in := (others => '0'); else v_in := to_signed(1, 24); end if;
+                    when 21 => v_in := signed(resize(e_lfsr, 24));
+                    when 22 => v_in := signed(resize(unsigned(s_pk_q(15 downto 9)), 24));
+                    when others => v_in := (others => '0');
+                end case;
+                case u_ir(27 downto 26) is
+                    when "01"   => u_b <= v_in;
+                    when "10"   => u_b <= resize(signed(u_ir(25 downto 10)), 24);
+                    when others => u_b <= signed(u_rq(23 downto 0));
                 end case;
                 -- E: execute
                 if u_irv2 = '1' then
                     v_op := to_integer(unsigned(u_ir2(31 downto 28)));
-                    case u_ir2(27 downto 26) is
-                        when "01"   => v_b := u_inr;
-                        when "10"   => v_b := resize(signed(u_ir2(25 downto 10)), 24);
-                        when others => v_b := signed(u_rqf);
-                    end case;
+                    v_b := u_b;
                     v_d := resize(u_acc, 25) - resize(v_b, 25);
                     v_take := '0';
                     v_tgt := unsigned(u_ir2(18 downto 10));
@@ -895,7 +962,9 @@ begin
         variable v_f, v_f5 : std_logic_vector(11 downto 0);
         variable v_c : unsigned(7 downto 0);
         variable v_g : unsigned(4 downto 0);
-        variable v_d11 : signed(10 downto 0);
+        variable v_d13 : signed(12 downto 0);
+        variable v_ft : unsigned(12 downto 0);
+        variable v_tg : unsigned(4 downto 0);
     begin
         if rising_edge(clk) then
             -- 0: DDAs (layout x, shape x, column phase, flame)
@@ -907,7 +976,9 @@ begin
                 s_xd <= s_xd0;
                 s_ph <= s_ph0;
                 s_lf <= l_lf0;
+                s_tu <= l_tu0;
             elsif g_avid = '1' then
+                s_tu <= s_tu + l_tdu;
                 if s_xd(16) = '1' then v_inc := signed(resize(l_sli, 13)); else v_inc := s_nsri; end if;
                 s_xs <= s_xs + signed(resize(s_sx, 17));
                 s_xv <= s_xv + signed(resize(s_sv, 17));
@@ -916,7 +987,12 @@ begin
                 s_lf <= s_lf + resize(v_inc, 23);
             end if;
 
-            -- 1: pixel units, the fade position, the flame level, the column phase
+            -- 1: pixel units, the fade position, the flame level, the column phase, the texel column
+            case s_tu(15 downto 14) is
+                when "00"   => p1_tc <= s_tu(13 downto 8);
+                when "11"   => p1_tc <= (others => '0');         -- left of the thumbnail
+                when others => p1_tc <= (others => '1');         -- right of it
+            end case;
             p1_xs <= unsigned(s_xs(15 downto 4));
             p1_xv <= s_xv(16 downto 4);
             p1_xj <= signed('0' & s_xs(15 downto 4)) + resize(l_j, 13);
@@ -941,17 +1017,19 @@ begin
             if (l_a = '1' and p1_xs < 880) or (l_a = '0' and p1_xs < 862) then
                 v_f(2) := '1'; end if;                                                         -- left wing
             if p1_xs < 81 then v_f(3) := '1'; end if;                                          -- left column
-            if l_tev = '1' and p1_xs >= l_tx0 and p1_xs < l_tx1 then v_f(4) := '1'; end if;    -- tracking line
+            v_d13 := signed('0' & p1_xs) - signed('0' & l_tx0);
+            if l_tev = '1' and v_d13(12 downto 9) = "0000" then v_f(4) := '1'; end if;         -- tracking line (512 px)
             if p1_xv < 0 then v_f(5) := '1'; end if;                                           -- xb < 0
             if p1_xv > 0 then v_f(6) := '1'; end if;                                           -- xb > 0
             if l_wingy = '1' and p1_xs < 900 and p1_xv < 0 then v_f(7) := '1'; end if;
             if l_a = '1' then
-                if p1_xs < 880 and p1_xs >= s_wa3 then v_f(9 downto 8) := "10";
-                elsif p1_xs < s_wa3 and p1_xs >= s_wa6 then v_f(9 downto 8) := "01"; end if;
+                if p1_xs < 880 and p1_xs >= 877 then v_f(9 downto 8) := "10";
+                elsif p1_xs < 877 and p1_xs >= 874 then v_f(9 downto 8) := "01"; end if;
             else
                 v_f(9 downto 8) := std_logic_vector(p1_spb);
             end if;
             p_fl(2) <= v_f;
+            s_tx_a <= l_tv & p1_tc;                        -- texel read (data at stage 3)
             -- flame toe: below TL the level falls at half slope; burn level for the blue
             v_s := resize(p1_lf, 14) + signed(resize(s_tl, 14));
             if p1_lf >= signed(resize(s_tl, 15)) then
@@ -972,7 +1050,8 @@ begin
             p3_flm <= p2_flm;
             p_brn(3) <= std_logic_vector(p2_brn); p_fl(3) <= p_fl(2);
 
-            -- 4: knots in; bell distances, shading, edge-glow slope
+            -- 4: knots in; bell distances, shading, edge-glow slope; the texel into fabric
+            p4_tex <= unsigned(s_tx_q);
             p4_k0 <= unsigned(s_kr_q(15 downto 8));
             p4_k1 <= unsigned(s_kr_q(7 downto 0));
             p4_kf <= p3_kf;
@@ -1009,7 +1088,10 @@ begin
             else
                 p5_eg <= f_clip8(signed(resize(p4_egm, 14)) + resize(l_e0, 14));
             end if;
-            p5_flm <= p4_flm;
+            -- the flame carrying the camera thumbnail: x (texel + 4) / 16 in Video, x 1 in Osc
+            if s_osc = '1' then v_tg := to_unsigned(16, 5); else v_tg := resize(p4_tex, 5) + 4; end if;
+            v_ft := p4_flm * v_tg;
+            if v_ft(12) = '1' then p5_flm <= (others => '1'); else p5_flm <= v_ft(11 downto 4); end if;
             p5_hc <= f_clip8(shift_left(resize(p4_hcl, 18), 4) + shift_left(resize(p4_hcl, 18), 3) + resize(p4_hcl, 18));
             -- Dusk squeeze: outside the radius the A-row window opens; the lift ramps in over D3P / 4 px
             p5_dr8 <= f_clip8(shift_left(resize(p4_dr, 16), 2));
@@ -1036,7 +1118,7 @@ begin
             p6_ka <= v_w(15 downto 8);
             v_w := shift_left(resize(p5_wm, 16), 7) - shift_left(resize(p5_wm, 16), 5) - resize(p5_wm, 16);
             p6_wa <= v_w(15 downto 8);
-            -- the flame with the edge glow (one value rides to stage 12)
+            -- the (textured) flame with the edge glow (one value rides to stage 12)
             p6_lx <= f_umax(p5_flm, p5_eg);
             if p5_dr8 < s_d3p then p6_lift <= p5_dr8; else p6_lift <= s_d3p; end if;
             v_f5 := p_fl(5); v_f5(10) := p5_ttp;                                           -- outside the bell
@@ -1060,9 +1142,9 @@ begin
             else
                 p8_s8 <= p7_ycam;
             end if;
-            -- Video: the camera at 3/4 shows through the white layer outside the bell
+            -- Video: the camera at 1/2 shows through the white layer outside the bell
             if s_osc = '0' and p_fl(7)(10) = '1' then
-                p8_bg <= p7_ycam - shift_right(p7_ycam, 2);
+                p8_bg <= shift_right(p7_ycam, 1);
             else
                 p8_bg <= (others => '0');
             end if;
@@ -1141,23 +1223,24 @@ begin
             p17_bv <= resize(signed(s_bc_q(9 downto 0)), 11);
             p17_l <= p16_l;
 
-            -- 18: palette (Ember: the blue layer's chroma swapped to red, the white layer warmed), offsets
+            -- 18: palette.  Blue: the ROMs (a blue white layer whose chroma is stored halved, an amber
+            -- key).  Ember: the key turned crimson (Y / 2, Cb / 4) and the white layer warm (Cr +L/4, Cb -L/4)
             p18_ly <= p17_ly;
-            p18_by <= p17_by;
+            p18_bu <= p17_bu;
             if s_ember = '1' then
-                v_d11 := p17_lu + signed(resize(shift_right(p17_l, 2), 11)); p18_lu <= v_d11(7 downto 0);
-                v_d11 := p17_lv - signed(resize(shift_right(p17_l, 2), 11)); p18_lv <= v_d11(7 downto 0);
-                p18_bu <= p17_bv;
-                p18_bv <= p17_bu;
+                p18_lu <= signed(resize(shift_right(p17_l, 3), 8));
+                p18_lv <= -signed(resize(shift_right(p17_l, 3), 8));
+                p18_by <= shift_right(p17_by, 1);
+                p18_bv <= shift_right(p17_bv, 2);
             else
                 p18_lu <= p17_lu(7 downto 0);
                 p18_lv <= p17_lv(7 downto 0);
-                p18_bu <= p17_bu;
+                p18_by <= p17_by;
                 p18_bv <= p17_bv;
             end if;
             p18_inv <= p17_inv;
 
-            -- 19: white layer x (1 - k)
+            -- 19: white layer x (1 - k) (its chroma x 2 at stage 20)
             p19_py <= p18_ly * p18_inv;
             p19_pu <= p18_lu * signed('0' & p18_inv(8 downto 4));     -- chroma: a 5-bit weight
             p19_pv <= p18_lv * signed('0' & p18_inv(8 downto 4));
@@ -1167,10 +1250,10 @@ begin
             v_p := signed(resize(p19_py(18 downto 8), 22)) + resize(p19_by, 22) + 64;
             if v_p < 0 then s_y12 <= (others => '0'); elsif v_p > 1023 then s_y12 <= (others => '1');
             else s_y12 <= unsigned(v_p(9 downto 0)); end if;
-            v_p := resize(shift_right(p19_pu, 4), 22) + resize(p19_bu, 22) + 512;
+            v_p := resize(shift_right(p19_pu, 3), 22) + resize(p19_bu, 22) + 512;
             if v_p < 0 then s_u12 <= (others => '0'); elsif v_p > 1023 then s_u12 <= (others => '1');
             else s_u12 <= unsigned(v_p(9 downto 0)); end if;
-            v_p := resize(shift_right(p19_pv, 4), 22) + resize(p19_bv, 22) + 512;
+            v_p := resize(shift_right(p19_pv, 3), 22) + resize(p19_bv, 22) + 512;
             if v_p < 0 then s_v12 <= (others => '0'); elsif v_p > 1023 then s_v12 <= (others => '1');
             else s_v12 <= unsigned(v_p(9 downto 0)); end if;
 

@@ -1,7 +1,8 @@
 # Beacon — a candle flame and a hyperbolic bell keyed into blue bars
 
-**v0.6.0 (2026-10-29): phase 2 round 1 from Ron's notes on v0.5.0, built; first flash showed the HD HDMI
-pin-skew lines, HD seeds re-picked 2026-10-30.** See
+**v0.6.1 (2026-10-30): phase 2 round 2. A blue flame and beam against amber bars, and the camera warped into
+the flame; built (all six bitstreams hand-routed and packed), NOT flashed.** v0.6.0's re-seeded build was
+HW-checked: the pin-skew lines are gone. See
 [Phase 2](#phase-2-v060). Heirloom #26, from
 `photos/WIN_20230424_23_53_49_Pro.jpg`. The v0.1.0 version (a hashed blue/black block grid with a
 cone and a radial glow) was replaced. The photo is two layers KEYED together, not added: a white
@@ -23,6 +24,19 @@ Ron's notes on v0.5.0 (2026-10-29), and what v0.6.0 does about each:
 
 Defaults still give the photo in Osc (preset Photo), apart from the centred, symmetric flame. The
 default frame in Video now shows the camera in the dark areas.
+
+**Round 2 (v0.6.1)**, from Ron's notes on the re-seeded v0.6.0 (2026-10-30). The lines were gone. In Blue mode
+the bars looked magenta and the beam and flame red. The photo's violet blue (48, 48, 255) reads that way on
+HDMI. He wanted more contrasting, complementary colours, and chose "blue flame, amber bars". Ember was OK.
+He also asked for the incoming video to be mapped into the flame, distorted to its shape rather than 1:1.
+
+| Note | v0.6.1 |
+|---|---|
+| Blue palette: blue flame and beam, amber bars | the white layer (flame, beam, halo, camera) keeps the photo's luma and is tinted dodger blue (Cb : Cr = .35 : −.186) at 90 % of the gamut-limited saturation, so the core stays white-hot and the glow goes deep blue; the key (bars) is amber, from the photo's near-black floor to (245, 118, 18) |
+| Ember stays | Ember now derives from the same ROMs: the key turns crimson (amber's Y / 2, Cb / 4) and the white layer warm (Cr +L/4, Cb −L/4, without the photo's slight green). Close to v0.6.0's Ember |
+| Video mapped into the flame, distorted to its shape | a 64 × 64 × 4-bit thumbnail of the camera (each texel the mean of 4 pixels, one row per 1/64 of the field) is warped into the flame: on every line the thumbnail's width spans the flame's width (32 texels per half-width; the width comes from a per-line table of the flame's half-width at gain 1 and a P12 curve), its height runs from the flame tip (ys 13) to the base (ys 440), and it follows P12's size and the sway. The flame's level is multiplied by (texel + 4) / 16, so bright parts of the picture blow out to white in the core and dark parts carve into the flame |
+| (follow-on) | the camera background outside the bell dropped from 3/4 to 1/2: with the blue palette it competed with the flame |
+
 
 ## Reading of the photo (measured)
 The work is in `.heirloom_work/rb_beacon/` (notes.md):
@@ -106,9 +120,9 @@ draw ")" arcs.
 | K6 Halo | the white ramps at the screen sides | reach −300 → +723 px; above 50 % the ramps re-centre on the tower and close in on it |
 | S7 Bands | the stripe zone | Stripes (photo) / Solid (the zone becomes one blue band) |
 | S8 Bell | the bell interior | Solid (photo) / Outline (only the outline, the neck and the flame) |
-| S9 Palette | the colours | Blue (photo) / Ember (the blue key turns red, the white layer warms) |
+| S9 Palette | the colours | Blue (v0.6.1: a blue flame, beam and halo against amber bars) / Ember (crimson bars, warm white) |
 | S10 Tear | ragged fade edges, tracking lines, line noise | On (photo) / Off (clean) |
-| S11 Source | the beam interior | Video (default: the camera fills the bell and cone at full contrast, and shows at 3/4 through the dark outside the bell) / Osc (the photo's shading) |
+| S11 Source | the beam interior, the flame | Video (default: the camera fills the bell and cone at full contrast, shows at 1/2 through the dark outside the bell, and a 64 × 64 thumbnail of it is warped into the flame) / Osc (the photo's shading, a plain flame) |
 | P12 Flame | the flame (headline) | 0 % = a small ember (gain .15, height .55); 40 % = the photo; 100 % = a towering flame (gain 2.4, height 1.8, wider glow) burning through the bars |
 
 Defaults: K1–K3, K5, K6 at 512; K4 at 635; P12 at 410; all switches at label 0.
@@ -118,8 +132,9 @@ Night Falls (Dusk 0, Halo 88 %), Swell (Speed 98 %, Bars 68 %).
 ## Video
 The photo's beam is an oscillator shading (the D valley), so the camera replaces that shading. The
 interior of the bell and cone is ramp × level × camera luma (full range since v0.6.0). Outside the
-bell the camera at 3/4 is max'ed into the white layer, so it shows wherever the blue key is low (the
-black rows, the stage around the tower) and the blue crossfades over it. The bars, flame and outlines
+bell the camera at 1/2 (3/4 in v0.6.0) is max'ed into the white layer, so it shows wherever the key is
+low (the black rows, the stage around the tower) and the bars crossfade over it. Since v0.6.1 the flame
+carries a 64 × 64 × 4-bit thumbnail of the camera warped into its shape (see Phase 2, round 2). The bars, flame and outlines
 stay generated, and every other control acts the same in both modes. Osc substitutes the photo's
 D(x) shading and has no camera background.
 
@@ -174,6 +189,22 @@ D(x) shading and has no camera background.
     flag; 6 min(ramp, D3P), the edge glow max'ed everywhere, the outside-bell flag; 7 lift + D3N;
     8 the camera background; 9 it is max'ed into the flame / glow value; 11 no A-row pre-shoot where
     the window opened. The right wing no longer replaces the bell.
+- **v0.6.1 changes.**
+  - Microcode (500 / 512 words, line program ≤ 715 clocks): the control curves shrank to 17 points (16
+    segments) to make room for a seventh, UWF (the texture's width scale against P12); per line the flame
+    half-width RW (C_PK bits 15..9) gives the texture step TDU and start TU0, and the row TV is clamped
+    0..63; the tracking-line end port is gone (the lines are a fixed 512 px); the sway's SD scale (AF) is gone.
+  - Texture: capture in `p_src` (column accumulator, 4-pixel sum, row accumulator, writes straight from
+    the sum into a 4096 × 4 RAM = 4 EBR, `no_rw_check`); read: the u DDA (16-bit, modular) at stage 0, the
+    column clamp at 1, the address at 2, the RAM at 3, fabric at 4, and the flame × (texel + 4) / 16 in
+    stage 5 (Osc: × 1).
+  - Palette: C_LC holds the blue white layer with its chroma stored halved (8-bit path, doubled at the
+    mix); C_BC the amber key; Ember is two shifts and two muxes.
+  - Fit: the first cut packed to 7531 LC (98 %) and HD Dual missed every seed. Recovered by: merging the
+    micro engine's two B-operand registers into one selected in the R stage (also shortens its
+    critical path, the ALU, which was routing-bound), the narrow white chroma path, the flame multiply
+    folded into stage 5, the texel-row clamp in microcode, unregistered capture writes, a narrower
+    capture sum, fixed-position A-row spike windows, fixed-length tracking lines, no AF. 7325–7343 LC.
 - **Contracts.**
   - damier's generated avid.
   - Virtual 1080-line coordinates from the timing ID: shapes are sized to the height and the column
@@ -190,6 +221,30 @@ D(x) shading and has no camera background.
     7098 LC.
 
 ## Status
+- **v0.6.1** built 2026-10-30. **All six bitstreams were routed by hand and packed** (`vmprog_pack.py`); a plain
+  `./build_heirloom.sh beacon` will NOT reproduce them, and the builder's router2 misses HD timing on most
+  seeds at this fill.
+  - Seeds: **HD HDMI = router2 seed 23** (79.47 MHz; HDMI HSYNC +1.94 ns, data ≤ −1.43: the most positive of
+    the ~60 HD HDMI seeds screened that also met timing, none reached +2.2); **HD Analog = router1 seed 12**
+    (88.24 MHz; HDMI HSYNC −1.49, data ≤ −1.11); **HD Dual = router1 seed 1** (87.14 MHz; −1.90, ≤ −1.57);
+    SD Analog / SD HDMI = router2 seed 1 (70.01 / 79.72 MHz); SD Dual = router2 seed 2 at --freq 27 (60.37 MHz).
+  - Router1 routes this netlist far better than router2 (HD 81–92 MHz on almost every seed, against 63–81),
+    as CLAUDE.md says for engine programs; its HD HDMI placements put HSYNC at −1.3..+1.7, so HD HDMI
+    stays on router2's seed 23.
+  - The pin-skew picture for beacon: +1.29 showed lines (v0.6.0 s2); +2.31 (v0.6.0 s42) and +3.09 (v0.5.0) were
+    clean. +1.94 is untested: **if HD HDMI shows lines again, re-pick from `skew/v063/screen*.txt`** (or screen
+    more router2 seeds).
+  - To rebuild: `skew/v063/<config>/bitstreams/<config>.json` are the netlists (regenerate with make if the RTL
+    changes); `skew/v063/route1.sh CONFIG SEED` (router2) and `route1r1.sh` (router1) route them;
+    `pack_v061/` is the staging directory (program_config.bin + bitstreams/) for `vmprog_pack.py`.
+  - 7325–7343 / 7680 LC (95.6 %, FULL), 29 / 32 EBR, iceunpack OK × 6, no `emulate_transparency`, no CARRY
+    I0==I1.
+  - `out/rev_b/ron/heirloom/beacon.vmprog` (509,573 bytes, unsigned). **NOT flashed.**
+  - Verified: GHDL analysis / elaboration / synthesis front-end; the micro program in the ISS; the integer
+    model with the palettes and the flame texture (`.heirloom_work/rb_beacon/p2/sheet_v062.png`,
+    `v061_flame_crop.png`). The RTL was not simulated.
+  - v0.6.0 sources: `.heirloom_work/rb_beacon/beacon_v11_060.vhd`, `masm_v6_060.py`, `imodel_060.py`,
+    `gen_hook_060.py`, `hook_tail_060.py`.
 - **v0.6.0** built 2026-10-29 with router2, **seed 1 on all six configs** (first attempt, no retries).
   - **First flash (HD HDMI, 2026-10-30): "the hsync red lines problem"** (per-line U/V swaps from the
     HDMI TX pin placement, memory hdmi_tx_placement_skew) on HD HDMI **seed 2**, HSYNC +1.29 ns / data
@@ -263,7 +318,11 @@ D(x) shading and has no camera background.
   photo's flame core is full white. Edges are softer in chroma (the 9-tap box).
 - **S8.** Bell Outline replaces the planned Mirror switch, which did not fit.
 - **Video.** It can't be "the photo's processing of a camera", because the photo is
-  oscillator-made. The camera fills only the beam interior.
+  oscillator-made. The camera fills the beam interior, shows through the dark at 1/2, and (v0.6.1) is warped
+  into the flame as a 64 × 64 × 4-bit thumbnail, so it is blocky inside a large flame (texels ~5 px wide at the
+  default P12, ~8 px at 100 %).
+- **Colours (v0.6.1).** The Blue palette is no longer the photo's blue bars: Ron chose a blue flame and beam
+  against amber bars. Preset Photo still gives the photo's composition, in those colours.
 - **Resolution.** 720p is the 1080p picture. On SD (4:3) the column, window and fade layout spans
   the width (compressed about 25 %) and the flame and bell keep their shape, sized to the height.
   Interlaced SD fields each draw the full picture.
