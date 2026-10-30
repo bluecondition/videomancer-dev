@@ -1,6 +1,7 @@
 # Beacon — a candle flame and a hyperbolic bell keyed into blue bars
 
-**v0.6.0 (2026-10-29): phase 2 round 1 from Ron's notes on v0.5.0, built, NOT flashed.** See
+**v0.6.0 (2026-10-29): phase 2 round 1 from Ron's notes on v0.5.0, built; first flash showed the HD HDMI
+pin-skew lines, HD seeds re-picked 2026-10-30.** See
 [Phase 2](#phase-2-v060). Heirloom #26, from
 `photos/WIN_20230424_23_53_49_Pro.jpg`. The v0.1.0 version (a hashed blue/black block grid with a
 cone and a radial glow) was replaced. The photo is two layers KEYED together, not added: a white
@@ -190,29 +191,36 @@ D(x) shading and has no camera background.
 
 ## Status
 - **v0.6.0** built 2026-10-29 with router2, **seed 1 on all six configs** (first attempt, no retries).
-  - **HD HDMI is a hand-installed seed 2** (vmprog repacked; a plain rebuild will NOT reproduce it).
-    - The builder's seed 1 put HSYNC in the pin-skew danger zone: +0.18 ns (data ≤ −0.60).
-    - Seeds 1–10 were screened with `tools/hdmi_pin_skew.py` (`.heirloom_work/rb_beacon/skew/screen_hdmi.txt`).
-      Seed 2 is centred: HSYNC +1.29, data ≤ −1.24, 76.75 MHz. (Seed 6, +1.08, misses timing at 73.5;
-      seed 7 stalled.)
-    - Shipped HD Analog s1: HDMI HSYNC +0.80, data ≤ +0.08 (analog encoder +1.39). HD Dual s1: HDMI
-      −2.75, data ≤ −1.73.
+  - **First flash (HD HDMI, 2026-10-30): "the hsync red lines problem"** (per-line U/V swaps from the
+    HDMI TX pin placement, memory hdmi_tx_placement_skew) on HD HDMI **seed 2**, HSYNC +1.29 ns / data
+    ≤ −1.24, which sits inside the usual +1.0..+2.2 window. Reference: v0.5.0's HD HDMI seed 1, which Ron
+    saw without lines, re-routes byte-identical at **HSYNC +3.09** / data ≤ −0.69. So for this netlist the
+    clean side is further right than the rule says.
+  - **Re-seeded and hand-installed (vmprog repacked; a plain rebuild will NOT reproduce these):**
+    - HD HDMI = **seed 42**: 77.94 MHz, HSYNC +2.31, data ≤ −1.38. The most positive of 46 screened seeds
+      (the builder's seed 1 was +0.18; s35 +1.46 misses timing).
+    - HD Analog = **seed 14**: 80.71 MHz, HDMI HSYNC −2.02, data ≤ −1.92. The builder's seed 1 (+0.80,
+      data ≤ +0.08) broke the data rule. No HD Analog seed in 1–17 is positive with clean data.
+    - HD Dual stays **seed 1**: −2.75, data ≤ −1.73.
+    - Screens: `.heirloom_work/rb_beacon/skew/screen_hdmi.txt`, `screen2.txt`, `screen3.txt`; v0.5.0
+      reference in `skew/v050/`. The line-showing build is kept in `skew/shipped_v060a/`.
     - To re-route: the HD jsons are in `.heirloom_work/rb_beacon/skew/<config>/` (regenerate with make
-      if the RTL changes), then `.heirloom_work/rb_beacon/skew/route1.sh hd_hdmi 2`. Seed 1 re-routed
-      byte-exact with the builder's bin. The seed-1 vmprog is kept as `skew/beacon_v060_hdhdmi_s1.vmprog`.
+      if the RTL changes), then `skew/route1.sh hd_hdmi 42` etc. and `vmprog_pack.py`. Re-routes are
+      byte-exact.
   - Fmax, post-route (MHz; SD needs 27):
 
     | Config | Fmax |
     |---|---|
-    | HD Analog | 76.97 |
+    | HD Analog | 80.71 (s14) |
     | SD Analog | 65.07 |
-    | HD HDMI | 76.75 (s2) |
+    | HD HDMI | 77.94 (s42) |
     | SD HDMI | 77.86 |
     | HD Dual | 75.93 |
     | SD Dual | 72.72 |
   - 7100–7152 / 7680 LC (93 %; +54 over v0.5.0 after the savings), 25 / 32 EBR, iceunpack OK × 6, no
     `emulate_transparency`, no CARRY I0==I1.
-  - `out/rev_b/ron/heirloom/beacon.vmprog` (498,753 bytes, unsigned). **NOT flashed.**
+  - `out/rev_b/ron/heirloom/beacon.vmprog` (499,783 bytes, unsigned, re-seeded 2026-10-30). The look is
+    not yet reviewed on hardware (the first flash showed the lines).
   - Verified: GHDL analysis / elaboration / synthesis front-end; the micro program in the ISS (483
     words, line program ≤ 651 clocks); the integer model updated to v0.6 (`imodel.py`) for a control
     sheet (`.heirloom_work/rb_beacon/p2/sheet_v060.png`) and a band-class kymograph of the swell
