@@ -7,7 +7,7 @@
 processing_delay_clks = 24
 program_id = "com.czartroniks.cocoon"
 program_name = "Cocoon"
-program_version = "0.5.0"
+program_version = "0.6.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -92,8 +92,8 @@ initial_value_label = "Fire"
 [[parameter]]
 parameter_id = "toggle_switch_9"
 name_label = "Band"
-value_labels = ["Off", "On"]
-initial_value_label = "On"
+value_labels = ["Solid", "Slats"]
+initial_value_label = "Solid"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
@@ -118,11 +118,12 @@ display_float_digits = 0
 suffix_label = "%"
 
 [[preset]]
-name = "Default"
+name = "Photo"
 
 [[preset]]
 name = "Seed"
 linear_potentiometer_12 = 0
+rotary_potentiometer_4 = 400
 
 [[preset]]
 name = "Hatch"
@@ -133,6 +134,17 @@ rotary_potentiometer_5 = 760
 name = "Ice Mirror"
 toggle_switch_7 = 1
 toggle_switch_8 = 1
+
+[[preset]]
+name = "Video Box"
+rotary_potentiometer_4 = 0
+linear_potentiometer_12 = 640
+
+[[preset]]
+name = "Slats"
+toggle_switch_9 = 1
+rotary_potentiometer_4 = 1023
+rotary_potentiometer_6 = 760
 
 [[preset]]
 name = "Osc Weave"

@@ -68,7 +68,7 @@ are listed below; rebuild those with `NEXTPNR_ROUTER="--router router1"` and/or 
 | Photo | Program | What it shows | Status |
 |-------|---------|---------------|--------|
 | WIN_20220629_23_49_20 | [escalator](escalator/) | picture tiled ~7 across, pastel rows with a vivid pink band, green stepped diagonals marching down the grid | v0.5.0 rebuilt from the photo, built 2026-10-21, 6/6 seed 1; not flashed |
-| WIN_20220829_23_30_37 | [cocoon](cocoon/) | a woven cocoon in a diamond glow, torn video banded across it | v0.5.0 rebuilt from the photo, built 2026-10-21, HD HDMI seed 4, SD Dual seed 2; not flashed |
+| WIN_20220829_23_30_37 | [cocoon](cocoon/) | a woven cocoon in a diamond glow, torn video banded across it | v0.6.0 phase 2 (arcs modulate the weave, K4 fades the red box, P12 band from nothing, S9 Slats), built 2026-10-31, router2, HD seeds pin-skew screened (HD HDMI s11, HD Analog s8, HD Dual s2); not flashed |
 | WIN_20221122_23_37_36 | [starburst](starburst/) | 4-fold mirror kaleidoscope of saddle contour bands (gray X's, CMY chevrons), serrated edges | v0.5.0 rebuilt from the photo, built 2026-10-21, all configs seed 3; not flashed |
 | WIN_20221124_22_54_05 | [rorschach](rorschach/) | posterized pastel picture over wavy stripes, mirrored left/right, torn sideways in 8-line bands | v0.5.0 rebuilt from the photo, built 2026-10-21, HD Dual seed 3; not flashed |
 | WIN_20230103_01_29_30 | [spearhead](spearhead/) | two nested-outline spearheads (black/magenta/yellow/blue/white) over a pastel mosaic of diagonal colour bands | v0.5.0 rebuilt from the photo, built 2026-10-21, 6/6 seed 1; not flashed |

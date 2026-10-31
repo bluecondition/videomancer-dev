@@ -1,7 +1,9 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Cocoon v0.5.0 -- Heirloom #2, rebuilt 2026-10-21 from WIN_20220829_23_30_37.
+-- Cocoon v0.6.0 -- Heirloom #2, rebuilt 2026-10-21 from WIN_20220829_23_30_37;
+-- phase 2 (2026-10-31): the arcs modulate the weave, K4 fades the red box,
+-- P12 grows the band from nothing, S9 slats the band.
 --
 -- The photo: light-gray flanks of posterized camera video; between them a
 -- diamond glow (red core -> maroon -> navy); a full-width horizontal band of
@@ -23,16 +25,20 @@
 --   K1 Weave   dash period (78 px at the default)
 --   K2 Rows    dash-row pitch (22 lines)
 --   K3 Arcs    arc spacing (30 F-units)
---   K4 Glow    the red glow's size
+--   K4 Glow    the red box and its glow: 0 % the box shows the camera, 25 %
+--              black, 50 % the glow is in, 67 % the photo, 100 % red floods;
+--              the arcs' modulation of the weave rises with it (row ripple
+--              and dash width, a cube law: none below 40 %)
 --   K5 Tear    the band's video tear and the texture's line jitter
 --   K6 Speed   bipolar: dashes slide, rows scroll, arcs stream (centre still)
 --   S7 Mirror  the cocoon points right
 --   S8 Palette Fire / Ice (generated colours with U and V exchanged)
---   S9 Band    the torn video band across the screen (default On)
+--   S9 Band    Solid / Slats (the band keyed by the weave rows: each row's
+--              core is band, the cocoon and glow show between)
 --   S10 Source Video / Osc (folded oscillators replace the camera)
 --   S11 Bend   the source luma bends the cocoon's field
---   P12 Cocoon size: a seed in a slit (0) .. the photo (50 %) .. the cocoon
---              bursts and fills the window (100 %)
+--   P12 Cocoon size and band: a seed with no band (0) .. the photo (50 %)
+--              .. the cocoon bursts and the band fills the screen (100 %)
 --
 -- Geometry in virtual 1080-line units derived from the MEASURED raster
 -- (1080 . 256 / active lines per line, square pixels in HD, 2 px per pixel
@@ -93,6 +99,9 @@ architecture cocoon of program_top is
     signal t_qy, t_qu, t_qv : std_logic_vector(7 downto 0) := (others => '0');
     signal w_qy, w_qu, w_qv : std_logic_vector(7 downto 0) := (others => '0');
     signal v_qy, v_qu, v_qv : std_logic_vector(7 downto 0) := (others => '0');
+    -- the arc -> weave modulation: m = k . tri(arc), a ROM of (tri(8:3), k)
+    signal m_ra : unsigned(9 downto 0) := (others => '0');
+    signal m_q  : std_logic_vector(7 downto 0) := (others => '0');
 
     -- -------------------------------------------------- raster / controls ---
     signal s_avq : std_logic := '0';
@@ -115,7 +124,12 @@ architecture cocoon of program_top is
     signal gl_lo, gl_hi, gl_mv : std_logic := '0';
     signal c_v : signed(10 downto 0) := (others => '0');            -- speed
     signal c_va : unsigned(10 downto 0) := (others => '0');
-    signal c_mir, c_ice, c_band, c_osc, c_bend : std_logic := '0';
+    signal c_mir, c_ice, c_band, c_osc, c_bend, c_slat : std_logic := '0';
+    -- K4: the box fade (video at beta, black, the glow at alpha) and the arc-mod gain
+    signal c_vbox : std_logic := '0';
+    signal c_alpha : unsigned(4 downto 0) := to_unsigned(16, 5);
+    signal c_beta  : unsigned(4 downto 0) := (others => '0');
+    signal c_k4 : unsigned(3 downto 0) := (others => '0');
 
     -- ------------------------------------------------- serial mul / div ---
     -- operand selects: one-hot over the sources, registered every clock from
@@ -232,6 +246,7 @@ architecture cocoon of program_top is
 
     -- --------------------------------------------------------- pixel path ---
     type t_sl is array (natural range <>) of std_logic;
+    type t_u2 is array (natural range <>) of unsigned(1 downto 0);
     type t_u5 is array (natural range <>) of unsigned(4 downto 0);
     type t_u8 is array (natural range <>) of unsigned(7 downto 0);
     type t_u10 is array (natural range <>) of unsigned(9 downto 0);
@@ -247,6 +262,11 @@ architecture cocoon of program_top is
     signal p_key : t_sl(2 to 15) := (others => '0');
     signal p_bank : t_sl(2 to 10) := (others => '0');
     signal p2_zz : signed(8 downto 0) := (others => '0');
+    signal p2_rb : unsigned(16 downto 0) := (others => '0');          -- row phase + the arc ripple
+    -- the arc modulation, fed back from S11 (a few pixels behind: the arcs are smooth)
+    signal p11_ta : signed(5 downto 0) := (others => '0');
+    signal p_m : signed(7 downto 0) := (others => '0');
+    signal p_inbx : t_sl(5 to 10) := (others => '0');                 -- in the band, per pixel (slats)
     signal p2_q1, p2_q2x, p2_q3 : unsigned(15 downto 0) := (others => '0');
     signal p3_g : unsigned(9 downto 0) := (others => '0');
     signal p3_xp : std_logic_vector(15 downto 0) := (others => '0');
@@ -259,11 +279,13 @@ architecture cocoon of program_top is
     signal p4_vyf : unsigned(7 downto 0) := (others => '0');
     signal p4_oph : unsigned(15 downto 0) := (others => '0');
     signal p4_tw5 : unsigned(4 downto 0) := (others => '0');
-    signal p_k16 : t_u5(4 to 13) := (others => (others => '0'));
+    signal p_k16 : t_u5(4 to 12) := (others => (others => '0'));
+    signal p13_k : unsigned(4 downto 0) := (others => '0');
     signal p_fl : t_sl(4 to 7) := (others => '0');
     signal p4_q2 : unsigned(15 downto 0) := (others => '0');
     signal p4_t1, p4_t3, p5_t1, p5_t3 : signed(8 downto 0) := (others => '0');
-    signal p_ox : t_s9(5 to 9) := (others => (others => '0'));
+    signal p_ox : t_s9(5 to 8) := (others => (others => '0'));
+    signal p9_oxm : signed(9 downto 0) := (others => '0');            -- dash oscillator + the arc
     signal p_inrow : t_sl(5 to 9) := (others => '0');
     signal p5_t2 : signed(8 downto 0) := (others => '0');
     signal p5_thv, p6_thv : unsigned(8 downto 0) := (others => '0');
@@ -272,8 +294,12 @@ architecture cocoon of program_top is
     signal p7_bend : signed(8 downto 0) := (others => '0');
     signal p7_vshow : std_logic := '0';
     signal p_f : t_u10(8 to 10) := (others => (others => '0'));
-    signal p8_ut, p8_uv, p8_full : std_logic := '0';
-    signal p_ut, p_uv, p_full : t_sl(9 to 13) := (others => '0');
+    signal p8_ut, p8_uv : std_logic := '0';
+    signal p_ut, p_uv : t_sl(9 to 13) := (others => '0');
+    -- gain class: 0 band (16), 1 cocoon / flank video (max(window, beta)),
+    -- 2 box video (beta), 3 glow (min(window, alpha))
+    signal p8_gc : unsigned(1 downto 0) := (others => '0');
+    signal p_gc : t_u2(9 to 12) := (others => (others => '0'));
     signal p9_pr : unsigned(18 downto 0) := (others => '0');
     signal p9_thr : signed(9 downto 0) := (others => '0');
     signal p10_pa : unsigned(15 downto 0) := (others => '0');
@@ -340,6 +366,7 @@ begin
             v_qy <= C_VY(to_integer(vid_ra));
             v_qu <= C_VU(to_integer(vid_ra));
             v_qv <= C_VV(to_integer(vid_ra));
+            m_q  <= C_M(to_integer(m_ra));
         end if;
     end process p_rom;
 
@@ -385,7 +412,7 @@ begin
                 else c_v <= v_k; c_va <= unsigned(abs(v_k)); end if;
                 c_mir  <= registers_in(6)(0);
                 c_ice  <= registers_in(6)(1);
-                c_band <= registers_in(6)(2);
+                c_slat <= registers_in(6)(2);
                 c_osc  <= registers_in(6)(3);
                 c_bend <= registers_in(6)(4);
                 c_t    <= c_t + 1;
@@ -467,7 +494,7 @@ begin
                 when  15 => v_a :=  6; v_b :=  9; v_q := '0'; v_n := 0;
                 when  16 => v_a :=  7; v_b := 10; v_q := '0'; v_n := 0;
                 when  17 => v_a :=  8; v_b := 11; v_q := '0'; v_n := 0;
-                when  20 => v_a :=  9; v_b := 12; v_q := '0'; v_n := 0;
+                when  20 => v_a :=  8; v_b := 12; v_q := '0'; v_n := 0;
                 when  21 => v_a :=  9; v_b := 13; v_q := '0'; v_n := 0;
                 when  22 => v_a :=  9; v_b := 14; v_q := '0'; v_n := 0;
                 when  23 => v_a :=  9; v_b := 15; v_q := '0'; v_n := 0;
@@ -481,6 +508,8 @@ begin
                 when  31 => v_a := 15; v_b := 20; v_q := '0'; v_n := 0;
                 when  32 => v_a := 15; v_b := 21; v_q := '0'; v_n := 0;
                 when  33 => v_a := 16; v_b := 21; v_q := '0'; v_n := 2;
+                when  34 => v_a :=  4; v_b :=  0; v_q := '1'; v_n := 0;
+                when  35 => v_a :=  6; v_b := 11; v_q := '0'; v_n := 0;
                 when 101 => v_a := 17; v_b := 20; v_q := '0'; v_n := 0;
                 when 102 => v_a := 18; v_b := 21; v_q := '0'; v_n := 0;
                 when 103 => v_a := 19; v_b :=  0; v_q := '1'; v_n := 0;
@@ -696,6 +725,10 @@ begin
                         q_st <= q_st + 1;
                     when 19 =>
                         dvd(to_unsigned(65536, 20), c_s256);
+                        -- the band's size operand: P12 / 2 in the lower half (0 .. 256: no band
+                        -- .. the photo), the cocoon size above it (the band fills the screen)
+                        if gl(5) <= 512 then r_p <= '0' & gl(5)(9 downto 1);
+                        else r_p <= c_s256; end if;
                         q_st <= q_st + 1;
                     when 20 =>
                         c_invs <= d_q(10 downto 0);
@@ -709,6 +742,7 @@ begin
                     when 22 =>
                         if m_acc(18 downto 8) > 540 then c_top <= to_unsigned(540, 10);
                         else c_top <= m_acc(17 downto 8); end if;
+                        if c_bh > 3 then c_band <= '1'; else c_band <= '0'; end if;
                         mgo;
                         q_st <= q_st + 1;
                     when 23 =>
@@ -763,6 +797,24 @@ begin
                         q_st <= q_st + 1;
                     when 34 =>
                         c_gd0 <= v_p(31 downto 9);
+                        -- K4: the box fade (0..255 video fades out, 256..511 the glow fades in)
+                        -- and K4 squared, then cubed, for the arc-mod gain
+                        if gl(3) < 256 then
+                            c_vbox <= '1'; c_beta <= to_unsigned(16, 5) - resize(gl(3)(7 downto 4), 5);
+                            c_alpha <= (others => '0');
+                        elsif gl(3) < 512 then
+                            c_vbox <= '0'; c_beta <= (others => '0'); c_alpha <= resize(gl(3)(7 downto 4), 5);
+                        else
+                            c_vbox <= '0'; c_beta <= (others => '0'); c_alpha <= to_unsigned(16, 5);
+                        end if;
+                        r_pb <= gl(3);
+                        mgo;
+                        q_st <= q_st + 1;
+                    when 35 =>
+                        mgo;
+                        q_st <= q_st + 1;
+                    when 36 =>
+                        c_k4    <= m_acc(19 downto 16);                -- K4^3 / 2^26: 0 below 40 %, 4 at 67 %, 15
                         e_vy    <= (others => '0');
                         q_first <= '1';
                         q_st    <= to_unsigned(100, 7);
@@ -1046,8 +1098,10 @@ begin
             else
                 p_key(2) <= '0';
             end if;
-            if p1_xj >= 1050 or l_inb = '0' then p_bank(2) <= '1'; else p_bank(2) <= '0'; end if;
+            if p1_xj >= 1050 then p_bank(2) <= '1'; else p_bank(2) <= '0'; end if;
             p2_zz <= f_tri8(p_ph(1));
+            -- the arcs ripple the weave rows (up to half a row at K4 100 %)
+            p2_rb <= unsigned(signed(l_rowph) + shift_left(resize(p_m, 17), 8));
             v_x := resize(p1_xwt, 16);
             p2_q1  <= unsigned(shift_left(v_x, 7)) + l_o1t;
             p2_q2x <= unsigned(shift_left(v_x, 6) + shift_left(v_x, 5)) - shift_left(c_t, 6);
@@ -1059,7 +1113,7 @@ begin
             p_lum(3) <= unsigned(lb_q);
             v_e := resize(p2_zz, 16);
             v_e := shift_left(v_e, 6) + shift_left(v_e, 4) + shift_left(v_e, 3) + shift_left(v_e, 2);  -- x 92
-            p3_rph <= unsigned(signed(l_rowph) + resize(v_e, 17));
+            p3_rph <= unsigned(signed(p2_rb) + resize(v_e, 17));
             v_z9 := f_tri8(p_ph(2)(13 downto 0) & "00");
             p_zg(3) <= v_z9(8 downto 5);                                 -- +-4 F-units
             p3_t1  <= f_tri8(p2_q1);
@@ -1082,6 +1136,8 @@ begin
             -- S5: dash phase; band-key threshold; oscillator 2 triangle
             p_ox(5) <= f_tri8(p4_oph);
             if p4_vyf < 102 then p_inrow(5) <= '1'; else p_inrow(5) <= '0'; end if;
+            -- Slats: only the core half of each weave row is band
+            if l_inb = '1' and (c_slat = '0' or p4_vyf < 64) then p_inbx(5) <= '1'; else p_inbx(5) <= '0'; end if;
             v_t := shift_left(resize(p4_tw5 & "000", 16), 7) + shift_left(resize(p4_tw5 & "000", 16), 5)
                    - resize(p4_tw5 & "000", 16);
             p5_thv <= to_unsigned(77, 9) + resize(v_t(15 downto 8), 9);
@@ -1102,7 +1158,7 @@ begin
             p_lum(7) <= v_lo;
             v_b9 := signed('0' & v_lo) - 128;
             p7_bend <= shift_right(v_b9, 2) + shift_right(v_b9, 3);
-            if l_inb = '1' and resize(v_lo, 9) > p6_thv and p6_tw31 = '0' then p7_vshow <= '1';
+            if p_inbx(6) = '1' and resize(v_lo, 9) > p6_thv and p6_tw31 = '0' then p7_vshow <= '1';
             else p7_vshow <= '0'; end if;
 
             -- S8: F; the layer select (texture / video / glow)
@@ -1113,23 +1169,30 @@ begin
             elsif v_g > 1023 then p_f(8) <= (others => '1');
             else p_f(8) <= unsigned(v_g(9 downto 0)); end if;
             -- band: texture or keyed video at full gain; outside it the cocoon is windowed like the
-            -- glow (it darkens toward the window edge and hands over to the flank video)
-            if (l_inb = '1' and p7_vshow = '0') or (l_inb = '0' and p_key(7) = '1' and p_fl(7) = '0') then
+            -- glow (it darkens toward the window edge and hands over to the flank video).  With K4
+            -- low the box behind the cocoon shows the camera instead of the glow.
+            if (p_inbx(7) = '1' and p7_vshow = '0') or (p_inbx(7) = '0' and p_key(7) = '1' and p_fl(7) = '0') then
                 p8_ut <= '1';
             else
                 p8_ut <= '0';
             end if;
-            if p7_vshow = '1' or (l_inb = '0' and p_fl(7) = '1') then p8_uv <= '1'; else p8_uv <= '0'; end if;
-            p8_full <= l_inb;
+            if p7_vshow = '1' or (p_inbx(7) = '0' and (p_fl(7) = '1' or c_vbox = '1')) then p8_uv <= '1';
+            else p8_uv <= '0'; end if;
+            if p_inbx(7) = '1' then p8_gc <= "00";
+            elsif (p_key(7) = '1' and p_fl(7) = '0') or p_fl(7) = '1' then p8_gc <= "01";
+            elsif c_vbox = '1' then p8_gc <= "10";
+            else p8_gc <= "11"; end if;
 
             -- S9: the arc product F x inca / 16; the dash threshold
             p9_pr <= p_f(8) * c_inca(12 downto 4);
             p9_thr <= signed(resize(shift_right(resize(p_f(8), 12) + shift_left(resize(p_f(8), 12), 1), 4), 10)) - 20;
+            -- the arcs swell the dashes on their dark side, thin them on the bright side
+            p9_oxm <= resize(p_ox(8), 10) + resize(p_m, 10);
 
             -- S10: arc phase; dashes and gaps; the glow distance (late accumulator)
             p10_pa <= resize(shift_left(resize(p9_pr, 23), 4), 16) - c_pha;
-            if p_inrow(9) = '1' and resize(p_ox(9), 10) > p9_thr then p10_dash <= '1'; else p10_dash <= '0'; end if;
-            if p_inrow(9) = '1' and resize(p_ox(9), 10) < p9_thr - 80 then p10_gap <= '1'; else p10_gap <= '0'; end if;
+            if p_inrow(9) = '1' and p9_oxm > p9_thr then p10_dash <= '1'; else p10_dash <= '0'; end if;
+            if p_inrow(9) = '1' and p9_oxm < p9_thr - 80 then p10_gap <= '1'; else p10_gap <= '0'; end if;
             if b_gdl < 0 then v_ab := -b_gdl; else v_ab := b_gdl; end if;
             p10_dg <= resize(unsigned(v_ab(20 downto 8)), 13) + l_dgyg;
 
@@ -1138,19 +1201,34 @@ begin
             if v_ta > 45 then v_lev := "001";
             elsif v_ta < -45 then v_lev := "011";
             else v_lev := "010"; end if;
-            if l_gate = '1' then
+            if l_gate = '1' and p_inbx(10) = '1' then
                 if p10_dash = '1' then v_lev := "000";
                 elsif p10_gap = '1' then v_lev := "100"; end if;
             end if;
-            tex_ra <= p_bank(10) & p_f(10)(9 downto 4) & v_lev;
+            tex_ra <= (p_bank(10) or not p_inbx(10)) & p_f(10)(9 downto 4) & v_lev;
             if p10_dg(12 downto 11) /= "00" then glw_ra <= (others => '1');
             else glw_ra <= p10_dg(10 downto 3); end if;
-            vid_ra <= l_inb & p_lum(10)(7 downto 3);
+            vid_ra <= p_inbx(10) & p_lum(10)(7 downto 3);
+            -- feedback: the arc triangle -> the modulation ROM (address reg, EBR, fabric copy),
+            -- used at S2 and S9 some pixels later
+            p11_ta <= v_ta(8 downto 3);
+            m_ra <= unsigned(p11_ta) & c_k4;
+            p_m <= signed(m_q);
 
             -- S12: ROM registers (p_rom).  S13: fabric copies
             t13_y <= unsigned(t_qy); t13_u <= unsigned(t_qu); t13_v <= unsigned(t_qv);
             w13_y <= unsigned(w_qy); w13_u <= unsigned(w_qu); w13_v <= unsigned(w_qv);
             v13_y <= unsigned(v_qy); v13_u <= unsigned(v_qu); v13_v <= unsigned(v_qv);
+            -- the layer gain: the band 16; the cocoon and flank video brighten with the box video
+            -- (beta); the box video at beta; the glow capped by alpha (both 0 / 16 at the default)
+            case p_gc(12) is
+                when "00" => p13_k <= to_unsigned(16, 5);
+                when "01" =>
+                    if p_k16(12) > c_beta then p13_k <= p_k16(12); else p13_k <= c_beta; end if;
+                when "10" => p13_k <= c_beta;
+                when others =>
+                    if p_k16(12) < c_alpha then p13_k <= p_k16(12); else p13_k <= c_alpha; end if;
+            end case;
 
             -- S14: the layer (Ice exchanges U and V of the generated colours)
             if p_ut(13) = '1' then
@@ -1164,7 +1242,7 @@ begin
                 if c_ice = '1' then s14_u <= w13_v & "00"; s14_v <= w13_u & "00";
                 else s14_u <= w13_u & "00"; s14_v <= w13_v & "00"; end if;
             end if;
-            if p_full(13) = '1' then s14_k <= to_unsigned(16, 5); else s14_k <= p_k16(13); end if;
+            s14_k <= p13_k;
 
             -- S15: the window gain (flank video fades out, the glow fades in)
             v_a11 := signed(resize(s14_y, 11)) - 64;
@@ -1227,14 +1305,15 @@ begin
             for i in 8 to 10 loop p_lum(i) <= p_lum(i - 1); end loop;
             for i in 5 to 7 loop p_fr(i) <= p_fr(i - 1); end loop;
             for i in 4 to 7 loop p_zg(i) <= p_zg(i - 1); end loop;
-            for i in 5 to 13 loop p_k16(i) <= p_k16(i - 1); end loop;
+            for i in 5 to 12 loop p_k16(i) <= p_k16(i - 1); end loop;
             for i in 5 to 7 loop p_fl(i) <= p_fl(i - 1); end loop;
-            for i in 6 to 9 loop p_ox(i) <= p_ox(i - 1); p_inrow(i) <= p_inrow(i - 1); end loop;
+            for i in 6 to 8 loop p_ox(i) <= p_ox(i - 1); end loop;
+            for i in 6 to 9 loop p_inrow(i) <= p_inrow(i - 1); end loop;
+            for i in 6 to 10 loop p_inbx(i) <= p_inbx(i - 1); end loop;
             for i in 9 to 10 loop p_f(i) <= p_f(i - 1); end loop;
-            p_ut(9) <= p8_ut; p_uv(9) <= p8_uv; p_full(9) <= p8_full;
-            for i in 10 to 13 loop
-                p_ut(i) <= p_ut(i - 1); p_uv(i) <= p_uv(i - 1); p_full(i) <= p_full(i - 1);
-            end loop;
+            p_ut(9) <= p8_ut; p_uv(9) <= p8_uv; p_gc(9) <= p8_gc;
+            for i in 10 to 13 loop p_ut(i) <= p_ut(i - 1); p_uv(i) <= p_uv(i - 1); end loop;
+            for i in 10 to 12 loop p_gc(i) <= p_gc(i - 1); end loop;
         end if;
     end process p_pix;
 

@@ -1,6 +1,7 @@
 # Cocoon — a woven cocoon in a diamond glow, torn video banded across it (Heirloom #2)
 
-**v0.5.0 (2026-10-21): rebuilt from the photo, built 6/6, NOT flashed.**
+**v0.6.0 (2026-10-31, phase 2): the arcs modulate the weave, K4 fades the red box, P12 grows the
+band from nothing, S9 Slats. Built, NOT flashed.** (v0.5.0, 2026-10-21: rebuilt from the photo.)
 Source photo: `photos/WIN_20220829_23_30_37_Pro.jpg`, a 1920×1080 capture from 2022-08-29.
 
 v0.1/v0.2 were a generic "hexagon of chevrons" sketch, and Ron judged them too abstract. v0.5.0 was
@@ -108,15 +109,15 @@ Working files are in `.heirloom_work/rb_cocoon/`:
 | K1 Weave | the dashes: period 36..170 px, square law (78 px = the photo at 56 %); the arcs' zigzag follows it |
 | K2 Rows | the dash rows: pitch 48..10 lines (22 lines = the photo at 56 %) |
 | K3 Arcs | the wing arcs: spacing 90..12 F-units (30 = the photo at 56 %) |
-| K4 Glow | the red diamond glow: scale 1.6..0.7, from a small core to red flooding the corners (1.0 = the photo at 67 %) |
+| K4 Glow | the red box and its glow, and the arcs' hold on the weave. 0 %: the box shows the camera (flank palette); 25 %: black; 50 %: the glow fully in; 67 %: the photo; 100 %: red floods. The glow scale runs 1.6..0.7 over the whole travel (1.0 at 67 %). The arc -> weave modulation is a cube law, none below 40 %, a little at the photo (+-34), full at 100 % (+-127: rows ripple half a row, dashes swell solid / vanish) |
 | K5 Tear | the band's torn video (held offsets σ 0..40 px, runs of 2..11 lines, 1 run in 5 ×4) and the texture's line jitter (σ 0..7 px); 50 % = the photo |
 | K6 Speed | bipolar, still within ±8 of the centre: dashes and zigzag slide, rows scroll, arcs stream out of the core; the default is +33 % |
 | S7 Mirror | the cocoon points right; the camera is not mirrored |
 | S8 Palette | Fire (the photo), or Ice: U and V exchanged on the generated colours, giving a cyan-blue cocoon in a dark maroon glow |
-| S9 Band | the torn video band across the screen (On = the photo) |
+| S9 Band | Solid (the photo) / Slats: only the core half of each weave row is band, so the cocoon, glow and flank video show between the slats; the slats follow the rows (K2 pitch, K6 scroll, the arc ripple) |
 | S10 Source | Video / Osc |
 | S11 Bend | the source luma bends the cocoon's field |
-| P12 Cocoon | the cocoon's size s, glided 1/8 per field: 0 % a seed in a slit band, 50 % the photo, 100 % the cocoon bursts and fills the window |
+| P12 Cocoon | the cocoon's size s and the band, glided 1/8 per field: 0 % a seed and no band, 50 % the photo, 100 % the cocoon bursts and the band fills the screen. The band's half-height is 0..247 lines over 0..50 % and follows s above (to 543) |
 
 ## Video
 - **Video** (default). The camera is the flanks and the band ends, as in the photo.
@@ -182,7 +183,55 @@ Working files are in `.heirloom_work/rb_cocoon/`:
   - v2c added the one-hot operand fetch, the chroma ring and one oscillator time counter.
   - The texture fixes added about 50 LC.
 
+## Phase 2: v0.6.0 (2026-10-31)
+Ron's notes on v0.5.0:
+- a little more modulation of the weave by the arcs, its strength on K4 Glow with the glow;
+- the red box shouldn't always be on: K4 down fades it out and the diamond glows less, K4 up
+  fades it in and the diamond glows more;
+- S9 repurposed for something more interesting, the band permanent;
+- P12 0 % = no band at all .. 100 % = the old 100 % (band fills the screen).
+
+What changed:
+- **Arc -> weave modulation.** The arc triangle (S11) is fed back through a 1024 x 8 ROM
+  `C_M` = k/15 x tri (address tri(8:3) & k), so it reaches the weave 6..13 px behind the pixel
+  it came from (invisible: the arcs vary over tens of pixels). It is added to the weave's row
+  phase at S2 (x 256: up to half a row) and to the dash oscillator before the dash / gap
+  thresholds at S9, so the dashes swell on the arcs' dark side and thin on the bright side.
+  k = K4^3 / 2^26 (per field, two serial multiplies): 0 below 40 %, 4 at the photo, 15 at 100 %.
+- **The red box fade.** Per field from K4: below 256 the box behind the cocoon shows the
+  camera through the flank palette at gain beta = 16 - K4/16; 256..511 the glow at gain
+  alpha = (K4 - 256)/16 (a dissolve through black at 25 %); from 512 alpha = 16. The gain is
+  picked per layer class at S13: band 16; cocoon and flank video max(window, beta), so the
+  window's dark seam and the cocoon's edge fade vanish as the camera fills the box; box video
+  beta; glow min(window, alpha). At the default (alpha 16, beta 0) every gain is v0.5's.
+- **P12 band.** The band's half-height is (P12/2) x 247 / 256 below 50 % (0 .. 247), and
+  s x 247 / 256 above (247 .. 543) as before. The band flag (rules, dots, gate) is now per field
+  `c_bh > 3`, so at 0 % nothing of the band is drawn. The cocoon's size law is unchanged.
+- **S9 Slats.** The band test is per pixel from S5: in Slats only where the row fold
+  vyf < 64 (the core half of each weave row), so the slats follow the rows' zigzag, pitch (K2),
+  scroll (K6) and the arc ripple (K4). The colourizer bank and the weave gate follow the pixel
+  test. The band's torn read and edge rules stay per line.
+
 ## Status
+- **v0.6.0, built 2026-10-31, router2. NOT flashed.**
+  - 7356–7397 / 7680 LC (95.8–96.3 %, now FULL), 21 / 32 EBR (+2 for `C_M`), iceunpack OK × 6.
+  - Builder seeds and post-route Fmax: HD Analog s2 74.40, SD Analog **s2** 74.09 (s1 hit the
+    router timeout), HD HDMI s2 74.63, SD HDMI s1 65.04, HD Dual s1 76.45, SD Dual s1 77.47 MHz.
+  - **HD seeds re-picked from a router2 pin-skew screen** (HD HDMI s1–24, HD Analog / HD Dual
+    s1–12: `.heirloom_work/rb_cocoon/skew/screen.txt`), hand-installed and repacked. HD timing is
+    thin: only 4 of the 24 HD HDMI seeds met 74.25.
+    - HD HDMI **s11**: 76.20 MHz, HSYNC +1.22 / data ≤ −0.61 ns (the builder's s2 sat at +0.58).
+    - HD Analog **s8**: 79.82 MHz, HDMI HSYNC −1.68 / data ≤ −1.46 ns (s2 had a data bit at +0.17).
+    - HD Dual **s2**: 81.14 MHz, −2.44 / ≤ −2.18 ns.
+  - A plain rebuild gives the builder seeds. To reproduce the shipped HD bitstreams, run
+    `skew/synth.sh <config>` then `RT=router2 skew/route.sh <config> <seed>` (s2 / s1 reproduced
+    the builder's bins byte-exact). The builder's vmprog is `skew/cocoon_v060_builder.vmprog`.
+  - If a rebuild regresses HD: try `NEXTPNR_ROUTER="--router router1"`, then reclaim LC (the
+    p_k16 chain, the line engine's n_ / l_ oscillator terms).
+  - `out/rev_b/ron/heirloom/cocoon.vmprog` (484,905 bytes). Presets are placeholders (Photo,
+    Seed, Hatch, Ice Mirror, Video Box, Slats, Osc Weave, Bent Video).
+
+**v0.5.0:**
 - **v0.5.0, built 2026-10-21, router2 (the builder default).**
   - Build seeds: **HD HDMI = seed 4** (seeds 1–3 missed) and **SD Dual = seed 2** (seed 1
     stalled the router). The others used seed 1.
