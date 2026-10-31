@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Cathode v0.6.0 -- Heirloom #23 (2026-10-27 rebuild; phase 2 2026-10-31), from WIN_20230407_23_48_05.
+-- Cathode v0.6.1 -- Heirloom #23 (2026-10-27 rebuild; phase 2 2026-10-31), from WIN_20230407_23_48_05.
 --
 -- The photo: a sample-and-hold colour mosaic (42.2 px x 13.9-line cells) through a CYCLIC
 -- four-colour colourizer -- green -> pink -> yellow -> mint -> green, a 2-bit Gray code --
@@ -18,7 +18,9 @@
 -- tube from its base to its tip, growing toward the tip, and the three tubes ride it at
 -- their own rates (0.75 / 1 / 0.625 of K4), so they writhe out of step and cross.  Each
 -- tube's length flickers on a triangle LFO (the next tube's wave phase), and the tube
--- thins as it stretches.
+-- thins as it stretches.  Video: the camera's brightness (smoothed 1/8 per pixel, minus its
+-- running mean) pushes the flames sideways by g/4 px per level, g = 1 .. 3 from P12, so the
+-- tube outlines trace the picture.
 --
 -- The program draws exactly that.  Osc = the photo's per-column ramp table (64 x 16 ROM)
 -- plus hashed R-bit noise with the photo's class statistics.  Video = the camera is the
@@ -257,6 +259,13 @@ architecture cathode of program_top is
     signal s_avg : unsigned(15 downto 0) := x"8000";
     signal s_adf : signed(16 downto 0) := (others => '0');
     signal s_adv : std_logic := '0';
+    -- video warp of the flames: low-passed luma minus its mean, times g (0 in Osc), folded into
+    -- the flame coordinate's subtrahend: s_pfd2 = 2 pf + g (lp - mean)
+    signal v_lp : unsigned(7 downto 0) := x"80";
+    signal v_dv : signed(9 downto 0) := (others => '0');
+    signal v_pa : signed(11 downto 0) := (others => '0');
+    signal s_vg : unsigned(1 downto 0) := (others => '0');
+    signal s_pfd2 : signed(13 downto 0) := to_signed(1892, 14);
 
     -- pixel pipeline
     type t_u6 is array (natural range <>) of unsigned(5 downto 0);
@@ -445,6 +454,14 @@ begin
                 s_nocore <= registers_in(6)(2);
                 s_flip   <= registers_in(6)(3);
                 s_osc    <= registers_in(6)(4);
+                -- video warp gain: 1 .. 3 from P12 (0 below 25 % reads as 1), off in Osc
+                if registers_in(6)(4) = '1' then
+                    s_vg <= "00";
+                elsif p12v(9 downto 8) = "00" then
+                    s_vg <= "01";
+                else
+                    s_vg <= p12v(9 downto 8);
+                end if;
                 if s_wmax /= 0 then s_w <= s_wmax; end if;
                 s_wmax <= (others => '0');
                 -- motion: the ramps roll (sp/8 + sp/32 rows/256 per field), cells re-seed every
@@ -884,6 +901,8 @@ begin
     ---------------------------------------------------------------------------
     p_vid : process(clk)
         variable v_l : unsigned(10 downto 0);
+        variable v_t : signed(9 downto 0);
+        variable v_g1, v_g0 : signed(11 downto 0);
     begin
         if rising_edge(clk) then
             v_y1 <= unsigned(data_in.y);
@@ -897,6 +916,15 @@ begin
             if s_adv = '1' then
                 s_avg <= unsigned(signed(s_avg) + resize(shift_right(s_adf, 10), 16));
             end if;
+            -- flame warp: lp += (L - lp) / 8; dv = lp - mean; s_pfd2 = 2 pf + g dv
+            v_t := signed(resize(v_l3, 10)) - signed(resize(v_lp, 10));
+            v_t := signed(resize(v_lp, 10)) + shift_right(v_t, 3);
+            v_lp <= unsigned(v_t(7 downto 0));
+            v_dv <= signed(resize(v_lp, 10)) - signed(resize(s_avg(15 downto 8), 10));
+            if s_vg(1) = '1' then v_g1 := shift_left(resize(v_dv, 12), 1); else v_g1 := (others => '0'); end if;
+            if s_vg(0) = '1' then v_g0 := resize(v_dv, 12); else v_g0 := (others => '0'); end if;
+            v_pa <= v_g1 + v_g0;
+            s_pfd2 <= signed(resize(s_pf & '0', 14)) + resize(v_pa, 14);
         end if;
     end process p_vid;
 
@@ -915,7 +943,7 @@ begin
         variable v_a, v_b : std_logic;
         variable v_prev : unsigned(2 downto 0);
         variable v_e : signed(12 downto 0);
-        variable v_d : signed(12 downto 0);
+        variable v_d : signed(13 downto 0);
         variable v_r8 : unsigned(8 downto 0);
         variable v_s9 : unsigned(8 downto 0);
         variable v_rt : unsigned(11 downto 0);
@@ -931,8 +959,8 @@ begin
             -------------------------------------------------------------------
             -- 1: cell number, flame dx, hash round 1
             p_ci(1) <= b_ci; p_cs(1) <= b_cs; p_pxv(1) <= b_pxv;
-            v_d := signed(resize(b_fx2, 13)) - signed(resize(s_pf, 13));
-            p_dx1 <= resize(shift_right(v_d, 1), 12);
+            v_d := signed(resize(b_fx2 & '0', 14)) - s_pfd2;           -- 4 dx (minus the video warp)
+            p_dx1 <= resize(shift_right(v_d, 2), 12);
             s_cra <= b_ci;
             v_h := ((b_ci & l_j & "000") xor (s_seed & s_seed(4 downto 0) & s_seed(7 downto 5))) xor x"A5C3";
             h2 <= v_h + shift_left(v_h, 5);

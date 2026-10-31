@@ -1,6 +1,6 @@
 # Cathode — a cycling S&H colour mosaic with three-tube purple flames
 
-**v0.6.0 (2026-10-31, phase 2 round 1): built, NOT flashed** (see [Phase 2](#phase-2)).
+**v0.6.1 (2026-10-31, phase 2 round 1): built, NOT flashed** (see [Phase 2](#phase-2)).
 v0.5.0 (2026-10-27) was the rebuild from the photo. Heirloom #23, from
 `photos/WIN_20230407_23_48_05_Pro.jpg`. The v0.1.0 version (posterized video plus two parabolic
 tubes) was judged too abstract and replaced. The photo is a sample-and-hold colour mosaic whose
@@ -109,7 +109,7 @@ peaks at 0.57 at the teardrop centre and is about 0.4 in the body and 0.36 in th
 | S8 Glow | the dark-green halo | On (photo) / Off (hard 4-px key edge) |
 | S9 Core | the teardrop tube | On (photo) / Off |
 | S10 Flip | the flames' direction | Down (photo) / Up |
-| S11 Source | the mosaic's red bit, the tubes' red | Video (default) / Osc |
+| S11 Source | the mosaic's red bit, the tubes' red, the flames' shape | Video (default): the camera also bends the flames (below) / Osc: the flames run on their own waves only |
 | P12 Flames | the flames (headline) | 0 % = short stubs at the top (×0.35 length, ×0.75 width, barely writhing); 50 % = the photo's flames, writhing up to ~73 px; 100 % = two tall purple pillars (×2.2, ×1.25) writhing like tentacles (up to ~135 px), with the mosaic only between them |
 
 Defaults: K1 487, K2 502, K3 342, K4 600, K5 351, labelled switches and K6 at label 0, P12 512.
@@ -123,6 +123,12 @@ woven in rather than used as the mosaic's source.
   bit, so the photo's column rhythm stays.
 - **Tubes.** The tubes' red is the live camera luma at full resolution, a purple/blue duotone
   picture inside the flames.
+- **Flame shape (v0.6.1).** The camera's luma, low-passed along the line (lp += (L − lp)/8, about
+  8 px) minus the running mean, pushes the flame coordinate sideways by g/4 virtual px per level:
+  bright parts of the picture push the tubes right, dark parts left. g = 1 below P12 25 %, then 1,
+  2 (the default, ½ px per level) and 3 (¾ px per level) by P12's top two bits. The tube outlines,
+  their halo and the dark lower gaps all follow, so the flames trace the picture's shapes while
+  they writhe. Off in Osc.
 - **Tested alternatives.** Adding luma to the phase, or replacing the phase with luma, were both
   illegible (`cmp_pfv*.png`).
 - **Osc.** Substitutes the photo-fitted per-column base phase plus the hashed red-bit noise. Every
@@ -172,7 +178,7 @@ woven in rather than used as the mosaic's source.
 Ron's note 2026-10-31 (on v0.5.0): instead of the flames just lightly swaying back and forth, they
 need more dynamic shape and movement. His biggest complaint with the program so far.
 
-**v0.6.0 (round 1):**
+**v0.6.0 (round 1, built, superseded by v0.6.1 before flashing):**
 - **The sway is gone.** It bent the whole flame group by ±40 px at the bottom, slowly.
 - **A wave runs down each tube** from its base to its tip (1.45 turns down the screen), its
   amplitude growing toward the tip: 0.19× at the base, 1× at the screen's far edge. In virtual
@@ -205,8 +211,39 @@ need more dynamic shape and movement. His biggest complaint with the program so 
     tubes, halo and dark lower gaps as the proto does. K6 sat at 512 in that sim (patch GBR), so
     its colours are green / red; on hardware K6 defaults to RGB.
 
+**v0.6.1:** Ron asked (2026-10-31) whether the flames could be more affected by the incoming
+video. Until now the camera only coloured them (the tubes' red).
+- **The camera now bends the flames** (Video mode; see [Video](#video)): its low-passed luma,
+  minus the running mean, displaces the flame coordinate by g/4 px per level, g from P12 (1 / 1 /
+  2 / 3 by quarters). The tube outlines trace the picture (on the test collage, the bears'
+  silhouettes and the computer show in the flame edges), and the flames keep writhing on their
+  waves. Osc is unchanged.
+- **Implementation.** On the video side: an 8-bit IIR, the mean subtraction, a gated 2-bit product
+  and `s_pfd2 = 2·pf + g·dv`. The beam's stage-1 subtract then uses `s_pfd2` (4× dx). It sits a few
+  pixels behind the beam, which is invisible on a low-passed signal.
+- **Tested alternatives** (`imodel7.py`, `sheet7.py`; `p7_a.png`, `p7_b.png`, `p7_c.png`):
+  - a swell, where bright areas widen the tubes. Also legible, but four more pixel-path adders;
+  - both together;
+  - a 32-px low-pass, which smears;
+  - twice the gain, which shreds the flames over busy textures.
+- **Fit.** 7387 LC (96 %).
+
 ## Status
-- **v0.6.0** built 2026-10-31, router2. 7268–7298 / 7680 LC (95 %), 2 / 32 EBR, iceunpack OK × 6.
+- **v0.6.1** built 2026-10-31, router2, all six configs on **seed 1** in the builder. 7357–7392 /
+  7680 LC (96 %), 2 / 32 EBR, iceunpack OK × 6.
+  - Builder: HD Analog 80.96, SD Analog 78.03, HD HDMI 80.95, SD HDMI 79.69, HD Dual 78.90,
+    SD Dual 78.77 MHz.
+  - **HD seeds from a pin-skew screen** (`.heirloom_work/rb_cathode/skew61/`: HD HDMI s1–48, HD
+    Analog / HD Dual s1–12), hand-installed and repacked:
+    - HD HDMI **s32**: 77.41 MHz, HSYNC +1.62 / data ≤ −0.79 ns, the most positive of the 48 that
+      met timing and the data rule (s1 sat at −0.01).
+    - HD Analog **s6**: 77.34 MHz, HDMI HSYNC −1.90 / data ≤ −0.74 ns (s1 had a data bit at +0.33).
+    - HD Dual s1 kept: 78.90 MHz, −2.55 / ≤ −1.48 ns.
+  - To reproduce: route the regenerated json with `skew61/route.sh` (`RT=router2`) at those seeds;
+    s1 reproduced the builder's bins byte-exact. The builder's vmprog is
+    `skew61/cathode_v061_builder.vmprog`.
+  - `out/rev_b/ron/heirloom/cathode.vmprog` (443,128 bytes). Not flashed.
+- **v0.6.0** built 2026-10-31, router2 (superseded before flashing). 7268–7298 / 7680 LC (95 %), 2 / 32 EBR, iceunpack OK × 6.
   - Builder seeds: HD Analog s1 75.79, SD Analog **s2** 85.67 (s1 ran into the 360 s timeout),
     HD HDMI s2 77.91, SD HDMI s1 82.77, HD Dual s1 79.33, SD Dual s1 84.35 MHz.
   - **HD seeds re-picked for HDMI pin skew** (router2 screen of HD HDMI s1–24 and HD Analog / HD
