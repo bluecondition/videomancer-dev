@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Cathode v0.5.0 -- Heirloom #23 (2026-10-27 rebuild), from WIN_20230407_23_48_05.
+-- Cathode v0.6.0 -- Heirloom #23 (2026-10-27 rebuild; phase 2 2026-10-31), from WIN_20230407_23_48_05.
 --
 -- The photo: a sample-and-hold colour mosaic (42.2 px x 13.9-line cells) through a CYCLIC
 -- four-colour colourizer -- green -> pink -> yellow -> mint -> green, a 2-bit Gray code --
@@ -14,6 +14,12 @@
 -- mosaic loses its green (magenta / black blocks in the gaps between the tubes) and
 -- a dark-green halo fades it back over ~80 px.
 --
+-- v0.6.0 (phase 2): the flames move like flames instead of swaying.  A wave runs down each
+-- tube from its base to its tip, growing toward the tip, and the three tubes ride it at
+-- their own rates (0.75 / 1 / 0.625 of K4), so they writhe out of step and cross.  Each
+-- tube's length flickers on a triangle LFO (the next tube's wave phase), and the tube
+-- thins as it stretches.
+--
 -- The program draws exactly that.  Osc = the photo's per-column ramp table (64 x 16 ROM)
 -- plus hashed R-bit noise with the photo's class statistics.  Video = the camera is the
 -- mosaic's R bit (cell-sampled luma above its running mean; the ramp keeps the other
@@ -22,7 +28,7 @@
 --   K1  Cells   cell width 160 .. 12 px (42 = the photo)
 --   K2  Rows    row height 64 .. 4 lines (13.9 = the photo)
 --   K3  Cycle   column-ramp gain 0 .. 3x (1x = the photo)
---   K4  Speed   bipolar (still in the centre): the ramps roll, cells re-roll, flames sway
+--   K4  Speed   bipolar (still in the centre): the ramps roll, cells re-roll, flames writhe
 --   K5  Flames  flames across, 1 .. 4 (2.03 = the photo)
 --   K6  Patch   RGB cable patch: RGB / RBG / GRB / GBR / BRG / BGR
 --   S7  Fringe  Blue / Off
@@ -30,7 +36,8 @@
 --   S9  Core    On / Off (the teardrop)
 --   S10 Flip    Down / Up
 --   S11 Source  Video / Osc
---   P12 FLAMES  length x0.35 .. x1 (photo, 50 %) .. x2.2, width x0.75 .. x1.25
+--   P12 FLAMES  length x0.35 .. x1 (photo, 50 %) .. x2.2, width x0.75 .. x1.25,
+--               writhe 16 .. 112 .. 208 px
 --
 -- Virtual 1080-line coordinates (timing-ID steps); generated avid; output conditioning
 -- ([1 2 1] luma, [1 2 2 2 2 2 2 2 1]/16 chroma, luma 13/16); blanking gate.  Latency 24
@@ -116,13 +123,6 @@ architecture cathode of program_top is
         x"00", x"00", x"00", x"00", x"00", x"00", x"00", x"00", x"00", x"00", x"00", x"00", x"00", x"00", x"00", x"00",
         x"00", x"00", x"00", x"00", x"00", x"00", x"00", x"00", x"00", x"00", x"00", x"00", x"00", x"00", x"00", x"00",
         x"00", x"00", x"00", x"00", x"00", x"00", x"00", x"00", x"00", x"00", x"00", x"00", x"00", x"00", x"00", x"00");
-    type t_sin is array (0 to 63) of integer range -128 to 127;
-    constant C_SIN : t_sin := (
-        0, 12, 25, 37, 49, 60, 71, 81, 90, 98, 106, 112, 117, 122, 125, 126,
-        127, 126, 125, 122, 117, 112, 106, 98, 90, 81, 71, 60, 49, 37, 25, 12,
-        0, -12, -25, -37, -49, -60, -71, -81, -90, -98, -106, -112, -117, -122, -125, -126,
-        -127, -126, -125, -122, -117, -112, -106, -98, -90, -81, -71, -60, -49, -37, -25, -12);
-
     -- cell RAM: the camera luma held per cell (written on a row's first line)
     type t_cram is array (0 to 63) of std_logic_vector(7 downto 0);
     signal cram : t_cram := (others => x"80");
@@ -155,8 +155,14 @@ architecture cathode of program_top is
     -- per-field state
     signal s_roll : unsigned(19 downto 0) := (others => '0');                -- Q8 rows
     signal s_sacc : unsigned(12 downto 0) := (others => '0');
+    -- flame waves: one phase per tube (10-bit turn); the length LFOs are triangles of the next
+    -- tube's phase (T <- B, B <- A, A <- T), +-32 on sy8 and -+32 on the width scale
+    signal s_phT : unsigned(9 downto 0) := to_unsigned(0, 10);
+    signal s_phB : unsigned(9 downto 0) := to_unsigned(341, 10);
+    signal s_phA : unsigned(9 downto 0) := to_unsigned(683, 10);
+    signal s_trT, s_trB, s_trA : signed(5 downto 0);
+    signal s_aw : unsigned(7 downto 0) := to_unsigned(112, 8);               -- writhe at vy 1792
     signal s_seed : unsigned(7 downto 0) := (others => '0');
-    signal s_th : unsigned(15 downto 0) := (others => '0');
     signal s_inc : unsigned(12 downto 0) := to_unsigned(1552, 13);           -- Q16 per virtual px
     signal s_incr : unsigned(13 downto 0) := to_unsigned(1552, 14);          -- per real px
     signal s_cp0 : unsigned(15 downto 0) := (others => '0');
@@ -165,14 +171,13 @@ architecture cathode of program_top is
     signal s_racc0 : unsigned(15 downto 0) := (others => '0');
     signal s_cyc8 : unsigned(9 downto 0) := to_unsigned(256, 10);
     signal s_sy8 : unsigned(9 downto 0) := to_unsigned(256, 10);
-    signal s_isy : unsigned(9 downto 0) := to_unsigned(256, 10);
+    signal s_isyT, s_isyB, s_isyA : unsigned(10 downto 0) := to_unsigned(256, 11);
     signal s_sx8 : unsigned(8 downto 0) := to_unsigned(256, 9);
     signal s_wv : unsigned(11 downto 0) := to_unsigned(1920, 12);            -- virtual width
     signal s_pf : unsigned(10 downto 0) := to_unsigned(946, 11);             -- flame period (virtual px)
     signal s_pf2, s_pf2m : unsigned(11 downto 0) := to_unsigned(1892, 12);
     signal s_fxs : unsigned(10 downto 0) := (others => '0');
     signal s_fxt : signed(12 downto 0) := (others => '0');
-    signal s_sway : signed(6 downto 0) := (others => '0');
     -- field sequencer (one serial multiplier, one serial divider)
     signal f_st : unsigned(5 downto 0) := (others => '0');
     signal f_ma : unsigned(24 downto 0) := (others => '0');
@@ -183,6 +188,7 @@ architecture cathode of program_top is
     signal f_dd : unsigned(11 downto 0) := (others => '0');                  -- divisor
     signal f_rem : unsigned(12 downto 0) := (others => '0');
     signal f_dc : unsigned(4 downto 0) := (others => '0');
+    signal f_t : unsigned(1 downto 0) := (others => '0');
     signal s_linit : std_logic := '0';
 
     -- per-line engine (computes the NEXT line, kicked at the source avid rise)
@@ -204,8 +210,10 @@ architecture cathode of program_top is
     signal e_t1, e_t2 : signed(12 downto 0) := (others => '0');
     signal e_dfr : signed(12 downto 0) := (others => '0');
     signal e_v : unsigned(7 downto 0) := (others => '0');
-    signal e_vyq : unsigned(11 downto 0) := (others => '0');
-    signal e_fx : signed(12 downto 0) := (others => '0');
+    signal e_wp : unsigned(9 downto 0) := (others => '0');                  -- wave position
+    signal e_A : unsigned(7 downto 0) := (others => '0');                   -- wave amplitude here
+    signal e_t : unsigned(1 downto 0) := (others => '0');
+    signal e_sg : std_logic := '0';
     signal e_aL, e_tL, e_bL, e_aR, e_tR, e_bR, e_m1, e_m2 : signed(11 downto 0) := (others => '0');
     signal s_fta : unsigned(8 downto 0) := (others => '0');
     signal s_ftq : std_logic_vector(7 downto 0) := (others => '0');
@@ -214,17 +222,17 @@ architecture cathode of program_top is
     signal n_j : unsigned(6 downto 0) := (others => '0');
     signal n_jk : unsigned(12 downto 0) := (others => '0');
     signal n_tw, n_bc, n_bw, n_an, n_aw : unsigned(7 downto 0) := (others => '0');
+    signal n_tc, n_bcs, n_acs : signed(9 downto 0) := (others => '0');
     signal n_l, n_r : signed(11 downto 0) := (others => '0');
     signal n_alive, n_low : std_logic := '0';
-    signal n_fxs : unsigned(10 downto 0) := (others => '0');
     -- committed line values
     signal l_tick : std_logic := '1';
     signal l_j : unsigned(6 downto 0) := (others => '0');
     signal l_jk : unsigned(12 downto 0) := (others => '0');
-    signal l_tw, l_bc, l_bw, l_an, l_aw : unsigned(7 downto 0) := (others => '0');
+    signal l_tw, l_bw, l_aw : unsigned(7 downto 0) := (others => '0');
+    signal l_tc, l_bc, l_ac : signed(9 downto 0) := (others => '0');       -- tube centres
     signal l_l, l_r : signed(11 downto 0) := (others => '0');
     signal l_alive, l_low : std_logic := '0';
-    signal l_fxs : unsigned(10 downto 0) := (others => '0');
 
     -- generated avid
     signal g_hsq, g_hsr, g_avq, g_avr : std_logic := '0';
@@ -331,6 +339,11 @@ architecture cathode of program_top is
 
 begin
 
+    -- length LFOs: triangle of the next tube's wave phase, -32..31
+    s_trT <= signed((s_phB(8 downto 3) xor (5 downto 0 => s_phB(9))) xor "100000");
+    s_trB <= signed((s_phA(8 downto 3) xor (5 downto 0 => s_phA(9))) xor "100000");
+    s_trA <= signed((s_phT(8 downto 3) xor (5 downto 0 => s_phT(9))) xor "100000");
+
     ---------------------------------------------------------------------------
     -- Memories
     ---------------------------------------------------------------------------
@@ -435,13 +448,16 @@ begin
                 if s_wmax /= 0 then s_w <= s_wmax; end if;
                 s_wmax <= (others => '0');
                 -- motion: the ramps roll (sp/8 + sp/32 rows/256 per field), cells re-seed every
-                -- 8192/|sp| fields, flames sway
+                -- 8192/|sp| fields, the tube waves advance sp x 0.75 / 1 / 0.625 (1/4096 turn)
+                -- (sp >> 2 etc. on 1/1024-turn phases)
                 v_sp := resize(s_sp, 20);
                 s_roll <= unsigned(signed(s_roll) + shift_right(v_sp, 3) + shift_right(v_sp, 5));
                 v_r := resize(s_sacc, 14) + resize(s_asp, 14);
                 if v_r(13) = '1' then s_seed <= s_seed + 1; end if;
                 s_sacc <= v_r(12 downto 0);
-                s_th  <= s_th + resize(s_asp & '0', 16);
+                s_phT <= s_phT + unsigned(resize(shift_right(s_sp, 3) + shift_right(s_sp, 4), 10));
+                s_phB <= s_phB + unsigned(resize(shift_right(s_sp, 2), 10));
+                s_phA <= s_phA + unsigned(resize(shift_right(s_sp, 3) + shift_right(s_sp, 5), 10));
                 f_st <= to_unsigned(1, 6);
             end if;
 
@@ -504,13 +520,30 @@ begin
                             v_sy := to_unsigned(256, 11) + resize(f_acc(19 downto 10), 11);
                         end if;
                         s_sy8 <= v_sy(9 downto 0);
-                        -- isy = 65536 / sy8 (dividend 2^16 left-aligned in 21 bits)
-                        f_dn <= shift_left(to_unsigned(65536, 21), 4); f_dd <= resize(v_sy, 12);
+                        f_t <= (others => '0');
+                        f_st <= f_st + 1;
+                    when 11 =>      -- isy(t) = 65536 / (sy8 + tri(t)) (dividend 2^16 left-aligned in 21 bits)
+                        case to_integer(f_t) is
+                            when 0      => v_x := resize(s_trT, 13);
+                            when 1      => v_x := resize(s_trB, 13);
+                            when others => v_x := resize(s_trA, 13);
+                        end case;
+                        v_x := signed(resize(s_sy8, 13)) + v_x;
+                        f_dn <= shift_left(to_unsigned(65536, 21), 4); f_dd <= unsigned(v_x(11 downto 0));
                         f_rem <= (others => '0'); f_dc <= to_unsigned(17, 5);
                         f_st <= f_st + 1;
-                    when 11 =>
-                        s_isy <= f_dn(9 downto 0);
+                    when 12 =>
+                        case to_integer(f_t) is
+                            when 0      => s_isyT <= f_dn(10 downto 0);
+                            when 1      => s_isyB <= f_dn(10 downto 0);
+                            when others => s_isyA <= f_dn(10 downto 0);
+                        end case;
+                        f_t <= f_t + 1;
+                        if f_t = 2 then f_st <= f_st + 1; else f_st <= f_st - 1; end if;
+                    when 13 =>
                         s_sx8 <= to_unsigned(192, 9) + resize(p12v(9 downto 3), 9);
+                        -- writhe amplitude: 16 + 3 p12 / 16 (px at vy 1792)
+                        s_aw <= to_unsigned(16, 8) + resize(p12v(9 downto 3), 8) + resize(p12v(9 downto 4), 8);
                         -- virtual width
                         case to_integer(s_xs) is
                             when 4      => s_wv <= s_w(10 downto 0) & '0';
@@ -518,35 +551,31 @@ begin
                             when others => s_wv <= s_w;
                         end case;
                         f_st <= f_st + 1;
-                    when 12 =>      -- Pf = Wv * 1024 / (1024 + 3 k5)
+                    when 14 =>      -- Pf = Wv * 1024 / (1024 + 3 k5)
                         f_dn <= resize(s_wv, 11) & "0000000000";
                         f_dd <= to_unsigned(1024, 12) + resize(k5v, 12) + resize(k5v & '0', 12);
                         f_rem <= (others => '0'); f_dc <= to_unsigned(21, 5);
                         f_st <= f_st + 1;
-                    when 13 =>
+                    when 15 =>
                         s_pf <= f_dn(10 downto 0);
                         f_st <= f_st + 1;
-                    when 14 =>
+                    when 16 =>
                         s_pf2 <= s_pf & '0';
                         s_fxt <= signed(resize(s_pf, 13)) - signed(resize(s_wv(11 downto 1), 13)) - 48;
                         f_st <= f_st + 1;
-                    when 15 | 16 | 17 =>
+                    when 17 | 18 | 19 =>
                         s_pf2m <= s_pf2 - resize(s_xs, 12);
                         if s_fxt < 0 then s_fxt <= s_fxt + signed(resize(s_pf, 13)); end if;
                         f_st <= f_st + 1;
-                    when 18 =>
+                    when 20 =>
                         if s_fxt >= signed(resize(s_pf, 13)) then
                             v_x := s_fxt - signed(resize(s_pf, 13));
                         else
                             v_x := s_fxt;
                         end if;
                         s_fxs <= unsigned(v_x(10 downto 0));
-                        -- sway amplitude (px at vy = 1024): 40 sin / 127 ~ (32 + 8) sin / 128
-                        v_x := to_signed(C_SIN(to_integer(s_th(15 downto 10))), 13);
-                        v_x := shift_right(v_x, 2) + shift_right(v_x, 4);
-                        s_sway <= resize(v_x, 7);
                         f_st <= f_st + 1;
-                    when 19 =>
+                    when 21 =>
                         -- cell grid anchor: first boundary at virtual x = 12
                         v_c16 := shift_left(resize(s_inc, 16), 3) + shift_left(resize(s_inc, 16), 2);
                         s_cp0 <= to_unsigned(0, 16) - v_c16;
@@ -559,7 +588,7 @@ begin
                         s_racc0 <= to_unsigned(0, 16) - resize(s_rinc & "000", 16) - resize(s_rinc & '0', 16);
                         s_cyc8 <= resize(k3v(9 downto 1), 10) + resize(k3v(9 downto 2), 10);
                         f_st <= f_st + 1;
-                    when 20 =>
+                    when 22 =>
                         s_linit <= '1';            -- start the line engine on line 0
                         f_st <= (others => '0');
                     when others =>
@@ -624,17 +653,20 @@ begin
     ---------------------------------------------------------------------------
     p_line : process(clk)
         variable v_n : unsigned(16 downto 0);
-        variable v_q : unsigned(31 downto 0);
         variable v_f : signed(12 downto 0);
-        variable v_w : signed(11 downto 0);
         variable v_big : signed(11 downto 0);
+        variable v_ps : unsigned(9 downto 0);
+        variable v_h : unsigned(8 downto 0);
+        variable v_o : signed(8 downto 0);
+        variable v_tr : signed(5 downto 0);
     begin
         if rising_edge(clk) then
             if data_in.avid = '1' and s_avq = '0' then
                 -- commit this line
                 l_tick <= n_tick; l_j <= n_j; l_jk <= n_jk;
-                l_tw <= n_tw; l_bc <= n_bc; l_bw <= n_bw; l_an <= n_an; l_aw <= n_aw;
-                l_l <= n_l; l_r <= n_r; l_alive <= n_alive; l_low <= n_low; l_fxs <= n_fxs;
+                l_tw <= n_tw; l_bw <= n_bw; l_aw <= n_aw;
+                l_tc <= n_tc; l_bc <= n_bcs; l_ac <= n_acs;
+                l_l <= n_l; l_r <= n_r; l_alive <= n_alive; l_low <= n_low;
             end if;
 
             if s_linit = '1' then
@@ -670,80 +702,106 @@ begin
                     when 4 =>
                         if s_flip = '1' then e_yv <= to_unsigned(1079, 11) - e_vy; else e_yv <= e_vy; end if;
                         e_st <= e_st + 1;
-                    when 5 =>       -- q = yv * isy
-                        e_ma <= resize(e_yv, 22); e_mb <= resize(s_isy, 12); e_acc <= (others => '0'); e_mc <= to_unsigned(10, 4);
+                    when 5 =>       -- wave position: yv * 11 / 8 (1/1024 turn; 1.45 turns down the screen)
+                        e_ma <= resize(e_yv, 22); e_mb <= to_unsigned(11, 12); e_acc <= (others => '0'); e_mc <= to_unsigned(4, 4);
                         e_st <= e_st + 1;
-                    when 6 =>
+                    when 6 =>       -- amplitude A = aw * (yv + 256) / 2048 (acc preloaded with aw * 256): grows toward the tip
+                        e_wp <= e_acc(12 downto 3);
+                        e_ma <= resize(e_yv, 22); e_mb <= resize(s_aw, 12); e_acc <= resize(s_aw & x"00", 22); e_mc <= to_unsigned(8, 4);
+                        e_st <= e_st + 1;
+                    when 7 =>
+                        e_A <= e_acc(18 downto 11);
+                        e_t <= (others => '0');
+                        e_st <= e_st + 1;
+                    when 8 =>       -- tube t: parabolic sine of (wp - phase), half-turn h in 512ths
+                        case to_integer(e_t) is
+                            when 0      => v_ps := e_wp - s_phT;
+                            when 1      => v_ps := e_wp - s_phB;
+                            when others => v_ps := e_wp - s_phA;
+                        end case;
+                        e_sg <= v_ps(9);
+                        v_h := v_ps(8 downto 0);
+                        e_ma <= resize(to_unsigned(512, 10) - v_h, 22); e_mb <= resize(v_h, 12);
+                        e_acc <= (others => '0'); e_mc <= to_unsigned(9, 4);
+                        e_st <= e_st + 1;
+                    when 9 =>       -- offset = A * s / 128, s = h (512 - h) / 512 (0..128)
+                        e_ma <= resize(e_A, 22); e_mb <= resize(e_acc(17 downto 9), 12);
+                        e_acc <= (others => '0'); e_mc <= to_unsigned(8, 4);
+                        e_st <= e_st + 1;
+                    when 10 =>      -- the offset goes into the tube's centre; state 24 adds the table centre
+                        v_o := signed(resize(e_acc(14 downto 7), 9));
+                        if e_sg = '1' then v_o := -v_o; end if;
+                        case to_integer(e_t) is
+                            when 0      => n_tc <= resize(v_o, 10);
+                            when 1      => n_bcs <= resize(v_o, 10);
+                            when others => n_acs <= resize(v_o, 10);
+                        end case;
+                        e_t <= e_t + 1;
+                        e_p <= (others => '0'); e_base <= (others => '0');
+                        if e_t = 2 then e_st <= e_st + 1; else e_st <= to_unsigned(8, 6); end if;
+                    when 11 =>      -- table entry p (tw, bc, bw, -ac, aw): q = yv * isy of its tube
+                        e_ma <= resize(e_yv, 22);
+                        case to_integer(e_p) is
+                            when 0      => e_mb <= resize(s_isyT, 12);
+                            when 1 | 2  => e_mb <= resize(s_isyB, 12);
+                            when others => e_mb <= resize(s_isyA, 12);
+                        end case;
+                        e_acc <= (others => '0'); e_mc <= to_unsigned(11, 4);
+                        e_st <= e_st + 1;
+                    when 12 =>
                         if e_acc(21 downto 12) >= 79 then
                             e_ti <= to_unsigned(79, 7); e_fr <= (others => '0');
                         else
                             e_ti <= e_acc(18 downto 12); e_fr <= e_acc(11 downto 8);
                         end if;
                         e_st <= e_st + 1;
-                    when 7 =>       -- vy^2
-                        e_ma <= resize(e_vy, 22); e_mb <= resize(e_vy, 12); e_acc <= (others => '0'); e_mc <= to_unsigned(11, 4);
-                        e_st <= e_st + 1;
-                    when 8 =>
-                        e_vyq <= e_acc(21 downto 10);
-                        e_st <= e_st + 1;
-                    when 9 =>       -- sway at this line: |S| * vy^2 / 2^20
-                        e_ma <= resize(e_vyq, 22);
-                        if s_sway < 0 then e_mb <= unsigned(resize(-s_sway, 12)); else e_mb <= unsigned(resize(s_sway, 12)); end if;
-                        e_acc <= (others => '0'); e_mc <= to_unsigned(7, 4);
-                        e_st <= e_st + 1;
-                    when 10 =>
-                        if s_sway < 0 then
-                            e_fx <= signed(resize(s_fxs, 13)) + signed(resize(e_acc(16 downto 10), 13));
-                        else
-                            e_fx <= signed(resize(s_fxs, 13)) - signed(resize(e_acc(16 downto 10), 13));
+                    when 13 =>      -- read entries ti and ti + 1
+                        if e_p = 1 then
+                            if e_ti >= 45 then n_low <= '1'; else n_low <= '0'; end if;   -- lower flame: dark gaps
                         end if;
-                        e_p <= (others => '0'); e_base <= (others => '0');
-                        e_st <= e_st + 1;
-                    when 11 =>
-                        if e_fx < 0 then
-                            e_fx <= e_fx + signed(resize(s_pf, 13));
-                        elsif e_fx >= signed(resize(s_pf, 13)) then
-                            e_fx <= e_fx - signed(resize(s_pf, 13));
-                        end if;
-                        e_st <= e_st + 1;
-                    when 12 =>      -- flame table: read entries ti and ti + 1
-                        n_fxs <= unsigned(e_fx(10 downto 0));
-                        if e_ti >= 45 then n_low <= '1'; else n_low <= '0'; end if;   -- lower flame: dark gaps
                         s_fta <= e_base + resize(e_ti, 9);
                         e_st <= e_st + 1;
-                    when 13 =>
+                    when 14 =>
                         if e_ti /= 79 then s_fta <= e_base + resize(e_ti, 9) + 1; end if;
                         e_st <= e_st + 1;
-                    when 14 =>
+                    when 15 =>
                         e_v0 <= unsigned(s_ftq);
                         e_st <= e_st + 1;
-                    when 15 =>
+                    when 16 =>
                         e_v1 <= unsigned(s_ftq);
                         e_st <= e_st + 1;
-                    when 16 =>
+                    when 17 =>
                         e_d <= signed(resize(e_v1, 9)) - signed(resize(e_v0, 9));
                         e_st <= e_st + 1;
-                    when 17 =>
+                    when 18 =>
                         v_f := resize(e_d, 13);
                         if e_fr(0) = '1' then e_t1 <= v_f; else e_t1 <= (others => '0'); end if;
                         if e_fr(2) = '1' then e_t2 <= shift_left(v_f, 2); else e_t2 <= (others => '0'); end if;
                         e_st <= e_st + 1;
-                    when 18 =>
+                    when 19 =>
                         v_f := resize(e_d, 13);
                         if e_fr(1) = '1' then e_t1 <= e_t1 + shift_left(v_f, 1); end if;
                         if e_fr(3) = '1' then e_t2 <= e_t2 + shift_left(v_f, 3); end if;
                         e_st <= e_st + 1;
-                    when 19 =>
+                    when 20 =>
                         e_dfr <= e_t1 + e_t2;
                         e_st <= e_st + 1;
-                    when 20 =>
+                    when 21 =>
                         v_f := signed(resize(e_v0, 13)) + shift_right(e_dfr, 4);
                         e_v <= unsigned(v_f(7 downto 0));
                         e_st <= e_st + 1;
-                    when 21 =>      -- scale by sx
-                        e_ma <= resize(e_v, 22); e_mb <= resize(s_sx8, 12); e_acc <= (others => '0'); e_mc <= to_unsigned(9, 4);
+                    when 22 =>      -- scale: centres by sx, widths by sx - tri (thin as it stretches)
+                        case to_integer(e_p) is
+                            when 0      => v_tr := s_trT;
+                            when 2      => v_tr := s_trB;
+                            when 4      => v_tr := s_trA;
+                            when others => v_tr := (others => '0');
+                        end case;
+                        e_ma <= resize(e_v, 22);
+                        e_mb <= unsigned(signed(resize(s_sx8, 12)) - resize(v_tr, 12));
+                        e_acc <= (others => '0'); e_mc <= to_unsigned(9, 4);
                         e_st <= e_st + 1;
-                    when 22 =>
+                    when 23 =>
                         case to_integer(e_p) is
                             when 0      => n_tw <= e_acc(15 downto 8);
                             when 1      => n_bc <= e_acc(15 downto 8);
@@ -753,27 +811,30 @@ begin
                         end case;
                         e_p <= e_p + 1;
                         e_base <= e_base + 80;
-                        if e_p = 4 then e_st <= to_unsigned(23, 6); else e_st <= to_unsigned(12, 6); end if;
-                    when 23 =>
+                        if e_p = 4 then e_st <= e_st + 1; else e_st <= to_unsigned(11, 6); end if;
+                    when 24 =>      -- tube centres = table centre + its wave
                         if s_nocore = '1' then n_tw <= (others => '0'); end if;
+                        n_tc <= n_tc + 4;
+                        n_bcs <= n_bcs + signed(resize(n_bc, 10));
+                        n_acs <= n_acs - signed(resize(n_an, 10));
                         e_st <= e_st + 1;
-                    when 24 =>      -- envelope candidates (tc = 4)
+                    when 25 =>      -- envelope candidates
                         v_big := to_signed(2047, 12);
-                        if n_aw /= 0 then e_aL <= -signed(resize(n_an, 12)) - signed(resize(n_aw, 12));
-                                          e_aR <= -signed(resize(n_an, 12)) + signed(resize(n_aw, 12));
+                        if n_aw /= 0 then e_aL <= resize(n_acs, 12) - signed(resize(n_aw, 12));
+                                          e_aR <= resize(n_acs, 12) + signed(resize(n_aw, 12));
                         else e_aL <= v_big; e_aR <= -v_big; end if;
-                        if n_tw /= 0 then e_tL <= 4 - signed(resize(n_tw, 12));
-                                          e_tR <= 4 + signed(resize(n_tw, 12));
+                        if n_tw /= 0 then e_tL <= resize(n_tc, 12) - signed(resize(n_tw, 12));
+                                          e_tR <= resize(n_tc, 12) + signed(resize(n_tw, 12));
                         else e_tL <= v_big; e_tR <= -v_big; end if;
-                        if n_bw /= 0 then e_bL <= signed(resize(n_bc, 12)) - signed(resize(n_bw, 12));
-                                          e_bR <= signed(resize(n_bc, 12)) + signed(resize(n_bw, 12));
+                        if n_bw /= 0 then e_bL <= resize(n_bcs, 12) - signed(resize(n_bw, 12));
+                                          e_bR <= resize(n_bcs, 12) + signed(resize(n_bw, 12));
                         else e_bL <= v_big; e_bR <= -v_big; end if;
                         e_st <= e_st + 1;
-                    when 25 =>
+                    when 26 =>
                         if e_aL < e_tL then e_m1 <= e_aL; else e_m1 <= e_tL; end if;
                         if e_aR > e_tR then e_m2 <= e_aR; else e_m2 <= e_tR; end if;
                         e_st <= e_st + 1;
-                    when 26 =>
+                    when 27 =>
                         if e_m1 < e_bL then n_l <= e_m1 - 16; else n_l <= e_bL - 16; end if;
                         if e_m2 > e_bR then n_r <= e_m2 + 16; else n_r <= e_bR + 16; end if;
                         if n_tw /= 0 or n_bw /= 0 or n_aw /= 0 then n_alive <= '1'; else n_alive <= '0'; end if;
@@ -798,7 +859,7 @@ begin
                 b_ci <= (others => '0');
                 b_cs <= '1';
                 b_pxv <= (others => '0');
-                b_fx2 <= l_fxs & '0';
+                b_fx2 <= s_fxs & '0';
             elsif g_avid = '1' then
                 v_c := resize(b_cacc, 17) + resize(s_incr, 17);
                 b_cacc <= v_c(15 downto 0);
@@ -876,11 +937,11 @@ begin
             v_h := ((b_ci & l_j & "000") xor (s_seed & s_seed(4 downto 0) & s_seed(7 downto 5))) xor x"A5C3";
             h2 <= v_h + shift_left(v_h, 5);
 
-            -- 2: tube offsets (teardrop centre 4), envelope distances; hash round 2
+            -- 2: tube offsets (centres from the line engine), envelope distances; hash round 2
             p_ci(2) <= p_ci(1);
-            p_uT2 <= resize(p_dx1, 13) - 4;
-            p_uB2 <= resize(p_dx1, 13) - signed(resize(l_bc, 13));
-            p_uA2 <= resize(p_dx1, 13) + signed(resize(l_an, 13));
+            p_uT2 <= resize(p_dx1, 13) - resize(l_tc, 13);
+            p_uB2 <= resize(p_dx1, 13) - resize(l_bc, 13);
+            p_uA2 <= resize(p_dx1, 13) - resize(l_ac, 13);
             p_dl2 <= resize(l_l, 13) - resize(p_dx1, 13);
             p_dr2 <= resize(p_dx1, 13) - resize(l_r, 13);
             v_h := h2 xor shift_right(h2, 7);

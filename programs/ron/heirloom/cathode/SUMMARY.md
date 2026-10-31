@@ -1,6 +1,7 @@
 # Cathode — a cycling S&H colour mosaic with three-tube purple flames
 
-**v0.5.0 (2026-10-27): rebuilt from the photo, built, NOT flashed.** Heirloom #23, from
+**v0.6.0 (2026-10-31, phase 2 round 1): built, NOT flashed** (see [Phase 2](#phase-2)).
+v0.5.0 (2026-10-27) was the rebuild from the photo. Heirloom #23, from
 `photos/WIN_20230407_23_48_05_Pro.jpg`. The v0.1.0 version (posterized video plus two parabolic
 tubes) was judged too abstract and replaced. The photo is a sample-and-hold colour mosaic whose
 colours cycle down every column, with two purple flames keyed over it. Each flame is three shaded
@@ -78,7 +79,12 @@ peaks at 0.57 at the teardrop centre and is about 0.4 in the body and 0.36 in th
    green cell entered from another colour (S7). Then a 2-px box.
 6. **Flame tables.** Per line: five 80-entry tables at 16-line steps (teardrop width, body centre and
    width, arm centre and width), linearly interpolated at `y / length` and scaled by `width`. The
-   flame coordinate is periodic with period `W / count`, plus a sway that grows with (y/1024)².
+   flame coordinate is periodic with period `W / count`.
+   - **Motion (v0.6).** A wave runs down each tube from its base to its tip: 1.45 turns down the
+     screen, its amplitude growing from 0.19× at the base to 1× at the screen's far edge. Each tube
+     rides it at its own phase and rate, so the three writhe out of step and cross.
+   - Each tube's length flickers ±32 on `sy8`, on a triangle LFO taken from the next tube's wave
+     phase, and its width scale moves the other way (thinner as it stretches).
 7. **Tubes per pixel.** Three tubes in parallel; teardrop over body over arm, all opaque.
    - Blue ramps over the rim (±16 px).
    - Red is a shift-add tent (the body's left 22 px are magenta). In Video mode red is the live
@@ -96,7 +102,7 @@ peaks at 0.57 at the teardrop centre and is about 0.4 in the body and 0.36 in th
 | K1 Cells | the mosaic cells | cell width 160 → 12 px, square law (42.2 px at 487) |
 | K2 Rows | the mosaic rows | row height 64 → 4 lines, square law (13.9 at 502) |
 | K3 Cycle | the colours cycling down each column | ramp gain 0 → 3× (1× at 342). 0 = every column one flat colour |
-| K4 Speed | motion | bipolar, still in the centre ±8: column colours roll down/up, noisy cells re-roll, flames sway |
+| K4 Speed | motion | bipolar, still in the centre ±8: column colours roll down/up, noisy cells re-roll, the flames writhe (tube waves at 0.75 / 1 / 0.625 × speed, travelling base → tip; tip → base when turned left) and their tips lick |
 | K5 Flames | the two flames | flames across, 1 → 4 (2.03 at 351) |
 | K6 Patch | the whole palette | RGB cable patch: RGB (photo) / RBG / GRB / GBR / BRG / BGR. A labelled default (index < 6) is read as its index |
 | S7 Fringe | the blue spike on green cells | Blue (photo) / Off |
@@ -104,7 +110,7 @@ peaks at 0.57 at the teardrop centre and is about 0.4 in the body and 0.36 in th
 | S9 Core | the teardrop tube | On (photo) / Off |
 | S10 Flip | the flames' direction | Down (photo) / Up |
 | S11 Source | the mosaic's red bit, the tubes' red | Video (default) / Osc |
-| P12 Flames | the flames (headline) | 0 % = short stubs at the top (×0.35 length, ×0.75 width); 50 % = the photo; 100 % = two tall purple pillars (×2.2, ×1.25) with the mosaic only between them |
+| P12 Flames | the flames (headline) | 0 % = short stubs at the top (×0.35 length, ×0.75 width, barely writhing); 50 % = the photo's flames, writhing up to ~73 px; 100 % = two tall purple pillars (×2.2, ×1.25) writhing like tentacles (up to ~135 px), with the mosaic only between them |
 
 Defaults: K1 487, K2 502, K3 342, K4 600, K5 351, labelled switches and K6 at label 0, P12 512.
 
@@ -129,15 +135,20 @@ woven in rather than used as the mosaic's source.
   - the cell and row increments (two-step k² products) and the increment per real line;
   - length (from P12), `isy = 65536/length`, width;
   - the virtual width and flame period `Pf = Wv·1024/(1024 + 3·k5)`, and the flame origin;
-  - the sway amplitude (40 px · sin);
+  - three per-tube `isy = 65536 / (sy8 ± tri)` divisions (the length flicker) and the writhe
+    amplitude `aw = 16 + 3·p12/16`;
   - the grid anchors and the cycle gain.
-  - Motion: roll += sp/8 + sp/32 (Q8 rows); re-seed every 8192/|sp| fields; sway phase += 2|sp|.
-- **Per-line engine.** Kicked at the source avid rise; it computes the next line in about 170 clocks
+  - Motion: roll += sp/8 + sp/32 (Q8 rows); re-seed every 8192/|sp| fields; the three tube
+    phases (10-bit turn) += sp × 3/16, sp/4, sp × 5/32.
+- **Per-line engine.** Kicked at the source avid rise; it computes the next line in about 260 clocks
   (inside SD's 858). It does:
   - the row step and first-line flag;
-  - Jk, the table index, and the sway from vy²;
-  - the flame start offset;
-  - five table reads (one flame-table EBR) with 4-bit linear interpolation and ×width;
+  - Jk;
+  - the wave position (yv·11/8) and amplitude (aw·(yv + 256)/2048), then per tube a parabolic
+    sine h·(512 − h) of (position − phase) times the amplitude, which becomes the tube's centre
+    offset;
+  - five table reads (one flame-table EBR), each at its own tube's length (yv·isy), with 4-bit
+    linear interpolation, ×width for the centres and ×(width ∓ tri) for the widths;
   - the outline left/right edges, plus the lower-flame and alive flags.
 - **Pixel path, 24 stages, one latency in every mode:**
   - 1–6: 16-bit 3-round add/xorshift hash; column ROM; rate × Jk as shift-adds; noise thresholds;
@@ -157,7 +168,58 @@ woven in rather than used as the mosaic's source.
     with one lerp multiply each; tube red as an 8×4 multiply; YUV in Q6.
 - **Hash.** Correlations < 0.05 (`imodel.py` checks).
 
+## Phase 2
+Ron's note 2026-10-31 (on v0.5.0): instead of the flames just lightly swaying back and forth, they
+need more dynamic shape and movement. His biggest complaint with the program so far.
+
+**v0.6.0 (round 1):**
+- **The sway is gone.** It bent the whole flame group by ±40 px at the bottom, slowly.
+- **A wave runs down each tube** from its base to its tip (1.45 turns down the screen), its
+  amplitude growing toward the tip: 0.19× at the base, 1× at the screen's far edge. In virtual
+  pixels: up to ~73 px at the photo's P12, 10 at 0 %, ~135 at 100 %.
+- **Each tube rides its own phase** at 0.75 / 1 / 0.625 of the K4 rate (teardrop / body / arm),
+  starting a third of a turn apart. The tubes writhe out of step and cross. Teardrop over body
+  over arm stays the priority, so they pass in front of each other, and the magenta / black gaps
+  between them open and close. At the default speed the body wave takes ~0.8 s per turn.
+- **Tips lick.** Each tube's length moves ±32 on `sy8` (±12.5 % at the photo's length, ±35 % for
+  the 0 % stubs) on a triangle LFO, the next tube's wave phase. Its width scale moves ∓32, so a
+  tube thins as it stretches.
+- **K4 turned left** runs the waves tip → base. The centre (±8) still freezes everything.
+- **P12** now also sets the writhe: `aw = 16 + 3·p12/16`. 100 % gives tall pillars writhing like
+  tentacles.
+- **Controls unchanged otherwise.** No control was re-assigned. The amount of writhe rides on P12
+  rather than a knob of its own; if Ron wants it separate, a control would have to give way.
+- **Implementation.** The line engine computes the wave position and amplitude per line, then for
+  each tube a parabolic sine h·(512 − h) of (position − phase) times the amplitude. That becomes
+  the tube's centre offset (the teardrop centre is now a per-line value). The five table reads each
+  use their own tube's `isy`. The field sequencer does three `isy` divisions instead of one. The
+  sway's sine ROM, vy² product and per-line flame-origin wrap are gone, and the beam takes the
+  field's flame origin directly.
+- **Fit.** 7298 LC (95 %, v0.5: 7020). Trims: the tube offsets go straight into the next-line
+  centre registers; 10-bit phases; the amplitude's +256 as an accumulator preload. A `rom_style`
+  attribute did not move the column table (64 × 15) into EBR.
+- **Checks.**
+  - `proto6.py` (imodel.py with the new flame functions) gave the amplitudes: `p6_motion.png`,
+    `p6_amp.png`, `p6_int.png`.
+  - The GHDL render (720p60, decimation 1, Osc, defaults; `rtl6_osc_def.png`) draws the writhing
+    tubes, halo and dark lower gaps as the proto does. K6 sat at 512 in that sim (patch GBR), so
+    its colours are green / red; on hardware K6 defaults to RGB.
+
 ## Status
+- **v0.6.0** built 2026-10-31, router2. 7268–7298 / 7680 LC (95 %), 2 / 32 EBR, iceunpack OK × 6.
+  - Builder seeds: HD Analog s1 75.79, SD Analog **s2** 85.67 (s1 ran into the 360 s timeout),
+    HD HDMI s2 77.91, SD HDMI s1 82.77, HD Dual s1 79.33, SD Dual s1 84.35 MHz.
+  - **HD seeds re-picked for HDMI pin skew** (router2 screen of HD HDMI s1–24 and HD Analog / HD
+    Dual s1–12, `.heirloom_work/rb_cathode/skew/screen.txt`), hand-installed and repacked:
+    - HD HDMI **s8**: 79.42 MHz, HSYNC +2.14 / data ≤ −1.00 ns. The only seed inside the window;
+      the builder's s2 sat at −0.66 / ≤ −0.58.
+    - HD Analog **s9**: 77.96 MHz, HDMI HSYNC −1.01 / data ≤ −1.26 ns (s1 was −1.15 / ≤ −0.87).
+    - HD Dual **s2**: 79.95 MHz, −2.93 / ≤ −1.86 ns (s1's data reached −0.34).
+  - A plain rebuild gives the builder seeds; to reproduce the shipped HD bitstreams, route the
+    regenerated json with `skew/route.sh` (`RT=router2`) at those seeds (byte-exact: s1 / s2
+    reproduced the builder's bins). The builder's vmprog is kept as
+    `skew/cathode_v060_builder.vmprog`.
+  - `out/rev_b/ron/heirloom/cathode.vmprog` (438,307 bytes). Not flashed.
 - **v0.5.0** built 2026-10-27, router2, all six configs on **seed 1**.
 - Fmax (last post-route line): HD Analog 86.16, **HD HDMI 75.15 (thin)**, HD Dual 79.65, SD Analog
   77.94, SD HDMI 81.56, SD Dual 79.02 MHz.
