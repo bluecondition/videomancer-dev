@@ -8,7 +8,9 @@ package cutout_pkg is
     type t_map is array(0 to 1023) of std_logic_vector(7 downto 0);
     type t_tint is array(0 to 511) of std_logic_vector(7 downto 0);
     type t_det is array(0 to 4095) of std_logic_vector(1 downto 0);
-    type t_prm is array(0 to 31) of std_logic_vector(23 downto 0);
+    type t_prm is array(0 to 31) of std_logic_vector(5 downto 0);
+    type t_swp is array(0 to 31) of unsigned(4 downto 0);
+    type t_cram is array(0 to 255) of std_logic_vector(31 downto 0);
     type t_tex is array(0 to 31) of std_logic_vector(2 downto 0);
     type t_paint is array(0 to 7) of std_logic_vector(31 downto 0);
     type t_zt is array(0 to 31) of unsigned(12 downto 0);
@@ -509,10 +511,47 @@ package cutout_pkg is
         "00", "00", "00", "00", "00", "00", "00", "00", "00", "00", "00", "00", "00", "00", "00", "00", "00", "00", "00", "00", "00", "00", "00", "00", "00", "00", "00", "00", "00", "00", "00", "00"
     );
     constant C_PRM : t_prm := (
-        x"00001F", x"332000", x"2D9900", x"D92480", x"221308", x"7EF388", x"C95FA6", x"3FA884",
-        x"562382", x"DDAA01", x"75D181", x"08FB8C", x"B48C8A", x"7B5B8A", x"653D0D", x"BDDFA7",
-        x"2B77A7", x"7E1405", x"8F6E8B", x"04AD89", x"3FE70E", x"8B0903", x"2E588F", x"327815",
-        x"142814", x"24C816", x"248010", x"143C11", x"327819", x"348D38", x"24001A", x"08B41D"
+        "011111", "000000", "000000", "100000", "001000", "001000", "100110", "000100",
+        "000010", "100001", "000001", "001100", "101010", "001010", "001101", "100111",
+        "000111", "000101", "101011", "001001", "001110", "100011", "001111", "010101",
+        "010100", "010110", "010000", "010001", "011001", "011000", "011010", "011101"
+    );
+    constant C_SWP : t_swp := (
+        to_unsigned(25, 5), to_unsigned(20, 5), to_unsigned(24, 5), to_unsigned(13, 5), to_unsigned(14, 5), to_unsigned(26, 5), to_unsigned(18, 5), to_unsigned(23, 5), to_unsigned(22, 5), to_unsigned(12, 5), to_unsigned(15, 5), to_unsigned(19, 5), to_unsigned(7, 5), to_unsigned(1, 5), to_unsigned(10, 5), to_unsigned(5, 5), to_unsigned(15, 5), to_unsigned(12, 5), to_unsigned(6, 5), to_unsigned(8, 5), to_unsigned(9, 5), to_unsigned(1, 5), to_unsigned(7, 5), to_unsigned(10, 5), to_unsigned(5, 5), to_unsigned(1, 5), to_unsigned(5, 5), to_unsigned(27, 5), to_unsigned(28, 5), to_unsigned(22, 5), to_unsigned(18, 5), to_unsigned(31, 5)
+    );
+    constant C_CRAM : t_cram := (
+        x"09DC9800", x"2000CC00", x"97EAB402", x"23D66401", x"12008802", x"F200F803", x"5DEB2333", x"A7FCFB6D",
+        x"22005803", x"A9EC7400", x"D000D363", x"F9FA2003", x"8BC4D001", x"59E0EBBB", x"3BF69376", x"DDE9F35B",
+        x"75C7AC03", x"13C0F800", x"6DF63C01", x"ABA40FD3", x"E5BAFBB2", x"08002C02", x"5800B801", x"7800C800",
+        x"28005000", x"C78E9000", x"80009000", x"3BCC5000", x"7800C800", x"8C01D002", x"00008F40", x"B4001F48",
+        x"DA00F401", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000",
+        x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000",
+        x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000",
+        x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000",
+        x"60484800", x"00107400", x"602C5000", x"2054A400", x"40346400", x"00406400", x"B02CD000", x"30089400",
+        x"40B84400", x"A0286400", x"1028A000", x"600C8C00", x"A0786000", x"30404800", x"70148C00", x"3030A800",
+        x"60749400", x"A0801800", x"2014A000", x"70B83000", x"308C5000", x"00886000", x"002CB800", x"0048D000",
+        x"40B42000", x"20E42400", x"00981800", x"60688800", x"40BC4400", x"00C82000", x"5030C000", x"9098B800",
+        x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000",
+        x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000",
+        x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000",
+        x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000",
+        x"DD4C1495", x"E8661C72", x"245B3F2A", x"EA3292A6", x"E1452223", x"517DB97B", x"0713CACB", x"2C7EA222",
+        x"E92DB97A", x"2D3A051A", x"406BAFAE", x"5511A7D1", x"1E68BF29", x"05779A47", x"F64B29FE", x"477BCAC9",
+        x"1357D2A6", x"E27C374E", x"0F1E8CF5", x"2E09851A", x"4B7F319F", x"DC172FAE", x"045CB19E", x"14640ACB",
+        x"EC28374F", x"3C480CF6", x"184829FE", x"F62827D1", x"14641495", x"1E695C73", x"D8480519", x"32101A45",
+        x"457ABFFC", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000",
+        x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000",
+        x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000",
+        x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000",
+        x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000",
+        x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000",
+        x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000",
+        x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000",
+        x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000",
+        x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000",
+        x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000",
+        x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000", x"00000000"
     );
     constant C_TEX : t_tex := (
         "100", "100", "101", "001", "001", "010", "000", "000", "011", "011", "010", "001", "001", "001", "000", "001",
@@ -523,6 +562,6 @@ package cutout_pkg is
         x"187A0352", x"16269370", x"2D44B280", x"2A25294A"
     );
     constant C_ZT : t_zt := (
-        to_unsigned(4344, 13), to_unsigned(4071, 13), to_unsigned(3815, 13), to_unsigned(3575, 13), to_unsigned(3350, 13), to_unsigned(3139, 13), to_unsigned(2942, 13), to_unsigned(2757, 13), to_unsigned(2583, 13), to_unsigned(2421, 13), to_unsigned(2268, 13), to_unsigned(2126, 13), to_unsigned(1992, 13), to_unsigned(1867, 13), to_unsigned(1749, 13), to_unsigned(1639, 13), to_unsigned(1536, 13), to_unsigned(1439, 13), to_unsigned(1349, 13), to_unsigned(1264, 13), to_unsigned(1184, 13), to_unsigned(1110, 13), to_unsigned(1040, 13), to_unsigned(975, 13), to_unsigned(913, 13), to_unsigned(856, 13), to_unsigned(802, 13), to_unsigned(752, 13), to_unsigned(704, 13), to_unsigned(660, 13), to_unsigned(618, 13), to_unsigned(580, 13)
+        to_unsigned(227, 13), to_unsigned(241, 13), to_unsigned(257, 13), to_unsigned(273, 13), to_unsigned(291, 13), to_unsigned(309, 13), to_unsigned(329, 13), to_unsigned(350, 13), to_unsigned(372, 13), to_unsigned(395, 13), to_unsigned(421, 13), to_unsigned(447, 13), to_unsigned(476, 13), to_unsigned(506, 13), to_unsigned(538, 13), to_unsigned(573, 13), to_unsigned(609, 13), to_unsigned(648, 13), to_unsigned(689, 13), to_unsigned(733, 13), to_unsigned(779, 13), to_unsigned(829, 13), to_unsigned(882, 13), to_unsigned(938, 13), to_unsigned(997, 13), to_unsigned(1061, 13), to_unsigned(1128, 13), to_unsigned(1200, 13), to_unsigned(1277, 13), to_unsigned(1358, 13), to_unsigned(1444, 13), to_unsigned(1536, 13)
     );
 end package cutout_pkg;

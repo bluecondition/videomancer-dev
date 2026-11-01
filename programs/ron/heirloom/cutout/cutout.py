@@ -23,10 +23,14 @@ scripts live in .heirloom_work/rb_cutout/ (pieces.py, features.py, mapbuild2.py,
   C_DET      4096 x 2: teeth (28 rows x 105 columns of 4 map units, address row * 105 + col; 0 none,
              1 dark rim, 2 stone, 3 highlight) and the "Love." glyph (64 x 20 cells of 2 map units, two
              cells per entry, from address 2944).
-  C_PRM      32 x 24: per id {fringe, drift sign, ov(6), ou(7), flip(2), k(2), family(5)}.
+  C_PRM      32 x 6: per id {fringe, family(5)}.
+  C_SWP      32 x 5: S8 Inks = Swap, family -> family.
+  C_CRAM     256 x 32: the crop RAM (v0.6): per-slot crop words (0..32, at the photo), slot constants (64.., 128..);
+             see scrap_words() / crop_ram().
   C_TEX      32 x 3: surface texture per family (0 none 1 grain 2 streaks 3 weave 4 specks 5 hair).
   C_PAINT    8 x 30: the K5 Paint wheel (drawn-space Y, U, V).
-  C_ZT       32 x 13: K2 Zoom -> store px per map unit, Q.12 (1536 = 0.375 at the centre, 3 octaves).
+  C_ZT       32 x 13: K2 Crops below the centre -> store px per map unit, Q.12 (227 at 0: one camera frame
+             spans the head .. 1536 = 0.375, the photo).
 """
 import os
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -41,13 +45,97 @@ TEX = [4, 4, 5, 1, 1, 2, 0, 0, 3, 3, 2, 1, 1, 1, 0, 1, 1, 0, 0, 0, 0, 1, 1, 1, 0
 PAINT = [[942, 576, 124], [724, 760, 250], [502, 860, 380], [502, 800, 760], [391, 640, 850], [354, 420, 880], [724, 300, 640], [674, 330, 330]]
 ZT = [4344, 4071, 3815, 3575, 3350, 3139, 2942, 2757, 2583, 2421, 2268, 2126, 1992, 1867, 1749, 1639, 1536, 1439, 1349, 1264, 1184, 1110, 1040, 975, 913, 856, 802, 752, 704, 660, 618, 580]
 
+# v0.6 S8 Inks = Swap: family -> family (scrap blues/blacks to warm inks of similar luma, the food to cool ones)
+SWAP = [25, 20, 24, 13, 14, 26, 18, 23, 22, 12, 15, 19, 7, 1, 10, 5,
+        15, 12, 6, 8, 9, 1, 7, 10, 5, 1, 5, 27, 28, 22, 18, 31]
+
+# v0.6 per-scrap crop words.  Slot s = 0..31 is map id s (slot 0, the ground, is the teeth instead); slot 32 is
+# the camera mirror (S10).  Per field the sequencer computes, per slot (A Q.9 from the K2 Crops glide g: g below
+# 512, 3g - 1024 above, so 0 .. 1 (the photo) .. 4):
+#   ph = Tph << e;  t = (tri8(ph + 0x4000) xor 255 * su) - 128;  Du = t * cu   (and Dv: drift on its own line)
+#   Wu = ((2A * ((ou - W0U) * 256 + Du)) >> 10) + W0U * 256   (15 b, Q.8 store px);  Wv likewise (14 b, W0V = 0)
+# so at g = 0 every slot reads (W0U, W0V): the scraps in register, and with ZQ (below) one camera frame spans the
+# head, centred.  Flips and scale step one slot at a time along the travel: below the centre a slot takes its
+# photo flip / scale once g/32 >= t1 (before that: no flip, k 0, in register); above it, its flip turns by f2
+# once g/32 - 16 >= t2 and its scale toggles once g/32 - 16 >= t3.
+W0U, W0V = 40, 0
+ZQ = [int(round(227 * (1536 / 227) ** (i / 31))) for i in range(32)]   # K2 below 512: store px per mu, Q.12
+ZQ[31] = 1536
+
+def _crop_consts():
+    import math, random
+    rng = random.Random(55)
+    perm = list(range(32)); rng.shuffle(perm)
+    rows = []
+    for s in range(32):
+        v = PRM[s]
+        fl, k, ou, ov = (v >> 7) & 3, (v >> 5) & 3, (v >> 9) & 127, (v >> 16) & 63
+        if s == 0:
+            fl, k, ou, ov = 0, 0, 5, 38                         # the teeth
+        th = rng.uniform(0, 2 * math.pi); a = rng.uniform(22, 60)
+        cu, cv = int(round(abs(a * math.cos(th)))), int(round(abs(a * math.sin(th))))
+        rows.append(dict(e=rng.choice([0, 0, 1, 1, 2]), su=int(math.cos(th) < 0), sv=int(math.sin(th) < 0),
+                         f2=rng.choice([1, 2, 3]), cu=cu, cv=cv, ou=ou - W0U, ov=ov - W0V, fl=fl, k=k,
+                         t1=1 + perm[s] % 15, t2=1 + (perm[s] * 7 + 3) % 15, t3=1 + (perm[s] * 11 + 5) % 15))
+    # the camera mirror: store centre (64, 32) at the soup centre at the photo's zoom (store x 11460, y 41844
+    # there, Q.8), x mirrored, still; no extra flip / scale step until the far end
+    rows.append(dict(e=0, su=0, sv=0, f2=0, cu=0, cv=0, ou=((64 * 256 + 11460 + 128) >> 8) - W0U,
+                     ov=((32 * 256 - 41844 + 128) >> 8) % 64 - W0V, fl=1, k=0, t1=15, t2=15, t3=15))
+    return rows
+CROP = _crop_consts()
+
+def _tri8(p):
+    p &= 0xFFFF
+    v = (p >> 7) & 255
+    return 255 - v if p & 0x8000 else v
+
+def crops_a(g):
+    return g if g < 512 else 3 * g - 1024
+
+def crops_zq(g):
+    return ZQ[g >> 4] if g < 512 else 1536
+
+def scrap_words(g, tph):
+    """The per-field slot words as the RTL sequencer computes them: [(Wu, Wv, fl, k)] * 33."""
+    A2 = crops_a(g) << 1
+    gi = g >> 5
+    out = []
+    for c in CROP:
+        ph = (tph << c['e']) & 0xFFFF
+        tu = (_tri8(ph + 0x4000) ^ (255 * c['su'])) - 128
+        tv = (_tri8(ph + 0x4000) ^ (255 * c['sv'])) - 128
+        du, dv = tu * c['cu'], tv * c['cv']
+        wu = (((A2 * ((c['ou'] << 8) + du)) >> 10) + (W0U << 8)) & 0x7FFF
+        wv = (((A2 * ((c['ov'] << 8) + dv)) >> 10) + (W0V << 8)) & 0x3FFF
+        if gi < 16:
+            on = gi >= c['t1']
+            fl, k = (c['fl'], c['k']) if on else (0, 0)
+        else:
+            fl = c['fl'] ^ (c['f2'] if gi - 16 >= c['t2'] else 0)
+            k = c['k'] ^ (1 if gi - 16 >= c['t3'] else 0)
+        out.append((wu, wv, fl, k))
+    return out
+
+def crop_ram():
+    """crop RAM init (256 x 32, two 16-bit halves): 0..32 slot words {Wu(15) k | Wv(14) flip(2)} at the photo
+    (A = 1, T = 0); 64 + s / 128 + s the slot constants:
+    A = e(2) su sv - - cu(8) cv(8) -;  B = ou'(8) ov'(7) fl(2) k t1(4) t2(4) t3(4) f2(2)  (ou', ov' signed)."""
+    w = [0] * 256
+    for s, (wu, wv, fl, k) in enumerate(scrap_words(512, 0)):
+        w[s] = (wu << 17) | (k << 16) | (wv << 2) | fl
+    for s, c in enumerate(CROP):
+        w[64 + s] = (c['e'] << 30) | (c['su'] << 29) | (c['sv'] << 28) | (c['cu'] << 18) | (c['cv'] << 10)
+        w[128 + s] = ((c["ou"] & 255) << 24) | ((c['ov'] & 127) << 17) | (c['fl'] << 15) | (c['k'] << 14) \
+            | (c['t1'] << 10) | (c['t2'] << 6) | (c['t3'] << 2) | c['f2']
+    return w
+
 def unhex(s, w):
     n = (w + 3) // 4
     return [int(s[i:i + n], 16) for i in range(0, len(s), n)]
 
 def arr(name, typ, vals, w, per=16):
     out = ["    constant %s : %s := (" % (name, typ)]
-    items = ['"' + format(v, '0%db' % w) + '"' if w < 4 else 'x"' + format(v, '0%dX' % (w // 4)) + '"' for v in vals]
+    items = ['"' + format(v, '0%db' % w) + '"' if w % 4 else 'x"' + format(v, '0%dX' % (w // 4)) + '"' for v in vals]
     for i in range(0, len(items), per):
         out.append("        " + ", ".join(items[i:i + per]) + ("," if i + per < len(items) else ""))
     out.append("    );")
@@ -60,7 +148,9 @@ def emit():
          "    type t_map is array(0 to 1023) of std_logic_vector(7 downto 0);",
          "    type t_tint is array(0 to 511) of std_logic_vector(7 downto 0);",
          "    type t_det is array(0 to 4095) of std_logic_vector(1 downto 0);",
-         "    type t_prm is array(0 to 31) of std_logic_vector(23 downto 0);",
+         "    type t_prm is array(0 to 31) of std_logic_vector(5 downto 0);",
+         "    type t_swp is array(0 to 31) of unsigned(4 downto 0);",
+         "    type t_cram is array(0 to 255) of std_logic_vector(31 downto 0);",
          "    type t_tex is array(0 to 31) of std_logic_vector(2 downto 0);",
          "    type t_paint is array(0 to 7) of std_logic_vector(31 downto 0);",
          "    type t_zt is array(0 to 31) of unsigned(12 downto 0);"]
@@ -70,11 +160,13 @@ def emit():
     L.append(arr("C_TU", "t_tint", unhex(TU, 8), 8))
     L.append(arr("C_TV", "t_tint", unhex(TV, 8), 8))
     L.append(arr("C_DET", "t_det", [int(c) for c in DET], 2, 32))
-    L.append(arr("C_PRM", "t_prm", PRM, 24, 8))
+    L.append(arr("C_PRM", "t_prm", [(((v >> 23) & 1) << 5) | (v & 31) for v in PRM], 6, 8))
+    L.append("    constant C_SWP : t_swp := (\n        " + ", ".join("to_unsigned(%d, 5)" % v for v in SWAP) + "\n    );")
+    L.append(arr("C_CRAM", "t_cram", crop_ram(), 32, 8))
     L.append(arr("C_TEX", "t_tex", TEX, 3, 16))
     L.append(arr("C_PAINT", "t_paint", [(y << 20) | (u << 10) | v for (y, u, v) in PAINT], 32, 4).replace('x"', 'x"').replace('"', '"'))
     zt = ["    constant C_ZT : t_zt := ("]
-    zt.append("        " + ", ".join("to_unsigned(%d, 13)" % v for v in ZT))
+    zt.append("        " + ", ".join("to_unsigned(%d, 13)" % v for v in ZQ))
     zt.append("    );")
     L.append("\n".join(zt))
     L.append("end package cutout_pkg;")

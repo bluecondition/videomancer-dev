@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Cutout v0.5.0 -- Heirloom #55 (2026-10-28), rebuilt from tezcatlipoca.jpg (a paper collage).
+-- Cutout v0.6.0 -- Heirloom #55 (phase 2, 2026-11-01), rebuilt from tezcatlipoca.jpg (a paper collage).
 --
 -- The collage: a skull-like head in profile, facing left, cut out of a flat cadmium-yellow
 -- ground and filled with overlapping torn magazine scraps -- blues, teals, glossy blacks, a sea,
@@ -15,21 +15,26 @@
 -- (two triangle plane waves + a positional hash) to it: ragged torn edges, white paper-core
 -- fringes on a third of them, a clean painted head edge.  Every scrap prints the camera picture
 -- (Source = Osc: a generated magazine photo) from a 128 x 64 x 4-bit store at its own crop, scale
--- and flip, through its own ink ramp (16 luma quantiles of that scrap family in the photo).  The
+-- and flip, drifting on its own line, through its own ink ramp (16 luma quantiles of that scrap family
+-- in the photo).  The crop, flip and scale come per pixel from a slot word per scrap that the field
+-- sequencer recomputes every field (the scraps are separate modules: K2 and K6 patch into all of them).  The
 -- soup and its cream rim are chord quadratics (one squarer), the cup, saucer, garnish, plate, plate
 -- rim, gravy and pastries come from the map (rings from the distance), the teeth and the "Love."
 -- glyph from a 4096 x 2 detail ROM, the forks are per-line bars.
 --
---   K1  Rag      torn-edge raggedness: scissor-clean .. the photo .. shredded
---   K2  Zoom     the size of the pictures in the scraps (3 octaves, 32 steps)
---   K3  Ink      texture contrast of the scraps: flat paper .. the photo .. hard
+--   K1  Rag      torn-edge raggedness: scissor-clean .. the photo .. shredded; the white paper-core
+--                fringe with it (none .. the photo's .. thick, on every scrap)
+--   K2  Crops    0 = every scrap prints one camera frame in register, zoomed to span the head; 50 % =
+--                the photo's crops; up: each scrap's crop slides off on its own, flips and rescales
+--   K3  Ink      texture contrast of the scraps: flat paper .. the photo .. hard 2-tone
 --   K4  Jaw      the jaw drops open (0 = closed, the photo)
 --   K5  Paint    the ground: yellow (the photo) and seven more poster paints
---   K6  Speed    bipolar: the crops pan, the Osc photo drifts, the torn strips sway (centre = still)
+--   K6  Speed    bipolar: each scrap's picture drifts on its own line and rate, "Love." crawls, the
+--                Osc photo drifts, the torn strips sway (centre = still)
 --   S7  Facing   Left (the photo) / Right (mirrored)
---   S8  Fringe   On / Off (the white torn paper core)
+--   S8  Inks     Photo / Swap (the scraps trade ink ramps: a warm head, a cool cup and plate)
 --   S9  Chatter  Off / On (the jaw chatters, at least a third open)
---   S10 Eye      Soup / Mirror (the soup becomes Tezcatlipoca's obsidian mirror: glossy black)
+--   S10 Eye      Soup / Mirror (the soup becomes Tezcatlipoca's mirror: the live camera, mirrored, in grey)
 --   S11 Source   Video / Osc
 --   P12 TEAR     0 = the intact collage; up: the head tears along its horizontal tears into eight
 --                strips that slide apart and sway; 100 % = flung across the frame
@@ -37,8 +42,8 @@
 -- Geometry in map units (0.75 virtual px, 1080 virtual lines) from the timing ID: the same
 -- picture at SD, 720p and 1080p, the cup and plate round on 4:3.  Engines: a field sequencer
 -- (one serial multiplier: zoom products, jaw, eight strip offsets into a strip RAM that also
--- holds the zoom / rag / paint tables) and a line prep in hblank (row DDAs, jaw, strip, map
--- rows, cup chord, teeth / glyph rows).  Generated avid; output conditioning (luma [1 2 1],
+-- holds the zoom / rag / paint tables, then five ops per scrap slot into the crop RAM) and a line
+-- prep in hblank (row DDAs, jaw, strip, map rows, cup chord, teeth / glyph rows).  Generated avid; output conditioning (luma [1 2 1],
 -- chroma [1 2 2 2 2 2 2 2 1]/16, luma to ~777) before the blanking gate.  Latency 32 in every
 -- mode.  Colours in the hardware convention (u = Cr, v = Cb), see cutout.py.
 
@@ -140,6 +145,10 @@ architecture cutout of program_top is
     begin
         if p(15) = '1' then return not p(14 downto 7); else return p(14 downto 7); end if;
     end function;
+    function f_tri12(p : unsigned(11 downto 0)) return unsigned is  -- the same over a 12-bit phase
+    begin
+        if p(11) = '1' then return not p(10 downto 3); else return p(10 downto 3); end if;
+    end function;
     type t_g5 is array (0 to 31) of unsigned(4 downto 0);
     constant C_G5 : t_g5 := (to_unsigned(0, 5), to_unsigned(1, 5), to_unsigned(1, 5), to_unsigned(1, 5), to_unsigned(2, 5),
         to_unsigned(2, 5), to_unsigned(2, 5), to_unsigned(2, 5), to_unsigned(3, 5), to_unsigned(3, 5), to_unsigned(3, 5),
@@ -199,6 +208,21 @@ architecture cutout of program_top is
     end function;
     signal r_ram : t_srm := f_srm_init;
     attribute no_rw_check of r_ram : signal is true;
+    -- crop RAM, two 16-bit halves read together: 0..32 slot words {Wu(15) k | Wv(14) flip(2)}, each half
+    -- written by its own sequencer op every field; 64.. / 128.. the slot constants
+    type t_crh is array (0 to 255) of std_logic_vector(15 downto 0);
+    function f_crh(hi : boolean) return t_crh is
+        variable r : t_crh;
+    begin
+        for i in 0 to 255 loop
+            if hi then r(i) := C_CRAM(i)(31 downto 16); else r(i) := C_CRAM(i)(15 downto 0); end if;
+        end loop;
+        return r;
+    end function;
+    signal c_ramh : t_crh := f_crh(true);
+    signal c_raml : t_crh := f_crh(false);
+    attribute no_rw_check of c_ramh : signal is true;
+    attribute no_rw_check of c_raml : signal is true;
 
     signal b_we : std_logic := '0';
     signal b_wa, b_ra : unsigned(12 downto 0) := (others => '0');
@@ -218,6 +242,11 @@ architecture cutout of program_top is
     signal r_we : std_logic := '0';
     signal r_wa, r_ra : unsigned(7 downto 0) := (others => '0');
     signal r_wd, r_q, r_rq : std_logic_vector(15 downto 0) := (others => '0');
+    signal c_weh, c_wel : std_logic := '0';
+    signal c_wdh, c_wdl : std_logic_vector(15 downto 0) := (others => '0');
+    signal c_ra, q_ca : unsigned(7 downto 0) := (others => '0');
+    signal c_qh, c_ql : std_logic_vector(15 downto 0) := (others => '0');
+    signal c_rq : std_logic_vector(31 downto 0) := (others => '0');
 
     ---------------------------------------------------------------------------
     -- timing, controls, field values
@@ -235,16 +264,22 @@ architecture cutout of program_top is
     signal s_zc : unsigned(10 downto 0) := (others => '0');
     signal s_avq : std_logic := '0';
     signal s_hcnt, s_wmax, s_w : unsigned(11 downto 0) := to_unsigned(1920, 12);
-    signal s_mir, s_frg, s_cht, s_eye, s_osc : std_logic := '0';
+    signal s_mir, s_swp, s_cht, s_eye, s_osc : std_logic := '0';
     signal s_spd : signed(9 downto 0) := (others => '0');
-    -- glides (Q.3): P12, K1, K2, K3, K4, K5
+    -- P12 glide (Q.3); K2 deadband latch; 32-step hysteresis indices: K1, K3, K5
     signal s_g12 : unsigned(12 downto 0) := (others => '0');                      -- P12 glide (Q.3)
+    signal s_g2 : unsigned(9 downto 0) := to_unsigned(512, 10);                    -- K2 Crops, powers up at the photo
     signal gl_d : signed(13 downto 0) := (others => '0');
-    signal s_h1, s_h2, s_h3 : unsigned(4 downto 0) := to_unsigned(16, 5);           -- power up at the defaults
+    signal s_h1, s_h3 : unsigned(4 downto 0) := to_unsigned(16, 5);                 -- power up at the defaults
     signal s_h5 : unsigned(4 downto 0) := to_unsigned(0, 5);
-    signal s_hn1, s_hn2, s_hn3, s_hn5 : unsigned(4 downto 0) := (others => '0');
+    signal s_hn1, s_hn3, s_hn5 : unsigned(4 downto 0) := (others => '0');
     signal s_kr1, s_kr2, s_kr3, s_kr5, s_kr12 : unsigned(9 downto 0) := (others => '0');
-    signal f_tdr, f_tsw, f_tos, f_tch : unsigned(15 downto 0) := (others => '0');
+    signal f_tph, f_tsw, f_tos, f_tch : unsigned(15 downto 0) := (others => '0');
+    signal f_tlb : unsigned(10 downto 0) := (others => '0');
+    signal f_cra : unsigned(11 downto 0) := to_unsigned(512, 12);                 -- Crops gain A, Q.9 (0 .. 4)
+    signal f_gi, f_zi : unsigned(4 downto 0) := to_unsigned(16, 5);
+    signal f_fw : unsigned(6 downto 0) := to_unsigned(35, 7);
+    signal f_fon, f_fall : std_logic := '0';
     signal f_zq : unsigned(12 downto 0) := to_unsigned(1536, 13);
     signal f_c16 : unsigned(4 downto 0) := to_unsigned(16, 5);
     signal f_g5 : unsigned(4 downto 0) := to_unsigned(5, 5);
@@ -264,17 +299,21 @@ architecture cutout of program_top is
     ---------------------------------------------------------------------------
     -- field sequencer
     ---------------------------------------------------------------------------
-    signal q_run, q_wr : std_logic := '0';
+    signal q_run, q_b, q_v : std_logic := '0';
     signal q_op, q_ph : unsigned(4 downto 0) := (others => '0');
-    signal q_s : unsigned(2 downto 0) := (others => '0');
-    signal q_j : unsigned(1 downto 0) := (others => '0');
+    signal q_s : unsigned(5 downto 0) := (others => '0');
+    signal q_j : unsigned(2 downto 0) := (others => '0');
     signal q_sw : unsigned(9 downto 0) := (others => '0');
-    signal q_sel : std_logic_vector(8 downto 0) := (others => '0');
+    signal q_sel : std_logic_vector(10 downto 0) := (others => '0');
+    signal q_t : signed(7 downto 0) := (others => '0');
+    signal q_c8 : unsigned(7 downto 0) := (others => '0');
+    signal q_x : signed(16 downto 0) := (others => '0');
+    signal q_fl : std_logic_vector(1 downto 0) := (others => '0');
+    signal q_k : std_logic := '0';
     signal q_amp, q_as, q_off : signed(15 downto 0) := (others => '0');
     signal m_a : signed(17 downto 0) := (others => '0');
     signal m_b : unsigned(15 downto 0) := (others => '0');
     signal m_p : signed(34 downto 0) := (others => '0');
-    signal m_r : signed(23 downto 0) := (others => '0');
 
     ---------------------------------------------------------------------------
     -- line prep and the live per-line values
@@ -283,7 +322,8 @@ architecture cutout of program_top is
     signal pr_w, pr_t : unsigned(4 downto 0) := (others => '0');
     signal pr_ym8 : signed(19 downto 0) := to_signed(-30643, 20);
     signal pr_syb : signed(20 downto 0) := (others => '0');
-    signal pr_pb, pr_yh1 : unsigned(15 downto 0) := (others => '0');
+    signal pr_yh1 : unsigned(15 downto 0) := (others => '0');
+    signal pr_pb : unsigned(11 downto 0) := (others => '0');
     signal pr_yq4, pr_ye4 : signed(16 downto 0) := (others => '0');
     signal pr_dy : signed(10 downto 0) := (others => '0');
     signal pr_sa : unsigned(2 downto 0) := (others => '0');
@@ -304,7 +344,8 @@ architecture cutout of program_top is
     signal l_fx0, l_fx1 : signed(10 downto 0) := (others => '0');
     signal l_tb : unsigned(11 downto 0) := (others => '0');
     signal l_sy8 : signed(20 downto 0) := (others => '0');
-    signal l_yh, l_ph1, l_ph2, l_ph3, l_pb : unsigned(15 downto 0) := (others => '0');
+    signal l_yh : unsigned(15 downto 0) := (others => '0');
+    signal l_ph1, l_ph2, l_pb : unsigned(11 downto 0) := (others => '0');            -- 12-bit noise / brush phases
 
     ---------------------------------------------------------------------------
     -- generated avid
@@ -321,8 +362,8 @@ architecture cutout of program_top is
     ---------------------------------------------------------------------------
     -- pixel path
     ---------------------------------------------------------------------------
-    signal p_n1, p_n2, p_n3, p_nb : unsigned(15 downto 0) := (others => '0');
-    signal p_t1, p_t2, p_t3, p_tb14 : unsigned(7 downto 0) := (others => '0');
+    signal p_n1, p_n2, p_nb : unsigned(11 downto 0) := (others => '0');
+    signal p_t1, p_t2, p_tb14 : unsigned(7 downto 0) := (others => '0');
     signal p_sel2 : std_logic := '0';
     signal p_ns2, p_ns3, p_ns4, p_ns5, p_ns6, p_ns7 : signed(10 downto 0) := (others => '0');
     signal p_x8 : signed(20 downto 0) := (others => '0');
@@ -353,13 +394,12 @@ architecture cutout of program_top is
     type t_ft is record
         rim, soup : std_logic;
         sh   : signed(8 downto 0);
-        uu   : signed(6 downto 0);
         code : std_logic_vector(1 downto 0);
         glyb : std_logic;
         hb   : unsigned(7 downto 0);
         hf   : std_logic;
     end record;
-    constant C_FT0 : t_ft := ('0', '0', (others => '0'), (others => '0'), "00", '0', (others => '0'), '0');
+    constant C_FT0 : t_ft := ('0', '0', (others => '0'), "00", '0', (others => '0'), '0');
     type t_ftv is array (8 to 14) of t_ft;
     signal ft : t_ftv := (others => C_FT0);
     signal p_iref9, p_ioth9, p_iref10, p_ioth10, p_iref11, p_ioth11, p_iref12, p_ioth12 : unsigned(4 downto 0) := (others => '0');
@@ -373,13 +413,7 @@ architecture cutout of program_top is
     signal p_fp13, p_fp14 : std_logic := '0';
     signal p_fam14 : unsigned(4 downto 0) := (others => '0');
     signal p_sh14 : signed(9 downto 0) := (others => '0');
-    signal p_k14, p_k15, p_k16 : unsigned(1 downto 0) := (others => '0');
-    signal p_fl14, p_fl15, p_fl16, p_fl17 : std_logic_vector(1 downto 0) := (others => '0');
-    signal p_ou14, p_ou15, p_ou16, p_ou17 : unsigned(6 downto 0) := (others => '0');
-    signal p_ov14, p_ov15, p_ov16, p_ov17 : unsigned(5 downto 0) := (others => '0');
-    signal p_dn14, p_frok14, p_inpl14, p_fe14, p_gr14 : std_logic := '0';
-    signal p_dn15, p_dn16, p_dn17, p_eye15, p_eye16, p_eye17 : std_logic := '0';
-    signal p_uu15, p_uu16, p_uu17 : signed(6 downto 0) := (others => '0');
+    signal p_frok14, p_inpl14, p_fe14, p_gr14 : std_logic := '0';
     type t_cb is record
         fam  : unsigned(4 downto 0);
         off  : signed(9 downto 0);
@@ -389,20 +423,24 @@ architecture cutout of program_top is
     constant C_CB0 : t_cb := ((others => '0'), (others => '0'), '0', '0');
     type t_cbv is array (16 to 23) of t_cb;
     signal cb : t_cbv := (others => C_CB0);
-    signal p_s8, p_sxs16 : signed(16 downto 0) := (others => '0');
+    signal p_s8 : signed(16 downto 0) := (others => '0');
+    signal p_st16 : signed(15 downto 0) := (others => '0');
     signal p_fam15c : unsigned(4 downto 0) := (others => '0');
     signal p_sh15c : signed(9 downto 0) := (others => '0');
     signal p_gl15 : signed(10 downto 0) := (others => '0');
     signal p_out15c, p_hf15, p_frg15 : std_logic := '0';
     signal p_hb15 : unsigned(7 downto 0) := (others => '0');
-    signal p_bu16 : signed(14 downto 0) := (others => '0');
-    signal p_sys16 : signed(15 downto 0) := (others => '0');
     signal p_q19 : unsigned(3 downto 0) := (others => '0');
     signal p_cx20 : signed(10 downto 0) := (others => '0');
     signal p_y24, p_u24, p_v24 : unsigned(9 downto 0) := to_unsigned(512, 10);
     -- conditioning
-    type t_u8 is array (natural range <>) of unsigned(7 downto 0);
-    signal s_csu, s_csv : t_u8(0 to 8) := (others => to_unsigned(128, 8));
+    -- the chroma box filter's 8-back tap: a 256 x 16 ring (u8 & v8), read 6 behind the write, + a fabric register
+    type t_cring is array (0 to 255) of std_logic_vector(15 downto 0);
+    signal s_cring : t_cring := (others => x"8080");
+    attribute no_rw_check of s_cring : signal is true;
+    signal s_cwp : unsigned(7 downto 0) := (others => '0');
+    signal s_crp : unsigned(7 downto 0) := to_unsigned(250, 8);
+    signal s_crq, s_crr : std_logic_vector(15 downto 0) := x"8080";
     signal s_boxu, s_boxv, s_boxud, s_boxvd : unsigned(10 downto 0) := to_unsigned(1024, 11);
     signal s_y25, s_y26, s_y27, s_y28, s_y29, s_y30x, s_yf30 : unsigned(9 downto 0) := to_unsigned(64, 10);
     signal s_u30, s_v30 : unsigned(9 downto 0) := to_unsigned(512, 10);
@@ -491,6 +529,29 @@ begin
             r_rq <= r_q;
         end if;
     end process;
+    p_cring : process(clk)
+    begin
+        if rising_edge(clk) then
+            s_crq <= s_cring(to_integer(s_crp));
+            s_cring(to_integer(s_cwp)) <= std_logic_vector(p_u24(9 downto 2)) & std_logic_vector(p_v24(9 downto 2));
+            s_cwp <= s_cwp + 1; s_crp <= s_crp + 1;
+        end if;
+    end process;
+    p_cramh : process(clk)
+    begin
+        if rising_edge(clk) then
+            c_qh <= c_ramh(to_integer(c_ra));
+            if c_weh = '1' then c_ramh(to_integer(q_s)) <= c_wdh; end if;
+        end if;
+    end process;
+    p_craml : process(clk)
+    begin
+        if rising_edge(clk) then
+            c_ql <= c_raml(to_integer(c_ra));
+            if c_wel = '1' then c_raml(to_integer(q_s)) <= c_wdl; end if;
+            c_rq <= c_qh & c_ql;
+        end if;
+    end process;
 
     ---------------------------------------------------------------------------
     -- Controls, vblank zone, width, glides, field counters, sync delay
@@ -552,12 +613,13 @@ begin
                 v_x := signed(resize(unsigned(registers_in(5)), 11)) - 512;          -- K6 Speed
                 if v_x > -16 and v_x < 16 then s_spd <= (others => '0'); else s_spd <= v_x(9 downto 0); end if;
                 s_mir <= registers_in(6)(0);
-                s_frg <= registers_in(6)(1);
+                s_swp <= registers_in(6)(1);
                 s_cht <= registers_in(6)(2);
                 s_eye <= registers_in(6)(3);
                 s_osc <= registers_in(6)(4);
                 -- field counters
-                f_tdr <= f_tdr + unsigned(resize(shift_right(s_spd, 3), 16));
+                f_tph <= f_tph + unsigned(resize(shift_right(s_spd, 1), 16));
+                f_tlb <= f_tlb + unsigned(resize(shift_right(s_spd, 5), 11));
                 f_tsw <= f_tsw + unsigned(resize(shift_left(resize(s_spd, 16), 1), 16));
                 f_tos <= f_tos + unsigned(resize(shift_right(s_spd, 6), 16));
                 f_tch <= f_tch + 2184;
@@ -571,18 +633,34 @@ begin
                 elsif gl_d > -64 and gl_d < 64 then s_g12 <= shift_left(resize(s_kr12, 13), 3);
                 else s_g12 <= unsigned(v_ng(12 downto 0)); end if;
             end if;
-            -- K1 Rag, K2 Zoom, K3 Ink, K5 Paint: 32-step indices with hysteresis (no ADC flicker)
+            -- K2 Crops follows the knob outside a +-3 deadband, per field (no ADC flicker; steps <= 4)
+            if s_zgo = '1' and (resize(s_kr2, 11) > resize(s_g2, 11) + 3 or resize(s_kr2, 11) + 3 < resize(s_g2, 11)) then
+                s_g2 <= s_kr2;
+            end if;
+            -- K1 Rag, K3 Ink, K5 Paint: 32-step indices with hysteresis (no ADC flicker)
             s_kr1 <= unsigned(registers_in(0)); s_kr2 <= unsigned(registers_in(1));
             s_kr3 <= unsigned(registers_in(2)); s_kr5 <= unsigned(registers_in(4));
             s_kr12 <= unsigned(registers_in(7));
-            s_hn1 <= f_hyst(s_kr1, s_h1); s_hn2 <= f_hyst(s_kr2, s_h2);
+            s_hn1 <= f_hyst(s_kr1, s_h1);
             s_hn3 <= f_hyst(s_kr3, s_h3); s_hn5 <= f_hyst(s_kr5, s_h5);
             if s_zgo = '1' then
-                s_h1 <= s_hn1; s_h2 <= s_hn2; s_h3 <= s_hn3; s_h5 <= s_hn5;
+                s_h1 <= s_hn1; s_h3 <= s_hn3; s_h5 <= s_hn5;
             end if;
             -- field values (settle long before the field sequencer reads them)
-            v_p16 := resize(s_h3 & "10000", 16) * to_unsigned(3, 16);
-            f_c16 <= to_unsigned(4, 5) + resize(v_p16(13 downto 7), 5);               -- K3 Ink, Q.4 (4..27)
+            f_c16 <= s_h3;                                                   -- K3 Ink, Q.3: flat .. 16 the photo .. 31 hard
+            -- K2 Crops: gain A (Q.9) = g below the centre, 3g - 1024 above; zoom index (one camera frame
+            -- across the head at 0 .. the photo's from the centre up); 32-step position for the flip / scale steps
+            if s_g2(9) = '0' then
+                f_cra <= resize(s_g2, 12); f_zi <= s_g2(8 downto 4);
+            else
+                f_cra <= resize(s_g2, 12) + shift_left(resize(s_g2, 12), 1) - 1024;
+                f_zi <= (others => '1');
+            end if;
+            f_gi <= s_g2(9 downto 5);
+            -- K1 Rag -> fringe width 7 x gain (35 at the photo), none at clean scissors, every scrap when shredded
+            f_fw <= shift_left(resize(f_g5, 7), 3) - resize(f_g5, 7);
+            if f_g5 /= 0 then f_fon <= '1'; else f_fon <= '0'; end if;
+            if f_g5 >= 10 then f_fall <= '1'; else f_fall <= '0'; end if;
             v_jk := unsigned(registers_in(3));
             if s_cht = '1' then
                 if v_jk < 358 then v_jk := to_unsigned(358, 10); end if;
@@ -606,44 +684,85 @@ begin
     end process p_ctrl;
 
     ---------------------------------------------------------------------------
-    -- Field sequencer (vblank, from zone clock 64): one serial multiplier, 30 ops in 24-clock
-    -- slots (0 operand select, 1 load, 2..17 multiply, 18 result shift, 19 write):
+    -- Field sequencer (vblank, from zone clock 64): one serial multiplier, 24-clock slots (0 operand
+    -- select and crop-RAM read, 4 operand prep, 5 load, 6..21 multiply, 22 result write).
+    -- Phase A, 30 ops:
     --   0 JK = Jaw * chatter triangle;  1 DSPX = sx * zq;  2 S0 = x0 * zq;  3 SYZ = sy * zq;
     --   4 SY0 = y0 * zq;  5 JZ = J4 * zq;  then per strip s = 0..7:
     --   AS = amplitude(s) * sway(s);  OFF = AS * P12 -> strip RAM 2s;  OFFS = OFF * zq -> 2s + 1
+    -- Phase B, per crop slot s = 0..32, four ops (constants A at crop RAM 64 + s, B at 128 + s):
+    --   Du = t(Tph << e, su) * cu  (t = tri8(ph + 0x4000) -/+ 128, the drift on the slot's own line);
+    --   Wu = 2A * (ou' * 256 + Du) >> 10, + W0U -> crop RAM s high half {Wu, k};  Dv, Wv likewise -> low
+    --   half {Wv, flip}.  Flip and k step with the Crops position against t1 / t2 / t3.  A W op takes its
+    --   D from the multiplier's product register, untouched since the D op.
     ---------------------------------------------------------------------------
     p_fseq : process(clk)
         variable v_hi : signed(18 downto 0);
         variable v_r : signed(23 downto 0);
         variable v_a : signed(17 downto 0);
         variable v_b : unsigned(15 downto 0);
+        variable v_t : unsigned(7 downto 0);
+        variable v_ph : unsigned(15 downto 0);
     begin
         if rising_edge(clk) then
-            q_wr <= '0'; r_we <= '0';
+            r_we <= '0';
             if s_zone = '1' and s_zc = 64 then
-                q_run <= '1'; q_op <= (others => '0'); q_ph <= (others => '0'); q_s <= (others => '0'); q_j <= (others => '0');
+                q_run <= '1'; q_b <= '0'; q_op <= (others => '0'); q_ph <= (others => '0'); q_s <= (others => '0'); q_j <= (others => '0');
             elsif q_run = '1' then
                 if q_ph = 23 then
                     q_ph <= (others => '0');
-                    if q_op = 29 then q_run <= '0'; end if;
-                    q_op <= q_op + 1;
-                    if q_op >= 6 then
-                        if q_j = 2 then q_j <= (others => '0'); q_s <= q_s + 1; else q_j <= q_j + 1; end if;
+                    if q_b = '0' then
+                        q_op <= q_op + 1;
+                        if q_op = 29 then
+                            q_b <= '1'; q_s <= (others => '0'); q_j <= (others => '0');
+                        elsif q_op >= 6 then
+                            if q_j = 2 then q_j <= (others => '0'); q_s <= q_s + 1; else q_j <= q_j + 1; end if;
+                        end if;
+                    else
+                        if q_j = 3 then
+                            q_j <= (others => '0'); q_s <= q_s + 1;
+                            if q_s = 32 then q_run <= '0'; end if;
+                        else
+                            q_j <= q_j + 1;
+                        end if;
                     end if;
                 else
                     q_ph <= q_ph + 1;
                 end if;
             end if;
-            -- phase 0: operand selects (registered)
+            -- phase 0: operand selects (registered); crop-RAM constant reads (A for D, B for W)
             if q_run = '1' and q_ph = 0 then
-                q_sw <= 768 + resize(f_tri8(f_sph(q_s) + f_tsw), 10);
-                q_amp <= f_amp(q_s);
+                q_sw <= 768 + resize(f_tri8(f_sph(q_s(2 downto 0)) + f_tsw), 10);
+                q_amp <= f_amp(q_s(2 downto 0));
                 q_sel <= (others => '0');
-                if q_op < 6 then q_sel(to_integer(q_op(2 downto 0))) <= '1';
-                else q_sel(6 + to_integer(q_j)) <= '1'; end if;
+                if q_b = '1' then
+                    q_sel(9 + to_integer(q_j(0 downto 0))) <= '1';
+                    q_v <= q_j(1);
+                    if q_j(0) = '0' then q_ca <= "01" & q_s; else q_ca <= "10" & q_s; end if;
+                elsif q_op < 6 then
+                    q_sel(to_integer(q_op(2 downto 0))) <= '1';
+                else
+                    q_sel(6 + to_integer(q_j(1 downto 0))) <= '1';
+                end if;
             end if;
-            -- phase 1: load
-            if q_run = '1' and q_ph = 1 then
+            -- phase 4: the slot operands, from the constants (c_rq) and the D product still in m_p
+            if q_run = '1' and q_ph = 4 then
+                if c_rq(31) = '1' then v_ph := shift_left(f_tph, 2);
+                elsif c_rq(30) = '1' then v_ph := shift_left(f_tph, 1);
+                else v_ph := f_tph; end if;
+                v_t := f_tri8(v_ph + to_unsigned(16384, 16));
+                if (q_v = '1' and c_rq(28) = '1') or (q_v = '0' and c_rq(29) = '1') then v_t := not v_t; end if;
+                q_t <= signed(v_t xor x"80");                                               -- t - 128
+                if q_v = '1' then
+                    q_c8 <= unsigned(c_rq(17 downto 10));
+                    q_x <= shift_left(resize(signed(c_rq(23 downto 17)), 17), 8) + resize(m_p(23 downto 10), 17);
+                else
+                    q_c8 <= unsigned(c_rq(25 downto 18));
+                    q_x <= shift_left(resize(signed(c_rq(31 downto 24)), 17), 8) + resize(m_p(23 downto 10), 17);
+                end if;
+            end if;
+            -- phase 5: load
+            if q_run = '1' and q_ph = 5 then
                 m_p <= (others => '0');
                 v_a := (others => '0'); v_b := (others => '0');
                 if q_sel(0) = '1' then v_a := v_a or signed(resize(f_jkin, 18)); v_b := v_b or shift_left(resize(f_trich, 16), 2); end if;
@@ -655,34 +774,50 @@ begin
                 if q_sel(6) = '1' then v_a := v_a or resize(q_amp, 18); v_b := v_b or resize(q_sw, 16); end if;
                 if q_sel(7) = '1' then v_a := v_a or resize(q_as, 18); v_b := v_b or resize(s_g12(12 downto 3), 16); end if;
                 if q_sel(8) = '1' then v_a := v_a or resize(q_off, 18); v_b := v_b or resize(f_zq, 16); end if;
+                if q_sel(9) = '1' then v_a := v_a or resize(shift_left(resize(q_t, 11), 2), 18); v_b := v_b or shift_left(resize(q_c8, 16), 8); end if;
+                if q_sel(10) = '1' then v_a := v_a or resize(q_x, 18); v_b := v_b or resize(shift_left(f_cra, 1), 16); end if;
                 m_a <= v_a; m_b <= v_b;
-            elsif q_run = '1' and q_ph >= 2 and q_ph <= 17 then
+            elsif q_run = '1' and q_ph >= 6 and q_ph <= 21 then
                 if m_b(0) = '1' then v_hi := m_p(34 downto 16) + resize(m_a, 19);
                 else v_hi := m_p(34 downto 16); end if;
                 m_p <= v_hi(18) & v_hi & m_p(15 downto 1);
                 m_b <= '0' & m_b(15 downto 1);
-            elsif q_run = '1' and q_ph = 18 then
-                m_r <= m_p(33 downto 10);
-                q_wr <= '1';
             end if;
-            -- phase 19: write
-            if q_wr = '1' then
-                if q_op = 0 then f_jk <= unsigned(m_r(9 downto 0));
-                elsif q_op = 1 then f_dspx <= m_r(15 downto 0);
-                elsif q_op = 2 then f_s0 <= m_r(20 downto 0);
-                elsif q_op = 3 then f_syz <= m_r(15 downto 0);
-                elsif q_op = 4 then f_sy0 <= m_r(20 downto 0);
-                elsif q_op = 5 then f_jz <= m_r(15 downto 0);
-                elsif q_j = 0 then q_as <= m_r(15 downto 0);
+            -- phase 22: write the result (the product register holds still after the multiply)
+            v_r := m_p(33 downto 10);
+            if q_run = '1' and q_ph = 22 and q_b = '0' then
+                if q_op = 0 then f_jk <= unsigned(v_r(9 downto 0));
+                elsif q_op = 1 then f_dspx <= v_r(15 downto 0);
+                elsif q_op = 2 then f_s0 <= v_r(20 downto 0);
+                elsif q_op = 3 then f_syz <= v_r(15 downto 0);
+                elsif q_op = 4 then f_sy0 <= v_r(20 downto 0);
+                elsif q_op = 5 then f_jz <= v_r(15 downto 0);
+                elsif q_j = 0 then q_as <= v_r(15 downto 0);
                 elsif q_j = 1 then
-                    q_off <= m_r(15 downto 0);
-                    r_we <= '1'; r_wa <= resize(q_s & '0', 8); r_wd <= std_logic_vector(m_r(15 downto 0));
+                    q_off <= v_r(15 downto 0);
+                    r_we <= '1'; r_wa <= resize(q_s(2 downto 0) & '0', 8); r_wd <= std_logic_vector(v_r(15 downto 0));
                 else
-                    r_we <= '1'; r_wa <= resize(q_s & '1', 8); r_wd <= std_logic_vector(m_r(17 downto 2));   -- Q.6 store px
+                    r_we <= '1'; r_wa <= resize(q_s(2 downto 0) & '1', 8); r_wd <= std_logic_vector(v_r(17 downto 2));   -- Q.6 store px
                 end if;
+            end if;
+            -- the slot's flip and scale (for the phase-22 writes): below the Crops centre its photo flip / k
+            -- once g/32 >= t1 (none before: in register); above it the flip turns by f2 once g/32 - 16 >= t2,
+            -- k toggles at t3
+            if f_gi(4) = '0' then
+                if f_gi(3 downto 0) >= unsigned(c_rq(13 downto 10)) then q_fl <= c_rq(16 downto 15); q_k <= c_rq(14);
+                else q_fl <= "00"; q_k <= '0'; end if;
+            else
+                if f_gi(3 downto 0) >= unsigned(c_rq(9 downto 6)) then q_fl <= c_rq(16 downto 15) xor c_rq(1 downto 0);
+                else q_fl <= c_rq(16 downto 15); end if;
+                if f_gi(3 downto 0) >= unsigned(c_rq(5 downto 2)) then q_k <= not c_rq(14); else q_k <= c_rq(14); end if;
             end if;
         end if;
     end process p_fseq;
+    -- crop-RAM writes in phase 22 (the product in m_p, the constants B still in c_rq, q_s still the slot)
+    c_weh <= '1' when q_run = '1' and q_b = '1' and q_ph = 22 and q_j = 1 else '0';
+    c_wel <= '1' when q_run = '1' and q_b = '1' and q_ph = 22 and q_j = 3 else '0';
+    c_wdh <= std_logic_vector(m_p(24 downto 18) + 40) & std_logic_vector(m_p(17 downto 10)) & q_k;   -- Wu + W0U, k
+    c_wdl <= std_logic_vector(m_p(23 downto 10)) & q_fl;                                         -- Wv, flip
 
     ---------------------------------------------------------------------------
     -- Line prep: in hblank (20 clocks after the generated avid falls, when the last pixel has
@@ -713,7 +848,7 @@ begin
             -- vblank table reads (zone clocks 40..44, data 3 clocks later): zoom, rag gain, paint
             if s_zone = '1' then
                 case to_integer(s_zc) is
-                    when 40 => r_ra <= "001" & s_h2;
+                    when 40 => r_ra <= "001" & f_zi;
                     when 41 => r_ra <= "010" & s_h1;
                     when 42 => r_ra <= "011" & s_h5(4 downto 2) & "00";
                     when 43 => r_ra <= "011" & s_h5(4 downto 2) & "01"; f_zq <= unsigned(r_rq(12 downto 0));
@@ -729,10 +864,10 @@ begin
                     when 0 =>
                         if pr_first = '1' then
                             pr_ym8 <= to_signed(-30643, 20); pr_syb <= f_sy0;
-                            l_ph1 <= f_nx1 + 34553; l_ph2 <= f_nx2 + 6368; l_ph3 <= f_nx3 + 47018; pr_pb <= f_bxk + 4942;
+                            l_ph1 <= f_nx1(15 downto 4) + 2159; l_ph2 <= f_nx2(15 downto 4) + 398; pr_pb <= f_bxk(15 downto 4) + 309;
                         else
                             pr_ym8 <= pr_ym8 + signed(resize(s_sy, 20)); pr_syb <= pr_syb + resize(f_syz, 21);
-                            l_ph1 <= l_ph1 + f_ny1; l_ph2 <= l_ph2 + f_ny2; l_ph3 <= l_ph3 + f_ny3; pr_pb <= pr_pb + f_byi;
+                            l_ph1 <= l_ph1 + f_ny1(15 downto 4); l_ph2 <= l_ph2 + f_ny2(15 downto 4); pr_pb <= pr_pb + f_byi(15 downto 4);
                         end if;
                     when 1 =>
                         pr_yq4 <= resize(shift_right(pr_ym8, 4), 17);
@@ -926,14 +1061,13 @@ begin
         variable v_n : signed(12 downto 0);
         variable v_nm : signed(11 downto 0);
         variable v_fs : signed(12 downto 0);
-        variable v_prm : std_logic_vector(23 downto 0);
+        variable v_prm : std_logic_vector(5 downto 0);
         variable v_fam : unsigned(4 downto 0);
         variable v_sh : signed(9 downto 0);
-        variable v_k : unsigned(1 downto 0);
-        variable v_fl : std_logic_vector(1 downto 0);
-        variable v_ou : unsigned(6 downto 0);
-        variable v_ov : unsigned(5 downto 0);
-        variable v_dn, v_feat, v_out, v_eye : std_logic;
+        variable v_feat, v_out : std_logic;
+        variable v_gw : unsigned(10 downto 0);
+        variable v_xs : signed(14 downto 0);
+        variable v_ys : signed(13 downto 0);
         variable v_tx : signed(9 downto 0);
         variable v_off : signed(9 downto 0);
         variable v_f3 : unsigned(13 downto 0);
@@ -962,10 +1096,10 @@ begin
             if g_start = '1' then
                 p_n1 <= l_ph1; p_n2 <= l_ph2;
             else
-                p_n1 <= p_n1 + f_ni1; p_n2 <= p_n2 + f_ni2;
+                p_n1 <= p_n1 + f_ni1(15 downto 4); p_n2 <= p_n2 + f_ni2(15 downto 4);
             end if;
             -- S1: triangles
-            p_t1 <= f_tri8(p_n1); p_t2 <= f_tri8(p_n2);
+            p_t1 <= f_tri12(p_n1); p_t2 <= f_tri12(p_n2);
             -- S2: which side of the line's strip boundary (+-4 map units of rag); noise sum; map x
             if resize(l_ye4, 18) + resize(shift_right(signed(resize(p_t1, 10)) + signed(resize(p_t2, 10)) - 256, 2), 18)
                >= resize(l_b4, 18) then p_sel2 <= '1'; else p_sel2 <= '0'; end if;
@@ -1011,7 +1145,8 @@ begin
             end if;
             v_gx := shift_left(resize(p_gx4, 20), 2) + resize(p_gx4, 20);
             p_gv5 <= l_gv0 + signed(resize(v_gx(19 downto 5), 17));
-            p_gu5 <= p_gx4(10 downto 5); p_gok5 <= p_gok4;
+            v_gw := p_gx4(10 downto 0) - f_tlb;                                         -- "Love." crawls
+            p_gu5 <= v_gw(10 downto 5); p_gok5 <= p_gok4;
             p_tc5 <= p_tc4;
             p_h5 <= p_hw4 + x"6A09";
             p_ns5 <= p_ns4;
@@ -1064,16 +1199,10 @@ begin
             if p_qs7 <= 1870 then ft(8).sh <= to_signed(24, 9);                         -- rim shade
             elsif p_qs7 >= 1870 + 1024 then ft(8).sh <= to_signed(-40, 9);
             else v_q := p_qs7 - 1870; ft(8).sh <= 24 - signed(resize(v_q(9 downto 4), 9)); end if;
-            if p_qs7 < 1870 then                                                        -- soup shade
-                if s_eye = '1' then
-                    v_q := resize(p_qs7, 15) + shift_left(resize(p_qs7, 15), 1);
-                    ft(8).sh <= -signed(resize(v_q(14 downto 8), 9));
-                else
-                    v_q := shift_left(resize(p_qs7, 15), 2) + resize(p_qs7, 15);
-                    ft(8).sh <= 16 - signed(resize(v_q(14 downto 8), 9));
-                end if;
+            if p_qs7 < 1870 then                                                        -- soup / mirror shade
+                v_q := shift_left(resize(p_qs7, 15), 2) + resize(p_qs7, 15);
+                ft(8).sh <= 16 - signed(resize(v_q(14 downto 8), 9));
             end if;
-            ft(8).uu <= p_uu7(6 downto 0);
             ft(8).hb <= p_h7(15 downto 8);
             if p_h7(5 downto 4) /= "00" then ft(8).hf <= '1'; else ft(8).hf <= '0'; end if;
             p_gl8 <= p_gl7; p_tt8 <= p_tt7; p_gs8 <= p_gs7;
@@ -1136,32 +1265,33 @@ begin
                 if p_fo13 >= 256 then v_sh := to_signed(16, 10); else v_sh := signed(resize(p_fo13(7 downto 3), 10)) - 16; end if;
             end if;
             if p_pid13 = 28 then v_sh := to_signed(-16, 10); end if;
-            p_fam14 <= v_fam; p_sh14 <= v_sh;
-            p_k14 <= unsigned(v_prm(6 downto 5)); p_fl14 <= v_prm(8 downto 7);
-            p_ou14 <= unsigned(v_prm(15 downto 9)); p_ov14 <= unsigned(v_prm(21 downto 16));
-            p_dn14 <= v_prm(22); p_frok14 <= v_prm(23);
+            p_fam14 <= v_fam; p_sh14 <= v_sh; p_frok14 <= v_prm(5);
+            -- the crop-RAM slot for this pixel (the sequencer owns the port in vblank): the teeth slot 0,
+            -- the camera mirror 32, else the scrap's own
+            if q_run = '1' then c_ra <= q_ca;
+            elsif ft(13).code /= "00" then c_ra <= (others => '0');
+            elsif s_eye = '1' and ft(13).soup = '1' then c_ra <= to_unsigned(32, 8);
+            else c_ra <= resize(p_pid13, 8); end if;
             if p_pid13 >= 26 and p_pid13 <= 30 then p_inpl14 <= '1'; else p_inpl14 <= '0'; end if;
             p_pid14 <= p_pid13; p_fo14 <= p_fo13; p_fp14 <= p_fp13;
             if p_oth13 /= 0 and p_oth13 < 23 then p_fe14 <= '1'; else p_fe14 <= '0'; end if;
             if p_pid13 = 0 and p_fo13 < 192 then p_gr14 <= '1'; else p_gr14 <= '0'; end if;
             -- S13/S14: the brush DDA (S13) and its triangle (S14)
-            if g_dl(12) = '1' then p_nb <= l_pb; else p_nb <= p_nb + f_binc; end if;
-            p_tb14 <= f_tri8(p_nb);
+            if g_dl(12) = '1' then p_nb <= l_pb; else p_nb <= p_nb + f_binc(15 downto 4); end if;
+            p_tb14 <= f_tri12(p_nb);
             -- S15: drawn features over the map (forks, cup, teeth, glyph); ground, fringe, texture;
             -- the store-x DDA
-            v_fam := p_fam14; v_sh := p_sh14; v_k := p_k14; v_fl := p_fl14; v_ou := p_ou14; v_ov := p_ov14;
-            v_dn := p_dn14; v_feat := '0'; v_eye := '0';
+            v_fam := p_fam14; v_sh := p_sh14; v_feat := '0';
             if p_inpl14 = '1' and p_fk(14) = '1' then v_fam := to_unsigned(27, 5); v_sh := to_signed(16, 10); end if;
             if ft(14).rim = '1' then
                 v_feat := '1'; v_fam := to_unsigned(19, 5); v_sh := resize(ft(14).sh, 10);
                 if ft(14).soup = '1' then
-                    if s_eye = '1' then v_fam := to_unsigned(0, 5);                         -- obsidian
+                    if s_eye = '1' then v_fam := to_unsigned(28, 5);                        -- the camera mirror
                     else v_fam := to_unsigned(18, 5); end if;
                 end if;
             end if;
             if ft(14).code /= "00" then
-                v_feat := '1'; v_fam := to_unsigned(28, 5); v_k := "00"; v_fl := "00";
-                v_ou := to_unsigned(5, 7); v_ov := to_unsigned(38, 6); v_dn := '0';
+                v_feat := '1'; v_fam := to_unsigned(28, 5);
                 case ft(14).code is
                     when "01" => v_sh := to_signed(-96, 10);
                     when "11" => v_sh := to_signed(48, 10);
@@ -1170,8 +1300,6 @@ begin
             end if;
             if ft(14).glyb = '1' and p_pid14 = 31 then v_fam := to_unsigned(30, 5); end if;
             if (p_pid14 = 0 and v_feat = '0') or l_gap = '1' then v_out := '1'; else v_out := '0'; end if;
-            p_k15 <= v_k; p_fl15 <= v_fl; p_ou15 <= v_ou; p_ov15 <= v_ov; p_dn15 <= v_dn; p_eye15 <= v_eye;
-            p_uu15 <= ft(14).uu;
             -- ground level: brush wave + paint rings round the head edge
             if p_gr14 = '1' then
                 v_rp := shift_left(resize(p_fo14, 16), 8) + shift_left(resize(p_fo14, 16), 10);
@@ -1181,8 +1309,9 @@ begin
             end if;
             p_gl15 <= -16 + signed(resize(shift_right(signed(resize(p_tb14, 10)) - 128, 1), 11)) + signed(resize(v_ring, 11));
             p_fam15c <= v_fam; p_sh15c <= v_sh; p_out15c <= v_out; p_hb15 <= ft(14).hb; p_hf15 <= ft(14).hf;
-            if s_frg = '0' and p_fp14 = '1' and p_fo14 < 35 + resize(ft(14).hb(7 downto 4), 12) and v_out = '0' and v_feat = '0'
-               and p_pid14 < 23 and p_pid14 /= 0 and p_frok14 = '1' and p_fe14 = '1' and ft(14).hf = '1' then
+            if f_fon = '1' and p_fp14 = '1' and p_fo14 < resize(f_fw, 12) + resize(ft(14).hb(7 downto 4), 12) and v_out = '0'
+               and v_feat = '0' and p_pid14 < 23 and p_pid14 /= 0 and (p_frok14 = '1' or f_fall = '1') and p_fe14 = '1'
+               and ft(14).hf = '1' then
                 p_frg15 <= '1';
             else
                 p_frg15 <= '0';
@@ -1195,21 +1324,19 @@ begin
                 when others => v_tx := (others => '0');
             end case;
             if p_out15c = '1' then v_off := resize(p_gl15, 10); else v_off := p_sh15c + v_tx; end if;
-            cb(16).fam <= p_fam15c; cb(16).outg <= p_out15c; cb(16).frg <= p_frg15;
+            if s_swp = '1' then cb(16).fam <= C_SWP(to_integer(p_fam15c)); else cb(16).fam <= p_fam15c; end if;   -- S8 Inks
+            cb(16).outg <= p_out15c; cb(16).frg <= p_frg15;
             cb(16).off <= v_off + signed(resize(p_hb15(5 downto 3) & '0', 10));          -- + dither
             for k in 17 to 23 loop cb(k) <= cb(k - 1); end loop;
             if g_dl(14) = '1' then p_s8 <= f_s0(16 downto 0); else p_s8 <= p_s8 + resize(f_dspx, 17); end if;
-            -- S16: torn store x at the scrap's scale; store y at its scale
+            -- S16: torn store x (the strip's offset)
             if p_sel(15) = '1' then v_st := p_s8 - l_dsb(16 downto 0); else v_st := p_s8 - l_dsa(16 downto 0); end if;
-            p_sxs16 <= shift_right(v_st, to_integer(p_k15));
-            p_sys16 <= shift_right(l_sy8(15 downto 0), to_integer(p_k15));
-            p_fl16 <= p_fl15; p_ov16 <= p_ov15;
-            if p_dn15 = '1' then p_bu16 <= signed(shift_left(resize(p_ou15, 15), 8)) - signed(f_tdr(14 downto 0));
-            else p_bu16 <= signed(shift_left(resize(p_ou15, 15), 8)) + signed(f_tdr(14 downto 0)); end if;
-            -- S17: flips, crop offsets, drift -> the store address (nearest)
-            if p_fl16(0) = '1' then v_su := p_bu16 - p_sxs16(14 downto 0); else v_su := p_bu16 + p_sxs16(14 downto 0); end if;
-            if p_fl16(1) = '1' then v_sv := signed(shift_left(resize(p_ov16, 14), 8)) - p_sys16(13 downto 0);
-            else v_sv := signed(shift_left(resize(p_ov16, 14), 8)) + p_sys16(13 downto 0); end if;
+            p_st16 <= v_st(15 downto 0);
+            -- S17: the slot word {Wu, k | Wv, flip} (c_rq, S16-aligned): scale, flips, crop -> the store address
+            if c_rq(16) = '1' then v_xs := p_st16(15 downto 1); v_ys := l_sy8(14 downto 1);
+            else v_xs := p_st16(14 downto 0); v_ys := l_sy8(13 downto 0); end if;
+            if c_rq(0) = '1' then v_su := signed(c_rq(31 downto 17)) - v_xs; else v_su := signed(c_rq(31 downto 17)) + v_xs; end if;
+            if c_rq(1) = '1' then v_sv := signed(c_rq(15 downto 2)) - v_ys; else v_sv := signed(c_rq(15 downto 2)) + v_ys; end if;
             b_ra <= unsigned(v_sv(13 downto 8)) & unsigned(v_su(14 downto 8));
             -- S18: RAM.  S19: fabric
             p_q19 <= unsigned(b_q);
@@ -1239,11 +1366,11 @@ begin
             else p_v24 <= unsigned(v_cv2(9 downto 0)); end if;
 
             -- 25..30: output conditioning (chroma [1 2 2 2 2 2 2 2 1]/16 as two adjacent 8-sums on
-            -- 8-bit chroma, luma [1 2 1]); 31: luma toward black (white 940 -> 777), the gate; 32: pad
-            s_csu(0) <= p_u24(9 downto 2); s_csv(0) <= p_v24(9 downto 2);
-            for i in 1 to 8 loop s_csu(i) <= s_csu(i - 1); s_csv(i) <= s_csv(i - 1); end loop;
-            s_boxu <= s_boxu + resize(p_u24(9 downto 2), 11) - resize(s_csu(7), 11);
-            s_boxv <= s_boxv + resize(p_v24(9 downto 2), 11) - resize(s_csv(7), 11);
+            -- 8-bit chroma, the 8-back tap from a ring; luma [1 2 1]); 31: luma toward black (white 940 ->
+            -- 777), the gate; 32: pad
+            s_crr <= s_crq;                                                              -- p_u24 / p_v24 of 8 clocks ago
+            s_boxu <= s_boxu + resize(p_u24(9 downto 2), 11) - resize(unsigned(s_crr(15 downto 8)), 11);
+            s_boxv <= s_boxv + resize(p_v24(9 downto 2), 11) - resize(unsigned(s_crr(7 downto 0)), 11);
             s_boxud <= s_boxu; s_boxvd <= s_boxv;
             v_sc := resize(s_boxu, 12) + s_boxud; s_u30 <= v_sc(11 downto 2);
             v_sc := resize(s_boxv, 12) + s_boxvd; s_v30 <= v_sc(11 downto 2);
