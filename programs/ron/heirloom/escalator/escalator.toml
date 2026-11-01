@@ -1,4 +1,4 @@
-# Escalator - Heirloom #1, v0.5.0 (2026-10-21): rebuilt from the photo WIN_20220629_23_49_20.
+# Escalator - Heirloom #1, v0.6.0 (2026-11-01, phase 2): rebuilt from the photo WIN_20220629_23_49_20.
 # A pastel tile grid (lavender halves, violet blobs fading pale, pink bands with yellow/orange blobs)
 # under green stair-stepped slabs that ride down the columns.  See escalator.vhd and SUMMARY.md.
 
@@ -6,7 +6,7 @@
 processing_delay_clks = 24
 program_id = "com.czartroniks.escalator"
 program_name = "Escalator"
-program_version = "0.5.0"
+program_version = "0.6.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -18,22 +18,22 @@ core = "yuv444_30b"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_1"
-name_label = "Columns"
+name_label = "Tiles"
 control_mode = "linear"
-display_min_value = 2
-display_max_value = 14
-initial_value = 438
-display_float_digits = 1
-suffix_label = ""
+display_min_value = 0
+display_max_value = 100
+initial_value = 547
+display_float_digits = 0
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
 name_label = "Bands"
 control_mode = "linear"
-display_min_value = 2
-display_max_value = 10
-initial_value = 275
-display_float_digits = 1
+display_min_value = -100
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
 suffix_label = ""
 
 [[parameter]]
@@ -62,7 +62,7 @@ name_label = "Speed"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 680
+initial_value = 623
 display_float_digits = 0
 suffix_label = ""
 
@@ -72,7 +72,7 @@ name_label = "Bend"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 480
+initial_value = 492
 display_float_digits = 0
 suffix_label = "%"
 
@@ -84,9 +84,9 @@ initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
-name_label = "Climb"
-value_labels = ["Off", "On"]
-initial_value_label = "Off"
+name_label = "Ramp"
+value_labels = ["Stairs", "Ramp"]
+initial_value_label = "Stairs"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
@@ -140,3 +140,15 @@ name = "Vivid Cascade"
 toggle_switch_10 = 1
 linear_potentiometer_12 = 1023
 rotary_potentiometer_1 = 620
+
+[[preset]]
+name = "Chevron Ramps"
+toggle_switch_7 = 1
+toggle_switch_8 = 1
+rotary_potentiometer_2 = 820
+
+[[preset]]
+name = "Bobbing Rush"
+rotary_potentiometer_5 = 900
+rotary_potentiometer_1 = 300
+rotary_potentiometer_2 = 160

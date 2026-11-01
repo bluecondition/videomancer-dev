@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Escalator v0.5.0 -- Heirloom #1, rebuilt from the photo WIN_20220629_23_49_20.
+-- Escalator v0.6.0 -- Heirloom #1, rebuilt from the photo WIN_20220629_23_49_20.
 --
 -- The photo: a pastel grid of ~7.1 tile columns (269 px) and ~4.15 band rows
 -- (260 lines).  Every tile holds a lavender left half, a grey gap, and a
@@ -24,21 +24,26 @@
 -- + treads) switches the colourizer bank.  The window's phase rides per
 -- field: the slabs ride down the stairs.
 --
---   K1  Columns  tile columns across, 2 .. 14 (7.14 = the photo)
---   K2  Bands    band rows down the frame, 2 .. 10 (4.15)
---   K3  Blob     blob edge, bipolar (centre = the photo): wider / narrower blobs
+--   K1  Tiles    the pastel grid's columns, 2 .. 20 (square law, 7.14 = the photo at 547); the
+--                stairs keep the photo's pitch on their own phase, so the grid detunes under them
+--   K2  Bands    bipolar, centre = the photo: right = more, thinner bands (to ~12 hairlines),
+--                left = fewer, taller bands until the rows flood pink
+--   K3  Blob     blob edge, bipolar (centre = the photo): wider blobs / narrower, vanishing
 --   K4  Flood    slab thickness, thin threads .. green flood (square law)
---   K5  Speed    ride speed of the slabs, bipolar, still at the centre
---   K6  Bend     how far the source (camera luma / Osc) bends the blob and slab edges
+--   K5  Speed    ride speed of the slabs, bipolar, still at the centre (to ~24 lines/frame); each
+--                column's slab also bobs in a wave across the columns, depth rising with speed
+--   K6  Bend     how far the source (camera luma / Osc) bends the blob and slab edges (cubic)
 --   S7  Mirror   every other column mirrored: chevron stairs
---   S8  Climb    the staircase climbs to the right instead of descending
+--   S8  Ramp     Stairs / Ramp: the slant runs the whole column, no step (diagonal saw ribbons)
 --   S9  Invert   key invert: green bank outside the slabs, the pastel grid inside
 --   S10 Vivid    every blob in the band's yellow/orange/magenta palette
 --   S11 Source   Video / Osc
 --   P12 RISE     escalator step: 0 = level green bars, photo = 1/3 period, 100 % = 1/2 period cascade
 --
 -- Count-based tiles (K1 columns across any width), vertical geometry in
--- virtual 1080-line units.  Generated avid (parity-locked start, field-latched
+-- virtual 1080-line units.  The slab staircase runs on its own phase at the
+-- photo's 7.14 columns; its per-column base (column step + bob) comes from a
+-- 9-entry column table the vblank sequencer writes into one EBR.  Generated avid (parity-locked start, field-latched
 -- width); output conditioning (luma [1 2 1], chroma [1 2 2 2 2 2 2 2 1]/16,
 -- luma to ~777) before the blanking gate.  Latency 24 clocks in every mode.
 -- Generated colours in the hardware convention (u = Cr, v = Cb), see escalator.py.
@@ -63,10 +68,12 @@ architecture escalator of program_top is
     constant C_NUE   : unsigned(15 downto 0) := to_unsigned(35326, 16);   -- 65535 - UE (mirrored)
     constant C_OVER  : unsigned(15 downto 0) := to_unsigned(32645, 16);   -- slab blue side (lk + 6 px)
     constant C_LEADT : unsigned(15 downto 0) := to_unsigned(62125, 16);   -- lead strip (last 14/269)
-    constant C_BH    : unsigned(15 downto 0) := to_unsigned(18003, 16);   -- band height (0.2747)
+    constant C_BH    : unsigned(15 downto 0) := to_unsigned(18003, 16);   -- band height (0.2747), K2 centre
     constant C_BOFF  : unsigned(12 downto 0) := to_unsigned(4141, 13);    -- band blob offset (17 px)
     constant C_TP0   : unsigned(23 downto 0) := to_unsigned(3367167, 24); -- line start: 0.2007 tile
     constant C_B0    : unsigned(15 downto 0) := to_unsigned(53537, 16);   -- slab bottom at col 0 (396 lines)
+    constant C_SCOLS : unsigned(19 downto 0) := to_unsigned(1826, 20);    -- slab columns x256 (7.14)
+    constant C_BDPH  : unsigned(15 downto 0) := to_unsigned(18725, 16);   -- bob phase step per column (1/3.5)
 
     -- 8-bit colours {Y, U(=Cr), V(=Cb)}, luma pre-boosted 16/13 (see escalator.py)
     type t_c3 is array(0 to 2) of unsigned(7 downto 0);
@@ -123,16 +130,16 @@ architecture escalator of program_top is
     -- zone / width
     signal s_idle : unsigned(9 downto 0) := (others => '0');
     signal s_zone, s_zone_d, s_zgo : std_logic := '0';
-    signal s_zc : unsigned(9 downto 0) := (others => '0');
+    signal s_zc : unsigned(10 downto 0) := (others => '0');
     signal s_avq : std_logic := '0';
     signal s_hcnt, s_wmax, s_w : unsigned(11 downto 0) := to_unsigned(1920, 12);
 
     -- controls (glided, Q.3) and decoded magnitudes
     type t_g is array(0 to 4) of unsigned(12 downto 0);
-    signal s_g : t_g := (to_unsigned(438 * 8, 13), to_unsigned(275 * 8, 13), to_unsigned(512 * 8, 13),
+    signal s_g : t_g := (to_unsigned(547 * 8, 13), to_unsigned(512 * 8, 13), to_unsigned(512 * 8, 13),
                          to_unsigned(615 * 8, 13), to_unsigned(681 * 8, 13));   -- power up at the defaults
-    signal s_m3, s_m5 : unsigned(8 downto 0) := (others => '0');
-    signal s_s3, s_s5 : std_logic := '0';
+    signal s_m2, s_m3, s_m5 : unsigned(8 downto 0) := (others => '0');
+    signal s_s2, s_s3, s_s5 : std_logic := '0';
     signal s_k6 : unsigned(9 downto 0) := (others => '0');
     signal gl_k, gl_o, gl_n : unsigned(12 downto 0) := (others => '0');
     signal gl_d : signed(13 downto 0) := (others => '0');
@@ -140,9 +147,9 @@ architecture escalator of program_top is
     signal q_gon : std_logic := '0';
     signal q_gi : unsigned(2 downto 0) := (others => '0');
     signal q_gph : unsigned(1 downto 0) := (others => '0');
-    signal q_p : unsigned(4 downto 0) := (others => '0');
-    signal q_ld, q_st : std_logic := '0';
-    signal q_wr : std_logic_vector(1 to 18) := (others => '0');
+    signal q_p : unsigned(5 downto 0) := (others => '0');
+    signal q_ld, q_st, q_wrc : std_logic := '0';
+    signal q_wr : std_logic_vector(1 to 24) := (others => '0');
 
     -- serial multiplier
     signal m_a  : unsigned(19 downto 0) := (others => '0');
@@ -151,30 +158,42 @@ architecture escalator of program_top is
     signal m_l  : unsigned(17 downto 0) := (others => '0');
 
     -- per-frame values
-    signal f_cols  : unsigned(11 downto 0) := to_unsigned(1827, 12);
+    signal f_cols  : unsigned(12 downto 0) := to_unsigned(1826, 13);
     signal f_bands : unsigned(11 downto 0) := to_unsigned(1062, 12);
-    signal f_inc   : unsigned(19 downto 0) := to_unsigned(62360, 20);
+    signal f_bh    : unsigned(15 downto 0) := C_BH;                       -- band height (K2)
+    signal f_inc   : unsigned(19 downto 0) := to_unsigned(62360, 20);     -- tile phase per px (K1)
+    signal f_sinc  : unsigned(19 downto 0) := to_unsigned(62360, 20);     -- slab phase per px (fixed)
     signal f_kb    : unsigned(19 downto 0) := to_unsigned(64446, 20);
     signal f_r     : unsigned(14 downto 0) := to_unsigned(21792, 15);
-    signal f_tt    : unsigned(17 downto 0) := (others => '0');
     signal f_sl    : unsigned(17 downto 0) := to_unsigned(20556, 18);
     signal f_st    : unsigned(14 downto 0) := to_unsigned(9953, 15);
     signal f_sl0   : unsigned(12 downto 0) := to_unsigned(4334, 13);
     signal f_dep   : unsigned(10 downto 0) := to_unsigned(1081, 11);
     signal f_tdi   : unsigned(15 downto 0) := to_unsigned(2557, 16);
-    signal f_k4sq  : unsigned(19 downto 0) := (others => '0');
     signal f_fl    : unsigned(9 downto 0) := to_unsigned(256, 10);
     signal f_t0    : unsigned(29 downto 0) := (others => '0');
     signal f_dt0   : signed(21 downto 0) := (others => '0');
     signal f_ddt   : unsigned(12 downto 0) := (others => '0');
     signal f_ts    : unsigned(13 downto 0) := (others => '0');
     signal f_s5sq  : unsigned(17 downto 0) := (others => '0');
-    signal f_spd   : signed(19 downto 0) := (others => '0');
+    signal f_spd   : signed(20 downto 0) := (others => '0');
     signal f_bo    : signed(15 downto 0) := (others => '0');
-    signal f_bend  : unsigned(13 downto 0) := (others => '0');
+    signal f_bend  : unsigned(9 downto 0) := to_unsigned(113, 10);
     signal f_ride  : unsigned(23 downto 0) := (others => '0');
     signal f_ta, f_tb : unsigned(15 downto 0) := (others => '0');
-    signal f_mir, f_neg, f_inv, f_viv, f_osc : std_logic := '0';
+    signal f_mir, f_ramp, f_inv, f_viv, f_osc : std_logic := '0';
+    -- column bob: phase per frame, amplitude; column-table writer
+    signal f_bph   : unsigned(15 downto 0) := (others => '0');
+    signal f_ba    : unsigned(7 downto 0) := (others => '0');
+    signal c_base, c_wd : unsigned(15 downto 0) := (others => '0');
+    signal c_ph, c_tri : unsigned(7 downto 0) := (others => '0');
+    signal c_we : std_logic := '0';
+    signal c_wa, c_waw : unsigned(3 downto 0) := (others => '0');
+    type t_colram is array (0 to 255) of unsigned(15 downto 0);
+    signal r_col : t_colram := (others => (others => '0'));
+    signal r_cq  : unsigned(15 downto 0) := (others => '0');
+    attribute no_rw_check : boolean;
+    attribute no_rw_check of r_col : signal is true;
 
     -- per-line engine (next line) and committed line values
     signal n_vy    : unsigned(19 downto 0) := (others => '0');   -- virtual line, Q.8
@@ -187,7 +206,7 @@ architecture escalator of program_top is
     signal n_pa, n_pb : unsigned(15 downto 0) := (others => '0');
     signal n_ramp  : unsigned(15 downto 0) := to_unsigned(36540, 16);
     signal n_band, n_bp1, n_bp2 : std_logic := '0';
-    signal n_dtop, n_seg, n_dbot : unsigned(15 downto 0) := (others => '0');
+    signal n_dtop, n_seg, n_dbot : unsigned(15 downto 0) := (others => '0');   -- n_seg: band ? height : 0
     signal n_cta, n_cba : unsigned(4 downto 0) := (others => '0');
     signal r_la : unsigned(6 downto 0) := (others => '0');
     signal r_lq, r_lq2 : std_logic_vector(15 downto 0) := (others => '0');
@@ -222,11 +241,15 @@ architecture escalator of program_top is
     signal v_y1 : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal s_vd : t_s8(2 to 3) := (others => (others => '0'));
 
-    -- beam (stage 0)
+    -- beam (stage 0): tile phase (K1) and slab phase (the photo's pitch), each with its own wrap
     signal b_tp   : unsigned(23 downto 0) := (others => '0');
     signal b_tq   : unsigned(24 downto 0) := (others => '0');   -- b_tp + inc, one step ahead (wrap = bit 24)
-    signal b_cc   : unsigned(4 downto 0) := (others => '0');
-    signal b_m, b_sync : std_logic := '0';
+    signal b_tpar, b_tm, b_tsync : std_logic := '0';            -- tile parity, tile mirror, sync tile
+    signal b_sp   : unsigned(15 downto 0) := (others => '0');   -- slab column phase
+    signal b_sq   : unsigned(24 downto 0) := (others => '0');   -- b_sp + sinc, one step ahead
+    signal b_m, b_sync, b_vin : std_logic := '0';               -- slab mirror, sync column, in the slant
+    signal b_ra   : unsigned(3 downto 0) := (others => '0');    -- column table read address (next column)
+    signal b_nx   : unsigned(15 downto 0) := (others => '0');   -- next column's staircase base (prefetched)
     signal b_ca   : unsigned(15 downto 0) := (others => '0');   -- column staircase (slab phase)
     signal b_sa   : unsigned(23 downto 0) := (others => '0');   -- slant, Q.8
     signal b_td   : unsigned(15 downto 0) := (others => '0');   -- tread phase
@@ -237,12 +260,10 @@ architecture escalator of program_top is
 
     -- pixel pipeline
     signal f_dep8 : unsigned(7 downto 0) := (others => '0');
-    signal f_rq   : unsigned(15 downto 0) := (others => '0');
+    signal f_rq   : unsigned(15 downto 0) := (others => '0');   -- next column's tread drop (minus)
     signal f_tsst : signed(17 downto 0) := (others => '0');
-    signal f_bend8 : unsigned(7 downto 0) := (others => '0');
     signal p1_uf, p2_uf, p3_uf, p4_uf, p5_uf : unsigned(15 downto 0) := (others => '0');
-    signal p1_tpf : unsigned(15 downto 0) := (others => '0');
-    signal p1_sync : std_logic := '0';
+    signal p1_sync, p1_tsync, p1_lead : std_logic := '0';
     signal p1_ca : unsigned(15 downto 0) := (others => '0');
     signal p1_sa : unsigned(15 downto 0) := (others => '0');
     signal p1_td : unsigned(3 downto 0) := (others => '0');
@@ -255,8 +276,8 @@ architecture escalator of program_top is
     signal p3_h, p3_hn : unsigned(15 downto 0) := (others => '0');
     signal p3_src : signed(7 downto 0) := (others => '0');
     signal p4_hs, p4_hns : unsigned(15 downto 0) := (others => '0');
-    signal p4_pe : signed(16 downto 0) := (others => '0');
-    signal p5_e : signed(17 downto 0) := (others => '0');
+    signal p4_pe : signed(17 downto 0) := (others => '0');
+    signal p5_e : signed(18 downto 0) := (others => '0');
     signal p5_dd, p5_ddn : unsigned(15 downto 0) := (others => '0');
     signal p5_t405, p5_t946 : unsigned(15 downto 0) := (others => '0');
     type t_u16 is array (natural range <>) of unsigned(15 downto 0);
@@ -326,6 +347,19 @@ begin
     end process p_rom;
 
     ---------------------------------------------------------------------------
+    -- Column table (one EBR): written in the vblank zone, read by the beam's
+    -- next-column prefetch (address 0 through the blanking).  A collision only
+    -- garbles one read of entry 0 in vblank, re-read every clock after it.
+    ---------------------------------------------------------------------------
+    p_colram : process(clk)
+    begin
+        if rising_edge(clk) then
+            if c_we = '1' then r_col(to_integer(c_waw)) <= c_wd; end if;
+            r_cq <= r_col(to_integer(b_ra));
+        end if;
+    end process p_colram;
+
+    ---------------------------------------------------------------------------
     -- Controls, vblank zone, per-frame sequencer (one serial multiplier)
     ---------------------------------------------------------------------------
     p_ctrl : process(clk)
@@ -333,7 +367,7 @@ begin
         variable v_x  : signed(10 downto 0);
         variable v_k  : unsigned(12 downto 0);
         variable v_df : signed(13 downto 0);
-        variable v_p  : integer range 0 to 31;
+        variable v_p  : integer range 0 to 63;
         variable v_ph : integer range 0 to 31;
         variable v_s  : unsigned(20 downto 0);
         variable v_pr : unsigned(37 downto 0);
@@ -360,7 +394,7 @@ begin
             s_zgo <= s_zone and not s_zone_d;
             if s_zone = '0' then
                 s_zc <= (others => '0');
-            elsif s_zc /= 1023 then
+            elsif s_zc /= 2047 then
                 s_zc <= s_zc + 1;
             end if;
 
@@ -383,14 +417,16 @@ begin
                 else s_s5 <= '0'; s_m5 <= (others => '0'); end if;
                 s_k6 <= unsigned(registers_in(5));
                 f_mir <= registers_in(6)(0);
-                f_neg <= registers_in(6)(1);
+                f_ramp <= registers_in(6)(1);
                 f_inv <= registers_in(6)(2);
                 f_viv <= registers_in(6)(3);
                 f_osc <= registers_in(6)(4);
-                -- ride phase and Osc drift
+                -- ride phase, column-bob phase (speed / 1024: travels with the ride), Osc drift
                 f_ride <= f_ride + unsigned(resize(f_spd, 24));
+                f_bph <= f_bph + unsigned(resize(f_spd(20 downto 10), 16));
                 f_ta <= f_ta + 262; f_tb <= f_tb - 197;
             end if;
+            f_ba <= f_s5sq(17 downto 10);                 -- bob depth: K5 square law, 0 .. 247
             -- glides: K1, K2, K3, K4, P12 ease 1/8 of the gap per field (deadband 4); one channel per
             -- four zone clocks (4..23): select, difference, ease, write
             if s_zone = '1' and s_zc >= 4 and s_zc < 24 then q_gon <= '1'; else q_gon <= '0'; end if;
@@ -423,49 +459,71 @@ begin
                         end if;
                 end case;
             end if;
-            -- K3 (glided) bipolar decode
+            -- K2, K3 (glided) bipolar decode
+            v_x := signed(resize(s_g(1)(12 downto 3), 11)) - 512;
+            if v_x > 7 then s_s2 <= '0'; v_u := unsigned(v_x) - 8; s_m2 <= v_u(8 downto 0);
+            elsif v_x < -7 then s_s2 <= '1'; v_u := unsigned(-v_x) - 8; s_m2 <= v_u(8 downto 0);
+            else s_s2 <= '0'; s_m2 <= (others => '0'); end if;
             v_x := signed(resize(s_g(2)(12 downto 3), 11)) - 512;
             if v_x > 7 then s_s3 <= '0'; v_u := unsigned(v_x) - 8; s_m3 <= v_u(8 downto 0);
             elsif v_x < -7 then s_s3 <= '1'; v_u := unsigned(-v_x) - 8; s_m3 <= v_u(8 downto 0);
             else s_s3 <= '0'; s_m3 <= (others => '0'); end if;
-            -- knob curves (settle long before the sequencer reads them)
-            f_cols  <= to_unsigned(512, 12) + resize(s_g(0)(12 downto 3), 12) + resize(s_g(0)(12 downto 3) & '0', 12);
-            f_bands <= to_unsigned(512, 12) + resize(s_g(1)(12 downto 3) & '0', 12);
-            f_r     <= s_g(4)(12 downto 3) & "00000";
+            f_r   <= s_g(4)(12 downto 3) & "00000";
 
-            -- serial products: slot p = zc/32 (1..18), phase 0 load, 1..18 step, 20 store; the
-            -- strobes and the slot number are registered from zc first (one clock late, same order)
-            v_p  := to_integer(s_zc(9 downto 5));
+            -- serial products: slot p = zc/32 (1..33), phase 0 load, 1..18 step, 20 store; the
+            -- strobes and the slot number are registered from zc first (one clock late, same order).
+            -- Slots 25..33 write the column table: entry k = (k - 1) * R + bob(k).
+            v_p  := to_integer(s_zc(10 downto 5));
             v_ph := to_integer(s_zc(4 downto 0));
-            q_p <= s_zc(9 downto 5);
-            if s_zone = '1' and v_p >= 1 and v_p <= 18 and v_ph = 0 then q_ld <= '1'; else q_ld <= '0'; end if;
-            if s_zone = '1' and v_p >= 1 and v_p <= 18 and v_ph >= 1 and v_ph <= 18 then q_st <= '1'; else q_st <= '0'; end if;
-            for k in 1 to 18 loop
+            q_p <= s_zc(10 downto 5);
+            if s_zone = '1' and v_p >= 1 and v_p <= 33 and v_ph = 0 then q_ld <= '1'; else q_ld <= '0'; end if;
+            if s_zone = '1' and v_p >= 1 and v_p <= 33 and v_ph >= 1 and v_ph <= 18 then q_st <= '1'; else q_st <= '0'; end if;
+            for k in 1 to 24 loop
                 if s_zone = '1' and v_p = k and v_ph = 20 then q_wr(k) <= '1'; else q_wr(k) <= '0'; end if;
             end loop;
+            if s_zone = '1' and v_p >= 25 and v_p <= 33 and v_ph = 20 then q_wrc <= '1'; else q_wrc <= '0'; end if;
+            -- column bob: unipolar triangle of this column's phase (0 .. 254), ready for the next load
+            if c_ph(7) = '1' then c_tri <= (not c_ph(6 downto 0)) & '0'; else c_tri <= c_ph(6 downto 0) & '0'; end if;
             if true then
+                v_pr := m_h & m_l;   -- the last product: chained slots load from it directly
                 if q_ld = '1' then
                     m_h <= (others => '0'); m_l <= (others => '0');
                     case to_integer(q_p) is
                         when 1  => m_a <= resize(f_cols, 20);  m_b <= resize(t_rw, 18);
                         when 2  => m_a <= resize(f_bands, 20); m_b <= resize(t_ysk, 18);
-                        when 3  => m_a <= f_inc;               m_b <= resize(f_r, 18);
-                        when 4  => m_a <= resize(f_tt, 20);    m_b <= to_unsigned(1015, 18);
+                        when 3  => m_a <= f_sinc;              m_b <= resize(f_r, 18);
+                        when 4  => m_a <= resize(v_pr(33 downto 16), 20); m_b <= to_unsigned(1015, 18);   -- slot 3's slant/tile
                         when 5  => m_a <= resize(f_r, 20);     m_b <= to_unsigned(29928, 18);
                         when 6  => m_a <= resize(f_r, 20);     m_b <= to_unsigned(13033, 18);
                         when 7  => m_a <= resize(f_r, 20);     m_b <= to_unsigned(3251, 18);
-                        when 8  => m_a <= f_inc;               m_b <= to_unsigned(2688, 18);
+                        when 8  => m_a <= f_sinc;              m_b <= to_unsigned(2688, 18);
                         when 9  => m_a <= resize(s_g(3)(12 downto 3), 20); m_b <= resize(s_g(3)(12 downto 3), 18);
-                        when 10 => m_a <= f_k4sq;              m_b <= to_unsigned(609, 18);
+                        when 10 => m_a <= v_pr(19 downto 0);   m_b <= to_unsigned(609, 18);   -- K4^2
                         when 11 => m_a <= resize(f_fl, 20);    m_b <= to_unsigned(13914, 18);
                         when 12 => m_a <= resize(f_fl, 20);    m_b <= t_cdt;
                         when 13 => m_a <= resize(f_fl, 20);    m_b <= resize(t_cddt, 18);
                         when 14 => m_a <= resize(f_fl, 20);    m_b <= to_unsigned(5405, 18);
                         when 15 => m_a <= resize(s_m5, 20);    m_b <= resize(s_m5, 18);
-                        when 16 => m_a <= resize(f_s5sq, 20);  m_b <= to_unsigned(350, 18);
-                        when 17 => m_a <= resize(s_m3, 20);    m_b <= to_unsigned(521, 18);
-                        when others => m_a <= resize(s_k6, 20); m_b <= to_unsigned(975, 18);
+                        when 16 => m_a <= resize(f_s5sq, 20);  m_b <= to_unsigned(840, 18);
+                        when 17 =>
+                            m_a <= resize(s_m3, 20);
+                            if s_s3 = '1' then m_b <= to_unsigned(521, 18); else m_b <= to_unsigned(1042, 18); end if;
+                        when 18 => m_a <= resize(s_k6, 20);    m_b <= resize(s_k6, 18);
+                        when 19 => m_a <= resize(v_pr(19 downto 10), 20); m_b <= resize(s_k6, 18);   -- K6^2 / 1024
+                        when 20 => m_a <= resize(s_g(0)(12 downto 3), 20); m_b <= resize(s_g(0)(12 downto 3), 18);
+                        when 21 => m_a <= v_pr(19 downto 0);   m_b <= to_unsigned(4608, 18);  -- K1^2
+                        when 22 => m_a <= C_SCOLS;             m_b <= resize(t_rw, 18);
+                        when 23 =>
+                            m_a <= resize(s_m2, 20);
+                            if s_s2 = '1' then m_b <= to_unsigned(336, 18); else m_b <= to_unsigned(1006, 18); end if;
+                        when 24 =>
+                            m_a <= resize(s_m2, 20);
+                            if s_s2 = '1' then m_b <= to_unsigned(18944, 18); else m_b <= to_unsigned(6912, 18); end if;
+                        when others => m_a <= resize(f_ba, 20); m_b <= resize(c_tri, 18);
                     end case;
+                    if q_p = 24 then   -- column-table writer: column 0 (the sync column) is one step up
+                        c_base <= 0 - resize(f_r, 16); c_ph <= f_bph(15 downto 8); c_wa <= (others => '0');
+                    end if;
                 end if;
                 if q_st = '1' then
                     if m_b(0) = '1' then v_s := resize(m_h, 21) + resize(m_a, 21); else v_s := resize(m_h, 21); end if;
@@ -473,16 +531,13 @@ begin
                     m_l <= v_s(0) & m_l(17 downto 1);
                     m_b <= '0' & m_b(17 downto 1);
                 end if;
-                v_pr := m_h & m_l;
                 if q_wr(1)  = '1' then f_inc  <= v_pr(27 downto 8); end if;
                 if q_wr(2)  = '1' then f_kb   <= v_pr(27 downto 8); end if;
-                if q_wr(3)  = '1' then f_tt   <= v_pr(33 downto 16); end if;
                 if q_wr(4)  = '1' then f_sl   <= v_pr(27 downto 10); end if;
                 if q_wr(5)  = '1' then f_st   <= v_pr(30 downto 16); end if;
                 if q_wr(6)  = '1' then f_sl0  <= v_pr(28 downto 16); end if;
                 if q_wr(7)  = '1' then f_dep  <= v_pr(26 downto 16); end if;
                 if q_wr(8)  = '1' then f_tdi  <= v_pr(31 downto 16); end if;
-                if q_wr(9)  = '1' then f_k4sq <= v_pr(19 downto 0); end if;
                 if q_wr(10) = '1' then f_fl   <= to_unsigned(31, 10) + resize(v_pr(29 downto 20), 10); end if;
                 if q_wr(11) = '1' then f_t0   <= v_pr(23 downto 0) & "000000"; end if;
                 if q_wr(12) = '1' then f_dt0  <= -signed(resize(v_pr(27 downto 8), 22)); end if;
@@ -490,14 +545,32 @@ begin
                 if q_wr(14) = '1' then f_ts   <= v_pr(21 downto 8); end if;
                 if q_wr(15) = '1' then f_s5sq <= v_pr(17 downto 0); end if;
                 if q_wr(16) = '1' then
-                    if s_s5 = '1' then f_spd <= -signed(resize(v_pr(26 downto 8), 20));
-                    else f_spd <= signed(resize(v_pr(26 downto 8), 20)); end if;
+                    if s_s5 = '1' then f_spd <= -signed(resize(v_pr(27 downto 8), 21));
+                    else f_spd <= signed(resize(v_pr(27 downto 8), 21)); end if;
                 end if;
                 if q_wr(17) = '1' then
-                    if s_s3 = '1' then f_bo <= -signed(resize(v_pr(17 downto 4), 16));
-                    else f_bo <= signed(resize(v_pr(17 downto 4), 16)); end if;
+                    if s_s3 = '1' then f_bo <= -signed(v_pr(19 downto 4));
+                    else f_bo <= signed(v_pr(19 downto 4)); end if;
                 end if;
-                if q_wr(18) = '1' then f_bend <= v_pr(19 downto 6); end if;
+                if q_wr(19) = '1' then f_bend <= v_pr(19 downto 10); end if;
+                if q_wr(21) = '1' then f_cols <= to_unsigned(512, 13) + v_pr(32 downto 20); end if;
+                if q_wr(22) = '1' then f_sinc <= v_pr(27 downto 8); end if;
+                if q_wr(23) = '1' then
+                    if s_s2 = '1' then f_bands <= to_unsigned(1062, 12) - v_pr(19 downto 8);
+                    else f_bands <= to_unsigned(1062, 12) + v_pr(19 downto 8); end if;
+                end if;
+                if q_wr(24) = '1' then
+                    if s_s2 = '1' then f_bh <= C_BH + v_pr(23 downto 8);
+                    else f_bh <= C_BH - v_pr(23 downto 8); end if;
+                end if;
+                -- column table entry: base -/+ bob, then the next column's base and bob phase
+                c_we <= q_wrc;
+                if q_wrc = '1' then
+                    c_wd <= c_base + v_pr(16 downto 1);
+                    c_waw <= c_wa; c_wa <= c_wa + 1;
+                    c_base <= c_base + resize(f_r, 16);
+                    c_ph <= c_ph - C_BDPH(15 downto 8);
+                end if;
             end if;
 
             s_hsync_sr(0) <= data_in.hsync_n; s_vsync_sr(0) <= data_in.vsync_n;
@@ -581,7 +654,7 @@ begin
                 n_ramp <= to_unsigned(36540, 16);
                 n_bp1 <= '0'; n_bp2 <= '0';
             end if;
-            if s_zone = '1' and s_zc = 700 then
+            if s_zone = '1' and s_zc = 1100 then   -- after the last sequencer slot
                 le_st <= to_unsigned(2, 4); le_adv <= '0';
             elsif data_in.avid = '0' and s_avq = '1' then
                 le_st <= to_unsigned(1, 4); le_adv <= '1';
@@ -605,15 +678,15 @@ begin
                 when 2 =>
                     if n_e0a >= 4320 then n_e0a <= n_e0a - 4320; n_e0i <= n_e0i + 1; end if;
                     if n_y8a >= 2160 then n_y8a <= n_y8a - 2160; n_y8q <= n_y8q + 1; end if;
-                    if n_vb(23 downto 8) < C_BH then
-                        n_band <= '1'; n_dtop <= n_vb(23 downto 8); n_seg <= C_BH;
+                    if n_vb(23 downto 8) < f_bh then
+                        n_band <= '1'; n_dtop <= n_vb(23 downto 8); n_seg <= f_bh;
                     else
-                        n_band <= '0'; n_dtop <= n_vb(23 downto 8) - C_BH; n_seg <= 65535 - C_BH + 1;
+                        n_band <= '0'; n_dtop <= n_vb(23 downto 8) - f_bh; n_seg <= (others => '0');
                     end if;
                     if n_vy >= 530 * 256 then n_low <= '1'; else n_low <= '0'; end if;
                 when 3 =>
                     r_la <= '0' & n_e0i;                                   -- drift
-                    v_d := n_seg - n_dtop;
+                    v_d := n_seg - n_vb(23 downto 8);                     -- distance to the segment end
                     n_dbot <= v_d;
                     if n_dtop(15 downto 12) /= 0 then n_cta <= (others => '1'); else n_cta <= n_dtop(11 downto 7); end if;
                     if v_d(15 downto 13) /= 0 then n_cba <= (others => '1'); else n_cba <= v_d(12 downto 8); end if;
@@ -639,8 +712,8 @@ begin
                     end if;
                 when 10 =>
                     n_e <= n_ea + n_eb2;
-                    if n_vb(23 downto 8) >= C_BH(15 downto 1) then v_d := n_vb(23 downto 8) - C_BH(15 downto 1);
-                    else v_d := C_BH(15 downto 1) - n_vb(23 downto 8); end if;
+                    if n_vb(23 downto 8) >= f_bh(15 downto 1) then v_d := n_vb(23 downto 8) - f_bh(15 downto 1);
+                    else v_d := f_bh(15 downto 1) - n_vb(23 downto 8); end if;
                     n_es <= to_signed(40925, 18) + signed(resize(v_d, 18));
                 when 11 =>
                     if n_band = '0' then
@@ -666,41 +739,55 @@ begin
     ---------------------------------------------------------------------------
     p_beam : process(clk)
         variable v_tp : unsigned(24 downto 0);
-        variable v_tpf : unsigned(15 downto 0);
+        variable v_sq : unsigned(24 downto 0);
         variable v_in : std_logic;
         variable v_mn : std_logic;
     begin
         if rising_edge(clk) then
+            b_nx <= r_cq;                                -- fabric copy of the column table read
             if g_start = '1' then
                 b_tp <= C_TP0; b_tq <= resize(C_TP0, 25) + resize(f_inc, 25);
-                b_cc <= (others => '0'); b_m <= '0'; b_sync <= '1';
-                b_ca <= unsigned(-signed(resize(f_r, 16)));
+                b_tpar <= '0'; b_tm <= '0'; b_tsync <= '1';
+                b_sp <= C_TP0(23 downto 8); b_sq <= resize(C_TP0, 25) + resize(f_sinc, 25);
+                b_m <= '0'; b_sync <= '1'; b_vin <= '0';
+                b_ca <= b_nx; b_ra <= to_unsigned(1, 4);  -- column 0 from the table, prefetch column 1
                 b_sa <= resize(f_sl0 & x"00", 24);
                 b_td <= to_unsigned(56219, 16);
                 b_t  <= resize(f_t0, 31); b_dt <= resize(f_dt0, 27);
                 b_tl <= (others => '0');
                 b_pa <= l_pa; b_pb <= l_pb;
             elsif g_avid = '1' then
+                -- tile phase (the pastel grid): mirror parity and the sync tile only
                 v_tp := resize(b_tq(23 downto 0), 25) + resize(f_inc, 25);
                 b_tp <= b_tq(23 downto 0);
                 b_tq <= v_tp;
-                v_tpf := b_tp(23 downto 8);
-                if b_m = '1' then
-                    if v_tpf > C_NUE then v_in := '1'; else v_in := '0'; end if;
-                else
-                    if v_tpf < C_UE then v_in := '1'; else v_in := '0'; end if;
+                if b_tq(24) = '1' then
+                    b_tpar <= not b_tpar; b_tm <= f_mir and not b_tpar; b_tsync <= '0';
                 end if;
+                -- slab phase (the staircase)
+                v_sq := resize(b_sq(23 downto 0), 25) + resize(f_sinc, 25);
+                b_sp <= b_sq(23 downto 8);
+                b_sq <= v_sq;
+                if f_ramp = '1' then
+                    v_in := '1';
+                elsif b_m = '1' then
+                    if b_sp > C_NUE then v_in := '1'; else v_in := '0'; end if;
+                else
+                    if b_sp < C_UE then v_in := '1'; else v_in := '0'; end if;
+                end if;
+                b_vin <= v_in;
                 b_t <= unsigned(signed(b_t) + resize(b_dt, 31));
                 b_dt <= b_dt + signed(resize(f_ddt, 27));
                 b_pa <= b_pa + t_kax; b_pb <= b_pb + t_kbx;
-                if b_tq(24) = '1' then
-                    -- tile wrap: next column
-                    b_cc <= b_cc + 1; b_sync <= '0';
-                    v_mn := f_mir and not b_cc(0);       -- the new column index is odd
+                if b_sq(24) = '1' then
+                    -- slab wrap: next column (its base from the table)
+                    b_ra <= b_ra + 1; b_sync <= '0';
+                    v_mn := f_mir and b_ra(0);           -- the new column index is odd
                     b_m <= v_mn;
-                    b_ca <= b_ca + resize(f_r, 16);
+                    b_ca <= b_nx;
                     if v_mn = '1' then
-                        b_sa <= resize(f_st & x"00", 24); b_td <= to_unsigned(38666, 16);
+                        if f_ramp = '1' then b_sa <= resize(f_r & x"00", 24); else b_sa <= resize(f_st & x"00", 24); end if;
+                        b_td <= to_unsigned(38666, 16);
                     else
                         b_sa <= (others => '0'); b_td <= to_unsigned(49152, 16);
                     end if;
@@ -714,6 +801,8 @@ begin
                         b_td <= b_td + f_tdi;
                     end if;
                 end if;
+            else
+                b_ra <= (others => '0');                 -- blanking: hold column 0 in the prefetch
             end if;
         end if;
     end process p_beam;
@@ -723,7 +812,7 @@ begin
     ---------------------------------------------------------------------------
     p_pix : process(clk)
         variable v_e   : signed(18 downto 0);
-        variable v_d   : signed(18 downto 0);
+        variable v_d   : signed(19 downto 0);
         variable v_t   : signed(17 downto 0);
         variable v_x   : signed(10 downto 0);
         variable v_s8  : signed(7 downto 0);
@@ -744,9 +833,8 @@ begin
         if rising_edge(clk) then
             -- per-frame derived constants
             f_dep8 <= f_dep(10 downto 3);
-            f_rq <= resize(f_r, 16) - resize(f_dep(10 downto 2) & '0', 16) - resize(f_dep(10 downto 2), 16);
+            f_rq <= 0 - resize(f_dep(10 downto 2) & '0', 16) - resize(f_dep(10 downto 2), 16);
             f_tsst <= signed(resize(f_ts, 18)) - signed(resize(f_st, 18));
-            f_bend8 <= f_bend(13 downto 6);
 
             -- video tap: source luma -> signed bend value (a few px early: invisible in a bend field)
             v_y1 <= unsigned(data_in.y);
@@ -759,9 +847,9 @@ begin
             s_vd(3) <= s_vd(2);
 
             -- 1: tile phase (mirrored), slab parts, Osc triangles
-            if b_m = '1' then p1_uf <= not b_tp(23 downto 8); else p1_uf <= b_tp(23 downto 8); end if;
-            p1_tpf <= b_tp(23 downto 8);
-            p1_sync <= b_sync;
+            if b_tm = '1' then p1_uf <= not b_tp(23 downto 8); else p1_uf <= b_tp(23 downto 8); end if;
+            if b_sp >= C_LEADT then p1_lead <= '1'; else p1_lead <= '0'; end if;
+            p1_sync <= b_sync; p1_tsync <= b_tsync;
             p1_ca <= b_ca; p1_sa <= b_sa(23 downto 8); p1_td <= b_td(15 downto 12);
             if b_td(15 downto 13) = "111" then p1_tdk <= '1'; else p1_tdk <= '0'; end if;
             p1_tl <= b_tl;
@@ -779,38 +867,37 @@ begin
             else
                 p_teff(2) <= p1_tl;
             end if;
-            p_sync(2) <= p1_sync;
-            if p1_tpf >= C_LEADT and f_mir = '0' and f_inv = '0' then p_lead0(2) <= '1'; else p_lead0(2) <= '0'; end if;
-            if p1_tdk = '1' and p1_uf < C_UE then p_dk0(2) <= '1'; else p_dk0(2) <= '0'; end if;
+            p_sync(2) <= p1_tsync;
+            if p1_lead = '1' and f_mir = '0' and f_inv = '0' then p_lead0(2) <= '1'; else p_lead0(2) <= '0'; end if;
+            if p1_tdk = '1' and b_vin = '1' then p_dk0(2) <= '1'; else p_dk0(2) <= '0'; end if;   -- b_vin: stage-1 slant flag
 
             -- 3: staircase h (and the next column's), source select
             p3_uf <= p2_uf;
             p3_h  <= p2_ca + p2_sa - resize(p2_tr(11 downto 1), 16);
-            p3_hn <= p2_ca + f_rq;
+            p3_hn <= b_nx + f_rq;   -- next column's base: b_nx still holds it while this pixel is at stage 2
             if f_osc = '1' then v_x := p2_ta3 + p2_tb2; p3_src <= v_x(10 downto 3); else p3_src <= s_vd(3); end if;
 
             -- 4: S +- h, bend product
             p4_uf <= p3_uf;
-            if f_neg = '1' then p4_hs <= l_s - p3_h; p4_hns <= l_s - p3_hn;
-            else p4_hs <= l_s + p3_h; p4_hns <= l_s + p3_hn; end if;
-            p4_pe <= p3_src * signed(resize(f_bend8, 9));
+            p4_hs <= l_s + p3_h; p4_hns <= l_s + p3_hn;
+            p4_pe <= p3_src * signed(resize(f_bend(9 downto 1), 10));
 
             -- 5: blob edge, slab distance, rim thresholds
             p5_uf <= p4_uf;
             if p_sync(4) = '1' and l_low = '1' then v_e := resize(l_es, 19); else v_e := resize(l_e, 19); end if;
-            p5_e <= resize(v_e + resize(shift_right(p4_pe, 1), 19), 18);
-            p5_dd  <= p4_hs + unsigned(resize(shift_right(p4_pe, 4), 16));
-            p5_ddn <= p4_hns + unsigned(resize(shift_right(p4_pe, 4), 16));
+            p5_e <= v_e + resize(p4_pe, 19);
+            p5_dd  <= p4_hs + unsigned(resize(shift_right(p4_pe, 3), 16));
+            p5_ddn <= p4_hns + unsigned(resize(shift_right(p4_pe, 3), 16));
             if p_teff(4) > 404 then p5_t405 <= p_teff(4) - 404; else p5_t405 <= (others => '0'); end if;
             if p_teff(4) > 945 then p5_t946 <= p_teff(4) - 945; else p5_t946 <= (others => '0'); end if;
 
             -- 6: decisions
             if p5_uf < C_LK then p6_left <= '1'; else p6_left <= '0'; end if;
             if p5_uf >= C_OVER then p6_over <= '1'; else p6_over <= '0'; end if;
-            v_d := signed(resize(p5_uf, 19)) - resize(p5_e, 19);
+            v_d := signed(resize(p5_uf, 20)) - resize(p5_e, 20);
             if v_d >= 0 and p5_uf >= C_LK then p6_blob <= '1'; else p6_blob <= '0'; end if;
             if v_d < 0 then p6_dq <= (others => '0');
-            elsif v_d(18 downto 15) /= 0 then p6_dq <= (others => '1');
+            elsif v_d(19 downto 15) /= 0 then p6_dq <= (others => '1');
             else p6_dq <= unsigned(v_d(14 downto 10)); end if;
             if p5_dd < p_teff(5) then v_in := '1'; else v_in := '0'; end if;
             p6_slab <= v_in;

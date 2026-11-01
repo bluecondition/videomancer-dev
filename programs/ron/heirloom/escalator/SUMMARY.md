@@ -1,5 +1,6 @@
 # Escalator — Heirloom #1, rebuilt from the photo
 
+**v0.6.0 (2026-11-01, phase 2 round 1): built, NOT flashed** (see [Phase 2](#phase-2)).
 **v0.5.0 (2026-10-21): built, NOT flashed.** Rebuilt from `photos/WIN_20220629_23_49_20_Pro.jpg`
 after Ron judged v0.2.0 too abstract. It now redraws the photo itself: a pastel tile grid of
 lavender halves, violet blobs and pink bands with yellow/orange blobs, crossed by green
@@ -48,17 +49,17 @@ stair-stepped slabs that ride down from column to column. Work files: `.heirloom
 - Then the glow, rims, treads, lead strip and pale band lines.
 - Luma is pre-boosted 16/13 so the output luma scale lands the photo's levels.
 
-## Controls
+## Controls (v0.6.0)
 | Control | Photo element it drives |
 |---|---|
-| K1 Columns | tile columns across, 2–14 (7.14 = photo) |
-| K2 Bands | pink band rows, 2–10 (4.15); band = 27.5 % of a row |
-| K3 Blob | blob left edge, bipolar: wide blobs (no grey gap) <-> narrow blobs; centre = photo |
+| K1 Tiles | the pastel grid's columns only, 2–20 (square law; 7.14 = photo at 547). The stairs keep the photo's pitch on their own phase, so the grid detunes under them and the slab colours (green over the lavender half, teal/blue over the blob) follow the tiles each slab crosses. Locked to the stairs at 547 |
+| K2 Bands | bipolar, centre = photo (4.15 bands, 27.5 % tall). Right: more, thinner bands, to 11.9 at 6.8 % (hairlines with their pale edges). Left: fewer, taller bands, to 1.57 at 84 % (the rows flood pink, lavender left as thin strips) |
+| K3 Blob | blob left edge, bipolar: left = wide blobs (no grey gap), -1/4 tile; right = narrower blobs that vanish, +1/2 tile; centre = photo |
 | K4 Flood | slab thickness, thin threads .. green flood (x0.12..x2.5, square law) |
-| K5 Speed | ride speed down/up the stairs, still at centre (+-8), up to 10 lines/frame; default ~1 down |
-| K6 Bend | source bend of the blob edges (+-32 px) and, more gently, the slab edges |
-| S7 Mirror | every other column mirrored: chevron stairs |
-| S8 Climb | the staircase climbs instead of descending |
+| K5 Speed | ride speed down/up the stairs, still at centre (+-8), up to ~24 lines/frame (square law; default 623 = ~1 line/frame down). Each column's slab also bobs: a unipolar triangle wave 3.5 columns long travels across the columns, depth 0..236 lines peak-to-peak (square law with speed: ~9 lines at the default), phase rate speed/1024 (33 s a cycle at the default, 1.35 s at full) |
+| K6 Bend | source bend of the blob edges and, an eighth as much, the slab edges; cubic law: the default 492 = v0.5's photo bend, 100 % = 4.5x v0.5's maximum (blob edges swing ~1 tile on full-swing video) |
+| S7 Mirror | every other column mirrored: chevron stairs (tile grid and stairs each on their own column parity) |
+| S8 Ramp | Stairs / Ramp: the slant runs the whole column with no step, so the slabs become continuous diagonal saw ribbons with ~10 treads; with S7, every other ribbon flips its slant (chevrons) |
 | S9 Invert | key invert: green/blue bank outside the slabs, the pastel grid inside |
 | S10 Vivid | every blob in the band's yellow/orange/magenta palette |
 | S11 Source | Video (default) / Osc |
@@ -74,19 +75,46 @@ into geometry, never to the output.
 ## Engine
 - **Per frame:**
   - 5 glides (K1–K4, P12; 1/8 per field, +-4 deadband), pipelined over 20 zone clocks.
-  - One 20x18 serial shift-add multiplier, 18 slots, strobes registered from the zone counter.
-    The slots compute increments, slant, tread, flood, thickness DDA, sync wedge, speed, blob
-    offset and bend.
-  - The ride and Osc phases.
+  - One 20x18 serial shift-add multiplier, 33 slots of 32 clocks (11-bit zone counter), strobes
+    registered from the zone counter. Slots 1–24: tile and slab increments, slant, tread, flood,
+    thickness DDA, sync wedge, speed, blob offset, bend (K6 cubic), K1 square, K2 band count and
+    height. Chained slots (3->4, 9->10, 18->19, 20->21) load straight from the product register.
+    Slots 25–33 write the 9-entry column table (one EBR): entry k = (k - 1) R + bob(k).
+  - The ride, column-bob and Osc phases. The line-0 precompute starts at zone clock 1100, after the
+    last slot.
 - **Per line:** a 13-state engine computes the next line: band/slab phases, drift and corners from
   one 128x16 table EBR, blob edge, sync edge, palette level and fraction, pale flag.
-- **Pixel path:** 24 stages, 24-clock latency in all modes; the tile-wrap carry is precomputed one
-  pixel ahead. Then the conditioning (luma [1 2 1], chroma [1 2 2 2 2 2 2 2 1]/16, luma x13/16) and
+- **Beam (v0.6):** two 24-bit phases, each with its wrap carry precomputed one pixel ahead: the tile
+  phase (K1, the grid's regions, mirror parity, sync tile) and the slab phase (fixed 7.14 columns:
+  staircase, slant, treads, thickness latch, lead strip, sync wedge). At each slab wrap the column
+  base loads from the prefetched table entry (address 0 through the blanking, next column during
+  the line).
+- **Pixel path:** 24 stages, 24-clock latency in all modes. Then the conditioning (luma [1 2 1], chroma [1 2 2 2 2 2 2 2 1]/16, luma x13/16) and
   the gate on the generated avid.
 - **Shell:** v0.2.0 heirloom.
-- **ROMs:** 6 x 512x8 colourizer, 1 x 128x16 line table.
+- **ROMs / RAM:** 6 x 512x8 colourizer, 1 x 128x16 line table, 1 x column table (16 x 16 in one EBR, `no_rw_check`).
 
 ## Status
+**v0.6.0 built 2026-11-01, NOT flashed.** 7226–7252/7680 LC (94 %), 8/32 EBR, router2. Fmax post-route:
+| Config | Seed | Fmax | HDMI HSYNC − clk / closest data bit |
+|---|---|---|---|
+| HD Analog | s19 (hand-installed) | 81.82 MHz | +1.64 / ≤ −0.57 ns |
+| HD HDMI | s45 (hand-installed) | 77.76 MHz | +2.30 / ≤ −0.91 ns |
+| HD Dual | s10 (hand-installed) | 88.07 MHz | −2.28 / ≤ −1.27 ns |
+| SD Analog | s1 (builder) | 77.92 MHz | |
+| SD HDMI | s1 (builder) | 75.82 MHz | |
+| SD Dual | s2 (builder) | 84.13 MHz | |
+
+The builder's HD seeds were unsafe for HDMI pin skew: HD HDMI s1 +0.47, HD Analog s1 +0.07. A router2 screen
+(HD HDMI s2–48, HD Analog / Dual s1–24; `.heirloom_work/rb_escalator/p2/skew/screen.txt`) picked the seeds
+above. The most positive HD HDMI HSYNC with data ≤ −0.6 won (beacon's HW-confirmed fix sat at +2.31).
+Fallback HD HDMI bins are in `skew/out/`: s18 (+1.69 / ≤ −0.99, 81.35 MHz) and s8 (+1.46 / ≤ −1.21, 86.17 MHz).
+The builder's own vmprog is `skew/escalator_v060_builder.vmprog`. A plain `./build_heirloom.sh escalator` re-picks seed 1
+for HD, so after a rebuild re-install the three HD bins with
+`cp skew/out/<cfg>_router2_s<N>.bin build/programs/ron/escalator/rev_b/bitstreams/<cfg>.bin` and repack
+(`vmprog_pack.py --no-sign --hardware rev_b --toml-path escalator.toml build/programs/ron/escalator/rev_b out/...`).
+iceunpack OK on all six. Presets are placeholders.
+
 v0.5.0 built 2026-10-21, router2, all configs seed 1. Fmax post-route: HD Analog 83.25, HD HDMI 79.37,
 HD Dual 86.42, SD Analog 85.17, SD HDMI 73.90, SD Dual 82.20 MHz. 6916–6927/7680 LC (90 %), 7/32 EBR.
 iceunpack OK. NOT flashed; presets are placeholders.
@@ -101,3 +129,44 @@ iceunpack OK. NOT flashed; presets are placeholders.
 - Thickness follows a smooth quadratic (photo scatter +-15 lines).
 - At SD (4:3) the 7.14 columns span a narrower picture: tiles 25 % narrower, slants steeper. Pale
   band lines are 1 line at SD/1080i.
+- v0.6: at SD and 720p the tile and slab counts are the same as at 1080 (count-based), so the
+  4:3 SD crop of v0.5 still applies; K2's hairline bands are 1 line thinner at SD/1080i. The column
+  bob and band heights are in virtual 1080-line units, so they look the same in every mode.
+
+## Phase 2
+
+### Round 1 — v0.6.0 (2026-11-01)
+Ron left no notes on v0.5.0, which has never been flashed. He picked a proposed map (all four
+recommended options):
+- **K1 Columns -> Tiles (grid only).** v0.5's K1 scaled the grid and the stairs together, a global
+  X scale. Now the tile ramp (pastel grid) and the slab staircase run on separate phases. K1 sets
+  only the grid (2–20, square law), and the stairs stay at the photo's 7.14 columns. Both phases
+  start at the same point and lock at K1 = 547, which is the photo. Away from it the grid detunes
+  under the stairs. Each slab switches the colourizer bank for whatever tiles it crosses, so its
+  green / teal / blue follows the grid, as the patch's bank switch would.
+- **K2 Bands -> count + height (bipolar).** The band count and the band height move together:
+  1.57 bands at 84 % .. 4.15 at 27.5 % (photo, centre, deadband) .. 11.9 at 6.8 %.
+- **K5 Speed -> unison ride + column bob.** Top speed goes from 10 to ~24 lines/frame; the default
+  is now 623 (still ~1 line/frame down). Each column's slab also bobs on a unipolar triangle wave,
+  3.5 columns long, that travels across the columns. Its depth rises with the square of speed
+  (~9 lines peak-to-peak at the default, 236 at full) and its phase moves at speed/1024, so it is
+  still at the centre and runs in the ride's direction.
+- **S8 Climb -> Ramp.** Stairs / Ramp: the slant runs the whole column (no UE clip, a mirrored
+  column starts at R) with ~10 treads, so the slabs become continuous diagonal saw ribbons.
+  The staircase no longer climbs.
+- Also widened, as proposed:
+  - **K3 Blob** goes to +1/2 tile on the narrow side (the blobs vanish); the wide side stays at
+    -1/4 tile.
+  - **K6 Bend** uses a cubic law. The default moves 480 -> 492 = v0.5's photo bend; 100 % =
+    4.5x v0.5's maximum.
+- **Default frame:** a GHDL render at 720p (Osc) matches the v0.5 baseline `rtl720_osc.png`, with
+  the slabs a few lines lower (ride phase + bob). See `.heirloom_work/rb_escalator/p2/cmp_def.png`.
+- **Fit:**
+  - The first version packed at 7548 LC (98 %).
+  - It came down to 7237 with no visible loss:
+    - chained sequencer slots load straight from the product register (no intermediate
+      registers);
+    - the bob is unipolar on an 8-bit column phase, stepping with the ride;
+    - the bend multiply is back to 8x10;
+    - the lead strip reads the next column's base straight from the prefetch register;
+    - the band-bottom distance needs no complement register.
