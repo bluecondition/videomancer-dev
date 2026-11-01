@@ -1,4 +1,4 @@
-# Crenel - Heirloom #10, v0.5.0 (2026-10-21): rebuilt from the photo WIN_20230223_01_46_41.
+# Crenel - Heirloom #10, v0.6.0 (2026-10-31, phase 2; v0.5.0 2026-10-21): rebuilt from the photo WIN_20230223_01_46_41.
 # A picture tiled twice across the line by a bent horizontal oscillator: a row of hot-pink "+"
 # crenels with feedback echoes over a navy ground, a blue camera dome, pink V's, rows of camera
 # blocks / arcs / dashes, a pink arch ring and pink blocks below.  See crenel.vhd and SUMMARY.md.
@@ -7,13 +7,13 @@
 processing_delay_clks = 24
 program_id = "com.czartroniks.crenel"
 program_name = "Crenel"
-program_version = "0.5.0"
+program_version = "0.6.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Pattern", "Glitch", "Color"]
 program_type = "processing"
-description = "Hot-pink crenels, camera domes, V's and arcs tiled twice by a bent oscillator; torn, echoing, rolling."
+description = "Hot-pink crenels, a camera dome, V's and arcs tiled by a bent oscillator; every band drifts on its own."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
@@ -29,13 +29,13 @@ suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
-name_label = "Tiles"
+name_label = "Dome"
 control_mode = "linear"
-display_min_value = 1
-display_max_value = 4
-initial_value = 341
-display_float_digits = 1
-suffix_label = ""
+display_min_value = 0
+display_max_value = 100
+initial_value = 471
+display_float_digits = 0
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
@@ -53,7 +53,7 @@ name_label = "Drift"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 600
+initial_value = 576
 display_float_digits = 0
 suffix_label = ""
 
@@ -75,9 +75,9 @@ initial_value_label = "Photo"
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
-name_label = "Tear"
+name_label = "Swap"
 value_labels = ["Off", "On"]
-initial_value_label = "On"
+initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
@@ -115,12 +115,13 @@ suffix_label = "%"
 
 [[preset]]
 name = "Photo"
+rotary_potentiometer_4 = 512
 toggle_switch_11 = 1
 
 [[preset]]
 name = "Battlements"
 linear_potentiometer_12 = 0
-toggle_switch_7 = 0
+rotary_potentiometer_4 = 512
 toggle_switch_11 = 1
 
 [[preset]]
@@ -143,3 +144,13 @@ name = "Jade Mirror"
 rotary_potentiometer_6 = 2
 toggle_switch_9 = 1
 rotary_potentiometer_1 = 600
+
+[[preset]]
+name = "Swap Shear"
+toggle_switch_7 = 1
+rotary_potentiometer_4 = 900
+
+[[preset]]
+name = "Ball"
+rotary_potentiometer_2 = 120
+rotary_potentiometer_4 = 300

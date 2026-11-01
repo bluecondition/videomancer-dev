@@ -1,6 +1,6 @@
 # Crenel — hot-pink crenels and camera domes, tiled by a bent oscillator
 
-**v0.5.0 (2026-10-21): built, NOT flashed.** Heirloom #10, rebuilt from the photo
+**v0.6.0 (2026-10-31, phase 2): built, NOT flashed.** Heirloom #10, rebuilt from the photo
 `photos/WIN_20230223_01_46_41_Pro.jpg` (the v0.1.0 comb-and-emboss sketch was judged too abstract).
 Work files, measurements and the full history: `.heirloom_work/rb_crenel/` (`notes.md`).
 
@@ -52,10 +52,10 @@ RTL (`imodel4.py`).
   4–26 px.
 
 ## What it does
-1. **Tile phase.** A 24-bit beam accumulator, `t = phi + x * inc(y)`. inc(y) = 2^24 / T(y) comes
-   from a measured 540-entry table (every second line, interpolated). It is FM-scaled about the
-   centre (2^24 / 980) by P12 Bend (with a +-12 % LFO) and by K2 Tiles. The tile parity drives
-   Mirror.
+1. **Tile phase.** A 24-bit beam accumulator, `t = phi(band) + x * inc(y)`. inc(y) = 2^24 / T(y)
+   comes from a measured 540-entry table (every second line, interpolated). It is FM-scaled about
+   the centre (2^24 / 980) by P12 Bend (with a +-12 % LFO). phi(band) is the K4 drift phase times
+   the band's own factor, so every band slides at its own rate. The tile parity drives Mirror.
 2. **Crenel phase.** `c = frac(k * t)`, k = 1..6 (K1), by shift-add, with the tooth index from the
    carry. The arcs/dash phase is 4c plus a per-line offset (and a sine wobble on the arcs row).
 3. **Per band, a pink window:** from the per-line edges (the chevron and fillets from the line ROM,
@@ -76,20 +76,20 @@ RTL (`imodel4.py`).
 | Control | Photo element it drives |
 |---|---|
 | K1 Crenels | the pink "+" crosses: 1–6 per tile (3 = the photo). Every crenel-locked row follows: the blocks, the camera teeth, the pink lower blocks, the arc and dash spacing |
-| K2 Tiles | how many copies of the picture lie across the line: 1–4 (2 = the photo) |
+| K2 Dome | the blue camera dome's radius, a true round cap with its top fixed at y 303: R 24 px (a small ball under the crenels) .. 458 (the photo, at 46 %) .. 2068 (a flat band filling the row). Quadratic, so the low end is fine-grained |
 | K3 Echo | the feedback echoes left of every tooth: none (clean edges) → strong double echoes (square law) |
-| K4 Drift | bipolar slide of the whole tiled picture along the line (still in the centre ±8); the photo's patch drifts slowly right |
+| K4 Drift | bipolar, still in the centre (±8): every band slides along the line at its own rate and direction, so the rows shear against each other. Factors: crenel row x1, dome x-1, slip row + V's x2, blocks x-1.5, arcs x3, dashes x-2.5, lower teeth x1.5, arch x-0.5, pink blocks x0.5, floor x-3. At full travel the base rate is about 6 s per tile (the arcs and the floor 2 s) |
 | K5 Ripples | the camera blobs' soft-key width: hard flat blobs → wide flanks with many ripple folds |
 | K6 Palette | Photo (fitted) / Ember / Jade / Rust |
-| S7 Tear | the sideways tears of the camera rows (default On) |
+| S7 Swap | a routing flip: the pink shapes (crenels, V's, pink blocks) and their echoes print the camera through the blue colouriser, and the camera areas (dome, blocks, arcs, dashes, teeth) take the lower pink fill, level by camera level |
 | S8 Outline | the pink shapes reduced to their ridges and rims |
 | S9 Mirror | every other tile mirrored: crenels and V's meet in chevrons |
 | S10 Roll | the band stack rolls up the screen (V-hold lost, 2 lines per field) |
 | S11 Source | Video / Osc (default Video) |
-| P12 Bend | the oscillator FM depth (0–2.5x of the measured bend): 0 = upright battlements, straight V's, round dome; 40 % = the photo; 100 % = crenels leaning into long slashes and the slipped rows torn apart. The tear amplitude follows (0.25x → 2x) |
+| P12 Bend | the oscillator FM depth (0–2.5x of the measured bend): 0 = upright battlements, straight V's, round dome; 40 % = the photo; 100 % = crenels leaning into long slashes and the slipped rows torn apart. The tear amplitude follows (0.25x → 2x); the tears are always on |
 
 Motion at defaults:
-- the tiled picture drifts right (about 36 s per tile);
+- K4 at 576: the bands shear slowly (the crenel row about 52 s per tile, the arcs and floor 17 s); every band starts at phase 0 at power-up, so the first frames are the photo's alignment. Preset 0 "Photo" sets K4 to the centre (still);
 - the bend breathes ±12 %;
 - the tears are redrawn every 8 fields;
 - the Osc source's oscillator walks.
@@ -107,13 +107,13 @@ field. Image-tester note: labelled knobs sim at 512 (K6 = Jade), so sims pass
 - Osc substitutes a bright level dipped by a triangle oscillator (5 per tile), phase-bent by a slow
   vertical triangle. It drifts per field and gives the soft dark lobes the colouriser folds into
   the photo's ripple arcs.
-- Every camera-path control (K5, S7, K4, P12) stays live in both modes.
+- Every camera-path control (K2, K4, K5, S7, P12) stays live in both modes.
 
 ## Engine
 - **Field values** (vblank zone):
   - glides on a shared 4-clock-per-channel datapath;
-  - K1 → shift-add selects; K2 → tile scale; K3 → echo gain (square-law LUT); K5 → ripple shift;
-    P12 → bend;
+  - K1 → shift-add selects; K2 → the dome diameter 2R = 48 + K2^2 / 256 (on the serial
+    multiplier); K3 → echo gain (square-law LUT); K5 → ripple shift; P12 → bend;
   - the bend LFO on the shared serial multiplier;
   - the drift and roll phases, the tear seed and the tear scale.
 - **Per-line engine**, kicked at the source avid rise. It computes the NEXT line in 12 slots x 20
@@ -122,8 +122,10 @@ field. Image-tester note: labelled knobs sim at 512 (K6 = Jade), so sims pass
   - the line ROM reads (inc pair, chevron, ridge gain, dome half-width, arc bow, fillet, dash hash)
     and a sequential band search;
   - the xorshift32 tear run generator;
-  - FM bend, tile scale, the tear offset in t and in c, the V edge slopes, the dash row index and
-    the arch dy^2.
+  - FM bend, the tear offset in t and in c, the V edge slopes, the dash row index and the arch dy^2;
+  - the dome (slots 8–10): hw^2 = d (2R - d) on the multiplier, a bit-serial square root (two bits
+    per clock), then hw x 68 into tile phase (clamped to the whole tile);
+  - the band's drift phase: the field drift phase x the band's factor (slot 9).
   The line record is assembled in the horizontal blanking, 24 clocks after the source avid fall,
   when the line's last pixel has left the pixel path. It is single-buffered; line 0 is computed
   late in the vblank zone.
@@ -150,7 +152,48 @@ field. Image-tester note: labelled knobs sim at 512 (K6 = Jade), so sims pass
   - output conditioning before the blanking gate;
   - colours in the hardware convention (U = Cr).
 
+## Phase 2 (v0.6.0, 2026-10-31)
+Ron's notes (on v0.5.0, before flashing it): change K2 Tiles and K4 Drift to more granular control,
+do something else with S7, and give the element-level shapes their own controls where possible.
+
+What changed (control table above):
+- **K2 Tiles → Dome.** The global tile scale is gone (the tile period is the measured one). K2 sets
+  the dome's radius; the line engine computes the dome's half-width per line from the circle
+  (hw = sqrt(d (2R − d))) instead of reading the fitted half-width table. At R 458 it lands within
+  2–3 % of the old table.
+- **K4 Drift → per-band drift.** The beam starts each line at the band's own phase: the field
+  drift phase times a factor per band (one multiply in the line engine). The bands slide against
+  each other, and each element group (crenels, dome, V's, blocks, arcs, dashes, teeth, arch,
+  pink blocks, floor) moves like its own oscillator.
+- **S7 Tear → Swap.** Pink shapes and camera areas exchange roles. The tears stay on, as in the photo.
+- **What did not get its own knob.** The V's, the arch ring and the dash / arc rows each have their
+  own drift rate, but no size control: all twelve controls are taken. Giving one a knob means
+  trading K6 Palette, S8 Outline or S10 Roll; that is Ron's call.
+- Defaults: K2 471 reproduces the photo's dome; K4 at the centre is the still photo (preset 0).
+  The fitted dome table in the line ROM (800..911) is no longer read.
+
 ## Status
+- **v0.6.0, 2026-11-01: built, NOT flashed.** Builder: **ROUTER1**
+  (`NEXTPNR_ROUTER="--router router1" MAKE_TIMEOUT=900 ./build_heirloom.sh crenel`). SD Analog,
+  SD HDMI and SD Dual closed on seed 1 at 92.55, 91.22 and 84.88 MHz. HD HDMI seed 1 stalled the
+  router (dupin: no self-add carries, so routing noise) and seed 2 closed. 7187–7228 / 7680 LC
+  (94 %), 23 / 32 EBR.
+  - **HD seeds were re-picked from a pin-skew screen** (`.heirloom_work/rb_crenel/skew/screen.txt`,
+    `screen2.txt`: HD HDMI router1 s1–40 and router2 s1–24, HD Analog s1–10, HD Dual s1–8), then
+    hand-installed and repacked. The builder's picks had HD HDMI s2 at HSYNC −1.54 ns, the kind of
+    placement that showed lines on abacus, and HD Analog / HD Dual s1 had data bits at +0.39 / +0.11.
+
+    | Config | Seed | HDMI HSYNC / closest data (ns) | Post-route Fmax |
+    |---|---|---|---|
+    | HD HDMI | **router2 s17** | +2.00 / ≤ −1.63 | 80.89 MHz |
+    | HD Analog | router1 s3 | −1.87 / ≤ −0.90 | 89.55 MHz |
+    | HD Dual | router1 s7 | −2.52 / ≤ −1.54 | 84.55 MHz |
+
+    Spare HD HDMI: router1 s34 (+2.04 / ≤ −0.83, 89.90 MHz). All six bitstreams pass iceunpack.
+  - A plain rebuild gives the builder seeds. To reproduce the shipped HD bitstreams, run
+    `skew/synth.sh <config>`, then `RT=router2 skew/route.sh hd_hdmi 17` (or router1 with
+    `hd_analog 3` / `hd_dual 7`). The builder's own seeds re-routed byte-exact. The builder's vmprog
+    is `skew/crenel_v060_builder.vmprog`.
 - **v0.5.0, 2026-10-21: built, NOT flashed.** **ROUTER1**:
   `NEXTPNR_ROUTER="--router router1" ./build_heirloom.sh crenel`. All six configs are seed 1.
   Post-route Fmax: HD Analog 77.59, HD HDMI 84.03, HD Dual 86.27, SD Analog 79.81, SD HDMI 85.27,
@@ -182,6 +225,5 @@ field. Image-tester note: labelled knobs sim at 512 (K6 = Jade), so sims pass
 - Not reproduced: the second V's separate pink stroke in the slipped row (that tile is not periodic
   in the photo), and the green specks / red fringe as separate objects (they appear only as
   colouriser folds).
-- S7 Tear is the subtlest switch: it slices only the camera rows, as in the photo.
 - Resolution: 720p renders the same picture as 1080p. SD 4:3 shows 1.5 tiles across instead of 2;
   the tile width is fixed in virtual units so the arch stays round and the crenels keep their shape.

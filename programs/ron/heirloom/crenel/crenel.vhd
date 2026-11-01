@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Crenel v0.5.0 -- Heirloom #10, rebuilt from the photo WIN_20230223_01_46_41.
+-- Crenel v0.6.0 -- Heirloom #10, rebuilt from the photo WIN_20230223_01_46_41 (phase 2).
 --
 -- The photo: one source picture tiled ~2x across the line by a horizontal oscillator whose
 -- phase resets at every line start and whose period is bent down the frame (1064 px at the top,
@@ -15,19 +15,22 @@
 -- red fringes) and are torn sideways in runs of lines.
 --
 --   K1  Crenels  crosses per tile 1 .. 6 (3 = the photo); every crenel-locked row follows
---   K2  Tiles    tiles across the 1920 line, 1 .. 4 (2 = the photo)
+--   K2  Dome     the blue camera dome's radius: a small ball .. the photo's cap (R 458) .. a flat
+--                band filling the row (R 24 .. 2068 px, quadratic)
 --   K3  Echo     feedback echoes left of every tooth: none .. strong and wide (square law)
---   K4  Drift    tile phase drift, bipolar (still in the centre): the whole tiled picture slides
+--   K4  Drift    bipolar (still in the centre): every band slides along the line at its own rate
+--                and direction (crenels x1, dome x-1, V's x2, blocks x-1.5, arcs x3, dashes
+--                x-2.5, lower teeth x1.5, arch x-0.5, pink blocks x0.5, floor x-3)
 --   K5  Ripples  soft-key width of the camera blobs: hard flat blobs .. wide rippled flanks
 --   K6  Palette  Photo / Ember / Jade / Rust
---   S7  Tear     sideways tearing of the camera rows (On)
+--   S7  Swap     the pink shapes print the camera, the camera areas turn pink
 --   S8  Outline  pink shapes reduced to their ridges and rims
 --   S9  Mirror   every other tile mirrored
 --   S10 Roll     the band structure rolls up the screen (V-hold lost)
 --   S11 Source   Video / Osc
 --   P12 BEND     oscillator FM depth: 0 = upright battlements, the photo at 40 %,
 --                100 % = crenels leaning into long slashes, slipped rows torn apart; the
---                tear amplitude follows
+--                camera rows' sideways tears (always on) follow
 --
 -- Geometry: virtual 1080-line rows, tile phase with a fixed virtual tile width (round arch at
 -- every resolution; SD 4:3 shows 1.5 tiles).  Generated avid (parity-locked start, field-latched
@@ -204,7 +207,7 @@ architecture crenel of program_top is
     signal f_k3    : unsigned(2 downto 0) := to_unsigned(3, 3);       -- crenels per tile 1 .. 6
     signal f_ca    : unsigned(1 downto 0) := to_unsigned(1, 2);       -- c = (t << ca) + (t << cb) [cben]
     signal f_cb, f_cben : std_logic := '1';
-    signal f_tiles : unsigned(10 downto 0) := to_unsigned(511, 11);
+    signal f_2r    : unsigned(12 downto 0) := to_unsigned(916, 13);   -- dome diameter (px)
     signal f_rip   : unsigned(2 downto 0) := to_unsigned(2, 3);
     signal f_bend  : unsigned(9 downto 0) := to_unsigned(256, 10);
     signal f_bendl : unsigned(10 downto 0) := to_unsigned(256, 11);
@@ -217,7 +220,7 @@ architecture crenel of program_top is
     signal f_ot    : unsigned(15 downto 0) := (others => '0');
     signal f_lfo   : unsigned(7 downto 0) := (others => '0');
     signal f_pal   : unsigned(1 downto 0) := (others => '0');
-    signal f_tear, f_outl, f_mir, f_rollon, f_osc, f_odd : std_logic := '0';
+    signal f_swap, f_outl, f_mir, f_rollon, f_osc, f_odd : std_logic := '0';
 
     -- serial multiplier (shared by the field sequencer and the line engine)
     signal q_job : unsigned(4 downto 0) := (others => '0');
@@ -246,7 +249,11 @@ architecture crenel of program_top is
     signal e_inck : unsigned(16 downto 0) := (others => '0');
     signal e_dmag : unsigned(11 downto 0) := (others => '0');
     signal e_dneg : std_logic := '0';
-    signal e_incb : unsigned(16 downto 0) := (others => '0');
+    signal e_hq : unsigned(19 downto 0) := (others => '0');      -- dome half-width^2 (px)
+    signal sq_x : unsigned(19 downto 0) := (others => '0');      -- serial square root
+    signal sq_r : unsigned(11 downto 0) := (others => '0');
+    signal sq_q : unsigned(9 downto 0) := (others => '0');
+    signal e_phb : unsigned(17 downto 0) := (others => '0');     -- the band's drift phase
     signal e_incv : unsigned(17 downto 0) := (others => '0');
     signal e_dt, e_dc : unsigned(15 downto 0) := (others => '0');
     signal e_lin0, e_lin1 : unsigned(15 downto 0) := (others => '0');
@@ -265,6 +272,7 @@ architecture crenel of program_top is
     -- the live line values (assembled in the horizontal blanking from the engine's results)
     type t_lv is record
         incr : unsigned(19 downto 0);
+        phi : unsigned(17 downto 0);
         dt, dc, koff4 : unsigned(15 downto 0);
         pon, psel, pbar, prim, primb, punder, pgate, echo, glow : std_logic;
         pa, pw : unsigned(15 downto 0);
@@ -283,7 +291,7 @@ architecture crenel of program_top is
         ak : unsigned(16 downto 0);
         gidx : unsigned(5 downto 0);
     end record;
-    constant C_LV0 : t_lv := (incr => (others => '0'), dt => (others => '0'), dc => (others => '0'),
+    constant C_LV0 : t_lv := (incr => (others => '0'), phi => (others => '0'), dt => (others => '0'), dc => (others => '0'),
         koff4 => (others => '0'),
         pon => '0', psel => '0', pbar => '0', prim => '0', primb => '0', punder => '0', pgate => '0',
         echo => '0', glow => '0', pa => (others => '0'), pw => (others => '0'),
@@ -369,7 +377,7 @@ architecture crenel of program_top is
     signal p10_dr : signed(9 downto 0) := (others => '0');
     type t_u8a is array (natural range <>) of unsigned(7 downto 0);
     type t_u9a is array (natural range <>) of unsigned(8 downto 0);
-    signal p_sr : t_u8a(6 to 8) := (others => (others => '0'));
+    signal p_sr : t_u8a(6 to 10) := (others => (others => '0'));
     signal p_code : t_u9a(11 to 14) := (others => (others => '0'));
     -- colour ROM
     signal r_ca : unsigned(10 downto 0) := (others => '0');
@@ -439,6 +447,7 @@ begin
         variable v_rl : unsigned(11 downto 0);
         variable v_sg : signed(16 downto 0);
         variable v_k3 : unsigned(2 downto 0);
+        variable v_dd : unsigned(7 downto 0);
     begin
         if rising_edge(clk) then
             t_xs <= f_vstep_x(registers_in(8)(3 downto 0));
@@ -483,7 +492,7 @@ begin
                 else f_drift <= (others => '0'); end if;
                 v_k6 := unsigned(registers_in(5));
                 if v_k6 < 4 then f_pal <= v_k6(1 downto 0); else f_pal <= v_k6(9 downto 8); end if;
-                f_tear   <= registers_in(6)(0);
+                f_swap   <= registers_in(6)(0);
                 f_outl   <= registers_in(6)(1);
                 f_mir    <= registers_in(6)(2);
                 f_rollon <= registers_in(6)(3);
@@ -544,7 +553,6 @@ begin
                     when 4 => f_ca <= "10"; f_cben <= '1'; f_cb <= '0';
                     when others => f_ca <= "10"; f_cben <= '1'; f_cb <= '1';
                 end case;
-                f_tiles <= to_unsigned(256, 11) + resize(shift_right(resize(s_g(1)(12 downto 3), 12) * 3, 2), 11);
                 f_eg    <= unsigned(C_EGL(to_integer(s_g(2)(12 downto 8))));
                 f_rip   <= resize(shift_right(resize(s_g(3)(12 downto 3), 13) * 5, 10), 3);
                 f_bend  <= resize(shift_right(resize(s_g(4)(12 downto 3), 13) * 5, 3), 10);
@@ -562,9 +570,11 @@ begin
             end if;
             if s_zone = '1' and s_zc = 64 then
                 q_run <= '1'; q_ph <= (others => '0'); q_job <= to_unsigned(3, 5);
-            elsif e_ph = 0 and e_slot >= 1 and e_slot <= 11 and e_slot /= 8 and e_slot /= 9 and e_slot /= 10 then
+            elsif s_zone = '1' and s_zc = 96 then
+                q_run <= '1'; q_ph <= (others => '0'); q_job <= to_unsigned(4, 5);
+            elsif e_ph = 0 and e_slot >= 1 and e_slot <= 11 and e_slot /= 2 then
                 q_run <= '1'; q_ph <= (others => '0');
-                q_job <= resize(e_slot, 5) + 7;                        -- 8 .. 18
+                q_job <= resize(e_slot, 5) + 7;                        -- 8, 10 .. 18
             end if;
             if q_run = '1' and q_ph = 0 then
                 m_h <= (others => '0'); m_l <= (others => '0');
@@ -573,8 +583,8 @@ begin
                     when 3  => m_a <= resize(f_bend, 18);
                                if f_lfo >= 128 then m_b <= resize(f_lfo - 128, 11);
                                else m_b <= resize(128 - f_lfo, 11); m_neg <= '1'; end if;
+                    when 4  => m_a <= resize(s_g(1)(12 downto 3), 18); m_b <= resize(s_g(1)(12 downto 3), 11);
                     when 8  => m_a <= resize(e_dmag, 18); m_b <= f_bendl; m_neg <= e_dneg;
-                    when 9  => m_a <= resize(e_incb, 18); m_b <= f_tiles;
                     when 10 => m_a <= e_incv; m_b <= resize(e_jit, 11); m_neg <= e_jneg;
                     when 11 => if e_dt(15) = '1' then m_a <= resize(0 - e_dt, 18); m_neg <= '1';
                                else m_a <= resize(e_dt, 18); end if;
@@ -590,6 +600,27 @@ begin
                             m_b <= (others => '0');
                         end if;
                     when 14 => m_a <= resize(e_dy(6 downto 0), 18); m_b <= to_unsigned(1171, 11);   -- row = dy * 1171 / 8192 = floor(dy / 7)
+                    -- dome: hw^2 = d (2R - d), d = rows below the dome top (y 303)
+                    when 15 => if e_dy >= 3 then v_dd := e_dy - 3; else v_dd := (others => '0'); end if;
+                               if resize(v_dd, 13) >= f_2r then m_a <= (others => '0');
+                               else m_a <= resize(f_2r - v_dd, 18); end if;
+                               m_b <= resize(v_dd, 11);
+                    -- the band's drift phase: f_phi x a per-band factor (Q1)
+                    when 16 => m_a <= f_phi(23 downto 6);
+                               case to_integer(e_band) is
+                                   when 0 | 1 | 2 => m_b <= to_unsigned(2, 11);
+                                   when 3         => m_b <= to_unsigned(2, 11); m_neg <= '1';
+                                   when 4 | 5     => m_b <= to_unsigned(4, 11);
+                                   when 6         => m_b <= to_unsigned(3, 11); m_neg <= '1';
+                                   when 7         => m_b <= to_unsigned(6, 11);
+                                   when 8         => m_b <= to_unsigned(5, 11); m_neg <= '1';
+                                   when 9         => m_b <= to_unsigned(3, 11);
+                                   when 10        => m_b <= to_unsigned(1, 11); m_neg <= '1';
+                                   when 11        => m_b <= to_unsigned(1, 11);
+                                   when others    => m_b <= to_unsigned(6, 11); m_neg <= '1';
+                               end case;
+                    -- dome half-width in tile phase: root (px) x 68
+                    when 17 => m_a <= resize(sq_q, 18); m_b <= to_unsigned(68, 11);
                     when others =>
                         if e_y >= 1064 then m_a <= resize(e_y - 1064, 18); m_b <= resize(e_y - 1064, 11);
                         elsif e_y < 1064 - 255 then m_a <= to_unsigned(255, 18); m_b <= to_unsigned(255, 11);
@@ -606,10 +637,10 @@ begin
                     when 3 =>
                         if m_neg = '1' then f_bendl <= resize(f_bend, 11) - resize(v_pr(19 downto 10), 11);
                         else f_bendl <= resize(f_bend, 11) + resize(v_pr(19 downto 10), 11); end if;
+                    when 4 => f_2r <= to_unsigned(48, 13) + resize(v_pr(19 downto 8), 13);
                     when 8 =>
-                        if m_neg = '1' then e_incb <= to_unsigned(C_INCC, 17) - resize(v_pr(24 downto 8), 17);
-                        else e_incb <= to_unsigned(C_INCC, 17) + resize(v_pr(24 downto 8), 17); end if;
-                    when 9 => e_incv <= v_pr(26 downto 9);
+                        if m_neg = '1' then e_incv <= resize(to_unsigned(C_INCC, 17) - resize(v_pr(24 downto 8), 17), 18);
+                        else e_incv <= resize(to_unsigned(C_INCC, 17) + resize(v_pr(24 downto 8), 17), 18); end if;
                     when 10 =>
                         if m_neg = '1' then e_dt <= 0 - v_pr(23 downto 8); else e_dt <= v_pr(23 downto 8); end if;
                     when 11 =>
@@ -621,6 +652,10 @@ begin
                         if q_job = 12 then e_lin0 <= unsigned(v_sg(15 downto 0)); else e_lin1 <= unsigned(v_sg(15 downto 0)); end if;
                     when 14 =>
                         if e_band = 12 then e_row <= resize(shift_right(e_dy, 3), 7); else e_row <= v_pr(19 downto 13); end if;
+                    when 15 => e_hq <= v_pr(19 downto 0);
+                    when 16 => if m_neg = '1' then e_phb <= 0 - v_pr(18 downto 1); else e_phb <= v_pr(18 downto 1); end if;
+                    when 17 => if v_pr(16 downto 15) /= 0 then e_hw <= to_unsigned(32767, 16);
+                               else e_hw <= resize(v_pr(14 downto 0), 16); end if;
                     when others => e_dy2 <= v_pr(15 downto 0);
                 end case;
             end if;
@@ -694,6 +729,7 @@ begin
         variable v_ad : unsigned(10 downto 0);
         variable v_t  : unsigned(15 downto 0);
         variable v_w  : unsigned(6 downto 0);
+        variable v_sr, v_st : unsigned(13 downto 0);
     begin
         if rising_edge(clk) then
             -- tear seed: redrawn every 8 fields
@@ -750,7 +786,7 @@ begin
                     when 3 =>
                         if e_y(10 downto 1) >= 539 then r_la <= to_unsigned(539, 10); else r_la <= resize(e_y(10 downto 1), 10) + 1; end if;
                         v_m := resize(t_mag * f_tk, 11);
-                        if t_hit = '1' and f_tear = '1' then e_jit <= resize(shift_right(v_m, 4), 6); else e_jit <= (others => '0'); end if;
+                        if t_hit = '1' then e_jit <= resize(shift_right(v_m, 4), 6); else e_jit <= (others => '0'); end if;
                         e_jneg <= not t_sgn;
                     when 4 =>
                         r_la <= to_unsigned(544, 10) + resize(e_d, 10);
@@ -759,8 +795,6 @@ begin
                         r_la <= to_unsigned(672, 10) + resize(e_d, 10);
                     when 6 =>
                         e_incb2 <= unsigned(r_lq2);
-                        if e_y >= 300 and e_y < 412 then v_i := resize(e_y - 300, 10); else v_i := (others => '0'); end if;
-                        r_la <= to_unsigned(800, 10) + v_i;
                     when 7 =>
                         e_lr <= unsigned(r_lq2);
                         if e_y >= 645 and e_y < 700 then v_i := resize(e_y - 645, 10); else v_i := (others => '0'); end if;
@@ -780,8 +814,6 @@ begin
                         else
                             r_la <= to_unsigned(1023, 10);                  -- (0)
                         end if;
-                    when 9 =>
-                        e_hw <= unsigned(r_lq2);
                     when 10 =>
                         e_koa <= unsigned(r_lq2);
                     when 11 =>
@@ -810,6 +842,22 @@ begin
                     end if;
                 end if;
             end if;
+            -- slot 9: square root of the dome's hw^2 (two bits per clock, phases 1 .. 10)
+            if e_slot = 9 then
+                if e_ph = 0 then
+                    sq_x <= e_hq; sq_r <= (others => '0'); sq_q <= (others => '0');
+                elsif e_ph <= 10 then
+                    v_sr := sq_r(11 downto 0) & sq_x(19 downto 18);
+                    v_st := "00" & sq_q & "01";
+                    if v_sr >= v_st then
+                        v_sr := v_sr - v_st; sq_q <= sq_q(8 downto 0) & '1';
+                    else
+                        sq_q <= sq_q(8 downto 0) & '0';
+                    end if;
+                    sq_r <= v_sr(11 downto 0);
+                    sq_x <= sq_x(17 downto 0) & "00";
+                end if;
+            end if;
             -- slot 8: the dash-row hash from the line ROM
             if e_slot = 8 then
                 case to_integer(e_ph) is
@@ -829,7 +877,7 @@ begin
                     when 3 => v_n.incr := resize(e_incv, 20) + resize(e_incv(17 downto 1), 20);
                     when others => v_n.incr := resize(e_incv, 20);
                 end case;
-                v_n.dt := e_dt; v_n.dc := e_dc;
+                v_n.dt := e_dt; v_n.dc := e_dc; v_n.phi := e_phb;
                 v_r := resize(f_rip, 4);
                 case to_integer(e_band) is
                     when 0 => v_n.gidx := to_unsigned(9, 6);
@@ -1024,7 +1072,7 @@ begin
     begin
         if rising_edge(clk) then
             if g_start = '1' then
-                b_p <= '0' & f_phi;
+                b_p <= '0' & l_lv.phi & "000000";
                 s_rbank <= not s_wbank;
             elsif g_avid = '1' then
                 b_p <= b_p + resize(l_lv.incr, 25);
@@ -1194,6 +1242,7 @@ begin
             p9_full <= p8_full; p9_camm <= p8_camm;
             p9_d2m <= signed(resize(p8_sq, 19)) + resize(signed(l_lv.ak), 19);    -- ak is negative: sign-extend
             p9_cut <= p8_cut;
+            p_sr(9) <= p_sr(8);
             -- 10: echo level, camera colouriser level, ring radius
             p10_lv <= p9_lv; p10_inside <= p9_inside; p10_glev <= p9_glev; p10_camm <= p9_camm;
             if p9_echoon = '0' then p10_echo <= (others => '0');
@@ -1210,8 +1259,14 @@ begin
             elsif v_dr > 63 then p10_dr <= to_signed(64, 10);
             else p10_dr <= resize(v_dr, 10); end if;
             p10_cut <= p9_cut;
-            -- 11: priority -> class / level
-            if p10_inside = '1' then
+            p_sr(10) <= p_sr(9);
+            -- 11: priority -> class / level (Swap: the pink shapes print the camera through the
+            -- colouriser, the camera areas take the lower pink fill)
+            if f_swap = '1' and (p10_inside = '1' or p10_echo > 1) then
+                p_code(11) <= "110" & p_sr(10)(7 downto 2);
+            elsif f_swap = '1' and p10_camm = '1' then
+                p_code(11) <= "011" & p10_lec;
+            elsif p10_inside = '1' then
                 p_code(11) <= "0" & l_lv.pcls & p10_lv;
             elsif l_lv.aron = '1' and p10_dr >= -64 and p10_dr <= 63 and p10_cut = '0' then
                 v_ar := shift_right(p10_dr + 64, 1);                       -- 0 .. 63: slice, not resize
