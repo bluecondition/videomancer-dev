@@ -1,18 +1,19 @@
-# Crossbeam - Heirloom #37, v0.5.0 (2026-10-27): rebuilt from the photo WIN_20230527_01_43_26.
+# Crossbeam - Heirloom #37, v0.6.0 (2026-11-01, phase 2): rebuilt from the photo WIN_20230527_01_43_26.
 # A glowing cyan cross beam luma-keyed over torn colour bars, with mirrored red/black zebra contours
-# in the corners and along the bottom.  See crossbeam.vhd and SUMMARY.md.
+# in the corners and along the bottom.  Phase 2: rows and columns scale one by one (Scatter / Lens),
+# the zebra lookup warps, the beam swings and pushes the contours, rows slip.  See SUMMARY.md.
 
 [program]
 processing_delay_clks = 24
 program_id = "com.czartroniks.crossbeam"
 program_name = "Crossbeam"
-program_version = "0.5.0"
+program_version = "0.6.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Grid", "Glitch", "Color"]
 program_type = "processing"
-description = "A glowing cyan cross beam keyed over torn colour bars, red zebra contours in the corners; the beam on the slider."
+description = "A cyan cross beam keyed over torn colour bars and red zebra contours; rows and columns scale, the beam swings and pushes."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
@@ -22,7 +23,7 @@ name_label = "Angle"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 372
+initial_value = 289
 display_float_digits = 0
 suffix_label = "%"
 
@@ -30,19 +31,19 @@ suffix_label = "%"
 parameter_id = "rotary_potentiometer_2"
 name_label = "Rows"
 control_mode = "linear"
-display_min_value = 0
+display_min_value = -100
 display_max_value = 100
-initial_value = 359
+initial_value = 512
 display_float_digits = 0
-suffix_label = "%"
+suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
-name_label = "Contours"
+name_label = "Warp"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 0
 display_float_digits = 0
 suffix_label = "%"
 
@@ -58,11 +59,11 @@ suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
-name_label = "Roll"
+name_label = "Swing"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 600
+initial_value = 512
 display_float_digits = 0
 suffix_label = ""
 
@@ -70,11 +71,11 @@ suffix_label = ""
 parameter_id = "rotary_potentiometer_6"
 name_label = "Columns"
 control_mode = "linear"
-display_min_value = 0
+display_min_value = -100
 display_max_value = 100
-initial_value = 258
+initial_value = 512
 display_float_digits = 0
-suffix_label = "%"
+suffix_label = ""
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
@@ -85,8 +86,8 @@ initial_value_label = "On"
 [[parameter]]
 parameter_id = "toggle_switch_8"
 name_label = "Tear"
-value_labels = ["Off", "On"]
-initial_value_label = "On"
+value_labels = ["Still", "Slip"]
+initial_value_label = "Still"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
@@ -120,25 +121,38 @@ suffix_label = "%"
 name = "Photo"
 
 [[preset]]
+name = "Lens"
+rotary_potentiometer_2 = 1000
+rotary_potentiometer_6 = 1000
+
+[[preset]]
+name = "Mosaic"
+rotary_potentiometer_2 = 40
+rotary_potentiometer_6 = 40
+toggle_switch_8 = 1
+
+[[preset]]
+name = "Liquid"
+rotary_potentiometer_3 = 900
+rotary_potentiometer_4 = 860
+toggle_switch_7 = 0
+
+[[preset]]
+name = "Scissors"
+rotary_potentiometer_5 = 900
+rotary_potentiometer_6 = 800
+
+[[preset]]
+name = "Ghost"
+linear_potentiometer_12 = 0
+rotary_potentiometer_3 = 500
+
+[[preset]]
+name = "Rising"
+rotary_potentiometer_5 = 150
+rotary_potentiometer_2 = 960
+
+[[preset]]
 name = "Blaze"
 linear_potentiometer_12 = 1000
 rotary_potentiometer_4 = 760
-
-[[preset]]
-name = "Bare Bars"
-linear_potentiometer_12 = 0
-rotary_potentiometer_5 = 700
-
-[[preset]]
-name = "Stacked"
-toggle_switch_9 = 1
-rotary_potentiometer_1 = 600
-
-[[preset]]
-name = "Contour Field"
-toggle_switch_7 = 0
-rotary_potentiometer_3 = 700
-
-[[preset]]
-name = "Amber Swap"
-toggle_switch_10 = 1

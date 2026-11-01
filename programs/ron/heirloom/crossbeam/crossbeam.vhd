@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Crossbeam v0.5.0 -- Heirloom #37, rebuilt 2026-10-27 from WIN_20230527_01_43_26.
+-- Crossbeam v0.6.0 -- Heirloom #37, rebuilt 2026-10-27 from WIN_20230527_01_43_26; phase 2 2026-11-01.
 --
 -- The photo: a glowing cyan cross beam (two arms crossing at the centre, slope ~0.23, a bright core
 -- fading to dark teal at the frame edges) luma-keyed over a grid of colour bars (rows of 39 lines,
@@ -13,22 +13,31 @@
 -- and along the bottom, torn row by row, and green -> ochre -> red ramps near the centre.  The
 -- zebra and the beam meet in a non-additive mix (salmon lines on teal).
 --
---   K1  Angle     the beam's arm slope 0.05 .. 0.55 (0.23 = the photo)
---   K2  Rows      colour-bar rows per frame 8 .. 64 (27.7)
---   K3  Contours  zebra stripe density 0.25 .. 4 x (1 x = the photo)
---   K4  Flow      bipolar: the zebra contours stream in / out (centre still)
---   K5  Roll      bipolar: the colour bars roll up / down (centre still)
---   K6  Columns   colour-bar periods across 1.5 .. 8 (3.14)
+--   K1  Angle     the beam's arm slope 0.02 .. 0.77 (0.23 = the photo)
+--   K2  Rows      bipolar, each bar row its own height: left Scatter (per-row heights x0.26 .. x3.5),
+--                 right Lens (rows swell where the beam crosses, thin away from it); centre = the photo
+--   K3  Warp      the zebra / ramp table lookup rippled by two travelling waves (up to 380 px across,
+--                 7.5 table rows down); 0 = the photo
+--   K4  Flow      bipolar: the zebra contours stream, the bars roll (a quarter as fast) and the warp
+--                 waves travel (centre still)
+--   K5  Swing     bipolar beam motion: right = the arms scissor (to +-86 % of the slope), left = the
+--                 cross travels up through its period; centre = still (the photo)
+--   K6  Columns   bipolar, each bar row its own block size: left Scatter (per-row x0.26 .. x3.5), right
+--                 Lens (blocks swell around the beam line, the grid bulges); centre = the photo
 --   S7  Bars      the colour bars (Off: the beam over the zebra field alone)
---   S8  Tear      the torn rows (zebra tears + the 376 px row shifts + jitter)
+--   S8  Slip      Tear (the photo's torn rows) / Slip (every bar row slides at its own speed, the zebra
+--                 row tears swing)
 --   S9  Stack     the cross repeats at half the vertical period
 --   S10 Palette   Photo / Swap (Cr and Cb exchanged: amber beam, blue zebra, cyan bars)
 --   S11 Source    Video / Osc (Video: the camera's slewed luma bends the zebra contours and blooms the beam)
---   P12 BEAM      the cross beam's brightness 0 .. 2 x: 0 = the bars and zebra alone, 50 % = the
---                 photo, 100 % = the beam swallows everything but white, yellow and the zebra.
+--   P12 BEAM      the cross beam's brightness 0 .. 2 x, and its push on the zebra contours (the beam's
+--                 level offsets the stripe phase, +-8 stripes, signed about the middle): 0 = no glow,
+--                 the X drawn in the contours; 50 % = the photo; 100 % = the beam swallows the bars and
+--                 shoves the contours.
 --
--- Engine: per-field sequencer on one serial shift-add multiplier; per-line scalar engine (row,
--- beam dy, table row, tear, block start) and a table engine that lerps the next line's zebra phase
+-- Engine: per-field sequencer on one serial shift-add multiplier; per-line engine with its own serial
+-- multiplier and a small ROM (row step, warp offsets, block step / start, slip, dy^2) and a table
+-- engine that lerps the next line's zebra phase
 -- (64 entries, value + slope) and amplitude / ramp (32 entries, even / odd banks) into ping-pong
 -- line RAMs.  Pixel path: beam DDAs, the cross field t = d1 d2 / c^2 (d = dy -+ s dx); the beam
 -- level in the log domain (log profile + log falloff + log gain + ridge + camera bloom, then an exp
@@ -50,13 +59,21 @@ use work.all;
 
 architecture crossbeam of program_top is
     constant C_LAT   : integer := 24;   -- matches processing_delay_clks
-    constant C_SUPER : integer := 117504;   -- 3 block periods (1836 px) in Q.6
     constant C_XC    : integer := 252032;   -- mirror / beam centre 984.5 px, Q.8
+    -- colour-bar block coordinate: 2^17 units = 3 periods (1836 virtual px), so it wraps for free
+    constant C_ANCH  : integer := 61931;    -- block coordinate at the centre (984.5 px)
+    constant C_C0U   : integer := 70283;    -- 984.5 px in block units
+    constant C_SHU   : integer := 26843;    -- the photo's 376 px row shift
+    constant C_PB1   : integer := 43691;    -- period boundaries
+    constant C_PB2   : integer := 87381;
+    constant C_CA    : integer := 21774;    -- column cuts A | B | C within a period (305 / 535 px)
+    constant C_CB    : integer := 38194;
 
     attribute no_rw_check : boolean;
     -- ROMs
-    signal r_kca : unsigned(7 downto 0) := (others => '0');
-    signal r_kcq : std_logic_vector(13 downto 0) := (others => '0');
+    signal r_lra : unsigned(8 downto 0) := (others => '0');
+    signal r_lrq : std_logic_vector(7 downto 0) := (others => '0');
+    signal lr_d  : std_logic_vector(7 downto 0) := (others => '0');
     signal r_pta : unsigned(10 downto 0) := (others => '0');
     signal r_ptq : std_logic_vector(7 downto 0) := (others => '0');
     signal r_aga : unsigned(9 downto 0) := (others => '0');
@@ -110,7 +127,9 @@ architecture crossbeam of program_top is
     signal t_dys : unsigned(10 downto 0) := to_unsigned(342, 11);
     signal t_dyt : unsigned(13 downto 0) := to_unsigned(1928, 14);
     signal t_xk  : unsigned(17 downto 0) := to_unsigned(87552, 18);
-    signal t_yk  : unsigned(17 downto 0) := to_unsigned(15534, 18);
+    signal t_dq  : unsigned(13 downto 0) := to_unsigned(1676, 14);
+    signal t_incb : unsigned(15 downto 0) := to_unsigned(18276, 16);
+    signal t_wfy : unsigned(9 downto 0) := (others => '0');
 
     -- zone / width
     signal s_idle : unsigned(9 downto 0) := (others => '0');
@@ -121,80 +140,92 @@ architecture crossbeam of program_top is
 
     -- controls (glided Q.3: K1, K2, K3, K6, P12)
     type t_g is array(0 to 4) of unsigned(12 downto 0);
-    signal s_g : t_g := (to_unsigned(372 * 8, 13), to_unsigned(359 * 8, 13), to_unsigned(512 * 8, 13),
-                         to_unsigned(258 * 8, 13), to_unsigned(512 * 8, 13));
+    signal s_g : t_g := (to_unsigned(289 * 8, 13), to_unsigned(512 * 8, 13), to_unsigned(0, 13),
+                         to_unsigned(512 * 8, 13), to_unsigned(512 * 8, 13));
     signal gl_k, gl_o, gl_n : unsigned(12 downto 0) := (others => '0');
     signal gl_d : signed(13 downto 0) := (others => '0');
     signal gl_w : std_logic := '0';
     signal q_gon : std_logic := '0';
     signal q_gi : unsigned(2 downto 0) := (others => '0');
     signal q_gph : unsigned(1 downto 0) := (others => '0');
-    signal s_s4, s_s5 : std_logic := '0';
+    signal s_s4, s_r5, s_l5 : std_logic := '0';
     signal s_m4, s_m5 : unsigned(8 downto 0) := (others => '0');
-    signal f_bars, f_tear, f_stack, f_alt, f_osc : std_logic := '0';
+    signal f_bars, f_slip, f_stack, f_alt, f_osc : std_logic := '0';
+    -- K2 / K6 bipolar decode (left = Scatter), K3 warp amplitudes, P12 push gain
+    signal f_k2s, f_k6s : std_logic := '0';
+    signal f_k2m, f_k6m : unsigned(4 downto 0) := (others => '0');
+    signal f_ax  : unsigned(7 downto 0) := (others => '0');
+    signal f_ay  : unsigned(12 downto 0) := (others => '0');
+    signal f_kp  : signed(6 downto 0) := (others => '0');
     signal s_lf : unsigned(15 downto 0) := x"ACE1";
 
     -- serial multiplier
     signal q_p : unsigned(4 downto 0) := (others => '0');
     signal q_ld, q_st : std_logic := '0';
     signal q_wr : std_logic_vector(1 to 12) := (others => '0');
-    signal m_a : unsigned(23 downto 0) := (others => '0');
+    -- K5 swing: scissor phase / triangle / products, travel
+    signal f_sph : unsigned(15 downto 0) := (others => '0');
+    signal f_tsg : std_logic := '0';
+    signal f_at  : unsigned(8 downto 0) := (others => '0');
+    signal f_k1e : unsigned(9 downto 0) := to_unsigned(289, 10);
+    signal f_dyi : signed(18 downto 0) := to_signed(90491, 19);
+    signal f_stk_d : std_logic := '0';
+    signal f_tva : signed(19 downto 0) := (others => '0');
+    -- warp wave phase at line 0 (Q.16 cycles), slip phase (block units)
+    signal f_ph0 : unsigned(15 downto 0) := (others => '0');
+    signal f_slp : unsigned(16 downto 0) := (others => '0');
+    signal m_a : unsigned(19 downto 0) := (others => '0');
     signal m_b : unsigned(19 downto 0) := (others => '0');
-    signal m_h : unsigned(23 downto 0) := (others => '0');
+    signal m_h : unsigned(19 downto 0) := (others => '0');
     signal m_l : unsigned(19 downto 0) := (others => '0');
 
     -- per-field values (power up at the 1080p defaults)
     signal f_s    : unsigned(11 downto 0) := to_unsigned(949, 12);
-    signal f_rows : unsigned(13 downto 0) := to_unsigned(7074, 14);
     signal f_ks   : unsigned(11 downto 0) := to_unsigned(79, 12);
     signal f_sdxm : unsigned(19 downto 0) := to_unsigned(78093, 20);
     signal f_sdx0 : signed(21 downto 0) := to_signed(-78093, 22);
-    signal f_dq   : unsigned(15 downto 0) := to_unsigned(1676, 16);
-    signal f_kc   : unsigned(13 downto 0) := to_unsigned(4104, 14);
-    signal f_incb : unsigned(9 downto 0) := to_unsigned(64, 10);
-    signal f_b0m  : unsigned(15 downto 0) := to_unsigned(7502, 16);
-    signal f_b0   : unsigned(16 downto 0) := to_unsigned(110002, 17);
-    signal f_m4sq, f_m5sq : unsigned(17 downto 0) := (others => '0');
-    signal f_fst, f_rst : unsigned(12 downto 0) := (others => '0');
+    signal f_fst : unsigned(12 downto 0) := (others => '0');
     signal f_e0   : unsigned(23 downto 0) := to_unsigned(1488890, 24);   -- SDX0^2 / 2^12
-    signal f_sk   : unsigned(31 downto 0) := (others => '0');                -- SDXm kS
     signal f_kk   : unsigned(23 downto 0) := to_unsigned(6241, 24);          -- kS^2
     signal f_f0   : signed(31 downto 0) := to_signed(-12332453, 32);         -- kS^2 - 2 SDXm kS
-    signal f_k2   : unsigned(24 downto 0) := to_unsigned(12482, 25);         -- 2 kS^2
-    signal f_gm   : unsigned(4 downto 0) := to_unsigned(16, 5);
-    signal f_ge   : unsigned(1 downto 0) := "10";
-    signal f_lb   : signed(11 downto 0) := (others => '0');
     signal f_lbm  : signed(12 downto 0) := to_signed(-1024, 13);
     signal f_pvq, f_pvh : signed(18 downto 0) := to_signed(250317, 19);
     signal f_dy0  : signed(18 downto 0) := to_signed(90491, 19);
     signal f_fl   : unsigned(15 downto 0) := (others => '0');     -- zebra flow phase, Q.16 of a stripe
     signal f_ro   : unsigned(20 downto 0) := (others => '0');     -- row roll, Q.16 rows mod 28
 
-    -- per-line scalar engine (next line) and committed line values
-    signal le_st : unsigned(2 downto 0) := (others => '0');
+    -- per-line engine (next line) and committed line values.  ls counts the sequence: 1 advance,
+    -- 2..9 row / ROM reads, then nine 32-clock serial-product windows, 309..310 combine
+    signal ls    : unsigned(8 downto 0) := (others => '0');
+    signal ls_init : std_logic := '0';
     signal n_q   : unsigned(20 downto 0) := (others => '0');
     signal n_dy  : signed(18 downto 0) := (others => '0');
     signal n_yq  : unsigned(21 downto 0) := (others => '0');
+    signal n_yqw : unsigned(11 downto 0) := (others => '0');   -- warped table row, Q.6
+    signal n_ph  : unsigned(15 downto 0) := (others => '0');
     signal n_bank : std_logic := '0';
     signal n_r   : unsigned(4 downto 0) := (others => '0');
     signal n_fyh : std_logic := '0';
+    signal n_ady : unsigned(16 downto 0) := (others => '0');
+    signal n_lens : signed(4 downto 0) := (others => '0');
+    signal n_step : unsigned(15 downto 0) := to_unsigned(1676, 16);
+    signal n_incb : unsigned(13 downto 0) := to_unsigned(1142, 14);
     signal n_sh  : std_logic := '0';
-    signal n_tr  : signed(7 downto 0) := (others => '0');
-    signal n_jt  : signed(2 downto 0) := (others => '0');
-    signal n_tear : signed(8 downto 0) := (others => '0');
-    signal n_bx0 : signed(17 downto 0) := (others => '0');
+    signal n_tear : signed(10 downto 0) := (others => '0');
+    signal n_bx0 : unsigned(16 downto 0) := (others => '0');
+    -- the line engine's serial multiplier: signed 18-bit a x unsigned 17-bit b, 17 steps
+    signal su_a  : signed(17 downto 0) := (others => '0');
+    signal su_b  : unsigned(16 downto 0) := (others => '0');
+    signal su_h  : signed(18 downto 0) := (others => '0');
+    signal su_l  : unsigned(16 downto 0) := (others => '0');
+    signal su_n  : unsigned(4 downto 0) := (others => '0');
     signal l_r   : unsigned(4 downto 0) := (others => '0');
     signal l_fyh, l_bank : std_logic := '0';
-    signal l_dy  : signed(18 downto 0) := (others => '0');
     signal l_dy2 : unsigned(21 downto 0) := (others => '0');
     signal l_ady : unsigned(16 downto 0) := (others => '0');
-    signal sq_n  : unsigned(4 downto 0) := (others => '0');
-    signal sq_a  : unsigned(16 downto 0) := (others => '0');
-    signal sq_b  : unsigned(16 downto 0) := (others => '0');
-    signal sq_h  : unsigned(16 downto 0) := (others => '0');
-    signal sq_l  : unsigned(16 downto 0) := (others => '0');
-    signal l_tear : signed(8 downto 0) := (others => '0');
-    signal l_bx0 : unsigned(16 downto 0) := (others => '0');
+    signal l_tear : signed(10 downto 0) := (others => '0');
+    signal l_bx0 : unsigned(20 downto 0) := (others => '0');
+    signal l_incb : unsigned(13 downto 0) := to_unsigned(1142, 14);
 
     -- table engine (10 clocks per entry: two reads, serial radix-4 lerp, write)
     signal e_go, e_run : std_logic := '0';
@@ -225,7 +256,7 @@ architecture crossbeam of program_top is
     -- beam
     signal b_xv  : unsigned(19 downto 0) := (others => '0');
     signal b_sdx : signed(21 downto 0) := (others => '0');
-    signal b_bx  : unsigned(16 downto 0) := (others => '0');
+    signal b_bx  : unsigned(20 downto 0) := (others => '0');   -- block coordinate, Q.4 units (wraps at 3 periods)
     signal b_pcf : unsigned(10 downto 0) := (others => '0');   -- free-running pixel clock: stage-k pixel x = pcf - k
     signal b_e   : signed(24 downto 0) := (others => '0');     -- SDX^2 / 2^12 (2nd-order DDA; dips below 0 near the centre)
     signal b_f   : signed(31 downto 0) := (others => '0');
@@ -243,7 +274,7 @@ architecture crossbeam of program_top is
     type t_sl is array (natural range <>) of std_logic;
     signal p1_adx : unsigned(9 downto 0) := (others => '0');
     signal p1_dif : signed(25 downto 0) := (others => '0');
-    signal p1_asdx : unsigned(20 downto 0) := (others => '0');
+    signal p1_asdx : unsigned(12 downto 0) := (others => '0');
     signal p1_bp : unsigned(1 downto 0) := (others => '0');
     signal p1_xi : unsigned(16 downto 0) := (others => '0');
     signal p2_u  : unsigned(9 downto 0) := (others => '0');
@@ -278,27 +309,27 @@ architecture crossbeam of program_top is
     signal p_rrc, p_grc : t_u5(7 to 13) := (others => (others => '0'));
     signal p8_s2 : signed(12 downto 0) := (others => '0');
     signal p8_val : std_logic := '0';
-    signal p8_pm : signed(20 downto 0) := (others => '0');
-    signal p_ag : t_u6(8 to 10) := (others => (others => '0'));
-    signal p9_fr : unsigned(7 downto 0) := (others => '0');
+    signal p8_b  : unsigned(7 downto 0) := (others => '0');     -- push field: the beam's log level
+    signal p8_pl : unsigned(7 downto 0) := (others => '0');
+    signal p_ag : t_u6(8 to 11) := (others => (others => '0'));
+    signal p9_pl : unsigned(7 downto 0) := (others => '0');
+    signal p9_pu : signed(16 downto 0) := (others => '0');
     signal p9_sat, p9_zero, p10_sat, p10_zero : std_logic := '0';
-    signal p10_st : unsigned(7 downto 0) := (others => '0');
+    signal p10_fr : unsigned(7 downto 0) := (others => '0');
     signal p11_g3 : unsigned(7 downto 0) := (others => '0');
-    signal p11_sr : unsigned(7 downto 0) := (others => '0');
-    signal p12_zr, p13_zr : unsigned(7 downto 0) := (others => '0');
+    signal p11_st : unsigned(7 downto 0) := (others => '0');
+    signal p12_sr, p13_zr : unsigned(7 downto 0) := (others => '0');
     signal p_isz, p_isr, p_win : t_sl(12 to 17) := (others => '0');
     signal p_isw : t_sl(12 to 13) := (others => '0');
     signal p14_gy, p14_gu, p14_gv : unsigned(9 downto 0) := (others => '0');
     signal p14_ry, p14_ru : unsigned(8 downto 0) := (others => '0');
     signal p14_rv : unsigned(7 downto 0) := (others => '0');
-    signal p14_qy : unsigned(9 downto 0) := (others => '0');
-    signal p14_qu, p14_qv : unsigned(8 downto 0) := (others => '0');
+    signal p14_qy, p14_qu, p14_qv : unsigned(9 downto 0) := (others => '0');
     signal p14_py, p14_pu, p14_pv : unsigned(9 downto 0) := (others => '0');
     signal p15_y, p15_u, p15_v : signed(11 downto 0) := (others => '0');
     signal p11_rkey : unsigned(9 downto 0) := (others => '0');
     signal p16_y : unsigned(10 downto 0) := (others => '0');
     signal p16_u, p16_v : signed(11 downto 0) := (others => '0');
-    signal p16_dy, p16_du, p16_dv : signed(11 downto 0) := (others => '0');
     signal p16_ed : std_logic := '0';
     signal p17_y : unsigned(10 downto 0) := to_unsigned(64, 11);
     signal s_h18 : signed(11 downto 0) := (others => '0');
@@ -327,7 +358,7 @@ begin
     p_rom : process(clk)
     begin
         if rising_edge(clk) then
-            r_kcq <= C_KC(to_integer(r_kca));
+            r_lrq <= C_LROM(to_integer(r_lra));
             r_ptq <= C_PT(to_integer(r_pta));
             r_agq <= C_AGR(to_integer(r_aga));
             r_clq <= C_CELL(to_integer(r_cla));
@@ -402,16 +433,21 @@ begin
         variable v_ng : signed(13 downto 0);
         variable v_p  : integer range 0 to 31;
         variable v_ph : integer range 0 to 31;
-        variable v_s  : unsigned(24 downto 0);
-        variable v_pr : unsigned(43 downto 0);
+        variable v_s  : unsigned(20 downto 0);
+        variable v_pr : unsigned(39 downto 0);
         variable v_k  : unsigned(9 downto 0);
+        variable v_d  : signed(10 downto 0);
         variable v_ro : unsigned(21 downto 0);
+        variable v_t  : unsigned(14 downto 0);
+        variable v_ke : signed(11 downto 0);
     begin
         if rising_edge(clk) then
             v_id := to_integer(unsigned(registers_in(8)(3 downto 0)));
             t_xs <= unsigned(C_T_XS(v_id)); t_ys <= unsigned(C_T_YS(v_id));
             t_dys <= unsigned(C_T_DYS(v_id)); t_dyt <= unsigned(C_T_DYT(v_id));
-            t_xk <= unsigned(C_T_XK(v_id)); t_yk <= unsigned(C_T_YK(v_id));
+            t_xk <= unsigned(C_T_XK(v_id)); t_dq <= unsigned(C_T_DQ(v_id));
+            t_incb <= unsigned(C_T_INCB(v_id));
+            t_wfy <= unsigned(C_T_WFY(v_id));
 
             -- vblank zone: no avid for 1024 clocks
             if data_in.avid = '1' then
@@ -440,29 +476,35 @@ begin
 
             if s_zgo = '1' then
                 s_w <= s_wmax; s_wmax <= (others => '0');
-                -- K4 Flow, K5 Roll: bipolar, deadband 8
+                -- K4 Flow bipolar, deadband 8; K5 Swing: right = scissor, left = travel
                 v_x := signed(resize(unsigned(registers_in(3)), 11)) - 512;
                 if v_x > 7 then s_s4 <= '0'; v_u := unsigned(v_x) - 8; s_m4 <= v_u(8 downto 0);
                 elsif v_x < -7 then s_s4 <= '1'; v_u := unsigned(-v_x) - 8; s_m4 <= v_u(8 downto 0);
                 else s_s4 <= '0'; s_m4 <= (others => '0'); end if;
                 v_x := signed(resize(unsigned(registers_in(4)), 11)) - 512;
-                if v_x > 7 then s_s5 <= '0'; v_u := unsigned(v_x) - 8; s_m5 <= v_u(8 downto 0);
-                elsif v_x < -7 then s_s5 <= '1'; v_u := unsigned(-v_x) - 8; s_m5 <= v_u(8 downto 0);
-                else s_s5 <= '0'; s_m5 <= (others => '0'); end if;
+                if v_x > 7 then s_r5 <= '1'; s_l5 <= '0'; v_u := unsigned(v_x) - 8; s_m5 <= v_u(8 downto 0);
+                elsif v_x < -7 then s_r5 <= '0'; s_l5 <= '1'; v_u := unsigned(-v_x) - 8; s_m5 <= v_u(8 downto 0);
+                else s_r5 <= '0'; s_l5 <= '0'; s_m5 <= (others => '0'); end if;
                 f_bars  <= registers_in(6)(0);
-                f_tear  <= registers_in(6)(1);
+                f_slip  <= registers_in(6)(1);
                 f_stack <= registers_in(6)(2);
                 f_alt   <= registers_in(6)(3);
                 f_osc   <= registers_in(6)(4);
-                -- zebra flow (Q.16 stripes) and row roll (Q.16 rows mod 28)
-                if s_s4 = '1' then f_fl <= f_fl - resize(f_fst, 16); else f_fl <= f_fl + resize(f_fst, 16); end if;
-                if s_s5 = '1' then
-                    v_ro := ('0' & f_ro) - resize(f_rst, 22);
+                -- zebra flow (Q.16 stripes) and row roll (a quarter of it, Q.16 rows mod 28) follow K4's
+                -- sign; the warp wave travels a quarter as fast, one way
+                if s_s4 = '1' then
+                    f_fl <= f_fl - resize(f_fst, 16);
+                    v_ro := ('0' & f_ro) - resize(f_fst(12 downto 2), 22);
                     if v_ro(21) = '1' then f_ro <= v_ro(20 downto 0) + to_unsigned(1835008, 21); else f_ro <= v_ro(20 downto 0); end if;
                 else
-                    v_ro := ('0' & f_ro) + resize(f_rst, 22);
+                    f_fl <= f_fl + resize(f_fst, 16);
+                    v_ro := ('0' & f_ro) + resize(f_fst(12 downto 2), 22);
                     if v_ro >= 1835008 then f_ro <= v_ro(20 downto 0) - to_unsigned(1835008, 21); else f_ro <= v_ro(20 downto 0); end if;
                 end if;
+                f_ph0 <= f_ph0 + resize(f_fst(12 downto 2), 16);
+                -- scissor phase (rate 1.5 m5 per field); slip phase: 107 block units (1.5 px) per field
+                if s_r5 = '1' then f_sph <= f_sph + resize(s_m5, 16) + resize(s_m5(8 downto 1), 16); end if;
+                f_slp <= f_slp + 107;
                 -- tear jitter LFSR (x^16 + x^14 + x^13 + x^11 + 1)
                 if s_lf(0) = '1' then s_lf <= ('0' & s_lf(15 downto 1)) xor x"B400"; else s_lf <= '0' & s_lf(15 downto 1); end if;
             end if;
@@ -504,77 +546,95 @@ begin
                 end case;
             end if;
 
-            -- ROM addresses for the K6 block scale and the K3 stripe gain, then fabric copies
-            r_kca <= s_g(3)(12 downto 5);
-            f_kc <= unsigned(r_kcq);
-            -- K3 stripe gain = mantissa (16..31) x 2^e;  P12 beam gain in the log domain (128 = x 2):
-            -- 2 (p - 512) below the middle (0 = off), (p - 512) / 4 above
-            f_gm <= unsigned(C_MM(to_integer(s_g(2)(10 downto 5)))); f_ge <= s_g(2)(12 downto 11);
+            -- P12 beam gain in the log domain (128 = x 2), less 8 octaves: 2 (p - 512) below the middle
+            -- (0 = off), (p - 512) / 4 above; push gain (p - 512) / 8 (signed, +-8 stripes over the beam)
             v_k := s_g(4)(12 downto 3);
-            if v_k(9) = '0' then f_lb <= shift_left(signed(resize(v_k, 12)) - 512, 1);
-            else f_lb <= shift_right(signed(resize(v_k, 12)) - 512, 2); end if;
-            f_lbm <= resize(f_lb, 13) - 1024;
-            -- knob curves (shift-add) and switch constants
+            v_d := signed(resize(v_k, 11)) - 512;
+            if v_k(9) = '0' then f_lbm <= resize(shift_left(v_d, 1), 13) - 1024;
+            else f_lbm <= resize(shift_right(v_d, 2), 13) - 1024; end if;
+            f_kp <= v_d(9 downto 3);
+            -- K1 arm slope 0.02 + 0.75 k (Q.12); K5 right swings k by +-at (clamped to the knob's range)
             v_k := s_g(0)(12 downto 3);
-            f_s <= to_unsigned(205, 12) + resize(v_k & '0', 12) + resize(v_k(9 downto 9), 12);     -- 0.05 + 0.5 k (Q.12)
-            v_k := s_g(1)(12 downto 3);
-            f_rows <= to_unsigned(2048, 14) + resize(v_k & "0000", 14) - resize(v_k & '0', 14);  -- 8 + 56 k rows (Q.8)
+            if f_tsg = '1' then v_ke := signed(resize(v_k, 12)) + signed(resize(f_at, 12));
+            else v_ke := signed(resize(v_k, 12)) - signed(resize(f_at, 12)); end if;
+            if v_ke < 0 then f_k1e <= (others => '0');
+            elsif v_ke > 1023 then f_k1e <= (others => '1');
+            else f_k1e <= unsigned(v_ke(9 downto 0)); end if;
+            f_s <= to_unsigned(82, 12) + resize(f_k1e & '0', 12) + resize(f_k1e, 12);
+            -- K2 / K6 bipolar: magnitude (|k - 512| - 8) / 16 (0..31), left = Scatter
+            v_d := signed(resize(s_g(1)(12 downto 3), 11)) - 512;
+            if v_d > 8 then f_k2s <= '0'; v_u := unsigned(v_d) - 8; f_k2m <= v_u(8 downto 4);
+            elsif v_d < -8 then f_k2s <= '1'; v_u := unsigned(-v_d) - 8; f_k2m <= v_u(8 downto 4);
+            else f_k2s <= '0'; f_k2m <= (others => '0'); end if;
+            v_d := signed(resize(s_g(3)(12 downto 3), 11)) - 512;
+            if v_d > 8 then f_k6s <= '0'; v_u := unsigned(v_d) - 8; f_k6m <= v_u(8 downto 4);
+            elsif v_d < -8 then f_k6s <= '1'; v_u := unsigned(-v_d) - 8; f_k6m <= v_u(8 downto 4);
+            else f_k6s <= '0'; f_k6m <= (others => '0'); end if;
+            -- K3 warp amplitudes: across k / 4 px (0..255), down k / 128 table rows (Q.10, 0..8)
+            f_ax <= s_g(2)(12 downto 5);
+            f_ay <= s_g(2)(12 downto 3) & "000";
             if f_stack = '1' then
                 f_pvq <= to_signed(125158, 19); f_pvh <= to_signed(62579, 19); f_dy0 <= to_signed(-34668, 19);
             else
                 f_pvq <= to_signed(250317, 19); f_pvh <= to_signed(125158, 19); f_dy0 <= to_signed(90491, 19);
             end if;
             f_sdx0 <= -signed(resize(f_sdxm, 22));
-            f_b0 <= to_unsigned(C_SUPER, 17) - resize(f_b0m, 17);
+            -- scissor triangle from the phase: sign (the magnitude goes straight to slot 1)
+            if f_sph(15) = '1' then v_t := not f_sph(14 downto 0); else v_t := f_sph(14 downto 0); end if;
+            f_tsg <= v_t(14);
 
-            -- serial products: slot p = zc/32 (1..12), phase 0 load, 1..20 step, 24 store
+            -- serial products: slot p = zc/32, phase 0 load, 1..20 step, 24 store
+            --   1 scissor swing m5 |tri|   3 kS = xk s   4 SDXm = 337060 s   5 m4^2 (flow)   7 m5^2 (travel)
+            --   9 SDXm^2   10 kS^2   11 SDXm kS
             v_p  := to_integer(s_zc(9 downto 5));
             v_ph := to_integer(s_zc(4 downto 0));
             q_p <= s_zc(9 downto 5);
-            if s_zone = '1' and v_p >= 1 and v_p <= 12 and v_ph = 0 then q_ld <= '1'; else q_ld <= '0'; end if;
-            if s_zone = '1' and v_p >= 1 and v_p <= 12 and v_ph >= 1 and v_ph <= 20 then q_st <= '1'; else q_st <= '0'; end if;
+            if s_zone = '1' and v_p >= 1 and v_p <= 11 and v_ph = 0 then q_ld <= '1'; else q_ld <= '0'; end if;
+            if s_zone = '1' and v_p >= 1 and v_p <= 11 and v_ph >= 1 and v_ph <= 20 then q_st <= '1'; else q_st <= '0'; end if;
             for k in 1 to 12 loop
                 if s_zone = '1' and v_p = k and v_ph = 24 then q_wr(k) <= '1'; else q_wr(k) <= '0'; end if;
             end loop;
             if q_ld = '1' then
                 m_h <= (others => '0'); m_l <= (others => '0');
                 case to_integer(q_p) is
-                    when 1  => m_a <= resize(t_xk, 24);     m_b <= resize(f_s, 20);
-                    when 2  => m_a <= to_unsigned(337060, 24); m_b <= resize(f_s, 20);
-                    when 3  => m_a <= resize(t_yk, 24);     m_b <= resize(f_rows, 20);
-                    when 4  => m_a <= resize(f_kc, 24);     m_b <= resize(t_xs, 20);
-                    when 5  => m_a <= resize(f_kc, 24);     m_b <= to_unsigned(7488, 20);
-                    when 6  => m_a <= resize(s_m4, 24);     m_b <= resize(s_m4, 20);
-                    when 7  => m_a <= resize(f_m4sq, 24);   m_b <= to_unsigned(1132, 20);
-                    when 8  => m_a <= resize(s_m5, 24);     m_b <= resize(s_m5, 20);
-                    when 9  => m_a <= resize(f_m5sq, 24);   m_b <= to_unsigned(1132, 20);
-                    when 10 => m_a <= resize(f_sdxm, 24);   m_b <= f_sdxm;
-                    when 11 => m_a <= resize(f_sdxm, 24);   m_b <= resize(f_ks, 20);
-                    when others => m_a <= resize(f_ks, 24); m_b <= resize(f_ks, 20);
+                    when 1  => if v_t(14) = '1' then m_a <= resize(v_t(13 downto 0), 20); else m_a <= resize(not v_t(13 downto 0), 20); end if;
+                               if s_r5 = '1' then m_b <= resize(s_m5, 20); else m_b <= (others => '0'); end if;
+                    when 3  => m_a <= resize(t_xk, 20);     m_b <= resize(f_s, 20);
+                    when 4  => m_a <= to_unsigned(337060, 20); m_b <= resize(f_s, 20);
+                    when 5  => m_a <= resize(s_m4, 20);     m_b <= resize(s_m4, 20);
+                    when 7  => m_a <= resize(s_m5, 20);     m_b <= resize(s_m5, 20);
+                    when 9  => m_a <= resize(f_sdxm, 20);   m_b <= f_sdxm;
+                    when 10 => m_a <= resize(f_ks, 20);     m_b <= resize(f_ks, 20);
+                    when others => m_a <= resize(f_sdxm, 20); m_b <= resize(f_ks, 20);
                 end case;
             end if;
             if q_st = '1' then
-                if m_b(0) = '1' then v_s := resize(m_h, 25) + resize(m_a, 25); else v_s := resize(m_h, 25); end if;
-                m_h <= v_s(24 downto 1);
+                if m_b(0) = '1' then v_s := resize(m_h, 21) + resize(m_a, 21); else v_s := resize(m_h, 21); end if;
+                m_h <= v_s(20 downto 1);
                 m_l <= v_s(0) & m_l(19 downto 1);
                 m_b <= '0' & m_b(19 downto 1);
             end if;
             v_pr := m_h & m_l;
-            if q_wr(1)  = '1' then f_ks   <= v_pr(31 downto 20); end if;
-            if q_wr(2)  = '1' then f_sdxm <= v_pr(31 downto 12); end if;
-            if q_wr(3)  = '1' then f_dq   <= v_pr(31 downto 16); end if;
-            if q_wr(4)  = '1' then f_incb <= v_pr(23 downto 14); end if;
-            if q_wr(5)  = '1' then f_b0m  <= v_pr(27 downto 12); end if;
-            if q_wr(6)  = '1' then f_m4sq <= v_pr(17 downto 0); end if;
-            if q_wr(7)  = '1' then f_fst  <= v_pr(28 downto 16); end if;
-            if q_wr(8)  = '1' then f_m5sq <= v_pr(17 downto 0); end if;
-            if q_wr(9)  = '1' then f_rst  <= v_pr(28 downto 16); end if;
-            if q_wr(10) = '1' then f_e0   <= v_pr(35 downto 12); end if;
-            if q_wr(11) = '1' then f_sk   <= v_pr(31 downto 0); end if;
-            if q_wr(12) = '1' then f_kk   <= v_pr(23 downto 0); end if;
-            -- square DDA start: F0 = kS^2 - 2 SDXm kS, step 2 kS^2
-            f_f0 <= signed(resize(f_kk, 32)) - signed(shift_left(f_sk, 1));
-            f_k2 <= shift_left(resize(f_kk, 25), 1);
+            if q_wr(1)  = '1' then f_at   <= v_pr(22 downto 14); end if;
+            if q_wr(3)  = '1' then f_ks   <= v_pr(31 downto 20); end if;
+            if q_wr(4)  = '1' then f_sdxm <= v_pr(31 downto 12); end if;
+            -- flow 0.0173 m4^2 (Q.16 stripes per field: 0.4 stripes/s at the default 680)
+            if q_wr(5)  = '1' then f_fst  <= resize(v_pr(17 downto 6), 13) + resize(v_pr(17 downto 9), 13); end if;
+            -- travel 0.0098 m5^2 per field: line 0's beam dy climbs through the period; home when not left
+            -- or on a Stack change
+            if q_wr(7) = '1' then
+                f_tva <= resize(f_dyi, 20) + signed(resize(v_pr(17 downto 7), 20)) + signed(resize(v_pr(17 downto 9), 20));
+            end if;
+            if q_wr(8) = '1' then
+                f_stk_d <= f_stack;
+                if s_l5 = '0' or f_stack /= f_stk_d then f_dyi <= f_dy0;
+                elsif f_tva >= resize(f_pvh, 20) then f_dyi <= resize(f_tva - resize(f_pvq, 20), 19);
+                else f_dyi <= resize(f_tva, 19); end if;
+            end if;
+            if q_wr(9)  = '1' then f_e0   <= v_pr(35 downto 12); end if;
+            if q_wr(10) = '1' then f_kk   <= v_pr(23 downto 0); end if;
+            -- square DDA start: F0 = kS^2 - 2 SDXm kS (its step 2 kS^2 is f_kk shifted)
+            if q_wr(11) = '1' then f_f0 <= signed(resize(f_kk, 32)) - signed(v_pr(30 downto 0) & '0'); end if;
 
             s_gav_sr(0) <= g_avid;
             for i in 1 to C_LAT - 1 loop s_gav_sr(i) <= s_gav_sr(i - 1); end loop;
@@ -627,74 +687,151 @@ begin
     g_start <= '1' when (g_sel = '0' and g_rsr(1) = '1') or (g_sel = '1' and g_rsr(2) = '1') else '0';
 
     ---------------------------------------------------------------------------
-    -- Per-line scalar engine: the next line's row, beam dy, table row, tear and
-    -- block start; line 0 in the vblank zone, then advanced after each source
-    -- avid rise (which commits the prepared line)
+    -- Per-line engine: the next line's row (K2 scaled step), beam dy, warped table
+    -- row, tear (+ warp, slip swing), block step and start (K6 scale about the
+    -- centre, slip), dy^2; line 0 in the vblank zone, then after each source avid
+    -- rise (which commits the prepared line).  One serial multiplier in nine
+    -- 32-clock windows and a line ROM; done by clock 311 (SD lines are 858)
     ---------------------------------------------------------------------------
     p_line : process(clk)
         variable v_q  : unsigned(21 downto 0);
         variable v_dy : signed(19 downto 0);
-        variable v_b  : signed(17 downto 0);
         variable v_j2 : unsigned(1 downto 0);
         variable v_ab : unsigned(18 downto 0);
-        variable v_sq : unsigned(17 downto 0);
+        variable v_lz : unsigned(5 downto 0);
+        variable v_sv : signed(18 downto 0);
+        variable v_P  : signed(35 downto 0);
+        variable v_yw : signed(12 downto 0);
+        variable v_e  : unsigned(6 downto 0);
+        variable v_z  : unsigned(6 downto 0);
+        variable v_k  : integer range 0 to 15;
+        variable v_ph : integer range 0 to 31;
     begin
         if rising_edge(clk) then
             e_go <= '0';
+            -- sequence clock: started for line 0 in the vblank zone, then after each source avid rise
             if s_zone = '1' and s_zc = 900 then
-                v_q := ('0' & f_ro) + to_unsigned(1835008 - 4869, 22);
-                if v_q >= 1835008 then n_q <= v_q(20 downto 0) - to_unsigned(1835008, 21); else n_q <= v_q(20 downto 0); end if;
-                n_dy <= f_dy0; n_yq <= (others => '0'); n_bank <= '0';
-                le_st <= to_unsigned(3, 3);
+                ls <= to_unsigned(1, 9); ls_init <= '1';
             elsif data_in.avid = '1' and s_avq = '0' then
-                le_st <= to_unsigned(1, 3);
-            elsif le_st /= 0 then
-                if le_st = 6 then le_st <= (others => '0'); else le_st <= le_st + 1; end if;
+                ls <= to_unsigned(1, 9); ls_init <= '0';
+            elsif ls /= 0 then
+                if ls = 311 then ls <= (others => '0'); else ls <= ls + 1; end if;
             end if;
-            -- serial square of |dy| (17 steps) for the beam field, started once dy is final
-            if (s_zone = '1' and s_zc = 901) or le_st = 2 then
-                v_ab := unsigned(abs(n_dy));
-                sq_a <= v_ab(16 downto 0); sq_b <= v_ab(16 downto 0);
-                sq_h <= (others => '0'); sq_l <= (others => '0'); sq_n <= to_unsigned(17, 5);
-            elsif sq_n /= 0 then
-                if sq_b(0) = '1' then v_sq := ('0' & sq_h) + ('0' & sq_a); else v_sq := '0' & sq_h; end if;
-                sq_h <= v_sq(17 downto 1);
-                sq_l <= v_sq(0) & sq_l(16 downto 1);
-                sq_b <= '0' & sq_b(16 downto 1);
-                sq_n <= sq_n - 1;
+            v_k := to_integer(ls(8 downto 5)); v_ph := to_integer(ls(4 downto 0));
+
+            -- the serial multiplier: P = a x b in {su_h, su_l} after 17 steps
+            if su_n /= 0 then
+                if su_b(0) = '1' then v_sv := su_h + resize(su_a, 19); else v_sv := su_h; end if;
+                su_h <= shift_right(v_sv, 1);
+                su_l <= v_sv(0) & su_l(16 downto 1);
+                su_b <= '0' & su_b(16 downto 1);
+                su_n <= su_n - 1;
             end if;
-            case to_integer(le_st) is
-                when 1 =>
-                    v_q := ('0' & n_q) + resize(f_dq, 22);
+            v_P := su_h & signed(su_l);
+
+            -- window k (1..9): load the operands at phase 0 (ROM operands were read at the previous
+            -- window's phase 28, or 20 for the scale factors), store at phase 20
+            if v_ph = 0 and v_k >= 1 and v_k <= 9 then
+                su_h <= (others => '0'); su_l <= (others => '0'); su_n <= to_unsigned(17, 5);
+                case v_k is
+                    when 1 => su_a <= resize(signed(lr_d), 18);       su_b <= resize(f_ay, 17);      -- warp down: sin
+                    when 2 => su_a <= resize(signed(lr_d), 18);       su_b <= resize(f_ax, 17);      -- warp across: cos
+                    when 3 =>                                                                         -- row scale exponent
+                        if f_k2s = '1' then su_a <= resize(signed(lr_d(4 downto 0)), 18); else su_a <= resize(n_lens, 18); end if;
+                        su_b <= resize(f_k2m, 17);
+                    when 4 => su_a <= signed(resize(t_dq, 18));       su_b <= resize(unsigned(lr_d), 17);  -- row step
+                    when 5 =>                                                                         -- block scale exponent
+                        if f_k6s = '1' then su_a <= resize(signed(lr_d(4 downto 0)), 18); else su_a <= resize(n_lens, 18); end if;
+                        su_b <= resize(f_k6m, 17);
+                    when 6 => su_a <= signed(resize(t_incb, 18));     su_b <= resize(unsigned(lr_d), 17);  -- block step
+                    when 7 => su_a <= to_signed(C_C0U, 18);           su_b <= resize(unsigned(lr_d), 17);  -- centre offset
+                    when 8 => su_a <= resize(signed(lr_d(2 downto 0)), 18);                           -- slip: speed x phase
+                              if f_slip = '1' then su_b <= f_slp; else su_b <= (others => '0'); end if;
+                    when others => su_a <= signed(resize(n_ady, 18)); su_b <= n_ady;                 -- dy^2
+                end case;
+            end if;
+
+            -- window 0: advance to the next line (or set up line 0), the row, |dy|, lens, tear
+            if v_k = 0 and v_ph = 1 then
+                if ls_init = '1' then
+                    v_q := ('0' & f_ro) + to_unsigned(1835008 - 4869, 22);
+                    if v_q >= 1835008 then n_q <= v_q(20 downto 0) - to_unsigned(1835008, 21); else n_q <= v_q(20 downto 0); end if;
+                    n_dy <= f_dyi; n_yq <= (others => '0'); n_bank <= '0';
+                    n_ph <= f_ph0;
+                else
+                    v_q := ('0' & n_q) + resize(n_step, 22);
                     if v_q >= 1835008 then n_q <= v_q(20 downto 0) - to_unsigned(1835008, 21); else n_q <= v_q(20 downto 0); end if;
                     v_dy := resize(n_dy, 20) + signed(resize(t_dys, 20));
                     if v_dy >= resize(f_pvh, 20) then n_dy <= resize(v_dy - resize(f_pvq, 20), 19); else n_dy <= resize(v_dy, 19); end if;
                     n_yq <= n_yq + resize(t_dyt, 22);
                     n_bank <= not n_bank;
-                when 3 =>
-                    n_r <= n_q(20 downto 16);
-                    n_fyh <= n_q(15);
-                when 4 =>
-                    n_sh <= C_SHIFT(to_integer(n_r))(0) and f_tear;
-                    n_tr <= signed(C_TEAR(to_integer(n_r)));
-                    case to_integer(n_r(2 downto 0)) is
-                        when 0 => v_j2 := s_lf(1 downto 0);   when 1 => v_j2 := s_lf(3 downto 2);
-                        when 2 => v_j2 := s_lf(5 downto 4);   when 3 => v_j2 := s_lf(7 downto 6);
-                        when 4 => v_j2 := s_lf(9 downto 8);   when 5 => v_j2 := s_lf(11 downto 10);
-                        when 6 => v_j2 := s_lf(13 downto 12); when others => v_j2 := s_lf(15 downto 14);
-                    end case;
-                    n_jt <= signed('0' & v_j2) - 1;
-                when 5 =>
-                    if f_tear = '1' then n_tear <= resize(n_tr, 9) + resize(n_jt, 9); else n_tear <= (others => '0'); end if;
-                    if n_sh = '1' then n_bx0 <= signed(resize(f_b0, 18)) - 24064; else n_bx0 <= signed(resize(f_b0, 18)); end if;
-                when 6 =>
-                    if n_bx0 < 0 then n_bx0 <= n_bx0 + C_SUPER; end if;
-                    e_go <= '1';
-                when others => null;
-            end case;
+                    n_ph <= n_ph + resize(t_wfy, 16);
+                end if;
+            end if;
+            if v_k = 0 and v_ph = 2 then
+                n_r <= n_q(20 downto 16);
+                n_fyh <= n_q(15);
+                v_ab := unsigned(abs(resize(n_dy, 19)));
+                n_ady <= v_ab(16 downto 0);
+            end if;
+            if v_k = 0 and v_ph = 3 then
+                -- lens weight: the distance from the beam line, 0..30 over half a period, minus 16
+                if f_stack = '1' then v_lz := '0' & n_ady(15 downto 11); else v_lz := '0' & n_ady(16 downto 12); end if;
+                n_lens <= signed(v_lz(4 downto 0) xor "10000");
+                n_sh <= C_SHIFT(to_integer(n_r))(0);
+                -- the zebra u offset starts as the photo's per-row tear + jitter (-1..2); warp and slip add on
+                case to_integer(n_r(2 downto 0)) is
+                    when 0 => v_j2 := s_lf(1 downto 0);   when 1 => v_j2 := s_lf(3 downto 2);
+                    when 2 => v_j2 := s_lf(5 downto 4);   when 3 => v_j2 := s_lf(7 downto 6);
+                    when 4 => v_j2 := s_lf(9 downto 8);   when 5 => v_j2 := s_lf(11 downto 10);
+                    when 6 => v_j2 := s_lf(13 downto 12); when others => v_j2 := s_lf(15 downto 14);
+                end case;
+                n_tear <= resize(signed(C_TEAR(to_integer(n_r))), 11) + signed(resize(v_j2, 11)) - 1;
+            end if;
+
+            -- line ROM reads: operands for the next window
+            if v_ph = 28 then
+                case v_k is
+                    when 0 => r_lra <= '1' & n_ph(15 downto 8);                                   -- sin
+                    when 1 => r_lra <= '1' & (n_ph(15 downto 14) + 1) & n_ph(13 downto 8);        -- cos
+                    when 2 => r_lra <= "0100" & n_r;                                             -- K2 weight
+                    when 4 => r_lra <= "0101" & n_r;                                             -- K6 weight
+                    when 7 => r_lra <= "0110" & n_r;                                             -- slip speed
+                    when others => null;
+                end case;
+            end if;
+
+            -- stores at phase 20
+            if v_ph = 20 then
+                v_e := unsigned(v_P(9 downto 3));                 -- scale exponent e = k g / 8 (-62..58)
+                case v_k is
+                    when 1 =>
+                        -- warp down: the table row (Q.6) + Ay sin / 2^11, clamped at the top
+                        v_yw := signed('0' & n_yq(21 downto 10)) + resize(v_P(21 downto 11), 13);
+                        if v_yw < 0 then n_yqw <= (others => '0'); else n_yqw <= unsigned(v_yw(11 downto 0)); end if;
+                    when 2 => n_tear <= n_tear + resize(v_P(16 downto 7), 11);       -- warp across
+                    when 3 | 5 => r_lra <= "00" & (not v_e(6)) & v_e(5 downto 0);  -- factor 64 * 2^(e / 32)
+                    when 4 => n_step <= unsigned(v_P(21 downto 6));
+                    when 6 => n_incb <= unsigned(v_P(23 downto 10));
+                    when 7 => n_bx0 <= to_unsigned(C_ANCH, 17) - unsigned(v_P(22 downto 6));  -- centre anchor
+                    when 8 =>
+                        -- slip: the row slides by speed x phase (mod 3 periods); the zebra row swings 0..127 px
+                        n_bx0 <= n_bx0 + unsigned(v_P(16 downto 0));
+                        v_z := unsigned(v_P(15 downto 9));
+                        if v_P(16) = '1' then v_z := not v_z; end if;
+                        n_tear <= n_tear + signed(resize(v_z, 11));
+                    when others => null;
+                end case;
+            end if;
+            if v_k = 1 and v_ph = 21 then e_go <= '1'; end if;
+            if v_k = 7 and v_ph = 21 and n_sh = '1' then n_bx0 <= n_bx0 - C_SHU; end if;   -- the photo's row shift
+            -- line ROM output, then a fabric copy
+            lr_d <= r_lrq;
+
             if data_in.avid = '1' and s_avq = '0' then
-                l_r <= n_r; l_fyh <= n_fyh; l_dy <= n_dy; l_tear <= n_tear; l_bx0 <= unsigned(n_bx0(16 downto 0));
-                l_dy2 <= sq_h & sq_l(16 downto 12); l_ady <= sq_a;
+                l_r <= n_r; l_fyh <= n_fyh; l_tear <= n_tear;
+                l_bx0 <= n_bx0 & "0000"; l_incb <= n_incb;
+                l_dy2 <= unsigned(v_P(33 downto 12)); l_ady <= n_ady;     -- dy^2 stays in the multiplier
                 l_bank <= n_bank;
             end if;
         end if;
@@ -720,9 +857,9 @@ begin
             pl_we <= '0'; ae_we <= '0'; ao_we <= '0';
             if e_go = '1' then
                 e_run <= '1'; e_c <= (others => '0'); e_k <= (others => '0'); e_first <= '1';
-                e_iy <= n_yq(20 downto 16); e_f <= n_yq(15 downto 10); e_bank <= n_bank;
-                if n_yq(21 downto 16) >= 31 then e_iy <= to_unsigned(31, 5); e_iy1 <= to_unsigned(31, 5);
-                else e_iy1 <= n_yq(20 downto 16) + 1; end if;
+                e_iy <= n_yqw(10 downto 6); e_f <= n_yqw(5 downto 0); e_bank <= n_bank;
+                if n_yqw(11 downto 6) >= 31 then e_iy <= to_unsigned(31, 5); e_iy1 <= to_unsigned(31, 5);
+                else e_iy1 <= n_yqw(10 downto 6) + 1; end if;
             elsif e_run = '1' then
                 if e_k = 9 then
                     e_k <= (others => '0'); e_c <= e_c + 1;
@@ -789,11 +926,10 @@ begin
     end process p_tab;
 
     ---------------------------------------------------------------------------
-    -- Beam DDAs: virtual x (Q.8), s dx (Q.8 of c / 256 units), block x (Q.6);
+    -- Beam DDAs: virtual x (Q.8), s dx (Q.8 of c / 256 units), block x (Q.4 units, per-line step);
     -- a free-running pixel clock (stage-k pixel x = pcf - k) for the key line buffer
     ---------------------------------------------------------------------------
     p_beam : process(clk)
-        variable v_bx : unsigned(17 downto 0);
     begin
         if rising_edge(clk) then
             if g_start = '1' then
@@ -805,9 +941,8 @@ begin
                     b_xv <= b_xv + resize(t_xs, 20);
                     b_sdx <= b_sdx + signed(resize(f_ks, 22));
                     b_e <= b_e + resize(shift_right(b_f, 12), 25);
-                    b_f <= b_f + signed(resize(f_k2, 32));
-                    v_bx := resize(b_bx, 18) + resize(f_incb, 18);
-                    if v_bx >= C_SUPER then b_bx <= v_bx(16 downto 0) - to_unsigned(C_SUPER, 17); else b_bx <= v_bx(16 downto 0); end if;
+                    b_f <= b_f + signed(resize(f_kk & '0', 32));
+                    b_bx <= b_bx + resize(l_incb, 21);
                 end if;
             end if;
         end if;
@@ -822,12 +957,10 @@ begin
         variable v_d   : signed(19 downto 0);
         variable v_u   : signed(11 downto 0);
         variable v_c   : unsigned(1 downto 0);
-        variable v_dd  : signed(21 downto 0);
-        variable v_ud  : unsigned(21 downto 0);
+        variable v_dd  : signed(13 downto 0);
         variable v_i2  : unsigned(5 downto 0);
         variable v_lo, v_hi : std_logic_vector(15 downto 0);
         variable v_l   : signed(13 downto 0);
-        variable v_sh  : signed(20 downto 0);
         variable v_a   : unsigned(7 downto 0);
         variable v_5a  : signed(10 downto 0);
         variable v_sr  : unsigned(13 downto 0);
@@ -840,6 +973,7 @@ begin
         variable v_ri  : unsigned(7 downto 0);
         variable v_r18 : unsigned(17 downto 0);
         variable v_pw  : std_logic_vector(29 downto 0);
+        variable v_gq  : std_logic_vector(29 downto 0);
         variable v_ed  : std_logic;
         variable v_y, v_cu, v_cv : signed(11 downto 0);
         variable v_t15 : signed(14 downto 0);
@@ -849,7 +983,8 @@ begin
         variable v_sc  : unsigned(11 downto 0);
         variable v_sy  : unsigned(11 downto 0);
         variable v_dl  : unsigned(9 downto 0);
-        variable v_vy  : unsigned(16 downto 0);
+        variable v_vy  : unsigned(9 downto 0);
+        variable v_vy2 : unsigned(8 downto 0);
     begin
         if rising_edge(clk) then
             -- camera luma above black, 0..255 (x 0.293); Osc = none.  Untapped delay: the camera
@@ -857,34 +992,35 @@ begin
             if f_osc = '1' or unsigned(data_in.y) <= 64 then
                 v_y1 <= (others => '0');
             else
-                v_vy := (unsigned(data_in.y) - 64) * to_unsigned(75, 7);
-                if v_vy(16) = '1' then v_y1 <= to_unsigned(255, 8); else v_y1 <= v_vy(15 downto 8); end if;
+                v_vy := resize(unsigned(data_in.y) - 64, 10);
+                v_vy2 := resize(v_vy(9 downto 2), 9) + resize(v_vy(9 downto 5), 9) + resize(v_vy(9 downto 6), 9);
+                if v_vy2(8) = '1' then v_y1 <= to_unsigned(255, 8); else v_y1 <= v_vy2(7 downto 0); end if;
             end if;
             -- horizontal slew of the camera luma (an analog low-pass, ~8 px): s += y - s/8
             v_ys <= v_ys + resize(v_y1, 11) - resize(v_ys(10 downto 3), 11);
 
             -- 1: |dx|; dy^2 - (s dx)^2 (Q.16 of c / 256 units); |s dx|; block period and offset
+            -- (magnitudes by one's complement: off by one fine unit, invisible)
             v_dx := signed('0' & b_xv) - C_XC;
-            if v_dx < 0 then v_ad := unsigned(-v_dx); else v_ad := unsigned(v_dx); end if;
+            if v_dx < 0 then v_ad := unsigned(not v_dx); else v_ad := unsigned(v_dx); end if;
             p1_adx <= v_ad(17 downto 8);
             p1_dif <= signed(resize(l_dy2, 26)) - resize(b_e, 26);
-            p1_asdx <= resize(unsigned(abs(b_sdx)), 21);
-            if b_bx >= 78336 then p1_bp <= "10"; p1_xi <= b_bx - 78336;
-            elsif b_bx >= 39168 then p1_bp <= "01"; p1_xi <= b_bx - 39168;
-            else p1_bp <= "00"; p1_xi <= b_bx; end if;
+            if b_sdx(21) = '1' then p1_asdx <= unsigned(not b_sdx(20 downto 8)); else p1_asdx <= unsigned(b_sdx(20 downto 8)); end if;
+            if b_bx(20 downto 4) >= C_PB2 then p1_bp <= "10"; p1_xi <= b_bx(20 downto 4) - C_PB2;
+            elsif b_bx(20 downto 4) >= C_PB1 then p1_bp <= "01"; p1_xi <= b_bx(20 downto 4) - C_PB1;
+            else p1_bp <= "00"; p1_xi <= b_bx(20 downto 4); end if;
 
             -- 2: folded, torn u; block column; |dy^2 - (s dx)^2|; arm distance ||dy| - |s dx||; falloff ROM address
             v_u := signed(resize(p1_adx, 12)) + resize(l_tear, 12);
             if v_u < 0 then p2_u <= (others => '0');
             elsif v_u > 1023 then p2_u <= (others => '1');
             else p2_u <= unsigned(v_u(9 downto 0)); end if;
-            if p1_xi >= 34240 then v_c := "10"; elsif p1_xi >= 19520 then v_c := "01"; else v_c := "00"; end if;
+            if p1_xi >= C_CB then v_c := "10"; elsif p1_xi >= C_CA then v_c := "01"; else v_c := "00"; end if;
             p2_j <= resize(p1_bp & '0', 4) + resize(p1_bp, 4) + resize(v_c, 4);
-            if p1_dif < 0 then p2_ad <= resize(unsigned(-p1_dif), 25); p2_in <= '1';
-            else p2_ad <= resize(unsigned(p1_dif), 25); p2_in <= '0'; end if;
-            v_dd := signed(resize(l_ady, 22)) - signed(resize(p1_asdx, 22));
-            v_ud := unsigned(abs(v_dd));
-            p2_darm <= resize(v_ud(21 downto 8), 12);
+            if p1_dif < 0 then p2_ad <= unsigned(not p1_dif(24 downto 0)); p2_in <= '1';
+            else p2_ad <= unsigned(p1_dif(24 downto 0)); p2_in <= '0'; end if;
+            v_dd := signed('0' & l_ady(16 downto 8)) - signed('0' & p1_asdx);
+            if v_dd < 0 then p2_darm <= resize(unsigned(not v_dd), 12); else p2_darm <= resize(unsigned(v_dd), 12); end if;
             if p1_adx(9 downto 2) = 255 then r_axa <= to_unsigned(255, 8); else r_axa <= p1_adx(9 downto 2); end if;
 
             -- 3: t = |dy^2 - (s dx)^2| / 2^24 (clamped), inside flag; ridge; line RAM and cell ROM addresses
@@ -930,45 +1066,43 @@ begin
             p_rrc(7) <= p6_rr; p_grc(7) <= p6_gr;
             p_cell(7) <= p_cell(6); p_rr(7) <= p_rr(6);
 
-            -- 8: log beam - 8 octaves + P12 gain + ridge + bloom; stripe gain mantissa product
+            -- 8: log beam - 8 octaves + P12 gain + ridge + bloom; push field B = the log beam from 3 octaves
+            -- below the visible level (0..255, P12-independent), stripe phase
             p8_s2 <= (signed(resize(p7_s1, 13)) + f_lbm) + (signed(resize(p7_rl, 13)) + signed(resize(p7_lv, 13)));
             p8_val <= p7_val;
-            p8_pm <= p7_pl * signed('0' & f_gm);
+            if p7_val = '0' or p7_s1(10 downto 3) < 80 then p8_b <= (others => '0');
+            elsif p7_s1(10 downto 3) >= 207 then p8_b <= to_unsigned(127, 8);
+            else p8_b <= p7_s1(10 downto 3) - 80; end if;
+            p8_pl <= unsigned(p7_pl(7 downto 0));
             p_ag(8) <= p7_ag;
 
-            -- 9: exp ROM address (clamped); stripe phase = (pl x m) >> (6 - e) + flow
+            -- 9: exp ROM address (clamped); push = B x P12 gain; stripe phase + flow
             p9_zero <= '0'; p9_sat <= '0';
             if p8_val = '0' or p8_s2 < 0 then r_exa <= (others => '0'); p9_zero <= '1';
             elsif p8_s2 > 1023 then r_exa <= (others => '1'); p9_sat <= '1';
             else r_exa <= unsigned(p8_s2(9 downto 0)); end if;
-            case to_integer(f_ge) is
-                when 0 => v_sh := shift_right(p8_pm, 6);
-                when 1 => v_sh := shift_right(p8_pm, 5);
-                when 2 => v_sh := shift_right(p8_pm, 4);
-                when others => v_sh := shift_right(p8_pm, 3);
-            end case;
-            p9_fr <= unsigned(v_sh(7 downto 0)) + f_fl(15 downto 8);
+            p9_pu <= resize(signed(p8_b) * f_kp, 17);
+            p9_pl <= p8_pl + f_fl(15 downto 8);
 
-            -- 10: (exp ROM output register) stripe profile clip(5 |f - 128| - 192)
-            if p9_fr(7) = '1' then v_a := p9_fr - 128; else v_a := 128 - p9_fr; end if;
-            v_5a := signed(resize(v_a & "00", 11)) + signed(resize(v_a, 11)) - 192;
-            if v_5a < 0 then p10_st <= (others => '0');
-            elsif v_5a > 255 then p10_st <= (others => '1');
-            else p10_st <= unsigned(v_5a(7 downto 0)); end if;
+            -- 10: (exp ROM output register) stripe phase + push (B kp / 4, 1/256 stripe)
+            p10_fr <= p9_pl + unsigned(p9_pu(9 downto 2));
             p10_zero <= p9_zero; p10_sat <= p9_sat;
 
-            -- 11: beam level G3; zebra stripe x amplitude
+            -- 11: beam level G3; stripe profile clip(5 |f - 128| - 192)
             if p10_zero = '1' then p11_g3 <= (others => '0');
             elsif p10_sat = '1' then p11_g3 <= (others => '1');
             else p11_g3 <= unsigned(r_exq); end if;
-            v_sr := p10_st * p_ag(10);
-            p11_sr <= v_sr(13 downto 6);
+            if p10_fr(7) = '1' then v_a := p10_fr - 128; else v_a := 128 - p10_fr; end if;
+            v_5a := signed(resize(v_a & "00", 11)) + signed(resize(v_a, 11)) - 192;
+            if v_5a < 0 then p11_st <= (others => '0');
+            elsif v_5a > 255 then p11_st <= (others => '1');
+            else p11_st <= unsigned(v_5a(7 downto 0)); end if;
             v_rs := resize(p_rrc(10) & "000", 9) + resize(p_grc(10) & "000", 9);
             p11_rkey <= resize(v_rs, 10) + resize(v_rs(8 downto 3), 10);
 
-            -- 12: zebra red; layer decode; key compare; beam colour ROM address
-            v_o := p11_sr;
-            p12_zr <= to_unsigned(12, 8) + v_o - resize(v_o(7 downto 3), 8);
+            -- 12: zebra stripe x amplitude; layer decode; key compare; beam colour ROM address
+            v_sr := p11_st * p_ag(11);
+            p12_sr <= v_sr(13 downto 6);
             v_code := p_cell(11)(7 downto 4); v_kc := p_cell(11)(3 downto 0);
             v_isz := '0'; v_isr := '0'; v_isw := '0';
             if f_bars = '0' or v_code = 10 then v_isz := '1';
@@ -981,8 +1115,9 @@ begin
             p_isz(12) <= v_isz; p_isr(12) <= v_isr; p_isw(12) <= v_isw; p_win(12) <= v_win;
             if v_isz = '1' and p11_g3 < 9 then r_gya <= to_unsigned(9, 8); else r_gya <= p11_g3; end if;
 
-            -- 13: (beam colour ROM output register)
-            p13_zr <= p12_zr;
+            -- 13: (beam colour ROM output register) zebra red
+            v_o := p12_sr;
+            p13_zr <= to_unsigned(12, 8) + v_o - resize(v_o(7 downto 3), 8);
 
             -- 14: beam colour copy; red part (zebra red or ramp red) and ramp green part; palette
             p14_gy <= unsigned(r_gyq(29 downto 20)); p14_gu <= unsigned(r_gyq(19 downto 10)); p14_gv <= unsigned(r_gyq(9 downto 0));
@@ -993,12 +1128,8 @@ begin
             p14_ru <= v_r18(16 downto 8);
             v_r18 := shift_left(resize(v_ri, 18), 7) + shift_left(resize(v_ri, 18), 4) + shift_left(resize(v_ri, 18), 3);   -- 152 v
             p14_rv <= v_r18(15 downto 8);
-            v_r18 := resize(p_grc(13) * to_unsigned(5079, 13), 18);                                        -- 516 x 8 x 16/13
-            p14_qy <= v_r18(17 downto 8);
-            v_r18 := resize(p_grc(13) * to_unsigned(3016, 12), 18);
-            p14_qu <= v_r18(16 downto 8);
-            v_r18 := resize(p_grc(13) * to_unsigned(2384, 12), 18);
-            p14_qv <= v_r18(16 downto 8);
+            v_gq := C_GRQ(to_integer(p_grc(13)));                                                    -- 516 x 8 x 16/13 g etc.
+            p14_qy <= unsigned(v_gq(29 downto 20)); p14_qu <= unsigned(v_gq(19 downto 10)); p14_qv <= unsigned(v_gq(9 downto 0));
             if p_isw(13) = '1' then v_pw := C_PYUV(4); else v_pw := C_PYUV(to_integer(p_cell(13)(7 downto 4))); end if;
             p14_py <= unsigned(v_pw(29 downto 20)); p14_pu <= unsigned(v_pw(19 downto 10)); p14_pv <= unsigned(v_pw(9 downto 0));
 
@@ -1011,9 +1142,9 @@ begin
             elsif p_win(14) = '1' then
                 p15_y <= signed(resize(p14_gy, 12)); p15_u <= signed(resize(p14_gu, 12)); p15_v <= signed(resize(p14_gv, 12));
             elsif p_isr(14) = '1' then
-                p15_y <= 64 + signed(resize(p14_ry, 12)) + signed(resize(p14_qy, 12));
-                p15_u <= 512 + signed(resize(p14_ru, 12)) - signed(resize(p14_qu, 12));
-                p15_v <= 512 - signed(resize(p14_rv, 12)) - signed(resize(p14_qv, 12));
+                p15_y <= signed(resize(p14_ry, 12)) + signed(resize(p14_qy, 12));
+                p15_u <= signed(resize(p14_ru, 12)) + signed(resize(p14_qu, 12));
+                p15_v <= signed(resize(p14_qv, 12)) - signed(resize(p14_rv, 12));
             else
                 p15_y <= signed(resize(p14_py, 12)); p15_u <= signed(resize(p14_pu, 12)); p15_v <= signed(resize(p14_pv, 12));
             end if;
@@ -1028,13 +1159,12 @@ begin
                or p_win(15) /= wb_q(0) then v_ed := '1'; end if;
             p16_ed <= v_ed and not p_isz(15);
             p16_y <= unsigned(resize(p15_y, 11)); p16_u <= p15_u; p16_v <= p15_v;
-            p16_dy <= p15_y - 64; p16_du <= p15_u - 512; p16_dv <= p15_v - 512;
 
-            -- 17: outline x 7/16 toward black / neutral; palette swap exchanges Cr and Cb; 8-bit chroma
+            -- 17: outline halfway toward black / neutral; palette swap exchanges Cr and Cb; 8-bit chroma
             if p16_ed = '1' then
-                p17_y <= unsigned(resize(signed(resize(p16_y, 12)) - shift_right(p16_dy, 1) - shift_right(p16_dy, 4), 11));
-                v_cu := p16_u - shift_right(p16_du, 1) - shift_right(p16_du, 4);
-                v_cv := p16_v - shift_right(p16_dv, 1) - shift_right(p16_dv, 4);
+                p17_y <= shift_right(p16_y + 64, 1);
+                v_cu := shift_right(p16_u + 512, 1);
+                v_cv := shift_right(p16_v + 512, 1);
             else
                 p17_y <= p16_y; v_cu := p16_u; v_cv := p16_v;
             end if;
@@ -1043,7 +1173,7 @@ begin
             if v_cv < 0 then p17_v8 <= (others => '0'); elsif v_cv > 1023 then p17_v8 <= (others => '1'); else p17_v8 <= unsigned(v_cv(9 downto 2)); end if;
             for i in 13 to 17 loop p_win(i) <= p_win(i - 1); p_isz(i) <= p_isz(i - 1); p_isr(i) <= p_isr(i - 1); end loop;
             p_isw(13) <= p_isw(12);
-            for i in 9 to 10 loop p_ag(i) <= p_ag(i - 1); end loop;
+            for i in 9 to 11 loop p_ag(i) <= p_ag(i - 1); end loop;
             for i in 8 to 13 loop p_cell(i) <= p_cell(i - 1); p_rrc(i) <= p_rrc(i - 1); p_grc(i) <= p_grc(i - 1); end loop;
 
             -- 18..23: output conditioning (chroma [1 2 2 2 2 2 2 2 1]/16 from 8-bit chroma and a delay-8

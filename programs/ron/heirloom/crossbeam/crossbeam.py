@@ -2,7 +2,7 @@
 # Copyright (C) 2026 czartroniks
 # SPDX-License-Identifier: GPL-3.0-only
 """
-CROSSBEAM v0.5.0 - build hook.  Emits crossbeam_pkg.vhd (pure Python, no dependencies).
+CROSSBEAM v0.6.0 - build hook.  Emits crossbeam_pkg.vhd (pure Python, no dependencies).
 
 The tables were measured from the source photo (WIN_20230527_01_43_26) in .heirloom_work/rb_crossbeam
 (st.py / integ2.py / cmaps.py / fitx5.py / cellkeys.py / hwtables.py) and are carried here as data:
@@ -20,12 +20,18 @@ The tables were measured from the source photo (WIN_20230527_01_43_26) in .heirl
   C_LAX   256 x 11: log2 of the beam's horizontal falloff A0 (1 - (|dx|/a)^q), |dx| = 4 i + 2 virtual px.
   C_EXP   1024 x 8: 2^(S/128), the beam level back from the log domain.
   C_AG6   64 x 6: zebra amplitude gamma 0.7.  C_LV 32 x 7: log2 of the camera bloom 1 + 3 vy / 1024.
-  C_MM    64 x 5: K3 stripe-gain mantissa 16 * 2^(i/64).   C_KC 256 x 14: K6 -> block scale (Q.12).
   C_TEAR  32 x 8 (signed): per-row tear of the zebra (virtual px).  C_SHIFT: rows shifted 376 block px.
   C_GYUV  256 x 30: the beam's colour (0, G - G/32 + 4, G + 8) as Y / Cr / Cb (10 bits each).
   C_PYUV  16 x 30: the colour codes (photo medians) as Y / Cr / Cb.
+  C_GRQ   32 x 30: the ramp's base from its green part (5-bit level g) as Y / Cr / Cb: 64 + 5079 g / 256,
+          512 - 3016 g / 256, 512 - 2384 g / 256 (the red part is added in the pixel path).
   C_T_*   16 entries per timing ID: virtual x / y step (Q.8), beam dy step (Q.8), table row step (Q.16),
-          x step x 342 (beam s dx step), y step x 15534 / 256 (row step).
+          x step x 342 (beam s dx step), colour-bar row step (Q.16 rows per line, 27.7 rows per frame),
+          block step (Q.8 block units per pixel; 2^17 units = 3 periods = 1836 virtual px), warp phase
+          step per line (Q.16 cycles: 1.7 cycles per frame height).
+  C_LROM  512 x 8: the line engine's ROM.  0..127: 64 * 2^((i - 64) / 32) (row / column scale factors,
+          Q.6); 128..159 / 160..191: per-row Scatter weights for K2 / K6 (signed, -16..15); 192..223:
+          per-row Slip speeds (signed, -3..3); 256..511: 127 sin(2 pi i / 256) (the warp waves).
 """
 import os
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -387,30 +393,6 @@ LV = [
     2, 4, 6, 8, 10, 13, 15, 17, 19, 21, 22, 24, 26, 28, 30, 32,
     34, 36, 37, 39, 41, 43, 44, 46, 48, 49, 51, 53, 54, 56, 58, 59,
 ]
-MM = [
-    16, 16, 16, 17, 17, 17, 17, 17, 17, 18, 18, 18, 18, 18, 19, 19,
-    19, 19, 19, 20, 20, 20, 20, 21, 21, 21, 21, 21, 22, 22, 22, 22,
-    23, 23, 23, 23, 24, 24, 24, 24, 25, 25, 25, 25, 26, 26, 26, 27,
-    27, 27, 27, 28, 28, 28, 29, 29, 29, 30, 30, 30, 31, 31, 31, 31,
-]
-KC = [
-    8567, 8424, 8285, 8151, 8022, 7896, 7774, 7656, 7542, 7430, 7322, 7218, 7116, 7017, 6920, 6827,
-    6735, 6647, 6560, 6476, 6394, 6314, 6236, 6159, 6085, 6012, 5942, 5872, 5805, 5739, 5674, 5611,
-    5549, 5489, 5430, 5372, 5315, 5260, 5205, 5152, 5100, 5049, 4999, 4950, 4902, 4855, 4808, 4763,
-    4718, 4674, 4632, 4589, 4548, 4507, 4467, 4428, 4390, 4352, 4314, 4278, 4242, 4206, 4172, 4137,
-    4104, 4071, 4038, 4006, 3974, 3943, 3913, 3882, 3853, 3824, 3795, 3766, 3739, 3711, 3684, 3657,
-    3631, 3605, 3579, 3554, 3529, 3505, 3480, 3457, 3433, 3410, 3387, 3364, 3342, 3320, 3298, 3277,
-    3256, 3235, 3214, 3194, 3174, 3154, 3134, 3115, 3096, 3077, 3058, 3040, 3021, 3003, 2986, 2968,
-    2951, 2934, 2917, 2900, 2883, 2867, 2851, 2835, 2819, 2803, 2788, 2772, 2757, 2742, 2727, 2713,
-    2698, 2684, 2669, 2655, 2642, 2628, 2614, 2601, 2587, 2574, 2561, 2548, 2535, 2523, 2510, 2498,
-    2485, 2473, 2461, 2449, 2437, 2425, 2414, 2402, 2391, 2380, 2368, 2357, 2346, 2336, 2325, 2314,
-    2304, 2293, 2283, 2272, 2262, 2252, 2242, 2232, 2222, 2213, 2203, 2193, 2184, 2174, 2165, 2156,
-    2147, 2138, 2128, 2120, 2111, 2102, 2093, 2084, 2076, 2067, 2059, 2051, 2042, 2034, 2026, 2018,
-    2010, 2002, 1994, 1986, 1978, 1970, 1963, 1955, 1948, 1940, 1933, 1925, 1918, 1911, 1903, 1896,
-    1889, 1882, 1875, 1868, 1861, 1854, 1848, 1841, 1834, 1828, 1821, 1814, 1808, 1801, 1795, 1789,
-    1782, 1776, 1770, 1764, 1757, 1751, 1745, 1739, 1733, 1727, 1721, 1716, 1710, 1704, 1698, 1693,
-    1687, 1681, 1676, 1670, 1665, 1659, 1654, 1648, 1643, 1638, 1632, 1627, 1622, 1617, 1611, 1606,
-]
 TEAR = [
     0, 0, -38, 18, 22, -14, 30, -10, 0, 0, 12, -26, 0, 0, 0, 0,
     16, 10, -30, -36, 34, 28, 0, -40, 40, 36, -20, 0, 0, 0, 0, 0,
@@ -437,6 +419,23 @@ GYUV = [
     758243990, 760339095, 763482775, 767676056, 769771160, 773963417, 776058522, 779203226, 782346907, 785490587, 789682844, 791778973, 793874077, 798066334, 801210014, 804354719,
     807498400, 809593504, 813785761, 815880865, 820074146, 823217827, 826361507, 829505188, 831601315, 834746017, 836841120, 839985823, 842080926, 844177053, 847320732, 849416858,
 ]
+# phase 2: per-row Scatter weights (K2 heights, K6 block scales) and Slip speeds (S8)
+G2 = [-9, 7, -3, 12, -14, 4, 15, -6, 1, -11, 9, -16, 6, -2, 13, -8,
+      3, -13, 10, -5, 14, -10, 0, 8, -15, 5, 11, -7, 2, -12, 7, -4]
+G6 = [5, -12, 14, -4, 9, -16, 2, 11, -8, 15, -2, 6, -13, 12, -6, 3,
+      -10, 13, -15, 8, -3, 10, -11, 1, 15, -7, 4, -14, 7, -9, 12, -1]
+SLIP = [1, -2, 3, -1, 0, 2, -3, 1, -1, 3, -2, 0, 2, -1, 1, -3,
+        3, -1, 2, -2, 1, 0, -3, 2, -1, 1, 3, -2, 1, -3, 2, -1]
+
+
+def lrom():
+    import math
+    t = [min(255, int(round(64 * 2 ** ((e - 64) / 32.0)))) for e in range(128)]
+    t += G2 + G6 + SLIP + [0] * 32
+    t += [int(round(127 * math.sin(2 * math.pi * i / 256.0))) for i in range(256)]
+    return t
+
+
 PYUV = [
     141033978, 309859745, 522055396, 982089830, 1058543110, 237444997, 169337433, 268059168, 580091489, 67633664, 67633664, 67633664, 67633664, 67633664, 67633664, 67633664,
 ]
@@ -456,14 +455,19 @@ def emit():
     xs = [int(round(256 * 1920 / w)) for w in WW]
     dys = [int(round(y * 1.33738)) for y in YS]
     dyt = [int(round(y * 65536 / (256 * 34.0))) for y in YS]
+    dq = [(7074 * ((y * 15534) >> 8)) >> 16 for y in YS]
+    incb = [int(round(131072 / 1836.0 * x)) for x in xs]
+    wfy = [int(round(1.7 * 65536 / 1080 * y / 256)) for y in YS]
     cs = [arr("C_PT", "t_pt", PT, 8), arr("C_AGR", "t_agr", AGR, 16), arr("C_CELL", "t_cell", CELL, 8),
           arr("C_LF", "t_lf", LF, 11), arr("C_LAX", "t_lax", LAX, 11), arr("C_EXP", "t_exp", EXP, 8),
-          arr("C_AG6", "t_ag6", AG6, 6), arr("C_LV", "t_lv", LV, 7), arr("C_MM", "t_mm", MM, 5),
-          arr("C_KC", "t_kc", KC, 14), arr("C_TEAR", "t_tear", TEAR, 8),
+          arr("C_AG6", "t_ag6", AG6, 6), arr("C_LV", "t_lv", LV, 7),
+          arr("C_LROM", "t_lrom", lrom(), 8), arr("C_TEAR", "t_tear", TEAR, 8),
           arr("C_SHIFT", "t_shift", SHIFT, 1), arr("C_GYUV", "t_gyuv", GYUV, 30), arr("C_PYUV", "t_pyuv", PYUV, 30),
+          arr("C_GRQ", "t_grq", [(64 + ((g * 5079) >> 8)) << 20 | (512 - ((g * 3016) >> 8)) << 10 | (512 - ((g * 2384) >> 8)) for g in range(32)], 30),
           arr("C_T_XS", "t_t10", xs, 10), arr("C_T_YS", "t_t11", YS, 11), arr("C_T_DYS", "t_t11", dys, 11),
           arr("C_T_DYT", "t_t14", dyt, 14), arr("C_T_XK", "t_t18", [x * 342 for x in xs], 18),
-          arr("C_T_YK", "t_t18", [(y * 15534) >> 8 for y in YS], 18)]
+          arr("C_T_DQ", "t_t14", dq, 14), arr("C_T_INCB", "t_t16", incb, 16),
+          arr("C_T_WFY", "t_t10", wfy, 10)]
     txt = ("-- crossbeam_pkg.vhd -- GENERATED by crossbeam.py; edit the generator, not this file.\n\n"
            "library ieee;\nuse ieee.std_logic_1164.all;\n\npackage crossbeam_pkg is\n"
            "    type t_pt is array(0 to 2047) of std_logic_vector(7 downto 0);\n"
@@ -474,15 +478,16 @@ def emit():
            "    type t_exp is array(0 to 1023) of std_logic_vector(7 downto 0);\n"
            "    type t_ag6 is array(0 to 63) of std_logic_vector(5 downto 0);\n"
            "    type t_lv is array(0 to 31) of std_logic_vector(6 downto 0);\n"
-           "    type t_mm is array(0 to 63) of std_logic_vector(4 downto 0);\n"
-           "    type t_kc is array(0 to 255) of std_logic_vector(13 downto 0);\n"
+           "    type t_lrom is array(0 to 511) of std_logic_vector(7 downto 0);\n"
            "    type t_gyuv is array(0 to 255) of std_logic_vector(29 downto 0);\n"
            "    type t_tear is array(0 to 31) of std_logic_vector(7 downto 0);\n"
            "    type t_shift is array(0 to 31) of std_logic_vector(0 downto 0);\n"
            "    type t_pyuv is array(0 to 15) of std_logic_vector(29 downto 0);\n"
+           "    type t_grq is array(0 to 31) of std_logic_vector(29 downto 0);\n"
            "    type t_t10 is array(0 to 15) of std_logic_vector(9 downto 0);\n"
            "    type t_t11 is array(0 to 15) of std_logic_vector(10 downto 0);\n"
            "    type t_t14 is array(0 to 15) of std_logic_vector(13 downto 0);\n"
+           "    type t_t16 is array(0 to 15) of std_logic_vector(15 downto 0);\n"
            "    type t_t18 is array(0 to 15) of std_logic_vector(17 downto 0);\n" +
            "\n".join(cs) + "\nend package crossbeam_pkg;\n")
     with open(os.path.join(HERE, "crossbeam_pkg.vhd"), "w") as fh:
