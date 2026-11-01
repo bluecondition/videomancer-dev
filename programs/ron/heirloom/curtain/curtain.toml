@@ -7,23 +7,23 @@
 processing_delay_clks = 24
 program_id = "com.czartroniks.curtain"
 program_name = "Curtain"
-program_version = "0.5.0"
+program_version = "0.6.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Material", "Warp", "Organic"]
 program_type = "processing"
-description = "Red drapes and magenta striation: swept folds with green piping and cyan pools, cut by pleats. Drape on the slider."
+description = "Red drapes, magenta striation: swept folds with green piping and cyan pools, cut by pleats; a dissolving seam. Drape on P12."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_1"
-name_label = "Folds"
+name_label = "Seam"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 0
 display_float_digits = 0
 suffix_label = "%"
 
@@ -39,7 +39,7 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
-name_label = "Stripes"
+name_label = "Weave"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
@@ -79,21 +79,21 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
-name_label = "Tear"
-value_labels = ["On", "Off"]
-initial_value_label = "On"
+name_label = "Swap"
+value_labels = ["Folds Up", "Drapes Up"]
+initial_value_label = "Folds Up"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
 name_label = "Piping"
-value_labels = ["On", "Off"]
-initial_value_label = "On"
+value_labels = ["Arcs", "Ribbons"]
+initial_value_label = "Arcs"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
 name_label = "Flames"
-value_labels = ["On", "Off"]
-initial_value_label = "On"
+value_labels = ["Teeth", "Fire"]
+initial_value_label = "Teeth"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
@@ -118,7 +118,7 @@ display_float_digits = 0
 suffix_label = "%"
 
 [[preset]]
-name = "Default"
+name = "Photo"
 
 [[preset]]
 name = "Hanging"
@@ -135,7 +135,23 @@ toggle_switch_10 = 1
 rotary_potentiometer_5 = 700
 
 [[preset]]
-name = "Many Folds"
-rotary_potentiometer_1 = 820
-rotary_potentiometer_2 = 760
-rotary_potentiometer_3 = 700
+name = "Dissolve"
+rotary_potentiometer_1 = 1023
+rotary_potentiometer_3 = 760
+
+[[preset]]
+name = "Hems"
+rotary_potentiometer_1 = 520
+toggle_switch_7 = 1
+
+[[preset]]
+name = "Bonfire"
+rotary_potentiometer_1 = 300
+toggle_switch_8 = 1
+toggle_switch_9 = 1
+rotary_potentiometer_4 = 700
+
+[[preset]]
+name = "Flat"
+rotary_potentiometer_3 = 0
+rotary_potentiometer_5 = 640

@@ -1,10 +1,80 @@
 # Curtain — red drapes, swept folds and pleat cuts
 
-**v0.5.0 (2026-10-27): rebuilt from the photo, built, NOT flashed.** Heirloom #34, from
+**v0.6.0 (2026-11-01, phase 2): K1 Seam dissolves the seam, K3 Weave, the pleats drift, S7 Swap,
+S8 Ribbons, S9 Fire. Built, NOT flashed.** (v0.5.0, 2026-10-27: rebuilt from the photo.) Heirloom #34, from
 `photos/WIN_20230521_01_34_12_Pro.jpg`. The v0.1.0 version (magenta folds wrung by a vertical sine,
 blue pools, lime piping) was judged too abstract and replaced. The photo is two line-locked oscillators
 feeding a keyed colourizer: swept folds in the upper half, cut by pleats that also own the red drapes
 of the lower half, all striated by a fine third oscillator. Presets are hand-written placeholders.
+
+## Phase 2 (v0.6.0)
+Ron (2026-10-31) approved a proposed map without flashing v0.5.0, and asked for something with the
+seam height, or a blend that removes the seam. K1 was traded for the seam (his pick).
+- **K1 Folds → Seam.** The seam becomes a wipe. A pixel shows the fold half when
+  `t(y) < f(x)`, where:
+  - `t = (2 s + 1) G / 256`, with s the row's distance below the seam;
+  - G is the per-field gain for a wipe half-height `D = K1² / 951` lines: 0 at K1 0 (the photo's hard
+    seam), 69 at 25 %, 276 at 50 %, ~1100 at 100 %;
+  - `f = pleat phase[15:8] + a 0..31 stripe triangle − 144`: the pleat sawtooth, roughened by the stripes.
+
+  As K1 rises, the drapes climb into the folds as tall pointed hems (one per pleat, peaking just after
+  each cut) and the folds hang into the drapes. At 100 % the halves interleave in near-vertical strips.
+  Each half's table is mirrored past the seam (fold rows reflect about 535.5, drape rows about 543.5),
+  so no horizontal line appears anywhere. The mirroring shows as a soft reflection axis at mid-height:
+  domes become lenses and chevrons become Xs. The fold spacing is fixed at the photo's 608 px.
+- **K3 Stripes → Weave.** One depth value w drives four things: 0 at K3 0, 40 at 50 % (the photo),
+  159 at 100 %.
+  - stripe amplitude: stripe blue `120 + 3 (S − 128) w / 256`, clamped;
+  - stripe bite into every key edge: key jitter `(S − 128) w / 256`;
+  - chevron depth: the walk slope × w / 40;
+  - drape slant: `w · 59` per line.
+
+  0 = flat colour fields; 100 % = hard two-level stripes, edges chewed ±80 key units, chevrons 4×
+  deeper, drape stripes near horizontal. The stripe period is fixed at 36 px.
+- **K4 Speed** also drifts the pleats right at 0.625 sp/65536 cycle per field, against the folds'
+  left drift. The cuts slide through the folds, so flame lengths (set by the fold phase at the cut) and
+  arc gates re-evaluate as they pass. The drapes slide with the pleats.
+- **S7 Tear → Swap.** Folds Up (the photo) / Drapes Up: the drapes hang from the top (rows from 0),
+  the folds start at line 544. The seam wipe and the mirroring work the same way. The tears are
+  always on now, at the photo's rate.
+- **S8 Piping On/Off → Arcs / Ribbons.** Ribbons: the arcs 2.5× wide (a second distance table in the
+  arc ROM), at full width with no taper, ungated (from the top down to the seam, across the cuts).
+- **S9 Flames On/Off → Teeth / Fire.** Fire: flames 3× longer, domes twice as wide and starting at
+  fold row 255 instead of 355.
+- Unchanged: K2 Pleats, K5 Pools, K6 Melt, S10 Velvet, S11 Source, P12 Drape.
+- **Defaults reproduce v0.5.0** (GHDL 720p, `.heirloom_work/rb_curtain/v060/cmp_v060.png`: photo /
+  v0.5.0 / v0.6.0 defaults / four new looks). The pleat drift moves the photo's still frame slowly at
+  the default Speed, as the fold drift already did.
+
+### Engine changes
+- **Line engine.** Every line now interpolates BOTH halves' table rows into the line RAM:
+  - the row loop runs 384 reads (drape main + first B cycle 256, fold 128);
+  - the line RAM is 2 × 512 × 16 (slot 00 drape, 01 drape first cycle, 10 fold);
+  - new states: the fold/drape row coordinates (Swap-aware), their mirroring, two row products,
+    the wipe product `|2 s + 1| G`;
+  - the sweep, domes, shadow and upper ramp all use the fold-local mirrored row;
+  - the drape slant uses the unmirrored signed drape row (continuous across the seam).
+- **Pixel path.** Stage 1 compares the per-line threshold with the per-pixel edge f. The result
+  picks the line RAM slot, the phase (A for the fold, B for the drape) and the interpolation fraction,
+  and travels as `p_fold` to gate the ramps, the shadow, the domes, the flames, the arcs and the drape
+  fringe. There is one stripe oscillator. The drape stripes add a per-line offset (slant minus walk)
+  at stage 2.
+- **Fit (first draft 102 % pack-only).** Ablation-led savings with no feature lost:
+  - melt `(L − mean)·g` → `L·g − mean·g`: unsigned 8×6, with mean·g a per-field offset;
+  - weave `(S/4 − 32)·w/4` → `S/4 · w/4`, its constant part per field; one key (the fold half's
+    1.2× pool-key jitter dropped);
+  - phase interpolation in eighths, the upper ramp's y factor in 16 levels;
+  - the pleat drift as a phase accumulator (no wrap logic);
+  - the chevron gain folded into a per-field slope scale;
+  - **RGB → YUV in luma-difference form.** `ys = 19 R + 38 G + 7 B`, `Y = 64 + 271 ys / 4096`,
+    `Cr = 512 + (64 R − ys)·0.039`, `Cb = 512 + (64 B − ys)/32`. Nine adders instead of 23; colours
+    within ~1.5 % of v0.5;
+  - **the output chroma filter's 8-sample U/V delay in one 256 × 16 RAM** (8-bit U & V, write every
+    clock, read at wa − 6, `no_rw_check`): −160 FF-only cells. Chroma is forced neutral on blank pixels,
+    and the two 8-sums reset to neutral after 8 blank samples, so power-up RAM contents cannot leave a
+    lasting colour cast.
+
+  The result: 7292 LC (94.9 %), 27 EBR.
 
 ## Reading of the photo (measured)
 The work is in `.heirloom_work/rb_curtain/` (`notes.md` has every number). The analysis scripts are
@@ -69,9 +139,11 @@ green (6,227,100) 1.8.
 The RTL's largest error is the top-right shadow cell.
 
 ## What it does
+(As at v0.5.0. The phase-2 section above lists what v0.6.0 changes: the seam wipe picks each pixel's
+half, both halves' rows are on every line, and the stripe, melt and colour maths are restructured.)
 1. **Oscillators.** Q16 DDAs per pixel:
    - A: 608 px, started at (T − sw·dx(y) − 260)·incA;
-   - B: 542 px, a sawtooth whose wrap is a cut, started 15 px into its cycle;
+   - B: 542 px, a sawtooth whose wrap is a cut, started 15 px into its cycle (v0.6: drifting with K4);
    - the stripe oscillator: 36 px;
    - the Osc source.
    A counter tracks the pixels since the last cut.
@@ -108,19 +180,19 @@ The RTL's largest error is the top-right shadow cell.
 | Control | Photo element | Function |
 |---|---|---|
 | **P12 Drape** | the folds' sweep (the arcs' curve) | Sweep 0–2×. 0 % = straight hanging folds (vertical arcs ending at different heights); 50 % = the photo; 100 % = whipped folds, arcs near horizontal and cut short. Glided. |
-| K1 Folds | fold tiles: arcs, pools, stripe bands | Fold period 1214–243 px, square law (608 at 512 = the photo, 3.2 folds). Glided. |
+| K1 Seam | the seam between the folds and the drapes | 0 = the photo's hard seam (default). Up: a wipe along the pleat sawtooth (stripe-roughened), half-height K1²/951 lines (69 at 25 %, 276 at 50 %, ~1100 at 100 %). The drapes climb into the folds as pointed hems and the folds hang into the drapes, until the halves interleave in near-vertical strips; each table is mirrored past the seam. Glided. |
 | K2 Pleats | cuts, flames, domes, lower drapes | Pleat period 1092–216 px (542 at 512 = the photo). Glided. |
-| K3 Stripes | magenta striation | Stripe period 72–14 px (36 at 512). |
-| K4 Speed | motion | Bipolar, still in the centre ±8. Positive: folds slide left past the cuts (default 600 ≈ 0.8 px/field, a fold every ~12 s), stripes stream, tears re-seed. |
+| K3 Weave | magenta striation | Depth w 0 / 40 (at 512, the photo) / 159: stripe amplitude, stripe bite into every key edge, chevron depth, drape slant. 0 = flat colour fields; max = hard stripes, chewed edges, deep chevrons, near-horizontal drape stripes. |
+| K4 Speed | motion | Bipolar, still in the centre ±8. Positive: folds slide left past the cuts (default 600 ≈ 0.8 px/field, a fold every ~12 s), the pleats drift right (~0.45 px/field at the default), stripes stream, tears re-seed. |
 | K5 Pools | cyan pools | Pool key level: 0 = none, 512 = the photo, max = pools flood the stripe bands. |
 | K6 Melt | camera / Osc into the patch | 0 = none; default 384; max = the source reshapes the keys (±0.5) and bends the stripes (±2 cycles). |
-| S7 Tear | torn rows and the seam band | On (photo) / Off |
-| S8 Piping | green arcs | On (photo) / Off |
-| S9 Flames | red flames after each cut | On (photo) / Off |
+| S7 Swap | which half hangs on top | Folds Up (photo) / Drapes Up (drapes from the top, folds from line 544) |
+| S8 Piping | green arcs | Arcs (photo) / Ribbons (2.5× wide, full width, ungated: from the top to the seam, across the cuts) |
+| S9 Flames | red flames after each cut, grey domes | Teeth (photo) / Fire (flames 3× longer, domes twice as wide and taller) |
 | S10 Velvet | palette | Red (photo) / Blue (R ↔ B: a blue curtain with gold pools) |
 | S11 Source | camera input | Video (default) / Osc |
 
-Defaults: K1 512, K2 512, K3 512, K4 600, K5 512, K6 384, P12 512, switches at label 0.
+Defaults: K1 0, K2 512, K3 512, K4 600, K5 512, K6 384, P12 512, switches at label 0.
 
 ## Video
 - **Video.** The photo is fully synthetic, so the camera is woven into the patch. The camera luma
@@ -132,8 +204,10 @@ Defaults: K1 512, K2 512, K3 512, K4 600, K5 512, K6 384, P12 512, switches at l
   stays live.
 
 ## Engine
-- **Field sequencer** (vblank zone, one serial multiplier, one serial divider):
-  - incA, incB and incS from K1–K3, square law;
+- **Field sequencer** (vblank zone, one serial multiplier, one serial divider). v0.6 adds: the seam
+  gain G (a division), the weave depth and its chevron/slant/offset terms, the pleat phase and the
+  pixels since the cut at the line start, the melt mean × gain. The original states:
+  - incA, incB and incS from K1–K3, square law (v0.6: incB only);
   - PBpx = 65536/incB and 0.35 PB;
   - the pool levels;
   - the Melt gain;
@@ -150,7 +224,8 @@ Defaults: K1 512, K2 512, K3 512, K4 600, K5 512, K6 384, P12 512, switches at l
   - the y factor, the dome width (an ogive as min of three lines), the shadow tent, and the Osc y
     triangle.
 - **Row loop.** 128 (upper) or 256 (lower) table reads interpolate two rows into a ping-pong line-RAM
-  pair (v[i], v[i+1]), so the pixel path interpolates along the phase with one read.
+  pair (v[i], v[i+1]), so the pixel path interpolates along the phase with one read. (v0.6: all 384
+  reads on every line.)
 - **Pixel path.** 24 stages, one latency in every mode (C_LAT = processing_delay_clks = 24). Every
   ROM/RAM read is re-registered in fabric:
   - line RAMs and x-LUTs: pool colour; orange; upper ramp; shadow; lower ramp; dome darkness;
@@ -158,14 +233,15 @@ Defaults: K1 512, K2 512, K3 512, K4 600, K5 512, K6 384, P12 512, switches at l
   - flame ROM;
   - stripe-wave ROM.
   Domes and shadow are saturating subtracts, so there are no multipliers.
-- **Memories (23 EBR).**
+- **Memories (27 EBR at v0.6).**
   - C_TAB 8192 × 8 (16);
-  - line RAMs 2 × 256 × 16 (`no_rw_check`; read and write are always in opposite banks);
+  - line RAMs 2 × 512 × 16 (`no_rw_check`; read and write are always in opposite banks);
   - wave 256 × 8;
   - flames 128 × 8;
   - x-LUTs 3 × 128 × 16;
-  - arc distance 512 × 8.
-  All are generated by `curtain.py` into `curtain_pkg.vhd`.
+  - arc distance 1024 × 8 (the second half for Ribbons);
+  - the output chroma delay, 256 × 16 (`no_rw_check`, read 6 behind the write).
+  The ROMs are generated by `curtain.py` into `curtain_pkg.vhd`.
 - **Shell.** Cathode/escalator v0.2.0:
   - timing-ID virtual-1080 steps;
   - the vblank zone;
@@ -191,6 +267,32 @@ Defaults: K1 512, K2 512, K3 512, K4 600, K5 512, K6 384, P12 512, switches at l
   as an index, and the arc ROM read a stage late.
 
 ## Status
+- **v0.6.0 built 2026-11-01, router2, NOT flashed.**
+  - 7282–7321 / 7680 LC (94.8–95.3 %, FULL), 27 / 32 EBR, iceunpack OK × 6.
+  - Builder seeds and post-route Fmax: HD Analog s2 74.42 (s1 stalled the router), SD Analog s1
+    68.11, HD HDMI s5 77.51, SD HDMI s1 72.69, HD Dual s2 75.75, SD Dual s1 71.76 MHz.
+  - **Pin-skew screen** (router2; HD HDMI s1–24, HD Analog s1–36, HD Dual s1–16:
+    `.heirloom_work/rb_curtain/skew/screen*.txt`). HD timing is thin: 3 of 22 routed HD HDMI seeds
+    and 9 of 31 HD Analog seeds met 74.25.
+    - HD HDMI **s5** (the builder's, byte-exact): 77.51 MHz, HSYNC +1.90 / data ≤ −0.99 ns.
+    - HD Analog **s22**, hand-installed: 78.59 MHz, HDMI HSYNC −2.87 / data ≤ −1.15 ns. The builder's s2
+      had a data bit at +0.59.
+    - HD Dual **s2** (the builder's, byte-exact): 75.75 MHz, −2.43 / ≤ −1.68 ns.
+  - A plain rebuild gives the builder seeds. To reproduce the shipped HD Analog, route
+    `skew/hd_analog/bitstreams/hd_analog.json` with `RT=router2 skew/route.sh hd_analog 22`. The
+    builder's vmprog is `skew/curtain_v060_builder.vmprog`.
+  - `out/rev_b/ron/heirloom/curtain.vmprog` (513,623 bytes). Presets are placeholders: Photo,
+    Hanging, Whipped, Blue Velvet, Dissolve, Hems, Bonfire, Flat.
+  - The first pack failed on a 135-byte description (max 127). The TOML converter's own check passed
+    it; only the packer catches it.
+  - **Check first on hardware:**
+    - Colour casts or chroma noise point at the new RAM chroma delay, which sims can't verify. Its
+      neutral resync runs every line.
+    - Thin per-line hue lines on HD HDMI would be the pin-skew problem: re-seed.
+  - If a rebuild regresses HD: try `NEXTPNR_ROUTER="--router router1"`. To reclaim LC, the stripe
+    roughening in the seam edge (~25 LC) and the luma delay are the next cuts.
+
+**v0.5.0:**
 - **v0.5.0 built 2026-10-27, router2, NOT flashed.**
 - **Build seeds: HD HDMI = seed 2** and **SD Dual = seed 2** (seed 1 stalled the router on both). The
   other four are seed 1.
@@ -209,6 +311,9 @@ Defaults: K1 512, K2 512, K3 512, K4 600, K5 512, K6 384, P12 512, switches at l
   restructuring.
 
 ## Deviations from the photo
+(v0.6.0 at its defaults adds: colours within ~1.5 % from the luma-difference RGB → YUV, chroma
+filtered at 8 bits, key interpolation in 1.2 px steps, the fold half's pool-key jitter 40/256 instead of
+48/256, and the still frame slowly drifting at the default Speed. The list below is as at v0.5.0.)
 - **One fold tile repeated.** The photo's three copies differ in detail. The dark zone after the
   second cut and the torn red bars at the top right are only approximated, by a right-hand shadow and
   x-ramps.

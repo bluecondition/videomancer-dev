@@ -6,7 +6,7 @@ package curtain_pkg is
     type t_tab is array (0 to 8191) of std_logic_vector(7 downto 0);
     type t_b128 is array (0 to 127) of std_logic_vector(7 downto 0);
     type t_b256 is array (0 to 255) of std_logic_vector(7 downto 0);
-    type t_b512 is array (0 to 511) of std_logic_vector(7 downto 0);
+    type t_b1024 is array (0 to 1023) of std_logic_vector(7 downto 0);
     type t_w128x16 is array (0 to 127) of std_logic_vector(15 downto 0);
     constant C_TAB : t_tab := (
         x"74", x"98", x"BF", x"DF", x"DF", x"DF", x"DF", x"DF", x"DF", x"DF", x"DF", x"DF", x"BD", x"84", x"84", x"A8",
@@ -598,7 +598,7 @@ package curtain_pkg is
         x"41F0", x"43F0", x"45F0", x"45F0", x"47F0", x"47F0", x"49F0", x"4BF0",
         x"4BF0", x"4DF0", x"4DF0", x"4FF0", x"51F0", x"51F0", x"53F0", x"53F0",
         x"55F0", x"57F0", x"57F0", x"59F0", x"59F0", x"5BF0", x"5DF0", x"5DF0");
-    constant C_ARC : t_b512 := (
+    constant C_ARC : t_b1024 := (
         x"04", x"0C", x"14", x"1C", x"24", x"2C", x"34", x"3C", x"44", x"4C", x"54", x"5C", x"64", x"6C", x"74", x"7C",
         x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F",
         x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F",
@@ -630,5 +630,37 @@ package curtain_pkg is
         x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81",
         x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81",
         x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81",
-        x"84", x"8C", x"94", x"9C", x"A4", x"AC", x"B4", x"BC", x"C4", x"CC", x"D4", x"DC", x"E4", x"EC", x"F4", x"FC");
+        x"84", x"8C", x"94", x"9C", x"A4", x"AC", x"B4", x"BC", x"C4", x"CC", x"D4", x"DC", x"E4", x"EC", x"F4", x"FC",
+        x"02", x"05", x"08", x"0B", x"0E", x"12", x"15", x"18", x"1B", x"1E", x"22", x"25", x"28", x"2B", x"2E", x"32",
+        x"35", x"38", x"3B", x"3E", x"42", x"45", x"48", x"4B", x"4E", x"52", x"55", x"58", x"5B", x"5E", x"62", x"65",
+        x"68", x"6B", x"6E", x"72", x"75", x"78", x"7B", x"7E", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F",
+        x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"81", x"81", x"81", x"81", x"81", x"81", x"81",
+        x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"83", x"86", x"89", x"8C", x"90", x"93",
+        x"96", x"99", x"9C", x"A0", x"A3", x"A6", x"A9", x"AC", x"B0", x"B3", x"B6", x"B9", x"BC", x"C0", x"C3", x"C6",
+        x"C9", x"CC", x"D0", x"D3", x"D6", x"D9", x"DC", x"E0", x"E3", x"E6", x"E9", x"EC", x"F0", x"F3", x"F6", x"F9",
+        x"FC", x"00", x"03", x"06", x"09", x"0C", x"10", x"13", x"16", x"19", x"1C", x"20", x"23", x"26", x"29", x"2C",
+        x"30", x"33", x"36", x"39", x"3C", x"40", x"43", x"46", x"49", x"4C", x"50", x"53", x"56", x"59", x"5C", x"60",
+        x"63", x"66", x"69", x"6C", x"70", x"73", x"76", x"79", x"7C", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F",
+        x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"84", x"87", x"8A", x"8E", x"91", x"94", x"97", x"9A", x"9E",
+        x"A1", x"A4", x"A7", x"AA", x"AE", x"B1", x"B4", x"B7", x"BA", x"BE", x"C1", x"C4", x"C7", x"CA", x"CE", x"D1",
+        x"D4", x"D7", x"DA", x"DE", x"E1", x"E4", x"E7", x"EA", x"EE", x"F1", x"F4", x"F7", x"FA", x"FE", x"01", x"04",
+        x"07", x"0A", x"0E", x"11", x"14", x"17", x"1A", x"1E", x"21", x"24", x"27", x"2A", x"2E", x"31", x"34", x"37",
+        x"3A", x"3E", x"41", x"44", x"47", x"4A", x"4E", x"51", x"54", x"57", x"5A", x"5E", x"61", x"64", x"67", x"6A",
+        x"6E", x"71", x"74", x"77", x"7A", x"7E", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F",
+        x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F",
+        x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F",
+        x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F",
+        x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F",
+        x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F",
+        x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F",
+        x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"7F", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81",
+        x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81",
+        x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81",
+        x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81",
+        x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81",
+        x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81",
+        x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81",
+        x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"81", x"82", x"85", x"88", x"8B", x"8E", x"92", x"95", x"98",
+        x"9B", x"9E", x"A2", x"A5", x"A8", x"AB", x"AE", x"B2", x"B5", x"B8", x"BB", x"BE", x"C2", x"C5", x"C8", x"CB",
+        x"CE", x"D2", x"D5", x"D8", x"DB", x"DE", x"E2", x"E5", x"E8", x"EB", x"EE", x"F2", x"F5", x"F8", x"FB", x"FE");
 end package curtain_pkg;

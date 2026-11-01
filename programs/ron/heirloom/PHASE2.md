@@ -37,7 +37,7 @@ hardware headroom left in each one, and the known issues to check.
     filter centre). The tangram agent found and fixed it locally; others probably share it.
   - **Whites read dimmer than the photos.** This is the HD HDMI bar-fix luma cap of ~777, by design.
   - **SD usually crops the sides** of the 16:9 picture. Each SUMMARY says what SD loses.
-  - **curtain:** its sources were tidied after its build, so rebuild before release.
+  - **curtain:** its sources were tidied after its build, so rebuild before release (done: rebuilt at v0.6.0, 2026-11-01).
   - **radiant:** must be built with `SEED=3`. HD HDMI fails placement at seeds 1–2, and the builder does not retry
     placement errors.
   - **goblet:** the "Hourglass" preset also turns the stripes off (unintended).
@@ -177,7 +177,7 @@ Commit the row along with the program's own files.
 | cocoon | built v0.6.0, awaiting HW | v0.6.0 | Ron 10-31 (on v0.5.0): more weave modulation by the arcs, its strength on K4 Glow with the glow; S9 Band -> something more interesting, band permanent; P12 0 % = no band at all .. 100 % = the current 100 % (band fills the screen); the red box (glow window) fades out as K4 goes down, in as it goes up, with the diamond glow. v0.6.0: all four in (arc triangle fed back through a k x tri ROM into the row phase + dash width, k = K4 cube, +-34 at the photo; box: camera below 25 %, black, glow in by 50 %; band 0..247 over P12 0..50 %; S9 Solid / Slats, per-pixel band from the row fold); 96 % LC, 21 EBR, router2; HD seeds from a pin-skew screen: HD HDMI s11 (+1.22 / <= -0.61), HD Analog s8, HD Dual s2; SD Analog s2 |
 | crenel | built v0.6.0, awaiting HW | v0.6.0 | Ron 10-31 (on v0.5.0, before flashing it): K2 Tiles and K4 Drift -> granular element controls; S7 Tear -> something else; give the dome, V, arch and dash elements their own controls. v0.6.0: K2 Dome (R 24..2068 px, a true circle, the photo at 471); K4 Drift per band (each row its own rate and direction, x-3..x3; still in the centre); S7 Swap (pink shapes print the camera, camera areas turn pink); tears always on. V's / arch / dashes get their own drift rates but no knob (all 12 controls taken). 94 % LC, 23 EBR, router1 builder; HD seeds from a pin-skew screen: HD HDMI router2 s17 (+2.00 / <= -1.63), HD Analog r1 s3, HD Dual r1 s7 |
 | crossbeam | meh (v0.6.0) | v0.6.0 | Ron 11-01: "meh", parked. Ron 10-31 (on v0.5.0, sight unseen, free hand): "needs more". K2 / K6 no longer global grid scales; beam more dynamic and adjustable; warp the table lookup and let the beam push the contours; S8 Tear -> something more interesting. v0.6.0: K2 Rows / K6 Columns bipolar per-row height / block scale (left Scatter, right Lens around the beam line, columns bulge); K3 Warp (density dropped) ripples the zebra / ramp lookup; K4 also rolls the bars; K5 Swing (right scissor, left the cross travels up); P12 also pushes the contours (signed, ghost X at 0 %); S8 Tear Still / Slip (rows slide at their own speeds); K1 0.02..0.77. New per-line engine (serial multiplier + line ROM); 91 % LC, 23 EBR, router1 6/6 seed 1 |
-| curtain | not started | | |
+| curtain | built v0.6.0, awaiting HW | v0.6.0 | Ron 10-31 (on v0.5.0, sight unseen): approved the proposed map, plus something with the seam height or a blend that removes the seam (K1 traded for it, his pick). v0.6.0: K1 Seam (wipe along the pleat sawtooth, stripe-roughened, half-height K1^2/951 lines; each half's table mirrored past the seam; both halves' rows on every line); K3 Weave (stripe amplitude + bite + chevron depth + drape slant, 0 = flat fields); K4 also drifts the pleats right; S7 Swap (drapes up), S8 Arcs / Ribbons (2.5x, ungated), S9 Teeth / Fire (3x flames, big domes); defaults = v0.5. Fit from 102 % pack: unsigned melt/weave multiplies, luma-difference RGB->YUV, chroma filter delay in RAM; 95 % LC, 27 EBR, router2; HD HDMI s5 (+1.90 / <= -0.99), HD Analog s22 hand-installed (-2.87 / <= -1.15), HD Dual s2 |
 | cusp | not started | | |
 | cutout | not started | | |
 | escalator | not started | | |
@@ -248,7 +248,7 @@ Commit the row along with the program's own files.
 | [cocoon](cocoon/SUMMARY.md) | v0.6.0 | 96 % (**FULL**) | 21 | router2 | HD HDMI s11 + HD Analog s8 + HD Dual s2 hand-installed; SD Analog seed 2 | oscillator/field |
 | [crenel](crenel/SUMMARY.md) | v0.6.0 | 94 % (tight) | 23 | router1 + router2 | HD HDMI r2 s17, HD Analog r1 s3, HD Dual r1 s7 hand-installed | oscillator/field |
 | [crossbeam](crossbeam/SUMMARY.md) | v0.6.0 | 91 % (room) | 23 | router1 | 6/6 seed 1 | measured field |
-| [curtain](curtain/SUMMARY.md) | v0.5.0 | 94 % (tight) | 23 | router2 | HD HDMI + SD Dual seed 2 | oscillator/field |
+| [curtain](curtain/SUMMARY.md) | v0.6.0 | 95 % (**FULL**) | 27 | router2 | HD Analog s22 hand-installed; HD HDMI s5, HD Dual s2 | oscillator/field |
 | [cusp](cusp/SUMMARY.md) | v0.5.0 | 94 % (tight) | 11 | router2 | 6/6 seed 1 | oscillator/field |
 | [cutout](cutout/SUMMARY.md) | v0.5.0 | 97 % (**FULL**) | 24 | router1 | 6/6 seed 1 | collage |
 | [escalator](escalator/SUMMARY.md) | v0.5.0 | 90 % (room) | 7 | router2 | 6/6 seed 1 | oscillator/field |
