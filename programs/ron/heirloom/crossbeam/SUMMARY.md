@@ -1,6 +1,6 @@
 # Crossbeam — a glowing cross beam keyed over torn colour bars
 
-**v0.6.0 (2026-11-01, phase 2): built, NOT flashed** (see [Phase 2](#phase-2-v060)). v0.5.0 (2026-10-27) rebuilt it from the photo.
+**v0.6.0 (2026-11-01, phase 2): built. Ron's verdict 2026-11-01: "meh", parked** (see [Phase 2](#phase-2-v060)). v0.5.0 (2026-10-27) rebuilt it from the photo.
 Photo: `photos/WIN_20230527_01_43_26_Pro.jpg`. The v0.1 version, "soft cyan X over hashed Mondrian blocks", was judged too abstract.
 The picture is three layers:
 - a grid of colour bars;
