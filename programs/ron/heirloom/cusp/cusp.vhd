@@ -1,7 +1,9 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Cusp v0.5.0 -- Heirloom #17, rebuilt from the photo WIN_20230315_00_30_57.
+-- Cusp v0.6.0 -- Heirloom #17, rebuilt from the photo WIN_20230315_00_30_57;
+-- phase 2: the two row types are separate modules (own cusp rate, height,
+-- drift and pointing), the fine stripes scroll and curl, the rainbow cycles.
 --
 -- The photo: rows of fine horizontal stripes (green / navy / blue above and
 -- below black cores; cyan / blue / navy in the orange rows) cut by repeating
@@ -23,15 +25,22 @@
 -- rings (the X's).  All fitted to the photo (.heirloom_work/rb_cusp; tables in
 -- cusp.py).
 --
---   K1  Cusps    cusps across (key-oscillator frequency) x0.4 .. x2.5
---   K2  Rows     rows down the frame x0.35 .. x2.8 (2.08 rows = the photo)
---   K3  Fish     how fast the fish grow across the frame, 0 .. 2x
---   K4  Speed    the key oscillator drifts (cusps stream right / left), bipolar
+--   K1  Cusps    cusps across the black-core rows x0.3 .. x2.9 (the orange
+--                rows keep the photo's, so the two row types detune)
+--   K2  Split    orange-row height: 0 = none, centre = the photo (167 of 520
+--                lines), max = 430 lines (the black-core rows a sliver)
+--   K3  Fish     how fast the fish grow across the frame, 0 .. 4x
+--   K4  Speed    bipolar: the black-core rows stream one way, the orange rows
+--                the other way; the fine stripes scroll into (out of) the
+--                cores; the rainbow swings round its colours (all from the
+--                one drift accumulator)
 --   K5  Stripes  density of the fine stripes x0.4 .. x2.5
---   K6  Bend     how far the source (camera luma / Osc) bends the cusps
+--   K6  Bend     how far the source (camera luma / Osc) bends the cusps, up
+--                to ~1 cycle; above 30 % the key also curls the fine stripes
+--                into chevrons around the cores
 --   S7  Flip     the key ramp runs backwards: arrowheads point left
---   S8  Rows     Alternate (the photo) / Same: every row a black-core row
---   S9  Glow     Soft (the photo) / Hard: key edges without glow, rims or X's
+--   S8  Rows     Alternate (the photo) / Opposed: the orange rows point left
+--   S9  Core     Black (the photo) / Rainbow: the cores glow orange-to-pink
 --   S10 Palette  Photo / Swap: red and blue exchanged (amber / orange)
 --   S11 Source   Video / Osc
 --   P12 POINT    the vertical modulation: 0 = flat bars, 47 % = the photo,
@@ -68,7 +77,7 @@ architecture cusp of program_top is
     constant C_HI0A : integer := 3193;
     constant C_HI0B : integer := 3039;
     constant C_CH0A : integer := 609;      -- 2 g 2^32 (per virtual px^2), sign below
-    constant C_CH0B : integer := 498;      -- negative
+    constant C_CH0B : integer := 498;      -- negative (the orange rows keep the photo rate: f_chb is a class constant)
     constant C_F1A  : integer := 1772;     -- Q.24 per virtual px, negative
     constant C_F1B  : integer := 359;
     constant C_R1A  : integer := 11161;
@@ -77,8 +86,7 @@ architecture cusp of program_top is
     constant C_UH   : integer := 901;      -- hold-strip tint phase (0.22)
     constant C_UC   : integer := 1434;     -- tint centre (0.35)
     constant C_PT0  : integer := 8372463;  -- 259.5/520 * 2^24
-    constant C_ZLO  : integer := -5468565; -- A zone: [-169.5, 183.5) lines about the A centre
-    constant C_ZHI  : integer := 5920263;
+    constant C_BC   : integer := 8614457;  -- B-zone centre, 267 lines from the A centre (the photo: B = [183.5, 350.5))
 
     -- timing classes: kx (Q.12 virtual px per px), rkx = 4096^2/kx, ys (2^24 per row period, per line)
     function f_kx(t : std_logic_vector(3 downto 0)) return unsigned is
@@ -124,6 +132,15 @@ architecture cusp of program_top is
         if k(i + 1) = '1' then b := shift_left(resize(d, 20), i + 1); else b := (others => '0'); end if;
         return a + b;
     end function;
+    -- core-table block for ops 6 / 7 / 8 (red / green / blue)
+    function v_k6(op : unsigned(3 downto 0)) return unsigned is
+    begin
+        case to_integer(op) is
+            when 6      => return "00";
+            when 7      => return "01";
+            when others => return "10";
+        end case;
+    end function;
     -- soft-key step: d * (2^-a + 2^-b), one shift less when fast
     function f_st(d : signed(13 downto 0); a, b : integer; fast : std_logic) return signed is
     begin
@@ -167,9 +184,13 @@ architecture cusp of program_top is
     signal m_l  : unsigned(17 downto 0) := (others => '0');
 
     -- per-field values
-    signal f_m1, f_m2, f_m5, f_m12 : unsigned(9 downto 0) := to_unsigned(256, 10);   -- Q.8
+    signal f_m1, f_m5, f_m12 : unsigned(9 downto 0) := to_unsigned(256, 10);   -- Q.8
     signal f_m3   : unsigned(9 downto 0) := to_unsigned(256, 10);
-    signal f_m6   : unsigned(7 downto 0) := to_unsigned(52, 8);
+    signal f_m6   : unsigned(7 downto 0) := to_unsigned(13, 8);    -- bend factor (13 = the default)
+    signal f_kb   : unsigned(7 downto 0) := (others => '0');       -- stripe curl
+    signal f_hh, f_hh2, f_zoff : unsigned(23 downto 0) := (others => '0');   -- B-zone half height, 2x, offset
+    signal f_incsb : unsigned(11 downto 0) := to_unsigned(256, 12);  -- B rows: photo rate x kx, Q.8
+    signal f_hue  : unsigned(7 downto 0) := (others => '0');
     signal f_sq   : unsigned(17 downto 0) := (others => '0');
     signal f_sp   : unsigned(26 downto 0) := (others => '0');
     signal f_incs : unsigned(11 downto 0) := to_unsigned(256, 12);    -- m1 * kx, Q.8
@@ -178,11 +199,10 @@ architecture cusp of program_top is
     signal f_f1a, f_f1b : signed(17 downto 0) := (others => '0');
     signal f_r1ak, f_r1bk : unsigned(17 downto 0) := (others => '0');
     signal f_r1a, f_r1b : unsigned(19 downto 0) := (others => '0');
-    signal f_step : unsigned(23 downto 0) := to_unsigned(32264, 24);
-    signal f_ptop : unsigned(23 downto 0) := (others => '0');
-    signal f_dr   : unsigned(31 downto 0) := (others => '0');
+    -- drift: black-core rows bits 31..0, orange rows not (31..0); stripe scroll tri(31..22); rainbow LFO tri(32..24)
+    signal f_dr   : unsigned(32 downto 0) := (others => '0');
     signal f_neg  : std_logic := '0';
-    signal f_flip, f_same, f_hard, f_swap, f_osc : std_logic := '0';
+    signal f_flip, f_opp, f_core, f_swap, f_osc : std_logic := '0';
     signal f_ot   : unsigned(15 downto 0) := (others => '0');
     signal f_ot2  : unsigned(15 downto 0) := (others => '0');
 
@@ -207,7 +227,7 @@ architecture cusp of program_top is
     signal le_st  : unsigned(4 downto 0) := (others => '0');
     signal le_op  : unsigned(3 downto 0) := (others => '0');
     signal le_P   : unsigned(23 downto 0) := (others => '0');
-    signal le_dA, le_dz : unsigned(23 downto 0) := (others => '0');
+    signal le_dA, le_dz, le_zv : unsigned(23 downto 0) := (others => '0');
     signal le_zA  : std_logic := '1';
     signal le_k   : unsigned(5 downto 0) := (others => '0');
     signal le_f   : unsigned(7 downto 0) := (others => '0');
@@ -221,13 +241,14 @@ architecture cusp of program_top is
     signal n_hi   : signed(15 downto 0) := (others => '0');
     signal n_xs   : unsigned(10 downto 0) := (others => '0');
     signal n_sr, n_sb : signed(12 downto 0) := (others => '0');
-    signal n_sg   : signed(12 downto 0) := (others => '0');
+    signal n_sg   : signed(13 downto 0) := (others => '0');
     signal n_dz   : unsigned(9 downto 0) := (others => '0');
     signal n_zA   : std_logic := '1';
     signal n_oy   : unsigned(15 downto 0) := (others => '0');
     signal l_hi   : signed(15 downto 0) := (others => '0');
     signal l_xs   : unsigned(10 downto 0) := (others => '0');
-    signal l_sr, l_sb, l_sg : signed(12 downto 0) := (others => '0');
+    signal l_sr, l_sb : signed(12 downto 0) := (others => '0');
+    signal l_sg   : signed(13 downto 0) := (others => '0');
     signal l_dz   : unsigned(9 downto 0) := (others => '0');
     signal l_zA   : std_logic := '1';
     signal l_oy   : unsigned(15 downto 0) := (others => '0');
@@ -235,7 +256,8 @@ architecture cusp of program_top is
     -- beam (DDAs)
     signal b_phi, b_inc : unsigned(31 downto 0) := (others => '0');
     signal b_ch   : signed(17 downto 0) := (others => '0');
-    signal b_f, b_r : signed(27 downto 0) := (others => '0');
+    signal b_f    : signed(27 downto 0) := (others => '0');
+    signal b_r    : signed(29 downto 0) := (others => '0');   -- Fish to 4x: the B ramp passes 8 units
     signal b_f1   : signed(17 downto 0) := (others => '0');
     signal b_r1   : unsigned(19 downto 0) := (others => '0');
     signal b_x    : unsigned(11 downto 0) := (others => '0');
@@ -266,13 +288,15 @@ architecture cusp of program_top is
     type t_u6a is array (natural range <>) of unsigned(5 downto 0);
     signal pu : t_u6a(6 to 13) := (others => (others => '0'));
     signal pxs : t_sla(6 to 13) := (others => '0');
-    signal pk  : t_sla(6 to 14) := (others => '1');
+    signal pk  : t_sla(6 to 12) := (others => '1');
     signal p13_pr : signed(14 downto 0) := (others => '0');
     signal p13_lr : signed(10 downto 0) := (others => '0');
     signal p13_lg : unsigned(9 downto 0) := (others => '0');
     signal p13_lb : unsigned(8 downto 0) := (others => '0');
+    signal p13_sb : unsigned(13 downto 0) := (others => '0');
     signal p14_lr, p14_lb : signed(12 downto 0) := (others => '0');
     signal p14_lg : signed(12 downto 0) := (others => '0');
+    signal p14_sg, p15_sg, p16_sg : signed(13 downto 0) := (others => '0');
     signal p15_dr, p15_dg, p15_db : signed(13 downto 0) := (others => '0');
     signal k1r, k2r, k1g, k2g, k1b, k2b : signed(13 downto 0) := to_signed(4095, 14);
     signal p15_kr, p15_kg, p15_kb : unsigned(6 downto 0) := to_unsigned(64, 7);
@@ -372,6 +396,7 @@ begin
         variable v_s  : unsigned(24 downto 0);
         variable v_pr : unsigned(41 downto 0);
         variable v_g  : unsigned(9 downto 0);
+        variable v_t8 : unsigned(7 downto 0);
     begin
         if rising_edge(clk) then
             t_kx  <= f_kx(registers_in(8)(3 downto 0));
@@ -382,11 +407,15 @@ begin
             case to_integer(unsigned(registers_in(8)(3 downto 0))) is
                 when 0 | 4 | 8 | 12 => f_f1a <= to_signed(-4725, 18); f_f1b <= to_signed(957, 18);
                                        f_r1ak <= to_unsigned(29763, 18); f_r1bk <= to_unsigned(90741, 18);
+                                       f_chb <= to_signed(-3534, 18);
                 when 5 | 6 | 14     => f_f1a <= to_signed(-2658, 18); f_f1b <= to_signed(538, 18);
                                        f_r1ak <= to_unsigned(16741, 18); f_r1bk <= to_unsigned(51040, 18);
+                                       f_chb <= to_signed(-1120, 18);
                 when others         => f_f1a <= to_signed(-1772, 18); f_f1b <= to_signed(359, 18);
                                        f_r1ak <= to_unsigned(11161, 18); f_r1bk <= to_unsigned(34027, 18);
+                                       f_chb <= to_signed(-498, 18);
             end case;
+            f_incsb <= resize(t_kx(13 downto 4), 12);   -- the orange rows keep the photo's cusp rate
 
             -- vblank zone: no avid for 1024 clocks
             if data_in.avid = '1' then
@@ -421,13 +450,13 @@ begin
                 elsif v_x < -16 then s_s4 <= '1'; v_u := unsigned(-v_x) - 16; s_a4 <= v_u(8 downto 0);
                 else s_s4 <= '0'; s_a4 <= (others => '0'); end if;
                 f_flip <= registers_in(6)(0);
-                f_same <= registers_in(6)(1);
-                f_hard <= registers_in(6)(2);
+                f_opp  <= registers_in(6)(1);
+                f_core <= registers_in(6)(2);
                 f_swap <= registers_in(6)(3);
                 f_osc  <= registers_in(6)(4);
                 -- drift (last field's speed)
-                if f_neg = '1' then f_dr <= f_dr + resize(f_sp, 32);
-                else f_dr <= f_dr - resize(f_sp, 32); end if;
+                if f_neg = '1' then f_dr <= f_dr + resize(f_sp, 33);
+                else f_dr <= f_dr - resize(f_sp, 33); end if;
                 f_neg <= s_s4;
                 f_ot  <= f_ot + 197;
                 f_ot2 <= f_ot2 + 131;
@@ -479,31 +508,44 @@ begin
             end loop;
             if q_ld = '1' then
                 m_h <= (others => '0'); m_l <= (others => '0');
+                -- per-field bases ride in the multiplier: m_h = X adds X at v_pr bit 0
                 case to_integer(q_p) is
                     -- knob curves (two segments about the centre, Q.8)
                     when 1  => v_g := s_g(0)(12 downto 3);
-                               if v_g < 512 then m_a <= resize(v_g, 24); m_b <= to_unsigned(154, 18);
-                               else m_a <= resize(v_g - 512, 24); m_b <= to_unsigned(384, 18); end if;
+                               if v_g < 512 then m_a <= resize(v_g, 24); m_b <= to_unsigned(179, 18); m_h <= to_unsigned(77 * 512, 24);
+                               else m_a <= resize(v_g - 512, 24); m_b <= to_unsigned(480, 18); m_h <= to_unsigned(256 * 512, 24); end if;
+                    -- K2 Split: B-zone half height, 0 .. 83.5 .. 215 lines (2^24 per 520 lines)
                     when 2  => v_g := s_g(1)(12 downto 3);
-                               if v_g < 512 then m_a <= resize(v_g, 24); m_b <= to_unsigned(166, 18);
-                               else m_a <= resize(v_g - 512, 24); m_b <= to_unsigned(461, 18); end if;
+                               if v_g < 512 then m_a <= resize(v_g, 24); m_b <= to_unsigned(5262, 18);
+                               else m_a <= resize(v_g - 512, 24); m_b <= to_unsigned(8303, 18); m_h <= to_unsigned(2694144, 24); end if;
                     when 3  => v_g := s_g(3)(12 downto 3);
-                               if v_g < 512 then m_a <= resize(v_g, 24); m_b <= to_unsigned(154, 18);
-                               else m_a <= resize(v_g - 512, 24); m_b <= to_unsigned(384, 18); end if;
+                               if v_g < 512 then m_a <= resize(v_g, 24); m_b <= to_unsigned(154, 18); m_h <= to_unsigned(102 * 512, 24);
+                               else m_a <= resize(v_g - 512, 24); m_b <= to_unsigned(384, 18); m_h <= to_unsigned(256 * 512, 24); end if;
                     when 4  => v_g := s_g(5)(12 downto 3);
                                if v_g < 481 then m_a <= resize(v_g, 24); m_b <= to_unsigned(545, 18);
-                               else m_a <= resize(v_g - 481, 24); m_b <= to_unsigned(1252, 18); end if;
-                    when 5  => m_a <= resize(s_g(4)(12 downto 3), 24); m_b <= to_unsigned(179, 18);
+                               else m_a <= resize(v_g - 481, 24); m_b <= to_unsigned(1252, 18); m_h <= to_unsigned(256 * 1024, 24); end if;
+                    -- K6 Bend factor: 0 .. 13 (30 %, the photo default) .. 159
+                    when 5  => v_g := s_g(4)(12 downto 3);
+                               if v_g < 300 then m_a <= resize(v_g, 24); m_b <= to_unsigned(45, 18);
+                               else m_a <= resize(v_g - 300, 24); m_b <= to_unsigned(208, 18); m_h <= to_unsigned(13 * 1024, 24); end if;
                     when 6  => m_a <= resize(s_a4, 24);  m_b <= resize(s_a4, 18);
                     when 7  => m_a <= resize(f_sq, 24);  m_b <= to_unsigned(349, 18);
                     when 8  => m_a <= resize(f_m1, 24);  m_b <= resize(t_kx, 18);
                     when 9  => m_a <= resize(f_incs, 24); m_b <= resize(f_incs, 18);
                     when 10 => m_a <= to_unsigned(C_CH0A, 24); m_b <= f_inc2;
-                    when 11 => m_a <= to_unsigned(C_CH0B, 24); m_b <= f_inc2;
+                    -- K6 above 30 %: stripe curl 0 .. 255
+                    when 11 => v_g := s_g(4)(12 downto 3);
+                               if v_g > 300 then m_a <= resize(v_g - 300, 24); else m_a <= (others => '0'); end if;
+                               m_b <= to_unsigned(362, 18);
+                    -- K3 Fish: 0 .. 1 (centre) .. 4 (Q.8)
+                    when 12 => v_g := s_g(2)(12 downto 3);
+                               if v_g < 512 then m_a <= resize(v_g, 24); m_b <= to_unsigned(256, 18);
+                               else m_a <= resize(v_g - 512, 24); m_b <= to_unsigned(767, 18); m_h <= to_unsigned(256 * 512, 24); end if;
+                    -- rainbow swing: (Speed^2 / 1024) x triangle LFO
+                    when 13 => if f_dr(32) = '1' then v_t8 := not f_dr(31 downto 24); else v_t8 := f_dr(31 downto 24); end if;
+                               m_a <= resize(f_sq(17 downto 10), 24); m_b <= resize(v_t8, 18);
                     when 15 => m_a <= resize(f_r1ak, 24);      m_b <= resize(f_m3, 18);
                     when 17 => m_a <= resize(f_r1bk, 24);      m_b <= resize(f_m3, 18);
-                    when 18 => m_a <= resize(t_ys, 24);        m_b <= resize(f_m2, 18);
-                    when 19 => m_a <= to_unsigned(C_PT0, 24);  m_b <= resize(f_m2, 18);
                     when others => m_a <= (others => '0');     m_b <= (others => '0');
                 end case;
             end if;
@@ -515,33 +557,35 @@ begin
             end if;
             v_pr := m_h & m_l;
             if q_wr(1) = '1' then
-                if s_g(0)(12 downto 3) < 512 then f_m1 <= to_unsigned(102, 10) + resize(v_pr(18 downto 9), 10);
-                else f_m1 <= to_unsigned(256, 10) + resize(v_pr(18 downto 9), 10); end if;
+                f_m1 <= v_pr(18 downto 9);
             end if;
             if q_wr(2) = '1' then
-                if s_g(1)(12 downto 3) < 512 then f_m2 <= to_unsigned(90, 10) + resize(v_pr(18 downto 9), 10);
-                else f_m2 <= to_unsigned(256, 10) + resize(v_pr(18 downto 9), 10); end if;
-                f_m3 <= resize(s_g(2)(12 downto 4), 10);
+                f_hh <= v_pr(23 downto 0);
             end if;
             if q_wr(3) = '1' then
-                if s_g(3)(12 downto 3) < 512 then f_m5 <= to_unsigned(102, 10) + resize(v_pr(18 downto 9), 10);
-                else f_m5 <= to_unsigned(256, 10) + resize(v_pr(18 downto 9), 10); end if;
+                f_m5 <= v_pr(18 downto 9);
+                -- B zone: (P - C_BC) in [-hh, hh)  <=>  (P + hh - C_BC) mod 2^24 < 2 hh
+                f_zoff <= f_hh - to_unsigned(C_BC, 24);
+                f_hh2  <= shift_left(f_hh, 1);
             end if;
             if q_wr(4) = '1' then
-                if s_g(5)(12 downto 3) < 481 then f_m12 <= resize(v_pr(19 downto 10), 10);
-                else f_m12 <= to_unsigned(256, 10) + resize(v_pr(19 downto 10), 10); end if;
+                f_m12 <= v_pr(19 downto 10);
             end if;
-            if q_wr(5) = '1' then f_m6 <= v_pr(17 downto 10); end if;
+            if q_wr(5) = '1' then
+                f_m6 <= v_pr(17 downto 10);
+            end if;
             if q_wr(6) = '1' then f_sq <= v_pr(17 downto 0); end if;
             if q_wr(7) = '1' then f_sp <= v_pr(26 downto 0); end if;
             if q_wr(8) = '1' then f_incs <= v_pr(23 downto 12); end if;
             if q_wr(9) = '1' then f_inc2 <= v_pr(21 downto 4); end if;
             if q_wr(10) = '1' then f_cha <= signed(v_pr(29 downto 12)); end if;
-            if q_wr(11) = '1' then f_chb <= -signed(v_pr(29 downto 12)); end if;
+            if q_wr(11) = '1' then f_kb <= v_pr(17 downto 10); end if;
+            if q_wr(12) = '1' then
+                f_m3 <= v_pr(18 downto 9);
+            end if;
+            if q_wr(13) = '1' then f_hue <= v_pr(15 downto 8); end if;
             if q_wr(15) = '1' then f_r1a <= v_pr(27 downto 8); end if;
             if q_wr(17) = '1' then f_r1b <= v_pr(27 downto 8); end if;
-            if q_wr(18) = '1' then f_step <= v_pr(31 downto 8); end if;
-            if q_wr(19) = '1' then f_ptop <= to_unsigned(0, 24) - v_pr(31 downto 8); end if;
 
             s_gav_sr(0) <= g_avid;
             for i in 1 to C_LAT - 1 loop
@@ -596,13 +640,14 @@ begin
     g_start <= '1' when (g_sel = '0' and g_rsr(1) = '1') or (g_sel = '1' and g_rsr(2) = '1') else '0';
 
     ---------------------------------------------------------------------------
-    -- Per-line engine.  Kicked at the source avid rise (and for line 0 late in
-    -- the vblank zone); computes the NEXT line: line phase, zone, distance,
+    -- Per-line engine.  Kicked at g_start (and for line 0 late in the vblank
+    -- zone); computes the NEXT line: line phase, zone (K2 Split), distance,
     -- then nine piecewise-linear table reads (two knots, the interpolation
     -- and a control scaling on one serial multiplier each).
     --   op 0 PMD -> phase start   1 FQD -> phase increment   2 FLD -> floor
     --   op 3 RAD -> ramp start    4 HID -> ceiling           5 XS -> sync strip
-    --   op 6 aSR  7 aSG (x Stripes, + B offset)  8 aSB  (S layer over d_A)
+    --   op 6 aSR  7 aSG (x Stripes, + B offset, + scroll)  8 aSB  (S layer
+    --   over d_A; S9 Core Rainbow reads table 14 on the core lines)
     ---------------------------------------------------------------------------
     p_line : process(clk)
         variable v_qs  : signed(23 downto 0);
@@ -613,12 +658,13 @@ begin
         variable v_ph  : signed(27 downto 0);
         variable v_w   : signed(17 downto 0);
         variable v_c   : integer range -8192 to 8191;
-        variable v_c32 : unsigned(31 downto 0);
+        variable v_c32, v_d32 : unsigned(31 downto 0);
         variable v_c18 : signed(17 downto 0);
+        variable v_sc  : unsigned(8 downto 0);
     begin
         if rising_edge(clk) then
             if s_zone = '1' and s_zc = 680 then
-                le_P <= f_ptop; n_oy <= to_unsigned(0, 16) - f_ot2;
+                le_P <= to_unsigned(16777216 - C_PT0, 24); n_oy <= to_unsigned(0, 16) - f_ot2;
             end if;
 
             if s_zone = '1' and s_zc = 699 then le_kick <= '1'; else le_kick <= '0'; end if;
@@ -629,28 +675,27 @@ begin
                 l_hi <= n_hi;
                 l_xs <= n_xs; l_sr <= n_sr; l_sg <= n_sg; l_sb <= n_sb; l_dz <= n_dz; l_zA <= n_zA;
                 l_oy <= n_oy;
-                n_oy <= n_oy + resize(t_ys(17 downto 9), 16);
+                n_oy <= n_oy + resize(t_ys(17 downto 8), 16);
                 le_st <= to_unsigned(1, 5);
             else
                 case to_integer(le_st) is
                     when 1 =>
-                        le_P <= le_P + f_step;
+                        le_P <= le_P + resize(t_ys, 24);
                         le_st <= le_st + 1;
                     when 2 =>
                         v_qs := signed(le_P);
                         if v_qs(23) = '1' then le_dA <= unsigned(-v_qs); else le_dA <= le_P; end if;
-                        if (v_qs >= to_signed(C_ZLO, 24) and v_qs < to_signed(C_ZHI, 24)) or f_same = '1' then
-                            le_zA <= '1';
-                        else
-                            le_zA <= '0';
-                        end if;
+                        le_zv <= le_P + f_zoff;
                         le_st <= le_st + 1;
                     when 3 =>
+                        if le_zv < f_hh2 then le_zA <= '0'; else le_zA <= '1'; end if;
+                        le_st <= le_st + 1;
+                    when 4 =>
                         if le_zA = '1' then le_dz <= le_dA; else le_dz <= to_unsigned(8388608, 24) - le_dA; end if;
                         le_op <= (others => '0');
                         le_st <= le_st + 1;
                     -- table op: knots, interpolation, scaling
-                    when 4 =>
+                    when 5 =>
                         case to_integer(le_op) is
                             when 0 => v_t := "000" & not le_zA;
                             when 1 => v_t := "001" & not le_zA;
@@ -664,30 +709,34 @@ begin
                         end case;
                         if le_op >= 6 then
                             v_k := le_dA(23 downto 18); v_f := le_dA(17 downto 10);
+                            -- Core Rainbow: knots 0..9 of the core lines from table 14 (red 0.., green 16.., blue 32..)
+                            if f_core = '1' and le_dA(23 downto 18) < 10 then
+                                v_t := "1110"; v_k := v_k6(le_op) & le_dA(21 downto 18);
+                            end if;
                         else
                             v_k := le_dz(23 downto 18); v_f := le_dz(17 downto 10);
                         end if;
                         le_k <= v_k; le_f <= v_f;
                         r_ka <= v_t & v_k;
                         le_st <= le_st + 1;
-                    when 5 =>
+                    when 6 =>
                         r_ka <= r_ka + 1;
                         le_st <= le_st + 1;
-                    when 6 =>
-                        le_st <= le_st + 1;
                     when 7 =>
-                        le_v0 <= resize(signed(r_kq2), 17);
                         le_st <= le_st + 1;
                     when 8 =>
+                        le_v0 <= resize(signed(r_kq2), 17);
+                        le_st <= le_st + 1;
+                    when 9 =>
                         lm_a <= resize(resize(signed(r_kq2), 17) - le_v0, 28);
                         lm_b <= resize(le_f, 16); lm_n <= to_unsigned(8, 5); lm_acc <= (others => '0');
                         le_st <= le_st + 1;
-                    when 9 | 11 | 13 =>
+                    when 10 | 12 | 14 =>
                         if lm_b(0) = '1' then lm_acc <= lm_acc + lm_a; end if;
                         lm_a <= shift_left(lm_a, 1); lm_b <= '0' & lm_b(15 downto 1);
                         if lm_n = 1 then le_st <= le_st + 1; end if;
                         lm_n <= lm_n - 1;
-                    when 10 =>
+                    when 11 =>
                         -- interpolated value; second multiply
                         v_x := le_v0 + resize(shift_right(lm_acc, 8), 17);
                         le_v <= v_x;
@@ -697,7 +746,8 @@ begin
                                 -- (FQ0 >> 8) + FQD/4  times INCS
                                 if le_zA = '1' then v_w := signed(resize(C_FQ0A, 18)); else v_w := signed(resize(C_FQ0B, 18)); end if;
                                 v_w := v_w + resize(shift_right(v_x, 2), 18);
-                                lm_a <= resize(v_w, 28); lm_b <= resize(f_incs, 16); lm_n <= to_unsigned(12, 5);
+                                lm_a <= resize(v_w, 28); lm_n <= to_unsigned(12, 5);
+                                if le_zA = '1' then lm_b <= resize(f_incs, 16); else lm_b <= resize(f_incsb, 16); end if;
                             when 5 =>
                                 lm_a <= resize(v_x - C_XS0, 28); lm_b <= resize(f_m12, 16); lm_n <= to_unsigned(10, 5);
                             when 6 | 8 =>
@@ -708,57 +758,62 @@ begin
                                 lm_a <= resize(v_x, 28); lm_b <= resize(f_m12, 16); lm_n <= to_unsigned(10, 5);
                         end case;
                         le_st <= le_st + 1;
-                    when 12 =>
+                    when 13 =>
                         -- store (or third multiply for XS)
                         lm_acc <= (others => '0');
                         case to_integer(le_op) is
                             when 0 =>
                                 v_ph := shift_right(lm_acc, 8);
-                                if le_zA = '1' then v_c32 := C_PM0A; else v_c32 := C_PM0B; end if;
-                                n_phi <= (v_c32 + f_dr) + unsigned(v_ph(15 downto 0) & x"0000");
-                                le_st <= to_unsigned(15, 5);
+                                if le_zA = '1' then v_c32 := C_PM0A; v_d32 := f_dr(31 downto 0);
+                                else v_c32 := C_PM0B; v_d32 := not f_dr(31 downto 0); end if;
+                                n_phi <= (v_c32 + v_d32) + unsigned(v_ph(15 downto 0) & x"0000");
+                                le_st <= to_unsigned(16, 5);
                             when 1 =>
                                 if le_zA = '1' then v_c18 := f_cha; else v_c18 := f_chb; end if;
                                 n_inc <= unsigned(resize(lm_acc, 32) + resize(shift_right(v_c18, 1), 32));
-                                le_st <= to_unsigned(15, 5);
+                                le_st <= to_unsigned(16, 5);
                             when 2 =>
                                 if le_zA = '1' then v_c := C_FL0A; else v_c := C_FL0B; end if;
                                 n_f0 <= shift_left(resize(shift_right(lm_acc, 8), 28) + v_c, 12);
-                                le_st <= to_unsigned(15, 5);
+                                le_st <= to_unsigned(16, 5);
                             when 3 =>
                                 if le_zA = '1' then v_c := C_RA0A; else v_c := C_RA0B; end if;
                                 n_r0 <= shift_left(resize(shift_right(lm_acc, 8), 28) + v_c, 12);
-                                le_st <= to_unsigned(15, 5);
+                                le_st <= to_unsigned(16, 5);
                             when 4 =>
                                 if le_zA = '1' then v_c := C_HI0A; else v_c := C_HI0B; end if;
                                 n_hi <= resize(shift_right(lm_acc, 8), 16) + v_c;
-                                le_st <= to_unsigned(15, 5);
+                                le_st <= to_unsigned(16, 5);
                             when 5 =>
                                 lm_a <= resize(shift_right(lm_acc, 8), 28) + C_XS0;
                                 lm_b <= resize(t_rkx, 16); lm_n <= to_unsigned(13, 5);
                                 le_st <= le_st + 1;
                             when 6 =>
                                 n_sr <= resize(shift_right(lm_acc, 4), 13);
-                                le_st <= to_unsigned(15, 5);
+                                le_st <= to_unsigned(16, 5);
                             when 7 =>
-                                if le_zA = '1' then n_sg <= resize(shift_right(lm_acc, 8), 13);
-                                else n_sg <= resize(shift_right(lm_acc, 8), 13) - 512; end if;
-                                le_st <= to_unsigned(15, 5);
+                                if le_zA = '1' then n_sg <= resize(shift_right(lm_acc, 8), 14);
+                                else n_sg <= resize(shift_right(lm_acc, 8), 14) - 512; end if;
+                                le_st <= to_unsigned(16, 5);
                             when others =>
                                 n_sb <= resize(shift_right(lm_acc, 4), 13);
-                                le_st <= to_unsigned(15, 5);
+                                le_st <= to_unsigned(16, 5);
                         end case;
-                    when 14 =>
+                    when 15 =>
                         if le_zA = '1' then n_xs <= unsigned(lm_acc(22 downto 12)); else n_xs <= (others => '0'); end if;
                         le_st <= le_st + 1;
-                    when 15 =>
+                    when 16 =>
+                        -- stripe scroll: outside the cores the fold argument slides 0 .. 511 and back (a
+                        -- triangle of drift bits 31..22, so the soft-key arcs never jump); the core edge stays put
+                        if f_dr(31) = '1' then v_sc := not f_dr(30 downto 22); else v_sc := f_dr(30 downto 22); end if;
+                        if le_op = 7 and n_sg(13) = '0' then n_sg <= n_sg + signed(resize(v_sc, 14)); end if;
                         -- next op
                         if le_op = 8 then
                             n_dz <= le_dz(23 downto 14); n_zA <= le_zA;
                             le_st <= (others => '0');
                         else
                             le_op <= le_op + 1;
-                            le_st <= to_unsigned(4, 5);
+                            le_st <= to_unsigned(5, 5);
                         end if;
                     when others =>
                         null;
@@ -774,7 +829,7 @@ begin
     begin
         if rising_edge(clk) then
             if g_start = '1' then
-                b_phi <= n_phi; b_inc <= n_inc; b_f <= n_f0; b_r <= n_r0;
+                b_phi <= n_phi; b_inc <= n_inc; b_f <= n_f0; b_r <= resize(n_r0, 30);
                 if n_zA = '1' then b_ch <= f_cha; b_f1 <= f_f1a; b_r1 <= f_r1a;
                 else b_ch <= f_chb; b_f1 <= f_f1b; b_r1 <= f_r1b; end if;
                 b_x <= (others => '0');
@@ -783,9 +838,9 @@ begin
                 b_phi <= b_phi + b_inc;
                 b_inc <= unsigned(signed(b_inc) + resize(b_ch, 32));
                 b_f <= b_f + resize(b_f1, 28);
-                b_r <= b_r + signed(resize(b_r1, 28));
+                b_r <= b_r + signed(resize(b_r1, 30));
                 b_x <= b_x + 1;
-                b_ox <= b_ox + resize(t_kx(13 downto 7), 16);
+                b_ox <= b_ox + resize(t_kx(13 downto 6), 16);
             end if;
         end if;
     end process p_beam;
@@ -816,7 +871,10 @@ begin
         if rising_edge(clk) then
             -- 1: phase, thresholds, sync strip, source
             p1_u <= b_phi(31 downto 20);
-            p1_f <= b_f(27 downto 12); p1_r <= b_r(27 downto 12);
+            p1_f <= b_f(27 downto 12);
+            if b_r(29 downto 27) = "000" or b_r(29 downto 27) = "111" then p1_r <= b_r(27 downto 12);
+            elsif b_r(29) = '0' then p1_r <= to_signed(32767, 16);
+            else p1_r <= to_signed(-32768, 16); end if;
             if resize(b_x, 11) < l_xs and b_x(11) = '0' then p1_xs <= '1'; else p1_xs <= '0'; end if;
             p1_yc <= signed(resize(unsigned(data_in.y), 11)) - 512;
             if b_ox(15) = '1' then p1_tx <= b_ox(15 downto 6) - 512; else p1_tx <= 512 - b_ox(15 downto 6); end if;
@@ -825,11 +883,11 @@ begin
 
             -- 2: bend = source * Bend; ceiling clip of the ramp
             if f_osc = '1' then
-                v_oc := signed(resize(shift_right(resize(p1_tx, 12) + resize(p1_ty, 12), 1), 12)) - 256;
+                v_oc := signed(resize(p1_tx, 12) + resize(p1_ty, 12)) - 512;
             else
                 v_oc := resize(p1_yc, 12);
             end if;
-            p2_bd <= resize(resize(shift_right(v_oc, 4), 8) * signed('0' & f_m6(7 downto 2)), 19);
+            p2_bd <= resize(resize(shift_right(v_oc, 4), 8) * signed('0' & f_m6), 19);
             p2_u <= p1_u;
             if p1_r < l_hi then p2_t1 <= p1_r; else p2_t1 <= l_hi; end if;
             p2_f <= p1_f; p2_xs <= p1_xs;
@@ -840,8 +898,8 @@ begin
             if p2_f > p2_t1 then p3_th <= p2_f; else p3_th <= p2_t1; end if;
             p3_xs <= p2_xs;
 
-            -- 4: flip; threshold to 12 bits
-            if f_flip = '1' then p4_u <= not p3_u; else p4_u <= p3_u; end if;
+            -- 4: flip (S8 Opposed flips the orange rows only); threshold to 12 bits
+            if (f_flip xor (f_opp and not p_zA(3))) = '1' then p4_u <= not p3_u; else p4_u <= p3_u; end if;
             v_th := p3_th;
             if v_th < 0 then p4_th <= (others => '0');
             elsif v_th > 4095 then p4_th <= (others => '1');
@@ -884,20 +942,25 @@ begin
             if pxs(12) = '1' then v_uu := to_signed(-8, 7);
             else v_uu := signed(resize(pu(12), 7)) - 22; end if;
             p13_pr <= resize(signed(r_lq2(17 downto 10)) * v_uu, 15);
+            -- stripe curl: the key phase slides the S green fold (K6 above 30 %)
+            p13_sb <= pu(12) * f_kb;
 
             p13_lr <= signed(r_lq2(47 downto 37));
             p13_lg <= unsigned(r_lq2(36 downto 27));
             p13_lb <= unsigned(r_lq2(26 downto 18));
 
-            -- 14: L layer pre-signals
+            -- 14: L layer pre-signals (+ rainbow swing on the green fold); S green + curl outside the cores
             p14_lr <= resize(p13_lr, 13) + resize(shift_right(p13_pr, 6), 13);
             p14_lb <= signed(resize(p13_lb, 13));
-            p14_lg <= signed(resize(p13_lg, 13));
+            p14_lg <= signed(resize(p13_lg, 13)) + signed(resize(f_hue, 13));
+            if l_sg(13) = '0' then p14_sg <= l_sg + signed(resize(p13_sb(13 downto 5), 14));
+            else p14_sg <= l_sg; end if;
 
-            -- 15: differences L - S; soft keys (2-pole per channel; Glow Hard = the key itself)
+            -- 15: differences L - S; soft keys (2-pole per channel)
             p15_dr <= resize(p14_lr, 14) - resize(l_sr, 14);
-            p15_dg <= resize(p14_lg, 14) - resize(l_sg, 14);
+            p15_dg <= resize(p14_lg, 14) - p14_sg;
             p15_db <= resize(p14_lb, 14) - resize(l_sb, 14);
+            p15_sg <= p14_sg;
             -- (k1 takes the stage-12 key, k2 one clock later: K at stage 15 = the model's K of this pixel)
             -- one rate per channel: R tau 5.9, G 12.3, B 2.2 px (HD); SD / 720p one shift faster
             if pk(12) = '1' then v_t := to_signed(4095, 14); else v_t := to_signed(0, 14); end if;
@@ -915,17 +978,13 @@ begin
                 k2g <= k2g + f_st(k1g - k2g, 4, 6, t_fast);
                 k2b <= k2b + f_st(k1b - k2b, 2, 3, t_fast);
             end if;
-            -- K (0..64); Glow Hard = the key itself
-            if f_hard = '1' then
-                if pk(14) = '1' then p15_kr <= to_unsigned(64, 7); p15_kg <= to_unsigned(64, 7); p15_kb <= to_unsigned(64, 7);
-                else p15_kr <= (others => '0'); p15_kg <= (others => '0'); p15_kb <= (others => '0'); end if;
-            else
-                p15_kr <= resize(unsigned(shift_right(k2r + 32, 6)), 7);
-                p15_kg <= resize(unsigned(shift_right(k2g + 32, 6)), 7);
-                p15_kb <= resize(unsigned(shift_right(k2b + 32, 6)), 7);
-            end if;
+            -- K (0..64)
+            p15_kr <= resize(unsigned(shift_right(k2r + 32, 6)), 7);
+            p15_kg <= resize(unsigned(shift_right(k2g + 32, 6)), 7);
+            p15_kb <= resize(unsigned(shift_right(k2b + 32, 6)), 7);
 
             -- 16: K * (L - S)
+            p16_sg <= p15_sg;
             -- (K = 64 is bit 6 alone: the third pair carries it)
             p16_ar <= f_pp(p15_dr, p15_kr, 0); p16_br <= f_pp(p15_dr, p15_kr, 2);
             p16_ag <= f_pp(p15_dg, p15_kg, 0); p16_bg <= f_pp(p15_dg, p15_kg, 2);
@@ -936,7 +995,7 @@ begin
 
             -- 17: S + K (L - S)
             p17_r <= resize(l_sr, 14) + resize(shift_right(p16_ar + p16_br + p16_cr, 6), 14);
-            p17_g <= resize(l_sg, 14) + resize(shift_right(p16_ag + p16_bg + p16_cg, 6), 14);
+            p17_g <= p16_sg + resize(shift_right(p16_ag + p16_bg + p16_cg, 6), 14);
             p17_b <= resize(l_sb, 14) + resize(shift_right(p16_ab + p16_bb + p16_cb, 6), 14);
 
             -- 18: clip red / blue; green fold (triangle of the fraction, black below zero)
@@ -1000,7 +1059,7 @@ begin
             -- delays
             for i in 2 to 15 loop p_zA(i) <= p_zA(i - 1); end loop;
             for i in 7 to 13 loop pu(i) <= pu(i - 1); pxs(i) <= pxs(i - 1); end loop;
-            for i in 7 to 14 loop pk(i) <= pk(i - 1); end loop;
+            for i in 7 to 12 loop pk(i) <= pk(i - 1); end loop;
         end if;
     end process p_pix;
 

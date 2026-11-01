@@ -1,18 +1,19 @@
-# Cusp - Heirloom #17, v0.5.0 (2026-10-21): rebuilt from the photo WIN_20230315_00_30_57.
+# Cusp - Heirloom #17, v0.6.0 (2026-11-01, phase 2): rebuilt from the photo WIN_20230315_00_30_57.
 # Rows of fine stripes cut by right-pointing arrowheads: black cores with blue X tips, cyan fish that
-# grow across the frame, broad rainbow bands, red X's in the orange rows.  See cusp.vhd and SUMMARY.md.
+# grow across the frame, broad rainbow bands, red X's in the orange rows.  Phase 2: the two row types are
+# separate modules (rate, height, drift, pointing); stripes scroll and curl; the rainbow cycles.  See SUMMARY.md.
 
 [program]
 processing_delay_clks = 32
 program_id = "com.czartroniks.cusp"
 program_name = "Cusp"
-program_version = "0.5.0"
+program_version = "0.6.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Pattern", "Warp", "Analysis"]
 program_type = "processing"
-description = "Fine rainbow stripes cut by arrowheads: black cores, cyan fish growing left to right; video bends the cusps."
+description = "Stripes cut by arrowheads: black-core and orange rows as separate modules, fish, curling stripes; video bends cusps."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
@@ -28,7 +29,7 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
-name_label = "Rows"
+name_label = "Split"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
@@ -41,7 +42,7 @@ parameter_id = "rotary_potentiometer_3"
 name_label = "Fish"
 control_mode = "linear"
 display_min_value = 0
-display_max_value = 200
+display_max_value = 100
 initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
@@ -85,14 +86,14 @@ initial_value_label = "Right"
 [[parameter]]
 parameter_id = "toggle_switch_8"
 name_label = "Rows"
-value_labels = ["Alternate", "Same"]
+value_labels = ["Alternate", "Opposed"]
 initial_value_label = "Alternate"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
-name_label = "Glow"
-value_labels = ["Soft", "Hard"]
-initial_value_label = "Soft"
+name_label = "Core"
+value_labels = ["Black", "Rainbow"]
+initial_value_label = "Black"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
@@ -129,12 +130,25 @@ linear_potentiometer_12 = 1000
 rotary_potentiometer_3 = 760
 
 [[preset]]
+name = "Orange Tide"
+rotary_potentiometer_2 = 880
+rotary_potentiometer_4 = 900
+toggle_switch_8 = 1
+
+[[preset]]
+name = "Sunset Cores"
+rotary_potentiometer_1 = 700
+rotary_potentiometer_6 = 650
+toggle_switch_9 = 1
+
+[[preset]]
+name = "Chevrons"
+rotary_potentiometer_5 = 700
+rotary_potentiometer_6 = 1023
+toggle_switch_11 = 1
+
+[[preset]]
 name = "Amber Swarm"
 toggle_switch_10 = 1
 rotary_potentiometer_1 = 800
 rotary_potentiometer_4 = 820
-
-[[preset]]
-name = "Hard Left"
-toggle_switch_7 = 1
-toggle_switch_9 = 1
