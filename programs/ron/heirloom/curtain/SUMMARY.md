@@ -1,7 +1,9 @@
 # Curtain — red drapes, swept folds and pleat cuts
 
-**v0.6.0 (2026-11-01, phase 2): K1 Seam dissolves the seam, K3 Weave, the pleats drift, S7 Swap,
-S8 Ribbons, S9 Fire. Built, NOT flashed.** (v0.5.0, 2026-10-27: rebuilt from the photo.) Heirloom #34, from
+**v0.6.1 (2026-11-01, phase 2): K1 Seam dissolves the seam, K3 Weave, S7 Swap, S8 Ribbons, S9 Fire;
+the pleats stand still at the default Speed again. Built, NOT flashed.** (v0.6.0 flashed: Ron "liked
+the previous one more", the default no longer looked like v0.5.0. v0.5.0, 2026-10-27: rebuilt from
+the photo.) Heirloom #34, from
 `photos/WIN_20230521_01_34_12_Pro.jpg`. The v0.1.0 version (magenta folds wrung by a vertical sine,
 blue pools, lime piping) was judged too abstract and replaced. The photo is two line-locked oscillators
 feeding a keyed colourizer: swept folds in the upper half, cut by pleats that also own the red drapes
@@ -31,9 +33,18 @@ seam height, or a blend that removes the seam. K1 was traded for the seam (his p
 
   0 = flat colour fields; 100 % = hard two-level stripes, edges chewed ±80 key units, chevrons 4×
   deeper, drape stripes near horizontal. The stripe period is fixed at 36 px.
-- **K4 Speed** also drifts the pleats right at 0.625 sp/65536 cycle per field, against the folds'
-  left drift. The cuts slide through the folds, so flame lengths (set by the fold phase at the cut) and
-  arc gates re-evaluate as they pass. The drapes slide with the pleats.
+- **K4 Speed** also drifts the pleats, by 0.625 (K4 − 600)/65536 cycle per field: right as K4 rises
+  above its default, left as it falls. The cuts slide through the folds, so flame lengths (set by the
+  fold phase at the cut) and arc gates re-evaluate as they pass, and the drapes slide with the
+  pleats. **At the default (600 ± 8) the pleats sit at the photo's position (15 px into the cycle)**,
+  and they snap back there whenever K4 returns to it.
+  - v0.6.0 drifted them at 0.625 sp, so they moved at the default Speed too (~27 px/s at 60 Hz).
+    Ron flashed v0.6.0: "I liked the previous one more, the default does not look like the last
+    version". Several photo elements are fitted to the cut positions but locked to screen x: the
+    orange left tile, the drape narrowing, the right-hand shadow, the dome darkening. Within seconds
+    of loading the composition left the photo. GHDL showed it once the pleat phase was advanced by
+    10 s (`.heirloom_work/rb_curtain/v060chk/cmp_drift_vid.png`). The single-frame check two fields
+    after load had matched v0.5.0, as had the camera (selfie) render.
 - **S7 Tear → Swap.** Folds Up (the photo) / Drapes Up: the drapes hang from the top (rows from 0),
   the folds start at line 544. The seam wipe and the mirroring work the same way. The tears are
   always on now, at the photo's rate.
@@ -43,8 +54,11 @@ seam height, or a blend that removes the seam. K1 was traded for the seam (his p
   fold row 255 instead of 355.
 - Unchanged: K2 Pleats, K5 Pools, K6 Melt, S10 Velvet, S11 Source, P12 Drape.
 - **Defaults reproduce v0.5.0** (GHDL 720p, `.heirloom_work/rb_curtain/v060/cmp_v060.png`: photo /
-  v0.5.0 / v0.6.0 defaults / four new looks). The pleat drift moves the photo's still frame slowly at
-  the default Speed, as the fold drift already did.
+  v0.5.0 / v0.6.0 defaults / four new looks; the selfie render matches v0.5.0 at the pixel-texture
+  level, `v060chk/crops_vid.png`). As in v0.5.0, only the folds and the stripes move at the default
+  Speed.
+- **Lesson.** Check a default for drift over SECONDS, not just the first frame. Any per-field motion
+  added to an element that the fitted, x-locked tables depend on will leave the photo at the default.
 
 ### Engine changes
 - **Line engine.** Every line now interpolates BOTH halves' table rows into the line RAM:
@@ -183,7 +197,7 @@ half, both halves' rows are on every line, and the stripe, melt and colour maths
 | K1 Seam | the seam between the folds and the drapes | 0 = the photo's hard seam (default). Up: a wipe along the pleat sawtooth (stripe-roughened), half-height K1²/951 lines (69 at 25 %, 276 at 50 %, ~1100 at 100 %). The drapes climb into the folds as pointed hems and the folds hang into the drapes, until the halves interleave in near-vertical strips; each table is mirrored past the seam. Glided. |
 | K2 Pleats | cuts, flames, domes, lower drapes | Pleat period 1092–216 px (542 at 512 = the photo). Glided. |
 | K3 Weave | magenta striation | Depth w 0 / 40 (at 512, the photo) / 159: stripe amplitude, stripe bite into every key edge, chevron depth, drape slant. 0 = flat colour fields; max = hard stripes, chewed edges, deep chevrons, near-horizontal drape stripes. |
-| K4 Speed | motion | Bipolar, still in the centre ±8. Positive: folds slide left past the cuts (default 600 ≈ 0.8 px/field, a fold every ~12 s), the pleats drift right (~0.45 px/field at the default), stripes stream, tears re-seed. |
+| K4 Speed | motion | Bipolar, still in the centre ±8. Positive: folds slide left past the cuts (default 600 ≈ 0.8 px/field, a fold every ~12 s), stripes stream, tears re-seed. The pleats stand at the photo's position at the default (600 ± 8) and drift with K4 − 600: right above it (up to ~2.2 px/field), left below it (up to ~3.1). |
 | K5 Pools | cyan pools | Pool key level: 0 = none, 512 = the photo, max = pools flood the stripe bands. |
 | K6 Melt | camera / Osc into the patch | 0 = none; default 384; max = the source reshapes the keys (±0.5) and bends the stripes (±2 cycles). |
 | S7 Swap | which half hangs on top | Folds Up (photo) / Drapes Up (drapes from the top, folds from line 544) |
@@ -267,7 +281,33 @@ Defaults: K1 0, K2 512, K3 512, K4 600, K5 512, K6 384, P12 512, switches at lab
   as an index, and the arc ROM read a stage late.
 
 ## Status
-- **v0.6.0 built 2026-11-01, router2, NOT flashed.**
+- **v0.6.1 built 2026-11-01, router2, NOT flashed.** v0.6.0 plus one change: the pleats stand still
+  at the default Speed.
+  - 7315–7357 / 7680 LC (95.2–95.8 %, FULL), 27 / 32 EBR, iceunpack OK × 6.
+  - **First try (pool-key jitter restored + a glide-home spring + a busy-flag sequencer): 7416–7460 LC.**
+    HD timing collapsed: 2 of 28 HD Analog seeds met 74.25, and every critical path was routing-bound
+    (the field sequencer, the knob glides). The pool jitter proved invisible (the selfie renders already
+    matched v0.5.0's pools). The busy flag cost 20 LC and the spring 62 (pack-only variants in
+    `.heirloom_work/rb_curtain/ys/var/`). The shipped netlist has none of them; the pleats snap home
+    instead of gliding.
+  - Builder seeds and post-route Fmax: HD Analog s5 80.08, SD Analog s1 73.91, HD HDMI s6 **62.62
+    (best-effort MISS, replaced)**, SD HDMI s1 70.98, HD Dual s6 74.38, SD Dual s1 76.55 MHz.
+  - **Pin-skew screen** (router2; HD Analog s1–40, HD HDMI s1–30, HD Dual s1–16 on make-regenerated
+    netlists, which the builder's bins match byte-exact: `.heirloom_work/rb_curtain/skew62/screen.txt`).
+    Timing is thin: 4 of 36 HD Analog seeds, 6 of 29 HD HDMI seeds and 1 of 15 HD Dual seeds met 74.25.
+    - HD Analog **s5** (the builder's): 80.08 MHz, HDMI HSYNC −1.22 / data ≤ −0.73 ns.
+    - HD HDMI **s11**, hand-installed: 76.44 MHz, HSYNC +1.88 / data ≤ −0.67 ns, the closest to
+      v0.6.0's s5 (+1.90), which Ron flashed without reporting lines.
+    - HD Dual **s6** (the builder's, the only passing seed): 74.38 MHz, −2.11 / ≤ −1.36 ns.
+  - To reproduce HD HDMI: `skew62/synth.sh hd_hdmi`, then `RT=router2 skew62/route.sh hd_hdmi 11`.
+    The builder's vmprog (HD HDMI missing timing) is `skew62/curtain_v061_builder.vmprog`.
+  - `out/rev_b/ron/heirloom/curtain.vmprog` (514,968 bytes). Presets are placeholders.
+  - If a rebuild regresses: this netlist is congestion-bound at 95 %, and HD Dual has one passing seed
+    in 16. Screen more seeds before restructuring, and remove logic rather than pipelining.
+
+**v0.6.0:**
+- **v0.6.0 built 2026-11-01, router2.** Flashed by Ron: the default left the photo within seconds
+  (the pleats drifted at the default Speed). Superseded by v0.6.1.
   - 7282–7321 / 7680 LC (94.8–95.3 %, FULL), 27 / 32 EBR, iceunpack OK × 6.
   - Builder seeds and post-route Fmax: HD Analog s2 74.42 (s1 stalled the router), SD Analog s1
     68.11, HD HDMI s5 77.51, SD HDMI s1 72.69, HD Dual s2 75.75, SD Dual s1 71.76 MHz.

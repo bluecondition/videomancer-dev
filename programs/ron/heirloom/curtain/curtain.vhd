@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Curtain v0.6.0 -- Heirloom #34 (2026-10-27 rebuild, 2026-11-01 phase 2), from WIN_20230521_01_34_12.
+-- Curtain v0.6.1 -- Heirloom #34 (2026-10-27 rebuild, 2026-11-01 phase 2), from WIN_20230521_01_34_12.
 --
 -- The photo: two line-locked horizontal oscillators into a keyed colourizer.
 --   A  the FOLD oscillator (608 px), phase-modulated by a vertical parabola (the drape sweep
@@ -27,8 +27,8 @@
 --   K2  Pleats   pleat oscillator: 1.8 .. 9 pleats (3.5 = the photo)
 --   K3  Weave    the striation: 0 = flat colour fields, 50 % = the photo, 100 % = deep
 --                chevrons, stripes biting into every key edge, steep drape stripes
---   K4  Speed    bipolar (still in the centre): folds slide left past the cuts, the pleats
---                drift right, stripes stream
+--   K4  Speed    bipolar (still in the centre): folds slide left past the cuts; the pleats
+--                stand still at the default (600, the photo) and drift as K4 leaves it; stripes stream
 --   K5  Pools    pool key level: none .. flooding
 --   K6  Melt     how far the camera (or Osc) bends the keys and the stripes
 --   S7  Swap     Folds above (photo) / Drapes above
@@ -148,6 +148,7 @@ architecture curtain of program_top is
     signal s_aB0 : unsigned(15 downto 0) := to_unsigned(1830, 16);
     signal s_xbc0 : unsigned(11 downto 0) := to_unsigned(30, 12);
     signal s_ysc : unsigned(13 downto 0) := to_unsigned(256, 14);     -- chevron slope scale ys * wc / 32
+    signal s_pd : signed(10 downto 0) := (others => '0');             -- pleat drift: K4 - 600, deadbanded
     -- seam wipe gain (Q8 per half line), weave depth (40 = the photo), chevron gain, drape slant
     signal s_G : unsigned(15 downto 0) := (others => '1');
     signal s_wv : unsigned(7 downto 0) := to_unsigned(40, 8);
@@ -431,6 +432,7 @@ begin
         variable v_t : unsigned(13 downto 0);
         variable v_k : signed(10 downto 0);
         variable v_sp : signed(16 downto 0);
+        variable v_pd : signed(10 downto 0);
         procedure glide(signal g : inout unsigned(12 downto 0); k : std_logic_vector(9 downto 0); w : std_logic) is
             variable d : signed(14 downto 0);
             variable n : signed(14 downto 0);
@@ -491,13 +493,19 @@ begin
                 s_osc    <= registers_in(6)(4);
                 if s_wmax /= 0 then s_w <= s_wmax; end if;
                 s_wmax <= (others => '0');
-                -- motion: folds drift sp/65536 cycle per field (left), the pleats 0.625 sp/65536
-                -- (right), stripes 8x, the Osc 4x; tears re-seed
+                -- motion: folds drift sp/65536 cycle per field (left), stripes 8x, the Osc 4x;
+                -- tears re-seed
                 v_sp := resize(s_sp, 17);
                 s_drA <= unsigned(signed(s_drA) + resize(v_sp, 16));
                 s_drS <= unsigned(signed(s_drS) + resize(shift_left(v_sp, 3), 16));
                 s_drO <= unsigned(signed(s_drO) + resize(shift_left(v_sp, 2), 16));
-                s_aB0 <= unsigned(signed(s_aB0) - resize(shift_right(v_sp, 1), 16) - resize(shift_right(v_sp, 3), 16));
+                -- the pleats stand at the photo's position at the default Speed (600); away from it
+                -- they drift 0.625 (K4 - 600)/65536 cycle per field (right as K4 rises, left as
+                -- it falls)
+                -- (the phase itself is stepped in sequencer state 9)
+                v_pd := signed(resize(unsigned(registers_in(3)), 11)) - 600;
+                if v_pd > -8 and v_pd < 8 then v_pd := (others => '0'); end if;
+                s_pd <= v_pd;
                 v_t := resize(s_tacc, 14) + resize(s_asp, 14);
                 if v_t(13) = '1' then s_tseed <= s_tseed + 1; end if;
                 s_tacc <= v_t(12 downto 0);
@@ -564,6 +572,13 @@ begin
                         f_st <= f_st + 1;
                     when 9 =>
                         s_th35 <= f_acc(17 downto 8);
+                        -- the pleat phase: 1830 (15 px, the photo) at the default Speed, else drift
+                        -- 0.625 (K4 - 600) / 65536 cycle per field
+                        if s_pd = 0 then
+                            s_aB0 <= to_unsigned(1830, 16);
+                        else
+                            s_aB0 <= unsigned(signed(s_aB0) - resize(shift_right(s_pd, 1), 16) - resize(shift_right(s_pd, 3), 16));
+                        end if;
                         -- per real pixel increments (x step xs/2 virtual px)
                         case to_integer(s_xs) is
                             when 4 =>
