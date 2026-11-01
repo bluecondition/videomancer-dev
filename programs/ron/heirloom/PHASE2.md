@@ -137,6 +137,10 @@ In Ron's words (2026-10-28):
 5. **Mind the budget** (table below). Programs marked **FULL** (≥ 95 % LC) have no headroom: adding a parameter means
    removing or cheapening something else, judged by standalone-yosys ablation (CLAUDE.md "Fit & high utilization").
    Keep LC ≤ ~92–94 % and ≤ ~24 EBR when possible.
+   - Cheap room in every program (from cutout v0.6.0): the shell's output chroma filter keeps two 9-stage 8-bit
+     delay lines (`s_csu` / `s_csv`) but reads only the 8-back tap. A 256 × 16 block-RAM ring (read pointer =
+     write − 6, then one fabric register) replaces them for ~−80 LC and +1 EBR. FF-to-FF copies (result copies,
+     carries) cost a whole LC per bit, while registers on LUT outputs pack almost free, so cut copies first.
 6. **Build and hand over.** Use `./build_heirloom.sh <name>`, with the router and seed noted in the table.
    - Judge timing from the last post-route "Max frequency" line per config.
    - Ron flashes and reports. Hardware eyes are the primary check.
