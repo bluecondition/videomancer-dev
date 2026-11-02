@@ -1,6 +1,6 @@
 # Chartreuse — a glossy lime surface folded into a sphere and crescents
 
-**v0.5.2 (2026-10-28): built, NOT flashed.** Heirloom #51, rebuilt from the photo
+**v0.6.1 (2026-11-02, phase 2): built, NOT flashed.** Heirloom #51, rebuilt from the photo
 `photos/WIN_20231211_00_38_58_Pro.jpg`. A monochrome lime surface (dark green -> lime -> white),
 mirrored about a horizontal axis 460 lines down. A big soft sphere sits on the left, then nested ")"
 crescents sweep right (an hourglass neck, a white C). Their arms bend into zig-zag fins at
@@ -89,14 +89,14 @@ Working files are in `.heirloom_work/rb_chartreuse/` (notes.md has the full log)
 | Control | Photo element | Function |
 |---|---|---|
 | P12 Fold | the chrome banding | colourizer gain about the line level: x0.25 (a soft glow) .. x1 at 50 % (the photo) .. x4 (dense chrome folds, with white lines at every new crossing) |
-| K1 Crescents | the crescent spacing | horizontal zoom about the sphere: x0.55 (wide) .. x1.8 (dense; the mirrored continuation shows at the right) |
-| K2 Arms | the fins and arms | vertical scale of the fold: x0.5 (tall, straight) .. x2 (squashed, many fins) |
-| K3 Sphere | the orb | bipolar dome: sunk .. the photo .. a bright swollen sphere with a ring |
-| K4 Speed | motion | bipolar, still in the centre +-24 (the photo): the bands and lines breathe (a level LFO), Sway travels, the Osc drifts |
+| K1 Crescents | the crescents | the crescents' own horizontal spacing (everything right of the sphere, field X >= 640): x0.35 (two or three wide sweeping arcs) .. x1 at 50 % (the photo) .. x2.2 (dense; the mirrored continuation shows at the right). The sphere keeps its size |
+| K2 Arms | the arms and fins | bipolar arm swing: the crescent spacing changes with each line's distance from the mirror axis, so every crescent bends by its own amount (the far ones most). Left: the arms straighten into upright bars; centre: the photo; right: the arms swing out into a fan of chevrons |
+| K3 Sphere | the orb | bipolar cone on the sphere (round, radius 0 .. 254 px at a fixed slope, +-1.5 F at the centre at full): left a dark crater with a ring, right a lit bump that becomes a ringed target |
+| K4 Speed | motion | bipolar, still at the centre (the photo); full travel = the old -40 .. +40 %. Rate and depth both rise away from the centre: the bands breathe (+-0.19 F), the crescents pulse with them (+-37 %: the bright half spreads them, the dark half packs them), the surface sways (+-48 px travelling sine), the Osc drifts |
 | K5 Lines | the white outlines | line half-width 0 (no lines) .. 9.5 px at 50 % (the photo) .. 19 px |
 | K6 Picture | | how far the source bends the surface (default 200: the composition holds) |
 | S7 Twin | the mirror | Off / On: a second fold, two spheres stacked |
-| S8 Sway | the bend | Off / On: a per-line sine offset (+-40 virtual px, 384-line period) |
+| S8 Mirror | | Off / On: the field mirrored about the screen centre, two spheres side by side framed by the crescents (with S7: four) |
 | S9 Shade | the gloss | Gloss / Neon (dark surface, glowing lines) |
 | S10 Palette | the hue | Chartreuse / Ember |
 | S11 Source | | Video / Osc (default Video) |
@@ -119,7 +119,54 @@ feeds a slow 2-D triangle plaid through the same path.
     to 24. It packs to ~6,970 LC.
 - router2 stalled (overused = 2) on HD Analog; router1 closes it. Rebuild with router1.
 
+## Phase 2 (v0.6.0 2026-10-31, v0.6.1 2026-11-02)
+Ron's notes on v0.5.2: K1 Crescents / K2 Arms should separate the shape into components that scale and
+move differently instead of a global X / Y zoom, with more range both ways; K3 Sphere is subtle, widen it
+both ways; the breathing should be much more prominent, with much more movement; S8 Sway is redundant
+(Speed turns it off): repurpose it; Speed's full travel should be what the old -40 .. +40 % was.
+
+What changed (control table above):
+- **Field X map, per line.** The sphere zone (|X| < 640) keeps unit scale; beyond it the beam steps at the
+  line's crescent spacing d(Y) = dce (1 + swing Y / 620), clamped to x0.15 .. x2.4 (x2.4 keeps the
+  field inside one mirror period and the window refill >= 3 pixels apart at SD). The zone switch is
+  taken from the previous pixel (one pixel late). The line engine computes d(Y) and, for Mirror, the
+  field X of pixel 0 (-(640 + (vw/2 - 640 - sway) d) - 4) on the serial multiplier while the MAC runs.
+- **K2's old vertical scale is gone**; the knot-row step is the photo's constant.
+- **Dome** centred on the sphere (X 360, was 480), radius set by K3 (fixed slope 24 / px), round within
+  3 % (r = max(mx, 7/8 mx + mn/2)); taken from |X| so it mirrors with S8 and, lying inside the sphere
+  zone, stays round at any K1 / K2.
+- **Breathing:** the triangle LFO's depth (3 x 0 .. 256) is linear in |K4 - centre|; the offset is
+  +-768 Q.12 (old +-256); the same LFO pulses the crescent spacing (slot 8). The lines ride only the
+  source now (not the breathing or the dome), so they hold their shape while the shading moves.
+- **Sway** is always on, depth from |K4 - centre| (+-48 px at the ends, 0 at the centre).
+- **Per-field slots** (one serial multiplier, 9 slots in the vblank): K1 spacing, K2 swing, K3 radius,
+  K4 speed, K4 depth, K5 line width, LFO x depth, spacing x |offset|, pulsed spacing x swing.
+- **Fit:** the first v0.6.0 build was 7,844 LC (102 %). Recovered by moving the knob curves into the
+  slots, the dome from a multiplier to radius x 24, glides on K1 / K2 / P12 only (K3, K5 read the knob
+  directly), the fold-line windows as bit decodes of t and G ([1152, 1344)), the fold-line gate straight
+  from P12, the RAM output register as the window's third word, and 8-bit Osc drift phases (Osc x4,
+  was x3.5).
+- **v0.6.1 = v0.6.0 + the family-wide output-filter resync** (96c4a7c, applied here in the working tree):
+  the chroma fed to the two running 8-sums is forced neutral off the generated avid, and both sums
+  snap back to 8 x 128 once 9 blank samples are in, so one bad ring sample can no longer leave a
+  permanent wrapped colour offset.
+- A bug caught on the model sheet before flashing: K1's lower half ran backwards (x1 at 0, x0.35 at
+  511) after the knob offsets became |k - 512|; the lower half is now 256 - product.
+- Verified in GHDL (720p60, decimation 1) before the v0.6.1 resync: the default video frame matches
+  v0.5.2 apart from the gentle default sway, and a K1 900 / K2 900 / K3 1000 / S8 / P12 800 Osc frame
+  matches the integer model (`.heirloom_work/rb_chartreuse/p2/model060.py`) bit for bit, after the
+  constant 4-px generated-avid offset.
+- Defaults: K1 / K2 / K3 at the centre reproduce the v0.5.2 geometry; K4 at its default (640) moves
+  gently (25 % depth: +-12 px sway, the old breathing size). Preset 0 "Photo" sets K4 to the centre: the
+  still photo.
+
 ## Status
+- **v0.6.1 built 2026-11-02 with ROUTER1** (`NEXTPNR_ROUTER="--router router1" ./build_heirloom.sh
+  chartreuse`), NOT flashed. `out/rev_b/ron/heirloom/chartreuse.vmprog` (507,723 B):
+  - HD Analog 81.80 (seed 1), HD HDMI 74.58 (seed 1, thin), HD Dual 80.03 MHz (**seed 3**);
+  - SD Analog 76.07, SD HDMI 80.03, SD Dual 73.86 MHz (seed 1).
+  - 7,192-7,207 LC (94 %), 23/32 EBR, iceunpack OK on all six. Builder seeds kept: the pin-skew
+    screen is no longer used (the 2026-11-01 re-analysis found the tool blind).
 - **v0.5.2 built 2026-10-28 with ROUTER1** (`NEXTPNR_ROUTER="--router router1" ./build_heirloom.sh
   chartreuse`). All six configs closed on seed 1:
   - HD Analog 82.77, HD HDMI 78.68, HD Dual 80.66 MHz;

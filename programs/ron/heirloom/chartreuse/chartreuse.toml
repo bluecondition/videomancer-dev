@@ -1,19 +1,20 @@
 # Chartreuse - Heirloom #51, rebuilt 2026-10-27 from WIN_20231211_00_38_58.
 # A glossy lime surface mirrored about a horizontal axis: a soft sphere, nested crescents,
-# zig-zag fins, white outline lines.  Fold on the slider.
+# zig-zag fins, white outline lines.  Fold on the slider.  v0.6.0 (phase 2): crescent spacing,
+# arm swing and the sphere dome as separate controls; breathing pulses the crescents; S8 Mirror.
 # See chartreuse.vhd, chartreuse.py and SUMMARY.md.
 
 [program]
 processing_delay_clks = 24
 program_id = "com.czartroniks.chartreuse"
 program_name = "Chartreuse"
-program_version = "0.5.2"
+program_version = "0.6.1"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Render", "Material", "Curve"]
 program_type = "processing"
-description = "Glossy lime sphere and crescents with white outlines, folded from one surface; the picture bends it. Fold on the slider."
+description = "Glossy lime sphere and crescents with white outlines; crescents, arms and sphere each move on their own. Fold on the slider."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
@@ -31,11 +32,11 @@ suffix_label = "%"
 parameter_id = "rotary_potentiometer_2"
 name_label = "Arms"
 control_mode = "linear"
-display_min_value = 0
+display_min_value = -100
 display_max_value = 100
 initial_value = 512
 display_float_digits = 0
-suffix_label = "%"
+suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
@@ -85,7 +86,7 @@ initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
-name_label = "Sway"
+name_label = "Mirror"
 value_labels = ["Off", "On"]
 initial_value_label = "Off"
 
@@ -119,12 +120,12 @@ suffix_label = "%"
 
 [[preset]]
 name = "Photo"
+rotary_potentiometer_4 = 512
 
 [[preset]]
 name = "Chrome Storm"
 linear_potentiometer_12 = 900
-rotary_potentiometer_4 = 820
-toggle_switch_8 = 1
+rotary_potentiometer_4 = 900
 
 [[preset]]
 name = "Twin Spheres"
@@ -136,3 +137,18 @@ name = "Neon Ember"
 toggle_switch_9 = 1
 toggle_switch_10 = 1
 rotary_potentiometer_5 = 800
+
+[[preset]]
+name = "Mirror Pair"
+toggle_switch_8 = 1
+rotary_potentiometer_1 = 700
+
+[[preset]]
+name = "Chevrons"
+rotary_potentiometer_2 = 1023
+rotary_potentiometer_1 = 640
+
+[[preset]]
+name = "Target"
+rotary_potentiometer_3 = 1023
+toggle_switch_8 = 1
