@@ -22,7 +22,7 @@ Flash from `out/rev_b/ron/heirloom/<name>.vmprog`; rebuild one with `./build_hei
     good.
   - **Fix.** Every program now forces the box input neutral off the generated avid and snaps the sum back to N ×
     neutral once N blank samples are in.
-  - **Rebuilt.** 49 programs, patch bump, all 6 configs timing-clean. Earlier hand-installed HD seeds are gone; any
+  - **Rebuilt.** 49 programs, patch bump, all 6 configs timing-clean. HW-confirmed on fern_diag and facet_diag v0.6.1 ("look correct"). Earlier hand-installed HD seeds are gone; any
     non-builder seed is in that program's SUMMARY.
   - **Already did it:** argus, crossbeam (once a field), curtain, shield, streak, tangram.
   - **chartreuse** is edited but not built; its tab has work in progress.
