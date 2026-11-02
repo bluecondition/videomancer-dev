@@ -2,7 +2,7 @@
 # Copyright (C) 2026 czartroniks
 # SPDX-License-Identifier: GPL-3.0-only
 """
-FACET v0.5 - build hook.  Generates facet_pkg.vhd (pure Python, no numpy):
+FACET v0.6 - build hook.  Generates facet_pkg.vhd (pure Python, no numpy):
 
   C_CO 512 x 32, C_CI 1024 x 32, C_TG 512 x 32: colour ramps over the Lambda
         gradient D = Y - 1.05|X - axis|, entry = (D + 1024) / 8, selected by the
@@ -13,9 +13,10 @@ FACET v0.5 - build hook.  Generates facet_pkg.vhd (pure Python, no numpy):
         background).  Word = Y(10) & U(10) & V(10) & "00",
         hardware convention (U = Cr, V = Cb), luma pre-boosted by 16/13 so the
         output conditioning's 13/16 luma scale lands on the photo's levels.
-  C_LS  512 x 16: the eye shape s(t) = sin(pi/2 * (0.4545 - t) / 0.4979) (signed
+  C_LS  1024 x 16: the eye shape s(t) = sin(pi/2 * (0.4545 - t) / 0.4979) (signed
         10 bits, x511; negative past the tip) & the perpendicular factor c(t)
-        (6 bits, x63) for t = folded lens phase in [0, 0.5).
+        (6 bits, x63) for t = folded lens phase in [0, 0.5); entries 512 .. 1023 =
+        the S8 Diamond bank, s = (0.4545 - t) / 0.4545 (straight flanks).
   C_INC 256 x 16: lens-phase increment per Q.1 virtual unit (24-bit phase),
         n = 0.75 * 8^(i/255) eyes per 1920 virtual px.
   f_*   small profile functions (x-order edge shadow / white line, rims,
@@ -94,6 +95,15 @@ def ls_entry(i):
     c = int(round(63 / math.sqrt(1 + dh * dh)))
     return s, c
 
+def ld_entry(i):
+    """S8 Diamond: straight flanks to the same tips, s = (UT - t) / UT; constant perpendicular factor"""
+    t = (i + 0.5) / 1024.0
+    a = max(-1.0, min(1.0, (UT - t) / UT))
+    s = int(round(511 * a))
+    dh = 308 / (UT * 944) if a > -1 else 0.0
+    c = int(round(63 / math.sqrt(1 + dh * dh)))
+    return s, c
+
 def inc_entry(i):
     n = 0.75 * 8 ** (i / 255.0)
     return int(round(n * 2 ** 24 / 3840.0))
@@ -149,13 +159,13 @@ def gen():
         L.append('    type t_%s is array (0 to %d) of std_logic_vector(31 downto 0);' % (nm.lower(), n - 1))
         L.append('    constant C_%s : t_%s := (' % (nm, nm.lower()))
         L.append(',\n'.join('        ' + ', '.join(word(*tab[i]) for i in range(r, r + 4)) for r in range(0, n, 4)) + ');')
-    L.append('    type t_ls is array (0 to 511) of std_logic_vector(15 downto 0);')
+    L.append('    type t_ls is array (0 to 1023) of std_logic_vector(15 downto 0);')
     L.append('    constant C_LS : t_ls := (')
     ent = []
-    for i in range(512):
-        s, c = ls_entry(i)
+    for i in range(1024):
+        s, c = ls_entry(i) if i < 512 else ld_entry(i - 512)
         ent.append('"%s%s"' % (format(s & 0x3FF, '010b'), format(c, '06b')))
-    L.append(',\n'.join('        ' + ', '.join(ent[r:r + 8]) for r in range(0, 512, 8)) + ');')
+    L.append(',\n'.join('        ' + ', '.join(ent[r:r + 8]) for r in range(0, 1024, 8)) + ');')
     L.append('    type t_inc is array (0 to 255) of std_logic_vector(15 downto 0);')
     L.append('    constant C_INC : t_inc := (')
     ent = ['"%s"' % format(inc_entry(i), '016b') for i in range(256)]

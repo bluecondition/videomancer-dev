@@ -141,13 +141,20 @@ In Ron's words (2026-10-28):
      delay lines (`s_csu` / `s_csv`) but reads only the 8-back tap. A 256 × 16 block-RAM ring (read pointer =
      write − 6, then one fabric register) replaces them for ~−80 LC and +1 EBR. FF-to-FF copies (result copies,
      carries) cost a whole LC per bit, while registers on LUT outputs pack almost free, so cut copies first.
-6. **Build and hand over.** Use `./build_heirloom.sh <name>`, with the router and seed noted in the table.
+6. **Preview first, in a diag copy** (Ron, 2026-11-01). Propose a control map, then build the first round of changes
+   in a diag copy, not in `programs/ron/heirloom/<name>/`. Leave the original intact until Ron previews and approves.
+   - `./heirloom_diag.sh new <name>` copies the program to `.heirloom_work/rb_<name>/diag/<name>_diag/`. The copy gets
+     its own program_id (`…<name>_diag`) and name ("<Name> Diag"), so it loads beside the original.
+   - `./heirloom_diag.sh build <name>` writes `out/rev_b/ron/_diag/<name>_diag_v<version>.vmprog`.
+   - Row status: `diag vX.Y.Z built, awaiting preview`.
+   - On approval, run `./heirloom_diag.sh merge <name>`, then do step 7 on the production copy.
+7. **Build and hand over.** Use `./build_heirloom.sh <name>`, with the router and seed noted in the table.
    - Judge timing from the last post-route "Max frequency" line per config.
    - Ron flashes and reports. Hardware eyes are the primary check.
    - Simulate only when it's genuinely needed (CLAUDE.md "Default to building, not simulating"), for example a new
      artifact that can't be reasoned out from the code. A quick check that the default frame still matches the photo
      is reasonable after a large change.
-7. **Finish each round:**
+8. **Finish each round:**
    - bump the version (phase 2 starts at v0.6.0);
    - update SUMMARY.md: controls, status, seeds, and what changed;
    - update the program's row in [README.md](README.md) and in [Phase 2 progress](#phase-2-progress);
@@ -185,7 +192,7 @@ Commit the row along with the program's own files.
 | cusp | built v0.6.0, awaiting HW | v0.6.0 | Ron 10-31 (on v0.5.0, sight unseen, picked from a proposed map): K1 Cusps = black-core rows only (orange rows keep theirs, rows detune); K2 Rows -> Split (orange-row height, seams .. dominant, row count fixed); K4 also slides the row types apart, scrolls the stripes, cycles the rainbow; K6 Bend wider (~1 cycle), bolder Osc, and the key bends the fine stripes; K3 Fish wider; S8 -> Alternate / Opposed (orange rows point left); S9 -> Core Black / Rainbow. v0.6.0: all in. Orange rows the other way at the same rate (one drift accumulator also drives the stripe scroll and rainbow LFO); the stripes breathe 2 periods into the cores and back (a wrapping scroll ticked every rim); curl only outside the cores; S9 core = yellow-to-pink glow from the L layer; K3 Fish 0..4x, K6 Bend to ~1.1 cycle. GHDL = model bit-exact. 97 % LC, 11 EBR, router2; HD seeds from a pin-skew screen: HD HDMI s138 (+0.96 / <= -0.78; nothing >= +1.0 with data <= -0.6 in 144 router2 seeds, router1 all negative), HD Analog s48, HD Dual s11 |
 | cutout | built v0.6.0, awaiting HW | v0.6.0 | Ron 11-01 (on v0.5.0, before flashing it; picked from a proposed map): K2 Zoom -> Crops (0 = all scraps in register, 50 % = photo, 100 % = crops slide apart, scraps flip / rescale one by one); K6 per-scrap drift + "Love." crawl; S8 Fringe -> Inks Photo / Swap, fringe onto K1 Rag; P12 unchanged; S10 -> Soup / Camera mirror. v0.6.0: all in (33 per-scrap crop words {crop, flip, scale} recomputed per field by the sequencer into a crop RAM; Crops 0 = one camera frame zoomed across the head; drift ping-pongs on each scrap's own line; Swap = warm head / cool cup and plate; Mirror = the live camera, mirrored, grey, in the soup; K3 Ink 0 = flat .. x1.9). First build 7728 LC, fitted with no feature lost (chroma filter delay into a block-RAM ring, 12-bit noise phases, leaner sequencer); 97.8 % LC, 27 EBR, router1 builder 6/6 seed 1; HD seeds from a pin-skew screen: HD HDMI s17 (+2.01 / <= -0.72), HD Analog s7 (+0.70 / <= -1.16, edge of the window, none better in 54 seeds), HD Dual s7 |
 | escalator | built v0.6.0, awaiting HW | v0.6.0 | Ron 11-01 (on v0.5.0, before flashing it; picked from a proposed map): K1 Columns -> grid only; K2 Bands -> count + height; K5 Speed -> unison ride + column bob; S8 Climb -> Ramp; wider K3 Blob / K6 Bend. v0.6.0: all in (tile and slab phases split, stairs fixed at the photo's 7.14 columns, K1 Tiles 2..20 square law, locked to the stairs at 547; K2 bipolar 1.57 bands at 84 % .. photo .. 11.9 at 6.8 %; K5 to ~24 lines/frame + a unipolar bob wave travelling across the columns (9-entry column table in one EBR, depth 0..236 lines with speed^2); S8 Stairs / Ramp (diagonal saw ribbons); K3 to +1/2 tile (blobs vanish); K6 cubic, 4.5x v0.5's max, default = the photo). First build 98 % LC, fitted by chaining sequencer products and a leaner bob; 94 % LC, 8 EBR, router2; HD seeds from a pin-skew screen: HD HDMI s45 (+2.30 / <= -0.91), HD Analog s19 (+1.64 / <= -0.57), HD Dual s10 |
-| facet | not started | | |
+| facet | done v0.6.2 | v0.6.2 | Ron 11-01 (on v0.5.0, before flashing it; picked from a proposed map): K5 Halo -> Spread (per-eye-pair heights, bipolar; halo width onto P12); K4 Speed = rate + depth (eye-pair ripple wave, wedge/floor slide); S7 Lines -> Floor V / Peak; S8 Glow -> Eyes Lens / Diamond. v0.6.0 diag (production v0.5.0 untouched): all four in, plus K4 square law (v0.5 motion at the new default 50 %, x4 at 100 %), eye-pair ripple and wedge/floor slide to +-253; 96 % LC, 26 EBR, router1 (SD Dual s2; HD HDMI s10 hand-installed after a pin-skew screen, +2.03 / <= -0.55); preview out/rev_b/ron/_diag/facet_diag_v0.6.0.vmprog. v0.6.1 diag (resync fix) HW: colours correct. Ron 11-02 (on v0.6.1): Wedge sweep further; Floor angle changes as it rises; wedge/floor overlap XOR-style mix with the ground, using the video. v0.6.2 diag: K2 cubic kA 0.02 .. 5 (photo at 38 %), K3 slope kB 0.21 .. 0.373 (photo) .. 1.2 riding the height, overlap = purple/ground (red/light in eyes) bands flipped by the source luma contours; 97 % LC, 26 EBR, router1 (HD Analog s2); preview out/rev_b/ron/_diag/facet_diag_v0.6.2.vmprog. Ron 11-02: approved; merged (production = the approved diag bitstreams) |
 | fern | not started | | |
 | goblet | not started | | |
 | greenroom | not started | | |
@@ -256,7 +263,7 @@ Commit the row along with the program's own files.
 | [cusp](cusp/SUMMARY.md) | v0.6.0 | 97 % (**FULL**) | 11 | router2 | hand-installed HD HDMI s138, HD Analog s48, HD Dual s11; SD seed 1 | oscillator/field |
 | [cutout](cutout/SUMMARY.md) | v0.6.0 | 98 % (**FULL**) | 27 | router1 | builder 6/6 seed 1; HD HDMI s17, HD Analog s7, HD Dual s7 hand-installed (pin-skew screen) | collage |
 | [escalator](escalator/SUMMARY.md) | v0.6.0 | 94 % (tight) | 8 | router2 | HD HDMI s45, HD Analog s19, HD Dual s10 hand-installed; SD Dual seed 2 | oscillator/field |
-| [facet](facet/SUMMARY.md) | v0.5.0 | 94 % (tight) | 20 | router2 | HD Dual seed 2 | oscillator/field |
+| [facet](facet/SUMMARY.md) | v0.6.2 | 97 % (**FULL**) | 26 | router1 | HD Analog seed 2 | oscillator/field |
 | [fern](fern/SUMMARY.md) | v0.5.0 | 93 % (tight) | 24 | router1 | HD HDMI seed 2 | measured field |
 | [goblet](goblet/SUMMARY.md) | v0.5.0 | 93 % (tight) | 25 | router2 | HD HDMI/Dual seed 2 | measured field |
 | [greenroom](greenroom/SUMMARY.md) | v0.5.0 | 95 % (**FULL**) | 25 | router1 | 6/6 seed 1 | collage |

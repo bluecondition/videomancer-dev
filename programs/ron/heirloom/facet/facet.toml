@@ -1,4 +1,4 @@
-# Facet - Heirloom #40, rebuilt 2026-10-21 from WIN_20230602_01_26_17.
+# Facet - Heirloom #40, rebuilt 2026-10-21 from WIN_20230602_01_26_17; phase 2 v0.6.0 (2026-11-01).
 # A mirrored row of green eyes (red cone / caps where the purple wedge and
 # floor cut them) on a blue-green gradient, x-order white edge lines.
 # See facet.vhd, facet.py and SUMMARY.md.
@@ -7,13 +7,13 @@
 processing_delay_clks = 32
 program_id = "com.czartroniks.facet"
 program_name = "Facet"
-program_version = "0.5.1"
+program_version = "0.6.2"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Shape", "Mirror", "Render"]
 program_type = "processing"
-description = "Mirrored green eyes with a red cone on a blue-green gradient, white-edged purple wedge and floor. Open the eyes on the slider."
+description = "Mirrored green eyes, red cone, purple wedge and floor. Each eye pair has its own height and drift. Open the eyes on the slider."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
@@ -33,7 +33,7 @@ name_label = "Wedge"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 489
+initial_value = 394
 display_float_digits = 0
 suffix_label = "%"
 
@@ -53,19 +53,19 @@ name_label = "Speed"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 410
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
-name_label = "Halo"
+name_label = "Spread"
 control_mode = "linear"
-display_min_value = 0
+display_min_value = -100
 display_max_value = 100
-initial_value = 371
+initial_value = 512
 display_float_digits = 0
-suffix_label = "%"
+suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
@@ -79,15 +79,15 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
-name_label = "Lines"
-value_labels = ["Off", "On"]
-initial_value_label = "On"
+name_label = "Floor"
+value_labels = ["V", "Peak"]
+initial_value_label = "V"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
-name_label = "Glow"
-value_labels = ["Off", "On"]
-initial_value_label = "On"
+name_label = "Eyes"
+value_labels = ["Lens", "Diamond"]
+initial_value_label = "Lens"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
@@ -137,4 +137,25 @@ rotary_potentiometer_2 = 900
 [[preset]]
 name = "Twin Eyes"
 toggle_switch_9 = 1
-rotary_potentiometer_5 = 600
+rotary_potentiometer_5 = 700
+
+[[preset]]
+name = "Hourglass"
+toggle_switch_7 = 1
+rotary_potentiometer_2 = 600
+rotary_potentiometer_3 = 450
+linear_potentiometer_12 = 560
+
+[[preset]]
+name = "Crown"
+rotary_potentiometer_1 = 820
+rotary_potentiometer_5 = 1023
+rotary_potentiometer_4 = 760
+linear_potentiometer_12 = 380
+
+[[preset]]
+name = "Diamonds"
+toggle_switch_8 = 1
+rotary_potentiometer_1 = 700
+rotary_potentiometer_5 = 250
+rotary_potentiometer_4 = 820
