@@ -1,4 +1,5 @@
-# Fern - Heirloom #46, v0.5.0 (2026-10-27): rebuilt from WIN_20230713_00_17_11.
+# Fern - Heirloom #46, v0.6.2 (2026-11-02, phase 2 final): K1 Fan, K2 Lean, Speed waves, flames follow Arrow, S9 Echo; wide Lean / Flesh / Arrow.
+# v0.5.0 (2026-10-27): rebuilt from WIN_20230713_00_17_11.
 # Nested pink frond arms on vertical stems over a green maze, a blue scanline ground and a small dart.
 # See fern.vhd and SUMMARY.md.
 
@@ -6,7 +7,7 @@
 processing_delay_clks = 32
 program_id = "com.czartroniks.fern"
 program_name = "Fern"
-program_version = "0.5.2"
+program_version = "0.6.2"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -18,23 +19,23 @@ core = "yuv444_30b"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_1"
-name_label = "Fronds"
+name_label = "Fan"
 control_mode = "linear"
-display_min_value = 50
-display_max_value = 200
-initial_value = 512
+display_min_value = -100
+display_max_value = 100
+initial_value = 785
 display_float_digits = 0
-suffix_label = "%"
+suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
-name_label = "Stems"
+name_label = "Lean"
 control_mode = "linear"
-display_min_value = 50
-display_max_value = 200
+display_min_value = -100
+display_max_value = 100
 initial_value = 512
 display_float_digits = 0
-suffix_label = "%"
+suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
@@ -90,9 +91,9 @@ initial_value_label = "Pink"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
-name_label = "Dart"
-value_labels = ["On", "Off"]
-initial_value_label = "On"
+name_label = "Echo"
+value_labels = ["Single", "Echo"]
+initial_value_label = "Single"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
@@ -130,16 +131,26 @@ linear_potentiometer_12 = 757
 rotary_potentiometer_3 = 760
 
 [[preset]]
-name = "Green Fern"
+name = "Lattice"
+rotary_potentiometer_2 = 282
+rotary_potentiometer_1 = 600
+
+[[preset]]
+name = "Echo Bands"
+toggle_switch_9 = 1
+rotary_potentiometer_2 = 710
+
+[[preset]]
+name = "Bows"
+rotary_potentiometer_1 = 80
 toggle_switch_8 = 1
-rotary_potentiometer_1 = 640
+
+[[preset]]
+name = "Writhe"
+rotary_potentiometer_3 = 1000
+rotary_potentiometer_4 = 576
 
 [[preset]]
 name = "Sweep"
 toggle_switch_7 = 1
-toggle_switch_9 = 1
-
-[[preset]]
-name = "Chevrons"
-toggle_switch_10 = 1
-rotary_potentiometer_1 = 760
+rotary_potentiometer_2 = 402

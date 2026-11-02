@@ -1,4 +1,4 @@
-"""fern.py -- build hook: generates fern_pkg.vhd (ROM contents and per-timing-ID constants).
+"""fern_diag.py -- build hook (fern v0.6.0 diag): generates fern_pkg.vhd (ROM contents and per-timing-ID constants).
 
 Fitted to photos/WIN_20230713_00_17_11_Pro.jpg (work files: .heirloom_work/rb_fern/).
   C_LUT    2048 x 16  key level / material colour LUT: 8 height bands x (16 arm phases x 16 stem phases);
@@ -6,7 +6,8 @@ Fitted to photos/WIN_20230713_00_17_11_Pro.jpg (work files: .heirloom_work/rb_fe
                       Bm (4 bits, (B - 64)/9).  Fitted trilinearly to the photo's signed distance and colours.
   C_TH     512 x 24   arm phase theta(c) at c = 16 i px (Q.10 cycles, mod 64 cycles) | step to the next knot (8 bits)
   C_EG     1024 x 10  line-engine table: 0..575 chevron law G(|dy|) per virtual line (Q.1 px); 640..767 the
-                      scanline saw over two periods (27.72 lines); 768..895 the maze modulator 0.6 tri (Q.8)
+                      scanline saw over two periods (27.72 lines); 768..895 the maze modulator 0.6 tri (Q.8);
+                      896..1023 one sine cycle as sign | 255 |sin| (the Speed ripple / sway waves)
   C_CS     256 x 8    0.5 - 0.5 cos(2 pi i / 256), 0..255
   C_MZ     256 x 8    maze green: 55 + 170 cs^0.6
   C_LN     256 x 8    arm contour lines: cs(i/256)^2 * 255
@@ -194,8 +195,11 @@ def eg_rom():
     for i in range(128):
         u = i / 128.0
         w[768 + i] = int(round(154 * (1 - abs(2 * u - 1))))
+    for i in range(128):
+        w[896 + i] = (512 if i >= 64 else 0) | SINMAG[i]
     return w, g
 
+SINMAG = [int(round(255 * abs(math.sin(2 * math.pi * i / 128)))) for i in range(128)]
 CS = [int(round(255 * (0.5 - 0.5 * math.cos(2 * math.pi * i / 256)))) for i in range(256)]
 MZ = [int(round(55 + 170 * (cs / 255.0) ** 0.6)) for cs in CS]
 LN = [int(round(255 * (cs / 255.0) ** 2)) for cs in CS]
