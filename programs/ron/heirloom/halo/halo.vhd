@@ -1,7 +1,9 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Halo v0.5.0 -- Heirloom #47, rebuilt from the photo WIN_20230801_00_19_00.
+-- Halo v0.6.0 -- Heirloom #47, rebuilt from the photo WIN_20230801_00_19_00.
+-- Phase 2 (v0.6.0): K1 / K2 / K3 / K5 / K6 reach twice as far on each side of the photo setting;
+-- S9 Ember flips the red from the crescent to red-hot ring cores.
 --
 -- The photo: a lattice of 2.02 cells across (949 px) by 542 lines.  Every cell
 -- holds a glowing yellow-white ellipse (164 x 185 px, 71 px right of the cell
@@ -20,15 +22,16 @@
 -- interior key with a jittered edge, and a red one-shot fired by the cell
 -- key's leading edge.  A line-start phase error tears the lines near the cusps.
 --
---   K1  Rings   ring size 45 .. 150 % (100 % = the photo's 164 x 185 px)
---   K2  Cells   cells across 1 .. 4 (2.02 = the photo), the whole lattice zooms
---   K3  Pinch   hourglass depth: 0 = straight blue columns, 160 % = deep diamonds
+--   K1  Rings   ring size x0.19 .. x2.25, exponential (the photo's 164 x 185 px at 68 %)
+--   K2  Cells   cells across 0.5 .. 8, exponential (2.02 = the photo at 50 %), the whole lattice zooms
+--   K3  Pinch   hourglass depth -100 .. 220 %: below 0 the columns pinch into lenses, 100 % = the photo
 --   K4  Speed   bipolar vertical roll of the lattice (cusps, diamonds, tears ride with it)
---   K5  Tear    line-start tear amount 0 .. 200 %
---   K6  Warp    how far the source (camera luma / Osc) bends the contours and rings
+--   K5  Tear    line-start tear amount -100 .. 300 % (negative tears the other way)
+--   K6  Warp    how far the source (camera luma / Osc) bends the contours and rings, -15 .. 185 %
 --   S7  Seam    Cut (the photo: white noise band right of the seam) / Mirror
 --   S8  Noise   the white band boils (On) / clean (Off)
---   S9  Ember   red crescent Short (the photo) / Long (whole cells ember)
+--   S9  Ember   Crescent (the photo: red fired at the cell's left edge) / Core (red-hot inside
+--               every ring, cooling to brown away from it)
 --   S10 Flip    the lattice mirrored left-right (tears stay at the line start)
 --   S11 Source  Video / Osc
 --   P12 HALO    glow: 0 = bare ellipse outlines, photo at 46 %, 100 % = blazing discs
@@ -84,7 +87,7 @@ architecture halo of program_top is
 
     -- glides: K1, K2, K3, K5, K6, P12 (Q.3)
     type t_g is array(0 to 5) of unsigned(12 downto 0);
-    signal s_g : t_g := (to_unsigned(550 * 8, 13), to_unsigned(349 * 8, 13), to_unsigned(639 * 8, 13),
+    signal s_g : t_g := (to_unsigned(694 * 8, 13), to_unsigned(515 * 8, 13), to_unsigned(639 * 8, 13),
                          to_unsigned(512 * 8, 13), to_unsigned(153 * 8, 13), to_unsigned(472 * 8, 13));
     signal gl_k, gl_o, gl_n : unsigned(12 downto 0) := (others => '0');
     signal gl_d : signed(13 downto 0) := (others => '0');
@@ -94,11 +97,14 @@ architecture halo of program_top is
     signal q_gph : unsigned(1 downto 0) := (others => '0');
 
     -- knob decodes
-    signal k_rq    : unsigned(9 downto 0) := to_unsigned(473, 10);   -- 1023 - K1 (ring size, square law)
-    signal k_cells : unsigned(10 downto 0) := to_unsigned(517, 11);  -- cells across, Q8 (256 .. 1022)
-    signal k_pinch : unsigned(7 downto 0) := to_unsigned(128, 8);    -- Q7 (0 .. 207)
-    signal k_tear  : unsigned(8 downto 0) := to_unsigned(256, 9);    -- Q8 (0 .. 511)
-    signal k_warp  : unsigned(5 downto 0) := to_unsigned(9, 6);
+    signal k_kxe   : unsigned(11 downto 0) := to_unsigned(576, 12);  -- ring kx / 659, Q8 (256 .. 3072, exp2 of 1023 - K1)
+    signal k_cells : unsigned(11 downto 0) := to_unsigned(518, 12);  -- cells across, Q8 (128 .. 2044, exp2 of K2)
+    signal k_pq    : unsigned(7 downto 0) := to_unsigned(127, 8);    -- v0.5 pinch curve, Q7 (0 .. 205)
+    signal k_pinch : unsigned(8 downto 0) := to_unsigned(127, 9);    -- |pinch| Q7 (0 .. 283); 2 k_pq - 127
+    signal k_pneg  : std_logic := '0';
+    signal k_tear  : unsigned(9 downto 0) := to_unsigned(256, 10);   -- |tear| Q8 (0 .. 767); K5 - 256
+    signal k_tneg  : std_logic := '0';
+    signal k_warp  : signed(7 downto 0) := to_signed(9, 8);          -- 2 (K6 / 16) - 9 (-9 .. 117)
     signal k_hi    : unsigned(7 downto 0) := to_unsigned(118, 8);    -- Halo table index (P12 / 4)
     signal r_p12   : std_logic_vector(31 downto 0) := (others => '0');
 
@@ -109,8 +115,7 @@ architecture halo of program_top is
     signal m_l  : unsigned(17 downto 0) := (others => '0');
     signal q_p : unsigned(4 downto 0) := (others => '0');
     signal q_ld, q_st : std_logic := '0';
-    signal q_wr : std_logic_vector(1 to 9) := (others => '0');
-    signal f_kq : unsigned(15 downto 0) := (others => '0');      -- (1023 - K1)^2 / 16
+    signal q_wr : std_logic_vector(1 to 8) := (others => '0');
     signal s_m4 : unsigned(8 downto 0) := (others => '0');
     signal s_n4 : std_logic := '0';
 
@@ -119,8 +124,9 @@ architecture halo of program_top is
     signal f_h0   : unsigned(23 downto 0) := (others => '0');
     signal f_vinc : unsigned(19 downto 0) := to_unsigned(30957, 20);
     signal f_v0   : unsigned(23 downto 0) := (others => '0');
-    signal f_tamp : unsigned(10 downto 0) := to_unsigned(518, 11);
-    signal f_kx   : unsigned(11 downto 0) := to_unsigned(1482, 12);
+    signal f_tamp : unsigned(12 downto 0) := to_unsigned(518, 13);
+    signal f_tneg : std_logic := '0';
+    signal f_kx   : unsigned(13 downto 0) := to_unsigned(1482, 14);
     signal f_ky   : unsigned(11 downto 0) := to_unsigned(750, 12);
     signal f_roll : unsigned(23 downto 0) := (others => '0');
     signal f_spd  : signed(15 downto 0) := (others => '0');
@@ -140,13 +146,13 @@ architecture halo of program_top is
     signal n_dy  : unsigned(15 downto 0) := (others => '0');
     signal n_va  : unsigned(7 downto 0) := (others => '0');
     signal r_vq, r_vq2 : std_logic_vector(7 downto 0) := (others => '0');
-    signal n_vp  : unsigned(8 downto 0) := (others => '0');
+    signal n_vp  : signed(9 downto 0) := (others => '0');
     signal n_dyn2 : unsigned(19 downto 0) := (others => '0');
     signal n_cu  : unsigned(15 downto 0) := (others => '0');
     signal n_ty  : unsigned(1 downto 0) := (others => '0');     -- 0 none / stretch, 1 shift, 2 centre (flare colour)
     signal n_shp : std_logic := '0';
     signal n_a   : unsigned(7 downto 0) := (others => '0');
-    signal n_amp : unsigned(15 downto 0) := (others => '0');
+    signal n_amp : unsigned(11 downto 0) := (others => '0');
     signal n_kj  : signed(15 downto 0) := (others => '0');
     signal n_tkj : signed(17 downto 0) := (others => '0');
     signal n_m9  : unsigned(3 downto 0) := to_unsigned(8, 4);
@@ -162,7 +168,7 @@ architecture halo of program_top is
     signal lm_l : unsigned(15 downto 0) := (others => '0');
     signal lm_on : std_logic := '0';
 
-    signal l_vp   : unsigned(8 downto 0) := (others => '0');
+    signal l_vp   : signed(9 downto 0) := (others => '0');
     signal l_dyn2 : unsigned(19 downto 0) := (others => '0');
     signal l_ty   : unsigned(1 downto 0) := (others => '0');
     signal l_shp  : std_logic := '0';
@@ -210,16 +216,16 @@ architecture halo of program_top is
     -- pixel pipeline
     signal p1_hm : unsigned(15 downto 0) := (others => '0');
     signal p1_s8 : signed(7 downto 0) := (others => '0');
-    signal p2_ws : signed(12 downto 0) := (others => '0');
+    signal p2_ws : signed(13 downto 0) := (others => '0');
     signal p3_sh : signed(7 downto 0) := (others => '0');
-    signal p3_gw : signed(7 downto 0) := (others => '0');
+    signal p3_gw : signed(8 downto 0) := (others => '0');
     signal p3_ew : signed(9 downto 0) := (others => '0');
-    signal p4_d  : signed(18 downto 0) := (others => '0');
+    signal p4_d  : signed(20 downto 0) := (others => '0');
     signal p5_hb : unsigned(15 downto 0) := (others => '0');
     signal p6_ax : unsigned(8 downto 0) := (others => '0');
     signal p6_dng, p6_rs : std_logic := '0';
     signal p6_fd : unsigned(2 downto 0) := (others => '0');
-    signal p7_m  : unsigned(17 downto 0) := (others => '0');
+    signal p7_m  : unsigned(19 downto 0) := (others => '0');
     signal p7_dng, p7_rs : std_logic := '0';
     signal p7_fd : unsigned(2 downto 0) := (others => '0');
     signal p8_s  : signed(10 downto 0) := (others => '0');
@@ -260,11 +266,11 @@ architecture halo of program_top is
     -- delay lines
     type t_u16 is array (natural range <>) of unsigned(15 downto 0);
     type t_u10 is array (natural range <>) of unsigned(9 downto 0);
-    type t_s8a is array (natural range <>) of signed(7 downto 0);
+    type t_s9a is array (natural range <>) of signed(8 downto 0);
     type t_s10 is array (natural range <>) of signed(9 downto 0);
     type t_sl is array (natural range <>) of std_logic;
     signal p_hm : t_u16(2 to 4) := (others => (others => '0'));
-    signal p_gw : t_s8a(4 to 8) := (others => (others => '0'));
+    signal p_gw : t_s9a(4 to 8) := (others => (others => '0'));
     signal p_ew : t_s10(4 to 11) := (others => (others => '0'));
     signal p_cell : t_sl(10 to 19) := (others => '0');
     signal p_int : t_sl(16 to 17) := (others => '0');
@@ -340,6 +346,7 @@ begin
         variable v_ph : integer range 0 to 31;
         variable v_s  : unsigned(20 downto 0);
         variable v_k  : unsigned(9 downto 0);
+        variable v_c  : unsigned(11 downto 0);
         variable v_pr : unsigned(37 downto 0);
         variable v_r  : unsigned(23 downto 0);
     begin
@@ -433,22 +440,47 @@ begin
                 end case;
             end if;
             -- knob curves (shift-add, settle long before the sequencer reads them)
-            k_rq <= to_unsigned(1023, 10) - s_g(0)(12 downto 3);
+            -- K1: 3.5 octaves of kx (piecewise-linear exp2): e = (1023 - K1) * 7/8 in 1/256 octave
+            v_k := to_unsigned(1023, 10) - s_g(0)(12 downto 3);
+            v_k := v_k - shift_right(v_k, 3);
+            v_c := resize(v_k(7 downto 0), 12) + 256;
+            case to_integer(v_k(9 downto 8)) is
+                when 0 => k_kxe <= v_c;
+                when 1 => k_kxe <= shift_left(v_c, 1);
+                when 2 => k_kxe <= shift_left(v_c, 2);
+                when others => k_kxe <= shift_left(v_c, 3);
+            end case;
+            -- K2: 4 octaves of cells across (0.5 .. 8)
             v_k := s_g(1)(12 downto 3);
-            k_cells <= to_unsigned(256, 11) + resize(shift_right(v_k, 1), 11) + resize(shift_right(v_k, 2), 11);
+            v_c := resize(v_k(7 downto 0), 12) + 256;
+            case to_integer(v_k(9 downto 8)) is
+                when 0 => k_cells <= shift_right(v_c, 1);
+                when 1 => k_cells <= v_c;
+                when 2 => k_cells <= shift_left(v_c, 1);
+                when others => k_cells <= shift_left(v_c, 2);
+            end case;
+            -- K3: the v0.5 curve doubled about the photo (127): -127 .. 283, sign apart
             v_k := s_g(2)(12 downto 3);
-            k_pinch <= resize(shift_right(v_k, 3), 8) + resize(shift_right(v_k, 4), 8) + resize(shift_right(v_k, 6), 8);
-            k_tear  <= s_g(3)(12 downto 4);
-            k_warp  <= s_g(4)(12 downto 7);
+            k_pq <= resize(shift_right(v_k, 3), 8) + resize(shift_right(v_k, 4), 8) + resize(shift_right(v_k, 6), 8);
+            if k_pq >= 64 then
+                k_pinch <= shift_left(resize(k_pq, 9), 1) - 127; k_pneg <= '0';
+            else
+                k_pinch <= 127 - shift_left(resize(k_pq, 9), 1); k_pneg <= '1';
+            end if;
+            -- K5: K5 - 256 (Q8, the photo's 1.0 at 512), sign apart
+            v_k := s_g(3)(12 downto 3);
+            if v_k >= 256 then k_tear <= v_k - 256; k_tneg <= '0';
+            else k_tear <= 256 - v_k; k_tneg <= '1'; end if;
+            k_warp  <= signed(shift_left(resize(s_g(4)(12 downto 7), 8), 1)) - 9;
             k_hi    <= s_g(5)(12 downto 5);
 
-            -- serial products: slot p = zc/32 (2..10), phase 0 load, 1..18 step, 20 store
+            -- serial products: slot p = zc/32 (2..9), phase 0 load, 1..18 step, 20 store
             v_p  := to_integer(s_zc(9 downto 5));
             v_ph := to_integer(s_zc(4 downto 0));
             q_p <= s_zc(9 downto 5);
-            if s_zone = '1' and v_p >= 2 and v_p <= 10 and v_ph = 0 then q_ld <= '1'; else q_ld <= '0'; end if;
-            if s_zone = '1' and v_p >= 2 and v_p <= 10 and v_ph >= 1 and v_ph <= 18 then q_st <= '1'; else q_st <= '0'; end if;
-            for k in 1 to 9 loop
+            if s_zone = '1' and v_p >= 2 and v_p <= 9 and v_ph = 0 then q_ld <= '1'; else q_ld <= '0'; end if;
+            if s_zone = '1' and v_p >= 2 and v_p <= 9 and v_ph >= 1 and v_ph <= 18 then q_st <= '1'; else q_st <= '0'; end if;
+            for k in 1 to 8 loop
                 if s_zone = '1' and v_p = k + 1 and v_ph = 20 then q_wr(k) <= '1'; else q_wr(k) <= '0'; end if;
             end loop;
             if q_ld = '1' then
@@ -459,9 +491,8 @@ begin
                     when 4 => m_a <= resize(k_cells, 20);   m_b <= resize(f_tvk, 18);
                     when 5 => m_a <= resize(k_cells, 20);   m_b <= to_unsigned(32270, 18);
                     when 6 => m_a <= resize(k_tear, 20);    m_b <= resize(k_cells, 18);
-                    when 7 => m_a <= resize(k_rq, 20);      m_b <= resize(k_rq, 18);
-                    when 8 => m_a <= resize(f_kq, 20);      m_b <= to_unsigned(145, 18);
-                    when 9 => m_a <= resize(f_kx, 20);      m_b <= to_unsigned(518, 18);
+                    when 7 => m_a <= resize(k_kxe, 20);     m_b <= to_unsigned(659, 18);
+                    when 8 => m_a <= resize(f_kx, 20);      m_b <= to_unsigned(518, 18);
                     when others => m_a <= resize(s_m4, 20); m_b <= resize(s_m4, 18);
                 end case;
             end if;
@@ -476,16 +507,15 @@ begin
             if q_wr(2) = '1' then f_h0 <= C_PHC - v_pr(23 downto 0); end if;
             if q_wr(3) = '1' then f_vinc <= v_pr(27 downto 8); end if;
             if q_wr(4) = '1' then f_v0 <= C_PVC + f_roll - v_pr(23 downto 0); end if;
-            if q_wr(5) = '1' then f_tamp <= v_pr(18 downto 8); end if;
-            if q_wr(6) = '1' then f_kq <= v_pr(19 downto 4); end if;
-            if q_wr(7) = '1' then f_kx <= to_unsigned(988, 12) + resize(v_pr(23 downto 12), 12); end if;
-            if q_wr(8) = '1' then
+            if q_wr(5) = '1' then f_tamp <= v_pr(20 downto 8); f_tneg <= k_tneg; end if;
+            if q_wr(6) = '1' then f_kx <= v_pr(21 downto 8); end if;
+            if q_wr(7) = '1' then
                 f_ky <= v_pr(21 downto 10);
                 if t_sd = '1' then
-                    f_kx <= f_kx + resize(shift_right(f_kx, 2), 12) + resize(shift_right(f_kx, 4), 12) + resize(shift_right(f_kx, 6), 12);
+                    f_kx <= f_kx + resize(shift_right(f_kx, 2), 14) + resize(shift_right(f_kx, 4), 14) + resize(shift_right(f_kx, 6), 14);
                 end if;
             end if;
-            if q_wr(9) = '1' then
+            if q_wr(8) = '1' then
                 if s_n4 = '1' then f_spd <= -signed(resize(v_pr(17 downto 6), 16));
                 else f_spd <= signed(resize(v_pr(17 downto 6), 16)); end if;
             end if;
@@ -623,14 +653,15 @@ begin
                     lm_a <= resize(unsigned(r_vq2), 19); lm_b <= resize(k_pinch, 16);
                     lm_h <= (others => '0'); lm_l <= (others => '0'); lm_on <= '1';
                 when 40 =>
-                    n_vp <= v_pr(15 downto 7);
+                    if k_pneg = '1' then n_vp <= -signed(resize(v_pr(15 downto 7), 10));
+                    else n_vp <= signed(resize(v_pr(15 downto 7), 10)); end if;
                     lm_a <= resize(n_a, 19); lm_b <= resize(f_tamp, 16);
                     lm_h <= (others => '0'); lm_l <= (others => '0'); lm_on <= '1';
                 when 58 =>
-                    lm_a <= v_pr(18 downto 0); lm_b <= resize(t_ta, 16);
+                    lm_a <= v_pr(19 downto 1); lm_b <= resize(t_ta, 16);
                     lm_h <= (others => '0'); lm_l <= (others => '0'); lm_on <= '1';
                 when 76 =>
-                    n_amp <= v_pr(26 downto 11);
+                    n_amp <= v_pr(27 downto 16);
                     lm_a <= resize(n_dy, 19); lm_b <= resize(f_ky, 16);
                     lm_h <= (others => '0'); lm_l <= (others => '0'); lm_on <= '1';
                 when 94 =>
@@ -670,7 +701,7 @@ begin
 
             -- commit at the next line start
             if g_start = '1' then
-                l_vp <= n_vp; l_dyn2 <= n_dyn2; l_ty <= n_ty; l_shp <= n_shp; l_amp <= n_amp(15 downto 4); l_tkj <= n_tkj;
+                l_vp <= n_vp; l_dyn2 <= n_dyn2; l_ty <= n_ty; l_shp <= n_shp; l_amp <= n_amp; l_tkj <= n_tkj;
                 l_pb <= n_pb; l_nz <= n_nz;
             end if;
         end if;
@@ -740,19 +771,19 @@ begin
             end if;
 
             -- 2: tear ROM (r_tq); source * warp
-            p2_ws <= resize(resize(shift_right(p1_s8, 2), 6) * signed('0' & k_warp), 13);
+            p2_ws <= resize(resize(shift_right(p1_s8, 2), 6) * k_warp, 14);
 
             -- 3: tear shape; warp terms
             p3_sh <= signed(r_tq);
-            p3_gw <= resize(shift_right(p2_ws, 5) + shift_right(p2_ws, 7), 8);
+            p3_gw <= resize(shift_right(p2_ws, 5) + shift_right(p2_ws, 7), 9);
             p3_ew <= resize(shift_right(p2_ws, 3), 10);
 
-            -- 4: tear product (shape * amp / 64)
-            p4_d <= resize(p3_sh * signed('0' & l_amp(11 downto 2)), 19);
+            -- 4: tear product (shape * amp)
+            p4_d <= resize(p3_sh * signed('0' & l_amp), 21);
 
-            -- 5: torn H phase (displacement = shape * amp / 128)
+            -- 5: torn H phase (displacement = shape * amp / 2, mod one cell; Tear < 0 tears the other way)
             v_d := resize(shift_right(p4_d, 1), 21);
-            if f_flip = '1' then p5_hb <= p_hm(4) - unsigned(v_d(15 downto 0));
+            if (f_flip xor f_tneg) = '1' then p5_hb <= p_hm(4) - unsigned(v_d(15 downto 0));
             else p5_hb <= p_hm(4) + unsigned(v_d(15 downto 0)); end if;
 
             -- 6: S ROM address (fold from the seam), ring |dx| / 8, cut side and noise fade
@@ -770,17 +801,17 @@ begin
             if v_u(14 downto 13) /= "00" then p6_fd <= (others => '0'); else p6_fd <= 7 - v_u(12 downto 10); end if;
 
             -- 7: S ROM (r_sq); |dx| * kx
-            p7_m <= p6_ax * f_kx(11 downto 3);
+            p7_m <= p6_ax * f_kx(13 downto 3);
             p7_dng <= p6_dng; p7_rs <= p6_rs; p7_fd <= p6_fd;
 
             -- 8: S value; |dxn| (Q8, saturated 1023); noise * fade
             p8_s <= signed(resize(unsigned(r_sq), 11)) - 160;
-            if p7_m(17) = '1' then p8_adn <= (others => '1'); else p8_adn <= p7_m(16 downto 7); end if;
+            if p7_m(19 downto 17) /= "000" then p8_adn <= (others => '1'); else p8_adn <= p7_m(16 downto 7); end if;
             p8_nt <= resize(l_nz * signed('0' & p7_fd), 13);
             p8_dng <= p7_dng; p8_rs <= p7_rs;
 
             -- 9: G = S + V * pinch + warp; square ROM address; signed dxn / 8 (clamped +-48); noise term
-            p9_g <= resize(p8_s, 12) + signed(resize(l_vp, 12)) + resize(p_gw(8), 12);
+            p9_g <= resize(p8_s, 12) + resize(l_vp, 12) + resize(p_gw(8), 12);
             r_qa <= p8_adn(9 downto 1);
             if p8_adn > 384 then v_n := to_signed(48, 10); else v_n := signed(resize(p8_adn(9 downto 3), 10)); end if;
             if p8_dng = '1' then p9_dxc <= resize(-v_n, 7); else p9_dxc <= resize(v_n, 7); end if;
@@ -818,14 +849,18 @@ begin
             else p13_er <= v_e(8 downto 0); end if;
             p13_m2 <= p12_m2(9 downto 2);
 
-            -- 14: glow index product t = e * m; red one-shot index (fired by the cell key's leading edge)
+            -- 14: glow index product t = e * m; red index: Crescent = a one-shot fired by the cell key's
+            -- leading edge; Core = the distance outside the ring (hot inside it)
             p14_t <= resize(p13_er * signed('0' & p13_m2), 18);
             if p_cell(13) = '1' and p14_cprev = '0' then
                 p14_xt <= x13(19 downto 8); p14_xtv <= '1'; r_ra <= (others => '0');
             else
                 v_r := x13(19 downto 8) - p14_xt;
-                if f_ember = '1' then v_r := shift_right(v_r, 3); else v_r := shift_right(v_r, 1); end if;
+                v_r := shift_right(v_r, 1);
                 if p14_xtv = '0' or v_r > 255 then r_ra <= (others => '1'); else r_ra <= v_r(7 downto 0); end if;
+            end if;
+            if f_ember = '1' then
+                if p13_er <= 0 then r_ra <= (others => '0'); else r_ra <= '0' & unsigned(p13_er(7 downto 1)); end if;
             end if;
             p14_cprev <= p_cell(13) and s_gav_sr(12);
             if s_gav_sr(12) = '0' then p14_xtv <= '0'; end if;
@@ -842,7 +877,7 @@ begin
 
             -- 17: glow word (fabric copy); interior red
             p17_gq <= r_gq;
-            if p_int(16) = '1' then v_rc := to_unsigned(38, 8) + shift_right(p16_r8 - 36, 2); else v_rc := p16_r8; end if;
+            if p_int(16) = '1' and f_ember = '0' then v_rc := to_unsigned(38, 8) + shift_right(p16_r8 - 36, 2); else v_rc := p16_r8; end if;
             p17_rc <= v_rc;
             p_int(17) <= p_int(16);
 

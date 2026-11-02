@@ -196,7 +196,7 @@ Commit the row along with the program's own files.
 | fern | not started | | |
 | goblet | built v0.6.0, awaiting HW | v0.6.0 | Ron 11-02 (on v0.5.1, before flashing it): likes it a lot; just widen the knob ranges where it makes sense. v0.6.0: K1 Stripes x0.25..x4 (was x0.5..x2); K2 Width x0.4..x3 (was x0.6..x1.6; narrow repeats the goblet ~3x, wide zooms into the bowl); K5 Melt square law, default unchanged, top x2.9 (video bends to +-176 px); Osc oscillator 4x on a cubic Melt curve (Osc default still the photo, full Melt zigzags the stripes); K3 / K4 / K6 / P12 unchanged; Hourglass preset no longer turns the stripes off. Default frame bit-exact with v0.5 (model). 94.7 % LC, 25 EBR, router2; HD HDMI seed 3, HD Dual seed 2, rest seed 1. Ron 11-02: approved the diag preview; merged and rebuilt with the same seeds |
 | greenroom | not started | | |
-| halo | not started | | |
+| halo | built v0.6.0, awaiting HW | v0.6.0 | Ron 11-02 (on v0.5.1): K1, K2, K3, K5, K6 +100 % range both ways; S9 (written "P9") a more prominent change. v0.6.0 (diag approved 11-02, merged): each side of the photo setting doubled: K1 Rings x0.19..x2.25 exp (photo at 68 %), K2 Cells 0.5..8 exp (photo at 50 %), K3 Pinch -100..220 % (negative = lens columns), K5 Tear -100..300 % (negative tears the other way), K6 Warp -15..185 %; S9 Ember Crescent / Core (red-hot inside every ring, brown surround). 92 % LC, 23 EBR, router2 (HD HDMI s3, rest s1) |
 | idol | not started | | |
 | jukebox | not started | | |
 | kiln | not started | | |
@@ -267,7 +267,7 @@ Commit the row along with the program's own files.
 | [fern](fern/SUMMARY.md) | v0.5.0 | 93 % (tight) | 24 | router1 | HD HDMI seed 2 | measured field |
 | [goblet](goblet/SUMMARY.md) | v0.6.0 | 94.7 % (tight) | 25 | router2 | HD HDMI seed 3, HD Dual seed 2 | measured field |
 | [greenroom](greenroom/SUMMARY.md) | v0.5.0 | 95 % (**FULL**) | 25 | router1 | 6/6 seed 1 | collage |
-| [halo](halo/SUMMARY.md) | v0.5.0 | 89 % (room) | 23 | router2 | 6/6 seed 1 | oscillator/field |
+| [halo](halo/SUMMARY.md) | v0.6.0 | 92 % (tight) | 23 | router2 | HD HDMI seed 3 | oscillator/field |
 | [idol](idol/SUMMARY.md) | v0.5.0 | 89 % (room) | 25 | router2 | HD Dual seed 3 | oscillator/field |
 | [jukebox](jukebox/SUMMARY.md) | v0.5.0 | 84 % (room) | 18 | router2 | HD Dual seed 4 | oscillator/field |
 | [kiln](kiln/SUMMARY.md) | v0.5.0 | 93 % (tight) | 24 | router2 | HD Analog seed 3, HD Dual seed 2 | oscillator/field |
