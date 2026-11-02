@@ -6,7 +6,7 @@
 processing_delay_clks = 32
 program_id = "com.czartroniks.fern"
 program_name = "Fern"
-program_version = "0.5.1"
+program_version = "0.5.2"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -112,7 +112,7 @@ name_label = "Arrow"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 438
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
@@ -121,12 +121,12 @@ name = "Photo"
 
 [[preset]]
 name = "Wireframe"
-rotary_potentiometer_4 = 120
+rotary_potentiometer_4 = 316
 rotary_potentiometer_5 = 200
 
 [[preset]]
 name = "Deep Arrow"
-linear_potentiometer_12 = 1000
+linear_potentiometer_12 = 757
 rotary_potentiometer_3 = 760
 
 [[preset]]

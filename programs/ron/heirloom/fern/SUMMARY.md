@@ -72,11 +72,11 @@ Glides: K1, K2, K4, K5, K6 and P12 move 1/8 of the gap per field (deadband 4).
 
 | Control | Photo element it drives |
 |---|---|
-| **P12 Arrow** | The chevron depth (the G law × 0.25 … 2). 0 % = a shallow bow, with the stems near-vertical flames; 43 % = the photo; 100 % = deep converging arrowheads, and the dart stretches with them. |
+| **P12 Arrow** | The chevron depth (the G law × 1/16 … 3; v0.5.2). Lower half in octaves: 0 % = near-straight vertical arms, 12.5 % = 1/8, 25 % = 1/4 (the old 0 %), 37.5 % = 1/2, 50 % = the photo. Upper half linear: 75 % = 2× (the old 100 %), 100 % = 3×, deep converging arrowheads, and the dart stretches with them. The ramp's pole is at ~5.2×. |
 | K1 Fronds | How many nested arms: arm density 0.5× … 2× (the ramp is scaled); centre = the photo. |
-| K2 Stems | Stem spacing: frequency 0.5× … 2× (period 412 … 103 px); centre = the photo. |
+| K2 Stems | Stem spacing: frequency 0.25× … 4×, one octave per quarter turn (period 824 … 52 px); centre = the photo; the old 0.5× … 2× is the middle half (v0.5.2). |
 | K3 Speed | Bipolar, still at the centre ±8, square law. The arms stream outward (default 600 ≈ 8–15 px/s) or inward; max ≈ 5–10 px per field. The maze drift and the scanline roll keep running at any setting. |
-| K4 Flesh | Frond thickness: key level −8.5 … +11 px, from a thin wireframe to fat flames; centre = the photo. |
+| K4 Flesh | Frond thickness: key level −18.5 … +21 px (v0.5.2, twice v0.5.1's), from a bare wireframe to flames everywhere (the key clamps at ±32 px); centre = the photo. |
 | K5 Maze | Maze curl: phase modulation by the arm phase, 0 … 3.4 cycles, from straight scan stripes to a tight curly maze. 27 % (0.92 cycle) = the photo. |
 | K6 Bend | How far the source bends the arms, the boundary, the dart and the maze: 0 … ±250 px at full-scale luma. Default 25 % = ±63 px. |
 | S7 Mirror | Photo (mirrored ">") / Sweep (the top half bends the other way: a one-way sweep). |
@@ -159,6 +159,11 @@ Glides: K1, K2, K4, K5, K6 and P12 move 1/8 of the gap per field (deadband 4).
   - The default renders use a sim-only copy whose K5 glide powers up at the default (see Status).
 
 ## Status
+- **v0.5.2 built 2026-11-02 (Ron's notes on production Fern), NOT flashed.** K2 Stems 0.25x .. 4x (one octave per quarter turn), K4 Flesh offset doubled (+-40 Q.1), P12 Arrow 1/16x .. 1x in octaves over the lower half and linear 1x .. 3x over the upper. The photo default moved to 50 % (initial 512; Deep Arrow preset 1000 -> 757, Wireframe K4 120 -> 316 keep their looks). The K5 glide now powers up at its 280 default.
+  - **3x depth needed engine headroom:** e_gp 12 bits; divider 17 quotient bits (starts at 2^18, so den must stay above 2^18; its minimum at 3x is 454,913); e_m 17 bits, moved to the multiplier's 18-bit operand; e_xa 12; e_c0m 16; n_dc / l_dc 16; b_c 28 bits with a clamp at c4 = 196608 so the bend can't wrap it; f_ps 12 bits (4x stems at psk 636 reach 2539). These were checked numerically over every |dy| at Arrow 1/16x / 1x / 3x x Fronds 0.5x / 1x / 2x x sx2 2-4 x Sweep. The ramp's pole is at ~5.2x.
+  - Post-route Fmax (ROUTER1): HD Analog s1 77.71, HD HDMI **s6 81.94 (hand re-route; the builder's s3 was 74.27)**, HD Dual s4 78.01, SD Analog s1 75.55, SD HDMI s1 70.43, SD Dual s1 71.55 MHz; 7129-7191 / 7680 LC. A plain rebuild lands HD HDMI s3 again.
+  - Ron's Green palette was "all green". That matches the wrapped-chroma bug (memory running_sum_chroma_offset) if his device still held v0.5.0. v0.5.1+ carries the fix; the intended Green is green fronds on a magenta / coral maze over a blue-violet ground. Check it on hardware before redesigning.
+  - The v0.5.1 vmprog is kept at `.heirloom_work/rb_fern/fern_v0.5.1.vmprog`.
 - **v0.5.1 built 2026-11-01: output-filter resync fix, NOT flashed.** The output running-sum filters now take neutral input off the generated avid and snap back to neutral once the box is full of blank samples, so a glitched block-RAM / clock sample can no longer leave a permanent wrapped colour offset (fern_diag hardware capture 2026-11-01). Production v0.5 (resync only; the v0.6 work is in the diag). HD Dual missed on the builder's six seeds and was hand re-routed (router1 s14, installed + repacked). Post-route Fmax: HD Analog s3 78.95, SD Analog s1 73.26, HD HDMI s4 76.49, SD HDMI s1 71.05, HD Dual router1 s14 78.54 (hand re-route), SD Dual s1 76.83 MHz; 7124-7180 / 7680 LC. Earlier hand-installed HD seeds are gone (new netlist).
 - **v0.5.0 built 2026-10-27, NOT flashed.** **ROUTER1**
   (`NEXTPNR_ROUTER="--router router1" ./build_heirloom.sh fern`). **Build seeds: HD HDMI = seed 2** (seed 1
