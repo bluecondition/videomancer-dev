@@ -133,6 +133,7 @@ The measurements and fits are in `.heirloom_work/rb_kiln/notes.md`.
     the model.
 
 ## Status
+- **v0.5.1 built 2026-11-01: output-filter resync fix, NOT flashed.** The output running-sum filters now take neutral input off the generated avid and snap back to neutral once the box is full of blank samples, so a glitched block-RAM / clock sample can no longer leave a permanent wrapped colour offset (fern_diag hardware capture 2026-11-01). Post-route Fmax: HD Analog s3 76.41, SD Analog s1 75.09, HD HDMI s1 77.20, SD HDMI s1 69.09, HD Dual s2 79.31, SD Dual s1 73.84 MHz; 7142-7164 / 7680 LC. Earlier hand-installed HD seeds are gone (new netlist).
 - **v0.5.0 (2026-10-27), router2, `build_heirloom.sh`.**  Built, NOT flashed.
 - **Build seeds:** **HD Analog = seed 3** (seeds 1–2 missed), **HD Dual = seed 2** (seed 1 missed); the other four are
   seed 1.

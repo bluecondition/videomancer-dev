@@ -221,6 +221,7 @@ D(x) shading and has no camera background.
     7098 LC.
 
 ## Status
+- **v0.6.2 built 2026-11-01: output-filter resync fix, NOT flashed.** The output running-sum filters now take neutral input off the generated avid and snap back to neutral once the box is full of blank samples, so a glitched block-RAM / clock sample can no longer leave a permanent wrapped colour offset (fern_diag hardware capture 2026-11-01). The gate bit rides a spare bit of the chroma ring. The earlier hand-routed v0.6.1 bitstreams are gone; the builder closed all six on seed 1. Post-route Fmax: HD Analog s1 86.30, SD Analog s1 81.38, HD HDMI s1 89.34, SD HDMI s1 91.14, HD Dual s1 81.75, SD Dual s1 83.13 MHz; 7405-7422 / 7680 LC. Earlier hand-installed HD seeds are gone (new netlist).
 - **v0.6.1** built 2026-10-30. **All six bitstreams were routed by hand and packed** (`vmprog_pack.py`); a plain
   `./build_heirloom.sh beacon` will NOT reproduce them, and the builder's router2 misses HD timing on most
   seeds at this fill.

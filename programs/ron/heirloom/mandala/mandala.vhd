@@ -305,6 +305,7 @@ architecture mandala of program_top is
     signal rb_q, rb_q2 : std_logic_vector(29 downto 0) := "0000000000" & "1000000000" & "1000000000";
     signal rs_q, rs_q2 : std_logic_vector(2 downto 0) := "111";
     signal s_ysum, s_usum, s_vsum, s_ud, s_vd : unsigned(13 downto 0) := (others => '0');
+    signal s_bxh : std_logic_vector(7 downto 0) := (others => '0');   -- generated avid of the last 8 ring inputs
     signal q23_y, q24_y, q25_y, q25_yf : unsigned(9 downto 0) := to_unsigned(64, 10);
     signal q24_u, q24_v, q25_u, q25_v : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal q27_y, q28_y : unsigned(9 downto 0) := to_unsigned(64, 10);
@@ -873,20 +874,24 @@ begin
 
             -- 22: box sums over the ring window: 8 taps at 1080, 4 at 720p / SD (the original's
             -- band-limited, soft stripes; luma box then [1 2 1], chroma box pair).  The ring's input
-            -- is forced to black/neutral in the vblank zone and the sums re-seeded there.
+            -- is forced to black/neutral off the generated avid, so the sums resync to 4 or 8 x neutral
+            -- in every blanking interval (once 8 blank samples are in), not just once a field.
             s_wp <= s_wp + 1;
             if t_b8 = '1' then rb_ra <= s_wp - 1; else rb_ra <= s_wp - 5; end if;
             rs_ra <= s_wp - (C_LAT - 3);
-            if s_zone = '1' then
-                v_iy := (others => '0'); v_iu := to_unsigned(512, 10); v_iv := to_unsigned(512, 10);
+            if s_gav_sr(21) = '0' then
+                v_iy := to_unsigned(64, 10); v_iu := to_unsigned(512, 10); v_iv := to_unsigned(512, 10);
             else
                 v_iy := q21_y; v_iu := q21_u; v_iv := q21_v;
             end if;
             rb_wd <= std_logic_vector(v_iy) & std_logic_vector(v_iu) & std_logic_vector(v_iv);
-            if s_zone = '1' and s_zc = 40 then
-                s_ysum <= (others => '0');
-                if t_b8 = '1' then s_usum <= to_unsigned(2048, 14); s_vsum <= to_unsigned(2048, 14);
-                else s_usum <= to_unsigned(4096, 14); s_vsum <= to_unsigned(4096, 14); end if;
+            s_bxh <= s_bxh(6 downto 0) & s_gav_sr(21);
+            if s_bxh = "00000000" then
+                if t_b8 = '1' then
+                    s_ysum <= to_unsigned(256, 14); s_usum <= to_unsigned(2048, 14); s_vsum <= to_unsigned(2048, 14);
+                else
+                    s_ysum <= to_unsigned(512, 14); s_usum <= to_unsigned(4096, 14); s_vsum <= to_unsigned(4096, 14);
+                end if;
             else
                 s_ysum <= s_ysum + unsigned(rb_wd(29 downto 20)) - unsigned(rb_q2(29 downto 20));
                 s_usum <= s_usum + unsigned(rb_wd(19 downto 10)) - unsigned(rb_q2(19 downto 10));

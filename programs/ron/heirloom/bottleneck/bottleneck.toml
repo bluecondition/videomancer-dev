@@ -6,7 +6,7 @@
 processing_delay_clks = 20
 program_id = "com.czartroniks.bottleneck"
 program_name = "Bottleneck"
-program_version = "0.5.0"
+program_version = "0.5.1"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"

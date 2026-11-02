@@ -236,6 +236,7 @@ architecture jukebox of program_top is
     type t_u10 is array (natural range <>) of unsigned(9 downto 0);
     signal s_csu, s_csv : t_u10(0 to 8) := (others => to_unsigned(512, 10));
     signal s_boxu, s_boxv, s_boxud, s_boxvd : unsigned(13 downto 0) := to_unsigned(4096, 14);
+    signal s_bxh : std_logic_vector(7 downto 0) := (others => '0');   -- generated avid of the last 8 box inputs
     signal s_y22, s_y23, s_y24, s_y25, s_y26, s_y27x, s_yf27 : unsigned(9 downto 0) := to_unsigned(64, 10);
     signal s_u27, s_v27 : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal s_y28 : unsigned(9 downto 0) := to_unsigned(64, 10);
@@ -762,10 +763,14 @@ begin
             -- 21: Y U V, clamped (drawn luma <= 940 -> ~777 after the 13/16 scale)
             v_y := p20_ya + p20_yb;
             if v_y > 940 then s_y21 <= to_unsigned(940, 10); else s_y21 <= v_y(9 downto 0); end if;
+            -- chroma neutral off the generated avid, so the 8-sums in p_out resync in every blanking interval
             v_u := p20_ua + p20_ub;
-            if v_u < 0 then s_u21 <= (others => '0'); elsif v_u > 1023 then s_u21 <= (others => '1'); else s_u21 <= unsigned(v_u(9 downto 0)); end if;
+            if s_gav_sr(19) = '0' then s_u21 <= to_unsigned(512, 10);
+            elsif v_u < 0 then s_u21 <= (others => '0'); elsif v_u > 1023 then s_u21 <= (others => '1'); else s_u21 <= unsigned(v_u(9 downto 0)); end if;
             v_u := p20_va + p20_vb;
-            if v_u < 0 then s_v21 <= (others => '0'); elsif v_u > 1023 then s_v21 <= (others => '1'); else s_v21 <= unsigned(v_u(9 downto 0)); end if;
+            if s_gav_sr(19) = '0' then s_v21 <= to_unsigned(512, 10);
+            elsif v_u < 0 then s_v21 <= (others => '0'); elsif v_u > 1023 then s_v21 <= (others => '1'); else s_v21 <= unsigned(v_u(9 downto 0)); end if;
+            s_bxh <= s_bxh(6 downto 0) & s_gav_sr(19);
         end if;
     end process p_pix;
 
@@ -780,10 +785,16 @@ begin
         variable v_dl : unsigned(9 downto 0);
     begin
         if rising_edge(clk) then
+            -- the running 8-sums snap back to neutral once 8 blank samples are in, so a glitched sample can't
+            -- offset the chroma for good
             s_csu(0) <= s_u21; s_csv(0) <= s_v21;
             for i in 1 to 8 loop s_csu(i) <= s_csu(i - 1); s_csv(i) <= s_csv(i - 1); end loop;
-            s_boxu <= s_boxu + s_u21 - s_csu(7);
-            s_boxv <= s_boxv + s_v21 - s_csv(7);
+            if s_bxh = "00000000" then
+                s_boxu <= to_unsigned(4096, 14); s_boxv <= to_unsigned(4096, 14);
+            else
+                s_boxu <= s_boxu + s_u21 - s_csu(7);
+                s_boxv <= s_boxv + s_v21 - s_csv(7);
+            end if;
             s_boxud <= s_boxu; s_boxvd <= s_boxv;
             v_sc := resize(s_boxu, 15) + s_boxud; s_u27 <= v_sc(13 downto 4);
             v_sc := resize(s_boxv, 15) + s_boxvd; s_v27 <= v_sc(13 downto 4);

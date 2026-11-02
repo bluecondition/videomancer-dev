@@ -108,6 +108,7 @@ described above. Every control acts in both modes; K6 is the wedge in Osc and th
   - colours in the hardware convention (u = Cr).
 
 ## Status
+- **v0.5.1 built 2026-11-01: output-filter resync fix, NOT flashed.** The output running-sum filters now take neutral input off the generated avid and snap back to neutral once the box is full of blank samples, so a glitched block-RAM / clock sample can no longer leave a permanent wrapped colour offset (fern_diag hardware capture 2026-11-01). Also gated: the mid-pipe luma 16-box and the key-flag box (up to ~8 px change at the line edges). Post-route Fmax: HD Analog s1 74.25, SD Analog s1 79.68, HD HDMI s1 80.36, SD HDMI s1 86.50, HD Dual s1 75.67, SD Dual s1 82.07 MHz; 6832-6865 / 7680 LC. Earlier hand-installed HD seeds are gone (new netlist).
 - **v0.5.0 built 2026-10-21, router2, not flashed.**
   - **Build seeds: SD Analog = seed 2** (seed 1 stalled the router) and **HD HDMI = seed 2** (seed 1
     missed timing). The other four are seed 1.

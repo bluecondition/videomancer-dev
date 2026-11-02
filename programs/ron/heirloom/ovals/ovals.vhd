@@ -951,11 +951,17 @@ begin
             end if;
 
             -- 20..25: output conditioning (chroma [1 2 2 2 2 2 2 2 1]/16 as two
-            -- adjacent 8-sums, luma [1 2 1]; centre at stage 24 -> 25)
+            -- adjacent 8-sums, luma [1 2 1]; centre at stage 24 -> 25).  p19 is neutral off the generated
+            -- avid, so the running 8-sums snap back to neutral once 8 blank samples are in (s_gav_sr(19 to 26)
+            -- = the avid p19 was gated with, 1..8 clocks back): a glitched sample can't offset the chroma for good.
             s_csu(0) <= p19_u; s_csv(0) <= p19_v;
             for i in 1 to 8 loop s_csu(i) <= s_csu(i - 1); s_csv(i) <= s_csv(i - 1); end loop;
-            s_boxu <= s_boxu + p19_u - s_csu(7);
-            s_boxv <= s_boxv + p19_v - s_csv(7);
+            if s_gav_sr(19 to 26) = "00000000" then
+                s_boxu <= to_unsigned(4096, 14); s_boxv <= to_unsigned(4096, 14);
+            else
+                s_boxu <= s_boxu + p19_u - s_csu(7);
+                s_boxv <= s_boxv + p19_v - s_csv(7);
+            end if;
             s_boxud <= s_boxu; s_boxvd <= s_boxv;
             v_sc := resize(s_boxu, 15) + s_boxud; s_u22 <= v_sc(13 downto 4);
             v_sc := resize(s_boxv, 15) + s_boxvd; s_v22 <= v_sc(13 downto 4);

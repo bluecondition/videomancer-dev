@@ -95,6 +95,7 @@ into geometry, never to the output.
 - **ROMs / RAM:** 6 x 512x8 colourizer, 1 x 128x16 line table, 1 x column table (16 x 16 in one EBR, `no_rw_check`).
 
 ## Status
+- **v0.6.1 built 2026-11-01: output-filter resync fix, NOT flashed.** The output running-sum filters now take neutral input off the generated avid and snap back to neutral once the box is full of blank samples, so a glitched block-RAM / clock sample can no longer leave a permanent wrapped colour offset (fern_diag hardware capture 2026-11-01). Post-route Fmax: HD Analog s1 79.66, SD Analog s1 74.55, HD HDMI s2 76.95, SD HDMI s1 72.13, HD Dual s1 78.60, SD Dual s1 76.98 MHz; 7240-7248 / 7680 LC. Earlier hand-installed HD seeds are gone (new netlist).
 **v0.6.0 built 2026-11-01, NOT flashed.** 7226–7252/7680 LC (94 %), 8/32 EBR, router2. Fmax post-route:
 | Config | Seed | Fmax | HDMI HSYNC − clk / closest data bit |
 |---|---|---|---|

@@ -132,6 +132,7 @@ Glides: 1/8 of the gap per field, ±4 hold.
   - 4 × 4 region-mean |ΔRGB| against the photo: 4.0. Integer model against the photo: MAE 16.1 with Melt 0.
 
 ## Status
+- **v0.5.1 built 2026-11-01: output-filter resync fix, NOT flashed.** The output running-sum filters now take neutral input off the generated avid and snap back to neutral once the box is full of blank samples, so a glitched block-RAM / clock sample can no longer leave a permanent wrapped colour offset (fern_diag hardware capture 2026-11-01). The once-a-field zone reseed is replaced by the per-line resync. Post-route Fmax: HD Analog s1 77.28, SD Analog s1 85.47, HD HDMI s1 82.93, SD HDMI s1 83.77, HD Dual s1 82.94, SD Dual s1 87.32 MHz; 6696-6718 / 7680 LC. Earlier hand-installed HD seeds are gone (new netlist).
 - **v0.5.0 built 2026-10-27, NOT flashed.** router2. Post-route Fmax:
   - HD Analog 84.78 MHz on **seed 2** (seed 1 stalled the router under machine load).
   - HD HDMI 86.63, HD Dual 78.72 MHz (seed 1).

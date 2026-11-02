@@ -125,6 +125,7 @@ P12, K1, K2 and K4 glide (1/8 of the gap per field). The control sheet is
   - colours in the hardware convention (u = Cr).
 
 ## Status
+- **v0.5.1 built 2026-11-01: output-filter resync fix, NOT flashed.** The output running-sum filters now take neutral input off the generated avid and snap back to neutral once the box is full of blank samples, so a glitched block-RAM / clock sample can no longer leave a permanent wrapped colour offset (fern_diag hardware capture 2026-11-01). A 13-FF g_avid chain was added for the gate. Post-route Fmax: HD Analog s2 81.02, SD Analog s1 75.31, HD HDMI s3 75.49, SD HDMI s1 79.98, HD Dual s4 85.41, SD Dual s1 72.71 MHz; 7076-7103 / 7680 LC. Earlier hand-installed HD seeds are gone (new netlist).
 - **v0.5.0 built 2026-10-21, router2, 6/6 on seed 1, not flashed.**
   - Post-route Fmax: HD Analog 74.28, HD HDMI 76.84, HD Dual 74.67, SD Analog 71.73, SD HDMI 59.39,
     SD Dual 71.55 MHz.

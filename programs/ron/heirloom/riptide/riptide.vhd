@@ -412,13 +412,14 @@ architecture riptide of program_top is
     signal s_cd_wa : unsigned(7 downto 0) := (others => '0');
     signal s_cd_q, s_cd_r : std_logic_vector(15 downto 0) := x"8080";
     signal s_boxu, s_boxv, s_boxud, s_boxvd : unsigned(11 downto 0) := to_unsigned(1024, 12);
+    signal s_bxh : std_logic_vector(7 downto 0) := (others => '0');   -- generated avid of the last 8 box inputs
     signal s_y13, s_y14, s_y15, s_y16, s_y17, s_y18x, s_yf18 : unsigned(9 downto 0) := to_unsigned(64, 10);
     signal s_u18, s_v18 : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal s_y19, s_y20 : unsigned(9 downto 0) := to_unsigned(64, 10);
     signal s_u19, s_v19, s_u20, s_v20 : unsigned(9 downto 0) := to_unsigned(512, 10);
 
     -- short FF taps of the generated avid (the long delay is the sync ring)
-    signal s_gav_sr : std_logic_vector(0 to 8) := (others => '0');
+    signal s_gav_sr : std_logic_vector(0 to 18) := (others => '0');   -- (18 = the chroma box input gate)
 
 begin
 
@@ -675,7 +676,7 @@ begin
 
             -- avid taps and the sync ring outputs
             s_gav_sr(0) <= g_avid;
-            for i in 1 to 8 loop s_gav_sr(i) <= s_gav_sr(i - 1); end loop;
+            for i in 1 to 18 loop s_gav_sr(i) <= s_gav_sr(i - 1); end loop;
             s_sy_r <= s_sy_q; s_sy_d1 <= s_sy_r; s_sy_d2 <= s_sy_d1; s_sy_d3 <= s_sy_d2;
             g_wm1 <= s_w - 1;
         end if;
@@ -1280,7 +1281,14 @@ begin
             -- 18, 19: pads; 20: to the conditioning
             p18_y <= p17_y; p18_u <= p17_u; p18_v <= p17_v;
             p19_y <= p18_y; p19_u <= p18_u; p19_v <= p18_v;
-            s_y12 <= p19_y; s_u12 <= p19_u; s_v12 <= p19_v;
+            -- (chroma neutral off the generated avid, so the 8-sums below resync in every blanking interval)
+            s_y12 <= p19_y;
+            if s_gav_sr(18) = '1' then
+                s_u12 <= p19_u; s_v12 <= p19_v;
+            else
+                s_u12 <= to_unsigned(512, 10); s_v12 <= to_unsigned(512, 10);
+            end if;
+            s_bxh <= s_bxh(6 downto 0) & s_gav_sr(18);
 
             -- luma ring read address (beam x at stage 7)
             if s_gav_sr(4) = '1' then s_rx <= s_rx + 1; else s_rx <= (others => '0'); end if;
@@ -1289,8 +1297,14 @@ begin
             -- output conditioning (centre of the chroma box at C_LAT - 3)
             -- (8-bit chroma in an EBR delay ring: the value 8 clocks back = read 6 behind + EBR and fabric registers)
             s_cd_r <= s_cd_q;
-            s_boxu <= s_boxu + resize(s_u12(9 downto 2), 12) - resize(unsigned(s_cd_r(15 downto 8)), 12);
-            s_boxv <= s_boxv + resize(s_v12(9 downto 2), 12) - resize(unsigned(s_cd_r(7 downto 0)), 12);
+            -- (the running 8-sums snap back to neutral once 8 blank samples are in: a sample the ring
+            -- returns wrong would otherwise offset the chroma for good)
+            if s_bxh = "00000000" then
+                s_boxu <= to_unsigned(1024, 12); s_boxv <= to_unsigned(1024, 12);
+            else
+                s_boxu <= s_boxu + resize(s_u12(9 downto 2), 12) - resize(unsigned(s_cd_r(15 downto 8)), 12);
+                s_boxv <= s_boxv + resize(s_v12(9 downto 2), 12) - resize(unsigned(s_cd_r(7 downto 0)), 12);
+            end if;
             s_boxud <= s_boxu; s_boxvd <= s_boxv;
             v_sc := resize(s_boxu, 15) + s_boxud; s_u18 <= v_sc(11 downto 2);
             v_sc := resize(s_boxv, 15) + s_boxvd; s_v18 <= v_sc(11 downto 2);

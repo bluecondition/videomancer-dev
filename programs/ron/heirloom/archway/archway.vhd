@@ -304,6 +304,7 @@ architecture archway of program_top is
     type t_u10 is array (natural range <>) of unsigned(9 downto 0);
     signal s_cay, s_cau, s_cav : t_u10(0 to 7) := (others => to_unsigned(512, 10));
     signal s_bay, s_bau, s_bav, s_bayd, s_baud, s_bavd : unsigned(12 downto 0) := to_unsigned(4096, 13);
+    signal s_bxh : std_logic_vector(7 downto 0) := (others => '0');   -- generated avid of the last 8 box inputs
     signal s_y21, s_u21, s_v21 : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal s_y22, s_u22, s_v22 : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal s_y23, s_u23, s_v23 : unsigned(9 downto 0) := to_unsigned(512, 10);
@@ -1041,8 +1042,11 @@ begin
             v_r := s_dx(0) & s_dx(1) & s_dx(2);
             if resize(v_r, 4) < l_nb then p18_sb <= '1'; else p18_sb <= '0'; end if;
             if v_r = l_nb(2 downto 0) and l_half = '1' then p18_sm <= '1'; else p18_sm <= '0'; end if;
-            -- 19: compose: A, B or (A + B) / 2
-            if p18_sb = '1' then
+            -- 19: compose: A, B or (A + B) / 2; neutral off the generated avid, so the box's running
+            -- 8-sums resync in every blanking interval
+            if s_gav_sr(16) = '0' then
+                s_y19 <= to_unsigned(64, 10); s_u19 <= to_unsigned(512, 10); s_v19 <= to_unsigned(512, 10);
+            elsif p18_sb = '1' then
                 s_y19 <= unsigned(p18_q(33 downto 24)); s_u19 <= unsigned(p18_q(23 downto 14)); s_v19 <= unsigned(p18_q(13 downto 4));
             elsif p18_sm = '1' then
                 v_md := ('0' & unsigned(p18_q(63 downto 54))) + unsigned(p18_q(33 downto 24)); s_y19 <= v_md(10 downto 1);
@@ -1051,6 +1055,7 @@ begin
             else
                 s_y19 <= unsigned(p18_q(63 downto 54)); s_u19 <= unsigned(p18_q(53 downto 44)); s_v19 <= unsigned(p18_q(43 downto 34));
             end if;
+            s_bxh <= s_bxh(6 downto 0) & s_gav_sr(16);
         end if;
     end process p_pix;
 
@@ -1067,9 +1072,14 @@ begin
             -- box A: stage 20 sums, stage 21 output
             s_cay(0) <= s_y19; s_cau(0) <= s_u19; s_cav(0) <= s_v19;
             for i in 1 to 7 loop s_cay(i) <= s_cay(i - 1); s_cau(i) <= s_cau(i - 1); s_cav(i) <= s_cav(i - 1); end loop;
-            s_bay <= s_bay + s_y19 - s_cay(7);
-            s_bau <= s_bau + s_u19 - s_cau(7);
-            s_bav <= s_bav + s_v19 - s_cav(7);
+            -- (the running 8-sums snap back to neutral once 8 blank samples are in)
+            if s_bxh = "00000000" then
+                s_bay <= to_unsigned(512, 13); s_bau <= to_unsigned(4096, 13); s_bav <= to_unsigned(4096, 13);
+            else
+                s_bay <= s_bay + s_y19 - s_cay(7);
+                s_bau <= s_bau + s_u19 - s_cau(7);
+                s_bav <= s_bav + s_v19 - s_cav(7);
+            end if;
             s_bayd <= s_bay; s_baud <= s_bau; s_bavd <= s_bav;
             v_sc := resize(s_bay, 14) + s_bayd; s_y21 <= v_sc(13 downto 4);
             v_sc := resize(s_bau, 14) + s_baud; s_u21 <= v_sc(13 downto 4);

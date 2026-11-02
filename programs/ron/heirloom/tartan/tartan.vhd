@@ -240,6 +240,7 @@ architecture tartan of program_top is
     signal s_bu16, s_bu16d, s_bv16, s_bv16d : unsigned(13 downto 0) := to_unsigned(8192, 14);
     signal s_by8, s_by8d : unsigned(12 downto 0) := to_unsigned(512, 13);
     signal s_bu8, s_bu8d, s_bv8, s_bv8d : unsigned(12 downto 0) := to_unsigned(4096, 13);
+    signal s_x18h : std_logic_vector(15 downto 0) := (others => '0');   -- generated avid of the last 16 x18 samples
     signal s_oy16, s_ou16, s_ov16 : unsigned(14 downto 0) := (others => '0');
     signal s_oy8, s_ou8, s_ov8 : unsigned(13 downto 0) := (others => '0');
     signal s_y29 : unsigned(9 downto 0) := to_unsigned(64, 10);
@@ -726,13 +727,20 @@ begin
             else
                 x18_y <= unsigned(v_p(29 downto 20)); x18_u <= unsigned(v_p(19 downto 10)); x18_v <= unsigned(v_p(9 downto 0));
             end if;
+            s_x18h <= s_x18h(14 downto 0) & s_gav_sr(16);
 
             -- 19..28: soft edges = output conditioning: two adjacent 16-sums (1080) or 8-sums
             -- (720p / SD, taps 4..11 so both are centred alike) on Y, U and V
+            -- (x18 is neutral off the generated avid, so the sums resync every blanking interval)
             s_cy(0) <= x18_y; s_cu(0) <= x18_u; s_cv(0) <= x18_v;
             for i in 1 to 15 loop s_cy(i) <= s_cy(i - 1); s_cu(i) <= s_cu(i - 1); s_cv(i) <= s_cv(i - 1); end loop;
-            s_by16 <= s_by16 + x18_y - s_cy(15); s_bu16 <= s_bu16 + x18_u - s_cu(15); s_bv16 <= s_bv16 + x18_v - s_cv(15);
-            s_by8 <= s_by8 + s_cy(3) - s_cy(11); s_bu8 <= s_bu8 + s_cu(3) - s_cu(11); s_bv8 <= s_bv8 + s_cv(3) - s_cv(11);
+            if s_x18h = "0000000000000000" then
+                s_by16 <= to_unsigned(1024, 14); s_bu16 <= to_unsigned(8192, 14); s_bv16 <= to_unsigned(8192, 14);
+                s_by8 <= to_unsigned(512, 13); s_bu8 <= to_unsigned(4096, 13); s_bv8 <= to_unsigned(4096, 13);
+            else
+                s_by16 <= s_by16 + x18_y - s_cy(15); s_bu16 <= s_bu16 + x18_u - s_cu(15); s_bv16 <= s_bv16 + x18_v - s_cv(15);
+                s_by8 <= s_by8 + s_cy(3) - s_cy(11); s_bu8 <= s_bu8 + s_cu(3) - s_cu(11); s_bv8 <= s_bv8 + s_cv(3) - s_cv(11);
+            end if;
             s_by16d <= s_by16; s_bu16d <= s_bu16; s_bv16d <= s_bv16;
             s_by8d <= s_by8; s_bu8d <= s_bu8; s_bv8d <= s_bv8;
             s_oy16 <= resize(s_by16, 15) + s_by16d; s_ou16 <= resize(s_bu16, 15) + s_bu16d; s_ov16 <= resize(s_bv16, 15) + s_bv16d;

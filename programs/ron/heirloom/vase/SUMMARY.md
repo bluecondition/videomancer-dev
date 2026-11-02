@@ -141,6 +141,7 @@ The photo's vase is camera content, so Video mode puts the camera there through 
   collision-free.
 
 ## Status
+- **v0.5.1 built 2026-11-01: output-filter resync fix, NOT flashed.** The output running-sum filters now take neutral input off the generated avid and snap back to neutral once the box is full of blank samples, so a glitched block-RAM / clock sample can no longer leave a permanent wrapped colour offset (fern_diag hardware capture 2026-11-01). Post-route Fmax: HD Analog s2 80.74, SD Analog s1 79.21, HD HDMI s1 76.75, SD HDMI s1 78.13, HD Dual s1 78.21, SD Dual s1 72.98 MHz; 6963-6994 / 7680 LC. Earlier hand-installed HD seeds are gone (new netlist).
 - **v0.5.0 built 2026-10-27, not flashed. ROUTER1** (`NEXTPNR_ROUTER="--router router1" ./build_heirloom.sh vase`).
   - **Seeds:** HD Analog = seed 5 (seeds 1–4 missed); all others seed 1.
   - **Fmax (last post-route line):** HD Analog 75.33, HD HDMI 78.47, HD Dual 75.81, SD Analog 76.46,

@@ -146,6 +146,7 @@ slow 2-D triangle (half amplitude) through the same path, so Melt stays live.
   - v6 (4 fewer pipeline stages) packs to 5,765 standalone and 7,218-7,229 in the real build.
 
 ## Status
+- **v0.5.1 built 2026-11-01: output-filter resync fix, NOT flashed.** The output running-sum filters now take neutral input off the generated avid and snap back to neutral once the box is full of blank samples, so a glitched block-RAM / clock sample can no longer leave a permanent wrapped colour offset (fern_diag hardware capture 2026-11-01). Post-route Fmax: HD Analog s1 75.83, SD Analog s1 81.37, HD HDMI s2 79.47, SD HDMI s1 78.67, HD Dual s1 78.81, SD Dual s1 82.01 MHz; 7210-7228 / 7680 LC. Earlier hand-installed HD seeds are gone (new netlist).
 - **v0.5.0 built 2026-10-27 with ROUTER1** (`NEXTPNR_ROUTER="--router router1" ./build_heirloom.sh
   waterfall`). All six configs closed on seed 1:
   - HD Analog 75.98, HD HDMI 84.83, HD Dual 76.38 MHz;

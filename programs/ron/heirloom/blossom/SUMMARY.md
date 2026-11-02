@@ -163,6 +163,7 @@ Working files: `.heirloom_work/rb_blossom/` (`notes.md` has every number).
   line). A combined-controls render showed the twist, swell and sway.
 
 ## Status
+- **v0.6.1 built 2026-11-01: output-filter resync fix, NOT flashed.** The output running-sum filters now take neutral input off the generated avid and snap back to neutral once the box is full of blank samples, so a glitched block-RAM / clock sample can no longer leave a permanent wrapped colour offset (fern_diag hardware capture 2026-11-01). Per-line resync added on top of the existing once-a-field zone reseed. Post-route Fmax: HD Analog s1 77.69, SD Analog s1 69.72, HD HDMI s3 85.19, SD HDMI s1 70.68, HD Dual s1 75.67, SD Dual s1 65.57 MHz; 7288-7320 / 7680 LC. Earlier hand-installed HD seeds are gone (new netlist).
 - **v0.6.0 built 2026-10-30, NOT flashed.** router2.
 - **Two HD seeds are hand-installed after a pin-skew screen** (vmprog repacked; a plain
   `./build_heirloom.sh blossom` will NOT reproduce them):

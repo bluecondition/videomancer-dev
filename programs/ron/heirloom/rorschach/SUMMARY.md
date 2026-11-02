@@ -139,6 +139,7 @@ shows soft blobs of the camera, not its fine detail.
   convention (U = Cr); per-field work anchored on the vblank zone (no avid for 1024 clocks).
 
 ## Status
+- **v0.5.1 built 2026-11-01: output-filter resync fix, NOT flashed.** The output running-sum filters now take neutral input off the generated avid and snap back to neutral once the box is full of blank samples, so a glitched block-RAM / clock sample can no longer leave a permanent wrapped colour offset (fern_diag hardware capture 2026-11-01). Post-route Fmax: HD Analog s1 75.78, SD Analog s2 73.52, HD HDMI s1 78.31, SD HDMI s1 80.74, HD Dual s1 79.59, SD Dual s1 76.17 MHz; 6930-6955 / 7680 LC. Earlier hand-installed HD seeds are gone (new netlist).
 - **v0.5.0 built 2026-10-21, NOT flashed.** router2. Build seeds: **HD Dual = seed 3**; the other
   five are seed 1.
 - Fmax (post-route; every config's last line PASS):

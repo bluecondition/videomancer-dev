@@ -273,6 +273,7 @@ architecture goblet of program_top is
     signal s_y8, s_u8, s_v8 : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal s_csy, s_csu, s_csv : t_u10(0 to 7) := (others => to_unsigned(512, 10));
     signal s_boxy, s_boxu, s_boxv, s_boxyd, s_boxud, s_boxvd : unsigned(12 downto 0) := to_unsigned(4096, 13);
+    signal s_bxh : std_logic_vector(7 downto 0) := (others => '0');   -- generated avid of the last 8 box inputs
     signal s_y11, s_u11, s_v11 : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal s_y12 : unsigned(9 downto 0) := to_unsigned(64, 10);
     signal s_u12, s_v12 : unsigned(9 downto 0) := to_unsigned(512, 10);
@@ -1025,19 +1026,28 @@ begin
             p_ys23 <= resize(p_yr22, 17) + resize(p_yg22, 17) + resize(p_yb22, 17);
             p_us23 <= p_ur22 + p_ug22 + p_ub22;
             p_vs23 <= p_vr22 + p_vg22 + p_vb22;
+            -- Y / U / V neutral off the generated avid, so the 8-sums below resync in every blanking interval
             v_y := shift_right(p_ys23, 6) + 64;
-            if v_y > 940 then s_y8 <= to_unsigned(940, 10); else s_y8 <= v_y(9 downto 0); end if;
+            if s_gav_sr(22) = '0' then s_y8 <= to_unsigned(64, 10);
+            elsif v_y > 940 then s_y8 <= to_unsigned(940, 10); else s_y8 <= v_y(9 downto 0); end if;
             v_cc := shift_right(p_us23, 6) + 512;
-            s_u8 <= unsigned(v_cc(9 downto 0));
+            if s_gav_sr(22) = '0' then s_u8 <= to_unsigned(512, 10); else s_u8 <= unsigned(v_cc(9 downto 0)); end if;
             v_cc := shift_right(p_vs23, 6) + 512;
-            s_v8 <= unsigned(v_cc(9 downto 0));
+            if s_gav_sr(22) = '0' then s_v8 <= to_unsigned(512, 10); else s_v8 <= unsigned(v_cc(9 downto 0)); end if;
+            s_bxh <= s_bxh(6 downto 0) & s_gav_sr(22);
 
-            -- 25..27: output conditioning: [1 2 2 2 2 2 2 2 1]/16 on Y, U and V as two adjacent 8-sums
+            -- 25..27: output conditioning: [1 2 2 2 2 2 2 2 1]/16 on Y, U and V as two adjacent 8-sums.
+            -- The running 8-sums snap back to neutral once 8 blank samples are in, so a glitched sample
+            -- can't offset them for good.
             s_csy(0) <= s_y8; s_csu(0) <= s_u8; s_csv(0) <= s_v8;
             for i in 1 to 7 loop s_csy(i) <= s_csy(i - 1); s_csu(i) <= s_csu(i - 1); s_csv(i) <= s_csv(i - 1); end loop;
-            s_boxy <= s_boxy + s_y8 - s_csy(7);
-            s_boxu <= s_boxu + s_u8 - s_csu(7);
-            s_boxv <= s_boxv + s_v8 - s_csv(7);
+            if s_bxh = "00000000" then
+                s_boxy <= to_unsigned(512, 13); s_boxu <= to_unsigned(4096, 13); s_boxv <= to_unsigned(4096, 13);
+            else
+                s_boxy <= s_boxy + s_y8 - s_csy(7);
+                s_boxu <= s_boxu + s_u8 - s_csu(7);
+                s_boxv <= s_boxv + s_v8 - s_csv(7);
+            end if;
             s_boxyd <= s_boxy; s_boxud <= s_boxu; s_boxvd <= s_boxv;
             v_sc := resize(s_boxy, 14) + s_boxyd; s_y11 <= v_sc(13 downto 4);
             v_sc := resize(s_boxu, 14) + s_boxud; s_u11 <= v_sc(13 downto 4);

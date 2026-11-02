@@ -200,6 +200,7 @@ Integer model: `.heirloom_work/rb_cusp/imodel6.py` (`GUARD=0` shows the unguarde
 `p6/sheet6.png`; the comparisons are `p6/s1.png`, `p6/s2.png`, `p6/g.png` and `p6/cores.png`.
 
 ## Status
+- **v0.6.1 built 2026-11-01: output-filter resync fix, NOT flashed.** The output running-sum filters now take neutral input off the generated avid and snap back to neutral once the box is full of blank samples, so a glitched block-RAM / clock sample can no longer leave a permanent wrapped colour offset (fern_diag hardware capture 2026-11-01). Post-route Fmax: HD Analog s4 75.83, SD Analog s1 79.40, HD HDMI s2 74.40, SD HDMI s1 75.11, HD Dual s1 78.50, SD Dual s1 74.32 MHz; 7422-7435 / 7680 LC. Earlier hand-installed HD seeds are gone (new netlist).
 - **v0.6.0, built 2026-11-01, router2. NOT flashed.**
   - 7419–7448 / 7680 LC (96.6–97.0 %, FULL), 11 / 32 EBR, iceunpack OK × 6.
   - Builder seeds and post-route Fmax: HD Analog s3 77.17, HD HDMI s3 75.27, HD Dual s2 78.25,

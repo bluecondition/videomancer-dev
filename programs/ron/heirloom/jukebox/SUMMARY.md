@@ -115,6 +115,7 @@ row centres; the repeats deviate by 1–3.6 RGB levels.
   needs) and writes `jukebox_pkg.vhd`.
 
 ## Status
+- **v0.5.1 built 2026-11-01: output-filter resync fix, NOT flashed.** The output running-sum filters now take neutral input off the generated avid and snap back to neutral once the box is full of blank samples, so a glitched block-RAM / clock sample can no longer leave a permanent wrapped colour offset (fern_diag hardware capture 2026-11-01). Post-route Fmax: HD Analog s1 87.49, SD Analog s1 84.80, HD HDMI s1 80.10, SD HDMI s1 62.26, HD Dual s2 82.39, SD Dual s1 62.91 MHz; 6488-6500 / 7680 LC. Earlier hand-installed HD seeds are gone (new netlist).
 - **v0.5.0 built 2026-10-21, router2 (the builder default), NOT flashed.**
 - **Seeds:** HD Dual = seed 4 (seed 1 stalled the router, seeds 2–3 missed timing); the other five
   are seed 1.

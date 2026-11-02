@@ -14,6 +14,19 @@ Flash from `out/rev_b/ron/heirloom/<name>.vmprog`; rebuild one with `./build_hei
   per-element parameters and bolder switches, while the defaults still give the photo. Ron's intentions, the
   per-tab workflow, the known issues and each program's LC/EBR headroom and rebuild command are in
   [PHASE2.md](PHASE2.md). Read it before starting any program.
+- **Family-wide fix: output filters now resync every line (2026-11-01).**
+  - **Symptom.** On hardware the fern_diag colours came out wrapped: maroon ground, olive maze, green fronds. One
+    constant chroma offset, wrapping mod 1024, reproduces the capture.
+  - **Cause.** The shared output conditioning is a running 8-sum (`box + new − tap(8 back)`) that never resyncs, so
+    a single wrong delayed sample (block-RAM start-up, a clock glitch on a source re-lock) offsets the colours for
+    good.
+  - **Fix.** Every program now forces the box input neutral off the generated avid and snaps the sum back to N ×
+    neutral once N blank samples are in.
+  - **Rebuilt.** 49 programs, patch bump, all 6 configs timing-clean. Earlier hand-installed HD seeds are gone; any
+    non-builder seed is in that program's SUMMARY.
+  - **Already did it:** argus, crossbeam (once a field), curtain, shield, streak, tangram.
+  - **chartreuse** is edited but not built; its tab has work in progress.
+  - **Rule for new work:** never write a running-sum or integrator filter without a periodic resync.
 
 ## Layout
 

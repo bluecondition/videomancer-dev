@@ -166,6 +166,7 @@ Working files are in `.heirloom_work/rb_archway/` (`notes.md` has every step).
 - **K2 suggestions (not built):** see Notes.
 
 ## Status
+- **v0.6.1 built 2026-11-01: output-filter resync fix, NOT flashed.** The output running-sum filters now take neutral input off the generated avid and snap back to neutral once the box is full of blank samples, so a glitched block-RAM / clock sample can no longer leave a permanent wrapped colour offset (fern_diag hardware capture 2026-11-01). The box input off-avid used to be the palette black; it is now neutral, so up to 8 px at each line edge fade to true black (visible in Ember). HD Analog / HD HDMI missed on router2 and were hand re-routed with router1 (installed + repacked). Post-route Fmax: HD Analog router1 s6 81.05 (hand re-route), SD Analog s1 71.73, HD HDMI router1 s2 81.65 (hand re-route), SD HDMI s1 72.93, HD Dual s3 81.85, SD Dual s1 73.13 MHz; 7332-7347 / 7680 LC. Earlier hand-installed HD seeds are gone (new netlist).
 - **v0.6.0 built 2026-10-28, router2, NOT flashed.** Build seeds: **HD Analog 2, SD Analog 3, HD HDMI 2,
   HD Dual 2**; SD HDMI and SD Dual seed 1. SD Analog seeds 1–2 and HD Dual seed 1 stalled router2 (timeout);
   HD Analog and HD HDMI seed 1 missed timing.

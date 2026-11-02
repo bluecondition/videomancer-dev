@@ -7,7 +7,7 @@
 processing_delay_clks = 36
 program_id = "com.czartroniks.ticker"
 program_name = "Ticker"
-program_version = "0.5.0"
+program_version = "0.5.1"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"

@@ -442,6 +442,9 @@ architecture cutout of program_top is
     signal s_crp : unsigned(7 downto 0) := to_unsigned(250, 8);
     signal s_crq, s_crr : std_logic_vector(15 downto 0) := x"8080";
     signal s_boxu, s_boxv, s_boxud, s_boxvd : unsigned(10 downto 0) := to_unsigned(1024, 11);
+    -- g_avid delay line for the box resync: s_gav_dl(k) = generated avid of the stage-(k+1) pixel
+    -- (bit 22 gates p_u24 / p_v24; bits 23 .. 30 = the gates of the 8 samples in the box)
+    signal s_gav_dl : std_logic_vector(30 downto 0) := (others => '0');
     signal s_y25, s_y26, s_y27, s_y28, s_y29, s_y30x, s_yf30 : unsigned(9 downto 0) := to_unsigned(64, 10);
     signal s_u30, s_v30 : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal s_y31, s_y32 : unsigned(9 downto 0) := to_unsigned(64, 10);
@@ -1360,17 +1363,27 @@ begin
             end if;
             if v_y < 64 then p_y24 <= to_unsigned(64, 10); elsif v_y > 1020 then p_y24 <= to_unsigned(1020, 10);
             else p_y24 <= unsigned(v_y(9 downto 0)); end if;
-            if v_cu2 < 16 then p_u24 <= to_unsigned(16, 10); elsif v_cu2 > 1008 then p_u24 <= to_unsigned(1008, 10);
+            -- chroma neutral off the generated avid, so the 8-sums below resync in every blanking interval
+            if s_gav_dl(22) = '0' then p_u24 <= to_unsigned(512, 10);
+            elsif v_cu2 < 16 then p_u24 <= to_unsigned(16, 10); elsif v_cu2 > 1008 then p_u24 <= to_unsigned(1008, 10);
             else p_u24 <= unsigned(v_cu2(9 downto 0)); end if;
-            if v_cv2 < 16 then p_v24 <= to_unsigned(16, 10); elsif v_cv2 > 1008 then p_v24 <= to_unsigned(1008, 10);
+            if s_gav_dl(22) = '0' then p_v24 <= to_unsigned(512, 10);
+            elsif v_cv2 < 16 then p_v24 <= to_unsigned(16, 10); elsif v_cv2 > 1008 then p_v24 <= to_unsigned(1008, 10);
             else p_v24 <= unsigned(v_cv2(9 downto 0)); end if;
+            s_gav_dl <= s_gav_dl(29 downto 0) & g_avid;
 
             -- 25..30: output conditioning (chroma [1 2 2 2 2 2 2 2 1]/16 as two adjacent 8-sums on
             -- 8-bit chroma, the 8-back tap from a ring; luma [1 2 1]); 31: luma toward black (white 940 ->
             -- 777), the gate; 32: pad
+            -- The running 8-sums snap back to neutral once 8 blank samples are in, so a sample the RAM
+            -- ring returns wrong can't offset the chroma for good.
             s_crr <= s_crq;                                                              -- p_u24 / p_v24 of 8 clocks ago
-            s_boxu <= s_boxu + resize(p_u24(9 downto 2), 11) - resize(unsigned(s_crr(15 downto 8)), 11);
-            s_boxv <= s_boxv + resize(p_v24(9 downto 2), 11) - resize(unsigned(s_crr(7 downto 0)), 11);
+            if s_gav_dl(30 downto 23) = "00000000" then
+                s_boxu <= to_unsigned(1024, 11); s_boxv <= to_unsigned(1024, 11);
+            else
+                s_boxu <= s_boxu + resize(p_u24(9 downto 2), 11) - resize(unsigned(s_crr(15 downto 8)), 11);
+                s_boxv <= s_boxv + resize(p_v24(9 downto 2), 11) - resize(unsigned(s_crr(7 downto 0)), 11);
+            end if;
             s_boxud <= s_boxu; s_boxvd <= s_boxv;
             v_sc := resize(s_boxu, 12) + s_boxud; s_u30 <= v_sc(11 downto 2);
             v_sc := resize(s_boxv, 12) + s_boxvd; s_v30 <= v_sc(11 downto 2);

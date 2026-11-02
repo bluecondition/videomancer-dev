@@ -299,6 +299,7 @@ architecture lava of program_top is
     signal rb_q, rb_q2 : std_logic_vector(19 downto 0) := "1000000000" & "1000000000";
     signal rs_q, rs_q2 : std_logic_vector(2 downto 0) := "111";
     signal s_usum, s_vsum, s_ud, s_vd : unsigned(13 downto 0) := (others => '0');
+    signal s_bxh : std_logic_vector(7 downto 0) := (others => '0');   -- ring-input gate of the last 8 box inputs
     type t_u10a is array (natural range <>) of unsigned(9 downto 0);
     signal s_ly : t_u10a(0 to 6) := (others => to_unsigned(64, 10));
     signal q31_y, q32_y, q33_y, q34_y, q35_y, q36_y : unsigned(9 downto 0) := to_unsigned(64, 10);
@@ -906,9 +907,12 @@ begin
                 v_iu := q28_u; v_iv := q28_v; v_iy := q28_y;
             end if;
             rb_wd <= std_logic_vector(v_iu) & std_logic_vector(v_iv);
+            s_bxh <= s_bxh(6 downto 0) & (s_gav_sr(27) and not s_zone);   -- the same gate as rb_wd
             s_ly(0) <= v_iy;
             for k in 1 to 6 loop s_ly(k) <= s_ly(k - 1); end loop;
-            if s_zone = '1' and s_zc = 40 then
+            -- the sums snap back to neutral once 8 blank samples are in (every blanking interval, and the
+            -- vblank zone), so a sample the ring returns wrong can't offset the chroma for good
+            if s_bxh = "00000000" then
                 if t_short = '1' then s_usum <= to_unsigned(2048, 14); s_vsum <= to_unsigned(2048, 14);
                 else s_usum <= to_unsigned(4096, 14); s_vsum <= to_unsigned(4096, 14); end if;
             else

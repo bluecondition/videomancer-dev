@@ -142,6 +142,7 @@ Working files: `.heirloom_work/rb_magma/` (`notes.txt` has every number).
   - Video and NTSC renders checked.
 
 ## Status
+- **v0.5.1 built 2026-11-01: output-filter resync fix, NOT flashed.** The output running-sum filters now take neutral input off the generated avid and snap back to neutral once the box is full of blank samples, so a glitched block-RAM / clock sample can no longer leave a permanent wrapped colour offset (fern_diag hardware capture 2026-11-01). The once-a-field zone reseed is replaced by the per-line resync. Post-route Fmax: HD Analog s1 90.93, SD Analog s1 85.32, HD HDMI s1 88.04, SD HDMI s1 86.93, HD Dual s1 84.21, SD Dual s1 86.93 MHz; 7052-7081 / 7680 LC. Earlier hand-installed HD seeds are gone (new netlist).
 - **v0.5.0 built 2026-10-27, NOT flashed.** **ROUTER1**
   (`NEXTPNR_ROUTER="--router router1" ./build_heirloom.sh magma`); all six configs seed 1.
 - Post-route Fmax: HD Analog 88.04, HD HDMI 86.93, HD Dual 86.82, SD Analog 86.76, SD HDMI 85.22,

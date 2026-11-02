@@ -309,6 +309,7 @@ architecture fern of program_top is
     -- output conditioning
     type t_u10 is array (natural range <>) of unsigned(9 downto 0);
     signal s_boxu, s_boxv, s_boxud, s_boxvd : unsigned(13 downto 0) := to_unsigned(4096, 14);
+    signal s_g24h : std_logic_vector(7 downto 0) := (others => '0');   -- generated avid of the last 8 p24 samples
     signal s_y25, s_y26, s_y27, s_y28, s_y29, s_y30x, s_yf30 : unsigned(9 downto 0) := to_unsigned(64, 10);
     signal s_u30, s_v30 : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal s_y31, s_y32 : unsigned(9 downto 0) := to_unsigned(64, 10);
@@ -1104,12 +1105,22 @@ begin
             v_v := shift_right(resize(C_VR(to_integer(p23_rs)), 18) - resize(p23_vg, 18) + resize(p23_vb, 18), 6) + 512;
             if f_pal = '1' then v_u := 1024 - v_u; end if;
             if v_y > 1023 then p24_y <= to_unsigned(1023, 10); else p24_y <= unsigned(v_y(9 downto 0)); end if;
-            if v_u < 0 then p24_u <= (others => '0'); elsif v_u > 1023 then p24_u <= to_unsigned(1023, 10); else p24_u <= unsigned(v_u(9 downto 0)); end if;
-            if v_v < 0 then p24_v <= (others => '0'); elsif v_v > 1023 then p24_v <= to_unsigned(1023, 10); else p24_v <= unsigned(v_v(9 downto 0)); end if;
+            -- chroma is neutral off the generated avid, so the 8-sums below can resync in every blanking interval
+            if s_gav_sr(22) = '0' then p24_u <= to_unsigned(512, 10);
+            elsif v_u < 0 then p24_u <= (others => '0'); elsif v_u > 1023 then p24_u <= to_unsigned(1023, 10); else p24_u <= unsigned(v_u(9 downto 0)); end if;
+            if s_gav_sr(22) = '0' then p24_v <= to_unsigned(512, 10);
+            elsif v_v < 0 then p24_v <= (others => '0'); elsif v_v > 1023 then p24_v <= to_unsigned(1023, 10); else p24_v <= unsigned(v_v(9 downto 0)); end if;
+            s_g24h <= s_g24h(6 downto 0) & s_gav_sr(22);
 
-            -- 25..30: output conditioning (chroma [1 2 2 2 2 2 2 2 1]/16 as two adjacent 8-sums, luma [1 2 1])
-            s_boxu <= s_boxu + (p24_u(9 downto 2) & "00") - (unsigned(r_cq2(15 downto 8)) & "00");
-            s_boxv <= s_boxv + (p24_v(9 downto 2) & "00") - (unsigned(r_cq2(7 downto 0)) & "00");
+            -- 25..30: output conditioning (chroma [1 2 2 2 2 2 2 2 1]/16 as two adjacent 8-sums, luma [1 2 1]).
+            -- The running 8-sums snap back to neutral once 8 blank samples are in: a sample the RAM ring returns
+            -- wrong (start-up, a clock glitch on a source re-lock) would otherwise offset the chroma for good.
+            if s_g24h = "00000000" then
+                s_boxu <= to_unsigned(4096, 14); s_boxv <= to_unsigned(4096, 14);
+            else
+                s_boxu <= s_boxu + (p24_u(9 downto 2) & "00") - (unsigned(r_cq2(15 downto 8)) & "00");
+                s_boxv <= s_boxv + (p24_v(9 downto 2) & "00") - (unsigned(r_cq2(7 downto 0)) & "00");
+            end if;
             s_boxud <= s_boxu; s_boxvd <= s_boxv;
             v_sc := resize(s_boxu, 15) + s_boxud; s_u30 <= v_sc(13 downto 4);
             v_sc := resize(s_boxv, 15) + s_boxvd; s_v30 <= v_sc(13 downto 4);

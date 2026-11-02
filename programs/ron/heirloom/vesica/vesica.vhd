@@ -363,7 +363,8 @@ architecture vesica of program_top is
     signal s_y19, s_y20 : unsigned(9 downto 0) := to_unsigned(64, 10);
     signal s_u19, s_v19, s_u20, s_v20 : unsigned(9 downto 0) := to_unsigned(512, 10);
 
-    signal s_gav_sr : std_logic_vector(0 to 5) := (others => '0');
+    signal s_gav_sr : std_logic_vector(0 to 14) := (others => '0');
+    signal s_b16h : std_logic_vector(7 downto 0) := (others => '0');   -- generated avid of the last 8 box inputs
 
 begin
 
@@ -571,7 +572,7 @@ begin
             end if;
 
             s_gav_sr(0) <= g_avid;
-            for i in 1 to 5 loop s_gav_sr(i) <= s_gav_sr(i - 1); end loop;
+            for i in 1 to 14 loop s_gav_sr(i) <= s_gav_sr(i - 1); end loop;
             g_wm1 <= s_w - 1;
         end if;
     end process p_ctrl;
@@ -1171,14 +1172,25 @@ begin
                 p15_u <= v_bu(9 downto 2); p15_v <= v_bv(9 downto 2);
             end if;
 
-            -- 16: compose (10 bits)
-            s_y12 <= p15_y; s_u12 <= p15_u; s_v12 <= p15_v;
+            -- 16: compose (10 bits); chroma neutral off the generated avid, so the box sums
+            -- resync every blanking interval
+            s_y12 <= p15_y;
+            if s_gav_sr(14) = '1' then
+                s_u12 <= p15_u; s_v12 <= p15_v;
+            else
+                s_u12 <= to_unsigned(128, 8); s_v12 <= to_unsigned(128, 8);
+            end if;
+            s_b16h <= s_b16h(6 downto 0) & s_gav_sr(14);
 
             -- output conditioning (centre of the chroma box at C_LAT - 3)
             -- (8-bit samples; the 10-bit value of a sample s is 4 s + 2)
             s_rc_f <= s_rc_q;                                           -- chroma 8 samples back
-            s_boxu <= s_boxu + s_u12 - unsigned(s_rc_f(15 downto 8));
-            s_boxv <= s_boxv + s_v12 - unsigned(s_rc_f(7 downto 0));
+            if s_b16h = "00000000" then
+                s_boxu <= to_unsigned(1024, 11); s_boxv <= to_unsigned(1024, 11);
+            else
+                s_boxu <= s_boxu + s_u12 - unsigned(s_rc_f(15 downto 8));
+                s_boxv <= s_boxv + s_v12 - unsigned(s_rc_f(7 downto 0));
+            end if;
             s_boxud <= s_boxu; s_boxvd <= s_boxv;
             v_sc := resize(s_boxu, 12) + s_boxud; s_u18 <= resize(v_sc(11 downto 2), 10) + 2;
             v_sc := resize(s_boxv, 12) + s_boxvd; s_v18 <= resize(v_sc(11 downto 2), 10) + 2;

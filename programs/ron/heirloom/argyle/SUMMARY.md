@@ -166,6 +166,7 @@ sizes.
   midpoint table and 2-term constants brought it to 6337 LC.
 
 ## Status
+- **v0.6.1 built 2026-11-01: output-filter resync fix, NOT flashed.** The output running-sum filters now take neutral input off the generated avid and snap back to neutral once the box is full of blank samples, so a glitched block-RAM / clock sample can no longer leave a permanent wrapped colour offset (fern_diag hardware capture 2026-11-01). Post-route Fmax: HD Analog s2 76.41, SD Analog s1 76.13, HD HDMI s2 74.93, SD HDMI s1 78.24, HD Dual s1 74.83, SD Dual s1 77.69 MHz; 7167-7183 / 7680 LC. Earlier hand-installed HD seeds are gone (new netlist).
 - **v0.6.0** built 2026-10-29 with router2. **HD Analog and HD Dual closed on seed 3** (seeds 1 and 2 missed;
   the builder's own retry found it); the SD configs are seed 1.
   - **HD HDMI is a hand-installed seed 9** (vmprog repacked; a plain rebuild will NOT reproduce it).

@@ -235,6 +235,7 @@ vertically.
   computes the bead warp table, and writes abacus_pkg.vhd.
 
 ## Status
+- **v0.6.4 built 2026-11-01: output-filter resync fix, NOT flashed.** The output running-sum filters now take neutral input off the generated avid and snap back to neutral once the box is full of blank samples, so a glitched block-RAM / clock sample can no longer leave a permanent wrapped colour offset (fern_diag hardware capture 2026-11-01). Post-route Fmax: HD Analog s4 80.61, SD Analog s1 75.78, HD HDMI s3 79.99, SD HDMI s2 75.53, HD Dual s1 76.16, SD Dual s1 77.25 MHz; 7330-7355 / 7680 LC. Earlier hand-installed HD seeds are gone (new netlist).
 - **v0.6.3 (phase 2 round 4: S9 V Mirror) built 2026-10-28, router2.**
   - **First flash, HD HDMI: "horizontal red and blue lines all over it".** These are per-line U/V swaps
     from the HDMI TX pin placement (memory hdmi_tx_placement_skew), not the RTL. The shipped HD HDMI

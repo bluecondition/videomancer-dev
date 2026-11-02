@@ -95,6 +95,7 @@ video-path control stays live in Osc.
   steps, colours in the hardware convention.
 
 ## Status
+- **v0.5.1 built 2026-11-01: output-filter resync fix, NOT flashed.** The output running-sum filters now take neutral input off the generated avid and snap back to neutral once the box is full of blank samples, so a glitched block-RAM / clock sample can no longer leave a permanent wrapped colour offset (fern_diag hardware capture 2026-11-01). Post-route Fmax: HD Analog s1 82.74, SD Analog s1 84.38, HD HDMI s1 85.11, SD HDMI s1 84.18, HD Dual s1 83.42, SD Dual s1 74.82 MHz; 7161-7184 / 7680 LC. Earlier hand-installed HD seeds are gone (new netlist).
 v0.5.0 built 2026-10-21, router2. Seeds: **HD Dual = seed 2** (seed 1 stalled the router); the others seed 1.
 
 | Config | Fmax (MHz) |

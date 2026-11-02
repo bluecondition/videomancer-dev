@@ -148,6 +148,7 @@ Defaults are K1–K3, K6 and P12 at 512, K4 at 0, K5 at 614 (slow flow), switche
   hardware convention (u = Cr).
 
 ## Status
+- **v0.5.1 built 2026-11-01: output-filter resync fix, NOT flashed.** The output running-sum filters now take neutral input off the generated avid and snap back to neutral once the box is full of blank samples, so a glitched block-RAM / clock sample can no longer leave a permanent wrapped colour offset (fern_diag hardware capture 2026-11-01). g_asr was extended to 20 bits for the gate. Post-route Fmax: HD Analog s1 82.96, SD Analog s1 83.54, HD HDMI s1 78.02, SD HDMI s1 83.59, HD Dual s1 80.94, SD Dual s1 83.69 MHz; 7293-7319 / 7680 LC. Earlier hand-installed HD seeds are gone (new netlist).
 - **v0.5.0 built 2026-10-28, ROUTER1 (`NEXTPNR_ROUTER="--router router1" ./build_heirloom.sh greenroom`), 6/6 on
   seed 1, not flashed.**
   - Post-route Fmax: HD Analog 81.35, HD HDMI 81.35, HD Dual 82.24, SD Analog 75.37, SD HDMI 83.15, SD Dual

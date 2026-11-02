@@ -126,6 +126,7 @@ path, so every video-path control stays live in Osc.
   (C_LAT 56), colours in hardware convention.
 
 ## Status
+- **v0.6.1 built 2026-11-01: output-filter resync fix, NOT flashed.** The output running-sum filters now take neutral input off the generated avid and snap back to neutral once the box is full of blank samples, so a glitched block-RAM / clock sample can no longer leave a permanent wrapped colour offset (fern_diag hardware capture 2026-11-01). Post-route Fmax: HD Analog s1 78.54, SD Analog s2 79.59, HD HDMI s1 81.12, SD HDMI s1 78.75, HD Dual s1 76.68, SD Dual s1 76.85 MHz; 6974-6991 / 7680 LC. Earlier hand-installed HD seeds are gone (new netlist).
 **v0.6.0** built 2026-10-30 with router2. NOT flashed. The three HD seeds were screened for HDMI TX pin skew
 (memory hdmi_tx_placement_skew, `tools/hdmi_pin_skew.py`), and two are hand-installed.
 

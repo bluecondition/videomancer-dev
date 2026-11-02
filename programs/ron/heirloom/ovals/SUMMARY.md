@@ -105,6 +105,7 @@ photo look.  Osc substitutes a drifting 2-D triangle lattice through the same pa
   720p the same picture).
 
 ## Status
+- **v0.5.2 built 2026-11-01: output-filter resync fix, NOT flashed.** The output running-sum filters now take neutral input off the generated avid and snap back to neutral once the box is full of blank samples, so a glitched block-RAM / clock sample can no longer leave a permanent wrapped colour offset (fern_diag hardware capture 2026-11-01). Post-route Fmax: HD Analog s1 80.76, SD Analog s1 81.00, HD HDMI s1 83.12, SD HDMI s1 76.95, HD Dual s2 78.21, SD Dual s1 83.47 MHz; 7645-7657 / 7680 LC. Earlier hand-installed HD seeds are gone (new netlist).
 - **v0.5.1 (2026-10-28), router2: built, not flashed.**
   - Fmax (MHz): HD Analog 83.35, HD HDMI 84.57, HD Dual 76.87 (**seed 2**, seed 1 missed), SD Analog 81.23,
     SD HDMI 83.27, SD Dual 82.12; every other config on seed 1.

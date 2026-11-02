@@ -109,6 +109,7 @@ Working files: `.heirloom_work/rb_warp/` (`notes.md` has every step).
     | v0.5.0 first cut (proto) | 16.8 / 6.3 | 87 / 192 | 126 / 251 | 0.67 |
 
 ## Status
+- **v0.5.1 built 2026-11-01: output-filter resync fix, NOT flashed.** The output running-sum filters now take neutral input off the generated avid and snap back to neutral once the box is full of blank samples, so a glitched block-RAM / clock sample can no longer leave a permanent wrapped colour offset (fern_diag hardware capture 2026-11-01). Post-route Fmax: HD Analog s1 75.51, SD Analog s2 78.70, HD HDMI s1 76.03, SD HDMI s1 84.91, HD Dual s1 75.36, SD Dual s1 72.31 MHz; 5449-5473 / 7680 LC. Earlier hand-installed HD seeds are gone (new netlist).
 - **v0.5.0 built 2026-10-27, NOT flashed.** router2 (`./build_heirloom.sh warp`).
 - **Build seeds:** HD HDMI = seed 4 (seeds 1–3 missed); the other five are seed 1.
 - **Fmax (post-route):** HD Analog 79.92, HD HDMI 75.71, HD Dual 81.51, SD Analog 79.59, SD HDMI 79.72,

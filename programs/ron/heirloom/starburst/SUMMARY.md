@@ -103,6 +103,7 @@ Glides (1/8 of the gap per field, ±3 hold) on K1, K2, K3, K5 and P12. At P12 = 
   cropped); 720p matches 1080p.
 
 ## Status
+- **v0.5.1 built 2026-11-01: output-filter resync fix, NOT flashed.** The output running-sum filters now take neutral input off the generated avid and snap back to neutral once the box is full of blank samples, so a glitched block-RAM / clock sample can no longer leave a permanent wrapped colour offset (fern_diag hardware capture 2026-11-01). Post-route Fmax: HD Analog s1 80.44, SD Analog s1 78.00, HD HDMI s1 79.43, SD HDMI s1 78.17, HD Dual s2 82.17, SD Dual s1 82.05 MHz; 6829-6866 / 7680 LC. Earlier hand-installed HD seeds are gone (new netlist).
 - **v0.5.0 built 2026-10-21, NOT flashed.** router2,
   `SEED=3 MAKE_TIMEOUT=900 ./build_heirloom.sh starburst`.
 - **Build seeds: all six configs = seed 3** (first try). On seed 1 router2 stalls on HD Analog, and

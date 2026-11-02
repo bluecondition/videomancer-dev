@@ -133,6 +133,7 @@ Working files: `.heirloom_work/rb_sinew/` (`notes.md` has every number).
   - Video = selfie: 94 % within ±12, 99.5 % within ±32 (the camera tap sits a few px off the beam).
 
 ## Status
+- **v0.5.1 built 2026-11-01: output-filter resync fix, NOT flashed.** The output running-sum filters now take neutral input off the generated avid and snap back to neutral once the box is full of blank samples, so a glitched block-RAM / clock sample can no longer leave a permanent wrapped colour offset (fern_diag hardware capture 2026-11-01). Post-route Fmax: HD Analog s1 85.32, SD Analog s1 93.40, HD HDMI s1 82.18, SD HDMI s1 87.67, HD Dual s1 93.76, SD Dual s1 83.89 MHz; 6857-6882 / 7680 LC. Earlier hand-installed HD seeds are gone (new netlist).
 - **v0.5.0 built 2026-10-27, NOT flashed.** **ROUTER1**
   (`NEXTPNR_ROUTER="--router router1" ./build_heirloom.sh sinew`), all six configs seed 1.
 - Post-route Fmax: HD Analog 82.37, HD HDMI 83.67, HD Dual 88.21, SD Analog 87.18, SD HDMI 85.93,

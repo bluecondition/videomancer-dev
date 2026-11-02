@@ -318,6 +318,7 @@ architecture cocoon of program_top is
     signal cr_wp, cr_ra : unsigned(3 downto 0) := (others => '0');
     signal cr_q, cr_f : std_logic_vector(19 downto 0) := "10000000001000000000";
     signal s_boxu, s_boxv, s_boxud, s_boxvd : unsigned(13 downto 0) := to_unsigned(4096, 14);
+    signal s_bxh : std_logic_vector(7 downto 0) := (others => '0');   -- generated avid of the last 8 box inputs
     signal s_y17, s_y18, s_y19, s_y20, s_y21, s_y22x, s_yf22 : unsigned(9 downto 0) := to_unsigned(64, 10);
     signal s_u22, s_v22 : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal s_y23, s_y24 : unsigned(9 downto 0) := to_unsigned(64, 10);
@@ -1272,14 +1273,27 @@ begin
                     v_b14 := shift_right(v_b14, 3) + 512; v_v := unsigned(v_b14(9 downto 0));
                 end if;
             end if;
-            s16_y <= v_y; s16_u <= v_u; s16_v <= v_v;
+            -- chroma neutral off the generated avid, so the 8-sums below resync in every blanking interval
+            s16_y <= v_y;
+            if s_gav_sr(14) = '1' then
+                s16_u <= v_u; s16_v <= v_v;
+            else
+                s16_u <= to_unsigned(512, 10); s16_v <= to_unsigned(512, 10);
+            end if;
+            s_bxh <= s_bxh(6 downto 0) & s_gav_sr(14);
 
-            -- S17 .. S24: output conditioning (centre at S21 -> S22), gate at S23
+            -- S17 .. S24: output conditioning (centre at S21 -> S22), gate at S23.  The running 8-sums
+            -- snap back to neutral once 8 blank samples are in, so a sample the RAM ring returns wrong
+            -- can't offset the chroma for good.
             cr_wp <= cr_wp + 1;
             cr_ra <= cr_wp - 5;
             cr_f  <= cr_q;
-            s_boxu <= s_boxu + s16_u - unsigned(cr_f(19 downto 10));
-            s_boxv <= s_boxv + s16_v - unsigned(cr_f(9 downto 0));
+            if s_bxh = "00000000" then
+                s_boxu <= to_unsigned(4096, 14); s_boxv <= to_unsigned(4096, 14);
+            else
+                s_boxu <= s_boxu + s16_u - unsigned(cr_f(19 downto 10));
+                s_boxv <= s_boxv + s16_v - unsigned(cr_f(9 downto 0));
+            end if;
             s_boxud <= s_boxu; s_boxvd <= s_boxv;
             v_sc := resize(s_boxu, 15) + s_boxud; s_u22 <= v_sc(13 downto 4);
             v_sc := resize(s_boxv, 15) + s_boxvd; s_v22 <= v_sc(13 downto 4);

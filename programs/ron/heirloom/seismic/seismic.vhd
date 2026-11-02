@@ -313,6 +313,7 @@ architecture seismic of program_top is
     signal c_rp : unsigned(7 downto 0) := to_unsigned(250, 8);
     signal c_rq, c_rq2 : std_logic_vector(15 downto 0) := x"8080";
     signal s_boxu, s_boxv, s_boxud, s_boxvd : unsigned(10 downto 0) := to_unsigned(1024, 11);
+    signal s_bxh : std_logic_vector(7 downto 0) := (others => '0');   -- generated avid of the last 8 box inputs
     signal s_y17, s_y18, s_y19, s_y20, s_y21, s_y22x, s_yf22 : unsigned(9 downto 0) := to_unsigned(64, 10);
     signal s_u22, s_v22 : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal s_y23, s_y24 : unsigned(9 downto 0) := to_unsigned(64, 10);
@@ -974,18 +975,28 @@ begin
             p15_cb <= signed(resize(p14_b & "00", 11)) - signed(resize(p14_y(14 downto 4), 11));
             -- 16: Y (cap 940); U = Cr = 512 + 2.5 (R - Yf); V = Cb = 512 + 2 (B - Yf)
             if p15_y > 876 then p16_y <= to_unsigned(940, 10); else p16_y <= to_unsigned(64, 10) + p15_y(9 downto 0); end if;
+            -- (chroma neutral off the generated avid, so the 8-sums below resync in every blanking interval)
             v_cs := resize(shift_right(p15_cr, 1), 18) + resize(shift_right(p15_cr, 3), 18) + 512;
-            if v_cs < 0 then p16_u <= (others => '0'); elsif v_cs > 1023 then p16_u <= (others => '1');
+            if s_gav_sr(14) = '0' then p16_u <= to_unsigned(512, 10);
+            elsif v_cs < 0 then p16_u <= (others => '0'); elsif v_cs > 1023 then p16_u <= (others => '1');
             else p16_u <= unsigned(v_cs(9 downto 0)); end if;
             v_cs := resize(shift_right(p15_cb, 1), 18) + 512;
-            if v_cs < 0 then p16_v <= (others => '0'); elsif v_cs > 1023 then p16_v <= (others => '1');
+            if s_gav_sr(14) = '0' then p16_v <= to_unsigned(512, 10);
+            elsif v_cs < 0 then p16_v <= (others => '0'); elsif v_cs > 1023 then p16_v <= (others => '1');
             else p16_v <= unsigned(v_cs(9 downto 0)); end if;
+            s_bxh <= s_bxh(6 downto 0) & s_gav_sr(14);
 
             -- 17..22: output conditioning (chroma [1 2 2 2 2 2 2 2 1]/16 as two adjacent 8-sums,
             -- luma [1 2 1]; centre at stage 21 -> 22)
-            -- (U, V at 8 bits; the sample 8 clocks back comes from the block-RAM ring)
-            s_boxu <= s_boxu + p16_u(9 downto 2) - unsigned(c_rq2(15 downto 8));
-            s_boxv <= s_boxv + p16_v(9 downto 2) - unsigned(c_rq2(7 downto 0));
+            -- (U, V at 8 bits; the sample 8 clocks back comes from the block-RAM ring.  The running
+            -- 8-sums snap back to neutral once 8 blank samples are in: a sample the ring returns wrong
+            -- would otherwise offset the chroma for good.)
+            if s_bxh = "00000000" then
+                s_boxu <= to_unsigned(1024, 11); s_boxv <= to_unsigned(1024, 11);
+            else
+                s_boxu <= s_boxu + p16_u(9 downto 2) - unsigned(c_rq2(15 downto 8));
+                s_boxv <= s_boxv + p16_v(9 downto 2) - unsigned(c_rq2(7 downto 0));
+            end if;
             s_boxud <= s_boxu; s_boxvd <= s_boxv;
             v_sc := resize(s_boxu, 15) + s_boxud; s_u22 <= v_sc(11 downto 2);
             v_sc := resize(s_boxv, 15) + s_boxvd; s_v22 <= v_sc(11 downto 2);

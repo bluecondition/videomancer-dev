@@ -118,6 +118,7 @@ ground appears in Video only where the camera has black areas; a bright scene ne
   blanking gate; colours in the hardware convention (U = Cr, V = Cb).
 
 ## Status
+- **v0.5.1 built 2026-11-01: output-filter resync fix, NOT flashed.** The output running-sum filters now take neutral input off the generated avid and snap back to neutral once the box is full of blank samples, so a glitched block-RAM / clock sample can no longer leave a permanent wrapped colour offset (fern_diag hardware capture 2026-11-01). Post-route Fmax: HD Analog s1 79.31, SD Analog s1 81.03, HD HDMI s1 77.71, SD HDMI s1 76.79, HD Dual s3 79.34, SD Dual s1 78.27 MHz; 6823-6851 / 7680 LC. Earlier hand-installed HD seeds are gone (new netlist).
 - **v0.5.0 built 2026-10-27, router2, not flashed.**
   - Build seeds: **HD Dual = seed 3** (seeds 1–2 missed); the other five are seed 1.
   - Post-route Fmax: HD Analog 77.59, HD HDMI 83.07, **HD Dual 74.48 (thin)**, SD Analog 72.93,

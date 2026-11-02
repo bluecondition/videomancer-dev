@@ -302,12 +302,14 @@ architecture bunting of program_top is
     signal s_y11, s_u11, s_v11 : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal s_hw1  : std_logic_vector(29 downto 0) := (others => '0');
     signal s_sy, s_su, s_sv, s_syd, s_sud, s_svd : unsigned(14 downto 0) := (others => '0');
+    signal s_sbh  : std_logic_vector(15 downto 0) := (others => '0');   -- input gate of the last 16 soft-ring samples
     signal s_y14, s_u14, s_v14 : unsigned(9 downto 0) := to_unsigned(512, 10);
 
     -- output conditioning
     type t_u10a is array (natural range <>) of unsigned(9 downto 0);
     signal s_ly : t_u10a(0 to 6) := (others => to_unsigned(64, 10));
     signal s_usum, s_vsum, s_ud, s_vd : unsigned(13 downto 0) := (others => '0');
+    signal s_cbh : std_logic_vector(7 downto 0) := (others => '0');   -- input gate of the last 8 chroma-ring samples
     signal s_y17, s_u17, s_v17 : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal s_y18, s_u18, s_v18 : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal s_y19, s_u19, s_v19 : unsigned(9 downto 0) := to_unsigned(512, 10);
@@ -1075,8 +1077,10 @@ begin
                 v_iy := s_y11; v_iu := s_u11; v_iv := s_v11;
             end if;
             sr_wd <= std_logic_vector(v_iy) & std_logic_vector(v_iu) & std_logic_vector(v_iv) & "00";
-            -- 13: box sums
-            if s_zone = '1' and s_zc = 40 then
+            s_sbh <= s_sbh(14 downto 0) & (s_gav_sr(10) and not s_zone);
+            -- 13: box sums (also snapped back to neutral once 16 blank samples are in, so they resync in
+            -- every blanking interval, not only once a field)
+            if (s_zone = '1' and s_zc = 40) or s_sbh = x"0000" then
                 if s_hd = '1' then
                     s_sy <= to_unsigned(1024, 15); s_su <= to_unsigned(8192, 15); s_sv <= to_unsigned(8192, 15);
                 else
@@ -1110,9 +1114,10 @@ begin
                 cr_wd <= std_logic_vector(s_u14) & std_logic_vector(s_v14);
                 s_ly(0) <= s_y14;
             end if;
+            s_cbh <= s_cbh(6 downto 0) & (s_gav_sr(13) and not s_zone);
             for k in 1 to 6 loop s_ly(k) <= s_ly(k - 1); end loop;
-            -- 16: chroma box sums
-            if s_zone = '1' and s_zc = 40 then
+            -- 16: chroma box sums (likewise snapped back once 8 blank samples are in)
+            if (s_zone = '1' and s_zc = 40) or s_cbh = "00000000" then
                 if s_short = '1' then s_usum <= to_unsigned(2048, 14); s_vsum <= to_unsigned(2048, 14);
                 else s_usum <= to_unsigned(4096, 14); s_vsum <= to_unsigned(4096, 14); end if;
             else

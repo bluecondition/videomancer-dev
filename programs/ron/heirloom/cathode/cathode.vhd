@@ -335,6 +335,7 @@ architecture cathode of program_top is
     -- output conditioning
     signal s_csu, s_csv : t_u10(0 to 8) := (others => to_unsigned(512, 10));
     signal s_boxu, s_boxv, s_boxud, s_boxvd : unsigned(13 downto 0) := to_unsigned(4096, 14);
+    signal s_bxh : std_logic_vector(7 downto 0) := (others => '0');   -- generated avid of the last 8 box inputs
     signal s_y18, s_y19, s_y20, s_y21, s_y22, s_y23x, s_yf23 : unsigned(9 downto 0) := to_unsigned(64, 10);
     signal s_u23, s_v23 : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal s_y24 : unsigned(9 downto 0) := to_unsigned(64, 10);
@@ -1211,17 +1212,28 @@ begin
             p_vs16 <= p_vr15 + p_vg15 + p_vb15;
             v_y := shift_right(p_ys16, 6) + 64;
             if v_y > 940 then s_y17 <= to_unsigned(940, 10); else s_y17 <= v_y(9 downto 0); end if;
-            v_cc := shift_right(p_us16, 6) + 512;
-            s_u17 <= unsigned(v_cc(9 downto 0));
-            v_cc := shift_right(p_vs16, 6) + 512;
-            s_v17 <= unsigned(v_cc(9 downto 0));
+            -- chroma neutral off the generated avid, so the 8-sums below resync in every blanking interval
+            if s_gav_sr(15) = '1' then
+                v_cc := shift_right(p_us16, 6) + 512;
+                s_u17 <= unsigned(v_cc(9 downto 0));
+                v_cc := shift_right(p_vs16, 6) + 512;
+                s_v17 <= unsigned(v_cc(9 downto 0));
+            else
+                s_u17 <= to_unsigned(512, 10); s_v17 <= to_unsigned(512, 10);
+            end if;
+            s_bxh <= s_bxh(6 downto 0) & s_gav_sr(15);
 
             -- 18..23: output conditioning (chroma [1 2 2 2 2 2 2 2 1]/16 as two adjacent
-            -- 8-sums, luma [1 2 1]; centre at stage 22 -> 23)
+            -- 8-sums, luma [1 2 1]; centre at stage 22 -> 23).  The running 8-sums snap back to
+            -- neutral once 8 blank samples are in, so a glitched sample can't offset the chroma for good.
             s_csu(0) <= s_u17; s_csv(0) <= s_v17;
             for i in 1 to 8 loop s_csu(i) <= s_csu(i - 1); s_csv(i) <= s_csv(i - 1); end loop;
-            s_boxu <= s_boxu + s_u17 - s_csu(7);
-            s_boxv <= s_boxv + s_v17 - s_csv(7);
+            if s_bxh = "00000000" then
+                s_boxu <= to_unsigned(4096, 14); s_boxv <= to_unsigned(4096, 14);
+            else
+                s_boxu <= s_boxu + s_u17 - s_csu(7);
+                s_boxv <= s_boxv + s_v17 - s_csv(7);
+            end if;
             s_boxud <= s_boxu; s_boxvd <= s_boxv;
             v_sc := resize(s_boxu, 15) + s_boxud; s_u23 <= v_sc(13 downto 4);
             v_sc := resize(s_boxv, 15) + s_boxvd; s_v23 <= v_sc(13 downto 4);

@@ -329,6 +329,7 @@ architecture cusp of program_top is
     signal rs_q, rs_q2 : std_logic_vector(3 downto 0) := "1110";
     signal ru_q, rv_q, ru_q2, rv_q2 : std_logic_vector(9 downto 0) := "1000000000";
     signal s_boxu, s_boxv, s_boxud, s_boxvd : unsigned(13 downto 0) := to_unsigned(4096, 14);
+    signal s_bxh : std_logic_vector(7 downto 0) := (others => '0');   -- generated avid of the last 8 p24 samples
     signal s_y25, s_y26, s_y27, s_y28, s_y29, s_y30x, s_yf30 : unsigned(9 downto 0) := to_unsigned(64, 10);
     signal s_u30, s_v30 : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal s_y31, s_y32 : unsigned(9 downto 0) := to_unsigned(64, 10);
@@ -1032,12 +1033,25 @@ begin
             if p22_y > 940 then p23_y <= to_unsigned(940, 10); else p23_y <= unsigned(p22_y(9 downto 0)); end if;
             if p22_u < 0 then p23_u <= (others => '0'); elsif p22_u > 1023 then p23_u <= (others => '1'); else p23_u <= unsigned(p22_u(9 downto 0)); end if;
             if p22_v < 0 then p23_v <= (others => '0'); elsif p22_v > 1023 then p23_v <= (others => '1'); else p23_v <= unsigned(p22_v(9 downto 0)); end if;
-            p24_y <= p23_y; p24_u <= p23_u; p24_v <= p23_v;
+            -- chroma neutral off the generated avid, so the 8-sums below resync in every blanking interval
+            p24_y <= p23_y;
+            if s_gav_sr(22) = '1' then
+                p24_u <= p23_u; p24_v <= p23_v;
+            else
+                p24_u <= to_unsigned(512, 10); p24_v <= to_unsigned(512, 10);
+            end if;
+            s_bxh <= s_bxh(6 downto 0) & s_gav_sr(22);
 
             -- 25..30: output conditioning (chroma [1 2 2 2 2 2 2 2 1]/16 as two
-            -- adjacent 8-sums, luma [1 2 1]; centre at stage 29 -> 30)
-            s_boxu <= s_boxu + p24_u - unsigned(ru_q2);
-            s_boxv <= s_boxv + p24_v - unsigned(rv_q2);
+            -- adjacent 8-sums, luma [1 2 1]; centre at stage 29 -> 30).  The running 8-sums snap back to
+            -- neutral once 8 blank samples are in, so a sample the RAM ring returns wrong can't offset
+            -- the chroma for good.
+            if s_bxh = "00000000" then
+                s_boxu <= to_unsigned(4096, 14); s_boxv <= to_unsigned(4096, 14);
+            else
+                s_boxu <= s_boxu + p24_u - unsigned(ru_q2);
+                s_boxv <= s_boxv + p24_v - unsigned(rv_q2);
+            end if;
             s_boxud <= s_boxu; s_boxvd <= s_boxv;
             v_sc := resize(s_boxu, 15) + s_boxud; s_u30 <= v_sc(13 downto 4);
             v_sc := resize(s_boxv, 15) + s_boxvd; s_v30 <= v_sc(13 downto 4);

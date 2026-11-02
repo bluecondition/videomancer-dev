@@ -378,7 +378,7 @@ architecture greenroom of program_top is
     signal g_wm1 : unsigned(11 downto 0) := to_unsigned(1919, 12);
     signal g_start, g_fall : std_logic := '0';
     signal g_ssr : std_logic_vector(14 downto 0) := (others => '0');        -- g_start delays
-    signal g_asr : std_logic_vector(14 downto 0) := (others => '0');        -- g_avid delays
+    signal g_asr : std_logic_vector(19 downto 0) := (others => '0');        -- g_avid delays
 
     ---------------------------------------------------------------------------
     -- main beam
@@ -506,6 +506,7 @@ architecture greenroom of program_top is
     signal s_swp, s_srp : unsigned(7 downto 0) := (others => '0');
     signal s_sq, s_do : std_logic_vector(3 downto 0) := "1110";
     signal s_boxu, s_boxv, s_boxud, s_boxvd : unsigned(10 downto 0) := to_unsigned(1024, 11);
+    signal s_bxh : std_logic_vector(7 downto 0) := (others => '0');   -- generated avid of the last 8 box inputs
     signal s_y19, s_y20, s_y21, s_y22, s_y23, s_y24x, s_yf : unsigned(9 downto 0) := to_unsigned(64, 10);
     signal s_uf, s_vf : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal s_yo : unsigned(9 downto 0) := to_unsigned(64, 10);
@@ -784,7 +785,7 @@ begin
             end if;
             g_avd <= g_avid;
             g_ssr <= g_ssr(13 downto 0) & g_start;
-            g_asr <= g_asr(13 downto 0) & g_avid;
+            g_asr <= g_asr(18 downto 0) & g_avid;
         end if;
     end process p_gavid;
     g_start <= '1' when (g_sel = '0' and g_rsr(1) = '1') or (g_sel = '1' and g_rsr(2) = '1') else '0';
@@ -1232,11 +1233,20 @@ begin
                     p18_u <= to_unsigned(418, 10); p18_v <= to_unsigned(512, 10);
                 when others => p18_y <= p17_y; p18_u <= p17_u; p18_v <= p17_v;
             end case;
+            -- chroma neutral off the generated avid, so the 8-sums below resync in every blanking interval
+            if g_asr(19) = '0' then p18_u <= to_unsigned(512, 10); p18_v <= to_unsigned(512, 10); end if;
+            s_bxh <= s_bxh(6 downto 0) & g_asr(19);
 
             -- 22..27: output conditioning (chroma [1 2 2 2 2 2 2 2 1]/16 as two adjacent 8-sums, the 8-back
-            -- sample from an EBR ring; luma [1 2 1]); 28: luma toward black (white 940 -> 777), blanking gate
-            s_boxu <= s_boxu + p18_u(9 downto 2) - unsigned(s_cq8(15 downto 8));
-            s_boxv <= s_boxv + p18_v(9 downto 2) - unsigned(s_cq8(7 downto 0));
+            -- sample from an EBR ring; luma [1 2 1]); 28: luma toward black (white 940 -> 777), blanking gate.
+            -- The running 8-sums snap back to neutral once 8 blank samples are in, so a sample the ring
+            -- returns wrong can't offset the chroma for good.
+            if s_bxh = "00000000" then
+                s_boxu <= to_unsigned(1024, 11); s_boxv <= to_unsigned(1024, 11);
+            else
+                s_boxu <= s_boxu + p18_u(9 downto 2) - unsigned(s_cq8(15 downto 8));
+                s_boxv <= s_boxv + p18_v(9 downto 2) - unsigned(s_cq8(7 downto 0));
+            end if;
             s_boxud <= s_boxu; s_boxvd <= s_boxv;
             s_uf <= resize(shift_right(resize(s_boxu, 12) + s_boxud, 2), 10);
             s_vf <= resize(shift_right(resize(s_boxv, 12) + s_boxvd, 2), 10);

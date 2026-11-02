@@ -340,6 +340,7 @@ architecture beacon of program_top is
     signal r10_op : std_logic := '0';
     signal r11_lc, r11_tk : std_logic := '0';
     signal r12_brn : unsigned(2 downto 0) := (others => '0');
+    signal r18_gv, r19_gv : std_logic := '0';                           -- generated avid at stages 18, 19
     signal p14_km, p14_l, p15_km, p15_l, p16_km, p16_l, p17_l : unsigned(7 downto 0) := (others => '0');
     signal p17_inv, p18_inv : unsigned(8 downto 0) := (others => '0');
     signal p17_ly, p18_ly : unsigned(9 downto 0) := (others => '0');
@@ -374,6 +375,7 @@ architecture beacon of program_top is
     signal s_sr : unsigned(7 downto 0) := to_unsigned(233, 8);
     signal s_srq, s_srf, s_sr26, s_sr27 : std_logic_vector(3 downto 0) := "0111";
     signal s_boxu, s_boxv, s_boxud, s_boxvd : unsigned(13 downto 0) := to_unsigned(4096, 14);
+    signal s_bxh : std_logic_vector(7 downto 0) := (others => '0');   -- generated avid of the last 8 box inputs
     signal s_y13, s_y14, s_y15, s_y16, s_y17, s_y18x, s_yf18 : unsigned(9 downto 0) := to_unsigned(64, 10);
     signal s_u18, s_v18 : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal s_y19, s_y20 : unsigned(9 downto 0) := to_unsigned(64, 10);
@@ -925,8 +927,8 @@ begin
     begin
         if rising_edge(clk) then
             s_crq <= ram_cr(to_integer(s_cr));
-            -- spare bits 26 .. 20 carry pipeline flags 7 stages on (stage k in -> s_crq acts as stage k + 7)
-            ram_cr(to_integer(s_cw)) <= "00000" & p_brn(4) & p_fl(3)(4) & p_fl(3)(3) & p_fl(2)(9 downto 8)
+            -- spare bits 27 .. 20 carry pipeline flags 7 stages on (stage k in -> s_crq acts as stage k + 7)
+            ram_cr(to_integer(s_cw)) <= "0000" & s_gav_sr(9) & p_brn(4) & p_fl(3)(4) & p_fl(3)(3) & p_fl(2)(9 downto 8)
                                         & std_logic_vector(s_u12) & std_logic_vector(s_v12);
             s_srq <= ram_sr(to_integer(s_sr));
             ram_sr(to_integer(s_sw)) <= s_gav_sr(0) & s_hs0 & s_vs0 & s_fd0;
@@ -937,6 +939,7 @@ begin
             r11_lc <= s_crq(22);                     -- p_fl(3)(3) at stage 11
             r11_tk <= s_crq(23);                     -- p_fl(3)(4) at stage 11
             r12_brn <= unsigned(s_crq(26 downto 24)); -- p_brn(4) at stage 12
+            r18_gv <= s_crq(27); r19_gv <= r18_gv;     -- s_gav_sr(9) (stage 10) at stages 18, 19
             s_srf <= s_srq; s_sr26 <= s_srf; s_sr27 <= s_sr26;
         end if;
     end process p_rings;
@@ -1250,12 +1253,16 @@ begin
             v_p := signed(resize(p19_py(18 downto 8), 22)) + resize(p19_by, 22) + 64;
             if v_p < 0 then s_y12 <= (others => '0'); elsif v_p > 1023 then s_y12 <= (others => '1');
             else s_y12 <= unsigned(v_p(9 downto 0)); end if;
+            -- (chroma neutral off the generated avid, so the box's 8-sums resync in every blanking interval)
             v_p := resize(shift_right(p19_pu, 3), 22) + resize(p19_bu, 22) + 512;
-            if v_p < 0 then s_u12 <= (others => '0'); elsif v_p > 1023 then s_u12 <= (others => '1');
+            if r19_gv = '0' then s_u12 <= to_unsigned(512, 10);
+            elsif v_p < 0 then s_u12 <= (others => '0'); elsif v_p > 1023 then s_u12 <= (others => '1');
             else s_u12 <= unsigned(v_p(9 downto 0)); end if;
             v_p := resize(shift_right(p19_pv, 3), 22) + resize(p19_bv, 22) + 512;
-            if v_p < 0 then s_v12 <= (others => '0'); elsif v_p > 1023 then s_v12 <= (others => '1');
+            if r19_gv = '0' then s_v12 <= to_unsigned(512, 10);
+            elsif v_p < 0 then s_v12 <= (others => '0'); elsif v_p > 1023 then s_v12 <= (others => '1');
             else s_v12 <= unsigned(v_p(9 downto 0)); end if;
+            s_bxh <= s_bxh(6 downto 0) & r19_gv;
 
             -- pipes
             for k in 7 to 9 loop p_fl(k) <= p_fl(k - 1); end loop;
@@ -1270,8 +1277,13 @@ begin
             s_lu_ra <= s_rx;
 
             -- output conditioning (centre of the chroma box at C_LAT - 3)
-            s_boxu <= s_boxu + s_u12 - s_cru;
-            s_boxv <= s_boxv + s_v12 - s_crv;
+            -- (the running 8-sums snap back to neutral once 8 blank samples are in)
+            if s_bxh = "00000000" then
+                s_boxu <= to_unsigned(4096, 14); s_boxv <= to_unsigned(4096, 14);
+            else
+                s_boxu <= s_boxu + s_u12 - s_cru;
+                s_boxv <= s_boxv + s_v12 - s_crv;
+            end if;
             s_boxud <= s_boxu; s_boxvd <= s_boxv;
             v_u := resize(s_boxu, 18) + s_boxud; s_u18 <= v_u(13 downto 4);
             v_u := resize(s_boxv, 18) + s_boxvd; s_v18 <= v_u(13 downto 4);

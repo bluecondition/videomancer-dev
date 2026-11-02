@@ -136,6 +136,7 @@ bpal3.py, glowfit.py, proto4.py, imodel.py).
     overflowed, and the noise row was latched from the previous line.
 
 ## Status
+- **v0.5.1 built 2026-11-01: output-filter resync fix, NOT flashed.** The output running-sum filters now take neutral input off the generated avid and snap back to neutral once the box is full of blank samples, so a glitched block-RAM / clock sample can no longer leave a permanent wrapped colour offset (fern_diag hardware capture 2026-11-01). Post-route Fmax: HD Analog s1 77.19, SD Analog s1 77.91, HD HDMI s1 80.10, SD HDMI s1 77.65, HD Dual s1 87.24, SD Dual s1 81.97 MHz; 6860-6889 / 7680 LC. Earlier hand-installed HD seeds are gone (new netlist).
 - v0.5.0 built 2026-10-27 with router2. All 6 configs on seed 1; every bitstream passes iceunpack.
 
 | Config | Fmax (MHz) | Fmin (MHz) |

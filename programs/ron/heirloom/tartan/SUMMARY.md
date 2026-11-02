@@ -123,6 +123,7 @@ down.
   - The P12 glide matches.
 
 ## Status
+- **v0.5.1 built 2026-11-01: output-filter resync fix, NOT flashed.** The output running-sum filters now take neutral input off the generated avid and snap back to neutral once the box is full of blank samples, so a glitched block-RAM / clock sample can no longer leave a permanent wrapped colour offset (fern_diag hardware capture 2026-11-01). Not touched: the source-side bend-tap running sum (v_box), which steers geometry, not colour. Post-route Fmax: HD Analog s2 76.79, SD Analog s1 74.11, HD HDMI s1 80.03, SD HDMI s1 77.73, HD Dual s1 84.27, SD Dual s1 87.11 MHz; 5717-5743 / 7680 LC. Earlier hand-installed HD seeds are gone (new netlist).
 - **v0.5.0 built 2026-10-27, NOT flashed.** router2 (`MAKE_TIMEOUT=900 ./build_heirloom.sh tartan`).
 - **Build seeds:** HD HDMI = seed 2 (seed 1 missed); the other five are seed 1.
 - **Post-route Fmax:** HD Analog 83.21, HD HDMI 76.25, HD Dual 83.98, SD Analog 78.79, SD HDMI 78.43,

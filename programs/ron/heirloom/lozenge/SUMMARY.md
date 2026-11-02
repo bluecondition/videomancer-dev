@@ -135,6 +135,7 @@ Working files are in `.heirloom_work/rb_lozenge/`.
     1–3 levels; 64-px block luma std 25.2 vs the photo's 24.4.
 
 ## Status
+- **v0.5.1 built 2026-11-01: output-filter resync fix, NOT flashed.** The output running-sum filters now take neutral input off the generated avid and snap back to neutral once the box is full of blank samples, so a glitched block-RAM / clock sample can no longer leave a permanent wrapped colour offset (fern_diag hardware capture 2026-11-01). Its off-avid input stays the palette black (the reset is 8 x that black), so active video is unchanged. Post-route Fmax: HD Analog s1 81.26, SD Analog s1 82.95, HD HDMI s1 85.34, SD HDMI s1 79.99, HD Dual s1 78.71, SD Dual s1 79.71 MHz; 6536-6551 / 7680 LC. Earlier hand-installed HD seeds are gone (new netlist).
 - **v0.5.0 (2026-10-27), built with ROUTER1.**
   - Build command: `NEXTPNR_ROUTER="--router router1" MAKE_TIMEOUT=900 ./build_heirloom.sh lozenge`.
   - All six configs on seed 1. Fmax (post-route): HD Analog 80.80, HD HDMI 82.81, HD Dual 88.35,

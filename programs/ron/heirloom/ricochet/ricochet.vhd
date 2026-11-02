@@ -293,6 +293,7 @@ architecture ricochet of program_top is
     -- output conditioning
     signal s_csu, s_csv : t_u10(0 to 8) := (others => to_unsigned(512, 10));
     signal s_boxu, s_boxv, s_boxud, s_boxvd : unsigned(13 downto 0) := to_unsigned(4096, 14);
+    signal s_bxh : std_logic_vector(7 downto 0) := (others => '0');   -- generated avid of the last 8 box inputs
     signal s_y22, s_y23, s_y24, s_y25, s_y26, s_y27x, s_yf27 : unsigned(9 downto 0) := to_unsigned(64, 10);
     signal s_u27, s_v27 : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal s_y28 : unsigned(9 downto 0) := to_unsigned(64, 10);
@@ -867,14 +868,19 @@ begin
             -- 19: palette ROM; 20: fabric copy; 21: Azure chroma mirror
             p19_q <= C_RIC_PAL(to_integer(p18_idx));
             p20_q <= p19_q;
+            -- (chroma neutral off the generated avid, so the 8-sums in p_out resync in every blanking interval)
             s_y21 <= unsigned(p20_q(31 downto 22));
-            if s_azure = '1' then
+            if s_gav_sr(19) = '0' then
+                s_u21 <= to_unsigned(512, 10);
+                s_v21 <= to_unsigned(512, 10);
+            elsif s_azure = '1' then
                 s_u21 <= 1024 - unsigned(p20_q(21 downto 12));
                 s_v21 <= 1024 - unsigned(p20_q(11 downto 2));
             else
                 s_u21 <= unsigned(p20_q(21 downto 12));
                 s_v21 <= unsigned(p20_q(11 downto 2));
             end if;
+            s_bxh <= s_bxh(6 downto 0) & s_gav_sr(19);
         end if;
     end process p_pix;
 
@@ -903,8 +909,14 @@ begin
         if rising_edge(clk) then
             s_csu(0) <= s_u21; s_csv(0) <= s_v21;
             for i in 1 to 8 loop s_csu(i) <= s_csu(i - 1); s_csv(i) <= s_csv(i - 1); end loop;
-            s_boxu <= s_boxu + s_u21 - s_csu(7);
-            s_boxv <= s_boxv + s_v21 - s_csv(7);
+            -- the running 8-sums snap back to neutral once 8 blank samples are in, so a glitched
+            -- sample can't offset the chroma for good
+            if s_bxh = "00000000" then
+                s_boxu <= to_unsigned(4096, 14); s_boxv <= to_unsigned(4096, 14);
+            else
+                s_boxu <= s_boxu + s_u21 - s_csu(7);
+                s_boxv <= s_boxv + s_v21 - s_csv(7);
+            end if;
             s_boxud <= s_boxu; s_boxvd <= s_boxv;
             v_sc := resize(s_boxu, 15) + s_boxud; s_u27 <= v_sc(13 downto 4);
             v_sc := resize(s_boxv, 15) + s_boxvd; s_v27 <= v_sc(13 downto 4);

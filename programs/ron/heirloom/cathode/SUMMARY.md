@@ -229,6 +229,7 @@ video. Until now the camera only coloured them (the tubes' red).
 - **Fit.** 7387 LC (96 %).
 
 ## Status
+- **v0.6.2 built 2026-11-01: output-filter resync fix, NOT flashed.** The output running-sum filters now take neutral input off the generated avid and snap back to neutral once the box is full of blank samples, so a glitched block-RAM / clock sample can no longer leave a permanent wrapped colour offset (fern_diag hardware capture 2026-11-01). Post-route Fmax: HD Analog s1 81.93, SD Analog s1 77.90, HD HDMI s1 79.45, SD HDMI s1 77.74, HD Dual s1 76.58, SD Dual s1 79.23 MHz; 7363-7394 / 7680 LC. Earlier hand-installed HD seeds are gone (new netlist).
 - **v0.6.1** built 2026-10-31, router2, all six configs on **seed 1** in the builder. 7357–7392 /
   7680 LC (96 %), 2 / 32 EBR, iceunpack OK × 6.
   - Builder: HD Analog 80.96, SD Analog 78.03, HD HDMI 80.95, SD HDMI 79.69, HD Dual 78.90,

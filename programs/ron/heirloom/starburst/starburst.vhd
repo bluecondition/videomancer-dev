@@ -310,6 +310,7 @@ architecture starburst of program_top is
     type t_u10 is array (natural range <>) of unsigned(9 downto 0);
     signal s_csu, s_csv : t_u10(0 to 8) := (others => to_unsigned(512, 10));
     signal s_boxu, s_boxv, s_boxud, s_boxvd : unsigned(13 downto 0) := to_unsigned(4096, 14);
+    signal s_bxh : std_logic_vector(7 downto 0) := (others => '0');   -- generated avid of the last 8 box inputs
     signal s_y13, s_y14, s_y15, s_y16, s_y17, s_y18x, s_yf18 : unsigned(9 downto 0) := to_unsigned(64, 10);
     signal s_u18, s_v18 : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal s_y19, s_y20 : unsigned(9 downto 0) := to_unsigned(64, 10);
@@ -964,7 +965,14 @@ begin
             p26_u <= unsigned(s_cl_q(19 downto 10));
             p26_v <= unsigned(s_cl_q(9 downto 0));
             p27_y <= p26_y; p27_u <= p26_u; p27_v <= p26_v;
-            s_y12 <= p27_y; s_u12 <= p27_u; s_v12 <= p27_v;
+            -- (chroma neutral off the generated avid, so the 8-sums below resync in every blanking interval)
+            s_y12 <= p27_y;
+            if s_gav_sr(26) = '1' then
+                s_u12 <= p27_u; s_v12 <= p27_v;
+            else
+                s_u12 <= to_unsigned(512, 10); s_v12 <= to_unsigned(512, 10);
+            end if;
+            s_bxh <= s_bxh(6 downto 0) & s_gav_sr(26);
 
             -- luma ring read address (beam x at stage 14)
             if s_gav_sr(11) = '1' then s_rx <= s_rx + 1; else s_rx <= (others => '0'); end if;
@@ -973,8 +981,14 @@ begin
             -- output conditioning (centre of the chroma box at C_LAT - 3)
             s_csu(0) <= s_u12; s_csv(0) <= s_v12;
             for i in 1 to 8 loop s_csu(i) <= s_csu(i - 1); s_csv(i) <= s_csv(i - 1); end loop;
-            s_boxu <= s_boxu + s_u12 - s_csu(7);
-            s_boxv <= s_boxv + s_v12 - s_csv(7);
+            -- (the running 8-sums snap back to neutral once 8 blank samples are in, so a glitched
+            -- sample can't offset the chroma for good)
+            if s_bxh = "00000000" then
+                s_boxu <= to_unsigned(4096, 14); s_boxv <= to_unsigned(4096, 14);
+            else
+                s_boxu <= s_boxu + s_u12 - s_csu(7);
+                s_boxv <= s_boxv + s_v12 - s_csv(7);
+            end if;
             s_boxud <= s_boxu; s_boxvd <= s_boxv;
             v_sc := resize(s_boxu, 15) + s_boxud; s_u18 <= v_sc(13 downto 4);
             v_sc := resize(s_boxv, 15) + s_boxvd; s_v18 <= v_sc(13 downto 4);

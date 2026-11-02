@@ -589,6 +589,8 @@ architecture radiant of program_top is
     -- conditioning
 
     signal s_boxu, s_boxv, s_boxud, s_boxvd : unsigned(10 downto 0) := to_unsigned(1024, 11);
+    signal s_gsr : std_logic_vector(7 downto 0) := (others => '0');   -- generated avid, delayed 1..8 (s_gsr(7) gates p_u14 / p_v14)
+    signal s_bxh : std_logic_vector(7 downto 0) := (others => '0');   -- that gate for the last 8 box inputs
     signal s_y15, s_y16, s_y17, s_y18, s_y19, s_y20x, s_yf20 : unsigned(9 downto 0) := to_unsigned(64, 10);
     signal s_u20x, s_v20x : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal s_y21 : unsigned(9 downto 0) := to_unsigned(64, 10);
@@ -1514,13 +1516,28 @@ begin
                 end if;
             end if;
             p_y9 <= v_y; p_u9 <= v_uu; p_v9 <= v_vv;
-            p_y14 <= p_y9; p_u14 <= p_u9; p_v14 <= p_v9;
+            -- chroma neutral off the generated avid (s_gsr(7): the avid of this pixel, the one the gate
+            -- below sees 7 clocks later), so the 8-sums below resync in every blanking interval
+            s_gsr <= s_gsr(6 downto 0) & g_avid;
+            p_y14 <= p_y9;
+            if s_gsr(7) = '1' then
+                p_u14 <= p_u9; p_v14 <= p_v9;
+            else
+                p_u14 <= to_unsigned(512, 10); p_v14 <= to_unsigned(512, 10);
+            end if;
+            s_bxh <= s_bxh(6 downto 0) & s_gsr(7);
 
             -- 15..20: output conditioning (chroma [1 2 2 2 2 2 2 2 1]/16 as two adjacent 8-sums on 8-bit
             -- chroma, luma [1 2 1]); 21: luma toward black (white 940 -> 777), the gate
-            -- the samples 8 back come from a block-RAM ring (written at s_dwp, read 6 back, 2-clock read)
-            s_boxu <= s_boxu + resize(p_u14(9 downto 2), 11) - resize(unsigned(c_q(15 downto 8)), 11);
-            s_boxv <= s_boxv + resize(p_v14(9 downto 2), 11) - resize(unsigned(c_q(7 downto 0)), 11);
+            -- the samples 8 back come from a block-RAM ring (written at s_dwp, read 6 back, 2-clock read).
+            -- The running 8-sums snap back to neutral (8 x 128) once 8 blank samples are in, so a sample
+            -- the ring returns wrong (start-up, a clock glitch on a source re-lock) can't offset the chroma for good.
+            if s_bxh = "00000000" then
+                s_boxu <= to_unsigned(1024, 11); s_boxv <= to_unsigned(1024, 11);
+            else
+                s_boxu <= s_boxu + resize(p_u14(9 downto 2), 11) - resize(unsigned(c_q(15 downto 8)), 11);
+                s_boxv <= s_boxv + resize(p_v14(9 downto 2), 11) - resize(unsigned(c_q(7 downto 0)), 11);
+            end if;
             s_boxud <= s_boxu; s_boxvd <= s_boxv;
             v_sc := resize(s_boxu, 12) + s_boxud; s_u20x <= v_sc(11 downto 2);
             v_sc := resize(s_boxv, 12) + s_boxvd; s_v20x <= v_sc(11 downto 2);

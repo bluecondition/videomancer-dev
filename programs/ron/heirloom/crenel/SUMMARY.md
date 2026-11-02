@@ -173,6 +173,7 @@ What changed (control table above):
   The fitted dome table in the line ROM (800..911) is no longer read.
 
 ## Status
+- **v0.6.1 built 2026-11-01: output-filter resync fix, NOT flashed.** The output running-sum filters now take neutral input off the generated avid and snap back to neutral once the box is full of blank samples, so a glitched block-RAM / clock sample can no longer leave a permanent wrapped colour offset (fern_diag hardware capture 2026-11-01). Post-route Fmax: HD Analog s1 86.81, SD Analog s1 90.97, HD HDMI s1 87.38, SD HDMI s1 91.22, HD Dual s1 83.28, SD Dual s1 82.21 MHz; 7211-7237 / 7680 LC. Earlier hand-installed HD seeds are gone (new netlist).
 - **v0.6.0, 2026-11-01: built, NOT flashed.** Builder: **ROUTER1**
   (`NEXTPNR_ROUTER="--router router1" MAKE_TIMEOUT=900 ./build_heirloom.sh crenel`). SD Analog,
   SD HDMI and SD Dual closed on seed 1 at 92.55, 91.22 and 84.88 MHz. HD HDMI seed 1 stalled the

@@ -282,6 +282,7 @@ architecture halo of program_top is
     signal ru_q, ru_q2 : std_logic_vector(19 downto 0) := "1000000000" & "1000000000";
     signal rs_q, rs_q2 : std_logic_vector(2 downto 0) := "111";
     signal s_boxu, s_boxv, s_boxud, s_boxvd : unsigned(13 downto 0) := to_unsigned(4096, 14);
+    signal s_bxh : std_logic_vector(7 downto 0) := (others => '0');   -- generated avid of the last 8 box inputs
     signal s_y23, s_y24, s_y25, s_y26, s_y27, s_y28x, s_yf28 : unsigned(9 downto 0) := to_unsigned(64, 10);
     signal s_u28, s_v28 : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal s_y29, s_y30, s_y31, s_y32 : unsigned(9 downto 0) := to_unsigned(64, 10);
@@ -907,15 +908,24 @@ begin
                 elsif k = 1 then p22_u <= unsigned(v_c(9 downto 0));
                 else p22_v <= unsigned(v_c(9 downto 0)); end if;
             end loop;
+            -- chroma neutral off the generated avid, so the 8-sums below resync in every blanking interval
+            if s_gav_sr(20) = '0' then p22_u <= to_unsigned(512, 10); p22_v <= to_unsigned(512, 10); end if;
+            s_bxh <= s_bxh(6 downto 0) & s_gav_sr(20);
 
             -- x counters: the virtual x of the stage-13 and stage-20 pixels
             if s_gav_sr(12) = '1' then x13 <= x13 + resize(t_sx, 20); else x13 <= (others => '0'); end if;
             if s_gav_sr(19) = '1' then x20 <= x20 + resize(t_sx, 20); else x20 <= (others => '0'); end if;
 
             -- 23..30: output conditioning (chroma [1 2 2 2 2 2 2 2 1]/16 as two adjacent
-            -- 8-sums over the ring window, luma [1 2 1]); the heirloom shell's stages, offset +10
-            s_boxu <= s_boxu + p22_u - unsigned(ru_q2(19 downto 10));
-            s_boxv <= s_boxv + p22_v - unsigned(ru_q2(9 downto 0));
+            -- 8-sums over the ring window, luma [1 2 1]); the heirloom shell's stages, offset +10.
+            -- The running 8-sums snap back to neutral once 8 blank samples are in, so a sample the ring
+            -- returns wrong can't offset the chroma for good.
+            if s_bxh = "00000000" then
+                s_boxu <= to_unsigned(4096, 14); s_boxv <= to_unsigned(4096, 14);
+            else
+                s_boxu <= s_boxu + p22_u - unsigned(ru_q2(19 downto 10));
+                s_boxv <= s_boxv + p22_v - unsigned(ru_q2(9 downto 0));
+            end if;
             s_boxud <= s_boxu; s_boxvd <= s_boxv;
             s_u28 <= resize(shift_right(resize(s_boxu, 15) + s_boxud, 4), 10);
             s_v28 <= resize(shift_right(resize(s_boxv, 15) + s_boxvd, 4), 10);

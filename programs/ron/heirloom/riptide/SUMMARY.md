@@ -119,6 +119,7 @@ pixel, so faces and edges show up as hue contours flowing through the swirl and 
   ended at 7553–7586 LC.
 
 ## Status
+- **v0.5.1 built 2026-11-01: output-filter resync fix, NOT flashed.** The output running-sum filters now take neutral input off the generated avid and snap back to neutral once the box is full of blank samples, so a glitched block-RAM / clock sample can no longer leave a permanent wrapped colour offset (fern_diag hardware capture 2026-11-01). s_gav_sr was extended to index 18 for the gate. Post-route Fmax: HD Analog s1 79.50, SD Analog s1 79.97, HD HDMI s1 84.16, SD HDMI s1 92.16, HD Dual s1 88.37, SD Dual s1 76.95 MHz; 7609-7640 / 7680 LC. Earlier hand-installed HD seeds are gone (new netlist).
 - v0.5.0 (2026-10-27): built 6/6 with **ROUTER1** (`NEXTPNR_ROUTER="--router router1"`), all HD PASS at
   74.25 MHz on the last post-route line:
 

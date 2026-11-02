@@ -246,6 +246,7 @@ Ron's notes 2026-10-30 (on v0.5.0):
     re-rolled glyphs as designed.
 
 ## Status
+- **v0.6.1 built 2026-11-01: output-filter resync fix, NOT flashed.** The output running-sum filters now take neutral input off the generated avid and snap back to neutral once the box is full of blank samples, so a glitched block-RAM / clock sample can no longer leave a permanent wrapped colour offset (fern_diag hardware capture 2026-11-01). Both the soft box and the chroma box resync per line (on top of the field reseed). Post-route Fmax: HD Analog s1 87.75, SD Analog s1 88.50, HD HDMI s1 86.95, SD HDMI s1 92.59, HD Dual s1 85.03, SD Dual s1 93.77 MHz; 6783-6806 / 7680 LC. Earlier hand-installed HD seeds are gone (new netlist).
 - **v0.6.0** built 2026-10-30 with **ROUTER1**
   (`NEXTPNR_ROUTER="--router router1" ./build_heirloom.sh bunting`), all six on seed 1. Then the
   three HD bitstreams were re-seeded for HDMI pin skew and hand-installed, and the vmprog was

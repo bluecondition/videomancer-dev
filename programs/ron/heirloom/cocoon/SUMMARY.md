@@ -213,6 +213,7 @@ What changed:
   test. The band's torn read and edge rules stay per line.
 
 ## Status
+- **v0.6.1 built 2026-11-01: output-filter resync fix, NOT flashed.** The output running-sum filters now take neutral input off the generated avid and snap back to neutral once the box is full of blank samples, so a glitched block-RAM / clock sample can no longer leave a permanent wrapped colour offset (fern_diag hardware capture 2026-11-01). Built with ROUTER1: router2 missed HD HDMI on seeds 1-5 and stalled on 6. Post-route Fmax: HD Analog s1 84.80, SD Analog s1 87.40, HD HDMI s2 86.03, SD HDMI s2 85.15, HD Dual s1 91.69, SD Dual s1 84.60 MHz; 7364-7410 / 7680 LC. Earlier hand-installed HD seeds are gone (new netlist).
 - **v0.6.0, built 2026-10-31, router2. NOT flashed.**
   - 7356–7397 / 7680 LC (95.8–96.3 %, now FULL), 21 / 32 EBR (+2 for `C_M`), iceunpack OK × 6.
   - Builder seeds and post-route Fmax: HD Analog s2 74.40, SD Analog **s2** 74.09 (s1 hit the

@@ -113,6 +113,7 @@ Working files: `.heirloom_work/rb_mandala/` (`notes.md` has every number).
   - Motion: the K1-max frame equals the model with the flow advanced 3 fields outward (99.8 % within ±4).
 
 ## Status
+- **v0.5.1 built 2026-11-01: output-filter resync fix, NOT flashed.** The output running-sum filters now take neutral input off the generated avid and snap back to neutral once the box is full of blank samples, so a glitched block-RAM / clock sample can no longer leave a permanent wrapped colour offset (fern_diag hardware capture 2026-11-01). The once-a-field zone reseed is replaced by the per-line resync; off-avid luma is now 64 (was 0). Post-route Fmax: HD Analog s1 88.44, SD Analog s1 94.60, HD HDMI s1 93.58, SD HDMI s1 88.47, HD Dual s1 92.16, SD Dual s1 92.45 MHz; 7016-7055 / 7680 LC. Earlier hand-installed HD seeds are gone (new netlist).
 - **v0.5.0 built 2026-10-21, NOT flashed.** router2, all six configs seed 1. Post-route Fmax:
   HD Analog 95.68, HD HDMI 90.44, HD Dual 94.46, SD Analog 95.58, SD HDMI 90.27, SD Dual 91.11 MHz.
   7027–7085 / 7680 LC (91.5–92.2 %), 21/32 EBR. All bitstreams pass iceunpack.

@@ -252,6 +252,7 @@ architecture lozenge of program_top is
     signal s_cay, s_cau, s_cav, s_cby, s_cbu, s_cbv : t_u10(0 to 7) := (others => to_unsigned(512, 10));
     signal s_bay, s_bau, s_bav, s_bayd, s_baud, s_bavd : unsigned(12 downto 0) := to_unsigned(4096, 13);
     signal s_bby, s_bbu, s_bbv, s_bbyd, s_bbud, s_bbvd : unsigned(12 downto 0) := to_unsigned(4096, 13);
+    signal s_bah, s_bbh : std_logic_vector(7 downto 0) := (others => '0');   -- generated avid of the last 8 inputs of boxes A, B
     signal s_y17, s_u17, s_v17 : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal s_y19, s_u19, s_v19 : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal s_y20, s_u20, s_v20 : unsigned(9 downto 0) := to_unsigned(512, 10);
@@ -881,6 +882,7 @@ begin
             else
                 s_y15 <= unsigned(p14_base(31 downto 22)); s_u15 <= unsigned(p14_base(21 downto 12)); s_v15 <= unsigned(p14_base(11 downto 2));
             end if;
+            s_bah <= s_bah(6 downto 0) & s_gav_sr(12);
         end if;
     end process p_pix;
 
@@ -894,22 +896,38 @@ begin
         variable v_dl : unsigned(9 downto 0);
     begin
         if rising_edge(clk) then
+            -- The running 8-sums snap back to the palette black (the off-avid input of both boxes) once
+            -- 8 blank samples are in, so a glitched sample can't offset the colours for good.
             -- box A: stage 16 sums, stage 17 output
             s_cay(0) <= s_y15; s_cau(0) <= s_u15; s_cav(0) <= s_v15;
             for i in 1 to 7 loop s_cay(i) <= s_cay(i - 1); s_cau(i) <= s_cau(i - 1); s_cav(i) <= s_cav(i - 1); end loop;
-            s_bay <= s_bay + s_y15 - s_cay(7);
-            s_bau <= s_bau + s_u15 - s_cau(7);
-            s_bav <= s_bav + s_v15 - s_cav(7);
+            if s_bah = "00000000" then
+                s_bay <= c_ky & "000"; s_bau <= c_ku & "000"; s_bav <= c_kv & "000";
+            else
+                s_bay <= s_bay + s_y15 - s_cay(7);
+                s_bau <= s_bau + s_u15 - s_cau(7);
+                s_bav <= s_bav + s_v15 - s_cav(7);
+            end if;
             s_bayd <= s_bay; s_baud <= s_bau; s_bavd <= s_bav;
-            v_sc := resize(s_bay, 14) + s_bayd; s_y17 <= v_sc(13 downto 4);
-            v_sc := resize(s_bau, 14) + s_baud; s_u17 <= v_sc(13 downto 4);
-            v_sc := resize(s_bav, 14) + s_bavd; s_v17 <= v_sc(13 downto 4);
+            -- box B input: palette black off the generated avid (what box A gives there anyway)
+            if s_gav_sr(14) = '1' then
+                v_sc := resize(s_bay, 14) + s_bayd; s_y17 <= v_sc(13 downto 4);
+                v_sc := resize(s_bau, 14) + s_baud; s_u17 <= v_sc(13 downto 4);
+                v_sc := resize(s_bav, 14) + s_bavd; s_v17 <= v_sc(13 downto 4);
+            else
+                s_y17 <= c_ky; s_u17 <= c_ku; s_v17 <= c_kv;
+            end if;
+            s_bbh <= s_bbh(6 downto 0) & s_gav_sr(14);
             -- box B: stage 18 sums, stage 19 output
             s_cby(0) <= s_y17; s_cbu(0) <= s_u17; s_cbv(0) <= s_v17;
             for i in 1 to 7 loop s_cby(i) <= s_cby(i - 1); s_cbu(i) <= s_cbu(i - 1); s_cbv(i) <= s_cbv(i - 1); end loop;
-            s_bby <= s_bby + s_y17 - s_cby(7);
-            s_bbu <= s_bbu + s_u17 - s_cbu(7);
-            s_bbv <= s_bbv + s_v17 - s_cbv(7);
+            if s_bbh = "00000000" then
+                s_bby <= c_ky & "000"; s_bbu <= c_ku & "000"; s_bbv <= c_kv & "000";
+            else
+                s_bby <= s_bby + s_y17 - s_cby(7);
+                s_bbu <= s_bbu + s_u17 - s_cbu(7);
+                s_bbv <= s_bbv + s_v17 - s_cbv(7);
+            end if;
             s_bbyd <= s_bby; s_bbud <= s_bbu; s_bbvd <= s_bbv;
             v_sc := resize(s_bby, 14) + s_bbyd; s_y19 <= v_sc(13 downto 4);
             v_sc := resize(s_bbu, 14) + s_bbud; s_u19 <= v_sc(13 downto 4);

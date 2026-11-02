@@ -129,6 +129,7 @@ in the middle keys in a CMY/grey plaid.
   motion matches the model frame for frame.
 
 ## Status
+- **v0.5.1 built 2026-11-01: output-filter resync fix, NOT flashed.** The output running-sum filters now take neutral input off the generated avid and snap back to neutral once the box is full of blank samples, so a glitched block-RAM / clock sample can no longer leave a permanent wrapped colour offset (fern_diag hardware capture 2026-11-01). The Y box resyncs too (to 8 x 64). Post-route Fmax: HD Analog s1 77.74, SD Analog s1 83.70, HD HDMI s1 81.97, SD HDMI s1 78.85, HD Dual s2 78.64, SD Dual s1 73.65 MHz; 6272-6285 / 7680 LC. Earlier hand-installed HD seeds are gone (new netlist).
 - **v0.5.0 built 2026-10-21, NOT flashed.** router2 (`MAKE_TIMEOUT=900 ./build_heirloom.sh medallion`).
 - **Build seeds:** HD Analog = seed 2 and HD HDMI = seed 2 (seed 1 missed on both); the other four
   are seed 1.

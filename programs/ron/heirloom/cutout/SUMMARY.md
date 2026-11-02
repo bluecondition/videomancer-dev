@@ -190,6 +190,7 @@ The photo is a portrait paper collage, 4776 × 5987 (0.80:1). Measurements below
   - colours in the hardware convention (u = Cr), from `cutout.py` → `cutout_pkg.vhd`.
 
 ## Status
+- **v0.6.1 built 2026-11-01: output-filter resync fix, NOT flashed.** The output running-sum filters now take neutral input off the generated avid and snap back to neutral once the box is full of blank samples, so a glitched block-RAM / clock sample can no longer leave a permanent wrapped colour offset (fern_diag hardware capture 2026-11-01). A 31-FF avid delay line was added for the gate (no stage-aligned avid before). Post-route Fmax: HD Analog s1 77.61, SD Analog s1 82.95, HD HDMI s2 79.55, SD HDMI s1 85.57, HD Dual s1 81.18, SD Dual s1 80.55 MHz; 7522-7545 / 7680 LC. Earlier hand-installed HD seeds are gone (new netlist).
 - **v0.6.0 built 2026-11-01, ROUTER1** (`NEXTPNR_ROUTER="--router router1" MAKE_TIMEOUT=900
   ./build_heirloom.sh cutout`), **builder 6/6 on seed 1; HD seeds then re-picked by a pin-skew screen. NOT
   flashed.**

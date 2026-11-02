@@ -141,6 +141,7 @@ Defaults: K1, K2, P12 at 512; K3 0; K4 640; K5 358; K6 RGB; all switches label 0
   - Narrowing the operands, adding the row engine and turning the VCA into FM brought it to 7104–7113 LC.
 
 ## Status
+- **v0.5.1 built 2026-11-01: output-filter resync fix, NOT flashed.** The output running-sum filters now take neutral input off the generated avid and snap back to neutral once the box is full of blank samples, so a glitched block-RAM / clock sample can no longer leave a permanent wrapped colour offset (fern_diag hardware capture 2026-11-01). The Y box resyncs too (to 8 x 64). Post-route Fmax: HD Analog s1 76.44, SD Analog s1 75.28, HD HDMI s1 82.71, SD HDMI s1 62.16, HD Dual s1 80.11, SD Dual s1 81.09 MHz; 7082-7101 / 7680 LC. Earlier hand-installed HD seeds are gone (new netlist).
 - **v0.5.0 built 2026-10-27, NOT flashed.** router2 (`./build_heirloom.sh goblet`).
 - **Build seeds:** HD HDMI = seed 2 (seed 1 stalled the router); HD Dual = seed 2 (seed 1 missed timing);
   HD Analog, SD Analog, SD HDMI and SD Dual = seed 1.

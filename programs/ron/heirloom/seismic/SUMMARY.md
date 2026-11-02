@@ -86,6 +86,7 @@ luma-difference RGB → YUV; chroma and sync delays in block-RAM rings; colouriz
 segment-walker bug in the pre-fit RTL (entry 1 of every strip skipped → black gap rows). Result 7,004–7,024 LC.
 
 ## Status
+- **v0.5.1 built 2026-11-01: output-filter resync fix, NOT flashed.** The output running-sum filters now take neutral input off the generated avid and snap back to neutral once the box is full of blank samples, so a glitched block-RAM / clock sample can no longer leave a permanent wrapped colour offset (fern_diag hardware capture 2026-11-01). Post-route Fmax: HD Analog s1 91.31, SD Analog s1 91.99, HD HDMI s1 94.07, SD HDMI s1 96.46, HD Dual s1 98.79, SD Dual s1 95.11 MHz; 7028-7034 / 7680 LC. Earlier hand-installed HD seeds are gone (new netlist).
 - v0.5.0 built 2026-10-27: router1 (NEXTPNR_ROUTER="--router router1"), all six configs seed 1. Post-route Fmax:
   HD Analog 91.99, HD HDMI 97.71, HD Dual 97.12, SD Analog 95.56, SD HDMI 96.07, SD Dual 94.98 MHz. 7,006–7,024 /
   7,680 LC (91 %), 11/32 EBR. router2 stalled on this netlist in a trial; use router1.

@@ -306,6 +306,7 @@ architecture ticker of program_top is
     signal s_csr : std_logic_vector(0 to 12) := (others => '0');
     signal s_ysum : unsigned(13 downto 0) := to_unsigned(1024, 14);         -- stage 20
     signal s_csum : unsigned(3 downto 0) := (others => '0');
+    signal s_y19h : std_logic_vector(15 downto 0) := (others => '0');      -- generated avid of the last 16 s_ysr(0) / s_csr(0)
     signal s_ys21 : t_u10(0 to 8) := (others => to_unsigned(64, 10));
     signal s_c21 : t_u8(0 to 4) := (others => (others => '0'));
     signal p_dy22 : signed(10 downto 0) := (others => '0');
@@ -320,6 +321,7 @@ architecture ticker of program_top is
     -- output conditioning
     signal s_csu, s_csv : t_u10(0 to 8) := (others => to_unsigned(512, 10));
     signal s_boxu, s_boxv, s_boxud, s_boxvd : unsigned(13 downto 0) := to_unsigned(4096, 14);
+    signal s_bxh : std_logic_vector(7 downto 0) := (others => '0');   -- generated avid of the last 8 box inputs
     signal s_y28, s_y29, s_y30, s_y31, s_y32, s_y33x, s_yf33 : unsigned(9 downto 0) := to_unsigned(64, 10);
     signal s_u33, s_v33 : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal s_y34, s_y35, s_y36 : unsigned(9 downto 0) := to_unsigned(64, 10);
@@ -836,13 +838,22 @@ begin
             p_c18 <= p_c17;
 
             -- 19..20: soft edges: 16-px box on luma, 8-px box on the key flag (centres aligned)
-            s_ysr(0) <= p_y18;
+            -- (luma 64 / key 0 off the generated avid, so both sums resync every blanking interval)
+            if s_gav_sr(17) = '1' then
+                s_ysr(0) <= p_y18; s_csr(0) <= p_c18;
+            else
+                s_ysr(0) <= to_unsigned(64, 10); s_csr(0) <= '0';
+            end if;
+            s_y19h <= s_y19h(14 downto 0) & s_gav_sr(17);
             for i in 1 to 16 loop s_ysr(i) <= s_ysr(i - 1); end loop;
-            s_csr(0) <= p_c18;
             for i in 1 to 12 loop s_csr(i) <= s_csr(i - 1); end loop;
-            s_ysum <= s_ysum + s_ysr(0) - s_ysr(16);
-            if s_csr(4) = '1' and s_csr(12) = '0' then s_csum <= s_csum + 1;
-            elsif s_csr(4) = '0' and s_csr(12) = '1' then s_csum <= s_csum - 1; end if;
+            if s_y19h = "0000000000000000" then
+                s_ysum <= to_unsigned(1024, 14); s_csum <= (others => '0');
+            else
+                s_ysum <= s_ysum + s_ysr(0) - s_ysr(16);
+                if s_csr(4) = '1' and s_csr(12) = '0' then s_csum <= s_csum + 1;
+                elsif s_csr(4) = '0' and s_csr(12) = '1' then s_csum <= s_csum - 1; end if;
+            end if;
 
             -- 21: smoothed (or hard) luma / key amount; shift registers for the fringe
             if s_hard = '1' then
@@ -878,18 +889,26 @@ begin
             p_u26 <= p_u25; p_v26 <= p_v25; p_y26 <= p_y25;
             v_u0 := p_u26 + resize(shift_right(p_pu26, 3), 12);
             v_v0 := p_v26 + resize(shift_right(p_pv26, 3), 12);
-            if v_u0 < 16 then s_u27 <= to_unsigned(16, 10); elsif v_u0 > 1008 then s_u27 <= to_unsigned(1008, 10);
+            if s_gav_sr(25) = '0' then s_u27 <= to_unsigned(512, 10);
+            elsif v_u0 < 16 then s_u27 <= to_unsigned(16, 10); elsif v_u0 > 1008 then s_u27 <= to_unsigned(1008, 10);
             else s_u27 <= unsigned(v_u0(9 downto 0)); end if;
-            if v_v0 < 16 then s_v27 <= to_unsigned(16, 10); elsif v_v0 > 1008 then s_v27 <= to_unsigned(1008, 10);
+            if s_gav_sr(25) = '0' then s_v27 <= to_unsigned(512, 10);
+            elsif v_v0 < 16 then s_v27 <= to_unsigned(16, 10); elsif v_v0 > 1008 then s_v27 <= to_unsigned(1008, 10);
             else s_v27 <= unsigned(v_v0(9 downto 0)); end if;
+            s_bxh <= s_bxh(6 downto 0) & s_gav_sr(25);
             s_y27 <= p_y26;
 
             -- 28..33: output conditioning (chroma [1 2 2 2 2 2 2 2 1]/16 as two
             -- adjacent 8-sums, luma [1 2 1]; centre at stage 32 -> 33)
+            -- (chroma neutral off the generated avid, so the sums resync every blanking interval)
             s_csu(0) <= s_u27; s_csv(0) <= s_v27;
             for i in 1 to 8 loop s_csu(i) <= s_csu(i - 1); s_csv(i) <= s_csv(i - 1); end loop;
-            s_boxu <= s_boxu + s_u27 - s_csu(7);
-            s_boxv <= s_boxv + s_v27 - s_csv(7);
+            if s_bxh = "00000000" then
+                s_boxu <= to_unsigned(4096, 14); s_boxv <= to_unsigned(4096, 14);
+            else
+                s_boxu <= s_boxu + s_u27 - s_csu(7);
+                s_boxv <= s_boxv + s_v27 - s_csv(7);
+            end if;
             s_boxud <= s_boxu; s_boxvd <= s_boxv;
             v_sc := resize(s_boxu, 15) + s_boxud; s_u33 <= v_sc(13 downto 4);
             v_sc := resize(s_boxv, 15) + s_boxvd; s_v33 <= v_sc(13 downto 4);

@@ -186,6 +186,7 @@ The photo is a portrait paper collage, 3196 × 4176 (0.765:1). Measurements belo
   - colours in the hardware convention (u = Cr).
 
 ## Status
+- **v0.5.1 built 2026-11-01: output-filter resync fix, NOT flashed.** The output running-sum filters now take neutral input off the generated avid and snap back to neutral once the box is full of blank samples, so a glitched block-RAM / clock sample can no longer leave a permanent wrapped colour offset (fern_diag hardware capture 2026-11-01). A small g_avid shift register was added for the gate. Post-route Fmax: HD Analog s4 80.10, SD Analog s3 72.36, HD HDMI s4 81.77, SD HDMI s3 80.23, HD Dual s4 75.69, SD Dual s3 77.43 MHz; 6911-6936 / 7680 LC. Earlier hand-installed HD seeds are gone (new netlist).
 - **v0.5.0 built 2026-10-28, router2, 6/6 on seed 3 (base `SEED=3`), not flashed.**
   - Post-route Fmax: HD Analog 82.01, HD HDMI 82.04, HD Dual 76.42, SD Analog 82.11, SD HDMI 80.44,
     SD Dual 74.55 MHz.

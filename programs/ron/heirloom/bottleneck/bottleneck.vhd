@@ -372,6 +372,7 @@ architecture bottleneck of program_top is
 
     -- output conditioning
     signal s_bxu, s_bxv, s_bxud, s_bxvd : unsigned(13 downto 0) := to_unsigned(4096, 14);
+    signal s_bxh : std_logic_vector(7 downto 0) := (others => '0');   -- generated avid of the last 8 box inputs
     type t_u10 is array (natural range <>) of unsigned(9 downto 0);
     signal s_ya : t_u10(0 to 5) := (others => to_unsigned(64, 10));
     signal s_y19, s_u19, s_v19 : unsigned(9 downto 0) := to_unsigned(512, 10);
@@ -1143,12 +1144,13 @@ begin
             if p15_o(0) < 0 then p16_y <= (others => '0'); elsif p15_o(0) > 1020 then p16_y <= to_unsigned(1020, 10); else p16_y <= unsigned(p15_o(0)(9 downto 0)); end if;
             if p15_o(1) < 4 then p16_u <= to_unsigned(4, 10); elsif p15_o(1) > 1020 then p16_u <= to_unsigned(1020, 10); else p16_u <= unsigned(p15_o(1)(9 downto 0)); end if;
             if p15_o(2) < 4 then p16_v <= to_unsigned(4, 10); elsif p15_o(2) > 1020 then p16_v <= to_unsigned(1020, 10); else p16_v <= unsigned(p15_o(2)(9 downto 0)); end if;
-            -- 17: black outside the generated avid
+            -- 17: black outside the generated avid (also keeps the box's 8-sums resyncable: s_bxh)
             if s_gav_sr(14) = '0' then
                 s_y17 <= to_unsigned(64, 10); s_u17 <= to_unsigned(512, 10); s_v17 <= to_unsigned(512, 10);
             else
                 s_y17 <= p16_y; s_u17 <= p16_u; s_v17 <= p16_v;
             end if;
+            s_bxh <= s_bxh(6 downto 0) & s_gav_sr(14);
         end if;
     end process p_pix;
 
@@ -1163,9 +1165,14 @@ begin
         variable v_ys : unsigned(11 downto 0);
     begin
         if rising_edge(clk) then
-            -- 18: running 8-sums; 19: output
-            s_bxu <= s_bxu + s_u17 - unsigned(ru_q2);
-            s_bxv <= s_bxv + s_v17 - unsigned(rv_q2);
+            -- 18: running 8-sums (snapped back to neutral once 8 blank samples are in, so they resync
+            -- in every blanking interval); 19: output
+            if s_bxh = "00000000" then
+                s_bxu <= to_unsigned(4096, 14); s_bxv <= to_unsigned(4096, 14);
+            else
+                s_bxu <= s_bxu + s_u17 - unsigned(ru_q2);
+                s_bxv <= s_bxv + s_v17 - unsigned(rv_q2);
+            end if;
             s_bxud <= s_bxu; s_bxvd <= s_bxv;
             v_sc := resize(s_bxu, 15) + s_bxud; s_u19 <= v_sc(13 downto 4);
             v_sc := resize(s_bxv, 15) + s_bxvd; s_v19 <= v_sc(13 downto 4);

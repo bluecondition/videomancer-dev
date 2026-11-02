@@ -399,6 +399,7 @@ architecture magma of program_top is
     signal rb_wd : std_logic_vector(19 downto 0) := "1000000000" & "1000000000";
     signal rb_q, rb_q2 : std_logic_vector(19 downto 0) := "1000000000" & "1000000000";
     signal s_u8, s_v8, s_u8p, s_v8p : unsigned(12 downto 0) := to_unsigned(4096, 13);
+    signal s_bxh : std_logic_vector(7 downto 0) := (others => '0');   -- generated avid of the last 8 ring inputs
     signal s_y1, s_y2 : unsigned(9 downto 0) := to_unsigned(64, 10);
     signal s_yf : t_u10a(23 to 27) := (others => to_unsigned(64, 10));
     signal q28_y : unsigned(9 downto 0) := to_unsigned(64, 10);
@@ -1196,13 +1197,15 @@ begin
             else q21_v <= unsigned(v_cs(9 downto 0)); end if;
 
             -- 22..28: output conditioning.  Chroma: box-8 pair [1 2 2 2 2 2 2 2 1]/16 in every mode over a
-            -- block-RAM ring (the sums see samples 1..8 back), re-seeded neutral in the vblank zone, its
-            -- centre at stage 28 -- summed straight into the output register.  Luma [1 2 1] (stage 23),
-            -- delayed 4 to stage 27, then scaled toward black (white 940 -> 777) into stage 28.
-            if s_zone = '1' then rb_wd <= std_logic_vector(to_unsigned(512, 10)) & std_logic_vector(to_unsigned(512, 10));
+            -- block-RAM ring (the sums see samples 1..8 back), its centre at stage 28 -- summed straight
+            -- into the output register.  Luma [1 2 1] (stage 23), delayed 4 to stage 27, then scaled toward
+            -- black (white 940 -> 777) into stage 28.  Chroma neutral off the generated avid, so the 8-sums
+            -- resync in every blanking interval (once 8 blank samples are in), not just once a field.
+            if s_gav_sr(20) = '0' then rb_wd <= std_logic_vector(to_unsigned(512, 10)) & std_logic_vector(to_unsigned(512, 10));
             else rb_wd <= std_logic_vector(q21_u) & std_logic_vector(q21_v); end if;
+            s_bxh <= s_bxh(6 downto 0) & s_gav_sr(20);
             rb_ra <= s_wp - 5;
-            if s_zone = '1' and s_zc = 40 then
+            if s_bxh = "00000000" then
                 s_u8 <= to_unsigned(4096, 13); s_v8 <= to_unsigned(4096, 13);
             else
                 s_u8 <= s_u8 + unsigned(rb_wd(19 downto 10)) - unsigned(rb_q2(19 downto 10));

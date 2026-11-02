@@ -366,6 +366,7 @@ architecture vase of program_top is
     signal cr_p, cr_wa, cr_ra : unsigned(7 downto 0) := (others => '0');
     signal cr_wd, cr_q : std_logic_vector(15 downto 0) := x"8080";
     signal s_boxu, s_boxv, s_boxud, s_boxvd : unsigned(10 downto 0) := to_unsigned(1024, 11);
+    signal s_b24h : std_logic_vector(7 downto 0) := (others => '0');   -- generated avid of the last 8 p24 chroma samples
     signal s_y25, s_y26, s_y27, s_y28, s_y29, s_y30x, s_yf30 : unsigned(9 downto 0) := to_unsigned(64, 10);
     signal s_u30, s_v30 : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal s_y31, s_y32 : unsigned(9 downto 0) := to_unsigned(64, 10);
@@ -1151,15 +1152,25 @@ begin
             p24_y <= to_unsigned(64, 10) + resize(v_dy2, 10);
             v_cu := f_clip(resize(p23_cr, 12) + 512, 1023, 10);
             v_cv := f_clip(resize(p23_cb, 12) + 512, 1023, 10);
-            p24_u8 <= v_cu(9 downto 2); p24_v8 <= v_cv(9 downto 2);
+            -- chroma neutral off the generated avid, so the box sums resync every blanking interval
+            if s_gav_sr(22) = '1' then
+                p24_u8 <= v_cu(9 downto 2); p24_v8 <= v_cv(9 downto 2);
+            else
+                p24_u8 <= to_unsigned(128, 8); p24_v8 <= to_unsigned(128, 8);
+            end if;
+            s_b24h <= s_b24h(6 downto 0) & s_gav_sr(22);
 
             -- 25..30: output conditioning (chroma [1 2 2 2 2 2 2 2 1]/16 from 8-bit chroma and a delay-8
             -- ring; luma [1 2 1])
             cr_p <= cr_p + 1;
             cr_wa <= cr_p; cr_wd <= std_logic_vector(p24_u8) & std_logic_vector(p24_v8);
             cr_ra <= cr_p - 6;
-            s_boxu <= s_boxu + resize(p24_u8, 11) - resize(unsigned(cr_q(15 downto 8)), 11);
-            s_boxv <= s_boxv + resize(p24_v8, 11) - resize(unsigned(cr_q(7 downto 0)), 11);
+            if s_b24h = "00000000" then
+                s_boxu <= to_unsigned(1024, 11); s_boxv <= to_unsigned(1024, 11);
+            else
+                s_boxu <= s_boxu + resize(p24_u8, 11) - resize(unsigned(cr_q(15 downto 8)), 11);
+                s_boxv <= s_boxv + resize(p24_v8, 11) - resize(unsigned(cr_q(7 downto 0)), 11);
+            end if;
             s_boxud <= s_boxu; s_boxvd <= s_boxv;
             v_sc := resize(s_boxu, 12) + s_boxud; s_u30 <= v_sc(11 downto 2);
             v_sc := resize(s_boxv, 12) + s_boxvd; s_v30 <= v_sc(11 downto 2);

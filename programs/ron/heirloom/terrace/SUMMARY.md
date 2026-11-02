@@ -112,6 +112,7 @@ Measured in `.heirloom_work/rb_terrace/` (m1–m8.py, fit_fb.py, shape.py; notes
     bar-fix level.
 
 ## Status
+- **v0.5.1 built 2026-11-01: output-filter resync fix, NOT flashed.** The output running-sum filters now take neutral input off the generated avid and snap back to neutral once the box is full of blank samples, so a glitched block-RAM / clock sample can no longer leave a permanent wrapped colour offset (fern_diag hardware capture 2026-11-01). Not touched: the source-side bend-tap running sum (v_box), which steers geometry, not colour. Post-route Fmax: HD Analog s1 83.31, SD Analog s1 83.87, HD HDMI s1 86.01, SD HDMI s1 91.35, HD Dual s1 88.51, SD Dual s1 89.57 MHz; 6850-6864 / 7680 LC. Earlier hand-installed HD seeds are gone (new netlist).
 - **v0.5.0, 2026-10-21, router2.** Post-route Fmax:
   - HD Analog 85.19 MHz (seed 1), HD HDMI 84.37 MHz (**seed 2**: seed 1 stalled the router at the 900 s timeout),
     HD Dual 82.68 MHz (seed 1);

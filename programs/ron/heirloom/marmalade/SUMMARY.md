@@ -110,6 +110,7 @@ was dropped.
 - **8 EBR:** zone ROM, 2 slew ROM, sine ROM, 2 anchor ROM, 2 palette RAM.
 
 ## Status
+- **v0.5.1 built 2026-11-01: output-filter resync fix, NOT flashed.** The output running-sum filters now take neutral input off the generated avid and snap back to neutral once the box is full of blank samples, so a glitched block-RAM / clock sample can no longer leave a permanent wrapped colour offset (fern_diag hardware capture 2026-11-01). Its Y / U / V pre-boxes resync too. Post-route Fmax: HD Analog s1 97.61, SD Analog s1 99.25, HD HDMI s1 97.55, SD HDMI s1 91.81, HD Dual s1 100.52, SD Dual s1 90.13 MHz; 5800-5821 / 7680 LC. Earlier hand-installed HD seeds are gone (new netlist).
 - **v0.5.0 built 2026-10-21 with ROUTER1** (`NEXTPNR_ROUTER="--router router1" ./build_heirloom.sh marmalade`), not
   flashed.
   - All six configs closed on seed 1.

@@ -357,6 +357,7 @@ architecture abacus of program_top is
     type t_u10 is array (natural range <>) of unsigned(9 downto 0);
     signal s_csu, s_csv : t_u10(0 to 8) := (others => to_unsigned(512, 10));
     signal s_boxu, s_boxv, s_boxud, s_boxvd : unsigned(13 downto 0) := to_unsigned(4096, 14);
+    signal s_bxh : std_logic_vector(7 downto 0) := (others => '0');   -- generated avid of the last 8 box inputs
     signal s_y14, s_y15, s_y16, s_y17, s_y18, s_y19x, s_yf19 : unsigned(9 downto 0) := to_unsigned(64, 10);
     signal s_u19, s_v19 : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal s_y20 : unsigned(9 downto 0) := to_unsigned(64, 10);
@@ -1091,8 +1092,15 @@ begin
             else
                 s_uq <= v_bu; s_vq <= v_bv;
             end if;
-            -- 16: latency padding (C_LAT stays a multiple of 4)
-            s_yo <= s_yq; s_uo <= s_uq; s_vo <= s_vq;
+            -- 16: latency padding (C_LAT stays a multiple of 4); chroma neutral off the generated
+            -- avid (stage 21 absolute), so the 8-sums in p_out resync in every blanking interval
+            s_yo <= s_yq;
+            if s_gav_sr(19) = '1' then
+                s_uo <= s_uq; s_vo <= s_vq;
+            else
+                s_uo <= to_unsigned(512, 10); s_vo <= to_unsigned(512, 10);
+            end if;
+            s_bxh <= s_bxh(6 downto 0) & s_gav_sr(19);
         end if;
     end process p_pix;
 
@@ -1257,8 +1265,13 @@ begin
         if rising_edge(clk) then
             s_csu(0) <= s_uo; s_csv(0) <= s_vo;
             for i in 1 to 8 loop s_csu(i) <= s_csu(i - 1); s_csv(i) <= s_csv(i - 1); end loop;
-            s_boxu <= s_boxu + s_uo - s_csu(7);
-            s_boxv <= s_boxv + s_vo - s_csv(7);
+            -- the running 8-sums snap back to neutral once 8 blank samples are in
+            if s_bxh = "00000000" then
+                s_boxu <= to_unsigned(4096, 14); s_boxv <= to_unsigned(4096, 14);
+            else
+                s_boxu <= s_boxu + s_uo - s_csu(7);
+                s_boxv <= s_boxv + s_vo - s_csv(7);
+            end if;
             s_boxud <= s_boxu; s_boxvd <= s_boxv;
             v_sc := resize(s_boxu, 15) + s_boxud; s_u19 <= v_sc(13 downto 4);
             v_sc := resize(s_boxv, 15) + s_boxvd; s_v19 <= v_sc(13 downto 4);

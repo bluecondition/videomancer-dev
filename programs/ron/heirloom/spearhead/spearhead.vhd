@@ -263,6 +263,7 @@ architecture spearhead of program_top is
     type t_u10 is array (natural range <>) of unsigned(9 downto 0);
     signal s_csu, s_csv : t_u10(0 to 8) := (others => to_unsigned(512, 10));
     signal s_boxu, s_boxv, s_boxud, s_boxvd : unsigned(13 downto 0) := to_unsigned(4096, 14);
+    signal s_bxh : std_logic_vector(7 downto 0) := (others => '0');   -- generated avid of the last 8 box inputs
     signal s_y9, s_y10, s_y11, s_y12, s_y13, s_y14x, s_yf14 : unsigned(9 downto 0) := to_unsigned(64, 10);
     signal s_u14, s_v14 : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal s_y15, s_y16 : unsigned(9 downto 0) := to_unsigned(64, 10);
@@ -744,18 +745,26 @@ begin
             if v_v < 16 then s7_bv <= to_unsigned(16, 10); elsif v_v > 1008 then s7_bv <= to_unsigned(1008, 10); else s7_bv <= unsigned(v_v(9 downto 0)); end if;
             s7_fg <= s6_fg; s7_k <= s6_k;
 
-            -- 8: compose (key: spear / background)
+            -- 8: compose (key: spear / background); chroma neutral off the generated avid, so the
+            --    8-sums below resync in every blanking interval
             if s7_k = '1' then
                 s_y8 <= unsigned(s7_fg(29 downto 20)); s_u8 <= unsigned(s7_fg(19 downto 10)); s_v8 <= unsigned(s7_fg(9 downto 0));
             else
                 s_y8 <= s7_by; s_u8 <= s7_bu; s_v8 <= s7_bv;
             end if;
+            if s_gav_sr(6) = '0' then s_u8 <= to_unsigned(512, 10); s_v8 <= to_unsigned(512, 10); end if;
+            s_bxh <= s_bxh(6 downto 0) & s_gav_sr(6);
 
-            -- 9..14: output conditioning (centre at stage 13 -> 14)
+            -- 9..14: output conditioning (centre at stage 13 -> 14).  The running 8-sums snap back to
+            -- neutral once 8 blank samples are in, so a glitched sample can't offset the chroma for good.
             s_csu(0) <= s_u8; s_csv(0) <= s_v8;
             for i in 1 to 8 loop s_csu(i) <= s_csu(i - 1); s_csv(i) <= s_csv(i - 1); end loop;
-            s_boxu <= s_boxu + s_u8 - s_csu(7);
-            s_boxv <= s_boxv + s_v8 - s_csv(7);
+            if s_bxh = "00000000" then
+                s_boxu <= to_unsigned(4096, 14); s_boxv <= to_unsigned(4096, 14);
+            else
+                s_boxu <= s_boxu + s_u8 - s_csu(7);
+                s_boxv <= s_boxv + s_v8 - s_csv(7);
+            end if;
             s_boxud <= s_boxu; s_boxvd <= s_boxv;
             v_sc := resize(s_boxu, 15) + s_boxud; s_u14 <= v_sc(13 downto 4);
             v_sc := resize(s_boxv, 15) + s_boxvd; s_v14 <= v_sc(13 downto 4);

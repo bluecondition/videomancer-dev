@@ -117,6 +117,7 @@ K4 700), Night Eyes (K1 760, S7 Night, S10 Fold).
 - **Colour convention.** Generated colours are in the hardware convention (U carries Cr).
 
 ## Status
+- **v0.5.1 built 2026-11-01: output-filter resync fix, NOT flashed.** The output running-sum filters now take neutral input off the generated avid and snap back to neutral once the box is full of blank samples, so a glitched block-RAM / clock sample can no longer leave a permanent wrapped colour offset (fern_diag hardware capture 2026-11-01). Post-route Fmax: HD Analog s1 86.82, SD Analog s1 84.57, HD HDMI s1 85.78, SD HDMI s1 85.57, HD Dual s1 86.06, SD Dual s1 88.32 MHz; 7122-7164 / 7680 LC. Earlier hand-installed HD seeds are gone (new netlist).
 v0.5.0 built 2026-10-27, NOT flashed.
 - **Router:** ROUTER1. router2 reaches 71 MHz on HD Analog, so rebuild with
   `NEXTPNR_ROUTER="--router router1" ./build_heirloom.sh lotus`.

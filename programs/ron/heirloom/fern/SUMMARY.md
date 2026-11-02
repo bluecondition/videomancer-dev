@@ -159,6 +159,7 @@ Glides: K1, K2, K4, K5, K6 and P12 move 1/8 of the gap per field (deadband 4).
   - The default renders use a sim-only copy whose K5 glide powers up at the default (see Status).
 
 ## Status
+- **v0.5.1 built 2026-11-01: output-filter resync fix, NOT flashed.** The output running-sum filters now take neutral input off the generated avid and snap back to neutral once the box is full of blank samples, so a glitched block-RAM / clock sample can no longer leave a permanent wrapped colour offset (fern_diag hardware capture 2026-11-01). Production v0.5 (resync only; the v0.6 work is in the diag). HD Dual missed on the builder's six seeds and was hand re-routed (router1 s14, installed + repacked). Post-route Fmax: HD Analog s3 78.95, SD Analog s1 73.26, HD HDMI s4 76.49, SD HDMI s1 71.05, HD Dual router1 s14 78.54 (hand re-route), SD Dual s1 76.83 MHz; 7124-7180 / 7680 LC. Earlier hand-installed HD seeds are gone (new netlist).
 - **v0.5.0 built 2026-10-27, NOT flashed.** **ROUTER1**
   (`NEXTPNR_ROUTER="--router router1" ./build_heirloom.sh fern`). **Build seeds: HD HDMI = seed 2** (seed 1
   missed); the other five are seed 1.

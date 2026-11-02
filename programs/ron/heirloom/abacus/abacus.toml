@@ -9,7 +9,7 @@
 processing_delay_clks = 28
 program_id = "com.czartroniks.abacus"
 program_name = "Abacus"
-program_version = "0.6.3"
+program_version = "0.6.4"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"

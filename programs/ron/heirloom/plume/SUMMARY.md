@@ -130,6 +130,7 @@ Working files: `.heirloom_work/rb_plume/` (`notes.md` has every number).
   - Motion: at K4 max the seams move +8 px per frame to the right, matching the per-field phase step.
 
 ## Status
+- **v0.5.1 built 2026-11-01: output-filter resync fix, NOT flashed.** The output running-sum filters now take neutral input off the generated avid and snap back to neutral once the box is full of blank samples, so a glitched block-RAM / clock sample can no longer leave a permanent wrapped colour offset (fern_diag hardware capture 2026-11-01). The once-a-field zone reseed is replaced by the per-line resync; off-avid luma is now 64 (was 0). Post-route Fmax: HD Analog s2 81.02, SD Analog s1 75.29, HD HDMI s5 77.59, SD HDMI s1 74.62, HD Dual s2 81.44, SD Dual s1 66.65 MHz; 6969-6995 / 7680 LC. Earlier hand-installed HD seeds are gone (new netlist).
 - **v0.5.0 built 2026-10-27, NOT flashed.** router2. Post-route Fmax:
 
   | Config | Seed | Fmax (MHz) |

@@ -156,6 +156,7 @@ Work dir: `.heirloom_work/rb_bottleneck/` (`notes.md`, `geom.py`, `tables.py`, `
   - Additive Width / Spread, one window, the melt as a shift and LFSR noise brought it to 7.4k.
 
 ## Status
+- **v0.5.1 built 2026-11-01: output-filter resync fix, NOT flashed.** The output running-sum filters now take neutral input off the generated avid and snap back to neutral once the box is full of blank samples, so a glitched block-RAM / clock sample can no longer leave a permanent wrapped colour offset (fern_diag hardware capture 2026-11-01). Post-route Fmax: HD Analog s1 87.70, SD Analog s1 83.89, HD HDMI s1 87.29, SD HDMI s1 84.28, HD Dual s3 83.51, SD Dual s1 89.06 MHz; 7394-7411 / 7680 LC. Earlier hand-installed HD seeds are gone (new netlist).
 - **v0.5.0 built 2026-10-27, ROUTER1** (`NEXTPNR_ROUTER="--router router1" ./build_heirloom.sh bottleneck`).
 - **Seeds:** SD HDMI = seed 2 (seed 1 stalled the router); the other five are seed 1.
 - **Fmax (post-route):** HD Analog 79.55, HD HDMI 86.23, HD Dual 78.15, SD Analog 75.96, SD HDMI 86.53,

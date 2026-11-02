@@ -67,6 +67,7 @@ buffer, so Bend stays live in Osc mode. At the default K6 the camera only bends 
 has no camera content); turn K6 up for a stronger effect.
 
 ## Status
+- **v0.5.1 built 2026-11-01: output-filter resync fix, NOT flashed.** The output running-sum filters now take neutral input off the generated avid and snap back to neutral once the box is full of blank samples, so a glitched block-RAM / clock sample can no longer leave a permanent wrapped colour offset (fern_diag hardware capture 2026-11-01). Post-route Fmax: HD Analog s1 83.33, SD Analog s1 83.39, HD HDMI s1 81.35, SD HDMI s1 75.57, HD Dual s1 78.05, SD Dual s1 73.40 MHz; 5812-5829 / 7680 LC. Earlier hand-installed HD seeds are gone (new netlist).
 v0.5.0 built 2026-10-21. router2, all six configs on seed 1; all bitstreams pass iceunpack.
 - HD Fmax: Analog 82.10, HDMI 81.63, Dual 79.26 MHz.
 - SD Fmax: Analog 80.98, HDMI 79.88, Dual 75.81 MHz.

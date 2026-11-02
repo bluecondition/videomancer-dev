@@ -113,6 +113,7 @@ Defaults: K1–K3, K5 and P12 at 512, K4 640, K6 and all switches at label 0 (S1
   - The P12 glide in one clock was the critical path (74.37 MHz); it is now pipelined and the engine kick registered.
 
 ## Status
+- **v0.5.1 built 2026-11-01: output-filter resync fix, NOT flashed.** The output running-sum filters now take neutral input off the generated avid and snap back to neutral once the box is full of blank samples, so a glitched block-RAM / clock sample can no longer leave a permanent wrapped colour offset (fern_diag hardware capture 2026-11-01). The Y box resyncs too (to 8 x 64). Post-route Fmax: HD Analog s1 77.86, SD Analog s1 74.53, HD HDMI s2 75.32, SD HDMI s1 80.01, HD Dual s2 82.82, SD Dual s1 72.45 MHz; 6807-6833 / 7680 LC. Earlier hand-installed HD seeds are gone (new netlist).
 - **v0.5.0 built 2026-10-27, NOT flashed.** router2 (`./build_heirloom.sh ribboncandy`).
 - **Build seeds:** HD Analog = seed 2 (seed 1 missed); HD HDMI = seed 3 (seed 1 missed, seed 2 stalled the router);
   HD Dual = seed 3 (seeds 1–2 stalled); SD Analog, SD HDMI, SD Dual = seed 1.

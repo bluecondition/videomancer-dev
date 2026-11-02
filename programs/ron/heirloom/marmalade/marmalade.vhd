@@ -250,6 +250,7 @@ architecture marmalade of program_top is
     signal s_udl, s_vdl : t_u10(0 to 10) := (others => to_unsigned(512, 10));
     signal s_by : unsigned(12 downto 0) := to_unsigned(512, 13);
     signal s_bu, s_bv : unsigned(12 downto 0) := to_unsigned(4096, 13);
+    signal s_b8h : std_logic_vector(10 downto 0) := (others => '0');   -- generated avid of the last 11 p16 samples
     signal p18_y, p19_y, s_y12 : unsigned(9 downto 0) := to_unsigned(64, 10);
     signal p18_u, p18_v, p19_u, p19_v, s_u12, s_v12 : unsigned(9 downto 0) := to_unsigned(512, 10);
     -- picture: camera luma (Video) or the drifting triangles (Osc) into the stage phase
@@ -264,6 +265,7 @@ architecture marmalade of program_top is
     -- output conditioning
     signal s_csu, s_csv : t_u10(0 to 8) := (others => to_unsigned(512, 10));
     signal s_boxu, s_boxv, s_boxud, s_boxvd : unsigned(13 downto 0) := to_unsigned(4096, 14);
+    signal s_bxh : std_logic_vector(7 downto 0) := (others => '0');   -- generated avid of the last 8 box inputs
     signal s_y13, s_y14, s_y15, s_y16, s_y17, s_y18x, s_yf18 : unsigned(9 downto 0) := to_unsigned(64, 10);
     signal s_u18, s_v18 : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal s_y19, s_y20 : unsigned(9 downto 0) := to_unsigned(64, 10);
@@ -817,28 +819,50 @@ begin
             if v_kk >= 4 then p13_k <= to_unsigned(4, 3); else p13_k <= v_kk(2 downto 0); end if;
 
             -- 14: palette RAM address; 15: RAM out; 16: fabric
+            -- black / neutral off the generated avid, so the box sums below resync in every blanking interval
             s_pr_a <= p13_zs & p13_k;
-            p16_y <= unsigned(s_pr_q(29 downto 20));
-            p16_u <= unsigned(s_pr_q(19 downto 10));
-            p16_v <= unsigned(s_pr_q(9 downto 0));
-            -- 17: luma box 8; chroma 3 px behind luma, box 8
+            if s_gav_sr(14) = '1' then
+                p16_y <= unsigned(s_pr_q(29 downto 20));
+                p16_u <= unsigned(s_pr_q(19 downto 10));
+                p16_v <= unsigned(s_pr_q(9 downto 0));
+            else
+                p16_y <= to_unsigned(64, 10); p16_u <= to_unsigned(512, 10); p16_v <= to_unsigned(512, 10);
+            end if;
+            s_b8h <= s_b8h(9 downto 0) & s_gav_sr(14);
+            -- 17: luma box 8; chroma 3 px behind luma, box 8 (both snap back to black / neutral once
+            -- 11 blank samples are in, so a glitched sample can't offset them for good)
             s_ydl(0) <= p16_y;
             for i in 1 to 7 loop s_ydl(i) <= s_ydl(i - 1); end loop;
-            s_by <= s_by + resize(p16_y, 13) - resize(s_ydl(7), 13);
             s_udl(0) <= p16_u; s_vdl(0) <= p16_v;
             for i in 1 to 10 loop s_udl(i) <= s_udl(i - 1); s_vdl(i) <= s_vdl(i - 1); end loop;
-            s_bu <= s_bu + resize(s_udl(2), 13) - resize(s_udl(10), 13);
-            s_bv <= s_bv + resize(s_vdl(2), 13) - resize(s_vdl(10), 13);
-            -- 18, 19: pads; 20: compose
+            if s_b8h = "00000000000" then
+                s_by <= to_unsigned(512, 13); s_bu <= to_unsigned(4096, 13); s_bv <= to_unsigned(4096, 13);
+            else
+                s_by <= s_by + resize(p16_y, 13) - resize(s_ydl(7), 13);
+                s_bu <= s_bu + resize(s_udl(2), 13) - resize(s_udl(10), 13);
+                s_bv <= s_bv + resize(s_vdl(2), 13) - resize(s_vdl(10), 13);
+            end if;
+            -- 18, 19: pads; 20: compose (chroma neutral off the generated avid, for the shell box sums)
             p18_y <= s_by(12 downto 3); p18_u <= s_bu(12 downto 3); p18_v <= s_bv(12 downto 3);
             p19_y <= p18_y; p19_u <= p18_u; p19_v <= p18_v;
-            s_y12 <= p19_y; s_u12 <= p19_u; s_v12 <= p19_v;
+            s_y12 <= p19_y;
+            if s_gav_sr(18) = '1' then
+                s_u12 <= p19_u; s_v12 <= p19_v;
+            else
+                s_u12 <= to_unsigned(512, 10); s_v12 <= to_unsigned(512, 10);
+            end if;
+            s_bxh <= s_bxh(6 downto 0) & s_gav_sr(18);
 
-            -- output conditioning (shell): chroma [1 2 2 2 2 2 2 2 1]/16, luma [1 2 1], 13/16
+            -- output conditioning (shell): chroma [1 2 2 2 2 2 2 2 1]/16, luma [1 2 1], 13/16;
+            -- the running 8-sums snap back to neutral once 8 blank samples are in
             s_csu(0) <= s_u12; s_csv(0) <= s_v12;
             for i in 1 to 8 loop s_csu(i) <= s_csu(i - 1); s_csv(i) <= s_csv(i - 1); end loop;
-            s_boxu <= s_boxu + s_u12 - s_csu(7);
-            s_boxv <= s_boxv + s_v12 - s_csv(7);
+            if s_bxh = "00000000" then
+                s_boxu <= to_unsigned(4096, 14); s_boxv <= to_unsigned(4096, 14);
+            else
+                s_boxu <= s_boxu + s_u12 - s_csu(7);
+                s_boxv <= s_boxv + s_v12 - s_csv(7);
+            end if;
             s_boxud <= s_boxu; s_boxvd <= s_boxv;
             s_u18 <= resize(shift_right(resize(s_boxu, 15) + s_boxud, 4), 10);
             s_v18 <= resize(shift_right(resize(s_boxv, 15) + s_boxvd, 4), 10);
