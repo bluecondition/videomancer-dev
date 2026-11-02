@@ -40,7 +40,7 @@ hardware headroom left in each one, and the known issues to check.
   - **curtain:** its sources were tidied after its build, so rebuild before release (done: rebuilt at v0.6.0, 2026-11-01).
   - **radiant:** must be built with `SEED=3`. HD HDMI fails placement at seeds 1–2, and the builder does not retry
     placement errors.
-  - **goblet:** the "Hourglass" preset also turns the stripes off (unintended).
+  - **goblet:** the "Hourglass" preset also turns the stripes off (unintended; fixed in v0.6.0, 2026-11-02).
   - **Presets are hand-written placeholders everywhere.** Capture real ones from the hardware with
     `./capture_preset.sh`.
 
@@ -194,7 +194,7 @@ Commit the row along with the program's own files.
 | escalator | built v0.6.0, awaiting HW | v0.6.0 | Ron 11-01 (on v0.5.0, before flashing it; picked from a proposed map): K1 Columns -> grid only; K2 Bands -> count + height; K5 Speed -> unison ride + column bob; S8 Climb -> Ramp; wider K3 Blob / K6 Bend. v0.6.0: all in (tile and slab phases split, stairs fixed at the photo's 7.14 columns, K1 Tiles 2..20 square law, locked to the stairs at 547; K2 bipolar 1.57 bands at 84 % .. photo .. 11.9 at 6.8 %; K5 to ~24 lines/frame + a unipolar bob wave travelling across the columns (9-entry column table in one EBR, depth 0..236 lines with speed^2); S8 Stairs / Ramp (diagonal saw ribbons); K3 to +1/2 tile (blobs vanish); K6 cubic, 4.5x v0.5's max, default = the photo). First build 98 % LC, fitted by chaining sequencer products and a leaner bob; 94 % LC, 8 EBR, router2; HD seeds from a pin-skew screen: HD HDMI s45 (+2.30 / <= -0.91), HD Analog s19 (+1.64 / <= -0.57), HD Dual s10 |
 | facet | done v0.6.2 | v0.6.2 | Ron 11-01 (on v0.5.0, before flashing it; picked from a proposed map): K5 Halo -> Spread (per-eye-pair heights, bipolar; halo width onto P12); K4 Speed = rate + depth (eye-pair ripple wave, wedge/floor slide); S7 Lines -> Floor V / Peak; S8 Glow -> Eyes Lens / Diamond. v0.6.0 diag (production v0.5.0 untouched): all four in, plus K4 square law (v0.5 motion at the new default 50 %, x4 at 100 %), eye-pair ripple and wedge/floor slide to +-253; 96 % LC, 26 EBR, router1 (SD Dual s2; HD HDMI s10 hand-installed after a pin-skew screen, +2.03 / <= -0.55); preview out/rev_b/ron/_diag/facet_diag_v0.6.0.vmprog. v0.6.1 diag (resync fix) HW: colours correct. Ron 11-02 (on v0.6.1): Wedge sweep further; Floor angle changes as it rises; wedge/floor overlap XOR-style mix with the ground, using the video. v0.6.2 diag: K2 cubic kA 0.02 .. 5 (photo at 38 %), K3 slope kB 0.21 .. 0.373 (photo) .. 1.2 riding the height, overlap = purple/ground (red/light in eyes) bands flipped by the source luma contours; 97 % LC, 26 EBR, router1 (HD Analog s2); preview out/rev_b/ron/_diag/facet_diag_v0.6.2.vmprog. Ron 11-02: approved; merged (production = the approved diag bitstreams) |
 | fern | not started | | |
-| goblet | not started | | |
+| goblet | built v0.6.0, awaiting HW | v0.6.0 | Ron 11-02 (on v0.5.1, before flashing it): likes it a lot; just widen the knob ranges where it makes sense. v0.6.0: K1 Stripes x0.25..x4 (was x0.5..x2); K2 Width x0.4..x3 (was x0.6..x1.6; narrow repeats the goblet ~3x, wide zooms into the bowl); K5 Melt square law, default unchanged, top x2.9 (video bends to +-176 px); Osc oscillator 4x on a cubic Melt curve (Osc default still the photo, full Melt zigzags the stripes); K3 / K4 / K6 / P12 unchanged; Hourglass preset no longer turns the stripes off. Default frame bit-exact with v0.5 (model). 94.7 % LC, 25 EBR, router2; HD HDMI seed 3, HD Dual seed 2, rest seed 1. Ron 11-02: approved the diag preview; merged and rebuilt with the same seeds |
 | greenroom | not started | | |
 | halo | not started | | |
 | idol | not started | | |
@@ -265,7 +265,7 @@ Commit the row along with the program's own files.
 | [escalator](escalator/SUMMARY.md) | v0.6.0 | 94 % (tight) | 8 | router2 | HD HDMI s45, HD Analog s19, HD Dual s10 hand-installed; SD Dual seed 2 | oscillator/field |
 | [facet](facet/SUMMARY.md) | v0.6.2 | 97 % (**FULL**) | 26 | router1 | HD Analog seed 2 | oscillator/field |
 | [fern](fern/SUMMARY.md) | v0.5.0 | 93 % (tight) | 24 | router1 | HD HDMI seed 2 | measured field |
-| [goblet](goblet/SUMMARY.md) | v0.5.0 | 93 % (tight) | 25 | router2 | HD HDMI/Dual seed 2 | measured field |
+| [goblet](goblet/SUMMARY.md) | v0.6.0 | 94.7 % (tight) | 25 | router2 | HD HDMI seed 3, HD Dual seed 2 | measured field |
 | [greenroom](greenroom/SUMMARY.md) | v0.5.0 | 95 % (**FULL**) | 25 | router1 | 6/6 seed 1 | collage |
 | [halo](halo/SUMMARY.md) | v0.5.0 | 89 % (room) | 23 | router2 | 6/6 seed 1 | oscillator/field |
 | [idol](idol/SUMMARY.md) | v0.5.0 | 89 % (room) | 25 | router2 | HD Dual seed 3 | oscillator/field |

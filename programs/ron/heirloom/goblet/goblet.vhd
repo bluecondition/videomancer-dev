@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Goblet v0.5.0 -- Heirloom #49 (2026-10-27 rebuild), from WIN_20230916_01_08_00.
+-- Goblet v0.6.0 -- Heirloom #49 (2026-10-27 rebuild; phase 2: wider knob ranges), from WIN_20230916_01_08_00.
 --
 -- The photo is an additive RGB patch: three stripe oscillators (R ~124 px, G ~327 px, B ~182 px
 -- columns, line-locked) plus a "glass" layer added on top of them channel by channel.  The glass
@@ -16,11 +16,12 @@
 --   * the line-start block: a colourized line-start ramp keyed into a round-ended block at the
 --     bottom left and two short rows at the left edge.
 --
---   K1  Stripes  stripe frequency x0.5 .. x2 (the photo at the centre)
---   K2  Width    the goblet's width (field x-scale about its axis), x0.6 .. x1.6
+--   K1  Stripes  stripe frequency x0.25 .. x4 (the photo at the centre)
+--   K2  Width    the goblet's width (field x-scale about its axis), x0.4 .. x3
 --   K3  Hue      the glass colours turned round the wheel (a full turn)
 --   K4  Speed    bipolar, still in the centre: the glass colours flow, the stripes drift
---   K5  Melt     how far the source (video / oscillator) bends the glass colours and the stripes
+--   K5  Melt     how far the source (video / oscillator) bends the glass colours and the stripes:
+--                square law (cubic on Osc, whose oscillator is 4x stronger), x2.9 v0.5's top
 --   K6  Patch    RGB cable patch: RGB / RBG / GRB / GBR / BRG / BGR
 --   S7  Mirror   the left half folded onto the right: a symmetric goblet
 --   S8  Stripes  On (photo) / Off: the glass on grey
@@ -139,8 +140,9 @@ architecture goblet of program_top is
     signal c_dyk : unsigned(15 downto 0) := (others => '0');
     signal c_g : unsigned(8 downto 0) := to_unsigned(256, 9);
     signal c_kr : unsigned(7 downto 0) := (others => '0');
-    signal c_km : unsigned(7 downto 0) := (others => '0');
-    signal c_ka, c_kv : unsigned(8 downto 0) := (others => '0');
+    signal c_km : unsigned(8 downto 0) := (others => '0');
+    signal c_ka, c_kv : unsigned(10 downto 0) := (others => '0');
+    signal c_m5 : unsigned(11 downto 0) := (others => '0');      -- Melt curve, 0 .. 2922 (v0.5: k5)
     signal c_hue : unsigned(9 downto 0) := (others => '0');
     signal c_osx : unsigned(7 downto 0) := (others => '0');
     signal c_osy : unsigned(9 downto 0) := (others => '0');
@@ -420,7 +422,7 @@ begin
                 f_mc <= f_mc - 1;
             else
                 case to_integer(f_st) is
-                    -- K1 Stripes: sf = 256 -/+ (d^2 >> 9) * (128 | 256) >> 9
+                    -- K1 Stripes: sf = 256 -/+ (d^2 >> 9) * (192 | 767) >> 9
                     when 1 =>
                         v_k := g1(12 downto 3);
                         if v_k(9) = '1' then f_hi <= '1'; f_d <= v_k - 512; else f_hi <= '0'; f_d <= 512 - v_k; end if;
@@ -430,13 +432,13 @@ begin
                         f_st <= f_st + 1;
                     when 3 =>
                         f_ma <= resize(f_acc(18 downto 9), 34);
-                        if f_hi = '1' then f_mb <= to_unsigned(256, 13); else f_mb <= to_unsigned(128, 13); end if;
-                        f_acc <= (others => '0'); f_mc <= to_unsigned(9, 4);
+                        if f_hi = '1' then f_mb <= to_unsigned(767, 13); else f_mb <= to_unsigned(192, 13); end if;
+                        f_acc <= (others => '0'); f_mc <= to_unsigned(10, 4);
                         f_st <= f_st + 1;
                     when 4 =>
-                        if f_hi = '1' then c_sf <= to_unsigned(256, 10) + resize(f_acc(17 downto 9), 10);
-                        else c_sf <= to_unsigned(256, 10) - resize(f_acc(17 downto 9), 10); end if;
-                        -- K2 Width (reversed): iw = 256 -/+ (d^2 >> 9) * (96 | 171) >> 9
+                        if f_hi = '1' then c_sf <= to_unsigned(256, 10) + resize(f_acc(18 downto 9), 10);
+                        else c_sf <= to_unsigned(256, 10) - resize(f_acc(18 downto 9), 10); end if;
+                        -- K2 Width (reversed): iw = 256 -/+ (d^2 >> 9) * (171 | 384) >> 9
                         v_k := not g2(12 downto 3);
                         if v_k(9) = '1' then f_hi <= '1'; f_d <= v_k - 512; else f_hi <= '0'; f_d <= 512 - v_k; end if;
                         f_st <= f_st + 1;
@@ -445,8 +447,8 @@ begin
                         f_st <= f_st + 1;
                     when 6 =>
                         f_ma <= resize(f_acc(18 downto 9), 34);
-                        if f_hi = '1' then f_mb <= to_unsigned(171, 13); else f_mb <= to_unsigned(96, 13); end if;
-                        f_acc <= (others => '0'); f_mc <= to_unsigned(8, 4);
+                        if f_hi = '1' then f_mb <= to_unsigned(384, 13); else f_mb <= to_unsigned(171, 13); end if;
+                        f_acc <= (others => '0'); f_mc <= to_unsigned(9, 4);
                         f_st <= f_st + 1;
                     when 7 =>
                         if f_hi = '1' then c_iw <= to_unsigned(256, 10) + resize(f_acc(17 downto 9), 10);
@@ -467,18 +469,18 @@ begin
                         c_xk0 <= to_signed(C_CX, 26) - signed(resize(f_acc(31 downto 8), 26));
                         f_ma <= resize(s_kx, 34); f_mb <= resize(c_sf, 13); f_acc <= (others => '0'); f_mc <= to_unsigned(10, 4);
                         f_st <= f_st + 1;
-                    when 12 =>      -- s0 = 15728640 - sf * (61440 | 46080) + drift (mod 480 samples)
+                    when 12 =>      -- s0 = 15728640 - sf * (61440 | 46080) + drift (mod 480 samples; up to 2 wraps)
                         c_ds <= f_acc(18 downto 2);
                         if s_sdm = '1' then f_ma <= to_unsigned(46080, 34); else f_ma <= to_unsigned(61440, 34); end if;
                         f_mb <= resize(c_sf, 13); f_acc <= (others => '0'); f_mc <= to_unsigned(10, 4);
                         f_st <= f_st + 1;
                     when 13 =>
-                        f_t <= to_signed(15728640, 27) - signed(resize(f_acc(24 downto 0), 27)) + signed(resize(s_sdr, 27));
+                        f_t <= to_signed(15728640, 27) - signed(resize(f_acc(25 downto 0), 27)) + signed(resize(s_sdr, 27));
                         f_st <= f_st + 1;
                     when 14 =>
                         if f_t < 0 then f_t <= f_t + C_SM;
-                        elsif f_t >= C_SM then f_t <= f_t - C_SM; end if;
-                        f_st <= f_st + 1;
+                        elsif f_t >= C_SM then f_t <= f_t - C_SM;
+                        else f_st <= f_st + 1; end if;
                     when 15 =>      -- dyk = (ys * 4005) >> 8
                         c_s0 <= unsigned(f_t(24 downto 0));
                         f_ma <= resize(s_ys, 34); f_mb <= to_unsigned(4005, 13); f_acc <= (others => '0'); f_mc <= to_unsigned(12, 4);
@@ -495,28 +497,40 @@ begin
                         end if;
                         f_mb <= to_unsigned(219, 13); f_acc <= (others => '0'); f_mc <= to_unsigned(8, 4);
                         f_st <= f_st + 1;
-                    when 17 =>      -- km = ((k5 g) >> 6) * 7 >> 8
+                    when 17 =>      -- K5 Melt curve: k5^2
                         c_kr <= f_acc(16 downto 9);
-                        f_ma <= resize(g5(12 downto 3), 34); f_mb <= resize(c_g, 13); f_acc <= (others => '0'); f_mc <= to_unsigned(9, 4);
+                        f_ma <= resize(g5(12 downto 3), 34); f_mb <= resize(g5(12 downto 3), 13); f_acc <= (others => '0'); f_mc <= to_unsigned(10, 4);
                         f_st <= f_st + 1;
-                    when 18 =>
-                        f_ma <= resize(f_acc(18 downto 6), 34); f_mb <= to_unsigned(7, 13); f_acc <= (others => '0'); f_mc <= to_unsigned(3, 4);
+                    when 18 =>      -- m5 = (k5^2 * 183) >> 16 (358 -> 357, 1023 -> 2922); Osc: ((k5^2 >> 10) * k5) >> 9
+                        if s_osc = '1' then
+                            f_ma <= shift_left(resize(f_acc(19 downto 10), 34), 7); f_mb <= resize(g5(12 downto 3), 13);
+                        else
+                            f_ma <= resize(f_acc(19 downto 0), 34); f_mb <= to_unsigned(183, 13);
+                        end if;
+                        f_acc <= (others => '0'); f_mc <= to_unsigned(10, 4);
                         f_st <= f_st + 1;
-                    when 19 =>      -- ka = (k5 * 410) >> 10
-                        c_km <= f_acc(15 downto 8);
-                        f_ma <= resize(g5(12 downto 3), 34); f_mb <= to_unsigned(410, 13); f_acc <= (others => '0'); f_mc <= to_unsigned(9, 4);
+                    when 19 =>      -- km = ((m5 g) >> 6) * 7 >> 8
+                        c_m5 <= f_acc(27 downto 16);
+                        f_ma <= resize(f_acc(27 downto 16), 34); f_mb <= resize(c_g, 13); f_acc <= (others => '0'); f_mc <= to_unsigned(9, 4);
                         f_st <= f_st + 1;
-                    when 20 =>      -- kv, hue; speed^2
-                        c_ka <= f_acc(18 downto 10);
-                        c_kv <= resize(g5(12 downto 4), 9);
+                    when 20 =>
+                        f_ma <= resize(f_acc(20 downto 6), 34); f_mb <= to_unsigned(7, 13); f_acc <= (others => '0'); f_mc <= to_unsigned(3, 4);
+                        f_st <= f_st + 1;
+                    when 21 =>      -- ka = (m5 * 410) >> 10
+                        c_km <= f_acc(16 downto 8);
+                        f_ma <= resize(c_m5, 34); f_mb <= to_unsigned(410, 13); f_acc <= (others => '0'); f_mc <= to_unsigned(9, 4);
+                        f_st <= f_st + 1;
+                    when 22 =>      -- kv, hue; speed^2
+                        c_ka <= f_acc(20 downto 10);
+                        c_kv <= resize(c_m5(11 downto 1), 11);
                         c_hue <= g3(12 downto 3) + s_hdr(17 downto 8);
                         f_ma <= resize(s_asp, 34); f_mb <= resize(s_asp, 13); f_acc <= (others => '0'); f_mc <= to_unsigned(10, 4);
                         f_st <= f_st + 1;
-                    when 21 =>      -- hue drift step (m * 210) >> 14
+                    when 23 =>      -- hue drift step (m * 210) >> 14
                         f_m <= f_acc(17 downto 0);
                         f_ma <= resize(f_acc(17 downto 0), 34); f_mb <= to_unsigned(210, 13); f_acc <= (others => '0'); f_mc <= to_unsigned(8, 4);
                         f_st <= f_st + 1;
-                    when 22 =>      -- stripe drift m >> 1 (mod 480 samples); osc x step (m * 3277) >> 14
+                    when 24 =>      -- stripe drift m >> 1 (mod 480 samples); osc x step (m * 3277) >> 14
                         if s_sp < 0 then s_hdr <= s_hdr - resize(f_acc(25 downto 14), 18);
                         else s_hdr <= s_hdr + resize(f_acc(25 downto 14), 18); end if;
                         if s_sp < 0 then
@@ -527,7 +541,7 @@ begin
                         f_t <= v_q;
                         f_ma <= resize(f_m, 34); f_mb <= to_unsigned(3277, 13); f_acc <= (others => '0'); f_mc <= to_unsigned(12, 4);
                         f_st <= f_st + 1;
-                    when 23 =>      -- osc y step (m * 2621) >> 14
+                    when 25 =>      -- osc y step (m * 2621) >> 14
                         if f_t < 0 then v_u := unsigned(resize(f_t + C_SM, 25));
                         elsif f_t >= C_SM then v_u := unsigned(resize(f_t - C_SM, 25));
                         else v_u := unsigned(f_t(24 downto 0)); end if;
@@ -535,18 +549,18 @@ begin
                         if s_sp < 0 then s_oxt <= s_oxt - f_acc(29 downto 14); else s_oxt <= s_oxt + f_acc(29 downto 14); end if;
                         f_ma <= resize(f_m, 34); f_mb <= to_unsigned(2621, 13); f_acc <= (others => '0'); f_mc <= to_unsigned(12, 4);
                         f_st <= f_st + 1;
-                    when 24 =>      -- osc steps: x (93 kx) >> 8 per px
+                    when 26 =>      -- osc steps: x (93 kx) >> 8 per px
                         if s_sp < 0 then s_oyt <= s_oyt + f_acc(29 downto 14); else s_oyt <= s_oyt - f_acc(29 downto 14); end if;
                         f_ma <= resize(s_kx, 34); f_mb <= to_unsigned(93, 13); f_acc <= (others => '0'); f_mc <= to_unsigned(7, 4);
                         f_st <= f_st + 1;
-                    when 25 =>      -- y (131 ys) >> 8 per line
+                    when 27 =>      -- y (131 ys) >> 8 per line
                         c_osx <= f_acc(15 downto 8);
                         f_ma <= resize(s_ys, 34); f_mb <= to_unsigned(131, 13); f_acc <= (others => '0'); f_mc <= to_unsigned(8, 4);
                         f_st <= f_st + 1;
-                    when 26 =>
+                    when 28 =>
                         c_osy <= f_acc(17 downto 8);
                         f_st <= f_st + 1;
-                    when 27 =>
+                    when 29 =>
                         s_linit <= '1';            -- start the line engine on line 0
                         f_st <= (others => '0');
                     when others =>
@@ -781,10 +795,10 @@ begin
             if v_e > 127 then v_sd2 <= to_signed(127, 9);
             elsif v_e < -128 then v_sd2 <= to_signed(-128, 9);
             else v_sd2 <= v_e(8 downto 0); end if;
-            -- oscillator: (tri(x) - 64 + tri(y) - 64) >> 3   (b_ox is at stage 7)
+            -- oscillator: (tri(x) - 64 + tri(y) - 64) >> 1   (b_ox is at stage 7)
             o_t8 <= f_tri8(b_ox(15 downto 8));
             v_t := signed(resize(o_t8, 9)) + signed(resize(f_tri8(l_oy), 9)) - 128;
-            o_s9 <= shift_right(v_t, 3);
+            o_s9 <= shift_right(v_t, 1);
             if s_osc = '1' then p_sd10 <= o_s9; else p_sd10 <= v_sd2; end if;
             p_sd11 <= p_sd10; p_sd12 <= p_sd11;
         end if;
@@ -856,9 +870,9 @@ begin
             if v_w < 0 then p_m12 <= (others => '0'); else p_m12 <= unsigned(v_w(8 downto 0)); end if;
             -- 13: gain and source products; angle + hue
             p_mg13 <= p_m12 * c_g(8 downto 2);
-            p_ms13 <= resize(p_sd12(8 downto 2) * signed(resize(c_km, 9)), 16);
+            p_ms13 <= resize(p_sd12(8 downto 2) * signed(resize(c_km, 10)), 16);
             p_aa13 <= p_a12 + c_hue;
-            p_as13 <= resize(p_sd12(8 downto 2) * signed(resize(c_ka(8 downto 3), 7)), 14);
+            p_as13 <= resize(p_sd12(8 downto 2) * signed(resize(c_ka(10 downto 3), 9)), 14);
             -- 14: Mg = (M8 g7 + s7 km) >> 6 ; A += (s7 ka6) >> 3
             v_s := signed(resize(p_mg13, 17)) + resize(p_ms13, 17);
             v_s := shift_right(v_s, 6);
@@ -900,7 +914,7 @@ begin
         if rising_edge(clk) then
             -- 1: position (Q3 samples), the source's bend, block test
             q_pos1 <= b_s(24 downto 13);
-            q_off1 <= resize(p_sd10(8 downto 2) * signed(resize(c_kv(8 downto 3), 7)), 14);
+            q_off1 <= resize(p_sd10(8 downto 2) * signed(resize(c_kv(10 downto 3), 9)), 14);
             v_x := b_xv(19 downto 8);
             if s_noblk = '0' and v_x < resize(l_xe, 12) then q_in1 <= '1'; else q_in1 <= '0'; end if;
             q_r1 <= v_x(7 downto 3); q_rf1 <= v_x(2 downto 0);

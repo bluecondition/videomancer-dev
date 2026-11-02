@@ -1,5 +1,10 @@
 # Goblet — a glass goblet over RGB stripe oscillators, Heirloom #49
 
+**v0.6.0 (2026-11-02, phase 2): wider knob ranges (K1, K2, K5). Ron approved the diag preview. Built, NOT
+flashed.** Ron likes v0.5 a lot and asked only for wider knob ranges where they make sense. The control map is
+unchanged, and the default frame is bit-exact with v0.5 (RTL-exact model). See
+[Phase 2](#phase-2-v060-wider-knob-ranges).
+
 **v0.5.0 (2026-10-27): rebuilt from the photo, built, NOT flashed.** Source photo:
 `photos/WIN_20230916_01_08_00_Pro.jpg` (1920×1080 capture, 2023-09-16). Replaces v0.1.0 (a 64-row goblet outline
 over palette stripes), which Ron judged too abstract and not like the photo. Presets are hand-written placeholders.
@@ -75,11 +80,11 @@ Working files: `.heirloom_work/rb_goblet/` (`notes.md` has every number).
 | Control | Photo element it drives |
 |---|---|
 | **P12 Glass** | The glass layer: the goblet, its lenses, bands and rims. 0 % = a faint ghost of the glass over the bare stripes (gain 0.25); 50 % = the photo; 100 % = the glass swells (gain 1.5) and its colour rings multiply (magnitude → hue, up to 1.5 turns). Glided. |
-| K1 Stripes | The stripe columns: frequency ×0.5..×2 (square-law halves, the photo at the centre). Glided. |
-| K2 Width | The goblet's width: the field's x-scale about its axis, ×0.6..×1.6. Field coordinates reflect at the frame edges, so a narrow setting repeats the lenses. Glided. |
+| K1 Stripes | The stripe columns: frequency ×0.25..×4 (v0.5: ×0.5..×2; square-law halves, the photo at the centre). Glided. |
+| K2 Width | The goblet's width: the field's x-scale about its axis, ×0.4..×3 (v0.5: ×0.6..×1.6). Field coordinates reflect at the field's edges, so a narrow setting repeats the goblet about three times across the frame; full right zooms into the bowl and stem. Glided. |
 | K3 Hue | The glass colours turned round the wheel: a full turn moves every band's orange / pink / blue / cyan through the glass. Glided. |
 | K4 Speed | Bipolar, still at the centre ±8, square law. The glass colours flow round the wheel (default 640: one turn ≈ 21 s) and the stripe oscillators drift (≈ 30 virtual px/s). Max is 16× the default. |
-| K5 Melt | How far the source bends the stripes (up to ±63 px), shifts the glass hue (±0.4 turn) and swells or thins the glass. Default 35 %. Glided. |
+| K5 Melt | How far the source bends the stripes, shifts the glass hue and swells or thins the glass. Square law, default 35 % unchanged, top ×2.9 v0.5's (video: bends up to ±176 px, the camera picture prints through the glass colours). On Osc the oscillator is 4× stronger and the curve cubic, so Osc at the default is still the photo and full Melt zigzags the stripes. Glided. |
 | K6 Patch | The RGB cable patch: RGB (the photo) / RBG / GRB / GBR / BRG / BGR. A labelled default (index < 6) is read as its index. |
 | S7 Mirror | Off (the photo's own halves) / On: the left half folded onto the right, an exactly symmetric goblet. |
 | S8 Stripes | On (the photo) / Off: the glass alone on grey. |
@@ -88,7 +93,37 @@ Working files: `.heirloom_work/rb_goblet/` (`notes.md` has every number).
 | S11 Source | Video (default) / Osc. |
 
 Defaults: K1, K2, P12 at 512; K3 0; K4 640; K5 358; K6 RGB; all switches label 0. Presets: Default, Ghost Glass
-(P12 0), Rainbow Melt (P12 max, K4 760), Hourglass (Mirror + Flip, stripes off).
+(P12 0), Rainbow Melt (P12 max, K4 760), Hourglass (Mirror + Flip).
+
+## Phase 2: v0.6.0 wider knob ranges
+Ron 2026-11-02 (on v0.5.1, before flashing it): "I like goblet already a lot, let's just expand the range on the
+knobs for the ones that make sense to do so."
+- **Widened:**
+  - **K1 Stripes** ×0.5..×2 → ×0.25..×4. Sequencer curve 256 −/+ (d²≫9)·(192 | 767)≫9. The stripe start s0 now
+    needs up to two mod-480 wraps, so state 14 loops until it is in range.
+  - **K2 Width** ×0.6..×1.6 → ×0.4..×3 (iw coefficients 171 | 384). ×0.4 is near the limit of the single
+    edge-reflection: the field folds once at knot 0 and knot 119, which covers iw ≤ 2.85.
+  - **K5 Melt** gets a curve m5 replacing k5 in the km / ka / kv products. Video uses (k5²·183)≫16, which gives
+    358 → 357 and 1023 → 2922. Osc uses ((k5²≫10)·k5)≫9, with the oscillator source 4× (v_t ≫ 1). km, ka and kv
+    widen to 9 / 11 / 11 bits, and the pixel products widen to 7×10, 7×9 and 7×9.
+- **Left alone:**
+  - K3 Hue is already a full turn.
+  - K4 Speed already reaches 16× the default (one hue turn in 1.3 s, stripes 480 virtual px/s).
+  - K6 Patch is an enum.
+  - P12 Glass is the designed ghost..climax. Its bottom stays a faint ghost so that Width, Hue, Mirror and Flip
+    stay live at 0 %.
+- **Hourglass preset** no longer turns S8 Stripes off (the phase-1 known issue).
+- **Checks (RTL-exact model, `.heirloom_work/rb_goblet/p2/`):**
+  - The default frame is bit-exact with v0.5.
+  - Osc at the default: mean |d| 0.6 of 255, 0.6 % of pixels over 24.
+  - Extremes are in `p2/ranges.png` and `p2/osc.png`.
+- **Build (2026-11-02, router2; diag and production gave the same results):** post-route Fmax HD Analog s1 83.84,
+  SD Analog s1 78.05, HD HDMI s3 78.91 (seeds 1-2 missed), SD HDMI s1 74.07, HD Dual s2 75.80 (seed 1 missed),
+  SD Dual s1 72.19 MHz. 7252-7276 / 7680 LC (94.7 %, +175 on v0.5.1), 25/32 EBR, 0 `emulate_transparency`,
+  all six pass iceunpack. `out/rev_b/ron/heirloom/goblet.vmprog` (532,939 bytes); the approved preview was
+  `out/rev_b/ron/_diag/goblet_diag_v0.6.0.vmprog`.
+- **SD:** at K1's top the stripes step 2 samples per pixel. The narrow red pulses alias into moiré there, while 720p
+  and 1080 stay clean.
 
 ## Video
 - **Video:** the camera luma, as a deviation (Y − 502)·0.28 and tapped straight from `data_in`, is patched like
@@ -96,8 +131,9 @@ Defaults: K1, K2, P12 at 512; K3 0; K4 640; K5 358; K6 RGB; all switches label 0
   - into the stripe oscillators' phase, so the columns bend around the picture;
   - into the glass hue and magnitude, so the bands shift colour and swell over bright areas.
   - At default Melt the goblet, lenses and rims still read clearly.
-- **Osc:** two triangle oscillators (700 px in x, 500 lines in y, ±0.06), drifting with Speed, feed the same
-  path. At the default Melt they are a gentle living wobble, so Osc at defaults is the photo. Melt stays live.
+- **Osc:** two triangle oscillators (700 px in x, 500 lines in y, ±0.25 since v0.6.0), drifting with Speed, feed the
+  same path through a cubic Melt curve. At the default Melt they are a gentle living wobble, so Osc at defaults is
+  the photo. Full Melt zigzags the stripes and swirls the glass.
 
 ## Engine
 - **Shell:** heirloom v0.2.0.
@@ -106,10 +142,10 @@ Defaults: K1, K2, P12 at 512; K3 0; K4 640; K5 358; K6 RGB; all switches label 0
   - Vblank zone (no avid for 1024 clocks), source-width measurement, damier's parity-locked generated avid.
 - **Glides:** a 3-clock pipeline (gap → step and ±4 deadband → apply) on K1, K2, K3, K5 and P12, snapping on
   the first field.
-- **Field sequencer:** one serial shift-add multiplier, ~27 states. It computes:
+- **Field sequencer:** one serial shift-add multiplier, ~29 states. It computes:
   - the square-law knob curves (sf, iw);
   - the knot DDA step and start (Q16), the stripe step and start (mod 480 samples), the knot-row step;
-  - the P12 gain and ring, the Melt gains;
+  - the P12 gain and ring, the Melt curve (square law on Video, cubic on Osc) and its three gains;
   - the hue, the speed² drifts (hue, stripes, oscillator phases) and the oscillator steps.
 - **Per-line engine** (kicked at the source avid rise; computes line n + 1): the knot row and its 5-bit fraction
   (flip-aware), the even / odd row bases, the line-start block's edge (128 × 8 table), the stub / purple /
@@ -141,6 +177,9 @@ Defaults: K1, K2, P12 at 512; K3 0; K4 640; K5 358; K6 RGB; all switches label 0
   - Narrowing the operands, adding the row engine and turning the VCA into FM brought it to 7104–7113 LC.
 
 ## Status
+- **v0.6.0 built 2026-11-02 (phase 2, wider knob ranges), NOT flashed.** Ron approved the diag preview. Merged and
+  rebuilt with `./build_heirloom.sh goblet` (router2). The builder found HD HDMI seed 3 and HD Dual seed 2 on its
+  own retries; the other four configs use seed 1. Fmax and LC are in [Phase 2](#phase-2-v060-wider-knob-ranges).
 - **v0.5.1 built 2026-11-01: output-filter resync fix, NOT flashed.** The output running-sum filters now take neutral input off the generated avid and snap back to neutral once the box is full of blank samples, so a glitched block-RAM / clock sample can no longer leave a permanent wrapped colour offset (fern_diag hardware capture 2026-11-01). The Y box resyncs too (to 8 x 64). Post-route Fmax: HD Analog s1 76.44, SD Analog s1 75.28, HD HDMI s1 82.71, SD HDMI s1 62.16, HD Dual s1 80.11, SD Dual s1 81.09 MHz; 7082-7101 / 7680 LC. Earlier hand-installed HD seeds are gone (new netlist).
 - **v0.5.0 built 2026-10-27, NOT flashed.** router2 (`./build_heirloom.sh goblet`).
 - **Build seeds:** HD HDMI = seed 2 (seed 1 stalled the router); HD Dual = seed 2 (seed 1 missed timing);
@@ -184,4 +223,4 @@ Defaults: K1, K2, P12 at 512; K3 0; K4 640; K5 358; K6 RGB; all switches label 0
 - Renders: `rtl_osc2.png`, `rtl_vid.png`, `rtl_mot.png`, `rtl_ntsc.png`; `cmp_final.png`, `cmp_motion.png`.
 
 ## Notes
-- The Hourglass preset also sets S8 Stripes Off (toggle_switch_8 = 1): it shows the mirrored, flipped glass on grey. Not intended by the agent; left as is because changing the TOML needs a rebuild.
+- Fixed in v0.6.0: the Hourglass preset set S8 Stripes Off too (toggle_switch_8 = 1), which was unintended.
