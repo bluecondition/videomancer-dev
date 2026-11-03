@@ -1,9 +1,92 @@
 # Kiln — camera fired in a frame-store kiln
 
-**v0.5.0 (2026-10-27): built, NOT flashed.** Rebuilt from the photo WIN_20230515_23_17_11: camera video in a
+**v0.6.1 phase 2 FINAL (2026-11-03): the v0.6.1 diag merged into production.** Ron flashed the v0.6.0 diag ("kiln is
+pretty much the perfect program") and asked for one change: replace Quench with an option that makes K1 Tiles glide and
+lock into whole tile counts. That is v0.6.1's S10 Tile Lock; Ron then said "finalize kiln". `out/rev_b/ron/heirloom/kiln.vmprog`
+is the v0.6.1 diag's six bitstreams repacked with the production TOML. See [v0.6.1](#v061-s10-tile-lock) and
+[Phase 2](#phase-2-v060).
+
+## v0.6.1: S10 Tile Lock
+Ron's note on v0.6.0 (2026-11-02): "in place of the quench knob, make an option that changes the behavior of K1 Tiles.
+Make the X scale glide and lock in to the next quantized set of tiles so that there's always an even set of tiles on
+the screen in that mode."
+- **S10 Tile Lock: Free / Lock** (Quench is gone).
+  - Free is K1 exactly as v0.6.0 (bit-identical tile scale at rest).
+  - Lock gives whole copies across: 1 .. 6, in six equal bands of the K1 travel (1 + K1 × 6 / 1024; ~17 % each, K1 default
+    551 = 4 copies). A copy count always fits the frame width exactly (3 copies at 1920 lands within 0.05 px), so the
+    tiles meet the right edge evenly in every mode, and Drift scrolls them seamlessly.
+- **The glide.** The tile scale the divider uses (`f_nl`, copies × 256) eases 1/16 of the gap per field toward the locked
+  count, then steps the last 15/256 one unit per field, so it lands exactly with no final jump. 2 → 3 copies: 63 % in 16
+  fields, exact in 67 (1.1 s at 60 Hz); 1 → 6: 1.55 s. It chains after K1's own knob glide, giving an S-curve. Flipping
+  to Lock glides from the current scale; flipping back to Free glides back to the K1 value, then tracks K1 directly.
+- **Why equal bands, not the nearest whole count.** K1 is exponential (0.5 .. 6.4), so rounding to the nearest count left
+  "1 copy" on the bottom 42 % of the knob and "6" on 6 %: half the travel would do nothing in Lock. The nearest-count map
+  is a one-line change if wanted (then the default sits at 2 copies, the photo's 1.93 rounded).
+- **Cost.** Two per-field sequencer states (zc 101 target and gap, zc 102 step), an 11-bit register; Quench's `768 − s`
+  subtractor left pixel stage 13. Arithmetic checked at RTL widths (every start/target pair converges exactly,
+  monotonically, no wrap: `.heirloom_work/rb_kiln/p2/lock_sweep.py`). GHDL analyse / elaborate / synth clean. Not
+  simulated (per-field control behaviour; the default frame path is unchanged).
+- **Presets** are unchanged (all have Tile Lock Free, the old Quench Off).
+
+v0.5.0 (2026-10-27): built, NOT flashed. Rebuilt from the photo WIN_20230515_23_17_11: camera video in a
 frame store zoomed to a quadrant, repeated across the frame (1.94 copies) with the bottom row of quadrants
 mirrored, run through a fire colouriser (royal blue, violet, purple, magenta, red, orange, yellow) with a
 brightness lift, and torn into horizontal fibres with an interlace comb.  Presets are hand-written placeholders.
+
+## Phase 2 (v0.6.0)
+Ron left no notes for kiln (free hand, 2026-11-02, built while he was away). The map follows the phase-2 brief:
+wider ranges, element-level motion instead of more zoom, a real look-flip on the near-dead switch, and no control
+dead in either Source mode. **The default Osc frame is bit-exact with v0.5** (integer model, 960 × 540, fields 4 and
+40); the default Video frame gains faint pale rims (K5, see below).
+
+| Was (v0.5) | Now (v0.6.0) | Notes |
+|---|---|---|
+| K1 Tiles: 1 .. 4 copies, linear, photo 1.94 at 31 % | **0.5 .. 6.4 copies**, exponential (piecewise-linear exp2 of K1 × 230 / 256 on the per-field multiplier), photo 1.934 at **54 % (551, bit-exact)** | 0.5 = one half of the camera quadrant fills the frame; 6.4 = a dense frieze. Display now 0–100 % |
+| K2 Fibres: fibre texture 0 .. 2x (the same factor on the colour noise and the sideways displacement) | **colour noise 0 .. 2x as before; the sideways tear 0 .. 3.9x**, square law above the photo (8 + (K2 − 512)² / 8192 eighths, clipped at 31: ×1.5 at 68 %, ×2.6 at 83 %, ×3.9 from 92 %) | The tear has its own factor in the knot multiply; at the top the alternate SD lines pull ~±35 px apart (stronger venetian blinds). A ×17 version (mantissa + shift) was built and cut for fit. Display 0–100 % |
+| K3 Blocks: 0.5 .. 2x, photo at 50 % | **0.25 .. 4x**, exponential (an octave per quarter), photo still 1x at 50 % (bit-exact) | 0 % melts everything into the red mids; 100 % posterises into blue, yellow and white-hot |
+| K4 Drift: bipolar scroll (still at the centre, square law) | **unchanged** | A sideways wave past the default speed (chevrons, ±34 cells) was built and rendered in the model, then cut: with it the chip sat at 97.5 % and HD Analog missed on all five seeds (65–73 MHz, routing-bound). Kept as `.heirloom_work/rb_kiln/p2/kiln_p2d_wave.vhd` |
+| K5 Rims: lift 0 .. 2x (**dead in Video**: the lift came only from the stored Osc map) | **−1x .. 2.9x** (K5 / 32 − 8 eighths), photo 1x at 50 % (bit-exact); **Video: rims traced on the camera's edges** | Negative etches the rims dark; 25 % = no lift. In Video each bilinear corner's lift = its two neighbours' \|code difference\| on the camera grid (min(e, 15) × 2), through the same 2-bit interpolation as the Osc lift, so pale rims outline the camera picture (default: faint) |
+| K6 Glaze | unchanged | |
+| S7 Mirror, S8 Kaleido, S10 Quench, S11 Source, P12 Heat | unchanged (v0.6.1: S10 Quench → Tile Lock) | The drift accumulator now wraps at two copies (Kaleido's period), fixing a flip-pop every copy of drift with Kaleido on |
+| S9 Weave: Comb (photo) / Smear (4x longer fibres, no comb: nearly invisible) | **S9 Strips: Off (photo) / On** | 8 bands per half (by the mirrored store row, so the strips mirror too), each slid by its own quarter-copy offset; bands 1, 2, 4, 7 scroll with Drift while the rest stand still, so with any drift the strips slide past each other. Per line: the store-column start = the drifted (or, for a standing band, undrifted) base + the band offset in the top 3 bits. The comb is now always on |
+
+**Per-field additions.** The K1 exponent (multiplier slot 2: K1 × 230 / 256) and the tear's square (slot 13) share the
+existing serial multiplier; K3 / K5 decode to bit-slices (no adders).
+
+**Fit (the first full feature set synthesised to ~110 % LC).**
+- The chroma filter's 8-back delay lines (2 × 8 × 10 FF) moved into two 256 × 16 block-RAM rings.
+- The C_LAT sync delay (3 × 32 FF) moved into a 256 × 4 ring.
+- All rings share one address counter.
+- The line and smooth noise layers share one 3-stage hash pipeline: at a smooth crossing its two rows follow the
+  line knot on the next two clocks, and the pre-roll runs 9 states.
+- The Video and Osc lifts share one corner mux.
+- v0.5's Glaze / clamp stage (the routed critical path at 97 %) is split: Glaze moved into stage 21, and the
+  chroma clamp is done in the signed domain (±448, then + 512 as a bit flip). Same arithmetic, same depth.
+- The K4 wave and the ×17 tear were cut (see the table). Result: 7,250 LC (94 %) against v0.5.1's 7,164; HD Analog
+  closed on router2 seeds 1–4 (76.7–79.4 MHz, v0.5.1: 76.4 on seed 3).
+- Pixel-path depth unchanged (U/V parity), latency 32 in every mode, generated avid / gate / conditioning
+  unchanged.
+
+**Presets:** Photo (= defaults, Osc), Cold Kiln, White Hot, Kaleidoscope (re-aimed), and new Torn (K2 high), Frieze (6 tiles,
+Kaleido), Strips (S9 On), Etched (dark rims, Blocks high, Video).
+
+Build (router2, `.heirloom_work/diag_build.sh kiln`, 2026-11-02): HD Analog s1 78.14, SD Analog s1 73.18, HD HDMI s1
+76.23, SD HDMI s1 74.29, HD Dual **s6** 76.02 (seeds 1–5 missed), SD Dual s1 76.31 MHz; 7,225–7,253 / 7,680 LC (94 %),
+27 / 32 EBR (+3: two chroma-delay rings and the sync ring). No pin-skew screen (builder seeds kept).
+
+**Checks:**
+- GHDL analyse / elaborate / synth front end clean.
+- Integer model `p2/imodel_p2.py` (the v0.6.0 spec): default Osc bit-exact with v0.5's `imodel.py`.
+- Knob arithmetic swept at RTL widths (`p2/sweep.py`): no wraps.
+- GHDL default-frame render (Osc, 960 × 540, warm-up 3, K4 centred) against v0.5's `rtl_osc2`: identical except the first 4
+  visible pixels of each line, which differ in chroma only. That is the v0.5.1 resync fix: rtl_osc2 predates it, and
+  the box filter now fills from neutral at the line start (U 640 = 512 + 9/16 × 223 at the first pixel). The render
+  was made on an intermediate build (wave engine present but idle, before the Glaze split and the cut). Its default
+  path is the same as the final one, since the split is equivalent arithmetic and the cut parts are zero at the
+  default.
+- Control sheet from the model: `.heirloom_work/rb_kiln/diag/sheet_v060.png`.
+- Not simulated: strips, tear and Video rims (model only; the GHDL render covers the default path, the shared hash
+  pipeline and the block-RAM rings).
 
 ## Reading of the photo
 The measurements and fits are in `.heirloom_work/rb_kiln/notes.md`.
@@ -53,16 +136,16 @@ The measurements and fits are in `.heirloom_work/rb_kiln/notes.md`.
 ## Controls
 | Control | Photo element it drives |
 |---|---|
-| K1 Tiles | the horizontal repeat: 1–4 copies across (1.94 = the photo) |
-| K2 Fibres | the streaky fibre texture and venetian blinds: 0–2× in 16 steps (1× = the photo) |
-| K3 Blocks | the yellow blocks and blue patches: colouriser contrast 0.5–2× about the red mids; low melts the picture into reds, high posterises it into yellow and blue |
-| K4 Drift | the frame-store scroll: the copies slide sideways; bipolar, still in the centre ± 8, square law, up to ~2 cells per field |
-| K5 Rims | the pink rims and ring edges: the brightness lift 0–2× in 16 steps |
+| K1 Tiles | the horizontal repeat: 0.5–6.4 copies across, exponential (1.94 = the photo, at 54 %) |
+| K2 Fibres | the fibre texture (colour noise 0–2x) and the sideways tear of the venetian blinds (0–17x, steep above the photo at 50 %) |
+| K3 Blocks | the yellow blocks and blue patches: colouriser contrast 0.25–4x about the red mids (photo 1x at 50 %) |
+| K4 Drift | the frame-store scroll (bipolar, still in the centre ± 8, square law, up to ~2 cells per field); past the default speed a sideways wave runs down (right) / up (left) the frame, up to ±34 cells |
+| K5 Rims | the pink rims and ring edges: lift −1x..2.9x (1x at 50 %, none at 25 %); in Video, rims on the camera's edges |
 | K6 Glaze | the fire palette's colourway: Fire (the photo) / Ice / Ember / Toxic / Violet / Mono / Neon / Rust |
 | S7 Mirror | the top/bottom symmetry: Mirror (the photo) / Repeat |
 | S8 Kaleido | the partial left/right symmetry: Off / On (every other copy flipped) |
-| S9 Weave | the interlace comb: Comb (the photo) / Smear (no alternation, 4× longer smeared fibres) |
-| S10 Quench | the fire itself: Off / On (the colouriser scalar inverted: yellow ground, blue and red seams) |
+| S9 Strips | Off (the photo) / On: 8 mirrored bands per half slid apart; half of them stand while the rest scroll |
+| S10 Tile Lock | K1's behaviour: Free (continuous, the photo) / Lock (whole copies 1 .. 6 in equal K1 bands, the X scale gliding into each new count) |
 | S11 Source | Video / Osc (default Video) |
 | P12 Heat | the colouriser offset, glided: 0 % = a cold kiln (blue and violet, red embers only in the hottest spots); 50 % = the photo; 100 % = white-hot (yellow ground with pale white cores, orange fibres tracing the picture) |
 
@@ -83,6 +166,9 @@ The measurements and fits are in `.heirloom_work/rb_kiln/notes.md`.
 - **Detail.** Video is a 64 × 128-camera-pixel picture per copy (bilinear), soft in the way the photo's is.
 
 ## Engine
+(v0.5 description below. v0.6.0 differences are in [Phase 2](#phase-2-v060): one shared hash pipeline, the chroma and
+sync delays in block-RAM rings, the per-line Strips base, the Video edge-map lift, the tear factor, and Glaze moved to stage 21.
+Smear and its 128-vpx knots are gone.)
 - **Per field** (vblank zone, measured width W and active lines H):
   - six serial divisions:
     - cells per pixel (Tiles × 2^15 / W) and virtual px per pixel;
@@ -133,6 +219,26 @@ The measurements and fits are in `.heirloom_work/rb_kiln/notes.md`.
     the model.
 
 ## Status
+- **v0.6.1 FINAL, 2026-11-03 ("finalize kiln"); merged.**
+  - `out/rev_b/ron/heirloom/kiln.vmprog` holds the v0.6.1 diag's six bitstreams, repacked with the production TOML (id
+    `com.czartroniks.kiln`, name "Kiln"; every bitstream passes iceunpack). Staging: `.heirloom_work/rb_kiln/final_v061/`.
+  - The merged sources match the diag's byte for byte, apart from the header comments of `kiln.vhd` and `kiln.toml`.
+  - Hardware: v0.6.0 was flashed and approved. v0.6.1 adds only Tile Lock (default frame path unchanged).
+  - Seeds (router2): HD Analog s4, HD HDMI s2, HD Dual s6, the SD configs s1 (Fmax below). To rebuild from source:
+    `./build_heirloom.sh kiln`. router2 is nondeterministic, so a rebuild won't reproduce these routes; if HD Dual
+    can't close, swap in the one-adder step (below) first.
+  - Presets are still the hand-written placeholders. Capture Ron's looks with `./capture_preset.sh`.
+- **v0.6.1 diag built 2026-11-02: S10 Tile Lock replaces Quench.** Router2
+  (`.heirloom_work/diag_build.sh kiln`): HD Analog **s4** 76.41, SD Analog s1 74.82, HD HDMI **s2** 77.75, SD HDMI s1
+  76.57, HD Dual **s6** 76.58, SD Dual s1 74.63 MHz; 7,341–7,361 / 7,680 LC (96 %), 27 EBR.
+  `out/rev_b/ron/_diag/kiln_diag_v0.6.1.vmprog`.
+  - Missed seeds were routing noise at 96 %. HD Analog s1–3 failed on the pre-existing stage-20 luma-lift multiply by
+    0.24 MHz. HD Dual's path is congestion (stage 2, 9 ns routing / 4.4 logic); a profile route at seed 7 passed at 74.63.
+  - Standalone yosys: the lock costs +98 LUT / +47 carry / +24 FF over v0.6.0. A logically identical one-adder step
+    (`p2/kiln_v061_compact_step.vhd`) is +53 LUT / +39 carry. Swap it in if the production merge build can't close HD Dual.
+- **v0.6.0 diag built 2026-11-02 (phase 2); flashed and approved by Ron.** Router2: HD Analog s1 78.14, SD Analog s1
+  73.18, HD HDMI s1 76.23, SD HDMI s1 74.29, HD Dual s6 76.02, SD Dual s1 76.31 MHz; 7,225–7,253 LC (94 %), 27 EBR.
+  `out/rev_b/ron/_diag/kiln_diag_v0.6.0.vmprog`. Changes: [Phase 2](#phase-2-v060).
 - **v0.5.1 built 2026-11-01: output-filter resync fix, NOT flashed.** The output running-sum filters now take neutral input off the generated avid and snap back to neutral once the box is full of blank samples, so a glitched block-RAM / clock sample can no longer leave a permanent wrapped colour offset (fern_diag hardware capture 2026-11-01). Post-route Fmax: HD Analog s3 76.41, SD Analog s1 75.09, HD HDMI s1 77.20, SD HDMI s1 69.09, HD Dual s2 79.31, SD Dual s1 73.84 MHz; 7142-7164 / 7680 LC. Earlier hand-installed HD seeds are gone (new netlist).
 - **v0.5.0 (2026-10-27), router2, `build_heirloom.sh`.**  Built, NOT flashed.
 - **Build seeds:** **HD Analog = seed 3** (seeds 1–2 missed), **HD Dual = seed 2** (seed 1 missed); the other four are
@@ -179,3 +285,11 @@ The measurements and fits are in `.heirloom_work/rb_kiln/notes.md`.
 - `cmp_final.png`.
 - `kiln_v1_8938lc.vhd`: the first RTL.
 - `synth.sh`, `abl/`: the standalone-yosys ablations.
+
+## Settled questions (2026-11-02 batch)
+Ron's approval of v0.6.0 settles both as built:
+1. The K4 sideways wave stays cut, and the Video rims stay. (The wave code is kept in `rb_kiln/p2/kiln_p2d_wave.vhd`.)
+2. The Video default keeps its faint rims.
+
+**Watch on hardware:** no pin-skew seed screening was run. If HD HDMI shows lines, re-seed that config; the next suspect
+is the hsync delay running through block RAM.
