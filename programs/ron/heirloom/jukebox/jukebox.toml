@@ -1,47 +1,51 @@
 # Jukebox - Heirloom #16, rebuilt 2026-10-21 (v0.5.0) from WIN_20230315_00_28_42.
 # A wall of rainbow capsules: flat contour bands that bend into rounded noses after every column cut.
 # See jukebox.vhd, jukebox.py (measured tables and constants) and SUMMARY.md.
+# v0.6.0 (phase 2): K1 Widths / K2 Heights size the capsules column by column and row by row (the grid
+# stays at the photo's 9.15 x 2.08), K5 Detune, S8 Fold Tri / Saw, wider Nose and Etch.
+# v0.6.1 (Ron's first-flash notes): stray rainbow lines fixed; wider K1 (both ends fold past L = 1), wider K2,
+# Nose to 200 % (100 % = the photo).
 
 [program]
 processing_delay_clks = 28
 program_id = "com.czartroniks.jukebox"
 program_name = "Jukebox"
-program_version = "0.5.1"
+program_version = "0.6.1"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Pattern", "Grid", "Demo"]
 program_type = "processing"
-description = "A wall of rainbow capsules: contour bands run flat and curl into rounded noses after every column cut."
+description = "A wall of rainbow capsules: contour bands curl into noses after each column cut; columns and rows sized one by one."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_1"
-name_label = "Columns"
+name_label = "Widths"
 control_mode = "linear"
-display_min_value = 0
+display_min_value = -100
 display_max_value = 100
-initial_value = 583
+initial_value = 512
 display_float_digits = 0
-suffix_label = "%"
+suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
-name_label = "Rows"
+name_label = "Heights"
 control_mode = "linear"
-display_min_value = 0
+display_min_value = -100
 display_max_value = 100
-initial_value = 475
+initial_value = 512
 display_float_digits = 0
-suffix_label = "%"
+suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
 name_label = "Nose"
 control_mode = "linear"
 display_min_value = 0
-display_max_value = 100
+display_max_value = 200
 initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
@@ -58,7 +62,7 @@ suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
-name_label = "Tint"
+name_label = "Detune"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
@@ -72,7 +76,7 @@ name_label = "Etch"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 460
+initial_value = 326
 display_float_digits = 0
 suffix_label = "%"
 
@@ -84,9 +88,9 @@ initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
-name_label = "Pairs"
-value_labels = ["On", "Off"]
-initial_value_label = "On"
+name_label = "Fold"
+value_labels = ["Tri", "Saw"]
+initial_value_label = "Tri"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
@@ -125,9 +129,9 @@ toggle_switch_7 = 1
 rotary_potentiometer_3 = 760
 
 [[preset]]
-name = "Soft Glow"
+name = "Soft Lens"
 linear_potentiometer_12 = 60
-rotary_potentiometer_1 = 380
+rotary_potentiometer_1 = 820
 
 [[preset]]
 name = "Filigree"
@@ -137,4 +141,20 @@ rotary_potentiometer_4 = 700
 [[preset]]
 name = "Ember Wall"
 toggle_switch_9 = 1
-rotary_potentiometer_5 = 640
+rotary_potentiometer_5 = 760
+
+[[preset]]
+name = "Cylinder"
+rotary_potentiometer_1 = 791
+toggle_switch_7 = 1
+
+[[preset]]
+name = "Perspective"
+rotary_potentiometer_1 = 170
+rotary_potentiometer_2 = 689
+
+[[preset]]
+name = "Sawtooth"
+toggle_switch_8 = 1
+rotary_potentiometer_5 = 200
+rotary_potentiometer_2 = 150

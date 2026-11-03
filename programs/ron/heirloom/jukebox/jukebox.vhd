@@ -1,7 +1,14 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Jukebox v0.5.0 -- Heirloom #16, rebuilt from the photo WIN_20230315_00_28_42.
+-- Jukebox v0.6.1 -- Heirloom #16, rebuilt from the photo WIN_20230315_00_28_42.
+-- v0.6.0 (phase 2): the grid is fixed at the photo's 9.15 x 2.08 and K1 / K2 size the capsules one
+-- by one instead of zooming the screen; K5 detunes the two column kinds; S8 swaps the band waveform.
+-- v0.6.1 (phase 2 final, from Ron's first-flash notes; approved 2026-11-03): the thin rainbow lines before
+-- every A -> B cut were one bad table entry (fixed in the hook); K1 Lens / Fan both run to L = 1.5 (past 1
+-- the step reverses: folded, mirrored
+-- columns), K2 Cascade x10 at the top and Alternate x20 / x1.5, K3 Nose to 21x (readout 200 %); the band
+-- offset E is interpolated between table positions so magnified columns don't step.
 --
 -- The photo: a wall of tall rainbow capsules, 9.15 columns by 2.08 rows.  In
 -- each column the contour bands run flat across and bend into rounded noses
@@ -21,14 +28,20 @@
 --   B  = 184 + bo - 79 bg (V - tint) - 0.086 G                   blue fills the cores
 --   then BT.601 to 10-bit YUV (luma pre-scaled 16/13).
 --
---   K1  Columns   capsule columns across (2 .. 24; 9.15 = the photo)
---   K2  Rows      capsule rows per frame height (1 .. 6; 2.08 = the photo)
---   K3  Nose      how far the rounded noses reach into each column
+--   K1  Widths    per-column widths, bipolar (centre = the photo's equal columns): right = Lens (the
+--                 centre columns swell, the edge columns squeeze, like a curved jukebox front), left =
+--                 Fan (columns widen toward the left and narrow toward the right: a wall in perspective);
+--                 the last third of each side folds the wall (the step reverses: mirrored columns)
+--   K2  Heights   per-row heights, bipolar (centre = the photo's 2.08 equal rows): right = Cascade (rows
+--                 small at the top growing down the screen, up to ~10 rows), left = Alternate (tall
+--                 capsule rows between thin strips, x1.5 / x20)
+--   K3  Nose      how far the rounded noses reach into each column (0.31x .. 21x; 512 = the photo)
 --   K4  Speed     bipolar band flow (centre +-8 still; right = bands stream out of the cores)
---   K5  Tint      red / blue balance of the capsules (centre = the photo)
---   K6  Etch      the picture's luma pushed into the contours
+--   K5  Detune    band count of the two column kinds against each other, bipolar (centre = the photo):
+--                 right = red-topped columns up to 2.8x the bands, yellow-topped down to 0.35x; left = reverse
+--   K6  Etch      the picture's luma pushed into the contours (0 .. 6 folds, twice v0.5's top)
 --   S7  Mirror    every other column reversed: closed capsules
---   S8  Pairs     On = the photo's two alternating column kinds / Off = all alike
+--   S8  Fold      Tri (the photo's soft triangle-folded bands) / Saw (hard-edged sawtooth bands)
 --   S9  Palette   Photo / Swap (red and blue exchanged: red cores, blue seams)
 --   S10 Stack     Mirror (the photo) / Saw (rows repeat, cut flat at every seam)
 --   S11 Source    Video / Osc
@@ -57,6 +70,9 @@ use work.all;
 architecture jukebox of program_top is
     constant C_LAT  : integer := 28;          -- = processing_delay_clks
     constant C_HC   : integer := 1175078;     -- 2-column phase at the screen centre (Q24)
+    -- v0.6: the grid is fixed at the photo's (v0.5 K1 583 -> 9.15 columns, K2 475 -> 2.08 rows)
+    constant C_HD   : integer := 39955;       -- 8738 + (96308 (583^2 >> 4)) >> 16: 2-column step at 1920
+    constant C_RQ   : integer := 2127;        -- 1024 + (5130 (475^2 >> 4)) >> 16: rows x 1024
     constant C_VPH0 : integer := 8406359;     -- vertical phase of the first line (Q24)
 
     function f_vstep_y(t : std_logic_vector(3 downto 0)) return unsigned is
@@ -69,6 +85,53 @@ architecture jukebox of program_top is
             when 5 | 6 | 14 => return to_unsigned(384, 12);
             when 1 | 2 | 10 => return to_unsigned(512, 12);
             when others     => return to_unsigned(256, 12);
+        end case;
+    end function;
+    -- v0.6: the vertical step of the photo's 2.08 rows per timing ((2127 ys) 3884 >> 16)
+    function f_vstepc(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(143452, 20);
+            when 4          => return to_unsigned(72608, 20);
+            when 8          => return to_unsigned(121014, 20);
+            when 12         => return to_unsigned(60507, 20);
+            when 5 | 6 | 14 => return to_unsigned(48405, 20);
+            when 1 | 2 | 10 => return to_unsigned(64541, 20);
+            when others     => return to_unsigned(32270, 20);
+        end case;
+    end function;
+    -- v0.6 K1 Widths DDA constants: the step profile hstep (1 + L g'(t)), g' = p0 + p1 t + p2 t^2 (Lens: -1, 0, 3;
+    -- Fan: -0.2875, 1.45, 0.8625; both integrate to 0 and g'(-1) = 2 / -7/8), t = -1 + x dt, dt = 2 / width.
+    -- KD16 = |p1 dt + p2 (dt^2 - 2 dt)| 2^21 (the first difference, negative for both), K28 = 2 p2 dt^2 2^30
+    -- (the second difference).  Index = side & width class.
+    function f_kd(side : std_logic; c : unsigned(1 downto 0)) return unsigned is
+    begin
+        case to_integer(c) is
+            when 1      => if side = '1' then return to_unsigned(897, 16); else return to_unsigned(19645, 16); end if;
+            when 2      => if side = '1' then return to_unsigned(1588, 16); else return to_unsigned(34904, 16); end if;
+            when others => if side = '1' then return to_unsigned(599, 16); else return to_unsigned(13100, 16); end if;
+        end case;
+    end function;
+    function f_k2(side : std_logic; c : unsigned(1 downto 0)) return unsigned is
+    begin
+        case to_integer(c) is
+            when 1      => if side = '1' then return to_unsigned(4522, 16); else return to_unsigned(15729, 16); end if;
+            when 2      => if side = '1' then return to_unsigned(14292, 16); else return to_unsigned(49710, 16); end if;
+            when others => if side = '1' then return to_unsigned(2010, 16); else return to_unsigned(6991, 16); end if;
+        end case;
+    end function;
+    -- v0.6 K2 Cascade: the step decrement per line (Q4) = c 9.8 vstep / lines = (cc KDT) >> 10, per timing
+    -- (v0.6.1: 9.8, was 4.75; the step falls from x(1 + 9c) at the top to x(1 - 0.8c) at the bottom)
+    function f_kdt(t : std_logic_vector(3 downto 0)) return unsigned is
+    begin
+        case to_integer(unsigned(t)) is
+            when 0          => return to_unsigned(370333, 19);
+            when 4          => return to_unsigned(94874, 19);
+            when 8          => return to_unsigned(263542, 19);
+            when 12         => return to_unsigned(65885, 19);
+            when 5 | 6 | 14 => return to_unsigned(42167, 19);
+            when 1 | 2 | 10 => return to_unsigned(74963, 19);
+            when others     => return to_unsigned(18740, 19);
         end case;
     end function;
     -- width class: 0 = 1920, 1 = 1280, 2 = 720
@@ -114,44 +177,64 @@ architecture jukebox of program_top is
     signal s_half : unsigned(10 downto 0) := to_unsigned(960, 11);
 
     -- knobs: glided (Q3), raw speed, switches
-    signal s_g1 : unsigned(12 downto 0) := to_unsigned(583 * 8, 13);
-    signal s_g2 : unsigned(12 downto 0) := to_unsigned(475 * 8, 13);
+    signal s_g1 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
+    signal s_g2 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
     signal s_g3 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
     signal s_g5 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
-    signal s_g6 : unsigned(12 downto 0) := to_unsigned(460 * 8, 13);
+    signal s_g6 : unsigned(12 downto 0) := to_unsigned(326 * 8, 13);
     signal s_gp : unsigned(12 downto 0) := to_unsigned(406 * 8, 13);
     signal s_gm : unsigned(12 downto 0) := (others => '0');                 -- shared glide: selected knob
     signal s_gd : signed(14 downto 0) := (others => '0');                   -- and its step
     signal s_k4 : unsigned(9 downto 0) := to_unsigned(600, 10);
     signal s_vm : unsigned(9 downto 0) := (others => '0');                  -- |speed| - 8
     signal s_vneg, s_vstill : std_logic := '1';
-    signal s_mirror, s_pairsoff, s_swap, s_saw, s_src : std_logic := '0';
+    signal s_mirror, s_fsaw, s_swap, s_saw, s_src : std_logic := '0';
     signal s_cls  : unsigned(1 downto 0) := (others => '0');
+    -- v0.6 knob decodes (free-running, from the glided knobs)
+    signal s_lq    : unsigned(9 downto 0) := (others => '0');               -- K1 |widths| (0 .. 511, Q9 of L)
+    signal s_wside : std_logic := '0';                                      -- 0 = Lens, 1 = Fan
+    signal s_v5    : unsigned(8 downto 0) := (others => '0');               -- K5 |detune| (0 .. 504)
+    signal s_dneg  : std_logic := '0';
+    signal s_v2    : unsigned(8 downto 0) := (others => '0');               -- K2 Alternate (0 .. 504)
+    signal s_cc    : unsigned(7 downto 0) := (others => '0');               -- K2 Cascade c (Q8)
+    signal s_hcas  : std_logic := '0';                                      -- 1 = Cascade side
+    signal s_dkn   : unsigned(9 downto 0) := (others => '0');               -- shared knob decoder: input,
+    signal s_dvm   : unsigned(9 downto 0) := (others => '0');               -- |v| - 8,
+    signal s_dsg, s_dst : std_logic := '0';                                 -- sign, centre zone
 
     -- per-field constants
-    signal s_tmp   : unsigned(23 downto 0) := (others => '0');
-    signal s_k1sq, s_k2sq, s_psq, s_k6sq : unsigned(19 downto 0) := (others => '0');
-    signal s_hd    : unsigned(16 downto 0) := to_unsigned(39955, 17);
+    signal s_psq, s_k6sq : unsigned(19 downto 0) := (others => '0');
     signal s_hstep : unsigned(17 downto 0) := to_unsigned(39955, 18);
     signal s_hp0   : unsigned(23 downto 0) := (others => '0');
-    signal s_rq    : unsigned(12 downto 0) := to_unsigned(2127, 13);
+
     signal s_vstep : unsigned(19 downto 0) := to_unsigned(32270, 20);
     signal s_bands : unsigned(10 downto 0) := to_unsigned(256, 11);
-    signal s_etch  : unsigned(9 downto 0) := (others => '0');
-    signal s_be    : unsigned(11 downto 0) := (others => '0');
+    signal s_etch  : unsigned(10 downto 0) := (others => '0');
+    signal s_be    : unsigned(12 downto 0) := (others => '0');
     signal s_vsq   : unsigned(17 downto 0) := (others => '0');
     signal s_spd   : signed(15 downto 0) := (others => '0');
     signal s_t17   : unsigned(16 downto 0) := (others => '0');
     signal s_t9    : unsigned(8 downto 0) := (others => '0');
-    signal s_tv    : unsigned(9 downto 0) := (others => '0');                -- |tint knob| - 8
-    signal s_tneg, s_tstill : std_logic := '1';
-    signal s_tm    : unsigned(13 downto 0) := (others => '0');
-    signal s_tint  : signed(9 downto 0) := (others => '0');
-    signal s_nose  : unsigned(7 downto 0) := to_unsigned(64, 8);
+    signal s_nose  : unsigned(9 downto 0) := to_unsigned(256, 10);         -- nose stretch (Q8, 1/stretch)
+    -- v0.6 per-field constants
+    signal s_wfix  : unsigned(14 downto 0) := (others => '0');              -- 23 A (Fan centre fix)
+    signal s_lh    : unsigned(16 downto 0) := (others => '0');              -- K1 L x hstep
+    signal s_s0    : signed(31 downto 0) := to_signed(39955 * 4096, 32);   -- the first pixel's step (Q12; < 0 past L = 1)
+    signal s_d0    : unsigned(23 downto 0) := (others => '0');              -- |first step difference| (Q12)
+    signal s_d2    : unsigned(15 downto 0) := (others => '0');              -- second difference (Q12)
+    signal s_fa, s_fb : unsigned(9 downto 0) := to_unsigned(256, 10);      -- detune factors (Q8)
+    signal s_bna, s_bnb : unsigned(11 downto 0) := to_unsigned(256, 12);    -- Bands of column kind A / B
+    signal s_ma    : unsigned(11 downto 0) := to_unsigned(256, 12);         -- row-kind step factors (Q8)
+    signal s_mb    : unsigned(12 downto 0) := to_unsigned(256, 13);
+    signal s_sb    : unsigned(25 downto 0) := to_unsigned(32270 * 16, 26);  -- row kind B's step (Q4, Alternate)
+    signal s_hcasf : std_logic := '0';                                      -- Cascade, field-latched
+    signal s_dd    : unsigned(17 downto 0) := (others => '0');              -- Cascade step decrement per line (Q4)
 
     -- field serial multiplier
     signal f_a   : unsigned(35 downto 0) := (others => '0');
     signal f_b   : unsigned(15 downto 0) := (others => '0');
+    signal f_ld  : std_logic := '0';                                        -- load a slot next clock (registered decode)
+    signal f_lk  : unsigned(5 downto 0) := (others => '0');                 -- and which
     signal f_acc : unsigned(35 downto 0) := (others => '0');
 
     -- generated avid
@@ -166,7 +249,9 @@ architecture jukebox of program_top is
     -- line engine
     signal e_lc   : unsigned(5 downto 0) := to_unsigned(63, 6);
     signal e_zk   : std_logic := '0';
-    signal e_ph   : unsigned(23 downto 0) := to_unsigned(C_VPH0, 24);
+    signal e_ph   : unsigned(28 downto 0) := to_unsigned(C_VPH0, 25) & x"0";    -- 25-bit phase (row pair) + Q4
+    signal e_sa   : unsigned(24 downto 0) := to_unsigned(32270 * 16, 25);   -- row kind A's step this line (Q4)
+    signal e_par  : std_logic := '0';                                       -- row kind of the computed line
     signal e_dn   : unsigned(11 downto 0) := (others => '0');
     signal e_dn2  : unsigned(11 downto 0) := (others => '0');
     signal e_t1   : unsigned(21 downto 0) := (others => '0');               -- 928 dn
@@ -183,40 +268,45 @@ architecture jukebox of program_top is
     signal m_a    : unsigned(23 downto 0) := (others => '0');
     signal m_b    : unsigned(11 downto 0) := (others => '0');
     signal m_acc  : unsigned(23 downto 0) := (others => '0');
-    signal n_bvg  : unsigned(12 downto 0) := (others => '0');
+    signal n_bvga, n_bvgb : unsigned(14 downto 0) := (others => '0');
     signal n_rv, n_bv : signed(9 downto 0) := (others => '0');
-    signal l_bvg  : unsigned(12 downto 0) := (others => '0');
+    signal l_bvga, l_bvgb : unsigned(14 downto 0) := (others => '0');
     signal l_rv, l_bv : signed(9 downto 0) := (others => '0');
 
     -- beam
     signal b_hp : unsigned(23 downto 0) := (others => '0');
     signal b_px : unsigned(10 downto 0) := (others => '0');
+    signal b_s  : signed(31 downto 0) := to_signed(39955 * 4096, 32);      -- K1 DDA: this pixel's step (Q12)
+    signal b_d  : signed(25 downto 0) := (others => '0');                   -- and its difference
 
     -- pixel path
     signal p1_typ : std_logic := '0';
-    signal p1_pos : unsigned(7 downto 0) := (others => '0');
+    signal p1_pos : unsigned(11 downto 0) := (others => '0');               -- column position, 8.4
     signal p2_typ, p2_ge : std_logic := '0';
-    signal p2_pos, p2_d : unsigned(7 downto 0) := (others => '0');
+    signal p2_pos : unsigned(11 downto 0) := (others => '0');
+    signal p2_d   : unsigned(9 downto 0) := (others => '0');                -- distance into the tail, 8.2
     signal p3_typ, p3_ge : std_logic := '0';
-    signal p3_pos : unsigned(7 downto 0) := (others => '0');
-    signal p3_nl, p3_nh : unsigned(11 downto 0) := (others => '0');
+    signal p3_pos : unsigned(11 downto 0) := (others => '0');
+    signal p3_nl, p3_nh : unsigned(14 downto 0) := (others => '0');
+    signal p4_fr, p5_fr, p6_fr : unsigned(3 downto 0) := (others => '0');  -- table-address fraction (E interpolation)
+    signal p7_ei  : signed(11 downto 0) := (others => '0');
     signal p3_y8  : unsigned(7 downto 0) := (others => '0');
     signal p4_ad  : unsigned(8 downto 0) := (others => '0');
-    signal p4_bla, p4_blb : unsigned(15 downto 0) := (others => '0');
-    signal p5_bl  : unsigned(11 downto 0) := (others => '0');
+    signal p4_bla, p4_blb : unsigned(16 downto 0) := (others => '0');
+    signal p5_bl  : unsigned(12 downto 0) := (others => '0');
+    signal p5_bvg : unsigned(14 downto 0) := (others => '0');
     signal t5_0, t5_1, t5_2, t5_3 : std_logic_vector(15 downto 0) := (others => '0');
     signal t6_0, t6_1, t6_2, t6_3 : std_logic_vector(15 downto 0) := (others => '0');
-    signal p6_gs  : unsigned(13 downto 0) := (others => '0');
-    signal p7_gal, p7_gah : unsigned(17 downto 0) := (others => '0');
+    signal p6_gs  : unsigned(14 downto 0) := (others => '0');
+    signal p7_gal, p7_gah : unsigned(18 downto 0) := (others => '0');
     signal p7_bbl, p7_bbh : signed(14 downto 0) := (others => '0');
     signal p7_e   : unsigned(8 downto 0) := (others => '0');
     signal p7_c, p8_c, p9_c : unsigned(7 downto 0) := (others => '0');
     signal p7_o, p8_o, p9_o, p10_o, p11_o : signed(7 downto 0) := (others => '0');
-    signal p7_r, p8_r, p9_r, p10_r, p11_r, p12_r, p13_r, p14_r, p15_r : unsigned(7 downto 0) := (others => '0');
-    signal p7_bo, p8_bo, p9_bo, p10_bo, p11_bo, p12_bo, p13_bo, p14_bo, p15_bo : unsigned(7 downto 0) := (others => '0');
+    signal p7_r, p15_r, p7_bo, p15_bo : unsigned(7 downto 0) := (others => '0');   -- 7 -> 15 through r_drg
     signal p8_ga9 : unsigned(8 downto 0) := (others => '0');
     signal p8_e   : unsigned(8 downto 0) := (others => '0');
-    signal p8_bb, p9_bb, p10_bb, p11_bb, p12_bb, p13_bb, p14_bb, p15_bb : signed(10 downto 0) := (others => '0');
+    signal p8_bb, p15_bb : signed(10 downto 0) := (others => '0');          -- 8 -> 15 through r_brg
     signal p9_tri : unsigned(7 downto 0) := (others => '0');
     signal p10_cl, p10_ch : unsigned(11 downto 0) := (others => '0');
     signal p11_ct : unsigned(8 downto 0) := (others => '0');
@@ -243,10 +333,25 @@ architecture jukebox of program_top is
     signal s_u28, s_v28 : unsigned(9 downto 0) := to_unsigned(512, 10);
 
     type t_bit_shift is array (0 to C_LAT - 1) of std_logic;
-    signal s_hsync_sr : t_bit_shift := (others => '1');
-    signal s_vsync_sr : t_bit_shift := (others => '1');
-    signal s_field_sr : t_bit_shift := (others => '1');
     signal s_gav_sr   : t_bit_shift := (others => '0');   -- s_gav_sr(k) = generated avid of the stage-(k+1) pixel
+
+    -- v0.6.1 delay rings in block RAM, written every clock at r_wp (FF-to-FF copies cost an LC per bit):
+    -- r and bo from stage 7 to 15 (read 6 back, two registers = 8), bb from 8 to 15 (read 5 back), and the
+    -- syncs (read 26 back, two registers = 28 = C_LAT).  The read address never equals the write address.
+    attribute no_rw_check : boolean;
+    type t_ring16 is array (0 to 255) of std_logic_vector(15 downto 0);
+    signal r_drg : t_ring16 := (others => (others => '0'));
+    attribute no_rw_check of r_drg : signal is true;
+    signal r_dq, r_dq2 : std_logic_vector(15 downto 0) := (others => '0');
+    type t_ring11 is array (0 to 255) of std_logic_vector(10 downto 0);
+    signal r_brg : t_ring11 := (others => (others => '0'));
+    attribute no_rw_check of r_brg : signal is true;
+    signal r_bq, r_bq2 : std_logic_vector(10 downto 0) := (others => '0');
+    type t_ring4 is array (0 to 255) of std_logic_vector(3 downto 0);
+    signal r_srg : t_ring4 := (others => (others => '1'));
+    attribute no_rw_check of r_srg : signal is true;
+    signal r_sq, r_sq2 : std_logic_vector(3 downto 0) := (others => '1');
+    signal r_wp : unsigned(7 downto 0) := (others => '0');
 
 begin
 
@@ -262,13 +367,37 @@ begin
     end process p_lb;
 
     ---------------------------------------------------------------------------
+    -- Delay rings (block RAM)
+    ---------------------------------------------------------------------------
+    p_ring : process(clk)
+    begin
+        if rising_edge(clk) then
+            r_wp <= r_wp + 1;
+            r_drg(to_integer(r_wp)) <= std_logic_vector(p7_r) & std_logic_vector(p7_bo);
+            r_dq <= r_drg(to_integer(r_wp - 6));
+            r_dq2 <= r_dq;
+            r_brg(to_integer(r_wp)) <= std_logic_vector(p8_bb);
+            r_bq <= r_brg(to_integer(r_wp - 5));
+            r_bq2 <= r_bq;
+            r_srg(to_integer(r_wp)) <= '1' & data_in.field_n & data_in.vsync_n & data_in.hsync_n;
+            r_sq <= r_srg(to_integer(r_wp - 26));
+            r_sq2 <= r_sq;
+        end if;
+    end process p_ring;
+    p15_r  <= unsigned(r_dq2(15 downto 8));
+    p15_bo <= unsigned(r_dq2(7 downto 0));
+    p15_bb <= signed(r_bq2);
+
+    ---------------------------------------------------------------------------
     -- Controls, vblank zone, per-field sequencer.  Every zone-clock step is one
     -- small operation (the zone is quasi-static but timed at the pixel clock).
     ---------------------------------------------------------------------------
     p_ctrl : process(clk)
         variable v_s  : signed(10 downto 0);
         variable v_m  : unsigned(9 downto 0);
-        variable v_k  : integer range 0 to 63;
+        variable v_k  : integer range 0 to 64;
+        variable v_fh, v_fl : unsigned(9 downto 0);
+
     begin
         if rising_edge(clk) then
             s_tid  <= registers_in(8)(3 downto 0);
@@ -299,23 +428,15 @@ begin
                 s_hcnt <= (others => '0');
             end if;
             s_k4 <= unsigned(registers_in(3));
-            -- speed: |v| - 8 and the still zone, registered free-running
-            v_s := signed(resize(s_k4, 11)) - 512;
-            if v_s > -9 and v_s < 9 then s_vstill <= '1'; else s_vstill <= '0'; end if;
-            s_vneg <= v_s(10);
-            if v_s(10) = '1' then v_m := unsigned(not v_s(9 downto 0)) - 7; else v_m := unsigned(v_s(9 downto 0)) - 8; end if;
-            s_vm <= v_m;
-            -- tint: |v| - 8 of the glided K5 and the centre zone
-            v_s := signed(resize(s_g5(12 downto 3), 11)) - 512;
-            if v_s > -9 and v_s < 9 then s_tstill <= '1'; else s_tstill <= '0'; end if;
-            s_tneg <= v_s(10);
-            if v_s(10) = '1' then v_m := unsigned(not v_s(9 downto 0)) - 7; else v_m := unsigned(v_s(9 downto 0)) - 8; end if;
-            s_tv <= v_m;
+            -- detune factors (Q8): x1 .. x2.84 up and x1 .. x0.36 down, linear in the knob
+            v_fh := to_unsigned(256, 10) + resize(s_v5, 10) - resize(s_v5(8 downto 4), 10);
+            v_fl := to_unsigned(256, 10) - resize(s_v5(8 downto 2), 10) - resize(s_v5(8 downto 4), 10) - resize(s_v5(8 downto 6), 10);
+            if s_dneg = '1' then s_fa <= v_fh; s_fb <= v_fl; else s_fa <= v_fl; s_fb <= v_fh; end if;
 
             if s_zgo = '1' then
                 s_w <= s_wmax; s_wmax <= (others => '0');
                 s_mirror   <= registers_in(6)(0);
-                s_pairsoff <= registers_in(6)(1);
+                s_fsaw     <= registers_in(6)(1);
                 s_swap     <= registers_in(6)(2);
                 s_saw      <= registers_in(6)(3);
                 s_src      <= registers_in(6)(4);
@@ -326,6 +447,42 @@ begin
 
             -- shared glide (1/8 of the gap per field, +-2 deadband): knob k on
             -- zone clocks 3k+1 (select, distance), 3k+2 (step), 3k+3 (update)
+            -- one bipolar decoder for K1 / K2 / K5 (glided, just after each glide update) and K4 (raw),
+            -- three zone clocks per knob: the input (zone clock 4 / 7 / 13 / 20), |v| - 8, its sign and the
+            -- +-8 centre zone (+1), the knob's own values (+2), latched for the field
+            case to_integer(s_zc) is
+                when 4      => s_dkn <= s_g1(12 downto 3);
+                when 7      => s_dkn <= s_g2(12 downto 3);
+                when 13     => s_dkn <= s_g5(12 downto 3);
+                when others => s_dkn <= s_k4;
+            end case;
+            v_s := signed(resize(s_dkn, 11)) - 512;
+            if v_s(10) = '1' then s_dvm <= unsigned(not v_s(9 downto 0)) - 7; else s_dvm <= unsigned(v_s(9 downto 0)) - 8; end if;
+            s_dsg <= v_s(10);
+            if v_s > -9 and v_s < 9 then s_dst <= '1'; else s_dst <= '0'; end if;
+            if s_zone = '1' then
+                case to_integer(s_zc) is
+                    when 6 =>       -- K1 Widths: Lens (right) / Fan (left), L = lq / 512 up to 1.5 on both sides
+                        s_wside <= s_dsg;
+                        if s_dst = '1' then s_lq <= (others => '0');
+                        else s_lq <= s_dvm + resize(s_dvm(9 downto 1), 10) + resize(s_dvm(9 downto 5), 10); end if;
+                    when 9 =>       -- K2 Heights: Cascade (right, c = cc / 256) / Alternate (left)
+                        if s_dst = '1' then
+                            s_hcas <= '0'; s_v2 <= (others => '0'); s_cc <= (others => '0');
+                        elsif s_dsg = '1' then
+                            s_hcas <= '0'; s_v2 <= s_dvm(8 downto 0); s_cc <= (others => '0');
+                        else
+                            s_hcas <= '1'; s_v2 <= (others => '0'); s_cc <= s_dvm(8 downto 1);
+                        end if;
+                    when 15 =>      -- K5 Detune
+                        s_dneg <= s_dsg;
+                        if s_dst = '1' then s_v5 <= (others => '0'); else s_v5 <= s_dvm(8 downto 0); end if;
+                    when 22 =>      -- K4 Speed
+                        s_vstill <= s_dst; s_vneg <= s_dsg; s_vm <= s_dvm;
+                    when others => null;
+                end case;
+            end if;
+
             if s_zone = '1' and s_zc >= 1 and s_zc <= 18 then
                 case to_integer(s_zc) is
                     when 1  => s_gm <= s_g1; s_gd <= signed(resize(unsigned(registers_in(0)) & "000", 15)) - signed(resize(s_g1, 15));
@@ -349,27 +506,42 @@ begin
                 end case;
             end if;
 
-            -- serial products: one slot every 24 zone clocks (k = 1, 4, 7 ..
-            -- 40): load at 8k, 16 iterations, result stable from 8k + 17.
-            v_k := to_integer(s_zc(8 downto 3));
-            if s_zc(2 downto 0) = "000" and (v_k = 1 or v_k = 4 or v_k = 7 or v_k = 10 or v_k = 13 or v_k = 16 or
-               v_k = 19 or v_k = 22 or v_k = 25 or v_k = 28 or v_k = 31 or v_k = 34 or v_k = 37 or v_k = 40) then
+            -- serial products: one slot every 24 zone clocks (k = 1, 4 .. 55):
+            -- load at 8k, 16 iterations, result stable from 8k + 17.  (v0.6: the
+            -- column / row counts and the vertical step are per-timing constants;
+            -- slots 1 .. 16 now set up the K1 Widths DDA.)  The slot decision is
+            -- registered one zone clock ahead (f_ld / f_lk), so only a registered
+            -- selector drives the operand mux.
+            v_k := to_integer(s_zc(8 downto 3)) + 1;
+            f_ld <= '0';
+            if s_zc(2 downto 0) = "111" and (v_k = 1 or v_k = 7 or v_k = 10 or v_k = 13 or v_k = 16 or v_k = 19 or
+               v_k = 22 or v_k = 25 or v_k = 28 or v_k = 31 or v_k = 34 or v_k = 37 or v_k = 40 or
+               v_k = 43 or v_k = 46 or v_k = 49 or v_k = 52 or v_k = 55) then
+                f_ld <= '1';
+            end if;
+            f_lk <= to_unsigned(v_k mod 64, 6);
+            if f_ld = '1' then
                 f_acc <= (others => '0');
-                case v_k is
-                    when 1  => f_a <= resize(s_g1(12 downto 3), 36);  f_b <= resize(s_g1(12 downto 3), 16);
-                    when 4  => f_a <= to_unsigned(96308, 36);          f_b <= s_k1sq(19 downto 4);
+                case to_integer(f_lk) is
+                    when 1  => f_a <= resize(s_hstep, 36);             f_b <= resize(s_lq, 16);
                     when 7  => f_a <= resize(s_hstep, 36);             f_b <= resize(s_half, 16);
-                    when 10 => f_a <= resize(s_g2(12 downto 3), 36);  f_b <= resize(s_g2(12 downto 3), 16);
-                    when 13 => f_a <= to_unsigned(5130, 36);           f_b <= s_k2sq(19 downto 4);
-                    when 16 => f_a <= resize(s_rq, 36);                f_b <= resize(s_ys, 16);
-                    when 19 => f_a <= resize(s_tmp, 36);               f_b <= to_unsigned(3884, 16);
+                    when 10 => f_a <= resize(f_acc(26 downto 15), 36); f_b <= resize(s_lq, 16);   -- half-screen span (slot 7)
+                    when 13 => f_a <= resize(s_lh, 36);                f_b <= f_kd(s_wside, s_cls);
+                    when 16 => f_a <= resize(s_lh, 36);                f_b <= f_k2(s_wside, s_cls);
+                    when 19 => f_a <= resize(s_v2, 36);                f_b <= resize(s_v2, 16);
                     when 22 => f_a <= resize(s_gp(12 downto 3), 36);  f_b <= resize(s_gp(12 downto 3), 16);
                     when 25 => f_a <= resize(s_psq, 36);               f_b <= to_unsigned(1222, 16);
                     when 28 => f_a <= resize(s_g6(12 downto 3), 36);  f_b <= resize(s_g6(12 downto 3), 16);
-                    when 31 => f_a <= resize(s_k6sq, 36);              f_b <= to_unsigned(769, 16);
+                    when 31 => f_a <= resize(s_k6sq, 36);              f_b <= to_unsigned(1538, 16);
                     when 34 => f_a <= resize(s_bands, 36);             f_b <= resize(s_etch, 16);
                     when 37 => f_a <= resize(s_vm, 36);                f_b <= resize(s_vm, 16);
-                    when others => f_a <= resize(s_vsq, 36);           f_b <= to_unsigned(66, 16);
+                    when 40 => f_a <= resize(s_vsq, 36);               f_b <= to_unsigned(66, 16);
+                    when 43 => f_a <= resize(s_bands, 36);             f_b <= resize(s_fa, 16);
+                    when 46 => f_a <= resize(s_bands, 36);             f_b <= resize(s_fb, 16);
+                    when 49 => f_a <= resize(s_vstep, 36);             f_b <= resize(s_ma, 16);
+                    when 52 => f_a <= resize(s_vstep, 36);             f_b <= resize(s_mb, 16);
+                    -- 55: (others)
+                    when others => f_a <= resize(f_kdt(s_tid), 36);    f_b <= resize(s_cc, 16);
                 end case;
             else
                 if f_b(0) = '1' then f_acc <= f_acc + f_a; end if;
@@ -378,24 +550,44 @@ begin
             end if;
             -- stores and shift-adds (one operation per zone clock)
             case to_integer(s_zc) is
-                when 26  => s_k1sq <= f_acc(19 downto 0);
-                when 50  => s_hd <= to_unsigned(8738, 17) + f_acc(32 downto 16);
-                when 51  =>
+                when 1   =>
                     case to_integer(s_cls) is
-                        when 1      => s_hstep <= resize(s_hd, 18) + resize(s_hd(16 downto 1), 18);
-                        when 2      => s_hstep <= s_hd & '0';
-                        when others => s_hstep <= resize(s_hd, 18);
+                        when 1      => s_hstep <= to_unsigned(C_HD + C_HD / 2, 18);
+                        when 2      => s_hstep <= to_unsigned(C_HD * 2, 18);
+                        when others => s_hstep <= to_unsigned(C_HD, 18);
                     end case;
+                    s_vstep <= f_vstepc(s_tid);
+                -- K1 Widths DDA: Lh = L hstep; the first pixel's step hstep + Lh g'(-1); its first and second
+                -- differences (L = 0 gives hstep and 0, 0: the photo's uniform columns exactly)
+                when 26  => s_lh <= f_acc(25 downto 9);
+                when 27  =>         -- Lens: hstep + 2 Lh; Fan: hstep - 7/8 Lh (negative past L = 8/7)
+                    if s_wside = '1' then s_s0 <= signed(shift_left(resize(s_hstep, 32), 12)) - signed(shift_left(resize(s_lh, 32), 12));
+                    else s_s0 <= signed(shift_left(resize(s_hstep, 32), 12)) + signed(shift_left(resize(s_lh, 32), 13)); end if;
+                when 28  => if s_wside = '1' then s_s0 <= s_s0 + signed(shift_left(resize(s_lh, 32), 9)); end if;
                 when 74  => s_hp0 <= to_unsigned(C_HC, 24) - f_acc(23 downto 0);
-                when 98  => s_k2sq <= f_acc(19 downto 0);
-                when 122 => s_rq <= to_unsigned(1024, 13) + f_acc(28 downto 16);
-                when 146 => s_tmp <= f_acc(23 downto 0);
-                when 170 => s_vstep <= f_acc(35 downto 16);
+                -- K1: A = L x half-screen span = lq hh15 / 512 (1/256 columns); Fan moves the centre column by
+                -- -0.725 A, so the start phase takes +23/32 A back (the Lens integrates to 0 at the centre)
+                when 98  => s_wfix <= shift_left(resize(f_acc(20 downto 9), 15), 4) + shift_left(resize(f_acc(20 downto 9), 15), 2);
+                when 99  => s_wfix <= s_wfix + shift_left(resize(f_acc(20 downto 9), 15), 1) + resize(f_acc(20 downto 9), 15);
+                when 100 => if s_wside = '1' then s_hp0 <= s_hp0 + (s_wfix(13 downto 5) & "000000000000000"); end if;
+                when 122 => s_d0 <= f_acc(32 downto 9);
+                when 146 => s_d2 <= f_acc(33 downto 18);
+                -- K2 Heights: row-kind step factors (Q8).  Cascade: 1 + 9c for both (x10 at the end); Alternate:
+                -- tall kind 1 + v/256 (x1.5), thin kind 1 + v^2 / 51 (x20 at the end; v^2 from slot 19)
+                when 170 =>
+                    s_hcasf <= s_hcas;
+                    if s_hcas = '1' then
+                        s_ma <= to_unsigned(256, 12) + shift_left(resize(s_cc, 12), 3) + resize(s_cc, 12);
+                        s_mb <= to_unsigned(256, 13) + shift_left(resize(s_cc, 13), 3) + resize(s_cc, 13);
+                    else
+                        s_ma <= to_unsigned(256, 12) + resize(s_v2(8 downto 2), 12);
+                        s_mb <= to_unsigned(256, 13) + resize(f_acc(17 downto 6), 13) + resize(f_acc(17 downto 8), 13);
+                    end if;
                 when 194 => s_psq <= f_acc(19 downto 0);
                 when 218 => s_bands <= to_unsigned(64, 11) + f_acc(30 downto 20);
                 when 242 => s_k6sq <= f_acc(19 downto 0);
-                when 266 => s_etch <= f_acc(29 downto 20);
-                when 290 => s_be <= f_acc(19 downto 8);
+                when 266 => s_etch <= f_acc(30 downto 20);
+                when 290 => s_be <= f_acc(20 downto 8);
                 when 314 => s_vsq <= f_acc(17 downto 0);
                 when 338 =>
                     if s_vstill = '1' then
@@ -407,26 +599,20 @@ begin
                     end if;
                 when 339 => s_t17 <= unsigned(signed(s_t17) + resize(s_spd, 17));
                 when 340 => s_t9 <= s_t17(16 downto 8);
-                -- tint = sign ((|v| - 8) 13 >> 5)
-                when 341 => s_tm <= shift_left(resize(s_tv, 14), 3) + shift_left(resize(s_tv, 14), 2);
-                when 342 => s_tm <= s_tm + resize(s_tv, 14);
-                when 343 =>
-                    if s_tstill = '1' then
-                        s_tint <= (others => '0');
-                    elsif s_tneg = '1' then
-                        s_tint <= -signed(resize(s_tm(13 downto 5), 10));
-                    else
-                        s_tint <= signed(resize(s_tm(13 downto 5), 10));
-                    end if;
-                when 344 => s_nose <= C_JB_NOSE(to_integer(s_g3(12 downto 7)));
+                when 341 => s_nose <= C_JB_NOSE(to_integer(s_g3(12 downto 7)));
+                -- K2 Heights: row-kind step factors (Alternate LUT, or 1 + 4c for both kinds on the Cascade side)
+                when 362 => s_bna <= f_acc(19 downto 8);
+                when 386 => s_bnb <= f_acc(19 downto 8);
+                -- (410: row kind A's step goes straight into the line engine's e_sa)
+                when 434 => s_sb <= f_acc(29 downto 4);
+                -- Cascade decrement per line (Q4): 9.8 c vstep / lines, one product with the per-timing constant
+                when 458 => s_dd <= f_acc(27 downto 10);
                 when others => null;
             end case;
 
-            s_hsync_sr(0) <= data_in.hsync_n; s_vsync_sr(0) <= data_in.vsync_n;
-            s_field_sr(0) <= data_in.field_n; s_gav_sr(0) <= g_avid;
+            s_gav_sr(0) <= g_avid;
             for i in 1 to C_LAT - 1 loop
-                s_hsync_sr(i) <= s_hsync_sr(i - 1); s_vsync_sr(i) <= s_vsync_sr(i - 1);
-                s_field_sr(i) <= s_field_sr(i - 1); s_gav_sr(i) <= s_gav_sr(i - 1);
+                s_gav_sr(i) <= s_gav_sr(i - 1);
             end loop;
         end if;
     end process p_ctrl;
@@ -501,28 +687,36 @@ begin
     -- 0), computes the NEXT line's vertical field values: dn (the vertical
     -- triangle, or the saw for Stack), V0 = 2 + 928 dn + 438 dn^2 (Q8 fold
     -- units, dn in Q12), the seam dip, Bands x Vg, the red and blue ramps.
+    -- v0.6: the vertical phase steps by the row kind's own step (K2 Heights:
+    -- Alternate), and both steps fall by s_dd per line (K2 Heights: Cascade);
+    -- Bands x Vg twice, once per column kind (K5 Detune).
     ---------------------------------------------------------------------------
     p_line : process(clk)
+        variable v_p25 : unsigned(24 downto 0);
         variable v_p2 : unsigned(23 downto 0);
         variable v_a  : unsigned(23 downto 0);
         variable v_x  : unsigned(17 downto 0);
     begin
         if rising_edge(clk) then
             e_zk <= '0';
-            if s_zone = '1' and s_zc = 360 then e_zk <= '1'; end if;
+            if s_zone = '1' and s_zc = 508 then e_zk <= '1'; end if;     -- after the last sequencer store (506)
 
+            -- row kind A's top step from the field sequencer (zone clock 410, no lines run in the zone);
+            -- kind B keeps its own constant step (Alternate) or follows A (Cascade, where only A falls)
+            if s_zone = '1' and s_zc = 410 then e_sa <= f_acc(28 downto 4); end if;
             if e_zk = '1' then
-                e_ph <= to_unsigned(C_VPH0, 24);
+                e_ph <= to_unsigned(C_VPH0, 25) & x"0";
                 e_lc <= (others => '0');
             elsif g_start = '1' then
-                e_ph <= e_ph + resize(s_vstep, 24);
+                if e_par = '1' or s_hcasf = '1' then e_ph <= e_ph + resize(e_sa, 29); else e_ph <= e_ph + resize(s_sb, 29); end if;
+                e_sa <= e_sa - resize(s_dd, 25);
                 e_lc <= (others => '0');
             elsif e_lc /= 63 then
                 e_lc <= e_lc + 1;
             end if;
             -- the pixel path takes the previous computation at the line start
             if g_start = '1' then
-                l_bvg <= n_bvg; l_rv <= n_rv; l_bv <= n_bv;
+                l_bvga <= n_bvga; l_bvgb <= n_bvgb; l_rv <= n_rv; l_bv <= n_bv;
             end if;
 
             -- multiplier (iterates every clock it is not loaded)
@@ -532,7 +726,9 @@ begin
 
             case to_integer(e_lc) is
                 when 1 =>
-                    v_p2 := e_ph + to_unsigned(8388608, 24);
+                    v_p25 := e_ph(28 downto 4) + to_unsigned(8388608, 25);
+                    e_par <= v_p25(24);                         -- row kind: the top capsule takes step A
+                    v_p2 := v_p25(23 downto 0);
                     if s_saw = '1' then
                         e_dn <= v_p2(23 downto 12);
                     else
@@ -575,9 +771,9 @@ begin
                     e_vg <= e_v0 - resize(e_dip, 11);
                     e_vr <= e_v0 - resize(e_dq(15 downto 8), 11);
                 when 20 =>
-                    m_a <= resize(e_vg, 24); m_b <= '0' & s_bands; m_acc <= (others => '0');
-                    e_rv1 <= signed(resize(e_vr, 12)) + resize(s_tint, 12);
-                    e_bv1 <= signed(resize(e_v0, 12)) - resize(s_tint, 12);
+                    m_a <= resize(e_vg, 24); m_b <= s_bna; m_acc <= (others => '0');
+                    e_rv1 <= signed(resize(e_vr, 12));
+                    e_bv1 <= signed(resize(e_v0, 12));
                 when 21 =>
                     e_rv2 <= shift_left(resize(e_rv1, 20), 6) + shift_left(resize(e_rv1, 20), 3);
                     e_bv2 <= shift_left(resize(e_bv1, 20), 6) + shift_left(resize(e_bv1, 20), 4);
@@ -585,9 +781,13 @@ begin
                     e_rv2 <= e_rv2 + resize(e_rv1, 20);
                     e_bv2 <= e_bv2 - resize(e_bv1, 20);
                 when 34 =>
-                    n_bvg <= m_acc(20 downto 8);
+                    n_bvga <= m_acc(22 downto 8);
                     n_rv  <= e_rv2(18 downto 9);
                     n_bv  <= e_bv2(17 downto 8);
+                when 35 =>
+                    m_a <= resize(e_vg, 24); m_b <= s_bnb; m_acc <= (others => '0');
+                when 49 =>
+                    n_bvgb <= m_acc(22 downto 8);
                 when others => null;
             end case;
         end if;
@@ -602,9 +802,14 @@ begin
             if g_start = '1' then
                 b_hp <= s_hp0;
                 b_px <= (others => '0');
+                b_s  <= s_s0;
+                b_d  <= -signed(resize(s_d0, 26));
             elsif g_avid = '1' then
-                b_hp <= b_hp + resize(s_hstep, 24);
+                b_hp <= b_hp + unsigned(resize(b_s(31 downto 12), 24));    -- (a negative step runs the columns backwards)
                 b_px <= b_px + 1;
+                -- K1 Widths: the step follows the quadratic profile across the line (second-order DDA)
+                b_s  <= b_s + resize(b_d, 32);
+                b_d  <= b_d + signed(resize(s_d2, 26));
             end if;
             s_lb_ra <= b_px;
         end if;
@@ -630,11 +835,11 @@ begin
     -- Pixel path (stage 1 = beam values of the pixel)
     ---------------------------------------------------------------------------
     p_pix : process(clk)
-        variable v_pos : unsigned(7 downto 0);
-        variable v_n   : unsigned(15 downto 0);
-        variable v_pw  : unsigned(9 downto 0);
-        variable v_bl  : unsigned(19 downto 0);
-        variable v_ga  : unsigned(21 downto 0);
+        variable v_pos : unsigned(11 downto 0);
+        variable v_n   : unsigned(14 downto 0);
+        variable v_pw  : unsigned(10 downto 0);
+        variable v_bl  : unsigned(20 downto 0);
+        variable v_ga  : unsigned(22 downto 0);
         variable v_bb  : signed(18 downto 0);
         variable v_f   : unsigned(8 downto 0);
         variable v_ct  : unsigned(15 downto 0);
@@ -645,94 +850,108 @@ begin
         variable v_u   : signed(11 downto 0);
     begin
         if rising_edge(clk) then
-            -- 1: column kind and position (Pairs Off: all kind A; Mirror: B reversed)
-            if s_pairsoff = '1' then p1_typ <= '1'; else p1_typ <= b_hp(23); end if;
-            v_pos := b_hp(22 downto 15);
+            -- 1: column kind and position, 8.4 (Mirror: B reversed)
+            p1_typ <= b_hp(23);
+            v_pos := b_hp(22 downto 11);
             if s_mirror = '1' and b_hp(23) = '0' then v_pos := not v_pos; end if;
             p1_pos <= v_pos;
 
-            -- 2: nose: distance into the tail
+            -- 2: nose: distance into the tail (8.2)
             p2_typ <= p1_typ; p2_pos <= p1_pos;
-            if p1_pos >= 48 then p2_ge <= '1'; p2_d <= p1_pos - 48; else p2_ge <= '0'; p2_d <= (others => '0'); end if;
+            if p1_pos(11 downto 4) >= 48 then
+                p2_ge <= '1'; v_pos := p1_pos - 768; p2_d <= v_pos(11 downto 2);
+            else
+                p2_ge <= '0'; p2_d <= (others => '0');
+            end if;
 
-            -- 3: tail stretch partial products; luma
+            -- 3: tail stretch partial products (d x s, s in Q8); luma
             p3_typ <= p2_typ; p3_pos <= p2_pos; p3_ge <= p2_ge;
-            p3_nl <= p2_d * s_nose(3 downto 0);
-            p3_nh <= p2_d * s_nose(7 downto 4);
+            p3_nl <= p2_d * s_nose(4 downto 0);
+            p3_nh <= p2_d * s_nose(9 downto 5);
             p3_y8 <= unsigned(s_lb_q);
 
-            -- 4: table address; etch partial products
+            -- 4: table address and its fraction (for the E interpolation); etch partial products
             if p3_ge = '1' then
-                v_n := resize(p3_nl, 16) + shift_left(resize(p3_nh, 16), 4);
-                v_pw := to_unsigned(48, 10) + resize(v_n(15 downto 6), 10);
-                if v_pw > 255 then p4_ad <= p3_typ & x"FF"; else p4_ad <= p3_typ & v_pw(7 downto 0); end if;
+                v_n := resize(p3_nl(14 downto 6), 15) + resize(p3_nh(14 downto 1), 15);    -- (d s) >> 6: 11.4
+                v_pw := to_unsigned(48, 11) + v_n(14 downto 4);
+                if v_pw > 255 then
+                    p4_ad <= p3_typ & x"FF"; p4_fr <= (others => '0');
+                else
+                    p4_ad <= p3_typ & v_pw(7 downto 0); p4_fr <= v_n(3 downto 0);
+                end if;
             else
-                p4_ad <= p3_typ & p3_pos;
+                p4_ad <= p3_typ & p3_pos(11 downto 4); p4_fr <= p3_pos(3 downto 0);
             end if;
             p4_bla <= s_be * p3_y8(3 downto 0);
             p4_blb <= s_be * p3_y8(7 downto 4);
 
-            -- 5: tables out of block RAM (p_tab); etch sum
-            v_bl := resize(p4_bla, 20) + shift_left(resize(p4_blb, 20), 4);
-            p5_bl <= v_bl(19 downto 8);
+            -- 5: tables out of block RAM (p_tab); etch sum; this column kind's Bands x Vg (K5 Detune)
+            v_bl := resize(p4_bla, 21) + shift_left(resize(p4_blb, 21), 4);
+            p5_bl <= v_bl(20 downto 8);
+            if p4_ad(8) = '1' then p5_bvg <= l_bvga; else p5_bvg <= l_bvgb; end if;
+            p5_fr <= p4_fr;
 
             -- 6: fabric copies; G-field vertical term
             t6_0 <= t5_0; t6_1 <= t5_1; t6_2 <= t5_2; t6_3 <= t5_3;
-            p6_gs <= resize(l_bvg, 14) + resize(p5_bl, 14);
+            p6_gs <= resize(p5_bvg, 15) + resize(p5_bl, 15);
+            p6_fr <= p5_fr;
 
-            -- 7: gain partial products (G: a x gs; B: bg x Bv); side values
+            -- 7: gain partial products (G: a x gs; B: bg x Bv); E slope x fraction; side values
             p7_gal <= unsigned(t6_1(11 downto 8)) * p6_gs;
             p7_gah <= unsigned(t6_1(15 downto 12)) * p6_gs;
             p7_bbl <= signed('0' & t6_2(3 downto 0)) * l_bv;
             p7_bbh <= signed('0' & t6_2(7 downto 4)) * l_bv;
-            p7_e  <= unsigned(t6_0(12 downto 4));
+            p7_e  <= unsigned(t6_0(8 downto 0));
+            p7_ei <= signed(t6_0(15 downto 9)) * signed('0' & p6_fr);
             p7_c  <= unsigned(t6_1(7 downto 0));
             p7_o  <= signed(t6_2(15 downto 8));
             p7_r  <= unsigned(t6_3(15 downto 8));
             p7_bo <= unsigned(t6_3(7 downto 0));
 
-            -- 8: products
-            v_ga := resize(p7_gal, 22) + shift_left(resize(p7_gah, 22), 4);
+            -- 8: products; E interpolated between table positions (mod 2 folds)
+            v_ga := resize(p7_gal, 23) + shift_left(resize(p7_gah, 23), 4);
             p8_ga9 <= v_ga(15 downto 7);
             v_bb := resize(p7_bbl, 19) + shift_left(resize(p7_bbh, 19), 4);
             p8_bb <= v_bb(17 downto 7);
-            p8_e <= p7_e; p8_c <= p7_c; p8_o <= p7_o; p8_r <= p7_r; p8_bo <= p7_bo;
+            p8_e <= p7_e + unsigned(resize(shift_right(p7_ei, 4), 9)); p8_c <= p7_c; p8_o <= p7_o;
 
             -- 9: fold phase (mod 2 folds) and the triangle fold
             v_f := p8_ga9 + p8_e - s_t9;
-            if v_f(8) = '1' then p9_tri <= not v_f(7 downto 0); else p9_tri <= v_f(7 downto 0); end if;
-            p9_c <= p8_c; p9_o <= p8_o; p9_r <= p8_r; p9_bo <= p8_bo; p9_bb <= p8_bb;
+            if s_fsaw = '1' then
+                p9_tri <= v_f(8 downto 1);                                  -- S8 Saw: one hard-edged ramp per 2 folds
+            elsif v_f(8) = '1' then p9_tri <= not v_f(7 downto 0); else p9_tri <= v_f(7 downto 0); end if;
+            p9_c <= p8_c; p9_o <= p8_o;
 
             -- 10: contrast partial products
             p10_cl <= p9_c(3 downto 0) * p9_tri;
             p10_ch <= p9_c(7 downto 4) * p9_tri;
-            p10_o <= p9_o; p10_r <= p9_r; p10_bo <= p9_bo; p10_bb <= p9_bb;
+            p10_o <= p9_o;
 
             -- 11: contrast
             v_ct := resize(p10_cl, 16) + shift_left(resize(p10_ch, 16), 4);
             p11_ct <= v_ct(15 downto 7);
-            p11_o <= p10_o; p11_r <= p10_r; p11_bo <= p10_bo; p11_bb <= p10_bb;
+            p11_o <= p10_o;
 
             -- 12: G level before the 233/256 scale
             p12_g8 <= resize(p11_o, 10) + signed(resize(p11_ct, 10));
-            p12_r <= p11_r; p12_bo <= p11_bo; p12_bb <= p11_bb;
+           
 
             -- 13: g8 * 23
             p13_gm <= shift_left(resize(p12_g8, 15), 4) + shift_left(resize(p12_g8, 15), 3) - resize(p12_g8, 15);
             p13_g8 <= p12_g8;
-            p13_r <= p12_r; p13_bo <= p12_bo; p13_bb <= p12_bb;
+           
 
             -- 14: G = 10 + g8 * 233 / 256, clipped
             v_g := to_signed(10, 12) + resize(p13_g8, 12) - resize(shift_right(p13_gm, 8), 12);
             if v_g < 0 then p14_g <= (others => '0');
             elsif v_g > 255 then p14_g <= (others => '1');
             else p14_g <= unsigned(v_g(7 downto 0)); end if;
-            p14_r <= p13_r; p14_bo <= p13_bo; p14_bb <= p13_bb;
+           
 
             -- 15: crosstalk terms G * 23, G * 22
             p15_gr <= shift_left(resize(p14_g, 13), 4) + shift_left(resize(p14_g, 13), 3) - resize(p14_g, 13);
             p15_gb <= shift_left(resize(p14_g, 13), 4) + shift_left(resize(p14_g, 13), 2) + shift_left(resize(p14_g, 13), 1);
-            p15_g <= p14_g; p15_r <= p14_r; p15_bo <= p14_bo; p15_bb <= p14_bb;
+            p15_g <= p14_g;
 
             -- 16: red and blue, clipped
             v_r := signed(resize(p15_r, 12)) + resize(l_rv, 12) - signed(resize(p15_gr(12 downto 8), 12));
@@ -815,9 +1034,9 @@ begin
     data_out.y       <= std_logic_vector(s_y28);
     data_out.u       <= std_logic_vector(s_u28);
     data_out.v       <= std_logic_vector(s_v28);
-    data_out.hsync_n <= s_hsync_sr(C_LAT - 1);
-    data_out.vsync_n <= s_vsync_sr(C_LAT - 1);
-    data_out.field_n <= s_field_sr(C_LAT - 1);
+    data_out.hsync_n <= r_sq2(0);
+    data_out.vsync_n <= r_sq2(1);
+    data_out.field_n <= r_sq2(2);
     data_out.avid    <= s_gav_sr(C_LAT - 1);
 
 end architecture jukebox;
