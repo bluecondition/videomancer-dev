@@ -1,12 +1,13 @@
 # Lozenge - Heirloom #24, rebuilt 2026-10-27 (v0.5.0) from WIN_20230410_01_10_37.
 # Nested diamonds: black bands with navy/grey rings, pink/olive bands swapped by squeezing stripes,
 # road-marking lines on the black bands' leading edges.  See lozenge.vhd, lozenge.py and SUMMARY.md.
+# v0.6.0 (phase 2 final, 2026-11-03): K3 Aspect -> Bulge (stars .. diamonds .. rounds), wider Stripes / Chirp / Black.
 
 [program]
 processing_delay_clks = 20
 program_id = "com.czartroniks.lozenge"
 program_name = "Lozenge"
-program_version = "0.5.1"
+program_version = "0.6.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -38,13 +39,13 @@ suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
-name_label = "Aspect"
+name_label = "Bulge"
 control_mode = "linear"
-display_min_value = 0
+display_min_value = -100
 display_max_value = 100
 initial_value = 512
 display_float_digits = 0
-suffix_label = "%"
+suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
@@ -121,6 +122,7 @@ name = "Photo"
 
 [[preset]]
 name = "Tunnel"
+rotary_potentiometer_3 = 300
 rotary_potentiometer_5 = 600
 linear_potentiometer_12 = 900
 
@@ -135,3 +137,27 @@ name = "Cyan Rush"
 rotary_potentiometer_4 = 900
 toggle_switch_10 = 1
 linear_potentiometer_12 = 600
+
+[[preset]]
+name = "Quatrefoil"
+rotary_potentiometer_3 = 0
+linear_potentiometer_12 = 450
+
+[[preset]]
+name = "Rounds"
+rotary_potentiometer_3 = 1023
+rotary_potentiometer_4 = 800
+linear_potentiometer_12 = 700
+
+[[preset]]
+name = "No Black"
+rotary_potentiometer_1 = 300
+rotary_potentiometer_5 = 0
+toggle_switch_8 = 1
+
+[[preset]]
+name = "Star Twins"
+rotary_potentiometer_3 = 180
+rotary_potentiometer_5 = 420
+toggle_switch_9 = 1
+toggle_switch_10 = 1

@@ -2,7 +2,7 @@
 # Copyright (C) 2026 czartroniks
 # SPDX-License-Identifier: GPL-3.0-only
 """
-LOZENGE v0.5.0 - build hook.  Writes lozenge_pkg.vhd next to this file (pure python: the builder
+LOZENGE v0.6.0 (phase 2 final) - build hook.  Writes lozenge_pkg.vhd next to this file (pure python: the builder
 runs it with the system python3).
 
 Fitted to the photo WIN_20230410_01_10_37 (see .heirloom_work/rb_lozenge/notes.md):

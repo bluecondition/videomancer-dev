@@ -1,7 +1,14 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Lozenge v0.5.0 -- Heirloom #24, rebuilt from the photo WIN_20230410_01_10_37.
+-- Lozenge v0.6.0 (phase 2 final) -- Heirloom #24, rebuilt from the photo WIN_20230410_01_10_37.
+--
+-- v0.6.0: K3 Aspect -> Bulge: a quadratic shaper on both triangles before they are summed,
+-- u += c * (tx^2 + ty^2), c bipolar: 4-point stars whose rings widen outward and fold back (left),
+-- the photo's straight diamonds (centre, c = 0, bit-exact), round rings crowding outward (right).
+-- c * r^2 is a 1024-entry table refilled by a DDA every field (no pixel multipliers): the pixel
+-- path reads it by |x - centre|, the line engine reads it by |y - centre| in hblank.  K1 Stripes
+-- x1/8 .. x8, K2 Chirp to 3x the photo's squeeze, K5 Black 0 (no black) .. 3x.
 --
 -- The photo: nested diamonds (centre 993, 518.6; 1.8 px of width per line of height), thick black
 -- bands with a navy / grey ring inside, hot pink and olive bands between them, cut by horizontal
@@ -17,11 +24,12 @@
 --   stripe = a vertical square wave, frequency gliding 1/142.6 -> 1/53.5 cycles per line; swaps the pairs
 --   lines  = one-shot profiles (ROM) at each black band's leading edge, in scan order
 --
---   K1  Stripes   stripe density (x0.25 .. x4)
---   K2  Chirp     how much the stripes squeeze going down (bipolar: up / even / down; the photo = 772)
---   K3  Aspect    tall .. flat diamonds
+--   K1  Stripes   stripe density (x1/8 .. x8)
+--   K2  Chirp     how much the stripes squeeze going down (bipolar: up / even / down; the photo = 772,
+--                 1023 = 3x the photo's squeeze)
+--   K3  Bulge     star .. diamond (512, the photo) .. round; ring spacing graded by radius
 --   K4  Speed     bipolar: rings stream out of (or into) the centre, the stripes roll
---   K5  Black     width of the black bands
+--   K5  Black     width of the black bands: none (0) .. the photo (512) .. 3x (1023)
 --   K6  Etch      how far the picture (or the Osc) bends the diamonds
 --   S7  Stripes   On (the photo) / Off (plain nested diamonds)
 --   S8  Marks     Road (the photo's edge lines) / Glow (a long luminous decay behind each edge)
@@ -105,6 +113,18 @@ architecture lozenge of program_top is
     signal r_pf_a : unsigned(9 downto 0) := (others => '0');
     signal r_pf_q : std_logic_vector(31 downto 0) := (others => '0');
 
+    -- bulge table: c * r^2 (Q16 phase, mod one period) by r = field px from the centre; written by the
+    -- per-field DDA in the vblank zone only, read by the pixel path (active) and the line engine (hblank)
+    type t_bt is array (0 to 1023) of unsigned(15 downto 0);
+    signal tb : t_bt := (others => x"0000");
+    attribute no_rw_check : boolean;
+    attribute no_rw_check of tb : signal is true;
+    signal t_we, t_run, t_ysel : std_logic := '0';
+    signal t_wa, t_ra : unsigned(9 downto 0) := (others => '0');
+    signal t_wd, t_rq : unsigned(15 downto 0) := (others => '0');
+    signal t_i  : unsigned(9 downto 0) := (others => '0');
+    signal t_q, t_d : unsigned(31 downto 0) := (others => '0');
+
     -- oscillator source (Source = Osc): 2-D triangle lattice, 640 x 540 virtual px, drifting
     signal s_ox  : unsigned(15 downto 0) := (others => '0');
     signal s_oy  : unsigned(15 downto 0) := (others => '0');
@@ -121,7 +141,7 @@ architecture lozenge of program_top is
     signal s_x0   : unsigned(8 downto 0) := (others => '0');
     signal s_idle : unsigned(9 downto 0) := (others => '0');
     signal s_zone, s_zone_d, s_zgo : std_logic := '0';
-    signal s_zc   : unsigned(9 downto 0) := (others => '0');
+    signal s_zc   : unsigned(10 downto 0) := (others => '0');
     signal s_avq  : std_logic := '0';
     signal s_hcnt, s_wmax : unsigned(11 downto 0) := (others => '0');
     signal s_w    : unsigned(11 downto 0) := to_unsigned(1920, 12);
@@ -150,10 +170,15 @@ architecture lozenge of program_top is
     signal c_g    : unsigned(15 downto 0) := to_unsigned(9166, 16);   -- ring gain per h (period 2^24)
     signal c_gl   : unsigned(15 downto 0) := to_unsigned(9259, 16);   -- left-side gain (x 1.01025)
     signal c_ga, c_gd : unsigned(16 downto 0) := to_unsigned(9166, 17); -- ascending / descending gain (twin: 2G)
-    signal c_kat  : unsigned(15 downto 0) := to_unsigned(14746, 16);  -- 2 * 1.800 * aspect, Q12
-    signal c_kab  : unsigned(15 downto 0) := to_unsigned(14664, 16);  -- 2 * 1.790 * aspect, Q12
-    signal c_chg  : unsigned(9 downto 0) := to_unsigned(362, 10);     -- |chirp| * 1.415, Q8 octaves
+    constant C_KAT : unsigned(15 downto 0) := to_unsigned(14746, 16); -- 2 * 1.800, Q12 (the photo's slopes)
+    constant C_KAB : unsigned(15 downto 0) := to_unsigned(14664, 16); -- 2 * 1.790, Q12
+    signal c_chg  : unsigned(10 downto 0) := to_unsigned(362, 11);    -- |chirp| * 1.415, Q8 octaves
     signal c_chn  : std_logic := '0';
+    signal z_hi   : std_logic := '0';
+    -- bulge: c (Q16 phase per field-px^2, 16 fraction bits, two's complement) and 2c
+    signal c_bc, c_bc2 : unsigned(31 downto 0) := (others => '0');
+    signal c_ba, c_bb  : unsigned(11 downto 0) := to_unsigned(1986, 12);  -- fold points (twin: 960 / 2880)
+    signal c_bth  : unsigned(11 downto 0) := (others => '0');          -- |x - fold| at the hold point (h)
     signal c_fsb  : unsigned(21 downto 0) := to_unsigned(192026, 22);
     signal c_fs   : unsigned(23 downto 0) := to_unsigned(192026, 24); -- stripe base frequency per line, Q24
     signal c_vsq  : unsigned(17 downto 0) := (others => '0');
@@ -207,11 +232,15 @@ architecture lozenge of program_top is
     signal e_e    : signed(10 downto 0) := (others => '0');
     signal e_sh   : signed(2 downto 0) := (others => '0');
     signal e_ph   : unsigned(23 downto 0) := (others => '0');
-    signal m_a    : unsigned(37 downto 0) := (others => '0');
+    signal m_a    : unsigned(39 downto 0) := (others => '0');
     signal m_b    : unsigned(15 downto 0) := (others => '0');
-    signal m_acc  : unsigned(37 downto 0) := (others => '0');
+    signal m_acc  : unsigned(39 downto 0) := (others => '0');
     signal n_dyg  : unsigned(28 downto 0) := (others => '0');
     signal n_s    : std_logic := '0';
+    signal e_ty   : unsigned(9 downto 0) := (others => '0');           -- next line's |y| in field px (bulge index)
+    signal y_cnt  : unsigned(3 downto 0) := (others => '0');
+    signal y_q    : unsigned(15 downto 0) := (others => '0');
+    signal n_qf   : unsigned(23 downto 0) := (others => '0');           -- next line: c ty^2 - flow (Q24)
 
     -- beam
     signal b_x, b_x1, b_x2 : unsigned(11 downto 0) := (others => '0');
@@ -225,6 +254,14 @@ architecture lozenge of program_top is
     signal b_rg  : unsigned(29 downto 0) := (others => '0');
     signal l_dyg : unsigned(28 downto 0) := (others => '0');
     signal l_s   : std_logic := '0';
+    signal l_qf  : unsigned(23 downto 0) := (others => '0');
+
+    -- bulge pixel path: stage 2 distances to the folds, stage 3 table address, 4 table data, 5 fabric
+    -- copy, 6 + the line term
+    signal q2_da, q2_db : signed(12 downto 0) := (others => '0');
+    signal q2_sel, q2_hold : std_logic := '0';
+    signal q5_t  : unsigned(15 downto 0) := (others => '0');
+    signal q6_q  : unsigned(23 downto 0) := (others => '0');
 
     -- pixel path
     signal p2_pd, p3_pd, p4_pd, p5_pd : unsigned(29 downto 0) := (others => '0');
@@ -288,6 +325,14 @@ begin
         end if;
     end process p_rom;
 
+    p_tb : process(clk)
+    begin
+        if rising_edge(clk) then
+            t_rq <= tb(to_integer(t_ra));
+            if t_we = '1' then tb(to_integer(t_wa)) <= t_wd; end if;
+        end if;
+    end process p_tb;
+
     ---------------------------------------------------------------------------
     -- Controls, vblank zone, per-field sequencer (one small operation per zone
     -- clock; the zone is quasi-static but timed at the pixel clock)
@@ -315,7 +360,7 @@ begin
             s_zgo <= s_zone and not s_zone_d;
             if s_zone = '0' then
                 s_zc <= (others => '0');
-            elsif s_zc /= 1023 then
+            elsif s_zc /= 2047 then
                 s_zc <= s_zc + 1;
             end if;
 
@@ -408,7 +453,6 @@ begin
                     when 78  => z_sel <= to_unsigned(2, 5);  z_pre <= '1';
                     when 102 => z_sel <= to_unsigned(3, 5);  z_pre <= '1';
                     when 126 => z_sel <= to_unsigned(4, 5);  z_pre <= '1';
-                    when 150 => z_sel <= to_unsigned(5, 5);  z_pre <= '1';
                     when 174 => z_sel <= to_unsigned(6, 5);  z_pre <= '1';
                     when 198 => z_sel <= to_unsigned(7, 5);  z_pre <= '1';
                     when 222 => z_sel <= to_unsigned(8, 5);  z_pre <= '1';
@@ -431,10 +475,11 @@ begin
                     when 0  => z_fa <= resize(s_gp(12 downto 3), 36); z_fb <= to_unsigned(1049, 16);     -- rings exponent
                     when 1  => z_fa <= to_unsigned(9166, 36);          z_fb <= z_mt;                      -- G
                     when 2  => z_fa <= resize(c_g, 36);                z_fb <= to_unsigned(4138, 16);     -- GL
-                    when 3  => z_fa <= resize(z_a(9 downto 0), 36);    z_fb <= to_unsigned(769, 16);      -- aspect exponent
-                    when 4  => z_fa <= to_unsigned(14746, 36);         z_fb <= z_mt;                      -- KAT
-                    when 5  => z_fa <= to_unsigned(14664, 36);         z_fb <= z_mt;                      -- KAB
-                    when 6  => z_fa <= resize(z_a(9 downto 0), 36);    z_fb <= to_unsigned(1474, 16);     -- |chirp|
+                    when 3  => z_fa <= resize(z_a(9 downto 0), 36);    z_fb <= resize(z_a(9 downto 0), 16); -- bulge d^2
+                    when 4  => z_fa <= resize(z_a(17 downto 2), 36);   z_fb <= c_g;                       -- bulge (d^2 / 4) * G
+                    when 6  =>                                                                            -- |chirp|, two slopes
+                        z_fa <= resize(z_a(9 downto 0), 36);
+                        if z_hi = '1' then z_fb <= to_unsigned(2886, 16); else z_fb <= to_unsigned(1474, 16); end if;
                     when 7  => z_fa <= to_unsigned(192026, 36);        z_fb <= z_mt;                      -- stripes
                     when 8  => z_fa <= resize(c_fsb, 36);              z_fb <= resize(s_ys, 16);          -- x line step
                     when 9  => z_fa <= resize(s_vm, 36);               z_fb <= resize(s_vm, 16);          -- speed^2
@@ -442,9 +487,9 @@ begin
                     when 11 => z_fa <= resize(c_vsq, 36);              z_fb <= to_unsigned(566, 16);      -- roll step
                     when 12 =>                                                                            -- black
                         if s_g5(12 downto 3) > 512 then
-                            z_fa <= resize(s_g5(12 downto 3) - 512, 36); z_fb <= to_unsigned(12634, 16);
+                            z_fa <= resize(s_g5(12 downto 3) - 512, 36); z_fb <= to_unsigned(25268, 16);
                         else
-                            z_fa <= resize(s_g5(12 downto 3), 36);       z_fb <= to_unsigned(5359, 16);
+                            z_fa <= resize(s_g5(12 downto 3), 36);       z_fb <= to_unsigned(6305, 16);
                         end if;
                     when 13 => z_fa <= resize(s_g6(12 downto 3), 36); z_fb <= resize(s_g6(12 downto 3), 16);  -- etch^2
                     when 14 => z_fa <= resize(z_a, 36);                z_fb <= c_g;                       -- etch^2 * G
@@ -477,11 +522,14 @@ begin
                         if c_xb0 > C_XH2 then c_xhs <= c_xb0; else c_xhs <= to_unsigned(C_XH2, 12); end if;
                         if s_twin = '1' then
                             c_ep0 <= to_unsigned(960, 12); c_ep1 <= to_unsigned(1920, 12); c_ep2 <= to_unsigned(2880, 12);
+                            c_ba <= to_unsigned(960, 12); c_bb <= to_unsigned(2880, 12);
                         else
                             c_ep0 <= to_unsigned(C_XC2, 12); c_ep1 <= to_unsigned(4095, 12); c_ep2 <= to_unsigned(4095, 12);
+                            c_ba <= to_unsigned(C_XC2, 12); c_bb <= to_unsigned(C_XC2, 12);
                         end if;
-                        when 22 =>
+                    when 22 =>
                         if c_xb0 + s_xs <= c_xhs then c_h01 <= '1'; else c_h01 <= '0'; end if;
+                        c_bth <= c_ba - c_xhs;
                         if s_pal = '1' then v_k := C_LZ_BASE(16); else v_k := C_LZ_BASE(0); end if;
                         c_ky <= unsigned(v_k(31 downto 22)); c_ku <= unsigned(v_k(21 downto 12)); c_kv <= unsigned(v_k(11 downto 2));
 
@@ -504,46 +552,46 @@ begin
                         else
                             c_ga <= resize(c_g, 17); c_gd <= resize(c_gl, 17);
                         end if;
-                        -- aspect: |k3 - 512|
-                        if s_g3(12 downto 3) >= 512 then z_a <= resize(s_g3(12 downto 3) - 512, 20); z_neg <= '0';
-                        else z_a <= resize(512 - s_g3(12 downto 3), 20); z_neg <= '1'; end if;
-                    when 122 =>
-                        v_e := signed(resize(f_acc(19 downto 10), 11));
-                        if z_neg = '1' then v_e := -v_e; end if;
-                        z_e <= resize(v_e, 12);
-                    when 123 => r_ex_a <= unsigned(z_e(7 downto 0)); z_sh <= z_e(10 downto 8);
-                    when 125 => z_mt <= r_ex_q;
-                    when 146 | 170 =>                 -- KAT / KAB = C * mt >> (15 - sh), sh = -2 .. 1
-                        case to_integer(z_sh) is
-                            when -2     => v_t := resize(f_acc(35 downto 17), 30);
-                            when -1     => v_t := resize(f_acc(35 downto 16), 30);
-                            when 0      => v_t := resize(f_acc(35 downto 15), 30);
-                            when others => v_t := resize(f_acc(35 downto 14), 30);
-                        end case;
-                        if s_zc = 146 then c_kat <= v_t(15 downto 0); else c_kab <= v_t(15 downto 0); end if;
-                    when 171 =>                       -- chirp: |k2 - 512| - 8
-                        if s_g2(12 downto 3) >= 520 then z_a <= resize(s_g2(12 downto 3) - 520, 20); z_neg <= '0';
-                        elsif s_g2(12 downto 3) <= 504 then z_a <= resize(504 - s_g2(12 downto 3), 20); z_neg <= '1';
+                        -- bulge: d = |k3 - 512| - 8 (deadband +-8: exactly the photo there); left = star (c < 0)
+                        if s_g3(12 downto 3) >= 520 then z_a <= resize(s_g3(12 downto 3) - 520, 20); z_neg <= '0';
+                        elsif s_g3(12 downto 3) <= 504 then z_a <= resize(504 - s_g3(12 downto 3), 20); z_neg <= '1';
                         else z_a <= (others => '0'); z_neg <= '0'; end if;
-                    when 194 => c_chg <= f_acc(19 downto 10); c_chn <= z_neg;
-                    when 195 =>                       -- stripes exponent = k1 - 512
+                    when 122 => z_a <= f_acc(19 downto 0);                       -- d^2 (18 bits)
+                    when 146 =>                       -- c = d^2 G / 2^18 (Q16.16 per px^2; 1/530 px^-1 at the photo's G)
+                        v_t := resize(f_acc(31 downto 16), 30);
+                        if z_neg = '1' then c_bc <= (not resize(v_t, 32)) + 1; else c_bc <= resize(v_t, 32); end if;
+                    when 147 => c_bc2 <= c_bc(30 downto 0) & '0';
+                    when 171 =>                       -- chirp: d = |k2 - 512| - 8; slope x1.96 past the photo's d = 252
+                        if s_g2(12 downto 3) >= 520 then v_m := s_g2(12 downto 3) - 520; z_neg <= '0';
+                        elsif s_g2(12 downto 3) <= 504 then v_m := 504 - s_g2(12 downto 3); z_neg <= '1';
+                        else v_m := (others => '0'); z_neg <= '0'; end if;
+                        if v_m > 252 then z_a <= resize(v_m - 252, 20); z_hi <= '1';
+                        else z_a <= resize(v_m, 20); z_hi <= '0'; end if;
+                    when 194 =>                       -- |chirp| Q8 octaves: 362 at the photo, 1069 (4.2) at full
+                        if z_hi = '1' then c_chg <= f_acc(20 downto 10) + 362; else c_chg <= f_acc(20 downto 10); end if;
+                        c_chn <= z_neg;
+                    when 195 =>                       -- stripes exponent = 1.5 (k1 - 512): +-3 octaves
                         v_e := signed(resize(s_g1(12 downto 3), 11)) - 512;
+                        v_e := v_e + shift_right(v_e, 1);
                         r_ex_a <= unsigned(v_e(7 downto 0)); z_sh <= v_e(10 downto 8);
                     when 197 => z_mt <= r_ex_q;
-                    when 218 =>                       -- FSB = 192026 * mt >> (15 - sh), sh = -2 .. 1
+                    when 218 =>                       -- FSB = 192026 * mt >> (15 - sh), sh = -3 .. 2
                         case to_integer(z_sh) is
+                            when -3     => c_fsb <= resize(f_acc(35 downto 18), 22);
                             when -2     => c_fsb <= resize(f_acc(35 downto 17), 22);
                             when -1     => c_fsb <= resize(f_acc(35 downto 16), 22);
                             when 0      => c_fsb <= resize(f_acc(35 downto 15), 22);
-                            when others => c_fsb <= f_acc(35 downto 14);
+                            when 1      => c_fsb <= f_acc(35 downto 14);
+                            when others => c_fsb <= f_acc(34 downto 13);
                         end case;
                     when 242 => c_fs  <= f_acc(31 downto 8);
                     when 266 => c_vsq <= f_acc(17 downto 0);
                     when 290 => c_dfl <= f_acc(28 downto 10);
                     when 314 => c_drl <= f_acc(27 downto 10);
                     when 338 =>
+                        -- black half-width: 0 at k5 = 0, the photo's 6305 at 512, 3x (18914) at 1023
                         if s_g5(12 downto 3) > 512 then c_hk <= to_unsigned(6305, 16) + f_acc(25 downto 10);
-                        else c_hk <= to_unsigned(946, 16) + f_acc(24 downto 9); end if;
+                        else c_hk <= f_acc(24 downto 9); end if;
                     when 362 => z_a <= f_acc(19 downto 0);
                     when 386 => z_a <= f_acc(35 downto 16);
                     when 410 => c_egq <= f_acc(32 downto 20);
@@ -575,6 +623,25 @@ begin
             end loop;
         end if;
     end process p_ctrl;
+
+    ---------------------------------------------------------------------------
+    -- Bulge table fill (vblank zone, zc 160 .. 1185): Q(r) = c r^2 by a second-order DDA,
+    -- Q(r + 1) = Q(r) + D(r), D(r) = c (2r + 1), so no multiplier; written mod 2^32 (Q16.16), the table
+    -- keeps the integer part (Q16 phase, mod one period).  c = 0 fills zeros (the photo).
+    ---------------------------------------------------------------------------
+    p_fill : process(clk)
+    begin
+        if rising_edge(clk) then
+            t_we <= '0';
+            if s_zone = '1' and s_zc = 160 then
+                t_run <= '1'; t_i <= (others => '0'); t_q <= (others => '0'); t_d <= c_bc;
+            elsif t_run = '1' then
+                t_we <= '1'; t_wa <= t_i; t_wd <= t_q(31 downto 16);
+                t_q <= t_q + t_d; t_d <= t_d + c_bc2; t_i <= t_i + 1;
+                if t_i = 1023 then t_run <= '0'; end if;
+            end if;
+        end if;
+    end process p_fill;
 
     ---------------------------------------------------------------------------
     -- Generated avid (parity-locked start 3/4 clocks after the source's avid
@@ -664,8 +731,8 @@ begin
     begin
         if rising_edge(clk) then
             e_zk <= '0';
-            if s_zone = '1' and s_zc = 600 then e_zk <= '1'; end if;
-            if s_zone = '1' and s_zc = 590 then e_ph <= to_unsigned(C_PH0, 24) + c_rl; end if;
+            if s_zone = '1' and s_zc = 1300 then e_zk <= '1'; end if;     -- after the bulge table fill
+            if s_zone = '1' and s_zc = 1290 then e_ph <= to_unsigned(C_PH0, 24) + c_rl; end if;
 
             if e_zk = '1' then
                 e_vy <= (others => '0');
@@ -678,7 +745,7 @@ begin
             end if;
 
             if m_b(0) = '1' then m_acc <= m_acc + m_a; end if;
-            m_a <= m_a(36 downto 0) & '0';
+            m_a <= m_a(38 downto 0) & '0';
             m_b <= '0' & m_b(15 downto 1);
 
             case to_integer(e_lc) is
@@ -689,35 +756,51 @@ begin
                     r_sg_a <= e_vy(18 downto 11);
                     n_s <= not e_ph(23);
                 when 2 =>
-                    m_a <= resize(e_dq, 38); m_acc <= (others => '0');
-                    if e_top = '1' then m_b <= c_kat; else m_b <= c_kab; end if;
+                    m_a <= resize(e_dq, 40); m_acc <= (others => '0');
+                    if e_top = '1' then m_b <= C_KAT; else m_b <= C_KAB; end if;
                 when 4 =>
                     v_g := r_sg_q;
                     if v_g < 0 then v_g := -v_g; e_sgn <= '1'; else e_sgn <= '0'; end if;
                     e_sg <= unsigned(v_g(10 downto 0));
                 when 19 =>
                     e_dy8 <= m_acc(32 downto 12);
-                    m_a <= resize(m_acc(32 downto 12), 38); m_b <= c_g; m_acc <= (others => '0');
+                    m_a <= resize(m_acc(32 downto 12), 40); m_b <= c_g; m_acc <= (others => '0');
+                when 20 =>                    -- bulge index: |y| in field px (e_dy8 is Q8 h), saturated
+                    if e_dy8(20 downto 19) /= "00" then e_ty <= (others => '1'); else e_ty <= e_dy8(18 downto 9); end if;
                 when 36 =>
                     n_dyg <= m_acc(36 downto 8);
-                    m_a <= resize(c_chg, 38); m_b <= resize(e_sg, 16); m_acc <= (others => '0');
+                    m_a <= resize(c_chg, 40); m_b <= resize(e_sg, 16); m_acc <= (others => '0');
                 when 53 =>
-                    v_e := signed(resize(m_acc(20 downto 12), 11));
+                    v_e := signed(resize(m_acc(21 downto 12), 11));
                     if (c_chn xor e_sgn) = '1' then v_e := -v_e; end if;
                     e_e <= v_e;
                 when 54 =>
                     r_el_a <= unsigned(e_e(7 downto 0)); e_sh <= e_e(10 downto 8);
                 when 56 =>
-                    m_a <= resize(c_fs, 38); m_b <= r_el_q; m_acc <= (others => '0');
-                when 73 =>
+                    m_a <= resize(c_fs, 40); m_b <= r_el_q; m_acc <= (others => '0');
+                when 73 =>                    -- step = c_fs * el >> (15 - sh), mod one cycle
                     case to_integer(e_sh) is
-                        when -2     => e_ph <= e_ph + resize(m_acc(37 downto 17), 24);
-                        when -1     => e_ph <= e_ph + resize(m_acc(37 downto 16), 24);
-                        when 0      => e_ph <= e_ph + resize(m_acc(37 downto 15), 24);
-                        when others => e_ph <= e_ph + m_acc(37 downto 14);
+                        when -3     => e_ph <= e_ph + resize(m_acc(39 downto 18), 24);
+                        when -2     => e_ph <= e_ph + resize(m_acc(39 downto 17), 24);
+                        when -1     => e_ph <= e_ph + m_acc(39 downto 16);
+                        when 0      => e_ph <= e_ph + m_acc(38 downto 15);
+                        when 1      => e_ph <= e_ph + m_acc(37 downto 14);
+                        when others => e_ph <= e_ph + m_acc(36 downto 13);
                     end case;
                 when others => null;
             end case;
+
+            -- bulge, vertical part: read c ty^2 from the table for the next line while the pixel path
+            -- leaves the port free (5 clocks after the generated avid falls, or in the zone after the
+            -- line-0 kick); n_qf = c ty^2 - flow, loaded with the line at g_start
+            if (s_gav_sr(0) = '1' and g_avid = '0') or (s_zone = '1' and s_zc = 1340) then
+                y_cnt <= to_unsigned(1, 4);
+            elsif y_cnt /= 0 then
+                y_cnt <= y_cnt + 1;
+            end if;
+            if y_cnt = 5 then t_ysel <= '1'; elsif y_cnt = 6 then t_ysel <= '0'; end if;
+            if y_cnt = 8 then y_q <= t_rq; end if;
+            if y_cnt = 9 then n_qf <= (y_q & x"00") - c_fl; end if;
         end if;
     end process p_line;
 
@@ -748,7 +831,7 @@ begin
                 b_ev <= "00";
                 b_pos <= c_ep0;
                 b_mx <= '0';
-                l_dyg <= n_dyg; l_s <= n_s and not s_flipoff;
+                l_dyg <= n_dyg; l_s <= n_s and not s_flipoff; l_qf <= n_qf;
             elsif g_avid = '1' then
                 b_px <= b_px + 1;
                 b_x  <= b_x1;
@@ -802,8 +885,30 @@ begin
         variable v_c   : unsigned(9 downto 0);
         variable v_o   : unsigned(5 downto 0);
         variable v_act : std_logic;
+        variable v_bd  : signed(12 downto 0);
+        variable v_bt  : unsigned(12 downto 0);
     begin
         if rising_edge(clk) then
+            -- bulge, horizontal part: 2 distances to the fold(s), 3 |x| in field px -> table address
+            -- (twin: the H triangle runs at double rate, so field px = h), 4 table, 5 fabric copy,
+            -- 6 + the line's c ty^2 - flow; added to the phase at 7 in place of the flow
+            q2_da <= signed(resize(b_x, 13)) - signed(resize(c_ba, 13));
+            q2_db <= signed(resize(b_x, 13)) - signed(resize(c_bb, 13));
+            if b_x >= 1920 then q2_sel <= s_twin; else q2_sel <= '0'; end if;
+            if b_x <= c_xhs then q2_hold <= '1'; else q2_hold <= '0'; end if;
+            if q2_hold = '1' then v_bd := signed(resize(c_bth, 13));
+            elsif q2_sel = '1' then v_bd := q2_db;
+            else v_bd := q2_da; end if;
+            v_bt := unsigned(abs(v_bd));
+            if t_ysel = '1' then
+                t_ra <= e_ty;
+            elsif s_twin = '1' then
+                if v_bt(12 downto 10) /= "000" then t_ra <= (others => '1'); else t_ra <= v_bt(9 downto 0); end if;
+            else
+                if v_bt(12 downto 11) /= "00" then t_ra <= (others => '1'); else t_ra <= v_bt(10 downto 1); end if;
+            end if;
+            q5_t <= t_rq;
+            q6_q <= (q5_t & x"00") + l_qf;
             -- 2: t * gain = x term + y term
             p2_pd <= b_p + resize(l_dyg, 30);
             -- 3: luma from the line buffer
@@ -819,8 +924,8 @@ begin
             -- 6: U = t * gain + luma * etch gain; the eye keys the un-etched field (a fixed pupil)
             p6_u <= p5_pd + shift_left(resize(p5_le, 30), 6);
             if p5_pd < C_EYE then p6_eye <= '1'; else p6_eye <= '0'; end if;
-            -- 7: phase (minus the flow)
-            p7_u <= p6_u(23 downto 0) - c_fl;
+            -- 7: phase (+ bulge - flow; exactly "- flow" when the bulge is 0)
+            p7_u <= p6_u(23 downto 0) + q6_q;
             p7_eye <= p6_eye;
             -- 8: distances to the band centres
             v_u16 := p7_u(23 downto 8);
