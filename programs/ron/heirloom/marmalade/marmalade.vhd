@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Marmalade v0.5.0 -- Heirloom #14 (2026-10-21 rebuild), from WIN_20230307_23_36_05.
+-- Marmalade v0.6.0 (phase 2 diag) -- Heirloom #14 (2026-10-21 rebuild), from WIN_20230307_23_36_05.
 --
 -- The photo: a sample-and-hold mosaic run through a nine-zone colourizer, crossed
 -- by a quantized vertical triangle.
@@ -27,19 +27,26 @@
 -- inside every block (the block layout and colours keep the photo's composition);
 -- Osc feeds two slowly drifting triangles into the same input.
 --
---   K1  Cells    cells across, 12 .. 120 (47.7 = the photo)
---   K2  Rows     rows per master cycle, 4 .. 64 (16 = the photo, 73.6 lines)
---   K3  Picture  how hard the camera (Video) or two drifting triangles (Osc) bend the
---                stage stripes, 0 .. +-0.6 stripe cycle (25 % = the default weave)
---   K4  Speed    bipolar (still in the centre): the master rolls, stripes crawl
---   K5  Slew     the S&H slew: hard cells .. the photo .. long rainbow smears
+--   K1  Cells    bipolar, per row: every block row's S&H clock detunes by its own factor
+--                (8 + perm(row)) / 16 of +-1.5 octaves: right = each row finer (x1.7 .. x4.4),
+--                left = each row coarser (x0.6 .. x0.22); centre = the photo's 47.7 cells
+--   K2  Rows     bipolar row cascade: the row clock chirps down the frame (top row = the
+--                photo's 73.6 lines); right = rows shrink to ~8 lines at the bottom, left =
+--                rows swell into slabs; centre = the photo's 16 equal rows
+--   K3  Picture  how hard the camera (Video) or two drifting triangles (Osc) bend the stage
+--                stripes, 0 .. +-1.2 stripe cycle (25 % = the default weave); above 25 % the
+--                source also bends the cell edges, up to +-4.5 cells
+--   K4  Speed    bipolar (still in the centre): the master rolls, stripes crawl (top x3.2)
+--   K5  Slew     bipolar about the photo (50 %): ringing rainbow fringes .. hard cells ..
+--                the photo .. long rainbow smears
 --   K6  Orange   orange mix: none (magenta/cyan/yellow) .. the photo .. burnt
---   S7  Shift    Stepped (the photo) / Straight
+--   S7  Shift    Stepped (the photo) / Drift (each row also slides at its own rate, with K4)
 --   S8  Keys     Warm (the photo) / Cool
---   S9  Stripes  Bunched (FM, the photo) / Even
---   S10 Clocks   One / Two (a second row clock re-picks half the cells)
+--   S9  Tilt     Level (the photo) / Slant (45-degree stripes)
+--   S10 Mirror   Off / On (the mosaic mirrored about the centre)
 --   S11 Source   Video / Osc
---   P12 STRIPES  stripe bands per master cycle: 1 .. 6 (50 %, the photo) .. 21
+--   P12 STRIPES  stripe bands per master cycle 1 .. 6 (50 %, the photo) .. 36, and the band
+--                width: thin bands at 0 % .. the stripes take over the blocks at 100 %
 --
 -- Virtual 1080-line coordinates (timing ID steps; centred grid).  Per-field
 -- constants on one serial multiplier in the vblank zone; a palette engine
@@ -97,12 +104,19 @@ architecture marmalade of program_top is
         end if;
         return unsigned(r(9 downto 0));
     end function;
-    -- the second row clock re-picks the cells whose hash bit is set
-    function f_hb(c : unsigned(5 downto 0)) return std_logic is
-        variable v : unsigned(11 downto 0);
+    -- K1 Cells: each row's share of the detune, (8 + perm) / 16
+    function f_perm(r : unsigned(3 downto 0)) return unsigned is
+        type t_p is array (0 to 15) of integer range 0 to 15;
+        constant C_P : t_p := (5, 12, 1, 9, 14, 3, 10, 7, 0, 13, 6, 2, 11, 15, 4, 8);
     begin
-        v := shift_left(resize(c, 12), 5) + shift_left(resize(c, 12), 2) + resize(c, 12) + 11;
-        return v(3);
+        return to_unsigned(8 + C_P(to_integer(r)), 12);
+    end function;
+    -- S7 Drift: each row's drift rate and direction, -3 .. +3 (never 0)
+    function f_drate(r : unsigned(3 downto 0)) return integer is
+        type t_d is array (0 to 15) of integer range -3 to 3;
+        constant C_D : t_d := (1, -2, 3, -1, 2, -3, 2, -1, 3, -2, 1, -3, 2, -2, 1, -1);
+    begin
+        return C_D(to_integer(r));
     end function;
     -- zone -> palette mode / orange-mix level (zones in level order)
     type t_z4 is array (0 to 8) of unsigned(1 downto 0);
@@ -115,7 +129,9 @@ architecture marmalade of program_top is
     signal s_zt_a : unsigned(9 downto 0) := (others => '0');
     signal s_zt_q : std_logic_vector(3 downto 0) := (others => '0');
     signal s_sw_a : unsigned(9 downto 0) := (others => '0');
-    signal s_sw_q : std_logic_vector(7 downto 0) := (others => '0');
+    signal s_sw_q : std_logic_vector(8 downto 0) := (others => '0');
+    signal s_ex_a : unsigned(7 downto 0) := (others => '0');
+    signal s_ex_q : std_logic_vector(9 downto 0) := (others => '0');
     signal s_sn_a : unsigned(7 downto 0) := (others => '0');
     signal s_sn_q : std_logic_vector(8 downto 0) := (others => '0');
     signal s_an_a : unsigned(6 downto 0) := (others => '0');
@@ -145,24 +161,38 @@ architecture marmalade of program_top is
     signal s_gl_r : unsigned(9 downto 0) := (others => '0');
     signal s_gl_d : signed(10 downto 0) := (others => '0');
     signal s_warm : unsigned(3 downto 0) := (others => '0');
-    signal s_nosh, s_cool, s_even, s_two, s_osc : std_logic := '0';
+    signal s_drift, s_cool, s_tilt, s_mir, s_osc : std_logic := '0';
     signal s_spd : signed(10 downto 0) := (others => '0');
+    signal s_spv : signed(11 downto 0) := (others => '0');           -- K4 curve (x3.2 at the top)
+    signal s_dt, s_dt3 : unsigned(21 downto 0) := (others => '0');   -- S7 drift phase T, 3T (Q16 cells)
     signal s_roll : unsigned(23 downto 0) := (others => '0');
     signal s_crawl : unsigned(15 downto 0) := (others => '0');
     signal s_u0 : unsigned(23 downto 0) := to_unsigned(44876, 24);
-    signal s_t1, s_t2, s_tp : unsigned(19 downto 0) := (others => '0');
-    signal s_cq4 : unsigned(10 downto 0) := to_unsigned(763, 11);
+    signal s_t1, s_tp : unsigned(19 downto 0) := (others => '0');
     signal s_inc : unsigned(13 downto 0) := to_unsigned(1628, 14);
-    signal s_ph0, s_ph0s : unsigned(21 downto 0) := (others => '0');
     signal s_du : unsigned(16 downto 0) := to_unsigned(14244, 17);
-    signal s_rq4 : unsigned(10 downto 0) := to_unsigned(256, 11);
-    signal s_rpi, s_rp2i : unsigned(27 downto 0) := (others => '0');
-    signal s_rp0, s_rp20 : unsigned(27 downto 0) := (others => '0');
-    signal s_nq8 : unsigned(12 downto 0) := to_unsigned(1536, 13);
+    signal s_rpi : unsigned(27 downto 0) := (others => '0');
+    signal s_rp0 : unsigned(27 downto 0) := (others => '0');
+    signal s_nq8 : unsigned(13 downto 0) := to_unsigned(1536, 14);
+    signal s_nqh : unsigned(13 downto 0) := (others => '0');
     signal s_phi_i : unsigned(15 downto 0) := (others => '0');
     signal s_phi0 : unsigned(15 downto 0) := (others => '0');
-    signal s_b : unsigned(16 downto 0) := (others => '0');
-    signal s_pq : unsigned(10 downto 0) := (others => '0');
+    signal s_b : unsigned(17 downto 0) := (others => '0');
+    signal s_pq, s_pql, s_pqh, s_gc : unsigned(11 downto 0) := (others => '0');
+    -- v0.6 per-field terms
+    signal s_gph : unsigned(8 downto 0) := (others => '0');          -- (P12 - 512)+
+    signal s_g2m : unsigned(9 downto 0) := (others => '0');          -- |K2 - 512|
+    signal s_g2n : std_logic := '0';
+    signal s_g3l : unsigned(8 downto 0) := (others => '0');          -- min(K3, 256)
+    signal s_g3h : unsigned(9 downto 0) := (others => '0');          -- (K3 - 256)+
+    signal s_kq : unsigned(20 downto 0) := (others => '0');
+    signal s_kqb, s_drpm : unsigned(15 downto 0) := (others => '0');
+    signal s_drp : unsigned(27 downto 0) := (others => '0');         -- K2 row-clock chirp per line (signed)
+    signal s_e1 : signed(15 downto 0) := (others => '0');            -- K1 detune, Q12 octaves
+    signal s_mb0, s_mb1, s_hm1 : unsigned(11 downto 0) := (others => '0');
+    signal s_bq : unsigned(13 downto 0) := to_unsigned(4096, 14);    -- P12 band width
+    signal s_th1, s_th2, s_th3, s_th4 : unsigned(15 downto 0) := (others => '0');
+    signal s_slope : unsigned(15 downto 0) := (others => '0');       -- S9 Slant, per pixel
     signal s_yoi : unsigned(15 downto 0) := to_unsigned(111, 16);
     signal s_xoi : unsigned(15 downto 0) := to_unsigned(111, 16);
     signal s_odr : unsigned(15 downto 0) := (others => '0');
@@ -207,28 +237,34 @@ architecture marmalade of program_top is
     -- line engine
     ---------------------------------------------------------------------------
     signal e_kick, e_first : std_logic := '0';
-    signal e_st : unsigned(3 downto 0) := (others => '0');
+    signal e_st, e_ret : unsigned(3 downto 0) := (others => '0');
     signal e_u : unsigned(23 downto 0) := (others => '0');
-    signal e_rp, e_rp2 : unsigned(27 downto 0) := (others => '0');
+    signal e_rp, e_rpi : unsigned(27 downto 0) := (others => '0');
     signal e_phl : unsigned(15 downto 0) := (others => '0');
-    signal e_n1p : unsigned(3 downto 0) := (others => '0');
+    signal e_n1p, e_row : unsigned(3 downto 0) := (others => '0');
     signal e_sh, e_neg : std_logic := '0';
     signal e_yo : unsigned(15 downto 0) := (others => '0');
-    signal e_ma : unsigned(24 downto 0) := (others => '0');
-    signal e_mb : unsigned(7 downto 0) := (others => '0');
-    signal e_macc : unsigned(24 downto 0) := (others => '0');
-    signal e_mi : unsigned(3 downto 0) := (others => '0');
+    signal e_ma : unsigned(25 downto 0) := (others => '0');
+    signal e_mb : unsigned(11 downto 0) := (others => '0');
+    signal e_macc : unsigned(25 downto 0) := (others => '0');
+    signal e_mi, e_n : unsigned(3 downto 0) := (others => '0');
+    signal e_ei : signed(3 downto 0) := (others => '0');
+    signal e_inc : unsigned(13 downto 0) := (others => '0');
+    signal e_ph, e_dsel : unsigned(21 downto 0) := (others => '0');
     signal n_phi, n_yo : unsigned(15 downto 0) := (others => '0');
-    signal n_ra, n_rb : unsigned(3 downto 0) := (others => '0');
-    signal n_sh : std_logic := '0';
+    signal n_ra : unsigned(3 downto 0) := (others => '0');
+    signal n_inc : unsigned(13 downto 0) := to_unsigned(1628, 14);
+    signal n_ph0 : unsigned(21 downto 0) := (others => '0');
     signal l_phi, l_yo : unsigned(15 downto 0) := (others => '0');
-    signal l_ra, l_rb : unsigned(3 downto 0) := (others => '0');
-    signal l_sh : std_logic := '0';
+    signal l_ra : unsigned(3 downto 0) := (others => '0');
+    signal l_inc : unsigned(13 downto 0) := to_unsigned(1628, 14);
 
     ---------------------------------------------------------------------------
     -- pixel path
     ---------------------------------------------------------------------------
     signal s_ph : unsigned(21 downto 0) := (others => '0');
+    signal s_mf : std_logic := '0';                                  -- S10 Mirror: past the centre
+    signal s_sx : unsigned(15 downto 0) := (others => '0');          -- S9 Slant x ramp
     type t_u6a is array (natural range <>) of unsigned(5 downto 0);
     signal p_c : t_u6a(1 to 4) := (others => (others => '0'));
     signal p_v : std_logic_vector(1 to 16) := (others => '0');
@@ -240,7 +276,7 @@ architecture marmalade of program_top is
     signal sl_d : unsigned(5 downto 0) := (others => '0');
     signal p8_cur, p9_cur, p10_cur, p11_cur, p12_cur : unsigned(7 downto 0) := (others => '0');
     signal p8_dl, p9_dl, p10_dl : signed(8 downto 0) := (others => '0');
-    signal p10_e : unsigned(7 downto 0) := (others => '0');
+    signal p10_e : signed(8 downto 0) := (others => '0');
     signal p11_lo, p11_hi : signed(13 downto 0) := (others => '0');
     signal p12_pr : signed(17 downto 0) := (others => '0');
     signal p13_zs : unsigned(3 downto 0) := (others => '0');
@@ -258,9 +294,13 @@ architecture marmalade of program_top is
     signal p8_src : unsigned(7 downto 0) := x"80";
     signal p9_d : signed(8 downto 0) := (others => '0');
     signal p10_lo : signed(15 downto 0) := (others => '0');
-    signal p10_hi : signed(14 downto 0) := (others => '0');
+    signal p10_hi : signed(15 downto 0) := (others => '0');
     signal p11_o : signed(20 downto 0) := (others => '0');
-    signal p12_phi : unsigned(15 downto 0) := (others => '0');
+    signal p11_q : unsigned(15 downto 0) := (others => '0');
+    signal p12_phi, p12_t : unsigned(15 downto 0) := (others => '0');
+    -- K3 above 25 %: the source bends the cell edges
+    signal p10c_lo, p10c_hi : signed(15 downto 0) := (others => '0');
+    signal p11c : signed(21 downto 0) := (others => '0');
     signal p13_k : unsigned(2 downto 0) := (others => '0');
     -- output conditioning
     signal s_csu, s_csv : t_u10(0 to 8) := (others => to_unsigned(512, 10));
@@ -287,6 +327,7 @@ begin
         if rising_edge(clk) then
             s_zt_q <= C_ZT(to_integer(s_zt_a));
             s_sw_q <= C_SLW(to_integer(s_sw_a));
+            s_ex_q <= C_EXP(to_integer(s_ex_a));
             s_sn_q <= C_SIN(to_integer(s_sn_a));
             s_an_q <= C_ANC(to_integer(s_an_a));
         end if;
@@ -308,6 +349,9 @@ begin
         variable v_s : signed(10 downto 0);
         variable v_slot : integer range 0 to 31;
         variable v_r : unsigned(31 downto 0);
+        variable v_k : signed(10 downto 0);
+        variable v_o : unsigned(11 downto 0);
+        variable v_d : signed(21 downto 0);
     begin
         if rising_edge(clk) then
             s_xs <= f_vstep_x(registers_in(8)(3 downto 0));
@@ -337,17 +381,22 @@ begin
             if s_zone = '1' and s_zc = 1 then
                 if s_warm /= 15 then s_warm <= s_warm + 1; end if;
                 s_w <= s_wmax; s_wmax <= (others => '0');
-                s_nosh <= registers_in(6)(0);
-                s_cool <= registers_in(6)(1);
-                s_even <= registers_in(6)(2);
-                s_two  <= registers_in(6)(3);
-                s_osc  <= registers_in(6)(4);
+                s_drift <= registers_in(6)(0);   -- S7 Shift: Stepped / Drift
+                s_cool  <= registers_in(6)(1);   -- S8 Keys
+                s_tilt  <= registers_in(6)(2);   -- S9 Tilt: Level / Slant
+                s_mir   <= registers_in(6)(3);   -- S10 Mirror
+                s_osc   <= registers_in(6)(4);   -- S11 Source
                 v_s := signed(resize(unsigned(registers_in(3)), 11)) - 512;      -- K4 Speed
                 if v_s > -8 and v_s < 8 then v_s := (others => '0'); end if;
                 s_spd <= v_s;
-                -- master roll sp x 2^-17 cycles, stripe crawl sp x 2^-14 cycles per field
-                s_roll  <= s_roll + unsigned(resize(shift_left(resize(s_spd, 24), 7), 24));
-                s_crawl <= s_crawl + unsigned(resize(shift_left(resize(s_spd, 16), 2), 16));
+                -- master roll v x 2^-17 cycles, stripe crawl v x 2^-14 cycles per field
+                s_roll  <= s_roll + unsigned(resize(shift_left(resize(s_spv, 24), 7), 24));
+                s_crawl <= s_crawl + unsigned(resize(shift_left(resize(s_spv, 16), 2), 16));
+                -- S7 Drift phase T (Q16 cells): 16 v plus a slow free run, so Drift moves at K4 0
+                v_d := shift_left(resize(s_spv, 22), 4);
+                if s_spv < 0 then v_d := v_d - 512; else v_d := v_d + 512; end if;
+                if s_drift = '0' then s_dt <= (others => '0');
+                else s_dt <= s_dt + unsigned(v_d); end if;
                 -- the Osc picture source drifts on its own (about 15 s per cycle)
                 s_odr <= s_odr + 73;
                 case to_integer(s_xs) is
@@ -358,6 +407,34 @@ begin
             end if;
             if s_zone = '1' and s_zc = 2 then
                 s_u0 <= to_unsigned(44876, 24) - s_roll;
+                -- K4 curve: v0.5's speed within +-128 (the default +128), steeper beyond (x3.2 at the top)
+                if s_spd > 128 then s_spv <= shift_left(resize(s_spd, 12), 2) - 384;
+                elsif s_spd < -128 then s_spv <= shift_left(resize(s_spd, 12), 2) + 384;
+                else s_spv <= resize(s_spd, 12); end if;
+            end if;
+            if s_zone = '1' and s_zc = 3 then
+                s_dt3 <= s_dt + shift_left(s_dt, 1);
+                -- cell centring: (W - centre offset - 2 x the filter delay); shifted rows + 2 K
+                case to_integer(s_xs) is
+                    when 4      => v_o := s_w - 31; s_mb1 <= s_w - 31 + 90;
+                    when 3      => v_o := s_w - 34; s_mb1 <= s_w - 34 + 120;
+                    when others => v_o := s_w - 40; s_mb1 <= s_w - 40 + 180;
+                end case;
+                s_mb0 <= v_o;
+                s_hm1 <= shift_right(v_o, 1) - 1;      -- S10 Mirror turns at the centre cell boundary
+            end if;
+            -- zone clock 28 (after the glides): knob terms for the multiplier
+            if s_zone = '1' and s_zc = 28 then
+                if s_gp > 512 then s_gph <= resize(s_gp - 512, 9); else s_gph <= (others => '0'); end if;
+                if s_g2 >= 512 then s_g2m <= s_g2 - 512; s_g2n <= '0';
+                else s_g2m <= 512 - s_g2; s_g2n <= '1'; end if;
+                if s_g3 > 256 then s_g3l <= to_unsigned(256, 9); s_g3h <= s_g3 - 256;
+                else s_g3l <= resize(s_g3, 9); s_g3h <= (others => '0'); end if;
+            end if;
+            -- K2 chirp gain: right = rows shrink (c up to 8.4 by the bottom), left = rows swell (c to -0.92)
+            if s_zone = '1' and s_zc = 300 then
+                if s_g2n = '0' then s_kqb <= resize(s_kq(20 downto 8), 16);
+                else s_kqb <= resize(s_kq(20 downto 11), 16) - resize(s_kq(20 downto 14), 16); end if;
             end if;
             -- zone clocks 4 .. 27: glides, four clocks per channel on one shared datapath
             if s_zone = '1' and s_zc(9 downto 5) = 0 and s_zc(4 downto 2) /= 0 and s_zc(4 downto 2) /= 7 then
@@ -400,42 +477,35 @@ begin
             if m_ld = '1' then
                 m_acc <= (others => '0');
                 case v_slot is
-                    when 1  => m_a <= resize(s_g1, 32); m_b <= resize(s_g1, 16);
-                    when 2  => m_a <= resize(s_t1, 32); m_b <= to_unsigned(1728, 16);
+                    when 1  => m_a <= resize(s_gph, 32); m_b <= resize(s_gph, 16);
+                    when 2  => m_a <= resize(s_t1, 32); m_b <= to_unsigned(15, 16);
                     when 3  =>
-                        m_a <= resize(s_cq4, 32);
+                        m_a <= to_unsigned(763, 32);     -- cells x 16 (47.7, the photo; K1 detunes per row)
                         case to_integer(s_xs) is
                             when 4      => m_b <= to_unsigned(4368, 16);
                             when 3      => m_b <= to_unsigned(3276, 16);
                             when others => m_b <= to_unsigned(2184, 16);
                         end case;
-                    when 4  =>
-                        m_a <= resize(s_inc, 32);
-                        case to_integer(s_xs) is
-                            -- (W - centre offset - 2 x the 11-pixel filter delay)
-                            when 4      => m_b <= resize(s_w - 31, 16);
-                            when 3      => m_b <= resize(s_w - 34, 16);
-                            when others => m_b <= resize(s_w - 40, 16);
-                        end case;
-                    when 5  =>
-                        m_a <= resize(s_inc, 32);
-                        case to_integer(s_xs) is
-                            when 4      => m_b <= to_unsigned(45, 16);
-                            when 3      => m_b <= to_unsigned(60, 16);
-                            when others => m_b <= to_unsigned(90, 16);
-                        end case;
+                    when 4  => m_a <= resize(s_g2m, 32); m_b <= resize(s_ys, 16);
+                    when 5  => m_a <= resize(s_g3l, 32); m_b <= to_unsigned(77, 16);
                     when 6  => m_a <= resize(s_ys, 32); m_b <= to_unsigned(14244, 16);
-                    when 7  => m_a <= resize(s_g2, 32); m_b <= resize(s_g2, 16);
-                    when 8  => m_a <= resize(s_t2, 32); m_b <= to_unsigned(960, 16);
-                    when 9  => m_a <= resize(s_du, 32); m_b <= resize(s_rq4, 16);
-                    when 10 => m_a <= resize(s_u0, 32); m_b <= resize(s_rq4, 16);
-                    when 11 => m_a <= resize(s_gp, 32); m_b <= resize(s_gp, 16);
-                    when 12 => m_a <= resize(s_tp, 32); m_b <= to_unsigned(5, 16);
-                    when 13 => m_a <= resize(s_du, 32); m_b <= resize(s_nq8, 16);
-                    when 14 => m_a <= resize(s_u0 - 969742, 32); m_b <= resize(s_nq8, 16);
-                    when 15 => m_a <= to_unsigned(4765, 32); m_b <= resize(s_nq8, 16);
-                    when 16 => m_a <= resize(s_ys, 32); m_b <= to_unsigned(111, 16);
-                    when others => m_a <= resize(s_g3, 32); m_b <= to_unsigned(77, 16);
+                    when 7  => m_a <= resize(s_g3h, 32); m_b <= to_unsigned(180, 16);
+                    when 8  => m_a <= resize(s_du, 32); m_b <= to_unsigned(256, 16);     -- 16 rows (the photo)
+                    when 9  => m_a <= resize(s_u0, 32); m_b <= to_unsigned(256, 16);
+                    when 10 => m_a <= resize(s_gp, 32); m_b <= resize(s_gp, 16);
+                    when 11 => m_a <= resize(s_tp, 32); m_b <= to_unsigned(5, 16);
+                    when 12 => m_a <= resize(s_du, 32); m_b <= resize(s_nq8, 16);
+                    when 13 => m_a <= resize(s_u0 - 969742, 32); m_b <= resize(s_nq8, 16);
+                    when 14 => m_a <= to_unsigned(4765, 32); m_b <= resize(s_nq8, 16);
+                    when 15 => m_a <= resize(s_ys, 32); m_b <= to_unsigned(111, 16);
+                    when 16 => m_a <= resize(s_rpi, 32); m_b <= s_kqb;
+                    when others =>
+                        m_a <= resize(s_nq8, 32);
+                        case to_integer(s_xs) is
+                            when 4      => m_b <= to_unsigned(28488, 16);
+                            when 3      => m_b <= to_unsigned(21366, 16);
+                            when others => m_b <= to_unsigned(14244, 16);
+                        end case;
                 end case;
             elsif m_stp = '1' then
                 if m_b(0) = '1' then m_acc <= m_acc + m_a; end if;
@@ -445,30 +515,48 @@ begin
                 v_r := m_acc;
                 case v_slot is
                     when 1  => s_t1 <= v_r(19 downto 0);
-                    when 2  => s_cq4 <= to_unsigned(192, 11) + resize(v_r(30 downto 20), 11);
+                    when 2  => s_nqh <= v_r(23 downto 10);
                     when 3  => s_inc <= v_r(23 downto 10);
-                    when 4  => s_ph0 <= to_unsigned(26 * 65536, 22) - v_r(22 downto 1);
-                    when 5  => s_ph0s <= s_ph0 - v_r(21 downto 0);
+                    when 4  => s_kq <= v_r(20 downto 0);
+                    when 5  => s_pql <= v_r(17 downto 6);
                     when 6  => s_du <= v_r(24 downto 8);
-                    when 7  => s_t2 <= v_r(19 downto 0);
-                    when 8  => s_rq4 <= to_unsigned(64, 11) + resize(v_r(30 downto 20), 11);
-                    when 9  => s_rpi <= v_r(31 downto 4);
-                    when 10 => s_rp0 <= v_r(31 downto 4);
-                    when 11 => s_tp <= v_r(19 downto 0);
-                    when 12 => s_nq8 <= to_unsigned(256, 13) + resize(v_r(22 downto 10), 13);
-                    when 13 => s_phi_i <= v_r(31 downto 16);
-                    when 14 => s_phi0 <= v_r(31 downto 16) - s_crawl;
-                    when 15 =>
-                        if s_even = '1' then s_b <= (others => '0'); else s_b <= v_r(24 downto 8); end if;
-                    when 16 => s_yoi <= v_r(23 downto 8);
-                    when others => s_pq <= v_r(16 downto 6);
+                    when 7  => s_pqh <= v_r(17 downto 6);
+                    when 8  => s_rpi <= v_r(31 downto 4);
+                    when 9  => s_rp0 <= v_r(31 downto 4);
+                    when 10 => s_tp <= v_r(19 downto 0);
+                    when 11 => s_nq8 <= to_unsigned(256, 14) + resize(v_r(22 downto 10), 14) + s_nqh;
+                    when 12 => s_phi_i <= v_r(31 downto 16);
+                    when 13 => s_phi0 <= v_r(31 downto 16) - s_crawl;
+                    when 14 => s_b <= v_r(25 downto 8);
+                    when 15 => s_yoi <= v_r(23 downto 8);
+                    when 16 => s_drpm <= v_r(31 downto 16);
+                    when others => s_slope <= v_r(31 downto 16);
                 end case;
             end if;
-            -- zone clock 780: direct terms
+            -- zone clocks 780 / 781: direct terms
             if s_zone = '1' and s_zc = 780 then
-                s_rp2i <= s_rpi + shift_right(s_rpi, 2) + shift_right(s_rpi, 4);
-                s_rp20 <= s_rp0 + shift_right(s_rp0, 2) + shift_right(s_rp0, 4) + 6207570;
                 s_ss <= s_g5(9 downto 6);
+                -- K1: detune = (K1 - 512) x 12 (Q12 octaves; +-1.5 octaves at the ends)
+                v_k := signed('0' & s_g1) - 512;
+                s_e1 <= shift_left(resize(v_k, 16), 3) + shift_left(resize(v_k, 16), 2);
+                -- K2: the chirp, signed
+                if s_g2n = '1' then s_drp <= to_unsigned(0, 28) - resize(s_drpm, 28);
+                else s_drp <= resize(s_drpm, 28); end if;
+                -- K3: stripe bend (v0.5's slope to the default, steeper beyond) and the cell bend
+                s_pq <= s_pql + s_pqh;
+                s_gc <= resize(shift_left(resize(s_g3h, 12), 1) + resize(s_g3h, 12), 12);
+                -- P12: stripe band width (quantizer step), 2048 .. 4096 (the photo) .. 7162
+                if s_gp > 512 then
+                    s_bq <= to_unsigned(4096, 14) + resize(shift_left(resize(s_gph, 14), 2) + shift_left(resize(s_gph, 14), 1), 14);
+                else
+                    s_bq <= to_unsigned(2048, 14) + shift_left(resize(s_gp, 14), 2);
+                end if;
+            end if;
+            if s_zone = '1' and s_zc = 781 then
+                s_th1 <= resize(s_bq, 16);
+                s_th2 <= shift_left(resize(s_bq, 16), 1);
+                s_th3 <= resize(s_bq, 16) + shift_left(resize(s_bq, 16), 1);
+                s_th4 <= shift_left(resize(s_bq, 16), 2);
             end if;
 
             s_hsync_sr(0) <= data_in.hsync_n; s_vsync_sr(0) <= data_in.vsync_n;
@@ -656,20 +744,25 @@ begin
     g_start <= '1' when (g_sel = '0' and g_rsr(1) = '1') or (g_sel = '1' and g_rsr(2) = '1') else '0';
 
     ---------------------------------------------------------------------------
-    -- Line engine: the next line's stage phase, table rows, shift, Osc row phase
+    -- Line engine: the next line's stage phase, table row, shift, Osc row phase,
+    -- and (v0.6) its cell clock (K1, per row), cell start phase and drift (S7);
+    -- the row clock chirps by K2.  One serial shift-add multiplier (state 15).
     ---------------------------------------------------------------------------
     p_eng : process(clk)
         variable v_fm : unsigned(15 downto 0);
         variable v_phi : unsigned(15 downto 0);
-        variable v_n1, v_n2 : unsigned(3 downto 0);
+        variable v_n1 : unsigned(3 downto 0);
         variable v_sh : std_logic;
         variable v_us : unsigned(23 downto 0);
         variable v_sn : signed(8 downto 0);
+        variable v_e : signed(15 downto 0);
+        variable v_q : unsigned(16 downto 0);
+        variable v_dr : integer range -3 to 3;
     begin
         if rising_edge(clk) then
             e_kick <= '0';
             if s_zone = '1' and s_zc = 1000 then
-                e_u <= s_u0; e_rp <= s_rp0; e_rp2 <= s_rp20; e_phl <= s_phi0;
+                e_u <= s_u0; e_rp <= s_rp0; e_rpi <= s_rpi; e_phl <= s_phi0;
                 e_yo <= to_unsigned(0, 16) - s_odr;
                 e_first <= '1';
                 e_kick <= '1';
@@ -677,7 +770,7 @@ begin
                 e_kick <= '1';
             end if;
             if g_start = '1' then
-                l_phi <= n_phi; l_ra <= n_ra; l_rb <= n_rb; l_sh <= n_sh; l_yo <= n_yo;
+                l_phi <= n_phi; l_ra <= n_ra; l_yo <= n_yo; l_inc <= n_inc;
             end if;
 
             case to_integer(e_st) is
@@ -690,40 +783,92 @@ begin
                 when 1 =>
                     e_st <= to_unsigned(2, 4);
                 when 2 =>
-                    -- |sin| x B, 8 shift-add steps
+                    -- |sin| x B, 8 steps
                     e_neg <= s_sn_q(8);
                     v_sn := signed(s_sn_q);
                     if v_sn < 0 then v_sn := -v_sn; end if;
-                    e_mb <= unsigned(v_sn(7 downto 0));
-                    e_ma <= resize(s_b, 25);
+                    e_mb <= resize(unsigned(v_sn(7 downto 0)), 12);
+                    e_ma <= resize(s_b, 26);
                     e_macc <= (others => '0'); e_mi <= (others => '0');
-                    e_st <= to_unsigned(3, 4);
+                    e_n <= to_unsigned(7, 4); e_ret <= to_unsigned(3, 4);
+                    e_st <= to_unsigned(15, 4);
                 when 3 =>
-                    if e_mb(0) = '1' then e_macc <= e_macc + e_ma; end if;
-                    e_ma <= e_ma(23 downto 0) & '0';
-                    e_mb <= '0' & e_mb(7 downto 1);
-                    if e_mi = 7 then e_st <= to_unsigned(4, 4); end if;
-                    e_mi <= e_mi + 1;
-                when 4 =>
                     -- stage phase = linear phase + FM (the pixel path adds the picture)
                     v_fm := e_macc(23 downto 8);
                     if e_neg = '1' then v_phi := e_phl - v_fm; else v_phi := e_phl + v_fm; end if;
                     n_phi <= v_phi;
-                    v_n1 := e_rp(27 downto 24); v_n2 := e_rp2(27 downto 24);
-                    n_ra <= v_n1;
-                    n_rb <= v_n1 + shift_left(v_n2, 2) + v_n2;
+                    v_n1 := e_rp(27 downto 24);
+                    n_ra <= v_n1; e_row <= v_n1;
                     -- the shift is latched at each row start from the master's square
                     v_sh := e_sh;
                     if e_first = '1' or v_n1 /= e_n1p then
                         v_us := e_u + 6815744;
-                        v_sh := (not v_us(23)) and not s_nosh;
+                        v_sh := not v_us(23);
                     end if;
-                    e_sh <= v_sh; n_sh <= v_sh;
+                    e_sh <= v_sh;
                     n_yo <= e_yo;
                     e_n1p <= v_n1; e_first <= '0';
-                    e_u <= e_u + s_du; e_rp <= e_rp + s_rpi; e_rp2 <= e_rp2 + s_rp2i;
+                    -- K2: the row clock chirps by s_drp per line (0 = the photo's 16 equal rows)
+                    e_u <= e_u + s_du; e_rp <= e_rp + e_rpi; e_rpi <= e_rpi + s_drp;
                     e_phl <= e_phl + s_phi_i; e_yo <= e_yo + s_yoi;
+                    -- K1: E1 = detune x (8 + perm(row)) / 16, 5 steps (signed, modular)
+                    e_ma <= unsigned(resize(s_e1, 26));
+                    e_mb <= f_perm(v_n1);
+                    e_macc <= (others => '0'); e_mi <= (others => '0');
+                    e_n <= to_unsigned(4, 4); e_ret <= to_unsigned(4, 4);
+                    e_st <= to_unsigned(15, 4);
+                when 4 =>
+                    v_e := signed(e_macc(19 downto 4));
+                    s_ex_a <= unsigned(v_e(11 downto 4));
+                    e_ei <= v_e(15 downto 12);
+                    e_st <= to_unsigned(5, 4);
+                when 5 =>
+                    e_st <= to_unsigned(6, 4);
+                when 6 =>
+                    -- this row's cell clock = inc x 2^E1: mantissa (512 .. 1021) x inc, 10 steps
+                    e_ma <= resize(s_inc, 26);
+                    e_mb <= resize(unsigned(s_ex_q), 12);
+                    e_macc <= (others => '0'); e_mi <= (others => '0');
+                    e_n <= to_unsigned(9, 4); e_ret <= to_unsigned(7, 4);
+                    e_st <= to_unsigned(15, 4);
+                when 7 =>
+                    case to_integer(e_ei) is
+                        when 2 | 3 | 4 | 5 | 6 | 7 => v_q := resize(e_macc(23 downto 7), 17);
+                        when 1      => v_q := resize(e_macc(23 downto 8), 17);
+                        when 0      => v_q := resize(e_macc(23 downto 9), 17);
+                        when -1     => v_q := resize(e_macc(23 downto 10), 17);
+                        when -2     => v_q := resize(e_macc(23 downto 11), 17);
+                        when others => v_q := resize(e_macc(23 downto 12), 17);
+                    end case;
+                    if v_q > 16383 then e_inc <= to_unsigned(16383, 14);
+                    else e_inc <= v_q(13 downto 0); end if;
+                    e_st <= to_unsigned(8, 4);
+                when 8 =>
+                    -- centred start phase: inc x (W - offsets [+ 2 x the 90 px shift]) / 2
+                    e_ma <= resize(e_inc, 26);
+                    if e_sh = '1' then e_mb <= s_mb1; else e_mb <= s_mb0; end if;
+                    e_macc <= (others => '0'); e_mi <= (others => '0');
+                    e_n <= to_unsigned(11, 4); e_ret <= to_unsigned(9, 4);
+                    e_st <= to_unsigned(15, 4);
+                when 9 =>
+                    e_ph <= to_unsigned(26 * 65536, 22) - e_macc(22 downto 1);
+                    -- S7 Drift: T x this row's rate (T = 0 when Stepped)
+                    v_dr := f_drate(e_row);
+                    if v_dr = 1 or v_dr = -1 then e_dsel <= s_dt;
+                    elsif v_dr = 2 or v_dr = -2 then e_dsel <= shift_left(s_dt, 1);
+                    else e_dsel <= s_dt3; end if;
+                    e_st <= to_unsigned(10, 4);
+                when 10 =>
+                    if f_drate(e_row) < 0 then n_ph0 <= e_ph - e_dsel; else n_ph0 <= e_ph + e_dsel; end if;
+                    n_inc <= e_inc;
                     e_st <= to_unsigned(0, 4);
+                when 15 =>
+                    -- serial shift-add multiplier: e_macc += e_ma x e_mb, e_n + 1 steps
+                    if e_mb(0) = '1' then e_macc <= e_macc + e_ma; end if;
+                    e_ma <= e_ma(24 downto 0) & '0';
+                    e_mb <= '0' & e_mb(11 downto 1);
+                    if e_mi = e_n then e_st <= e_ret; end if;
+                    e_mi <= e_mi + 1;
                 when others =>
                     e_st <= to_unsigned(0, 4);
             end case;
@@ -734,27 +879,31 @@ begin
     -- Pixel path
     ---------------------------------------------------------------------------
     p_pix : process(clk)
-        variable v_c : unsigned(5 downto 0);
-        variable v_row : unsigned(3 downto 0);
-        variable v_t : unsigned(15 downto 0);
-        variable v_kk : unsigned(3 downto 0);
+        variable v_pa : unsigned(13 downto 0);
+        variable v_kn : unsigned(2 downto 0);
         variable v_v : signed(18 downto 0);
         variable v_z : signed(18 downto 0);
         variable v_tx, v_ty : unsigned(14 downto 0);
     begin
         if rising_edge(clk) then
-            -- 0: cell phase and the Osc x triangle phase (aligned with g_avid)
+            -- 0: cell phase (this line's start phase and cell clock from the line engine;
+            -- S10 Mirror runs it backwards past the centre), the Osc x triangle phase and
+            -- the S9 Slant ramp (aligned with g_avid)
             if g_start = '1' then
-                if l_sh = '1' then s_ph <= s_ph0s; else s_ph <= s_ph0; end if;
+                s_ph <= n_ph0;
+                s_mf <= '0';
                 s_xo <= s_odr;
+                s_sx <= (others => '0');
             elsif g_avid = '1' then
-                s_ph <= s_ph + resize(s_inc, 22);
+                if s_mf = '1' then s_ph <= s_ph - resize(l_inc, 22);
+                else s_ph <= s_ph + resize(l_inc, 22); end if;
+                if g_cnt = s_hm1 and s_mir = '1' then s_mf <= '1'; end if;
                 s_xo <= s_xo + s_xoi;
+                if s_tilt = '1' then s_sx <= s_sx + s_slope; end if;
             end if;
-            -- 1: zone ROM address (the second clock's row for hashed cells)
-            v_c := s_ph(21 downto 16);
-            if f_hb(v_c) = '1' and s_two = '1' then v_row := l_rb; else v_row := l_ra; end if;
-            s_zt_a <= v_row & v_c;
+            -- 1: zone ROM address; K3 above 25 % bends the cell phase by the source
+            v_pa := s_ph(21 downto 8) + unsigned(p11c(21 downto 8));
+            s_zt_a <= l_ra & v_pa(13 downto 8);
             p_v(1) <= g_avid;
             for i in 2 to 16 loop p_v(i) <= p_v(i - 1); end loop;
             -- 2: ROM out; 3: fabric; 4: pad
@@ -772,18 +921,18 @@ begin
             elsif sl_d /= 63 then
                 sl_d <= sl_d + 1;
             end if;
-            -- 8: slew ROM address
+            -- 8: slew ROM address (signed kernel: K5 left of the photo rings)
             s_sw_a <= s_ss & sl_d;
             p8_cur <= sl_cur;
             p8_dl <= signed('0' & sl_cur) - signed('0' & sl_prev);
             -- 9: ROM out; 10: fabric
             p9_cur <= p8_cur; p9_dl <= p8_dl;
             p10_cur <= p9_cur; p10_dl <= p9_dl;
-            p10_e <= unsigned(s_sw_q);
-            -- 11: delta x e, split on the nibbles of e
+            p10_e <= signed(s_sw_q);
+            -- 11: delta x e, split on e (low nibble unsigned, high part signed)
             p11_cur <= p10_cur;
-            p11_lo <= p10_dl * signed('0' & p10_e(3 downto 0));
-            p11_hi <= p10_dl * signed('0' & p10_e(7 downto 4));
+            p11_lo <= p10_dl * signed('0' & std_logic_vector(p10_e(3 downto 0)));
+            p11_hi <= p10_dl * p10_e(8 downto 4);
             -- 12: sum
             p12_cur <= p11_cur;
             p12_pr <= shift_left(resize(p11_hi, 18), 4) + resize(p11_lo, 18);
@@ -806,17 +955,26 @@ begin
             end if;
             -- 9: centred
             p9_d <= signed('0' & p8_src) - 128;
-            -- 10: x Picture, split on the bits of pq
+            -- 10: x Picture, split on the bits of pq; x the cell bend (K3 above 25 %)
             p10_lo <= p9_d * signed('0' & s_pq(5 downto 0));
-            p10_hi <= p9_d * signed('0' & s_pq(10 downto 6));
-            -- 11: offset = d pq / 4 (Q16 stripe cycles)
+            p10_hi <= p9_d * signed('0' & s_pq(11 downto 6));
+            p10c_lo <= p9_d * signed('0' & s_gc(5 downto 0));
+            p10c_hi <= p9_d * signed('0' & s_gc(11 downto 6));
+            -- 11: offset = d pq / 4 (Q16 stripe cycles); line phase + Slant ramp; cell bend (Q16 cells)
             p11_o <= shift_left(resize(p10_hi, 21), 6) + resize(p10_lo, 21);
+            p11_q <= l_phi + s_sx;
+            p11c <= shift_left(resize(p10c_hi, 22), 6) + resize(p10c_lo, 22);
             -- 12: phase
-            p12_phi <= l_phi + unsigned(resize(shift_right(p11_o, 2), 16));
-            -- 13: stage k = min(floor(16 |frac - 1/2|), 4)
-            if p12_phi(15) = '1' then v_t := p12_phi - 32768; else v_t := 32768 - p12_phi; end if;
-            v_kk := v_t(15 downto 12);
-            if v_kk >= 4 then p13_k <= to_unsigned(4, 3); else p13_k <= v_kk(2 downto 0); end if;
+            p12_phi <= p11_q + unsigned(resize(shift_right(p11_o, 2), 16));
+            -- 12b: t = |frac - 1/2|
+            if p12_phi(15) = '1' then p12_t <= p12_phi - 32768; else p12_t <= 32768 - p12_phi; end if;
+            -- 13: stage k = min(floor(t / bq), 4) (bq 4096 = the photo's floor(16 t))
+            v_kn := "000";
+            if p12_t >= s_th1 then v_kn := "001"; end if;
+            if p12_t >= s_th2 then v_kn := "010"; end if;
+            if p12_t >= s_th3 then v_kn := "011"; end if;
+            if p12_t >= s_th4 then v_kn := "100"; end if;
+            p13_k <= v_kn;
 
             -- 14: palette RAM address; 15: RAM out; 16: fabric
             -- black / neutral off the generated avid, so the box sums below resync in every blanking interval

@@ -1,4 +1,4 @@
-# Marmalade - Heirloom #14, rebuilt 2026-10-21 from WIN_20230307_23_36_05.
+# Marmalade - Heirloom #14, rebuilt 2026-10-21 from WIN_20230307_23_36_05; v0.6.0 = phase 2 diag.
 # A sample-and-hold mosaic through a nine-zone orange/magenta colourizer, crossed by
 # quantized stage stripes (cyan / white / grey / dark), half the rows stepped sideways.
 # See marmalade.vhd and SUMMARY.md.
@@ -7,7 +7,7 @@
 processing_delay_clks = 28
 program_id = "com.czartroniks.marmalade"
 program_name = "Marmalade"
-program_version = "0.5.1"
+program_version = "0.6.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -21,9 +21,9 @@ core = "yuv444_30b"
 parameter_id = "rotary_potentiometer_1"
 name_label = "Cells"
 control_mode = "linear"
-display_min_value = 0
+display_min_value = -100
 display_max_value = 100
-initial_value = 589
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
@@ -31,9 +31,9 @@ suffix_label = "%"
 parameter_id = "rotary_potentiometer_2"
 name_label = "Rows"
 control_mode = "linear"
-display_min_value = 0
+display_min_value = -100
 display_max_value = 100
-initial_value = 458
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
@@ -61,7 +61,7 @@ suffix_label = "%"
 parameter_id = "rotary_potentiometer_5"
 name_label = "Slew"
 control_mode = "linear"
-display_min_value = 0
+display_min_value = -100
 display_max_value = 100
 initial_value = 512
 display_float_digits = 0
@@ -80,7 +80,7 @@ suffix_label = "%"
 [[parameter]]
 parameter_id = "toggle_switch_7"
 name_label = "Shift"
-value_labels = ["Stepped", "Straight"]
+value_labels = ["Stepped", "Drift"]
 initial_value_label = "Stepped"
 
 [[parameter]]
@@ -91,15 +91,15 @@ initial_value_label = "Warm"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
-name_label = "Spacing"
-value_labels = ["Bunched", "Even"]
-initial_value_label = "Bunched"
+name_label = "Tilt"
+value_labels = ["Level", "Slant"]
+initial_value_label = "Level"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
-name_label = "Clocks"
-value_labels = ["One", "Two"]
-initial_value_label = "One"
+name_label = "Mirror"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
@@ -118,7 +118,7 @@ display_float_digits = 0
 suffix_label = "%"
 
 [[preset]]
-name = "Default"
+name = "Photo"
 
 [[preset]]
 name = "Photo Osc"
@@ -138,7 +138,26 @@ toggle_switch_8 = 1
 
 [[preset]]
 name = "Big Blocks"
-rotary_potentiometer_1 = 260
-rotary_potentiometer_2 = 200
+rotary_potentiometer_1 = 150
+rotary_potentiometer_2 = 300
 rotary_potentiometer_5 = 800
 linear_potentiometer_12 = 300
+
+[[preset]]
+name = "Cascade"
+toggle_switch_11 = 1
+rotary_potentiometer_1 = 800
+rotary_potentiometer_2 = 1000
+linear_potentiometer_12 = 700
+
+[[preset]]
+name = "Mirror Drift"
+toggle_switch_7 = 1
+toggle_switch_10 = 1
+rotary_potentiometer_4 = 700
+
+[[preset]]
+name = "Ringing"
+rotary_potentiometer_5 = 0
+toggle_switch_9 = 1
+rotary_potentiometer_3 = 700

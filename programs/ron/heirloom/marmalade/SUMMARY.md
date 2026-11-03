@@ -1,10 +1,53 @@
 # Marmalade — a sample-and-hold mosaic through a nine-zone orange colourizer (Heirloom #14)
 
-**v0.5.0 (2026-10-21): rebuilt from the photo, built, NOT flashed.** Source: `photos/WIN_20230307_23_36_05_Pro.jpg`.
-v0.1.0 (hashed Mondrian blocks slid sideways) was judged too abstract. This version measures the photo's
-mechanism and stores its held pattern. The picture is woven into the stage stripes.
-Working files: `.heirloom_work/rb_marmalade/`: `notes.md`, `proto2.py` (float proto), `imodel.py` (integer
-model), `sheet_a.png` / `sheet_b.png` (control sheets), `cmp_final.png`.
+**v0.6.0 FINAL (2026-11-03, phase 2): Ron approved the diag preview as built; it is merged into production.**
+`out/rev_b/ron/heirloom/marmalade.vmprog` repacks the previewed diag bitstreams (the sources are byte-identical; only the
+program_id and name differ). The diag copy stays at `.heirloom_work/rb_marmalade/diag/marmalade_diag/` for a later round. Phase-2 working files: `.heirloom_work/rb_marmalade/p2/` (sweep.py, check.sh, psim.sh, renders).
+v0.5.0 (2026-10-21): rebuilt from the photo `photos/WIN_20230307_23_36_05_Pro.jpg`, built, NOT flashed.
+
+## Phase 2 (v0.6.0)
+Ron left no notes for marmalade (free hand, 2026-11-02). The map follows the phase-2 brief: per-element parameters
+instead of the two global grid scales, about twice the range each side of the photo, bolder switches, more motion,
+and one CV driving related modules (P12 count + band width; K3 stripes + cells). The defaults still draw the v0.5
+picture.
+
+| Was (v0.5) | Now (v0.6.0) | Notes |
+|---|---|---|
+| K1 Cells: 12 .. 120 cells across the whole screen, photo 47.7 at 58 % | **Bipolar, per row**: each row's S&H clock detunes by (8 + perm(row)) / 16 of ±1.5 octaves. Right = every row finer by its own factor (×1.7 .. ×4.4); left = coarser (×0.6 .. ×0.22); centre (default 512) = 47.7 cells | Columns break into staggered fragments. The line engine computes each line's clock (exp2 ROM) and centred start phase, so rows stay centred and the 90 px shift stays 90 px |
+| K2 Rows: 4 .. 64 rows per master, photo 16 at 45 % | **Bipolar cascade**: the row clock chirps down the frame (top row = the photo's 73.6 lines). Right = rows shrink to ~8 lines at the bottom; left = rows swell into slabs (~900 lines). Centre (default 512) = 16 equal rows | Linear chirp of the row increment per line (a perspective plane); same picture at SD / 720p / 1080p in virtual lines |
+| K3 Picture: stripe bend 0 .. ±0.6 cycle | **0 .. ±1.2 cycle** (v0.5's slope up to the 25 % default, steeper above); **above 25 % the source also bends the cell edges**, up to ±4.5 cells | Block edges trace the camera (Video) or wobble with the drifting triangles (Osc); zero cell bend at and below the default |
+| K4 Speed | **Same within ±128 (incl. the default +128), top ×3.25** | Also the S7 Drift rate |
+| K5 Slew: hard .. photo .. smears (left half near-dead) | **Bipolar about the photo**: 0 .. ~30 % ringing (overshoot through the zones beyond the target and back: rainbow fringes), ~31–37 % hard, 50 % the photo, right half smears (unchanged) | Signed 9-bit kernel ROM; rows 8..15 are v0.5's exactly |
+| S7 Shift: Stepped / Straight | **Stepped / Drift** | Drift: every row also slides at its own rate and direction (−3 .. +3 × a phase set by K4, plus a slow free run so it moves at K4 = 0). The 90 px steps stay |
+| S9 Spacing: Bunched / Even | **S9 Tilt: Level / Slant** (renamed) | 45° stripe bands (virtual coordinates); bunching always on |
+| S10 Clocks: One / Two | **S10 Mirror: Off / On** (renamed) | The cell clock runs backwards past the screen centre: the mosaic mirrors about the centre |
+| P12 Stripes: 1 .. 6 .. 21 bands | **1 .. 6 (50 %) .. 36 bands, and the band width**: 25 % of each cycle at 0 % → the photo's 50 % → 87 % at 100 % (the stripes take over the blocks) | Count curve unchanged below 50 %; the stage quantizer compares \|frac − ½\| with four per-field thresholds j · bq, bq 2048 .. 4096 (photo) .. 7162 |
+
+Unchanged: K6 Orange, S8 Keys, S11 Source. K1, K2 and K5 display −100 .. +100 % with the photo at 0.
+Fix: v0.5 started each line's cell phase from the previous line's shift state, so the first line of each shifted row
+band was unshifted (2 lines per master); v0.6 uses the line's own start phase.
+
+Presets: Photo (defaults), Photo Osc, Candy Stripe, Unripe, Big Blocks (K1 150, K2 300, K5 800, P12 300), and new
+Cascade (Osc, K1 800, K2 1000, P12 700), Mirror Drift (S7 Drift, S10 Mirror, K4 700), Ringing (K5 0, S9 Slant, K3 700).
+
+Build (router1, 2026-11-02): HD Analog s1 93.01, SD Analog s1 94.42, HD HDMI s1 92.16, SD HDMI s1 95.17,
+HD Dual s1 94.98, SD Dual s1 96.07 MHz; 6,836–6,854 / 7,680 LC (89 %), 10 / 32 EBR. No pin-skew screen.
+
+Checks: GHDL analyse / elaborate / synth OK; p2/sweep.py (all knobs at RTL widths: no wraps, defaults bit-exact);
+default-frame GHDL 1080p dec 1 Osc render vs v0.5 rtl_osc.png: 98.1 % identical (rest: 1-px shifts of the Osc-tilted
+stripe edges, line-end columns from the v0.5.1 resync, and the shift-toggle rows 145 / 734 fix); one 720p render with
+K1 / K2 / K5 / P12 / K3 extreme plus Slant and Mirror. Drift motion and Video-mode cell bend not simulated.
+
+## Engine changes (v0.6.0)
+- Line engine (one serial shift-add multiplier, ~46 clocks per line): E1 = detune × (8 + perm(row)) / 16; 2^frac(E1)
+  from a 256 × 10 exp ROM; the row's cell clock inc × 2^E1 (14 bits, clamped); the centred start phase
+  26 − inc × (W − offsets [+ 2 × shift]) / 2; the S7 drift T × rate(row). The row increment chirps by drp per line (K2).
+- Pixel path: the cell DDA loads the line's start phase and clock and runs backwards past the centre under S10; the
+  zone ROM address adds the K3 cell bend (split multiply); the stage phase adds the Slant ramp; the quantizer uses
+  four per-field thresholds; the slew multiply takes the signed kernel. Latency 28, pixel depth unchanged (the extra
+  register is in the parallel stripe path).
+- Sequencer: the old K1 / K2 curve and start-phase slots now hold the P12 high-end square, the K2 chirp gain, the
+  split K3 curve and the Slant slope (still 17 slots). The second row clock is gone.
 
 ## Reading of the photo (measured)
 - **One vertical master.** Every vertical structure is locked to a ~1180-line oscillator (about 1.05 frames):
@@ -66,21 +109,18 @@ model), `sheet_a.png` / `sheet_b.png` (control sheets), `cmp_final.png`.
 ## Controls
 | Control | Photo element | Function |
 |---|---|---|
-| K1 Cells | the 40.24 px cell grid | cells across, 12 .. 120 (47.7 = the photo), centred |
-| K2 Rows | the 73.6-line row hold | rows per master cycle, 4 .. 64 (16 = the photo) |
-| K3 Picture | the stripe bands (where the camera enters) | how hard the camera (Video) or the drifting triangles (Osc) bend the stage stripes, 0 .. ±0.6 stripe cycle; 25% default |
-| K4 Speed | the rolling master | bipolar, still in the centre ±8: the master rolls (rows, stripes, shift band and FM move down together; +25% ≈ 1 row/s) and the stripes crawl through the blocks |
-| K5 Slew | the soft edges and slivers | S&H slew 2^(−0.4 s): hard cells .. the photo (dark seam between magenta and amber) .. long rainbow smears |
-| K6 Orange | the marmalade orange mix | 0 = unripe (magenta, cyan, yellow), 50% = the photo, 100% = burnt (zones still distinct) |
-| S7 Shift | the stepped top/bottom bands | Stepped (the photo's 90 px) / Straight |
+| K1 Cells | the 40.24 px cell grid, row by row | bipolar per-row S&H clock detune: centre = 47.7 cells on every row; right = finer by each row's factor (×1.7 .. ×4.4); left = coarser (×0.6 .. ×0.22) |
+| K2 Rows | the 73.6-line row hold | bipolar cascade from the top: centre = 16 equal rows; right = rows shrink to ~8 lines at the bottom; left = rows swell into slabs |
+| K3 Picture | the stripe bands; above 25 % the cell edges | camera (Video) / drifting triangles (Osc) bend the stripes 0 .. ±1.2 cycle (25 % default); above 25 % they also bend the cell edges, up to ±4.5 cells |
+| K4 Speed | the rolling master | bipolar, still in the centre ±8: the master rolls and the stripes crawl; top ×3.25 v0.5; also the S7 Drift rate |
+| K5 Slew | the soft edges and slivers | ringing rainbow fringes (−100 %) .. hard (~−30 %) .. the photo (0) .. long smears (+100 %) |
+| K6 Orange | the marmalade orange mix | 0 = unripe, 50 % = the photo, 100 % = burnt |
+| S7 Shift | the stepped top/bottom bands | Stepped (the photo's 90 px) / Drift (each row also slides at its own speed, with K4) |
 | S8 Keys | the flat yellow / amber / orange blocks | Warm (the photo) / Cool (cyan, blue, violet) |
-| S9 Spacing | the stripe bunching | Bunched (FM, the photo) / Even |
-| S10 Clocks | the row splits | One (the photo) / Two (a second clock at 1.31× re-picks the hashed half of the cells) |
+| S9 Tilt | the stripe bands | Level (the photo) / Slant (45°) |
+| S10 Mirror | the mosaic | Off (the photo) / On (mirrored about the centre) |
 | S11 Source | the camera | Video (default) / Osc |
-| **P12 Stripes** | the stripe bands | 1 band per master at 0 (calm blocks with one band) .. 6 at 50% (the photo) .. 21 at 100% (dense candy stripes through every block) |
-
-K1, K2, K3, K5, K6 and P12 glide (1/8 of the gap per field, ±4 hold). Every control changes the picture at any
-P12 position (`sheet_a.png`, `sheet_b.png`).
+| **P12 Stripes** | the stripe bands | 1 thin band per master (0 %) .. 6 (50 %, the photo) .. 36 at 100 %, bands widening until the stripes take over the blocks |
 
 ## Video
 The photo is synthetic, so the camera is woven into the patch the way an analog artist would patch it: camera
@@ -110,6 +150,7 @@ was dropped.
 - **8 EBR:** zone ROM, 2 slew ROM, sine ROM, 2 anchor ROM, 2 palette RAM.
 
 ## Status
+- **v0.6.0 FINAL 2026-11-03: the phase-2 diag merged into production** (see Phase 2). ROUTER1, 6/6 seed 1: HD Analog 93.01, HD HDMI 92.16, HD Dual 94.98, SD Analog 94.42, SD HDMI 95.17, SD Dual 96.07 MHz; 6,836–6,854 / 7,680 LC (89 %), 10 / 32 EBR. The production vmprog repacks the diag bitstreams Ron previewed, so the seeds above are the ones in it. A source rebuild: `NEXTPNR_ROUTER="--router router1" ./build_heirloom.sh marmalade`.
 - **v0.5.1 built 2026-11-01: output-filter resync fix, NOT flashed.** The output running-sum filters now take neutral input off the generated avid and snap back to neutral once the box is full of blank samples, so a glitched block-RAM / clock sample can no longer leave a permanent wrapped colour offset (fern_diag hardware capture 2026-11-01). Its Y / U / V pre-boxes resync too. Post-route Fmax: HD Analog s1 97.61, SD Analog s1 99.25, HD HDMI s1 97.55, SD HDMI s1 91.81, HD Dual s1 100.52, SD Dual s1 90.13 MHz; 5800-5821 / 7680 LC. Earlier hand-installed HD seeds are gone (new netlist).
 - **v0.5.0 built 2026-10-21 with ROUTER1** (`NEXTPNR_ROUTER="--router router1" ./build_heirloom.sh marmalade`), not
   flashed.
@@ -145,3 +186,14 @@ was dropped.
 - At SD 4:3 only the central 1440 virtual px show, so about 6 cells on each side are cropped. 720p renders the
   same picture as 1080p.
 - The capture's black left border is not drawn.
+
+## Open questions (asked 2026-11-02, still unanswered at sign-off 2026-11-03)
+
+1. Bring back a plain global cell/row count?
+2. Restore any of the dropped options (S7 Straight, S9 Even, the second row clock)?
+
+**Watch on hardware:**
+- Renamed: Spacing -> Tilt, Clocks -> Mirror.
+- No pin-skew seed screening was run. If HD HDMI shows lines, re-seed that config and repack.
+
+For a further round, start a new diag version from `.heirloom_work/rb_marmalade/diag/marmalade_diag/` (`.heirloom_work/diag_build.sh marmalade` builds it).

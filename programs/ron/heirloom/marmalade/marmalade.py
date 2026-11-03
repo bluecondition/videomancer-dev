@@ -18,8 +18,13 @@ Generates marmalade_pkg.vhd from tables measured on the photo (WIN_20230307_23_3
                     pre-compensated for the shell's 13/16 output scale (capped at 940;
                     saturated capped colours get their chroma re-solved).  U = Cr,
                     V = Cb (hardware convention).
-  C_SLW  1024 x 8   slew decay {s(4), d(6)} -> round(255 (1 - a)^d), a = 2^(-0.4 s).
+  C_SLW  1024 x 9   signed slew kernel {s(4), d(6)} (v0.6: K5 is bipolar about the photo):
+                    s 8..15: round(255 (1 - a)^d), a = 2^(-0.4 s) (as v0.5, the photo at s 8);
+                    s 7 / 6: a = 0.2 / 0.4; s 5: hard (255 at d 0, then 0);
+                    s 4 .. 0: ringing, 255 r^d cos(pi d / P) tapered to 0 by d 63 (overshoot
+                    through the zones beyond the target and back: rainbow fringes).
   C_SIN  256 x 9    signed sine, +-255.
+  C_EXP  256 x 10   round(512 * 2^(i/256)): the per-row cell-clock exp2 mantissa (K1 Cells).
 
 Zone order (the colourizer's level order, fitted to the edge slivers):
   0 M0 magenta  1 M1 pink  2 M2 red  3 Of orange key  4 D2 dark orange
@@ -107,13 +112,24 @@ def anc_table():
                 out.append(precomp(A[m][t][min(k, 4)]))
     return out
 
+RING = {0: (0.955, 16), 1: (0.94, 14), 2: (0.92, 12), 3: (0.89, 10), 4: (0.85, 8)}
+
 def slw_table():
     out = []
     for s in range(16):
-        a = 2.0 ** (-0.4 * s)
         for d in range(64):
+            if s in RING:
+                r, P = RING[s]
+                tap = 1.0 if d < 40 else 0.5 * (1 + math.cos(math.pi * (d - 40) / 23))
+                v = int(round(255 * r ** d * math.cos(math.pi * d / P) * tap))
+                out.append(max(-255, min(255, v)) if d < 63 else 0)
+                continue
+            a = {5: 1.0, 6: 0.4, 7: 0.2}.get(s, 2.0 ** (-0.4 * s))
             out.append(int(round(255 * (1 - a) ** d)) if a < 1 else (255 if d == 0 else 0))
     return out
+
+def exp_table():
+    return [int(round(512 * 2.0 ** (i / 256.0))) for i in range(256)]
 
 def sin_table():
     return [int(round(255 * math.sin(2 * math.pi * i / 256))) for i in range(256)]
@@ -140,11 +156,13 @@ def main():
         'package marmalade_pkg is',
         '    type t_zt is array (0 to 1023) of std_logic_vector(3 downto 0);',
         '    type t_anc is array (0 to 127) of std_logic_vector(29 downto 0);',
-        '    type t_slw is array (0 to 1023) of std_logic_vector(7 downto 0);',
+        '    type t_slw is array (0 to 1023) of std_logic_vector(8 downto 0);',
+        '    type t_exp is array (0 to 255) of std_logic_vector(9 downto 0);',
         '    type t_sin is array (0 to 255) of std_logic_vector(8 downto 0);',
         emit('C_ZT', 't_zt', zt_table(), 4, 16),
         emit('C_ANC', 't_anc', anc, 30, 4),
-        emit('C_SLW', 't_slw', slw_table(), 8, 16),
+        emit('C_SLW', 't_slw', slw_table(), 9, 16),
+        emit('C_EXP', 't_exp', exp_table(), 10, 16),
         emit('C_SIN', 't_sin', sin_table(), 9, 16),
         'end package marmalade_pkg;', '',
     ]
