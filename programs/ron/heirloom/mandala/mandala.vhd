@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Mandala v0.5.0 -- Heirloom #6, rebuilt from the photo WIN_20230128_01_06_08.
+-- Mandala v0.6.0 (phase-2 diag) -- Heirloom #6, rebuilt from the photo WIN_20230128_01_06_08.
 --
 -- The photo: a left/right mirrored psychedelic mask -- two eye lobes of nested
 -- rings with red/yellow cores, a brow cusp where the ring systems cross, red
@@ -22,18 +22,25 @@
 -- band-limited stripes).  The video luma (or the Osc) is added into the field,
 -- so the contours bend around the picture.
 --
+-- v0.6.0: the face's elements are patch points.  A region ROM (mandala.py) tags every control point
+-- with an element (eyes, mouth, cheek lenses + brow, forehead lobes + nose bridge, edge + corner red
+-- lobes) and a weight (1/4 .. 1); the line engine adds that element's per-field offset to the control
+-- point before the blend, so each element's contours (and its red key, at 1/8) move on their own,
+-- smoothly.  The offsets: K3 Eyes (static) and five detuned breathing LFOs (K6 above its default).
+--
 --   K1  Flow     stripe drift, bipolar (centre +-8 = still): + rings stream out of the eyes
 --   K2  Width    stripe width: fat bands .. thin lines (8 steps, step 4 = the photo)
---   K3  Blue     the blue glow level, bipolar (centre = the photo)
---   K4  Red      the red lobes' size, bipolar (centre = the photo)
+--   K3  Eyes     the eye ring systems: left = shut (the pits fill, rings collapse), right = wide open (black pupils)
+--   K4  Red      the red lobes' size, bipolar (centre = the photo), +-3 key units
 --   K5  Melt     how far the video (or Osc) bends the contours
---   K6  Breathe  depth of a slow LFO on the field: the eyes and mouth swell and shrink
+--   K6  Breathe  0 .. default: the v0.5 LFO on the whole field; above: deeper, and every element breathes on its
+--                own detuned LFO (eyes 15 s, mouth 20 s, cheeks 11.6 s, forehead 9.7 s, outer lobes 27 s)
 --   S7  Stripes  Green (the photo) / Blue: the stripe and glow channels swap
 --   S8  Lobes    Red (the photo) / Green: the key and stripe channels swap
---   S9  Edge     Soft (the photo) / Hard comparator stripes
+--   S9  Glow     Ramp (the photo) / Bands: the blue glow folds every 2 stripes (blue bands beat the stripes)
 --   S10 Faces    One / Two (a second fold: two masks side by side)
 --   S11 Source   Video / Osc
---   P12 RINGS    stripe density: 0 = a few broad bands, 50 % = the photo, 100 % = 3.2x
+--   P12 RINGS    stripe density: 0 = x0.125 (the rings dissolve into the glow), 50 % = the photo, 100 % = x3.6
 --
 -- Virtual 1080-line geometry (round at SD, 720p and 1080).  Generated avid;
 -- output conditioning (luma box + [1 2 1], chroma box pair [1 2 .. 2 1], luma to ~777)
@@ -133,7 +140,7 @@ architecture mandala of program_top is
 
     -- glides: K2, K3, K4, K5, K6, P12 (Q.3), power up at the defaults
     type t_g is array(0 to 5) of unsigned(12 downto 0);
-    signal s_g : t_g := (to_unsigned(576 * 8, 13), to_unsigned(512 * 8, 13), to_unsigned(512 * 8, 13),
+    signal s_g : t_g := (to_unsigned(608 * 8, 13), to_unsigned(512 * 8, 13), to_unsigned(512 * 8, 13),
                          to_unsigned(400 * 8, 13), to_unsigned(384 * 8, 13), to_unsigned(512 * 8, 13));
     signal gl_k, gl_o, gl_n : unsigned(12 downto 0) := (others => '0');
     signal gl_d : signed(13 downto 0) := (others => '0');
@@ -145,17 +152,18 @@ architecture mandala of program_top is
     -- serial multiplier (per-field products)
     signal q_p : unsigned(4 downto 0) := (others => '0');
     signal q_ld, q_st : std_logic := '0';
-    signal q_wr : std_logic_vector(1 to 5) := (others => '0');
+    signal q_wr : std_logic_vector(1 to 3) := (others => '0');
+    signal q_wre : std_logic := '0';                              -- LFO slots 4..21 store
     signal m_a  : unsigned(19 downto 0) := (others => '0');
     signal m_b  : unsigned(17 downto 0) := (others => '0');
     signal m_h  : unsigned(19 downto 0) := (others => '0');
     signal m_l  : unsigned(17 downto 0) := (others => '0');
 
     -- per-field values
-    signal f_wl    : unsigned(2 downto 0) := to_unsigned(4, 3);
-    signal f_blue  : signed(11 downto 0) := (others => '0');     -- Q9 stripes
+    signal f_wl    : unsigned(3 downto 0) := to_unsigned(9, 4);
+    signal f_eyes  : signed(10 downto 0) := (others => '0');     -- K3: eye offset, Q7 stripes (+ = shut)
     signal f_red   : signed(9 downto 0) := (others => '0');      -- Q7 key units
-    signal f_melt  : unsigned(7 downto 0) := to_unsigned(100, 8);
+    signal f_melt  : unsigned(8 downto 0) := to_unsigned(100, 9);
     signal f_d8    : unsigned(7 downto 0) := to_unsigned(96, 8);
     signal f_p8    : unsigned(7 downto 0) := to_unsigned(128, 8);
     signal f_gain  : unsigned(9 downto 0) := to_unsigned(256, 10); -- Q8
@@ -165,13 +173,24 @@ architecture mandala of program_top is
     signal f_fneg  : std_logic := '0';
     signal f_spd   : unsigned(6 downto 0) := (others => '0');     -- Q9 per field
     signal f_flow  : unsigned(8 downto 0) := (others => '0');     -- Q9 phase (mod 1 stripe)
-    signal f_lph   : unsigned(15 downto 0) := (others => '0');    -- breathe LFO phase
+    signal f_lph   : unsigned(19 downto 0) := (others => '0');    -- breathe LFO phase (16 cycles; low 16 = v0.5's)
+    signal f_sd    : unsigned(7 downto 0) := (others => '0');     -- element breathe depth (K6 above its default)
+    signal f_pht   : unsigned(15 downto 0) := (others => '0');    -- LFO phase (slot temp: common, then each element)
+    -- element offsets (Q7 stripes) in a block RAM indexed by element: 1 eyes (K3 + breathe), 2 mouth, 3 cheeks,
+    -- 4 forehead, 5 outer (breathe); 0, 6, 7 stay 0.  Written by the LFO slots in the vblank zone, read by the
+    -- line engine (never both: no_rw_check)
+    type t_ampram is array (0 to 255) of std_logic_vector(11 downto 0);
+    signal am_ram : t_ampram := (others => (others => '0'));
+    signal am_we  : std_logic := '0';
+    signal am_wa  : unsigned(2 downto 0) := (others => '0');
+    signal am_wd  : std_logic_vector(11 downto 0) := (others => '0');
+    signal am_q   : std_logic_vector(11 downto 0) := (others => '0');
     signal f_la    : unsigned(15 downto 0) := (others => '0');
     signal f_lneg  : std_logic := '0';
     signal f_s9    : unsigned(8 downto 0) := (others => '0');     -- |sin| 0..256
     signal f_off   : signed(11 downto 0) := (others => '0');      -- Q9 field offset
     signal f_ta, f_tb : unsigned(15 downto 0) := (others => '0');
-    signal f_sw7, f_sw8, f_hard, f_tw, f_osc : std_logic := '0';
+    signal f_sw7, f_sw8, f_bands, f_tw, f_osc : std_logic := '0';
 
     -- generated avid
     signal g_hsq, g_hsr, g_avq, g_avr : std_logic := '0';
@@ -194,11 +213,15 @@ architecture mandala of program_top is
     signal e_t8   : unsigned(7 downto 0) := (others => '0');
     signal e_t2   : unsigned(15 downto 0) := (others => '0');
     signal e_base : unsigned(10 downto 0) := (others => '0');
-    signal e_abi  : unsigned(10 downto 0) := (others => '0');
     signal e_w0, e_w1, e_w2 : unsigned(8 downto 0) := (others => '0');
     signal r_ca   : unsigned(10 downto 0) := (others => '0');
     signal cf_q, cf_q2 : std_logic_vector(11 downto 0) := (others => '0');
     signal cr_q, cr_q2 : std_logic_vector(7 downto 0) := (others => '0');
+    -- element offsets: the region ROM is read 2 issues ahead of C_CF / C_CR
+    signal r_ra   : unsigned(10 downto 0) := (others => '0');
+    signal rg_q   : std_logic_vector(4 downto 0) := (others => '0');
+    signal e_lev  : unsigned(1 downto 0) := (others => '0');
+    signal e_asc  : signed(11 downto 0) := (others => '0');
     type t_u2a is array (natural range <>) of unsigned(1 downto 0);
     type t_u6a is array (natural range <>) of unsigned(5 downto 0);
     signal e_tv : std_logic_vector(0 to 4) := (others => '0');
@@ -233,6 +256,7 @@ architecture mandala of program_top is
     attribute no_rw_check : boolean;
     attribute no_rw_check of tf_ram : signal is true;
     attribute no_rw_check of tr_ram : signal is true;
+    attribute no_rw_check of am_ram : signal is true;
 
     -- beam
     signal b_u  : signed(24 downto 0) := (others => '0');
@@ -280,7 +304,7 @@ architecture mandala of program_top is
     signal q13_env, q14_env, q15_env, q16_env : unsigned(4 downto 0) := (others => '0');
     signal q13_bi : unsigned(7 downto 0) := (others => '0');
     signal q13_rx : unsigned(6 downto 0) := (others => '0');
-    signal r_ga : unsigned(9 downto 0) := (others => '0');
+    signal r_ga : unsigned(10 downto 0) := (others => '0');
     signal r_ba : unsigned(7 downto 0) := (others => '0');
     signal r_gq, r_bq : std_logic_vector(7 downto 0) := (others => '0');
     signal q14_r, q15_r, q16_r, q17_r : unsigned(7 downto 0) := (others => '0');
@@ -324,8 +348,17 @@ begin
         if rising_edge(clk) then
             cf_q <= C_CF(to_integer(r_ca));
             cr_q <= C_CR(to_integer(r_ca));
+            rg_q <= C_RG(to_integer(r_ra));
         end if;
     end process p_crom;
+
+    p_amp : process(clk)
+    begin
+        if rising_edge(clk) then
+            if am_we = '1' then am_ram(to_integer(am_wa)) <= am_wd; end if;
+            am_q <= am_ram(to_integer(unsigned(rg_q(4 downto 2))));
+        end if;
+    end process p_amp;
 
     p_tf : process(clk)
     begin
@@ -364,7 +397,9 @@ begin
         variable v_pr : unsigned(37 downto 0);
         variable v_k  : signed(10 downto 0);
         variable v_k3 : signed(12 downto 0);
-        variable v_g3 : unsigned(17 downto 0);
+        variable v_g3 : unsigned(18 downto 0);
+        variable v_md : unsigned(10 downto 0);
+        variable v_st : signed(11 downto 0);
     begin
         if rising_edge(clk) then
             t_kx  <= f_kx(registers_in(8)(3 downto 0));
@@ -408,7 +443,7 @@ begin
                 else f_fneg <= '0'; f_fm <= (others => '0'); end if;
                 f_sw7  <= registers_in(6)(0);
                 f_sw8  <= registers_in(6)(1);
-                f_hard <= registers_in(6)(2);
+                f_bands <= registers_in(6)(2);
                 f_tw   <= registers_in(6)(3);
                 f_osc  <= registers_in(6)(4);
                 -- phases: + flow drifts the rings out of the eyes (phase down)
@@ -453,26 +488,36 @@ begin
             end if;
 
             -- knob curves (settle long before the sequencer reads them)
-            f_wl <= s_g(0)(12 downto 10);
+            f_wl <= s_g(0)(12 downto 9);                                       -- 16 banks, bank 9 = the photo
             v_k := signed(resize(s_g(1)(12 downto 3), 11)) - 512;
-            f_blue <= shift_left(resize(v_k, 12), 1);                          -- +-1024 Q9 = +-2 stripes
+            f_eyes <= -v_k;                                                    -- +512 (shut) .. -511 (open), Q7
             v_k := signed(resize(s_g(2)(12 downto 3), 11)) - 512;
             v_k3 := resize(v_k, 13) + shift_left(resize(v_k, 13), 1);          -- 3x, +-1536
-            f_red <= resize(shift_right(v_k3, 3), 10);                         -- +-192 Q7 = +-1.5 units
-            f_melt <= s_g(3)(12 downto 5);
+            f_red <= resize(shift_right(v_k3, 2), 10);                         -- +-384 Q7 = +-3 units
+            -- Melt: the v0.5 line up to 100 (the default), then 2.5x steeper: 2.5 k - 150 (x1.9 at the top)
+            if s_g(3)(12 downto 5) <= 100 then
+                f_melt <= resize(s_g(3)(12 downto 5), 9);
+            else
+                v_md := shift_left(resize(s_g(3)(12 downto 5), 11), 1) + resize(s_g(3)(12 downto 6), 11);
+                f_melt <= resize(v_md - 150, 9);
+            end if;
             f_d8 <= s_g(4)(12 downto 5);
+            if s_g(4)(12 downto 5) > 96 then f_sd <= s_g(4)(12 downto 5) - 96; else f_sd <= (others => '0'); end if;
             f_p8 <= s_g(5)(12 downto 5);
             if t_b8 = '1' then f_whc <= s_w(11 downto 1) - 1; else f_whc <= s_w(11 downto 1) - 3; end if;
-            f_la <= f_lph;
-            if f_lph(15) = '1' then f_la <= (not f_lph) + 1; f_lneg <= '1'; else f_lneg <= '0'; end if;
+            f_la <= f_pht;                                                     -- the LFO slot's phase, folded
+            if f_pht(15) = '1' then f_la <= (not f_pht) + 1; f_lneg <= '1'; else f_lneg <= '0'; end if;
 
-            -- serial products: slot p = zc/32 (1..5), phase 0 load, 1..18 step, 20 store
+            -- serial products: slot p = zc/32 (1..21), phase 0 load, 1..18 step, 20 store.  Slots 4..21 are the
+            -- LFOs, three each (phase = lph x rate / 16, |sin| = parabola, depth x |sin|): 4..6 the v0.5 common
+            -- LFO (rate 16 = lph itself: bit-exact), then eyes, mouth, cheeks, forehead, outer lobes
             v_p  := to_integer(s_zc(9 downto 5));
             v_ph := to_integer(s_zc(4 downto 0));
             q_p <= s_zc(9 downto 5);
-            if s_zone = '1' and v_p >= 1 and v_p <= 5 and v_ph = 0 then q_ld <= '1'; else q_ld <= '0'; end if;
-            if s_zone = '1' and v_p >= 1 and v_p <= 5 and v_ph >= 1 and v_ph <= 18 then q_st <= '1'; else q_st <= '0'; end if;
-            for k in 1 to 5 loop
+            if s_zone = '1' and v_p >= 1 and v_p <= 21 and v_ph = 0 then q_ld <= '1'; else q_ld <= '0'; end if;
+            if s_zone = '1' and v_p >= 1 and v_p <= 21 and v_ph >= 1 and v_ph <= 18 then q_st <= '1'; else q_st <= '0'; end if;
+            if s_zone = '1' and v_p >= 4 and v_p <= 21 and v_ph = 20 then q_wre <= '1'; else q_wre <= '0'; end if;
+            for k in 1 to 3 loop
                 if s_zone = '1' and v_p = k and v_ph = 20 then q_wr(k) <= '1'; else q_wr(k) <= '0'; end if;
             end loop;
             if q_ld = '1' then
@@ -481,8 +526,16 @@ begin
                     when 1 => m_a <= resize(f_p8, 20);  m_b <= resize(f_p8, 18);
                     when 2 => m_a <= resize(f_whc, 20); m_b <= resize(t_kx, 18);
                     when 3 => m_a <= resize(f_fm, 20);  m_b <= resize(f_fm, 18);
-                    when 4 => m_a <= resize(f_la, 20);  m_b <= resize(to_unsigned(32768, 17) - resize(f_la, 17), 18);
-                    when others => m_a <= resize(f_d8, 20); m_b <= resize(f_s9, 18);
+                    -- LFO rates x16: common 16, eyes 16, mouth 12, cheeks 21, forehead 25, outer 9
+                    when 4 | 7 => m_a <= f_lph; m_b <= to_unsigned(16, 18);
+                    when 10 => m_a <= f_lph; m_b <= to_unsigned(12, 18);
+                    when 13 => m_a <= f_lph; m_b <= to_unsigned(21, 18);
+                    when 16 => m_a <= f_lph; m_b <= to_unsigned(25, 18);
+                    when 19 => m_a <= f_lph; m_b <= to_unsigned(9, 18);
+                    when 5 | 8 | 11 | 14 | 17 | 20 =>
+                        m_a <= resize(f_la, 20); m_b <= resize(to_unsigned(32768, 17) - resize(f_la, 17), 18);
+                    when 6 => m_a <= resize(f_d8, 20); m_b <= resize(f_s9, 18);
+                    when others => m_a <= resize(f_sd, 20); m_b <= resize(f_s9, 18);
                 end case;
             end if;
             if q_st = '1' then
@@ -493,18 +546,35 @@ begin
             end if;
             v_pr := m_h & m_l;
             if q_wr(1) = '1' then
-                v_g3 := resize(v_pr(15 downto 0), 18) + shift_left(resize(v_pr(15 downto 0), 18), 1);   -- 3 p^2
-                f_gain <= to_unsigned(64, 10) + resize(v_g3(17 downto 8), 10);
+                v_g3 := shift_left(resize(v_pr(15 downto 0), 19), 3) - resize(v_pr(15 downto 0), 19);   -- 7 p^2
+                f_gain <= to_unsigned(32, 10) + resize(v_g3(18 downto 9), 10);                        -- 0.125 + 3.5 p^2
+            end if;
+            am_we <= '0';
+            if q_wre = '1' then
+                case to_integer(q_p) is
+                    when 4 | 7 | 10 | 13 | 16 | 19 => f_pht <= v_pr(19 downto 4);      -- (lph x rate) / 16 mod 1 cycle
+                    when 5 | 8 | 11 | 14 | 17 | 20 =>
+                        if v_pr(29 downto 20) > 256 then f_s9 <= to_unsigned(256, 9); else f_s9 <= v_pr(28 downto 20); end if;
+                    when 6 =>                                                          -- the v0.5 breathe offset
+                        if f_lneg = '1' then f_off <= -signed(resize(v_pr(16 downto 6), 12));
+                        else f_off <= signed(resize(v_pr(16 downto 6), 12)); end if;
+                    when others =>
+                        v_st := signed(resize(v_pr(15 downto 7), 12));                 -- sd x |sin| / 128: 0 .. 318
+                        if f_lneg = '1' then v_st := -v_st; end if;
+                        if q_p = 9 then v_st := v_st + resize(f_eyes, 12); end if;     -- eyes: + K3
+                        am_we <= '1'; am_wd <= std_logic_vector(v_st);
+                        case to_integer(q_p) is
+                            when 9  => am_wa <= to_unsigned(1, 3);
+                            when 12 => am_wa <= to_unsigned(2, 3);
+                            when 15 => am_wa <= to_unsigned(3, 3);
+                            when 18 => am_wa <= to_unsigned(4, 3);
+                            when others => am_wa <= to_unsigned(5, 3);
+                        end case;
+                end case;
             end if;
             if q_wr(2) = '1' then f_u0 <= -signed(resize(v_pr(23 downto 0), 25)); end if;
             if q_wr(3) = '1' then f_spd <= v_pr(17 downto 11); end if;
-            if q_wr(4) = '1' then
-                if v_pr(29 downto 20) > 256 then f_s9 <= to_unsigned(256, 9); else f_s9 <= v_pr(28 downto 20); end if;
-            end if;
-            if q_wr(5) = '1' then
-                if f_lneg = '1' then f_off <= -signed(resize(v_pr(16 downto 6), 12));
-                else f_off <= signed(resize(v_pr(16 downto 6), 12)); end if;
-            end if;
+
 
             s_gav_sr(0) <= g_avid;
             for i in 1 to C_LAT - 1 loop s_gav_sr(i) <= s_gav_sr(i - 1); end loop;
@@ -571,10 +641,12 @@ begin
         variable v_q0 : signed(12 downto 0);
         variable v_q2 : signed(13 downto 0);
         variable v_w  : unsigned(9 downto 0);
+        variable v_cf : signed(12 downto 0);
+        variable v_cr : signed(9 downto 0);
     begin
         if rising_edge(clk) then
-            -- kick
-            if s_zone = '1' and s_zc = 200 then
+            -- kick (line 0 after the last per-field slot, so the element offsets are settled)
+            if s_zone = '1' and s_zc = 704 then
                 e_V <= (others => '0'); e_wb <= '0'; e_st <= to_unsigned(1, 3);
             elsif data_in.avid = '1' and s_avq = '0' then
                 r_bank <= e_wb; e_wb <= not e_wb;
@@ -598,23 +670,24 @@ begin
                     e_w2 <= v_w(8 downto 0);
                 when 4 =>
                     e_w0 <= to_unsigned(128, 9) - resize(e_t8, 9) + e_w2;
+                    r_ra <= e_base;                                  -- region look-ahead: issue 0
                 when 5 =>
                     e_w1 <= to_unsigned(256, 9) - e_w0 - e_w2;
-                    e_iss <= '1'; e_i <= (others => '0'); e_r <= (others => '0'); e_abi <= e_base;
+                    e_iss <= '1'; e_i <= (others => '0'); e_r <= (others => '0'); r_ca <= e_base + 85;
+                    r_ra <= r_ra + 43;                               -- issue 1
                 when others => null;
             end case;
 
             -- issue: 43 knots x 3 rows
             e_tv(0) <= e_iss; e_tr(0) <= e_r; e_ti(0) <= e_i;
+            -- addresses step by row: +43, +43, then -85 to the next knot's row 0.  r_ca (C_CF / C_CR) takes the
+            -- issue of row e_r (preloaded base + 85, so the first -85 lands on base); the region address r_ra
+            -- runs two issues ahead (its row is e_r + 2: back to row 0 when e_r = 1).
             if e_iss = '1' then
-                case to_integer(e_r) is
-                    when 0 => r_ca <= e_abi;
-                    when 1 => r_ca <= e_abi + 43;
-                    when others => r_ca <= e_abi + 86;
-                end case;
+                if e_r = 0 then r_ca <= r_ca - 85; else r_ca <= r_ca + 43; end if;
+                if e_r = 1 then r_ra <= r_ra - 85; else r_ra <= r_ra + 43; end if;
                 if e_r = 2 then
                     e_r <= (others => '0');
-                    e_abi <= e_abi + 1;
                     if e_i = 42 then e_iss <= '0'; else e_i <= e_i + 1; end if;
                 else
                     e_r <= e_r + 1;
@@ -624,7 +697,23 @@ begin
             for k in 1 to 4 loop
                 e_tv(k) <= e_tv(k - 1); e_tr(k) <= e_tr(k - 1); e_ti(k) <= e_ti(k - 1);
             end loop;
-            cf_q2 <= cf_q; cr_q2 <= cr_q;
+            -- element offset: region code (ROM out 2 issues early) -> the element's per-field offset (Q7) ->
+            -- x weight 1/4 .. 1 -> added to the control point as it leaves its ROM; the key gets 1/8 of it,
+            -- clamped to +-127 (beyond that the key is saturated anyway; keeps P0 inside 10 bits)
+            -- (am_q = the element's offset, read from am_ram by the region code: p_amp)
+            e_lev <= unsigned(rg_q(1 downto 0));
+            case to_integer(e_lev) is
+                when 0 => e_asc <= shift_right(signed(am_q), 2);
+                when 1 => e_asc <= shift_right(signed(am_q), 1);
+                when 2 => e_asc <= shift_right(signed(am_q), 1) + shift_right(signed(am_q), 2);
+                when others => e_asc <= signed(am_q);
+            end case;
+            v_cf := resize(signed(cf_q), 13) + resize(e_asc, 13);              -- |sum| <= 1442: fits 12 bits
+            cf_q2 <= std_logic_vector(v_cf(11 downto 0));
+            v_cr := resize(signed(cr_q), 10) + resize(shift_right(e_asc, 3), 10);
+            if v_cr > 127 then cr_q2 <= std_logic_vector(to_signed(127, 8));
+            elsif v_cr < -127 then cr_q2 <= std_logic_vector(to_signed(-127, 8));
+            else cr_q2 <= std_logic_vector(v_cr(7 downto 0)); end if;
             case to_integer(e_tr(1)) is
                 when 0 => e_wc <= e_w0;
                 when 1 => e_wc <= e_w1;
@@ -790,7 +879,7 @@ begin
             q9_fa <= shift_left(resize(q8_fah, 23), 4) + resize(q8_fal, 23) + shift_left(resize(q8_f0, 23), 8);
             q9_fb <= shift_left(resize(q8_fbh, 23), 4) + resize(q8_fbl, 23);
             q9_fr <= resize(q8_r0, 12) + resize(shift_right(q8_ra, 4), 12) + resize(shift_right(q8_rb, 4), 12);
-            q9_m <= q8_src * signed('0' & f_melt);
+            q9_m <= resize(q8_src * signed('0' & f_melt), 19);
             -- 10: F (Q9 stripes); offset = breathe + melt
             q10_f <= resize(shift_right(q9_fa + q9_fb, 8), 16);
             q10_fr <= q9_fr;
@@ -803,7 +892,7 @@ begin
             q12_gh <= resize(q11_f * signed('0' & f_gain(9 downto 5)), 22);
             q12_gl <= resize(q11_f * signed('0' & f_gain(4 downto 0)), 22);
             q12_es <= q11_f + 922;
-            q12_bs <= q11_f + resize(f_blue, 16) + 512;
+            q12_bs <= q11_f + 512;
             q12_rx <= q11_fr + 38;
             -- 13: Fg; clamps
             q13_fg <= shift_left(resize(q12_gh, 27), 5) + resize(q12_gl, 27);
@@ -815,22 +904,21 @@ begin
             else q13_bi <= unsigned(v_t(7 downto 0)); end if;
             if q12_rx < 0 then q13_rx <= (others => '0'); elsif q12_rx > 76 then q13_rx <= to_unsigned(76, 7);
             else q13_rx <= unsigned(q12_rx(6 downto 0)); end if;
-            -- 14: stripe phase -> pulse ROM address (width & phase); ramp ROM address; red key x 27 / 8
+            -- 14: stripe phase -> pulse ROM address (width & phase); ramp ROM address (Bands: folded every
+            -- 2 stripes, 255 - x = not x); red key x 27 / 8
             v_ph := unsigned(q13_fg(16 downto 8)) + f_flow;
             r_ga <= f_wl & v_ph(8 downto 2);
-            r_ba <= q13_bi;
+            if f_bands = '1' and q13_bi(5) = '1' then r_ba <= not (q13_bi(4 downto 0) & "000");
+            elsif f_bands = '1' then r_ba <= q13_bi(4 downto 0) & "000";
+            else r_ba <= q13_bi; end if;
             v_rx := shift_left(resize(q13_rx, 12), 4) + shift_left(resize(q13_rx, 12), 3)
                     + shift_left(resize(q13_rx, 12), 1) + resize(q13_rx, 12);
             if v_rx(11 downto 3) > 255 then q14_r <= (others => '1'); else q14_r <= v_rx(10 downto 3); end if;
             q14_env <= q13_env;
             -- 15: ROM outputs (block RAM)
             q15_r <= q14_r; q15_env <= q14_env;
-            -- 16: fabric copy; Hard edge
-            if f_hard = '1' then
-                if r_gq(7) = '1' then q16_pu <= (others => '1'); else q16_pu <= (others => '0'); end if;
-            else
-                q16_pu <= unsigned(r_gq);
-            end if;
+            -- 16: fabric copy
+            q16_pu <= unsigned(r_gq);
             q16_b <= unsigned(r_bq); q16_r <= q15_r; q16_env <= q15_env;
             -- 17: G = pulse x envelope
             v_g := q16_pu * (resize(q16_env, 6) + 1);

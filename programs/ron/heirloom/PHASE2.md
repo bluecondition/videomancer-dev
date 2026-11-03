@@ -208,7 +208,7 @@ Commit the row along with the program's own files.
 | lotus | not started | | |
 | lozenge | **done v0.6.0** (diag merged into production 2026-11-03) | v0.6.0 | Ron 11-03: "lozenge diag, approved"; merged unchanged, production vmprog = the approved diag bitstreams repacked (both open questions settled as built: Bulge replaces Aspect, the star side stays uncapped with the quatrefoil at 0). Earlier: no Ron notes (free hand, 2026-11-02 batch). v0.6.0 diag (production v0.5.1 untouched): K3 Aspect -> Bulge (quadratic shaper on both triangles, c*(tx^2+ty^2), square law: left = 4-point stars whose rings widen outward and fold back, 0 = quatrefoil; 512 = the photo, bit-exact; right = round lens / oval rings crowding outward; c tracks the ring gain so P12 keeps the shape; per-field 1024-entry c*r^2 table filled by a DDA in vblank, read by \|x\| in the pixel path and by \|y\| in hblank, 4 EBR, no multipliers); K1 Stripes x1/8..x8; K2 Chirp to 3x the photo's squeeze (two-slope, photo at 772); K5 Black 0 (no black, navy rings) .. 3x; presets re-aimed + Quatrefoil / Rounds / No Black / Star Twins. GHDL: default frame byte-identical to v0.5, Bulge frame bit-exact with the model. 93 % LC, 19 EBR, router1 6/6 seed 1 (HD 82.9 / 83.1 / 81.8 MHz); preview out/rev_b/ron/_diag/lozenge_diag_v0.6.0.vmprog |
 | magma | not started | | |
-| mandala | not started | | |
+| mandala | done v0.6.0 | v0.6.0 | No Ron notes (free hand, 2026-11-02 batch). v0.6.0 (diag previewed, then merged): the face's elements become patch points: a region ROM tags the 43x46 control points (eyes / mouth / cheeks + brow / forehead + nose bridge / outer lobes, soft 1/4..1 weights) and the line engine adds a per-element offset before the blend; K3 Blue -> Eyes (+-4 stripes: shut .. black pupils); K6 Breathe above its default deepens and drives five detuned element LFOs (9.7-27 s); K2 Width 16 banks 0.12..8 (default 608); P12 x0.125..x3.6; K4 Red +-3; K5 Melt x1.9 at the top; S9 Edge -> Glow Ramp / Bands. Defaults bit-exact with v0.5 (model, three LFO phases); 3 GHDL renders match the model at 98.5-98.7 %. First build 98.5 % LC, slimmed with no feature lost to 96 % LC, 27 EBR, router2 (HD Analog s2, rest s1; HD HDMI 76.92 MHz). Ron 11-03: approved as built ("finalize"); merged into production. The production vmprog repacks the previewed diag bitstreams. Open, unanswered: the Blue level back on a knob? per-element breathing at K6's default? |
 | marmalade | not started | | |
 | medallion | not started | | |
 | ovals | not started | | |
@@ -279,7 +279,7 @@ Commit the row along with the program's own files.
 | [lotus](lotus/SUMMARY.md) | v0.5.0 | 93 % (tight) | 22 | router1 | HD Dual seed 2 | oscillator/field |
 | [lozenge](lozenge/SUMMARY.md) | v0.5.0 | 84 % (room) | 15 | router1 | 6/6 seed 1 | oscillator/field |
 | [magma](magma/SUMMARY.md) | v0.5.0 | 92 % (tight) | 22 | router1 | 6/6 seed 1 | oscillator/field |
-| [mandala](mandala/SUMMARY.md) | v0.5.0 | 92 % (tight) | 21 | router2 | 6/6 seed 1 | measured field |
+| [mandala](mandala/SUMMARY.md) | v0.6.0 | 96 % (**FULL**) | 27 | router2 | HD Analog seed 2 | measured field |
 | [marmalade](marmalade/SUMMARY.md) | v0.5.0 | 76 % (room) | 8 | router1 | 6/6 seed 1 | oscillator/field |
 | [medallion](medallion/SUMMARY.md) | v0.5.0 | 82 % (room) | 14 | router2 | HD Analog/HDMI seed 2 | oscillator/field |
 | [ovals](ovals/SUMMARY.md) | v0.5.1 | 99.6 % (**FULL**) | 15 | router2 | HD Dual seed 2 | oscillator/field |

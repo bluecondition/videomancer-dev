@@ -1,18 +1,19 @@
-# Mandala - Heirloom #6, v0.5.0 (2026-10-21): rebuilt from the photo WIN_20230128_01_06_08.
+# Mandala - Heirloom #6, v0.6.0 (phase-2 diag, 2026-11-02): rebuilt from the photo WIN_20230128_01_06_08.
 # A mirrored psychedelic mask: one smooth field drives three channels -- fine contour stripes (G),
-# a blue glow ramp (B) and a red key (R).  See mandala.vhd and SUMMARY.md.
+# a blue glow ramp (B) and a red key (R).  v0.6.0: the eyes, mouth, cheeks, forehead and outer lobes
+# are separate elements (K3 Eyes, per-element breathing on K6).  See mandala.vhd and SUMMARY.md.
 
 [program]
 processing_delay_clks = 28
 program_id = "com.czartroniks.mandala"
 program_name = "Mandala"
-program_version = "0.5.1"
+program_version = "0.6.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Mirror", "Color", "Render"]
 program_type = "processing"
-description = "Mirrored psychedelic mask: fine contour stripes, blue glow and red lobes from one field; video bends the rings."
+description = "Mirrored psychedelic mask of contour rings; eyes, mouth, cheeks and lobes move as separate elements; video bends rings."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
@@ -32,13 +33,13 @@ name_label = "Width"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 576
+initial_value = 608
 display_float_digits = 0
 suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
-name_label = "Blue"
+name_label = "Eyes"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
@@ -90,9 +91,9 @@ initial_value_label = "Red"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
-name_label = "Edge"
-value_labels = ["Soft", "Hard"]
-initial_value_label = "Soft"
+name_label = "Glow"
+value_labels = ["Ramp", "Bands"]
+initial_value_label = "Ramp"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
@@ -117,18 +118,18 @@ display_float_digits = 0
 suffix_label = "%"
 
 [[preset]]
-name = "Mandala"
+name = "Photo"
 
 [[preset]]
 name = "Broad Bands"
 linear_potentiometer_12 = 0
-rotary_potentiometer_2 = 300
+rotary_potentiometer_2 = 480
 
 [[preset]]
 name = "Moire Climax"
 linear_potentiometer_12 = 1023
 rotary_potentiometer_1 = 760
-rotary_potentiometer_2 = 900
+rotary_potentiometer_2 = 800
 
 [[preset]]
 name = "Gold Mask"
@@ -139,3 +140,19 @@ rotary_potentiometer_6 = 700
 name = "Twin Masks"
 toggle_switch_10 = 1
 toggle_switch_8 = 1
+
+[[preset]]
+name = "Wide Eyes"
+rotary_potentiometer_3 = 1023
+rotary_potentiometer_6 = 600
+
+[[preset]]
+name = "Banded Glow"
+toggle_switch_9 = 1
+rotary_potentiometer_2 = 700
+
+[[preset]]
+name = "Living Mask"
+rotary_potentiometer_6 = 1023
+rotary_potentiometer_3 = 380
+rotary_potentiometer_5 = 700
