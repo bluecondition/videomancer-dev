@@ -200,7 +200,7 @@ Commit the row along with the program's own files.
 | idol | not started | | |
 | jukebox | not started | | |
 | kiln | not started | | |
-| lava | not started | | |
+| lava | **done v0.6.0** (diag merged into production 2026-11-03) | v0.6.0 | Ron 11-03 (on the v0.6.0 diag): "I like it the way it is"; merged unchanged, production vmprog = the approved diag bitstreams repacked (both open questions settled as built: Camera ground stays, the comb deepens with Drip). Earlier: no Ron notes (free hand, 2026-11-02 batch). v0.6.0 diag (production v0.5.1 untouched): K1 Columns x0.25..x4 exp (photo 50 %); K2 Bend -1..3 (negative = valley; Bend now per warp knot in the line engine); K3 Rows -> per-band heights, bipolar cascade with the outline fixed (per-field remap RAM t + c*t(1034 - t)/1034, c +-0.98; left = worms swell, right = web / blobs / scallops swell); K4 Speed x2 per step (default 560 = photo drift); K5 Ripple -> Drip (per-drop tongues down / arches up, each drop its own breathing length, on a per-field 48-knot table added in the line engine; the comb rides 2.5 -> 10 px); K6 Melt x2 per step (default 100 = photo); S8 Ground Black -> Camera (camera luma in violet / Osc clouds). Default frame bit-exact with v0.5.1 (GHDL raw diff 0). First design ~98 % LC; fitted by moving Drip and Bend off the pixel path, cheaper curves, latency 36 -> 32 (output copies, even change keeps U/V parity) and a pre-registered Mirror turn; the ground-stripe oscillator was dropped for fit. 94.6 % LC, 26 EBR, router2 (HD HDMI s2, SD Dual s2, rest s1); preview out/rev_b/ron/_diag/lava_diag_v0.6.0.vmprog |
 | lotus | not started | | |
 | lozenge | not started | | |
 | magma | not started | | |

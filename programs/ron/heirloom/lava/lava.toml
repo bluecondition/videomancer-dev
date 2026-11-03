@@ -1,19 +1,19 @@
-# Lava - Heirloom #43, v0.5.0 (2026-10-27): rebuilt from the photo WIN_20230605_01_14_56.
+# Lava - Heirloom #43, v0.6.0 (2026-11-02, phase 2 diag): rebuilt from the photo WIN_20230605_01_14_56.
 # A glossy red lava sheet - worms, a zigzag rim, olive diamonds, a white web, rimmed blobs - hangs over violet
 # stripes and bends up into stepped drapes on the left.  One fitted oscillator period through a fitted warp.
 # See lava.vhd, lava.py (fitted data) and SUMMARY.md.
 
 [program]
-processing_delay_clks = 36
+processing_delay_clks = 32
 program_id = "com.czartroniks.lava"
 program_name = "Lava"
-program_version = "0.5.1"
+program_version = "0.6.0"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
 categories = ["Render", "Organic", "Pattern"]
 program_type = "processing"
-description = "A glossy red lava sheet of worms, diamonds and webs bends into drapes over violet stripes; Flow pours it."
+description = "A glossy red lava sheet of worms, diamonds and webs drapes and drips over violet stripes; Flow pours it."
 hardware_compatibility = ["rev_b"]
 core = "yuv444_30b"
 
@@ -21,9 +21,9 @@ core = "yuv444_30b"
 parameter_id = "rotary_potentiometer_1"
 name_label = "Columns"
 control_mode = "linear"
-display_min_value = 50
-display_max_value = 200
-initial_value = 341
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
@@ -31,21 +31,21 @@ suffix_label = "%"
 parameter_id = "rotary_potentiometer_2"
 name_label = "Bend"
 control_mode = "linear"
-display_min_value = 0
-display_max_value = 160
-initial_value = 650
+display_min_value = -100
+display_max_value = 100
+initial_value = 512
 display_float_digits = 0
-suffix_label = "%"
+suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
 name_label = "Rows"
 control_mode = "linear"
-display_min_value = 60
-display_max_value = 160
-initial_value = 409
+display_min_value = -100
+display_max_value = 100
+initial_value = 512
 display_float_digits = 0
-suffix_label = "%"
+suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
@@ -53,19 +53,19 @@ name_label = "Speed"
 control_mode = "linear"
 display_min_value = -100
 display_max_value = 100
-initial_value = 600
+initial_value = 560
 display_float_digits = 0
 suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
-name_label = "Ripple"
+name_label = "Drip"
 control_mode = "linear"
-display_min_value = 0
+display_min_value = -100
 display_max_value = 100
-initial_value = 320
+initial_value = 512
 display_float_digits = 0
-suffix_label = "%"
+suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
@@ -73,7 +73,7 @@ name_label = "Melt"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 200
+initial_value = 100
 display_float_digits = 0
 suffix_label = "%"
 
@@ -86,7 +86,7 @@ initial_value_label = "Off"
 [[parameter]]
 parameter_id = "toggle_switch_8"
 name_label = "Ground"
-value_labels = ["Stripes", "Black"]
+value_labels = ["Stripes", "Camera"]
 initial_value_label = "Stripes"
 
 [[parameter]]
@@ -118,28 +118,41 @@ display_float_digits = 0
 suffix_label = "%"
 
 [[preset]]
-name = "Lava"
+name = "Photo"
 
 [[preset]]
 name = "Receding"
 linear_potentiometer_12 = 120
 
 [[preset]]
-name = "Flood"
-linear_potentiometer_12 = 980
-rotary_potentiometer_3 = 700
+name = "Dripping"
+rotary_potentiometer_5 = 900
+linear_potentiometer_12 = 600
 
 [[preset]]
 name = "Twin Curtain"
 toggle_switch_7 = 1
-rotary_potentiometer_2 = 820
+rotary_potentiometer_2 = 630
 
 [[preset]]
-name = "Ice Sheet"
-toggle_switch_10 = 1
+name = "Giant Worms"
+rotary_potentiometer_3 = 60
+rotary_potentiometer_1 = 300
+
+[[preset]]
+name = "Valley"
+rotary_potentiometer_2 = 80
+rotary_potentiometer_5 = 200
+
+[[preset]]
+name = "Over Camera"
 toggle_switch_8 = 1
+rotary_potentiometer_5 = 820
+linear_potentiometer_12 = 380
 
 [[preset]]
-name = "Rising"
+name = "Ice Rising"
+toggle_switch_10 = 1
 toggle_switch_9 = 1
-rotary_potentiometer_4 = 420
+rotary_potentiometer_4 = 466
+rotary_potentiometer_1 = 760

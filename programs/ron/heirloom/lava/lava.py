@@ -347,8 +347,25 @@ def _rom(name, typ, vals, width, depth, per=16):
     return "    constant %s : %s := (\n" % (name, typ) + ",\n".join(rows) + "\n    );"
 
 
+# DRIP: each drop's breath phase (phase 2, v0.6.0), indexed by the drop number mod 32.  A fixed shuffle so
+# neighbouring drops sit far apart in phase (no two adjacent within 1/8 of a cycle).
+def _drip_phases():
+    x, out = 0x2545, []
+    while len(out) < 32:
+        x = (x * 1103515245 + 12345) & 0x7FFFFFFF
+        v = (x >> 16) & 0xFF
+        if out and min((v - out[-1]) % 256, (out[-1] - v) % 256) < 32:
+            continue
+        out.append(v)
+    return out
+
+
+DRIP = _drip_phases()
+
+
 def emit():
     parts = [_rom("C_LV_WARP", "t_lv_w", WARP, 8, 2048)]
+    parts.append(_rom("C_LV_DRIP", "t_lv_d", DRIP, 8, 32))
     for b, v in enumerate((TY0, TY1, TY2, TY3)):
         parts.append(_rom("C_LV_Y%d" % b, "t_lv_y", v, 8, 1024))
     for b, v in enumerate((TC0, TC1)):
@@ -358,6 +375,7 @@ def emit():
 -- C_LV_WARP : warp knots (t - y) / 8, signed, address j*48 + i (42 virtual px x 27 lines).
 -- C_LV_Y0..3: tile luma banks, (Y10 - 64) / 4 (pre-boosted 16/13), bank (i&1) + 2 (j&1), address (j>>1)*12 + (i>>1).
 -- C_LV_C0..1: tile chroma banks by i parity {Cr 15:8, Cb 7:0}, signed, units of 4, address j*6 + (i>>1).
+-- C_LV_DRIP : each drop's breath phase (Drip), by drop number mod 32.
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -366,6 +384,7 @@ package lava_pkg is
     type t_lv_w is array(0 to 2047) of std_logic_vector(7 downto 0);
     type t_lv_y is array(0 to 1023) of std_logic_vector(7 downto 0);
     type t_lv_c is array(0 to 511) of std_logic_vector(15 downto 0);
+    type t_lv_d is array(0 to 31) of std_logic_vector(7 downto 0);
 """ + "\n".join(parts) + """
 end package lava_pkg;
 """
