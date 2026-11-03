@@ -1,12 +1,12 @@
-# Idol - Heirloom #31 (v0.5.0, 2026-10-27), rebuilt from WIN_20230515_23_14_37.
+# Idol - Heirloom #31 (v0.6.1 phase 2, 2026-11-03: the v0.6 diag merged, bold Axis; v0.5.0 2026-10-27), rebuilt from WIN_20230515_23_14_37.
 # A camera idol folded top-to-bottom, through a cyclic yellow/orange/blue/brown colourizer on a
 # flat yellow ground, smeared sideways and feathered into per-line streaks.
 
 [program]
-processing_delay_clks = 28
+processing_delay_clks = 30
 program_id = "com.czartroniks.idol"
 program_name = "Idol"
-program_version = "0.5.1"
+program_version = "0.6.1"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -40,8 +40,8 @@ suffix_label = ""
 parameter_id = "rotary_potentiometer_3"
 name_label = "Axis"
 control_mode = "linear"
-display_min_value = 30
-display_max_value = 70
+display_min_value = 13
+display_max_value = 91
 initial_value = 463
 display_float_digits = 0
 suffix_label = "%"
@@ -90,9 +90,9 @@ initial_value_label = "Off"
 
 [[parameter]]
 parameter_id = "toggle_switch_9"
-name_label = "Slips"
-value_labels = ["On", "Off"]
-initial_value_label = "On"
+name_label = "Palette"
+value_labels = ["Photo", "Rainbow"]
+initial_value_label = "Photo"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
@@ -117,7 +117,7 @@ display_float_digits = 0
 suffix_label = "%"
 
 [[preset]]
-name = "Default"
+name = "Photo"
 
 [[preset]]
 name = "Idol Osc"
@@ -130,7 +130,31 @@ toggle_switch_11 = 1
 linear_potentiometer_12 = 700
 
 [[preset]]
-name = "Feathers"
+name = "Shredded"
 rotary_potentiometer_1 = 1000
 rotary_potentiometer_5 = 900
 toggle_switch_11 = 1
+
+[[preset]]
+name = "Writhe"
+rotary_potentiometer_4 = 960
+toggle_switch_11 = 1
+
+[[preset]]
+name = "Rainbow"
+toggle_switch_9 = 1
+toggle_switch_11 = 1
+linear_potentiometer_12 = 640
+
+[[preset]]
+name = "Kaleido"
+rotary_potentiometer_3 = 80
+toggle_switch_8 = 1
+toggle_switch_11 = 1
+
+[[preset]]
+name = "Calm Flood"
+rotary_potentiometer_1 = 0
+rotary_potentiometer_6 = 800
+toggle_switch_11 = 1
+linear_potentiometer_12 = 150

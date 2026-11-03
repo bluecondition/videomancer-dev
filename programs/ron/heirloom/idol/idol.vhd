@@ -1,7 +1,7 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Idol v0.5.0 -- Heirloom #31, rebuilt from the photo WIN_20230515_23_14_37.
+-- Idol v0.6.1 (phase 2) -- Heirloom #31, rebuilt from the photo WIN_20230515_23_14_37.
 --
 -- The photo: a camera on a small idol figure (hat, eyes, an open "O" mouth -- it shows plainly in
 -- the blue channel, twice, 324 px apart), folded top-to-bottom about row 518.5 by a frame-store
@@ -22,21 +22,28 @@
 -- rings.  Geometry comes from the measured raster (serial divisions in the vblank zone), so every mode
 -- shows the whole picture across the width.
 --
---   K1  Feather  the streaks: none .. the photo (40 %) .. the whole idol torn into feathers
+--   K1  Feather  the tears: streaks 0 .. 4x and frame-store slips 0 .. 24x as often (the photo at 40 %);
+--                0 = a clean idol, 100 % = the idol shredded into feathers and slices
 --   K2  Hue      colourizer phase (0 = the photo); the ground stays yellow
---   K3  Axis     mirror line 30 .. 70 % of the height (48 % = the photo)
---   K4  Speed    bipolar colour cycling, still at the centre (+-8)
+--   K3  Axis     mirror line 13 .. 91 % of the height (48 % = the photo), the idol riding on it: below the
+--                photo the folded store shrinks with the axis into stacked idols (4 at 0 %); above it the
+--                top half stretches down to the axis and the reflection below stays 1:1.  With Mirror off
+--                the store's middle row follows the axis the same way
+--   K4  Speed    bipolar colour cycling, still at the centre (+-8).  Past the default speed (either way) the
+--                colour bands also swell in sequence (a travelling sine on the palette position) and the
+--                rows ripple sideways (a travelling sine down the folded store, up to ~6 cells)
 --   K5  Smear    horizontal smear, chroma box 1 .. 128 px (64 = the photo), luma a quarter of it
---   K6  Ground   the yellow key window: none .. the photo .. yellow floods the light bands
+--   K6  Ground   the key window: none .. the photo (30 %) .. 89 % of the cycle flat (only a blue band left)
 --   S7  Mirror   Fold / Off (Osc: the top half repeats; Video: the plain camera)
 --   S8  Twin     left/right mirror too
---   S9  Slips    frame-store slips on / off
+--   S9  Palette  Photo (yellow ground) / Rainbow (the hue once round the wheel, black ground)
 --   S10 Negative colourizer input inverted (band order reversed; Video: bright -> yellow)
 --   S11 Source   Video / Osc
---   P12 BANDS    colourizer gain 0.5 .. 1 (the photo, 50 %) .. 4 cycles: dense rings at 100 %
+--   P12 BANDS    colourizer gain 0.25 .. 1 (the photo, 50 %) .. 4 cycles, exponential: dense rings at 100 %
 --
 -- Generated avid; output conditioning (luma [1 2 1], chroma [1 2 2 2 2 2 2 2 1]/16, luma to ~777)
--- before the blanking gate.  Latency 28 clocks in every mode.  Colours in the hardware convention
+-- before the blanking gate.  Latency 30 clocks in every mode (v0.5: 28; the band swell adds two stages, so
+-- the pixel depth and the sync latency both moved by 2 and the U/V parity is unchanged).  Colours in the hardware convention
 -- (U = Cr, V = Cb), see idol.py.
 
 library ieee;
@@ -51,8 +58,9 @@ use work.idol_pkg.all;
 use work.all;
 
 architecture idol of program_top is
-    constant C_LAT : integer := 28;   -- matches processing_delay_clks
+    constant C_LAT : integer := 30;   -- matches processing_delay_clks (even: keep the pixel-depth parity)
     constant C_PIV : integer := 1782; -- Osc gain pivot (red / orange step), 2048 = one cycle
+    constant C_AREF : integer := 132948;  -- the photo's mirror line, virtual rows Q8 (519.3)
 
     type t_sl is array (natural range <>) of std_logic;
     type t_u8a is array (natural range <>) of unsigned(7 downto 0);
@@ -72,6 +80,19 @@ architecture idol of program_top is
             r := signed('0' & g);
         end if;
         return unsigned(r(9 downto 0));
+    end function;
+    -- 64-step sine, +-127 (swell and ripple), from a 16-entry quarter wave sampled at half steps
+    -- (small enough to stay in LUTs; a 64-entry constant array could be mapped to a block RAM)
+    type t_qsin is array (0 to 15) of signed(7 downto 0);
+    constant C_QSIN : t_qsin := (
+        to_signed(6, 8), to_signed(19, 8), to_signed(31, 8), to_signed(43, 8), to_signed(54, 8), to_signed(65, 8), to_signed(76, 8), to_signed(85, 8), to_signed(94, 8), to_signed(102, 8), to_signed(109, 8), to_signed(115, 8), to_signed(120, 8), to_signed(123, 8), to_signed(126, 8), to_signed(127, 8));
+    function f_sin(i : unsigned(5 downto 0)) return signed is
+        variable j : unsigned(3 downto 0);
+        variable v : signed(7 downto 0);
+    begin
+        if i(4) = '1' then j := not i(3 downto 0); else j := i(3 downto 0); end if;
+        v := C_QSIN(to_integer(j));
+        if i(5) = '1' then return -v; else return v; end if;
     end function;
     -- 16-bit xorshift (7, 9, 8)
     function f_x16(x : unsigned(15 downto 0)) return unsigned is
@@ -134,21 +155,28 @@ architecture idol of program_top is
     signal s_gl_t : std_logic_vector(9 downto 0) := (others => '0');
     signal s_gl_d : signed(10 downto 0) := (others => '0');
     -- per-field values
-    signal f_osc, f_mir, f_twin, f_slips, f_neg : std_logic := '0';
+    signal f_osc, f_mir, f_twin, f_pal, f_neg : std_logic := '0';
     signal f_sp : signed(10 downto 0) := (others => '0');
     signal f_acc : unsigned(15 downto 0) := (others => '0');
     signal f_ph : unsigned(10 downto 0) := (others => '0');
     signal f_g : unsigned(8 downto 0) := to_unsigned(64, 9);
     signal f_w : unsigned(9 downto 0) := to_unsigned(61, 10);
-    signal f_axis, f_ax2 : unsigned(19 downto 0) := to_unsigned(520 * 256, 20);
+    signal f_axis : unsigned(19 downto 0) := to_unsigned(512 * 256, 20);        -- axis divisor (rows, Q8)
+    signal f_st : unsigned(12 downto 0) := to_unsigned(256, 13);   -- top-half row step: ys x 512 / axis
+    signal f_up : std_logic := '1';                                 -- axis at / above the photo's
     signal f_ta : unsigned(19 downto 0) := (others => '0');
-    signal f_F : unsigned(9 downto 0) := to_unsigned(256, 10);
-    signal f_Fm : unsigned(9 downto 0) := (others => '0');
+    signal f_F : unsigned(10 downto 0) := to_unsigned(256, 11);
+    signal f_Fm : unsigned(10 downto 0) := (others => '0');
+    signal f_sth : unsigned(4 downto 0) := to_unsigned(1, 5);        -- slip threshold (new slip if rnd8 < f_sth)
+    signal f_dep : unsigned(8 downto 0) := (others => '0');          -- K4 depth past the default speed, 0 .. 416
+    signal f_swA : unsigned(3 downto 0) := (others => '0');          -- band swell amplitude (0 .. 13)
+    signal f_rpA : unsigned(4 downto 0) := (others => '0');          -- ripple amplitude (0 .. 26)
+    signal f_swph, f_rph : unsigned(5 downto 0) := (others => '0');  -- swell / ripple phases
     signal m_a : unsigned(15 downto 0) := (others => '0');
     signal m_b : unsigned(7 downto 0) := (others => '0');
     signal m_p : unsigned(23 downto 0) := (others => '0');
     signal m_add : unsigned(9 downto 0) := (others => '0');
-    signal f_amp1, f_amp2, f_amp3, f_amp0 : unsigned(9 downto 0) := (others => '0');
+    signal f_amp1, f_amp2, f_amp3, f_amp0 : unsigned(10 downto 0) := (others => '0');
     signal f_kc, f_ky : unsigned(2 downto 0) := (others => '0');
     signal f_nc, f_ny : unsigned(7 downto 0) := to_unsigned(1, 8);
     signal s_bfc, s_bfy : std_logic := '0';
@@ -166,6 +194,9 @@ architecture idol of program_top is
     signal le_st : unsigned(5 downto 0) := (others => '0');
     signal le_dl : unsigned(5 downto 0) := (others => '0');
     signal n_vy : unsigned(19 downto 0) := (others => '0');
+    signal n_vs : unsigned(20 downto 0) := (others => '0');        -- the store-side row (K3-scaled DDA)
+    signal n_stp : unsigned(12 downto 0) := to_unsigned(256, 13);
+    signal n_bh : std_logic := '0';                                 -- past the photo axis (bottom half)
     signal n_v : signed(20 downto 0) := (others => '0');
     signal n_m : unsigned(18 downto 0) := (others => '0');
     signal n_kb : unsigned(10 downto 0) := (others => '0');
@@ -178,6 +209,11 @@ architecture idol of program_top is
     signal n_srem : unsigned(4 downto 0) := (others => '0');
     signal n_sdy : signed(20 downto 0) := (others => '0');
     signal n_sdx : signed(23 downto 0) := (others => '0');
+    signal n_rs : signed(7 downto 0) := (others => '0');
+    signal n_rk : unsigned(6 downto 0) := (others => '0');
+    signal n_rm : signed(5 downto 0) := (others => '0');
+    signal n_rp : signed(12 downto 0) := (others => '0');
+    signal n_c1 : signed(23 downto 0) := to_signed(-32768, 24);
     signal l_j0 : unsigned(6 downto 0) := (others => '0');
     signal l_ty : unsigned(4 downto 0) := (others => '0');
     signal l_jp : std_logic := '0';
@@ -223,7 +259,7 @@ architecture idol of program_top is
     attribute no_rw_check of vr01 : signal is true;
     attribute no_rw_check of vr10 : signal is true;
     attribute no_rw_check of vr11 : signal is true;
-    signal a_pal : unsigned(7 downto 0) := (others => '0');
+    signal a_pal : unsigned(8 downto 0) := (others => '0');
     signal r_pyu : std_logic_vector(15 downto 0) := (others => '0');
     signal r_pv : std_logic_vector(7 downto 0) := (others => '0');
     -- smear ring
@@ -287,7 +323,7 @@ architecture idol of program_top is
     signal q3_m : signed(13 downto 0) := (others => '0');
     signal q4_n : signed(8 downto 0) := (others => '0');
     signal q5_n, q6_n : signed(8 downto 0) := (others => '0');
-    signal q6_amp : unsigned(9 downto 0) := (others => '0');
+    signal q6_amp : unsigned(10 downto 0) := (others => '0');
     signal q7_no : signed(19 downto 0) := (others => '0');
     signal p_no : t_s13a(8 to 10) := (others => (others => '0'));
     -- phase, key, gain
@@ -296,8 +332,10 @@ architecture idol of program_top is
     signal p12_D : signed(11 downto 0) := (others => '0');
     signal p13_pr : signed(21 downto 0) := (others => '0');
     signal p13_key : std_logic := '0';
-    signal p14_idx : unsigned(10 downto 0) := (others => '0');
-    signal p_key : t_sl(14 to 17) := (others => '0');
+    signal p14_idx, p14a_idx, p14b_idx : unsigned(10 downto 0) := (others => '0');
+    signal w14_s : signed(7 downto 0) := (others => '0');
+    signal w14_m : signed(12 downto 0) := (others => '0');
+    signal p_key : t_sl(14 to 19) := (others => '0');
     signal p17_y, p17_u, p17_v : unsigned(7 downto 0) := (others => '0');
     signal c18_y, c18_u, c18_v : unsigned(7 downto 0) := (others => '0');
     signal c19_y, c19_u, c19_v : unsigned(7 downto 0) := (others => '0');
@@ -307,7 +345,10 @@ architecture idol of program_top is
     signal s21_y, s21_u, s21_v : unsigned(7 downto 0) := (others => '0');
     -- output conditioning
     type t_u10a is array (natural range <>) of unsigned(9 downto 0);
-    signal s_csu, s_csv : t_u8a(0 to 8) := (others => to_unsigned(128, 8));
+    type t_ringb is array (0 to 255) of std_logic_vector(15 downto 0);
+    signal ringb : t_ringb := (others => (others => '0'));            -- output chroma filter's 8-back tap
+    attribute no_rw_check of ringb : signal is true;
+    signal r_cb, r_cbf : std_logic_vector(15 downto 0) := x"8080";
     signal s_boxu, s_boxv, s_boxud, s_boxvd : unsigned(10 downto 0) := to_unsigned(1024, 11);
     signal s_bxh : std_logic_vector(7 downto 0) := (others => '0');   -- generated avid of the last 8 box inputs
     signal s_y22, s_y23, s_y24 : unsigned(7 downto 0) := to_unsigned(16, 8);
@@ -378,6 +419,16 @@ begin
             r_rgf <= r_rg;
         end if;
     end process p_ring;
+    -- output chroma filter delay (v0.6.0 fit, was two 8-deep FF chains): s21 written at s_wp, read 6 back,
+    -- plus one fabric register = the sample 8 clocks back
+    p_ringb : process(clk)
+    begin
+        if rising_edge(clk) then
+            ringb(to_integer(s_wp)) <= std_logic_vector(s21_u) & std_logic_vector(s21_v);
+            r_cb <= ringb(to_integer(s_wp - 6));
+            r_cbf <= r_cb;
+        end if;
+    end process p_ringb;
     p_ringy : process(clk)
     begin
         if rising_edge(clk) then
@@ -391,6 +442,7 @@ begin
     -- Controls, vblank zone, glides, per-field values (one small op per zone clock)
     ---------------------------------------------------------------------------
     p_ctrl : process(clk)
+        variable v_e : unsigned(9 downto 0);
         variable v_s : signed(10 downto 0);
         variable v_r : unsigned(12 downto 0);
         variable v_sl : integer range -1 to 7;
@@ -425,17 +477,22 @@ begin
             g_wm1 <= s_w - 1;
 
             -- geometry from the measured raster (works at every mode and in decimated sims):
-            -- q = 2^22 / W (zc 64 .. 87), ys = 1080 * 256 / lines (zc 96 .. 119)
-            if s_zone = '1' and (s_zc = 64 or s_zc = 96) then
+            -- q = 2^22 / W (zc 64 .. 87), ys = 1080 * 256 / lines (zc 96 .. 119),
+            -- K3 top-half row step = ys x 512 / axis (zc 135 .. 158; exactly ys at the photo's axis)
+            if s_zone = '1' and (s_zc = 64 or s_zc = 96 or s_zc = 135) then
                 d_r <= (others => '0');
                 if s_zc = 64 then
                     d_n <= to_unsigned(4194304, 23);
                     if s_w < 360 then d_v <= to_unsigned(1920, 12); else d_v <= s_w; end if;
-                else
+                elsif s_zc = 96 then
                     d_n <= to_unsigned(276480, 23);
                     if s_hl < 200 then d_v <= to_unsigned(1080, 12); else d_v <= resize(s_hl, 12); end if;
+                else
+                    d_n <= shift_left(resize(t_ys, 23), 9);
+                    d_v <= resize(f_axis(19 downto 8), 12);
                 end if;
-            elsif s_zone = '1' and ((s_zc > 64 and s_zc <= 87) or (s_zc > 96 and s_zc <= 119)) then
+            elsif s_zone = '1' and ((s_zc > 64 and s_zc <= 87) or (s_zc > 96 and s_zc <= 119)
+                                    or (s_zc > 135 and s_zc <= 158)) then
                 v_r := d_r(11 downto 0) & d_n(22);
                 if v_r >= resize(d_v, 13) then
                     d_r <= v_r - resize(d_v, 13); d_n <= d_n(21 downto 0) & '1';
@@ -444,6 +501,9 @@ begin
                 end if;
             elsif s_zone = '1' and s_zc = 90 then
                 t_q <= d_n(14 downto 0);
+            elsif s_zone = '1' and s_zc = 159 then
+                f_st <= d_n(12 downto 0);
+                f_up <= f_axis(17);
             elsif s_zone = '1' and s_zc = 122 then
                 t_ys <= d_n(11 downto 0);
                 t_cs <= resize(t_q, 16) + resize(t_q(14 downto 1), 16);       -- 96 / W
@@ -478,7 +538,7 @@ begin
                 s_hl <= s_lcnt; s_lcnt <= (others => '0');
                 f_mir   <= not registers_in(6)(0);
                 f_twin  <= registers_in(6)(1);
-                f_slips <= not registers_in(6)(2);
+                f_pal   <= registers_in(6)(2);
                 f_neg   <= registers_in(6)(3);
                 f_osc   <= registers_in(6)(4);
                 -- K4 Speed: bipolar, deadband 8
@@ -521,9 +581,16 @@ begin
             if s_zone = '1' then
                 case to_integer(s_zc) is
                     when 132 =>
-                        -- feather F = 2.5 K1 (Q8: 256 = the photo); axis = 324 + 432 K3 (virtual rows, Q8)
-                        f_F <= resize(shift_right(s_g1, 1) + shift_right(s_g1, 3), 10);
-                        f_ta <= shift_left(resize(s_g3, 20), 6) + shift_left(resize(s_g3, 20), 5);
+                        -- feather F (Q8: 256 = the photo): 0.625 K1 up to the photo (409), then 1.25 per step to
+                        -- 4x (1022) at 1023.  Axis divisor = 143.3 + 0.797 K3 rows (Q8): 512.3 at 463 (the photo), so the
+                        -- top-half step ys x 512 / axis is exactly ys there; 143 .. 958 puts the line at 13 .. 91 %
+                        if s_g1 <= 409 then
+                            f_F <= resize(shift_right(s_g1, 1) + shift_right(s_g1, 3), 11);
+                        else
+                            v_e := s_g1 - 409;
+                            f_F <= to_unsigned(255, 11) + resize(v_e, 11) + resize(shift_right(v_e, 2), 11);
+                        end if;
+                        f_ta <= shift_left(resize(s_g3, 20), 7) + shift_left(resize(s_g3, 20), 6);
                         f_acc <= unsigned(signed(f_acc) + resize(f_sp, 16));
                         if f_osc = '1' then
                             f_cstep <= t_cs; f_cmax <= to_unsigned(95 * 65536 - 1, 24);
@@ -539,27 +606,62 @@ begin
                         if f_F > 256 then f_Fm <= f_F - 256; else f_Fm <= (others => '0'); end if;
                         f_2lo <= shift_left(f_lo, 1); f_2hi <= shift_left(f_hi, 1);
                     when 134 =>
-                        f_axis <= f_ta + to_unsigned(324 * 256, 20);
-                        -- P12 Bands: gain (Q6) 32 .. 64 .. 256
-                        if s_gp <= 512 then
-                            f_g <= to_unsigned(32, 9) + resize(s_gp(9 downto 4), 9);
+                        f_axis <= f_ta + to_unsigned(36697, 20);
+                        -- slips: none below F 128, the photo's 1/256 per line up to F 256, then +1/256 per 32 of F
+                        if f_F < 128 then
+                            f_sth <= (others => '0');
+                        elsif f_F < 256 then
+                            f_sth <= to_unsigned(1, 5);
                         else
-                            f_g <= to_unsigned(64, 9) + resize(shift_right(resize(s_gp - 512, 12) + shift_left(resize(s_gp - 512, 12), 1), 3), 9);
+                            v_e := resize(shift_right(f_F - 256, 5), 10);
+                            f_sth <= to_unsigned(1, 5) + v_e(4 downto 0);
+                        end if;
+                        -- P12 Bands: gain (Q6) 16 .. 64 .. 256, exponential (piecewise-linear octaves)
+                        if s_gp >= 512 then
+                            v_e := s_gp - 512;
+                            if v_e(8) = '0' then
+                                f_g <= to_unsigned(64, 9) + resize(v_e(7 downto 2), 9);
+                            else
+                                f_g <= to_unsigned(128, 9) + resize(v_e(7 downto 1), 9);
+                            end if;
+                        else
+                            v_e := to_unsigned(512, 10) - s_gp;
+                            if v_e(9) = '1' then
+                                f_g <= to_unsigned(16, 9);
+                            elsif v_e(8) = '0' then
+                                f_g <= to_unsigned(64, 9) - resize(v_e(7 downto 3), 9);
+                            else
+                                f_g <= to_unsigned(32, 9) - resize(v_e(7 downto 4), 9);
+                            end if;
                         end if;
                     when 135 =>
-                        f_ax2 <= shift_left(f_axis, 1);
                         -- K6 Ground: key window (1/2048 cycle)
                         if s_g6 <= 307 then
                             f_w <= resize(shift_right(s_g6, 3) + shift_right(s_g6, 4) + shift_right(s_g6, 6), 10);
                         else
-                            f_w <= 61 + resize(shift_right(s_g6 - 307, 1) + shift_right(s_g6 - 307, 3)
-                                     + shift_right(s_g6 - 307, 4) + shift_right(s_g6 - 307, 5), 10);
+                            -- above the photo: 1.1875 per step, to 910 (0.44 cycle each side) at 1023
+                            f_w <= 61 + resize((s_g6 - 307) + shift_right(s_g6 - 307, 3)
+                                     + shift_right(s_g6 - 307, 4), 10);
                         end if;
                     when 136 =>
                         -- hue: K2 (two units per knob step) + the cycle, plus the gain pivot
                         v_h := shift_left(resize(s_g2, 11), 1) + f_acc(15 downto 5);
                         if f_osc = '1' then f_ph <= v_h + to_unsigned(C_PIV, 11); else f_ph <= v_h; end if;
                         s_w2 <= shift_right(s_w, 1);
+                    when 137 =>
+                        -- K4 depth: |speed| past the default (+80) and a margin of 8: 0 at the photo setting
+                        if f_sp > 88 then
+                            f_dep <= resize(unsigned(f_sp - 88), 9);
+                        elsif f_sp < -88 then
+                            f_dep <= resize(unsigned(to_signed(-88, 11) - f_sp), 9);
+                        else
+                            f_dep <= (others => '0');
+                        end if;
+                        f_swph <= f_acc(15 downto 10);
+                        f_rph <= f_acc(14 downto 9);
+                    when 138 =>
+                        f_swA <= f_dep(8 downto 5);
+                        f_rpA <= f_dep(8 downto 4);
                     when others => null;
                 end case;
             end if;
@@ -584,8 +686,8 @@ begin
                     else
                         m_a <= resize(f_Fm, 16);
                         case v_sl is
-                            when 0 => m_b <= to_unsigned(205, 8); m_add <= to_unsigned(0, 10);
-                            when 1 => m_b <= to_unsigned(205, 8); m_add <= to_unsigned(61, 10);
+                            when 0 => m_b <= to_unsigned(102, 8); m_add <= to_unsigned(0, 10);
+                            when 1 => m_b <= to_unsigned(154, 8); m_add <= to_unsigned(61, 10);
                             when 2 => m_b <= to_unsigned(205, 8); m_add <= to_unsigned(133, 10);
                             when others => m_b <= to_unsigned(225, 8); m_add <= to_unsigned(225, 10);
                         end case;
@@ -595,10 +697,10 @@ begin
                     m_b <= shift_left(m_b, 1);
                 elsif v_ph = 9 then
                     case v_sl is
-                        when 0 => f_amp0 <= m_add + resize(m_p(17 downto 8), 10);
-                        when 1 => f_amp1 <= m_add + resize(m_p(17 downto 8), 10);
-                        when 2 => f_amp2 <= m_add + resize(m_p(17 downto 8), 10);
-                        when 3 => f_amp3 <= m_add + resize(m_p(17 downto 8), 10);
+                        when 0 => f_amp0 <= resize(m_add, 11) + resize(m_p(17 downto 8), 11);
+                        when 1 => f_amp1 <= resize(m_add, 11) + resize(m_p(17 downto 8), 11);
+                        when 2 => f_amp2 <= resize(m_add, 11) + resize(m_p(17 downto 8), 11);
+                        when 3 => f_amp3 <= resize(m_add, 11) + resize(m_p(17 downto 8), 11);
                         when others => f_c0 <= signed(resize(m_p, 24)) - 32768;
                     end case;
                 end if;
@@ -669,10 +771,13 @@ begin
         variable v_h : unsigned(15 downto 0);
         variable v_n : unsigned(4 downto 0);
         variable v_dy : unsigned(12 downto 0);
+        variable v_ra : signed(7 downto 0);
+        variable v_w : signed(21 downto 0);
     begin
         if rising_edge(clk) then
             if s_zone = '1' and s_zc = 140 then
-                n_vy <= (others => '0'); n_wacc <= (others => '0'); n_wrow <= to_unsigned(127, 7);
+                n_vy <= (others => '0'); n_vs <= (others => '0');
+                n_wacc <= (others => '0'); n_wrow <= to_unsigned(127, 7);
                 n_slr <= f_sseed; n_srem <= (others => '0');
             end if;
             if data_in.avid = '0' and s_avq = '1' then
@@ -691,16 +796,19 @@ begin
             l_go <= '0';
             case to_integer(le_st) is
                 when 1 =>
-                    if f_mir = '1' and n_vy > f_axis then
-                        n_v <= signed(resize(f_ax2, 21)) - signed(resize(n_vy, 21));
+                    -- fold the store-side row about the photo's line (n_vs reaches it at the K3 axis)
+                    if n_vs > C_AREF then n_bh <= '1'; else n_bh <= '0'; end if;
+                    if f_mir = '1' and n_vs > C_AREF then
+                        v_w := to_signed(2 * C_AREF, 22) - signed('0' & n_vs);
+                        n_v <= v_w(20 downto 0);
                     else
-                        n_v <= signed(resize(n_vy, 21));
+                        n_v <= signed(n_vs);
                     end if;
                     n_slr <= f_x16(n_slr);
                 when 2 =>
                     if n_srem /= 0 then
                         n_v <= n_v + n_sdy; n_srem <= n_srem - 1;
-                    elsif f_slips = '1' and n_slr(7 downto 0) = 0 then
+                    elsif n_slr(7 downto 0) < resize(f_sth, 8) then
                         -- a new slip: 8 .. 23 lines (fewer at 720p / SD), +-(8..38) rows, +-(0..1.5) cells
                         v_n := ('0' & n_slr(11 downto 8)) + 8;
                         if t_ys >= 768 then v_n := shift_right(v_n, 2);
@@ -712,15 +820,15 @@ begin
                         if n_slr(8) = '1' then n_sdx <= -signed(resize(n_slr(15 downto 10) & "00000000000", 24));
                         else n_sdx <= signed(resize(n_slr(15 downto 10) & "00000000000", 24)); end if;
                     end if;
-                when 3 to 6 =>
-                    -- fold into the store's range by reflection (twice)
+                when 3 to 9 =>
+                    -- fold into the store's range by reflection (up to 7 times: stacked idols at low K3)
                     if n_v < f_lo then n_v <= f_2lo - n_v;
                     elsif n_v > f_hi then n_v <= f_2hi - n_v; end if;
-                when 7 =>
+                when 10 =>
                     v_v := n_v - f_lo;
                     if v_v < 0 then n_m <= (others => '0'); else n_m <= unsigned(v_v(18 downto 0)); end if;
                     n_kb <= f_K; n_pr <= (others => '0');
-                when 8 to 18 =>
+                when 11 to 21 =>
                     -- serial multiply n_m x f_K (11 steps, MSB first)
                     if n_kb(10) = '1' then
                         n_pr <= shift_left(n_pr, 1) + resize(n_m, 30);
@@ -728,9 +836,9 @@ begin
                         n_pr <= shift_left(n_pr, 1);
                     end if;
                     n_kb <= shift_left(n_kb, 1);
-                when 19 =>
+                when 22 =>
                     n_fy <= signed(resize(n_pr(29 downto 16), 15)) - 16;
-                when 20 =>
+                when 23 =>
                     v_f := n_fy;
                     if v_f < 0 then v_f := (others => '0');
                     elsif v_f > 4063 then v_f := to_signed(4063, 15); end if;
@@ -746,26 +854,49 @@ begin
                     v_h := resize(n_vy(19 downto 10), 16) xor (f_fseed(7 downto 0) & f_fseed(15 downto 8));
                     n_hs <= v_h + shift_left(v_h, 5);
                     l_sg <= n_vy(9);
-                when 21 =>
+                when 24 =>
                     n_ho <= n_ho xor shift_right(n_ho, 7);
                     n_hs <= n_hs xor shift_right(n_hs, 7);
-                when 22 =>
+                when 25 =>
                     n_ho <= (n_ho + shift_left(n_ho, 3)) or x"0001";
                     n_hs <= (n_hs + shift_left(n_hs, 3)) or x"0001";
-                when 23 =>
-                    l_so <= n_ho; l_ss <= n_hs; l_go <= '1';
-                    -- the line's DDA start (centring offset + slip)
-                    if n_srem /= 0 then l_c0 <= f_c0 + n_sdx; else l_c0 <= f_c0; end if;
                 when 26 =>
+                    l_so <= n_ho; l_ss <= n_hs; l_go <= '1';
+                    -- the line's DDA start (centring offset + ripple + slip)
+                    if n_srem /= 0 then l_c0 <= n_c1 + n_sdx; else l_c0 <= n_c1; end if;
+                when 29 =>
                     -- camera-store write row (the camera's own, unmirrored row)
+                    -- K3: the store-side step, ys x 512 / axis on the top half; below the photo's line
+                    -- the same (stacked idols) when the axis is under the photo's, else 1:1
+                    if f_up = '1' and n_bh = '1' then n_stp <= resize(t_ys, 13); else n_stp <= f_st; end if;
                     v_j := n_wacc(22 downto 16);
                     if v_j /= n_wrow and n_vy < 1080 * 256 then l_wen <= '1'; else l_wen <= '0'; end if;
                     l_wrow <= v_j; n_wrow <= v_j;
-                when 27 =>
+                when 30 =>
                     n_vy <= n_vy + t_ys;
+                    n_vs <= n_vs + n_stp;
                     n_wacc <= n_wacc + t_wv;
                 when others => null;
             end case;
+            -- ripple (K4 depth): d = sin(folded row / 256 rows + phase) x depth x 128 (Q16 cells, up to 6.4
+            -- cells), a signed serial 7-step multiply beside the row multiply, folded into the line's DDA start
+            if le_st = 10 then
+                n_rs <= f_sin(unsigned(n_v(15 downto 10)) + f_rph);
+            elsif le_st = 11 then
+                v_ra := abs(n_rs);
+                n_rk <= unsigned(v_ra(6 downto 0));
+                if n_rs(7) = '1' then n_rm <= -signed('0' & f_rpA); else n_rm <= signed('0' & f_rpA); end if;
+                n_rp <= (others => '0');
+            elsif le_st >= 12 and le_st <= 18 then
+                if n_rk(6) = '1' then
+                    n_rp <= shift_left(n_rp, 1) + resize(n_rm, 13);
+                else
+                    n_rp <= shift_left(n_rp, 1);
+                end if;
+                n_rk <= shift_left(n_rk, 1);
+            elsif le_st = 19 then
+                n_c1 <= f_c0 + shift_left(resize(n_rp, 24), 7);
+            end if;
         end if;
     end process p_line;
 
@@ -886,6 +1017,8 @@ begin
         variable v_sc : unsigned(14 downto 0);
         variable v_cu : unsigned(11 downto 0);
         variable v_t : unsigned(11 downto 0);
+        variable v_sa : unsigned(5 downto 0);
+        variable v_iw : unsigned(10 downto 0);
     begin
         if rising_edge(clk) then
             -- 1: clamp, cell, bank addresses
@@ -1041,16 +1174,28 @@ begin
             p14_idx <= v_ix;
             p_key(14) <= p13_key;
 
-            -- 15: palette address
-            a_pal <= p14_idx(10 downto 3);
+            -- 14a: band swell: the sine of twice the palette position plus the swell phase (K4 depth)
+            v_sa := p14_idx(9 downto 4) + f_swph;
+            w14_s <= f_sin(v_sa);
+            p14a_idx <= p14_idx;
             p_key(15) <= p_key(14);
-            -- 16: palette read
+            -- 14b: swell product (8 x 5 bits, a stage to itself)
+            w14_m <= w14_s * signed('0' & f_swA);
+            p14b_idx <= p14a_idx;
             p_key(16) <= p_key(15);
+            -- 15: palette address: family & (index + swell)
+            v_iw := p14b_idx + unsigned(resize(shift_right(w14_m, 3), 11));
+            a_pal <= f_pal & v_iw(10 downto 3);
+            p_key(17) <= p_key(16);
+            -- 16: palette read
+            p_key(18) <= p_key(17);
             -- 17: fabric copy
             p17_y <= unsigned(r_pyu(15 downto 8)); p17_u <= unsigned(r_pyu(7 downto 0)); p17_v <= unsigned(r_pv);
-            p_key(17) <= p_key(16);
-            -- 18: key fill
-            if p_key(17) = '1' then
+            p_key(19) <= p_key(18);
+            -- 18: key fill (Photo: yellow; Rainbow: black)
+            if p_key(19) = '1' and f_pal = '1' then
+                c18_y <= to_unsigned(C_BLK_Y, 8); c18_u <= to_unsigned(C_BLK_U, 8); c18_v <= to_unsigned(C_BLK_V, 8);
+            elsif p_key(19) = '1' then
                 c18_y <= to_unsigned(C_YEL_Y, 8); c18_u <= to_unsigned(C_YEL_U, 8); c18_v <= to_unsigned(C_YEL_V, 8);
             else
                 c18_y <= p17_y; c18_u <= p17_u; c18_v <= p17_v;
@@ -1085,20 +1230,18 @@ begin
             -- 21; chroma neutral off the generated avid (aligned to the 8-sums' centre at the gate), so the
             -- 8-sums below resync in every blanking interval
             s21_y <= s20_y;
-            if s_gav_sr(18) = '0' then s21_u <= to_unsigned(128, 8); s21_v <= to_unsigned(128, 8);
+            if s_gav_sr(20) = '0' then s21_u <= to_unsigned(128, 8); s21_v <= to_unsigned(128, 8);
             else s21_u <= s20_u; s21_v <= s20_v; end if;
-            s_bxh <= s_bxh(6 downto 0) & s_gav_sr(18);
+            s_bxh <= s_bxh(6 downto 0) & s_gav_sr(20);
 
             -- 22..25: output conditioning (8-bit samples; a sample s is 4 s + 2 in 10 bits):
             -- chroma [1 2 2 2 2 2 2 2 1]/16 (two adjacent 8-sums), luma [1 2 1]/4.  The running 8-sums snap
             -- back to neutral once 8 blank samples are in, so a glitched sample can't offset the chroma for good.
-            s_csu(0) <= s21_u; s_csv(0) <= s21_v;
-            for i in 1 to 8 loop s_csu(i) <= s_csu(i - 1); s_csv(i) <= s_csv(i - 1); end loop;
             if s_bxh = "00000000" then
                 s_boxu <= to_unsigned(1024, 11); s_boxv <= to_unsigned(1024, 11);
             else
-                s_boxu <= s_boxu + s21_u - s_csu(7);
-                s_boxv <= s_boxv + s21_v - s_csv(7);
+                s_boxu <= s_boxu + s21_u - unsigned(r_cbf(15 downto 8));
+                s_boxv <= s_boxv + s21_v - unsigned(r_cbf(7 downto 0));
             end if;
             s_boxud <= s_boxu; s_boxvd <= s_boxv;
             v_cu := resize(s_boxu, 12) + s_boxud; s_u25 <= resize(v_cu(11 downto 2), 10) + 2;
@@ -1109,7 +1252,7 @@ begin
             s_yf <= s_yd(0);
             -- 26: luma scale and gate
             if s_yf > 64 then v_dl := s_yf - 64; else v_dl := (others => '0'); end if;
-            if s_gav_sr(25) = '1' then
+            if s_gav_sr(27) = '1' then
                 s_y26 <= s_yf - shift_right(v_dl, 3) - shift_right(v_dl, 4);
                 s_u26 <= s_u25; s_v26 <= s_v25;
             else
