@@ -145,7 +145,7 @@ versions from v0.1.0.
 
 | # | Still (clip, time) | Program | What it shows | Status |
 |---|---|---|---|---|
-| 1 | 20230127_01_48_55 t25.5 | tongues | twin red/yellow flame tongues mirrored, green ground at right, black | in progress (wave 1) |
+| 1 | 20230127_01_48_55 t25.5 | tongues | twin red/yellow flame tongues mirrored, green ground at right, black | v0.1.0 built 2026-11-04 (ROUTER1; SD HDMI seed 2, others seed 1; 6957–6992 LC, 16 EBR); not flashed |
 | 2 | 20230203_00_19_56 t6.0 | tapers | magenta/cyan/blue candle-flame columns on black | v0.1.0 built 2026-11-04 (router2; HD Analog seed 2; 6296–6308 LC, 9 EBR); not flashed |
 | 3 | 20230205_00_16_05 t0.5 | zigzag | green/rainbow zigzag V ribbons with white/blue highlights | v0.1.0 built 2026-11-04 (ROUTER1 6/6 seed 1; 5863–5882 LC, 21 EBR); not flashed |
 | 4 | 20230206_00_35_06 t0.5 | frogspawn | green/black cellular contour lattice | v0.1.1 built 2026-11-04 (router2; HD Analog seed 2, HD Dual seed 3; HD HDMI and HD Dual thin, +0.3/+0.5 MHz; 6730–6752 LC, 17 EBR); not flashed |
@@ -162,7 +162,7 @@ versions from v0.1.0.
 | 15 | 20230509_23_58_21 t0.5 | wildfire | green/yellow/blue rainbow flame contours | in progress (wave 2) |
 | 16 | 20230518_23_23_28 t0.5 | crucible | orange/blue flame cross on magenta with mirrored blue shapes | in progress (wave 2) |
 | 17 | 20230529_01_27_21 t0.5 | serpent | red/green/yellow serpent S-ribbon on black | in progress (wave 2) |
-| 18 | 20230618_20_23_10 t0.5 | hourglass | rainbow hourglass lens pair on black | queued |
+| 18 | 20230618_20_23_10 t0.5 | hourglass | rainbow hourglass lens pair on black | in progress (wave 2) |
 | 19 | 20230620_00_50_54 t0.5 | saltire | magenta/yellow/green/blue hard-edged neon X with wavy edges | queued |
 | 20 | 20230703_01_29_07 t10.0 | horizon | cyan/blue/yellow planet horizon with ribs | queued |
 | 21 | 20230710_00_15_14 t1.5 | plumage | orange/magenta/green feather fan curves | queued |
