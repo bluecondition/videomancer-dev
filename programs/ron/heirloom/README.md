@@ -158,14 +158,14 @@ versions from v0.1.0.
 | 11 | 20230401_00_20_03 t0.5 | lattice | magenta/green/blue diamond trellis with blue diamonds | v0.1.0 built 2026-11-04 (ROUTER1 6/6 seed 1; 6552–6566 LC, 15 EBR); not flashed |
 | 12 | 20230404_23_59_18 t9.5 | zebra | black/white zebra stripe swirl with red/blue fringes | in progress (wave 2) |
 | 13 | 20230428_23_30_39 t0.5 | vinyl | fine blue/red vinyl-groove moire rings | in progress (wave 2) |
-| 14 | 20230501_01_34_42 t0.5 | lentil | bright pink curved lens bands around blue diamonds | in progress (wave 2) |
+| 14 | 20230501_01_34_42 t0.5 | lentil | bright pink curved lens bands around blue diamonds | v0.1.0 built 2026-11-04 (router2 6/6 seed 1; 6910–6948 LC, 17 EBR); not flashed |
 | 15 | 20230509_23_58_21 t0.5 | wildfire | green/yellow/blue rainbow flame contours | in progress (wave 2) |
 | 16 | 20230518_23_23_28 t0.5 | crucible | orange/blue flame cross on magenta with mirrored blue shapes | in progress (wave 2) |
 | 17 | 20230529_01_27_21 t0.5 | serpent | red/green/yellow serpent S-ribbon on black | in progress (wave 2) |
 | 18 | 20230618_20_23_10 t0.5 | hourglass | rainbow hourglass lens pair on black | in progress (wave 2) |
 | 19 | 20230620_00_50_54 t0.5 | saltire | magenta/yellow/green/blue hard-edged neon X with wavy edges | in progress (wave 2) |
 | 20 | 20230703_01_29_07 t10.0 | horizon | cyan/blue/yellow planet horizon with ribs | in progress (wave 2) |
-| 21 | 20230710_00_15_14 t1.5 | plumage | orange/magenta/green feather fan curves | queued |
+| 21 | 20230710_00_15_14 t1.5 | plumage | orange/magenta/green feather fan curves | in progress (wave 2) |
 | 22 | 20230712_00_46_37 t2.5 | scales | cyan/orange/pink crescent fish scales | queued |
 | 23 | 20230717_23_51_09 t7.5 | ironwork | magenta/green/black lace contour ironwork | queued |
 | 24 | 20230722_01_18_41 t5.5 | carpet | red/white/orange kaleidoscopic carpet | queued |
