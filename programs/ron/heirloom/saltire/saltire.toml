@@ -1,0 +1,159 @@
+# Saltire - Heirloom (video phase) v0.1.0, rebuilt 2026-11-04 from the clip WIN_20230620_00_50_54 at 0.5 s.
+# A neon X: jagged magenta bands with white-fringed scallop teeth meeting at a flaming vertex, yellow arms,
+# a blue field with soft black blobs, over wavy green / teal stripes.  See saltire.vhd, saltire.py, SUMMARY.md.
+
+[program]
+processing_delay_clks = 40
+program_id = "com.czartroniks.saltire"
+program_name = "Saltire"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Shape", "Mirror", "Color"]
+program_type = "processing"
+description = "A neon X: jagged magenta bands, flaming tongues and yellow arms over wavy green stripes and a blotched blue field."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Stripes"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Wave"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Cross"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Speed"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 680
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Spread"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Blobs"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Fold"
+value_labels = ["Mirror", "Quad"]
+initial_value_label = "Mirror"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Teeth"
+value_labels = ["Scallop", "Blade"]
+initial_value_label = "Scallop"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Twin"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Guns"
+value_labels = ["RGB", "BRG"]
+initial_value_label = "RGB"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Flames"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 300
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Photo"
+
+[[preset]]
+name = "Inferno"
+rotary_potentiometer_4 = 860
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Calm X"
+rotary_potentiometer_2 = 160
+linear_potentiometer_12 = 0
+
+[[preset]]
+name = "Twin Blades"
+toggle_switch_8 = 1
+toggle_switch_9 = 1
+linear_potentiometer_12 = 420
+
+[[preset]]
+name = "Quad Neon"
+toggle_switch_7 = 1
+toggle_switch_10 = 1
+
+[[preset]]
+name = "Deep Wave"
+rotary_potentiometer_1 = 330
+rotary_potentiometer_2 = 1023
+rotary_potentiometer_4 = 760
+
+[[preset]]
+name = "Wide Open"
+rotary_potentiometer_3 = 300
+rotary_potentiometer_5 = 820
+rotary_potentiometer_6 = 800
+
+[[preset]]
+name = "Narrow Gate"
+rotary_potentiometer_1 = 760
+rotary_potentiometer_5 = 140
+toggle_switch_10 = 1

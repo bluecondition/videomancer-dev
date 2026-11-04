@@ -163,7 +163,7 @@ versions from v0.1.0.
 | 16 | 20230518_23_23_28 t0.5 | crucible | orange/blue flame cross on magenta with mirrored blue shapes | v0.1.1 built 2026-11-04 (ROUTER1 6/6 seed 1; 6994–7010 LC, 21 EBR); not flashed |
 | 17 | 20230529_01_27_21 t0.5 | serpent | red/green/yellow serpent S-ribbon on black | v0.1.0 built 2026-11-04 (ROUTER1 6/6 seed 1; HD Dual thin, 74.46 MHz; 7086–7107 LC, 18 EBR); not flashed |
 | 18 | 20230618_20_23_10 t0.5 | hourglass | rainbow hourglass lens pair on black | v0.1.0 built 2026-11-04 (router2; HD HDMI seed 2; 5648–5661 LC, 74 %, 21 EBR); not flashed |
-| 19 | 20230620_00_50_54 t0.5 | saltire | magenta/yellow/green/blue hard-edged neon X with wavy edges | in progress (wave 2) |
+| 19 | 20230620_00_50_54 t0.5 | saltire | magenta/yellow/green/blue hard-edged neon X with wavy edges | v0.1.0 built 2026-11-04 (ROUTER1 6/6 seed 1; HD Dual thin, 75.27 MHz; 7179–7200 LC, 24 EBR); not flashed |
 | 20 | 20230703_01_29_07 t10.0 | horizon | cyan/blue/yellow planet horizon with ribs | v0.1.0 built 2026-11-04 (ROUTER1 6/6 seed 1; 7030–7058 LC, 18 EBR); not flashed |
 | 21 | 20230710_00_15_14 t1.5 | plumage | orange/magenta/green feather fan curves | v0.1.0 built 2026-11-04 (router2; HD HDMI seed 2; HD Analog thin, 75.05 MHz; 7140–7173 LC, 23 EBR); not flashed |
 | 22 | 20230712_00_46_37 t2.5 | scales | cyan/orange/pink crescent fish scales | in progress (wave 2) |
@@ -175,7 +175,7 @@ versions from v0.1.0.
 | 28 | 20230825_00_00_20 t6.5 | arcade | orange/blue ring arches on blue stripes | in progress (wave 2) |
 | 29 | 20230905_00_44_28 t0.5 | coral | red hexagon core with cyan coral rings on light blue | in progress (wave 2) |
 | 30 | 20230906_00_33_30 t11.0 | spine | magenta/purple/black torn diagonal spine | in progress (wave 2) |
-| 31 | 20230910_00_11_50 t7.0 | quill | blue/white feather plumes on black | queued |
+| 31 | 20230910_00_11_50 t7.0 | quill | blue/white feather plumes on black | in progress (wave 2) |
 | 32 | 20230914_01_59_34 t4.0 | marble | cream/orange/red marble swirl arcs with blue dots | queued |
 | 33 | 20230919_00_32_29 t3.0 | neon | magenta/white glowing S-curve neon tubes on teal | queued |
 | 34 | 20230930_01_37_53 t0.5 | brazier | blue/purple nested diamond with pink flames on a red/black ground | queued |
