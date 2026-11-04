@@ -1,0 +1,155 @@
+# Crucible - Heirloom from the video clips (phase 3), v0.1.1, built 2026-11-04 from the still
+# WIN_20230518_23_23_28 t0.5.  An orange/yellow flame cross on magenta: rolling flame stripes (a V oscillator
+# plus the H triangle, keyed), a black figure that breathes between head and diamond, a column of blue lenses.
+# See crucible.vhd, crucible.py, SUMMARY.md.
+
+[program]
+processing_delay_clks = 20
+program_id = "com.czartroniks.crucible"
+program_name = "Crucible"
+program_version = "0.1.1"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Mirror", "Shape", "Color"]
+program_type = "processing"
+description = "An orange flame cross on magenta: rolling flame stripes, a breathing black figure, a column of blue lenses."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Stripes"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Roll"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 770
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Figure"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Morph"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Lenses"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Camera"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 400
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Twin"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Flip"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Palette"
+value_labels = ["Flame", "Ice"]
+initial_value_label = "Flame"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Tear"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Heat"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 546
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Photo"
+
+[[preset]]
+name = "Head Holds"
+rotary_potentiometer_4 = 0
+
+[[preset]]
+name = "Diamond"
+rotary_potentiometer_4 = 1023
+linear_potentiometer_12 = 620
+
+[[preset]]
+name = "Cold"
+linear_potentiometer_12 = 120
+
+[[preset]]
+name = "Molten"
+linear_potentiometer_12 = 980
+rotary_potentiometer_2 = 900
+
+[[preset]]
+name = "Twin Ice"
+toggle_switch_7 = 1
+toggle_switch_9 = 1
+
+[[preset]]
+name = "Torn Flip"
+toggle_switch_8 = 1
+toggle_switch_10 = 1
+rotary_potentiometer_1 = 700
+
+[[preset]]
+name = "Big Figure"
+rotary_potentiometer_3 = 820
+rotary_potentiometer_5 = 760
