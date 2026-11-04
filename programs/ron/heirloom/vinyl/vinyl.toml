@@ -1,0 +1,158 @@
+# Vinyl - Heirloom (phase 3, video clips), built 2026-11-04 (v0.1.0) from the clip WIN_20230428_23_30_39 at 0.5 s.
+# Nested L-shaped green / blue bands with sawtooth red fringes, rope-twisted by a fine hatch, and fine curved
+# grooves like a record's in the wide blue band at the bottom.  See vinyl.vhd, vinyl.py and SUMMARY.md.
+
+[program]
+processing_delay_clks = 24
+program_id = "com.czartroniks.vinyl"
+program_name = "Vinyl"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Illusion", "Pattern", "Curve"]
+program_type = "processing"
+description = "L-shaped green and blue bands with sawtooth red fringes, rope hatching and record-groove moire."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Rings"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Corner"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Fall"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Speed"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 640
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Teeth"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 380
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Etch"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 200
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Wave"
+value_labels = ["Tri", "Saw"]
+initial_value_label = "Tri"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Mirror"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Palette"
+value_labels = ["Primaries", "Sepia"]
+initial_value_label = "Primaries"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Grooves"
+value_labels = ["Low", "High"]
+initial_value_label = "Low"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Moire"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 307
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Photo"
+
+[[preset]]
+name = "Clean Rings"
+rotary_potentiometer_5 = 0
+linear_potentiometer_12 = 0
+
+[[preset]]
+name = "Lattice"
+rotary_potentiometer_4 = 700
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Two Corners"
+toggle_switch_8 = 1
+rotary_potentiometer_1 = 700
+linear_potentiometer_12 = 500
+
+[[preset]]
+name = "Sepia Saw"
+toggle_switch_7 = 1
+toggle_switch_9 = 1
+rotary_potentiometer_5 = 700
+
+[[preset]]
+name = "Deep Teeth"
+rotary_potentiometer_5 = 1023
+rotary_potentiometer_3 = 300
+
+[[preset]]
+name = "Groove Rain"
+toggle_switch_10 = 1
+linear_potentiometer_12 = 750
+rotary_potentiometer_4 = 800
+
+[[preset]]
+name = "Etched"
+rotary_potentiometer_6 = 800
+rotary_potentiometer_2 = 300
