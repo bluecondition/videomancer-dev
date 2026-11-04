@@ -1,0 +1,158 @@
+# Placard - Heirloom from the clip WIN_20230221_00_58_22 (0.5 s), built 2026-11-04 (v0.1.0).
+# A magenta ground with black arcs, diagonal CMYK zones, bars and stripes keyed in the white and cyan zones,
+# two "roads" of fine coloured lines, dark mosaic skirts, rolling down inside a black letterbox frame.
+# See placard.vhd, placard.py and SUMMARY.md.
+
+[program]
+processing_delay_clks = 18
+program_id = "com.czartroniks.placard"
+program_name = "Placard"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Pattern", "Shape", "Illusion"]
+program_type = "processing"
+description = "Magenta ground with black arcs, diagonal CMYK zones, bars and stripes, roads of fine lines, rolling in a frame."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Arcs"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Squeeze"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Bars"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Speed"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 672
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Zones"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Etch"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 320
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Fold"
+value_labels = ["Fold", "Ramp"]
+initial_value_label = "Fold"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Stripes"
+value_labels = ["Stripes", "Bars"]
+initial_value_label = "Stripes"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Frame"
+value_labels = ["On", "Off"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Colours"
+value_labels = ["Print", "Neon"]
+initial_value_label = "Print"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Flood"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 410
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Clip"
+
+[[preset]]
+name = "Contours"
+rotary_potentiometer_2 = 700
+linear_potentiometer_12 = 0
+
+[[preset]]
+name = "Flood"
+rotary_potentiometer_5 = 700
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Neon Ramp"
+rotary_potentiometer_4 = 760
+toggle_switch_7 = 1
+toggle_switch_10 = 1
+
+[[preset]]
+name = "Dense"
+rotary_potentiometer_1 = 800
+rotary_potentiometer_3 = 800
+rotary_potentiometer_5 = 300
+
+[[preset]]
+name = "Full Screen"
+toggle_switch_9 = 1
+linear_potentiometer_12 = 600
+
+[[preset]]
+name = "Slow Print"
+rotary_potentiometer_2 = 300
+rotary_potentiometer_4 = 560
+
+[[preset]]
+name = "Osc Etch"
+rotary_potentiometer_6 = 800
+toggle_switch_11 = 1

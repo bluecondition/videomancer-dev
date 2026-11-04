@@ -1,0 +1,116 @@
+#!/usr/bin/env python3
+# Copyright (C) 2026 czartroniks
+# SPDX-License-Identifier: GPL-3.0-only
+"""
+PLACARD v0.1.0 - build hook.  Writes placard_pkg.vhd next to this file (pure python: the builder runs it with
+the system python3).
+
+Heirloom from the clip WIN_20230221_00_58_22 at 0.5 s (see .heirloom_work/rb_placard/notes.md).  The picture:
+a magenta ground with thin black arcs (contours of an H ramp whose rate is modulated by a vertical oscillator,
+F = x * u(phi) / lambda), diagonal CMYK zones (a folded diagonal ramp Z = |x - 1.8 y|: white, cyan, flat
+magenta, yellow, black), vertical bars / horizontal stripes / hatched bars keyed inside the white and cyan
+zones, two kinds of band (the "roads": contours of the product field P = (x + 200)(y - y0) coloured by the
+cyclic CMYK palette), dark mosaic skirts, all rolling down the frame, inside a black letterbox frame.
+
+Package contents (also read by imodel.py):
+  C_PL_COS   1024 x 8   signed round(127 cos(2 pi (i - 108) / 470)), i = vertical phase in lines (0..939)
+  C_PL_EXP2  256 x 16   round(32768 * 2^(i/256))
+  C_PL_STR   1024 x 4   bit 0 = stripe row ((i mod 30) < 15), bits 2..1 = hatch row ((i mod 8) >> 1)
+  C_PL_PAL   64 x 32    {Y, U, V, 00}: index = palette * 32 + class; luma pre-scaled 16/13 for the shell's
+                        13/16 output scale and capped at 940 (drawn whites ~777).  Colours in the hardware
+                        convention (U register = Cr, V register = Cb).
+Classes: 0 ground, 1 ground + thin arc, 2 black arc, 3 white, 4 cyan, 5 flat magenta, 6 yellow, 7 black,
+8 navy (mosaic), 9 navy thin, 10 navy thick, 11..14 hatch W / C / M / k, 15 band dark, 16..31 band palette.
+"""
+import math
+import os
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+BAND_RGB = [(130, 140, 140), (175, 185, 185), (215, 220, 220), (235, 240, 240), (120, 240, 250), (40, 250, 255),
+            (200, 90, 240), (252, 22, 252), (252, 22, 252), (170, 110, 250), (150, 220, 240), (165, 175, 175),
+            (65, 70, 65), (140, 140, 25), (70, 75, 70), (100, 105, 105)]
+BAND_RGB_NEON = [(130, 140, 140), (175, 185, 185), (215, 220, 220), (235, 240, 240), (120, 250, 130), (40, 255, 60),
+                 (250, 90, 90), (250, 40, 40), (250, 40, 40), (120, 140, 255), (160, 190, 255), (165, 175, 175),
+                 (65, 70, 65), (40, 40, 160), (70, 75, 70), (100, 105, 105)]
+
+def mul(c, k):
+    return tuple(int(round(v * k)) for v in c)
+
+PALS = []
+# palette 0: Print (the clip)
+g = (251, 18, 175); nv = (24, 27, 55); bk = (12, 12, 14)
+PALS.append([g, mul(g, 0.62), bk, (234, 238, 240), (31, 247, 252), (252, 22, 252), (252, 249, 10), bk,
+             nv, mul(nv, 0.7), mul(nv, 0.45), (234, 238, 240), (31, 247, 252), (252, 22, 252), bk, (60, 62, 60)] + BAND_RGB)
+# palette 1: Neon (navy ground, white / green / red / blue zones)
+g = (20, 20, 90); nv = (60, 10, 30)
+PALS.append([g, mul(g, 0.62), bk, (240, 240, 240), (40, 250, 60), (250, 40, 40), (60, 90, 255), bk,
+             nv, mul(nv, 0.7), mul(nv, 0.45), (240, 240, 240), (40, 250, 60), (250, 40, 40), bk, (60, 62, 60)] + BAND_RGB_NEON)
+
+def rgb_to_hw10(rgb):
+    r, g, b = [c / 255.0 for c in rgb]
+    y = 0.299 * r + 0.587 * g + 0.114 * b
+    cb, cr = (b - y) / 1.772, (r - y) / 1.402
+    return (round(64 + y * 876), round(512 + cr * 896), round(512 + cb * 896))
+
+def prescale(yuv):
+    y, u, v = yuv
+    y2 = 64 + (y - 64) * 16.0 / 13.0
+    y2 = int(round(min(940, max(64, y2))))
+    return (y2, min(1000, max(24, int(u))), min(1000, max(24, int(v))))
+
+def word(yuv):
+    y, u, v = prescale(yuv)
+    return (y << 22) | (u << 12) | (v << 2)
+
+def cos_rom():
+    out = []
+    for i in range(1024):
+        if i < 940:
+            out.append(int(round(127 * math.cos(2 * math.pi * (i - 108) / 470.0))))
+        else:
+            out.append(0)
+    return out
+
+def str_rom():
+    return [(1 if (i % 30) < 15 else 0) | (((i % 8) >> 1) << 1) for i in range(1024)]
+
+def exp2_rom():
+    return [int(round(32768 * 2 ** (i / 256.0))) for i in range(256)]
+
+def pal_rom():
+    out = []
+    for pal in PALS:
+        assert len(pal) == 32
+        out += [word(rgb_to_hw10(c)) for c in pal]
+    return out
+
+def vhd_table(name, typ, depth, width, vals, signed=False):
+    lines = ["    type %s is array (0 to %d) of %s(%d downto 0);" % ("t_" + name.lower(), depth - 1, typ, width - 1),
+             "    constant %s : %s := (" % (name, "t_" + name.lower())]
+    items = []
+    for v in vals:
+        if signed:
+            items.append('to_signed(%d, %d)' % (v, width))
+        else:
+            items.append('x"%0*X"' % ((width + 3) // 4, v) if width % 4 == 0 else 'to_unsigned(%d, %d)' % (v, width))
+    per = 8 if signed else 16
+    for i in range(0, len(items), per):
+        lines.append("        " + ", ".join(items[i:i + per]) + ("," if i + per < len(items) else ""))
+    lines.append("    );")
+    return "\n".join(lines)
+
+def main():
+    parts = ["-- Generated by placard.py -- DO NOT EDIT.",
+             "library ieee;", "use ieee.std_logic_1164.all;", "use ieee.numeric_std.all;", "",
+             "package placard_pkg is",
+             vhd_table("C_PL_COS", "signed", 1024, 8, cos_rom(), signed=True),
+             vhd_table("C_PL_EXP2", "unsigned", 256, 16, exp2_rom()),
+             vhd_table("C_PL_STR", "unsigned", 1024, 4, str_rom()),
+             vhd_table("C_PL_PAL", "std_logic_vector", 64, 32, pal_rom()),
+             "end package placard_pkg;", ""]
+    with open(os.path.join(HERE, "placard_pkg.vhd"), "w") as f:
+        f.write("\n".join(parts))
+
+if __name__ == "__main__":
+    main()
