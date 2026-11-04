@@ -165,13 +165,13 @@ versions from v0.1.0.
 | 18 | 20230618_20_23_10 t0.5 | hourglass | rainbow hourglass lens pair on black | v0.1.0 built 2026-11-04 (router2; HD HDMI seed 2; 5648–5661 LC, 74 %, 21 EBR); not flashed |
 | 19 | 20230620_00_50_54 t0.5 | saltire | magenta/yellow/green/blue hard-edged neon X with wavy edges | in progress (wave 2) |
 | 20 | 20230703_01_29_07 t10.0 | horizon | cyan/blue/yellow planet horizon with ribs | in progress (wave 2) |
-| 21 | 20230710_00_15_14 t1.5 | plumage | orange/magenta/green feather fan curves | in progress (wave 2) |
+| 21 | 20230710_00_15_14 t1.5 | plumage | orange/magenta/green feather fan curves | v0.1.0 built 2026-11-04 (router2; HD HDMI seed 2; HD Analog thin, 75.05 MHz; 7140–7173 LC, 23 EBR); not flashed |
 | 22 | 20230712_00_46_37 t2.5 | scales | cyan/orange/pink crescent fish scales | in progress (wave 2) |
 | 23 | 20230717_23_51_09 t7.5 | ironwork | magenta/green/black lace contour ironwork | in progress (wave 2) |
 | 24 | 20230722_01_18_41 t5.5 | carpet | red/white/orange kaleidoscopic carpet | in progress (wave 2) |
 | 25 | 20230731_01_19_22 t0.5 | pebble | red/orange concentric dotted ripple rings | in progress (wave 2) |
 | 26 | 20230816_00_32_31 t5.0 | temple | orange/yellow/blue symmetric sunset temple with blue flames | in progress (wave 2) |
-| 27 | 20230820_01_33_09 t0.5 | brushfire | orange/green/white burning-grass streaks | queued |
+| 27 | 20230820_01_33_09 t0.5 | brushfire | orange/green/white burning-grass streaks | in progress (wave 2) |
 | 28 | 20230825_00_00_20 t6.5 | arcade | orange/blue ring arches on blue stripes | queued |
 | 29 | 20230905_00_44_28 t0.5 | coral | red hexagon core with cyan coral rings on light blue | queued |
 | 30 | 20230906_00_33_30 t11.0 | spine | magenta/purple/black torn diagonal spine | queued |
