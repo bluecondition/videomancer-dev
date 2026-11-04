@@ -1,0 +1,160 @@
+# Zebra - Heirloom (phase 3, video clips), built 2026-11-04 (v0.1.0) from the clip still WIN_20230404_23_59_18 at 9.5 s.
+# A neon zebra swirl: nested diamond / chevron stripes through a folded colouriser, cut by concentric arc seams into
+# ribbons that each jump half a cycle (staggered black cells), stripes curling into the seams.  See zebra.vhd, zebra.py.
+
+[program]
+processing_delay_clks = 24
+program_id = "com.czartroniks.zebra"
+program_name = "Zebra"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Pattern", "Illusion", "Warp"]
+program_type = "processing"
+description = "Neon zebra swirl: chevron stripes cut by concentric arc seams into staggered ribbons that curl and drift."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Bands"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Chevron"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 713
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Shift"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Speed"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 640
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Cells"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 420
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Etch"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 180
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Curl"
+value_labels = ["On", "Off"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Mirror"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Seams"
+value_labels = ["Arcs", "Saddle"]
+initial_value_label = "Arcs"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Colours"
+value_labels = ["Neon", "Fire"]
+initial_value_label = "Neon"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Swirl"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 461
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Photo"
+
+[[preset]]
+name = "Unwound"
+linear_potentiometer_12 = 80
+rotary_potentiometer_4 = 700
+
+[[preset]]
+name = "Shredded"
+linear_potentiometer_12 = 1000
+rotary_potentiometer_1 = 700
+
+[[preset]]
+name = "Arch"
+toggle_switch_8 = 1
+rotary_potentiometer_2 = 850
+linear_potentiometer_12 = 560
+
+[[preset]]
+name = "Saddle"
+toggle_switch_9 = 1
+linear_potentiometer_12 = 520
+rotary_potentiometer_5 = 520
+
+[[preset]]
+name = "Fire Bricks"
+toggle_switch_10 = 1
+rotary_potentiometer_3 = 760
+rotary_potentiometer_1 = 380
+
+[[preset]]
+name = "Hairline"
+rotary_potentiometer_1 = 1023
+rotary_potentiometer_5 = 200
+toggle_switch_7 = 1
+
+[[preset]]
+name = "Needles"
+rotary_potentiometer_2 = 1023
+rotary_potentiometer_4 = 860
+linear_potentiometer_12 = 640
