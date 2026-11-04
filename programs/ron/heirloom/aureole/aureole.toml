@@ -1,0 +1,151 @@
+# Aureole - Heirloom from the video clips (v0.1.0, 2026-11-04), from clip WIN_20230314_23_42_54 at 7.5 s.
+# A soft cyan bloom in nested vertical bands with a dark-red horned floor and a warm cap (white, orange, pink)
+# scrolling down through it.  See aureole.vhd, aureole.py and SUMMARY.md.
+# v0.1.1: S9 Gold = a full-frame gold halo (bold at any scroll phase); the default frame is unchanged.
+
+[program]
+processing_delay_clks = 24
+program_id = "com.czartroniks.aureole"
+program_name = "Aureole"
+program_version = "0.1.1"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Pattern", "Shape", "Illusion"]
+program_type = "processing"
+description = "Soft cyan bloom in nested bands; a warm white cap with horned edges scrolls down through it."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Width"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Horns"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 205
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Skew"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 820
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Speed"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 761
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Teeth"
+control_mode = "linear"
+display_min_value = 2
+display_max_value = 12
+initial_value = 357
+display_float_digits = 1
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Etch"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 400
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Palette"
+value_labels = ["Cyan", "Gold"]
+initial_value_label = "Cyan"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Twin"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Glow"
+value_labels = ["Blue", "Gold"]
+initial_value_label = "Blue"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Shape"
+value_labels = ["Arch", "Well"]
+initial_value_label = "Arch"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Bloom"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 489
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Clip"
+
+[[preset]]
+name = "Deep Horns"
+rotary_potentiometer_2 = 700
+rotary_potentiometer_5 = 300
+linear_potentiometer_12 = 600
+
+[[preset]]
+name = "White Bloom"
+rotary_potentiometer_2 = 400
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Gold Twins"
+toggle_switch_7 = 1
+toggle_switch_8 = 1
+toggle_switch_9 = 1
+linear_potentiometer_12 = 560
+
+[[preset]]
+name = "Well"
+rotary_potentiometer_1 = 650
+rotary_potentiometer_2 = 300
+toggle_switch_10 = 1
+
+[[preset]]
+name = "Slow Cathedral"
+rotary_potentiometer_2 = 60
+rotary_potentiometer_4 = 600
+linear_potentiometer_12 = 120
