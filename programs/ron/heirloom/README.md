@@ -147,7 +147,7 @@ versions from v0.1.0.
 |---|---|---|---|---|
 | 1 | 20230127_01_48_55 t25.5 | tongues | twin red/yellow flame tongues mirrored, green ground at right, black | in progress (wave 1) |
 | 2 | 20230203_00_19_56 t6.0 | tapers | magenta/cyan/blue candle-flame columns on black | v0.1.0 built 2026-11-04 (router2; HD Analog seed 2; 6296–6308 LC, 9 EBR); not flashed |
-| 3 | 20230205_00_16_05 t0.5 | zigzag | green/rainbow zigzag V ribbons with white/blue highlights | in progress (wave 1) |
+| 3 | 20230205_00_16_05 t0.5 | zigzag | green/rainbow zigzag V ribbons with white/blue highlights | v0.1.0 built 2026-11-04 (ROUTER1 6/6 seed 1; 5863–5882 LC, 21 EBR); not flashed |
 | 4 | 20230206_00_35_06 t0.5 | frogspawn | green/black cellular contour lattice | in progress (wave 1) |
 | 5 | 20230210_01_00_21 t3.0 | peaks | pink/orange/violet sunset peaks with teeth | v0.1.0 built 2026-11-04 (ROUTER1 6/6 seed 1; 7033–7048 LC, 17 EBR); not flashed |
 | 6 | 20230216_01_27_34 t2.5 | grommets | purple/blue ring lattice with black holes | v0.1.0 built 2026-11-04 (router2; HD HDMI seed 3, HD Dual seed 2; 6650–6675 LC, 23 EBR); not flashed |
@@ -157,7 +157,7 @@ versions from v0.1.0.
 | 10 | 20230314_23_42_54 t7.5 | aureole | soft glowing white/cyan/orange bloom figure | in progress (wave 1) |
 | 11 | 20230401_00_20_03 t0.5 | lattice | magenta/green/blue diamond trellis with blue diamonds | in progress (wave 2) |
 | 12 | 20230404_23_59_18 t9.5 | zebra | black/white zebra stripe swirl with red/blue fringes | in progress (wave 2) |
-| 13 | 20230428_23_30_39 t0.5 | vinyl | fine blue/red vinyl-groove moire rings | queued |
+| 13 | 20230428_23_30_39 t0.5 | vinyl | fine blue/red vinyl-groove moire rings | in progress (wave 2) |
 | 14 | 20230501_01_34_42 t0.5 | lentil | bright pink curved lens bands around blue diamonds | queued |
 | 15 | 20230509_23_58_21 t0.5 | wildfire | green/yellow/blue rainbow flame contours | queued |
 | 16 | 20230518_23_23_28 t0.5 | crucible | orange/blue flame cross on magenta with mirrored blue shapes | queued |
