@@ -134,3 +134,64 @@ are listed below; rebuild those with `NEXTPNR_ROUTER="--router router1"` and/or 
 | duci.jpg (collage) | [radiant](radiant/) | pink paper rays burst from a dark halo behind a bust with a flag lens and a cup of coffee on his head | v0.5.0 rebuilt from the collage, built 2026-10-28, router2, base SEED=3 6/6; not flashed |
 | selfie.jpg (collage) | [triplicate](triplicate/) | the picture photocopied in red, green and blue, cascading over a wall of prints | v0.5.0 rebuilt from the collage, built 2026-10-21, 6/6 seed 1, thin HD margins; not flashed |
 | tezcatlipoca.jpg (collage) | [cutout](cutout/) | a collage head of torn magazine scraps on a yellow ground | v0.6.0 phase 2 (K2 Crops, per-scrap drift, S8 Inks swap, S10 camera mirror), built 2026-11-01, ROUTER1, HD seeds pin-skew screened, 98% LC, 27 EBR; not flashed |
+
+## From the video clips (phase 3, started 2026-11-04)
+
+Stills taken out of the 2023–2024 Camera Roll mp4 clips (481 clips, 164 capture sessions, 1,099 distinct looks), capped at
+**50 programs**, one per patch (clips shot back to back are one patch). The brief is [VIDEO.md](VIDEO.md); the picks,
+grades and reserve list are in `.heirloom_work/vid/` (`queue.txt`, `triage.txt`). Stills: `photos/vid/<clip>_t<sec>.png`
+with a motion strip and four motion frames beside each. Programs are built to the phase-2 standard from the start,
+versions from v0.1.0.
+
+| # | Still (clip, time) | Program | What it shows | Status |
+|---|---|---|---|---|
+| 1 | 20230127_01_48_55 t25.5 | tongues | twin red/yellow flame tongues mirrored, green ground at right, black | in progress (wave 1) |
+| 2 | 20230203_00_19_56 t6.0 | tapers | magenta/cyan/blue candle-flame columns on black | in progress (wave 1) |
+| 3 | 20230205_00_16_05 t0.5 | zigzag | green/rainbow zigzag V ribbons with white/blue highlights | in progress (wave 1) |
+| 4 | 20230206_00_35_06 t0.5 | frogspawn | green/black cellular contour lattice | in progress (wave 1) |
+| 5 | 20230210_01_00_21 t3.0 | peaks | pink/orange/violet sunset peaks with teeth | in progress (wave 1) |
+| 6 | 20230216_01_27_34 t2.5 | grommets | purple/blue ring lattice with black holes | v0.1.0 built 2026-11-04 (router2; HD HDMI seed 3, HD Dual seed 2; 6650–6675 LC, 23 EBR); not flashed |
+| 7 | 20230221_00_58_22 t0.5 | placard | hard-edged yellow/magenta/cyan/black graphic with stripe hatching in a frame | in progress (wave 1) |
+| 8 | 20230301_23_17_23 t0.5 | undulate | rainbow sine ripple field | in progress (wave 1) |
+| 9 | 20230305_00_05_43 t0.5 | chalice | mirrored chalice figure with rainbow contours on black | in progress (wave 1) |
+| 10 | 20230314_23_42_54 t7.5 | aureole | soft glowing white/cyan/orange bloom figure | in progress (wave 1) |
+| 11 | 20230401_00_20_03 t0.5 | lattice | magenta/green/blue diamond trellis with blue diamonds | queued |
+| 12 | 20230404_23_59_18 t9.5 | zebra | black/white zebra stripe swirl with red/blue fringes | queued |
+| 13 | 20230428_23_30_39 t0.5 | vinyl | fine blue/red vinyl-groove moire rings | queued |
+| 14 | 20230501_01_34_42 t0.5 | lentil | bright pink curved lens bands around blue diamonds | queued |
+| 15 | 20230509_23_58_21 t0.5 | wildfire | green/yellow/blue rainbow flame contours | queued |
+| 16 | 20230518_23_23_28 t0.5 | crucible | orange/blue flame cross on magenta with mirrored blue shapes | queued |
+| 17 | 20230529_01_27_21 t0.5 | serpent | red/green/yellow serpent S-ribbon on black | queued |
+| 18 | 20230618_20_23_10 t0.5 | hourglass | rainbow hourglass lens pair on black | queued |
+| 19 | 20230620_00_50_54 t0.5 | saltire | magenta/yellow/green/blue hard-edged neon X with wavy edges | queued |
+| 20 | 20230703_01_29_07 t10.0 | horizon | cyan/blue/yellow planet horizon with ribs | queued |
+| 21 | 20230710_00_15_14 t1.5 | plumage | orange/magenta/green feather fan curves | queued |
+| 22 | 20230712_00_46_37 t2.5 | scales | cyan/orange/pink crescent fish scales | queued |
+| 23 | 20230717_23_51_09 t7.5 | ironwork | magenta/green/black lace contour ironwork | queued |
+| 24 | 20230722_01_18_41 t5.5 | carpet | red/white/orange kaleidoscopic carpet | queued |
+| 25 | 20230731_01_19_22 t0.5 | pebble | red/orange concentric dotted ripple rings | queued |
+| 26 | 20230816_00_32_31 t5.0 | temple | orange/yellow/blue symmetric sunset temple with blue flames | queued |
+| 27 | 20230820_01_33_09 t0.5 | brushfire | orange/green/white burning-grass streaks | queued |
+| 28 | 20230825_00_00_20 t6.5 | arcade | orange/blue ring arches on blue stripes | queued |
+| 29 | 20230905_00_44_28 t0.5 | coral | red hexagon core with cyan coral rings on light blue | queued |
+| 30 | 20230906_00_33_30 t11.0 | spine | magenta/purple/black torn diagonal spine | queued |
+| 31 | 20230910_00_11_50 t7.0 | quill | blue/white feather plumes on black | queued |
+| 32 | 20230914_01_59_34 t4.0 | marble | cream/orange/red marble swirl arcs with blue dots | queued |
+| 33 | 20230919_00_32_29 t3.0 | neon | magenta/white glowing S-curve neon tubes on teal | queued |
+| 34 | 20230930_01_37_53 t0.5 | brazier | blue/purple nested diamond with pink flames on a red/black ground | queued |
+| 35 | 20231002_01_20_50 t0.5 | lantern | magenta/yellow/black nested petal contours around a pink disc | queued |
+| 36 | 20231009_00_32_55 t0.5 | cumulus | blue/yellow/magenta/cyan scalloped cloud waves with drips | queued |
+| 37 | 20231104_16_39_25 t0.5 | streamers | bold rainbow wavy vertical ribbons | queued |
+| 38 | 20231116_23_41_37 t3.5 | hawser | yellow/black/red wavy rope strands with red glints | queued |
+| 39 | 20231119_00_47_47 t0.5 | herringbone | blue/white zigzag herringbone stripes | queued |
+| 40 | 20231123_23_27_50 t5.5 | confetti | magenta petal cards over a striped grey ground with red/blue stripes | queued |
+| 41 | 20231124_00_45_44 t5.0 | pyramid | teal/pink pyramid with a striped core on a dark vignette | queued |
+| 42 | 20231204_21_01_30 t0.5 | platter | pink dotted vinyl disc on dark with curved magenta/green strands | queued |
+| 43 | 20231204_23_13_02 t5.5 | plaid | red/yellow/black woven plaid with wavy curves | queued |
+| 44 | 20231205_23_09_56 t0.5 | bunsen | orange/blue flame on blue; blue with yellow flame blobs | queued |
+| 45 | 20231227_22_52_47 t3.5 | kachina | red/magenta/blue/yellow mirrored totem mask | queued |
+| 46 | 20231229_00_46_59 t6.0 | effigy | yellow idol in red/black flames, mirrored | queued |
+| 47 | 20240102_00_30_49 t1.0 | cateye | pink/yellow chevron eye | queued |
+| 48 | 20240104_00_30_04 t3.0 | grotto | blue/white/black cavern eye with cyan edges | queued |
+| 49 | 20240105_20_46_57 t0.5 | bubbles | bubble lenses in cyan/green/red wavy bands | queued |
+| 50 | 20240216_23_50_17 t0.5 | velvet | magenta/white/yellow vertical drapes with a reflection | queued |
