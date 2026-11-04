@@ -1,0 +1,153 @@
+# Peaks - Heirloom from the video clips, 2026-11-04 (v0.1.0), from WIN_20230210_01_00_21 at 3.0 s.
+# Two yellow peaks of a sunset over diagonal peach/magenta bands and a green/violet weave, reflected in
+# rippled water, with H-sync slips smearing the sky.  See peaks.vhd, peaks.py and SUMMARY.md.
+
+[program]
+processing_delay_clks = 18
+program_id = "com.czartroniks.peaks"
+program_name = "Peaks"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Pattern", "Shape", "Illusion"]
+program_type = "processing"
+description = "Sunset peaks over diagonal bands and a green-violet weave, reflected in rippling water; the picture warps the sky."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Bands"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Curtains"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Lean"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 700
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Picture"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 320
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Peaks"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 400
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Tint"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Tears"
+value_labels = ["On", "Off"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Water"
+value_labels = ["Hold", "Mirror"]
+initial_value_label = "Hold"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Suns"
+value_labels = ["Two", "Four"]
+initial_value_label = "Two"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Palette"
+value_labels = ["Sunset", "Night"]
+initial_value_label = "Sunset"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Storm"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 400
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Clip"
+
+[[preset]]
+name = "Glassy Dusk"
+toggle_switch_7 = 1
+linear_potentiometer_12 = 0
+
+[[preset]]
+name = "Mirror Lake"
+toggle_switch_8 = 1
+rotary_potentiometer_3 = 560
+linear_potentiometer_12 = 250
+
+[[preset]]
+name = "Four Moons"
+toggle_switch_9 = 1
+toggle_switch_10 = 1
+rotary_potentiometer_5 = 300
+
+[[preset]]
+name = "Blue Hour"
+rotary_potentiometer_6 = 60
+rotary_potentiometer_2 = 380
+
+[[preset]]
+name = "Gale"
+linear_potentiometer_12 = 1023
+rotary_potentiometer_4 = 600
+
+[[preset]]
+name = "Big Peaks"
+rotary_potentiometer_5 = 900
+rotary_potentiometer_1 = 300
+rotary_potentiometer_6 = 900
