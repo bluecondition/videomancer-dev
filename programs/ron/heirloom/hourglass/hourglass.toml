@@ -1,0 +1,158 @@
+# Hourglass - Heirloom from the video clips (phase 3), v0.1.0, built 2026-11-04 from the still
+# WIN_20230618_20_23_10 t0.5 (the clip scrolls one patch down with a 2.37 s period).  A rainbow lens pair on
+# olive-black: a vertical sine wave on an hourglass profile keys |x| (the lenses), a soft key gives the yellow
+# halo, two measured colourisers (a tilted-stripe field and a depth field) fill the lenses.
+# See hourglass.vhd, hourglass.py, SUMMARY.md.
+
+[program]
+processing_delay_clks = 24
+program_id = "com.czartroniks.hourglass"
+program_name = "Hourglass"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Shape", "Color", "Optics"]
+program_type = "processing"
+description = "A rainbow lens pair pinching in an hourglass of yellow glow: a scrolling wave keys the lenses; stripes and rings fill them."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Waist"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Bulbs"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Glow"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Speed"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 700
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Colour"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Camera"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 384
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Mirror"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Palette"
+value_labels = ["Photo", "Ice"]
+initial_value_label = "Photo"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Twin"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Halo"
+value_labels = ["Glow", "Rings"]
+initial_value_label = "Glow"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Pinch"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 479
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Photo"
+
+[[preset]]
+name = "Calm Vase"
+linear_potentiometer_12 = 0
+rotary_potentiometer_3 = 700
+
+[[preset]]
+name = "Bead Chain"
+rotary_potentiometer_1 = 0
+rotary_potentiometer_2 = 760
+linear_potentiometer_12 = 700
+
+[[preset]]
+name = "Mirror Pair"
+toggle_switch_7 = 1
+rotary_potentiometer_4 = 620
+
+[[preset]]
+name = "Ice Twins"
+toggle_switch_8 = 1
+toggle_switch_9 = 1
+
+[[preset]]
+name = "Ring Halo"
+toggle_switch_10 = 1
+rotary_potentiometer_3 = 760
+
+[[preset]]
+name = "Rising"
+rotary_potentiometer_4 = 330
+rotary_potentiometer_5 = 680
+
+[[preset]]
+name = "Camera Lens"
+rotary_potentiometer_6 = 800
+linear_potentiometer_12 = 560
