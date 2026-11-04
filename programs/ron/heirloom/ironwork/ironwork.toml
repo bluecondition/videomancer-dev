@@ -1,0 +1,153 @@
+# Ironwork - Heirloom phase 3 (video clips), v0.1.1 (2026-11-04), from the still WIN_20230717_23_51_09 at 7.5 s.
+# A magenta / green / black lace of contour ironwork: an offset-circle field (lenses, diamond eyes, arches) read
+# as rings, two colourisers keyed by fine bent stripes, torn by line-timing slips.  See ironwork.vhd / .py.
+
+[program]
+processing_delay_clks = 24
+program_id = "com.czartroniks.ironwork"
+program_name = "Ironwork"
+program_version = "0.1.1"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Pattern", "Shape", "Illusion"]
+program_type = "processing"
+description = "Magenta, green and black contour lace: lenses, diamond eyes and arches keyed by fine bent stripes."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Tiles"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Rows"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Lens"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Cycle"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 700
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Rings"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Etch"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 400
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Tear"
+value_labels = ["On", "Off"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Palette"
+value_labels = ["Ironwork", "Verdigris"]
+initial_value_label = "Ironwork"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Weave"
+value_labels = ["Lace", "Mesh"]
+initial_value_label = "Lace"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Key"
+value_labels = ["Lace", "Negative"]
+initial_value_label = "Lace"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Lace"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Photo"
+
+[[preset]]
+name = "Wrought Bars"
+linear_potentiometer_12 = 60
+rotary_potentiometer_4 = 620
+
+[[preset]]
+name = "Filigree"
+linear_potentiometer_12 = 1000
+rotary_potentiometer_5 = 640
+
+[[preset]]
+name = "Verdigris Mesh"
+toggle_switch_8 = 1
+toggle_switch_9 = 1
+rotary_potentiometer_1 = 700
+
+[[preset]]
+name = "Rose Window"
+rotary_potentiometer_3 = 0
+rotary_potentiometer_5 = 720
+rotary_potentiometer_2 = 380
+
+[[preset]]
+name = "Long Arches"
+rotary_potentiometer_3 = 1000
+rotary_potentiometer_2 = 300
+toggle_switch_7 = 1
+
+[[preset]]
+name = "Negative"
+toggle_switch_10 = 1
+rotary_potentiometer_4 = 820
