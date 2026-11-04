@@ -153,13 +153,13 @@ versions from v0.1.0.
 | 6 | 20230216_01_27_34 t2.5 | grommets | purple/blue ring lattice with black holes | v0.1.0 built 2026-11-04 (router2; HD HDMI seed 3, HD Dual seed 2; 6650–6675 LC, 23 EBR); not flashed |
 | 7 | 20230221_00_58_22 t0.5 | placard | hard-edged yellow/magenta/cyan/black graphic with stripe hatching in a frame | v0.1.0 built 2026-11-04 (ROUTER1 6/6 seed 1; 7150–7158 LC, 15 EBR); not flashed |
 | 8 | 20230301_23_17_23 t0.5 | undulate | rainbow sine ripple field | in progress (wave 1) |
-| 9 | 20230305_00_05_43 t0.5 | chalice | mirrored chalice figure with rainbow contours on black | in progress (wave 1) |
+| 9 | 20230305_00_05_43 t0.5 | chalice | mirrored chalice figure with rainbow contours on black | v0.1.0 built 2026-11-04 (router2 6/6 seed 1; 6923–6952 LC, 17 EBR); not flashed |
 | 10 | 20230314_23_42_54 t7.5 | aureole | soft glowing white/cyan/orange bloom figure | in progress (wave 1) |
 | 11 | 20230401_00_20_03 t0.5 | lattice | magenta/green/blue diamond trellis with blue diamonds | in progress (wave 2) |
 | 12 | 20230404_23_59_18 t9.5 | zebra | black/white zebra stripe swirl with red/blue fringes | in progress (wave 2) |
 | 13 | 20230428_23_30_39 t0.5 | vinyl | fine blue/red vinyl-groove moire rings | in progress (wave 2) |
 | 14 | 20230501_01_34_42 t0.5 | lentil | bright pink curved lens bands around blue diamonds | in progress (wave 2) |
-| 15 | 20230509_23_58_21 t0.5 | wildfire | green/yellow/blue rainbow flame contours | queued |
+| 15 | 20230509_23_58_21 t0.5 | wildfire | green/yellow/blue rainbow flame contours | in progress (wave 2) |
 | 16 | 20230518_23_23_28 t0.5 | crucible | orange/blue flame cross on magenta with mirrored blue shapes | queued |
 | 17 | 20230529_01_27_21 t0.5 | serpent | red/green/yellow serpent S-ribbon on black | queued |
 | 18 | 20230618_20_23_10 t0.5 | hourglass | rainbow hourglass lens pair on black | queued |
