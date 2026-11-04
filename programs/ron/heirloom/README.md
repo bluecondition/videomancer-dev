@@ -155,7 +155,7 @@ versions from v0.1.0.
 | 8 | 20230301_23_17_23 t0.5 | undulate | rainbow sine ripple field | v0.1.1 built 2026-11-04 (router2 6/6 seed 1; HD HDMI thin, 74.31 MHz; 7054–7072 LC, 21 EBR); not flashed |
 | 9 | 20230305_00_05_43 t0.5 | chalice | mirrored chalice figure with rainbow contours on black | v0.1.0 built 2026-11-04 (router2 6/6 seed 1; 6923–6952 LC, 17 EBR); not flashed |
 | 10 | 20230314_23_42_54 t7.5 | aureole | soft glowing white/cyan/orange bloom figure | in progress (wave 1) |
-| 11 | 20230401_00_20_03 t0.5 | lattice | magenta/green/blue diamond trellis with blue diamonds | in progress (wave 2) |
+| 11 | 20230401_00_20_03 t0.5 | lattice | magenta/green/blue diamond trellis with blue diamonds | v0.1.0 built 2026-11-04 (ROUTER1 6/6 seed 1; 6552–6566 LC, 15 EBR); not flashed |
 | 12 | 20230404_23_59_18 t9.5 | zebra | black/white zebra stripe swirl with red/blue fringes | in progress (wave 2) |
 | 13 | 20230428_23_30_39 t0.5 | vinyl | fine blue/red vinyl-groove moire rings | in progress (wave 2) |
 | 14 | 20230501_01_34_42 t0.5 | lentil | bright pink curved lens bands around blue diamonds | in progress (wave 2) |
@@ -163,7 +163,7 @@ versions from v0.1.0.
 | 16 | 20230518_23_23_28 t0.5 | crucible | orange/blue flame cross on magenta with mirrored blue shapes | in progress (wave 2) |
 | 17 | 20230529_01_27_21 t0.5 | serpent | red/green/yellow serpent S-ribbon on black | in progress (wave 2) |
 | 18 | 20230618_20_23_10 t0.5 | hourglass | rainbow hourglass lens pair on black | in progress (wave 2) |
-| 19 | 20230620_00_50_54 t0.5 | saltire | magenta/yellow/green/blue hard-edged neon X with wavy edges | queued |
+| 19 | 20230620_00_50_54 t0.5 | saltire | magenta/yellow/green/blue hard-edged neon X with wavy edges | in progress (wave 2) |
 | 20 | 20230703_01_29_07 t10.0 | horizon | cyan/blue/yellow planet horizon with ribs | queued |
 | 21 | 20230710_00_15_14 t1.5 | plumage | orange/magenta/green feather fan curves | queued |
 | 22 | 20230712_00_46_37 t2.5 | scales | cyan/orange/pink crescent fish scales | queued |

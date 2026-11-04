@@ -1,0 +1,140 @@
+# Lattice - Heirloom phase 3 (video clips), v0.1.0 from WIN_20230401_00_20_03 at 0.5 s.
+# Blue diamonds on lime in a lattice, ringed orange and dark, a faint relief trellis between them, magenta blades
+# crossing on the trellis.  See lattice.vhd, lattice.py and SUMMARY.md.
+
+[program]
+processing_delay_clks = 20
+program_id = "com.czartroniks.lattice"
+program_name = "Lattice"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Pattern", "Shape", "Illusion"]
+program_type = "processing"
+description = "Blue diamonds ringed orange on a lime lattice, with magenta blades crossing and sliding along the trellis."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Big"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Small"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Columns"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Drift"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 620
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Spindles"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Rings"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Shape"
+value_labels = ["Diamond", "Bulb"]
+initial_value_label = "Diamond"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Cross"
+value_labels = ["Single", "Double"]
+initial_value_label = "Single"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Fill"
+value_labels = ["Flat", "Gem"]
+initial_value_label = "Flat"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Palette"
+value_labels = ["Lime", "Dusk"]
+initial_value_label = "Lime"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Blades"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 380
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Photo"
+
+[[preset]]
+name = "Spindles"
+rotary_potentiometer_5 = 760
+
+[[preset]]
+name = "Woven"
+linear_potentiometer_12 = 1023
+toggle_switch_8 = 1
+
+[[preset]]
+name = "Rainbow Gems"
+rotary_potentiometer_6 = 900
+toggle_switch_9 = 1
+
+[[preset]]
+name = "Dusk Bulbs"
+toggle_switch_7 = 1
+toggle_switch_10 = 1
+linear_potentiometer_12 = 600
