@@ -1,0 +1,155 @@
+# Scales - Heirloom (phase 3, video clips), built 2026-11-04 (v0.1.0) from the clip WIN_20230712_00_46_37 at 2.5 s.
+# Crescent fish scales: a hard-synced H sawtooth bent by a V parabola, cyan / dark teal key lobes riding a slow
+# travelling wave, pink / olive bands, dark lines with red fringes.  See scales.vhd, scales.py and SUMMARY.md.
+
+[program]
+processing_delay_clks = 20
+program_id = "com.czartroniks.scales"
+program_name = "Scales"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Shape", "Pattern", "Warp"]
+program_type = "processing"
+description = "Crescent fish scales bent by a V parabola, cyan lobes swelling on a slow travelling wave, pink and olive bands."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Scales"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Bow"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Lobes"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Drift"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 768
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Bands"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Warp"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 400
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Wave"
+value_labels = ["Saw", "Tri"]
+initial_value_label = "Saw"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Mirror"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Rows"
+value_labels = ["One", "Tiled"]
+initial_value_label = "One"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Colours"
+value_labels = ["Koi", "Reef"]
+initial_value_label = "Koi"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Crescents"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 460
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Still"
+
+[[preset]]
+name = "Big Crescents"
+linear_potentiometer_12 = 720
+
+[[preset]]
+name = "Armour"
+rotary_potentiometer_1 = 640
+rotary_potentiometer_2 = 700
+toggle_switch_9 = 1
+
+[[preset]]
+name = "Bow Tie"
+rotary_potentiometer_2 = 780
+toggle_switch_8 = 1
+
+[[preset]]
+name = "Lens Eyes"
+toggle_switch_7 = 1
+linear_potentiometer_12 = 600
+
+[[preset]]
+name = "Reef"
+toggle_switch_10 = 1
+linear_potentiometer_12 = 560
+
+[[preset]]
+name = "Reversed"
+rotary_potentiometer_1 = 400
+rotary_potentiometer_2 = 40
+
+[[preset]]
+name = "Fast Tide"
+rotary_potentiometer_3 = 700
+rotary_potentiometer_4 = 1000
