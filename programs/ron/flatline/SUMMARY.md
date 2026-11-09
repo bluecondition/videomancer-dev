@@ -5,14 +5,13 @@ variants from one source, `programs/ron/flatline/flatline.vhd` (master; `variant
 the siblings and generates every TOML from `_template.toml`). Design and deviations:
 [DESIGN.md](DESIGN.md). Control card: [CONTROLS.md](CONTROLS.md).
 
-Status: **all five builds timing-closed and packed, none flashed** (see the build record below).
-**v0.1.1 (rebuilding):** the first GHDL preview renders found four defects that no build report
+Status: **v0.1.1: all five builds timing-closed and packed (16:05-16:45, 2026-11-09), none flashed.**
+**v0.1.1 fixes:** the first GHDL preview renders found four defects that no build report
 shows: the dry (raw) path read its chroma back from the delay ring crossed (the raw half of the
 wipe would have been hue-swapped on hardware), the representative-colour table had sectors 2/3
 and 6/7 crossed (red drew as yellow-orange, blue as teal), the XDoG threshold inked the whole
 picture, and the Canny gain was 4x too low to draw anything on a photo. All four are fixed in the
-source (DESIGN.md section 4, "Fixed after the first renders"); the vmprogs in out/ are v0.1.0
-until the rebuild in the build record lands. Brief: Ron's FLATLINE prompt of 2026-11-09; Ron's
+source (DESIGN.md section 4, "Fixed after the first renders") and in the vmprogs in out/. Brief: Ron's FLATLINE prompt of 2026-11-09; Ron's
 standing note: if the mode filter and the bilateral conflict for budget, the mode filter stays
 (it does; every build has it).
 
@@ -62,7 +61,11 @@ Build totals (standalone sum / estimated routed LC): A 6742 / 6870 (89%), B 7072
 C 7280 / 7325 (95%), D 7448 / 7470 (97%), E 7095 / 7170 (93%). Real routed LC has come in
 about 5 points under these estimates (see the build record).
 
-## Build record (2026-11-09, dev flow; judge the LAST post-route Fmax per config)
+## Build record (v0.1.1, 2026-11-09 evening; judge the LAST post-route Fmax per config)
+
+v0.1.1 = v0.1.0 plus the four preview-render fixes (output mux wiring, a constant table, the
+DoG threshold arithmetic and a 5-bit gain): same LC within a few cells, same EBR. The v0.1.0
+numbers are kept in the line under each row where they differ in a seed.
 
 Builder default = router2 with up to 6 seed retries; A was built with
 `NEXTPNR_ROUTER="--router router1"` (router2 missed every seed on the un-split bilateral and
@@ -73,17 +76,18 @@ the 27 MHz SD clock, so their Fmax numbers are informational.
 
 | Build | LC | EBR | HD Analog | SD Analog | HD HDMI | SD HDMI | HD Dual | SD Dual | Result |
 |---|---|---|---|---|---|---|---|---|---|
-| B flatline_ink (median + XDoG) | 6654 (87%) | 29 | 74.76 s1 | 78.74 s2 | 79.23 s2 | 80.56 | 83.10 | 70.68 | **all pass** (HD Analog margin 0.5 MHz) |
-| C flatline_canny (median + Canny) | 6825 (89%) | 29 | 85.19 | 81.70 | 82.32 s2 | 76.31 | 82.32 | 80.78 s2 | **all pass** |
-| D flatline_kuwa (Kuwahara) | 6858 (89%) | 28 | 78.16 | 77.87 | 74.45 | 81.41 | 74.85 s4 | 74.63 | **all pass** (HD HDMI 0.2 MHz, HD Dual 0.6 MHz margins) |
-| A flatline (bilateral), router1 | 6598 (86%) | 28 | 82.18 | 85.41 | 84.36 | 80.69 | 78.73 | 80.74 | **all pass**, all seed 1 (after the bilateral stage re-split; before it every HD config sat at 69.6-70.9 on router1 seeds 1-6) |
-| E flatline_finish (median + soft + shadow) | 6783 (88%) | 28 | 82.14 | 75.10 s2 | 82.24 s2 | 70.80 s3 | 77.50 s3 | 70.81 | **all pass** (after the shadow popcount pipeline; before it HD Analog sat at 52-58 MHz on both routers). router2 stalled on SD Analog s1, SD HDMI s1+s2, HD Dual s1 |
+| B flatline_ink (median + DoG ink) | 6661 (87%) | 29 | 84.63 s2 | 72.38 | 83.49 s4 | 79.26 s3 | 82.26 | 77.07 | **all pass** (v0.1.0: 74.76 / 78.74 s2 / 79.23 s2 / 80.56 / 83.10 / 70.68). router2 stalled on HD Analog s1, HD HDMI s1+s2, SD HDMI s1+s2 |
+| C flatline_canny (median + Canny) | 6848 (89%) | 29 | 77.63 s2 | 79.75 s2 | 80.44 | 80.08 | 74.86 s2 | 75.68 | **all pass** (HD Dual margin 0.6 MHz; v0.1.0: 85.19 / 81.70 / 82.32 s2 / 76.31 / 82.32 / 80.78 s2) |
+| D flatline_kuwa (Kuwahara) | 6859 (89%) | 28 | 76.41 | 70.02 | 79.55 | 79.38 | 79.47 s3 | 78.02 | **all pass** (v0.1.0: 78.16 / 77.87 / 74.45 / 81.41 / 74.85 s4 / 74.63) |
+| A flatline (bilateral), router1 | 6587 (86%) | 28 | 82.18 | 81.10 | 86.82 | 82.08 | 78.13 | 81.80 | **all pass**, all seed 1 (v0.1.0: 82.18 / 85.41 / 84.36 / 80.69 / 78.73 / 80.74, also all seed 1; before the bilateral stage re-split every HD config sat at 69.6-70.9 on router1 seeds 1-6) |
+| E flatline_finish (median + soft + shadow) | 6777 (88%) | 28 | 74.55 s5 | 68.38 | 75.61 | 71.85 s2 | 79.56 s6 | 73.48 s2 | **all pass** (HD Analog margin 0.3 MHz, HD HDMI 1.4; v0.1.0: 82.14 / 75.10 s2 / 82.24 s2 / 70.80 s3 / 77.50 s3 / 70.81). router2 stalled on 9 of its 17 seed attempts; before the shadow popcount pipeline HD Analog sat at 52-58 MHz on both routers |
 
 vmprogs: `out/rev_b/ron/flatline.vmprog`, `flatline_ink.vmprog`, `flatline_canny.vmprog`, `flatline_kuwa.vmprog`, `flatline_finish.vmprog`.
-The marginal HD configs (B HD Analog 74.76, D HD HDMI 74.45 / HD Dual 74.85) are real passes
-but thin; if a mode looks wrong only on that input, suspect timing before the algorithm and
-re-route that config with another seed (`make ... CONFIG=<cfg> SEED=<n>` + repack). A and E
-have 3-8 MHz of margin on every HD config.
+The marginal HD configs (E HD Analog 74.55, C HD Dual 74.86) are real passes but thin; if a
+mode looks wrong only on that input, suspect timing before the algorithm and re-route that
+config with another seed (`make ... CONFIG=<cfg> SEED=<n>` + repack). A has 4-12 MHz of margin
+on every HD config. E's HD Dual closed on the last retry (seed 6) at 79.56, a real pass.
+SD configs are judged against the 27 MHz SD clock.
 
 ## Previews (GHDL render matrix, 2026-11-09)
 
