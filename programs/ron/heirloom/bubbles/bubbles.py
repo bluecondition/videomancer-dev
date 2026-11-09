@@ -1,0 +1,115 @@
+#!/usr/bin/env python3
+# Copyright (C) 2026 czartroniks
+# SPDX-License-Identifier: GPL-3.0-only
+"""
+BUBBLES v0.1.0 - build hook.  Writes bubbles_pkg.vhd next to this file (pure python: the builder runs it with the
+system python3).
+
+Fitted to the still WIN_20240105_20_46_57 @ 0.5 s (see .heirloom_work/rb_bubbles/notes.md):
+
+  S(y)  = 1.98 + 1.52 cos(2 pi (y + scroll - 109) / 1050) - 2.535e-5 u^2,  u = ((y - 242) mod 536) - 268
+  F1    = S - dx^2 / 50000          (dx = px to the nearest column axis, 937 px apart)
+          bubble where F1 > 1, halo dip centred on F1 = 0 (+-0.7)
+  F2    = Vf + 1.12 - dx^2 / 125000  inversion key (the bubble and the wave are RGB-inverted where F2 > 0)
+  wave  = x > 1995 - 591 cos(2 pi (y - 10) / 1050)  (a screen-fixed key from the right; P12 moves it)
+  rainbow phase = (x - 810 - tau(y)) / 512 px, tau = 134 - 150 cos(2 pi (y - 10) / 1050)
+
+Package contents (all tables also read by imodel.py):
+  C_BB_RR/RG/RB  512 x 8   the rainbow, as seen in the inverted state (phase 0 = the white->yellow edge)
+  C_BB_COS       256 x 16  quarter cosine: round(32767 cos(2 pi (j + 0.5) / 1024)), j = 0..255
+  C_BB_EXP       256 x 16  round(32768 * 2^(i / 256))
+  C_BB_HM        128 x 32  halo dip per channel, signed 9 bits {R 26..18, G 17..9, B 8..0}: halo = clamp(ground - dip);
+                           index = ground * 64 + t, t = |F1 - halo| in 1/64 units; Mint: (200, 210, 200)(1 - t/0.7),
+                           Night: a glow (-40, -130, -150)(1 - t/0.7)
+  C_BB_MR/MG/MB  256 x 32  RGB -> YUV contributions, {Y (11 bits), |Cr| (10), |Cb| (10), 0}, all x2:
+           Y = 64 + (MR.y + MG.y + MB.y) / 2           (luma pre-scaled 16/13 for the shell's 13/16 output scale)
+           U (Cr) = 512 + (MR.u - MG.u - MB.u) / 2
+           V (Cb) = 512 + (MB.v - MR.v - MG.v) / 2
+Colours are in the hardware convention (U register = Cr, V register = Cb).
+"""
+import math
+import os
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+# rainbow key colours (phase, (r, g, b)), measured along the bubbles of the still
+KEYS = [(0.00, (250, 193, 71)), (0.04, (253, 195, 8)), (0.06, (251, 198, 0)), (0.23, (247, 198, 0)), (0.254, (255, 106, 0)),
+        (0.273, (255, 47, 0)), (0.293, (255, 27, 0)), (0.31, (255, 17, 0)), (0.49, (255, 16, 0)), (0.527, (255, 12, 51)),
+        (0.566, (255, 8, 115)), (0.605, (255, 6, 196)), (0.645, (255, 4, 249)), (0.66, (255, 4, 255)), (0.74, (255, 4, 255)),
+        (0.77, (252, 120, 250)), (0.80, (250, 190, 242)), (0.84, (246, 214, 238)), (0.88, (244, 222, 236)), (0.905, (246, 200, 220)),
+        (0.92, (190, 150, 160)), (0.935, (40, 50, 50)), (0.95, (110, 70, 80)), (0.97, (241, 173, 120)), (1.0, (250, 193, 71))]
+
+def rainbow_rom(ch):
+    out = []
+    for i in range(512):
+        ph = i / 512.0
+        for a, b in zip(KEYS, KEYS[1:]):
+            if a[0] <= ph <= b[0]:
+                f = (ph - a[0]) / (b[0] - a[0])
+                out.append(int(round(a[1][ch] + f * (b[1][ch] - a[1][ch]))))
+                break
+    return out
+
+def cos_rom():
+    return [int(round(32767 * math.cos(2 * math.pi * (j + 0.5) / 1024))) for j in range(256)]
+
+def exp_rom():
+    return [min(65535, int(round(32768 * 2 ** (i / 256.0)))) for i in range(256)]
+
+def halo_rom():
+    """additive dips, signed 9 bits per channel: halo = clamp(ground - dip(t)); t = |F1 - halo| in 1/64 units"""
+    out = []
+    for ground, D in ((0, (200, 210, 200)), (1, (-40, -130, -150))):
+        for t in range(64):
+            tt = min(1.0, (t + 0.5) / 64.0 / 0.7)
+            v = [int(round(D[c] * (1 - tt))) & 511 for c in range(3)]
+            out.append((v[0] << 18) | (v[1] << 9) | v[2])
+    return out
+
+def matrix_rom(ch):
+    ky, ku, kv = [(1.2642, 2.4819, 0.4820)[ch], (1.7569, 1.4711, 0.2857)[ch], (0.5929, 1.1640, 1.7569)[ch]]
+    out = []
+    for v in range(256):
+        y = int(round(2 * ky * v)); u = int(round(2 * ku * v)); w = int(round(2 * kv * v))
+        out.append((y << 21) | (u << 11) | (w << 1))
+    return out
+
+def vhd_table(name, typ, depth, width, vals, signed=False):
+    lines = ["    type %s is array (0 to %d) of %s(%d downto 0);" % ("t_" + name.lower(), depth - 1, typ, width - 1),
+             "    constant %s : %s := (" % (name, "t_" + name.lower())]
+    items = []
+    for v in vals:
+        if signed:
+            items.append('to_signed(%d, %d)' % (v, width))
+        else:
+            items.append('x"%0*X"' % ((width + 3) // 4, v) if width % 4 == 0 else 'to_unsigned(%d, %d)' % (v, width))
+    per = 8 if signed else 16
+    for i in range(0, len(items), per):
+        lines.append("        " + ", ".join(items[i:i + per]) + ("," if i + per < len(items) else ""))
+    lines.append("    );")
+    return "\n".join(lines)
+
+def tables():
+    return dict(RR=rainbow_rom(0), RG=rainbow_rom(1), RB=rainbow_rom(2), COS=cos_rom(), EXP=exp_rom(), HM=halo_rom(),
+                MR=matrix_rom(0), MG=matrix_rom(1), MB=matrix_rom(2))
+
+def main():
+    t = tables()
+    parts = ["-- Generated by bubbles.py -- DO NOT EDIT.",
+             "library ieee;", "use ieee.std_logic_1164.all;", "use ieee.numeric_std.all;", "",
+             "package bubbles_pkg is",
+             vhd_table("C_BB_RR", "unsigned", 512, 8, t['RR']),
+             vhd_table("C_BB_RG", "unsigned", 512, 8, t['RG']),
+             vhd_table("C_BB_RB", "unsigned", 512, 8, t['RB']),
+             vhd_table("C_BB_COS", "unsigned", 256, 16, t['COS']),
+             vhd_table("C_BB_EXP", "unsigned", 256, 16, t['EXP']),
+             vhd_table("C_BB_HM", "std_logic_vector", 128, 32, t['HM']),
+             vhd_table("C_BB_MR", "std_logic_vector", 256, 32, t['MR']),
+             vhd_table("C_BB_MG", "std_logic_vector", 256, 32, t['MG']),
+             vhd_table("C_BB_MB", "std_logic_vector", 256, 32, t['MB']),
+             "end package bubbles_pkg;", ""]
+    with open(os.path.join(HERE, "bubbles_pkg.vhd"), "w") as f:
+        f.write("\n".join(parts))
+
+if __name__ == "__main__":
+    main()

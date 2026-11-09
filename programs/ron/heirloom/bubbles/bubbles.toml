@@ -1,0 +1,152 @@
+# Bubbles - Heirloom (video phase), built 2026-11-09 (v0.1.0) from the clip WIN_20240105_20_46_57 at 0.5 s.
+# Columns of rainbow bubble lenses ringed by soft dark halos on a mint-to-cyan ground, swelling and shrinking as a
+# slow swell rolls up through them, with the clip's wavy rainbow curtain entering from the right.
+# See bubbles.vhd, bubbles.py and SUMMARY.md.
+
+[program]
+processing_delay_clks = 20
+program_id = "com.czartroniks.bubbles"
+program_name = "Bubbles"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Shape", "Pattern", "Color"]
+program_type = "processing"
+description = "Rainbow bubble lenses with dark halos on a mint ground, swelling as a slow swell rolls up; a wavy curtain."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Bubbles"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Halo"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Columns"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Rise"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 756
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Rainbow"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Camera"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 256
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Lens"
+value_labels = ["Normal", "Flip"]
+initial_value_label = "Normal"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Rings"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Mirror"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Ground"
+value_labels = ["Mint", "Night"]
+initial_value_label = "Mint"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Wave"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 196
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Still"
+
+[[preset]]
+name = "Curtain"
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Night Lenses"
+toggle_switch_10 = 1
+toggle_switch_7 = 1
+
+[[preset]]
+name = "Contours"
+toggle_switch_8 = 1
+rotary_potentiometer_2 = 300
+
+[[preset]]
+name = "Honeycomb"
+toggle_switch_9 = 1
+rotary_potentiometer_3 = 900
+rotary_potentiometer_1 = 640
+
+[[preset]]
+name = "Candy Rise"
+rotary_potentiometer_5 = 900
+rotary_potentiometer_4 = 950
+linear_potentiometer_12 = 500
+
+[[preset]]
+name = "Osc Wobble"
+toggle_switch_11 = 1
+rotary_potentiometer_6 = 800
