@@ -171,7 +171,7 @@ versions from v0.1.0.
 | 24 | 20230722_01_18_41 t5.5 | carpet | red/white/orange kaleidoscopic carpet | v0.1.0 built 2026-11-04 (ROUTER1 6/6 seed 1; 6777–6794 LC, 14 EBR); not flashed |
 | 25 | 20230731_01_19_22 t0.5 | pebble | red/orange concentric dotted ripple rings | v0.1.0 built 2026-11-04 (router2 6/6 seed 1; 6696–6766 LC, 21 EBR); not flashed |
 | 26 | 20230816_00_32_31 t5.0 | temple | orange/yellow/blue symmetric sunset temple with blue flames | v0.1.0 built 2026-11-04 (ROUTER1; HD Dual seed 2; 6410–6443 LC, 23 EBR); not flashed |
-| 27 | 20230820_01_33_09 t0.5 | brushfire | orange/green/white burning-grass streaks | in progress (resumed 2026-11-09) |
+| 27 | 20230820_01_33_09 t0.5 | brushfire | orange/green/white burning-grass streaks | v0.1.0 built 2026-11-09 (ROUTER1; HD Dual seed 2; 7087–7113 LC, 23 EBR); not flashed |
 | 28 | 20230825_00_00_20 t6.5 | arcade | orange/blue ring arches on blue stripes | v0.1.0 built 2026-11-09 (router2; SD Dual seed 2; 6866–6891 LC, 19 EBR); not flashed |
 | 29 | 20230905_00_44_28 t0.5 | coral | red hexagon core with cyan coral rings on light blue | in progress (resumed 2026-11-09) |
 | 30 | 20230906_00_33_30 t11.0 | spine | magenta/purple/black torn diagonal spine | in progress (resumed 2026-11-09) |
@@ -180,7 +180,7 @@ versions from v0.1.0.
 | 33 | 20230919_00_32_29 t3.0 | neon | magenta/white glowing S-curve neon tubes on teal | queued |
 | 34 | 20230930_01_37_53 t0.5 | brazier | blue/purple nested diamond with pink flames on a red/black ground | queued |
 | 35 | 20231002_01_20_50 t0.5 | lantern | magenta/yellow/black nested petal contours around a pink disc | queued |
-| 36 | 20231009_00_32_55 t0.5 | cumulus | blue/yellow/magenta/cyan scalloped cloud waves with drips | queued |
+| 36 | 20231009_00_32_55 t0.5 | cumulus | blue/yellow/magenta/cyan scalloped cloud waves with drips | in progress (wave 3) |
 | 37 | 20231104_16_39_25 t0.5 | streamers | bold rainbow wavy vertical ribbons | queued |
 | 38 | 20231116_23_41_37 t3.5 | hawser | yellow/black/red wavy rope strands with red glints | queued |
 | 39 | 20231119_00_47_47 t0.5 | herringbone | blue/white zigzag herringbone stripes | queued |

@@ -1,0 +1,157 @@
+# Brushfire - Heirloom from the video clips (phase 3), v0.1.0, built 2026-11-04 from the still
+# WIN_20230820_01_33_09 t0.5 (the clip breathes: the flames swell into lens shapes and retreat on a 5.8 s cycle).
+# Two crowns of flame with red-cored lobes, nested arches and red streaks; chevrons stacked down each axis in a
+# pink zone; S-curved white/black/olive/blue bands sweeping to the lower right under pink diagonals.
+# See brushfire.vhd, brushfire.py, SUMMARY.md.
+
+[program]
+processing_delay_clks = 24
+program_id = "com.czartroniks.brushfire"
+program_name = "Brushfire"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Pattern", "Color", "Warp"]
+program_type = "processing"
+description = "Crowns of flame with red-cored lobes and stacked chevrons over S-curved bands; the fire breathes down and back."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Tiles"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Lobes"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Streaks"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Speed"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 708
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Bands"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Camera"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 320
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Bands"
+value_labels = ["Sweep", "Zigzag"]
+initial_value_label = "Sweep"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Palette"
+value_labels = ["Photo", "Ice"]
+initial_value_label = "Photo"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Flip"
+value_labels = ["Hang", "Rise"]
+initial_value_label = "Hang"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Flames"
+value_labels = ["Solid", "Lines"]
+initial_value_label = "Solid"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Blaze"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 360
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Photo"
+
+[[preset]]
+name = "Wildfire"
+linear_potentiometer_12 = 900
+rotary_potentiometer_4 = 820
+
+[[preset]]
+name = "Ember Crown"
+linear_potentiometer_12 = 60
+rotary_potentiometer_2 = 760
+
+[[preset]]
+name = "Rising"
+toggle_switch_9 = 1
+linear_potentiometer_12 = 520
+
+[[preset]]
+name = "Zigzag Field"
+toggle_switch_7 = 1
+rotary_potentiometer_5 = 640
+
+[[preset]]
+name = "Ice Lines"
+toggle_switch_8 = 1
+toggle_switch_10 = 1
+
+[[preset]]
+name = "Many Fires"
+rotary_potentiometer_1 = 820
+rotary_potentiometer_3 = 700
+
+[[preset]]
+name = "Camera Burn"
+rotary_potentiometer_6 = 700
+linear_potentiometer_12 = 480
