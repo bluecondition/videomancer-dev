@@ -1,0 +1,169 @@
+# FLATLINE (build A) -- bilateral + edge lines + temporal vote.  The drop shadow,
+# soft quantization, XDoG and Canny live in the sibling builds (see DESIGN.md).
+
+[program]
+processing_delay_clks = 84
+program_id = "com.czartroniks.flatline"
+program_name = "Flatline"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Edges", "Render", "Analysis"]
+program_type = "processing"
+description = "Flatline A: separable bilateral smoothing, flat mattes with region-boundary ink, temporal vote. Raw video on the wipe."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Smoother"
+value_labels = ["Off", "Bilateral"]
+initial_value_label = "Bilateral"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Strength"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 400
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Levels"
+value_labels = ["2", "3", "4", "5", "6", "7", "8", "8 Coarse"]
+initial_value_label = "4"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Lines"
+value_labels = ["None", "Edge", "Edge White", "Edge Bold"]
+initial_value_label = "Edge"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Ink"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 600
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Shadow n/a"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 0
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Quant n/a"
+value_labels = ["Hard", "(n/a)"]
+initial_value_label = "Hard"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Levels"
+value_labels = ["Fixed", "Adaptive"]
+initial_value_label = "Adaptive"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Cleanup"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Temporal"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "View"
+value_labels = ["Final", "Lines"]
+initial_value_label = "Final"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Wipe"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 1023
+display_float_digits = 0
+suffix_label = "%"
+
+# Presets are hand-written starting points; capture real ones from the
+# device with ./capture_preset.sh once the look is dialled in.
+# Zone centres: K1 (3 labels) 170/512/853; K3 (8) 64,192,320,448,576,704,832,960;
+# K4 (4) 128/384/640/896.
+
+[[preset]]
+name = "Cel Flat"
+rotary_potentiometer_1 = 768
+rotary_potentiometer_2 = 400
+rotary_potentiometer_3 = 320
+rotary_potentiometer_4 = 384
+rotary_potentiometer_5 = 600
+rotary_potentiometer_6 = 0
+toggle_switch_7 = 0
+toggle_switch_8 = 1
+toggle_switch_9 = 1
+toggle_switch_10 = 1
+toggle_switch_11 = 0
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Cut Paper"
+rotary_potentiometer_1 = 768
+rotary_potentiometer_2 = 700
+rotary_potentiometer_3 = 448
+rotary_potentiometer_4 = 128
+rotary_potentiometer_5 = 600
+rotary_potentiometer_6 = 300
+toggle_switch_7 = 1
+toggle_switch_8 = 1
+toggle_switch_9 = 1
+toggle_switch_10 = 1
+toggle_switch_11 = 0
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Ink Trace"
+rotary_potentiometer_1 = 768
+rotary_potentiometer_2 = 500
+rotary_potentiometer_3 = 192
+rotary_potentiometer_4 = 384
+rotary_potentiometer_5 = 700
+rotary_potentiometer_6 = 0
+toggle_switch_7 = 0
+toggle_switch_8 = 0
+toggle_switch_9 = 1
+toggle_switch_10 = 1
+toggle_switch_11 = 0
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Lines Only"
+rotary_potentiometer_1 = 768
+rotary_potentiometer_2 = 400
+rotary_potentiometer_3 = 320
+rotary_potentiometer_4 = 384
+rotary_potentiometer_5 = 600
+rotary_potentiometer_6 = 200
+toggle_switch_7 = 0
+toggle_switch_8 = 1
+toggle_switch_9 = 1
+toggle_switch_10 = 1
+toggle_switch_11 = 1
+linear_potentiometer_12 = 1023
