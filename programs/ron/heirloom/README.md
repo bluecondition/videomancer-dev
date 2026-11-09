@@ -204,7 +204,7 @@ against all 101 existing heirloom stills (`.heirloom_work/vid/dedupe.py`, sheets
 | # | Still (clip, time) | Program | What it shows | Status |
 |---|---|---|---|---|
 | 51 | 20230129_23_23_56 t0.5 | gable | red/cyan pointed chevron fan on dark, cyan/magenta streak alt | in progress (wave 4) |
-| 52 | 20230214_23_42_08 t0.5 | breakers | cyan/blue wavy ribbon bands; green/red/blue contour crab alt | in progress (wave 4) |
+| 52 | 20230214_23_42_08 t0.5 | breakers | cyan/blue wavy ribbon bands; green/red/blue contour crab alt | v0.1.1 built 2026-11-09 (router1; all six seed 1; 7,003-7,035 LC, 21 EBR); not flashed |
 | 53 | 20230318_12_24_18 t4.0 | tilework | skewed colour-block grid; cyan/green mesh checker alt | in progress (wave 4) |
 | 54 | 20230318_14_13_38 t0.5 | staircase | cyan diagonal pixel staircase; magenta/cyan random block mosaic alt | in progress (wave 4) |
 | 55 | 20230328_00_11_14 t0.5 | pods | green/yellow cell eyes lattice in olive; grey chevron stacks with rainbow fringes alt | v0.1.1 built 2026-11-09 (router1; all six seed 1; 6,437-6,455 LC, 19 EBR); not flashed |

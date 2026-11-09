@@ -1,0 +1,162 @@
+# Breakers - Heirloom (video phase), from the clip WIN_20230214_23_42_08 at 0.5 s.
+# Wavy blue / pink / white ribbons on cyan, rolling down once a second; green surf eating them from the left,
+# a flat lagoon at the bottom with blue dashes, and an eye that swells on the right edge and sinks into it.
+# See breakers.vhd, breakers.py and SUMMARY.md.
+# v0.1.1: Grain's travel made obvious (clean .. shredded surf); default Etch 80 with pair-averaged camera luma, Osc 10x.
+
+[program]
+processing_delay_clks = 20
+program_id = "com.czartroniks.breakers"
+program_name = "Breakers"
+program_version = "0.1.1"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Pattern", "Warp", "Glitch"]
+program_type = "processing"
+description = "Wavy blue and pink ribbons on cyan rolling down, green surf eating them, a lagoon with a sinking eye."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Ribbons"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Swell"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Ripple"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Speed"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 700
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Grain"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Etch"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 80
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Mirror"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Lagoon"
+value_labels = ["On", "Off"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Fold"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Palette"
+value_labels = ["Sea", "Crab"]
+initial_value_label = "Sea"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Break"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 410
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Photo"
+
+[[preset]]
+name = "Calm Sea"
+linear_potentiometer_12 = 0
+rotary_potentiometer_4 = 620
+
+[[preset]]
+name = "Storm"
+linear_potentiometer_12 = 1023
+rotary_potentiometer_2 = 760
+rotary_potentiometer_4 = 820
+
+[[preset]]
+name = "Crab"
+toggle_switch_7 = 1
+toggle_switch_10 = 1
+rotary_potentiometer_3 = 380
+
+[[preset]]
+name = "Endless"
+toggle_switch_9 = 1
+rotary_potentiometer_1 = 700
+linear_potentiometer_12 = 250
+
+[[preset]]
+name = "Straight Swell"
+rotary_potentiometer_2 = 90
+rotary_potentiometer_5 = 900
+
+[[preset]]
+name = "Tide Pool"
+toggle_switch_11 = 1
+rotary_potentiometer_6 = 210
+toggle_switch_8 = 1
+
+[[preset]]
+name = "Fine Chop"
+rotary_potentiometer_3 = 900
+rotary_potentiometer_5 = 120
+linear_potentiometer_12 = 650
