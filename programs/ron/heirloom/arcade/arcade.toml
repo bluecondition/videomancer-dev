@@ -1,0 +1,156 @@
+# Arcade - Heirloom (video phase) v0.1.0, from the clip WIN_20230825_00_00_20 at 6.5 s.
+# A row of textured globes with orange rings, blue ring stripes arching between them, orange chevrons rising
+# between the globes from below, two tear lines.  See arcade.vhd, arcade.py and SUMMARY.md.
+
+[program]
+processing_delay_clks = 24
+program_id = "com.czartroniks.arcade"
+program_name = "Arcade"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Pattern", "Shape", "Illusion"]
+program_type = "processing"
+description = "Textured globes in orange rings, blue ring stripes arching between them, orange chevrons rising from below."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Globes"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Arches"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Chevrons"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Speed"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 700
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Texture"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Etch"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 520
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Globe"
+value_labels = ["Texture", "Rings"]
+initial_value_label = "Texture"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Chevrons"
+value_labels = ["Peak", "Valley"]
+initial_value_label = "Peak"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Weave"
+value_labels = ["On", "Off"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Palette"
+value_labels = ["Photo", "Neon"]
+initial_value_label = "Photo"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Globe Size"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Photo"
+
+[[preset]]
+name = "Beads"
+rotary_potentiometer_2 = 760
+linear_potentiometer_12 = 80
+
+[[preset]]
+name = "Giants"
+rotary_potentiometer_1 = 300
+linear_potentiometer_12 = 1000
+
+[[preset]]
+name = "Spires"
+rotary_potentiometer_3 = 1000
+rotary_potentiometer_4 = 820
+
+[[preset]]
+name = "Neon Valley"
+toggle_switch_8 = 1
+toggle_switch_10 = 1
+
+[[preset]]
+name = "Fine Clip"
+rotary_potentiometer_2 = 820
+rotary_potentiometer_5 = 150
+
+[[preset]]
+name = "Target Row"
+rotary_potentiometer_1 = 800
+toggle_switch_7 = 1
+toggle_switch_9 = 1
+
+[[preset]]
+name = "Deep Etch"
+rotary_potentiometer_6 = 900
+toggle_switch_11 = 1

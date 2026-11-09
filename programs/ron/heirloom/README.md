@@ -172,7 +172,7 @@ versions from v0.1.0.
 | 25 | 20230731_01_19_22 t0.5 | pebble | red/orange concentric dotted ripple rings | v0.1.0 built 2026-11-04 (router2 6/6 seed 1; 6696–6766 LC, 21 EBR); not flashed |
 | 26 | 20230816_00_32_31 t5.0 | temple | orange/yellow/blue symmetric sunset temple with blue flames | v0.1.0 built 2026-11-04 (ROUTER1; HD Dual seed 2; 6410–6443 LC, 23 EBR); not flashed |
 | 27 | 20230820_01_33_09 t0.5 | brushfire | orange/green/white burning-grass streaks | in progress (resumed 2026-11-09) |
-| 28 | 20230825_00_00_20 t6.5 | arcade | orange/blue ring arches on blue stripes | in progress (resumed 2026-11-09) |
+| 28 | 20230825_00_00_20 t6.5 | arcade | orange/blue ring arches on blue stripes | v0.1.0 built 2026-11-09 (router2; SD Dual seed 2; 6866–6891 LC, 19 EBR); not flashed |
 | 29 | 20230905_00_44_28 t0.5 | coral | red hexagon core with cyan coral rings on light blue | in progress (resumed 2026-11-09) |
 | 30 | 20230906_00_33_30 t11.0 | spine | magenta/purple/black torn diagonal spine | in progress (resumed 2026-11-09) |
 | 31 | 20230910_00_11_50 t7.0 | quill | blue/white feather plumes on black | in progress (resumed 2026-11-09) |
