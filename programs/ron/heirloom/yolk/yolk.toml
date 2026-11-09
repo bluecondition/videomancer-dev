@@ -1,0 +1,157 @@
+# Yolk - Heirloom (video phase), built 2026-11-09 (v0.1.0) from the clip WIN_20240111_01_01_24 at 0.5 s.
+# Four red eggs with black yolks, mirrored, under white flames with magenta U-lines and over white lens rings;
+# the egg rows rise through the static white bands.  See yolk.vhd, yolk.py, SUMMARY.md.
+
+[program]
+processing_delay_clks = 20
+program_id = "com.czartroniks.yolk"
+program_name = "Yolk"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Pattern", "Color", "Mirror"]
+program_type = "processing"
+description = "Red eggs with black yolks rising between white flame and lens-ring bands, mirrored, in yellow and magenta."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Eggs"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Rows"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Yolk"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Rise"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 680
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Bands"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Etch"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 380
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Mirror"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Invert"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Tear"
+value_labels = ["Dash", "Slip"]
+initial_value_label = "Dash"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Colours"
+value_labels = ["Yolk", "Lagoon"]
+initial_value_label = "Yolk"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Rings"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 390
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Photo"
+
+[[preset]]
+name = "Targets"
+linear_potentiometer_12 = 1000
+rotary_potentiometer_4 = 600
+
+[[preset]]
+name = "Facing Rows"
+toggle_switch_7 = 1
+rotary_potentiometer_3 = 620
+
+[[preset]]
+name = "Bulbs"
+toggle_switch_8 = 1
+linear_potentiometer_12 = 560
+
+[[preset]]
+name = "Lagoon"
+toggle_switch_10 = 1
+rotary_potentiometer_4 = 760
+
+[[preset]]
+name = "Hatchery"
+rotary_potentiometer_1 = 820
+rotary_potentiometer_2 = 760
+rotary_potentiometer_5 = 300
+
+[[preset]]
+name = "Torn Shell"
+toggle_switch_9 = 1
+rotary_potentiometer_3 = 700
+
+[[preset]]
+name = "Seeds"
+rotary_potentiometer_3 = 120
+rotary_potentiometer_5 = 900
+linear_potentiometer_12 = 700

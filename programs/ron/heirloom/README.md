@@ -229,7 +229,7 @@ against all 101 existing heirloom stills (`.heirloom_work/vid/dedupe.py`, sheets
 | 74 | 20231218_00_10_10 t0.5 | harlequin | orange/purple/green wavy stripes with orange diamonds | in progress (wave 4) |
 | 75 | 20231218_21_31_11 t3.0 | starline | magenta/green neon chevron star lines on black; rainbow stripes with white dots alt; B/W silhouettes alt | in progress (wave 4) |
 | 76 | 20231227_00_20_47 t6.0 | ocelot | orange/black/blue wavy zebra stripes with blue dots | v0.1.0 built 2026-11-09 (router2; all six seed 1; 5,677-5,710 LC, 19 EBR); not flashed |
-| 77 | 20240111_01_01_24 t0.5 | yolk | yellow/red/white flames and eggs mirrored; magenta/blue triangles alt | in progress (wave 4) |
+| 77 | 20240111_01_01_24 t0.5 | yolk | yellow/red/white flames and eggs mirrored; magenta/blue triangles alt | v0.1.0 built 2026-11-09 (router2; HD Analog seed 2, HD HDMI seed 2, others seed 1; 6,871-6,878 LC, 23 EBR); not flashed |
 | 78 | 20240117_22_55_32 t0.5 | coastline | blue field with a red/yellow/green wavy ridge | v0.1.0 built 2026-11-09 (router2; HD HDMI seed 2, others seed 1; 6,844-6,864 LC, 15 EBR); not flashed |
 | 79 | 20240207_23_34_28 t0.5 | hornet | yellow/black/red horizontal bands with eyes; red/cyan vertical gloss alt | in progress (wave 4) |
 | 80 | 20240213_23_38_52 t3.0 | flamecrest | magenta/red/yellow flame fringe on black; masks alt | in progress (wave 4) |
