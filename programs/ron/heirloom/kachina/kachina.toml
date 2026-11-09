@@ -1,0 +1,162 @@
+# Kachina - Heirloom (video phase), v0.1.0 2026-11-09, from clip WIN_20231227_22_52_47 at 3.5 s.
+# v0.1.1 (2026-11-09): Etch default 480 -> 380; the Osc lattice enters at 3x the camera's level.
+# A four-way mirrored totem mask (magenta ground, blue bands with red rims in a big X, yellow spindles, shaded red
+# masks with slit eyes), read row by row through a breathing, scrolling V oscillator.  See kachina.vhd, kachina.py.
+
+[program]
+processing_delay_clks = 16
+program_id = "com.czartroniks.kachina"
+program_name = "Kachina"
+program_version = "0.1.1"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Mirror", "Shape", "Color"]
+program_type = "processing"
+description = "A mirrored totem mask of red masks, blue bands and yellow spindles, breathing and scrolling on a V oscillator."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Width"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Period"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Breath"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Scroll"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 700
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Etch"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 380
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Colour"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Wave"
+value_labels = ["Triangle", "Saw"]
+initial_value_label = "Triangle"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Centre"
+value_labels = ["Cross", "Masks"]
+initial_value_label = "Cross"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Tear"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Palette"
+value_labels = ["Kachina", "Frost"]
+initial_value_label = "Kachina"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Totem"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Photo"
+
+[[preset]]
+name = "Steady"
+rotary_potentiometer_3 = 0
+rotary_potentiometer_4 = 512
+
+[[preset]]
+name = "Stripes"
+linear_potentiometer_12 = 40
+rotary_potentiometer_3 = 0
+
+[[preset]]
+name = "Totem Pole"
+linear_potentiometer_12 = 1000
+rotary_potentiometer_3 = 0
+rotary_potentiometer_4 = 760
+
+[[preset]]
+name = "Frost Masks"
+toggle_switch_8 = 1
+toggle_switch_10 = 1
+rotary_potentiometer_3 = 300
+
+[[preset]]
+name = "Saw Stack"
+toggle_switch_7 = 1
+rotary_potentiometer_2 = 700
+rotary_potentiometer_4 = 820
+
+[[preset]]
+name = "Torn Quad"
+toggle_switch_9 = 1
+rotary_potentiometer_1 = 800
+rotary_potentiometer_3 = 0
+
+[[preset]]
+name = "Ember Melt"
+rotary_potentiometer_6 = 300
+rotary_potentiometer_3 = 900
+rotary_potentiometer_5 = 700
+toggle_switch_11 = 1
