@@ -184,7 +184,7 @@ versions from v0.1.0.
 | 37 | 20231104_16_39_25 t0.5 | streamers | bold rainbow wavy vertical ribbons | v0.1.1 built 2026-11-09 (router1; HD HDMI seed 2, others seed 1; 6,946-6,959 LC, 24 EBR); not flashed |
 | 38 | 20231116_23_41_37 t3.5 | hawser | yellow/black/red wavy rope strands with red glints | v0.1.0 built 2026-11-09 (ROUTER1 6/6 seed 1; 6824–6840 LC, 22 EBR); not flashed |
 | 39 | 20231119_00_47_47 t0.5 | herringbone | blue/white zigzag herringbone stripes | v0.1.0 built 2026-11-09 (router2 6/6 seed 1; 5974–5986 LC, 12 EBR); not flashed |
-| 40 | 20231123_23_27_50 t5.5 | confetti | magenta petal cards over a striped grey ground with red/blue stripes | in progress (wave 3) |
+| 40 | 20231123_23_27_50 t5.5 | confetti | magenta petal cards over a striped grey ground with red/blue stripes | v0.1.0 built 2026-11-09 (router2; HD HDMI seed 5, others seed 1; 6,890-6,914 LC, 22 EBR); not flashed |
 | 41 | 20231124_00_45_44 t5.0 | pyramid | teal/pink pyramid with a striped core on a dark vignette | v0.1.0 built 2026-11-09 (router2; all six seed 1; 6,724-6,731 LC, 20 EBR); not flashed |
 | 42 | 20231204_21_01_30 t0.5 | platter | pink dotted vinyl disc on dark with curved magenta/green strands | in progress (wave 3) |
 | 43 | 20231204_23_13_02 t5.5 | plaid | red/yellow/black woven plaid with wavy curves | in progress (wave 3) |
@@ -194,4 +194,4 @@ versions from v0.1.0.
 | 47 | 20240102_00_30_49 t1.0 | cateye | pink/yellow chevron eye | in progress (wave 3) |
 | 48 | 20240104_00_30_04 t3.0 | grotto | blue/white/black cavern eye with cyan edges | in progress (wave 3) |
 | 49 | 20240105_20_46_57 t0.5 | bubbles | bubble lenses in cyan/green/red wavy bands | in progress (wave 3) |
-| 50 | 20240216_23_50_17 t0.5 | velvet | magenta/white/yellow vertical drapes with a reflection | queued |
+| 50 | 20240216_23_50_17 t0.5 | velvet | magenta/white/yellow vertical drapes with a reflection | in progress (wave 3) |

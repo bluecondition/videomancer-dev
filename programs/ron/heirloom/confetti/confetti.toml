@@ -1,0 +1,157 @@
+# Confetti - Heirloom (phase 3, video clips), built 2026-11-09 (v0.1.0) from the clip WIN_20231123_23_27_50 at 5.5 s.
+# Magenta petal cards over a striped ground: three columns of tall petals from a linearly FM'd H oscillator, sliced
+# into cards by slanted window cuts, a corner petal, an orange / teal hyperbolic fan, a red zone with navy stripes.
+# The petal oscillator scrolls under the fixed cuts.  See confetti.vhd, confetti.py and SUMMARY.md.
+
+[program]
+processing_delay_clks = 20
+program_id = "com.czartroniks.confetti"
+program_name = "Confetti"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Shape", "Pattern", "Warp"]
+program_type = "processing"
+description = "Magenta petal cards sliced by slanted cuts over an orange / teal fan and a red striped zone."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Columns"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Chirp"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 768
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Slant"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 760
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Speed"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 700
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Size"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Warp"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 300
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Zone"
+value_labels = ["On", "Off"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Petal"
+value_labels = ["On", "Off"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Palette"
+value_labels = ["Magenta", "Citrus"]
+initial_value_label = "Magenta"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Chevron"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Confetti"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Still"
+
+[[preset]]
+name = "Held Still"
+rotary_potentiometer_4 = 512
+
+[[preset]]
+name = "Whole Petals"
+linear_potentiometer_12 = 0
+
+[[preset]]
+name = "Shower"
+linear_potentiometer_12 = 930
+rotary_potentiometer_5 = 640
+
+[[preset]]
+name = "Chevrons"
+toggle_switch_10 = 1
+rotary_potentiometer_3 = 900
+
+[[preset]]
+name = "Citrus Lattice"
+toggle_switch_9 = 1
+rotary_potentiometer_5 = 900
+rotary_potentiometer_1 = 700
+
+[[preset]]
+name = "Bare Fan"
+toggle_switch_7 = 1
+toggle_switch_8 = 1
+rotary_potentiometer_5 = 300
+
+[[preset]]
+name = "Osc Storm"
+toggle_switch_11 = 1
+rotary_potentiometer_6 = 640
+rotary_potentiometer_4 = 900
