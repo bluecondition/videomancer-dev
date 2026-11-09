@@ -1,0 +1,156 @@
+# Hawser - Heirloom from the video clips (phase 3), v0.1.0, built 2026-11-09 from the still
+# WIN_20231116_23_41_37 t3.5 (the clip writhes: the rope tubes' S-curves travel up the frame, ~3 s per writhe).
+# Solid amber rope tubes with dark-orange edges and a silver rim swing in growing S-curves over bundles of thin
+# peach / amber / silver cords on black, with red glints on the cords.
+# See hawser.vhd, hawser.py, SUMMARY.md.
+
+[program]
+processing_delay_clks = 24
+program_id = "com.czartroniks.hawser"
+program_name = "Hawser"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Pattern", "Color", "Warp"]
+program_type = "processing"
+description = "Amber rope tubes swing in rising S-curves over thin peach and silver cords on black, with red glints."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Tubes"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Wave"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Cords"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Speed"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 700
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Glints"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Camera"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 384
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Braid"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Palette"
+value_labels = ["Amber", "Lemon"]
+initial_value_label = "Amber"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Mirror"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Tubes"
+value_labels = ["Solid", "Wire"]
+initial_value_label = "Solid"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Twist"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 435
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Photo"
+
+[[preset]]
+name = "Lemon Clip"
+toggle_switch_8 = 1
+
+[[preset]]
+name = "Hanging"
+linear_potentiometer_12 = 0
+rotary_potentiometer_4 = 512
+
+[[preset]]
+name = "Tangle"
+linear_potentiometer_12 = 1000
+rotary_potentiometer_4 = 820
+
+[[preset]]
+name = "Braid"
+toggle_switch_7 = 1
+linear_potentiometer_12 = 600
+
+[[preset]]
+name = "Mirror Wire"
+toggle_switch_9 = 1
+toggle_switch_10 = 1
+
+[[preset]]
+name = "Ripples"
+rotary_potentiometer_2 = 900
+rotary_potentiometer_1 = 700
+
+[[preset]]
+name = "Camera Bend"
+rotary_potentiometer_6 = 700
+rotary_potentiometer_5 = 640
