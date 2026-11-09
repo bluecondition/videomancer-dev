@@ -1,0 +1,159 @@
+# Owlet - Heirloom (video phase), built 2026-11-09 (v0.1.0) from the clip WIN_20230818_01_17_40 at 3.0 s.
+# Two blue / cyan / pink contour eyes with black outlines and violet pupils, an X between them, a red band with
+# chevrons and tongues; the eye row rolls up through the frame and every other row burns red.
+# See owlet.vhd, owlet.py, SUMMARY.md.
+
+[program]
+processing_delay_clks = 20
+program_id = "com.czartroniks.owlet"
+program_name = "Owlet"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Pattern", "Warp", "Color"]
+program_type = "processing"
+description = "Blue, cyan and pink contour eyes with violet pupils rolling up through a red band of chevrons and tongues."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Eyes"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Rings"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Fins"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Roll"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 700
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Ember"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Etch"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 140
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Twin"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Shape"
+value_labels = ["Lens", "Diamond"]
+initial_value_label = "Lens"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Melt"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Fire"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Gaze"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Clip"
+
+[[preset]]
+name = "Asleep"
+linear_potentiometer_12 = 60
+rotary_potentiometer_4 = 600
+
+[[preset]]
+name = "Wide Awake"
+linear_potentiometer_12 = 980
+rotary_potentiometer_3 = 800
+
+[[preset]]
+name = "Owl Totem"
+toggle_switch_7 = 1
+rotary_potentiometer_1 = 300
+
+[[preset]]
+name = "Bonfire"
+toggle_switch_10 = 1
+rotary_potentiometer_5 = 850
+rotary_potentiometer_2 = 700
+
+[[preset]]
+name = "Molten"
+toggle_switch_9 = 1
+toggle_switch_10 = 1
+rotary_potentiometer_2 = 760
+
+[[preset]]
+name = "Crowd"
+rotary_potentiometer_1 = 1000
+toggle_switch_8 = 1
+rotary_potentiometer_3 = 900
+
+[[preset]]
+name = "Still Eyes"
+rotary_potentiometer_4 = 512
+rotary_potentiometer_5 = 0
