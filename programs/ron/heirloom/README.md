@@ -194,4 +194,4 @@ versions from v0.1.0.
 | 47 | 20240102_00_30_49 t1.0 | cateye | pink/yellow chevron eye | v0.1.1 built 2026-11-09 (router1; all six seed 1; 7,147-7,177 LC, 21 EBR); not flashed |
 | 48 | 20240104_00_30_04 t3.0 | grotto | blue/white/black cavern eye with cyan edges | v0.1.0 built 2026-11-09 (router2; HD Dual seed 2, others seed 1; 6,870-6,884 LC, 23 EBR); not flashed |
 | 49 | 20240105_20_46_57 t0.5 | bubbles | bubble lenses in cyan/green/red wavy bands | v0.1.0 built 2026-11-09 (router1; all six seed 1; 6,995-7,014 LC, 17 EBR); not flashed |
-| 50 | 20240216_23_50_17 t0.5 | velvet | magenta/white/yellow vertical drapes with a reflection | in progress (wave 3) |
+| 50 | 20240216_23_50_17 t0.5 | velvet | magenta/white/yellow vertical drapes with a reflection | v0.1.1 built 2026-11-09 (router1; all six seed 1; 7,135-7,143 LC, 20 EBR); not flashed |

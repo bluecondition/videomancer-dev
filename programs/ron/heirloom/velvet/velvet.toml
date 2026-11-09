@@ -1,0 +1,156 @@
+# Velvet - Heirloom (video phase), built 2026-11-09 (v0.1.1) from the clip WIN_20240216_23_50_17 at 0.5 s.
+# Soft magenta / red / yellow drapes that hang straight and fan into two nested red chevrons, with a rippled
+# reflection band rolling up through them.  See velvet.vhd, velvet.py, SUMMARY.md.
+
+[program]
+processing_delay_clks = 24
+program_id = "com.czartroniks.velvet"
+program_name = "Velvet"
+program_version = "0.1.1"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Pattern", "Warp", "Glitch"]
+program_type = "processing"
+description = "Magenta, red and yellow velvet drapes fanning into red chevrons, with a rippled reflection rolling up."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Sway"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Pleats"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Tide"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 700
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Swell"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Hem"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 340
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Etch"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 240
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Mirror"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Hang"
+value_labels = ["Top", "Floor"]
+initial_value_label = "Top"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Reflect"
+value_labels = ["Band", "Flood"]
+initial_value_label = "Band"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Light"
+value_labels = ["Day", "Night"]
+initial_value_label = "Day"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Ripple"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 507
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Photo"
+
+[[preset]]
+name = "Torrent"
+linear_potentiometer_12 = 1023
+toggle_switch_9 = 1
+
+[[preset]]
+name = "From Floor"
+toggle_switch_8 = 1
+rotary_potentiometer_1 = 700
+
+[[preset]]
+name = "Night Water"
+toggle_switch_10 = 1
+toggle_switch_9 = 1
+linear_potentiometer_12 = 700
+
+[[preset]]
+name = "Parted"
+toggle_switch_7 = 1
+rotary_potentiometer_5 = 150
+
+[[preset]]
+name = "Big Folds"
+rotary_potentiometer_1 = 1023
+rotary_potentiometer_2 = 300
+
+[[preset]]
+name = "Calm"
+linear_potentiometer_12 = 0
+rotary_potentiometer_3 = 560
+
+[[preset]]
+name = "Fine Pleats"
+rotary_potentiometer_2 = 900
+rotary_potentiometer_4 = 800
