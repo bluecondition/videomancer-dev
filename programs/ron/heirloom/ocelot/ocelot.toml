@@ -1,0 +1,155 @@
+# Ocelot - Heirloom (video phase), built 2026-11-09 (v0.1.0) from the clip WIN_20231227_00_20_47 at 6.0 s.
+# Orange zebra bands dipped into chevrons over salmon / grey stripes, with a black ocelot body of glowing dash
+# triplets and blue crescents rolling up through them.  See ocelot.vhd, ocelot.py, SUMMARY.md.
+
+[program]
+processing_delay_clks = 20
+program_id = "com.czartroniks.ocelot"
+program_name = "Ocelot"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Pattern", "Warp", "Organic"]
+program_type = "processing"
+description = "Orange zebra chevrons on salmon stripes, with a black body of glowing dashes and blue crescents rolling up."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Stripes"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Bands"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Chevron"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Roll"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 700
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Stretch"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Etch"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 400
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Twin"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Invert"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Fur"
+value_labels = ["Crescents", "Flood"]
+initial_value_label = "Crescents"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Colours"
+value_labels = ["Ocelot", "Ice"]
+initial_value_label = "Ocelot"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Body"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Photo"
+
+[[preset]]
+name = "Pounce"
+linear_potentiometer_12 = 1023
+rotary_potentiometer_5 = 800
+
+[[preset]]
+name = "Twin Cats"
+toggle_switch_7 = 1
+linear_potentiometer_12 = 600
+
+[[preset]]
+name = "Snow Leopard"
+toggle_switch_10 = 1
+toggle_switch_9 = 1
+
+[[preset]]
+name = "Inside Out"
+toggle_switch_8 = 1
+rotary_potentiometer_3 = 900
+
+[[preset]]
+name = "Fine Fur"
+rotary_potentiometer_1 = 800
+rotary_potentiometer_2 = 800
+
+[[preset]]
+name = "Lazy"
+rotary_potentiometer_4 = 580
+linear_potentiometer_12 = 250
+
+[[preset]]
+name = "Zigzag"
+rotary_potentiometer_3 = 1023
+rotary_potentiometer_5 = 1023
