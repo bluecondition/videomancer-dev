@@ -5,9 +5,16 @@ variants from one source, `programs/ron/flatline/flatline.vhd` (master; `variant
 the siblings and generates every TOML from `_template.toml`). Design and deviations:
 [DESIGN.md](DESIGN.md). Control card: [CONTROLS.md](CONTROLS.md).
 
-Status: **all five builds timing-closed and packed, none flashed** (see the build record below). Brief: Ron's FLATLINE prompt of
-2026-11-09; Ron's standing note: if the mode filter and the bilateral conflict for budget, the
-mode filter stays (it does — every build has it).
+Status: **all five builds timing-closed and packed, none flashed** (see the build record below).
+**v0.1.1 (rebuilding):** the first GHDL preview renders found four defects that no build report
+shows: the dry (raw) path read its chroma back from the delay ring crossed (the raw half of the
+wipe would have been hue-swapped on hardware), the representative-colour table had sectors 2/3
+and 6/7 crossed (red drew as yellow-orange, blue as teal), the XDoG threshold inked the whole
+picture, and the Canny gain was 4x too low to draw anything on a photo. All four are fixed in the
+source (DESIGN.md section 4, "Fixed after the first renders"); the vmprogs in out/ are v0.1.0
+until the rebuild in the build record lands. Brief: Ron's FLATLINE prompt of 2026-11-09; Ron's
+standing note: if the mode filter and the bilateral conflict for budget, the mode filter stays
+(it does; every build has it).
 
 ## What is in which build
 
@@ -78,6 +85,14 @@ but thin; if a mode looks wrong only on that input, suspect timing before the al
 re-route that config with another seed (`make ... CONFIG=<cfg> SEED=<n>` + repack). A and E
 have 3-8 MHz of margin on every HD config.
 
+## Previews (GHDL render matrix, 2026-11-09)
+
+https://claude.ai/artifact/XH5t8MW9oYVUY33XAcPBP2 -- 99 renders at 960x540 (1080p, decimation
+2): every build at 12 shared settings plus its own extras on a photo, and portrait / synth /
+test-card sources, colour-corrected to hardware order (stimulus Cb/Cr pre-swapped, render
+post-swapped). Made with `~/flatline_work/previews/run_previews.py` + `gen_page.py`. Kernels
+appear 2x coarser than on HD hardware; timing, noise and motion effects are not represented.
+
 ## Sim check (GHDL image tester, 480x270, build A)
 
 Two renders only, to catch gross pipeline errors (the standing rule is build + hardware eyes):
@@ -94,8 +109,11 @@ value >= 512: the processed half came out saturated green). Sim traps worth know
 - At decimation 4 the fixed pixel kernels are 4x coarser relative to the picture (a 30-px bar
   is 3.75 half-res samples, so a 2-sample ink footprint eats most of it). Judge geometry on
   hardware or at decimation 1.
-- Colours of the processed half appear hue-swapped in the sim (standard BT.601 render of a
-  hardware-order output); the raw half is right. Expected.
+- Colours appear hue-swapped in the sim, on the raw half as well as the processed half: the
+  tester feeds the program hardware-order chroma and renders the output as standard BT.601
+  (a dry render of the test card shows its red stripes blue). One Cb/Cr swap on the rendered
+  PNG gives what the hardware will show (`~/flatline_work/previews/uvswap.py`); the preview
+  page was made that way.
 
 ## Recommendation (what to look at first)
 

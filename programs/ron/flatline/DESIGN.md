@@ -160,9 +160,13 @@ for the base plus the bilateral); every item below is what it took to get a buil
 - **Open/close is not built** (needs 2 more label line-buffer pairs = 8 EBR); the horizontal
   mode plus the vertical mode cover island removal. **Median+bilateral two-pass is not built**
   (needs a second 5-row window). Both are the two lowest items in the brief's priority list.
-- **XDoG runs on the raw luma rows** (the window stores raw luma because the median and
-  Kuwahara need raw rows); sigma is fixed by the 5-row window (3x3 vs 5x5 binomial), tau = 63/64.
-  K5 moves epsilon (more ink), phi is fixed (16-code ramp).
+- **"XDoG" is the DoG edge, not the thresholded sharpened image.** It runs on the raw luma
+  rows (the window stores raw luma because the median and Kuwahara need raw rows); the two
+  scales are fixed by the 5-row window (3x3 vs 5x5 binomial). Ink goes on the dark side where
+  -DoG exceeds a K5 threshold of 0.5 .. 4.4 codes (the 99th percentile of |DoG| on a photo
+  is ~10 codes), alpha 1/4 .. 1 over the next 2 codes. The Winnemoeller form (G1 - tau G2 < eps,
+  which also fills every dark region) was what v0.1.0 built; with eps = 0..31 codes it inked
+  the whole picture, and the fills are not what an ink layer over mattes wants anyway.
 - **Shadow silhouette is stored at quarter resolution, 16 lines**: offset up to 15 lines /
   15 px at 1080p in 1080-line units (scaled per mode), softened by a horizontal popcount.
 - **Diagnostic view is lines-only on grey** (the brief's own fallback). The 2x2 split (smoothed
@@ -175,9 +179,28 @@ for the base plus the bilateral); every item below is what it took to get a buil
   is then a bit test on |d| >> log2(sigma) instead of three 9-bit compares per tap.
 - **Line colour and designer palette** folded into K4 labels and the split view (no switch left).
 - **Canny uses 4-bit magnitudes in its NMS window** (two rows in one 1024x8 RAM) with a
-  K5-controlled pre-gain, thresholds fixed at 8/4 of 15. 6-bit magnitudes would cost 1 more EBR.
+  K5-controlled pre-gain of 2..17, thresholds fixed at 8/4 of 15: a strong edge is a step of
+  256/gain codes (128 at K5 = 0, ~25 at 50%, 15 at 100%). 6-bit magnitudes would cost 1 more
+  EBR. (v0.1.0 scaled the product 4x lower, so nothing under a 114-code step drew a line.)
 - **Builds are narrower than planned.** With the base at ~73% of the chip, each build holds one
   smoother plus one line algorithm (plus the cheap extras where they fit); see SUMMARY.md.
+
+### Fixed after the first renders (v0.1.1, 2026-11-09)
+
+The GHDL preview renders (see SUMMARY.md, "Previews") caught four things no build report shows:
+
+- The dry path read U/V back from the delay ring in the wrong order: the raw half of the wipe
+  would have been hue-swapped on hardware.
+- The representative-colour table gave the odd sectors the small cosine. True for sectors 1
+  and 5 but not 2 and 6 (and vice versa for 3/7), so red rendered as yellow-orange and blue as
+  teal. Found with a synthetic hue wheel (16 hues x 2 saturations) through the hardware-order
+  emulation; the fixed table maps all 32 patches to their own sector centres.
+- The XDoG threshold inked the whole picture (above).
+- The Canny gain range was 4x too low (above).
+
+Lesson for the next program: render a hue wheel and a wipe through the sim with the input
+pre-swapped and the output post-swapped (that is what the hardware does) before calling a
+palette done; the sector/table symmetry can hide a crossed table on real photos.
 
 ## 5. Resolution consistency (warnings for Ron)
 

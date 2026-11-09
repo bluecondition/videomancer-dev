@@ -233,8 +233,11 @@ architecture flatline of program_top is
                 when others => big := to_unsigned(296, 9); small := to_unsigned(123, 9);
             end case;
         end if;
-        -- odd sectors (1,3,5,7 at 67.5/112.5/...) have the small cosine
-        if hue(0) = '1' then mu := small; mv := big; else mu := big; mv := small; end if;
+        -- |cos| is the big component in the sectors next to the U axis (0, 3, 4, 7 at
+        -- 22.5 / 157.5 / 202.5 / 337.5) and the small one next to the V axis (1, 2, 5, 6).
+        -- v0.1.0 used "odd sectors small", which crossed sectors 2<->3 and 6<->7 (red
+        -- rendered as yellow-orange, blue as teal; hue-wheel sim 2026-11-09).
+        if hue(1) /= hue(0) then mu := small; mv := big; else mu := big; mv := small; end if;
         -- signs: U negative in sectors 2..5, V negative in sectors 4..7
         if hue = "010" or hue = "011" or hue = "100" or hue = "101" then nu := '1'; else nu := '0'; end if;
         nv := hue(2);
@@ -309,7 +312,7 @@ architecture flatline of program_top is
     signal c_width : unsigned(1 downto 0) := "00";     -- 0 thin 1 medium 2 thick
     signal c_inkw  : unsigned(1 downto 0) := "11";     -- boundary ink alpha (half / full)
     signal c_eps8  : unsigned(4 downto 0) := (others => '0');  -- XDoG epsilon
-    signal c_cgain : unsigned(3 downto 0) := x"4";     -- Canny pre-gain
+    signal c_cgain : unsigned(4 downto 0) := "00110";  -- Canny pre-gain 2..17
     signal c_shofs : unsigned(3 downto 0) := (others => '0');  -- shadow offset, 1080-line units (0..15)
     signal c_shsoft : unsigned(1 downto 0) := "00";    -- soften 1/2/4/8
     signal c_sd, c_720, c_il : std_logic := '0';
@@ -614,7 +617,7 @@ begin
             if k5 < 342 then c_width <= "00"; elsif k5 < 683 then c_width <= "01"; else c_width <= "10"; end if;
             if k5(9 downto 8) = "00" then c_inkw <= "10"; else c_inkw <= "11"; end if;   -- half ink in the bottom quarter
             c_eps8 <= k5(9 downto 5);
-            c_cgain <= k5(9 downto 6) + 1;
+            c_cgain <= resize(k5(9 downto 6), 5) + 2;       -- 2..17: K5 at 0 still finds hard edges
             -- K6: offset over the lower half, soften over the upper half
             if k6(9) = '0' then
                 c_shofs <= k6(8 downto 5); c_shsoft <= "00";
@@ -687,8 +690,9 @@ begin
                 & std_logic_vector(f0_y);
         end if;
     end process p_ring;
-    -- (ring bits: 9:0 y, 17:10 raw u (hardware), 25:18 raw v (hardware), 26 avid, 27 hs, 28 vs, 29 fld, 30 line_off)
-    -- note f0_u holds data_in.v (internal order), so the "raw u" field = data_in.v ... restored at output
+    -- (ring bits: 9:0 y, 17:10 f0_v = data_in.u, 25:18 f0_u = data_in.v, 26 avid, 27 hs, 28 vs,
+    -- 29 fld, 30 line_off). f0_u/f0_v are the internally swapped pair, so the output read-back
+    -- takes u from 17:10 and v from 25:18 to restore hardware order.
 
     ------------------------------------------------------------------------
     -- line buffer memories (read every clock, write on ce_d)
@@ -1425,8 +1429,12 @@ begin
     end generate;
 
     ------------------------------------------------------------------------
-    -- XDoG on the raw window: 3x3 vs 5x5 binomial, tau = 63/64,
-    -- alpha = clamp((eps - D) / 2 codes), 3 bits, at stage 10
+    -- DoG ink on the raw window: 3x3 vs 5x5 binomial, ink on the dark side where
+    -- -DoG >= (eps + 4) / 8 codes (0.5 .. 4.4 over K5; the 99th percentile of |DoG| on
+    -- a photo is ~10 codes, so this spans ~20% .. 2.5% of the pixels), alpha 1..3 over
+    -- the next 2 codes, at stage 10.
+    -- (v0.1.0 used the XDoG form G1 - 63/64 G2 < eps, which with eps = 0..31 codes
+    -- inked every flat region darker than 64 eps: the whole picture went black.)
     ------------------------------------------------------------------------
     g_xdog : if C_HAS_XDOG generate
         signal x2_a, x2_b : unsigned(8 downto 0) := (others => '0');
@@ -1465,13 +1473,14 @@ begin
                     x7_b <= resize(c5s(1), 13) + resize(c5s(3), 13);
                     x7_c <= c5s(2);
                     x8_g2 <= resize(x7_a, 16) + shift_left(resize(x7_b, 16), 2) + shift_left(resize(x7_c, 16), 2) + shift_left(resize(x7_c, 16), 1);
-                    -- D in 1/256 codes: 16 g1 - g2 + g2/64
-                    x9_d <= shift_left(signed(resize(x8_g1, 18)), 4) - signed(resize(x8_g2, 18)) + signed(resize(shift_right(x8_g2, 6), 18));
-                    v_t := shift_left(signed(resize(c_eps8, 18)), 8) - x9_d;
-                    v_t := shift_right(v_t, 10);                 -- 4 codes per alpha step
-                    if v_t <= 0 then xa10 <= (others => '0');
-                    elsif v_t >= 3 then xa10 <= "11";
-                    else xa10 <= unsigned(v_t(1 downto 0)); end if;
+                    -- DoG in 1/256 codes: 16 g1 - g2 (both binomial sums, 16 and 256)
+                    x9_d <= shift_left(signed(resize(x8_g1, 18)), 4) - signed(resize(x8_g2, 18));
+                    -- ink where -DoG >= (eps + 4) / 8 codes: v_t = -DoG - thr in 1/256 codes
+                    v_t := -x9_d - shift_left(signed(resize(c_eps8, 18)) + 4, 5);
+                    if v_t < 0 then xa10 <= (others => '0');
+                    elsif v_t >= 512 then xa10 <= "11";          -- 2+ codes past the threshold
+                    elsif v_t >= 256 then xa10 <= "10";
+                    else xa10 <= "01"; end if;
                     xa_d(11) <= xa10;
                     for i in 12 to 32 loop xa_d(i) <= xa_d(i - 1); end loop;
                 end if;
@@ -1506,7 +1515,7 @@ begin
         signal n7_mag : unsigned(7 downto 0) := (others => '0');
         signal n7_dir : unsigned(1 downto 0) := (others => '0');
         signal n7_cg : unsigned(10 downto 0) := (others => '0');
-        signal n8_mp : unsigned(11 downto 0) := (others => '0');
+        signal n8_mp : unsigned(12 downto 0) := (others => '0');
         signal n8_dir, n9_dir, n10_dir, n11_dir, n12_dir, n13_dir, n14_dir : unsigned(1 downto 0) := (others => '0');
         signal n9_m4, n10_m0, n11_m0, n11_m1 : unsigned(3 downto 0) := (others => '0');
         signal cnt9, cnt9_d, cnt9_dd, cnt14 : unsigned(9 downto 0) := (others => '0');
@@ -1579,7 +1588,9 @@ begin
                     -- stage 8..9: pre-gain -> 4-bit magnitude
                     n8_mp <= n7_mag * c_cgain;
                     n8_dir <= n7_dir;
-                    if n8_mp(11 downto 10) /= "00" then n9_m4 <= (others => '1'); else n9_m4 <= n8_mp(9 downto 6); end if;
+                    -- strong edge (m4 >= 8) at step height >= 256/gain codes: 128 .. 15 over K5
+                    -- (v0.1.0 took bits 9..6 with gain 1..16: nothing below a 114-code step)
+                    if n8_mp(12 downto 8) /= "00000" then n9_m4 <= (others => '1'); else n9_m4 <= n8_mp(7 downto 4); end if;
                     n9_dir <= n8_dir;
                     if hv_c(8) = '1' then
                         if hf_c(8) = '1' then cnt9 <= (others => '0'); else cnt9 <= cnt9 + 1; end if;
@@ -1938,8 +1949,10 @@ begin
                 out_y <= o7_y; out_u <= o7_v; out_v <= o7_u;         -- back to hardware order
             else
                 out_y <= unsigned(ring_q(9 downto 0));
-                out_u <= unsigned(ring_q(25 downto 18)) & "00";      -- ring: 17:10 = data_in.v, 25:18 = data_in.u
-                out_v <= unsigned(ring_q(17 downto 10)) & "00";
+                -- ring 25:18 = f0_u = data_in.v, 17:10 = f0_v = data_in.u: read back in
+                -- hardware order (v0.1.0 had these crossed: the raw half was hue-swapped)
+                out_u <= unsigned(ring_q(17 downto 10)) & "00";
+                out_v <= unsigned(ring_q(25 downto 18)) & "00";
             end if;
             out_hs <= ring_q(27); out_vs <= ring_q(28); out_fld <= ring_q(29);
         end if;

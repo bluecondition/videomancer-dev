@@ -5,7 +5,7 @@
 processing_delay_clks = 84
 program_id = "com.czartroniks.flatline_finish"
 program_name = "Flatline Finish"
-program_version = "0.1.0"
+program_version = "0.1.1"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"

@@ -58,6 +58,16 @@ TOML = {
 }
 
 
+
+def write_if_changed(path, text: str) -> None:
+    """Write via a temp file + rename, and only when the content differs."""
+    import os
+    if path.exists() and path.read_text() == text:
+        return
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(text)
+    os.replace(tmp, path)
+
 def stamp_vhd(src: str, name: str, cfg: dict) -> str:
     out = src
     for k, v in cfg.items():
@@ -108,8 +118,8 @@ def main():
     for name, cfg in VARIANTS.items():
         d = HERE.parent / name
         d.mkdir(exist_ok=True)
-        (d / f"{name}.vhd").write_text(stamp_vhd(vhd, name, cfg))
-        (d / f"{name}.toml").write_text(stamp_toml(toml, name, TOML[name]))
+        write_if_changed(d / f"{name}.vhd", stamp_vhd(vhd, name, cfg))
+        write_if_changed(d / f"{name}.toml", stamp_toml(toml, name, TOML[name]))
         print(f"stamped {name}")
 
 
