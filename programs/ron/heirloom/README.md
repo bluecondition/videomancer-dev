@@ -187,7 +187,7 @@ versions from v0.1.0.
 | 40 | 20231123_23_27_50 t5.5 | confetti | magenta petal cards over a striped grey ground with red/blue stripes | v0.1.0 built 2026-11-09 (router2; HD HDMI seed 5, others seed 1; 6,890-6,914 LC, 22 EBR); not flashed |
 | 41 | 20231124_00_45_44 t5.0 | pyramid | teal/pink pyramid with a striped core on a dark vignette | v0.1.0 built 2026-11-09 (router2; all six seed 1; 6,724-6,731 LC, 20 EBR); not flashed |
 | 42 | 20231204_21_01_30 t0.5 | platter | pink dotted vinyl disc on dark with curved magenta/green strands | in progress (wave 3) |
-| 43 | 20231204_23_13_02 t5.5 | plaid | red/yellow/black woven plaid with wavy curves | in progress (wave 3) |
+| 43 | 20231204_23_13_02 t5.5 | plaid | red/yellow/black woven plaid with wavy curves | v0.1.0 built 2026-11-09 (router1; all six seed 1; 7,019-7,046 LC, 22 EBR); not flashed |
 | 44 | 20231205_23_09_56 t0.5 | bunsen | orange/blue flame on blue; blue with yellow flame blobs | in progress (wave 3) |
 | 45 | 20231227_22_52_47 t3.5 | kachina | red/magenta/blue/yellow mirrored totem mask | in progress (wave 3) |
 | 46 | 20231229_00_46_59 t6.0 | effigy | yellow idol in red/black flames, mirrored | in progress (wave 3) |

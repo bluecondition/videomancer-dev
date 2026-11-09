@@ -1,0 +1,159 @@
+# Plaid - Heirloom (phase 3, video clips), v0.1.0 (2026-11-09) from WIN_20231204_23_13_02 at 5.5 s.
+# A woven plaid: yellow-to-red colour cells between black weft bars and warp gaps, over bands of crimson and
+# hot-pink sawtooth stripes.  The weft slides down, the colour scrolls, the bands drift and breathe.
+# See plaid.vhd, plaid.py and SUMMARY.md.
+
+[program]
+processing_delay_clks = 20
+program_id = "com.czartroniks.plaid"
+program_name = "Plaid"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Material", "Pattern", "Grid"]
+program_type = "processing"
+description = "Yellow-to-red colour cells woven between black weft bars over bands of hot-pink stripes; the weft slides down."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Warp"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Weft"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Shuttle"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 820
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Bands"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Stripes"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Dye"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Layer"
+value_labels = ["Cells", "Bands"]
+initial_value_label = "Cells"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Arcs"
+value_labels = ["Waves", "Arcs"]
+initial_value_label = "Waves"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Colours"
+value_labels = ["Ember", "Orchid"]
+initial_value_label = "Ember"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Twill"
+value_labels = ["Plain", "Twill"]
+initial_value_label = "Plain"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Weave"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 410
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Photo"
+
+[[preset]]
+name = "Loose Weave"
+linear_potentiometer_12 = 60
+rotary_potentiometer_3 = 700
+
+[[preset]]
+name = "Fine Tartan"
+linear_potentiometer_12 = 900
+rotary_potentiometer_4 = 700
+
+[[preset]]
+name = "Twill Arcs"
+toggle_switch_8 = 1
+toggle_switch_10 = 1
+
+[[preset]]
+name = "Orchid Bands"
+toggle_switch_7 = 1
+toggle_switch_9 = 1
+rotary_potentiometer_1 = 700
+
+[[preset]]
+name = "Open Cells"
+rotary_potentiometer_1 = 200
+rotary_potentiometer_2 = 300
+rotary_potentiometer_5 = 300
+
+[[preset]]
+name = "Cage"
+rotary_potentiometer_1 = 820
+rotary_potentiometer_2 = 820
+rotary_potentiometer_5 = 900
+
+[[preset]]
+name = "Camera Dye"
+rotary_potentiometer_6 = 860
+rotary_potentiometer_3 = 512
