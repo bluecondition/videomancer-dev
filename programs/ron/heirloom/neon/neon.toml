@@ -1,0 +1,158 @@
+# Neon - Heirloom (video phase), built 2026-11-09 (v0.1.0) from the clip WIN_20230919_00_32_29 at 3.0 s.
+# Three neon bands (white tubes in a red glow around violet interiors) bent into S-curves on teal; the curve
+# rolls down the frame while the interior's magenta stripes and eyes stay put.  See neon.vhd, neon.py, SUMMARY.md.
+
+[program]
+processing_delay_clks = 20
+program_id = "com.czartroniks.neon"
+program_name = "Neon"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Pattern", "Warp", "Tube"]
+program_type = "processing"
+description = "Glowing white neon tubes around violet and magenta interiors, swaying in S-curves over a teal ground."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Bands"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Gap"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Drift"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 700
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Waves"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Facets"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Etch"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 400
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Wave"
+value_labels = ["Sine", "Square"]
+initial_value_label = "Sine"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Mirror"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Glow"
+value_labels = ["Halo", "Bare"]
+initial_value_label = "Halo"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Palette"
+value_labels = ["Neon", "Argon"]
+initial_value_label = "Neon"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Sway"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 395
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Photo"
+
+[[preset]]
+name = "Hairpins"
+rotary_potentiometer_3 = 800
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Serpent"
+rotary_potentiometer_1 = 700
+rotary_potentiometer_4 = 850
+linear_potentiometer_12 = 520
+
+[[preset]]
+name = "Argon Mirror"
+toggle_switch_8 = 1
+toggle_switch_10 = 1
+
+[[preset]]
+name = "Stepped"
+rotary_potentiometer_2 = 750
+toggle_switch_7 = 1
+linear_potentiometer_12 = 600
+
+[[preset]]
+name = "Bare Tubes"
+rotary_potentiometer_2 = 200
+toggle_switch_9 = 1
+rotary_potentiometer_1 = 760
+
+[[preset]]
+name = "Fine Facets"
+rotary_potentiometer_5 = 950
+rotary_potentiometer_2 = 850
+
+[[preset]]
+name = "Still Neon"
+rotary_potentiometer_3 = 512
+linear_potentiometer_12 = 0
