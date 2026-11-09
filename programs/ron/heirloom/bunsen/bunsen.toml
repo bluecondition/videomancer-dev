@@ -1,0 +1,155 @@
+# Bunsen - Heirloom from the video clips (phase 3), v0.1.0, built 2026-11-09 from the still
+# WIN_20231205_23_09_56 t0.5 (a 6 s clip; Ron raises the key's fade through it).
+# An orange bat / crown key over a magenta contour field with blue pools in the corners, fading out toward the
+# bottom: two cross-modulated oscillators through a colouriser, a measured shape key mixed by a V-shaped ramp.
+# See bunsen.vhd, bunsen.py, SUMMARY.md.
+
+[program]
+processing_delay_clks = 24
+program_id = "com.czartroniks.bunsen"
+program_name = "Bunsen"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Mask", "Demo", "Color"]
+program_type = "processing"
+description = "An orange bat-crown key over a swaying magenta contour field with blue pools; the slider fades the flame down the bat."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Rings"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Lattice"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Warp"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Speed"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 377
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Bat"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Camera"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 320
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Gas"
+value_labels = ["Ember", "Blue"]
+initial_value_label = "Ember"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Key"
+value_labels = ["Bat", "Cutout"]
+initial_value_label = "Bat"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Flames"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Flip"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Fade"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 643
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Photo"
+
+[[preset]]
+name = "Embers"
+linear_potentiometer_12 = 0
+
+[[preset]]
+name = "Lit Bat"
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Blue Flames"
+toggle_switch_7 = 1
+toggle_switch_9 = 1
+
+[[preset]]
+name = "Cutout"
+toggle_switch_8 = 1
+linear_potentiometer_12 = 900
+
+[[preset]]
+name = "Fine Lattice"
+rotary_potentiometer_2 = 900
+rotary_potentiometer_3 = 200
+
+[[preset]]
+name = "Drapes"
+rotary_potentiometer_3 = 1000
+rotary_potentiometer_4 = 600
+
+[[preset]]
+name = "Hanging Bat"
+toggle_switch_10 = 1
+rotary_potentiometer_5 = 640
