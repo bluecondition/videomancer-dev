@@ -212,7 +212,7 @@ against all 101 existing heirloom stills (`.heirloom_work/vid/dedupe.py`, sheets
 | 57 | 20230408_23_11_38 t3.5 | pupil | blue/yellow moire lens eyes on flat green | in progress (wave 4) |
 | 58 | 20230424_23_47_33 t8.0 | tatter | white torn tear over orange/magenta diamond zigzags (beacon/vase session, different patch) | in progress (wave 4) |
 | 59 | 20230627_23_37_56 t7.0 | nesting | blue/magenta/red mirrored nested squares | in progress (wave 4) |
-| 60 | 20230723_00_52_24 t0.5 | tunnel | black/white concentric diamond moire eye | in progress (wave 4) |
+| 60 | 20230723_00_52_24 t0.5 | tunnel | black/white concentric diamond moire eye | v0.1.0 built 2026-11-09 (router1; all six seed 1; 6,755-6,764 LC, 13 EBR); not flashed |
 | 61 | 20230804_22_27_52 t6.0 | mummer | green/red/blue/magenta contour mask faces | in progress (wave 4) |
 | 62 | 20230817_00_06_49 t0.5 | gothic | green/blue/red arch stripes | in progress (wave 4) |
 | 63 | 20230818_01_17_40 t3.0 | owlet | blue/cyan contour eyes on a red ground; purple/red blobs alt | in progress (wave 4) |
