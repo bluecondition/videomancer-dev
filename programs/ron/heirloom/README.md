@@ -179,7 +179,7 @@ versions from v0.1.0.
 | 32 | 20230914_01_59_34 t4.0 | marble | cream/orange/red marble swirl arcs with blue dots | v0.1.0 built 2026-11-09 (router2 6/6 seed 1; 6891–6902 LC, 15 EBR); not flashed |
 | 33 | 20230919_00_32_29 t3.0 | neon | magenta/white glowing S-curve neon tubes on teal | in progress (wave 3) |
 | 34 | 20230930_01_37_53 t0.5 | brazier | blue/purple nested diamond with pink flames on a red/black ground | v0.1.0 built 2026-11-09 (ROUTER1 6/6 seed 1; 6724–6754 LC, 18 EBR); not flashed |
-| 35 | 20231002_01_20_50 t0.5 | lantern | magenta/yellow/black nested petal contours around a pink disc | in progress (wave 3) |
+| 35 | 20231002_01_20_50 t0.5 | lantern | magenta/yellow/black nested petal contours around a pink disc | v0.1.0 built 2026-11-09 (router2; SD Dual seed 2; 5114–5133 LC, 18 EBR); not flashed |
 | 36 | 20231009_00_32_55 t0.5 | cumulus | blue/yellow/magenta/cyan scalloped cloud waves with drips | v0.1.0 built 2026-11-09 (router2 6/6 seed 1; 6990–7005 LC, 16 EBR); not flashed |
 | 37 | 20231104_16_39_25 t0.5 | streamers | bold rainbow wavy vertical ribbons | in progress (wave 3) |
 | 38 | 20231116_23_41_37 t3.5 | hawser | yellow/black/red wavy rope strands with red glints | v0.1.0 built 2026-11-09 (ROUTER1 6/6 seed 1; 6824–6840 LC, 22 EBR); not flashed |
@@ -190,7 +190,7 @@ versions from v0.1.0.
 | 43 | 20231204_23_13_02 t5.5 | plaid | red/yellow/black woven plaid with wavy curves | in progress (wave 3) |
 | 44 | 20231205_23_09_56 t0.5 | bunsen | orange/blue flame on blue; blue with yellow flame blobs | in progress (wave 3) |
 | 45 | 20231227_22_52_47 t3.5 | kachina | red/magenta/blue/yellow mirrored totem mask | in progress (wave 3) |
-| 46 | 20231229_00_46_59 t6.0 | effigy | yellow idol in red/black flames, mirrored | queued |
+| 46 | 20231229_00_46_59 t6.0 | effigy | yellow idol in red/black flames, mirrored | in progress (wave 3) |
 | 47 | 20240102_00_30_49 t1.0 | cateye | pink/yellow chevron eye | queued |
 | 48 | 20240104_00_30_04 t3.0 | grotto | blue/white/black cavern eye with cyan edges | queued |
 | 49 | 20240105_20_46_57 t0.5 | bubbles | bubble lenses in cyan/green/red wavy bands | queued |
