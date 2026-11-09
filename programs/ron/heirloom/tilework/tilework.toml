@@ -1,0 +1,160 @@
+# Tilework - Heirloom (video phase), built 2026-11-09 (v0.1.0) from the clip WIN_20230318_12_24_18 at 4.0 s.
+# A skewed grid of flat colour blocks: a 3-bit triangle staircase of rows through a hue-wheel colouriser, the
+# centre column inverted by a square wave, rainbow fringes at the column edges.  See tilework.vhd, tilework.py and
+# SUMMARY.md.
+
+[program]
+processing_delay_clks = 20
+program_id = "com.czartroniks.tilework"
+program_name = "Tilework"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Pattern", "Grid", "Color"]
+program_type = "processing"
+description = "A skewed grid of saturated colour blocks: a staircase of rows, an inverted centre column, rainbow seams."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Rows"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Columns"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Level"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Sweep"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 400
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Skew"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Bend"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 300
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Plaid"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Stairs"
+value_labels = ["Straight", "Stairs"]
+initial_value_label = "Straight"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Prism"
+value_labels = ["Thin", "Wide"]
+initial_value_label = "Thin"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Colours"
+value_labels = ["Wheel", "Turned"]
+initial_value_label = "Wheel"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Zoom"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 246
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Still"
+
+[[preset]]
+name = "Fine Mesh"
+linear_potentiometer_12 = 1023
+rotary_potentiometer_4 = 0
+
+[[preset]]
+name = "Giant Tiles"
+linear_potentiometer_12 = 0
+rotary_potentiometer_4 = 0
+
+[[preset]]
+name = "Breathing"
+rotary_potentiometer_4 = 820
+linear_potentiometer_12 = 400
+
+[[preset]]
+name = "Tartan"
+toggle_switch_7 = 1
+rotary_potentiometer_1 = 700
+rotary_potentiometer_2 = 640
+
+[[preset]]
+name = "Chevrons"
+toggle_switch_8 = 1
+rotary_potentiometer_2 = 700
+linear_potentiometer_12 = 330
+
+[[preset]]
+name = "Fan"
+rotary_potentiometer_5 = 1023
+toggle_switch_9 = 1
+rotary_potentiometer_2 = 680
+
+[[preset]]
+name = "Turned Wave"
+toggle_switch_10 = 1
+toggle_switch_11 = 1
+rotary_potentiometer_6 = 500
