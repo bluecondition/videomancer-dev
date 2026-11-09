@@ -175,7 +175,7 @@ versions from v0.1.0.
 | 28 | 20230825_00_00_20 t6.5 | arcade | orange/blue ring arches on blue stripes | v0.1.0 built 2026-11-09 (router2; SD Dual seed 2; 6866–6891 LC, 19 EBR); not flashed |
 | 29 | 20230905_00_44_28 t0.5 | coral | red hexagon core with cyan coral rings on light blue | in progress (resumed 2026-11-09) |
 | 30 | 20230906_00_33_30 t11.0 | spine | magenta/purple/black torn diagonal spine | v0.1.0 built 2026-11-09 (ROUTER1 6/6 seed 1; 6930–6944 LC, 22 EBR); not flashed |
-| 31 | 20230910_00_11_50 t7.0 | quill | blue/white feather plumes on black | in progress (resumed 2026-11-09) |
+| 31 | 20230910_00_11_50 t7.0 | quill | blue/white feather plumes on black | v0.1.0 built 2026-11-09 (router2 6/6 seed 1; 7018–7057 LC, 16 EBR); not flashed |
 | 32 | 20230914_01_59_34 t4.0 | marble | cream/orange/red marble swirl arcs with blue dots | in progress (resumed 2026-11-09) |
 | 33 | 20230919_00_32_29 t3.0 | neon | magenta/white glowing S-curve neon tubes on teal | in progress (wave 3) |
 | 34 | 20230930_01_37_53 t0.5 | brazier | blue/purple nested diamond with pink flames on a red/black ground | in progress (wave 3) |
@@ -183,7 +183,7 @@ versions from v0.1.0.
 | 36 | 20231009_00_32_55 t0.5 | cumulus | blue/yellow/magenta/cyan scalloped cloud waves with drips | in progress (wave 3) |
 | 37 | 20231104_16_39_25 t0.5 | streamers | bold rainbow wavy vertical ribbons | in progress (wave 3) |
 | 38 | 20231116_23_41_37 t3.5 | hawser | yellow/black/red wavy rope strands with red glints | in progress (wave 3) |
-| 39 | 20231119_00_47_47 t0.5 | herringbone | blue/white zigzag herringbone stripes | queued |
+| 39 | 20231119_00_47_47 t0.5 | herringbone | blue/white zigzag herringbone stripes | in progress (wave 3) |
 | 40 | 20231123_23_27_50 t5.5 | confetti | magenta petal cards over a striped grey ground with red/blue stripes | queued |
 | 41 | 20231124_00_45_44 t5.0 | pyramid | teal/pink pyramid with a striped core on a dark vignette | queued |
 | 42 | 20231204_21_01_30 t0.5 | platter | pink dotted vinyl disc on dark with curved magenta/green strands | queued |
