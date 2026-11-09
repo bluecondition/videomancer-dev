@@ -173,7 +173,7 @@ versions from v0.1.0.
 | 26 | 20230816_00_32_31 t5.0 | temple | orange/yellow/blue symmetric sunset temple with blue flames | v0.1.0 built 2026-11-04 (ROUTER1; HD Dual seed 2; 6410–6443 LC, 23 EBR); not flashed |
 | 27 | 20230820_01_33_09 t0.5 | brushfire | orange/green/white burning-grass streaks | v0.1.0 built 2026-11-09 (ROUTER1; HD Dual seed 2; 7087–7113 LC, 23 EBR); not flashed |
 | 28 | 20230825_00_00_20 t6.5 | arcade | orange/blue ring arches on blue stripes | v0.1.0 built 2026-11-09 (router2; SD Dual seed 2; 6866–6891 LC, 19 EBR); not flashed |
-| 29 | 20230905_00_44_28 t0.5 | coral | red hexagon core with cyan coral rings on light blue | in progress (resumed 2026-11-09) |
+| 29 | 20230905_00_44_28 t0.5 | coral | red hexagon core with cyan coral rings on light blue | v0.1.1 built 2026-11-09 (ROUTER1 6/6 seed 1; 6020–6035 LC, 23 EBR); not flashed |
 | 30 | 20230906_00_33_30 t11.0 | spine | magenta/purple/black torn diagonal spine | v0.1.0 built 2026-11-09 (ROUTER1 6/6 seed 1; 6930–6944 LC, 22 EBR); not flashed |
 | 31 | 20230910_00_11_50 t7.0 | quill | blue/white feather plumes on black | v0.1.0 built 2026-11-09 (router2 6/6 seed 1; 7018–7057 LC, 16 EBR); not flashed |
 | 32 | 20230914_01_59_34 t4.0 | marble | cream/orange/red marble swirl arcs with blue dots | in progress (resumed 2026-11-09) |
@@ -184,7 +184,7 @@ versions from v0.1.0.
 | 37 | 20231104_16_39_25 t0.5 | streamers | bold rainbow wavy vertical ribbons | in progress (wave 3) |
 | 38 | 20231116_23_41_37 t3.5 | hawser | yellow/black/red wavy rope strands with red glints | in progress (wave 3) |
 | 39 | 20231119_00_47_47 t0.5 | herringbone | blue/white zigzag herringbone stripes | in progress (wave 3) |
-| 40 | 20231123_23_27_50 t5.5 | confetti | magenta petal cards over a striped grey ground with red/blue stripes | queued |
+| 40 | 20231123_23_27_50 t5.5 | confetti | magenta petal cards over a striped grey ground with red/blue stripes | in progress (wave 3) |
 | 41 | 20231124_00_45_44 t5.0 | pyramid | teal/pink pyramid with a striped core on a dark vignette | queued |
 | 42 | 20231204_21_01_30 t0.5 | platter | pink dotted vinyl disc on dark with curved magenta/green strands | queued |
 | 43 | 20231204_23_13_02 t5.5 | plaid | red/yellow/black woven plaid with wavy curves | queued |
