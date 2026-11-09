@@ -1,0 +1,153 @@
+# Temple - Heirloom from the video clips (phase 3), v0.1.0, built 2026-11-04 from the still
+# WIN_20230816_00_32_31 t5.0.  An orange/yellow/blue mirror-symmetric sunset temple: cyan flame columns over
+# an orange sky, maroon shapes, a pink band of orange spindles, a stack of wavy purple bands, a cyan floor.
+# See temple.vhd, temple.py, SUMMARY.md.
+
+[program]
+processing_delay_clks = 20
+program_id = "com.czartroniks.temple"
+program_name = "Temple"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Mirror", "Shape", "Color"]
+program_type = "processing"
+description = "A sunset temple: cyan flames over orange, maroon shapes, orange spindles in a pink band, wavy purple bands."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Columns"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Spindles"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Flames"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Drift"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Stack"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Camera"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 200
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Flip"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Palette"
+value_labels = ["Sunset", "Ice"]
+initial_value_label = "Sunset"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Shadows"
+value_labels = ["Off", "On"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Tear"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Sun"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Photo"
+
+[[preset]]
+name = "Dusk"
+linear_potentiometer_12 = 120
+
+[[preset]]
+name = "Blaze"
+linear_potentiometer_12 = 940
+
+[[preset]]
+name = "Still Temple"
+rotary_potentiometer_4 = 0
+
+[[preset]]
+name = "Wide Columns"
+rotary_potentiometer_1 = 180
+rotary_potentiometer_2 = 760
+
+[[preset]]
+name = "Ice Flip"
+toggle_switch_7 = 1
+toggle_switch_8 = 1
+
+[[preset]]
+name = "Torn Lenses"
+toggle_switch_10 = 1
+rotary_potentiometer_5 = 1000
+
+[[preset]]
+name = "Bare Sky"
+toggle_switch_9 = 0
+rotary_potentiometer_3 = 900
