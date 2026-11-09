@@ -195,3 +195,41 @@ versions from v0.1.0.
 | 48 | 20240104_00_30_04 t3.0 | grotto | blue/white/black cavern eye with cyan edges | v0.1.0 built 2026-11-09 (router2; HD Dual seed 2, others seed 1; 6,870-6,884 LC, 23 EBR); not flashed |
 | 49 | 20240105_20_46_57 t0.5 | bubbles | bubble lenses in cyan/green/red wavy bands | v0.1.0 built 2026-11-09 (router1; all six seed 1; 6,995-7,014 LC, 17 EBR); not flashed |
 | 50 | 20240216_23_50_17 t0.5 | velvet | magenta/white/yellow vertical drapes with a reflection | v0.1.1 built 2026-11-09 (router1; all six seed 1; 7,135-7,143 LC, 20 EBR); not flashed |
+
+## From the video clips, part 2 (phase 3b, started 2026-11-09)
+
+Stills taken out of the same clips: 30 more patches, picked after a visual de-dupe of every remaining A/B-graded session
+against all 101 existing heirloom stills (`.heirloom_work/vid/dedupe.py`, sheets in `.heirloom_work/vid/dd/`). Same brief and standard.
+
+| # | Still (clip, time) | Program | What it shows | Status |
+|---|---|---|---|---|
+| 51 | 20230129_23_23_56 t0.5 | gable | red/cyan pointed chevron fan on dark, cyan/magenta streak alt | in progress (wave 4) |
+| 52 | 20230214_23_42_08 t0.5 | breakers | cyan/blue wavy ribbon bands; green/red/blue contour crab alt | in progress (wave 4) |
+| 53 | 20230318_12_24_18 t4.0 | tilework | skewed colour-block grid; cyan/green mesh checker alt | in progress (wave 4) |
+| 54 | 20230318_14_13_38 t0.5 | staircase | cyan diagonal pixel staircase; magenta/cyan random block mosaic alt | in progress (wave 4) |
+| 55 | 20230328_00_11_14 t0.5 | pods | green/yellow cell eyes lattice in olive; grey chevron stacks with rainbow fringes alt | in progress (wave 4) |
+| 56 | 20230402_23_03_06 t0.5 | seaweed | green/magenta wavy vertical curtain bands | in progress (wave 4) |
+| 57 | 20230408_23_11_38 t3.5 | pupil | blue/yellow moire lens eyes on flat green | in progress (wave 4) |
+| 58 | 20230424_23_47_33 t8.0 | tatter | white torn tear over orange/magenta diamond zigzags (beacon/vase session, different patch) | in progress (wave 4) |
+| 59 | 20230627_23_37_56 t7.0 | nesting | blue/magenta/red mirrored nested squares | in progress (wave 4) |
+| 60 | 20230723_00_52_24 t0.5 | tunnel | black/white concentric diamond moire eye | in progress (wave 4) |
+| 61 | 20230804_22_27_52 t6.0 | mummer | green/red/blue/magenta contour mask faces | in progress (wave 4) |
+| 62 | 20230817_00_06_49 t0.5 | gothic | green/blue/red arch stripes | in progress (wave 4) |
+| 63 | 20230818_01_17_40 t3.0 | owlet | blue/cyan contour eyes on a red ground; purple/red blobs alt | in progress (wave 4) |
+| 64 | 20230904_01_56_58 t0.5 | specter | green ghost flame figure on black with blue floor | in progress (wave 4) |
+| 65 | 20230906_22_43_27 t2.5 | mantis | green/purple/white kaleidoscope insect | in progress (wave 4) |
+| 66 | 20230907_00_18_59 t5.5 | cupola | red/orange/green sunset bands with blue domes | in progress (wave 4) |
+| 67 | 20230927_23_58_07 t2.5 | batwing | magenta/yellow/blue mirrored bat-wing kaleido; green/yellow zigzag alt | in progress (wave 4) |
+| 68 | 20231003_00_48_14 t1.5 | marionette | magenta/green/blue curtain of hanging figures | in progress (wave 4) |
+| 69 | 20231008_20_41_21 t0.5 | butterfly | magenta/blue/black kaleido butterfly | in progress (wave 4) |
+| 70 | 20231022_00_05_49 t0.5 | oilslick | orange/blue oil-slick swirl; green/magenta contour blobs alt | in progress (wave 4) |
+| 71 | 20231026_23_13_39 t0.5 | vine | green/purple/black diagonal flame streaks | in progress (wave 4) |
+| 72 | 20231121_21_36_42 t0.5 | portal | cyan/magenta/green mirrored arcs with stripes | in progress (wave 4) |
+| 73 | 20231208_23_03_08 t0.5 | tiger | orange/blue/green wavy diagonal tiger bands | in progress (wave 4) |
+| 74 | 20231218_00_10_10 t0.5 | harlequin | orange/purple/green wavy stripes with orange diamonds | in progress (wave 4) |
+| 75 | 20231218_21_31_11 t3.0 | starline | magenta/green neon chevron star lines on black; rainbow stripes with white dots alt; B/W silhouettes alt | in progress (wave 4) |
+| 76 | 20231227_00_20_47 t6.0 | ocelot | orange/black/blue wavy zebra stripes with blue dots | in progress (wave 4) |
+| 77 | 20240111_01_01_24 t0.5 | yolk | yellow/red/white flames and eggs mirrored; magenta/blue triangles alt | in progress (wave 4) |
+| 78 | 20240117_22_55_32 t0.5 | coastline | blue field with a red/yellow/green wavy ridge | v0.1.0 built 2026-11-09 (router2; HD HDMI seed 2, others seed 1; 6,844-6,864 LC, 15 EBR); not flashed |
+| 79 | 20240207_23_34_28 t0.5 | hornet | yellow/black/red horizontal bands with eyes; red/cyan vertical gloss alt | in progress (wave 4) |
+| 80 | 20240213_23_38_52 t3.0 | flamecrest | magenta/red/yellow flame fringe on black; masks alt | in progress (wave 4) |
