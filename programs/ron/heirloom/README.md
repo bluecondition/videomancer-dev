@@ -190,7 +190,7 @@ versions from v0.1.0.
 | 43 | 20231204_23_13_02 t5.5 | plaid | red/yellow/black woven plaid with wavy curves | v0.1.0 built 2026-11-09 (router1; all six seed 1; 7,019-7,046 LC, 22 EBR); not flashed |
 | 44 | 20231205_23_09_56 t0.5 | bunsen | orange/blue flame on blue; blue with yellow flame blobs | v0.1.0 built 2026-11-09 (router1; all six seed 1; 6,917-6,945 LC, 23 EBR); not flashed |
 | 45 | 20231227_22_52_47 t3.5 | kachina | red/magenta/blue/yellow mirrored totem mask | v0.1.1 built 2026-11-09 (router1; all six seed 1; 6,831-6,849 LC, 24 EBR); not flashed |
-| 46 | 20231229_00_46_59 t6.0 | effigy | yellow idol in red/black flames, mirrored | in progress (wave 3) |
+| 46 | 20231229_00_46_59 t6.0 | effigy | yellow idol in red/black flames, mirrored | v0.1.0 built 2026-11-09 (router1; all six seed 1; 7,082-7,118 LC, 23 EBR); not flashed |
 | 47 | 20240102_00_30_49 t1.0 | cateye | pink/yellow chevron eye | in progress (wave 3) |
 | 48 | 20240104_00_30_04 t3.0 | grotto | blue/white/black cavern eye with cyan edges | in progress (wave 3) |
 | 49 | 20240105_20_46_57 t0.5 | bubbles | bubble lenses in cyan/green/red wavy bands | v0.1.0 built 2026-11-09 (router1; all six seed 1; 6,995-7,014 LC, 17 EBR); not flashed |
