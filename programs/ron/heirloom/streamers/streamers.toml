@@ -1,0 +1,158 @@
+# Streamers - Heirloom (phase 3, video clips), built 2026-11-09 (v0.1.0) from the still WIN_20231104_16_39_25 at 0.5 s.
+# Bold rainbow ribbons swinging down the frame: two hsync-reset VCOs FM'd per line by two travelling LFOs.
+# See streamers.vhd, streamers.py and SUMMARY.md.
+# v0.1.1 (2026-11-09): Sync continues VCO Q from the last off-screen red edge at each line start (no left-edge block); Bend default 280, Osc at twice the camera's level.
+
+[program]
+processing_delay_clks = 20
+program_id = "com.czartroniks.streamers"
+program_name = "Streamers"
+program_version = "0.1.1"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Pattern", "Warp", "Color"]
+program_type = "processing"
+description = "Bold rainbow ribbons swinging down the frame: two hsync-reset oscillators FM'd by travelling waves."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Red"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Blue"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Wave"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Speed"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 768
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Width"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Bend"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 280
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Mirror"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Cables"
+value_labels = ["RGB", "GBR"]
+initial_value_label = "RGB"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Sync"
+value_labels = ["Free", "Sync"]
+initial_value_label = "Free"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Shape"
+value_labels = ["Sine", "Zigzag"]
+initial_value_label = "Sine"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Swing"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 318
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Photo"
+
+[[preset]]
+name = "Calm Bars"
+linear_potentiometer_12 = 0
+
+[[preset]]
+name = "Braids"
+rotary_potentiometer_3 = 300
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Dense Ripple"
+rotary_potentiometer_1 = 820
+rotary_potentiometer_2 = 820
+rotary_potentiometer_3 = 700
+linear_potentiometer_12 = 600
+
+[[preset]]
+name = "Mirror Gate"
+toggle_switch_7 = 1
+linear_potentiometer_12 = 560
+
+[[preset]]
+name = "Synced"
+rotary_potentiometer_2 = 760
+toggle_switch_9 = 1
+
+[[preset]]
+name = "Zig Cables"
+toggle_switch_8 = 1
+toggle_switch_10 = 1
+linear_potentiometer_12 = 520
+
+[[preset]]
+name = "Thin Red"
+rotary_potentiometer_5 = 120
+rotary_potentiometer_4 = 900

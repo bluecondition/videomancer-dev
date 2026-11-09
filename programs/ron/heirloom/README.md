@@ -181,7 +181,7 @@ versions from v0.1.0.
 | 34 | 20230930_01_37_53 t0.5 | brazier | blue/purple nested diamond with pink flames on a red/black ground | v0.1.0 built 2026-11-09 (ROUTER1 6/6 seed 1; 6724–6754 LC, 18 EBR); not flashed |
 | 35 | 20231002_01_20_50 t0.5 | lantern | magenta/yellow/black nested petal contours around a pink disc | v0.1.0 built 2026-11-09 (router2; SD Dual seed 2; 5114–5133 LC, 18 EBR); not flashed |
 | 36 | 20231009_00_32_55 t0.5 | cumulus | blue/yellow/magenta/cyan scalloped cloud waves with drips | v0.1.0 built 2026-11-09 (router2 6/6 seed 1; 6990–7005 LC, 16 EBR); not flashed |
-| 37 | 20231104_16_39_25 t0.5 | streamers | bold rainbow wavy vertical ribbons | in progress (wave 3) |
+| 37 | 20231104_16_39_25 t0.5 | streamers | bold rainbow wavy vertical ribbons | v0.1.1 built 2026-11-09 (router1; HD HDMI seed 2, others seed 1; 6,946-6,959 LC, 24 EBR); not flashed |
 | 38 | 20231116_23_41_37 t3.5 | hawser | yellow/black/red wavy rope strands with red glints | v0.1.0 built 2026-11-09 (ROUTER1 6/6 seed 1; 6824–6840 LC, 22 EBR); not flashed |
 | 39 | 20231119_00_47_47 t0.5 | herringbone | blue/white zigzag herringbone stripes | v0.1.0 built 2026-11-09 (router2 6/6 seed 1; 5974–5986 LC, 12 EBR); not flashed |
 | 40 | 20231123_23_27_50 t5.5 | confetti | magenta petal cards over a striped grey ground with red/blue stripes | in progress (wave 3) |
@@ -193,5 +193,5 @@ versions from v0.1.0.
 | 46 | 20231229_00_46_59 t6.0 | effigy | yellow idol in red/black flames, mirrored | in progress (wave 3) |
 | 47 | 20240102_00_30_49 t1.0 | cateye | pink/yellow chevron eye | in progress (wave 3) |
 | 48 | 20240104_00_30_04 t3.0 | grotto | blue/white/black cavern eye with cyan edges | in progress (wave 3) |
-| 49 | 20240105_20_46_57 t0.5 | bubbles | bubble lenses in cyan/green/red wavy bands | queued |
+| 49 | 20240105_20_46_57 t0.5 | bubbles | bubble lenses in cyan/green/red wavy bands | in progress (wave 3) |
 | 50 | 20240216_23_50_17 t0.5 | velvet | magenta/white/yellow vertical drapes with a reflection | queued |
