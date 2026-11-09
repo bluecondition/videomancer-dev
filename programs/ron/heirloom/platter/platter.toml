@@ -1,0 +1,157 @@
+# Platter - Heirloom from the video clips (phase 3), v0.1.1, built 2026-11-09 from the still
+# WIN_20231204_21_01_30 t0.5 (clip of Ron's modular video synth).
+# A pink dotted "vinyl" platter with a spindle hole and orbiting balls, over black ground and shaded yellow / pink
+# tubes that breathe through an S-curve. See platter.vhd, platter.py, SUMMARY.md.
+
+[program]
+processing_delay_clks = 20
+program_id = "com.czartroniks.platter"
+program_name = "Platter"
+program_version = "0.1.1"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Shape", "Noise", "Warp"]
+program_type = "processing"
+description = "A pink dotted vinyl platter with orbiting balls over black and shaded yellow / pink tubes that breathe."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Platter"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Grain"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Bands"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Orbit"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 700
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Tubes"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Camera"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 128
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Flip"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Colours"
+value_labels = ["Rose", "Neon"]
+initial_value_label = "Rose"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Mirror"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Window"
+value_labels = ["Disc", "Window"]
+initial_value_label = "Disc"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Warp"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 440
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Photo"
+
+[[preset]]
+name = "Still Columns"
+linear_potentiometer_12 = 0
+rotary_potentiometer_4 = 860
+
+[[preset]]
+name = "Thrash"
+linear_potentiometer_12 = 1023
+rotary_potentiometer_5 = 700
+
+[[preset]]
+name = "Big Record"
+rotary_potentiometer_1 = 1023
+toggle_switch_7 = 1
+rotary_potentiometer_2 = 820
+
+[[preset]]
+name = "Neon Mirror"
+toggle_switch_8 = 1
+toggle_switch_9 = 1
+
+[[preset]]
+name = "Porthole"
+toggle_switch_10 = 1
+rotary_potentiometer_1 = 380
+
+[[preset]]
+name = "Six Bands"
+rotary_potentiometer_3 = 1023
+rotary_potentiometer_2 = 300
+
+[[preset]]
+name = "Camera Platter"
+rotary_potentiometer_6 = 820
+rotary_potentiometer_2 = 700
