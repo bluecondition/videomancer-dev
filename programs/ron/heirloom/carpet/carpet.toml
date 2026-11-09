@@ -1,0 +1,150 @@
+# Carpet - Heirloom phase 3 (video clips), v0.1.0 from WIN_20230722_01_18_41 at 5.5 s.
+# A red / white / orange kaleidoscopic carpet: tall black-cored diamonds and flat lenses whose rings meet in X crossings
+# and bow-tie stars, V-zigzag bands, H-sync jitter streaks.  See carpet.vhd, carpet.py and SUMMARY.md.
+
+[program]
+processing_delay_clks = 20
+program_id = "com.czartroniks.carpet"
+program_name = "Carpet"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Pattern", "Shape", "Illusion"]
+program_type = "processing"
+description = "Red, white and orange kaleidoscope carpet: black-cored diamonds and lenses ringed in folds that flow."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Diamonds"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Zigzag"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Tiles"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Speed"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 680
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Jitter"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 300
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Etch"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 320
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Rows"
+value_labels = ["Mirror", "Double"]
+initial_value_label = "Mirror"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Weave"
+value_labels = ["Min", "Max"]
+initial_value_label = "Min"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Palette"
+value_labels = ["Ember", "Ice"]
+initial_value_label = "Ember"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Stagger"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Folds"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 409
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Photo"
+
+[[preset]]
+name = "Bare Lines"
+linear_potentiometer_12 = 0
+
+[[preset]]
+name = "Dense Weave"
+linear_potentiometer_12 = 860
+rotary_potentiometer_4 = 760
+
+[[preset]]
+name = "Ice Lattice"
+toggle_switch_9 = 1
+toggle_switch_10 = 1
+linear_potentiometer_12 = 560
+
+[[preset]]
+name = "Lanterns"
+toggle_switch_8 = 1
+linear_potentiometer_12 = 600
+
+[[preset]]
+name = "Four Rows"
+toggle_switch_7 = 1
+rotary_potentiometer_3 = 700
+
+[[preset]]
+name = "Shredded"
+rotary_potentiometer_5 = 900
+linear_potentiometer_12 = 650
