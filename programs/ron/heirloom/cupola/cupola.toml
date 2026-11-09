@@ -1,0 +1,155 @@
+# Cupola - Heirloom (video phase), built 2026-11-09 (v0.1.1) from the clip WIN_20230907_00_18_59 at 5.5 s.
+# An RGB patch: red pillars rolling up, two cupola cells crossing in yellow X's, magenta domes under a cream strip.
+# See cupola.vhd, cupola.py, SUMMARY.md.
+
+[program]
+processing_delay_clks = 28
+program_id = "com.czartroniks.cupola"
+program_name = "Cupola"
+program_version = "0.1.1"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Pattern", "Shape", "Color"]
+program_type = "processing"
+description = "Red pillars rolling up behind two breathing cupolas that cross in yellow X's, magenta domes over green."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Pillars"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Cupolas"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Rows"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Roll"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 701
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Dome"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Etch"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 200
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Flip"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Colours"
+value_labels = ["Sunset", "Lagoon"]
+initial_value_label = "Sunset"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Lattice"
+value_labels = ["Single", "Double"]
+initial_value_label = "Single"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Polarity"
+value_labels = ["Positive", "Negative"]
+initial_value_label = "Positive"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Cupola"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 507
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Photo"
+
+[[preset]]
+name = "Arches"
+linear_potentiometer_12 = 0
+rotary_potentiometer_5 = 700
+
+[[preset]]
+name = "Hourglass"
+linear_potentiometer_12 = 1023
+toggle_switch_9 = 1
+
+[[preset]]
+name = "Lagoon"
+toggle_switch_8 = 1
+rotary_potentiometer_3 = 700
+
+[[preset]]
+name = "Bowls"
+toggle_switch_7 = 1
+rotary_potentiometer_5 = 850
+
+[[preset]]
+name = "Negative"
+toggle_switch_10 = 1
+rotary_potentiometer_1 = 300
+
+[[preset]]
+name = "Fast Rows"
+rotary_potentiometer_4 = 950
+rotary_potentiometer_3 = 900
+
+[[preset]]
+name = "Osc Bend"
+toggle_switch_11 = 1
+rotary_potentiometer_6 = 500
