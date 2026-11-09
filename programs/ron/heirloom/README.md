@@ -183,9 +183,9 @@ versions from v0.1.0.
 | 36 | 20231009_00_32_55 t0.5 | cumulus | blue/yellow/magenta/cyan scalloped cloud waves with drips | in progress (wave 3) |
 | 37 | 20231104_16_39_25 t0.5 | streamers | bold rainbow wavy vertical ribbons | in progress (wave 3) |
 | 38 | 20231116_23_41_37 t3.5 | hawser | yellow/black/red wavy rope strands with red glints | in progress (wave 3) |
-| 39 | 20231119_00_47_47 t0.5 | herringbone | blue/white zigzag herringbone stripes | in progress (wave 3) |
+| 39 | 20231119_00_47_47 t0.5 | herringbone | blue/white zigzag herringbone stripes | v0.1.0 built 2026-11-09 (router2 6/6 seed 1; 5974–5986 LC, 12 EBR); not flashed |
 | 40 | 20231123_23_27_50 t5.5 | confetti | magenta petal cards over a striped grey ground with red/blue stripes | in progress (wave 3) |
-| 41 | 20231124_00_45_44 t5.0 | pyramid | teal/pink pyramid with a striped core on a dark vignette | queued |
+| 41 | 20231124_00_45_44 t5.0 | pyramid | teal/pink pyramid with a striped core on a dark vignette | in progress (wave 3) |
 | 42 | 20231204_21_01_30 t0.5 | platter | pink dotted vinyl disc on dark with curved magenta/green strands | queued |
 | 43 | 20231204_23_13_02 t5.5 | plaid | red/yellow/black woven plaid with wavy curves | queued |
 | 44 | 20231205_23_09_56 t0.5 | bunsen | orange/blue flame on blue; blue with yellow flame blobs | queued |
