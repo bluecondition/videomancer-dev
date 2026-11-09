@@ -176,7 +176,7 @@ versions from v0.1.0.
 | 29 | 20230905_00_44_28 t0.5 | coral | red hexagon core with cyan coral rings on light blue | v0.1.1 built 2026-11-09 (ROUTER1 6/6 seed 1; 6020–6035 LC, 23 EBR); not flashed |
 | 30 | 20230906_00_33_30 t11.0 | spine | magenta/purple/black torn diagonal spine | v0.1.0 built 2026-11-09 (ROUTER1 6/6 seed 1; 6930–6944 LC, 22 EBR); not flashed |
 | 31 | 20230910_00_11_50 t7.0 | quill | blue/white feather plumes on black | v0.1.0 built 2026-11-09 (router2 6/6 seed 1; 7018–7057 LC, 16 EBR); not flashed |
-| 32 | 20230914_01_59_34 t4.0 | marble | cream/orange/red marble swirl arcs with blue dots | in progress (resumed 2026-11-09) |
+| 32 | 20230914_01_59_34 t4.0 | marble | cream/orange/red marble swirl arcs with blue dots | v0.1.0 built 2026-11-09 (router2 6/6 seed 1; 6891–6902 LC, 15 EBR); not flashed |
 | 33 | 20230919_00_32_29 t3.0 | neon | magenta/white glowing S-curve neon tubes on teal | in progress (wave 3) |
 | 34 | 20230930_01_37_53 t0.5 | brazier | blue/purple nested diamond with pink flames on a red/black ground | in progress (wave 3) |
 | 35 | 20231002_01_20_50 t0.5 | lantern | magenta/yellow/black nested petal contours around a pink disc | in progress (wave 3) |
@@ -187,7 +187,7 @@ versions from v0.1.0.
 | 40 | 20231123_23_27_50 t5.5 | confetti | magenta petal cards over a striped grey ground with red/blue stripes | in progress (wave 3) |
 | 41 | 20231124_00_45_44 t5.0 | pyramid | teal/pink pyramid with a striped core on a dark vignette | in progress (wave 3) |
 | 42 | 20231204_21_01_30 t0.5 | platter | pink dotted vinyl disc on dark with curved magenta/green strands | in progress (wave 3) |
-| 43 | 20231204_23_13_02 t5.5 | plaid | red/yellow/black woven plaid with wavy curves | queued |
+| 43 | 20231204_23_13_02 t5.5 | plaid | red/yellow/black woven plaid with wavy curves | in progress (wave 3) |
 | 44 | 20231205_23_09_56 t0.5 | bunsen | orange/blue flame on blue; blue with yellow flame blobs | queued |
 | 45 | 20231227_22_52_47 t3.5 | kachina | red/magenta/blue/yellow mirrored totem mask | queued |
 | 46 | 20231229_00_46_59 t6.0 | effigy | yellow idol in red/black flames, mirrored | queued |
