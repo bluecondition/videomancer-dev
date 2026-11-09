@@ -1,0 +1,155 @@
+# Marionette - Heirloom (video phase), built 2026-11-09 (v0.1.0) from the clip WIN_20231003_00_48_14 at 1.5 s.
+# A curtain of hanging magenta figures with green gaps and pink heads, rolling up, the heads torn into slipping
+# strips.  See marionette.vhd, marionette.py, SUMMARY.md.
+
+[program]
+processing_delay_clks = 16
+program_id = "com.czartroniks.marionette"
+program_name = "Marionette"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Pattern", "Color", "Glitch"]
+program_type = "processing"
+description = "A rolling curtain of hanging magenta figures with green gaps and pink heads, torn into slipping strips."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Figures"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Waist"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Heads"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Roll"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 772
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Glow"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Etch"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 220
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Twin"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Tear"
+value_labels = ["Calm", "Torn"]
+initial_value_label = "Calm"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Light"
+value_labels = ["Day", "Night"]
+initial_value_label = "Day"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Sway"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Curtain"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 688
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Photo"
+
+[[preset]]
+name = "Crowd"
+linear_potentiometer_12 = 0
+rotary_potentiometer_3 = 700
+
+[[preset]]
+name = "Curtain"
+linear_potentiometer_12 = 1023
+rotary_potentiometer_5 = 820
+
+[[preset]]
+name = "Night Show"
+toggle_switch_9 = 1
+rotary_potentiometer_4 = 700
+
+[[preset]]
+name = "Twin Rows"
+toggle_switch_7 = 1
+rotary_potentiometer_1 = 380
+
+[[preset]]
+name = "Torn Dance"
+toggle_switch_8 = 1
+toggle_switch_10 = 1
+
+[[preset]]
+name = "Wedges"
+rotary_potentiometer_2 = 1023
+rotary_potentiometer_3 = 900
+
+[[preset]]
+name = "Big Heads"
+rotary_potentiometer_3 = 1023
+linear_potentiometer_12 = 420

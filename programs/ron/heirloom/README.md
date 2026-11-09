@@ -220,7 +220,7 @@ against all 101 existing heirloom stills (`.heirloom_work/vid/dedupe.py`, sheets
 | 65 | 20230906_22_43_27 t2.5 | mantis | green/purple/white kaleidoscope insect | in progress (wave 4) |
 | 66 | 20230907_00_18_59 t5.5 | cupola | red/orange/green sunset bands with blue domes | in progress (wave 4) |
 | 67 | 20230927_23_58_07 t2.5 | batwing | magenta/yellow/blue mirrored bat-wing kaleido; green/yellow zigzag alt | v0.1.0 built 2026-11-09 (router1; SD HDMI seed 2, others seed 1; 6,865-6,881 LC, 21 EBR); not flashed |
-| 68 | 20231003_00_48_14 t1.5 | marionette | magenta/green/blue curtain of hanging figures | in progress (wave 4) |
+| 68 | 20231003_00_48_14 t1.5 | marionette | magenta/green/blue curtain of hanging figures | v0.1.0 built 2026-11-09 (router1; all six seed 1; 7,127-7,165 LC, 21 EBR); not flashed |
 | 69 | 20231008_20_41_21 t0.5 | butterfly | magenta/blue/black kaleido butterfly | in progress (wave 4) |
 | 70 | 20231022_00_05_49 t0.5 | oilslick | orange/blue oil-slick swirl; green/magenta contour blobs alt | in progress (wave 4) |
 | 71 | 20231026_23_13_39 t0.5 | vine | green/purple/black diagonal flame streaks | in progress (wave 4) |
