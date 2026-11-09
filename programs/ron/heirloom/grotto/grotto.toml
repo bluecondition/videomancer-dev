@@ -1,0 +1,152 @@
+# Grotto - Heirloom (phase 3, video clips), built 2026-11-09 (v0.1.0) from WIN_20240104_00_30_04 at 3.0 s.
+# A blue / white / black cavern face: a keyed black eye and slit inside white bands with green edges, folding
+# around one measured field; the eye breathes (grows and sinks) on a 10 s LFO.  See grotto.vhd, grotto.py.
+
+[program]
+processing_delay_clks = 28
+program_id = "com.czartroniks.grotto"
+program_name = "Grotto"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Shape", "Mask", "Warp"]
+program_type = "processing"
+description = "A blue cavern face: a keyed black eye and slit inside white bands with green edges, breathing."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Rings"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Tide"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Green"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Speed"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Slit"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Etch"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 448
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Twin"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Iris"
+value_labels = ["Hole", "Rings"]
+initial_value_label = "Hole"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Palette"
+value_labels = ["Blue", "Gold"]
+initial_value_label = "Blue"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Wave"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Eye"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Still"
+
+[[preset]]
+name = "Wide Eye"
+rotary_potentiometer_3 = 800
+linear_potentiometer_12 = 900
+
+[[preset]]
+name = "Two Eyes"
+toggle_switch_7 = 1
+rotary_potentiometer_1 = 700
+
+[[preset]]
+name = "Gold Iris"
+toggle_switch_8 = 1
+toggle_switch_9 = 1
+rotary_potentiometer_1 = 760
+
+[[preset]]
+name = "Flood"
+rotary_potentiometer_2 = 150
+rotary_potentiometer_5 = 900
+
+[[preset]]
+name = "Swim"
+toggle_switch_10 = 1
+rotary_potentiometer_4 = 760
+rotary_potentiometer_1 = 640
+
+[[preset]]
+name = "Closed Eye"
+linear_potentiometer_12 = 60
+rotary_potentiometer_3 = 0
