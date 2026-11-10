@@ -1,0 +1,154 @@
+# Mantis - Heirloom (video phase), built 2026-11-10 (v0.1.1; v0.1.0 the same day) from the clip WIN_20230906_22_43_27 at 2.5 s.
+# A green / purple / white kaleidoscope insect: an X of leaf wings, dark chevron arms, pillar pairs, hanging lobes
+# and wood grain; the colours flow down through it, one cycle per 8.93 s.
+# See mantis.vhd, mantis.py, SUMMARY.md.
+
+[program]
+processing_delay_clks = 20
+program_id = "com.czartroniks.mantis"
+program_name = "Mantis"
+program_version = "0.1.1"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Mirror", "Pattern", "Color"]
+program_type = "processing"
+description = "A green, purple and white kaleidoscope insect: leaf wings, chevron arms and pillars, colours flowing down."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Pillars"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Arms"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Bands"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Flow"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 687
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Grain"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Etch"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 104
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Twin"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Hue"
+value_labels = ["RGB", "GBR"]
+initial_value_label = "RGB"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Key"
+value_labels = ["Soft", "Hard"]
+initial_value_label = "Soft"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Invert"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Wings"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Clip"
+
+[[preset]]
+name = "Folded"
+linear_potentiometer_12 = 90
+
+[[preset]]
+name = "Spread"
+linear_potentiometer_12 = 980
+rotary_potentiometer_4 = 760
+
+[[preset]]
+name = "Twin Mantis"
+toggle_switch_7 = 1
+rotary_potentiometer_1 = 380
+
+[[preset]]
+name = "Neon Key"
+toggle_switch_9 = 1
+rotary_potentiometer_3 = 700
+
+[[preset]]
+name = "Night Moth"
+toggle_switch_8 = 1
+rotary_potentiometer_4 = 600
+
+[[preset]]
+name = "Dense Grove"
+rotary_potentiometer_1 = 150
+rotary_potentiometer_5 = 900
+
+[[preset]]
+name = "Still Life"
+rotary_potentiometer_4 = 512

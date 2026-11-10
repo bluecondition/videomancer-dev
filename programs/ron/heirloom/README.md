@@ -217,7 +217,7 @@ against all 101 existing heirloom stills (`.heirloom_work/vid/dedupe.py`, sheets
 | 62 | 20230817_00_06_49 t0.5 | gothic | green/blue/red arch stripes | v0.1.1 built 2026-11-10 (router1; all six seed 1; 7,198-7,225 LC, 23 EBR); not flashed |
 | 63 | 20230818_01_17_40 t3.0 | owlet | blue/cyan contour eyes on a red ground; purple/red blobs alt | v0.1.0 built 2026-11-09 (router1; all six seed 1; 7,088-7,119 LC, 19 EBR); not flashed |
 | 64 | 20230904_01_56_58 t0.5 | specter | green ghost flame figure on black with blue floor | in progress (wave 4) |
-| 65 | 20230906_22_43_27 t2.5 | mantis | green/purple/white kaleidoscope insect | in progress (wave 4) |
+| 65 | 20230906_22_43_27 t2.5 | mantis | green/purple/white kaleidoscope insect | v0.1.1 built 2026-11-10 (router2; HD Analog, HD HDMI, HD Dual, SD Analog seed 2, others seed 1; 7,302-7,313 LC, 17 EBR); not flashed |
 | 66 | 20230907_00_18_59 t5.5 | cupola | red/orange/green sunset bands with blue domes | v0.1.1 built 2026-11-09 (router1; all six seed 1; 6,647-6,667 LC, 22 EBR); not flashed |
 | 67 | 20230927_23_58_07 t2.5 | batwing | magenta/yellow/blue mirrored bat-wing kaleido; green/yellow zigzag alt | v0.1.0 built 2026-11-09 (router1; SD HDMI seed 2, others seed 1; 6,865-6,881 LC, 21 EBR); not flashed |
 | 68 | 20231003_00_48_14 t1.5 | marionette | magenta/green/blue curtain of hanging figures | v0.1.0 built 2026-11-09 (router1; all six seed 1; 7,127-7,165 LC, 21 EBR); not flashed |
