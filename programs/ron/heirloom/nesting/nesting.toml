@@ -1,0 +1,157 @@
+# Nesting - Heirloom (video phase), built 2026-11-09 from the clip WIN_20230627_23_37_56 at 7.0 s.
+# Two eyes of nested bevelled squares in blue / cyan / black contour rings, magenta key rings running into a purple
+# vase, a diamond floor, torn zigzag edges; an LFO breathes the eyes into a dense lattice.  See nesting.vhd,
+# nesting.py and SUMMARY.md.
+
+[program]
+processing_delay_clks = 20
+program_id = "com.czartroniks.nesting"
+program_name = "Nesting"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Mirror", "Pattern", "Glitch"]
+program_type = "processing"
+description = "Blue, magenta and red mirrored nested squares: two eyes and a purple vase that breathe into a lattice, edges torn."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Eyes"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Corners"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 420
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Pink"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Breath"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Tear"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Etch"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 300
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Quad"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Pink"
+value_labels = ["On", "Off"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Palette"
+value_labels = ["Photo", "Ember"]
+initial_value_label = "Photo"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Colours"
+value_labels = ["Forward", "Reverse"]
+initial_value_label = "Forward"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Nesting"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 300
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Clip"
+
+[[preset]]
+name = "Lattice"
+linear_potentiometer_12 = 1023
+rotary_potentiometer_4 = 0
+
+[[preset]]
+name = "Big Eyes"
+linear_potentiometer_12 = 0
+rotary_potentiometer_4 = 300
+
+[[preset]]
+name = "Four Eyes"
+toggle_switch_7 = 1
+rotary_potentiometer_1 = 600
+
+[[preset]]
+name = "Star Ember"
+toggle_switch_9 = 1
+rotary_potentiometer_2 = 80
+
+[[preset]]
+name = "Red Eyes"
+toggle_switch_10 = 1
+rotary_potentiometer_3 = 700
+linear_potentiometer_12 = 380
+
+[[preset]]
+name = "Shredded"
+rotary_potentiometer_5 = 1023
+rotary_potentiometer_4 = 900
+
+[[preset]]
+name = "Osc Bloom"
+toggle_switch_11 = 1
+rotary_potentiometer_6 = 700
