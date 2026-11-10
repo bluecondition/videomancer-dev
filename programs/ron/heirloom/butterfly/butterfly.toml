@@ -1,0 +1,148 @@
+# Butterfly - Heirloom (video clips), built 2026-11-10 (v0.1.0) from WIN_20231008_20_41_21 t0.5; v0.1.1: smooth camera bend.
+# A magenta / blue / black kaleidoscope: lenses pinched at dark X crossings, hearts above and below each X,
+# nested blue diamonds, blue arcs and a bow-tie glow.  See butterfly.vhd, butterfly.py and SUMMARY.md.
+
+[program]
+processing_delay_clks = 24
+program_id = "com.czartroniks.butterfly"
+program_name = "Butterfly"
+program_version = "0.1.1"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Pattern", "Mirror", "Shape"]
+program_type = "processing"
+description = "Magenta kaleidoscope: lenses pinched at dark X crossings, hearts, nested blue diamonds and arcs."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Columns"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Rows"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Hearts"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Flap"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 0
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Rings"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Bend"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 224
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Echo"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Mix"
+value_labels = ["Darker", "Interfere"]
+initial_value_label = "Darker"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Palette"
+value_labels = ["Magenta", "Ember"]
+initial_value_label = "Magenta"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Twin"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Wings"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Photo"
+
+[[preset]]
+name = "Wingbeat"
+rotary_potentiometer_4 = 420
+
+[[preset]]
+name = "Open Wings"
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Echo Ember"
+toggle_switch_7 = 1
+toggle_switch_9 = 1
+
+[[preset]]
+name = "Interfere"
+toggle_switch_8 = 1
+rotary_potentiometer_5 = 700
+
+[[preset]]
+name = "Twin Swarm"
+rotary_potentiometer_1 = 800
+toggle_switch_10 = 1
+
+[[preset]]
+name = "Small Hearts"
+rotary_potentiometer_3 = 150
+rotary_potentiometer_5 = 800

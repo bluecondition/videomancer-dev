@@ -221,7 +221,7 @@ against all 101 existing heirloom stills (`.heirloom_work/vid/dedupe.py`, sheets
 | 66 | 20230907_00_18_59 t5.5 | cupola | red/orange/green sunset bands with blue domes | v0.1.1 built 2026-11-09 (router1; all six seed 1; 6,647-6,667 LC, 22 EBR); not flashed |
 | 67 | 20230927_23_58_07 t2.5 | batwing | magenta/yellow/blue mirrored bat-wing kaleido; green/yellow zigzag alt | v0.1.0 built 2026-11-09 (router1; SD HDMI seed 2, others seed 1; 6,865-6,881 LC, 21 EBR); not flashed |
 | 68 | 20231003_00_48_14 t1.5 | marionette | magenta/green/blue curtain of hanging figures | v0.1.0 built 2026-11-09 (router1; all six seed 1; 7,127-7,165 LC, 21 EBR); not flashed |
-| 69 | 20231008_20_41_21 t0.5 | butterfly | magenta/blue/black kaleido butterfly | in progress (wave 4) |
+| 69 | 20231008_20_41_21 t0.5 | butterfly | magenta/blue/black kaleido butterfly | v0.1.1 built 2026-11-10 (router1; all six seed 1; 7,026-7,046 LC, 20 EBR); not flashed |
 | 70 | 20231022_00_05_49 t0.5 | oilslick | orange/blue oil-slick swirl; green/magenta contour blobs alt | v0.1.0 built 2026-11-10 (router1; all six seed 1; 7,145-7,161 LC, 24 EBR); not flashed |
 | 71 | 20231026_23_13_39 t0.5 | vine | green/purple/black diagonal flame streaks | v0.1.0 built 2026-11-10 (router2; HD Dual seed 2, others seed 1; 7,077-7,089 LC, 21 EBR); not flashed |
 | 72 | 20231121_21_36_42 t0.5 | portal | cyan/magenta/green mirrored arcs with stripes | in progress (wave 4) |
