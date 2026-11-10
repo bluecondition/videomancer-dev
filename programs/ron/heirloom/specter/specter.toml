@@ -1,0 +1,154 @@
+# Specter - Heirloom (video clips), built 2026-11-09 (v0.1.0) from the clip WIN_20230904_01_56_58 at 0.5 s.
+# A green ghost figure with a striped head and outstretched arms, its legs streaming down to a blue floor, in a
+# haze of hanging green curtains.  See specter.vhd, specter.py and SUMMARY.md.
+
+[program]
+processing_delay_clks = 16
+program_id = "com.czartroniks.specter"
+program_name = "Specter"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Shape", "Temporal", "Mask"]
+program_type = "processing"
+description = "A green ghost with outstretched arms drips down through a haze of hanging curtains onto a blue floor."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Ghost"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Comb"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Haze"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Drift"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 768
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Drip"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Etch"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 200
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Twin"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Tear"
+value_labels = ["Calm", "Torn"]
+initial_value_label = "Calm"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Ghost"
+value_labels = ["Glow", "Shadow"]
+initial_value_label = "Glow"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Palette"
+value_labels = ["Spectre", "Ember"]
+initial_value_label = "Spectre"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Tide"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Photo"
+
+[[preset]]
+name = "Blue Sea"
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Twin Shades"
+toggle_switch_7 = 1
+toggle_switch_9 = 1
+
+[[preset]]
+name = "Ember Drip"
+rotary_potentiometer_5 = 980
+toggle_switch_10 = 1
+
+[[preset]]
+name = "Barcode"
+rotary_potentiometer_2 = 1023
+rotary_potentiometer_1 = 760
+
+[[preset]]
+name = "Torn Ghost"
+toggle_switch_8 = 1
+rotary_potentiometer_4 = 900
+
+[[preset]]
+name = "Lone Ghost"
+rotary_potentiometer_3 = 0
+linear_potentiometer_12 = 300
+
+[[preset]]
+name = "Lattice"
+toggle_switch_11 = 1
+rotary_potentiometer_6 = 500
