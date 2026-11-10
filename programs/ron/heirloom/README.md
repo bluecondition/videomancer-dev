@@ -214,7 +214,7 @@ against all 101 existing heirloom stills (`.heirloom_work/vid/dedupe.py`, sheets
 | 59 | 20230627_23_37_56 t7.0 | nesting | blue/magenta/red mirrored nested squares | v0.1.0 built 2026-11-10 (router1; all six seed 1; 7,155-7,183 LC, 21 EBR); not flashed |
 | 60 | 20230723_00_52_24 t0.5 | tunnel | black/white concentric diamond moire eye | v0.1.0 built 2026-11-09 (router1; all six seed 1; 6,755-6,764 LC, 13 EBR); not flashed |
 | 61 | 20230804_22_27_52 t6.0 | mummer | green/red/blue/magenta contour mask faces | in progress (wave 4) |
-| 62 | 20230817_00_06_49 t0.5 | gothic | green/blue/red arch stripes | in progress (wave 4) |
+| 62 | 20230817_00_06_49 t0.5 | gothic | green/blue/red arch stripes | v0.1.1 built 2026-11-10 (router1; all six seed 1; 7,198-7,225 LC, 23 EBR); not flashed |
 | 63 | 20230818_01_17_40 t3.0 | owlet | blue/cyan contour eyes on a red ground; purple/red blobs alt | v0.1.0 built 2026-11-09 (router1; all six seed 1; 7,088-7,119 LC, 19 EBR); not flashed |
 | 64 | 20230904_01_56_58 t0.5 | specter | green ghost flame figure on black with blue floor | in progress (wave 4) |
 | 65 | 20230906_22_43_27 t2.5 | mantis | green/purple/white kaleidoscope insect | in progress (wave 4) |
