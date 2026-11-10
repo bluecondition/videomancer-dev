@@ -210,7 +210,7 @@ against all 101 existing heirloom stills (`.heirloom_work/vid/dedupe.py`, sheets
 | 55 | 20230328_00_11_14 t0.5 | pods | green/yellow cell eyes lattice in olive; grey chevron stacks with rainbow fringes alt | v0.1.1 built 2026-11-09 (router1; all six seed 1; 6,437-6,455 LC, 19 EBR); not flashed |
 | 56 | 20230402_23_03_06 t0.5 | seaweed | green/magenta wavy vertical curtain bands | in progress (wave 4) |
 | 57 | 20230408_23_11_38 t3.5 | pupil | blue/yellow moire lens eyes on flat green | v0.1.0 built 2026-11-10 (router1; all six seed 1; 6,546-6,564 LC, 13 EBR); not flashed |
-| 58 | 20230424_23_47_33 t8.0 | tatter | white torn tear over orange/magenta diamond zigzags (beacon/vase session, different patch) | in progress (wave 4) |
+| 58 | 20230424_23_47_33 t8.0 | tatter | white torn tear over orange/magenta diamond zigzags (beacon/vase session, different patch) | v0.1.1 built 2026-11-10 (router1; all six seed 1; 6,699-6,727 LC, 21 EBR); not flashed |
 | 59 | 20230627_23_37_56 t7.0 | nesting | blue/magenta/red mirrored nested squares | in progress (wave 4) |
 | 60 | 20230723_00_52_24 t0.5 | tunnel | black/white concentric diamond moire eye | v0.1.0 built 2026-11-09 (router1; all six seed 1; 6,755-6,764 LC, 13 EBR); not flashed |
 | 61 | 20230804_22_27_52 t6.0 | mummer | green/red/blue/magenta contour mask faces | in progress (wave 4) |

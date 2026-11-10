@@ -1,0 +1,156 @@
+# Tatter - Heirloom (video phase), built 2026-11-10 (v0.1.1) from the clip WIN_20230424_23_47_33 at 8.0 s.
+# White tubes with dark-grey edges (eyes, X crossings, a wavy band) over an orange / yellow / red checker, the left
+# of the frame torn away along a parabolic crack into a white bar and a blue / green strip.  See tatter.vhd,
+# tatter.py, SUMMARY.md.
+
+[program]
+processing_delay_clks = 20
+program_id = "com.czartroniks.tatter"
+program_name = "Tatter"
+program_version = "0.1.1"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Pattern", "Glitch", "Color"]
+program_type = "processing"
+description = "White tube eyes and crosses over an orange checker, torn along a crack into a white bar and a blue-green strip."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Columns"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Rows"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Eyes"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Scroll"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 770
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Checker"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Etch"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 300
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Crosses"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Colours"
+value_labels = ["Sunset", "Lagoon"]
+initial_value_label = "Sunset"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Rings"
+value_labels = ["Tubes", "Contours"]
+initial_value_label = "Tubes"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Invert"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Tear"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Photo"
+
+[[preset]]
+name = "In Sync"
+linear_potentiometer_12 = 0
+
+[[preset]]
+name = "Shredded"
+linear_potentiometer_12 = 1023
+rotary_potentiometer_4 = 860
+
+[[preset]]
+name = "Lagoon"
+toggle_switch_8 = 1
+rotary_potentiometer_3 = 600
+
+[[preset]]
+name = "Contours"
+toggle_switch_9 = 1
+rotary_potentiometer_1 = 420
+
+[[preset]]
+name = "Checker Eyes"
+toggle_switch_10 = 1
+rotary_potentiometer_5 = 700
+
+[[preset]]
+name = "Crosses"
+toggle_switch_7 = 1
+rotary_potentiometer_2 = 640
+
+[[preset]]
+name = "Fine Weave"
+rotary_potentiometer_5 = 120
+rotary_potentiometer_1 = 700
+rotary_potentiometer_4 = 600
