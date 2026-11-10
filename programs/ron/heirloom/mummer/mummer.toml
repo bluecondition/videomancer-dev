@@ -1,0 +1,157 @@
+# Mummer - Heirloom (video phase), built 2026-11-10 (v0.1.1) from the clip WIN_20230804_22_27_52 at 6.0 s.
+# Two green mask faces fluted by vertical stripes, glowing cyan, outlined black and blue, on a red / crimson /
+# violet ground of zigzag lightning; the structure rolls down and the faces narrow as they descend.
+# See mummer.vhd, mummer.py, SUMMARY.md.
+
+[program]
+processing_delay_clks = 20
+program_id = "com.czartroniks.mummer"
+program_name = "Mummer"
+program_version = "0.1.1"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Pattern", "Warp", "Color"]
+program_type = "processing"
+description = "Green mask faces fluted by stripes, glowing cyan, rolling down through a red and violet ground of zigzag lightning."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Faces"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Stripes"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Lightning"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Roll"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 700
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Bands"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Etch"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 140
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Twin"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Colours"
+value_labels = ["Mask", "Gold"]
+initial_value_label = "Mask"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Mirror"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Tear"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Mask"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Clip"
+
+[[preset]]
+name = "Small Faces"
+linear_potentiometer_12 = 120
+rotary_potentiometer_4 = 620
+
+[[preset]]
+name = "Swollen"
+linear_potentiometer_12 = 980
+rotary_potentiometer_2 = 700
+
+[[preset]]
+name = "Totem"
+toggle_switch_9 = 1
+toggle_switch_7 = 1
+
+[[preset]]
+name = "Gold Mask"
+toggle_switch_8 = 1
+rotary_potentiometer_5 = 640
+
+[[preset]]
+name = "Storm"
+rotary_potentiometer_3 = 1000
+toggle_switch_10 = 1
+rotary_potentiometer_4 = 860
+
+[[preset]]
+name = "Crowd"
+rotary_potentiometer_1 = 980
+rotary_potentiometer_5 = 380
+
+[[preset]]
+name = "Still Faces"
+rotary_potentiometer_4 = 512
+rotary_potentiometer_3 = 0
