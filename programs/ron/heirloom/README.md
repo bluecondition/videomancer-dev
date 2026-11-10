@@ -226,7 +226,7 @@ against all 101 existing heirloom stills (`.heirloom_work/vid/dedupe.py`, sheets
 | 71 | 20231026_23_13_39 t0.5 | vine | green/purple/black diagonal flame streaks | v0.1.0 built 2026-11-10 (router2; HD Dual seed 2, others seed 1; 7,077-7,089 LC, 21 EBR); not flashed |
 | 72 | 20231121_21_36_42 t0.5 | portal | cyan/magenta/green mirrored arcs with stripes | v0.1.0 built 2026-11-10 (router1; all six seed 1; 6,945-6,952 LC, 24 EBR); not flashed |
 | 73 | 20231208_23_03_08 t0.5 | tiger | orange/blue/green wavy diagonal tiger bands | v0.1.1 built 2026-11-10 (router2; all six seed 1, HD HDMI thin at 74.65 MHz; 7,061-7,074 LC, 15 EBR); not flashed |
-| 74 | 20231218_00_10_10 t0.5 | harlequin | orange/purple/green wavy stripes with orange diamonds | in progress (wave 4) |
+| 74 | 20231218_00_10_10 t0.5 | harlequin | orange/purple/green wavy stripes with orange diamonds | v0.1.1 built 2026-11-10 (router1; all six seed 1; 6,998-7,013 LC, 24 EBR); not flashed |
 | 75 | 20231218_21_31_11 t3.0 | starline | magenta/green neon chevron star lines on black; rainbow stripes with white dots alt; B/W silhouettes alt | v0.1.0 built 2026-11-09 (router1; all six seed 1; 7,078-7,119 LC, 23 EBR); not flashed |
 | 76 | 20231227_00_20_47 t6.0 | ocelot | orange/black/blue wavy zebra stripes with blue dots | v0.1.0 built 2026-11-09 (router2; all six seed 1; 5,677-5,710 LC, 19 EBR); not flashed |
 | 77 | 20240111_01_01_24 t0.5 | yolk | yellow/red/white flames and eggs mirrored; magenta/blue triangles alt | v0.1.0 built 2026-11-09 (router2; HD Analog seed 2, HD HDMI seed 2, others seed 1; 6,871-6,878 LC, 23 EBR); not flashed |

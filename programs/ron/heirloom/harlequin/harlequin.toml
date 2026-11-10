@@ -1,0 +1,159 @@
+# Harlequin - Heirloom (video phase), built 2026-11-10 (v0.1.0; v0.1.1 smooth camera bend) from the clip WIN_20231218_00_10_10 at 0.5 s.
+# Orange lemon diamonds in violet / red stripes that hug each diamond's right side, a glass wash, a torn seam and a
+# squashed band, rolling up (V-hold).  See harlequin.vhd, harlequin.py and SUMMARY.md.
+
+[program]
+processing_delay_clks = 24
+program_id = "com.czartroniks.harlequin"
+program_name = "Harlequin"
+program_version = "0.1.1"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Pattern", "Shape", "Signal"]
+program_type = "processing"
+description = "Orange lemon diamonds in violet and red stripes that hug them, a glass wash, a torn seam, rolling up."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Diamonds"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Stripes"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Waist"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Bend"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Glass"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Etch"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 320
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Shape"
+value_labels = ["Lemon", "Rhombus"]
+initial_value_label = "Lemon"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Tear"
+value_labels = ["Calm", "Torn"]
+initial_value_label = "Calm"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Core"
+value_labels = ["Orange", "Stripes"]
+initial_value_label = "Orange"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Patch"
+value_labels = ["RGB", "GBR"]
+initial_value_label = "RGB"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "V-Hold"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 400
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Clip"
+
+[[preset]]
+name = "Locked"
+linear_potentiometer_12 = 0
+
+[[preset]]
+name = "Rhombus Roll"
+toggle_switch_7 = 1
+linear_potentiometer_12 = 700
+
+[[preset]]
+name = "Peacock"
+toggle_switch_10 = 1
+rotary_potentiometer_5 = 760
+rotary_potentiometer_4 = 820
+
+[[preset]]
+name = "Lantern Row"
+rotary_potentiometer_1 = 900
+rotary_potentiometer_3 = 760
+toggle_switch_9 = 1
+
+[[preset]]
+name = "Shredded"
+toggle_switch_8 = 1
+linear_potentiometer_12 = 1023
+rotary_potentiometer_2 = 760
+
+[[preset]]
+name = "Giant"
+rotary_potentiometer_1 = 0
+rotary_potentiometer_5 = 900
+linear_potentiometer_12 = 250
+
+[[preset]]
+name = "Osc Bloom"
+toggle_switch_11 = 1
+rotary_potentiometer_6 = 700
+rotary_potentiometer_4 = 1023
