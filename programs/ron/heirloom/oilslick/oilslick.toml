@@ -1,0 +1,156 @@
+# Oilslick - Heirloom from the video clips (phase 3b), v0.1.0 built 2026-11-10 from WIN_20231022_00_05_49 at 0.5 s.
+# An oil-slick kaleidoscope: red / orange domes with blue cores and magenta arcs, black voids with green edges
+# between them, a purple sky, and a dark lower tier (the reflection) under a horizon.  See oilslick.vhd,
+# oilslick.py and SUMMARY.md.
+
+[program]
+processing_delay_clks = 20
+program_id = "com.czartroniks.oilslick"
+program_name = "Oilslick"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Pattern", "Warp", "Color"]
+program_type = "processing"
+description = "Oil-slick kaleidoscope: orange domes with blue cores, black voids edged in green, a dark reflected lower tier."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Domes"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Horizon"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Rings"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Flow"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 640
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Voids"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Etch"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 350
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Slick"
+value_labels = ["Dark", "Light"]
+initial_value_label = "Dark"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Colours"
+value_labels = ["Oil", "Contour"]
+initial_value_label = "Oil"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Reflect"
+value_labels = ["Tier", "Mirror"]
+initial_value_label = "Tier"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Boil"
+value_labels = ["Calm", "Boil"]
+initial_value_label = "Calm"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Tide"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Photo"
+
+[[preset]]
+name = "High Tide"
+linear_potentiometer_12 = 900
+
+[[preset]]
+name = "Moonlit"
+linear_potentiometer_12 = 80
+rotary_potentiometer_3 = 700
+
+[[preset]]
+name = "Contour"
+toggle_switch_8 = 1
+rotary_potentiometer_4 = 760
+
+[[preset]]
+name = "Mirror Lake"
+toggle_switch_9 = 1
+linear_potentiometer_12 = 700
+
+[[preset]]
+name = "Boiling"
+toggle_switch_10 = 1
+rotary_potentiometer_3 = 760
+
+[[preset]]
+name = "Negative"
+toggle_switch_7 = 1
+rotary_potentiometer_1 = 700
+
+[[preset]]
+name = "Many Domes"
+rotary_potentiometer_1 = 900
+rotary_potentiometer_2 = 300
+rotary_potentiometer_4 = 820
