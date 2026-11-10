@@ -1,0 +1,155 @@
+# Pupil - Heirloom (video phase), v0.1.0 built 2026-11-09 from the clip WIN_20230408_23_11_38 (still at 3.5 s).
+# A column of almond eyes on flat green: cream moire rings on the left, a blue core with a violet ball keyed on the
+# rows where the eye is deep enough, snapping open on every beat of Ron's rhythm.  See pupil.vhd, pupil.py, SUMMARY.md.
+
+[program]
+processing_delay_clks = 20
+program_id = "com.czartroniks.pupil"
+program_name = "Pupil"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Pattern", "Shape", "Illusion"]
+program_type = "processing"
+description = "Almond eyes of cream moire rings round a blue-violet pupil on flat green, snapping open on every beat."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Eyes"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Squint"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Rings"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Beat"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Pulse"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Bend"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 354
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Slip"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Core"
+value_labels = ["Blue", "Rings"]
+initial_value_label = "Blue"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Twin"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Colours"
+value_labels = ["Green", "Magenta"]
+initial_value_label = "Green"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Dilate"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 343
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Still"
+
+[[preset]]
+name = "Rest Seeds"
+linear_potentiometer_12 = 120
+
+[[preset]]
+name = "Wide Open"
+rotary_potentiometer_5 = 700
+linear_potentiometer_12 = 760
+
+[[preset]]
+name = "Twin Gaze"
+toggle_switch_9 = 1
+linear_potentiometer_12 = 420
+
+[[preset]]
+name = "Ring Moire"
+rotary_potentiometer_3 = 250
+toggle_switch_8 = 1
+
+[[preset]]
+name = "Slip Drums"
+rotary_potentiometer_4 = 820
+toggle_switch_7 = 1
+
+[[preset]]
+name = "Magenta Slits"
+rotary_potentiometer_2 = 900
+rotary_potentiometer_1 = 700
+toggle_switch_10 = 1
+
+[[preset]]
+name = "Osc Crystal"
+rotary_potentiometer_6 = 500
+toggle_switch_11 = 1
