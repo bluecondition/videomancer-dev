@@ -1,0 +1,149 @@
+# Hornet - Heirloom (phase 3, video clips), built 2026-11-10 (v0.1.0) from clip WIN_20240207_23_34_28 at 0.5 s.
+# A band of hornet faces (red eyes with grey pupils, leaning yellow lemons in dark crescents, yellow ridges) between
+# stepped red / cyan stripes and rounded cyan / red blocks, rolling up through screen-locked 65-line cuts.
+# See hornet.vhd, hornet.py and SUMMARY.md.
+# v0.1.1: fat yellow lemons (folded key fill), flat grey pupils, darker reds, a gentler smoothed camera bend.
+
+[program]
+processing_delay_clks = 24
+program_id = "com.czartroniks.hornet"
+program_name = "Hornet"
+program_version = "0.1.1"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Pattern", "Shape", "Mask"]
+program_type = "processing"
+description = "Hornet faces: red eyes, leaning yellow lemons and stepped red/cyan stripes rolling up through 65-line cuts."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Eyes"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 200
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Lemons"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 200
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Stripes"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Roll"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 742
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Blocks"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 200
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Etch"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 150
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Cuts"
+value_labels = ["Fine", "Shred"]
+initial_value_label = "Fine"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Colours"
+value_labels = ["Fire", "Wasp"]
+initial_value_label = "Fire"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Twin"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Key"
+value_labels = ["On", "Off"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Lean"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 160
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Photo"
+
+[[preset]]
+name = "Angry Face"
+linear_potentiometer_12 = 0
+rotary_potentiometer_4 = 512
+
+[[preset]]
+name = "Swept"
+linear_potentiometer_12 = 1023
+rotary_potentiometer_2 = 700
+
+[[preset]]
+name = "Wasp Nest"
+toggle_switch_8 = 1
+toggle_switch_9 = 1
+rotary_potentiometer_3 = 700
+
+[[preset]]
+name = "Shredded"
+toggle_switch_7 = 1
+rotary_potentiometer_5 = 900
+rotary_potentiometer_4 = 880
+
+[[preset]]
+name = "Hollow"
+toggle_switch_10 = 1
+rotary_potentiometer_1 = 800
