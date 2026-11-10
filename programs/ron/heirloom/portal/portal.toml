@@ -1,0 +1,154 @@
+# Portal - Heirloom (video phase), built 2026-11-10 (v0.1.0) from the clip WIN_20231121_21_36_42 at 0.5 s.
+# An RGB patch: blue rings and magenta domes, a green trapezoid portal between striped eyes, pink bars rising.
+# See portal.vhd, portal.py, SUMMARY.md.
+
+[program]
+processing_delay_clks = 24
+program_id = "com.czartroniks.portal"
+program_name = "Portal"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Pattern", "Shape", "Color"]
+program_type = "processing"
+description = "Mirrored domes and blue rings around a green trapezoid portal, striped eyes, pink bars rising through cyan."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Tiles"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Domes"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Trapezoid"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Speed"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 700
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Stripes"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Etch"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 200
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Flip"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Arches"
+value_labels = ["Bars", "Arches"]
+initial_value_label = "Bars"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Colours"
+value_labels = ["Magenta", "Citrus"]
+initial_value_label = "Magenta"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Polarity"
+value_labels = ["Positive", "Negative"]
+initial_value_label = "Positive"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Bars"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 455
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Photo"
+
+[[preset]]
+name = "Clean Portal"
+linear_potentiometer_12 = 0
+
+[[preset]]
+name = "Bar Storm"
+linear_potentiometer_12 = 1023
+rotary_potentiometer_4 = 850
+
+[[preset]]
+name = "Arches"
+toggle_switch_8 = 1
+rotary_potentiometer_2 = 640
+
+[[preset]]
+name = "Bowls"
+toggle_switch_7 = 1
+rotary_potentiometer_2 = 800
+
+[[preset]]
+name = "Citrus"
+toggle_switch_9 = 1
+rotary_potentiometer_5 = 700
+
+[[preset]]
+name = "Six Portals"
+rotary_potentiometer_1 = 1023
+rotary_potentiometer_3 = 300
+
+[[preset]]
+name = "Osc Bend"
+toggle_switch_11 = 1
+rotary_potentiometer_6 = 500

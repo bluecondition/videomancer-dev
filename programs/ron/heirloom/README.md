@@ -224,7 +224,7 @@ against all 101 existing heirloom stills (`.heirloom_work/vid/dedupe.py`, sheets
 | 69 | 20231008_20_41_21 t0.5 | butterfly | magenta/blue/black kaleido butterfly | v0.1.1 built 2026-11-10 (router1; all six seed 1; 7,026-7,046 LC, 20 EBR); not flashed |
 | 70 | 20231022_00_05_49 t0.5 | oilslick | orange/blue oil-slick swirl; green/magenta contour blobs alt | v0.1.0 built 2026-11-10 (router1; all six seed 1; 7,145-7,161 LC, 24 EBR); not flashed |
 | 71 | 20231026_23_13_39 t0.5 | vine | green/purple/black diagonal flame streaks | v0.1.0 built 2026-11-10 (router2; HD Dual seed 2, others seed 1; 7,077-7,089 LC, 21 EBR); not flashed |
-| 72 | 20231121_21_36_42 t0.5 | portal | cyan/magenta/green mirrored arcs with stripes | in progress (wave 4) |
+| 72 | 20231121_21_36_42 t0.5 | portal | cyan/magenta/green mirrored arcs with stripes | v0.1.0 built 2026-11-10 (router1; all six seed 1; 6,945-6,952 LC, 24 EBR); not flashed |
 | 73 | 20231208_23_03_08 t0.5 | tiger | orange/blue/green wavy diagonal tiger bands | in progress (wave 4) |
 | 74 | 20231218_00_10_10 t0.5 | harlequin | orange/purple/green wavy stripes with orange diamonds | in progress (wave 4) |
 | 75 | 20231218_21_31_11 t3.0 | starline | magenta/green neon chevron star lines on black; rainbow stripes with white dots alt; B/W silhouettes alt | v0.1.0 built 2026-11-09 (router1; all six seed 1; 7,078-7,119 LC, 23 EBR); not flashed |
