@@ -208,7 +208,7 @@ against all 101 existing heirloom stills (`.heirloom_work/vid/dedupe.py`, sheets
 | 53 | 20230318_12_24_18 t4.0 | tilework | skewed colour-block grid; cyan/green mesh checker alt | v0.1.0 built 2026-11-09 (router1; all six seed 1; 6,917-6,937 LC, 7 EBR); not flashed |
 | 54 | 20230318_14_13_38 t0.5 | staircase | cyan diagonal pixel staircase; magenta/cyan random block mosaic alt | v0.1.0 built 2026-11-09 (router2; all six seed 1; 6,453-6,481 LC, 6 EBR); not flashed |
 | 55 | 20230328_00_11_14 t0.5 | pods | green/yellow cell eyes lattice in olive; grey chevron stacks with rainbow fringes alt | v0.1.1 built 2026-11-09 (router1; all six seed 1; 6,437-6,455 LC, 19 EBR); not flashed |
-| 56 | 20230402_23_03_06 t0.5 | seaweed | green/magenta wavy vertical curtain bands | in progress (wave 4) |
+| 56 | 20230402_23_03_06 t0.5 | seaweed | green/magenta wavy vertical curtain bands | v0.1.0 built 2026-11-10 (router1; HD Dual seed 2, others seed 1; 7,067-7,091 LC, 23 EBR); not flashed |
 | 57 | 20230408_23_11_38 t3.5 | pupil | blue/yellow moire lens eyes on flat green | v0.1.0 built 2026-11-10 (router1; all six seed 1; 6,546-6,564 LC, 13 EBR); not flashed |
 | 58 | 20230424_23_47_33 t8.0 | tatter | white torn tear over orange/magenta diamond zigzags (beacon/vase session, different patch) | v0.1.1 built 2026-11-10 (router1; all six seed 1; 6,699-6,727 LC, 21 EBR); not flashed |
 | 59 | 20230627_23_37_56 t7.0 | nesting | blue/magenta/red mirrored nested squares | v0.1.0 built 2026-11-10 (router1; all six seed 1; 7,155-7,183 LC, 21 EBR); not flashed |
