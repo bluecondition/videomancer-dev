@@ -223,7 +223,7 @@ against all 101 existing heirloom stills (`.heirloom_work/vid/dedupe.py`, sheets
 | 68 | 20231003_00_48_14 t1.5 | marionette | magenta/green/blue curtain of hanging figures | v0.1.0 built 2026-11-09 (router1; all six seed 1; 7,127-7,165 LC, 21 EBR); not flashed |
 | 69 | 20231008_20_41_21 t0.5 | butterfly | magenta/blue/black kaleido butterfly | in progress (wave 4) |
 | 70 | 20231022_00_05_49 t0.5 | oilslick | orange/blue oil-slick swirl; green/magenta contour blobs alt | in progress (wave 4) |
-| 71 | 20231026_23_13_39 t0.5 | vine | green/purple/black diagonal flame streaks | in progress (wave 4) |
+| 71 | 20231026_23_13_39 t0.5 | vine | green/purple/black diagonal flame streaks | v0.1.0 built 2026-11-10 (router2; HD Dual seed 2, others seed 1; 7,077-7,089 LC, 21 EBR); not flashed |
 | 72 | 20231121_21_36_42 t0.5 | portal | cyan/magenta/green mirrored arcs with stripes | in progress (wave 4) |
 | 73 | 20231208_23_03_08 t0.5 | tiger | orange/blue/green wavy diagonal tiger bands | in progress (wave 4) |
 | 74 | 20231218_00_10_10 t0.5 | harlequin | orange/purple/green wavy stripes with orange diamonds | in progress (wave 4) |

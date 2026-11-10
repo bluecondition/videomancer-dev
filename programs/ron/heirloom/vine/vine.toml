@@ -1,0 +1,161 @@
+# Vine - Heirloom (video phase), from the clip WIN_20231026_23_13_39 at 0.5 s.
+# Four blue vines with violet / magenta blossoms swaying down a green ground banded by a vertical sine; dark flame
+# spikes, pale tongues and small leaves at their edges.  The sway is an FM'd horizontal oscillator whose wave rolls
+# down once every 8.45 s.  See vine.vhd, vine.py and SUMMARY.md.
+
+[program]
+processing_delay_clks = 20
+program_id = "com.czartroniks.vine"
+program_name = "Vine"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Organic", "Warp", "Noise"]
+program_type = "processing"
+description = "Blue vines with magenta blossoms swaying down a banded green ground, ragged flame edges, leaves drifting."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Vines"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Sway"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Wave"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Speed"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 700
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Girth"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Etch"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 256
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Zigzag"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Night"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Mirror"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Palette"
+value_labels = ["Vine", "Ember"]
+initial_value_label = "Vine"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Flame"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 409
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Photo"
+
+[[preset]]
+name = "Calm"
+linear_potentiometer_12 = 0
+rotary_potentiometer_4 = 620
+
+[[preset]]
+name = "Burning"
+linear_potentiometer_12 = 1023
+rotary_potentiometer_2 = 640
+rotary_potentiometer_4 = 820
+
+[[preset]]
+name = "Chevrons"
+toggle_switch_7 = 1
+rotary_potentiometer_3 = 380
+
+[[preset]]
+name = "Mirror"
+toggle_switch_9 = 1
+rotary_potentiometer_2 = 700
+rotary_potentiometer_3 = 420
+
+[[preset]]
+name = "Ember Night"
+toggle_switch_8 = 1
+toggle_switch_10 = 1
+linear_potentiometer_12 = 600
+
+[[preset]]
+name = "Thicket"
+rotary_potentiometer_1 = 900
+rotary_potentiometer_2 = 760
+rotary_potentiometer_5 = 300
+
+[[preset]]
+name = "Blue Wall"
+rotary_potentiometer_5 = 960
+rotary_potentiometer_1 = 300
+linear_potentiometer_12 = 700
