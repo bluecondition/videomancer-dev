@@ -1,0 +1,155 @@
+# Agate - Patchbay: marbling by cascaded cross-modulation of the H and V ramps (v0.1.0, 2026-11-14).
+# Four stages of X += A w(Y f + p), Y += A w(X f + p'), f an octave up per stage, into a wavefolder and a
+# banded colouriser.  See agate.vhd, agate.py and SUMMARY.md.
+
+[program]
+processing_delay_clks = 40
+program_id = "com.czartroniks.agate"
+program_name = "Agate"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Craft", "Material", "Organic"]
+program_type = "processing"
+description = "Paper marbling and cut agate: the H and V ramps cross-modulate through four octaves into a banded colouriser."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Scale"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Lean"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Detail"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Speed"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 640
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Bands"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Colour"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 0
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Shape"
+value_labels = ["Round", "Angular"]
+initial_value_label = "Round"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Bookmatch"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Veins"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Colours"
+value_labels = ["Stone", "Neon"]
+initial_value_label = "Stone"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Stir"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 800
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Agate"
+
+[[preset]]
+name = "Split Stone"
+rotary_potentiometer_1 = 380
+rotary_potentiometer_6 = 341
+toggle_switch_8 = 1
+toggle_switch_9 = 1
+
+[[preset]]
+name = "Suminagashi"
+rotary_potentiometer_2 = 200
+rotary_potentiometer_3 = 800
+rotary_potentiometer_5 = 300
+rotary_potentiometer_6 = 682
+linear_potentiometer_12 = 900
+
+[[preset]]
+name = "Neon Comb"
+rotary_potentiometer_2 = 80
+rotary_potentiometer_5 = 700
+toggle_switch_7 = 1
+toggle_switch_10 = 1
+
+[[preset]]
+name = "Ruled"
+rotary_potentiometer_5 = 640
+toggle_switch_9 = 1
+linear_potentiometer_12 = 0
+
+[[preset]]
+name = "Deep Fold"
+rotary_potentiometer_1 = 300
+rotary_potentiometer_3 = 1023
+rotary_potentiometer_4 = 760
+linear_potentiometer_12 = 1023
