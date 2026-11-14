@@ -1,0 +1,164 @@
+# Louver - Kinetic #6 (pilot), 2026-11-14.
+# Rows of two-sided slats turning about their long axes in a travelling wave; Twist turns them into ribbons.
+# See louver.vhd, louver.py and SUMMARY.md.
+
+[program]
+processing_delay_clks = 36
+program_id = "com.czartroniks.louver"
+program_name = "Louver"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Pattern", "Illusion", "Shape"]
+program_type = "processing"
+description = "Two-sided slats turning in a travelling wave, lit like blinds; Twist winds them into ribbons."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Scale"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 625
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Blade"
+control_mode = "linear"
+display_min_value = 20
+display_max_value = 100
+initial_value = 831
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Depth"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 560
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Rate"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 640
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Spread"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 354
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Colour"
+control_mode = "linear"
+display_min_value = 1
+display_max_value = 16
+initial_value = 160
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Wave"
+value_labels = ["Smooth", "Snap"]
+initial_value_label = "Smooth"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Field"
+value_labels = ["Linear", "Radial"]
+initial_value_label = "Linear"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Axis"
+value_labels = ["Across", "Down"]
+initial_value_label = "Across"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Face"
+value_labels = ["Palette", "Video"]
+initial_value_label = "Palette"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Twist"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 323
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Ribbons"
+
+[[preset]]
+name = "Tri-Vision"
+rotary_potentiometer_2 = 1023
+rotary_potentiometer_3 = 650
+rotary_potentiometer_5 = 300
+rotary_potentiometer_6 = 608
+toggle_switch_7 = 1
+linear_potentiometer_12 = 0
+
+[[preset]]
+name = "Ripple Blinds"
+rotary_potentiometer_1 = 480
+rotary_potentiometer_3 = 460
+rotary_potentiometer_5 = 420
+rotary_potentiometer_6 = 288
+toggle_switch_8 = 1
+linear_potentiometer_12 = 200
+
+[[preset]]
+name = "Helix Field"
+rotary_potentiometer_1 = 560
+rotary_potentiometer_3 = 700
+rotary_potentiometer_4 = 700
+rotary_potentiometer_6 = 224
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Bead Curtain"
+rotary_potentiometer_1 = 520
+rotary_potentiometer_2 = 700
+rotary_potentiometer_4 = 380
+rotary_potentiometer_6 = 544
+toggle_switch_9 = 1
+linear_potentiometer_12 = 700
+
+[[preset]]
+name = "Picture Blinds"
+rotary_potentiometer_1 = 420
+rotary_potentiometer_2 = 960
+rotary_potentiometer_3 = 380
+rotary_potentiometer_6 = 32
+toggle_switch_10 = 1
+linear_potentiometer_12 = 160

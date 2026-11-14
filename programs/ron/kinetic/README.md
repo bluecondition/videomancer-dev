@@ -22,7 +22,7 @@ Flash from `out/rev_b/ron/kinetic/<name>.vmprog`; rebuild one with `./build_set.
 | 3 | metamorph | Escher tiling: a checkerboard whose edges deform into interlocking tiles | Morph | waiting |
 | 4 | cafewall | Café-wall illusion: offset brick rows whose straight mortar lines appear to tilt | Offset wave | waiting |
 | 5 | snakes | Kitaoka "rotating snakes": rings that seem to turn while still, then really crawl | Drift, illusory to real | waiting |
-| 6 | louver | Slats turning in a wave, two-sided, lit like blinds | Twist: rigid slats to helices | pilot, in progress |
+| 6 | [louver](louver/) | Slats turning in a wave, two-sided, lit like blinds | Twist: rigid slats to helices | pilot v0.1.0 built 2026-11-14 (router2, all six seed 1; HD 77.8-86.5 MHz; 7,021 LC, 91 %, 24 EBR); awaiting Ron's flash |
 | 7 | horologe | A wall of clock hands sweeping in phase patterns | Spread: chaos to synchronized figures | waiting |
 | 8 | cogwork | A lattice of meshed gears counter-rotating | Speed and tooth count | waiting |
 | 9 | pendula | Dots orbiting per cell; phase gradients make them read as rolling rings | Phase gradient | waiting |

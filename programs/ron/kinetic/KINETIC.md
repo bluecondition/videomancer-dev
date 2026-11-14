@@ -132,3 +132,24 @@ A Kinetic program is accepted on five tests, judged on renders at 1280x720 or la
 Each program folder holds `<name>.vhd`, `<name>.toml`, optional `<name>.py` + `<name>_pkg.vhd`, and
 `SUMMARY.md` (what it draws and the art it comes from, the element and its state, the 12 controls, how
 video enters, the engine, build status with seeds / Fmax / LC / EBR, anything cut).
+
+## Lessons from the pilots (riley and louver, 2026-11-14)
+
+- **The chassis is not free.** Shell + wave engine + source field + output conditioning come to about 1,500 LC
+  before any geometry, and flip-flop-only cells count in full (they rarely pack with a LUT). Both pilots' first
+  RTL overflowed (louver 10,685 LC, riley's true-distance Radial 8,263 LC); they shipped at 87-91 %.
+  Budget the geometry at about 5,000 LC.
+- **No per-pixel square roots, and count every per-pixel multiplier** (about 2 LUT per partial-product bit).
+  Colour blends go through a per-field table of pre-blended steps, not three multipliers. Radial fields use the
+  per-element index or a quadratic (r^2) field, never sqrt(r) per pixel.
+- **Chroma may be carried at 8 bits** up to the output filter (quantise in steps of 4 around 512).
+- **Chassis blocks to lift**: riley.vhd tags its blocks [A] timing, [B] controls, [C] wave engine, [D] source,
+  [E] blend, [F] output; louver.vhd has [A] timing / zone / glides / sequencer, [B] generated avid, [C] source
+  field, [D] wave engine, [F] output conditioning and delay rings. Start from the pilot nearer your geometry
+  (riley for per-pixel fields, louver for per-element state with table-fetched sin / cos and shading).
+- **Sim notes**: GHDL captures sit 4 columns right with 4 blank columns (the tester captures from hsync, the
+  generated avid starts 4 clocks later; align the model before diffing). `sim.sh` cannot run two renders of the
+  same program at once. Knob-coverage sims need the glides bypassed (a sim-only copy or a generic). The tester
+  stacks interlaced fields rather than weaving them.
+- **Run one heavy job at a time** (one sim, one yosys, or the build): the machine restarted twice under twelve
+  agents' parallel load.
