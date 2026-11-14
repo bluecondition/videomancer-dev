@@ -1,0 +1,157 @@
+# Crosscolor - Patchbay, built 2026-11-14 (v0.1.0).
+# A luma-only zone plate (or sheared chirped gratings) through a fake composite decoder: fine detail near the
+# virtual colour subcarrier demodulates into rainbow ghost rings.  See crosscolor.vhd and SUMMARY.md.
+
+[program]
+processing_delay_clks = 48
+program_id = "com.czartroniks.crosscolor"
+program_name = "Crosscolor"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Signal", "Illusion", "Optics"]
+program_type = "processing"
+description = "A black-and-white zone plate through a fake composite decoder: rainbow ghost rings where it meets the subcarrier."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Pattern"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Subcarrier"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 585
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Saturation"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 600
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Speed"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 680
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Bandwidth"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 440
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Hue"
+control_mode = "linear"
+display_min_value = -180
+display_max_value = 180
+initial_value = 512
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Pattern"
+value_labels = ["Zone Plate", "Gratings"]
+initial_value_label = "Zone Plate"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Comb"
+value_labels = ["On", "Off"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Dot Crawl"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Standard"
+value_labels = ["180 Flip", "90 Steps"]
+initial_value_label = "180 Flip"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Bleed"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 500
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Zone Plate"
+
+[[preset]]
+name = "Clean Mono"
+linear_potentiometer_12 = 0
+
+[[preset]]
+name = "Rainbow Flood"
+rotary_potentiometer_3 = 800
+rotary_potentiometer_5 = 200
+toggle_switch_9 = 1
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Hanover Bars"
+rotary_potentiometer_2 = 300
+toggle_switch_8 = 1
+linear_potentiometer_12 = 650
+
+[[preset]]
+name = "Striped Shirt"
+rotary_potentiometer_4 = 760
+toggle_switch_7 = 1
+linear_potentiometer_12 = 600
+
+[[preset]]
+name = "Test Card Osc"
+rotary_potentiometer_1 = 380
+toggle_switch_10 = 1
+toggle_switch_11 = 1
+linear_potentiometer_12 = 560
+
+[[preset]]
+name = "Pastel Smear"
+rotary_potentiometer_3 = 420
+rotary_potentiometer_5 = 900
+rotary_potentiometer_6 = 200
+linear_potentiometer_12 = 760

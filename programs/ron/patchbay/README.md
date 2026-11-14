@@ -16,7 +16,7 @@ Flash from `out/rev_b/ron/patchbay/<name>.vmprog`; rebuild one with `./build_set
 | 3 | pulsar | Stacked scope traces with hidden lines (the pulsar ridgeline plot) | Burst | in progress |
 | 4 | [skyline](skyline/) | Sample-and-hold bar graph with peak caps and a reflection | Drive | v0.1.0 built 2026-11-14 (router2; SD Dual seed 2, others seed 1; HD 83.9-88.4 MHz; 6,674-6,712 LC, 87 %, 12 EBR); not flashed |
 | 5 | [lissajous](lissajous/) | An X-Y scope figure rescanned as a raster through arcsine shapers | Detune | v0.1.0 built 2026-11-14 (router2, all six seed 1; HD 81.9-84.2 MHz; 7,046-7,095 LC, 92 %, 19 EBR); not flashed |
-| 6 | crosscolor | Fine luma patterns through a composite decoder: rainbow cross-colour and dot crawl | Bleed | in progress |
+| 6 | [crosscolor](crosscolor/) | Fine luma patterns through a composite decoder: rainbow cross-colour and dot crawl | Bleed | v0.1.0 built 2026-11-14 (router2; SD Dual seed 2, others seed 1; HD 79.5-80.8 MHz; 6,911-6,937 LC, 90 %, 21 EBR); not flashed |
 | 7 | [euclid](euclid/) | A Euclidean step sequencer drawn as a piano roll | Fill | v0.1.0 built 2026-11-14 (router2, all six seed 1; HD 85.7-91.4 MHz; 5,533-5,560 LC, 18 EBR); not flashed |
 | 8 | agate | Cascaded cross-modulated ramps: marbling and cut-stone bands | Stir | in progress |
 | 9 | limelight | Soft-keyed rotating ramps: swinging beams of gelled light | Blaze | in progress |
