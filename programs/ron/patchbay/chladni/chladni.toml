@@ -1,0 +1,163 @@
+# Chladni - Patchbay, 2026-11-14 (v0.1.0).  Standing waves on a plate: two H-locked and two V-locked sine VCOs,
+# two multipliers, a mixer, a window comparator at F = 0 (the sand) and a colouriser on |F|.
+# See chladni.vhd, chladni.py and SUMMARY.md.
+
+[program]
+processing_delay_clks = 24
+program_id = "com.czartroniks.chladni"
+program_name = "Chladni"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Optics", "Pattern", "Organic"]
+program_type = "processing"
+description = "Chladni figures: sand lines and colour bands on a vibrating plate, morphing as the modes drift."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Mode N"
+control_mode = "linear"
+display_min_value = 1
+display_max_value = 9
+initial_value = 256
+display_float_digits = 1
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Mode M"
+control_mode = "linear"
+display_min_value = 1
+display_max_value = 9
+initial_value = 512
+display_float_digits = 1
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Mix"
+control_mode = "linear"
+display_min_value = -90
+display_max_value = 45
+initial_value = 320
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Speed"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 660
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Sand"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Bands"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 400
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Plate"
+value_labels = ["Square", "Screen"]
+initial_value_label = "Square"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Look"
+value_labels = ["Bands", "Sand"]
+initial_value_label = "Bands"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Twin"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Colours"
+value_labels = ["Ember", "Verdigris"]
+initial_value_label = "Ember"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Resonance"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 256
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Plate"
+
+[[preset]]
+name = "Sand Alone"
+rotary_potentiometer_4 = 512
+rotary_potentiometer_5 = 420
+rotary_potentiometer_6 = 620
+toggle_switch_8 = 1
+linear_potentiometer_12 = 460
+
+[[preset]]
+name = "Lace"
+rotary_potentiometer_4 = 600
+rotary_potentiometer_5 = 380
+rotary_potentiometer_6 = 300
+toggle_switch_7 = 1
+toggle_switch_9 = 1
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Verdigris Twin"
+rotary_potentiometer_1 = 384
+rotary_potentiometer_2 = 768
+rotary_potentiometer_3 = 1023
+rotary_potentiometer_4 = 400
+toggle_switch_9 = 1
+toggle_switch_10 = 1
+
+[[preset]]
+name = "Big Cross"
+rotary_potentiometer_4 = 720
+rotary_potentiometer_6 = 760
+toggle_switch_7 = 1
+linear_potentiometer_12 = 0
+
+[[preset]]
+name = "Lattice Osc"
+rotary_potentiometer_1 = 640
+rotary_potentiometer_2 = 256
+rotary_potentiometer_3 = 520
+rotary_potentiometer_4 = 860
+rotary_potentiometer_6 = 560
+toggle_switch_7 = 1
+toggle_switch_11 = 1
