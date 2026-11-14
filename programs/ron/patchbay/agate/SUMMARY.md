@@ -130,8 +130,8 @@ Verification (GHDL image sims of exactly the built sources):
   the model bit for bit.
 - Source Osc and Source Video fed `selfie.jpg` were rendered at 720p60 and looked at (`cmp_final.png`); the
   model's luma path is not bit-exact with the RTL's source timing, so these were not pixel-diffed.
-- **Not rendered in RTL: SD (ntsc) and 1080i.** The integer model has both rasters and the geometry runs on
-  the shell's virtual 1080-line steps, but no SD or interlaced frame came out of GHDL. No second, later
+- **SD (ntsc) was rendered once, by eye only** (default knobs, black input, both fields: the same picture as
+  HD); it was not pixel-diffed against the model. **1080i was not rendered in RTL.** No second, later
   capture was made for motion either; the motion evidence is the phase match above and the model's `strip.png`.
 
 ## Cut / deviations
