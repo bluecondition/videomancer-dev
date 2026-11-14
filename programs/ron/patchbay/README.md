@@ -19,5 +19,5 @@ Flash from `out/rev_b/ron/patchbay/<name>.vmprog`; rebuild one with `./build_set
 | 6 | [crosscolor](crosscolor/) | Fine luma patterns through a composite decoder: rainbow cross-colour and dot crawl | Bleed | v0.1.0 built 2026-11-14 (router2; SD Dual seed 2, others seed 1; HD 79.5-80.8 MHz; 6,911-6,937 LC, 90 %, 21 EBR); not flashed |
 | 7 | [euclid](euclid/) | A Euclidean step sequencer drawn as a piano roll | Fill | v0.1.0 built 2026-11-14 (router2, all six seed 1; HD 85.7-91.4 MHz; 5,533-5,560 LC, 18 EBR); not flashed |
 | 8 | agate | Cascaded cross-modulated ramps: marbling and cut-stone bands | Stir | in progress |
-| 9 | limelight | Soft-keyed rotating ramps: swinging beams of gelled light | Blaze | in progress |
+| 9 | [limelight](limelight/) | Soft-keyed rotating ramps: swinging beams of gelled light | Blaze | v0.1.0 built 2026-11-14 (ROUTER1; HD HDMI seed 3, others seed 1; HD 78.5-80.5 MHz; 6,857-6,895 LC, 90 %, 16 EBR); not flashed |
 | 10 | colorfield | Soft window keys as paint: breathing colour fields | Dissolve | in progress |

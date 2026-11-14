@@ -1,0 +1,158 @@
+# Limelight - Patchbay #9 (v0.1.0, 2026-11-14): soft-keyed beams of gelled light.
+# Four rotated-ramp window keys (cones from a lamp rail), an additive gel mixer, a floor that mirrors the
+# beams and catches a pool under each.  See limelight.vhd, limelight.py and SUMMARY.md.
+
+[program]
+processing_delay_clks = 16
+program_id = "com.czartroniks.limelight"
+program_name = "Limelight"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Render", "Mask", "Vision"]
+program_type = "processing"
+description = "Four swinging beams of gelled light: soft-keyed rotated ramps, additive mixing, pools on a mirror floor."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Reach"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 800
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Soft"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 600
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Sweep"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 600
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Speed"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 700
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Spread"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 300
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Colour"
+control_mode = "linear"
+display_min_value = 1
+display_max_value = 8
+initial_value = 64
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Lamps"
+value_labels = ["Top", "Foot"]
+initial_value_label = "Top"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Haze"
+value_labels = ["Smooth", "Rays"]
+initial_value_label = "Smooth"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Mix"
+value_labels = ["Add", "Key"]
+initial_value_label = "Add"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Pools"
+value_labels = ["On", "Off"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Blaze"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 560
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Limelight"
+
+[[preset]]
+name = "Pencils"
+rotary_potentiometer_2 = 250
+rotary_potentiometer_3 = 900
+rotary_potentiometer_5 = 1023
+linear_potentiometer_12 = 60
+
+[[preset]]
+name = "Chorus Line"
+rotary_potentiometer_3 = 800
+rotary_potentiometer_4 = 820
+rotary_potentiometer_5 = 0
+rotary_potentiometer_6 = 320
+toggle_switch_8 = 1
+
+[[preset]]
+name = "Cut Paper"
+rotary_potentiometer_2 = 100
+rotary_potentiometer_6 = 704
+toggle_switch_9 = 1
+linear_potentiometer_12 = 760
+
+[[preset]]
+name = "Footlights"
+rotary_potentiometer_1 = 500
+rotary_potentiometer_2 = 820
+rotary_potentiometer_6 = 448
+toggle_switch_7 = 1
+linear_potentiometer_12 = 700
+
+[[preset]]
+name = "White Out"
+rotary_potentiometer_1 = 1023
+rotary_potentiometer_4 = 620
+rotary_potentiometer_6 = 960
+toggle_switch_8 = 1
+linear_potentiometer_12 = 1023
