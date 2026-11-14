@@ -11,7 +11,7 @@ Flash from `out/rev_b/ron/patchbay/<name>.vmprog`; rebuild one with `./build_set
 
 | # | Program | The patch | P12 headline | Status |
 |---|---------|-----------|--------------|--------|
-| 1 | munch | Digital logic: ramp ADCs through XOR / AND / ADD into a DAC colourizer (munching squares, Sierpinski) | Munch | in progress |
+| 1 | [munch](munch/) | Digital logic: ramp ADCs through XOR / AND / ADD into a DAC colourizer (munching squares, Sierpinski) | Munch | v0.1.0 built 2026-11-14 (ROUTER1, all six seed 1; HD 95.4-100.2 MHz; 6,478-6,503 LC, 85 %, 18 EBR); not flashed |
 | 2 | chladni | Four sine VCOs through two multipliers: standing-wave sand figures on a plate | Resonance | in progress |
 | 3 | pulsar | Stacked scope traces with hidden lines (the pulsar ridgeline plot) | Burst | in progress |
 | 4 | skyline | Sample-and-hold bar graph with peak caps and a reflection | Drive | in progress |

@@ -1,0 +1,164 @@
+# Munch - Patchbay, v0.1.0 (2026-11-14).  A digital-logic patch: H and V ramps through two 8-bit ADCs on a divided
+# clock, a logic module, three window comparators against a sweeping threshold (munching squares) and a
+# 3-channel DAC colouriser.  See munch.vhd, munch.py and SUMMARY.md.
+
+[program]
+processing_delay_clks = 24
+program_id = "com.czartroniks.munch"
+program_name = "Munch"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Pattern", "Glitch", "Color"]
+program_type = "processing"
+description = "Munching squares: ramps into ADCs, logic and window comparators, a 3-channel DAC colouriser."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Cell"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Logic"
+value_labels = ["XOR", "AND", "OR", "ADD", "Lattice", "Carry", "Mul", "Rings"]
+initial_value_label = "XOR"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Window"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 520
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Speed"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 720
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Bits"
+value_labels = ["4-7", "3-6", "2-5", "7-2", "6-1", "5-0", "4-7 Lo", "3-6 Lo"]
+initial_value_label = "7-2"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Colour"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 330
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Mirror"
+value_labels = ["On", "Off"]
+initial_value_label = "On"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Code"
+value_labels = ["Binary", "Gray"]
+initial_value_label = "Binary"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Skew"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Planes"
+value_labels = ["Filled", "Outline"]
+initial_value_label = "Filled"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Munch"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 400
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Munch"
+
+[[preset]]
+name = "Quilt"
+rotary_potentiometer_3 = 620
+rotary_potentiometer_4 = 600
+linear_potentiometer_12 = 0
+
+[[preset]]
+name = "Cascade"
+rotary_potentiometer_3 = 640
+rotary_potentiometer_4 = 820
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Sierpinski"
+rotary_potentiometer_1 = 256
+rotary_potentiometer_2 = 192
+rotary_potentiometer_3 = 200
+rotary_potentiometer_6 = 120
+toggle_switch_7 = 1
+linear_potentiometer_12 = 250
+
+[[preset]]
+name = "Circuit"
+rotary_potentiometer_1 = 768
+rotary_potentiometer_2 = 704
+toggle_switch_10 = 1
+linear_potentiometer_12 = 600
+
+[[preset]]
+name = "Rings"
+rotary_potentiometer_1 = 256
+rotary_potentiometer_2 = 960
+rotary_potentiometer_3 = 450
+rotary_potentiometer_6 = 700
+linear_potentiometer_12 = 700
+
+[[preset]]
+name = "Gray Plaid"
+rotary_potentiometer_2 = 576
+rotary_potentiometer_5 = 64
+rotary_potentiometer_6 = 900
+toggle_switch_8 = 1
+toggle_switch_9 = 1
+
+[[preset]]
+name = "Diagonals"
+rotary_potentiometer_2 = 448
+rotary_potentiometer_3 = 380
+rotary_potentiometer_4 = 300
+toggle_switch_9 = 1
+linear_potentiometer_12 = 820
