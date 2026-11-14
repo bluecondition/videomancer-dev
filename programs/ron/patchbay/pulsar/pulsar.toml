@@ -1,0 +1,163 @@
+# Pulsar - Patchbay, v0.1.0 (2026-11-14).  Stacked scope traces with hidden lines (the PSR B1919+21 ridgeline
+# plot): two VCOs + slewed noise under a burst envelope, one comparator per trace, a priority chain, an edge
+# differentiator.  See pulsar.vhd, pulsar.py and SUMMARY.md.
+
+[program]
+processing_delay_clks = 24
+program_id = "com.czartroniks.pulsar"
+program_name = "Pulsar"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Curve", "Signal", "Illusion"]
+program_type = "processing"
+description = "Stacked scope traces with hidden lines: a pulsar ridgeline plot that travels toward you."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Lines"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 620
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Height"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 880
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Envelope"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 430
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Speed"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 640
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Rough"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 450
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Colour"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Fill"
+value_labels = ["Black", "Glow"]
+initial_value_label = "Black"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Burst"
+value_labels = ["One", "Twin"]
+initial_value_label = "One"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Tilt"
+value_labels = ["Flat", "Perspective"]
+initial_value_label = "Flat"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Paper"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Burst"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 780
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Pulsar"
+
+[[preset]]
+name = "CP 1919"
+rotary_potentiometer_1 = 1023
+rotary_potentiometer_2 = 1023
+rotary_potentiometer_3 = 330
+rotary_potentiometer_5 = 800
+rotary_potentiometer_6 = 0
+linear_potentiometer_12 = 700
+
+[[preset]]
+name = "Glow Range"
+rotary_potentiometer_1 = 420
+rotary_potentiometer_3 = 700
+rotary_potentiometer_5 = 120
+toggle_switch_7 = 1
+linear_potentiometer_12 = 850
+
+[[preset]]
+name = "Flyover"
+rotary_potentiometer_1 = 500
+rotary_potentiometer_3 = 620
+rotary_potentiometer_4 = 760
+toggle_switch_7 = 1
+toggle_switch_9 = 1
+linear_potentiometer_12 = 900
+
+[[preset]]
+name = "Twin Ink"
+rotary_potentiometer_1 = 760
+rotary_potentiometer_5 = 650
+rotary_potentiometer_6 = 300
+toggle_switch_8 = 1
+toggle_switch_10 = 1
+
+[[preset]]
+name = "Rainbow Swell"
+rotary_potentiometer_3 = 1023
+rotary_potentiometer_5 = 0
+rotary_potentiometer_6 = 1023
+rotary_potentiometer_4 = 300
+toggle_switch_11 = 1
+linear_potentiometer_12 = 600
