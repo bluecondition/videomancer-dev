@@ -1,5 +1,109 @@
 # SUGARCOAT
 
+**STATUS: v2.0.0 built 2026-11-14, timing-closed on all six configs, NOT flashed.** The candy
+generator was checked against the integer model (all 96 candies, zero pixel difference) and
+rendered on pictures; nothing of v2 has been seen on hardware. Design notes:
+[DESIGN.md](DESIGN.md). Controls: [CONTROLS.md](CONTROLS.md).
+
+**v1.2.2 (signed off 2026-10-07, hardware-captured defaults) is kept:** source in git at
+`1fc2fc5` (copy in `.sugarcoat_work/v1.2.2/`), vmprog as
+`out/rev_b/ron/sugarcoat_v1.2.2.vmprog`. Its notes follow below the v2 section unchanged.
+
+## v2.0.0 (2026-11-14) — APPLIQUE's mattes, drawn candy
+
+Ron's brief: take the techniques learned in APPLIQUE and use them to improve Sugarcoat; make
+the candy / cookie textures more realistic and varied ("I want it to look like real candy and
+cookies"; frosting and anything else for variety); include APPLIQUE's thin line / just matte
+options.
+
+What changed, in one paragraph: the per-pixel classifier and its Clean filter are replaced by
+APPLIQUE's matte pipeline (clean flat regions, optional thin line where the candy changes), and
+the 16 flat two-colour textures by a candy generator: 96 candies from 22 shapes, scattered per
+cell by a hash (position, size, silhouette, colour, quarter turn), shaded as domes / sticks /
+ramps with a specular highlight, embossed with a lit rim and a contact shadow, with crumb /
+sugar / nonpareil grain and a sprinkle overlay; 16 themes (8 x Bank) of 8 luma + 8 hue candies.
+`sugarcoat.vhd` is a fork of `applique.vhd` v0.1.1 (DESIGN.md section 1); `tables.py` holds
+palette, candies and themes and stamps the ROMs; `model.py` is the integer model.
+
+Controls: K1 Theme, K2 Sprinkles, K3 Scale (continuous), K4 Shade, K5 Level, K6 Gloss; S7
+Lines, S8 Split, S9 Bank, S10 Angle, S11 Map; P12 Variety. Theme / Scale / Level / Gloss / Bank /
+Map are where v1 had them.
+
+### Build
+
+`NEXTPNR_ROUTER="--router router1" MAKE_TIMEOUT=1500 ./build_programs.sh ron sugarcoat`
+
+router1, **seed 1 on all 6 configs**, zero retries; 7052–7080 / 7680 LC (92%), 24 / 32 EBR;
+latency 84 clocks:
+
+| Config | Fmax (MHz, routed) | Target |
+|---|---|---|
+| HD Analog | 84.03 | 74.25 |
+| HD HDMI | 85.59 | 74.25 |
+| HD Dual | 86.63 | 74.25 |
+| SD Analog | 83.25 | 27 |
+| SD HDMI | 83.08 | 27 |
+| SD Dual | 85.24 | 27 |
+
+Standalone yosys (program + core): 3873 LUT4 + 1043 carry + 2615 FF, `emulate_transparency` 0.
+The first synthesis had 1363 carry cells: every `x < constant` in the shape stage had become a
+carry chain. Written as gates (`f_lt`) they cost 320 fewer cells. router2 was not tried
+(APPLIQUE and VENEER INK both stall on it).
+
+### Verification done
+
+- **RTL against `model.py`**: a 16-class card (8 grey levels + 8 hue sectors; Fixed, Variety 8)
+  and a sim copy whose theme ROM maps (bank, theme, class) straight to candy ids put 16 candies
+  on screen per sim. Six GHDL renders at 960 x 540 cover all 96 candies: **every cell interior
+  identical to the model** (mean difference 0.00), shading, relief, grain, Shade and Gloss
+  included, once the model is shifted 2 pixels right and 1 line up (the same constant offset of
+  the sheet APPLIQUE has). A seventh render with Sprinkles 68% and Angle Bias is identical too.
+  Scripts: `.sugarcoat_work/{mkcard,mksim,compare}.py`, `sim.sh`.
+- **Pictures**: 27 GHDL renders at 960 x 540 on the Sugarcoat Previews page (runner and page
+  generator in `.sugarcoat_work/previews/`).
+- Not simulated: interlaced timings, 720p, SD (the steps for those are APPLIQUE's table).
+
+### First hardware checks
+
+1. Default look on HD HDMI (Candy Shop, Chroma, 5 levels, lines on). Hue candies should land as
+   on the previews: violet gumdrops, pink bubblegum, red hearts, yellow butterscotch, lime
+   slices, green starlights, aqua rock candy, blue rings.
+2. **Thick bright bars** on HD HDMI. The output has APPLIQUE's [1 2 1] conditioning, but the
+   candy has small saturated features (sprinkles, nonpareils, grain) that switch chroma every
+   2–3 pixels. If bars show (try Frosting with Sprinkles up, or Scale low), widen the chroma
+   filter first (CLAUDE.md, wrinkle).
+3. Region-edge boil on live video (inherited: temporal vote off, 1-code hysteresis). A region
+   that flips level swaps its whole candy, so it shows more than in VENEER.
+4. K3 Scale sweep: smooth glide, no shimmer at rest. At 0% the grain is under a pixel.
+5. K5 Level: centre = exactly the same picture as before; both ends keep a picture.
+6. K1 and P12 at full scale select the last theme / 8 levels (the zone-latch fix).
+7. K6 Gloss 0%: flat colours, no highlights. Lit rims on the upper left of every piece.
+8. 720p / SD source: candy the same size relative to the screen (DESIGN.md section 4 lists what
+   differs).
+
+### Open choices (made without asking; easy to change)
+
+- **Replaced in place** rather than as a second program; v1.2.2 stays flashable from its own
+  vmprog file. Both carry program_id `com.czartroniks.sugarcoat`.
+- **Chroma map uses any saturation** (the matte path's lowest class, about 8%), like v1 at Ron's
+  captured Strength. A brown bear therefore becomes "red candy". Vivid colours only would keep
+  more of the picture's light and dark; it is one compare in `f_cls`.
+- **Whites are about 81%** on screen (APPLIQUE's luma-toward-black conditioning, kept).
+- No Drift (v1's rule: nothing moves on its own). No Contrast knob (Adaptive split replaces it).
+- Presets are hand-written placeholders.
+- The community repo copy (`~/videomancer-community`) is still v1.2.2.
+
+### Changing candies
+
+Edit `tables.py` (a candy is one `K(...)` line; themes are at the end), look at it with
+`python3 model.py --sheet out.png`, then `python3 model.py --stats && python3 tables.py` and
+rebuild. ROM-only changes do not move timing (the two builds of 2026-11-14 differed only in a
+ground colour and routed to identical figures).
+
+---
+
+## v1 history (v1.2.2 and earlier)
+
 **STATUS: v1.2.0 FINAL except presets (Ron signed off 2026-10-07: "Sugarcoat
 can be finalized for now").  Presets are placeholders — capture on hardware
 with `./capture_preset.sh` when looks are dialled in, then rebuild (HD HDMI

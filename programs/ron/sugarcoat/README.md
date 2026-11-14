@@ -1,35 +1,36 @@
 # Sugarcoat
 
-Video re-made as candy: every pixel is classed by brightness or hue and redrawn in one of 16 candy textures (chocolate, cookies & cream, choc-chip cookie, cane, mint, icing, taffy, Battenberg, allsorts, waffle, jelly beans, gingerbread, liquorice, nonpareils and more), with gloss, outlines and shading. 64 themed maps put dark textures in shadows and hue-matched candies on colours.
+Video re-made as candy. The picture is flattened into clean regions by brightness and hue, and every region is filled from a case of about a hundred drawn confections: chocolate bars with bevelled segments, chocolate-chip cookies, piped frosting, doughnut glaze with sprinkles, candy canes, starlight mints, gumballs, jelly beans, gummy rings, fruit slices, allsorts, caramels and more. Pieces are scattered with their own colour, size and turn, shaded as domes and sticks with a highlight, and sit on the surface with a lit rim and a shadow. Nothing moves on its own: the picture alone decides where each candy goes.
 
-**P12 (Strength):** How much variety the map uses: in Luma mode it opens up from 2 to 4 to 8 textures across the brightness range; in Chroma mode it sweeps the saturation floor, so more of the picture turns into hue-matched candy.
+**P12 (Variety):** How many candies are on screen at once: 2 to 8 brightness levels and, in the Chroma map, 2 / 4 / 8 hue groups. At the top the whole case is out, up to sixteen candies.
 
 ## Controls
 
 | | Control | Range | What it does |
 |---|---|---|---|
-| K1 | Theme | 0–63 | Which candy goes where: 8 themes (Classic, Bakery, Liquorice...) with swap and tone variants |
-| K2 | Clean | 0–100% | Removes specks so candy areas form clean patches |
-| K3 | Scale | 8 px / 16 px / 32 px / 64 px | Texture size |
-| K4 | Contrast | 0–100% | Contrast of the picture before it is sorted into candies (50% = unchanged) |
-| K5 | Level | -100–100% | Brightness offset before sorting; centre = unchanged |
-| K6 | Gloss | 0–100% | Shiny highlights from the picture's shape |
-| S7 | Outline | Off / On | Dark outlines between candy areas |
-| S8 | Shade | Flat / Shaded | Flat candy, or shaded by the picture's brightness |
-| S9 | Bank | A / B | Second set of 8 themes |
-| S10 | Sprinkles | Off / On | Adds sprinkles |
-| S11 | Map | Chroma / Luma | Choose candies by colour or by brightness |
-| P12 | Strength | 0–100% | How much variety: more textures (Luma) or more colour candies (Chroma) |
+| K1 | Theme | Candy Shop / Bakery / Chocolate / Frosting / Liquorice / Pastel / Gummy / Peppermint | Which candies are in the case |
+| K2 | Sprinkles | 0–100% | Scatters sprinkles over everything |
+| K3 | Scale | 0–100% | Size of every candy, x1 to x16 |
+| K4 | Shade | 0–100% | How much of the picture's light and dark the candy keeps |
+| K5 | Level | −100–100% | More dark candy or more light candy; centre = unchanged |
+| K6 | Gloss | 0–100% | Shading, highlights and embossed edges; 0 = flat cut paper |
+| S7 | Lines | Off / On | Thin black line where the candy changes |
+| S8 | Split | Fixed / Adaptive | Equal brightness steps, or each level covering the same area |
+| S9 | Bank | A / B | A second helping of each theme |
+| S10 | Angle | Straight / Bias | Turns every candy 45 degrees |
+| S11 | Map | Chroma / Luma | Candies by colour and brightness, or by brightness only |
+| P12 | Variety | 2–8 | How many candies are on screen |
 
 ## Presets
 
-Candy Shop, Sweet Shelf, Big Bites, Bakeshop, Cel Candy.
+Candy Shop, Bakery Case, Chocolate Box, Birthday Cake, Gummy Bias, Cut Paper.
 
 ## Technical notes
 
 - Program type: processing; core `yuv444_30b`.
-- Input-to-output latency: 32 clocks (`processing_delay_clks`).
+- Input-to-output latency: 84 clocks (`processing_delay_clks`), the same in every mode.
 - Built and timed at the full 74.25 MHz HD pixel clock.
+- Candy sizes follow the screen height at every resolution; region shapes and lines are coarser at 720p and SD.
 
 ## License
 
