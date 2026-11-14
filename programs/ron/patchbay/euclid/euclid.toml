@@ -1,0 +1,162 @@
+# Euclid - Patchbay, 2026-11-14 (v0.1.0).
+# A Euclidean step sequencer drawn as a piano roll through a colouriser: tracks are rows, steps are columns,
+# hits are pads; a playhead sweeps and every struck pad decays by an envelope.  See euclid.vhd, euclid.py, SUMMARY.md.
+
+[program]
+processing_delay_clks = 20
+program_id = "com.czartroniks.euclid"
+program_name = "Euclid"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Grid", "Pattern", "Color"]
+program_type = "processing"
+description = "Euclidean step sequencer as a piano roll: rhythm tracks strike glowing pads that decay by envelope."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Steps"
+control_mode = "linear"
+display_min_value = 4
+display_max_value = 32
+initial_value = 441
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Gate"
+control_mode = "linear"
+display_min_value = 30
+display_max_value = 100
+initial_value = 500
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Tracks"
+control_mode = "linear"
+display_min_value = 2
+display_max_value = 12
+initial_value = 605
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Tempo"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 784
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Rotate"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 256
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Colour"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 200
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Layout"
+value_labels = ["Sweep", "Roll"]
+initial_value_label = "Sweep"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Tails"
+value_labels = ["Long", "Short"]
+initial_value_label = "Long"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Accent"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Metre"
+value_labels = ["Same", "Poly"]
+initial_value_label = "Same"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Fill"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 370
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Patch"
+
+[[preset]]
+name = "Four Floor"
+rotary_potentiometer_5 = 256
+rotary_potentiometer_6 = 120
+linear_potentiometer_12 = 0
+
+[[preset]]
+name = "Polymetre"
+rotary_potentiometer_1 = 300
+rotary_potentiometer_3 = 1023
+rotary_potentiometer_6 = 520
+toggle_switch_10 = 1
+linear_potentiometer_12 = 300
+
+[[preset]]
+name = "Tracker"
+rotary_potentiometer_1 = 1023
+rotary_potentiometer_2 = 800
+rotary_potentiometer_4 = 860
+toggle_switch_7 = 1
+toggle_switch_9 = 1
+linear_potentiometer_12 = 520
+
+[[preset]]
+name = "Big Pads"
+rotary_potentiometer_1 = 140
+rotary_potentiometer_2 = 760
+rotary_potentiometer_3 = 200
+rotary_potentiometer_4 = 700
+rotary_potentiometer_6 = 700
+toggle_switch_11 = 1
+linear_potentiometer_12 = 600
+
+[[preset]]
+name = "Cascade"
+rotary_potentiometer_3 = 900
+rotary_potentiometer_4 = 900
+rotary_potentiometer_5 = 128
+rotary_potentiometer_6 = 330
+toggle_switch_8 = 1
+linear_potentiometer_12 = 1023
