@@ -1,0 +1,162 @@
+# Isoline - Kinetic (v0.1.0, 2026-11-14).  Metaballs drawn as a topographic map: hypsometric tints and
+# contour lines, islands merging through saddles; the picture's luma rises as terrain.
+# See isoline.vhd, isoline.py and SUMMARY.md.
+
+[program]
+processing_delay_clks = 36
+program_id = "com.czartroniks.isoline"
+program_name = "Isoline"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Organic", "Edges", "Print"]
+program_type = "processing"
+description = "Metaballs as a topographic map: tints and contour lines, islands merging through saddles. Video rises as terrain."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Scale"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 520
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Shape"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 338
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Depth"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 600
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Rate"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 700
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Spread"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 647
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Colour"
+value_labels = ["Ink", "Paper", "Bauhaus", "Vega", "Outrun", "Ultra", "Ocean", "Ice", "Moss", "Citrus", "Terra", "Ember", "Gold", "Candy", "Mint", "Plum"]
+initial_value_label = "Ocean"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Wave"
+value_labels = ["Smooth", "Snap"]
+initial_value_label = "Smooth"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Field"
+value_labels = ["Orbit", "Drift"]
+initial_value_label = "Orbit"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Look"
+value_labels = ["Tints", "Lines"]
+initial_value_label = "Tints"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Index"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Merge"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 540
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Archipelago"
+
+[[preset]]
+name = "Survey"
+rotary_potentiometer_2 = 520
+rotary_potentiometer_6 = 96
+toggle_switch_9 = 1
+toggle_switch_10 = 1
+linear_potentiometer_12 = 600
+
+[[preset]]
+name = "Atolls"
+rotary_potentiometer_1 = 640
+rotary_potentiometer_2 = 300
+rotary_potentiometer_3 = 800
+rotary_potentiometer_6 = 480
+toggle_switch_10 = 1
+linear_potentiometer_12 = 200
+
+[[preset]]
+name = "Lava Lamp"
+rotary_potentiometer_1 = 600
+rotary_potentiometer_2 = 120
+rotary_potentiometer_3 = 850
+rotary_potentiometer_4 = 760
+rotary_potentiometer_5 = 500
+rotary_potentiometer_6 = 736
+toggle_switch_8 = 1
+linear_potentiometer_12 = 480
+
+[[preset]]
+name = "Stations"
+rotary_potentiometer_2 = 420
+rotary_potentiometer_4 = 780
+rotary_potentiometer_6 = 224
+toggle_switch_7 = 1
+toggle_switch_10 = 1
+linear_potentiometer_12 = 430
+
+[[preset]]
+name = "Continent"
+rotary_potentiometer_1 = 420
+rotary_potentiometer_2 = 600
+rotary_potentiometer_3 = 700
+rotary_potentiometer_6 = 672
+toggle_switch_10 = 1
+linear_potentiometer_12 = 1023
