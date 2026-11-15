@@ -1,6 +1,6 @@
 # Lattice — blue diamonds on a lime trellis, crossed by sliding magenta blades
 
-**v0.1.0 built 2026-11-04, NOT flashed.** Heirloom phase 3 (video clips), from the still
+**v0.1.1 (2026-11-15, K6 camera pass: K6 = Camera, Rings on K5, Spindles fixed) built, NOT flashed; v0.1.0 built 2026-11-04.** Heirloom phase 3 (video clips), from the still
 `photos/vid/WIN_20230401_00_20_03_t0p5.png` (clip WIN_20230401_00_20_03 at 0.5 s; same patch: 00_19_01, 00_25_43).
 A lattice of blue diamonds on lime green, big and small ones alternating, each ringed yellow / orange / dark; a faint
 relief trellis running diagonally between them; and magenta blades lying on the trellis — X crosses at the saddles
@@ -73,8 +73,8 @@ Working files are in `.heirloom_work/rb_lattice/` (`notes.md`, `pfit.py`, `palbi
 | K2 Small | the small diamonds' size, the same range |
 | K3 Columns | the diamond columns across (the H oscillator's rate): ×1/3 (one long diamond) .. 2.03 columns (512) .. ×3 (six narrow columns), about the screen centre |
 | K4 Drift | bipolar (±8 deadband, square law): the blades climb (right) or fall (left) along the trellis; full ≈ 2 cells/s; 620 = the default slow climb |
-| K5 Spindles | the blades' oscillator rate against the rows, ×1/3 .. ×3. 512 = locked: every cell shows the same X, as in the still. Turning it, as Ron did in the clip, crowds the blade windows toward the top: X's break into spindles that sit at a different phase in each row. 0 = long continuous blades |
-| K6 Rings | the diamonds' fringe: 0 = hard blue-on-green edges, 512 = the photo's yellow / orange / dark ring, 1023 = four rainbow contour rings round every diamond (the 00_19_01 look) |
+| K5 Rings | (K6 before v0.1.1) the diamonds' fringe: 0 = hard blue-on-green edges, 512 = the photo's yellow / orange / dark ring, 1023 = four rainbow contour rings round every diamond (the 00_19_01 look) |
+| K6 Camera | the camera's (or Osc's) strength in the diamonds' fill: 0 = the photo's flat blue, 25 % = the v0.1.0 gain, 50 % = ×2 (default), 100 % = ×3 with the camera's black point raised (a contrast climax). See "K6 camera pass" |
 | S7 Shape | Diamond (the photo) / Bulb: both waveforms rounded, so the diamonds become lenses and ellipses |
 | S8 Cross | Single (the photo) / Double: a second blade window half a cycle away, giving twice the blades |
 | S9 Fill | Flat (the photo's blue, lit by the source) / Gem: diamonds graded from the rim to a pale core |
@@ -82,8 +82,9 @@ Working files are in `.heirloom_work/rb_lattice/` (`notes.md`, `pfit.py`, `palbi
 | S11 Source | Video / Osc |
 | P12 Blades | the blades' width and window: 0 % = the bare lattice; 380 (37 %) = the photo; 100 % = continuous wide magenta ribbons weaving the whole trellis (the 00_19_01 wide pink bands). Glided |
 
-Glides (1/8 per field, ±2 deadband) on K1, K2, K3, K5, K6 and P12. Presets: Photo, Spindles, Woven, Rainbow Gems,
-Dusk Bulbs.
+Glides (1/8 per field, ±2 deadband; ±4 on K6) on K1, K2, K3, K5, K6 and P12. Presets: Photo, Camera Boost
+(K6 100 %; was Spindles), Woven, Rainbow Gems, Dusk Bulbs. K5 Spindles (the blade oscillator's rate) is fixed at 512
+(locked, the still) since v0.1.1.
 
 ## Video
 - **Video (default).** Camera luma, (Y >> 2) − 16 from a line buffer, lights the diamonds' fill.
@@ -121,6 +122,40 @@ Dusk Bulbs.
     pixels (glides modelled).
   - Model vs still at defaults: median |ΔRGB| 2.7, mean 15.5; 4×4 region means within 3–9 levels; luma-class
     agreement 88 %.
+
+## K6 camera pass (2026-11-15), v0.1.1
+- **K6 is now Camera:** how strongly the camera (or Osc) lights the diamonds' fill, 0..100 %, default 50 %.
+- **Gain law.** The fill index is lb · G / 256, clipped at 63, where lb is the line-buffer value
+  ((luma >> 2) − black point; Osc 0..63).
+  - Up to 50 %: G = k · 9 / 32 and the black point stays 16. 25 % gives G 72, the v0.1.0 lb/4 + lb/32.
+    50 % gives G 144, ×2.
+  - Above 50 %: G rises to 214 (×3 at 100 %) and the camera's black point rises from 16 to 54. This affects Video
+    only; Osc keeps its zero. The extra gain therefore becomes contrast, not a pale washout.
+- **The points (selfie, `.heirloom_work/rb_lattice/k6/k6sheet.png`):**
+  - 0 %: the photo's flat blue, the black-input picture.
+  - 25 %: v0.1.0.
+  - 50 %: brighter, paler camera images in every diamond. About a quarter of the selfie reaches the palest step;
+    the rings and blades are untouched.
+  - 100 %: a high-contrast camera: blue shadows and pale highlights.
+  - Osc at 50 %: the lighter-blue ripples, twice v0.1.0's.
+- **How.**
+  - K6 rides the shared glide in Spindles' old channel (1/8 per field, ±4 deadband).
+  - It is decoded in two vblank-zone slots (zc 43 / 44).
+  - One 8 × 8 multiply has its own pixel stage (5); the clip is at stage 6.
+  - The latency is unchanged (C_LAT 20).
+- **Frozen: K5 Spindles at 512** (the blade oscillator locked to the rows, as in the still).
+  - It was the weakest knob: in `sheet.png` its whole travel only re-cuts the thin blades, while K1 / K2 / K3 / old
+    K6 redraw the lattice.
+  - K4 Drift, the only motion control, was kept.
+- **K6's old function, Rings, moved to K5** with its range and default.
+  - Preset Spindles became Camera Boost (K6 100 %).
+  - Rainbow Gems' Rings 900 moved to K5.
+- **Build (v0.1.1, 2026-11-15):** router1, all six configs on seed 1 (`.kinetic_work/tools/k6build.sh heirloom
+  lattice`).
+  - Post-route Fmax: HD Analog 95.14, HD HDMI 97.98, HD Dual 92.67 (worst HD), SD Analog 97.21, SD HDMI 88.32,
+    SD Dual 96.72 MHz.
+  - Fit: 6789–6814 / 7680 LC (89 %), 16 / 32 EBR.
+  - Output: `out/rev_b/ron/heirloom/lattice.vmprog`. Not flashed.
 
 ## Status
 - **v0.1.0 built 2026-11-04 with router1:** `NEXTPNR_ROUTER="--router router1" MAKE_TIMEOUT=900 .heirloom_work/vid/build_queue.sh lattice`.

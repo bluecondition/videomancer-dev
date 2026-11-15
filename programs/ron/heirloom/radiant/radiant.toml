@@ -7,7 +7,7 @@
 processing_delay_clks = 16
 program_id = "com.czartroniks.radiant"
 program_name = "Radiant"
-program_version = "0.5.1"
+program_version = "0.5.2"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -39,11 +39,11 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
-name_label = "Stripe"
+name_label = "Pulse"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 256
 display_float_digits = 0
 suffix_label = "%"
 
@@ -69,11 +69,11 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
-name_label = "Pulse"
+name_label = "Camera"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 256
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
@@ -123,13 +123,12 @@ name = "Duci"
 [[preset]]
 name = "Bare Halo"
 linear_potentiometer_12 = 0
-rotary_potentiometer_6 = 0
+rotary_potentiometer_3 = 0
 
 [[preset]]
 name = "Blaze"
 linear_potentiometer_12 = 1023
-rotary_potentiometer_6 = 700
-rotary_potentiometer_3 = 800
+rotary_potentiometer_3 = 700
 
 [[preset]]
 name = "Gold Icon"

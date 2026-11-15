@@ -1,6 +1,6 @@
 # Pebble — red ripples dotted by rows, each crest a window onto a mirrored figure
 
-**v0.1.0 built 2026-11-04, not flashed.** Heirloom phase 3 (video clips), from the clip `WIN_20230731_01_19_22`
+**v0.1.1 (2026-11-15, K6 camera pass: K6 = Camera, Rows on K3, Origin fixed) built, not flashed; v0.1.0 built 2026-11-04.** Heirloom phase 3 (video clips), from the clip `WIN_20230731_01_19_22`
 at 0.5 s (`photos/vid/WIN_20230731_01_19_22_t0p5.png`). The same clip at 4.5 s and 14.0 s shows the far ends of
 Ron's knob.
 
@@ -96,10 +96,10 @@ Presets are hand-written placeholders. Working files are in `.heirloom_work/rb_p
 |---|---|
 | K1 Ripples | the ripples' count: ring gain ×1/4 .. ×4, exponential. 512 = the photo's 337 px spacing; 0 = one fat ripple; 1023 = about 20 hairline ripples |
 | K2 Bend | the ripples' bow: the vertical cosine's depth, b/a = 1.6 s·\|s\|, ±8 deadband. 0 = reversed and folded into horizontal streaks and lenses; 512 = straight vertical bands; 671 = the photo's "(" (0.144); 1023 = folded into nested closed loops |
-| K3 Origin | the drop point: the ramp origin, Xc = −193 + 4 (k − 512) px. 0 = far left, deep even arcs; 512 = the photo; 800 = mid-screen ")(" splash; 1023 = right edge, ")" arcs |
+| K3 Rows | (K6 before v0.1.1) period of the dotted rows: 8 .. 63.75 (512, the photo) .. 510 lines (±3 octaves). Also steps the figure |
 | K4 Speed | the bulge's scroll, bipolar (±8 deadband, square law). 682 = the clip's 1.25 lines per field downward; full travel = 12 lines per field either way. Also sets the figure's chevron flow |
 | K5 Inlay | width of the window at each crest. 0 = none (pure fire ripples); 512 = the photo (27 % of a ripple on A rows, 5 % on B rows); 1023 = 96 % / 74 % (the figure layer through nearly the whole ripple, thin fire lines left) |
-| K6 Rows | period of the dotted rows: 8 .. 63.75 (512, the photo) .. 510 lines (±3 octaves). Also steps the figure |
+| K6 Camera | the camera's (or Osc's) strength into all three patch points (ripple phase, figure palette, crown drip): 0 = none (the black-input picture), 25 % = the v0.1.0 gain, 50 % = ×2 (default), 100 % = ×4. See "K6 camera pass" |
 | S7 Twin | Off / On: the ripples mirrored about the screen centre (two arc systems meeting in a lens) |
 | S8 Palette | Fire (the photo) / Ice (Cb ↔ Cr: deep-blue ripples with cyan crests, maroon-green rows, a red figure) |
 | S9 Weave | Off / On: the B rows shifted half a ripple (bricks of red and green) |
@@ -174,6 +174,46 @@ P12 = 100 %, in the gaps between the figures and in the figures' row stepping (`
   - Osc and camera frames are shown in `cmp_final.png`.
   - `dupin.py`: 0 `CARRY I0==I1`.
   - Standalone yosys: one transparency emulation, the line buffer's, as in every shell.
+
+## K6 camera pass (2026-11-15), v0.1.1
+- **K6 is now Camera:** the camera's (or Osc's) strength into all three patch points, 0..100 %, default 50 %.
+  Neither K2 Bend nor S10 Bend is a camera control (they are the cosine's depth and its waveform), so nothing was
+  swapped. One gain was added instead.
+- **Gain law.** s' = s · G / 64 on the line-buffer luma s (camera 0..239, Osc 0..222), with G = k / 4:
+  - 0 at 0 %;
+  - 64 = v0.1.0 at 25 %;
+  - 128 = ×2 at 50 %;
+  - 255 ≈ ×4 at 100 %.
+
+  s' (0..1016) feeds the three products:
+  - the ripple phase, s' · 6144 (0.088 ripple per full luma at ×1);
+  - the figure palette index, s' · 3.5, modulo 1024 (one palette cycle);
+  - the crown drip, s' · 72 / 256 lines. This was · 75; it is now 4 % less, to keep it one add.
+- **The points (selfie, `.heirloom_work/rb_pebble/k6/k6sheet.png`):**
+  - 0 %: the black-input picture (clean ripples, the crown at the top).
+  - 25 %: v0.1.0.
+  - 50 %: the ripple edges fray further around the picture, the windows show the camera in false colour, and bright
+    areas drip the crown well down the frame.
+  - 100 %: the crown drips to mid-frame in camera false colour, and the ripple edges are strongly frayed (per-line
+    streaks), but the ripples and rows still read.
+  - Osc at 50 %: smooth wobbling ripples and a wavy crown, twice v0.1.0's.
+- **How.**
+  - K6 rides the shared glide in Origin's old channel (±4 deadband) and is decoded at zone slot 41.
+  - Pixel stage 4 is the multiply (it replaces the old shift-add partials). Stage 5 forms the three products, one add
+    each.
+  - The latency is unchanged (C_LAT 20).
+- **Frozen: K3 Origin at 512** (the photo's ramp origin, Xc = −193 px).
+  - It was the weakest knob: in `sheet.png` it only slides the arcs' origin, while Ripples, Bend, Inlay and Rows
+    redraw the picture.
+  - K4 Speed, the only motion control, was kept.
+- **K6's old function, Rows, moved to K3** with its range and default; the presets' Rows values moved with it.
+  - Splash lost its Origin 800 (the mid-screen ")(" splash). It gains S7 Twin, the mirrored lens, instead.
+- **Build (v0.1.1, 2026-11-15):** router1, all six configs on seed 1 (`.kinetic_work/tools/k6build.sh heirloom
+  pebble`).
+  - Post-route Fmax: HD Analog 97.51, HD HDMI 96.98, HD Dual 96.26 (worst HD), SD Analog 95.24, SD HDMI 96.33,
+    SD Dual 100.60 MHz.
+  - Fit: 6838–6858 / 7680 LC (89 %), 21 / 32 EBR.
+  - Output: `out/rev_b/ron/heirloom/pebble.vmprog`. Not flashed.
 
 ## Status
 - **v0.1.0 built 2026-11-04**, builder default router2, **all six configs on seed 1**. Post-route Fmax (the last

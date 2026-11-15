@@ -21,10 +21,13 @@
 --
 --   K1  Halo     halo disc radius (50 .. 150 %, 100 % = the collage)
 --   K2  Lift     the cup rises off the head (0 = sitting on it, as in the collage)
---   K3  Stripe   the rays' stripe mix: white strips -> the collage's white / pink / line -> pink, wide line
+--   K3  Pulse    the rays breathe in width (depth and rate; 0 = still)   [K6 camera pass: was K6]
 --   K4  Tissue   torn tissue on the ground (bare paint .. dense)
 --   K5  Flank    the woman and the soldier slide out to the frame edges
---   K6  Pulse    the rays breathe in width (depth and rate; 0 = still)
+--   K6  Camera   how strongly the camera (or Osc) prints through the cut-outs: shade = mid + (src - mid) G,
+--                G in four steps: 0 = flat paper (each zone's mid step), 1/2 at 256, 1 at 512 = the v0.5 print,
+--                2 from 640 (x2 contrast)
+--                (K6 camera pass: Stripe is fixed at 512 = the collage's mix)
 --   S7  Lens     Flag / Clear (the left lens shows the eye)
 --   S8  Cup      On / Off (the bare head)
 --   S9  Halo     Dark / Gold
@@ -41,6 +44,7 @@
 -- (luma [1 2 1] and to ~777, chroma [1 2 2 2 2 2 2 2 1]/16) before the blanking gate.  Latency 16, all
 -- modes.  Colours in the hardware convention (u = Cr, v = Cb).
 
+-- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K3 = Pulse (was K6); K3 Stripe fixed at 512 (C_KFIX_3).
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -53,6 +57,7 @@ use work.radiant_pkg.all;
 use work.all;
 
 architecture radiant of program_top is
+    constant C_KFIX_3 : std_logic_vector(9 downto 0) := std_logic_vector(to_unsigned(512, 10));   -- K6 camera pass: fixed knob
     constant C_LAT : integer := 16;
 
     ---------------------------------------------------------------------------
@@ -376,6 +381,10 @@ architecture radiant of program_top is
     signal s_w : unsigned(10 downto 0) := to_unsigned(1920, 11);
     signal s_flag, s_cup, s_gold, s_lab, s_osc : std_logic := '0';
     signal s_fc : unsigned(7 downto 0) := (others => '0');                    -- field counter
+    -- K6 Camera: the shade-gain step (G = 0, 1/2, 1, 2; 2 = the v0.5 look) and 128 (1 - G) >> 4 as a dither prefix
+    signal s_cgo : std_logic := '0';
+    signal c_cst : unsigned(1 downto 0) := "10";
+    signal c_ck  : std_logic_vector(7 downto 0) := x"00";
 
     ---------------------------------------------------------------------------
     -- register machine
@@ -571,11 +580,11 @@ architecture radiant of program_top is
 
     signal p_zone5 : unsigned(3 downto 0) := (others => '0');
     signal p_ldu5 : unsigned(7 downto 0) := (others => '0');
-    signal p_l5 : unsigned(7 downto 0) := (others => '0');
+    signal p_d4 : signed(8 downto 0) := (others => '0');      -- K6: the shade source l (-17 .. 253)
+    signal p_a5 : signed(9 downto 0) := (others => '0');      -- K6: G l
     signal p_gr5 : signed(7 downto 0) := (others => '0');
     signal p_y9, p_u9, p_v9 : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal p_pa3, p_pb3 : unsigned(5 downto 0) := (others => '0');
-    signal p_pl4 : unsigned(7 downto 0) := (others => '0');
     type t_bb is record
         win : unsigned(1 downto 0);
         lab : std_logic_vector(1 downto 0);
@@ -659,6 +668,7 @@ begin
     -- Controls, vblank zone, width, sync delays
     ---------------------------------------------------------------------------
     p_ctrl : process(clk)
+        variable v_cd : signed(10 downto 0);
     begin
         if rising_edge(clk) then
             s_tid <= registers_in(8)(3 downto 0);
@@ -701,6 +711,23 @@ begin
                 s_fc <= s_fc + 1;
             end if;
             g_wm1 <= resize(s_w, 12) - 1;
+
+            -- K6 Camera: the gain step floor((k + 128) / 256), 0 .. 3: G = 0 (flat: each zone's middle step),
+            -- 1/2 (256), 1 (512 = the v0.5 camera print), 2 (from 640: x2 contrast).  Once per field (one clock
+            -- after the zone start) the step moves at most one toward the knob, and only when the knob is 4 past
+            -- the boundary: a glide and a +-4 deadband in a 2-bit register (LC-tight)
+            s_cgo <= s_zgo;
+            if s_cgo = '1' then
+                v_cd := signed(resize(unsigned(registers_in(5)), 11)) - signed(resize(c_cst & "00000000", 11));
+                if v_cd >= 132 and c_cst /= 3 then c_cst <= c_cst + 1;
+                elsif v_cd < -132 and c_cst /= 0 then c_cst <= c_cst - 1; end if;
+            end if;
+            case to_integer(c_cst) is                      -- 128 (1 - G) >> 4
+                when 0      => c_ck <= x"08";
+                when 1      => c_ck <= x"04";
+                when 2      => c_ck <= x"00";
+                when others => c_ck <= x"F8";
+            end case;
 
             -- delay line: written each clock, read 12 entries back (s_dq = input delayed 14),
             -- then two registers (delay 15, 16 = C_LAT)
@@ -755,10 +782,10 @@ begin
                             when L_T12 => v_l := signed(resize(unsigned(registers_in(7)) & "00", 16));
                             when L_K1  => v_l := signed(resize(unsigned(registers_in(0)), 16));
                             when L_K2  => v_l := signed(resize(unsigned(registers_in(1)), 16));
-                            when L_K3  => v_l := signed(resize(unsigned(registers_in(2)), 16));
+                            when L_K3  => v_l := signed(resize(unsigned(C_KFIX_3), 16));
                             when L_K4  => v_l := signed(resize(unsigned(registers_in(3)), 16));
                             when L_K5  => v_l := signed(resize(unsigned(registers_in(4)), 16));
-                            when L_K6  => v_l := signed(resize(unsigned(registers_in(5)), 16));
+                            when L_K6  => v_l := signed(resize(unsigned(registers_in(2)), 16));
                             when L_W   => v_l := signed(resize(s_w, 16));
                             when L_XS  => v_l := signed(resize(s_xs, 16));
                             when L_YS  => v_l := signed(resize(s_ys, 16));
@@ -1243,6 +1270,7 @@ begin
         variable v_l : signed(11 downto 0);
         variable v_gr : signed(11 downto 0);
         variable v_lvl : unsigned(3 downto 0);
+        variable v_c4  : signed(11 downto 0);
         variable v_y, v_uu, v_vv : unsigned(9 downto 0);
         variable v_sy : unsigned(11 downto 0);
         variable v_sc : unsigned(11 downto 0);
@@ -1449,7 +1477,15 @@ begin
             else
                 p_mb4 <= to_unsigned(12, 5) + resize(p_nm3(7 downto 6), 5) + resize(p_lfsr(5 downto 5), 5);
             end if;
-            p_pl4 <= resize(p_pa3 & '0', 8) + resize(p_pb3, 8) + 16;
+            -- K6: the shade source l (Video = the camera luma straight from the input, one pixel earlier than v0.5;
+            -- Osc = the blob field)
+            -- (camera: (a - 16) 17/16 = a + a / 16 - 17, a = Y >> 2; Osc: pa 2 + pb + 16; S6 clamps the sum)
+            if s_osc = '0' then
+                v_c4 := signed(resize(unsigned(data_in.y(9 downto 2)), 12)) + signed(resize(unsigned(data_in.y(9 downto 6)), 12)) - 17;
+            else
+                v_c4 := signed(resize(p_pa3 & '0', 12)) + signed(resize(p_pb3, 12)) + 16;
+            end if;
+            p_d4 <= v_c4(8 downto 0);
             p_lab4 <= p_lab3; p_ldu4 <= p_ldu3; p_lb4 <= p_lb3;
 
             -- S5: the overlay code (what shows where no figure wins) and its parameter; the shade source
@@ -1484,13 +1520,13 @@ begin
             for k in 6 to 8 loop p_b(k) <= p_b(k - 1); end loop;
             p_oa5 <= v_oa;
             p_zone5 <= p_zone4; p_ldu5 <= p_ldu4;
-            if s_osc = '0' then
-                v_l := signed(resize(unsigned(data_in.y(9 downto 2)), 12)) - 16;
-                v_l := v_l + shift_right(v_l, 4);
-            else
-                v_l := signed(resize(p_pl4, 12));
-            end if;
-            if v_l < 0 then p_l5 <= (others => '0'); elsif v_l > 255 then p_l5 <= (others => '1'); else p_l5 <= unsigned(v_l(7 downto 0)); end if;
+            -- K6 camera gain (its own stage): G l as a 4-way shift-select
+            case to_integer(c_cst) is
+                when 0      => p_a5 <= (others => '0');
+                when 1      => p_a5 <= resize(shift_right(p_d4, 1), 10);
+                when 2      => p_a5 <= resize(p_d4, 10);
+                when others => p_a5 <= shift_left(resize(p_d4, 10), 1);
+            end case;
             if p_zone4 = 1 then
                 v_gr := resize(signed((not p_gx4(7)) & p_gx4(6 downto 0)), 12);
                 p_gr5 <= resize(shift_right(shift_left(v_gr, 3) + v_gr, 4), 8);
@@ -1499,7 +1535,8 @@ begin
                 p_gr5 <= resize(shift_right(v_gr, 4), 8);
             end if;
             -- S6: level = shade + grain + dither -> palette address (zone & level), or the DUCI word
-            v_l := signed(resize(p_l5, 12)) + resize(p_gr5, 12) + signed(resize(p_lfsr(3 downto 0), 12));
+            -- (G l + 128 (1 - G): the constant rides on the dither nibble's free upper bits)
+            v_l := resize(p_a5, 12) + resize(p_gr5, 12) + signed(std_logic_vector'(c_ck & std_logic_vector(p_lfsr(3 downto 0))));
             if v_l < 0 then v_lvl := (others => '0'); elsif v_l > 255 then v_lvl := (others => '1'); else v_lvl := unsigned(v_l(7 downto 4)); end if;
             if p_b(5).lab(1) = '1' then pa <= p_ldu5; else pa <= p_zone5 & v_lvl; end if;
             ova <= p_oa5;

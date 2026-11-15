@@ -6,7 +6,7 @@
 processing_delay_clks = 20
 program_id = "com.czartroniks.lattice"
 program_name = "Lattice"
-program_version = "0.1.0"
+program_version = "0.1.1"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -58,7 +58,7 @@ suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
-name_label = "Spindles"
+name_label = "Rings"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
@@ -68,7 +68,7 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
-name_label = "Rings"
+name_label = "Camera"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
@@ -120,8 +120,8 @@ suffix_label = "%"
 name = "Photo"
 
 [[preset]]
-name = "Spindles"
-rotary_potentiometer_5 = 760
+name = "Camera Boost"
+rotary_potentiometer_6 = 1023
 
 [[preset]]
 name = "Woven"
@@ -130,7 +130,7 @@ toggle_switch_8 = 1
 
 [[preset]]
 name = "Rainbow Gems"
-rotary_potentiometer_6 = 900
+rotary_potentiometer_5 = 900
 toggle_switch_9 = 1
 
 [[preset]]

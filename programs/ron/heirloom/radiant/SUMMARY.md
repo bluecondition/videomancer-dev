@@ -1,6 +1,6 @@
 # Radiant — pink paper rays burst from a dark halo behind a bust with a flag lens and a cup of coffee on his head (Heirloom #52)
 
-**v0.5.0 (2026-10-28): rebuilt from the photo, built, NOT flashed.** Source: `photos/duci.jpg`.
+**v0.5.2 (2026-11-15): K6 camera pass (K6 = Camera, Pulse on K3, Stripe fixed), built, NOT flashed; see that section.** **v0.5.0 (2026-10-28): rebuilt from the photo, built, NOT flashed.** Source: `photos/duci.jpg`.
 v0.1.0 drew 2–8 generated rays and a halo ring around the video, without the collage's figures. This version
 rebuilds the collage itself:
 - the measured layout and cut-outs (hands, bust, woman, soldier) and the four paper rays;
@@ -8,6 +8,52 @@ rebuilds the collage itself:
 
 The live camera is printed through the cut-outs. Osc mode substitutes generated shading.
 Working files: `.heirloom_work/rb_radiant/` (`notes.md`, `proto.py`, `mprog.py`, `sheet.png`, `cmp_final.png`).
+
+## K6 camera pass (2026-11-15), v0.5.2
+- **K6 is now Camera** (0..100 %, default 50 %).
+- **Class: the camera IS the picture.** The cut-outs print the camera, so K6 fades that print against the program's own
+  flat paper, rather than adding a gain on top of a drawing.
+- **Law.** shade = 128 + (src − 128) · G, built as G · src + 128 (1 − G).
+  - src is the camera luma, (Y >> 2 − 16) · 17/16, or the Osc blobs.
+  - The result then goes through the usual grain and dither into the zone's 16-step ramp.
+  - G takes four steps, floor((k + 128) / 256): 0, ½, 1 and 2 (2 from k = 640).
+  - It is a 4-way shift-select because LC is tight here. The first build, a 9 × 9 multiply with a continuous
+    G = k / 512, came to 7190 LC (93.6 %) and failed placement. An 8-step shift-select, at 7030 LC, placed on
+    only a few seeds per config.
+  - 0 %: G 0. Flat paper: every figure zone sits on its middle step (the collage's median colour for that zone),
+    with grain.
+  - 25 %: G ½, half contrast.
+  - 50 % (the default): G 1. Exactly the v0.5 print; the camera is tapped one pixel earlier.
+  - 100 %: G 2, ×2 contrast about the middle step. Zones reach their darkest and lightest quantiles, but stay
+    in their own colours, so nothing washes out. A dark camera (the selfie) reads darker and more mottled.
+- **Sims** (NTSC, selfie, `.heirloom_work/rb_radiant/k6/k6sheet.png`, rendered with the shipped build):
+  - 0: flat cut-outs.
+  - 25 %: a soft print.
+  - 50 %: the v0.5 print.
+  - 100 %: a deeper, higher-contrast print.
+  - Osc keeps its blotches, scaled the same way.
+- **How.**
+  - A 2-bit step register is updated one clock after the vblank-zone start, outside the register machine. Each
+    field it moves at most one step toward the knob, and only when the knob is 4 codes past the step boundary.
+    That gives a glide and a ±4 deadband without a glide register.
+  - Stage S4 forms src, with the camera tapped there, one pixel earlier than v0.5. The source's own 0..255 clamp is
+    gone; S6 still clamps the final sum.
+  - Stage S5 is the shift-select G · src (0, src / 2, src, 2 src).
+  - Stage S6 is unchanged in shape: one three-operand add of G · src + grain + (128 (1 − G) + dither). The per-field
+    constant 128 (1 − G) (128, 64, 0, −128) fills the dither nibble's free upper bits, so no adder is needed for it.
+  - The latency is unchanged (16).
+- **Frozen: K3 Stripe at 512** (the photo's white / pink / line mix).
+  - It was the weakest knob: in `sheet.png` its whole travel only re-colours the inside of the four thin rays.
+- **K6's old function, Pulse, moved to K3** with its range and default (25 %). It is the program's only motion.
+  Bare Halo's and Blaze's Pulse values moved with it; Blaze lost its Stripe 800.
+- **Build (v0.5.2, 2026-11-15):** router1 (`SEED=3 .kinetic_work/tools/k6build.sh heirloom radiant`).
+  - Five configs on seed 3. SD Dual is on seed 4: seed 3 stalled router1.
+  - Post-route Fmax: HD Analog 91.56, HD HDMI 89.52, HD Dual 88.95 (worst HD), SD Analog 95.81, SD HDMI 96.65,
+    SD Dual 89.48 MHz.
+  - Fit: 6951–6966 / 7680 LC (91 %), 16 / 32 EBR.
+  - Seeds 1 and 2 fail placement on some configs. A placement-only probe of all six netlists placed them all at
+    seed 3.
+  - Output: `out/rev_b/ron/heirloom/radiant.vmprog`. Not flashed.
 
 ## Reading of the photo (measured)
 The photo is a portrait paper collage, 3196 × 4176 (0.765:1). Measurements below are in page heights H
@@ -102,10 +148,10 @@ The photo is a portrait paper collage, 3196 × 4176 (0.765:1). Measurements belo
 |---|---|---|
 | K1 Halo | the dark red-brown halo disc | radius 50–150 % of the photo's 0.238 H (100 % at 50 %); the thin black rim follows |
 | K2 Lift | the cup of coffee on his head | 0 = sitting on the head (the photo); up to 0.19 H higher, floating up through the halo |
-| K3 Stripe | the rays' stripes | 0 = white strips with a thin pink core and a hairline; 50 % = the photo's mix (pink 0.44, line 0.10 of the half width); 100 % = pink strips with a wide dark line |
+| K3 Pulse | (motion) the rays | (K6 before v0.5.2) the rays breathe in width. Default 25 %: ±12.5 %, 9.3 s period. 100 %: ±50 %, 2.7 s. 0 = still |
 | K4 Tissue | the torn mauve tissue on the maroon paint | 0 = bare two-tone paint; 100 % = dense tissue with light overlaps and stains |
 | K5 Flank | the woman and the soldier at the page edges | 0 = the photo's positions; 100 % = slid out to the frame edges (about 0.49 H each way at 16:9, 0.27 H at 4:3) |
-| K6 Pulse | (motion) the rays | the rays breathe in width. Default 25 %: ±12.5 %, 9.3 s period. 100 %: ±50 %, 2.7 s. 0 = still |
+| K6 Camera | the camera printed through the cut-outs | how strongly the camera (or Osc) shades the figures, in four steps: 0 = flat paper (each zone's middle step), 25 % = half contrast, 50 % = the v0.5 print (default), 100 % = ×2 contrast. See "K6 camera pass" |
 | S7 Lens | the Dominica-flag lens | Flag (the photo) / Clear (the left lens shows an eye like the right) |
 | S8 Cup | the cup | On / Off (the bare head with its grey hair) |
 | S9 Halo | the disc's paper | Dark (the photo's red-brown) / Gold |
@@ -115,6 +161,7 @@ The photo is a portrait paper collage, 3196 × 4176 (0.765:1). Measurements belo
 
 - P12 glides (1/8 of the gap per field).
 - Presets: Duci (the photo), Bare Halo, Blaze, Gold Icon, Wide Stage.
+- Since v0.5.2 the rays' stripe mix (K3 Stripe) is fixed at 50 % (the photo's mix).
 - The control sheet is `.heirloom_work/rb_radiant/sheet.png` (from the proto). Every control changes the
   picture.
 

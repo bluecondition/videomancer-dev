@@ -22,8 +22,10 @@
 --   K2  Small      small diamonds' size
 --   K3  Columns    diamond columns across: x1/3 .. x3 (the H oscillator's rate, about the screen centre)
 --   K4  Drift      bipolar: the blades climb (right) or fall (left) along the trellis; 620 = the default drift
---   K5  Spindles   the blade oscillator's rate against the rows: x1/3 .. x3 (512 = locked, the photo)
---   K6  Rings      0 = hard edges .. 512 = the photo's fringe .. 1023 = four rainbow rings round every diamond
+--   K5  Rings      0 = hard edges .. 512 = the photo's fringe .. 1023 = four rainbow rings round every diamond
+--   K6  Camera     camera (or Osc) strength in the diamonds' fill: 0 = the photo's blue, 256 = the v0.1.0 gain,
+--                  512 = x2 (default), 1023 = x3 with the camera's black point raised (a contrast climax)
+--                  (K6 camera pass: Spindles, the blade oscillator's rate, is fixed at 512 = locked, the photo)
 --   S7  Shape      Diamond / Bulb (both waveforms rounded: lenses)
 --   S8  Cross      Single / Double (a second blade window half a cycle away)
 --   S9  Fill       Flat (the photo's blue, lit by the camera) / Gem (graded toward a pale core)
@@ -37,6 +39,7 @@
 -- avid; output conditioning (Y, U and V through two [1 2 2 2 2 2 2 2 1]/16 boxes with the per-line resync, luma
 -- 13/16) before the blanking gate.  Colours in the hardware convention (u = Cr, v = Cb).
 
+-- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K5 = Rings (was K6); K5 Spindles fixed at 512 (C_KFIX_5).
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -49,6 +52,7 @@ use work.lattice_pkg.all;
 use work.all;
 
 architecture lattice of program_top is
+    constant C_KFIX_5 : std_logic_vector(9 downto 0) := std_logic_vector(to_unsigned(512, 10));   -- K6 camera pass: fixed knob
     constant C_LAT : integer := 20;   -- = processing_delay_clks
 
     -- fitted constants (lattice.py CONSTS)
@@ -129,7 +133,11 @@ architecture lattice of program_top is
     signal s_g1 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
     signal s_g2 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
     signal s_g3 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
-    signal s_g5 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
+    signal s_gc : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);   -- K6 Camera (glided, Q3)
+    signal c_cg : unsigned(7 downto 0) := to_unsigned(144, 8);         -- camera gain, Q8 (72 = the v0.1.0 gain)
+    signal c_cb : unsigned(7 downto 0) := to_unsigned(16, 8);          -- camera black point, (luma >> 2) units
+    signal z_cd : unsigned(9 downto 0) := (others => '0');
+    signal z_chi : std_logic := '0';
     signal s_g6 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
     signal s_gp : unsigned(12 downto 0) := to_unsigned(380 * 8, 13);
     signal s_gm : unsigned(12 downto 0) := (others => '0');
@@ -234,11 +242,11 @@ architecture lattice of program_top is
     signal q3_sig : signed(12 downto 0) := (others => '0');
     signal q4_x   : signed(11 downto 0) := (others => '0');
     signal q4_q   : signed(12 downto 0) := (others => '0');
-    signal q4_lc  : unsigned(5 downto 0) := (others => '0');
+    signal q4_lb  : unsigned(7 downto 0) := (others => '0');
+    signal q5_cm  : unsigned(15 downto 0) := (others => '0');
     signal q5_s   : signed(12 downto 0) := (others => '0');
     signal q5_e   : signed(13 downto 0) := (others => '0');
     signal q5_ri  : unsigned(5 downto 0) := (others => '0');
-    signal q5_lc  : unsigned(5 downto 0) := (others => '0');
     signal q6_side : std_logic := '0';
     signal q6_abs : unsigned(11 downto 0) := (others => '0');
     signal q6_eh  : signed(13 downto 0) := (others => '0');
@@ -386,8 +394,8 @@ begin
                             when 0      => s_gm <= s_g1; s_gr <= unsigned(registers_in(0));
                             when 1      => s_gm <= s_g2; s_gr <= unsigned(registers_in(1));
                             when 2      => s_gm <= s_g3; s_gr <= unsigned(registers_in(2));
-                            when 3      => s_gm <= s_g5; s_gr <= unsigned(registers_in(4));
-                            when 4      => s_gm <= s_g6; s_gr <= unsigned(registers_in(5));
+                            when 3      => s_gm <= s_gc; s_gr <= unsigned(registers_in(5));   -- K6 Camera
+                            when 4      => s_gm <= s_g6; s_gr <= unsigned(registers_in(4));
                             when others => s_gm <= s_gp; s_gr <= unsigned(registers_in(7));
                         end case;
                         z_gp <= "11";
@@ -395,7 +403,8 @@ begin
                         s_gd <= signed(resize(s_gr & "000", 15)) - signed(resize(s_gm, 15));
                         z_gp <= "01";
                     when "01" =>
-                        if s_gd > 16 or s_gd < -16 then
+                        -- +-2 deadband (+-4 on the camera channel)
+                        if (z_gc /= 3 and (s_gd > 16 or s_gd < -16)) or s_gd > 32 or s_gd < -32 then
                             s_gd <= shift_right(s_gd, 3);
                         else
                             s_gd <= (others => '0');
@@ -406,7 +415,7 @@ begin
                             when 0      => s_g1 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                             when 1      => s_g2 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                             when 2      => s_g3 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
-                            when 3      => s_g5 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
+                            when 3      => s_gc <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                             when 4      => s_g6 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                             when others => s_gp <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                         end case;
@@ -463,7 +472,7 @@ begin
                     when 28 => z_e <= resize(shift_right(signed(resize(z_t1 + z_t2, 20)) - 103424, 8), 12);
                     when 29 => r_ex_a <= unsigned(z_e(7 downto 0)); z_sh3 <= z_e(10 downto 8);
                     when 31 => z_m3 <= r_ex_q;
-                    when 32 => z_k <= s_g5(12 downto 3);
+                    when 32 => z_k <= unsigned(C_KFIX_5);
                     when 33 => z_t1 <= shift_left(resize(z_k, 18), 7) + shift_left(resize(z_k, 18), 6);
                                z_t2 <= shift_left(resize(z_k, 18), 3) + shift_left(resize(z_k, 18), 1);
                     when 34 => z_e <= resize(shift_right(signed(resize(z_t1 + z_t2, 20)) - 103424, 8), 12);
@@ -496,6 +505,22 @@ begin
                             c_w2 <= to_unsigned(3044, 12);
                         else
                             c_w2 <= to_unsigned(3044, 12) - shift_left(resize(v_p - 380, 12), 2) - resize(shift_right(v_p - 380, 5), 12);
+                        end if;
+                    -- K6 Camera: gain G (Q8) = k * 9 / 32 up to 512 (72 at 256 = the v0.1.0 gain, 144 at 512);
+                    -- above 512, G -> 216 (x3) and the camera's black point rises 16 -> 55 (Osc unaffected)
+                    when 43 =>
+                        if s_gc(12 downto 3) > 512 then
+                            z_chi <= '1'; z_cd <= s_gc(12 downto 3) - 512;
+                        else
+                            z_chi <= '0'; z_cd <= s_gc(12 downto 3);
+                        end if;
+                    when 44 =>
+                        if z_chi = '1' then
+                            c_cg <= 144 + resize(shift_right(z_cd, 3), 8) + resize(shift_right(z_cd, 6), 8);
+                            c_cb <= 16 + resize(shift_right(z_cd, 4), 8) + resize(shift_right(z_cd, 6), 8);
+                        else
+                            c_cg <= resize(shift_right(shift_left(resize(z_cd, 14), 3) + resize(z_cd, 14), 5), 8);
+                            c_cb <= to_unsigned(16, 8);
                         end if;
                     -- products
                     when 82  =>                       -- stepv = 17768 * m3 >> (15 - sh3), sh3 = -2 .. 1
@@ -608,7 +633,7 @@ begin
             if s_src = '1' then s_lb_wd <= std_logic_vector(s_osum);
             else
                 v_l := unsigned(data_in.y(9 downto 2));
-                if v_l > 16 then s_lb_wd <= std_logic_vector(v_l - 16); else s_lb_wd <= (others => '0'); end if;
+                if v_l > c_cb then s_lb_wd <= std_logic_vector(v_l - c_cb); else s_lb_wd <= (others => '0'); end if;
             end if;
             if data_in.avid = '1' then s_wcol <= s_wcol + 1; else s_wcol <= (others => '0'); end if;
         end if;
@@ -755,8 +780,6 @@ begin
     ---------------------------------------------------------------------------
     p_pix : process(clk)
         variable v_p10 : unsigned(9 downto 0);
-        variable v_lb  : unsigned(7 downto 0);
-        variable v_lc  : unsigned(6 downto 0);
         variable v_r   : signed(12 downto 0);
         variable v_jj  : signed(24 downto 0);
         variable v_g   : unsigned(13 downto 0);
@@ -779,12 +802,10 @@ begin
             -- 3: trellis sum (X ROM reads)
             q3_sig <= resize(q2_tx, 13) + resize(l_ty, 13);
             q3_sgn <= q2_sgn;
-            -- 4: X (fabric copy), signed trellis q, camera luma -> fill index
+            -- 4: X (fabric copy), signed trellis q, camera luma (fabric copy)
             q4_x <= r_xq;
             if q3_sgn = '1' then q4_q <= q3_sig; else q4_q <= -q3_sig; end if;
-            v_lb := unsigned(s_lb_q);
-            v_lc := resize(shift_right(v_lb, 2), 7) + resize(shift_right(v_lb, 5), 7);
-            if v_lc > 63 then q4_lc <= (others => '1'); else q4_lc <= v_lc(5 downto 0); end if;
+            q4_lb <= unsigned(s_lb_q);
             -- 5: s = X + Y, blade offset, ground index
             q5_s <= resize(q4_x, 13) + l_y;
             q5_e <= resize(q4_q, 14) + 42;
@@ -792,13 +813,14 @@ begin
             if v_r < 0 then q5_ri <= (others => '0');
             elsif v_r > 63 then q5_ri <= (others => '1');
             else q5_ri <= unsigned(v_r(5 downto 0)); end if;
-            q5_lc <= q4_lc;
+            q5_cm <= q4_lb * c_cg;                                   -- K6 camera gain (Q8)
             -- 6: side, |s|, blade position e + hq
             q6_side <= not q5_s(12);
             v_ab := abs(q5_s);
             q6_abs <= unsigned(v_ab(11 downto 0));
             q6_eh <= q5_e + signed(resize(l_hq, 14));
-            q6_ri <= q5_ri; q6_lc <= q5_lc;
+            q6_ri <= q5_ri;
+            if q5_cm(15 downto 14) /= "00" then q6_lc <= (others => '1'); else q6_lc <= q5_cm(13 downto 8); end if;
             -- 7: a = |s| + size offset of the side; in-blade test; blade index partials
             if q6_side = '1' then q7_a <= signed(resize(q6_abs, 14)) + resize(c_offb, 14);
             else q7_a <= signed(resize(q6_abs, 14)) + resize(c_offs, 14); end if;

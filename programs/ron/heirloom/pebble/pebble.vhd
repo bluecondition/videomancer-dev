@@ -18,10 +18,12 @@
 --
 --   K1  Ripples   ring count x1/4 .. x4 (512 = the photo)
 --   K2  Bend      the ripples' bow, bipolar: ")" .. straight (512) .. "(" (671 = the photo) .. folded loops
---   K3  Origin    the ramp origin (the drop point): far left .. the photo (512) .. mid screen (800) .. right
+--   K3  Rows      height of the dotted rows: 8 .. 64 (512, the photo) .. 512 lines
 --   K4  Speed     bipolar: the bulge scrolls down (+) / up (-); 682 = the clip's 75 lines/s; the figure flows
 --   K5  Inlay     width of the window at each ripple's crest: none .. the photo (512) .. nearly the whole ring
---   K6  Rows      height of the dotted rows: 8 .. 64 (512, the photo) .. 512 lines
+--   K6  Camera    camera (or Osc) strength into all three patch points (ripple phase, figure palette, crown
+--                 drip): 0 = none, 256 = the v0.1.0 gain, 512 = x2 (default), 1023 = x4
+--                 (K6 camera pass: Origin, the ramp origin, is fixed at 512 = the photo)
 --   S7  Twin      the ripples mirrored about the screen centre
 --   S8  Palette   Fire (the photo) / Ice (Cb <-> Cr: blue ripples, cyan crests, red figure)
 --   S9  Weave     the B rows shifted half a ripple (a brick / checker weave)
@@ -36,6 +38,7 @@
 -- through two [1 2 2 2 2 2 2 2 1]/16 boxes with the running-sum resync, luma 13/16) before the blanking gate.
 -- Colours in the hardware convention (u = Cr, v = Cb).
 
+-- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K3 = Rows (was K6); K3 Origin fixed at 512 (C_KFIX_3).
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -48,6 +51,7 @@ use work.pebble_pkg.all;
 use work.all;
 
 architecture pebble of program_top is
+    constant C_KFIX_3 : std_logic_vector(9 downto 0) := std_logic_vector(to_unsigned(512, 10));   -- K6 camera pass: fixed knob
     constant C_LAT : integer := 20;   -- = processing_delay_clks
 
     constant C_A0   : integer := 21935;      -- ring gain a per half virtual px (2^24 per ring) at K1 = 512
@@ -135,7 +139,8 @@ architecture pebble of program_top is
     -- knobs: glided (Q3), raw speed, switches
     signal s_g1 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
     signal s_g2 : unsigned(12 downto 0) := to_unsigned(671 * 8, 13);
-    signal s_g3 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
+    signal s_gc : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);   -- K6 Camera (glided, Q3)
+    signal c_cg : unsigned(7 downto 0) := to_unsigned(128, 8);         -- camera gain, Q6 (64 = the v0.1.0 gain)
     signal s_g5 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
     signal s_g6 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
     signal s_gp : unsigned(12 downto 0) := to_unsigned(314 * 8, 13);
@@ -237,16 +242,14 @@ architecture pebble of program_top is
     signal p2_mh  : signed(11 downto 0) := (others => '0');
     signal p2_u, p3_u, p4_u, p5_u : unsigned(23 downto 0) := (others => '0');
     signal p3_m, p4_m : unsigned(9 downto 0) := (others => '0');
-    signal p3_s, p4_s : unsigned(7 downto 0) := (others => '0');
+    signal p3_s   : unsigned(7 downto 0) := (others => '0');
+    signal p4_sg  : unsigned(15 downto 0) := (others => '0');
     signal p4_m1a, p4_m1b, p4_m2a, p4_m2b, p4_mca, p4_mcb : unsigned(15 downto 0) := (others => '0');
     signal p4_maa, p4_mab : unsigned(10 downto 0) := (others => '0');
-    signal p4_s3a : unsigned(9 downto 0) := (others => '0');
-    signal p4_s7a, p4_s7b : unsigned(14 downto 0) := (others => '0');
-    signal p4_ue  : unsigned(23 downto 0) := (others => '0');
     signal p5_m1, p5_m2, p5_mc : unsigned(15 downto 0) := (others => '0');
     signal p5_ma  : unsigned(10 downto 0) := (others => '0');
     signal p5_s35 : unsigned(9 downto 0) := (others => '0');
-    signal p5_s75 : unsigned(14 downto 0) := (others => '0');
+    signal p5_s72 : unsigned(16 downto 0) := (others => '0');
     signal p5_ue  : unsigned(23 downto 0) := (others => '0');
     signal p6_uf  : unsigned(23 downto 0) := (others => '0');
     signal p6_t1, p6_ph2, p6_fc : unsigned(15 downto 0) := (others => '0');
@@ -416,9 +419,9 @@ begin
                         case to_integer(z_gc) is
                             when 0      => s_gm <= s_g1; s_gr <= unsigned(registers_in(0));
                             when 1      => s_gm <= s_g2; s_gr <= unsigned(registers_in(1));
-                            when 2      => s_gm <= s_g3; s_gr <= unsigned(registers_in(2));
+                            when 2      => s_gm <= s_gc; s_gr <= unsigned(registers_in(5));   -- K6 Camera
                             when 3      => s_gm <= s_g5; s_gr <= unsigned(registers_in(4));
-                            when 4      => s_gm <= s_g6; s_gr <= unsigned(registers_in(5));
+                            when 4      => s_gm <= s_g6; s_gr <= unsigned(registers_in(2));
                             when others => s_gm <= s_gp; s_gr <= unsigned(registers_in(7));
                         end case;
                         z_gp <= "11";
@@ -426,7 +429,8 @@ begin
                         s_gd <= signed(resize(s_gr & "000", 15)) - signed(resize(s_gm, 15));
                         z_gp <= "01";
                     when "01" =>
-                        if s_gd > 16 or s_gd < -16 then
+                        -- +-2 deadband (+-4 on the camera channel)
+                        if (z_gc /= 2 and (s_gd > 16 or s_gd < -16)) or s_gd > 32 or s_gd < -32 then
                             s_gd <= shift_right(s_gd, 3);
                         else
                             s_gd <= (others => '0');
@@ -436,7 +440,7 @@ begin
                         case to_integer(z_gc) is
                             when 0      => s_g1 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                             when 1      => s_g2 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
-                            when 2      => s_g3 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
+                            when 2      => s_gc <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                             when 3      => s_g5 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                             when 4      => s_g6 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                             when others => s_gp <= unsigned(signed(s_gm) + s_gd(12 downto 0));
@@ -505,6 +509,7 @@ begin
                         if v_k >= 520 then z_d <= resize(v_k - 520, 9); c_bneg <= '0';
                         elsif v_k <= 504 then z_d <= resize(504 - v_k, 9); c_bneg <= '1';
                         else z_d <= (others => '0'); c_bneg <= '0'; end if;
+                    when 41 => c_cg <= resize(shift_right(s_gc(12 downto 3), 2), 8);   -- K6 Camera: G = k / 4 (Q6)
                     when 42 => z_mt <= r_ex_q;
                     when 93 =>                       -- a = 21935 mt >> (15 - sh), sh = -2 .. 1
                         case to_integer(z_sh) is
@@ -555,7 +560,7 @@ begin
                                  + resize(c_va(10 downto 7), 9);
                         if c_hwa > 7176 then c_hwb <= c_hwa - 7176; else c_hwb <= (others => '0'); end if;
                         -- ramp origin Xc = -386 + 8 (k3 - 512) h; dx0 = x0 - Xc
-                        v_x := signed(resize(s_x0, 15)) + 386 - shift_left(signed(resize(s_g3(12 downto 3), 15)) - 512, 3);
+                        v_x := signed(resize(s_x0, 15)) + 386 - shift_left(signed(resize(unsigned(C_KFIX_3), 15)) - 512, 3);
                         c_dx0 <= v_x(13 downto 0);
                         if s_xs = 4 then
                             c_ca0 <= to_unsigned(390, 11); c_cb0 <= to_unsigned(438, 11);
@@ -823,6 +828,8 @@ begin
         variable v_t18 : unsigned(17 downto 0);
         variable v_m  : unsigned(15 downto 0);
         variable v_s  : unsigned(14 downto 0);
+        variable v_g  : unsigned(9 downto 0);
+        variable v_s12 : unsigned(11 downto 0);
     begin
         if rising_edge(clk) then
             -- 2: offset from the figure axis (h)
@@ -835,7 +842,7 @@ begin
             p3_s <= unsigned(s_lb_q);
             p3_u <= p2_u;
             q_isb(3) <= q_isb(2);
-            -- 4: the m and source products, first halves (shift-adds); side flags
+            -- 4: the m products, first halves (shift-adds); the K6 camera gain; side flags
             v_m := resize(p3_m, 16);
             p4_m1a <= shift_left(v_m, 8) - shift_left(v_m, 5);                    -- m 218 = 256 - 32
             p4_m1b <= shift_left(v_m, 2) + shift_left(v_m, 1);                    --          - (4 + 2)
@@ -845,11 +852,8 @@ begin
             p4_mcb <= shift_left(v_m, 4) + shift_left(v_m, 3) + shift_left(v_m, 1); --        + 16 + 8 + 2
             p4_maa <= resize(p3_m, 11) + resize(p3_m(9 downto 3), 11);           -- m 1.1953 = 1 + 1/8
             p4_mab <= resize(p3_m(9 downto 4), 11) + resize(p3_m(9 downto 7), 11); --          + 1/16 + 1/128
-            p4_s3a <= shift_left(resize(p3_s, 10), 1) + resize(p3_s, 10);         -- s 3.5 = 3 s + s / 2
-            p4_s7a <= shift_left(resize(p3_s, 15), 6) + shift_left(resize(p3_s, 15), 3);   -- s 75 = 64 + 8
-            p4_s7b <= shift_left(resize(p3_s, 15), 1) + resize(p3_s, 15);         --        + 2 + 1
-            p4_ue <= shift_left(resize(p3_s, 24), 12) + shift_left(resize(p3_s, 24), 11);  -- s 6144
-            p4_s <= p3_s; p4_m <= p3_m; p4_u <= p3_u;
+            p4_sg <= p3_s * c_cg;                                                  -- s' = s G >> 6 (0 .. 1016)
+            p4_m <= p3_m; p4_u <= p3_u;
             if p3_m >= l_si then q_out(4) <= '1'; else q_out(4) <= '0'; end if;
             if p3_m < l_se then q_ine(4) <= '1'; else q_ine(4) <= '0'; end if;
             if p3_m >= l_sc then q_msd(4) <= '1'; else q_msd(4) <= '0'; end if;
@@ -859,9 +863,11 @@ begin
             p5_m2 <= p4_m2a + p4_m2b;
             p5_mc <= p4_mca + p4_mcb;
             p5_ma <= p4_maa + p4_mab;
-            p5_s35 <= p4_s3a + resize(p4_s(7 downto 1), 10);
-            p5_s75 <= p4_s7a + p4_s7b;
-            p5_ue <= p4_ue;
+            v_g := p4_sg(15 downto 6);
+            v_s12 := shift_left(resize(v_g, 12), 2) - resize(v_g(9 downto 1), 12);   -- s' 3.5 (mod 1024: a palette cycle)
+            p5_s35 <= v_s12(9 downto 0);
+            p5_s72 <= shift_left(resize(v_g, 17), 6) + shift_left(resize(v_g, 17), 3);   -- s' 72 (crown drip)
+            p5_ue <= shift_left(resize(v_g, 24), 12) + shift_left(resize(v_g, 24), 11);  -- s' 6144 (ripple phase)
             p5_u <= p4_u;
             q_isb(5) <= q_isb(4);
             q_out(5) <= q_out(4); q_ine(5) <= q_ine(4); q_msd(5) <= q_msd(4);
@@ -872,7 +878,7 @@ begin
             p6_fc <= p5_mc - 35625;
             p6_pp <= l_pl - p5_ma(9 downto 0);
             p6_s35 <= p5_s35;
-            p6_dd <= resize(l_dl, 13) + signed(resize(p5_s75(14 downto 8), 13));
+            p6_dd <= resize(l_dl, 13) + signed(resize(p5_s72(16 downto 8), 13));
             q_isb(6) <= q_isb(5);
             q_out(6) <= q_out(5); q_ine(6) <= q_ine(5); q_msd(6) <= q_msd(5);
             -- 7: window distances, fire address, triangle 2, crown address
