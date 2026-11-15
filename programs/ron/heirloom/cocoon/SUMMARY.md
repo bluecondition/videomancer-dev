@@ -110,13 +110,13 @@ Working files are in `.heirloom_work/rb_cocoon/`:
 | K2 Rows | the dash rows: pitch 48..10 lines (22 lines = the photo at 56 %) |
 | K3 Arcs | the wing arcs: spacing 90..12 F-units (30 = the photo at 56 %) |
 | K4 Glow | the red box and its glow, and the arcs' hold on the weave. 0 %: the box shows the camera (flank palette); 25 %: black; 50 %: the glow fully in; 67 %: the photo; 100 %: red floods. The glow scale runs 1.6..0.7 over the whole travel (1.0 at 67 %). The arc -> weave modulation is a cube law, none below 40 %, a little at the photo (+-34), full at 100 % (+-127: rows ripple half a row, dashes swell solid / vanish) |
-| K5 Tear | the band's torn video (held offsets σ 0..40 px, runs of 2..11 lines, 1 run in 5 ×4) and the texture's line jitter (σ 0..7 px); 50 % = the photo |
-| K6 Speed | bipolar, still within ±8 of the centre: dashes and zigzag slide, rows scroll, arcs stream out of the core; the default is +33 % |
+| K5 Speed | (was K6, v0.6.2) bipolar, still within ±8 of the centre: dashes and zigzag slide, rows scroll, arcs stream out of the core; the default is +33 % |
+| K6 Camera | (v0.6.2) the camera's strength: one gain on the source luma (camera or Osc), 0 % = a black input (navy flanks, the band all weave), 25 % = half-strength video and v0.6.1's bend slope, 50 % = the photo's video and twice that bend, 100 % = ×1.44 (light-grey flanks, more video in the band, the cocoon carved by the picture). The same gained luma always bends the cocoon's field (0 at black) |
 | S7 Mirror | the cocoon points right; the camera is not mirrored |
 | S8 Palette | Fire (the photo), or Ice: U and V exchanged on the generated colours, giving a cyan-blue cocoon in a dark maroon glow |
-| S9 Band | Solid (the photo) / Slats: only the core half of each weave row is band, so the cocoon, glow and flank video show between the slats; the slats follow the rows (K2 pitch, K6 scroll, the arc ripple) |
+| S9 Band | Solid (the photo) / Slats: only the core half of each weave row is band, so the cocoon, glow and flank video show between the slats; the slats follow the rows (K2 pitch, K5 scroll, the arc ripple) |
 | S10 Source | Video / Osc |
-| S11 Bend | the source luma bends the cocoon's field |
+| S11 Tear | (v0.6.2, was Bend) Photo / Shred: the band's torn video (held offsets σ 0..40 px, runs of 2..11 lines, 1 run in 5 ×4) and the texture's line jitter (σ 0..7 px) at the photo's level (the old K5 Tear at 50 %) or at the old K5's maximum; Shred cuts in at once, Photo glides back |
 | P12 Cocoon | the cocoon's size s and the band, glided 1/8 per field: 0 % a seed and no band, 50 % the photo, 100 % the cocoon bursts and the band fills the screen. The band's half-height is 0..247 lines over 0..50 % and follows s above (to 543) |
 
 ## Video
@@ -124,7 +124,7 @@ Working files are in `.heirloom_work/rb_cocoon/`:
   - Its luma is posterized into the photo's two palettes: grey, olive and navy outside the band;
     green, pink and orange, torn, inside it.
   - In the band it is keyed over the weave by brightness, more strongly toward the ends.
-  - With S11 Bend on, it also warps the cocoon.
+  - It also warps the cocoon, at the K6 Camera strength (v0.6.2; it was the S11 Bend switch).
 - **Osc.** Three folded triangle oscillators replace the camera:
   - one horizontal, with a vertical wobble;
   - one vertical, with a horizontal wobble;
@@ -211,6 +211,32 @@ What changed:
   vyf < 64 (the core half of each weave row), so the slats follow the rows' zigzag, pitch (K2),
   scroll (K6) and the arc ripple (K4). The colourizer bank and the weave gate follow the pixel
   test. The band's torn read and edge rules stay per line.
+
+## K6 camera pass (2026-11-15)
+v0.6.2 (Ron's rule: K6 is the camera strength in every Heirloom / Kinetic / Patchbay program, default 50 %).
+- **K6 Camera** is one gain g on the source luma, camera or Osc, applied after the S10 source select in a
+  stage of its own (L x g / 16, an 8 x 5 multiply on a free-running luma chain, so the gained luma reaches
+  S7 two pixels late: a 2 px shift, invisible). Everything the source drives follows it: the flank and band
+  posterize, the band's video key and the cocoon's bend.
+- **Law** (per field from the glided K6, ±4 deadband, 1/8 ease, rails snap): g = K6 / 32 below 50 %,
+  16 + (K6 − 512) / 64 above (g in 1/16, 0 .. 23).
+  - 0 %: g = 0, exactly a black input (navy flanks, the band all weave, no bend).
+  - 25 %: g = 0.5; the bend has v0.6.1's slope (3/8 of the luma).
+  - 50 % (default): g = 1, the photo's flank and band video; the bend at twice v0.6.1's slope (3/4).
+  - 100 %: g = 1.44; flanks go mostly light grey, more video keys into the band, the cocoon's wings are
+    carved by the picture (bend slope 1.08).
+  The video side follows the "camera is the picture" rule (50 % = the shipped look), the bend the "luma bends
+  the drawing" rule (25 % = the shipped slope). The bend is now unipolar, 0 at black (v0.6.1 bent ±48 about
+  mid grey), so a black or missing camera leaves the cocoon unbent at every K6.
+- **S11 Bend → Tear.** The bend is always on at the K6 strength, so its switch was free. K5 Tear (the weakest
+  knob: it only changes the band's tear and the texture jitter, `sheet.png`) is frozen at the photo (512); S11
+  Tear Photo / Shred sends 512 or 1023 into Tear's glide channel, so the old K5 maximum stays one flip away.
+- **K6's old function, Speed, moved to K5** (bipolar, default 680). K5 Tear's knob value is gone from the presets;
+  Hatch and Bent Video now use S11 Shred, Bent Video also K6 = 100 %.
+- Sheet: `.heirloom_work/rb_cocoon/k6/k6sheet.png` (selfie, 720p60 / 2: K6 0, 256, 512, 1023, Osc at 512).
+- **Build** (router1, `.kinetic_work/tools/k6build.sh`): 7484–7516 / 7680 LC (97.9 %, +~110), 21 / 32 EBR.
+  Post-route Fmax: HD Analog s1 81.77, SD Analog s1 86.50, HD HDMI s1 80.37, **SD HDMI s3** 79.37, HD Dual s1
+  88.69, **SD Dual s2** 86.33 MHz. `out/rev_b/ron/heirloom/cocoon.vmprog`. Not flashed.
 
 ## Status
 - **v0.6.1 built 2026-11-01: output-filter resync fix, NOT flashed.** The output running-sum filters now take neutral input off the generated avid and snap back to neutral once the box is full of blank samples, so a glitched block-RAM / clock sample can no longer leave a permanent wrapped colour offset (fern_diag hardware capture 2026-11-01). Built with ROUTER1: router2 missed HD HDMI on seeds 1-5 and stalled on 6. Post-route Fmax: HD Analog s1 84.80, SD Analog s1 87.40, HD HDMI s2 86.03, SD HDMI s2 85.15, HD Dual s1 91.69, SD Dual s1 84.60 MHz; 7364-7410 / 7680 LC. Earlier hand-installed HD seeds are gone (new netlist).

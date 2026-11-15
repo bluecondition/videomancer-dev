@@ -7,7 +7,7 @@
 processing_delay_clks = 24
 program_id = "com.czartroniks.cocoon"
 program_name = "Cocoon"
-program_version = "0.6.1"
+program_version = "0.6.2"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -59,16 +59,6 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
-name_label = "Tear"
-control_mode = "linear"
-display_min_value = 0
-display_max_value = 100
-initial_value = 512
-display_float_digits = 0
-suffix_label = "%"
-
-[[parameter]]
-parameter_id = "rotary_potentiometer_6"
 name_label = "Speed"
 control_mode = "linear"
 display_min_value = -100
@@ -76,6 +66,16 @@ display_max_value = 100
 initial_value = 680
 display_float_digits = 0
 suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Camera"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
@@ -103,9 +103,9 @@ initial_value_label = "Video"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
-name_label = "Bend"
-value_labels = ["Off", "On"]
-initial_value_label = "Off"
+name_label = "Tear"
+value_labels = ["Photo", "Shred"]
+initial_value_label = "Photo"
 
 [[parameter]]
 parameter_id = "linear_potentiometer_12"
@@ -128,7 +128,7 @@ rotary_potentiometer_4 = 400
 [[preset]]
 name = "Hatch"
 linear_potentiometer_12 = 1023
-rotary_potentiometer_5 = 760
+toggle_switch_11 = 1
 
 [[preset]]
 name = "Ice Mirror"
@@ -144,7 +144,7 @@ linear_potentiometer_12 = 640
 name = "Slats"
 toggle_switch_9 = 1
 rotary_potentiometer_4 = 1023
-rotary_potentiometer_6 = 760
+rotary_potentiometer_5 = 760
 
 [[preset]]
 name = "Osc Weave"
@@ -155,5 +155,5 @@ rotary_potentiometer_2 = 400
 [[preset]]
 name = "Bent Video"
 toggle_switch_11 = 1
-rotary_potentiometer_5 = 760
 rotary_potentiometer_3 = 760
+rotary_potentiometer_6 = 1023

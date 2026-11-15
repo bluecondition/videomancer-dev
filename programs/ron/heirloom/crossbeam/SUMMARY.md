@@ -117,10 +117,10 @@ Measured in `.heirloom_work/rb_crossbeam/` (`m1`–`m14.py`, `st.py`, `integ2.py
 |---|---|---|
 | K1 Angle | the beam's arms | arm slope s 0.02–0.77; 0.232 = the photo (default 289) |
 | K2 Rows | the bar rows, one by one | bipolar, centre = the photo (512). Left **Scatter**: each row its own height (×0.26..×3.5 from a per-row table). Right **Lens**: rows swell at the beam's crossing line and thin away from it |
-| K3 Warp | the zebra / ramp lookup | 0 = the photo (default). One wave in quadrature ripples the lookup up to 255 px across and 8 table rows down; it travels with K4 |
+| K3 Columns | the bar blocks, row by row | (was K6, v0.6.1) bipolar, centre = the photo (512). Left **Scatter**: each row its own block size. Right **Lens**: blocks swell around the beam line, the grid bulges (the scale changes per line, about the screen centre) |
 | K4 Flow | the zebra contours, the bar rows, the warp | bipolar, still in the centre ±8, square law. The contours stream up to ±4 stripes/s, the bars roll a quarter as fast, the warp wave travels. Default 680 = the photo's 0.4 stripes/s and 0.1 rows/s |
 | K5 Swing | the beam | bipolar, still in the centre ±8 (the photo, default 512). Right: the arms scissor (slope swings about K1, depth and rate up to ±503 knob units at 0.7 Hz). Left: the cross travels up through its period (to ~0.6 periods/s, square law) |
-| K6 Columns | the bar blocks, row by row | bipolar, centre = the photo (512). Left **Scatter**: each row its own block size. Right **Lens**: blocks swell around the beam line, the grid bulges (the scale changes per line, about the screen centre) |
+| K6 Camera | the camera (or Osc) term | (v0.6.1) the camera's strength: one gain on the source luma before the slew. 0 % = none (the photo), 25 % = v0.6.0's fixed gain (up to one stripe of contour bend), 50 % = ×2 (the default), 100 % = ×4. It bends the zebra contours and blooms the beam. K3 Warp (the old K3) is fixed at 0, the photo |
 | S7 Bars | the colour bars | On (default) / Off: the beam over the zebra field alone |
 | S8 Tear | the torn rows | Still (default, the photo's tear: the 376 px row shifts, the per-row zebra tears, ±1–2 px jitter) / Slip: each row slides at its own speed (−3..+3 × 1.5 px per field) and the zebra row tears swing 0..127 px |
 | S9 Stack | the second cross | Off (the photo: period 731 lines) / On: half the period, three crosses stacked |
@@ -132,10 +132,10 @@ K1, K2, K3, K6 and P12 glide (1/8 of the gap per field, ±4 deadband).
 
 ## Video
 The photo is synthetic, so the camera is woven into the patch rather than replacing a layer:
-- **Contours.** The camera's luma, slewed horizontally like an analog low-pass (s += y − s/8), is added to the zebra phase, up to one stripe. The zebra contours bend around the picture.
+- **Contours.** The camera's luma, scaled by K6 and slewed horizontally like an analog low-pass (s += y − s/8), is added to the zebra phase: up to one stripe at K6 25 %, two at the default, four at 100 %. The zebra contours bend around the picture.
 - **Bloom.** The same luma blooms the beam (log + up to ×1.37). The cross spreads into the bars where the picture is bright.
 - **Black camera.** Video mode with a black camera is exactly the photo.
-- **Osc mode** uses the stored contour field (the photo's own) with no camera term. Every control stays live in both modes.
+- **Osc mode** (v0.6.1) replaces the camera with a drifting diagonal triangle oscillator (512 virtual px, mirrored about the cross line by |dy|, moving with the K4 flow) through the same K6 gain, slew, contour bend and bloom. Before v0.6.1 Osc had no camera term at all, which would have left K6 dead in Osc mode. Every control stays live in both modes; K6 = 0 is the photo in both.
 
 ## Engine
 - **Per-field sequencer.** One serial shift-add multiplier (20 × 20), slots of 32 clocks in the vblank zone. It computes:
@@ -178,6 +178,34 @@ The photo is synthetic, so the camera is woven into the patch rather than replac
   - engines started per field and per line;
   - every RAM collision-free with `no_rw_check` (0 emulated transparency);
   - no self-add carries (checked with dupin).
+
+## K6 camera pass (2026-11-15)
+v0.6.1 (Ron's rule: K6 is the camera strength in every Heirloom / Kinetic / Patchbay program, default 50 %).
+- **K6 Camera** is one gain g on the source luma (the camera above black ×0.293, or the new Osc), in a stage
+  of its own before the horizontal slew (an 8 x 6 multiply on the source side; the slew register grew to 13
+  bits, the bloom index clamps at its top entry). It scales both camera terms: the contour bend (the slewed
+  luma added to the stripe phase) and the beam bloom.
+- **Law** (per field from the glided K6, ±4 deadband, 1/8 ease, rails exact): g = K6 / 16 (in 1/16, 0 .. 63).
+  - 0 %: no camera term, the photo (a black camera, or Osc at 0).
+  - 25 %: g = 1, v0.6.0's fixed gain: up to one stripe of bend.
+  - 50 % (default): ×2, up to two stripes. The contours bend harder and the brightest busy areas start to
+    break into islands, but the stripes still read (`zebra_crop.png`), so the full ×2 was kept.
+  - 100 %: ×4: the zebra is carved into fragments wherever the picture is busy, and the beam's bloom
+    saturates over bright areas; the bars and the X still read.
+- **K3 Warp frozen at 0** (the photo), the weakest knob (`p2/sheet_c.png`: 512 hardly differs from the default,
+  1023 only ripples the contours). Its glide channel now glides K6; the warp amplitudes are constant 0.
+  **K6's old function, Columns, moved to K3** (bipolar Scatter / Lens, default 512). Presets: Lens, Mosaic and
+  Scissors moved their Columns value to K3; Liquid and Ghost lost their warp values, and Liquid now sets
+  K6 = 900 (camera bend in place of the warp).
+- **Osc gained a source.** v0.6.0's Osc had no camera term (the photo's own contour field), so K6 would have
+  done nothing in Osc mode. Osc now feeds a diagonal triangle oscillator (512 virtual px, mirrored about the
+  cross line by |dy|, drifting with the K4 flow on the old warp phase) through the same gain, slew, bend and
+  bloom. The photo is K6 = 0 in both modes.
+- Sheet: `.heirloom_work/rb_crossbeam/k6/k6sheet.png` (selfie, 720p60 / 2: K6 0, 256, 512, 1023, Osc at 512).
+  The decimated sim shows the top-left quarter of the picture (the virtual coordinates come from the timing ID).
+- **Build** (router1, `.kinetic_work/tools/k6build.sh`): all six configs seed 1. 7118–7134 / 7680 LC (93 %,
+  +~160), 23 / 32 EBR. Post-route Fmax: HD Analog 94.48, SD Analog 87.80, HD HDMI 88.44, SD HDMI 88.45,
+  HD Dual 82.01, SD Dual 89.61 MHz. `out/rev_b/ron/heirloom/crossbeam.vmprog`. Not flashed.
 
 ## Status
 - **v0.6.0 built 2026-11-01, not flashed. ROUTER1** (`NEXTPNR_ROUTER="--router router1" ./build_heirloom.sh crossbeam`); every

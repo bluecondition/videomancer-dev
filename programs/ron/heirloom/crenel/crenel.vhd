@@ -17,12 +17,14 @@
 --   K1  Crenels  crosses per tile 1 .. 6 (3 = the photo); every crenel-locked row follows
 --   K2  Dome     the blue camera dome's radius: a small ball .. the photo's cap (R 458) .. a flat
 --                band filling the row (R 24 .. 2068 px, quadratic)
---   K3  Echo     feedback echoes left of every tooth: none .. strong and wide (square law)
+--   K3  Palette  Photo / Ember / Jade / Rust
 --   K4  Drift    bipolar (still in the centre): every band slides along the line at its own rate
 --                and direction (crenels x1, dome x-1, V's x2, blocks x-1.5, arcs x3, dashes
 --                x-2.5, lower teeth x1.5, arch x-0.5, pink blocks x0.5, floor x-3)
 --   K5  Ripples  soft-key width of the camera blobs: hard flat blobs .. wide rippled flanks
---   K6  Palette  Photo / Ember / Jade / Rust
+--   K6  Camera   the camera's strength: one gain on the source (camera luma or Osc) before the
+--                line buffer, 0 = a black input (the camera areas go to the navy ground) .. 50 %
+--                = the photo .. 100 % x1.44 (brighter, wider blobs)
 --   S7  Swap     the pink shapes print the camera, the camera areas turn pink
 --   S8  Outline  pink shapes reduced to their ridges and rims
 --   S9  Mirror   every other tile mirrored
@@ -38,6 +40,8 @@
 -- before the blanking gate.  Latency 24 clocks in every mode.  Colours in the hardware
 -- convention (u = Cr, v = Cb), see crenel.py.
 
+-- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K3 = Palette (was K6); K3 Echo fixed at 460 (C_KFIX_3).
+-- The K3 glide channel now glides K6; the echo gain is the constant C_EGL(460 / 32).
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -50,6 +54,7 @@ use work.crenel_pkg.all;
 use work.all;
 
 architecture crenel of program_top is
+    constant C_KFIX_3 : std_logic_vector(9 downto 0) := std_logic_vector(to_unsigned(460, 10));   -- K6 camera pass: fixed knob
     constant C_LAT : integer := 24;   -- matches processing_delay_clks
 
     constant C_INCC : integer := 17119;          -- 2^24 / 980, the FM centre
@@ -142,9 +147,9 @@ architecture crenel of program_top is
     signal s_avq : std_logic := '0';
     signal s_hcnt, s_wmax, s_w : unsigned(11 downto 0) := to_unsigned(1920, 12);
 
-    -- controls (glided K1 K2 K3 K5 P12, Q.3)
+    -- controls (glided K1 K2 K6 K5 P12, Q.3)
     type t_g is array(0 to 4) of unsigned(12 downto 0);
-    signal s_g : t_g := (to_unsigned(410 * 8, 13), to_unsigned(341 * 8, 13), to_unsigned(460 * 8, 13),
+    signal s_g : t_g := (to_unsigned(410 * 8, 13), to_unsigned(341 * 8, 13), to_unsigned(512 * 8, 13),
                          to_unsigned(512 * 8, 13), to_unsigned(410 * 8, 13));
     signal gl_k, gl_o, gl_n : unsigned(12 downto 0) := (others => '0');
     signal gl_d : signed(13 downto 0) := (others => '0');
@@ -328,6 +333,11 @@ architecture crenel of program_top is
     signal w1_we, w2_we, w3_we, w1_b, w2_b, w3_b, w2_osc : std_logic := '0';
     signal w2_pa : unsigned(15 downto 0) := (others => '0');
     signal w1_l, w2_l, w3_d : unsigned(7 downto 0) := (others => '0');
+    -- K6 camera gain (1/16, 0 .. 23, per field) and the gained source (its own stage)
+    signal f_cg : unsigned(4 downto 0) := to_unsigned(16, 5);
+    signal w4_a : unsigned(9 downto 0) := (others => '0');
+    signal w4_we, w4_b : std_logic := '0';
+    signal w4_p : unsigned(12 downto 0) := (others => '0');
 
     -- echo profile ROM
     signal r_eca : unsigned(9 downto 0) := (others => '0');
@@ -491,7 +501,7 @@ begin
                 if v_x > 7 then f_drift <= resize(v_x - 8, 10);
                 elsif v_x < -7 then f_drift <= resize(v_x + 8, 10);
                 else f_drift <= (others => '0'); end if;
-                v_k6 := unsigned(registers_in(5));
+                v_k6 := unsigned(registers_in(2));
                 if v_k6 < 4 then f_pal <= v_k6(1 downto 0); else f_pal <= v_k6(9 downto 8); end if;
                 f_swap   <= registers_in(6)(0);
                 f_outl   <= registers_in(6)(1);
@@ -509,7 +519,7 @@ begin
                 f_odd <= not f_odd;
             end if;
 
-            -- glides: K1, K2, K3, K5, P12 ease 1/8 of the gap per field (deadband 4); one channel per
+            -- glides: K1, K2, K6, K5, P12 ease 1/8 of the gap per field (deadband 4); one channel per
             -- four zone clocks (4..23): select, difference, ease, write
             if s_zone = '1' and s_zc >= 4 and s_zc < 24 then q_gon <= '1'; else q_gon <= '0'; end if;
             q_gi <= s_zc(4 downto 2) - 1; q_gph <= s_zc(1 downto 0);
@@ -519,7 +529,7 @@ begin
                         case to_integer(q_gi) is
                             when 0 => gl_k <= unsigned(registers_in(0)) & "000"; gl_o <= s_g(0);
                             when 1 => gl_k <= unsigned(registers_in(1)) & "000"; gl_o <= s_g(1);
-                            when 2 => gl_k <= unsigned(registers_in(2)) & "000"; gl_o <= s_g(2);
+                            when 2 => gl_k <= unsigned(registers_in(5)) & "000"; gl_o <= s_g(2);
                             when 3 => gl_k <= unsigned(registers_in(4)) & "000"; gl_o <= s_g(3);
                             when others => gl_k <= unsigned(registers_in(7)) & "000"; gl_o <= s_g(4);
                         end case;
@@ -554,7 +564,10 @@ begin
                     when 4 => f_ca <= "10"; f_cben <= '1'; f_cb <= '0';
                     when others => f_ca <= "10"; f_cben <= '1'; f_cb <= '1';
                 end case;
-                f_eg    <= unsigned(C_EGL(to_integer(s_g(2)(12 downto 8))));
+                f_eg    <= unsigned(C_EGL(to_integer(unsigned(C_KFIX_3(9 downto 5)))));
+                -- K6 camera gain (1/16): 0 .. 16 over 0 .. 50 %, 16 .. 23 over 50 .. 100 %
+                if s_g(2)(12) = '0' then f_cg <= '0' & s_g(2)(11 downto 8);
+                else f_cg <= to_unsigned(16, 5) + resize(s_g(2)(11 downto 9), 5); end if;
                 f_rip   <= resize(shift_right(resize(s_g(3)(12 downto 3), 13) * 5, 10), 3);
                 f_bend  <= resize(shift_right(resize(s_g(4)(12 downto 3), 13) * 5, 3), 10);
                 v_t8 := f_fld(7 downto 0) + (f_fld(6 downto 0) & '0');
@@ -1059,10 +1072,13 @@ begin
             v_o := to_unsigned(255, 9) - resize(v_da(14 downto 8), 9);
             w3_we <= w2_we; w3_b <= w2_b; w3_a <= w2_a;
             if w2_osc = '1' then w3_d <= v_o(7 downto 0); else w3_d <= w2_l; end if;
-            -- write
-            lb_we <= w3_we;
-            lb_wa <= w3_b & w3_a;
-            lb_wd <= std_logic_vector(w3_d);
+            -- 4: the K6 camera gain (camera or Osc) x g/16
+            w4_we <= w3_we; w4_b <= w3_b; w4_a <= w3_a;
+            w4_p <= w3_d * f_cg;
+            -- write (clamped)
+            lb_we <= w4_we;
+            lb_wa <= w4_b & w4_a;
+            if w4_p(12) = '1' then lb_wd <= (others => '1'); else lb_wd <= std_logic_vector(w4_p(11 downto 4)); end if;
         end if;
     end process p_src;
 

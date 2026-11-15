@@ -77,10 +77,10 @@ RTL (`imodel4.py`).
 |---|---|
 | K1 Crenels | the pink "+" crosses: 1–6 per tile (3 = the photo). Every crenel-locked row follows: the blocks, the camera teeth, the pink lower blocks, the arc and dash spacing |
 | K2 Dome | the blue camera dome's radius, a true round cap with its top fixed at y 303: R 24 px (a small ball under the crenels) .. 458 (the photo, at 46 %) .. 2068 (a flat band filling the row). Quadratic, so the low end is fine-grained |
-| K3 Echo | the feedback echoes left of every tooth: none (clean edges) → strong double echoes (square law) |
+| K3 Palette | (was K6, v0.6.2) Photo (fitted) / Ember / Jade / Rust |
 | K4 Drift | bipolar, still in the centre (±8): every band slides along the line at its own rate and direction, so the rows shear against each other. Factors: crenel row x1, dome x-1, slip row + V's x2, blocks x-1.5, arcs x3, dashes x-2.5, lower teeth x1.5, arch x-0.5, pink blocks x0.5, floor x-3. At full travel the base rate is about 6 s per tile (the arcs and the floor 2 s) |
 | K5 Ripples | the camera blobs' soft-key width: hard flat blobs → wide flanks with many ripple folds |
-| K6 Palette | Photo (fitted) / Ember / Jade / Rust |
+| K6 Camera | (v0.6.2) the camera's strength: one gain on the source (camera luma or Osc) before the line buffer. 0 % = a black input (the camera areas fall to the navy ground, the pink fills to their black-input weave), 50 % = the photo's camera, 100 % = ×1.44 (brighter, wider blobs, more folds). The feedback echoes (the old K3 Echo) are fixed at its default, 460 |
 | S7 Swap | a routing flip: the pink shapes (crenels, V's, pink blocks) and their echoes print the camera through the blue colouriser, and the camera areas (dome, blocks, arcs, dashes, teeth) take the lower pink fill, level by camera level |
 | S8 Outline | the pink shapes reduced to their ridges and rims |
 | S9 Mirror | every other tile mirrored: crenels and V's meet in chevrons |
@@ -93,9 +93,9 @@ Motion at defaults:
 - the bend breathes ±12 %;
 - the tears are redrawn every 8 fields;
 - the Osc source's oscillator walks.
-K1, K2, K3, K5 and P12 glide (1/8 of the gap per field); K4, K6 and the switches are latched per
-field. Image-tester note: labelled knobs sim at 512 (K6 = Jade), so sims pass
-`--set rotary_potentiometer_6=0` for the Photo palette.
+K1, K2, K5, K6 and P12 glide (1/8 of the gap per field); K3, K4 and the switches are latched per
+field. Image-tester note: labelled knobs sim at 512 (K3 = Jade), so sims pass
+`--set rotary_potentiometer_3=0` for the Photo palette.
 
 ## Video
 - The camera luma is written into a 2 x 1024-entry line buffer (one whole source line per tile),
@@ -107,7 +107,7 @@ field. Image-tester note: labelled knobs sim at 512 (K6 = Jade), so sims pass
 - Osc substitutes a bright level dipped by a triangle oscillator (5 per tile), phase-bent by a slow
   vertical triangle. It drifts per field and gives the soft dark lobes the colouriser folds into
   the photo's ripple arcs.
-- Every camera-path control (K2, K4, K5, S7, P12) stays live in both modes.
+- Every camera-path control (K2, K4, K5, K6, S7, P12) stays live in both modes.
 
 ## Engine
 - **Field values** (vblank zone):
@@ -171,6 +171,31 @@ What changed (control table above):
   trading K6 Palette, S8 Outline or S10 Roll; that is Ron's call.
 - Defaults: K2 471 reproduces the photo's dome; K4 at the centre is the still photo (preset 0).
   The fitted dome table in the line ROM (800..911) is no longer read.
+
+## K6 camera pass (2026-11-15)
+v0.6.2 (Ron's rule: K6 is the camera strength in every Heirloom / Kinetic / Patchbay program, default 50 %).
+- **K6 Camera** is one gain g on the source, camera luma or the Osc level, after the source select and before
+  the line buffer (stage 4 of the write side: an 8 x 5 multiply, then the clamp at the write). The camera is
+  the picture here (the dome, blocks, arcs, dashes and teeth print key x source), so K6 sets how strongly it
+  shows, and the pink fills' ±4-level weave follows.
+- **Law** (per field from the glided K6, ±4 deadband, 1/8 ease): g = K6 / 32 below 50 %, 16 + (K6 − 512) / 64
+  above (g in 1/16, 0 .. 23).
+  - 0 %: g = 0, exactly a black input: the camera areas fall to the navy ground.
+  - 25 %: g = 0.5, a dim dome.
+  - 50 % (default): g = 1, v0.6.1's camera, the photo.
+  - 100 %: g = 1.44, a brighter, flatter dome with more of it in the top folds. Kept at 1.44: past it the
+    bright parts clamp and the dome loses its camera detail.
+- **K6's old function, Palette, moved to K3** (labelled Photo / Ember / Jade / Rust, as before). **K3 Echo was
+  frozen at its default, 460** (the weakest knob: 0 and 460 look alike in `sheet_a.png`, only 1023 thickens the
+  echoes). Its glide channel now glides K6; the echo gain is the constant C_EGL(460 / 32). The Torn Slashes and
+  Outline Echo presets lost their echo values; Ember Roll and Jade Mirror moved their palette to K3.
+- Sheet: `.heirloom_work/rb_crenel/k6/k6sheet.png` (selfie, 720p60 / 2: K6 0, 256, 512, 1023, Osc at 512;
+  palette Photo). The decimated sim shows only the top half of the picture (the virtual rows come from the
+  timing ID), enough for the dome.
+- **Build** (router1, `.kinetic_work/tools/k6build.sh`): all six configs seed 1. 7193–7248 / 7680 LC (94 %,
+  unchanged: the frozen echo glide paid for the multiply), 23 / 32 EBR. Post-route Fmax: HD Analog 83.49,
+  SD Analog 88.84, HD HDMI 86.01, SD HDMI 92.28, HD Dual 89.90, SD Dual 89.73 MHz.
+  `out/rev_b/ron/heirloom/crenel.vmprog`. Not flashed.
 
 ## Status
 - **v0.6.1 built 2026-11-01: output-filter resync fix, NOT flashed.** The output running-sum filters now take neutral input off the generated avid and snap back to neutral once the box is full of blank samples, so a glitched block-RAM / clock sample can no longer leave a permanent wrapped colour offset (fern_diag hardware capture 2026-11-01). Post-route Fmax: HD Analog s1 86.81, SD Analog s1 90.97, HD HDMI s1 87.38, SD HDMI s1 91.22, HD Dual s1 83.28, SD Dual s1 82.21 MHz; 7211-7237 / 7680 LC. Earlier hand-installed HD seeds are gone (new netlist).

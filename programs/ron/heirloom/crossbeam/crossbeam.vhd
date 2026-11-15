@@ -16,20 +16,22 @@
 --   K1  Angle     the beam's arm slope 0.02 .. 0.77 (0.23 = the photo)
 --   K2  Rows      bipolar, each bar row its own height: left Scatter (per-row heights x0.26 .. x3.5),
 --                 right Lens (rows swell where the beam crosses, thin away from it); centre = the photo
---   K3  Warp      the zebra / ramp table lookup rippled by two travelling waves (up to 380 px across,
---                 7.5 table rows down); 0 = the photo
+--   K3  Columns   bipolar, each bar row its own block size: left Scatter (per-row x0.26 .. x3.5), right
+--                 Lens (blocks swell around the beam line, the grid bulges); centre = the photo
 --   K4  Flow      bipolar: the zebra contours stream, the bars roll (a quarter as fast) and the warp
 --                 waves travel (centre still)
 --   K5  Swing     bipolar beam motion: right = the arms scissor (to +-86 % of the slope), left = the
 --                 cross travels up through its period; centre = still (the photo)
---   K6  Columns   bipolar, each bar row its own block size: left Scatter (per-row x0.26 .. x3.5), right
---                 Lens (blocks swell around the beam line, the grid bulges); centre = the photo
+--   K6  Camera    the camera's strength: one gain on the source luma (camera or Osc) before the slew,
+--                 0 = none (the photo) .. 25 % = v0.6.0's fixed gain (one stripe of bend) .. 50 % x2
+--                 .. 100 % x4; it bends the zebra contours and blooms the beam
 --   S7  Bars      the colour bars (Off: the beam over the zebra field alone)
 --   S8  Slip      Tear (the photo's torn rows) / Slip (every bar row slides at its own speed, the zebra
 --                 row tears swing)
 --   S9  Stack     the cross repeats at half the vertical period
 --   S10 Palette   Photo / Swap (Cr and Cb exchanged: amber beam, blue zebra, cyan bars)
---   S11 Source    Video / Osc (Video: the camera's slewed luma bends the zebra contours and blooms the beam)
+--   S11 Source    Video / Osc (Video: the camera's slewed luma bends the zebra contours and blooms the beam;
+--                 Osc: a drifting diagonal triangle oscillator, mirrored about the cross, does the same)
 --   P12 BEAM      the cross beam's brightness 0 .. 2 x, and its push on the zebra contours (the beam's
 --                 level offsets the stripe phase, +-8 stripes, signed about the middle): 0 = no glow,
 --                 the X drawn in the contours; 50 % = the photo; 100 % = the beam swallows the bars and
@@ -46,6 +48,9 @@
 -- conditioning.  Latency 24 clocks in every mode.  Colours in the hardware convention (u = Cr,
 -- v = Cb).
 
+-- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K3 = Columns (was K6); K3 Warp fixed at 0 (C_KFIX_3).
+-- The K3 glide channel now glides K6; the warp amplitudes are constant 0.  Osc gained a source (it had
+-- no camera term, so K6 would have been dead in Osc mode).
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -58,6 +63,7 @@ use work.crossbeam_pkg.all;
 use work.all;
 
 architecture crossbeam of program_top is
+    constant C_KFIX_3 : std_logic_vector(9 downto 0) := std_logic_vector(to_unsigned(0, 10));   -- K6 camera pass: fixed knob
     constant C_LAT   : integer := 24;   -- matches processing_delay_clks
     constant C_XC    : integer := 252032;   -- mirror / beam centre 984.5 px, Q.8
     -- colour-bar block coordinate: 2^17 units = 3 periods (1836 virtual px), so it wraps for free
@@ -138,9 +144,9 @@ architecture crossbeam of program_top is
     signal s_avq : std_logic := '0';
     signal s_hcnt, s_wmax, s_w : unsigned(11 downto 0) := to_unsigned(1920, 12);
 
-    -- controls (glided Q.3: K1, K2, K3, K6, P12)
+    -- controls (glided Q.3: K1, K2, K6 camera, K3 columns, P12)
     type t_g is array(0 to 4) of unsigned(12 downto 0);
-    signal s_g : t_g := (to_unsigned(289 * 8, 13), to_unsigned(512 * 8, 13), to_unsigned(0, 13),
+    signal s_g : t_g := (to_unsigned(289 * 8, 13), to_unsigned(512 * 8, 13), to_unsigned(512 * 8, 13),
                          to_unsigned(512 * 8, 13), to_unsigned(512 * 8, 13));
     signal gl_k, gl_o, gl_n : unsigned(12 downto 0) := (others => '0');
     signal gl_d : signed(13 downto 0) := (others => '0');
@@ -263,7 +269,11 @@ architecture crossbeam of program_top is
 
     -- video luma above black (0..255), Osc = none
     signal v_y1 : unsigned(7 downto 0) := (others => '0');
-    signal v_ys : unsigned(10 downto 0) := (others => '0');
+    signal v_ys : unsigned(12 downto 0) := (others => '0');           -- 8 x the slewed, gained luma
+    -- K6 camera gain (1/16, 0 .. 63, per field), the gained source luma, the Osc phase
+    signal f_cg : unsigned(5 downto 0) := to_unsigned(32, 6);
+    signal v_yg : unsigned(13 downto 0) := (others => '0');
+    signal v_oph : unsigned(15 downto 0) := (others => '0');
 
     -- pixel path
     type t_u4 is array (natural range <>) of unsigned(3 downto 0);
@@ -509,7 +519,7 @@ begin
                 if s_lf(0) = '1' then s_lf <= ('0' & s_lf(15 downto 1)) xor x"B400"; else s_lf <= '0' & s_lf(15 downto 1); end if;
             end if;
 
-            -- glides: K1, K2, K3, K6, P12 ease 1/8 of the gap per field (deadband 4); one channel per
+            -- glides: K1, K2, K6, K3, P12 ease 1/8 of the gap per field (deadband 4); one channel per
             -- four zone clocks (4..23): select, difference, ease, write
             if s_zone = '1' and s_zc >= 4 and s_zc < 24 then q_gon <= '1'; else q_gon <= '0'; end if;
             q_gi <= s_zc(4 downto 2) - 1; q_gph <= s_zc(1 downto 0);
@@ -519,8 +529,8 @@ begin
                         case to_integer(q_gi) is
                             when 0 => gl_k <= unsigned(registers_in(0)) & "000"; gl_o <= s_g(0);
                             when 1 => gl_k <= unsigned(registers_in(1)) & "000"; gl_o <= s_g(1);
-                            when 2 => gl_k <= unsigned(registers_in(2)) & "000"; gl_o <= s_g(2);
-                            when 3 => gl_k <= unsigned(registers_in(5)) & "000"; gl_o <= s_g(3);
+                            when 2 => gl_k <= unsigned(registers_in(5)) & "000"; gl_o <= s_g(2);
+                            when 3 => gl_k <= unsigned(registers_in(2)) & "000"; gl_o <= s_g(3);
                             when others => gl_k <= unsigned(registers_in(7)) & "000"; gl_o <= s_g(4);
                         end case;
                     when 1 =>
@@ -570,9 +580,11 @@ begin
             if v_d > 8 then f_k6s <= '0'; v_u := unsigned(v_d) - 8; f_k6m <= v_u(8 downto 4);
             elsif v_d < -8 then f_k6s <= '1'; v_u := unsigned(-v_d) - 8; f_k6m <= v_u(8 downto 4);
             else f_k6s <= '0'; f_k6m <= (others => '0'); end if;
-            -- K3 warp amplitudes: across k / 4 px (0..255), down k / 128 table rows (Q.10, 0..8)
-            f_ax <= s_g(2)(12 downto 5);
-            f_ay <= s_g(2)(12 downto 3) & "000";
+            -- K3 warp fixed at 0 (the photo): no warp across or down
+            f_ax <= (others => '0');
+            f_ay <= (others => '0');
+            -- K6 camera gain (1/16): K6 / 16, 0 .. 63 (16 = v0.6.0's fixed gain at 25 %)
+            f_cg <= s_g(2)(12 downto 7);
             if f_stack = '1' then
                 f_pvq <= to_signed(125158, 19); f_pvh <= to_signed(62579, 19); f_dy0 <= to_signed(-34668, 19);
             else
@@ -985,19 +997,27 @@ begin
         variable v_dl  : unsigned(9 downto 0);
         variable v_vy  : unsigned(9 downto 0);
         variable v_vy2 : unsigned(8 downto 0);
+        variable v_li  : unsigned(4 downto 0);
     begin
         if rising_edge(clk) then
             -- camera luma above black, 0..255 (x 0.293); Osc = none.  Untapped delay: the camera
             -- reaches the zebra and the bloom a few pixels late (invisible in a contour bend).
-            if f_osc = '1' or unsigned(data_in.y) <= 64 then
+            -- Osc: a diagonal triangle oscillator (512 virtual px, mirrored about the cross line by |dy|),
+            -- drifting with the K4 flow (the old warp phase)
+            v_oph <= b_xv(16 downto 1) + l_ady(16 downto 1) + f_ph0;
+            if f_osc = '1' then
+                if v_oph(15) = '1' then v_y1 <= not v_oph(14 downto 7); else v_y1 <= v_oph(14 downto 7); end if;
+            elsif unsigned(data_in.y) <= 64 then
                 v_y1 <= (others => '0');
             else
                 v_vy := resize(unsigned(data_in.y) - 64, 10);
                 v_vy2 := resize(v_vy(9 downto 2), 9) + resize(v_vy(9 downto 5), 9) + resize(v_vy(9 downto 6), 9);
                 if v_vy2(8) = '1' then v_y1 <= to_unsigned(255, 8); else v_y1 <= v_vy2(7 downto 0); end if;
             end if;
-            -- horizontal slew of the camera luma (an analog low-pass, ~8 px): s += y - s/8
-            v_ys <= v_ys + resize(v_y1, 11) - resize(v_ys(10 downto 3), 11);
+            -- the K6 camera gain in its own stage (camera or Osc), then the horizontal slew (an analog
+            -- low-pass, ~8 px): s += y g/16 - s/8
+            v_yg <= v_y1 * f_cg;
+            v_ys <= v_ys + resize(v_yg(13 downto 4), 13) - resize(v_ys(12 downto 3), 13);
 
             -- 1: |dx|; dy^2 - (s dx)^2 (Q.16 of c / 256 units); |s dx|; block period and offset
             -- (magnitudes by one's complement: off by one fine unit, invisible)
@@ -1059,9 +1079,10 @@ begin
             -- gamma; ramp key sum; camera bloom log
             p7_s1 <= resize(unsigned(p6_lax(9 downto 0)), 11) + resize(unsigned(p6_lf(9 downto 0)), 11);
             p7_val <= p6_lax(10) and p6_lf(10);
-            p7_pl <= resize(p6_pp, 15) + signed(resize(v_ys(10 downto 3), 15));
+            p7_pl <= resize(p6_pp, 15) + signed(resize(v_ys(12 downto 3), 15));
             p7_ag <= unsigned(C_AG6(to_integer(p6_ai)));
-            p7_lv <= unsigned(C_LV(to_integer(v_ys(10 downto 6))));
+            if v_ys(12 downto 11) /= "00" then v_li := (others => '1'); else v_li := v_ys(10 downto 6); end if;
+            p7_lv <= unsigned(C_LV(to_integer(v_li)));
             p7_rl <= resize(p_rr(6)(5 downto 3), 4) + resize(p_rr(6)(5 downto 4), 4);
             p_rrc(7) <= p6_rr; p_grc(7) <= p6_gr;
             p_cell(7) <= p_cell(6); p_rr(7) <= p_rr(6);

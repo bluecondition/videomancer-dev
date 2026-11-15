@@ -29,14 +29,17 @@
 --              black, 50 % the glow is in, 67 % the photo, 100 % red floods;
 --              the arcs' modulation of the weave rises with it (row ripple
 --              and dash width, a cube law: none below 40 %)
---   K5 Tear    the band's video tear and the texture's line jitter
---   K6 Speed   bipolar: dashes slide, rows scroll, arcs stream (centre still)
+--   K5 Speed   bipolar: dashes slide, rows scroll, arcs stream (centre still)
+--   K6 Camera  the camera's strength: one gain on the source luma (camera or
+--              Osc), 0 = a black input .. 50 % = the photo .. 100 % x1.44; the
+--              same gained luma bends the cocoon's field (always on, 0 at black)
 --   S7 Mirror  the cocoon points right
 --   S8 Palette Fire / Ice (generated colours with U and V exchanged)
 --   S9 Band    Solid / Slats (the band keyed by the weave rows: each row's
 --              core is band, the cocoon and glow show between)
 --   S10 Source Video / Osc (folded oscillators replace the camera)
---   S11 Bend   the source luma bends the cocoon's field
+--   S11 Tear   Photo / Shred: the band's video tear and the texture's line
+--              jitter at the photo's level or at the old K5 Tear's maximum
 --   P12 Cocoon size and band: a seed with no band (0) .. the photo (50 %)
 --              .. the cocoon bursts and the band fills the screen (100 %)
 --
@@ -46,6 +49,8 @@
 -- output conditioning before the blanking gate.  Latency 24 clocks.
 -- Colours in the hardware convention (u = Cr, v = Cb).
 
+-- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K5 = Speed (was K6); K5 Tear fixed at 512 (C_KFIX_5).
+-- S11 Bend -> Tear Photo (512) / Shred (1023); the bend is always on at the K6 gain.
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -58,6 +63,7 @@ use work.cocoon_pkg.all;
 use work.all;
 
 architecture cocoon of program_top is
+    constant C_KFIX_5 : std_logic_vector(9 downto 0) := std_logic_vector(to_unsigned(512, 10));   -- K6 camera pass: fixed knob
     constant C_LAT : integer := 24;
 
     -- bipolar triangle of a 16-bit phase: -128 .. 128, +128 at phase 0
@@ -112,19 +118,22 @@ architecture cocoon of program_top is
     signal c_W : unsigned(11 downto 0) := to_unsigned(1920, 12);
     signal c_H : unsigned(10 downto 0) := to_unsigned(1080, 11);
     signal s_sd : std_logic := '0';
-    type t_g is array (0 to 5) of unsigned(9 downto 0);
-    -- glides (K1 K2 K3 K4 K5 P12), starting at the defaults
+    type t_g is array (0 to 6) of unsigned(9 downto 0);
+    -- glides (K1 K2 K3 [K4] Tear P12 K6), starting at the defaults
     signal gl : t_g := (to_unsigned(576, 10), to_unsigned(571, 10), to_unsigned(568, 10),
-                        to_unsigned(682, 10), to_unsigned(512, 10), to_unsigned(512, 10));
+                        to_unsigned(682, 10), to_unsigned(512, 10), to_unsigned(512, 10),
+                        to_unsigned(512, 10));
     signal gl_n : unsigned(4 downto 0) := (others => '0');
-    signal gl_c, gl_ch : integer range 0 to 5 := 0;
+    signal gl_c, gl_ch : integer range 0 to 6 := 0;
     signal gl_ph : integer range 0 to 2 := 0;
     signal gl_k, gl_g : unsigned(9 downto 0) := (others => '0');
     signal gl_d, gl_s : signed(10 downto 0) := (others => '0');
     signal gl_lo, gl_hi, gl_mv : std_logic := '0';
     signal c_v : signed(10 downto 0) := (others => '0');            -- speed
     signal c_va : unsigned(10 downto 0) := (others => '0');
-    signal c_mir, c_ice, c_band, c_osc, c_bend, c_slat : std_logic := '0';
+    signal c_mir, c_ice, c_band, c_osc, c_shred, c_slat : std_logic := '0';
+    -- K6 camera gain in 1/16 (0 .. 23), decoded from the K6 glide (static during active video)
+    signal c_cg : unsigned(4 downto 0) := to_unsigned(16, 5);
     -- K4: the box fade (video at beta, black, the glow at alpha) and the arc-mod gain
     signal c_vbox : std_logic := '0';
     signal c_alpha : unsigned(4 downto 0) := to_unsigned(16, 5);
@@ -291,7 +300,9 @@ architecture cocoon of program_top is
     signal p5_thv, p6_thv : unsigned(8 downto 0) := (others => '0');
     signal p5_tw31, p6_tw31 : std_logic := '0';
     signal p6_lo : unsigned(7 downto 0) := (others => '0');
-    signal p7_bend : signed(8 downto 0) := (others => '0');
+    signal p7_bend : unsigned(9 downto 0) := (others => '0');       -- L' x 3/4 (0 .. 286)
+    signal p7_src : unsigned(7 downto 0) := (others => '0');
+    signal p_gm : unsigned(12 downto 0) := (others => '0');          -- source luma x K6 gain (1/16)
     signal p7_vshow : std_logic := '0';
     signal p_f : t_u10(8 to 10) := (others => (others => '0'));
     signal p8_ut, p8_uv : std_logic := '0';
@@ -408,22 +419,22 @@ begin
                 else c_H <= s_lcnt(10 downto 0); end if;
                 s_wmax <= (others => '0');
                 s_lcnt <= (others => '0');
-                v_k := signed('0' & unsigned(registers_in(5))) - 512;
+                v_k := signed('0' & unsigned(registers_in(4))) - 512;
                 if v_k < 8 and v_k > -8 then c_v <= (others => '0'); c_va <= (others => '0');
                 else c_v <= v_k; c_va <= unsigned(abs(v_k)); end if;
                 c_mir  <= registers_in(6)(0);
                 c_ice  <= registers_in(6)(1);
                 c_slat <= registers_in(6)(2);
                 c_osc  <= registers_in(6)(3);
-                c_bend <= registers_in(6)(4);
+                c_shred <= registers_in(6)(4);
                 c_t    <= c_t + 1;
                 gl_n   <= to_unsigned(1, 5);
                 gl_ch  <= 0;
                 gl_ph  <= 0;
             elsif gl_n /= 0 then
-                if gl_n = 18 then gl_n <= (others => '0'); else gl_n <= gl_n + 1; end if;
+                if gl_n = 21 then gl_n <= (others => '0'); else gl_n <= gl_n + 1; end if;
                 if gl_ph = 0 then
-                    -- fetch: K1..K5 = registers 0..4, then P12
+                    -- fetch: K1..K4 = registers 0..3, the Tear (S11), P12, then K6 Camera
                     v_i := gl_ch;
                     gl_c <= v_i;
                     case v_i is
@@ -431,8 +442,11 @@ begin
                         when 1 => gl_k <= unsigned(registers_in(1));
                         when 2 => gl_k <= unsigned(registers_in(2));
                         when 3 => gl_k <= unsigned(registers_in(3));
-                        when 4 => gl_k <= unsigned(registers_in(4));
-                        when others => gl_k <= unsigned(registers_in(7));
+                        when 4 =>
+                            if c_shred = '1' then gl_k <= to_unsigned(1023, 10);
+                            else gl_k <= unsigned(C_KFIX_5); end if;
+                        when 5 => gl_k <= unsigned(registers_in(7));
+                        when others => gl_k <= unsigned(registers_in(5));
                     end case;
                     gl_g <= gl(v_i);
                     gl_ph <= 1;
@@ -459,9 +473,13 @@ begin
                         gl(gl_c) <= unsigned(v_s(9 downto 0));
                     end if;
                     gl_ph <= 0;
-                    if gl_ch /= 5 then gl_ch <= gl_ch + 1; else gl_ch <= 0; end if;
+                    if gl_ch /= 6 then gl_ch <= gl_ch + 1; else gl_ch <= 0; end if;
                 end if;
             end if;
+
+            -- K6 camera gain (1/16): 0 .. 16 over 0 .. 50 %, 16 .. 23 over 50 .. 100 %
+            if gl(6)(9) = '0' then c_cg <= '0' & gl(6)(8 downto 5);
+            else c_cg <= to_unsigned(16, 5) + resize(gl(6)(8 downto 6), 5); end if;
 
             s_hsync_sr(0) <= data_in.hsync_n; s_vsync_sr(0) <= data_in.vsync_n;
             s_field_sr(0) <= data_in.field_n; s_gav_sr(0) <= g_avid;
@@ -1067,7 +1085,7 @@ begin
         variable v_lev : unsigned(2 downto 0);
         variable v_ta : signed(8 downto 0);
         variable v_lo : unsigned(7 downto 0);
-        variable v_b9 : signed(8 downto 0);
+        variable v_l9 : unsigned(8 downto 0);
         variable v_sum : signed(10 downto 0);
         variable v_m : signed(16 downto 0);
         variable v_a11 : signed(10 downto 0);
@@ -1154,17 +1172,23 @@ begin
             p6_thv <= p5_thv;
             p6_tw31 <= p5_tw31;
 
-            -- S7: the source luma (camera or oscillators); bend; band key
-            if c_osc = '1' then v_lo := p6_lo; else v_lo := p_lum(6); end if;
+            -- K6 camera gain (free-running luma chain): the source select (camera or oscillators),
+            -- then L x g/16 in a stage of its own.  The gained luma reaches S7 two pixels late
+            -- (a 2 px shift of the camera / Osc, invisible).
+            if c_osc = '1' then p7_src <= p6_lo; else p7_src <= p_lum(6); end if;
+            p_gm <= p7_src * c_cg;
+
+            -- S7: the gained source luma; bend (L' x 3/4, 0 at black); band key
+            v_l9 := p_gm(12 downto 4);
+            if v_l9(8) = '1' then v_lo := (others => '1'); else v_lo := v_l9(7 downto 0); end if;
             p_lum(7) <= v_lo;
-            v_b9 := signed('0' & v_lo) - 128;
-            p7_bend <= shift_right(v_b9, 2) + shift_right(v_b9, 3);
-            if p_inbx(6) = '1' and resize(v_lo, 9) > p6_thv and p6_tw31 = '0' then p7_vshow <= '1';
+            p7_bend <= resize(p_gm(12 downto 5), 10) + resize(p_gm(12 downto 6), 10);
+            if p_inbx(6) = '1' and v_l9 > p6_thv and p6_tw31 = '0' then p7_vshow <= '1';
             else p7_vshow <= '0'; end if;
 
             -- S8: F; the layer select (texture / video / glow)
             v_g := signed(resize(p_fr(7), 13));
-            if c_bend = '1' then v_g := v_g + resize(p7_bend, 13); end if;
+            v_g := v_g + signed(resize(p7_bend, 13));
             v_g := v_g + resize(p_zg(7), 13);
             if v_g < 0 then p_f(8) <= (others => '0');
             elsif v_g > 1023 then p_f(8) <= (others => '1');

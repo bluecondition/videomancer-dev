@@ -7,7 +7,7 @@
 processing_delay_clks = 24
 program_id = "com.czartroniks.crenel"
 program_name = "Crenel"
-program_version = "0.6.1"
+program_version = "0.6.2"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -39,13 +39,9 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
-name_label = "Echo"
-control_mode = "linear"
-display_min_value = 0
-display_max_value = 100
-initial_value = 460
-display_float_digits = 0
-suffix_label = "%"
+name_label = "Palette"
+value_labels = ["Photo", "Ember", "Jade", "Rust"]
+initial_value_label = "Photo"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
@@ -69,9 +65,13 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
-name_label = "Palette"
-value_labels = ["Photo", "Ember", "Jade", "Rust"]
-initial_value_label = "Photo"
+name_label = "Camera"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
@@ -127,21 +127,19 @@ toggle_switch_11 = 1
 [[preset]]
 name = "Torn Slashes"
 linear_potentiometer_12 = 1023
-rotary_potentiometer_3 = 800
 
 [[preset]]
 name = "Outline Echo"
 toggle_switch_8 = 1
-rotary_potentiometer_3 = 1023
 
 [[preset]]
 name = "Ember Roll"
-rotary_potentiometer_6 = 1
+rotary_potentiometer_3 = 1
 toggle_switch_10 = 1
 
 [[preset]]
 name = "Jade Mirror"
-rotary_potentiometer_6 = 2
+rotary_potentiometer_3 = 2
 toggle_switch_9 = 1
 rotary_potentiometer_1 = 600
 

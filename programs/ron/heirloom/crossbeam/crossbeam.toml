@@ -7,7 +7,7 @@
 processing_delay_clks = 24
 program_id = "com.czartroniks.crossbeam"
 program_name = "Crossbeam"
-program_version = "0.6.0"
+program_version = "0.6.1"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -39,13 +39,13 @@ suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
-name_label = "Warp"
+name_label = "Columns"
 control_mode = "linear"
-display_min_value = 0
+display_min_value = -100
 display_max_value = 100
-initial_value = 0
+initial_value = 512
 display_float_digits = 0
-suffix_label = "%"
+suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
@@ -69,13 +69,13 @@ suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
-name_label = "Columns"
+name_label = "Camera"
 control_mode = "linear"
-display_min_value = -100
+display_min_value = 0
 display_max_value = 100
 initial_value = 512
 display_float_digits = 0
-suffix_label = ""
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
@@ -123,29 +123,28 @@ name = "Photo"
 [[preset]]
 name = "Lens"
 rotary_potentiometer_2 = 1000
-rotary_potentiometer_6 = 1000
+rotary_potentiometer_3 = 1000
 
 [[preset]]
 name = "Mosaic"
 rotary_potentiometer_2 = 40
-rotary_potentiometer_6 = 40
+rotary_potentiometer_3 = 40
 toggle_switch_8 = 1
 
 [[preset]]
 name = "Liquid"
-rotary_potentiometer_3 = 900
+rotary_potentiometer_6 = 900
 rotary_potentiometer_4 = 860
 toggle_switch_7 = 0
 
 [[preset]]
 name = "Scissors"
 rotary_potentiometer_5 = 900
-rotary_potentiometer_6 = 800
+rotary_potentiometer_3 = 800
 
 [[preset]]
 name = "Ghost"
 linear_potentiometer_12 = 0
-rotary_potentiometer_3 = 500
 
 [[preset]]
 name = "Rising"
