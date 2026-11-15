@@ -45,6 +45,7 @@
 -- One latency (C_LAT = 30) in every mode.  Colours in the hardware convention (u = Cr, v = Cb).
 
 -- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K5 = Colour (was K6); K5 Spread fixed at 520 (C_KFIX_5).
+-- 2026-11-15: K6 camera top +25 % (Ron)
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -215,6 +216,8 @@ architecture tumbler of program_top is
     signal s_kt  : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal s_kgd : signed(13 downto 0) := (others => '0');
     signal s_kg  : unsigned(12 downto 0) := to_unsigned(4096, 13);
+    -- K6 top +25 % (2026-11-15): per-field multiplier gain = 1.25 k / 2 (max 638; the product is taken / 128)
+    signal c_kq  : unsigned(9 downto 0) := to_unsigned(320, 10);
 
     -- field serial multiplier (24 iterations), serial shifter, sequencer scratch
     signal f_a, f_acc, z_fa : unsigned(47 downto 0) := (others => '0');
@@ -605,6 +608,8 @@ begin
                     when 43 =>
                         if C_SIM_SNAP or (s_kgd < 8 and s_kgd > -8) then s_kg <= s_kt & "000";
                         else s_kg <= unsigned(signed(s_kg) + resize(shift_right(s_kgd, 3), 13)); end if;
+                    -- K6 top +25 %: k / 2 + k / 8 (k = s_kg / 8), so source x c_kq / 128 = 1.25 x source x k / 256
+                    when 44 => c_kq <= resize(s_kg(12 downto 4), 10) + resize(s_kg(12 downto 6), 10);
                     when 36 =>                       -- the line colour: black hairline, or the accent
                         if s_edge = '1' then c_ky <= c_cy; c_kc <= c_cc;
                         else c_ky <= to_unsigned(64, 10); c_kc <= (others => to_unsigned(128, 8)); end if;
@@ -979,16 +984,18 @@ begin
             v_fw := resize(v_cf(3 downto 1), 5) + resize(v_cf(3 downto 2), 5);
             if v_lw > v_fw then q7_wt <= v_lw; else q7_wt <= v_fw; end if;
             q7_face <= q6_face;
-            -- 7 .. 9: K6 Camera: held source x the glided gain (k / 256)
-            m7_p0 <= f_gu(s_kg(12 downto 3), q6_src(0), 12) + shift_left(f_gu(s_kg(12 downto 3), q6_src(1), 12), 1);
-            m7_p1 <= f_gu(s_kg(12 downto 3), q6_src(2), 12) + shift_left(f_gu(s_kg(12 downto 3), q6_src(3), 12), 1);
-            m7_p2 <= f_gu(s_kg(12 downto 3), q6_src(4), 12) + shift_left(f_gu(s_kg(12 downto 3), q6_src(5), 12), 1);
-            m7_p3 <= f_gu(s_kg(12 downto 3), q6_src(6), 12) + shift_left(f_gu(s_kg(12 downto 3), q6_src(7), 12), 1);
+            -- 7 .. 9: K6 Camera: held source x the glided gain (1.25 k / 256 since 2026-11-15, as c_kq / 128)
+            m7_p0 <= f_gu(c_kq, q6_src(0), 12) + shift_left(f_gu(c_kq, q6_src(1), 12), 1);
+            m7_p1 <= f_gu(c_kq, q6_src(2), 12) + shift_left(f_gu(c_kq, q6_src(3), 12), 1);
+            m7_p2 <= f_gu(c_kq, q6_src(4), 12) + shift_left(f_gu(c_kq, q6_src(5), 12), 1);
+            m7_p3 <= f_gu(c_kq, q6_src(6), 12) + shift_left(f_gu(c_kq, q6_src(7), 12), 1);
             m8_a <= resize(m7_p0, 14) + shift_left(resize(m7_p1, 14), 2);
             m8_b <= resize(m7_p2, 14) + shift_left(resize(m7_p3, 14), 2);
             q8_face <= q7_face;
             v_m18 := resize(m8_a, 18) + shift_left(resize(m8_b, 18), 4);
-            q9_src <= v_m18(17 downto 8);
+            -- up to 255 x 638 / 128 = 1271: kept modulo 1024, exact for psi (x48 and x96 are multiples of 16, and
+            -- 1024 x 16 is a whole turn)
+            q9_src <= v_m18(16 downto 7);
             q9_face <= q8_face;
             -- index: column + row / 2 (Linear) or octagonal max + min / 2 (Radial), less the phase
             if s_rad = '0' then

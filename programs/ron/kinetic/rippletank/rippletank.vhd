@@ -17,8 +17,9 @@
 --   K4  Rate        rings run outwards / inwards, bipolar, centre = still; the steering wave runs at half the
 --                   ring rate and the sources orbit the centre at 1/16 of it
 --   K5  Spread      phase step between sources, square law, 0 .. 1/2 cycle
---   K6  Camera      camera / Osc strength, 8 levels: 0 .. 25 % a gain up to v0.1.0's x 3/4, past 25 % a
---                   contrast about 44 % luma (50 % = slope x 2, 100 % = x 4), glided
+--   K6  Camera      camera / Osc strength, 9 levels: 0 .. 25 % a gain up to v0.1.0's x 3/4, past 25 % a
+--                   contrast about 44 % luma (50 % = slope x 2, 100 % = x 5.3 since the 2026-11-15 top step
+--                   g = 4, the nearest step to 1.25 x the old top g = 3), glided
 --   S7  Wave        Smooth (shaded) / Hard (two-tone, anti-aliased)
 --   S8  Field       Line (an array through the centre) / Ring (on a circle, turned a quarter)
 --   S9  Mode        Sum (interference) / Max (overlapping ponds)
@@ -47,6 +48,7 @@
 -- Colours in the hardware convention (u = Cr, v = Cb).
 
 -- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K3 = Colour (was K6); K3 Depth fixed at 720 (C_KFIX_3).
+-- 2026-11-15: K6 camera top +25 % (Ron)
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -149,7 +151,8 @@ architecture rippletank of program_top is
     signal s_g6 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);     -- K6 Camera (glided)
     signal c_csh : unsigned(1 downto 0) := to_unsigned(1, 2);            -- camera gain g = (1 + 2 c_cb) << c_csh quarters
     signal c_cb  : std_logic := '1';
-    signal c_o6  : unsigned(4 downto 0) := to_unsigned(9, 5);            -- contrast offset / 8: 3 (g - 3)
+    signal c_cb2 : std_logic := '0';                                     -- K6 top step (2026-11-15): + (1 << c_csh), g = 4
+    signal c_o6  : unsigned(5 downto 0) := to_unsigned(9, 6);            -- contrast offset / 8: 3 (g - 3)
     signal s_g5 : unsigned(12 downto 0) := to_unsigned(C_DEF_K5 * 8, 13);
     signal s_gp : unsigned(12 downto 0) := to_unsigned(C_DEF_P12 * 8, 13);
     signal s_gm : unsigned(12 downto 0) := (others => '0');
@@ -498,14 +501,16 @@ begin
             -- grows (a plain x 2 gain whited the frame).  A negative lift does nothing (stage 11 keeps max(F, .)),
             -- so it needs no floor, and K6 = 0 is g = 1/4 with an offset no luma reaches.  c_o6 x 8 = the offset.
             case to_integer(s_g6(12 downto 9)) is
-                when 0        => c_csh <= "00"; c_cb <= '0'; c_o6 <= to_unsigned(31, 5);   -- off
-                when 1        => c_csh <= "00"; c_cb <= '0'; c_o6 <= to_unsigned(0, 5);    -- 1/4
-                when 2        => c_csh <= "01"; c_cb <= '0'; c_o6 <= to_unsigned(0, 5);    -- 1/2
-                when 3 | 4    => c_csh <= "00"; c_cb <= '1'; c_o6 <= to_unsigned(0, 5);    -- 3/4 (v0.1.0; k 192 .. 319)
-                when 5 | 6    => c_csh <= "10"; c_cb <= '0'; c_o6 <= to_unsigned(3, 5);    -- 1
-                when 7 | 8    => c_csh <= "01"; c_cb <= '1'; c_o6 <= to_unsigned(9, 5);    -- 3/2 (k 448 .. 575)
-                when 9 to 12  => c_csh <= "11"; c_cb <= '0'; c_o6 <= to_unsigned(15, 5);   -- 2
-                when others   => c_csh <= "10"; c_cb <= '1'; c_o6 <= to_unsigned(27, 5);   -- 3
+                when 0        => c_csh <= "00"; c_cb <= '0'; c_cb2 <= '0'; c_o6 <= to_unsigned(31, 6);   -- off
+                when 1        => c_csh <= "00"; c_cb <= '0'; c_cb2 <= '0'; c_o6 <= to_unsigned(0, 6);    -- 1/4
+                when 2        => c_csh <= "01"; c_cb <= '0'; c_cb2 <= '0'; c_o6 <= to_unsigned(0, 6);    -- 1/2
+                when 3 | 4    => c_csh <= "00"; c_cb <= '1'; c_cb2 <= '0'; c_o6 <= to_unsigned(0, 6);    -- 3/4 (v0.1.0; k 192 .. 319)
+                when 5 | 6    => c_csh <= "10"; c_cb <= '0'; c_cb2 <= '0'; c_o6 <= to_unsigned(3, 6);    -- 1
+                when 7 | 8    => c_csh <= "01"; c_cb <= '1'; c_cb2 <= '0'; c_o6 <= to_unsigned(9, 6);    -- 3/2 (k 448 .. 575)
+                when 9 to 12  => c_csh <= "11"; c_cb <= '0'; c_cb2 <= '0'; c_o6 <= to_unsigned(15, 6);   -- 2
+                when 13       => c_csh <= "10"; c_cb <= '1'; c_cb2 <= '0'; c_o6 <= to_unsigned(27, 6);   -- 3 (k 832 .. 895)
+                -- K6 top +25 % (2026-11-15): g = 4 (16 quarters = 8 + 8) for k >= 896, offset (4 - 3/4) 96 = 312
+                when others   => c_csh <= "11"; c_cb <= '0'; c_cb2 <= '1'; c_o6 <= to_unsigned(39, 6);
             end case;
             s_oys <= resize(shift_right(resize(s_ys, 19) * to_unsigned(121, 7), 8), 10);
 
@@ -1092,7 +1097,9 @@ begin
                 when "10"   => v_ls := resize(s9_l & "00", 11);
                 when others => v_ls := s9_l & "000";
             end case;
-            if c_cb = '1' then v_l2 := v_ls & '0'; else v_l2 := (others => '0'); end if;
+            if c_cb = '1' then v_l2 := v_ls & '0';
+            elsif c_cb2 = '1' then v_l2 := '0' & v_ls;      -- K6 top step: 8 + 8 quarters, max 4080 < 2^12
+            else v_l2 := (others => '0'); end if;
             k_g  <= resize(v_ls, 12) + v_l2;
         end if;
     end process p_src;

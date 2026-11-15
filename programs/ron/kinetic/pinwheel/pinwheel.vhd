@@ -43,6 +43,7 @@
 -- One latency (C_LAT = 36) in every mode.  Colours in the hardware convention (u = Cr, v = Cb).
 
 -- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K5 = Colour (was K6); K5 Spread fixed at 409 (C_KFIX_5).
+-- 2026-11-15: K6 camera top +25 % (Ron)
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -208,6 +209,8 @@ architecture pinwheel of program_top is
     signal s_kt  : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal s_kgd : signed(13 downto 0) := (others => '0');
     signal s_kg  : unsigned(12 downto 0) := to_unsigned(4096, 13);
+    -- K6 top +25 % (2026-11-15): per-field multiplier gain = 1.25 k / 2 (max 638; the product is taken / 128)
+    signal c_kq  : unsigned(9 downto 0) := to_unsigned(320, 10);
 
     -- field serial multiplier (24 iterations), serial shifter, sequencer scratch
     signal f_a, f_acc, z_fa : unsigned(47 downto 0) := (others => '0');
@@ -274,7 +277,7 @@ architecture pinwheel of program_top is
     -- K6 Camera: smeared sample x gain, three stages of gated sums (8 x 10 bits) -> 10 bits (1.0 = 256)
     signal m1_p0, m1_p1, m1_p2, m1_p3 : unsigned(11 downto 0) := (others => '0');
     signal m2_a, m2_b : unsigned(13 downto 0) := (others => '0');
-    signal s_yg : unsigned(9 downto 0) := (others => '0');
+    signal s_yg : unsigned(10 downto 0) := (others => '0');            -- 11 bits since K6 x1.25 (max 1273)
 
     -- [D] wave engine: line registers (the NEXT line's start values) and pixel accumulators (stage 1)
     signal ls_sj  : signed(27 downto 0) := (others => '0');
@@ -300,7 +303,7 @@ architecture pinwheel of program_top is
     signal q8_w   : unsigned(9 downto 0) := (others => '0');
     signal q9_p0, q9_p1, q9_p2, q9_p3 : unsigned(11 downto 0) := (others => '0');
     signal q10_qa, q10_qb : unsigned(13 downto 0) := (others => '0');
-    signal q10_src : unsigned(9 downto 0) := (others => '0');
+    signal q10_src : unsigned(10 downto 0) := (others => '0');
     signal q11_aw  : unsigned(13 downto 0) := (others => '0');
     signal q11_st  : unsigned(12 downto 0) := (others => '0');
     signal q12_al  : unsigned(12 downto 0) := (others => '0');
@@ -657,6 +660,8 @@ begin
                     when 99 =>
                         if C_SIM_SNAP or (s_kgd < 8 and s_kgd > -8) then s_kg <= s_kt & "000";
                         else s_kg <= unsigned(signed(s_kg) + resize(shift_right(s_kgd, 3), 13)); end if;
+                    -- K6 top +25 %: k / 2 + k / 8 (k = s_kg / 8), so sample x c_kq / 128 = 1.25 x sample x k / 256
+                    when 100 => c_kq <= resize(s_kg(12 downto 4), 10) + resize(s_kg(12 downto 6), 10);
                     when 156 =>                      -- depth = (k3 / 1023)^2 * 1.25 turns
                         v_t := shift_left(resize(f_acc(25 downto 0), 29), 2) + resize(f_acc(25 downto 0), 29);
                         c_d <= v_t(28 downto 21);
@@ -855,14 +860,14 @@ begin
 
             -- K6 Camera: the smeared sample x the glided gain (k / 256), one multiply over three stages
             -- (3 px later than the smear: invisible against its 64 px)
-            m1_p0 <= f_gu(s_kg(12 downto 3), s_y1(6), 12)  + shift_left(f_gu(s_kg(12 downto 3), s_y1(7), 12), 1);
-            m1_p1 <= f_gu(s_kg(12 downto 3), s_y1(8), 12)  + shift_left(f_gu(s_kg(12 downto 3), s_y1(9), 12), 1);
-            m1_p2 <= f_gu(s_kg(12 downto 3), s_y1(10), 12) + shift_left(f_gu(s_kg(12 downto 3), s_y1(11), 12), 1);
-            m1_p3 <= f_gu(s_kg(12 downto 3), s_y1(12), 12) + shift_left(f_gu(s_kg(12 downto 3), s_y1(13), 12), 1);
+            m1_p0 <= f_gu(c_kq, s_y1(6), 12)  + shift_left(f_gu(c_kq, s_y1(7), 12), 1);
+            m1_p1 <= f_gu(c_kq, s_y1(8), 12)  + shift_left(f_gu(c_kq, s_y1(9), 12), 1);
+            m1_p2 <= f_gu(c_kq, s_y1(10), 12) + shift_left(f_gu(c_kq, s_y1(11), 12), 1);
+            m1_p3 <= f_gu(c_kq, s_y1(12), 12) + shift_left(f_gu(c_kq, s_y1(13), 12), 1);
             m2_a <= resize(m1_p0, 14) + shift_left(resize(m1_p1, 14), 2);
             m2_b <= resize(m1_p2, 14) + shift_left(resize(m1_p3, 14), 2);
             v_m18 := resize(m2_a, 18) + shift_left(resize(m2_b, 18), 4);
-            s_yg <= v_m18(17 downto 8);
+            s_yg <= v_m18(17 downto 7);            -- 255 x 638 / 128 = 1271 < 2^11
         end if;
     end process p_src;
 
@@ -987,9 +992,9 @@ begin
             k8 <= v_k;
             if s_gav_sr(5) = '1' then sl_ra <= v_k; else sl_ra <= (not v_k(7)) & v_k(6 downto 0); end if;
             k9 <= k8; k10 <= k9;
-            q10_src <= unsigned(sl_q(9 downto 0));
+            q10_src <= unsigned(sl_q(10 downto 0));
             -- on the sample row, at the cell column's last pixel: store the smeared sample x the camera gain
-            sl_wd <= "000000" & std_logic_vector(s_yg);
+            sl_wd <= "00000" & std_logic_vector(s_yg);
             sl_wa <= k10;
             if s_srow = '1' and s_gav_sr(8) = '1' and (s_nw(9) = '1' or s_gav_sr(7) = '0') then sl_we <= '1'; else sl_we <= '0'; end if;
 
@@ -998,8 +1003,8 @@ begin
             v_st := shift_left(resize(q10_src, 13), 3) + shift_left(resize(q10_src, 13), 1);
             if s_src = '1' then q11_st <= v_st(11 downto 0) & '0'; else q11_st <= v_st; end if;
             if s_src = '0' then
-                if q10_src(9 downto 8) /= "00" then rt_ra <= (others => '1'); else rt_ra <= q10_src(7 downto 0); end if;
-            elsif q10_src(9 downto 7) /= "000" then rt_ra <= (others => '1');
+                if q10_src(10 downto 8) /= "000" then rt_ra <= (others => '1'); else rt_ra <= q10_src(7 downto 0); end if;
+            elsif q10_src(10 downto 7) /= "0000" then rt_ra <= (others => '1');
             else rt_ra <= q10_src(6 downto 0) & '0'; end if;
             -- 12: the state: alpha = +-Depth * wave + source (13 bits per turn)
             v_al := signed(resize(q11_aw, 15));

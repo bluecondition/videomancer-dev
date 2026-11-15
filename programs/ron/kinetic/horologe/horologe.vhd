@@ -22,8 +22,8 @@
 --   K3  Depth    swing 0 .. 1.25 turns (square law)
 --   K4  Rate     bipolar, centre = still; 60 s per cycle .. 2 cycles per second
 --   K5  Hands    hand 2 against hand 1: locked in line .. mirrored (centre) .. counter-running at up to x3 (glided)
---   K6  Camera   camera strength 0 .. 100 % (default 50 % = twice the v0.1.0 gain): source term = luma x 0 .. 80
---                (Q14 turns per luma step; 25 % = x20 = v0.1.0), Osc x2.  Applied to the held sample as it is read,
+--   K6  Camera   camera strength 0 .. 100 %: source term = luma x 0 .. 100 (Q14 turns per luma step; x1.25 of
+--                the v0.1.1 law, 2026-11-15; 25 % = x25), Osc x2.  Applied to the held sample as it is read,
 --                through a 256-entry gain table refilled every field by repeated addition (no multiplier).
 --   S7  Wave     Smooth / Snap
 --   S8  Field    Linear / Radial
@@ -37,6 +37,7 @@
 --   [F] output conditioning.  One latency (C_LAT = 57) in every mode.  Hardware colour convention (u = Cr).
 
 -- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K2 = Colour (was K6); K2 Shape fixed at 450 (C_KFIX_2).
+-- 2026-11-15: K6 camera top +25 % (Ron)
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -306,8 +307,8 @@ architecture horologe of program_top is
     signal q10_qa, q10_qb : unsigned(13 downto 0) := (others => '0');
     signal q11_aw  : unsigned(14 downto 0) := (others => '0');
     signal q11_st  : unsigned(15 downto 0) := (others => '0');
-    signal q12_al  : signed(16 downto 0) := (others => '0');
-    signal q13_a   : signed(13 downto 0) := (others => '0');           -- hand 1, Q11 turns
+    signal q12_al  : signed(17 downto 0) := (others => '0');           -- 18 bits since K6 x1.25 (up to 4.4 turns)
+    signal q13_a   : signed(14 downto 0) := (others => '0');           -- hand 1, Q11 turns
     signal h14_p0, h14_p1, h14_p2, h14_p3, h15_qa, h15_qb, h16_pr : signed(15 downto 0) := (others => '0');
     signal q14_a1, q15_a1, q16_a1, q17_a1, q17_a2 : unsigned(10 downto 0) := (others => '0');
     signal q17_lx  : signed(10 downto 0) := (others => '0');
@@ -654,6 +655,8 @@ begin
                         -- Camera: gain = 5/16 K6 (K6 256 -> 80 = the v0.1.0 x20), Osc x2
                         v_cg := resize(s_g6(12 downto 5), 10) + resize(s_g6(12 downto 7), 10);
                         if s_src = '1' then c_cg <= v_cg(8 downto 0) & '0'; else c_cg <= v_cg; end if;
+                    -- K6 top +25 %: gain x 1.25 (Video max 397, Osc max 795 < 1024), before the table fill at zc 768
+                    when 82 => c_cg <= c_cg + shift_right(c_cg, 2);
                     when 81 =>
                         c_xmp  <= signed(resize(c_xst, 19)) - signed(resize(c_p, 19));
                         c_x2mp <= signed(resize(c_xst & '0', 19)) - signed(resize(c_p, 19));
@@ -927,13 +930,13 @@ begin
     p_wave : process(clk)
         variable v_a   : unsigned(19 downto 0);
         variable v_pos : unsigned(11 downto 0);
-        variable v_al  : signed(16 downto 0);
+        variable v_al  : signed(17 downto 0);
         variable v_p   : unsigned(17 downto 0);
         variable v_k   : unsigned(7 downto 0);
         variable v_bk  : std_logic;
         variable v_sel : unsigned(13 downto 0);
-        variable v_sn  : signed(16 downto 0);
-        variable v_n   : signed(5 downto 0);
+        variable v_sn  : signed(17 downto 0);
+        variable v_n   : signed(6 downto 0);
         variable v_bo  : unsigned(7 downto 0);
     begin
         if rising_edge(clk) then
@@ -992,18 +995,18 @@ begin
             sl_wa <= l_wbank & v_bo;
             if l_last = '1' and s_gav_sr(8) = '1' and (s_nw(9) = '1' or s_gav_sr(7) = '0') then sl_we <= '1'; else sl_we <= '0'; end if;
 
-            -- 11: source term = 4 x the gain table's word (K6: Video x0 .. x80 per luma step, default x40, white =
-            -- 0.53 turn; Osc x2): gt = sample x c_cg / 16, max 255 x 638 / 16 < 2^14
+            -- 11: source term = 4 x the gain table's word (K6: Video x0 .. x100 per luma step since the 2026-11-15
+            -- +25 %; Osc x2): gt = sample x c_cg / 16, max 255 x 795 / 16 < 2^14
             q11_st <= unsigned(gt_q(13 downto 0)) & "00";
-            -- 12: hand 1 = +-Depth * wave + source (Q14 turns, signed; 17 bits: up to 3.6 turns never wraps)
-            v_al := signed(resize(q11_aw, 17));
+            -- 12: hand 1 = +-Depth * wave + source (Q14 turns, signed; 18 bits: up to 4.4 turns never wraps)
+            v_al := signed(resize(q11_aw, 18));
             if s_neg(11) = '1' then v_al := -v_al; end if;
-            q12_al <= v_al + signed(resize(q11_st, 17));
+            q12_al <= v_al + signed(resize(q11_st, 18));
             -- 13: Snap: tick between the 8 compass points (dwell, a quick move across +-1/64 turn); Q11 turns
             v_sn := q12_al + 256;
-            v_n := v_sn(16 downto 11);
+            v_n := v_sn(17 downto 11);
             if s_snap = '0' then
-                q13_a <= q12_al(16 downto 3);
+                q13_a <= q12_al(17 downto 3);
             elsif v_sn(10 downto 9) /= "00" then
                 q13_a <= (v_n + 1) & "00000000";
             else

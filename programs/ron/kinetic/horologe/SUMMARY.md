@@ -179,3 +179,24 @@ v0.1.1. K6 is now Camera: how hard the held camera luma turns the hands.
 - Unsure on hardware: whether 100 % (white spins a clock 1.07 turns, so the picture no longer maps one way onto the
   hand angles) reads as the climax Ron wants, and whether a noisy camera makes the hands jitter more at 2x; the
   hold has no smoothing along y or time.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+v0.1.2. Ron, after the fern / kiln K6 = 100 % renders: a slightly stronger camera effect at the top of the knob.
+The orchestrator set the K6 default to 100 % (1023) and bumped the version; this pass changed the logic.
+
+- Classification: **element** (K6 scales the held luma that turns the hands: it moves the drawing, it never
+  shows the camera image).
+- Change: the table's top extended. A new sequencer slot (zc 82, before the gain table fill at zc 768 .. 1023)
+  scales the per-field gain by 1.25 (c_cg += c_cg >> 2): Video = luma x 0 .. 100 per step (was 0 .. 80; 50 % =
+  x50), Osc x2 that (max gain 795 of 1023). The table's top word is now 255 x 795 / 16 = 12,670 (14-bit word,
+  18-bit fill sum: both fit). The hand-1 sum grew from 17 to 18 bits and hand 1 from 14 to 15 bits (Q11 turns),
+  since Osc white plus full Depth now reaches 4.3 turns and a wrap would jump hand 2 (Hands multiplies hand 1);
+  Snap's compass index is 7 bits. At 100 % white turns a clock 1.33 turns (was 1.07).
+- Look (GHDL, bear.png, 720p60 / 4, glides bypassed in the scratch copies): `.kinetic_work/rb_horologe/k6b/
+  k6b_cmp.png`. Same clock wall; the hands sit at different angles (more turn); every clock stays rigid. No wrap
+  or new artifacts.
+- Build (`.kinetic_work/tools/k6build.sh kinetic horologe`): router1, every config on seed 1 (it placed first
+  time). Post-route Fmax HD Analog 79.83, HD HDMI 76.38, HD Dual 77.16, SD Analog 74.74, SD HDMI 80.33, SD Dual
+  82.60 MHz (worst HD 76.38). 7,014 LC at most (91.3 %, +36), 19 / 32 block RAMs. vmprog:
+  out/rev_b/ron/kinetic/horologe.vmprog. Not flashed.

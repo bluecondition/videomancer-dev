@@ -153,3 +153,23 @@ by about 30 lines (the heavier vertical smoothing).
 - The source line store differs from riley's chassis: 16-bit words (12-bit state), 1/32 per line.
 - The beam DDAs count down, so the tiling is the mirror image of the first prototype's (same figures).
 - `field_n` is passed through one register (the core ties it high on every input), as in riley.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+v0.1.2. Ron, after the fern / kiln K6 = 100 % renders: a slightly stronger camera effect at the top of the knob.
+The orchestrator set the K6 default to 100 % (1023) and bumped the version; this pass changed the logic.
+
+- Classification: **element** (K6 scales the source's offset to A, which bends the tile edges: it re-shapes
+  the drawing, it never shows the camera image).
+- Change: the per-field source-table gain G is x1.25 at every knob position (a new zone clock, zc 223, between
+  the G decode at 222 and the fill at 224: c_wg += c_wg >> 2): 25 % = 400, 50 % = 800 (2.5 x v0.1.0), 100 % =
+  1,197 (3.75 x; was 958 = 3 x). G fits its 11 bits; the fill's G l^2 sum (77.8 M < 2^27) and its 2 G step
+  (614 k < 2^20) fit; the table word still clamps at 511 (1 tile). No pixel-path change.
+- Look (GHDL, bear.png, 720p60 / 4, glides bypassed in the scratch copies): `.kinetic_work/rb_metamorph/k6b/
+  k6b_cmp.png`. The same figures, bent further in the bright areas. No wrap or new artifacts.
+- Doubt: the K6 camera pass found 4 x frayed the edges into per-line steps; 3.75 x is close to that, though the
+  bear render at 3.75 x still reads clean.
+- Build (`.kinetic_work/tools/k6build.sh kinetic metamorph`): router1, every config on seed 1. Post-route Fmax
+  HD Analog 90.94, HD HDMI 93.55, HD Dual 91.45, SD Analog 85.34, SD HDMI 84.85, SD Dual 96.29 MHz (worst HD
+  90.94). 7,214 LC at most (93.9 %), 23 / 32 block RAMs. vmprog: out/rev_b/ron/kinetic/metamorph.vmprog. Not
+  flashed.

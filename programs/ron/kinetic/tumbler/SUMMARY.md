@@ -155,3 +155,24 @@ v0.1.1. K6 is now **Camera**, the camera strength (Ron's rule for the Heirloom /
 - SD: the anti-alias ramp is 4 virtual px (2 real px across, about 1 field line down), the hairline is 4
   virtual px wide; 720p / 1080i: ramp 2 virtual px, hairline 3.
 - No float prototype: per the run notes the design went straight to the integer model at RTL widths.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+v0.1.2. Ron, after the fern / kiln K6 = 100 % renders: a slightly stronger camera effect at the top of the knob.
+The orchestrator set the K6 default to 100 % (1023) and bumped the version; this pass changed the logic.
+
+- Classification: **element** (K6 scales the held source that turns each cube's light angle psi: it recolours
+  the drawing by brightness, it never shows the camera image).
+- Change: the camera gain is x1.25 at every knob position: 0 .. 5x (was 0 .. 4x; 25 % = 1.25x, 50 % = 2.5x).
+  A new sequencer slot (zc 44) registers c_kq = k / 2 + k / 8 (max 638), which feeds the existing 8 x 10
+  gated-sum multiply in place of k; the product is taken / 128 instead of / 256, so the multiplier keeps its
+  width. The scaled source (max 1,271) is kept modulo 1024 in the existing 10-bit delay-ring field: exact,
+  because psi = 48 x source (Osc 96) and 1024 x 16 is a whole turn. At 100 % white runs psi 3.2 turns round the
+  colour wheel (was 2.6).
+- Look (GHDL, bear.png, 720p60 / 4, C_SIM_SNAP in the scratch copies): `.kinetic_work/rb_tumbler/k6b/
+  k6b_cmp.png`. Same rigid cube tiling; individual cubes land on other face tones (more turns of the wheel). No
+  wrap or new artifacts.
+- Build (`.kinetic_work/tools/k6build.sh kinetic tumbler`): router1, every config on seed 1. Post-route Fmax
+  HD Analog 82.43, HD HDMI 83.96, HD Dual 76.86, SD Analog 89.29, SD HDMI 85.06, SD Dual 88.79 MHz (worst HD
+  76.86). 6,992 LC at most (91.0 %), 16 / 32 block RAMs. vmprog: out/rev_b/ron/kinetic/tumbler.vmprog. Not
+  flashed.

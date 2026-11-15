@@ -178,3 +178,24 @@ v0.1.1. K6 is now **Camera**, the camera strength (Ron's rule for the Heirloom /
 - Scale's pitch is quantised to half a virtual pixel, so a slow Scale glide moves the outer cells in sub-pixel
   to 2-px steps.
 - `field_n` is delayed with the syncs; nothing in the picture depends on it.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+v0.1.2. Ron, after the fern / kiln K6 = 100 % renders: a slightly stronger camera effect at the top of the knob.
+The orchestrator set the K6 default to 100 % (1023) and bumped the version; this pass changed the logic.
+
+- Classification: **element** (K6 scales the held source that turns the rotors and swells the discs: it moves
+  and sizes the drawing, it never shows the camera image).
+- Change: the camera gain is x1.25 at every knob position: 0 .. 5x (was 0 .. 4x; 25 % = 1.25x, 50 % = 2.5x).
+  A new sequencer slot (zc 100) registers c_kq = k / 2 + k / 8 (max 638), which feeds the existing 8 x 10
+  gated-sum multiply in place of k; the product is taken / 128 instead of / 256, so the multiplier keeps its
+  width. The held source grew from 10 to 11 bits (white at 100 %: 1,091, max 1,271): the hold word, the read
+  register and the disc-size clamp (now on bits 10 .. 8 / 10 .. 7) follow; the rotation term still wraps
+  modulo a turn. At 100 % white turns a rotor 1.33 turns (was 1.07) and more cells reach the full disc.
+- Look (GHDL, bear.png, 720p60 / 4, C_SIM_SNAP in the scratch copies): `.kinetic_work/rb_pinwheel/k6b/
+  k6b_cmp.png`. Same rotor wall; the marker blades sit at different angles (more rotation). No wrap or new
+  artifacts.
+- Build (`.kinetic_work/tools/k6build.sh kinetic pinwheel`): router1, every config on seed 1. Post-route Fmax
+  HD Analog 83.76, HD HDMI 79.37, HD Dual 85.41, SD Analog 78.68, SD HDMI 77.95, SD Dual 91.30 MHz (worst HD
+  79.37). 6,961 LC at most (90.6 %), 23 / 32 block RAMs. vmprog: out/rev_b/ron/kinetic/pinwheel.vmprog. Not
+  flashed.

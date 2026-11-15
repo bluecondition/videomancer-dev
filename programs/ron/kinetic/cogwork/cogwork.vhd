@@ -25,8 +25,8 @@
 --   K4  Rate     bipolar, centre = still; 60 s per cycle .. 2 cycles per second
 --   K5  Colour   the 16 shared palettes (ground, A / B = gears by parity, accent = hubs) (was K6; Spread is
 --                fixed at 450 = the old default, C_KFIX_5)
---   K6  Camera   camera strength 0 .. 100 % (default 50 % = twice the v0.1.0 gain): state += luma x 0 .. 32
---                (25 % = x8 = v0.1.0), Osc x3.  Applied to the held sample before the hold.
+--   K6  Camera   camera strength 0 .. 100 %: state += luma x 0 .. 40 (x1.25 of the v0.1.1 law, 2026-11-15;
+--                25 % = x10), Osc x3.  Applied to the held sample before the hold.
 --   S7  Wave     Smooth / Snap
 --   S8  Field    Linear / Radial
 --   S9  Body     Spoked / Disc
@@ -44,6 +44,7 @@
 -- One latency (C_LAT = 32) in every mode.  Colours in the hardware convention (u = Cr, v = Cb).
 
 -- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K5 = Colour (was K6); K5 Spread fixed at 450 (C_KFIX_5).
+-- 2026-11-15: K6 camera top +25 % (Ron)
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -296,7 +297,7 @@ architecture cogwork of program_top is
     signal q12_aw : unsigned(12 downto 0) := (others => '0');
     signal q11_src : unsigned(13 downto 0) := (others => '0');
     signal q12_st : unsigned(14 downto 0) := (others => '0');
-    signal q13_stt : signed(15 downto 0) := (others => '0');
+    signal q13_stt : signed(16 downto 0) := (others => '0');   -- 17 bits: the K6 x1.25 Osc source reaches 30504 + 8191
     signal q14_hs : signed(9 downto 0) := (others => '0');
     type t_ix is array (2 to 8) of unsigned(4 downto 0);
     signal q_ix : t_ix := (others => (others => '0'));
@@ -622,6 +623,8 @@ begin
                     when 24 =>
                         if s_src = '1' then c_cg <= resize(s_g6(12 downto 5), 10) + resize(s_g6(12 downto 4), 10);
                         else c_cg <= resize(s_g6(12 downto 5), 10); end if;
+                    -- K6 top +25 %: gain x 1.25 (Video max 318, Osc max 957 < 1024)
+                    when 25 => c_cg <= c_cg + shift_right(c_cg, 2);
                     when 60  => c_sy <= f_acc(28 downto 8);
                     when 92  => c_x0 <= to_unsigned(8388608, 32) - f_acc(31 downto 0);
                     when 124 => c_y0 <= to_unsigned(8388608, 32) - f_acc(31 downto 0);
@@ -823,7 +826,7 @@ begin
             -- hold: write as the stage-1 pixel crosses the cell centre on a cell row's first line
             sl_wa <= "000" & a_x(28 downto 24);
             -- K6 camera gain on the smeared sample (3 stages: the written sample is the smear 2 px before the write
-            -- point): h = sample x c_cg / 16 = the source term / 2, max 255 x 765 / 16 < 2^14
+            -- point): h = sample x c_cg / 16 = the source term / 2, max 255 x 957 / 16 < 2^14 (K6 x1.25)
             for i in 0 to 3 loop
                 cm1_p(i) <= f_gu(c_cg, s_y1(6 + 2 * i), 12) + shift_left(f_gu(c_cg, s_y1(7 + 2 * i), 12), 1);
             end loop;
@@ -872,8 +875,8 @@ begin
         variable v_pos : unsigned(11 downto 0);
         variable v_th  : unsigned(13 downto 0);
         variable v_p   : unsigned(15 downto 0);
-        variable v_st  : signed(15 downto 0);
-        variable v_h   : signed(11 downto 0);
+        variable v_st  : signed(16 downto 0);
+        variable v_h   : signed(12 downto 0);
     begin
         if rising_edge(clk) then
             -- 2: Spread * column of the stage-2 pixel
@@ -922,16 +925,16 @@ begin
             q12_aw <= v_p(15 downto 3);
 
             -- source hold read: address at 9, RAM at 10, fabric at 11, x2 at 12 (gained before the hold by K6:
-            -- Video x0 .. x32, default x16; Osc x3 that)
+            -- Video x0 .. x40, default x20; Osc x3 that; K6 top +25 % 2026-11-15)
             sl_ra <= "000" & q_ix(8);
             q11_src <= unsigned(sl_q(13 downto 0));
             q12_st <= q11_src & '0';
-            -- 13: the state = +-Depth * wave + source (14 bits per turn)
-            v_st := signed(resize(q12_aw, 16));
+            -- 13: the state = +-Depth * wave + source (14 bits per turn; 17-bit sum, no wrap before the hub clamp)
+            v_st := signed(resize(q12_aw, 17));
             if s_neg(12) = '1' then v_st := -v_st; end if;
-            q13_stt <= v_st + signed(resize(q12_st, 16));
+            q13_stt <= v_st + signed(resize(q12_st, 17));
             -- 14: the hub swell
-            v_h := q13_stt(15 downto 4);
+            v_h := q13_stt(16 downto 4);
             if v_h > 420 then q14_hs <= to_signed(420, 10);
             elsif v_h < -230 then q14_hs <= to_signed(-230, 10);
             else q14_hs <= v_h(9 downto 0); end if;

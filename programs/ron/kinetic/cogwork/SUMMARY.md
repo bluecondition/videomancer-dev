@@ -155,3 +155,24 @@ v0.1.1. K6 is now Camera: how hard the held camera luma swings the spokes and sw
 - Unsure on hardware: whether 100 % reads as enough of a climax over 50 %. The hub swell hits its 420 / 4096 limit
   at white only near 100 % (K6 about 980), so the top of the knob mostly adds spoke swing (up to 0.43 turn) and fills more hubs
   to the limit; with Osc the hubs plateau at the limit over much of the lattice from 50 % up.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+v0.1.2. Ron, after the fern / kiln K6 = 100 % renders: a slightly stronger camera effect at the top of the knob.
+The orchestrator set the K6 default to 100 % (1023) and bumped the version; this pass changed the logic.
+
+- Classification: **element** (K6 scales the held luma that swings the spokes and swells the hubs: it bends the
+  drawing, it never shows the camera image).
+- Change: the per-field gain is x1.25 at every knob position (new sequencer slot zc 25: c_cg += c_cg >> 2), so
+  Video = luma x 0 .. 40 (was 0 .. 32; 50 % = x20), Osc x3 that (max gain 957 of 1023). The hold's gated-sum
+  product still fits its 14-bit word (255 x 957 / 16 = 15,252). The state sum (Depth wave + source) grew from
+  16 to 17 bits, because the Osc source at x1.25 reaches 30,504 + 8,191 and would have wrapped the hub swell's
+  sign; the hub clamp (420 / -230) now reads bits 16 .. 4 and the spoke angle still takes the low 12 bits.
+  At 100 % white now reaches the hub limit at K6 about 790 and swings the spokes 0.53 turn.
+- Look (GHDL, bear.png, 720p60 / 4, glides bypassed in the scratch copies): `.kinetic_work/rb_cogwork/k6b/
+  k6b_cmp.png`. Same gear wall; the spokes sit at different angles (more swing) and the hubs are a little
+  fuller. No wrap or new artifacts.
+- Build (`.kinetic_work/tools/k6build.sh kinetic cogwork`): router1; HD HDMI on **seed 2**, the rest seed 1.
+  Post-route Fmax HD Analog 82.27, HD HDMI 87.62, HD Dual 90.56, SD Analog 91.90, SD HDMI 83.04, SD Dual
+  86.45 MHz (worst HD 82.27). 7,208 LC at most (93.9 %), 18 / 32 block RAMs. vmprog:
+  out/rev_b/ron/kinetic/cogwork.vmprog. Not flashed.

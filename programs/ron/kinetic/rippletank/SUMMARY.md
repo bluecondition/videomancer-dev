@@ -167,3 +167,26 @@ v0.1.1. Ron: K6 is the camera strength in every program, default 50 %.
   70.53, SD HDMI 75.77, SD Dual 77.62. 7,056 .. 7,081 / 7,680 LC (92 %, v0.1.0 7,019 .. 7,066), 17 / 32 EBR
   (unchanged). Log `.kinetic_work/rb_rippletank/build_v0.1.1.log`.
 
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+v0.1.2. Ron, after the fern / kiln K6 = 100 % renders: a slightly stronger camera effect at the top of the knob.
+The orchestrator set the K6 default to 100 % (1023) and bumped the version; this pass changed the logic.
+
+- Classification: **element** (K6 sets how hard the camera luma lifts the ripple field toward colour A: it
+  re-shapes the drawn waves, it never shows the camera image as such).
+- Change: the gain is a step code, so one step was added at the top: g = 4 (16 quarters) for k >= 896 (the
+  nearest representable step to 1.25 x the old top g = 3; slope x 5.3 against v0.1.0 instead of x 4). g = 3 now
+  holds only k 832 .. 895; every lower step is unchanged. The step is built as 8 + 8 quarters: the gated add
+  that made x 3 (v_ls + 2 v_ls) gets a second flag (c_cb2) adding v_ls itself, still one LUT per bit; k_g max
+  4,080 < 2^12. The contrast offset (g - 3/4) x 96 is 312 for the new step, so its register grew from 5 to 6
+  bits; the stage-10 sum stays inside 11 bits (at most 190 + 1,020 - 312).
+- Look (GHDL, bear.png, 720p60 / 4, glides bypassed in the scratch copies): `.kinetic_work/rb_rippletank/k6b/
+  k6b_cmp.png`. Nearly the same frame: the bright areas were already filled to colour A at the old top, so the
+  steeper contrast shows only as slightly more light / dark separation in the mid-tones. No wrap or new artifacts.
+- Doubt: the lift caps at colour A, so the top step reads subtly on a bright picture.
+- Build (`.kinetic_work/tools/k6build.sh kinetic rippletank`): router1. Seeds: HD HDMI **seed 2** (seed 1 missed
+  timing), SD HDMI **seed 3** (seeds 1 and 2 stalled the router; no CARRY I0 == I1 self-add in the netlist,
+  so congestion), the rest seed 1. Post-route Fmax HD Analog 77.62, HD HDMI 75.13, HD Dual 76.09, SD Analog
+  78.51, SD HDMI 75.77, SD Dual 77.58 MHz (worst HD 75.13: a thin margin). 7,084 LC at most (92.2 %, +3),
+  17 / 32 block RAMs. vmprog: out/rev_b/ron/kinetic/rippletank.vmprog. Not flashed.

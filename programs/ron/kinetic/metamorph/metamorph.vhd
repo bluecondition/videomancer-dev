@@ -23,7 +23,8 @@
 --   K3  Depth    the wave's swing of A (square law, 0 .. 1/2 tile)
 --   K4  Rate     wave travel, bipolar, centre = still
 --   K5  Colour   the 16 shared Kinetic palettes (ground, A; the accent on the outline)   [K6 before v0.1.1]
---   K6  Camera   the source's strength: the luma^2 table gain, 0 = none, 25 % = v0.1.0's, 50 % = 2 x, 100 % = 3 x
+--   K6  Camera   the source's strength: the luma^2 table gain, 0 = none, 25 % = 1.25 x v0.1.0's, 50 % = 2.5 x,
+--                100 % = 3.75 x (x1.25 at every position since 2026-11-15)
 --       (Spread, K5 before v0.1.1, is fixed at 420: phase step per tile, one metamorphosis across the screen)
 --   S7  Wave     Smooth / Snap (dwell at the extremes)
 --   S8  Field    Linear (the metamorphosis sweeps across) / Radial (rings from the centre)
@@ -45,6 +46,7 @@
 -- Colours in the hardware convention (u = Cr, v = Cb).
 
 -- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K5 = Colour (was K6); K5 Spread fixed at 420 (C_KFIX_5).
+-- 2026-11-15: K6 camera top +25 % (Ron)
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -1193,6 +1195,10 @@ begin
                 else
                     c_wg <= to_unsigned(320, 11) + resize(s_g6(12 downto 4), 11) + resize(s_g6(12 downto 6), 11);
                 end if;
+            end if;
+            -- K6 top +25 % (2026-11-15): G x 1.25 (max 1197 < 2048; G 255^2 < 2^27, the 2 G step < 2^20)
+            if s_zone = '1' and s_zc = 223 then
+                c_wg <= c_wg + shift_right(c_wg, 2);
             end if;
             -- source table fill (zone, zc 224 .. 480): A units by source level, (G l^2) >> 16 clamped to 511
             -- (1 tile), the square by second differences
