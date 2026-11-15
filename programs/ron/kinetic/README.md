@@ -34,5 +34,5 @@ Flash from `out/rev_b/ron/kinetic/<name>.vmprog`; rebuild one with `./build_set.
 | 16 | isoline | Metaballs drawn as clean topographic bands | Merge | in progress |
 | 17 | [girih](girih/) | Islamic star pattern whose contact angle opens stars into rosettes | Angle | v0.1.0 built 2026-11-14 (router2, all six seed 1; HD 79.2-94.8 MHz; ~6,000 LC, 78 %, 15 EBR); not flashed |
 | 18 | [wallpaper](wallpaper/) | One motif pushed through symmetry groups under rotation and zoom | Symmetry sweep | v0.1.0 built 2026-11-14 (router2; HD Dual seed 2, others seed 1; HD 77.4-82.2 MHz; 7,371-7,383 LC, 96 %, 20 EBR); not flashed; sparse default, rework candidate |
-| 19 | outrun | Neon perspective grid, floor and ceiling, with rolling wave terrain | Terrain height | in progress |
+| 19 | [outrun](outrun/) | Neon perspective grid, floor and ceiling, with rolling wave terrain | Terrain height | v0.1.0 built 2026-11-14 (ROUTER1, all six seed 1; HD 79.0-87.0 MHz; 6,945 LC, 90 %, 13 EBR); not flashed |
 | 20 | [slinky](slinky/) | A shape with graded echo copies along a swinging axis: an extruded tube | Extrusion length | v0.1.0 built 2026-11-14 (router2; HD Analog + HD Dual seed 2, others seed 1; HD 76.0-84.2 MHz; 6,966 LC, 91 %, 17 EBR); not flashed |
