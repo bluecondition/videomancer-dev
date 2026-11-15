@@ -1,0 +1,167 @@
+# Tumbler - Kinetic, 2026-11-14.
+# The tumbling-blocks tiling: cubes of three rhombi whose three tones rotate with each cube's light angle.
+# See tumbler.vhd, tumbler.py and SUMMARY.md.
+
+[program]
+processing_delay_clks = 30
+program_id = "com.czartroniks.tumbler"
+program_name = "Tumbler"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Pattern", "Illusion", "Shape"]
+program_type = "processing"
+description = "Tumbling-blocks cubes whose three tones rotate in a travelling wave, so the cubes tumble and invert."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Scale"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 690
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Shape"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 693
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Inset"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 300
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Rate"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 640
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Spread"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 520
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Colour"
+control_mode = "linear"
+display_min_value = 1
+display_max_value = 16
+initial_value = 160
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Wave"
+value_labels = ["Smooth", "Snap"]
+initial_value_label = "Smooth"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Field"
+value_labels = ["Linear", "Radial"]
+initial_value_label = "Linear"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Edges"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Tone"
+value_labels = ["Shaded", "Three"]
+initial_value_label = "Shaded"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Flip"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Tumbling Blocks"
+
+[[preset]]
+name = "Necker Snap"
+rotary_potentiometer_3 = 0
+rotary_potentiometer_5 = 300
+rotary_potentiometer_6 = 32
+toggle_switch_7 = 1
+toggle_switch_10 = 1
+linear_potentiometer_12 = 700
+
+[[preset]]
+name = "Neon Ripple"
+rotary_potentiometer_1 = 560
+rotary_potentiometer_3 = 500
+rotary_potentiometer_5 = 480
+rotary_potentiometer_6 = 288
+toggle_switch_8 = 1
+toggle_switch_9 = 1
+linear_potentiometer_12 = 760
+
+[[preset]]
+name = "Tall Blocks"
+rotary_potentiometer_1 = 760
+rotary_potentiometer_2 = 1023
+rotary_potentiometer_3 = 620
+rotary_potentiometer_4 = 400
+rotary_potentiometer_6 = 608
+linear_potentiometer_12 = 600
+
+[[preset]]
+name = "Flat Tiles"
+rotary_potentiometer_1 = 600
+rotary_potentiometer_2 = 120
+rotary_potentiometer_3 = 200
+rotary_potentiometer_5 = 620
+rotary_potentiometer_6 = 864
+toggle_switch_9 = 1
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Cube Picture"
+rotary_potentiometer_1 = 300
+rotary_potentiometer_3 = 0
+rotary_potentiometer_4 = 512
+rotary_potentiometer_6 = 32
+toggle_switch_10 = 1
+linear_potentiometer_12 = 0
