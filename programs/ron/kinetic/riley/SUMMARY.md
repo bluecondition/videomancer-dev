@@ -165,3 +165,28 @@ The RAM / ROM processes are 331-392. `imodel.py` (work dir) mirrors each section
   copy; K6 = 0 / 256 / 512 / 1023 and Osc at 512; Colour fell to Moss in those renders because the
   labelled K2 sims at 512).
 
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+v0.1.2. Ron's rule after the K6 = 100 % renders: bend / element programs get a 25 % stronger camera at the
+top of K6; picture programs keep their logic. The K6 default is now 100 % (initial 1023).
+
+- **Classification: element.** K6 is the gain of the band-weight curve: the camera changes the duty of the
+  drawn bands.
+- **Change:** in the per-field weight-table fill, c_spg = c_spg + c_spg / 4 at a new zone clock 460 (after
+  slot 17 stores it at 458, before the fill starts at 464). The gain is 1.25 x at every position:
+  - 20 % = v0.1.0;
+  - 50 % = 2.5;
+  - **100 % = 3.75** (was 3).
+
+  Widths: c_spg reaches 3250 at most (12 bits), the 28-bit wt_acc 213 M (of 268 M) and wt_d 1.66 M (of
+  2.1 M). The pixel path is unchanged.
+- **Look check:** `.kinetic_work/rb_riley/k6b/k6b_cmp.png` (GHDL, 720p60 / 4, bear.png, K2 at Ink, glides
+  snapped). The same wave field; the dark swellings are thinner because more of the picture reaches hairline
+  gaps. Clean.
+- **Doubt:** the K6 camera pass found that a straight g = 4 washed the selfie to near-uniform hairlines.
+  At 3.75 the top of K6 is close to that on a bright picture.
+- **Build** (2026-11-15, `.kinetic_work/tools/k6build.sh kinetic riley`): router1, every config on seed 1.
+  Post-route Fmax HD Analog 95.14, HD HDMI 90.42, HD Dual 88.57 MHz (worst HD 88.57); SD Analog 96.98,
+  SD HDMI 92.67, SD Dual 95.24. 6,567 .. 6,579 / 7,680 LC (85.7 %), 22 / 32 EBR. vmprog:
+  out/rev_b/ron/kinetic/riley.vmprog (v0.1.2). Not flashed.

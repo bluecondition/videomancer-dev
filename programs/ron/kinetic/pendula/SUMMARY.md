@@ -165,3 +165,28 @@ v0.1.1. K6 is now Camera: how strongly the held camera luma grows the dots.
 - Unsure on hardware: the 50 % / 100 % levels were judged on one bright test photo (selfie.jpg fills the frame
   with a lit face); a darker camera picture will look less saturated at the same setting. Also whether losing the
   orbit-shape knob is acceptable for the line / circle presets (see above).
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+v0.1.2. Ron's rule after the K6 = 100 % renders: bend / element programs get a 25 % stronger camera at the
+top of K6; picture programs keep their logic. The K6 default is now 100 % (initial 1023).
+
+- **Classification: element.** The camera grows the dots: K6 is the contrast gain on the held luma that
+  sets each dot's size.
+- **Change:** c_cg = c_cg + c_cg / 4 at a new zone clock 23, after the two-segment law at clock 21. The
+  gain is 1.25 x at every position (0 .. 958 in Q8, 10 bits as before):
+  - 20 % = v0.1.0;
+  - 50 % = x 2.5;
+  - **100 % = x 3.74** (was x 3).
+
+  The product reaches 954 at most, inside the 10-bit cm3_x, and the soft knee is unchanged.
+- **Look check:** `.kinetic_work/rb_pendula/k6b/k6b_cmp.png` (GHDL, 720p60 / 4, bear.png, glides snapped).
+  The crop is a bright area, where the dots were already at the largest size at x 3, so almost nothing
+  changes (1.2 % of pixels). No wrap or garbage.
+- **Doubt:** the K6 camera pass rejected x 4 at 100 % because a bright picture became nearly all full dots.
+  The new x 3.74 is close to that, so the top of K6 may wash a bright camera picture toward a uniform
+  lattice on hardware.
+- **Build** (2026-11-15, `.kinetic_work/tools/k6build.sh kinetic pendula`): router1, every config on seed 1.
+  Post-route Fmax HD Analog 83.13, HD HDMI 96.95, HD Dual 96.23 MHz (worst HD 83.13); SD Analog 98.34,
+  SD HDMI 95.17, SD Dual 94.45. 6,796 .. 6,803 / 7,680 LC (88.6 %), 21 / 32 EBR. vmprog:
+  out/rev_b/ron/kinetic/pendula.vmprog (v0.1.2). Not flashed.

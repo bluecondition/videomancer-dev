@@ -27,8 +27,8 @@
 --   K3  Depth    orbit size 0 .. 69 % of the half cell (square law)
 --   K4  Rate     bipolar, centre = still; 60 s per cycle .. 2 cycles per second
 --   K5  Size     dot radius 25 % .. 87 % of the room the orbit leaves
---   K6  Camera   camera strength 0 .. 100 % (default 50 %): the held luma (and the Osc lattice) x 0 .. 3 with a
---                soft knee at white, before the hold; 25 % = x1 = v0.1.0, 50 % = x2
+--   K6  Camera   camera strength 0 .. 100 %: the held luma (and the Osc lattice) x 0 .. 3.75 with a soft knee at
+--                white, before the hold; 20 % = x1 = v0.1.0, 50 % = x2.5, 100 % = x3.75 (2026-11-15: x 1.25 everywhere)
 --   S7  Wave     Smooth / Snap
 --   S8  Field    Linear / Radial
 --   S9  Lattice  Square / Hex (alternate rows offset half a pitch)
@@ -46,6 +46,7 @@
 -- One latency (C_LAT = 36) in every mode.  Colours in the hardware convention (u = Cr, v = Cb).
 
 -- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K2 = Colour (was K6); K2 Shape fixed at 128 (C_KFIX_2).
+-- 2026-11-15: K6 camera top +25 % (Ron)
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -133,7 +134,7 @@ architecture pendula of program_top is
     signal h_wd  : std_logic_vector(7 downto 0) := (others => '0');
     -- K6 camera gain: glided knob (Q3), per-field gain (Q8), the gated-sum product stages
     signal s_g6  : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
-    signal c_cg  : unsigned(9 downto 0) := to_unsigned(512, 10);
+    signal c_cg  : unsigned(9 downto 0) := to_unsigned(640, 10);
     type t_u12c is array (0 to 3) of unsigned(11 downto 0);
     signal cm1_p : t_u12c := (others => (others => '0'));
     signal cm2_a, cm2_b : unsigned(13 downto 0) := (others => '0');
@@ -567,6 +568,9 @@ begin
                     when 21 =>
                         if s_g6(12) = '1' then c_cg <= to_unsigned(256, 10) + resize(s_g6(12 downto 4), 10);
                         else c_cg <= s_g6(12 downto 3); end if;
+                    -- 2026-11-15: K6 camera top +25 %: gain x 1.25 at every position (0 .. 958 = x3.74)
+                    when 23 =>
+                        c_cg <= c_cg + resize(c_cg(9 downto 2), 10);
                     -- palette: ground, A, B, accent (chroma kept to 8 bits); B and accent as differences
                     when 22 => r_pl_a <= "00" & s_pal & "00";
                     when 25 =>

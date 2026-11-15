@@ -154,3 +154,26 @@ v0.1.1. K6 is now **Camera**, the camera strength (Ron's rule for the Heirloom /
   hold every setting.
 - The float prototype was skipped for time: the design was iterated directly on the integer model.
 - `field_n` is passed through one register instead of the 40-clock delay (the core ties it high).
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+v0.1.2. Ron's rule after the K6 = 100 % renders: bend / element programs get a 25 % stronger camera at the
+top of K6; picture programs keep their logic. The K6 default is now 100 % (initial 1023).
+
+- **Classification: element.** K6 scales the held luma that shifts each cell's ring phase. The camera moves
+  the drawing's rings; it is never shown as an image.
+- **Change:** a new per-field gain `c_kh` = k / 2 + k / 8 (half of 1.25 k, 0 .. 638), set at zone clock 28
+  after the glide. It replaces s_kg(12 downto 3) in the unchanged 8 x 10 gated-sum multiply, and the product
+  is taken one bit higher (bits 17 .. 7, so the hold delay is 11 bits). The gain is now 1.25 k / 256:
+  - 20 % = v0.1.0;
+  - 50 % = 2.5 x;
+  - **100 % = 5 x** (white = 8.5 rings, was 6.8).
+
+  Video's 11-bit offset x 32 still fits the 16-bit phase. For Osc (x 64) the top bit leaves the 16-ring
+  modulus, which is an exact wrap: PHI is mod 16 rings. Latency unchanged.
+- **Look check:** `.kinetic_work/rb_hexbloom/k6b/k6b_cmp.png` (GHDL, 720p60 / 4, bear.png, K5 at Vega,
+  glides snapped). The same rigid hexagonal nests, with each cell's rings at a different phase. No garbage.
+- **Build** (2026-11-15, `.kinetic_work/tools/k6build.sh kinetic hexbloom`): router1, every config on seed 1.
+  Post-route Fmax HD Analog 95.71, HD HDMI 101.78, HD Dual 98.08 MHz (worst HD 95.71); SD Analog 88.81,
+  SD HDMI 87.61, SD Dual 80.82. 6,902 .. 6,921 / 7,680 LC (90.1 %), 10 / 32 EBR. vmprog:
+  out/rev_b/ron/kinetic/hexbloom.vmprog (v0.1.2). Not flashed.

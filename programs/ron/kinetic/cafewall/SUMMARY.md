@@ -156,3 +156,24 @@ Reveal divides the picture's contrast by four along with the tiles'.
 - The left 4 px of the picture blend to the mortar colour in chroma (the 9-tap filter meets the line start).
 - `field_n` is delayed with the syncs as in the shell; the core ties it high on every input, so interlaced
   fields draw the same lines (SD and 1080i are line-doubled, as in every program).
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+v0.1.2. Ron's rule after the K6 = 100 % renders: bend / element programs get a 25 % stronger camera at the
+top of K6; picture programs keep their logic. The K6 default is now 100 % (initial 1023).
+
+- **Classification: element.** K6 sets how strongly the camera's luma recolours the tiles (the tone step of
+  each tile in the drawn wall). The wall itself is never the camera image. It is close to a picture mosaic,
+  but the set rule counts every Kinetic program as element.
+- **Change:** the per-field gain is k + k / 4, latched at zone clock 24 (`c_kg`, 11 bits, 0 .. 1278), so
+  g = 1.25 k / 256. That puts v0.1.0's step at 20 %, 2.5 x at 50 % and **5 x at 100 %** (was 4 x). The
+  stretch offset 120 (k' - 256) follows (17 bits, at most 122,640), and the result is still clamped to the
+  v0.1.0 tone range. The pixel-path multiply is now 8 x 11 (was 8 x 10), with a 19-bit product and a 20-bit
+  offset subtract. Latency unchanged.
+- **Look check:** `.kinetic_work/rb_cafewall/k6b/k6b_cmp.png` (GHDL, 720p60 / 4, bear.png, glides snapped
+  in both copies), old against new at K6 = 100 %. It is the same wall with the tile tones a little closer
+  to two-tone (9.5 % of pixels changed). No wrap. The 4 x top was already near the clamp, so the gain is mild.
+- **Build** (2026-11-15, `.kinetic_work/tools/k6build.sh kinetic cafewall`): router1, every config on seed 1
+  (no router stalls this time). Post-route Fmax HD Analog 101.42, HD HDMI 88.83, HD Dual 104.36 MHz (worst HD
+  88.83); SD Analog 101.28, SD HDMI 100.46, SD Dual 97.48. 6,148 .. 6,165 / 7,680 LC (80 %), 11 / 32 EBR.
+  vmprog: out/rev_b/ron/kinetic/cafewall.vmprog (v0.1.2). Not flashed.

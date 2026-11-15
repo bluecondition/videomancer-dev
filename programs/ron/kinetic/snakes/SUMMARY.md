@@ -175,3 +175,26 @@ of each cell row still uses the row above's sample (that line is inside the grou
   720 x 243 x 2 fields, 1080i 1920 x 540 x 2 fields. Not rendered: 1080p, PAL, 480p.
   Scale and Drive were only rendered at their defaults in GHDL (they are glided; other values need a sim-only
   copy with the glides bypassed), so the Scale range and the SD / 1080p extremes are model-only.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+v0.1.2. Ron's rule after the K6 = 100 % renders: bend / element programs get a 25 % stronger camera at the
+top of K6; picture programs keep their logic. The K6 default is now 100 % (initial 1023).
+
+- **Classification: element.** The camera turns each disc's odd and even rings against each other (a phi
+  offset), which re-aligns the drawn segments.
+- **Change:** the per-field `c_kg` at zone clock 24 is now half of 1.25 k (k / 2 + k / 8, 0 .. 638). The
+  8 x 10 pixel multiply is unchanged, and its product is sliced one bit lower (Video bits 16 .. 4, Osc
+  15 .. 3). So the offset is luma x 8 x 1.25 k / 256:
+  - 20 % = v0.1.0;
+  - 50 % = 2.5 x;
+  - **100 % = 5 x** (white about 4.6 steps, was 3.7).
+
+  The offset is a 13-bit phase (one cycle), and the dropped top bit is an exact wrap, as Osc's already was.
+  No added logic, at 94 % LC with a thin HD margin.
+- **Look check:** `.kinetic_work/rb_snakes/k6b/k6b_cmp.png` (GHDL, 720p60 / 4, bear.png, glides snapped).
+  The same discs, with segments turned further on the bright ones. Every disc stays rigid.
+- **Build** (2026-11-15, `.kinetic_work/tools/k6build.sh kinetic snakes`): router1. Post-route Fmax HD Analog
+  78.77 (seed 1), **HD HDMI 76.32 on seed 3** (seeds 1 and 2 missed), HD Dual 79.88 (seed 1) MHz, so the
+  worst HD is 76.32. SD Analog 80.55, SD HDMI 73.36, SD Dual 73.66 (seed 1). 7,191 .. 7,209 / 7,680 LC
+  (93.9 %, unchanged), 23 / 32 EBR. vmprog: out/rev_b/ron/kinetic/snakes.vmprog (v0.1.2). Not flashed.

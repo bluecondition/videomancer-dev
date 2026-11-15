@@ -43,6 +43,7 @@
 -- mode.  Colours in the hardware convention (u = Cr, v = Cb).
 
 -- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K5 = Colour (was K6); K5 Spread fixed at 560 (C_KFIX_5).
+-- 2026-11-15: K6 camera top +25 % (Ron)
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -161,6 +162,9 @@ architecture hexbloom of program_top is
     signal s_kt  : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal s_kgd : signed(13 downto 0) := (others => '0');
     signal s_kg  : unsigned(12 downto 0) := to_unsigned(4096, 13);
+    -- 2026-11-15: the multiply's gain, HALF of 1.25 k (k / 2 + k / 8, 0 .. 638), so the gain is 1.25 k / 256
+    -- (100 % = 5 x) on the unchanged 8 x 10 multiply; the product is taken one bit higher (/ 128)
+    signal c_kh  : unsigned(9 downto 0) := to_unsigned(320, 10);
     signal s_k4 : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal s_vm : unsigned(8 downto 0) := (others => '0');
     signal s_vneg : std_logic := '0';
@@ -282,7 +286,7 @@ architecture hexbloom of program_top is
     -- -> 10 bits (1.0 = 256), then delayed to stage 13
     signal m8_p0, m8_p1, m8_p2, m8_p3 : unsigned(11 downto 0) := (others => '0');
     signal m9_a, m9_b : unsigned(13 downto 0) := (others => '0');
-    type t_ld is array (10 to 13) of unsigned(9 downto 0);
+    type t_ld is array (10 to 13) of unsigned(10 downto 0);
     signal s_ld : t_ld := (others => (others => '0'));
 
     -- [E] coverage and blend
@@ -568,6 +572,7 @@ begin
                     when 27 =>
                         if C_SIM_SNAP or (s_kgd < 8 and s_kgd > -8) then s_kg <= s_kt & "000";
                         else s_kg <= unsigned(signed(s_kg) + resize(shift_right(s_kgd, 3), 13)); end if;
+                    when 28 => c_kh <= resize(s_kg(12 downto 4), 10) + resize(s_kg(12 downto 6), 10);   -- K6 top +25 %
                     when 22 =>
                         if s_goff = '1' then c_gth <= to_signed(1024, 13); else c_gth <= to_signed(1024 - C_GW, 13); end if;
                     -- pitch: cells per h = 2^17 * 2^-oct
@@ -829,15 +834,15 @@ begin
             if s_rad = '1' and s6_aj > s6_ah then s7_m <= s6_aj; else s7_m <= s6_ah; end if;
             s7_aj <= unsigned(s6_aj(11 downto 0));
             if l_first = '1' then s_ld7 <= (others => '0'); else s_ld7 <= lm_q; end if;   -- line 0 is being sampled: no hold yet
-            -- 8 .. 10: K6 Camera: held luma x the glided gain (k / 256); 11 .. 13: delay
-            m8_p0 <= f_gu(s_kg(12 downto 3), s_ld7(0), 12) + shift_left(f_gu(s_kg(12 downto 3), s_ld7(1), 12), 1);
-            m8_p1 <= f_gu(s_kg(12 downto 3), s_ld7(2), 12) + shift_left(f_gu(s_kg(12 downto 3), s_ld7(3), 12), 1);
-            m8_p2 <= f_gu(s_kg(12 downto 3), s_ld7(4), 12) + shift_left(f_gu(s_kg(12 downto 3), s_ld7(5), 12), 1);
-            m8_p3 <= f_gu(s_kg(12 downto 3), s_ld7(6), 12) + shift_left(f_gu(s_kg(12 downto 3), s_ld7(7), 12), 1);
+            -- 8 .. 10: K6 Camera: held luma x the glided gain (1.25 k / 256 since 2026-11-15); 11 .. 13: delay
+            m8_p0 <= f_gu(c_kh, s_ld7(0), 12) + shift_left(f_gu(c_kh, s_ld7(1), 12), 1);
+            m8_p1 <= f_gu(c_kh, s_ld7(2), 12) + shift_left(f_gu(c_kh, s_ld7(3), 12), 1);
+            m8_p2 <= f_gu(c_kh, s_ld7(4), 12) + shift_left(f_gu(c_kh, s_ld7(5), 12), 1);
+            m8_p3 <= f_gu(c_kh, s_ld7(6), 12) + shift_left(f_gu(c_kh, s_ld7(7), 12), 1);
             m9_a <= resize(m8_p0, 14) + shift_left(resize(m8_p1, 14), 2);
             m9_b <= resize(m8_p2, 14) + shift_left(resize(m8_p3, 14), 2);
             v_m18 := resize(m9_a, 18) + shift_left(resize(m9_b, 18), 4);
-            s_ld(10) <= v_m18(17 downto 8);
+            s_ld(10) <= v_m18(17 downto 7);   -- held luma x 1.25 k / 256 (0 .. 1271)
             for i in 11 to 13 loop s_ld(i) <= s_ld(i - 1); end loop;
             -- 8: T1 (the triangle metric), D = T2 - T1, M = the hexagon metric; the wave index
             if s7_sgn = '1' then
@@ -894,7 +899,8 @@ begin
             s13_pr <= resize(s12_pl, 22) + (s12_ph & "000000");
             -- 14: minus the held luma
             -- (the held source is 10 bits since the K6 camera gain: 256 = the shipped 1x; PHI wraps mod 16 rings)
-            if s_src = '1' then v_src := s_ld(13) & "000000"; else v_src := '0' & s_ld(13) & "00000"; end if;
+            -- (2026-11-15: 11 bits, 0 .. 1271; Osc's top bit drops out of the 16-ring modulus: an exact wrap)
+            if s_src = '1' then v_src := s_ld(13)(9 downto 0) & "000000"; else v_src := s_ld(13) & "00000"; end if;
             s14_pp <= s13_pr(19 downto 4) - v_src;
             s14_lo <= fl_q; s14_hi <= fh_q;
             -- 15: the displacement (rings, Q12)

@@ -24,7 +24,8 @@
 --                code c (g = 31 - c, 16 = the full quadrant).  Video: c = 7 + G 9 L / 16; Osc: c = 7 + G (L - 7)
 --                (twice-ish the camera's swing, as before); c clamped to 0 .. 23 (g 31 .. 8: motifs from about
 --                half a quadrant up to twice it, cropped at the quadrant edge).  0 = none (every motif at the
---                black-input size, g 24), 25 % = v0.1.0 exactly, 50 % (default) = twice.  Glided in the shared
+--                black-input size, g 24), 25 % = v0.1.0 exactly, 50 % = twice.  Since 2026-11-15 G = 1.25 K6 / 256
+--                (20 % = v0.1.0, 50 % = 2.5 x, 100 % = 5 x; Osc too).  Glided in the shared
 --                glide (channel 3, formerly Spread); one 4 x 8 multiply on the source side before the hold RAM.
 --   S7  Wave     Smooth (sine) / Snap (dwell and flip)
 --   S8  Field    Linear (index = i + j) / Radial (|i| + |j| from the screen centre)
@@ -44,6 +45,7 @@
 -- Colours in the hardware convention (u = Cr, v = Cb).
 
 -- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K5 = Colour (was K6); K5 Spread fixed at 500 (C_KFIX_5).
+-- 2026-11-15: K6 camera top +25 % (Ron)
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -153,9 +155,10 @@ architecture wallpaper of program_top is
     signal s_g2 : unsigned(12 downto 0) := to_unsigned(C_DEF_K2 * 8, 13);
     signal s_g3 : unsigned(12 downto 0) := to_unsigned(C_DEF_K3 * 8, 13);
     signal s_gcam : unsigned(12 downto 0) := to_unsigned(C_DEF_K6 * 8, 13);   -- K6 Camera, glided (Q3)
-    signal c_cm   : unsigned(7 downto 0) := to_unsigned(72, 8);               -- size-code gain, x / 64
+    signal s_g5   : unsigned(10 downto 0) := to_unsigned(640, 11);            -- 2026-11-15: 1.25 K6 (k + k / 4)
+    signal c_cm   : unsigned(8 downto 0) := to_unsigned(90, 9);               -- size-code gain, x / 64 (<= 319)
     signal c_cb   : signed(5 downto 0) := to_signed(7, 6);                    -- size-code base
-    signal s_kq   : unsigned(7 downto 0) := (others => '0');                  -- 9 K6 / 64 (Video) or 7 K6 / 256 (Osc)
+    signal s_kq   : unsigned(7 downto 0) := (others => '0');                  -- 9 s_g5 / 64 (Video) or 7 s_g5 / 256 (Osc)
     signal s_gm : unsigned(12 downto 0) := (others => '0');
     signal s_gd : signed(14 downto 0) := (others => '0');
     signal s_gr : unsigned(9 downto 0) := (others => '0');
@@ -269,7 +272,7 @@ architecture wallpaper of program_top is
     signal s_bcnt : unsigned(5 downto 0) := (others => '0');
     signal s_bsum : unsigned(12 downto 0) := (others => '0');
     signal s_lnow : unsigned(3 downto 0) := (others => '0');
-    signal s_lp   : unsigned(11 downto 0) := (others => '0');   -- level x c_cm
+    signal s_lp   : unsigned(12 downto 0) := (others => '0');   -- level x c_cm
     signal s_cnow : unsigned(4 downto 0) := to_unsigned(7, 5);  -- size code: c_cb + level x c_cm / 64, 0 .. 23
 
     -- geometry pipeline (stages 3 .. 21)
@@ -637,14 +640,17 @@ begin
 
                     -- K6 camera: size-code gain c_cm (x / 64) and base c_cb, G = K6 / 256:
                     -- Video c = 7 + L 36 G / 64 (= 9 K6 / 64 x L / 64); Osc c = 7 - 7 G + L 64 G / 64
-                    when 30 =>                        -- one adder: Video 9 x (8 K6), Osc 7 x (8 K6)
-                        v_m17 := f_addsub(resize(s_gcam & "000", 17), resize(s_gcam, 17), s_src);
-                        if s_src = '1' then s_kq <= "000" & v_m17(15 downto 11); else s_kq <= v_m17(16 downto 9); end if;
+                    -- 2026-11-15: K6 camera top +25 %: every K6 term below takes s_g5 = 1.25 K6 (0 .. 1278)
+                    when 29 =>
+                        s_g5 <= resize(s_gcam(12 downto 3), 11) + resize(s_gcam(12 downto 5), 11);
+                    when 30 =>                        -- one adder: Video 9 x s_g5 (<= 179 after / 64), Osc 7 x s_g5 (<= 34 after / 256)
+                        v_m17 := resize(f_addsub(resize(s_g5 & "000", 14), resize(s_g5, 14), s_src), 17);
+                        if s_src = '1' then s_kq <= "00" & v_m17(13 downto 8); else s_kq <= v_m17(13 downto 6); end if;
                     when 31 =>
                         if s_src = '1' then
-                            c_cm <= s_gcam(12 downto 5); c_cb <= to_signed(7, 6) - signed(resize(s_kq(4 downto 0), 6));
+                            c_cm <= s_g5(10 downto 2); c_cb <= resize(to_signed(7, 7) - signed(resize(s_kq(5 downto 0), 7)), 6);
                         else
-                            c_cm <= s_kq; c_cb <= to_signed(7, 6);
+                            c_cm <= '0' & s_kq; c_cb <= to_signed(7, 6);
                         end if;
                     when 20 =>                        -- motion (last field's step)
                         c_ph <= f_addsub(c_ph, resize(c_rstep, 32), s_vneg);
@@ -1166,10 +1172,10 @@ begin
             v_b := resize(s_bsum(12 downto 5), 9) + resize(s_bsum(12 downto 7), 9);
             if v_b(8) = '1' then s_lnow <= (others => '1'); else s_lnow <= v_b(7 downto 4); end if;
 
-            -- K6 camera: the size code c = c_cb + level x c_cm / 64, clamped to 0 .. 23 (g 31 .. 8).  One 4 x 8
+            -- K6 camera: the size code c = c_cb + level x c_cm / 64, clamped to 0 .. 23 (g 31 .. 8).  One 4 x 9
             -- multiply in its own stage, then the add and clamp (the held sample moves 2 px right: invisible)
             s_lp <= s_lnow * c_cm;
-            v_c8 := resize(c_cb, 8) + signed(resize(s_lp(11 downto 6), 8));
+            v_c8 := resize(c_cb, 8) + signed(resize(s_lp(12 downto 6), 8));
             if v_c8 < 0 then s_cnow <= (others => '0');
             elsif v_c8 > 23 then s_cnow <= to_unsigned(23, 5);
             else s_cnow <= unsigned(v_c8(4 downto 0)); end if;

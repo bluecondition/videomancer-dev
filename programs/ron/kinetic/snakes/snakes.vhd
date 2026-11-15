@@ -26,9 +26,9 @@
 --   K4  Rate      bipolar, centre = still; 60 s per cycle .. 2 cycles per second
 --   K5  Colour    the 16 shared palettes; the four tones are the palette colours shaded to fixed luma bands
 --                 [K6 before v0.1.1]
---   K6  Camera    the source's strength: phi offset = luma * 8 * k / 256 (0 = none, 25 % = v0.1.0's, 50 % = 2 x,
---                 100 % = 4 x; glided).  (Spread, K5 before v0.1.1, is fixed at 760: phase step per disc 0.28
---                 cycle, half of it per ring: the pinwheels)
+--   K6  Camera    the source's strength: phi offset = luma * 8 * 1.25 k / 256 (0 = none, 20 % = v0.1.0's,
+--                 50 % = 2.5 x, 100 % = 5 x; glided; x 1.25 since 2026-11-15).  (Spread, K5 before v0.1.1,
+--                 is fixed at 760: phase step per disc 0.28 cycle, half of it per ring: the pinwheels)
 --   S7  Wave      Smooth / Snap
 --   S8  Field     Linear / Radial
 --   S9  Lattice   Staggered / Square
@@ -46,6 +46,7 @@
 -- One latency (C_LAT = 46) in every mode.  Colours in the hardware convention (u = Cr, v = Cb).
 
 -- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K5 = Colour (was K6); K5 Spread fixed at 760 (C_KFIX_5).
+-- 2026-11-15: K6 camera top +25 % (Ron)
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -196,7 +197,7 @@ architecture snakes of program_top is
     signal s_g1 : unsigned(12 downto 0) := to_unsigned(409 * 8, 13);
     signal s_gp : unsigned(12 downto 0) := to_unsigned(400 * 8, 13);
     signal s_g6 : unsigned(12 downto 0) := to_unsigned(C_DEF_K6 * 8, 13);   -- K6 Camera
-    signal c_kg : unsigned(9 downto 0) := to_unsigned(C_DEF_K6, 10);        -- its per-field value
+    signal c_kg : unsigned(9 downto 0) := to_unsigned(C_DEF_K6 / 2 + C_DEF_K6 / 8, 10);   -- its per-field value: HALF of 1.25 k
     signal s_gm : unsigned(12 downto 0) := (others => '0');
     signal s_gd : signed(14 downto 0) := (others => '0');
     signal s_gr : unsigned(9 downto 0) := (others => '0');
@@ -539,8 +540,9 @@ begin
                 end case;
             end if;
 
-            -- K6 Camera: the glided value, latched once the glides are done (zone clock 24)
-            if s_zone = '1' and s_zc = 24 then c_kg <= s_g6(12 downto 3); end if;
+            -- K6 Camera: the glided value, latched once the glides are done (zone clock 24).  2026-11-15 (K6 top
+            -- +25 %): HALF of 1.25 k (k / 2 + k / 8, 0 .. 638), the product is sliced one bit lower below
+            if s_zone = '1' and s_zc = 24 then c_kg <= resize(s_g6(12 downto 4), 10) + resize(s_g6(12 downto 6), 10); end if;
 
             -- serial products: slot k loads at zc = 32 + 32 k, 24 iterations, stored at 60 + 32 k.  The slot
             -- number is decoded at 30 + 32 k and the operands pre-muxed at 31 + 32 k (no zc decode on the
@@ -875,10 +877,11 @@ begin
             hl_we <= g_avid and a_uf(23) and (not s_u23d) and l_new;
             hl_wa <= a_i;
             -- K6 Camera: the sample x the gain in its own stage (one pixel behind s_y1), then the phi offset
-            -- (Video: luma * 8 * k / 256; Osc twice that, mod one cycle); k = 256 gives v0.1.0's offsets
+            -- (Video: luma * 8 * k / 256; Osc twice that, mod one cycle); k = 256 gives v0.1.0's offsets.
+            -- 2026-11-15: c_kg = 1.25 k / 2, so one bit lower; the top bit drops out of the 13-bit phase (a cycle)
             s_ym <= s_y1(13 downto 6) * c_kg;
-            if s_src = '1' then hl_wd <= "000" & std_logic_vector(s_ym(16 downto 4));
-            else hl_wd <= "000" & std_logic_vector(s_ym(17 downto 5)); end if;
+            if s_src = '1' then hl_wd <= "000" & std_logic_vector(s_ym(15 downto 3));
+            else hl_wd <= "000" & std_logic_vector(s_ym(16 downto 4)); end if;
         end if;
     end process p_src;
 

@@ -20,8 +20,8 @@
 --   K4  Rate     wave travel, bipolar, centre = still (60 s per cycle .. 2 cycles per second)
 --   K5  Spread   crest slant per band (Radial: slides the pond's centre along the band axis), square law
 --   K6  Camera   camera (and Osc) strength: the weight curve's gain g = K6 / 256 up to 50 %, then half that
---                slope (0, 1 = the v0.1.0 look at 25 %, 2 at the 50 % default, 3 at 100 %), glided, applied in
---                the per-field weight-table fill
+--                slope (0, 1 = the v0.1.0 look at 25 %, 2 at 50 %, 3 at 100 %), x 1.25 everywhere since 2026-11-15
+--                (1.25 / 2.5 / 3.75), glided, applied in the per-field weight-table fill
 --   S7  Wave     Smooth (sine) / Zigzag (triangle)
 --   S8  Field    Linear / Radial
 --   S9  Bands    Duo (ground + A) / Quad (bands step through A, B, accent, ground)
@@ -56,6 +56,7 @@
 -- Colours in the hardware convention (u = Cr, v = Cb).
 
 -- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K2 = Colour (was K6); K2 Chirp fixed at 760 (C_KFIX_2).
+-- 2026-11-15: K6 camera top +25 % (Ron)
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -661,6 +662,7 @@ begin
                     when 410 => c_V0 <= f_addsub(to_unsigned(0, 28), f_acc(27 downto 0), '1');
                     when 434 => c_Vd <= f_acc(27 downto 0);
                     when 458 => c_spg <= f_acc(17 downto 6);   -- span * g * 4 (K6 camera pass)
+                    when 460 => c_spg <= c_spg + resize(c_spg(11 downto 2), 12);   -- K6 top +25 %: x 1.25 (<= 3250)
                     when others => null;
                 end case;
             end if;
@@ -957,7 +959,7 @@ begin
             s12_d8 <= s11_d8;
 
             -- weight table fill (zone, zc 464 .. 720): W(l) = K3 + min(g * span * l^2 / 2^15, span), the square
-            -- by second differences.  K6 camera pass: g = K6 / 256, 2 + (K6 - 512) / 512 past 50 % (c_spg = 4 g span,
+            -- by second differences.  K6 camera pass: g = K6 / 256, 2 + (K6 - 512) / 512 past 50 % (c_spg = 4 g span x 1.25,
             -- slot 17), so 25 % is the v0.1.0 curve, 0 % a flat K3 (= a black input); moved from zc 224 to
             -- after slot 17.
             wt_we <= '0';

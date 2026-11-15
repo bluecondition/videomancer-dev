@@ -27,9 +27,9 @@
 --   K4  Rate     bipolar, centre = still; 60 s per cycle .. 2 cycles per second
 --   K5  Colour   the 16 shared palettes (ground and A = the tiles, B = the picture's tint, accent = Reveal's mortar)
 --                [K6 before v0.1.1]
---   K6  Camera   the picture's tone strength (glided), g = k / 256: up to 25 % the step is g * (v0.1.0's step)
---                (0 = none, 25 % = v0.1.0's); above, the step's contrast is stretched g times about the middle
---                of the 16 steps (50 % = 2 x, 100 % = 4 x), clamped to the v0.1.0 range so the two tile sets
+--   K6  Camera   the picture's tone strength (glided), g = 1.25 k / 256: up to 20 % the step is g * (v0.1.0's
+--                step) (0 = none, 20 % = v0.1.0's); above, the step's contrast is stretched g times about the middle
+--                of the 16 steps (50 % = 2.5 x, 100 % = 5 x), clamped to the v0.1.0 range so the two tile sets
 --                never meet (2 x in amplitude washed the wall to one grey)
 --       (Spread, K5 before v0.1.1, is fixed at 420: phase step per row, one slow S down the wall)
 --   S7  Wave     Smooth / Snap
@@ -49,6 +49,7 @@
 -- One latency (C_LAT = 22) in every mode.  Colours in the hardware convention (u = Cr, v = Cb).
 
 -- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K5 = Colour (was K6); K5 Spread fixed at 420 (C_KFIX_5).
+-- 2026-11-15: K6 camera top +25 % (Ron)
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -173,8 +174,8 @@ architecture cafewall of program_top is
     signal s_g1 : unsigned(12 downto 0) := to_unsigned(560 * 8, 13);
     signal s_gp : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
     signal s_g6 : unsigned(12 downto 0) := to_unsigned(C_DEF_K6 * 8, 13);   -- K6 Camera
-    signal c_kg : unsigned(9 downto 0) := to_unsigned(C_DEF_K6, 10);        -- its per-field value
-    signal c_ko : unsigned(16 downto 0) := to_unsigned(120 * (C_DEF_K6 - 256), 17);   -- the stretch offset
+    signal c_kg : unsigned(10 downto 0) := to_unsigned(C_DEF_K6 + C_DEF_K6 / 4, 11);   -- its per-field value x 1.25
+    signal c_ko : unsigned(16 downto 0) := to_unsigned(120 * (C_DEF_K6 + C_DEF_K6 / 4 - 256), 17);   -- the stretch offset
     signal s_gm : unsigned(12 downto 0) := (others => '0');
     signal s_gd : signed(14 downto 0) := (others => '0');
     signal s_gr : unsigned(9 downto 0) := (others => '0');
@@ -254,7 +255,7 @@ architecture cafewall of program_top is
     signal s_av0, s_sav, s_savd : std_logic := '0';
     signal s_y1  : unsigned(13 downto 0) := (others => '0');
     signal s_ymv : unsigned(7 downto 0) := (others => '0');     -- the filtered sample (Osc: x 2, clipped)
-    signal s_ym  : unsigned(17 downto 0) := (others => '0');    -- ... x Camera (/ 4096 = the v0.1.0 step x g)
+    signal s_ym  : unsigned(18 downto 0) := (others => '0');    -- ... x Camera (/ 4096 = the v0.1.0 step x g)
     signal s_yl  : unsigned(3 downto 0) := (others => '0');     -- the tone step after the stretch and clamp
 
     -- [D] row registers (the NEXT line's values) and the per-line engine
@@ -462,11 +463,12 @@ begin
                 end case;
             end if;
 
-            -- K6 Camera: the glided value, latched once the glides are done (zone clock 24), and the stretch
-            -- offset 7.5 (g - 1) steps = 120 (k - 256) in product units (k >= 256; 0 below)
-            if s_zone = '1' and s_zc = 24 then c_kg <= s_g6(12 downto 3); end if;
+            -- K6 Camera: the glided value x 1.25 (2026-11-15: k + k / 4, 0 .. 1278), latched once the glides are
+            -- done (zone clock 24), and the stretch offset 7.5 (g - 1) steps = 120 (k - 256) in product units
+            -- (k >= 256; 0 below; at most 122,640)
+            if s_zone = '1' and s_zc = 24 then c_kg <= resize(s_g6(12 downto 3), 11) + resize(s_g6(12 downto 5), 11); end if;
             if s_zone = '1' and s_zc = 25 then
-                if c_kg(9 downto 8) = "00" then c_ko <= (others => '0');
+                if c_kg(10 downto 8) = "000" then c_ko <= (others => '0');
                 else c_ko <= shift_left(resize(c_kg - 256, 17), 7) - shift_left(resize(c_kg - 256, 17), 3); end if;
             end if;
 
@@ -738,7 +740,7 @@ begin
         variable v_s9 : unsigned(8 downto 0);
         variable v_x  : unsigned(13 downto 0);
         variable v_d1 : signed(14 downto 0);
-        variable v_yo : signed(18 downto 0);
+        variable v_yo : signed(19 downto 0);
     begin
         if rising_edge(clk) then
             -- oscillator
@@ -781,9 +783,9 @@ begin
             elsif s_y1(13) = '1' then s_ymv <= (others => '1');
             else s_ymv <= s_y1(12 downto 5); end if;
             s_ym <= s_ymv * c_kg;
-            v_yo := signed(resize(s_ym, 19)) - signed(resize(c_ko, 19));
+            v_yo := signed(resize(s_ym, 20)) - signed(resize(c_ko, 20));
             if v_yo < 0 then s_yl <= (others => '0');
-            elsif v_yo(18 downto 16) /= "000" then s_yl <= (others => '1');
+            elsif v_yo(19 downto 16) /= "0000" then s_yl <= (others => '1');
             else s_yl <= unsigned(v_yo(15 downto 12)); end if;
         end if;
     end process p_src;

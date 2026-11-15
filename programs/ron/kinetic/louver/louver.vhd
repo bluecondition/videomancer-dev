@@ -26,8 +26,8 @@
 --   K4  Rate     bipolar, centre = still; 60 s per cycle .. 2 cycles per second
 --   K5  Colour   the 16 shared palettes (ground = gap, A = front, B = back, accent = glint and thin face)
 --                [K6 camera pass: was K6; Spread fixed at 354 = phase step 0.06 cycle per slat]
---   K6  Camera   camera (and Osc) strength: source term = src * 20 g turns/2^14 (Osc x2), g = K6 / 256 (glided):
---                0 = none (= a black input), 1 = the v0.1.0 gain at 25 %, 2 at the 50 % default, 4 at 100 %
+--   K6  Camera   camera (and Osc) strength: source term = src * 20 g turns/2^14 (Osc x2), g = 1.25 K6 / 256 (glided):
+--                0 = none (= a black input), 1 = the v0.1.0 gain at 20 %, 2.5 at 50 %, 5 at 100 % (2026-11-15: +25 %)
 --   S7  Wave     Smooth / Snap
 --   S8  Field    Linear / Radial
 --   S9  Axis     Across (horizontal slats) / Down (vertical slats)
@@ -45,6 +45,7 @@
 -- One latency (C_LAT = 36) in every mode.  Colours in the hardware convention (u = Cr, v = Cb).
 
 -- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K5 = Colour (was K6); K5 Spread fixed at 354 (C_KFIX_5).
+-- 2026-11-15: K6 camera top +25 % (Ron)
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -199,7 +200,7 @@ architecture louver of program_top is
     signal s_g1 : unsigned(12 downto 0) := to_unsigned(625 * 8, 13);
     signal s_gp : unsigned(12 downto 0) := to_unsigned(323 * 8, 13);
     signal s_gk : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);   -- K6 camera pass: the Camera glide
-    signal c_cam : unsigned(6 downto 0) := to_unsigned(40, 7);         -- camera coefficient 20 g = 5 K6 / 64
+    signal c_cam : unsigned(6 downto 0) := to_unsigned(50, 7);         -- camera coefficient 20 g = 25 K6 / 256
     signal s_gm : unsigned(12 downto 0) := (others => '0');
     signal s_gd : signed(14 downto 0) := (others => '0');
     signal s_gr : unsigned(9 downto 0) := (others => '0');
@@ -619,6 +620,9 @@ begin
                     when 40 =>
                         v_t := resize(s_gk(12 downto 3) & "00", 29) + resize(s_gk(12 downto 3), 29);
                         c_cam <= v_t(12 downto 6);
+                    -- 2026-11-15: K6 camera top +25 %: c = c + c / 4 (0 .. 98; 25 at 25 %, 50 at 50 %)
+                    when 41 =>
+                        c_cam <= c_cam + resize(c_cam(6 downto 2), 7);
                     -- palette: ground, A, B, accent (chroma kept to 8 bits)
                     when 22 => r_pl_a <= "00" & s_pal & "00";
                     when 25 =>

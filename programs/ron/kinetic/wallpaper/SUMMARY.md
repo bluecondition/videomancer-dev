@@ -158,3 +158,27 @@ with a wider range (0.52 .. 1.0), so big diamonds of swelling motifs drift acros
   96 %: freezing Spread paid for little of the gain stage), 21 / 32 EBR. It closes on seed 1 everywhere with
   router1, but there is now almost no room left for additions. Not flashed.
   Rebuild: `NEXTPNR_ROUTER="--router router1" ./build_set.sh kinetic wallpaper`.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+v0.1.2. Ron's rule after the K6 = 100 % renders: bend / element programs get a 25 % stronger camera at the
+top of K6; picture programs keep their logic. The K6 default is now 100 % (initial 1023).
+
+- **Classification: element.** The held source sets each motif's size.
+- **Change:** a new per-field `s_g5` = k + k / 4 (11 bits, 0 .. 1278) at zone clock 29 feeds every K6 term:
+  - Video: c_cm = 9 s_g5 / 64 (at most 179);
+  - Osc: c_cm = s_g5 / 4 (at most 319) and c_cb = 7 - 7 s_g5 / 256 (at least -27; computed in 7 bits).
+
+  So G = 1.25 K6 / 256: 20 % = v0.1.0, 50 % = 2.5 x, **100 % = 5 x** (was 4 x), Osc included. Osc keeps
+  its centre (level 7 = size code 7). c_cm became 9 bits, so the pixel-path multiply is 4 x 9 (was 4 x 8)
+  and s_lp 13 bits. The zone-clock 30 adder narrowed from 17 to 14 bits. The size code is clamped to
+  0 .. 23 as before.
+- **Look check:** `.kinetic_work/rb_wallpaper/k6b/k6b_cmp.png` (GHDL, 720p60 / 4, bear.png, K5 at Ink,
+  glides snapped). The same pattern with bigger motifs, cropped at their quadrant edges. The pink sliver
+  where a bar meets the red half-disc's crop edge is the chroma output filter, not a fault.
+- **Build** (2026-11-15, `.kinetic_work/tools/k6build.sh kinetic wallpaper`): router1, every config on seed 1.
+  Post-route Fmax HD Analog 83.01, HD HDMI 84.43, **HD Dual 74.52 MHz** (worst HD, only 0.4 % over 74.25;
+  it was 84.63 on v0.1.1, so this is placement luck, not a deeper path); SD Analog 78.45, SD HDMI 81.96,
+  SD Dual 75.41. 7,498 .. 7,522 / 7,680 LC (97.9 %, +32 over v0.1.1), 21 / 32 EBR. vmprog:
+  out/rev_b/ron/kinetic/wallpaper.vmprog (v0.1.2). Not flashed. If a rebuild misses on HD Dual, try another
+  seed (router1 SEED=2) before changing logic.

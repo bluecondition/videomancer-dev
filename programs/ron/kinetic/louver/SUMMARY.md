@@ -163,3 +163,26 @@ fabric register before arithmetic; no RAM ever reads the address it is writing (
   likely cause of the stalls. Rebuild: `NEXTPNR_ROUTER="--router router1" ./build_set.sh kinetic louver`
   (expect a seed-2 retry on two configs), or router2.
 
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+v0.1.2. Ron's rule after the K6 = 100 % renders: bend / element programs get a 25 % stronger camera at the
+top of K6; picture programs keep their logic. The K6 default is now 100 % (initial 1023).
+
+- **Classification: element.** K6 is the gain of the source term that turns the slats (the slat angle).
+  S10 Face = Video, which puts the picture on the front face, is separate and unchanged.
+- **Change:** the camera coefficient gets c = c + c / 4 at a new zone clock 41, after the existing
+  c = 5 K6 / 64 at clock 40. It is still 7 bits (0 .. 98, was 0 .. 79), so g = 1.25 K6 / 256:
+  - 20 % = v0.1.0;
+  - 50 % = 2.5 x;
+  - **100 % = 4.9 x** (white turns a slat about 1.35 turns, was 1.09).
+
+  The pixel path is unchanged: the partial sums already hold src x 127, and alpha wraps mod a turn as
+  before. Osc keeps its x 2 on top.
+- **Look check:** `.kinetic_work/rb_louver/k6b/k6b_cmp.png` (GHDL, 720p60 / 4, bear.png, glides snapped).
+  The same ribbons with more pinches and segment changes, and clean outlines.
+- **Build** (2026-11-15, `.kinetic_work/tools/k6build.sh kinetic louver`): router1. Post-route Fmax HD Analog
+  83.91 (seed 1), HD HDMI 83.96 (seed 1), **HD Dual 85.70 on seed 2** (worst HD 83.91); **SD Analog 96.30 on
+  seed 2**, SD HDMI 85.30, SD Dual 90.16 (seed 1). On HD Dual and SD Analog, router1's seed 1 stalled (the
+  600 s timeout); the duplicated-input LUTs in the Osc face path are still the likely cause. 7,200 .. 7,225 /
+  7,680 LC (94.1 %), 24 / 32 EBR. vmprog: out/rev_b/ron/kinetic/louver.vmprog (v0.1.2). Not flashed.
