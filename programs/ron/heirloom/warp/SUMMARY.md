@@ -138,3 +138,11 @@ Working files: `.heirloom_work/rb_warp/` (`notes.md` has every step).
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. Here the camera strength was on K4 (Bend), so K4 and K6 swapped: **K6 = Bend** (the camera strength, default now 512 = 50 %), **K4 = Palette** (was K6). Nothing else changed: the VHDL swaps the two knob inputs (the processing is identical), the TOML blocks and preset keys moved with them (the Controls rows above are renumbered). v0.5.2, rebuilt with router1: all six seed 1; HD worst 80.53 MHz (HD Analog 83.19, HD HDMI 88.84, HD Dual 80.53), LC LC. Rebuild: `NEXTPNR_ROUTER="--router router1" ./build_heirloom.sh warp`. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+**Bend type**: K6 Bend adds the camera (or Osc) to the stripe phase, so the gain was raised 25 %. The K6 default is now 100 % (orchestrator).
+- The per-field gain f_k4h = (K6 >> 3 + K6 >> 5) >> 2 gives 0 .. 39 (was K6 >> 5, 0 .. 31), so full luma bends +-1.2 cycles.
+- The pixel product widens to 12 x 7 bits, at most 39,936, inside the 18-bit p4_bp. The bend is modular.
+- Check: `.heirloom_work/rb_warp/k6b/k6b_cmp.png`. The stripes bend further: same picture, no garbage.
+- Build: v0.5.3, router1; seed 2 on HD Analog and HD HDMI (seed 1 stalled router1 at the 600 s timeout under machine load; dupin: no CARRY I0==I1), seed 1 elsewhere; worst HD 78.02 MHz (HD Analog 82.01, HD HDMI 84.68, HD Dual 78.02); 5,506 / 7,680 LC. `.kinetic_work/k6_builds.txt`: heirloom warp OK router1 worst-HD 78.02 LC 5506.

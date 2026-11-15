@@ -267,3 +267,12 @@ Working files are in `.heirloom_work/rb_streamers/`; `notes.md` has the steps.
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 280 -> 512 (v0.1.2). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+**Bend type**: K6 sets how far the camera (or Osc) bends both VCO phases, so the gain was raised 25 %. The K6 default is now 100 % (orchestrator).
+- The per-field bend constant goes from 900 to 1125.
+- c_bg is now 20 bits: the Osc's x2 tops out at 574,875, which needs bit 19.
+- The low-nibble partial product p5_ea is now 24 bits. The 24-bit bend sum is modular, but a dropped bit 23 there would be a half-cycle error.
+- Check: `.heirloom_work/rb_streamers/k6b/k6b_cmp.png` (glide bypassed in the scratch copies). The ribbons bend and fray more: same picture, no wrap.
+- Build: v0.1.3, router1, all six on seed 1; worst HD 78.88 MHz (HD Analog 80.07, HD HDMI 79.41, HD Dual 78.88); 6,964 / 7,680 LC. `.kinetic_work/k6_builds.txt`: heirloom streamers OK router1 worst-HD 78.88 LC 6964.

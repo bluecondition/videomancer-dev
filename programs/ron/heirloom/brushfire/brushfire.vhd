@@ -3,6 +3,7 @@
 --
 -- Brushfire v0.1.0 -- Heirloom from the video clips, built from the still WIN_20230820_01_33_09 t0.5
 -- (clip WIN_20230820_01_33_09, 9.5 s; the same patch in clips 01_32_42 and 01_36_37).
+-- 2026-11-15: K6 camera top +25 % (Ron)
 --
 -- The still: two crowns of flame across the top (red-cored lobes, nested white/yellow arches, long orange and red
 -- streaks), red-rimmed chevrons stacked down each tile's axis in a pink/purple/brown zone, and under it all
@@ -179,7 +180,7 @@ architecture brushfire of program_top is
     signal c_kv   : unsigned(21 downto 0) := (others => '0');
     signal c_kn   : unsigned(14 downto 0) := (others => '0');
     signal c_kz   : unsigned(20 downto 0) := (others => '0');
-    signal c_gF   : unsigned(4 downto 0) := to_unsigned(3, 5);
+    signal c_gF   : unsigned(5 downto 0) := to_unsigned(4, 6);   -- k6^2 x1.25 >> 15, 0 .. 39
     signal c_th   : unsigned(15 downto 0) := to_unsigned(C_TH0, 16);
     signal c_fl   : unsigned(15 downto 0) := (others => '0');   -- streak flow, Q8 (Fk units)
     signal c_bfl  : unsigned(15 downto 0) := (others => '0');   -- band flow, 2^16 per cycle
@@ -377,6 +378,7 @@ begin
         variable v_h  : signed(12 downto 0);
         variable v_w  : signed(21 downto 0);
         variable v_fs : unsigned(18 downto 0);
+        variable v_g6 : unsigned(7 downto 0);
     begin
         if rising_edge(clk) then
             s_tid <= registers_in(8)(3 downto 0);
@@ -597,7 +599,8 @@ begin
                             z_pa <= unsigned(resize(360 - v_d, 10)); z_pc <= to_unsigned(182, 16); z_t1(1) <= '1';
                         end if;
                     when 180 =>
-                        c_gF <= f_acc(19 downto 15);
+                        v_g6 := resize(f_acc(19 downto 13), 8) + resize(f_acc(19 downto 15), 8);   -- x1.25 (K6 top +25 %)
+                        c_gF <= v_g6(7 downto 2);
                         z_fms <= to_unsigned(8, 4); z_fld <= '1';             -- job 8 at 181: |p - 360| slope
                     when 198 =>
                         if z_t1(1) = '1' then z_hp <= -signed(resize(f_acc(19 downto 8), 12));
@@ -946,7 +949,7 @@ begin
         variable v_a  : unsigned(9 downto 0);
         variable v_dc : signed(11 downto 0);
         variable v_cm : signed(8 downto 0);
-        variable v_cp : signed(14 downto 0);
+        variable v_cp : signed(15 downto 0);
         variable v_f  : signed(19 downto 0);
         variable v_k  : unsigned(15 downto 0);
         variable v_hb : signed(17 downto 0);

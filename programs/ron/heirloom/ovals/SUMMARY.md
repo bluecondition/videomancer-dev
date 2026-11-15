@@ -151,3 +151,10 @@ photo look.  Osc substitutes a drifting 2-D triangle lattice through the same pa
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 200 -> 512 (v0.5.3). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+**Bend type**: K6 Etch adds the camera (or Osc) luma to the palette index, so the gain was raised 25 %. The K6 default is now 100 % (orchestrator).
+- The design is at 99.6 % LC, so the change is one per-field add. c_k6 = K6 / 2 + K6 / 8 (0 .. 638, still 10 bits), and the etch product slice moves down one bit (p7_et(17:8)). The pixel multiplier keeps its 8 x 10 width, and p8_e2 grows by one bit. The index clamps at 0 .. 511 as before.
+- Check: `.heirloom_work/rb_ovals/k6b/k6b_cmp.png` (glide bypassed in the scratch copies). Bright areas push further up the palette: same picture, no wrap.
+- Build: v0.5.4, router1, all six on seed 1; worst HD 83.77 MHz (HD Analog 83.77, HD HDMI 90.77, HD Dual 86.19); 7,658 / 7,680 LC (99.7 %, +1 vs v0.5.2). `.kinetic_work/k6_builds.txt`: heirloom ovals OK router1 worst-HD 83.77 LC 7658.

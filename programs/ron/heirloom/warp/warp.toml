@@ -7,7 +7,7 @@
 processing_delay_clks = 24
 program_id = "com.czartroniks.warp"
 program_name = "Warp"
-program_version = "0.5.2"
+program_version = "0.5.3"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -69,7 +69,7 @@ name_label = "Bend"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 512
+initial_value = 1023
 display_float_digits = 0
 suffix_label = "%"
 

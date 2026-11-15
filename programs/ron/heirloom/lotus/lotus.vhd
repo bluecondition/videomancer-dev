@@ -2,6 +2,7 @@
 -- SPDX-License-Identifier: GPL-3.0-only
 --
 -- Lotus v0.5.0 -- Heirloom #33, rebuilt from the photo WIN_20230515_23_23_36.
+-- 2026-11-15: K6 camera top +25 % (Ron)
 --
 -- The photo: two copies (period 943 px, 2.04 across) of an orange/green contour
 -- "eye" -- an olive core diamond in nested green / orange rings, a pointed ring
@@ -211,7 +212,7 @@ architecture lotus of program_top is
     signal f_u0  : unsigned(19 downto 0) := (others => '0');
     signal f_p2  : unsigned(15 downto 0) := (others => '0');
     signal f_gr  : unsigned(9 downto 0) := to_unsigned(256, 10);        -- Rings gain, Q8
-    signal f_e8g : unsigned(7 downto 0) := to_unsigned(75, 8);          -- etch x gain
+    signal f_e8g : unsigned(8 downto 0) := to_unsigned(94, 9);          -- etch x gain (K6 x1.25, capped at 319)
     signal f_spd : unsigned(10 downto 0) := (others => '0');
     signal f_hh  : unsigned(8 downto 0) := to_unsigned(203, 9);
     signal f_flow : unsigned(11 downto 0) := (others => '0');
@@ -219,7 +220,7 @@ architecture lotus of program_top is
     signal f_roll : unsigned(7 downto 0) := (others => '0');
     signal f_seed : unsigned(15 downto 0) := x"ACE1";
     signal f_s8, f_b8, f_r8 : unsigned(8 downto 0) := to_unsigned(256, 9);
-    signal f_e8 : unsigned(7 downto 0) := to_unsigned(75, 8);
+    signal f_e8 : unsigned(8 downto 0) := to_unsigned(94, 9);
 
     -- Osc source
     signal s_ox, s_oy, s_oxl : unsigned(15 downto 0) := (others => '0');
@@ -340,8 +341,8 @@ architecture lotus of program_top is
     signal p4_sl : signed(11 downto 0) := (others => '0');
     signal p4_dx : signed(14 downto 0) := (others => '0');
     signal p5_sp : signed(15 downto 0) := (others => '0');
-    signal p4_et, p5_et : unsigned(10 downto 0) := (others => '0');
-    signal p_e4  : unsigned(3 downto 0) := (others => '0');
+    signal p4_et, p5_et : unsigned(11 downto 0) := (others => '0');
+    signal p_e4  : unsigned(4 downto 0) := (others => '0');   -- etch gain code 0 .. 19
     signal p5_abh, p5_arh : unsigned(4 downto 0) := (others => '0');
     type t_u5a is array (natural range <>) of unsigned(4 downto 0);
     signal p_ab, p_ar : t_u5a(6 to 8) := (others => (others => '0'));
@@ -527,7 +528,7 @@ begin
                 f_s8 <= s_g2(12 downto 4);
                 f_b8 <= s_g3(12 downto 4);
                 f_r8 <= s_g5(12 downto 4);
-                f_e8 <= s_g6(12 downto 5);
+                f_e8 <= resize(s_g6(12 downto 5), 9) + resize(s_g6(12 downto 7), 9);   -- x1.25 (K6 top +25 %)
             end if;
 
             -- serial products: slot k loads at zc = 32 + 24 k, 16 iterations, result
@@ -559,7 +560,7 @@ begin
                     when 218 => f_gr  <= to_unsigned(64, 10) + resize(f_acc(25 downto 16), 10);
                     when 242 => if s_vstill = '1' then f_spd <= (others => '0'); else f_spd <= f_acc(17 downto 7); end if;
                     when 266 => f_hh  <= f_acc(17 downto 9);
-                    when 290 => f_e8g <= f_acc(15 downto 8);
+                    when 290 => if f_acc(19 downto 8) > 319 then f_e8g <= to_unsigned(319, 9); else f_e8g <= f_acc(16 downto 8); end if;
                     when others => null;
                 end case;
             end if;
@@ -1180,7 +1181,7 @@ begin
         variable v_g9  : unsigned(8 downto 0);
         variable v_h   : signed(17 downto 0);
         variable v_o   : unsigned(15 downto 0);
-        variable v_et  : unsigned(10 downto 0);
+        variable v_et  : unsigned(11 downto 0);
         variable v_sp  : signed(15 downto 0);
         variable v_kd  : unsigned(7 downto 0);
     begin
@@ -1215,10 +1216,11 @@ begin
             p4_f <= unsigned(fr_q(31 downto 16)); p4_sl <= signed(fr_q(15 downto 4));
             p4_fr <= p3_fr; p4_lum <= p3_lum;
             p4_dx <= signed(resize(l_kwu, 15)) - signed(resize(p3_ak, 15));
-            p_e4 <= f_e8g(7 downto 4);
+            p_e4 <= f_e8g(8 downto 4);
             v_et := (others => '0');
-            if p_e4(3) = '1' then v_et := shift_left(resize(p3_lum, 11), 3); end if;
-            if p_e4(2) = '1' then v_et := v_et + shift_left(resize(p3_lum, 11), 2); end if;
+            if p_e4(3) = '1' then v_et := shift_left(resize(p3_lum, 12), 3); end if;
+            if p_e4(2) = '1' then v_et := v_et + shift_left(resize(p3_lum, 12), 2); end if;
+            if p_e4(4) = '1' then v_et := shift_left(resize(p3_lum, 12), 4); end if;   -- 16 .. 19 (cap): bits 3, 2 are 0
             p4_et <= v_et;
             -- 5: slope x fraction and the etch (bits 1, 0) by conditional adds; cushion alphas
             p5_f <= p4_f;
@@ -1228,8 +1230,8 @@ begin
             if p4_fr(0) = '1' then v_sp := v_sp + resize(p4_sl, 16); end if;
             p5_sp <= v_sp;
             v_et := p4_et;
-            if p_e4(1) = '1' then v_et := v_et + shift_left(resize(p4_lum, 11), 1); end if;
-            if p_e4(0) = '1' then v_et := v_et + resize(p4_lum, 11); end if;
+            if p_e4(1) = '1' then v_et := v_et + shift_left(resize(p4_lum, 12), 1); end if;
+            if p_e4(0) = '1' then v_et := v_et + resize(p4_lum, 12); end if;
             p5_et <= v_et;
             p5_abh <= f_clamp16(shift_right(p4_dx + 104, 4));
             p5_arh <= f_clamp16(shift_right(p4_dx + 382, 5));

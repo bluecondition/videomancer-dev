@@ -2,6 +2,7 @@
 -- SPDX-License-Identifier: GPL-3.0-only
 --
 -- Grommets v0.1.0 -- Heirloom (from the video clips), built from the still WIN_20230216_01_27_34 @ 2.5 s.
+-- 2026-11-15: K6 camera top +25 % (Ron)
 --
 -- The still: two big black keyhole holes (x 538 / 1474, 545 px wide, 511 lines tall, round sides, pointed top and
 -- bottom) over a purple / blue lattice of contours, a bright cyan X of contours crossing between the holes, a reddish
@@ -173,7 +174,7 @@ architecture grommets of program_top is
     signal c_dd   : unsigned(11 downto 0) := to_unsigned(56, 12);
     signal c_gs   : unsigned(18 downto 0) := to_unsigned(19659, 19);
     signal c_ss   : unsigned(15 downto 0) := to_unsigned(655, 16);
-    signal c_eg   : unsigned(12 downto 0) := to_unsigned(18, 13);
+    signal c_eg   : unsigned(12 downto 0) := to_unsigned(22, 13);
     signal c_off  : unsigned(15 downto 0) := to_unsigned(16384, 16);
     signal c_xb0  : unsigned(11 downto 0) := to_unsigned(16, 12);
     constant C_KY : unsigned(9 downto 0) := to_unsigned(64, 10);
@@ -562,7 +563,7 @@ begin
                     when 554 => c_gs <= f_acc(32 downto 14);
                     when 578 => c_ss <= f_acc(31 downto 16);
                     when 602 => z_a <= resize(f_acc(19 downto 0), 22);
-                    when 626 => c_eg <= f_acc(35 downto 23);
+                    when 626 => c_eg <= f_acc(35 downto 23) + f_acc(35 downto 25);   -- x1.25 (K6 top +25 %), max 365
                     when others => null;
                 end case;
             end if;

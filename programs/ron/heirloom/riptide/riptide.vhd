@@ -2,6 +2,7 @@
 -- SPDX-License-Identifier: GPL-3.0-only
 --
 -- Riptide v0.5.0 -- Heirloom #15, rebuilt from WIN_20230309_00_28_35.
+-- 2026-11-15: K6 camera top +25 % (Ron)
 --
 -- The photo: a band of psychedelic swirl (rows 327..712 of 1080) MIRRORED top/bottom about the
 -- centre line, cut into strips by glitch zones of torn lines, with torn edges, between two blue
@@ -229,7 +230,7 @@ architecture riptide of program_top is
     signal s_k5q : unsigned(9 downto 0) := (others => '0');
     signal s_gq : unsigned(9 downto 0) := to_unsigned(64, 10);      -- gain Q6
     signal s_gg : unsigned(17 downto 0) := (others => '0');
-    signal s_eh : unsigned(5 downto 0) := (others => '0');          -- etch hue
+    signal s_eh : unsigned(5 downto 0) := (others => '0');          -- etch hue (K6 x1.25 / 32, 0 .. 39; applied >> 1)
     signal s_rowcl : unsigned(9 downto 0) := to_unsigned(32, 10);
     signal s_rowfl : unsigned(10 downto 0) := to_unsigned(107, 11);
     signal s_strp : unsigned(14 downto 0) := to_unsigned(6068, 15);
@@ -493,6 +494,7 @@ begin
         variable v_t : unsigned(14 downto 0);
         variable v_i : integer range 0 to 7;
         variable v_q : unsigned(31 downto 0);
+        variable v_eh : unsigned(6 downto 0);
     begin
         if rising_edge(clk) then
             s_xs <= f_vstep_x(registers_in(8)(3 downto 0));
@@ -593,7 +595,8 @@ begin
             if s_zone = '1' and s_zc = 29 then
                 s_jb4 <= resize(s_xsu(11 downto 4), 10) - 4; s_tcst <= s_xsu(3 downto 0) & x"00";   -- texture column of the first pixel
                 s_cx0 <= shift_left(resize(s_xsu, 22), 8) + shift_left(resize(s_xsu, 22), 4) + resize(s_xsu, 22) + resize(s_xsu(11 downto 4), 22);
-                s_eh <= s_g2(9 downto 4);
+                v_eh := resize(s_g2(9 downto 4), 7) + resize(s_g2(9 downto 6), 7);   -- x1.25 (K6 top +25 %)
+                s_eh <= v_eh(6 downto 1);
                 -- strips slide apart in the upper half of P12: 300 px x (2p - 1)
                 if s_gp(9) = '1' then
                     v_h := resize(s_gp(8 downto 0) & '0', 14);
@@ -1237,7 +1240,7 @@ begin
             p9_he <= resize(f_dig(resize(s_lu1, 10), v_e3, s_eh(1 downto 0)), 14) + shift_left(resize(f_dig(resize(s_lu1, 10), v_e3, s_eh(3 downto 2)), 14), 2)
                    + shift_left(resize(f_dig(resize(s_lu1, 10), v_e3, s_eh(5 downto 4)), 14), 4);
             -- 10: hue + etch; gain = base + etch
-            p10_a <= p9_a + unsigned(resize(shift_right(p9_he, 2), 12));
+            p10_a <= p9_a + unsigned(p9_he(12 downto 1));   -- etch >> 1 (s_eh is half scale), mod 4096
             p10_v <= p9_v;
             p10_g <= s_gq;
             -- 11: colour ROM address; gain float

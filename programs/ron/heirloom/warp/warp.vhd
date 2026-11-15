@@ -2,6 +2,7 @@
 -- SPDX-License-Identifier: GPL-3.0-only
 --
 -- Warp v0.5.0 -- Heirloom #48, rebuilt from the photo WIN_20230909_23_29_18.
+-- 2026-11-15: K6 camera top +25 % (Ron)
 --
 -- The photo: fine orange / lavender / green stripes on a plane receding to a horizon seam at
 -- y ~695: above it hyperbolic arcs (isolines of (x + 94)(690 - y), period 30-110 px), below it
@@ -82,7 +83,7 @@ architecture warp of program_top is
     signal f_r1, f_r2 : unsigned(11 downto 0) := (others => '0');
     signal f_seam, f_marg, f_mir, f_zig, f_osc : std_logic := '0';
     signal f_pal : unsigned(2 downto 0) := (others => '0');
-    signal f_k4h : unsigned(4 downto 0) := (others => '0');
+    signal f_k4h : unsigned(5 downto 0) := (others => '0');   -- K6 x1.25 / 32, 0 .. 39
     signal f_k5  : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal f_m   : unsigned(8 downto 0) := (others => '0');
     signal f_neg3 : std_logic := '0';
@@ -258,6 +259,7 @@ begin
         variable v_q  : unsigned(9 downto 0);
         variable v_s  : unsigned(21 downto 0);
         variable v_k6 : unsigned(9 downto 0);
+        variable v_kb : unsigned(7 downto 0);
     begin
         if rising_edge(clk) then
             v_id := to_integer(unsigned(registers_in(8)(3 downto 0)));
@@ -303,7 +305,8 @@ begin
                 if v_x > 8 then f_neg3 <= '0'; v_u := unsigned(v_x) - 8; f_m <= v_u(8 downto 0);
                 elsif v_x < -8 then f_neg3 <= '1'; v_u := unsigned(-v_x) - 8; f_m <= v_u(8 downto 0);
                 else f_neg3 <= '0'; f_m <= (others => '0'); end if;
-                f_k4h <= unsigned(registers_in(5)(9 downto 5));
+                v_kb := resize(unsigned(registers_in(5)(9 downto 3)), 8) + resize(unsigned(registers_in(5)(9 downto 5)), 8);   -- x1.25 (K6 top +25 %)
+                f_k4h <= v_kb(7 downto 2);
                 f_k5  <= unsigned(registers_in(4));
                 v_k6 := unsigned(registers_in(3));
                 if v_k6 < 8 then f_pal <= v_k6(2 downto 0); else f_pal <= v_k6(9 downto 7); end if;
@@ -609,7 +612,7 @@ begin
             -- 4: horizontal wrap difference x fx; bend product
             v_d8 := signed(p3_b - p3_a);
             p4_pr <= resize(v_d8 * signed(resize(p3_fx, 5)), 13);
-            p4_bp <= resize(p3_src * signed(resize(f_k4h, 6)), 18);
+            p4_bp <= resize(p3_src * signed(resize(f_k4h, 7)), 18);
             p4_a <= p3_a; p4_acc <= p3_acc;
 
             -- 5: warp phase D (1/256 cycle); bend (1/1024 cycle)

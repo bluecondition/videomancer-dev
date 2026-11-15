@@ -148,3 +148,12 @@ v0.5.0 built 2026-10-27, NOT flashed.
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 300 -> 512 (v0.5.2). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+**Bend type**: K6 Etch adds the camera (or Osc) to the contour phase, so the gain was raised 25 %. The K6 default is now 100 % (orchestrator).
+- f_e8 = K6 / 4 + K6 / 16 is now 9 bits (0 .. 318).
+- The etch x Rings product f_e8g is 9 bits and **saturates at 319**. Before, it was an 8-bit slice that wrapped whenever Rings sat above the photo (the diag had already fixed this).
+- The pixel etch code is now 5 bits, 0 .. 19 (was 0 .. 15). Bit 4 is a mux, not an add: at the 319 cap, bits 3 and 2 are 0 whenever bit 4 is set. The etch sum is now 12 bits.
+- Check: `.heirloom_work/rb_lotus/k6b/k6b_cmp.png` (glide bypassed in the scratch copies). The contours sit further round in bright areas: same picture, no wrap.
+- Build: v0.5.3, router1, all six on seed 1; worst HD 82.46 MHz (HD Analog 82.46, HD HDMI 84.77, HD Dual 86.66); 7,203 / 7,680 LC (93.8 %). `.kinetic_work/k6_builds.txt`: heirloom lotus OK router1 worst-HD 82.46 LC 7203.

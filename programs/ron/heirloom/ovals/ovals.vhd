@@ -2,6 +2,7 @@
 -- SPDX-License-Identifier: GPL-3.0-only
 --
 -- Ovals v0.5.1 -- Heirloom #50, rebuilt from the photo WIN_20231003_23_01_50.
+-- 2026-11-15: K6 camera top +25 % (Ron)
 --
 -- The photo: a hot-pink ground with horizontal stripes (39.4-line bands), carrying columns of vesica
 -- lenses ("ovals") stacked into chains that touch at X points (two lens rows, X rows at y ~256 / ~781).
@@ -165,7 +166,7 @@ architecture ovals of program_top is
     signal c_phi0 : unsigned(23 downto 0) := (others => '0');
     signal c_stp0 : unsigned(23 downto 0) := (others => '0');
     signal c_k3   : unsigned(9 downto 0) := to_unsigned(512, 10);
-    signal c_k6   : unsigned(9 downto 0) := to_unsigned(200, 10);
+    signal c_k6   : unsigned(9 downto 0) := to_unsigned(125, 10);   -- K6 x1.25 / 2 (0 .. 638)
 
     -- field serial multiplier
     signal f_a   : unsigned(39 downto 0) := (others => '0');
@@ -271,7 +272,7 @@ architecture ovals of program_top is
     signal p7_et  : unsigned(17 downto 0) := (others => '0');
     signal p7_s, p7_gr, p7_in, p7_cl : std_logic := '0';
     signal p8_s1  : signed(25 downto 0) := (others => '0');
-    signal p8_e2  : unsigned(8 downto 0) := (others => '0');
+    signal p8_e2  : unsigned(9 downto 0) := (others => '0');
     signal p8_s, p8_gr, p8_in, p8_cl : std_logic := '0';
     signal p9_qg  : signed(17 downto 0) := (others => '0');
     signal p9_s, p9_gr, p9_in, p9_cl : std_logic := '0';
@@ -469,7 +470,7 @@ begin
                                c_dum  <= signed(resize(c_du, 26)) - C_PHQ;
                     when 47 => c_gq <= r_exq(11 downto 2);
                                c_k3 <= s_g3(12 downto 3);
-                               c_k6 <= s_g6(12 downto 3);
+                               c_k6 <= resize(s_g6(12 downto 4), 10) + resize(s_g6(12 downto 6), 10);   -- x1.25 / 2 (K6 top +25 %)
                     when others => null;
                 end case;
             end if;
@@ -868,7 +869,7 @@ begin
             p7_cl <= p6_cl;
             -- 8: Q * gain; etch >> 9
             p8_s1 <= resize(p7_pa, 26) + shift_left(resize(p7_pb, 26), 5);
-            p8_e2 <= p7_et(17 downto 9);
+            p8_e2 <= p7_et(17 downto 8);   -- c_k6 is K6 x1.25 / 2
             p8_s <= p7_s; p8_gr <= p7_gr; p8_in <= p7_in; p8_cl <= p7_cl;
             -- 9: Qg (h-units)
             p9_qg <= resize(p8_s1(25 downto 8), 18) + signed(resize(p8_e2, 18));

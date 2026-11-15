@@ -2,6 +2,7 @@
 -- SPDX-License-Identifier: GPL-3.0-only
 --
 -- Streamers v0.1.1 -- Heirloom (phase 3, video clips), from the still WIN_20231104_16_39_25 at 0.5 s.
+-- 2026-11-15: K6 camera top +25 % (Ron)
 --
 -- v0.1.1: K6 Bend default 400 -> 280 (a textured camera picture no longer shreds the ribbons); the Osc lattice
 -- is patched in at twice the camera's level, so Source = Osc still bends the default picture as boldly as before.
@@ -183,7 +184,7 @@ architecture streamers of program_top is
     signal c_rsq  : unsigned(23 downto 0) := (others => '0');
     signal c_duty : unsigned(15 downto 0) := to_unsigned(K_DUTY, 16);
     signal c_fall : unsigned(15 downto 0) := to_unsigned(K_PR16 + K_DUTY - 65536, 16);
-    signal c_bg   : unsigned(18 downto 0) := (others => '0');          -- bend, Q24 phase per luma step (x2 for Osc)
+    signal c_bg   : unsigned(19 downto 0) := (others => '0');          -- bend, Q24 phase per luma step (x2 for Osc)
     signal c_dp   : unsigned(11 downto 0) := to_unsigned(K_DP0, 12);   -- reset point to the first pixel, h
     signal c_dq   : unsigned(11 downto 0) := to_unsigned(K_DQ0, 12);
     signal c_nc1  : unsigned(10 downto 0) := to_unsigned(959, 11);     -- centre pixel - 1 (Mirror)
@@ -248,7 +249,8 @@ architecture streamers of program_top is
     signal p2_p, p3_p, p4_p, p5_p, p6_p : unsigned(15 downto 0) := (others => '0');   -- P phase bits 23..8
     signal p2_q, p3_q, p4_q, p5_q, p6_q : unsigned(9 downto 0) := (others => '0');    -- Q phase bits 23..14
     signal p4_lm  : unsigned(7 downto 0) := (others => '0');
-    signal p5_ea, p5_eb : unsigned(22 downto 0) := (others => '0');
+    signal p5_ea  : unsigned(23 downto 0) := (others => '0');
+    signal p5_eb  : unsigned(22 downto 0) := (others => '0');
     signal p6_b   : unsigned(23 downto 0) := (others => '0');
     signal p7_p : unsigned(15 downto 0) := (others => '0');
     signal p7_q : unsigned(9 downto 0) := (others => '0');
@@ -478,7 +480,7 @@ begin
                     when 15 => z_fa <= to_unsigned(K_RSP, 24);         z_fb <= resize(s_ys, 16);          -- ramp P step
                     when 16 => z_fa <= to_unsigned(K_RSQ, 24);         z_fb <= resize(s_ys, 16);          -- ramp Q step
                     when 17 => z_fa <= resize(s_g6(12 downto 3), 24); z_fb <= resize(s_g6(12 downto 3), 16); -- bend^2
-                    when others => z_fa <= resize(z_b2, 24);         z_fb <= to_unsigned(900, 16);      -- bend gain
+                    when others => z_fa <= resize(z_b2, 24);         z_fb <= to_unsigned(1125, 16);     -- bend gain (900 x1.25: K6 top +25 %)
                 end case;
             end if;
             if z_ld = '1' then
@@ -561,9 +563,9 @@ begin
                     when 410 => c_rsp <= (not resize(f_acc(31 downto 8), 24)) + 1;
                     when 434 => c_rsq <= (not resize(f_acc(31 downto 8), 24)) + 1;
                     when 458 => z_b2 <= f_acc(19 downto 0);
-                    when 482 =>                       -- bend = k6^2 * 900 >> 12; the Osc generator is patched in at
+                    when 482 =>                       -- bend = k6^2 * 1125 >> 12; the Osc generator is patched in at
                                                       -- twice the camera's level
-                        if s_src = '1' then c_bg <= f_acc(29 downto 11); else c_bg <= f_acc(30 downto 12); end if;
+                        if s_src = '1' then c_bg <= f_acc(30 downto 11); else c_bg <= resize(f_acc(30 downto 12), 20); end if;
                     when others => null;
                 end case;
             end if;
@@ -878,7 +880,7 @@ begin
             -- 4: luma from the line buffer (EBR data at 3, fabric copy)
             p4_lm <= unsigned(s_lb_q);
             -- 5: bend partials (luma nibbles x gain)
-            p5_ea <= resize(p4_lm(3 downto 0) * c_bg, 23);
+            p5_ea <= p4_lm(3 downto 0) * c_bg;
             p5_eb <= resize(p4_lm(7 downto 4) * c_bg, 23);
             -- 6: bend = luma * gain (mod one cycle)
             p6_b  <= resize(p5_ea, 24) + shift_left(resize(p5_eb, 24), 4);

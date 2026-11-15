@@ -269,3 +269,13 @@ Phase 2 is in `.heirloom_work/rb_crossbeam/p2/`:
 - `hwtables.py` and `hwtables2.py` (the quantised tables); `imodel4`–`imodel7.py` (the integer models; `imodel7` is the shipped RTL); `mkhook.py` (writes `crossbeam.py`).
 - `parts/` (the RTL source pieces), `abl/` (ablations), `prof/` (critical-path profiles), `rdiff.py` (RTL against model).
 - Renders: `rtl720_osc7.png`, `rtl720_vid9.png`, `rtl720_mot9.png`, `cmp_final.png`.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+**Bend type**: the one camera gain scales the zebra-contour bend and the beam bloom. Both are drawn elements, so the gain was raised 25 %. The K6 default is now 100 % (orchestrator).
+- f_cg = K6 / 16 + K6 / 64, giving 0 .. 78 in 1/16 (was 0 .. 63). The pixel path widens as follows:
+  - the gained luma v_yg goes to 15 bits, and the slew v_ys to 14 bits (its steady state is at most 10,072);
+  - the bend adds v_ys(13:3);
+  - the bloom index clamps on bits 13 .. 11.
+- Check: `.heirloom_work/rb_crossbeam/k6b/k6b_cmp.png` (glide bypassed in the scratch copies). The contours bend harder, with no wrap.
+- Build: v0.6.2, router1, all six on seed 1; worst HD 90.35 MHz (HD Analog 93.43, HD HDMI 94.48, HD Dual 90.35); 7,161 / 7,680 LC. `.kinetic_work/k6_builds.txt`: heirloom crossbeam OK router1 worst-HD 90.35 LC 7161.

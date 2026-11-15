@@ -2,6 +2,7 @@
 -- SPDX-License-Identifier: GPL-3.0-only
 --
 -- Crossbeam v0.6.0 -- Heirloom #37, rebuilt 2026-10-27 from WIN_20230527_01_43_26; phase 2 2026-11-01.
+-- 2026-11-15: K6 camera top +25 % (Ron)
 --
 -- The photo: a glowing cyan cross beam (two arms crossing at the centre, slope ~0.23, a bright core
 -- fading to dark teal at the frame edges) luma-keyed over a grid of colour bars (rows of 39 lines,
@@ -269,10 +270,10 @@ architecture crossbeam of program_top is
 
     -- video luma above black (0..255), Osc = none
     signal v_y1 : unsigned(7 downto 0) := (others => '0');
-    signal v_ys : unsigned(12 downto 0) := (others => '0');           -- 8 x the slewed, gained luma
+    signal v_ys : unsigned(13 downto 0) := (others => '0');           -- 8 x the slewed, gained luma
     -- K6 camera gain (1/16, 0 .. 63, per field), the gained source luma, the Osc phase
-    signal f_cg : unsigned(5 downto 0) := to_unsigned(32, 6);
-    signal v_yg : unsigned(13 downto 0) := (others => '0');
+    signal f_cg : unsigned(6 downto 0) := to_unsigned(40, 7);   -- K6 x1.25 / 16, 0 .. 78
+    signal v_yg : unsigned(14 downto 0) := (others => '0');
     signal v_oph : unsigned(15 downto 0) := (others => '0');
 
     -- pixel path
@@ -584,7 +585,7 @@ begin
             f_ax <= (others => '0');
             f_ay <= (others => '0');
             -- K6 camera gain (1/16): K6 / 16, 0 .. 63 (16 = v0.6.0's fixed gain at 25 %)
-            f_cg <= s_g(2)(12 downto 7);
+            f_cg <= resize(s_g(2)(12 downto 7), 7) + resize(s_g(2)(12 downto 9), 7);   -- x1.25 (K6 top +25 %)
             if f_stack = '1' then
                 f_pvq <= to_signed(125158, 19); f_pvh <= to_signed(62579, 19); f_dy0 <= to_signed(-34668, 19);
             else
@@ -1017,7 +1018,7 @@ begin
             -- the K6 camera gain in its own stage (camera or Osc), then the horizontal slew (an analog
             -- low-pass, ~8 px): s += y g/16 - s/8
             v_yg <= v_y1 * f_cg;
-            v_ys <= v_ys + resize(v_yg(13 downto 4), 13) - resize(v_ys(12 downto 3), 13);
+            v_ys <= v_ys + resize(v_yg(14 downto 4), 14) - resize(v_ys(13 downto 3), 14);
 
             -- 1: |dx|; dy^2 - (s dx)^2 (Q.16 of c / 256 units); |s dx|; block period and offset
             -- (magnitudes by one's complement: off by one fine unit, invisible)
@@ -1079,9 +1080,9 @@ begin
             -- gamma; ramp key sum; camera bloom log
             p7_s1 <= resize(unsigned(p6_lax(9 downto 0)), 11) + resize(unsigned(p6_lf(9 downto 0)), 11);
             p7_val <= p6_lax(10) and p6_lf(10);
-            p7_pl <= resize(p6_pp, 15) + signed(resize(v_ys(12 downto 3), 15));
+            p7_pl <= resize(p6_pp, 15) + signed(resize(v_ys(13 downto 3), 15));
             p7_ag <= unsigned(C_AG6(to_integer(p6_ai)));
-            if v_ys(12 downto 11) /= "00" then v_li := (others => '1'); else v_li := v_ys(10 downto 6); end if;
+            if v_ys(13 downto 11) /= "000" then v_li := (others => '1'); else v_li := v_ys(10 downto 6); end if;
             p7_lv <= unsigned(C_LV(to_integer(v_li)));
             p7_rl <= resize(p_rr(6)(5 downto 3), 4) + resize(p_rr(6)(5 downto 4), 4);
             p_rrc(7) <= p6_rr; p_grc(7) <= p6_gr;

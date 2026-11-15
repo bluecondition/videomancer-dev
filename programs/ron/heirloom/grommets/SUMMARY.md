@@ -149,3 +149,10 @@ Working files are in `.heirloom_work/rb_grommets/` (`notes.md` has every number)
 - **Resolutions.** 720p shows the same geometry as 1080p. SD shows the centre 1440 virtual px (both holes stay on
   screen, the outer eyes are off), the bands become 4.2 lines (what the original SD patch had), and the stems'
   keystone is in virtual lines, so it looks the same.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+**Bend type**: K6 Etch sets how far the camera (or Osc) bends the lattice field, so the gain was raised 25 %. The K6 default is now 100 % (orchestrator).
+- The per-field EG = (k6^2 GV >> 23) + (k6^2 GV >> 25), at most 365 (was 292), in the existing 13-bit c_eg. Full-white etch is at most 93k, far inside the 21-bit field sum.
+- Check: `.heirloom_work/rb_grommets/k6b/k6b_cmp.png` (glide bypassed in the scratch copies). At K6 = 100 % a bright camera already pushes most of the lattice into the black key. The +25 % pushes a little more: same picture, slightly blacker, no wrap.
+- Build: v0.1.1, router1, all six on seed 1; worst HD 92.65 MHz (HD Analog 93.46, HD HDMI 92.65, HD Dual 95.84); 6,674 / 7,680 LC. `.kinetic_work/k6_builds.txt`: heirloom grommets OK router1 worst-HD 92.65 LC 6674.

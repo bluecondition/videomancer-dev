@@ -200,3 +200,10 @@ field contours over the still; `proto*.py` = float protos; `imodel.py` = the int
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 320 -> 512 (v0.1.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+**Bend type**: K6 sets how far the camera (or Osc) luma bends the flame field F and the band phase, so the top end was raised 25 %. The K6 default is now 100 % (orchestrator).
+- The per-field gain c_gF = k6^2 x 1.25 >> 15, formed as (k6^2 >> 13 + k6^2 >> 15) >> 2 after the k6^2 job. It is now 6 bits, 0 .. 39 (was 0 .. 31). The pixel-path camera product widens from 9 x 6 to 9 x 7 bits. The largest Osc term is 21,060, inside the 16-bit p5_cp. The F term is at most 1316, inside its 12 bits. The band phase is modular.
+- Check: `.heirloom_work/rb_brushfire/k6b/k6b_cmp.png` (bear, 720p60 / 4, K6 = 100 %, glide bypassed in the scratch copies). It shows the same picture with more bend, and no wrap.
+- Build: v0.1.2, router1; seed 2 on HD Analog, SD Analog and HD Dual (seed 1 stalled router1 at the 600 s timeout under machine load; dupin: no CARRY I0==I1), seed 1 elsewhere; worst HD 83.59 MHz (HD Analog 85.59, HD HDMI 83.59, HD Dual 85.98); 7,156 / 7,680 LC. `.kinetic_work/k6_builds.txt`: heirloom brushfire OK router1 worst-HD 83.59 LC 7156.
