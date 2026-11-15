@@ -199,3 +199,7 @@ holds the posterized camera), so 50 % keeps the shipped look. **v0.5.2.**
 - **Build (v0.5.2, 2026-11-15):** router1, all six configs seed 1. HD Analog 87.32, HD HDMI 86.16, HD Dual 82.67 MHz
   (worst HD); SD Analog 75.35, SD HDMI 81.17, SD Dual 77.05 MHz; 7189–7211 / 7680 LC (93.9 %), 24/32 EBR.
   `out/rev_b/ron/heirloom/rorschach.vmprog`. NOT flashed.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: K6 now loads at 100 % (initial_value 1023) so the full camera effect shows on load. This is a picture-type program (K6 sets how strongly the camera image itself shows), so its camera range is unchanged (the +25 % top boost went only to bend / element programs). The vmprog was repacked from the same bitstreams (only the settings block differs).

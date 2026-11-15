@@ -176,3 +176,7 @@ how much of it the fake decoder turns into rainbow. 0 .. 100 %, default 50 %.
   pixels left or right of its luma (a real decoder's chroma delay).
 - In the sim the picture starts 4 px right (the generated avid's start, as in every program on this shell).
 - The centre's Lissajous is +-128 px by +-64 lines (powers of two) instead of the prototype's +-150 by +-90.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: K6 now loads at 100 % (initial_value 1023). Picture-type camera use, so its camera range is unchanged; the vmprog was repacked from the same bitstreams.

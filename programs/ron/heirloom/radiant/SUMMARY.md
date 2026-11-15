@@ -281,3 +281,7 @@ The photo is a portrait paper collage, 3196 × 4176 (0.765:1). Measurements belo
   shorter to match. 720p is identical to 1080p.
 - **Interlace.** Interlaced modes draw both fields the same (line-doubled), because the hardware delivers no
   bottom field.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: K6 now loads at 100 % (initial_value 1023) so the full camera effect shows on load. This is a picture-type program (K6 sets how strongly the camera image itself shows), so its camera range is unchanged (the +25 % top boost went only to bend / element programs). The vmprog was repacked from the same bitstreams (only the settings block differs).

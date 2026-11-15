@@ -298,3 +298,7 @@ black stays the second palette. Merged into production with `./heirloom_diag.sh 
 restored; the diag copy stays in `.heirloom_work/rb_idol/diag/idol_diag/`).
 
 **Remaining:** presets are still hand-written; capture real ones from the hardware with `./capture_preset.sh`.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: K6 now loads at 100 % (initial_value 1023) so the full camera effect shows on load. This is a picture-type program (K6 sets how strongly the camera image itself shows), so its camera range is unchanged (the +25 % top boost went only to bend / element programs). The vmprog was repacked from the same bitstreams (only the settings block differs).

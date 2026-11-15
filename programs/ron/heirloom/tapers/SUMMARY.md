@@ -193,3 +193,7 @@ Working files are in `.heirloom_work/rb_tapers/` (`notes.md`, `widths.py`, `fitT
 (the float replica), `sheet.py` + `sheet.png` (every control at min / default / max), `imodel.py` (the integer
 model), `mkcam.py` + `cam_synth_720.png` (the synthetic camera), `rtl_*.png` (GHDL renders),
 `cmp_final.png` (still | proto | RTL Osc | RTL Video), `build_v0.1.0.log`.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: K6 now loads at 100 % (initial_value 1023) so the full camera effect shows on load. This is a picture-type program (K6 sets how strongly the camera image itself shows), so its camera range is unchanged (the +25 % top boost went only to bend / element programs). The vmprog was repacked from the same bitstreams (only the settings block differs).

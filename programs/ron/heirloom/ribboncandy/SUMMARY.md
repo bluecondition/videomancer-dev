@@ -173,3 +173,7 @@ ground cells are a sample-and-hold mosaic of it), so 50 % keeps the shipped look
 - **Build (v0.5.2, 2026-11-15):** router1, all six configs seed 1. HD Analog 86.71, HD HDMI 85.41, HD Dual
   86.39 MHz (worst HD 85.41); SD Analog 79.61, SD HDMI 85.65, SD Dual 87.67 MHz; 7094–7123 / 7680 LC (92.7 %),
   8/32 EBR. `out/rev_b/ron/heirloom/ribboncandy.vmprog`. NOT flashed.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: K6 now loads at 100 % (initial_value 1023) so the full camera effect shows on load. This is a picture-type program (K6 sets how strongly the camera image itself shows), so its camera range is unchanged (the +25 % top boost went only to bend / element programs). The vmprog was repacked from the same bitstreams (only the settings block differs).

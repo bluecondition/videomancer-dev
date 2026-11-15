@@ -190,3 +190,7 @@ P12, K1, K2 and K4 glide (1/8 of the gap per field). The control sheet is
 - **Motion.** The photo is still. The default Speed gives a slow drift and breathing instead.
 - **SD 4:3.** The picture is the same, with less wall at the sides. At P12 100 % with Size at maximum, the
   red copy's back edge clips at the 4:3 frame edge.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: K6 now loads at 100 % (initial_value 1023) so the full camera effect shows on load. This is a picture-type program (K6 sets how strongly the camera image itself shows), so its camera range is unchanged (the +25 % top boost went only to bend / element programs). The vmprog was repacked from the same bitstreams (only the settings block differs).

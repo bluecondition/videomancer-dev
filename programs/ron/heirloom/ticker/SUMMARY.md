@@ -168,3 +168,7 @@ described above. Every control acts in both modes; S8 Shadow (K6 until v0.5.1) i
   run at a fixed rate.
 - The grey ROM is an inline constant in `ticker.vhd`, not a build-hook package, because there is only
   one 256-entry table.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: K6 now loads at 100 % (initial_value 1023) so the full camera effect shows on load. This is a picture-type program (K6 sets how strongly the camera image itself shows), so its camera range is unchanged (the +25 % top boost went only to bend / element programs). The vmprog was repacked from the same bitstreams (only the settings block differs).

@@ -179,3 +179,7 @@ camera ──> 8-px box ──> sample-and-hold per pad (clocked by the step gri
 
 **Watch on hardware:** nothing here has been flashed. The track RAM and hold RAM carry `no_rw_check`. No
 pin-skew seed screening was run.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: K6 now loads at 100 % (initial_value 1023). Picture-type camera use, so its camera range is unchanged; the vmprog was repacked from the same bitstreams.

@@ -187,3 +187,7 @@ swing a camera gives, so the flip is unmistakable.
   SD Analog 92.76, HD HDMI 96.37, SD HDMI 99.76, HD Dual 99.58, SD Dual 97.64 MHz post-route (worst HD 96.37;
   v0.1.0 was 78.45 .. 80.53). 6,945 .. 6,970 / 7,680 LC (91 %), 16 / 32 EBR.
   `out/rev_b/ron/patchbay/limelight.vmprog`. Not flashed.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: K6 now loads at 100 % (initial_value 1023). Picture-type camera use, so its camera range is unchanged; the vmprog was repacked from the same bitstreams.

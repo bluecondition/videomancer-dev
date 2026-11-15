@@ -289,3 +289,7 @@ The photo is a portrait paper collage, 4776 × 5987 (0.80:1). Measurements below
   line and "Love." crawls along its label; the tear and jaw are at rest.
 - **SD 4:3.** The whole head fits, but at high Tear the outer strips swing past the 4:3 frame edge.
   Interlaced modes draw the same lines in both fields.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: K6 now loads at 100 % (initial_value 1023) so the full camera effect shows on load. This is a picture-type program (K6 sets how strongly the camera image itself shows), so its camera range is unchanged (the +25 % top boost went only to bend / element programs). The vmprog was repacked from the same bitstreams (only the settings block differs).

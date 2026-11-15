@@ -191,3 +191,7 @@ Glides (1/8 per field, ±2 deadband; ±4 on K6) on K1, K2, K3, K5, K6 and P12. P
   - 720p shows the same geometry as 1080p.
   - SD shows the centre 4:3 (virtual x 240–1680): the outer half-columns and the left-edge hold fall outside, and the
     picture is softer.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: K6 now loads at 100 % (initial_value 1023) so the full camera effect shows on load. This is a picture-type program (K6 sets how strongly the camera image itself shows), so its camera range is unchanged (the +25 % top boost went only to bend / element programs). The vmprog was repacked from the same bitstreams (only the settings block differs).

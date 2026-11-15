@@ -253,3 +253,7 @@ v0.6.2 (Ron's rule: K6 is the camera strength in every Heirloom / Kinetic / Patc
   colouriser folds).
 - Resolution: 720p renders the same picture as 1080p. SD 4:3 shows 1.5 tiles across instead of 2;
   the tile width is fixed in virtual units so the arch stays round and the crenels keep their shape.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: K6 now loads at 100 % (initial_value 1023) so the full camera effect shows on load. This is a picture-type program (K6 sets how strongly the camera image itself shows), so its camera range is unchanged (the +25 % top boost went only to bend / element programs). The vmprog was repacked from the same bitstreams (only the settings block differs).

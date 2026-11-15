@@ -217,3 +217,7 @@ v0.5.2. Ron's rule for the Heirloom, Kinetic and Patchbay sets: K6 is the camera
 - `mkhook2.py`: writes `vase.py`.
 - Images: `sheet.png` (control sheet), `cmp_proto.png`, `cmp_final.png`.
 - `abl/` (ablations), `prof/` (critical-path profiles).
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: K6 now loads at 100 % (initial_value 1023) so the full camera effect shows on load. This is a picture-type program (K6 sets how strongly the camera image itself shows), so its camera range is unchanged (the +25 % top boost went only to bend / element programs). The vmprog was repacked from the same bitstreams (only the settings block differs).

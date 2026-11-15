@@ -192,3 +192,7 @@ K6 is new (**v0.6.1**).
 - **LC:** 7,189 is slightly over the ~7,100 budget; all configs closed on the first seed.
 - **SD 4:3:** the same composition is squeezed horizontally (the layout spans the width; nothing here is round).
   720p matches 1080p.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: K6 now loads at 100 % (initial_value 1023) so the full camera effect shows on load. This is a picture-type program (K6 sets how strongly the camera image itself shows), so its camera range is unchanged (the +25 % top boost went only to bend / element programs). The vmprog was repacked from the same bitstreams (only the settings block differs).
