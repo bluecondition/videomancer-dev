@@ -1,6 +1,8 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
+-- 2026-11-15: K6 camera top +25 % (Ron)
+--
 -- Waterfall v0.5.0 -- Heirloom #45 (2026-10-27 rebuild), from WIN_20230610_00_51_13.
 --
 -- The photo: ONE line-locked chirped oscillator into a banded colourizer.
@@ -123,7 +125,8 @@ architecture waterfall of program_top is
     -- controls
     signal g1, g12 : unsigned(12 downto 0) := (others => '0');
     signal s_warm : std_logic := '0';
-    signal s_k1, s_k2, s_k3, s_k5, s_k6, s_p12 : unsigned(9 downto 0) := to_unsigned(512, 10);
+    signal s_k1, s_k2, s_k3, s_k5, s_p12 : unsigned(9 downto 0) := to_unsigned(512, 10);
+    signal s_mg : unsigned(6 downto 0) := to_unsigned(40, 7);                  -- melt gain (k6 >> 4) x 1.25
     signal s_sp : signed(10 downto 0) := (others => '0');
     signal s_nobead, s_wind, s_dusk, s_soft, s_osc : std_logic := '0';
     -- per-field constants
@@ -472,7 +475,7 @@ begin
                 s_k2 <= unsigned(registers_in(1));
                 s_k3 <= unsigned(registers_in(2));
                 s_k5 <= unsigned(registers_in(4));
-                s_k6 <= unsigned(registers_in(5));
+                s_mg <= resize(unsigned(registers_in(5)(9 downto 4)), 7) + resize(unsigned(registers_in(5)(9 downto 6)), 7);
                 v_s := signed(resize(unsigned(registers_in(3)), 11)) - 512;          -- K4 Speed
                 if v_s > -8 and v_s < 8 then v_s := (others => '0'); end if;
                 s_sp <= v_s;
@@ -1090,7 +1093,7 @@ begin
 
             -- 3: knot values to fabric; melt product
             p3_ve <= s_rqe; p3_vo <= s_rqo;
-            p3_mv <= resize(p2_dL * signed('0' & s_k6(9 downto 4)), 16);
+            p3_mv <= resize(p2_dL * signed('0' & s_mg), 16);
 
             -- 4: knot pair, difference (clamped to +-1023)
             if p_jo(3) = '0' then

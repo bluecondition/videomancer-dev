@@ -1,6 +1,8 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
+-- 2026-11-15: K6 camera top +25 % (Ron)
+--
 -- Bubbles v0.1.0 -- Heirloom (video phase), from the clip WIN_20240105_20_46_57 at 0.5 s.
 --
 -- The still: three columns of rainbow bubble lenses (937 px apart) stacked over a mint-to-cyan ground, each
@@ -162,7 +164,7 @@ architecture bubbles of program_top is
     signal c_vsn  : signed(17 downto 0) := to_signed(15978, 18);     -- the same, negated under Mirror
     signal c_phs  : unsigned(23 downto 0) := (others => '0');        -- swell roll phase
     signal c_vst  : unsigned(17 downto 0) := to_unsigned(35028, 18); -- roll step per field (24-bit phase)
-    signal c_g6   : unsigned(5 downto 0) := to_unsigned(16, 6);      -- camera gain
+    signal c_g6   : unsigned(6 downto 0) := to_unsigned(20, 7);      -- camera gain (k6 >> 4) x 1.25
 
     -- field serial multiplier
     signal f_a   : unsigned(31 downto 0) := (others => '0');
@@ -223,14 +225,14 @@ architecture bubbles of program_top is
     -- pixel path (the number is the stage)
     signal p2_a  : unsigned(14 downto 0) := (others => '0');
     signal p2_l  : unsigned(7 downto 0) := (others => '0');
-    signal p3_gl : unsigned(13 downto 0) := (others => '0');
+    signal p3_gl : unsigned(14 downto 0) := (others => '0');
     signal p3_a  : unsigned(14 downto 0) := (others => '0');
     signal p4_ac : signed(16 downto 0) := (others => '0');
     signal p4_a04 : unsigned(14 downto 0) := (others => '0');
-    signal p4_g4 : unsigned(11 downto 0) := (others => '0');
-    signal p4_pc : unsigned(7 downto 0) := (others => '0');
+    signal p4_g4 : unsigned(12 downto 0) := (others => '0');
+    signal p4_pc : unsigned(8 downto 0) := (others => '0');
     signal p5_f1, p5_f2, p5_d : signed(17 downto 0) := (others => '0');
-    signal p5_pc : unsigned(7 downto 0) := (others => '0');
+    signal p5_pc : unsigned(8 downto 0) := (others => '0');
     type t_u2 is array (2 to 10) of unsigned(1 downto 0);
     signal pf_rz : t_u2 := (others => (others => '0'));
     type t_flag is array (2 to 10) of std_logic;
@@ -503,7 +505,7 @@ begin
                         -- P12 above the still
                         if s_gp(12 downto 3) > 196 then c_q <= s_gp(12 downto 3) - 196;
                         else c_q <= (others => '0'); end if;
-                        c_g6 <= unsigned(registers_in(5)(9 downto 4));
+                        c_g6 <= resize(unsigned(registers_in(5)(9 downto 4)), 7) + resize(unsigned(registers_in(5)(9 downto 6)), 7);
                     when 66 =>                         -- e8 = +-(|512 - k3| * 169) >> 8 (floor)
                         if z_neg = '1' then v_e := -signed(resize(f_acc(19 downto 8), 12)) - 1;
                         else v_e := signed(resize(f_acc(19 downto 8), 12)); end if;
@@ -861,8 +863,8 @@ begin
             -- 4: the camera folded into a
             p4_ac  <= signed(resize(p3_a, 17)) - signed(resize(shift_right(p3_gl, 1), 17));
             p4_a04 <= shift_right(p3_a, 2) + shift_right(p3_a, 3);          -- 0.375 a
-            p4_g4  <= p3_gl(13 downto 2);
-            p4_pc  <= p3_gl(13 downto 6);
+            p4_g4  <= p3_gl(14 downto 2);
+            p4_pc  <= p3_gl(14 downto 6);
             -- 5: the fields
             p5_f1 <= resize(l_s1, 18) - resize(p4_ac, 18);
             p5_d  <= resize(l_sh, 18) - resize(p4_ac, 18);

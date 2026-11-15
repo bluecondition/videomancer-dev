@@ -195,3 +195,15 @@ Working files: `.heirloom_work/rb_bubbles/` (`notes.md`, `proto.py`, `imodel.py`
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 256 -> 512 (v0.1.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: K6 now loads at 100 % (initial_value 1023), and the camera effect at the top of the knob is 25 % stronger.
+
+Bend / element: K6 is how far the camera's luma swells the lenses and halos and bends the rainbow phase.
+
+The per-field camera gain is now (k6 >> 4) + (k6 >> 6), 0..78 (was k6 >> 4, 0..63), so every position is x1.25 (x1.24 at the top). The gain product and its consumers are one bit wider (p3_gl 15 bits, p4_g4 13, the rainbow phase p4_pc / p5_pc 9 bits into the 9-bit cyclic rainbow address). White now adds up to +2.3 field units and bends the rainbow up to 0.58 cycle (was +1.85 / 0.47).
+
+Old against new at K6 = 100 % (bear, 720p / 4): `.heirloom_work/rb_bubbles/k6b/k6b_cmp.png`.
+
+Build: router1, all seed 1, worst HD Fmax 91.91 MHz, 7035 LC (max of 6). Fmax per config: HD Analog 106.06, SD Analog 104.61, HD HDMI 100.11, SD HDMI 99.91, HD Dual 91.91, SD Dual 96.38 MHz.

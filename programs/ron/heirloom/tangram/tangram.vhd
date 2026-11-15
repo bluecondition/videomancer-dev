@@ -1,6 +1,8 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
+-- 2026-11-15: K6 camera top +25 % (Ron)
+--
 -- Tangram v0.5.0 -- Heirloom #9, rebuilt from the photo WIN_20230222_00_06_47.
 --
 -- The photo is an ADDITIVE RGB patch: each colour channel carries one oscillator layer.
@@ -85,7 +87,7 @@ architecture tangram of program_top is
 
     -- per-field values (engine OUT ports, hardwired phase accumulators)
     signal f_dutyh  : unsigned(7 downto 0) := to_unsigned(57, 8);
-    signal f_bk     : unsigned(10 downto 0) := (others => '0');
+    signal f_bk     : unsigned(10 downto 0) := (others => '0');   -- bend gain k6 x 2, max 2046 (2026-11-15: was x 1.6, RFI constant 410 -> 512)
     signal f_isl    : unsigned(10 downto 0) := to_unsigned(30, 11);   -- lower-ramp increment per pixel, Q.6
     signal f_thl    : signed(15 downto 0) := to_signed(-128, 16);     -- key thresholds on the scaled phase
     signal f_thh    : signed(15 downto 0) := to_signed(1664, 16);

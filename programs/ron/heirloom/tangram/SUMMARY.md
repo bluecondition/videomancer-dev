@@ -139,3 +139,15 @@ Work files are in `.heirloom_work/rb_tangram/`:
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 160 -> 512 (v0.5.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: K6 now loads at 100 % (initial_value 1023), and the camera effect at the top of the knob is 25 % stronger.
+
+Bend / element: K6 Bend is how far the source bends the pink stripes (and 0.6x the lower green ramps).
+
+The microcode's bend gain is BK = k6 x 512 >> 8 = 2 k6, 0..2046 (was k6 x 410 >> 8, 0..1638): x1.25 at every position, inside f_bk's 11 bits. It is a data-only change: the register-file constant RFI[239] in tangram.py is 512 (was 410; it is read only by that MUL). No logic changed. The assembler sources .heirloom_work/rb_tangram/mc2.py and p2/mc2.py say const(512) to match.
+
+Old against new at K6 = 100 % (bear, 720p / 4): `.heirloom_work/rb_tangram/k6b/k6b_cmp.png`.
+
+Build: router1, seeds other than 1: HD Dual seed 5, worst HD Fmax 77.81 MHz, 7113 LC (max of 6). Fmax per config: HD Analog 85.85, SD Analog 78.40, HD HDMI 77.81, SD HDMI 74.83, HD Dual 78.82, SD Dual 84.57 MHz. HD Dual needs router1 seed 5, as in v0.5.0 (seeds 1-4 miss, router2 misses on this engine), so build with SEED_MAX_RETRIES >= 5.

@@ -1,6 +1,8 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
+-- 2026-11-15: K6 camera top +25 % (Ron)
+--
 -- Grotto v0.1.0 -- Heirloom (phase 3, video clips), from the still WIN_20240104_00_30_04 at 3.0 s.
 --
 -- The still: a blue / white / black cavern "face": a hard-keyed black eye with a pale rim in the middle, a
@@ -163,7 +165,7 @@ architecture grotto of program_top is
     signal c_tide : signed(9 downto 0) := (others => '0');
     signal c_tm   : signed(10 downto 0) := to_signed(-256, 11);    -- tide - 256
     signal c_fr7  : unsigned(8 downto 0) := to_unsigned(128, 9);   -- fold frequency, Q7
-    signal c_et8  : unsigned(7 downto 0) := to_unsigned(44, 8);    -- etch gain, w per luma step, Q8
+    signal c_et8  : unsigned(7 downto 0) := to_unsigned(27, 8);    -- etch gain, w per luma step, Q7 (x 1.25: 291 / 2)
     signal c_wg, c_wg3 : unsigned(4 downto 0) := to_unsigned(11, 5);
     signal c_xsh  : unsigned(11 downto 0) := to_unsigned(730, 12);  -- seam x (h)
     signal c_sl0, c_sl1 : unsigned(11 downto 0) := to_unsigned(730, 12);
@@ -488,7 +490,7 @@ begin
                     when 8  => z_fa <= resize(unsigned(abs(z_k1)), 32); z_fb <= to_unsigned(205, 16);   -- rings octaves
                     when 9  => z_fa <= resize(unsigned(abs(z_e4)), 32); z_fb <= to_unsigned(386, 16);   -- speed octaves
                     when 10 => z_fa <= resize(s_g6(12 downto 3), 32); z_fb <= resize(s_g6(12 downto 3), 16);  -- etch^2
-                    when 11 => z_fa <= resize(z_sq, 32); z_fb <= to_unsigned(233, 16);             -- etch gain
+                    when 11 => z_fa <= resize(z_sq, 32); z_fb <= to_unsigned(291, 16);             -- etch gain (233 x 1.25)
                     when 12 => z_fa <= resize(s_g3(12 downto 3), 32); z_fb <= to_unsigned(11, 16); -- green width
                     when 13 => z_fa <= resize(z_mabs, 32); z_fb <= to_unsigned(60, 16);            -- seam drift
                     when others => z_fa <= resize(r_ex_q, 32); z_fb <= to_unsigned(109, 16);       -- speed
@@ -556,7 +558,7 @@ begin
                                 else z_es <= signed(resize(f_acc(18 downto 8), 11)); end if;
                     when 299 => r_ex_a <= unsigned(z_es(7 downto 0));
                     when 322 => z_sq <= f_acc(19 downto 12);
-                    when 346 => c_et8 <= f_acc(15 downto 8);
+                    when 346 => c_et8 <= f_acc(16 downto 9);                 -- Q7, max 144
                     when 370 => c_wg <= f_acc(13 downto 9);
                     when 371 => c_wg3 <= c_wg + 3;
                     when 394 => z_seam <= signed(resize(f_acc(13 downto 7), 8));
@@ -917,7 +919,7 @@ begin
             v_p22 := resize(q9_psl, 22) + shift_left(resize(q9_psh, 22), 4);
             q10_bs <= resize(shift_right(v_p22, 10), 12);
             v_p19 := resize(q9_etl, 19) + shift_left(resize(q9_eth, 19), 4);
-            q10_et <= resize(shift_right(v_p19, 8), 11);
+            q10_et <= resize(shift_right(v_p19, 7), 11);           -- c_et8 is Q7
             -- 11, 12: S = S0 + eye + slit + etch
             q11_u <= resize(q10_s0, 13) + resize(q10_be, 13);
             q11_v <= resize(q10_bs, 13) + resize(q10_et, 13);

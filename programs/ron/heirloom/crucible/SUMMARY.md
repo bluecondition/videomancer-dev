@@ -202,3 +202,15 @@ integer model, `sheet2.py` = the control sheet, `fr/` = every clip frame at 480x
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 400 -> 512 (v0.1.2). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: K6 now loads at 100 % (initial_value 1023), and the camera effect at the top of the knob is 25 % stronger.
+
+Bend / element: K6 is how much the camera's light (or the Osc lattice) heats the flame field.
+
+The per-field gain is now (k6^2 >> 15) + (k6^2 >> 17), 0..38 (was k6^2 >> 15, 0..31): x1.25 at every position (x1.23 at the top). The camera product p5_ct is 14 bits (was 13); F = H + camera stays well inside its 13-bit range. White now heats up to 4.4 F units (was 3.6). Note: with a bright source at K6 = 100 % the flame field floods almost the whole frame, old and new alike.
+
+Old against new at K6 = 100 % (bear, 720p / 4): `.heirloom_work/rb_crucible/k6b/k6b_cmp.png`.
+
+Build: router1, all seed 1, worst HD Fmax 77.18 MHz, 7039 LC (max of 6). Fmax per config: HD Analog 78.88, SD Analog 77.47, HD HDMI 77.18, SD HDMI 81.08, HD Dual 78.24, SD Dual 80.85 MHz.

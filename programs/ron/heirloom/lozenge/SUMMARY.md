@@ -257,3 +257,15 @@ Ron approved the diag as built, so both are settled as built:
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 320 -> 512 (v0.6.1). The vmprog was repacked from the same bitstreams (lozenge_diag build, as merged; verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: K6 now loads at 100 % (initial_value 1023), and the camera effect at the top of the knob is 25 % stronger.
+
+Bend / element: K6 Etch is how far the picture (or the Osc) bends the diamonds.
+
+The etch-gain constant is 9370 (was 7496, exactly x1.25 at every position). c_egq is 14 bits (was 13), the etch partials p4_ea / p4_eb 18 bits and p5_le 22 bits; the phase it feeds wraps mod 2^24 by design. Full etch is now 0..1000 px per full luma (was 800).
+
+Old against new at K6 = 100 % (bear, 720p / 4): `.heirloom_work/rb_lozenge/k6b/k6b_cmp.png`.
+
+Build: router1, all seed 1, worst HD Fmax 81.45 MHz, 7177 LC (max of 6). Fmax per config: HD Analog 81.45, SD Analog 81.45, HD HDMI 82.91, SD HDMI 82.91, HD Dual 82.29, SD Dual 80.98 MHz.

@@ -240,3 +240,15 @@ Working files are in `.heirloom_work/rb_saltire/`; `notes.md` has every number.
   - SD (4:3) spans the same 1920 virtual px across the narrower frame, so the X is squeezed to 3/4
     horizontally (steeper arms, narrower stripes). The vertical structure is identical. Ron should
     expect this at SD.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: K6 now loads at 100 % (initial_value 1023), and the camera effect at the top of the knob is 25 % stronger.
+
+Mixed: K6 sets the blob depth m (part of the drawing) and also how far the camera / Osc bends the band (luma >> ke, a shift step) and punches blob holes (15/16 luma in the blob sum).
+
+Only the camera part changed: the camera luma is scaled x1.25 once (stage 5, luma + luma >> 2), feeding both the band etch ((1.25 luma) >> ke, 9 bits) and the blob term (1.25 x 15/16 luma; the 15/16 moved from stage 10 to stage 6). Every K6 position is x1.25; m and the thresholds are unchanged. The blobs-off threshold sentinel is 2047 (was 1023), so K6 <= 8 still punches no holes (blob + luma now peaks near 1050). Note: K6 = 100 % is also the heaviest blob depth, so with a bright source most of the frame is black holes, old and new alike.
+
+Old against new at K6 = 100 % (bear, 720p / 4): `.heirloom_work/rb_saltire/k6b/k6b_cmp.png`.
+
+Build: router1, seeds other than 1: HD Analog seed 2, worst HD Fmax 80.12 MHz, 7203 LC (max of 6). Fmax per config: HD Analog 85.69, SD Analog 76.97, HD HDMI 81.31, SD HDMI 74.06, HD Dual 80.12, SD Dual 77.76 MHz.

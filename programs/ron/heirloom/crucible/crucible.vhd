@@ -1,6 +1,8 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
+-- 2026-11-15: K6 camera top +25 % (Ron)
+--
 -- Crucible v0.1.1 -- Heirloom from the video clips, built from the still WIN_20230518_23_23_28 t0.5
 -- v0.1.1: S7 Twin On = two separate lens columns at +-420 virtual px from the axis (one each side of the
 -- figure); S10 Tear On = frequent large sync-tear bursts (1 start in 8 lines, 8..39 lines, 40..198 vpx).
@@ -176,7 +178,7 @@ architecture crucible of program_top is
     signal c_ls8  : unsigned(8 downto 0) := to_unsigned(256, 9);      -- lens row scale (breathing), Q8
     signal c_zs8, c_izs8 : unsigned(9 downto 0) := to_unsigned(256, 10);
     signal c_th8  : signed(9 downto 0) := to_signed(166, 10);         -- lens threshold, Q8
-    signal c_g    : unsigned(4 downto 0) := to_unsigned(4, 5);        -- camera gain
+    signal c_g    : unsigned(5 downto 0) := to_unsigned(5, 6);        -- camera gain (k6^2 >> 15) x 1.25
     signal c_h8   : signed(10 downto 0) := (others => '0');           -- heat, Q8
     signal c_xb0  : unsigned(11 downto 0) := to_unsigned(16, 12);
     signal c_dd   : unsigned(5 downto 0) := to_unsigned(8, 6);        -- 2 xs^2
@@ -279,7 +281,7 @@ architecture crucible of program_top is
     signal p4_mid : unsigned(4 downto 0) := (others => '0');
     signal p4_band : unsigned(2 downto 0) := (others => '0');
     signal p5_kf : unsigned(9 downto 0) := (others => '0');
-    signal p5_ct : unsigned(12 downto 0) := (others => '0');
+    signal p5_ct : unsigned(13 downto 0) := (others => '0');
     signal p6_f  : signed(12 downto 0) := (others => '0');
     signal p7_dy, p7_dyi, p7_dr, p7_dl, p7_db : signed(13 downto 0) := (others => '0');
     signal p8_fy, p8_fr, p8_fl, p8_fb : std_logic := '0';
@@ -581,7 +583,7 @@ begin
                             c_b <= resize(c_b8, 9) + resize(f_acc(17 downto 9), 9);
                         end if;
                     when others =>
-                        c_g <= f_acc(19 downto 15);
+                        c_g <= resize(f_acc(19 downto 15), 6) + resize(f_acc(19 downto 17), 6);
                 end case;
             end if;
             if s_zone = '1' and z_run = '1' and z_kc = 22 and z_k = 3 then

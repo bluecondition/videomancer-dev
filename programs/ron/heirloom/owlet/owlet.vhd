@@ -1,6 +1,8 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
+-- 2026-11-15: K6 camera top +25 % (Ron)
+--
 -- Owlet v0.1.0 -- Heirloom from the video clips (phase 3b), made from the still WIN_20230818_01_17_40 @ 3.0 s.
 --
 -- The still: two contour eyes (axes x 530 and 1470) of nested blue / cyan / pink rings with a black outline
@@ -258,8 +260,9 @@ architecture owlet of program_top is
     signal q6_gs  : unsigned(13 downto 0) := (others => '0');
     signal q6_az  : signed(14 downto 0) := (others => '0');
     signal q6_et  : unsigned(17 downto 0) := (others => '0');
-    signal q7_f1, q7_f2 : signed(17 downto 0) := (others => '0');
-    signal q8_f   : signed(17 downto 0) := (others => '0');
+    signal q7_f1  : signed(17 downto 0) := (others => '0');
+    signal q7_f2  : signed(18 downto 0) := (others => '0');            -- 19 bits: etch x 1.25 headroom
+    signal q8_f   : signed(18 downto 0) := (others => '0');
     type t_flags is array (9 to 14) of std_logic;
     signal q_red, q_fir : t_flags := (others => '0');
     signal q11_p  : std_logic_vector(31 downto 0) := (others => '0');
@@ -460,7 +463,7 @@ begin
                     when 10 => z_fa <= resize(c_ka, 36);             z_fb <= resize(c_kr, 18);         -- x kr
                     when 11 => z_fa <= resize(s_g6(12 downto 3), 36); z_fb <= resize(s_g6(12 downto 3), 18); -- etch^2
                     when 12 => z_fa <= resize(z_k6s(19 downto 6), 36); z_fb <= resize(c_kr, 18);       -- x kr
-                    when 13 => z_fa <= resize(z_eg, 36);             z_fb <= to_unsigned(154, 18);     -- x 0.6
+                    when 13 => z_fa <= resize(z_eg, 36);             z_fb <= to_unsigned(385, 18);     -- x 0.6 x 1.25 (>> 9)
                     when 14 => z_fa <= to_unsigned(3040, 36);        z_fb <= resize(c_kr, 18);         -- red ramp centre
                     when 15 => z_fa <= resize(c_kr, 36);             z_fb <= to_unsigned(204, 18);     -- red ramp slope
                     when 16 => z_fa <= to_unsigned(600, 36);         z_fb <= resize(c_kr, 18);         -- Fire threshold
@@ -574,8 +577,8 @@ begin
                     when 316 => z_k6s <= f_acc(19 downto 0);
                     when 340 => z_eg <= f_acc(27 downto 12);
                     when 364 =>
-                        if s_src = '1' then c_eg <= resize(f_acc(23 downto 8), 18) + shift_left(resize(f_acc(23 downto 8), 18), 1);
-                        else c_eg <= resize(f_acc(23 downto 8), 18); end if;
+                        if s_src = '1' then c_eg <= resize(f_acc(24 downto 9), 18) + shift_left(resize(f_acc(24 downto 9), 18), 1);
+                        else c_eg <= resize(f_acc(24 downto 9), 18); end if;
                     when 388 => c_t0 <= to_signed(C_FPQ, 18) + signed(resize(f_acc(27 downto 12), 18));
                     when 412 => c_ts <= f_acc(23 downto 8);
                     when 436 => c_tf <= to_signed(C_FPQ, 18) + signed(resize(f_acc(25 downto 12), 18));
@@ -902,9 +905,9 @@ begin
             q6_et <= q5_et(25 downto 8);
             -- 7, 8: F = V + gS + aZ + etch (Q2)
             q7_f1 <= l_v + signed(resize(q6_gs, 18));
-            if q6_zn = '1' then q7_f2 <= signed(resize(q6_et, 18)) - resize(q6_az, 18);
-            else q7_f2 <= signed(resize(q6_et, 18)) + resize(q6_az, 18); end if;
-            q8_f  <= q7_f1 + q7_f2;
+            if q6_zn = '1' then q7_f2 <= signed(resize(q6_et, 19)) - resize(q6_az, 19);
+            else q7_f2 <= signed(resize(q6_et, 19)) + resize(q6_az, 19); end if;
+            q8_f  <= resize(q7_f1, 19) + q7_f2;
             -- 9: palette address (F / 2 + 320, wrapping); red band and Fire tests
             r_p_a <= unsigned(q8_f(12 downto 3)) + 320;
             if q8_f > l_t then q_red(9) <= '1'; else q_red(9) <= '0'; end if;

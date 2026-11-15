@@ -1,6 +1,8 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
+-- 2026-11-15: K6 camera top +25 % (Ron)
+--
 -- Lozenge v0.6.0 (phase 2 final) -- Heirloom #24, rebuilt from the photo WIN_20230410_01_10_37.
 --
 -- v0.6.0: K3 Aspect -> Bulge: a quadratic shaper on both triangles before they are summed,
@@ -187,7 +189,7 @@ architecture lozenge of program_top is
     signal c_fl   : unsigned(23 downto 0) := (others => '0');          -- ring flow, Q24 periods
     signal c_rl   : unsigned(23 downto 0) := (others => '0');          -- stripe roll, Q24 cycles
     signal c_hk   : unsigned(15 downto 0) := to_unsigned(6305, 16);   -- black half-width, Q16
-    signal c_egq  : unsigned(12 downto 0) := (others => '0');          -- etch gain per luma step >> 6
+    signal c_egq  : unsigned(13 downto 0) := (others => '0');          -- etch gain per luma step >> 6 (x 1.25)
     signal c_xb0  : unsigned(11 downto 0) := to_unsigned(16, 12);     -- beam start x (h)
     signal c_xhs  : unsigned(11 downto 0) := to_unsigned(132, 12);    -- hold end x (h)
     signal c_h01  : std_logic := '1';
@@ -266,8 +268,8 @@ architecture lozenge of program_top is
     -- pixel path
     signal p2_pd, p3_pd, p4_pd, p5_pd : unsigned(29 downto 0) := (others => '0');
     signal p3_lm  : unsigned(7 downto 0) := (others => '0');
-    signal p4_ea, p4_eb : unsigned(16 downto 0) := (others => '0');
-    signal p5_le  : unsigned(20 downto 0) := (others => '0');
+    signal p4_ea, p4_eb : unsigned(17 downto 0) := (others => '0');
+    signal p5_le  : unsigned(21 downto 0) := (others => '0');
     signal p6_u   : unsigned(29 downto 0) := (others => '0');
     signal p7_u   : unsigned(23 downto 0) := (others => '0');
     signal p6_eye, p7_eye : std_logic := '0';
@@ -493,7 +495,7 @@ begin
                         end if;
                     when 13 => z_fa <= resize(s_g6(12 downto 3), 36); z_fb <= resize(s_g6(12 downto 3), 16);  -- etch^2
                     when 14 => z_fa <= resize(z_a, 36);                z_fb <= c_g;                       -- etch^2 * G
-                    when 15 => z_fa <= resize(z_a, 36);                z_fb <= to_unsigned(7496, 16);
+                    when 15 => z_fa <= resize(z_a, 36);                z_fb <= to_unsigned(9370, 16);   -- 7496 x 1.25
                     when 16 =>                                                                            -- P0
                         z_fa <= resize(c_gd, 36);
                         if s_twin = '1' then z_fb <= resize(to_unsigned(960, 12) - c_xhs, 16);
@@ -594,7 +596,7 @@ begin
                         else c_hk <= f_acc(24 downto 9); end if;
                     when 362 => z_a <= f_acc(19 downto 0);
                     when 386 => z_a <= f_acc(35 downto 16);
-                    when 410 => c_egq <= f_acc(32 downto 20);
+                    when 410 => c_egq <= f_acc(33 downto 20);
                     when 434 => c_p0  <= f_acc(29 downto 0);
                     when 458 => c_bmx <= f_acc(29 downto 0);
                     when 482 =>
@@ -915,11 +917,11 @@ begin
             p3_pd <= p2_pd;
             p3_lm <= unsigned(s_lb_q);
             -- 4: etch partials (luma nibbles x gain)
-            p4_ea <= resize(p3_lm(3 downto 0) * c_egq, 17);
-            p4_eb <= resize(p3_lm(7 downto 4) * c_egq, 17);
+            p4_ea <= resize(p3_lm(3 downto 0) * c_egq, 18);
+            p4_eb <= resize(p3_lm(7 downto 4) * c_egq, 18);
             p4_pd <= p3_pd;
             -- 5: etch
-            p5_le <= resize(p4_ea, 21) + shift_left(resize(p4_eb, 21), 4);
+            p5_le <= resize(p4_ea, 22) + shift_left(resize(p4_eb, 22), 4);
             p5_pd <= p4_pd;
             -- 6: U = t * gain + luma * etch gain; the eye keys the un-etched field (a fixed pupil)
             p6_u <= p5_pd + shift_left(resize(p5_le, 30), 6);

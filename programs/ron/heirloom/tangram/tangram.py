@@ -14,6 +14,7 @@ The tables were fitted to the source photo (WIN_20230222_00_06_47) and are carri
         sentinel line.
   UC    512 x 16: the engine microcode (line program at 0, field program at 256).
   RFI   256 x 16: the engine register file's initial contents (constants, slot start pointers, glide states).
+        2026-11-15 (K6 camera top +25 %): the BK constant (k6 x c >> 8) is 512, was 410.
   BW/BV 512 x 8: the blue layer's measured profiles (wedge / lower V): 0..127 the edge (fringe, d = i-97),
         128..383 one stripe period (296 / 332 px) for the flow.
   L3    256 x 8: the T3 band's convex ramp.
@@ -131,7 +132,7 @@ RFI = [
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 35, 31, 29, 26, 19, 12, 6, 0,
     124, 112, 109, 94, 78, 63, 52, 37, 150, 148, 146, 143, 138, 133, 128, 126, 16, 32, 64, 128, 256, 256, 1083, 37841,
-    6373, 64720, 13175, 63861, 65402, 4415, 274, 62509, 2109, 65056, 221, 8191, 2047, 16, 32, 820, 64389, 1664, 65024, 640, 65136, 655, 10176, 410,
+    6373, 64720, 13175, 63861, 65402, 4415, 274, 62509, 2109, 65056, 221, 8191, 2047, 16, 32, 820, 64389, 1664, 65024, 640, 65136, 655, 10176, 512,
     65280, 1127, 1024, 351, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 ]
 BW = [

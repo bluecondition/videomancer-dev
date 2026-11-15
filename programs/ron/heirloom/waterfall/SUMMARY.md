@@ -182,3 +182,15 @@ slow 2-D triangle (half amplitude) through the same path, so Melt stays live.
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 300 -> 512 (v0.5.2). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: K6 now loads at 100 % (initial_value 1023), and the camera effect at the top of the knob is 25 % stronger.
+
+Bend / element: K6 Melt is how far the camera's luma (or the Osc triangle) bends the strings.
+
+The per-field melt gain is now (k6 >> 4) + (k6 >> 6), 0..78 (was k6 >> 4, 0..63), decoded in the field-start block. Every position is x1.25 (x1.24 at the top). The 9 x 8 product fits its 16-bit register (+-9984). The strings now bend up to +-0.62 line at max (was +-0.5).
+
+Old against new at K6 = 100 % (bear, 720p / 4): `.heirloom_work/rb_waterfall/k6b/k6b_cmp.png`.
+
+Build: router1, all seed 1, worst HD Fmax 76.01 MHz, 7262 LC (max of 6). Fmax per config: HD Analog 81.05, SD Analog 77.88, HD HDMI 76.01, SD HDMI 85.08, HD Dual 79.90, SD Dual 71.67 MHz.

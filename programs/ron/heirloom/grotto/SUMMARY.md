@@ -140,3 +140,15 @@ Glides: K1, K2, K3, K5, K6 and P12 move 1/8 of the gap per field.
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 448 -> 512 (v0.1.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: K6 now loads at 100 % (initial_value 1023), and the camera effect at the top of the knob is 25 % stronger.
+
+Bend / element: K6 Etch is how far the camera (or the Osc) bends the field.
+
+The etch-gain constant is 291 (was 233, x1.25 at every position). The per-field gain c_et8 is now Q7 (f_acc(16 downto 9), max 144), and the pixel path shifts the etch product by 7 (was 8), so the pixel-path widths are unchanged. Full etch is now 2.0 S per full luma (was 1.6).
+
+Old against new at K6 = 100 % (bear, 720p / 4): `.heirloom_work/rb_grotto/k6b/k6b_cmp.png`.
+
+Build: router1, all seed 1, worst HD Fmax 97.85 MHz, 6901 LC (max of 6). Fmax per config: HD Analog 97.85, SD Analog 103.44, HD HDMI 98.30, SD HDMI 109.11, HD Dual 105.98, SD Dual 85.46 MHz.

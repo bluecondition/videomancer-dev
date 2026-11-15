@@ -1,6 +1,8 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
+-- 2026-11-15: K6 camera top +25 % (Ron)
+--
 -- Saltire v0.1.0 -- Heirloom (video phase), rebuilt from the clip WIN_20230620_00_50_54 at 0.5 s.
 --
 -- The still: a neon X.  The picture is mirrored about virtual line 517 (v = |y - 517|).  One magenta band per
@@ -196,7 +198,7 @@ architecture saltire of program_top is
     signal c_a0f   : unsigned(8 downto 0) := to_unsigned(50, 9);
     signal c_daf   : unsigned(8 downto 0) := to_unsigned(60, 9);
     signal c_at    : unsigned(8 downto 0) := to_unsigned(109, 9);
-    signal c_t1, c_t2, c_t3, c_t4 : signed(11 downto 0) := to_signed(1023, 12);
+    signal c_t1, c_t2, c_t3, c_t4 : signed(11 downto 0) := to_signed(2047, 12);
     signal c_boff  : std_logic := '0';
     signal c_ke    : unsigned(1 downto 0) := "10";                   -- etch: luma >> ke
     signal z_e1, z_e5, z_e6 : signed(10 downto 0) := (others => '0');
@@ -300,10 +302,11 @@ architecture saltire of program_top is
     signal p3_xpx : signed(12 downto 0) := (others => '0');
     signal p3_son, p4_son, p5_son, p3_kp, p4_kp : std_logic := '0';
     signal p3_dg : std_logic := '0';
-    signal p4_lu, p5_lu, p6_lu, p7_lu, p8_lu, p9_lu : unsigned(7 downto 0) := (others => '0');
+    signal p4_lu : unsigned(7 downto 0) := (others => '0');
+    signal p5_lu, p6_lu, p7_lu, p8_lu, p9_lu : unsigned(8 downto 0) := (others => '0');   -- camera luma x 1.25 (x 15/16 from 6)
     signal p4_x117 : unsigned(15 downto 0) := (others => '0');
     signal p4_cx : unsigned(13 downto 0) := (others => '0');
-    signal p5_etv : unsigned(7 downto 0) := (others => '0');
+    signal p5_etv : unsigned(8 downto 0) := (others => '0');
     signal p4_sr : std_logic_vector(7 downto 0) := (others => '0');
     signal p5_xr : std_logic_vector(31 downto 0) := (others => '0');
     signal p5_cor, p6_cor, p7_cor, p8_cor : unsigned(8 downto 0) := (others => '0');
@@ -703,10 +706,10 @@ begin
                     when others => null;
                 end case;
             end if;
-            -- blobs off: thresholds out of reach
+            -- blobs off: thresholds out of reach (2047: blob + luma x 1.25 peaks near 1050)
             if s_zone = '1' and s_zc = 600 and c_boff = '1' then
-                c_t1 <= to_signed(1023, 12); c_t2 <= to_signed(1023, 12);
-                c_t3 <= to_signed(1023, 12); c_t4 <= to_signed(1023, 12);
+                c_t1 <= to_signed(2047, 12); c_t2 <= to_signed(2047, 12);
+                c_t3 <= to_signed(2047, 12); c_t4 <= to_signed(2047, 12);
             end if;
 
             s_hsync_sr(0) <= data_in.hsync_n; s_vsync_sr(0) <= data_in.vsync_n;
@@ -1041,6 +1044,7 @@ begin
         variable v_g0, v_g1, v_g2 : unsigned(14 downto 0);
         variable v_h0, v_h1, v_h2 : signed(13 downto 0);
         variable v_n   : unsigned(2 downto 0);
+        variable v_l5  : unsigned(8 downto 0);
     begin
         if rising_edge(clk) then
             -- 2: geometry x (twin fold, Cross); stripe index flags and phase; the teeth phase
@@ -1083,15 +1087,16 @@ begin
             if v_c < 0 then p5_cor <= (others => '0');
             elsif v_c > 384 then p5_cor <= to_unsigned(384, 9);
             else p5_cor <= unsigned(v_c(8 downto 0)); end if;
+            v_l5 := resize(p4_lu, 9) + resize(shift_right(p4_lu, 2), 9);   -- camera luma x 1.25 (K6 camera +25 %)
             if c_boff = '1' then p5_etv <= (others => '0');
-            else p5_etv <= shift_right(p4_lu, to_integer(c_ke)); end if;
+            else p5_etv <= shift_right(v_l5, to_integer(c_ke)); end if;
             if p4_kp = '1' then
                 p5_lvl <= signed(resize(unsigned(p4_sr(5 downto 0)), 8)) + resize(l_lt, 8);
             else
                 p5_lvl <= signed(resize(unsigned(p4_sr(5 downto 0)), 8));
             end if;
             p5_teal <= p4_sr(6);
-            p5_son <= p4_son; p5_qt <= p4_qt; p5_lu <= p4_lu;
+            p5_son <= p4_son; p5_qt <= p4_qt; p5_lu <= v_l5;
             pspl(5) <= pspl(4); ptip(5) <= ptip(4); pdw(5) <= pdw(4);
             if p4_dx < -512 then pex(5) <= to_signed(-512, 10);
             elsif p4_dx > 511 then pex(5) <= to_signed(511, 10);
@@ -1121,7 +1126,7 @@ begin
             else v_lv := unsigned(p5_lvl(5 downto 0)); end if;
             if p5_son = '1' then pgi(6) <= '0' & p5_teal & v_lv; else pgi(6) <= to_unsigned(128, 8); end if;
             p6_vv <= signed(resize(l_vp, 13)) + signed(resize(p5_etv, 13));
-            p6_cor <= p5_cor; p6_qt <= p5_qt; p6_lu <= p5_lu;
+            p6_cor <= p5_cor; p6_qt <= p5_qt; p6_lu <= p5_lu - shift_right(p5_lu, 4);   -- x 15/16
             pspl(6) <= pspl(5); ptip(6) <= ptip(5); pdw(6) <= pdw(5); pex(6) <= pex(5);
             -- 7: amplitude; vv against the edges; drip lump; cos data (fabric copies)
             p7_amp <= c_a0f + resize(shift_right(p6_da + p6_da4, 3), 9);
@@ -1150,10 +1155,10 @@ begin
             p9_amp <= p8_amp; p9_lu <= p8_lu;
             pdpi(9) <= pdpi(8); pdpo(9) <= pdpo(8); pnear(9) <= pnear(8); pgi(9) <= pgi(8);
             pspl(9) <= pspl(8); ptip(9) <= ptip(8); pdw(9) <= pdw(8); pex(9) <= pex(8);
-            -- 10: amp * tooth, split lo / hi nibble; blob + luma (15/16)
+            -- 10: amp * tooth, split lo / hi nibble; blob + luma (x 1.25 x 15/16, from stage 6)
             p10_ml <= resize(p9_amp * unsigned(p9_tooth(3 downto 0)), 13);
             p10_mh <= resize(signed('0' & p9_amp) * p9_tooth(7 downto 4), 14);
-            p10_blob <= p9_b2 + signed(resize(p9_lu, 12)) - signed(resize(shift_right(p9_lu, 4), 12));
+            p10_blob <= p9_b2 + signed(resize(p9_lu, 12));
             pdpi(10) <= pdpi(9); pdpo(10) <= pdpo(9); pnear(10) <= pnear(9); pgi(10) <= pgi(9);
             pspl(10) <= pspl(9); ptip(10) <= ptip(9); pdw(10) <= pdw(9); pex(10) <= pex(9);
             -- 11: toff (Blade: x2); hole level (thermometer over the 4 thresholds)
