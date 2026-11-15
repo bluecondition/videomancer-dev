@@ -1,0 +1,167 @@
+# Cafewall - Kinetic, 2026-11-14.
+# The cafe wall illusion: rows of dark and light tiles sliding against each other in a travelling wave, with
+# thin mid-tone mortar lines that are straight but look like wedges.  See cafewall.vhd, cafewall.py, SUMMARY.md.
+
+[program]
+processing_delay_clks = 22
+program_id = "com.czartroniks.cafewall"
+program_name = "Cafewall"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Illusion", "Pattern", "Grid"]
+program_type = "processing"
+description = "Cafe wall illusion: tile rows slide in a wave; the straight mortar lines look like wedges."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Scale"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 560
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Shape"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 200
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Mortar"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 380
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Rate"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 740
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Spread"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 420
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Colour"
+control_mode = "linear"
+display_min_value = 1
+display_max_value = 16
+initial_value = 32
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Wave"
+value_labels = ["Smooth", "Snap"]
+initial_value_label = "Smooth"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Field"
+value_labels = ["Linear", "Radial"]
+initial_value_label = "Linear"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Rows"
+value_labels = ["Same", "Alternate"]
+initial_value_label = "Same"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Reveal"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Shift"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Cafe Wall"
+
+[[preset]]
+name = "Munsterberg"
+rotary_potentiometer_2 = 0
+rotary_potentiometer_3 = 250
+rotary_potentiometer_5 = 300
+toggle_switch_9 = 1
+linear_potentiometer_12 = 360
+
+[[preset]]
+name = "Brick Flip"
+rotary_potentiometer_1 = 480
+rotary_potentiometer_2 = 420
+rotary_potentiometer_5 = 250
+rotary_potentiometer_6 = 160
+toggle_switch_7 = 1
+
+[[preset]]
+name = "Pond Tiles"
+rotary_potentiometer_1 = 420
+rotary_potentiometer_3 = 300
+rotary_potentiometer_5 = 520
+rotary_potentiometer_6 = 224
+toggle_switch_8 = 1
+linear_potentiometer_12 = 600
+
+[[preset]]
+name = "Straight Lines"
+rotary_potentiometer_3 = 450
+rotary_potentiometer_6 = 608
+toggle_switch_10 = 1
+
+[[preset]]
+name = "Mosaic"
+rotary_potentiometer_1 = 200
+rotary_potentiometer_2 = 80
+rotary_potentiometer_6 = 544
+linear_potentiometer_12 = 430
+
+[[preset]]
+name = "Landslide"
+rotary_potentiometer_1 = 620
+rotary_potentiometer_2 = 600
+rotary_potentiometer_4 = 840
+rotary_potentiometer_5 = 180
+rotary_potentiometer_6 = 288
+linear_potentiometer_12 = 1023

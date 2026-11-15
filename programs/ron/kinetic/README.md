@@ -19,7 +19,7 @@ Flash from `out/rev_b/ron/kinetic/<name>.vmprog`; rebuild one with `./build_set.
 | 1 | [riley](riley/) | Bridget Riley bands pinched and swollen by travelling waves | Fold: straight lines to bands folding into moiré | pilot v0.1.0 built 2026-11-14 (router2; HD Dual seed 2, others seed 1; HD 76.0-81.3 MHz; 6,673-6,695 LC, 22 EBR); awaiting Ron's flash |
 | 2 | vega | Vasarely grid of squares / circles bulging over a moving sphere | Bulge to a full globe | in progress |
 | 3 | metamorph | Escher tiling: a checkerboard whose edges deform into interlocking tiles | Morph | in progress |
-| 4 | cafewall | Café-wall illusion: offset brick rows whose straight mortar lines appear to tilt | Offset wave | in progress |
+| 4 | [cafewall](cafewall/) | Café-wall illusion: offset brick rows whose straight mortar lines appear to tilt | Offset wave | v0.1.0 built 2026-11-14 (ROUTER1, all six seed 1; HD 87.2-97.9 MHz; 5,833 LC, 76 %, 11 EBR); not flashed |
 | 5 | snakes | Kitaoka "rotating snakes": rings that seem to turn while still, then really crawl | Drift, illusory to real | in progress |
 | 6 | [louver](louver/) | Slats turning in a wave, two-sided, lit like blinds | Twist: rigid slats to helices | pilot v0.1.0 built 2026-11-14 (router2, all six seed 1; HD 77.8-86.5 MHz; 7,021 LC, 91 %, 24 EBR); awaiting Ron's flash |
 | 7 | horologe | A wall of clock hands sweeping in phase patterns | Spread: chaos to synchronized figures | in progress |
