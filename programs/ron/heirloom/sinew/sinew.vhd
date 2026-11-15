@@ -38,6 +38,7 @@
 -- (luma [1 2 1], chroma [1 2 2 2 2 2 2 2 1]/16, luma to ~777) before the blanking gate.  Latency 24
 -- clocks in every mode.  Generated colours in the hardware convention (U carries Cr, V carries Cb).
 
+-- K6 camera pass 2026-11-15: K6 = Melt (camera strength, was K5), K5 = Palette (was K6); default K6 50 %.
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -399,7 +400,7 @@ begin
                 if v_x > 8 then f_v <= resize(v_x - 8, 10);
                 elsif v_x < -8 then f_v <= resize(v_x + 8, 10);
                 else f_v <= (others => '0'); end if;
-                f_pal   <= unsigned(registers_in(5)(9 downto 7));
+                f_pal   <= unsigned(registers_in(4)(9 downto 7));
                 f_tear  <= registers_in(6)(0);
                 f_grain <= registers_in(6)(1);
                 f_saw   <= registers_in(6)(2);
@@ -428,7 +429,7 @@ begin
                             when 0 => gl_k <= unsigned(registers_in(0)) & "000"; gl_o <= s_g(0);
                             when 1 => gl_k <= unsigned(registers_in(1)) & "000"; gl_o <= s_g(1);
                             when 2 => gl_k <= unsigned(registers_in(2)) & "000"; gl_o <= s_g(2);
-                            when 3 => gl_k <= unsigned(registers_in(4)) & "000"; gl_o <= s_g(3);
+                            when 3 => gl_k <= unsigned(registers_in(5)) & "000"; gl_o <= s_g(3);
                             when others => gl_k <= unsigned(registers_in(7)) & "000"; gl_o <= s_g(4);
                         end case;
                     when 1 =>

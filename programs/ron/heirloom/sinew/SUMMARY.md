@@ -78,8 +78,8 @@ Working files: `.heirloom_work/rb_sinew/` (`notes.md` has every number).
 | K2 Sinews | Sinew line density 0.5–2× (base period 561 → 280 → 140 px). Glided. |
 | K3 Twist | The ropes' S-curve 0–4× (centre = the photo; 0 = straight leaning ropes). Glided. |
 | K4 Speed | Bipolar, still at the centre ±8. Positive: the pinch rolls down, the sinews stream, the ropes drift. Default 640 ≈ 28 lines/s (one triangle cycle in ~24 s), sinews 0.11 cycle/s. |
-| K5 Melt | How far the camera (or Osc) bends the sinews and ropes. Default 420 (gentle bend); max ±0.7 sinew cycle. Glided. |
-| K6 Palette | 1 the photo, 2 R/B/G, 3 G/R/B, 4 G/B/R, 5 B/R/G, 6 B/G/R, 7 the photo with G inverted, 8 the negative of 2. |
+| K6 Melt | How far the camera (or Osc) bends the sinews and ropes. Default 420 (gentle bend); max ±0.7 sinew cycle. Glided. |
+| K5 Palette | 1 the photo, 2 R/B/G, 3 G/R/B, 4 G/B/R, 5 B/R/G, 6 B/G/R, 7 the photo with G inverted, 8 the negative of 2. |
 | S7 Tear | Torn strips at the vertices and slips (default On). |
 | S8 Grain | The ropes' marbling (default On). |
 | S9 Wave | Triangle (the photo) / Saw: the fan runs one way and resets at the vertex. |
@@ -162,3 +162,7 @@ Working files: `.heirloom_work/rb_sinew/` (`notes.md` has every number).
   `imodel.py` (RTL-exact integer model), `gen_hook.py` (writes `sinew.py`).
 - `sheet_final.py` / `sheet.png` (control sheet), `cmp_proto.png`, `cmp_final.png`.
 - `abl/` (ablations), `synth_sa.sh` (standalone synth), `check_local.sh` (GHDL check including `sinew_pkg.vhd`).
+
+## K6 camera pass (2026-11-15)
+
+Ron: K6 is the camera strength in every program, default 50 %. Here the camera strength was on K5 (Melt), so K5 and K6 swapped: **K6 = Melt** (the camera strength, default now 512 = 50 %), **K5 = Palette** (was K6). Nothing else changed: the VHDL swaps the two knob inputs (the processing is identical), the TOML blocks and preset keys moved with them (the Controls rows above are renumbered). v0.5.2, rebuilt with router1: all six seed 1; HD worst 85.36 MHz (HD Analog 100.92, HD HDMI 85.36, HD Dual 89.01), LC LC. Rebuild: `NEXTPNR_ROUTER="--router router1" ./build_heirloom.sh sinew`. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/.

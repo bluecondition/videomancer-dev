@@ -86,9 +86,9 @@ Working files are in `.heirloom_work/rb_peaks/` (`notes.md`, `meas*.py`, `proto.
 | K1 Bands | the band VCO (and the suns, which ride on it): ×1/4 .. ×4 cycles per width; 2.03 = the clip (512) |
 | K2 Curtains | the weave VCO: ×1/4 .. ×4; 8.4 curtains per width at 512 |
 | K3 Lean | the vertical LFO into both VCOs: bipolar (±8 deadband). 0 = the lean reversed, 512 = vertical bands and curtains, 700 = the clip (−0.7 / +0.6 px per line), 1023 = 1.6× the clip |
-| K4 Picture | how far the camera (or the Osc) displaces the sky: 0 .. 300 px per full luma (square law); 320 = 29 px |
+| K6 Picture | how far the camera (or the Osc) displaces the sky: 0 .. 300 px per full luma (square law); 320 = 29 px |
 | K5 Peaks | the suns' apex row: at the horizon (0) .. line ~350 (400, the clip) .. the top of the frame (1023: the peaks swallow the sky) |
-| K6 Tint | the colouriser's tint: bipolar (±8 deadband). Left adds Cb (towards the clip's cyan/blue look at 0.5 s), right adds Cr (pink/orange, as at 12.5 s); 512 = the still |
+| K4 Tint | the colouriser's tint: bipolar (±8 deadband). Left adds Cb (towards the clip's cyan/blue look at 0.5 s), right adds Cr (pink/orange, as at 12.5 s); 512 = the still |
 | S7 Tears | the H-sync slips and smears: On (the clip) / Off |
 | S8 Water | Hold (the clip: the horizon line replayed, rippled) / Mirror (a true rippled reflection of the sky) |
 | S9 Suns | Two (the clip) / Four |
@@ -190,3 +190,7 @@ Presets: Clip, Glassy Dusk (Tears off, Storm 0), Mirror Lake, Four Moons (Four +
   suns stay on screen, but only ~1.5 band cycles show.
 - **Proto.** The proto's lean was fitted with a slightly different curve; the RTL uses a straight lean plus the
   glided slip, as measured.
+
+## K6 camera pass (2026-11-15)
+
+Ron: K6 is the camera strength in every program, default 50 %. Here the camera strength was on K4 (Picture), so K4 and K6 swapped: **K6 = Picture** (the camera strength, default now 512 = 50 %), **K4 = Tint** (was K6). Nothing else changed: the VHDL swaps the two knob inputs (the processing is identical), the TOML blocks and preset keys moved with them (the Controls rows above are renumbered). v0.1.1, rebuilt with router1: HD Dual seed 2; HD worst 81.26 MHz (HD Analog 84.03, HD HDMI 81.26, HD Dual 83.89), LC LC. Rebuild: `NEXTPNR_ROUTER="--router router1" ./build_heirloom.sh peaks`. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/.

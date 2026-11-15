@@ -69,8 +69,8 @@ Working files: `.heirloom_work/rb_plume/` (`notes.md` has every number).
 | K2 Reach | How far the red chevron reaches right, xF′ = xL + (xF − xL) × 0.375..1.62 (centre = the photo). Glided. |
 | K3 Stripes | Green stripe density, ×0.5..×2 (centre = the photo). Glided. |
 | K4 Flow | Bipolar, still at the centre ±8. Positive streams the seams right along the plume, square-law speed; the stripes drift at a quarter of it. Default 640 ≈ 45 virtual px/s. |
-| K5 Bend | How far the video (or Osc) bends the seams (up to ±2 cycles) and the stripes (±4 cycles). Default 200. Glided. |
-| K6 Tear | Line tearing of the top and bottom bands (triangle jitter plus a 3-line hold, gated by the measured tear zone). 0 = clean. |
+| K6 Bend | How far the video (or Osc) bends the seams (up to ±2 cycles) and the stripes (±4 cycles). Default 200. Glided. |
+| K5 Tear | Line tearing of the top and bottom bands (triangle jitter plus a 3-line hold, gated by the measured tear zone). 0 = clean. |
 | S7 Twin | A second plume mirrored from the right edge. |
 | S8 Wedge | The pink wedge on the right: On (the photo) / Off. |
 | S9 Ribbons | The black ribbons: Dark (the photo) / Filled with stripes. |
@@ -163,3 +163,7 @@ Working files: `.heirloom_work/rb_plume/` (`notes.md` has every number).
 - **SD (4:3):** shows the central 1440 virtual px, so the plume's base and the wedge are partly cropped. 720p and
   1080 are the same picture.
 - **Interlace:** no bottom-field half-line offset (field_n is tied high on hardware, so this is moot).
+
+## K6 camera pass (2026-11-15)
+
+Ron: K6 is the camera strength in every program, default 50 %. Here the camera strength was on K5 (Bend), so K5 and K6 swapped: **K6 = Bend** (the camera strength, default now 512 = 50 %), **K5 = Tear** (was K6). Nothing else changed: the VHDL swaps the two knob inputs (the processing is identical), the TOML blocks and preset keys moved with them (the Controls rows above are renumbered). v0.5.2, rebuilt with router1: all six seed 1; HD worst 81.05 MHz (HD Analog 82.62, HD HDMI 81.05, HD Dual 85.24), LC LC. Rebuild: `NEXTPNR_ROUTER="--router router1" ./build_heirloom.sh plume`. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/.

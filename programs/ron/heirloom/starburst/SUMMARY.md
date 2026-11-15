@@ -62,8 +62,8 @@ Work files: `.heirloom_work/rb_starburst/` (`notes.md`, `proto.py`, `imodel.py`,
 | K2 Bands | The colour band sequence: colourizer gain 0.5×–3×. Fewer, broader bands (yellow/magenta dominate) … many fine rings |
 | K3 Teeth | The yellow/black sawtooth teeth and the grey X's feathers: count 0.5×–2× (1× ≈ 14 teeth per cell) |
 | K4 Speed | Bipolar, still at the centre (±8). The teeth crawl along the edges, the feathers roll and the bands breathe (±0.025 cycle); the sign sets the direction |
-| K5 Etch | How hard the picture bends the bands: camera luma (Video) or the oscillator (Osc) added to the field, up to ±0.27 cycle |
-| K6 Palette | Band colours: CMYK (the photo), Ember, Ice, Acid, Rose, Mono, Neon, Gold |
+| K6 Etch | How hard the picture bends the bands: camera luma (Video) or the oscillator (Osc) added to the field, up to ±0.27 cycle |
+| K5 Palette | Band colours: CMYK (the photo), Ember, Ice, Acid, Rose, Mono, Neon, Gold |
 | S7 Centre | Which X sits at the screen centre: Grey X (the photo) / White X |
 | S8 Greys | The bowties: Grey (the photo) / Colour (grey bands recoloured from the palette's accents) |
 | S9 Source | Video (default) / Osc |
@@ -132,3 +132,7 @@ Glides (1/8 of the gap per field, ±3 hold) on K1, K2, K3, K5 and P12. At P12 = 
   yellow reads as a darker gold. Edges are crisper than the camera-blurred photo.
 - **The lattice is screen-centred.** The photo's is 7 px right of centre and 13 lines down from the
   capture's black top band, and its cell is 1.4 % larger than the default Cells.
+
+## K6 camera pass (2026-11-15)
+
+Ron: K6 is the camera strength in every program, default 50 %. Here the camera strength was on K5 (Etch), so K5 and K6 swapped: **K6 = Etch** (the camera strength, default now 512 = 50 %), **K5 = Palette** (was K6). Nothing else changed: the VHDL swaps the two knob inputs (the processing is identical), the TOML blocks and preset keys moved with them (the Controls rows above are renumbered). v0.5.2, rebuilt with router1: SD HDMI seed 2, HD Dual seed 2; HD worst 80.24 MHz (HD Analog 85.62, HD HDMI 80.24, HD Dual 83.72), LC LC. Rebuild: `NEXTPNR_ROUTER="--router router1" ./build_heirloom.sh starburst`. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/.

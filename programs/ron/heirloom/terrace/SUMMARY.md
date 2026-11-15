@@ -56,10 +56,10 @@ Measured in `.heirloom_work/rb_terrace/` (m1–m8.py, fit_fb.py, shape.py; notes
 |---|---|
 | K1 Tiles | Tile count: sawtooth cycles across, 1–8 linear (2.72 = the photo) |
 | K2 Rows | Row height: rows per frame height, 4–64 linear (25.1) |
-| K3 Bend | Narrow/wide column alternation: 0–5× the photo's bend, square law (45 % = 1×). Above about 2.5× the columns fold back into zigzags. In Video mode it also scales how far the camera shifts the column steps |
+| K6 Bend | Narrow/wide column alternation: 0–5× the photo's bend, square law (45 % = 1×). Above about 2.5× the columns fold back into zigzags. In Video mode it also scales how far the camera shifts the column steps |
 | K4 Speed | Row drift: bipolar, still within ±8 of centre, square law, up to ±2 rows/s. The default (+39 %) is about 0.29 rows/s: rows rise and the stairs climb |
 | K5 Seam | Flyback fringe: 0.4–50 % of a tile, cubic (3.05 % = 21.5 px, the photo). At 50 % the sawtooth becomes a triangle, giving chevron terraces |
-| K6 Palette | The 8 colours: Photo (fitted) / Primary / Ember / Ocean / Neon / Pastel / Inverse / Mono |
+| K3 Palette | The 8 colours: Photo (fitted) / Primary / Ember / Ocean / Neon / Pastel / Inverse / Mono |
 | S7 Climb | Staircase direction: it climbs to the right |
 | S8 Ramp | The stair treads become continuous slopes (diagonal bands, waved by the bend) |
 | S9 Lean | The columns shear half a tile over the frame height |
@@ -151,3 +151,7 @@ Measured in `.heirloom_work/rb_terrace/` (m1–m8.py, fit_fb.py, shape.py; notes
 - `rdiff.py`: RTL vs model diffs;
 - `simx.sh`: the GHDL sim wrapper;
 - `cmp_final.png`, `cmp_motion.png`, `cmp_swb.png`: the comparisons.
+
+## K6 camera pass (2026-11-15)
+
+Ron: K6 is the camera strength in every program, default 50 %. Here the camera strength was on K3 (Bend), so K3 and K6 swapped: **K6 = Bend** (the camera strength, default now 512 = 50 %), **K3 = Palette** (was K6). Nothing else changed: the VHDL swaps the two knob inputs (the processing is identical), the TOML blocks and preset keys moved with them (the Controls rows above are renumbered). v0.5.2, rebuilt with router1: all six seed 1; HD worst 89.62 MHz (HD Analog 89.62, HD HDMI 97.85, HD Dual 99.07), LC LC. Rebuild: `NEXTPNR_ROUTER="--router router1" ./build_heirloom.sh terrace`. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/.

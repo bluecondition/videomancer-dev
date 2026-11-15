@@ -92,8 +92,8 @@ proto; `imodel.py` / `imrun.py` / `cycles.py` = the integer model; `sheet.py` = 
 | K2 Period | the V oscillator's period: x4 (0: one giant stretched half, the side masks become tall drums) .. the still (512, 1148 lines) .. x1/4 (1023: four totems stacked); exponential, glided |
 | K3 Breath | the VCA LFO on the V wave: 0 = steady (the still's amplitude, no breathing); 0..512 = depth (512 = the clip: bipolar, the totem melts into stripes and re-forms upside down every 5.9 s); 512..1023 = rate, 11.8 s .. 2.4 s |
 | K4 Scroll | bipolar, still in the centre +-8: the V wave scrolls down (left) / up (right), square law; 700 = the clip's 128 lines/s up, 1023 = 1000 lines/s |
-| K5 Etch | how far the camera's light pushes the bands, masks and arms outward: 0 .. 239 px per full luma (square law; 380 = 66 px); the Osc lattice enters at 3x that |
-| K6 Colour | the colouriser's phase: every element walks the chain together, -28 .. +28 entries (centre +-8 = the still; 0 = a maroon ground, red and pink bands, lilac masks; 1023 = an orange-red ground, violet masks, pink cavities) |
+| K6 Etch | how far the camera's light pushes the bands, masks and arms outward: 0 .. 239 px per full luma (square law; 380 = 66 px); the Osc lattice enters at 3x that |
+| K5 Colour | the colouriser's phase: every element walks the chain together, -28 .. +28 entries (centre +-8 = the still; 0 = a maroon ground, red and pink bands, lilac masks; 1023 = an orange-red ground, violet masks, pink cavities) |
 | S7 Wave | Triangle (the clip: mirrored top/bottom) / Saw: the top half of the totem repeated, a hard seam where the X centre meets the next oval |
 | S8 Centre | Cross (the still: the X and the yellow star at the centre) / Masks: inside-out, the two side masks meet in the middle and the X splits to the edges |
 | S9 Tear | Off (the still) / On: sync-tear bands shifted whole, each pattern held 4 fields |
@@ -173,3 +173,7 @@ proto; `imodel.py` / `imrun.py` / `cycles.py` = the integer model; `sheet.py` = 
   masks are cut to their inner halves at the screen edges, and SD expands two table px per line-buffer entry.
 - Camera: the camera bends u per pixel, so a busy, high-contrast picture still frays band and mask edges on its bright
   side at the default Etch (the masks keep reading); lower Etch gives a cleaner totem.
+
+## K6 camera pass (2026-11-15)
+
+Ron: K6 is the camera strength in every program, default 50 %. Here the camera strength was on K5 (Etch), so K5 and K6 swapped: **K6 = Etch** (the camera strength, default now 512 = 50 %), **K5 = Colour** (was K6). Nothing else changed: the VHDL swaps the two knob inputs (the processing is identical), the TOML blocks and preset keys moved with them (the Controls rows above are renumbered). v0.1.2, rebuilt with router1: all six seed 1; HD worst 82.07 MHz (HD Analog 82.17, HD HDMI 82.07, HD Dual 88.32), LC LC. Rebuild: `NEXTPNR_ROUTER="--router router1" ./build_heirloom.sh kachina`. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/.

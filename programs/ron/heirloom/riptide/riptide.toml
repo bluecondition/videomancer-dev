@@ -7,7 +7,7 @@
 processing_delay_clks = 28
 program_id = "com.czartroniks.riptide"
 program_name = "Riptide"
-program_version = "0.5.1"
+program_version = "0.5.2"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -29,11 +29,11 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
-name_label = "Etch"
+name_label = "Ridges"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 300
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 
@@ -69,7 +69,7 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
-name_label = "Ridges"
+name_label = "Etch"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100

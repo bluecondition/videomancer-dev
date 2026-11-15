@@ -84,8 +84,8 @@ Working files: `.heirloom_work/rb_goblet/` (`notes.md` has every number).
 | K2 Width | The goblet's width: the field's x-scale about its axis, ×0.4..×3 (v0.5: ×0.6..×1.6). Field coordinates reflect at the field's edges, so a narrow setting repeats the goblet about three times across the frame; full right zooms into the bowl and stem. Glided. |
 | K3 Hue | The glass colours turned round the wheel: a full turn moves every band's orange / pink / blue / cyan through the glass. Glided. |
 | K4 Speed | Bipolar, still at the centre ±8, square law. The glass colours flow round the wheel (default 640: one turn ≈ 21 s) and the stripe oscillators drift (≈ 30 virtual px/s). Max is 16× the default. |
-| K5 Melt | How far the source bends the stripes, shifts the glass hue and swells or thins the glass. Square law, default 35 % unchanged, top ×2.9 v0.5's (video: bends up to ±176 px, the camera picture prints through the glass colours). On Osc the oscillator is 4× stronger and the curve cubic, so Osc at the default is still the photo and full Melt zigzags the stripes. Glided. |
-| K6 Patch | The RGB cable patch: RGB (the photo) / RBG / GRB / GBR / BRG / BGR. A labelled default (index < 6) is read as its index. |
+| K6 Melt | How far the source bends the stripes, shifts the glass hue and swells or thins the glass. Square law, default 35 % unchanged, top ×2.9 v0.5's (video: bends up to ±176 px, the camera picture prints through the glass colours). On Osc the oscillator is 4× stronger and the curve cubic, so Osc at the default is still the photo and full Melt zigzags the stripes. Glided. |
+| K5 Patch | The RGB cable patch: RGB (the photo) / RBG / GRB / GBR / BRG / BGR. A labelled default (index < 6) is read as its index. |
 | S7 Mirror | Off (the photo's own halves) / On: the left half folded onto the right, an exactly symmetric goblet. |
 | S8 Stripes | On (the photo) / Off: the glass alone on grey. |
 | S9 Block | On (the photo) / Off: the bottom-left line-start block and the left-edge stubs. |
@@ -224,3 +224,7 @@ knobs for the ones that make sense to do so."
 
 ## Notes
 - Fixed in v0.6.0: the Hourglass preset set S8 Stripes Off too (toggle_switch_8 = 1), which was unintended.
+
+## K6 camera pass (2026-11-15)
+
+Ron: K6 is the camera strength in every program, default 50 %. Here the camera strength was on K5 (Melt), so K5 and K6 swapped: **K6 = Melt** (the camera strength, default now 512 = 50 %), **K5 = Patch** (was K6). Nothing else changed: the VHDL swaps the two knob inputs (the processing is identical), the TOML blocks and preset keys moved with them (the Controls rows above are renumbered). v0.6.1, rebuilt with router1: all six seed 1; HD worst 83.85 MHz (HD Analog 87.56, HD HDMI 83.85, HD Dual 92.96), LC LC. Rebuild: `NEXTPNR_ROUTER="--router router1" ./build_heirloom.sh goblet`. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/.

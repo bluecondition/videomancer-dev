@@ -88,8 +88,8 @@ Working files: `.heirloom_work/rb_blossom/` (`notes.md` has every number).
 | K2 Bands | Contour density: field gain 0.62–1.62 about the flood edge. More bands squeeze into the garden; the palette reflects below its first band instead of going flat. |
 | K3 Garden | The tangle's colour: palette blend offset ±0.75 (violet / teal lines … the photo … yellow-green). Bipolar, centre = the photo. |
 | K4 Sway | Bipolar, still at the centre ±8. The rows sway sideways in a wave travelling down (right) or up (left), one cycle per row pair. The amplitude (to ~235 virtual px) and the rate (to ~1.4 s a cycle) both rise away from the centre. |
-| K5 Melt | How far the video (or Osc) bends the bands: up to ±2 palette units. Default 460. |
-| K6 Breathe | Depth of a heartbeat that travels down the rows (~2.4 s a beat). Each row in turn grows (height and width, to ×1.41) and blooms (+2.3 / −1.2 units). The video (or Osc) scales the bloom per pixel. Default 256 (gentle). |
+| K6 Melt | How far the video (or Osc) bends the bands: up to ±2 palette units. Default 460. |
+| K5 Breathe | Depth of a heartbeat that travels down the rows (~2.4 s a beat). Each row in turn grows (height and width, to ×1.41) and blooms (+2.3 / −1.2 units). The video (or Osc) scales the bloom per pixel. Default 256 (gentle). |
 | S7 Mirror | Off / On: the left half mirrored on screen; twin hearts point at each other. |
 | S8 Palette | Photo / Indigo (U and V exchanged: blue hearts on teal). |
 | S9 Edge | Soft (the photo) / Hard (16-entry poster bands). |
@@ -212,3 +212,7 @@ Working files: `.heirloom_work/rb_blossom/` (`notes.md` has every number).
 - **SD (4:3):** shows the central 1440 virtual px, which crops the far-left lobes (x < 240) and part of the
   flood. 720p and 1080 are the same picture.
 - **Interlace:** no bottom-field half-line offset (field_n is tied high on hardware, so this is moot).
+
+## K6 camera pass (2026-11-15)
+
+Ron: K6 is the camera strength in every program, default 50 %. Here the camera strength was on K5 (Melt), so K5 and K6 swapped: **K6 = Melt** (the camera strength, default now 512 = 50 %), **K5 = Breathe** (was K6). Nothing else changed: the VHDL swaps the two knob inputs (the processing is identical), the TOML blocks and preset keys moved with them (the Controls rows above are renumbered). v0.6.2, rebuilt with router1: all six seed 1; HD worst 78.83 MHz (HD Analog 78.83, HD HDMI 82.14, HD Dual 83.74), LC LC. Rebuild: `NEXTPNR_ROUTER="--router router1" ./build_heirloom.sh blossom`. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/.

@@ -7,7 +7,7 @@
 processing_delay_clks = 32
 program_id = "com.czartroniks.goblet"
 program_name = "Goblet"
-program_version = "0.6.0"
+program_version = "0.6.1"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -59,19 +59,19 @@ suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
+name_label = "Patch"
+value_labels = ["RGB", "RBG", "GRB", "GBR", "BRG", "BGR"]
+initial_value_label = "RGB"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
 name_label = "Melt"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 358
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
-
-[[parameter]]
-parameter_id = "rotary_potentiometer_6"
-name_label = "Patch"
-value_labels = ["RGB", "RBG", "GRB", "GBR", "BRG", "BGR"]
-initial_value_label = "RGB"
 
 [[parameter]]
 parameter_id = "toggle_switch_7"

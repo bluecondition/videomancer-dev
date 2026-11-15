@@ -15,7 +15,7 @@ picture.
 |---|---|---|
 | K1 Cells: 12 .. 120 cells across the whole screen, photo 47.7 at 58 % | **Bipolar, per row**: each row's S&H clock detunes by (8 + perm(row)) / 16 of ±1.5 octaves. Right = every row finer by its own factor (×1.7 .. ×4.4); left = coarser (×0.6 .. ×0.22); centre (default 512) = 47.7 cells | Columns break into staggered fragments. The line engine computes each line's clock (exp2 ROM) and centred start phase, so rows stay centred and the 90 px shift stays 90 px |
 | K2 Rows: 4 .. 64 rows per master, photo 16 at 45 % | **Bipolar cascade**: the row clock chirps down the frame (top row = the photo's 73.6 lines). Right = rows shrink to ~8 lines at the bottom; left = rows swell into slabs (~900 lines). Centre (default 512) = 16 equal rows | Linear chirp of the row increment per line (a perspective plane); same picture at SD / 720p / 1080p in virtual lines |
-| K3 Picture: stripe bend 0 .. ±0.6 cycle | **0 .. ±1.2 cycle** (v0.5's slope up to the 25 % default, steeper above); **above 25 % the source also bends the cell edges**, up to ±4.5 cells | Block edges trace the camera (Video) or wobble with the drifting triangles (Osc); zero cell bend at and below the default |
+| K6 Picture: stripe bend 0 .. ±0.6 cycle | **0 .. ±1.2 cycle** (v0.5's slope up to the 25 % default, steeper above); **above 25 % the source also bends the cell edges**, up to ±4.5 cells | Block edges trace the camera (Video) or wobble with the drifting triangles (Osc); zero cell bend at and below the default |
 | K4 Speed | **Same within ±128 (incl. the default +128), top ×3.25** | Also the S7 Drift rate |
 | K5 Slew: hard .. photo .. smears (left half near-dead) | **Bipolar about the photo**: 0 .. ~30 % ringing (overshoot through the zones beyond the target and back: rainbow fringes), ~31–37 % hard, 50 % the photo, right half smears (unchanged) | Signed 9-bit kernel ROM; rows 8..15 are v0.5's exactly |
 | S7 Shift: Stepped / Straight | **Stepped / Drift** | Drift: every row also slides at its own rate and direction (−3 .. +3 × a phase set by K4, plus a slow free run so it moves at K4 = 0). The 90 px steps stay |
@@ -111,10 +111,10 @@ K1 / K2 / K5 / P12 / K3 extreme plus Slant and Mirror. Drift motion and Video-mo
 |---|---|---|
 | K1 Cells | the 40.24 px cell grid, row by row | bipolar per-row S&H clock detune: centre = 47.7 cells on every row; right = finer by each row's factor (×1.7 .. ×4.4); left = coarser (×0.6 .. ×0.22) |
 | K2 Rows | the 73.6-line row hold | bipolar cascade from the top: centre = 16 equal rows; right = rows shrink to ~8 lines at the bottom; left = rows swell into slabs |
-| K3 Picture | the stripe bands; above 25 % the cell edges | camera (Video) / drifting triangles (Osc) bend the stripes 0 .. ±1.2 cycle (25 % default); above 25 % they also bend the cell edges, up to ±4.5 cells |
+| K6 Picture | the stripe bands; above 25 % the cell edges | camera (Video) / drifting triangles (Osc) bend the stripes 0 .. ±1.2 cycle (25 % default); above 25 % they also bend the cell edges, up to ±4.5 cells |
 | K4 Speed | the rolling master | bipolar, still in the centre ±8: the master rolls and the stripes crawl; top ×3.25 v0.5; also the S7 Drift rate |
 | K5 Slew | the soft edges and slivers | ringing rainbow fringes (−100 %) .. hard (~−30 %) .. the photo (0) .. long smears (+100 %) |
-| K6 Orange | the marmalade orange mix | 0 = unripe, 50 % = the photo, 100 % = burnt |
+| K3 Orange | the marmalade orange mix | 0 = unripe, 50 % = the photo, 100 % = burnt |
 | S7 Shift | the stepped top/bottom bands | Stepped (the photo's 90 px) / Drift (each row also slides at its own speed, with K4) |
 | S8 Keys | the flat yellow / amber / orange blocks | Warm (the photo) / Cool (cyan, blue, violet) |
 | S9 Tilt | the stripe bands | Level (the photo) / Slant (45°) |
@@ -197,3 +197,7 @@ was dropped.
 - No pin-skew seed screening was run. If HD HDMI shows lines, re-seed that config and repack.
 
 For a further round, start a new diag version from `.heirloom_work/rb_marmalade/diag/marmalade_diag/` (`.heirloom_work/diag_build.sh marmalade` builds it).
+
+## K6 camera pass (2026-11-15)
+
+Ron: K6 is the camera strength in every program, default 50 %. Here the camera strength was on K3 (Picture), so K3 and K6 swapped: **K6 = Picture** (the camera strength, default now 512 = 50 %), **K3 = Orange** (was K6). Nothing else changed: the VHDL swaps the two knob inputs (the processing is identical), the TOML blocks and preset keys moved with them (the Controls rows above are renumbered). v0.6.1, rebuilt with router1: all six seed 1; HD worst 91.17 MHz (HD Analog 95.37, HD HDMI 94.98, HD Dual 91.17), LC LC. Rebuild: `NEXTPNR_ROUTER="--router router1" ./build_heirloom.sh marmalade`. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/.

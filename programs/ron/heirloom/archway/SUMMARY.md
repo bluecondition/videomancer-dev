@@ -76,10 +76,10 @@ Working files are in `.heirloom_work/rb_archway/` (`notes.md` has every step).
 |---|---|
 | K1 Steps | the mosaic cells: 5.5–194 px (exponential, −3.25 / +1.9 octaves; 512 = the photo's 52 px). The colour levels stay put, so small cells give fine staircases (nearly the Smooth look) and large cells give big blocks |
 | K2 Lines | the cyan fan's line density: period ×2.3 (fat bands) .. ×0.44 (fine hatching); 512 = the photo |
-| K3 Etch | how far the camera (or the Osc) bends every contour, cell and line: cube law, 0–~750 px at full luma; 400 = 49 px (as v0.5), 700 ≈ 240 px |
+| K6 Etch | how far the camera (or the Osc) bends every contour, cell and line: cube law, 0–~750 px at full luma; 400 = 49 px (as v0.5), 700 ≈ 240 px |
 | K4 Speed | bipolar, still within ±8 of the centre. **Left:** the lines stream into the arch fast (square law, to 0.25 periods a field) while the S&H grid creeps (linear, to 0.02 cells a field). **Right:** the grid races (cube law, to 0.32 cells a field) while the lines drift out slowly (linear, to 0.06 periods a field). 640 = the v0.5 motion exactly. The chevron breathes with speed² on both sides |
 | K5 Chevron | 0 = gone (its apex sits below the bottom line at any Arch); rising, the chevron climbs from the foot; 381 = the photo (at the default Arch); past ~475 its apex leaves the top and the band moves outward until, at 1023, the pink band lies on the outermost arc with the nested lines and black cells filling the arch |
-| K6 Palette | a continuous morph (display 1.0–8.0): 1 Archway (the photo) → 2 Lagoon → 3 Orchard → 4 Jade → 5 Ultra → 6 Citrus (RGB permutations of the photo palette) → 7 Ember → 8 Frost (luma ramps), 32 steps between neighbours (16 per line, line pairs alternate), glided |
+| K3 Palette | a continuous morph (display 1.0–8.0): 1 Archway (the photo) → 2 Lagoon → 3 Orchard → 4 Jade → 5 Ultra → 6 Citrus (RGB permutations of the photo palette) → 7 Ember → 8 Frost (luma ramps), 32 steps between neighbours (16 per line, line pairs alternate), glided |
 | S7 Split | On (the photo: thin lines over the mosaic on the left, fat cyan with a black gap on the right) / Off (both halves like the left) |
 | S8 Arcs | the four black arcs On / Off |
 | S9 Flip | Off / On: the arch upside down, the chevron at the top. The generated field only: the camera's etch stays upright (flipping it would need a frame store) |
@@ -224,3 +224,7 @@ Working files are in `.heirloom_work/rb_archway/` (`notes.md` has every step).
   - the depth or ratio of the slow triangle (0.636·tri(9φ/64)): from even hatching to lines clumped in
     bundles that beat;
   - a line-width offset on the three thresholds: hairlines to solid cyan bands, separate from density.
+
+## K6 camera pass (2026-11-15)
+
+Ron: K6 is the camera strength in every program, default 50 %. Here the camera strength was on K3 (Etch), so K3 and K6 swapped: **K6 = Etch** (the camera strength, default now 512 = 50 %), **K3 = Palette** (was K6). Nothing else changed: the VHDL swaps the two knob inputs (the processing is identical), the TOML blocks and preset keys moved with them (the Controls rows above are renumbered). v0.6.2, rebuilt with router1: SD HDMI seed 2; HD worst 74.65 MHz (HD Analog 82.17, HD HDMI 74.65, HD Dual 79.69), LC LC. Rebuild: `NEXTPNR_ROUTER="--router router1" ./build_heirloom.sh archway`. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/.

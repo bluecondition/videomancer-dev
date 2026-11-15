@@ -82,11 +82,11 @@ Working files: `.heirloom_work/rb_riptide/` (`notes.md` has every number).
 |---|---|
 | **P12 Rip** | The glitch zones and torn edges. 0 = a clean mirrored band. Default 310 = the photo: ~3 px jitter in the six zones and 22-line torn edges. Edge depth grows as Rip² (255 lines at 100 %). Above 50 % the strips slide sideways (up to ±300 px), every band line jitters and the texture lines tear. |
 | K1 Band | Band half-height 24–541 lines (square law). Default 585 = 193 lines = the photo. Past that the knot field refolds. |
-| K2 Etch | The source picture etched into everything as hue contours: luma (Video) or the oscillator (Osc) rotates the hue of band and texture, up to ±176°. Default 300. |
+| K6 Etch | The source picture etched into everything as hue contours: luma (Video) or the oscillator (Osc) rotates the hue of band and texture, up to ±176°. Default 300. |
 | K3 Hue | Colourizer phase, a full turn. 0 = the photo's palette. |
 | K4 Speed | Bipolar, still at the centre (±8). Hue drift, the strips' slide oscillation, ridge crawl and column drift. Default 640. |
 | K5 Gain | Value gain 0.41–2.5× (square law), from dark ink to posterized plateaus. Default 547 (53 %) = 1.0× = the photo. |
-| K6 Ridges | Fingerprint ridge spacing 0.37–2.4× in 16 steps. Centre (50 %) = 10.8 lines = the photo. |
+| K2 Ridges | Fingerprint ridge spacing 0.37–2.4× in 16 steps. Centre (50 %) = 10.8 lines = the photo. |
 | S7 Mirror | Fold (the photo's top/bottom reflection) / Repeat (strips stacked without reflection). |
 | S8 Quad | The band is also mirrored left/right. |
 | S9 Palette | Photo / Opposite (hue + 180°: an orange fingerprint around a complementary band). |
@@ -151,3 +151,7 @@ pixel, so faces and edges show up as hue contours flowing through the swirl and 
 - The capture borders are not drawn.
 - At SD the picture is the centre 4:3 crop of the 16:9 composition (same scale, about 3.8 of the 5.1 columns
   visible); 720p and 1080p are identical.
+
+## K6 camera pass (2026-11-15)
+
+Ron: K6 is the camera strength in every program, default 50 %. Here the camera strength was on K2 (Etch), so K2 and K6 swapped: **K6 = Etch** (the camera strength, default now 512 = 50 %), **K2 = Ridges** (was K6). Nothing else changed: the VHDL swaps the two knob inputs (the processing is identical), the TOML blocks and preset keys moved with them (the Controls rows above are renumbered). v0.5.2, rebuilt with router1: HD HDMI seed 3, HD Dual seed 2; HD worst 78.16 MHz (HD Analog 85.65, HD HDMI 86.48, HD Dual 78.16), LC LC. Rebuild: `NEXTPNR_ROUTER="--router router1" ./build_heirloom.sh riptide`. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/.

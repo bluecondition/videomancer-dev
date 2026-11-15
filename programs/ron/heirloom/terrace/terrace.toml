@@ -7,7 +7,7 @@
 processing_delay_clks = 28
 program_id = "com.czartroniks.terrace"
 program_name = "Terrace"
-program_version = "0.5.1"
+program_version = "0.5.2"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -39,13 +39,9 @@ suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
-name_label = "Bend"
-control_mode = "linear"
-display_min_value = 0
-display_max_value = 100
-initial_value = 458
-display_float_digits = 0
-suffix_label = "%"
+name_label = "Palette"
+value_labels = ["Photo", "Primary", "Ember", "Ocean", "Neon", "Pastel", "Inverse", "Mono"]
+initial_value_label = "Photo"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
@@ -69,9 +65,13 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
-name_label = "Palette"
-value_labels = ["Photo", "Primary", "Ember", "Ocean", "Neon", "Pastel", "Inverse", "Mono"]
-initial_value_label = "Photo"
+name_label = "Bend"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
@@ -123,15 +123,15 @@ linear_potentiometer_12 = 0
 [[preset]]
 name = "Chevrons"
 rotary_potentiometer_5 = 1023
-rotary_potentiometer_6 = 576
+rotary_potentiometer_3 = 576
 
 [[preset]]
 name = "Cascade"
 linear_potentiometer_12 = 1023
-rotary_potentiometer_3 = 700
+rotary_potentiometer_6 = 700
 toggle_switch_9 = 1
 
 [[preset]]
 name = "Camera Steps"
 toggle_switch_10 = 1
-rotary_potentiometer_3 = 700
+rotary_potentiometer_6 = 700

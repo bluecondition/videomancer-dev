@@ -85,8 +85,8 @@ Working files: `.heirloom_work/rb_magma/` (`notes.txt` has every number).
 | K2 Fan | How far the streaks fan out from the left edge: 0 = straight vertical bands, centre = the photo, max = 2×. Glided. |
 | K3 Flow | Band drift, bipolar, still at the centre ±8. Positive streams the stripes right; square law. Default 800 ≈ one band every 7 s. |
 | K4 Pockets | The red pockets in the bands: 0 = none, centre = the photo, max = a pocket in every slot. |
-| K5 Melt | How far the video (or Osc) bends the bands and swells the lava. Default 400. |
-| K6 Sky | The cyan/blue horizon. Low = night blue/violet with red lava; high = cyan everywhere with yellow lava. |
+| K6 Melt | How far the video (or Osc) bends the bands and swells the lava. Default 400. |
+| K5 Sky | The cyan/blue horizon. Low = night blue/violet with red lava; high = cyan everywhere with yellow lava. |
 | S7 Cores | Hot (yellow cores with red rims, the photo) / Flat (red lava). |
 | S8 Ripple | Fine (the photo's fingerprint contours) / Coarse (wide topographic rings). |
 | S9 Mirror | Off / On: the stripe flow mirrored about the centre into chevrons. |
@@ -168,3 +168,7 @@ Working files: `.heirloom_work/rb_magma/` (`notes.txt` has every number).
 - **Static fields:** the fitted lava and band level stay in place. Motion is the band flow, the rising
   pockets, the lava breathe, the re-rolling comb and P12.
 - **Interlace:** no bottom-field half-line offset (field_n is tied high on hardware).
+
+## K6 camera pass (2026-11-15)
+
+Ron: K6 is the camera strength in every program, default 50 %. Here the camera strength was on K5 (Melt), so K5 and K6 swapped: **K6 = Melt** (the camera strength, default now 512 = 50 %), **K5 = Sky** (was K6). Nothing else changed: the VHDL swaps the two knob inputs (the processing is identical), the TOML blocks and preset keys moved with them (the Controls rows above are renumbered). v0.5.2, rebuilt with router1: all six seed 1; HD worst 83.17 MHz (HD Analog 85.34, HD HDMI 86.93, HD Dual 83.17), LC LC. Rebuild: `NEXTPNR_ROUTER="--router router1" ./build_heirloom.sh magma`. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/.

@@ -7,7 +7,7 @@
 processing_delay_clks = 36
 program_id = "com.czartroniks.starburst"
 program_name = "Starburst"
-program_version = "0.5.1"
+program_version = "0.5.2"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -59,19 +59,19 @@ suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
+name_label = "Palette"
+value_labels = ["CMYK", "Ember", "Ice", "Acid", "Rose", "Mono", "Neon", "Gold"]
+initial_value_label = "CMYK"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
 name_label = "Etch"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 245
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
-
-[[parameter]]
-parameter_id = "rotary_potentiometer_6"
-name_label = "Palette"
-value_labels = ["CMYK", "Ember", "Ice", "Acid", "Rose", "Mono", "Neon", "Gold"]
-initial_value_label = "CMYK"
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
@@ -130,9 +130,9 @@ rotary_potentiometer_4 = 760
 name = "Drifting Glass"
 toggle_switch_10 = 1
 rotary_potentiometer_1 = 200
-rotary_potentiometer_6 = 384
+rotary_potentiometer_5 = 384
 
 [[preset]]
 name = "Carved Face"
-rotary_potentiometer_5 = 900
+rotary_potentiometer_6 = 900
 rotary_potentiometer_2 = 330

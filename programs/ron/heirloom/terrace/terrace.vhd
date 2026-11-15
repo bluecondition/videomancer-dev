@@ -39,6 +39,7 @@
 -- before the blanking gate.  Latency 28 clocks in every mode.  Colours in
 -- the hardware convention (u = Cr, v = Cb), see terrace.py.
 
+-- K6 camera pass 2026-11-15: K6 = Bend (camera strength, was K3), K3 = Palette (was K6); default K6 50 %.
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -298,7 +299,7 @@ begin
             g_wm1 <= s_w - 1;
 
             -- K6 palette (8 labels; a value < 8 is the firmware's label index)
-            v_k := unsigned(registers_in(5));
+            v_k := unsigned(registers_in(2));
             if v_k < 8 then s_pal <= v_k(2 downto 0); else s_pal <= v_k(9 downto 7); end if;
 
             if s_zgo = '1' then
@@ -328,7 +329,7 @@ begin
                         case to_integer(q_gi) is
                             when 0 => gl_k <= unsigned(registers_in(0)) & "000"; gl_o <= s_g(0);
                             when 1 => gl_k <= unsigned(registers_in(1)) & "000"; gl_o <= s_g(1);
-                            when 2 => gl_k <= unsigned(registers_in(2)) & "000"; gl_o <= s_g(2);
+                            when 2 => gl_k <= unsigned(registers_in(5)) & "000"; gl_o <= s_g(2);
                             when 3 => gl_k <= unsigned(registers_in(4)) & "000"; gl_o <= s_g(3);
                             when others => gl_k <= unsigned(registers_in(7)) & "000"; gl_o <= s_g(4);
                         end case;

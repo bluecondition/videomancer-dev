@@ -39,6 +39,7 @@
 -- conditioning (luma box-4 + [1 2 1], chroma 8-box pair, luma to ~777) before the blanking gate.
 -- Latency 24 clocks in every mode.  Generated colours in the hardware convention (U = Cr, V = Cb).
 
+-- K6 camera pass 2026-11-15: K6 = Bend (camera strength, was K5), K5 = Tear (was K6); default K6 50 %.
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -394,7 +395,7 @@ begin
                 f_fill   <= registers_in(6)(2);
                 f_swap   <= registers_in(6)(3);
                 f_osc    <= registers_in(6)(4);
-                f_tg     <= unsigned(registers_in(5)(9 downto 4));
+                f_tg     <= unsigned(registers_in(4)(9 downto 4));
                 -- phases: + flow streams the seams right (phase down); the stripes drift at 1/4
                 if f_fneg = '1' then
                     f_flow <= f_flow + resize(f_spd, 16); f_gflow <= f_gflow + resize(f_spd(12 downto 2), 16);
@@ -416,7 +417,7 @@ begin
                             when 0 => gl_k <= unsigned(registers_in(0)) & "000"; gl_o <= s_g(0);
                             when 1 => gl_k <= unsigned(registers_in(1)) & "000"; gl_o <= s_g(1);
                             when 2 => gl_k <= unsigned(registers_in(2)) & "000"; gl_o <= s_g(2);
-                            when 3 => gl_k <= unsigned(registers_in(4)) & "000"; gl_o <= s_g(3);
+                            when 3 => gl_k <= unsigned(registers_in(5)) & "000"; gl_o <= s_g(3);
                             when others => gl_k <= unsigned(registers_in(7)) & "000"; gl_o <= s_g(4);
                         end case;
                     when 1 =>

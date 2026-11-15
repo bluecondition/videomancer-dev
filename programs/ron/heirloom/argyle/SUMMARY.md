@@ -62,8 +62,8 @@ X junctions, and big and small cores alternating along each row. Work files are 
 | K2 Scatter | **v0.6:** every diamond its own random size, 0 % = the photo, 100 % = flat-magenta slabs next to ringed pips. The sizes ride with the lattice and slowly breathe, each diamond on its own phase, at a rate set by Drift's speed (about 4 s a cycle at the default Drift; still when Drift is centred) |
 | K3 Pairs | the big/small core alternation (half-frequency part of the horizontal oscillator), 0–400 % (100 % = photo) |
 | K4 Drift | the lattice slides along its diagonal; bipolar, still at centre ±8; default 0.5 px/field up-left, ~8 s per diamond |
-| K5 Bend | how far camera luma / Osc bends the rings and colours (default 39 %) |
-| K6 Fringe | colour offset against the rings, 0–64 px (15 = photo's chroma offset) |
+| K6 Bend | how far camera luma / Osc bends the rings and colours (default 39 %) |
+| K5 Fringe | colour offset against the rings, 0–64 px (15 = photo's chroma offset) |
 | S7 Saw | vertical oscillator becomes a sawtooth: diamonds turn into stacked chevrons |
 | S8 Hard | hard-clipped rings |
 | S9 Shape | Lens (photo) / Diamond: straight-sided cores |
@@ -208,3 +208,7 @@ sizes.
 - **SD.** On 4:3 SD the diamonds keep their shape, so 5.5 fit across instead of 7.3.
   K1 Bloom is measured in diamonds from the screen centre, so SD shows the same bloom with the sides
   cropped, like the rest of the picture.
+
+## K6 camera pass (2026-11-15)
+
+Ron: K6 is the camera strength in every program, default 50 %. Here the camera strength was on K5 (Bend), so K5 and K6 swapped: **K6 = Bend** (the camera strength, default now 512 = 50 %), **K5 = Fringe** (was K6). Nothing else changed: the VHDL swaps the two knob inputs (the processing is identical), the TOML blocks and preset keys moved with them (the Controls rows above are renumbered). v0.6.2, rebuilt with router1: all six seed 1; HD worst 81.33 MHz (HD Analog 94.32, HD HDMI 84.69, HD Dual 81.33), LC LC. Rebuild: `NEXTPNR_ROUTER="--router router1" ./build_heirloom.sh argyle`. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/.

@@ -95,8 +95,8 @@ Work dir: `.heirloom_work/rb_bottleneck/` (`notes.md`, `geom.py`, `tables.py`, `
 | K2 Spread | distance between the bottles | the bottles move apart / together by (k − 512)/4 px each |
 | K3 Level | the lime neck / pink body line | fill threshold + 0.75 (k − 512) lines: 0 = all lime, 100 % = all pink |
 | K4 Speed | the moving parts | bipolar, still in the centre ±8. The bottles sway (±40 px at the bottom), the stripes wobble (±12 lines), the glitch blocks slide on three LFOs, the PWM lines crawl and the stair steps slide |
-| K5 Melt | outlines and fill line | the camera's (or Osc's) luma moves them: (luma − 96)·2^(k/128)/16 px, ±25 px at the default, ±400 px at 100 % |
-| K6 Stripes | the stripe field | rolls the stripes ±256 lines (wrapping); 512 = the photo |
+| K6 Melt | outlines and fill line | the camera's (or Osc's) luma moves them: (luma − 96)·2^(k/128)/16 px, ±25 px at the default, ±400 px at 100 % |
+| K5 Stripes | the stripe field | rolls the stripes ±256 lines (wrapping); 512 = the photo |
 | S7 Bottles | bottle count | Two (the photo) / One |
 | S8 Hold | the staircase | On (the photo) / Off |
 | S9 Rims | the glass rims and halos | On (the photo) / Off (bare silhouettes on the stripes) |
@@ -198,3 +198,7 @@ Work dir: `.heirloom_work/rb_bottleneck/` (`notes.md`, `geom.py`, `tables.py`, `
 - `imodel.py`: integer model of the RTL.
 - `sheet.png`: control sheet.
 - `cmp_proto.png`, `cmp_final.png`, `cmp_motion.png`, `cmp_vid.png`.
+
+## K6 camera pass (2026-11-15)
+
+Ron: K6 is the camera strength in every program, default 50 %. Here the camera strength was on K5 (Melt), so K5 and K6 swapped: **K6 = Melt** (the camera strength, default now 512 = 50 %), **K5 = Stripes** (was K6). Nothing else changed: the VHDL swaps the two knob inputs (the processing is identical), the TOML blocks and preset keys moved with them (the Controls rows above are renumbered). v0.5.2, rebuilt with router1: HD HDMI seed 2; HD worst 84.60 MHz (HD Analog 86.48, HD HDMI 86.48, HD Dual 84.60), LC LC. Rebuild: `NEXTPNR_ROUTER="--router router1" ./build_heirloom.sh bottleneck`. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/.

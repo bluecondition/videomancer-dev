@@ -47,6 +47,7 @@
 -- horizontal softness and the HD HDMI bar fix, luma 13/16) before the blanking gate.  Colours
 -- in the hardware convention (u = Cr, v = Cb).
 
+-- K6 camera pass 2026-11-15: K6 = Etch (camera strength, was K3), K3 = Palette (was K6); default K6 50 %.
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -423,9 +424,9 @@ begin
                         case to_integer(z_gc) is
                             when 0      => s_gm <= s_g1; s_gr <= unsigned(registers_in(0));
                             when 1      => s_gm <= s_g2; s_gr <= unsigned(registers_in(1));
-                            when 2      => s_gm <= s_g3; s_gr <= unsigned(registers_in(2));
+                            when 2      => s_gm <= s_g3; s_gr <= unsigned(registers_in(5));
                             when 3      => s_gm <= s_g5; s_gr <= unsigned(registers_in(4));
-                            when 4      => s_gm <= s_g6; s_gr <= unsigned(registers_in(5));
+                            when 4      => s_gm <= s_g6; s_gr <= unsigned(registers_in(2));
                             when others => s_gm <= s_gp; s_gr <= unsigned(registers_in(7));
                         end case;
                         z_gp <= "11";

@@ -55,6 +55,7 @@
 -- avid, output conditioning ([1 2 1] luma, [1 2 2 2 2 2 2 2 1]/16 chroma, luma
 -- 13/16), blanking gate.  Latency 28 clocks in every mode.  Colours: u = Cr.
 
+-- K6 camera pass 2026-11-15: K6 = Picture (camera strength, was K3), K3 = Orange (was K6); default K6 50 %.
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -443,9 +444,9 @@ begin
                         case to_integer(s_zc(4 downto 2)) is
                             when 1      => s_gl_g <= s_g1; s_gl_t <= registers_in(0);
                             when 2      => s_gl_g <= s_g2; s_gl_t <= registers_in(1);
-                            when 3      => s_gl_g <= s_g3; s_gl_t <= registers_in(2);
+                            when 3      => s_gl_g <= s_g3; s_gl_t <= registers_in(5);
                             when 4      => s_gl_g <= s_g5; s_gl_t <= registers_in(4);
-                            when 5      => s_gl_g <= s_g6; s_gl_t <= registers_in(5);
+                            when 5      => s_gl_g <= s_g6; s_gl_t <= registers_in(2);
                             when others => s_gl_g <= s_gp; s_gl_t <= registers_in(7);
                         end case;
                     when 1 =>

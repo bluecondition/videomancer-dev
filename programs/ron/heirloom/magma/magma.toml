@@ -7,7 +7,7 @@
 processing_delay_clks = 28
 program_id = "com.czartroniks.magma"
 program_name = "Magma"
-program_version = "0.5.1"
+program_version = "0.5.2"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -59,16 +59,6 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
-name_label = "Melt"
-control_mode = "linear"
-display_min_value = 0
-display_max_value = 100
-initial_value = 400
-display_float_digits = 0
-suffix_label = "%"
-
-[[parameter]]
-parameter_id = "rotary_potentiometer_6"
 name_label = "Sky"
 control_mode = "linear"
 display_min_value = -100
@@ -76,6 +66,16 @@ display_max_value = 100
 initial_value = 512
 display_float_digits = 0
 suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Melt"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
@@ -138,4 +138,4 @@ rotary_potentiometer_2 = 800
 [[preset]]
 name = "Ice Night"
 toggle_switch_10 = 1
-rotary_potentiometer_6 = 200
+rotary_potentiometer_5 = 200

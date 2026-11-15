@@ -6,7 +6,7 @@
 processing_delay_clks = 18
 program_id = "com.czartroniks.peaks"
 program_name = "Peaks"
-program_version = "0.1.0"
+program_version = "0.1.1"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -48,13 +48,13 @@ suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
-name_label = "Picture"
+name_label = "Tint"
 control_mode = "linear"
-display_min_value = 0
+display_min_value = -100
 display_max_value = 100
-initial_value = 320
+initial_value = 512
 display_float_digits = 0
-suffix_label = "%"
+suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
@@ -68,13 +68,13 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
-name_label = "Tint"
+name_label = "Picture"
 control_mode = "linear"
-display_min_value = -100
+display_min_value = 0
 display_max_value = 100
 initial_value = 512
 display_float_digits = 0
-suffix_label = ""
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
@@ -138,16 +138,16 @@ rotary_potentiometer_5 = 300
 
 [[preset]]
 name = "Blue Hour"
-rotary_potentiometer_6 = 60
+rotary_potentiometer_4 = 60
 rotary_potentiometer_2 = 380
 
 [[preset]]
 name = "Gale"
 linear_potentiometer_12 = 1023
-rotary_potentiometer_4 = 600
+rotary_potentiometer_6 = 600
 
 [[preset]]
 name = "Big Peaks"
 rotary_potentiometer_5 = 900
 rotary_potentiometer_1 = 300
-rotary_potentiometer_6 = 900
+rotary_potentiometer_4 = 900

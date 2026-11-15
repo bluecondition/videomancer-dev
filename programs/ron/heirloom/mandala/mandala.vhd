@@ -47,6 +47,7 @@
 -- before the blanking gate.  Latency 28 clocks in every mode.
 -- Generated colours in the hardware convention (U carries Cr, V carries Cb).
 
+-- K6 camera pass 2026-11-15: K6 = Melt (camera strength, was K5), K5 = Breathe (was K6); default K6 50 %.
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -463,8 +464,8 @@ begin
                             when 0 => gl_k <= unsigned(registers_in(1)) & "000"; gl_o <= s_g(0);
                             when 1 => gl_k <= unsigned(registers_in(2)) & "000"; gl_o <= s_g(1);
                             when 2 => gl_k <= unsigned(registers_in(3)) & "000"; gl_o <= s_g(2);
-                            when 3 => gl_k <= unsigned(registers_in(4)) & "000"; gl_o <= s_g(3);
-                            when 4 => gl_k <= unsigned(registers_in(5)) & "000"; gl_o <= s_g(4);
+                            when 3 => gl_k <= unsigned(registers_in(5)) & "000"; gl_o <= s_g(3);
+                            when 4 => gl_k <= unsigned(registers_in(4)) & "000"; gl_o <= s_g(4);
                             when others => gl_k <= unsigned(registers_in(7)) & "000"; gl_o <= s_g(5);
                         end case;
                     when 1 =>

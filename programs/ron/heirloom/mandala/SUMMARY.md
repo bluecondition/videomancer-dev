@@ -26,11 +26,11 @@ Each element's contours (and its red key, at 1/8) then move on their own, with s
 | Was (v0.5) | Now (v0.6.0) | Notes |
 |---|---|---|
 | K3 Blue: blue-ramp offset ±2 stripes (the whole face bluer / greener) | **K3 Eyes**, bipolar, photo at the centre (512) | The eye elements get −4 .. +4 stripes. Right = **wide open**: the pits deepen into black pupils ringed by extra nested rings, the red irises narrow. Left = **shut**: the pits fill, the rings collapse to points and the eyes go pink. **Renamed control** (Blue → Eyes); the blue level is no longer on a knob (see S9 and the questions) |
-| K6 Breathe: LFO depth 0 .. ±2 stripes on the whole field, default 384 = ±0.75 | **K6 Breathe**: 0 .. 384 exactly v0.5; above 384 the common LFO keeps deepening to v0.5's ±2 **and each element breathes on its own detuned LFO**, 0 → ±2.5 stripes | Element LFOs (parabolic sine, one phase accumulator): eyes 15.2 s, mouth 20.2 s, cheeks 11.6 s, forehead 9.7 s, outer lobes 27 s. They drift through every combination: eyes dilate while the mouth shuts, the forehead lobes swell, the corners darken. At or below the default the picture is v0.5 bit for bit |
+| K5 Breathe: LFO depth 0 .. ±2 stripes on the whole field, default 384 = ±0.75 | **K6 Breathe**: 0 .. 384 exactly v0.5; above 384 the common LFO keeps deepening to v0.5's ±2 **and each element breathes on its own detuned LFO**, 0 → ±2.5 stripes | Element LFOs (parabolic sine, one phase accumulator): eyes 15.2 s, mouth 20.2 s, cheeks 11.6 s, forehead 9.7 s, outer lobes 27 s. They drift through every combination: eyes dilate while the mouth shuts, the forehead lobes swell, the corners darken. At or below the default the picture is v0.5 bit for bit |
 | K2 Width: pulse exponent 0.33 .. 3 in 8 banks, photo bank 4 (default 576) | **0.12 .. 8 in 16 banks**, photo bank 9 (default **608**, the middle of its bank) | Twice the log range each way, finer steps. 0 = the stripes wash out into a pale / white face; 100 % = hair-thin lines on a blue-magenta face. Bank 9 is bit-identical to v0.5's bank 4 |
 | P12 Rings: gain 0.25 + 3p², ×0.25 .. ×3.25 | **0.125 + 3.5p², ×0.125 .. ×3.6** | Photo still at 50 % (gain 256, bit-exact). 0 % = the rings dissolve: only the glow, the red lobes and one broad band remain; 100 % = denser moiré |
 | K4 Red: ±1.5 key units | **±3 key units** | 0 = no red anywhere (a blue / green mask); 100 % = red floods the face and the outer field |
-| K5 Melt: 0 .. ±2 stripes, linear, default 400 | **0 .. ±3.8 stripes**: the v0.5 line up to the default, then 2.5× steeper | Default unchanged (bit-exact); the top is 1.9× v0.5's |
+| K6 Melt: 0 .. ±2 stripes, linear, default 400 | **0 .. ±3.8 stripes**: the v0.5 line up to the default, then 2.5× steeper | Default unchanged (bit-exact); the top is 1.9× v0.5's |
 | S9 Edge: Soft / Hard comparator stripes (subtle after the box filter) | **S9 Glow: Ramp (the photo) / Bands** | Bands folds the blue ramp every 2 stripes, so blue bands beat against the green stripes: the face turns pink / orange / blue banded, the outer greens get blue rings, the eye cores go pink |
 
 Unchanged: K1 Flow, S7 Stripes, S8 Lobes, S10 Faces (the elements follow both folds), S11 Source. The defaults draw the
@@ -125,8 +125,8 @@ Working files: `.heirloom_work/rb_mandala/` (`notes.md` has every number).
 | K2 Width | Stripe line width: washed-out bands → hair-thin lines (pulse exponent 0.12–8, 16 ROM banks; bank 9 = the photo, default 608). |
 | K3 Eyes | The eye ring systems, bipolar ±4 stripes: left = shut (rings collapse, eyes fill pink), centre = the photo, right = wide open (black pupils, extra rings, narrower red irises). |
 | K4 Red | The red lobes' size (corner, edge, forehead, cheek and eye cores) and the pink face area, ±3 key units. Bipolar, centre = the photo. |
-| K5 Melt | How far the video (or Osc) bends the contours, up to ±3.8 stripes (v0.5's line up to the default 400, 2.5× steeper above). |
-| K6 Breathe | 0–384: depth of the v0.5 slow LFO on the whole field (15 s; 384 = ±0.75 stripe, the default). Above 384 it deepens to ±2 and each element breathes on its own detuned LFO (eyes 15 s, mouth 20 s, cheeks 11.6 s, forehead 9.7 s, outer lobes 27 s), up to ±2.5 stripes more. |
+| K6 Melt | How far the video (or Osc) bends the contours, up to ±3.8 stripes (v0.5's line up to the default 400, 2.5× steeper above). |
+| K5 Breathe | 0–384: depth of the v0.5 slow LFO on the whole field (15 s; 384 = ±0.75 stripe, the default). Above 384 it deepens to ±2 and each element breathes on its own detuned LFO (eyes 15 s, mouth 20 s, cheeks 11.6 s, forehead 9.7 s, outer lobes 27 s), up to ±2.5 stripes more. |
 | S7 Stripes | Green (the photo) / Blue: the stripe and glow channels swap (a gold mask). |
 | S8 Lobes | Red (the photo) / Green: the key and stripe channels swap. |
 | S9 Glow | Ramp (the photo) / Bands: the blue glow folds every 2 stripes (pink / orange / blue banded face). |
@@ -219,3 +219,7 @@ Working files: `.heirloom_work/rb_mandala/` (`notes.md` has every number).
 - No pin-skew seed screening was run. If HD HDMI shows lines, re-seed that config and repack.
 
 For a further round, start a new diag version from `.heirloom_work/rb_mandala/diag/mandala_diag/` (`.heirloom_work/diag_build.sh mandala` builds it).
+
+## K6 camera pass (2026-11-15)
+
+Ron: K6 is the camera strength in every program, default 50 %. Here the camera strength was on K5 (Melt), so K5 and K6 swapped: **K6 = Melt** (the camera strength, default now 512 = 50 %), **K5 = Breathe** (was K6). Nothing else changed: the VHDL swaps the two knob inputs (the processing is identical), the TOML blocks and preset keys moved with them (the Controls rows above are renumbered). v0.6.1, rebuilt with router1: HD Dual seed 2; HD worst 84.52 MHz (HD Analog 88.51, HD HDMI 84.52, HD Dual 93.32), LC LC. Rebuild: `NEXTPNR_ROUTER="--router router1" ./build_heirloom.sh mandala`. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/.

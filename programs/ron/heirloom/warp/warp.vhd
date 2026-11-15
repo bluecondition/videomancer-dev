@@ -36,6 +36,7 @@
 -- ~777) before the blanking gate.  Latency 24 clocks in every mode.  Colours in the hardware
 -- convention (u = Cr, v = Cb), see warp.py.
 
+-- K6 camera pass 2026-11-15: K6 = Bend (camera strength, was K4), K4 = Palette (was K6); default K6 50 %.
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -302,9 +303,9 @@ begin
                 if v_x > 8 then f_neg3 <= '0'; v_u := unsigned(v_x) - 8; f_m <= v_u(8 downto 0);
                 elsif v_x < -8 then f_neg3 <= '1'; v_u := unsigned(-v_x) - 8; f_m <= v_u(8 downto 0);
                 else f_neg3 <= '0'; f_m <= (others => '0'); end if;
-                f_k4h <= unsigned(registers_in(3)(9 downto 5));
+                f_k4h <= unsigned(registers_in(5)(9 downto 5));
                 f_k5  <= unsigned(registers_in(4));
-                v_k6 := unsigned(registers_in(5));
+                v_k6 := unsigned(registers_in(3));
                 if v_k6 < 8 then f_pal <= v_k6(2 downto 0); else f_pal <= v_k6(9 downto 7); end if;
                 f_seam <= registers_in(6)(0);
                 f_marg <= registers_in(6)(1);

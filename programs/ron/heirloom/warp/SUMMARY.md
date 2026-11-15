@@ -59,9 +59,9 @@ Working files: `.heirloom_work/rb_warp/` (`notes.md` has every step).
 | K1 Stripes | Stripe density of the plane, ×0.5..×2 (centre = the photo). Glided. |
 | K2 Horizon | The horizon seam row, ±256 lines (centre = y 695). Moves where the arcs and the fan meet, and the palette split. Glided. |
 | K3 Flow | Stripe drift, bipolar, still at the centre ±8, square law. Default 640 = one period in ~6 s. |
-| K4 Bend | How far the camera (or Osc) luma bends the stripe phase: 0..±1 cycle at full luma. Default 100 ≈ ±0.09. |
+| K6 Bend | How far the camera (or Osc) luma bends the stripe phase: 0..±1 cycle at full luma. Default 100 ≈ ±0.09. |
 | K5 Haze | The green haze down the frame: none / the photo (centre) / double. |
-| K6 Palette | Warp (the photo) / Ember / Ice / Toxic / Candy / Mono / Neon / Rust: transforms of the fitted palettes, so each keeps the photo's band structure. |
+| K4 Palette | Warp (the photo) / Ember / Ice / Toxic / Candy / Mono / Neon / Rust: transforms of the fitted palettes, so each keeps the photo's band structure. |
 | S7 Seam | On: the photo's horizon seam (two laws) / Off: one through-zero law. |
 | S8 Margin | The black/green left margin with its staircase edge. |
 | S9 Mirror | The right half mirrors the left (the DDA reverses at the centre). |
@@ -134,3 +134,7 @@ Working files: `.heirloom_work/rb_warp/` (`notes.md` has every step).
 - **Chroma.** Chroma uses the 9-tap filter in every mode. At 720p the median |Cb| is 11 % under the photo
   (13.5 virtual px of filter); at 1080 it is within 5 %.
 - **Interlace.** No bottom-field offset (field_n is tied high on hardware).
+
+## K6 camera pass (2026-11-15)
+
+Ron: K6 is the camera strength in every program, default 50 %. Here the camera strength was on K4 (Bend), so K4 and K6 swapped: **K6 = Bend** (the camera strength, default now 512 = 50 %), **K4 = Palette** (was K6). Nothing else changed: the VHDL swaps the two knob inputs (the processing is identical), the TOML blocks and preset keys moved with them (the Controls rows above are renumbered). v0.5.2, rebuilt with router1: all six seed 1; HD worst 80.53 MHz (HD Analog 83.19, HD HDMI 88.84, HD Dual 80.53), LC LC. Rebuild: `NEXTPNR_ROUTER="--router router1" ./build_heirloom.sh warp`. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/.

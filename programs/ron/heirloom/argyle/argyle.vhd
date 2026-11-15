@@ -49,6 +49,7 @@
 -- [1 2 1], chroma [1 2 2 2 2 2 2 2 1]/16, luma to ~777) before the blanking
 -- gate.  Latency 27 clocks in every mode.
 
+-- K6 camera pass 2026-11-15: K6 = Bend (camera strength, was K5), K5 = Fringe (was K6); default K6 50 %.
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -588,7 +589,7 @@ begin
                 if v_x > 8 then s_s4 <= '0'; v_u := unsigned(v_x) - 8; s_m4 <= v_u(8 downto 0);
                 elsif v_x < -8 then s_s4 <= '1'; v_u := unsigned(-v_x) - 8; s_m4 <= v_u(8 downto 0);
                 else s_s4 <= '0'; s_m4 <= (others => '0'); end if;
-                s_k6 <= unsigned(registers_in(5));
+                s_k6 <= unsigned(registers_in(4));
                 f_saw  <= registers_in(6)(0);
                 f_hard <= registers_in(6)(1);
                 f_dia  <= registers_in(6)(2);
@@ -617,7 +618,7 @@ begin
                             when 0 => gl_k <= unsigned(registers_in(0)) & "000"; gl_o <= s_g(0);
                             when 1 => gl_k <= unsigned(registers_in(1)) & "000"; gl_o <= s_g(1);
                             when 2 => gl_k <= unsigned(registers_in(2)) & "000"; gl_o <= s_g(2);
-                            when 3 => gl_k <= unsigned(registers_in(4)) & "000"; gl_o <= s_g(3);
+                            when 3 => gl_k <= unsigned(registers_in(5)) & "000"; gl_o <= s_g(3);
                             when others => gl_k <= unsigned(registers_in(7)) & "000"; gl_o <= s_g(4);
                         end case;
                     when 1 =>

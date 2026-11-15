@@ -46,6 +46,7 @@
 -- 13/16) before the blanking gate.  Latency 36 clocks in every mode.
 -- Colours in the hardware convention (u = Cr, v = Cb).
 
+-- K6 camera pass 2026-11-15: K6 = Etch (camera strength, was K5), K5 = Palette (was K6); default K6 50 %.
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -405,7 +406,7 @@ begin
             end if;
 
             -- K6 Palette (8 labels; the firmware loads the default as the index)
-            v_k := unsigned(registers_in(5));
+            v_k := unsigned(registers_in(4));
             if v_k >= 8 then s_live6 <= '1'; end if;
             if s_live6 = '0' and v_k < 8 then
                 s_j6 <= v_k(2 downto 0);
@@ -448,7 +449,7 @@ begin
                             when 1      => s_gl_g <= s_g1; s_gl_t <= registers_in(0);
                             when 2      => s_gl_g <= s_g2; s_gl_t <= registers_in(1);
                             when 3      => s_gl_g <= s_g3; s_gl_t <= registers_in(2);
-                            when 4      => s_gl_g <= s_g5; s_gl_t <= registers_in(4);
+                            when 4      => s_gl_g <= s_g5; s_gl_t <= registers_in(5);
                             when others => s_gl_g <= s_gp; s_gl_t <= registers_in(7);
                         end case;
                     when 1 =>

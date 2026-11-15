@@ -7,7 +7,7 @@
 processing_delay_clks = 24
 program_id = "com.czartroniks.warp"
 program_name = "Warp"
-program_version = "0.5.1"
+program_version = "0.5.2"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -49,13 +49,9 @@ suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_4"
-name_label = "Bend"
-control_mode = "linear"
-display_min_value = 0
-display_max_value = 100
-initial_value = 100
-display_float_digits = 0
-suffix_label = "%"
+name_label = "Palette"
+value_labels = ["Warp", "Ember", "Ice", "Toxic", "Candy", "Mono", "Neon", "Rust"]
+initial_value_label = "Warp"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
@@ -69,9 +65,13 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
-name_label = "Palette"
-value_labels = ["Warp", "Ember", "Ice", "Toxic", "Candy", "Mono", "Neon", "Rust"]
-initial_value_label = "Warp"
+name_label = "Bend"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
@@ -128,5 +128,5 @@ rotary_potentiometer_3 = 760
 [[preset]]
 name = "Mirror Ice"
 toggle_switch_9 = 1
-rotary_potentiometer_6 = 2
+rotary_potentiometer_4 = 2
 rotary_potentiometer_1 = 700

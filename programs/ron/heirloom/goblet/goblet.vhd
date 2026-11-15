@@ -35,6 +35,7 @@
 -- 1080 virtual lines.  Generated avid; output conditioning ([1 2 2 2 2 2 2 2 1]/16 on Y, U, V,
 -- luma 13/16) and blanking gate.  Latency 32 clocks in every mode.  Colours: u = Cr, v = Cb.
 
+-- K6 camera pass 2026-11-15: K6 = Melt (camera strength, was K5), K5 = Patch (was K6); default K6 50 %.
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -363,7 +364,7 @@ begin
                 s_gd(0) <= signed(resize(unsigned(registers_in(0)) & "000", 15)) - signed(resize(g1, 15));
                 s_gd(1) <= signed(resize(unsigned(registers_in(1)) & "000", 15)) - signed(resize(g2, 15));
                 s_gd(2) <= signed(resize(unsigned(registers_in(2)) & "000", 15)) - signed(resize(g3, 15));
-                s_gd(3) <= signed(resize(unsigned(registers_in(4)) & "000", 15)) - signed(resize(g5, 15));
+                s_gd(3) <= signed(resize(unsigned(registers_in(5)) & "000", 15)) - signed(resize(g5, 15));
                 s_gd(4) <= signed(resize(unsigned(registers_in(7)) & "000", 15)) - signed(resize(g12, 15));
             end if;
             if s_zgo2 = '1' then
@@ -380,7 +381,7 @@ begin
                 s_warm <= '1';
                 if s_warm = '0' then
                     g1 <= unsigned(registers_in(0)) & "000"; g2 <= unsigned(registers_in(1)) & "000";
-                    g3 <= unsigned(registers_in(2)) & "000"; g5 <= unsigned(registers_in(4)) & "000";
+                    g3 <= unsigned(registers_in(2)) & "000"; g5 <= unsigned(registers_in(5)) & "000";
                     g12 <= unsigned(registers_in(7)) & "000";
                 else
                     if s_gb(0) = '1' then g1 <= s_gn(0); end if;
@@ -399,9 +400,9 @@ begin
                 v_a := -v_s;
                 if v_s < 0 then s_asp <= unsigned(v_a(9 downto 0)); else s_asp <= unsigned(v_s(9 downto 0)); end if;
                 -- K6 patch: (k6 * 3) >> 9 -> 0..5; a labelled default arrives as its index
-                v_t := resize(unsigned(registers_in(5)), 13) + resize(unsigned(registers_in(5)) & '0', 13);
-                if unsigned(registers_in(5)) < 6 then
-                    s_patch <= unsigned(registers_in(5)(2 downto 0));
+                v_t := resize(unsigned(registers_in(4)), 13) + resize(unsigned(registers_in(4)) & '0', 13);
+                if unsigned(registers_in(4)) < 6 then
+                    s_patch <= unsigned(registers_in(4)(2 downto 0));
                 else
                     s_patch <= v_t(11 downto 9);
                 end if;
