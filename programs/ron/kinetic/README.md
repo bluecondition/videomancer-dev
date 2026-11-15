@@ -29,7 +29,7 @@ Flash from `out/rev_b/ron/kinetic/<name>.vmprog`; rebuild one with `./build_set.
 | 11 | [hexbloom](hexbloom/) | A honeycomb of concentric hexagons breathing per cell | Bloom depth | v0.1.0 built 2026-11-14 (ROUTER1, all six seed 1; HD 97.1-104.2 MHz; 6,604-6,622 LC, 86 %, 10 EBR); not flashed |
 | 12 | tumbler | Rhombille cubes whose shading flips in waves (reversible-cube illusion) | Flip wave | in progress |
 | 13 | bauhaus | Cells of quarter-arcs, half-discs, bars and dots re-rolled by a wave | Re-roll rate | in progress |
-| 14 | quasi | Quasicrystal: 5 to 8 plane waves summed into shimmering Penrose-like contours | Symmetry order | in progress |
+| 14 | [quasi](quasi/) | Quasicrystal: 5 to 8 plane waves summed into shimmering Penrose-like contours | Symmetry order | v0.1.0 built 2026-11-14 (router2, all six seed 1; HD 80.6-88.0 MHz; 6,779-6,803 LC, 89 %, 24 EBR); not flashed |
 | 15 | rippletank | 2 to 4 orbiting point sources, circular-wave interference | Wavelength | in progress |
 | 16 | isoline | Metaballs drawn as clean topographic bands | Merge | in progress |
 | 17 | [girih](girih/) | Islamic star pattern whose contact angle opens stars into rosettes | Angle | v0.1.0 built 2026-11-14 (router2, all six seed 1; HD 79.2-94.8 MHz; ~6,000 LC, 78 %, 15 EBR); not flashed |
