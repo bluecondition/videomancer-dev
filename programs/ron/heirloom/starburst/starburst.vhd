@@ -47,6 +47,7 @@
 -- Colours in the hardware convention (u = Cr, v = Cb).
 
 -- K6 camera pass 2026-11-15: K6 = Etch (camera strength, was K5), K5 = Palette (was K6); default K6 50 %.
+-- 2026-11-15: K6 camera top +25 % (Ron): etch depth g + g/4 (g = K6 / 16; 0 .. 78, 7 bits).
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -175,7 +176,7 @@ architecture starburst of program_top is
     signal s_phi : unsigned(9 downto 0) := (others => '0');        -- max(0, p - 512)
     signal s_u1c : unsigned(6 downto 0) := to_unsigned(40, 7);     -- tooth mask end (columns)
     signal s_vu0 : unsigned(15 downto 0) := to_unsigned(51118, 16);
-    signal s_dep : unsigned(5 downto 0) := (others => '0');
+    signal s_dep : unsigned(6 downto 0) := (others => '0');         -- etch depth, K6 / 16 x 1.25 (0 .. 78)
     signal s_dpx : unsigned(12 downto 0) := to_unsigned(1101, 13);
     signal s_px0 : unsigned(19 downto 0) := (others => '0');
     signal s_t3 : unsigned(17 downto 0) := (others => '0');
@@ -473,7 +474,7 @@ begin
                 v_h := resize(s_g3, 12) + shift_left(resize(s_g3, 12), 1);
                 s_ts8 <= to_unsigned(32, 8) + resize(v_h(11 downto 5), 8);
                 if s_gp(9) = '1' then s_phi <= '0' & s_gp(8 downto 0); else s_phi <= (others => '0'); end if;
-                s_dep <= s_g5(9 downto 4);
+                s_dep <= resize(s_g5(9 downto 4), 7) + resize(s_g5(9 downto 6), 7);   -- x1.25
             end if;
             if s_zone = '1' and s_zc = 25 then
                 -- tooth mask end U1c = 40 + phi * 48 / 512; V-teeth mask start 0.78 - phi * 64
@@ -939,7 +940,7 @@ begin
             p17_p <= p16_df * signed('0' & p_fu(16)(7 downto 2));
             p15_lu <= unsigned(s_lu_q);
             p16_ls <= signed(resize(p15_lu, 10)) - 126;
-            p17_vp <= p16_ls * signed('0' & s_dep);
+            p17_vp <= resize(p16_ls * signed('0' & s_dep), 17);   -- |vp| <= 129 x 78 = 10062
             -- 18: F
             p18_f <= signed(resize(p17_lo, 14)) + resize(shift_right(p17_p, 6), 14);
             p18_vp <= p17_vp;

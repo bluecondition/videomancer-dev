@@ -47,6 +47,9 @@
 -- blanking gate (the chroma 8-back sample and the sync delay ride two block-RAM
 -- rings).  Latency 24 clocks in every mode.  Colours in the hardware
 -- convention (u = Cr, v = Cb).  Builds with router1.
+--
+-- 2026-11-15: K6 camera top +25 % (Ron): the camera / Osc luma enters the etch as (L - 128) x 1.25
+--             (s_lq, x + x/4), so the field and stripe etch are x1.25 at every K6 position.
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -314,7 +317,8 @@ architecture vesica of program_top is
     signal p8_sh : unsigned(1 downto 0) := (others => '0');
     signal p8_sd : unsigned(14 downto 0) := (others => '0');
     signal p9_prod : unsigned(16 downto 0) := (others => '0');
-    signal p4_lu : unsigned(7 downto 0) := to_unsigned(128, 8);
+    signal p4_x9 : signed(9 downto 0) := (others => '0');            -- (L - 128) x 1.25 (-160 .. 158)
+    signal s_lq  : signed(9 downto 0);                                 -- combinational: (s_lu - 128) x 1.25
     signal p5_xm : signed(11 downto 0) := (others => '0');
     signal p9_lvl : unsigned(1 downto 0) := (others => '0');
     signal p10_idx : unsigned(5 downto 0) := (others => '0');
@@ -367,6 +371,9 @@ architecture vesica of program_top is
     signal s_b16h : std_logic_vector(7 downto 0) := (others => '0');   -- generated avid of the last 8 box inputs
 
 begin
+
+    -- K6 camera +25 % (2026-11-15): the etch luma x 1.25 (x + x/4)
+    s_lq <= (signed(resize(s_lu, 10)) - 128) + shift_right(signed(resize(s_lu, 10)) - 128, 2);
 
     ---------------------------------------------------------------------------
     -- ROMs (registered reads -> block RAM)
@@ -1029,9 +1036,9 @@ begin
             p5_mn <= p4_mn;
             -- the crescent's shoulder: (56 - |d|)^2 / 224 rounds the taper into the full width
             if p4_ad < 64 then p5_kq <= to_unsigned(C_VES_KQ(to_integer(p4_ad(5 downto 0))), 4); else p5_kq <= (others => '0'); end if;
-            p4_lu <= s_lu;
-            -- etch: (luma - 128) x mantissa, then x 2^e / 16 at stage 6
-            v_x9 := signed(resize(p4_lu, 10)) - 128;
+            p4_x9 <= s_lq;
+            -- etch: (luma - 128) x 1.25 x mantissa (|xm| <= 1120), then x 2^e / 16 at stage 6
+            v_x9 := p4_x9;
             v_xm := (others => '0');
             if f_gem(2) = '1' then v_xm := v_xm + shift_left(resize(v_x9, 12), 2); end if;
             if f_gem(1) = '1' then v_xm := v_xm + shift_left(resize(v_x9, 12), 1); end if;

@@ -214,3 +214,15 @@ I extracted all 339 frames (30.05 fps, 11.3 s).
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 300 -> 512 (v0.1.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: K6 loads at 100 % (initial_value 1023), and bend / element programs get a 25 % stronger camera at the top of the knob.
+- **Bend.** K6 Etch adds the camera (or Osc) luma to layer A's palette index and layer B's ring phase, so the picture bends both ring systems.
+- **Change.** The per-field etch gain is eg + eg/4, with eg = 5 k6² >> 14, in a new step at zone clock 463 (one 9-bit add after the clock-462 decode). That is ×1.25 at every position: 398 at 100 %, where it was 319.
+  - Still inside its 9 bits.
+  - Video lumA ≤ 397. Osc (8×) −1371 .. 1808 inside the 12-bit g_lum.
+  - The palette index wraps by design. The ring phase gains at most +2.9 k in its 18-bit sum.
+  - Latency unchanged.
+- **Render.** `.heirloom_work/rb_nesting/k6b/k6b_cmp.png` (bear, 720p60 / 2, K6 100 %, glide bypassed in the scratch copies). The same eyes and rings; the bright areas push the contours further round the palette.
+- **Build** v0.1.2, router1, all six seed 1. HD Analog 92.03, HD HDMI 88.98, HD Dual 89.73 MHz (worst HD 88.98). 7173–7196 / 7680 LC. Not flashed.

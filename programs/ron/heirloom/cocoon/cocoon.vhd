@@ -50,6 +50,7 @@
 -- Colours in the hardware convention (u = Cr, v = Cb).
 
 -- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K5 = Speed (was K6); K5 Tear fixed at 512 (C_KFIX_5).
+-- 2026-11-15: K6 camera top +25 % (Ron): the bend only, L' x 15/16 (was 3/4); posterize and band key unchanged.
 -- S11 Bend -> Tear Photo (512) / Shred (1023); the bend is always on at the K6 gain.
 library ieee;
 use ieee.std_logic_1164.all;
@@ -300,7 +301,7 @@ architecture cocoon of program_top is
     signal p5_thv, p6_thv : unsigned(8 downto 0) := (others => '0');
     signal p5_tw31, p6_tw31 : std_logic := '0';
     signal p6_lo : unsigned(7 downto 0) := (others => '0');
-    signal p7_bend : unsigned(9 downto 0) := (others => '0');       -- L' x 3/4 (0 .. 286)
+    signal p7_bend : unsigned(9 downto 0) := (others => '0');       -- L' x 15/16 (0 .. 344)
     signal p7_src : unsigned(7 downto 0) := (others => '0');
     signal p_gm : unsigned(12 downto 0) := (others => '0');          -- source luma x K6 gain (1/16)
     signal p7_vshow : std_logic := '0';
@@ -1178,11 +1179,11 @@ begin
             if c_osc = '1' then p7_src <= p6_lo; else p7_src <= p_lum(6); end if;
             p_gm <= p7_src * c_cg;
 
-            -- S7: the gained source luma; bend (L' x 3/4, 0 at black); band key
+            -- S7: the gained source luma; bend (L' x 15/16 = L'/16 - L'/256 in 1/16, 0 at black; was 3/4); band key
             v_l9 := p_gm(12 downto 4);
             if v_l9(8) = '1' then v_lo := (others => '1'); else v_lo := v_l9(7 downto 0); end if;
             p_lum(7) <= v_lo;
-            p7_bend <= resize(p_gm(12 downto 5), 10) + resize(p_gm(12 downto 6), 10);
+            p7_bend <= resize(p_gm(12 downto 4), 10) - resize(p_gm(12 downto 8), 10);   -- <= 344
             if p_inbx(6) = '1' and v_l9 > p6_thv and p6_tw31 = '0' then p7_vshow <= '1';
             else p7_vshow <= '0'; end if;
 

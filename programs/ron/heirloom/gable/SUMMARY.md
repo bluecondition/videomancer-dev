@@ -210,3 +210,13 @@ Glides (1/8 of the gap per field, ±2 deadband) on K1, K2, K3, K5, K6 and P12.
   - **SD shows the centre 4:3**: the gable is in view, but the outer rings and the flanks' outer parts are cropped.
 - **Magenta** takes the alternative clip's colour family, but not its round arcs (S10 Arch gives those separately)
   or its green / blue blocks.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: K6 loads at 100 % (initial_value 1023), and bend / element programs get a 25 % stronger camera at the top of the knob.
+- **Bend.** K6 Etch adds the camera (or Osc) luma to the field index, so the picture bends the chevrons.
+- **Change.** The per-field etch gain is g + g/4 (zone clock 170, straight from the serial product's slices), so ×1.25 at every position. At 100 % that is 598 rows of field per full luma, where it was 478.
+  - c_eg ≤ 2558, or 3837 with the Osc's ×1.5, inside its 13 bits. The Osc centring product c_eg × 111 ≤ 426 k stays inside its 20 bits. The etch product ≤ 978 k stays inside its 21 bits.
+  - The index wraps mod 2^20 as designed: the colouriser bands are periodic. Latency unchanged.
+- **Render.** `.heirloom_work/rb_gable/k6b/k6b_cmp.png` (bear, 720p60 / 2, K6 100 %, glide bypassed in the scratch copies). The same torn strokes, the bands pushed further round the picture. At 100 % both old and new are dominated by the camera.
+- **Build** v0.1.1, router1, all six seed 1. HD Analog 90.61, HD HDMI 86.03, HD Dual 85.49 MHz (worst HD 85.49). 6858–6886 / 7680 LC, 19 / 32 EBR. Not flashed.

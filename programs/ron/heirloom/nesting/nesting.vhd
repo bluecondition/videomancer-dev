@@ -36,6 +36,8 @@
 -- the shell's output conditioning (two [1 2 2 2 2 2 2 2 1]/16 boxes with the per-line resync, luma 13/16) and the
 -- blanking gate.  Virtual 1080-line coordinates (SD shows the centre 4:3).  Generated avid; one latency (C_LAT 20)
 -- in every mode.  Colours in the hardware convention (u = Cr, v = Cb).
+--
+-- 2026-11-15: K6 camera top +25 % (Ron): etch gain eg + eg/4, eg = 5 k6^2 >> 14 (per field, step 463; max 398).
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -656,6 +658,8 @@ begin
                     when 462 =>                       -- eg = 5 k6^2 >> 14
                         v_t := m_acc + shift_left(m_acc, 2);
                         c_eg <= resize(v_t(22 downto 14), 9);
+                    when 463 =>                       -- x1.25 (2026-11-15): <= 398
+                        c_eg <= c_eg + shift_right(c_eg, 2);
                     when 486 => c_sta  <= m_acc(15 downto 0);
                     when 510 => c_staf <= m_acc(15 downto 0);
                     when 534 => c_stb  <= m_acc(11 downto 0);

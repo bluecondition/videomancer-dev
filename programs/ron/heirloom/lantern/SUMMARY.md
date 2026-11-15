@@ -156,3 +156,13 @@ Working files are in `.heirloom_work/rb_lantern/` (notes.md has the whole chain)
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 300 -> 512 (v0.1.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: K6 loads at 100 % (initial_value 1023), and bend / element programs get a 25 % stronger camera at the top of the knob.
+- **Bend.** K6 Bend adds the camera (or Osc) luma to the field, so the picture bends the contours.
+- **Change.** The per-field bend gain is K² × 35/65536 (zone clock 348), where it was K² × 28/65536: ×1.25 at every position, about 1.9 periods per full luma at 100 % (was 1.5).
+  - c_kq peaks at 558, so it is widened 9 → 10 bits, along with the bend path: nibble partials 14 bits, bend 14 bits (≤ 8909), Osc ×4 16 bits (≤ 35636).
+  - G + bend ≤ 232 k stays inside the 18-bit sum. Latency unchanged.
+- **Render.** `.heirloom_work/rb_lantern/k6b/k6b_cmp.png` (bear, 720p60 / 2, K6 100 %, glide bypassed in the scratch copies). The same lantern, with more contours wrapped round the picture.
+- **Build** v0.1.2, router1, all six seed 1. HD Analog 107.20, HD HDMI 105.74, HD Dual 104.16 MHz (worst HD 104.16). 5138–5166 / 7680 LC. Not flashed.

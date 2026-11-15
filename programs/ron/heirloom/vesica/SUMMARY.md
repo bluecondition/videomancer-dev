@@ -180,3 +180,14 @@ in a float prototype (proto.py), then in an RTL-exact integer model (imodel3.py)
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 400 -> 512 (v0.5.2). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: K6 loads at 100 % (initial_value 1023), and bend / element programs get a 25 % stronger camera at the top of the knob.
+- **Bend.** K6 Etch bends the lattice bands and the stripes by the camera (or Osc) luma.
+- **Change.** The luma operand is scaled, not the gain: the etch now takes (L − 128) × 1.25.
+  - Why: the K6 gain is a ROM mantissa / exponent pair (3-bit mantissa × 2^e). ×1.25 falls between its steps: the old top, 224, would land between 256 and 320.
+  - How: `s_lq = x + x/4` is one 10-bit add on the registered luma, feeding the existing stage-4 register. The field and the stripe etch are both ×1.25 at every K6 position, Osc included.
+  - Headroom: |xm| ≤ 1120 (12 bit), E ≤ 2240 (13 bit), |F2 + E| ≤ 23.8 k (16 bit); the stripe phase is modular. Latency unchanged.
+- **Render.** `.heirloom_work/rb_vesica/k6b/k6b_cmp.png` (bear, 720p60 / 1, K6 100 %, glide bypassed in the scratch copies). The same eye and lattice, with the lattice bent a little further by the picture. At / 2 the sim's short vblank leaves the eye half-drawn (`k6b_cmp_d2.png`); that is a sim artifact, the same in old and new.
+- **Build** v0.5.3, router1, all six seed 1. HD Analog 81.91, HD HDMI 87.64, HD Dual 75.92 MHz (worst HD 75.92). 7435–7473 / 7680 LC, 22 / 32 EBR. Not flashed.

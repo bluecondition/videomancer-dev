@@ -136,3 +136,13 @@ Glides (1/8 of the gap per field, ±3 hold) on K1, K2, K3, K5 and P12. At P12 = 
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. Here the camera strength was on K5 (Etch), so K5 and K6 swapped: **K6 = Etch** (the camera strength, default now 512 = 50 %), **K5 = Palette** (was K6). Nothing else changed: the VHDL swaps the two knob inputs (the processing is identical), the TOML blocks and preset keys moved with them (the Controls rows above are renumbered). v0.5.2, rebuilt with router1: SD HDMI seed 2, HD Dual seed 2; HD worst 80.24 MHz (HD Analog 85.62, HD HDMI 80.24, HD Dual 83.72), LC LC. Rebuild: `NEXTPNR_ROUTER="--router router1" ./build_heirloom.sh starburst`. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: K6 loads at 100 % (initial_value 1023), and bend / element programs get a 25 % stronger camera at the top of the knob.
+- **Bend.** K6 Etch adds the camera (or Osc) luma to the band field, so the picture bends the bands.
+- **Change.** The per-field etch depth is g + g/4, with g = K6 / 16 (zone clock 24): 0 .. 78, where it was 0 .. 63, so ×1.25 at every position.
+  - `s_dep` widened to 7 bits. The video product |vp| ≤ 129 × 78 = 10062 still fits its 17-bit register. F + vp/8 stays inside 15 bits (≤ 11.5 k); the colourizer index is cyclic.
+  - Up to ±0.34 cycle of bend (was ±0.27). Latency unchanged.
+- **Render.** `.heirloom_work/rb_starburst/k6b/k6b_cmp.png` (bear, 720p60 / 2, K6 100 %, K5 CMYK, glides started at the defaults in the scratch copies). The same kaleidoscope, with the bands pushed further by the picture.
+- **Build** v0.5.3, router1. HD Dual seed 2, the rest seed 1. HD Analog 84.38, HD HDMI 86.97, HD Dual 83.47 MHz (worst HD 83.47). 6851–6882 / 7680 LC. Not flashed.

@@ -202,3 +202,13 @@ Work dir: `.heirloom_work/rb_bottleneck/` (`notes.md`, `geom.py`, `tables.py`, `
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. Here the camera strength was on K5 (Melt), so K5 and K6 swapped: **K6 = Melt** (the camera strength, default now 512 = 50 %), **K5 = Stripes** (was K6). Nothing else changed: the VHDL swaps the two knob inputs (the processing is identical), the TOML blocks and preset keys moved with them (the Controls rows above are renumbered). v0.5.2, rebuilt with router1: HD HDMI seed 2; HD worst 84.60 MHz (HD Analog 86.48, HD HDMI 86.48, HD Dual 84.60), LC LC. Rebuild: `NEXTPNR_ROUTER="--router router1" ./build_heirloom.sh bottleneck`. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: K6 loads at 100 % (initial_value 1023), and bend / element programs get a 25 % stronger camera at the top of the knob.
+- **Element (bend).** K6 Melt moves the bottle outlines and the fill line by the camera's (or Osc's) luma, so it re-shapes the drawing.
+- **Change.** Melt is a shift select: (luma − 96) << (K6 / 128) / 16 px, shift 0 .. 6. The top code (K6 ≥ 896) used to clamp to shift 6. It now adds a quarter (shift 6 + shift 4 = ×80, 1.25 × the old top).
+  - Per-field flag `c_mq` (zone clock 45); one 13-bit add at pixel stage 5 (`p5_lb = lp/16 + lp/64`). |lb| ≤ 795, inside the 13-bit path. Latency unchanged.
+  - Below 87.5 % the knob is unchanged (the brief's nearest-step option for a shift code).
+- **Render.** `.heirloom_work/rb_bottleneck/k6b/k6b_cmp.png` (bear, 720p60 / 4, K6 100 %, old against new, glide bypassed in the scratch copies). The same picture; the outlines melt further into the stripes.
+- **Build** v0.5.3, router1. SD Analog and SD HDMI seed 2, the rest seed 1. HD Analog 80.05, HD HDMI 83.65, HD Dual 82.43 MHz (worst HD 80.05). 7399–7416 / 7680 LC, 17 / 32 EBR. Not flashed.

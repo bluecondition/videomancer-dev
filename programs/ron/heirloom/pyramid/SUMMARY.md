@@ -180,3 +180,14 @@ Working files: `.heirloom_work/rb_pyramid/` (`notes.md`, `proto.py`, `imodel.py`
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 384 -> 512 (v0.1.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: K6 loads at 100 % (initial_value 1023), and bend / element programs get a 25 % stronger camera at the top of the knob.
+- **Bend.** K6 Warp patches the camera (or Osc) luma into the G stripe phase and the R shaper phase, so the picture bends the stripes and shifts the rings.
+- **Change.** The per-field warp gain is k6 + k6/4 (zone clock 32): 0 .. 1278 in 11 bits, so ×1.25 at every position.
+  - The existing pixel warp product grows 8 × 10 → 8 × 11 (19 bits).
+  - At 100 % white bends the stripes up to ~0.6 period (was ~0.5) and shifts R by up to 1.25 cycles (was 1). Both are phases: G wraps mod 2^24, R mod 2^16 (the R slice wp(17:2) is the same value mod 2^16).
+  - Latency unchanged.
+- **Render.** `.heirloom_work/rb_pyramid/k6b/k6b_cmp.png` (bear, 720p60 / 2, K6 100 %, glide bypassed in the scratch copies). The same pyramid; the picture breaks the stripes a little further.
+- **Build** v0.1.2, router1, all six seed 1. HD Analog 93.34, HD HDMI 84.25, HD Dual 98.09 MHz (worst HD 84.25). 6746–6764 / 7680 LC. Not flashed.

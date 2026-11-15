@@ -32,6 +32,8 @@
 -- through a [1 2 2 2 2 2 2 2 1]/16 box with the running-sum resync, Y through [1 2 1]/4 on the same centre,
 -- luma 13/16) before the blanking gate.
 -- Colours in the hardware convention (u = Cr, v = Cb).
+--
+-- 2026-11-15: K6 camera top +25 % (Ron): warp gain k6 + k6/4 (0 .. 1278, 11 bits; the warp product 8 x 11).
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -155,7 +157,7 @@ architecture pyramid of program_top is
     signal c_orx  : unsigned(23 downto 0) := to_unsigned(12149000, 24);
     signal c_ory  : unsigned(23 downto 0) := to_unsigned(14125000, 24);
     signal c_gk   : unsigned(8 downto 0) := to_unsigned(101, 9);     -- R shaper gain, Q8
-    signal c_wg   : unsigned(9 downto 0) := to_unsigned(384, 10);    -- warp gain
+    signal c_wg   : unsigned(10 downto 0) := to_unsigned(480, 11);   -- warp gain, k6 x 1.25 (0 .. 1278)
     signal c_ya   : signed(12 downto 0) := to_signed(28, 13);        -- apex y (virtual lines)
     signal c_rys  : unsigned(16 downto 0) := to_unsigned(18725, 17); -- R y-phase per line
 
@@ -225,7 +227,7 @@ architecture pyramid of program_top is
     signal p4_na : signed(9 downto 0) := (others => '0');
     signal p4_rx : signed(7 downto 0) := (others => '0');
     signal p4_rim, p5_rim, p6_rim, p7_rim, p8_rim, p9_rim, p10_rim, p11_rim, p12_rim, p13_rim : std_logic := '0';
-    signal p5_wp : unsigned(17 downto 0) := (others => '0');
+    signal p5_wp : unsigned(18 downto 0) := (others => '0');
     signal p5_bq : signed(13 downto 0) := (others => '0');
     signal p5_aq : unsigned(12 downto 0) := (others => '0');
     signal p5_al, p5_al2, p5_ar : signed(9 downto 0) := (others => '0');
@@ -514,7 +516,7 @@ begin
                         r_ex_a <= unsigned(v_e(7 downto 0)); z_sh5 <= v_e(10 downto 8);
                     when 32 =>
                         z_mt5 <= r_ex_q;
-                        c_wg <= s_g6(12 downto 3);
+                        c_wg <= resize(s_g6(12 downto 3), 11) + resize(s_g6(12 downto 5), 11);   -- x1.25
                         -- B and R x phases at the line start, steps per pixel
                         case to_integer(s_xs) is
                             when 4 =>

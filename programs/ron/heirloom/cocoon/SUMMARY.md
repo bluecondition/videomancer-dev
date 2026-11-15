@@ -310,3 +310,14 @@ v0.6.2 (Ron's rule: K6 is the camera strength in every Heirloom / Kinetic / Patc
     window.
   - Interlaced fields render identically.
 - **Band dots.** The band dots stay at pixel scale: an 8 px period at every resolution.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: K6 loads at 100 % (initial_value 1023), and bend / element programs get a 25 % stronger camera at the top of the knob.
+- **Mixed.** The K6 gain g scales the source luma that drives the flank and band posterize and the band's video key (the picture side), and the cocoon's bend (the element side). Only the bend was boosted.
+- **Change.** The bend is L' × 15/16 (`L'/16 − L'/256` in the 1/16 gain units), where it was L' × 3/4. That is ×1.25 at every K6 position.
+  - At 100 % the bend slope goes 1.08 → 1.35, and the bend term peaks at 344 (was 274) in its 10-bit register. F clamps to 0 .. 1023 as before.
+  - It's still one adder (a subtract replaces the add); latency unchanged.
+  - The posterize, band key and flanks are untouched.
+- **Render.** `.heirloom_work/rb_cocoon/k6b/k6b_cmp.png` (bear, 720p60 / 2, K6 100 %). The same picture: flanks and band identical, the weave bent further by the picture.
+- **Build** v0.6.3, router1, all six seed 1. HD Analog 80.87, HD HDMI 84.63, HD Dual 77.08 MHz (worst HD 77.08). 7507–7534 / 7680 LC (98.1 %), 21 / 32 EBR. Not flashed.

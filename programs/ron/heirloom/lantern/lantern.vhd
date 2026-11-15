@@ -37,6 +37,8 @@
 -- coordinates (SD shows the centre 4:3 of the picture).  Generated avid; output conditioning (luma [1 2 1],
 -- chroma [1 2 2 2 2 2 2 2 1]/16 as running 8-sums that resync to neutral in every blanking, luma 13/16)
 -- before the blanking gate.  Colours in the hardware convention (u = Cr, v = Cb).
+--
+-- 2026-11-15: K6 camera top +25 % (Ron): bend gain K^2 x 35/65536 (was 28/65536, max 558), bend path widened.
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -174,7 +176,7 @@ architecture lantern of program_top is
     signal c_vm2 : unsigned(17 downto 0) := (others => '0');
     signal c_stp : unsigned(16 downto 0) := (others => '0');        -- phase step per field (2^24 per cycle)
     signal c_ph0 : unsigned(23 downto 0) := to_unsigned(K_PH0, 24);
-    signal c_kq  : unsigned(8 downto 0) := (others => '0');         -- bend gain, Q4 per luma step
+    signal c_kq  : unsigned(9 downto 0) := (others => '0');         -- bend gain, Q4 per luma step (0 .. 558)
     signal c_d0  : unsigned(31 downto 0) := (others => '0');        -- table DDA start step (a + b), Q28
     signal c_d2  : unsigned(31 downto 0) := (others => '0');        -- 2b, Q28
     signal c_xb0 : unsigned(11 downto 0) := to_unsigned(16, 12);    -- beam start x (h): x0 + 8 xs (the generated avid's lag)
@@ -239,9 +241,9 @@ architecture lantern of program_top is
     signal q3_l0, q3_l1, q3_l2, q3_l3 : unsigned(7 downto 0) := (others => '0');
     signal q4_ls : unsigned(9 downto 0) := (others => '0');
     signal q5_l  : unsigned(7 downto 0) := (others => '0');
-    signal q6_pl, q6_ph : unsigned(12 downto 0) := (others => '0');
-    signal q7_b  : unsigned(12 downto 0) := (others => '0');
-    signal q8_b  : unsigned(14 downto 0) := (others => '0');
+    signal q6_pl, q6_ph : unsigned(13 downto 0) := (others => '0');
+    signal q7_b  : unsigned(13 downto 0) := (others => '0');     -- <= 8909
+    signal q8_b  : unsigned(15 downto 0) := (others => '0');     -- <= 35636 (Osc x4)
     signal q9_g  : unsigned(17 downto 0) := (others => '0');
     signal q10_f1, q10_f2 : signed(18 downto 0) := (others => '0');
     signal q11_d1, q11_d2 : signed(18 downto 0) := (others => '0');
@@ -504,7 +506,8 @@ begin
                     when 276 => c_lam <= f_acc(25 downto 10);
                     when 300 => c_vm2 <= f_acc(17 downto 0);
                     when 324 => c_stp <= f_acc(32 downto 16); s_vnegf <= s_vneg;
-                    when 348 => c_kq <= f_acc(19 downto 11) - resize(f_acc(19 downto 14), 9);
+                    when 348 => c_kq <= resize(f_acc(19 downto 11), 10) + resize(f_acc(19 downto 15), 10)   -- K^2 x 35/65536
+                                        + resize(f_acc(19 downto 16), 10);                              -- (x1.25)
                     when others => null;
                 end case;
             end if;
@@ -754,10 +757,10 @@ begin
             q3_l0 <= unsigned(s_lb_q); q3_l1 <= q3_l0; q3_l2 <= q3_l1; q3_l3 <= q3_l2;
             q4_ls <= resize(q3_l0, 10) + resize(q3_l1, 10) + resize(q3_l2, 10) + resize(q3_l3, 10);
             q5_l  <= q4_ls(9 downto 2);
-            q6_pl <= resize(q5_l(3 downto 0) * c_kq, 13);
-            q6_ph <= resize(q5_l(7 downto 4) * c_kq, 13);
-            q7_b  <= resize(shift_right(resize(q6_pl, 17) + shift_left(resize(q6_ph, 17), 4), 4), 13);
-            if s_src = '1' then q8_b <= shift_left(resize(q7_b, 15), 2); else q8_b <= resize(q7_b, 15); end if;
+            q6_pl <= resize(q5_l(3 downto 0) * c_kq, 14);
+            q6_ph <= resize(q5_l(7 downto 4) * c_kq, 14);
+            q7_b  <= resize(shift_right(resize(q6_pl, 18) + shift_left(resize(q6_ph, 18), 4), 4), 14);
+            if s_src = '1' then q8_b <= shift_left(resize(q7_b, 16), 2); else q8_b <= resize(q7_b, 16); end if;
 
             -- 9: + bend
             q9_g <= q8_g + resize(q8_b, 18);

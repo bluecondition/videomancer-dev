@@ -47,6 +47,8 @@
 -- luma 13/16) before the blanking gate.  Colours in the hardware convention (u = Cr, v = Cb).
 
 -- K6 camera pass 2026-11-15: K6 = Melt (camera strength, was K5), K5 = Stripes (was K6); default K6 50 %.
+-- 2026-11-15: K6 camera top +25 % (Ron): the top Melt code (K6 >= 896, was clamped to shift 6) is shift 6
+--             plus a quarter (x80 = 1.25 x the old top).
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -205,6 +207,7 @@ architecture bottleneck of program_top is
     signal c_lv   : signed(10 downto 0) := (others => '0');
     signal c_l3   : signed(11 downto 0) := (others => '0');
     signal c_ms   : unsigned(2 downto 0) := to_unsigned(2, 3);        -- Melt shift 0..6
+    signal c_mq   : std_logic := '0';                                 -- top Melt code: + a quarter
     signal c_gs   : unsigned(9 downto 0) := to_unsigned(256, 10);
     signal c_hon  : std_logic := '1';
     signal c_hend : unsigned(10 downto 0) := to_unsigned(897, 11);
@@ -592,7 +595,7 @@ begin
                         for k in 0 to 11 loop
                             if c_g >= B_TA(k) then c_act(k) <= '1'; else c_act(k) <= '0'; end if;
                         end loop;
-                        if s_g5(12 downto 10) = "111" then c_ms <= "110"; else c_ms <= s_g5(12 downto 10); end if;
+                        if s_g5(12 downto 10) = "111" then c_ms <= "110"; c_mq <= '1'; else c_ms <= s_g5(12 downto 10); c_mq <= '0'; end if;
                         if c_g >= 200 then c_hon <= s_hsw; else c_hon <= '0'; end if;
                         if c_g < 700 then c_hst <= to_unsigned(45, 6); else c_hst <= to_unsigned(60, 6); end if;
                     when 200 =>                                             -- slide gains = gs +- slide
@@ -1029,6 +1032,7 @@ begin
         variable v_ba : unsigned(5 downto 0);
         variable v_ty : unsigned(1 downto 0);
         variable v_o  : signed(11 downto 0);
+        variable v_mq : signed(12 downto 0);
     begin
         if rising_edge(clk) then
             -- 2: x (virtual px), glitch-window tests, bottle select (x >= midpoint + shift)
@@ -1054,7 +1058,8 @@ begin
             if p4_dr >= p4_dl then p5_d <= p4_dr; p5_sd <= '1'; else p5_d <= p4_dl; p5_sd <= '0'; end if;
             p5_xi <= -p4_dl; p5_rr <= p4_rr + shift_right(p4_rr, 1);
             p5_sel <= p4_sel;
-            p5_lb <= resize(shift_right(p4_lp, 4), 13);
+            if c_mq = '1' then v_mq := resize(shift_right(p4_lp, 6), 13); else v_mq := (others => '0'); end if;
+            p5_lb <= resize(shift_right(p4_lp, 4), 13) + v_mq;          -- top code: melt x 1.25 (|lb| <= 795)
             -- 6: melt applied to the outward distance; inside distance min(x - el, 1.5 (er - x)); zones
             p6_d <= p5_d - p5_lb;
             if p5_xi < p5_rr then p6_r15 <= p5_xi; else p6_r15 <= p5_rr; end if;

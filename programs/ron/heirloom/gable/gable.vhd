@@ -35,6 +35,8 @@
 -- order), a 33-stage pixel path.  Virtual 1080-line coordinates (SD shows the centre 4:3).  Generated avid;
 -- output conditioning (U and V through two [1 2 2 2 2 2 2 2 1]/16 boxes with the running-sum resync, Y through
 -- [1 2 1]/4, luma 13/16) before the blanking gate.  Colours in the hardware convention (u = Cr, v = Cb).
+--
+-- 2026-11-15: K6 camera top +25 % (Ron): etch gain g + g/4 (per field, step 170; max 3837 with Osc x1.5).
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -533,7 +535,7 @@ begin
                     when 98  => z_sq  <= m_acc(17 downto 0);
                     when 122 => c_pst <= m_acc(29 downto 16);
                     when 146 => z_e2  <= m_acc(19 downto 4);
-                    when 170 => c_eg  <= resize(m_acc(25 downto 15), 13);
+                    when 170 => c_eg  <= resize(m_acc(25 downto 15), 13) + resize(m_acc(25 downto 17), 13);   -- x1.25
                     when 171 =>
                         if s_src = '1' then c_eg <= c_eg + shift_right(c_eg, 1); end if;   -- the Osc at 1.5x the camera's gain
                     when 194 =>
