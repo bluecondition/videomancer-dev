@@ -1,0 +1,168 @@
+# Wallpaper - Kinetic (v0.1.0, 2026-11-14).  The wallpaper groups of the square lattice: one asymmetric motif
+# (disc, bar, wedge) under 12 symmetry groups; a travelling wave turns the motifs, video sets their size.
+# See wallpaper.vhd, wallpaper.py and SUMMARY.md.
+
+[program]
+processing_delay_clks = 35
+program_id = "com.czartroniks.wallpaper"
+program_name = "Wallpaper"
+program_version = "0.1.0"
+abi_version = ">=1.0,<2.0"
+author = "czartroniks"
+license = "GPL-3.0"
+categories = ["Illusion", "Pattern", "Print"]
+program_type = "processing"
+description = "One motif under the 12 wallpaper groups of the square lattice; a wave turns it, video sizes it."
+hardware_compatibility = ["rev_b"]
+core = "yuv444_30b"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_1"
+name_label = "Scale"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 850
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_2"
+name_label = "Shape"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 256
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_3"
+name_label = "Depth"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 480
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_4"
+name_label = "Rate"
+control_mode = "linear"
+display_min_value = -100
+display_max_value = 100
+initial_value = 740
+display_float_digits = 0
+suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_5"
+name_label = "Spread"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 500
+display_float_digits = 0
+suffix_label = "%"
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Colour"
+value_labels = ["Ink", "Paper", "Bauhaus", "Vega", "Outrun", "Ultra", "Ocean", "Ice", "Moss", "Citrus", "Terra", "Ember", "Gold", "Candy", "Mint", "Plum"]
+initial_value_label = "Ink"
+
+[[parameter]]
+parameter_id = "toggle_switch_7"
+name_label = "Wave"
+value_labels = ["Smooth", "Snap"]
+initial_value_label = "Smooth"
+
+[[parameter]]
+parameter_id = "toggle_switch_8"
+name_label = "Field"
+value_labels = ["Linear", "Radial"]
+initial_value_label = "Linear"
+
+[[parameter]]
+parameter_id = "toggle_switch_9"
+name_label = "Spin"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_10"
+name_label = "Mesh"
+value_labels = ["Off", "On"]
+initial_value_label = "Off"
+
+[[parameter]]
+parameter_id = "toggle_switch_11"
+name_label = "Source"
+value_labels = ["Video", "Osc"]
+initial_value_label = "Video"
+
+[[parameter]]
+parameter_id = "linear_potentiometer_12"
+name_label = "Symmetry"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 811
+display_float_digits = 0
+suffix_label = "%"
+
+[[preset]]
+name = "Pinwheels"
+
+[[preset]]
+name = "Kaleidoscope"
+rotary_potentiometer_1 = 950
+rotary_potentiometer_2 = 512
+rotary_potentiometer_3 = 700
+rotary_potentiometer_5 = 400
+rotary_potentiometer_6 = 224
+toggle_switch_10 = 1
+linear_potentiometer_12 = 1023
+
+[[preset]]
+name = "Semaphore"
+rotary_potentiometer_1 = 600
+rotary_potentiometer_2 = 0
+rotary_potentiometer_3 = 800
+rotary_potentiometer_4 = 800
+rotary_potentiometer_5 = 650
+rotary_potentiometer_6 = 96
+toggle_switch_7 = 1
+linear_potentiometer_12 = 0
+
+[[preset]]
+name = "Glide"
+rotary_potentiometer_1 = 750
+rotary_potentiometer_2 = 768
+rotary_potentiometer_3 = 420
+rotary_potentiometer_5 = 300
+rotary_potentiometer_6 = 160
+toggle_switch_8 = 1
+linear_potentiometer_12 = 640
+
+[[preset]]
+name = "Carousel"
+rotary_potentiometer_1 = 880
+rotary_potentiometer_2 = 1023
+rotary_potentiometer_3 = 600
+rotary_potentiometer_4 = 300
+rotary_potentiometer_5 = 450
+rotary_potentiometer_6 = 288
+toggle_switch_9 = 1
+linear_potentiometer_12 = 940
+
+[[preset]]
+name = "Halftone"
+rotary_potentiometer_1 = 250
+rotary_potentiometer_2 = 768
+rotary_potentiometer_3 = 300
+rotary_potentiometer_5 = 350
+rotary_potentiometer_6 = 608
+toggle_switch_11 = 1
+linear_potentiometer_12 = 470
