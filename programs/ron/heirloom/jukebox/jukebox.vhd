@@ -1,6 +1,8 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
+-- 2026-11-15: K6 camera top +25 % (Ron)
+--
 -- Jukebox v0.6.1 -- Heirloom #16, rebuilt from the photo WIN_20230315_00_28_42.
 -- v0.6.0 (phase 2): the grid is fixed at the photo's 9.15 x 2.08 and K1 / K2 size the capsules one
 -- by one instead of zooming the screen; K5 detunes the two column kinds; S8 swaps the band waveform.
@@ -210,7 +212,7 @@ architecture jukebox of program_top is
     signal s_vstep : unsigned(19 downto 0) := to_unsigned(32270, 20);
     signal s_bands : unsigned(10 downto 0) := to_unsigned(256, 11);
     signal s_etch  : unsigned(10 downto 0) := (others => '0');
-    signal s_be    : unsigned(12 downto 0) := (others => '0');
+    signal s_be    : unsigned(13 downto 0) := (others => '0');
     signal s_vsq   : unsigned(17 downto 0) := (others => '0');
     signal s_spd   : signed(15 downto 0) := (others => '0');
     signal s_t17   : unsigned(16 downto 0) := (others => '0');
@@ -292,8 +294,8 @@ architecture jukebox of program_top is
     signal p7_ei  : signed(11 downto 0) := (others => '0');
     signal p3_y8  : unsigned(7 downto 0) := (others => '0');
     signal p4_ad  : unsigned(8 downto 0) := (others => '0');
-    signal p4_bla, p4_blb : unsigned(16 downto 0) := (others => '0');
-    signal p5_bl  : unsigned(12 downto 0) := (others => '0');
+    signal p4_bla, p4_blb : unsigned(17 downto 0) := (others => '0');
+    signal p5_bl  : unsigned(13 downto 0) := (others => '0');
     signal p5_bvg : unsigned(14 downto 0) := (others => '0');
     signal t5_0, t5_1, t5_2, t5_3 : std_logic_vector(15 downto 0) := (others => '0');
     signal t6_0, t6_1, t6_2, t6_3 : std_logic_vector(15 downto 0) := (others => '0');
@@ -532,7 +534,7 @@ begin
                     when 22 => f_a <= resize(s_gp(12 downto 3), 36);  f_b <= resize(s_gp(12 downto 3), 16);
                     when 25 => f_a <= resize(s_psq, 36);               f_b <= to_unsigned(1222, 16);
                     when 28 => f_a <= resize(s_g6(12 downto 3), 36);  f_b <= resize(s_g6(12 downto 3), 16);
-                    when 31 => f_a <= resize(s_k6sq, 36);              f_b <= to_unsigned(1538, 16);
+                    when 31 => f_a <= resize(s_k6sq, 36);              f_b <= to_unsigned(1922, 16);   -- 1538 x1.25
                     when 34 => f_a <= resize(s_bands, 36);             f_b <= resize(s_etch, 16);
                     when 37 => f_a <= resize(s_vm, 36);                f_b <= resize(s_vm, 16);
                     when 40 => f_a <= resize(s_vsq, 36);               f_b <= to_unsigned(66, 16);
@@ -587,7 +589,7 @@ begin
                 when 218 => s_bands <= to_unsigned(64, 11) + f_acc(30 downto 20);
                 when 242 => s_k6sq <= f_acc(19 downto 0);
                 when 266 => s_etch <= f_acc(30 downto 20);
-                when 290 => s_be <= f_acc(20 downto 8);
+                when 290 => s_be <= f_acc(21 downto 8);
                 when 314 => s_vsq <= f_acc(17 downto 0);
                 when 338 =>
                     if s_vstill = '1' then
@@ -838,7 +840,7 @@ begin
         variable v_pos : unsigned(11 downto 0);
         variable v_n   : unsigned(14 downto 0);
         variable v_pw  : unsigned(10 downto 0);
-        variable v_bl  : unsigned(20 downto 0);
+        variable v_bl  : unsigned(21 downto 0);
         variable v_ga  : unsigned(22 downto 0);
         variable v_bb  : signed(18 downto 0);
         variable v_f   : unsigned(8 downto 0);
@@ -886,8 +888,8 @@ begin
             p4_blb <= s_be * p3_y8(7 downto 4);
 
             -- 5: tables out of block RAM (p_tab); etch sum; this column kind's Bands x Vg (K5 Detune)
-            v_bl := resize(p4_bla, 21) + shift_left(resize(p4_blb, 21), 4);
-            p5_bl <= v_bl(20 downto 8);
+            v_bl := resize(p4_bla, 22) + shift_left(resize(p4_blb, 22), 4);
+            p5_bl <= v_bl(21 downto 8);
             if p4_ad(8) = '1' then p5_bvg <= l_bvga; else p5_bvg <= l_bvgb; end if;
             p5_fr <= p4_fr;
 

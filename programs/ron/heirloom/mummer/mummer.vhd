@@ -1,6 +1,8 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
+-- 2026-11-15: K6 camera top +25 % (Ron)
+--
 -- Mummer v0.1.1 -- Heirloom from the video clips (phase 3b), made from the still WIN_20230804_22_27_52 @ 6.0 s.
 --
 -- The still: two green mask faces (axes x 550 and 1483: one horizontal period of 933 px), each a wide lens with
@@ -555,7 +557,7 @@ begin
                     when 340 => z_q <= f_acc(20 downto 0);
                     when 364 =>
                         if s_src = '1' then c_eg <= resize(f_acc(27 downto 19), 10) + shift_left(resize(f_acc(27 downto 19), 10), 1);
-                        else c_eg <= resize(f_acc(27 downto 19), 10); end if;
+                        else c_eg <= resize(f_acc(27 downto 19), 10) + resize(f_acc(27 downto 21), 10); end if;  -- camera x1.25 (top 266 -> 332)
                     when 388 => z_vsq <= f_acc(17 downto 0);
                     when 412 => c_vst <= f_acc(31 downto 16);
                     when 436 =>                       -- stripes start phase / step per pixel, by mode

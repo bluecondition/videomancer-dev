@@ -1,6 +1,8 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
+-- 2026-11-15: K6 camera top +25 % (Ron)
+--
 -- Portal v0.1.0 -- Heirloom (video phase), from the clip WIN_20231121_21_36_42 at 0.5 s.
 --
 -- The still: an RGB patch of the old modular synth.  Two mirrored tiles (946 px).  One parabolic ring field
@@ -587,7 +589,9 @@ begin
                     when 194 =>
                         if s_vneg = '1' then c_drift <= -signed(resize(shift_right(f_acc, 16), 10));
                         else c_drift <= signed(resize(shift_right(f_acc, 16), 10)); end if;
-                    when 218 => c_eg <= resize(shift_right(f_acc, 12), 8);
+                    when 218 =>                                  -- etch: the Osc k6^2 >> 12 (product >> 3);
+                        if s_src = '1' then c_eg <= f_acc(19 downto 12);   -- the camera 1.25 k6^2 >> 13 (product >> 7)
+                        else c_eg <= ('0' & f_acc(19 downto 13)) + ("000" & f_acc(19 downto 15)); end if;
                     when 242 => c_slk <= resize(shift_right(f_acc, 8), 8);
                     when others => null;
                 end case;
@@ -852,7 +856,7 @@ begin
             if c_m2(3) = '1' then v_q := v_q + shift_left(resize(p4_sq, 22), 3); end if;
             p5_qb <= v_q(19 downto 0);
             p5_s16 <= shift_left(resize(p4_sq, 20), 4);
-            if s_src = '1' then v_e := shift_right(p4_et, 3); else v_e := shift_right(p4_et, 8); end if;
+            if s_src = '1' then v_e := shift_right(p4_et, 3); else v_e := shift_right(p4_et, 7); end if;
             if v_e > 1023 then p5_e <= to_signed(1023, 11); elsif v_e < -1023 then p5_e <= to_signed(-1023, 11);
             else p5_e <= resize(v_e, 11); end if;
             p5_spl <= resize(p_u(4) * c_sfq(4 downto 0), 14);

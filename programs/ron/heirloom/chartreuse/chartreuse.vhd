@@ -1,6 +1,8 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
+-- 2026-11-15: K6 camera top +25 % (Ron)
+--
 -- Chartreuse v0.6.1 -- Heirloom #51, rebuilt from the photo WIN_20231211_00_38_58.
 --
 -- The photo: a glossy lime surface mirrored about a horizontal axis 460 lines down.  A big soft
@@ -532,6 +534,7 @@ begin
             elsif v_s(10 downto 9) /= "00" then f_kgl <= to_unsigned(31, 5);
             else f_kgl <= v_s(8 downto 4); end if;
             v_s := resize(f_k6, 21) + resize(f_k6(9 downto 1), 21);
+            v_s := v_s + shift_right(v_s, 2);                                -- x1.25 (top 23 -> 29)
             f_kv <= v_s(10 downto 6);
             -- breathing: +-256 triangle of the speed phase (phase + 1/4 so it is 0 at phase 0)
             v_pq := f_phi + 16384;

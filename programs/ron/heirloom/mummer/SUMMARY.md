@@ -237,3 +237,9 @@ Measured elements:
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 140 -> 512 (v0.1.2). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: K6 loads at 100 % (initial_value 1023, set by the orchestrator, with the version bump), and the camera effect at the top of the knob is 25 % stronger on bend / element programs. Bend-type: the camera's luma times Etch is added to the field (the faces, flutes and chevrons bend). Camera gain c_eg = x + (x >> 2) with x = (k6 (2048 - k6) x 133) >> 19 (top 266 -> 332). The peak etch term is ~330, inside the range the Osc already uses. The Osc gain (3 x) is unchanged. The gain is computed per field (no new pixel-path multiplier, latency unchanged). Checked: a GHDL render of old against new code at K6 = 100 % (the K6 glide bypassed in the scratch copies), `.heirloom_work/rb_mummer/k6b/k6b_cmp.png`: the same picture with a stronger camera bend, with no wrap and no new artifacts.
+
+- Build: router1, all six configs on seed 1; worst HD 86.90 MHz (HD Dual; HD Analog 93.42, HD HDMI 92.11); SD 79.30-87.88; 7137-7165 LC, 18 / 32 EBR.

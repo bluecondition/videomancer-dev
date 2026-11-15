@@ -1,6 +1,8 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
+-- 2026-11-15: K6 camera top +25 % (Ron)
+--
 -- Undulate v0.1.1 -- Heirloom (video phase), from the clip WIN_20230301_23_17_23 at 0.5 s.
 -- v0.1.1: S10 Square is a hard full-level bar (48 % duty) for the ripples and a hard bar for the flecks.
 --
@@ -538,7 +540,7 @@ begin
                             z_fa <= resize(512 - s_g5(12 downto 3), 28); z_fb <= to_unsigned(77, 16);
                         end if;
                     when 14 => z_fa <= resize(s_g6(12 downto 3), 28);   z_fb <= resize(s_g6(12 downto 3), 16); -- etch^2
-                    when 15 => z_fa <= resize(z_a(9 downto 0), 28);     z_fb <= to_unsigned(771, 16);     -- etch
+                    when 15 => z_fa <= resize(z_a(9 downto 0), 28);     z_fb <= to_unsigned(964, 16);     -- etch (771 x1.25)
                     when 16 => z_fa <= resize(c_sxh, 28);               z_fb <= resize(c_xb0, 16);        -- plane at xb0
                     when 17 => z_fa <= to_unsigned(1373, 28);           z_fb <= resize(s_ys, 16);         -- fold per line
                     when 18 => z_fa <= to_unsigned(1079, 28);           z_fb <= resize(s_ys, 16);         -- red offset per line

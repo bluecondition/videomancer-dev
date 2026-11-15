@@ -1,6 +1,8 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
+-- 2026-11-15: K6 camera top +25 % (Ron)
+--
 -- Flamecrest v0.1.1 -- Heirloom phase 3 (video clips), from clip WIN_20240213_23_38_52 at 3.0 s.
 --
 -- v0.1.1: K5 Strokes made bold: its travel also loosens the tongue gate (none at 0, the still at 512,
@@ -619,7 +621,7 @@ begin
                     when 218 => c_eg0 <= f_acc(19 downto 11);      -- k6^2 >> 11
                     when 219 =>
                         if s_src = '1' then c_eg <= shift_left(resize(c_eg0, 12), 2) + shift_left(resize(c_eg0, 12), 1);
-                        else c_eg <= resize(c_eg0, 12); end if;
+                        else c_eg <= resize(c_eg0, 12) + resize(c_eg0(8 downto 2), 12); end if;  -- camera x1.25 (top 511 -> 638)
                     when 242 => c_msq <= f_acc(17 downto 0);       -- m^2
                     when 266 =>
                         c_spd <= f_acc(23 downto 16);              -- m^2 * 51 >> 16

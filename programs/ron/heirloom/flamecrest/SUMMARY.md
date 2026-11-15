@@ -160,3 +160,9 @@ Working files are in `.heirloom_work/rb_flamecrest/`: notes.md, proto*.py, imode
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 400 -> 512 (v0.1.2). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: K6 loads at 100 % (initial_value 1023, set by the orchestrator, with the version bump), and the camera effect at the top of the knob is 25 % stronger on bend / element programs. Bend-type: K6 Etch bends the tongues' ring phase and pushes their colour level by the camera's luma. Camera gain c_eg = c_eg0 + (c_eg0 >> 2) (k6^2 >> 11 x1.25, top 511 -> 638). Peak colour level 5084, well inside the range the Osc already uses. The Osc gain (6 x c_eg0) is unchanged: its colour-level sum is already near the 16-bit limit. At K6 = 100 % bright areas now lift the black upper region into the first flame colours. The gain is computed per field (no new pixel-path multiplier, latency unchanged). Checked: a GHDL render of old against new code at K6 = 100 % (the K6 glide bypassed in the scratch copies), `.heirloom_work/rb_flamecrest/k6b/k6b_cmp.png`: the same picture with a stronger camera bend, with no wrap and no new artifacts.
+
+- Build: router1, all six configs on seed 1; worst HD 95.14 MHz (HD Dual; HD Analog 95.18, HD HDMI 99.07); SD 91.98-98.48; 7204-7223 LC, 23 / 32 EBR.

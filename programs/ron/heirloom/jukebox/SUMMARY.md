@@ -337,3 +337,9 @@ v0.6.0 asked Ron two questions: bring a column/row count back (on P12 or a switc
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 326 -> 512 (v0.6.2). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: K6 loads at 100 % (initial_value 1023, set by the orchestrator, with the version bump), and the camera effect at the top of the knob is 25 % stronger on bend / element programs. Bend-type: K6 Etch pushes the picture's luma into the contour field (scaled by Bands x Etch). The etch constant is 1538 -> 1922 (x1.25; top etch 1534 -> 1918). The Bands x Etch register s_be is widened 13 -> 14 bits, and the luma product (p4_bla / p4_blb, p5_bl) is one bit wider. A sweep at the RTL widths (all Bands, maximum Detune) gives a peak G sum of 29281 < 32768, so nothing wraps. The camera and the Osc share this path, so both are 25 % stronger. The gain is computed per field (no new pixel-path multiplier, latency unchanged). Checked: a GHDL render of old against new code at K6 = 100 % (the K6 glide bypassed in the scratch copies), `.heirloom_work/rb_jukebox/k6b/k6b_cmp.png`: the same picture with a stronger camera bend, with no wrap and no new artifacts.
+
+- Build: router1, all six configs on seed 1; worst HD 90.95 MHz (HD Dual; HD Analog 93.37, HD HDMI 92.40); SD 87.08-95.49; 7306-7343 LC (v0.6.1 was 7303-7333), 21 / 32 EBR.

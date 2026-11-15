@@ -191,3 +191,9 @@ Glides (1/8 of the gap per field, +-2 deadband) on K1, K2, K3, K5, K6 and P12.
 ## K6 camera pass (2026-11-15)
 
 Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 320 -> 512 (v0.1.2). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: K6 loads at 100 % (initial_value 1023, set by the orchestrator, with the version bump), and the camera effect at the top of the knob is 25 % stronger on bend / element programs. Bend-type: the camera's luma is added to the ripple phase. The etch constant is 771 -> 964 (x1.25), so c_eg peaks at 962 (was 769) and still fits 10 bits. Top: 3 -> 3.75 cycles per full luma. The ripple phase wraps by design. The camera and the Osc share this gain, so both are 25 % stronger. The gain is computed per field (no new pixel-path multiplier, latency unchanged). Checked: a GHDL render of old against new code at K6 = 100 % (the K6 glide bypassed in the scratch copies), `.heirloom_work/rb_undulate/k6b/k6b_cmp.png`: the same picture with a stronger camera bend, with no wrap and no new artifacts.
+
+- Build: router1; SD HDMI on seed 3 (seeds 1-2 stalled router1, timeout; dupin: 0 CARRY I0==I1), the other five on seed 1; worst HD 89.31 MHz (HD Analog; HD HDMI 91.79, HD Dual 98.32); SD 90.99-91.37; 7064-7071 LC, 21 / 32 EBR.

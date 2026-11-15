@@ -1,6 +1,8 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
+-- 2026-11-15: K6 camera top +25 % (Ron)
+--
 -- Batwing v0.1.0 -- Heirloom (video phase), from the clip WIN_20230927_23_58_07 at 2.5 s.
 --
 -- The still: three mirrored tiles of a magenta / yellow / violet "bat wing": in each tile a lilac bowtie
@@ -155,7 +157,7 @@ architecture batwing of program_top is
     signal c_R    : unsigned(23 downto 0) := to_unsigned(C_R0, 24);     -- phase of line 0
     signal c_G    : unsigned(8 downto 0) := to_unsigned(128, 9);        -- Bands gain, Q7
     signal c_cw   : unsigned(7 downto 0) := to_unsigned(96, 8);         -- waist (xp units x 256 / 184)
-    signal c_eg   : unsigned(7 downto 0) := to_unsigned(3, 8);          -- etch gain
+    signal c_eg   : unsigned(7 downto 0) := to_unsigned(2, 8);          -- etch gain / 2 (product >> 5)
     signal c_ws   : unsigned(9 downto 0) := to_unsigned(256, 10);       -- wingspan, Q8
     signal c_wsg  : unsigned(18 downto 0) := (others => '0');
     signal c_le   : unsigned(12 downto 0) := to_unsigned(525, 13);      -- KE ws G, Q12 per xp unit
@@ -228,7 +230,7 @@ architecture batwing of program_top is
     signal p5_lb  : unsigned(7 downto 0) := (others => '0');
     signal p6_camp : unsigned(15 downto 0) := (others => '0');
     signal p6_xpb : unsigned(9 downto 0) := (others => '0');
-    signal p7_cam, p8_cam, p9_cam : unsigned(9 downto 0) := (others => '0');
+    signal p7_cam, p8_cam, p9_cam : unsigned(10 downto 0) := (others => '0');
     signal p7_uxb : signed(10 downto 0) := (others => '0');
     signal p7_kw  : unsigned(18 downto 0) := (others => '0');
     signal p8_k1l, p8_k1h : signed(17 downto 0) := (others => '0');
@@ -531,13 +533,13 @@ begin
                     when 154 => c_vsq <= f_acc(17 downto 0);
                     when 178 => c_spd <= f_acc(27 downto 10);
                     when 202 => c_cw  <= f_acc(17 downto 10);
-                    when 226 =>                                   -- etch k6^2 >> 12; the Osc at 4x + 16
-                        if s_src = '1' then
+                    when 226 =>                                   -- etch, held as half the gain (product >> 5):
+                        if s_src = '1' then                       -- the Osc (4 (k6^2 >> 12) + 16) / 2, top 128
                             v_t := resize(f_acc(19 downto 12), 24);
-                            v_t := shift_left(v_t, 2) + 16;
-                            if v_t > 255 then c_eg <= (others => '1'); else c_eg <= v_t(7 downto 0); end if;
-                        else
-                            c_eg <= f_acc(19 downto 12);
+                            v_t := shift_left(v_t, 1) + 8;
+                            if v_t > 128 then c_eg <= to_unsigned(128, 8); else c_eg <= v_t(7 downto 0); end if;
+                        else                                      -- the camera 1.25 k6^2 >> 13 (top 127 -> 158)
+                            c_eg <= ('0' & f_acc(19 downto 13)) + ("000" & f_acc(19 downto 15));
                         end if;
                     when 250 =>
                         if s_gp(12 downto 3) <= 384 then c_ws <= f_acc(19 downto 10);
@@ -799,7 +801,7 @@ begin
             -- 7: 511 - xpb; bowtie slope product
             p7_uxb <= to_signed(511, 11) - signed(resize(p6_xpb, 11));
             p7_kw <= p6_ux * c_kw;
-            p7_cam <= p6_camp(15 downto 6);
+            p7_cam <= p6_camp(15 downto 5);
             p7_xp <= p6_xp; p7_ux <= p6_ux; p7_l8 <= p6_l8;
             -- 8: KM and KE partial products (L1 split 6 / 6 bits, LE split 6 / 7 bits); TA (fabric copy); the
             -- bowtie key's two limits; the ripple phase
@@ -808,9 +810,9 @@ begin
             p8_kel <= p7_ux * c_le(5 downto 0);
             p8_keh <= p7_ux * c_le(12 downto 6);
             p8_ta <= r_ta_q;
-            v_kb := signed(resize(p7_kw(18 downto 8), 13)) + signed(resize(p7_cam(9 downto 2), 13));
+            v_kb := signed(resize(p7_kw(18 downto 8), 13)) + signed(resize(p7_cam(10 downto 2), 13));
             if resize(l_kb, 13) < v_kb then p8_kB <= '1'; else p8_kB <= '0'; end if;
-            v_ka := signed(resize(p7_xp, 13)) + signed(resize(p7_cam(9 downto 2), 13));
+            v_ka := signed(resize(p7_xp, 13)) + signed(resize(p7_cam(10 downto 2), 13));
             if v_ka >= resize(l_kth, 13) then p8_kA <= '1'; else p8_kA <= '0'; end if;
             v_r1 := resize(shift_left(resize(p7_xp, 10), 1), 8) + l_vr1;
             v_r2 := l_vr2 - resize(shift_right(resize(p7_xp, 11) + shift_left(resize(p7_xp, 11), 1), 2), 8);

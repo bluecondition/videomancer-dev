@@ -1,6 +1,8 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
+-- 2026-11-15: K6 camera top +25 % (Ron)
+--
 -- Spine v0.1.0 -- Heirloom phase 3 (video clips), from the clip WIN_20230906_00_33_30 at 11.0 s.
 --
 -- The still: a magenta -> plum vertical gradient cut by a diagonal band; outside the band, a purple "O X O X"
@@ -145,7 +147,7 @@ architecture spine of program_top is
     signal s_vm : unsigned(8 downto 0) := (others => '0');
     signal s_vneg : std_logic := '0';
     signal s_mir, s_pal, s_inv, s_tear, s_src : std_logic := '0';
-    signal s_k6 : unsigned(9 downto 0) := to_unsigned(300, 10);
+    signal s_k6 : unsigned(9 downto 0) := to_unsigned(188, 10);     -- 1.25 k6 / 2 (products one bit lower)
 
     -- per-field constants
     signal z_e    : signed(10 downto 0) := (others => '0');
@@ -334,6 +336,7 @@ begin
         variable v_e  : signed(10 downto 0);
         variable v_k  : unsigned(9 downto 0);
         variable v_v  : signed(10 downto 0);
+        variable v_k6 : unsigned(10 downto 0);
     begin
         if rising_edge(clk) then
             s_tid <= registers_in(8)(3 downto 0);
@@ -502,7 +505,8 @@ begin
                         -- slant: s = 1.25 + 2.25 (k3 - 512) / 512 (Q8: 320 + v + v / 8)
                         v_v := signed(resize(s_g3(12 downto 3), 11)) - 512;
                         c_sq <= to_signed(320, 11) + v_v + shift_right(v_v, 3);
-                        s_k6 <= s_g6(12 downto 3);
+                        v_k6 := ('0' & s_g6(12 downto 3)) + ("000" & s_g6(12 downto 5));   -- K6 x1.25 (top 1023 -> 1278)
+                        s_k6 <= v_k6(10 downto 1);
                     when 93 =>                       -- KX = 36472 mt >> (15 - sh), sh = -2 .. 1
                         case to_integer(z_sh1) is
                             when -2     => c_kx <= resize(f_acc(35 downto 17), 18);
@@ -846,9 +850,9 @@ begin
             p5_e  <= p4_s * s_k6;
             p5_a  <= p4_a;
             -- 6: the key (28 px ahead) and the ring phase (mod 2 rings)
-            v_k := resize(p5_a, 16) + resize(shift_right(p5_kh, 6), 16) + signed(resize(p5_e(17 downto 8), 16));
+            v_k := resize(p5_a, 16) + resize(shift_right(p5_kh, 6), 16) + signed(resize(p5_e(17 downto 7), 16));
             p6_k <= v_k;
-            v_r := l_vt + unsigned(p5_rc(15 downto 7)) + p5_e(15 downto 7);
+            v_r := l_vt + unsigned(p5_rc(15 downto 7)) + p5_e(14 downto 6);
             p6_r <= v_r;
             -- 7: key bit into the look-ahead register; texture palette address
             if (p6_k > 0) xor (s_inv = '1') then
