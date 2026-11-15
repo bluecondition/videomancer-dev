@@ -354,3 +354,7 @@ sheet.png is now the v0.6.1 sheet):
 - `metrics.py`, `metrics_after.txt`: before/after metrics.
 - `sheet.png`, `crops_gloss.png`, `cmp_proto.png`, `cmp_final.png`.
 - `v1_renders/`: v0.5.0 without gloss.
+
+## K6 camera pass (2026-11-15)
+
+Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 160 -> 512 (v0.6.5). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.

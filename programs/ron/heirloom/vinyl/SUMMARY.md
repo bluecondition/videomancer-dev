@@ -177,3 +177,7 @@ Measured from the m-frames (0.5 s apart) and one frame per second over the whole
     the strip are at the left; the right quarter of near-flat bands is cut on 4:3.
   - Interlaced inputs draw both fields alike.
 - **Budget.** 93 % LC, slightly over the ~92 % target. It routed and closed with 3.6-9 MHz of HD margin.
+
+## K6 camera pass (2026-11-15)
+
+Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 200 -> 512 (v0.1.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.

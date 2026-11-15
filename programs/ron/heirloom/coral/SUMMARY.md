@@ -173,3 +173,7 @@ Working files are in `.heirloom_work/rb_coral/`: `notes.md`; `wmap.py` (the pale
 - **Resolutions.** 720p shows the same geometry as 1080p. SD shows the centre 4:3, so the outer ends of the corner
   fans and the hook tips fall near the edges.
 - **Cuts:** none for budget.
+
+## K6 camera pass (2026-11-15)
+
+Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 384 -> 512 (v0.1.2). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.

@@ -151,3 +151,7 @@ All 679 frames re-extracted (`fr/`), kymographs at three columns, column-run tra
 - With a bright camera picture the default Etch swells the clouds noticeably (the composition still reads).
 - **Resolutions:** 720p shows the same picture as 1080p; SD shows the centre 4:3 (virtual x 240-1680, both tile centres
   included) and is softer (the box filter is per output pixel).
+
+## K6 camera pass (2026-11-15)
+
+Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 384 -> 512 (v0.1.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.

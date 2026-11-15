@@ -229,3 +229,7 @@ Working files: `.heirloom_work/rb_brazier/` (`notes.md`; `pal16_*` = palfit k = 
     complete.
   - Interlaced inputs draw both fields from the same virtual lines (line-doubled), as field_n is not available.
 - **Speed.** The LFO steps per field, so at 50 Hz sources the cycle is 6.6 s instead of 5.5 s.
+
+## K6 camera pass (2026-11-15)
+
+Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 300 -> 512 (v0.1.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.

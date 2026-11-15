@@ -157,3 +157,7 @@ Working files: `.heirloom_work/rb_temple/` (`notes.md`; `fit_*.py` = the field f
   centre 4:3 (1440 virtual px), so the outer ellipses are cut and the corner glows lost; the row tables have 2.1-line
   resolution, so steep band edges step by 2 lines at 1080p. The LFO is per field, so 50 Hz modes drift 17 % slower.
 - **Nothing was cut for budget.**
+
+## K6 camera pass (2026-11-15)
+
+Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 200 -> 512 (v0.1.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.

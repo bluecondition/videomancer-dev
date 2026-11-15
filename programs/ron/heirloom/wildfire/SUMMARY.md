@@ -155,3 +155,7 @@ knots.py, imodel.py).
 - **Resolutions:** 720p shows the same picture as 1080p. SD shows the centre 4:3 (virtual x 256-1696), so the left
   strip and the right edge of the fan are off-screen there.
 - Drawn whites are ~777 (the shell's 13/16 luma cap). One 9-tap box replaces the photo's slightly softer blur.
+
+## K6 camera pass (2026-11-15)
+
+Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 160 -> 512 (v0.1.2). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.

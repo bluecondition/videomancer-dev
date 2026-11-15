@@ -102,3 +102,7 @@ segment-walker bug in the pre-fit RTL (entry 1 of every strip skipped → black 
 - Fit rounding: key/mask products at 64 levels (R and B up to ~1.5 % darker at full keys), Melt in 64 steps, YUV within
   ±9 codes of BT.601, strip shift to 1/16 px, chirp rate ~0.2 % low for K2 below 50 %.
 - SD 4:3: the same picture compressed horizontally (nothing round).
+
+## K6 camera pass (2026-11-15)
+
+Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 384 -> 512 (v0.5.2). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.

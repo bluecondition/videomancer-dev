@@ -129,3 +129,7 @@ Working files are in `.heirloom_work/rb_carpet/` (`notes.md`, `fit1.py` / `fit3.
   diamond columns and the centre lens are on screen, the left lens column and the left-edge hold fall outside. 1080i
   sources render both fields alike (field_n is tied high on hardware), so 1080i draws the 540-line picture
   line-doubled.
+
+## K6 camera pass (2026-11-15)
+
+Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 320 -> 512 (v0.1.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.

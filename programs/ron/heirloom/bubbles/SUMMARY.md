@@ -191,3 +191,7 @@ Working files: `.heirloom_work/rb_bubbles/` (`notes.md`, `proto.py`, `imodel.py`
   - The camera luma is not low-passed, so very fine detail in the picture makes the lens edges ragged.
 - **Resolutions.** 720p shows the same geometry as 1080p. SD shows the centre 4:3 (virtual x 240–1680), so the
   left and right columns are cut in half and only the inner tips of the curtain show.
+
+## K6 camera pass (2026-11-15)
+
+Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 256 -> 512 (v0.1.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.

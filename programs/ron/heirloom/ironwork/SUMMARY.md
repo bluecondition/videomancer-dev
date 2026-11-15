@@ -153,3 +153,7 @@ Working files are in `.heirloom_work/rb_ironwork/` (`notes.md`, `meas*.py`, `fit
   box (2 LSBs); the second 9-tap box of the older shells is gone (the contract's [1 2 1] luma / 9-tap chroma remain).
 - **Resolutions.** 720p shows the same geometry and the same tear layout as 1080p. SD shows the centre 4:3 (about 1.5
   tiles instead of 2). Whites come out at ~777 (the shell's white cap).
+
+## K6 camera pass (2026-11-15)
+
+Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 400 -> 512 (v0.1.2). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.

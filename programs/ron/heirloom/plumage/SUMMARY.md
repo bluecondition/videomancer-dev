@@ -215,3 +215,7 @@ The whole 10.5 s clip was re-extracted at 10 fps (`seq3/`, `warm.py`, `track.py`
 - **Resolutions.** 720p shows the same geometry as 1080p. **SD shows the centre 4:3** (virtual x 240..1680), so the
   root strip and the steepest left blades are off-screen at SD, and Mirror's two roots are cut off.
 - Nothing visible was cut for budget beyond the per-lane width variation.
+
+## K6 camera pass (2026-11-15)
+
+Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 400 -> 512 (v0.1.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.

@@ -156,3 +156,7 @@ deadband at 512, which is exactly the still.
   85 % of the SD width instead of 39 % and 76 %, so the right side column is narrower. At SD the zoom is capped at
   3.6 octaves (rows >= 2 field lines), so P12 above ~85 % no longer gets finer there, and the fine-mesh rows are
   coarser than at HD.
+
+## K6 camera pass (2026-11-15)
+
+Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 300 -> 512 (v0.1.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.

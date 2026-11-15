@@ -333,3 +333,7 @@ row centres; the repeats deviate by 1–3.6 RGB levels.
 v0.6.0 asked Ron two questions: bring a column/row count back (on P12 or a switch), and bring Tint back as a palette switch. His notes asked for neither, and he approved v0.6.1 without them, so the v0.6 control map stands. The diag copy stays at `.heirloom_work/rb_jukebox/diag/jukebox_diag/` for reference.
 
 **Next step:** capture real presets from the hardware (`./capture_preset.sh`), then rebuild.
+
+## K6 camera pass (2026-11-15)
+
+Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 326 -> 512 (v0.6.2). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.

@@ -160,3 +160,7 @@ Glides (1/8 of the gap per field) on K1, K2, K4, K5, K6 and P12.
   softened over ~2 px.
 - **Resolutions.** 720p shows the same picture as 1080p. SD shows the centre 4:3 (1440 virtual px): 1.5 tiles instead
   of 2.02, with the bowtie and the seams at the same size. The roll is per field, so at 50 Hz it runs at 133 lines/s.
+
+## K6 camera pass (2026-11-15)
+
+Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 120 -> 512 (v0.1.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.

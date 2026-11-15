@@ -135,3 +135,7 @@ stays live.
   within about a second.
 - **SD:** x is mapped to the full width, so on 4:3 the chevrons are 25 % narrower (steeper arms). The seam stripes
   (~11 lines at 1080) are only ~2.5 lines at 480i and will alias. 720p matches 1080.
+
+## K6 camera pass (2026-11-15)
+
+Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 200 -> 512 (v0.5.2). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.

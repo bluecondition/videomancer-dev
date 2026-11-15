@@ -219,3 +219,7 @@ gives right-band widths of 140 → 122 → 158 lines at 0 / +0.5 / +1.0 s; the c
   - SD (4:3) shows all 8 columns across the narrower frame, so each column is 0.75× as wide relative to
     the height and the tongue arcs and line slopes are steeper. The vertical structure is identical.
   - Interlaced SD follows the shell's timing-ID line steps.
+
+## K6 camera pass (2026-11-15)
+
+Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 400 -> 512 (v0.1.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.

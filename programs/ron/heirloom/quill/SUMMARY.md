@@ -152,3 +152,7 @@ sweep); Ember Fan (Ember, Curl 820); Splayed (Curl 60, Quills 380); Fast Sweep.
 - **Resolutions.** 720p shows the same geometry as 1080p. SD shows the centre 4:3, so the leftmost tongue and the
   convergence point on the left edge fall outside the screen, and SD is softer.
 - Nothing visible was cut for budget; the tilt became a cell-index ramp and the dot phases 8 bits.
+
+## K6 camera pass (2026-11-15)
+
+Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 320 -> 512 (v0.1.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.

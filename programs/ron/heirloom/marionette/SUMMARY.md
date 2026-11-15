@@ -145,3 +145,7 @@ Working files are in `.heirloom_work/rb_marionette/` (`notes.md`, `contours.py`,
 - **Resolutions.** 720p shows the same geometry as 1080p. SD shows the centre 4:3 (3.5 figures) and, with 4.4
   virtual lines per SD line, the 3-line fringe bands at the bodies' tops and bottoms become one SD line; Twin at 720p
   can show two short single-row lines.
+
+## K6 camera pass (2026-11-15)
+
+Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 220 -> 512 (v0.1.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.

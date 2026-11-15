@@ -165,3 +165,7 @@ proto, `imodel.py` = the integer model, `diag.py` = the landmark comparer, `fit.
 - Resolutions: 720p shows the same geometry as 1080p. SD shows the centre 4:3 (1440 virtual px), so the
   outer bands are cut at the sides; the G delay is 20 px there. The line jitter is ±1 virtual px (sub-pixel
   at 720p and SD).
+
+## K6 camera pass (2026-11-15)
+
+Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 256 -> 512 (v0.1.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.

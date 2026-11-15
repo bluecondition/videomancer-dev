@@ -264,3 +264,7 @@ Integer model: `.heirloom_work/rb_cusp/imodel6.py` (`GUARD=0` shows the unguarde
 - Resolution: 4:3 SD shows the whole layout about 19 % narrower relative to the height. The glow / rim /
   arc widths come out about 1.33× wider than HD at SD and about 0.75× at 720p (the soft-key rate has two
   settings).
+
+## K6 camera pass (2026-11-15)
+
+Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 300 -> 512 (v0.6.2). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.

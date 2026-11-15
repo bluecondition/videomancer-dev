@@ -237,3 +237,7 @@ Ron approved v0.6.0 as it is (2026-11-03), so both questions are settled the way
 2. The edge comb keeps deepening with Drip.
 
 If HD HDMI ever shows lines, re-seed that config. No pin-skew screen was run.
+
+## K6 camera pass (2026-11-15)
+
+Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 100 -> 512 (v0.6.1). The vmprog was repacked from the same bitstreams (lava_diag build, as merged; verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.

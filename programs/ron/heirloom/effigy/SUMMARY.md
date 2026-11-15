@@ -232,3 +232,7 @@ These numbers come from the four m-frames (t − 0.5 s to + 1.5 s) and the strip
 - **Burn at 100 %.** It deliberately turns every contour into fat orange and yellow stripes, a busy "inferno" scene.
 - **Budget.** LC sits at 92.7 %, about 18 LC over the ~7100 guide. Timing closed with wide margin (84–87 MHz on HD
   at seed 1).
+
+## K6 camera pass (2026-11-15)
+
+Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 450 -> 512 (v0.1.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.

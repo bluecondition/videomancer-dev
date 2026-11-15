@@ -263,3 +263,7 @@ Working files are in `.heirloom_work/rb_streamers/`; `notes.md` has the steps.
   back. Mirror folds can show a sliver a few pixels wide at the centre, where P's phase dips across the red edge;
   this is the real shape of the fold.
 - **Nothing visible was cut for budget.**
+
+## K6 camera pass (2026-11-15)
+
+Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 280 -> 512 (v0.1.2). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.

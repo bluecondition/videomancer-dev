@@ -8,7 +8,7 @@
 processing_delay_clks = 24
 program_id = "com.czartroniks.bunsen"
 program_name = "Bunsen"
-program_version = "0.1.0"
+program_version = "0.1.1"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -74,7 +74,7 @@ name_label = "Camera"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
-initial_value = 320
+initial_value = 512
 display_float_digits = 0
 suffix_label = "%"
 

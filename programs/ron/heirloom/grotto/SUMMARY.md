@@ -136,3 +136,7 @@ Glides: K1, K2, K3, K5, K6 and P12 move 1/8 of the gap per field.
   re-patching the oscillators that made the photo (which could not be identified).
 - **Resolutions:** 720p shows the same picture as 1080p. SD shows the centre 4:3 (virtual x 240-1680), so the slit's
   right end and the left lens are cut, and it is softer (the boxes are per output pixel).
+
+## K6 camera pass (2026-11-15)
+
+Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 448 -> 512 (v0.1.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.

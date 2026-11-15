@@ -228,3 +228,7 @@ Glides (1/8 of the gap per field) on K1, K2, K3, K5, K6 and P12.
   - SD shows the centre 4:3 (virtual x 240 .. 1680): the composition, chevrons and body hold, and the outer bands are
     cropped.
 - **Shell.** The RTL shell comes from velvet v0.1.1, the phase-2 fern / lozenge lineage with the latest fixes.
+
+## K6 camera pass (2026-11-15)
+
+Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 400 -> 512 (v0.1.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.

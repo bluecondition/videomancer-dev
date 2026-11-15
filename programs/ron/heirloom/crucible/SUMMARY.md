@@ -198,3 +198,7 @@ integer model, `sheet2.py` = the control sheet, `fr/` = every clip frame at 480x
   - With Twin On, the right column (x 1117–1707) loses its last ~27 vpx at the SD edge.
   - The roll speed is per field, so 50 Hz modes roll 17 % slower.
 - **Nothing was cut for budget.**
+
+## K6 camera pass (2026-11-15)
+
+Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 400 -> 512 (v0.1.2). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.

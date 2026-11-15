@@ -203,3 +203,7 @@ Working files are in `.heirloom_work/rb_starline/` (`notes.md` has the measureme
   delay moved into an EBR (no visible change).
 - **K1 extreme.** K1 = 0 leaves one 27 px single-row bright run at the point row. The defaults and P12 0 % and
   100 % are clean.
+
+## K6 camera pass (2026-11-15)
+
+Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 420 -> 512 (v0.1.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.

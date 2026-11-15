@@ -217,3 +217,7 @@ Working files are in `.heirloom_work/rb_specter/` (`notes.md`, `meas1..8.py`, `f
 - **Line width** comes from the timing ID (1920 / 1280 / 720), not measured.
 - **Resolutions.** 720p shows the same geometry as 1080p. SD shows the centre 4:3: the outer curtains and part of
   the blue corners fall outside (virtual x 240–1680).
+
+## K6 camera pass (2026-11-15)
+
+Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 200 -> 512 (v0.1.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.

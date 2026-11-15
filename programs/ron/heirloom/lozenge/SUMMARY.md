@@ -253,3 +253,7 @@ Ron approved the diag as built, so both are settled as built:
 2. Should Bulge's star side be capped so 0 % doesn't fold into a quatrefoil? No cap: 0 % stays the quatrefoil.
 
 **Watch on hardware:** no pin-skew seed screening was run. If HD HDMI shows lines, re-seed that config.
+
+## K6 camera pass (2026-11-15)
+
+Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 320 -> 512 (v0.6.1). The vmprog was repacked from the same bitstreams (lozenge_diag build, as merged; verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.

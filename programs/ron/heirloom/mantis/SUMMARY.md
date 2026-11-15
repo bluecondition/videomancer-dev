@@ -237,3 +237,7 @@ The reading:
   - 720p shows the same geometry as 1080.
   - SD shows the centre 4:3, so the outermost pillar pairs and the edge eyes fall outside the frame.
   - The output blur is per output pixel, so SD is relatively softer.
+
+## K6 camera pass (2026-11-15)
+
+Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 104 -> 512 (v0.1.2). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.

@@ -215,3 +215,7 @@ All 177 frames were extracted (29.98 fps, 5.9 s; `breath.txt`, `palx.py` per-eye
 - **Resolutions.** 720p shows the same geometry as 1080p. SD shows the centre 4:3, with the eye column a little right
   of centre as in HD. The moire and slip bands are counted in virtual lines, so they look the same at every
   resolution.
+
+## K6 camera pass (2026-11-15)
+
+Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 354 -> 512 (v0.1.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.

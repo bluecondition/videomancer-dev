@@ -147,3 +147,7 @@ photo look.  Osc substitutes a drifting 2-D triangle lattice through the same pa
 - checks: `match.py`, `regions.py`, `lc2.py`;
 - images: `cmp_final.png`, `z_mid_final.png` (photo / v0.5.0 / v0.5.1 middle double oval), `sheet.png`;
 - `v051a/` (fallback build without the fold clamp), `syn/v20.vhd` (3-candidate draft).
+
+## K6 camera pass (2026-11-15)
+
+Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 200 -> 512 (v0.5.3). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.

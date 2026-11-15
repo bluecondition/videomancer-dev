@@ -171,3 +171,7 @@ Working files are in `.heirloom_work/rb_cateye/` (notes.md has the whole chain).
 - **Resolutions.** Virtual 1080-line coordinates: 720p shows the same picture as 1080p. SD shows the centre 4:3
   (x 240–1680 virtual px), so the outer magenta of both walls falls outside; the eye, both dashed lines and the ridge
   stay in frame. SD 480i fields step 4.45 virtual lines, so the stripes and the T table are coarser there.
+
+## K6 camera pass (2026-11-15)
+
+Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 300 -> 512 (v0.1.2). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.

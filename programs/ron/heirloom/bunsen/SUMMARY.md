@@ -197,3 +197,7 @@ and the kymographs (the motion); `proto2.py` (float proto), `imodel.py` (integer
   - the key table's per-line interpolation (only the warp D is still interpolated);
   - the 16-level fade alpha (now 8);
   - the serial multipliers, narrowed to 24 bits.
+
+## K6 camera pass (2026-11-15)
+
+Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 320 -> 512 (v0.1.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.

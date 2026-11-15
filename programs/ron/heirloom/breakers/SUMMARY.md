@@ -178,3 +178,7 @@ Glides (1/8 per field): K1, K2, K3, P12. K5 and K6 are read per field; K4 has a 
 - **Resolutions.** 720p shows the same picture. SD shows the centre 4:3 (virtual x 240..1680): the eye on the right
   edge and the leftmost surf are cropped. At 720p a 4-row noise unit is 2 or 3 lines, so a tear boundary can
   occasionally leave a one-line chroma step (~37 px) at a ribbon edge; at 1080p the single-row check is 0.
+
+## K6 camera pass (2026-11-15)
+
+Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 80 -> 512 (v0.1.2). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.

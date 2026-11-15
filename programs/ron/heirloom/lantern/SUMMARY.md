@@ -152,3 +152,7 @@ Working files are in `.heirloom_work/rb_lantern/` (notes.md has the whole chain)
   same lines.
 - With non-integer floor values (K5 away from 512), the lantern's edge line is one-sided (half width), a keyed
   look.
+
+## K6 camera pass (2026-11-15)
+
+Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 300 -> 512 (v0.1.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.

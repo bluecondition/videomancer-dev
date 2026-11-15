@@ -258,3 +258,7 @@ Working files are in `.heirloom_work/rb_aureole/`: `notes.md`, `proto_final.py`,
   - The horn wave restarts at each mode's line start, so SD's teeth sit at a different phase (start at virtual
     x 256 instead of 8).
 - **Presets** are hand-written placeholders. Capture real ones with `./capture_preset.sh`.
+
+## K6 camera pass (2026-11-15)
+
+Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 400 -> 512 (v0.1.2). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.

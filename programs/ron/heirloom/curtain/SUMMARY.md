@@ -381,3 +381,7 @@ filtered at 8 bits, key interpolation in 1.2 px steps, the fold half's pool-key 
 - `cmp_final.png`: photo / proto / RTL Osc / RTL Video.
 - `ys/`: LC ablation and pack scripts.
 - `old_v010_*`: the replaced v0.1.0.
+
+## K6 camera pass (2026-11-15)
+
+Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 384 -> 512 (v0.6.2). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.

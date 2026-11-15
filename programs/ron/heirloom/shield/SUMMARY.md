@@ -158,3 +158,7 @@ Working files are in `.heirloom_work/rb_shield/` (`notes.md`, `gfit.json`).
 - **Palette wrap.** The palette wraps every 1024 px of field. This shows only at high Depth or Bands, and
   is the designed P12 climax.
 - **Osc mode.** At default Etch the lattice's positive mean shrinks the shields by about 45 px.
+
+## K6 camera pass (2026-11-15)
+
+Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 320 -> 512 (v0.5.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.

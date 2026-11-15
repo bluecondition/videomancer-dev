@@ -251,3 +251,7 @@ Glides (1/8 of the gap per field): K1, K3, P12. K2, K5 and K6 are read per field
   - At SD a flame-noise row is about 2 field lines.
 - **Edge artifacts.** The left edge fades in over ~9 px (filter warm-up). The first line of a field skips the vertical
   average.
+
+## K6 camera pass (2026-11-15)
+
+Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 256 -> 512 (v0.1.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.

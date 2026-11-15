@@ -260,3 +260,7 @@ Working files are in `.heirloom_work/rb_seaweed/`; `notes.md` has the steps.
   - SD's 4.4 virtual lines per row put small stair steps on near-horizontal band edges.
 - **Not drawn:** the capture border (1 – 3 px). The left edge fades in over a few pixels (filter warm-up).
 - **Nothing visible was cut for budget.**
+
+## K6 camera pass (2026-11-15)
+
+Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 150 -> 512 (v0.1.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.

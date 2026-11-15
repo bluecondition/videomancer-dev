@@ -237,3 +237,7 @@ Glides (1/8 of the gap per field, +-2 deadband) on K1, K2, K4, K5, K6 and P12.
   - 720p shows the same geometry as 1080p.
   - SD shows the centre 4:3 (virtual x 240..1680), so the left band's outer glow and the right band's outer tube fall
     off the edges. The interior mirror stays at x = 992.
+
+## K6 camera pass (2026-11-15)
+
+Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 400 -> 512 (v0.1.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.

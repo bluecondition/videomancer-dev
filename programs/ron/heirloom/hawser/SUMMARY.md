@@ -181,3 +181,7 @@ the colour profiles; `proto.py` + `glint2.py` = the float proto; `imodel.py` = t
   - SD shows the centre 4:3 (virtual x 240..1680), so the photo's still left edge (the ramp's zero, x ≈ −290) is
     further off-screen. At SD the leftmost visible tube already swings ~±50 px.
   - Line widths are in virtual px, so they look the same at every resolution.
+
+## K6 camera pass (2026-11-15)
+
+Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 384 -> 512 (v0.1.1). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.

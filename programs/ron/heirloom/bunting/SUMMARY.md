@@ -320,3 +320,7 @@ Ron's notes 2026-10-30 (on v0.5.0):
   - `hashcheck.py`: the glyph re-roll hash and its correlation check.
   - `simy.sh`: simx.sh with `PROGDIR`.
   - `rtl6_*.png`, `cmp6.png`: the GHDL renders. `build6.log`: the build.
+
+## K6 camera pass (2026-11-15)
+
+Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 340 -> 512 (v0.6.2). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.

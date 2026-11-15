@@ -241,3 +241,7 @@ at 77–88 MHz, 7143–7186 LC (93–94 %), 20 EBR. NOT flashed.
 - **SD** shows the central 1440 virtual px, with the half-eyes cut to their tips.
 - **Sim previews.** `sim.sh` previews show the R≈0 background redder than it is; read the raw `output.txt` instead
   (`rb_facet/raw2png.py`).
+
+## K6 camera pass (2026-11-15)
+
+Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 307 -> 512 (v0.6.3). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.

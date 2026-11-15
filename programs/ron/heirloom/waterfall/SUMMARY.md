@@ -178,3 +178,7 @@ slow 2-D triangle (half amplitude) through the same path, so Melt stays live.
 - Resolution: the same picture at SD, 720p and 1080p (virtual coordinates). At SD the right-edge
   lines are ~13.5 real px apart and the dither texture is coarser; the per-line engine has ~10 %
   headroom in SD's 858-clock line.
+
+## K6 camera pass (2026-11-15)
+
+Ron: K6 is the camera strength in every program, default 50 %. K6 here already was the camera strength, so only its default changed: initial value 300 -> 512 (v0.5.2). The vmprog was repacked from the same bitstreams (verified: only the 150-byte settings block differs), so timing, seeds and LC are as above. Presets keep their own K6 values. The pre-pass vmprog is in out/rev_b/ron/_pre_k6/heirloom/.
