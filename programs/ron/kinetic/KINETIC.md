@@ -56,7 +56,10 @@ The six standard functions exist on every program, on these knobs unless stated:
 | K3 Depth | wave depth |
 | K4 Rate | wave speed, bipolar, centre = still |
 | K5 Spread | phase step per element |
-| K6 Colour | palette, 16 steps with hysteresis (the shared table below) |
+| K6 Camera | camera (and Osc) strength: 0 % none, 25 % the original fixed gain, **50 % default** = about twice that, 100 % a bold climax (Ron, 2026-11-15) |
+
+**Colour (the 16 shared palettes) is kept on every program, on that program's weakest knob** (usually K5, with Spread frozen at its
+default; riley K2, horologe / pendula / outrun / slinky K2, isoline / rippletank K3). Each program's README row and SUMMARY say where.
 | S7 Wave | Smooth / Snap |
 | S8 Field | Linear / Radial |
 | S9, S10 | the program's own look-flips |

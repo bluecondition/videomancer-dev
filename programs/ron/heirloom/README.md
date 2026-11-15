@@ -14,6 +14,17 @@ Flash from `out/rev_b/ron/heirloom/<name>.vmprog`; rebuild one with `./build_hei
   per-element parameters and bolder switches, while the defaults still give the photo. Ron's intentions, the
   per-tab workflow, the known issues and each program's LC/EBR headroom and rebuild command are in
   [PHASE2.md](PHASE2.md). Read it before starting any program.
+- **K6 camera pass (2026-11-15, Ron): K6 is the camera strength in every Heirloom program, default 50 %.**
+  - 89 programs already had the camera on K6 (Etch, Camera, Picture, Bend, Warp, Melt, Dye ...): only the default changed
+    (-> 512), repacked from the same bitstreams. arcade, gable, horizon and pods were already above 50 % and were left alone.
+  - 17 had the camera strength on another knob (archway K3, sinew K5, warp K4 ...): that knob and K6 swapped; nothing lost.
+  - 20 needed an agent (argus, beacon, cathode, cocoon, crenel, crossbeam, cutout, idol, kiln, lattice, pebble, radiant,
+    ribboncandy, rorschach, streak, tapers, ticker, triplicate, vase, zigzag): K6 became the camera and its old job moved to
+    the weakest control (in cutout, kiln and zigzag the camera strength turned up on K3 / K3 / K5 and was swapped instead).
+    Each SUMMARY says what moved and what was frozen. The other 5 programs already had K6 = camera at exactly 50 %. Where the camera IS the picture, 50 % = the
+    shipped look; elsewhere 25 % = the shipped strength and 50 % about twice it.
+  - Every pending diag copy got the same change, so approving one later keeps K6 = camera. Pre-pass vmprogs:
+    out/rev_b/ron/_pre_k6/. Rebuilt programs are router1 builds; seeds in each SUMMARY.
 - **Family-wide fix: output filters now resync every line (2026-11-01).**
   - **Symptom.** On hardware the fern_diag colours came out wrapped: maroon ground, olive maze, green fronds. One
     constant chroma offset, wrapping mod 1024, reproduces the capture.

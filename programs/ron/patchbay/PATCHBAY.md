@@ -35,6 +35,11 @@ The index of patches is in [README.md](README.md). The set is open-ended: new pa
   input the patch still gives its full picture. Osc substitutes a generator at the same point, fed boldly
   enough that the flip is unmistakable. `program_type = "processing"`.
 
+- **K6 is the camera strength** (Ron, 2026-11-15, the same rule as every Heirloom and Kinetic program): 0 % = no camera
+  (or Osc) effect, 25 % = the strength the patch was designed with, **50 % = the default** (about twice that, or the strongest
+  clean level), 100 % = a bold climax that does not wash out. A patch whose own colour or mode control would have lived on K6
+  puts it on its weakest other control.
+
 ## The bar
 
 1. **Rack photo**: the default frame would pass for a capture from Ron's rack, and is striking enough that
