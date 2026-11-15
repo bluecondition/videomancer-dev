@@ -101,6 +101,9 @@ Chassis from louver.vhd ([A] timing / zone / glides / sequencer, [B] generated a
 
 ## Status
 
+**Shipped vmprog: the ROUTER1 rebuild of 2026-11-14** (same sources). Post-route Fmax: HD Analog 75.39 MHz; SD Analog 81.93 MHz; HD HDMI 80.37 MHz; SD HDMI 78.77 MHz; HD Dual 76.16 MHz; SD Dual 72.86 MHz. Rebuild: `NEXTPNR_ROUTER="--router router1" ./build_set.sh kinetic bauhaus`. The router2 figures below are the first build, kept for the record; it was timing-marginal.
+
+
 - Built 2026-11-14 through the shared queue with router2 (the builder default); rebuild with
   `./build_set.sh kinetic bauhaus`. Never flashed.
 
