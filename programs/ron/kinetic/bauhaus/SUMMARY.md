@@ -211,3 +211,16 @@ v0.1.1. Ron: K6 is the camera strength in every program, default 50 %.
   v0.1.0's 75.39); SD Analog 80.85, SD HDMI 75.45, SD Dual 75.00. 7,058 .. 7,075 / 7,680 LC (92 %, v0.1.0
   6,731), 23 / 32 EBR (unchanged). Log `.kinetic_work/rb_bauhaus/build_v0.1.1.log`.
 
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: K6 now loads at 100 % (initial_value 1023, set with the version bump), and on bend / element programs the camera is 25 % stronger at the top of the knob (here x 1.25 at every position, 0 stays 0).
+
+- **Element-type**: K6 sizes each cell's figure by the held camera luma (the shape halftone), so it got the +25 %.
+- Change (per-field decode, state 44): the gain c_cg = 25 k / 256 (was 5 k / 64), 0 .. 99 (was 0 .. 79). The contrast
+  knee now follows the gain (c_cg >= 20, about 20 % of the knob instead of 25 %), so the law stays continuous and still
+  pivots on level 7 (held 90); 100 % = contrast x 5 (was x 4), 50 % = x 2.5. Widths checked: c_off <= 79 x 90 = 7,110
+  (13 bits), held x c_cg <= 23,661 (15 bits), the level clamp unchanged. Pixel path and latency unchanged.
+- Look: `.kinetic_work/rb_bauhaus/k6b/k6b_cmp.png` (GHDL, bear, 720p60 / 4, K1 = 0 for more cells, K6 glide snapped in
+  scratch copies): the same poster; some mid-grey cells move one step further toward the full box or the dot.
+- Build (2026-11-15, `.kinetic_work/tools/k6build.sh kinetic bauhaus`): **router1, every config on seed 1**. Post-route Fmax HD Analog 75.25, SD Analog 66.92, HD HDMI 84.74, SD HDMI 76.73, HD Dual 79.54, SD Dual 76.52 MHz (worst HD 75.25); 7,080 / 7,680 LC (92.2 %). Not flashed.

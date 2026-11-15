@@ -180,3 +180,18 @@ field, [F] output conditioning are riley's; the box is 64 px instead of 32).
   start, first used 230 pixels in on SD). A source whose lines are much shorter than standard would break that.
 - The horizon glow is dithered between adjacent pixels (a checkerboard, removed by the [1 2 1] luma filter);
   look for texture in the glow band on HD HDMI.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: K6 now loads at 100 % (initial_value 1023, set with the version bump), and on bend / element programs the camera is 25 % stronger at the top of the knob (here x 1.25 at every position, 0 stays 0).
+
+- **Element-type**: K6 lifts / bends the terrain rows and tints the sky toward colour A by the camera's brightness
+  (the drawing re-shaped and recoloured), so both got the +25 %; the tint keeps its centre law.
+- Change (quasi-static gain registers): s_cg5 = 1.25 s_cg / 2 in units of 1/32 (<= 158), so the 8 x 8 multiply stays;
+  s9_g widened to 11 bits (<= 1259); the tint offset follows the gain (3 (s_cg5 - 32) = (g - 1) x 96, <= 378), the
+  tint difference s9_d is 12 bits with the clamp widened, and the height term (modulo one cell by design) takes the
+  11 bits. Gain at 100 % = 4.94 (was 3.97); g = 1 (v0.1.0) is now at about 20 %. Latency unchanged.
+- Look: `.kinetic_work/rb_outrun/k6b/k6b_cmp.png` (sky, horizon K3 = 0) and `k6b_cmp_tunnel.png` (S9 Tunnel: the near
+  ceiling rows), GHDL, bear, Outrun palette, 720p60 / 4: rows bend further, the sky's camera silhouette is a little
+  harder; no wrap.
+- Build (2026-11-15, `.kinetic_work/tools/k6build.sh kinetic outrun`): **router1, every config on seed 1**. Post-route Fmax HD Analog 86.66, SD Analog 89.09, HD HDMI 82.08, SD HDMI 89.09, HD Dual 87.24, SD Dual 86.61 MHz (worst HD 82.08); 7,134 / 7,680 LC (92.9 %). Not flashed.

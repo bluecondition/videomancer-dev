@@ -25,8 +25,8 @@
 --   K3  Mix      curved motifs .. straight motifs
 --   K4  Rate     bipolar, centre = still; 60 s per cycle .. 2 cycles per second
 --   K5  Colour   the 16 shared palettes (was K6; Spread is fixed at 354 = phase step per cell, square law)
---   K6  Camera   camera / Osc strength: 0 % = the poster alone, 0 .. 25 % a gain (25 % = v0.1.0), past 25 % a
---                contrast about the middle level (50 % = x 2, 100 % = x 4), glided
+--   K6  Camera   camera / Osc strength: 0 % = the poster alone, 0 .. 20 % a gain (20 % = v0.1.0), past it a
+--                contrast about the middle level (50 % = x 2.5, 100 % = x 5: the 2026-11-15 +25 %), glided
 --   S7  Wave     Smooth / Snap
 --   S8  Field    Linear / Radial
 --   S9  Gutters  Off / On (ground lines between the cells)
@@ -44,6 +44,7 @@
 -- One latency (C_LAT = 42) in every mode.  Colours in the hardware convention (u = Cr, v = Cb).
 
 -- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K5 = Colour (was K6); K5 Spread fixed at 354 (C_KFIX_5).
+-- 2026-11-15: K6 camera top +25 % (Ron)
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -581,9 +582,12 @@ begin
                         else c6_d <= (others => '0'); end if;
                     when 42 => c6_g <= unsigned(signed(c6_g) + c6_d(12 downto 0));
                     when 43 => c6_t <= resize(c6_g(12 downto 3) & "00", 13) + resize(c6_g(12 downto 3), 13);
-                    when 44 => c_cg <= c6_t(12 downto 6);
+                    -- K6 top +25 % (2026-11-15): c_cg = 5k / 64 x 1.25 = 25k / 256 (0 .. 99; 5k + 5k / 4 <= 6393
+                    -- fits 13 bits); the contrast knee follows the gain (c_cg = 20, k ~ 205), so the law stays
+                    -- continuous.  c_off <= 79 x 90 = 7110 (13 bits), held x c_cg <= 239 x 99 = 23661 (15 bits)
+                    when 44 => c_cg <= resize(shift_right(c6_t + shift_right(c6_t, 2), 6), 7);
                     when 45 =>
-                        if c6_g(12 downto 11) = "00" then c6_e <= (others => '0'); c_chi <= '0';
+                        if c_cg < 20 then c6_e <= (others => '0'); c_chi <= '0';
                         else c6_e <= c_cg - 20; c_chi <= '1'; end if;
                     when 46 => c_off <= shift_left(resize(c6_e, 13), 6) + shift_left(resize(c6_e, 13), 4);
                     when 47 => c_off <= c_off + shift_left(resize(c6_e, 13), 3);

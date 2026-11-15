@@ -27,9 +27,9 @@
 --   K3  Depth    how far the path swings (0 .. 900 px across, half that down)
 --   K4  Rate     bipolar, centre = still; 60 s per cycle .. 2 cycles per second
 --   K5  Spread   phase step per copy 0 .. 1/8 cycle (square law)
---   K6  Camera   camera (and Osc) strength: the added luma's gain g = K6 / 256 (0 = a black input, 1 = the
---                v0.1.0 look at 25 %, 2 at the 50 % default, 4 at 100 %), glided, one 9 x 8 multiply ahead of
---                the delay ring (s_vg)
+--   K6  Camera   camera (and Osc) strength: the added luma's gain g = 1.25 K6 / 256 (0 = a black input, 1 = the
+--                v0.1.0 look at 20 %, 2.5 at 50 %, 5 at 100 %: the 2026-11-15 +25 %), glided, one 9 x 8 multiply
+--                ahead of the delay ring (s_vg)
 --   S7  Wave     Smooth / Snap
 --   S8  Field    Swing / Orbit
 --   S9  Form     Ring / Square
@@ -50,6 +50,7 @@
 -- One latency (C_LAT = 16) in every mode.  Colours in the hardware convention (u = Cr, v = Cb).
 
 -- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K2 = Colour (was K6); K2 Shape fixed at 380 (C_KFIX_2).
+-- 2026-11-15: K6 camera top +25 % (Ron)
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -189,8 +190,9 @@ architecture slinky of program_top is
     signal s_gp : unsigned(12 downto 0) := to_unsigned(870 * 8, 13);
     signal s_gc : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);   -- K6 camera pass: the K6 Camera glide
     signal s_cg : unsigned(7 downto 0) := to_unsigned(127, 8);         -- camera gain, 64 = 1 (the v0.1.0 strength)
-    signal s_vg : unsigned(10 downto 0) := (others => '0');            -- the source x gain
-    signal s_cg3 : unsigned(9 downto 0) := (others => '0');            -- 3 x gain
+    signal s_cgs : unsigned(7 downto 0) := to_unsigned(79, 8);         -- K6 top +25 %: 1.25 x gain, 32 = 1 (<= 158)
+    signal s_vg : unsigned(11 downto 0) := (others => '0');            -- the source x gain (+25 %: 12 bits, <= 2365)
+    signal s_cg3 : unsigned(9 downto 0) := (others => '0');            -- 3 x gain (+25 %: 6 s_cgs, the same units)
     signal s_coff : unsigned(9 downto 0) := (others => '0');           -- the fill's luma offset above 25 %
     signal s_gm : unsigned(12 downto 0) := (others => '0');
     signal s_gd : signed(14 downto 0) := (others => '0');
@@ -302,7 +304,7 @@ architecture slinky of program_top is
     signal r4_j, r5_j, r5_k : unsigned(4 downto 0) := (others => '0');
     signal r5_co, r5_ai, r6_al, r7_al : unsigned(3 downto 0) := (others => '0');
     signal r8_t   : std_logic_vector(25 downto 0) := (others => '0');
-    signal r8_vp  : unsigned(10 downto 0) := (others => '0');   -- K6 camera pass: 11 bits (x gain)
+    signal r8_vp  : unsigned(11 downto 0) := (others => '0');   -- K6 camera pass: 11 bits (x gain; +25 %: 12)
     signal q9_y   : unsigned(9 downto 0) := to_unsigned(64, 10);
     type t_u8 is array (1 to 2) of unsigned(7 downto 0);
     signal q9_c   : t_u8 := (others => to_unsigned(128, 8));
@@ -366,7 +368,7 @@ begin
     p_ring : process(clk)
     begin
         if rising_edge(clk) then
-            vr(to_integer(rc + 6)) <= "00000" & std_logic_vector(s_vg);   -- K6 camera pass: s_vg is s_v9 one clock later
+            vr(to_integer(rc + 6)) <= "0000" & std_logic_vector(s_vg);    -- K6 camera pass: s_vg is s_v9 one clock later
             vr_q <= vr(to_integer(rc));
             vr_f <= vr_q;
             cr(to_integer(rc + 6)) <= std_logic_vector(q9_c(1)) & std_logic_vector(q9_c(2));
@@ -466,7 +468,10 @@ begin
             -- above 25 % the extra gain is centred on half-scale luma 192 (Y 448): the copies' fill luma drops
             -- by (gain - 1) x 192 = 3 (s_cg - 64), so the mean stays at the v0.1.0 level and the camera gains
             -- contrast instead of washing the copies out (applied in the colour-table fill, per field)
-            s_cg3 <= shift_left(resize(s_cg, 10), 1) + resize(s_cg, 10);
+            -- K6 top +25 % (2026-11-15): the multiplier's gain is s_cgs = 1.25 s_cg / 2 (units 1/32, <= 158, so the
+            -- multiply stays 9 x 8); the fill offset follows it: (g - 1) x 192 = 6 s_cgs - 192 (<= 756)
+            s_cgs <= resize(shift_right(resize(s_cg, 9) + resize(s_cg(7 downto 2), 9), 1), 8);
+            s_cg3 <= shift_left(resize(s_cgs, 10), 2) + shift_left(resize(s_cgs, 10), 1);
             if s_cg3 > 192 then s_coff <= s_cg3 - 192; else s_coff <= (others => '0'); end if;
 
             -- shared glide for Scale, Extrude and (K6 camera pass) Camera (1/8 of the gap per field, +-2
@@ -826,8 +831,8 @@ begin
             end if;
             -- K6 camera pass: the camera gain, one 9 x 8 multiply in its own stage (written to the ring one
             -- slot nearer, so the delay is unchanged)
-            v_g := s_v9 * s_cg;
-            s_vg <= v_g(16 downto 6);
+            v_g := s_v9 * s_cgs;                                    -- (K6 top +25 %: / 32, <= 479 x 158 / 32 = 2365)
+            s_vg <= v_g(16 downto 5);
         end if;
     end process p_src;
 
@@ -987,9 +992,9 @@ begin
         variable v_m  : std_logic_vector(16 downto 0);
         variable v_co, v_ai, v_al : unsigned(3 downto 0);
         variable v_ix : unsigned(4 downto 0);
-        variable v_v  : unsigned(10 downto 0);
-        variable v_p  : unsigned(13 downto 0);
-        variable v_y  : unsigned(11 downto 0);
+        variable v_v  : unsigned(11 downto 0);
+        variable v_p  : unsigned(14 downto 0);
+        variable v_y  : unsigned(12 downto 0);
     begin
         if rising_edge(clk) then
             -- 3
@@ -1043,15 +1048,15 @@ begin
             r6_al <= v_al; r7_al <= r6_al;
             -- 8
             r8_t <= tt_q(25 downto 0);
-            v_v := unsigned(vr_f(10 downto 0));     -- K6 camera pass: the source x gain, 11 bits
+            v_v := unsigned(vr_f(11 downto 0));     -- K6 camera pass: the source x gain, 11 bits (+25 %: 12)
             if r7_al(3) = '1' then
                 r8_vp <= v_v;
             else
-                v_p := (f_gu(v_v, r7_al(0), 14) + shift_left(f_gu(v_v, r7_al(1), 14), 1)) + shift_left(f_gu(v_v, r7_al(2), 14), 2);
-                r8_vp <= v_p(13 downto 3);
+                v_p := (f_gu(v_v, r7_al(0), 15) + shift_left(f_gu(v_v, r7_al(1), 15), 1)) + shift_left(f_gu(v_v, r7_al(2), 15), 2);
+                r8_vp <= v_p(14 downto 3);
             end if;
             -- 9: the ground colour outside the generated avid
-            v_y := resize(unsigned(r8_t(25 downto 16)), 12) + resize(r8_vp, 12);
+            v_y := resize(unsigned(r8_t(25 downto 16)), 13) + resize(r8_vp, 13);
             if s_gav_sr(6) = '0' then
                 q9_y <= c_gy; q9_c(1) <= c_gu; q9_c(2) <= c_gv;
             else

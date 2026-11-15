@@ -164,3 +164,17 @@ under the islands. The source field lags the picture a little to the right and b
   Post-route Fmax HD Analog 84.73, HD HDMI 86.74, HD Dual 90.82 MHz (worst HD 84.73, better than v0.1.0's
   76.96); SD Analog 86.58, SD HDMI 86.14, SD Dual 83.59. 7,339 .. 7,361 / 7,680 LC (96 %, slightly under
   v0.1.0), 21 / 32 EBR. Not flashed. Rebuild: `NEXTPNR_ROUTER="--router router1" ./build_set.sh kinetic isoline`.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: K6 now loads at 100 % (initial_value 1023, set with the version bump), and on bend / element programs the camera is 25 % stronger at the top of the knob (here x 1.25 at every position, 0 stays 0).
+
+- **Bend-type**: K6 raises the contour terrain by the camera.
+- Change: the camera part only, in the existing source-sample stage: the cored camera sample (luma >> 2 less 80) x 1.25
+  (v + v / 4, <= 218 of 255), so with the unchanged K6 / 32 gain every position is x 1.25 and 100 % is about 4.8 x
+  v0.1.0 (was 3.9 x); x 1 is now at about 20 %. Scaling the shared gain instead would have wrapped the Osc through the
+  IIRs (s_slg up to 988, s_h up to 31,616 of 32,767, the line store up to 63,232 of 65,535), so the Osc keeps its old
+  range (now 1.6 x the camera's gain instead of 2 x). One 8-bit add, no new multiplier, latency unchanged.
+- Look: `.kinetic_work/rb_isoline/k6b/k6b_cmp.png` (GHDL, bear, Ocean, 720p60 / 4, glide start set to 1023 in scratch
+  copies): the same contour map with the coastlines pushed further (more land); clean.
+- Build (2026-11-15, `.kinetic_work/tools/k6build.sh kinetic isoline`): **router1, seed 1 except SD HDMI seed 2**. Post-route Fmax HD Analog 88.19, SD Analog 87.86, HD HDMI 78.88, SD HDMI 84.73, HD Dual 89.34, SD Dual 85.29 MHz (worst HD 78.88); 7,372 / 7,680 LC (96.0 %). Not flashed.

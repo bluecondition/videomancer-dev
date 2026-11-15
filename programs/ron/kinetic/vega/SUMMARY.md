@@ -184,3 +184,18 @@ Chassis sections lifted from louver.vhd ([A] timing / zone / glides / sequencer,
   EBR. It closed with 15 % margin despite the LC, but there is little room left for anything else.
   Rebuild: `NEXTPNR_ROUTER="--router router1" ./build_set.sh kinetic vega`.
 
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: K6 now loads at 100 % (initial_value 1023, set with the version bump), and on bend / element programs the camera is 25 % stronger at the top of the knob (here x 1.25 at every position, 0 stays 0).
+
+- **Element-type**: K6 sizes the cells by the smeared camera luma.
+- Change (per-field decode, state 41): c_cam Video = (4 ke - ke / 4) / 32 (was 3 ke / 32; <= 82), Osc 5 ke / 32 (was
+  4 ke / 32; <= 109 of 127), still one add / subtract: x 1.25 at every position, g = 1.71 at 100 % (was 1.37), 1.25 at
+  50 %. Size term <= 239 x 109 / 32 = 814 in s_st's 10 bits, then v_f's 11 bits and the 56 .. 472 clamp. Latency
+  unchanged.
+- Look: `.kinetic_work/rb_vega/k6b/k6b_cmp.png` (GHDL, bear, 720p60 / 4, glide snapped): the same picture, the cells
+  swell further toward the cap. The earlier note still applies: at 100 % it is now 2.57 x the luma (a 2.25 x left the
+  selfie almost uniformly full), so on a mid-key camera most cells sit at the cap; the knob's middle keeps the calmer
+  looks.
+- Build (2026-11-15, `.kinetic_work/tools/k6build.sh kinetic vega`): **router1, every config on seed 1**. Post-route Fmax HD Analog 89.73, SD Analog 89.65, HD HDMI 82.58, SD HDMI 86.71, HD Dual 83.93, SD Dual 87.97 MHz (worst HD 82.58); 7,381 / 7,680 LC (96.1 %). Not flashed.

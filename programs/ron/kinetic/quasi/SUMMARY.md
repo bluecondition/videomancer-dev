@@ -154,3 +154,18 @@ v0.1.1. Ron: K6 is the camera strength in every program, default 50 %.
   SD HDMI 85.65, SD Dual 92.46. 6,963 .. 6,980 / 7,680 LC (91 %, v0.1.0 6,779 .. 6,803), 24 / 32 EBR
   (unchanged). Log `.kinetic_work/rb_quasi/build_v0.1.1.log`.
 
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: K6 now loads at 100 % (initial_value 1023, set with the version bump), and on bend / element programs the camera is 25 % stronger at the top of the knob (here x 1.25 at every position, 0 stays 0).
+
+- **Bend-type**: the camera term is added to the field F, so it bends the bands.
+- Change (quasi-static decode): the old law (k / 16 up to 50 %, then half the slope) is formed in 1/256 (c_cgw) and
+  c_cg = 1.25 x it, 0 .. 59 (was 0 .. 47; still 6 bits). 100 % = x 3.7 of v0.1.0 (was x 2.94), 50 % = x 2.5, x 1 at
+  about 20 %. Widths: lb x c_cg <= 15,045 (14 bits), s7_l <= 15,053, F <= 2,047 + 3,767 in its 14-bit signed sum,
+  G modulo 2^18 by design. One 10-bit register and add, no pixel-path change, latency unchanged.
+- Look: `.kinetic_work/rb_quasi/k6b/k6b_cmp.png` (GHDL, bear, Ink, 720p60 / 4 = the top-left sixteenth, glide snapped):
+  in this small view the band edges move a lot (a 25 % larger source term over a bright, flat area shifts a contour by
+  most of a band); smooth and anti-aliased, no wrap. Worth a hardware look for the per-line ragged contours in flat
+  areas that a linear x 4 once showed (x 3.7 is close to it).
+- Build (2026-11-15, `.kinetic_work/tools/k6build.sh kinetic quasi`): **router1, every config on seed 1**. Post-route Fmax HD Analog 94.18, SD Analog 89.98, HD HDMI 87.32, SD HDMI 93.83, HD Dual 89.33, SD Dual 95.52 MHz (worst HD 87.32); 7,006 / 7,680 LC (91.2 %). Not flashed.

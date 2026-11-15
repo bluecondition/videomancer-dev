@@ -27,8 +27,8 @@
 --   K4  Rate     bipolar, centre = still; 60 s per cycle .. 2 cycles per second
 --   K5  Colour   the 16 shared palettes   [K6 camera pass: was K6; Spread fixed at 274]
 --   K6  Camera   camera (and Osc) strength: size term = smeared luma * 1.5 g (Osc * 2 g), g = K6 / 512 up
---                to 50 %, then 3/8 of that slope (glided): 0 = none (= a black input), 0.5 at 25 %, 1 = the
---                v0.1.0 gain at the 50 % default (already near the size cap), 1.37 at 100 %
+--                to 50 %, then 3/8 of that slope (glided), x 1.25 at every position (2026-11-15): 0 = none
+--                (= a black input), 0.62 at 25 %, 1.25 at 50 % (1 = the v0.1.0 gain), 1.71 at 100 %
 --   S7  Wave     Smooth / Snap
 --   S8  Field    Linear / Radial
 --   S9  Lens     Bulge / Pinch
@@ -46,6 +46,7 @@
 -- One latency (C_LAT = 33) in every mode.  Colours in the hardware convention (u = Cr, v = Cb).
 
 -- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K5 = Colour (was K6); K5 Spread fixed at 274 (C_KFIX_5).
+-- 2026-11-15: K6 camera top +25 % (Ron)
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -643,9 +644,12 @@ begin
                     when 40 =>
                         if s_gk(12) = '0' then s_ke <= s_gk(12 downto 3);
                         else s_ke <= "10" & (resize(s_gk(11 downto 5), 8) + resize(s_gk(11 downto 6), 8)); end if;
+                    -- K6 top +25 % (2026-11-15): Video 1.5 g x 1.25 = (4 ke - ke / 4) / 32 (<= 82, was 3 ke / 32),
+                    -- Osc 2 g x 1.25 = 5 ke / 32 (<= 109 of 127, was 4 ke / 32).  Size term <= 239 x 109 / 32 = 814
+                    -- (s_st 10 bits; + the base in v_f's 11 bits, then the 56 .. 472 clamp)
                     when 41 =>
-                        if s_src = '1' then v_t := resize(s_ke & "00", 29);
-                        else v_t := resize(s_ke & '0', 29) + resize(s_ke, 29); end if;
+                        if s_src = '1' then v_t := resize(s_ke & "00", 29) + resize(s_ke, 29);
+                        else v_t := resize(s_ke & "00", 29) - resize(s_ke(9 downto 2), 29); end if;
                         c_cam <= v_t(11 downto 5);
                     when 22 => r_pl_a <= "00" & s_pal & "00";
                     when 25 =>

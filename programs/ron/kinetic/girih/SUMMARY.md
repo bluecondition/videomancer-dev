@@ -164,3 +164,17 @@ register before arithmetic; no RAM ever reads the address it is writing (no_rw_c
   Post-route Fmax HD Analog 96.16, HD HDMI 102.01, HD Dual 102.01 MHz (worst HD 96.16); SD Analog 91.99, SD
   HDMI 98.29, SD Dual 99.65. 6,274 .. 6,287 / 7,680 LC (82 %), 15 / 32 EBR. Not flashed.
   Rebuild: `NEXTPNR_ROUTER="--router router1" ./build_set.sh kinetic girih`.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: K6 now loads at 100 % (initial_value 1023, set with the version bump), and on bend / element programs the camera is 25 % stronger at the top of the knob (here x 1.25 at every position, 0 stays 0).
+
+- **Element-type**: K6 closes (rotates) each tile's contact angle by the held camera luma.
+- Change (per-field decode, state 13): Video gain 15 K6 / 32 (was 3 K6 / 8; <= 479), Osc 5 K6 / 4 (was K6; <= 1278),
+  each one add / subtract of the glided value; s_cm widened to 11 bits and the high half of the split multiply to 8 x 6.
+  100 % on the camera: white closes the angle by about 158 degrees (was 126). The Osc's term can now pass a full turn
+  (up to about 391 degrees); the 14-bit angle drops whole turns, and the geometry's period is half a turn, so that wrap
+  is seamless. Latency unchanged.
+- Look: `.kinetic_work/rb_girih/k6b/k6b_cmp.png` (GHDL, bear, 720p60 / 4, glide snapped): the same rosettes, the
+  straps of the bright tiles turned further; clean.
+- Build (2026-11-15, `.kinetic_work/tools/k6build.sh kinetic girih`): **router1, every config on seed 1**. Post-route Fmax HD Analog 89.79, SD Analog 83.96, HD HDMI 93.81, SD HDMI 99.79, HD Dual 94.33, SD Dual 97.21 MHz (worst HD 89.79); 6,326 / 7,680 LC (82.4 %). Not flashed.

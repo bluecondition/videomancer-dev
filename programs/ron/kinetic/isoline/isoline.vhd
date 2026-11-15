@@ -19,10 +19,10 @@
 --   K4  Rate     travel along the path, bipolar, centre = still
 --   K5  Spread   phase step per blob (0 = one stacked hill; square law, 0 .. 1/2 cycle)
 --   K6  Camera   how strongly the source field (camera luma or Osc) raises the terrain: linear gain,
---                0 = none (the black-input picture), 25 % = the v0.1.0 strength, 50 % (default) = twice it,
---                100 % = about four times (31 / 8).  Glided in the shared glide (channel 2, +-4 deadband), applied
---                to the 8-bit source sample as K6 / 32 (32 steps) by one 8 x 5 multiply before the IIRs (Osc keeps
---                twice the camera's gain)
+--                0 = none (the black-input picture), 20 % = the v0.1.0 strength, 100 % = about 4.8 times
+--                (2026-11-15 +25 %: the cored camera sample x 1.25).  Glided in the shared glide (channel 2, +-4
+--                deadband), applied to the 8-bit source sample as K6 / 32 (32 steps) by one 8 x 5 multiply before
+--                the IIRs (the Osc unchanged: 1.6 x the camera's gain at every position, up to 31 / 8 of v0.1.0's)
 --   S7  Wave     Smooth / Snap (the blobs hop between 8 stations with an eased move)
 --   S8  Field    Orbit (the ellipse) / Drift (a figure of eight: the blobs cross and merge)
 --   S9  Look     Tints (filled bands stepping ground -> A -> B -> accent -> B -> A ..) / Lines (contours alone)
@@ -53,6 +53,7 @@
 -- 0 .. W - 1 at stage S.  One latency (36) in every mode.  Colours in the hardware convention (u = Cr, v = Cb).
 
 -- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K3 = Colour (was K6); K3 Depth fixed at 600 (C_KFIX_3).
+-- 2026-11-15: K6 camera top +25 % (Ron)
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -975,6 +976,7 @@ begin
     ---------------------------------------------------------------------------
     p_src : process(clk)
         variable v_l : unsigned(7 downto 0);
+        variable v_lc : unsigned(7 downto 0);
         variable v_s : unsigned(7 downto 0);
         variable v_d : signed(17 downto 0);
         variable v_a : signed(17 downto 0);
@@ -995,9 +997,13 @@ begin
 
             -- the source sample: the lattice, or luma cored at about 30 % ((luma >> 2) - 80), so only the
             -- picture's bright areas rise and a dim background leaves the coastlines alone
+            -- K6 top +25 % (2026-11-15): the cored camera sample x 1.25 (<= 175 + 43 = 218, 8 bits), so the camera's
+            -- K6 / 32 gain reaches 31 / 16 x 1.25 at 100 %.  The Osc is left as it was: it already fills the IIRs
+            -- (s_slg <= 988, s_h <= 31616 of 32767, the line store <= 63232 of 65535), so 1.25 x would wrap them
             v_l := unsigned(data_in.y(9 downto 2));
+            v_lc := v_l - 80;
             if s_src = '1' then s_sl <= s_osum;
-            elsif v_l > 80 then s_sl <= v_l - 80;
+            elsif v_l > 80 then s_sl <= v_lc + shift_right(v_lc, 2);
             else s_sl <= (others => '0'); end if;
             -- K6 camera pass: the gain, one 8 x 5 multiply in its own stage, then the Osc / camera shift (Q8.2
             -- out: camera s_sl x K6 / 512, Osc twice that; <= 988).  The avid flag takes two more registers so

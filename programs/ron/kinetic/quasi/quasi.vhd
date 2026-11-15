@@ -19,7 +19,8 @@
 --   K4  Rate     bipolar, centre = still (60 s per cycle .. 2 cycles per second)
 --   K5  Colour   the 16 shared Kinetic palettes (hysteresis; was K6.  Spread, the phase step from wave to
 --                wave, is fixed at 300 = 0.04 cycle, square law)
---   K6  Camera   camera / Osc strength: source x 0 .. 2.9 (25 % = v0.1.0's x 1, 50 % = x 2), glided
+--   K6  Camera   camera / Osc strength: source x 0 .. 3.7 (20 % = v0.1.0's x 1, 50 % = x 2.5; the 2026-11-15
+--                +25 % at every position), glided
 --   S7  Wave     Smooth (sine) / Angular (triangle: polygonal tiles)
 --   S8  Field    Phason (the offsets breathe) / Drift (a rigid glide of the whole pattern)
 --   S9  Look     Fill (bands) / Lines (the contours alone)
@@ -46,6 +47,7 @@
 -- One latency (36) in every mode.  Colours in the hardware convention (u = Cr, v = Cb).
 
 -- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K5 = Colour (was K6); K5 Spread fixed at 300 (C_KFIX_5).
+-- 2026-11-15: K6 camera top +25 % (Ron)
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -166,7 +168,8 @@ architecture quasi of program_top is
     signal s_g2 : unsigned(12 downto 0) := to_unsigned(C_DEF_K2 * 8, 13);
     signal s_g3 : unsigned(12 downto 0) := to_unsigned(C_DEF_K3 * 8, 13);
     signal s_g6 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);     -- K6 Camera (glided)
-    signal c_cg : unsigned(5 downto 0) := to_unsigned(32, 6);            -- camera gain, Q4 (16 = x 1)
+    signal c_cg : unsigned(5 downto 0) := to_unsigned(40, 6);            -- camera gain, Q4 (16 = x 1)
+    signal c_cgw : unsigned(9 downto 0) := to_unsigned(512, 10);         -- K6 top +25 %: the old law in 1/256
     signal s_gp : unsigned(12 downto 0) := to_unsigned(C_DEF_P12 * 8, 13);
     signal s_gm : unsigned(12 downto 0) := (others => '0');
     signal s_gd : signed(14 downto 0) := (others => '0');
@@ -551,12 +554,16 @@ begin
             g_wm1 <= s_w - 1;
             -- K6 Camera gain law (Q4, 16 = x 1): k / 16 up to 512 (256 -> x 1 = v0.1.0, 512 -> x 2), then half
             -- the slope, (k + 512) / 32 (1023 -> x 2.94; x 4 left per-line ragged contours in flat picture areas)
+            -- K6 top +25 % (2026-11-15): the old law is formed in 1/256 (c_cgw = k, or (k + 512) / 2 past the knee;
+            -- old c_cg = c_cgw / 16), then c_cg = 1.25 x it (<= (767 + 191) / 16 = 59 of 63).  Downstream: lb x
+            -- c_cg <= 15045 (k_g2, 14 bits), F <= 2047 + 3767 (s8_f, 14-bit signed), G modulo 2^18 by design
             if s_g6(12) = '0' then
-                c_cg <= s_g6(12 downto 7);
+                c_cgw <= '0' & s_g6(11 downto 3);
             else
                 v_cg := resize(s_g6(12 downto 3), 11) + 512;
-                c_cg <= v_cg(10 downto 5);
+                c_cgw <= v_cg(10 downto 1);
             end if;
+            c_cg <= resize(shift_right(c_cgw + shift_right(c_cgw, 2), 4), 6);
             s_oys <= resize(shift_right(resize(s_ys, 19) * to_unsigned(121, 7), 8), 10);
             s_ncl2 <= f_ncl2(s_tid);
 

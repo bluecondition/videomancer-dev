@@ -25,9 +25,9 @@
 --   K5  Colour   the 16 shared palettes  [K6 camera pass: was K6; the old K5 Spread, the phase step per tile
 --                (square law, 0 .. 1/2 cycle), is fixed at its default 330]
 --   K6  Camera   how far the held source closes each tile's angle: linear gain, 0 = none (the black-input
---                picture), 25 % = the v0.1.0 strength (Video x6, white = 29 degrees), 50 % (default) = twice it,
---                100 % = four times (Osc keeps its 16 / 6 of the camera's gain).  Glided per field, applied to
---                the smeared sample by one 8 x 10 multiply (two 8 x 5 halves, then their sum) before the hold RAM
+--                picture), 20 % = the v0.1.0 strength (Video x6, white = 29 degrees), 100 % = five times
+--                (2026-11-15 +25 %; Osc keeps its 16 / 6 of the camera's gain).  Glided per field, applied to
+--                the smeared sample by one 8 x 11 multiply (8 x 5 and 8 x 6 halves, then their sum) before the hold RAM
 --   S7  Wave     Smooth / Snap
 --   S8  Field    Linear / Radial
 --   S9  Lattice  Square / Octagon
@@ -45,6 +45,7 @@
 -- One latency (C_LAT = 36) in every mode.  Colours in the hardware convention (u = Cr, v = Cb).
 
 -- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K5 = Colour (was K6); K5 Spread fixed at 330 (C_KFIX_5).
+-- 2026-11-15: K6 camera top +25 % (Ron)
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -165,7 +166,7 @@ architecture girih of program_top is
     -- K6 Camera: its own glide (Q3, 1/8 of the gap per field, +-4 deadband) and the source gain (x / 16)
     signal s_gk6 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);
     signal s_k6d : signed(14 downto 0) := (others => '0');
-    signal s_cm  : unsigned(9 downto 0) := to_unsigned(192, 10);
+    signal s_cm  : unsigned(10 downto 0) := to_unsigned(240, 11);   -- K6 top +25 %: 11 bits (Osc up to 1278)
     signal s_gd : signed(14 downto 0) := (others => '0');
     signal s_gr : unsigned(9 downto 0) := (others => '0');
     signal s_k4 : unsigned(9 downto 0) := to_unsigned(640, 10);
@@ -237,7 +238,8 @@ architecture girih of program_top is
     signal s_sav, s_savd, s_srow, s_wbank : std_logic := '0';
     signal s_ext : unsigned(5 downto 0) := (others => '0');
     signal s_y1 : unsigned(13 downto 0) := (others => '0');
-    signal s_ygl, s_ygh : unsigned(12 downto 0) := (others => '0');   -- smeared sample x K6 gain, two halves
+    signal s_ygl : unsigned(12 downto 0) := (others => '0');          -- smeared sample x K6 gain, two halves
+    signal s_ygh : unsigned(13 downto 0) := (others => '0');          -- (K6 top +25 %: high half 8 x 6)
     signal s_yg : unsigned(13 downto 0) := (others => '0');           -- the source term (14 bits per turn)
 
     -- [D] tile accumulators: line registers (the NEXT line's start values), pixel accumulators (stage 1)
@@ -369,7 +371,7 @@ begin
         variable v_b  : unsigned(25 downto 0);
         variable v_a27 : unsigned(26 downto 0);
         variable v_g9 : unsigned(16 downto 0);
-        variable v_a15 : unsigned(14 downto 0);
+        variable v_a16 : unsigned(15 downto 0);
         variable v_sy, v_0y, v_1y : unsigned(9 downto 0);
         variable v_sc, v_0c, v_1c : t_u8;
     begin
@@ -527,9 +529,12 @@ begin
                             s_k6d <= (others => '0');
                         end if;
                     when 12 => s_gk6 <= unsigned(signed(s_gk6) + s_k6d(12 downto 0));
+                    -- K6 top +25 % (2026-11-15): Video 15 K6 / 32 = (2 gk6 - gk6 / 8) / 32 (<= 479, was 3 K6 / 8),
+                    -- Osc 5 K6 / 4 = 5 gk6 / 32 (<= 1278, was K6); gk6 = 8 K6 (Q3), so both fit 16 bits
                     when 13 =>
-                        v_a15 := resize(s_gk6 & '0', 15) + resize(s_gk6, 15);
-                        if s_src = '1' then s_cm <= s_gk6(12 downto 3); else s_cm <= '0' & v_a15(14 downto 6); end if;
+                        if s_src = '1' then v_a16 := resize(s_gk6 & "00", 16) + resize(s_gk6, 16);
+                        else v_a16 := resize(s_gk6 & '0', 16) - resize(s_gk6(12 downto 3), 16); end if;
+                        s_cm <= v_a16(15 downto 5);
                     -- wave phase (last field's step): one adder, add or subtract
                     when 20 =>
                         v_b := resize(c_dph, 26);
@@ -765,7 +770,9 @@ begin
             -- / 16 -> the angle term in 14 bits per turn (max 223 x 1023 / 16 = 14258).  The hold RAM stores it,
             -- so the stored sample is the smear 2 px earlier than before (invisible: the smear is 64 px)
             s_ygl <= s_y1(13 downto 6) * s_cm(4 downto 0);
-            s_ygh <= s_y1(13 downto 6) * s_cm(9 downto 5);
+            s_ygh <= s_y1(13 downto 6) * s_cm(10 downto 5);
+            -- (K6 top +25 %: the Osc term can pass a full turn, 223 x 1278 / 16 = 17812; keeping 18 bits drops
+            -- whole turns only, and the angle's period is half a turn, so the wrap is seamless.  Video <= 6676.)
             v_g18 := resize(s_ygl, 18) + shift_left(resize(s_ygh, 18), 5);
             s_yg <= v_g18(17 downto 4);
         end if;

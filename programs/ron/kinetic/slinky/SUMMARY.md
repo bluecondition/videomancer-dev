@@ -163,3 +163,19 @@ arithmetic; no RAM reads the address it is writing (no_rw_check on all of them).
 - Only Scale and Extrude are glided; the path phase is 12 bits per cycle (about 1.4 px steps at full Depth).
 - SD shows the centre 4:3 of the 1920-wide canvas; the path's width is reduced to 3/4 there so the train stays
   on screen.
+
+## K6 top +25 % and default 100 % (2026-11-15)
+
+Ron: K6 now loads at 100 % (initial_value 1023, set with the version bump), and on bend / element programs the camera is 25 % stronger at the top of the knob (here x 1.25 at every position, 0 stays 0).
+
+- **Element-type** (borderline; the set brief counts all Kinetic programs as element-type): K6 recolours the drawn
+  copies by the camera luma (a window onto the camera inside every copy, contrast about luma 192).
+- Change (quasi-static): s_cgs = 1.25 s_cg / 2 in units of 1/32 (<= 158; the 9 x 8 multiply is unchanged); s_vg widened
+  to 12 bits (<= 2,365) through the delay-ring word, the coverage product (r8_vp, 12 bits) and the luma sum (13 bits,
+  the clamp at 1023 unchanged); the fill offset follows the gain, (g - 1) x 192 = 6 s_cgs - 192 (<= 756). Gain at 100 %
+  = 4.94 (was 3.97). Latency unchanged.
+- Look: `.kinetic_work/rb_slinky/k6b/k6b_cmp.png` (GHDL, bear, 720p60 / 4, glide snapped): the same picture with a
+  stronger camera inside the copy, but the copy also brightens overall (on the bear 35 % of the copy's pixels reach
+  white, was 25 %): that copy's fill was already floored at black, so the larger offset cannot subtract. A darker
+  camera or a lighter grade colour keeps closer to the intended contrast.
+- Build (2026-11-15, `.kinetic_work/tools/k6build.sh kinetic slinky`): **router1, seed 1 except HD HDMI seed 2**. Post-route Fmax HD Analog 84.93, SD Analog 78.49, HD HDMI 75.68, SD HDMI 83.88, HD Dual 75.46, SD Dual 86.99 MHz (worst HD 75.46); 7,232 / 7,680 LC (94.2 %). Not flashed.

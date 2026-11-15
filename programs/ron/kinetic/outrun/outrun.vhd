@@ -21,10 +21,10 @@
 --   K3  Horizon  horizon height, 25 % .. 75 % of the screen
 --   K4  Rate     flight / wave speed, bipolar, centre = still
 --   K5  Spread   wave cycles per cell, square law, 0 .. 1/2
---   K6  Camera   camera (and Osc) strength: the source field's gain g = K6 / 256 (0 = a black input,
---                1 = the v0.1.0 look at 25 %, 2 at the 50 % default, 4 at 100 %), glided, one 8 x 8
+--   K6  Camera   camera (and Osc) strength: the source field's gain g = 1.25 K6 / 256 (0 = a black input,
+--                1 = the v0.1.0 look at 20 %, 2.5 at 50 %, 5 at 100 %: the 2026-11-15 +25 %), glided, one 8 x 8
 --                multiply on the field at stage 9 (s9_g); lifts the terrain and tints the sky (the tint
---                centred on field value 96 above 25 %, so it gains contrast, not colour)
+--                centred on field value 96 above g = 1, so it gains contrast, not colour)
 --   S7  Wave     Smooth (sine) / Step (terraces)
 --   S8  Field    Linear / Radial
 --   S9  Space    Sky / Tunnel (mirrored ceiling)
@@ -46,6 +46,7 @@
 -- One latency (36) in every mode.  Colours in the hardware convention (u = Cr, v = Cb).
 
 -- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K2 = Colour (was K6); K2 Shape fixed at 341 (C_KFIX_2).
+-- 2026-11-15: K6 camera top +25 % (Ron)
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -215,8 +216,9 @@ architecture outrun of program_top is
     signal s_g1 : unsigned(12 downto 0) := to_unsigned(C_DEF_K1 * 8, 13);
     signal s_g2 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);   -- K6 camera pass: the K6 Camera glide (was Shape)
     signal s_cg : unsigned(7 downto 0) := to_unsigned(127, 8);         -- camera gain, 64 = 1 (the v0.1.0 strength)
-    signal s_cgx : unsigned(7 downto 0) := (others => '0');            -- gain above 1 (s_cg - 64, >= 0)
-    signal s_toff : unsigned(8 downto 0) := (others => '0');           -- the sky tint's offset, 1.5 s_cgx
+    signal s_cg5 : unsigned(7 downto 0) := to_unsigned(79, 8);         -- K6 top +25 %: 1.25 x gain, 32 = 1 (<= 158)
+    signal s_cgx : unsigned(7 downto 0) := (others => '0');            -- gain above 1 (s_cg5 - 32, >= 0)
+    signal s_toff : unsigned(8 downto 0) := (others => '0');           -- the sky tint's offset, 3 s_cgx
     signal s_g3 : unsigned(12 downto 0) := to_unsigned(C_DEF_K3 * 8, 13);
     signal s_g5 : unsigned(12 downto 0) := to_unsigned(C_DEF_K5 * 8, 13);
     signal s_gp : unsigned(12 downto 0) := to_unsigned(C_DEF_P12 * 8, 13);
@@ -365,8 +367,8 @@ architecture outrun of program_top is
     signal lb_we : std_logic := '0';
     signal lb_rc : unsigned(10 downto 0) := (others => '0');
     signal s8_q, s8_qp, s9_l : unsigned(7 downto 0) := (others => '0');
-    signal s9_g : unsigned(9 downto 0) := (others => '0');     -- K6 camera pass: the field x gain (one clock later)
-    signal s9_d : signed(10 downto 0) := (others => '0');      -- the field x gain less the tint offset
+    signal s9_g : unsigned(10 downto 0) := (others => '0');    -- K6 camera pass: the field x gain (one clock later; +25 %: 11 bits)
+    signal s9_d : signed(11 downto 0) := (others => '0');      -- the field x gain less the tint offset
     signal s9_t : unsigned(3 downto 0) := (others => '0');     -- and its sky-tint alpha (saturated)
 
     -- [E] blend
@@ -534,8 +536,11 @@ begin
             -- above 25 % the sky tint's extra gain is centred on field value 96 (about the mean of a picture):
             -- tint = (field x gain - (gain - 1) x 96) / 16, so the sky gains contrast at the v0.1.0 mean
             -- instead of flooding with colour A
-            if s_cg > 64 then s_cgx <= s_cg - 64; else s_cgx <= (others => '0'); end if;
-            s_toff <= resize(s_cgx, 9) + resize(shift_right(s_cgx, 1), 9);
+            -- K6 top +25 % (2026-11-15): the multiplier's gain is s_cg5 = 1.25 s_cg / 2 (units 1/32, <= 158, so
+            -- the multiply stays 8 x 8); the tint centre follows it: offset (g - 1) x 96 = 3 (s_cg5 - 32) <= 378
+            s_cg5 <= resize(shift_right(resize(s_cg, 9) + resize(s_cg(7 downto 2), 9), 1), 8);
+            if s_cg5 > 32 then s_cgx <= s_cg5 - 32; else s_cgx <= (others => '0'); end if;
+            s_toff <= resize(s_cgx, 9) + shift_left(resize(s_cgx, 9), 1);
             s_oys <= resize(shift_right(resize(s_ys, 19) * to_unsigned(121, 7), 8), 10);
 
             -- [B] shared glide (1/8 of the gap per field, +-2 deadband): four clocks per channel
@@ -967,7 +972,7 @@ begin
             s9_fw <= v_fw(21 downto 7);
             s9_neg <= s8_neg;
             -- 10: height = +-wave + source
-            if s_src = '1' then v_hs := '0' & s9_g & "00000"; else v_hs := "000" & s9_g & "000"; end if;   -- K6: x gain
+            if s_src = '1' then v_hs := s9_g & "00000"; else v_hs := "00" & s9_g & "000"; end if;   -- K6: x gain (mod one cell)
             s10_h <= signed(f_addsub(resize(v_hs, 16), resize(s9_fw, 16), s9_neg));
             -- 11: z' = z - h
             s11_zp <= l_zf - (unsigned(s10_h(11 downto 0)) & "00");
@@ -1079,11 +1084,11 @@ begin
             -- K6 camera pass: the camera gain, one 8 x 8 multiply in its own stage (the field then sits
             -- one pixel later: invisible on a 64-px box); the tint offset next, the tint alpha (0 .. 15)
             -- one stage on
-            v_p := s9_l * s_cg;
-            s9_g <= v_p(15 downto 6);
-            s9_d <= signed(resize(s9_g, 11)) - signed(resize(s_toff, 11));
+            v_p := s9_l * s_cg5;                                            -- (K6 top +25 %: / 32, <= 1259)
+            s9_g <= v_p(15 downto 5);
+            s9_d <= signed(resize(s9_g, 12)) - signed(resize(s_toff, 12));
             if s9_d < 0 then s9_t <= (others => '0');
-            elsif s9_d(9 downto 8) /= "00" then s9_t <= (others => '1');
+            elsif s9_d(10 downto 8) /= "000" then s9_t <= (others => '1');
             else s9_t <= unsigned(s9_d(7 downto 4)); end if;
         end if;
     end process p_src;
