@@ -1,5 +1,9 @@
 # Beacon — a candle flame and a hyperbolic bell keyed into blue bars
 
+**v0.6.3 (2026-11-15), K6 camera pass:** K6 is now Camera (gain on the camera, 25 % = the shipped
+strength, default 50 % = 2×); Halo moved to S10 (Edge / Close); Tear is fixed On; the white layer's green
+chroma wrap is fixed. See [K6 camera pass](#k6-camera-pass-2026-11-15).
+
 **v0.6.1 (2026-10-30): phase 2 round 2. A blue flame and beam against amber bars, and the camera warped into
 the flame; built (all six bitstreams hand-routed and packed), NOT flashed.** v0.6.0's re-seeded build was
 HW-checked: the pin-skew lines are gone. See
@@ -37,6 +41,50 @@ He also asked for the incoming video to be mapped into the flame, distorted to i
 | Video mapped into the flame, distorted to its shape | a 64 × 64 × 4-bit thumbnail of the camera (each texel the mean of 4 pixels, one row per 1/64 of the field) is warped into the flame: on every line the thumbnail's width spans the flame's width (32 texels per half-width; the width comes from a per-line table of the flame's half-width at gain 1 and a P12 curve), its height runs from the flame tip (ys 13) to the base (ys 440), and it follows P12's size and the sway. The flame's level is multiplied by (texel + 4) / 16, so bright parts of the picture blow out to white in the core and dark parts carve into the flame |
 | (follow-on) | the camera background outside the bell dropped from 3/4 to 1/2: with the blue palette it competed with the flame |
 
+
+## K6 camera pass (2026-11-15)
+
+Ron: K6 is the camera strength in every program, default 50 %. Beacon had no camera-strength control, so
+K6 is new (**v0.6.3**).
+
+- **What K6 does.** A gain on the camera luma right at the input, before the luma ring and the flame
+  texture capture, so all three camera uses follow it: the bell interior, the camera background
+  outside the bell (1/2) and the thumbnail warped into the flame. Three input stages: 8-bit luma above
+  black, × gain (quarters, an 8 × 4 product in its own stage), back over black and clipped. The ring and
+  the capture index by column, so nothing moves. In Osc, the same gain scales the photo's beam shading
+  D (stage 7, one 8 × 4 product), so K6 stays live; the **Photo preset now sets K6 to 25 %**, which is the
+  photo's shading exactly.
+- **Gain law.** The micro engine glides K6 in its old Halo slot (G6: 1/8 of the gap per field, hold
+  band −4..+3, snapped on the first field) and sends the gain in quarters on a new field port (OUT 37):
+  G6 / 64 below 50 % (0 .. 1.75×), 2 + (G6 − 512) / 512 above (2 .. 2.75×).
+  - 0 % = a black input: dark bell, no camera background, the flame dimmed to 5/16 by its black
+    thumbnail.
+  - 25 % = 1×, the shipped strength.
+  - 50 % = 2× (default): the camera fills the bell and shows bright behind the bars; the flame is
+    white-hot with the picture carved into it. Still reads as Beacon (the flame stays the brightest thing).
+  - 100 % = 2.75×: the camera's mid-tones clip to the blue-white top of the white layer.
+- **K6's old function.** Halo moved to **S10** (IN port 23, read by the field program instead of the
+  glided K6): Edge = the old K6 50 % (the photo), Close = the old K6 100 % (the ramps re-centre on the
+  tower and close in). Halo's lower half (−300 px of reach) did almost nothing on the sheet, so the two
+  states keep what mattered. The old **S10 Tear** was the weakest control (Tear On and Off are nearly the
+  same picture on the sheet) and is **fixed On** (the photo). Presets: Red Night and Night Falls had Halo
+  78 % / 88 %, now Halo Close.
+- **Micro program.** 509 / 512 words (+9): the CAMG block and `LD IN HALO`. ISS-checked: CAMG 0 / 4 / 8 /
+  10 / 11 at K6 0 / 256 / 512 / 768 / 1023; XEC 930 (Edge) / 1029 (Close).
+- **Fixed on the way: the white layer's chroma wrap.** The v0.6.1 white-layer ROM stores its chroma
+  halved and the RTL carries it in 8 signed bits, but the blue tint's halved Cb reached 157 for levels
+  58..110, so it wrapped negative: the camera's mid-tones and the flame's mid levels came out GREEN on the
+  RTL (the integer model doesn't wrap, so the model sheets looked right; v0.6.1 / v0.6.2 were never
+  simulated in RTL or flashed). `gen_hook.py` now caps the saturation at 127 / (0.35 · 448) = 0.81 of full
+  scale (hue kept); no RTL change.
+- **Fit.** The first cut (a fabric glide, Q.4 gains) packed to 7709 LC, over the chip. Moving the glide
+  into the micro engine and using quarter-step gains: 7541 LC (pack-only, HD Analog; v0.6.2 7422).
+- **Sheet:** `.heirloom_work/rb_beacon/k6/k6sheet.png` (selfie, 720p60 at decimation 1, because the line
+  program needs ~715 clocks and decimation 2 gives 704).
+- **Build (v0.6.3, 2026-11-15):** router1, **seed 1 on all six configs**. HD Analog 84.13, SD Analog
+  87.75, HD HDMI 85.93, SD HDMI 81.01, HD Dual 80.44, SD Dual 82.45 MHz (worst HD 80.44). 7549-7580 /
+  7680 LC (98.7 %), 29 / 32 EBR. The HD HDMI pin-skew placement was not screened for this netlist; if HD
+  HDMI shows the hsync red lines again, re-screen router2 seeds as in v0.6.0 / v0.6.1. **Not flashed.**
 
 ## Reading of the photo (measured)
 The work is in `.heirloom_work/rb_beacon/` (notes.md):
@@ -117,17 +165,18 @@ draw ")" arcs.
 | K3 Dusk | the fade of the blue around the light | 50 % → 0 %: the blue closes in on the tower (full lift outside a squeeze radius that shrinks onto the tower outline); 50 % → 100 %: the dark deepens (−0.6) |
 | K4 Speed | motion | bipolar, still in the centre ±8: the bars roll down (up below centre), 1.4 lines/field at the default, and swell in a travelling wave whose depth rises with \|speed\| (0 → 0.9); the flicker and sway rates rise with \|speed\| |
 | K5 Beam | the bell and cone | hyperbola spread ×0.35 → ×2.83; the left wing cone follows it |
-| K6 Halo | the white ramps at the screen sides | reach −300 → +723 px; above 50 % the ramps re-centre on the tower and close in on it |
+| K6 Camera | the camera (v0.6.3, K6 camera pass) | a gain on the camera luma (bell interior, background, flame texture) and, in Osc, on the photo's beam shading: 0 % = a black input, 25 % = the shipped strength, 50 % = 2×, 100 % = 2.75× |
 | S7 Bands | the stripe zone | Stripes (photo) / Solid (the zone becomes one blue band) |
 | S8 Bell | the bell interior | Solid (photo) / Outline (only the outline, the neck and the flame) |
 | S9 Palette | the colours | Blue (v0.6.1: a blue flame, beam and halo against amber bars) / Ember (crimson bars, warm white) |
-| S10 Tear | ragged fade edges, tracking lines, line noise | On (photo) / Off (clean) |
+| S10 Halo | the white ramps at the screen sides | (v0.6.3, was K6) Edge = the old K6 50 % (the photo) / Close = the old K6 100 %: the ramps re-centre on the tower and close in on it. The old S10 Tear (ragged fade edges, tracking lines, line noise) is fixed On |
 | S11 Source | the beam interior, the flame | Video (default: the camera fills the bell and cone at full contrast, shows at 1/2 through the dark outside the bell, and a 64 × 64 thumbnail of it is warped into the flame) / Osc (the photo's shading, a plain flame) |
 | P12 Flame | the flame (headline) | 0 % = a small ember (gain .15, height .55); 40 % = the photo; 100 % = a towering flame (gain 2.4, height 1.8, wider glow) burning through the bars |
 
 Defaults: K1–K3, K5, K6 at 512; K4 at 635; P12 at 410; all switches at label 0.
-Presets: Photo (Source = Osc), Small Flame, Blaze, Wire Beam (Bell Outline, wide beam), Red Night,
-Night Falls (Dusk 0, Halo 88 %), Swell (Speed 98 %, Bars 68 %).
+Presets: Photo (Source = Osc, Camera 25 % so the Osc shading is the photo's), Small Flame, Blaze, Wire
+Beam (Bell Outline, wide beam), Red Night (Halo Close), Night Falls (Dusk 0, Halo Close), Swell (Speed
+98 %, Bars 68 %).
 
 ## Video
 The photo's beam is an oscillator shading (the D valley), so the camera replaces that shading. The

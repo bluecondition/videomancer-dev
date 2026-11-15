@@ -1,12 +1,14 @@
 # Cathode - Heirloom #23 (rebuilt 2026-10-27), from WIN_20230407_23_48_05.
 # A sample-and-hold colour mosaic (cyclic green / pink / yellow / mint colourizer, phase ramping down
 # every column) with two purple three-tube flames keyed over it.  See cathode.vhd and SUMMARY.md.
+# v0.6.3 (2026-11-15) K6 camera pass: K6 = Camera (gain on the camera luma, 25 % = the shipped strength);
+# K6's old Patch moved to S7 as RGB / BGR; the old S7 Fringe is fixed at Blue.
 
 [program]
 processing_delay_clks = 24
 program_id = "com.czartroniks.cathode"
 program_name = "Cathode"
-program_version = "0.6.2"
+program_version = "0.6.3"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -68,15 +70,19 @@ suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
-name_label = "Patch"
-value_labels = ["RGB", "RBG", "GRB", "GBR", "BRG", "BGR"]
-initial_value_label = "RGB"
+name_label = "Camera"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
-name_label = "Fringe"
-value_labels = ["Blue", "Off"]
-initial_value_label = "Blue"
+name_label = "Patch"
+value_labels = ["RGB", "BGR"]
+initial_value_label = "RGB"
 
 [[parameter]]
 parameter_id = "toggle_switch_8"
@@ -127,7 +133,7 @@ rotary_potentiometer_5 = 180
 
 [[preset]]
 name = "Embers"
-rotary_potentiometer_6 = 900
+toggle_switch_7 = 1
 linear_potentiometer_12 = 300
 rotary_potentiometer_1 = 700
 

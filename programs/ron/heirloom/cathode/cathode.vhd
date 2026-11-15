@@ -32,8 +32,9 @@
 --   K3  Cycle   column-ramp gain 0 .. 3x (1x = the photo)
 --   K4  Speed   bipolar (still in the centre): the ramps roll, cells re-roll, flames writhe
 --   K5  Flames  flames across, 1 .. 4 (2.03 = the photo)
---   K6  Patch   RGB cable patch: RGB / RBG / GRB / GBR / BRG / BGR
---   S7  Fringe  Blue / Off
+--   K6  Camera  camera strength: 0 = a black input .. 25 % the shipped gain .. 50 % 1.53x .. 100 % 1.97x
+--   S7  Patch   RGB cable patch: RGB (the photo) / BGR (red flames on a cyan mosaic)
+--               (the old S7 Fringe is fixed at Blue)
 --   S8  Glow    On (dark-green halo) / Off (hard key)
 --   S9  Core    On / Off (the teardrop)
 --   S10 Flip    Down / Up
@@ -45,6 +46,10 @@
 -- ([1 2 1] luma, [1 2 2 2 2 2 2 2 1]/16 chroma, luma 13/16); blanking gate.  Latency 24
 -- clocks in every mode.  Colours: u = Cr, v = Cb (hardware convention).
 
+-- K6 camera pass 2026-11-15 (v0.6.3): K6 = Camera (new), a gain on the camera luma L8 that feeds the
+-- mosaic's red bit, the tubes' red and the flame warp alike (0 % = a black input, 25 % = the shipped
+-- 0.297 per level, 50 % = 1.53x, the strongest clean level, 100 % = 1.97x).  K6's old six-way Patch
+-- moved to S7 as RGB / BGR (the photo / the Embers preset); the old S7 Fringe is fixed at Blue.
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -146,12 +151,14 @@ architecture cathode of program_top is
     signal s_hcnt, s_wmax, s_w : unsigned(11 downto 0) := to_unsigned(1920, 12);
 
     -- glided knobs (10.3), switches
-    signal g1, g2, g12 : unsigned(12 downto 0) := (others => '0');
+    signal g1, g2, g12, g6 : unsigned(12 downto 0) := (others => '0');
     signal k1v, k2v, k3v, k5v, p12v : unsigned(9 downto 0) := (others => '0');
     signal s_sp : signed(10 downto 0) := (others => '0');
     signal s_asp : unsigned(9 downto 0) := (others => '0');
-    signal s_patch : unsigned(2 downto 0) := (others => '0');
-    signal s_nofr, s_hard, s_nocore, s_flip, s_osc : std_logic := '0';
+    signal s_bgr : std_logic := '0';                                   -- S7 Patch: BGR
+    constant s_nofr : std_logic := '0';                                 -- K6 camera pass: Fringe fixed Blue
+    signal s_hard, s_nocore, s_flip, s_osc : std_logic := '0';
+    signal s_cgq : unsigned(7 downto 0) := to_unsigned(152, 8);          -- K6 camera gain, x/64 on luma/4 (76 = 1x)
     signal s_warm : std_logic := '0';
 
     -- per-field state
@@ -252,8 +259,8 @@ architecture cathode of program_top is
     signal b_fx2 : unsigned(11 downto 0) := (others => '0');
 
     -- video luma
-    signal v_y1 : unsigned(9 downto 0) := to_unsigned(64, 10);
     signal v_d2 : unsigned(9 downto 0) := (others => '0');
+    signal v_lm : unsigned(15 downto 0) := (others => '0');
     signal v_l3, v_l4, v_l5 : unsigned(7 downto 0) := (others => '0');
     signal s_hold : unsigned(7 downto 0) := x"80";
     signal s_avg : unsigned(15 downto 0) := x"8000";
@@ -391,6 +398,7 @@ begin
         variable v_sy : unsigned(10 downto 0);
         variable v_x : signed(12 downto 0);
         variable v_c16 : unsigned(15 downto 0);
+        variable v_cg : unsigned(9 downto 0);
         procedure glide(signal g : inout unsigned(12 downto 0); k : std_logic_vector(9 downto 0); w : std_logic) is
             variable d : signed(14 downto 0);
             variable n : signed(14 downto 0);
@@ -429,6 +437,18 @@ begin
             end if;
 
             k1v <= g1(12 downto 3); k2v <= g2(12 downto 3); p12v <= g12(12 downto 3);
+            -- K6 camera gain on L8 (x/64 on luma/4, 76 = 1x, the shipped gain): 0.297 k up to 25 % (1x), then
+            -- 76 + 0.156 (k - 256) to 50 % (116 = 1.53x, the strongest that stays clean: 2x shreds the flame
+            -- edges into noise over busy pictures), then 116 + 0.07 (k - 512) to 100 % (150 = 1.97x)
+            case g6(12 downto 11) is
+                when "00" =>
+                    v_cg := resize(g6(10 downto 5), 10) + resize(g6(10 downto 8), 10) + resize(g6(10 downto 9), 10);
+                when "01" =>
+                    v_cg := to_unsigned(76, 10) + resize(g6(10 downto 6), 10) + resize(g6(10 downto 8), 10);
+                when others =>
+                    v_cg := to_unsigned(116, 10) + resize(g6(11 downto 7), 10) + resize(g6(11 downto 10), 10);
+            end case;
+            s_cgq <= v_cg(7 downto 0);
             g_wm1 <= s_w - 1;
             s_linit <= '0';
 
@@ -443,14 +463,9 @@ begin
                 if v_s > -8 and v_s < 8 then v_s := (others => '0'); end if;
                 s_sp <= v_s;
                 if v_s < 0 then s_asp <= unsigned(resize(-v_s, 10)); else s_asp <= unsigned(v_s(9 downto 0)); end if;
-                -- K6 patch: (k6 * 3) >> 9 -> 0..5
-                v_t := resize(unsigned(registers_in(5)), 13) + resize(unsigned(registers_in(5)) & '0', 13);
-                if unsigned(registers_in(5)) < 6 then            -- a labelled default arrives as its index
-                    s_patch <= unsigned(registers_in(5)(2 downto 0));
-                else
-                    s_patch <= v_t(11 downto 9);
-                end if;
-                s_nofr   <= registers_in(6)(0);
+                -- K6 Camera (glided); S7 Patch RGB / BGR
+                glide(g6, registers_in(5), s_warm);
+                s_bgr    <= registers_in(6)(0);
                 s_hard   <= registers_in(6)(1);
                 s_nocore <= registers_in(6)(2);
                 s_flip   <= registers_in(6)(3);
@@ -901,15 +916,15 @@ begin
     -- Video luma (L8 = 0..255 over black .. white) and its running mean
     ---------------------------------------------------------------------------
     p_vid : process(clk)
-        variable v_l : unsigned(10 downto 0);
         variable v_t : signed(9 downto 0);
         variable v_g1, v_g0 : signed(11 downto 0);
     begin
         if rising_edge(clk) then
-            v_y1 <= unsigned(data_in.y);
-            if v_y1 > 64 then v_d2 <= v_y1 - 64; else v_d2 <= (others => '0'); end if;
-            v_l := resize(v_d2(9 downto 2), 11) + resize(v_d2(9 downto 5), 11) + resize(v_d2(9 downto 6), 11);
-            if v_l > 255 then v_l3 <= (others => '1'); else v_l3 <= v_l(7 downto 0); end if;
+            -- L8 = clip(((y - 64) / 4) x K6 gain / 64): the input register is folded into the subtract so
+            -- the multiply stage keeps the camera's depth (shipped: (y - 64) x 0.297 by shift-adds)
+            if unsigned(data_in.y) > 64 then v_d2 <= unsigned(data_in.y) - 64; else v_d2 <= (others => '0'); end if;
+            v_lm <= v_d2(9 downto 2) * s_cgq;
+            if v_lm(15 downto 14) /= "00" then v_l3 <= (others => '1'); else v_l3 <= v_lm(13 downto 6); end if;
             v_l4 <= v_l3; v_l5 <= v_l4;
             -- mean of the cell samples: avg += (L << 8 - avg) / 1024
             s_adv <= s_cwe;
@@ -1185,14 +1200,11 @@ begin
             else
                 v_o(0) := p_mr13; v_o(1) := p_g13; v_o(2) := p_b13;
             end if;
-            case to_integer(s_patch) is
-                when 1      => p_o14(0) <= v_o(0); p_o14(1) <= v_o(2); p_o14(2) <= v_o(1);
-                when 2      => p_o14(0) <= v_o(1); p_o14(1) <= v_o(0); p_o14(2) <= v_o(2);
-                when 3      => p_o14(0) <= v_o(1); p_o14(1) <= v_o(2); p_o14(2) <= v_o(0);
-                when 4      => p_o14(0) <= v_o(2); p_o14(1) <= v_o(0); p_o14(2) <= v_o(1);
-                when 5      => p_o14(0) <= v_o(2); p_o14(1) <= v_o(1); p_o14(2) <= v_o(0);
-                when others => p_o14 <= v_o;
-            end case;
+            if s_bgr = '1' then
+                p_o14(0) <= v_o(2); p_o14(1) <= v_o(1); p_o14(2) <= v_o(0);
+            else
+                p_o14 <= v_o;
+            end if;
 
             -- 15..17: RGB -> 10-bit YUV (u = Cr, v = Cb), Q6, luma pre-boosted 16/13:
             -- Y = 64 + (81 R + 159 G + 31 B) / 64, Cr = 512 + (113 R - 94 G - 18 B) / 64,

@@ -1,5 +1,9 @@
 # Cathode — a cycling S&H colour mosaic with three-tube purple flames
 
+**v0.6.3 (2026-11-15), K6 camera pass:** K6 is now Camera (gain on the camera, 25 % = the shipped
+strength, default 50 % = 1.53×); Patch moved to S7 as RGB / BGR; Fringe is fixed at Blue. See
+[K6 camera pass](#k6-camera-pass-2026-11-15).
+
 **v0.6.1 (2026-10-31, phase 2 round 1): built, NOT flashed** (see [Phase 2](#phase-2)).
 v0.5.0 (2026-10-27) was the rebuild from the photo. Heirloom #23, from
 `photos/WIN_20230407_23_48_05_Pro.jpg`. The v0.1.0 version (posterized video plus two parabolic
@@ -104,15 +108,15 @@ peaks at 0.57 at the teardrop centre and is about 0.4 in the body and 0.36 in th
 | K3 Cycle | the colours cycling down each column | ramp gain 0 → 3× (1× at 342). 0 = every column one flat colour |
 | K4 Speed | motion | bipolar, still in the centre ±8: column colours roll down/up, noisy cells re-roll, the flames writhe (tube waves at 0.75 / 1 / 0.625 × speed, travelling base → tip; tip → base when turned left) and their tips lick |
 | K5 Flames | the two flames | flames across, 1 → 4 (2.03 at 351) |
-| K6 Patch | the whole palette | RGB cable patch: RGB (photo) / RBG / GRB / GBR / BRG / BGR. A labelled default (index < 6) is read as its index |
-| S7 Fringe | the blue spike on green cells | Blue (photo) / Off |
+| K6 Camera | the camera (v0.6.3, K6 camera pass) | a gain on the camera luma that feeds the mosaic's red bit, the tubes' red and the flame warp: 0 % = a black input, 25 % = the shipped strength, 50 % = 1.53× (the strongest that stays clean), 100 % = 1.97× (see [K6 camera pass](#k6-camera-pass-2026-11-15)) |
+| S7 Patch | the whole palette | (v0.6.3, was K6) RGB cable patch: RGB (photo) / BGR (red flames on a cyan mosaic, the old Embers preset). The old S7 Fringe (the blue spike on green cells) is fixed at Blue |
 | S8 Glow | the dark-green halo | On (photo) / Off (hard 4-px key edge) |
 | S9 Core | the teardrop tube | On (photo) / Off |
 | S10 Flip | the flames' direction | Down (photo) / Up |
 | S11 Source | the mosaic's red bit, the tubes' red, the flames' shape | Video (default): the camera also bends the flames (below) / Osc: the flames run on their own waves only |
 | P12 Flames | the flames (headline) | 0 % = short stubs at the top (×0.35 length, ×0.75 width, barely writhing); 50 % = the photo's flames, writhing up to ~73 px; 100 % = two tall purple pillars (×2.2, ×1.25) writhing like tentacles (up to ~135 px), with the mosaic only between them |
 
-Defaults: K1 487, K2 502, K3 342, K4 600, K5 351, labelled switches and K6 at label 0, P12 512.
+Defaults: K1 487, K2 502, K3 342, K4 600, K5 351, K6 512 (v0.6.3), labelled switches at label 0, P12 512.
 
 ## Video
 The photo's mosaic is synthetic: per-column ramps no camera scene would produce. So the camera is
@@ -227,6 +231,44 @@ video. Until now the camera only coloured them (the tubes' red).
   - a 32-px low-pass, which smears;
   - twice the gain, which shreds the flames over busy textures.
 - **Fit.** 7387 LC (96 %).
+
+## K6 camera pass (2026-11-15)
+
+Ron: K6 is the camera strength in every program, default 50 %. Cathode had no camera-strength control,
+so K6 is new (**v0.6.3**).
+
+- **What K6 does.** A gain on the camera luma L8 at the input, so all three camera uses follow it: the
+  mosaic's red bit (cell luma against its running mean; a stronger camera leaves fewer in-between
+  cells), the tubes' red (the purple duotone picture inside the flames) and the flame warp (low-passed
+  luma minus the mean, pushing the tube outlines). The input register is folded into the black
+  subtract, so the new 8 × 8 product stage keeps the camera at its old depth (no shift). In Osc the
+  program has no camera term (hashed red-bit noise and generated tube tents), so K6 does nothing there.
+- **Gain law.** K6 is glided with the program's own glide (1/8 of the gap per field, deadband 4,
+  snapped on the first field). In 64ths on luma / 4 (76 = 1×): 0.297 k to 25 %, then 76 + 0.156 (k − 256)
+  to 50 %, then 116 + 0.07 (k − 512) to 100 %.
+  - 0 % = a black input: pure blue tubes, no warp, the mosaic's camera bit flat.
+  - 25 % = 1×, the shipped strength.
+  - 50 % = 1.53× (default), **not 2×**: on the selfie, 1.75× starts to break the flame gaps into noise
+    blocks and 2× shreds the flame edges and turns the frame into a magenta mess (the v0.6.1 notes
+    found the same for a doubled warp). 1.5× is as clean as the shipped look, with redder tubes and more
+    of the picture in the mosaic.
+  - 100 % = 1.97×: the bold end, ragged flames and a magenta-heavy picture. 3.4× washed everything
+    magenta, so the top is capped near 2×.
+- **K6's old function.** Patch (six RGB permutations) moved to **S7** as **RGB / BGR** (the photo / the old
+  Embers preset's red flames on a cyan mosaic). A switch holds two of the six; the other four (RBG, GRB,
+  GBR, BRG) are gone. The old **S7 Fringe** was the weakest control (Blue and Off are nearly the same
+  picture on the sheet) and is **fixed at Blue** (the photo). The Embers preset now sets S7 = BGR.
+- **Fit.** 7482 LC pack-only on HD Analog (v0.6.2: 7389): the product stage and K6 glide, less the
+  six-way patch mux.
+- **Sheet:** `.heirloom_work/rb_cathode/k6/k6sheet.png` (selfie, 720p60 at decimation 2, which shows the
+  top-left quarter of the canvas at the real pixel scale). The first law's renders are kept as
+  `k6_v512_law1_2x.png` and `k6_v1023_law1_3.4x.png`, with `k6_v320.png` / `k6_v384.png` /
+  `k6_v448.png` at 1.25× / 1.5× / 1.75×.
+- **Build (v0.6.3, 2026-11-15):** router1. HD Analog s1 90.88, SD Analog s1 85.97, HD HDMI s1 88.48,
+  SD HDMI s1 89.37, **HD Dual s2** 90.07 (seed 1 stalled router1 into the make timeout), SD Dual s1 89.37
+  MHz (worst HD 88.48). 7506-7537 / 7680 LC (98 %), 2 / 32 EBR. The earlier hand-installed pin-skew HD
+  seeds are gone (new netlist); if HD HDMI shows the hsync red lines, re-screen seeds as in v0.6.1.
+  **Not flashed.**
 
 ## Status
 - **v0.6.2 built 2026-11-01: output-filter resync fix, NOT flashed.** The output running-sum filters now take neutral input off the generated avid and snap back to neutral once the box is full of blank samples, so a glitched block-RAM / clock sample can no longer leave a permanent wrapped colour offset (fern_diag hardware capture 2026-11-01). Post-route Fmax: HD Analog s1 81.93, SD Analog s1 77.90, HD HDMI s1 79.45, SD HDMI s1 77.74, HD Dual s1 76.58, SD Dual s1 79.23 MHz; 7363-7394 / 7680 LC. Earlier hand-installed HD seeds are gone (new netlist).

@@ -1,12 +1,14 @@
 # Beacon - Heirloom #26, rebuilt 2026-10-27 from WIN_20230424_23_53_49; phase 2 v0.6.0 2026-10-29.
 # A candle flame over a hyperbolic bell and cone, keyed into blue/black bars that fade
 # around the light. See beacon.vhd and SUMMARY.md.
+# v0.6.3 (2026-11-15) K6 camera pass: K6 = Camera (gain on the camera luma, 25 % = the shipped strength);
+# K6's old Halo moved to S10 (Edge = the old 50 %, Close = the old 100 %); the old S10 Tear is fixed On.
 
 [program]
 processing_delay_clks = 28
 program_id = "com.czartroniks.beacon"
 program_name = "Beacon"
-program_version = "0.6.2"
+program_version = "0.6.3"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -68,7 +70,7 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
-name_label = "Halo"
+name_label = "Camera"
 control_mode = "linear"
 display_min_value = 0
 display_max_value = 100
@@ -96,9 +98,9 @@ initial_value_label = "Blue"
 
 [[parameter]]
 parameter_id = "toggle_switch_10"
-name_label = "Tear"
-value_labels = ["On", "Off"]
-initial_value_label = "On"
+name_label = "Halo"
+value_labels = ["Edge", "Close"]
+initial_value_label = "Edge"
 
 [[parameter]]
 parameter_id = "toggle_switch_11"
@@ -119,6 +121,7 @@ suffix_label = "%"
 [[preset]]
 name = "Photo"
 toggle_switch_11 = 1
+rotary_potentiometer_6 = 256
 
 [[preset]]
 name = "Small Flame"
@@ -137,13 +140,13 @@ rotary_potentiometer_5 = 700
 [[preset]]
 name = "Red Night"
 toggle_switch_9 = 1
+toggle_switch_10 = 1
 rotary_potentiometer_3 = 700
-rotary_potentiometer_6 = 800
 
 [[preset]]
 name = "Night Falls"
+toggle_switch_10 = 1
 rotary_potentiometer_3 = 0
-rotary_potentiometer_6 = 900
 
 [[preset]]
 name = "Swell"

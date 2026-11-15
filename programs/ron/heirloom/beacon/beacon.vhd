@@ -5,6 +5,13 @@
 -- ranges, the flame centred on the tower, Dusk squeeze, Speed swell, more video; v0.6.1:
 -- a blue flame and beam against amber bars, the camera warped into the flame).
 --
+-- K6 camera pass 2026-11-15 (v0.6.3): K6 = Camera (new): a gain on the camera luma before the luma
+-- ring and the flame-texture capture, so the bell interior, the background and the flame texture all
+-- follow it; 0 % = a black input, 25 % = the shipped strength, 50 % = 2x, 100 % = 2.75x.  In Osc it
+-- scales the photo's D shading of the beam the same way (the Photo preset sets K6 to 25 %).  The micro
+-- engine glides K6 (its old Halo slot) and sends the gain in quarters on OUT port 37.  K6's old Halo
+-- moved to S10 (IN port 23: Edge = the old 50 %, Close = the old 100 %); the old S10 Tear is fixed On.
+--
 -- The photo is two layers keyed together:
 --   * a white layer (grey-green in the mid tones): a candle flame (an
 --     asymmetric tent, 2.4 / 2.0 per px, on a peak profile with a pointed
@@ -42,12 +49,12 @@
 --   K4  Speed    bipolar: the bars roll and swell in a travelling wave whose depth
 --                follows |speed|; the flame flickers faster
 --   K5  Beam     the bell / cone spread, x0.35 .. x2.83 (the wing cone follows it)
---   K6  Halo     reach of the white ramps at the screen sides; at 100 % they close
---                in on the tower
+--   K6  Camera   camera strength: 0 = a black input .. 25 % the shipped gain .. 50 % 2x .. 100 % 2.75x
 --   S7  Bands    Stripes (the photo) / Solid bands
 --   S8  Bell     Solid / Outline (the bell drawn as its outline only)
 --   S9  Palette  Blue (a blue flame, beam and halo against amber bars) / Ember (red bars, warm white)
---   S10 Tear     ragged fade edges and tracking lines on / clean
+--   S10 Halo     the white ramps at the screen sides: Edge (the photo) / Close (they close in on the tower)
+--                (Tear, the ragged fade edges and tracking lines, is fixed On)
 --   S11 Source   Video (the camera fills the beam, shows through the dark outside the
 --                tower, and a 64 x 64 thumbnail of it is warped into the flame) / Osc
 --   P12 Flame    0 = a small ember .. 40 % = the photo .. 100 % a towering
@@ -178,7 +185,14 @@ architecture beacon of program_top is
     signal s_zc : unsigned(9 downto 0) := (others => '0');
     signal s_avq : std_logic := '0';
     signal s_hcnt, s_wmax, s_w : unsigned(11 downto 0) := to_unsigned(1920, 12);
-    signal s_stripes, s_outline, s_ember, s_tear, s_osc : std_logic := '0';
+    signal s_stripes, s_outline, s_ember, s_osc : std_logic := '0';
+    signal s_tear : std_logic := '1';                                -- K6 camera pass: Tear fixed On
+    -- K6 camera gain in quarters (from the micro engine, OUT 37), and the three input stages
+    signal f_cg  : unsigned(3 downto 0) := to_unsigned(8, 4);
+    signal s_cd8 : unsigned(7 downto 0) := (others => '0');
+    signal s_cm  : unsigned(11 downto 0) := (others => '0');
+    signal s_cy8 : unsigned(7 downto 0) := x"10";
+    signal s_ca1, s_ca2, s_ca3 : std_logic := '0';
     signal s_sx, s_sv : unsigned(5 downto 0) := to_unsigned(16, 6);
     signal s_xv0 : signed(16 downto 0) := to_signed(-16480, 17);   -- shape x origin: the tower (flame and bell) axis
     signal s_xdp : unsigned(7 downto 0) := to_unsigned(146, 8);
@@ -306,6 +320,7 @@ architecture beacon of program_top is
     signal p4_tt, p4_dw, p4_hcl, p4_c5 : signed(12 downto 0) := (others => '0');
     signal s_hw5 : signed(12 downto 0) := (others => '0');          -- HW + 5 (static over the line)
     signal p4_d8 : unsigned(7 downto 0) := (others => '0');
+    signal p7_dm : unsigned(11 downto 0) := (others => '0');          -- Osc D shading x K6 gain (Q.2)
     signal p4_dr : signed(12 downto 0) := (others => '0');          -- |x - axis| - squeeze radius
     signal p4_egm : unsigned(11 downto 0) := (others => '0');
     signal p4_flm : unsigned(7 downto 0) := (others => '0');
@@ -481,7 +496,7 @@ begin
                 s_stripes <= not registers_in(6)(0);
                 s_outline <= registers_in(6)(1);
                 s_ember   <= registers_in(6)(2);
-                s_tear    <= not registers_in(6)(3);
+                s_tear    <= '1';                      -- K6 camera pass: Tear fixed On (S10 is Halo)
                 s_osc     <= registers_in(6)(4);
                 case to_integer(s_vx) is
                     -- shape x is measured from the tower axis (the flame sits on the bell's axis);
@@ -548,21 +563,33 @@ begin
     -- Source side: the camera luma ring (Video mode)
     ---------------------------------------------------------------------------
     p_src : process(clk)
+        variable v_c : unsigned(9 downto 0);
     begin
         if rising_edge(clk) then
-            s_lu_we <= data_in.avid;
+            -- K6 camera gain (3 stages; the ring and the capture index by column, so nothing moves):
+            -- 8-bit luma above black, x gain (quarters), back over black and clipped
+            if unsigned(data_in.y(9 downto 2)) > 16 then s_cd8 <= unsigned(data_in.y(9 downto 2)) - 16;
+            else s_cd8 <= (others => '0'); end if;
+            s_ca1 <= data_in.avid;
+            s_cm <= s_cd8 * f_cg;
+            s_ca2 <= s_ca1;
+            v_c := s_cm(11 downto 2) + 16;
+            if v_c > 255 then s_cy8 <= (others => '1'); else s_cy8 <= v_c(7 downto 0); end if;
+            s_ca3 <= s_ca2;
+
+            s_lu_we <= s_ca3;
             s_lu_wa <= s_wcol;
-            s_lu_wd <= data_in.y(9 downto 2);
-            if data_in.avid = '1' then s_wcol <= s_wcol + 1; else s_wcol <= (others => '0'); end if;
+            s_lu_wd <= std_logic_vector(s_cy8);
+            if s_ca3 = '1' then s_wcol <= s_wcol + 1; else s_wcol <= (others => '0'); end if;
 
             -- flame texture capture: each texel is the mean of the first 4 pixels of its 1/64 of the
             -- line; one row per 1/64 of the field (every line of the band rewrites it, the last wins)
-            s_tav <= data_in.avid;
-            if data_in.avid = '1' then
+            s_tav <= s_ca3;
+            if s_ca3 = '1' then
                 s_tcc <= s_tcc + s_tcs;
                 s_tcd <= s_tcc(15 downto 10);
                 if s_tcc(15 downto 10) /= s_tcd then
-                    s_tbs <= resize(unsigned(data_in.y(9 downto 4)), 8); s_tbc <= "01";
+                    s_tbs <= resize(s_cy8(7 downto 2), 8); s_tbc <= "01";
                 elsif s_tbc /= "00" then
                     s_tbs <= s_tsum; s_tbc <= s_tbc + 1;
                 end if;
@@ -574,8 +601,8 @@ begin
         end if;
     end process p_src;
     -- the 4th sample of a texel column completes it: write {row, column} straight from the sum
-    s_tsum <= s_tbs + unsigned(data_in.y(9 downto 4));
-    s_tw_e <= '1' when data_in.avid = '1' and s_tcc(15 downto 10) = s_tcd and s_tbc = "11" and s_trc(16) = '0' else '0';
+    s_tsum <= s_tbs + resize(s_cy8(7 downto 2), 8);
+    s_tw_e <= '1' when s_ca3 = '1' and s_tcc(15 downto 10) = s_tcd and s_tbc = "11" and s_trc(16) = '0' else '0';
     s_tw_a <= s_trc(15 downto 10) & s_tcd;
     s_tw_d <= std_logic_vector(s_tsum(7 downto 4));
     ---------------------------------------------------------------------------
@@ -694,6 +721,7 @@ begin
                     when 9  => s_d3n <= o_d(8 downto 0);
                     when 10 => s_d3p <= unsigned(o_d(7 downto 0));
                     when 11 => s_tl <= unsigned(o_d(5 downto 0));
+                    when 37 => f_cg <= unsigned(o_d(3 downto 0));         -- K6 camera gain (quarters)
                     when 12 => n_a <= o_d(0);       -- (ports 12 .. 36 also go to the staging RAM)
                     when 41 => u_ix <= unsigned(o_d(7 downto 0));
                     when 40 =>
@@ -739,7 +767,7 @@ begin
                     when 1  => v_in := signed(resize(unsigned(registers_in(1)), 24));
                     when 2  => v_in := signed(resize(unsigned(registers_in(2)), 24));
                     when 3  => v_in := signed(resize(unsigned(registers_in(4)), 24));
-                    when 4  => v_in := signed(resize(unsigned(registers_in(5)), 24));
+                    when 4  => v_in := signed(resize(unsigned(registers_in(5)), 24));   -- K6 Camera (glided as G6)
                     when 5  => v_in := signed(resize(unsigned(registers_in(7)), 24));
                     when 6  => v_in := signed(resize(s_sy, 24));
                     when 7  => v_in := signed(resize(s_sx, 24));
@@ -757,6 +785,8 @@ begin
                     when 20 => if s_stripes = '1' then v_in := (others => '0'); else v_in := to_signed(1, 24); end if;
                     when 21 => v_in := signed(resize(e_lfsr, 24));
                     when 22 => v_in := signed(resize(unsigned(s_pk_q(15 downto 9)), 24));
+                    when 23 =>   -- S10 Halo (K6 camera pass): Edge = 512, Close = 1023
+                        if registers_in(6)(3) = '1' then v_in := to_signed(1023, 24); else v_in := to_signed(512, 24); end if;
                     when others => v_in := (others => '0');
                 end case;
                 case u_ir(27 downto 26) is
@@ -1132,6 +1162,7 @@ begin
             p7_gau <= to_unsigned(C_GAUSS(to_integer(p6_gi)), 8);
             p7_iyr <= resize(l_iy * p6_r, 16);
             p7_ycam <= unsigned(s_lu_q);
+            p7_dm <= unsigned(p_d8(6)) * f_cg;                       -- K6 scales the Osc source too
             p7_dl <= signed(resize(p6_lift, 10)) + resize(s_d3n, 10);
             p7_ka <= p6_ka; p7_wa <= p6_wa;
             p_lx(7) <= std_logic_vector(p6_lx);
@@ -1141,7 +1172,7 @@ begin
             v_w := resize(l_lp * p7_gau, 16); p8_line <= v_w(13 downto 6);
             p8_int1 <= p7_iyr(13 downto 6);
             if s_osc = '1' then
-                p8_s8 <= unsigned(p_d8(7));
+                if p7_dm(11 downto 10) /= "00" then p8_s8 <= (others => '1'); else p8_s8 <= p7_dm(9 downto 2); end if;
             else
                 p8_s8 <= p7_ycam;
             end if;

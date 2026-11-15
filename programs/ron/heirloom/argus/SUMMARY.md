@@ -1,4 +1,7 @@
-# Argus — Heirloom #21 (v0.6.0)
+# Argus — Heirloom #21 (v0.6.1)
+
+**v0.6.1 (2026-11-15), K6 camera pass:** K6 is now Camera (silhouette strength, 50 % = the shipped look);
+the old K6 Grain is fixed at its default. See [K6 camera pass](#k6-camera-pass-2026-11-15).
 
 **v0.6.0 (2026-10-29), phase 2 round 1: S7 Mirror is Fold / Off (Off replaces Repeat).** Ron flashed v0.5.0
 and liked everything except the Repeat option. v0.5.0 (2026-10-27) was rebuilt from the photo
@@ -66,7 +69,7 @@ drop B over the pastels. RGB -> YUV -> output conditioning (chroma [1 2 2 2 2 2 
 | K3 Tint | 0..100 %, 50 % | offset inside the G fold: the cyan/white centre field turns magenta/violet or cyan/white |
 | K4 Speed | -100..100, 640 | the ribs stream out of the silhouettes (bipolar, still at the centre +-8, square law) |
 | K5 Spread | 0..100 %, 50 % | width of the cyan centre field (G's horizontal V slope, 0.36..2.8x) |
-| K6 Grain | 0..100 %, 50 % | key texture: flat olive below 12 %, then dark contour rings (line width), mottling, dark dashes |
+| K6 Camera | 0..100 %, 50 % | (K6 camera pass, v0.6.1) silhouette strength of the darkness store, Video and Osc alike: 0 % = no silhouettes (the bare, evenly spaced rib field), 50 % = the shipped key (bit-exact), 100 % = deeper, slightly wider keys (2.47x) |
 | S7 Mirror | Fold / Off | Fold = the photo's top/bottom mirror about row 522. Off = the silhouettes run unmirrored down the whole frame (Video: the full camera picture; Osc: the photo's top half stretched to full height); the colour field stays folded behind them |
 | S8 Specks | On / Off | the B dropouts over the pastels |
 | S9 Swap | Off / On | exchanges the R and B laws (pink <-> blue ribs) |
@@ -138,6 +141,38 @@ Osc substitutes the photo-fitted darkness store (a ROM). Video is the default.
   field included. It is replaced by **Off**: no mirror for the silhouettes. Only the store-row operand of the
   line engine's product 0 changes (vy / 2 instead of the folded vy). The writer's top-half gate extends to line
   1044, and the colour laws keep the folded vy. Fold is unchanged, so the photo and the defaults are untouched.
+
+## K6 camera pass (2026-11-15)
+
+Ron: K6 is the camera strength in every program, default 50 %. Argus had no camera-strength control, so
+K6 is new (**v0.6.1**).
+
+- **What K6 does.** The camera reaches Argus as a frame store: the darkness store's silhouettes (Video:
+  the camera's IIR-smoothed luma at 64 x 61 nodes; Osc: the photo-fitted ROM). So K6 sets how strongly
+  the store shows, the same way in both sources. The row writer (horizontal blank, off the pixel path)
+  now scales each column's darkness before it goes into the row buffer:
+  `D' = g (D + 16) - 16` (darkness units; Q.2 in the RTL), clipped to +-200, so the charge target stays in
+  range. The pivot of 16 makes the silhouettes shrink onto their darkest cores as g falls instead of
+  popping off at 0.
+- **Gain law.** K6 is glided in the existing glide slot machine (a fifth slot: 1/8 of the gap per field,
+  deadband 4). g = k / 512 below 50 % (Q.6), then 1 + 3 (k - 512) / 1024 above.
+  - 0 % = no silhouettes: the bare rib field, slanted and evenly spaced (no keys, so no echo).
+  - 25 % = g 0.5: the silhouettes shrink to their dark cores and the echo weakens.
+  - 50 % = g 1: the shipped look, bit-exact (Video and Osc; the Photo preset is unchanged).
+  - 100 % = g 2.47: deeper olive keys with denser contour rings, slightly wider (they grow by about 10
+    darkness units), and stronger echo bunching. The ribs and colour field still read; no washout.
+  - Because 50 % is the shipped look, this follows the rule for "the camera IS the picture" programs
+    (the silhouettes are a photocopy of the camera); doubling at 50 % would also have moved the Osc
+    photo anchor.
+- **K6's old function.** Grain (key texture) was the weakest control on the sheet: 512 and 1023 look
+  the same, and only below 12 % (flat olive) does it change anything. So it was dropped, fixed at its
+  default 512 (contour-ring line offset 19, mottle level 2, never flat). Nothing else moved. Its
+  per-field product on the serial multiplier is gone, and the ring thresholds are constants.
+- **Sheet:** `.heirloom_work/rb_argus/k6/k6sheet.png` (selfie, 720p60 decimation 2, glides snapped in a
+  sim-only copy).
+- **Build (v0.6.1, 2026-11-15):** router1, **seed 1 on all six configs**. HD Analog 88.02, SD Analog
+  82.39, HD HDMI 89.29, SD HDMI 95.15, HD Dual 83.68, SD Dual 88.05 MHz (worst HD 83.68). 7392-7416 /
+  7680 LC (96.6 %, +~180 over v0.6.0), 22 / 32 EBR. **Not flashed.**
 
 ## Deviations from the photo, and why
 

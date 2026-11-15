@@ -1,7 +1,12 @@
 -- Copyright (C) 2026 czartroniks
 -- SPDX-License-Identifier: GPL-3.0-only
 --
--- Argus v0.6.0 -- Heirloom #21, rebuilt from the photo WIN_20230325_11_04_55.
+-- Argus v0.6.1 -- Heirloom #21, rebuilt from the photo WIN_20230325_11_04_55.
+--
+-- K6 camera pass 2026-11-15: K6 = Camera (new): the silhouette strength of the darkness store, Video and
+-- Osc alike, applied in the row writer as D' = g (D + 16) - 16 (darkness units), g = 0 .. 1 (50 %, the
+-- shipped look, bit-exact) .. 2.47 (100 %); 0 % = no silhouettes, the bare rib field.  The old K6 Grain
+-- (key texture) is dropped, fixed at its default 512 (contour rings, line offset 19, mottle level 2).
 --
 -- The photo: camera silhouettes (a dark left block, arms, blobs and a ">" band) folded top to bottom
 -- about row 522, keyed into olive / brown / green with dark contour lines, and around them a sawtooth
@@ -20,7 +25,7 @@
 --   K3  Tint    offset inside the G fold: magenta / violet .. cyan / white
 --   K4  Speed   stripes stream out of the silhouettes, bipolar, still in the centre +-8
 --   K5  Spread  width of the cyan centre field
---   K6  Grain   silhouette texture: flat olive .. dark contour lines, dashes, mottling
+--   K6  Camera  silhouette strength: 0 = none (bare ribs) .. 50 % the shipped key .. 100 % deeper, wider keys
 --   S7  Mirror  Fold (the photo) / Off: the silhouettes span the frame unmirrored, colour field still folded
 --   S8  Specks  On (the photo) / Off
 --   S9  Swap    R <-> B laws
@@ -50,6 +55,13 @@ architecture argus of program_top is
     constant C_XC8  : integer := 244160;    -- hue-V centre, Q.8 virtual px (953.75)
     constant C_C0   : integer := 182031;    -- line-start phase, Q.18
     constant C_B0Q  : integer := 36044;     -- charge floor 0.55, Q.16
+    -- K6 camera pass: Grain fixed at 512 -> ring line offset 19: thresholds (48 + 19) * 8/7, (16 + 19) * 8/7
+    -- and their mirrors; mottle level "10"; never flat
+    constant C_TH2 : unsigned(8 downto 0) := to_unsigned(76, 9);
+    constant C_TH1 : unsigned(8 downto 0) := to_unsigned(39, 9);
+    constant C_TB2 : unsigned(8 downto 0) := to_unsigned(436, 9);
+    constant C_TB1 : unsigned(8 downto 0) := to_unsigned(473, 9);
+    constant C_CAMC : integer := 64;        -- camera gain pivot: 16 darkness units, Q.2
 
     function f_clip8(v : signed) return unsigned is
     begin
@@ -84,7 +96,7 @@ architecture argus of program_top is
     signal s_lcnt, s_hl, s_hd : unsigned(10 downto 0) := to_unsigned(1080, 11);
 
     -- controls (glided Q.3: K1, K2, K5, P12)
-    type t_g is array(0 to 3) of unsigned(12 downto 0);
+    type t_g is array(0 to 4) of unsigned(12 downto 0);   -- K1, K2, K5, P12, K6
     signal s_g : t_g := (others => to_unsigned(512 * 8, 13));
     signal gl_k, gl_o, gl_n : unsigned(12 downto 0) := (others => '0');
     signal gl_d : signed(13 downto 0) := (others => '0');
@@ -128,16 +140,10 @@ architecture argus of program_top is
     signal f_spa : unsigned(8 downto 0) := (others => '0');
     signal f_sps : std_logic := '0';
     signal f_sp  : unsigned(14 downto 0) := (others => '0');
-    signal f_off  : unsigned(5 downto 0) := to_unsigned(19, 6);
-    signal f_flat : std_logic := '0';
-    signal f_mot  : unsigned(1 downto 0) := "10";
+    signal f_cg   : unsigned(7 downto 0) := to_unsigned(64, 8);   -- K6 camera gain, Q.6
     signal f_nmir, f_nosp, f_swap, f_kal, f_osc : std_logic := '0';
     signal f_k4 : unsigned(9 downto 0) := (others => '0');
-    signal f_k6 : unsigned(9 downto 0) := to_unsigned(512, 10);
     signal f_k3 : unsigned(9 downto 0) := to_unsigned(512, 10);
-    signal f_g6lo : std_logic := '0';
-    signal f_th2, f_th1, f_tb2, f_tb1 : unsigned(8 downto 0) := (others => '0');
-    signal f_g6d : unsigned(9 downto 0) := (others => '0');
 
     -- line engine (computes the next line during the current one) and committed line values
     signal le_on, le_first, le_mul : std_logic := '0';
@@ -183,7 +189,10 @@ architecture argus of program_top is
     signal rw_p : signed(14 downto 0) := (others => '0');
     signal rb_we, rw_v6 : std_logic := '0';
     signal rw_c6 : unsigned(5 downto 0) := (others => '0');
-    signal rw_ds, rw_dp : signed(10 downto 0) := (others => '0');
+    signal rw_ds, rw_dp, rw_dg : signed(10 downto 0) := (others => '0');
+    signal rw_v7, rw_v8 : std_logic := '0';
+    signal rw_c7, rw_c8 : unsigned(5 downto 0) := (others => '0');
+    signal rw_m : signed(20 downto 0) := (others => '0');
     signal rb_wa : unsigned(6 downto 0) := (others => '0');
     signal rb_wd, rb_wdd : std_logic_vector(15 downto 0) := (others => '0');
     signal rb_a : unsigned(6 downto 0) := (others => '0');
@@ -375,7 +384,6 @@ begin
         variable v_rm : unsigned(12 downto 0);
         variable v_zc : integer range 0 to 1023;
         variable v_a  : unsigned(9 downto 0);
-        variable v_th : unsigned(8 downto 0);
     begin
         if rising_edge(clk) then
             -- vblank zone: no avid for 1024 clocks
@@ -412,7 +420,6 @@ begin
                 s_hl <= s_lcnt; s_lcnt <= (others => '0');
                 f_k3 <= unsigned(registers_in(2));
                 f_k4 <= unsigned(registers_in(3));
-                f_k6 <= unsigned(registers_in(5));
                 f_nmir <= registers_in(6)(0);
                 f_nosp <= registers_in(6)(1);
                 f_swap <= registers_in(6)(2);
@@ -423,8 +430,8 @@ begin
                 else f_flow <= f_flow - resize(f_sp, 18); end if;
             end if;
 
-            -- glides: K1, K2, K5, P12 ease 1/8 of the gap per field (deadband 4)
-            if s_zone = '1' and s_zc >= 4 and s_zc < 20 then q_gon <= '1'; else q_gon <= '0'; end if;
+            -- glides: K1, K2, K5, P12, K6 ease 1/8 of the gap per field (deadband 4)
+            if s_zone = '1' and s_zc >= 4 and s_zc < 24 then q_gon <= '1'; else q_gon <= '0'; end if;
             q_gi <= s_zc(4 downto 2) - 1; q_gph <= s_zc(1 downto 0);
             if q_gon = '1' then
                 case to_integer(q_gph) is
@@ -433,7 +440,8 @@ begin
                             when 0 => gl_k <= unsigned(registers_in(0)) & "000"; gl_o <= s_g(0);
                             when 1 => gl_k <= unsigned(registers_in(1)) & "000"; gl_o <= s_g(1);
                             when 2 => gl_k <= unsigned(registers_in(4)) & "000"; gl_o <= s_g(2);
-                            when others => gl_k <= unsigned(registers_in(7)) & "000"; gl_o <= s_g(3);
+                            when 3 => gl_k <= unsigned(registers_in(7)) & "000"; gl_o <= s_g(3);
+                            when others => gl_k <= unsigned(registers_in(5)) & "000"; gl_o <= s_g(4);
                         end case;
                     when 1 =>
                         gl_d <= signed(resize(gl_k, 14)) - signed(resize(gl_o, 14));
@@ -447,7 +455,8 @@ begin
                                 when 0 => s_g(0) <= gl_n;
                                 when 1 => s_g(1) <= gl_n;
                                 when 2 => s_g(2) <= gl_n;
-                                when others => s_g(3) <= gl_n;
+                                when 3 => s_g(3) <= gl_n;
+                                when others => s_g(4) <= gl_n;
                             end case;
                         end if;
                 end case;
@@ -493,18 +502,13 @@ begin
             if v_x > 8 then f_sps <= '0'; v_a := unsigned(v_x(9 downto 0)) - 8; f_spa <= v_a(8 downto 0);
             elsif v_x < -8 then f_sps <= '1'; v_x := -v_x; v_a := unsigned(v_x(9 downto 0)) - 8; f_spa <= v_a(8 downto 0);
             else f_sps <= '0'; f_spa <= (others => '0'); end if;
-            -- K6 Grain: ring line width (offset), mottle amount, flat below 12 %
-            if f_k6 < 512 then f_g6lo <= '1'; f_g6d <= 512 - f_k6; else f_g6lo <= '0'; f_g6d <= f_k6 - 512; end if;
-            if f_k6 < 128 then f_flat <= '1'; else f_flat <= '0'; end if;
-            -- ring thresholds on the contour distance: (48 + off) * 8/7, (16 + off) * 8/7, and their mirrors
-            v_th := resize(f_off, 9) + 48;
-            f_th2 <= v_th + shift_right(v_th, 3) + shift_right(v_th, 6);
-            v_th := resize(f_off, 9) + 16;
-            f_th1 <= v_th + shift_right(v_th, 3) + shift_right(v_th, 6);
-            f_tb2 <= resize(to_unsigned(512, 10) - resize(f_th2, 10), 9);
-            f_tb1 <= resize(to_unsigned(512, 10) - resize(f_th1, 10), 9);
-            if f_k6 < 128 then f_mot <= "00"; elsif f_k6 < 384 then f_mot <= "01";
-            elsif f_k6 < 768 then f_mot <= "10"; else f_mot <= "11"; end if;
+            -- K6 Camera (glided): gain Q.6 = k / 8 below 50 % (0 .. 1), 1 + 3 (k - 512) / 1024 above (.. 2.47)
+            if s_g(4)(12) = '0' then
+                f_cg <= resize(s_g(4)(11 downto 6), 8);
+            else
+                v_a := '0' & s_g(4)(11 downto 3);
+                f_cg <= to_unsigned(64, 8) + resize(shift_right(v_a, 3), 8) + resize(shift_right(v_a, 4), 8);
+            end if;
 
             -- per-field products on the serial multiplier: request at zc = 128 + 16 k, product at +15
             mu_ldf <= '0';
@@ -528,9 +532,6 @@ begin
                 when 272 => mu_af <= resize(f_dxq, 18);  mu_bf <= to_unsigned(275, 13); mu_ldf <= '1';  -- kq
                 when 288 => mu_af <= resize(f_kh, 18);   mu_bf <= resize(f_dxq, 13); mu_ldf <= '1';     -- G slope
                 when 304 => mu_af <= resize(f_kh, 18);   mu_bf <= to_unsigned(953, 13); mu_ldf <= '1';  -- G start
-                when 320 =>
-                    mu_af <= resize(f_g6d, 18); mu_ldf <= '1';                                           -- K6 rings
-                    if f_g6lo = '1' then mu_bf <= to_unsigned(19, 13); else mu_bf <= to_unsigned(9, 13); end if;
                 when others => null;
             end case;
             case v_zc is
@@ -546,9 +547,6 @@ begin
                 when 287 => f_kq <= m_p(18 downto 10);
                 when 303 => f_gs <= m_p(20 downto 8);
                 when 319 => f_gs0 <= m_p(20 downto 0);
-                when 335 =>
-                    if f_g6lo = '1' then f_off <= to_unsigned(19, 6) + resize(m_p(13 downto 8), 6);
-                    else f_off <= to_unsigned(19, 6) - resize(m_p(13 downto 9), 6); end if;
                 when others => null;
             end case;
 
@@ -802,6 +800,7 @@ begin
     p_rows : process(clk)
         variable v_r1 : unsigned(5 downto 0);
         variable v_s : signed(11 downto 0);
+        variable v_g : signed(14 downto 0);
     begin
         if rising_edge(clk) then
             if (data_in.avid = '0' and s_avq = '1') or (s_zone = '1' and s_zc = 1000) then
@@ -849,14 +848,23 @@ begin
             rw_v6 <= rw_v5; rw_c6 <= rw_c5;
             v_s := shift_left(resize(rw_a5, 12), 2) + resize(shift_right(rw_p, 3), 12);
             rw_ds <= v_s(10 downto 0);
+            -- 6a: K6 camera gain (D + 16) g, Q.2 darkness x Q.6 gain
+            rw_v7 <= rw_v6; rw_c7 <= rw_c6;
+            rw_m <= (resize(rw_ds, 12) + C_CAMC) * signed('0' & f_cg);
+            -- 6b: D' = (D + 16) g - 16, clipped to +-200 darkness (keeps the charge target in range)
+            rw_v8 <= rw_v7; rw_c8 <= rw_c7;
+            v_g := resize(shift_right(rw_m, 6), 15) - C_CAMC;
+            if v_g > 800 then rw_dg <= to_signed(800, 11);
+            elsif v_g < -800 then rw_dg <= to_signed(-800, 11);
+            else rw_dg <= v_g(10 downto 0); end if;
             -- 7: row buffer entry c - 1: darkness and the step to column c (bank = next line's parity)
             rb_we <= '0';
-            if rw_v6 = '1' then
-                rw_dp <= rw_ds;
-                if rw_c6 /= 0 then
+            if rw_v8 = '1' then
+                rw_dp <= rw_dg;
+                if rw_c8 /= 0 then
                     rb_wd <= std_logic_vector(resize(rw_dp, 16));
-                    rb_wdd <= std_logic_vector(resize(resize(rw_ds, 12) - resize(rw_dp, 12), 16));
-                    rb_wa <= rw_bk & (rw_c6 - 1);
+                    rb_wdd <= std_logic_vector(resize(resize(rw_dg, 12) - resize(rw_dp, 12), 16));
+                    rb_wa <= rw_bk & (rw_c8 - 1);
                     rb_we <= '1';
                 end if;
             end if;
@@ -1004,7 +1012,7 @@ begin
     p_pix : process(clk)
         variable v_t20 : signed(19 downto 0);
         variable v_t3  : signed(12 downto 0);
-        variable v_n9, v_m9 : signed(8 downto 0);
+        variable v_n9 : signed(8 downto 0);
         variable v_ca, v_cb : std_logic_vector(1 downto 0);
         variable v_sp  : std_logic;
         variable v_ta, v_tb : unsigned(17 downto 0);
@@ -1054,12 +1062,7 @@ begin
             v_t3 := p5_dp + shift_left(p5_dp, 1);
             p6_q9 <= unsigned(v_t3(8 downto 0)) xor "100000000";
             v_n9 := resize(signed((not v_t3(9)) & v_t3(8 downto 2)), 9);
-            case f_mot is
-                when "00" => p_mot(6) <= (others => '0');
-                when "01" => p_mot(6) <= resize(shift_right(v_n9, 6), 4);
-                when "10" => p_mot(6) <= resize(shift_right(v_n9, 5), 4);
-                when others => v_m9 := v_n9 + shift_right(v_n9, 1); p_mot(6) <= resize(shift_right(v_m9, 5), 4);
-            end case;
+            p_mot(6) <= resize(shift_right(v_n9, 5), 4);    -- mottle level "10" (Grain fixed at 512)
 
             -- 7: charge IIR coefficients for this pixel (a shift pair by key and scale set) and the target term
             --    tk = (t >> a) + s (t >> b), with the +1 corrections of the inverted operands folded in; ring level
@@ -1093,8 +1096,8 @@ begin
             end case;
             if v_sp = '1' then p7_tk <= v_ta + v_tb + 2; else p7_tk <= v_ta - v_tb + 1; end if;
             -- ring level: distance of q9 to the nearest contour (triangle) against the field's thresholds
-            if f_flat = '1' or (p6_q9 >= f_th2 and p6_q9 <= f_tb2) then p_rl(7) <= "10";
-            elsif p6_q9 >= f_th1 and p6_q9 <= f_tb1 then p_rl(7) <= "01"; else p_rl(7) <= "00"; end if;
+            if p6_q9 >= C_TH2 and p6_q9 <= C_TB2 then p_rl(7) <= "10";
+            elsif p6_q9 >= C_TH1 and p6_q9 <= C_TB1 then p_rl(7) <= "01"; else p_rl(7) <= "00"; end if;
 
             -- 8: charge IIR (one-clock loop): E += tk - (E >> a) - s (E >> b) as a 4-operand carry-save sum
             --    and one carry chain; E restarts at 0 on the first pixel of the line
@@ -1191,7 +1194,7 @@ begin
 
             -- 19: key fill (ring level, dashes, line streak), specks
             v_rl := p_rl(18);
-            if p_sp(18) = '1' and f_flat = '0' then v_rl := "00"; end if;
+            if p_sp(18) = '1' then v_rl := "00"; end if;
             if p_key(18) = '1' then
                 case v_rl is
                     when "10" =>
