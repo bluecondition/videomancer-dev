@@ -15,12 +15,13 @@
 --   coverage  = clamp(1/2 + (weight / 2 - |frac(PHI) - 1/2|) / |grad PHI|)      17 steps, per pixel
 --
 --   K1  Scale    band pitch 8 .. 160 virtual lines (exponential, glided; the wavelength follows as sqrt)
---   K2  Chirp    how much the wavelength tightens along the band (bipolar: tight left / even / tight right;
---                Radial: how fast the rings crowd)
+--   K2  Colour   the 16 shared Kinetic palettes (hysteresis)   [K6 camera pass: was K6; Chirp fixed at 760]
 --   K3  Weight   band duty 10 % .. 90 % (the source adds to it)
 --   K4  Rate     wave travel, bipolar, centre = still (60 s per cycle .. 2 cycles per second)
 --   K5  Spread   crest slant per band (Radial: slides the pond's centre along the band axis), square law
---   K6  Colour   the 16 shared Kinetic palettes (hysteresis)
+--   K6  Camera   camera (and Osc) strength: the weight curve's gain g = K6 / 256 up to 50 %, then half that
+--                slope (0, 1 = the v0.1.0 look at 25 %, 2 at the 50 % default, 3 at 100 %), glided, applied in
+--                the per-field weight-table fill
 --   S7  Wave     Smooth (sine) / Zigzag (triangle)
 --   S8  Field    Linear / Radial
 --   S9  Bands    Duo (ground + A) / Quad (bands step through A, B, accent, ground)
@@ -54,6 +55,7 @@
 -- the screen centre.  s_gav_sr(S - 2) flags pixels 0 .. W - 1 at stage S.  One latency (36) in every mode.
 -- Colours in the hardware convention (u = Cr, v = Cb).
 
+-- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K2 = Colour (was K6); K2 Chirp fixed at 760 (C_KFIX_2).
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -66,6 +68,7 @@ use work.riley_pkg.all;
 use work.all;
 
 architecture riley of program_top is
+    constant C_KFIX_2 : std_logic_vector(9 downto 0) := std_logic_vector(to_unsigned(760, 10));   -- K6 camera pass: fixed knob
     constant C_LAT : integer := 36;   -- = processing_delay_clks
 
     -- TOML defaults: the glides start there
@@ -153,7 +156,7 @@ architecture riley of program_top is
 
     -- [B] knobs: glided (Q3), raw rate, switches, palette
     signal s_g1 : unsigned(12 downto 0) := to_unsigned(C_DEF_K1 * 8, 13);
-    signal s_g2 : unsigned(12 downto 0) := to_unsigned(C_DEF_K2 * 8, 13);
+    signal s_g2 : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);   -- K6 camera pass: the K6 Camera glide (was Chirp)
     signal s_g3 : unsigned(12 downto 0) := to_unsigned(C_DEF_K3 * 8, 13);
     signal s_g5 : unsigned(12 downto 0) := to_unsigned(C_DEF_K5 * 8, 13);
     signal s_gp : unsigned(12 downto 0) := to_unsigned(C_DEF_P12 * 8, 13);
@@ -194,6 +197,7 @@ architecture riley of program_top is
     signal c_F    : unsigned(11 downto 0) := (others => '0');      -- fold, bands Q9
     signal c_k3d  : unsigned(7 downto 0) := to_unsigned(102, 8);   -- weight at black, duty / 256
     signal c_span : unsigned(7 downto 0) := to_unsigned(141, 8);   -- head-room above it
+    signal c_spg  : unsigned(11 downto 0) := to_unsigned(1128, 12); -- span * K6 / 64 = span * camera gain * 4
     signal c_rstep : unsigned(27 downto 0) := (others => '0');     -- phase step per field, Q32
     signal c_ph   : unsigned(31 downto 0) := (others => '0');      -- wave phase, Q32 cycles
     signal c_cneg : std_logic := '0';                              -- chirp sign
@@ -288,8 +292,8 @@ architecture riley of program_top is
     attribute no_rw_check of wt_ram : signal is true;
     signal wt_q, wt_wd, wt_wa, wt_i : unsigned(7 downto 0) := (others => '0');
     signal wt_we, wt_run : std_logic := '0';
-    signal wt_acc : unsigned(23 downto 0) := (others => '0');
-    signal wt_d   : unsigned(16 downto 0) := (others => '0');
+    signal wt_acc : unsigned(27 downto 0) := (others => '0');   -- K6 camera pass: Q17 (was Q15), x camera gain
+    signal wt_d   : unsigned(20 downto 0) := (others => '0');
 
     -- [E] coverage and blend
     signal s13_weff, s14_weff, s15_weff, s14_wh : unsigned(12 downto 0) := (others => '0');
@@ -487,7 +491,7 @@ begin
                     when others => s_oxs <= to_unsigned(102, 9);
                 end case;
                 -- palette: 16 steps with hysteresis (leave a step only 8 past its edge)
-                v_k := unsigned(registers_in(5));
+                v_k := unsigned(registers_in(1));
                 v_c := signed(resize(v_k, 11)) - signed(resize(s_pal & "100000", 11));
                 if v_c > 40 or v_c < -40 then s_pal <= v_k(9 downto 6); end if;
             end if;
@@ -502,7 +506,7 @@ begin
                     when "00" =>
                         case to_integer(z_gc) is
                             when 0      => s_gm <= s_g1; s_gr <= unsigned(registers_in(0));
-                            when 1      => s_gm <= s_g2; s_gr <= unsigned(registers_in(1));
+                            when 1      => s_gm <= s_g2; s_gr <= unsigned(registers_in(5));   -- K6 Camera
                             when 2      => s_gm <= s_g3; s_gr <= unsigned(registers_in(2));
                             when 3      => s_gm <= s_g5; s_gr <= unsigned(registers_in(4));
                             when others => s_gm <= s_gp; s_gr <= unsigned(registers_in(7));
@@ -511,8 +515,8 @@ begin
                     when "11" =>
                         s_gd <= signed(resize(s_gr & "000", 15)) - signed(resize(s_gm, 15));
                         z_gp <= "01";
-                    when "01" =>
-                        if s_gd > 16 or s_gd < -16 then
+                    when "01" =>                           -- deadband +-2 codes (the camera, channel 1: +-4)
+                        if (s_gd > 16 or s_gd < -16) and (z_gc /= 1 or s_gd > 32 or s_gd < -32) then
                             s_gd <= shift_right(s_gd, 3);
                         else
                             s_gd <= (others => '0');
@@ -556,6 +560,7 @@ begin
                     when 366 => z_sel <= to_unsigned(14, 5); z_pre <= '1';
                     when 390 => z_sel <= to_unsigned(15, 5); z_pre <= '1';
                     when 414 => z_sel <= to_unsigned(16, 5); z_pre <= '1';
+                    when 438 => z_sel <= to_unsigned(17, 5); z_pre <= '1';   -- K6 camera pass
                     when others => null;
                 end case;
             end if;
@@ -584,7 +589,11 @@ begin
                     when 13 => z_fa <= resize(w_d0m, 40); z_fb <= w_J2;
                     when 14 => z_fa <= resize(w_J2, 40);  z_fb <= resize(w_dd, 16);                      -- its second difference
                     when 15 => z_fa <= resize(w_jPV, 40); z_fb <= resize(w_dxm, 16);                     -- band coordinate there
-                    when others => z_fa <= resize(w_jPV, 40); z_fb <= resize(s_xs, 16);                  -- and its step
+                    when 16 => z_fa <= resize(w_jPV, 40); z_fb <= resize(s_xs, 16);                      -- and its step
+                    when others =>                                                                       -- span * camera:
+                        z_fa <= resize(c_span, 40);                                                      -- 256 g = K6 to 50 %,
+                        if s_g2(12) = '0' then z_fb <= resize(s_g2(12 downto 3), 16);                    -- then half slope
+                        else z_fb <= resize("10" & s_g2(11 downto 4), 16); end if;                       -- (g 3 at 100 %)
                 end case;
             end if;
             if z_ld = '1' then
@@ -601,7 +610,7 @@ begin
                     when 20 =>                        -- motion (last field's step)
                         c_ph <= f_addsub(c_ph, resize(c_rstep, 32), s_vneg);
                     when 21 =>                        -- chirp: |k2 - 512| - 8 past a +-8 deadband
-                        v_k := s_g2(12 downto 3);
+                        v_k := unsigned(C_KFIX_2);     -- K6 camera pass: Chirp fixed at its default
                         if v_k > 520 then z_cm <= resize(v_k - 520, 9); c_cneg <= '0';
                         elsif v_k < 504 then z_cm <= resize(504 - v_k, 9); c_cneg <= '1';
                         else z_cm <= (others => '0'); c_cneg <= '0'; end if;
@@ -651,6 +660,7 @@ begin
                     when 386 => c_Pdd <= f_addsub(to_unsigned(0, 36), f_acc(34 downto 0) & '0', w_qneg);
                     when 410 => c_V0 <= f_addsub(to_unsigned(0, 28), f_acc(27 downto 0), '1');
                     when 434 => c_Vd <= f_acc(27 downto 0);
+                    when 458 => c_spg <= f_acc(17 downto 6);   -- span * g * 4 (K6 camera pass)
                     when others => null;
                 end case;
             end if;
@@ -946,16 +956,18 @@ begin
             s11_d8 <= wt_q;
             s12_d8 <= s11_d8;
 
-            -- weight table fill (zone, zc 224 .. 480): W(l) = K3 + min(span * l^2 / 2^15, span), the square by
-            -- second differences
+            -- weight table fill (zone, zc 464 .. 720): W(l) = K3 + min(g * span * l^2 / 2^15, span), the square
+            -- by second differences.  K6 camera pass: g = K6 / 256, 2 + (K6 - 512) / 512 past 50 % (c_spg = 4 g span,
+            -- slot 17), so 25 % is the v0.1.0 curve, 0 % a flat K3 (= a black input); moved from zc 224 to
+            -- after slot 17.
             wt_we <= '0';
-            if s_zone = '1' and s_zc = 224 then
-                wt_run <= '1'; wt_i <= (others => '0'); wt_acc <= (others => '0'); wt_d <= resize(c_span, 17);
+            if s_zone = '1' and s_zc = 464 then
+                wt_run <= '1'; wt_i <= (others => '0'); wt_acc <= (others => '0'); wt_d <= resize(c_spg, 21);
             elsif wt_run = '1' then
                 wt_we <= '1'; wt_wa <= wt_i;
-                if wt_acc(23 downto 15) > resize(c_span, 9) then wt_wd <= c_k3d + c_span;
-                else wt_wd <= c_k3d + wt_acc(22 downto 15); end if;
-                wt_acc <= wt_acc + wt_d; wt_d <= wt_d + shift_left(resize(c_span, 17), 1); wt_i <= wt_i + 1;
+                if wt_acc(27 downto 17) > resize(c_span, 11) then wt_wd <= c_k3d + c_span;
+                else wt_wd <= c_k3d + wt_acc(24 downto 17); end if;
+                wt_acc <= wt_acc + wt_d; wt_d <= wt_d + shift_left(resize(c_spg, 21), 1); wt_i <= wt_i + 1;
                 if wt_i = 255 then wt_run <= '0'; end if;
             end if;
         end if;

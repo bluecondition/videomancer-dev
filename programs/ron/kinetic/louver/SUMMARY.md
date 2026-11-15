@@ -1,6 +1,6 @@
 # Louver (Kinetic #6, pilot)
 
-v0.1.0 built 2026-11-14, all six configs, not flashed.
+v0.1.1 (K6 camera pass) 2026-11-15, not flashed (v0.1.0 built 2026-11-14).
 
 ## What it draws
 
@@ -37,8 +37,8 @@ where the gold edge swaps sides.
 | K2 | Blade | blade width 20 % .. 100 % of the pitch (thin blades and wide gaps .. closed shutters) |
 | K3 | Depth | swing 0 .. 1.25 turns, square law (near the top the slats spin right round) |
 | K4 | Rate | bipolar, centre = still (+-8 deadband); 60 s per cycle .. 2 cycles per second, exponential |
-| K5 | Spread | phase step per slat 0 .. 1/2 cycle, square law |
-| K6 | Colour | the 16 shared palettes with hysteresis: ground = gap, A = front, B = back, accent = glint and thin face |
+| K5 | Colour | the 16 shared palettes with hysteresis: ground = gap, A = front, B = back, accent = glint and thin face (K6 until v0.1.0; Spread is now fixed at its old default 354, a phase step of 0.06 cycle per slat) |
+| K6 | Camera | camera (and Osc) strength, 0 .. 100 %, default 50 %: 0 % = no camera (the black-input picture), 25 % = the v0.1.0 gain (white opens a slat 0.27 turn), 50 % = twice it, 100 % = four times (see "K6 camera pass") |
 | S7 | Wave | Smooth / Snap (slats dwell and flip quickly) |
 | S8 | Field | Linear (the wave rolls through the rows) / Radial (an octagonal ripple from the centre) |
 | S9 | Axis | Across (horizontal slats) / Down (vertical slats) |
@@ -126,3 +126,40 @@ fabric register before arithmetic; no RAM ever reads the address it is writing (
   the bottom of the picture.
 - The first design (three-colour blend with per-pixel multipliers, thin-face shading, 10-bit chroma, 32-bit
   accumulators) was 10,685 LC and did not fit; the blend table and the gated-sum multiplies brought it to 7,021.
+
+## K6 camera pass (2026-11-15), v0.1.1
+
+- **K6 = Camera**, 0 .. 100 %, default 50 % (initial 512): the gain of the source term that turns the slats.
+  alpha += src x c, c = 20 g (Osc: 40 g), g = K6 / 256 (linear), alpha in 2^14 per turn, src = smeared luma
+  >> 2 less 16 (0 .. 239):
+  - 0 % (g 0): no source term, exactly the black-input picture (the wave alone);
+  - 25 % (g 1, c = 20): the v0.1.0 gain, bit for bit: white opens a slat 0.27 turn (a venetian-blind halftone);
+  - 50 % (g 2, default): white turns a slat 0.54 turn, past edge-on to its back face, so bright areas show
+    the back colour; the slat outlines pick up the picture's texture as gentle lumps, still clean;
+  - 100 % (g 4): white turns a slat 1.09 turns: the ribbons break into red / blue segments with pinches and
+    gold waists wherever the picture's brightness crosses a quarter turn. Bold, lumpier outlines, no washout
+    (the angle wraps, it never clips).
+  - Osc keeps its x2 over the camera (1.09 turns of lattice at the default).
+  - Face = Video is NOT scaled by K6 (the front face still carries the picture at K6 = 0 %; that switch is
+    the deliberate "picture on the slats" mode, and scaling three channels would need three more multiplies).
+- How: K6 is glided as a third channel of the shared glide (deadband +-4 codes, 1/8 of the gap per field);
+  c = 5 K6 / 64 (0 .. 79) is formed once per field (zone clock 40, one add). Pixel path: stage 11 = two gated
+  partial sums src x c(3..0), src x c(6..4) (was src x 20 by shifts), stage 12 = their sum (Osc x2, modulo a
+  turn) and +-Depth x wave, stage 13 = alpha, folded into the |cos| ROM-address stage (the old stage-12 add).
+  The alpha delay ring now writes at rc + 7 (alpha is a stage later), so the shade address still lands at 22.
+  Latency unchanged (36).
+- **K5 = Colour** (the 16 palettes, was K6); presets keep their palettes on K5.
+- **Spread is fixed** at its old default 354 (0.06 cycle per slat: a gentle diagonal roll through the rows).
+  Rate is the only speed control and stays; Scale, Blade, Depth all change the frame far more than Spread.
+  Presets lost their Spread values (Tri-Vision 300, Ripple Blinds 420).
+- Look check: `.kinetic_work/rb_louver/k6sheet.png` (GHDL, selfie, 720p60 / 2 = the top-left quarter of the
+  frame, glides snapped; K6 = 0 / 256 / 512 / 1023 and Osc at 512).
+- Build (router1 through the queue, 2026-11-15): post-route Fmax HD Analog 91.84 MHz (seed 1), SD Analog
+  88.84 (**seed 2**), HD HDMI 95.52 (**seed 2**), SD HDMI 78.14 (seed 1), HD Dual 91.60 (seed 1), SD Dual
+  90.73 (seed 1); worst HD 91.60. 7,217 / 7,680 LC (94.0 %, from 91.4 %), 24 / 32 EBR. On SD Analog and HD
+  HDMI router1's seed 1 stalled (the builder's 600 s timeout) and seed 2 closed. The netlist has no carry
+  self-adds (dupin: 0 CARRY I0==I1) but two LUTs with a duplicated input in the Osc face-colour path
+  (v_iu / v_iv = 6 x lattice + 512, unchanged since v0.1.0, which was only ever routed with router2): the
+  likely cause of the stalls. Rebuild: `NEXTPNR_ROUTER="--router router1" ./build_set.sh kinetic louver`
+  (expect a seed-2 retry on two configs), or router2.
+

@@ -25,8 +25,10 @@
 --   K2  Shape    square .. octagon .. disc (24 steps)
 --   K3  Depth    size swing (square law)
 --   K4  Rate     bipolar, centre = still; 60 s per cycle .. 2 cycles per second
---   K5  Spread   phase step per cell 0 .. 1/2 cycle (square law)
---   K6  Colour   the 16 shared palettes
+--   K5  Colour   the 16 shared palettes   [K6 camera pass: was K6; Spread fixed at 274]
+--   K6  Camera   camera (and Osc) strength: size term = smeared luma * 1.5 g (Osc * 2 g), g = K6 / 512 up
+--                to 50 %, then 3/8 of that slope (glided): 0 = none (= a black input), 0.5 at 25 %, 1 = the
+--                v0.1.0 gain at the 50 % default (already near the size cap), 1.37 at 100 %
 --   S7  Wave     Smooth / Snap
 --   S8  Field    Linear / Radial
 --   S9  Lens     Bulge / Pinch
@@ -43,6 +45,7 @@
 --   [F] output conditioning: luma [1 2 1], chroma [1 2 2 2 2 2 2 2 1] with resync, luma 13/16, blanking gate
 -- One latency (C_LAT = 33) in every mode.  Colours in the hardware convention (u = Cr, v = Cb).
 
+-- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K5 = Colour (was K6); K5 Spread fixed at 274 (C_KFIX_5).
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -55,6 +58,7 @@ use work.vega_pkg.all;
 use work.all;
 
 architecture vega of program_top is
+    constant C_KFIX_5 : std_logic_vector(9 downto 0) := std_logic_vector(to_unsigned(274, 10));   -- K6 camera pass: fixed knob
     constant C_LAT      : integer := 33;      -- = processing_delay_clks
     constant C_SIM_SNAP : boolean := false;   -- sim-only copies set this: knob glides jump straight to the knob
 
@@ -209,6 +213,9 @@ architecture vega of program_top is
     -- knobs: glided (Q3), raw rate, switches, palette
     signal s_g1 : unsigned(12 downto 0) := to_unsigned(450 * 8, 13);
     signal s_gp : unsigned(12 downto 0) := to_unsigned(640 * 8, 13);
+    signal s_gk : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);   -- K6 camera pass: the Camera glide
+    signal c_cam : unsigned(6 downto 0) := to_unsigned(48, 7);         -- camera coefficient, Q5 (48 = x1.5)
+    signal s_ke  : unsigned(9 downto 0) := to_unsigned(512, 10);       -- the camera law's knee (K6 camera pass)
     signal s_gm : unsigned(12 downto 0) := (others => '0');
     signal s_gd : signed(14 downto 0) := (others => '0');
     signal s_gr : unsigned(9 downto 0) := (others => '0');
@@ -290,6 +297,8 @@ architecture vega of program_top is
     signal s_ext : unsigned(5 downto 0) := (others => '0');
     signal s_y1  : unsigned(13 downto 0) := (others => '0');
     signal s_st  : unsigned(9 downto 0) := (others => '0');
+    signal s_cpa : unsigned(11 downto 0) := (others => '0');   -- K6 camera pass: smear * c_cam partial sums
+    signal s_cpb : unsigned(10 downto 0) := (others => '0');
 
     -- [D] wave table fill (12 clocks per entry: ROM, then Depth * wave by shift-adds)
     signal w_acc : unsigned(23 downto 0) := (others => '0');
@@ -509,8 +518,8 @@ begin
                     when others => s_oxs <= to_unsigned(102, 9);
                 end case;
                 -- Colour: 16 palettes with hysteresis
-                v_d := signed(resize(unsigned(registers_in(5)), 11)) - signed(resize(s_pal & "100000", 11));
-                if v_d > 40 or v_d < -40 then s_pal <= unsigned(registers_in(5)(9 downto 6)); end if;
+                v_d := signed(resize(unsigned(registers_in(4)), 11)) - signed(resize(s_pal & "100000", 11));
+                if v_d > 40 or v_d < -40 then s_pal <= unsigned(registers_in(4)(9 downto 6)); end if;
                 -- lens wander
                 s_wx <= s_wx + 38;
                 s_wy <= s_wy + 27;
@@ -524,26 +533,28 @@ begin
             elsif z_grun = '1' then
                 case z_gp is
                     when "00" =>
-                        if z_gc(0) = '0' then s_gm <= s_g1; s_gr <= unsigned(registers_in(0));
+                        if z_gc(1) = '1' then s_gm <= s_gk; s_gr <= unsigned(registers_in(5));   -- K6 Camera
+                        elsif z_gc(0) = '0' then s_gm <= s_g1; s_gr <= unsigned(registers_in(0));
                         else s_gm <= s_gp; s_gr <= unsigned(registers_in(7)); end if;
                         z_gp <= "11";
                     when "11" =>
                         s_gd <= signed(resize(s_gr & "000", 15)) - signed(resize(s_gm, 15));
                         z_gp <= "01";
-                    when "01" =>
+                    when "01" =>                           -- deadband +-2 codes (the camera, channel 2: +-4)
                         if C_SIM_SNAP then
                             null;
-                        elsif s_gd > 16 or s_gd < -16 then
+                        elsif (s_gd > 16 or s_gd < -16) and (z_gc(1) = '0' or s_gd > 32 or s_gd < -32) then
                             s_gd <= shift_right(s_gd, 3);
                         else
                             s_gd <= (others => '0');
                         end if;
                         z_gp <= "10";
                     when others =>
-                        if z_gc(0) = '0' then s_g1 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
+                        if z_gc(1) = '1' then s_gk <= unsigned(signed(s_gm) + s_gd(12 downto 0));
+                        elsif z_gc(0) = '0' then s_g1 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                         else s_gp <= unsigned(signed(s_gm) + s_gd(12 downto 0)); end if;
                         z_gp <= "00";
-                        if z_gc = 1 then z_grun <= '0'; end if;
+                        if z_gc = 2 then z_grun <= '0'; end if;
                         z_gc <= z_gc + 1;
                 end case;
             end if;
@@ -574,7 +585,7 @@ begin
                     when 11 => z_fa(8 downto 0)  <= v_st;                 z_fb <= resize(v_st, 21);
                     when 12 => z_fa(8 downto 0)  <= s_vm;                 z_fb <= to_unsigned(900, 21);       -- rate exponent
                     when 13 =>                                                                                -- spread^2
-                        z_fa(12 downto 3) <= unsigned(registers_in(4)); z_fb(12 downto 3) <= unsigned(registers_in(4));
+                        z_fa(12 downto 3) <= unsigned(C_KFIX_5); z_fb(12 downto 3) <= unsigned(C_KFIX_5);
                     when others => z_fa(15 downto 0) <= z_mt;             z_fb <= to_unsigned(1193046, 21);   -- rate (14)
                 end case;
             end if;
@@ -627,6 +638,15 @@ begin
                         end if;
                         c_b8 <= s_gp(12 downto 5);
                     -- palette: ground, A, B, accent (chroma kept to 8 bits)
+                    -- K6 camera pass: camera coefficient (Q5): Video 1.5 g, Osc 2 g; g = ke / 512 with ke = K6 up
+                    -- to 50 % (g 1 = v0.1.0), then 512 + 3 (K6 - 512) / 8 (g 1.37 at 100 %: the size cap)
+                    when 40 =>
+                        if s_gk(12) = '0' then s_ke <= s_gk(12 downto 3);
+                        else s_ke <= "10" & (resize(s_gk(11 downto 5), 8) + resize(s_gk(11 downto 6), 8)); end if;
+                    when 41 =>
+                        if s_src = '1' then v_t := resize(s_ke & "00", 29);
+                        else v_t := resize(s_ke & '0', 29) + resize(s_ke, 29); end if;
+                        c_cam <= v_t(11 downto 5);
                     when 22 => r_pl_a <= "00" & s_pal & "00";
                     when 25 =>
                         c_gy <= unsigned(r_pl_q(31 downto 22)); c_gc(1) <= unsigned(r_pl_q(21 downto 14)); c_gc(2) <= unsigned(r_pl_q(11 downto 4));
@@ -871,6 +891,7 @@ begin
         variable v_l  : unsigned(7 downto 0);
         variable v_x  : unsigned(13 downto 0);
         variable v_d1 : signed(14 downto 0);
+        variable v_cs : unsigned(15 downto 0);
     begin
         if rising_edge(clk) then
             -- oscillator
@@ -910,8 +931,14 @@ begin
                 v_d1 := signed(resize(v_x, 15)) - signed(resize(s_y1, 15));
                 s_y1 <= unsigned(signed(s_y1) + resize(shift_right(v_d1, 4), 14));
             end if;
-            if s_src = '1' then s_st <= resize(s_y1(13 downto 6) & '0', 10);
-            else s_st <= resize(s_y1(13 downto 6), 10) + resize(s_y1(13 downto 7), 10); end if;
+            -- K6 camera pass: the size term = smear * c_cam / 32 (two gated partial sums, then their sum; one
+            -- clock later than v0.1.0's x1.5 / x2, which c_cam = 48 / 64 reproduces exactly)
+            s_cpa <= f_gu(s_y1(13 downto 6), c_cam(0), 12) + shift_left(f_gu(s_y1(13 downto 6), c_cam(1), 12), 1)
+                   + shift_left(f_gu(s_y1(13 downto 6), c_cam(2), 12), 2) + shift_left(f_gu(s_y1(13 downto 6), c_cam(3), 12), 3);
+            s_cpb <= f_gu(s_y1(13 downto 6), c_cam(4), 11) + shift_left(f_gu(s_y1(13 downto 6), c_cam(5), 11), 1)
+                   + shift_left(f_gu(s_y1(13 downto 6), c_cam(6), 11), 2);
+            v_cs := resize(s_cpa, 16) + shift_left(resize(s_cpb, 16), 4);
+            s_st <= v_cs(14 downto 5);
         end if;
     end process p_src;
 

@@ -6,7 +6,7 @@
 processing_delay_clks = 36
 program_id = "com.czartroniks.riley"
 program_name = "Riley"
-program_version = "0.1.0"
+program_version = "0.1.1"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -28,13 +28,9 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_2"
-name_label = "Chirp"
-control_mode = "linear"
-display_min_value = -100
-display_max_value = 100
-initial_value = 760
-display_float_digits = 0
-suffix_label = ""
+name_label = "Colour"
+value_labels = ["Ink", "Paper", "Bauhaus", "Vega", "Outrun", "Ultra", "Ocean", "Ice", "Moss", "Citrus", "Terra", "Ember", "Gold", "Candy", "Mint", "Plum"]
+initial_value_label = "Ink"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_3"
@@ -68,9 +64,13 @@ suffix_label = "%"
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_6"
-name_label = "Colour"
-value_labels = ["Ink", "Paper", "Bauhaus", "Vega", "Outrun", "Ultra", "Ocean", "Ice", "Moss", "Citrus", "Terra", "Ember", "Gold", "Candy", "Mint", "Plum"]
-initial_value_label = "Ink"
+name_label = "Camera"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
@@ -118,31 +118,28 @@ name = "Current"
 [[preset]]
 name = "Fall"
 rotary_potentiometer_1 = 330
-rotary_potentiometer_2 = 900
 rotary_potentiometer_3 = 512
 rotary_potentiometer_5 = 0
-rotary_potentiometer_6 = 96
+rotary_potentiometer_2 = 96
 toggle_switch_10 = 1
 linear_potentiometer_12 = 520
 
 [[preset]]
 name = "Cataract"
 rotary_potentiometer_1 = 520
-rotary_potentiometer_2 = 512
 rotary_potentiometer_3 = 620
 rotary_potentiometer_4 = 800
 rotary_potentiometer_5 = 420
-rotary_potentiometer_6 = 160
+rotary_potentiometer_2 = 160
 toggle_switch_9 = 1
 linear_potentiometer_12 = 430
 
 [[preset]]
 name = "Chevrons"
 rotary_potentiometer_1 = 600
-rotary_potentiometer_2 = 620
 rotary_potentiometer_3 = 512
 rotary_potentiometer_5 = 250
-rotary_potentiometer_6 = 224
+rotary_potentiometer_2 = 224
 toggle_switch_7 = 1
 toggle_switch_9 = 1
 linear_potentiometer_12 = 500
@@ -150,18 +147,16 @@ linear_potentiometer_12 = 500
 [[preset]]
 name = "Pond"
 rotary_potentiometer_1 = 450
-rotary_potentiometer_2 = 300
 rotary_potentiometer_4 = 300
 rotary_potentiometer_5 = 200
-rotary_potentiometer_6 = 416
+rotary_potentiometer_2 = 416
 toggle_switch_8 = 1
 linear_potentiometer_12 = 420
 
 [[preset]]
 name = "Moire"
 rotary_potentiometer_1 = 500
-rotary_potentiometer_2 = 700
 rotary_potentiometer_4 = 620
 rotary_potentiometer_5 = 400
-rotary_potentiometer_6 = 800
+rotary_potentiometer_2 = 800
 linear_potentiometer_12 = 1023

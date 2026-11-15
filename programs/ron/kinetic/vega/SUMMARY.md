@@ -1,6 +1,6 @@
 # Vega (Kinetic)
 
-**v0.1.0 built 2026-11-14, all six configs, not flashed.** Flash `out/rev_b/ron/kinetic/vega.vmprog`.
+**v0.1.1 (K6 camera pass) 2026-11-15, not flashed** (v0.1.0 built 2026-11-14). Flash `out/rev_b/ron/kinetic/vega.vmprog`.
 
 ## What it draws
 
@@ -34,8 +34,8 @@ and the globe drifts slowly from side to side on its own.
 | K2 | Shape | the inset shape in 24 steps: square .. chamfered square .. regular octagon .. disc (default disc) |
 | K3 | Depth | wave swing of the size, square law, 0 .. +-43 % of the half cell (default +-16 %) |
 | K4 | Rate | bipolar, centre = still (+-8 deadband); 60 s per cycle .. 2 cycles per second, exponential |
-| K5 | Spread | phase step per cell 0 .. 1/2 cycle, square law |
-| K6 | Colour | the 16 shared palettes with hysteresis: ground, A = the cells, B and accent = the Grade scale |
+| K5 | Colour | the 16 shared palettes with hysteresis: ground, A = the cells, B and accent = the Grade scale (K6 until v0.1.0; Spread is now fixed at its old default 274, a phase step of 0.036 cycle per cell) |
+| K6 | Camera | camera (and Osc) strength, 0 .. 100 %, default 50 %: 0 % = no camera (the black-input picture), 25 % = half the v0.1.0 gain, 50 % = the v0.1.0 gain (luma x 1.5), 100 % = 1.37x it (see "K6 camera pass") |
 | S7 | Wave | Smooth / Snap (cells dwell at big and small and flip quickly) |
 | S8 | Field | Linear (diagonal wave and colour scale) / Radial (rings from the centre) |
 | S9 | Lens | Bulge (a globe) / Pinch (a funnel) |
@@ -152,3 +152,35 @@ Chassis sections lifted from louver.vhd ([A] timing / zone / glides / sequencer,
 - The edge ramp follows the rms of the lens's two stretches, so close to the globe's rim edges that run along
   the radius are a little soft and edges across it a little sharp; the last few pixels inside the rim fade
   toward the mean colour by design.
+
+## K6 camera pass (2026-11-15), v0.1.1
+
+- **K6 = Camera**, 0 .. 100 %, default 50 % (initial 512): the gain of the camera's (and the Osc lattice's)
+  term in the cell size. size = 280 + Depth x wave + smear x c, clamped 56 .. 472 (of 512), c = 1.5 g for
+  Video and 2 g for Osc (the old ratio), g = K6 / 512 up to 50 % and 3/8 of that slope above
+  (g = 1 + 3 (K6 - 512) / 4096):
+  - 0 % (g 0): no source term, exactly the black-input picture (the wave alone);
+  - 25 % (g 0.5, luma x 0.75): a calm halftone, almost no cell reaches the cap;
+  - 50 % (g 1, luma x 1.5, default): the v0.1.0 gain, bit for bit, and twice the 25 % point. v0.1.0 was
+    already "too hot" (cells full at ~40 % grey), so twice the shipped gain would wash out: the 25 % point
+    sits at half the shipped gain instead, and the default is the strongest clean level, the shipped look;
+  - 100 % (g 1.37, luma x 2.06): bold, most cells of a mid-key picture swell to the cap and only the darker
+    areas keep small cells. A straight half-slope (g 1.5, luma x 2.25) left the selfie almost uniformly full,
+    so the top of the range was pulled in. (A numpy check on the selfie at the mean base size: 14 % of
+    pixels at the cap for x 1.5, 40 % for x 2.0, 50 % for x 2.25, 81 % for x 3.)
+- How: K6 is glided as a third channel of the shared glide (deadband +-4 codes, 1/8 of the gap per field);
+  the knee value and c (Q5, 0 .. 87) are formed once per field (zone clocks 40, 41). The source path: the
+  1/16 smear x c as two gated partial sums, then their sum / 32 (one register more than v0.1.0's x1.5 shift-add,
+  so the hold samples the smear one pixel later; the main pixel pipeline and the latency (33) are unchanged).
+- **K5 = Colour** (the 16 palettes, was K6); presets keep their palettes on K5.
+- **Spread is fixed** at its old default 274 (0.036 cycle per cell). Its sheet panels at 0 / 274 / 1023 were the
+  closest of the knobs (Rate is the only speed control and stays). Presets lost their Spread values
+  (Vega-Nor 180, Ink Globe 420, Funnel 350, Flip Dots 560).
+- Look check: `.kinetic_work/rb_vega/k6sheet.png` (GHDL, selfie, 720p60 / 2 = the top-left quarter of the
+  frame, glides snapped; K6 = 0 / 256 / 512 / 1023 and Osc at 512).
+- Build (router1 through the queue, 2026-11-15): all six configs on seed 1. Post-route Fmax HD Analog
+  86.27 MHz, SD Analog 90.65, HD HDMI 86.39, SD HDMI 92.34, HD Dual 85.11, SD Dual 84.05 (worst HD 85.11).
+  7,366 / 7,680 LC (95.9 %, up from 93.6 %: the two partial-sum adders and the third glide channel), 22 / 32
+  EBR. It closed with 15 % margin despite the LC, but there is little room left for anything else.
+  Rebuild: `NEXTPNR_ROUTER="--router router1" ./build_set.sh kinetic vega`.
+

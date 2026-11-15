@@ -24,8 +24,10 @@
 --   K2  Blade    blade width 20 % .. 100 % of the pitch
 --   K3  Depth    swing 0 .. 1.25 turns (square law)
 --   K4  Rate     bipolar, centre = still; 60 s per cycle .. 2 cycles per second
---   K5  Spread   phase step per slat 0 .. 1/2 cycle (square law)
---   K6  Colour   the 16 shared palettes (ground = gap, A = front, B = back, accent = glint and thin face)
+--   K5  Colour   the 16 shared palettes (ground = gap, A = front, B = back, accent = glint and thin face)
+--                [K6 camera pass: was K6; Spread fixed at 354 = phase step 0.06 cycle per slat]
+--   K6  Camera   camera (and Osc) strength: source term = src * 20 g turns/2^14 (Osc x2), g = K6 / 256 (glided):
+--                0 = none (= a black input), 1 = the v0.1.0 gain at 25 %, 2 at the 50 % default, 4 at 100 %
 --   S7  Wave     Smooth / Snap
 --   S8  Field    Linear / Radial
 --   S9  Axis     Across (horizontal slats) / Down (vertical slats)
@@ -42,6 +44,7 @@
 --   [F] output conditioning: luma [1 2 1], chroma [1 2 2 2 2 2 2 2 1] with resync, luma 13/16, blanking gate
 -- One latency (C_LAT = 36) in every mode.  Colours in the hardware convention (u = Cr, v = Cb).
 
+-- K6 camera pass 2026-11-15: K6 = Camera (camera strength, new); K5 = Colour (was K6); K5 Spread fixed at 354 (C_KFIX_5).
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
@@ -54,6 +57,7 @@ use work.louver_pkg.all;
 use work.all;
 
 architecture louver of program_top is
+    constant C_KFIX_5 : std_logic_vector(9 downto 0) := std_logic_vector(to_unsigned(354, 10));   -- K6 camera pass: fixed knob
     constant C_LAT      : integer := 36;      -- = processing_delay_clks
     constant C_SIM_SNAP : boolean := false;   -- sim-only copies set this: knob glides jump straight to the knob
 
@@ -194,6 +198,8 @@ architecture louver of program_top is
     -- knobs: glided (Q3), raw rate, switches, palette
     signal s_g1 : unsigned(12 downto 0) := to_unsigned(625 * 8, 13);
     signal s_gp : unsigned(12 downto 0) := to_unsigned(323 * 8, 13);
+    signal s_gk : unsigned(12 downto 0) := to_unsigned(512 * 8, 13);   -- K6 camera pass: the Camera glide
+    signal c_cam : unsigned(6 downto 0) := to_unsigned(40, 7);         -- camera coefficient 20 g = 5 K6 / 64
     signal s_gm : unsigned(12 downto 0) := (others => '0');
     signal s_gd : signed(14 downto 0) := (others => '0');
     signal s_gr : unsigned(9 downto 0) := (others => '0');
@@ -300,8 +306,13 @@ architecture louver of program_top is
     signal q10_src : unsigned(7 downto 0) := (others => '0');
     signal q10_e   : unsigned(13 downto 0) := (others => '0');
     signal q11_aw  : unsigned(14 downto 0) := (others => '0');
-    signal q11_st  : unsigned(13 downto 0) := (others => '0');
-    signal q12_al  : unsigned(13 downto 0) := (others => '0');
+    -- K6 camera pass: source term = src * c_cam (Osc x2) as two gated partial sums (11), their sum (12),
+    -- alpha = +-Depth * wave + source at 13 (folded into the |cos| ROM address stage)
+    signal q11_pa  : unsigned(11 downto 0) := (others => '0');
+    signal q11_pb  : unsigned(10 downto 0) := (others => '0');
+    signal q12_st  : unsigned(13 downto 0) := (others => '0');
+    signal q12_aw  : signed(15 downto 0) := (others => '0');
+    signal q13_al  : unsigned(13 downto 0) := (others => '0');
     signal k8, k9, k10, k17, k18, k19 : unsigned(7 downto 0) := (others => '0');
 
     -- [E] the look
@@ -413,7 +424,7 @@ begin
             vr_q <= vr(to_integer(rc));
             tr(to_integer(rc + 14)) <= "000" & std_logic_vector(q2_t);
             tr_q <= tr(to_integer(rc));
-            ar(to_integer(rc + 8)) <= "000000" & std_logic_vector(q12_al(13 downto 4));
+            ar(to_integer(rc + 7)) <= "000000" & std_logic_vector(q13_al(13 downto 4));   -- K6 camera pass: stage 13, d 7
             ar_q <= ar(to_integer(rc));
             cr(to_integer(rc + 6)) <= std_logic_vector(q29_c(1)) & std_logic_vector(q29_c(2));
             cr_q <= cr(to_integer(rc));
@@ -496,8 +507,8 @@ begin
                     when others => s_oxs <= to_unsigned(102, 9); s_sd <= '0';
                 end case;
                 -- Colour: 16 palettes with hysteresis
-                v_d := signed(resize(unsigned(registers_in(5)), 11)) - signed(resize(s_pal & "100000", 11));
-                if v_d > 40 or v_d < -40 then s_pal <= unsigned(registers_in(5)(9 downto 6)); end if;
+                v_d := signed(resize(unsigned(registers_in(4)), 11)) - signed(resize(s_pal & "100000", 11));
+                if v_d > 40 or v_d < -40 then s_pal <= unsigned(registers_in(4)(9 downto 6)); end if;
             end if;
             g_wm1 <= s_w - 1;
             s_oys <= resize(shift_right(resize(s_ys, 19) * to_unsigned(121, 7), 8), 10);
@@ -508,26 +519,28 @@ begin
             elsif z_grun = '1' then
                 case z_gp is
                     when "00" =>
-                        if z_gc(0) = '0' then s_gm <= s_g1; s_gr <= unsigned(registers_in(0));
+                        if z_gc(1) = '1' then s_gm <= s_gk; s_gr <= unsigned(registers_in(5));   -- K6 Camera
+                        elsif z_gc(0) = '0' then s_gm <= s_g1; s_gr <= unsigned(registers_in(0));
                         else s_gm <= s_gp; s_gr <= unsigned(registers_in(7)); end if;
                         z_gp <= "11";
                     when "11" =>
                         s_gd <= signed(resize(s_gr & "000", 15)) - signed(resize(s_gm, 15));
                         z_gp <= "01";
-                    when "01" =>
+                    when "01" =>                           -- deadband +-2 codes (the camera, channel 2: +-4)
                         if C_SIM_SNAP then
                             null;
-                        elsif s_gd > 16 or s_gd < -16 then
+                        elsif (s_gd > 16 or s_gd < -16) and (z_gc(1) = '0' or s_gd > 32 or s_gd < -32) then
                             s_gd <= shift_right(s_gd, 3);
                         else
                             s_gd <= (others => '0');
                         end if;
                         z_gp <= "10";
                     when others =>
-                        if z_gc(0) = '0' then s_g1 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
+                        if z_gc(1) = '1' then s_gk <= unsigned(signed(s_gm) + s_gd(12 downto 0));
+                        elsif z_gc(0) = '0' then s_g1 <= unsigned(signed(s_gm) + s_gd(12 downto 0));
                         else s_gp <= unsigned(signed(s_gm) + s_gd(12 downto 0)); end if;
                         z_gp <= "00";
-                        if z_gc = 1 then z_grun <= '0'; end if;
+                        if z_gc = 2 then z_grun <= '0'; end if;
                         z_gc <= z_gc + 1;
                 end case;
             end if;
@@ -551,7 +564,7 @@ begin
                         z_fa(12 downto 3) <= unsigned(registers_in(2)); z_fb(12 downto 3) <= unsigned(registers_in(2));
                     when 4  => z_fa(12 downto 0) <= s_gp;                 z_fb <= resize(s_gp, 24);           -- twist^2 (held in c_s)
                     when 7  =>                                                                                -- spread^2
-                        z_fa(12 downto 3) <= unsigned(registers_in(4)); z_fb(12 downto 3) <= unsigned(registers_in(4));
+                        z_fa(12 downto 3) <= unsigned(C_KFIX_5); z_fb(12 downto 3) <= unsigned(C_KFIX_5);
                     when 5 | 8 => z_fa(20 downto 0) <= c_ip;              z_fb <= resize(c_s, 24);            -- twist, spread / pitch
                     when 6 | 9 =>                                               -- step along the slat: per line (Down) / per pixel
                         z_fa(19 downto 0) <= z_x;
@@ -602,6 +615,10 @@ begin
                         if s_vneg = '1' then v_b := not v_b; end if;
                         v_a27 := (c_ph & '1') + (v_b & s_vneg);
                         c_ph <= v_a27(26 downto 1);
+                    -- K6 camera pass: camera coefficient 20 g = 5 K6 / 64 (0 .. 79; 20 at 25 %, 40 at 50 %)
+                    when 40 =>
+                        v_t := resize(s_gk(12 downto 3) & "00", 29) + resize(s_gk(12 downto 3), 29);
+                        c_cam <= v_t(12 downto 6);
                     -- palette: ground, A, B, accent (chroma kept to 8 bits)
                     when 22 => r_pl_a <= "00" & s_pal & "00";
                     when 25 =>
@@ -998,14 +1015,18 @@ begin
             sl_wa <= k10;
             if s_gav_sr(8) = '1' and (s_nw(9) = '1' or s_gav_sr(7) = '0') then sl_we <= '1'; else sl_we <= '0'; end if;
 
-            -- 11: source term (Video x20: white = 0.27 turn; Osc x40)
-            v_st := shift_left(resize(q10_src, 14), 4) + shift_left(resize(q10_src, 14), 2);
-            if s_src = '1' then q11_st <= v_st(12 downto 0) & '0'; else q11_st <= v_st; end if;
-            -- 12: the state: alpha = +-Depth * wave + source (14 bits per turn)
+            -- 11: source term src * c_cam (K6 camera pass; c_cam = 20 g, so g = 1 is v0.1.0's Video x20:
+            -- white = 0.27 turn) as two gated partial sums
+            q11_pa <= f_gu(q10_src, c_cam(0), 12) + shift_left(f_gu(q10_src, c_cam(1), 12), 1)
+                    + shift_left(f_gu(q10_src, c_cam(2), 12), 2) + shift_left(f_gu(q10_src, c_cam(3), 12), 3);
+            q11_pb <= f_gu(q10_src, c_cam(4), 11) + shift_left(f_gu(q10_src, c_cam(5), 11), 1)
+                    + shift_left(f_gu(q10_src, c_cam(6), 11), 2);
+            -- 12: their sum (Osc x2), modulo a turn; +-Depth * wave
+            v_st := resize(q11_pa, 14) + shift_left(resize(q11_pb, 14), 4);
+            if s_src = '1' then q12_st <= v_st(12 downto 0) & '0'; else q12_st <= v_st; end if;
             v_al := signed(resize(q11_aw, 16));
             if s_neg(11) = '1' then v_al := -v_al; end if;
-            v_al := v_al + signed(resize(q11_st, 16));
-            q12_al <= unsigned(v_al(13 downto 0));
+            q12_aw <= v_al;
         end if;
     end process p_wave;
 
@@ -1033,11 +1054,15 @@ begin
         variable v_pc  : signed(12 downto 0);
         variable v_oy  : signed(11 downto 0);
         variable v_oc  : signed(10 downto 0);
+        variable v_al  : signed(15 downto 0);
     begin
         if rising_edge(clk) then
-            -- 13: |cos|, |sin| address by quarter turn
-            if q12_al(12) = '1' then r_cs_a <= not q12_al(11 downto 3); else r_cs_a <= q12_al(11 downto 3); end if;
-            q13_sg <= not q12_al(12);                       -- sin alpha * cos alpha > 0: thin face on the +t side
+            -- 13: the state: alpha = +-Depth * wave + source (14 bits per turn; K6 camera pass: was stage 12);
+            -- |cos|, |sin| address by quarter turn
+            v_al := q12_aw + signed(resize(q12_st, 16));
+            q13_al <= unsigned(v_al(13 downto 0));
+            if v_al(12) = '1' then r_cs_a <= not unsigned(v_al(11 downto 3)); else r_cs_a <= unsigned(v_al(11 downto 3)); end if;
+            q13_sg <= not v_al(12);                         -- sin alpha * cos alpha > 0: thin face on the +t side
             q14_sg <= q13_sg;
             -- 14: ROM; 15: fabric copies
             q15_cos <= r_cs_q(15 downto 7); q15_sin <= r_cs_q(6 downto 2);

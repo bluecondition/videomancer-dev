@@ -1,6 +1,6 @@
 # Riley (Kinetic pilot)
 
-**v0.1.0 built 2026-11-14, not flashed.** Flash `out/rev_b/ron/kinetic/riley.vmprog`.
+**v0.1.1 (K6 camera pass) built 2026-11-15, not flashed.** Flash `out/rev_b/ron/kinetic/riley.vmprog`.
 
 ## What it draws
 
@@ -32,11 +32,11 @@ the picture.
 | Control | Name | What it does |
 |---|---|---|
 | K1 | Scale | band pitch, 8 .. 160 virtual lines, exponential, glided (default 27 = 40 bands); the wavelength follows as its square root |
-| K2 | Chirp | how much the wavelength tightens along the band. Bipolar with a deadband: tight at the left / even / tight at the right (Down: top / bottom, as in "Fall"). Radial: how fast the rings crowd outwards |
+| K2 | Colour | the 16 shared Kinetic palettes (ground + A; Quad adds B and the accent), with hysteresis (K6 until v0.1.0; Chirp is now fixed at its old default 760, a gentle tightening toward the right) |
 | K3 | Weight | band duty at black, 10 % .. 90 % (default 40 %); the source adds to it |
 | K4 | Rate | wave travel, bipolar, centre = still; exponential, 60 s per cycle just off the deadband to 2 cycles per second at either end |
 | K5 | Spread | crest slant: phase step per band, square law, 0 .. 1/2 cycle. Low = slanting crests ("Cataract 3"); high = neighbouring bands in antiphase, a woven standing figure. Radial: slides the pond's centre along the band axis |
-| K6 | Colour | the 16 shared Kinetic palettes (ground + A; Quad adds B and the accent), with hysteresis |
+| K6 | Camera | camera (and Osc) strength, 0 .. 100 %, default 50 %: 0 % = no camera (the black-input picture), 25 % = the v0.1.0 weight curve, 50 % = twice it, 100 % = three times (see "K6 camera pass") |
 | S7 | Wave | Smooth (sine) / Zigzag (triangle: Riley's chevrons). **Zigzag replaces the standard Snap**: a dwell-and-flip wave only reads on discrete elements, a triangle is the Riley figure |
 | S8 | Field | Linear (the wave runs along the bands) / Radial (a pond: a calm centre, rings that crowd outwards) |
 | S9 | Bands | Duo (every band is colour A) / Quad (the bands step through A, B, accent, ground: three coloured lines and a rest) |
@@ -133,3 +133,35 @@ The RAM / ROM processes are 331-392. `imodel.py` (work dir) mirrors each section
 - SD: the same picture (the centre 4:3, same band count top to bottom), but 480i has 243 lines per field, so
   below about Scale 25 % (pitch under 16 virtual lines = under 4 field lines) the bands begin to fade toward
   grey, and at Scale 0 % the field is flat grey with faint moire. 720p and 1080p hold every Scale.
+
+## K6 camera pass (2026-11-15), v0.1.1
+
+- **K6 = Camera**, 0 .. 100 %, default 50 % (initial 512): the strength of the camera's (and the Osc
+  lattice's) effect on the band weight. It is the gain g of the weight curve,
+  W(l) = K3 + min(1, 2 g l^2) x head-room, with g = K6 / 256 up to 50 % and half that slope above
+  (g = 2 + (K6 - 512) / 512):
+  - 0 % (g 0): the table is flat at K3, exactly the black-input picture (the wave alone);
+  - 25 % (g 1): the v0.1.0 curve, bit for bit (a subtle engraving);
+  - 50 % (g 2, default): twice v0.1.0; mid-greys swell the bands to hairline gaps, darker areas keep their
+    gaps; clean, no ragged edges (the weight only changes duty, never position);
+  - 100 % (g 3): most of a mid-key picture is hairline gaps, only the darker areas still show as thick
+    dark bands. A straight g = 4 (K6 / 256 all the way) washed the selfie out to nearly uniform hairlines,
+    so the slope halves past 50 %.
+  - Source = Osc goes through the same table, so it keeps its full-swing lead over the camera.
+- Where it is applied: per field, in the weight-table fill (no pixel-path change). K6 is glided in the
+  existing shared glide (channel 1, which was Chirp's; deadband +-4 codes, 1/8 of the gap per field), one
+  new slot (17) on the per-field serial multiplier forms span x K6 / 64, and the table's second-difference
+  DDA steps by that (28-bit accumulator, Q17). The fill moved from zone clock 224 to 464 (after slot 17;
+  done by 720, well inside every mode's vblank).
+- **K2 = Colour** (the 16 palettes, was K6); presets keep their palettes on K2.
+- **Chirp is fixed** at its old default 760 (c = +0.45: the wave tightens gently toward the right; in Radial
+  the rings crowd 1.34x outwards). It was the weakest knob: its sheet panels at 0 / 760 / 1023 barely
+  differ. The presets lost their Chirp values (Fall 900, Cataract 512, Chevrons 620, Pond 300, Moire 700).
+- Build (router1 through the queue, 2026-11-15): all six configs on seed 1. Post-route Fmax HD Analog
+  90.10 MHz, SD Analog 95.14, HD HDMI 93.70, SD HDMI 94.57, HD Dual 93.49, SD Dual 91.11 (worst HD 90.10).
+  6,560 / 7,680 LC (85 %), 22 / 32 EBR. Rebuild: `NEXTPNR_ROUTER="--router router1" ./build_set.sh kinetic
+  riley`.
+- Look check: `.kinetic_work/rb_riley/k6sheet.png` (GHDL, selfie, 720p60 / 2, glides bypassed in a sim-only
+  copy; K6 = 0 / 256 / 512 / 1023 and Osc at 512; Colour fell to Moss in those renders because the
+  labelled K2 sims at 512).
+

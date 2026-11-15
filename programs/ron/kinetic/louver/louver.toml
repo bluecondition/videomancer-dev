@@ -6,7 +6,7 @@
 processing_delay_clks = 36
 program_id = "com.czartroniks.louver"
 program_name = "Louver"
-program_version = "0.1.0"
+program_version = "0.1.1"
 abi_version = ">=1.0,<2.0"
 author = "czartroniks"
 license = "GPL-3.0"
@@ -58,16 +58,6 @@ suffix_label = ""
 
 [[parameter]]
 parameter_id = "rotary_potentiometer_5"
-name_label = "Spread"
-control_mode = "linear"
-display_min_value = 0
-display_max_value = 100
-initial_value = 354
-display_float_digits = 0
-suffix_label = "%"
-
-[[parameter]]
-parameter_id = "rotary_potentiometer_6"
 name_label = "Colour"
 control_mode = "linear"
 display_min_value = 1
@@ -75,6 +65,16 @@ display_max_value = 16
 initial_value = 160
 display_float_digits = 0
 suffix_label = ""
+
+[[parameter]]
+parameter_id = "rotary_potentiometer_6"
+name_label = "Camera"
+control_mode = "linear"
+display_min_value = 0
+display_max_value = 100
+initial_value = 512
+display_float_digits = 0
+suffix_label = "%"
 
 [[parameter]]
 parameter_id = "toggle_switch_7"
@@ -123,8 +123,7 @@ name = "Ribbons"
 name = "Tri-Vision"
 rotary_potentiometer_2 = 1023
 rotary_potentiometer_3 = 650
-rotary_potentiometer_5 = 300
-rotary_potentiometer_6 = 608
+rotary_potentiometer_5 = 608
 toggle_switch_7 = 1
 linear_potentiometer_12 = 0
 
@@ -132,8 +131,7 @@ linear_potentiometer_12 = 0
 name = "Ripple Blinds"
 rotary_potentiometer_1 = 480
 rotary_potentiometer_3 = 460
-rotary_potentiometer_5 = 420
-rotary_potentiometer_6 = 288
+rotary_potentiometer_5 = 288
 toggle_switch_8 = 1
 linear_potentiometer_12 = 200
 
@@ -142,7 +140,7 @@ name = "Helix Field"
 rotary_potentiometer_1 = 560
 rotary_potentiometer_3 = 700
 rotary_potentiometer_4 = 700
-rotary_potentiometer_6 = 224
+rotary_potentiometer_5 = 224
 linear_potentiometer_12 = 1023
 
 [[preset]]
@@ -150,7 +148,7 @@ name = "Bead Curtain"
 rotary_potentiometer_1 = 520
 rotary_potentiometer_2 = 700
 rotary_potentiometer_4 = 380
-rotary_potentiometer_6 = 544
+rotary_potentiometer_5 = 544
 toggle_switch_9 = 1
 linear_potentiometer_12 = 700
 
@@ -159,6 +157,6 @@ name = "Picture Blinds"
 rotary_potentiometer_1 = 420
 rotary_potentiometer_2 = 960
 rotary_potentiometer_3 = 380
-rotary_potentiometer_6 = 32
+rotary_potentiometer_5 = 32
 toggle_switch_10 = 1
 linear_potentiometer_12 = 160
